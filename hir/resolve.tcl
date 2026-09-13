@@ -36,12 +36,13 @@
 
 namespace eval hir::resolve {}
 
-proc hir::resolve::program {exprs mode} {
+proc hir::resolve::program {exprs mode {origins {}}} {
     set hir [hir::Empty $mode]
     dict set hir bound [dict create]
+    dict set hir originOf $origins
     if {$mode eq "program"} {
         set root [NewScope hir root "" "" "" {builtin root}]
-        set top [NewScope hir program $root "" "" {ir {}}]
+        set top [NewScope hir program $root "" "" [Origin $hir {}]]
         Declare hir $top [core::ir::scopeBindNames $exprs]
     } else {
         set top [NewScope hir ambient "" "" "" {host environment}]
@@ -63,6 +64,7 @@ proc hir::resolve::program {exprs mode} {
         }
     }
     dict unset hir bound
+    dict unset hir originOf
     return $hir
 }
 
@@ -155,6 +157,15 @@ proc hir::resolve::Lookup {hirVar s name} {
     return ""
 }
 
+# The origin of the input node at IR PATH: as given to hir::build -origins,
+# else {ir PATH}.
+proc hir::resolve::Origin {hir path} {
+    if {[dict exists $hir originOf $path]} {
+        return [dict get $hir originOf $path]
+    }
+    return [list ir $path]
+}
+
 # Records that block expression E is created in scope S's region.
 proc hir::resolve::AddClosure {hirVar s e} {
     upvar 1 $hirVar hir
@@ -185,7 +196,7 @@ proc hir::resolve::Expr {hirVar node path ctx} {
     set scope [dict get $ctx scope]
     set e [hir::NewId hir expr]
     set kind [expr {$op eq "error-value" ? "error" : $op}]
-    dict set hir exprs $e [dict create id $e kind $kind origin [list ir $path] \
+    dict set hir exprs $e [dict create id $e kind $kind origin [Origin $hir $path] \
         scope $scope type "" reachable 1]
 
     switch -- $op {
@@ -213,7 +224,7 @@ proc hir::resolve::Expr {hirVar node path ctx} {
                     } else {
                         dict set hir bound $b 1
                         dict set hir bindings $b declaredBy $e
-                        dict set hir bindings $b origin [list ir $path]
+                        dict set hir bindings $b origin [Origin $hir $path]
                     }
                 }
             }
@@ -221,11 +232,11 @@ proc hir::resolve::Expr {hirVar node path ctx} {
         }
         block {
             set invocation $e
-            set bodyScope [NewScope hir block $scope $e $e [list ir $path]]
+            set bodyScope [NewScope hir block $scope $e $e [Origin $hir $path]]
             set params {}
             set index 0
             foreach param [core::ir::blockParams $node] {
-                set b [NewBinding hir $param param $bodyScope [list ir [concat $path 1 $index]]]
+                set b [NewBinding hir $param param $bodyScope [Origin $hir [concat $path 1 $index]]]
                 dict set hir bound $b 1
                 lappend params $b
                 incr index
@@ -258,7 +269,7 @@ proc hir::resolve::Expr {hirVar node path ctx} {
             foreach {role index outcome} {then 2 1 else 3 0} {
                 set body [core::ir::blockBody [lindex $node $index]]
                 set branch [NewScope hir branch $scope \
-                    [dict get $hir scopes $scope invocation] $e [list ir [concat $path $index]]]
+                    [dict get $hir scopes $scope invocation] $e [Origin $hir [concat $path $index]]]
                 dict set hir scopes $branch outcome $outcome
                 Declare hir $branch [core::ir::scopeBindNames $body]
                 SetField hir $e ${role}Scope $branch
@@ -270,7 +281,7 @@ proc hir::resolve::Expr {hirVar node path ctx} {
         loop {
             set body [core::ir::blockBody [lindex $node 1]]
             set iteration [NewScope hir loop $scope \
-                [dict get $hir scopes $scope invocation] $e [list ir [concat $path 1]]]
+                [dict get $hir scopes $scope invocation] $e [Origin $hir [concat $path 1]]]
             Declare hir $iteration [core::ir::scopeBindNames $body]
             SetField hir $e bodyScope $iteration
             SetField hir $e body \

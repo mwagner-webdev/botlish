@@ -1,0 +1,16 @@
+# Mutual recursion: is_even refers to is_odd before is_odd is bound; the
+# reference is resolved lexically and evaluated only when is_even runs.
+#
+# expect: [true, false]
+
+fn is_even(n):
+    if n == 0:
+        return true
+    is_odd(n - 1)
+
+fn is_odd(n):
+    if n == 0:
+        return false
+    is_even(n - 1)
+
+[is_even(10), is_even(7)]

@@ -1,0 +1,132 @@
+# surface-lexer.test -- tokenizing Botlish source (surface/lexer.tcl).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+# Tokens of SOURCE as KIND, or KIND:VALUE for names, integers and strings.
+proc tokens {source} {
+    lmap token [surface::lex $source t.bot] {
+        set kind [dict get $token kind]
+        if {$kind in {IDENT INT STRING}} {
+            set kind $kind:[dict get $token value]
+        }
+        set kind
+    }
+}
+
+# "LINE:COLUMN MESSAGE" of the syntax error SOURCE raises.
+proc lexError {source} {
+    if {![catch {surface::lex $source t.bot} message options]} {
+        return "no error"
+    }
+    lassign [dict get $options -errorcode] a b diagnostic
+    if {"$a $b" ne "SURFACE SYNTAX"} {
+        return "unexpected error: $message"
+    }
+    return "[dict get $diagnostic line]:[dict get $diagnostic column] [dict get $diagnostic message]"
+}
+
+test lex-identifiers {identifiers, keywords and underscores} -body {
+    tokens "fn _x x1 if else loop return break continue true false unit iffy"
+} -result {fn IDENT:_x IDENT:x1 if else loop return break continue true false unit IDENT:iffy NEWLINE EOF}
+
+test lex-integers {decimal integers of any size} -body {
+    tokens "0 42 123456789012345678901234567890"
+} -result {INT:0 INT:42 INT:123456789012345678901234567890 NEWLINE EOF}
+
+test lex-leading-zero {leading zeros are rejected} -body {
+    list [lexError "007"] [lexError "x = 01"]
+} -result {{1:1 invalid integer literal "007": leading zeros are not allowed} {1:5 invalid integer literal "01": leading zeros are not allowed}}
+
+test lex-integer-suffix {digits followed by a name character} -body {
+    lexError "12ab"
+} -result {1:1 invalid integer literal}
+
+test lex-operators {operators, longest match first} -body {
+    join [tokens "a==b<=c>=d<e>f=g+h-i*j(k)\[l\],m:"]
+} -result {IDENT:a == IDENT:b <= IDENT:c >= IDENT:d < IDENT:e > IDENT:f = IDENT:g + IDENT:h - IDENT:i * IDENT:j ( IDENT:k ) [ IDENT:l ] , IDENT:m : NEWLINE EOF}
+
+test lex-strings {strings and escapes} -body {
+    set values [lmap token [surface::lex {"hello" "a\nb" "q: \"" "\\ \t \r" ""}] {
+        if {[dict get $token kind] ne "STRING"} continue
+        dict get $token value
+    }]
+    list [llength $values] [lindex $values 0] [lindex $values 1] [lindex $values 2] \
+         [lindex $values 3] [lindex $values 4]
+} -result [list 5 hello "a\nb" {q: "} "\\ \t \r" ""]
+
+test lex-string-errors {unterminated strings and invalid escapes} -body {
+    list [lexError {x = "abc}] [lexError "x = \"ab\ncd\""] [lexError {"a\qb"}]
+} -result {{1:5 unterminated string} {1:5 unterminated string} {1:3 invalid escape "\q" in string}}
+
+test lex-comments {comments run to end of line, not inside strings} -body {
+    tokens "# heading\nx = 1 # trailing\ny = \"# not a comment\""
+} -result {IDENT:x = INT:1 NEWLINE IDENT:y = {STRING:# not a comment} NEWLINE EOF}
+
+test lex-blank-lines {blank and comment-only lines produce no tokens} -body {
+    tokens "\n\nx\n\n   \n  # indented comment\ny\n\n"
+} -result {IDENT:x NEWLINE IDENT:y NEWLINE EOF}
+
+test lex-indent {INDENT and DEDENT around a suite} -body {
+    tokens "if a:\n    b\nc"
+} -result {if IDENT:a : NEWLINE INDENT IDENT:b NEWLINE DEDENT IDENT:c NEWLINE EOF}
+
+test lex-nested-indent {nested levels close together; any indentation width} -body {
+    tokens "fn f():\n  loop:\n        x\ny"
+} -result {fn IDENT:f ( ) : NEWLINE INDENT loop : NEWLINE INDENT IDENT:x NEWLINE DEDENT DEDENT IDENT:y NEWLINE EOF}
+
+test lex-dedent-at-eof {open levels close at the end of input} -body {
+    tokens "if a:\n    if b:\n        c"
+} -result {if IDENT:a : NEWLINE INDENT if IDENT:b : NEWLINE INDENT IDENT:c NEWLINE DEDENT DEDENT EOF}
+
+test lex-blank-lines-keep-indentation {blank and comment lines inside a suite} -body {
+    tokens "if a:\n    b\n\n# comment at column 1\n    c\nd"
+} -result {if IDENT:a : NEWLINE INDENT IDENT:b NEWLINE IDENT:c NEWLINE DEDENT IDENT:d NEWLINE EOF}
+
+test lex-inconsistent-dedent {a dedent must return to an enclosing level} -body {
+    lexError "if a:\n    b\n  c"
+} -result {3:3 inconsistent dedent: indentation does not match any enclosing level}
+
+test lex-tab-indent {tabs in indentation are errors} -body {
+    list [lexError "if a:\n\tb"] [lexError "if a:\n  \tb"] [lexError "x =\t1"] [lexError "x\n\t\ny"]
+} -result {{2:1 tab used for indentation} {2:3 tab used for indentation} {no error} {no error}}
+
+test lex-paren-continuation {newlines and indentation inside ( ) are ignored} -body {
+    tokens "fn add(\n    a,\n  b,\n):\n    a + b"
+} -result {fn IDENT:add ( IDENT:a , IDENT:b , ) : NEWLINE INDENT IDENT:a + IDENT:b NEWLINE DEDENT EOF}
+
+test lex-bracket-continuation {newlines inside [ ] are ignored} -body {
+    join [tokens "values = \[\n    1,\n    2,\n\]\nx"]
+} -result {IDENT:values = [ INT:1 , INT:2 , ] NEWLINE IDENT:x NEWLINE EOF}
+
+test lex-bracket-errors {unbalanced brackets} -body {
+    list [lexError "f(1"] [lexError "x)"] [lexError "\[1)"]
+} -result {{1:2 "(" is never closed} {1:2 unmatched ")"} {1:3 ")" does not match "[" opened at t.bot:1:1}}
+
+test lex-reserved-question-mark {? is not part of names} -body {
+    list [lexError "integer?(x)"] [lexError "x ? y"]
+} -result {{1:8 "?" is reserved and cannot be part of a name} {1:3 unexpected character "?"}}
+
+test lex-unsupported-characters {characters of deferred syntax} -body {
+    list [lexError "a != b"] [lexError "a / b"] [lexError "a.b"] [lexError "a; b"] [lexError "a::b"]
+} -result {{1:3 unexpected character "!"} {1:3 unexpected character "/"} {1:2 unexpected character "."} {1:2 unexpected character ";"} {no error}}
+
+test lex-crlf {CRLF line endings} -body {
+    tokens "if a:\r\n    b\r\nc\r\n"
+} -result {if IDENT:a : NEWLINE INDENT IDENT:b NEWLINE DEDENT IDENT:c NEWLINE EOF}
+
+test lex-spans {tokens carry file, offsets, line and column} -body {
+    set token [lindex [surface::lex "x = 1\n  \nfoo(\"ab\")" prog.bot] 4]
+    list [dict get $token kind] [dict get $token span]
+} -result {IDENT {file prog.bot start 9 end 12 line 3 column 1 endLine 3 endColumn 4}}
+
+test lex-error-code {syntax errors carry a diagnostic and a located message} -body {
+    catch {surface::lex "x = \"abc" demo.bot} message options
+    list $message [lrange [dict get $options -errorcode] 0 1] [lindex [dict get $options -errorcode] 2]
+} -result {{demo.bot:1:5: unterminated string} {SURFACE SYNTAX} {file demo.bot line 1 column 5 start 4 end 8 message {unterminated string}}}
+
+test lex-empty {empty and comment-only input} -body {
+    list [tokens ""] [tokens "# nothing\n\n"]
+} -result {EOF EOF}
+
+cleanupTests

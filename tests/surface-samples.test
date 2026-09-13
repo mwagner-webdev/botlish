@@ -1,0 +1,127 @@
+# surface-samples.test -- Botlish source programs end to end
+# (examples/surface/*.bot).
+#
+# Each sample states its outcome in a comment:
+#
+#   # expect: VALUE                 value shown with evidence
+#   # expect-error: ERRORCODE
+#
+# For every sample:
+#   interp    source -> AST -> HIR -> core IR -> interpreter gives the outcome
+#   compile   source -> AST -> HIR -> Tcl compiler (from the HIR) agrees
+#   backends  both backends agree on the lowered core IR
+#   hir       the HIR is what hir::build derives from its lowered IR, so the
+#             source lowering adds no facts of its own
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+proc sampleExpectation {text} {
+    foreach line [split $text \n] {
+        if {[regexp {^#\s*expect:\s*(.*)$} $line -> shown]} {
+            return [list value $shown]
+        }
+        if {[regexp {^#\s*expect-error:\s*(.*)$} $line -> code]} {
+            return [list error $code]
+        }
+    }
+    error "sample states no expected outcome"
+}
+
+proc sampleOutcome {script} {
+    if {[catch {uplevel 1 $script} result options]} {
+        return [list error [dict get $options -errorcode]]
+    }
+    return [list value [core::value::show $result 1]]
+}
+
+proc withBackend {backend script} {
+    set saved [core::useBackend]
+    core::useBackend $backend
+    try {
+        return [uplevel 1 $script]
+    } finally {
+        core::useBackend $saved
+    }
+}
+
+set samples [lsort [glob -directory [file join $::projectRoot examples surface] *.bot]]
+
+test surface-samples-exist {there are source samples} -body {
+    expr {[llength $samples] >= 8}
+} -result 1
+
+foreach path $samples {
+    set name [file rootname [file tail $path]]
+
+    test surface-sample-interp-$name "$name: runs interpreted" -body {
+        set outcome [withBackend interp {
+            sampleOutcome {core::evalProgram [hir::lower [surface::readProgramFile $path]]}
+        }]
+        expr {$outcome eq [sampleExpectation [core::ReadFile $path]] ? "expected" : $outcome}
+    } -result expected
+
+    test surface-sample-compile-$name "$name: runs compiled from the HIR" -body {
+        set outcome [sampleOutcome {core::compiler::evalHir [surface::readProgramFile $path]}]
+        expr {$outcome eq [sampleExpectation [core::ReadFile $path]] ? "expected" : $outcome}
+    } -result expected
+
+    test surface-sample-backends-$name "$name: both backends agree on the lowered IR" -body {
+        differential [hir::lower [surface::readProgramFile $path -strict 0]]
+    } -result same
+
+    test surface-sample-hir-$name "$name: the HIR is what analysis of its IR derives" -body {
+        set h [surface::readProgramFile $path -strict 0]
+        expr {[hir::format $h] eq [hir::format [hir::build [hir::lower $h] -strict 0]]}
+    } -result 1
+}
+
+# ---------------------------------------------------------------------------
+# Programs beyond the samples, on the backend under test
+
+# Effects spellable from source (the helpers' test-log / test-tick are not).
+if {"test_tick" ni [core::native::names]} {
+    core::registerNative test_tick -arity 0 -impl testTickImpl
+    core::registerNative test_log  -arity 1 -impl testLogImpl
+}
+
+proc runSource {text} {
+    return [core::value::show [core::evalProgram [hir::lower [surface::compile $text t.bot]]] 1]
+}
+
+test surface-run-factorial {recursion with arbitrary-precision results} -body {
+    runSource "fn factorial(n):\n    if n <= 1:\n        return 1\n\n    n * factorial(n - 1)\n\nfactorial(30)"
+} -result 265252859812191058636308480000000
+
+test surface-run-abs {unary minus and branch values} -body {
+    runSource "fn abs(x):\n    if x < 0:\n        0 - x\n    else:\n        x\n\n\[abs(-3), abs(4), -abs(-5)\]"
+} -result {[3, 4, -5]}
+
+test surface-run-missing-else {a missing else is unit} -body {
+    runSource "fn f(flag):\n    if flag:\n        1\n\n\[f(true), f(false)\]"
+} -result {[1, unit]}
+
+test surface-run-lexical-scope {closures see lexical, not dynamic, bindings} -body {
+    runSource "x = 1\nfn get():\n    x\nfn caller():\n    x = 2\n    get()\ncaller()"
+} -result 1
+
+test surface-run-continue {continue starts the next iteration; each iteration is a fresh scope} -body {
+    resetEffects
+    list [runSource "loop:\n    t = test_tick()\n    if t < 3:\n        continue\n    break t"] $::testTicks
+} -result {3 3}
+
+test surface-run-evaluation-order {arguments evaluate left to right} -body {
+    resetEffects
+    list [runSource "fn pick(a, b, c):\n    c\npick(test_log(1), test_log(2), test_log(3))"] $::testLog
+} -result {3 {1 2 3}}
+
+test surface-run-strings {string escapes reach the runtime} -body {
+    runSource "\[length(\"a\\tb\"), length(\"q\\\"\"), length(\"\\\\\"), length(\"\")\]"
+} -result {[3, 2, 1, 0]}
+
+test surface-run-duplicate-in-branch {same-scope rebinding in a branch is invalid} -body {
+    catch {surface::compile "if true:\n    y = 1\n    y = 2" t.bot} result options
+    list [dict get $options -errorcode] $result
+} -result {{CORE SEMANTIC DUPLICATE} {t.bot:3:5: duplicate binding "y" in the same lexical scope}}
+
+cleanupTests

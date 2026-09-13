@@ -1,0 +1,212 @@
+# surface-lowering.test -- surface AST to HIR (surface/lower.tcl).
+#
+# Lowering restates syntax; HIR decides meaning. These tests check both
+# halves: the tree handed to HIR (via hir::lower, which for today's HIR gives
+# it back) and the facts HIR derives from it (via hir::format).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+proc hirText {source} {
+    return [hir::format [surface::compile $source t.bot]]
+}
+
+proc loweredIR {source} {
+    return [canonicalProgram [hir::lower [surface::compile $source t.bot -strict 0]]]
+}
+
+# "LINE:COLUMN" of an origin.
+proc at {origin} {
+    set fields [lrange $origin 2 end]
+    return [dict get $fields line]:[dict get $fields column]
+}
+
+# ---------------------------------------------------------------------------
+# Lowering rules
+
+foreach {name source ir} {
+    int         "42"                      {{const 42}}
+    big-int     "123456789012345678901234567890" {{const 123456789012345678901234567890}}
+    string      "\"hello world\""         {{const str {hello world}}}
+    digit-string "\"42\""                 {{const str 42}}
+    booleans    "true\nfalse\nunit"       {{ref true} {ref false} {ref unit}}
+    name        "x = 1\nx"                {{bind x {const 1}} {ref x}}
+    operator    "1 + 2 * 3"               {{call {ref +} {const 1} {call {ref *} {const 2} {const 3}}}}
+    comparison  "1 <= 2"                  {{call {ref <=} {const 1} {const 2}}}
+    unary       "-5"                      {{call {ref -} {const 0} {const 5}}}
+    call        "fn f(a, b):\n    b\nf(1, 2)" {{bind f {block {a b} {ref b}}} {call {ref f} {const 1} {const 2}}}
+    list        "\[1, \"a\", \[\]\]"      {{call {ref list} {const 1} {const str a} {call {ref list}}}}
+    function    "fn add(a, b):\n    a + b" {{bind add {block {a b} {call {ref +} {ref a} {ref b}}}}}
+    if-else     "if true:\n    1\nelse:\n    2" {{if {ref true} {block {} {const 1}} {block {} {const 2}}}}
+    if-no-else  "if true:\n    1"         {{if {ref true} {block {} {const 1}} {block {}}}}
+    loop        "loop:\n    break 42"     {{loop {block {} {break {const 42}}}}}
+    break-unit  "loop:\n    break"        {{loop {block {} break}}}
+    continue    "loop:\n    continue"     {{loop {block {} continue}}}
+    return      "fn f():\n    return\nfn g():\n    return 1" {{bind f {block {} {return {ref unit}}}} {bind g {block {} {return {const 1}}}}}
+} {
+    test lower-rule-$name "lowering rule: $name" -body {
+        loweredIR $source
+    } -result [canonicalProgram $ir]
+}
+
+# ---------------------------------------------------------------------------
+# What HIR makes of it
+
+test lower-hir-function {a function declaration is a binding of a block} -body {
+    hirText "fn add(a, b):\n    a + b\n\nadd(1, 2)"
+} -result {program s2 binds b1 add
+e1 bind b1 add : block(e2)/2 -> int
+    e2 block s3 (b2 a, b3 b) captures () : block(e2)/2 -> int
+        e3 call native(+) : int
+            e4 ref b4 + : native +
+            e5 ref b2 a : any
+            e6 ref b3 b : any
+e7 call block(e2) : int
+    e8 ref b1 add : block(e2)/2 -> int
+    e9 const 1 : int
+    e10 const 2 : int}
+
+test lower-hir-closure {a nested function is an ordinary block that HIR finds captures for} -body {
+    hirText "fn make_adder(x):\n    fn add(y):\n        x + y\n\n    add\n\nmake_adder(10)(32)"
+} -result {program s2 binds b1 make_adder
+e1 bind b1 make_adder : block(e2)/1 -> block(e4)/1 -> int
+    e2 block s3 (b2 x) captures () binds b3 add : block(e2)/1 -> block(e4)/1 -> int
+        e3 bind b3 add : block(e4)/1 -> int
+            e4 block s4 (b4 y) captures (b2 x) : block(e4)/1 -> int
+                e5 call native(+) : int
+                    e6 ref b5 + : native +
+                    e7 ref b2 x : any deferred
+                    e8 ref b4 y : any
+        e9 ref b3 add : block(e4)/1 -> int
+e10 call block(e4) : int
+    e11 call block(e2) : block(e4)/1 -> int
+        e12 ref b1 make_adder : block(e2)/1 -> block(e4)/1 -> int
+        e13 const 10 : int
+    e14 const 32 : int}
+
+test lower-hir-branch-scopes {branches are inline scopes of the enclosing invocation, not blocks} -body {
+    set h [surface::compile "fn f(flag):\n    if flag:\n        x = 1\n        x\n    else:\n        loop:\n            break 2" t.bot]
+    set if [hirFind $h if]
+    set loop [hirFind $h loop]
+    set block [hirFind $h block]
+    list [llength $block] \
+         [dict get [hir::scope $h [hir::get $h $if thenScope]] kind] \
+         [dict get [hir::scope $h [hir::get $h $if elseScope]] kind] \
+         [dict get [hir::scope $h [hir::get $h $loop bodyScope]] kind] \
+         [expr {[dict get [hir::scope $h [hir::get $h $if thenScope]] invocation] eq $block}] \
+         [expr {[dict get [hir::scope $h [hir::get $h $loop bodyScope]] invocation] eq $block}] \
+         [hir::get $h [hirFind $h break] target] $loop
+} -match glob -result {1 branch branch loop 1 1 e* e*}
+
+test lower-hir-shadowing {a branch binding shadows without replacing the outer binding} -body {
+    set h [surface::compile "x = 1\n\nif true:\n    x = 2\n    x\n\nx" t.bot]
+    set refs [hirRefBindings $h x]
+    set binds [lmap e [hirFind $h bind x] {hir::get $h $e binding}]
+    list [llength [lsort -unique $binds]] [lindex $refs 0] [lindex $binds 1] [lindex $refs 1] [lindex $binds 0]
+} -result {2 b3 b3 b1 b1}
+
+test lower-hir-recursion {recursion resolves through the function's own binding} -body {
+    set h [surface::compile "fn fact(n):\n    if n <= 1:\n        return 1\n    n * fact(n - 1)\n\nfact(5)" t.bot]
+    set ref [lindex [hirFind $h ref fact] 0]
+    list [hir::get $h $ref binding] [hir::get $h $ref init] \
+         [hir::types::show [hir::bindingType $h b1]] \
+         [hir::get $h [hirFind $h return] target] [lindex [hirFind $h block] 0]
+} -result {b1 deferred {block(e2)/1 -> int} e2 e2}
+
+test lower-hir-operators-are-calls {operators and list literals are ordinary calls with native targets} -body {
+    set h [surface::compile "a = 1\n\[a + 2, a * 3, a < 4, a == 5, -a\]" t.bot]
+    lsort -unique [lmap e [hirFind $h call] {hir::format::Target $h [hir::get $h $e target]}]
+} -result {native(*) native(+) native(-) native(<) native(==) native(list)}
+
+test lower-hir-mutual-recursion {mutually recursive functions refer to each other's bindings} -body {
+    set h [surface::compile "fn even(n):\n    if n == 0:\n        return true\n    odd(n - 1)\nfn odd(n):\n    if n == 0:\n        return false\n    even(n - 1)\neven(4)" t.bot]
+    list [hirRefBindings $h odd] [hirRefBindings $h even] \
+         [core::formatValue [core::compiler::evalHir $h]]
+} -result {b2 {b1 b1} true}
+
+# ---------------------------------------------------------------------------
+# Source origins
+
+test lower-origins {expressions, scopes and bindings originate in the source} -body {
+    set h [surface::compile "fn add(a, b):\n    a + b\n\nadd(1, 20)" demo.bot]
+    set plus [hirFind $h ref +]
+    set call [lindex [hirFind $h call] 0]
+    set block [hirFind $h block]
+    list [hir::get $h $plus origin] \
+         [at [hir::get $h $call origin]] \
+         [at [hir::get $h $block origin]] \
+         [at [dict get [hir::binding $h b1] origin]] \
+         [at [dict get [hir::binding $h b3] origin]] \
+         [at [dict get [hir::scope $h [hir::get $h $block bodyScope]] origin]] \
+         [at [dict get [hir::scope $h [hir::top $h]] origin]] \
+         [hir::sourceFile $h f1]
+} -result {{file f1 start 20 end 21 line 2 column 7 endLine 2 endColumn 8} 2:5 1:7 1:1 1:11 1:7 1:1 {id f1 path demo.bot}}
+
+test lower-origins-branches {branch and loop scopes originate at their suites} -body {
+    set h [surface::compile "if true:\n    1\nelse:\n    loop:\n        break 2" t.bot]
+    set if [hirFind $h if]
+    list [at [dict get [hir::scope $h [hir::get $h $if thenScope]] origin]] \
+         [at [dict get [hir::scope $h [hir::get $h $if elseScope]] origin]] \
+         [at [dict get [hir::scope $h [hir::get $h [hirFind $h loop] bodyScope]] origin]]
+} -result {2:5 4:5 5:9}
+
+test lower-origins-query {hir::exprsAt finds expressions by source origin} -body {
+    set h [surface::compile "x = 1\nx" t.bot]
+    set origin [hir::get $h [hirFind $h ref x] origin]
+    list [hir::exprsAt $h $origin] [hirFind $h ref x]
+} -result {e3 e3}
+
+test lower-origins-every-node {every expression, scope and binding from source has a file origin} -body {
+    set source [core::ReadFile [file join $::projectRoot examples surface 08-return.bot]]
+    set h [surface::compile $source 08-return.bot]
+    set missing {}
+    dict for {e node} [dict get $h exprs] {
+        if {[lindex [dict get $node origin] 0] ne "file"} { lappend missing $e }
+    }
+    dict for {s scope} [dict get $h scopes] {
+        if {[dict get $scope kind] ne "root" && [lindex [dict get $scope origin] 0] ne "file"} { lappend missing $s }
+    }
+    dict for {b binding} [dict get $h bindings] {
+        if {[dict get $binding kind] ne "root" && [lindex [dict get $binding origin] 0] ne "file"} { lappend missing $b }
+    }
+    set missing
+} -result {}
+
+test lower-origins-ir-default {IR-built HIR keeps IR path origins} -body {
+    set h [hir::build {{bind x {const 1}}}]
+    list [hir::get $h e1 origin] [dict get [hir::scope $h s2] origin] [dict get $h files]
+} -result {{ir 0} {ir {}} {}}
+
+# ---------------------------------------------------------------------------
+# Semantic errors are HIR's, reported at source positions
+
+foreach {name source code message} {
+    duplicate        "x = 1\nx = 2"                       DUPLICATE {t.bot:2:1: duplicate binding "x" in the same lexical scope}
+    duplicate-fn     "fn f():\n    1\nfn f():\n    2"    DUPLICATE {t.bot:3:1: duplicate binding "f" in the same lexical scope}
+    param-rebind     "fn f(a):\n    a = 1"             DUPLICATE {t.bot:2:5: duplicate binding "a" in the same lexical scope}
+    unbound          "y = nope"                         UNBOUND   {t.bot:1:5: unbound name "nope"}
+    before-binding   "y = x\nx = 1"                     UNBOUND   {t.bot:1:5: name "x" used before its binding}
+    return-outside   "return 1"                         RETURN-OUTSIDE-CALLABLE {t.bot:1:1: return outside callable invocation}
+    break-outside    "if true:\n    break"              BREAK-OUTSIDE-LOOP {t.bot:2:5: break outside lexical loop}
+    break-in-fn      "loop:\n    fn f():\n        continue\n    break" CONTINUE-OUTSIDE-LOOP {t.bot:3:9: continue outside lexical loop}
+} {
+    test lower-semantic-$name "semantic error: $name" -body {
+        catch {surface::compile $source t.bot} result options
+        list [dict get $options -errorcode] $result
+    } -result [list [list CORE SEMANTIC $code] $message]
+}
+
+test lower-non-strict {with -strict 0 diagnostics stay in the HIR and raise at run time} -body {
+    set h [surface::compile "x = 1\nif false:\n    x = 2\n    x = 3\nx" t.bot -strict 0]
+    list [lmap d [hir::diagnostics $h] {dict get $d kind}] \
+         [core::formatValue [core::evalProgram [hir::lower $h]]] \
+         [core::formatValue [core::compiler::evalHir $h]]
+} -result {DUPLICATE 1 1}
+
+test lower-parse-without-analysis {the AST of a semantically invalid program is available} -body {
+    set ast [surface::parse "x = 1\nx = 2" t.bot]
+    list [llength [dict get $ast body]] \
+         [catch {surface::lowerToHir $ast}]
+} -result {2 1}
+
+cleanupTests

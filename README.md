@@ -23,18 +23,25 @@ scopes, captures, refinements and known call targets made explicit. The
 compiler compiles from HIR; the interpreter runs core IR, and HIR lowers back
 to it.
 
+A first, minimal source language (`surface/`, §17) parses Botlish source
+into a surface AST and builds HIR from it.
+
 ```
-core IR ──hir::build──▶ HIR ──hir::lower──▶ core IR ──▶ interpreter
-                         │
-                         └──────────────────────────▶ Tcl compiler
+source ──surface::parse──▶ AST ──surface::lowerToHir──┐
+                                                      ▼
+core IR ──────────────hir::build────────────────────▶ HIR ──hir::lower──▶ core IR ──▶ interpreter
+                                                       │
+                                                       └──────────────────────────▶ Tcl compiler
 ```
 
 ```
 core/            runtime and interpreter (see "Implementation map")
 hir/             semantic HIR: resolution, types, refinements, lowering
 compiler/        HIR -> Tcl compiler
+surface/         source language: lexer, parser, surface AST, AST -> HIR
 examples/*.ir    acceptance programs as IR data
 examples/hir/    HIR samples (.hir text) with the core IR they lower to
+examples/surface/  source programs (.bot)
 tests/*.test     tcltest suite
 main.tcl         example runner
 ```
@@ -46,6 +53,8 @@ tclsh main.tcl                              # run all examples (interp)
 tclsh main.tcl -backend compile -code FILE.ir   # compile, show generated Tcl, run
 tclsh main.tcl -hir FILE.ir                 # show the program's HIR, run
 tclsh main.tcl -backend compile FILE.hir    # read HIR text, compile it, run
+tclsh main.tcl examples/surface/03-closure.bot            # run source (interp)
+tclsh main.tcl -backend compile -hir -ast FILE.bot   # show AST and HIR, compile, run
 tclsh bench/bench.tcl                       # compare backends on bench/*.ir
 ```
 
@@ -387,7 +396,11 @@ refinement unless its contract explicitly establishes one. So
 | `core::compiler::unitHir EXPRS ?MODE?` | the HIR a unit was compiled from |
 | `core::compiler::evalHir HIR` | compile and run a program-mode HIR directly; returns the value |
 | `hir::parse TEXT` / `hir::readFile PATH` | read HIR text (the `hir::format` notation) back into HIR |
-| `hir::build EXPRS ?-mode M? ?-strict 0\|1?` | build the HIR of a program (§16) |
+| `hir::build EXPRS ?-mode M? ?-strict 0\|1? ?-origins D? ?-files D?` | build the HIR of a program (§16) |
+| `surface::lex` / `surface::parse SOURCE ?FILE?` | Botlish source → tokens / surface AST (§17) |
+| `surface::formatAst AST ?-spans 1?` | readable surface AST |
+| `surface::lowerToHir AST ?-strict 0\|1?` | surface AST → HIR |
+| `surface::compile SOURCE ?FILE? ?-strict 0\|1?` / `surface::readProgramFile PATH` | source → HIR |
 | `hir::lower HIR` / `hir::format HIR ?-origins 1?` | HIR → core IR / readable HIR |
 | `hir::*` queries | nodes, scopes, bindings, symbols, types, captures, refinements (§16) |
 | `hir::types::*` | static types: core types plus `{native N}`, `{block E A R}`, `never` (§13) |
@@ -433,6 +446,11 @@ refinement unless its contract explicitly establishes one. So
 | `hir/format.tcl` | readable HIR |
 | `hir/read.tcl` | HIR text → HIR |
 | `compiler/compiler.tcl` | HIR → Tcl compiler backend |
+| `surface/lexer.tcl` | source → tokens, indentation → `INDENT`/`DEDENT` |
+| `surface/parser.tcl` | tokens → surface AST (recursive descent) |
+| `surface/ast.tcl` | spans, syntax errors, AST formatting |
+| `surface/lower.tcl` | surface AST → HIR |
+| `surface/surface.tcl` | loader and `surface::compile` / `readProgramFile` |
 | `bench/` | benchmark programs and runner |
 
 Implementation notes (not part of the semantics):
@@ -446,7 +464,7 @@ Implementation notes (not part of the semantics):
 
 ## 11. Not implemented (deliberately)
 
-No parser or surface syntax, macros, modules, objects, assignment, mutable
+Surface syntax beyond the minimal language of §17, macros, modules, objects, assignment, mutable
 variables, exceptions, `?` propagation, pattern matching, a type checker
 beyond refinement tracking, async, coroutines, threads, FFI, or native code
 generation.
@@ -977,8 +995,10 @@ name now has result type `never` (it always raises) instead of `any`.
 
 ### Known limitations
 
-* HIR is built from core IR. Origins are IR paths. There's no syntax tree, no
-  source spans, and no preserved comments or formatting.
+* HIR is built from unresolved trees in core IR notation, whether they come
+  from IR files or from source (§17). Source-built HIR carries source spans
+  as origins (`hir::build -origins`), but there's no lossless syntax tree: no
+  NodeIds, preserved comments or formatting.
 * IDs are deterministic per build but not stable across edits. Incremental
   and LSP use will need identity that survives edits.
 * HIR refinements are only the statically provable subset. When the callee
@@ -1011,3 +1031,91 @@ canonical symbol as the `target`, and lower to existing core IR. After that,
 take origins from a lossless syntax tree (FileId and NodeId) so tooling can
 query the HIR by source position. On the backend side, the next step is to use
 `captures` so that only captured scopes are materialized.
+
+## 17. Surface language (first milestone)
+
+`surface/` is a small Python-like source language. It exists to prove the
+vertical slice `source → tokens → surface AST → HIR → core IR → backends`,
+not to be the full language. It adds no semantics: every construct lowers to
+HIR that already existed, and HIR does all resolution, capture analysis,
+typing and checking.
+
+```botlish
+fn make_adder(x):
+    fn add(y):
+        x + y
+
+    add
+
+add10 = make_adder(10)
+add10(32)          # 42 (add captures x)
+```
+
+### Syntax
+
+* `x = e` is an **immutable binding**, not assignment. A second binding of a
+  name in the same scope is `DUPLICATE`; nested scopes may shadow.
+* `fn f(a, b):` declares a function. The body's last expression is its
+  value; `return` exits early.
+* `if c:` / `else:` (optional `else`), `loop:`, `break [e]`, `continue`.
+* Integers (decimal, arbitrary precision, no leading zeros), strings
+  (`"..."`, escapes `\ \" \n \r \t`), `true`, `false`, `unit`, lists
+  `[a, b]`, calls `f(x)(y)`.
+* Operators, from highest precedence: call, unary `-`, `*`, `+ -`,
+  `== < <= > >=`. Arithmetic is left-associative. Comparisons don't chain
+  (`a < b < c` is a syntax error).
+* Blocks are delimited by indentation (spaces only; tabs are an error).
+  Blank and comment lines (`#`) don't count. Newlines inside `( )` and `[ ]`
+  are ignored. Trailing commas are allowed in parameters, arguments and lists.
+* Names are `[A-Za-z_][A-Za-z0-9_]*`. `?` is reserved, so natives like
+  `integer?` or `test-log` can't be named from source yet.
+
+The full grammar is at the top of `surface/parser.tcl`.
+
+### Lowering
+
+| Source | HIR (as the core IR it is built from) |
+|---|---|
+| `42`, `"s"` | `const 42`, `const str s` |
+| `true` `false` `unit`, `x` | `ref true` …, `ref x` |
+| `a + b`, `-a` | `call (ref +) a b`, `call (ref -) (const 0) a` |
+| `[a, b]` | `call (ref list) a b` |
+| `f(a)` | `call f a` |
+| `x = e` | `bind x e` |
+| `fn f(a): body` | `bind f (block {a} body…)` |
+| `if c: t` / `else: e` | `if c (block {} t…) (block {} e…)`, inline branches; no `else` → empty branch (`unit`) |
+| `loop: body` | `loop (block {} body…)` |
+| `return` / `break` | `return (ref unit)` / `break` |
+
+Every HIR expression, scope and binding built from source has the origin
+`{file f1 start S end E line L column C endLine L2 endColumn C2}`. The HIR's
+`files` table maps `f1` to the path. Operator callees point at the operator,
+a function's block at its parameter list and body, and branch and loop scopes
+at their suites.
+
+### Errors
+
+Syntax errors stop at the first error and raise
+`{SURFACE SYNTAX DIAGNOSTIC}` with `FILE:LINE:COLUMN: message`. HIR's
+semantic diagnostics (`DUPLICATE`, `UNBOUND`, control placement) are raised
+statically as `{CORE SEMANTIC KIND}`, with the source location before the
+message. With `-strict 0` they stay in the HIR and are raised at run time.
+
+### Samples and tests
+
+`examples/surface/*.bot` state their outcome in a `# expect:` comment.
+`tests/surface-samples.test` runs each one through the interpreter (from the
+lowered IR) and the compiler (from the HIR). It checks that both backends
+agree, and that the HIR equals what `hir::build` derives from its lowered IR.
+`surface-lexer.test`, `surface-parser.test` and `surface-lowering.test`
+cover the layers separately.
+
+### Known limitations
+
+* A list literal calls whatever `list` is in scope. A program that binds
+  `list` changes what `[...]` means. HIR has no unshadowable way to name a
+  root binding yet.
+* Duplicate parameter names (`fn f(a, a)`) are rejected by the core IR shape
+  check, without a source location.
+* No error recovery, no partial parsing, and no stable node identity across
+  edits yet (needed for an LSP).

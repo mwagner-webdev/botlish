@@ -1,0 +1,11 @@
+# Recursion through the function's own lexical binding.
+#
+# expect: 55
+
+fn fib(n):
+    if n <= 1:
+        return n
+
+    fib(n - 1) + fib(n - 2)
+
+fib(10)

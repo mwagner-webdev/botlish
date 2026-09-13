@@ -1,0 +1,6 @@
+# break carries the loop's value.
+#
+# expect: 42
+
+loop:
+    break 42

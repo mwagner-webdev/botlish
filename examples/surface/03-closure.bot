@@ -1,0 +1,12 @@
+# A nested function is a real closure: add captures make_adder's x.
+#
+# expect: 42
+
+fn make_adder(x):
+    fn add(y):
+        x + y
+
+    add
+
+add10 = make_adder(10)
+add10(32)

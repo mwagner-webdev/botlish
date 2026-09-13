@@ -1,0 +1,6 @@
+# List literals call the list constructor.
+#
+# expect: [1, 2, 3]
+
+x = 2
+[1, x, x + 1]

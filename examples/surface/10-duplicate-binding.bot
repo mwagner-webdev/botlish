@@ -1,0 +1,7 @@
+# Binding is not assignment: a second binding of x in the same scope is
+# invalid.
+#
+# expect-error: CORE SEMANTIC DUPLICATE
+
+x = 1
+x = 2

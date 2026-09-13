@@ -1,0 +1,16 @@
+# Early return from inside a loop and a branch leaves the whole function.
+#
+# expect: [7, 0, 3]
+
+fn abs(x):
+    if x < 0:
+        return -x
+    x
+
+fn first_positive(a, b):
+    loop:
+        if a > 0:
+            return a
+        break b
+
+[abs(-7), abs(0), first_positive(-1, 3)]

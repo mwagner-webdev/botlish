@@ -1,0 +1,11 @@
+# A branch is a nested scope: its x shadows the outer x without changing it.
+#
+# expect: 1
+
+x = 1
+
+if true:
+    x = 2
+    x
+
+x

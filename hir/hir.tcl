@@ -34,6 +34,7 @@
 #   bindings     BindingId -> binding
 #   symbols      SymbolId  -> symbol
 #   types        TypeId    -> type form (interned; see types.tcl)
+#   files        FileId    -> {id path}: source files origins refer to
 #   diagnostics  list of {kind KIND message TEXT expr ExprId}
 #
 # IDs are strings with a kind prefix, allocated monotonically per program in
@@ -50,7 +51,9 @@
 #   id kind origin scope type reachable
 #
 # where ORIGIN says where the node came from ({ir PATH}: PATH indexes into
-# the input IR, e.g. {ir {2 1 3}}; later {file f3 start 120 end 144}), SCOPE
+# the input IR, e.g. {ir {2 1 3}}; or a source span given with hir::build
+# -origins: {file f1 start 120 end 144 line 3 column 5 endLine 3 endColumn 29}
+# with offsets into file f1 and 1-based line and column), SCOPE
 # is the ScopeId the expression is evaluated in, TYPE is a TypeId and
 # REACHABLE is 0 when no normal completion can reach the node. By kind:
 #
@@ -121,7 +124,7 @@ namespace eval hir {
 proc hir::Empty {mode} {
     return [dict create mode $mode roots {} top "" \
         exprs [dict create] scopes [dict create] bindings [dict create] \
-        symbols [dict create] types [dict create] typeIds [dict create] \
+        symbols [dict create] types [dict create] typeIds [dict create] files [dict create] \
         diagnostics {} counters [dict create]]
 }
 
@@ -152,9 +155,14 @@ proc hir::Diagnose {hirVar kind message expr} {
 #   -strict 0       keep diagnostics in the HIR; the error stays a run-time
 #                   error of the lowered program (used by the compiler)
 #
+#   -origins D      origins of input nodes: IR path -> origin, for nodes that
+#                   came from elsewhere (source text); other nodes get {ir PATH}.
+#                   Scope and binding origins follow the node that creates them.
+#   -files D        FileId -> path of the files those origins refer to
+#
 # Malformed IR always raises {CORE MALFORMED}.
 proc hir::build {exprs args} {
-    set options [dict create -mode program -strict 1]
+    set options [dict create -mode program -strict 1 -origins {} -files {}]
     foreach {option value} $args {
         if {![dict exists $options $option]} {
             error "hir::build: unknown option \"$option\""
@@ -165,7 +173,10 @@ proc hir::build {exprs args} {
     if {$mode ni {program sequence}} {
         error "hir::build: -mode must be program or sequence"
     }
-    set hir [hir::resolve::program $exprs $mode]
+    set hir [hir::resolve::program $exprs $mode [dict get $options -origins]]
+    dict for {f path} [dict get $options -files] {
+        dict set hir files $f [dict create id $f path $path]
+    }
     if {[dict get $options -strict]} {
         foreach diagnostic [dict get $hir diagnostics] {
             core::semanticError [dict get $diagnostic kind] [dict get $diagnostic message]
@@ -199,6 +210,7 @@ proc hir::kind {hir e} {
 proc hir::scope {hir s}   { return [dict get $hir scopes $s] }
 proc hir::binding {hir b} { return [dict get $hir bindings $b] }
 proc hir::symbol {hir y}  { return [dict get $hir symbols $y] }
+proc hir::sourceFile {hir f} { return [dict get $hir files $f] }
 
 # The type form of TypeId T.
 proc hir::type {hir t} {

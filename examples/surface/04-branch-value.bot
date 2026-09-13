@@ -1,0 +1,11 @@
+# The selected branch of a final if is the function's value.
+#
+# expect: 20
+
+fn choose(flag):
+    if flag:
+        10
+    else:
+        20
+
+choose(false)
