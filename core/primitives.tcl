@@ -82,4 +82,4 @@ core::native::register ==   -arity 2 -impl core::primitives::valueEqual \
 core::native::register eq   -arity 2 -impl core::primitives::stringEqual \
     -param-types {str str} -result-type bool
 core::native::register list -arity * -impl core::primitives::makeList \
-    -result-type list -runtime list-alloc
+    -result-type list -runtime list-alloc -result-shape elements

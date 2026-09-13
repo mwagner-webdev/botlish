@@ -11,6 +11,16 @@
 #                                   RESULT types what a call returns
 #   never                           no value: evaluation never completes
 #                                   normally (return, break, error, ...)
+#   {list ELEM}                     a list whose every element has static
+#                                   type ELEM ({list never}: the empty list)
+#   {list ELEM {P0 P1 ...}}         a list of exactly n elements, element i
+#                                   of static type Pi; ELEM is their lub
+#
+# The list forms are *aggregate facts*. Semantic inference (infer) never
+# produces them: a program's HIR types stay what they were. Only
+# specialization inference (inferRegion, used by hir/specialize.tcl) tracks
+# what lists contain. They are bounded (see MakeList), so analyses over them
+# terminate.
 #
 # These are semantic facts, not representation: nothing here says how a
 # backend stores a value. The procedures handle the extra forms and delegate
@@ -22,19 +32,133 @@
 #
 # Types are interned per HIR program: nodes and bindings hold TypeIds.
 
-namespace eval hir::types {}
+namespace eval hir::types {
+    # Bounds of aggregate facts: list forms nest at most aggregateDepth deep
+    # (deeper lists are plain list), a positional shape has at most
+    # shapeLength elements, and block result types are cut at the same
+    # depth. Lattices of bounded types have finite height.
+    variable aggregateDepth 3
+    variable shapeLength 8
+}
 
 proc hir::types::IsSpecific {type} {
     return [expr {$type eq "never"
-                  || ([llength $type] > 1 && [lindex $type 0] in {native block})}]
+                  || ([llength $type] > 1 && [lindex $type 0] in {native block list})}]
+}
+
+# 1 if TYPE is a list form ({list ELEM} or {list ELEM SHAPE}).
+proc hir::types::IsList {type} {
+    return [expr {[lindex $type 0] eq "list" && [llength $type] in {2 3}}]
 }
 
 # TYPE in canonical form (core types are normalized by core::type).
 proc hir::types::canonical {type} {
     if {[IsSpecific $type]} {
-        return $type
+        return [Bound $type 0]
     }
     return [core::type::normalize $type]
+}
+
+# The canonical list form of a list whose elements have type ELEM or, if
+# SHAPED, whose elements are exactly of the POSITIONS types (ELEM is then
+# derived), nested DEPTH list forms deep. Nothing known about the elements
+# gives the plain kind list. A shape is kept only when it says more than the
+# element type (a heterogeneous list) and fits shapeLength; only the
+# outermost list has one (elements and positions are unshaped).
+proc hir::types::MakeList {elem {positions {}} {shaped 0} {depth 0}} {
+    variable aggregateDepth
+    variable shapeLength
+    if {$depth >= $aggregateDepth} {
+        return list
+    }
+    set inner [expr {$depth + 1}]
+    if {$shaped} {
+        set positions [lmap p $positions {Unshaped [Bound $p $inner]}]
+        set elem never
+        foreach p $positions {
+            set elem [lub $elem $p]
+        }
+        if {[llength $positions] > $shapeLength || [lsearch -exact -not $positions $elem] < 0} {
+            set shaped 0
+        }
+    }
+    set elem [Unshaped [Bound $elem $inner]]
+    if {$shaped} {
+        return [list list $elem $positions]
+    }
+    if {$elem eq "any"} {
+        return list
+    }
+    return [list list $elem]
+}
+
+# TYPE with the aggregate bounds applied, nested DEPTH list forms deep.
+proc hir::types::Bound {type depth} {
+    variable aggregateDepth
+    if {[IsList $type]} {
+        if {[llength $type] == 3} {
+            return [MakeList [lindex $type 1] [lindex $type 2] 1 $depth]
+        }
+        return [MakeList [lindex $type 1] {} 0 $depth]
+    }
+    if {[lindex $type 0] eq "block" && [llength $type] == 4} {
+        set result [expr {$depth >= $aggregateDepth ? "any" : [Bound [lindex $type 3] [expr {$depth + 1}]]}]
+        return [lreplace $type 3 3 $result]
+    }
+    return $type
+}
+
+# TYPE without a positional shape.
+proc hir::types::Unshaped {type} {
+    if {[IsList $type] && [llength $type] == 3} {
+        return [expr {[lindex $type 1] eq "any" ? "list" : [lrange $type 0 1]}]
+    }
+    return $type
+}
+
+# The static type of every element of a value of static type TYPE, if TYPE
+# is a list form; otherwise "".
+proc hir::types::elementOf {type} {
+    return [expr {[IsList $type] ? [lindex $type 1] : ""}]
+}
+
+# The positional shape {P0 ...} of static type TYPE, or "" if not known.
+proc hir::types::shapeOf {type} {
+    return [expr {[IsList $type] && [llength $type] == 3 ? [lindex $type 2] : ""}]
+}
+
+# 1 if every value of static type A is a value of static type B.
+proc hir::types::subtype {a b} {
+    if {$a eq "never" || $b eq "any" || $a eq $b} {
+        return 1
+    }
+    if {$b eq "never"} {
+        return 0
+    }
+    if {[IsList $b]} {
+        if {![IsList $a] || ![subtype [lindex $a 1] [lindex $b 1]]} {
+            return 0
+        }
+        set sb [shapeOf $b]
+        if {$sb eq ""} {
+            return 1
+        }
+        set sa [shapeOf $a]
+        if {[llength $sa] != [llength $sb]} {
+            return 0
+        }
+        foreach pa $sa pb $sb {
+            if {![subtype $pa $pb]} {
+                return 0
+            }
+        }
+        return 1
+    }
+    if {[IsSpecific $b]} {
+        # A block or native form: only that identical form is known to be one.
+        return 0
+    }
+    return [core::type::subtype [semantic $a] $b]
 }
 
 # Least upper bound: the most precise type describing values of A or B.
@@ -45,7 +169,16 @@ proc hir::types::lub {a b} {
     if {[lindex $a 0] eq "block" && [lindex $b 0] eq "block"
             && [llength $a] == 4 && [llength $b] == 4
             && [lrange $a 1 2] eq [lrange $b 1 2]} {
-        return [list block [lindex $a 1] [lindex $a 2] [lub [lindex $a 3] [lindex $b 3]]]
+        return [canonical [list block [lindex $a 1] [lindex $a 2] [lub [lindex $a 3] [lindex $b 3]]]]
+    }
+    if {[IsList $a] && [IsList $b]} {
+        set elem [lub [lindex $a 1] [lindex $b 1]]
+        set sa [shapeOf $a]
+        set sb [shapeOf $b]
+        if {$sa ne "" && [llength $sa] == [llength $sb]} {
+            return [MakeList $elem [lmap pa $sa pb $sb {lub $pa $pb}] 1]
+        }
+        return [MakeList $elem]
     }
     if {[IsSpecific $a] || [IsSpecific $b]} {
         set kind [kindOf $a]
@@ -113,6 +246,12 @@ proc hir::types::show {type} {
         switch -- [lindex $type 0] {
             native { return "native [lindex $type 1]" }
             block  { return "block([lindex $type 1])/[lindex $type 2] -> [show [lindex $type 3]]" }
+            list {
+                if {[llength $type] == 3} {
+                    return "list\[[join [lmap p [lindex $type 2] {show $p}] {, }]\]"
+                }
+                return "list<[show [lindex $type 1]]>"
+            }
         }
     }
     return [core::type::show $type]
@@ -176,8 +315,98 @@ proc hir::types::infer {hirVar} {
     Sequence hir ctx [dict get $hir roots]
 }
 
+# ---------------------------------------------------------------------------
+# Region inference (specialization)
+#
+# inferRegion types one region (a block's body, or the program's top level)
+# of HIR again, under facts its semantic inference could not assume, and
+# returns what that proves. hir/specialize.tcl uses it for native function
+# instances: the same walk, the same refinements, flow facts and
+# reachability, with three differences:
+#
+#   * entry facts: TYPES (BindingId -> type) seeds the region's parameter
+#     and captured bindings (a specialization's argument types, what the
+#     creations of the block had captured)
+#   * aggregate facts: list constants, list-building natives
+#     (-result-shape, core/native.tcl) and list reads produce list forms
+#   * a HANDLER (command prefix) decides what the region's calls of known
+#     blocks return and learns which blocks the region creates:
+#
+#       {*}HANDLER call CALL BLOCK ARG-TYPES   -> the call's result type
+#       {*}HANDLER create BLOCK SEEDS          (SEEDS: captured BindingId ->
+#                                               type where BLOCK is created)
+#
+#     Nested block bodies are not walked (they are regions of their own).
+#
+# An operation that always raises (a native or block called with the wrong
+# number of arguments, a native argument statically of another kind, a
+# non-callable callee, a non-Boolean condition) has type never here: its
+# error path contributes nothing to what the region returns.
+#
+# HIR is changed in place (typically a scratch copy): expressions of the
+# region get their types, known outcomes and reachability. Returns the type
+# of the region's normal completion (never if none).
+proc hir::types::inferRegion {hirVar region types handler} {
+    upvar 1 $hirVar hir
+    set ctx [NewContext]
+    dict set ctx types $types
+    dict set ctx spec $handler
+    if {$region eq "program"} {
+        return [Sequence hir ctx [dict get $hir roots]]
+    }
+    set body [Sequence hir ctx [dict get $hir exprs $region body]]
+    return [lub $body [dict get $ctx returnType]]
+}
+
 proc hir::types::NewContext {} {
     return [dict create types {} facts {} returnType never breakTypes {} reachable 1]
+}
+
+# The static type of constant V under aggregate facts.
+proc hir::types::AggregateOfValue {v} {
+    if {[core::value::kind $v] eq "list"} {
+        return [MakeList never [lmap item [core::value::items $v] {AggregateOfValue $item}] 1]
+    }
+    return [ofValue $v]
+}
+
+# The result type of a call of a native with -result-shape SHAPE on the
+# arguments ARG-EXPRS of types ARG-TYPES, given its declared result type
+# RESULT.
+proc hir::types::ShapeResult {hir shape argExprs argTypes result} {
+    switch -- [lindex $shape 0] {
+        elements {
+            return [MakeList never $argTypes 1]
+        }
+        element {
+            lassign $shape _ l i
+            set list [lindex $argTypes $l]
+            set elem [elementOf $list]
+            if {$elem eq "" || $elem eq "never"} {
+                # Nothing known, or an empty list: no element to describe.
+                return $result
+            }
+            set positions [shapeOf $list]
+            set index [dict get $hir exprs [lindex $argExprs $i]]
+            if {$positions ne "" && [dict get $index kind] eq "const"
+                    && [core::value::kind [dict get $index value]] eq "int"} {
+                set n [core::value::intOf [dict get $index value]]
+                if {$n >= 0 && $n < [llength $positions]} {
+                    return [lindex $positions $n]
+                }
+            }
+            return $elem
+        }
+        append {
+            lassign $shape _ l v
+            set list [lindex $argTypes $l]
+            if {[IsList $list]} {
+                return [MakeList [lub [lindex $list 1] [lindex $argTypes $v]]]
+            }
+            return $result
+        }
+    }
+    return $result
 }
 
 proc hir::types::SetType {hirVar e type} {
@@ -271,6 +500,9 @@ proc hir::types::Expr {hirVar ctxVar e} {
     dict set hir exprs $e reachable [dict get $ctx reachable]
     switch -- [dict get $node kind] {
         const {
+            if {[dict exists $ctx spec]} {
+                return [SetType hir $e [AggregateOfValue [dict get $node value]]]
+            }
             return [SetType hir $e [ofValue [dict get $node value]]]
         }
         ref {
@@ -356,6 +588,16 @@ proc hir::types::Block {hirVar outerVar e self} {
     upvar 1 $hirVar hir $outerVar outer
     set node [dict get $hir exprs $e]
     set arity [llength [dict get $node params]]
+    if {[dict exists $outer spec]} {
+        # Region inference: the body is a region of its own. Report what
+        # this creation captures; calls of the block ask the handler.
+        set seeds [dict create]
+        foreach b [dict get $node captures] {
+            dict set seeds $b [BindingType $hir $outer $b]
+        }
+        {*}[dict get $outer spec] create $e $seeds
+        return [list block $e $arity any]
+    }
     set assumed never
     set attempts [expr {$self eq "" ? 1 : 3}]
     for {set attempt 1} {$attempt <= $attempts} {incr attempt} {
@@ -401,6 +643,7 @@ proc hir::types::Call {hirVar ctxVar e} {
     set target ""
     set known ""
     set result any
+    set spec [dict exists $ctx spec]
     if {[lindex $calleeType 0] eq "native" && [llength $calleeType] == 2} {
         set name [lindex $calleeType 1]
         set target [list native [hir::resolve::nativeSymbol hir $name]]
@@ -411,6 +654,19 @@ proc hir::types::Call {hirVar ctxVar e} {
             if {[dict get $meta testsType] ne ""} {
                 set known [hir::refine::decideTypeTest $name [lindex $argTypes 0]]
             }
+            if {$spec && !$dead} {
+                foreach argType $argTypes paramType [dict get $meta paramTypes] {
+                    set kind [kindOf $argType]
+                    if {$paramType ni {"" any} && $kind ne "" && $kind ne [core::type::base $paramType]} {
+                        # The argument is statically of another kind: the call
+                        # always raises TYPE.
+                        set dead 1
+                    }
+                }
+                if {!$dead && [dict get $meta resultShape] ne ""} {
+                    set result [ShapeResult $hir [dict get $meta resultShape] $argExprs $argTypes $result]
+                }
+            }
             if {!$dead} {
                 # The call returned, so every argument had its parameter type.
                 foreach arg $argExprs paramType [dict get $meta paramTypes] {
@@ -419,13 +675,23 @@ proc hir::types::Call {hirVar ctxVar e} {
                     }
                 }
             }
+        } elseif {$spec} {
+            set dead 1
         }
     } elseif {[lindex $calleeType 0] eq "block" && [llength $calleeType] == 4} {
         lassign $calleeType _ block arity blockResult
         set target [list block $block]
         if {$arity == [llength $argExprs]} {
             set result $blockResult
+            if {$spec && !$dead && [dict get $ctx reachable]} {
+                set result [{*}[dict get $ctx spec] call $e $block $argTypes]
+            }
+        } elseif {$spec} {
+            set dead 1
         }
+    } elseif {$spec && [kindOf $calleeType] ni {"" block native}} {
+        # Not callable: the call always raises NOT-CALLABLE.
+        set dead 1
     }
     dict set hir exprs $e target $target
     dict set hir exprs $e known $known
@@ -460,6 +726,11 @@ proc hir::types::If {hirVar ctxVar e} {
 
     set known ""
     set refinements [dict create 1 {} 0 {}]
+    if {[dict exists $ctx spec] && [kindOf $test] ni {"" bool}} {
+        # Region inference: the condition is statically not a Boolean, so
+        # the if always raises NOT-BOOLEAN.
+        set test never
+    }
     set live [expr {$entry && $test ne "never"}]
     if {$test ne "never"} {
         set known [KnownOutcome $hir $condition]

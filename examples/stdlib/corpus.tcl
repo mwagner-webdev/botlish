@@ -19,7 +19,10 @@
 #
 #   interp     HIR --hir::lower--> core IR --> core::evalProgram
 #   compile    HIR --> core::compiler::evalHir
-#   cranelift  HIR --> native::evalHir (native lowering, Cranelift JIT)
+#   cranelift  HIR --> native::evalHir (native lowering with function
+#              specialization, Cranelift JIT)
+#   cranelift-generic
+#              the same without specialization: generic, guarded functions
 #
 # Adding a backend means adding a case to run.
 
@@ -35,7 +38,7 @@ if {[info commands ::native::evalHir] eq ""} {
 
 namespace eval corpus {
     variable home [file dirname [file normalize [info script]]]
-    variable backends {interp compile cranelift}
+    variable backends {interp compile cranelift-generic cranelift}
 }
 
 # The corpus programs recurse once per character, element or record: Botlish
@@ -65,7 +68,8 @@ proc corpus::run {backend hir} {
     switch -- $backend {
         interp  { return [core::evalProgram [hir::lower $hir]] }
         compile { return [core::compiler::evalHir $hir] }
-        cranelift { return [native::evalHir $hir] }
+        cranelift { return [native::evalHir $hir -specialize 1] }
+        cranelift-generic { return [native::evalHir $hir -specialize 0] }
     }
     error "corpus::run: unknown backend \"$backend\""
 }

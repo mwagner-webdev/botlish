@@ -7,7 +7,9 @@
 #
 # The names use `_` rather than `-` so that source can spell them (§17).
 # Lists carry no element type, so list_get's result type is any: nothing in
-# its signature says what kind of value comes out.
+# its signature says what kind of value comes out. Their -result-shape lets
+# static analyses that track list contents (hir/types.tcl, aggregate facts)
+# do better without knowing these natives by name.
 
 namespace eval core::lists {}
 
@@ -40,6 +42,6 @@ proc core::lists::append {l v} {
 core::native::register list_length -arity 1 -impl core::lists::length \
     -param-types {list} -result-type int
 core::native::register list_get    -arity 2 -impl core::lists::get \
-    -param-types {list int} -result-type any -runtime range-check
+    -param-types {list int} -result-type any -runtime range-check     -result-shape {element 0 1}
 core::native::register list_append -arity 2 -impl core::lists::append \
-    -param-types {list any} -result-type list -runtime list-alloc
+    -param-types {list any} -result-type list -runtime list-alloc     -result-shape {append 0 1}

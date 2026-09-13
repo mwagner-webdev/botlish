@@ -14,11 +14,20 @@
 # error comes back on standard output. Only program mode is supported: a
 # native program cannot run in, or return, a Tcl environment.
 #
-#   native::evalHir HIR                 runs a program-mode HIR program
-#   native::nir HIR                     its NIR text
-#   native::clif HIR                    the Cranelift IR of its functions
-#   native::measure HIR RUNS            {LOWER-US COMPILE-US BEST-US COLLECTIONS VALUE}
-#   native::object HIR PATH             writes an object file (AOT smoke test)
+#   native::evalHir HIR ?OPTIONS?       runs a program-mode HIR program
+#   native::nir HIR ?OPTIONS?           its NIR text
+#   native::clif HIR ?OPTIONS?          the Cranelift IR of its functions
+#   native::measure HIR RUNS ?OPTIONS?  {LOWER-US COMPILE-US BEST-US COLLECTIONS VALUE}
+#   native::object HIR PATH ?OPTIONS?   writes an object file (AOT smoke test)
+#   native::report HIR                  guard accounting and instance counts
+#   native::codeSize HIR ?OPTIONS?      {TOTAL-BYTES {FUNCTION-BYTES ...}} of
+#                                       the machine code
+#
+# OPTIONS are native::lower::program's: -specialize 0 lowers generic
+# functions only (the guarded baseline; also BOTLISH_NATIVE_SPECIALIZE=0).
+# Two backends are registered: cranelift (specializing, unless the
+# environment variable says otherwise) and cranelift-generic (never
+# specializing), so the suite and the corpus can run on both.
 #
 # Errors: Botlish errors keep their {CORE SEMANTIC KIND} codes. The backend's
 # own failures are {NATIVE UNSUPPORTED ...} (a construct native lowering does
@@ -54,10 +63,15 @@ proc native::binary {} {
 }
 
 # The NIR text of the program-mode HIR program HIR.
-proc native::nir {hir} {
+proc native::nir {hir args} {
+    return [dict get [lowered $hir {*}$args] text]
+}
+
+# native::lower::program's result for HIR, recording unsupported constructs.
+proc native::lowered {hir args} {
     variable unsupported
     try {
-        return [dict get [native::lower::program $hir] text]
+        return [native::lower::program $hir {*}$args]
     } trap {NATIVE UNSUPPORTED} {message options} {
         lappend unsupported [list [dict get $options -errorcode] $message]
         return -options $options $message
@@ -112,26 +126,26 @@ proc native::Outcome {lines} {
     throw {NATIVE BUG} "native backend produced no result:\n[join $lines \n]"
 }
 
-proc native::evalHir {hir} {
+proc native::evalHir {hir args} {
     if {[hir::mode $hir] ne "program"} {
         error "native::evalHir: expected a program-mode HIR"
     }
     foreach expr [hir::lower $hir] {
         core::ir::check $expr
     }
-    return [Outcome [Driver run [nir $hir]]]
+    return [Outcome [Driver run [nir $hir {*}$args]]]
 }
 
-proc native::clif {hir} {
-    set lines [Driver clif [nir $hir]]
+proc native::clif {hir args} {
+    set lines [Driver clif [nir $hir {*}$args]]
     if {[regexp {^error } [lindex $lines 0]]} {
         Outcome $lines
     }
     return [join $lines \n]
 }
 
-proc native::measure {hir runs} {
-    set lower [lindex [time {set text [nir $hir]}] 0]
+proc native::measure {hir runs args} {
+    set lower [lindex [time {set text [nir $hir {*}$args]}] 0]
     set lines [Driver bench $text $runs]
     set timing [lsearch -inline $lines {timing *}]
     set value [Outcome $lines]
@@ -142,23 +156,85 @@ proc native::measure {hir runs} {
     return [list $lower $compile $best $collections $value]
 }
 
-proc native::object {hir path} {
-    set lines [Driver object [nir $hir] $path]
+proc native::codeSize {hir args} {
+    set lines [Driver size [nir $hir {*}$args]]
+    set line [lsearch -inline $lines {size *}]
+    if {$line eq ""} {
+        Outcome $lines
+    }
+    return [lrange $line 1 2]
+}
+
+proc native::object {hir path args} {
+    set lines [Driver object [nir $hir {*}$args] $path]
     if {[regexp {^error } [lindex $lines 0]]} {
         Outcome $lines
     }
     return [lindex $lines 0]
 }
 
+# Guard accounting for the program-mode HIR program HIR, specialized and
+# generic. Returns a dict:
+#
+#   genericBlockers      representation blockers of the semantic analysis
+#                        (hir::aot::analyze), over every region
+#   generic              {blockers N guards N functions N} of the
+#                        -specialize 0 lowering: its emitted functions'
+#                        blockers and the kind guards emitted for them
+#   specialized          {blockers N guards N functions N generic N
+#                        specialized N perFunction {NAME {generic 0|1
+#                        specializations N}}} of the specializing lowering
+#   nirGuards            guard and guardbool instructions in the specialized
+#                        NIR text, of which knownErrorGuards always fail
+#
+# Kind guards are emitted exactly for representation blockers, so for each
+# lowering blockers == guards, and nirGuards == specialized guards +
+# knownErrorGuards; a mismatch raises {NATIVE BUG}.
+proc native::report {hir} {
+    set result [dict create]
+    set generic 0
+    dict for {id region} [dict get [hir::aot::analyze $hir] regions] {
+        foreach blocker [dict get $region blockers] {
+            if {[dict get $blocker class] eq "representation"} {
+                incr generic
+            }
+        }
+    }
+    dict set result genericBlockers $generic
+    foreach {mode flag} {generic 0 specialized 1} {
+        set lowered [lowered $hir -specialize $flag]
+        set statistics [dict get $lowered statistics]
+        if {[dict get $statistics blockers] != [dict get $statistics guards]} {
+            throw {NATIVE BUG} "native::report: $mode lowering emitted [dict get $statistics guards] kind guard(s) for [dict get $statistics blockers] blocker(s)"
+        }
+        set knownErrorGuards 0
+        foreach info [dict get $lowered functions] {
+            incr knownErrorGuards [dict get $info knownErrorGuards]
+        }
+        set nirGuards [regexp -all -line {^\s+guard(bool)? } [dict get $lowered text]]
+        if {$nirGuards != [dict get $statistics guards] + $knownErrorGuards} {
+            throw {NATIVE BUG} "native::report: $mode NIR has $nirGuards guard(s), lowering counted [dict get $statistics guards] + $knownErrorGuards"
+        }
+        dict set result $mode $statistics
+        if {$flag} {
+            dict set result nirGuards $nirGuards
+            dict set result knownErrorGuards $knownErrorGuards
+        }
+    }
+    return $result
+}
+
 # ---------------------------------------------------------------------------
 # Backend entry points (core::registerBackend)
 
-proc native::runProgram {exprs env} {
+proc native::runProgram {exprs env {specialize ""}} {
     variable cache
-    if {![dict exists $cache $exprs]} {
-        dict set cache $exprs [nir [hir::build $exprs -strict 0]]
+    set options [expr {$specialize eq "" ? {} : [list -specialize $specialize]}]
+    set key [list $exprs $options [expr {[info exists ::env(BOTLISH_NATIVE_SPECIALIZE)] ? $::env(BOTLISH_NATIVE_SPECIALIZE) : ""}]]
+    if {![dict exists $cache $key]} {
+        dict set cache $key [nir [hir::build $exprs -strict 0] {*}$options]
     }
-    return [core::completion::normal [Outcome [Driver run [dict get $cache $exprs]]]]
+    return [core::completion::normal [Outcome [Driver run [dict get $cache $key]]]]
 }
 
 proc native::runSequence {exprs env} {
@@ -169,3 +245,8 @@ proc native::runSequence {exprs env} {
 }
 
 core::registerBackend cranelift native::runSequence native::runProgram
+core::registerBackend cranelift-generic native::runSequence {native::runProgramWith 0}
+
+proc native::runProgramWith {specialize exprs env} {
+    return [runProgram $exprs $env $specialize]
+}

@@ -82,6 +82,8 @@ pub struct CompiledProgram {
     /// Address of each function's generic entry.
     pub generic_entries: Vec<usize>,
     pub clif: Option<String>,
+    /// Machine code bytes of each function (with its generic entry).
+    pub code_sizes: Vec<u32>,
     /// Keeps the machine code alive.
     _module: JITModule,
 }
@@ -155,8 +157,10 @@ impl Backend for CraneliftJit {
         let symbols = clif::declare(&mut module, program, false)?;
         let mut pool = ConstPool::default();
         let mut listing = options.clif.then(|| clif::legend(&symbols));
+        let mut code_sizes = Vec::with_capacity(program.functions.len());
         for f in &program.functions {
-            let text = clif::define(&mut module, &symbols, f, &mut pool, options.clif)?;
+            let (text, size) = clif::define(&mut module, &symbols, f, &mut pool, options.clif)?;
+            code_sizes.push(size);
             if let (Some(listing), Some(text)) = (listing.as_mut(), text) {
                 listing.push('\n');
                 listing.push_str(&text);
@@ -166,7 +170,7 @@ impl Backend for CraneliftJit {
         let entry_ptr = module.get_finalized_function(symbols.direct[0]);
         let generic_entries = symbols.entry.iter().map(|id| module.get_finalized_function(*id) as usize).collect();
         let entry: ProgramEntry = unsafe { std::mem::transmute(entry_ptr) };
-        Ok(CompiledProgram { entry, pool, generic_entries, clif: listing, _module: module })
+        Ok(CompiledProgram { entry, pool, generic_entries, clif: listing, code_sizes, _module: module })
     }
 }
 

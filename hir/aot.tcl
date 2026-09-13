@@ -135,36 +135,228 @@ namespace eval hir::aot {
 }
 
 proc hir::aot::analyze {hir} {
+    set context [context $hir]
     set regions [dict create]
-    set top [hir::top $hir]
-    dict set regions program [NewRegion $hir program <program> \
-        [dict get $hir scopes $top origin] {} "" {}]
-    set statics [StaticBlocks $hir]
-    set walk [hir::walk $hir]
-    foreach e $walk {
-        if {[hir::kind $hir $e] eq "block"} {
-            dict set regions $e [NewRegion $hir $e [BlockName $hir $e] \
-                [hir::get $hir $e origin] \
-                [lmap b [hir::get $hir $e params] {
-                    dict create binding $b name [BindingName $hir $b] \
-                        type [hir::bindingType $hir $b]
-                }] \
-                [hir::type $hir [hir::get $hir $e resultType]] \
-                [lmap b [hir::get $hir $e captures] {
-                    dict create binding $b name [BindingName $hir $b] \
-                        class [expr {[BoundBlock $hir $b] in $statics ? "block" : "value"}]
-                }]]
-        }
+    foreach id [dict keys [dict get $context exprs]] {
+        dict set regions $id [analyzeRegion $hir $id $context]
     }
-    set tails [TailCalls $hir]
+    return [dict create regions [Transitive $regions]]
+}
+
+# Program-wide facts the analysis of any one region needs, computed once:
+#
+#   walk        ExprIds in pre-order
+#   positions   ExprId -> index in walk
+#   exprs       RegionId -> ExprIds of the region in walk order (program
+#               first, then blocks in source order)
+#   statics     StaticBlocks
+#   tails       TailCalls
+#   selfTails   selfTailCalls
+#   names       block ExprId -> BlockName
+#   diagnostics RegionId -> diagnostics located in the region
+#   unproven    unprovenReferences
+#   cells       local BindingId -> 1 for bindings some unproven reference
+#               reads (a backend must hold them in a cell)
+#   envless     static blocks that capture no cell binding, to a greatest
+#               fixpoint: blocks a backend can run as plain functions with
+#               no environment at all
+#   callees     callee ExprId -> call ExprId
+#   discarded   ExprId -> 1 for expressions whose value nothing uses: all
+#               but the last of a sequence, and the last of a loop body
+#   bound       block ExprId -> bind ExprId, for blocks bound to a name
+#
+# The facts depend only on HIR structure (scopes, bindings, call targets),
+# never on types, so one context serves every typed view of the program
+# (hir/specialize.tcl).
+proc hir::aot::context {hir} {
+    set walk [hir::walk $hir]
     set positions [dict create]
+    set exprs [dict create program {}]
+    set names [dict create]
     set index 0
     foreach e $walk {
         dict set positions $e [incr index]
+        if {[hir::kind $hir $e] eq "block"} {
+            dict set exprs $e {}
+        }
     }
-    set state [dict create regions $regions reported {} initChecked {} positions $positions]
     foreach e $walk {
-        set region [RegionOf $hir $e]
+        dict lappend exprs [RegionOf $hir $e] $e
+    }
+    dict for {b binding} [dict get $hir bindings] {
+        set declaredBy [dict get $binding declaredBy]
+        if {$declaredBy ne ""} {
+            set value [hir::get $hir $declaredBy value]
+            if {[hir::kind $hir $value] eq "block" && ![dict exists $names $value]} {
+                dict set names $value [BindingName $hir $b]
+            }
+        }
+    }
+    set diagnostics [dict create]
+    foreach diagnostic [hir::diagnostics $hir] {
+        set e [dict get $diagnostic expr]
+        set region [expr {$e ne "" && [dict exists $hir exprs $e] ? [RegionOf $hir $e] : "program"}]
+        dict lappend diagnostics $region $diagnostic
+    }
+    set unproven [unprovenReferences $hir]
+    set cells [dict create]
+    dict for {ref b} $unproven {
+        if {[dict get [hir::binding $hir $b] kind] eq "local"} {
+            dict set cells $b 1
+        }
+    }
+    set statics [StaticBlocks $hir]
+    set envless $statics
+    set changed 1
+    while {$changed} {
+        set changed 0
+        foreach e $envless {
+            foreach b [hir::get $hir $e captures] {
+                if {[dict exists $cells $b] || [BoundBlock $hir $b] ni $envless} {
+                    set envless [lsearch -all -inline -not -exact $envless $e]
+                    set changed 1
+                    break
+                }
+            }
+        }
+    }
+    set callees [dict create]
+    set discarded [dict create]
+    set bound [dict create]
+    foreach body [list [hir::roots $hir]] {
+        foreach e [lrange $body 0 end-1] {
+            dict set discarded $e 1
+        }
+    }
+    foreach e $walk {
+        switch -- [hir::kind $hir $e] {
+            call { dict set callees [hir::get $hir $e callee] $e }
+            bind {
+                set value [hir::get $hir $e value]
+                if {[hir::kind $hir $value] eq "block"} {
+                    dict set bound $value $e
+                }
+            }
+        }
+        set bodies {}
+        switch -- [hir::kind $hir $e] {
+            block { set bodies [list [hir::get $hir $e body]] }
+            if    { set bodies [list [hir::get $hir $e thenBody] [hir::get $hir $e elseBody]] }
+            loop  { set bodies [list [concat [hir::get $hir $e body] [list ""]]] }
+        }
+        foreach body $bodies {
+            foreach child [lrange $body 0 end-1] {
+                if {$child ne ""} {
+                    dict set discarded $child 1
+                }
+            }
+        }
+    }
+    return [dict create walk $walk positions $positions exprs $exprs \
+        statics $statics tails [TailCalls $hir] selfTails [selfTailCalls $hir] \
+        names $names diagnostics $diagnostics unproven $unproven cells $cells \
+        envless $envless callees $callees discarded $discarded bound $bound]
+}
+
+# The blocks whose Block value code of REGION materializes when it runs the
+# expressions REACHABLE (ExprIds of the region), sorted: the functions whose
+# generic implementation a backend must provide for it. CONTEXT is the
+# program's context. A Block value is materialized by
+#
+#   * creating a block that is not envless (a closure), or an envless one
+#     whose value is used (not discarded, not bound to a name)
+#   * binding an envless block to a name in value position, or as a
+#     duplicate bind, or to a cell binding (a binding in statement position
+#     is not materialized: references materialize it)
+#   * a reference to a binding bound to an envless block, except the
+#     callee of a direct call of that block (which needs no value)
+#
+# Backends must follow the same rule (native/lower.tcl does).
+proc hir::aot::materializedBlocks {hir context region reachable} {
+    set envless [dict get $context envless]
+    set cells [dict get $context cells]
+    set discarded [dict get $context discarded]
+    set result {}
+    foreach e $reachable {
+        switch -- [hir::kind $hir $e] {
+            block {
+                if {![dict exists $context bound $e]
+                        && ($e ni $envless || ![dict exists $discarded $e])} {
+                    lappend result $e
+                }
+            }
+            bind {
+                set value [hir::get $hir $e value]
+                if {[hir::kind $hir $value] ne "block"} {
+                    continue
+                }
+                if {$value ni $envless || [hir::get $hir $e duplicate]
+                        || ![dict exists $discarded $e]
+                        || [dict exists $cells [hir::get $hir $e binding]]} {
+                    lappend result $value
+                }
+            }
+            ref {
+                set block [MaterializedByRef $hir $context $e]
+                if {$block ne ""} {
+                    lappend result $block
+                }
+            }
+        }
+    }
+    return [lsort -unique $result]
+}
+
+# The envless block reference E materializes the Block value of, or "".
+proc hir::aot::MaterializedByRef {hir context e} {
+    set b [hir::get $hir $e binding]
+    if {$b eq "" || [hir::get $hir $e init] eq "no"
+            || [dict get [hir::binding $hir $b] kind] ne "local"
+            || [dict exists $context cells $b]} {
+        return ""
+    }
+    set block [BoundBlock $hir $b]
+    if {$block eq "" || $block ni [dict get $context envless]} {
+        return ""
+    }
+    if {[dict exists $context callees $e] && ![dict exists $context unproven $e]} {
+        lassign [hir::get $hir [dict get $context callees $e] target] kind target
+        if {$kind eq "block" && $target eq $block} {
+            return ""
+        }
+    }
+    return $block
+}
+
+# The analysis of one region (RegionId REGION) of HIR, whose types may be a
+# specialized view of the program (hir/specialize.tcl): a region dict as
+# described above, summarized; transitive is its own status (Transitive
+# combines regions).
+proc hir::aot::analyzeRegion {hir region {context ""}} {
+    if {$context eq ""} {
+        set context [context $hir]
+    }
+    set statics [dict get $context statics]
+    if {$region eq "program"} {
+        set r [NewRegion $hir program <program> \
+            [dict get $hir scopes [hir::top $hir] origin] {} "" {}]
+    } else {
+        set name [expr {[dict exists $context names $region] ? [dict get $context names $region] : ""}]
+        set r [NewRegion $hir $region $name [hir::get $hir $region origin] \
+            [lmap b [hir::get $hir $region params] {
+                dict create binding $b name [BindingName $hir $b] \
+                    type [hir::bindingType $hir $b]
+            }] \
+            [hir::type $hir [hir::get $hir $region resultType]] \
+            [lmap b [hir::get $hir $region captures] {
+                dict create binding $b name [BindingName $hir $b] \
+                    class [expr {[BoundBlock $hir $b] in $statics ? "block" : "value"}]
+            }]]
+    }
+    set state [dict create regions [dict create $region $r] reported {} initChecked {} \
+        positions [dict get $context positions]]
+    set tails [dict get $context tails]
+    foreach e [dict get $context exprs $region] {
         if {![hir::get $hir $e reachable]} {
             dict update state regions regions {
                 dict set regions $region unreachable \
@@ -174,17 +366,15 @@ proc hir::aot::analyze {hir} {
         }
         Visit $hir state $region $e $tails $statics
     }
-    foreach diagnostic [hir::diagnostics $hir] {
-        set e [dict get $diagnostic expr]
-        set region [expr {$e ne "" && [dict exists $hir exprs $e] ? [RegionOf $hir $e] : "program"}]
-        Block state $region [Blocker $hir StaticError $e "" "" {} \
-            "[dict get $diagnostic kind]: [dict get $diagnostic message]"]
+    if {[dict exists $context diagnostics $region]} {
+        foreach diagnostic [dict get $context diagnostics $region] {
+            Block state $region [Blocker $hir StaticError [dict get $diagnostic expr] "" "" {} \
+                "[dict get $diagnostic kind]: [dict get $diagnostic message]"]
+        }
     }
-    set regions [dict get $state regions]
-    dict for {id region} $regions {
-        dict set regions $id [Summarize $region]
-    }
-    return [dict create regions [Transitive $regions]]
+    set r [Summarize [dict get $state regions $region]]
+    dict set r transitive [dict get $r status]
+    return $r
 }
 
 # ---------------------------------------------------------------------------

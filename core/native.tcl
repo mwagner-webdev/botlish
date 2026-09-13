@@ -29,6 +29,15 @@
 #                   below). Pure metadata for static analysis (hir/aot.tcl):
 #                   the operation is fully known, but lowering it to native
 #                   code needs these helpers. It never changes semantics.
+#   resultShape     "" or how the result is built from the arguments, for
+#                   static analyses that track what aggregates contain
+#                   (hir/types.tcl, aggregate facts). Pure metadata, like
+#                   runtime; the result type still states the contract:
+#                     elements        a list of the arguments, in order
+#                     element L I     the element of list argument L at the
+#                                     index given by Int argument I
+#                     append L V      a list of list argument L's elements
+#                                     followed by argument V
 #
 # Refinement rules are flat lists of ARG-INDEX TYPE pairs, e.g. {0 int}
 # ("argument 0 is an int") or {0 {refined str {Emailish}}}. The evaluator
@@ -70,7 +79,7 @@ proc core::native::register {name args} {
         error "core::native::register: options must be -option value pairs"
     }
     set options [dict create -impl "" -arity "" -refines-true {} -refines-false {} \
-        -param-types "" -result-type any -tests-type "" -runtime {}]
+        -param-types "" -result-type any -tests-type "" -runtime {} -result-shape {}]
     foreach {option value} $args {
         if {![dict exists $options $option]} {
             error "core::native::register: unknown option \"$option\""
@@ -138,6 +147,11 @@ proc core::native::register {name args} {
             error "core::native::register: unknown -runtime tag \"$tag\" for \"$name\" (known: $runtimeTags)"
         }
     }
+    set shape [dict get $options -result-shape]
+    set count [expr {$arity eq "*" ? "" : $arity}]
+    if {![ValidShape $shape $count]} {
+        error "core::native::register: bad -result-shape \"$shape\" for \"$name\""
+    }
     dict set registry $name [dict create \
         name $name \
         impl $impl \
@@ -147,8 +161,28 @@ proc core::native::register {name args} {
         paramTypes $paramTypes \
         resultType [CanonicalType $name -result-type [dict get $options -result-type]] \
         testsType $testsType \
-        runtime [lsort -unique [dict get $options -runtime]]]
+        runtime [lsort -unique [dict get $options -runtime]]         resultShape $shape]
     return [core::value::native $name]
+}
+
+# 1 if SHAPE is a valid -result-shape for a native taking COUNT arguments
+# ("" for any number).
+proc core::native::ValidShape {shape count} {
+    if {[catch {llength $shape} length]} {
+        return 0
+    }
+    set indices [lrange $shape 1 end]
+    foreach index $indices {
+        if {![string is digit -strict $index] || ($count ne "" && $index >= $count)} {
+            return 0
+        }
+    }
+    switch -- [lindex $shape 0] {
+        ""       { return [expr {$length == 0}] }
+        elements { return [expr {$length == 1}] }
+        element - append { return [expr {$length == 3 && $count ne ""}] }
+    }
+    return 0
 }
 
 proc core::native::CanonicalType {name option type} {

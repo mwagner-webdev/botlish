@@ -81,14 +81,15 @@ pub fn declare<M: Module>(module: &mut M, program: &nir::Program, export: bool) 
     Ok(symbols)
 }
 
-/// Defines function F and its generic entry. Returns F's CLIF if LISTING.
+/// Defines function F and its generic entry. Returns F's CLIF if LISTING, and
+/// the size in bytes of the machine code of both.
 pub fn define<M: Module>(
     module: &mut M,
     symbols: &Symbols,
     f: &nir::Function,
     pool: &mut ConstPool,
     listing: bool,
-) -> Result<Option<String>, BackendError> {
+) -> Result<(Option<String>, u32), BackendError> {
     let mut text = String::new();
     let mut ctx = module.make_context();
     let mut fctx = FunctionBuilderContext::new();
@@ -111,6 +112,7 @@ pub fn define<M: Module>(
     module.define_function(symbols.direct[f.id as usize], &mut ctx).map_err(|e| {
         BackendError::Codegen(format!("function {} ({}): {e:?}", f.id, f.name))
     })?;
+    let mut size = ctx.compiled_code().map_or(0, |code| code.code_info().total_size);
     module.clear_context(&mut ctx);
 
     // Generic entry: unpack the argument array and call the direct function.
@@ -138,8 +140,9 @@ pub fn define<M: Module>(
         b.finalize(config);
     }
     module.define_function(symbols.entry[f.id as usize], &mut ctx).map_err(module_error)?;
+    size += ctx.compiled_code().map_or(0, |code| code.code_info().total_size);
     module.clear_context(&mut ctx);
-    Ok(listing.then_some(text))
+    Ok((listing.then_some(text), size))
 }
 
 struct Translator<'a, 'b, M: Module> {

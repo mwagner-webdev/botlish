@@ -1,0 +1,235 @@
+# hir-specialize.test -- call-site specialization analysis (hir/specialize.tcl)
+# and the aggregate facts it uses (hir/types.tcl).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot examples stdlib corpus.tcl]
+
+proc specOf {text args} {
+    set hir [surface::compile $text t.bot -strict 0]
+    return [list $hir [hir::specialize::analyze $hir {*}$args]]
+}
+
+# Labels of the used instances of function NAME, in program order.
+proc specLabels {analysis name} {
+    lmap id [dict get $analysis used] {
+        if {[dict get $analysis instances $id name] ne $name} continue
+        hir::specialize::label $analysis $id
+    }
+}
+
+# The used instance of NAME labeled LABEL.
+proc specInstance {analysis label} {
+    foreach id [dict get $analysis used] {
+        if {[hir::specialize::label $analysis $id] eq $label} {
+            return [dict get $analysis instances $id]
+        }
+    }
+    error "no used instance $label"
+}
+
+proc specResult {analysis label} {
+    hir::types::show [dict get [specInstance $analysis $label] result]
+}
+
+# {status guards} of the used instance LABEL.
+proc specStatus {hir analysis label} {
+    set id [dict get [specInstance $analysis $label] id]
+    set region [hir::specialize::region $hir $analysis $id]
+    list [dict get $region status] [hir::specialize::RepresentationBlockers $region]
+}
+
+# The static type (shown) of the root expression of program TEXT's last
+# statement, under region inference of the program.
+proc aggregateType {text} {
+    lassign [specOf $text] hir analysis
+    set view [hir::specialize::view $hir $analysis i0]
+    hir::types::show [hir::typeOf $view [lindex [hir::roots $hir] end]]
+}
+
+# ---------------------------------------------------------------------------
+# Instances and keys
+
+test hir-specialize-1 {a call with known argument kinds uses an instance; the semantic type is unchanged} -body {
+    lassign [specOf "fn inc(x):\n    x + 1\n\ninc(1)"] hir analysis
+    set block [lindex [hir::roots $hir] 0]
+    set block [hir::get $hir $block value]
+    list [specLabels $analysis inc] [specResult $analysis inc<int>] \
+         [hir::types::show [hir::typeOf $hir $block]] \
+         [hir::types::show [hir::bindingType $hir [hir::get $hir $block params]]] \
+         [specStatus $hir $analysis inc<int>]
+} -result {inc<int> int {block(e2)/1 -> int} any {closed 0}}
+
+test hir-specialize-2 {analysis changes neither the HIR nor its semantic analysis} -body {
+    set hir [corpus::program matmul "matmul(\[\[1, 2\]\], \[\[3\], \[4\]\])"]
+    set before [hir::format $hir -origins 1]
+    set aot [hir::aot::analyze $hir]
+    set analysis [hir::specialize::analyze $hir]
+    hir::specialize::explain $hir $analysis
+    list [expr {[hir::format $hir -origins 1] eq $before}] [expr {[hir::aot::analyze $hir] eq $aot}]
+} -result {1 1}
+
+test hir-specialize-3 {several instances, reuse, and the generic fallback} -body {
+    lassign [specOf "fn pick(flag):\n    if flag:\n        return 1\n    \"one\"\n\nfn same(x, y):\n    x == y\n\n\[same(1, 2), same(3, 4), same(\"a\", \"b\"), same(pick(true), pick(false))\]"] hir analysis
+    set program [dict get $analysis instances i0]
+    list [specLabels $analysis same] [specLabels $analysis pick] \
+         [llength [lsort -unique [dict values [dict get $program calls]]]] \
+         [specResult $analysis pick<bool>]
+} -result {{{same<int, int>} {same<str, str>} same<generic>} pick<bool> 4 any}
+
+test hir-specialize-4 {specialization is deterministic} -body {
+    set hir [surface::readProgramFile [corpus::path csv]]
+    expr {[hir::specialize::analyze $hir] eq [hir::specialize::analyze [surface::readProgramFile [corpus::path csv]]]}
+} -result 1
+
+test hir-specialize-5 {-specialize 0: generic instances with the semantic types} -body {
+    lassign [specOf "fn inc(x):\n    x + 1\n\ninc(1)" -specialize 0] hir analysis
+    list [specLabels $analysis inc] [dict get [specInstance $analysis inc<generic>] overlay] \
+         [specStatus $hir $analysis inc<generic>]
+} -result {inc<generic> {} {guarded 1}}
+
+test hir-specialize-6 {closures over values stay generic; static blocks are specialized} -body {
+    lassign [specOf "fn make_adder(k):\n    fn add(y):\n        y + k\n    add(1)\n\nmake_adder(2)"] hir analysis
+    list [specLabels $analysis make_adder] [specLabels $analysis add] [specResult $analysis add<generic>]
+} -result {make_adder<int> add<generic> int}
+
+# ---------------------------------------------------------------------------
+# Recursion and the result fixpoint
+
+test hir-specialize-7 {self recursion uses one instance} -body {
+    lassign [specOf "fn count(n, acc):\n    if n == 0:\n        return acc\n    count(n - 1, acc + 1)\n\ncount(10, 0)"] hir analysis
+    set count [specInstance $analysis {count<int, int>}]
+    list [specLabels $analysis count] [lsort -unique [dict values [dict get $count calls]]] [dict get $count id] \
+         [specResult $analysis {count<int, int>}]
+} -result {{{count<int, int>}} i1 i1 int}
+
+test hir-specialize-8 {a self tail call with other kinds widens to the lub of both keys} -body {
+    lassign [specOf "fn swap(a, b, n):\n    if n == 0:\n        return a\n    swap(b, a, n - 1)\n\nfn grow(acc, n):\n    if n == 0:\n        return acc\n    grow(list_append(acc, n), n - 1)\n\n\[swap(1, \"x\", 3), grow(\[\], 3)\]"] hir analysis
+    list [specLabels $analysis swap] [specLabels $analysis grow] [specResult $analysis {grow<list<never>, int>}]
+} -result {{{swap<int, str, int>} {swap<any, any, int>}} {{grow<list<never>, int>} {grow<list<int>, int>}} list<int>}
+
+test hir-specialize-9 {mutual recursion reaches a fixpoint with one instance each} -body {
+    lassign [specOf "fn even(n):\n    if n == 0:\n        return true\n    odd(n - 1)\n\nfn odd(n):\n    if n == 0:\n        return false\n    even(n - 1)\n\neven(10)"] hir analysis
+    list [specResult $analysis even<int>] [specResult $analysis odd<int>] \
+         [specStatus $hir $analysis even<int>] [specStatus $hir $analysis odd<int>] \
+         [expr {[dict get [specInstance $analysis even<int>] passes] < 10}]
+} -result {bool bool {closed 0} {closed 0} 1}
+
+test hir-specialize-10 {results propagate around a cycle of three functions} -body {
+    lassign [specOf "fn a(n):\n    if n == 0:\n        return \"done\"\n    b(n - 1)\n\nfn b(n):\n    c(n)\n\nfn c(n):\n    a(n)\n\nfn use(n):\n    length(a(n)) + 1\n\nuse(3)"] hir analysis
+    list [specResult $analysis a<int>] [specResult $analysis b<int>] [specResult $analysis c<int>] \
+         [specStatus $hir $analysis use<int>]
+} -result {str str str {closed 0}}
+
+test hir-specialize-11 {a path that always raises does not join the result} -body {
+    lassign [specOf "fn f(s):\n    if length(s) > 3:\n        return 1 + \"x\"\n    s\n\nf(\"ab\")"] hir analysis
+    set block [hir::get $hir [lindex [hir::roots $hir] 0] value]
+    list [specResult $analysis f<str>] [hir::types::show [hir::type $hir [hir::get $hir $block resultType]]]
+} -result {str any}
+
+test hir-specialize-12 {explosion control: a per-function limit, then the generic instance} -body {
+    set saved $hir::specialize::limit
+    set hir::specialize::limit 2
+    try {
+        lassign [specOf "fn id(x):\n    x\n\n\[id(1), id(\"a\"), id(true), id(\[1\]), id(unit)\]"] hir analysis
+        specLabels $analysis id
+    } finally {
+        set hir::specialize::limit $saved
+    }
+} -result {id<int> id<str> id<generic>}
+
+test hir-specialize-13 {explosion control: polymorphic recursion terminates} -body {
+    lassign [specOf "fn nest(x, n):\n    if n == 0:\n        return 0\n    1 + nest(\[x\], n - 1)\n\nnest(1, 50)"] hir analysis
+    set labels [specLabels $analysis nest]
+    list [expr {[llength $labels] <= $hir::specialize::limit + 1}] [lindex $labels 0] [lindex $labels end] \
+         [specResult $analysis {nest<int, int>}]
+} -result {1 {nest<int, int>} {nest<list<list<list<list>>>, int>} int}
+
+# ---------------------------------------------------------------------------
+# Aggregate facts
+
+test hir-specialize-14 {list literals} -body {
+    list [aggregateType "\[1, 2, 3\]"] [aggregateType "\[\"a\", \"b\"\]"] \
+         [aggregateType "\[\[1, 2\], \[3, 4\]\]"] [aggregateType "\[\[1\], \[\"a\"\]\]"] \
+         [aggregateType "\[1, \"a\"\]"] [aggregateType "\[\]"]
+} -result {list<int> list<str> list<list<int>> {list[list<int>, list<str>]} {list[int, str]} list<never>}
+
+test hir-specialize-15 {list_get: element kinds, positions of fixed shapes, and nothing for an empty list} -body {
+    list [aggregateType "xs = \[1, 2\]\nlist_get(xs, 1)"] \
+         [aggregateType "m = \[\[1, 2\], \[3\]\]\nlist_get(list_get(m, 1), 0)"] \
+         [aggregateType "p = \[\"a\", 1\]\nlist_get(p, 1)"] \
+         [aggregateType "p = \[\"a\", 1\]\nfn i():\n    1\nlist_get(p, i())"] \
+         [aggregateType "list_get(\[\], 0)"]
+} -result {int int int any any}
+
+test hir-specialize-16 {list_append keeps a homogeneous element kind and joins others} -body {
+    list [aggregateType "list_append(\[1\], 2)"] [aggregateType "list_append(\[1\], \"a\")"] \
+         [aggregateType "list_append(\[\], \"a\")"] [aggregateType "list_append(\[\"a\", 1\], 2)"] \
+         [aggregateType "list_append(\[\[1\]\], \[2\])"]
+} -result {list<int> list list<str> list list<list<int>>}
+
+test hir-specialize-17 {aggregate types are bounded} -body {
+    list [hir::types::show [hir::types::canonical {list {list {list {list int}}}}]] \
+         [hir::types::show [hir::types::MakeList never {int str int str int str int str int} 1]] \
+         [hir::types::show [hir::types::lub {list int} {list never}]] \
+         [hir::types::subtype {list never} {list int}] [hir::types::subtype {list any {int str}} {list any {int any}}] \
+         [hir::types::subtype list {list int}]
+} -result {list<list<list<list>>> list list<int> 1 1 0}
+
+# ---------------------------------------------------------------------------
+# The corpus
+
+test hir-specialize-corpus-1 {every used corpus instance is closed; the generic analysis is unchanged} -body {
+    lmap name [corpus::names] {
+        set hir [surface::readProgramFile [corpus::path $name]]
+        set analysis [hir::specialize::analyze $hir]
+        set summary [hir::specialize::summary $hir $analysis]
+        set statuses [lsort -unique [lmap {id region} [hir::specialize::regions $hir $analysis] {dict get $region transitive}]]
+        list $name [dict get $summary generic] [dict get $summary specialized] $statuses \
+            [dict get $summary genericInstances] [dict get $summary specializedInstances]
+    }
+} -result {{csv 17 0 closed 0 9} {matmul 17 0 closed 0 6} {string_replace 12 0 closed 0 3} {string_reverse 4 0 closed 0 2}}
+
+test hir-specialize-corpus-2 {specialized instances per corpus function} -body {
+    set hir [surface::readProgramFile [corpus::path csv]]
+    dict get [hir::specialize::summary $hir [hir::specialize::analyze $hir]] perFunction
+} -result {peek {generic 0 specializations 1} scan_unquoted {generic 0 specializations 1} scan_quoted {generic 0 specializations 1} scan_field {generic 0 specializations 1} scan_record {generic 0 specializations 2} scan_records {generic 0 specializations 2} csv_parse {generic 0 specializations 1}}
+
+test hir-specialize-all-programs {every example and benchmark program can be specialized and explained} -body {
+    set failures {}
+    set count 0
+    foreach path [concat \
+            [glob -directory [file join $::projectRoot examples] *.ir] \
+            [glob -directory [file join $::projectRoot examples hir] *.hir] \
+            [glob -directory [file join $::projectRoot examples surface] *.bot] \
+            [glob -directory [file join $::projectRoot examples stdlib] *.bot] \
+            [glob -directory [file join $::projectRoot bench] *.ir]] {
+        switch -- [file extension $path] {
+            .ir  { set script {hir::build [core::loadProgramFile $path] -strict 0} }
+            .hir { set script {hir::readFile $path} }
+            .bot { set script {surface::readProgramFile $path -strict 0} }
+        }
+        if {[catch {
+            set hir [eval $script]
+            if {[hir::mode $hir] eq "program"} {
+                set before [hir::format $hir]
+                hir::specialize::explain $hir [hir::specialize::analyze $hir]
+                if {[hir::format $hir] ne $before} {
+                    error "the HIR changed"
+                }
+            }
+        } message]} {
+            lappend failures [file tail $path] $message
+        }
+        incr count
+    }
+    list [expr {$count > 30}] $failures
+} -result {1 {}}
+
+test hir-specialize-explain {the explanation shows the semantic report and every instance} -body {
+    set text [hir::specialize::explain [surface::readProgramFile [corpus::path string_reverse]]]
+    list [string match "*reverse_from (semantic): guarded   \\\[UnknownParameterKind 4\\\]*" $text] \
+         [string match "*reverse_from<str, int, str>: closed*params:   text : str, index : int, reversed : str*result:   str*calls:    reverse_from<str, int, str>*guards:   0*" $text] \
+         [string match "*guards: generic 4, specialized 0; instances: 0 generic, 2 specialized*" $text]
+} -result {1 1 1}
+
+cleanupTests

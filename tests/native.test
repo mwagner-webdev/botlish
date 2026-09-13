@@ -2,11 +2,11 @@
 # Cranelift IR, and semantic parity with the interpreter and the Tcl
 # compiler.
 #
-# Semantic checks are three-way differential: a program must produce the
-# same outcome (value with evidence, or error code and message) on interp,
-# compile and cranelift. Structural checks look at NIR and CLIF for the
-# property that matters (a back edge, a direct call, a missing guard), not
-# at incidental instruction order.
+# Semantic checks are differential: a program must produce the same outcome
+# (value with evidence, or error code and message) on interp, compile,
+# cranelift-generic (no function specialization) and cranelift. Structural
+# checks look at NIR and CLIF for the property that matters (a back edge, a
+# direct call, a missing guard), not at incidental instruction order.
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
@@ -21,15 +21,17 @@ proc sourceIR {text} {
     return [hir::lower [sourceHir $text]]
 }
 
-# "same" if interp, compile and cranelift agree on the program given as
-# source TEXT; otherwise every outcome.
+set parityBackends {interp compile cranelift-generic cranelift}
+
+# "same" if every backend agrees on the program given as source TEXT;
+# otherwise every outcome.
 proc parity {text} {
     set exprs [sourceIR $text]
-    set outcomes [lmap backend {interp compile cranelift} {outcomeUnder $backend $exprs}]
+    set outcomes [lmap backend $::parityBackends {outcomeUnder $backend $exprs}]
     if {[llength [lsort -unique $outcomes]] == 1} {
         return same
     }
-    return [join [lmap backend {interp compile cranelift} outcome $outcomes {list $backend $outcome}] " / "]
+    return [join [lmap backend $::parityBackends outcome $outcomes {list $backend $outcome}] " / "]
 }
 
 # The outcome of source TEXT on cranelift: {value V} or {error CODE MESSAGE}.
@@ -37,18 +39,67 @@ proc native {text} {
     lrange [outcomeUnder cranelift [sourceIR $text]] 0 end-1
 }
 
-proc nirOf {text} {
-    native::nir [sourceHir $text]
+# The NIR of source TEXT, specialized unless ARGS say -specialize 0 (whatever
+# BOTLISH_NATIVE_SPECIALIZE says).
+proc nirOf {text args} {
+    native::nir [sourceHir $text] -specialize 1 {*}$args
 }
 
-# The NIR of function NAME in NIR program text.
-proc nirFunction {nir name} {
-    regexp "func \[0-9\]+ \"[string map {? \\?} $name]\"\[^\n\]*\n(.*?)\nend" $nir -> body
-    return $body
+# The NIR functions of NIR program text: a list of {ID NAME INSTANCE BODY}.
+proc nirFunctions {nir} {
+    set result {}
+    set current ""
+    foreach line [split $nir \n] {
+        if {$current eq ""} {
+            if {[regexp {^func ([0-9]+) "((?:[^"\\]|\\.)*)"} $line -> id name]} {
+                set instance ""
+                regexp {instance="([^"]*)"} $line -> instance
+                set current [list $id $name $instance]
+                set body {}
+            }
+        } elseif {$line eq "end"} {
+            lappend result [concat $current [list [join $body \n]]]
+            set current ""
+        } else {
+            lappend body $line
+        }
+    }
+    return $result
 }
 
-proc clifOf {text} {
-    native::clif [sourceHir $text]
+# The NIR of function NAME in NIR program text: its first instance, or the
+# instance whose key is INSTANCE (generic, or its key types, e.g. "int, str").
+proc nirFunction {nir name {instance ""}} {
+    foreach f [nirFunctions $nir] {
+        lassign $f id fname key body
+        if {$fname eq $name && ($instance eq "" || $key eq $instance)} {
+            return $body
+        }
+    }
+    return ""
+}
+
+# The id of function NAME's instance INSTANCE in NIR program text ("" if none).
+proc nirFunctionId {nir name instance} {
+    foreach f [nirFunctions $nir] {
+        lassign $f id fname key
+        if {$fname eq $name && $key eq $instance} {
+            return $id
+        }
+    }
+    return ""
+}
+
+# The instance keys of function NAME in NIR program text, in id order.
+proc nirInstances {nir name} {
+    lmap f [nirFunctions $nir] {
+        if {[lindex $f 1] ne $name} continue
+        lindex $f 2
+    }
+}
+
+proc clifOf {text args} {
+    native::clif [sourceHir $text] -specialize 1 {*}$args
 }
 
 # The CLIF of NIR function number ID (botlish_fn_ID).
@@ -118,12 +169,12 @@ test native-int-4 {factorial of 30 through non-tail recursion} -body {
 # Guards and errors
 
 test native-guard-1 {a known operation on an unknown kind is guarded, not dispatched} -body {
-    set body [nirFunction [nirOf "fn inc(x):\n    x + 1\n\ninc(1)"] inc]
+    set body [nirFunction [nirOf "fn inc(x):\n    x + 1\n\ninc(1)" -specialize 0] inc]
     list [regexp {guard int %0 "\+"} $body] [regexp {op iadd} $body] [regexp {callvalue} $body]
 } -result {1 1 0}
 
 test native-guard-2 {no guard where HIR proves the kind} -body {
-    set body [nirFunction [nirOf "fn f(s):\n    n = length(s)\n    concat(s, s)\n\nf(\"a\")"] f]
+    set body [nirFunction [nirOf "fn f(s):\n    n = length(s)\n    concat(s, s)\n\nf(\"a\")" -specialize 0] f]
     list [regexp -all {guard str %0} $body] [regexp {op strcat %0 %0} $body]
 } -result {1 1}
 
@@ -235,9 +286,13 @@ test native-call-5 {known natives use no generic dispatch} -body {
 
 test native-call-6 {environment-free functions take no environment} -body {
     set nir [nirOf "${countdown}fn start(n):\n    count(n, 0)\n\nk = 7\nfn addk(n):\n    n + k\n\n\[start(4), addk(1)\]"]
+    set used [nirOf "fn twice(f, x):\n    f(f(x))\n\nfn inc(n):\n    n + 1\n\nfn unused():\n    0\n\ntwice(inc, 1)"]
+    # Functions only called directly are never materialized as values; a
+    # function passed as a value is its generic instance's constant closure.
     list [regexp {"count" params=2 env=0} $nir] [regexp {"start" params=1 env=0} $nir] \
-         [regexp {"addk" params=1 env=1} $nir] [regexp {fnvalue 1} $nir]
-} -result {1 1 1 1}
+         [regexp {"addk" params=1 env=1} $nir] [regexp {fnvalue} $nir] \
+         [regexp "fnvalue [nirFunctionId $used inc generic]" $used] [regexp {"unused"} $used]
+} -result {1 1 1 0 1 0}
 
 test native-call-7 {calls chosen at run time: closures and natives as values} -body {
     list [parity "fn apply(f, x):\n    f(x)\n\nfn inc(n):\n    n + 1\n\n\[apply(inc, 1), apply(length, \"abc\")\]"] \
@@ -251,6 +306,155 @@ test native-call-8 {mutual recursion through a forward reference} -body {
          [native "fn even(n):\n    if n == 0:\n        return true\n    odd(n - 1)\n\nfn odd(n):\n    if n == 0:\n        return false\n    even(n - 1)\n\n\[even(10000), odd(7)\]"] \
          [regexp {cellcheck} [nirFunction [nirOf "fn even(n):\n    if n == 0:\n        return true\n    odd(n - 1)\n\nfn odd(n):\n    if n == 0:\n        return false\n    even(n - 1)\n\neven(2)"] even]]
 } -result {same {value {[true, true]}} 1}
+
+# ---------------------------------------------------------------------------
+# Function specialization (hir/specialize.tcl): instances whose argument
+# kinds are known, next to the generic functions
+
+set pick "fn pick(flag):\n    if flag:\n        return 1\n    \"one\"\n\n"
+
+test native-spec-1 {a parameter's kind guard is removed in the specialization, kept in the generic function} -body {
+    set text "fn inc(x):\n    x + 1\n\ninc(1)"
+    set specialized [nirOf $text]
+    set generic [nirOf $text -specialize 0]
+    list [nirInstances $specialized inc] [regexp {guard} [nirFunction $specialized inc int]] \
+         [regexp {op iadd %0 %[0-9]+} [nirFunction $specialized inc int]] \
+         [nirInstances $generic inc] [regexp {guard int %0} [nirFunction $generic inc generic]] \
+         [parity $text]
+} -result {int 0 1 generic 1 same}
+
+test native-spec-2 {one function, several instances: Int, String and the generic fallback} -body {
+    set text "${pick}fn same(x, y):\n    x == y\n\n\[same(1, 1), same(\"a\", \"b\"), same(pick(true), pick(false)), same(pick(false), \"one\")\]"
+    set nir [nirOf $text]
+    # pick returns an Int or a String: same(pick(...), ...) runs the generic
+    # function (structural equality); the known calls compare words or strings.
+    list [nirInstances $nir same] \
+         [regexp {op ieq %0 %1} [nirFunction $nir same {int, int}]] \
+         [regexp {op streq %0 %1} [nirFunction $nir same {str, str}]] \
+         [regexp {op veq %0 %1} [nirFunction $nir same generic]] \
+         [regexp {op veq %0 %1} [nirFunction $nir same {any, str}]] \
+         [parity $text] [native $text]
+} -result {{{int, int} {str, str} generic {any, str}} 1 1 1 1 same {value {[true, false, false, true]}}}
+
+test native-spec-2b {a type test's refinement removes the guard on its path, generic or specialized} -body {
+    set program {
+        {bind f {block {x} {if {call {ref integer?} {ref x}} {block {} {call {ref +} {ref x} {const 1}}} {block {} {const 0}}}}}
+        {bind pick {block {c} {if {ref c} {block {} {const 1}} {block {} {const str a}}}}}
+        {call {ref list} {call {ref f} {const 41}} {call {ref f} {call {ref pick} {ref false}}}}
+    }
+    set nir [native::nir [hir::build $program] -specialize 1]
+    set outcomes [lmap backend $::parityBackends {outcomeUnder $backend $program}]
+    list [nirInstances $nir f] [regexp {guard} [nirFunction $nir f generic]] \
+         [regexp {op isint %0} [nirFunction $nir f generic]] [regexp {op isint} [nirFunction $nir f int]] \
+         [llength [lsort -unique $outcomes]] [lindex $outcomes 0 1]
+} -result {{int generic} 0 1 0 1 {[42, 0]}}
+
+test native-spec-3 {calls with the same argument kinds reuse one instance} -body {
+    set nir [nirOf "fn inc(x):\n    x + 1\n\nfn twice(y):\n    inc(inc(y))\n\n\[inc(1), inc(2), twice(3), inc(4 * 5)\]"]
+    set id [nirFunctionId $nir inc int]
+    list [nirInstances $nir inc] [nirInstances $nir twice] \
+         [regexp -all "call $id " [nirFunction $nir <program>]] [regexp -all "call $id " [nirFunction $nir twice int]]
+} -result {int int 3 2}
+
+test native-spec-4 {a specialized self tail call stays a CFG back edge} -body {
+    set text "${countdown}count(3000000, 0)"
+    set nir [nirOf $text]
+    set clif [clifOf $text]
+    set id [nirFunctionId $nir count {int, int}]
+    regexp "; u0:(\[0-9\]+) = botlish_fn_$id " $clif -> self
+    set body [clifFunction $clif $id]
+    list [nirInstances $nir count] [regexp {tail %[0-9]+ %[0-9]+} [nirFunction $nir count {int, int}]] \
+         [regexp {guard} [nirFunction $nir count {int, int}]] \
+         [regexp "fn\[0-9\]+ = u0:$self " $body] [regexp {jump block0\(} $body] [native $text]
+} -result {{{int, int}} 1 0 0 1 {value 3000000}}
+
+test native-spec-5 {a self tail call with other kinds widens to an instance that loops} -body {
+    set text "fn swap(a, b, n):\n    if n == 0:\n        return \[a, b\]\n    swap(b, a, n - 1)\n\nswap(1, \"x\", 1001)"
+    set nir [nirOf $text]
+    # swap<int, str, int> calls swap<any, any, int> (the lub of both key
+    # lists), which tail-calls itself.
+    list [nirInstances $nir swap] [regexp {tail } [nirFunction $nir swap {any, any, int}]] \
+         [regexp {= call } [nirFunction $nir swap {int, str, int}]] [parity $text]
+} -result {{{int, str, int} {any, any, int}} 1 1 same}
+
+test native-spec-6 {mutually recursive specializations call each other directly} -body {
+    set text "fn even(n):\n    if n == 0:\n        return true\n    odd(n - 1)\n\nfn odd(n):\n    if n == 0:\n        return false\n    even(n - 1)\n\n\[even(1000), odd(7)\]"
+    set nir [nirOf $text]
+    set odd [nirFunctionId $nir odd int]
+    set even [nirFunctionId $nir even int]
+    # The forward reference to odd makes both closures over a cell: their
+    # generic instances are the closures' entry points, while the calls run
+    # the specializations.
+    list [nirInstances $nir even] [nirInstances $nir odd] \
+         [regexp "callenv $odd " [nirFunction $nir even int]] [regexp "callenv $even " [nirFunction $nir odd int]] \
+         [regexp {guard} [nirFunction $nir even int]] [regexp {guard} [nirFunction $nir odd int]] [parity $text]
+} -result {{int generic} {int generic} 1 1 0 0 same}
+
+test native-spec-7 {a callee's specialized result kind reaches its caller} -body {
+    set text "fn id(x):\n    x\n\nfn next(y):\n    id(y) + 1\n\nnext(41)"
+    set specialized [nirFunction [nirOf $text] next int]
+    set generic [nirFunction [nirOf $text -specialize 0] next generic]
+    # Generically id returns any, so + checks its result; id<int> returns int.
+    list [regexp -all {guard} $specialized] [regexp {guard int %[0-9]+ "\+"} $generic] [parity $text]
+} -result {0 1 same}
+
+test native-spec-8 {List[Int] -> list_get -> Int: no kind guard, the range check stays} -body {
+    set text "fn first_plus(xs, n):\n    list_get(xs, 0) + n\n\nfirst_plus(\[1, 2\], 3)"
+    set nir [nirOf $text]
+    set body [nirFunction $nir first_plus {list<int>, int}]
+    list [nirInstances $nir first_plus] [regexp {guard} $body] [regexp {op listget %0 %[0-9]+} $body] \
+         [regexp -all {guard} [nirFunction [nirOf $text -specialize 0] first_plus]] \
+         [parity $text] [parity "fn first_plus(xs, n):\n    list_get(xs, 0) + n\n\nfirst_plus(\[\], 3)"] \
+         [native "fn at(xs, i):\n    list_get(xs, i) + 1\n\nat(\[1, 2\], 2)"]
+} -result {{{list<int>, int}} 0 1 3 same same {error {CORE SEMANTIC RANGE} {list_get: index 2 is outside 0..1}}}
+
+test native-spec-9 {nested lists: the matrix's rows and entries are known} -body {
+    set text "fn cell(m, r, c):\n    list_get(list_get(m, r), c) * 2\n\ncell(\[\[1, 2\], \[3, 4\]\], 1, 0)"
+    set body [nirFunction [nirOf $text] cell {list<list<int>>, int, int}]
+    list [regexp {guard} $body] [parity $text] [native $text]
+} -result {0 same {value 6}}
+
+test native-spec-10 {heterogeneous lists and appends do not claim an element kind} -body {
+    set appended "fn bump(xs, i):\n    list_get(xs, i) + 1\n\nbump(list_append(\[1\], \"a\"), 1)"
+    set mixed "fn bump(xs, i):\n    list_get(xs, i) + 1\n\nbump(\[1, \"a\"\], 0)"
+    list [regexp {guard int} [nirFunction [nirOf $appended] bump]] [parity $appended] \
+         [nirInstances [nirOf $mixed] bump] [regexp {guard int} [nirFunction [nirOf $mixed] bump]] [parity $mixed] \
+         [native $appended]
+} -result {1 same {{list[int, str], int}} 1 same {error {CORE SEMANTIC TYPE} {+: expected int, got "a"}}}
+
+test native-spec-11 {errors and big Ints keep their semantics in specializations} -body {
+    list [parity "fn double(x):\n    x * 2\n\n\[double(4611686018427387903), double(-4611686018427387904)\]"] \
+         [parity "fn cut(s, n):\n    substring(s, 0, n)\n\ncut(\"abc\", 5)"] \
+         [parity "fn add(a, b):\n    a + b\n\nadd(1, \"b\")"] \
+         [parity "fn head(xs):\n    list_get(xs, 0) + 1\n\nhead(\[\])"] \
+         [parity "fn size(s):\n    length(s)\n\nsize(\[1\])"] \
+         [parity "fn f(c, x):\n    if c:\n        x\n    else:\n        0\n\nf(1, 2)"]
+} -result {same same same same same same}
+
+test native-spec-12 {specializations are implementation artifacts: Block values are generic} -body {
+    set text "fn inc(x):\n    x + 1\n\nfn apply(f, v):\n    f(v)\n\nfn same(g):\n    g == inc\n\n\[inc(1), apply(inc, 2), same(inc)\]"
+    set nir [nirOf $text]
+    list [nirInstances $nir inc] [regexp "fnvalue [nirFunctionId $nir inc generic]" [nirFunction $nir <program>]] \
+         [parity $text]
+} -result {{int generic} 1 same}
+
+test native-spec-13 {-specialize 0 and 1 run the same programs to the same outcomes} -body {
+    set hir [surface::readProgramFile [corpus::path csv]]
+    list [expr {[native::nir $hir -specialize 0] ne [native::nir $hir -specialize 1]}] \
+         [expr {[native::evalHir $hir -specialize 0] eq [native::evalHir $hir -specialize 1]}]
+} -setup {
+    source [file join $::projectRoot examples stdlib corpus.tcl]
+} -result {1 1}
+
+test native-spec-14 {guard accounting: blockers and emitted guards agree} -body {
+    source [file join $::projectRoot examples stdlib corpus.tcl]
+    lmap name [corpus::names] {
+        set report [native::report [surface::readProgramFile [corpus::path $name]]]
+        list $name [dict get $report genericBlockers] \
+            [dict get $report generic guards] [dict get $report specialized guards] \
+            [dict get $report nirGuards]
+    }
+} -result {{csv 17 17 0 0} {matmul 17 17 0 0} {string_replace 12 12 0 0} {string_reverse 4 4 0 0}}
 
 # ---------------------------------------------------------------------------
 # Closures

@@ -4,6 +4,7 @@
 //!   botlish-native run FILE.nir          compile (Cranelift JIT) and run
 //!   botlish-native bench RUNS FILE.nir   compile once, run RUNS times
 //!   botlish-native clif FILE.nir         print the Cranelift IR of every function
+//!   botlish-native size FILE.nir         compile; print machine code sizes
 //!   botlish-native object OUT FILE.nir   write an object file (AOT smoke test)
 //!   botlish-native check FILE.nir        parse and validate only
 //! ```
@@ -14,6 +15,8 @@
 //!   value VALUE                 VALUE: the host runtime value (core/value.tcl)
 //!   error ERRORCODE MESSAGE     a Botlish error, or {NATIVE ...} for backend failures
 //!   timing COMPILE_US BEST_US RUNS COLLECTIONS    (bench, before the result)
+//!   size TOTAL_BYTES {FUNCTION_BYTES...}          (size: per NIR function,
+//!                                                  with its generic entry)
 //! ```
 //!
 //! Native code runs on a thread with a large stack; the shadow stack bounds
@@ -72,7 +75,7 @@ fn read(path: &str) -> Result<String, String> {
 
 fn cli(args: &[String]) -> i32 {
     let usage = || {
-        eprintln!("usage: botlish-native run|clif|check FILE.nir | bench RUNS FILE.nir | object OUT FILE.nir");
+        eprintln!("usage: botlish-native run|clif|size|check FILE.nir | bench RUNS FILE.nir | object OUT FILE.nir");
         2
     };
     let (command, rest) = match args.split_first() {
@@ -85,7 +88,7 @@ fn cli(args: &[String]) -> i32 {
             _ => return usage(),
         },
         ("object", [_, file, ..]) => (1, file),
-        ("run" | "clif" | "check", [file, ..]) => (1, file),
+        ("run" | "clif" | "size" | "check", [file, ..]) => (1, file),
         _ => return usage(),
     };
     let text = match read(file) {
@@ -161,6 +164,12 @@ fn execute(command: &str, program: &nir::Program, runs: usize) -> i32 {
     let compile_us = started.elapsed().as_micros();
     if command == "clif" {
         emit(compiled.clif.as_deref().unwrap_or(""));
+        return 0;
+    }
+    if command == "size" {
+        let sizes: Vec<String> = compiled.code_sizes.iter().map(|n| n.to_string()).collect();
+        let total: u32 = compiled.code_sizes.iter().sum();
+        emit(&tcl_list(&["size".to_string(), total.to_string(), tcl_list(&sizes)]));
         return 0;
     }
 

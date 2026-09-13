@@ -15,10 +15,13 @@ There are three backends that implement the same semantics:
 * **`compile`**: a compiler from IR to Tcl procedures (`compiler/compiler.tcl`,
   see §12).
 * **`cranelift`**: a native code backend. HIR is lowered to a small native IR
-  and compiled to machine code with Cranelift (`native/`, see §20).
+  and compiled to machine code with Cranelift (`native/`, see §20). It
+  compiles specialized instances of functions whose argument kinds are known
+  at their call sites (§21). **`cranelift-generic`** is the same backend
+  without specialization: the guarded baseline.
 
 The whole test suite runs against `interp` and `compile`. The algorithm
-corpus and the native tests run on all three, and
+corpus and the native tests run on all of them, and
 `tests/native-coverage.tcl` classifies every test of the suite on
 `cranelift`.
 
@@ -71,6 +74,7 @@ tclsh main.tcl -backend compile -hir -ast FILE.bot   # show AST and HIR, compile
 tclsh bench/bench.tcl                       # compare backends on bench/*.ir
 tclsh bench/corpus.tcl                      # baseline timings of the algorithm corpus (§18)
 tclsh main.tcl -aot examples/stdlib/matmul.bot   # closed-AOT readiness report (§19)
+tclsh main.tcl -aot-spec examples/stdlib/matmul.bot   # the same per specialized instance (§21)
 ```
 
 ```tcl
@@ -430,7 +434,10 @@ refinement unless its contract explicitly establishes one. So
 | `hir::lower HIR` / `hir::format HIR ?-origins 1?` | HIR → core IR / readable HIR |
 | `hir::*` queries | nodes, scopes, bindings, symbols, types, captures, refinements (§16) |
 | `hir::aot::analyze HIR` / `hir::aot::explain HIR ?ANALYSIS?` | closed-AOT readiness: structured analysis / readable report (§19) |
-| `hir::types::*` | static types: core types plus `{native N}`, `{block E A R}`, `never` (§13) |
+| `hir::specialize::analyze HIR ?-specialize 0\|1?` / `hir::specialize::explain HIR ?ANALYSIS?` | call-site specialization: function instances, their facts and blockers (§21) |
+| `native::nir` / `native::evalHir` / `native::clif HIR ?-specialize 0\|1?` | native IR / run natively / Cranelift IR (§20) |
+| `native::report HIR` / `native::codeSize HIR` | guard accounting and instance counts / machine code size (§21) |
+| `hir::types::*` | static types: core types plus `{native N}`, `{block E A R}`, `never`, and the list aggregate facts `{list ELEM ?SHAPE?}` (§13, §21) |
 | `core::type::*` | semantic types (§14) |
 | `core::regex::*` | regex IR (§15) |
 | `core::check NODE` | static shape and control-placement check |
@@ -475,9 +482,10 @@ refinement unless its contract explicitly establishes one. So
 | `hir/format.tcl` | readable HIR |
 | `hir/read.tcl` | HIR text → HIR |
 | `hir/aot.tcl` | closed-AOT readiness analysis (§19) |
+| `hir/specialize.tcl` | call-site specialization: instances, result fixpoint, views for `hir::aot` (§21) |
 | `compiler/compiler.tcl` | HIR → Tcl compiler backend |
 | `native/lower.tcl` | HIR → NIR native lowering (§20) |
-| `native/native.tcl` | the `cranelift` backend: runs the native driver; NIR, CLIF and object entry points |
+| `native/native.tcl` | the `cranelift` and `cranelift-generic` backends: runs the native driver; NIR, CLIF, object, code size and guard report entry points |
 | `native/src/nir.rs` | NIR parsing and validation |
 | `native/src/runtime/` | native `Value` representation, heap and collector, errors, runtime helper ABI |
 | `native/src/codegen/` | the `Backend` interface; NIR → Cranelift IR for JIT and object files |
@@ -1502,9 +1510,10 @@ The blockers come from two sources, neither of them dynamic dispatch:
 2. **Lists carry no element type.** `list_get` returns `any`. That affects
    `matmul`'s entries and the pairs `csv` returns.
 
-What would close them is left for later milestones: parameter types
-(inferred from closed-world call sites, or annotated), element types, and
-facts from block calls.
+This table is the *semantic* analysis, and it stays so: a function's HIR
+types never change because of its callers. Call-site specialization (§21)
+analyzes instances of these functions under the argument kinds their
+callers pass, on the same `hir::aot` analysis, and closes all four programs.
 
 **Found while building the corpus.**
 
@@ -1518,8 +1527,8 @@ facts from block calls.
   `init deferred` over-approximates, and block calls add no flow facts.
 
 **For the first native (Cranelift) milestone**, in order of evidence (the
-milestone is described in §20; items 1, 3 and 4 are done, 2 and 5 are the
-next milestone's):
+milestone is described in §20, where items 1, 3 and 4 were done; §21 does 2
+and the element-type half of 5):
 
 1. Turn self tail calls into loops. Every loop in the corpus is one, and
    recursion depth otherwise grows with the input. The Tcl compiler already
@@ -1565,13 +1574,15 @@ HIR ──native::lower (Tcl)──▶ NIR text ──botlish-native (Rust)─�
  └──hir::aot facts────────────┘
 ```
 
-* **Native lowering** (`native/lower.tcl`) turns HIR into NIR. It does no
-  semantic analysis of its own. Guards come from `hir::aot`'s
-  representation blockers and known-error facts, self tail calls from
+* **Native lowering** (`native/lower.tcl`) turns HIR into NIR, one NIR
+  function per function *instance* (§21). It does no semantic analysis of
+  its own. Instances and their call targets come from `hir::specialize`,
+  guards from `hir::aot`'s representation blockers and known-error facts on
+  each instance's typed view, self tail calls from
   `hir::aot::selfTailCalls` (shared with the Tcl compiler), init checks
   from `hir::aot::unprovenReferences`, and environment-free functions from
-  `hir::aot`'s static blocks. Lowering cross-checks the guards against HIR
-  types and reports a mismatch as a backend bug.
+  `hir::aot`'s static blocks. Lowering cross-checks the guards against the
+  view's types and reports a mismatch as a backend bug.
 * **NIR** is register-based and representation-level: constants, moves,
   `guard KIND`, `op OP` (a known operation on operands of the kinds it
   requires), `call` / `callenv` / `callvalue`, `tail`, cells and closures,
@@ -1728,12 +1739,14 @@ result-value result-error`.
 ### Coverage
 
 `tests/native-coverage.tcl` runs the whole suite with
-`CORE_BACKEND=cranelift` and puts every test in exactly one class:
+`CORE_BACKEND=cranelift` and puts every test in exactly one class. With
+`BOTLISH_NATIVE_SPECIALIZE=0` (no specialization, §21) the classification
+is identical:
 
 | Class | Tests | Of the 757 tests that predate the backend | Meaning |
 |---|---:|---:|---|
-| native | 205 | 171 | passed, ran native code |
-| independent | 544 | 541 | passed without running a program on the backend (frontend, HIR, analysis) |
+| native | 218 | 171 | passed, ran native code |
+| independent | 566 | 541 | passed without running a program on the backend (frontend, HIR, analysis) |
 | passed-partial | 3 | 0 | passed; checks an unsupported-construct diagnostic on purpose |
 | unsupported | 45 | 45 | needs a construct listed above |
 | failed | 0 | 0 | anything else |
@@ -1742,40 +1755,48 @@ The 45 unsupported tests need: a Block returned to the host (12), sequence
 mode (7), `test-log`/`test_log` (8), `test-tick`/`test_tick` (6), `web`
 library natives and evidence (9), and the test natives `test-fake-escape`,
 `test-lax-param` and `test-both-ints?` (3).
-`tests/native.test` (40 tests) checks lowering and CLIF structure, and
-three-way parity on arithmetic at the small/big boundaries, guards, every
-error class, strings, lists, Results, calls, closures, the stack limit, the
-collector and object emission. `tests/stdlib.test` runs every corpus case on
-all three backends.
+`tests/native.test` (55 tests) checks lowering and CLIF structure, and
+parity of interp, compile, cranelift-generic and cranelift on arithmetic at
+the small/big boundaries, guards, every error class, strings, lists,
+Results, calls, closures, specialization, the stack limit, the collector
+and object emission. `tests/stdlib.test` runs every corpus case on all four
+backends.
 
 ### Corpus
 
 `tclsh bench/corpus.tcl -runs 3 -markdown` (Tcl 8.6.17, Windows, x86-64;
-best of 3, wall time). Cranelift's compile time is separate: native
-lowering in Tcl + Cranelift code generation and JIT linking.
+best of 3, wall time). The compile columns are native lowering in Tcl
+(including the specialization analysis) + Cranelift code generation and JIT
+linking. "code" is generic → specialized: machine code bytes, NIR functions
+and kind guards in the NIR.
 
-| algorithm | input | interp | compile | cranelift | cranelift compile (lower + jit) | compile / cranelift |
-|---|---|---:|---:|---:|---:|---:|
-| string_reverse | 100 chars | 37.4 ms | 1.6 ms | 0.019 ms | 4.1 + 2.7 ms | 83x |
-| string_reverse | 1,000 chars | 301.0 ms | 12.6 ms | 0.431 ms | 4.2 + 3.0 ms | 29x |
-| string_reverse | 10,000 chars | 3042.2 ms | 129.1 ms | 21.5 ms | 4.2 + 2.7 ms | 6.0x |
-| string_replace | 1 KB | 609.4 ms | 16.9 ms | 0.124 ms | 7.3 + 4.4 ms | 136x |
-| string_replace | 10 KB | 5935.9 ms | 161.3 ms | 3.6 ms | 6.4 + 6.3 ms | 45x |
-| string_replace | 100 KB | skipped | 1610.2 ms | 83.4 ms | 8.0 + 4.7 ms | 19x |
-| csv | 100 rows | 2172.1 ms | 55.2 ms | 1.0 ms | 8.4 + 6.7 ms | 55x |
-| csv | 1,000 rows | 23087.2 ms | 899.0 ms | 12.4 ms | 10.1 + 7.0 ms | 72x |
-| csv | 10,000 rows | skipped | 36384.2 ms | 237.6 ms | 21.0 + 7.0 ms | 153x |
-| matmul | 2x3 * 3x2 | 15.1 ms | 0.968 ms | 0.002 ms | 7.0 + 5.7 ms | 484x |
-| matmul | 8x8 | 223.3 ms | 9.3 ms | 0.019 ms | 13.5 + 10.6 ms | 488x |
-| matmul | 16x16 | 1645.0 ms | 63.4 ms | 0.108 ms | 34.1 + 26.3 ms | 587x |
-| matmul | 32x32 | skipped | 493.3 ms | 0.906 ms | 138.8 + 117.7 ms | 544x |
+| algorithm | input | interp | compile | cranelift-generic | cranelift | generic compile | specialized compile | code | compile / cranelift | generic / specialized |
+|---|---|---:|---:|---:|---:|---:|---:|---|---:|---:|
+| string_reverse | 100 chars | 33.8 ms | 2.9 ms | 0.019 ms | 0.018 ms | 6.2 + 2.9 ms | 6.5 + 2.3 ms | 2054→1686 B, 3→3 fn, 4→0 guards | 163x | 1.1x |
+| string_reverse | 1,000 chars | 300.5 ms | 13.0 ms | 0.422 ms | 0.390 ms | 5.2 + 2.8 ms | 6.4 + 2.3 ms | 2054→1686 B, 3→3 fn, 4→0 guards | 33x | 1.1x |
+| string_reverse | 10,000 chars | 3107.1 ms | 128.9 ms | 21.8 ms | 23.6 ms | 5.7 + 2.7 ms | 7.1 + 2.4 ms | 2054→1686 B, 3→3 fn, 4→0 guards | 5.5x | 0.9x |
+| string_replace | 1 KB | 583.5 ms | 15.9 ms | 0.134 ms | 0.116 ms | 11.9 + 5.2 ms | 9.9 + 3.5 ms | 4893→3813 B, 4→4 fn, 12→0 guards | 137x | 1.2x |
+| string_replace | 10 KB | 5855.4 ms | 157.7 ms | 2.9 ms | 2.8 ms | 7.7 + 4.6 ms | 10.5 + 3.6 ms | 4893→3813 B, 4→4 fn, 12→0 guards | 56x | 1.0x |
+| string_replace | 100 KB | skipped | 1696.6 ms | 142.7 ms | 82.5 ms | 18.2 + 7.9 ms | 14.3 + 3.8 ms | 4893→3813 B, 4→4 fn, 12→0 guards | 21x | 1.7x |
+| csv | 100 rows | 2146.1 ms | 55.7 ms | 0.872 ms | 0.848 ms | 11.7 + 6.7 ms | 20.0 + 6.7 ms | 7588→8094 B, 8→10 fn, 17→0 guards | 66x | 1.0x |
+| csv | 1,000 rows | 23233.3 ms | 832.8 ms | 12.5 ms | 11.6 ms | 11.2 + 6.6 ms | 25.7 + 7.7 ms | 7588→8094 B, 8→10 fn, 17→0 guards | 72x | 1.1x |
+| csv | 10,000 rows | skipped | 36515.4 ms | 220.9 ms | 176.9 ms | 25.5 + 7.5 ms | 34.7 + 6.9 ms | 7588→8094 B, 8→10 fn, 17→0 guards | 207x | 1.2x |
+| matmul | 2x3 * 3x2 | 14.9 ms | 0.896 ms | 0.002 ms | 0.002 ms | 8.1 + 5.7 ms | 16.4 + 5.4 ms | 6930→7494 B, 5→7 fn, 17→0 guards | 448x | 1.0x |
+| matmul | 8x8 | 225.4 ms | 9.6 ms | 0.019 ms | 0.017 ms | 15.4 + 10.1 ms | 24.0 + 11.1 ms | 18044→18608 B, 5→7 fn, 17→0 guards | 564x | 1.1x |
+| matmul | 16x16 | 1661.5 ms | 65.0 ms | 0.103 ms | 0.085 ms | 44.5 + 28.2 ms | 59.4 + 27.2 ms | 52231→52795 B, 5→7 fn, 17→0 guards | 765x | 1.2x |
+| matmul | 32x32 | skipped | 491.3 ms | 0.729 ms | 0.577 ms | 133.7 + 131.0 ms | 195.2 + 120.8 ms | 200021→200585 B, 5→7 fn, 17→0 guards | 852x | 1.3x |
 
-All three backends produced the same value in every case.
+All four backends produced the same value in every case. The code sizes
+include the program function, whose size is mostly the benchmark's literal
+matrices.
 
-The corpus stays guarded, as `hir::aot` reports: every guard in the NIR is
-one of its representation blockers (reverse 4, replace 12, CSV 17,
-matmul 17), no call goes through `rt_call_value`, and every corpus function
-is environment-free. Where the time goes:
+The allocation-heavy cases vary between runs by more than guards could
+explain: with `-runs 7`, string_reverse at 10,000 characters took 12.7 ms
+generic and 13.3 ms specialized in one run and 14.5 / 14.1 ms in another,
+and string_replace at 100 KB 35.1 / 36.4 ms and 34.0 / 35.6 ms. Their time
+is string copying and collection, not checks.
+
+Where the time goes:
 
 * **reverse** and **replace** at large sizes are dominated by copying the
   accumulator string on every `concat`: O(n²) bytes, most of them garbage
@@ -1788,32 +1809,344 @@ is environment-free. Where the time goes:
 * **CSV** spends its time in `list_append` copies (quadratic in records)
   and in allocating the two-element `[field, index]` lists.
 * **matmul** runs mostly inline: small-Int fast paths for `*` and `+`, and
-  a `list_get` helper call with a range check per entry.
+  a `list_get` helper call with a range check per entry. Without guards it
+  is 1.2–1.3× faster.
 * Compile time is dominated by native lowering in Tcl for programs with
   large literals (the benchmark's matrices are source literals), and by
   Cranelift for the rest.
 
-### Next milestone: specialization and closed native AOT
+## 21. Call-site specialization
 
-The remaining blockers are the ones §19 lists: `UnknownParameterKind` (44 of
-50) and `UnknownAggregateElementType` (6). Recommendations, in order:
+`hir/specialize.tcl` lets native code run functions *specialized* to the
+kinds of the arguments their callers pass, while every function's semantics
+and HIR types stay exactly what they were. It closes all 50 of the corpus's
+kind guards (§19) without changing the corpus. It adds no syntax.
 
-1. **Call-site specialization** of parameter kinds in a closed program:
-   compile `f<Str, Int, Str>` next to the generic `f(Any, Any, Any)`, keeping
-   the semantic function unchanged. Every corpus function is called from
-   known sites with kinds `hir::aot` can already see at the caller.
-2. **Result propagation**, so a specialized callee's result kind reaches its
-   caller (`reverse_from`'s accumulator, `dot`'s `total`).
-3. **Unboxing** of Ints proven small (range analysis for indices and
-   counters), then **redundant guard elimination** for guards on values
-   HIR narrowed later on the same path (e.g. `index` in `substring(text,
-   index, index + 1)`).
-4. **List element kinds**, then **transient builders** for `list_append`
-   and string accumulation where the old value is provably dead (escape
-   analysis), and **scalar replacement** of the `[field, index]` pairs.
+```sh
+tclsh main.tcl -aot-spec examples/stdlib/csv.bot          # instances, facts, blockers
+tclsh main.tcl -emit-nir examples/stdlib/csv.bot          # specialized NIR
+tclsh main.tcl -backend cranelift-generic -emit-nir FILE  # the unspecialized NIR
+BOTLISH_NATIVE_SPECIALIZE=0 tclsh tests/native-coverage.tcl
+```
+
+```tcl
+set spec [hir::specialize::analyze $hir]      ;# instances, keys, results
+puts [hir::specialize::explain $hir $spec]    ;# semantic and instance reports
+native::nir $hir -specialize 0                ;# the guarded baseline
+native::report $hir                           ;# guard accounting
+```
+
+### Semantic types and instances
+
+A function's semantic type doesn't change because of its callers:
+`fn reverse_from(text, index, reversed)` stays `(any, any, any)` in HIR,
+and `hir::aot::analyze` still reports it guarded. An *instance* is an
+implementation artifact: the function's code analyzed again under argument
+kinds its semantic inference couldn't assume. Instances of one function
+coexist:
+
+```
+reverse_from (semantic): guarded   [UnknownParameterKind 4]
+reverse_from<str, int, str>: closed   [i2, line 16:16]
+  params:   text : str, index : int, reversed : str
+  result:   str
+  calls:    reverse_from<str, int, str>
+  guards:   0
+```
+
+Nothing observable changes. A Block value is always the generic function;
+instances are chosen only by direct calls, and `f<int>` is never a value
+programs can see. Specialization is an optimization: `-specialize 0`
+(`cranelift-generic`) runs the generic functions everywhere, and the test
+suite and the corpus produce the same values and errors both ways.
+
+### Specialization keys
+
+A key is `{BLOCK ARG-TYPES}`: the block's ExprId and one *key type* per
+parameter. Key types are the static types of the arguments reduced to what
+choosing an operation depends on:
+
+* the kinds `int str bool unit result any`, with named-type evidence
+  dropped (the instance still sees the base kind)
+* `block` and `native` for callables, without which one
+* `list`, `{list ELEM}` and `{list ELEM SHAPE}`, with key-typed elements
+
+The generic instance has key type `any` everywhere. Equal keys are the same
+instance: `keys` is the cache from key to instance, and instance ids are
+allocated in discovery order, so the analysis is deterministic. No register
+numbers or locations are part of a key.
+
+### Which instance a call uses
+
+For a call of a known block `B` in instance `I`:
+
+1. `B` captures values (it isn't a static block, §19): `B<generic>`.
+   Closures over values stay generic, because their captures' kinds would
+   depend on which closure is running. Functions whose captures are only
+   other functions are specialized, even when they are reached through a
+   forward reference's cell (mutual recursion).
+2. A self tail call whose key types are all subtypes of `I`'s: `I` itself,
+   so the call stays a CFG back edge. Otherwise the key is the pointwise lub
+   of `I`'s key and the call's (`swap<int, str, int>` tail-calling
+   `swap(b, a, n - 1)` goes to `swap<any, any, int>`, which loops). The lub
+   is strictly more general, so a chain of such calls climbs a finite
+   lattice and ends in an instance that loops. This keeps tail recursion in
+   constant native stack.
+3. Otherwise `B<key types>`. If every key type is `any`, that is
+   `B<generic>`; if `B` already has `limit` (8) specialized instances in
+   use, or the analysis has `instanceLimit` (1000) instances, the call uses
+   `B<generic>` too.
+
+**Explosion control**, then: at most 8 specialized instances per function
+plus its generic one; key types bounded by the aggregate bounds below; self
+tail calls only widen. Polymorphic recursion (`nest([x], n - 1)`) makes
+instances with deeper list keys until the depth bound turns the key into
+plain `list`, which then recurses into itself. Instances are reference
+counted by the reachable code that calls or materializes them; one that
+drops to zero is released and doesn't count towards the limit, so
+instances an optimistic early pass needed don't crowd out the ones the
+fixpoint needs.
+
+### Analysis: region inference, results, fixpoint
+
+Each instance is typed by `hir::types::inferRegion`: the same inference
+walk as semantic inference (§13), with the same refinements, flow facts and
+reachability, plus:
+
+* **Entry facts.** Parameters are seeded with the key types; captured
+  bindings with the lub of their types at every creation of the block the
+  analysis has seen (for a static block, functions).
+* **Calls of known blocks** ask the analysis for the callee instance's
+  result type (`SpecializationSummary`: the `result` of the instance).
+* **Aggregate facts** (below).
+* **Error paths are `never`.** An operation that always raises (a native
+  argument statically of another kind, a wrong number of arguments, a
+  non-callable callee, a non-Boolean condition) has type `never`, so it
+  contributes nothing to a result: `f(s)` returning `1 + "x"` on one path
+  and `s` on the other is `str` in `f<str>` (semantically it is `any`). The
+  error itself is unchanged: the always-failing check is still emitted.
+
+The **result fixpoint** is a monotone worklist analysis. An instance's
+result starts at `never` ("no normal completion known yet"). A call records
+the caller as a dependent of the callee; after analyzing an instance, its
+result becomes `lub(old, inferred)`, and if that changed, its dependents are
+analyzed again. Seeds that grow (a block created with new captured types)
+re-analyze that block's instances. All types involved are bounded, so every
+chain of changes is finite; as a guard against a non-monotone corner case,
+an instance analyzed more than 16 times gets result `any`, and a hard bound
+on total analyses raises `{HIR SPECIALIZE LIMIT}`. At the fixpoint every
+result holds under the assumptions its callers used, by induction over
+calls, as in the semantic inference of recursive block results.
+
+Instances are *unseen*, *building* or *analyzed*. A call that discovers an
+unseen callee analyzes it on the spot (up to 32 deep), so the caller usually
+sees the callee's result in its first pass; a building callee (recursion)
+answers with its current result. The worklist then takes the most recently
+discovered instance first, so callees settle before callers are analyzed
+again. Mutual recursion (`even<int>` ↔ `odd<int>`) and cycles (`a → b → c
+→ a`) reach a fixpoint with one instance per function.
+
+The analysis never changes the HIR. Its output is an *overlay* per
+instance: the type, known outcome and reachability of each of the region's
+expressions that differ from the semantic HIR. `hir::specialize::view`
+applies an overlay to a copy of the HIR.
+
+### Aggregate facts
+
+Lists get element facts in region inference only (semantic HIR types are
+unchanged):
+
+| Form | Meaning |
+|---|---|
+| `{list ELEM}` (`list<ELEM>`) | every element has static type ELEM; `{list never}` is the empty list |
+| `{list ELEM {P0 P1 ...}}` (`list[P0, P1]`) | exactly these elements, element i of type Pi; ELEM is their lub |
+
+* List constants and `list` calls build them: `[1, 2, 3]` is `list<int>`,
+  `[[1, 2], [3, 4]]` is `list<list<int>>`, `[1, "a"]` is `list[int, str]`
+  (a shape is kept only when it says more than the element type), and `[]`
+  is `list<never>`.
+* `list_get(xs, i)` has the element type, or position i's type when `xs`
+  has a shape and `i` is an Int constant in range. An empty list's element
+  is not invented: `list_get([], 0)` is `any` (and raises `RANGE`).
+* `list_append(xs, x)` is `list<lub(ELEM, type of x)>`: `list<int>` stays
+  `list<int>` with an Int, and becomes plain `list` with a String. Appending
+  drops a shape.
+* lub joins element types and, for equal lengths, positions; plain `list`
+  is `list<any>`.
+* **Bounds:** list forms nest at most three deep (deeper lists are plain
+  `list`), shapes have at most eight positions, and only the outermost list
+  has one. So the lattice has finite height.
+
+The rules are not specific to the corpus's natives: a native declares how
+its result is built with `-result-shape` (`elements`, `element L I`,
+`append L V`; `core/native.tcl`), like `-runtime`, and nothing in the
+analysis knows a native by name. A list fact proves a kind, never an index:
+`list_get` still range-checks, and Int arithmetic keeps its overflow path.
+
+### Guards and lowering
+
+`hir::aot` is the one source of truth for checks. `hir::aot::analyzeRegion`
+analyzes one region on any typed view of the program (the semantic HIR, or
+an instance's view), with the structural facts computed once
+(`hir::aot::context`). An instance's guards are exactly its view's
+representation blockers:
+
+* a parameter whose key type is a kind needs no guard;
+* a flow fact (`length(s)` proves `s : str`) or a refinement (`if
+  integer?(x)`) already removes later guards on the same path, in both
+  modes, because the view is typed by the same inference;
+* a call result of a specialized callee has the callee's result type, and
+  `list_get` on `list<int>` gives an `int` that `*` doesn't check.
+
+Native lowering (`native/lower.tcl`) emits one NIR function per instance it
+refers to, starting from the program: a direct call calls the instance the
+analysis chose; `fnvalue` and `closure` use generic instances; a self tail
+call that stays in its instance is `tail`. Only instances the lowered code
+refers to are emitted, so a function that is only called with known kinds
+has no generic code at all, unless its Block value is materialized
+(`hir::aot::materializedBlocks`: a closure, a function passed as a value,
+or a function bound through a cell, whose closure entry must exist).
+Specializations use the generic ABI (tagged words in and out) and differ
+only in what they don't check. The NIR header says which instance a
+function is (`instance="str, int, str"` or `instance="generic"`).
+
+`native::report HIR` checks the accounting: for both modes, the kind
+guards lowering emitted equal the representation blockers of the emitted
+instances, and the NIR's `guard`/`guardbool` instructions equal those plus
+the checks that always fail (known errors). A mismatch raises `NATIVE BUG`.
+
+### The corpus
+
+| Program | Semantic blockers | Generic NIR guards | Specialized blockers | Specialized NIR guards | Status |
+|---|---:|---:|---:|---:|---|
+| `reverse_chars` | 4 | 4 | 0 | 0 | closed |
+| `replace` | 12 | 12 | 0 | 0 | closed |
+| `csv_parse` | 17 | 17 | 0 | 0 | closed |
+| `matmul` | 17 | 17 | 0 | 0 | closed |
+
+Every used instance of every corpus program is closed, transitively. The 44
+parameter-kind guards go because every corpus function is called with known
+kinds; `csv`'s two element guards go because `[field, index]` is
+`list[str, int]` and `list_get(scanned, 1)` is an `int`; `matmul`'s four
+because the literal matrices are `list<list<int>>`. The generic functions
+stay guarded, and a caller passing, say, a matrix of Strings gets a different
+instance (or the generic one) with the checks.
+
+Instances emitted (generic mode emits one generic function each):
+
+| Function | Generic | Specializations |
+|---|---|---:|
+| `reverse_from`, `reverse_chars` | no | 1 each |
+| `matches_at`, `replace_from`, `replace` | no | 1 each |
+| `peek`, `scan_unquoted`, `scan_quoted`, `scan_field`, `csv_parse` | no | 1 each |
+| `scan_record` (`fields : list<never>` → `list<str>`) | no | 2 |
+| `scan_records` (`records : list<never>` → `list<list<str>>`) | no | 2 |
+| `dot`, `matmul` | no | 1 each |
+| `product_row`, `product_rows` (empty → non-empty accumulator) | no | 2 each |
+
+The second instance of the accumulating functions is the self-tail-call
+widening at work: the first call passes `[]`, the loop passes a non-empty
+list, and `list<never>` ∪ `list<str>` is `list<str>`, which then loops.
+
+Representative NIR (`tclsh main.tcl -emit-nir examples/stdlib/matmul.bot`).
+The generic `dot` checks 8 operands; `dot<list<int>, list<list<int>>, int,
+int, int, int>` checks none, reads Ints out of `list<list<int>>`, multiplies
+them without a guard, and loops:
+
+```
+func 1 "dot" ... instance="list<int>, list<list<int>>, int, int, int, int"
+    %6 = op ieq %3 %4
+    br %6 L0 L1
+  label L0
+    ret %5
+  ...
+  label L2
+    %9 = op listget %0 %3
+    %10 = op listget %1 %3
+    %11 = op listget %10 %2
+    %12 = op imul %9 %11
+    %13 = int 1
+    %14 = op iadd %3 %13
+    %15 = op iadd %5 %12
+    tail %0 %1 %2 %14 %4 %15
+end
+```
+
+In `csv`, the specialized `scan_records` passes `list_get(scanned, 1)`, an
+`int` from `list[list<str>, int]`, straight to its loop, and calls the
+specialized `scan_record` (`call 5`):
+
+```
+func 8 "scan_records" ... instance="str, int, list<list<str>>"
+    %7 = op listnew
+    %8 = call 5 %0 %1 %7
+    %9 = int 1
+    %10 = op listget %8 %9
+    %11 = int 0
+    %12 = op listget %8 %11
+    %13 = op listappend %2 %12
+    tail %0 %10 %13
+end
+```
+
+In the CLIF of `reverse_from<str, int, str>` the self tail call is
+`jump block0(v68, v59, v67)` to the loop header; the function never calls
+itself.
+
+**Compile time** (lowering + JIT, from the table in §20; the first column is
+the commit before this milestone, measured the same way):
+
+| Case | before | generic | specialized |
+|---|---:|---:|---:|
+| string_reverse 100 chars | 4.1 + 3.4 ms | 6.2 + 2.9 ms | 6.5 + 2.3 ms |
+| string_replace 1 KB | 6.4 + 4.7 ms | 11.9 + 5.2 ms | 9.9 + 3.5 ms |
+| csv 100 rows | 8.4 + 6.9 ms | 11.7 + 6.7 ms | 20.0 + 6.7 ms |
+| matmul 2x3 * 3x2 | 7.4 + 6.7 ms | 8.1 + 5.7 ms | 16.4 + 5.4 ms |
+| matmul 32x32 | 136.4 + 121.8 ms | 133.7 + 131.0 ms | 195.2 + 120.8 ms |
+
+Lowering times of a few milliseconds vary by ±2 ms between runs. The
+specialization analysis roughly doubles lowering for small programs (every
+instance's region is inferred and analyzed again), and costs about 60 ms on
+matmul 32×32, whose program region holds 5,000 literal expressions. The
+first version cost 250 ms there: the worklist re-inferred the program four
+times, and views re-applied full overlays. Analyzing unseen callees on
+demand, callee-first ordering and overlays of differences fixed that.
+Cranelift time follows code size.
+
+**Code size.** Specializations are smaller than their generic versions
+(no guard blocks); functions that need two instances (an accumulator
+starting empty) add code. Machine code of the corpus files as written
+(`native::codeSize`): reverse 1,997 → 1,629 bytes (−18%), replace 4,769 →
+3,689 (−23%), CSV 7,525 → 8,031 (+7%), matmul 6,100 → 6,664 (+9%).
+
+### Known limitations
+
+* Closures over values are never specialized, and a function bound through
+  a cell (mutual recursion) also keeps its generic function as its closure's
+  entry, even if all its calls are specialized.
+* Positional shapes come only from literals; `list_get` uses a position only
+  for a constant index. There are no Result payload facts.
+* The limit counts instances in use at the moment a call is analyzed, so
+  which calls get the generic instance at the limit depends on discovery
+  order (deterministically).
+* The Tcl compiler (§12) doesn't use instances yet. The analysis is
+  backend-neutral (`hir/specialize.tcl`, views analyzed by `hir::aot`), so it
+  could.
+
+### Next milestone
+
+Kinds are known; representations are not specialized yet. In order of
+evidence:
+
+1. **Unboxing** of Ints proven small (range analysis for indices and
+   counters): matmul's inner loop and every index in the string functions.
+2. **Transient builders** for `list_append` and string accumulation where
+   the old value is provably dead (escape analysis), and **scalar
+   replacement** of `[field, index]` pairs, whose shapes are now known.
+3. A nursery or reference counting for the string-copying cases, which
+   dominate reverse and replace at large sizes.
+4. Specialization in the Tcl compiler, and of closures with per-creation
+   capture facts.
 5. Replace the shadow stack with Cranelift stack maps, and make the object
    path runnable (runtime as a static library, constant-table initializer)
    for real closed AOT.
-
-The corpus programs should stay unchanged throughout. `hir::aot` and
-`bench/corpus.tcl` measure the progress.
