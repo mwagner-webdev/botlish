@@ -1,0 +1,50 @@
+name: bench
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: Timed runs per program and backend (best is reported)
+        default: "5"
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Tcl 8.6
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends tcl8.6
+
+      # Fails if the backends disagree on any benchmark's value. Timings from
+      # shared runners are noisy, so they are reported but never gate.
+      - name: Run benchmarks
+        shell: bash
+        env:
+          RUNS: ${{ inputs.runs || '5' }}
+        run: tclsh8.6 bench/bench.tcl -runs "$RUNS" -markdown | tee bench.md
+
+      - name: Publish summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Benchmarks"
+            echo
+            if [ -s bench.md ]; then cat bench.md; else echo "No results (benchmark failed to start)."; fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-results
+          path: bench.md
+          if-no-files-found: ignore

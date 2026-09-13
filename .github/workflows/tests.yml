@@ -1,0 +1,35 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: tests (${{ matrix.backend }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [interp, compile]
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Tcl 8.6
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends tcl8.6
+          echo 'puts "Tcl [info patchlevel], tcltest [package require tcltest 2.5]"' | tclsh8.6
+
+      - name: Run test suite
+        env:
+          CORE_BACKEND: ${{ matrix.backend }}
+        run: tclsh8.6 tests/all.tcl
+
+      - name: Run examples
+        run: tclsh8.6 main.tcl -backend ${{ matrix.backend }}
