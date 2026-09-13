@@ -82,6 +82,19 @@ proc core::completion::atProgramBoundary {c} {
     }
 }
 
+# Compiled code signals completions with Tcl completion codes. STATUS,
+# RESULT and OPTIONS are the outcome of `catch`. Tcl errors are re-raised.
+proc core::completion::fromTclCode {status result options} {
+    switch -- $status {
+        0 { return [normal $result] }
+        1 { return -options $options $result }
+        2 { return [returning $result] }
+        3 { return [breaking $result] }
+        4 { return [continuing] }
+        default { error "core::completion: unexpected Tcl completion code $status" }
+    }
+}
+
 proc core::completion::show {c} {
     if {[kind $c] eq "continue"} {
         return continue

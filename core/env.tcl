@@ -4,14 +4,15 @@
 #
 #   frame {
 #       parent       parent frame id, or "" for a root
-#       bindings     NAME -> {id BINDING-ID value VALUE}
+#       bindings     NAME -> {id BINDING-ID ?value VALUE?}
 #       refinements  BINDING-ID -> list of facts proven in this scope
 #   }
 #
-# Frames are append-only: a name may be added once and never changed or
-# removed. Because frames have identity, a Block that captures a frame sees
-# bindings added to that frame later (this is what permits recursion); it can
-# never observe a binding change, because bindings do not change.
+# A binding without a value is *declared*: its scope has been entered but its
+# bind has not completed. Frames are append-only: a binding receives its value
+# once and never changes. Because frames have identity, a Block that captures
+# a frame sees bindings made in that frame later (this is what permits
+# recursion); it can never observe a binding change.
 #
 # Refinements are keyed by binding identity, not by name, so a fact about an
 # outer `x` never applies to an inner `x` that shadows it.
@@ -58,21 +59,67 @@ proc core::env::parent {env} {
     return [dict get $frames $env parent]
 }
 
-# Adds an immutable binding to ENV itself. Returns the new binding id.
-proc core::env::define {env name value} {
+# Declares NAMES in ENV without values. A scope declares every name it binds
+# when it is entered, so that each name denotes one binding throughout the
+# scope: using it before its bind completes is an error, rather than silently
+# reaching an outer binding of the same name. Already-present names are
+# skipped (a later bind of them will report the duplicate).
+proc core::env::declare {env names} {
     variable frames
+    Require $env
+    foreach name $names {
+        if {![dict exists $frames $env bindings $name]} {
+            dict set frames $env bindings $name [dict create id [NewBindingId $env $name]]
+        }
+    }
+}
+
+proc core::env::NewBindingId {env name} {
     variable bindingIndex
     variable nextBinding
+    set id b[incr nextBinding]
+    dict set bindingIndex $id [dict create name $name frame $env]
+    return $id
+}
+
+# Gives NAME its immutable value in ENV itself. Returns the binding id.
+proc core::env::define {env name value} {
+    variable frames
     Require $env
     core::value::check $value
     if {[dict exists $frames $env bindings $name]} {
-        core::semanticError DUPLICATE \
-            "duplicate binding \"$name\" in the same lexical scope"
+        set binding [dict get $frames $env bindings $name]
+        if {[dict exists $binding value]} {
+            duplicateBinding $name
+        }
+        set id [dict get $binding id]
+    } else {
+        set id [NewBindingId $env $name]
     }
-    set id b[incr nextBinding]
     dict set frames $env bindings $name [dict create id $id value $value]
-    dict set bindingIndex $id [dict create name $name frame $env]
     return $id
+}
+
+proc core::env::duplicateBinding {name} {
+    core::semanticError DUPLICATE "duplicate binding \"$name\" in the same lexical scope"
+}
+
+proc core::env::usedBeforeBinding {name} {
+    core::semanticError UNBOUND "name \"$name\" used before its binding"
+}
+
+# Returns the value of NAME bound directly in ENV. The name must have been
+# declared or defined there (compiled code only asks for such names).
+proc core::env::lookupLocal {env name} {
+    variable frames
+    if {![dict exists $frames $env bindings $name]} {
+        error "core::env: \"$name\" is not declared in $env"
+    }
+    set binding [dict get $frames $env bindings $name]
+    if {![dict exists $binding value]} {
+        usedBeforeBinding $name
+    }
+    return [dict get $binding value]
 }
 
 # ---------------------------------------------------------------------------
@@ -125,7 +172,8 @@ proc core::env::ScopeRefinements {scope} {
     }
 }
 
-# Resolves NAME lexically. Returns the binding record {id BINDING-ID value V}.
+# Resolves NAME lexically. Returns the binding record {id BINDING-ID ?value V?};
+# the value is absent while the binding is declared but not yet made.
 proc core::env::resolve {env name} {
     foreach scope [lookupScopes $env] {
         set binding [ScopeBinding $scope $name]
@@ -137,7 +185,11 @@ proc core::env::resolve {env name} {
 }
 
 proc core::env::lookup {env name} {
-    return [dict get [resolve $env $name] value]
+    set binding [resolve $env $name]
+    if {![dict exists $binding value]} {
+        usedBeforeBinding $name
+    }
+    return [dict get $binding value]
 }
 
 # ---------------------------------------------------------------------------
@@ -203,7 +255,9 @@ proc core::env::localBindings {env} {
     Require $env
     set result [dict create]
     dict for {name binding} [dict get $frames $env bindings] {
-        dict set result $name [dict get $binding value]
+        if {[dict exists $binding value]} {
+            dict set result $name [dict get $binding value]
+        }
     }
     return $result
 }

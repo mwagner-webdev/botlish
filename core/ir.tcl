@@ -180,6 +180,86 @@ proc core::ir::literalValue {node} {
 }
 
 # ---------------------------------------------------------------------------
+# Scope structure
+#
+# A scope is the sequence of a program, a block body, an if branch or a loop
+# body. The names a scope binds are those of every `bind` evaluated in it,
+# i.e. reachable from its expressions without entering a nested scope
+# (block nodes, if branches, loop bodies). The condition of an `if` belongs
+# to the enclosing scope.
+
+proc core::ir::scopeBindNames {exprs} {
+    set names {}
+    foreach expr $exprs {
+        CollectBindNames $expr names
+    }
+    return $names
+}
+
+proc core::ir::CollectBindNames {node namesVar} {
+    upvar 1 $namesVar names
+    switch -- [op $node] {
+        bind {
+            CollectBindNames [lindex $node 2] names
+            if {[lindex $node 1] ni $names} {
+                lappend names [lindex $node 1]
+            }
+        }
+        call {
+            foreach expr [lrange $node 1 end] {
+                CollectBindNames $expr names
+            }
+        }
+        if {
+            CollectBindNames [lindex $node 1] names
+        }
+        return - ok - error-value {
+            CollectBindNames [lindex $node 1] names
+        }
+        break {
+            if {[llength $node] == 2} {
+                CollectBindNames [lindex $node 1] names
+            }
+        }
+    }
+}
+
+# True if a block node occurs anywhere within EXPRS (at any depth).
+proc core::ir::containsBlock {exprs} {
+    foreach expr $exprs {
+        switch -- [op $expr] {
+            block {
+                return 1
+            }
+            const - ref - continue {}
+            if {
+                if {[containsBlock [list [lindex $expr 1]]]
+                    || [containsBlock [blockBody [lindex $expr 2]]]
+                    || [containsBlock [blockBody [lindex $expr 3]]]} {
+                    return 1
+                }
+            }
+            loop {
+                if {[containsBlock [blockBody [lindex $expr 1]]]} {
+                    return 1
+                }
+            }
+            bind {
+                if {[containsBlock [list [lindex $expr 2]]]} {
+                    return 1
+                }
+            }
+            default {
+                if {[containsBlock [lrange $expr 1 end]]} {
+                    return 1
+                }
+            }
+        }
+    }
+    return 0
+}
+
+# ---------------------------------------------------------------------------
 # Static check of a whole expression tree.
 #
 # Besides shapes, verifies lexical placement of control operators:

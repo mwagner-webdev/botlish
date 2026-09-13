@@ -4,7 +4,12 @@ package require tcltest 2.5
 namespace import -force ::tcltest::*
 
 set ::projectRoot [file dirname [file dirname [file normalize [info script]]]]
-source [file join $::projectRoot core core.tcl]
+source [file join $::projectRoot compiler compiler.tcl]
+
+# The backend under test: CORE_BACKEND=interp (default) or compile.
+if {[info exists ::env(CORE_BACKEND)]} {
+    core::useBackend $::env(CORE_BACKEND)
+}
 
 # Evaluates a program given as expressions; returns the formatted value.
 proc run {args} {

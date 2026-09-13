@@ -4,7 +4,7 @@
 #
 #     (call (ref P) ARG...)
 #
-# and P resolves to a callable with refinement metadata, each rule
+# and P's value is a callable with refinement metadata, each rule
 # "argument I satisfies FACT" for the observed outcome is applied to argument I
 # if that argument is itself (ref NAME). The fact is attached to the *binding*
 # NAME resolves to, and recorded in the branch's own environment, so it is
@@ -16,17 +16,23 @@
 
 namespace eval core::refine {}
 
+# True if CONDITION-NODE has the shape that can yield refinements.
+proc core::refine::isRefiningCondition {conditionNode} {
+    return [expr {[core::ir::op $conditionNode] eq "call"
+                  && [core::ir::op [lindex $conditionNode 1]] eq "ref"}]
+}
+
 # Returns a flat list of BINDING-ID FACT pairs.
 proc core::refine::branchFacts {conditionNode env outcome} {
-    if {[core::ir::op $conditionNode] ne "call"} {
+    if {![isRefiningCondition $conditionNode]} {
         return {}
     }
-    set calleeNode [lindex $conditionNode 1]
-    if {[core::ir::op $calleeNode] ne "ref"} {
-        return {}
-    }
-    set callee [core::env::lookup $env [lindex $calleeNode 1]]
-    set argNodes [lrange $conditionNode 2 end]
+    set callee [core::env::lookup $env [lindex $conditionNode 1 1]]
+    return [factsFromCall $callee [lrange $conditionNode 2 end] $env $outcome]
+}
+
+# Facts from calling CALLEE (a value) on ARG-NODES in ENV with OUTCOME (1/0).
+proc core::refine::factsFromCall {callee argNodes env outcome} {
     set facts {}
     foreach {index fact} [core::callable::refinementRules $callee $outcome] {
         if {$index >= [llength $argNodes]} {

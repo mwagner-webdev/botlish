@@ -1,0 +1,122 @@
+# backends.test -- differential and mixed-mode checks across backends.
+#
+# The rest of the suite runs once per backend (see all.tcl). This file runs
+# programs under *both* backends in one process and compares outcomes, and
+# checks that interpreted and compiled Blocks interoperate.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+# Outcome of EXPRS under BACKEND: "value V" or "error ERRORCODE".
+proc outcomeUnder {backend exprs} {
+    set saved [core::useBackend]
+    core::useBackend $backend
+    try {
+        if {[catch {core::evalProgram $exprs} result options]} {
+            return [list error [dict get $options -errorcode]]
+        }
+        return [list value [core::formatValue $result]]
+    } finally {
+        core::useBackend $saved
+    }
+}
+
+proc differential {exprs} {
+    set a [outcomeUnder interp $exprs]
+    set b [outcomeUnder compile $exprs]
+    if {$a ne $b} {
+        return "interp: $a / compile: $b"
+    }
+    return same
+}
+
+set corpus {}
+foreach path [lsort [glob -directory [file join $::projectRoot examples] *.ir]] {
+    lappend corpus [file tail $path] [core::readProgramFile $path]
+}
+lappend corpus \
+    nested-closures {
+        {bind compose {block {f g} {block {x} {call {ref f} {call {ref g} {ref x}}}}}}
+        {bind inc {block {x} {call {ref +} {ref x} {const 1}}}}
+        {bind dbl {block {x} {call {ref *} {ref x} {const 2}}}}
+        {call {call {ref compose} {ref inc} {ref dbl}} {const 20}}
+    } \
+    loop-in-branch-in-loop {
+        {call {block {}
+            {loop {block {}
+                {bind inner {loop {block {}
+                    {if {ref true} {block {} {break {const 3}}} {block {} {continue}}}}}}
+                {return {call {ref list} {ref inner} {ok {ref inner}}}}}}}}
+    } \
+    closure-in-loop {
+        {bind make {block {}
+            {loop {block {}
+                {bind k {const 7}}
+                {break {block {} {ref k}}}}}}}
+        {call {call {ref make}}}
+    } \
+    tdz {
+        {bind x {const 1}}
+        {call {block {} {bind y {call {block {} {ref x}}}} {bind x {const 2}} {ref y}}}
+    } \
+    duplicate {
+        {bind a {const 1}}
+        {bind a {const 2}}
+    } \
+    non-boolean {
+        {if {const 0} {block {}} {block {}}}
+    } \
+    arity {
+        {call {block {x} {ref x}}}
+    }
+
+foreach {name exprs} $corpus {
+    test differential-$name "both backends agree on $name" -body {
+        differential $exprs
+    } -result same
+}
+
+test mixed-1 {compiled code calls an interpreted Block} -body {
+    set saved [core::useBackend]
+    try {
+        core::useBackend interp
+        set scope [core::childEnv [core::rootEnv]]
+        core::evalIn {bind add1 {block {x} {call {ref +} {ref x} {const 1}}}} $scope
+        core::useBackend compile
+        core::formatCompletion [core::evalIn {call {ref add1} {const 41}} $scope]
+    } finally {
+        core::useBackend $saved
+    }
+} -result {value(42)}
+
+test mixed-2 {interpreted code calls a compiled closure} -body {
+    set saved [core::useBackend]
+    try {
+        core::useBackend compile
+        set scope [core::childEnv [core::rootEnv]]
+        core::evalIn {bind adder {block {n} {block {x} {call {ref +} {ref x} {ref n}}}}} $scope
+        core::useBackend interp
+        core::formatCompletion [core::evalIn {call {call {ref adder} {const 40}} {const 2}} $scope]
+    } finally {
+        core::useBackend $saved
+    }
+} -result {value(42)}
+
+test mixed-3 {compiled Blocks carry code; interpreted ones do not} -body {
+    set saved [core::useBackend]
+    try {
+        core::useBackend compile
+        set compiled [core::evalProgram {{block {} {const 1}}}]
+        core::useBackend interp
+        set interpreted [core::evalProgram {{block {} {const 1}}}]
+        list [expr {[core::value::blockCode $compiled] ne ""}] [core::value::blockCode $interpreted]
+    } finally {
+        core::useBackend $saved
+    }
+} -result {1 {}}
+
+test compiler-1 {scopes without closures compile to Tcl locals} -body {
+    set code [core::compiler::generatedCode {{call {block {a} {bind b {call {ref +} {ref a} {const 1}}} {ref b}} {const 1}}}]
+    list [regexp {core::env::define \$f} $code] [regexp {set v[0-9]+ } $code]
+} -result {0 1}
+
+cleanupTests

@@ -8,7 +8,7 @@ package require Tcl 8.6
 apply {{dir} {
     foreach file {
         errors value completion env ir
-        block native callable refine evaluator
+        block native callable refine runtime evaluator
         primitives predicates programfile
     } {
         uplevel #0 [list source [file join $dir $file.tcl]]

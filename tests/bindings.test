@@ -74,6 +74,54 @@ test bind-9 {using a name before its binding exists is unbound} -body {
                 {bind later {const 1}}
 } -result {CORE SEMANTIC UNBOUND}
 
+test scope-1 {a name denotes its scope's binding even before that bind runs} -body {
+    # The closure's x is the inner x; calling it before the inner bind is an
+    # error, not a silent read of the outer x.
+    core::evalProgram {
+        {bind x {const 1}}
+        {call {block {}
+            {bind y {call {block {} {ref x}}}}
+            {bind x {const 2}}
+            {ref y}}}
+    }
+} -returnCodes error -errorCode {CORE SEMANTIC UNBOUND} -result {name "x" used before its binding}
+
+test scope-2 {use before binding in a scope without closures} -body {
+    core::evalProgram {
+        {bind x {const 1}}
+        {call {block {} {bind y {ref x}} {bind x {const 2}} {ref y}}}
+    }
+} -returnCodes error -errorCode {CORE SEMANTIC UNBOUND} -result {name "x" used before its binding}
+
+test scope-3 {a bind's own expression cannot see the name being bound} -body {
+    core::evalProgram {{bind x {const 1}} {call {block {} {bind x {ref x}}}}}
+} -returnCodes error -errorCode {CORE SEMANTIC UNBOUND} -match glob -result *
+
+test scope-4 {binds in argument position belong to the enclosing scope} -body {
+    run {call {block {} {call {ref list} {bind y {const 5}}} {ref y}}}
+} -result 5
+
+test scope-5 {duplicate binding in a block body without closures} -setup resetEffects -body {
+    list [catch {core::eval {call {block {}
+                                {bind x {const 1}}
+                                {bind x {call {ref test-log} {const 2}}}}}} message options] \
+         [dict get $options -errorcode] $::testLog
+} -result {1 {CORE SEMANTIC DUPLICATE} 2}
+
+test scope-6 {binding a parameter name in a body with closures} -body {
+    core::eval {call {block {x} {bind f {block {} {ref x}}} {bind x {const 2}}} {const 1}}
+} -returnCodes error -errorCode {CORE SEMANTIC DUPLICATE} -match glob -result *
+
+test scope-7 {mutual recursion between later bindings} -body {
+    run {bind even? {block {n} {if {call {ref ==} {ref n} {const 0}}
+                                   {block {} {ref true}}
+                                   {block {} {call {ref odd?} {call {ref -} {ref n} {const 1}}}}}}} \
+        {bind odd? {block {n} {if {call {ref ==} {ref n} {const 0}}
+                                  {block {} {ref false}}
+                                  {block {} {call {ref even?} {call {ref -} {ref n} {const 1}}}}}}} \
+        {call {ref list} {call {ref even?} {const 10}} {call {ref odd?} {const 7}}}
+} -result {[true, true]}
+
 test malformed-1 {unknown operation} -body {
     core::eval {frobnicate 1}
 } -returnCodes error -errorCode {CORE MALFORMED} -match glob -result {*unknown operation "frobnicate"*}

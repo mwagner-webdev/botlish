@@ -9,21 +9,32 @@ the language's own. Where Tcl behaves differently (truthiness, strings as
 values, exceptions, variable scope, command lookup), the evaluator does
 **not** inherit Tcl's behavior.
 
+There are two backends that implement the same semantics:
+
+* **`interp`**: the tree-walking reference interpreter (`core/evaluator.tcl`).
+* **`compile`**: a compiler from IR to Tcl procedures (`compiler/compiler.tcl`,
+  see §12).
+
+The whole test suite runs against both.
+
 ```
-core/            evaluator (see "Implementation map")
+core/            runtime and interpreter (see "Implementation map")
+compiler/        IR -> Tcl compiler
 examples/*.ir    acceptance programs as IR data
 tests/*.test     tcltest suite
 main.tcl         example runner
 ```
 
 ```sh
-tclsh tests/all.tcl          # run the test suite
-tclsh main.tcl               # run all examples
-tclsh main.tcl FILE.ir       # run one program file
+tclsh tests/all.tcl                         # test suite, both backends
+CORE_BACKEND=compile tclsh tests/all.tcl    # test suite, one backend
+tclsh main.tcl                              # run all examples (interp)
+tclsh main.tcl -backend compile -code FILE.ir   # compile, show generated Tcl, run
 ```
 
 ```tcl
-source core/core.tcl
+source compiler/compiler.tcl       ;# loads core too; core/core.tcl alone is interp-only
+core::useBackend compile
 core::formatValue [core::eval {call {ref +} {const 1} {const 2}}]   ;# => 3
 ```
 
@@ -72,9 +83,26 @@ Rules:
   through the caller.
 * An environment has identity. A block that captures an environment also sees
   bindings added to it later. Recursion and mutual recursion work because of
-  this. Using a name before its binding has been made is an unbound-name
-  error. A binding can never be observed changing, because bindings don't
+  this. A binding can never be observed changing, because bindings don't
   change.
+* **A name means one binding throughout its scope.** A scope is a program, a
+  block body, an `if` branch, or a loop iteration. The scope binds every name
+  bound by a `bind` evaluated directly in it, including binds nested inside
+  call arguments or an `if` condition, but not binds inside nested scopes. On
+  entry, the scope declares all of these names. Using a name after it is
+  declared but before its `bind` completes is an `UNBOUND` error ("used
+  before its binding"). It never silently reads an outer binding of the same
+  name:
+
+  ```
+  (bind x (const 1))
+  (call (block {}
+      (bind y (call (block {} (ref x))))   ; this x is the inner x -> error
+      (bind x (const 2))))
+  ```
+
+  This rule is what lets names be resolved statically. The compiler depends
+  on it.
 * Refinements attach to a **binding**, not a name. A fact about an outer `x`
   doesn't apply to an inner `x` that shadows it.
 
@@ -288,6 +316,8 @@ core::registerNative even? -arity 1 -impl myEvenImpl -refines-true {0 Even}
 | `core::eval NODE` | evaluate one expression in a fresh program scope; returns a value |
 | `core::evalProgram EXPRS` | evaluate a list of expressions; returns the last value |
 | `core::evalIn NODE ENV` | evaluate in a given environment; returns a completion |
+| `core::useBackend ?NAME?` | select or query the backend (`interp`, `compile`) |
+| `core::compiler::generatedCode EXPRS` | the Tcl code generated for a unit |
 | `core::check NODE` | static shape and control-placement check |
 | `core::rootEnv` / `core::childEnv ENV` | create environments |
 | `core::envDefine ENV NAME VALUE` | add a binding, for embedding and tests |
@@ -308,24 +338,87 @@ core::registerNative even? -arity 1 -impl myEvenImpl -refines-true {0 Even}
 | `core/completion.tcl` | completions and call/program boundaries |
 | `core/env.tcl` | frames, binding, lookup scopes, refinement storage |
 | `core/ir.tcl` | node shapes, literal rules, static placement check |
-| `core/block.tcl` | block creation and invocation |
+| `core/block.tcl` | block creation and invocation (interpreted and compiled bodies) |
 | `core/native.tcl` | native registry and invocation |
 | `core/callable.tcl` | the single call dispatch point |
 | `core/refine.tcl` | deriving and installing branch refinements |
-| `core/evaluator.tcl` | one handler per form, public API |
+| `core/runtime.tcl` | semantic rules shared by both backends |
+| `core/evaluator.tcl` | interpreter (one handler per form), backend selection, public API |
 | `core/primitives.tcl`, `core/predicates.tcl` | builtin natives |
+| `compiler/compiler.tcl` | IR → Tcl compiler backend |
 
 Implementation notes (not part of the semantics):
 
 * Runtime values are tagged Tcl lists (`{int 42}`, `{str hello}`, ...).
 * Environments are ids in a frame store that only grows. Nothing is reclaimed,
   which is acceptable for a reference model.
-* Handlers use `core::valueOf`, which relies on Tcl's `return -level 2` to
-  propagate an abrupt completion out of the calling handler. What propagates
-  is still an explicit completion value.
+* Interpreter handlers use `core::interp::valueOf`, which relies on Tcl's
+  `return -level 2` to propagate an abrupt completion out of the calling
+  handler. What propagates is still an explicit completion value.
 
 ## 11. Not implemented (deliberately)
 
 No parser or surface syntax, macros, modules, objects, assignment, mutable
 variables, exceptions, `?` propagation, pattern matching, a type checker
-beyond refinement tracking, async, coroutines, threads, FFI, or compilation.
+beyond refinement tracking, async, coroutines, threads, FFI, or native code
+generation.
+
+## 12. The compiler backend
+
+`compiler/compiler.tcl` translates IR into Tcl procedures that Tcl then
+bytecode-compiles. It reuses the runtime (values, natives, environments, the
+call boundary and refinement metadata) but none of the interpreter's
+evaluation machinery. There are no completion objects, no per-node dispatch,
+and no name search in scopes it can resolve statically.
+
+**Units.** The expressions passed to `evalProgram` or `evalIn` form a
+compilation unit and become `proc unitN {base}`, where `base` is the
+environment the unit runs in. Units are cached by their IR, so compiling the
+same IR twice yields the same proc.
+
+**Expressions** are flattened into Tcl commands in evaluation order. Each
+intermediate value goes into a temporary `tN`. Constants become literal
+words.
+
+**Blocks** become `proc blockN {captured argv}`. The Block value stores the
+proc name in its `CODE` field. `core::block::invoke` checks arity and applies
+the same call boundary to compiled and interpreted Blocks, so the two kinds
+can call each other.
+
+**`if` and `loop`** compile inline into Tcl `if` and `while 1`. Control flow
+maps onto Tcl completion codes:
+
+| IR | Inside a compiled loop in the same proc | Otherwise |
+|----|----|----|
+| `(break v)` | `set tLoop v; break` | `return -code break v` |
+| `(continue)` | `continue` | `return -code continue` |
+| `(return v)` | `return v` in a block proc | `return -code return v` at unit level |
+
+The "otherwise" cases only arise in code the static placement check would
+reject. They reach the call or program boundary and raise the same errors as
+the interpreter.
+
+**Names** are resolved at compile time using the scope rule in §2:
+
+* A scope that contains a block node is *materialized* as a runtime frame,
+  because a closure may capture it and its bindings and refinements can be
+  observed. It declares its names on entry and reads and writes through
+  `core::env`, which checks use-before-binding at run time.
+* Any other scope never escapes its proc. Its bindings are Tcl locals `vN`.
+  Evaluation order inside it matches the compiler's walk, so use-before-binding
+  and duplicate bindings are decided at compile time and compiled into the
+  matching error.
+* Names that no nested scope binds are looked up dynamically in the unit's
+  environment. Program-level bindings and root natives are reached this way.
+
+**Refinements** are installed only in materialized branches, since those are
+the only ones where facts can be observed. They use the callee value the
+condition actually called, plus the same metadata rules as the interpreter.
+
+**Testing.** `tests/all.tcl` runs every test file once per backend, with the
+backend chosen by `CORE_BACKEND`. `tests/backends.test` also runs a corpus
+under both backends in one process and compares the outcomes, and checks
+calls between compiled and interpreted Blocks.
+
+**Known gap:** compiled code cannot yet propagate a `propagate-error`
+completion out of a call. No form produces one yet.

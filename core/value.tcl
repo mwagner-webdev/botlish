@@ -11,7 +11,10 @@
 #   {unit}                    the unit value
 #   {list ITEMS}              ITEMS is a Tcl list of runtime values
 #   {result ok|error VALUE}   Result
-#   {block PARAMS BODY ENV}   Block: parameters, body expressions, captured env
+#   {block PARAMS BODY ENV CODE}
+#                             Block: parameters, body expressions (IR),
+#                             captured env, and the compiled code for the
+#                             body ("" when the body is to be interpreted)
 #   {native NAME}             native callable; metadata lives in the registry
 #
 # Values are treated as immutable. Code outside this file should construct and
@@ -64,8 +67,8 @@ proc core::value::err {payload} {
     return [list result error [check $payload]]
 }
 
-proc core::value::block {params body env} {
-    return [list block $params $body $env]
+proc core::value::block {params body env {code ""}} {
+    return [list block $params $body $env $code]
 }
 
 proc core::value::native {name} {
@@ -119,6 +122,7 @@ proc core::value::resultPayload {v} { Require result $v; return [lindex $v 2] }
 proc core::value::blockParams {v} { Require block $v; return [lindex $v 1] }
 proc core::value::blockBody {v}   { Require block $v; return [lindex $v 2] }
 proc core::value::blockEnv {v}    { Require block $v; return [lindex $v 3] }
+proc core::value::blockCode {v}   { Require block $v; return [lindex $v 4] }
 
 proc core::value::nativeName {v}  { Require native $v; return [lindex $v 1] }
 
