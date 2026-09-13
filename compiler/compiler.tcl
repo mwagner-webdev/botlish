@@ -92,6 +92,13 @@ namespace eval core::compiler {
     variable bindLog {}
     # Block ExprId -> proc name.
     variable blockProcs [dict create]
+    # Program mode: block ExprIds whose procs never touch their captured
+    # environment (EnvlessBlocks), and calls compiled as loops
+    # (SelfTailCalls).
+    variable envless {}
+    variable selfTailCalls {}
+    # If conditions whose callee value CompileIf needs (InstallsRefinements).
+    variable refining {}
     # Native name -> intrinsic generator.
     variable intrinsics [dict create \
         +        {IntrinsicArith +} \
@@ -167,10 +174,17 @@ proc core::compiler::evalHir {hir} {
             lappend names [dict get $hir bindings $b name]
         }
     }
+    set mark [core::env::mark]
     set env [core::env::child [core::rootEnv]]
     core::env::declare $env $names
-    set completion [Run ::core::compiler::code::[dict get $unit name] $env]
-    return [core::completion::atProgramBoundary $completion]
+    set value ""
+    try {
+        set completion [Run ::core::compiler::code::[dict get $unit name] $env]
+        set value [core::completion::atProgramBoundary $completion]
+    } finally {
+        core::releaseProgram $mark $value
+    }
+    return $value
 }
 
 # The generated Tcl code for EXPRS, for inspection.
@@ -235,6 +249,173 @@ proc core::compiler::BlockProc {e} {
         dict set blockProcs $e ::core::compiler::code::block[NewId]
     }
     return [dict get $blockProcs $e]
+}
+
+# ---------------------------------------------------------------------------
+# Unit facts (program mode), derived from HIR; they decide representation
+# only.
+#
+# Envless blocks. A call whose HIR target is block T, through a `ref` callee,
+# needs the callee value only for T's captured environment: HIR resolved the
+# target, and a reference whose type names the block is bound whenever it
+# runs (its bind preceded, on every path, the code that typed it). If T's
+# proc never reads its environment, the call can skip the lookup and pass no
+# environment. A block is envless when
+#   * it creates no closures in its own invocation (no materialized scope
+#     of its own, no frames to link), and
+#   * every reference in its invocation to a binding from outside it is the
+#     callee of such a call of an envless block of matching arity.
+# Computed as a greatest fixpoint, so self and mutual recursion qualify.
+# Block values are still created with their environment: generic calls,
+# core::blockEnv and refinement probes see exactly what they saw before.
+
+proc core::compiler::EnvlessBlocks {} {
+    variable hir
+    set blocks {}
+    set callOf [dict create]
+    set regionRefs [dict create]
+    foreach e [hir::walk $hir] {
+        switch -- [Kind $e] {
+            block {
+                lappend blocks $e
+                dict set regionRefs $e {}
+            }
+            call {
+                dict set callOf [N $e callee] $e
+            }
+        }
+    }
+    set disqualified {}
+    foreach e [hir::walk $hir] {
+        set invocation [S [N $e scope] invocation]
+        if {$invocation eq ""} {
+            continue
+        }
+        if {[Kind $e] eq "block"} {
+            lappend disqualified $invocation
+        } elseif {[Kind $e] eq "ref"} {
+            set b [N $e binding]
+            if {$b eq ""} {
+                # An unbound name is looked up (and fails) at run time.
+                lappend disqualified $invocation
+            } elseif {[B $b kind] ne "root" && [S [B $b scope] invocation] ne $invocation} {
+                dict lappend regionRefs $invocation $e
+            }
+        }
+    }
+    set envless $blocks
+    foreach e [lsort -unique $disqualified] {
+        set envless [lsearch -all -inline -exact -not $envless $e]
+    }
+    set changed 1
+    while {$changed} {
+        set changed 0
+        foreach e $envless {
+            foreach ref [dict get $regionRefs $e] {
+                if {![SkippableCallee $ref $callOf $envless]} {
+                    set envless [lsearch -all -inline -exact -not $envless $e]
+                    set changed 1
+                    break
+                }
+            }
+        }
+    }
+    return $envless
+}
+
+# 1 if REF is the callee of a call to an envless block of matching arity.
+proc core::compiler::SkippableCallee {ref callOf envless} {
+    if {![dict exists $callOf $ref]} {
+        return 0
+    }
+    return [expr {[DirectEnvlessTarget [dict get $callOf $ref] $envless] ne ""}]
+}
+
+# The envless block call E directly calls through a `ref` callee, or "".
+proc core::compiler::DirectEnvlessTarget {e envless} {
+    lassign [N $e target] kind target
+    if {$kind ne "block" || $target ni $envless || [Kind [N $e callee]] ne "ref"
+            || [InstallsRefinements $e]
+            || [llength [N $target params]] != [llength [N $e args]]} {
+        return ""
+    }
+    return $target
+}
+
+# 1 if call E is the condition of an if with a materialized branch, where
+# CompileIf installs refinements using the callee value.
+proc core::compiler::InstallsRefinements {e} {
+    variable refining
+    return [dict exists $refining $e]
+}
+
+# Call ExprId -> 1 for InstallsRefinements.
+proc core::compiler::RefiningConditions {} {
+    variable hir
+    set result [dict create]
+    foreach e [hir::walk $hir] {
+        if {[Kind $e] eq "if" && [Kind [N $e condition]] eq "call"
+                && ([S [N $e thenScope] closures] ne "" || [S [N $e elseScope] closures] ne "")} {
+            dict set result [N $e condition] 1
+        }
+    }
+    return $result
+}
+
+# Self tail calls: calls whose HIR target is the block they occur in, with
+# matching arity, in tail position of that block (its body's value or a
+# return's value, through if branches), and not inside a loop of that block.
+# Such a call is the last thing its invocation does, so its proc rebinds
+# the parameters and starts over instead of nesting a Tcl call.
+proc core::compiler::SelfTailCalls {} {
+    variable hir
+    set result {}
+    foreach e [hir::walk $hir] {
+        switch -- [Kind $e] {
+            block {
+                if {[N $e body] ne ""} {
+                    TailCallsInto [lindex [N $e body] end] $e result
+                }
+            }
+            return {
+                if {[N $e target] ne ""} {
+                    TailCallsInto [N $e value] [N $e target] result
+                }
+            }
+        }
+    }
+    return $result
+}
+
+proc core::compiler::TailCallsInto {e block resultVar} {
+    upvar 1 $resultVar result
+    switch -- [Kind $e] {
+        call {
+            lassign [N $e target] kind target
+            if {$kind eq "block" && $target eq $block
+                    && [llength [N $block params]] == [llength [N $e args]]
+                    && ![InLoopOf $e $block]} {
+                lappend result $e
+            }
+        }
+        if {
+            foreach role {thenBody elseBody} {
+                if {[N $e $role] ne ""} {
+                    TailCallsInto [lindex [N $e $role] end] $block result
+                }
+            }
+        }
+    }
+}
+
+# 1 if expression E is inside a loop body within block BLOCK's invocation.
+proc core::compiler::InLoopOf {e block} {
+    for {set s [N $e scope]} {$s ne "" && [S $s owner] ne $block} {set s [S $s parent]} {
+        if {[S $s kind] eq "loop"} {
+            return 1
+        }
+    }
+    return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -426,6 +607,16 @@ proc core::compiler::GenerateUnit {mode exprs {unitHir ""}} {
         set unitHir [hir::build $exprs -mode $mode -strict 0]
     }
     set hir $unitHir
+    variable envless
+    variable selfTailCalls
+    variable refining
+    set envless {}
+    set selfTailCalls {}
+    set refining [RefiningConditions]
+    if {$mode eq "program"} {
+        set envless [EnvlessBlocks]
+        set selfTailCalls [SelfTailCalls]
+    }
     set pending {}
     set bindLog {}
     set blockProcs [dict create]
@@ -467,12 +658,33 @@ proc core::compiler::CompileBlock {ctxVar e} {
 # Returns the proc source of block expression E.
 proc core::compiler::CompileBlockBody {outerVar e procName} {
     upvar 1 $outerVar outer
+    variable envless
+    variable selfTailCalls
     set ctx [NewContext 1 [dict get $outer program]]
+    dict set ctx block $e
+
+    # A self tail call restarts the proc body with new arguments (and, for
+    # a block that reads its environment, the callee's environment).
+    set looping 0
+    foreach call $selfTailCalls {
+        if {[S [N $call scope] invocation] eq $e} {
+            set looping 1
+            break
+        }
+    }
+    if {$looping} {
+        Emit ctx "while 1 \{"
+        Indent ctx 1
+    }
 
     # Enclosing scopes are all materialized (a block is created in each).
-    # Rebuild their frame variables from the captured frame's parent chain.
+    # Rebuild their frame variables from the captured frame's parent chain,
+    # unless the block never reads them.
     set previous ""
     foreach id [lreverse [dict get $outer order]] {
+        if {$e in $envless} {
+            break
+        }
         set frame [dict get $outer scopes $id frame]
         if {$previous eq ""} {
             Emit ctx "set $frame \$captured"
@@ -503,6 +715,10 @@ proc core::compiler::CompileBlockBody {outerVar e procName} {
     set result [CompileSequence ctx [N $e body]]
     if {[OpType $result] ne "never"} {
         Emit ctx "return [BoxWord $result]"
+    }
+    if {$looping} {
+        Indent ctx -1
+        Emit ctx "\}"
     }
     return [ProcSource [namespace tail $procName] {captured argv} $ctx]
 }
@@ -686,9 +902,20 @@ proc core::compiler::CompileCall {ctxVar e {calleeVar ""} {argsVar ""}} {
     if {$calleeVar ne ""} {
         upvar 1 $calleeVar callee $argsVar argOps
     }
-    set callee [CompileExpr ctx [N $e callee]]
-    if {[OpType $callee] eq "never"} {
-        return $callee
+    variable envless
+    variable selfTailCalls
+    set envlessTarget ""
+    if {[dict get $ctx program]} {
+        set envlessTarget [DirectEnvlessTarget $e $envless]
+    }
+    if {$envlessTarget ne ""} {
+        # The target ignores its environment: no need to look the callee up.
+        set callee [Op box {{}} [Type [N $e callee]]]
+    } else {
+        set callee [CompileExpr ctx [N $e callee]]
+        if {[OpType $callee] eq "never"} {
+            return $callee
+        }
     }
     set argOps {}
     foreach arg [N $e args] {
@@ -707,6 +934,19 @@ proc core::compiler::CompileCall {ctxVar e {calleeVar ""} {argsVar ""}} {
             return [CompileNativeCall ctx $e $callee $name $argOps]
         }
         block {
+            if {$e in $selfTailCalls && [dict exists $ctx block] && [dict get $ctx block] eq $targetId} {
+                if {$envlessTarget eq ""} {
+                    Emit ctx "set captured \[lindex [BoxWord $callee] 3\]"
+                }
+                Emit ctx "set argv \[list [BoxWords $argOps]\]"
+                Emit ctx "continue"
+                return [Never]
+            }
+            if {$envlessTarget ne ""} {
+                set t [NewTemp]
+                Emit ctx "set $t \[[BlockProc $targetId] {} \[list [BoxWords $argOps]\]\]"
+                return [Op box "\$$t" any]
+            }
             if {[dict get $ctx program]
                     && [llength [N $targetId params]] == [llength $argOps]} {
                 set t [NewTemp]
@@ -757,7 +997,47 @@ proc core::compiler::CompileNativeCall {ctxVar e callee name argOps} {
         set param [lindex [dict get $meta paramTypes] 0]
         return [InlineTypeTest ctx $name [lindex $argOps 0] $testsType $param]
     }
+    if {$arity ne "*"} {
+        return [DirectNativeCall ctx $name $meta $argOps]
+    }
     return [GenericCall ctx $callee $argOps]
+}
+
+# A call of the native NAME (resolved by HIR, arity matching) without the
+# runtime's dispatch: the implementation is called directly, followed by
+# exactly the contract checks core::native::invoke makes after it, except
+# those static types already prove. The callee is a known root constant, so
+# nothing about it needs checking.
+proc core::compiler::DirectNativeCall {ctxVar name meta argOps} {
+    upvar 1 $ctxVar ctx
+    set t [NewTemp]
+    set impl [join [lmap word [dict get $meta impl] {Word $word}] { }]
+    Emit ctx "set $t \[$impl [BoxWords $argOps]\]"
+    set index 0
+    foreach type [dict get $meta paramTypes] arg $argOps {
+        if {$type ni {any ""} && ![core::type::subtype [hir::types::semantic [OpType $arg]] $type]} {
+            ContractCheck ctx $type [BoxWord $arg] "$name argument $index"
+        }
+        incr index
+    }
+    set resultType [dict get $meta resultType]
+    if {$resultType eq "any"} {
+        Emit ctx "core::value::check \$$t"
+    } else {
+        ContractCheck ctx $resultType "\$$t" "$name result"
+    }
+    return [Op box "\$$t" any]
+}
+
+# Emits core::type::AssertCanonical's check of WORD against TYPE, inline for
+# a primitive kind.
+proc core::compiler::ContractCheck {ctxVar type word context} {
+    upvar 1 $ctxVar ctx
+    if {[llength $type] == 1} {
+        Emit ctx "if \{\[lindex $word 0\] ne \"$type\"\} \{core::type::AssertCanonical $type $word [Word $context]\}"
+    } else {
+        Emit ctx "core::type::AssertCanonical [Word $type] $word [Word $context]"
+    }
 }
 
 # ---------------------------------------------------------------------------

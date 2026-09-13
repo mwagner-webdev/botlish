@@ -113,6 +113,8 @@ proc core::value::err {payload} {
 }
 
 proc core::value::block {params body env {code ""}} {
+    # The Block keeps its captured environment alive (env.tcl, Lifetime).
+    core::env::pin $env
     return [list block $params $body $env $code]
 }
 
@@ -170,6 +172,22 @@ proc core::value::blockEnv {v}    { Require block $v; return [lindex $v 3] }
 proc core::value::blockCode {v}   { Require block $v; return [lindex $v 4] }
 
 proc core::value::nativeName {v}  { Require native $v; return [lindex $v 1] }
+
+# 1 if V is a Block or contains one (in a list or Result).
+proc core::value::containsBlock {v} {
+    switch -- [kind $v] {
+        block  { return 1 }
+        list {
+            foreach item [lindex $v 1] {
+                if {[containsBlock $item]} {
+                    return 1
+                }
+            }
+        }
+        result { return [containsBlock [lindex $v 2]] }
+    }
+    return 0
+}
 
 # ---------------------------------------------------------------------------
 # Equality: approximation of the future language's ==.

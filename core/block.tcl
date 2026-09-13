@@ -36,7 +36,12 @@ proc core::block::invoke {blockValue argValues} {
             core::env::define $frame $param $arg
         }
         core::env::declare $frame [core::ir::scopeBindNames $body]
-        set completion [core::interp::evalSequence $body $frame]
+        try {
+            set completion [core::interp::evalSequence $body $frame]
+        } finally {
+            # The invocation's frame ends here unless a Block captured it.
+            core::env::release $frame
+        }
     }
     return [core::completion::atCallBoundary $completion]
 }

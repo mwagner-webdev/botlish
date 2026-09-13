@@ -133,15 +133,24 @@ proc core::forms::op-if {node env} {
     # The branch body runs inline (no callable boundary) in a fresh scope
     # that carries the facts proven by the condition.
     set branchEnv [core::interp::enterScope $env $body]
-    core::refine::install $branchEnv [core::refine::branchFacts $condition $env $outcome]
-    return [core::interp::evalSequence $body $branchEnv]
+    try {
+        core::refine::install $branchEnv [core::refine::branchFacts $condition $env $outcome]
+        return [core::interp::evalSequence $body $branchEnv]
+    } finally {
+        core::env::release $branchEnv
+    }
 }
 
 proc core::forms::op-loop {node env} {
     set body [core::ir::blockBody [lindex $node 1]]
     while 1 {
         # Each iteration is a fresh scope.
-        set completion [core::interp::evalSequence $body [core::interp::enterScope $env $body]]
+        set iterationEnv [core::interp::enterScope $env $body]
+        try {
+            set completion [core::interp::evalSequence $body $iterationEnv]
+        } finally {
+            core::env::release $iterationEnv
+        }
         switch -- [core::completion::kind $completion] {
             value - continue {
                 # next iteration
@@ -247,9 +256,25 @@ proc core::evalProgram {exprs} {
     foreach expr $exprs {
         core::ir::check $expr
     }
+    set mark [core::env::mark]
     set env [core::env::child [core::rootEnv]]
     core::env::declare $env [core::ir::scopeBindNames $exprs]
-    return [core::completion::atProgramBoundary [core::RunWithBackend program $exprs $env]]
+    set value ""
+    try {
+        set value [core::completion::atProgramBoundary [core::RunWithBackend program $exprs $env]]
+    } finally {
+        core::releaseProgram $mark $value
+    }
+    return $value
+}
+
+# Ends a program run: the frames created since MARK are dropped unless the
+# program's value VALUE ("" if it failed) contains a Block, which may still
+# refer to them (for example as a refinement probe).
+proc core::releaseProgram {mark value} {
+    if {$value eq "" || ![core::value::containsBlock $value]} {
+        core::env::releaseSince $mark
+    }
 }
 
 # Evaluates a single top-level expression. Returns its value.

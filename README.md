@@ -475,8 +475,13 @@ refinement unless its contract explicitly establishes one. So
 Implementation notes (not part of the semantics):
 
 * Runtime values are tagged Tcl lists (`{int 42}`, `{str hello}`, ...).
-* Environments are ids in a frame store that only grows. Nothing is reclaimed,
-  which is acceptable for a reference model.
+* Environments are ids in a frame store. Only Blocks refer to frames, so
+  frames are reclaimed explicitly (`core/env.tcl`, *Lifetime*): creating a
+  Block *pins* its environment and every ancestor, and a scope's frame is
+  released when the scope ends (block invocation, branch, loop iteration)
+  unless it is pinned. When a program ends and its value contains no Block,
+  every frame it created is released. Environments created through the
+  embedding API are left to the embedder.
 * Interpreter handlers use `core::interp::valueOf`, which relies on Tcl's
   `return -level 2` to propagate an abrupt completion out of the calling
   handler. What propagates is still an explicit completion value.
@@ -644,6 +649,24 @@ representation: the compiler maps a block's `EXPR` to the proc it generates.
   generic invoke is unnecessary
   there: in a checked program, a compiled block can't produce an escaping
   `break` or `continue`, and arity is already known to match.
+* **Direct native calls:** a call of a HIR-resolved native with fixed arity
+  and no intrinsic calls the native's implementation directly, instead of
+  dispatching through `core::runtime::callValue`. It then makes the contract
+  checks `core::native::invoke` makes, in the same order, except those that
+  static types prove. A primitive kind is checked inline. So contract
+  violations still raise `CORE CONTRACT TYPE`.
+* **Envless functions:** a block that creates no closures, and whose only
+  references to outer bindings are callees of direct calls to envless
+  blocks, never reads its environment (a greatest fixpoint, so recursion
+  qualifies). Direct calls to such a block skip the callee lookup and pass
+  no environment, and its proc doesn't rebuild frame variables. The Block
+  value itself is still created with its environment. This covers every
+  function in the §18 corpus.
+* **Self tail calls:** a call of the enclosing block itself, with matching
+  arity, in tail position (the body's value or a `return`'s value, through
+  `if` branches), and not inside a `loop`, compiles to rebinding `argv`
+  (and `captured`, unless the block is envless) and `continue` in a
+  `while 1` around the proc body. Such loops need no Tcl recursion depth.
 
 `core::compiler::programTypes EXPRS` reports the inferred types of
 program-level bindings. `core::compiler::bindingTypes EXPRS` reports the type
@@ -654,9 +677,9 @@ of every `bind` at any depth, including refinements in force at that point.
 
 | program | interp | compile, untyped | compile, typed |
 |---------|-------:|-----------------:|---------------:|
-| `fib.ir` | 1121 ms | 326 ms | 12 ms |
-| `loop-count.ir` | 194 ms | 53 ms | 2 ms |
-| `sum-refined.ir` | 110 ms | 37 ms | 16 ms |
+| `fib.ir` | 1121 ms | 326 ms | 12 ms (8.8 ms with direct native calls and envless functions) |
+| `loop-count.ir` | 194 ms | 53 ms | 2 ms (1.4 ms) |
+| `sum-refined.ir` | 110 ms | 37 ms | 16 ms (17.7 ms) |
 
 `sum-refined` gains least. Its scopes contain closures, so its bindings stay
 in runtime frames, and the parameter tested with `==` has no static kind.
@@ -1317,9 +1340,10 @@ compiler compiles from HIR, the same way as `examples/surface/`.
 
 **How the language shapes them.** Bindings are immutable and a loop
 iteration can't carry state, so every loop is a self-recursive tail call
-that carries its index and accumulator. Neither backend eliminates tail
-calls, so recursion depth grows with the input (`corpus.tcl` raises Tcl's
-recursion limit). A function that has to return two things (a field and the
+that carries its index and accumulator. The compiler turns these self tail
+calls into Tcl loops (§13). The interpreter doesn't, so there recursion
+depth grows with the input (`corpus.tcl` raises Tcl's recursion limit). A
+function that has to return two things (a field and the
 position after it) returns a two-element list.
 
 **Tests.** `tests/stdlib.test` runs about 60 cases (the edge cases of each
@@ -1329,29 +1353,31 @@ covers the list primitives.
 
 **Benchmarks.** `tclsh bench/corpus.tcl [-runs N] [-markdown] [-all]` times
 every algorithm at several input sizes on every backend. Each measurement
-runs in a fresh process (the reference runtime never frees environments),
-and compilation is excluded. Cases marked slow skip the interpreter unless
+runs in a fresh process, so measurements can't disturb each other, and
+compilation is excluded. Cases marked slow skip the interpreter unless
 you pass `-all`. A future backend is a new case in `corpus::run` and becomes
 a new column.
 
-Baseline (`tclsh bench/corpus.tcl -runs 3`, Tcl 8.6.17 on Windows, best of
-3, wall time, compilation excluded; "skipped" = slow case, run with `-all`):
+`tclsh bench/corpus.tcl -runs 3` (Tcl 8.6.17 on Windows, best of 3, wall
+time, compilation excluded). "compile, before" is the first compiler, from
+before direct native calls, envless functions and self-tail loops (Â§13);
+"skipped" is a slow case, run with `-all`:
 
-| algorithm | input | interp | compile | speedup |
+| algorithm | input | interp | compile, before | compile |
 |---|---|---:|---:|---:|
-| string_reverse | 100 chars | 31.7 ms | 4.8 ms | 6.7x |
-| string_reverse | 1,000 chars | 287.0 ms | 43.1 ms | 6.7x |
-| string_reverse | 10,000 chars | 2974.5 ms | 431.3 ms | 6.9x |
-| string_replace | 1 KB | 558.3 ms | 55.7 ms | 10.0x |
-| string_replace | 10 KB | 5931.2 ms | 565.6 ms | 10.5x |
-| string_replace | 100 KB | skipped | 5699.0 ms | |
-| csv | 100 rows | 2013.6 ms | 156.8 ms | 12.8x |
-| csv | 1,000 rows | 22350.7 ms | 1977.9 ms | 11.3x |
-| csv | 10,000 rows | skipped | 49741.9 ms | |
-| matmul | 2x3 * 3x2 | 15.2 ms | 1.9 ms | 8.1x |
-| matmul | 8x8 | 216.9 ms | 24.3 ms | 8.9x |
-| matmul | 16x16 | 1567.7 ms | 175.1 ms | 9.0x |
-| matmul | 32x32 | skipped | 1380.8 ms | |
+| string_reverse | 100 chars | 35.4 ms | 4.8 ms | 1.6 ms |
+| string_reverse | 1,000 chars | 296.6 ms | 43.1 ms | 12.9 ms |
+| string_reverse | 10,000 chars | 3059.6 ms | 431.3 ms | 127.7 ms |
+| string_replace | 1 KB | 569.3 ms | 55.7 ms | 16.7 ms |
+| string_replace | 10 KB | 6072.7 ms | 565.6 ms | 159.2 ms |
+| string_replace | 100 KB | skipped | 5699.0 ms | 1638.2 ms |
+| csv | 100 rows | 2105.8 ms | 156.8 ms | 56.0 ms |
+| csv | 1,000 rows | 23930.1 ms | 1977.9 ms | 888.9 ms |
+| csv | 10,000 rows | skipped | 49741.9 ms | 37148.1 ms |
+| matmul | 2x3 * 3x2 | 15.2 ms | 1.9 ms | 2.2 ms |
+| matmul | 8x8 | 225.2 ms | 24.3 ms | 9.2 ms |
+| matmul | 16x16 | 1697.6 ms | 175.1 ms | 65.6 ms |
+| matmul | 32x32 | skipped | 1380.8 ms | 509.0 ms |
 
 Both backends produced the same value in every measured case.
 
@@ -1361,13 +1387,14 @@ here):
 * **reverse**: each step copies the whole accumulator (`concat(character,
   reversed)`), so the algorithm is O(n²) in characters copied. Up to 10,000
   characters the call overhead still dominates: times grow linearly.
-  Recursion is n calls deep. The interpreter never frees environments, so
-  it keeps every intermediate accumulator alive: O(n²) memory.
+  Before frames were reclaimed, the interpreter kept every intermediate
+  accumulator alive: O(n²) memory.
 * **replace**: testing for a match allocates a needle-sized substring at
   every position, and every match copies the result so far. Times are
   linear here because matches are sparse.
 * **CSV**: `list_append` copies the list, so building n records costs O(n²).
-  Going from 1,000 to 10,000 rows takes about 25× as long (compiled).
+  Going from 1,000 to 10,000 rows takes about 42× as long compiled: with
+  call overhead reduced, the copying dominates.
   Quoted fields grow one character at a time. Every field scan allocates a
   two-element list just to return two values.
 * **matmul**: n³ work as expected, but every entry read goes through
@@ -1475,7 +1502,9 @@ facts from block calls.
 **For the first native (Cranelift) milestone**, in order of evidence:
 
 1. Turn self tail calls into loops. Every loop in the corpus is one, and
-   recursion depth otherwise grows with the input.
+   recursion depth otherwise grows with the input. The Tcl compiler already
+   does this (§13); `hir::aot`'s `tail`/`self` facts give a native backend
+   the same information.
 2. Infer parameter kinds from call sites in a closed program. Parameter
    kinds cause 44 of the corpus's 50 blockers.
 3. Keep a tagged value representation and runtime helpers for Int (with a

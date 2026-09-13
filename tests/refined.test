@@ -218,7 +218,7 @@ test refined-type-test-fold-1 {a test proven by evidence compiles to a constant}
         {bind q {call {ref uriEscape} {const str {a b}}}}
         {call {ref UriQueryValue?} {ref q}}
     }]
-    list [regexp {acceptsCanonical|native UriQueryValue\?} $code] [regexp {native uriEscape} $code]
+    list [regexp {acceptsCanonical|native UriQueryValue\?} $code] [regexp {core::web::uriEscape} $code]
 } -result {0 1}
 
 test refined-type-test-fold-2 {a test proven by an enclosing refinement is not repeated} -body {

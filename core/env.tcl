@@ -37,8 +37,73 @@ proc core::env::new {parent} {
     dict set frames $id [dict create \
         parent $parent \
         bindings [dict create] \
-        refinements [dict create]]
+        refinements [dict create] \
+        pinned 0]
     return $id
+}
+
+# ---------------------------------------------------------------------------
+# Lifetime
+#
+# Frames are reclaimed explicitly, which is enough because the only runtime
+# values that refer to a frame are Blocks (their captured environment).
+#
+#   pin      a Block captures ENV: ENV and every ancestor stay alive (the
+#            Block can reach them through the parent chain)
+#   release  the scope ENV was created for has ended: the frame is dropped
+#            unless it is pinned. Nested scopes end before their parents,
+#            and a pinned frame's ancestors are pinned, so a released frame
+#            is unreachable.
+#   mark / releaseSince
+#            every frame created after a mark, dropped at once, pinned or
+#            not; for a program whose result holds no Block, since then
+#            nothing can refer to its frames any more
+#
+# Environments an embedder creates (core::rootEnv, core::childEnv) are only
+# released by an embedder.
+
+proc core::env::pin {env} {
+    variable frames
+    while {$env ne "" && [dict exists $frames $env] && ![dict get $frames $env pinned]} {
+        dict set frames $env pinned 1
+        set env [dict get $frames $env parent]
+    }
+}
+
+proc core::env::release {env} {
+    variable frames
+    if {[dict exists $frames $env] && ![dict get $frames $env pinned]} {
+        Drop $env
+    }
+}
+
+proc core::env::mark {} {
+    variable nextFrame
+    return $nextFrame
+}
+
+proc core::env::releaseSince {mark} {
+    variable frames
+    foreach env [dict keys $frames] {
+        if {[string range $env 3 end] > $mark} {
+            Drop $env
+        }
+    }
+}
+
+proc core::env::Drop {env} {
+    variable frames
+    variable bindingIndex
+    dict for {name binding} [dict get $frames $env bindings] {
+        dict unset bindingIndex [dict get $binding id]
+    }
+    dict unset frames $env
+}
+
+# The number of live frames (for tests).
+proc core::env::liveCount {} {
+    variable frames
+    return [dict size $frames]
 }
 
 proc core::env::child {parent} {

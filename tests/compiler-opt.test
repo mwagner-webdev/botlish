@@ -1,0 +1,194 @@
+# compiler-opt.test -- Tcl-level optimizations of the compiler and the
+# runtime's frame lifetime. None of them may change what a program means:
+# every program here is also checked against the interpreter.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+# The interpreter still recurses per call.
+interp recursionlimit {} 100000
+
+proc sourceIR {text} {
+    return [hir::lower [surface::compile $text t.bot]]
+}
+
+proc codeOf {text} {
+    return [core::compiler::generatedCode [sourceIR $text]]
+}
+
+if {"test_live_frames" ni [core::native::names]} {
+    core::registerNative test_live_frames -arity 0 \
+        -impl {apply {{} {core::value::int [core::env::liveCount]}}} -result-type int
+}
+
+set countdown "fn count(n, acc):\n    if n == 0:\n        return acc\n    count(n - 1, acc + 1)\n\n"
+
+# ---------------------------------------------------------------------------
+# Self tail calls
+
+test opt-tail-1 {a self tail call compiles to a loop, not a nested call} -body {
+    set code [codeOf "${countdown}count(3, 0)"]
+    list [regexp {while 1 \{} $code] [regexp {set argv \[list} $code] \
+         [regexp {code::block[0-9]+ [^\n]*\[list \$v} $code]
+} -result {1 1 0}
+
+test opt-tail-2 {a looped self tail call needs no Tcl recursion depth} -body {
+    set saved [core::useBackend]
+    set limit [interp recursionlimit {}]
+    interp recursionlimit {} 1000
+    core::useBackend compile
+    try {
+        core::formatValue [core::evalProgram [sourceIR "${countdown}count(200000, 0)"]]
+    } finally {
+        core::useBackend $saved
+        interp recursionlimit {} $limit
+    }
+} -result 200000
+
+test opt-tail-3 {calls that are not in tail position stay calls} -body {
+    set code [codeOf "fn fib(n):\n    if n <= 1:\n        return n\n    fib(n - 1) + fib(n - 2)\n\nfib(10)"]
+    list [regexp {set argv} $code] [regexp {while 1} $code]
+} -result {0 0}
+
+test opt-tail-4 {a return of a self call inside a loop is not looped} -body {
+    set text "fn f(n):\n    loop:\n        if n == 0:\n            return 0\n        return f(n - 1)\n\nf(5)"
+    list [regexp {set argv} [codeOf $text]] [differential [sourceIR $text]]
+} -result {0 same}
+
+test opt-tail-5 {tail calls through if branches and returns} -body {
+    set text "fn collatz(n, steps):\n    if n == 1:\n        return steps\n    if n == 2 * (n - n + 0) + n and false:\n        return 0\n    even = parity(n) == 0\n    if even:\n        return collatz(half(n, 0), steps + 1)\n    else:\n        collatz(3 * n + 1, steps + 1)\n\nfn parity(n):\n    if n < 2:\n        return n\n    parity(n - 2)\n\nfn half(n, h):\n    if h + h >= n:\n        return h\n    half(n, h + 1)\n\n\[collatz(27, 0), collatz(1, 0)\]"
+    list [regexp -all {set argv} [codeOf $text]] [differential [sourceIR $text]]
+} -result {4 same}
+
+test opt-tail-6 {closures calling themselves in tail position keep their own environment} -body {
+    set text "fn make(step):\n    fn walk(n, acc):\n        if n == 0:\n            return acc\n        walk(n - 1, acc + step)\n    walk\n\na = make(2)\nb = make(10)\n\[a(5, 0), b(5, 0), a(3, 1)\]"
+    list [regexp {set captured \[lindex} [codeOf $text]] [differential [sourceIR $text]] \
+         [core::formatValue [core::evalProgram [sourceIR $text]]]
+} -result {1 same {[10, 50, 7]}}
+
+test opt-tail-7 {errors inside a looped call are unchanged} -body {
+    differential [sourceIR "fn f(n, acc):\n    if n == 0:\n        return acc\n    f(n - 1, concat(acc, n))\n\nf(3, \"x\")"]
+} -result same
+
+# ---------------------------------------------------------------------------
+# Environments
+
+test opt-env-1 {functions that only call functions pass and read no environment} -body {
+    set code [codeOf "${countdown}fn start(n):\n    count(n, 0)\n\nstart(4)"]
+    list [regexp {proc block[0-9]+ \{captured argv\} \{[^\}]*set base \$captured} $code] \
+         [regexp -all {lookupLocal \$base} $code] [regexp {code::block[0-9]+ \{\} \[list} $code]
+} -result {0 0 1}
+
+test opt-env-2 {a function that reads a captured value keeps its environment} -body {
+    set text "k = 7\nfn addk(n):\n    n + k\n\nfn go(n):\n    addk(n)\n\ngo(1)"
+    set code [codeOf $text]
+    list [regexp {set base \$captured} $code] [regexp {lookupLocal \$base k} $code] \
+         [differential [sourceIR $text]]
+} -result {1 1 same}
+
+test opt-env-3 {an if condition calling a function, with a closure in a branch} -body {
+    set text "fn yes(x):\n    true\n\nif yes(1):\n    fn inner():\n        2\n    inner()\nelse:\n    3"
+    differential [sourceIR $text]
+} -result same
+
+test opt-env-4 {unbound names in an otherwise envless function still fail at run time} -body {
+    differential {{bind f {block {} {ref nope}}} {call {ref f}}}
+} -result same
+
+test opt-env-5 {mutual recursion through a forward reference is unchanged} -body {
+    differential [hir::lower [surface::readProgramFile [file join $::projectRoot examples surface 09-mutual-recursion.bot]]]
+} -result same
+
+test opt-env-6 {a Block value still carries its environment} -body {
+    set saved [core::useBackend]
+    core::useBackend compile
+    try {
+        set value [core::evalProgram [sourceIR "x = 5\nfn f():\n    1\nf"]]
+        core::envBindings [core::blockEnv $value]
+    } finally {
+        core::useBackend $saved
+    }
+} -result {x {int 5} f {block {} {{const 1}} env* ::core::compiler::code::block*}} -match glob
+
+# ---------------------------------------------------------------------------
+# Natives
+
+test opt-native-1 {known natives call their implementation directly} -body {
+    set code [codeOf "fn f(s):\n    concat(substring(s, 0, 1), s)\n\nf(\"ab\")"]
+    list [regexp {callValue} $code] [regexp {core::strings::substring} $code] \
+         [regexp {core::strings::concat} $code]
+} -result {0 1 1}
+
+test opt-native-2 {checks static types prove are not emitted} -body {
+    set code [codeOf "fn f(s):\n    n = length(s)\n    length(s) + n\n\nf(\"ab\")"]
+    regexp -all {AssertCanonical str} $code
+} -result 1
+
+test opt-native-3 {contract violations are still caught} -body {
+    list [differential {{call {ref test-fake-escape} {const str x}}}] \
+         [differential {{call {ref test-lax-param} {const str x}}}] \
+         [lindex [outcomeUnder compile {{call {ref test-fake-escape} {const str x}}}] 1]
+} -result {same same {CORE CONTRACT TYPE}}
+
+test opt-native-4 {argument errors are unchanged} -body {
+    list [differential {{call {ref substring} {const 1} {const 0} {const 0}}}] \
+         [differential {{call {ref list_get} {call {ref list}} {const 0}}}] \
+         [differential {{call {ref result-value} {error-value {const 1}}}}]
+} -result {same same same}
+
+# ---------------------------------------------------------------------------
+# Frame lifetime
+
+test opt-life-1 {a program leaves no frames behind} -body {
+    set result {}
+    foreach backend {interp compile} {
+        set saved [core::useBackend]
+        core::useBackend $backend
+        set before [core::env::liveCount]
+        core::evalProgram [sourceIR "fn make(k):\n    fn add(n):\n        n + k\n    add\n\nfn go(n, acc):\n    if n == 0:\n        return acc\n    go(n - 1, acc + make(n)(1))\n\ngo(50, 0)"]
+        lappend result [expr {[core::env::liveCount] - $before}]
+        core::useBackend $saved
+    }
+    set result
+} -result {0 0}
+
+test opt-life-2 {frames of finished calls are released while the program runs} -body {
+    set saved [core::useBackend]
+    core::useBackend interp
+    try {
+        set before [core::env::liveCount]
+        set value [core::evalProgram [sourceIR "fn inc(n):\n    if n > 0:\n        n + 1\n    else:\n        0\n\nfn go(n):\n    if n == 0:\n        return test_live_frames()\n    inc(n)\n    go(n - 1)\n\ngo(200)"]]
+        # go's own frames (one per active call, plus branches) remain; inc's
+        # and every finished branch's are gone.
+        expr {[core::value::intOf $value] - $before < 3 * 200 + 10}
+    } finally {
+        core::useBackend $saved
+    }
+} -result 1
+
+test opt-life-3 {a returned Block keeps its frames, and refinement probes work} -body {
+    set saved [core::useBackend]
+    core::useBackend interp
+    try {
+        set value [core::evalProgram {
+            {bind f {block {x}
+                {if {call {ref integer?} {ref x}} {block {} {block {} {ref x}}} {block {} {const 0}}}}}
+            {call {ref f} {const 5}}
+        }]
+        list [core::envRefinements [core::blockEnv $value]] \
+             [core::formatValue [core::runtime::callValue $value {}]]
+    } finally {
+        core::useBackend $saved
+    }
+} -result {{x int} 5}
+
+test opt-life-4 {frames are released after errors too} -body {
+    set saved [core::useBackend]
+    core::useBackend interp
+    set before [core::env::liveCount]
+    catch {core::evalProgram [sourceIR "fn f(n):\n    if n == 0:\n        return 1 + \"x\"\n    f(n - 1)\n\nf(20)"]}
+    core::useBackend $saved
+    expr {[core::env::liveCount] - $before}
+} -result 0
+
+cleanupTests
