@@ -1,83 +1,98 @@
-# types.tcl -- the static type language of the compiler.
+# types.tcl -- the compiler's static types.
 #
-# A static type describes every value an expression can produce:
+# Static types are the semantic types of core/type.tcl, which define what it
+# means for a value to have a type, extended with forms that only the
+# compiler needs:
 #
-#   int str bool unit list result   values of that kind
-#   native block                    some callable of that kind
+#   (any semantic type)             int, str, {refined str {Emailish}}, any, ...
 #   {native NAME}                   exactly the native callable NAME
 #   {block PROC ARITY RESULT}       a Block whose body is compiled proc PROC,
 #                                   taking ARITY arguments; RESULT types what
 #                                   a call returns
-#   any                             no static knowledge
 #   never                           no value: evaluation never completes
 #                                   normally (return, break, error, ...)
 #
+# The procedures here handle the compiler-only forms and delegate everything
+# else to core::type, so a refinement or named type means the same thing to
+# the compiler as to the interpreter.
+#
 # Types only ever *describe* runtime values; they never change what a program
-# means. The compiler uses them to choose faster code whose behavior is
-# identical, and falls back to the generic code whenever a type is unknown.
+# means. Invariant: if an operand has static type T (a semantic type), its
+# runtime value v satisfies core::type::acceptsValue T v.
 #
 # Where types come from:
 #   * literals and constructors (const, ok, error-value, list)
 #   * the root environment's constants, when the program is compiled against it
 #   * native signatures in the registry (-param-types / -result-type)
 #   * immutability: a binding has the type of the expression it was bound to
-#   * refinement facts of predicates, inside the branch they hold in
-#   * flow facts: once a native requiring int returned, its argument was an
-#     int, and since bindings are immutable it stays one
+#   * refinement metadata of predicates (types), inside the branch they hold in
+#   * flow facts: once a native requiring a type returned, its argument had
+#     that type, and since bindings are immutable it keeps it
 
-namespace eval core::types {
-    variable factTypes [dict create \
-        Int int Str str List list Result.ok result Result.error result]
+namespace eval core::types {}
+
+proc core::types::IsCompilerOnly {type} {
+    return [expr {$type eq "never"
+                  || ([llength $type] > 1 && [lindex $type 0] in {native block})}]
+}
+
+# TYPE in canonical form (semantic types are normalized by core::type).
+proc core::types::Canonical {type} {
+    if {[IsCompilerOnly $type]} {
+        return $type
+    }
+    return [core::type::normalize $type]
 }
 
 # Least upper bound: the most precise type describing values of A or B.
 proc core::types::lub {a b} {
-    if {$a eq "never"} { return $b }
-    if {$b eq "never"} { return $a }
-    if {$a eq $b} { return $a }
+    if {$a eq "never"} { return [Canonical $b] }
+    if {$b eq "never"} { return [Canonical $a] }
+    if {$a eq $b} { return [Canonical $a] }
     if {[lindex $a 0] eq "block" && [lindex $b 0] eq "block"
+            && [llength $a] == 4 && [llength $b] == 4
             && [lrange $a 1 2] eq [lrange $b 1 2]} {
         return [list block [lindex $a 1] [lindex $a 2] [lub [lindex $a 3] [lindex $b 3]]]
     }
-    return any
+    if {[IsCompilerOnly $a] || [IsCompilerOnly $b]} {
+        set kind [kindOf $a]
+        return [expr {$kind ne "" && $kind eq [kindOf $b] ? $kind : "any"}]
+    }
+    return [core::type::lub $a $b]
 }
 
-# Narrows CURRENT by a proven FACT type.
+# Narrows CURRENT by a proven FACT (a semantic type).
 proc core::types::narrow {current fact} {
-    if {$fact eq "any"} {
+    if {$fact eq "any" || $current eq "never"} {
         return $current
     }
-    if {$current in {any never} || [kindOf $current] ne $fact} {
-        # A contradicting fact can only hold on unreachable paths.
-        return [expr {$current eq "never" ? "never" : $fact}]
+    if {[IsCompilerOnly $current]} {
+        # A precise callable type already implies a bare kind fact.
+        if {$fact eq [kindOf $current]} {
+            return $current
+        }
+        return $fact
     }
-    return $current
+    return [core::type::narrow $current $fact]
 }
 
 # The runtime value kind every value of TYPE has, or "" if not fixed.
 proc core::types::kindOf {type} {
-    switch -- [lindex $type 0] {
-        native - block { return [lindex $type 0] }
-        any - never    { return "" }
-        default        { return $type }
+    if {$type eq "never"} {
+        return ""
     }
+    if {[IsCompilerOnly $type]} {
+        return [lindex $type 0]
+    }
+    return [core::type::base $type]
 }
 
 # The static type of the runtime value V.
 proc core::types::ofValue {v} {
-    switch -- [core::value::kind $v] {
-        native  { return [list native [core::value::nativeName $v]] }
-        default { return [core::value::kind $v] }
+    if {[core::value::kind $v] eq "native"} {
+        return [list native [core::value::nativeName $v]]
     }
-}
-
-# The type proven by refinement fact FACT (see core/predicates.tcl), or any.
-proc core::types::ofFact {fact} {
-    variable factTypes
-    if {[dict exists $factTypes $fact]} {
-        return [dict get $factTypes $fact]
-    }
-    return any
+    return [core::type::ofValue $v]
 }
 
 # Signature of native NAME: {PARAM-TYPES RESULT-TYPE}; PARAM-TYPES may be "".
@@ -87,12 +102,14 @@ proc core::types::nativeSignature {name} {
 }
 
 proc core::types::show {type} {
-    if {[llength $type] == 1} {
-        return $type
+    if {$type eq "never"} {
+        return never
     }
-    switch -- [lindex $type 0] {
-        native  { return "native [lindex $type 1]" }
-        block   { return "block/[lindex $type 2] -> [show [lindex $type 3]]" }
-        default { return $type }
+    if {[IsCompilerOnly $type]} {
+        switch -- [lindex $type 0] {
+            native { return "native [lindex $type 1]" }
+            block  { return "block/[lindex $type 2] -> [show [lindex $type 3]]" }
+        }
     }
+    return [core::type::show $type]
 }

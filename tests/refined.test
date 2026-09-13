@@ -1,0 +1,152 @@
+# refined.test -- programs using refined types, on both backends.
+#
+# The acceptance targets: a regex-validated type refined by an ordinary
+# predicate, an opaque type produced only by a trusted transform, and string
+# operations that discard refinements.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+# Static type the compiler inferred for the binding NAME in EXPRS.
+proc boundType {exprs name} {
+    foreach entry [core::compiler::bindingTypes $exprs] {
+        lassign $entry bound type
+        if {$bound eq $name} {
+            return $type
+        }
+    }
+    return "(not bound)"
+}
+
+set emailProgram {
+    {bind x {const str foo@example.com}}
+    {if {call {ref Emailish?} {ref x}}
+        {block {} {bind seen {ref x}} {ref seen}}
+        {block {} {bind other {ref x}} {const str invalid}}}
+}
+
+set escapeProgram {
+    {bind raw {const str {a&b=c}}}
+    {bind escaped {call {ref uriEscape} {ref raw}}}
+    {bind part {call {ref substring} {ref escaped} {const 0} {const 3}}}
+    {call {ref list} {ref escaped} {ref part}}
+}
+
+test refined-1 {Emailish? program evaluates in the then branch} -body {
+    list [run {*}$emailProgram] [differential $emailProgram]
+} -result {{"foo@example.com"} same}
+
+test refined-2 {compiler sees x : Emailish in the then branch only} -body {
+    list [boundType $emailProgram seen] [boundType $emailProgram other] [boundType $emailProgram x]
+} -result {{refined str Emailish} str str}
+
+test refined-3 {interpreter records the Emailish refinement for the branch} -body {
+    set v [runValue {bind x {const str foo@example.com}} \
+                    {if {call {ref Emailish?} {ref x}}
+                        {block {} {block {} {ref x}}}
+                        {block {} {const unreachable}}}]
+    core::refinementsOf [core::blockEnv $v] x
+} -result {{refined str Emailish}}
+
+test refined-4 {a failing validator takes the else branch} -body {
+    set p {{bind x {const str not-an-email}}
+           {if {call {ref Emailish?} {ref x}} {block {} {const yes}} {block {} {const no}}}}
+    list [run {*}$p] [differential $p]
+} -result {{"no"} same}
+
+test refined-5 {Emailish? requires a string} -body {
+    list [differential {{call {ref Emailish?} {const 5}}}] \
+         [catch {core::eval {call {ref Emailish?} {const 5}}} m opts] $m [dict get $opts -errorcode]
+} -result {same 1 {Emailish?: expected str, got 5} {CORE SEMANTIC TYPE}}
+
+test refined-6 {independent refinements accumulate} -body {
+    set p {
+        {bind x {const str a@b.io}}
+        {if {call {ref Emailish?} {ref x}}
+            {block {} {if {call {ref NonEmpty?} {ref x}}
+                          {block {} {bind both {ref x}} {block {} {ref x}}}
+                          {block {}}}}
+            {block {}}}
+    }
+    set v [runValue {*}$p]
+    list [boundType $p both] [core::refinementsOf [core::blockEnv $v] x] [differential $p]
+} -result {{refined str {Emailish NonEmpty}} {{refined str NonEmpty} {refined str Emailish}} same}
+
+test refined-7 {uriEscape: static types} -body {
+    dict map {name type} [core::compiler::programTypes $escapeProgram] {set type}
+} -result {raw str escaped {refined str UriQueryValue} part str}
+
+test refined-8 {uriEscape: runtime evidence on both backends} -body {
+    list [differential $escapeProgram] [lindex [outcomeUnder interp $escapeProgram] 1]
+} -result {same {["a%26b%3Dc"#{UriQueryValue}, "a%2"]}}
+
+test refined-9 {escaped equals the plain string with the same characters} -body {
+    set p [concat [lrange $escapeProgram 0 1] {
+        {call {ref list}
+            {call {ref ==} {ref escaped} {const str a%26b%3Dc}}
+            {call {ref eq} {ref escaped} {const str a%26b%3Dc}}
+            {call {ref string?} {ref escaped}}}
+    }]
+    list [run {*}$p] [differential $p]
+} -result {{[true, true, true]} same}
+
+test refined-10 {substring of escaped is a plain str, with no evidence} -body {
+    set saved [core::useBackend]
+    try {
+        set results {}
+        foreach backend {interp compile} {
+            core::useBackend $backend
+            set part [lindex [core::value::items [core::evalProgram $escapeProgram]] 1]
+            lappend results [core::value::evidence $part] [core::type::ofValue $part]
+        }
+        set results
+    } finally {
+        core::useBackend $saved
+    }
+} -result {{} str {} str}
+
+test refined-11 {string transformations discard refinements} -body {
+    set p {
+        {bind escaped {call {ref uriEscape} {const str {x y}}}}
+        {bind lower {call {ref lowercase} {ref escaped}}}
+        {bind joined {call {ref concat} {ref escaped} {const str !}}}
+        {bind n {call {ref length} {ref escaped}}}
+        {call {ref list}
+            {call {ref UriQueryValue?} {ref escaped}}
+            {call {ref UriQueryValue?} {ref lower}}
+            {call {ref UriQueryValue?} {ref joined}}
+            {ref n}}
+    }
+    list [run {*}$p] [differential $p] \
+         [dict map {name type} [core::compiler::programTypes $p] {set type}]
+} -result {{[true, false, false, 5]} same {escaped {refined str UriQueryValue} lower str joined str n int}}
+
+test refined-12 {an opaque type cannot be manufactured from a literal} -body {
+    set p {{call {ref UriQueryValue?} {const str a%26b}}}
+    list [run {*}$p] [differential $p]
+} -result {false same}
+
+test refined-13 {a native claiming a refined result must deliver the evidence} -body {
+    list [differential {{call {ref test-fake-escape} {const str abc}}}] \
+         [catch {core::eval {call {ref test-fake-escape} {const str abc}}} m opts] $m \
+         [dict get $opts -errorcode]
+} -result {same 1 {test-fake-escape result: contract violation: expected str[UriQueryValue], got "abc"} {CORE CONTRACT TYPE}}
+
+test refined-14 {a native must enforce its declared parameter types} -body {
+    list [differential {{call {ref test-lax-param} {const str nope}}}] \
+         [catch {core::eval {call {ref test-lax-param} {const str nope}}} m opts] $m \
+         [dict get $opts -errorcode]
+} -result {same 1 {test-lax-param argument 0: contract violation: expected str[Emailish], got "nope"} {CORE CONTRACT TYPE}}
+
+test refined-15 {refinement from a flow fact: a refined parameter proves its argument} -body {
+    set p {
+        {bind f {block {s} {call {ref test-lax-param} {ref s}} {bind after {ref s}} {ref after}}}
+        {call {ref f} {const str a@b.io}}
+    }
+    list [run {*}$p] [differential $p] [boundType $p after]
+} -result {{"a@b.io"} same {refined str Emailish}}
+
+test refined-16 {substring range errors} -body {
+    differential {{call {ref substring} {const str abc} {const 2} {const 5}}}
+} -result same
+
+cleanupTests

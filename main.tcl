@@ -3,7 +3,9 @@
 #   tclsh main.tcl [-backend interp|compile] [-code] [FILE.ir ...]
 #
 # Runs the given program files (default: every examples/*.ir) and prints
-# each program's value. -code also prints the Tcl code the compiler generates.
+# each program's value, with runtime evidence shown as "text"#{Type}. With
+# -backend compile it also prints the inferred types of program-level
+# bindings; -code prints the Tcl code the compiler generates.
 #
 # For every Block in the result (directly or as a list element) the runner
 # also prints the refinements visible in the Block's captured environment, so
@@ -30,12 +32,17 @@ proc runFile {path showCode} {
         puts "   error: $value ([dict get $options -errorcode])"
         return 1
     }
-    puts "   value: [core::formatValue $value]"
+    puts "   value: [core::value::show $value 1]"
+    if {[core::useBackend] eq "compile"} {
+        dict for {name type} [core::compiler::programTypes $program] {
+            puts "   type:  $name : [core::types::show $type]"
+        }
+    }
     set index 0
     foreach probe [probeValues $value] {
         set shown {}
         dict for {name facts} [core::envRefinements [core::blockEnv $probe]] {
-            lappend shown "$name : [join $facts {, }]"
+            lappend shown "$name : [join [lmap fact $facts {core::type::show $fact}] {, }]"
         }
         if {$shown eq ""} {
             set shown [list (none)]

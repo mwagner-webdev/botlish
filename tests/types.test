@@ -1,0 +1,130 @@
+# types.test -- core::type: semantic value types, named types, evidence.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+proc str {text} { return [core::value::str $text] }
+
+test type-1 {normalize: primitives, shorthand names, refined sets} -body {
+    list [core::type::normalize int] \
+         [core::type::normalize any] \
+         [core::type::normalize Emailish] \
+         [core::type::normalize {refined str {NonEmpty Emailish Emailish}}] \
+         [core::type::normalize {refined str {}}]
+} -result {int any {refined str Emailish} {refined str {Emailish NonEmpty}} str}
+
+test type-2 {valid rejects unknown names, bad bases and malformed forms} -body {
+    list [core::type::valid Emailish] \
+         [core::type::valid Nope] \
+         [core::type::valid {refined int {Emailish}}] \
+         [core::type::valid {refined any {Emailish}}] \
+         [core::type::valid {refined str}] \
+         [core::type::valid never]
+} -result {1 0 0 0 0 0}
+
+test type-3 {base} -body {
+    list [core::type::base str] [core::type::base {refined str {Emailish}}] \
+         [core::type::base Result.ok] [core::type::base any]
+} -result {str str result {}}
+
+test type-4 {subtype} -body {
+    list [core::type::subtype Emailish str] \
+         [core::type::subtype str Emailish] \
+         [core::type::subtype {refined str {Emailish NonEmpty}} Emailish] \
+         [core::type::subtype Emailish {refined str {Emailish NonEmpty}}] \
+         [core::type::subtype int any] \
+         [core::type::subtype any int] \
+         [core::type::subtype int str]
+} -result {1 0 1 0 1 0 0}
+
+test type-5 {narrow combines evidence} -body {
+    list [core::type::narrow any Emailish] \
+         [core::type::narrow str Emailish] \
+         [core::type::narrow Emailish str] \
+         [core::type::narrow Emailish NonEmpty] \
+         [core::type::narrow {refined str {Emailish NonEmpty}} Emailish]
+} -result {{refined str Emailish} {refined str Emailish} {refined str Emailish} {refined str {Emailish NonEmpty}} {refined str {Emailish NonEmpty}}}
+
+test type-6 {lub keeps shared evidence only} -body {
+    list [core::type::lub Emailish Emailish] \
+         [core::type::lub Emailish str] \
+         [core::type::lub {refined str {Emailish NonEmpty}} {refined str {NonEmpty UriQueryValue}}] \
+         [core::type::lub Emailish int]
+} -result {{refined str Emailish} str {refined str NonEmpty} any}
+
+test type-7 {compiler types delegate to core types} -body {
+    list [core::types::kindOf str] \
+         [core::types::kindOf {refined str {Emailish}}] \
+         [core::types::kindOf {native +}] \
+         [core::types::kindOf never] \
+         [core::types::narrow any Emailish] \
+         [core::types::lub never Emailish] \
+         [core::types::lub {native +} {native -}] \
+         [core::types::narrow {native +} native]
+} -result {str str native {} {refined str Emailish} {refined str Emailish} native {native +}}
+
+test type-8 {validator types: acceptsValue and validate} -body {
+    list [core::type::acceptsValue Emailish [str foo@example.com]] \
+         [core::type::acceptsValue Emailish [str not-an-email]] \
+         [core::type::acceptsValue Emailish [core::value::int 5]] \
+         [core::type::validate Emailish [str a.b@mail.example.org]] \
+         [core::type::acceptsValue {refined str {Emailish NonEmpty}} [str x@y.io]] \
+         [core::type::acceptsValue any [core::value::unit]] \
+         [core::type::acceptsValue Result.ok [core::value::ok [core::value::int 1]]] \
+         [core::type::acceptsValue Result.ok [core::value::err [core::value::int 1]]]
+} -result {1 0 0 1 1 1 1 0}
+
+test type-9 {opaque types accept only values carrying evidence} -body {
+    set plain [str abc]
+    set proven [core::value::withEvidence $plain UriQueryValue]
+    list [core::type::acceptsValue UriQueryValue $plain] \
+         [core::type::acceptsValue UriQueryValue $proven] \
+         [core::value::evidence $proven] \
+         [core::value::hasEvidence $proven UriQueryValue] \
+         [core::value::strOf $proven]
+} -result {0 1 UriQueryValue 1 abc}
+
+test type-10 {evidence accumulates as a set} -body {
+    set v [core::value::withEvidence [str a@b.io] Emailish]
+    set v [core::value::withEvidence $v UriQueryValue]
+    set v [core::value::withEvidence $v Emailish]
+    core::value::evidence $v
+} -result {Emailish UriQueryValue}
+
+test type-11 {withEvidence refuses a validator type the value fails} -body {
+    core::value::withEvidence [str nope] Emailish
+} -returnCodes error -match glob -result {*does not satisfy Emailish}
+
+test type-12 {withEvidence refuses a different base} -body {
+    core::value::withEvidence [core::value::int 1] UriQueryValue
+} -returnCodes error -match glob -result {*not of base type*}
+
+test type-13 {evidence does not change equality or display} -body {
+    set proven [core::value::withEvidence [str abc] UriQueryValue]
+    list [core::value::equal $proven [str abc]] \
+         [core::value::show $proven] \
+         [core::value::show $proven 1] \
+         [core::type::ofValue $proven]
+} -result {1 {"abc"} {"abc"#{UriQueryValue}} {refined str UriQueryValue}}
+
+test type-14 {register validates its options} -body {
+    list [catch {core::type::register int -base str -opaque 1}] \
+         [catch {core::type::register T1 -base any -opaque 1}] \
+         [catch {core::type::register T2 -base str}] \
+         [catch {core::type::register T3 -base str -opaque 1 -validator {expr 1}}] \
+         [catch {core::type::register T4 -base int -opaque 1}] \
+         [catch {core::type::register Emailish -base str -opaque 1}]
+} -result {1 1 1 1 1 1}
+
+test type-15 {assertValue raises a contract error} -body {
+    core::type::assertValue UriQueryValue [str abc] demo
+} -returnCodes error -errorCode {CORE CONTRACT TYPE} \
+  -result {demo: contract violation: expected str[UriQueryValue], got "abc"}
+
+test type-16 {native registry delegates type checking to core::type} -body {
+    list [catch {core::registerNative test-bad-1 -arity 1 -impl list -param-types {Nope}} m1] $m1 \
+         [catch {core::registerNative test-bad-2 -arity 1 -impl list -refines-true {0 Int}} m2] $m2 \
+         [dict get [core::native::metadata uriEscape] resultType] \
+         [dict get [core::native::metadata Emailish?] refinesTrue]
+} -result {1 {core::native::register: -param-types of "test-bad-1": core::type: unknown type "Nope"} 1 {core::native::register: -refines-true of "test-bad-2": core::type: unknown type "Int"} {refined str UriQueryValue} {0 {refined str Emailish}}}
+
+cleanupTests

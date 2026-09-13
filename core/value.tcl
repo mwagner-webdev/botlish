@@ -6,7 +6,11 @@
 # distinct values.
 #
 #   {int DIGITS}              arbitrary-precision integer, canonical decimal
-#   {str TEXT}                string
+#   {str TEXT ?EVIDENCE?}     string; EVIDENCE is a sorted, non-empty list of
+#                             named types the string is proven to satisfy
+#                             (see type.tcl). Evidence is knowledge *about*
+#                             the string, not part of it: equality, eq and
+#                             display ignore it.
 #   {bool true|false}         Boolean
 #   {unit}                    the unit value
 #   {list ITEMS}              ITEMS is a Tcl list of runtime values
@@ -40,6 +44,47 @@ proc core::value::int {digits} {
 
 proc core::value::str {text} {
     return [list str $text]
+}
+
+# ---------------------------------------------------------------------------
+# Evidence
+
+# The named types V carries evidence for (a sorted list, possibly empty).
+proc core::value::evidence {v} {
+    if {[kind $v] eq "str" && [llength $v] == 3} {
+        return [lindex $v 2]
+    }
+    return {}
+}
+
+proc core::value::hasEvidence {v name} {
+    return [expr {$name in [evidence $v]}]
+}
+
+# V with added evidence for every named type in TYPE (a named type or a
+# refined type). Only trusted Tcl code calls this. For validator types the
+# validator must accept V; opaque types are taken on the caller's word, which
+# is what makes such callers trusted.
+proc core::value::withEvidence {v type} {
+    set type [core::type::normalize $type]
+    if {[core::type::base $type] ne [kind $v]} {
+        error "core::value::withEvidence: [show $v] is not of base type [core::type::show $type]"
+    }
+    if {[kind $v] ni $core::type::evidenceKinds} {
+        error "core::value::withEvidence: [kind $v] values cannot carry evidence"
+    }
+    set names [evidence $v]
+    foreach name [core::type::evidenceOf $type] {
+        if {![dict get [core::type::metadata $name] opaque]
+                && ![core::type::runValidator $name $v]} {
+            error "core::value::withEvidence: [show $v] does not satisfy $name"
+        }
+        lappend names $name
+    }
+    if {$names eq ""} {
+        return $v
+    }
+    return [list str [lindex $v 1] [lsort -unique $names]]
 }
 
 # The single point where a host (Tcl) truth value becomes a language Boolean.
@@ -174,13 +219,17 @@ proc core::value::equal {a b} {
 }
 
 # ---------------------------------------------------------------------------
-# Display: unambiguous human-readable rendering.
+# Display: unambiguous human-readable rendering. With WITH-EVIDENCE, evidence
+# is appended as "TEXT"#{Name ...} (for debugging and differential tests).
 
-proc core::value::show {v} {
+proc core::value::show {v {withEvidence 0}} {
     switch -- [kind $v] {
         int  { return [lindex $v 1] }
         str  {
             set escaped [string map {\\ \\\\ \" \\\" \n \\n \t \\t} [lindex $v 1]]
+            if {$withEvidence && [evidence $v] ne ""} {
+                return "\"$escaped\"#{[evidence $v]}"
+            }
             return "\"$escaped\""
         }
         bool { return [lindex $v 1] }
@@ -188,11 +237,11 @@ proc core::value::show {v} {
         list {
             set parts {}
             foreach item [lindex $v 1] {
-                lappend parts [show $item]
+                lappend parts [show $item $withEvidence]
             }
             return "\[[join $parts {, }]\]"
         }
-        result { return "[lindex $v 1]([show [lindex $v 2]])" }
+        result { return "[lindex $v 1]([show [lindex $v 2] $withEvidence])" }
         block  { return "<block ([join [lindex $v 1] { }])>" }
         native { return "<native [lindex $v 1]>" }
     }

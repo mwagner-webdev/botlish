@@ -14,15 +14,15 @@ proc probeRefinements {value name} {
     return $result
 }
 
-test refine-1 {integer? true branch installs Int refinement} -body {
+test refine-1 {integer? true branch installs int refinement} -body {
     set v [runValue {bind x {const 41}} \
                     {if {call {ref integer?} {ref x}}
                         {block {} {block {} {ref x}}}
                         {block {} {const unreachable}}}]
     core::refinementsOf [core::blockEnv $v] x
-} -result Int
+} -result int
 
-test refine-2 {integer? false branch does not install Int refinement} -body {
+test refine-2 {integer? false branch does not install int refinement} -body {
     set v [runValue {bind x {const hello}} \
                     {if {call {ref integer?} {ref x}}
                         {block {} {const unreachable}}
@@ -38,7 +38,7 @@ test refine-3 {branch refinement disappears outside the branch} -body {
                     {bind after {block {} {ref x}}} \
                     {call {ref list} {ref inside} {ref after}}]
     probeRefinements $v x
-} -result {Int {}}
+} -result {int {}}
 
 test refine-4 {refinement is visible in nested scopes within the branch} -body {
     set v [runValue {bind x {const 41}} \
@@ -46,7 +46,7 @@ test refine-4 {refinement is visible in nested scopes within the branch} -body {
                         {block {} {call {block {} {block {} {ref x}}}}}
                         {block {} {const unreachable}}}]
     core::envRefinements [core::blockEnv $v]
-} -result {x Int}
+} -result {x int}
 
 test refine-5 {refinement follows the binding, not the name} -body {
     set v [runValue {bind x {const 41}} \
@@ -80,7 +80,7 @@ test refine-8 {predicates remain ordinary values: aliasing keeps metadata} -body
                         {block {} {block {} {ref x}}}
                         {block {} {const unreachable}}}]
     core::refinementsOf [core::blockEnv $v] x
-} -result Int
+} -result int
 
 test refine-9 {other registered predicates refine generically} -body {
     set v [runValue {bind s {const hello}} \
@@ -91,16 +91,16 @@ test refine-9 {other registered predicates refine generically} -body {
                                       {block {} {const unreachable}}}}
                         {block {} {const unreachable}}}]
     core::envRefinements [core::blockEnv $v]
-} -result {r Result.ok s Str}
+} -result {r {{refined result Result.ok}} s str}
 
 test refine-10 {registry supports multi-argument and false-branch rules} -setup {
     if {"test-both-ints?" ni [core::native::names]} {
         core::registerNative test-both-ints? -arity 2 \
             -impl {apply {{a b} {core::value::bool [expr {[core::value::kind $a] eq "int" && [core::value::kind $b] eq "int"}]}}} \
-            -refines-true {0 Int 1 Int}
+            -refines-true {0 int 1 int}
         core::registerNative test-not-int? -arity 1 \
             -impl {apply {{a} {core::value::bool [expr {[core::value::kind $a] ne "int"}]}}} \
-            -refines-false {0 Int}
+            -refines-false {0 int}
     }
 } -body {
     set v [runValue {bind a {const 1}} \
@@ -114,10 +114,10 @@ test refine-10 {registry supports multi-argument and false-branch rules} -setup 
                     {call {ref list} {ref p1} {ref p2}}]
     lassign [core::value::items $v] p1 p2
     list [core::envRefinements [core::blockEnv $p1]] [core::envRefinements [core::blockEnv $p2]]
-} -result {{a Int b Int} {a Int}}
+} -result {{a int b int} {a int}}
 
 test refine-11 {refinement metadata is not special-cased by name} -body {
     dict get [core::native::metadata integer?] refinesTrue
-} -result {0 Int}
+} -result {0 int}
 
 cleanupTests

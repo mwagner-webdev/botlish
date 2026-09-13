@@ -1,0 +1,81 @@
+# regex.test -- the engine-independent regex IR.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+proc re {ir} { return [core::regex::create $ir] }
+
+set emailish {seq
+    {repeat {class alnum} 1 inf}
+    {lit @}
+    {repeat {class alnum} 1 inf}
+    {lit .}
+    {repeat {class alpha} 2 inf}}
+
+test regex-1 {lowering produces an ARE} -body {
+    core::regex::compileTcl [re $emailish]
+} -result [string map {@ \\u0040 . \\u002E} {(?:(?:[[:alnum:]]){1,}@(?:[[:alnum:]]){1,}.(?:[[:alpha:]]){2,})}]
+
+test regex-2 {matches tests the whole text} -body {
+    set r [re $emailish]
+    lmap text {foo@example.com foo@examplexcom @x.com a@b.c xfoo@example.com. "a@b.com\n"} {
+        core::regex::matchesText $r $text
+    }
+} -result {1 0 0 0 0 0}
+
+test regex-3 {literal text never acts as regex syntax} -body {
+    set r [re {lit {a.b*[c]$\d}}]
+    list [core::regex::matchesText $r {a.b*[c]$\d}] [core::regex::matchesText $r {axbbbc}]
+} -result {1 0}
+
+test regex-4 {classes, sets and ranges} -body {
+    set r [re {seq {set {range a c} {char _} {class digit}} {repeat {class space} 0 1} {range x z}}]
+    lmap text {ax _\ty 9z dx ab} { core::regex::matchesText $r $text }
+} -result {1 1 1 0 0}
+
+test regex-5 {alternation and bounded repetition} -body {
+    set r [re {repeat {alt {lit ab} {lit c}} 2 3}]
+    lmap text {abc cab ababab ab abababab} { core::regex::matchesText $r $text }
+} -result {1 1 1 0 0}
+
+test regex-6 {captures by name} -body {
+    set r [re {seq {capture user {repeat {class alnum} 1 inf}} {lit @} {capture host {repeat {any} 1 inf}}}]
+    list [core::regex::captureNames $r] \
+         [core::regex::captures $r joe@host.example] \
+         [core::regex::captures $r nope]
+} -result {{user host} {user joe host host.example} {}}
+
+test regex-7 {non-ASCII literals and classes} -body {
+    # Characters are built with format: tcltest reads test files in the
+    # system encoding, which need not be UTF-8.
+    set e [format %c 0xE9]
+    set zhong [format %c 0x4E2D]
+    set r [re [list seq {repeat {class alpha} 1 inf} [list lit $e$zhong]]]
+    list [core::regex::matchesText $r "caf$e$e$zhong"] [core::regex::matchesText $r "caf$e"]
+} -result {1 0}
+
+test regex-8 {matches is a validator on string values} -body {
+    set r [re $emailish]
+    list [core::regex::matches $r [core::value::str a@b.io]] \
+         [catch {core::regex::matches $r [core::value::int 1]}]
+} -result {1 1}
+
+foreach {name ir message} {
+    unknown-node      {bogus}                         {*unknown regex node*}
+    unicode-property  {unicode-property L}            {*not supported yet*}
+    repeat-too-large  {repeat {lit a} 0 256}          {*repeat maximum*}
+    repeat-inverted   {repeat {lit a} 3 2}            {*repeat maximum*}
+    repeat-bad-min    {repeat {lit a} x 2}            {*repeat minimum*}
+    empty-range       {range z a}                     {*empty range*}
+    nested-set        {set {set {char a}}}            {*set item*}
+    multi-char        {char ab}                       {*single character*}
+    bad-class         {class word}                    {*unknown class*}
+    duplicate-capture {seq {capture a {lit x}} {capture a {lit y}}} {*duplicate capture*}
+    empty-alt         {alt}                           {*wrong number of operands*}
+    engine-syntax     {(?=x)}                          {*unknown regex node*}
+} {
+    test regex-reject-$name "IR outside the safe contract is rejected: $name" -body {
+        core::regex::create $ir
+    } -returnCodes error -match glob -result $message
+}
+
+cleanupTests

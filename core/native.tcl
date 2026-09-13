@@ -9,14 +9,21 @@
 #   arity           exact argument count, or * for any
 #   refinesTrue     facts proven when the callable returns true
 #   refinesFalse    facts proven when the callable returns false
-#   paramTypes      value kinds the implementation *requires* of each
+#   paramTypes      types (type.tcl) the implementation *requires* of each
 #                   argument (any = no requirement); a call that returns
-#                   proves its arguments had these kinds. "" = unknown.
-#   resultType      value kind of every result, or any
+#                   proves its arguments had these types. "" = unknown.
+#   resultType      type of every result, or any
 #
-# Refinement rules are flat lists of ARG-INDEX FACT pairs, e.g. {0 Int}
-# ("argument 0 satisfies Int"). The evaluator never special-cases a native by
-# name; it only consults this metadata (see refine.tcl).
+# Refinement rules are flat lists of ARG-INDEX TYPE pairs, e.g. {0 int}
+# ("argument 0 is an int") or {0 {refined str {Emailish}}}. The evaluator
+# never special-cases a native by name; it only consults this metadata (see
+# refine.tcl).
+#
+# Declared types are a *contract*. After every call the reference runtime
+# asserts that each argument satisfied its parameter type and that the
+# result satisfies the result type, so a native cannot claim to return, say,
+# a UriQueryValue while returning a plain string. Types are accepted in any
+# form type.tcl understands and stored in canonical form.
 
 namespace eval core::native {
     variable registry [dict create]
@@ -52,19 +59,23 @@ proc core::native::register {name args} {
     foreach option {-refines-true -refines-false} {
         set rules [dict get $options $option]
         if {[llength $rules] % 2} {
-            error "core::native::register: $option must be ARG-INDEX FACT pairs"
+            error "core::native::register: $option must be ARG-INDEX TYPE pairs"
         }
-        foreach {index fact} $rules {
-            if {![string is digit -strict $index] || $fact eq ""} {
-                error "core::native::register: bad $option rule \"$index $fact\""
+        set canonical {}
+        foreach {index type} $rules {
+            if {![string is digit -strict $index]} {
+                error "core::native::register: bad $option argument index \"$index\""
             }
+            lappend canonical $index [CanonicalType $name $option $type]
         }
+        dict set options $option $canonical
     }
-    set kinds {int str bool unit list result block native any}
-    foreach type [concat [dict get $options -param-types] [list [dict get $options -result-type]]] {
-        if {$type ni $kinds} {
-            error "core::native::register: unknown type \"$type\" (known: $kinds)"
-        }
+    set paramTypes {}
+    foreach type [dict get $options -param-types] {
+        lappend paramTypes [CanonicalType $name -param-types $type]
+    }
+    if {$arity ne "*" && $paramTypes ne "" && [llength $paramTypes] != $arity} {
+        error "core::native::register: -param-types of \"$name\" must list $arity type(s)"
     }
     dict set registry $name [dict create \
         name $name \
@@ -72,9 +83,16 @@ proc core::native::register {name args} {
         arity $arity \
         refinesTrue [dict get $options -refines-true] \
         refinesFalse [dict get $options -refines-false] \
-        paramTypes [dict get $options -param-types] \
-        resultType [dict get $options -result-type]]
+        paramTypes $paramTypes \
+        resultType [CanonicalType $name -result-type [dict get $options -result-type]]]
     return [core::value::native $name]
+}
+
+proc core::native::CanonicalType {name option type} {
+    if {[catch {core::type::normalize $type} canonical]} {
+        error "core::native::register: $option of \"$name\": $canonical"
+    }
+    return $canonical
 }
 
 proc core::native::names {} {
@@ -105,5 +123,17 @@ proc core::native::invoke {nativeValue argValues} {
             "$name expects $arity argument(s), got [llength $argValues]"
     }
     set result [{*}[dict get $meta impl] {*}$argValues]
+    core::value::check $result
+    # The call returned: check the contract it declared.
+    set index 0
+    foreach type [dict get $meta paramTypes] {
+        if {$type ne "any"} {
+            core::type::AssertCanonical $type [lindex $argValues $index] "$name argument $index"
+        }
+        incr index
+    }
+    if {[dict get $meta resultType] ne "any"} {
+        core::type::AssertCanonical [dict get $meta resultType] $result "$name result"
+    }
     return [core::completion::normal $result]
 }

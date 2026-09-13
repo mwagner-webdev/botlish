@@ -77,6 +77,8 @@ namespace eval core::compiler {
     variable cache [dict create]
     # Proc sources generated for the unit being compiled.
     variable pending {}
+    # {NAME TYPE} for every bind compiled into the unit, in compilation order.
+    variable bindLog {}
     # Native name -> intrinsic generator.
     variable intrinsics [dict create \
         +        {IntrinsicArith +} \
@@ -121,10 +123,11 @@ proc core::compiler::compileUnit {mode exprs} {
     variable cache
     set key [list $mode $exprs]
     if {![dict exists $cache $key]} {
-        lassign [GenerateUnit $mode $exprs] name code types
+        lassign [GenerateUnit $mode $exprs] name code types bindings
         # The procs are defined only after the whole unit compiled cleanly.
         namespace eval ::core::compiler::code $code
-        dict set cache $key [dict create name ::core::compiler::code::$name code $code types $types]
+        dict set cache $key [dict create name ::core::compiler::code::$name \
+            code $code types $types bindings $bindings]
     }
     return [dict get $cache $key name]
 }
@@ -141,6 +144,15 @@ proc core::compiler::programTypes {exprs} {
     variable cache
     compileUnit program $exprs
     return [dict get $cache [list program $exprs] types]
+}
+
+# Every binding compiled for the program EXPRS, at any depth, with its
+# inferred static type: a list of {NAME TYPE} in compilation order. Types
+# include branch refinements and flow facts known where the bind occurs.
+proc core::compiler::bindingTypes {exprs} {
+    variable cache
+    compileUnit program $exprs
+    return [dict get $cache [list program $exprs] bindings]
 }
 
 # ---------------------------------------------------------------------------
@@ -372,10 +384,12 @@ proc core::compiler::LearnFact {ctxVar op type} {
 # ---------------------------------------------------------------------------
 # Units and blocks
 
-# Returns {UNIT-PROC-NAME CODE PROGRAM-TYPES}.
+# Returns {UNIT-PROC-NAME CODE PROGRAM-TYPES BINDINGS}.
 proc core::compiler::GenerateUnit {mode exprs} {
     variable pending
+    variable bindLog
     set pending {}
+    set bindLog {}
     set program [expr {$mode eq "program"}]
     set ctx [NewContext 0 $program]
     set top [dict create kind top materialized 1 frame base init {}]
@@ -400,7 +414,7 @@ proc core::compiler::GenerateUnit {mode exprs} {
             dict set types [string range $key 4 end] $type
         }
     }
-    return [list $name [join $pending \n\n] $types]
+    return [list $name [join $pending \n\n] $types $bindLog]
 }
 
 proc core::compiler::ProcSource {name params ctx} {
@@ -413,6 +427,7 @@ proc core::compiler::ProcSource {name params ctx} {
 proc core::compiler::CompileBlock {ctxVar node {selfKey ""} {procName ""}} {
     upvar 1 $ctxVar outer
     variable pending
+    variable bindLog
     set params [core::ir::blockParams $node]
     set arity [llength $params]
     if {$procName eq ""} {
@@ -428,12 +443,12 @@ proc core::compiler::CompileBlock {ctxVar node {selfKey ""} {procName ""}} {
         if {$attempt == $attempts && $attempts > 1} {
             set assumed any
         }
-        set saved $pending
+        set saved [list $pending $bindLog]
         lassign [CompileBlockBody outer $node $procName $selfKey $assumed] resultType source
         if {$selfKey eq "" || $resultType eq $assumed || $assumed eq "any"} {
             break
         }
-        set pending $saved
+        lassign $saved pending bindLog
         set assumed $resultType
     }
     lappend pending $source
@@ -657,6 +672,8 @@ proc core::compiler::CompileBind {ctxVar name valueNode} {
     if {$typed} {
         dict set ctx types $key [OpType $value]
     }
+    variable bindLog
+    lappend bindLog [list $name [OpType $value]]
 
     if {[dict get $scope materialized]} {
         if {$first} {
@@ -928,7 +945,7 @@ proc core::compiler::CompileIf {ctxVar node} {
             set rules [core::native::refinementRules [lindex [OpType $callee] 1] $branchOutcome]
             foreach {index fact} $rules {
                 if {$index < [llength $argOps]} {
-                    dict lappend branchFacts $branchOutcome [lindex $argOps $index] [core::types::ofFact $fact]
+                    dict lappend branchFacts $branchOutcome [lindex $argOps $index] $fact
                 }
             }
         }

@@ -251,8 +251,10 @@ runtime, so code run through `core::evalIn` gets the same errors.
 ## 6. Predicates and refinement
 
 A callable can carry refinement metadata: facts that are proven when it
-returns `true` or `false`. For example, the metadata for `integer?` is
-"when the result is true, argument 0 satisfies `Int`".
+returns `true` or `false`. A fact is a **type** (§14). For example, the
+metadata for `integer?` is `-refines-true {0 int}` ("when the result is
+true, argument 0 is an `int`"). The metadata for `Emailish?` is
+`{0 {refined str {Emailish}}}`.
 
 When an `if` condition has the form `(call (ref P) ARG...)`, the evaluator:
 
@@ -279,10 +281,13 @@ Invalid programs raise Tcl errors with error code `CORE SEMANTIC <KIND>`:
 
 `UNBOUND`, `DUPLICATE`, `NOT-CALLABLE`, `ARITY`, `NOT-BOOLEAN`, `TYPE`,
 `EQUALITY`, `BREAK-OUTSIDE-LOOP`, `CONTINUE-OUTSIDE-LOOP`,
-`RETURN-OUTSIDE-CALLABLE`, `UNCAUGHT-ERROR`.
+`RETURN-OUTSIDE-CALLABLE`, `UNCAUGHT-ERROR`, `RANGE`.
 
 Malformed IR raises `CORE MALFORMED`. Application-level failures are `Result`
 values. The two are never mixed.
+
+A native that breaks its declared type contract (§8) raises
+`CORE CONTRACT TYPE`. That's a bug in trusted Tcl code, not in the program.
 
 ## 8. Native callables in the root environment
 
@@ -293,13 +298,20 @@ values. The two are never mixed.
 | `==` | any, any → bool (value equality) | |
 | `eq` | str, str → bool | |
 | `list` | any... → list | |
-| `integer?` | any → bool | true: arg 0 : `Int` |
-| `string?` | any → bool | true: arg 0 : `Str` |
-| `list?` | any → bool | true: arg 0 : `List` |
+| `integer?` | any → bool | true: arg 0 : `int` |
+| `string?` | any → bool | true: arg 0 : `str` |
+| `list?` | any → bool | true: arg 0 : `list` |
 | `ok?` | any → bool | true: arg 0 : `Result.ok` |
 | `error?` | any → bool | true: arg 0 : `Result.error` |
 | `result-value` | ok Result → its value | |
 | `result-error` | error Result → its payload | |
+| `length` | str → int | |
+| `substring` | str, int, int → str (characters `start <= i < end`) | |
+| `lowercase` | str → str | |
+| `concat` | str, str → str | |
+| `Emailish?` | str → bool (`lib/web.tcl`) | true: arg 0 : `Emailish` |
+| `UriQueryValue?` | str → bool (`lib/web.tcl`) | true: arg 0 : `UriQueryValue` |
+| `uriEscape` | str → `UriQueryValue` (`lib/web.tcl`) | |
 
 New natives are registered through the registry, not by changing the
 evaluator:
@@ -308,14 +320,24 @@ evaluator:
 core::registerNative even? -arity 1 -impl myEvenImpl -refines-true {0 Even}
 ```
 
-`-refines-true` and `-refines-false` take `ARG-INDEX FACT` pairs.
+`-refines-true` and `-refines-false` take `ARG-INDEX TYPE` pairs.
 
-Natives may also declare a signature: `-param-types {int int}` lists the
-value kinds the implementation *requires* of each argument (`any` means no
-requirement), and `-result-type int` gives the kind of every result. These
-are promises the compiler relies on (§13). A native must enforce every
-parameter kind it declares, and must return only the result kind it
-declares.
+Natives may also declare a signature. `-param-types {int int}` lists the
+type each argument must have (`any` means no requirement), and
+`-result-type int` gives the type of every result. Types can be refined, for
+example `-result-type {refined str {UriQueryValue}}`.
+
+**Declared types are a contract.** After every call, the reference runtime
+checks that each argument satisfied its parameter type and that the result
+satisfies the result type. A violation raises `CORE CONTRACT TYPE`. So a
+native can't claim to return a `UriQueryValue` while returning a plain
+string. The compiler relies on these declarations (§13). Only its inlined
+intrinsics for trusted builtins skip the check.
+
+**Strings discard refinements.** A string transformation's result carries no
+refinement unless its contract explicitly establishes one. So
+`substring(UriQueryValue)` is a plain `str`, while `uriEscape(str)` is a
+`UriQueryValue`.
 
 ## 9. Public API
 
@@ -327,6 +349,9 @@ declares.
 | `core::useBackend ?NAME?` | select or query the backend (`interp`, `compile`) |
 | `core::compiler::generatedCode EXPRS ?MODE?` | the Tcl code generated for a unit (`program` or `sequence`) |
 | `core::compiler::programTypes EXPRS` | inferred types of program-level bindings |
+| `core::compiler::bindingTypes EXPRS` | inferred type of every `bind`, at any depth |
+| `core::type::*` | semantic types (§14) |
+| `core::regex::*` | regex IR (§15) |
 | `core::check NODE` | static shape and control-placement check |
 | `core::rootEnv` / `core::childEnv ENV` | create environments |
 | `core::envDefine ENV NAME VALUE` | add a binding, for embedding and tests |
@@ -353,9 +378,12 @@ declares.
 | `core/refine.tcl` | deriving and installing branch refinements |
 | `core/runtime.tcl` | semantic rules shared by both backends |
 | `core/evaluator.tcl` | interpreter (one handler per form), backend selection, public API |
-| `core/primitives.tcl`, `core/predicates.tcl` | builtin natives |
+| `core/type.tcl` | semantic types: named/refined types, subtyping, value membership |
+| `core/regex.tcl` | engine-independent regex IR, lowered to Tcl ARE |
+| `core/primitives.tcl`, `core/predicates.tcl`, `core/strings.tcl` | builtin natives |
+| `lib/web.tcl` | demonstration library: `Emailish`, `UriQueryValue`, `uriEscape` |
 | `compiler/compiler.tcl` | IR → Tcl compiler backend |
-| `compiler/types.tcl` | static types used by the compiler |
+| `compiler/types.tcl` | compiler-only static types, delegating to `core/type.tcl` |
 | `bench/` | benchmark programs and runner |
 
 Implementation notes (not part of the semantics):
@@ -440,33 +468,44 @@ completion out of a call. No form produces one yet.
 
 ## 13. Type inference
 
-`compiler/types.tcl` defines the static types the compiler infers. Types only
-*describe* runtime values. They never change what a program means: the
-compiler uses them to pick faster code whose behavior is identical, and falls
-back to generic code whenever a type is unknown.
+The compiler's static types are the semantic types of `core/type.tcl` (§14),
+plus a few forms only the compiler needs, defined in `compiler/types.tcl`.
+Types only *describe* runtime values. They never change what a program
+means: the compiler uses them to pick faster code whose behavior is
+identical, and falls back to generic code whenever a type is unknown. The
+invariant is that an operand of semantic type `T` always holds a value `v`
+for which `core::type::acceptsValue T v` is true.
 
-| Type | Describes |
-|------|-----------|
-| `int` `str` `bool` `unit` `list` `result` | values of that kind |
-| `native`, `block` | some callable of that kind |
-| `{native NAME}` | exactly the native `NAME` |
-| `{block PROC ARITY RESULT}` | a Block compiled to `PROC`, whose calls return `RESULT` |
-| `any` | nothing known |
-| `never` | no value: evaluation does not complete normally |
+| Type | Defined in | Describes |
+|------|------------|-----------|
+| `int` `str` `bool` `unit` `list` `result` `native` `block` | core | values of that kind |
+| `{refined BASE {NAMES…}}` | core | values of `BASE` satisfying every named type |
+| `any` | core | nothing known |
+| `{native NAME}` | compiler | exactly the native `NAME` |
+| `{block PROC ARITY RESULT}` | compiler | a Block compiled to `PROC`, whose calls return `RESULT` |
+| `never` | compiler | no value: evaluation does not complete normally |
+
+`core::types::lub`, `narrow` and `kindOf` handle the compiler-only forms
+themselves and delegate everything else to `core::type`. For example,
+`kindOf {refined str {Emailish}}` is `str`, and narrowing `str` by
+`Emailish` gives `{refined str {Emailish}}`.
 
 **Where types come from.**
 
 * **Literals and constructors:** `const`, `ok`, `error-value`, `list`.
 * **Root constants** in program mode: `+` has type `{native +}`, and `true`
   has type `bool`.
-* **Native signatures** (§8): a call of `-` has type `int`.
+* **Native signatures** (§8): a call of `-` has type `int`, and a call of
+  `uriEscape` has type `{refined str {UriQueryValue}}`.
 * **Immutability:** a binding has the type of the expression it was bound
   to, and keeps it.
 * **Refinements:** inside the `then` branch of `(if (call (ref integer?) (ref x)) …)`,
-  `x` is `int`. This is the planned use of predicate metadata.
-* **Flow facts:** when a native that requires `int` returns, its argument
-  was an `int`. Because bindings are immutable, the argument stays an `int`
-  for the rest of the path.
+  `x` is `int`. Inside the `then` branch of `Emailish?`, it's
+  `{refined str {Emailish}}`. Nested predicates accumulate evidence.
+* **Flow facts:** when a native that requires a type returns, its argument
+  had that type. The runtime contract check guarantees this. Because
+  bindings are immutable, the argument keeps the type for the rest of the
+  path.
 * **Block results:** the result type is the lub of the body's value and
   every `return`. A block that calls itself through its binding is compiled
   under an assumed result type, starting from `never`, until the inferred
@@ -499,8 +538,9 @@ back to generic code whenever a type is unknown.
   `break` or `continue`, and arity is already known to match.
 
 `core::compiler::programTypes EXPRS` reports the inferred types of
-program-level bindings. `tclsh main.tcl -backend compile -code FILE.ir`
-shows the generated code.
+program-level bindings. `core::compiler::bindingTypes EXPRS` reports the type
+of every `bind` at any depth, including refinements in force at that point.
+`tclsh main.tcl -backend compile -code FILE.ir` shows the generated code.
 
 **Performance** (`tclsh bench/bench.tcl`, best of 5, excluding compilation):
 
@@ -512,3 +552,127 @@ shows the generated code.
 
 `sum-refined` gains least. Its scopes contain closures, so its bindings stay
 in runtime frames, and the parameter tested with `==` has no static kind.
+Since then, native type contracts are checked after every generic native
+call. That costs roughly 10% in the interpreter and on compiled
+`sum-refined`; inlined intrinsics are unaffected.
+
+## 14. Types, named types and evidence
+
+`core/type.tcl` owns the meaning of types. The interpreter is the
+specification; the compiler consumes the same definitions.
+
+**Type forms.**
+
+| Form | Values |
+|------|--------|
+| `int` `str` `bool` `unit` `list` `result` `block` `native` | every value of that kind |
+| `any` | every value |
+| `{refined BASE {NAME…}}` | values of kind `BASE` that satisfy every named type (an evidence set) |
+
+A registered name on its own is shorthand: `Emailish` means
+`{refined str {Emailish}}`. `core::type::normalize` gives the canonical form,
+with names sorted and unique, and every registry stores canonical types.
+
+**Named types** are registered from Tcl. There's no type declaration IR yet:
+
+```tcl
+core::type::register Emailish      -base str -validator [list core::regex::matches $re]
+core::type::register UriQueryValue -base str -opaque 1
+core::type::definePredicate Emailish          ;# registers the native Emailish?
+```
+
+* A **validator** type is structural. The validator (a command prefix called
+  with the value, returning 1/0) decides membership.
+* An **opaque** type has no validator. A value belongs to it only if it
+  carries runtime *evidence*, which only trusted natives attach. For opaque
+  types, evidence is the semantics. For validator types, evidence is only an
+  optimization.
+
+**Operations.**
+
+| Operation | Meaning |
+|-----------|---------|
+| `valid T` | `T` is a well-formed type |
+| `base T` | its primitive kind (`""` for `any`) |
+| `subtype A B` | every value of `A` is a value of `B` |
+| `acceptsValue T V` | `V` is a value of `T` |
+| `validate NAME V` | `V` satisfies the named type (evidence, else validator; opaque: evidence only) |
+| `lub A B` | same base: the evidence both share; otherwise `any` |
+| `narrow A B` | same base: the union of the evidence; otherwise `B` (a contradiction only happens on unreachable paths) |
+| `assertValue T V CONTEXT` | contract check; raises `CORE CONTRACT TYPE` |
+
+For example, `lub(Emailish, str)` is `str`, and
+`narrow(Emailish, NonEmpty)` is `{refined str {Emailish NonEmpty}}`. Proving a
+second property never erases the first.
+
+**Runtime evidence.** Strings may carry evidence:
+
+```
+{str TEXT}                          plain
+{str TEXT {UriQueryValue}}          proven UriQueryValue
+{str TEXT {Emailish UriQueryValue}}
+```
+
+`core::value::evidence`, `withEvidence` and `hasEvidence` work with it.
+`strOf` still returns the text. **Evidence is knowledge about a value, not
+part of it:** `==`, `eq` and ordinary display ignore it, so `"foo"` proven to
+be a `UriQueryValue` still equals `"foo"`. `core::value::show V 1` shows
+evidence as `"foo"#{UriQueryValue}`; the differential tests use this form, so
+both backends must agree on evidence too. Only string values carry evidence
+for now.
+
+**The predicate pattern.** A named type gets an ordinary predicate. `if`
+knows nothing about named types:
+
+```
+(if (call (ref Emailish?) (ref x))
+    (block {} … x : {refined str {Emailish}} …)
+    (block {} …))
+```
+
+A future surface form such as `if string is Emailish x:` can lower to this
+call without new core semantics.
+
+**Trusted transforms produce evidence.** `uriEscape` percent-encodes its
+input and returns `withEvidence [str $escaped] UriQueryValue`. Its declared
+result type is `{refined str {UriQueryValue}}`. The compiler knows the
+static type, and the runtime value carries the proof through dynamically
+typed code. The contract check stops a native from claiming that type
+without delivering the evidence.
+
+`lib/web.tcl` defines `Emailish`, `UriQueryValue`, their predicates and
+`uriEscape` as a demonstration library, loaded with core.
+`examples/05-refined-strings.ir` shows all of it.
+
+## 15. Regular expressions
+
+`core/regex.tcl` represents regexes as Tcl data. The IR is the
+specification; Tcl's `regexp` is only the engine it's lowered to. Constructs
+outside the safe contract are rejected when the IR is built, so arbitrary
+engine syntax is never accepted and never needs sanitizing.
+
+```tcl
+set re [core::regex::create {seq
+    {repeat {class alnum} 1 inf}
+    {lit @}
+    {repeat {class alnum} 1 inf}
+    {lit .}
+    {repeat {class alpha} 2 inf}}]
+core::regex::matchesText $re foo@example.com   ;# 1 (the whole text must match)
+```
+
+| Node | Matches |
+|------|---------|
+| `{lit TEXT}` | the characters of `TEXT`, never as regex syntax |
+| `{char C}` / `{range LO HI}` / `{class NAME}` | one character; classes: `alpha digit alnum upper lower space punct xdigit` |
+| `{set ITEM…}` | one character matching any char, range or class item |
+| `{any}` | any one character |
+| `{seq NODE…}` / `{alt NODE…}` | sequence / alternatives |
+| `{repeat NODE MIN MAX}` | `MIN`..`MAX` repetitions, `MAX` may be `inf`; bounds 0..255 |
+| `{capture NAME NODE}` | a named capture (`core::regex::captures`) |
+| `{start}` / `{end}` | start / end of the text |
+
+`compileTcl` returns the ARE. Every non-alphanumeric literal is emitted as a
+`\uXXXX` escape. `matches RE V` is the validator protocol, taking a string
+value. `unicode-property` is reserved and currently rejected. There are no
+backreferences or lookaround.

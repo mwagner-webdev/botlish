@@ -30,7 +30,8 @@ proc errorCodeOf {args} {
 }
 
 # Outcome of EXPRS under BACKEND: {value V LOG} or {error ERRORCODE MESSAGE LOG},
-# where LOG is what test-log recorded.
+# where LOG is what test-log recorded. V includes runtime evidence, so the
+# backends must also agree on what values are proven to be.
 proc outcomeUnder {backend exprs} {
     set saved [core::useBackend]
     core::useBackend $backend
@@ -39,7 +40,7 @@ proc outcomeUnder {backend exprs} {
         if {[catch {core::evalProgram $exprs} result options]} {
             return [list error [dict get $options -errorcode] $result $::testLog]
         }
-        return [list value [core::formatValue $result] $::testLog]
+        return [list value [core::value::show $result 1] $::testLog]
     } finally {
         core::useBackend $saved
     }
@@ -77,4 +78,20 @@ proc resetEffects {} {
 if {"test-log" ni [core::native::names]} {
     core::registerNative test-log  -arity 1 -impl testLogImpl
     core::registerNative test-tick -arity 0 -impl testTickImpl
+
+    # A second validator type on str, to combine evidence with Emailish.
+    core::type::register NonEmpty -base str \
+        -validator {apply {{v} {expr {[string length [core::value::strOf $v]] > 0}}}}
+    core::type::definePredicate NonEmpty
+
+    # A native that breaks its declared contract: it claims to return a
+    # UriQueryValue but returns a plain string.
+    core::registerNative test-fake-escape -arity 1 \
+        -impl {apply {{v} {return $v}}} \
+        -param-types {str} -result-type UriQueryValue
+
+    # A native whose implementation does not enforce its declared parameter.
+    core::registerNative test-lax-param -arity 1 \
+        -impl {apply {{v} {core::value::int 1}}} \
+        -param-types {Emailish} -result-type int
 }

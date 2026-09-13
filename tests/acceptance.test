@@ -22,6 +22,6 @@ test acceptance-4 {refinement scoping} -body {
     lassign [core::value::items [runExample 04-refinement-scope.ir]] inside after
     list [core::envRefinements [core::blockEnv $inside]] \
          [core::envRefinements [core::blockEnv $after]]
-} -result {{x Int} {}}
+} -result {{x int} {}}
 
 cleanupTests

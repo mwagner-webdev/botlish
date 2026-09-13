@@ -4,6 +4,9 @@
 #
 #   errorcode {CORE MALFORMED}         the IR is not well-formed
 #   errorcode {CORE SEMANTIC <KIND>}   a well-formed but invalid program
+#   errorcode {CORE CONTRACT TYPE}     trusted Tcl code (a native) broke its
+#                                      declared type contract: an
+#                                      implementation bug, not a program error
 #
 # Semantic kinds:
 #   UNBOUND                  unresolved lexical name
@@ -13,6 +16,7 @@
 #   NOT-BOOLEAN              non-Boolean if condition
 #   TYPE                     primitive applied to a value of the wrong kind
 #   EQUALITY                 == applied to values without defined equality
+#   RANGE                    an index outside the valid range
 #   BREAK-OUTSIDE-LOOP       break not lexically inside a loop
 #   CONTINUE-OUTSIDE-LOOP    continue not lexically inside a loop
 #   RETURN-OUTSIDE-CALLABLE  return not inside a callable invocation

@@ -34,14 +34,22 @@ proc core::predicates::resultError {v} {
 }
 
 core::native::register integer? -arity 1 \
-    -impl {core::predicates::KindIs int} -refines-true {0 Int} \
+    -impl {core::predicates::KindIs int} -refines-true {0 int} \
     -param-types any -result-type bool
 core::native::register string? -arity 1 \
-    -impl {core::predicates::KindIs str} -refines-true {0 Str} \
+    -impl {core::predicates::KindIs str} -refines-true {0 str} \
     -param-types any -result-type bool
 core::native::register list? -arity 1 \
-    -impl {core::predicates::KindIs list} -refines-true {0 List} \
+    -impl {core::predicates::KindIs list} -refines-true {0 list} \
     -param-types any -result-type bool
+
+# The tag of a Result is a structural property: validator types.
+core::type::register Result.ok    -base result -validator {core::predicates::HasTag ok}
+core::type::register Result.error -base result -validator {core::predicates::HasTag error}
+
+proc core::predicates::HasTag {tag v} {
+    return [expr {[core::value::resultTag $v] eq $tag}]
+}
 
 core::native::register ok? -arity 1 \
     -impl {core::predicates::ResultIs ok} -refines-true {0 Result.ok} \

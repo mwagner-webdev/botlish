@@ -1,0 +1,26 @@
+# Refined string types (lib/web.tcl).
+#
+# address  - Emailish is structural: the predicate Emailish? validates it with
+#            a regex and refines `address` inside the then branch. The probe
+#            block captured there reports address : str[Emailish].
+# query    - UriQueryValue is opaque: only uriEscape produces it, and the
+#            result carries runtime evidence ("..."#{UriQueryValue}).
+# prefix   - substring discards the refinement: a plain str.
+# Expected (compile backend also prints the inferred types):
+#   [<block ()>, "a%26b%3Dc"#{UriQueryValue}, "a%2", true]
+
+{bind address {const str foo@example.com}}
+
+{bind probe
+    {if {call {ref Emailish?} {ref address}}
+        {block {} {block {} {ref address}}}
+        {block {} {block {} {const str invalid}}}}}
+
+{bind query {call {ref uriEscape} {const str {a&b=c}}}}
+{bind prefix {call {ref substring} {ref query} {const 0} {const 3}}}
+
+{call {ref list}
+    {ref probe}
+    {ref query}
+    {ref prefix}
+    {call {ref ==} {ref query} {const str a%26b%3Dc}}}
