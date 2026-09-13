@@ -1,7 +1,11 @@
-# all.tcl -- runs the whole test suite against every backend.
+# all.tcl -- runs the whole test suite against the Tcl backends.
 #
-#   tclsh tests/all.tcl                        both backends
+#   tclsh tests/all.tcl                        interp and compile
 #   CORE_BACKEND=compile tclsh tests/all.tcl   one backend
+#
+# stdlib.test and native.test also run programs on cranelift, so the native
+# backend must be built (native/). tests/native-coverage.tcl runs the suite
+# with CORE_BACKEND=cranelift and classifies what it does not support.
 #
 # Extra arguments are passed to tcltest (e.g. -file calls.test).
 

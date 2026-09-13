@@ -1,0 +1,347 @@
+# native.test -- the Cranelift backend (native/): native lowering, generated
+# Cranelift IR, and semantic parity with the interpreter and the Tcl
+# compiler.
+#
+# Semantic checks are three-way differential: a program must produce the
+# same outcome (value with evidence, or error code and message) on interp,
+# compile and cranelift. Structural checks look at NIR and CLIF for the
+# property that matters (a back edge, a direct call, a missing guard), not
+# at incidental instruction order.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 100000
+
+proc sourceHir {text} {
+    return [surface::compile $text t.bot -strict 0]
+}
+
+proc sourceIR {text} {
+    return [hir::lower [sourceHir $text]]
+}
+
+# "same" if interp, compile and cranelift agree on the program given as
+# source TEXT; otherwise every outcome.
+proc parity {text} {
+    set exprs [sourceIR $text]
+    set outcomes [lmap backend {interp compile cranelift} {outcomeUnder $backend $exprs}]
+    if {[llength [lsort -unique $outcomes]] == 1} {
+        return same
+    }
+    return [join [lmap backend {interp compile cranelift} outcome $outcomes {list $backend $outcome}] " / "]
+}
+
+# The outcome of source TEXT on cranelift: {value V} or {error CODE MESSAGE}.
+proc native {text} {
+    lrange [outcomeUnder cranelift [sourceIR $text]] 0 end-1
+}
+
+proc nirOf {text} {
+    native::nir [sourceHir $text]
+}
+
+# The NIR of function NAME in NIR program text.
+proc nirFunction {nir name} {
+    regexp "func \[0-9\]+ \"[string map {? \\?} $name]\"\[^\n\]*\n(.*?)\nend" $nir -> body
+    return $body
+}
+
+proc clifOf {text} {
+    native::clif [sourceHir $text]
+}
+
+# The CLIF of NIR function number ID (botlish_fn_ID).
+proc clifFunction {clif id} {
+    regexp "; function $id \[^\n\]*\n(.*?)\n\}" $clif -> body
+    return $body
+}
+
+set countdown "fn count(n, acc):\n    if n == 0:\n        return acc\n    count(n - 1, acc + 1)\n\n"
+
+# ---------------------------------------------------------------------------
+# Basic execution (phase 1)
+
+test native-basic-1 {constants, Booleans and unit} -body {
+    list [parity "42"] [parity "true"] [parity "unit"] [parity "\"text\""] [native "\[1, true, \"a\", unit\]"]
+} -result {same same same same {value {[1, true, "a", unit]}}}
+
+test native-basic-2 {a function and a direct call} -body {
+    list [parity "fn seven():\n    7\n\nseven()"] [parity "fn add(a, b):\n    a + b\n\nadd(40, 2)"]
+} -result {same same}
+
+test native-basic-3 {branches: statement and value forms} -body {
+    parity "fn sign(n):\n    s = if n < 0:\n        \"negative\"\n    else:\n        if n == 0:\n            \"zero\"\n        else:\n            \"positive\"\n    s\n\n\[sign(-5), sign(0), sign(9)\]"
+} -result same
+
+test native-basic-4 {loops with break values and continue} -body {
+    parity "fn f():\n    loop:\n        break 42\n\nfn g(n):\n    loop:\n        if n > 0:\n            break n\n        continue\n\n\[f(), g(3)\]"
+} -result same
+
+test native-basic-5 {return from inside a loop and branches} -body {
+    parity "fn find(xs, i, target):\n    loop:\n        if i == list_length(xs):\n            return -1\n        if list_get(xs, i) == target:\n            return i\n        return find(xs, i + 1, target)\n\n\[find(\[5, 6, 7\], 0, 7), find(\[5\], 0, 9)\]"
+} -result same
+
+# ---------------------------------------------------------------------------
+# Ints (arbitrary precision)
+
+test native-int-1 {arithmetic and comparisons} -body {
+    parity "\[1 + 2, 10 - 20, 6 * 7, 3 < 4, 4 <= 4, 5 > 6, 7 >= 8, 3 == 3, 3 == 4, -(5)\]"
+} -result same
+
+test native-int-2 {values beyond 64 bits stay exact} -body {
+    list [parity "\[9223372036854775807 + 1, -9223372036854775808 - 1, 9223372036854775807 * 9223372036854775807, 100000000000000000000 - 100000000000000000000, 4611686018427387904 + 4611686018427387904\]"] \
+         [native "4611686018427387903 + 1"] [native "-4611686018427387904 - 1"] \
+         [native "123456789012345678901234567890 == 123456789012345678901234567890"] \
+         [native "fn big():\n    170141183460469231731687303715884105727\n\nbig() > 170141183460469231731687303715884105726"]
+} -result {same {value 4611686018427387904} {value -4611686018427387905} {value true} {value true}}
+
+test native-int-3 {small-range boundaries of the tagged representation} -body {
+    set cases {}
+    foreach {a op b} {
+        4611686018427387903 + 1   -4611686018427387904 - 1   -4611686018427387904 + -1
+        2147483648 * 2147483648   -2147483648 * 2147483648   3037000499 * 3037000499
+        4611686018427387904 - 1   -4611686018427387905 + 1   4611686018427387903 < 4611686018427387904
+        -4611686018427387905 < -4611686018427387904   4611686018427387904 == 4611686018427387904
+    } {
+        lappend cases "$a $op $b"
+    }
+    parity "\[[join $cases {, }]\]"
+} -result same
+
+test native-int-4 {factorial of 30 through non-tail recursion} -body {
+    list [parity "fn fact(n):\n    if n <= 1:\n        return 1\n    n * fact(n - 1)\n\nfact(30)"] \
+         [native "fn fact(n):\n    if n <= 1:\n        return 1\n    n * fact(n - 1)\n\nfact(30)"]
+} -result {same {value 265252859812191058636308480000000}}
+
+# ---------------------------------------------------------------------------
+# Guards and errors
+
+test native-guard-1 {a known operation on an unknown kind is guarded, not dispatched} -body {
+    set body [nirFunction [nirOf "fn inc(x):\n    x + 1\n\ninc(1)"] inc]
+    list [regexp {guard int %0 "\+"} $body] [regexp {op iadd} $body] [regexp {callvalue} $body]
+} -result {1 1 0}
+
+test native-guard-2 {no guard where HIR proves the kind} -body {
+    set body [nirFunction [nirOf "fn f(s):\n    n = length(s)\n    concat(s, s)\n\nf(\"a\")"] f]
+    list [regexp -all {guard str %0} $body] [regexp {op strcat %0 %0} $body]
+} -result {1 1}
+
+test native-guard-3 {guard failures raise the reference TYPE errors} -body {
+    list [parity "fn inc(x):\n    x + 1\n\ninc(\"a\")"] [native "fn inc(x):\n    x + 1\n\ninc(\"a\")"] \
+         [parity "fn f(s):\n    length(s)\n\nf(\[1\])"] [parity "concat(\"a\", 1)"] \
+         [parity "fn g(l):\n    list_get(l, \"0\")\n\ng(\[1\])"]
+} -result {same {error {CORE SEMANTIC TYPE} {+: expected int, got "a"}} same same same}
+
+test native-guard-4 {a non-Boolean condition} -body {
+    list [parity "fn f(c):\n    if c:\n        1\n    else:\n        2\n\nf(0)"] [native "fn f(c):\n    if c:\n        1\n    else:\n        2\n\nf(\[\])"]
+} -result {same {error {CORE SEMANTIC NOT-BOOLEAN} {if condition must be a Boolean, got []}}}
+
+test native-error-1 {ARITY of blocks and natives, NOT-CALLABLE, EQUALITY} -body {
+    list [parity "fn f(a, b):\n    a\n\nf(1)"] [parity "length(\"a\", \"b\")"] \
+         [parity "fn call(g, x):\n    g(x)\n\ncall(5, 1)"] \
+         [parity "fn call(g, x):\n    g(x)\n\nfn two(a, b):\n    a\n\ncall(two, 1)"] \
+         [parity "fn f():\n    1\n\nfn eq(a, b):\n    a == b\n\neq(f, f)"] \
+         [native "fn call(g, x):\n    g(x)\n\ncall(5, 1)"]
+} -result {same same same same same {error {CORE SEMANTIC NOT-CALLABLE} {cannot call non-callable value 5}}}
+
+test native-error-2 {UNBOUND and DUPLICATE are raised at run time, in order} -body {
+    list [parity "x = 1\nx = 2\nx"] [parity "fn f():\n    y\n\nf()"] \
+         [parity "fn early():\n    late()\n\nv = early()\n\nfn late():\n    1\n\nv"] \
+         [native "fn early():\n    late()\n\nv = early()\n\nfn late():\n    1\n\nv"]
+} -result {same same same {error {CORE SEMANTIC UNBOUND} {name "late" used before its binding}}}
+
+test native-error-3 {RANGE errors of list_get and substring, including big indices} -body {
+    list [parity "list_get(\[1, 2\], 2)"] [parity "list_get(\[\], 0)"] [parity "list_get(\[1\], -1)"] \
+         [parity "list_get(\[1\], 100000000000000000000)"] [parity "substring(\"abc\", 2, 1)"] \
+         [parity "substring(\"abc\", 0, 4)"] [parity "substring(\"abc\", -1, 2)"] \
+         [native "list_get(\[1, 2\], 2)"]
+} -result {same same same same same same same {error {CORE SEMANTIC RANGE} {list_get: index 2 is outside 0..1}}}
+
+test native-error-4 {errors inside looped tail calls and deep frames propagate} -body {
+    list [parity "fn f(n, acc):\n    if n == 0:\n        return acc\n    f(n - 1, concat(acc, n))\n\nf(3, \"x\")"] \
+         [parity "fn g(n):\n    if n == 0:\n        return 1 + \"x\"\n    1 + g(n - 1)\n\ng(50)"]
+} -result {same same}
+
+test native-error-5 {unbounded non-tail recursion is a resource error, not a crash} -body {
+    native "fn down(n):\n    1 + down(n + 1)\n\ndown(0)"
+} -result {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}}
+
+# ---------------------------------------------------------------------------
+# Strings, lists, Results, equality
+
+test native-string-1 {string primitives, non-ASCII characters and escapes} -body {
+    list [parity "\[length(\"h\u00e9llo\"), substring(\"h\u00e9llo\", 1, 3), concat(\"\u00e4\", \"\u20ac\"), lowercase(\"ABC\u00c4\"), \"a\\\"b\\n\\\\c\\t\"\]"] \
+         [parity "\[\"x\" == \"x\", \"x\" == \"y\", \"\" == \"\", substring(\"abc\", 3, 3)\]"]
+} -result {same same}
+
+test native-list-1 {list primitives and structural equality} -body {
+    list [parity "xs = \[1, \[2, 3\], \"four\"\]\n\[list_length(xs), list_get(xs, 1), list_append(xs, 5), xs\]"] \
+         [parity "\[\[1, \[2\]\] == \[1, \[2\]\], \[1\] == \[1, 2\], \[1\] == \[\"1\"\], \[\] == \[\]\]"]
+} -result {same same}
+
+test native-result-1 {Results, their predicates and payloads} -body {
+    set exprs {
+        {bind r {ok {const 5}}}
+        {bind e {error-value {const str bad}}}
+        {call {ref list} {call {ref ok?} {ref r}} {call {ref error?} {ref r}} {call {ref result-value} {ref r}}
+            {call {ref result-error} {ref e}} {call {ref ==} {ref r} {ok {const 5}}} {ref e}}
+    }
+    list [differentialAll $exprs] [differentialAll {{call {ref result-value} {error-value {const 1}}}}] \
+         [differentialAll {{call {ref integer?} {const 1}} } ] [differentialAll {{bind f {block {x} {call {ref string?} {ref x}}}} {call {ref f} {const 1}}}]
+} -setup {
+    proc differentialAll {exprs} {
+        set outcomes [lmap backend {interp compile cranelift} {outcomeUnder $backend $exprs}]
+        expr {[llength [lsort -unique $outcomes]] == 1 ? "same" : $outcomes}
+    }
+} -result {same same same same}
+
+# ---------------------------------------------------------------------------
+# Calls: direct, envless, tail, generic
+
+test native-call-1 {resolved Botlish calls are direct calls, not dispatch} -body {
+    set nir [nirOf "${countdown}fn start(n):\n    count(n, 0)\n\nstart(4)"]
+    set clif [clifOf "${countdown}fn start(n):\n    count(n, 0)\n\nstart(4)"]
+    list [regexp {call 1 %0 %1} [nirFunction $nir start]] [regexp {callvalue} $nir] \
+         [regexp {; u0:[0-9]+ = botlish_fn_1 \(count\)} $clif] [regexp {rt_call_value} [clifFunction $clif 2]]
+} -result {1 0 1 0}
+
+test native-call-2 {a self tail call becomes a back edge, not a recursive call} -body {
+    set clif [clifOf "${countdown}count(100000, 0)"]
+    set nir [nirOf "${countdown}count(100000, 0)"]
+    set body [clifFunction $clif 1]
+    # botlish_fn_1's own module id, as CLIF names it
+    regexp {; u0:([0-9]+) = botlish_fn_1 } $clif -> self
+    list [regexp {tail %[0-9]+ %[0-9]+} [nirFunction $nir count]] \
+         [regexp "fn\[0-9\]+ = u0:$self " $body] \
+         [regexp {jump block0\(} $body] [parity "${countdown}count(5000, 0)"]
+} -result {1 0 1 same}
+
+test native-call-3 {tail recursion runs in constant native stack} -body {
+    native "${countdown}count(3000000, 0)"
+} -result {value 3000000}
+
+test native-call-4 {calls that are not in tail position stay calls} -body {
+    set nir [nirOf "fn fib(n):\n    if n <= 1:\n        return n\n    fib(n - 1) + fib(n - 2)\n\nfib(15)"]
+    list [regexp {tail} $nir] [regexp -all {= call 1 } [nirFunction $nir fib]] [parity "fn fib(n):\n    if n <= 1:\n        return n\n    fib(n - 1) + fib(n - 2)\n\nfib(15)"]
+} -result {0 2 same}
+
+test native-call-5 {known natives use no generic dispatch} -body {
+    set clif [clifOf "fn f(s):\n    concat(substring(s, 0, 1), s)\n\nf(\"ab\")"]
+    set body [clifFunction $clif 1]
+    regexp {; u0:([0-9]+) = rt_call_value} $clif -> dispatch
+    list [regexp "= u0:$dispatch " $body] [regexp {; u0:[0-9]+ = rt_substr} $clif]
+} -result {0 1}
+
+test native-call-6 {environment-free functions take no environment} -body {
+    set nir [nirOf "${countdown}fn start(n):\n    count(n, 0)\n\nk = 7\nfn addk(n):\n    n + k\n\n\[start(4), addk(1)\]"]
+    list [regexp {"count" params=2 env=0} $nir] [regexp {"start" params=1 env=0} $nir] \
+         [regexp {"addk" params=1 env=1} $nir] [regexp {fnvalue 1} $nir]
+} -result {1 1 1 1}
+
+test native-call-7 {calls chosen at run time: closures and natives as values} -body {
+    list [parity "fn apply(f, x):\n    f(x)\n\nfn inc(n):\n    n + 1\n\n\[apply(inc, 1), apply(length, \"abc\")\]"] \
+         [regexp {callvalue} [nirFunction [nirOf "fn apply(f, x):\n    f(x)\n\napply(length, \"a\")"] apply]] \
+         [parity "fn apply(f, x):\n    f(x)\n\napply(substring, \"abc\")"] \
+         [parity "fn apply2(f, x, y):\n    f(x, y)\n\n\[apply2(list_get, \[1, 2\], 1), apply2(list_get, \[1\], 5)\]"]
+} -result {same 1 same same}
+
+test native-call-8 {mutual recursion through a forward reference} -body {
+    list [parity [core::ReadFile [file join $::projectRoot examples surface 09-mutual-recursion.bot]]] \
+         [native "fn even(n):\n    if n == 0:\n        return true\n    odd(n - 1)\n\nfn odd(n):\n    if n == 0:\n        return false\n    even(n - 1)\n\n\[even(10000), odd(7)\]"] \
+         [regexp {cellcheck} [nirFunction [nirOf "fn even(n):\n    if n == 0:\n        return true\n    odd(n - 1)\n\nfn odd(n):\n    if n == 0:\n        return false\n    even(n - 1)\n\neven(2)"] even]]
+} -result {same {value {[true, true]}} 1}
+
+# ---------------------------------------------------------------------------
+# Closures
+
+test native-closure-1 {a capturing closure escapes its creator} -body {
+    list [parity [core::ReadFile [file join $::projectRoot examples surface 03-closure.bot]]] \
+         [regexp {closure 2 %0} [nirFunction [nirOf "fn make_adder(x):\n    fn add(y):\n        x + y\n    add\n\nmake_adder(1)(2)"] make_adder]]
+} -result {same 1}
+
+test native-closure-2 {separate closure instances keep separate environments} -body {
+    parity "fn make(step):\n    fn walk(n, acc):\n        if n == 0:\n            return acc\n        walk(n - 1, acc + step)\n    walk\n\na = make(2)\nb = make(10)\n\[a(5, 0), b(5, 0), a(3, 1)\]"
+} -result same
+
+test native-closure-3 {closures in loops, nested closures, and captured cells} -body {
+    list [parity "fn outer(k):\n    fn even(n):\n        if n == 0:\n            return k\n        odd(n - 1)\n    fn odd(n):\n        if n == 0:\n            return 0 - k\n        even(n - 1)\n    \[even(6), even(3)\]\n\nouter(5)"] \
+         [parity "fn a(x):\n    fn b(y):\n        fn c(z):\n            x + y + z\n        c\n    b\n\na(1)(2)(3)"] \
+         [parity "fn make():\n    loop:\n        k = 7\n        fn get():\n            k\n        break get\n\nmake()()"] \
+         [parity "fn make(n):\n    fn get():\n        n\n    get\n\nfn collect(i, acc):\n    if i == 4:\n        return acc\n    collect(i + 1, list_append(acc, make(i)))\n\nfs = collect(0, \[\])\n\[list_get(fs, 0)(), list_get(fs, 3)()\]"]
+} -result {same same same same}
+
+test native-closure-4 {a Block cannot be returned to the host} -body {
+    native "fn f(x):\n    x\n\nf"
+} -result {error {NATIVE UNSUPPORTED value} {the native backend cannot return a Block to the host: <block (x)>}}
+
+# ---------------------------------------------------------------------------
+# The corpus, runtime memory, AOT, diagnostics
+
+test native-corpus-1 {every corpus program's sample runs natively to its expect: value} -body {
+    lmap path [lsort [glob -directory [file join $::projectRoot examples stdlib] *.bot]] {
+        regexp -line {^#\s*expect:\s*(.*)$} [core::ReadFile $path] -> expected
+        set value [native::evalHir [surface::readProgramFile $path]]
+        expr {[core::value::show $value 1] eq $expected}
+    }
+} -result {1 1 1 1}
+
+test native-gc-1 {collecting before every allocation changes nothing} -body {
+    set text "[core::ReadFile [file join $::projectRoot examples stdlib csv.bot]]\ncsv_parse(\"a,\\\"b\\\"\\\"c\\\",d\\ne,f\\n\")"
+    set hir [sourceHir $text]
+    set normal [native::measure $hir 2]
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        set stressed [native::measure $hir 2]
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+    list [expr {[lindex $normal end] eq [lindex $stressed end]}] [expr {[lindex $stressed 3] > 10}] \
+         [core::value::show [lindex $stressed end]]
+} -result {1 1 {[["a", "b\"c", "d"], ["e", "f"]]}}
+
+test native-gc-2 {repeated runs reclaim garbage} -body {
+    set hir [corpus::program string_reverse "reverse_chars(\"[string repeat abcdefghij 300]\")"]
+    lassign [native::measure $hir 5] - - - collections value
+    list [string length [core::value::strOf $value]] [expr {$collections >= 4}]
+} -setup {
+    source [file join $::projectRoot examples stdlib corpus.tcl]
+} -result {3000 1}
+
+test native-aot-1 {the same lowering emits an object file} -body {
+    set path [file join [temporaryDirectory] botlish-aot-test.obj]
+    file delete $path
+    set result [native::object [sourceHir "${countdown}count(5, 0)"] $path]
+    set size [file size $path]
+    set channel [open $path rb]
+    set bytes [read $channel]
+    close $channel
+    file delete $path
+    list [lindex $result 0] [expr {$size > 200}] [string match *botlish_fn_1* $bytes] [string match *rt_int_add* $bytes]
+} -result {object 1 1 1}
+
+test native-diagnostic-1 {an unsupported construct reports location, HIR node and operation} -body {
+    set hir [surface::compile "fn f(x):\n    test_log(x)\n\nf(1)" t.bot -strict 0]
+    list [catch {native::nir $hir} message options] [dict get $options -errorcode] $message
+} -setup {
+    if {"test_log" ni [core::native::names]} {
+        core::registerNative test_log -arity 1 -impl testLogImpl
+    }
+} -match glob -result {1 {NATIVE UNSUPPORTED {native test_log}} {t.bot:2:5: e*: native lowering does not support native test_log: *}}
+
+test native-diagnostic-2 {sequence mode is reported as unsupported} -body {
+    set saved [core::useBackend]
+    core::useBackend cranelift
+    try {
+        list [catch {core::evalIn {const 1} [core::childEnv [core::rootEnv]]} message options] [dict get $options -errorcode]
+    } finally {
+        core::useBackend $saved
+    }
+} -result {1 {NATIVE UNSUPPORTED sequence-mode}}
+
+test native-diagnostic-3 {invalid NIR is rejected by the driver, not executed} -body {
+    catch {native::Outcome [native::Driver run "nir 1\n\nfunc 0 \"<program>\" params=0 env=0 regs=1 pnames=\"\" captures=0\n    ret %5\nend\n"]} message options
+    list [dict get $options -errorcode] $message
+} -result {{NATIVE INVALID-NIR} {invalid NIR at line 0: function 0 (<program>): register %5 out of range}}
+
+cleanupTests

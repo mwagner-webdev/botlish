@@ -97,6 +97,8 @@ namespace eval core::compiler {
     # (SelfTailCalls).
     variable envless {}
     variable selfTailCalls {}
+    # References that need a run-time init check (hir::aot::unprovenReferences).
+    variable unproven {}
     # If conditions whose callee value CompileIf needs (InstallsRefinements).
     variable refining {}
     # Native name -> intrinsic generator.
@@ -258,7 +260,8 @@ proc core::compiler::BlockProc {e} {
 # Envless blocks. A call whose HIR target is block T, through a `ref` callee,
 # needs the callee value only for T's captured environment: HIR resolved the
 # target, and a reference whose type names the block is bound whenever it
-# runs (its bind preceded, on every path, the code that typed it). If T's
+# runs, unless it is a forward reference HIR cannot prove bound
+# (hir::aot::unprovenReferences), which must still be looked up. If T's
 # proc never reads its environment, the call can skip the lookup and pass no
 # environment. A block is envless when
 #   * it creates no closures in its own invocation (no materialized scope
@@ -333,8 +336,10 @@ proc core::compiler::SkippableCallee {ref callOf envless} {
 
 # The envless block call E directly calls through a `ref` callee, or "".
 proc core::compiler::DirectEnvlessTarget {e envless} {
+    variable unproven
     lassign [N $e target] kind target
     if {$kind ne "block" || $target ni $envless || [Kind [N $e callee]] ne "ref"
+            || [dict exists $unproven [N $e callee]]
             || [InstallsRefinements $e]
             || [llength [N $target params]] != [llength [N $e args]]} {
         return ""
@@ -362,60 +367,12 @@ proc core::compiler::RefiningConditions {} {
     return $result
 }
 
-# Self tail calls: calls whose HIR target is the block they occur in, with
-# matching arity, in tail position of that block (its body's value or a
-# return's value, through if branches), and not inside a loop of that block.
-# Such a call is the last thing its invocation does, so its proc rebinds
-# the parameters and starts over instead of nesting a Tcl call.
+# Self tail calls (hir::aot::selfTailCalls, shared with native lowering):
+# such a call is the last thing its invocation does, so its proc rebinds the
+# parameters and starts over instead of nesting a Tcl call.
 proc core::compiler::SelfTailCalls {} {
     variable hir
-    set result {}
-    foreach e [hir::walk $hir] {
-        switch -- [Kind $e] {
-            block {
-                if {[N $e body] ne ""} {
-                    TailCallsInto [lindex [N $e body] end] $e result
-                }
-            }
-            return {
-                if {[N $e target] ne ""} {
-                    TailCallsInto [N $e value] [N $e target] result
-                }
-            }
-        }
-    }
-    return $result
-}
-
-proc core::compiler::TailCallsInto {e block resultVar} {
-    upvar 1 $resultVar result
-    switch -- [Kind $e] {
-        call {
-            lassign [N $e target] kind target
-            if {$kind eq "block" && $target eq $block
-                    && [llength [N $block params]] == [llength [N $e args]]
-                    && ![InLoopOf $e $block]} {
-                lappend result $e
-            }
-        }
-        if {
-            foreach role {thenBody elseBody} {
-                if {[N $e $role] ne ""} {
-                    TailCallsInto [lindex [N $e $role] end] $block result
-                }
-            }
-        }
-    }
-}
-
-# 1 if expression E is inside a loop body within block BLOCK's invocation.
-proc core::compiler::InLoopOf {e block} {
-    for {set s [N $e scope]} {$s ne "" && [S $s owner] ne $block} {set s [S $s parent]} {
-        if {[S $s kind] eq "loop"} {
-            return 1
-        }
-    }
-    return 0
+    return [dict keys [hir::aot::selfTailCalls $hir]]
 }
 
 # ---------------------------------------------------------------------------
@@ -610,9 +567,11 @@ proc core::compiler::GenerateUnit {mode exprs {unitHir ""}} {
     variable envless
     variable selfTailCalls
     variable refining
+    variable unproven
     set envless {}
     set selfTailCalls {}
     set refining [RefiningConditions]
+    set unproven [hir::aot::unprovenReferences $hir]
     if {$mode eq "program"} {
         set envless [EnvlessBlocks]
         set selfTailCalls [SelfTailCalls]

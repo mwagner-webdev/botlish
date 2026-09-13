@@ -2,12 +2,13 @@
 # (examples/stdlib/*.bot).
 #
 # Every case runs the corpus program, followed by a driver expression, on
-# both backends in this process (see examples/stdlib/corpus.tcl):
+# every backend (see examples/stdlib/corpus.tcl):
 #
-#   interp    source -> HIR -> core IR -> interpreter
-#   compile   source -> HIR -> Tcl compiler
+#   interp     source -> HIR -> core IR -> interpreter
+#   compile    source -> HIR -> Tcl compiler
+#   cranelift  source -> HIR -> native lowering -> Cranelift -> machine code
 #
-# and expects both to produce the stated outcome (so they also agree). The
+# and expects each to produce the stated outcome (so they also agree). The
 # expected values are written out by hand; no second implementation of the
 # algorithms exists anywhere.
 #
@@ -52,7 +53,7 @@ foreach name [corpus::names] {
         regexp -line {^#\s*expect:\s*(.*)$} $text -> shown
         set hir [surface::readProgramFile [corpus::path $name]]
         set outcomes [lmap backend $corpus::backends {corpus::outcome $backend $hir}]
-        expr {$outcomes eq [list [value $shown] [value $shown]] ? "expected" : $outcomes}
+        expr {$outcomes eq [lrepeat [llength $corpus::backends] [value $shown]] ? "expected" : $outcomes}
     } -result expected
 
     # bench/corpus.tcl times the lowered IR on every backend; this is what

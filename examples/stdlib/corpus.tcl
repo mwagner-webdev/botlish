@@ -17,10 +17,11 @@
 #
 # Backends run a program the way examples/surface programs run:
 #
-#   interp    HIR --hir::lower--> core IR --> core::evalProgram
-#   compile   HIR --> core::compiler::evalHir
+#   interp     HIR --hir::lower--> core IR --> core::evalProgram
+#   compile    HIR --> core::compiler::evalHir
+#   cranelift  HIR --> native::evalHir (native lowering, Cranelift JIT)
 #
-# Adding a backend (a future native backend) means adding a case to run.
+# Adding a backend means adding a case to run.
 
 if {[info commands ::core::compiler::evalHir] eq ""} {
     source [file join [file dirname [file dirname [file dirname [file normalize [info script]]]]] compiler compiler.tcl]
@@ -28,14 +29,18 @@ if {[info commands ::core::compiler::evalHir] eq ""} {
 if {[info commands ::surface::compile] eq ""} {
     source [file join [file dirname [file dirname [file dirname [file normalize [info script]]]]] surface surface.tcl]
 }
+if {[info commands ::native::evalHir] eq ""} {
+    source [file join [file dirname [file dirname [file dirname [file normalize [info script]]]]] native native.tcl]
+}
 
 namespace eval corpus {
     variable home [file dirname [file normalize [info script]]]
-    variable backends {interp compile}
+    variable backends {interp compile cranelift}
 }
 
 # The corpus programs recurse once per character, element or record: Botlish
-# has no mutable loop state, and neither backend eliminates tail calls.
+# has no mutable loop state, and the interpreter does not eliminate tail
+# calls.
 interp recursionlimit {} 1000000
 
 proc corpus::names {} {
@@ -60,6 +65,7 @@ proc corpus::run {backend hir} {
     switch -- $backend {
         interp  { return [core::evalProgram [hir::lower $hir]] }
         compile { return [core::compiler::evalHir $hir] }
+        cranelift { return [native::evalHir $hir] }
     }
     error "corpus::run: unknown backend \"$backend\""
 }

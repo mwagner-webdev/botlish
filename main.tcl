@@ -1,6 +1,7 @@
 # main.tcl -- example runner.
 #
-#   tclsh main.tcl [-backend interp|compile] [-code] [-hir] [-ast] [-aot] [-aot-data] [FILE.ir|FILE.hir|FILE.bot ...]
+#   tclsh main.tcl [-backend interp|compile|cranelift] [-code] [-hir] [-ast] [-aot] [-aot-data]
+#                  [-emit-nir] [-emit-clif] [FILE.ir|FILE.hir|FILE.bot ...]
 #
 # Runs the given program files (default: every examples/*.ir) and prints
 # each program's value, with runtime evidence shown as "text"#{Type}. With
@@ -9,7 +10,9 @@
 # program's semantic HIR (hir::format); -ast prints the surface AST of a .bot
 # file (surface::formatAst). -aot prints the closed-AOT readiness of every
 # function (hir::aot::explain), and -aot-data the analysis itself as a Tcl
-# dict (hir::aot::analyze), before running the program.
+# dict (hir::aot::analyze), before running the program. -emit-nir prints the
+# native backend IR the program lowers to (native/lower.tcl), and -emit-clif
+# the Cranelift IR of every function (both need no -backend cranelift).
 #
 # A .hir file (HIR text, e.g. examples/hir/*.hir) is read with hir::readFile;
 # a .bot file (Botlish source, e.g. examples/surface/*.bot) is parsed and
@@ -23,6 +26,7 @@
 set root [file dirname [file normalize [info script]]]
 source [file join $root compiler compiler.tcl]
 source [file join $root surface surface.tcl]
+source [file join $root native native.tcl]
 
 proc probeValues {value} {
     switch -- [core::value::kind $value] {
@@ -32,7 +36,7 @@ proc probeValues {value} {
     }
 }
 
-proc runFile {path showCode showHir showAst showAot} {
+proc runFile {path showCode showHir showAst showAot showNative} {
     puts "== [file tail $path] ([core::useBackend])"
     set hir ""
     set extension [file extension $path]
@@ -57,13 +61,16 @@ proc runFile {path showCode showHir showAst showAot} {
             return 1
         }
         set program [hir::lower $hir]
-        set run [expr {[core::useBackend] eq "compile"
-            ? {core::compiler::evalHir $hir} : {core::evalProgram $program}}]
+        set run [dict get {
+            compile   {core::compiler::evalHir $hir}
+            cranelift {native::evalHir $hir}
+            interp    {core::evalProgram $program}
+        } [core::useBackend]]
     } else {
         set program [core::loadProgramFile $path]
         set run {core::evalProgram $program}
     }
-    if {$showHir || $showAot ne ""} {
+    if {$showHir || $showAot ne "" || $showNative ne ""} {
         set shownHir [expr {$hir ne "" ? $hir : [hir::build $program -strict 0]}]
     }
     if {$showHir} {
@@ -75,6 +82,15 @@ proc runFile {path showCode showHir showAst showAot} {
     }
     if {$showCode} {
         puts [core::compiler::generatedCode $program]
+    }
+    if {$showNative ne "" && [catch {
+        switch -- $showNative {
+            nir  { puts -nonewline [native::nir $shownHir] }
+            clif { puts [native::clif $shownHir] }
+        }
+    } message options]} {
+        puts "   error: $message ([dict get $options -errorcode])"
+        return 1
     }
     if {[catch $run value options]} {
         puts "   error: $value ([dict get $options -errorcode])"
@@ -106,6 +122,7 @@ set showCode 0
 set showHir 0
 set showAst 0
 set showAot ""
+set showNative ""
 for {set i 0} {$i < [llength $argv]} {incr i} {
     set arg [lindex $argv $i]
     switch -- $arg {
@@ -115,6 +132,8 @@ for {set i 0} {$i < [llength $argv]} {incr i} {
         -ast     { set showAst 1 }
         -aot     { set showAot text }
         -aot-data { set showAot data }
+        -emit-nir { set showNative nir }
+        -emit-clif { set showNative clif }
         default  { lappend files $arg }
     }
 }
@@ -123,6 +142,6 @@ if {$files eq ""} {
 }
 set failures 0
 foreach path $files {
-    incr failures [runFile $path $showCode $showHir $showAst $showAot]
+    incr failures [runFile $path $showCode $showHir $showAst $showAot $showNative]
 }
 exit [expr {$failures > 0}]

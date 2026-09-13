@@ -10,16 +10,20 @@
 # the reference runtime never reclaims environments, so measurements in one
 # process would disturb each other.
 #
+# The cranelift backend compiles once and runs the program N times in its
+# own process (native/src/main.rs, bench): the best run is its execution
+# time. Compilation is reported separately, as "cranelift compile": native
+# lowering in Tcl (HIR to NIR) + Cranelift code generation and JIT linking.
+#
 # Cases marked slow are skipped on the interpreter unless -all is given
 # (shown as "skipped"). -markdown prints a Markdown table. Exits with
 # status 1 if backends disagree on a value (compared by length and CRC-32 of
 # its display form).
 #
-# A backend is a name corpus::run (examples/stdlib/corpus.tcl) understands;
-# a future native backend is one more case there and one more column here.
+# A backend is a name corpus::run (examples/stdlib/corpus.tcl) understands.
 #
 # Internal: tclsh bench/corpus.tcl -measure ALGORITHM SIZE BACKEND RUNS
-# prints "MICROSECONDS LENGTH CRC".
+# prints "MICROSECONDS LENGTH CRC ?{LOWER-MICROSECONDS JIT-MICROSECONDS}?".
 
 set root [file dirname [file dirname [file normalize [info script]]]]
 source [file join $root examples stdlib corpus.tcl]
@@ -107,6 +111,11 @@ proc bench::case {algorithm size} {
 proc bench::measure {algorithm size backend runs} {
     lassign [case $algorithm $size] _ _ script
     set driver [apply [list {} $script]]
+    if {$backend eq "cranelift"} {
+        lassign [native::measure [corpus::program $algorithm $driver] $runs] lower jit best - value
+        set shown [core::value::show $value 1]
+        return [list $best [string length $shown] [zlib crc32 [encoding convertto utf-8 $shown]] [list $lower $jit]]
+    }
     set program [hir::lower [corpus::program $algorithm $driver]]
     core::useBackend $backend
     # The program runs as its lowered IR, whose HIR is the corpus program's
@@ -156,49 +165,80 @@ proc bench::cell {micros} {
     if {$micros eq ""} {
         return skipped
     }
+    if {$micros < 1000} {
+        return [format "%.3f ms" [expr {$micros / 1000.0}]]
+    }
     return [format "%.1f ms" [expr {$micros / 1000.0}]]
 }
 
+# Cranelift compile time: native lowering + Cranelift JIT.
+proc bench::compileCell {times} {
+    if {$times eq ""} {
+        return skipped
+    }
+    lassign $times lower jit
+    return [format "%.1f + %.1f ms" [expr {$lower / 1000.0}] [expr {$jit / 1000.0}]]
+}
+
+# Columns: every backend, then cranelift's compile time if it runs.
+set columns $backends
+if {"cranelift" in $backends} {
+    lappend columns "cranelift compile"
+}
+# speedup: the Tcl compiler's time over cranelift's when both run, else the
+# interpreter's over the last backend's.
+if {"cranelift" in $backends && "compile" in $backends} {
+    set speedupOf {compile cranelift}
+} else {
+    set speedupOf [list [lindex $backends 0] [lindex $backends end]]
+}
 if {$markdown} {
-    puts "Tcl [info patchlevel], best of $runs runs, wall time, compilation excluded.\n"
-    puts "| algorithm | input | [join $backends { | }] | speedup | values |"
-    puts "|---|---|[string repeat ---:| [llength $backends]]---:|---|"
+    puts "Tcl [info patchlevel], best of $runs runs, wall time, compilation excluded (cranelift compile: native lowering in Tcl + Cranelift JIT).\n"
+    puts "| algorithm | input | [join $columns { | }] | speedup ([join $speedupOf { / }]) | values |"
+    puts "|---|---|[string repeat ---:| [llength $columns]]---:|---|"
 } else {
     puts [format "%-16s %-14s%s %9s" algorithm input \
-        [join [lmap b $backends {format "%14s" $b}] ""] speedup]
+        [join [lmap b $columns {format "%22s" $b}] ""] speedup]
 }
 
 set disagreements 0
 foreach algorithm $algorithms {
     foreach entry [dict get $bench::cases $algorithm] {
         lassign $entry size slow
-        set times {}
+        set times [dict create]
         set values {}
+        set compileTime ""
         foreach backend $backends {
             if {$slow && !$all && $backend eq "interp"} {
-                lappend times ""
+                dict set times $backend ""
                 continue
             }
             set result [exec [info nameofexecutable] [info script] -measure $algorithm $size $backend $runs]
-            lappend times [lindex $result 0]
+            dict set times $backend [lindex $result 0]
             lappend values [lrange $result 1 2]
+            if {$backend eq "cranelift"} {
+                set compileTime [lindex $result 3]
+            }
         }
         set agree [expr {[llength [lsort -unique $values]] <= 1}]
         if {!$agree} {
             incr disagreements
         }
-        set measured [lsearch -all -inline -not $times ""]
+        lassign $speedupOf slower faster
         set speedup ""
-        if {[lindex $times 0] ne "" && [llength $measured] > 1} {
-            set speedup [format "%.1fx" [expr {double([lindex $times 0]) / max(1, [lindex $times end])}]]
+        if {[dict get $times $slower] ne "" && [dict get $times $faster] ne ""} {
+            set speedup [format "%.1fx" [expr {double([dict get $times $slower]) / max(1, [dict get $times $faster])}]]
         }
-        set cells [lmap micros $times {bench::cell $micros}]
+        set cells [lmap backend $backends {bench::cell [dict get $times $backend]}]
+        if {"cranelift" in $backends} {
+            lappend cells [bench::compileCell $compileTime]
+        }
         set check [expr {$agree ? "agree" : "DIFFER: $values"}]
         if {$markdown} {
             puts "| $algorithm | $size | [join $cells { | }] | $speedup | [expr {$agree ? "✅" : "❌ $check"}] |"
         } else {
             puts [format "%-16s %-14s%s %9s  %s" $algorithm $size \
-                [join [lmap c $cells {format "%14s" $c}] ""] $speedup $check]
+                [join [lmap c $cells {format "%22s" $c}] ""] $speedup $check]
         }
         flush stdout
     }

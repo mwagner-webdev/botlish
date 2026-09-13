@@ -5,10 +5,29 @@ namespace import -force ::tcltest::*
 
 set ::projectRoot [file dirname [file dirname [file normalize [info script]]]]
 source [file join $::projectRoot compiler compiler.tcl]
+source [file join $::projectRoot native native.tcl]
 
-# The backend under test: CORE_BACKEND=interp (default) or compile.
+# The backend under test: CORE_BACKEND=interp (default), compile or cranelift.
 if {[info exists ::env(CORE_BACKEND)]} {
     core::useBackend $::env(CORE_BACKEND)
+}
+
+# Native coverage (tests/native-coverage.tcl): NATIVE_COVERAGE=FILE appends
+# one line per test: {NAME PASSED NATIVE-RUNS UNSUPPORTED-ERRORS}.
+if {[info exists ::env(NATIVE_COVERAGE)] && [info commands ::CoverageTest] eq ""} {
+    proc ::CoverageTest {name args} {
+        set native::unsupported {}
+        set native::runs 0
+        set failedBefore $::tcltest::numTests(Failed)
+        uplevel 1 [list ::tcltest::test $name {*}$args]
+        set passed [expr {$::tcltest::numTests(Failed) == $failedBefore}]
+        set channel [open $::env(NATIVE_COVERAGE) a]
+        fconfigure $channel -encoding utf-8
+        puts $channel [list $name $passed $native::runs $native::unsupported]
+        close $channel
+    }
+    rename ::test {}
+    interp alias {} ::test {} ::CoverageTest
 }
 
 # Evaluates a program given as expressions; returns the formatted value.

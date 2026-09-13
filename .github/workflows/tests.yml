@@ -26,6 +26,14 @@ jobs:
           sudo apt-get install -y --no-install-recommends tcl8.6
           echo 'puts "Tcl [info patchlevel], tcltest [package require tcltest 2.5]"' | tclsh8.6
 
+      # The corpus and native tests run every program on the Cranelift
+      # backend too, whichever backend the suite targets.
+      - name: Build the native backend
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          cargo build --release --manifest-path native/Cargo.toml
+
       - name: Run test suite
         env:
           CORE_BACKEND: ${{ matrix.backend }}
@@ -33,3 +41,43 @@ jobs:
 
       - name: Run examples
         run: tclsh8.6 main.tcl -backend ${{ matrix.backend }}
+
+  native:
+    name: tests (cranelift coverage)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Tcl 8.6
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends tcl8.6
+
+      - name: Build the native backend
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          cargo build --release --manifest-path native/Cargo.toml
+
+      # Runs the whole suite on cranelift and classifies every test; fails
+      # only if a test fails for a reason other than a reported unsupported
+      # construct.
+      - name: Native coverage
+        run: tclsh8.6 tests/native-coverage.tcl | tee coverage.txt
+
+      # The corpus and the source samples; examples/04-refinement-scope.ir
+      # (returns a Block) and 05-refined-strings.ir (web library) need
+      # unsupported constructs, and surface sample 10 expects an error.
+      - name: Run examples
+        run: tclsh8.6 main.tcl -backend cranelift examples/stdlib/*.bot examples/surface/0*.bot examples/surface/1[1-3]*.bot examples/0[1-3]*.ir
+
+      - name: Publish summary
+        if: always()
+        run: |
+          {
+            echo "## Cranelift backend coverage"
+            echo
+            echo '```'
+            cat coverage.txt 2>/dev/null || echo "No results."
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

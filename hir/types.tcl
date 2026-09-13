@@ -152,6 +152,9 @@ proc hir::types::intern {hirVar type} {
 #   * branch refinements (refine.tcl), inside the branch they are proven in
 #   * flow facts: once a call of a native requiring a type returned, its
 #     argument had that type, and since bindings are immutable it keeps it
+#   * forward references: a reference from a closure to a binding bound later
+#     to a block expression E has type {block E ARITY any} (ForwardType), so
+#     mutually recursive functions have known call targets
 #   * block results: lub of the body's value and every return; a block bound
 #     to a binding it calls itself through is analyzed under an assumed
 #     result type (never, then the inferred type) until the assumption is
@@ -194,7 +197,26 @@ proc hir::types::BindingType {hir ctx b} {
     if {[dict get $hir bindings $b kind] eq "root"} {
         return [ofValue [dict get $hir bindings $b value]]
     }
-    return any
+    return [ForwardType $hir $b]
+}
+
+# The type of a local binding B read before this path has bound it: only a
+# reference from inside a closure (init deferred) gets here. If B's first
+# bind binds a block expression E, the reference either fails (B not bound
+# yet when it runs) or yields the Block E created: bindings are immutable, and
+# a later duplicate bind raises instead of rebinding. Its result is not known
+# yet: {block E ARITY any}. Otherwise any.
+proc hir::types::ForwardType {hir b} {
+    set binding [dict get $hir bindings $b]
+    set declaredBy [dict get $binding declaredBy]
+    if {[dict get $binding kind] ne "local" || $declaredBy eq ""} {
+        return any
+    }
+    set value [dict get $hir exprs $declaredBy value]
+    if {[dict get $hir exprs $value kind] ne "block"} {
+        return any
+    }
+    return [list block $value [llength [dict get $hir exprs $value params]] any]
 }
 
 # Records that binding B's value has type FACT on the current path.

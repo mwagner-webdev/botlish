@@ -92,11 +92,20 @@ test hir-aot-7 {a name looked up in an unknown environment is a dynamic binding}
     lsort -unique [aotBlockerKinds $a <program>]
 } -result {DynamicBinding DynamicCall}
 
-test hir-aot-8 {a forward reference to a later function has no call target (HIR limitation)} -body {
+test hir-aot-8 {a forward reference to a later function is a direct call with an init check} -body {
     set a [aotOf [surface::readProgramFile [file join $::projectRoot examples surface 09-mutual-recursion.bot]]]
     list [aotStatus $a is_even] [aotBlockerKinds $a is_even] [aotStatus $a is_odd] \
-         [lmap f [aotFacts $a is_even init-check] {dict get $f name}]
-} -result {{open open} {DynamicCall UnknownParameterKind} {guarded closed} is_odd}
+         [lmap f [aotFacts $a is_even init-check] {dict get $f name}] \
+         [lmap f [aotFacts $a is_even direct-call] {dict filter $f key name tail}] \
+         [lmap f [aotFacts $a is_odd direct-call] {dict filter $f key name tail}]
+} -result {{guarded closed} UnknownParameterKind {guarded closed} is_odd {{name is_odd tail 1}} {{name is_even tail 1}}}
+
+test hir-aot-8b {shared call facts: self tail calls and unproven references} -body {
+    set hir [surface::compile "fn even(n):\n    if n == 0:\n        return true\n    odd(n - 1)\n\nfn odd(n):\n    if n == 0:\n        return false\n    even(n - 1)\n\nfn count(n):\n    loop:\n        return count(n)\n    count(n - 1)\n\neven(4)" t.bot]
+    set self [lmap {call block} [hir::aot::selfTailCalls $hir] {hir::aot::BlockName $hir $block}]
+    set refs [lmap {ref b} [hir::aot::unprovenReferences $hir] {hir::get $hir $ref name}]
+    list $self $refs
+} -result {count odd}
 
 # ---------------------------------------------------------------------------
 # Kinds

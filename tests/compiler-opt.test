@@ -99,6 +99,16 @@ test opt-env-5 {mutual recursion through a forward reference is unchanged} -body
     differential [hir::lower [surface::readProgramFile [file join $::projectRoot examples surface 09-mutual-recursion.bot]]]
 } -result same
 
+test opt-env-5b {a forward call before the later function is bound still fails} -body {
+    set text "fn early():\n    late()\n\nx = early()\n\nfn late():\n    1\n\nx"
+    list [differential [sourceIR $text]] [lindex [outcomeUnder compile [sourceIR $text]] 1]
+} -result {same {CORE SEMANTIC UNBOUND}}
+
+test opt-env-5c {mutual recursion between nested functions, with a forward call} -body {
+    set text "fn outer(k):\n    fn even(n):\n        if n == 0:\n            return k\n        odd(n - 1)\n    fn odd(n):\n        if n == 0:\n            return 0 - k\n        even(n - 1)\n    \[even(6), even(3)\]\n\nouter(5)"
+    list [differential [sourceIR $text]] [core::formatValue [core::evalProgram [sourceIR $text]]]
+} -result {same {[5, -5]}}
+
 test opt-env-6 {a Block value still carries its environment} -body {
     set saved [core::useBackend]
     core::useBackend compile

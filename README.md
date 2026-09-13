@@ -9,13 +9,18 @@ the language's own. Where Tcl behaves differently (truthiness, strings as
 values, exceptions, variable scope, command lookup), the evaluator does
 **not** inherit Tcl's behavior.
 
-There are two backends that implement the same semantics:
+There are three backends that implement the same semantics:
 
 * **`interp`**: the tree-walking reference interpreter (`core/evaluator.tcl`).
 * **`compile`**: a compiler from IR to Tcl procedures (`compiler/compiler.tcl`,
   see §12).
+* **`cranelift`**: a native code backend. HIR is lowered to a small native IR
+  and compiled to machine code with Cranelift (`native/`, see §20).
 
-The whole test suite runs against both.
+The whole test suite runs against `interp` and `compile`. The algorithm
+corpus and the native tests run on all three, and
+`tests/native-coverage.tcl` classifies every test of the suite on
+`cranelift`.
 
 Between the two sits a semantic layer, the **HIR** (`hir/`, §16): core IR
 with every name resolved to a binding identity, every expression typed, and
@@ -31,13 +36,16 @@ source ──surface::parse──▶ AST ──surface::lowerToHir──┐
                                                       ▼
 core IR ──────────────hir::build────────────────────▶ HIR ──hir::lower──▶ core IR ──▶ interpreter
                                                        │
-                                                       └──────────────────────────▶ Tcl compiler
+                                                       ├──────────────────────────▶ Tcl compiler
+                                                       │
+                                                       └──native::lower──▶ NIR ──▶ Cranelift ──▶ machine code
 ```
 
 ```
 core/            runtime and interpreter (see "Implementation map")
 hir/             semantic HIR: resolution, types, refinements, lowering
 compiler/        HIR -> Tcl compiler
+native/          HIR -> NIR -> Cranelift native backend (Tcl lowering; Rust runtime and codegen)
 surface/         source language: lexer, parser, surface AST, AST -> HIR
 examples/*.ir    acceptance programs as IR data
 examples/hir/    HIR samples (.hir text) with the core IR they lower to
@@ -48,7 +56,11 @@ main.tcl         example runner
 ```
 
 ```sh
-tclsh tests/all.tcl                         # test suite, both backends
+tclsh tests/all.tcl                         # test suite, interp and compile
+cargo build --release --manifest-path native/Cargo.toml   # build the native backend (§20)
+tclsh tests/native-coverage.tcl             # test suite on cranelift, classified (§20)
+tclsh main.tcl -backend cranelift FILE.bot  # run natively
+tclsh main.tcl -emit-nir -emit-clif FILE.bot   # show NIR, then Cranelift IR, of every function
 CORE_BACKEND=compile tclsh tests/all.tcl    # test suite, one backend
 tclsh main.tcl                              # run all examples (interp)
 tclsh main.tcl -backend compile -code FILE.ir   # compile, show generated Tcl, run
@@ -464,6 +476,11 @@ refinement unless its contract explicitly establishes one. So
 | `hir/read.tcl` | HIR text → HIR |
 | `hir/aot.tcl` | closed-AOT readiness analysis (§19) |
 | `compiler/compiler.tcl` | HIR → Tcl compiler backend |
+| `native/lower.tcl` | HIR → NIR native lowering (§20) |
+| `native/native.tcl` | the `cranelift` backend: runs the native driver; NIR, CLIF and object entry points |
+| `native/src/nir.rs` | NIR parsing and validation |
+| `native/src/runtime/` | native `Value` representation, heap and collector, errors, runtime helper ABI |
+| `native/src/codegen/` | the `Backend` interface; NIR → Cranelift IR for JIT and object files |
 | `surface/lexer.tcl` | source → tokens, indentation → `INDENT`/`DEDENT` |
 | `surface/parser.tcl` | tokens → surface AST (recursive descent) |
 | `surface/ast.tcl` | spans, syntax errors, AST formatting |
@@ -490,8 +507,7 @@ Implementation notes (not part of the semantics):
 
 Surface syntax beyond the minimal language of §17, macros, modules, objects, assignment, mutable
 variables, exceptions, `?` propagation, pattern matching, a type checker
-beyond refinement tracking, async, coroutines, threads, FFI, or native code
-generation.
+beyond refinement tracking, async, coroutines, threads, or FFI.
 
 ## 12. The compiler backend
 
@@ -1091,11 +1107,11 @@ name now has result type `never` (it always raises) instead of `any`.
   of NAME". That identity is approximate if the sequence also binds the name.
 * The only symbols are builtins. Parameters are typed `any`: there are no
   type annotations and no function types beyond `{block E A R}`.
-* Types are inferred in one walk in evaluation order, so a reference to a
-  function bound *later* (mutual recursion,
-  `examples/surface/09-mutual-recursion.bot`) has type `any`, and its calls
-  have no known target, although the binding is immutably bound to a block
-  expression.
+* A reference from a closure to a function bound *later* (mutual recursion,
+  `examples/surface/09-mutual-recursion.bot`) has the forward type
+  `{block E ARITY any}`: its call target is known, its result type is not.
+  Whether the binding is bound when the reference runs stays a run-time
+  check (`hir::aot::unprovenReferences`).
 * `init deferred` covers every reference from inside a closure, including
   references that are certainly bound when the closure runs (parameters of
   the enclosing block, the function itself, bindings made before the closure
@@ -1347,16 +1363,17 @@ function that has to return two things (a field and the
 position after it) returns a two-element list.
 
 **Tests.** `tests/stdlib.test` runs about 60 cases (the edge cases of each
-algorithm, non-ASCII text, 64-bit overflow, errors) on both backends in one
-process and requires both to produce the stated outcome. `tests/lists.test`
-covers the list primitives.
+algorithm, non-ASCII text, 64-bit overflow, errors) on all three backends
+(interp, compile, cranelift) and requires each to produce the stated
+outcome. `tests/lists.test` covers the list primitives.
 
 **Benchmarks.** `tclsh bench/corpus.tcl [-runs N] [-markdown] [-all]` times
 every algorithm at several input sizes on every backend. Each measurement
 runs in a fresh process, so measurements can't disturb each other, and
 compilation is excluded. Cases marked slow skip the interpreter unless
-you pass `-all`. A future backend is a new case in `corpus::run` and becomes
-a new column.
+you pass `-all`. A backend is a case in `corpus::run` and a column; the
+native backend's numbers and compile times are in §20. The table below is
+the historical Tcl baseline.
 
 `tclsh bench/corpus.tcl -runs 3` (Tcl 8.6.17 on Windows, best of 3, wall
 time, compilation excluded). "compile, before" is the first compiler, from
@@ -1494,12 +1511,15 @@ facts from block calls.
 * Fixed: `.bot` and `.ir` files were read in the platform's system encoding
   (cp1252 on Windows), which corrupted non-ASCII source. Program files are
   now read as UTF-8.
-* Not fixed, documented in §16's known limitations: calls of a function
-  bound later (mutual recursion) have no call target, so `is_even` in
-  `examples/surface/09-mutual-recursion.bot` is `open`. `init deferred`
-  over-approximates. Block calls add no flow facts.
+* Fixed in the native milestone (§20): calls of a function bound later
+  (mutual recursion) had no call target, so `is_even` in
+  `examples/surface/09-mutual-recursion.bot` was `open`. It is now
+  `guarded`, with an init check. Still in §16's known limitations:
+  `init deferred` over-approximates, and block calls add no flow facts.
 
-**For the first native (Cranelift) milestone**, in order of evidence:
+**For the first native (Cranelift) milestone**, in order of evidence (the
+milestone is described in §20; items 1, 3 and 4 are done, 2 and 5 are the
+next milestone's):
 
 1. Turn self tail calls into loops. Every loop in the corpus is one, and
    recursion depth otherwise grows with the input. The Tcl compiler already
@@ -1514,6 +1534,286 @@ facts from block calls.
 4. Give HIR call targets for forward references to functions.
 5. Plan list element types and a growable or persistent list
    representation. `list_append` copying is what makes CSV quadratic.
+
+## 20. The native backend (Cranelift)
+
+`native/` compiles Botlish to machine code. It implements the same semantics
+as the interpreter and the Tcl compiler, including arbitrary-precision Ints,
+run-time kind checks and the reference error codes and messages. It runs the
+algorithm corpus (§18) unchanged.
+
+```sh
+cargo build --release --manifest-path native/Cargo.toml   # Rust 1.96+, Cranelift 0.135
+tclsh main.tcl -backend cranelift examples/stdlib/csv.bot
+tclsh main.tcl -emit-nir examples/stdlib/matmul.bot       # native IR
+tclsh main.tcl -emit-clif examples/stdlib/matmul.bot      # Cranelift IR
+tclsh tests/native-coverage.tcl                           # whole suite on cranelift, classified
+tclsh bench/corpus.tcl                                    # corpus timings, all backends
+```
+
+```tcl
+source native/native.tcl        ;# loads compiler, hir and core too
+core::useBackend cranelift      ;# core::evalProgram now runs natively
+native::evalHir $hir            ;# or run a program-mode HIR directly
+```
+
+### Pipeline
+
+```
+HIR ──native::lower (Tcl)──▶ NIR text ──botlish-native (Rust)──▶ Cranelift IR ──▶ machine code
+ │                            ▲
+ └──hir::aot facts────────────┘
+```
+
+* **Native lowering** (`native/lower.tcl`) turns HIR into NIR. It does no
+  semantic analysis of its own. Guards come from `hir::aot`'s
+  representation blockers and known-error facts, self tail calls from
+  `hir::aot::selfTailCalls` (shared with the Tcl compiler), init checks
+  from `hir::aot::unprovenReferences`, and environment-free functions from
+  `hir::aot`'s static blocks. Lowering cross-checks the guards against HIR
+  types and reports a mismatch as a backend bug.
+* **NIR** is register-based and representation-level: constants, moves,
+  `guard KIND`, `op OP` (a known operation on operands of the kinds it
+  requires), `call` / `callenv` / `callvalue`, `tail`, cells and closures,
+  branches, `ret` and `raise`. It has no names to resolve, no types and no
+  traits. The format is documented at the top of `native/lower.tcl`.
+* **The driver** `botlish-native` (`native/src/main.rs`) parses and
+  validates NIR (`nir.rs`), translates it with the `Backend` interface
+  (`codegen/`, whose only implementation is Cranelift), JIT-compiles and
+  runs it against the runtime (`runtime/`). The Tcl backend runs one driver
+  process per program: the NIR goes in as a file, and the value comes back
+  in the host's runtime value representation (core/value.tcl), or the error
+  with its error code.
+* The same translation also writes object files
+  (`botlish-native object OUT FILE.nir`). That is a smoke test only:
+  running one would also need the runtime as a static library and an
+  initializer for the constant table.
+
+### Values
+
+A `Value` is one 64-bit word (`runtime/value.rs`):
+
+| Low bits | Meaning |
+|---|---|
+| `…1` | small Int `n` as `(n << 1) \| 1`, for `-2^62 <= n < 2^62` |
+| `0010`, `0110`, `1010` | `false`, `true`, `unit` |
+| `1110` | an unbound cell (never a program value) |
+| `…000` | pointer to a heap object, whose header byte is its kind: big Int, Str, List, Result, Block (closure), native, cell |
+| `0` | no value: an error is pending |
+
+Kind knowledge and machine representation stay separate. A guard proves a
+*kind* (`guard int`) and keeps the tagged word. The Int operations then take
+an inline path for two small Ints and call a runtime helper otherwise.
+Unboxing proven Ints to bare `i64` is left for a later milestone.
+
+**Ints** are canonical: a value in the small range is always small, so two
+Ints are equal iff their words are equal or both are big and numerically
+equal. `+`, `-` and `*` run inline on tagged words and detect leaving the
+small range with Cranelift's overflow-checking instructions; on overflow or
+a big operand, they call `rt_int_add` / `rt_int_sub` / `rt_int_mul`, which
+use `num-bigint` and normalize the result. Comparisons are inline for small
+Ints and use `rt_int_cmp` otherwise. `num-bigint` is an implementation
+detail: nothing about it is visible to programs.
+
+**Strings** are UTF-8 with a cached character count and an ASCII flag.
+`length` and `substring` count Unicode scalar values: ASCII strings are
+indexed in O(1), others by walking the characters. This matches Tcl 9. On
+Tcl 8.6, characters outside the BMP are not representable anyway (§18), so
+the corpus tests only use BMP characters. `lowercase` uses simple one-to-one
+case mapping, like Tcl's `string tolower`, and keeps a character whose
+lowercase form is several characters.
+
+**Lists** are immutable vectors of values. `list_append` copies, as the
+reference runtime does, so CSV's quadratic behavior is kept deliberately
+(§18).
+
+### Functions, calls and closures
+
+```
+botlish_fn_F(vm, a0..an) -> Value              environment-free F
+botlish_fn_F(vm, closure, a0..an) -> Value     F with an environment
+botlish_entry_F(vm, closure, args*) -> Value   generic entry: the code of F's Block values
+```
+
+All words are `i64`, with the platform's C calling convention. A result of
+0 means an error is pending: every call site branches to its function's
+error exit, which pops the shadow frame and returns 0, so no generated code
+runs after a failed guard or helper.
+
+* **Direct calls.** A call whose HIR target is a Botlish function is
+  `call botlish_fn_F`, with no lookup and no arity check (HIR checked the
+  arity; a mismatch raises `ARITY` in place). A call with no known target
+  is `rt_call_value`, which dispatches on the callee's kind: a closure
+  (arity check, then its generic entry), a native (arity check, parameter
+  kind checks, the operation), or `NOT-CALLABLE`.
+* **Known natives** become an `op` after their guards. Arithmetic,
+  comparisons, kind tests, cells and captures are inline. String, list,
+  Result and structural equality operations call one runtime helper each,
+  never a dispatcher. Native identity maps to an implementation in
+  `native::lower::natives`; everything else (arity, parameter kinds) comes
+  from the native registry.
+* **Environment-free functions** are `hir::aot`'s static blocks, minus
+  those that capture a cell. They take no closure argument. Their Block
+  value is one constant closure, loaded from the constant table.
+* **Closures.** A Block value is `{code, function id, arity, captures}`.
+  Captures are values, except for bindings that some reference can't be
+  proven bound when it runs (a forward reference, as in mutual recursion).
+  Those are *cells*: allocated when their scope is entered, set by the bind,
+  and read with an `UNBOUND` check where the reference is unproven. A
+  closure reads its own function binding through `self`.
+* **Self tail calls** (`hir::aot::selfTailCalls`, the Tcl compiler's
+  criterion) rebind the parameter variables and jump back to the body block
+  after the prologue: a CFG back edge. In the CLIF, the body block is a loop
+  header with the parameters as block parameters, and the function never
+  calls itself. Other calls, including tail calls to other functions, are
+  real calls.
+* **Branches and loops** are ordinary CFG blocks. `if` values, `break`
+  values, `continue` and `return` from inside loops are jumps and moves.
+
+### Runtime helpers, errors and memory
+
+The helper ABI is listed with its failure and allocation behavior at the top
+of `native/src/runtime/ops.rs`. Every helper takes the VM pointer and 64-bit
+words. Operands already have the kinds the operation requires. A helper that
+fails records a structured `RtError` (the offending values stay GC roots)
+and returns 0. The error is formatted only at the program boundary, as the
+reference runtime's error code (`CORE SEMANTIC TYPE`, `RANGE`, `ARITY`,
+`NOT-BOOLEAN`, `NOT-CALLABLE`, `EQUALITY`, `UNBOUND`, `DUPLICATE`) and its
+exact message. The native backend's own failures are `NATIVE UNSUPPORTED`,
+`NATIVE INVALID-NIR`, `NATIVE CODEGEN`, `NATIVE BUG` and
+`NATIVE LIMIT STACK`. Unbounded recursion ends in `NATIVE LIMIT STACK`,
+not a crash. The Tcl backends raise Tcl's recursion limit instead, which is
+a resource limit, not semantics.
+
+Memory management is temporary: a precise, non-moving mark-and-sweep
+collector (`runtime/heap.rs`). Every native frame reserves one shadow-stack
+slot per NIR register, clears them in its prologue, and stores every
+register definition to its slot. The collector scans those slots, the
+pending error's values and a small list of runtime roots. Register values
+stay in Cranelift variables, and objects never move, so reads never touch
+the shadow stack. A collection runs inside an allocation, when twice the
+live bytes after the last collection have been allocated (at least 32 MB).
+`BOTLISH_NATIVE_GC_STRESS=1` collects before every allocation, and the
+corpus tests pass that way. Between benchmark runs, the whole heap is
+reclaimed. Nothing about ownership reaches HIR or NIR. Cranelift's stack
+maps would let a later collector drop the shadow stack.
+
+### Diagnostics
+
+A construct native lowering does not support raises
+`{NATIVE UNSUPPORTED WHAT}` with the source location, the HIR node and the
+operation, e.g.
+`t.bot:2:5: e5: native lowering does not support native test_log: ...`.
+Invalid NIR is rejected by the driver's validator before code generation.
+A Cranelift verifier or code generation failure is `NATIVE CODEGEN`, and a
+panic is `NATIVE BUG`.
+
+**Supported:** program-mode HIR with every expression kind (`const`, `ref`,
+`bind`, `block`, `call`, `if`, `loop`, `return`, `break`, `continue`, `ok`,
+`error`), closures with captured values and cells, mutual recursion, run-time
+`UNBOUND` and `DUPLICATE`, calls chosen at run time, natives as values, and
+the builtin natives `+ - * < <= > >= == eq list length substring lowercase
+concat list_length list_get list_append integer? string? list? ok? error?
+result-value result-error`.
+
+**Not supported** (each reported as `NATIVE UNSUPPORTED`):
+
+* natives implemented only in Tcl: the `web` and regex libraries and the
+  test suite's instrumentation natives (`test-log`, `test-tick`, …)
+* named types and evidence (`Emailish?`, refined parameter types)
+* sequence mode (`core::evalIn` in an existing Tcl environment)
+* handing a Block value back to the host, and so refinement probes through
+  `core::blockEnv`
+
+### Coverage
+
+`tests/native-coverage.tcl` runs the whole suite with
+`CORE_BACKEND=cranelift` and puts every test in exactly one class:
+
+| Class | Tests | Of the 757 tests that predate the backend | Meaning |
+|---|---:|---:|---|
+| native | 205 | 171 | passed, ran native code |
+| independent | 544 | 541 | passed without running a program on the backend (frontend, HIR, analysis) |
+| passed-partial | 3 | 0 | passed; checks an unsupported-construct diagnostic on purpose |
+| unsupported | 45 | 45 | needs a construct listed above |
+| failed | 0 | 0 | anything else |
+
+The 45 unsupported tests need: a Block returned to the host (12), sequence
+mode (7), `test-log`/`test_log` (8), `test-tick`/`test_tick` (6), `web`
+library natives and evidence (9), and the test natives `test-fake-escape`,
+`test-lax-param` and `test-both-ints?` (3).
+`tests/native.test` (40 tests) checks lowering and CLIF structure, and
+three-way parity on arithmetic at the small/big boundaries, guards, every
+error class, strings, lists, Results, calls, closures, the stack limit, the
+collector and object emission. `tests/stdlib.test` runs every corpus case on
+all three backends.
+
+### Corpus
+
+`tclsh bench/corpus.tcl -runs 3 -markdown` (Tcl 8.6.17, Windows, x86-64;
+best of 3, wall time). Cranelift's compile time is separate: native
+lowering in Tcl + Cranelift code generation and JIT linking.
+
+| algorithm | input | interp | compile | cranelift | cranelift compile (lower + jit) | compile / cranelift |
+|---|---|---:|---:|---:|---:|---:|
+| string_reverse | 100 chars | 37.4 ms | 1.6 ms | 0.019 ms | 4.1 + 2.7 ms | 83x |
+| string_reverse | 1,000 chars | 301.0 ms | 12.6 ms | 0.431 ms | 4.2 + 3.0 ms | 29x |
+| string_reverse | 10,000 chars | 3042.2 ms | 129.1 ms | 21.5 ms | 4.2 + 2.7 ms | 6.0x |
+| string_replace | 1 KB | 609.4 ms | 16.9 ms | 0.124 ms | 7.3 + 4.4 ms | 136x |
+| string_replace | 10 KB | 5935.9 ms | 161.3 ms | 3.6 ms | 6.4 + 6.3 ms | 45x |
+| string_replace | 100 KB | skipped | 1610.2 ms | 83.4 ms | 8.0 + 4.7 ms | 19x |
+| csv | 100 rows | 2172.1 ms | 55.2 ms | 1.0 ms | 8.4 + 6.7 ms | 55x |
+| csv | 1,000 rows | 23087.2 ms | 899.0 ms | 12.4 ms | 10.1 + 7.0 ms | 72x |
+| csv | 10,000 rows | skipped | 36384.2 ms | 237.6 ms | 21.0 + 7.0 ms | 153x |
+| matmul | 2x3 * 3x2 | 15.1 ms | 0.968 ms | 0.002 ms | 7.0 + 5.7 ms | 484x |
+| matmul | 8x8 | 223.3 ms | 9.3 ms | 0.019 ms | 13.5 + 10.6 ms | 488x |
+| matmul | 16x16 | 1645.0 ms | 63.4 ms | 0.108 ms | 34.1 + 26.3 ms | 587x |
+| matmul | 32x32 | skipped | 493.3 ms | 0.906 ms | 138.8 + 117.7 ms | 544x |
+
+All three backends produced the same value in every case.
+
+The corpus stays guarded, as `hir::aot` reports: every guard in the NIR is
+one of its representation blockers (reverse 4, replace 12, CSV 17,
+matmul 17), no call goes through `rt_call_value`, and every corpus function
+is environment-free. Where the time goes:
+
+* **reverse** and **replace** at large sizes are dominated by copying the
+  accumulator string on every `concat`: O(n²) bytes, most of them garbage
+  at once. Collection frequency matters more than the copying itself: with
+  a 32 MB minimum collection threshold, `string_replace` at 100 KB took
+  146 ms, because new copies kept landing in cold memory; with 1 MB it takes
+  about 80 ms (see `native/src/runtime/heap.rs`). A nursery or reference counting would do
+  better. The helpers derive a result's character count and ASCII flag from
+  the operands instead of rescanning.
+* **CSV** spends its time in `list_append` copies (quadratic in records)
+  and in allocating the two-element `[field, index]` lists.
+* **matmul** runs mostly inline: small-Int fast paths for `*` and `+`, and
+  a `list_get` helper call with a range check per entry.
+* Compile time is dominated by native lowering in Tcl for programs with
+  large literals (the benchmark's matrices are source literals), and by
+  Cranelift for the rest.
+
+### Next milestone: specialization and closed native AOT
+
+The remaining blockers are the ones §19 lists: `UnknownParameterKind` (44 of
+50) and `UnknownAggregateElementType` (6). Recommendations, in order:
+
+1. **Call-site specialization** of parameter kinds in a closed program:
+   compile `f<Str, Int, Str>` next to the generic `f(Any, Any, Any)`, keeping
+   the semantic function unchanged. Every corpus function is called from
+   known sites with kinds `hir::aot` can already see at the caller.
+2. **Result propagation**, so a specialized callee's result kind reaches its
+   caller (`reverse_from`'s accumulator, `dot`'s `total`).
+3. **Unboxing** of Ints proven small (range analysis for indices and
+   counters), then **redundant guard elimination** for guards on values
+   HIR narrowed later on the same path (e.g. `index` in `substring(text,
+   index, index + 1)`).
+4. **List element kinds**, then **transient builders** for `list_append`
+   and string accumulation where the old value is provably dead (escape
+   analysis), and **scalar replacement** of the `[field, index]` pairs.
+5. Replace the shadow stack with Cranelift stack maps, and make the object
+   path runnable (runtime as a static library, constant-table initializer)
+   for real closed AOT.
 
 The corpus programs should stay unchanged throughout. `hir::aot` and
 `bench/corpus.tcl` measure the progress.

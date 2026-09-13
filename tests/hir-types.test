@@ -149,6 +149,15 @@ test hir-call-4 {a known block target} -body {
     list [hir::get $h $call target] [hirFind $h block] [shownTypes $h $call]
 } -result {{block e2} e2 int}
 
+test hir-call-4b {a forward reference to a later function has a known target, result unknown} -body {
+    set h [hirOf {bind even {block {n} {call {ref odd} {ref n}}}} \
+                 {bind odd {block {n} {call {ref even} {ref n}}}} \
+                 {bind later {block {} {ref value}}} \
+                 {bind value {const 1}}]
+    set calls [hirFind $h call]
+    list [lmap e $calls {hir::get $h $e target}] [hirRefTypes $h odd] [hirRefTypes $h value]
+} -result {{{block e7} {block e2}} {{block(e7)/1 -> any}} any}
+
 test hir-call-5 {argument order is preserved} -body {
     set h [hirOf {call {ref list} {const a} {const b} {const c}}]
     set call [hirFind $h call]

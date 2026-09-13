@@ -298,6 +298,78 @@ proc hir::aot::InitProven {hir e b positions} {
                   && [hir::scopeWithin $hir [hir::get $hir $c scope] [dict get $binding scope]]}]
 }
 
+# ---------------------------------------------------------------------------
+# Shared call facts for backends
+#
+# These are the semantic criteria every backend uses, so that the Tcl
+# compiler and native lowering cannot disagree about them.
+
+# Self tail calls: calls whose HIR target is the block they occur in, with
+# matching arity, in tail position of that block (its body's value or a
+# return's value, through if branches), and not inside a loop of that block.
+# Such a call is the last thing its invocation does, so a backend may rebind
+# the parameters and restart the body instead of nesting a call. Returns a
+# dict call ExprId -> block ExprId.
+proc hir::aot::selfTailCalls {hir} {
+    set result [dict create]
+    foreach e [TailCalls $hir] {
+        lassign [hir::get $hir $e target] kind target
+        if {$kind eq "block" && [RegionOf $hir $e] eq $target
+                && [llength [hir::get $hir $target params]] == [llength [hir::get $hir $e args]]
+                && ![InLoopOf $hir $e $target]} {
+            dict set result $e $target
+        }
+    }
+    return $result
+}
+
+# 1 if expression E is inside a loop body within block BLOCK's invocation.
+proc hir::aot::InLoopOf {hir e block} {
+    for {set s [hir::get $hir $e scope]} {$s ne "" && [dict get $hir scopes $s owner] ne $block} \
+            {set s [dict get $hir scopes $s parent]} {
+        if {[dict get $hir scopes $s kind] eq "loop"} {
+            return 1
+        }
+    }
+    return 0
+}
+
+# References (init deferred, to a local or parameter binding) that HIR cannot
+# prove bound when they run (see InitProven): evaluating one must check that
+# its binding has a value. Returns a dict ref ExprId -> BindingId.
+proc hir::aot::unprovenReferences {hir} {
+    set walk [hir::walk $hir]
+    set positions [dict create]
+    set index 0
+    foreach e $walk {
+        dict set positions $e [incr index]
+    }
+    set result [dict create]
+    foreach e $walk {
+        if {[hir::kind $hir $e] ne "ref" || [hir::get $hir $e init] ne "deferred"} {
+            continue
+        }
+        set b [hir::get $hir $e binding]
+        if {[dict get [hir::binding $hir $b] kind] in {local param}
+                && ![InitProven $hir $e $b $positions]} {
+            dict set result $e $b
+        }
+    }
+    return $result
+}
+
+# The binding whose first bind binds block expression E (the function E
+# defines), or "".
+proc hir::aot::functionBinding {hir e} {
+    dict for {b binding} [dict get $hir bindings] {
+        set declaredBy [dict get $binding declaredBy]
+        if {$declaredBy ne "" && [hir::get $hir $declaredBy value] eq $e} {
+            return $b
+        }
+    }
+    return ""
+}
+
 # ExprIds of the calls in tail position of their block: the value of the
 # body, or of a return leaving the block, through if branches.
 proc hir::aot::TailCalls {hir} {

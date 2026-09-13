@@ -1,0 +1,18 @@
+[package]
+name = "botlish-native"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+cranelift-codegen = "0.135"
+cranelift-frontend = "0.135"
+cranelift-module = "0.135"
+cranelift-jit = "0.135"
+cranelift-object = "0.135"
+cranelift-native = "0.135"
+num-bigint = "0.4"
+num-traits = "0.2"
+
+[profile.release]
+debug = 1
