@@ -1195,13 +1195,58 @@ references and hygiene.
 
 ### Known limitations
 
-* `and`, `or` and `not` conditions add no refinements: `if integer?(x) and
-  …` would not refine `x`. Only a direct predicate call does (§6), and
-  predicates can't be named from source yet anyway.
-* A renamed binding shows its core IR name (`list#1`) in run-time errors of
-  `-strict 0` programs and in `programTypes`. HIR diagnostics use the source
-  spelling.
-* Recovery is line-based. An error inside a line can cascade into one more
-  diagnostic, for example a stray token after an unexpected character.
-* Node ids identify structure, not text ranges. An editor still has to
-  reparse the whole file; there's no incremental reparsing yet.
+**Language**
+
+* `and`, `or` and `not` add no refinements. They lower to nested `if`s, and
+  HIR only derives facts from a condition that is a direct predicate call
+  (§6), so `if integer?(x) and x > 0:` would not refine `x` in the branch.
+  This doesn't bite yet, because predicates can't be named from source.
+* An `if` is a value only as the whole right side of `=`, or the whole value
+  of `return` or `break`. It can't be an operand or an argument
+  (`1 + if c: …`, `f(if c: …)`), because its blocks need their own lines.
+  There's no one-line form (`if c: a else: b`) and no `elif`; nest an `if`
+  inside `else:` instead.
+* Natives whose names contain `?` or `-` (`integer?`, `ok?`, `result-value`,
+  `test-log`) can't be named from source. `?` is reserved, and `-` is an
+  operator.
+
+**Hygiene**
+
+* A binding renamed for hygiene keeps its core IR name (`list#1`) wherever
+  core IR names are visible: lowered IR, `-code` output, `programTypes`,
+  runtime environments (`core::envBindings`, block probes), and run-time
+  errors of `-strict 0` programs. HIR diagnostics and the binding's
+  `spelling` keep the source name.
+* Root references work only in program mode. Sequence-mode HIR (`evalIn`,
+  an unknown host environment) has no root scope to point at, and building
+  one raises `CORE MALFORMED`.
+
+**Errors and recovery**
+
+* Only the first semantic error is raised. `surface::lowerToHir` (strict)
+  reports the first HIR diagnostic; the rest stay in the HIR
+  (`-strict 0`, `hir::diagnostics`). Syntax errors, in contrast, can all be
+  collected with `-recover 1`.
+* Recovery is line-based:
+  * An error anywhere in a statement discards the whole statement,
+    including the block under its header. A typo in an `if` condition drops
+    the entire `if`, and errors inside that block go unreported.
+  * An error inside a line can cascade into one more diagnostic, for example
+    a stray token after an unexpected character (`2 ! 3`).
+  * An unclosed bracket is closed only at the end of input or before a line
+    that starts like a statement (a keyword or `name =`) and isn't indented
+    deeper than the line that opened it. Expression lines in between are
+    read as part of the bracket.
+* An AST with syntax errors can't be lowered, so there's no partial HIR for
+  the valid parts of a broken file.
+
+**Node ids**
+
+* Node ids are structural paths, not identities tracked across edits:
+  * Renaming a function or binding changes the ids of everything inside it.
+  * Inserting a statement renumbers later siblings with the same key: a new
+    `x = …` before an existing one turns `x=` into `x=#2`, and a new
+    expression statement shifts `call`, `call#2`, ….
+  * Moving code changes its ids.
+* There's no incremental reparsing. An editor has to reparse the whole file
+  and match nodes by id.
