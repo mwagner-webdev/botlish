@@ -33,15 +33,12 @@ proc core::predicates::resultError {v} {
     return [core::value::resultPayload $v]
 }
 
-core::native::register integer? -arity 1 \
-    -impl {core::predicates::KindIs int} -refines-true {0 int} \
-    -param-types any -result-type bool
-core::native::register string? -arity 1 \
-    -impl {core::predicates::KindIs str} -refines-true {0 str} \
-    -param-types any -result-type bool
-core::native::register list? -arity 1 \
-    -impl {core::predicates::KindIs list} -refines-true {0 list} \
-    -param-types any -result-type bool
+# Kind and tag predicates are type tests (-tests-type): each returns exactly
+# whether its argument is a value of the type, and refines it accordingly.
+foreach {name kind} {integer? int string? str list? list} {
+    core::native::register $name -arity 1  -impl [list core::predicates::KindIs $kind] -tests-type $kind
+}
+unset name kind
 
 # The tag of a Result is a structural property: validator types.
 core::type::register Result.ok    -base result -validator {core::predicates::HasTag ok}
@@ -51,12 +48,8 @@ proc core::predicates::HasTag {tag v} {
     return [expr {[core::value::resultTag $v] eq $tag}]
 }
 
-core::native::register ok? -arity 1 \
-    -impl {core::predicates::ResultIs ok} -refines-true {0 Result.ok} \
-    -param-types any -result-type bool
-core::native::register error? -arity 1 \
-    -impl {core::predicates::ResultIs error} -refines-true {0 Result.error} \
-    -param-types any -result-type bool
+core::native::register ok? -arity 1  -impl {core::predicates::ResultIs ok} -tests-type Result.ok
+core::native::register error? -arity 1  -impl {core::predicates::ResultIs error} -tests-type Result.error
 
 core::native::register result-value -arity 1 -impl core::predicates::resultValue \
     -param-types result

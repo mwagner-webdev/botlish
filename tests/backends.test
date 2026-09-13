@@ -8,7 +8,7 @@ source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 
 set corpus {}
 foreach path [lsort [glob -directory [file join $::projectRoot examples] *.ir]] {
-    lappend corpus [file tail $path] [core::readProgramFile $path]
+    lappend corpus [file tail $path] [core::loadProgramFile $path]
 }
 lappend corpus \
     nested-closures {

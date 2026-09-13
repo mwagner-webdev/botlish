@@ -75,6 +75,9 @@ proc resetEffects {} {
     set ::testTicks 0
 }
 
+# The refined-type tests use the optional web library.
+core::loadLibrary web
+
 if {"test-log" ni [core::native::names]} {
     core::registerNative test-log  -arity 1 -impl testLogImpl
     core::registerNative test-tick -arity 0 -impl testTickImpl

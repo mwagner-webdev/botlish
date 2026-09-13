@@ -298,20 +298,20 @@ A native that breaks its declared type contract (§8) raises
 | `==` | any, any → bool (value equality) | |
 | `eq` | str, str → bool | |
 | `list` | any... → list | |
-| `integer?` | any → bool | true: arg 0 : `int` |
-| `string?` | any → bool | true: arg 0 : `str` |
-| `list?` | any → bool | true: arg 0 : `list` |
-| `ok?` | any → bool | true: arg 0 : `Result.ok` |
-| `error?` | any → bool | true: arg 0 : `Result.error` |
+| `integer?` | any → bool, type test of `int` | true: arg 0 : `int` |
+| `string?` | any → bool, type test of `str` | true: arg 0 : `str` |
+| `list?` | any → bool, type test of `list` | true: arg 0 : `list` |
+| `ok?` | any → bool, type test of `Result.ok` | true: arg 0 : `Result.ok` |
+| `error?` | any → bool, type test of `Result.error` | true: arg 0 : `Result.error` |
 | `result-value` | ok Result → its value | |
 | `result-error` | error Result → its payload | |
 | `length` | str → int | |
 | `substring` | str, int, int → str (characters `start <= i < end`) | |
 | `lowercase` | str → str | |
 | `concat` | str, str → str | |
-| `Emailish?` | str → bool (`lib/web.tcl`) | true: arg 0 : `Emailish` |
-| `UriQueryValue?` | str → bool (`lib/web.tcl`) | true: arg 0 : `UriQueryValue` |
-| `uriEscape` | str → `UriQueryValue` (`lib/web.tcl`) | |
+| `Emailish?` | str → bool, type test of `Emailish` (library `web`) | true: arg 0 : `Emailish` |
+| `UriQueryValue?` | str → bool, type test of `UriQueryValue` (library `web`) | true: arg 0 : `UriQueryValue` |
+| `uriEscape` | str → `UriQueryValue` (library `web`) | |
 
 New natives are registered through the registry, not by changing the
 evaluator:
@@ -331,8 +331,26 @@ example `-result-type {refined str {UriQueryValue}}`.
 checks that each argument satisfied its parameter type and that the result
 satisfies the result type. A violation raises `CORE CONTRACT TYPE`. So a
 native can't claim to return a `UriQueryValue` while returning a plain
-string. The compiler relies on these declarations (§13). Only its inlined
-intrinsics for trusted builtins skip the check.
+string. The compiler relies on these declarations (§13). Compiled code
+never re-checks them: its inlined intrinsics and type tests are exact, and
+generic calls go through the runtime, which checks.
+
+**Type tests.** `-tests-type T` declares a native to be a *type test*: a
+pure one-argument predicate that returns exactly `core::type::acceptsValue T ARG`.
+
+* Its parameter type must be `any` or a primitive kind `P`, with `T` a
+  subtype of `P`. The runtime itself rejects arguments not of kind `P`, with
+  `core::value::expect`'s `TYPE` error, before calling the implementation.
+* The result type is `bool`. Unless given explicitly, `-refines-true {0 T}`
+  is added.
+* The reference runtime verifies every answer against `acceptsValue`. A
+  wrong answer raises `CORE CONTRACT TYPE`.
+
+Because the answer is fully specified by the type, a compiler may decide the
+call from static types, or replace it with an inline membership test (§13).
+Compiled code trusts the declaration, so only the interpreter catches a lying
+type test. `core::type::definePredicate` registers type tests, and so do the
+builtin kind and tag predicates.
 
 **Strings discard refinements.** A string transformation's result carries no
 refinement unless its contract explicitly establishes one. So
@@ -362,6 +380,8 @@ refinement unless its contract explicitly establishes one. So
 | `core::formatValue V` / `core::formatCompletion C` | display |
 | `core::registerNative NAME ?options?` | register a native callable |
 | `core::readProgramFile PATH` | read a `.ir` file (a list of IR; `#` lines are comments) |
+| `core::loadProgramFile PATH` | load the libraries a `.ir` file names with `# requires: NAME…`, then read it |
+| `core::loadLibrary NAME` | load the optional library `lib/NAME.tcl` (once) |
 
 ## 10. Implementation map
 
@@ -381,7 +401,7 @@ refinement unless its contract explicitly establishes one. So
 | `core/type.tcl` | semantic types: named/refined types, subtyping, value membership |
 | `core/regex.tcl` | engine-independent regex IR, lowered to Tcl ARE |
 | `core/primitives.tcl`, `core/predicates.tcl`, `core/strings.tcl` | builtin natives |
-| `lib/web.tcl` | demonstration library: `Emailish`, `UriQueryValue`, `uriEscape` |
+| `lib/web.tcl` | optional demonstration library (`core::loadLibrary web`): `Emailish`, `UriQueryValue`, `uriEscape` |
 | `compiler/compiler.tcl` | IR → Tcl compiler backend |
 | `compiler/types.tcl` | compiler-only static types, delegating to `core/type.tcl` |
 | `bench/` | benchmark programs and runner |
@@ -525,13 +545,24 @@ themselves and delegate everything else to `core::type`. For example,
 * **Representations:** an operand is `box` (a runtime value), `int` (a bare
   integer) or `bool` (1/0). Unboxed values are boxed only when they escape
   into a frame, a call, a `return` or a `break`.
-* **Intrinsics:** calls of `+ - * < <= > >= == eq list integer? string? list? ok? error?`
-  compile to inline Tcl. An argument whose kind isn't known is first checked
-  with `core::value::expect`. That check raises exactly the error the native
+* **Intrinsics:** calls of `+ - * < <= > >= == eq list ok? error?` compile
+  to inline Tcl. An argument whose kind isn't known is first checked with
+  `core::value::expect`. That check raises exactly the error the native
   would, in the same order, and then becomes a flow fact.
-* **Folding:** a predicate applied to a value of known kind becomes a
-  constant. An `if` with a constant condition compiles only the branch that
-  runs.
+* **Type tests** (natives declared with `-tests-type T`, §8), with argument
+  of static type `S` and parameter kind `P`:
+  * **Folded to true** if `S ⊑ P` and `S ⊑ T`. For example, `Emailish?` on a
+    value already refined to `Emailish`, or `UriQueryValue?` on the result
+    of `uriEscape`.
+  * **Folded to false** if `S ⊑ P` and `S`'s base differs from `T`'s. For
+    example, `integer?` on a string.
+  * **Otherwise inline:** the parameter kind check, then either
+    `string equal [lindex $v 0] KIND` for a primitive `T` or
+    `core::type::acceptsCanonical T $v`. The generic native call is gone.
+  * If `S` isn't a subtype of `P`, the test isn't folded, so the kind error
+    still happens at run time.
+* **Folding:** an `if` with a constant condition compiles only the branch
+  that runs.
 * **Direct calls:** in program mode, a call of a `{block PROC ARITY _}` with
   matching arity calls `PROC` directly. The generic invoke is unnecessary
   there: in a checked program, a compiled block can't produce an escaping
@@ -552,9 +583,14 @@ of every `bind` at any depth, including refinements in force at that point.
 
 `sum-refined` gains least. Its scopes contain closures, so its bindings stay
 in runtime frames, and the parameter tested with `==` has no static kind.
-Since then, native type contracts are checked after every generic native
-call. That costs roughly 10% in the interpreter and on compiled
-`sum-refined`; inlined intrinsics are unaffected.
+Native type contracts are checked on generic native calls, which costs
+compiled `sum-refined` roughly 10%; inlined intrinsics and type tests are
+unaffected.
+
+`refined-checks.ir` repeats `Emailish?` and `UriQueryValue?` checks, some of
+them made redundant by an enclosing refinement. Compiled, it went from
+20.9 ms to 8.5 ms once type tests were folded and inlined instead of called
+generically.
 
 ## 14. Types, named types and evidence
 
@@ -641,8 +677,10 @@ typed code. The contract check stops a native from claiming that type
 without delivering the evidence.
 
 `lib/web.tcl` defines `Emailish`, `UriQueryValue`, their predicates and
-`uriEscape` as a demonstration library, loaded with core.
-`examples/05-refined-strings.ir` shows all of it.
+`uriEscape` as an optional demonstration library. It isn't loaded by core:
+call `core::loadLibrary web`, or put `# requires: web` in a program file,
+which `main.tcl` and `bench/bench.tcl` honor. `examples/05-refined-strings.ir`
+shows all of it.
 
 ## 15. Regular expressions
 

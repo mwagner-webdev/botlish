@@ -24,7 +24,7 @@ proc probeValues {value} {
 
 proc runFile {path showCode} {
     puts "== [file tail $path] ([core::useBackend])"
-    set program [core::readProgramFile $path]
+    set program [core::loadProgramFile $path]
     if {$showCode} {
         puts [core::compiler::generatedCode $program]
     }

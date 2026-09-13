@@ -145,6 +145,133 @@ test refined-15 {refinement from a flow fact: a refined parameter proves its arg
     list [run {*}$p] [differential $p] [boundType $p after]
 } -result {{"a@b.io"} same {refined str Emailish}}
 
+test refined-library-1 {the web library is opt-in} -body {
+    set child [interp create]
+    try {
+        $child eval [list source [file join $::projectRoot compiler compiler.tcl]]
+        set before [$child eval {expr {"Emailish?" in [core::native::names]
+                                       || [core::type::isNamed Emailish]}}]
+        $child eval {core::loadLibrary web; core::loadLibrary web}
+        set after [$child eval {expr {"Emailish?" in [core::native::names]
+                                      && [core::type::isNamed UriQueryValue]}}]
+        set value [$child eval {core::formatValue [core::eval {call {ref Emailish?} {const str a@b.io}}]}]
+        list $before $after $value
+    } finally {
+        interp delete $child
+    }
+} -result {0 1 true}
+
+test refined-library-2 {program files declare the libraries they need} -body {
+    core::programFileRequires [file join $::projectRoot examples 05-refined-strings.ir]
+} -result web
+
+# ---------------------------------------------------------------------------
+# Type tests (-tests-type)
+
+set typeTestCases {
+    param-kind-error-not-folded {
+        {call {ref Emailish?} {const 5}}
+    }
+    param-kind-error-through-unknown-type {
+        {bind f {block {v} {call {ref Emailish?} {ref v}}}}
+        {call {ref list} {call {ref f} {const str a@b.io}} {call {ref f} {const 5}}}
+    }
+    plain-string-is-not-proven {
+        {call {ref list} {call {ref Emailish?} {const str nope}} {call {ref UriQueryValue?} {const str a%20b}}}
+    }
+    evidence-decides-opaque-test {
+        {bind q {call {ref uriEscape} {const str {a b}}}}
+        {call {ref list} {call {ref UriQueryValue?} {ref q}} {call {ref string?} {ref q}} {call {ref integer?} {ref q}}}
+    }
+    refinement-decides-nested-test {
+        {bind f {block {s}
+            {if {call {ref Emailish?} {ref s}}
+                {block {} {call {ref list} {call {ref Emailish?} {ref s}} {call {ref string?} {ref s}}
+                                           {call {ref NonEmpty?} {ref s}}}}
+                {block {} {call {ref list} {call {ref Emailish?} {ref s}}}}}}}
+        {call {ref list} {call {ref f} {const str a@b.io}} {call {ref f} {const str nope}}}
+    }
+    other-evidence-does-not-decide {
+        {bind f {block {s}
+            {if {call {ref NonEmpty?} {ref s}} {block {} {call {ref Emailish?} {ref s}}} {block {} {const none}}}}}
+        {call {ref list} {call {ref f} {const str a@b.io}} {call {ref f} {const str x}} {call {ref f} {const str {}}}}
+    }
+    result-tag-tests {
+        {bind r {ok {const 1}}}
+        {call {ref list} {call {ref ok?} {ref r}} {call {ref error?} {ref r}} {call {ref ok?} {const 1}}
+                         {call {ref error?} {error-value {const x}}}}
+    }
+    kind-tests-on-unknown {
+        {bind f {block {v} {call {ref list} {call {ref integer?} {ref v}} {call {ref string?} {ref v}} {call {ref list?} {ref v}}}}}
+        {call {ref list} {call {ref f} {const 1}} {call {ref f} {const a}} {call {ref f} {call {ref list}}}}
+    }
+}
+
+foreach {name exprs} $typeTestCases {
+    test refined-type-test-$name "backends agree: $name" -body {
+        differential $exprs
+    } -result same
+}
+
+test refined-type-test-fold-1 {a test proven by evidence compiles to a constant} -body {
+    set code [core::compiler::generatedCode {
+        {bind q {call {ref uriEscape} {const str {a b}}}}
+        {call {ref UriQueryValue?} {ref q}}
+    }]
+    list [regexp {acceptsCanonical|native UriQueryValue\?} $code] [regexp {native uriEscape} $code]
+} -result {0 1}
+
+test refined-type-test-fold-2 {a test proven by an enclosing refinement is not repeated} -body {
+    set code [core::compiler::generatedCode {
+        {bind f {block {s}
+            {if {call {ref Emailish?} {ref s}}
+                {block {} {if {call {ref Emailish?} {ref s}} {block {} {const yes}} {block {} {const no}}}}
+                {block {} {const no}}}}}
+        {call {ref f} {const str a@b.io}}
+    }]
+    list [regexp -all {acceptsCanonical} $code] [regexp {str no\}\s*\n\s*\} else} $code]
+} -result {1 0}
+
+test refined-type-test-fold-3 {an undecided test is inline, not a native call} -body {
+    set code [core::compiler::generatedCode {
+        {bind f {block {s} {call {ref Emailish?} {ref s}}}}
+        {call {ref f} {const str a@b.io}}
+    }]
+    list [regexp {callValue} $code] [regexp {core::value::expect str \$v[0-9]+ Emailish\?} $code] \
+         [regexp {acceptsCanonical \{refined str Emailish\}} $code]
+} -result {0 1 1}
+
+test refined-type-test-register-1 {type test registration rules} -body {
+    set impl {apply {{v} {core::value::true}}}
+    lmap options [list \
+        [list -arity 2 -tests-type int] \
+        [list -arity 1 -param-types Emailish -tests-type Emailish] \
+        [list -arity 1 -param-types int -tests-type Emailish] \
+        [list -arity 1 -result-type int -tests-type int] \
+    ] {
+        list [catch {core::registerNative test-bad-type-test -impl $impl {*}$options} message] \
+             [string match {core::native::register: *} $message]
+    }
+} -result [lrepeat 4 {1 1}]
+
+test refined-type-test-register-2 {a type test gets bool result and its refinement} -body {
+    set meta [core::native::metadata Emailish?]
+    list [dict get $meta resultType] [dict get $meta paramTypes] [dict get $meta testsType] \
+         [dict get $meta refinesTrue] [dict get [core::native::metadata integer?] testsType]
+} -result {bool str {refined str Emailish} {0 {refined str Emailish}} int}
+
+test refined-type-test-contract {the reference runtime verifies a type test's answers} -setup {
+    if {"test-lying-int?" ni [core::native::names]} {
+        core::registerNative test-lying-int? -arity 1 \
+            -impl {apply {{v} {core::value::true}}} -tests-type int
+    }
+} -body {
+    # Compiled code trusts the declaration (it never calls the implementation
+    # when the type decides the test); the interpreter catches the lie.
+    list [outcomeUnder interp {{call {ref test-lying-int?} {const str a}}}] \
+         [outcomeUnder compile {{call {ref test-lying-int?} {const str a}}}]
+} -result {{error {CORE CONTRACT TYPE} {test-lying-int?: contract violation: as a test of int it must return false for "a", returned true} {}} {value false {}}}
+
 test refined-16 {substring range errors} -body {
     differential {{call {ref substring} {const str abc} {const 2} {const 5}}}
 } -result same

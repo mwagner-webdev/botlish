@@ -13,6 +13,16 @@
 #                   argument (any = no requirement); a call that returns
 #                   proves its arguments had these types. "" = unknown.
 #   resultType      type of every result, or any
+#   testsType       "" or a type T: the native is a *type test*, a pure
+#                   one-argument predicate returning exactly whether its
+#                   argument is a value of T (core::type::acceptsValue).
+#                   Its parameter type must be any or a primitive kind P,
+#                   with T a subtype of P; the runtime itself rejects
+#                   arguments not of kind P (with core::value::expect's
+#                   TYPE error) before calling the implementation. A type
+#                   test refines its argument to T when it returns true.
+#                   Knowing this, a compiler may decide the call from static
+#                   types or replace it with an inline membership test.
 #
 # Refinement rules are flat lists of ARG-INDEX TYPE pairs, e.g. {0 int}
 # ("argument 0 is an int") or {0 {refined str {Emailish}}}. The evaluator
@@ -41,7 +51,7 @@ proc core::native::register {name args} {
         error "core::native::register: options must be -option value pairs"
     }
     set options [dict create -impl "" -arity "" -refines-true {} -refines-false {} \
-        -param-types "" -result-type any]
+        -param-types "" -result-type any -tests-type ""]
     foreach {option value} $args {
         if {![dict exists $options $option]} {
             error "core::native::register: unknown option \"$option\""
@@ -55,6 +65,32 @@ proc core::native::register {name args} {
     set arity [dict get $options -arity]
     if {$arity ne "*" && !([string is digit -strict $arity])} {
         error "core::native::register: -arity must be a non-negative integer or *"
+    }
+    set testsType [dict get $options -tests-type]
+    if {$testsType ne ""} {
+        set testsType [CanonicalType $name -tests-type $testsType]
+        if {$arity ne "1"} {
+            error "core::native::register: a -tests-type native must have -arity 1"
+        }
+        if {[dict get $options -param-types] eq ""} {
+            dict set options -param-types any
+        }
+        set param [CanonicalType $name -param-types [lindex [dict get $options -param-types] 0]]
+        if {$param ne "any" && [llength $param] != 1} {
+            error "core::native::register: the parameter type of -tests-type native \"$name\" must be any or a primitive kind"
+        }
+        if {![core::type::subtype $testsType $param]} {
+            error "core::native::register: -tests-type [core::type::show $testsType] of \"$name\" is not a subtype of its parameter type $param"
+        }
+        if {[dict get $options -result-type] ni {any bool}} {
+            error "core::native::register: a -tests-type native returns bool"
+        }
+        dict set options -result-type bool
+        # A type test refines its argument to the type when it returns true.
+        set rules [dict get $options -refines-true]
+        if {![dict exists $rules 0]} {
+            dict set options -refines-true [concat $rules [list 0 $testsType]]
+        }
     }
     foreach option {-refines-true -refines-false} {
         set rules [dict get $options $option]
@@ -84,7 +120,8 @@ proc core::native::register {name args} {
         refinesTrue [dict get $options -refines-true] \
         refinesFalse [dict get $options -refines-false] \
         paramTypes $paramTypes \
-        resultType [CanonicalType $name -result-type [dict get $options -result-type]]]
+        resultType [CanonicalType $name -result-type [dict get $options -result-type]] \
+        testsType $testsType]
     return [core::value::native $name]
 }
 
@@ -122,8 +159,22 @@ proc core::native::invoke {nativeValue argValues} {
         core::semanticError ARITY \
             "$name expects $arity argument(s), got [llength $argValues]"
     }
+    set testsType [dict get $meta testsType]
+    if {$testsType ne ""} {
+        set param [lindex [dict get $meta paramTypes] 0]
+        if {$param ne "any"} {
+            core::value::expect $param [lindex $argValues 0] $name
+        }
+    }
     set result [{*}[dict get $meta impl] {*}$argValues]
     core::value::check $result
+    if {$testsType ne ""} {
+        set expected [core::value::bool [core::type::acceptsCanonical $testsType [lindex $argValues 0]]]
+        if {$result ne $expected} {
+            throw [list CORE CONTRACT TYPE] \
+                "$name: contract violation: as a test of [core::type::show $testsType] it must return [core::value::show $expected] for [core::value::show [lindex $argValues 0] 1], returned [core::value::show $result]"
+        }
+    }
     # The call returned: check the contract it declared.
     set index 0
     foreach type [dict get $meta paramTypes] {

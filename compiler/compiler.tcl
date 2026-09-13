@@ -91,9 +91,6 @@ namespace eval core::compiler {
         ==       IntrinsicValueEqual \
         eq       IntrinsicStringEqual \
         list     IntrinsicList \
-        integer? {IntrinsicKindIs int} \
-        string?  {IntrinsicKindIs str} \
-        list?    {IntrinsicKindIs list} \
         ok?      {IntrinsicResultIs ok} \
         error?   {IntrinsicResultIs error}]
 }
@@ -755,8 +752,12 @@ proc core::compiler::GenericCall {ctxVar callee argOps resultType} {
     return [Op box "\$$t" $resultType]
 }
 
-# A call of the native NAME. Uses an intrinsic when one applies; otherwise a
-# generic call typed by the native's signature. Returns the operand.
+# A call of the native NAME, in order of preference:
+#   1. a type test decided by the argument's static type (a constant)
+#   2. an intrinsic
+#   3. a type test as an inline membership check
+#   4. a generic call typed by the native's signature
+# Returns the operand.
 proc core::compiler::CompileNativeCall {ctxVar callee name argOps} {
     upvar 1 $ctxVar ctx
     variable intrinsics
@@ -765,11 +766,22 @@ proc core::compiler::CompileNativeCall {ctxVar callee name argOps} {
     if {$arity ne "*" && $arity != [llength $argOps]} {
         return [GenericCall ctx $callee $argOps any]
     }
+    set testsType [dict get $meta testsType]
+    if {$testsType ne ""} {
+        set param [lindex [dict get $meta paramTypes] 0]
+        set folded [FoldTypeTest [lindex $argOps 0] $testsType $param]
+        if {$folded ne ""} {
+            return $folded
+        }
+    }
     if {[dict exists $intrinsics $name]} {
         set result [{*}[dict get $intrinsics $name] ctx $name $argOps]
         if {$result ne ""} {
             return $result
         }
+    }
+    if {$testsType ne ""} {
+        return [InlineTypeTest ctx $name [lindex $argOps 0] $testsType $param]
     }
     lassign [core::types::nativeSignature $name] paramTypes resultType
     set result [GenericCall ctx $callee $argOps $resultType]
@@ -889,15 +901,59 @@ proc core::compiler::IntrinsicList {ctxVar name argOps} {
     return [Op box "\$$t" list]
 }
 
-proc core::compiler::IntrinsicKindIs {kind ctxVar name argOps} {
+# ---------------------------------------------------------------------------
+# Type tests
+#
+# A native declared with -tests-type T (see core/native.tcl) returns exactly
+# core::type::acceptsValue T ARG, after the runtime has rejected arguments
+# not of its parameter kind P. The runtime verifies this contract in the
+# reference implementation, so the compiler may rely on it.
+
+# The semantic type (core/type.tcl) an operand's static type implies.
+proc core::compiler::SemanticType {type} {
+    if {$type eq "never"} {
+        return any
+    }
+    if {[llength $type] > 1 && [lindex $type 0] in {native block}} {
+        return [lindex $type 0]
+    }
+    return $type
+}
+
+# A constant operand if the argument's static type decides the test of
+# TESTS-TYPE (with parameter type PARAM); otherwise "".
+proc core::compiler::FoldTypeTest {arg testsType param} {
+    set type [SemanticType [OpType $arg]]
+    if {$type eq "any" || ![core::type::subtype $type $param]} {
+        # Unknown, or the call raises the parameter kind error at run time.
+        return ""
+    }
+    if {[core::type::subtype $type $testsType]} {
+        return [Op bool 1 bool]
+    }
+    if {[core::type::base $type] ne [core::type::base $testsType]} {
+        return [Op bool 0 bool]
+    }
+    return ""
+}
+
+# Inline code for the type test: the parameter kind check, then membership.
+proc core::compiler::InlineTypeTest {ctxVar name arg testsType param} {
     upvar 1 $ctxVar ctx
-    set arg [lindex $argOps 0]
-    set argKind [core::types::kindOf [OpType $arg]]
-    if {$argKind ne ""} {
-        return [Op bool [expr {$argKind eq $kind}] bool]
+    set word [BoxWord $arg]
+    if {$param ne "any" && [core::types::kindOf [OpType $arg]] ne $param} {
+        Emit ctx "core::value::expect $param $word [Word $name]"
+        LearnFact ctx $arg $param
+    }
+    if {$testsType eq $param} {
+        return [Op bool 1 bool]
     }
     set t [NewTemp]
-    Emit ctx "set $t \[string equal \[lindex [BoxWord $arg] 0\] $kind\]"
+    if {[llength $testsType] == 1} {
+        Emit ctx "set $t \[string equal \[lindex $word 0\] $testsType\]"
+    } else {
+        Emit ctx "set $t \[core::type::acceptsCanonical [Word $testsType] $word\]"
+    }
     return [Op bool "\$$t" bool]
 }
 

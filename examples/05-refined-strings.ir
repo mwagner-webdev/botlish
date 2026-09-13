@@ -1,4 +1,5 @@
 # Refined string types (lib/web.tcl).
+# requires: web
 #
 # address  - Emailish is structural: the predicate Emailish? validates it with
 #            a regex and refines `address` inside the then branch. The probe

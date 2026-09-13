@@ -98,21 +98,22 @@ proc core::type::metadata {name} {
 
 # Registers NAME? (or PREDICATE-NAME): an ordinary native predicate that
 # requires a value of the type's base kind and answers whether it satisfies
-# NAME. Its refinement metadata proves NAME in the true branch.
+# NAME. It is declared a type test of NAME (see native.tcl -tests-type), so
+# it refines its argument to NAME in the true branch and compilers may
+# decide it from static types.
 proc core::type::definePredicate {name {predicateName ""}} {
     if {$predicateName eq ""} {
         set predicateName $name?
     }
     set base [dict get [metadata $name] base]
     return [core::native::register $predicateName -arity 1 \
-        -impl [list core::type::PredicateImpl $name $predicateName] \
+        -impl [list core::type::PredicateImpl $name] \
         -param-types [list $base] \
-        -result-type bool \
-        -refines-true [list 0 [list refined $base [list $name]]]]
+        -tests-type [list refined $base [list $name]]]
 }
 
-proc core::type::PredicateImpl {name predicateName v} {
-    core::value::expect [dict get [metadata $name] base] $v $predicateName
+# The runtime has already checked the base kind (a -tests-type contract).
+proc core::type::PredicateImpl {name v} {
     return [core::value::bool [validate $name $v]]
 }
 
@@ -277,10 +278,10 @@ proc core::type::validate {name v} {
 
 # 1 if V is a value of TYPE.
 proc core::type::acceptsValue {type v} {
-    return [AcceptsCanonical [normalize $type] $v]
+    return [acceptsCanonical [normalize $type] $v]
 }
 
-proc core::type::AcceptsCanonical {type v} {
+proc core::type::acceptsCanonical {type v} {
     if {$type eq "any"} {
         return 1
     }
@@ -306,7 +307,7 @@ proc core::type::assertValue {type v context} {
 
 # assertValue for a TYPE already in canonical form (registries store those).
 proc core::type::AssertCanonical {type v context} {
-    if {![AcceptsCanonical $type $v]} {
+    if {![acceptsCanonical $type $v]} {
         throw [list CORE CONTRACT TYPE] \
             "$context: contract violation: expected [show $type], got [core::value::show $v 1]"
     }

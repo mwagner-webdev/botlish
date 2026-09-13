@@ -1,0 +1,30 @@
+# Repeated refined-type predicates: an outer Emailish? check whose result is
+# re-checked in the then branch (statically redundant), and UriQueryValue?
+# on a value whose type proves the answer.
+# requires: web
+
+{bind check
+    {block {n acc s q}
+        {if {call {ref <=} {ref n} {const 0}}
+            {block {} {ref acc}}
+            {block {}
+                {bind hit
+                    {if {call {ref Emailish?} {ref s}}
+                        {block {}
+                            {if {call {ref Emailish?} {ref s}}
+                                {block {} {if {call {ref UriQueryValue?} {ref q}}
+                                              {block {} {const 1}}
+                                              {block {} {const 0}}}}
+                                {block {} {const 0}}}}
+                        {block {} {const 0}}}}
+                {call {ref check}
+                    {call {ref -} {ref n} {const 1}}
+                    {call {ref +} {ref acc} {ref hit}}
+                    {ref s}
+                    {ref q}}}}}}
+
+{bind q {call {ref uriEscape} {const str {a b}}}}
+
+{call {ref list}
+    {call {ref check} {const 400} {const 0} {const str someone@example.com} {ref q}}
+    {call {ref check} {const 400} {const 0} {const str not-an-email} {ref q}}}

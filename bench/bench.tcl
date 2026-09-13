@@ -50,7 +50,7 @@ if {$markdown} {
 
 set disagreements 0
 foreach path $files {
-    set program [core::readProgramFile $path]
+    set program [core::loadProgramFile $path]
     set times {}
     set values {}
     foreach backend $backends {
