@@ -1,18 +1,20 @@
 # resolve.tcl -- building HIR: scopes, bindings and lexical resolution.
 #
-# One walk over core IR, in evaluation order, creates an expression node per
-# IR node and resolves every name. The rules are those of the interpreter
-# (README §2, core/env.tcl), decided statically:
+# One walk over syntax nodes (syntax.tcl: core IR converted by
+# hir::syntax::fromIR, or built by a frontend), in evaluation order, creates
+# an expression node per syntax node and resolves every name. The rules are
+# those of the interpreter (README §2, core/env.tcl), decided statically:
 #
 # * A scope is the program, a block invocation, an if branch or a loop
 #   iteration. On entry it declares every name bound by a `bind` reachable
-#   without entering a nested scope (core::ir::scopeBindNames), so a name
+#   without entering a nested scope (hir::syntax::scopeBindNames), so a name
 #   denotes one binding throughout its scope. Block parameters are bindings
 #   of the block's scope.
 # * A reference denotes the binding of the innermost enclosing scope that
 #   declares its name; failing that, a root binding (program mode) or an
 #   ambient binding of the host environment (sequence mode). Otherwise it is
-#   unresolved: {UNBOUND "unbound name ..."}.
+#   unresolved: {UNBOUND "unbound name ..."}. A root reference (a syntax ref
+#   with root 1) denotes the root binding of its name regardless.
 # * Whether the binding has its value when the reference is evaluated:
 #     yes       it is bound earlier in the same invocation, or is a
 #               parameter or root binding
@@ -36,26 +38,21 @@
 
 namespace eval hir::resolve {}
 
-proc hir::resolve::program {exprs mode {origins {}}} {
+# The HIR of the syntax nodes NODES (syntax.tcl) in MODE; ORIGIN is the
+# origin of the program scope.
+proc hir::resolve::program {nodes mode origin} {
     set hir [hir::Empty $mode]
     dict set hir bound [dict create]
-    dict set hir originOf $origins
     if {$mode eq "program"} {
         set root [NewScope hir root "" "" "" {builtin root}]
-        set top [NewScope hir program $root "" "" [Origin $hir {}]]
-        Declare hir $top [core::ir::scopeBindNames $exprs]
+        set top [NewScope hir program $root "" "" $origin]
+        Declare hir $top [hir::syntax::scopeBindNames $nodes]
     } else {
         set top [NewScope hir ambient "" "" "" {host environment}]
     }
     dict set hir top $top
     set ctx [dict create scope $top callable "" loop "" blocks {}]
-    set roots {}
-    set index 0
-    foreach expr $exprs {
-        lappend roots [Expr hir $expr [list $index] $ctx]
-        incr index
-    }
-    dict set hir roots $roots
+    dict set hir roots [Sequence hir $nodes $ctx]
     if {$mode eq "program"} {
         # Root bindings are created on first reference, so ids depend only on
         # the program; the rest exist too, for scope queries.
@@ -64,7 +61,6 @@ proc hir::resolve::program {exprs mode {origins {}}} {
         }
     }
     dict unset hir bound
-    dict unset hir originOf
     return $hir
 }
 
@@ -157,15 +153,6 @@ proc hir::resolve::Lookup {hirVar s name} {
     return ""
 }
 
-# The origin of the input node at IR PATH: as given to hir::build -origins,
-# else {ir PATH}.
-proc hir::resolve::Origin {hir path} {
-    if {[dict exists $hir originOf $path]} {
-        return [dict get $hir originOf $path]
-    }
-    return [list ir $path]
-}
-
 # Records that block expression E is created in scope S's region.
 proc hir::resolve::AddClosure {hirVar s e} {
     upvar 1 $hirVar hir
@@ -183,36 +170,36 @@ proc hir::resolve::SetField {hirVar e key value} {
     dict set hir exprs $e $key $value
 }
 
-# Resolves the IR NODE at PATH in context CTX:
+# Resolves the syntax NODE in context CTX:
 #   scope     ScopeId the node is evaluated in
 #   callable  the enclosing block ExprId ("" at unit level)
 #   loop      the enclosing loop ExprId within that block ("")
 #   blocks    {ExprId BodyScopeId} of every enclosing block, innermost last
 # Returns the ExprId.
-proc hir::resolve::Expr {hirVar node path ctx} {
+proc hir::resolve::Expr {hirVar node ctx} {
     upvar 1 $hirVar hir
-    core::ir::checkShape $node
-    set op [core::ir::op $node]
+    set kind [dict get $node kind]
+    set origin [dict get $node origin]
     set scope [dict get $ctx scope]
     set e [hir::NewId hir expr]
-    set kind [expr {$op eq "error-value" ? "error" : $op}]
-    dict set hir exprs $e [dict create id $e kind $kind origin [Origin $hir $path] \
+    dict set hir exprs $e [dict create id $e kind $kind origin $origin \
         scope $scope type "" reachable 1]
 
-    switch -- $op {
+    switch -- $kind {
         const {
-            SetField hir $e literal [lrange $node 1 end]
-            SetField hir $e value [core::ir::literalValue $node]
+            set literal [dict get $node literal]
+            SetField hir $e literal $literal
+            SetField hir $e value [core::ir::literalValue [list const {*}$literal]]
         }
         ref {
-            ResolveRef hir $e [lindex $node 1] $ctx
+            ResolveRef hir $e [dict get $node name] [dict get $node root] $ctx
         }
         bind {
-            set name [lindex $node 1]
+            set name [dict get $node name]
             SetField hir $e name $name
             set b [Lookup hir $scope $name]
             SetField hir $e binding $b
-            SetField hir $e value [Expr hir [lindex $node 2] [concat $path 2] $ctx]
+            SetField hir $e value [Expr hir [dict get $node value] $ctx]
             set duplicate 0
             switch -- [dict get $hir bindings $b kind] {
                 ambient {}
@@ -224,25 +211,32 @@ proc hir::resolve::Expr {hirVar node path ctx} {
                     } else {
                         dict set hir bound $b 1
                         dict set hir bindings $b declaredBy $e
-                        dict set hir bindings $b origin [Origin $hir $path]
+                        dict set hir bindings $b origin $origin
                     }
                 }
             }
             SetField hir $e duplicate $duplicate
         }
         block {
-            set invocation $e
-            set bodyScope [NewScope hir block $scope $e $e [Origin $hir $path]]
+            set bodyScope [NewScope hir block $scope $e $e $origin]
             set params {}
-            set index 0
-            foreach param [core::ir::blockParams $node] {
-                set b [NewBinding hir $param param $bodyScope [Origin $hir [concat $path 1 $index]]]
+            foreach param [dict get $node params] {
+                lassign $param name paramOrigin
+                set first [expr {[dict exists $hir scopes $bodyScope names $name]
+                    ? [dict get $hir scopes $bodyScope names $name] : ""}]
+                set b [NewBinding hir $name param $bodyScope $paramOrigin]
+                if {$first ne ""} {
+                    # Only reachable from syntax built without core IR's shape
+                    # check; the name keeps denoting the first parameter.
+                    dict set hir scopes $bodyScope names $name $first
+                    hir::Diagnose hir DUPLICATE \
+                        "duplicate binding \"$name\" in the same lexical scope (block parameters)" $e
+                }
                 dict set hir bound $b 1
                 lappend params $b
-                incr index
             }
-            set body [core::ir::blockBody $node]
-            Declare hir $bodyScope [core::ir::scopeBindNames $body]
+            set body [dict get $node body]
+            Declare hir $bodyScope [hir::syntax::scopeBindNames $body]
             AddClosure hir $scope $e
             SetField hir $e bodyScope $bodyScope
             SetField hir $e params $params
@@ -250,45 +244,37 @@ proc hir::resolve::Expr {hirVar node path ctx} {
             SetField hir $e resultType ""
             set inner [dict create scope $bodyScope callable $e loop "" \
                 blocks [concat [dict get $ctx blocks] [list [list $e $bodyScope]]]]
-            SetField hir $e body [Sequence hir $body [concat $path] 2 $inner]
+            SetField hir $e body [Sequence hir $body $inner]
         }
         call {
-            SetField hir $e callee [Expr hir [lindex $node 1] [concat $path 1] $ctx]
-            set args {}
-            set index 2
-            foreach arg [lrange $node 2 end] {
-                lappend args [Expr hir $arg [concat $path $index] $ctx]
-                incr index
-            }
-            SetField hir $e args $args
+            SetField hir $e callee [Expr hir [dict get $node callee] $ctx]
+            SetField hir $e args [Sequence hir [dict get $node args] $ctx]
             SetField hir $e target ""
             SetField hir $e known ""
         }
         if {
-            SetField hir $e condition [Expr hir [lindex $node 1] [concat $path 1] $ctx]
-            foreach {role index outcome} {then 2 1 else 3 0} {
-                set body [core::ir::blockBody [lindex $node $index]]
+            SetField hir $e condition [Expr hir [dict get $node condition] $ctx]
+            foreach {role outcome} {then 1 else 0} {
+                set body [dict get $node ${role}Body]
                 set branch [NewScope hir branch $scope \
-                    [dict get $hir scopes $scope invocation] $e [Origin $hir [concat $path $index]]]
+                    [dict get $hir scopes $scope invocation] $e [dict get $node ${role}Origin]]
                 dict set hir scopes $branch outcome $outcome
-                Declare hir $branch [core::ir::scopeBindNames $body]
+                Declare hir $branch [hir::syntax::scopeBindNames $body]
                 SetField hir $e ${role}Scope $branch
-                SetField hir $e ${role}Body \
-                    [Sequence hir $body [concat $path $index] 2 [dict replace $ctx scope $branch]]
+                SetField hir $e ${role}Body [Sequence hir $body [dict replace $ctx scope $branch]]
             }
             SetField hir $e refinements [dict create 1 {} 0 {}]
         }
         loop {
-            set body [core::ir::blockBody [lindex $node 1]]
+            set body [dict get $node body]
             set iteration [NewScope hir loop $scope \
-                [dict get $hir scopes $scope invocation] $e [Origin $hir [concat $path 1]]]
-            Declare hir $iteration [core::ir::scopeBindNames $body]
+                [dict get $hir scopes $scope invocation] $e [dict get $node bodyOrigin]]
+            Declare hir $iteration [hir::syntax::scopeBindNames $body]
             SetField hir $e bodyScope $iteration
-            SetField hir $e body \
-                [Sequence hir $body [concat $path 1] 2 [dict replace $ctx scope $iteration loop $e]]
+            SetField hir $e body [Sequence hir $body [dict replace $ctx scope $iteration loop $e]]
         }
         return {
-            SetField hir $e value [Expr hir [lindex $node 1] [concat $path 1] $ctx]
+            SetField hir $e value [Expr hir [dict get $node value] $ctx]
             SetField hir $e target [dict get $ctx callable]
             if {[dict get $ctx callable] eq ""} {
                 hir::Diagnose hir RETURN-OUTSIDE-CALLABLE "return outside callable invocation" $e
@@ -296,8 +282,8 @@ proc hir::resolve::Expr {hirVar node path ctx} {
         }
         break {
             set value ""
-            if {[llength $node] == 2} {
-                set value [Expr hir [lindex $node 1] [concat $path 1] $ctx]
+            if {[dict get $node value] ne ""} {
+                set value [Expr hir [dict get $node value] $ctx]
             }
             SetField hir $e value $value
             SetField hir $e target [dict get $ctx loop]
@@ -311,30 +297,42 @@ proc hir::resolve::Expr {hirVar node path ctx} {
                 hir::Diagnose hir CONTINUE-OUTSIDE-LOOP "continue outside lexical loop" $e
             }
         }
-        ok - error-value {
-            SetField hir $e value [Expr hir [lindex $node 1] [concat $path 1] $ctx]
+        ok - error {
+            SetField hir $e value [Expr hir [dict get $node value] $ctx]
+        }
+        default {
+            core::malformed "unknown syntax node kind \"$kind\"" $node
         }
     }
     return $e
 }
 
-# Resolves the expressions EXPRS, found at PATH from index FIRST on.
-proc hir::resolve::Sequence {hirVar exprs path first ctx} {
+# Resolves the syntax nodes NODES in order.
+proc hir::resolve::Sequence {hirVar nodes ctx} {
     upvar 1 $hirVar hir
     set ids {}
-    set index $first
-    foreach expr $exprs {
-        lappend ids [Expr hir $expr [concat $path $index] $ctx]
-        incr index
+    foreach node $nodes {
+        lappend ids [Expr hir $node $ctx]
     }
     return $ids
 }
 
-proc hir::resolve::ResolveRef {hirVar e name ctx} {
+# Resolves reference E to NAME; ROOT 1: to the root binding NAME, whatever
+# local bindings are called (hygiene.tcl keeps lowering faithful).
+proc hir::resolve::ResolveRef {hirVar e name root ctx} {
     upvar 1 $hirVar hir
     set scope [dict get $ctx scope]
     SetField hir $e name $name
-    set b [Lookup hir $scope $name]
+    if {$root} {
+        set s [dict get $hir top]
+        if {[dict get $hir scopes $s kind] ne "program"} {
+            core::malformed "a root reference needs program mode" [list ref $name]
+        }
+        set b [RootBinding hir [dict get $hir scopes $s parent] $name]
+        dict lappend hir rootRefs $e
+    } else {
+        set b [Lookup hir $scope $name]
+    }
     SetField hir $e binding $b
     if {$b eq ""} {
         SetField hir $e init no

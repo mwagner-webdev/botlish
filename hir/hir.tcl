@@ -8,6 +8,7 @@
 #
 # Pipeline:
 #
+#   syntax --hir::buildSyntax--> HIR     (frontends, e.g. surface/)
 #   core IR --hir::build--> HIR --hir::lower--> core IR --> interp / compiler
 #                             \------------------------------> compiler facts
 #
@@ -51,8 +52,8 @@
 #   id kind origin scope type reachable
 #
 # where ORIGIN says where the node came from ({ir PATH}: PATH indexes into
-# the input IR, e.g. {ir {2 1 3}}; or a source span given with hir::build
-# -origins: {file f1 start 120 end 144 line 3 column 5 endLine 3 endColumn 29}
+# the input IR, e.g. {ir {2 1 3}}; or what a frontend gave hir::buildSyntax,
+# e.g. a source span {file f1 start 120 end 144 line 3 column 5 endLine 3 endColumn 29}
 # with offsets into file f1 and 1-based line and column), SCOPE
 # is the ScopeId the expression is evaluated in, TYPE is a TypeId and
 # REACHABLE is 0 when no normal completion can reach the node. By kind:
@@ -103,6 +104,8 @@
 #   type         TypeId of the value it is bound to ("" if not inferred)
 #   symbol       SymbolId of what a root binding denotes
 #   value        runtime value of a root binding
+#   spelling     only on bindings hygiene renamed (hygiene.tcl): the name
+#                as written; NAME is then the name core IR uses
 #
 # A symbol is something a name can denote that did not come from a Botlish
 # binding: {id kind provenance name}. Today only builtins exist
@@ -144,7 +147,8 @@ proc hir::Diagnose {hirVar kind message expr} {
     dict lappend hir diagnostics [dict create kind $kind message $message expr $expr]
 }
 
-# Builds the HIR of EXPRS.
+# Builds the HIR of the core IR program EXPRS (through hir::syntax::fromIR,
+# so origins are {ir PATH}).
 #
 #   -mode program   (default) EXPRS are a checked program: a program scope
 #                   over the root environment; all names resolve statically
@@ -155,25 +159,34 @@ proc hir::Diagnose {hirVar kind message expr} {
 #   -strict 0       keep diagnostics in the HIR; the error stays a run-time
 #                   error of the lowered program (used by the compiler)
 #
-#   -origins D      origins of input nodes: IR path -> origin, for nodes that
-#                   came from elsewhere (source text); other nodes get {ir PATH}.
-#                   Scope and binding origins follow the node that creates them.
-#   -files D        FileId -> path of the files those origins refer to
-#
 # Malformed IR always raises {CORE MALFORMED}.
 proc hir::build {exprs args} {
-    set options [dict create -mode program -strict 1 -origins {} -files {}]
-    foreach {option value} $args {
-        if {![dict exists $options $option]} {
-            error "hir::build: unknown option \"$option\""
-        }
-        dict set options $option $value
+    set options [Options hir::build {-mode program -strict 1} $args]
+    set nodes {}
+    set index 0
+    foreach expr $exprs {
+        lappend nodes [hir::syntax::fromIR $expr [list $index]]
+        incr index
     }
+    return [hir::buildSyntax $nodes {*}$options -origin {ir {}}]
+}
+
+# Builds the HIR of the syntax nodes NODES (syntax.tcl), with the options of
+# hir::build and
+#
+#   -origin O       origin of the program scope
+#   -files D        FileId -> path of the files origins refer to
+#
+# This is how frontends construct HIR: they state what was written and where;
+# resolution, hygiene (hygiene.tcl), types and refinements happen here.
+proc hir::buildSyntax {nodes args} {
+    set options [Options hir::buildSyntax {-mode program -strict 1 -origin "" -files {}} $args]
     set mode [dict get $options -mode]
     if {$mode ni {program sequence}} {
         error "hir::build: -mode must be program or sequence"
     }
-    set hir [hir::resolve::program $exprs $mode [dict get $options -origins]]
+    set hir [hir::resolve::program $nodes $mode [dict get $options -origin]]
+    hir::hygiene::apply hir
     dict for {f path} [dict get $options -files] {
         dict set hir files $f [dict create id $f path $path]
     }
@@ -184,6 +197,17 @@ proc hir::build {exprs args} {
     }
     hir::types::infer hir
     return $hir
+}
+
+proc hir::Options {command defaults given} {
+    set options [dict create {*}$defaults]
+    foreach {option value} $given {
+        if {![dict exists $options $option]} {
+            error "$command: unknown option \"$option\""
+        }
+        dict set options $option $value
+    }
+    return $options
 }
 
 # ---------------------------------------------------------------------------
@@ -336,7 +360,7 @@ proc hir::exprsAt {hir origin} {
 }
 
 apply {{dir} {
-    foreach file {resolve types refine lower format read} {
+    foreach file {syntax resolve hygiene types refine lower format read} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

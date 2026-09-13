@@ -1,0 +1,15 @@
+# An if can be the value of a binding, return or break.
+#
+# expect: ["negative", "zero", "positive"]
+
+fn describe(n):
+    word = if n < 0:
+        "negative"
+    else:
+        if n == 0:
+            "zero"
+        else:
+            "positive"
+    word
+
+[describe(-3), describe(0), describe(8)]

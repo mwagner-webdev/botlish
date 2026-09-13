@@ -1,0 +1,12 @@
+# and, or and not short-circuit and always produce Booleans; != is the
+# negation of ==.
+#
+# expect: [true, false, true, true]
+
+fn between(x, low, high):
+    low <= x and x <= high
+
+fn outside(x, low, high):
+    not between(x, low, high)
+
+[between(5, 1, 10), outside(5, 1, 10), 3 != 4, false or 1 == 1]

@@ -1,0 +1,147 @@
+# hir-syntax.test -- constructing HIR from syntax nodes (hir/syntax.tcl),
+# root references and hygiene (hir/hygiene.tcl).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+proc o {label} {
+    return [list test $label]
+}
+
+# Lowered IR and value of HIR H under both backends.
+proc hirRuns {h} {
+    list [canonicalProgram [hir::lower $h]] \
+         [core::formatValue [core::evalProgram [hir::lower $h]]] \
+         [core::formatValue [core::compiler::evalHir $h]]
+}
+
+test hir-syntax-from-ir {hir::build is fromIR + buildSyntax} -body {
+    set ir {{bind x {const 1}} {call {block {a} {if {ref a} {block {} {loop {block {} {break {ref x}}}}} {block {}}}} {ref true}}}
+    set nodes {}
+    set index 0
+    foreach expr $ir {
+        lappend nodes [hir::syntax::fromIR $expr [list $index]]
+        incr index
+    }
+    set viaSyntax [hir::buildSyntax $nodes -origin {ir {}}]
+    set viaBuild [hir::build $ir]
+    list [expr {$viaSyntax eq $viaBuild}] [expr {[canonicalProgram [hir::lower $viaBuild]] eq [canonicalProgram $ir]}]
+} -result {1 1}
+
+test hir-syntax-origins {syntax nodes carry their own origins into expressions, scopes and bindings} -body {
+    set h [hir::buildSyntax [list \
+        [hir::syntax::bindNode [o bind] f [hir::syntax::blockNode [o block] [list [list a [o param]]] [list \
+            [hir::syntax::ifNode [o if] [hir::syntax::refNode [o cond] a] [o then] [list [hir::syntax::constNode [o one] 1]] \
+                [o else] [list [hir::syntax::loopNode [o loop] [o body] [list [hir::syntax::breakNode [o break] [hir::syntax::constNode [o two] 2]]]]]]]]] \
+        [hir::syntax::callNode [o call] [hir::syntax::refNode [o callee] f] [hir::syntax::rootRef [o false] false]]] \
+        -origin [o program] -files {f9 demo.src}]
+    set if [hirFind $h if]
+    list [lmap e [hir::walk $h] {lindex [hir::get $h $e origin] 1}] \
+         [dict get [hir::scope $h [hir::top $h]] origin] \
+         [dict get [hir::scope $h [hir::get $h $if thenScope]] origin] \
+         [dict get [hir::scope $h [hir::get $h $if elseScope]] origin] \
+         [dict get [hir::scope $h [hir::get $h [hirFind $h loop] bodyScope]] origin] \
+         [dict get [hir::binding $h b1] origin] [dict get [hir::binding $h b2] origin] \
+         [hir::sourceFile $h f9] \
+         [lrange [hirRuns $h] 1 2]
+} -result {{bind block if cond one loop break two call callee false} {test program} {test then} {test else} {test body} {test bind} {test param} {id f9 path demo.src} {2 2}}
+
+test hir-syntax-malformed {constructors reject malformed nodes} -body {
+    list [catch {hir::syntax::constNode [o c] int 007} m1 o1] [dict get $o1 -errorcode] \
+         [catch {hir::syntax::refNode [o r] ""} m2 o2] [dict get $o2 -errorcode] \
+         [catch {hir::syntax::rootRef [o r] no-such-native} m3 o3] [dict get $o3 -errorcode] \
+         [catch {hir::syntax::blockNode [o b] {a} {}} m4 o4] [dict get $o4 -errorcode] \
+         [catch {hir::buildSyntax [list [dict create kind nope origin {}]]} m5 o5] [dict get $o5 -errorcode]
+} -result {1 {CORE MALFORMED} 1 {CORE MALFORMED} 1 {CORE MALFORMED} 1 {CORE MALFORMED} 1 {CORE MALFORMED}}
+
+test hir-syntax-duplicate-params {duplicate parameters from syntax are a located diagnostic} -body {
+    set h [hir::buildSyntax [list [hir::syntax::blockNode [o block] [list [list a [o p1]] [list a [o p2]]] \
+        [list [hir::syntax::refNode [o ref] a]]]] -strict 0]
+    list [lmap d [hir::diagnostics $h] {list [dict get $d kind] [hir::get $h [dict get $d expr] origin]}] \
+         [hirRefBindings $h a] [hir::get $h e1 params] \
+         [catch {hir::buildSyntax [list [hir::syntax::blockNode [o block] [list [list a [o p1]] [list a [o p2]]] {}]]} m o] \
+         [dict get $o -errorcode]
+} -result {{{DUPLICATE {test block}}} b1 {b1 b2} 1 {CORE SEMANTIC DUPLICATE}}
+
+# ---------------------------------------------------------------------------
+# Root references and hygiene
+
+test hir-rootref-unshadowed {a root reference with nothing shadowing it lowers to a plain ref} -body {
+    set h [hir::buildSyntax [list [hir::syntax::callNode [o c] [hir::syntax::rootRef [o r] +] \
+        [hir::syntax::constNode [o a] 1] [hir::syntax::constNode [o b] 2]]]]
+    list [hir::format $h] [hirRuns $h]
+} -result {{program s2
+e1 call native(+) : int
+    e2 ref b1 + : native +
+    e3 const 1 : int
+    e4 const 2 : int} {{{call {ref +} {const 1} {const 2}}} 3 3}}
+
+test hir-rootref-program-binding {a program binding shadowing a root reference is renamed} -body {
+    # list = 5; [1, list]   -- the list literal's `list` is a root reference
+    set h [hir::buildSyntax [list \
+        [hir::syntax::bindNode [o bind] list [hir::syntax::constNode [o five] 5]] \
+        [hir::syntax::callNode [o lit] [hir::syntax::rootRef [o lit] list] [hir::syntax::constNode [o one] 1] [hir::syntax::refNode [o ref] list]]]]
+    list [hirRuns $h] [dict get [hir::binding $h b1] name] [dict get [hir::binding $h b1] spelling] \
+         [dict keys [dict get [hir::scope $h s2] names]]
+} -result {{{{bind list#1 {const 5}} {call {ref list} {const 1} {ref list#1}}} {[1, 5]} {[1, 5]}} list#1 list list#1}
+
+test hir-rootref-used-before-shadowing-binding {the root reference is before the shadowing binding} -body {
+    # x = [1]; list = 2; [x, list]
+    set h [hir::buildSyntax [list \
+        [hir::syntax::bindNode [o x] x [hir::syntax::callNode [o l1] [hir::syntax::rootRef [o l1] list] [hir::syntax::constNode [o 1] 1]]] \
+        [hir::syntax::bindNode [o b] list [hir::syntax::constNode [o 2] 2]] \
+        [hir::syntax::callNode [o l2] [hir::syntax::rootRef [o l2] list] [hir::syntax::refNode [o rx] x] [hir::syntax::refNode [o rl] list]]]]
+    list [hir::diagnostics $h] [lrange [hirRuns $h] 1 2]
+} -result {{} {{[[1], 2]} {[[1], 2]}}}
+
+test hir-rootref-parameter-and-branch {parameters and branch bindings are renamed, outer ones untouched} -body {
+    # fn f(true): if true: [true] else: (list = 1; [list])
+    set block [hir::syntax::blockNode [o f] [list [list true [o p]]] [list \
+        [hir::syntax::ifNode [o if] [hir::syntax::refNode [o c] true] \
+            [o then] [list [hir::syntax::callNode [o l] [hir::syntax::rootRef [o l] list] [hir::syntax::refNode [o t] true]]] \
+            [o else] [list [hir::syntax::bindNode [o bl] list [hir::syntax::constNode [o one] 1]] \
+                           [hir::syntax::callNode [o l2] [hir::syntax::rootRef [o l2] list] [hir::syntax::rootRef [o t2] true] [hir::syntax::refNode [o rl] list]]]]]]
+    set h [hir::buildSyntax [list [hir::syntax::bindNode [o bf] f $block] \
+        [hir::syntax::bindNode [o bl] outer [hir::syntax::constNode [o z] 0]] \
+        [hir::syntax::callNode [o call] [hir::syntax::refNode [o rf] f] [hir::syntax::rootRef [o arg] false]]]]
+    list [lmap b [dict keys [dict get $h bindings]] {
+            set binding [hir::binding $h $b]
+            if {[dict get $binding kind] eq "root"} continue
+            dict get $binding name
+         }] \
+         [lrange [hirRuns $h] 1 2]
+} -result {{f outer true#1 list#1} {{[true, 1]} {[true, 1]}}}
+
+test hir-rootref-fresh-names {fresh names avoid names the program uses} -body {
+    set nodes [list [hir::syntax::bindNode [o a] list#1 [hir::syntax::constNode [o 7] 7]] \
+        [hir::syntax::bindNode [o b] list [hir::syntax::constNode [o 8] 8]] \
+        [hir::syntax::callNode [o c] [hir::syntax::rootRef [o c] list] [hir::syntax::refNode [o r1] list#1] [hir::syntax::refNode [o r2] list]]]
+    set h [hir::buildSyntax $nodes]
+    list [lmap b {b1 b2} {dict get [hir::binding $h $b] name}] [lrange [hirRuns $h] 1 2]
+} -result {{list#1 list#2} {{[7, 8]} {[7, 8]}}}
+
+test hir-rootref-closure-frames {renamed bindings in materialized frames agree with the compiler} -body {
+    # list = 3; g = block {} (list); [g(), list] -- `list` is captured, so its
+    # frame is materialized under the renamed name.
+    set h [hir::buildSyntax [list \
+        [hir::syntax::bindNode [o a] list [hir::syntax::constNode [o 3] 3]] \
+        [hir::syntax::bindNode [o g] g [hir::syntax::blockNode [o blk] {} [list [hir::syntax::refNode [o r] list]]]] \
+        [hir::syntax::callNode [o l] [hir::syntax::rootRef [o l] list] [hir::syntax::callNode [o c] [hir::syntax::refNode [o rg] g]] [hir::syntax::refNode [o r2] list]]]]
+    list [lrange [hirRuns $h] 1 2] [hir::captures $h [hirFind $h block]] \
+         [expr {[hir::format [hir::build [hir::lower $h]]] eq [hir::format $h]}]
+} -result {{{[3, 3]} {[3, 3]}} b1 1}
+
+test hir-rootref-sequence-mode {root references need program mode} -body {
+    catch {hir::buildSyntax [list [hir::syntax::rootRef [o r] list]] -mode sequence} message options
+    list [dict get $options -errorcode] $message
+} -match glob -result {{CORE MALFORMED} *program mode*}
+
+test hir-rootref-text-roundtrip {hygienic HIR reads back from its text} -body {
+    set h [hir::buildSyntax [list \
+        [hir::syntax::bindNode [o a] list [hir::syntax::constNode [o 5] 5]] \
+        [hir::syntax::callNode [o l] [hir::syntax::rootRef [o l] list] [hir::syntax::refNode [o r] list]]]]
+    set text [hir::format $h]
+    list [expr {[hir::format [hir::parse $text]] eq $text}] \
+         [core::formatValue [core::compiler::evalHir [hir::parse $text]]]
+} -result {1 {[5]}}
+
+cleanupTests

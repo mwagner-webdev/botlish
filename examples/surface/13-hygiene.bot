@@ -1,0 +1,10 @@
+# Binding a name the language uses behind the scenes (list literals call the
+# native list) does not change what the syntax means.
+#
+# expect: [[1, 2], 3]
+
+fn pair(list, x):
+    [list, x]
+
+list = 3
+[pair(1, 2), list]

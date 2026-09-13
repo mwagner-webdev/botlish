@@ -14,9 +14,9 @@
 #
 # Nodes
 # -----
-# Every node is a dict with `kind` and `span` plus per-kind fields:
+# Every node is a dict with `kind`, `span` and `id` plus per-kind fields:
 #
-#   program    body (statements)
+#   program    body (statements), diagnostics (syntax errors, see below)
 #   suite      body (statements)                 an indented block
 #   int        text (canonical decimal digits)
 #   string     value (the decoded text)
@@ -26,21 +26,40 @@
 #   list       items (expressions)
 #   call       callee, args
 #   unary      op (-), opSpan, operand
-#   binary     op (+ - * == < <= > >=), opSpan, left, right
-#   bind       name, nameSpan, value
+#   not        opSpan, operand
+#   binary     op (+ - * == != < <= > >=), opSpan, left, right
+#   logical    op (and | or), opSpan, left, right
+#   bind       name, nameSpan, value (an expression or an if)
 #   function   name, nameSpan, params ({NAME SPAN} pairs), paramsSpan (from
 #              "(" to the end of the body: the function literal), body (suite)
 #   if         condition, then (suite), else (suite or "")
 #   loop       body (suite)
-#   return     value (expression or "")
-#   break      value (expression or "")
+#   return     value (an expression, an if, or "")
+#   break      value (an expression, an if, or "")
 #   continue
+#   error      a statement that could not be parsed (recovering parses only)
 #
-# Syntax errors
-# -------------
-# surface::syntaxError raises {SURFACE SYNTAX DIAGNOSTIC} with the message
-# "FILE:LINE:COLUMN: TEXT"; DIAGNOSTIC is a dict {file line column start end
-# message} for tools.
+# Node ids
+# --------
+# `id` names a node by its place in the program's structure rather than by
+# position, so it survives edits elsewhere (for tooling and incremental use).
+# A statement's id is its parent's id, "/", and a key:
+#
+#   NAME()     function NAME          NAME=      binding of NAME
+#   if loop return break continue     KIND       any other expression statement
+#
+# the Nth statement with the same key among its siblings adding "#N" (N > 1).
+# Inner nodes add their role: then, else, cond, value, callee, argN, itemN,
+# left, right, operand; a parameter is NAME()/(PARAM). A top-level function
+# fib is "fib()"; the x + y in make_adder's inner add is
+# "make_adder()/add()/binary". Editing one function body changes no id outside
+# it; adding a statement changes only the ids of later siblings with its key.
+#
+# Diagnostics
+# -----------
+# A diagnostic is a dict {file line column start end message}. surface::raise
+# throws one as {SURFACE SYNTAX DIAGNOSTIC} with the message
+# "FILE:LINE:COLUMN: TEXT".
 
 namespace eval surface::ast {}
 
@@ -73,17 +92,153 @@ proc surface::ast::location {span} {
     return "[dict get $span file]:[dict get $span line]:[dict get $span column]"
 }
 
-proc surface::syntaxError {span message} {
-    set diagnostic [dict create file [dict get $span file] line [dict get $span line] \
+proc surface::diagnostic {span message} {
+    return [dict create file [dict get $span file] line [dict get $span line] \
         column [dict get $span column] start [dict get $span start] \
         end [dict get $span end] message $message]
-    throw [list SURFACE SYNTAX $diagnostic] "[surface::ast::location $span]: $message"
+}
+
+proc surface::raise {diagnostic} {
+    throw [list SURFACE SYNTAX $diagnostic] \
+        "[dict get $diagnostic file]:[dict get $diagnostic line]:[dict get $diagnostic column]: [dict get $diagnostic message]"
+}
+
+proc surface::syntaxError {span message} {
+    surface::raise [surface::diagnostic $span $message]
+}
+
+# ---------------------------------------------------------------------------
+# Node ids
+
+# PROGRAM with an id on every node.
+proc surface::ast::assignIds {program} {
+    dict set program id ""
+    dict set program body [Statements [dict get $program body] ""]
+    return $program
+}
+
+proc surface::ast::Child {parent role} {
+    return [expr {$parent eq "" ? $role : "$parent/$role"}]
+}
+
+proc surface::ast::Statements {statements parent} {
+    set counts [dict create]
+    set result {}
+    foreach statement $statements {
+        switch -- [dict get $statement kind] {
+            function { set key "[dict get $statement name]()" }
+            bind     { set key "[dict get $statement name]=" }
+            default  { set key [dict get $statement kind] }
+        }
+        dict incr counts $key
+        set n [dict get $counts $key]
+        if {$n > 1} {
+            append key #$n
+        }
+        lappend result [Ids $statement [Child $parent $key]]
+    }
+    return $result
+}
+
+proc surface::ast::Suite {suite id} {
+    dict set suite id $id
+    dict set suite body [Statements [dict get $suite body] $id]
+    return $suite
+}
+
+# NODE and its descendants with ids, NODE's id being ID.
+proc surface::ast::Ids {node id} {
+    dict set node id $id
+    switch -- [dict get $node kind] {
+        list {
+            set items {}
+            set index 1
+            foreach item [dict get $node items] {
+                lappend items [Ids $item $id/item$index]
+                incr index
+            }
+            dict set node items $items
+        }
+        call {
+            dict set node callee [Ids [dict get $node callee] $id/callee]
+            set args {}
+            set index 1
+            foreach arg [dict get $node args] {
+                lappend args [Ids $arg $id/arg$index]
+                incr index
+            }
+            dict set node args $args
+        }
+        unary - not {
+            dict set node operand [Ids [dict get $node operand] $id/operand]
+        }
+        binary - logical {
+            dict set node left [Ids [dict get $node left] $id/left]
+            dict set node right [Ids [dict get $node right] $id/right]
+        }
+        bind - return - break {
+            if {[dict get $node value] ne ""} {
+                dict set node value [Ids [dict get $node value] $id/value]
+            }
+        }
+        function {
+            dict set node body [Suite [dict get $node body] $id]
+        }
+        if {
+            dict set node condition [Ids [dict get $node condition] $id/cond]
+            dict set node then [Suite [dict get $node then] $id/then]
+            if {[dict get $node else] ne ""} {
+                dict set node else [Suite [dict get $node else] $id/else]
+            }
+        }
+        loop {
+            dict set node body [Suite [dict get $node body] $id]
+        }
+    }
+    return $node
+}
+
+# NODE, the node with id ID in the tree AST, or "".
+proc surface::findNode {ast id} {
+    if {[dict get $ast id] eq $id} {
+        return $ast
+    }
+    foreach child [surface::ast::Children $ast] {
+        set found [surface::findNode $child $id]
+        if {$found ne ""} {
+            return $found
+        }
+    }
+    return ""
+}
+
+proc surface::ast::Children {node} {
+    switch -- [dict get $node kind] {
+        program - suite    { return [dict get $node body] }
+        list               { return [dict get $node items] }
+        call               { return [concat [list [dict get $node callee]] [dict get $node args]] }
+        unary - not        { return [list [dict get $node operand]] }
+        binary - logical   { return [list [dict get $node left] [dict get $node right]] }
+        bind - return - break {
+            return [expr {[dict get $node value] eq "" ? {} : [list [dict get $node value]]}]
+        }
+        function           { return [list [dict get $node body]] }
+        loop               { return [list [dict get $node body]] }
+        if {
+            set children [list [dict get $node condition] [dict get $node then]]
+            if {[dict get $node else] ne ""} {
+                lappend children [dict get $node else]
+            }
+            return $children
+        }
+    }
+    return {}
 }
 
 # ---------------------------------------------------------------------------
 # Formatting, for debugging and tests.
 #
-#   surface::formatAst AST ?-spans 1?
+#   surface::formatAst AST ?-spans 1? ?-ids 1?
 #
 # Expressions are S-expressions; statements with suites span several lines,
 # their suite indented by four spaces:
@@ -91,115 +246,147 @@ proc surface::syntaxError {span message} {
 #   (bind x (int 10))
 #   fn add (a b)
 #       (binary + (name a) (name b))
-#   if (name flag)
+#   bind y = if (name flag)
 #       (int 1)
 #   else
 #       (int 2)
 #
-# With -spans 1 every node is followed by @LINE:COLUMN-ENDLINE:ENDCOLUMN.
+# With -spans 1 every node is followed by @LINE:COLUMN-ENDLINE:ENDCOLUMN;
+# with -ids 1 by its id in angle brackets. Syntax errors of a recovering parse
+# are listed after the statements as "! LINE:COLUMN MESSAGE".
 
 proc surface::formatAst {ast args} {
-    set options [dict create -spans 0]
+    set options [dict create -spans 0 -ids 0]
     foreach {option value} $args {
         if {![dict exists $options $option]} {
             error "surface::formatAst: unknown option \"$option\""
         }
         dict set options $option $value
     }
-    set spans [dict get $options -spans]
+    set show [list [dict get $options -spans] [dict get $options -ids]]
     set lines {}
     if {[dict get $ast kind] in {program suite}} {
         foreach statement [dict get $ast body] {
-            surface::ast::Statement $statement 0 $spans lines
+            surface::ast::Statement $statement 0 $show lines
         }
     } else {
-        surface::ast::Statement $ast 0 $spans lines
+        surface::ast::Statement $ast 0 $show lines
+    }
+    if {[dict exists $ast diagnostics]} {
+        foreach diagnostic [dict get $ast diagnostics] {
+            lappend lines "! [dict get $diagnostic line]:[dict get $diagnostic column] [dict get $diagnostic message]"
+        }
     }
     return [::join $lines \n]
 }
 
-proc surface::ast::At {node spans} {
-    if {!$spans} {
-        return ""
+proc surface::ast::At {node show} {
+    lassign $show spans ids
+    set text ""
+    if {$spans} {
+        set s [dict get $node span]
+        append text " @[dict get $s line]:[dict get $s column]-[dict get $s endLine]:[dict get $s endColumn]"
     }
-    set s [dict get $node span]
-    return " @[dict get $s line]:[dict get $s column]-[dict get $s endLine]:[dict get $s endColumn]"
+    if {$ids && [dict exists $node id]} {
+        append text " <[dict get $node id]>"
+    }
+    return $text
 }
 
 proc surface::ast::Quote {text} {
     return "\"[string map [list \\ \\\\ \" \\\" \n \\n \r \\r \t \\t] $text]\""
 }
 
-proc surface::ast::Expr {node spans} {
-    set at [At $node $spans]
+proc surface::ast::Expr {node show} {
+    set at [At $node $show]
     switch -- [dict get $node kind] {
         int     { return "(int [dict get $node text])$at" }
         string  { return "(str [Quote [dict get $node value]])$at" }
         bool    { return "(bool [dict get $node value])$at" }
         unit    { return "(unit)$at" }
         name    { return "(name [dict get $node name])$at" }
+        error   { return "(error)$at" }
         list {
-            return "([::join [concat list [lmap item [dict get $node items] {Expr $item $spans}]] { }])$at"
+            return "([::join [concat list [lmap item [dict get $node items] {Expr $item $show}]] { }])$at"
         }
         call {
-            set parts [list call [Expr [dict get $node callee] $spans]]
+            set parts [list call [Expr [dict get $node callee] $show]]
             foreach arg [dict get $node args] {
-                lappend parts [Expr $arg $spans]
+                lappend parts [Expr $arg $show]
             }
             return "([::join $parts { }])$at"
         }
         unary {
-            return "(unary [dict get $node op] [Expr [dict get $node operand] $spans])$at"
+            return "(unary [dict get $node op] [Expr [dict get $node operand] $show])$at"
         }
-        binary {
-            return "(binary [dict get $node op] [Expr [dict get $node left] $spans] [Expr [dict get $node right] $spans])$at"
+        not {
+            return "(not [Expr [dict get $node operand] $show])$at"
+        }
+        binary - logical {
+            return "([dict get $node kind] [dict get $node op] [Expr [dict get $node left] $show] [Expr [dict get $node right] $show])$at"
         }
         bind {
-            return "(bind [dict get $node name] [Expr [dict get $node value] $spans])$at"
+            return "(bind [dict get $node name] [Expr [dict get $node value] $show])$at"
         }
         return - break {
             if {[dict get $node value] eq ""} {
                 return "([dict get $node kind])$at"
             }
-            return "([dict get $node kind] [Expr [dict get $node value] $spans])$at"
+            return "([dict get $node kind] [Expr [dict get $node value] $show])$at"
         }
         continue { return "(continue)$at" }
     }
     error "surface::ast: not an expression node: [dict get $node kind]"
 }
 
-proc surface::ast::Suite {suite indent spans linesVar} {
+proc surface::ast::Body {suite indent show linesVar} {
     upvar 1 $linesVar lines
     foreach statement [dict get $suite body] {
-        Statement $statement $indent $spans lines
+        Statement $statement $indent $show lines
     }
 }
 
-proc surface::ast::Statement {node indent spans linesVar} {
+# Lines of the if NODE, its first line starting with PREFIX.
+proc surface::ast::If {node prefix indent show linesVar} {
     upvar 1 $linesVar lines
     set pad [string repeat {    } $indent]
-    set inner [expr {$indent + 1}]
-    set at [At $node $spans]
+    lappend lines "$pad${prefix}if [Expr [dict get $node condition] $show][At $node $show]"
+    Body [dict get $node then] [expr {$indent + 1}] $show lines
+    if {[dict get $node else] ne ""} {
+        lappend lines "${pad}else[At [dict get $node else] $show]"
+        Body [dict get $node else] [expr {$indent + 1}] $show lines
+    }
+}
+
+proc surface::ast::Statement {node indent show linesVar} {
+    upvar 1 $linesVar lines
+    set pad [string repeat {    } $indent]
+    set at [At $node $show]
     switch -- [dict get $node kind] {
         function {
             set params [lmap pair [dict get $node params] {lindex $pair 0}]
             lappend lines "${pad}fn [dict get $node name] ($params)$at"
-            Suite [dict get $node body] $inner $spans lines
+            Body [dict get $node body] [expr {$indent + 1}] $show lines
+            return
         }
         if {
-            lappend lines "${pad}if [Expr [dict get $node condition] $spans]$at"
-            Suite [dict get $node then] $inner $spans lines
-            if {[dict get $node else] ne ""} {
-                lappend lines "${pad}else[At [dict get $node else] $spans]"
-                Suite [dict get $node else] $inner $spans lines
-            }
+            If $node "" $indent $show lines
+            return
         }
         loop {
             lappend lines "${pad}loop$at"
-            Suite [dict get $node body] $inner $spans lines
+            Body [dict get $node body] [expr {$indent + 1}] $show lines
+            return
         }
-        default {
-            lappend lines "$pad[Expr $node $spans]"
+        bind - return - break {
+            set value [dict get $node value]
+            if {$value ne "" && [dict get $value kind] eq "if"} {
+                set prefix [expr {[dict get $node kind] eq "bind"
+                    ? "bind [dict get $node name]$at = " : "[dict get $node kind]$at "}]
+                If $value $prefix $indent $show lines
+                return
+            }
         }
     }
+    lappend lines "$pad[Expr $node $show]"
 }

@@ -34,19 +34,24 @@ proc runFile {path showCode showHir showAst} {
     puts "== [file tail $path] ([core::useBackend])"
     set hir ""
     set extension [file extension $path]
-    if {$extension eq ".bot" && $showAst} {
-        if {[catch {surface::parse [core::ReadFile $path] $path} ast options]} {
-            puts "   error: $ast ([lrange [dict get $options -errorcode] 0 1])"
+    if {$extension eq ".bot"} {
+        # Parse with recovery first, so every syntax error is reported.
+        set ast [surface::parse [core::ReadFile $path] $path -recover 1]
+        if {$showAst} {
+            puts [surface::formatAst $ast]
+        }
+        if {[dict get $ast diagnostics] ne ""} {
+            foreach diagnostic [dict get $ast diagnostics] {
+                puts "   error: [dict get $diagnostic file]:[dict get $diagnostic line]:[dict get $diagnostic column]: [dict get $diagnostic message] (SURFACE SYNTAX)"
+            }
             return 1
         }
-        puts [surface::formatAst $ast]
     }
     if {$extension in {.hir .bot}} {
         if {$extension eq ".hir"} {
             set hir [hir::readFile $path]
         } elseif {[catch {surface::readProgramFile $path} hir options]} {
-            set code [dict get $options -errorcode]
-            puts "   error: $hir ([expr {[lindex $code 0] eq "SURFACE" ? [lrange $code 0 1] : $code}])"
+            puts "   error: $hir ([dict get $options -errorcode])"
             return 1
         }
         set program [hir::lower $hir]

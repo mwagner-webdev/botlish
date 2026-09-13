@@ -3,36 +3,47 @@
 #   surface::lowerToHir AST ?-strict 1|0?     => HIR program
 #
 # The frontend says what was written and where; HIR says what it means.
-# Lowering therefore only restates syntax in the shape HIR is built from and
-# hands it to hir::build, which does all semantic work: lexical resolution,
+# Lowering restates the AST as HIR syntax nodes (hir/syntax.tcl) and hands
+# them to hir::buildSyntax, which does all semantic work: lexical resolution,
 # binding identity, duplicate and use-before-binding checks, captures, types,
 # refinements, call targets and control targets. Nothing here looks a name up.
 #
-# hir::build consumes unresolved expression trees in core IR notation (there
-# is no other HIR constructor). Each tree node records the span it came from,
-# keyed by its path, and is passed as hir::build -origins, so every HIR
-# expression, scope and binding has a {file f1 start .. end .. line ..
-# column .. endLine .. endColumn ..} origin; f1 is the source file (-files).
+# Names the frontend introduces itself (operators, list, true, false, unit)
+# are root references: they denote the root binding whatever the program
+# binds (hir/hygiene.tcl). A program may bind `list` without changing what
+# [1, 2] means.
 #
-# Rules (SPAN of the source node unless stated):
+# Rules (root references marked ^):
 #
 #   42                    const 42
 #   "text"                const str text
-#   true / false / unit   ref true / ref false / ref unit   (root bindings)
+#   true / false / unit   ^true / ^false / ^unit
 #   x                     ref x
-#   [a, b]                call (ref list) a b               callee @ the list
+#   [a, b]                call ^list a b
 #   f(a, b)               call f a b
-#   a OP b                call (ref OP) a b                 callee @ the operator
-#   -a                    call (ref -) (const 0) a          callee, 0 @ the "-"
+#   a OP b                call ^OP a b              OP: + - * == < <= > >=
+#   a != b                if (call ^== a b) {^false} {^true}
+#   -a                    call ^- (const 0) a
+#   not a                 if a {^false} {^true}
+#   a and b               if a {if b {^true} {^false}} {^false}
+#   a or b                if a {^true} {if b {^true} {^false}}
 #   x = e                 bind x e
-#   fn f(a, b): body      bind f (block {a b} body...)      block @ "(" .. end
-#   if c: t else: e       if c (block {} t...) (block {} e...)
-#                         inline branches; a missing else is an empty branch
-#                         (value unit) @ the end of the if
-#   loop: body            loop (block {} body...)           inline body
-#   return / return e     return (ref unit) / return e
+#   fn f(a, b): body      bind f (block (a b) body...)
+#   if c: t else: e       if c {t...} {e...}    inline branches; a missing
+#                         else is an empty branch (value unit)
+#   loop: body            loop {body...}        inline body
+#   return / return e     return ^unit / return e
 #   break / break e       break / break e
 #   continue              continue
+#
+# `not`, `and`, `or` and `!=` are conditions, not calls: `and` and `or`
+# evaluate their right operand only when needed, and every operand must be a
+# Boolean (NOT-BOOLEAN otherwise), so their value is always a Boolean.
+#
+# Origins: every syntax node gets {file f1 node ID start .. end .. line ..
+# column .. endLine .. endColumn ..} from the AST node it comes from (ID is
+# the node's structural id, ast.tcl); nodes a rule adds get the id with a
+# role (ID/op for an operator's callee, ID/then for a branch it adds, ...).
 
 namespace eval surface::lower {}
 
@@ -47,14 +58,14 @@ proc surface::lowerToHir {ast args} {
     if {[dict get $ast kind] ne "program"} {
         error "surface::lowerToHir: expected a program node"
     }
-    set origins [dict create {} [surface::lower::Origin [dict get $ast span]]]
-    set exprs {}
-    set index 0
-    foreach statement [dict get $ast body] {
-        lappend exprs [surface::lower::Node $statement [list $index] origins]
-        incr index
+    if {[dict exists $ast diagnostics]} {
+        foreach diagnostic [dict get $ast diagnostics] {
+            surface::raise $diagnostic
+        }
     }
-    set hir [hir::build $exprs -strict 0 -origins $origins \
+    set nodes [surface::lower::Sequence [dict get $ast body]]
+    set hir [hir::buildSyntax $nodes -strict 0 \
+        -origin [surface::lower::Origin [dict get $ast span] ""] \
         -files [dict create f1 [dict get $ast span file]]]
     if {[dict get $options -strict]} {
         foreach diagnostic [hir::diagnostics $hir] {
@@ -75,128 +86,158 @@ proc surface::originLocation {hir origin} {
     return "$path:[dict get $fields line]:[dict get $fields column]"
 }
 
-# The HIR origin of source SPAN.
-proc surface::lower::Origin {span} {
-    return [list file f1 start [dict get $span start] end [dict get $span end] \
-        line [dict get $span line] column [dict get $span column] \
-        endLine [dict get $span endLine] endColumn [dict get $span endColumn]]
-}
-
-proc surface::lower::Record {originsVar path span} {
-    upvar 1 $originsVar origins
-    dict set origins $path [Origin $span]
-}
-
-# The tree for NODE at PATH; records origins.
-proc surface::lower::Node {node path originsVar} {
-    upvar 1 $originsVar origins
-    set span [dict get $node span]
-    Record origins $path $span
-    switch -- [dict get $node kind] {
-        int {
-            return [list const [dict get $node text]]
-        }
-        string {
-            return [list const str [dict get $node value]]
-        }
-        bool {
-            return [list ref [dict get $node value]]
-        }
-        unit {
-            return [list ref unit]
-        }
-        name {
-            return [list ref [dict get $node name]]
-        }
-        list {
-            Record origins [concat $path 1] $span
-            return [list call [list ref list] {*}[Args [dict get $node items] $path 2 origins]]
-        }
-        call {
-            return [list call [Node [dict get $node callee] [concat $path 1] origins] \
-                {*}[Args [dict get $node args] $path 2 origins]]
-        }
-        binary {
-            Record origins [concat $path 1] [dict get $node opSpan]
-            return [list call [list ref [dict get $node op]] \
-                {*}[Args [list [dict get $node left] [dict get $node right]] $path 2 origins]]
-        }
-        unary {
-            Record origins [concat $path 1] [dict get $node opSpan]
-            Record origins [concat $path 2] [dict get $node opSpan]
-            return [list call [list ref -] [list const 0] \
-                [Node [dict get $node operand] [concat $path 3] origins]]
-        }
-        bind {
-            return [list bind [dict get $node name] \
-                [Node [dict get $node value] [concat $path 2] origins]]
-        }
-        function {
-            set block [concat $path 2]
-            Record origins $block [dict get $node paramsSpan]
-            set names {}
-            set index 0
-            foreach param [dict get $node params] {
-                lassign $param name paramSpan
-                lappend names $name
-                Record origins [concat $block 1 $index] $paramSpan
-                incr index
-            }
-            return [list bind [dict get $node name] \
-                [list block $names {*}[Suite [dict get $node body] $block origins]]]
-        }
-        if {
-            set condition [Node [dict get $node condition] [concat $path 1] origins]
-            set then [Suite [dict get $node then] [concat $path 2] origins]
-            Record origins [concat $path 2] [dict get $node then span]
-            if {[dict get $node else] eq ""} {
-                set else {}
-                Record origins [concat $path 3] [surface::ast::endOf $span]
-            } else {
-                set else [Suite [dict get $node else] [concat $path 3] origins]
-                Record origins [concat $path 3] [dict get $node else span]
-            }
-            return [list if $condition [list block {} {*}$then] [list block {} {*}$else]]
-        }
-        loop {
-            set body [concat $path 1]
-            Record origins $body [dict get $node body span]
-            return [list loop [list block {} {*}[Suite [dict get $node body] $body origins]]]
-        }
-        return {
-            if {[dict get $node value] eq ""} {
-                Record origins [concat $path 1] $span
-                return [list return [list ref unit]]
-            }
-            return [list return [Node [dict get $node value] [concat $path 1] origins]]
-        }
-        break {
-            if {[dict get $node value] eq ""} {
-                return [list break]
-            }
-            return [list break [Node [dict get $node value] [concat $path 1] origins]]
-        }
-        continue {
-            return [list continue]
-        }
-    }
-    error "surface::lowerToHir: unknown node kind \"[dict get $node kind]\""
-}
-
-# Trees for the expressions NODES, at PATH from index FIRST on.
-proc surface::lower::Args {nodes path first originsVar} {
-    upvar 1 $originsVar origins
+# ExprIds of HIR whose origin is the AST node ID, in pre-order.
+proc surface::hirExprs {hir id} {
     set result {}
-    set index $first
-    foreach node $nodes {
-        lappend result [Node $node [concat $path $index] origins]
-        incr index
+    foreach e [hir::walk $hir] {
+        set origin [hir::get $hir $e origin]
+        if {[lindex $origin 0] eq "file" && [dict get [lrange $origin 2 end] node] eq $id} {
+            lappend result $e
+        }
     }
     return $result
 }
 
-# Body trees of SUITE, the statements of the (block ...) node at PATH.
-proc surface::lower::Suite {suite path originsVar} {
-    upvar 1 $originsVar origins
-    return [Args [dict get $suite body] $path 2 origins]
+# The HIR origin of source SPAN for AST node id ID.
+proc surface::lower::Origin {span id} {
+    return [list file f1 node $id start [dict get $span start] end [dict get $span end] \
+        line [dict get $span line] column [dict get $span column] \
+        endLine [dict get $span endLine] endColumn [dict get $span endColumn]]
+}
+
+proc surface::lower::OriginOf {node {role ""}} {
+    set id [dict get $node id]
+    if {$role ne ""} {
+        set id $id/$role
+    }
+    return [Origin [dict get $node span] $id]
+}
+
+proc surface::lower::Sequence {nodes} {
+    return [lmap node $nodes {Node $node}]
+}
+
+# if CONDITION {THEN...} {ELSE...}, with branches originating at ORIGIN.
+proc surface::lower::Branch {origin condition then else} {
+    return [hir::syntax::ifNode $origin $condition $origin $then $origin $else]
+}
+
+# A Boolean constant as a root reference.
+proc surface::lower::Bool {origin value} {
+    return [hir::syntax::rootRef $origin $value]
+}
+
+# The syntax node of AST NODE.
+proc surface::lower::Node {node} {
+    set origin [OriginOf $node]
+    switch -- [dict get $node kind] {
+        int {
+            return [hir::syntax::constNode $origin [dict get $node text]]
+        }
+        string {
+            return [hir::syntax::constNode $origin str [dict get $node value]]
+        }
+        bool {
+            return [hir::syntax::rootRef $origin [dict get $node value]]
+        }
+        unit {
+            return [hir::syntax::rootRef $origin unit]
+        }
+        name {
+            return [hir::syntax::refNode $origin [dict get $node name]]
+        }
+        list {
+            return [hir::syntax::callNode $origin \
+                [hir::syntax::rootRef [OriginOf $node list] list] \
+                {*}[Sequence [dict get $node items]]]
+        }
+        call {
+            return [hir::syntax::callNode $origin [Node [dict get $node callee]] \
+                {*}[Sequence [dict get $node args]]]
+        }
+        binary {
+            set op [dict get $node op]
+            set opOrigin [Origin [dict get $node opSpan] [dict get $node id]/op]
+            if {$op eq "!="} {
+                set equal [hir::syntax::callNode $origin \
+                    [hir::syntax::rootRef $opOrigin ==] \
+                    [Node [dict get $node left]] [Node [dict get $node right]]]
+                return [Branch $origin $equal [list [Bool $opOrigin false]] [list [Bool $opOrigin true]]]
+            }
+            return [hir::syntax::callNode $origin [hir::syntax::rootRef $opOrigin $op] \
+                [Node [dict get $node left]] [Node [dict get $node right]]]
+        }
+        unary {
+            set opOrigin [Origin [dict get $node opSpan] [dict get $node id]/op]
+            return [hir::syntax::callNode $origin [hir::syntax::rootRef $opOrigin -] \
+                [hir::syntax::constNode $opOrigin 0] [Node [dict get $node operand]]]
+        }
+        not {
+            set opOrigin [Origin [dict get $node opSpan] [dict get $node id]/op]
+            return [Branch $origin [Node [dict get $node operand]] \
+                [list [Bool $opOrigin false]] [list [Bool $opOrigin true]]]
+        }
+        logical {
+            set opOrigin [Origin [dict get $node opSpan] [dict get $node id]/op]
+            set right [dict get $node right]
+            set rightOrigin [OriginOf $right test]
+            set test [Branch $rightOrigin [Node $right] \
+                [list [Bool $rightOrigin true]] [list [Bool $rightOrigin false]]]
+            if {[dict get $node op] eq "and"} {
+                return [Branch $origin [Node [dict get $node left]] \
+                    [list $test] [list [Bool $opOrigin false]]]
+            }
+            return [Branch $origin [Node [dict get $node left]] \
+                [list [Bool $opOrigin true]] [list $test]]
+        }
+        bind {
+            return [hir::syntax::bindNode $origin [dict get $node name] \
+                [Node [dict get $node value]]]
+        }
+        function {
+            set params [lmap param [dict get $node params] {
+                lassign $param name span
+                list $name [Origin $span "[dict get $node id]/($name)"]
+            }]
+            set block [hir::syntax::blockNode \
+                [Origin [dict get $node paramsSpan] [dict get $node id]/block] \
+                $params [Sequence [dict get $node body body]]]
+            return [hir::syntax::bindNode $origin [dict get $node name] $block]
+        }
+        if {
+            set then [dict get $node then]
+            set else [dict get $node else]
+            if {$else eq ""} {
+                set elseOrigin [Origin [surface::ast::endOf [dict get $node span]] [dict get $node id]/else]
+                set elseBody {}
+            } else {
+                set elseOrigin [OriginOf $else]
+                set elseBody [Sequence [dict get $else body]]
+            }
+            return [hir::syntax::ifNode $origin [Node [dict get $node condition]] \
+                [OriginOf $then] [Sequence [dict get $then body]] $elseOrigin $elseBody]
+        }
+        loop {
+            set body [dict get $node body]
+            return [hir::syntax::loopNode $origin \
+                [Origin [dict get $body span] [dict get $body id]/body] \
+                [Sequence [dict get $body body]]]
+        }
+        return {
+            if {[dict get $node value] eq ""} {
+                return [hir::syntax::returnNode $origin [hir::syntax::rootRef $origin unit]]
+            }
+            return [hir::syntax::returnNode $origin [Node [dict get $node value]]]
+        }
+        break {
+            if {[dict get $node value] eq ""} {
+                return [hir::syntax::breakNode $origin]
+            }
+            return [hir::syntax::breakNode $origin [Node [dict get $node value]]]
+        }
+        continue {
+            return [hir::syntax::continueNode $origin]
+        }
+    }
+    error "surface::lowerToHir: cannot lower a \"[dict get $node kind]\" node"
 }

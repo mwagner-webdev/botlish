@@ -213,4 +213,169 @@ test parse-error-message {syntax error messages name file, line and column} -bod
     list $message [lrange [dict get $options -errorcode] 0 1]
 } -result {{src/demo.bot:2:9: expected an expression, found end of line} {SURFACE SYNTAX}}
 
+# ---------------------------------------------------------------------------
+# Boolean operators
+
+test parse-boolean-precedence {or < and < not < comparisons} -body {
+    ast "a or b and c\nnot a == b\na and not b or c\nnot not a\na != b + 1"
+} -result {(logical or (name a) (logical and (name b) (name c)))
+(not (binary == (name a) (name b)))
+(logical or (logical and (name a) (not (name b))) (name c))
+(not (not (name a)))
+(binary != (name a) (binary + (name b) (int 1)))}
+
+test parse-boolean-associativity {and and or are left-associative} -body {
+    ast "a and b and c\na or b or c"
+} -result {(logical and (logical and (name a) (name b)) (name c))
+(logical or (logical or (name a) (name b)) (name c))}
+
+test parse-boolean-errors {not is not an operand of arithmetic; != does not chain} -body {
+    list [parseError "1 + not x"] [parseError "a != b != c"] [parseError "a and"]
+} -result {{1:5 expected an expression, found "not"} {1:8 comparison chaining is not supported} {1:6 expected an expression, found end of line}}
+
+# ---------------------------------------------------------------------------
+# if as a value
+
+test parse-if-values {an if as the value of a binding, return or break} -body {
+    ast "x = if a:\n    1\nelse:\n    2\nfn f():\n    return if b:\n        3\nloop:\n    break if c:\n        4\n    else:\n        5\ny = x"
+} -result {bind x = if (name a)
+    (int 1)
+else
+    (int 2)
+fn f ()
+    return if (name b)
+        (int 3)
+loop
+    break if (name c)
+        (int 4)
+    else
+        (int 5)
+(bind y (name x))}
+
+test parse-if-value-errors {an if is not an operand} -body {
+    list [parseError "x = 1 + if a:\n    1"] [parseError "f(if a:\n    1)"] [parseError "x = if a: 1 else: 2"]
+} -result {{1:9 an "if" value must be the whole right side of "=", "return" or "break"} {1:3 an "if" value must be the whole right side of "=", "return" or "break"} {1:11 expected a new line and an indented block after ":", found integer 1}}
+
+# ---------------------------------------------------------------------------
+# Recovery
+
+proc recoveredAst {source} {
+    return [surface::formatAst [surface::parse $source t.bot -recover 1]]
+}
+
+test parse-recover-statements {each bad statement becomes an error node; parsing continues} -body {
+    recoveredAst "x = 1 +\ny = 2\nf(a b)\nz = 3"
+} -result {(error)
+(bind y (int 2))
+(error)
+(bind z (int 3))
+! 1:8 expected an expression, found end of line
+! 3:5 expected "," or ")" in the argument list, found name "b"}
+
+test parse-recover-blocks {a bad header skips its block; errors inside a block stay inside} -body {
+    recoveredAst "if x\n    1\n    2\nfn f():\n    a = \n    b\nc"
+} -result {(error)
+fn f ()
+    (error)
+    (name b)
+(name c)
+! 1:5 expected ":" after the "if" condition, found end of line
+! 5:9 expected an expression, found end of line}
+
+test parse-recover-lexical {lexical and syntax errors together, in source order} -body {
+    # "2 ! 3": the lexer skips "!", then the parser finds a stray 3.
+    recoveredAst "a = \"open\nb = f(1\nc = 2 ! 3\nd = 007"
+} -result {(bind a (str "open"))
+(bind b (call (name f) (int 1)))
+(error)
+(bind d (int 7))
+! 1:5 unterminated string
+! 2:6 "(" is never closed
+! 3:7 unexpected character "!"
+! 3:9 expected end of line, found integer 3
+! 4:5 invalid integer literal "007": leading zeros are not allowed}
+
+test parse-recover-indentation {unexpected indentation is skipped as a block} -body {
+    recoveredAst "a\n    b\n    c\nd"
+} -result {(name a)
+(error)
+(name d)
+! 2:5 unexpected indentation}
+
+test parse-recover-clean {a clean recovering parse equals a normal parse} -body {
+    set source [core::ReadFile [file join $::projectRoot examples surface 08-return.bot]]
+    set normal [surface::parse $source t.bot]
+    set recovered [surface::parse $source t.bot -recover 1]
+    list [expr {$normal eq $recovered}] [dict get $recovered diagnostics]
+} -result {1 {}}
+
+test parse-recover-lowering {an AST with syntax errors is not lowered} -body {
+    set ast [surface::parse "x = \ny = 1" t.bot -recover 1]
+    catch {surface::lowerToHir $ast} message options
+    list [lrange [dict get $options -errorcode] 0 1] $message
+} -result {{SURFACE SYNTAX} {t.bot:1:5: expected an expression, found end of line}}
+
+test parse-recover-always-terminates {recovery makes progress on hostile input} -body {
+    set results {}
+    foreach source [list ")))" "\]\]\]" "else:\n  else:\n else" ":\n:\n:" "fn\nfn\nfn" "if if if" "= = =" "\n\n    \n  x\n y\nz" "loop:\n" "fn f(\n" "\"\n\"\n\""] {
+        set ast [surface::parse $source t.bot -recover 1]
+        lappend results [expr {[dict get $ast kind] eq "program"}]
+    }
+    lsort -unique $results
+} -result 1
+
+# ---------------------------------------------------------------------------
+# Node ids
+
+proc ids {source} {
+    set lines {}
+    foreach line [split [surface::formatAst [surface::parse $source t.bot] -ids 1] \n] {
+        lappend lines [string trim $line]
+    }
+    return [join $lines \n]
+}
+
+test parse-ids {ids name nodes by structure} -body {
+    ids "fn make_adder(x):\n    fn add(y):\n        x + y\n    add\nx = 1\nx = 2\nif x:\n    loop:\n        break\nmake_adder(1)(2)"
+} -result {fn make_adder (x) <make_adder()>
+fn add (y) <make_adder()/add()>
+(binary + (name x) <make_adder()/add()/binary/left> (name y) <make_adder()/add()/binary/right>) <make_adder()/add()/binary>
+(name add) <make_adder()/name>
+(bind x (int 1) <x=/value>) <x=>
+(bind x (int 2) <x=#2/value>) <x=#2>
+if (name x) <if/cond> <if>
+loop <if/then/loop>
+(break) <if/then/loop/break>
+(call (call (name make_adder) <call/callee/callee> (int 1) <call/callee/arg1>) <call/callee> (int 2) <call/arg1>) <call>}
+
+# Ids of every node of the AST of SOURCE, by kind and span text.
+proc idsByText {source} {
+    set ast [surface::parse $source t.bot]
+    set result [dict create]
+    set stack [list $ast]
+    while {$stack ne ""} {
+        set node [lindex $stack end]
+        set stack [lrange $stack 0 end-1]
+        set span [dict get $node span]
+        dict set result "[dict get $node kind] [string range $source [dict get $span start] [dict get $span end]-1]" [dict get $node id]
+        lappend stack {*}[surface::ast::Children $node]
+    }
+    return $result
+}
+
+test parse-ids-stable {editing one function or adding statements keeps unrelated ids} -body {
+    set before "fn fib(n):\n    if n <= 1:\n        return n\n    fib(n - 1) + fib(n - 2)\n\nfn main():\n    x = fib(10)\n    x\n"
+    set after  "# a comment\nlimit = 2\n\nfn fib(n):\n    if n < limit:\n        return n\n    total = fib(n - 1) + fib(n - 2)\n    total\n\nfn main():\n    x = fib(10)\n    x\n"
+    set a [idsByText $before]
+    set b [idsByText $after]
+    list [dict get $a "function fn main():\n    x = fib(10)\n    x"] [dict get $b "function fn main():\n    x = fib(10)\n    x"] \
+         [dict get $a "call fib(10)"] [dict get $b "call fib(10)"] \
+         [dict get $a "return return n"] [dict get $b "return return n"]
+} -result {main() main() main()/x=/value main()/x=/value fib()/if/then/return fib()/if/then/return}
+
+test parse-find-node {surface::findNode finds a node by id} -body {
+    set ast [surface::parse "fn f(a):\n    a + 1\nf(2)" t.bot]
+    list [dict get [surface::findNode $ast f()/binary/right] text] [surface::findNode $ast nope]
+} -result {1 {}}
+
 cleanupTests

@@ -23,7 +23,7 @@ scopes, captures, refinements and known call targets made explicit. The
 compiler compiles from HIR; the interpreter runs core IR, and HIR lowers back
 to it.
 
-A first, minimal source language (`surface/`, §17) parses Botlish source
+A small source language (`surface/`, §17) parses Botlish source
 into a surface AST and builds HIR from it.
 
 ```
@@ -396,9 +396,11 @@ refinement unless its contract explicitly establishes one. So
 | `core::compiler::unitHir EXPRS ?MODE?` | the HIR a unit was compiled from |
 | `core::compiler::evalHir HIR` | compile and run a program-mode HIR directly; returns the value |
 | `hir::parse TEXT` / `hir::readFile PATH` | read HIR text (the `hir::format` notation) back into HIR |
-| `hir::build EXPRS ?-mode M? ?-strict 0\|1? ?-origins D? ?-files D?` | build the HIR of a program (§16) |
-| `surface::lex` / `surface::parse SOURCE ?FILE?` | Botlish source → tokens / surface AST (§17) |
-| `surface::formatAst AST ?-spans 1?` | readable surface AST |
+| `hir::build EXPRS ?-mode M? ?-strict 0\|1?` | build the HIR of a core IR program (§16) |
+| `hir::buildSyntax NODES ?-mode M? ?-strict 0\|1? ?-origin O? ?-files D?` | build HIR from syntax nodes (`hir::syntax::*Node`, `rootRef`, `fromIR`) |
+| `surface::lex` / `surface::parse SOURCE ?FILE? ?-recover 1?` | Botlish source → tokens / surface AST (§17) |
+| `surface::formatAst AST ?-spans 1? ?-ids 1?` | readable surface AST |
+| `surface::findNode AST ID` / `surface::hirExprs HIR ID` | an AST node / its HIR expressions, by structural id |
 | `surface::lowerToHir AST ?-strict 0\|1?` | surface AST → HIR |
 | `surface::compile SOURCE ?FILE? ?-strict 0\|1?` / `surface::readProgramFile PATH` | source → HIR |
 | `hir::lower HIR` / `hir::format HIR ?-origins 1?` | HIR → core IR / readable HIR |
@@ -439,6 +441,8 @@ refinement unless its contract explicitly establishes one. So
 | `core/primitives.tcl`, `core/predicates.tcl`, `core/strings.tcl` | builtin natives |
 | `lib/web.tcl` | optional demonstration library (`core::loadLibrary web`): `Emailish`, `UriQueryValue`, `uriEscape` |
 | `hir/hir.tcl` | HIR data model, ids, `hir::build`, queries |
+| `hir/syntax.tcl` | syntax nodes: HIR's input, and core IR → syntax |
+| `hir/hygiene.tcl` | renaming bindings that shadow root references |
 | `hir/resolve.tcl` | scopes, bindings, symbols, lexical resolution, captures, control targets |
 | `hir/types.tcl` | static types (delegating to `core/type.tcl`) and type inference |
 | `hir/refine.tcl` | branch refinement facts and statically decided type tests |
@@ -859,14 +863,50 @@ how many natives are registered.
 Spelling is never identity. Shadowing yields distinct BindingIds, and facts,
 captures and types attach to BindingIds, not names.
 
-Every node has an `origin`. Today that's `{ir PATH}`, where PATH indexes into
-the input IR: `{ir {1 2}}` is argument 1 of the call at top-level position 1.
-A syntax tree will supply `{file f3 start 120 end 144}` in the same field, so
-later analyses can report back to source through ExprIds.
+Every node has an `origin`. HIR built from core IR has `{ir PATH}`, where
+PATH indexes into the input IR: `{ir {1 2}}` is argument 1 of the call at
+top-level position 1. HIR built from source (§17) has
+`{file f1 node ID start .. end .. line .. column ..}`, so later analyses can
+report back to source through ExprIds.
+
+### Syntax nodes: how HIR is built
+
+HIR has one input, *syntax nodes* (`hir/syntax.tcl`). Each node states what
+was written and where, before anything is resolved: `const`, `ref`, `bind`,
+`block` (parameters with their own origins), `call`, `if` and `loop` (with
+origins for their branch and body scopes), `return`, `break`, `continue`,
+`ok` and `error`. Every node carries its own origin.
+
+```tcl
+set n [hir::syntax::bindNode $origin x [hir::syntax::constNode $origin 10]]
+set h [hir::buildSyntax [list $n] -origin $programOrigin -files {f1 main.bot}]
+```
+
+`hir::build EXPRS` is `hir::syntax::fromIR` followed by `hir::buildSyntax`.
+Frontends such as `surface/` build syntax nodes directly. Resolution,
+hygiene, types and refinements all happen in `hir::buildSyntax`, so a
+frontend never resolves a name.
+
+### Root references and hygiene
+
+`hir::syntax::rootRef ORIGIN NAME` is a reference to the root binding `NAME`
+(a native, `true`, `false` or `unit`) that no local binding can shadow. A
+frontend uses it for names it introduces itself, such as the `list` a list
+literal calls. It resolves directly to the root binding (program mode only).
+
+Core IR has only lexical `ref`, and core IR doesn't need to grow for this:
+spelling isn't identity. After resolution, `hir/hygiene.tcl` checks each
+root reference. If a lexical lookup of its name would find a local binding,
+that binding is renamed `NAME#N`, a name the program doesn't use and source
+can't spell. The rename covers the binding, its scope's names, and every
+`bind` and `ref` of it. The original name is kept in the binding's
+`spelling`. Lowered core IR, the compiler's runtime frames and HIR text then
+all agree with the HIR. Diagnostics are computed before renaming and keep the
+source spelling.
 
 ### Scopes and resolution
 
-`hir/resolve.tcl` walks the IR once, in evaluation order, and applies the
+`hir/resolve.tcl` walks the syntax nodes once, in evaluation order, and applies the
 run-time rules of §2 statically:
 
 * Scope kinds are `root` (natives, `true`, `false`, `unit`), `program`,
@@ -995,12 +1035,10 @@ name now has result type `never` (it always raises) instead of `any`.
 
 ### Known limitations
 
-* HIR is built from unresolved trees in core IR notation, whether they come
-  from IR files or from source (§17). Source-built HIR carries source spans
-  as origins (`hir::build -origins`), but there's no lossless syntax tree: no
-  NodeIds, preserved comments or formatting.
-* IDs are deterministic per build but not stable across edits. Incremental
-  and LSP use will need identity that survives edits.
+* Source-built HIR carries structural node ids and spans in its origins
+  (§17), but there's no lossless syntax tree: no preserved comments or
+  formatting. HIR's own ids (`e12`, `b3`) are deterministic per build but
+  not stable across edits.
 * HIR refinements are only the statically provable subset. When the callee
   isn't statically known (a parameter, say), the interpreter may still
   install facts the HIR doesn't have.
@@ -1028,17 +1066,15 @@ denote symbols with canonical provenance (`users::save`). Resolution already
 goes through scope kinds and symbol entries. A qualified or method-style
 reference could then resolve to the existing `ref` and `call` forms, with the
 canonical symbol as the `target`, and lower to existing core IR. After that,
-take origins from a lossless syntax tree (FileId and NodeId) so tooling can
-query the HIR by source position. On the backend side, the next step is to use
+keep comments and formatting in a lossless syntax tree so tooling can edit
+source through the HIR. On the backend side, the next step is to use
 `captures` so that only captured scopes are materialized.
 
-## 17. Surface language (first milestone)
+## 17. Surface language
 
-`surface/` is a small Python-like source language. It exists to prove the
-vertical slice `source → tokens → surface AST → HIR → core IR → backends`,
-not to be the full language. It adds no semantics: every construct lowers to
-HIR that already existed, and HIR does all resolution, capture analysis,
-typing and checking.
+`surface/` is a small Python-like source language. It adds no semantics:
+every construct lowers to HIR syntax (§16), and HIR does all resolution,
+capture analysis, typing and checking.
 
 ```botlish
 fn make_adder(x):
@@ -1058,12 +1094,15 @@ add10(32)          # 42 (add captures x)
 * `fn f(a, b):` declares a function. The body's last expression is its
   value; `return` exits early.
 * `if c:` / `else:` (optional `else`), `loop:`, `break [e]`, `continue`.
+* An `if` can also be the value of a binding, `return` or `break`
+  (`sign = if n < 0:` followed by its blocks). It can't be an operand or an
+  argument.
 * Integers (decimal, arbitrary precision, no leading zeros), strings
-  (`"..."`, escapes `\ \" \n \r \t`), `true`, `false`, `unit`, lists
+  (`"..."`, escapes `\\ \" \n \r \t`), `true`, `false`, `unit`, lists
   `[a, b]`, calls `f(x)(y)`.
 * Operators, from highest precedence: call, unary `-`, `*`, `+ -`,
-  `== < <= > >=`. Arithmetic is left-associative. Comparisons don't chain
-  (`a < b < c` is a syntax error).
+  `== != < <= > >=`, `not`, `and`, `or`. Arithmetic, `and` and `or` are
+  left-associative. Comparisons don't chain (`a < b < c` is a syntax error).
 * Blocks are delimited by indentation (spaces only; tabs are an error).
   Blank and comment lines (`#`) don't count. Newlines inside `( )` and `[ ]`
   are ignored. Trailing commas are allowed in parameters, arguments and lists.
@@ -1074,32 +1113,75 @@ The full grammar is at the top of `surface/parser.tcl`.
 
 ### Lowering
 
-| Source | HIR (as the core IR it is built from) |
+`^name` is a root reference: it denotes the root binding whatever the
+program binds (§16, "Root references and hygiene").
+
+| Source | HIR syntax (as core IR) |
 |---|---|
 | `42`, `"s"` | `const 42`, `const str s` |
-| `true` `false` `unit`, `x` | `ref true` …, `ref x` |
-| `a + b`, `-a` | `call (ref +) a b`, `call (ref -) (const 0) a` |
-| `[a, b]` | `call (ref list) a b` |
+| `true` `false` `unit`, `x` | `^true` …, `ref x` |
+| `a + b`, `-a` | `call ^+ a b`, `call ^- (const 0) a` |
+| `a != b` | `if (call ^== a b) {^false} {^true}` |
+| `not a` | `if a {^false} {^true}` |
+| `a and b` | `if a {if b {^true} {^false}} {^false}` |
+| `a or b` | `if a {^true} {if b {^true} {^false}}` |
+| `[a, b]` | `call ^list a b` |
 | `f(a)` | `call f a` |
 | `x = e` | `bind x e` |
 | `fn f(a): body` | `bind f (block {a} body…)` |
-| `if c: t` / `else: e` | `if c (block {} t…) (block {} e…)`, inline branches; no `else` → empty branch (`unit`) |
-| `loop: body` | `loop (block {} body…)` |
-| `return` / `break` | `return (ref unit)` / `break` |
+| `if c: t` / `else: e` | `if c {t…} {e…}`, inline branches; no `else` → empty branch (`unit`) |
+| `loop: body` | `loop {body…}` |
+| `return` / `break` | `return ^unit` / `break` |
+
+`not`, `and`, `or` and `!=` are conditions, not calls. `and` and `or`
+evaluate their right operand only when needed. Every operand must be a
+Boolean (`NOT-BOOLEAN` otherwise), so the result is always a Boolean. A
+program may bind `list`, or name a parameter `list`, without changing what
+`[...]` means.
 
 Every HIR expression, scope and binding built from source has the origin
-`{file f1 start S end E line L column C endLine L2 endColumn C2}`. The HIR's
-`files` table maps `f1` to the path. Operator callees point at the operator,
-a function's block at its parameter list and body, and branch and loop scopes
-at their suites.
+`{file f1 node ID start S end E line L column C endLine L2 endColumn C2}`.
+The HIR's `files` table maps `f1` to the path.
 
-### Errors
+### Node ids
 
-Syntax errors stop at the first error and raise
-`{SURFACE SYNTAX DIAGNOSTIC}` with `FILE:LINE:COLUMN: message`. HIR's
-semantic diagnostics (`DUPLICATE`, `UNBOUND`, control placement) are raised
-statically as `{CORE SEMANTIC KIND}`, with the source location before the
-message. With `-strict 0` they stay in the HIR and are raised at run time.
+Every AST node has a structural `id` that survives unrelated edits. A
+statement's id is its parent's id plus a key: `NAME()` for a function,
+`NAME=` for a binding, or the statement kind. A repeated key gets `#N`.
+Inner nodes add their role (`then`, `cond`, `value`, `left`, `arg1`, …).
+For example, the `x + y` in `make_adder`'s inner `add` is
+`make_adder()/add()/binary`. Editing one function's body doesn't change ids
+outside it. Inserting a statement only changes later siblings with the same
+key.
+
+HIR origins carry the id, so `surface::hirExprs HIR ID` finds the HIR
+expressions an AST node became, and `surface::findNode AST ID` finds the
+node. A rule that adds nodes gives them the id plus a role (`ID/op` for an
+operator's callee and constants, `ID/block` for a function's block,
+`ID/(a)` for its parameter `a`).
+
+### Errors and recovery
+
+`surface::parse` raises the first syntax error as
+`{SURFACE SYNTAX DIAGNOSTIC}` with `FILE:LINE:COLUMN: message`.
+
+`surface::parse SOURCE FILE -recover 1` always returns a program:
+
+* The lexer records each error and recovers locally. It skips bad
+  characters, ends unterminated strings at the end of line, and closes open
+  brackets at the end of input or before a line that starts like a
+  statement.
+* A statement that fails to parse becomes an `error` node. Parsing resumes
+  after its line and any block indented under it.
+* The program's `diagnostics` list every error in source order. `main.tcl`
+  uses this to report all syntax errors of a `.bot` file.
+
+`surface::lowerToHir` refuses an AST with diagnostics.
+
+HIR's semantic diagnostics (`DUPLICATE`, including duplicate parameters,
+`UNBOUND`, control placement) are raised statically as
+`{CORE SEMANTIC KIND}`, with the source location before the message. With
+`-strict 0` they stay in the HIR and are raised at run time.
 
 ### Samples and tests
 
@@ -1108,14 +1190,18 @@ message. With `-strict 0` they stay in the HIR and are raised at run time.
 lowered IR) and the compiler (from the HIR). It checks that both backends
 agree, and that the HIR equals what `hir::build` derives from its lowered IR.
 `surface-lexer.test`, `surface-parser.test` and `surface-lowering.test`
-cover the layers separately.
+cover the layers separately. `hir-syntax.test` covers HIR syntax, root
+references and hygiene.
 
 ### Known limitations
 
-* A list literal calls whatever `list` is in scope. A program that binds
-  `list` changes what `[...]` means. HIR has no unshadowable way to name a
-  root binding yet.
-* Duplicate parameter names (`fn f(a, a)`) are rejected by the core IR shape
-  check, without a source location.
-* No error recovery, no partial parsing, and no stable node identity across
-  edits yet (needed for an LSP).
+* `and`, `or` and `not` conditions add no refinements: `if integer?(x) and
+  …` would not refine `x`. Only a direct predicate call does (§6), and
+  predicates can't be named from source yet anyway.
+* A renamed binding shows its core IR name (`list#1`) in run-time errors of
+  `-strict 0` programs and in `programTypes`. HIR diagnostics use the source
+  spelling.
+* Recovery is line-based. An error inside a line can cascade into one more
+  diagnostic, for example a stray token after an unexpected character.
+* Node ids identify structure, not text ranges. An editor still has to
+  reparse the whole file; there's no incremental reparsing yet.

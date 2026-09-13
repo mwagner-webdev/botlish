@@ -140,7 +140,7 @@ test lower-origins {expressions, scopes and bindings originate in the source} -b
          [at [dict get [hir::scope $h [hir::get $h $block bodyScope]] origin]] \
          [at [dict get [hir::scope $h [hir::top $h]] origin]] \
          [hir::sourceFile $h f1]
-} -result {{file f1 start 20 end 21 line 2 column 7 endLine 2 endColumn 8} 2:5 1:7 1:1 1:11 1:7 1:1 {id f1 path demo.bot}}
+} -result {{file f1 node add()/binary/op start 20 end 21 line 2 column 7 endLine 2 endColumn 8} 2:5 1:7 1:1 1:11 1:7 1:1 {id f1 path demo.bot}}
 
 test lower-origins-branches {branch and loop scopes originate at their suites} -body {
     set h [surface::compile "if true:\n    1\nelse:\n    loop:\n        break 2" t.bot]
@@ -202,6 +202,98 @@ test lower-non-strict {with -strict 0 diagnostics stay in the HIR and raise at r
          [core::formatValue [core::evalProgram [hir::lower $h]]] \
          [core::formatValue [core::compiler::evalHir $h]]
 } -result {DUPLICATE 1 1}
+
+# ---------------------------------------------------------------------------
+# Boolean operators and if values
+
+foreach {name source ir} {
+    not-equal   "1 != 2"     {{if {call {ref ==} {const 1} {const 2}} {block {} {ref false}} {block {} {ref true}}}}
+    not         "not true"   {{if {ref true} {block {} {ref false}} {block {} {ref true}}}}
+    and         "true and false" {{if {ref true} {block {} {if {ref false} {block {} {ref true}} {block {} {ref false}}}} {block {} {ref false}}}}
+    or          "true or false"  {{if {ref true} {block {} {ref true}} {block {} {if {ref false} {block {} {ref true}} {block {} {ref false}}}}}}
+    if-value    "x = if true:\n    1\nelse:\n    2" {{bind x {if {ref true} {block {} {const 1}} {block {} {const 2}}}}}
+    return-if   "fn f():\n    return if true:\n        1" {{bind f {block {} {return {if {ref true} {block {} {const 1}} {block {}}}}}}}
+    break-if    "loop:\n    break if true:\n        1" {{loop {block {} {break {if {ref true} {block {} {const 1}} {block {}}}}}}}
+} {
+    test lower-rule-$name "lowering rule: $name" -body {
+        loweredIR $source
+    } -result [canonicalProgram $ir]
+}
+
+test lower-boolean-values {truth tables and short-circuiting} -body {
+    set h [surface::compile "fn t(a, b):\n    \[a and b, a or b, not a, a != b\]\n\[t(true, true), t(true, false), t(false, true), t(false, false)\]" t.bot]
+    list [core::formatValue [core::evalProgram [hir::lower $h]]] \
+         [core::formatValue [core::compiler::evalHir $h]]
+} -result [lrepeat 2 {[[true, true, false, false], [false, true, false, true], [false, true, true, true], [false, false, true, false]]}]
+
+test lower-boolean-short-circuit {the right operand is not evaluated when the left decides} -body {
+    # nope is unbound: evaluating it would fail.
+    set h [surface::compile "fn f(x):\n    \[x or nope(), not x and nope()\]\nf(true)" t.bot -strict 0]
+    core::formatValue [core::evalProgram [hir::lower $h]]
+} -result {[true, false]}
+
+test lower-boolean-operands {operands must be Booleans} -body {
+    set results {}
+    foreach source {"1 and true" "true and 1" "false or 1" "not 1"} {
+        catch {core::evalProgram [hir::lower [surface::compile $source t.bot]]} message options
+        lappend results [dict get $options -errorcode]
+    }
+    set results
+} -result {{CORE SEMANTIC NOT-BOOLEAN} {CORE SEMANTIC NOT-BOOLEAN} {CORE SEMANTIC NOT-BOOLEAN} {CORE SEMANTIC NOT-BOOLEAN}}
+
+test lower-boolean-types {Boolean operators have type bool} -body {
+    set h [surface::compile "fn f(a, b):\n    c = a and b\n    d = not a\n    e = a != b\n    \[c, d, e\]" t.bot]
+    lmap name {c d e} {hir::types::show [hir::bindingType $h [hir::lookup $h s3 $name]]}
+} -result {bool bool bool}
+
+test lower-if-value-scopes {an if value's branches are inline scopes} -body {
+    set h [surface::compile "x = 1\ny = if x == 1:\n    x = 2\n    x\nelse:\n    0\n\[x, y\]" t.bot]
+    list [core::formatValue [core::compiler::evalHir $h]] \
+         [dict get [hir::scope $h [hir::get $h [hirFind $h if] thenScope]] kind] \
+         [hir::types::show [hir::bindingType $h b2]]
+} -result {{[1, 2]} branch int}
+
+# ---------------------------------------------------------------------------
+# Hygiene: names the frontend introduces cannot be shadowed
+
+test lower-hygiene-list {binding list does not change list literals} -body {
+    set h [surface::compile "list = 5\n\[1, list\]" t.bot]
+    list [core::formatValue [core::evalProgram [hir::lower $h]]] \
+         [core::formatValue [core::compiler::evalHir $h]] \
+         [canonicalProgram [hir::lower $h]]
+} -result {{[1, 5]} {[1, 5]} {{bind list#1 {const 5}} {call {ref list} {const 1} {ref list#1}}}}
+
+test lower-hygiene-nested {a list parameter and a list binding in a branch} -body {
+    set h [surface::compile "fn f(list):\n    if true:\n        list = 2\n        \[list\]\n    else:\n        \[list\]\n\[f(1), \[\]\]" t.bot]
+    list [core::formatValue [core::evalProgram [hir::lower $h]]] \
+         [core::formatValue [core::compiler::evalHir $h]]
+} -result {{[[2], []]} {[[2], []]}}
+
+test lower-hygiene-diagnostics {diagnostics keep the source spelling} -body {
+    catch {surface::compile "list = 1\nlist = 2\n\[\]" t.bot} message
+    set message
+} -result {t.bot:2:1: duplicate binding "list" in the same lexical scope}
+
+test lower-hygiene-analysis {hygienic HIR is what analysis of its lowered IR derives} -body {
+    set h [surface::compile "list = 5\nfn g():\n    \[list\]\ng()" t.bot]
+    expr {[hir::format $h] eq [hir::format [hir::build [hir::lower $h]]]}
+} -result 1
+
+# ---------------------------------------------------------------------------
+# Node ids in origins
+
+test lower-node-ids {HIR expressions from an AST node carry its id} -body {
+    set h [surface::compile "fn add(a, b):\n    a != b\nadd(1, 2)" t.bot]
+    list [lmap e [surface::hirExprs $h add()/binary] {hir::kind $h $e}] \
+         [lmap e [surface::hirExprs $h add()/binary/op] {hir::kind $h $e}] \
+         [lmap e [surface::hirExprs $h add()/block] {hir::kind $h $e}] \
+         [dict get [lrange [dict get [hir::binding $h [lindex [hir::get $h [surface::hirExprs $h add()/block] params] 1]] origin] 2 end] node]
+} -result {{if call} {ref ref ref} block add()/(b)}
+
+test lower-duplicate-params-located {duplicate parameters are reported at the function} -body {
+    catch {surface::compile "x = 1\nfn f(a, b, a):\n    a" t.bot} message options
+    list [dict get $options -errorcode] $message
+} -result {{CORE SEMANTIC DUPLICATE} {t.bot:2:5: duplicate binding "a" in the same lexical scope (block parameters)}}
 
 test lower-parse-without-analysis {the AST of a semantically invalid program is available} -body {
     set ast [surface::parse "x = 1\nx = 2" t.bot]

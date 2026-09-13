@@ -1,14 +1,14 @@
 # parser.tcl -- Botlish source to surface AST (ast.tcl).
 #
-#   surface::parse SOURCE ?FILENAME?        => program node
-#   surface::parseTokens TOKENS             => program node
+#   surface::parse SOURCE ?FILENAME? ?-recover 1?     => program node
 #
 # Recursive descent over the tokens of lexer.tcl. The grammar, with layout
 # already turned into NEWLINE / INDENT / DEDENT tokens:
 #
 #   program      = { NEWLINE | statement } EOF
-#   statement    = simple NEWLINE | function | if | loop
+#   statement    = simple NEWLINE | valued | function | if | loop
 #   simple       = binding | return | break | continue | expression
+#   valued       = IDENT "=" if | "return" if | "break" if
 #   function     = "fn" IDENT "(" [ IDENT { "," IDENT } [ "," ] ] ")" ":" suite
 #   if           = "if" expression ":" suite [ "else" ":" suite ]
 #   loop         = "loop" ":" suite
@@ -17,8 +17,11 @@
 #   return       = "return" [ expression ]
 #   break        = "break" [ expression ]
 #   continue     = "continue"
-#   expression   = comparison
-#   comparison   = additive [ ( "==" | "<" | "<=" | ">" | ">=" ) additive ]
+#   expression   = disjunction
+#   disjunction  = conjunction { "or" conjunction }
+#   conjunction  = inversion { "and" inversion }
+#   inversion    = "not" inversion | comparison
+#   comparison   = additive [ ( "==" | "!=" | "<" | "<=" | ">" | ">=" ) additive ]
 #   additive     = multiplicative { ( "+" | "-" ) multiplicative }
 #   multiplicative = unary { "*" unary }
 #   unary        = "-" unary | postfix
@@ -27,22 +30,62 @@
 #   primary      = INT | STRING | "true" | "false" | "unit" | IDENT
 #                | "[" [ arguments ] "]" | "(" expression ")"
 #
-# Binary arithmetic is left-associative; comparisons do not chain.
+# An if is a value where a statement's value ends the statement: the right
+# side of a binding, or the value of return or break (`x = if c:` followed
+# by its suites). Binary arithmetic, and and or are left-associative;
+# comparisons do not chain.
 #
-# Parser state is a dict {tokens pos last}: LAST is the span of the last
-# consumed token that is not layout, used to end node spans.
+# Without -recover, the first syntax error (lexical or grammatical) is raised
+# ({SURFACE SYNTAX DIAGNOSTIC}). With -recover 1 parsing always returns a
+# program: a statement that fails to parse becomes an `error` node, parsing
+# resumes after the line (and any block indented under it), and the
+# program's `diagnostics` lists every lexical and syntax error in source
+# order.
+#
+# Parser state is a dict {tokens pos last recover diagnostics}: LAST is the
+# span of the last consumed token that is not layout, used to end node spans.
 
 namespace eval surface::parser {
-    variable comparisons {== < <= > >=}
+    variable comparisons {== != < <= > >=}
 }
 
-proc surface::parse {source {filename <input>}} {
-    return [surface::parseTokens [surface::lex $source $filename]]
+proc surface::parse {source args} {
+    set filename <input>
+    if {[llength $args] % 2} {
+        set args [lassign $args filename]
+    }
+    set options [dict create -recover 0]
+    foreach {option value} $args {
+        if {![dict exists $options $option]} {
+            error "surface::parse: unknown option \"$option\""
+        }
+        dict set options $option $value
+    }
+    set recover [dict get $options -recover]
+    set lexed [surface::lexer::tokenize $source $filename]
+    if {!$recover} {
+        foreach diagnostic [dict get $lexed diagnostics] {
+            surface::raise $diagnostic
+        }
+    }
+    set program [surface::parseTokens [dict get $lexed tokens] -recover $recover]
+    set all [concat [dict get $lexed diagnostics] [dict get $program diagnostics]]
+    set decorated [lmap diagnostic $all {list [dict get $diagnostic start] $diagnostic}]
+    dict set program diagnostics [lmap entry [lsort -integer -index 0 $decorated] {lindex $entry 1}]
+    return [surface::ast::assignIds $program]
 }
 
-proc surface::parseTokens {tokens} {
-    set p [dict create tokens $tokens pos 0 last [dict get [lindex $tokens 0] span]]
-    return [surface::parser::Program p]
+# The program node of TOKENS (without ids); -recover as for surface::parse.
+proc surface::parseTokens {tokens args} {
+    set options [dict create -recover 0]
+    foreach {option value} $args {
+        dict set options $option $value
+    }
+    set p [dict create tokens $tokens pos 0 last [dict get [lindex $tokens 0] span] \
+        recover [dict get $options -recover] diagnostics {}]
+    set program [surface::parser::Program p]
+    dict set program diagnostics [dict get $p diagnostics]
+    return $program
 }
 
 # ---------------------------------------------------------------------------
@@ -107,21 +150,87 @@ proc surface::parser::SpanFrom {pVar start} {
 }
 
 # ---------------------------------------------------------------------------
-# Statements
+# Statements and recovery
 
 proc surface::parser::Program {pVar} {
     upvar 1 $pVar p
     set start [dict get [Peek p] span]
+    set body [Statements p {EOF}]
+    set end [dict get [Peek p] span]
+    return [surface::ast::node program [surface::ast::cover $start $end] body $body]
+}
+
+# Statements up to a token of a kind in STOP (not consumed).
+proc surface::parser::Statements {pVar stop} {
+    upvar 1 $pVar p
     set body {}
-    while {[Kind p] ne "EOF"} {
+    while {[Kind p] ni $stop} {
         if {[Kind p] eq "NEWLINE"} {
             Advance p
             continue
         }
-        lappend body [Statement p]
+        set token [Peek p]
+        if {![catch {Statement p} statement options]} {
+            lappend body $statement
+            continue
+        }
+        if {![dict get $p recover] || [lrange [dict get $options -errorcode] 0 1] ne {SURFACE SYNTAX}} {
+            return -options $options $statement
+        }
+        dict lappend p diagnostics [lindex [dict get $options -errorcode] 2]
+        set before [dict get $p pos]
+        Synchronize p
+        if {[dict get $p pos] == $before && [Kind p] ni [concat $stop EOF]} {
+            Advance p
+        }
+        set end [expr {[dict get $p last start] >= [dict get $token span start]
+            ? [dict get $p last] : [dict get $token span]}]
+        lappend body [surface::ast::node error [surface::ast::cover [dict get $token span] $end]]
     }
-    set end [dict get [Peek p] span]
-    return [surface::ast::node program [surface::ast::cover $start $end] body $body]
+    return $body
+}
+
+# Skips to the start of the next statement: past the end of the current line
+# and any block indented under it, or to the end of the enclosing block.
+proc surface::parser::Synchronize {pVar} {
+    upvar 1 $pVar p
+    while 1 {
+        switch -- [Kind p] {
+            EOF - DEDENT {
+                return
+            }
+            NEWLINE {
+                Advance p
+                if {[Kind p] eq "INDENT"} {
+                    SkipBlock p
+                }
+                return
+            }
+            INDENT {
+                SkipBlock p
+                return
+            }
+            default {
+                Advance p
+            }
+        }
+    }
+}
+
+# Skips an INDENT and everything up to its matching DEDENT.
+proc surface::parser::SkipBlock {pVar} {
+    upvar 1 $pVar p
+    set depth 0
+    while {[Kind p] ne "EOF"} {
+        switch -- [Kind p] {
+            INDENT { incr depth }
+            DEDENT { incr depth -1 }
+        }
+        Advance p
+        if {$depth == 0} {
+            return
+        }
+    }
 }
 
 proc surface::parser::Statement {pVar} {
@@ -135,6 +244,12 @@ proc surface::parser::Statement {pVar} {
         else   { Fail $token "\"else\" without a matching \"if\"" }
     }
     set statement [Simple p]
+    if {[dict get $statement kind] in {bind return break}
+            && [dict get $statement value] ne ""
+            && [dict get $statement value kind] eq "if"} {
+        # The if's suites ended the line.
+        return $statement
+    }
     set next [Peek p]
     if {[dict get $next kind] ne "NEWLINE"} {
         if {[dict get $next kind] eq "=" && [dict get $statement kind] ne "bind"} {
@@ -155,7 +270,7 @@ proc surface::parser::Simple {pVar} {
             if {[Kind p 1] eq "="} {
                 Advance p
                 Advance p
-                set value [Expression p]
+                set value [Value p]
                 return [surface::ast::node bind [SpanFrom p $start] \
                     name [dict get $token value] nameSpan $start value $value]
             }
@@ -164,7 +279,7 @@ proc surface::parser::Simple {pVar} {
             Advance p
             set value ""
             if {[Kind p] ni {NEWLINE DEDENT EOF}} {
-                set value [Expression p]
+                set value [Value p]
             }
             return [surface::ast::node [dict get $token kind] [SpanFrom p $start] value $value]
         }
@@ -172,6 +287,15 @@ proc surface::parser::Simple {pVar} {
             Advance p
             return [surface::ast::node continue $start]
         }
+    }
+    return [Expression p]
+}
+
+# A statement's value: an if or an expression.
+proc surface::parser::Value {pVar} {
+    upvar 1 $pVar p
+    if {[Kind p] eq "if"} {
+        return [If p]
     }
     return [Expression p]
 }
@@ -234,15 +358,14 @@ proc surface::parser::Suite {pVar after} {
     }
     Advance p
     set start [dict get [Peek p] span]
-    set body {}
-    while {[Kind p] ne "DEDENT"} {
-        if {[Kind p] eq "NEWLINE"} {
-            Advance p
-            continue
-        }
-        lappend body [Statement p]
+    set body [Statements p {DEDENT EOF}]
+    if {[Kind p] eq "DEDENT"} {
+        Advance p
     }
-    Advance p
+    if {$body eq ""} {
+        # Every statement of the block was skipped by recovery.
+        return [surface::ast::node suite $start body {}]
+    }
     return [surface::ast::node suite [SpanFrom p $start] body $body]
 }
 
@@ -250,6 +373,42 @@ proc surface::parser::Suite {pVar after} {
 # Expressions
 
 proc surface::parser::Expression {pVar} {
+    upvar 1 $pVar p
+    return [Logical p or Conjunction]
+}
+
+proc surface::parser::Conjunction {pVar} {
+    upvar 1 $pVar p
+    return [Logical p and Inversion]
+}
+
+# OPERAND { OP OPERAND }, left-associative.
+proc surface::parser::Logical {pVar op operand} {
+    upvar 1 $pVar p
+    set left [$operand p]
+    while {[Kind p] eq $op} {
+        set token [Advance p]
+        set right [$operand p]
+        set left [surface::ast::node logical \
+            [surface::ast::cover [dict get $left span] [dict get $right span]] \
+            op $op opSpan [dict get $token span] left $left right $right]
+    }
+    return $left
+}
+
+proc surface::parser::Inversion {pVar} {
+    upvar 1 $pVar p
+    if {[Kind p] eq "not"} {
+        set op [Advance p]
+        set operand [Inversion p]
+        return [surface::ast::node not \
+            [surface::ast::cover [dict get $op span] [dict get $operand span]] \
+            opSpan [dict get $op span] operand $operand]
+    }
+    return [Comparison p]
+}
+
+proc surface::parser::Comparison {pVar} {
     upvar 1 $pVar p
     variable comparisons
     set left [Additive p]
@@ -366,6 +525,9 @@ proc surface::parser::Primary {pVar} {
             set expr [Expression p]
             Expect p ) "\")\""
             return $expr
+        }
+        if {
+            Fail $token "an \"if\" value must be the whole right side of \"=\", \"return\" or \"break\""
         }
     }
     Fail $token "expected an expression, found [Describe $token]"

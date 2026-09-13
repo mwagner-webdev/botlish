@@ -1,15 +1,17 @@
 # lexer.tcl -- indentation-sensitive tokenizer for Botlish source.
 #
-#   surface::lex SOURCE ?FILENAME?      => list of tokens
+#   surface::lex SOURCE ?FILENAME?          => list of tokens; raises the first
+#                                              syntax error
+#   surface::lexer::tokenize SOURCE FILE    => {tokens TOKENS diagnostics DIAGS}
 #
 # A token is a dict {kind text value span}:
 #
 #   IDENT     [A-Za-z_][A-Za-z0-9_]*, not a keyword        value: the name
 #   INT       decimal digits, no leading zeros              value: the digits
 #   STRING    "..." on one line; escapes \\ \" \n \r \t     value: decoded text
-#   keywords  fn if else loop return break continue true false unit
+#   keywords  fn if else loop return break continue true false unit and or not
 #             (kind is the word itself)
-#   operators ( ) [ ] , : = == < <= > >= + - *   (kind is the text itself)
+#   operators ( ) [ ] , : = == != < <= > >= + - *   (kind is the text itself)
 #   NEWLINE   end of a logical line
 #   INDENT    the next logical line is indented deeper
 #   DEDENT    one indentation level ends
@@ -26,19 +28,34 @@
 # * At the end of input, the last logical line is terminated and every open
 #   level is closed.
 #
-# The lexer stops at the first error (surface::syntaxError). Every token and
-# error carries a full span, so error recovery (skipping to the next line and
-# reporting several diagnostics) can later be added here and in the parser
-# without changing the token format.
+# Errors never stop tokenizing. Each is recorded as a diagnostic (ast.tcl)
+# and the lexer recovers locally, so a parser can still see the rest:
+#
+#   tab in indentation         the tab counts as one column
+#   inconsistent dedent        the line joins the enclosing level it passed
+#   unexpected character       skipped
+#   "?" after a name           skipped
+#   invalid integer            an INT of its digits (leading zeros dropped)
+#   unterminated string        the string ends at the end of line
+#   invalid escape             the escaped character is kept
+#   unmatched ")" or "]"       skipped
+#   mismatched ")" or "]"      closes the open bracket
+#   bracket never closed       closed by a zero-width token at the end of
+#                              input, or before a line that starts like a
+#                              statement (see UnclosedBefore)
 
 namespace eval surface::lexer {
-    variable keywords {fn if else loop return break continue true false unit}
+    variable keywords {fn if else loop return break continue true false unit and or not}
     # Longest operators first.
-    variable operators {== <= >= ( ) [ ] , : = < > + - *}
+    variable operators {== != <= >= ( ) [ ] , : = < > + - *}
 }
 
 proc surface::lex {source {filename <input>}} {
-    return [surface::lexer::tokenize $source $filename]
+    set result [surface::lexer::tokenize $source $filename]
+    foreach diagnostic [dict get $result diagnostics] {
+        surface::raise $diagnostic
+    }
+    return [dict get $result tokens]
 }
 
 proc surface::lexer::tokenize {source file} {
@@ -46,6 +63,7 @@ proc surface::lexer::tokenize {source file} {
     variable operators
     set n [string length $source]
     set tokens {}
+    set diagnostics {}
     set i 0
     set line 1
     set lineStart 0
@@ -86,7 +104,7 @@ proc surface::lexer::tokenize {source file} {
                 continue
             }
             if {$tab >= 0} {
-                Fail $file $tab $line $lineStart 1 "tab used for indentation"
+                Report diagnostics $file $tab $line $lineStart 1 "tab used for indentation"
             }
             set width [expr {$j - $i}]
             set here [Span $file $j $j $line $lineStart]
@@ -99,7 +117,7 @@ proc surface::lexer::tokenize {source file} {
                     lappend tokens [Token DEDENT "" "" $here]
                 }
                 if {$width != [lindex $indents end]} {
-                    Fail $file $j $line $lineStart 0 \
+                    Report diagnostics $file $j $line $lineStart 0 \
                         "inconsistent dedent: indentation does not match any enclosing level"
                 }
             }
@@ -116,11 +134,20 @@ proc surface::lexer::tokenize {source file} {
             }
             "\r" {
                 if {[string index $source $i+1] ne "\n"} {
-                    Fail $file $i $line $lineStart 1 "unexpected carriage return"
+                    Report diagnostics $file $i $line $lineStart 1 "unexpected carriage return"
                 }
                 incr i
             }
             "\n" {
+                if {$brackets ne "" && [UnclosedBefore $source [expr {$i + 1}] [lindex $brackets 0 2]]} {
+                    set here [Span $file $i $i $line $lineStart]
+                    foreach bracket [lreverse $brackets] {
+                        lassign $bracket opener span
+                        lappend diagnostics [surface::diagnostic $span "\"$opener\" is never closed"]
+                        lappend tokens [Token [expr {$opener eq "(" ? ")" : "\]"}] "" "" $here]
+                    }
+                    set brackets {}
+                }
                 if {$brackets eq ""} {
                     if {$tokens ne "" && [dict get [lindex $tokens end] kind] ni {NEWLINE INDENT DEDENT}} {
                         lappend tokens [Token NEWLINE "\n" "" [Span $file $i [expr {$i + 1}] $line $lineStart]]
@@ -137,7 +164,7 @@ proc surface::lexer::tokenize {source file} {
                 }
             }
             {"} {
-                lappend tokens [String $source $i $file $line $lineStart]
+                lappend tokens [String $source $i $file $line $lineStart diagnostics]
                 set i [dict get [lindex $tokens end] span end]
             }
             {[0-9]} {
@@ -145,16 +172,24 @@ proc surface::lexer::tokenize {source file} {
                 while {$j < $n && [string index $source $j] in {0 1 2 3 4 5 6 7 8 9}} {
                     incr j
                 }
-                set text [string range $source $i $j-1]
-                if {$j < $n && [regexp {[A-Za-z_]} [string index $source $j]]} {
-                    Fail $file $i $line $lineStart [expr {$j - $i + 1}] "invalid integer literal"
+                set digits [string range $source $i $j-1]
+                set end $j
+                while {$end < $n && [regexp {[A-Za-z0-9_]} [string index $source $end]]} {
+                    incr end
                 }
-                if {[string length $text] > 1 && [string index $text 0] eq "0"} {
-                    Fail $file $i $line $lineStart [string length $text] \
-                        "invalid integer literal \"$text\": leading zeros are not allowed"
+                if {$end > $j} {
+                    Report diagnostics $file $i $line $lineStart [expr {$end - $i}] "invalid integer literal"
+                } elseif {[string length $digits] > 1 && [string index $digits 0] eq "0"} {
+                    Report diagnostics $file $i $line $lineStart [string length $digits] \
+                        "invalid integer literal \"$digits\": leading zeros are not allowed"
                 }
-                lappend tokens [Token INT $text $text [Span $file $i $j $line $lineStart]]
-                set i $j
+                set value [string trimleft $digits 0]
+                if {$value eq ""} {
+                    set value 0
+                }
+                lappend tokens [Token INT [string range $source $i $end-1] $value \
+                    [Span $file $i $end $line $lineStart]]
+                set i $end
             }
             {[A-Za-z_]} {
                 set j $i
@@ -162,12 +197,13 @@ proc surface::lexer::tokenize {source file} {
                     incr j
                 }
                 set text [string range $source $i $j-1]
-                if {[string index $source $j] eq "?"} {
-                    Fail $file $j $line $lineStart 1 "\"?\" is reserved and cannot be part of a name"
-                }
                 set kind [expr {$text in $keywords ? $text : "IDENT"}]
                 lappend tokens [Token $kind $text $text [Span $file $i $j $line $lineStart]]
                 set i $j
+                if {[string index $source $i] eq "?"} {
+                    Report diagnostics $file $i $line $lineStart 1 "\"?\" is reserved and cannot be part of a name"
+                    incr i
+                }
             }
             default {
                 set found ""
@@ -179,36 +215,42 @@ proc surface::lexer::tokenize {source file} {
                 }
                 if {$found eq ""} {
                     set what [expr {[string is print $c] ? "\"$c\"" : [format "U+%04X" [scan $c %c]]}]
-                    Fail $file $i $line $lineStart 1 "unexpected character $what"
+                    Report diagnostics $file $i $line $lineStart 1 "unexpected character $what"
+                    incr i
+                    continue
                 }
                 set j [expr {$i + [string length $found]}]
                 set span [Span $file $i $j $line $lineStart]
+                set i $j
                 switch -- $found {
                     ( - [ {
-                        lappend brackets [list $found $span]
+                        lappend brackets [list $found $span [lindex $indents end]]
                     }
                     ) - ] {
                         set opener [expr {$found eq ")" ? "(" : "\["}]
                         if {$brackets eq ""} {
-                            surface::syntaxError $span "unmatched \"$found\""
+                            lappend diagnostics [surface::diagnostic $span "unmatched \"$found\""]
+                            continue
                         }
                         if {[lindex $brackets end 0] ne $opener} {
-                            surface::syntaxError $span \
-                                "\"$found\" does not match \"[lindex $brackets end 0]\" opened at [surface::ast::location [lindex $brackets end 1]]"
+                            lappend diagnostics [surface::diagnostic $span \
+                                "\"$found\" does not match \"[lindex $brackets end 0]\" opened at [surface::ast::location [lindex $brackets end 1]]"]
                         }
                         set brackets [lrange $brackets 0 end-1]
                     }
                 }
                 lappend tokens [Token $found $found "" $span]
-                set i $j
             }
         }
     }
 
-    if {$brackets ne ""} {
-        surface::syntaxError [lindex $brackets end 1] "\"[lindex $brackets end 0]\" is never closed"
-    }
     set here [Span $file $n $n $line $lineStart]
+    foreach bracket [lreverse $brackets] {
+        lassign $bracket opener span
+        lappend diagnostics [surface::diagnostic $span "\"$opener\" is never closed"]
+        set closer [expr {$opener eq "(" ? ")" : "\]"}]
+        lappend tokens [Token $closer "" "" $here]
+    }
     if {$tokens ne "" && [dict get [lindex $tokens end] kind] ni {NEWLINE INDENT DEDENT}} {
         lappend tokens [Token NEWLINE "" "" $here]
     }
@@ -216,7 +258,20 @@ proc surface::lexer::tokenize {source file} {
         lappend tokens [Token DEDENT "" "" $here]
     }
     lappend tokens [Token EOF "" "" $here]
-    return $tokens
+    return [dict create tokens $tokens diagnostics $diagnostics]
+}
+
+# True if the physical line starting at offset START cannot continue an
+# expression inside brackets: it is indented no deeper than INDENT (the level
+# of the line that opened them) and starts like a statement (a statement
+# keyword, or a binding). Brackets still open there are never closed.
+proc surface::lexer::UnclosedBefore {source start indent} {
+    set line [string range $source $start [expr {$start + 200}]]
+    if {![regexp {^( *)(\S.*)?} $line -> spaces rest] || $rest eq ""} {
+        return 0
+    }
+    return [expr {[string length $spaces] <= $indent
+        && [regexp {^(?:(?:fn|if|else|loop|return|break|continue)\M|[A-Za-z_][A-Za-z0-9_]*[ \t]*=(?!=))} $rest]}]
 }
 
 proc surface::lexer::Token {kind text value span} {
@@ -229,18 +284,23 @@ proc surface::lexer::Span {file start end line lineStart} {
         $line [expr {$end - $lineStart + 1}]]
 }
 
-proc surface::lexer::Fail {file start line lineStart length message} {
-    surface::syntaxError [Span $file $start [expr {$start + $length}] $line $lineStart] $message
+proc surface::lexer::Report {diagnosticsVar file start line lineStart length message} {
+    upvar 1 $diagnosticsVar diagnostics
+    lappend diagnostics [surface::diagnostic \
+        [Span $file $start [expr {$start + $length}] $line $lineStart] $message]
 }
 
 # The STRING token starting at the quote at offset START.
-proc surface::lexer::String {source start file line lineStart} {
+proc surface::lexer::String {source start file line lineStart diagnosticsVar} {
+    upvar 1 $diagnosticsVar diagnostics
     set n [string length $source]
     set i [expr {$start + 1}]
     set value ""
     while 1 {
-        if {$i >= $n || [string index $source $i] in {"\n" "\r"}} {
-            Fail $file $start $line $lineStart [expr {$i - $start}] "unterminated string"
+        if {$i >= $n || [string index $source $i] eq "\n"
+                || ([string index $source $i] eq "\r" && [string index $source $i+1] eq "\n")} {
+            Report diagnostics $file $start $line $lineStart [expr {$i - $start}] "unterminated string"
+            break
         }
         set c [string index $source $i]
         if {$c eq "\""} {
@@ -257,9 +317,11 @@ proc surface::lexer::String {source start file line lineStart} {
                 t  { append value \t }
                 default {
                     if {$e eq "" || $e eq "\n"} {
-                        Fail $file $start $line $lineStart [expr {$i + 1 - $start}] "unterminated string"
+                        incr i
+                        continue
                     }
-                    Fail $file $i $line $lineStart 2 "invalid escape \"\\$e\" in string"
+                    Report diagnostics $file $i $line $lineStart 2 "invalid escape \"\\$e\" in string"
+                    append value $e
                 }
             }
             incr i 2
