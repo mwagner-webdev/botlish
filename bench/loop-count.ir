@@ -1,0 +1,21 @@
+# A loop whose body does integer work on bindings local to the iteration.
+# The loop is driven by an outer recursion, since the language has no mutation.
+
+{bind work
+    {block {i}
+        {loop {block {}
+            {bind a {call {ref *} {ref i} {const 3}}}
+            {bind b {call {ref +} {ref a} {const 7}}}
+            {if {call {ref >=} {ref b} {const 0}}
+                {block {} {break {call {ref -} {ref b} {ref a}}}}
+                {block {} {continue}}}}}}}
+
+{bind drive
+    {block {i total}
+        {if {call {ref <=} {ref i} {const 0}}
+            {block {} {ref total}}
+            {block {} {call {ref drive}
+                           {call {ref -} {ref i} {const 1}}
+                           {call {ref +} {ref total} {call {ref work} {ref i}}}}}}}}
+
+{call {ref drive} {const 500} {const 0}}

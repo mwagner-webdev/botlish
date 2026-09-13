@@ -34,16 +34,23 @@ proc core::predicates::resultError {v} {
 }
 
 core::native::register integer? -arity 1 \
-    -impl {core::predicates::KindIs int} -refines-true {0 Int}
+    -impl {core::predicates::KindIs int} -refines-true {0 Int} \
+    -param-types any -result-type bool
 core::native::register string? -arity 1 \
-    -impl {core::predicates::KindIs str} -refines-true {0 Str}
+    -impl {core::predicates::KindIs str} -refines-true {0 Str} \
+    -param-types any -result-type bool
 core::native::register list? -arity 1 \
-    -impl {core::predicates::KindIs list} -refines-true {0 List}
+    -impl {core::predicates::KindIs list} -refines-true {0 List} \
+    -param-types any -result-type bool
 
 core::native::register ok? -arity 1 \
-    -impl {core::predicates::ResultIs ok} -refines-true {0 Result.ok}
+    -impl {core::predicates::ResultIs ok} -refines-true {0 Result.ok} \
+    -param-types any -result-type bool
 core::native::register error? -arity 1 \
-    -impl {core::predicates::ResultIs error} -refines-true {0 Result.error}
+    -impl {core::predicates::ResultIs error} -refines-true {0 Result.error} \
+    -param-types any -result-type bool
 
-core::native::register result-value -arity 1 -impl core::predicates::resultValue
-core::native::register result-error -arity 1 -impl core::predicates::resultError
+core::native::register result-value -arity 1 -impl core::predicates::resultValue \
+    -param-types result
+core::native::register result-error -arity 1 -impl core::predicates::resultError \
+    -param-types result

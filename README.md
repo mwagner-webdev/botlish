@@ -30,6 +30,7 @@ tclsh tests/all.tcl                         # test suite, both backends
 CORE_BACKEND=compile tclsh tests/all.tcl    # test suite, one backend
 tclsh main.tcl                              # run all examples (interp)
 tclsh main.tcl -backend compile -code FILE.ir   # compile, show generated Tcl, run
+tclsh bench/bench.tcl                       # compare backends on bench/*.ir
 ```
 
 ```tcl
@@ -309,6 +310,13 @@ core::registerNative even? -arity 1 -impl myEvenImpl -refines-true {0 Even}
 
 `-refines-true` and `-refines-false` take `ARG-INDEX FACT` pairs.
 
+Natives may also declare a signature: `-param-types {int int}` lists the
+value kinds the implementation *requires* of each argument (`any` means no
+requirement), and `-result-type int` gives the kind of every result. These
+are promises the compiler relies on (§13). A native must enforce every
+parameter kind it declares, and must return only the result kind it
+declares.
+
 ## 9. Public API
 
 | Procedure | Purpose |
@@ -317,7 +325,8 @@ core::registerNative even? -arity 1 -impl myEvenImpl -refines-true {0 Even}
 | `core::evalProgram EXPRS` | evaluate a list of expressions; returns the last value |
 | `core::evalIn NODE ENV` | evaluate in a given environment; returns a completion |
 | `core::useBackend ?NAME?` | select or query the backend (`interp`, `compile`) |
-| `core::compiler::generatedCode EXPRS` | the Tcl code generated for a unit |
+| `core::compiler::generatedCode EXPRS ?MODE?` | the Tcl code generated for a unit (`program` or `sequence`) |
+| `core::compiler::programTypes EXPRS` | inferred types of program-level bindings |
 | `core::check NODE` | static shape and control-placement check |
 | `core::rootEnv` / `core::childEnv ENV` | create environments |
 | `core::envDefine ENV NAME VALUE` | add a binding, for embedding and tests |
@@ -346,6 +355,8 @@ core::registerNative even? -arity 1 -impl myEvenImpl -refines-true {0 Even}
 | `core/evaluator.tcl` | interpreter (one handler per form), backend selection, public API |
 | `core/primitives.tcl`, `core/predicates.tcl` | builtin natives |
 | `compiler/compiler.tcl` | IR → Tcl compiler backend |
+| `compiler/types.tcl` | static types used by the compiler |
+| `bench/` | benchmark programs and runner |
 
 Implementation notes (not part of the semantics):
 
@@ -408,8 +419,11 @@ the interpreter.
   Evaluation order inside it matches the compiler's walk, so use-before-binding
   and duplicate bindings are decided at compile time and compiled into the
   matching error.
-* Names that no nested scope binds are looked up dynamically in the unit's
-  environment. Program-level bindings and root natives are reached this way.
+* Names that no nested scope binds are resolved in the unit's environment.
+  In *sequence* mode (`evalIn`), that environment is arbitrary, so these
+  names are looked up dynamically. In *program* mode (`evalProgram`), the
+  environment is a fresh program scope over a fresh root. Program-level
+  names are then known and typed, and root names compile to constants.
 
 **Refinements** are installed only in materialized branches, since those are
 the only ones where facts can be observed. They use the callee value the
@@ -418,7 +432,83 @@ condition actually called, plus the same metadata rules as the interpreter.
 **Testing.** `tests/all.tcl` runs every test file once per backend, with the
 backend chosen by `CORE_BACKEND`. `tests/backends.test` also runs a corpus
 under both backends in one process and compares the outcomes, and checks
-calls between compiled and interpreted Blocks.
+calls between compiled and interpreted Blocks. `tests/inference.test` does
+the same for programs built to expose unsound type facts (§13).
 
 **Known gap:** compiled code cannot yet propagate a `propagate-error`
 completion out of a call. No form produces one yet.
+
+## 13. Type inference
+
+`compiler/types.tcl` defines the static types the compiler infers. Types only
+*describe* runtime values. They never change what a program means: the
+compiler uses them to pick faster code whose behavior is identical, and falls
+back to generic code whenever a type is unknown.
+
+| Type | Describes |
+|------|-----------|
+| `int` `str` `bool` `unit` `list` `result` | values of that kind |
+| `native`, `block` | some callable of that kind |
+| `{native NAME}` | exactly the native `NAME` |
+| `{block PROC ARITY RESULT}` | a Block compiled to `PROC`, whose calls return `RESULT` |
+| `any` | nothing known |
+| `never` | no value: evaluation does not complete normally |
+
+**Where types come from.**
+
+* **Literals and constructors:** `const`, `ok`, `error-value`, `list`.
+* **Root constants** in program mode: `+` has type `{native +}`, and `true`
+  has type `bool`.
+* **Native signatures** (§8): a call of `-` has type `int`.
+* **Immutability:** a binding has the type of the expression it was bound
+  to, and keeps it.
+* **Refinements:** inside the `then` branch of `(if (call (ref integer?) (ref x)) …)`,
+  `x` is `int`. This is the planned use of predicate metadata.
+* **Flow facts:** when a native that requires `int` returns, its argument
+  was an `int`. Because bindings are immutable, the argument stays an `int`
+  for the rest of the path.
+* **Block results:** the result type is the lub of the body's value and
+  every `return`. A block that calls itself through its binding is compiled
+  under an assumed result type, starting from `never`, until the inferred
+  type equals the assumption. If that doesn't happen within 3 passes, the
+  result type is `any`. Accepting only a stable assumption is sound by
+  induction over calls.
+
+**Scope of facts.** A fact holds only on the path that proves it:
+
+* Facts learned in a branch or loop body are dropped at its end.
+* Facts learned in a sequence hold for the rest of that sequence.
+* A closure inherits the facts known where it is created. Its captured
+  bindings can't change afterwards.
+
+**What types buy.**
+
+* **Representations:** an operand is `box` (a runtime value), `int` (a bare
+  integer) or `bool` (1/0). Unboxed values are boxed only when they escape
+  into a frame, a call, a `return` or a `break`.
+* **Intrinsics:** calls of `+ - * < <= > >= == eq list integer? string? list? ok? error?`
+  compile to inline Tcl. An argument whose kind isn't known is first checked
+  with `core::value::expect`. That check raises exactly the error the native
+  would, in the same order, and then becomes a flow fact.
+* **Folding:** a predicate applied to a value of known kind becomes a
+  constant. An `if` with a constant condition compiles only the branch that
+  runs.
+* **Direct calls:** in program mode, a call of a `{block PROC ARITY _}` with
+  matching arity calls `PROC` directly. The generic invoke is unnecessary
+  there: in a checked program, a compiled block can't produce an escaping
+  `break` or `continue`, and arity is already known to match.
+
+`core::compiler::programTypes EXPRS` reports the inferred types of
+program-level bindings. `tclsh main.tcl -backend compile -code FILE.ir`
+shows the generated code.
+
+**Performance** (`tclsh bench/bench.tcl`, best of 5, excluding compilation):
+
+| program | interp | compile, untyped | compile, typed |
+|---------|-------:|-----------------:|---------------:|
+| `fib.ir` | 1121 ms | 326 ms | 12 ms |
+| `loop-count.ir` | 194 ms | 53 ms | 2 ms |
+| `sum-refined.ir` | 110 ms | 37 ms | 16 ms |
+
+`sum-refined` gains least. Its scopes contain closures, so its bindings stay
+in runtime frames, and the parameter tested with `==` has no static kind.

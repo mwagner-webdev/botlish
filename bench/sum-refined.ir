@@ -1,0 +1,17 @@
+# Tail-style recursion over an accumulator whose type is only known through
+# an integer? refinement, plus a closure created per step.
+
+{bind sum
+    {block {n acc}
+        {if {call {ref integer?} {ref acc}}
+            {block {}
+                {if {call {ref ==} {ref n} {const 0}}
+                    {block {} {ref acc}}
+                    {block {}
+                        {bind step {block {x} {call {ref +} {ref x} {ref n}}}}
+                        {call {ref sum}
+                            {call {ref -} {ref n} {const 1}}
+                            {call {ref step} {ref acc}}}}}}
+            {block {} {error-value {const not_an_integer}}}}}}
+
+{call {ref sum} {const 400} {const 0}}

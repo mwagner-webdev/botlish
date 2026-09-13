@@ -1,0 +1,210 @@
+# inference.test -- the compiler's type inference must never change meaning.
+#
+# Each differential case is built so that an unsound type fact (one leaking
+# out of the path that proves it, or assumed too early) would change the
+# value, the error, or the error message. Both backends run in-process and
+# must agree exactly, including test-log effects.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+set cases {
+    fact-does-not-leak-out-of-branch {
+        {bind f {block {x flag}
+            {if {ref flag}
+                {block {} {call {ref +} {ref x} {const 1}}}
+                {block {} {const 0}}}
+            {call {ref integer?} {ref x}}}}
+        {call {ref f} {const hello} {ref false}}
+    }
+    refinement-does-not-leak-out-of-branch {
+        {bind f {block {x}
+            {if {call {ref integer?} {ref x}} {block {} {const int}} {block {}}}
+            {call {ref list} {call {ref integer?} {ref x}} {call {ref string?} {ref x}}}}}
+        {call {ref list} {call {ref f} {const 1}} {call {ref f} {const one}}}
+    }
+    fact-holds-after-a-check {
+        {bind f {block {x} {call {ref +} {ref x} {const 0}} {call {ref integer?} {ref x}}}}
+        {call {ref f} {const 5}}
+    }
+    check-raises-the-natives-error {
+        {bind f {block {a b} {call {ref +} {ref a} {ref b}}}}
+        {call {ref f} {const 1} {const x}}
+    }
+    check-order-is-left-to-right {
+        {bind f {block {a b} {call {ref <} {ref a} {ref b}}}}
+        {call {ref f} {const str a} {const str b}}
+    }
+    arguments-evaluated-before-kind-errors {
+        {call {ref +} {call {ref test-log} {const a}} {call {ref test-log} {const b}}}
+    }
+    fact-does-not-leak-out-of-loop {
+        {bind f {block {x flag}
+            {loop {block {}
+                {if {ref flag} {block {} {break}} {block {}}}
+                {call {ref +} {ref x} {const 1}}
+                {break}}}
+            {call {ref integer?} {ref x}}}}
+        {call {ref f} {const hello} {ref true}}
+    }
+    duplicate-bind-does-not-retype {
+        {call {block {}
+            {bind g {block {} {ref v}}}
+            {bind v {const 1}}
+            {bind v {call {ref test-log} {call {ref integer?} {call {ref g}}}}}}}
+    }
+    recursive-result-type {
+        {bind f {block {n}
+            {if {call {ref ==} {ref n} {const 0}}
+                {block {} {const done}}
+                {block {} {call {ref f} {call {ref -} {ref n} {const 1}}}}}}}
+        {call {ref string?} {call {ref f} {const 3}}}
+    }
+    recursive-mixed-result-type {
+        {bind f {block {n}
+            {if {call {ref <} {ref n} {const 1}}
+                {block {} {const 7}}
+                {block {} {bind r {call {ref f} {call {ref -} {ref n} {const 1}}}} {const seven}}}}}
+        {call {ref list} {call {ref integer?} {call {ref f} {const 0}}}
+                         {call {ref integer?} {call {ref f} {const 2}}}}
+    }
+    never-returning-recursion {
+        {bind f {block {n} {if {call {ref ==} {ref n} {const 0}}
+                               {block {} {call {ref +} {const 1} {const x}}}
+                               {block {} {call {ref f} {call {ref -} {ref n} {const 1}}}}}}}
+        {call {ref f} {const 3}}
+    }
+    break-value-types {
+        {bind f {block {flag}
+            {loop {block {}
+                {if {ref flag} {block {} {break {const 1}}} {block {} {break {const one}}}}}}}}
+        {call {ref list} {call {ref integer?} {call {ref f} {ref true}}}
+                         {call {ref integer?} {call {ref f} {ref false}}}}
+    }
+    return-and-fallthrough-types {
+        {bind f {block {flag}
+            {loop {block {} {if {ref flag} {block {} {return {const 1}}} {block {}}} {break}}}
+            {const one}}}
+        {call {ref list} {call {ref integer?} {call {ref f} {ref true}}}
+                         {call {ref integer?} {call {ref f} {ref false}}}}
+    }
+    shadowed-native-at-program-level {
+        {bind + {block {a b} {const shadowed}}}
+        {call {ref +} {const 1} {const 2}}
+    }
+    shadowed-predicate-in-block {
+        {call {block {x}
+            {bind integer? {block {v} {ref true}}}
+            {if {call {ref integer?} {ref x}} {block {} {call {ref +} {ref x} {const 1}}} {block {}}}}
+          {const text}}
+    }
+    aliased-native {
+        {bind plus {ref +}}
+        {call {ref plus} {const 2} {const 3}}
+    }
+    unboxed-values-escape-boxed {
+        {bind b {call {ref <} {const 1} {const 2}}}
+        {bind n {call {ref +} {const 1} {const 2}}}
+        {call {ref list} {ref b} {ref n} {call {ref ==} {ref b} {ref true}} {ok {ref n}}}
+    }
+    branch-representations-join {
+        {bind f {block {flag}
+            {if {ref flag}
+                {block {} {call {ref <} {const 1} {const 2}}}
+                {block {} {call {ref +} {const 1} {const 1}}}}}}
+        {call {ref list} {call {ref f} {ref true}} {call {ref f} {ref false}}}
+    }
+    closures-created-before-a-check {
+        {bind f {block {x}
+            {bind early {block {} {call {ref integer?} {ref x}}}}
+            {bind r {call {ref early}}}
+            {call {ref +} {ref x} {const 0}}
+            {bind late {block {} {call {ref +} {ref x} {const 1}}}}
+            {call {ref list} {ref r} {call {ref late}}}}}
+        {call {ref list} {call {ref f} {const 1}} {call {ref f} {const one}}}
+    }
+    constant-condition {
+        {bind x {const 5}}
+        {if {call {ref integer?} {ref x}}
+            {block {} {const yes}}
+            {block {} {call {ref test-log} {const no}}}}
+    }
+    equality-across-kinds {
+        {call {ref list}
+            {call {ref ==} {const 1} {const str 1}}
+            {call {ref ==} {ref unit} {ref unit}}
+            {call {ref ==} {ref true} {call {ref <} {const 2} {const 1}}}
+            {call {ref eq} {const a} {const a}}}
+    }
+    equality-on-callables-raises {
+        {bind f {block {} {const 1}}}
+        {call {ref ==} {ref f} {ref f}}
+    }
+    direct-call-arity {
+        {bind f {block {a} {ref a}}}
+        {call {ref f}}
+    }
+    deep-bignum {
+        {bind pow {block {b e}
+            {if {call {ref ==} {ref e} {const 0}}
+                {block {} {const 1}}
+                {block {} {call {ref *} {ref b} {call {ref pow} {ref b} {call {ref -} {ref e} {const 1}}}}}}}}
+        {call {ref pow} {const 7} {const 90}}
+    }
+    result-helpers {
+        {bind r {error-value {const bad}}}
+        {if {call {ref error?} {ref r}}
+            {block {} {call {ref result-error} {ref r}}}
+            {block {} {call {ref result-value} {ref r}}}}
+    }
+}
+
+foreach {name exprs} $cases {
+    test inference-$name "backends agree: $name" -body {
+        differential $exprs
+    } -result same
+}
+
+test types-1 {fib is inferred to return int} -body {
+    set program [core::readProgramFile [file join $::projectRoot bench fib.ir]]
+    lassign [dict get [core::compiler::programTypes $program] fib] kind proc arity result
+    list $kind $arity $result
+} -result {block 1 int}
+
+test types-2 {program-level binding types} -body {
+    dict map {name type} [core::compiler::programTypes {
+        {bind n {call {ref +} {const 1} {const 2}}}
+        {bind s {const hello}}
+        {bind b {call {ref integer?} {ref s}}}
+        {bind r {ok {ref n}}}
+        {bind l {call {ref list} {ref n}}}
+        {bind p {ref +}}
+        {bind u {call {ref result-value} {ref r}}}
+    }] {core::types::show $type}
+} -result {n int s str b bool r result l list p {native +} u any}
+
+test types-3 {typed arithmetic compiles to inline code without generic calls} -body {
+    set code [core::compiler::generatedCode [core::readProgramFile [file join $::projectRoot bench fib.ir]]]
+    list [regexp -all {callValue} $code] [regexp -all {expr \{} $code]
+} -result {0 4}
+
+test types-4 {a known-kind check folds away the untaken branch} -body {
+    set code [core::compiler::generatedCode {
+        {bind x {const 5}}
+        {if {call {ref integer?} {ref x}} {block {} {const yes}} {block {} {call {ref test-log} {const no}}}}
+    }]
+    regexp {test-log} $code
+} -result 0
+
+test types-5 {sequence mode does not assume the root's contents} -body {
+    set saved [core::useBackend]
+    try {
+        core::useBackend compile
+        set scope [core::childEnv [core::rootEnv]]
+        core::envDefine $scope integer? [core::value::native string?]
+        core::formatCompletion [core::evalIn {call {ref integer?} {const hi}} $scope]
+    } finally {
+        core::useBackend $saved
+    }
+} -result {value(true)}
+
+cleanupTests

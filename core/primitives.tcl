@@ -63,13 +63,23 @@ proc core::primitives::makeList {args} {
     return [core::value::listOf $args]
 }
 
-core::native::register +   -arity 2 -impl core::primitives::add
-core::native::register -   -arity 2 -impl core::primitives::subtract
-core::native::register *   -arity 2 -impl core::primitives::multiply
-core::native::register <   -arity 2 -impl core::primitives::less
-core::native::register <=  -arity 2 -impl core::primitives::lessEqual
-core::native::register >   -arity 2 -impl core::primitives::greater
-core::native::register >=  -arity 2 -impl core::primitives::greaterEqual
-core::native::register ==  -arity 2 -impl core::primitives::valueEqual
-core::native::register eq  -arity 2 -impl core::primitives::stringEqual
-core::native::register list -arity * -impl core::primitives::makeList
+foreach {name impl result} {
+    +  add          int
+    -  subtract     int
+    *  multiply     int
+    <  less         bool
+    <= lessEqual    bool
+    >  greater      bool
+    >= greaterEqual bool
+} {
+    core::native::register $name -arity 2 -impl core::primitives::$impl \
+        -param-types {int int} -result-type $result
+}
+unset name impl result
+
+core::native::register ==   -arity 2 -impl core::primitives::valueEqual \
+    -param-types {any any} -result-type bool
+core::native::register eq   -arity 2 -impl core::primitives::stringEqual \
+    -param-types {str str} -result-type bool
+core::native::register list -arity * -impl core::primitives::makeList \
+    -result-type list

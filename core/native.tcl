@@ -9,6 +9,10 @@
 #   arity           exact argument count, or * for any
 #   refinesTrue     facts proven when the callable returns true
 #   refinesFalse    facts proven when the callable returns false
+#   paramTypes      value kinds the implementation *requires* of each
+#                   argument (any = no requirement); a call that returns
+#                   proves its arguments had these kinds. "" = unknown.
+#   resultType      value kind of every result, or any
 #
 # Refinement rules are flat lists of ARG-INDEX FACT pairs, e.g. {0 Int}
 # ("argument 0 satisfies Int"). The evaluator never special-cases a native by
@@ -29,7 +33,8 @@ proc core::native::register {name args} {
     if {[llength $args] % 2} {
         error "core::native::register: options must be -option value pairs"
     }
-    set options [dict create -impl "" -arity "" -refines-true {} -refines-false {}]
+    set options [dict create -impl "" -arity "" -refines-true {} -refines-false {} \
+        -param-types "" -result-type any]
     foreach {option value} $args {
         if {![dict exists $options $option]} {
             error "core::native::register: unknown option \"$option\""
@@ -55,12 +60,20 @@ proc core::native::register {name args} {
             }
         }
     }
+    set kinds {int str bool unit list result block native any}
+    foreach type [concat [dict get $options -param-types] [list [dict get $options -result-type]]] {
+        if {$type ni $kinds} {
+            error "core::native::register: unknown type \"$type\" (known: $kinds)"
+        }
+    }
     dict set registry $name [dict create \
         name $name \
         impl $impl \
         arity $arity \
         refinesTrue [dict get $options -refines-true] \
-        refinesFalse [dict get $options -refines-false]]
+        refinesFalse [dict get $options -refines-false] \
+        paramTypes [dict get $options -param-types] \
+        resultType [dict get $options -result-type]]
     return [core::value::native $name]
 }
 

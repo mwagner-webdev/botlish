@@ -16,8 +16,13 @@
 # its scope.
 
 namespace eval core {
-    # Backend name -> command prefix taking {EXPRS ENV}, returning a completion.
-    variable backends [dict create interp core::interp::evalSequence]
+    # Backend name -> {sequence CMD program CMD}. Both commands take
+    # {EXPRS ENV} and return a completion. `sequence` runs EXPRS in an
+    # arbitrary existing environment. `program` runs statically checked
+    # EXPRS in a fresh program scope (declared, child of a fresh root), which
+    # a backend may exploit, e.g. by knowing the root's contents.
+    variable backends [dict create interp [dict create \
+        sequence core::interp::evalSequence program core::interp::evalSequence]]
     variable backend interp
 }
 
@@ -181,9 +186,12 @@ proc core::forms::op-error-value {node env} {
 # ---------------------------------------------------------------------------
 # Backends
 
-proc core::registerBackend {name command} {
+proc core::registerBackend {name sequenceCommand {programCommand ""}} {
     variable backends
-    dict set backends $name $command
+    if {$programCommand eq ""} {
+        set programCommand $sequenceCommand
+    }
+    dict set backends $name [dict create sequence $sequenceCommand program $programCommand]
 }
 
 proc core::backends {} {
@@ -205,10 +213,10 @@ proc core::useBackend {{name ""}} {
     return $backend
 }
 
-proc core::RunSequence {exprs env} {
+proc core::RunWithBackend {mode exprs env} {
     variable backends
     variable backend
-    return [{*}[dict get $backends $backend] $exprs $env]
+    return [{*}[dict get $backends $backend $mode] $exprs $env]
 }
 
 # ---------------------------------------------------------------------------
@@ -241,7 +249,7 @@ proc core::evalProgram {exprs} {
     }
     set env [core::env::child [core::rootEnv]]
     core::env::declare $env [core::ir::scopeBindNames $exprs]
-    return [core::completion::atProgramBoundary [core::RunSequence $exprs $env]]
+    return [core::completion::atProgramBoundary [core::RunWithBackend program $exprs $env]]
 }
 
 # Evaluates a single top-level expression. Returns its value.
@@ -252,7 +260,7 @@ proc core::eval {node} {
 # Evaluates NODE directly in the existing environment ENV (no new scope, no
 # static checks). Returns a completion.
 proc core::evalIn {node env} {
-    return [core::RunSequence [list $node] $env]
+    return [core::RunWithBackend sequence [list $node] $env]
 }
 
 proc core::childEnv {env}                { return [core::env::child $env] }

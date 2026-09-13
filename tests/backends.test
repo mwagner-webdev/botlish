@@ -6,29 +6,6 @@
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 
-# Outcome of EXPRS under BACKEND: "value V" or "error ERRORCODE".
-proc outcomeUnder {backend exprs} {
-    set saved [core::useBackend]
-    core::useBackend $backend
-    try {
-        if {[catch {core::evalProgram $exprs} result options]} {
-            return [list error [dict get $options -errorcode]]
-        }
-        return [list value [core::formatValue $result]]
-    } finally {
-        core::useBackend $saved
-    }
-}
-
-proc differential {exprs} {
-    set a [outcomeUnder interp $exprs]
-    set b [outcomeUnder compile $exprs]
-    if {$a ne $b} {
-        return "interp: $a / compile: $b"
-    }
-    return same
-}
-
 set corpus {}
 foreach path [lsort [glob -directory [file join $::projectRoot examples] *.ir]] {
     lappend corpus [file tail $path] [core::readProgramFile $path]

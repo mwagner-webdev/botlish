@@ -29,6 +29,32 @@ proc errorCodeOf {args} {
     return [dict get $options -errorcode]
 }
 
+# Outcome of EXPRS under BACKEND: {value V LOG} or {error ERRORCODE MESSAGE LOG},
+# where LOG is what test-log recorded.
+proc outcomeUnder {backend exprs} {
+    set saved [core::useBackend]
+    core::useBackend $backend
+    resetEffects
+    try {
+        if {[catch {core::evalProgram $exprs} result options]} {
+            return [list error [dict get $options -errorcode] $result $::testLog]
+        }
+        return [list value [core::formatValue $result] $::testLog]
+    } finally {
+        core::useBackend $saved
+    }
+}
+
+# "same" if both backends produce the same outcome; otherwise both outcomes.
+proc differential {exprs} {
+    set a [outcomeUnder interp $exprs]
+    set b [outcomeUnder compile $exprs]
+    if {$a ne $b} {
+        return "interp: $a / compile: $b"
+    }
+    return same
+}
+
 # Observable effects for tests only. The language has no mutation; these
 # Tcl-backed natives let tests observe evaluation order and repetition.
 set ::testLog {}
