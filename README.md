@@ -17,9 +17,22 @@ There are two backends that implement the same semantics:
 
 The whole test suite runs against both.
 
+Between the two sits a semantic layer, the **HIR** (`hir/`, §16): core IR
+with every name resolved to a binding identity, every expression typed, and
+scopes, captures, refinements and known call targets made explicit. The
+compiler compiles from HIR; the interpreter runs core IR, and HIR lowers back
+to it.
+
+```
+core IR ──hir::build──▶ HIR ──hir::lower──▶ core IR ──▶ interpreter
+                         │
+                         └──────────────────────────▶ Tcl compiler
+```
+
 ```
 core/            runtime and interpreter (see "Implementation map")
-compiler/        IR -> Tcl compiler
+hir/             semantic HIR: resolution, types, refinements, lowering
+compiler/        HIR -> Tcl compiler
 examples/*.ir    acceptance programs as IR data
 tests/*.test     tcltest suite
 main.tcl         example runner
@@ -30,6 +43,7 @@ tclsh tests/all.tcl                         # test suite, both backends
 CORE_BACKEND=compile tclsh tests/all.tcl    # test suite, one backend
 tclsh main.tcl                              # run all examples (interp)
 tclsh main.tcl -backend compile -code FILE.ir   # compile, show generated Tcl, run
+tclsh main.tcl -hir FILE.ir                 # show the program's HIR, run
 tclsh bench/bench.tcl                       # compare backends on bench/*.ir
 ```
 
@@ -368,6 +382,11 @@ refinement unless its contract explicitly establishes one. So
 | `core::compiler::generatedCode EXPRS ?MODE?` | the Tcl code generated for a unit (`program` or `sequence`) |
 | `core::compiler::programTypes EXPRS` | inferred types of program-level bindings |
 | `core::compiler::bindingTypes EXPRS` | inferred type of every `bind`, at any depth |
+| `core::compiler::unitHir EXPRS ?MODE?` | the HIR a unit was compiled from |
+| `hir::build EXPRS ?-mode M? ?-strict 0\|1?` | build the HIR of a program (§16) |
+| `hir::lower HIR` / `hir::format HIR ?-origins 1?` | HIR → core IR / readable HIR |
+| `hir::*` queries | nodes, scopes, bindings, symbols, types, captures, refinements (§16) |
+| `hir::types::*` | static types: core types plus `{native N}`, `{block E A R}`, `never` (§13) |
 | `core::type::*` | semantic types (§14) |
 | `core::regex::*` | regex IR (§15) |
 | `core::check NODE` | static shape and control-placement check |
@@ -402,8 +421,13 @@ refinement unless its contract explicitly establishes one. So
 | `core/regex.tcl` | engine-independent regex IR, lowered to Tcl ARE |
 | `core/primitives.tcl`, `core/predicates.tcl`, `core/strings.tcl` | builtin natives |
 | `lib/web.tcl` | optional demonstration library (`core::loadLibrary web`): `Emailish`, `UriQueryValue`, `uriEscape` |
-| `compiler/compiler.tcl` | IR → Tcl compiler backend |
-| `compiler/types.tcl` | compiler-only static types, delegating to `core/type.tcl` |
+| `hir/hir.tcl` | HIR data model, ids, `hir::build`, queries |
+| `hir/resolve.tcl` | scopes, bindings, symbols, lexical resolution, captures, control targets |
+| `hir/types.tcl` | static types (delegating to `core/type.tcl`) and type inference |
+| `hir/refine.tcl` | branch refinement facts and statically decided type tests |
+| `hir/lower.tcl` | HIR → core IR |
+| `hir/format.tcl` | readable HIR |
+| `compiler/compiler.tcl` | HIR → Tcl compiler backend |
 | `bench/` | benchmark programs and runner |
 
 Implementation notes (not part of the semantics):
@@ -429,6 +453,12 @@ bytecode-compiles. It reuses the runtime (values, natives, environments, the
 call boundary and refinement metadata) but none of the interpreter's
 evaluation machinery. There are no completion objects, no per-node dispatch,
 and no name search in scopes it can resolve statically.
+
+The compiler does no semantic analysis of its own. Each unit is first built
+into HIR (§16), which says which binding every name denotes, whether it is
+bound yet, the type of every expression, captures, refinements and known
+call targets. The compiler only decides how to run that in Tcl: frames,
+representations, intrinsics, direct calls and control codes.
 
 **Units.** The expressions passed to `evalProgram` or `evalIn` form a
 compilation unit and become `proc unitN {base}`, where `base` is the
@@ -457,21 +487,20 @@ The "otherwise" cases only arise in code the static placement check would
 reject. They reach the call or program boundary and raise the same errors as
 the interpreter.
 
-**Names** are resolved at compile time using the scope rule in §2:
+**Storage.** Names are resolved by the HIR using the scope rule in §2; the
+compiler stores each binding according to its HIR scope:
 
-* A scope that contains a block node is *materialized* as a runtime frame,
-  because a closure may capture it and its bindings and refinements can be
-  observed. It declares its names on entry and reads and writes through
-  `core::env`, which checks use-before-binding at run time.
+* A scope in which a block is created (its HIR `closures`) is *materialized*
+  as a runtime frame, because a closure may capture it and its bindings and
+  refinements can be observed. It declares its names on entry and reads and
+  writes through `core::env`, which checks use-before-binding at run time.
 * Any other scope never escapes its proc. Its bindings are Tcl locals `vN`.
-  Evaluation order inside it matches the compiler's walk, so use-before-binding
-  and duplicate bindings are decided at compile time and compiled into the
-  matching error.
-* Names that no nested scope binds are resolved in the unit's environment.
-  In *sequence* mode (`evalIn`), that environment is arbitrary, so these
-  names are looked up dynamically. In *program* mode (`evalProgram`), the
-  environment is a fresh program scope over a fresh root. Program-level
-  names are then known and typed, and root names compile to constants.
+  The HIR decides use-before-binding and duplicate bindings statically there,
+  and they compile into the matching error.
+* Root bindings compile to constants. Ambient bindings (names of the
+  arbitrary environment of a *sequence*-mode unit, `evalIn`) are looked up
+  dynamically. In *program* mode (`evalProgram`), the environment is a fresh
+  program scope over a fresh root, so every name is known.
 
 **Refinements** are installed only in materialized branches, since those are
 the only ones where facts can be observed. They use the callee value the
@@ -481,54 +510,58 @@ condition actually called, plus the same metadata rules as the interpreter.
 backend chosen by `CORE_BACKEND`. `tests/backends.test` also runs a corpus
 under both backends in one process and compares the outcomes, and checks
 calls between compiled and interpreted Blocks. `tests/inference.test` does
-the same for programs built to expose unsound type facts (§13).
+the same for programs built to expose unsound type facts (§13). The
+`tests/hir-*.test` files cover the HIR (§16).
 
 **Known gap:** compiled code cannot yet propagate a `propagate-error`
 completion out of a call. No form produces one yet.
 
 ## 13. Type inference
 
-The compiler's static types are the semantic types of `core/type.tcl` (§14),
-plus a few forms only the compiler needs, defined in `compiler/types.tcl`.
+Types are inferred on the HIR (`hir/types.tcl`, §16) and consumed by the
+compiler. Static types are the semantic types of `core/type.tcl` (§14), plus
+a few forms that describe values more precisely than a value type can.
 Types only *describe* runtime values. They never change what a program
 means: the compiler uses them to pick faster code whose behavior is
 identical, and falls back to generic code whenever a type is unknown. The
-invariant is that an operand of semantic type `T` always holds a value `v`
-for which `core::type::acceptsValue T v` is true.
+invariant is that an expression of semantic type `T` always evaluates to a
+value `v` for which `core::type::acceptsValue T v` is true.
 
 | Type | Defined in | Describes |
 |------|------------|-----------|
 | `int` `str` `bool` `unit` `list` `result` `native` `block` | core | values of that kind |
 | `{refined BASE {NAMES…}}` | core | values of `BASE` satisfying every named type |
 | `any` | core | nothing known |
-| `{native NAME}` | compiler | exactly the native `NAME` |
-| `{block PROC ARITY RESULT}` | compiler | a Block compiled to `PROC`, whose calls return `RESULT` |
-| `never` | compiler | no value: evaluation does not complete normally |
+| `{native NAME}` | hir | exactly the native `NAME` |
+| `{block EXPR ARITY RESULT}` | hir | a Block created by the block expression `EXPR` (an ExprId), whose calls return `RESULT` |
+| `never` | hir | no value: evaluation does not complete normally |
 
-`core::types::lub`, `narrow` and `kindOf` handle the compiler-only forms
-themselves and delegate everything else to `core::type`. For example,
+`hir::types::lub`, `narrow` and `kindOf` handle the extra forms themselves
+and delegate everything else to `core::type`. For example,
 `kindOf {refined str {Emailish}}` is `str`, and narrowing `str` by
-`Emailish` gives `{refined str {Emailish}}`.
+`Emailish` gives `{refined str {Emailish}}`. None of these forms mention a
+representation: the compiler maps a block's `EXPR` to the proc it generates.
 
 **Where types come from.**
 
 * **Literals and constructors:** `const`, `ok`, `error-value`, `list`.
 * **Root constants** in program mode: `+` has type `{native +}`, and `true`
-  has type `bool`.
+  has type `bool` (and, as an `if` condition, decides the branch).
 * **Native signatures** (§8): a call of `-` has type `int`, and a call of
   `uriEscape` has type `{refined str {UriQueryValue}}`.
 * **Immutability:** a binding has the type of the expression it was bound
   to, and keeps it.
 * **Refinements:** inside the `then` branch of `(if (call (ref integer?) (ref x)) …)`,
   `x` is `int`. Inside the `then` branch of `Emailish?`, it's
-  `{refined str {Emailish}}`. Nested predicates accumulate evidence.
+  `{refined str {Emailish}}`. Nested predicates accumulate evidence. As in
+  the interpreter, only arguments that are plain `(ref NAME)` are refined.
 * **Flow facts:** when a native that requires a type returns, its argument
   had that type. The runtime contract check guarantees this. Because
   bindings are immutable, the argument keeps the type for the rest of the
   path.
 * **Block results:** the result type is the lub of the body's value and
-  every `return`. A block that calls itself through its binding is compiled
-  under an assumed result type, starting from `never`, until the inferred
+  every reachable `return`. A block that calls itself through its binding is
+  analyzed under an assumed result type, starting from `never`, until the inferred
   type equals the assumption. If that doesn't happen within 3 passes, the
   result type is `any`. Accepting only a stable assumption is sound by
   induction over calls.
@@ -548,9 +581,10 @@ themselves and delegate everything else to `core::type`. For example,
 * **Intrinsics:** calls of `+ - * < <= > >= == eq list ok? error?` compile
   to inline Tcl. An argument whose kind isn't known is first checked with
   `core::value::expect`. That check raises exactly the error the native
-  would, in the same order, and then becomes a flow fact.
+  would, in the same order; the flow fact above then covers the argument.
 * **Type tests** (natives declared with `-tests-type T`, §8), with argument
-  of static type `S` and parameter kind `P`:
+  of static type `S` and parameter kind `P` (decided by the HIR, which marks
+  the call `known`):
   * **Folded to true** if `S ⊑ P` and `S ⊑ T`. For example, `Emailish?` on a
     value already refined to `Emailish`, or `UriQueryValue?` on the result
     of `uriEscape`.
@@ -563,8 +597,9 @@ themselves and delegate everything else to `core::type`. For example,
     still happens at run time.
 * **Folding:** an `if` with a constant condition compiles only the branch
   that runs.
-* **Direct calls:** in program mode, a call of a `{block PROC ARITY _}` with
-  matching arity calls `PROC` directly. The generic invoke is unnecessary
+* **Direct calls:** in program mode, a call whose HIR target is a block
+  expression with matching arity calls that block's proc directly. The
+  generic invoke is unnecessary
   there: in a checked program, a compiled block can't produce an escaping
   `break` or `continue`, and arity is already known to match.
 
@@ -714,3 +749,230 @@ core::regex::matchesText $re foo@example.com   ;# 1 (the whole text must match)
 `\uXXXX` escape. `matches RE V` is the validator protocol, taking a string
 value. `unicode-property` is reserved and currently rejected. There are no
 backreferences or lookaround.
+
+## 16. Semantic HIR
+
+`hir/` is the semantic layer between core IR and the backends. Core IR stays
+the executable specification: small, and all an evaluator needs. The HIR
+records what a program *means* before it runs: which binding every name
+denotes, the type of every expression, which facts hold where, what each
+block captures and what each call calls. The compiler compiles from HIR, and
+future source-level features (namespaces, traits, extension methods, foreign
+symbols, the output of macros) are meant to live here and lower to existing
+core forms. Core IR only grows for run-time semantics it can't already
+express.
+
+```
+source text ─▶ syntax tree ─▶ (macro expansion) ─▶ HIR ─▶ core IR ─▶ interp / compiler
+               (not yet)                            ▲
+core IR ────────────────────── hir::build ──────────┘   (today)
+```
+
+```tcl
+set h [hir::build $exprs]              ;# -mode program|sequence, -strict 1|0
+puts [hir::format $h]
+hir::lower $h                          ;# structurally equal to $exprs
+```
+
+```
+program s2 binds b1 x, b2 f
+e1 bind b1 x : int
+    e2 const 10 : int
+e3 bind b2 f : block(e4)/1 -> int
+    e4 block s3 (b3 v) captures (b1 x) : block(e4)/1 -> int
+        e5 if : int
+            e6 call native(integer?) : bool
+                e7 ref b4 integer? : native integer?
+                e8 ref b3 v : any
+            then s4 refines b3 v : int
+                e9 return -> e4 : never
+                    e10 ref b3 v : int
+            else s5
+                e11 ref b1 x : int deferred
+```
+
+### Data model
+
+A HIR program is a dict of flat tables, so every entity is addressable by id.
+`hir/hir.tcl` documents every field.
+
+| Table | Entry |
+|-------|-------|
+| `exprs` | expression node: `id kind origin scope type reachable`, plus per-kind fields |
+| `scopes` | `kind parent invocation owner names bindings closures refinements` |
+| `bindings` | `name kind scope declaredBy origin type symbol value` |
+| `symbols` | what a name can denote besides a Botlish binding: `kind name provenance` |
+| `types` | interned type forms (§13) |
+| `diagnostics` | static errors: `kind message expr` |
+
+Expression kinds follow core IR, with semantic fields added:
+
+| Kind | Fields |
+|------|--------|
+| `const` | `literal`, `value` |
+| `ref` | `name` (the spelling, for diagnostics), `binding`, `init` (`yes`, `no` or `deferred`) |
+| `bind` | `name`, `binding`, `value`, `duplicate` |
+| `block` | `bodyScope`, `params` (BindingIds), `body`, `captures` (BindingIds), `resultType` |
+| `call` | `callee`, `args`, `target` (`""`, `{native SymbolId}` or `{block ExprId}`), `known` (`""`, `1` or `0`) |
+| `if` | `condition`, `thenScope`/`thenBody`, `elseScope`/`elseBody`, `refinements` (outcome → BindingId/fact pairs) |
+| `loop` | `bodyScope`, `body` |
+| `return` / `break` / `continue` | `value`, `target` (the block or loop ExprId they leave) |
+| `ok` / `error` | `value` |
+
+There is one call form. Operators, predicates, natives and blocks are all
+`call`s. What is known about the callee is metadata (`target`, `known`), so
+later resolution (trait methods, multiple dispatch, foreign functions) can
+add metadata without adding call forms.
+
+### IDs and origins
+
+IDs are strings with a kind prefix: `e` ExprId, `s` ScopeId, `b` BindingId,
+`y` SymbolId and `t` TypeId. `f` (FileId) and `n` (NodeId) are reserved for
+source files and syntax nodes. IDs are allocated in order during a
+deterministic walk of each program, so building the same IR twice gives the
+same ids. Root bindings are created on first reference, so ids don't depend on
+how many natives are registered.
+
+Spelling is never identity. Shadowing yields distinct BindingIds, and facts,
+captures and types attach to BindingIds, not names.
+
+Every node has an `origin`. Today that's `{ir PATH}`, where PATH indexes into
+the input IR: `{ir {1 2}}` is argument 1 of the call at top-level position 1.
+A syntax tree will supply `{file f3 start 120 end 144}` in the same field, so
+later analyses can report back to source through ExprIds.
+
+### Scopes and resolution
+
+`hir/resolve.tcl` walks the IR once, in evaluation order, and applies the
+run-time rules of §2 statically:
+
+* Scope kinds are `root` (natives, `true`, `false`, `unit`), `program`,
+  `block` (one invocation: parameters and body), `branch`, `loop` (one
+  iteration) and `ambient` (the unknown environment of a sequence-mode unit).
+  A scope's `invocation` is the block whose call it belongs to. Code in one
+  invocation runs in walk order.
+* A scope declares every name it binds on entry. A reference denotes the
+  binding of the innermost scope that declares its name. Failing that, it
+  denotes a root binding (program mode) or an ambient binding (sequence
+  mode). Otherwise it's unresolved (`UNBOUND`).
+* `init` says whether the binding has its value when the reference runs.
+  `yes`: bound earlier in the same invocation, or a parameter or root binding.
+  `no`: same invocation but not bound yet, so evaluating it raises "used
+  before its binding". `deferred`: the reference is inside a closure, so it's
+  decided when the closure is called.
+* A `bind` of a binding that's already bound is marked `duplicate`. It still
+  denotes the first binding, and raises `DUPLICATE` when evaluated, after its
+  value.
+* A block's `captures` are the non-root bindings its body refers to (at any
+  depth) that are defined outside the block. A scope's `closures` are the
+  blocks created in it.
+* `return` targets the innermost block. `break` and `continue` target the
+  innermost loop within that block.
+
+Queries: `hir::lookup`, `hir::visibleBindings`, `hir::refinementsAt`,
+`hir::captures`, `hir::scopeWithin`, `hir::exprsAt ORIGIN`, `hir::walk` and
+`hir::children`.
+
+Static errors become diagnostics. With `-strict 1` (the default),
+`hir::build` raises the first one, with the interpreter's error code and
+message. With `-strict 0` (which the compiler uses), they stay in the HIR, and
+the lowered program raises them at run time exactly where the interpreter
+would. Malformed IR always raises `CORE MALFORMED`.
+
+### Types and refinements
+
+`hir/types.tcl` types every expression, using the rules of §13, and interns
+the types. Unreachable code is still typed but marked `reachable 0`, and it
+contributes nothing to result or break types. Semantic types never encode
+representation: no Tcl variables, frames or boxing.
+
+Refinements (`hir/refine.tcl`) follow the run-time rule of §6. When a
+condition calls a callee whose static type is a known native, that native's
+metadata gives facts about the arguments that are plain references. Facts are
+BindingId/type pairs. They're recorded on the `if` (per outcome) and on the
+branch scope, and they narrow the binding only inside that branch. Nothing in
+the HIR refers to a predicate by name. A type test decided by static types
+(§8) sets the call's `known` field. If an `if` condition is known (a decided
+test, or the root binding `true` or `false`), the other branch is marked
+unreachable.
+
+### Lowering
+
+`hir::lower` (`hir/lower.tcl`) erases ids, types, captures, refinements,
+targets and origins. Each node becomes its core IR form (`error` becomes
+`error-value`). Constants keep their literal text and references keep their
+spelling. Because resolution followed the run-time rules, run-time lookup
+finds the same binding. For today's HIR, lowering gives back the input
+program. The tests check this for the examples, the benchmarks and the
+differential corpora, and check that the lowered programs behave identically
+under the interpreter and the compiler.
+
+### Who does what
+
+Moved out of the compiler into HIR:
+
+* lexical resolution and binding identity (the compiler used to key bindings
+  as `SCOPE:NAME`)
+* scope contents, and use-before-binding and duplicate decisions
+* static type inference, flow facts and branch refinement facts
+* the fixpoint for recursive block result types (the compiler now compiles
+  each block once)
+* statically decided type tests
+* known call targets (a native symbol or a block expression)
+* block captures, and the closures created in each scope
+* control-flow targets
+
+Deliberately left in the Tcl backend:
+
+* which scopes become runtime frames, and Tcl variables for everything else
+* operand representations (boxed, bare integer, 1/0) and coercions between
+  them
+* intrinsics, kind checks, and constant folding the HIR doesn't decide (such
+  as `==` on values of different kinds)
+* emitting direct calls, generic calls, and control flow as Tcl completion
+  codes
+* installing refinements in materialized frames, using the callee value that
+  was actually called
+
+On the 204 programs the test suite evaluates, the HIR-driven compiler infers
+the same binding types as the previous compiler and emits the same code
+shape: the same counts of generic calls, kind checks, frame operations and
+inline expressions. The one difference: a block that refers to an unbound
+name now has result type `never` (it always raises) instead of `any`.
+
+### Known limitations
+
+* HIR is built from core IR. Origins are IR paths. There's no syntax tree, no
+  source spans, and no preserved comments or formatting.
+* IDs are deterministic per build but not stable across edits. Incremental
+  and LSP use will need identity that survives edits.
+* HIR refinements are only the statically provable subset. When the callee
+  isn't statically known (a parameter, say), the interpreter may still
+  install facts the HIR doesn't have.
+* The compiler still materializes every scope a block is created in, not just
+  scopes whose bindings are captured. Captures are available, but frames are
+  observable (`core::blockEnv`, refinement probes), so using them needs care.
+* The compiler can fold conditions the HIR doesn't decide (`==`, intrinsic
+  kind decisions) and prune a branch the HIR considers reachable. Types stay
+  sound, but the HIR's type can be less precise than what the compiled code
+  knows.
+* An ambient binding (sequence mode) means "the host environment's binding
+  of NAME". That identity is approximate if the sequence also binds the name.
+* The only symbols are builtins. Parameters are typed `any`: there are no
+  type annotations and no function types beyond `{block E A R}`.
+* In sequence mode, malformed IR is rejected for the whole unit when it's
+  built, including nodes the interpreter would never reach. The compiler
+  already did this for the nodes it compiled.
+* The HIR is made of persistent Tcl dicts, copied on update. That favors
+  clarity over speed.
+
+### Next extension
+
+Give HIR a symbol layer: a module or namespace scope kind whose bindings
+denote symbols with canonical provenance (`users::save`). Resolution already
+goes through scope kinds and symbol entries. A qualified or method-style
+reference could then resolve to the existing `ref` and `call` forms, with the
+canonical symbol as the `target`, and lower to existing core IR. After that,
+take origins from a lossless syntax tree (FileId and NodeId) so tooling can
+query the HIR by source position. On the backend side, the next step is to use
+`captures` so that only captured scopes are materialized.

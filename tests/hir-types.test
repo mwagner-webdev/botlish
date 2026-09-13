@@ -1,0 +1,183 @@
+# hir-types.test -- semantic types of HIR expressions, and call resolution.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+# Shown type of the expression at each ExprId.
+proc shownTypes {hir ids} {
+    return [lmap e $ids {hir::types::show [hir::typeOf $hir $e]}]
+}
+
+# ---------------------------------------------------------------------------
+# Types
+
+test hir-type-1 {constants receive their semantic types} -body {
+    set h [hirOf {const 10} {const hello} {const str 10} {const int 7} {const list {1 a}} {const 010}]
+    shownTypes $h [hir::roots $h]
+} -result {int str str int list str}
+
+test hir-type-2 {references preserve the binding's type} -body {
+    set h [hirOf {bind n {call {ref +} {const 1} {const 2}}} {bind m {ref n}} {ref m}]
+    list [hirRefTypes $h n] [hirRefTypes $h m] \
+         [hir::types::show [hir::bindingType $h [hir::get $h [hirFind $h bind m] binding]]] \
+         [dict get [hir::binding $h b1] type] [hir::type $h [dict get [hir::binding $h b1] type]]
+} -result {int int int t2 int}
+
+test hir-type-3 {known native calls receive their result types} -body {
+    set h [hirOf {call {ref -} {const 3} {const 1}} \
+                 {call {ref uriEscape} {const str {a b}}} \
+                 {call {ref list} {const 1}} \
+                 {call {ref <} {const 1} {const 2}} \
+                 {call {ref result-value} {ok {const 1}}} \
+                 {call {ref integer?} {const x}}]
+    shownTypes $h [hir::roots $h]
+} -result {int {str[UriQueryValue]} list bool any bool}
+
+test hir-type-4 {if receives the joined type of its branches} -body {
+    set h [hirOf {bind f {block {flag s}
+                    {bind a {if {ref flag} {block {} {const 1}} {block {} {const 2}}}}
+                    {bind b {if {ref flag} {block {} {const 1}} {block {} {const one}}}}
+                    {bind c {if {ref flag} {block {} {call {ref uriEscape} {ref s}}} {block {} {const plain}}}}
+                    {bind d {if {ref flag} {block {} {return {const 1}}} {block {} {const two}}}}
+                    {ref a}}}]
+    shownTypes $h [lmap name {a b c d} {hirFind $h bind $name}]
+} -result {int any str str}
+
+test hir-type-5 {unknown cases fall back to any} -body {
+    set h [hirOf {bind f {block {p g}
+                    {bind x {ref p}}
+                    {bind y {call {ref g} {ref p}}}
+                    {bind z {call {ref +} {const 1}}}
+                    {ref y}}}]
+    list [shownTypes $h [lmap name {x y z} {hirFind $h bind $name}]] \
+         [hir::get $h [hir::get $h [hirFind $h bind y] value] target]
+} -result {{any any any} {}}
+
+test hir-type-6 {block types and inferred result types} -body {
+    set fib [hir::build [core::readProgramFile [file join $::projectRoot bench fib.ir]]]
+    set mixed [hirOf {bind f {block {n}
+        {if {call {ref <} {ref n} {const 1}}
+            {block {} {const 7}}
+            {block {} {bind r {call {ref f} {call {ref -} {ref n} {const 1}}}} {const seven}}}}}]
+    set fibBlock [hirFind $fib block]
+    list [hir::typeOf $fib [hirFind $fib bind fib]] \
+         [hir::type $fib [hir::get $fib $fibBlock resultType]] \
+         [shownTypes $mixed [hirFind $mixed bind f]]
+} -result {{block e2 1 int} int {{block(e2)/1 -> any}}}
+
+test hir-type-7 {never: abrupt completions and errors} -body {
+    set h [hirOf {bind f {block {}
+                    {loop {block {} {break {const 1}}}}
+                    {loop {block {} {continue}}}}} \
+                 {bind g {block {} {return {const 1}} {ref nope}}}]
+    list [shownTypes $h [hirFind $h loop]] [shownTypes $h [hirFind $h return]] \
+         [shownTypes $h [hirFind $h block]] [hirRefTypes $h nope]
+} -result {{int never} never {{block(e2)/0 -> never} {block(e9)/0 -> int}} never}
+
+test hir-type-8 {code after an abrupt completion is unreachable and contributes no result type} -body {
+    set h [hirOf {bind f {block {} {return {const 1}} {return {const two}}}}]
+    lmap e [hirFind $h return] {list [hir::get $h $e reachable] [shownTypes $h [hir::get $h $e value]]}
+} -result {{1 int} {0 str}}
+
+test hir-type-9 {every expression has a type} -body {
+    set missing 0
+    foreach path [concat [glob [file join $::projectRoot examples *.ir]] [glob [file join $::projectRoot bench *.ir]]] {
+        set h [hir::build [core::loadProgramFile $path]]
+        foreach e [hir::walk $h] {
+            if {[hir::get $h $e type] eq ""} {
+                incr missing
+            }
+        }
+    }
+    set missing
+} -result 0
+
+test hir-type-10 {type ids are interned} -body {
+    set h [hirOf {const 1} {const 2} {const a}]
+    list [lmap e [hir::roots $h] {hir::get $h $e type}] [dict get $h types]
+} -result {{t1 t1 t2} {t1 int t2 str}}
+
+test hir-type-11 {the compiler reports the HIR's program types} -body {
+    set p {
+        {bind n {call {ref +} {const 1} {const 2}}}
+        {bind s {const hello}}
+        {bind p {ref +}}
+        {bind f {block {x} {ref x}}}
+    }
+    set h [hir::build $p]
+    set fromHir [dict create]
+    foreach b [dict get [hir::scope $h [hir::top $h]] bindings] {
+        dict set fromHir [dict get [hir::binding $h $b] name] [hir::bindingType $h $b]
+    }
+    list [expr {$fromHir eq [core::compiler::programTypes $p]}] $fromHir
+} -result {1 {n int s str p {native +} f {block e11 1 any}}}
+
+test hir-type-12 {flow facts: a returned native call proves its parameter types} -body {
+    set h [hirOf {bind f {block {x s}
+                    {call {ref +} {ref x} {const 1}}
+                    {call {ref test-lax-param} {ref s}}
+                    {call {ref list} {ref x} {ref s}}}}]
+    list [hirRefTypes $h x] [hirRefTypes $h s]
+} -result {{any int} {any {str[Emailish]}}}
+
+# ---------------------------------------------------------------------------
+# Calls
+
+test hir-call-1 {a known native target is represented semantically} -body {
+    set h [hirOf {call {ref +} {const 1} {const 2}}]
+    set call [hirFind $h call]
+    lassign [hir::get $h $call target] kind symbol
+    list $kind [dict get [hir::symbol $h $symbol] name] \
+         [expr {$symbol eq [dict get [hir::binding $h [hirRefBindings $h +]] symbol]}]
+} -result {native + 1}
+
+test hir-call-2 {aliasing a native keeps the target} -body {
+    set h [hirOf {bind plus {ref +}} {call {ref plus} {const 2} {const 3}}]
+    set target [hir::get $h [hirFind $h call] target]
+    list [lindex $target 0] [dict get [hir::symbol $h [lindex $target 1]] name] \
+         [shownTypes $h [hirFind $h call]]
+} -result {native + int}
+
+test hir-call-3 {unknown callees stay generic} -body {
+    set h [hirOf {bind apply {block {f x} {call {ref f} {ref x}}}} \
+                 {call {call {ref list}} {const 1}}]
+    lmap e [hirFind $h call] {hir::get $h $e target}
+} -result {{} {} {native y1}}
+
+test hir-call-4 {a known block target} -body {
+    set h [hirOf {bind inc {block {x} {call {ref +} {ref x} {const 1}}}} {call {ref inc} {const 1}}]
+    set call [lindex [hirFind $h call] end]
+    list [hir::get $h $call target] [hirFind $h block] [shownTypes $h $call]
+} -result {{block e2} e2 int}
+
+test hir-call-5 {argument order is preserved} -body {
+    set h [hirOf {call {ref list} {const a} {const b} {const c}}]
+    set call [hirFind $h call]
+    list [lmap e [hir::get $h $call args] {hir::get $h $e literal}] \
+         [lmap e [hir::get $h $call args] {hir::get $h $e origin}] \
+         [hir::lower::expr $h $call]
+} -result {{a b c} {{ir {0 2}} {ir {0 3}} {ir {0 4}}} {call {ref list} {const a} {const b} {const c}}}
+
+test hir-call-6 {type tests are decided from static types} -body {
+    set h [hirOf {bind f {block {v}
+                    {bind q {call {ref uriEscape} {const str {a b}}}}
+                    {call {ref list}
+                        {call {ref integer?} {const 1}}
+                        {call {ref integer?} {const a}}
+                        {call {ref integer?} {ref v}}
+                        {call {ref UriQueryValue?} {ref q}}
+                        {call {ref Emailish?} {const 5}}
+                        {call {ref Emailish?} {ref q}}}}}]
+    set calls [lrange [hirFind $h call] 2 end]
+    lmap e $calls {hir::get $h $e known}
+} -result {1 0 {} 1 {} {}}
+
+test hir-call-7 {one call concept: operators, predicates and blocks share the form} -body {
+    set h [hirOf {bind f {block {x} {ref x}}} \
+                 {call {ref f} {call {ref integer?} {call {ref +} {const 1} {const 2}}}}]
+    lsort -unique [lmap e [hir::walk $h] {
+        if {[hir::kind $h $e] ne "call"} continue
+        hir::kind $h $e
+    }]
+} -result call
+
+cleanupTests

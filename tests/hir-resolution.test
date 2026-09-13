@@ -1,0 +1,234 @@
+# hir-resolution.test -- HIR scopes, binding identity, lexical resolution,
+# block parameters and captures.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+# ---------------------------------------------------------------------------
+# Resolution
+
+test hir-resolve-1 {a reference resolves to the binding its bind creates} -body {
+    set h [hirOf {bind x {const 10}} {ref x}]
+    set bind [hirFind $h bind x]
+    set b [hir::get $h $bind binding]
+    list [hirRefBindings $h x] [dict get [hir::binding $h $b] name] \
+         [dict get [hir::binding $h $b] kind] [dict get [hir::binding $h $b] declaredBy] \
+         [hir::get $h [hirFind $h ref x] init]
+} -result {b1 x local e1 yes}
+
+test hir-resolve-2 {nested lexical lookup reaches the outer binding} -body {
+    set h [hirOf {bind x {const 10}} {call {block {} {call {block {} {ref x}}}}}]
+    list [hirRefBindings $h x] [hir::get $h [hirFind $h ref x] init]
+} -result {b1 deferred}
+
+test hir-resolve-3 {shadowing creates distinct binding ids} -body {
+    set h [hirOf {bind x {const 10}} \
+                 {bind inner {call {block {} {bind x {const 20}} {ref x}}}} \
+                 {call {ref list} {ref inner} {ref x}}]
+    set binds [lmap e [hirFind $h bind x] {hir::get $h $e binding}]
+    set refs [hirRefBindings $h x]
+    list [llength [lsort -unique $binds]] \
+         [expr {[lindex $refs 0] eq [lindex $binds 1]}] \
+         [expr {[lindex $refs 1] eq [lindex $binds 0]}]
+} -result {2 1 1}
+
+test hir-resolve-4 {a reference resolves to the nearest lexical binding} -body {
+    set h [hirOf {bind x {const 1}} \
+                 {call {block {x}
+                     {bind a {ref x}}
+                     {if {ref true}
+                         {block {} {bind x {const 3}} {ref x}}
+                         {block {} {ref x}}}}
+                   {const 2}}]
+    set scopes [lmap e [hirFind $h ref x] {
+        set b [hir::get $h $e binding]
+        list [dict get [hir::binding $h $b] kind] [dict get [hir::scope $h [dict get [hir::binding $h $b] scope]] kind]
+    }]
+} -result {{param block} {local branch} {param block}}
+
+test hir-resolve-5 {duplicate binding: strict build raises the runtime error} -body {
+    set p {{bind x {const 10}} {bind x {const 20}}}
+    list [catch {hir::build $p} m1 o1] $m1 [dict get $o1 -errorcode] \
+         [catch {core::evalProgram $p} m2 o2] $m2 [dict get $o2 -errorcode]
+} -result [list 1 {duplicate binding "x" in the same lexical scope} {CORE SEMANTIC DUPLICATE} \
+                1 {duplicate binding "x" in the same lexical scope} {CORE SEMANTIC DUPLICATE}]
+
+test hir-resolve-6 {duplicate binding: the second bind denotes the first binding} -body {
+    set h [hirOf {bind x {const 10}} {bind x {const 20}} {ref x}]
+    lassign [hirFind $h bind x] first second
+    list [hir::get $h $first binding] [hir::get $h $second binding] \
+         [hir::get $h $first duplicate] [hir::get $h $second duplicate] \
+         [lmap d [hir::diagnostics $h] {list [dict get $d kind] [dict get $d expr]}] \
+         [hir::types::show [hir::typeOf $h $second]]
+} -result [list b1 b1 0 1 [list [list DUPLICATE e3]] never]
+
+test hir-resolve-7 {rebinding a parameter is a duplicate; shadowing it in a nested scope is not} -body {
+    set h [hirOf {call {block {x} {if {ref true} {block {} {bind x {const 2}}} {block {}}} {bind x {const 1}}} {const 0}}]
+    lmap e [hirFind $h bind x] {hir::get $h $e duplicate}
+} -result {0 1}
+
+test hir-resolve-8 {duplicate parameters are rejected as by the interpreter} -body {
+    hir::build {{block {x x} {ref x}}}
+} -returnCodes error -errorCode {CORE SEMANTIC DUPLICATE} \
+  -result {duplicate binding "x" in the same lexical scope (block parameters)}
+
+test hir-resolve-9 {unresolved names fail semantically} -body {
+    set h [hirOf {ref nope}]
+    list [catch {hir::build {{ref nope}}} m o] $m [dict get $o -errorcode] \
+         [hirRefBindings $h nope] [hirRefTypes $h nope] \
+         [dict get [lindex [hir::diagnostics $h] 0] kind]
+} -result {1 {unbound name "nope"} {CORE SEMANTIC UNBOUND} {{}} never UNBOUND}
+
+test hir-resolve-10 {use before binding in the same invocation is static; in a closure it is deferred} -body {
+    set tdz {{bind x {const 1}} {call {block {} {bind y {ref x}} {bind x {const 2}}}}}
+    set closure {{bind x {const 1}} {call {block {} {bind y {call {block {} {ref x}}}} {bind x {const 2}}}}}
+    set h1 [hirOf {*}$tdz]
+    set h2 [hirOf {*}$closure]
+    list [hir::get $h1 [hirFind $h1 ref x] init] \
+         [catch {hir::build $tdz} m] $m [catch {core::evalProgram $tdz} m] $m \
+         [hir::get $h2 [hirFind $h2 ref x] init] \
+         [expr {[hirRefBindings $h2 x] eq [hir::get $h2 [lindex [hirFind $h2 bind x] 1] binding]}]
+} -result {no 1 {name "x" used before its binding} 1 {name "x" used before its binding} deferred 1}
+
+test hir-resolve-11 {scope kinds and structure} -body {
+    set h [hirOf {bind f {block {n}
+                    {loop {block {}
+                        {bind k {const 1}}
+                        {if {ref true} {block {} {break {ref k}}} {block {} {continue}}}}}}}]
+    set result {}
+    dict for {s scope} [dict get $h scopes] {
+        set parent [dict get $scope parent]
+        lappend result [list $s [dict get $scope kind] \
+            [expr {$parent eq "" ? "-" : [dict get [hir::scope $h $parent] kind]}] \
+            [lmap b [dict get $scope bindings] {
+                if {[dict get [hir::binding $h $b] kind] eq "root"} continue
+                dict get [hir::binding $h $b] name}]]
+    }
+    set result
+} -result {{s1 root - {}} {s2 program root f} {s3 block program n} {s4 loop block k} {s5 branch loop {}} {s6 branch loop {}}}
+
+test hir-resolve-12 {scope queries: visible bindings and lookup} -body {
+    set h [hirOf {bind x {const 1}} {bind y {const 2}} \
+                 {call {block {x} {ref x} {ref y}} {const 3}}]
+    set blockScope [hir::get $h [hirFind $h block] bodyScope]
+    set visible [hir::visibleBindings $h $blockScope]
+    list [dict get $visible x] [dict get $visible y] \
+         [hir::lookup $h $blockScope x] [hir::lookup $h [hir::top $h] x] \
+         [hir::get $h [lindex [hirFind $h ref x] 0] scope]
+} -result {b3 b2 b3 b1 s3}
+
+test hir-resolve-13 {root names are bindings denoting builtin symbols} -body {
+    set h [hirOf {call {ref +} {ref true} {const 1}}]
+    lmap name {+ true} {
+        set binding [hir::binding $h [hirRefBindings $h $name]]
+        set symbol [hir::symbol $h [dict get $binding symbol]]
+        list [dict get $binding kind] [dict get $symbol kind] [dict get $symbol provenance]
+    }
+} -result {{root native {core native +}} {root constant {core root true}}}
+
+test hir-resolve-14 {root bindings can be shadowed} -body {
+    set h [hirOf {bind + {block {a b} {const shadowed}}} {call {ref +} {const 1} {const 2}}]
+    set b [hirRefBindings $h +]
+    list [dict get [hir::binding $h $b] kind] [hir::get $h [hirFind $h call] target]
+} -result {local {block e2}}
+
+test hir-resolve-15 {ids are deterministic} -body {
+    set p [core::readProgramFile [file join $::projectRoot bench fib.ir]]
+    expr {[hir::build $p] eq [hir::build $p]}
+} -result 1
+
+test hir-resolve-16 {sequence mode: unbound top-level names are ambient bindings} -body {
+    set h [hir::build {{bind a {const 1}} {ref a} {ref b} {call {block {a} {ref a}} {ref a}}} -mode sequence]
+    set refs [hirRefBindings $h a]
+    list [hir::mode $h] [dict get [hir::scope $h [hir::top $h]] kind] \
+         [lmap b [lsort -unique $refs] {dict get [hir::binding $h $b] kind}] \
+         [lmap e [hirFind $h ref] {hir::get $h $e init}] \
+         [hir::diagnostics $h]
+} -result {sequence ambient {ambient param} {deferred deferred yes deferred} {}}
+
+test hir-resolve-17 {control operators know their targets} -body {
+    set h [hirOf {bind f {block {}
+                    {loop {block {}
+                        {if {ref true}
+                            {block {} {break {const 1}}}
+                            {block {} {call {block {} {return {const 2}}}} {continue}}}}}}}]
+    list [hir::get $h [hirFind $h break] target] [hir::get $h [hirFind $h continue] target] \
+         [hir::get $h [hirFind $h return] target] [hirFind $h loop] [hirFind $h block]
+} -result {e3 e3 e9 e3 {e2 e9}}
+
+test hir-resolve-18 {control placement errors are diagnostics} -body {
+    set h [hir::build {{return {const 1}} {loop {block {} {call {block {} {break}}}}}} -strict 0]
+    lmap d [hir::diagnostics $h] {dict get $d kind}
+} -result {RETURN-OUTSIDE-CALLABLE BREAK-OUTSIDE-LOOP}
+
+test hir-resolve-19 {origins point back into the input IR} -body {
+    set h [hirOf {bind x {const 10}} {call {ref +} {ref x} {const 1}}]
+    list [hir::get $h [hirFind $h ref x] origin] [hir::get $h [hirFind $h bind] origin] \
+         [dict get [hir::binding $h b1] origin] [hir::exprsAt $h {ir {1 2}}]
+} -result {{ir {1 2}} {ir 0} {ir 0} e5}
+
+test hir-resolve-20 {malformed IR is rejected} -body {
+    hir::build {{bind x}}
+} -returnCodes error -errorCode {CORE MALFORMED} -match glob -result {malformed IR: *}
+
+# ---------------------------------------------------------------------------
+# Blocks
+
+test hir-block-1 {block parameters receive binding ids in order} -body {
+    set h [hirOf {block {a b} {call {ref +} {ref b} {ref a}}}]
+    set block [hirFind $h block]
+    set params [hir::get $h $block params]
+    list $params [lmap b $params {dict get [hir::binding $h $b] name}] \
+         [lmap b $params {dict get [hir::binding $h $b] kind}] \
+         [hirRefBindings $h b] [hirRefBindings $h a] \
+         [dict get [hir::binding $h [lindex $params 1]] origin]
+} -result {{b1 b2} {a b} {param param} b2 b1 {ir {0 1 1}}}
+
+test hir-block-2 {closure capture is explicit} -body {
+    set h [hirOf {bind x {const 10}} {bind f {block {} {ref x}}}]
+    hir::captures $h [hirFind $h block]
+} -result b1
+
+test hir-block-3 {nested captures} -body {
+    set h [hirOf {bind x {const 10}} \
+                 {bind outer {block {n}
+                     {bind inner {block {} {call {ref +} {ref x} {ref n}}}}
+                     {ref inner}}}]
+    lassign [hirFind $h block] outer inner
+    list [hir::captures $h $outer] [hir::captures $h $inner]
+} -result {b1 {b1 b3}}
+
+test hir-block-4 {block-local bindings, parameters and root names are not captured} -body {
+    set h [hirOf {bind f {block {p}
+                    {bind y {const 1}}
+                    {if {ref true} {block {} {bind z {ref y}} {ref z}} {block {}}}
+                    {call {ref +} {ref y} {ref p}}}}]
+    hir::captures $h [hirFind $h block]
+} -result {}
+
+test hir-block-5 {a capture from a branch of the block belongs to the block} -body {
+    set h [hirOf {bind x {const 10}} \
+                 {bind f {block {} {if {ref true} {block {} {block {} {ref x}}} {block {}}}}}]
+    lassign [hirFind $h block] outer inner
+    list [hir::captures $h $outer] [hir::captures $h $inner]
+} -result {b1 b1}
+
+test hir-block-6 {lexical, not dynamic, lookup} -body {
+    set p [core::readProgramFile [file join $::projectRoot examples 03-lexical-closure.ir]]
+    set h [hir::build $p]
+    set f [hir::get $h [lindex [hirFind $h bind f] 0] value]
+    set programX [hir::get $h [lindex [hirFind $h bind x] 0] binding]
+    set gX [hir::get $h [lindex [hirFind $h bind x] 1] binding]
+    list [hir::captures $h $f] [expr {[hir::captures $h $f] eq $programX}] \
+         [expr {$gX ne $programX}] [run {*}$p]
+} -result {b1 1 1 10}
+
+test hir-block-7 {scopes know the closures created in them} -body {
+    set h [hirOf {bind a {const 1}} \
+                 {if {ref true} {block {} {block {} {ref a}}} {block {} {const 2}}} \
+                 {call {block {} {const 3}}}]
+    lmap s [dict keys [dict get $h scopes]] {
+        list [dict get [hir::scope $h $s] kind] [dict get [hir::scope $h $s] closures]
+    }
+} -result {{root {}} {program {e5 e9}} {branch e5} {block {}} {branch {}} {block {}}}
+
+cleanupTests

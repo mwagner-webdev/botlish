@@ -1,0 +1,180 @@
+# hir-lowering.test -- HIR lowers back to executable core IR, and the
+# formatter shows HIR semantic state.
+#
+#   input IR -> HIR -> core IR -> interpreter    must behave as the input
+#   input IR -> HIR -> compiler                  must agree with the interpreter
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+# Representative programs: the examples and the differential corpora used
+# elsewhere, plus programs with static errors. (The benchmarks run too long
+# under the interpreter; they are only checked for round trips.)
+set corpus {}
+foreach path [lsort [glob -directory [file join $::projectRoot examples] *.ir]] {
+    lappend corpus [file tail $path] [core::loadProgramFile $path]
+}
+foreach path [lsort [glob -directory [file join $::projectRoot bench] *.ir]] {
+    test hir-lower-roundtrip-bench-[file tail $path] "lowering reproduces the core IR: [file tail $path]" -body {
+        set exprs [core::loadProgramFile $path]
+        expr {[canonicalProgram [hir::lower [hir::build $exprs]]] eq [canonicalProgram $exprs]}
+    } -result 1
+}
+lappend corpus \
+    recursion {
+        {bind fib {block {n}
+            {if {call {ref <} {ref n} {const 2}}
+                {block {} {ref n}}
+                {block {} {call {ref +} {call {ref fib} {call {ref -} {ref n} {const 1}}}
+                                        {call {ref fib} {call {ref -} {ref n} {const 2}}}}}}}}
+        {call {ref fib} {const 8}}
+    } \
+    closures {
+        {bind compose {block {f g} {block {x} {call {ref f} {call {ref g} {ref x}}}}}}
+        {bind inc {block {x} {call {ref +} {ref x} {const 1}}}}
+        {bind dbl {block {x} {call {ref *} {ref x} {const 2}}}}
+        {call {call {ref compose} {ref inc} {ref dbl}} {const 20}}
+    } \
+    control {
+        {call {block {}
+            {loop {block {}
+                {bind inner {loop {block {}
+                    {if {ref true} {block {} {break {const 3}}} {block {} {continue}}}}}}
+                {return {call {ref list} {ref inner} {ok {ref inner}} {error-value {const list {1 x}}}}}}}}}
+    } \
+    shadowing {
+        {bind x {const 10}}
+        {bind + {block {a b} {const shadowed}}}
+        {bind inner {call {block {} {bind x {const 20}} {ref x}}}}
+        {call {ref list} {ref inner} {ref x} {call {ref +} {const 1} {const 2}}}
+    } \
+    refined {
+        {bind f {block {s}
+            {if {call {ref Emailish?} {ref s}}
+                {block {} {call {ref list} {ref s} {call {ref uriEscape} {ref s}}}}
+                {block {} {const str {}}}}}}
+        {call {ref list} {call {ref f} {const str a@b.io}} {call {ref f} {const str nope}}}
+    } \
+    tdz {
+        {bind x {const 1}}
+        {call {block {} {bind y {call {block {} {ref x}}}} {bind x {const 2}} {ref y}}}
+    } \
+    duplicate {
+        {bind a {const 1}}
+        {bind a {call {ref test-log} {const evaluated}}}
+    } \
+    unbound {
+        {call {ref test-log} {const before}}
+        {ref nope}
+    } \
+    unbound-in-closure {
+        {bind f {block {} {ref nope}}}
+        {call {ref test-log} {const created}}
+        {call {ref f}}
+    }
+
+foreach {name exprs} $corpus {
+    test hir-lower-roundtrip-$name "lowering reproduces the core IR: $name" -body {
+        set h [hir::build $exprs -strict 0]
+        expr {[canonicalProgram [hir::lower $h]] eq [canonicalProgram $exprs]}
+    } -result 1
+
+    test hir-lower-interp-$name "HIR -> core IR -> interpreter behaves as the input: $name" -body {
+        set lowered [hir::lower [hir::build $exprs -strict 0]]
+        set expected [outcomeUnder interp $exprs]
+        set actual [outcomeUnder interp $lowered]
+        expr {$actual eq $expected ? "same" : "input: $expected / lowered: $actual"}
+    } -result same
+
+    test hir-lower-compile-$name "HIR -> compiler agrees with the interpreter: $name" -body {
+        differential [hir::lower [hir::build $exprs -strict 0]]
+    } -result same
+}
+
+test hir-lower-1 {the compiler compiles from the HIR of the unit} -body {
+    set p [core::readProgramFile [file join $::projectRoot bench fib.ir]]
+    set h [core::compiler::unitHir $p]
+    list [hir::mode $h] [expr {[canonicalProgram [hir::lower $h]] eq [canonicalProgram $p]}] \
+         [expr {[core::compiler::unitHir $p] eq [hir::build $p]}]
+} -result {program 1 1}
+
+test hir-lower-2 {sequence-mode HIR lowers too} -body {
+    set p {{bind a {const 1}} {call {block {b} {call {ref +} {ref a} {ref b}}} {const 2}}}
+    set h [hir::build $p -mode sequence]
+    set scope [core::childEnv [core::rootEnv]]
+    list [expr {[canonicalProgram [hir::lower $h]] eq [canonicalProgram $p]}] \
+         [core::formatCompletion [core::evalIn [lindex [hir::lower $h] 0] $scope]] \
+         [core::formatCompletion [core::evalIn [lindex [hir::lower $h] 1] $scope]]
+} -result {1 value(1) value(3)}
+
+test hir-lower-3 {lowering erases semantic metadata} -body {
+    set h [hirOf {bind x {const 10}} {bind f {block {y} {call {ref +} {ref x} {ref y}}}}]
+    hir::lower $h
+} -result {{bind x {const 10}} {bind f {block y {call {ref +} {ref x} {ref y}}}}}
+
+# ---------------------------------------------------------------------------
+# Formatting
+
+test hir-format-1 {bindings, types and known targets} -body {
+    hir::format [hir::build {
+        {bind x {const 10}}
+        {bind y {call {ref +} {ref x} {const 1}}}
+    }]
+} -result {program s2 binds b1 x, b2 y
+e1 bind b1 x : int
+    e2 const 10 : int
+e3 bind b2 y : int
+    e4 call native(+) : int
+        e5 ref b3 + : native +
+        e6 ref b1 x : int
+        e7 const 1 : int}
+
+test hir-format-2 {captures, parameters, refinements and control targets} -body {
+    hir::format [hir::build {
+        {bind x {const 10}}
+        {bind f {block {v}
+            {if {call {ref integer?} {ref v}}
+                {block {} {bind w {ref x}} {return {ref v}}}
+                {block {} {ref x}}}}}
+        {call {ref f} {const one}}
+    }]
+} -result {program s2 binds b1 x, b2 f
+e1 bind b1 x : int
+    e2 const 10 : int
+e3 bind b2 f : block(e4)/1 -> int
+    e4 block s3 (b3 v) captures (b1 x) : block(e4)/1 -> int
+        e5 if : int
+            e6 call native(integer?) : bool
+                e7 ref b4 integer? : native integer?
+                e8 ref b3 v : any
+            then s4 binds b5 w refines b3 v : int
+                e9 bind b5 w : int
+                    e10 ref b1 x : int deferred
+                e11 return -> e4 : never
+                    e12 ref b3 v : int
+            else s5
+                e13 ref b1 x : int deferred
+e14 call block(e4) : int
+    e15 ref b2 f : block(e4)/1 -> int
+    e16 const one : str}
+
+test hir-format-3 {diagnostic flags and origins} -body {
+    hir::format [hir::build {
+        {bind a {const 1}}
+        {bind a {ref b}}
+        {call {block {} {bind c {ref c}}}}
+        {call {ref integer?} {const 2}}
+    } -strict 0] -origins 1
+} -result {program s2 binds b1 a
+e1 bind b1 a : int @ir 0
+    e2 const 1 : int @ir {0 2}
+e3 bind b1 a : never duplicate @ir 1
+    e4 ref ? b : never unbound @ir {1 2}
+e5 call block(e6) : never unreachable @ir 2
+    e6 block s3 () captures () binds b2 c : block(e6)/0 -> never unreachable @ir {2 1}
+        e7 bind b2 c : never @ir {2 1 2}
+            e8 ref b2 c : never before-binding @ir {2 1 2 2}
+e9 call native(integer?) = true : bool unreachable @ir 3
+    e10 ref b3 integer? : native integer? unreachable @ir {3 1}
+    e11 const 2 : int unreachable @ir {3 2}}
+
+cleanupTests

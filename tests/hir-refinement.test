@@ -1,0 +1,156 @@
+# hir-refinement.test -- path-sensitive refinement facts in HIR.
+#
+# Facts attach to BindingIds, come from native refinement metadata, and hold
+# exactly in the branch that proves them.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+# Facts proven on entry to the then and else scopes of if expression E,
+# shown as NAME : TYPE.
+proc branchFacts {hir e} {
+    lmap role {then else} {
+        set shown {}
+        foreach {b fact} [dict get [hir::scope $hir [hir::get $hir $e ${role}Scope]] refinements] {
+            lappend shown "$b [dict get [hir::binding $hir $b] name] : [hir::types::show $fact]"
+        }
+        set shown
+    }
+}
+
+set predicateProgram {
+    {bind f {block {x}
+        {if {call {ref integer?} {ref x}}
+            {block {} {bind inside {ref x}} {call {ref +} {ref x} {const 1}}}
+            {block {} {bind outside {ref x}} {const 0}}}
+        {bind after {ref x}}
+        {ref after}}}
+}
+
+test hir-refine-1 {a predicate refines the binding its argument denotes} -body {
+    set h [hir::build $predicateProgram]
+    set if [hirFind $h if]
+    set x [hir::get $h [hirFind $h block] params]
+    list $x [hir::get $h $if refinements] [branchFacts $h $if]
+} -result {b2 {1 {b2 int} 0 {}} {{{b2 x : int}} {}}}
+
+test hir-refine-2 {the refinement holds only in the true branch} -body {
+    set h [hir::build $predicateProgram]
+    hirRefTypes $h x
+} -result {any int int any any}
+
+test hir-refine-3 {the refinement disappears after the branch} -body {
+    set h [hir::build $predicateProgram]
+    set if [hirFind $h if]
+    list [shownTypesOfBinds $h {inside outside after}] \
+         [dict size [hir::refinementsAt $h [hir::get $h [hirFind $h block] bodyScope]]] \
+         [hir::refinementsAt $h [hir::get $h $if thenScope]] \
+         [hir::refinementsAt $h [hir::get $h $if elseScope]]
+} -setup {
+    proc shownTypesOfBinds {hir names} {
+        lmap name $names {hir::types::show [hir::typeOf $hir [hirFind $hir bind $name]]}
+    }
+} -result {{int any any} 0 {b2 int} {}}
+
+test hir-refine-4 {shadowing does not refine a different binding} -body {
+    set h [hirOf {bind f {block {x}
+        {if {call {ref integer?} {ref x}}
+            {block {} {bind x {const shadow}} {ref x}}
+            {block {}}}}}]
+    set outer [hir::get $h [hirFind $h block] params]
+    set inner [hir::get $h [hirFind $h bind x] binding]
+    list [expr {$outer ne $inner}] [hir::get $h [hirFind $h if] refinements] \
+         [lrange [hirRefBindings $h x] 1 end] [lrange [hirRefTypes $h x] 1 end]
+} -result [list 1 {1 {b2 int} 0 {}} b4 str]
+
+test hir-refine-5 {a refinement is visible in closures created in the branch} -body {
+    set h [hirOf {bind f {block {x}
+        {if {call {ref integer?} {ref x}}
+            {block {} {block {} {ref x}}}
+            {block {} {block {} {ref x}}}}}}]
+    lassign [lrange [hirFind $h block] 1 end] thenProbe elseProbe
+    list [hirRefTypes $h x] \
+         [hir::refinementsAt $h [hir::get $h $thenProbe bodyScope]] \
+         [hir::refinementsAt $h [hir::get $h $elseProbe bodyScope]]
+} -result {{any int any} {b2 int} {}}
+
+test hir-refine-6 {a shadowed predicate carries no metadata; an alias keeps it} -body {
+    set shadowed [hirOf {bind f {block {x}
+        {bind integer? {block {v} {ref true}}}
+        {if {call {ref integer?} {ref x}} {block {} {ref x}} {block {}}}}}]
+    set aliased [hirOf {bind f {block {x}
+        {bind is_int {ref integer?}}
+        {if {call {ref is_int} {ref x}} {block {} {ref x}} {block {}}}}}]
+    list [hir::get $shadowed [hirFind $shadowed if] refinements] [lindex [hirRefTypes $shadowed x] end] \
+         [hir::get $aliased [hirFind $aliased if] refinements] [lindex [hirRefTypes $aliased x] end]
+} -result {{1 {} 0 {}} any {1 {b2 int} 0 {}} int}
+
+test hir-refine-7 {only direct references are refined} -body {
+    set h [hirOf {bind f {block {x}
+        {if {call {ref integer?} {call {ref list} {ref x}}} {block {} {ref x}} {block {}}}}}]
+    list [hir::get $h [hirFind $h if] refinements] [hirRefTypes $h x]
+} -result {{1 {} 0 {}} {any any}}
+
+test hir-refine-8 {refinement rules come from native metadata, including false branches} -setup {
+    if {"test-hir-not-int?" ni [core::native::names]} {
+        core::registerNative test-hir-not-int? -arity 1 \
+            -impl {apply {{a} {core::value::bool [expr {[core::value::kind $a] ne "int"}]}}} \
+            -refines-false {0 int}
+        core::registerNative test-hir-both-ints? -arity 2 \
+            -impl {apply {{a b} {core::value::bool [expr {[core::value::kind $a] eq "int" && [core::value::kind $b] eq "int"}]}}} \
+            -refines-true {0 int 1 int}
+    }
+} -body {
+    set h [hirOf {bind f {block {a b}
+        {if {call {ref test-hir-not-int?} {ref a}} {block {} {ref a}} {block {} {ref a}}}
+        {if {call {ref test-hir-both-ints?} {ref a} {ref b}} {block {} {ref b}} {block {}}}}}]
+    lassign [hirFind $h if] first second
+    list [branchFacts $h $first] [branchFacts $h $second] [hirRefTypes $h a] [hirRefTypes $h b]
+} -result {{{} {{b2 a : int}}} {{{b2 a : int} {b3 b : int}} {}} {any any int any} {any int}}
+
+test hir-refine-9 {named-type evidence accumulates across nested branches} -body {
+    set h [hirOf {bind f {block {s}
+        {if {call {ref Emailish?} {ref s}}
+            {block {} {if {call {ref NonEmpty?} {ref s}} {block {} {bind both {ref s}}} {block {}}}}
+            {block {}}}}}]
+    list [hir::types::show [hir::typeOf $h [hirFind $h bind both]]] \
+         [dict get [hir::refinementsAt $h [hir::get $h [lindex [hirFind $h if] 1] thenScope]] b2]
+} -result {{str[Emailish,NonEmpty]} {{refined str NonEmpty} {refined str Emailish}}}
+
+test hir-refine-10 {a refinement is not repeated when it is already known} -body {
+    set h [hirOf {bind f {block {s}
+        {if {call {ref Emailish?} {ref s}}
+            {block {} {if {call {ref Emailish?} {ref s}} {block {} {const yes}} {block {} {const no}}}}
+            {block {} {const no}}}}}]
+    set inner [lindex [hirFind $h if] 1]
+    list [hir::get $h [hir::get $h $inner condition] known] \
+         [lmap e [hir::get $h $inner elseBody] {hir::get $h $e reachable}] \
+         [hir::types::show [hir::typeOf $h $inner]]
+} -result {1 0 str}
+
+test hir-refine-11 {flow facts from calls do not leak out of a branch} -body {
+    set h [hirOf {bind f {block {x flag}
+        {if {ref flag} {block {} {call {ref +} {ref x} {const 1}} {ref x}} {block {}}}
+        {ref x}}}]
+    hirRefTypes $h x
+} -result {any int any}
+
+test hir-refine-12 {HIR refinements match the facts the interpreter installs} -body {
+    set p [core::readProgramFile [file join $::projectRoot examples 04-refinement-scope.ir]]
+    set h [hir::build $p]
+    set if [hirFind $h if]
+    set hirInside [lmap {b fact} [dict get [hir::refinementsAt $h [hir::get $h $if thenScope]]] {
+        list [dict get [hir::binding $h $b] name] $fact
+    }]
+    set hirAfter [hir::refinementsAt $h [hir::top $h]]
+    set saved [core::useBackend]
+    core::useBackend interp
+    try {
+        lassign [core::value::items [core::evalProgram $p]] inside after
+    } finally {
+        core::useBackend $saved
+    }
+    list $hirInside [core::envRefinements [core::blockEnv $inside]] \
+         $hirAfter [core::envRefinements [core::blockEnv $after]]
+} -result {{{x int}} {x int} {} {}}
+
+cleanupTests

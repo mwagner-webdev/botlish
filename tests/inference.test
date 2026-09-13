@@ -179,7 +179,7 @@ test types-2 {program-level binding types} -body {
         {bind l {call {ref list} {ref n}}}
         {bind p {ref +}}
         {bind u {call {ref result-value} {ref r}}}
-    }] {core::types::show $type}
+    }] {hir::types::show $type}
 } -result {n int s str b bool r result l list p {native +} u any}
 
 test types-3 {typed arithmetic compiles to inline code without generic calls} -body {

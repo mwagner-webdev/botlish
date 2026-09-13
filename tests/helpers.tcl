@@ -56,6 +56,65 @@ proc differential {exprs} {
     return same
 }
 
+# ---------------------------------------------------------------------------
+# HIR
+
+# The HIR of a program given as expressions (non-strict: diagnostics kept).
+proc hirOf {args} {
+    return [hir::build $args -strict 0]
+}
+
+# ExprIds of kind KIND (and, if given, spelling NAME), in pre-order.
+proc hirFind {hir kind {name ""}} {
+    set result {}
+    foreach e [hir::walk $hir] {
+        if {[hir::kind $hir $e] ne $kind} {
+            continue
+        }
+        if {$name ne "" && (![dict exists [hir::node $hir $e] name]
+                            || [hir::get $hir $e name] ne $name)} {
+            continue
+        }
+        lappend result $e
+    }
+    return $result
+}
+
+# The binding each reference to NAME resolves to, in pre-order.
+proc hirRefBindings {hir name} {
+    return [lmap e [hirFind $hir ref $name] {hir::get $hir $e binding}]
+}
+
+# Shown types of the references to NAME, in pre-order.
+proc hirRefTypes {hir name} {
+    return [lmap e [hirFind $hir ref $name] {hir::types::show [hir::typeOf $hir $e]}]
+}
+
+# NODE with canonical Tcl list quoting, for comparing IR structurally.
+proc canonicalIR {node} {
+    set op [lindex $node 0]
+    switch -- $op {
+        const - ref - continue {
+            return [list {*}$node]
+        }
+        bind {
+            return [list bind [lindex $node 1] [canonicalIR [lindex $node 2]]]
+        }
+        block {
+            return [list block [list {*}[lindex $node 1]] \
+                {*}[lmap e [lrange $node 2 end] {canonicalIR $e}]]
+        }
+        call - return - break - ok - error-value - if - loop {
+            return [list $op {*}[lmap e [lrange $node 1 end] {canonicalIR $e}]]
+        }
+    }
+    error "canonicalIR: unknown node $node"
+}
+
+proc canonicalProgram {exprs} {
+    return [lmap e $exprs {canonicalIR $e}]
+}
+
 # Observable effects for tests only. The language has no mutation; these
 # Tcl-backed natives let tests observe evaluation order and repetition.
 set ::testLog {}

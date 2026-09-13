@@ -1,13 +1,32 @@
-# compiler.tcl -- compiles core IR to Tcl procedures, guided by static types.
+# compiler.tcl -- compiles HIR to Tcl procedures.
 #
-#   source compiler/compiler.tcl       ;# also loads core
+#   source compiler/compiler.tcl       ;# also loads core and hir
 #   core::useBackend compile
 #
 # The compiler is a second implementation of the same semantics as the
 # interpreter in core/evaluator.tcl. It shares the runtime (values, natives,
 # environments, call boundary) but none of the interpreter's evaluation
-# machinery. Static types (types.tcl) let it replace generic runtime
-# operations with specialized Tcl code whenever that is indistinguishable.
+# machinery.
+#
+# It does no semantic analysis of its own. Each unit is first built into HIR
+# (hir/), which owns
+#
+#   lexical resolution and binding identity   (which binding a name denotes,
+#                                             whether it is bound yet,
+#                                             duplicate binds)
+#   static types, flow facts, refinements     (the type of every expression)
+#   captures and closures of scopes
+#   known call targets                        ({native SYMBOL} / {block EXPR})
+#   statically decided type tests
+#   control targets of return/break/continue
+#
+# and the compiler decides only how to run it in Tcl:
+#
+#   frames        which scopes become runtime frames, Tcl variables for the rest
+#   representation  boxed values or bare integers/Booleans
+#   intrinsics    inline Tcl for known natives, kind checks, constant folding
+#   calls         direct proc calls for known blocks, the generic call boundary
+#   control flow  Tcl completion codes
 #
 # Translation scheme
 # ------------------
@@ -17,8 +36,8 @@
 #     program   run as a checked program in a fresh program scope over a
 #               fresh root (core::evalProgram); root bindings are then known
 #               constants and program-level bindings are statically typed
-# * Each block node becomes `proc blockN {captured argv} {...}`; the Block
-#   value carries its name as CODE (see core/block.tcl).
+# * Each block expression becomes `proc blockN {captured argv} {...}`; the
+#   Block value carries its name as CODE (see core/block.tcl).
 # * if branches and loop bodies are inline: Tcl `if` and `while 1`.
 # * Expressions become sequential Tcl commands in evaluation order.
 # * Control flow uses Tcl completion codes:
@@ -30,55 +49,49 @@
 #
 # Operands and representations
 # ----------------------------
-# Compiling an expression yields an *operand* {REPR WORD TYPE KEY}:
+# Compiling an expression yields an *operand* {REPR WORD TYPE}:
 #   REPR  box   WORD evaluates to a runtime value ({int 5}, {str a}, ...)
-#         int   WORD evaluates to a bare canonical integer (TYPE is int)
-#         bool  WORD evaluates to 1 or 0 (TYPE is bool)
-#   TYPE  its static type
-#   KEY   the binding it was read from, if any, so facts learned about the
-#         value can be attached to the binding
+#         int   WORD evaluates to a bare canonical integer
+#         bool  WORD evaluates to 1 or 0
+#   TYPE  its static type: the HIR type of the expression, or never when the
+#         compiler found that evaluation cannot complete normally
 # Unboxed representations never escape: values are boxed whenever they are
 # stored in a frame, passed to a call, returned or broken out of a loop.
 #
-# Name resolution and storage
-# ---------------------------
-# Every name is resolved statically. A scope is *materialized* as a runtime
-# frame iff it contains a block node: only then can a closure capture it or
-# its bindings or refinements be observed. Such scopes declare their names
-# on entry and access them through core::env (run-time use-before-binding
-# checks). Other scopes keep bindings in Tcl variables (or propagate them as
-# constants); use-before-binding and duplicates are decided statically there.
+# Storage
+# -------
+# A scope is *materialized* as a runtime frame iff a block is created in it
+# (HIR scope closures): only then can a closure capture it or its bindings or
+# refinements be observed. Such scopes declare their names on entry and access
+# them through core::env (run-time use-before-binding checks). Other scopes
+# keep bindings in Tcl variables (or propagate them as constants).
 #
 # Type-directed code
 # ------------------
 # * Calls of known natives with an intrinsic (+ - * < <= > >= == eq list
-#   integer? string? list? ok? error?) compile to inline Tcl. Arguments of
-#   unknown type are first checked with core::value::expect, which raises
-#   exactly the error the native would; the check then becomes a fact.
-# * Predicates on arguments of known kind fold to constants; an if with a
-#   constant condition compiles only the branch that runs.
-# * In program mode, calls of a Block whose proc and arity are statically
-#   known call the proc directly. (Checked programs cannot produce escaping
-#   break/continue codes, so the generic boundary would be a no-op.)
-# * Block result types are inferred, iterating to a fixpoint for a block
-#   that calls itself through the binding it is bound to.
-#
-# Facts are scoped like the control flow that proves them: facts learned in
-# a branch or loop body are dropped at its end; facts learned in a sequence
-# hold for the rest of it; closures inherit the facts known where they are
-# created (their captured bindings cannot change afterwards).
+#   ok? error?) compile to inline Tcl. Arguments not statically of the
+#   required kind are first checked with core::value::expect, which raises
+#   exactly the error the native would.
+# * Type tests decided by HIR fold to constants; other type tests compile to
+#   inline membership checks. An if with a constant condition compiles only
+#   the branch that runs.
+# * In program mode, calls whose HIR target is a block of matching arity call
+#   its proc directly. (Checked programs cannot produce escaping break/continue
+#   codes, so the generic boundary would be a no-op.)
 
-source [file join [file dirname [file dirname [file normalize [info script]]]] core core.tcl]
-source [file join [file dirname [file normalize [info script]]] types.tcl]
+source [file join [file dirname [file dirname [file normalize [info script]]]] hir hir.tcl]
 
 namespace eval core::compiler {
     variable nextId 0
-    # {MODE EXPRS} -> dict {name UNIT-PROC code CODE types PROGRAM-TYPES}
+    # {MODE EXPRS} -> dict {name UNIT-PROC code CODE types PROGRAM-TYPES
+    #                       bindings BINDINGS hir HIR}
     variable cache [dict create]
-    # Proc sources generated for the unit being compiled.
+    # State of the unit being compiled.
+    variable hir {}
     variable pending {}
-    # {NAME TYPE} for every bind compiled into the unit, in compilation order.
     variable bindLog {}
+    # Block ExprId -> proc name.
+    variable blockProcs [dict create]
     # Native name -> intrinsic generator.
     variable intrinsics [dict create \
         +        {IntrinsicArith +} \
@@ -120,36 +133,83 @@ proc core::compiler::compileUnit {mode exprs} {
     variable cache
     set key [list $mode $exprs]
     if {![dict exists $cache $key]} {
-        lassign [GenerateUnit $mode $exprs] name code types bindings
+        set unit [GenerateUnit $mode $exprs]
         # The procs are defined only after the whole unit compiled cleanly.
-        namespace eval ::core::compiler::code $code
-        dict set cache $key [dict create name ::core::compiler::code::$name \
-            code $code types $types bindings $bindings]
+        namespace eval ::core::compiler::code [dict get $unit code]
+        dict set unit name ::core::compiler::code::[dict get $unit name]
+        dict set cache $key $unit
     }
     return [dict get $cache $key name]
 }
 
-# The generated Tcl code for EXPRS, for inspection.
-proc core::compiler::generatedCode {exprs {mode program}} {
+proc core::compiler::Cached {mode exprs field} {
     variable cache
     compileUnit $mode $exprs
-    return [dict get $cache [list $mode $exprs] code]
+    return [dict get $cache [list $mode $exprs] $field]
+}
+
+# The generated Tcl code for EXPRS, for inspection.
+proc core::compiler::generatedCode {exprs {mode program}} {
+    return [Cached $mode $exprs code]
+}
+
+# The HIR the unit for EXPRS was compiled from.
+proc core::compiler::unitHir {exprs {mode program}} {
+    return [Cached $mode $exprs hir]
 }
 
 # Inferred static types of the program-level bindings of EXPRS: NAME -> TYPE.
 proc core::compiler::programTypes {exprs} {
-    variable cache
-    compileUnit program $exprs
-    return [dict get $cache [list program $exprs] types]
+    return [Cached program $exprs types]
 }
 
 # Every binding compiled for the program EXPRS, at any depth, with its
 # inferred static type: a list of {NAME TYPE} in compilation order. Types
 # include branch refinements and flow facts known where the bind occurs.
 proc core::compiler::bindingTypes {exprs} {
-    variable cache
-    compileUnit program $exprs
-    return [dict get $cache [list program $exprs] bindings]
+    return [Cached program $exprs bindings]
+}
+
+# ---------------------------------------------------------------------------
+# HIR access (the unit being compiled)
+
+proc core::compiler::N {e key} {
+    variable hir
+    return [dict get $hir exprs $e $key]
+}
+
+proc core::compiler::Kind {e} {
+    variable hir
+    return [dict get $hir exprs $e kind]
+}
+
+proc core::compiler::Type {e} {
+    variable hir
+    return [hir::typeOf $hir $e]
+}
+
+proc core::compiler::B {b key} {
+    variable hir
+    return [dict get $hir bindings $b $key]
+}
+
+proc core::compiler::S {s key} {
+    variable hir
+    return [dict get $hir scopes $s $key]
+}
+
+proc core::compiler::Lower {e} {
+    variable hir
+    return [hir::lower::expr $hir $e]
+}
+
+# The proc a block expression compiles to.
+proc core::compiler::BlockProc {e} {
+    variable blockProcs
+    if {![dict exists $blockProcs $e]} {
+        dict set blockProcs $e ::core::compiler::code::block[NewId]
+    }
+    return [dict get $blockProcs $e]
 }
 
 # ---------------------------------------------------------------------------
@@ -158,24 +218,16 @@ proc core::compiler::bindingTypes {exprs} {
 # A context describes the proc being generated:
 #   lines        generated commands
 #   indent       current indentation depth
-#   scopes       SCOPE-ID -> scope dict
-#   order        scope ids, outermost first
-#   loops        result variables of enclosing compiled loops, innermost last
-#   breakTypes   loop result variable -> type of the values broken with
+#   scopes       ScopeId -> compiler scope
+#   order        ScopeIds, outermost first
+#   loops        loop ExprId -> result variable, for loops compiled in this proc
 #   inBlock      1 inside a block proc, 0 at unit level
-#   returnType   lub of the values returned from the current block proc
 #   program      1 when compiling in program mode
-#   types        BINDING-KEY -> static type of the binding
-#   facts        BINDING-KEY -> narrowed type proven on the current path
 #
-# A scope dict:
-#   kind          top | local
+# A compiler scope (how a HIR scope is stored):
 #   materialized  1 if the scope is a runtime frame
 #   frame         Tcl variable holding the frame (materialized scopes)
-#   names         names bound in the scope (for top: program mode only)
-#   locals        NAME -> {REPR WORD} (non-materialized scopes)
-#   init          names whose (first) bind has been compiled
-#   constants     NAME -> value (top scope in program mode: the root)
+#   locals        BindingId -> {REPR WORD} (non-materialized scopes)
 
 proc core::compiler::NewId {} {
     variable nextId
@@ -183,8 +235,8 @@ proc core::compiler::NewId {} {
 }
 
 proc core::compiler::NewContext {inBlock program} {
-    return [dict create lines {} indent 1 scopes {} order {} loops {} breakTypes {} \
-        inBlock $inBlock returnType never program $program types {} facts {}]
+    return [dict create lines {} indent 1 scopes {} order {} loops {} \
+        inBlock $inBlock program $program]
 }
 
 proc core::compiler::Emit {ctxVar line} {
@@ -206,13 +258,6 @@ proc core::compiler::Word {value} {
     return [list $value]
 }
 
-proc core::compiler::FrameVar {scopeId} {
-    if {$scopeId eq "top"} {
-        return base
-    }
-    return f$scopeId
-}
-
 proc core::compiler::PushScope {ctxVar scopeId scope} {
     upvar 1 $ctxVar ctx
     dict set ctx scopes $scopeId $scope
@@ -226,38 +271,30 @@ proc core::compiler::PopScope {ctxVar} {
     dict set ctx order [lrange $order 0 end-1]
 }
 
-proc core::compiler::InnermostScopeId {ctx} {
-    return [lindex [dict get $ctx order] end]
-}
-
-# Opens a local scope for EXPRS (extra names, e.g. parameters, in EXTRA).
-# Emits frame creation under PARENT-FRAME-EXPR when the scope is materialized.
-# Returns the scope id.
-proc core::compiler::OpenScope {ctxVar exprs parentFrameExpr {extraNames {}}} {
+# Opens the HIR scope SCOPE-ID. Emits frame creation under PARENT-FRAME-EXPR
+# when the scope is materialized.
+proc core::compiler::OpenScope {ctxVar scopeId parentFrameExpr} {
     upvar 1 $ctxVar ctx
-    set id [NewId]
-    set names $extraNames
-    foreach name [core::ir::scopeBindNames $exprs] {
-        if {$name ni $names} {
-            lappend names $name
-        }
-    }
-    set materialized [core::ir::containsBlock $exprs]
-    set frame [FrameVar $id]
+    set materialized [expr {[S $scopeId closures] ne ""}]
+    set frame f$scopeId
     if {$materialized} {
         Emit ctx "set $frame \[core::env::child $parentFrameExpr\]"
     }
-    PushScope ctx $id [dict create kind local materialized $materialized \
-        frame $frame names $names locals {} init {}]
-    return $id
+    PushScope ctx $scopeId [dict create materialized $materialized frame $frame locals {}]
 }
 
-proc core::compiler::DeclareScope {ctxVar id exprs} {
+# Declares a materialized scope's local bindings in its frame.
+proc core::compiler::DeclareScope {ctxVar scopeId} {
     upvar 1 $ctxVar ctx
-    if {[dict get $ctx scopes $id materialized]} {
-        set names [core::ir::scopeBindNames $exprs]
+    if {[dict get $ctx scopes $scopeId materialized]} {
+        set names {}
+        foreach b [S $scopeId bindings] {
+            if {[B $b kind] eq "local"} {
+                lappend names [B $b name]
+            }
+        }
         if {$names ne ""} {
-            Emit ctx "core::env::declare \$[FrameVar $id] [Word $names]"
+            Emit ctx "core::env::declare \$[dict get $ctx scopes $scopeId frame] [Word $names]"
         }
     }
 }
@@ -266,28 +303,20 @@ proc core::compiler::DeclareScope {ctxVar id exprs} {
 proc core::compiler::CurrentFrameExpr {ctx} {
     foreach id [lreverse [dict get $ctx order]] {
         if {[dict get $ctx scopes $id materialized]} {
-            return "\$[FrameVar $id]"
+            return "\$[dict get $ctx scopes $id frame]"
         }
     }
     error "core::compiler: no materialized scope"
 }
 
-proc core::compiler::MarkBound {ctxVar id name} {
-    upvar 1 $ctxVar ctx
-    set init [dict get $ctx scopes $id init]
-    lappend init $name
-    dict set ctx scopes $id init $init
-}
-
 # ---------------------------------------------------------------------------
 # Operands
 
-proc core::compiler::Op {repr word type {key ""}} {
-    return [list $repr $word $type $key]
+proc core::compiler::Op {repr word type} {
+    return [list $repr $word $type]
 }
 
 proc core::compiler::OpType {op} { return [lindex $op 2] }
-proc core::compiler::OpKey {op}  { return [lindex $op 3] }
 
 proc core::compiler::Never {} {
     return [Op box unit never]
@@ -358,122 +387,64 @@ proc core::compiler::Coerce {op repr} {
     }
 }
 
-# Current static type of the binding KEY.
-proc core::compiler::KeyType {ctx key} {
-    if {[dict exists $ctx facts $key]} {
-        return [dict get $ctx facts $key]
-    }
-    if {[dict exists $ctx types $key]} {
-        return [dict get $ctx types $key]
-    }
-    return any
-}
-
-# Records that the value of OP has type TYPE on the current path.
-proc core::compiler::LearnFact {ctxVar op type} {
-    upvar 1 $ctxVar ctx
-    set key [OpKey $op]
-    if {$key ne ""} {
-        dict set ctx facts $key [core::types::narrow [KeyType $ctx $key] $type]
-    }
-}
-
 # ---------------------------------------------------------------------------
 # Units and blocks
 
-# Returns {UNIT-PROC-NAME CODE PROGRAM-TYPES BINDINGS}.
+# Returns the unit dict {name code types bindings hir}.
 proc core::compiler::GenerateUnit {mode exprs} {
+    variable hir
     variable pending
     variable bindLog
+    variable blockProcs
+    set hir [hir::build $exprs -mode $mode -strict 0]
     set pending {}
     set bindLog {}
-    set program [expr {$mode eq "program"}]
-    set ctx [NewContext 0 $program]
-    set top [dict create kind top materialized 1 frame base init {}]
-    if {$program} {
-        set constants [dict create true [core::value::true] false [core::value::false] \
-            unit [core::value::unit]]
-        foreach name [core::native::names] {
-            dict set constants $name [core::value::native $name]
-        }
-        dict set top names [core::ir::scopeBindNames $exprs]
-        dict set top constants $constants
-    }
-    PushScope ctx top $top
-    set result [CompileSequence ctx $exprs]
+    set blockProcs [dict create]
+    set ctx [NewContext 0 [expr {$mode eq "program"}]]
+    PushScope ctx [hir::top $hir] [dict create materialized 1 frame base locals {}]
+    set result [CompileSequence ctx [hir::roots $hir]]
     Emit ctx "return [BoxWord $result]"
     set name unit[NewId]
     lappend pending [ProcSource $name {base} $ctx]
 
     set types [dict create]
-    dict for {key type} [dict get $ctx types] {
-        if {[string match top:* $key]} {
-            dict set types [string range $key 4 end] $type
+    if {$mode eq "program"} {
+        foreach b [S [hir::top $hir] bindings] {
+            set declaredBy [B $b declaredBy]
+            if {$declaredBy ne "" && [N $declaredBy reachable] && [B $b type] ne ""} {
+                dict set types [B $b name] [hir::bindingType $hir $b]
+            }
         }
     }
-    return [list $name [join $pending \n\n] $types $bindLog]
+    return [dict create name $name code [join $pending \n\n] types $types \
+        bindings $bindLog hir $hir]
 }
 
 proc core::compiler::ProcSource {name params ctx} {
     return "proc $name [list $params] {\n[join [dict get $ctx lines] \n]\n}"
 }
 
-# Compiles a block node. SELF-KEY/PROC-NAME are given when the block is the
-# value of a binding: calls through that binding inside the body are then
-# typed with the block's own (inferred) result type.
-proc core::compiler::CompileBlock {ctxVar node {selfKey ""} {procName ""}} {
+proc core::compiler::CompileBlock {ctxVar e} {
     upvar 1 $ctxVar outer
     variable pending
-    variable bindLog
-    set params [core::ir::blockParams $node]
-    set arity [llength $params]
-    if {$procName eq ""} {
-        set procName ::core::compiler::code::block[NewId]
-    }
-
-    # Result type inference. Without self-reference one pass suffices. With
-    # it, assume a result type, compile, and repeat with the inferred type
-    # until it is stable (sound by induction over calls); give up with any.
-    set assumed never
-    set attempts [expr {$selfKey eq "" ? 1 : 3}]
-    for {set attempt 1} {$attempt <= $attempts} {incr attempt} {
-        if {$attempt == $attempts && $attempts > 1} {
-            set assumed any
-        }
-        set saved [list $pending $bindLog]
-        lassign [CompileBlockBody outer $node $procName $selfKey $assumed] resultType source
-        if {$selfKey eq "" || $resultType eq $assumed || $assumed eq "any"} {
-            break
-        }
-        lassign $saved pending bindLog
-        set assumed $resultType
-    }
-    lappend pending $source
-
-    set type [list block $procName $arity $resultType]
+    set procName [BlockProc $e]
+    lappend pending [CompileBlockBody outer $e $procName]
+    variable hir
     set t [NewTemp]
-    Emit outer "set $t \[core::value::block [Word $params] [Word [core::ir::blockBody $node]] [CurrentFrameExpr $outer] [Word $procName]\]"
-    return [Op box "\$$t" $type]
+    Emit outer "set $t \[core::value::block [Word [hir::lower::params $hir $e]] [Word [hir::lower::body $hir $e]] [CurrentFrameExpr $outer] [Word $procName]\]"
+    return [Op box "\$$t" [Type $e]]
 }
 
-# One compilation of a block body. Returns {RESULT-TYPE PROC-SOURCE}.
-proc core::compiler::CompileBlockBody {outerVar node procName selfKey assumed} {
+# Returns the proc source of block expression E.
+proc core::compiler::CompileBlockBody {outerVar e procName} {
     upvar 1 $outerVar outer
-    set params [core::ir::blockParams $node]
-    set body [core::ir::blockBody $node]
-
     set ctx [NewContext 1 [dict get $outer program]]
-    dict set ctx types [dict get $outer types]
-    dict set ctx facts [dict get $outer facts]
-    if {$selfKey ne ""} {
-        dict set ctx types $selfKey [list block $procName [llength $params] $assumed]
-    }
 
-    # Enclosing scopes are all materialized (each contains this block node).
+    # Enclosing scopes are all materialized (a block is created in each).
     # Rebuild their frame variables from the captured frame's parent chain.
     set previous ""
     foreach id [lreverse [dict get $outer order]] {
-        set frame [FrameVar $id]
+        set frame [dict get $outer scopes $id frame]
         if {$previous eq ""} {
             Emit ctx "set $frame \$captured"
         } else {
@@ -485,40 +456,39 @@ proc core::compiler::CompileBlockBody {outerVar node procName selfKey assumed} {
         PushScope ctx $id [dict get $outer scopes $id]
     }
 
-    set scopeId [OpenScope ctx $body {$captured} $params]
-    set frame [FrameVar $scopeId]
+    set scopeId [N $e bodyScope]
+    OpenScope ctx $scopeId {$captured}
+    set frame [dict get $ctx scopes $scopeId frame]
     set index 0
-    foreach param $params {
+    foreach b [N $e params] {
         if {[dict get $ctx scopes $scopeId materialized]} {
-            Emit ctx "core::env::define \$$frame [Word $param] \[lindex \$argv $index\]"
+            Emit ctx "core::env::define \$$frame [Word [B $b name]] \[lindex \$argv $index\]"
         } else {
             set var v[NewId]
             Emit ctx "set $var \[lindex \$argv $index\]"
-            dict set ctx scopes $scopeId locals $param [list box "\$$var"]
+            dict set ctx scopes $scopeId locals $b [list box "\$$var"]
         }
-        MarkBound ctx $scopeId $param
         incr index
     }
-    DeclareScope ctx $scopeId $body
-    set result [CompileSequence ctx $body]
+    DeclareScope ctx $scopeId
+    set result [CompileSequence ctx [N $e body]]
     if {[OpType $result] ne "never"} {
         Emit ctx "return [BoxWord $result]"
     }
-    set resultType [core::types::lub [OpType $result] [dict get $ctx returnType]]
-    return [list $resultType [ProcSource [namespace tail $procName] {captured argv} $ctx]]
+    return [ProcSource [namespace tail $procName] {captured argv} $ctx]
 }
 
 # ---------------------------------------------------------------------------
 # Expressions
 #
-# Each Compile* procedure emits the commands that evaluate a node and returns
-# its operand.
+# Each Compile* procedure emits the commands that evaluate an expression and
+# returns its operand.
 
 proc core::compiler::CompileSequence {ctxVar exprs} {
     upvar 1 $ctxVar ctx
     set result [Op box unit unit]
-    foreach expr $exprs {
-        set result [CompileExpr ctx $expr]
+    foreach e $exprs {
+        set result [CompileExpr ctx $e]
         if {[OpType $result] eq "never"} {
             # The rest of the sequence cannot run.
             break
@@ -527,42 +497,49 @@ proc core::compiler::CompileSequence {ctxVar exprs} {
     return $result
 }
 
-proc core::compiler::CompileExpr {ctxVar node} {
+proc core::compiler::CompileExpr {ctxVar e} {
     upvar 1 $ctxVar ctx
-    core::ir::checkShape $node
-    switch -- [core::ir::op $node] {
+    set op [CompileForm ctx $e]
+    if {[OpType $op] ne "never"} {
+        set op [lreplace $op 2 2 [Type $e]]
+    }
+    return $op
+}
+
+proc core::compiler::CompileForm {ctxVar e} {
+    upvar 1 $ctxVar ctx
+    switch -- [Kind $e] {
         const {
-            set value [core::ir::literalValue $node]
+            set value [N $e value]
             if {[core::value::kind $value] eq "int"} {
                 return [Op int [Word [core::value::intOf $value]] int]
             }
-            return [Op box [Word $value] [core::types::ofValue $value]]
+            return [Op box [Word $value] any]
         }
         ref {
-            return [CompileRef ctx [lindex $node 1]]
+            return [CompileRef ctx $e]
         }
         bind {
-            return [CompileBind ctx [lindex $node 1] [lindex $node 2]]
+            return [CompileBind ctx $e]
         }
         block {
-            return [CompileBlock ctx $node]
+            return [CompileBlock ctx $e]
         }
         call {
-            return [CompileCall ctx $node]
+            return [CompileCall ctx $e]
         }
         if {
-            return [CompileIf ctx $node]
+            return [CompileIf ctx $e]
         }
         loop {
-            return [CompileLoop ctx $node]
+            return [CompileLoop ctx $e]
         }
         return {
-            set value [CompileExpr ctx [lindex $node 1]]
+            set value [CompileExpr ctx [N $e value]]
             if {[OpType $value] eq "never"} {
                 return $value
             }
             if {[dict get $ctx inBlock]} {
-                dict set ctx returnType [core::types::lub [dict get $ctx returnType] [OpType $value]]
                 Emit ctx "return [BoxWord $value]"
             } else {
                 Emit ctx "return -code return [BoxWord $value]"
@@ -571,17 +548,15 @@ proc core::compiler::CompileExpr {ctxVar node} {
         }
         break {
             set value [Op box unit unit]
-            if {[llength $node] == 2} {
-                set value [CompileExpr ctx [lindex $node 1]]
+            if {[N $e value] ne ""} {
+                set value [CompileExpr ctx [N $e value]]
                 if {[OpType $value] eq "never"} {
                     return $value
                 }
             }
-            set loops [dict get $ctx loops]
-            if {$loops ne ""} {
-                set var [lindex $loops end]
-                dict set ctx breakTypes $var \
-                    [core::types::lub [dict get $ctx breakTypes $var] [OpType $value]]
+            set loop [N $e target]
+            if {[dict exists $ctx loops $loop]} {
+                set var [dict get $ctx loops $loop]
                 Emit ctx "set $var [BoxWord $value]"
                 Emit ctx "break"
             } else {
@@ -590,189 +565,157 @@ proc core::compiler::CompileExpr {ctxVar node} {
             return [Never]
         }
         continue {
-            if {[dict get $ctx loops] ne ""} {
+            if {[dict exists $ctx loops [N $e target]]} {
                 Emit ctx "continue"
             } else {
                 Emit ctx "return -code continue"
             }
             return [Never]
         }
-        ok - error-value {
-            set value [CompileExpr ctx [lindex $node 1]]
+        ok - error {
+            set value [CompileExpr ctx [N $e value]]
             if {[OpType $value] eq "never"} {
                 return $value
             }
-            set tag [expr {[core::ir::op $node] eq "ok" ? "ok" : "error"}]
             set t [NewTemp]
-            Emit ctx "set $t \[list result $tag [BoxWord $value]\]"
+            Emit ctx "set $t \[list result [Kind $e] [BoxWord $value]\]"
             return [Op box "\$$t" result]
         }
     }
 }
 
-proc core::compiler::CompileRef {ctxVar name} {
+proc core::compiler::CompileRef {ctxVar e} {
     upvar 1 $ctxVar ctx
+    set name [N $e name]
+    set b [N $e binding]
     set t [NewTemp]
-    foreach id [lreverse [dict get $ctx order]] {
-        set scope [dict get $ctx scopes $id]
-        set key $id:$name
-        if {[dict get $scope kind] eq "top"} {
-            if {[dict get $ctx program]} {
-                if {$name in [dict get $scope names]} {
-                    Emit ctx "set $t \[core::env::lookupLocal \$base [Word $name]\]"
-                    return [Op box "\$$t" [KeyType $ctx $key] $key]
-                }
-                if {[dict exists $scope constants $name]} {
-                    set value [dict get $scope constants $name]
-                    return [Op box [Word $value] [core::types::ofValue $value]]
-                }
-            }
-            Emit ctx "set $t \[core::env::lookup \$[dict get $scope frame] [Word $name]\]"
+    if {$b eq ""} {
+        # Unbound: the lookup raises the interpreter's error.
+        Emit ctx "set $t \[core::env::lookup \$base [Word $name]\]"
+        return [Never]
+    }
+    switch -- [B $b kind] {
+        root {
+            return [Op box [Word [B $b value]] any]
+        }
+        ambient {
+            Emit ctx "set $t \[core::env::lookup \$base [Word $name]\]"
             return [Op box "\$$t" any]
         }
-        if {$name ni [dict get $scope names]} {
-            continue
-        }
-        if {[dict get $scope materialized]} {
-            Emit ctx "set $t \[core::env::lookupLocal \$[dict get $scope frame] [Word $name]\]"
-            return [Op box "\$$t" [KeyType $ctx $key] $key]
-        }
-        if {$name in [dict get $scope init]} {
-            lassign [dict get $scope locals $name] repr word
-            return [Op $repr $word [KeyType $ctx $key] $key]
-        }
+    }
+    if {[N $e init] eq "no"} {
         Emit ctx "core::env::usedBeforeBinding [Word $name]"
         return [Never]
     }
-    error "core::compiler: no top scope"
+    set scope [dict get $ctx scopes [B $b scope]]
+    if {[dict get $scope materialized]} {
+        Emit ctx "set $t \[core::env::lookupLocal \$[dict get $scope frame] [Word $name]\]"
+        return [Op box "\$$t" any]
+    }
+    lassign [dict get $scope locals $b] repr word
+    return [Op $repr $word any]
 }
 
-proc core::compiler::CompileBind {ctxVar name valueNode} {
+proc core::compiler::CompileBind {ctxVar e} {
     upvar 1 $ctxVar ctx
-    set id [InnermostScopeId $ctx]
-    set scope [dict get $ctx scopes $id]
-    set key $id:$name
-    # Only the first bind of a name gives the binding its type; any later
-    # bind of it in the same scope fails with a duplicate-binding error.
-    set first [expr {$name ni [dict get $scope init]}]
-    set typed [expr {$first && ([dict get $scope kind] ne "top" || [dict get $ctx program])}]
-
-    if {[core::ir::op $valueNode] eq "block" && $typed} {
-        core::ir::checkShape $valueNode
-        set value [CompileBlock ctx $valueNode $key]
-    } else {
-        set value [CompileExpr ctx $valueNode]
-    }
+    variable bindLog
+    set b [N $e binding]
+    set name [N $e name]
+    set value [CompileExpr ctx [N $e value]]
     if {[OpType $value] eq "never"} {
         return $value
     }
-    if {$typed} {
-        dict set ctx types $key [OpType $value]
-    }
-    variable bindLog
     lappend bindLog [list $name [OpType $value]]
 
+    if {[B $b kind] eq "ambient"} {
+        Emit ctx "core::env::define \$base [Word $name] [BoxWord $value]"
+        return $value
+    }
+    set scope [dict get $ctx scopes [B $b scope]]
     if {[dict get $scope materialized]} {
-        if {$first} {
-            MarkBound ctx $id $name
-        }
+        # A duplicate raises here, at run time.
         Emit ctx "core::env::define \$[dict get $scope frame] [Word $name] [BoxWord $value]"
-    } elseif {!$first} {
+        return [expr {[N $e duplicate] ? [Never] : $value}]
+    }
+    if {[N $e duplicate]} {
         Emit ctx "core::env::duplicateBinding [Word $name]"
         return [Never]
-    } else {
-        lassign $value repr word
-        if {![IsLiteral $word] && ![regexp {^\$[tv][0-9]+$} $word]} {
-            set var v[NewId]
-            Emit ctx "set $var $word"
-            set word "\$$var"
-        }
-        dict set ctx scopes $id locals $name [list $repr $word]
-        MarkBound ctx $id $name
     }
-    return [lreplace $value 3 3 $key]
+    lassign $value repr word
+    if {![IsLiteral $word] && ![regexp {^\$[tv][0-9]+$} $word]} {
+        set var v[NewId]
+        Emit ctx "set $var $word"
+        set word "\$$var"
+    }
+    dict set ctx scopes [B $b scope] locals $b [list $repr $word]
+    return $value
 }
 
 # CALLEE-VAR and ARGS-VAR, if given, receive the operands of callee and argOps.
-proc core::compiler::CompileCall {ctxVar node {calleeVar ""} {argsVar ""}} {
+proc core::compiler::CompileCall {ctxVar e {calleeVar ""} {argsVar ""}} {
     upvar 1 $ctxVar ctx
     if {$calleeVar ne ""} {
         upvar 1 $calleeVar callee $argsVar argOps
     }
-    set callee [CompileExpr ctx [lindex $node 1]]
+    set callee [CompileExpr ctx [N $e callee]]
     if {[OpType $callee] eq "never"} {
         return $callee
     }
     set argOps {}
-    foreach argNode [lrange $node 2 end] {
-        set arg [CompileExpr ctx $argNode]
-        if {[OpType $arg] eq "never"} {
-            return $arg
+    foreach arg [N $e args] {
+        set op [CompileExpr ctx $arg]
+        if {[OpType $op] eq "never"} {
+            return $op
         }
-        lappend argOps $arg
+        lappend argOps $op
     }
 
-    set calleeType [OpType $callee]
-    set resultType any
-    switch -- [lindex $calleeType 0] {
+    variable hir
+    lassign [N $e target] targetKind targetId
+    switch -- $targetKind {
         native {
-            if {[llength $calleeType] == 2} {
-                set name [lindex $calleeType 1]
-                set result [CompileNativeCall ctx $callee $name $argOps]
-                if {$result ne ""} {
-                    return $result
-                }
-            }
+            set name [dict get $hir symbols $targetId name]
+            return [CompileNativeCall ctx $e $callee $name $argOps]
         }
         block {
-            if {[llength $calleeType] == 4} {
-                lassign $calleeType _ procName arity blockResult
-                if {$arity == [llength $argOps]} {
-                    set resultType $blockResult
-                    if {[dict get $ctx program]} {
-                        set t [NewTemp]
-                        Emit ctx "set $t \[$procName \[lindex [BoxWord $callee] 3\] \[list [BoxWords $argOps]\]\]"
-                        return [Op box "\$$t" $resultType]
-                    }
-                }
+            if {[dict get $ctx program]
+                    && [llength [N $targetId params]] == [llength $argOps]} {
+                set t [NewTemp]
+                Emit ctx "set $t \[[BlockProc $targetId] \[lindex [BoxWord $callee] 3\] \[list [BoxWords $argOps]\]\]"
+                return [Op box "\$$t" any]
             }
         }
     }
-    return [GenericCall ctx $callee $argOps $resultType]
+    return [GenericCall ctx $callee $argOps]
 }
 
 proc core::compiler::BoxWords {ops} {
     return [join [lmap op $ops {BoxWord $op}] { }]
 }
 
-proc core::compiler::GenericCall {ctxVar callee argOps resultType} {
+proc core::compiler::GenericCall {ctxVar callee argOps} {
     upvar 1 $ctxVar ctx
     set t [NewTemp]
     Emit ctx "set $t \[core::runtime::callValue [BoxWord $callee] \[list [BoxWords $argOps]\]\]"
-    return [Op box "\$$t" $resultType]
+    return [Op box "\$$t" any]
 }
 
 # A call of the native NAME, in order of preference:
-#   1. a type test decided by the argument's static type (a constant)
+#   1. a type test HIR decided (a constant)
 #   2. an intrinsic
 #   3. a type test as an inline membership check
-#   4. a generic call typed by the native's signature
+#   4. a generic call
 # Returns the operand.
-proc core::compiler::CompileNativeCall {ctxVar callee name argOps} {
+proc core::compiler::CompileNativeCall {ctxVar e callee name argOps} {
     upvar 1 $ctxVar ctx
     variable intrinsics
     set meta [core::native::metadata $name]
     set arity [dict get $meta arity]
     if {$arity ne "*" && $arity != [llength $argOps]} {
-        return [GenericCall ctx $callee $argOps any]
+        return [GenericCall ctx $callee $argOps]
     }
-    set testsType [dict get $meta testsType]
-    if {$testsType ne ""} {
-        set param [lindex [dict get $meta paramTypes] 0]
-        set folded [FoldTypeTest [lindex $argOps 0] $testsType $param]
-        if {$folded ne ""} {
-            return $folded
-        }
+    if {[N $e known] ne ""} {
+        return [Op bool [N $e known] bool]
     }
     if {[dict exists $intrinsics $name]} {
         set result [{*}[dict get $intrinsics $name] ctx $name $argOps]
@@ -780,18 +723,12 @@ proc core::compiler::CompileNativeCall {ctxVar callee name argOps} {
             return $result
         }
     }
+    set testsType [dict get $meta testsType]
     if {$testsType ne ""} {
+        set param [lindex [dict get $meta paramTypes] 0]
         return [InlineTypeTest ctx $name [lindex $argOps 0] $testsType $param]
     }
-    lassign [core::types::nativeSignature $name] paramTypes resultType
-    set result [GenericCall ctx $callee $argOps $resultType]
-    # The call returned, so every argument had its required kind.
-    foreach arg $argOps paramType $paramTypes {
-        if {$paramType ne ""} {
-            LearnFact ctx $arg $paramType
-        }
-    }
-    return $result
+    return [GenericCall ctx $callee $argOps]
 }
 
 # ---------------------------------------------------------------------------
@@ -808,16 +745,15 @@ proc core::compiler::CompileNativeCall {ctxVar callee name argOps} {
 proc core::compiler::RequireKind {ctxVar name kind argOps} {
     upvar 1 $ctxVar ctx
     foreach arg $argOps {
-        set argKind [core::types::kindOf [OpType $arg]]
+        set argKind [hir::types::kindOf [OpType $arg]]
         if {$argKind ne "" && $argKind ne $kind} {
             return ""
         }
     }
     set words {}
     foreach arg $argOps {
-        if {[core::types::kindOf [OpType $arg]] ne $kind} {
+        if {[hir::types::kindOf [OpType $arg]] ne $kind} {
             Emit ctx "core::value::expect $kind [BoxWord $arg] [Word $name]"
-            LearnFact ctx $arg $kind
             set arg [lreplace $arg 2 2 $kind]
         }
         if {$kind eq "int"} {
@@ -854,8 +790,8 @@ proc core::compiler::IntrinsicCompare {operator ctxVar name argOps} {
 proc core::compiler::IntrinsicValueEqual {ctxVar name argOps} {
     upvar 1 $ctxVar ctx
     lassign $argOps a b
-    set ka [core::types::kindOf [OpType $a]]
-    set kb [core::types::kindOf [OpType $b]]
+    set ka [hir::types::kindOf [OpType $a]]
+    set kb [hir::types::kindOf [OpType $b]]
     set t [NewTemp]
     if {$ka eq "" || $kb eq "" || $ka in {block native} || $kb in {block native}} {
         return ""
@@ -901,49 +837,29 @@ proc core::compiler::IntrinsicList {ctxVar name argOps} {
     return [Op box "\$$t" list]
 }
 
-# ---------------------------------------------------------------------------
-# Type tests
-#
+proc core::compiler::IntrinsicResultIs {tag ctxVar name argOps} {
+    upvar 1 $ctxVar ctx
+    set arg [lindex $argOps 0]
+    set argKind [hir::types::kindOf [OpType $arg]]
+    if {$argKind ne "" && $argKind ne "result"} {
+        return [Op bool 0 bool]
+    }
+    set word [BoxWord $arg]
+    set t [NewTemp]
+    Emit ctx "set $t \[expr {\[lindex $word 0\] eq {result} && \[lindex $word 1\] eq {$tag}}\]"
+    return [Op bool "\$$t" bool]
+}
+
 # A native declared with -tests-type T (see core/native.tcl) returns exactly
 # core::type::acceptsValue T ARG, after the runtime has rejected arguments
 # not of its parameter kind P. The runtime verifies this contract in the
-# reference implementation, so the compiler may rely on it.
-
-# The semantic type (core/type.tcl) an operand's static type implies.
-proc core::compiler::SemanticType {type} {
-    if {$type eq "never"} {
-        return any
-    }
-    if {[llength $type] > 1 && [lindex $type 0] in {native block}} {
-        return [lindex $type 0]
-    }
-    return $type
-}
-
-# A constant operand if the argument's static type decides the test of
-# TESTS-TYPE (with parameter type PARAM); otherwise "".
-proc core::compiler::FoldTypeTest {arg testsType param} {
-    set type [SemanticType [OpType $arg]]
-    if {$type eq "any" || ![core::type::subtype $type $param]} {
-        # Unknown, or the call raises the parameter kind error at run time.
-        return ""
-    }
-    if {[core::type::subtype $type $testsType]} {
-        return [Op bool 1 bool]
-    }
-    if {[core::type::base $type] ne [core::type::base $testsType]} {
-        return [Op bool 0 bool]
-    }
-    return ""
-}
-
-# Inline code for the type test: the parameter kind check, then membership.
+# reference implementation, so the compiler may rely on it. Inline code: the
+# parameter kind check, then membership.
 proc core::compiler::InlineTypeTest {ctxVar name arg testsType param} {
     upvar 1 $ctxVar ctx
     set word [BoxWord $arg]
-    if {$param ne "any" && [core::types::kindOf [OpType $arg]] ne $param} {
+    if {$param ne "any" && [hir::types::kindOf [OpType $arg]] ne $param} {
         Emit ctx "core::value::expect $param $word [Word $name]"
-        LearnFact ctx $arg $param
     }
     if {$testsType eq $param} {
         return [Op bool 1 bool]
@@ -957,28 +873,18 @@ proc core::compiler::InlineTypeTest {ctxVar name arg testsType param} {
     return [Op bool "\$$t" bool]
 }
 
-proc core::compiler::IntrinsicResultIs {tag ctxVar name argOps} {
-    upvar 1 $ctxVar ctx
-    set arg [lindex $argOps 0]
-    set argKind [core::types::kindOf [OpType $arg]]
-    if {$argKind ne "" && $argKind ne "result"} {
-        return [Op bool 0 bool]
-    }
-    set word [BoxWord $arg]
-    set t [NewTemp]
-    Emit ctx "set $t \[expr {\[lindex $word 0\] eq {result} && \[lindex $word 1\] eq {$tag}}\]"
-    return [Op bool "\$$t" bool]
-}
-
 # ---------------------------------------------------------------------------
 # Control flow
 
-proc core::compiler::CompileIf {ctxVar node} {
+proc core::compiler::CompileIf {ctxVar e} {
     upvar 1 $ctxVar ctx
-    set condition [lindex $node 1]
-    set refining [core::refine::isRefiningCondition $condition]
+    set condition [N $e condition]
+    set refining [expr {[Kind $condition] eq "call" && [Kind [N $condition callee]] eq "ref"}]
     if {$refining} {
         set test [CompileCall ctx $condition callee argOps]
+        if {[OpType $test] ne "never"} {
+            set test [lreplace $test 2 2 [Type $condition]]
+        }
     } else {
         set test [CompileExpr ctx $condition]
     }
@@ -990,21 +896,7 @@ proc core::compiler::CompileIf {ctxVar node} {
     } else {
         set outcome [NewTemp]
         Emit ctx "set $outcome \[core::runtime::conditionOutcome [BoxWord $test]\]"
-        LearnFact ctx $test bool
         set outcome "\$$outcome"
-    }
-
-    # Refinement facts of the predicate, per outcome: {OPERAND TYPE ...}.
-    set branchFacts [dict create 1 {} 0 {}]
-    if {$refining && [lindex [OpType $callee] 0] eq "native" && [llength [OpType $callee]] == 2} {
-        foreach branchOutcome {1 0} {
-            set rules [core::native::refinementRules [lindex [OpType $callee] 1] $branchOutcome]
-            foreach {index fact} $rules {
-                if {$index < [llength $argOps]} {
-                    dict lappend branchFacts $branchOutcome [lindex $argOps $index] $fact
-                }
-            }
-        }
     }
 
     set outcomes {1 0}
@@ -1014,29 +906,29 @@ proc core::compiler::CompileIf {ctxVar node} {
     set parentFrame [CurrentFrameExpr $ctx]
     set compiled [dict create]
     foreach branchOutcome $outcomes {
+        set role [expr {$branchOutcome ? "then" : "else"}]
         set savedLines [dict get $ctx lines]
-        set savedFacts [dict get $ctx facts]
         dict set ctx lines {}
         if {[llength $outcomes] == 2} {
             Indent ctx 1
         }
-        foreach {arg type} [dict get $branchFacts $branchOutcome] {
-            LearnFact ctx $arg $type
-        }
-        set body [core::ir::blockBody [lindex $node [expr {$branchOutcome ? 2 : 3}]]]
-        set id [OpenScope ctx $body $parentFrame]
-        DeclareScope ctx $id $body
+        set id [N $e ${role}Scope]
+        OpenScope ctx $id $parentFrame
+        DeclareScope ctx $id
         if {$refining && [dict get $ctx scopes $id materialized]} {
-            Emit ctx "core::refine::install \$[FrameVar $id] \[core::refine::factsFromCall [BoxWord $callee] [Word [lrange $condition 2 end]] $parentFrame $branchOutcome\]"
+            # Refinements are observable in the frame: install what the
+            # runtime rule proves for the callee value actually called.
+            variable hir
+            set argNodes [lmap arg [N $condition args] {Lower $arg}]
+            Emit ctx "core::refine::install \$[dict get $ctx scopes $id frame] \[core::refine::factsFromCall [BoxWord $callee] [Word $argNodes] $parentFrame $branchOutcome\]"
         }
-        set value [CompileSequence ctx $body]
+        set value [CompileSequence ctx [N $e ${role}Body]]
         PopScope ctx
         if {[llength $outcomes] == 2} {
             Indent ctx -1
         }
         dict set compiled $branchOutcome [list [dict get $ctx lines] $value]
         dict set ctx lines $savedLines
-        dict set ctx facts $savedFacts
     }
 
     if {[llength $outcomes] == 1} {
@@ -1044,18 +936,19 @@ proc core::compiler::CompileIf {ctxVar node} {
         foreach line $lines {
             dict lappend ctx lines $line
         }
-        return [lreplace $value 3 3 ""]
+        return $value
     }
 
     # Common representation of the branch values.
-    set type never
     set reprs {}
     dict for {branchOutcome entry} $compiled {
         set value [lindex $entry 1]
-        set type [core::types::lub $type [OpType $value]]
         if {[OpType $value] ne "never"} {
             lappend reprs [lindex $value 0]
         }
+    }
+    if {$reprs eq ""} {
+        set never 1
     }
     set reprs [lsort -unique $reprs]
     set repr [expr {[llength $reprs] == 1 ? [lindex $reprs 0] : "box"}]
@@ -1077,29 +970,28 @@ proc core::compiler::CompileIf {ctxVar node} {
         }
     }
     Emit ctx "\}"
-    return [Op $repr "\$$result" $type]
+    if {[info exists never]} {
+        return [Never]
+    }
+    return [Op $repr "\$$result" any]
 }
 
-proc core::compiler::CompileLoop {ctxVar node} {
+proc core::compiler::CompileLoop {ctxVar e} {
     upvar 1 $ctxVar ctx
-    set body [core::ir::blockBody [lindex $node 1]]
     set result [NewTemp]
     set parentFrame [CurrentFrameExpr $ctx]
-    set savedFacts [dict get $ctx facts]
     Emit ctx "while 1 \{"
     Indent ctx 1
-    set id [OpenScope ctx $body $parentFrame]
-    DeclareScope ctx $id $body
-    dict lappend ctx loops $result
-    dict set ctx breakTypes $result never
-    CompileSequence ctx $body
-    dict set ctx loops [lrange [dict get $ctx loops] 0 end-1]
-    set type [dict get $ctx breakTypes $result]
+    set id [N $e bodyScope]
+    OpenScope ctx $id $parentFrame
+    DeclareScope ctx $id
+    dict set ctx loops $e $result
+    CompileSequence ctx [N $e body]
+    dict unset ctx loops $e
     PopScope ctx
     Indent ctx -1
     Emit ctx "\}"
-    dict set ctx facts $savedFacts
-    return [Op box "\$$result" $type]
+    return [Op box "\$$result" any]
 }
 
 core::registerBackend compile core::compiler::runSequence core::compiler::runProgram

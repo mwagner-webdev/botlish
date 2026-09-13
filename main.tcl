@@ -1,11 +1,12 @@
 # main.tcl -- example runner.
 #
-#   tclsh main.tcl [-backend interp|compile] [-code] [FILE.ir ...]
+#   tclsh main.tcl [-backend interp|compile] [-code] [-hir] [FILE.ir ...]
 #
 # Runs the given program files (default: every examples/*.ir) and prints
 # each program's value, with runtime evidence shown as "text"#{Type}. With
 # -backend compile it also prints the inferred types of program-level
-# bindings; -code prints the Tcl code the compiler generates.
+# bindings; -code prints the Tcl code the compiler generates; -hir prints the
+# program's semantic HIR (hir::format).
 #
 # For every Block in the result (directly or as a list element) the runner
 # also prints the refinements visible in the Block's captured environment, so
@@ -22,9 +23,12 @@ proc probeValues {value} {
     }
 }
 
-proc runFile {path showCode} {
+proc runFile {path showCode showHir} {
     puts "== [file tail $path] ([core::useBackend])"
     set program [core::loadProgramFile $path]
+    if {$showHir} {
+        puts [hir::format [hir::build $program -strict 0]]
+    }
     if {$showCode} {
         puts [core::compiler::generatedCode $program]
     }
@@ -35,7 +39,7 @@ proc runFile {path showCode} {
     puts "   value: [core::value::show $value 1]"
     if {[core::useBackend] eq "compile"} {
         dict for {name type} [core::compiler::programTypes $program] {
-            puts "   type:  $name : [core::types::show $type]"
+            puts "   type:  $name : [hir::types::show $type]"
         }
     }
     set index 0
@@ -55,11 +59,13 @@ proc runFile {path showCode} {
 
 set files {}
 set showCode 0
+set showHir 0
 for {set i 0} {$i < [llength $argv]} {incr i} {
     set arg [lindex $argv $i]
     switch -- $arg {
         -backend { core::useBackend [lindex $argv [incr i]] }
         -code    { set showCode 1 }
+        -hir     { set showHir 1 }
         default  { lappend files $arg }
     }
 }
@@ -68,6 +74,6 @@ if {$files eq ""} {
 }
 set failures 0
 foreach path $files {
-    incr failures [runFile $path $showCode]
+    incr failures [runFile $path $showCode $showHir]
 }
 exit [expr {$failures > 0}]

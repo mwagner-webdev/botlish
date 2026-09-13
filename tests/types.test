@@ -51,15 +51,15 @@ test type-6 {lub keeps shared evidence only} -body {
          [core::type::lub Emailish int]
 } -result {{refined str Emailish} str {refined str NonEmpty} any}
 
-test type-7 {compiler types delegate to core types} -body {
-    list [core::types::kindOf str] \
-         [core::types::kindOf {refined str {Emailish}}] \
-         [core::types::kindOf {native +}] \
-         [core::types::kindOf never] \
-         [core::types::narrow any Emailish] \
-         [core::types::lub never Emailish] \
-         [core::types::lub {native +} {native -}] \
-         [core::types::narrow {native +} native]
+test type-7 {HIR static types delegate to core types} -body {
+    list [hir::types::kindOf str] \
+         [hir::types::kindOf {refined str {Emailish}}] \
+         [hir::types::kindOf {native +}] \
+         [hir::types::kindOf never] \
+         [hir::types::narrow any Emailish] \
+         [hir::types::lub never Emailish] \
+         [hir::types::lub {native +} {native -}] \
+         [hir::types::narrow {native +} native]
 } -result {str str native {} {refined str Emailish} {refined str Emailish} native {native +}}
 
 test type-8 {validator types: acceptsValue and validate} -body {
