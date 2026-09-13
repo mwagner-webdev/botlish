@@ -73,13 +73,13 @@ foreach {name impl result} {
     >= greaterEqual bool
 } {
     core::native::register $name -arity 2 -impl core::primitives::$impl \
-        -param-types {int int} -result-type $result
+        -param-types {int int} -result-type $result -runtime bigint
 }
 unset name impl result
 
 core::native::register ==   -arity 2 -impl core::primitives::valueEqual \
-    -param-types {any any} -result-type bool
+    -param-types {any any} -result-type bool -runtime structural-equality
 core::native::register eq   -arity 2 -impl core::primitives::stringEqual \
     -param-types {str str} -result-type bool
 core::native::register list -arity * -impl core::primitives::makeList \
-    -result-type list
+    -result-type list -runtime list-alloc

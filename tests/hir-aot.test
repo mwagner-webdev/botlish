@@ -1,0 +1,309 @@
+# hir-aot.test -- closed-AOT readiness analysis (hir/aot.tcl).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot examples stdlib corpus.tcl]
+
+proc aotOf {hir} {
+    return [hir::aot::analyze $hir]
+}
+
+# The region bound to NAME (<program> for the top level).
+proc aotRegion {analysis name} {
+    dict for {id region} [dict get $analysis regions] {
+        if {[dict get $region name] eq $name} {
+            return $region
+        }
+    }
+    error "no region named $name"
+}
+
+proc aotSource {text} {
+    return [aotOf [surface::compile $text t.bot]]
+}
+
+# {status dispatch} of region NAME.
+proc aotStatus {analysis name} {
+    set region [aotRegion $analysis $name]
+    return [list [dict get $region status] [dict get $region dispatch]]
+}
+
+proc aotBlockerKinds {analysis name} {
+    return [lmap b [dict get [aotRegion $analysis $name] blockers] {dict get $b kind}]
+}
+
+proc aotFacts {analysis name kind} {
+    return [lmap f [dict get [aotRegion $analysis $name] facts] {
+        if {[dict get $f kind] ne $kind} continue
+        set f
+    }]
+}
+
+# ---------------------------------------------------------------------------
+# Calls
+
+test hir-aot-1 {exact native calls are known; runtime needs are facts, not blockers} -body {
+    set a [aotOf [hirOf {call {ref +} {const 1} {call {ref *} {const 2} {const 3}}}]]
+    set region [aotRegion $a <program>]
+    list [aotStatus $a <program>] \
+         [lmap f [aotFacts $a <program> native-call] {list [dict get $f native] [dict get $f runtime] [dict get $f argKinds]}] \
+         [dict get $region requirements] [dict get $region blockers]
+} -result {{closed closed} {{+ bigint {int int}} {* bigint {int int}}} bigint {}}
+
+test hir-aot-2 {exact Botlish function calls are known, with tail and self flags} -body {
+    set a [aotSource "fn count(n):\n    if n == 0:\n        return 0\n    count(n - 1)\n\nfn start():\n    1 + count(5)\n\nstart()"]
+    list [lmap f [aotFacts $a count direct-call] {dict filter $f key name tail self}] \
+         [lmap f [aotFacts $a start direct-call] {dict filter $f key name tail self}] \
+         [dict get [aotRegion $a start] callees] [aotStatus $a start] \
+         [dict get [aotRegion $a start] transitive]
+} -result {{{name count tail 1 self 1}} {{name count tail 0 self 0}} e2 {closed closed} guarded}
+
+test hir-aot-3 {a closure call with a known target is direct; the closure needs an environment} -body {
+    set a [aotSource "fn make_adder(x):\n    fn add(y):\n        x + y\n    add\n\nadd10 = make_adder(10)\nadd10(32)"]
+    list [lmap f [aotFacts $a <program> direct-call] {dict get $f name}] \
+         [lmap f [aotFacts $a make_adder closure] {dict get $f kind}] \
+         [dict get [aotRegion $a add] captures] \
+         [dict get [aotRegion $a <program>] requirements] \
+         [aotStatus $a <program>]
+} -result {{make_adder add} closure {{binding b3 name x class value}} closure-env {closed closed}}
+
+test hir-aot-4 {a call of a block whose target is not known is an indirect call, not a blocker} -body {
+    set a [aotOf [hirOf \
+        {bind pick {block {flag} {if {ref flag} {block {} {block {} {const 1}}} {block {} {block {} {const 2}}}}}} \
+        {call {call {ref pick} {ref true}}}]]
+    list [lmap f [aotFacts $a <program> indirect-call] {dict get $f calleeKind}] \
+         [aotStatus $a <program>] [dict get [aotRegion $a <program>] requirements]
+} -result {block {closed closed} indirect-call}
+
+test hir-aot-5 {a call of a native whose identity is not known is an indirect call} -body {
+    set a [aotOf [hirOf  {bind pick {block {flag} {if {ref flag} {block {} {ref +}} {block {} {ref -}}}}}  {call {call {ref pick} {ref true}} {const 1} {const 2}}]]
+    list [lmap f [aotFacts $a <program> indirect-call] {dict get $f calleeKind}]  [aotStatus $a <program>]
+} -result {native {closed closed}}
+
+test hir-aot-6 {an unknown callable is a semantic blocker: dispatch is open} -body {
+    set a [aotSource "fn apply(f, x):\n    f(x)\n\nfn inc(n):\n    n + 1\n\napply(inc, 1)"]
+    set blocker [lindex [dict get [aotRegion $a apply] blockers] 0]
+    list [aotStatus $a apply] [dict get $blocker kind] [dict get $blocker class] \
+         [dict get $blocker cause cause] [dict get [aotRegion $a apply] requirements] \
+         [dict get [aotRegion $a <program>] transitive]
+} -result {{open open} DynamicCall semantic parameter {dynamic-call tagged-values} open}
+
+test hir-aot-7 {a name looked up in an unknown environment is a dynamic binding} -body {
+    set a [aotOf [hir::build {{call {ref +} {ref x} {const 1}}} -mode sequence -strict 0]]
+    lsort -unique [aotBlockerKinds $a <program>]
+} -result {DynamicBinding DynamicCall}
+
+test hir-aot-8 {a forward reference to a later function has no call target (HIR limitation)} -body {
+    set a [aotOf [surface::readProgramFile [file join $::projectRoot examples surface 09-mutual-recursion.bot]]]
+    list [aotStatus $a is_even] [aotBlockerKinds $a is_even] [aotStatus $a is_odd] \
+         [lmap f [aotFacts $a is_even init-check] {dict get $f name}]
+} -result {{open open} {DynamicCall UnknownParameterKind} {guarded closed} is_odd}
+
+# ---------------------------------------------------------------------------
+# Kinds
+
+test hir-aot-9 {operands of unknown kind are reported with their cause, not guessed} -body {
+    set a [aotSource "fn first_plus(xs, n):\n    list_get(xs, 0) + n\n\nfirst_plus(\[1\], 2)"]
+    lmap b [dict get [aotRegion $a first_plus] blockers] {
+        list [dict get $b kind] [dict get $b class] [dict get $b requires] [dict get $b cause cause] [dict get $b cause native]
+    }
+} -result {{UnknownAggregateElementType representation int aggregate-element list_get} {UnknownParameterKind representation int parameter {}} {UnknownParameterKind representation list parameter {}}}
+
+test hir-aot-10 {a guarded region is still semantically closed} -body {
+    set a [aotSource "fn inc(x):\n    x + 1\n\ninc(1)"]
+    list [aotStatus $a inc] [dict get [aotRegion $a inc] requirements]
+} -result {{guarded closed} {bigint tagged-values}}
+
+test hir-aot-11 {the result of a block with an unknown result is an unknown call result} -body {
+    set a [aotSource "fn id(x):\n    x\n\nfn g(y):\n    id(y) + 1\n\ng(1)"]
+    set blocker [lindex [dict get [aotRegion $a g] blockers] 0]
+    list [dict get $blocker kind] [dict get $blocker cause cause] [dict get $blocker cause block]
+} -result {UnknownCallResultKind block-result e2}
+
+test hir-aot-12 {a known wrong kind is a known error, not a blocker} -body {
+    set a [aotSource "fn f():\n    1 + \"a\"\n\nf()"]
+    list [aotStatus $a f] [lmap x [aotFacts $a f known-error] {dict get $x error}]
+} -result {{closed closed} TYPE}
+
+test hir-aot-13 {an if condition of unknown kind needs a Boolean check} -body {
+    set a [aotSource "fn f(c):\n    if c:\n        1\n    else:\n        2\n\nf(true)"]
+    set blocker [lindex [dict get [aotRegion $a f] blockers] 0]
+    list [dict get $blocker kind] [dict get $blocker requires]
+} -result {UnknownParameterKind bool}
+
+# ---------------------------------------------------------------------------
+# Facts remove blockers
+
+test hir-aot-14 {a flow fact already in HIR removes the later blocker} -body {
+    set a [aotSource "fn f(s):\n    n = length(s)\n    concat(s, s)\n\nf(\"a\")"]
+    lmap b [dict get [aotRegion $a f] blockers] {list [dict get $b requires] [dict get $b location line]}
+} -result {{str 2}}
+
+test hir-aot-15 {a refinement proven by a type test removes the blocker inside the branch} -body {
+    set unrefined [aotOf [hirOf {bind f {block {x} {call {ref +} {ref x} {const 1}}}}]]
+    set refined [aotOf [hirOf {bind f {block {x}
+        {if {call {ref integer?} {ref x}} {block {} {call {ref +} {ref x} {const 1}}} {block {} {const 0}}}}}]]
+    list [aotStatus $unrefined f] [aotBlockerKinds $unrefined f] \
+         [aotStatus $refined f] [aotBlockerKinds $refined f] \
+         [lmap x [aotFacts $refined f native-call] {list [dict get $x native] [dict get $x argKinds]}]
+} -result {{guarded closed} UnknownParameterKind {closed closed} {} {{integer? {{}}} {+ {int int}}}}
+
+test hir-aot-16 {== on two known scalars needs no structural comparison} -body {
+    set a [aotOf [hirOf {call {ref ==} {const 1} {const 2}} {call {ref ==} {const str a} {const 1}} \
+        {bind f {block {x} {call {ref ==} {ref x} {const 1}}}}]]
+    list [lmap x [aotFacts $a <program> native-call] {dict get $x runtime}] \
+         [lmap x [aotFacts $a f native-call] {dict get $x runtime}]
+} -result {{bigint structural-equality} structural-equality}
+
+# ---------------------------------------------------------------------------
+# Provenance, init checks, other facts
+
+test hir-aot-17 {blockers point back to HIR expressions and source locations} -body {
+    set hir [surface::compile "x = 1\n\nfn inc(n):\n    n + x\n\ninc(2)" t.bot]
+    set blocker [lindex [dict get [aotRegion [aotOf $hir] inc] blockers] 0]
+    list [dict get $blocker location] [hir::kind $hir [dict get $blocker expr]] \
+         [hir::get $hir [dict get $blocker expr] name] [hir::kind $hir [dict get $blocker operation]] \
+         [expr {[dict get $blocker origin] eq [hir::get $hir [dict get $blocker expr] origin]}]
+} -result {{file t.bot line 4 column 5 node inc()/binary/left} ref n call 1}
+
+test hir-aot-18 {core IR origins are reported as IR paths} -body {
+    set a [aotOf [hirOf {bind f {block {x} {call {ref +} {ref x} {const 1}}}} {call {ref f} {const 1}}  {bind g {block {x} {call {ref -} {ref x}}}}]]
+    list [lmap b [dict get [aotRegion $a f] blockers] {dict get $b location}]  [lmap x [aotFacts $a g known-error] {list [dict get $x error] [dict get $x location]}]  [aotFacts $a g native-call] [dict get [aotRegion $a <program>] location]
+} -result {{{ir {0 2 2 2}}} {{ARITY {ir {2 2 2}}}} {} {ir {}}}
+
+test hir-aot-19 {init checks: only where HIR cannot prove a closure's reference bound} -body {
+    set a [aotSource "fn early():\n    late()\n\nfn late():\n    early()\n\nfn self(n):\n    if n == 0:\n        return 0\n    self(n - 1)\n\nfn outer(p):\n    fn inner():\n        p\n    inner\n\nouter(1)()"]
+    list [lmap x [aotFacts $a early init-check] {dict get $x name}] \
+         [aotFacts $a late init-check] [aotFacts $a self init-check] [aotFacts $a inner init-check]
+} -result {late {} {} {}}
+
+test hir-aot-20 {big literals, Results and unreachable code} -body {
+    set a [aotOf [hirOf {call {ref +} {const 100000000000000000000} {const 1}} \
+        {ok {const 1}} \
+        {bind g {block {} {return {const 1}} {call {ref +} {const 1} {const 2}}}}]]
+    list [lmap x [aotFacts $a <program> bigint-literal] {dict get $x kind}] \
+         [dict get [aotRegion $a <program>] requirements] \
+         [dict get [aotRegion $a g] unreachable] [aotFacts $a g native-call]
+} -result {bigint-literal {bigint result-alloc} 4 {}}
+
+test hir-aot-21 {static errors are semantic blockers} -body {
+    set a [aotOf [hirOf {call {ref nope} {const 1}}]]
+    list [aotStatus $a <program>] [lsort -unique [aotBlockerKinds $a <program>]]
+} -result {{open open} {StaticError UnresolvedBinding}}
+
+test hir-aot-22 {top-level functions that only call functions need no environment} -body {
+    set a [aotSource "fn a():\n    1\n\nfn b():\n    a()\n\nfn c(v):\n    fn d():\n        v\n    d\n\nb()"]
+    list [dict get [aotRegion $a b] captures] [dict get [aotRegion $a b] requirements] \
+         [dict get [aotRegion $a d] captures]
+} -result {{{binding b1 name a class block}} {} {{binding b4 name v class value}}}
+
+# ---------------------------------------------------------------------------
+# Analysis is observation only
+
+test hir-aot-23 {analysis changes neither the HIR nor what the program does} -body {
+    set hir [corpus::program matmul "matmul(\[\[1, 2\]\], \[\[3\], \[4\]\])"]
+    set before [hir::format $hir -origins 1]
+    set outcomeBefore [corpus::outcome compile $hir]
+    set analysis [hir::aot::analyze $hir]
+    hir::aot::explain $hir $analysis
+    list [expr {[hir::format $hir -origins 1] eq $before}] \
+         [expr {[corpus::outcome compile $hir] eq $outcomeBefore}] \
+         [corpus::outcome interp $hir] [dict size [dict get $analysis regions]]
+} -result {1 1 {value {[[11]]}} 5}
+
+test hir-aot-all-programs {every example and benchmark program can be analyzed and explained} -body {
+    set failures {}
+    set count 0
+    foreach path [concat \
+            [glob -directory [file join $::projectRoot examples] *.ir] \
+            [glob -directory [file join $::projectRoot examples hir] *.hir] \
+            [glob -directory [file join $::projectRoot examples surface] *.bot] \
+            [glob -directory [file join $::projectRoot examples stdlib] *.bot] \
+            [glob -directory [file join $::projectRoot bench] *.ir]] {
+        switch -- [file extension $path] {
+            .ir  { set script {hir::build [core::loadProgramFile $path] -strict 0} }
+            .hir { set script {hir::readFile $path} }
+            .bot { set script {surface::readProgramFile $path -strict 0} }
+        }
+        if {[catch {
+            set hir [eval $script]
+            hir::aot::explain $hir [hir::aot::analyze $hir]
+        } message]} {
+            lappend failures [file tail $path] $message
+        }
+        incr count
+    }
+    list [expr {$count > 30}] $failures
+} -result {1 {}}
+
+test hir-aot-24 {analysis is deterministic} -body {
+    set hir [surface::readProgramFile [corpus::path csv]]
+    expr {[hir::aot::analyze $hir] eq [hir::aot::analyze [surface::readProgramFile [corpus::path csv]]]}
+} -result 1
+
+# ---------------------------------------------------------------------------
+# The corpus (examples/stdlib): what currently stands between each program
+# and straightforward native code. These pin the current reality; a change
+# in HIR that removes a blocker should update them deliberately.
+
+proc corpusAot {name} {
+    return [aotOf [surface::readProgramFile [corpus::path $name]]]
+}
+
+# NAME -> {status dispatch transitive} for every region.
+proc corpusStatuses {analysis} {
+    set result {}
+    dict for {id region} [dict get $analysis regions] {
+        lappend result [dict get $region name] \
+            [list [dict get $region status] [dict get $region dispatch] [dict get $region transitive]]
+    }
+    return $result
+}
+
+test hir-aot-corpus-1 {every corpus function has closed dispatch} -body {
+    lmap name [corpus::names] {
+        set open {}
+        dict for {id region} [dict get [corpusAot $name] regions] {
+            if {[dict get $region dispatch] ne "closed"} {
+                lappend open [dict get $region name]
+            }
+        }
+        list $name $open
+    }
+} -result {{csv {}} {matmul {}} {string_replace {}} {string_reverse {}}}
+
+test hir-aot-corpus-2 {string_reverse: guarded only by parameter kinds} -body {
+    set a [corpusAot string_reverse]
+    list [corpusStatuses $a] [lsort -unique [aotBlockerKinds $a reverse_from]] \
+         [dict get [aotRegion $a reverse_from] requirements]
+} -result {{<program> {closed closed guarded} reverse_from {guarded closed guarded} reverse_chars {closed closed guarded}} UnknownParameterKind {bigint char-index range-check string-alloc structural-equality tagged-values}}
+
+test hir-aot-corpus-3 {string_replace: guarded only by parameter kinds} -body {
+    set a [corpusAot string_replace]
+    list [corpusStatuses $a] \
+         [lsort -unique [concat {*}[lmap n {matches_at replace_from replace} {aotBlockerKinds $a $n}]]]
+} -result {{<program> {closed closed guarded} matches_at {guarded closed guarded} replace_from {guarded closed guarded} replace {guarded closed guarded}} UnknownParameterKind}
+
+test hir-aot-corpus-4 {csv: parameter kinds and list elements} -body {
+    set a [corpusAot csv]
+    list [corpusStatuses $a] [lsort -unique [aotBlockerKinds $a scan_record]] \
+         [dict get [aotRegion $a scan_record] requirements]
+} -result {{<program> {closed closed guarded} peek {guarded closed guarded} scan_unquoted {guarded closed guarded} scan_quoted {guarded closed guarded} scan_field {guarded closed guarded} scan_record {guarded closed guarded} scan_records {guarded closed guarded} csv_parse {closed closed guarded}} {UnknownAggregateElementType UnknownParameterKind} {bigint list-alloc range-check tagged-values}}
+
+test hir-aot-corpus-5 {matmul: the operands of * are list elements of unknown kind} -body {
+    set a [corpusAot matmul]
+    set times [lmap b [dict get [aotRegion $a dot] blockers] {
+        if {[dict get $b cause cause] ne "aggregate-element" || [dict get $b requires] ne "int"} continue
+        list [dict get $b location line] [dict get $b cause native]
+    }]
+    list [corpusStatuses $a] $times [dict get [aotRegion $a dot] requirements]
+} -result {{<program> {closed closed guarded} dot {guarded closed guarded} product_row {guarded closed guarded} product_rows {guarded closed guarded} matmul {guarded closed guarded}} {{22 list_get} {22 list_get}} {bigint range-check structural-equality tagged-values}}
+
+test hir-aot-explain {the explanation names status, blockers with lines, and runtime needs} -body {
+    set text [hir::aot::explain [surface::readProgramFile [corpus::path matmul]]]
+    list [string match "*dot: guarded*" $text] \
+         [string match "*line 22:12  e13  UnknownAggregateElementType: * needs int; the element read by list_get at line 22:12*" $text] \
+         [string match "*dispatch: closed -- natives: ==, *, list_get x3, + x2; functions: dot (self, tail)*" $text] \
+         [string match "*runtime:  bigint, range-check, structural-equality, tagged-values*" $text]
+} -result {1 1 1 1}
+
+cleanupTests

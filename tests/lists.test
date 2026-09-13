@@ -1,0 +1,85 @@
+# lists.test -- the list primitives list_length, list_get and list_append,
+# and runtime-requirement metadata of natives.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+test lists-1 {list_length counts elements, nested lists count once} -body {
+    list [run {call {ref list_length} {call {ref list}}}] \
+         [run {call {ref list_length} {call {ref list} {const 1} {const str a} {call {ref list} {const 2} {const 3}}}}]
+} -result {0 3}
+
+test lists-2 {list_get returns the element itself, of any kind} -body {
+    list [run {call {ref list_get} {call {ref list} {const 7} {const str a}} {const 0}}] \
+         [run {call {ref list_get} {call {ref list} {const 7} {const str a}} {const 1}}] \
+         [run {call {ref list_get} {call {ref list} {const 7} {call {ref list} {const 8}}} {const 1}}]
+} -result {7 {"a"} {[8]}}
+
+test lists-3 {list_get outside the list is a RANGE error, on both sides} -body {
+    list [errorCodeOf {call {ref list_get} {call {ref list} {const 1}} {const 1}}] \
+         [errorCodeOf {call {ref list_get} {call {ref list} {const 1}} {const -1}}] \
+         [errorCodeOf {call {ref list_get} {call {ref list}} {const 0}}] \
+         [errorCodeOf {call {ref list_get} {call {ref list} {const 1}} {const 100000000000000000000}}]
+} -result {{CORE SEMANTIC RANGE} {CORE SEMANTIC RANGE} {CORE SEMANTIC RANGE} {CORE SEMANTIC RANGE}}
+
+test lists-4 {list_get range message} -body {
+    catch {core::evalProgram {{call {ref list_get} {call {ref list} {const 1} {const 2}} {const 2}}}} message
+    set message
+} -result {list_get: index 2 is outside 0..1}
+
+test lists-5 {list_append returns a new list and leaves its argument unchanged} -body {
+    run {bind xs {call {ref list} {const 1}}} \
+        {bind ys {call {ref list_append} {ref xs} {const 2}}} \
+        {bind zs {call {ref list_append} {ref xs} {call {ref list} {const 3}}}} \
+        {call {ref list} {ref xs} {ref ys} {ref zs}}
+} -result {[[1], [1, 2], [1, [3]]]}
+
+test lists-6 {arguments of the wrong kind are TYPE errors} -body {
+    list [errorCodeOf {call {ref list_length} {const str abc}}] \
+         [errorCodeOf {call {ref list_get} {const str abc} {const 0}}] \
+         [errorCodeOf {call {ref list_get} {call {ref list} {const 1}} {const str 0}}] \
+         [errorCodeOf {call {ref list_append} {const 1} {const 2}}]
+} -result {{CORE SEMANTIC TYPE} {CORE SEMANTIC TYPE} {CORE SEMANTIC TYPE} {CORE SEMANTIC TYPE}}
+
+test lists-7 {arity is exact} -body {
+    list [errorCodeOf {call {ref list_length}}] \
+         [errorCodeOf {call {ref list_get} {call {ref list}}}] \
+         [errorCodeOf {call {ref list_append} {call {ref list}} {const 1} {const 2}}]
+} -result {{CORE SEMANTIC ARITY} {CORE SEMANTIC ARITY} {CORE SEMANTIC ARITY}}
+
+test lists-8 {both backends agree, including errors} -body {
+    lmap program {
+        {{call {ref list_get} {call {ref list} {const 1} {const 2}} {const 1}}}
+        {{call {ref list_get} {call {ref list} {const 1} {const 2}} {const 2}}}
+        {{call {ref list_get} {const str x} {const 0}}}
+        {{call {ref list_append} {call {ref list} {const 1}} {call {ref list} {const 2}}}}
+        {{call {ref list_length} {call {ref list_append} {call {ref list}} {const 1}}}}
+    } {differential $program}
+} -result {same same same same same}
+
+test lists-9 {signatures: what HIR types calls of the list primitives as} -body {
+    list [hir::types::nativeSignature list_length] \
+         [hir::types::nativeSignature list_get] \
+         [hir::types::nativeSignature list_append]
+} -result {{list int} {{list int} any} {{list any} list}}
+
+test lists-10 {a call that returned proves its list argument is a list} -body {
+    set h [hirOf {bind f {block {xs} {call {ref list_length} {ref xs}} {ref xs}}}]
+    hirRefTypes $h xs
+} -result {any list}
+
+test lists-11 {the primitives can be named from source} -body {
+    set h [surface::compile "xs = \[1, 2\]\n\[list_length(xs), list_get(xs, 1), list_append(xs, 3)\]" t.bot]
+    core::value::show [core::compiler::evalHir $h]
+} -result {[2, 2, [1, 2, 3]]}
+
+test lists-12 {runtime requirements are metadata, sorted and validated} -body {
+    list [dict get [core::native::metadata list_append] runtime] \
+         [dict get [core::native::metadata substring] runtime] \
+         [dict get [core::native::metadata +] runtime] \
+         [dict get [core::native::metadata integer?] runtime] \
+         [catch {core::registerNative test-bad-runtime -arity 0 -impl list -runtime {gc}} message] \
+         [string match {*unknown -runtime tag "gc"*} $message]
+} -result {list-alloc {char-index range-check string-alloc} bigint {} 1 1}
+
+cleanupTests

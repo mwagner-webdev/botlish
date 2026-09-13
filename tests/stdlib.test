@@ -1,0 +1,207 @@
+# stdlib.test -- correctness of the Botlish algorithm corpus
+# (examples/stdlib/*.bot).
+#
+# Every case runs the corpus program, followed by a driver expression, on
+# both backends in this process (see examples/stdlib/corpus.tcl):
+#
+#   interp    source -> HIR -> core IR -> interpreter
+#   compile   source -> HIR -> Tcl compiler
+#
+# and expects both to produce the stated outcome (so they also agree). The
+# expected values are written out by hand; no second implementation of the
+# algorithms exists anywhere.
+#
+# Non-ASCII text is written with \u escapes: tcltest reads this file in the
+# platform's encoding.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot examples stdlib corpus.tcl]
+
+# The outcome of DRIVER after program NAME, on both backends:
+# "expected" if both produce EXPECTED, otherwise both outcomes.
+proc corpusCase {name driver expected} {
+    set hir [corpus::program $name $driver]
+    set outcomes [lmap backend $corpus::backends {corpus::outcome $backend $hir}]
+    foreach outcome $outcomes {
+        if {$outcome ne $expected} {
+            return [join [lmap backend $corpus::backends outcome $outcomes {list $backend $outcome}] " / "]
+        }
+    }
+    return expected
+}
+
+proc value {shown} { return [list value $shown] }
+
+# Defines one test per case: {ID DESCRIPTION DRIVER EXPECTED-OUTCOME}.
+proc corpusTests {name cases} {
+    foreach {id description driver expected} $cases {
+        test stdlib-$name-$id "$name: $description" -body [list corpusCase $name $driver $expected] \
+            -result expected
+    }
+}
+
+set lit corpus::literal
+
+test stdlib-0 {the corpus programs} -body {
+    corpus::names
+} -result {csv matmul string_replace string_reverse}
+
+foreach name [corpus::names] {
+    test stdlib-sample-$name "$name: the sample in the file runs to its expect: value" -body {
+        set text [corpus::text $name]
+        regexp -line {^#\s*expect:\s*(.*)$} $text -> shown
+        set hir [surface::readProgramFile [corpus::path $name]]
+        set outcomes [lmap backend $corpus::backends {corpus::outcome $backend $hir}]
+        expr {$outcomes eq [list [value $shown] [value $shown]] ? "expected" : $outcomes}
+    } -result expected
+
+    # bench/corpus.tcl times the lowered IR on every backend; this is what
+    # makes that the same program the compiler compiles from HIR.
+    test stdlib-hir-$name "$name: the HIR is what analysis of its lowered IR derives" -body {
+        set h [surface::readProgramFile [corpus::path $name] -strict 0]
+        expr {[hir::format $h] eq [hir::format [hir::build [hir::lower $h] -strict 0]]}
+    } -result 1
+}
+
+# ---------------------------------------------------------------------------
+# string_reverse
+
+corpusTests string_reverse [list \
+    empty        {the empty string}      {reverse_chars("")}      [value {""}] \
+    one          {one character}         {reverse_chars("a")}     [value {"a"}] \
+    odd          {odd length}            {reverse_chars("abc")}   [value {"cba"}] \
+    even         {even length}           {reverse_chars("abcd")}  [value {"dcba"}] \
+    repeated     {repeated characters}   {[reverse_chars("aaaa"), reverse_chars("abba"), reverse_chars("aab")]} \
+        [value {["aaaa", "abba", "baa"]}] \
+    escapes      {quotes, newlines and backslashes are characters} \
+        "reverse_chars([$lit "a\nb\"\\"])" [value {"\\\"b\na"}] \
+    non-ascii    {non-ASCII characters are single units} \
+        "\[reverse_chars([$lit \u00e4\u00f6\u00fc]) == [$lit \u00fc\u00f6\u00e4], length(reverse_chars([$lit a\u00e9\u20acb]))\]" \
+        [value {[true, 4]}] \
+    non-ascii-2  {mixed ASCII and non-ASCII} \
+        "reverse_chars([$lit a\u00e9\u20acb]) == [$lit b\u20ac\u00e9a]" [value true] \
+    combining    {a combining mark is its own unit: not grapheme clusters} \
+        "reverse_chars([$lit e\u0301x]) == [$lit x\u0301e]" [value true] \
+    involution   {reversing twice gives the original, 500 characters} \
+        "text = [$lit [string repeat abcdefghij 50]]\n\[reverse_chars(reverse_chars(text)) == text, length(reverse_chars(text))\]" \
+        [value {[true, 500]}] \
+    not-a-string {a non-string argument is a TYPE error} {reverse_chars(12)} \
+        {error {CORE SEMANTIC TYPE}} \
+]
+
+# ---------------------------------------------------------------------------
+# string_replace
+
+corpusTests string_replace [list \
+    no-match      {no occurrence}                  {replace("abc", "x", "y")}       [value {"abc"}] \
+    one           {one occurrence}                 {replace("abc", "b", "X")}       [value {"aXc"}] \
+    many          {several occurrences}            {replace("a-b-c-d", "-", "+")}   [value {"a+b+c+d"}] \
+    adjacent      {adjacent occurrences}           {replace("aaaa", "aa", "b")}     [value {"bb"}] \
+    leftover      {a partial occurrence is kept}   {replace("aaa", "aa", "b")}      [value {"ba"}] \
+    overlap       {occurrences do not overlap, left match wins} \
+        {replace("abababa", "aba", "X")} [value {"XbX"}] \
+    shorter       {replacement shorter than needle} {replace("hello world", "world", "W")} [value {"hello W"}] \
+    longer        {replacement longer than needle}  {replace("a.b.c", ".", "<dot>")}    [value {"a<dot>b<dot>c"}] \
+    empty-repl    {empty replacement}              {replace("abcabc", "abc", "")}   [value {""}] \
+    delete        {deleting from the middle}       {replace("a, b, c", ", ", "")}   [value {"abc"}] \
+    empty-hay     {empty haystack}                 {replace("", "x", "y")}          [value {""}] \
+    beginning     {occurrence at the beginning}    {replace("abcx", "abc", "Z")}    [value {"Zx"}] \
+    end           {occurrence at the end}          {replace("xabc", "abc", "Z")}    [value {"xZ"}] \
+    whole         {the whole haystack}             {replace("abc", "abc", "Z")}     [value {"Z"}] \
+    long-needle   {needle longer than haystack}    {replace("ab", "abc", "Z")}      [value {"ab"}] \
+    no-rescan     {replacements are not rescanned} {replace("aa", "a", "aa")}      [value {"aaaa"}] \
+    literal       {needles are not patterns}       {replace("a.c*a.c", ".c*", "!")} [value {"a!a.c"}] \
+    empty-needle  {an empty needle replaces nothing} {replace("abc", "", "-")}      [value {"abc"}] \
+    non-ascii     {non-ASCII needle and replacement} \
+        "replace([$lit gr\u00fc\u00dfe], [$lit \u00fc], \"ue\") == [$lit grue\u00dfe]" [value true] \
+    newline       {newlines are ordinary characters} \
+        "replace([$lit a\nb\nc], [$lit \n], \" \")" [value {"a b c"}] \
+    larger        {1000 characters, 100 replacements} \
+        "length(replace([$lit [string repeat abcdefghij 100]], \"cde\", \"12345\"))" [value 1200] \
+]
+
+# ---------------------------------------------------------------------------
+# csv
+
+# Rows 1..100 of: N,"name N",x
+set generatedCsv [join [lmap i [lsearch -all [lrepeat 101 x] x] {
+    if {$i == 0} continue
+    format {%d,"name %d",x} $i $i
+}] \n]
+
+corpusTests csv [list \
+    empty         {empty input has no records}      {csv_parse("")}          [value {[]}] \
+    one-field     {one field}                       {csv_parse("x")}         [value {[["x"]]}] \
+    one-row       {one row}                         {csv_parse("a,b,c")}     [value {[["a", "b", "c"]]}] \
+    rows          {multiple rows} \
+        "csv_parse([$lit "name,age\nAlice,30\nBob,40"])" \
+        [value {[["name", "age"], ["Alice", "30"], ["Bob", "40"]]}] \
+    trailing-nl   {a final newline ends the last record} \
+        "csv_parse([$lit "a,b\nc,d\n"])" [value {[["a", "b"], ["c", "d"]]}] \
+    empty-fields  {empty fields} \
+        "\[csv_parse(\"a,,c\"), csv_parse(\",\"), csv_parse(\"a,\"), csv_parse(\",a\")\]" \
+        [value {[[["a", "", "c"]], [["", ""]], [["a", ""]], [["", "a"]]]}] \
+    empty-line    {an empty line is a record with one empty field} \
+        "csv_parse([$lit "a\n\nb"])" [value {[["a"], [""], ["b"]]}] \
+    quoted-comma  {a quoted comma} \
+        "csv_parse([$lit "name,note\nAlice,\"hello, world\"\nBob,\"said \"\"hello\"\"\""])" \
+        [value {[["name", "note"], ["Alice", "hello, world"], ["Bob", "said \"hello\""]]}] \
+    escaped-quote {"" inside quotes is one quote} \
+        "csv_parse([$lit {"""",x""y}])" [value {[["\"", "x\"\"y"]]}] \
+    empty-quoted  {an empty quoted field} \
+        "\[csv_parse([$lit {""}]), csv_parse([$lit {a,"",b}])\]" \
+        [value {[[[""]], [["a", "", "b"]]]}] \
+    quoted-nl     {a quoted field may contain newlines} \
+        "csv_parse([$lit "\"line 1\nline 2\",x\ny,z"])" \
+        [value {[["line 1\nline 2", "x"], ["y", "z"]]}] \
+    quoted-last   {a quoted field at the end of the input} \
+        "csv_parse([$lit {a,"b,c"}])" [value {[["a", "b,c"]]}] \
+    ragged        {records may have different field counts} \
+        "csv_parse([$lit "a\nb,c,d\n"])" [value {[["a"], ["b", "c", "d"]]}] \
+    crlf          {\r is not a line ending: it stays in the field} \
+        "csv_parse([$lit "a\r\nb"]) == \[\[[$lit "a\r"]\], \[\"b\"\]\]" [value true] \
+    non-ascii     {non-ASCII fields} \
+        "csv_parse([$lit "\u00e4,\"\u00f6,\u00fc\""]) == \[\[[$lit \u00e4], [$lit \u00f6,\u00fc]\]\]" \
+        [value true] \
+    many-rows     {100 generated rows} \
+        "rows = csv_parse([$lit $generatedCsv])\n\[list_length(rows), list_get(rows, 41)\]" \
+        [value {[100, ["42", "name 42", "x"]]}] \
+]
+
+# ---------------------------------------------------------------------------
+# matmul
+
+corpusTests matmul [list \
+    1x1           {1 x 1}         {matmul([[3]], [[4]])}  [value {[[12]]}] \
+    identity      {multiplying by the identity} \
+        {matmul([[1, 2], [3, 4]], [[1, 0], [0, 1]])} [value {[[1, 2], [3, 4]]}] \
+    identity-left {the identity on the left} \
+        {matmul([[1, 0], [0, 1]], [[1, 2], [3, 4]])} [value {[[1, 2], [3, 4]]}] \
+    rectangular   {2 x 3 times 3 x 2} \
+        {matmul([[1, 2, 3], [4, 5, 6]], [[7, 8], [9, 10], [11, 12]])} [value {[[58, 64], [139, 154]]}] \
+    row-column    {1 x 3 times 3 x 1} \
+        {matmul([[1, 2, 3]], [[4], [5], [6]])} [value {[[32]]}] \
+    column-row    {3 x 1 times 1 x 3} \
+        {matmul([[1], [2], [3]], [[4, 5, 6]])} [value {[[4, 5, 6], [8, 10, 12], [12, 15, 18]]}] \
+    zeros         {zero entries} \
+        {matmul([[0, 0], [0, 0]], [[5, 6], [7, 8]])} [value {[[0, 0], [0, 0]]}] \
+    negative      {negative entries} \
+        {matmul([[-1, 2], [3, -4]], [[5, -6], [-7, 8]])} [value {[[-19, 22], [43, -50]]}] \
+    big-product   {products beyond 64 bits stay exact} \
+        {matmul([[9223372036854775807]], [[9223372036854775807]])} \
+        [value {[[85070591730234615847396907784232501249]]}] \
+    big-sum       {sums beyond 64 bits stay exact} \
+        {matmul([[4611686018427387904, 4611686018427387904, 4611686018427387904, 4611686018427387904]], [[1], [1], [1], [1]])} \
+        [value {[[18446744073709551616]]}] \
+    empty         {an empty matrix} {matmul([], [[1]])} [value {[]}] \
+    square-4      {4 x 4} \
+        {a = [[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12], [13, 14, 15, 16]]
+matmul(a, a)} \
+        [value {[[90, 100, 110, 120], [202, 228, 254, 280], [314, 356, 398, 440], [426, 484, 542, 600]]}] \
+    incompatible  {incompatible dimensions are a RANGE error, never a guess} \
+        {matmul([[1, 2], [3, 4]], [[1, 2]])} {error {CORE SEMANTIC RANGE}} \
+    non-int       {a non-integer entry is a TYPE error} \
+        {matmul([[1, "2"]], [[1], [2]])} {error {CORE SEMANTIC TYPE}} \
+]
+
+cleanupTests

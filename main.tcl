@@ -1,13 +1,15 @@
 # main.tcl -- example runner.
 #
-#   tclsh main.tcl [-backend interp|compile] [-code] [-hir] [-ast] [FILE.ir|FILE.hir|FILE.bot ...]
+#   tclsh main.tcl [-backend interp|compile] [-code] [-hir] [-ast] [-aot] [-aot-data] [FILE.ir|FILE.hir|FILE.bot ...]
 #
 # Runs the given program files (default: every examples/*.ir) and prints
 # each program's value, with runtime evidence shown as "text"#{Type}. With
 # -backend compile it also prints the inferred types of program-level
 # bindings; -code prints the Tcl code the compiler generates; -hir prints the
 # program's semantic HIR (hir::format); -ast prints the surface AST of a .bot
-# file (surface::formatAst).
+# file (surface::formatAst). -aot prints the closed-AOT readiness of every
+# function (hir::aot::explain), and -aot-data the analysis itself as a Tcl
+# dict (hir::aot::analyze), before running the program.
 #
 # A .hir file (HIR text, e.g. examples/hir/*.hir) is read with hir::readFile;
 # a .bot file (Botlish source, e.g. examples/surface/*.bot) is parsed and
@@ -30,7 +32,7 @@ proc probeValues {value} {
     }
 }
 
-proc runFile {path showCode showHir showAst} {
+proc runFile {path showCode showHir showAst showAot} {
     puts "== [file tail $path] ([core::useBackend])"
     set hir ""
     set extension [file extension $path]
@@ -61,8 +63,15 @@ proc runFile {path showCode showHir showAst} {
         set program [core::loadProgramFile $path]
         set run {core::evalProgram $program}
     }
+    if {$showHir || $showAot ne ""} {
+        set shownHir [expr {$hir ne "" ? $hir : [hir::build $program -strict 0]}]
+    }
     if {$showHir} {
-        puts [hir::format [expr {$hir ne "" ? $hir : [hir::build $program -strict 0]}]]
+        puts [hir::format $shownHir]
+    }
+    switch -- $showAot {
+        text { puts [hir::aot::explain $shownHir] }
+        data { puts [hir::aot::analyze $shownHir] }
     }
     if {$showCode} {
         puts [core::compiler::generatedCode $program]
@@ -96,6 +105,7 @@ set files {}
 set showCode 0
 set showHir 0
 set showAst 0
+set showAot ""
 for {set i 0} {$i < [llength $argv]} {incr i} {
     set arg [lindex $argv $i]
     switch -- $arg {
@@ -103,6 +113,8 @@ for {set i 0} {$i < [llength $argv]} {incr i} {
         -code    { set showCode 1 }
         -hir     { set showHir 1 }
         -ast     { set showAst 1 }
+        -aot     { set showAot text }
+        -aot-data { set showAot data }
         default  { lappend files $arg }
     }
 }
@@ -111,6 +123,6 @@ if {$files eq ""} {
 }
 set failures 0
 foreach path $files {
-    incr failures [runFile $path $showCode $showHir $showAst]
+    incr failures [runFile $path $showCode $showHir $showAst $showAot]
 }
 exit [expr {$failures > 0}]

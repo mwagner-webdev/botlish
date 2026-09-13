@@ -1,0 +1,26 @@
+# String reverse, written in Botlish over the string primitives.
+#
+# reverse_chars reverses the units that length and substring count. Today
+# those are the runtime's characters (Tcl 8.6 string indices), not grapheme
+# clusters: a base letter followed by a combining mark is two units, and its
+# mark ends up before the letter.
+#
+# Botlish has no mutable loop state, so the loop is a recursive call that
+# carries the index and the text reversed so far. Each step builds a new
+# string one character longer than the last, so reversing n characters
+# copies O(n^2) characters, and the recursion is n calls deep.
+#
+# expect: ["", "a", "cba", "dcba", "üöä"]
+
+# The characters of text from index on, reversed, followed by reversed.
+fn reverse_from(text, index, reversed):
+    if index == length(text):
+        return reversed
+
+    character = substring(text, index, index + 1)
+    reverse_from(text, index + 1, concat(character, reversed))
+
+fn reverse_chars(text):
+    reverse_from(text, 0, "")
+
+[reverse_chars(""), reverse_chars("a"), reverse_chars("abc"), reverse_chars("abcd"), reverse_chars("äöü")]

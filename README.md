@@ -42,6 +42,7 @@ surface/         source language: lexer, parser, surface AST, AST -> HIR
 examples/*.ir    acceptance programs as IR data
 examples/hir/    HIR samples (.hir text) with the core IR they lower to
 examples/surface/  source programs (.bot)
+examples/stdlib/   algorithm corpus in Botlish: reverse, replace, CSV, matmul (§18)
 tests/*.test     tcltest suite
 main.tcl         example runner
 ```
@@ -56,6 +57,8 @@ tclsh main.tcl -backend compile FILE.hir    # read HIR text, compile it, run
 tclsh main.tcl examples/surface/03-closure.bot            # run source (interp)
 tclsh main.tcl -backend compile -hir -ast FILE.bot   # show AST and HIR, compile, run
 tclsh bench/bench.tcl                       # compare backends on bench/*.ir
+tclsh bench/corpus.tcl                      # baseline timings of the algorithm corpus (§18)
+tclsh main.tcl -aot examples/stdlib/matmul.bot   # closed-AOT readiness report (§19)
 ```
 
 ```tcl
@@ -334,6 +337,9 @@ A native that breaks its declared type contract (§8) raises
 | `substring` | str, int, int → str (characters `start <= i < end`) | |
 | `lowercase` | str → str | |
 | `concat` | str, str → str | |
+| `list_length` | list → int | |
+| `list_get` | list, int → any (the element at `0 <= i < length`, else `RANGE`) | |
+| `list_append` | list, any → list (a new list; the argument is unchanged) | |
 | `Emailish?` | str → bool, type test of `Emailish` (library `web`) | true: arg 0 : `Emailish` |
 | `UriQueryValue?` | str → bool, type test of `UriQueryValue` (library `web`) | true: arg 0 : `UriQueryValue` |
 | `uriEscape` | str → `UriQueryValue` (library `web`) | |
@@ -346,6 +352,12 @@ core::registerNative even? -arity 1 -impl myEvenImpl -refines-true {0 Even}
 ```
 
 `-refines-true` and `-refines-false` take `ARG-INDEX TYPE` pairs.
+
+`-runtime {TAG…}` states what a native implementation of the operation
+needs from a runtime beyond bare machine operations: `bigint`,
+`string-alloc`, `list-alloc`, `result-alloc`, `char-index`, `range-check`,
+`structural-equality`, `evidence` (`core/native.tcl` defines each). It is
+metadata for static analysis (§19) and never changes what a call does.
 
 Natives may also declare a signature. `-param-types {int int}` lists the
 type each argument must have (`any` means no requirement), and
@@ -405,6 +417,7 @@ refinement unless its contract explicitly establishes one. So
 | `surface::compile SOURCE ?FILE? ?-strict 0\|1?` / `surface::readProgramFile PATH` | source → HIR |
 | `hir::lower HIR` / `hir::format HIR ?-origins 1?` | HIR → core IR / readable HIR |
 | `hir::*` queries | nodes, scopes, bindings, symbols, types, captures, refinements (§16) |
+| `hir::aot::analyze HIR` / `hir::aot::explain HIR ?ANALYSIS?` | closed-AOT readiness: structured analysis / readable report (§19) |
 | `hir::types::*` | static types: core types plus `{native N}`, `{block E A R}`, `never` (§13) |
 | `core::type::*` | semantic types (§14) |
 | `core::regex::*` | regex IR (§15) |
@@ -438,7 +451,7 @@ refinement unless its contract explicitly establishes one. So
 | `core/evaluator.tcl` | interpreter (one handler per form), backend selection, public API |
 | `core/type.tcl` | semantic types: named/refined types, subtyping, value membership |
 | `core/regex.tcl` | engine-independent regex IR, lowered to Tcl ARE |
-| `core/primitives.tcl`, `core/predicates.tcl`, `core/strings.tcl` | builtin natives |
+| `core/primitives.tcl`, `core/predicates.tcl`, `core/strings.tcl`, `core/lists.tcl` | builtin natives |
 | `lib/web.tcl` | optional demonstration library (`core::loadLibrary web`): `Emailish`, `UriQueryValue`, `uriEscape` |
 | `hir/hir.tcl` | HIR data model, ids, `hir::build`, queries |
 | `hir/syntax.tcl` | syntax nodes: HIR's input, and core IR → syntax |
@@ -449,13 +462,15 @@ refinement unless its contract explicitly establishes one. So
 | `hir/lower.tcl` | HIR → core IR |
 | `hir/format.tcl` | readable HIR |
 | `hir/read.tcl` | HIR text → HIR |
+| `hir/aot.tcl` | closed-AOT readiness analysis (§19) |
 | `compiler/compiler.tcl` | HIR → Tcl compiler backend |
 | `surface/lexer.tcl` | source → tokens, indentation → `INDENT`/`DEDENT` |
 | `surface/parser.tcl` | tokens → surface AST (recursive descent) |
 | `surface/ast.tcl` | spans, syntax errors, AST formatting |
 | `surface/lower.tcl` | surface AST → HIR |
 | `surface/surface.tcl` | loader and `surface::compile` / `readProgramFile` |
-| `bench/` | benchmark programs and runner |
+| `bench/` | benchmark programs and runners (`bench.tcl` for `*.ir`, `corpus.tcl` for §18) |
+| `examples/stdlib/corpus.tcl` | loading and running the algorithm corpus on each backend |
 
 Implementation notes (not part of the semantics):
 
@@ -1053,6 +1068,18 @@ name now has result type `never` (it always raises) instead of `any`.
   of NAME". That identity is approximate if the sequence also binds the name.
 * The only symbols are builtins. Parameters are typed `any`: there are no
   type annotations and no function types beyond `{block E A R}`.
+* Types are inferred in one walk in evaluation order, so a reference to a
+  function bound *later* (mutual recursion,
+  `examples/surface/09-mutual-recursion.bot`) has type `any`, and its calls
+  have no known target, although the binding is immutably bound to a block
+  expression.
+* `init deferred` covers every reference from inside a closure, including
+  references that are certainly bound when the closure runs (parameters of
+  the enclosing block, the function itself, bindings made before the closure
+  is created). `hir::aot` (§19) separates these cases; HIR does not.
+* Calling a block proves nothing about its arguments. Flow facts come only
+  from native signatures, so after `peek(text, i)` returns, `text` is still
+  `any` in the caller.
 * In sequence mode, malformed IR is rejected for the whole unit when it's
   built, including nodes the interpreter would never reach. The compiler
   already did this for the nodes it compiled.
@@ -1250,3 +1277,214 @@ references and hygiene.
   * Moving code changes its ids.
 * There's no incremental reparsing. An editor has to reparse the whole file
   and match nodes by id.
+
+## 18. Algorithm corpus
+
+`examples/stdlib/` holds ordinary algorithms written in Botlish over the
+string and list primitives (§8). They're the target corpus for a future
+native backend, and they should stay unchanged while that backend learns to
+compile them. None of them has a native shortcut.
+
+| File | Function | What it does |
+|------|----------|--------------|
+| `string_reverse.bot` | `reverse_chars(text)` | reverses the units `length`/`substring` count |
+| `string_replace.bot` | `replace(haystack, needle, replacement)` | exact, left-to-right, non-overlapping replacement |
+| `csv.bot` | `csv_parse(text)` | valid-input CSV → list of records of field strings |
+| `matmul.bot` | `matmul(a, b)` | Int matrix product over nested lists |
+
+Each file is a normal program: its functions followed by a sample
+expression with a `# expect:` comment, so `tclsh main.tcl FILE` runs it.
+`examples/stdlib/corpus.tcl` appends a driver expression to a program, and
+runs the result on a backend. The interpreter runs the lowered IR, and the
+compiler compiles from HIR, the same way as `examples/surface/`.
+
+**Semantics chosen for the corpus**
+
+* `reverse_chars` reverses characters as the runtime indexes them (Tcl 8.6
+  string indices). Those aren't grapheme clusters: a combining mark ends up
+  before its base letter. Only BMP characters are tested, because this Tcl
+  build turns non-BMP characters into U+FFFD.
+* `replace` with an empty needle returns the haystack unchanged.
+  Replacements aren't rescanned.
+* `csv_parse` handles `,` separators, `\n` record endings (a final `\n`
+  doesn't start an empty record), and quoted fields with `""` escapes and
+  embedded commas and newlines. An empty line is a record with one empty
+  field. `\r\n`, whitespace trimming and invalid-input diagnostics aren't
+  supported.
+* `matmul` needs rectangular matrices with compatible, non-zero dimensions
+  (an empty `a` gives `[]`). An incompatible shape surfaces as `list_get`'s
+  `RANGE` error. Entries are arbitrary-precision Ints.
+
+**How the language shapes them.** Bindings are immutable and a loop
+iteration can't carry state, so every loop is a self-recursive tail call
+that carries its index and accumulator. Neither backend eliminates tail
+calls, so recursion depth grows with the input (`corpus.tcl` raises Tcl's
+recursion limit). A function that has to return two things (a field and the
+position after it) returns a two-element list.
+
+**Tests.** `tests/stdlib.test` runs about 60 cases (the edge cases of each
+algorithm, non-ASCII text, 64-bit overflow, errors) on both backends in one
+process and requires both to produce the stated outcome. `tests/lists.test`
+covers the list primitives.
+
+**Benchmarks.** `tclsh bench/corpus.tcl [-runs N] [-markdown] [-all]` times
+every algorithm at several input sizes on every backend. Each measurement
+runs in a fresh process (the reference runtime never frees environments),
+and compilation is excluded. Cases marked slow skip the interpreter unless
+you pass `-all`. A future backend is a new case in `corpus::run` and becomes
+a new column.
+
+Baseline (`tclsh bench/corpus.tcl -runs 3`, Tcl 8.6.17 on Windows, best of
+3, wall time, compilation excluded; "skipped" = slow case, run with `-all`):
+
+| algorithm | input | interp | compile | speedup |
+|---|---|---:|---:|---:|
+| string_reverse | 100 chars | 31.7 ms | 4.8 ms | 6.7x |
+| string_reverse | 1,000 chars | 287.0 ms | 43.1 ms | 6.7x |
+| string_reverse | 10,000 chars | 2974.5 ms | 431.3 ms | 6.9x |
+| string_replace | 1 KB | 558.3 ms | 55.7 ms | 10.0x |
+| string_replace | 10 KB | 5931.2 ms | 565.6 ms | 10.5x |
+| string_replace | 100 KB | skipped | 5699.0 ms | |
+| csv | 100 rows | 2013.6 ms | 156.8 ms | 12.8x |
+| csv | 1,000 rows | 22350.7 ms | 1977.9 ms | 11.3x |
+| csv | 10,000 rows | skipped | 49741.9 ms | |
+| matmul | 2x3 * 3x2 | 15.2 ms | 1.9 ms | 8.1x |
+| matmul | 8x8 | 216.9 ms | 24.3 ms | 8.9x |
+| matmul | 16x16 | 1567.7 ms | 175.1 ms | 9.0x |
+| matmul | 32x32 | skipped | 1380.8 ms | |
+
+Both backends produced the same value in every measured case.
+
+**Observations** (evidence for runtime and backend work, not defects to fix
+here):
+
+* **reverse**: each step copies the whole accumulator (`concat(character,
+  reversed)`), so the algorithm is O(n²) in characters copied. Up to 10,000
+  characters the call overhead still dominates: times grow linearly.
+  Recursion is n calls deep. The interpreter never frees environments, so
+  it keeps every intermediate accumulator alive: O(n²) memory.
+* **replace**: testing for a match allocates a needle-sized substring at
+  every position, and every match copies the result so far. Times are
+  linear here because matches are sparse.
+* **CSV**: `list_append` copies the list, so building n records costs O(n²).
+  Going from 1,000 to 10,000 rows takes about 25× as long (compiled).
+  Quoted fields grow one character at a time. Every field scan allocates a
+  two-element list just to return two values.
+* **matmul**: n³ work as expected, but every entry read goes through
+  `list_get` with a range check, and its result has no static kind. Every
+  `*` and `+` is on arbitrary-precision Ints.
+* All four: every loop is a self tail call (`hir::aot` reports `tail`), so
+  loop conversion or tail calls in a native backend matter more than any
+  other single optimization.
+
+## 19. Closed-AOT readiness analysis
+
+`hir/aot.tcl` answers, for every function and for the program's top level,
+the question *could this be compiled to native code without dynamic semantic
+dispatch, and what would native code still need?* It only reads HIR (§16):
+resolved bindings, types, call targets, captures, control targets and
+diagnostics, plus the native registry's signatures and `-runtime` tags. It
+emits no code, knows no native by name, and says nothing about any
+particular backend.
+
+```sh
+tclsh main.tcl -aot FILE          # readable report, then run
+tclsh main.tcl -aot-data FILE     # the analysis dict
+```
+
+```tcl
+set analysis [hir::aot::analyze $hir]    ;# canonical, structured
+puts [hir::aot::explain $hir $analysis]  ;# derived text
+```
+
+**Status.** A region is `open` if some operation can't be chosen statically
+(a call of a value of unknown kind, an ambient name, a static error). It is
+`guarded` if every operation is chosen but some operand's kind isn't
+established, so native code must check it at run time and keep the value
+tagged. It is `closed` otherwise. `dispatch` is `open` exactly when a
+semantic blocker exists. `transitive` also takes directly called functions
+into account.
+
+Needing runtime support is not a blocker. `+` on two known Ints is closed,
+and its need for arbitrary-precision arithmetic is a *requirement*:
+
+| Situation | Reported as |
+|-----------|-------------|
+| the operation can't be chosen | blocker, class `semantic` (`DynamicCall`, `DynamicBinding`, `UnresolvedBinding`, `UnresolvedControl`, `StaticError`) |
+| operation known, operand kind not proven | blocker, class `representation` (`UnknownParameterKind`, `UnknownAggregateElementType`, `UnknownCallResultKind`, `UnknownValueKind`, `UnprovenRefinement`) |
+| operation known, needs runtime support | fact plus requirement tag (`bigint`, `string-alloc`, `list-alloc`, `char-index`, `range-check`, `structural-equality`, `closure-env`, `init-check`, `tagged-values`, …) |
+| operation always raises | `known-error` fact |
+
+Each blocker and fact carries its ExprId, HIR origin and a location (file,
+line, column and surface node id, or the IR path). A representation blocker
+also names the operation that needs the kind, the type it needs, and the
+*cause* of the unknown kind: a parameter, an element read out of an
+aggregate, the result of a call, or a merge. The data model is documented at
+the top of `hir/aot.tcl`.
+
+Facts it derives beyond HIR (without changing HIR):
+
+* **Direct calls** are marked `tail`/`self`.
+* **Static blocks:** a block whose captures are all bindings of static
+  blocks needs no environment. Top-level functions that only call other
+  top-level functions are plain functions.
+* **Init checks:** a deferred reference needs one only when HIR can't prove
+  the binding is bound whenever the closure runs. Parameters, a function's
+  reference to itself, and bindings made before the closure is created are
+  proven. A forward reference, as in mutual recursion, is not.
+* `==` on two known scalars needs no structural comparison.
+
+**The corpus today.** Every function in §18 has closed dispatch: every call
+target is a known native or a known Botlish function. None is closed:
+
+| Program | Dispatch | Types | Main blocker | Native-runtime needs |
+|---------|----------|-------|--------------|----------------------|
+| `reverse_chars` | closed | guarded (4 blockers) | parameter kinds (`text`, `index`, `reversed`) | bigint, char-index, string-alloc, range-check, structural-equality, tagged-values |
+| `replace` | closed | guarded (12) | parameter kinds | bigint, char-index, string-alloc, range-check, tagged-values |
+| `csv_parse` | closed | guarded (17) | parameter kinds (15); list elements of the `[field, index]` pairs (2) | bigint, char-index, string-alloc, list-alloc, range-check, tagged-values |
+| `matmul` | closed | guarded (17) | parameter kinds (13); list elements feeding `*` and `list_get` (4) | bigint, list-alloc, range-check, structural-equality, tagged-values |
+
+(Requirements are unions over each program's functions and exclude the
+sample expression's list literal.)
+
+The blockers come from two sources, neither of them dynamic dispatch:
+
+1. **Parameters have no kind.** There are no annotations and no call-site
+   inference, and calling a block proves nothing about its arguments. So
+   the first use of each parameter needs a check, and results that pass a
+   parameter through (`reverse_from`'s accumulator, `dot`'s `total`) are
+   `any`. Flow facts from native signatures already remove every later
+   check on the same path.
+2. **Lists carry no element type.** `list_get` returns `any`. That affects
+   `matmul`'s entries and the pairs `csv` returns.
+
+What would close them is left for later milestones: parameter types
+(inferred from closed-world call sites, or annotated), element types, and
+facts from block calls.
+
+**Found while building the corpus.**
+
+* Fixed: `.bot` and `.ir` files were read in the platform's system encoding
+  (cp1252 on Windows), which corrupted non-ASCII source. Program files are
+  now read as UTF-8.
+* Not fixed, documented in §16's known limitations: calls of a function
+  bound later (mutual recursion) have no call target, so `is_even` in
+  `examples/surface/09-mutual-recursion.bot` is `open`. `init deferred`
+  over-approximates. Block calls add no flow facts.
+
+**For the first native (Cranelift) milestone**, in order of evidence:
+
+1. Turn self tail calls into loops. Every loop in the corpus is one, and
+   recursion depth otherwise grows with the input.
+2. Infer parameter kinds from call sites in a closed program. Parameter
+   kinds cause 44 of the corpus's 50 blockers.
+3. Keep a tagged value representation and runtime helpers for Int (with a
+   small-integer fast path), strings and lists, instead of lowering Int to
+   bare `i64`. The analysis's requirements list the helpers each function
+   needs.
+4. Give HIR call targets for forward references to functions.
+5. Plan list element types and a growable or persistent list
+   representation. `list_append` copying is what makes CSV quadratic.
+
+The corpus programs should stay unchanged throughout. `hir::aot` and
+`bench/corpus.tcl` measure the progress.

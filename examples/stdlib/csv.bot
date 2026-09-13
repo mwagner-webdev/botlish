@@ -1,0 +1,86 @@
+# CSV parsing, written in Botlish over the string and list primitives.
+#
+# csv_parse(text) returns a list of records, each a list of field strings.
+# The input is assumed to be valid CSV of this subset:
+#
+#   * records are separated by "\n"; a final "\n" ends the last record
+#     rather than starting an empty one
+#   * fields are separated by ","
+#   * a field that starts with a quote is quoted: it ends at the next single
+#     quote, "" inside it stands for one quote, and it may contain commas
+#     and newlines. A quoted field is followed by ",", "\n" or the end.
+#   * any other field is unquoted: it runs to the next "," or "\n"
+#   * an empty line is a record with one empty field
+#
+# Not supported: "\r\n" line endings (the "\r" stays in the last field),
+# whitespace trimming, other delimiters, and diagnostics for invalid input.
+#
+# Scanning a field is a recursive state machine over character positions;
+# a field scan hands back two things, the field and where scanning stopped,
+# as a two-element list. Fields and records are built by appending to
+# immutable lists, and a quoted field grows one character at a time.
+#
+# expect: [["name", "age"], ["Alice", "30"], ["Bob", "40"]]
+
+# The character at index, or "" past the end.
+fn peek(text, index):
+    if index >= length(text):
+        return ""
+
+    substring(text, index, index + 1)
+
+# An unquoted field that started at start, scanned up to index:
+# [field, index of the "," or "\n" that ends it, or the end].
+fn scan_unquoted(text, start, index):
+    character = peek(text, index)
+    if character == "" or character == "," or character == "\n":
+        return [substring(text, start, index), index]
+
+    scan_unquoted(text, start, index + 1)
+
+# A quoted field whose decoded content so far is field, scanned from index
+# (inside the quotes): [field, index just after the closing quote].
+fn scan_quoted(text, index, field):
+    character = peek(text, index)
+    if character == "\"":
+        if peek(text, index + 1) == "\"":
+            return scan_quoted(text, index + 2, concat(field, "\""))
+
+        return [field, index + 1]
+
+    scan_quoted(text, index + 1, concat(field, character))
+
+# The field starting at index: [field, index just after it].
+fn scan_field(text, index):
+    if peek(text, index) == "\"":
+        return scan_quoted(text, index + 1, "")
+
+    scan_unquoted(text, index, index)
+
+# The rest of the record whose fields so far are fields, from index:
+# [fields, index just after the record's "\n", or the end].
+fn scan_record(text, index, fields):
+    scanned = scan_field(text, index)
+    more = list_append(fields, list_get(scanned, 0))
+    stop = list_get(scanned, 1)
+    delimiter = peek(text, stop)
+    if delimiter == ",":
+        return scan_record(text, stop + 1, more)
+
+    if delimiter == "\n":
+        return [more, stop + 1]
+
+    [more, stop]
+
+# The records from index on, appended to records.
+fn scan_records(text, index, records):
+    if index >= length(text):
+        return records
+
+    scanned = scan_record(text, index, [])
+    scan_records(text, list_get(scanned, 1), list_append(records, list_get(scanned, 0)))
+
+fn csv_parse(text):
+    scan_records(text, 0, [])
+
+csv_parse("name,age\nAlice,30\nBob,40\n")

@@ -55,4 +55,5 @@ core::native::register uriEscape \
     -arity 1 \
     -impl core::web::uriEscape \
     -param-types {str} \
-    -result-type {refined str {UriQueryValue}}
+    -result-type {refined str {UriQueryValue}} \
+    -runtime {string-alloc evidence}

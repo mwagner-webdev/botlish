@@ -15,6 +15,8 @@ namespace eval core {}
 
 proc core::ReadFile {path} {
     set channel [open $path r]
+    # Program files are UTF-8 whatever the platform's system encoding is.
+    fconfigure $channel -encoding utf-8
     try {
         return [read $channel]
     } finally {

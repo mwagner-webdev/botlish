@@ -23,6 +23,12 @@
 #                   test refines its argument to T when it returns true.
 #                   Knowing this, a compiler may decide the call from static
 #                   types or replace it with an inline membership test.
+#   runtime         what a native implementation of the operation needs from
+#                   a runtime, beyond bare machine operations on values of
+#                   known kinds (a sorted list of tags from runtimeTags
+#                   below). Pure metadata for static analysis (hir/aot.tcl):
+#                   the operation is fully known, but lowering it to native
+#                   code needs these helpers. It never changes semantics.
 #
 # Refinement rules are flat lists of ARG-INDEX TYPE pairs, e.g. {0 int}
 # ("argument 0 is an int") or {0 {refined str {Emailish}}}. The evaluator
@@ -37,6 +43,19 @@
 
 namespace eval core::native {
     variable registry [dict create]
+    # Runtime requirement tags (-runtime):
+    #   bigint               arbitrary-precision integer arithmetic or
+    #                        comparison (a small-integer fast path still needs
+    #                        an overflow check and a big-integer fallback)
+    #   string-alloc         allocates a new string
+    #   list-alloc           allocates a new list
+    #   result-alloc         allocates a new Result
+    #   char-index           counts or indexes a string by character, not byte
+    #   range-check          may raise RANGE for an index outside a value
+    #   structural-equality  compares values of any kinds structurally
+    #   evidence             reads or attaches refinement evidence
+    variable runtimeTags {bigint string-alloc list-alloc result-alloc char-index
+        range-check structural-equality evidence}
 }
 
 proc core::native::register {name args} {
@@ -51,7 +70,7 @@ proc core::native::register {name args} {
         error "core::native::register: options must be -option value pairs"
     }
     set options [dict create -impl "" -arity "" -refines-true {} -refines-false {} \
-        -param-types "" -result-type any -tests-type ""]
+        -param-types "" -result-type any -tests-type "" -runtime {}]
     foreach {option value} $args {
         if {![dict exists $options $option]} {
             error "core::native::register: unknown option \"$option\""
@@ -113,6 +132,12 @@ proc core::native::register {name args} {
     if {$arity ne "*" && $paramTypes ne "" && [llength $paramTypes] != $arity} {
         error "core::native::register: -param-types of \"$name\" must list $arity type(s)"
     }
+    variable runtimeTags
+    foreach tag [dict get $options -runtime] {
+        if {$tag ni $runtimeTags} {
+            error "core::native::register: unknown -runtime tag \"$tag\" for \"$name\" (known: $runtimeTags)"
+        }
+    }
     dict set registry $name [dict create \
         name $name \
         impl $impl \
@@ -121,7 +146,8 @@ proc core::native::register {name args} {
         refinesFalse [dict get $options -refines-false] \
         paramTypes $paramTypes \
         resultType [CanonicalType $name -result-type [dict get $options -result-type]] \
-        testsType $testsType]
+        testsType $testsType \
+        runtime [lsort -unique [dict get $options -runtime]]]
     return [core::value::native $name]
 }
 

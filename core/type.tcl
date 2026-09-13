@@ -109,7 +109,8 @@ proc core::type::definePredicate {name {predicateName ""}} {
     return [core::native::register $predicateName -arity 1 \
         -impl [list core::type::PredicateImpl $name] \
         -param-types [list $base] \
-        -tests-type [list refined $base [list $name]]]
+        -tests-type [list refined $base [list $name]] \
+        -runtime evidence]
 }
 
 # The runtime has already checked the base kind (a -tests-type contract).

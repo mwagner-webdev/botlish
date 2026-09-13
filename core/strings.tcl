@@ -41,10 +41,11 @@ proc core::strings::concat {a b} {
 }
 
 core::native::register length    -arity 1 -impl core::strings::length \
-    -param-types {str} -result-type int
+    -param-types {str} -result-type int -runtime char-index
 core::native::register substring -arity 3 -impl core::strings::substring \
-    -param-types {str int int} -result-type str
+    -param-types {str int int} -result-type str \
+    -runtime {string-alloc char-index range-check}
 core::native::register lowercase -arity 1 -impl core::strings::lowercase \
-    -param-types {str} -result-type str
+    -param-types {str} -result-type str -runtime string-alloc
 core::native::register concat    -arity 2 -impl core::strings::concat \
-    -param-types {str str} -result-type str
+    -param-types {str str} -result-type str -runtime string-alloc

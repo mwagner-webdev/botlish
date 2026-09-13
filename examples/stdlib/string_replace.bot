@@ -1,0 +1,44 @@
+# Exact string replacement, written in Botlish over the string primitives.
+#
+# replace(haystack, needle, replacement) scans haystack left to right and
+# replaces every non-overlapping occurrence of needle with replacement.
+# Matching compares characters exactly; nothing is a pattern.
+#
+# An empty needle matches nothing, so the haystack comes back unchanged.
+# (Replacing an empty match would never advance the scan.)
+#
+# The scan remembers where the current run of unmatched text starts and
+# copies that run only when a match or the end is reached. Testing for a
+# match at a position builds a substring as long as the needle, so the scan
+# allocates O(n) strings, and the recursion is up to n calls deep.
+#
+# expect: ["abc", "aXc", "bb", "", ""]
+
+# true if needle occurs in haystack starting at index.
+fn matches_at(haystack, needle, index):
+    end = index + length(needle)
+    if end > length(haystack):
+        return false
+
+    substring(haystack, index, end) == needle
+
+# haystack from index on with its matches replaced, appended to done;
+# unmatched text from run_start up to index has not been copied yet.
+fn replace_from(haystack, needle, replacement, index, run_start, done):
+    if index + length(needle) > length(haystack):
+        return concat(done, substring(haystack, run_start, length(haystack)))
+
+    if matches_at(haystack, needle, index):
+        copied = concat(done, substring(haystack, run_start, index))
+        after = index + length(needle)
+        return replace_from(haystack, needle, replacement, after, after, concat(copied, replacement))
+
+    replace_from(haystack, needle, replacement, index + 1, run_start, done)
+
+fn replace(haystack, needle, replacement):
+    if length(needle) == 0:
+        return haystack
+
+    replace_from(haystack, needle, replacement, 0, 0, "")
+
+[replace("abc", "x", "y"), replace("abc", "b", "X"), replace("aaaa", "aa", "b"), replace("abcabc", "abc", ""), replace("", "x", "y")]
