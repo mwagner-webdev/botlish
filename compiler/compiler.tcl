@@ -148,6 +148,31 @@ proc core::compiler::Cached {mode exprs field} {
     return [dict get $cache [list $mode $exprs] $field]
 }
 
+# Compiles and runs the program-mode HIR program HIR as a checked program,
+# as core::evalProgram does for its lowered IR. Returns the value. The HIR is
+# trusted: it may come from hir::parse rather than hir::build.
+proc core::compiler::evalHir {hir} {
+    if {[hir::mode $hir] ne "program"} {
+        error "core::compiler::evalHir: expected a program-mode HIR"
+    }
+    set exprs [hir::lower $hir]
+    foreach expr $exprs {
+        core::ir::check $expr
+    }
+    set unit [GenerateUnit program $exprs $hir]
+    namespace eval ::core::compiler::code [dict get $unit code]
+    set names {}
+    foreach b [dict get $hir scopes [hir::top $hir] bindings] {
+        if {[dict get $hir bindings $b kind] eq "local"} {
+            lappend names [dict get $hir bindings $b name]
+        }
+    }
+    set env [core::env::child [core::rootEnv]]
+    core::env::declare $env $names
+    set completion [Run ::core::compiler::code::[dict get $unit name] $env]
+    return [core::completion::atProgramBoundary $completion]
+}
+
 # The generated Tcl code for EXPRS, for inspection.
 proc core::compiler::generatedCode {exprs {mode program}} {
     return [Cached $mode $exprs code]
@@ -390,13 +415,17 @@ proc core::compiler::Coerce {op repr} {
 # ---------------------------------------------------------------------------
 # Units and blocks
 
-# Returns the unit dict {name code types bindings hir}.
-proc core::compiler::GenerateUnit {mode exprs} {
+# Returns the unit dict {name code types bindings hir}. UNIT-HIR is the HIR
+# of EXPRS, built here if not given.
+proc core::compiler::GenerateUnit {mode exprs {unitHir ""}} {
     variable hir
     variable pending
     variable bindLog
     variable blockProcs
-    set hir [hir::build $exprs -mode $mode -strict 0]
+    if {$unitHir eq ""} {
+        set unitHir [hir::build $exprs -mode $mode -strict 0]
+    }
+    set hir $unitHir
     set pending {}
     set bindLog {}
     set blockProcs [dict create]

@@ -1,0 +1,29 @@
+# Lexical scopes: every scope has its own bindings, so shadowing yields
+# distinct binding ids and each reference resolves to the nearest binding.
+# Root names like + are ordinary bindings and can be shadowed too.
+#
+# expect: [20, 10]
+#
+# Lowers to 01-scopes.ir.
+
+program s2 binds b1 x, b2 inner, b3 +
+e1 bind b1 x : int
+    e2 const 10 : int
+e3 bind b2 inner : int
+    e4 call block(e5) : int
+        e5 block s3 () captures () binds b4 x : block(e5)/0 -> int
+            e6 bind b4 x : int
+                e7 const 20 : int
+            e8 call block(e9) : int
+                e9 block s4 () captures (b4 x) : block(e9)/0 -> int
+                    e10 ref b4 x : int deferred
+e11 bind b3 + : block(e12)/2 -> list
+    e12 block s5 (b5 a, b6 b) captures () : block(e12)/2 -> list
+        e13 call native(list) : list
+            e14 ref b7 list : native list
+            e15 ref b5 a : any
+            e16 ref b6 b : any
+e17 call block(e12) : list
+    e18 ref b3 + : block(e12)/2 -> list
+    e19 ref b2 inner : int
+    e20 ref b1 x : int

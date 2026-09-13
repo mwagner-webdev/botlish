@@ -4,6 +4,7 @@
 #   set h [hir::build {{bind x {const 10}} {call {ref +} {ref x} {const 1}}}]
 #   puts [hir::format $h]
 #   hir::lower $h                      ;# back to core IR
+#   hir::parse [hir::format $h]        ;# HIR text back to HIR (read.tcl)
 #
 # Pipeline:
 #
@@ -323,7 +324,7 @@ proc hir::exprsAt {hir origin} {
 }
 
 apply {{dir} {
-    foreach file {resolve types refine lower format} {
+    foreach file {resolve types refine lower format read} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

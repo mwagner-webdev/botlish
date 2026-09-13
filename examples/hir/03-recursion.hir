@@ -1,0 +1,30 @@
+# Recursion through a binding: the call inside the body has the known target
+# block(...), and the block's result type is inferred to be int.
+#
+# expect: 55
+#
+# Lowers to 03-recursion.ir.
+
+program s2 binds b1 sum
+e1 bind b1 sum : block(e2)/1 -> int
+    e2 block s3 (b2 n) captures (b1 sum) : block(e2)/1 -> int
+        e3 if : int
+            e4 call native(==) : bool
+                e5 ref b3 == : native ==
+                e6 ref b2 n : any
+                e7 const 0 : int
+            then s4
+                e8 const 0 : int
+            else s5
+                e9 call native(+) : int
+                    e10 ref b4 + : native +
+                    e11 ref b2 n : any
+                    e12 call block(e2) : int
+                        e13 ref b1 sum : block(e2)/1 -> int deferred
+                        e14 call native(-) : int
+                            e15 ref b5 - : native -
+                            e16 ref b2 n : any
+                            e17 const 1 : int
+e18 call block(e2) : int
+    e19 ref b1 sum : block(e2)/1 -> int
+    e20 const 10 : int

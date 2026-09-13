@@ -1,0 +1,25 @@
+# Refinements: a predicate proves a fact about the binding it tests, only in
+# the branch where it holds. A test decided by static types marks the other
+# branch unreachable.
+
+{bind describe
+    {block {v}
+        {if {call {ref integer?} {ref v}}
+            {block {} {call {ref +} {ref v} {const 1}}}
+            {block {}
+                {if {call {ref string?} {ref v}}
+                    {block {} {ref v}}
+                    {block {} {const other}}}}}}}
+
+{bind five {const 5}}
+
+{bind known
+    {if {call {ref integer?} {ref five}}
+        {block {} {const yes}}
+        {block {} {const no}}}}
+
+{call {ref list}
+    {call {ref describe} {const 41}}
+    {call {ref describe} {const hi}}
+    {call {ref describe} {call {ref list}}}
+    {ref known}}

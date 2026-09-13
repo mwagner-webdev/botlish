@@ -1,0 +1,13 @@
+# requires: web
+# Named types: Emailish? refines its argument to str[Emailish], and
+# uriEscape returns a str[UriQueryValue] carrying runtime evidence.
+
+{bind contact
+    {block {address}
+        {if {call {ref Emailish?} {ref address}}
+            {block {} {ok {call {ref uriEscape} {ref address}}}}
+            {block {} {error-value {ref address}}}}}}
+
+{call {ref list}
+    {call {ref contact} {const str a@b.io}}
+    {call {ref contact} {const str nope}}}

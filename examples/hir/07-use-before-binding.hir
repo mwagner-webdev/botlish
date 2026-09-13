@@ -1,0 +1,21 @@
+# Static binding errors stay run-time errors: w is used before its binding
+# in the same invocation, so evaluating the reference raises UNBOUND. The
+# reference inside f is deferred: it is only decided when f is called.
+#
+# expect-error: CORE SEMANTIC UNBOUND
+#
+# Lowers to 07-use-before-binding.ir.
+
+program s2 binds b1 f, b2 y, b3 w
+e1 bind b1 f : block(e2)/0 -> any
+    e2 block s3 () captures (b3 w) : block(e2)/0 -> any
+        e3 ref b3 w : any deferred
+e4 bind b2 y : never
+    e5 call block(e6) : never
+        e6 block s4 () captures () binds b4 z, b5 w : block(e6)/0 -> never
+            e7 bind b4 z : never
+                e8 ref b5 w : never before-binding
+            e9 bind b5 w : int unreachable
+                e10 const 1 : int unreachable
+e11 bind b3 w : int unreachable
+    e12 const 2 : int unreachable

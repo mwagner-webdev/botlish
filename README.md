@@ -34,6 +34,7 @@ core/            runtime and interpreter (see "Implementation map")
 hir/             semantic HIR: resolution, types, refinements, lowering
 compiler/        HIR -> Tcl compiler
 examples/*.ir    acceptance programs as IR data
+examples/hir/    HIR samples (.hir text) with the core IR they lower to
 tests/*.test     tcltest suite
 main.tcl         example runner
 ```
@@ -44,6 +45,7 @@ CORE_BACKEND=compile tclsh tests/all.tcl    # test suite, one backend
 tclsh main.tcl                              # run all examples (interp)
 tclsh main.tcl -backend compile -code FILE.ir   # compile, show generated Tcl, run
 tclsh main.tcl -hir FILE.ir                 # show the program's HIR, run
+tclsh main.tcl -backend compile FILE.hir    # read HIR text, compile it, run
 tclsh bench/bench.tcl                       # compare backends on bench/*.ir
 ```
 
@@ -383,6 +385,8 @@ refinement unless its contract explicitly establishes one. So
 | `core::compiler::programTypes EXPRS` | inferred types of program-level bindings |
 | `core::compiler::bindingTypes EXPRS` | inferred type of every `bind`, at any depth |
 | `core::compiler::unitHir EXPRS ?MODE?` | the HIR a unit was compiled from |
+| `core::compiler::evalHir HIR` | compile and run a program-mode HIR directly; returns the value |
+| `hir::parse TEXT` / `hir::readFile PATH` | read HIR text (the `hir::format` notation) back into HIR |
 | `hir::build EXPRS ?-mode M? ?-strict 0\|1?` | build the HIR of a program (§16) |
 | `hir::lower HIR` / `hir::format HIR ?-origins 1?` | HIR → core IR / readable HIR |
 | `hir::*` queries | nodes, scopes, bindings, symbols, types, captures, refinements (§16) |
@@ -427,6 +431,7 @@ refinement unless its contract explicitly establishes one. So
 | `hir/refine.tcl` | branch refinement facts and statically decided type tests |
 | `hir/lower.tcl` | HIR → core IR |
 | `hir/format.tcl` | readable HIR |
+| `hir/read.tcl` | HIR text → HIR |
 | `compiler/compiler.tcl` | HIR → Tcl compiler backend |
 | `bench/` | benchmark programs and runner |
 
@@ -906,6 +911,36 @@ finds the same binding. For today's HIR, lowering gives back the input
 program. The tests check this for the examples, the benchmarks and the
 differential corpora, and check that the lowered programs behave identically
 under the interpreter and the compiler.
+
+### HIR text and samples
+
+The `hir::format` notation is also an input format. `hir::parse` (and
+`hir::readFile`, which honors `# requires:` and skips `#` comment lines)
+rebuilds a complete HIR program from it. The text states the binding ids,
+scopes, types, captures, refinements, call targets and flags. The reader
+derives everything else: binding kinds and types, scope structure, closures,
+root symbols, diagnostics and origins. It rejects text that is malformed or
+inconsistent (an id declared twice, a reference to a binding that isn't
+visible, a block whose type names another block) with `{HIR PARSE}`. It does
+not check that the stated facts are *true*. To check that, compare the text
+with `hir::format [hir::build [hir::lower $h]]`.
+
+`core::compiler::evalHir HIR` compiles a program-mode HIR as given, without
+rebuilding it from IR, and runs it like `core::evalProgram`. The compiler
+trusts the HIR's facts.
+
+`examples/hir/NAME.hir` are samples covering scopes and shadowing, closures,
+recursion, refinements, control flow, refined strings and use before
+binding. Each sits next to the `NAME.ir` it lowers to and states its outcome
+in a `# expect:` or `# expect-error:` comment. `tests/hir-samples.test`
+checks, for every sample, that:
+
+* it reads back to the same text,
+* its stated facts are what analysis of its IR derives,
+* it lowers to `NAME.ir`,
+* the interpreter runs the lowered IR to the expected outcome,
+* the compiler, compiling the parsed HIR itself, gives the same outcome, and
+* both backends agree on the lowered IR.
 
 ### Who does what
 

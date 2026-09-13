@@ -1,0 +1,12 @@
+# Static binding errors stay run-time errors: w is used before its binding
+# in the same invocation, so evaluating the reference raises UNBOUND. The
+# reference inside f is deferred: it is only decided when f is called.
+
+{bind f {block {} {ref w}}}
+
+{bind y
+    {call {block {}
+        {bind z {ref w}}
+        {bind w {const 1}}}}}
+
+{bind w {const 2}}

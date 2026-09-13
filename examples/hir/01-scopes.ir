@@ -1,0 +1,14 @@
+# Lexical scopes: every scope has its own bindings, so shadowing yields
+# distinct binding ids and each reference resolves to the nearest binding.
+# Root names like + are ordinary bindings and can be shadowed too.
+
+{bind x {const 10}}
+
+{bind inner
+    {call {block {}
+        {bind x {const 20}}
+        {call {block {} {ref x}}}}}}
+
+{bind + {block {a b} {call {ref list} {ref a} {ref b}}}}
+
+{call {ref +} {ref inner} {ref x}}

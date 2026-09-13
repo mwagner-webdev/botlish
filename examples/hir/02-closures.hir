@@ -1,0 +1,28 @@
+# Closures: each block records exactly the outer bindings it captures.
+# The inner block captures n (a parameter of adder) and base; adder itself
+# captures base only because its inner block needs it.
+#
+# expect: 106
+#
+# Lowers to 02-closures.ir.
+
+program s2 binds b1 base, b2 adder, b3 add5
+e1 bind b1 base : int
+    e2 const 100 : int
+e3 bind b2 adder : block(e4)/1 -> block(e5)/1 -> int
+    e4 block s3 (b4 n) captures (b1 base) : block(e4)/1 -> block(e5)/1 -> int
+        e5 block s4 (b5 x) captures (b4 n, b1 base) : block(e5)/1 -> int
+            e6 call native(+) : int
+                e7 ref b6 + : native +
+                e8 call native(+) : int
+                    e9 ref b6 + : native +
+                    e10 ref b5 x : any
+                    e11 ref b4 n : any deferred
+                e12 ref b1 base : int deferred
+e13 bind b3 add5 : block(e5)/1 -> int
+    e14 call block(e4) : block(e5)/1 -> int
+        e15 ref b2 adder : block(e4)/1 -> block(e5)/1 -> int
+        e16 const 5 : int
+e17 call block(e5) : int
+    e18 ref b3 add5 : block(e5)/1 -> int
+    e19 const 1 : int

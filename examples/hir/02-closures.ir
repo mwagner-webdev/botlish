@@ -1,0 +1,14 @@
+# Closures: each block records exactly the outer bindings it captures.
+# The inner block captures n (a parameter of adder) and base; adder itself
+# captures base only because its inner block needs it.
+
+{bind base {const 100}}
+
+{bind adder
+    {block {n}
+        {block {x}
+            {call {ref +} {call {ref +} {ref x} {ref n}} {ref base}}}}}
+
+{bind add5 {call {ref adder} {const 5}}}
+
+{call {ref add5} {const 1}}

@@ -1,0 +1,14 @@
+# Control flow: break targets the loop, return targets the enclosing block,
+# and the loop's value type comes from its breaks.
+
+{bind pick
+    {block {flag}
+        {bind found
+            {loop {block {}
+                {bind k {const 7}}
+                {if {ref flag}
+                    {block {} {break {ref k}}}
+                    {block {} {return {const none}}}}}}}
+        {call {ref list} {ref found} {ok {ref found}}}}}
+
+{call {ref list} {call {ref pick} {ref true}} {call {ref pick} {ref false}}}

@@ -1,0 +1,53 @@
+# Refinements: a predicate proves a fact about the binding it tests, only in
+# the branch where it holds. A test decided by static types marks the other
+# branch unreachable.
+#
+# expect: [42, "hi", "other", "yes"]
+#
+# Lowers to 04-refinement.ir.
+
+program s2 binds b1 describe, b2 five, b3 known
+e1 bind b1 describe : block(e2)/1 -> any
+    e2 block s3 (b4 v) captures () : block(e2)/1 -> any
+        e3 if : any
+            e4 call native(integer?) : bool
+                e5 ref b5 integer? : native integer?
+                e6 ref b4 v : any
+            then s4 refines b4 v : int
+                e7 call native(+) : int
+                    e8 ref b6 + : native +
+                    e9 ref b4 v : int
+                    e10 const 1 : int
+            else s5
+                e11 if : str
+                    e12 call native(string?) : bool
+                        e13 ref b7 string? : native string?
+                        e14 ref b4 v : any
+                    then s6 refines b4 v : str
+                        e15 ref b4 v : str
+                    else s7
+                        e16 const other : str
+e17 bind b2 five : int
+    e18 const 5 : int
+e19 bind b3 known : str
+    e20 if : str
+        e21 call native(integer?) = true : bool
+            e22 ref b5 integer? : native integer?
+            e23 ref b2 five : int
+        then s8 refines b2 five : int
+            e24 const yes : str
+        else s9
+            e25 const no : str unreachable
+e26 call native(list) : list
+    e27 ref b8 list : native list
+    e28 call block(e2) : any
+        e29 ref b1 describe : block(e2)/1 -> any
+        e30 const 41 : int
+    e31 call block(e2) : any
+        e32 ref b1 describe : block(e2)/1 -> any
+        e33 const hi : str
+    e34 call block(e2) : any
+        e35 ref b1 describe : block(e2)/1 -> any
+        e36 call native(list) : list
+            e37 ref b8 list : native list
+    e38 ref b3 known : str

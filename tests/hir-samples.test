@@ -1,0 +1,161 @@
+# hir-samples.test -- HIR sample programs (examples/hir/*.hir).
+#
+# Each sample is HIR text (the hir::format notation) next to the core IR it
+# must lower to (NAME.ir), with its expected outcome in a comment:
+#
+#   # expect: VALUE                 value shown with evidence
+#   # expect-error: ERRORCODE
+#
+# For every sample:
+#   parse     reading the text and formatting it again reproduces it
+#   analysis  the facts it states are what hir::build derives from its IR
+#   lower     it lowers to NAME.ir
+#   interp    its lowered IR runs to the expected outcome in the interpreter
+#   compile   the compiler, compiling the parsed HIR itself, agrees
+#   backends  both backends agree on its lowered IR
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+# The HIR lines of TEXT, without comments and blank lines.
+proc hirBody {text} {
+    set kept {}
+    foreach line [split $text \n] {
+        set content [string trim $line]
+        if {$content ne "" && [string index $content 0] ne "#"} {
+            lappend kept [string trimright $line]
+        }
+    }
+    return [join $kept \n]
+}
+
+# The expected outcome stated in a sample: {value SHOWN} or {error CODE}.
+proc sampleExpectation {text} {
+    foreach line [split $text \n] {
+        if {[regexp {^#\s*expect:\s*(.*)$} $line -> shown]} {
+            return [list value $shown]
+        }
+        if {[regexp {^#\s*expect-error:\s*(.*)$} $line -> code]} {
+            return [list error $code]
+        }
+    }
+    error "sample states no expected outcome"
+}
+
+# Outcome of SCRIPT in the same shape.
+proc sampleOutcome {script} {
+    if {[catch {uplevel 1 $script} result options]} {
+        return [list error [dict get $options -errorcode]]
+    }
+    return [list value [core::value::show $result 1]]
+}
+
+proc withBackend {backend script} {
+    set saved [core::useBackend]
+    core::useBackend $backend
+    try {
+        return [uplevel 1 $script]
+    } finally {
+        core::useBackend $saved
+    }
+}
+
+set samples [lsort [glob -directory [file join $::projectRoot examples hir] *.hir]]
+
+test hir-samples-exist {there are HIR samples, each with its core IR} -body {
+    list [expr {[llength $samples] >= 5}] \
+         [lmap path $samples {file exists [file rootname $path].ir}]
+} -match glob -result {1 {1*}}
+
+foreach path $samples {
+    set name [file rootname [file tail $path]]
+
+    test hir-sample-parse-$name "$name: the HIR text reads back to itself" -body {
+        set text [core::ReadFile $path]
+        expr {[hir::format [hir::readFile $path]] eq [hirBody $text]}
+    } -result 1
+
+    test hir-sample-analysis-$name "$name: its facts are what analysis derives" -body {
+        set lowered [hir::lower [hir::readFile $path]]
+        set derived [hir::format [hir::build $lowered -strict 0]]
+        set stated [hirBody [core::ReadFile $path]]
+        expr {$derived eq $stated ? "same" : "derived:\n$derived"}
+    } -result same
+
+    test hir-sample-lower-$name "$name: lowers to its core IR" -body {
+        set lowered [hir::lower [hir::readFile $path]]
+        set expected [core::loadProgramFile [file rootname $path].ir]
+        expr {[canonicalProgram $lowered] eq [canonicalProgram $expected]
+              ? "same" : "lowered: $lowered"}
+    } -result same
+
+    test hir-sample-interp-$name "$name: runs interpreted" -body {
+        set lowered [hir::lower [hir::readFile $path]]
+        set outcome [withBackend interp {sampleOutcome {core::evalProgram $lowered}}]
+        expr {$outcome eq [sampleExpectation [core::ReadFile $path]] ? "expected" : $outcome}
+    } -result expected
+
+    test hir-sample-compile-$name "$name: runs compiled from the HIR" -body {
+        set h [hir::readFile $path]
+        set outcome [sampleOutcome {core::compiler::evalHir $h}]
+        expr {$outcome eq [sampleExpectation [core::ReadFile $path]] ? "expected" : $outcome}
+    } -result expected
+
+    test hir-sample-backends-$name "$name: both backends agree on the lowered IR" -body {
+        differential [hir::lower [hir::readFile $path]]
+    } -result same
+}
+
+# ---------------------------------------------------------------------------
+# The checks above are meaningful
+
+set sampleText [core::ReadFile [file join $::projectRoot examples hir 03-recursion.hir]]
+
+test hir-samples-wrong-fact {a sample stating a wrong type fails the analysis check} -body {
+    set wrong [string map {{e20 const 10 : int} {e20 const 10 : str}} $sampleText]
+    set h [hir::parse $wrong]
+    list [expr {$wrong ne $sampleText}] \
+         [expr {[hir::format [hir::build [hir::lower $h] -strict 0]] eq [hirBody $wrong]}]
+} -result {1 0}
+
+test hir-samples-wrong-binding {a sample naming the wrong binding fails the analysis check} -body {
+    set text [core::ReadFile [file join $::projectRoot examples hir 01-scopes.hir]]
+    # Claim the nested reference denotes the outer x.
+    set wrong [string map {{e9 block s4 () captures (b4 x)} {e9 block s4 () captures (b1 x)}
+                           {e10 ref b4 x : int deferred} {e10 ref b1 x : int deferred}} $text]
+    set h [hir::parse $wrong]
+    # The IR is the same; only the stated resolution is wrong.
+    list [expr {$wrong ne $text}] \
+         [expr {[hir::lower $h] eq [hir::lower [hir::parse $text]]}] \
+         [expr {[hir::format [hir::build [hir::lower $h] -strict 0]] eq [hirBody $wrong]}]
+} -result {1 1 0}
+
+test hir-samples-trusted {evalHir compiles the given HIR, not one rebuilt from its IR} -body {
+    # Mark an undecided type test as decided: the compiler folds it.
+    set text {program s2
+e1 call native(integer?) = true : bool
+    e2 ref b1 integer? : native integer?
+    e3 const hello : str}
+    list [core::formatValue [core::compiler::evalHir [hir::parse $text]]] \
+         [run {call {ref integer?} {const hello}}]
+} -result {true false}
+
+# ---------------------------------------------------------------------------
+# Reader errors
+
+foreach {name text pattern} {
+    no-header {e1 const 1 : int} {*expected a header*}
+    indentation "program s2\n  e1 const 1 : int" {*multiple of four*}
+    missing-type "program s2\ne1 const 1" {*EXPR KIND ... : TYPE*}
+    undeclared "program s2\ne1 ref b9 nope : any" {*not declared and is not a root name*}
+    invisible "program s2\ne1 call block(e2) : int\n    e2 block s3 () captures () binds b1 y : block(e2)/0 -> int\n        e3 bind b1 y : int\n            e4 const 1 : int\ne5 ref b1 y : int" {*not visible here*}
+    block-type "program s2\ne1 block s3 (b1 a) captures () : block(e1)/2 -> any" {*must be block(e1)/1*}
+    bad-type "program s2\ne1 const 1 : integer" {*bad type*}
+    missing-branch "program s2\ne1 if : int\n    e2 ref b1 true : bool\n    then s3\n        e3 const 1 : int" {*expected "else SCOPE*}
+} {
+    test hir-read-error-$name "reader rejects: $name" -body {
+        list [catch {hir::parse $text} message options] [dict get $options -errorcode] \
+             [string match $pattern $message]
+    } -result {1 {HIR PARSE} 1}
+}
+
+cleanupTests

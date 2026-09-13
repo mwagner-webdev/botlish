@@ -1,12 +1,15 @@
 # main.tcl -- example runner.
 #
-#   tclsh main.tcl [-backend interp|compile] [-code] [-hir] [FILE.ir ...]
+#   tclsh main.tcl [-backend interp|compile] [-code] [-hir] [FILE.ir|FILE.hir ...]
 #
 # Runs the given program files (default: every examples/*.ir) and prints
 # each program's value, with runtime evidence shown as "text"#{Type}. With
 # -backend compile it also prints the inferred types of program-level
 # bindings; -code prints the Tcl code the compiler generates; -hir prints the
 # program's semantic HIR (hir::format).
+#
+# A .hir file (HIR text, e.g. examples/hir/*.hir) is read with hir::readFile.
+# The interpreter runs its lowered IR; the compiler compiles the HIR itself.
 #
 # For every Block in the result (directly or as a list element) the runner
 # also prints the refinements visible in the Block's captured environment, so
@@ -25,14 +28,23 @@ proc probeValues {value} {
 
 proc runFile {path showCode showHir} {
     puts "== [file tail $path] ([core::useBackend])"
-    set program [core::loadProgramFile $path]
+    set hir ""
+    if {[file extension $path] eq ".hir"} {
+        set hir [hir::readFile $path]
+        set program [hir::lower $hir]
+        set run [expr {[core::useBackend] eq "compile"
+            ? {core::compiler::evalHir $hir} : {core::evalProgram $program}}]
+    } else {
+        set program [core::loadProgramFile $path]
+        set run {core::evalProgram $program}
+    }
     if {$showHir} {
-        puts [hir::format [hir::build $program -strict 0]]
+        puts [hir::format [expr {$hir ne "" ? $hir : [hir::build $program -strict 0]}]]
     }
     if {$showCode} {
         puts [core::compiler::generatedCode $program]
     }
-    if {[catch {core::evalProgram $program} value options]} {
+    if {[catch $run value options]} {
         puts "   error: $value ([dict get $options -errorcode])"
         return 1
     }

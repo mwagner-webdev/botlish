@@ -1,0 +1,10 @@
+# Recursion through a binding: the call inside the body has the known target
+# block(...), and the block's result type is inferred to be int.
+
+{bind sum
+    {block {n}
+        {if {call {ref ==} {ref n} {const 0}}
+            {block {} {const 0}}
+            {block {} {call {ref +} {ref n} {call {ref sum} {call {ref -} {ref n} {const 1}}}}}}}}
+
+{call {ref sum} {const 10}}

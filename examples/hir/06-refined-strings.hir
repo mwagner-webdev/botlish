@@ -1,0 +1,31 @@
+# requires: web
+# Named types: Emailish? refines its argument to str[Emailish], and
+# uriEscape returns a str[UriQueryValue] carrying runtime evidence.
+#
+# expect: [ok("a%40b.io"#{UriQueryValue}), error("nope")]
+#
+# Lowers to 06-refined-strings.ir.
+
+program s2 binds b1 contact
+e1 bind b1 contact : block(e2)/1 -> result
+    e2 block s3 (b2 address) captures () : block(e2)/1 -> result
+        e3 if : result
+            e4 call native(Emailish?) : bool
+                e5 ref b3 Emailish? : native Emailish?
+                e6 ref b2 address : any
+            then s4 refines b2 address : str[Emailish]
+                e7 ok : result
+                    e8 call native(uriEscape) : str[UriQueryValue]
+                        e9 ref b4 uriEscape : native uriEscape
+                        e10 ref b2 address : str[Emailish]
+            else s5
+                e11 error : result
+                    e12 ref b2 address : str
+e13 call native(list) : list
+    e14 ref b5 list : native list
+    e15 call block(e2) : result
+        e16 ref b1 contact : block(e2)/1 -> result
+        e17 const str a@b.io : str
+    e18 call block(e2) : result
+        e19 ref b1 contact : block(e2)/1 -> result
+        e20 const str nope : str
