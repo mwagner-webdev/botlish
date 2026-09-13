@@ -1,0 +1,88 @@
+# loops.test -- loop, break, continue, callable boundaries.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+test loop-1 {loop repeats after normal body completion} -setup resetEffects -body {
+    list [run {loop {block {}
+                 {bind n {call {ref test-tick}}}
+                 {if {call {ref ==} {ref n} {const 3}} {block {} {break {ref n}}} {block {}}}}}] \
+         $::testTicks
+} -result {3 3}
+
+test loop-2 {each iteration has a fresh scope} -setup resetEffects -body {
+    # `bind n` would be a duplicate if iterations shared a scope.
+    run {loop {block {}
+            {bind n {call {ref test-tick}}}
+            {if {call {ref <} {ref n} {const 5}} {block {}} {block {} {break {ref n}}}}}}
+} -result 5
+
+test continue-1 {continue starts the next iteration} -setup resetEffects -body {
+    list [run {loop {block {}
+                 {bind n {call {ref test-tick}}}
+                 {if {call {ref <} {ref n} {const 3}} {block {} {continue}} {block {}}}
+                 {call {ref test-log} {ref n}}
+                 {break {ref n}}}}] \
+         $::testTicks $::testLog
+} -result {3 3 3}
+
+test break-1 {break exits the loop} -setup resetEffects -body {
+    list [run {loop {block {} {call {ref test-tick}} {break} {call {ref test-tick}}}}] $::testTicks
+} -result {unit 1}
+
+test break-2 {break may carry a value; the loop evaluates to it} -body {
+    run {bind v {loop {block {} {break {const 42}}}}} {ref v}
+} -result 42
+
+test break-3 {break inside nested loops exits only the inner loop} -setup resetEffects -body {
+    run {loop {block {}
+            {bind inner {loop {block {} {break {const inner}}}}}
+            {break {call {ref list} {ref inner} {const outer}}}}}
+} -result {["inner", "outer"]}
+
+test loop-return-1 {return propagates through a loop to the callable} -setup resetEffects -body {
+    list [run {call {block {}
+                  {loop {block {}
+                      {bind n {call {ref test-tick}}}
+                      {if {call {ref ==} {ref n} {const 2}} {block {} {return {ref n}}} {block {}}}}}
+                  {const unreachable}}}] \
+         $::testTicks
+} -result {2 2}
+
+test boundary-1 {break cannot cross an ordinary callable boundary (static)} -body {
+    core::eval {loop {block {} {call {block {} {break}}}}}
+} -returnCodes error -errorCode {CORE SEMANTIC BREAK-OUTSIDE-LOOP} -result {break outside lexical loop}
+
+test boundary-2 {break cannot cross an ordinary callable boundary (dynamic)} -body {
+    # A helper defined outside the loop and called from inside it.
+    set scope [core::childEnv [core::rootEnv]]
+    core::evalIn {bind helper {block {} {break}}} $scope
+    core::evalIn {loop {block {} {call {ref helper}}}} $scope
+} -returnCodes error -errorCode {CORE SEMANTIC BREAK-OUTSIDE-LOOP} -match glob -result {break outside lexical loop*}
+
+test boundary-3 {continue cannot cross an ordinary callable boundary (static)} -body {
+    core::eval {loop {block {} {call {block {} {continue}}} {break}}}
+} -returnCodes error -errorCode {CORE SEMANTIC CONTINUE-OUTSIDE-LOOP} -result {continue outside lexical loop}
+
+test boundary-4 {continue cannot cross an ordinary callable boundary (dynamic)} -body {
+    set scope [core::childEnv [core::rootEnv]]
+    core::evalIn {bind helper {block {} {continue}}} $scope
+    core::evalIn {loop {block {} {call {ref helper}} {break}}} $scope
+} -returnCodes error -errorCode {CORE SEMANTIC CONTINUE-OUTSIDE-LOOP} -match glob -result {continue outside lexical loop*}
+
+test boundary-5 {break outside any loop} -body {
+    core::eval {break}
+} -returnCodes error -errorCode {CORE SEMANTIC BREAK-OUTSIDE-LOOP} -match glob -result *
+
+test boundary-6 {continue outside any loop} -body {
+    core::eval {continue}
+} -returnCodes error -errorCode {CORE SEMANTIC CONTINUE-OUTSIDE-LOOP} -match glob -result *
+
+test boundary-7 {a block value created in a loop body is its own callable} -body {
+    core::eval {loop {block {} {bind b {block {} {break}}} {break}}}
+} -returnCodes error -errorCode {CORE SEMANTIC BREAK-OUTSIDE-LOOP} -match glob -result *
+
+test boundary-8 {break in an if branch inside a loop is lexically in the loop} -body {
+    run {loop {block {} {if {ref true} {block {} {break {const ok}}} {block {}}}}}
+} -result {"ok"}
+
+cleanupTests

@@ -1,0 +1,75 @@
+# blocks.test -- Block values, closures, parameters, arity.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+test block-1 {evaluating a block does not execute its body} -setup resetEffects -body {
+    list [run {block {x y} {call {ref test-log} {const ran}}}] $::testLog
+} -result {{<block (x y)>} {}}
+
+test block-2 {block value is inspectable} -body {
+    set b [runValue {block {x} {ref x}}]
+    list [core::value::blockParams $b] [core::value::blockBody $b]
+} -result {x {{ref x}}}
+
+test block-3 {calling a block runs its body with parameters bound} -body {
+    run {call {block {x y} {call {ref -} {ref x} {ref y}}} {const 10} {const 3}}
+} -result 7
+
+test block-4 {empty block body evaluates to unit} -body {
+    run {call {block {}}}
+} -result unit
+
+test block-5 {value of a block is its final expression} -body {
+    run {call {block {} {bind x {const 10}} {bind y {call {ref +} {ref x} {const 1}}} {ref y}}}
+} -result 11
+
+test closure-1 {closure captures lexical value} -body {
+    run {bind make_adder {block {x} {block {y} {call {ref +} {ref x} {ref y}}}}} \
+        {bind add10 {call {ref make_adder} {const 10}}} \
+        {bind add5 {call {ref make_adder} {const 5}}} \
+        {call {ref list} {call {ref add10} {const 1}} {call {ref add5} {const 1}}}
+} -result {[11, 6]}
+
+test closure-2 {closure does not use the caller's dynamic environment} -body {
+    run {bind x {const 10}} \
+        {bind f {block {} {ref x}}} \
+        {bind g {block {} {bind x {const 20}} {call {ref f}}}} \
+        {call {ref g}}
+} -result 10
+
+test closure-3 {names local to the caller are not visible to the callee} -body {
+    errorCodeOf {bind f {block {} {ref secret}}} \
+                {call {block {} {bind secret {const 1}} {call {ref f}}}}
+} -result {CORE SEMANTIC UNBOUND}
+
+test closure-4 {the body runs in a child of the captured environment} -body {
+    set b [runValue {bind x {const 1}} {block {} {ref x}}]
+    dict get [core::envBindings [core::blockEnv $b]] x
+} -result {int 1}
+
+test params-1 {parameters are immutable bindings} -body {
+    core::eval {call {block {x} {bind x {const 2}}} {const 1}}
+} -returnCodes error -errorCode {CORE SEMANTIC DUPLICATE} -match glob -result {*"x"*}
+
+test params-2 {parameters may shadow outer bindings} -body {
+    run {bind x {const 1}} {call {block {x} {ref x}} {const 2}}
+} -result 2
+
+test params-3 {duplicate parameter names are rejected} -body {
+    core::eval {block {x x} {ref x}}
+} -returnCodes error -errorCode {CORE SEMANTIC DUPLICATE} -match glob -result *
+
+test params-4 {each invocation gets fresh parameter bindings} -body {
+    run {bind id {block {x} {ref x}}} \
+        {call {ref list} {call {ref id} {const 1}} {call {ref id} {const 2}}}
+} -result {[1, 2]}
+
+test arity-1 {too few arguments} -body {
+    core::eval {call {block {x y} {ref x}} {const 1}}
+} -returnCodes error -errorCode {CORE SEMANTIC ARITY} -match glob -result {*expects 2 argument(s), got 1}
+
+test arity-2 {too many arguments} -body {
+    core::eval {call {block {} {const 1}} {const 1}}
+} -returnCodes error -errorCode {CORE SEMANTIC ARITY} -match glob -result *
+
+cleanupTests

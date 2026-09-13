@@ -1,0 +1,18 @@
+# make_adder = block(x): block(y): x + y
+# add10 = make_adder(10)
+# result = if integer?(41): add10(32) else: 0
+# Expected: 42
+
+{bind make_adder
+    {block {x}
+        {block {y}
+            {call {ref +} {ref x} {ref y}}}}}
+
+{bind add10 {call {ref make_adder} {const 10}}}
+
+{bind result
+    {if {call {ref integer?} {const 41}}
+        {block {} {call {ref add10} {const 32}}}
+        {block {} {const 0}}}}
+
+{ref result}

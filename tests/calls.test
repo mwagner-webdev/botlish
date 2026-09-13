@@ -1,0 +1,106 @@
+# calls.test -- call semantics and native primitives.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+test call-1 {callee then arguments are evaluated left to right} -setup resetEffects -body {
+    run {call {call {ref test-log} {ref list}}
+              {call {ref test-log} {const 1}}
+              {call {ref test-log} {const 2}}
+              {call {ref test-log} {const 3}}}
+    set ::testLog
+} -result {{<native list>} 1 2 3}
+
+test call-2 {arguments are evaluated before arity is checked} -setup resetEffects -body {
+    catch {core::eval {call {block {} {const 0}} {call {ref test-log} {const 1}}}}
+    set ::testLog
+} -result 1
+
+test call-3 {calling a non-callable value} -body {
+    core::eval {call {const 5}}
+} -returnCodes error -errorCode {CORE SEMANTIC NOT-CALLABLE} -result {cannot call non-callable value 5}
+
+test call-4 {native arity is checked} -body {
+    core::eval {call {ref +} {const 1}}
+} -returnCodes error -errorCode {CORE SEMANTIC ARITY} -match glob -result *
+
+test call-5 {natives are first-class values} -body {
+    run {bind apply {block {f a b} {call {ref f} {ref a} {ref b}}}} \
+        {call {ref apply} {ref *} {const 6} {const 7}}
+} -result 42
+
+test arith-1 {basic arithmetic} -body {
+    list [run {call {ref +} {const 2} {const 3}}] \
+         [run {call {ref -} {const 2} {const 3}}] \
+         [run {call {ref *} {const -4} {const 3}}]
+} -result {5 -1 -12}
+
+test arith-2 {arbitrary-precision integer arithmetic} -body {
+    run {call {ref *} {const 123456789012345678901234567890} {const 987654321098765432109876543210}}
+} -result [expr {123456789012345678901234567890 * 987654321098765432109876543210}]
+
+test arith-3 {no fixed-width overflow} -body {
+    run {call {ref +} {const 9223372036854775807} {const 1}}
+} -result 9223372036854775808
+
+test arith-4 {arithmetic on a string is a type error} -body {
+    core::eval {call {ref +} {const 1} {const str 2}}
+} -returnCodes error -errorCode {CORE SEMANTIC TYPE} -result {+: expected int, got "2"}
+
+test compare-1 {comparisons return language Booleans} -body {
+    list [run {call {ref <} {const 1} {const 2}}] \
+         [run {call {ref <=} {const 2} {const 2}}] \
+         [run {call {ref >} {const 1} {const 2}}] \
+         [run {call {ref >=} {const 100000000000000000000} {const 99999999999999999999}}]
+} -result {true true false true}
+
+test equal-1 {== on integers and strings} -body {
+    list [run {call {ref ==} {const 42} {const 42}}] \
+         [run {call {ref ==} {const 42} {const 43}}] \
+         [run {call {ref ==} {const abc} {const abc}}]
+} -result {true false true}
+
+test equal-2 {== distinguishes kinds: 10 is not "10"} -body {
+    run {call {ref ==} {const 10} {const str 10}}
+} -result false
+
+test equal-3 {== is structural on lists and Results} -body {
+    list [run {call {ref ==} {const list {1 2}} {call {ref list} {const 1} {const 2}}}] \
+         [run {call {ref ==} {const list {1 2}} {const list {1 2 3}}}] \
+         [run {call {ref ==} {ok {const 1}} {ok {const 1}}}] \
+         [run {call {ref ==} {ok {const 1}} {error-value {const 1}}}]
+} -result {true false true false}
+
+test equal-4 {== on Booleans and unit} -body {
+    list [run {call {ref ==} {ref true} {ref true}}] \
+         [run {call {ref ==} {ref true} {ref false}}] \
+         [run {call {ref ==} {ref unit} {call {block {}}}}]
+} -result {true false true}
+
+test equal-5 {== on callables is undefined} -body {
+    core::eval {call {ref ==} {ref +} {ref +}}
+} -returnCodes error -errorCode {CORE SEMANTIC EQUALITY} -match glob -result *
+
+test eq-1 {eq is string equality} -body {
+    list [run {call {ref eq} {const abc} {const abc}}] \
+         [run {call {ref eq} {const abc} {const abd}}] \
+         [run {call {ref eq} {const str 10} {const str 10}}]
+} -result {true false true}
+
+test eq-2 {eq does not coerce integers to strings} -body {
+    core::eval {call {ref eq} {const 10} {const str 10}}
+} -returnCodes error -errorCode {CORE SEMANTIC TYPE} -match glob -result *
+
+test integerp-1 {integer? runtime behavior} -body {
+    list [run {call {ref integer?} {const 41}}] \
+         [run {call {ref integer?} {const -7}}] \
+         [run {call {ref integer?} {const hello}}] \
+         [run {call {ref integer?} {const str 41}}] \
+         [run {call {ref integer?} {ref true}}] \
+         [run {call {ref integer?} {ok {const 1}}}]
+} -result {true true false false false false}
+
+test list-1 {list constructor} -body {
+    run {call {ref list} {const 1} {const a} {call {ref list}}}
+} -result {[1, "a", []]}
+
+cleanupTests

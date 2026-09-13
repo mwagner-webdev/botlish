@@ -1,0 +1,16 @@
+# Refinement scoping. Each probe is a block whose captured environment is the
+# scope we want to inspect:
+#   inside - created in the then branch of `if integer?(x)`: reports x : Int
+#   after  - created after the if: the branch-local refinement is gone
+# Expected: a list of two probes; the runner prints their refinements.
+
+{bind x {const 41}}
+
+{bind inside
+    {if {call {ref integer?} {ref x}}
+        {block {} {block {} {ref x}}}
+        {block {} {block {} {ref x}}}}}
+
+{bind after {block {} {ref x}}}
+
+{call {ref list} {ref inside} {ref after}}

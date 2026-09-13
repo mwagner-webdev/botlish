@@ -1,0 +1,13 @@
+# A function-like block whose loop breaks with a value, which it returns.
+# Expected: 17
+
+{call
+    {block {}
+        {bind resulting_value
+            {loop
+                {block {}
+                    {if {call {ref ==} {const 1} {const 1}}
+                        {block {} {break {const 17}}}
+                        {block {}}}}}}
+        {return {ref resulting_value}}
+        {const unreachable}}}

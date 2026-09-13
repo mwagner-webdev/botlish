@@ -1,0 +1,97 @@
+# control.test -- if, return, Boolean conditions, completions.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+test if-1 {if returns the selected branch value} -body {
+    list [run {if {call {ref >} {const 5} {const 0}} {block {} {const positive}} {block {} {const nonpositive}}}] \
+         [run {if {call {ref >} {const -5} {const 0}} {block {} {const positive}} {block {} {const nonpositive}}}]
+} -result {{"positive"} {"nonpositive"}}
+
+test if-2 {exactly one branch executes} -setup resetEffects -body {
+    run {if {ref true}
+            {block {} {call {ref test-log} {const then}}}
+            {block {} {call {ref test-log} {const else}}}}
+    set ::testLog
+} -result {{"then"}}
+
+test if-3 {empty branch evaluates to unit} -body {
+    run {if {ref false} {block {} {const 1}} {block {}}}
+} -result unit
+
+test if-4 {condition must be a Boolean: no integer truthiness} -body {
+    core::eval {if {const 1} {block {} {const 1}} {block {} {const 0}}}
+} -returnCodes error -errorCode {CORE SEMANTIC NOT-BOOLEAN} -result {if condition must be a Boolean, got 1}
+
+test if-5 {condition must be a Boolean: the string "true" is not one} -body {
+    core::eval {if {const true} {block {} {const 1}} {block {} {const 0}}}
+} -returnCodes error -errorCode {CORE SEMANTIC NOT-BOOLEAN} -match glob -result *
+
+test if-6 {branch-local binding does not escape} -body {
+    errorCodeOf {if {ref true} {block {} {bind y {const 1}}} {block {}}} \
+                {ref y}
+} -result {CORE SEMANTIC UNBOUND}
+
+test if-7 {values escape a branch} -body {
+    run {bind v {if {ref true} {block {} {bind y {const 1}} {call {ref +} {ref y} {const 1}}} {block {}}}} \
+        {ref v}
+} -result 2
+
+test if-8 {a branch may bind a name that also exists outside it} -body {
+    run {bind y {const outer}} \
+        {bind inner {if {ref true} {block {} {bind y {const inner}} {ref y}} {block {}}}} \
+        {call {ref list} {ref inner} {ref y}}
+} -result {["inner", "outer"]}
+
+test return-1 {return exits the callable with its value} -body {
+    run {call {block {} {return {const 10}} {const 20}}}
+} -result 10
+
+test return-2 {code after return is not evaluated} -setup resetEffects -body {
+    run {call {block {} {call {ref test-log} {const before}}
+                        {return {const 10}}
+                        {call {ref test-log} {const after}}}}
+    set ::testLog
+} -result {{"before"}}
+
+test return-3 {return inside an if branch exits the enclosing callable} -setup resetEffects -body {
+    list [run {call {block {x}
+                  {if {call {ref <} {ref x} {const 0}} {block {} {return {const negative}}} {block {}}}
+                  {call {ref test-log} {const continued}}
+                  {const nonnegative}}
+              {const -1}}] $::testLog
+} -result {{"negative"} {}}
+
+test return-4 {return applies only to the innermost invocation} -body {
+    run {bind inner {block {} {return {const 1}} {const 2}}} \
+        {call {block {} {bind r {call {ref inner}}} {call {ref +} {ref r} {const 100}}}}
+} -result 101
+
+test return-5 {return in an argument position aborts the call} -setup resetEffects -body {
+    list [run {call {block {} {call {ref test-log} {return {const 5}}} {const 6}}}] $::testLog
+} -result {5 {}}
+
+test return-6 {return outside a callable is rejected statically} -body {
+    core::eval {return {const 1}}
+} -returnCodes error -errorCode {CORE SEMANTIC RETURN-OUTSIDE-CALLABLE} -match glob -result *
+
+test return-7 {return reaching the program boundary is rejected dynamically} -body {
+    set c [core::evalIn {return {const 1}} [core::rootEnv]]
+    list [core::formatCompletion $c] [catch {core::completion::atProgramBoundary $c} m opts] [dict get $opts -errorcode]
+} -result {return(1) 1 {CORE SEMANTIC RETURN-OUTSIDE-CALLABLE}}
+
+test completion-1 {evalIn exposes semantic completions} -body {
+    set scope [core::rootEnv]
+    list [core::formatCompletion [core::evalIn {const 1} $scope]] \
+         [core::formatCompletion [core::evalIn {return {const 2}} $scope]] \
+         [core::formatCompletion [core::evalIn {break} $scope]] \
+         [core::formatCompletion [core::evalIn {break {const 3}} $scope]] \
+         [core::formatCompletion [core::evalIn {continue} $scope]]
+} -result {value(1) return(2) break(unit) break(3) continue}
+
+test completion-2 {an abrupt sub-expression completion propagates out of bind} -body {
+    set scope [core::childEnv [core::rootEnv]]
+    set c [core::evalIn {bind x {return {const 9}}} $scope]
+    list [core::formatCompletion $c] [dict exists [core::envBindings $scope] x]
+} -result {return(9) 0}
+
+cleanupTests

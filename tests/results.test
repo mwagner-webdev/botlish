@@ -1,0 +1,54 @@
+# results.test -- Result values: ok / error-value.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+test result-1 {ok value construction} -body {
+    run {ok {const 10}}
+} -result {ok(10)}
+
+test result-2 {error value construction} -body {
+    run {error-value {const bad_input}}
+} -result {error("bad_input")}
+
+test result-3 {an error Result is an ordinary value, not an exception} -body {
+    run {bind r {error-value {const bad}}} {const after}
+} -result {"after"}
+
+test result-4 {ok? and error? predicates} -body {
+    list [run {call {ref ok?} {ok {const 1}}}] \
+         [run {call {ref ok?} {error-value {const 1}}}] \
+         [run {call {ref error?} {error-value {const 1}}}] \
+         [run {call {ref error?} {ok {const 1}}}] \
+         [run {call {ref ok?} {const 1}}] \
+         [run {call {ref error?} {const ok}}]
+} -result {true false true false false false}
+
+test result-5 {result-value and result-error} -body {
+    list [run {call {ref result-value} {ok {const 10}}}] \
+         [run {call {ref result-error} {error-value {const bad}}}]
+} -result {10 {"bad"}}
+
+test result-6 {result-value of an error Result is invalid} -body {
+    core::eval {call {ref result-value} {error-value {const bad}}}
+} -returnCodes error -errorCode {CORE SEMANTIC TYPE} -match glob -result *
+
+test result-7 {a string that looks like a Result is not one} -body {
+    run {call {ref ok?} {const {ok 5}}}
+} -result false
+
+test result-8 {Results nest and may hold any value} -body {
+    run {ok {error-value {call {ref list} {const 1} {const 2}}}}
+} -result {ok(error([1, 2]))}
+
+test result-9 {handling a Result with if} -body {
+    run {bind safe_div {block {a b}
+            {if {call {ref ==} {ref b} {const 0}}
+                {block {} {error-value {const division_by_zero}}}
+                {block {} {ok {ref a}}}}}} \
+        {bind r {call {ref safe_div} {const 1} {const 0}}} \
+        {if {call {ref error?} {ref r}}
+            {block {} {call {ref result-error} {ref r}}}
+            {block {} {call {ref result-value} {ref r}}}}
+} -result {"division_by_zero"}
+
+cleanupTests

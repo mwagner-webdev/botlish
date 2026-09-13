@@ -1,0 +1,27 @@
+# acceptance.test -- the acceptance programs in examples/.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+proc runExample {name} {
+    return [core::evalProgram [core::readProgramFile [file join $::projectRoot examples $name]]]
+}
+
+test acceptance-1 {make_adder / integer? program evaluates to 42} -body {
+    core::formatValue [runExample 01-adder.ir]
+} -result 42
+
+test acceptance-2 {loop break value returned from a function-like block} -body {
+    core::formatValue [runExample 02-loop-break.ir]
+} -result 17
+
+test acceptance-3 {lexical, not dynamic, closure semantics} -body {
+    core::formatValue [runExample 03-lexical-closure.ir]
+} -result 10
+
+test acceptance-4 {refinement scoping} -body {
+    lassign [core::value::items [runExample 04-refinement-scope.ir]] inside after
+    list [core::envRefinements [core::blockEnv $inside]] \
+         [core::envRefinements [core::blockEnv $after]]
+} -result {{x Int} {}}
+
+cleanupTests

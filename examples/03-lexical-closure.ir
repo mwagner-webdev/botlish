@@ -1,0 +1,13 @@
+# f sees the x of its definition site, not the x of its caller g.
+# Expected: 10
+
+{bind x {const 10}}
+
+{bind f {block {} {ref x}}}
+
+{bind g
+    {block {}
+        {bind x {const 20}}
+        {call {ref f}}}}
+
+{call {ref g}}

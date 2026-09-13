@@ -1,0 +1,101 @@
+# bindings.test -- const, bind, ref, lexical scoping, malformed IR.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+test const-1 {integer constant} -body {
+    run {const 10}
+} -result 10
+
+test const-2 {string constant} -body {
+    run {const hello}
+} -result {"hello"}
+
+test const-3 {non-canonical integer text is a string, not octal} -body {
+    run {const 010}
+} -result {"010"}
+
+test const-4 {typed string literal keeps digits as a string} -body {
+    list [run {const str 10}] [run {call {ref integer?} {const str 10}}]
+} -result {{"10"} false}
+
+test const-5 {list literal} -body {
+    run {const list {1 2 abc}}
+} -result {[1, 2, "abc"]}
+
+test const-6 {the text "true" is a string, not a Boolean} -body {
+    list [run {const true}] [run {ref true}]
+} -result {{"true"} true}
+
+test bind-1 {binding and lookup} -body {
+    run {bind x {const 10}} {ref x}
+} -result 10
+
+test bind-2 {bind evaluates to the bound value} -body {
+    run {bind x {const 7}}
+} -result 7
+
+test bind-3 {duplicate binding in the same scope is rejected} -body {
+    core::evalProgram {{bind x {const 10}} {bind x {const 20}}}
+} -returnCodes error -errorCode {CORE SEMANTIC DUPLICATE} \
+  -result {duplicate binding "x" in the same lexical scope}
+
+test bind-4 {unbound name} -body {
+    core::eval {ref nope}
+} -returnCodes error -errorCode {CORE SEMANTIC UNBOUND} -result {unbound name "nope"}
+
+test bind-5 {nested scope may shadow; outer binding unaffected} -body {
+    run {bind x {const 10}} \
+        {bind inner {call {block {} {bind x {const 20}} {ref x}}}} \
+        {call {ref list} {ref inner} {ref x}}
+} -result {[20, 10]}
+
+test bind-6 {outer lexical lookup} -body {
+    run {bind x {const 10}} \
+        {call {block {} {call {block {} {ref x}}}}}
+} -result 10
+
+test bind-7 {root bindings are ordinary and may be shadowed} -body {
+    run {bind + {block {a b} {const shadowed}}} \
+        {call {ref +} {const 1} {const 2}}
+} -result {"shadowed"}
+
+test bind-8 {a block sees later bindings of its scope (recursion)} -body {
+    run {bind fact {block {n}
+            {if {call {ref <=} {ref n} {const 1}}
+                {block {} {const 1}}
+                {block {} {call {ref *} {ref n}
+                                {call {ref fact} {call {ref -} {ref n} {const 1}}}}}}}} \
+        {call {ref fact} {const 20}}
+} -result 2432902008176640000
+
+test bind-9 {using a name before its binding exists is unbound} -body {
+    errorCodeOf {bind f {block {} {ref later}}} \
+                {bind early {call {ref f}}} \
+                {bind later {const 1}}
+} -result {CORE SEMANTIC UNBOUND}
+
+test malformed-1 {unknown operation} -body {
+    core::eval {frobnicate 1}
+} -returnCodes error -errorCode {CORE MALFORMED} -match glob -result {*unknown operation "frobnicate"*}
+
+test malformed-2 {wrong operand count} -body {
+    core::eval {bind x}
+} -returnCodes error -errorCode {CORE MALFORMED} -match glob -result {*(bind NAME EXPR)*}
+
+test malformed-3 {empty node} -body {
+    core::eval {}
+} -returnCodes error -errorCode {CORE MALFORMED} -match glob -result *
+
+test malformed-4 {bad typed integer literal} -body {
+    core::eval {const int 007}
+} -returnCodes error -errorCode {CORE MALFORMED} -match glob -result *
+
+test malformed-5 {if branch must be a block node} -body {
+    core::eval {if {ref true} {const 1} {block {}}}
+} -returnCodes error -errorCode {CORE MALFORMED} -match glob -result {*then branch*}
+
+test malformed-6 {malformed nodes are rejected by evalIn too} -body {
+    core::evalIn {ref} [core::rootEnv]
+} -returnCodes error -errorCode {CORE MALFORMED} -match glob -result *
+
+cleanupTests

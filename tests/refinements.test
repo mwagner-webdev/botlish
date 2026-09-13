@@ -1,0 +1,123 @@
+# refinements.test -- predicate metadata and branch refinement.
+#
+# A block created inside a scope captures that scope, so it acts as a probe:
+# core::blockEnv gives the environment to inspect.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+# Returns {INSIDE AFTER}: refinements of NAME in the probe blocks.
+proc probeRefinements {value name} {
+    set result {}
+    foreach probe [core::value::items $value] {
+        lappend result [core::refinementsOf [core::blockEnv $probe] $name]
+    }
+    return $result
+}
+
+test refine-1 {integer? true branch installs Int refinement} -body {
+    set v [runValue {bind x {const 41}} \
+                    {if {call {ref integer?} {ref x}}
+                        {block {} {block {} {ref x}}}
+                        {block {} {const unreachable}}}]
+    core::refinementsOf [core::blockEnv $v] x
+} -result Int
+
+test refine-2 {integer? false branch does not install Int refinement} -body {
+    set v [runValue {bind x {const hello}} \
+                    {if {call {ref integer?} {ref x}}
+                        {block {} {const unreachable}}
+                        {block {} {block {} {ref x}}}}]
+    list [core::refinementsOf [core::blockEnv $v] x] [core::envRefinements [core::blockEnv $v]]
+} -result {{} {}}
+
+test refine-3 {branch refinement disappears outside the branch} -body {
+    set v [runValue {bind x {const 41}} \
+                    {bind inside {if {call {ref integer?} {ref x}}
+                                     {block {} {block {} {ref x}}}
+                                     {block {} {block {} {ref x}}}}} \
+                    {bind after {block {} {ref x}}} \
+                    {call {ref list} {ref inside} {ref after}}]
+    probeRefinements $v x
+} -result {Int {}}
+
+test refine-4 {refinement is visible in nested scopes within the branch} -body {
+    set v [runValue {bind x {const 41}} \
+                    {if {call {ref integer?} {ref x}}
+                        {block {} {call {block {} {block {} {ref x}}}}}
+                        {block {} {const unreachable}}}]
+    core::envRefinements [core::blockEnv $v]
+} -result {x Int}
+
+test refine-5 {refinement follows the binding, not the name} -body {
+    set v [runValue {bind x {const 41}} \
+                    {if {call {ref integer?} {ref x}}
+                        {block {} {bind x {const shadow}} {block {} {ref x}}}
+                        {block {} {const unreachable}}}]
+    list [core::refinementsOf [core::blockEnv $v] x] [core::envRefinements [core::blockEnv $v]]
+} -result {{} {}}
+
+test refine-6 {only direct ref arguments are refined} -body {
+    set v [runValue {bind x {const 41}} \
+                    {if {call {ref integer?} {call {ref +} {ref x} {const 1}}}
+                        {block {} {block {} {ref x}}}
+                        {block {} {const unreachable}}}]
+    core::envRefinements [core::blockEnv $v]
+} -result {}
+
+test refine-7 {a shadowed predicate name carries no metadata} -body {
+    set v [runValue {bind x {const 41}} \
+                    {bind integer? {block {v} {ref true}}} \
+                    {if {call {ref integer?} {ref x}}
+                        {block {} {block {} {ref x}}}
+                        {block {} {const unreachable}}}]
+    core::refinementsOf [core::blockEnv $v] x
+} -result {}
+
+test refine-8 {predicates remain ordinary values: aliasing keeps metadata} -body {
+    set v [runValue {bind x {const 41}} \
+                    {bind is_int {ref integer?}} \
+                    {if {call {ref is_int} {ref x}}
+                        {block {} {block {} {ref x}}}
+                        {block {} {const unreachable}}}]
+    core::refinementsOf [core::blockEnv $v] x
+} -result Int
+
+test refine-9 {other registered predicates refine generically} -body {
+    set v [runValue {bind s {const hello}} \
+                    {bind r {ok {const 1}}} \
+                    {if {call {ref string?} {ref s}}
+                        {block {} {if {call {ref ok?} {ref r}}
+                                      {block {} {block {} {ref s}}}
+                                      {block {} {const unreachable}}}}
+                        {block {} {const unreachable}}}]
+    core::envRefinements [core::blockEnv $v]
+} -result {r Result.ok s Str}
+
+test refine-10 {registry supports multi-argument and false-branch rules} -setup {
+    if {"test-both-ints?" ni [core::native::names]} {
+        core::registerNative test-both-ints? -arity 2 \
+            -impl {apply {{a b} {core::value::bool [expr {[core::value::kind $a] eq "int" && [core::value::kind $b] eq "int"}]}}} \
+            -refines-true {0 Int 1 Int}
+        core::registerNative test-not-int? -arity 1 \
+            -impl {apply {{a} {core::value::bool [expr {[core::value::kind $a] ne "int"}]}}} \
+            -refines-false {0 Int}
+    }
+} -body {
+    set v [runValue {bind a {const 1}} \
+                    {bind b {const 2}} \
+                    {bind p1 {if {call {ref test-both-ints?} {ref a} {ref b}}
+                                {block {} {block {} {ref a}}}
+                                {block {} {const unreachable}}}} \
+                    {bind p2 {if {call {ref test-not-int?} {ref a}}
+                                {block {} {const unreachable}}
+                                {block {} {block {} {ref a}}}}} \
+                    {call {ref list} {ref p1} {ref p2}}]
+    lassign [core::value::items $v] p1 p2
+    list [core::envRefinements [core::blockEnv $p1]] [core::envRefinements [core::blockEnv $p2]]
+} -result {{a Int b Int} {a Int}}
+
+test refine-11 {refinement metadata is not special-cased by name} -body {
+    dict get [core::native::metadata integer?] refinesTrue
+} -result {0 Int}
+
+cleanupTests
