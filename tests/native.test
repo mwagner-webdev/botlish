@@ -698,10 +698,43 @@ test native-repr-17 {raw block parameters and raw backedge values are never scan
     list [expr {$normal eq $stressed}] $normal
 } -result {1 {value 200000}}
 
-test native-repr-18 {a raw loop index that also escapes as an ordinary return value is boxed exactly once for that boundary, reusing the same boxed form its own guard comparison already needed} -body {
+test native-repr-18 {a raw loop index that also escapes as an ordinary return value is boxed exactly once, lazily, right at that boundary: the comparison and the self-tail backedge never touch a tagged form of it at all} -body {
     set text "fn f(n):\n    if n == 0:\n        return n\n    f(n - 1)\n\nf(5)"
     set body [nirFunction [nirOf $text] f]
-    list [regexp {ret %[0-9]+} $body] [regexp -all {op rbox} $body] [native $text]
-} -result {1 2 {value 0}}
+    list [regexp {ret %[0-9]+} $body] [regexp -all {op rbox} $body] \
+         [regexp {op rieq %0} $body] [regexp {op risub %0} $body] [native $text]
+} -result {1 1 1 1 {value 0}}
+
+# ---------------------------------------------------------------------------
+# Representation: demand-driven expression lowering (a consumer requests raw
+# or tagged directly, instead of Expr always producing tagged and a later
+# consumer unboxing it back -- see the "Demand-driven lowering" note in
+# native/lower.tcl's Representation section)
+
+test native-repr-19 {a self-tail loop whose raw parameter never crosses a tagged boundary emits no representation transition at all: the milestone's canonical dead "rbox immediately unboxed back" pattern does not appear because nothing ever asks for tagged in the first place} -body {
+    set text "fn f(n):\n    if n == 0:\n        return unit\n    f(n - 1)\n\nf(5)"
+    set body [nirFunction [nirOf $text] f]
+    list [regexp {op rieq %0} $body] [regexp {op risub %0} $body] [regexp {tail %[0-9]+} $body] \
+         [regexp {op rbox} $body] [regexp {op runbox} $body] [native $text]
+} -result {1 1 1 0 0 {value unit}}
+
+test native-repr-20 {a raw-safe arithmetic chain nested inside another raw-eligible operation stays fully raw with zero intermediate boxes, boxing only once, at the function's own tagged-return boundary} -body {
+    set text "fn f(x):\n    ((x + 1) * 2 - 3) + 10\n\n\[f(1), f(100)\]"
+    set body [nirFunction [nirOf $text] f]
+    list [regexp -all {op riadd} $body] [regexp {op rimul} $body] [regexp {op risub} $body] \
+         [regexp -all {op rbox} $body] [regexp -all {op runbox} $body] [parity $text]
+} -result {2 1 1 1 1 same}
+
+test native-repr-21 {a raw-provable value passed to an ordinary (non-self-tail) call still boxes exactly once: this cleanup removes only boxes nothing needed, never a genuine ABI boundary} -body {
+    set text "fn helper(x):\n    x\n\nfn f(n):\n    if n == 0:\n        return helper(n)\n    f(n - 1)\n\nf(5)"
+    set body [nirFunction [nirOf $text] f]
+    list [regexp {op rbox} $body] [regexp {call [0-9]+ %[0-9]+} $body] [native $text]
+} -result {1 1 {value 0}}
+
+test native-repr-22 {a bound value read raw, then tagged, then raw again is computed once, with at most one conversion in each direction (RawOf/TaggedOf's shared caches): Botlish has no side-effecting natives, so "not duplicated" is checked structurally -- one defining riadd, one runbox, reused} -body {
+    set text "fn f(x):\n    a = x + 1\n    \[a + 2, a, a + 3\]\n\nf(5)"
+    set body [nirFunction [nirOf $text] f]
+    list [regexp -all {op riadd} $body] [regexp -all {op runbox} $body] [regexp -all {op rbox} $body] [native $text]
+} -result {3 1 3 {value {[8, 6, 9]}}}
 
 cleanupTests

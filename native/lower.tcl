@@ -171,10 +171,49 @@ namespace eval native::lower {
 # fn rawCache: tagged Reg -> raw Reg, so reading the same already-small
 # local twice (e.g. two arithmetic expressions over the same binding) unboxes
 # it once (RawOf), and a value this lowering already boxed from a raw result
-# is unboxed again for free (RawArithOrCompare caches its own rbox). Scoped
-# like fn locals: If and Loop save and restore it around each branch, since a
-# register's raw counterpart from one branch does not dominate the other or
-# the code after the join.
+# is unboxed again for free (a box TaggedOf itself created caches both
+# directions). Scoped like fn locals: If and Loop save and restore it around
+# each branch, since a register's raw counterpart from one branch does not
+# dominate the other or the code after the join.
+#
+# Demand-driven lowering
+# -----------------------
+# Expr's contract is "produce the representation the caller asked for", not
+# unconditionally tagged: `Expr fn e ?want?` (want defaults to `tagged`, the
+# conservative form every ordinary caller keeps getting) returns a register
+# already in that representation. Only two expression kinds can produce `raw`
+# directly, without ever materializing a tagged value first:
+#
+#   ref   a local/parameter register already stored raw (a self-tail-proven
+#         parameter, RawParams): returned as-is, no conversion at all.
+#   call  a native `+ - * < <= > >= ==` whose operands need no runtime kind
+#         guard (RawEligibleCall) and whose operand/result ranges are proven
+#         small (hir/range.tcl): its own operands are demanded raw too (so a
+#         chain like `(i + 1) * 2 - 3` stays raw throughout, recursively),
+#         and the arithmetic result is boxed only if the caller wanted tagged
+#         -- a comparison's result is always a tagged Bool regardless, since
+#         raw is purely an Int representation (see #11 of the milestone this
+#         was written for; Bool representation is untouched).
+#
+# Every other expression kind (and a raw-ineligible call, or one whose
+# operand needs a guard: guards run on tagged registers, so representation
+# stays downstream of them exactly as before) always produces tagged; Expr's
+# uniform tail then converts with RawOf/TaggedOf if the caller's `want`
+# disagrees with what was produced -- "decline raw, lower tagged, runbox"
+# (milestone #6). Because RawOf/TaggedOf are the same two caches either way,
+# asking for one representation and later the other of the same *register*
+# never re-runs the expression's own code (only Bind/Call's argument
+# evaluation ever *runs* an expression; a subsequent Ref of the binding it
+# produced just reads that one register, in whichever representation the new
+# use needs) -- see the milestone's #8/#18/#30.
+#
+# The two places that actually *ask* for raw are: NativeCall, for the
+# operands of a raw-eligible arithmetic/comparison (recursively demanding raw
+# from whatever produced them), and Call, for a self-tail call's arguments at
+# a parameter slot RawParams proved raw for the whole function (replacing the
+# old always-produce-tagged-then-RawOf-it-back TailArgs). Both are exactly
+# the places native/lower.tcl already knew, from existing analysis, that raw
+# is both safe and wanted; nothing here adds a new proof.
 
 # ---------------------------------------------------------------------------
 # Entry point
@@ -630,16 +669,17 @@ proc native::lower::Sequence {fnVar exprs} {
     return $result
 }
 
-proc native::lower::Expr {fnVar e} {
+proc native::lower::Expr {fnVar e {want tagged}} {
     upvar 1 $fnVar fn
     variable hir
     set node [hir::node $hir $e]
+    set repr tagged
     switch -- [dict get $node kind] {
         const    { set result [Const fn $e $node] }
-        ref      { set result [Ref fn $e $node] }
+        ref      { lassign [Ref fn $e $node $want] result repr }
         bind     { set result [Bind fn $e $node] }
         block    { set result [Closure fn $e] }
-        call     { set result [Call fn $e $node] }
+        call     { lassign [Call fn $e $node $want] result repr }
         if       { set result [If fn $e $node] }
         loop     { set result [Loop fn $e $node] }
         return {
@@ -686,6 +726,12 @@ proc native::lower::Expr {fnVar e} {
         Emit fn unreachable $e
         return never
     }
+    if {$result ne "never" && $want eq "raw" && $repr eq "tagged"} {
+        # WANT could not be produced directly (Ref/Call are the only kinds
+        # that ever try): the declined-raw fallback, lower tagged then
+        # runbox (milestone #6), reusing RawOf's cache like any other caller.
+        set result [RawOf fn $result]
+    }
     return $result
 }
 
@@ -725,7 +771,7 @@ proc native::lower::IntConst {fnVar n e} {
     return $r
 }
 
-proc native::lower::Ref {fnVar e node} {
+proc native::lower::Ref {fnVar e node want} {
     upvar 1 $fnVar fn
     variable hir
     variable unproven
@@ -733,12 +779,12 @@ proc native::lower::Ref {fnVar e node} {
     set name [dict get $node name]
     if {$b eq ""} {
         Emit fn "raise UNBOUND [Quote "unbound name \"$name\""]" $e
-        return never
+        return {never tagged}
     }
     set binding [hir::binding $hir $b]
     switch -- [dict get $binding kind] {
         root {
-            return [RootValue fn $e $binding]
+            return [list [RootValue fn $e $binding] tagged]
         }
         ambient {
             Unsupported $e "ambient binding" "\"$name\" is looked up in an unknown environment"
@@ -746,20 +792,30 @@ proc native::lower::Ref {fnVar e node} {
     }
     if {[dict get $node init] eq "no"} {
         Emit fn "raise UNBOUND [Quote "name \"$name\" used before its binding"]" $e
-        return never
+        return {never tagged}
     }
     set access [Access fn $b]
     lassign $access how where
     switch -- $how {
-        reg     { return $where }
-        rawreg  { return [TaggedOf fn $where] }
-        fnvalue { return [Assign fn "fnvalue $where" $e] }
-        self    { return [Assign fn self $e] }
+        reg     { return [list $where tagged] }
+        rawreg  {
+            # A parameter RawParams proved raw for the whole function: WHERE
+            # already *is* its raw register (Function), so a raw consumer
+            # gets it with no conversion at all, not TaggedOf-then-RawOf'd
+            # back (the milestone's core case: see #9 and the "Demand-driven
+            # lowering" note above).
+            if {$want eq "raw"} {
+                return [list $where raw]
+            }
+            return [list [TaggedOf fn $where] tagged]
+        }
+        fnvalue { return [list [Assign fn "fnvalue $where" $e] tagged] }
+        self    { return [list [Assign fn self $e] tagged] }
         cell {
             if {[dict exists $unproven $e]} {
-                return [Assign fn "cellcheck $where [Quote [dict get $binding name]]" $e]
+                return [list [Assign fn "cellcheck $where [Quote [dict get $binding name]]" $e] tagged]
             }
-            return [Assign fn "cellget $where" $e]
+            return [list [Assign fn "cellget $where" $e] tagged]
         }
     }
     throw {NATIVE BUG} "native lowering: bad access $access for $b ($e)"
@@ -891,12 +947,16 @@ proc native::lower::Closure {fnVar e} {
 # ---------------------------------------------------------------------------
 # Calls
 
-proc native::lower::Call {fnVar e node} {
+# Returns {RESULT REPR}: REPR is "raw" only when Ref or Call produced it
+# directly; every other expression kind always returns "tagged" (Expr's tail
+# reconciles a mismatch with WANT via RawOf/TaggedOf).
+proc native::lower::Call {fnVar e node want} {
     upvar 1 $fnVar fn
     variable hir
     variable selfTail
     variable envless
     variable unproven
+    variable natives
     lassign [dict get $node target] targetKind target
     set calleeExpr [dict get $node callee]
     set argExprs [dict get $node args]
@@ -910,65 +970,125 @@ proc native::lower::Call {fnVar e node} {
     if {!$skipCallee} {
         set callee [Expr fn $calleeExpr]
         if {$callee eq "never"} {
-            return never
+            return {never tagged}
         }
     }
+
+    if {$targetKind eq "native"} {
+        # A raw-eligible native (RawEligibleCall, decided from the argument
+        # *expressions* alone -- no evaluation needed yet) asks its operands
+        # for raw directly, so a chain of such calls never materializes an
+        # intermediate tagged value only to unbox it straight back
+        # (milestone #10); anything else evaluates tagged exactly as before.
+        lassign [NativeCallOp $e $node] name op
+        set rawEligible [expr {[dict exists $natives $name] ? [RawEligibleCall $e $argExprs $op] : 0}]
+        set argRegs {}
+        foreach arg $argExprs {
+            set r [Expr fn $arg [expr {$rawEligible ? "raw" : "tagged"}]]
+            if {$r eq "never"} {
+                return {never tagged}
+            }
+            lappend argRegs $r
+        }
+        return [NativeCall fn $e $node $name $argRegs $rawEligible $op $want]
+    }
+
+    if {$targetKind eq "block"} {
+        set params [hir::get $hir $target params]
+        set instance [expr {[dict exists $fn targets $e] ? [dict get $fn targets $e] : ""}]
+        # The instance hir::specialize chose; a self tail call that stays in
+        # this instance is a loop, and each of its raw-declared parameter
+        # slots (RawParams) wants its argument raw directly, rather than
+        # Expr's default tagged form immediately unboxed back (the
+        # milestone's central case: see #9).
+        set self [expr {$instance ne "" && [dict exists $selfTail $e] && $instance eq [dict get $fn instance]}]
+        set argRegs {}
+        set i 0
+        foreach arg $argExprs {
+            set argWant tagged
+            if {$self && $i < [llength $params]
+                    && [lindex [dict get $fn locals [lindex $params $i]] 0] eq "rawreg"} {
+                set argWant raw
+            }
+            set r [Expr fn $arg $argWant]
+            if {$r eq "never"} {
+                return {never tagged}
+            }
+            lappend argRegs $r
+            incr i
+        }
+        if {[llength $params] != [llength $argRegs]} {
+            set pnames [lmap b $params {dict get [hir::binding $hir $b] name}]
+            Emit fn "raise ARITY [Quote "block ([join $pnames { }]) expects [llength $params] argument(s), got [llength $argRegs]"]" $e
+            return {never tagged}
+        }
+        if {![dict exists $fn targets $e]} {
+            throw {NATIVE BUG} "native lowering: hir::specialize chose no instance for call $e"
+        }
+        set id [expr {$self ? [Placeholder $instance] : [FunctionRef $instance]}]
+        dict lappend fn calls [list direct $id $self]
+        if {$self} {
+            if {$target in $envless} {
+                Emit fn [string trimright "tail [join $argRegs { }]"] $e
+            } else {
+                Emit fn [string trimright "tailenv $callee [join $argRegs { }]"] $e
+            }
+            return {never tagged}
+        }
+        if {$target in $envless} {
+            return [list [Assign fn [string trimright "call $id [join $argRegs { }]"] $e] tagged]
+        }
+        return [list [Assign fn [string trimright "callenv $id $callee [join $argRegs { }]"] $e] tagged]
+    }
+
     set argRegs {}
     foreach arg $argExprs {
         set r [Expr fn $arg]
         if {$r eq "never"} {
-            return never
+            return {never tagged}
         }
         lappend argRegs $r
     }
-
-    switch -- $targetKind {
-        native {
-            set name [dict get [hir::symbol $hir $target] name]
-            return [NativeCall fn $e $node $name $argRegs]
-        }
-        block {
-            set params [hir::get $hir $target params]
-            if {[llength $params] != [llength $argRegs]} {
-                set pnames [lmap b $params {dict get [hir::binding $hir $b] name}]
-                Emit fn "raise ARITY [Quote "block ([join $pnames { }]) expects [llength $params] argument(s), got [llength $argRegs]"]" $e
-                return never
-            }
-            if {![dict exists $fn targets $e]} {
-                throw {NATIVE BUG} "native lowering: hir::specialize chose no instance for call $e"
-            }
-            # The instance hir::specialize chose; a self tail call that stays in
-            # this instance is a loop.
-            set instance [dict get $fn targets $e]
-            set self [expr {[dict exists $selfTail $e] && $instance eq [dict get $fn instance]}]
-            set id [expr {$self ? [Placeholder $instance] : [FunctionRef $instance]}]
-            dict lappend fn calls [list direct $id $self]
-            if {$self} {
-                # Every argument's own evaluation just produced its tagged
-                # form (Expr's uniform contract); a parameter this function
-                # declared rawreg (RawParams) needs its raw form for the
-                # backedge instead, which RawOf gets for free (a cache hit)
-                # when that tagged form was itself just unboxed FROM a raw
-                # register (e.g. `next = i + 1`'s own rbox, RawArithOrCompare).
-                set tailArgs [TailArgs fn $params $argRegs]
-                if {$target in $envless} {
-                    Emit fn [string trimright "tail [join $tailArgs { }]"] $e
-                } else {
-                    Emit fn [string trimright "tailenv $callee [join $tailArgs { }]"] $e
-                }
-                return never
-            }
-            if {$target in $envless} {
-                return [Assign fn [string trimright "call $id [join $argRegs { }]"] $e]
-            }
-            return [Assign fn [string trimright "callenv $id $callee [join $argRegs { }]"] $e]
-        }
-    }
     dict lappend fn calls [list value]
-    return [Assign fn [string trimright "callvalue $callee [join $argRegs { }]"] $e]
+    return [list [Assign fn [string trimright "callvalue $callee [join $argRegs { }]"] $e] tagged]
 }
 
-proc native::lower::NativeCall {fnVar e node name argRegs} {
+# {NAME OP}: the native NODE's target's name, and the NIR op its call
+# resolves to (an "equality" implementation picks veq/ieq/streq from the two
+# argument expressions' static types, exactly as NativeCall always has) --
+# purely static, so eligibility (RawEligibleCall) can be decided before any
+# argument is lowered. OP is "" for a name native/lower.tcl does not
+# implement (NativeCall's own existence check reports that properly; this
+# only needs to not throw first).
+proc native::lower::NativeCallOp {e node} {
+    variable hir
+    variable natives
+    lassign [dict get $node target] targetKind target
+    set name [dict get [hir::symbol $hir $target] name]
+    if {![dict exists $natives $name]} {
+        return [list $name ""]
+    }
+    set impl [dict get $natives $name]
+    if {[lindex $impl 0] ne "equality"} {
+        return [list $name [lindex $impl 1]]
+    }
+    set argExprs [dict get $node args]
+    if {[llength $argExprs] != 2} {
+        return [list $name veq]
+    }
+    lassign $argExprs a b
+    set ka [hir::types::kindOf [hir::typeOf $hir $a]]
+    set kb [hir::types::kindOf [hir::typeOf $hir $b]]
+    set op veq
+    if {$ka eq $kb && $ka eq "int"} {
+        set op ieq
+    } elseif {$ka eq $kb && $ka eq "str"} {
+        set op streq
+    }
+    return [list $name $op]
+}
+
+proc native::lower::NativeCall {fnVar e node name argRegs rawEligible op want} {
     upvar 1 $fnVar fn
     variable hir
     variable natives
@@ -978,7 +1098,7 @@ proc native::lower::NativeCall {fnVar e node name argRegs} {
     set arity [dict get $meta arity]
     if {$arity ne "*" && $arity != [llength $argRegs]} {
         Emit fn "raise ARITY [Quote "$name expects $arity argument(s), got [llength $argRegs]"]" $e
-        return never
+        return {never tagged}
     }
     if {![dict exists $natives $name]} {
         Unsupported $e "native $name" "the native \"$name\" has no native implementation"
@@ -986,12 +1106,18 @@ proc native::lower::NativeCall {fnVar e node name argRegs} {
     dict lappend fn calls [list native $name]
     if {[dict get $node known] ne ""} {
         # A type test HIR decided: the arguments ran, nothing else does.
-        return [Assign fn "bool [expr {[dict get $node known] ? "true" : "false"}]" $e]
+        return [list [Assign fn "bool [expr {[dict get $node known] ? "true" : "false"}]" $e] tagged]
     }
     set testsType [dict get $meta testsType]
     if {$testsType ne "" && [llength $testsType] > 1 && $name ni {ok? error?}} {
         Unsupported $e "native $name" "type tests of named types need evidence, which is not supported natively"
     }
+    # Unaffected by rawEligible: RawEligibleCall already required every
+    # int-typed operand to need neither a guard nor a known-error guard, so
+    # this loop is a no-op (falls through its subtype-proven case) whenever
+    # rawEligible is true -- run unconditionally anyway, so the "hir::aot
+    # proved no check" assertion below still covers every call the same way
+    # it always has.
     set argExprs [dict get $node args]
     foreach arg $argExprs r $argRegs type [dict get $meta paramTypes] {
         if {$type in {"" any}} {
@@ -1010,25 +1136,36 @@ proc native::lower::NativeCall {fnVar e node name argRegs} {
             throw {NATIVE BUG} "native lowering: hir::aot reports no check for argument $arg of $name ($e)"
         }
     }
-    set impl [dict get $natives $name]
-    if {[lindex $impl 0] eq "equality"} {
-        lassign $argExprs a b
-        set ka [hir::types::kindOf [hir::typeOf $hir $a]]
-        set kb [hir::types::kindOf [hir::typeOf $hir $b]]
-        set op veq
-        if {$ka eq $kb && $ka eq "int"} {
-            set op ieq
-        } elseif {$ka eq $kb && $ka eq "str"} {
-            set op streq
+    if {$rawEligible} {
+        # ARGREGS are already raw (Call requested it): lower directly, with
+        # no RawOf needed on either operand.
+        lassign $argRegs xa xb
+        set rawOp [dict get {
+            iadd riadd  isub risub  imul rimul
+            ilt  rilt   ile  rile   igt  rigt   ige rige   ieq rieq
+        } $op]
+        set arith [expr {$op in {iadd isub imul}}]
+        if {$arith} {
+            set r [AssignRaw fn "op $rawOp $xa $xb" $e]
+        } else {
+            # A raw comparison's result is a tagged Bool, not raw (nir.rs's
+            # OpCode::raw_result is false for rilt/rile/rigt/rige/rieq).
+            set r [Assign fn "op $rawOp $xa $xb" $e]
         }
-    } else {
-        set op [lindex $impl 1]
+        dict incr fn [expr {$arith ? "rawArith" : "rawCompare"}]
+        if {!$arith} {
+            return [list $r tagged]
+        }
+        if {$want eq "raw"} {
+            return [list $r raw]
+        }
+        return [list [TaggedOf fn $r] tagged]
     }
-    set raw [RawArithOrCompare fn $e $argExprs $argRegs $op]
+    set raw [RawArithOrCompare fn $e $argExprs $argRegs $op $want]
     if {$raw ne ""} {
         return $raw
     }
-    return [Assign fn [string trimright "op $op [join $argRegs { }]"] $e]
+    return [list [Assign fn [string trimright "op $op [join $argRegs { }]"] $e] tagged]
 }
 
 # ---------------------------------------------------------------------------
@@ -1043,12 +1180,60 @@ proc native::lower::NativeCall {fnVar e node name argRegs} {
 # (native/src/codegen/clif.rs's int_arith/int_compare, which still handles
 # every other case exactly as before, including BigInt overflow).
 
-# If OP is `+ - * < <= > >= ==` on two Ints (ARG-EXPRS/ARG-REGS) whose ranges
-# (and, for arithmetic, whose result's range) hir/range.tcl proved fit the
-# small-Int representation, emits the raw form and returns the result
-# register (comparisons: a Bool; arithmetic: reboxed once). Otherwise emits
-# nothing and returns "": the caller falls back to the tagged `op`.
-proc native::lower::RawArithOrCompare {fnVar e argExprs argRegs op} {
+# Whether a native call to OP (already resolved: NativeCallOp) on ARG-EXPRS
+# can lower its operands raw directly: reprOpt is on, OP is one of the
+# raw-representable `+ - * < <= > >= ==`, there are exactly two arguments,
+# *neither* needs a runtime kind guard or known-error guard (CollectChecks's
+# guards/knownErrors: those run on a tagged register, so representation
+# stays strictly downstream of them, same as always -- see RawArithOrCompare
+# below for the case where a guard *is* needed first), and both operands'
+# (and, for arithmetic, the result's) ranges hir/range.tcl proved fit the
+# small-Int representation. Decided purely from ARG-EXPRS/E, before either
+# argument is lowered, so Call can ask each for raw directly instead of
+# tagged-then-RawOf.
+proc native::lower::RawEligibleCall {e argExprs op} {
+    variable reprOpt
+    variable ranges
+    variable currentInstance
+    variable guards
+    variable knownErrors
+    if {!$reprOpt || $op ni {iadd isub imul ilt ile igt ige ieq} || [llength $argExprs] != 2} {
+        return 0
+    }
+    lassign $argExprs ea eb
+    foreach a [list $ea $eb] {
+        set key [list $e $a]
+        if {[dict exists $guards $key] || [dict exists $knownErrors $key]} {
+            return 0
+        }
+    }
+    set rangeA [hir::range::of $ranges $currentInstance $ea]
+    set rangeB [hir::range::of $ranges $currentInstance $eb]
+    if {![hir::range::fitsSmall $rangeA] || ![hir::range::fitsSmall $rangeB]} {
+        return 0
+    }
+    if {$op in {iadd isub imul}} {
+        switch -- $op {
+            iadd { set r [hir::range::add $rangeA $rangeB] }
+            isub { set r [hir::range::sub $rangeA $rangeB] }
+            imul { set r [hir::range::mul $rangeA $rangeB] }
+        }
+        if {![hir::range::fitsSmall $r]} {
+            return 0
+        }
+    }
+    return 1
+}
+
+# The RawEligibleCall-declined path: OP already ran on tagged ARG-REGS (a
+# guard may just have checked one of them), so this only asks whether the two
+# operands' ranges retroactively also fit the small-Int representation --
+# unlike RawEligibleCall, it consumes already-lowered registers, converting
+# with RawOf rather than asking Expr to produce raw from scratch. Emits the
+# raw form and returns {REG REPR} (comparisons: always tagged; arithmetic:
+# raw if WANT is raw, else reboxed once). Otherwise emits nothing and returns
+# "": the caller falls back to the plain tagged `op`.
+proc native::lower::RawArithOrCompare {fnVar e argExprs argRegs op want} {
     upvar 1 $fnVar fn
     variable reprOpt
     variable ranges
@@ -1089,13 +1274,12 @@ proc native::lower::RawArithOrCompare {fnVar e argExprs argRegs op} {
     }
     dict incr fn [expr {$arith ? "rawArith" : "rawCompare"}]
     if {!$arith} {
-        return $r
+        return [list $r tagged]
     }
-    set boxed [Assign fn "op rbox $r"]
-    dict incr fn rawBoxes
-    dict set fn rawCache $boxed $r
-    dict set fn rawCache $r $boxed
-    return $boxed
+    if {$want eq "raw"} {
+        return [list $r raw]
+    }
+    return [list [TaggedOf fn $r] tagged]
 }
 
 # The raw (untagged) machine-integer form of tagged register REG, already
@@ -1132,23 +1316,6 @@ proc native::lower::TaggedOf {fnVar reg} {
     dict set fn rawCache $reg $r
     dict set fn rawCache $r $reg
     return $r
-}
-
-# ARGREGS (each already the tagged form Expr's contract guarantees), with
-# the register at each rawreg-declared position of PARAMS (this same
-# function's own parameters, for a genuine self-tail call: see RawParams)
-# replaced by its raw form, for a `tail`/`tailenv` backedge.
-proc native::lower::TailArgs {fnVar params argRegs} {
-    upvar 1 $fnVar fn
-    set result {}
-    foreach b $params r $argRegs {
-        if {[lindex [dict get $fn locals $b] 0] eq "rawreg"} {
-            lappend result [RawOf fn $r]
-        } else {
-            lappend result $r
-        }
-    }
-    return $result
 }
 
 # The NIR operation implementing native NAME for generic calls.
