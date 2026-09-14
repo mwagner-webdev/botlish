@@ -1,0 +1,159 @@
+# native-alloc.test -- allocation instrumentation (native/src/runtime/metrics.rs):
+# counts, bytes, live/peak, GC, copies, site attribution, and the assertion
+# helpers native.tcl builds on top (native::assertAllocations and friends).
+#
+# These are less about Botlish semantics (native.test's job) than about
+# whether the report native::allocationReport returns is trustworthy: exact
+# where the workload makes it exact, an inequality where only that is safe,
+# and internally consistent under BOTLISH_NATIVE_GC_STRESS=1.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+proc sourceHir {text} {
+    return [surface::compile $text t.bot -strict 0]
+}
+
+# Exact counts below (GC cycles especially) assume the default, unforced
+# collector: isolate this file from an ambient BOTLISH_NATIVE_GC_STRESS/MIN
+# (the Rust binary reads them from its own environment on every Driver
+# call), regardless of what the process running the suite happens to have
+# set. alloc-stress-1 sets BOTLISH_NATIVE_GC_STRESS itself, deliberately,
+# and restores this absence afterward.
+catch {unset ::env(BOTLISH_NATIVE_GC_STRESS)}
+catch {unset ::env(BOTLISH_NATIVE_GC_MIN)}
+
+# A tail-recursive counter (identical shape to native.test's countdown
+# example): under the default -specialize/-repr-opt, its loop-carried n/acc
+# stay raw machine integers the whole way down (hir/range.tcl, native/lower.tcl's
+# "Representation" section), so this allocates nothing at all -- exactly the
+# kind of "steady-state lookup allocates zero objects" case future
+# HashTable/collection tests will want (req #50 of the milestone).
+set countText "fn count(n, acc):\n    if n == 0:\n        return acc\n    count(n - 1, acc + 1)\n\ncount(1000, 0)"
+
+test alloc-count-1 {one concat allocates exactly one String, nothing else} -body {
+    set report [native::allocationReport [sourceHir {concat("a", "b")}] summary]
+    list [dict get $report total allocations] [dict get $report byKind String allocations] \
+        [dict get $report byKind List allocations]
+} -result {1 1 0}
+
+test alloc-count-2 {distinct kinds are counted separately} -body {
+    set report [native::allocationReport [sourceHir {[concat("a", "b"), 1]}] summary]
+    list [dict get $report byKind String allocations] [dict get $report byKind List allocations]
+} -result {1 1}
+
+test alloc-bytes-1 {allocated bytes grow with payload size, not just count} -body {
+    set short [dict get [native::allocationReport [sourceHir {concat("a", "b")}] summary] byKind String allocatedBytes]
+    set long [dict get [native::allocationReport [sourceHir {concat("aaaaaaaaaa", "bbbbbbbbbb")}] summary] \
+        byKind String allocatedBytes]
+    expr {$long > $short}
+} -result 1
+
+test alloc-bytes-2 {allocatedBytes is header plus payload bytes, summed} -body {
+    set k [dict get [native::allocationReport [sourceHir {concat("a", "b")}] summary] byKind String]
+    expr {[dict get $k allocatedBytes] == [dict get $k headerBytes] + [dict get $k payloadBytes]}
+} -result 1
+
+test alloc-copies-1 {string concat/substring copy bytes} -body {
+    set report [native::allocationReport [sourceHir {concat("hello ", "world")}] summary]
+    dict get $report copies stringBytes
+} -result 11
+
+test alloc-copies-2 {list_append copies the existing elements, not the new one} -body {
+    # list_append(list_append([1], 2), 3): [1] copies 1 element in
+    # (listnew), the first append copies 1 (the old [1]), the second
+    # copies 2 (the old [1, 2]) -- 4 total, never counting the freshly
+    # appended value itself.
+    set report [native::allocationReport [sourceHir {list_append(list_append([1], 2), 3)}] summary]
+    dict get $report copies listElements
+} -result 4
+
+test alloc-zero-1 {tail recursion over raw loop-carried integers allocates nothing} -body {
+    dict get [native::allocationReport [sourceHir $countText] summary] total allocations
+} -result 0
+
+test alloc-zero-2 {native::assertAllocations/assertKindAllocations helpers} -body {
+    native::assertAllocations [sourceHir $countText] 0
+    native::assertKindAllocations [sourceHir {concat("a", "b")}] String 1
+    native::assertAllocationsAtMost [sourceHir {concat("a", "b")}] 5
+    native::assertBytesAtMost [sourceHir {concat("a", "b")}] 1000
+    set failed 0
+    if {![catch {native::assertAllocations [sourceHir {concat("a", "b")}] 0} msg]} {
+        set failed 1
+    }
+    list $failed [string match "expected 0 allocation*" $msg]
+} -result {0 1}
+
+test alloc-sites-1 {two source expressions of the same kind are distinct sites} -body {
+    set text "fn f():\n    a = concat(\"a\", \"b\")\n    b = concat(\"c\", \"d\")\n    \[a, b\]\n\nf()"
+    set report [native::allocationReport [sourceHir $text] sites]
+    set lines [lsort -unique [lmap s [dict get $report sites] {
+        if {[dict get $s operation] ne "strcat"} continue
+        dict get [dict get $s location] line
+    }]]
+    list [llength $lines] [expr {[lindex $lines 0] != [lindex $lines 1]}]
+} -result {2 1}
+
+test alloc-sites-2 {sites resolve to the compiling file} -body {
+    set report [native::allocationReport [sourceHir {concat("a", "b")}] sites]
+    set site [lindex [dict get $report sites] 0]
+    list [dict get [dict get $site location] file] [dict get $site operation] [dict get $site objectKind]
+} -result {t.bot strcat String}
+
+test alloc-sites-3 {a non-allocating slow path (BigInt op landing back on small) leaves no stale site} -body {
+    # isub of two equal huge BigInts lands on 0, which fits small: the
+    # runtime helper is called (codegen marks a site for it) but never
+    # actually allocates. The following, unrelated concat must not inherit
+    # that abandoned site.
+    set text {[100000000000000000000000000000000000 - 100000000000000000000000000000000000, concat("x", "y")]}
+    set report [native::allocationReport [sourceHir $text] sites]
+    set ops [lsort -unique [lmap s [dict get $report sites] {dict get $s operation}]]
+    list [dict get $report byKind BigInt allocations] $ops
+} -result {0 {listnew strcat}}
+
+test alloc-runs-1 {a report over several runs reflects only the last run} -body {
+    set hir [sourceHir {concat("a", "b")}]
+    set one [dict get [native::allocationReport $hir summary 1] total allocations]
+    set three [dict get [native::allocationReport $hir summary 3] total allocations]
+    list $one $three
+} -result {1 1}
+
+test alloc-runs-2 {static (constant table) counts persist across runs; run counters do not accumulate} -body {
+    set hir [sourceHir {concat("a", "b")}]
+    set one [dict get [native::allocationReport $hir summary 1] static allocations]
+    set three [dict get [native::allocationReport $hir summary 3] static allocations]
+    list [expr {$one > 0}] [expr {$one == $three}]
+} -result {1 1}
+
+test alloc-live-1 {a second run's reclaim matches the first run's allocations exactly} -body {
+    # Vm::reset's cleanup collection, between run 1 and run 2, is this
+    # report's first GC cycle: it must reclaim exactly what run 1 allocated
+    # (an exact recompute at every collection, never "allocated - freed").
+    set hir [sourceHir {concat("a", "b")}]
+    set alloc [dict get [native::allocationReport $hir summary 1] total allocatedBytes]
+    set report [native::allocationReport $hir summary 2]
+    list [dict get $report gc cycles] [dict get $report gc reclaimedBytes] $alloc
+} -result {1 42 42}
+
+test alloc-off-1 {instrumentation off changes no semantics} -body {
+    set hir [sourceHir {concat("hello ", "world")}]
+    list [native::evalHir $hir] [native::evalHir $hir -specialize 0]
+} -result {{str {hello world}} {str {hello world}}}
+
+test alloc-stress-1 {reports stay internally consistent under BOTLISH_NATIVE_GC_STRESS=1} -body {
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    set text "fn build(n):\n    if n == 0:\n        return \[\]\n    list_append(build(n - 1), n)\n\nlist_length(build(80))"
+    set report [native::allocationReport [sourceHir $text] summary]
+    unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    set total [dict get $report total]
+    list [expr {[dict get $total peakLiveObjects] >= [dict get $total currentLiveObjects]}] \
+        [expr {[dict get $report gc cycles] > 0}] \
+        [expr {[dict get $total allocations] == [dict get $report byKind List allocations]}]
+} -result {1 1 1}
+
+test alloc-mode-1 {mode must be summary or sites} -body {
+    catch {native::allocationReport [sourceHir {1}] verbose} msg
+    set msg
+} -match glob -result {*summary or sites*}
+
+cleanupTests

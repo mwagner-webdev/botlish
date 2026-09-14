@@ -9,6 +9,11 @@
 //!   botlish-native check FILE.nir        parse and validate only
 //! ```
 //!
+//! `run`/`bench` accept `--alloc off|summary|sites` (default `off`,
+//! byte-identical to no instrumentation): see runtime/metrics.rs. For
+//! `bench`, the report reflects the last of RUNS executions (Vm::reset
+//! isolates each run's metrics from the previous one).
+//!
 //! FILE may be - for standard input. Output is UTF-8, one Tcl list per line:
 //!
 //! ```text
@@ -17,6 +22,8 @@
 //!   timing COMPILE_US BEST_US RUNS COLLECTIONS    (bench, before the result)
 //!   size TOTAL_BYTES {FUNCTION_BYTES...}          (size: per NIR function,
 //!                                                  with its generic entry)
+//!   alloc REPORT                                  (run/bench, --alloc != off:
+//!                                                  runtime/metrics.rs's Tcl dict)
 //! ```
 //!
 //! Native code runs on a thread with a large stack; the shadow stack bounds
@@ -26,7 +33,8 @@ mod codegen;
 mod nir;
 mod runtime;
 
-use codegen::{Backend, CompileOptions, CraneliftJit};
+use codegen::{Backend, CompileOptions, CraneliftJit, Site};
+use runtime::metrics::{kind_name, AllocMode, SiteStats};
 use runtime::show::{tcl_list, tcl_value};
 use runtime::value::NO_VALUE;
 use runtime::vm::{FunctionInfo, NativeInfo, ProgramInfo, Vm};
@@ -73,11 +81,32 @@ fn read(path: &str) -> Result<String, String> {
     std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))
 }
 
+/// Pulls "--alloc MODE" out of ARGS (it may appear anywhere): the remaining
+/// arguments in order, and the mode (Off if absent). None if "--alloc" is
+/// given without a valid mode.
+fn extract_alloc_mode(args: &[String]) -> Option<(Vec<String>, AllocMode)> {
+    let mut mode = AllocMode::Off;
+    let mut out = Vec::with_capacity(args.len());
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "--alloc" {
+            mode = AllocMode::parse(args.get(i + 1)?)?;
+            i += 2;
+            continue;
+        }
+        out.push(args[i].clone());
+        i += 1;
+    }
+    Some((out, mode))
+}
+
 fn cli(args: &[String]) -> i32 {
     let usage = || {
-        eprintln!("usage: botlish-native run|clif|size|check FILE.nir | bench RUNS FILE.nir | object OUT FILE.nir");
+        eprintln!("usage: botlish-native run|clif|size|check FILE.nir [--alloc off|summary|sites] | bench RUNS FILE.nir [--alloc ...] | object OUT FILE.nir");
         2
     };
+    let Some((args, alloc_mode)) = extract_alloc_mode(args) else { return usage() };
+    let args = &args[..];
     let (command, rest) = match args.split_first() {
         Some((c, rest)) => (c.as_str(), rest),
         None => return usage(),
@@ -132,7 +161,7 @@ fn cli(args: &[String]) -> i32 {
                 }
             }
         }
-        _ => execute(command, &program, runs),
+        _ => execute(command, &program, runs, alloc_mode),
     }
 }
 
@@ -151,10 +180,48 @@ fn program_info(program: &nir::Program) -> ProgramInfo {
     }
 }
 
-fn execute(command: &str, program: &nir::Program, runs: usize) -> i32 {
+/// The "sites" entry of Metrics::to_tcl: SITES (codegen::clif's compile-time
+/// table, one per allocating instruction) joined with STATS (Vm::alloc's
+/// per-run counts, keyed by the same 1-based site id). Ids present in STATS
+/// but not SITES (impossible unless the two are mismatched) are skipped
+/// rather than panicking, since this is only ever assembled internally
+/// right after compiling and running the same program.
+fn sites_tcl(sites: &[Site], stats: &std::collections::HashMap<u32, SiteStats>) -> String {
+    let mut ids: Vec<&u32> = stats.keys().collect();
+    ids.sort();
+    let entries: Vec<String> = ids
+        .into_iter()
+        .filter_map(|&id| {
+            let site = sites.get(id as usize - 1)?;
+            let s = &stats[&id];
+            Some(tcl_list(&[
+                "id".to_string(),
+                id.to_string(),
+                "funcId".to_string(),
+                site.func.to_string(),
+                "func".to_string(),
+                site.func_name.clone(),
+                "hirExpr".to_string(),
+                site.hir_expr.map(|e| e.to_string()).unwrap_or_default(),
+                "operation".to_string(),
+                site.operation.to_string(),
+                "objectKind".to_string(),
+                kind_name(site.object_kind).to_string(),
+                "allocations".to_string(),
+                s.allocations.to_string(),
+                "allocatedBytes".to_string(),
+                s.allocated_bytes.to_string(),
+            ]))
+        })
+        .collect();
+    tcl_list(&entries)
+}
+
+fn execute(command: &str, program: &nir::Program, runs: usize, alloc_mode: AllocMode) -> i32 {
     let started = Instant::now();
     let mut backend = CraneliftJit;
-    let compiled = match backend.compile(program, &CompileOptions { clif: command == "clif" }) {
+    let options = CompileOptions { clif: command == "clif", alloc_sites: alloc_mode.sites() };
+    let compiled = match backend.compile(program, &options) {
         Ok(c) => c,
         Err(e) => {
             emit_error(&e.error_code().split(' ').collect::<Vec<_>>(), e.message());
@@ -173,7 +240,7 @@ fn execute(command: &str, program: &nir::Program, runs: usize) -> i32 {
         return 0;
     }
 
-    let mut vm = Vm::new(Rc::new(program_info(program)));
+    let mut vm = Vm::new(Rc::new(program_info(program)), alloc_mode);
     compiled.install_constants(&mut vm);
     let mut best = u128::MAX;
     let mut result = NO_VALUE;
@@ -190,6 +257,10 @@ fn execute(command: &str, program: &nir::Program, runs: usize) -> i32 {
     }
     if command == "bench" {
         emit(&format!("timing {compile_us} {best} {runs} {}", vm.heap.collections));
+    }
+    if alloc_mode.enabled() {
+        let sites = alloc_mode.sites().then(|| sites_tcl(&compiled.sites, &vm.metrics.sites)).unwrap_or_default();
+        emit(&format!("alloc {}", vm.metrics.to_tcl(&sites)));
     }
     if result == NO_VALUE {
         let error = vm.error.take().unwrap_or(runtime::error::RtError::Bug(

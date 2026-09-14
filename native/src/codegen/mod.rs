@@ -15,6 +15,7 @@
 pub mod clif;
 
 use crate::nir::{FuncId, Program};
+use crate::runtime::heap::object_size;
 use crate::runtime::ops::helpers;
 use crate::runtime::value::*;
 use crate::runtime::vm::{str_object, Vm};
@@ -75,6 +76,26 @@ impl ConstPool {
 
 pub type ProgramEntry = extern "C" fn(*mut Vm) -> Value;
 
+/// One allocating NIR instruction, compiled (CompileOptions::alloc_sites):
+/// codegen/clif.rs's Translator interns one of these per allocating
+/// instruction it translates (never per dynamic execution -- a hot loop's
+/// one static instruction is one Site regardless of how many times it
+/// runs), in `CompiledProgram::sites`, 1-based (id 0 means "unattributed"
+/// -- see runtime/vm.rs's `alloc_site`). This backend does not interpret
+/// `hir_expr`: it is native/lower.tcl's opaque "@ExprId" annotation
+/// (nir::Function::origins), resolved to a source location only on the Tcl
+/// side (native.tcl), which is where HIR lives.
+pub struct Site {
+    pub func: FuncId,
+    pub func_name: String,
+    pub hir_expr: Option<u32>,
+    /// The NIR operation ("strcat", "listappend", "cell", "closure", ...):
+    /// distinguishes, e.g., two String-allocating sites by which runtime
+    /// helper actually allocated (req: runtime-helper attribution).
+    pub operation: &'static str,
+    pub object_kind: u8,
+}
+
 /// A program compiled to machine code, ready to run.
 pub struct CompiledProgram {
     pub entry: ProgramEntry,
@@ -84,6 +105,8 @@ pub struct CompiledProgram {
     pub clif: Option<String>,
     /// Machine code bytes of each function (with its generic entry).
     pub code_sizes: Vec<u32>,
+    /// Empty unless compiled with CompileOptions::alloc_sites.
+    pub sites: Vec<Site>,
     /// Keeps the machine code alive.
     _module: JITModule,
 }
@@ -116,6 +139,10 @@ impl CompiledProgram {
                     })) as *mut Header
                 }
             };
+            if vm.metrics.enabled() {
+                let bytes = unsafe { object_size(raw) } as u64;
+                vm.record_static_alloc(unsafe { (*raw).kind }, bytes);
+            }
             table.push(raw as Value);
             statics.push(raw);
         }
@@ -126,6 +153,11 @@ impl CompiledProgram {
 pub struct CompileOptions {
     /// Keep the CLIF of every function.
     pub clif: bool,
+    /// Emit the extra "store this instruction's site id into vm.alloc_site"
+    /// before each allocating helper call, and build CompiledProgram::sites
+    /// (runtime/metrics.rs's AllocMode::Sites). False recompiles to exactly
+    /// today's uninstrumented code: no VM_ALLOC_SITE_OFFSET store anywhere.
+    pub alloc_sites: bool,
 }
 
 /// A code generator for NIR programs.
@@ -156,10 +188,12 @@ impl Backend for CraneliftJit {
         let mut module = JITModule::new(builder);
         let symbols = clif::declare(&mut module, program, false)?;
         let mut pool = ConstPool::default();
+        let mut sites = Vec::new();
         let mut listing = options.clif.then(|| clif::legend(&symbols));
         let mut code_sizes = Vec::with_capacity(program.functions.len());
         for f in &program.functions {
-            let (text, size) = clif::define(&mut module, &symbols, f, &mut pool, options.clif)?;
+            let (text, size) =
+                clif::define(&mut module, &symbols, f, &mut pool, &mut sites, options.alloc_sites, options.clif)?;
             code_sizes.push(size);
             if let (Some(listing), Some(text)) = (listing.as_mut(), text) {
                 listing.push('\n');
@@ -170,7 +204,7 @@ impl Backend for CraneliftJit {
         let entry_ptr = module.get_finalized_function(symbols.direct[0]);
         let generic_entries = symbols.entry.iter().map(|id| module.get_finalized_function(*id) as usize).collect();
         let entry: ProgramEntry = unsafe { std::mem::transmute(entry_ptr) };
-        Ok(CompiledProgram { entry, pool, generic_entries, clif: listing, code_sizes, _module: module })
+        Ok(CompiledProgram { entry, pool, generic_entries, clif: listing, code_sizes, sites, _module: module })
     }
 }
 
@@ -182,8 +216,9 @@ pub fn emit_object(program: &Program) -> Result<(Vec<u8>, ConstPool), BackendErr
     let mut module = cranelift_object::ObjectModule::new(builder);
     let symbols = clif::declare(&mut module, program, true)?;
     let mut pool = ConstPool::default();
+    let mut sites = Vec::new();
     for f in &program.functions {
-        clif::define(&mut module, &symbols, f, &mut pool, false)?;
+        clif::define(&mut module, &symbols, f, &mut pool, &mut sites, false, false)?;
     }
     let bytes = module.finish().emit().map_err(|e| BackendError::Codegen(e.to_string()))?;
     Ok((bytes, pool))

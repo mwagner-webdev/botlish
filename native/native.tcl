@@ -22,6 +22,17 @@
 #   native::report HIR                  guard accounting and instance counts
 #   native::codeSize HIR ?OPTIONS?      {TOTAL-BYTES {FUNCTION-BYTES ...}} of
 #                                       the machine code
+#   native::allocationReport HIR MODE ?RUNS? ?OPTIONS?
+#                                       allocation instrumentation report (a
+#                                       dict; runtime/src/runtime/metrics.rs's
+#                                       Metrics::to_tcl); MODE is summary or
+#                                       sites. native::allocationText REPORT
+#                                       renders it for humans.
+#                                       native::assertAllocations HIR N
+#                                       ?OPTIONS?, assertAllocationsAtMost,
+#                                       assertBytesAtMost and
+#                                       assertKindAllocations HIR KIND N
+#                                       ?OPTIONS? are test helpers built on it.
 #
 # OPTIONS are native::lower::program's: -specialize 0 lowers generic
 # functions only (the guarded baseline; also BOTLISH_NATIVE_SPECIALIZE=0);
@@ -157,6 +168,157 @@ proc native::measure {hir runs args} {
     }
     lassign $timing _ compile best _ collections
     return [list $lower $compile $best $collections $value]
+}
+
+# Runs the program-mode HIR program HIR RUNS times in one process
+# (Vm::reset between runs) under allocation instrumentation (MODE: summary
+# or sites; runtime/src/runtime/metrics.rs) and returns the report as a
+# dict -- runtime/metrics.rs's Metrics::to_tcl, RUNS > 1's report
+# reflecting the last run only, like native::measure's timing (Vm::reset
+# isolates one run's counters from the previous run's). ARGS are
+# native::lower::program's. In "sites" mode, each entry of the report's
+# "sites" list gains a "location" key: {file line column} resolved from its
+# "hirExpr" via hir::aot::Location, since the backend itself never
+# interprets that id (see codegen/mod.rs's Site doc comment) -- "" if
+# unattributed or the id no longer resolves (e.g. a synthetic expression).
+proc native::allocationReport {hir mode {runs 1} args} {
+    if {[hir::mode $hir] ne "program"} {
+        error "native::allocationReport: expected a program-mode HIR"
+    }
+    if {$mode ni {summary sites}} {
+        error "native::allocationReport: mode must be summary or sites, got $mode"
+    }
+    set text [nir $hir {*}$args]
+    if {$runs > 1} {
+        set lines [Driver bench $text $runs --alloc $mode]
+    } else {
+        set lines [Driver run $text --alloc $mode]
+    }
+    set line [lsearch -inline $lines {alloc *}]
+    Outcome $lines
+    if {$line eq ""} {
+        throw {NATIVE BUG} "native backend produced no allocation report:\n[join $lines \n]"
+    }
+    set report [lrange $line 1 end]
+    if {$mode eq "sites"} {
+        dict set report sites [ResolveSites $hir [dict get $report sites]]
+    }
+    return $report
+}
+
+# SITES (native::allocationReport's "sites" list) with each entry's
+# "hirExpr" resolved to a "location" key: {file line column}, or {} if
+# unattributed or unresolvable. Kept separate from the Rust report so the
+# backend never has to understand HIR: see codegen/mod.rs's Site.
+proc native::ResolveSites {hir sites} {
+    set resolved {}
+    foreach site $sites {
+        # nir.rs strips HIR's "e" id-namespace prefix when it parses the
+        # NIR text's "@eN" origin annotation (Site::hir_expr is opaque
+        # there): reattach it to look the expression back up here, where
+        # HIR's id convention is the caller's to know.
+        set e [dict get $site hirExpr]
+        set location {}
+        if {$e ne ""} {
+            set e "e$e"
+            if {[dict exists $hir exprs $e]} {
+                set location [hir::aot::Location $hir [hir::get $hir $e origin]]
+            }
+        }
+        dict set site location $location
+        lappend resolved $site
+    }
+    return $resolved
+}
+
+# N as a human-scaled byte count ("820 B", "12.3 KB", "94.3 MB").
+proc native::FormatBytes {n} {
+    if {$n >= 1000000} {
+        return [format "%.1f MB" [expr {$n / 1000000.0}]]
+    }
+    if {$n >= 1000} {
+        return [format "%.1f KB" [expr {$n / 1000.0}]]
+    }
+    return "$n B"
+}
+
+# A concise developer-readable rendering of REPORT (native::allocationReport's
+# result). The dict is the canonical representation (tests and tooling read
+# it); this text is derived from it, never the other way around. Shows the
+# top TOPSITES allocation sites by bytes when REPORT has a "sites" list
+# (sites mode).
+proc native::allocationText {report {topSites 10}} {
+    set total [dict get $report total]
+    set lines [list "Botlish managed heap allocation report" ""]
+    lappend lines "allocated:" "    [dict get $total allocations] objects" "    [FormatBytes [dict get $total allocatedBytes]]" ""
+    lappend lines "peak live:" "    [dict get $total peakLiveObjects] objects" "    [FormatBytes [dict get $total peakLiveBytes]]" ""
+    set gc [dict get $report gc]
+    lappend lines "GC:" "    [dict get $gc cycles] cycles" \
+        "    [FormatBytes [dict get $gc reclaimedBytes]] reclaimed" \
+        "    [format %.1f [expr {[dict get $gc totalTimeUs] / 1000.0}]] ms total" \
+        "    [format %.1f [expr {[dict get $gc maxPauseUs] / 1000.0}]] ms max" ""
+    lappend lines "by kind:"
+    foreach kind {String List BigInt Result Block Cell Native} {
+        set k [dict get $report byKind $kind]
+        if {[dict get $k allocations] == 0} continue
+        lappend lines [format "    %-8s %8d   %s" $kind [dict get $k allocations] [FormatBytes [dict get $k allocatedBytes]]]
+    }
+    set copies [dict get $report copies]
+    lappend lines "" "copies:" "    String  [FormatBytes [dict get $copies stringBytes]]" \
+        "    List    [dict get $copies listElements] elements"
+    set static [dict get $report static]
+    lappend lines "" "static (constant table, excluded from GC/live/peak):" \
+        "    [dict get $static allocations] objects, [FormatBytes [dict get $static bytes]]"
+    set sites [dict get $report sites]
+    if {$sites ne ""} {
+        set bySite [lsort -command {apply {{a b} {
+            expr {[dict get $b allocatedBytes] - [dict get $a allocatedBytes]}
+        }}} $sites]
+        lappend lines "" "top allocation sites by bytes:"
+        set n 0
+        foreach s $bySite {
+            if {[incr n] > $topSites} break
+            set loc [dict get $s location]
+            set where [expr {[dict exists $loc file] ? "[dict get $loc file]:[dict get $loc line]" : "func [dict get $s func]"}]
+            lappend lines [format "    %2d. %-32s %-12s %8d allocations  %s" \
+                $n $where [dict get $s operation] [dict get $s allocations] [FormatBytes [dict get $s allocatedBytes]]]
+        }
+    }
+    lappend lines "" "excluded: num-bigint limb buffers, the shadow stack (fixed ~32 MB), Cranelift/JIT code, process bookkeeping."
+    return [join $lines \n]
+}
+
+# ---------------------------------------------------------------------------
+# Allocation assertions (for future collection/optimizer tests, e.g. "this
+# steady-state lookup allocates zero objects"). Errors (rather than
+# returning a boolean) so they read like tcltest's own assertions.
+
+proc native::assertAllocations {hir n args} {
+    set got [dict get [allocationReport $hir summary 1 {*}$args] total allocations]
+    if {$got != $n} {
+        error "expected $n allocation(s), got $got"
+    }
+}
+
+proc native::assertAllocationsAtMost {hir n args} {
+    set got [dict get [allocationReport $hir summary 1 {*}$args] total allocations]
+    if {$got > $n} {
+        error "expected at most $n allocation(s), got $got"
+    }
+}
+
+proc native::assertBytesAtMost {hir n args} {
+    set got [dict get [allocationReport $hir summary 1 {*}$args] total allocatedBytes]
+    if {$got > $n} {
+        error "expected at most $n allocated byte(s), got $got"
+    }
+}
+
+proc native::assertKindAllocations {hir kind n args} {
+    set got [dict get [allocationReport $hir summary 1 {*}$args] byKind $kind allocations]
+    if {$got != $n} {
+        error "expected $n $kind allocation(s), got $got"
+    }
 }
 
 proc native::codeSize {hir args} {

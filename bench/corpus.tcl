@@ -18,7 +18,10 @@
 # (HIR to NIR, including the specialization analysis) + Cranelift code
 # generation and JIT linking. "code" is the machine code size and the
 # number of NIR functions (generic -> specialized), "guards" the kind guards
-# in the NIR.
+# in the NIR. "alloc" is cranelift's allocation baseline (native/src/runtime/
+# metrics.rs, summary mode, the last of the N timed runs): objects, bytes,
+# peak live bytes, GC cycles -- a second compile+run per case, so it is
+# measured for cranelift only, not cranelift-generic.
 #
 # Cases marked slow are skipped on the interpreter unless -all is given
 # (shown as "skipped"). -markdown prints a Markdown table. Exits with
@@ -29,7 +32,9 @@
 #
 # Internal: tclsh bench/corpus.tcl -measure ALGORITHM SIZE BACKEND RUNS
 # prints "MICROSECONDS LENGTH CRC ?{LOWER-MICROSECONDS JIT-MICROSECONDS}
-# {CODE-BYTES FUNCTIONS GUARDS}?".
+# {CODE-BYTES FUNCTIONS GUARDS} {ALLOCATIONS BYTES PEAK-BYTES GC-CYCLES
+# STRING-BYTES-COPIED LIST-ELEMENTS-COPIED}?" (the last two braced groups
+# native backends only; the allocation group cranelift only, else {}).
 
 set root [file dirname [file dirname [file normalize [info script]]]]
 source [file join $root examples stdlib corpus.tcl]
@@ -129,8 +134,21 @@ proc bench::measure {algorithm size backend runs} {
             [llength [dict get $lowered functions]] $guards \
             [dict get $stats rawUnboxes] [dict get $stats rawBoxes] \
             [expr {[dict get $stats rawArith] + [dict get $stats rawCompare]}]]
+        # Allocation baseline (native/src/runtime/metrics.rs), cranelift
+        # (specialized) only: a second measurement (its own compile+run),
+        # so this is skipped for cranelift-generic to keep the corpus run to
+        # one extra process per case rather than two.
+        set alloc ""
+        if {$specialize} {
+            set report [native::allocationReport $hir summary $runs -specialize $specialize]
+            set total [dict get $report total]
+            set copies [dict get $report copies]
+            set alloc [list [dict get $total allocations] [dict get $total allocatedBytes] \
+                [dict get $total peakLiveBytes] [dict get $report gc cycles] \
+                [dict get $copies stringBytes] [dict get $copies listElements]]
+        }
         return [list $best [string length $shown] [zlib crc32 [encoding convertto utf-8 $shown]] \
-            [list $lower $jit] $code]
+            [list $lower $jit] $code $alloc]
     }
     set program [hir::lower [corpus::program $algorithm $driver]]
     core::useBackend $backend
@@ -209,6 +227,39 @@ proc bench::codeCell {generic specialized} {
     return [join $parts ", "]
 }
 
+# N as a human-scaled byte count, for the alloc column and the baseline doc.
+proc bench::formatBytes {n} {
+    if {$n eq ""} {
+        return "-"
+    }
+    if {$n >= 1000000} {
+        return [format "%.1f MB" [expr {$n / 1000000.0}]]
+    }
+    if {$n >= 1000} {
+        return [format "%.1f KB" [expr {$n / 1000.0}]]
+    }
+    return "$n B"
+}
+
+# cranelift's allocation baseline (native::allocationReport summary mode):
+# ALLOC is {allocations bytes peakBytes gcCycles stringBytesCopied
+# listElementsCopied}, "" when not measured (bench::measure's -specialize 0).
+proc bench::allocCell {alloc} {
+    if {$alloc eq ""} {
+        return skipped
+    }
+    lassign $alloc allocations bytes peakBytes gcCycles stringCopied listCopied
+    set copies {}
+    if {$stringCopied > 0} {
+        lappend copies "[bench::formatBytes $stringCopied] str copied"
+    }
+    if {$listCopied > 0} {
+        lappend copies "$listCopied list elems copied"
+    }
+    set suffix [expr {$copies eq "" ? "" : ", [join $copies {, }]"}]
+    return "$allocations objs, [bench::formatBytes $bytes], peak [bench::formatBytes $peakBytes], $gcCycles gc$suffix"
+}
+
 # Columns: every backend, then the native compile times and code.
 set columns $backends
 set natives [lmap b {cranelift-generic cranelift} {if {$b ni $backends} continue; set b}]
@@ -217,6 +268,9 @@ foreach b $natives {
 }
 if {$natives ne ""} {
     lappend columns code
+}
+if {"cranelift" in $backends} {
+    lappend columns alloc
 }
 # speedups: the Tcl compiler's time over cranelift's and cranelift-generic's
 # over cranelift's when they run, else the interpreter's over the last
@@ -248,6 +302,7 @@ foreach algorithm $algorithms {
         set values {}
         set compileTimes [dict create cranelift "" cranelift-generic ""]
         set codes [dict create cranelift "" cranelift-generic ""]
+        set allocs [dict create cranelift ""]
         foreach backend $backends {
             if {$slow && !$all && $backend eq "interp"} {
                 dict set times $backend ""
@@ -259,6 +314,9 @@ foreach algorithm $algorithms {
             if {$backend in $natives} {
                 dict set compileTimes $backend [lindex $result 3]
                 dict set codes $backend [lindex $result 4]
+            }
+            if {$backend eq "cranelift"} {
+                dict set allocs cranelift [lindex $result 5]
             }
         }
         set agree [expr {[llength [lsort -unique $values]] <= 1}]
@@ -279,6 +337,9 @@ foreach algorithm $algorithms {
         }
         if {$natives ne ""} {
             lappend cells [bench::codeCell [dict get $codes cranelift-generic] [dict get $codes cranelift]]
+        }
+        if {"cranelift" in $backends} {
+            lappend cells [bench::allocCell [dict get $allocs cranelift]]
         }
         set check [expr {$agree ? "agree" : "DIFFER: $values"}]
         if {$markdown} {

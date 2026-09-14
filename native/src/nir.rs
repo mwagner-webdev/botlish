@@ -187,6 +187,15 @@ pub struct Function {
     pub pnames: String,
     pub captures: u32,
     pub body: Vec<Inst>,
+    /// The HIR expression each instruction in BODY (same index) originated
+    /// from -- native/lower.tcl's trailing "@ExprId" annotation on nearly
+    /// every emitted instruction (see native/lower.tcl's Emit/Assign).
+    /// None for instructions with no annotation (Label, and some that never
+    /// carry one). Purely informational to this backend: it is opaque here
+    /// and only meaningful to the Tcl compiler that emitted it (see
+    /// codegen::clif's Site table and native.tcl's allocation-site
+    /// resolution) -- this backend does not and must not interpret it.
+    pub origins: Vec<Option<u32>>,
     /// Registers native/lower.tcl has proven hold a raw (untagged) machine
     /// integer for the *whole* function, indexed by Reg (`raw_regs[r]`),
     /// declared once by the `rawregs=` header attribute rather than inferred
@@ -232,7 +241,16 @@ enum Token {
     Pair(String, String),
 }
 
-fn tokenize(line: &str) -> Result<Vec<Token>, String> {
+/// TOKENS of the line, and its trailing "@ExprId" origin annotation, if any
+/// (native/lower.tcl's Emit/Assign; see Function::origins). HIR expression
+/// ids print as e.g. "e17" (one letter, hir.tcl's id namespace prefix, then
+/// digits): the leading letter is skipped, not required, so a bare-digit
+/// annotation (this backend's own NIR test fixtures) also parses. Anything
+/// else not digits at all (e.g. a func header's "@program", never emitted
+/// since lower.tcl only appends it when the region is not "program") yields
+/// None, not an error: this annotation is optional and opaque to this
+/// backend either way -- see codegen/mod.rs's Site doc comment.
+fn tokenize(line: &str) -> Result<(Vec<Token>, Option<u32>), String> {
     let mut tokens = Vec::new();
     let mut chars = line.chars().peekable();
     loop {
@@ -241,8 +259,15 @@ fn tokenize(line: &str) -> Result<Vec<Token>, String> {
         }
         let Some(&c) = chars.peek() else { break };
         if c == '@' {
-            // An origin annotation ends the instruction.
-            break;
+            chars.next();
+            if chars.peek().is_some_and(|c| c.is_ascii_alphabetic()) {
+                chars.next();
+            }
+            let mut digits = String::new();
+            while chars.peek().is_some_and(|c| c.is_ascii_digit()) {
+                digits.push(chars.next().unwrap());
+            }
+            return Ok((tokens, digits.parse().ok()));
         }
         if c == '"' {
             chars.next();
@@ -282,7 +307,7 @@ fn tokenize(line: &str) -> Result<Vec<Token>, String> {
             tokens.push(Token::Word(word));
         }
     }
-    Ok(tokens)
+    Ok((tokens, None))
 }
 
 fn quoted(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> Result<String, String> {
@@ -340,7 +365,7 @@ pub fn parse(text: &str) -> Result<Program, NirError> {
     let mut seen_header = false;
     for (index, raw) in text.lines().enumerate() {
         p.line = index + 1;
-        let tokens = tokenize(raw).or_else(|m| p.err(m))?;
+        let (tokens, origin) = tokenize(raw).or_else(|m| p.err(m))?;
         if tokens.is_empty() || raw.trim_start().starts_with(';') {
             continue;
         }
@@ -365,7 +390,9 @@ pub fn parse(text: &str) -> Result<Program, NirError> {
             continue;
         }
         let inst = parse_inst(&p, &tokens, &program)?;
-        current.as_mut().unwrap().body.push(inst);
+        let f = current.as_mut().unwrap();
+        f.body.push(inst);
+        f.origins.push(origin);
     }
     if current.is_some() {
         return p.err("missing end");
@@ -428,6 +455,7 @@ fn parse_func_header(p: &Parser, tokens: &[Token]) -> Result<Function, NirError>
         pnames: kv.get("pnames").cloned().unwrap_or_default(),
         captures: num("captures")?,
         body: Vec::new(),
+        origins: Vec::new(),
         raw_regs,
     })
 }

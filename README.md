@@ -2150,3 +2150,157 @@ evidence:
 5. Replace the shadow stack with Cranelift stack maps, and make the object
    path runnable (runtime as a static library, constant-table initializer)
    for real closed AOT.
+
+## 22. Allocation instrumentation
+
+Before any of §21's "next milestone" items (unboxing landed; escape
+analysis, transient builders, a nursery are still ahead), the runtime
+needed to say *exactly* what it allocates, not just describe it in prose
+like §20's "where the time goes." `native/src/runtime/metrics.rs` adds one
+canonical accounting layer with no GC, codegen or ABI semantics changed:
+
+```
+NIR (op strcat, cell, closure, ...)
+  --codegen/clif.rs: in Sites mode only, marks the causing instruction's
+    site id in vm.alloc_site immediately before the allocating helper call
+        │
+        ▼
+runtime/vm.rs Vm::alloc<T> ── the one physical allocation point
+        │                          (String/List/BigInt/Result/Block/Cell/
+        ▼                           Native all go through it; the constant
+runtime/heap.rs Heap::collect       table is the one exception, counted
+  (exact mark-sweep already          separately as "static", excluded from
+   visits every object: live/         live/peak/GC since it is never swept)
+   reclaimed counted here, never
+   approximated as allocated-freed)
+        │
+        ▼
+Metrics::to_tcl -- one Tcl dict (native::allocationReport), native::allocationText
+  renders it for humans; native::assertAllocations and friends are built on it
+```
+
+**Allocation identity** is the existing `Header::kind` byte -- String, List,
+BigInt, Result, Block, Cell, Native -- no new taxonomy. **`allocatedBytes`**
+is exactly what the runtime's own constructors already compute and hand to
+the heap: `size_of` the Rust struct (`headerBytes`) plus the caller-known
+variable-length payload (`payloadBytes`) -- not the allocator's actual
+malloc chunk size, no padding accounted for. **Live/peak/reclaimed** are
+recomputed exactly at every collection from the retained set (never
+"allocated − freed"), so `peakLiveObjects`/`peakLiveBytes` can exceed the
+final `currentLiveObjects`/`currentLiveBytes` whenever a mid-run collection
+actually reclaimed something. Each GC cycle records its reason (`threshold`,
+`stress`, or `explicit` -- `Vm::reset`'s end-of-run collection between
+benchmark runs), before/after object and byte counts, reclaimed
+objects/bytes, and wall time.
+
+**Site attribution** turns out to already be half-built: `native/lower.tcl`
+was already emitting `@ExprId` on nearly every instruction
+(`Emit`/`Assign`/`AssignRaw`), and `native/src/nir.rs`'s parser was just
+discarding it (`if c == '@' { break; }`). Capturing it into
+`Function::origins` and interning one `Site` per *compiled* allocating
+instruction (never per dynamic execution, so a hot loop's one static
+`concat` is one site regardless of iteration count) makes every allocation
+traceable to `{file line column}` (via `hir::aot::Location`, so the Rust
+backend itself never has to understand HIR) and to the runtime operation
+that caused it (`strcat` vs. `substr` vs. `listappend`, not just "a
+String"). A helper that may allocate but sometimes doesn't (BigInt
+arithmetic landing back on a small result) has its site cleared again
+immediately after the call, so an allocation-free slow path never
+misattributes some later, unrelated allocation.
+
+**Modes** (`botlish-native run|bench FILE.nir --alloc off|summary|sites`,
+default `off`): `summary` is a runtime-only switch (no NIR/codegen
+change) covering everything except per-site attribution; `sites`
+additionally recompiles with the extra site-id stores, like `-specialize`
+already recompiles to change what's measured. From Tcl:
+`native::allocationReport HIR summary|sites ?RUNS? ?OPTIONS?`,
+`native::allocationText REPORT`, and `native::assertAllocations`,
+`assertAllocationsAtMost`, `assertBytesAtMost`, `assertKindAllocations` for
+future collection/optimizer tests ("this steady-state lookup allocates zero
+objects").
+
+**Corpus baseline** (`tclsh bench/corpus.tcl -runs 3 -all -backends
+cranelift`, summary mode, last of 3 runs; Tcl 8.6.17, Linux, x86-64):
+
+| algorithm | input | allocations | allocated | peak live | GC cycles | string copied | list elems copied |
+|---|---|---:|---:|---:|---:|---:|---:|
+| string_reverse | 100 chars | 223 | 14.1 KB | 14.1 KB | 1 | 5.2 KB | 5 |
+| string_reverse | 1,000 chars | 2,023 | 582.5 KB | 582.5 KB | 1 | 501.5 KB | 5 |
+| string_reverse | 10,000 chars | 20,023 | 50.8 MB | 1.1 MB | 49 | 50.0 MB | 5 |
+| string_replace | 1 KB | 1,058 | 71.8 KB | 71.8 KB | 1 | 29.4 KB | 5 |
+| string_replace | 10 KB | 10,258 | 3.0 MB | 1.1 MB | 3 | 2.6 MB | 5 |
+| string_replace | 100 KB | 102,258 | 256.4 MB | 1.4 MB | 236 | 252.3 MB | 5 |
+| csv | 100 rows | 7,669 | 377.8 KB | 377.8 KB | 1 | 22.5 KB | 6,690 |
+| csv | 1,000 rows | 79,571 | 7.5 MB | 1.3 MB | 8 | 247.3 KB | 516,540 |
+| csv | 10,000 rows | 834,585 | 436.9 MB | 8.0 MB | 154 | 2.7 MB | 50,165,040 |
+| matmul | 2×3 · 3×2 | 32 | 1.4 KB | 1.4 KB | 1 | 0 | 40 |
+| matmul | 8×8 | 115 | 7.6 KB | 7.6 KB | 1 | 0 | 416 |
+| matmul | 16×16 | 339 | 33.9 KB | 33.9 KB | 1 | 0 | 2,604 |
+| matmul | 32×32 | 1,171 | 194.0 KB | 194.0 KB | 1 | 0 | 18,500 |
+
+This confirms §20's prose quantitatively and sharpens it: **reverse** and
+**replace** are almost entirely `concat`/`substr` String traffic (peak live
+stays at 1.1–1.4 MB at their largest sizes tested -- 10,000 chars / 100 KB
+-- while *copied* bytes grow into the hundreds of megabytes: the
+accumulator is O(n) live at any instant but O(n²) copied over the run's
+lifetime, all through one or two sites). **CSV**'s allocation count is
+dominated by `list_append` (the 50 million list-element copies at 10,000
+rows are almost all memmoving existing rows/fields forward one element at a
+time) rather than by the `[field, index]` pair lists §20 also names as a
+cost -- both are visible
+now as distinct sites instead of one guess. **matmul** allocates almost
+nothing per cell: the inner loop's Ints stay small and raw (§"Representation"
+of `native/lower.tcl`), so the only sites are the output rows' `listnew`
+calls, and no BigInt ever appears with these operands. The one surprise
+worth a follow-up look: from 1,000 to 10,000 rows (10×), object *count*
+scales near-linearly (79,571 → 834,585, 10.5×, as expected -- one
+`list_append` per field/row) but elements *copied* scales quadratically
+(516,540 → 50,165,040, 97×): `list_append`'s O(n) memmove on every call is
+the entire explanation, and a transient builder (§21's item 2) should turn
+it into O(n) total, not just fewer guards.
+
+**Instrumentation overhead** (best of 5, wall time, same compiled program
+except `sites` mode's extra site-id stores):
+
+| case | off | summary | sites |
+|---|---:|---:|---:|
+| string_reverse 10,000 chars | 3.01 ms | 3.00 ms (≈0%) | 3.33 ms (+11%) |
+| csv 10,000 rows | 268.2 ms | 305.3 ms (+14%) | 305.0 ms (+14%) |
+| matmul 32×32 | 0.371 ms | 0.384 ms (+4%) | 0.402 ms (+8%) |
+
+`summary` mode is close to free except on CSV's extreme allocation rate
+(834,585 objects/run): `Heap::collect`'s exact accounting does one full
+extra pass over every currently-tracked object per cycle (`bytes_before`)
+on top of the sweep it already does, and CSV alone runs 154 collections.
+That pass is a legitimate follow-up to cut (fold it into the existing sweep
+loop rather than a separate one) if summary mode needs to get cheaper still
+for very high allocation rates; it was not touched in this milestone, which
+adds measurement only.
+
+**BigInt and external memory.** A BigInt allocation counts as one Botlish
+object with an estimated size (`n.bits() / 8`); `num-bigint`'s actual
+internal limb buffer is a second, separate Rust allocation the Botlish heap
+never sees, and its transient growth during arithmetic (e.g. intermediate
+buffers a multiplication reallocates through) is invisible to this report
+entirely. The report is explicitly a **Botlish managed heap allocation
+report**: excluded, and said so in both the human and structured output,
+are `num-bigint` limb buffers, the shadow stack (a fixed `Vec<Value>`,
+~32 MB), Cranelift/JIT code memory, and general process bookkeeping.
+
+```sh
+tclsh bench/corpus.tcl -runs 3 -all -backends cranelift   # alloc column, cranelift only
+```
+```tcl
+native::allocationReport $hir summary            ;# or sites, ?runs? ?options?
+puts [native::allocationText $report]            ;# human-readable
+native::assertAllocations $hir 0                 ;# a future HashTable-lookup test's shape
+```
+
+Tests: `tests/native-alloc.test` (17 tests: counts, bytes, copies, live/
+reclaimed exactness, peak > final, per-run isolation, two source
+expressions of the same kind as distinct sites, a non-allocating slow path
+leaving no stale site, `BOTLISH_NATIVE_GC_STRESS=1` consistency,
+instrumentation-off semantic parity) plus 7 Rust unit tests
+(`native/src/runtime/heap.rs`) against `Heap`/`Metrics` directly. Neither
+GC policy nor codegen semantics changed: `tests/all.tcl` (891 tests, both
+Tcl backends) and `tests/native-coverage.tcl` are unaffected.

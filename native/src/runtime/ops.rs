@@ -190,15 +190,21 @@ pub extern "C" fn rt_substr(p: *mut Vm, s: Value, start: Value, end: Value) -> V
     };
     if obj.ascii {
         let text = obj.text[from..to].to_string();
-        return vm(p).new_str_known(text, to - from, true);
+        let bytes = text.len();
+        let r = vm(p).new_str_known(text, to - from, true);
+        vm(p).metrics.record_string_copy(bytes);
+        return r;
     }
-    let text = obj.text.chars().skip(from).take(to - from).collect();
-    vm(p).new_str(text)
+    let text: String = obj.text.chars().skip(from).take(to - from).collect();
+    let bytes = text.len();
+    let r = vm(p).new_str(text);
+    vm(p).metrics.record_string_copy(bytes);
+    r
 }
 
 pub extern "C" fn rt_str_lower(p: *mut Vm, s: Value) -> Value {
     // Simple (one-to-one) case mapping, like Tcl's string tolower.
-    let text = str_of(s)
+    let text: String = str_of(s)
         .text
         .chars()
         .map(|c| {
@@ -209,7 +215,10 @@ pub extern "C" fn rt_str_lower(p: *mut Vm, s: Value) -> Value {
             }
         })
         .collect();
-    vm(p).new_str(text)
+    let bytes = text.len();
+    let r = vm(p).new_str(text);
+    vm(p).metrics.record_string_copy(bytes);
+    r
 }
 
 pub extern "C" fn rt_str_cat(p: *mut Vm, a: Value, b: Value) -> Value {
@@ -219,7 +228,10 @@ pub extern "C" fn rt_str_cat(p: *mut Vm, a: Value, b: Value) -> Value {
     text.push_str(&y.text);
     // The character count and ASCII flag follow from the operands: no rescan.
     let (chars, ascii) = (x.chars + y.chars, x.ascii && y.ascii);
-    vm(p).new_str_known(text, chars, ascii)
+    let bytes = text.len();
+    let r = vm(p).new_str_known(text, chars, ascii);
+    vm(p).metrics.record_string_copy(bytes);
+    r
 }
 
 // ---------------------------------------------------------------------------
@@ -227,7 +239,10 @@ pub extern "C" fn rt_str_cat(p: *mut Vm, a: Value, b: Value) -> Value {
 
 pub extern "C" fn rt_list_new(p: *mut Vm, n: u64, items: *const Value) -> Value {
     let items = unsafe { std::slice::from_raw_parts(items, n as usize) }.to_vec();
-    vm(p).new_list(items)
+    let elements = items.len();
+    let r = vm(p).new_list(items);
+    vm(p).metrics.record_list_copy(elements);
+    r
 }
 
 pub extern "C" fn rt_list_len(p: *mut Vm, l: Value) -> Value {
@@ -248,10 +263,16 @@ pub extern "C" fn rt_list_get(p: *mut Vm, l: Value, index: Value) -> Value {
 
 pub extern "C" fn rt_list_append(p: *mut Vm, l: Value, v: Value) -> Value {
     let old = &list_of(l).items;
+    // Elements copied: the existing list's backing store, memmoved whole.
+    // The appended element itself is a fresh write of a given value, not a
+    // copy of stored data, so it is not counted here.
+    let copied = old.len();
     let mut items = Vec::with_capacity(old.len() + 1);
     items.extend_from_slice(old);
     items.push(v);
-    vm(p).new_list(items)
+    let r = vm(p).new_list(items);
+    vm(p).metrics.record_list_copy(copied);
+    r
 }
 
 // ---------------------------------------------------------------------------

@@ -10,6 +10,7 @@
 
 use super::error::RtError;
 use super::heap::Heap;
+use super::metrics::{AllocMode, GcReason, Metrics};
 use super::value::*;
 use crate::nir::OpCode;
 use std::cell::RefCell;
@@ -53,12 +54,18 @@ pub struct Vm {
     pub ss_top: *mut Value,
     pub ss_limit: *mut Value,
     pub consts: *const Value,
+    /// The allocation site (codegen::clif's per-instruction site table
+    /// index; 0 = unattributed) of the instruction about to call an
+    /// allocating helper. Only written by generated code in Sites mode
+    /// (see metrics.rs); read and reset to 0 by `Vm::alloc`.
+    pub alloc_site: u32,
     ss_base: *mut Value,
     shadow: Vec<Value>,
     pub heap: Heap,
     pub error: Option<RtError>,
     pub temp_roots: Vec<Value>,
     pub info: Rc<ProgramInfo>,
+    pub metrics: Metrics,
     const_table: Vec<Value>,
     statics: Vec<*mut Header>,
 }
@@ -66,9 +73,10 @@ pub struct Vm {
 pub const VM_SS_TOP_OFFSET: i32 = offset_of!(Vm, ss_top) as i32;
 pub const VM_SS_LIMIT_OFFSET: i32 = offset_of!(Vm, ss_limit) as i32;
 pub const VM_CONSTS_OFFSET: i32 = offset_of!(Vm, consts) as i32;
+pub const VM_ALLOC_SITE_OFFSET: i32 = offset_of!(Vm, alloc_site) as i32;
 
 impl Vm {
-    pub fn new(info: Rc<ProgramInfo>) -> Box<Vm> {
+    pub fn new(info: Rc<ProgramInfo>, alloc_mode: AllocMode) -> Box<Vm> {
         let mut shadow = vec![0u64; SHADOW_STACK_SLOTS];
         let base = shadow.as_mut_ptr();
         let limit = unsafe { base.add(SHADOW_STACK_SLOTS) };
@@ -77,12 +85,14 @@ impl Vm {
             ss_top: base,
             ss_limit: limit,
             consts: std::ptr::null(),
+            alloc_site: 0,
             ss_base: base,
             shadow,
             heap: Heap::new(),
             error: None,
             temp_roots: Vec::new(),
             info,
+            metrics: Metrics::new(alloc_mode),
             const_table: Vec::new(),
             statics: Vec::new(),
         })
@@ -102,31 +112,60 @@ impl Vm {
         NO_VALUE
     }
 
-    /// Allocates OBJ (collecting first if due). BYTES is its payload size.
+    /// Allocates OBJ (collecting first if due). BYTES is its payload size
+    /// (the object's Rust struct size is its header size: see metrics.rs's
+    /// allocated_bytes definition).
     pub fn alloc<T>(&mut self, obj: T, bytes: usize) -> Value {
         if self.heap.wants_collection() {
             self.collect();
         }
         let raw = Box::into_raw(Box::new(obj)) as *mut Header;
-        self.heap.register(raw, std::mem::size_of::<T>() + bytes);
+        let header_bytes = std::mem::size_of::<T>();
+        self.heap.register(raw, header_bytes + bytes);
+        if self.metrics.enabled() {
+            let kind = unsafe { (*raw).kind };
+            let site = self.alloc_site;
+            self.alloc_site = 0;
+            self.metrics.record_alloc(kind, header_bytes, bytes, site);
+        }
         raw as Value
     }
 
+    /// Records one constant-table (static) object: allocated once per
+    /// program by codegen::CompiledProgram::install_constants, outside the
+    /// Heap's object list and never collected (see metrics.rs).
+    pub fn record_static_alloc(&mut self, kind: u8, bytes: u64) {
+        self.metrics.record_static(kind, bytes);
+    }
+
+    /// A collection triggered by an allocation (Heap::wants_collection):
+    /// threshold or stress, whichever Heap says caused it.
     pub fn collect(&mut self) {
+        let reason = self.heap.trigger_reason();
+        self.collect_with(reason);
+    }
+
+    fn collect_with(&mut self, reason: GcReason) {
         let stack = unsafe {
             std::slice::from_raw_parts(self.ss_base, self.ss_top.offset_from(self.ss_base) as usize)
         };
         let error_values = self.error.as_ref().map(|e| e.values()).unwrap_or_default();
         let roots = stack.iter().copied().chain(error_values).chain(self.temp_roots.iter().copied());
-        self.heap.collect(roots.collect::<Vec<_>>().into_iter());
+        self.heap.collect(roots.collect::<Vec<_>>().into_iter(), &mut self.metrics, reason);
     }
 
-    /// Prepares for the next run: empty shadow stack, no error, empty heap.
+    /// Prepares for the next run: empty shadow stack, no error, empty heap,
+    /// fresh metrics (per-run isolation: a run's report must not include an
+    /// earlier run's allocations). Metrics are reset before the cleanup
+    /// collection below runs, so that collection's own effect (releasing
+    /// the previous run's objects) is visible in the new run's report as
+    /// its first GC cycle, not folded into stale totals.
     pub fn reset(&mut self) {
         self.ss_top = self.ss_base;
         self.error = None;
         self.temp_roots.clear();
-        self.collect();
+        self.metrics.reset();
+        self.collect_with(GcReason::Explicit);
     }
 
     // -----------------------------------------------------------------------

@@ -20,11 +20,11 @@
 //! Self tail calls (NIR `tail`) rebind the parameter variables and jump back
 //! to the body block after the prologue: a CFG back edge, no call.
 
-use super::{BackendError, Const, ConstPool};
+use super::{BackendError, Const, ConstPool, Site};
 use crate::nir::{self, Inst, OpCode, Reg};
 use crate::runtime::ops::helpers;
 use crate::runtime::value::*;
-use crate::runtime::vm::{VM_CONSTS_OFFSET, VM_SS_LIMIT_OFFSET, VM_SS_TOP_OFFSET};
+use crate::runtime::vm::{VM_ALLOC_SITE_OFFSET, VM_CONSTS_OFFSET, VM_SS_LIMIT_OFFSET, VM_SS_TOP_OFFSET};
 use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::{
     types, AbiParam, BlockArg, InstBuilder, MemFlagsData, Signature, StackSlotData, StackSlotKind,
@@ -88,6 +88,8 @@ pub fn define<M: Module>(
     symbols: &Symbols,
     f: &nir::Function,
     pool: &mut ConstPool,
+    sites: &mut Vec<Site>,
+    instrument_sites: bool,
     listing: bool,
 ) -> Result<(Option<String>, u32), BackendError> {
     let mut text = String::new();
@@ -99,7 +101,7 @@ pub fn define<M: Module>(
     let config = module.isa().frontend_config();
     {
         let b = FunctionBuilder::new(&mut ctx.func, &mut fctx);
-        let mut t = Translator::new(b, module, symbols, f, pool);
+        let mut t = Translator::new(b, module, symbols, f, pool, sites, instrument_sites);
         t.function()?;
         let Translator { mut b, .. } = t;
         b.seal_all_blocks();
@@ -151,6 +153,14 @@ struct Translator<'a, 'b, M: Module> {
     symbols: &'a Symbols,
     f: &'a nir::Function,
     pool: &'a mut ConstPool,
+    /// codegen/mod.rs's Site table: interned lazily, one entry per
+    /// allocating instruction actually translated (see `mark_site`).
+    sites: &'a mut Vec<Site>,
+    instrument_sites: bool,
+    /// Index into `f.body`/`f.origins` of the instruction being translated
+    /// (set at the top of each iteration in `function`): `mark_site` reads
+    /// `f.origins[current_index]` to attribute a site to its HIR expression.
+    current_index: usize,
     vars: Vec<Variable>,
     closure: Option<Variable>,
     labels: HashMap<nir::Label, ir::Block>,
@@ -169,6 +179,8 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         symbols: &'a Symbols,
         f: &'a nir::Function,
         pool: &'a mut ConstPool,
+        sites: &'a mut Vec<Site>,
+        instrument_sites: bool,
     ) -> Self {
         let vars = (0..f.regs).map(|_| b.declare_var(I64)).collect();
         let closure = f.env.then(|| b.declare_var(I64));
@@ -181,6 +193,9 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             symbols,
             f,
             pool,
+            sites,
+            instrument_sites,
+            current_index: 0,
             vars,
             closure,
             labels: HashMap::new(),
@@ -251,7 +266,8 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
 
         self.b.switch_to_block(self.body);
         self.terminated = false;
-        for inst in &f.body {
+        for (index, inst) in f.body.iter().enumerate() {
+            self.current_index = index;
             self.inst(inst)?;
         }
         if !self.terminated {
@@ -296,6 +312,37 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         let r = self.func_ref(id);
         let call = self.b.ins().call(r, args);
         self.b.inst_results(call)[0]
+    }
+
+    /// Interns a Site for the instruction currently being translated and,
+    /// in Sites mode, stores its id into `vm.alloc_site` (a no-op store
+    /// when not instrumenting sites is never emitted at all -- this whole
+    /// method is skipped). See the `sites`/`current_index` fields' docs.
+    fn mark_site(&mut self, operation: &'static str, object_kind: u8) {
+        if !self.instrument_sites {
+            return;
+        }
+        let hir_expr = self.f.origins.get(self.current_index).copied().flatten();
+        self.sites.push(Site { func: self.f.id, func_name: self.f.name.clone(), hir_expr, operation, object_kind });
+        let id = self.iconst(self.sites.len() as u64); // 1-based: 0 means unattributed
+        self.b.ins().store(MemFlagsData::trusted(), id, self.vm, VM_ALLOC_SITE_OFFSET);
+    }
+
+    /// Like `call_helper`, for a helper that may allocate an OBJECT_KIND
+    /// via OPERATION. Marks the site immediately before the call and clears
+    /// it immediately after (back to 0, "unattributed") rather than leaving
+    /// it set: NAME does not always actually allocate (e.g. the BigInt slow
+    /// path can still land on a value that fits small), and a stale site id
+    /// left in `vm.alloc_site` would otherwise misattribute some later,
+    /// unrelated allocation instead of just attributing nothing.
+    fn call_allocating(&mut self, name: &str, args: &[ir::Value], operation: &'static str, object_kind: u8) -> ir::Value {
+        self.mark_site(operation, object_kind);
+        let r = self.call_helper(name, args);
+        if self.instrument_sites {
+            let zero = self.iconst(0);
+            self.b.ins().store(MemFlagsData::trusted(), zero, self.vm, VM_ALLOC_SITE_OFFSET);
+        }
+        r
     }
 
     /// Branches to the error exit if V is 0; continues in a new block.
@@ -468,7 +515,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 self.def(*dst, v);
             }
             Inst::Cell { dst } => {
-                let v = self.call_helper("rt_cell_new", &[self.vm]);
+                let v = self.call_allocating("rt_cell_new", &[self.vm], "cell", KIND_CELL);
                 self.def(*dst, v);
             }
             Inst::CellSet { cell, value } => {
@@ -499,7 +546,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 let entry = self.func_ref(self.symbols.entry[*func as usize]);
                 let code = self.b.ins().func_addr(I64, entry);
                 let id = self.iconst(*func as u64);
-                let v = self.call_helper("rt_closure_new", &[self.vm, id, code, n, ptr]);
+                let v = self.call_allocating("rt_closure_new", &[self.vm, id, code, n, ptr], "closure", KIND_CLOSURE);
                 self.def(*dst, v);
             }
             Inst::Guard { kind, value, context } => {
@@ -672,40 +719,53 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 self.bool_of(flag)
             }
             _ => {
-                let (helper, extra, fallible): (&str, Option<u64>, bool) = match op {
-                    StrEq => ("rt_str_eq", None, false),
-                    StrLen => ("rt_str_len", None, false),
-                    Substr => ("rt_substr", None, true),
-                    // Fallible: each may construct a new String/List, which
-                    // the runtime rejects past MAX_COLLECTION_LENGTH (see
-                    // Vm::reject_oversized_collection).
-                    StrLower => ("rt_str_lower", None, true),
-                    StrCat => ("rt_str_cat", None, true),
-                    ListLen => ("rt_list_len", None, false),
-                    ListGet => ("rt_list_get", None, true),
-                    ListAppend => ("rt_list_append", None, true),
-                    IsOk => ("rt_is_result", Some(1), false),
-                    IsError => ("rt_is_result", Some(0), false),
-                    ResultValue => ("rt_result_payload", Some(1), true),
-                    ResultError => ("rt_result_payload", Some(0), true),
-                    MkOk | MkError => {
-                        let ok = self.iconst((op == MkOk) as u64);
-                        return self.call_helper("rt_result_new", &[self.vm, ok, a[0]]);
-                    }
-                    ListNew => {
-                        let (n, ptr) = self.array(args);
-                        let v = self.call_helper("rt_list_new", &[self.vm, n, ptr]);
-                        self.check(v);
-                        return v;
-                    }
-                    _ => unreachable!(),
-                };
+                // The 4th element, when present, is this op's allocation
+                // site (operation name, resulting object kind): see
+                // `call_allocating`. None for helpers that never allocate.
+                let (helper, extra, fallible, alloc): (&str, Option<u64>, bool, Option<(&'static str, u8)>) =
+                    match op {
+                        StrEq => ("rt_str_eq", None, false, None),
+                        StrLen => ("rt_str_len", None, false, None),
+                        Substr => ("rt_substr", None, true, Some(("substr", KIND_STR))),
+                        // Fallible: each may construct a new String/List,
+                        // which the runtime rejects past
+                        // MAX_COLLECTION_LENGTH (Vm::reject_oversized_collection).
+                        StrLower => ("rt_str_lower", None, true, Some(("strlower", KIND_STR))),
+                        StrCat => ("rt_str_cat", None, true, Some(("strcat", KIND_STR))),
+                        ListLen => ("rt_list_len", None, false, None),
+                        ListGet => ("rt_list_get", None, true, None),
+                        ListAppend => ("rt_list_append", None, true, Some(("listappend", KIND_LIST))),
+                        IsOk => ("rt_is_result", Some(1), false, None),
+                        IsError => ("rt_is_result", Some(0), false, None),
+                        ResultValue => ("rt_result_payload", Some(1), true, None),
+                        ResultError => ("rt_result_payload", Some(0), true, None),
+                        MkOk | MkError => {
+                            let ok = self.iconst((op == MkOk) as u64);
+                            let operation = if op == MkOk { "mkok" } else { "mkerror" };
+                            return self.call_allocating(
+                                "rt_result_new",
+                                &[self.vm, ok, a[0]],
+                                operation,
+                                KIND_RESULT,
+                            );
+                        }
+                        ListNew => {
+                            let (n, ptr) = self.array(args);
+                            let v = self.call_allocating("rt_list_new", &[self.vm, n, ptr], "listnew", KIND_LIST);
+                            self.check(v);
+                            return v;
+                        }
+                        _ => unreachable!(),
+                    };
                 let mut values = vec![self.vm];
                 values.extend(&a);
                 if let Some(extra) = extra {
                     values.push(self.iconst(extra));
                 }
-                let r = self.call_helper(helper, &values);
+                let r = match alloc {
+                    Some((operation, kind)) => self.call_allocating(helper, &values, operation, kind),
+                    None => self.call_helper(helper, &values),
+                };
                 if fallible {
                     self.check(r);
                 }
@@ -751,12 +811,16 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         };
         self.b.ins().brif(overflow, slow, &[], done, &[BlockArg::Value(r)]);
         self.b.switch_to_block(slow);
-        let helper = match op {
-            OpCode::IAdd => "rt_int_add",
-            OpCode::ISub => "rt_int_sub",
-            _ => "rt_int_mul",
+        let (helper, operation) = match op {
+            OpCode::IAdd => ("rt_int_add", "iadd"),
+            OpCode::ISub => ("rt_int_sub", "isub"),
+            _ => ("rt_int_mul", "imul"),
         };
-        let r = self.call_helper(helper, &[self.vm, a, b]);
+        // May not actually allocate (the result can still fit small, e.g.
+        // BigInt - BigInt): call_allocating clears the site again after the
+        // call either way, so an allocation-free slow path never leaves a
+        // stale site id to misattribute a later allocation.
+        let r = self.call_allocating(helper, &[self.vm, a, b], operation, KIND_BIGINT);
         self.b.ins().jump(done, &[BlockArg::Value(r)]);
         self.b.switch_to_block(done);
         result
