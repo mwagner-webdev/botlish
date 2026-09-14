@@ -44,6 +44,13 @@
 #                   implementation actually upholds, never a guess from the
 #                   native's name.
 #                     nonneg          the result is always >= 0
+#                     collection-length   the result is always a String or
+#                                     List length: >= 0 and, by the runtime's
+#                                     own enforced construction limit
+#                                     (native/src/runtime/ops.rs), also <=
+#                                     hir::range's small-Int maximum -- never
+#                                     merely assumed (see MAX_COLLECTION_LENGTH
+#                                     there)
 #
 # Refinement rules are flat lists of ARG-INDEX TYPE pairs, e.g. {0 int}
 # ("argument 0 is an int") or {0 {refined str {Emailish}}}. The evaluator
@@ -159,7 +166,7 @@ proc core::native::register {name args} {
         error "core::native::register: bad -result-shape \"$shape\" for \"$name\""
     }
     set range [dict get $options -result-range]
-    if {$range ni {{} nonneg}} {
+    if {$range ni {{} nonneg collection-length}} {
         error "core::native::register: bad -result-range \"$range\" for \"$name\""
     }
     dict set registry $name [dict create \

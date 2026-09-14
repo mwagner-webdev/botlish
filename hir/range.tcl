@@ -47,10 +47,14 @@
 #
 # Parameters: interprocedural seeding
 # ------------------------------------
-# A parameter's range is seeded only from the *literal* Int arguments passed
-# to it by other instances' direct calls (ExternalSeeds: a syntactic look at
-# each call's argument expressions, not a fixpoint over the caller's own
-# analysis, so instances need no dependency order). A call from an instance
+# A parameter's range is seeded only from *syntactically evident* arguments
+# passed to it by other instances' direct calls (ExternalSeeds/SeedRange: a
+# syntactic look at each call's argument expressions, not a fixpoint over the
+# caller's own analysis, so instances need no dependency order): a literal
+# Int, or a direct call to a native whose -result-range metadata is a
+# context-free guarantee (nonneg, collection-length; e.g. a parameter passed
+# only `list_length(row)`-shaped arguments gets a genuine finite range with
+# no relational reasoning). A call from an instance
 # back to itself (hir::specialize's `calls`, self tail calls and ordinary
 # same-instance recursion alike) instead feeds back through a small internal
 # fixpoint: analyze the region under the current assumption, see what range
@@ -91,6 +95,19 @@ proc hir::range::point {n} {
 
 proc hir::range::nonneg {} {
     return [dict create min 0 max +inf]
+}
+
+# The range of a native result tagged -result-range collection-length
+# (core/native.tcl): a String/List length. Unlike nonneg this bound is
+# *finite* -- native/src/runtime/vm.rs's MAX_COLLECTION_LENGTH is an actual
+# enforced construction-time limit, not an assumption (see its doc comment),
+# so this alone makes a direct length(...)/list_length(...) call small
+# (fitsSmall below) with no relational reasoning: it is the whole proof for
+# every corpus loop whose bound is a length call appearing in the loop body
+# itself (e.g. reverse's `index == length(text)`).
+proc hir::range::collectionLength {} {
+    variable smallMax
+    return [dict create min 0 max $smallMax]
 }
 
 proc hir::range::isUnknown {r} {
@@ -159,9 +176,11 @@ proc hir::range::AddBound {a b} {
     return [expr {$a + $b}]
 }
 
-# X - Y (a bound of a subtraction result): only ever called as (a.min,
-# b.max) or (a.max, b.min), so a min operand is never +inf and a max operand
-# is never -inf; every combination below is then well defined.
+# X - Y (a bound of a subtraction result, or Narrowed's "predecessor of a
+# finite bound" with y=1): every caller either passes (a.min, b.max) or
+# (a.max, b.min) from `sub`, or has already checked x is finite (Narrowed),
+# so x is never +inf and y is never -inf; every combination below is then
+# well defined.
 proc hir::range::SubBound {x y} {
     if {$x eq "-inf" || $y eq "+inf"} {
         return -inf
@@ -222,17 +241,39 @@ proc hir::range::show {r} {
 # ---------------------------------------------------------------------------
 # Interprocedural seeding
 
-# The Int value of expression E if it is a plain integer literal, or
-# unknown: a purely syntactic fact, so callers need not be analyzed first.
-proc hir::range::LiteralRange {hir e} {
-    if {[hir::kind $hir $e] ne "const"} {
-        return [unknown]
+# The Range of expression E if it is a plain integer literal, or a direct
+# call to a native whose -result-range metadata (core/native.tcl) is a
+# context-free guarantee (nonneg, collection-length): unknown otherwise. Both
+# cases are purely syntactic facts that need no analysis of any callee or
+# binding, so external call sites can be seeded from them without an
+# ordering dependency between instances. The native-call case is what lets a
+# parameter seeded only by e.g. `list_length(row)`-shaped arguments (never a
+# literal) still get a genuine finite range (matmul's `count`/`columns`):
+# the same metadata Call (below) reads for an expression already inside the
+# instance being analyzed, read here for an expression outside it.
+proc hir::range::SeedRange {hir e} {
+    switch -- [hir::kind $hir $e] {
+        const {
+            set v [hir::get $hir $e value]
+            if {[core::value::kind $v] ne "int"} {
+                return [unknown]
+            }
+            return [point [core::value::intOf $v]]
+        }
+        call {
+            lassign [hir::get $hir $e target] targetKind target
+            if {$targetKind ne "native"} {
+                return [unknown]
+            }
+            set name [dict get [hir::symbol $hir $target] name]
+            switch -- [dict get [core::native::metadata $name] resultRange] {
+                nonneg            { return [nonneg] }
+                collection-length { return [collectionLength] }
+            }
+            return [unknown]
+        }
     }
-    set v [hir::get $hir $e value]
-    if {[core::value::kind $v] ne "int"} {
-        return [unknown]
-    }
-    return [point [core::value::intOf $v]]
+    return [unknown]
 }
 
 # InstanceId -> list of Range, one per parameter: the join of the literal
@@ -254,7 +295,7 @@ proc hir::range::ExternalSeeds {hir spec} {
             set current [expr {[dict exists $seeds $target] ? [dict get $seeds $target] : [lrepeat $nparams never]}]
             set next {}
             foreach argExpr [hir::get $hir $callExpr args] c $current {
-                lappend next [join $c [LiteralRange $hir $argExpr]]
+                lappend next [join $c [SeedRange $hir $argExpr]]
             }
             dict set seeds $target $next
         }
@@ -383,8 +424,9 @@ proc hir::range::Call {hirVar ctxVar e node} {
             }
         } else {
             set meta [core::native::metadata $name]
-            if {[dict get $meta resultRange] eq "nonneg"} {
-                set result [nonneg]
+            switch -- [dict get $meta resultRange] {
+                nonneg            { set result [nonneg] }
+                collection-length { set result [collectionLength] }
             }
         }
         dict set ctx exprs $e $result
@@ -402,20 +444,193 @@ proc hir::range::If {hirVar ctxVar e node} {
     set condition [dict get $node condition]
     Expr hir ctx $condition
     set known [hir::types::KnownOutcome $hir $condition]
+    set saved [dict get $ctx bindings]
     set branches [dict create]
+    set after [dict create]
     foreach {outcome role} {1 then 0 else} {
         if {$known ne "" && $known != $outcome} {
             dict set branches $outcome never
+            dict set after $outcome $saved
             continue
         }
-        set saved [dict get $ctx bindings]
-        dict set branches $outcome [Sequence hir ctx [dict get $node ${role}Body]]
         dict set ctx bindings $saved
+        foreach {b r} [ComparisonNarrowing $hir $ctx $condition $outcome] {
+            dict set ctx bindings $b $r
+        }
+        dict set branches $outcome [Sequence hir ctx [dict get $node ${role}Body]]
+        dict set after $outcome [dict get $ctx bindings]
     }
+    # What code textually after this "if" sees (spec #14's whole point: an
+    # early-return/break guard -- the corpus's actual shape, e.g. reverse's
+    # `if index == length(text): return ...` with no else, the recursive
+    # call a later sibling statement, not nested in an else branch -- must
+    # let a narrowed bound reach that sibling code, not just the branch body
+    # itself). If one outcome never completes normally, only the other's
+    # bindings (narrowed or not) are reachable afterward; if both are alive,
+    # only the join of the two is safe. Every existing (pre-this-milestone)
+    # binding is unchanged by either branch unless ComparisonNarrowing
+    # touched it (an existing binding's range in ctx is otherwise never
+    # rewritten -- only a fresh `bind` adds a new BindingId), so for any
+    # program before this addition this reduces to plain restoration, same
+    # as before.
+    dict set ctx bindings [JoinBindings $saved [dict get $after 1] [dict get $after 0] $branches]
     if {$known ne ""} {
         return [dict get $branches $known]
     }
     return [join [dict get $branches 1] [dict get $branches 0]]
+}
+
+# The bindings dict code after an "if" sees, given SAVED (bindings entering
+# it), AFTER1/AFTER0 (bindings leaving each branch, meaningful only when that
+# branch is alive) and BRANCHES (each outcome's Range-or-never, to tell which
+# branches are alive).
+proc hir::range::JoinBindings {saved after1 after0 branches} {
+    set dead1 [expr {[dict get $branches 1] eq "never"}]
+    set dead0 [expr {[dict get $branches 0] eq "never"}]
+    if {$dead1 && $dead0} {
+        return $saved
+    }
+    if {$dead1} {
+        return $after0
+    }
+    if {$dead0} {
+        return $after1
+    }
+    set result [dict create]
+    dict for {b r} $saved {
+        set r1 [expr {[dict exists $after1 $b] ? [dict get $after1 $b] : $r}]
+        set r0 [expr {[dict exists $after0 $b] ? [dict get $after0 $b] : $r}]
+        dict set result $b [join $r1 $r0]
+    }
+    return $result
+}
+
+# ---------------------------------------------------------------------------
+# Branch-derived narrowing (spec #14): what a `< <= > >=` condition directly
+# says about a ref'd local/param binding's range on the branch its outcome
+# (1 true, 0 false) selects. Sound and general -- no step/monotonicity
+# reasoning, unlike hir/induction.tcl's equality-termination proof. `==`
+# establishes nothing here (spec #15: equality alone never bounds a
+# magnitude without an independent monotonicity fact).
+
+# The binding a `ref` expression E names, if it is a proven-initialized local
+# or parameter (the only bindings ctx bindings tracks a range for), else "".
+proc hir::range::RefBinding {hir e} {
+    if {[hir::kind $hir $e] ne "ref"} {
+        return ""
+    }
+    set b [hir::get $hir $e binding]
+    if {$b eq "" || [hir::get $hir $e init] eq "no"} {
+        return ""
+    }
+    if {[dict get [hir::binding $hir $b] kind] ne "local"} {
+        return ""
+    }
+    return $b
+}
+
+# {binding Range ...}: what CONDITION (a call already evaluated into CTX's
+# exprs, so its argument ranges are available) establishes when it evaluates
+# to OUTCOME, for each side that is a ref'd local/param binding.
+proc hir::range::ComparisonNarrowing {hir ctx condition outcome} {
+    set node [hir::node $hir $condition]
+    if {[dict get $node kind] ne "call"} {
+        return {}
+    }
+    lassign [dict get $node target] targetKind target
+    if {$targetKind ne "native"} {
+        return {}
+    }
+    set name [dict get [hir::symbol $hir $target] name]
+    set args [dict get $node args]
+    if {[llength $args] != 2} {
+        return {}
+    }
+    if {$name eq "=="} {
+        return [EqualityNarrowing $hir $ctx $condition $args $outcome]
+    }
+    if {$name ni {< <= > >=}} {
+        return {}
+    }
+    set op $name
+    if {!$outcome} {
+        # The false branch's fact is the comparison's negation.
+        set op [dict get {< >= <= > > <= >= <} $op]
+    }
+    lassign $args ea eb
+    set exprs [dict get $ctx exprs]
+    set ra [expr {[dict exists $exprs $ea] ? [dict get $exprs $ea] : [unknown]}]
+    set rb [expr {[dict exists $exprs $eb] ? [dict get $exprs $eb] : [unknown]}]
+    set facts [dict create]
+    set ba [RefBinding $hir $ea]
+    if {$ba ne ""} {
+        set n [Narrowed $op $ra $rb]
+        if {$n ne ""} {
+            dict set facts $ba $n
+        }
+    }
+    set bb [RefBinding $hir $eb]
+    if {$bb ne ""} {
+        # "B [mirror of OP] A" is the same fact, stated about B.
+        set mirror [dict get {< > <= >= > < >= <=} $op]
+        set n [Narrowed $mirror $rb $ra]
+        if {$n ne ""} {
+            dict set facts $bb $n
+        }
+    }
+    return $facts
+}
+
+# ComparisonNarrowing's `==` case. Equality alone proves nothing (spec #15):
+# unless hir/induction.tcl already proved this exact "if P == B" sound as an
+# equality-termination guard (ctx monotone, keyed by this same condition's
+# expression id -- hir/induction.tcl's Guard found the identical HIR node,
+# so it is the same P and the same B), in which case its false ("P != B")
+# branch is exactly "P < B" / "P > B" per that proof, the same fact a
+# `<`/`>` guard would give. Unlike the generic comparison case above, OP here
+# is derived from the proof's step direction, not from the source order of
+# CONDITION's two operands, so this resolves P and B itself (whichever side
+# each is) rather than trying both sides symmetrically.
+proc hir::range::EqualityNarrowing {hir ctx condition args outcome} {
+    if {$outcome || ![dict exists [dict get $ctx monotone] $condition]} {
+        return {}
+    }
+    lassign [dict get [dict get $ctx monotone] $condition] p step
+    lassign $args ea eb
+    set boundExpr [expr {[RefBinding $hir $ea] eq $p ? $eb : $ea}]
+    set exprs [dict get $ctx exprs]
+    set boundRange [expr {[dict exists $exprs $boundExpr] ? [dict get $exprs $boundExpr] : [unknown]}]
+    set current [dict get [dict get $ctx bindings] $p]
+    set n [Narrowed [expr {$step > 0 ? "<" : ">"}] $current $boundRange]
+    return [expr {$n eq "" ? {} : [dict create $p $n]}]
+}
+
+# The Range of X narrowed by "X OP Y", given X's own range RX and Y's range
+# RY, or "" if OP gives no new information (Y unbounded on the relevant
+# side).
+proc hir::range::Narrowed {op rx ry} {
+    set mn [dict get $rx min]
+    set mx [dict get $rx max]
+    switch -- $op {
+        < {
+            if {[dict get $ry max] eq "+inf"} { return "" }
+            set mx [Min $mx [SubBound [dict get $ry max] 1]]
+        }
+        <= {
+            if {[dict get $ry max] eq "+inf"} { return "" }
+            set mx [Min $mx [dict get $ry max]]
+        }
+        > {
+            if {[dict get $ry min] eq "-inf"} { return "" }
+            set mn [Max $mn [AddBound [dict get $ry min] 1]]
+        }
+        >= {
+            if {[dict get $ry min] eq "-inf"} { return "" }
+            set mn [Max $mn [dict get $ry min]]
+        }
+        default { return "" }
+    }
+    return [dict create min $mn max $mx]
 }
 
 # The region of instance ID's view HIR (already specialize::view'd): a dict
@@ -425,9 +640,9 @@ proc hir::range::If {hirVar ctxVar e node} {
 #   selfCalls  list of argument-Range-lists, one per call this pass found
 #              targeting this same instance (self tail calls and ordinary
 #              same-instance recursion alike)
-proc hir::range::AnalyzeInstance {hir id instanceCalls block params assumed} {
+proc hir::range::AnalyzeInstance {hir id instanceCalls block params assumed monotone} {
     set ctx [dict create bindings [dict create] returnRange never exprs [dict create] \
-        selfCalls {} id $id instanceCalls $instanceCalls]
+        selfCalls {} id $id instanceCalls $instanceCalls monotone $monotone]
     foreach b $params r $assumed {
         dict set ctx bindings $b $r
     }
@@ -446,6 +661,13 @@ proc hir::range::AnalyzeInstance {hir id instanceCalls block params assumed} {
 proc hir::range::analyze {hir spec} {
     variable maxPasses
     set seeds [ExternalSeeds $hir $spec]
+    # hir/induction.tcl's proof, when it fires, replaces a parameter's own
+    # self-call feedback with a fixed answer (see the loop below): unlike an
+    # ordinary seed it is a *conclusion*, not just a starting guess, so nil
+    # widen must never touch it, or the very growth its equality-termination
+    # argument already accounts for would immediately widen it back to
+    # infinity (see hir/induction.tcl's header).
+    set induction [hir::induction::analyze $hir $spec $seeds]
     set instances [dict create]
     foreach id [dict get $spec used] {
         set instance [dict get $spec instances $id]
@@ -453,17 +675,30 @@ proc hir::range::analyze {hir spec} {
         set params [expr {$block eq "program" ? {} : [hir::get $hir $block params]}]
         set n [llength $params]
         set assumed [expr {[dict exists $seeds $id] ? [dict get $seeds $id] : [lrepeat $n [unknown]]}]
+        set locked [dict create]
+        for {set i 0} {$i < $n} {incr i} {
+            set override [hir::induction::of $induction $id $i]
+            if {$override ne ""} {
+                lset assumed $i $override
+                dict set locked $i 1
+            }
+        }
         set view [hir::specialize::view $hir $spec $id]
         set instanceCalls [dict get $instance calls]
+        set monotone [hir::induction::monotone $induction $id]
         set outcome {}
         for {set pass 1} {$pass <= $maxPasses} {incr pass} {
-            set outcome [AnalyzeInstance $view $id $instanceCalls $block $params $assumed]
+            set outcome [AnalyzeInstance $view $id $instanceCalls $block $params $assumed $monotone]
             set selfCalls [dict get $outcome selfCalls]
             if {$selfCalls eq ""} {
                 break
             }
             set next {}
             for {set i 0} {$i < $n} {incr i} {
+                if {[dict exists $locked $i]} {
+                    lappend next [lindex $assumed $i]
+                    continue
+                }
                 set r never
                 foreach call $selfCalls {
                     set r [join $r [lindex $call $i]]
@@ -481,7 +716,7 @@ proc hir::range::analyze {hir spec} {
         }
         dict set instances $id [dict create params $assumed exprs [dict get $outcome exprs] result [dict get $outcome result]]
     }
-    return [dict create instances $instances]
+    return [dict create instances $instances induction $induction]
 }
 
 # The Range of expression E as instance ID's analysis proved it, or unknown.

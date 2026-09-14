@@ -641,4 +641,67 @@ test native-repr-11 {collecting before every allocation changes nothing, with ra
     list [expr {$normal eq $stressed}] $normal
 } -result {1 {int 2000}}
 
+# ---------------------------------------------------------------------------
+# Representation: raw values across CFG joins and self-tail backedges
+# (hir/induction.tcl, hir/range.tcl's branch-derived narrowing, the
+# "Representation" section of native/lower.tcl, native/src/nir.rs's
+# declared rawregs, native/src/codegen/clif.rs's per-parameter prologue
+# unboxing)
+
+test native-repr-12 {a self-tail loop's proven-small parameter is declared raw for the whole function (rawregs=) and stays raw across the backedge: comparison and decrement are raw, while an unbounded accumulator in the same function stays tagged} -body {
+    set nir [nirOf "${countdown}count(100000, 0)"]
+    set body [nirFunction $nir count]
+    list [regexp {func [0-9]+ "count"[^\n]*rawregs="(?:\d+ )*0(?: \d+)*"} $nir] \
+         [regexp {op rieq %0} $body] [regexp {op risub %0} $body] \
+         [regexp {tail %[0-9]+ %[0-9]+} $body] \
+         [regexp {op iadd %1 } $body] [regexp {op riadd %1 } $body]
+} -result {1 1 1 1 1 0}
+
+test native-repr-13 {a loop-carried index bounded by an immutable collection length (string_reverse's shape) stays raw across the self-tail backedge} -body {
+    set text "fn reverse_from(text, index, reversed):\n    if index == length(text):\n        return reversed\n    character = substring(text, index, index + 1)\n    reverse_from(text, index + 1, concat(character, reversed))\n\nreverse_from(\"hello\", 0, \"\")"
+    set nir [nirOf $text]
+    set body [nirFunction $nir reverse_from]
+    list [regexp {func [0-9]+ "reverse_from"[^\n]*rawregs="(?:\d+ )*1(?: \d+)*"} $nir] \
+         [regexp {op rieq} $body] [regexp {op riadd} $body] \
+         [regexp {tail %[0-9]+ %[0-9]+ %[0-9]+} $body] \
+         [parity $text] [native $text]
+} -result {1 1 1 1 same {value {"olleh"}}}
+
+test native-repr-14 {a parameter seeded, at every external call site, only by a length/list_length-shaped argument (matmul's "count") is itself proven small with no relational reasoning, so an == guard against it stays raw too} -body {
+    set text "fn dot(a_row, b, column, k, count, total):\n    if k == count:\n        return total\n    term = list_get(a_row, k) * list_get(list_get(b, k), column)\n    dot(a_row, b, column, k + 1, count, total + term)\n\ndot(\[1, 2\], \[\[1, 2\], \[3, 4\]\], 0, 0, list_length(\[1, 2\]), 0)"
+    set body [nirFunction [nirOf $text] dot]
+    list [regexp {op rieq} $body] [regexp {op riadd} $body] [regexp {op imul} $body] \
+         [regexp {op iadd} $body] [parity $text] [native $text]
+} -result {1 1 1 1 same {value 7}}
+
+test native-repr-15 {an equality-terminated loop whose step is +-2 is not (unsoundly) proven small -- it could skip the terminator -- so it safely falls back to tagged and still computes the right answer} -body {
+    set text "fn count2(n, acc):\n    if n == 0:\n        return acc\n    count2(n - 2, acc + 1)\n\ncount2(100000, 0)"
+    set body [nirFunction [nirOf $text] count2]
+    list [regexp {op risub} $body] [regexp {op rieq} $body] [regexp {op isub} $body] [native $text]
+} -result {0 0 1 {value 50000}}
+
+test native-repr-16 {a self-recursive counter with no recognizable step (an opaque, call-derived next value, csv's scan_records shape) safely falls back to tagged: analysis terminates, and execution is still correct} -body {
+    set text "fn next_index(i):\n    i + 1\n\nfn scan(text, index, count):\n    if index >= length(text):\n        return count\n    scan(text, next_index(index), count + 1)\n\nscan(\"abcde\", 0, 0)"
+    set body [nirFunction [nirOf $text] scan]
+    list [regexp {op riadd} $body] [regexp {op rige} $body] [native $text]
+} -result {0 0 {value 5}}
+
+test native-repr-17 {raw block parameters and raw backedge values are never scanned as GC roots: stress-collecting on every allocation still gives the right answer for a loop that stays raw the whole time} -body {
+    set text "${countdown}count(200000, 0)"
+    set normal [native $text]
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        set stressed [native $text]
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+    list [expr {$normal eq $stressed}] $normal
+} -result {1 {value 200000}}
+
+test native-repr-18 {a raw loop index that also escapes as an ordinary return value is boxed exactly once for that boundary, reusing the same boxed form its own guard comparison already needed} -body {
+    set text "fn f(n):\n    if n == 0:\n        return n\n    f(n - 1)\n\nf(5)"
+    set body [nirFunction [nirOf $text] f]
+    list [regexp {ret %[0-9]+} $body] [regexp -all {op rbox} $body] [native $text]
+} -result {1 2 {value 0}}
+
 cleanupTests

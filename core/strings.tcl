@@ -41,7 +41,7 @@ proc core::strings::concat {a b} {
 }
 
 core::native::register length    -arity 1 -impl core::strings::length \
-    -param-types {str} -result-type int -runtime char-index -result-range nonneg
+    -param-types {str} -result-type int -runtime char-index -result-range collection-length
 core::native::register substring -arity 3 -impl core::strings::substring \
     -param-types {str int int} -result-type str \
     -runtime {string-alloc char-index range-check}

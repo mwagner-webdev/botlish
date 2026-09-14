@@ -187,6 +187,17 @@ pub struct Function {
     pub pnames: String,
     pub captures: u32,
     pub body: Vec<Inst>,
+    /// Registers native/lower.tcl has proven hold a raw (untagged) machine
+    /// integer for the *whole* function, indexed by Reg (`raw_regs[r]`),
+    /// declared once by the `rawregs=` header attribute rather than inferred
+    /// per instruction: see validate's raw-consistency checks and the
+    /// "Representation" section of native/lower.tcl. This lets a register
+    /// have more than one definition site (an `if`-join's shared result
+    /// register, a `tail`-rebound parameter slot) and still be checked, since
+    /// the declaration -- not scan order -- says what it must be. A
+    /// parameter register (index < params) declared raw is unboxed once, in
+    /// the prologue (codegen::clif), from the tagged incoming argument.
+    pub raw_regs: Vec<bool>,
 }
 
 pub struct NativeDecl {
@@ -398,15 +409,26 @@ fn parse_func_header(p: &Parser, tokens: &[Token]) -> Result<Function, NirError>
             None => p.err(format!("func needs {key}=")),
         }
     };
+    let regs = num("regs")?;
+    let mut raw_regs = vec![false; regs as usize];
+    if let Some(list) = kv.get("rawregs") {
+        for tok in list.split_whitespace() {
+            let r: usize = tok.parse().map_err(|_| ())
+                .and_then(|r: usize| if r < regs as usize { Ok(r) } else { Err(()) })
+                .or_else(|_| p.err::<usize>(format!("bad rawregs register {tok}")))?;
+            raw_regs[r] = true;
+        }
+    }
     Ok(Function {
         id,
         name: name.clone(),
         params: num("params")?,
         env: num("env")? == 1,
-        regs: num("regs")?,
+        regs,
         pnames: kv.get("pnames").cloned().unwrap_or_default(),
         captures: num("captures")?,
         body: Vec::new(),
+        raw_regs,
     })
 }
 
@@ -540,11 +562,14 @@ fn validate(program: &Program) -> Result<(), NirError> {
             return fail(ctx("does not end in a terminator".into()));
         }
         // Which registers hold a raw (untagged) machine integer rather than
-        // a Value, forward-computed from each register's one definition
-        // (Move propagates its source's representation). Never true for a
-        // register a Tail/TailEnv implicitly redefines (a function parameter
-        // slot: always tagged, part of the generic ABI).
-        let mut raw = vec![false; f.regs as usize];
+        // a Value: f.raw_regs's declaration (rawregs=, from native/lower.tcl,
+        // which already knows the answer from hir::range/hir::induction), not
+        // inferred here. Checking a declaration instead of inferring one
+        // forward is what lets a register have more than one definition site
+        // -- an `if`-join's shared result register, a `tail`-rebound
+        // parameter slot -- and still be validated: every site just has to
+        // agree with the same fixed answer, in whatever order it runs.
+        let raw = &f.raw_regs;
         for inst in &f.body {
             let mut used: Vec<Reg> = Vec::new();
             let mut targets: Vec<Label> = Vec::new();
@@ -640,8 +665,20 @@ fn validate(program: &Program) -> Result<(), NirError> {
                 return fail(ctx(format!("register %{r} out of range")));
             }
             match inst {
-                Inst::RawInt { dst, .. } => raw[*dst as usize] = true,
-                Inst::Move { dst, src } => raw[*dst as usize] = raw[*src as usize],
+                Inst::RawInt { dst, .. } => {
+                    if !raw[*dst as usize] {
+                        return fail(ctx(format!("rawint %{dst}: not declared in rawregs")));
+                    }
+                }
+                Inst::Move { dst, src } => {
+                    if raw[*dst as usize] != raw[*src as usize] {
+                        return fail(ctx(format!(
+                            "move %{dst} = %{src}: %{dst} is {}, %{src} is {}",
+                            if raw[*dst as usize] { "raw" } else { "tagged" },
+                            if raw[*src as usize] { "raw" } else { "tagged" }
+                        )));
+                    }
+                }
                 Inst::Op { dst, op, args } => {
                     if let Some(a) = args.iter().find(|a| raw[**a as usize] != op.raw_operands()) {
                         let (is, want) = (raw[*a as usize], op.raw_operands());
@@ -651,7 +688,33 @@ fn validate(program: &Program) -> Result<(), NirError> {
                             if want { "raw" } else { "tagged" }
                         )));
                     }
-                    raw[*dst as usize] = op.raw_result();
+                    if raw[*dst as usize] != op.raw_result() {
+                        return fail(ctx(format!(
+                            "op {op:?}: result %{dst} is declared {}, must be {}",
+                            if raw[*dst as usize] { "raw" } else { "tagged" },
+                            if op.raw_result() { "raw" } else { "tagged" }
+                        )));
+                    }
+                }
+                // A parameter register i < f.params declared raw is unboxed
+                // once in the prologue (codegen::clif), so its representation
+                // for the rest of the function -- including every backedge --
+                // is raw: the i-th argument must already be raw too. Every
+                // other rebound register (env=1's closure) stays ordinary
+                // tagged, like any operand in the catch-all below.
+                Inst::Tail { args } | Inst::TailEnv { args, .. } => {
+                    if let Some((i, a)) = args.iter().enumerate().find(|(i, a)| raw[**a as usize] != raw[*i]) {
+                        return fail(ctx(format!(
+                            "tail argument {i} (%{a}) is {}, but parameter %{i} is declared {}",
+                            if raw[*a as usize] { "raw" } else { "tagged" },
+                            if raw[i] { "raw" } else { "tagged" }
+                        )));
+                    }
+                    if let Inst::TailEnv { closure, .. } = inst {
+                        if raw[*closure as usize] {
+                            return fail(ctx(format!("tailenv closure %{closure} must be tagged")));
+                        }
+                    }
                 }
                 _ => {
                     if let Some(r) = used.iter().find(|r| raw[**r as usize]) {

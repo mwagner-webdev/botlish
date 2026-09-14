@@ -415,6 +415,45 @@ proc native::lower::GenericRef {e} {
     return [FunctionRef $id]
 }
 
+# 1 if any of INSTANCE's calls (ExprId -> target InstanceId) is a self-tail
+# call (hir::aot::selfTailCalls, native::lower's own `selfTail` criterion for
+# a NIR `tail`/`tailenv` backedge) that stays within instance ID itself: the
+# only case a parameter's own register can benefit from staying raw across
+# every iteration instead of round-tripping through box/unbox each time (see
+# RawParams). A non-recursive function's proven-small parameter is already
+# unboxed at most once per use by RawOf's cache; there is no backedge for a
+# permanently-raw register to save anything on.
+proc native::lower::HasSelfTailCall {id calls} {
+    variable selfTail
+    foreach {callExpr target} $calls {
+        if {$target eq $id && [dict exists $selfTail $callExpr]} {
+            return 1
+        }
+    }
+    return 0
+}
+
+# 1|0 per parameter of instance ID's PARAMS: whether hir::range::analyze's
+# fully-analyzed Range for it (hir/induction.tcl's equality-termination proof
+# and/or hir/range.tcl's branch-derived narrowing, already folded into that
+# Range by the time native::lower runs it) fits the small-Int representation
+# for the *entire* function, not just one local use -- exactly the fact that
+# justifies making the parameter's own register raw from the prologue
+# onward (see clif.rs's per-parameter prologue unboxing) rather than merely
+# unboxing a local temporary. Only asked for a self-tail-recursive instance
+# (HasSelfTailCall): see its comment for why a non-recursive one gets no
+# benefit from this.
+proc native::lower::RawParams {id instance params} {
+    variable reprOpt
+    variable ranges
+    set n [llength $params]
+    if {!$reprOpt || !$n || ![HasSelfTailCall $id [dict get $instance calls]]} {
+        return [lrepeat $n 0]
+    }
+    set paramRanges [dict get [dict get $ranges instances $id] params]
+    return [lmap r $paramRanges {hir::range::fitsSmall $r}]
+}
+
 # ---------------------------------------------------------------------------
 # Functions
 
@@ -429,6 +468,7 @@ proc native::lower::Function {id} {
     variable selfTail
     variable captureLists
     variable currentInstance
+    variable ranges
     set currentInstance $id
     set instance [hir::specialize::instance $spec $id]
     set region [dict get $instance block]
@@ -441,7 +481,7 @@ proc native::lower::Function {id} {
     }]]
     set fn [dict create region $region instance $id targets [dict get $instance calls] \
         lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 \
-        rawCache [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
+        rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
         locals [dict create] loops [dict create] broken [dict create] calls {}]
     if {$region eq "program"} {
         set name <program>
@@ -456,8 +496,15 @@ proc native::lower::Function {id} {
         set scope [hir::get $hir $region bodyScope]
         set body [hir::get $hir $region body]
     }
-    foreach b $params {
-        dict set fn locals $b [list reg [NewReg fn]]
+    set rawParams [RawParams $id $instance $params]
+    foreach b $params raw $rawParams {
+        set r [NewReg fn]
+        if {$raw} {
+            MarkRaw fn $r
+            dict set fn locals $b [list rawreg $r]
+        } else {
+            dict set fn locals $b [list reg $r]
+        }
     }
     EnterScope fn $scope
     set result [Sequence fn $body]
@@ -473,6 +520,10 @@ proc native::lower::Function {id} {
     set key [expr {[dict get $instance generic] ? "generic"
         : [join [lmap t [dict get $instance args] {hir::types::show $t}] {, }]}]
     set head "func [Placeholder $id] [Quote $name] params=[llength $params] env=$env regs=[dict get $fn nreg] pnames=[Quote [join $pnames { }]] captures=[llength $captures] instance=[Quote $key]"
+    set rawRegs [lsort -integer [lmap r [dict keys [dict get $fn rawRegs]] {string range $r 1 end}]]
+    if {$rawRegs ne ""} {
+        append head " rawregs=[Quote [join $rawRegs { }]]"
+    }
     if {$region ne "program"} {
         append head " @$region"
     }
@@ -523,6 +574,27 @@ proc native::lower::Assign {fnVar rhs {e ""}} {
     set r [NewReg fn]
     Emit fn "$r = $rhs" $e
     return $r
+}
+
+# Like Assign, for an instruction whose result is a raw (untagged) machine
+# integer: records R in fn rawRegs, emitted as the func header's `rawregs=`
+# declaration (native/src/nir.rs's validate checks every definition and use
+# of a declared register against it, rather than inferring raw-ness by scan
+# order -- see the "Representation" section below).
+proc native::lower::AssignRaw {fnVar rhs {e ""}} {
+    upvar 1 $fnVar fn
+    set r [Assign fn $rhs $e]
+    dict set fn rawRegs $r 1
+    return $r
+}
+
+# Declares REG raw (see AssignRaw) without emitting an instruction: for a
+# register a *later* instruction defines (a tail-rebound parameter slot, an
+# if-join's shared result register) whose raw-ness is decided before that
+# instruction is reached.
+proc native::lower::MarkRaw {fnVar reg} {
+    upvar 1 $fnVar fn
+    dict set fn rawRegs $reg 1
 }
 
 # Enters HIR scope S: creates the cells of its cell bindings.
@@ -647,7 +719,7 @@ proc native::lower::IntConst {fnVar n e} {
     variable reprOpt
     set r [Assign fn "int $n" $e]
     if {$reprOpt && [hir::range::fitsSmall [hir::range::point $n]]} {
-        set raw [Assign fn "rawint $n"]
+        set raw [AssignRaw fn "rawint $n"]
         dict set fn rawCache $r $raw
     }
     return $r
@@ -680,6 +752,7 @@ proc native::lower::Ref {fnVar e node} {
     lassign $access how where
     switch -- $how {
         reg     { return $where }
+        rawreg  { return [TaggedOf fn $where] }
         fnvalue { return [Assign fn "fnvalue $where" $e] }
         self    { return [Assign fn self $e] }
         cell {
@@ -807,6 +880,7 @@ proc native::lower::Closure {fnVar e} {
         lassign [Access fn $b] how where
         switch -- $how {
             reg - cell { lappend values $where }
+            rawreg     { lappend values [TaggedOf fn $where] }
             fnvalue    { lappend values [Assign fn "fnvalue $where"] }
             self       { lappend values [Assign fn self] }
         }
@@ -870,10 +944,17 @@ proc native::lower::Call {fnVar e node} {
             set id [expr {$self ? [Placeholder $instance] : [FunctionRef $instance]}]
             dict lappend fn calls [list direct $id $self]
             if {$self} {
+                # Every argument's own evaluation just produced its tagged
+                # form (Expr's uniform contract); a parameter this function
+                # declared rawreg (RawParams) needs its raw form for the
+                # backedge instead, which RawOf gets for free (a cache hit)
+                # when that tagged form was itself just unboxed FROM a raw
+                # register (e.g. `next = i + 1`'s own rbox, RawArithOrCompare).
+                set tailArgs [TailArgs fn $params $argRegs]
                 if {$target in $envless} {
-                    Emit fn [string trimright "tail [join $argRegs { }]"] $e
+                    Emit fn [string trimright "tail [join $tailArgs { }]"] $e
                 } else {
-                    Emit fn [string trimright "tailenv $callee [join $argRegs { }]"] $e
+                    Emit fn [string trimright "tailenv $callee [join $tailArgs { }]"] $e
                 }
                 return never
             }
@@ -999,7 +1080,13 @@ proc native::lower::RawArithOrCompare {fnVar e argExprs argRegs op} {
     } $op]
     set xa [RawOf fn $ra]
     set xb [RawOf fn $rb]
-    set r [Assign fn "op $rawOp $xa $xb" $e]
+    if {$arith} {
+        set r [AssignRaw fn "op $rawOp $xa $xb" $e]
+    } else {
+        # A raw comparison's result is a tagged Bool, not raw (nir.rs's
+        # OpCode::raw_result is false for rilt/rile/rigt/rige/rieq).
+        set r [Assign fn "op $rawOp $xa $xb" $e]
+    }
     dict incr fn [expr {$arith ? "rawArith" : "rawCompare"}]
     if {!$arith} {
         return $r
@@ -1007,6 +1094,7 @@ proc native::lower::RawArithOrCompare {fnVar e argExprs argRegs op} {
     set boxed [Assign fn "op rbox $r"]
     dict incr fn rawBoxes
     dict set fn rawCache $boxed $r
+    dict set fn rawCache $r $boxed
     return $boxed
 }
 
@@ -1019,10 +1107,48 @@ proc native::lower::RawOf {fnVar reg} {
     if {[dict exists $cache $reg]} {
         return [dict get $cache $reg]
     }
-    set r [Assign fn "op runbox $reg"]
+    set r [AssignRaw fn "op runbox $reg"]
     dict incr fn rawUnboxes
     dict set fn rawCache $reg $r
+    dict set fn rawCache $r $reg
     return $r
+}
+
+# The tagged (boxed) form of a RAW register REG, already proven a small Int
+# by construction (a rawreg parameter: see Function/RawParams below): the
+# mirror of RawOf, boxing it once (op rbox) and remembering the result (fn
+# rawCache, the same cache RawOf reads/writes -- register numbers are unique,
+# so the two directions never collide) so a later RawOf of the boxed
+# register it just produced is a cache hit, not a redundant runbox, and a
+# later TaggedOf of the same raw register is a cache hit too.
+proc native::lower::TaggedOf {fnVar reg} {
+    upvar 1 $fnVar fn
+    set cache [dict get $fn rawCache]
+    if {[dict exists $cache $reg]} {
+        return [dict get $cache $reg]
+    }
+    set r [Assign fn "op rbox $reg"]
+    dict incr fn rawBoxes
+    dict set fn rawCache $reg $r
+    dict set fn rawCache $r $reg
+    return $r
+}
+
+# ARGREGS (each already the tagged form Expr's contract guarantees), with
+# the register at each rawreg-declared position of PARAMS (this same
+# function's own parameters, for a genuine self-tail call: see RawParams)
+# replaced by its raw form, for a `tail`/`tailenv` backedge.
+proc native::lower::TailArgs {fnVar params argRegs} {
+    upvar 1 $fnVar fn
+    set result {}
+    foreach b $params r $argRegs {
+        if {[lindex [dict get $fn locals $b] 0] eq "rawreg"} {
+            lappend result [RawOf fn $r]
+        } else {
+            lappend result $r
+        }
+    }
+    return $result
 }
 
 # The NIR operation implementing native NAME for generic calls.

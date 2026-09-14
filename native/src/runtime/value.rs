@@ -31,6 +31,21 @@ pub const UNBOUND: Value = 14;
 pub const SMALL_MIN: i64 = -(1 << 62);
 pub const SMALL_MAX: i64 = (1 << 62) - 1;
 
+/// The runtime's enforced ceiling on a String's character count or a List's
+/// element count (`Vm::new_str`/`new_str_known`/`new_list`): a String/List
+/// longer than this is rejected with a RANGE error at construction, rather
+/// than merely relying on the allocator to fail first. This is what makes
+/// `length`/`list_length`'s `-result-range collection-length` metadata
+/// (core/native.tcl, consumed by hir/range.tcl) an actual checked runtime
+/// contract instead of an assumption: every reachable String/List length is
+/// guaranteed to fit the small-Int representation (SMALL_MAX above), so
+/// `length(xs)`/`list_length(xs)` can never itself need a BigInt result.
+/// Set equal to SMALL_MAX (not some smaller, more "obviously safe" value):
+/// the guarantee this milestone needs is exactly "fits a small Int", and
+/// picking anything smaller would reject collections the small-Int range
+/// itself has no trouble representing.
+pub const MAX_COLLECTION_LENGTH: usize = SMALL_MAX as usize;
+
 pub const KIND_BIGINT: u8 = 1;
 pub const KIND_STR: u8 = 2;
 pub const KIND_LIST: u8 = 3;

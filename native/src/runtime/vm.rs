@@ -149,6 +149,9 @@ impl Vm {
 
     pub fn new_str(&mut self, text: String) -> Value {
         let obj = str_object(text, false);
+        if let Some(v) = self.reject_oversized_collection(obj.chars) {
+            return v;
+        }
         let bytes = obj.text.len();
         self.alloc(obj, bytes)
     }
@@ -157,14 +160,35 @@ impl Vm {
     pub fn new_str_known(&mut self, text: String, chars: usize, ascii: bool) -> Value {
         debug_assert_eq!(chars, text.chars().count());
         debug_assert_eq!(ascii, text.is_ascii());
+        if let Some(v) = self.reject_oversized_collection(chars) {
+            return v;
+        }
         let bytes = text.len();
         let obj = StrObj { hdr: Header::new(KIND_STR, false), chars, ascii, text: text.into_boxed_str() };
         self.alloc(obj, bytes)
     }
 
     pub fn new_list(&mut self, items: Vec<Value>) -> Value {
+        if let Some(v) = self.reject_oversized_collection(items.len()) {
+            return v;
+        }
         let bytes = items.capacity() * 8;
         self.alloc(ListObj { hdr: Header::new(KIND_LIST, false), items }, bytes)
+    }
+
+    /// Enforces MAX_COLLECTION_LENGTH (see its doc comment): Some(NO_VALUE)
+    /// with a pending RANGE error if LEN exceeds it, else None (construct as
+    /// normal). Every String/List constructor routes through this, so
+    /// `length`/`list_length`'s `-result-range collection-length` metadata
+    /// (core/native.tcl) is an actual checked invariant, not an assumption.
+    fn reject_oversized_collection(&mut self, len: usize) -> Option<Value> {
+        if len <= MAX_COLLECTION_LENGTH {
+            return None;
+        }
+        let message = format!(
+            "a String/List cannot exceed {MAX_COLLECTION_LENGTH} characters/elements, got {len}"
+        );
+        Some(self.fail(RtError::Semantic { kind: "RANGE", message }))
     }
 
     pub fn new_result(&mut self, ok: bool, payload: Value) -> Value {

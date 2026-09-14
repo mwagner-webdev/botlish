@@ -101,23 +101,23 @@ test range-analyze-3 {a parameter with no literal argument anywhere stays unknow
     list [paramRanges $analysis [rangeInstance $spec add1]] [paramRanges $analysis [rangeInstance $spec go]]
 } -result {{{[-∞, +∞]}} {{[3, 3]}}}
 
-test range-analyze-4 {a self-recursive counter widens: bounded on the side that never moves, infinite on the side that grows} -body {
+test range-analyze-4 {a self-recursive counter decreasing to an == 0 guard: hir/induction.tcl proves it never goes negative either, on the side that grows} -body {
     lassign [rangeOf "fn count_up(n, acc):\n    if n == 0:\n        return acc\n    count_up(n - 1, acc + 1)\n\ncount_up(1000, 0)"] hir spec analysis
     set id [rangeInstance $spec count_up]
     paramRanges $analysis $id
-} -result {{[-∞, 1000]} {[0, +∞]}}
+} -result {{[0, 1000]} {[0, +∞]}}
 
-test range-analyze-5 {a parameter passed unchanged through recursion, seeded by a literal, stays exact} -body {
+test range-analyze-5 {a parameter passed unchanged through recursion, seeded by a literal, stays exact; the == 0-terminated decreasing one is now bounded below too} -body {
     lassign [rangeOf "fn walk(step, n):\n    if n == 0:\n        return 0\n    walk(step, n - 1)\n\nwalk(7, 3)"] hir spec analysis
     paramRanges $analysis [rangeInstance $spec walk]
-} -result {{[7, 7]} {[-∞, 3]}}
+} -result {{[7, 7]} {[0, 3]}}
 
-test range-analyze-6 {a native's -result-range metadata (length, list_length) proves non-negative, not small} -body {
+test range-analyze-6 {a native's -result-range collection-length metadata (length, list_length) proves a String/List length is both non-negative and machine-representable, so length(s) is provably small with no relational reasoning} -body {
     lassign [rangeOf "fn f(s):\n    length(s)\n\nf(\"abc\")"] hir spec analysis
     set id [rangeInstance $spec f]
     set r [lindex [dict values [dict get [dict get $analysis instances $id] exprs]] end]
     list [hir::range::show $r] [hir::range::fitsSmall $r]
-} -result {{[0, +∞]} 0}
+} -result [list "\[0, $hir::range::smallMax\]" 1]
 
 test range-analyze-7 {if branches join conservatively: two exact branches bound, one unbounded branch spoils it} -body {
     lassign [rangeOf "fn pick(c):\n    if c:\n        1\n    else:\n        2\n\n\[pick(true), pick(false)\]"] hir spec analysis
@@ -132,5 +132,39 @@ test range-analyze-8 {only + - * and proven-nonneg natives establish a fact; eve
     set r [lindex [dict values [dict get [dict get $analysis instances $id] exprs]] end]
     hir::range::isUnknown $r
 } -result 1
+
+# ---------------------------------------------------------------------------
+# hir/induction.tcl: the equality-termination induction-variable proof, and
+# hir/range.tcl's branch-derived narrowing it builds on (spec #10, #14-19 of
+# the milestone that added them)
+
+test range-induction-1 {an == guard against a stable, immutable-collection-length bound with a +1 step (string_reverse's shape) proves the counter stays within [0, length]} -body {
+    lassign [rangeOf "fn reverse_from(text, index, reversed):\n    if index == length(text):\n        return reversed\n    reverse_from(text, index + 1, reversed)\n\nreverse_from(\"hello\", 0, \"\")"] hir spec analysis
+    set id [rangeInstance $spec reverse_from]
+    lassign [paramRanges $analysis $id] textRange indexRange
+    list $indexRange [hir::range::fitsSmall [lindex [dict get [dict get $analysis instances $id] params] 1]]
+} -result [list "\[0, $hir::range::smallMax\]" 1]
+
+test range-induction-2 {a parameter seeded, at every external call, only by a length/list_length-shaped argument (matmul's "count") is itself proven small (interprocedural, from hir::range::SeedRange, no relational reasoning needed for the bound itself), so the == guard against it proves the counter small too} -body {
+    lassign [rangeOf "fn dot(a_row, b, column, k, count, total):\n    if k == count:\n        return total\n    dot(a_row, b, column, k + 1, count, total + 1)\n\ndot(\[1, 2\], \[\[1, 2\], \[3, 4\]\], 0, 0, list_length(\[1, 2\]), 0)"] hir spec analysis
+    set id [rangeInstance $spec dot]
+    set params [dict get [dict get $analysis instances $id] params]
+    # k (index 3) is proven small; total (index 5), an unbounded accumulator
+    # in the very same instance, is correctly left alone (spec #49: a raw
+    # loop index must coexist with a BigInt-capable accumulator).
+    list [hir::range::fitsSmall [lindex $params 3]] [hir::range::fitsSmall [lindex $params 5]]
+} -result {1 0}
+
+test range-induction-3 {a step of +-2 against an == guard is not proven (it could skip the terminator): the parameter widens to infinity on that side exactly as plain interval feedback always did, not [initial, bound]} -body {
+    lassign [rangeOf "fn count2(n, acc):\n    if n == 0:\n        return acc\n    count2(n - 2, acc + 1)\n\ncount2(100000, 0)"] hir spec analysis
+    paramRanges $analysis [rangeInstance $spec count2]
+} -result {{[-∞, 100000]} {[0, +∞]}}
+
+test range-induction-4 {an opaque, call-derived next value (csv's scan_records shape: no i + c pattern at all) is not a step candidate, so an otherwise-provable >= guard's own branch-narrowing still applies to the *comparison*, but the parameter's own range across the backedge is not tightened by hir/induction.tcl} -body {
+    lassign [rangeOf "fn next_index(i):\n    i + 1\n\nfn scan(text, index, count):\n    if index >= length(text):\n        return count\n    scan(text, next_index(index), count + 1)\n\nscan(\"abcde\", 0, 0)"] hir spec analysis
+    set id [rangeInstance $spec scan]
+    lassign [paramRanges $analysis $id] textR indexR countR
+    list $indexR [hir::range::fitsSmall [lindex [dict get [dict get $analysis instances $id] params] 1]]
+} -result {{[-∞, +∞]} 0}
 
 cleanupTests

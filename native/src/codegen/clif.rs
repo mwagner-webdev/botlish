@@ -228,7 +228,19 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             next = 2;
         }
         for i in 0..f.params {
-            self.def(i, params[next + i as usize]);
+            let v = params[next + i as usize];
+            if f.raw_regs[i as usize] {
+                // native/lower.tcl proved this parameter's whole range fits
+                // the small-Int representation (RawParams): unbox the
+                // incoming tagged argument once, here, so it stays raw for
+                // the rest of the function, including every self-tail
+                // backedge (Inst::Tail/TailEnv below) -- spec's "prove/unbox
+                // once" (native/lower.tcl's Representation section, #9).
+                let unboxed = self.b.ins().sshr_imm_s(v, 1);
+                self.def_raw(i, unboxed);
+            } else {
+                self.def(i, v);
+            }
         }
         self.b.ins().jump(self.body, &[]);
 
@@ -552,7 +564,15 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                     self.b.def_var(self.closure.unwrap(), c);
                 }
                 for (i, v) in values.into_iter().enumerate() {
-                    self.def(i as Reg, v);
+                    // nir.rs's validate already required this argument to be
+                    // raw exactly when parameter slot i is (rawregs=): a
+                    // backedge into a raw parameter carries a raw value
+                    // straight through, never re-boxing to cross it.
+                    if self.f.raw_regs[i] {
+                        self.def_raw(i as Reg, v);
+                    } else {
+                        self.def(i as Reg, v);
+                    }
                 }
                 self.b.ins().jump(self.body, &[]);
                 self.terminated = true;
@@ -656,11 +676,14 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                     StrEq => ("rt_str_eq", None, false),
                     StrLen => ("rt_str_len", None, false),
                     Substr => ("rt_substr", None, true),
-                    StrLower => ("rt_str_lower", None, false),
-                    StrCat => ("rt_str_cat", None, false),
+                    // Fallible: each may construct a new String/List, which
+                    // the runtime rejects past MAX_COLLECTION_LENGTH (see
+                    // Vm::reject_oversized_collection).
+                    StrLower => ("rt_str_lower", None, true),
+                    StrCat => ("rt_str_cat", None, true),
                     ListLen => ("rt_list_len", None, false),
                     ListGet => ("rt_list_get", None, true),
-                    ListAppend => ("rt_list_append", None, false),
+                    ListAppend => ("rt_list_append", None, true),
                     IsOk => ("rt_is_result", Some(1), false),
                     IsError => ("rt_is_result", Some(0), false),
                     ResultValue => ("rt_result_payload", Some(1), true),
@@ -671,7 +694,9 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                     }
                     ListNew => {
                         let (n, ptr) = self.array(args);
-                        return self.call_helper("rt_list_new", &[self.vm, n, ptr]);
+                        let v = self.call_helper("rt_list_new", &[self.vm, n, ptr]);
+                        self.check(v);
+                        return v;
                     }
                     _ => unreachable!(),
                 };
