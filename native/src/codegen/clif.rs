@@ -256,6 +256,16 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         self.b.ins().store(MemFlagsData::trusted(), value, self.base, (reg * 8) as i32);
     }
 
+    /// Like `def`, for a register that holds a raw (untagged) machine
+    /// integer rather than a Value: never a GC root (it can hold no heap
+    /// reference), so unlike `def` it is never stored to the shadow stack --
+    /// storing a raw word there would let the collector misread it as a
+    /// pointer (native/src/runtime/heap.rs's roots are precise, not
+    /// conservative). The slot stays at the prologue's zero.
+    fn def_raw(&mut self, reg: Reg, value: ir::Value) {
+        self.b.def_var(self.vars[reg as usize], value);
+    }
+
     fn get(&mut self, reg: Reg) -> ir::Value {
         self.b.use_var(self.vars[reg as usize])
     }
@@ -399,6 +409,11 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         }
         match inst {
             Inst::Label(_) => unreachable!(),
+            Inst::RawInt { dst, digits } => {
+                let n: i64 = digits.parse().expect("validated rawint literal");
+                let v = self.b.ins().iconst(I64, n);
+                self.def_raw(*dst, v);
+            }
             Inst::Int { dst, digits } => {
                 let v = match digits.parse::<i64>() {
                     Ok(n) if fits_small(n) => self.iconst(make_small(n)),
@@ -499,7 +514,11 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             }
             Inst::Op { dst, op, args } => {
                 let v = self.op(*op, args);
-                self.def(*dst, v);
+                if op.raw_result() {
+                    self.def_raw(*dst, v);
+                } else {
+                    self.def(*dst, v);
+                }
             }
             Inst::Call { dst, func, args } => {
                 let mut values = vec![self.vm];
@@ -603,6 +622,33 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                     _ => Kind::List,
                 };
                 let flag = self.is_kind(a[0], kind);
+                self.bool_of(flag)
+            }
+            // Representation transitions and raw (untagged) integer
+            // arithmetic/comparison: lower.tcl emits these only where range
+            // analysis proved they are safe (see the "Representation"
+            // section of native/lower.tcl), so no check is needed here.
+            RBox => {
+                // a[0] is raw and proven within the small-Int range.
+                let shifted = self.b.ins().ishl_imm_s(a[0], 1);
+                self.b.ins().bor_imm_s(shifted, 1)
+            }
+            RUnbox => {
+                // a[0] is a tagged Value proven to be a small Int.
+                self.b.ins().sshr_imm_s(a[0], 1)
+            }
+            RIAdd => self.b.ins().iadd(a[0], a[1]),
+            RISub => self.b.ins().isub(a[0], a[1]),
+            RIMul => self.b.ins().imul(a[0], a[1]),
+            RILt | RILe | RIGt | RIGe | RIEq => {
+                let cc = match op {
+                    RILt => IntCC::SignedLessThan,
+                    RILe => IntCC::SignedLessThanOrEqual,
+                    RIGt => IntCC::SignedGreaterThan,
+                    RIGe => IntCC::SignedGreaterThanOrEqual,
+                    _ => IntCC::Equal,
+                };
+                let flag = self.b.ins().icmp(cc, a[0], a[1]);
                 self.bool_of(flag)
             }
             _ => {

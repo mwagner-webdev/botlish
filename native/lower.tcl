@@ -136,7 +136,45 @@ namespace eval native::lower {
     variable captureLists {}
     variable pending {}
     variable usedNatives {}
+    # Representation (see "Representation" below): the hir::range analysis
+    # of the program, the instance currently being lowered (its key into
+    # it), and whether local unboxing is enabled at all.
+    variable ranges {}
+    variable currentInstance {}
+    variable reprOpt 1
 }
+
+# ---------------------------------------------------------------------------
+# Representation
+#
+# Alongside the semantic/kind checks above (guards), a function's local Int
+# values may be lowered as raw (untagged) machine integers rather than
+# tagged Values, when hir/range.tcl's analysis proves an operand's -- and,
+# for arithmetic, the result's -- mathematical range fits the runtime's
+# small-Int representation (hir::range::smallMin/smallMax). This never
+# changes what a value *is* (still an arbitrary-precision Botlish Int): it
+# is purely a lowering choice, exactly as sound whether taken or not (see
+# hir/range.tcl's header). -repr-opt 0 (or BOTLISH_NATIVE_REPR_OPT=0)
+# disables it, for differential testing and benchmark comparison.
+#
+# The rewrite applies only to `+ - * < <= > >= ==` on two Ints already
+# proven that kind by a guard or by a static type (representation is
+# strictly downstream of the guard/kind machinery: see RawArithOrCompare).
+# Every "logical" NIR register a binding, a call argument, or a branch join
+# is ever known by stays tagged, exactly as it is today; raw registers are
+# purely local temporaries introduced and consumed within one function's
+# lowering, never stored in `fn locals`, never a captured value, never an
+# argument, never a branch's joined result. That keeps the function ABI,
+# self-tail-loop parameter slots (always tagged: see native/src/codegen/
+# clif.rs's `def` vs `def_raw`) and every other lowering rule unchanged.
+#
+# fn rawCache: tagged Reg -> raw Reg, so reading the same already-small
+# local twice (e.g. two arithmetic expressions over the same binding) unboxes
+# it once (RawOf), and a value this lowering already boxed from a raw result
+# is unboxed again for free (RawArithOrCompare caches its own rbox). Scoped
+# like fn locals: If and Loop save and restore it around each branch, since a
+# register's raw counterpart from one branch does not dominate the other or
+# the code after the join.
 
 # ---------------------------------------------------------------------------
 # Entry point
@@ -166,17 +204,23 @@ proc native::lower::program {hirProgram args} {
     variable captureLists
     variable pending
     variable usedNatives
+    variable ranges
+    variable reprOpt
 
     set default [expr {[info exists ::env(BOTLISH_NATIVE_SPECIALIZE)]
         && $::env(BOTLISH_NATIVE_SPECIALIZE) eq "0" ? 0 : 1}]
-    set options [hir::Options native::lower::program [list -specialize $default] $args]
+    set reprDefault [expr {[info exists ::env(BOTLISH_NATIVE_REPR_OPT)]
+        && $::env(BOTLISH_NATIVE_REPR_OPT) eq "0" ? 0 : 1}]
+    set options [hir::Options native::lower::program [list -specialize $default -repr-opt $reprDefault] $args]
     if {[hir::mode $hirProgram] ne "program"} {
         throw {NATIVE UNSUPPORTED sequence-mode} \
             "native lowering: only program-mode HIR can be compiled (sequence mode runs in an unknown environment)"
     }
     set baseHir $hirProgram
     set hir $hirProgram
+    set reprOpt [dict get $options -repr-opt]
     set spec [hir::specialize::analyze $hirProgram -specialize [dict get $options -specialize]]
+    set ranges [hir::range::analyze $hirProgram $spec]
     set context [dict get $spec context]
     set selfTail [dict get $context selfTails]
     set unproven [dict get $context unproven]
@@ -242,9 +286,17 @@ proc native::lower::Statistics {infos} {
     set specialized 0
     set guardCount 0
     set blockerCount 0
+    set rawUnboxes 0
+    set rawBoxes 0
+    set rawArith 0
+    set rawCompare 0
     foreach info $infos {
         incr guardCount [dict get $info guards]
         incr blockerCount [dict get $info blockers]
+        incr rawUnboxes [dict get $info rawUnboxes]
+        incr rawBoxes [dict get $info rawBoxes]
+        incr rawArith [dict get $info rawArith]
+        incr rawCompare [dict get $info rawCompare]
         if {[dict get $info block] eq "program"} {
             continue
         }
@@ -265,7 +317,8 @@ proc native::lower::Statistics {infos} {
         }
     }
     return [dict create functions [llength $infos] generic $generic specialized $specialized \
-        blockers $blockerCount guards $guardCount perFunction $perFunction]
+        blockers $blockerCount guards $guardCount rawUnboxes $rawUnboxes rawBoxes $rawBoxes \
+        rawArith $rawArith rawCompare $rawCompare perFunction $perFunction]
 }
 
 # ---------------------------------------------------------------------------
@@ -375,6 +428,8 @@ proc native::lower::Function {id} {
     variable envless
     variable selfTail
     variable captureLists
+    variable currentInstance
+    set currentInstance $id
     set instance [hir::specialize::instance $spec $id]
     set region [dict get $instance block]
     set hir [hir::specialize::view $baseHir $spec $id]
@@ -386,6 +441,7 @@ proc native::lower::Function {id} {
     }]]
     set fn [dict create region $region instance $id targets [dict get $instance calls] \
         lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 \
+        rawCache [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
         locals [dict create] loops [dict create] broken [dict create] calls {}]
     if {$region eq "program"} {
         set name <program>
@@ -428,7 +484,9 @@ proc native::lower::Function {id} {
     set info [dict create id [Placeholder $id] name $name block $region instance $id \
         label [hir::specialize::label $spec $id] generic [dict get $instance generic] \
         envless [expr {!$env}] selfTailCalls $tails calls [dict get $fn calls] \
-        blockers $blockers guards [dict get $fn guards] knownErrorGuards [dict get $fn knownErrorGuards]]
+        blockers $blockers guards [dict get $fn guards] knownErrorGuards [dict get $fn knownErrorGuards] \
+        rawUnboxes [dict get $fn rawUnboxes] rawBoxes [dict get $fn rawBoxes] \
+        rawArith [dict get $fn rawArith] rawCompare [dict get $fn rawCompare]]
     return [list $text $info]
 }
 
@@ -563,13 +621,13 @@ proc native::lower::Const {fnVar e node} {
     upvar 1 $fnVar fn
     set value [dict get $node value]
     switch -- [core::value::kind $value] {
-        int  { return [Assign fn "int [core::value::intOf $value]" $e] }
+        int  { return [IntConst fn [core::value::intOf $value] $e] }
         str  { return [Assign fn "str [Quote [core::value::strOf $value]]" $e] }
         list {
             # (const list {...}): a list of literal elements.
             set items [lmap item [core::value::items $value] {
                 if {[core::value::kind $item] eq "int"} {
-                    Assign fn "int [core::value::intOf $item]" $e
+                    IntConst fn [core::value::intOf $item] $e
                 } else {
                     Assign fn "str [Quote [core::value::strOf $item]]" $e
                 }
@@ -578,6 +636,21 @@ proc native::lower::Const {fnVar e node} {
         }
     }
     throw {NATIVE INVALID-HIR} "native lowering: unexpected constant [core::value::show $value] ($e)"
+}
+
+# An Int constant N: the tagged register (as before), with its raw
+# counterpart pre-computed and cached (fn rawCache) when N fits the small-Int
+# range, so arithmetic on a literal never round-trips through a redundant
+# runbox of a value this lowering just boxed itself (the milestone's #8).
+proc native::lower::IntConst {fnVar n e} {
+    upvar 1 $fnVar fn
+    variable reprOpt
+    set r [Assign fn "int $n" $e]
+    if {$reprOpt && [hir::range::fitsSmall [hir::range::point $n]]} {
+        set raw [Assign fn "rawint $n"]
+        dict set fn rawCache $r $raw
+    }
+    return $r
 }
 
 proc native::lower::Ref {fnVar e node} {
@@ -867,9 +940,89 @@ proc native::lower::NativeCall {fnVar e node name argRegs} {
         } elseif {$ka eq $kb && $ka eq "str"} {
             set op streq
         }
-        return [Assign fn "op $op [join $argRegs { }]" $e]
+    } else {
+        set op [lindex $impl 1]
     }
-    return [Assign fn [string trimright "op [lindex $impl 1] [join $argRegs { }]"] $e]
+    set raw [RawArithOrCompare fn $e $argExprs $argRegs $op]
+    if {$raw ne ""} {
+        return $raw
+    }
+    return [Assign fn [string trimright "op $op [join $argRegs { }]"] $e]
+}
+
+# ---------------------------------------------------------------------------
+# Representation: local unboxing of proven-small Int arithmetic/comparisons
+#
+# Every operand here already has kind Int by this point (a guard just ran,
+# or hir::aot proved it statically: see NativeCall above and CollectChecks).
+# Representation is strictly downstream of that: this only decides whether
+# the two (already Int) operands, and the arithmetic result, additionally
+# fit the runtime's small-Int range (hir/range.tcl), so the operation can run
+# on raw machine integers instead of through the tagged fast/slow path
+# (native/src/codegen/clif.rs's int_arith/int_compare, which still handles
+# every other case exactly as before, including BigInt overflow).
+
+# If OP is `+ - * < <= > >= ==` on two Ints (ARG-EXPRS/ARG-REGS) whose ranges
+# (and, for arithmetic, whose result's range) hir/range.tcl proved fit the
+# small-Int representation, emits the raw form and returns the result
+# register (comparisons: a Bool; arithmetic: reboxed once). Otherwise emits
+# nothing and returns "": the caller falls back to the tagged `op`.
+proc native::lower::RawArithOrCompare {fnVar e argExprs argRegs op} {
+    upvar 1 $fnVar fn
+    variable reprOpt
+    variable ranges
+    variable currentInstance
+    if {!$reprOpt || $op ni {iadd isub imul ilt ile igt ige ieq} || [llength $argExprs] != 2} {
+        return ""
+    }
+    lassign $argExprs ea eb
+    lassign $argRegs ra rb
+    set rangeA [hir::range::of $ranges $currentInstance $ea]
+    set rangeB [hir::range::of $ranges $currentInstance $eb]
+    if {![hir::range::fitsSmall $rangeA] || ![hir::range::fitsSmall $rangeB]} {
+        return ""
+    }
+    set arith [expr {$op in {iadd isub imul}}]
+    if {$arith} {
+        switch -- $op {
+            iadd { set resultRange [hir::range::add $rangeA $rangeB] }
+            isub { set resultRange [hir::range::sub $rangeA $rangeB] }
+            imul { set resultRange [hir::range::mul $rangeA $rangeB] }
+        }
+        if {![hir::range::fitsSmall $resultRange]} {
+            return ""
+        }
+    }
+    set rawOp [dict get {
+        iadd riadd  isub risub  imul rimul
+        ilt  rilt   ile  rile   igt  rigt   ige rige   ieq rieq
+    } $op]
+    set xa [RawOf fn $ra]
+    set xb [RawOf fn $rb]
+    set r [Assign fn "op $rawOp $xa $xb" $e]
+    dict incr fn [expr {$arith ? "rawArith" : "rawCompare"}]
+    if {!$arith} {
+        return $r
+    }
+    set boxed [Assign fn "op rbox $r"]
+    dict incr fn rawBoxes
+    dict set fn rawCache $boxed $r
+    return $boxed
+}
+
+# The raw (untagged) machine-integer form of tagged register REG, already
+# proven a small Int: unboxes it once (op runbox) and remembers the result
+# for later reads/arithmetic of the same register (fn rawCache).
+proc native::lower::RawOf {fnVar reg} {
+    upvar 1 $fnVar fn
+    set cache [dict get $fn rawCache]
+    if {[dict exists $cache $reg]} {
+        return [dict get $cache $reg]
+    }
+    set r [Assign fn "op runbox $reg"]
+    dict incr fn rawUnboxes
+    dict set fn rawCache $reg $r
+    return $r
 }
 
 # The NIR operation implementing native NAME for generic calls.
@@ -908,6 +1061,7 @@ proc native::lower::If {fnVar e node} {
     foreach {label role} [list $then then $else else] {
         EmitLabel fn $label
         set saved [dict get $fn locals]
+        set savedRaw [dict get $fn rawCache]
         EnterScope fn [dict get $node ${role}Scope]
         set body [dict get $node ${role}Body]
         if {$body ne "" && ![hir::get $hir [lindex $body 0] reachable]} {
@@ -918,6 +1072,7 @@ proc native::lower::If {fnVar e node} {
             set value [Sequence fn $body]
         }
         dict set fn locals $saved
+        dict set fn rawCache $savedRaw
         if {$value ne "never"} {
             Emit fn "$result = move $value"
             Emit fn "jump $join"
@@ -939,6 +1094,7 @@ proc native::lower::Loop {fnVar e node} {
     Emit fn "jump $head" $e
     EmitLabel fn $head
     set saved [dict get $fn locals]
+    set savedRaw [dict get $fn rawCache]
     dict set fn loops $e [list $head $exit $result]
     EnterScope fn [dict get $node bodyScope]
     set value [Sequence fn [dict get $node body]]
@@ -948,6 +1104,7 @@ proc native::lower::Loop {fnVar e node} {
     set used [dict exists $fn broken $e]
     dict unset fn loops $e
     dict set fn locals $saved
+    dict set fn rawCache $savedRaw
     if {!$used} {
         return never
     }

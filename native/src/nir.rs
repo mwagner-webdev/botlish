@@ -40,6 +40,21 @@ pub enum OpCode {
     ResultError,
     MkOk,
     MkError,
+    /// Representation transitions and raw (untagged machine-integer)
+    /// arithmetic/comparison: see the "Representation" section of
+    /// native/lower.tcl. A raw operand/result is never a tagged Value: it
+    /// carries no GC root (codegen never stores it to the shadow stack), so
+    /// it must never itself be the payload of any of the ops above.
+    RBox,
+    RUnbox,
+    RIAdd,
+    RISub,
+    RIMul,
+    RILt,
+    RILe,
+    RIGt,
+    RIGe,
+    RIEq,
 }
 
 impl OpCode {
@@ -73,6 +88,16 @@ impl OpCode {
             "resulterror" => ResultError,
             "mkok" => MkOk,
             "mkerror" => MkError,
+            "rbox" => RBox,
+            "runbox" => RUnbox,
+            "riadd" => RIAdd,
+            "risub" => RISub,
+            "rimul" => RIMul,
+            "rilt" => RILt,
+            "rile" => RILe,
+            "rigt" => RIGt,
+            "rige" => RIGe,
+            "rieq" => RIEq,
             _ => return None,
         })
     }
@@ -83,10 +108,21 @@ impl OpCode {
         match self {
             ListNew => None,
             StrLen | StrLower | ListLen | IsInt | IsStr | IsList | IsOk | IsError | ResultValue
-            | ResultError | MkOk | MkError => Some(1),
+            | ResultError | MkOk | MkError | RBox | RUnbox => Some(1),
             Substr => Some(3),
             _ => Some(2),
         }
+    }
+
+    /// 1 if OP's result is a raw (untagged) machine integer, not a Value.
+    pub fn raw_result(self) -> bool {
+        matches!(self, OpCode::RUnbox | OpCode::RIAdd | OpCode::RISub | OpCode::RIMul)
+    }
+
+    /// 1 if OP's operands are raw (untagged) machine integers, not Values.
+    pub fn raw_operands(self) -> bool {
+        use OpCode::*;
+        matches!(self, RBox | RIAdd | RISub | RIMul | RILt | RILe | RIGt | RIGe | RIEq)
     }
 }
 
@@ -94,6 +130,11 @@ impl OpCode {
 pub enum Inst {
     Label(Label),
     Int { dst: Reg, digits: String },
+    /// A raw (untagged) machine-integer constant: DIGITS must fit an i64.
+    /// native/lower.tcl emits this only when range analysis proves every
+    /// value the register can hold fits the runtime's small-Int range, so
+    /// `op rbox` of it never needs a check.
+    RawInt { dst: Reg, digits: String },
     Str { dst: Reg, text: String },
     Bool { dst: Reg, value: bool },
     Unit { dst: Reg },
@@ -409,6 +450,13 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
                 }
                 Inst::Int { dst, digits }
             }
+            "rawint" => {
+                let digits = tokens.get(3).and_then(word).unwrap_or("").to_string();
+                if digits.parse::<i64>().is_err() {
+                    return p.err("bad rawint literal (must fit an i64)");
+                }
+                Inst::RawInt { dst, digits }
+            }
             "str" => Inst::Str { dst, text: quoted(3)? },
             "bool" => match tokens.get(3).and_then(word) {
                 Some("true") => Inst::Bool { dst, value: true },
@@ -491,12 +539,19 @@ fn validate(program: &Program) -> Result<(), NirError> {
         if !f.body.last().is_some_and(Inst::is_terminator) {
             return fail(ctx("does not end in a terminator".into()));
         }
+        // Which registers hold a raw (untagged) machine integer rather than
+        // a Value, forward-computed from each register's one definition
+        // (Move propagates its source's representation). Never true for a
+        // register a Tail/TailEnv implicitly redefines (a function parameter
+        // slot: always tagged, part of the generic ABI).
+        let mut raw = vec![false; f.regs as usize];
         for inst in &f.body {
             let mut used: Vec<Reg> = Vec::new();
             let mut targets: Vec<Label> = Vec::new();
             match inst {
                 Inst::Label(_) | Inst::Unreachable | Inst::Raise { .. } => {}
                 Inst::Int { dst, .. }
+                | Inst::RawInt { dst, .. }
                 | Inst::Str { dst, .. }
                 | Inst::Bool { dst, .. }
                 | Inst::Unit { dst }
@@ -583,6 +638,28 @@ fn validate(program: &Program) -> Result<(), NirError> {
             }
             if let Some(r) = used.iter().find(|r| **r >= f.regs) {
                 return fail(ctx(format!("register %{r} out of range")));
+            }
+            match inst {
+                Inst::RawInt { dst, .. } => raw[*dst as usize] = true,
+                Inst::Move { dst, src } => raw[*dst as usize] = raw[*src as usize],
+                Inst::Op { dst, op, args } => {
+                    if let Some(a) = args.iter().find(|a| raw[**a as usize] != op.raw_operands()) {
+                        let (is, want) = (raw[*a as usize], op.raw_operands());
+                        return fail(ctx(format!(
+                            "op {op:?}: operand %{a} is {}, must be {}",
+                            if is { "raw" } else { "tagged" },
+                            if want { "raw" } else { "tagged" }
+                        )));
+                    }
+                    raw[*dst as usize] = op.raw_result();
+                }
+                _ => {
+                    if let Some(r) = used.iter().find(|r| raw[**r as usize]) {
+                        return fail(ctx(format!(
+                            "register %{r} is raw but used where a tagged Value is required"
+                        )));
+                    }
+                }
             }
             if let Some(l) = targets.iter().find(|l| !labels.contains(l)) {
                 return fail(ctx(format!("undefined label L{l}")));

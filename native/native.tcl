@@ -24,7 +24,10 @@
 #                                       the machine code
 #
 # OPTIONS are native::lower::program's: -specialize 0 lowers generic
-# functions only (the guarded baseline; also BOTLISH_NATIVE_SPECIALIZE=0).
+# functions only (the guarded baseline; also BOTLISH_NATIVE_SPECIALIZE=0);
+# -repr-opt 0 disables local unboxing of proven-small Int arithmetic
+# (hir/range.tcl, native/lower.tcl's "Representation" section; also
+# BOTLISH_NATIVE_REPR_OPT=0).
 # Two backends are registered: cranelift (specializing, unless the
 # environment variable says otherwise) and cranelift-generic (never
 # specializing), so the suite and the corpus can run on both.

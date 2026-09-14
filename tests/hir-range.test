@@ -1,0 +1,136 @@
+# hir-range.test -- conservative integer range analysis (hir/range.tcl): the
+# Range lattice itself, and what analyze proves about specialized instances.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+proc r {min max} {
+    return [dict create min $min max $max]
+}
+
+proc rangeOf {text} {
+    set hir [surface::compile $text t.bot -strict 0]
+    set spec [hir::specialize::analyze $hir]
+    return [list $hir $spec [hir::range::analyze $hir $spec]]
+}
+
+# The used InstanceId of block-bound function NAME, whose key types show as
+# KEY (e.g. "int"), or its only/first used instance if KEY is "".
+proc rangeInstance {spec name {key ""}} {
+    foreach id [dict get $spec used] {
+        set instance [dict get $spec instances $id]
+        if {[dict get $instance name] ne $name} {
+            continue
+        }
+        if {$key eq "" || [join [lmap t [dict get $instance args] {hir::types::show $t}] {, }] eq $key} {
+            return $id
+        }
+    }
+    error "no used instance of \"$name\" matching \"$key\""
+}
+
+proc paramRanges {analysis id} {
+    return [lmap p [dict get [dict get $analysis instances $id] params] {hir::range::show $p}]
+}
+
+# ---------------------------------------------------------------------------
+# The Range lattice
+
+test range-lattice-1 {unknown, point and nonneg} -body {
+    list [hir::range::isUnknown [hir::range::unknown]] [hir::range::unknown] \
+         [hir::range::point 7] [hir::range::nonneg]
+} -result {1 {min -inf max +inf} {min 7 max 7} {min 0 max +inf}}
+
+test range-lattice-2 {join is the least upper bound; never is the bottom} -body {
+    list [hir::range::join [r 0 10] [r 3 7]] [hir::range::join [r 0 10] [r 20 30]] \
+         [hir::range::join never [r 1 1]] [hir::range::join [r 1 1] never] \
+         [hir::range::join [r 0 10] [hir::range::unknown]]
+} -result {{min 0 max 10} {min 0 max 30} {min 1 max 1} {min 1 max 1} {min -inf max +inf}}
+
+test range-lattice-3 {fitsSmall is exact at the runtime's small-Int boundary} -body {
+    list [hir::range::fitsSmall [hir::range::point $hir::range::smallMax]] \
+         [hir::range::fitsSmall [hir::range::point [expr {$hir::range::smallMax + 1}]]] \
+         [hir::range::fitsSmall [hir::range::point $hir::range::smallMin]] \
+         [hir::range::fitsSmall [hir::range::point [expr {$hir::range::smallMin - 1}]]] \
+         $hir::range::smallMin $hir::range::smallMax
+} -result {1 0 1 0 -4611686018427387904 4611686018427387903}
+
+test range-lattice-4 {addition and subtraction: conservative interval bounds} -body {
+    list [hir::range::add [r 0 10] [r 3 7]] [hir::range::sub [r 0 10] [r 3 7]] \
+         [hir::range::add [r 0 10] [hir::range::unknown]] \
+         [hir::range::add [r 0 10] [hir::range::nonneg]] \
+         [hir::range::sub [hir::range::nonneg] [r 0 10]]
+} -result {{min 3 max 17} {min -7 max 7} {min -inf max +inf} {min 0 max +inf} {min -10 max +inf}}
+
+test range-lattice-5 {multiplication: the four endpoint products, or unknown if any bound is infinite} -body {
+    list [hir::range::mul [r 2 3] [r 4 5]] [hir::range::mul [r -3 -2] [r 4 5]] \
+         [hir::range::mul [r -2 3] [r -5 4]] [hir::range::mul [hir::range::nonneg] [r 2 2]]
+} -result {{min 8 max 15} {min -15 max -8} {min -15 max 12} {min -inf max +inf}}
+
+test range-lattice-6 {widening pushes a grown bound to infinity; a stable bound is kept} -body {
+    list [hir::range::widen [r 0 0] [r 0 1]] [hir::range::widen [r 0 5] [r -3 5]] \
+         [hir::range::widen [r 0 5] [r 0 5]] [hir::range::widen [r 0 0] [r -1 1]]
+} -result {{min 0 max +inf} {min -inf max 5} {min 0 max 5} {min -inf max +inf}}
+
+test range-lattice-7 {host range arithmetic is arbitrary precision: never overflows} -body {
+    set huge [expr {2 ** 200}]
+    hir::range::add [hir::range::point $huge] [hir::range::point $huge]
+} -result [list min [expr {2 * 2 ** 200}] max [expr {2 * 2 ** 200}]]
+
+# ---------------------------------------------------------------------------
+# Analysis over specialized instances
+
+test range-analyze-1 {an Int constant is an exact point, however large} -body {
+    lassign [rangeOf "\[1, 0, 1000000000000000000000000000000\]"] hir spec analysis
+    set id [dict get $spec keys program]
+    dict for {e r} [dict get [dict get $analysis instances $id] exprs] {
+        if {[hir::kind $hir $e] eq "const" && [core::value::kind [hir::get $hir $e value]] eq "int"} {
+            lappend got [hir::range::show $r]
+        }
+    }
+    lsort $got
+} -result {{[0, 0]} {[1, 1]} {[1000000000000000000000000000000, 1000000000000000000000000000000]}}
+
+test range-analyze-2 {a non-recursive parameter seeded only by literal calls is exact} -body {
+    lassign [rangeOf "fn add1(x):\n    x + 1\n\n\[add1(5), add1(9)\]"] hir spec analysis
+    paramRanges $analysis [rangeInstance $spec add1]
+} -result {{[5, 9]}}
+
+test range-analyze-3 {a parameter with no literal argument anywhere stays unknown} -body {
+    lassign [rangeOf "fn add1(x):\n    x + 1\n\nfn go(n):\n    add1(n)\n\ngo(3)"] hir spec analysis
+    list [paramRanges $analysis [rangeInstance $spec add1]] [paramRanges $analysis [rangeInstance $spec go]]
+} -result {{{[-∞, +∞]}} {{[3, 3]}}}
+
+test range-analyze-4 {a self-recursive counter widens: bounded on the side that never moves, infinite on the side that grows} -body {
+    lassign [rangeOf "fn count_up(n, acc):\n    if n == 0:\n        return acc\n    count_up(n - 1, acc + 1)\n\ncount_up(1000, 0)"] hir spec analysis
+    set id [rangeInstance $spec count_up]
+    paramRanges $analysis $id
+} -result {{[-∞, 1000]} {[0, +∞]}}
+
+test range-analyze-5 {a parameter passed unchanged through recursion, seeded by a literal, stays exact} -body {
+    lassign [rangeOf "fn walk(step, n):\n    if n == 0:\n        return 0\n    walk(step, n - 1)\n\nwalk(7, 3)"] hir spec analysis
+    paramRanges $analysis [rangeInstance $spec walk]
+} -result {{[7, 7]} {[-∞, 3]}}
+
+test range-analyze-6 {a native's -result-range metadata (length, list_length) proves non-negative, not small} -body {
+    lassign [rangeOf "fn f(s):\n    length(s)\n\nf(\"abc\")"] hir spec analysis
+    set id [rangeInstance $spec f]
+    set r [lindex [dict values [dict get [dict get $analysis instances $id] exprs]] end]
+    list [hir::range::show $r] [hir::range::fitsSmall $r]
+} -result {{[0, +∞]} 0}
+
+test range-analyze-7 {if branches join conservatively: two exact branches bound, one unbounded branch spoils it} -body {
+    lassign [rangeOf "fn pick(c):\n    if c:\n        1\n    else:\n        2\n\n\[pick(true), pick(false)\]"] hir spec analysis
+    set id [rangeInstance $spec pick]
+    set body [dict get [dict get $analysis instances $id] result]
+    hir::range::show $body
+} -result {[1, 2]}
+
+test range-analyze-8 {only + - * and proven-nonneg natives establish a fact; everything else is unknown} -body {
+    lassign [rangeOf "fn f(xs):\n    list_get(xs, 0)\n\nf(\[1, 2\])"] hir spec analysis
+    set id [rangeInstance $spec f]
+    set r [lindex [dict values [dict get [dict get $analysis instances $id] exprs]] end]
+    hir::range::isUnknown $r
+} -result 1
+
+cleanupTests

@@ -124,8 +124,11 @@ proc bench::measure {algorithm size backend runs} {
         set shown [core::value::show $value 1]
         set lowered [native::lower::program $hir -specialize $specialize]
         set guards [regexp -all -line {^\s+guard(bool)? } [dict get $lowered text]]
+        set stats [dict get $lowered statistics]
         set code [list [lindex [native::codeSize $hir -specialize $specialize] 0] \
-            [llength [dict get $lowered functions]] $guards]
+            [llength [dict get $lowered functions]] $guards \
+            [dict get $stats rawUnboxes] [dict get $stats rawBoxes] \
+            [expr {[dict get $stats rawArith] + [dict get $stats rawCompare]}]]
         return [list $best [string length $shown] [zlib crc32 [encoding convertto utf-8 $shown]] \
             [list $lower $jit] $code]
     }
@@ -193,10 +196,12 @@ proc bench::compileCell {times} {
     return [format "%.1f + %.1f ms" [expr {$lower / 1000.0}] [expr {$jit / 1000.0}]]
 }
 
-# Native code: bytes/functions/guards of the generic and specialized code.
+# Native code: bytes/functions/guards/unboxes/boxes/raw-ops of the generic
+# and specialized code (unboxes, boxes, raw-ops: hir/range.tcl's local
+# unboxing, native/lower.tcl's "Representation" section).
 proc bench::codeCell {generic specialized} {
     set parts {}
-    foreach {index unit} {0 "B" 1 "fn" 2 "guards"} {
+    foreach {index unit} {0 "B" 1 "fn" 2 "guards" 3 "unbox" 4 "box" 5 "rawops"} {
         set g [expr {$generic eq "" ? "-" : [lindex $generic $index]}]
         set s [expr {$specialized eq "" ? "-" : [lindex $specialized $index]}]
         lappend parts "$g->$s $unit"

@@ -169,8 +169,10 @@ test native-int-4 {factorial of 30 through non-tail recursion} -body {
 # Guards and errors
 
 test native-guard-1 {a known operation on an unknown kind is guarded, not dispatched} -body {
+    # x + 1 with x proven a small Int (called only with the literal 1: see
+    # hir/range.tcl) lowers to raw arithmetic (op riadd), not op iadd.
     set body [nirFunction [nirOf "fn inc(x):\n    x + 1\n\ninc(1)" -specialize 0] inc]
-    list [regexp {guard int %0 "\+"} $body] [regexp {op iadd} $body] [regexp {callvalue} $body]
+    list [regexp {guard int %0 "\+"} $body] [regexp {op r?iadd} $body] [regexp {callvalue} $body]
 } -result {1 1 0}
 
 test native-guard-2 {no guard where HIR proves the kind} -body {
@@ -318,7 +320,7 @@ test native-spec-1 {a parameter's kind guard is removed in the specialization, k
     set specialized [nirOf $text]
     set generic [nirOf $text -specialize 0]
     list [nirInstances $specialized inc] [regexp {guard} [nirFunction $specialized inc int]] \
-         [regexp {op iadd %0 %[0-9]+} [nirFunction $specialized inc int]] \
+         [regexp {op r?iadd} [nirFunction $specialized inc int]] \
          [nirInstances $generic inc] [regexp {guard int %0} [nirFunction $generic inc generic]] \
          [parity $text]
 } -result {int 0 1 generic 1 same}
@@ -329,7 +331,7 @@ test native-spec-2 {one function, several instances: Int, String and the generic
     # pick returns an Int or a String: same(pick(...), ...) runs the generic
     # function (structural equality); the known calls compare words or strings.
     list [nirInstances $nir same] \
-         [regexp {op ieq %0 %1} [nirFunction $nir same {int, int}]] \
+         [regexp {op r?ieq} [nirFunction $nir same {int, int}]] \
          [regexp {op streq %0 %1} [nirFunction $nir same {str, str}]] \
          [regexp {op veq %0 %1} [nirFunction $nir same generic]] \
          [regexp {op veq %0 %1} [nirFunction $nir same {any, str}]] \
@@ -547,5 +549,96 @@ test native-diagnostic-3 {invalid NIR is rejected by the driver, not executed} -
     catch {native::Outcome [native::Driver run "nir 1\n\nfunc 0 \"<program>\" params=0 env=0 regs=1 pnames=\"\" captures=0\n    ret %5\nend\n"]} message options
     list [dict get $options -errorcode] $message
 } -result {{NATIVE INVALID-NIR} {invalid NIR at line 0: function 0 (<program>): register %5 out of range}}
+
+# ---------------------------------------------------------------------------
+# Representation: local unboxing of proven-small Int arithmetic (hir/range.tcl,
+# the "Representation" section of native/lower.tcl)
+
+test native-repr-1 {a parameter proven small by its only (literal) callers gets raw arithmetic; a BigInt literal does not} -body {
+    set small [nirFunction [nirOf "fn add1(x):\n    x + 1\n\n\[add1(5), add1(9)\]"] add1]
+    set big [nirFunction [nirOf "fn add1(x):\n    x + 1\n\nadd1(100000000000000000000)"] add1]
+    list [regexp {op runbox} $small] [regexp {op riadd} $small] [regexp {op rbox} $small] \
+         [regexp {op iadd} $small] \
+         [regexp {op runbox} $big] [regexp {op iadd} $big]
+} -result {1 1 1 0 0 1}
+
+test native-repr-2 {arithmetic whose result could leave the small range stays tagged, and still overflows to BigInt correctly} -body {
+    set text "fn add1(x):\n    x + 1\n\nadd1($::hir::range::smallMax)"
+    set body [nirFunction [nirOf $text] add1]
+    list [regexp {op iadd} $body] [regexp {op riadd} $body] [parity $text] [native $text]
+} -result {1 0 same {value 4611686018427387904}}
+
+test native-repr-3 {comparisons between two proven-small Ints compile as a direct raw comparison} -body {
+    set body [nirFunction [nirOf "fn small(x):\n    x < 100\n\n\[small(1), small(2)\]"] small]
+    list [regexp {op rilt} $body] [regexp {op ilt} $body]
+} -result {1 0}
+
+test native-repr-4 {reading the same proven-small local twice unboxes it once (boxing elimination)} -body {
+    set body [nirFunction [nirOf "fn f(x):\n    \[x + 1, x + 2\]\n\n\[f(3), f(4)\]"] f]
+    list [regexp -all {op runbox} $body] [regexp -all {op riadd} $body] [regexp -all {op rbox} $body]
+} -result {1 2 2}
+
+test native-repr-5 {a branch join is conservative: one small literal and one that is not stays tagged, and both values are correct} -body {
+    set text "fn pick(c):\n    y = if c:\n        1\n    else:\n        100000000000000000000\n    y + 1\n\n\[pick(true), pick(false)\]"
+    set body [nirFunction [nirOf $text] pick]
+    list [regexp {op iadd} $body] [regexp {op riadd} $body] [parity $text] \
+         [native::evalHir [sourceHir $text]]
+} -result {1 0 same {list {{int 2} {int 100000000000000000001}}}}
+
+test native-repr-6 {a proven-small local crossing an ABI boundary (return, generic call, list) is boxed exactly once} -body {
+    set text "fn f(x):\n    x + 1\n\n\[f(1), f(2)\]"
+    set body [nirFunction [nirOf $text] f]
+    list [regexp {ret %[0-9]+} $body] [regexp -all {op rbox} $body] [parity $text]
+} -result {1 1 same}
+
+test native-repr-7 {-repr-opt 0 (and BOTLISH_NATIVE_REPR_OPT=0) disables local unboxing without changing values} -body {
+    set text "fn add1(x):\n    x + 1\n\n\[add1(5), add1(9)\]"
+    set on [nirFunction [nirOf $text] add1]
+    set off [nirFunction [nirOf $text -repr-opt 0] add1]
+    set ::env(BOTLISH_NATIVE_REPR_OPT) 0
+    set envOff [nirFunction [nirOf $text] add1]
+    unset ::env(BOTLISH_NATIVE_REPR_OPT)
+    list [regexp {op riadd} $on] [regexp {op iadd} $off] [regexp {op riadd} $off] \
+         [regexp {op iadd} $envOff] \
+         [native::evalHir [sourceHir $text] -repr-opt 0] [native::evalHir [sourceHir $text]]
+} -result {1 1 0 1 {list {{int 6} {int 10}}} {list {{int 6} {int 10}}}}
+
+test native-repr-8 {differential: interp, compile, cranelift-generic and cranelift (repr-opt on and off) all agree} -body {
+    foreach text [list \
+        "fn add1(x):\n    x + 1\n\n\[add1(5), add1($::hir::range::smallMax)\]" \
+        "fn f(x):\n    if x < 10:\n        x + 1\n    else:\n        x - 1\n\n\[f(1), f(20)\]" \
+        "${countdown}\[count(5, 0), count(0, 0)\]" \
+    ] {
+        lappend got [parity $text]
+        set hir [sourceHir $text]
+        lappend got [expr {[native::evalHir $hir] eq [native::evalHir $hir -repr-opt 0]}]
+    }
+    set got
+} -result {same 1 same 1 same 1}
+
+test native-repr-9 {representation statistics: emitted raw ops are counted, and drop to zero with -repr-opt 0} -body {
+    set hir [sourceHir "fn add1(x):\n    x + 1\n\n\[add1(5), add1(9)\]"]
+    set on [dict get [native::lower::program $hir] statistics]
+    set off [dict get [native::lower::program $hir -repr-opt 0] statistics]
+    list [expr {[dict get $on rawUnboxes] > 0}] [expr {[dict get $on rawBoxes] > 0}] \
+         [expr {[dict get $on rawArith] > 0}] [dict get $off rawUnboxes] [dict get $off rawBoxes] [dict get $off rawArith]
+} -result {1 1 1 0 0 0}
+
+test native-repr-10 {the small-Int boundary native/lower.tcl reads matches the runtime's actual boundary} -body {
+    list [native "fn add1(x):\n    x + 1\n\nadd1($::hir::range::smallMax)"] \
+         [native "fn add1(x):\n    x + 1\n\nadd1([expr {$::hir::range::smallMax - 1}])"]
+} -result {{value 4611686018427387904} {value 4611686018427387903}}
+
+test native-repr-11 {collecting before every allocation changes nothing, with raw arithmetic in play} -body {
+    set hir [sourceHir "fn add1(x):\n    x + 1\n\nfn go(n, acc):\n    if n == 0:\n        return acc\n    go(n - 1, add1(acc))\n\ngo(2000, 0)"]
+    set normal [native::evalHir $hir]
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        set stressed [native::evalHir $hir]
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+    list [expr {$normal eq $stressed}] $normal
+} -result {1 {int 2000}}
 
 cleanupTests

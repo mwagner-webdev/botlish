@@ -377,6 +377,12 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         ResultError => rt_result_payload(p, a[0], 0),
         MkOk => rt_result_new(p, 1, a[0]),
         MkError => rt_result_new(p, 0, a[0]),
+        RBox | RUnbox | RIAdd | RISub | RIMul | RILt | RILe | RIGt | RIGe | RIEq => {
+            // Raw (untagged) representation ops never implement a dynamic
+            // native: native/lower.tcl emits them only directly, as `op`
+            // instructions inline in a function's own body.
+            unreachable!("{op:?} is never a native implementation")
+        }
     }
 }
 

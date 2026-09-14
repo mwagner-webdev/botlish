@@ -38,6 +38,12 @@
 #                                     index given by Int argument I
 #                     append L V      a list of list argument L's elements
 #                                     followed by argument V
+#   resultRange     "" (nothing known) or a fact about every Int result, for
+#                   hir/range.tcl's representation analysis. Pure metadata,
+#                   like runtime and resultShape: a guarantee the
+#                   implementation actually upholds, never a guess from the
+#                   native's name.
+#                     nonneg          the result is always >= 0
 #
 # Refinement rules are flat lists of ARG-INDEX TYPE pairs, e.g. {0 int}
 # ("argument 0 is an int") or {0 {refined str {Emailish}}}. The evaluator
@@ -79,7 +85,7 @@ proc core::native::register {name args} {
         error "core::native::register: options must be -option value pairs"
     }
     set options [dict create -impl "" -arity "" -refines-true {} -refines-false {} \
-        -param-types "" -result-type any -tests-type "" -runtime {} -result-shape {}]
+        -param-types "" -result-type any -tests-type "" -runtime {} -result-shape {} -result-range {}]
     foreach {option value} $args {
         if {![dict exists $options $option]} {
             error "core::native::register: unknown option \"$option\""
@@ -152,6 +158,10 @@ proc core::native::register {name args} {
     if {![ValidShape $shape $count]} {
         error "core::native::register: bad -result-shape \"$shape\" for \"$name\""
     }
+    set range [dict get $options -result-range]
+    if {$range ni {{} nonneg}} {
+        error "core::native::register: bad -result-range \"$range\" for \"$name\""
+    }
     dict set registry $name [dict create \
         name $name \
         impl $impl \
@@ -161,7 +171,7 @@ proc core::native::register {name args} {
         paramTypes $paramTypes \
         resultType [CanonicalType $name -result-type [dict get $options -result-type]] \
         testsType $testsType \
-        runtime [lsort -unique [dict get $options -runtime]]         resultShape $shape]
+        runtime [lsort -unique [dict get $options -runtime]]         resultShape $shape resultRange $range]
     return [core::value::native $name]
 }
 
