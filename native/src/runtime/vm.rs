@@ -233,6 +233,19 @@ impl Vm {
     pub fn new_result(&mut self, ok: bool, payload: Value) -> Value {
         self.alloc(ResultObj { hdr: Header::new(KIND_RESULT, false), ok, payload }, 0)
     }
+
+    /// A fresh MutableArray of CAPACITY slots, every slot initialized to
+    /// UNIT (never uninitialized memory: see MutArrayObj's doc comment).
+    /// Rejects a capacity outside 0..=MAX_COLLECTION_LENGTH with RANGE, the
+    /// same construction limit every String/List already enforces.
+    pub fn new_mutarray(&mut self, capacity: usize) -> Value {
+        if let Some(v) = self.reject_oversized_collection(capacity) {
+            return v;
+        }
+        let bytes = capacity * 8;
+        let slots = vec![UNIT; capacity].into_boxed_slice();
+        self.alloc(MutArrayObj { hdr: Header::new(KIND_MUTARRAY, false), slots }, bytes)
+    }
 }
 
 impl Drop for Vm {

@@ -258,14 +258,18 @@ proc native::allocationText {report {topSites 10}} {
         "    [format %.1f [expr {[dict get $gc totalTimeUs] / 1000.0}]] ms total" \
         "    [format %.1f [expr {[dict get $gc maxPauseUs] / 1000.0}]] ms max" ""
     lappend lines "by kind:"
-    foreach kind {String List BigInt Result Block Cell Native} {
+    foreach kind {String List MutableArray BigInt Result Block Cell Native} {
         set k [dict get $report byKind $kind]
         if {[dict get $k allocations] == 0} continue
         lappend lines [format "    %-8s %8d   %s" $kind [dict get $k allocations] [FormatBytes [dict get $k allocatedBytes]]]
     }
     set copies [dict get $report copies]
-    lappend lines "" "copies:" "    String  [FormatBytes [dict get $copies stringBytes]]" \
-        "    List    [dict get $copies listElements] elements"
+    lappend lines "" "copies:" "    String       [FormatBytes [dict get $copies stringBytes]]" \
+        "    List         [dict get $copies listElements] elements" \
+        "    MutableArray [dict get $copies mutableArrayElements] elements"
+    set mutations [dict get $report mutableArray]
+    lappend lines "" "mutable array:" \
+        "    [dict get $mutations reads] reads, [dict get $mutations writes] writes"
     set static [dict get $report static]
     lappend lines "" "static (constant table, excluded from GC/live/peak):" \
         "    [dict get $static allocations] objects, [FormatBytes [dict get $static bytes]]"

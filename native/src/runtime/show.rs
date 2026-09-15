@@ -57,6 +57,9 @@ fn show_into(v: Value, out: &mut String) {
             let name = current_program(|p| p.natives[n.native as usize].name.clone());
             out.push_str(&format!("<native {name}>"));
         }
+        Kind::MutArray => {
+            out.push_str(&format!("<mutable-array capacity={}>", mutarray_of(v).slots.len()));
+        }
     }
 }
 
@@ -94,6 +97,12 @@ pub fn tcl_value(v: Value) -> Result<String, RtError> {
         Kind::Block => {
             return Err(RtError::Unsupported(format!(
                 "the native backend cannot return a Block to the host: {}",
+                show(v)
+            )));
+        }
+        Kind::MutArray => {
+            return Err(RtError::Unsupported(format!(
+                "the native backend cannot return a MutableArray to the host (finalize it to a List first): {}",
                 show(v)
             )));
         }

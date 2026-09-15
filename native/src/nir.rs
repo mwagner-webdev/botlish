@@ -31,6 +31,12 @@ pub enum OpCode {
     ListLen,
     ListGet,
     ListAppend,
+    MutArrayAllocate,
+    MutArrayCapacity,
+    MutArrayGet,
+    MutArraySet,
+    MutArrayCopy,
+    MutArrayFreeze,
     IsInt,
     IsStr,
     IsList,
@@ -79,6 +85,12 @@ impl OpCode {
             "listlen" => ListLen,
             "listget" => ListGet,
             "listappend" => ListAppend,
+            "mutarrayallocate" => MutArrayAllocate,
+            "mutarraycapacity" => MutArrayCapacity,
+            "mutarrayget" => MutArrayGet,
+            "mutarrayset" => MutArraySet,
+            "mutarraycopy" => MutArrayCopy,
+            "mutarrayfreeze" => MutArrayFreeze,
             "isint" => IsInt,
             "isstr" => IsStr,
             "islist" => IsList,
@@ -107,9 +119,10 @@ impl OpCode {
         use OpCode::*;
         match self {
             ListNew => None,
-            StrLen | StrLower | ListLen | IsInt | IsStr | IsList | IsOk | IsError | ResultValue
-            | ResultError | MkOk | MkError | RBox | RUnbox => Some(1),
-            Substr => Some(3),
+            StrLen | StrLower | ListLen | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList
+            | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | RBox | RUnbox => Some(1),
+            Substr | MutArraySet => Some(3),
+            MutArrayCopy => Some(5),
             _ => Some(2),
         }
     }

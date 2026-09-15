@@ -45,7 +45,7 @@ set lit corpus::literal
 
 test stdlib-0 {the corpus programs} -body {
     corpus::names
-} -result {csv matmul string_replace string_reverse}
+} -result {csv csv_chunked csv_geometric matmul string_replace string_reverse}
 
 foreach name [corpus::names] {
     test stdlib-sample-$name "$name: the sample in the file runs to its expect: value" -body {
@@ -122,7 +122,16 @@ corpusTests string_replace [list \
 ]
 
 # ---------------------------------------------------------------------------
-# csv
+# csv, csv_geometric, csv_chunked
+#
+# csv_geometric and csv_chunked (examples/stdlib) are the same algorithm as
+# csv, except that field/record construction uses a GeometricBuilder or
+# ChunkedBuilder over MutableArray instead of repeated list_append. Running
+# every csv case against all three corpus programs is this milestone's
+# "strategy equivalence" differential test (req #41): the three must produce
+# identical semantic results for every input, not merely the one sample in
+# each file's "# expect:" comment. csv itself is the frozen O(n^2)-copying
+# baseline (req #21) and is not touched here.
 
 # Rows 1..100 of: N,"name N",x
 set generatedCsv [join [lmap i [lsearch -all [lrepeat 101 x] x] {
@@ -130,7 +139,7 @@ set generatedCsv [join [lmap i [lsearch -all [lrepeat 101 x] x] {
     format {%d,"name %d",x} $i $i
 }] \n]
 
-corpusTests csv [list \
+set csvCases [list \
     empty         {empty input has no records}      {csv_parse("")}          [value {[]}] \
     one-field     {one field}                       {csv_parse("x")}         [value {[["x"]]}] \
     one-row       {one row}                         {csv_parse("a,b,c")}     [value {[["a", "b", "c"]]}] \
@@ -168,6 +177,9 @@ corpusTests csv [list \
         "rows = csv_parse([$lit $generatedCsv])\n\[list_length(rows), list_get(rows, 41)\]" \
         [value {[100, ["42", "name 42", "x"]]}] \
 ]
+foreach corpusName {csv csv_geometric csv_chunked} {
+    corpusTests $corpusName $csvCases
+}
 
 # ---------------------------------------------------------------------------
 # matmul

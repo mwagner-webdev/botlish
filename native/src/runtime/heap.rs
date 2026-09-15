@@ -91,6 +91,11 @@ impl Heap {
             header.marked = 1;
             match header.kind {
                 KIND_LIST => stack.extend_from_slice(&list_of(v).items),
+                // Every slot is traced, initialized or not: allocation fills
+                // unused capacity with UNIT (Vm::new_mutarray), never
+                // uninitialized memory, so there is nothing here that could
+                // be mistaken for an arbitrary root.
+                KIND_MUTARRAY => stack.extend_from_slice(&mutarray_of(v).slots),
                 KIND_RESULT => stack.push(result_of(v).payload),
                 KIND_CLOSURE => {
                     let c = closure_of(v);
@@ -185,6 +190,7 @@ pub unsafe fn object_size(object: *mut Header) -> usize {
             KIND_BIGINT => size_of::<BigIntObj>() + (as_ref::<BigIntObj>(v).n.bits() as usize / 8),
             KIND_STR => size_of::<StrObj>() + str_of(v).text.len(),
             KIND_LIST => size_of::<ListObj>() + list_of(v).items.capacity() * 8,
+            KIND_MUTARRAY => size_of::<MutArrayObj>() + mutarray_of(v).slots.len() * 8,
             KIND_RESULT => size_of::<ResultObj>(),
             KIND_CLOSURE => size_of::<ClosureObj>() + closure_of(v).ncaps * 8,
             KIND_NATIVE => size_of::<NativeObj>(),
@@ -208,6 +214,7 @@ pub unsafe fn free_object(object: *mut Header) {
             }
             KIND_NATIVE => drop(Box::from_raw(object as *mut NativeObj)),
             KIND_CELL => drop(Box::from_raw(object as *mut CellObj)),
+            KIND_MUTARRAY => drop(Box::from_raw(object as *mut MutArrayObj)),
             kind => panic!("bad heap object kind {kind}"),
         }
     }

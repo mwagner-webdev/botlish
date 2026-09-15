@@ -33,8 +33,9 @@
 # Internal: tclsh bench/corpus.tcl -measure ALGORITHM SIZE BACKEND RUNS
 # prints "MICROSECONDS LENGTH CRC ?{LOWER-MICROSECONDS JIT-MICROSECONDS}
 # {CODE-BYTES FUNCTIONS GUARDS} {ALLOCATIONS BYTES PEAK-BYTES GC-CYCLES
-# STRING-BYTES-COPIED LIST-ELEMENTS-COPIED}?" (the last two braced groups
-# native backends only; the allocation group cranelift only, else {}).
+# STRING-BYTES-COPIED LIST-ELEMENTS-COPIED MUTABLE-ARRAY-ELEMENTS-COPIED
+# MUTABLE-ARRAY-ALLOCATIONS}?" (the last two braced groups native backends
+# only; the allocation group cranelift only, else {}).
 
 set root [file dirname [file dirname [file normalize [info script]]]]
 source [file join $root examples stdlib corpus.tcl]
@@ -99,6 +100,16 @@ set bench::cases [dict create \
         {"1,000 rows"  0 {string cat "csv_parse(" [corpus::literal [bench::csv 1000]] ")"}}
         {"10,000 rows" 1 {string cat "csv_parse(" [corpus::literal [bench::csv 10000]] ")"}}
     } \
+    csv_geometric {
+        {"100 rows"    0 {string cat "csv_parse(" [corpus::literal [bench::csv 100]] ")"}}
+        {"1,000 rows"  0 {string cat "csv_parse(" [corpus::literal [bench::csv 1000]] ")"}}
+        {"10,000 rows" 1 {string cat "csv_parse(" [corpus::literal [bench::csv 10000]] ")"}}
+    } \
+    csv_chunked {
+        {"100 rows"    0 {string cat "csv_parse(" [corpus::literal [bench::csv 100]] ")"}}
+        {"1,000 rows"  0 {string cat "csv_parse(" [corpus::literal [bench::csv 1000]] ")"}}
+        {"10,000 rows" 1 {string cat "csv_parse(" [corpus::literal [bench::csv 10000]] ")"}}
+    } \
     matmul {
         {"2x3 * 3x2" 0 {return "matmul(\[\[1, 2, 3\], \[4, 5, 6\]\], \[\[7, 8\], \[9, 10\], \[11, 12\]\])"}}
         {"8x8"       0 {string cat "matmul(" [bench::matrix 8 3] ", " [bench::matrix 8 5] ")"}}
@@ -145,7 +156,8 @@ proc bench::measure {algorithm size backend runs} {
             set copies [dict get $report copies]
             set alloc [list [dict get $total allocations] [dict get $total allocatedBytes] \
                 [dict get $total peakLiveBytes] [dict get $report gc cycles] \
-                [dict get $copies stringBytes] [dict get $copies listElements]]
+                [dict get $copies stringBytes] [dict get $copies listElements] \
+                [dict get $copies mutableArrayElements] [dict get $report byKind MutableArray allocations]]
         }
         return [list $best [string length $shown] [zlib crc32 [encoding convertto utf-8 $shown]] \
             [list $lower $jit] $code $alloc]
@@ -243,18 +255,22 @@ proc bench::formatBytes {n} {
 
 # cranelift's allocation baseline (native::allocationReport summary mode):
 # ALLOC is {allocations bytes peakBytes gcCycles stringBytesCopied
-# listElementsCopied}, "" when not measured (bench::measure's -specialize 0).
+# listElementsCopied mutableArrayElementsCopied mutableArrayAllocations}, ""
+# when not measured (bench::measure's -specialize 0).
 proc bench::allocCell {alloc} {
     if {$alloc eq ""} {
         return skipped
     }
-    lassign $alloc allocations bytes peakBytes gcCycles stringCopied listCopied
+    lassign $alloc allocations bytes peakBytes gcCycles stringCopied listCopied mutarrayCopied mutarrayAllocs
     set copies {}
     if {$stringCopied > 0} {
         lappend copies "[bench::formatBytes $stringCopied] str copied"
     }
     if {$listCopied > 0} {
         lappend copies "$listCopied list elems copied"
+    }
+    if {$mutarrayAllocs > 0} {
+        lappend copies "$mutarrayAllocs mutarrays, $mutarrayCopied mutarray elems copied"
     }
     set suffix [expr {$copies eq "" ? "" : ", [join $copies {, }]"}]
     return "$allocations objs, [bench::formatBytes $bytes], peak [bench::formatBytes $peakBytes], $gcCycles gc$suffix"

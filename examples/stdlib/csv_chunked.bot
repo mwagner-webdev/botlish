@@ -1,0 +1,125 @@
+# CSV parsing, identical to csv.bot's algorithm and result, except that both
+# levels of list construction (fields within a record, records within the
+# result) use a ChunkedBuilder over MutableArray instead of repeated
+# list_append. See csv_geometric.bot for the GeometricBuilder comparison
+# point and bench/corpus.tcl's csv/csv_geometric/csv_chunked cases.
+#
+# ChunkedBuilder: fixed-size MutableArray chunks, appended into without ever
+# copying earlier chunks (unlike GeometricBuilder, which copies every prior
+# element on every growth step). A builder's state is
+# [completedChunks, currentChunk, filled]: completedChunks is an ordinary
+# persistent List of full MutableArray chunks (list_append there copies only
+# the *chunk handles* seen so far, not their elements -- see the file-level
+# note below on why that is a deliberately minor, not eliminated, quadratic
+# term). Finalization flattens once: every chunk's elements are bulk-copied
+# (mutable_array_copy) into one exact-size MutableArray, then frozen to a
+# List, so total element movement is still O(n), just with different
+# constants than GeometricBuilder's.
+#
+# expect: [["name", "age"], ["Alice", "30"], ["Bob", "40"]]
+
+fn chunk_size():
+    64
+
+fn chunked_new():
+    [[], mutable_array_allocate(chunk_size()), 0]
+
+# BUILDER with VALUE appended: writes into the current chunk's next free
+# slot, or -- when the current chunk is full -- files it away in
+# completedChunks (persistent list_append: see the file-level note; this
+# never copies a chunk's *elements*, only prior chunk handles) and starts a
+# fresh chunk.
+fn chunked_append(builder, value):
+    completed = list_get(builder, 0)
+    current = list_get(builder, 1)
+    filled = list_get(builder, 2)
+    if filled == chunk_size():
+        more = list_append(completed, current)
+        fresh = mutable_array_allocate(chunk_size())
+        mutable_array_set(fresh, 0, value)
+        return [more, fresh, 1]
+
+    mutable_array_set(current, filled, value)
+    [completed, current, filled + 1]
+
+# The offset just past CHUNKS[0..) once each of them (all full,
+# chunk_size() elements) has been bulk-copied into FINAL starting at OFFSET.
+fn chunked_copy_chunks(chunks, index, final, offset):
+    if index >= list_length(chunks):
+        return offset
+
+    chunk = list_get(chunks, index)
+    mutable_array_copy(final, offset, chunk, 0, chunk_size())
+    chunked_copy_chunks(chunks, index + 1, final, offset + chunk_size())
+
+# BUILDER's elements as an ordinary immutable List: one exact-size
+# MutableArray, filled by bulk-copying every completed chunk followed by the
+# current chunk's filled prefix, then frozen.
+fn chunked_finish(builder):
+    completed = list_get(builder, 0)
+    current = list_get(builder, 1)
+    filled = list_get(builder, 2)
+    total = list_length(completed) * chunk_size() + filled
+    final = mutable_array_allocate(total)
+    offset = chunked_copy_chunks(completed, 0, final, 0)
+    mutable_array_copy(final, offset, current, 0, filled)
+    mutable_array_freeze(final, total)
+
+# ---------------------------------------------------------------------------
+# CSV parsing (see csv.bot for the algorithm's description; unchanged here
+# except that FIELDS and RECORDS are ChunkedBuilder states, finalized with
+# chunked_finish wherever the persistent version returned a completed List).
+
+fn peek(text, index):
+    if index >= length(text):
+        return ""
+
+    substring(text, index, index + 1)
+
+fn scan_unquoted(text, start, index):
+    character = peek(text, index)
+    if character == "" or character == "," or character == "\n":
+        return [substring(text, start, index), index]
+
+    scan_unquoted(text, start, index + 1)
+
+fn scan_quoted(text, index, field):
+    character = peek(text, index)
+    if character == "\"":
+        if peek(text, index + 1) == "\"":
+            return scan_quoted(text, index + 2, concat(field, "\""))
+
+        return [field, index + 1]
+
+    scan_quoted(text, index + 1, concat(field, character))
+
+fn scan_field(text, index):
+    if peek(text, index) == "\"":
+        return scan_quoted(text, index + 1, "")
+
+    scan_unquoted(text, index, index)
+
+fn scan_record(text, index, fields):
+    scanned = scan_field(text, index)
+    more = chunked_append(fields, list_get(scanned, 0))
+    stop = list_get(scanned, 1)
+    delimiter = peek(text, stop)
+    if delimiter == ",":
+        return scan_record(text, stop + 1, more)
+
+    if delimiter == "\n":
+        return [chunked_finish(more), stop + 1]
+
+    [chunked_finish(more), stop]
+
+fn scan_records(text, index, records):
+    if index >= length(text):
+        return chunked_finish(records)
+
+    scanned = scan_record(text, index, chunked_new())
+    scan_records(text, list_get(scanned, 1), chunked_append(records, list_get(scanned, 0)))
+
+fn csv_parse(text):
+    scan_records(text, 0, chunked_new())
+
+csv_parse("name,age\nAlice,30\nBob,40\n")

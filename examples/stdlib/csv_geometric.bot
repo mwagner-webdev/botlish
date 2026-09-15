@@ -1,0 +1,120 @@
+# CSV parsing, identical to csv.bot's algorithm and result, except that both
+# levels of list construction (fields within a record, records within the
+# result) use a GeometricBuilder over MutableArray instead of repeated
+# list_append. csv.bot's persistent-list version is kept unchanged as the
+# quadratic-copying baseline (see bench/corpus.tcl's csv/csv_geometric/
+# csv_chunked cases); this file exists to compare construction strategies on
+# the identical parsing algorithm.
+#
+# GeometricBuilder: a contiguous, geometrically-growing mutable array,
+# built entirely from the MutableArray substrate (mutable_array_allocate/
+# _capacity/_get/_set/_copy/_freeze) -- ordinary Botlish, not a compiler or
+# runtime primitive. A builder's state is the two-element list
+# [storage, length]; growth policy (capacity doubles, or length + 1 if that
+# still isn't enough) lives entirely here, not in the runtime.
+#
+# expect: [["name", "age"], ["Alice", "30"], ["Bob", "40"]]
+
+fn geo_new():
+    [mutable_array_allocate(0), 0]
+
+# The capacity a builder holding LENGTH elements should grow CAPACITY to, to
+# fit one more: double, or exactly enough if doubling still isn't enough
+# (starting from capacity 0). This is the one place the growth policy is
+# decided; MutableArray itself has no notion of growing.
+fn geo_new_capacity(capacity, length):
+    doubled = capacity * 2
+    if doubled <= length:
+        return length + 1
+
+    doubled
+
+# STORAGE, grown if it has no room for one more element at LENGTH: a fresh,
+# larger MutableArray with STORAGE's first LENGTH elements copied in, or
+# STORAGE unchanged if it already has room.
+fn geo_grow(storage, length):
+    capacity = mutable_array_capacity(storage)
+    if length < capacity:
+        return storage
+
+    new_capacity = geo_new_capacity(capacity, length)
+    fresh = mutable_array_allocate(new_capacity)
+    mutable_array_copy(fresh, 0, storage, 0, length)
+    fresh
+
+# BUILDER with VALUE appended: a new builder state (BUILDER's storage,
+# grown in place when full, is mutated -- only the [storage, length] pair
+# threading the length forward is a fresh value, exactly like scan_record's
+# own state threading below).
+fn geo_append(builder, value):
+    storage = list_get(builder, 0)
+    length = list_get(builder, 1)
+    grown = geo_grow(storage, length)
+    mutable_array_set(grown, length, value)
+    [grown, length + 1]
+
+# BUILDER's elements as an ordinary immutable List (finalization: a single
+# exact-size copy, see mutable_array_freeze).
+fn geo_finish(builder):
+    storage = list_get(builder, 0)
+    length = list_get(builder, 1)
+    mutable_array_freeze(storage, length)
+
+# ---------------------------------------------------------------------------
+# CSV parsing (see csv.bot for the algorithm's description; unchanged here
+# except that FIELDS and RECORDS are GeometricBuilder states, finalized with
+# geo_finish wherever the persistent version returned a completed List).
+
+fn peek(text, index):
+    if index >= length(text):
+        return ""
+
+    substring(text, index, index + 1)
+
+fn scan_unquoted(text, start, index):
+    character = peek(text, index)
+    if character == "" or character == "," or character == "\n":
+        return [substring(text, start, index), index]
+
+    scan_unquoted(text, start, index + 1)
+
+fn scan_quoted(text, index, field):
+    character = peek(text, index)
+    if character == "\"":
+        if peek(text, index + 1) == "\"":
+            return scan_quoted(text, index + 2, concat(field, "\""))
+
+        return [field, index + 1]
+
+    scan_quoted(text, index + 1, concat(field, character))
+
+fn scan_field(text, index):
+    if peek(text, index) == "\"":
+        return scan_quoted(text, index + 1, "")
+
+    scan_unquoted(text, index, index)
+
+fn scan_record(text, index, fields):
+    scanned = scan_field(text, index)
+    more = geo_append(fields, list_get(scanned, 0))
+    stop = list_get(scanned, 1)
+    delimiter = peek(text, stop)
+    if delimiter == ",":
+        return scan_record(text, stop + 1, more)
+
+    if delimiter == "\n":
+        return [geo_finish(more), stop + 1]
+
+    [geo_finish(more), stop]
+
+fn scan_records(text, index, records):
+    if index >= length(text):
+        return geo_finish(records)
+
+    scanned = scan_record(text, index, geo_new())
+    scan_records(text, list_get(scanned, 1), geo_append(records, list_get(scanned, 0)))
+
+fn csv_parse(text):
+    scan_records(text, 0, geo_new())
+
+csv_parse("name,age\nAlice,30\nBob,40\n")

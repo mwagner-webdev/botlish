@@ -19,7 +19,7 @@ apply {{dir} {
     foreach file {
         errors value completion env ir type regex
         block native callable refine runtime evaluator
-        primitives predicates strings lists programfile
+        primitives predicates strings lists mutarray programfile
     } {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }

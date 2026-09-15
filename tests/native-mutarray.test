@@ -1,0 +1,437 @@
+# native-mutarray.test -- MutableArray: the explicit mutable-storage
+# substrate (core/mutarray.tcl, native/src/runtime/{value,ops,heap,metrics}.rs).
+#
+# Semantic checks are differential across every backend (see native.test's
+# header): interp, compile, cranelift-generic, cranelift must agree. GC
+# stress (BOTLISH_NATIVE_GC_STRESS=1) and allocation-instrumentation checks
+# are native-backend-specific, like native-alloc.test's.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 100000
+
+proc sourceHir {text} {
+    return [surface::compile $text t.bot -strict 0]
+}
+
+proc sourceIR {text} {
+    return [hir::lower [sourceHir $text]]
+}
+
+set parityBackends {interp compile cranelift-generic cranelift}
+
+# The outcome of source TEXT on cranelift: {value V} or {error CODE MESSAGE}.
+proc native {text} {
+    lrange [outcomeUnder cranelift [sourceIR $text]] 0 end-1
+}
+
+proc parity {text} {
+    set exprs [sourceIR $text]
+    set outcomes [lmap backend $::parityBackends {outcomeUnder $backend $exprs}]
+    if {[llength [lsort -unique $outcomes]] == 1} {
+        return same
+    }
+    return [join [lmap backend $::parityBackends outcome $outcomes {list $backend $outcome}] " / "]
+}
+
+# ---------------------------------------------------------------------------
+# Basic semantics
+
+test mutarray-1 {a fresh array's capacity matches allocate's argument} -body {
+    parity {mutable_array_capacity(mutable_array_allocate(5))}
+} -result same
+
+test mutarray-2 {a fresh slot holds unit, not uninitialized memory} -body {
+    parity {mutable_array_get(mutable_array_allocate(3), 1)}
+} -result same
+
+test mutarray-3 {set then get reads back the written value} -body {
+    parity "fn f():\n    a = mutable_array_allocate(3)\n    mutable_array_set(a, 1, \"hello\")\n    mutable_array_get(a, 1)\nf()"
+} -result same
+
+test mutarray-4 {set returns unit} -body {
+    parity "fn f():\n    a = mutable_array_allocate(1)\n    mutable_array_set(a, 0, 1)\nf()"
+} -result same
+
+test mutarray-5 {mutation through one handle is observable through another} -body {
+    parity "fn f():\n    a = mutable_array_allocate(2)\n    b = a\n    mutable_array_set(a, 0, 99)\n    mutable_array_get(b, 0)\nf()"
+} -result same
+
+test mutarray-6 {zero-capacity array} -body {
+    parity {mutable_array_capacity(mutable_array_allocate(0))}
+} -result same
+
+test mutarray-7 {allocate rejects a non-Int capacity} -body {
+    parity {mutable_array_allocate("3")}
+} -result same
+
+test mutarray-8 {get/set reject a non-mutarray first argument} -body {
+    list [parity {mutable_array_get([1, 2], 0)}] [parity {mutable_array_set([1, 2], 0, 9)}]
+} -result {same same}
+
+# ---------------------------------------------------------------------------
+# Bounds: negative index, index >= capacity, invalid copy range, oversized
+# allocation, capacity arithmetic overflow (req #35)
+
+test mutarray-bounds-1 {negative index (get)} -body {
+    parity {mutable_array_get(mutable_array_allocate(3), -1)}
+} -result same
+
+test mutarray-bounds-2 {index == capacity (get)} -body {
+    parity {mutable_array_get(mutable_array_allocate(3), 3)}
+} -result same
+
+test mutarray-bounds-3 {negative index (set)} -body {
+    parity "fn f():\n    a = mutable_array_allocate(3)\n    mutable_array_set(a, -1, 9)\nf()"
+} -result same
+
+test mutarray-bounds-4 {index == capacity (set)} -body {
+    parity "fn f():\n    a = mutable_array_allocate(3)\n    mutable_array_set(a, 3, 9)\nf()"
+} -result same
+
+test mutarray-bounds-5 {out-of-range access is a RANGE error, never a default value} -body {
+    native {mutable_array_get(mutable_array_allocate(3), 3)}
+} -result {error {CORE SEMANTIC RANGE} {mutable_array_get: index 3 is outside 0..2}}
+
+# Every backend raises RANGE for a negative/oversized capacity, but the
+# reference interpreter (which has no small-Int representation to protect)
+# and the native runtime (which enforces MAX_COLLECTION_LENGTH: value.rs)
+# do not need to word the message identically -- so this checks the error
+# code on each backend, not full outcome parity.
+test mutarray-bounds-6 {negative allocate capacity is RANGE on every backend} -body {
+    lmap backend $parityBackends {
+        lrange [outcomeUnder $backend [sourceIR {mutable_array_allocate(0 - 1)}]] 0 1
+    }
+} -result [lrepeat 4 {error {CORE SEMANTIC RANGE}}]
+
+test mutarray-bounds-7 {a huge allocate capacity is a RANGE error, not a crash, on every backend} -body {
+    lmap backend $parityBackends {
+        lrange [outcomeUnder $backend [sourceIR {mutable_array_allocate(100000000000000000000000000000000000000)}]] 0 1
+    }
+} -result [lrepeat 4 {error {CORE SEMANTIC RANGE}}]
+
+test mutarray-bounds-8 {freeze count > capacity} -body {
+    parity {mutable_array_freeze(mutable_array_allocate(3), 4)}
+} -result same
+
+test mutarray-bounds-9 {freeze negative count} -body {
+    parity {mutable_array_freeze(mutable_array_allocate(3), 0 - 1)}
+} -result same
+
+test mutarray-copy-bounds-1 {copy count larger than either capacity} -body {
+    parity "fn f():\n    a = mutable_array_allocate(3)\n    b = mutable_array_allocate(3)\n    mutable_array_copy(a, 0, b, 0, 10)\nf()"
+} -result same
+
+test mutarray-copy-bounds-2 {copy destination offset pushes past capacity} -body {
+    parity "fn f():\n    a = mutable_array_allocate(5)\n    b = mutable_array_allocate(5)\n    mutable_array_copy(a, 3, b, 0, 3)\nf()"
+} -result same
+
+test mutarray-copy-bounds-3 {copy source offset pushes past capacity} -body {
+    parity "fn f():\n    a = mutable_array_allocate(5)\n    b = mutable_array_allocate(5)\n    mutable_array_copy(a, 0, b, 3, 3)\nf()"
+} -result same
+
+test mutarray-copy-bounds-4 {negative dst/src start or count} -body {
+    list \
+        [parity "fn f():\n    a = mutable_array_allocate(3)\n    mutable_array_copy(a, 0 - 1, a, 0, 1)\nf()"] \
+        [parity "fn f():\n    a = mutable_array_allocate(3)\n    mutable_array_copy(a, 0, a, 0 - 1, 1)\nf()"] \
+        [parity "fn f():\n    a = mutable_array_allocate(3)\n    mutable_array_copy(a, 0, a, 0, 0 - 1)\nf()"]
+} -result {same same same}
+
+# ---------------------------------------------------------------------------
+# Bulk copy correctness: zero elements, full range, partial range, offsets,
+# both overlap directions (memmove semantics)
+
+test mutarray-copy-1 {copying zero elements is a no-op} -body {
+    parity "fn f():\n    a = mutable_array_allocate(3)\n    mutable_array_set(a, 0, 1)\n    mutable_array_copy(a, 0, a, 2, 0)\n    mutable_array_freeze(a, 3)\nf()"
+} -result same
+
+test mutarray-copy-2 {full-range copy into a larger array} -body {
+    parity "fn f():\n    a = mutable_array_allocate(3)\n    mutable_array_set(a, 0, 1)\n    mutable_array_set(a, 1, 2)\n    mutable_array_set(a, 2, 3)\n    b = mutable_array_allocate(5)\n    mutable_array_copy(b, 0, a, 0, 3)\n    mutable_array_freeze(b, 3)\nf()"
+} -result same
+
+test mutarray-copy-3 {partial-range copy with both offsets} -body {
+    parity "fn f():\n    a = mutable_array_allocate(5)\n    mutable_array_set(a, 0, 1)\n    mutable_array_set(a, 1, 2)\n    mutable_array_set(a, 2, 3)\n    mutable_array_set(a, 3, 4)\n    mutable_array_set(a, 4, 5)\n    b = mutable_array_allocate(5)\n    mutable_array_copy(b, 2, a, 1, 2)\n    mutable_array_freeze(b, 5)\nf()"
+} -result same
+
+test mutarray-copy-4 {overlapping self-copy, destination after source (forward)} -body {
+    parity "fn f():\n    a = mutable_array_allocate(5)\n    mutable_array_set(a, 0, 1)\n    mutable_array_set(a, 1, 2)\n    mutable_array_set(a, 2, 3)\n    mutable_array_set(a, 3, 4)\n    mutable_array_set(a, 4, 5)\n    mutable_array_copy(a, 1, a, 0, 3)\n    mutable_array_freeze(a, 5)\nf()"
+} -result same
+
+test mutarray-copy-5 {overlapping self-copy, destination before source (backward)} -body {
+    parity "fn f():\n    a = mutable_array_allocate(5)\n    mutable_array_set(a, 0, 1)\n    mutable_array_set(a, 1, 2)\n    mutable_array_set(a, 2, 3)\n    mutable_array_set(a, 3, 4)\n    mutable_array_set(a, 4, 5)\n    mutable_array_copy(a, 0, a, 1, 3)\n    mutable_array_freeze(a, 5)\nf()"
+} -result same
+
+test mutarray-copy-6 {overlapping self-copy over the identical range is a no-op} -body {
+    parity "fn f():\n    a = mutable_array_allocate(3)\n    mutable_array_set(a, 0, 1)\n    mutable_array_set(a, 1, 2)\n    mutable_array_set(a, 2, 3)\n    mutable_array_copy(a, 0, a, 0, 3)\n    mutable_array_freeze(a, 3)\nf()"
+} -result same
+
+# ---------------------------------------------------------------------------
+# Finalization
+
+test mutarray-freeze-1 {freeze produces an ordinary List, usable by list natives} -body {
+    parity "fn f():\n    a = mutable_array_allocate(3)\n    mutable_array_set(a, 0, 10)\n    mutable_array_set(a, 1, 20)\n    mutable_array_set(a, 2, 30)\n    l = mutable_array_freeze(a, 3)\n    \[list_length(l), list_get(l, 1)\]\nf()"
+} -result same
+
+test mutarray-freeze-2 {freezing a prefix ignores the rest of the array} -body {
+    parity "fn f():\n    a = mutable_array_allocate(5)\n    mutable_array_set(a, 0, 1)\n    mutable_array_set(a, 1, 2)\n    mutable_array_freeze(a, 2)\nf()"
+} -result same
+
+test mutarray-freeze-3 {mutating the array after freeze does not change the frozen List} -body {
+    parity "fn f():\n    a = mutable_array_allocate(2)\n    mutable_array_set(a, 0, 1)\n    frozen = mutable_array_freeze(a, 2)\n    mutable_array_set(a, 0, 999)\n    \[frozen, mutable_array_get(a, 0)\]\nf()"
+} -result same
+
+test mutarray-freeze-4 {freezing capacity 0} -body {
+    parity {mutable_array_freeze(mutable_array_allocate(0), 0)}
+} -result same
+
+# ---------------------------------------------------------------------------
+# No structural equality (like Block/Native)
+
+test mutarray-eq-1 {== between two MutableArrays is an EQUALITY error} -body {
+    parity {mutable_array_allocate(1) == mutable_array_allocate(1)}
+} -result same
+
+test mutarray-eq-2 {== between a MutableArray and an ordinary value is an EQUALITY error} -body {
+    parity {mutable_array_allocate(1) == 1}
+} -result same
+
+# ---------------------------------------------------------------------------
+# Builders: ordinary Botlish construction strategies over MutableArray.
+# The state threading below mirrors examples/stdlib/csv_geometric.bot and
+# csv_chunked.bot exactly (kept in sync by hand: both are short and this
+# keeps the test self-contained). "persistent" is the existing list_append
+# baseline (frozen, unchanged, in examples/stdlib/csv.bot); the strategy
+# equivalence check (req #41) is that all three produce the same List.
+
+set builders {
+fn geo_new():
+    [mutable_array_allocate(0), 0]
+
+fn geo_new_capacity(capacity, length):
+    doubled = capacity * 2
+    if doubled <= length:
+        return length + 1
+
+    doubled
+
+fn geo_grow(storage, length):
+    capacity = mutable_array_capacity(storage)
+    if length < capacity:
+        return storage
+
+    new_capacity = geo_new_capacity(capacity, length)
+    fresh = mutable_array_allocate(new_capacity)
+    mutable_array_copy(fresh, 0, storage, 0, length)
+    fresh
+
+fn geo_append(builder, value):
+    storage = list_get(builder, 0)
+    length = list_get(builder, 1)
+    grown = geo_grow(storage, length)
+    mutable_array_set(grown, length, value)
+    [grown, length + 1]
+
+fn geo_finish(builder):
+    storage = list_get(builder, 0)
+    length = list_get(builder, 1)
+    mutable_array_freeze(storage, length)
+
+fn chunk_size():
+    4
+
+fn chunked_new():
+    [[], mutable_array_allocate(chunk_size()), 0]
+
+fn chunked_append(builder, value):
+    completed = list_get(builder, 0)
+    current = list_get(builder, 1)
+    filled = list_get(builder, 2)
+    if filled == chunk_size():
+        more = list_append(completed, current)
+        fresh = mutable_array_allocate(chunk_size())
+        mutable_array_set(fresh, 0, value)
+        return [more, fresh, 1]
+
+    mutable_array_set(current, filled, value)
+    [completed, current, filled + 1]
+
+fn chunked_copy_chunks(chunks, index, final, offset):
+    if index >= list_length(chunks):
+        return offset
+
+    chunk = list_get(chunks, index)
+    mutable_array_copy(final, offset, chunk, 0, chunk_size())
+    chunked_copy_chunks(chunks, index + 1, final, offset + chunk_size())
+
+fn chunked_finish(builder):
+    completed = list_get(builder, 0)
+    current = list_get(builder, 1)
+    filled = list_get(builder, 2)
+    total = list_length(completed) * chunk_size() + filled
+    final = mutable_array_allocate(total)
+    offset = chunked_copy_chunks(completed, 0, final, 0)
+    mutable_array_copy(final, offset, current, 0, filled)
+    mutable_array_freeze(final, total)
+
+fn fill_geo(b, i, n):
+    if i >= n:
+        return geo_finish(b)
+    fill_geo(geo_append(b, [i, "v"]), i + 1, n)
+
+fn fill_chunked(b, i, n):
+    if i >= n:
+        return chunked_finish(b)
+    fill_chunked(chunked_append(b, [i, "v"]), i + 1, n)
+
+fn fill_persistent(l, i, n):
+    if i >= n:
+        return l
+    fill_persistent(list_append(l, [i, "v"]), i + 1, n)
+
+fn check(n):
+    a = fill_geo(geo_new(), 0, n)
+    b = fill_chunked(chunked_new(), 0, n)
+    c = fill_persistent([], 0, n)
+    [a == c, b == c, list_length(a)]
+}
+
+# 0, 1, chunk_size()'s boundary (4) and boundary+1, and a size exercising
+# several geometric growth steps and several completed chunks.
+foreach n {0 1 3 4 5 8 100} {
+    test mutarray-builder-$n "GeometricBuilder and ChunkedBuilder agree with persistent list_append at n=$n" -body {
+        parity "$builders\ncheck($n)"
+    } -result same
+}
+
+test mutarray-builder-values-1 {builders hold heap values (strings, nested lists) correctly} -body {
+    parity "$builders\nfill_geo(geo_new(), 0, 37) == fill_persistent(\[\], 0, 37)"
+} -result same
+
+# ---------------------------------------------------------------------------
+# GC stress: values reachable only through a MutableArray survive collection
+# (BOTLISH_NATIVE_GC_STRESS=1 collects before every allocation).
+
+test mutarray-gc-stress-1 {values stored only in a MutableArray stay live across GC, including through growth/copy/freeze} -setup {
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+} -cleanup {
+    unset ::env(BOTLISH_NATIVE_GC_STRESS)
+} -body {
+    # Each string is heap-allocated (concat forces a fresh allocation, not a
+    # constant), stored only inside the MutableArray/builder, and read back
+    # after further allocations (each of which may trigger a collection
+    # under stress) -- including a grow (allocate + copy) and a freeze.
+    set text {
+fn label(i):
+    if i == 0:
+        return "x"
+
+    concat(label(i - 1), "x")
+
+fn geo_new():
+    [mutable_array_allocate(0), 0]
+
+fn geo_new_capacity(capacity, length):
+    doubled = capacity * 2
+    if doubled <= length:
+        return length + 1
+
+    doubled
+
+fn geo_grow(storage, length):
+    capacity = mutable_array_capacity(storage)
+    if length < capacity:
+        return storage
+
+    new_capacity = geo_new_capacity(capacity, length)
+    fresh = mutable_array_allocate(new_capacity)
+    mutable_array_copy(fresh, 0, storage, 0, length)
+    fresh
+
+fn geo_append(builder, value):
+    storage = list_get(builder, 0)
+    length = list_get(builder, 1)
+    grown = geo_grow(storage, length)
+    mutable_array_set(grown, length, value)
+    [grown, length + 1]
+
+fn geo_finish(builder):
+    storage = list_get(builder, 0)
+    length = list_get(builder, 1)
+    mutable_array_freeze(storage, length)
+
+fn fill(b, i, n):
+    if i >= n:
+        return geo_finish(b)
+    fill(geo_append(b, label(i)), i + 1, n)
+
+[list_length(fill(geo_new(), 0, 50)), list_get(fill(geo_new(), 0, 50), 17), list_get(fill(geo_new(), 0, 50), 49)]
+}
+    native::evalHir [sourceHir $text] -specialize 1
+} -result [list list [list {int 50} [list str [string repeat x 18]] [list str [string repeat x 50]]]]
+
+test mutarray-gc-stress-2 {allocation report stays internally consistent while MutableArrays are live} -body {
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    set text "fn build(n, i, a):\n    if i >= n:\n        return a\n    mutable_array_set(a, i, concat(\"x\", \"\"))\n    build(n, i + 1, a)\n\nmutable_array_capacity(build(30, 0, mutable_array_allocate(30)))"
+    set report [native::allocationReport [sourceHir $text] summary]
+    unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    set total [dict get $report total]
+    list [expr {[dict get $total peakLiveObjects] >= [dict get $total currentLiveObjects]}] \
+        [expr {[dict get $report gc cycles] > 0}] \
+        [dict get $report byKind MutableArray allocations]
+} -result {1 1 1}
+
+# ---------------------------------------------------------------------------
+# Allocation/copy instrumentation: the new storage kind is visible through
+# the existing machinery (req #10-#13, #42-#43), using the canonical heap
+# accounting path (no second metric system).
+
+test mutarray-alloc-1 {allocate is one MutableArray allocation, nothing else} -body {
+    set report [native::allocationReport [sourceHir {mutable_array_capacity(mutable_array_allocate(5))}] summary]
+    list [dict get $report total allocations] [dict get $report byKind MutableArray allocations]
+} -result {1 1}
+
+test mutarray-alloc-2 {allocated bytes grow with capacity} -body {
+    set small [dict get [native::allocationReport [sourceHir {mutable_array_capacity(mutable_array_allocate(2))}] summary] byKind MutableArray allocatedBytes]
+    set large [dict get [native::allocationReport [sourceHir {mutable_array_capacity(mutable_array_allocate(200))}] summary] byKind MutableArray allocatedBytes]
+    expr {$large > $small}
+} -result 1
+
+test mutarray-copy-metric-1 {mutable_array_copy counts elements copied} -body {
+    set text "fn f():\n    a = mutable_array_allocate(5)\n    b = mutable_array_allocate(5)\n    mutable_array_copy(b, 0, a, 0, 5)\nf()"
+    dict get [native::allocationReport [sourceHir $text] summary] copies mutableArrayElements
+} -result 5
+
+test mutarray-copy-metric-2 {freeze counts its copy, an ordinary append write does not} -body {
+    # A single mutable_array_set of a caller-supplied value into unused
+    # capacity is a write, not a copy of an existing value (req #43): only
+    # the freeze's own copy of the 3 elements shows up in
+    # mutableArrayElements.
+    set text "fn f():\n    a = mutable_array_allocate(3)\n    mutable_array_set(a, 0, 1)\n    mutable_array_set(a, 1, 2)\n    mutable_array_set(a, 2, 3)\n    mutable_array_freeze(a, 3)\nf()"
+    dict get [native::allocationReport [sourceHir $text] summary] copies mutableArrayElements
+} -result 3
+
+test mutarray-mutation-metric-1 {optional read/write counters} -body {
+    set text "fn f():\n    a = mutable_array_allocate(2)\n    mutable_array_set(a, 0, 1)\n    mutable_array_set(a, 1, 2)\n    \[mutable_array_get(a, 0), mutable_array_get(a, 1)\]\nf()"
+    set report [native::allocationReport [sourceHir $text] summary]
+    list [dict get $report mutableArray writes] [dict get $report mutableArray reads]
+} -result {2 2}
+
+proc geoScalingProgram {n} {
+    return "fn geo_new():\n    \[mutable_array_allocate(0), 0\]\n\nfn geo_new_capacity(capacity, length):\n    doubled = capacity * 2\n    if doubled <= length:\n        return length + 1\n\n    doubled\n\nfn geo_grow(storage, length):\n    capacity = mutable_array_capacity(storage)\n    if length < capacity:\n        return storage\n\n    new_capacity = geo_new_capacity(capacity, length)\n    fresh = mutable_array_allocate(new_capacity)\n    mutable_array_copy(fresh, 0, storage, 0, length)\n    fresh\n\nfn geo_append(builder, value):\n    storage = list_get(builder, 0)\n    length = list_get(builder, 1)\n    grown = geo_grow(storage, length)\n    mutable_array_set(grown, length, value)\n    \[grown, length + 1\]\n\nfn geo_finish(builder):\n    storage = list_get(builder, 0)\n    length = list_get(builder, 1)\n    mutable_array_freeze(storage, length)\n\nfn fill(b, i, n):\n    if i >= n:\n        return geo_finish(b)\n    fill(geo_append(b, i), i + 1, n)\n\nlist_length(fill(geo_new(), 0, $n))\n"
+}
+
+test mutarray-builder-scaling-1 {geometric construction: O(log N) allocations, O(N) elements copied (never quadratic)} -body {
+    set small [native::allocationReport [sourceHir [geoScalingProgram 100]] summary]
+    set large [native::allocationReport [sourceHir [geoScalingProgram 1000]] summary]
+    set smallAllocs [dict get $small byKind MutableArray allocations]
+    set largeAllocs [dict get $large byKind MutableArray allocations]
+    set smallCopied [dict get $small copies mutableArrayElements]
+    set largeCopied [dict get $large copies mutableArrayElements]
+    # 10x the elements: allocation count barely moves (log growth), copied
+    # elements scale much closer to 10x than 100x (never quadratic).
+    list [expr {$largeAllocs < $smallAllocs * 3}] \
+        [expr {$largeCopied < $smallCopied * 20}]
+} -result {1 1}
+
+cleanupTests

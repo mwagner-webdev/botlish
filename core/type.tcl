@@ -28,7 +28,7 @@
 # (compiler/types.tcl) consumes the same definitions for its static types.
 
 namespace eval core::type {
-    variable primitives {int str bool unit list result block native}
+    variable primitives {int str bool unit list result block native mutarray}
     # Kinds whose runtime representation can carry evidence (see value.tcl).
     variable evidenceKinds {str}
     # NAME -> {name NAME base KIND validator CMD opaque 0|1}

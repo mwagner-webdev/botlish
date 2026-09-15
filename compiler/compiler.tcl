@@ -1061,7 +1061,7 @@ proc core::compiler::IntrinsicValueEqual {ctxVar name argOps} {
     set ka [hir::types::kindOf [OpType $a]]
     set kb [hir::types::kindOf [OpType $b]]
     set t [NewTemp]
-    if {$ka eq "" || $kb eq "" || $ka in {block native} || $kb in {block native}} {
+    if {$ka eq "" || $kb eq "" || $ka in {block native mutarray} || $kb in {block native mutarray}} {
         return ""
     }
     if {$ka ne $kb} {

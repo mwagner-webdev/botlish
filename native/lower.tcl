@@ -114,6 +114,12 @@ namespace eval native::lower {
         list_length  {op listlen} \
         list_get     {op listget} \
         list_append  {op listappend} \
+        mutable_array_allocate {op mutarrayallocate} \
+        mutable_array_capacity {op mutarraycapacity} \
+        mutable_array_get      {op mutarrayget} \
+        mutable_array_set      {op mutarrayset} \
+        mutable_array_copy     {op mutarraycopy} \
+        mutable_array_freeze   {op mutarrayfreeze} \
         integer?     {op isint} \
         string?      {op isstr} \
         list?        {op islist} \

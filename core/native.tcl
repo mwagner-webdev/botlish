@@ -76,8 +76,12 @@ namespace eval core::native {
     #   range-check          may raise RANGE for an index outside a value
     #   structural-equality  compares values of any kinds structurally
     #   evidence             reads or attaches refinement evidence
+    #   mutarray-alloc       allocates a new MutableArray, or a List by
+    #                        finalizing one (mutable_array_freeze)
+    #   mutarray-mutate      mutates a MutableArray's slots in place
+    #                        (mutable_array_set, mutable_array_copy)
     variable runtimeTags {bigint string-alloc list-alloc result-alloc char-index
-        range-check structural-equality evidence}
+        range-check structural-equality evidence mutarray-alloc mutarray-mutate}
 }
 
 proc core::native::register {name args} {

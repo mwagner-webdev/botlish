@@ -20,12 +20,18 @@
 #                             captured env, and the compiled code for the
 #                             body ("" when the body is to be interpreted)
 #   {native NAME}             native callable; metadata lives in the registry
+#   {mutarray ID}             MutableArray handle; ID indexes
+#                             core::mutarray's mutable store (mutarray.tcl).
+#                             The only value kind that is NOT treated as
+#                             immutable: two {mutarray ID} values with the
+#                             same ID are the same storage, and mutating one
+#                             is observable through the other.
 #
-# Values are treated as immutable. Code outside this file should construct and
-# inspect values only through these procedures.
+# Values other than {mutarray ID} are treated as immutable. Code outside this
+# file should construct and inspect values only through these procedures.
 
 namespace eval core::value {
-    variable kinds {int str bool unit list result block native}
+    variable kinds {int str bool unit list result block native mutarray}
 }
 
 proc core::value::isCanonicalInt {text} {
@@ -172,6 +178,7 @@ proc core::value::blockEnv {v}    { Require block $v; return [lindex $v 3] }
 proc core::value::blockCode {v}   { Require block $v; return [lindex $v 4] }
 
 proc core::value::nativeName {v}  { Require native $v; return [lindex $v 1] }
+proc core::value::mutarrayId {v}  { Require mutarray $v; return [lindex $v 1] }
 
 # 1 if V is a Block or contains one (in a list or Result).
 proc core::value::containsBlock {v} {
@@ -201,7 +208,10 @@ proc core::value::containsBlock {v} {
 proc core::value::equal {a b} {
     set ka [kind $a]
     set kb [kind $b]
-    if {$ka in {block native} || $kb in {block native}} {
+    # MutableArray, like Block/Native, has no structural equality (its
+    # identity/equality semantics are a separate design question: see
+    # mutarray.tcl).
+    if {$ka in {block native mutarray} || $kb in {block native mutarray}} {
         core::semanticError EQUALITY \
             "== is not defined for callables: [show $a] == [show $b]"
     }
@@ -262,5 +272,6 @@ proc core::value::show {v {withEvidence 0}} {
         result { return "[lindex $v 1]([show [lindex $v 2] $withEvidence])" }
         block  { return "<block ([join [lindex $v 1] { }])>" }
         native { return "<native [lindex $v 1]>" }
+        mutarray { return "<mutable-array capacity=[core::value::intOf [core::mutarray::capacity $v]]>" }
     }
 }

@@ -26,6 +26,12 @@
 //! | rt_list_len            | List                | Int                          | no        |
 //! | rt_list_get            | List, Int           | element; RANGE               | no        |
 //! | rt_list_append         | List, any           | new List (copy)              | yes       |
+//! | rt_mutarray_allocate   | count                | MutableArray (slots = UNIT)  | yes       |
+//! | rt_mutarray_capacity   | MutableArray         | Int                          | no        |
+//! | rt_mutarray_get        | MutableArray, Int    | element; RANGE               | no        |
+//! | rt_mutarray_set        | MutableArray,Int,any | Unit; RANGE                  | no        |
+//! | rt_mutarray_copy       | dst,i,src,i,count    | Unit; RANGE                  | no        |
+//! | rt_mutarray_freeze     | MutableArray, Int    | List (copy); RANGE           | yes       |
 //! | rt_is_kind             | any, kind code      | Bool                         | no        |
 //! | rt_is_result           | any, 1 ok / 0 error | Bool                         | no        |
 //! | rt_result_payload      | Result, 1/0         | payload; TYPE if wrong tag   | no        |
@@ -126,7 +132,9 @@ pub extern "C" fn rt_int_cmp(_p: *mut Vm, a: Value, b: Value) -> i64 {
 
 fn equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
     let (ka, kb) = (kind_of(a), kind_of(b));
-    if matches!(ka, Kind::Block | Kind::Native) || matches!(kb, Kind::Block | Kind::Native) {
+    // MutableArray, like Block/Native, has no structural equality (req #31:
+    // its identity/equality semantics are a separate design question).
+    if matches!(ka, Kind::Block | Kind::Native | Kind::MutArray) || matches!(kb, Kind::Block | Kind::Native | Kind::MutArray) {
         vm(p).fail(RtError::Equality { a, b });
         return Err(());
     }
@@ -154,7 +162,7 @@ fn equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
             let (x, y) = (result_of(a), result_of(b));
             x.ok == y.ok && equal(p, x.payload, y.payload)?
         }
-        Kind::Block | Kind::Native => unreachable!(),
+        Kind::Block | Kind::Native | Kind::MutArray => unreachable!(),
     })
 }
 
@@ -276,6 +284,130 @@ pub extern "C" fn rt_list_append(p: *mut Vm, l: Value, v: Value) -> Value {
 }
 
 // ---------------------------------------------------------------------------
+// MutableArrays: fixed-capacity, explicitly mutable indexed storage
+// (value.rs's MutArrayObj). Every constructor/mutator here is the runtime
+// substrate only -- growth policy, chunking and finalization strategy are
+// ordinary Botlish (see examples/stdlib), never decided in this file.
+//
+// rt_mutarray_set and rt_mutarray_copy are the two places a slot's value
+// ever changes after allocation: a future write barrier (e.g. for a
+// generational collector) has exactly these two call sites to instrument,
+// never arbitrary code that pokes at a MutableArray's memory directly.
+//
+// "No misleading copy accounting" (milestone req #43): record_mutarray_copy
+// is called only for movement of *existing* values -- bulk copy and
+// finalization -- never for an ordinary append's single fresh write of a
+// caller-supplied value into unused capacity (that is charged, optionally,
+// as a mutarray write via record_mutarray_write instead).
+
+pub extern "C" fn rt_mutarray_allocate(p: *mut Vm, capacity: Value) -> Value {
+    match int_small(capacity) {
+        Some(n) if n >= 0 => vm(p).new_mutarray(n as usize),
+        _ => {
+            let message = format!(
+                "mutable_array_allocate: capacity must be 0..{MAX_COLLECTION_LENGTH}, got {}",
+                int_to_big(capacity)
+            );
+            vm(p).fail(RtError::Semantic { kind: "RANGE", message })
+        }
+    }
+}
+
+pub extern "C" fn rt_mutarray_capacity(p: *mut Vm, arr: Value) -> Value {
+    vm(p).new_int(mutarray_of(arr).slots.len() as i64)
+}
+
+pub extern "C" fn rt_mutarray_get(p: *mut Vm, arr: Value, index: Value) -> Value {
+    let slots = &mutarray_of(arr).slots;
+    match int_small(index) {
+        Some(i) if i >= 0 && (i as usize) < slots.len() => {
+            let v = slots[i as usize];
+            vm(p).metrics.record_mutarray_read();
+            v
+        }
+        _ => {
+            let message =
+                format!("mutable_array_get: index {} is outside 0..{}", int_to_big(index), slots.len() as i64 - 1);
+            vm(p).fail(RtError::Semantic { kind: "RANGE", message })
+        }
+    }
+}
+
+pub extern "C" fn rt_mutarray_set(p: *mut Vm, arr: Value, index: Value, value: Value) -> Value {
+    let obj = mutarray_of_mut(arr);
+    match int_small(index) {
+        Some(i) if i >= 0 && (i as usize) < obj.slots.len() => {
+            obj.slots[i as usize] = value;
+            vm(p).metrics.record_mutarray_write();
+            UNIT
+        }
+        _ => {
+            let len = obj.slots.len();
+            let message = format!("mutable_array_set: index {} is outside 0..{}", int_to_big(index), len as i64 - 1);
+            vm(p).fail(RtError::Semantic { kind: "RANGE", message })
+        }
+    }
+}
+
+fn invalid_copy_range(p: *mut Vm, dst: Value, dst_start: Value, src: Value, src_start: Value, count: Value) -> Value {
+    let dst_len = mutarray_of(dst).slots.len();
+    let src_len = mutarray_of(src).slots.len();
+    let message = format!(
+        "mutable_array_copy: range dstStart={}, srcStart={}, count={} is invalid for dst capacity {dst_len}, src capacity {src_len}",
+        int_to_big(dst_start), int_to_big(src_start), int_to_big(count)
+    );
+    vm(p).fail(RtError::Semantic { kind: "RANGE", message })
+}
+
+/// Bulk copy: COUNT elements of SRC starting at SRC_START into DST starting
+/// at DST_START. Uses `ptr::copy` (memmove semantics), so DST and SRC may be
+/// the same MutableArray with overlapping ranges: the result is always as if
+/// SRC's elements were read before any of DST's were written.
+pub extern "C" fn rt_mutarray_copy(p: *mut Vm, dst: Value, dst_start: Value, src: Value, src_start: Value, count: Value) -> Value {
+    let (ds, ss, n) = match (int_small(dst_start), int_small(src_start), int_small(count)) {
+        (Some(ds), Some(ss), Some(n)) if ds >= 0 && ss >= 0 && n >= 0 => (ds, ss, n),
+        _ => return invalid_copy_range(p, dst, dst_start, src, src_start, count),
+    };
+    let dst_len = mutarray_of(dst).slots.len() as i64;
+    let src_len = mutarray_of(src).slots.len() as i64;
+    let in_range = |start: i64, len: i64| start.checked_add(n).is_some_and(|end| end <= len);
+    if !in_range(ds, dst_len) || !in_range(ss, src_len) {
+        return invalid_copy_range(p, dst, dst_start, src, src_start, count);
+    }
+    if n > 0 {
+        let dst_ptr = mutarray_of_mut(dst).slots.as_mut_ptr();
+        let src_ptr = mutarray_of(src).slots.as_ptr();
+        unsafe { std::ptr::copy(src_ptr.add(ss as usize), dst_ptr.add(ds as usize), n as usize) };
+        vm(p).metrics.record_mutarray_copy(n as usize);
+    }
+    UNIT
+}
+
+/// Final immutable storage creation (milestone architecture item #2): a new
+/// List of ARR's first COUNT elements. This is substrate, not policy -- it
+/// is the one way a MutableArray's contents become an ordinary immutable
+/// List; growth/chunking policy is entirely the caller's (ordinary Botlish).
+/// Always copies (req #18): a future zero-copy freeze (req #19), proving ARR
+/// is uniquely owned and never mutated again, is left open, not implemented.
+pub extern "C" fn rt_mutarray_freeze(p: *mut Vm, arr: Value, count: Value) -> Value {
+    let slots = &mutarray_of(arr).slots;
+    match int_small(count) {
+        Some(n) if n >= 0 && (n as usize) <= slots.len() => {
+            let items = slots[..n as usize].to_vec();
+            let elements = items.len();
+            let r = vm(p).new_list(items);
+            vm(p).metrics.record_mutarray_copy(elements);
+            r
+        }
+        _ => {
+            let message =
+                format!("mutable_array_freeze: count {} is outside 0..{}", int_to_big(count), slots.len());
+            vm(p).fail(RtError::Semantic { kind: "RANGE", message })
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Kinds and Results
 
 pub extern "C" fn rt_is_kind(_p: *mut Vm, v: Value, kind: u64) -> Value {
@@ -389,6 +521,12 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         ListLen => rt_list_len(p, a[0]),
         ListGet => rt_list_get(p, a[0], a[1]),
         ListAppend => rt_list_append(p, a[0], a[1]),
+        MutArrayAllocate => rt_mutarray_allocate(p, a[0]),
+        MutArrayCapacity => rt_mutarray_capacity(p, a[0]),
+        MutArrayGet => rt_mutarray_get(p, a[0], a[1]),
+        MutArraySet => rt_mutarray_set(p, a[0], a[1], a[2]),
+        MutArrayCopy => rt_mutarray_copy(p, a[0], a[1], a[2], a[3], a[4]),
+        MutArrayFreeze => rt_mutarray_freeze(p, a[0], a[1]),
         IsInt => rt_is_kind(p, a[0], Kind::Int.code() as u64),
         IsStr => rt_is_kind(p, a[0], Kind::Str.code() as u64),
         IsList => rt_is_kind(p, a[0], Kind::List.code() as u64),
@@ -435,6 +573,12 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_list_len, 2),
         h!(rt_list_get, 3),
         h!(rt_list_append, 3),
+        h!(rt_mutarray_allocate, 2),
+        h!(rt_mutarray_capacity, 2),
+        h!(rt_mutarray_get, 3),
+        h!(rt_mutarray_set, 4),
+        h!(rt_mutarray_copy, 6),
+        h!(rt_mutarray_freeze, 3),
         h!(rt_is_kind, 3),
         h!(rt_is_result, 3),
         h!(rt_result_payload, 3),

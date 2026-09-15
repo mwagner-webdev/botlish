@@ -53,6 +53,10 @@ pub const KIND_RESULT: u8 = 4;
 pub const KIND_CLOSURE: u8 = 5;
 pub const KIND_NATIVE: u8 = 6;
 pub const KIND_CELL: u8 = 7;
+/// A MutableArray: fixed-capacity mutable indexed storage (see
+/// MutArrayObj). Distinct from KIND_LIST, whose ListObj is never mutated
+/// after construction.
+pub const KIND_MUTARRAY: u8 = 8;
 
 #[repr(C)]
 pub struct Header {
@@ -89,6 +93,18 @@ pub struct StrObj {
 pub struct ListObj {
     pub hdr: Header,
     pub items: Vec<Value>,
+}
+
+/// A MutableArray: fixed-capacity, explicitly mutable indexed storage. Every
+/// slot is a program value (initialized to UNIT at allocation: see
+/// Vm::new_mutarray), never uninitialized memory. Unlike ListObj, SLOTS is
+/// mutated in place by mutable_array_set/mutable_array_copy; its length
+/// (`slots.len()`) is its fixed capacity and never changes after allocation
+/// (see the module-level "no hidden resizing" invariant in ops.rs).
+#[repr(C)]
+pub struct MutArrayObj {
+    pub hdr: Header,
+    pub slots: Box<[Value]>,
 }
 
 #[repr(C)]
@@ -176,6 +192,7 @@ pub enum Kind {
     Result,
     Block,
     Native,
+    MutArray,
 }
 
 impl Kind {
@@ -189,6 +206,7 @@ impl Kind {
             "result" => Kind::Result,
             "block" => Kind::Block,
             "native" => Kind::Native,
+            "mutarray" => Kind::MutArray,
             _ => return None,
         })
     }
@@ -203,6 +221,7 @@ impl Kind {
             Kind::Result => "result",
             Kind::Block => "block",
             Kind::Native => "native",
+            Kind::MutArray => "mutarray",
         }
     }
 
@@ -211,7 +230,7 @@ impl Kind {
     }
 
     pub fn from_code(code: u8) -> Kind {
-        [Kind::Int, Kind::Str, Kind::Bool, Kind::Unit, Kind::List, Kind::Result, Kind::Block, Kind::Native]
+        [Kind::Int, Kind::Str, Kind::Bool, Kind::Unit, Kind::List, Kind::Result, Kind::Block, Kind::Native, Kind::MutArray]
             [code as usize]
     }
 }
@@ -233,6 +252,7 @@ pub fn kind_of(v: Value) -> Kind {
         KIND_RESULT => Kind::Result,
         KIND_CLOSURE => Kind::Block,
         KIND_NATIVE => Kind::Native,
+        KIND_MUTARRAY => Kind::MutArray,
         _ => panic!("not a program value: {v:#x}"),
     }
 }
@@ -249,6 +269,21 @@ pub fn str_of<'a>(v: Value) -> &'a StrObj {
 pub fn list_of<'a>(v: Value) -> &'a ListObj {
     debug_assert_eq!(heap_kind(v), KIND_LIST);
     unsafe { as_ref(v) }
+}
+
+pub fn mutarray_of<'a>(v: Value) -> &'a MutArrayObj {
+    debug_assert_eq!(heap_kind(v), KIND_MUTARRAY);
+    unsafe { as_ref(v) }
+}
+
+/// A mutable reference to V's slots (V must be a MutableArray). Sound because
+/// every caller holds V, a live tagged pointer, exclusively for the duration
+/// of the borrow: MutableArrays are ordinary thread-local runtime state (no
+/// aliased native access from generated code), so `&mut` here reflects an
+/// actual invariant, not an unchecked assumption.
+pub fn mutarray_of_mut<'a>(v: Value) -> &'a mut MutArrayObj {
+    debug_assert_eq!(heap_kind(v), KIND_MUTARRAY);
+    unsafe { &mut *(v as *mut MutArrayObj) }
 }
 
 pub fn result_of<'a>(v: Value) -> &'a ResultObj {

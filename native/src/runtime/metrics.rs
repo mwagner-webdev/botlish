@@ -35,13 +35,15 @@
 //! Botlish managed heap only.
 
 use super::show::tcl_list;
-use super::value::{KIND_BIGINT, KIND_CELL, KIND_CLOSURE, KIND_LIST, KIND_NATIVE, KIND_RESULT, KIND_STR};
+use super::value::{
+    KIND_BIGINT, KIND_CELL, KIND_CLOSURE, KIND_LIST, KIND_MUTARRAY, KIND_NATIVE, KIND_RESULT, KIND_STR,
+};
 use std::collections::HashMap;
 use std::time::Duration;
 
 /// One more than the largest `Header::kind` value: `by_kind`/`static_by_kind`
 /// are indexed directly by kind byte (index 0 unused).
-pub const KIND_COUNT: usize = 8;
+pub const KIND_COUNT: usize = 9;
 
 pub fn kind_name(kind: u8) -> &'static str {
     match kind {
@@ -52,12 +54,14 @@ pub fn kind_name(kind: u8) -> &'static str {
         KIND_CLOSURE => "Block",
         KIND_NATIVE => "Native",
         KIND_CELL => "Cell",
+        KIND_MUTARRAY => "MutableArray",
         _ => "?",
     }
 }
 
 /// Every kind this milestone's object set uses, in report order.
-pub const KINDS: [u8; 7] = [KIND_STR, KIND_LIST, KIND_BIGINT, KIND_RESULT, KIND_CLOSURE, KIND_CELL, KIND_NATIVE];
+pub const KINDS: [u8; 8] =
+    [KIND_STR, KIND_LIST, KIND_MUTARRAY, KIND_BIGINT, KIND_RESULT, KIND_CLOSURE, KIND_CELL, KIND_NATIVE];
 
 #[derive(Clone, Copy, Default)]
 pub struct KindStats {
@@ -172,6 +176,16 @@ pub struct Metrics {
     pub gc_max_pause: Duration,
     pub string_bytes_copied: u64,
     pub list_elements_copied: u64,
+    /// Existing-value movement into a MutableArray: bulk copy
+    /// (mutable_array_copy) and finalization (mutable_array_freeze), never
+    /// an ordinary append write of one fresh value into unused capacity
+    /// (see the "No misleading copy accounting" note on
+    /// rt_mutarray_set/rt_mutarray_freeze in ops.rs).
+    pub mutarray_elements_copied: u64,
+    /// Optional mutation counters (req #12): every mutable_array_get/_set
+    /// call, regardless of whether it is part of a copy.
+    pub mutarray_reads: u64,
+    pub mutarray_writes: u64,
 }
 
 impl Metrics {
@@ -190,6 +204,9 @@ impl Metrics {
             gc_max_pause: Duration::ZERO,
             string_bytes_copied: 0,
             list_elements_copied: 0,
+            mutarray_elements_copied: 0,
+            mutarray_reads: 0,
+            mutarray_writes: 0,
         }
     }
 
@@ -253,6 +270,24 @@ impl Metrics {
     pub fn record_list_copy(&mut self, elements: usize) {
         if self.enabled() {
             self.list_elements_copied += elements as u64;
+        }
+    }
+
+    pub fn record_mutarray_copy(&mut self, elements: usize) {
+        if self.enabled() {
+            self.mutarray_elements_copied += elements as u64;
+        }
+    }
+
+    pub fn record_mutarray_read(&mut self) {
+        if self.enabled() {
+            self.mutarray_reads += 1;
+        }
+    }
+
+    pub fn record_mutarray_write(&mut self) {
+        if self.enabled() {
+            self.mutarray_writes += 1;
         }
     }
 
@@ -335,13 +370,16 @@ impl Metrics {
         let copies = dict(&[
             ("stringBytes", n(self.string_bytes_copied)),
             ("listElements", n(self.list_elements_copied)),
+            ("mutableArrayElements", n(self.mutarray_elements_copied)),
         ]);
+        let mutations = dict(&[("reads", n(self.mutarray_reads)), ("writes", n(self.mutarray_writes))]);
         dict(&[
             ("total", total),
             ("byKind", by_kind),
             ("static", statics),
             ("gc", gc),
             ("copies", copies),
+            ("mutableArray", mutations),
             ("sites", sites_tcl.to_string()),
         ])
     }

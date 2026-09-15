@@ -426,6 +426,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             Kind::Result => KIND_RESULT,
             Kind::Block => KIND_CLOSURE,
             Kind::Native => KIND_NATIVE,
+            Kind::MutArray => KIND_MUTARRAY,
             Kind::Bool | Kind::Unit => unreachable!(),
         };
         let low3 = self.b.ins().band_imm_s(v, 7);
@@ -735,6 +736,30 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         ListLen => ("rt_list_len", None, false, None),
                         ListGet => ("rt_list_get", None, true, None),
                         ListAppend => ("rt_list_append", None, true, Some(("listappend", KIND_LIST))),
+                        MutArrayAllocate => {
+                            let v = self.call_allocating(
+                                "rt_mutarray_allocate",
+                                &[self.vm, a[0]],
+                                "mutarrayallocate",
+                                KIND_MUTARRAY,
+                            );
+                            self.check(v);
+                            return v;
+                        }
+                        MutArrayCapacity => ("rt_mutarray_capacity", None, false, None),
+                        MutArrayGet => ("rt_mutarray_get", None, true, None),
+                        MutArraySet => ("rt_mutarray_set", None, true, None),
+                        MutArrayCopy => ("rt_mutarray_copy", None, true, None),
+                        MutArrayFreeze => {
+                            let v = self.call_allocating(
+                                "rt_mutarray_freeze",
+                                &[self.vm, a[0], a[1]],
+                                "mutarrayfreeze",
+                                KIND_LIST,
+                            );
+                            self.check(v);
+                            return v;
+                        }
                         IsOk => ("rt_is_result", Some(1), false, None),
                         IsError => ("rt_is_result", Some(0), false, None),
                         ResultValue => ("rt_result_payload", Some(1), true, None),
