@@ -45,7 +45,7 @@ set lit corpus::literal
 
 test stdlib-0 {the corpus programs} -body {
     corpus::names
-} -result {csv csv_chunked csv_geometric matmul string_replace string_reverse}
+} -result {csv csv_chunked csv_geometric hashtable matmul string_replace string_reverse}
 
 foreach name [corpus::names] {
     test stdlib-sample-$name "$name: the sample in the file runs to its expect: value" -body {

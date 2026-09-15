@@ -16,6 +16,8 @@ pub enum OpCode {
     IAdd,
     ISub,
     IMul,
+    /// Euclidean modulo (core/primitives.tcl's modulo): 0 <= result < |b|.
+    IMod,
     ILt,
     ILe,
     IGt,
@@ -46,6 +48,9 @@ pub enum OpCode {
     ResultError,
     MkOk,
     MkError,
+    /// Structural hash (core/hashing.tcl's hash): consistent with VEq,
+    /// masked to 61 bits so the result never needs a BigInt.
+    Hash,
     /// Representation transitions and raw (untagged machine-integer)
     /// arithmetic/comparison: see the "Representation" section of
     /// native/lower.tcl. A raw operand/result is never a tagged Value: it
@@ -70,6 +75,7 @@ impl OpCode {
             "iadd" => IAdd,
             "isub" => ISub,
             "imul" => IMul,
+            "imod" => IMod,
             "ilt" => ILt,
             "ile" => ILe,
             "igt" => IGt,
@@ -100,6 +106,7 @@ impl OpCode {
             "resulterror" => ResultError,
             "mkok" => MkOk,
             "mkerror" => MkError,
+            "hash" => Hash,
             "rbox" => RBox,
             "runbox" => RUnbox,
             "riadd" => RIAdd,
@@ -120,7 +127,7 @@ impl OpCode {
         match self {
             ListNew => None,
             StrLen | StrLower | ListLen | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList
-            | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | RBox | RUnbox => Some(1),
+            | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | Hash | RBox | RUnbox => Some(1),
             Substr | MutArraySet => Some(3),
             MutArrayCopy => Some(5),
             _ => Some(2),

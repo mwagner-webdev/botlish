@@ -15,8 +15,11 @@
 #   ARITY                    wrong number of arguments
 #   NOT-BOOLEAN              non-Boolean if condition
 #   TYPE                     primitive applied to a value of the wrong kind
-#   EQUALITY                 == applied to values without defined equality
+#   EQUALITY                 == or hash applied to values without defined
+#                            equality
 #   RANGE                    an index outside the valid range
+#   ARITHMETIC               an arithmetic operation with no defined result
+#                            (mod by zero)
 #   BREAK-OUTSIDE-LOOP       break not lexically inside a loop
 #   CONTINUE-OUTSIDE-LOOP    continue not lexically inside a loop
 #   RETURN-OUTSIDE-CALLABLE  return not inside a callable invocation

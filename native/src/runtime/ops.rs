@@ -15,9 +15,11 @@
 //! | helper                 | operands            | result / failure             | allocates |
 //! |------------------------|---------------------|------------------------------|-----------|
 //! | rt_int_add/sub/mul     | Int, Int            | Int                          | big Ints  |
+//! | rt_int_mod             | Int, Int            | Int (0<=r<|b|); ARITHMETIC   | no        |
 //! | rt_int_cmp             | Int, Int            | -1/0/1 (raw i64)             | no        |
 //! | rt_value_eq            | any, any            | Bool; EQUALITY on callables  | no        |
 //! | rt_str_eq              | Str, Str            | Bool                         | no        |
+//! | rt_hash                | any                 | Int (61-bit); EQUALITY       | no        |
 //! | rt_str_len             | Str                 | Int                          | no        |
 //! | rt_substr              | Str, Int, Int       | Str; RANGE                   | yes       |
 //! | rt_str_lower           | Str                 | Str                          | yes       |
@@ -51,6 +53,7 @@ use super::value::*;
 use super::vm::{Vm, NativeInfo};
 use crate::nir::OpCode;
 use num_bigint::BigInt;
+use num_traits::Signed;
 use std::cmp::Ordering;
 
 pub type GenericEntry = extern "C" fn(*mut Vm, Value, *const Value) -> Value;
@@ -116,6 +119,31 @@ pub extern "C" fn rt_int_mul(p: *mut Vm, a: Value, b: Value) -> Value {
     int_binary(p, a, b, i64::checked_mul, |x, y| x * y)
 }
 
+/// Euclidean modulo (core/primitives.tcl's modulo): 0 <= result < |b|,
+/// regardless of the sign of a or b. Native `%` (small i64, or BigInt) may
+/// follow either sign convention -- whichever it picks, "if the result is
+/// negative, add |b|" always lands on the unique representative in [0, |b|)
+/// congruent to a mod b, so both paths agree with each other and with the
+/// reference interpreter's identical fixup (core::primitives::modulo).
+pub extern "C" fn rt_int_mod(p: *mut Vm, a: Value, b: Value) -> Value {
+    if let (Some(x), Some(y)) = (int_small(a), int_small(b)) {
+        if y == 0 {
+            return vm(p).fail(RtError::Semantic { kind: "ARITHMETIC", message: "mod: division by zero".to_string() });
+        }
+        let r = x % y;
+        return vm(p).new_int(if r < 0 { r + y.abs() } else { r });
+    }
+    let (aa, bb) = (int_to_big(a), int_to_big(b));
+    if bb == BigInt::from(0) {
+        return vm(p).fail(RtError::Semantic { kind: "ARITHMETIC", message: "mod: division by zero".to_string() });
+    }
+    let mut r = &aa % &bb;
+    if r.sign() == num_bigint::Sign::Minus {
+        r += bb.abs();
+    }
+    vm(p).new_big(r)
+}
+
 fn int_compare(a: Value, b: Value) -> Ordering {
     match (int_small(a), int_small(b)) {
         (Some(x), Some(y)) => x.cmp(&y),
@@ -175,6 +203,87 @@ pub extern "C" fn rt_value_eq(p: *mut Vm, a: Value, b: Value) -> Value {
 
 pub extern "C" fn rt_str_eq(_p: *mut Vm, a: Value, b: Value) -> Value {
     bool_value(str_of(a).text == str_of(b).text)
+}
+
+// ---------------------------------------------------------------------------
+// Hashing (core::hashing::hash): FNV-1a, byte-for-byte identical to the
+// reference interpreter (core/hashing.tcl) by construction -- both fold the
+// same kind-tag-then-payload bytes through the same 64-bit FNV-1a step, and
+// both mask the final accumulator to 61 bits, so a hash result never needs a
+// BigInt (2^61 comfortably fits SMALL_MAX = 2^62 - 1) regardless of backend.
+// No random seed: see core/hashing.tcl's header for the stability contract.
+
+const FNV_OFFSET: u64 = 0xcbf29ce484222325;
+const FNV_PRIME: u64 = 0x100000001b3;
+const HASH_MASK: u64 = (1u64 << 61) - 1;
+
+fn fnv1a(h: u64, bytes: &[u8]) -> u64 {
+    let mut h = h;
+    for &byte in bytes {
+        h = (h ^ byte as u64).wrapping_mul(FNV_PRIME);
+    }
+    h
+}
+
+/// H folded with V's kind tag and payload, recursing into List elements and
+/// a Result payload exactly as `equal` recurses (see ops.rs's `equal`).
+fn hash_mix(p: *mut Vm, h: u64, v: Value) -> Result<u64, ()> {
+    let kind = kind_of(v);
+    if matches!(kind, Kind::Block | Kind::Native | Kind::MutArray) {
+        vm(p).fail(RtError::Unhashable { value: v });
+        return Err(());
+    }
+    // Kind tags matching core/hashing.tcl's KindTag dict exactly (int str
+    // bool unit list result -> 0 1 2 3 4 5), so e.g. Int 1 and Str "1" never
+    // collide by coincidence of payload bytes alone.
+    let tag = match kind {
+        Kind::Int => 0u8,
+        Kind::Str => 1,
+        Kind::Bool => 2,
+        Kind::Unit => 3,
+        Kind::List => 4,
+        Kind::Result => 5,
+        Kind::Block | Kind::Native | Kind::MutArray => unreachable!(),
+    };
+    let h = fnv1a(h, &[tag]);
+    Ok(match kind {
+        // Canonical decimal text, matching how core::value::equal treats
+        // textual identity as numeric equality for every Int, small or big.
+        Kind::Int => {
+            let text = match int_small(v) {
+                Some(n) => n.to_string(),
+                None => int_to_big(v).to_string(),
+            };
+            fnv1a(h, text.as_bytes())
+        }
+        // Evidence is metadata, not part of the value (equal ignores it too).
+        Kind::Str => fnv1a(h, str_of(v).text.as_bytes()),
+        Kind::Bool => fnv1a(h, &[(v == TRUE) as u8]),
+        Kind::Unit => h,
+        Kind::List => {
+            let items = &list_of(v).items;
+            let mut h = fnv1a(h, &(items.len() as u64).to_le_bytes());
+            for item in items {
+                let sub = hash_mix(p, FNV_OFFSET, *item)?;
+                h = fnv1a(h, &sub.to_le_bytes());
+            }
+            h
+        }
+        Kind::Result => {
+            let r = result_of(v);
+            let h = fnv1a(h, &[r.ok as u8]);
+            let sub = hash_mix(p, FNV_OFFSET, r.payload)?;
+            fnv1a(h, &sub.to_le_bytes())
+        }
+        Kind::Block | Kind::Native | Kind::MutArray => unreachable!(),
+    })
+}
+
+pub extern "C" fn rt_hash(p: *mut Vm, v: Value) -> Value {
+    match hash_mix(p, FNV_OFFSET, v) {
+        Ok(h) => vm(p).new_int((h & HASH_MASK) as i64),
+        Err(()) => NO_VALUE,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -506,6 +615,7 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         IAdd => rt_int_add(p, a[0], a[1]),
         ISub => rt_int_sub(p, a[0], a[1]),
         IMul => rt_int_mul(p, a[0], a[1]),
+        IMod => rt_int_mod(p, a[0], a[1]),
         ILt => cmp(|o| o == Ordering::Less),
         ILe => cmp(|o| o != Ordering::Greater),
         IGt => cmp(|o| o == Ordering::Greater),
@@ -536,6 +646,7 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         ResultError => rt_result_payload(p, a[0], 0),
         MkOk => rt_result_new(p, 1, a[0]),
         MkError => rt_result_new(p, 0, a[0]),
+        Hash => rt_hash(p, a[0]),
         RBox | RUnbox | RIAdd | RISub | RIMul | RILt | RILe | RIGt | RIGe | RIEq => {
             // Raw (untagged) representation ops never implement a dynamic
             // native: native/lower.tcl emits them only directly, as `op`
@@ -562,9 +673,11 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_int_add, 3),
         h!(rt_int_sub, 3),
         h!(rt_int_mul, 3),
+        h!(rt_int_mod, 3),
         h!(rt_int_cmp, 3),
         h!(rt_value_eq, 3),
         h!(rt_str_eq, 3),
+        h!(rt_hash, 2),
         h!(rt_str_len, 2),
         h!(rt_substr, 4),
         h!(rt_str_lower, 2),

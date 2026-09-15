@@ -1,0 +1,634 @@
+# native-hashtable.test -- the mutable open-addressed HashTable
+# (examples/stdlib/hashtable.bot), the adversarial workload this milestone
+# built over the MutableArray substrate and the mod/hash primitives
+# (native-hashing.test covers those two primitives on their own).
+#
+# Semantic checks are differential across every backend (see native.test's
+# header): interp, compile, cranelift-generic, cranelift must agree.
+# Allocation/GC-stress checks are native-backend-specific, like
+# native-alloc.test's and native-mutarray.test's.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot examples stdlib corpus.tcl]
+
+interp recursionlimit {} 1000000
+
+# corpus::text's whole file, minus its own trailing "sample()" call: this
+# test appends its own driver after the definitions, and a leftover
+# sample() would otherwise run (and allocate) as an extra, discarded
+# top-level statement ahead of every test's own program.
+set ::hashtableSource [regsub {\nsample\(\)\n$} [corpus::text hashtable] "\n"]
+
+# TEXT appended after the HashTable implementation, compiled to HIR.
+proc sourceHir {text} {
+    return [surface::compile "$::hashtableSource\n$text\n" t.bot -strict 0]
+}
+
+proc sourceIR {text} {
+    return [hir::lower [sourceHir $text]]
+}
+
+set parityBackends {interp compile cranelift-generic cranelift}
+
+proc parity {text} {
+    set exprs [sourceIR $text]
+    set outcomes [lmap backend $::parityBackends {outcomeUnder $backend $exprs}]
+    if {[llength [lsort -unique $outcomes]] == 1} {
+        return same
+    }
+    return [join [lmap backend $::parityBackends outcome $outcomes {list $backend $outcome}] " / "]
+}
+
+# The outcome of source TEXT on cranelift: {value V} or {error CODE MESSAGE}.
+proc native {text} {
+    lrange [outcomeUnder cranelift [sourceIR $text]] 0 end-1
+}
+
+# ---------------------------------------------------------------------------
+# Basic semantics
+
+test ht-empty-1 {a fresh table is empty} -body {
+    native {
+fn f():
+    t = ht_new()
+    [ht_size(t), ht_contains(t, "x"), ht_get(t, "x")]
+f()
+    }
+} -result {value {[0, false, unit]}}
+
+test ht-single-1 {insert then get} -body {
+    parity {
+fn f():
+    t = ht_new()
+    ht_set(t, "a", 1)
+    ht_get(t, "a")
+f()
+    }
+} -result same
+
+test ht-single-2 {insert then contains/size} -body {
+    native {
+fn f():
+    t = ht_new()
+    ht_set(t, "a", 1)
+    [ht_contains(t, "a"), ht_size(t)]
+f()
+    }
+} -result {value {[true, 1]}}
+
+test ht-replace-1 {inserting an existing key replaces the value, size unchanged} -body {
+    native {
+fn f():
+    t = ht_new()
+    ht_set(t, "a", 1)
+    ht_set(t, "a", 2)
+    [ht_get(t, "a"), ht_size(t)]
+f()
+    }
+} -result {value {[2, 1]}}
+
+test ht-equal-key-1 {two separately allocated but equal String keys are the same key (value equality, not identity)} -body {
+    native {
+fn f():
+    t = ht_new()
+    ht_set(t, concat("a", "b"), 1)
+    ht_set(t, concat("a", "b"), 2)
+    [ht_get(t, "ab"), ht_size(t)]
+f()
+    }
+} -result {value {[2, 1]}}
+
+test ht-int-keys-1 {Int keys work, distinct from String keys of the same text} -body {
+    native {
+fn f():
+    t = ht_new()
+    ht_set(t, 1, "int-one")
+    ht_set(t, "1", "str-one")
+    [ht_get(t, 1), ht_get(t, "1"), ht_size(t)]
+f()
+    }
+} -result {value {["int-one", "str-one", 2]}}
+
+test ht-failed-lookup-1 {get/contains of an absent key on an otherwise nonempty table} -body {
+    native {
+fn f():
+    t = ht_new()
+    ht_set(t, "a", 1)
+    [ht_contains(t, "missing"), ht_get(t, "missing")]
+f()
+    }
+} -result {value {[false, unit]}}
+
+test ht-delete-1 {delete removes the key; a later get/contains reflects that} -body {
+    native {
+fn f():
+    t = ht_new()
+    ht_set(t, "a", 1)
+    ht_delete(t, "a")
+    [ht_contains(t, "a"), ht_get(t, "a"), ht_size(t)]
+f()
+    }
+} -result {value {[false, unit, 0]}}
+
+test ht-delete-absent-1 {deleting an absent key is a no-op} -body {
+    native {
+fn f():
+    t = ht_new()
+    ht_set(t, "a", 1)
+    ht_delete(t, "missing")
+    [ht_size(t), ht_get(t, "a")]
+f()
+    }
+} -result {value {[1, 1]}}
+
+# ---------------------------------------------------------------------------
+# Collision chain / tombstone suite, at capacity 8 (ht_min_capacity): "k2",
+# "k13", "k22", "k35", "k44" were chosen (tests/native-hashtable.test's own
+# search, not hand-picked) because hash("kN") mod 8 == 5 for every one of
+# them -- so with only these keys inserted, capacity never grows past 8 and
+# every one of them starts probing at the same bucket, forcing exactly the
+# probe chain req #30/#32 describe. Insertion order fills bucket 5 with k2,
+# then (linear probing) 6 with k13, then 7 with k22.
+
+test ht-collision-chain-1 {three colliding keys all land, and all look up correctly} -body {
+    native {
+fn f():
+    t = ht_new()
+    ht_set(t, "k2", "A")
+    ht_set(t, "k13", "B")
+    ht_set(t, "k22", "C")
+    [ht_capacity(t), ht_get(t, "k2"), ht_get(t, "k13"), ht_get(t, "k22")]
+f()
+    }
+} -result {value {[8, "A", "B", "C"]}}
+
+test ht-collision-chain-2 {failed lookup for a fourth colliding, never-inserted key} -body {
+    native {
+fn f():
+    t = ht_new()
+    ht_set(t, "k2", "A")
+    ht_set(t, "k13", "B")
+    ht_set(t, "k22", "C")
+    ht_contains(t, "k35")
+f()
+    }
+} -result {value false}
+
+test ht-collision-replace-1 {replacement inside a collision chain} -body {
+    native {
+fn f():
+    t = ht_new()
+    ht_set(t, "k2", "A")
+    ht_set(t, "k13", "B")
+    ht_set(t, "k22", "C")
+    ht_set(t, "k22", "C2")
+    [ht_get(t, "k22"), ht_size(t), ht_capacity(t)]
+f()
+    }
+} -result {value {["C2", 3, 8]}}
+
+test ht-tombstone-delete-1 {delete from the middle of a collision chain} -body {
+    native {
+fn f():
+    t = ht_new()
+    ht_set(t, "k2", "A")
+    ht_set(t, "k13", "B")
+    ht_set(t, "k22", "C")
+    ht_delete(t, "k13")
+    [ht_contains(t, "k13"), ht_get(t, "k13"), ht_size(t), ht_tombstones(t)]
+f()
+    }
+} -result {value {[false, unit, 2, 1]}}
+
+test ht-tombstone-lookup-past-1 {lookup for a key past a tombstone still succeeds} -body {
+    native {
+fn f():
+    t = ht_new()
+    ht_set(t, "k2", "A")
+    ht_set(t, "k13", "B")
+    ht_set(t, "k22", "C")
+    ht_delete(t, "k13")
+    ht_get(t, "k22")
+f()
+    }
+} -result {value {"C"}}
+
+test ht-tombstone-failed-lookup-1 {a failed lookup keeps probing through a tombstone until EMPTY} -body {
+    native {
+fn f():
+    t = ht_new()
+    ht_set(t, "k2", "A")
+    ht_set(t, "k13", "B")
+    ht_set(t, "k22", "C")
+    ht_delete(t, "k13")
+    ht_contains(t, "k35")
+f()
+    }
+} -result {value false}
+
+test ht-tombstone-reuse-1 {inserting a new colliding key reuses the tombstone slot, not a fresh one} -body {
+    native {
+fn f():
+    t = ht_new()
+    ht_set(t, "k2", "A")
+    ht_set(t, "k13", "B")
+    ht_set(t, "k22", "C")
+    ht_delete(t, "k13")
+    ht_set(t, "k44", "D")
+    [ht_capacity(t), ht_tombstones(t), ht_size(t), ht_get(t, "k44"), ht_get(t, "k22"), ht_contains(t, "k13")]
+f()
+    }
+} -result {value {[8, 0, 3, "D", "C", false]}}
+
+test ht-collision-parity-1 {the whole collision/tombstone/reuse sequence agrees on every backend} -body {
+    parity {
+fn f():
+    t = ht_new()
+    ht_set(t, "k2", "A")
+    ht_set(t, "k13", "B")
+    ht_set(t, "k22", "C")
+    ht_delete(t, "k13")
+    ht_set(t, "k44", "D")
+    [ht_get(t, "k2"), ht_get(t, "k44"), ht_get(t, "k22"), ht_contains(t, "k13"), ht_contains(t, "k35"), ht_size(t)]
+f()
+    }
+} -result same
+
+# ---------------------------------------------------------------------------
+# Resize/rehash correctness
+
+test ht-resize-1 {enough inserts to force growth: capacity increases, every key is still present} -body {
+    native {
+fn build(t, i, n):
+    if i >= n:
+        return t
+    ht_set(t, i, i * 10)
+    build(t, i + 1, n)
+
+fn check(t, i, n):
+    if i >= n:
+        return true
+    if ht_get(t, i) != i * 10:
+        return false
+    check(t, i + 1, n)
+
+fn f():
+    t = build(ht_new(), 0, 50)
+    [ht_capacity(t) > 8, ht_size(t), check(t, 0, 50)]
+f()
+    }
+} -result {value {[true, 50, true]}}
+
+test ht-resize-2 {resize with collided entries: the k2/k13/k22 chain survives growth past capacity 8} -body {
+    native {
+fn build_more(t, i, n):
+    if i >= n:
+        return unit
+    ht_set(t, i, i)
+    build_more(t, i + 1, n)
+
+fn f():
+    t = ht_new()
+    ht_set(t, "k2", "A")
+    ht_set(t, "k13", "B")
+    ht_set(t, "k22", "C")
+    ht_delete(t, "k13")
+    build_more(t, 0, 40)
+    [ht_capacity(t) > 8, ht_get(t, "k2"), ht_get(t, "k22"), ht_contains(t, "k13"), ht_size(t)]
+f()
+    }
+} -result {value {[true, "A", "C", false, 42]}}
+
+test ht-multiple-resizes-1 {several resizes: all mappings present, size correct, tombstones reset, capacity as expected} -body {
+    native {
+fn build(t, i, n):
+    if i >= n:
+        return unit
+    ht_set(t, i, i * 2)
+    build(t, i + 1, n)
+
+fn check(t, i, n):
+    if i >= n:
+        return true
+    if ht_get(t, i) != i * 2:
+        return false
+    check(t, i + 1, n)
+
+fn f():
+    t = ht_new()
+    build(t, 0, 400)
+    [ht_size(t), ht_tombstones(t), check(t, 0, 400), ht_capacity(t)]
+f()
+    }
+} -result {value {[400, 0, true, 1024]}}
+
+# ---------------------------------------------------------------------------
+# Pre-sizing (req #38): ht_new_sized avoids growing while filling to the
+# expected count.
+
+test ht-presize-1 {ht_capacity_for computes the smallest doubling capacity keeping expected under 2/3 load} -body {
+    native {[ht_capacity_for(0, 8), ht_capacity_for(5, 8), ht_capacity_for(6, 8), ht_capacity_for(100, 8)]}
+} -result {value {[8, 8, 16, 256]}}
+
+test ht-presize-2 {a table pre-sized for N entries never resizes while filling to exactly N} -body {
+    native {
+fn build(t, i, n):
+    if i >= n:
+        return unit
+    ht_set(t, i, i)
+    build(t, i + 1, n)
+
+fn f():
+    t = ht_new_sized(100)
+    capacityBefore = ht_capacity(t)
+    build(t, 0, 100)
+    [ht_capacity(t) == capacityBefore, ht_size(t)]
+f()
+    }
+} -result {value {[true, 100]}}
+
+# ---------------------------------------------------------------------------
+# Zero-allocation steady state (req #19, #42). ht_new()/ht_set() themselves
+# allocate (setup: item #18 says to report that honestly, not hide it), so
+# "the operation under test allocates zero objects" is checked as a delta
+# against an identical program that omits only that one operation -- not as
+# an absolute zero over the whole program, which would also have to count
+# setup. Both the base and the tested program end in `unit` (ht_set/
+# ht_delete's own return value), so neither program's *return* differs in a
+# way that would itself cost an allocation.
+
+proc allocationsOf {text} {
+    return [dict get [native::allocationReport [sourceHir $text] summary] total allocations]
+}
+
+# Fails (with both programs' texts and counts, for diagnosis) unless AFTER
+# allocates exactly as much as BASE -- i.e. the code AFTER adds beyond BASE
+# allocates zero.
+proc assertNoExtraAllocation {label base after} {
+    set baseCount [allocationsOf $base]
+    set afterCount [allocationsOf $after]
+    if {$baseCount != $afterCount} {
+        error "$label: base allocated $baseCount, with the operation added allocated $afterCount (expected equal)"
+    }
+    return {}
+}
+
+set ::htSetupSmall {
+fn setup():
+    t = ht_new()
+    ht_set(t, "a", 1)
+    ht_set(t, "b", 2)
+    ht_set(t, "c", 3)
+    t
+}
+
+set ::htBase "$::htSetupSmall\nfn f():\n    t = setup()\n    unit\nf()\n"
+
+test ht-alloc-hit-1 {a successful lookup allocates zero managed objects beyond setup} -body {
+    assertNoExtraAllocation hit $::htBase "$::htSetupSmall\nfn f():\n    t = setup()\n    ht_get(t, \"b\")\n    unit\nf()"
+} -result {}
+
+test ht-alloc-miss-1 {a failed lookup allocates zero managed objects beyond setup} -body {
+    assertNoExtraAllocation miss $::htBase "$::htSetupSmall\nfn f():\n    t = setup()\n    ht_get(t, \"missing\")\n    unit\nf()"
+} -result {}
+
+test ht-alloc-contains-1 {contains (hit and miss) allocates zero managed objects beyond setup} -body {
+    assertNoExtraAllocation contains $::htBase "$::htSetupSmall\nfn f():\n    t = setup()\n    ht_contains(t, \"b\")\n    ht_contains(t, \"missing\")\n    unit\nf()"
+} -result {}
+
+test ht-alloc-replace-1 {replacing an existing key's value allocates zero managed objects beyond setup} -body {
+    assertNoExtraAllocation replace $::htBase "$::htSetupSmall\nfn f():\n    t = setup()\n    ht_set(t, \"b\", 99)\nf()"
+} -result {}
+
+test ht-alloc-insert-1 {insert with spare capacity allocates zero managed objects beyond setup} -body {
+    assertNoExtraAllocation insert $::htBase "$::htSetupSmall\nfn f():\n    t = setup()\n    ht_set(t, \"d\", 4)\nf()"
+} -result {}
+
+test ht-alloc-delete-1 {delete allocates zero managed objects beyond setup} -body {
+    assertNoExtraAllocation delete $::htBase "$::htSetupSmall\nfn f():\n    t = setup()\n    ht_delete(t, \"b\")\nf()"
+} -result {}
+
+test ht-alloc-resize-1 {resize is expected to allocate: exactly 3 replacement MutableArrays per resize step} -body {
+    set text {
+fn build(t, i, n):
+    if i >= n:
+        return unit
+    ht_set(t, i, i)
+    build(t, i + 1, n)
+
+fn f():
+    t = ht_new()
+    build(t, 0, 5)
+    ht_size(t)
+f()
+    }
+    set report [native::allocationReport [sourceHir $text] summary]
+    dict get $report byKind MutableArray allocations
+} -result 4
+
+test ht-alloc-resize-2 {a resize causes no mutable_array_copy: every entry is rehashed, not bulk-copied (req #23)} -body {
+    set text {
+fn build(t, i, n):
+    if i >= n:
+        return unit
+    ht_set(t, i, i)
+    build(t, i + 1, n)
+
+fn f():
+    t = ht_new()
+    build(t, 0, 40)
+    ht_size(t)
+f()
+    }
+    set report [native::allocationReport [sourceHir $text] summary]
+    dict get $report copies mutableArrayElements
+} -result 0
+
+# ---------------------------------------------------------------------------
+# Specialization / representation-optimization flags (req #27, #28):
+# correctness is unchanged with either disabled.
+
+test ht-specialize-off-1 {-specialize 0 gives the same result as the default} -body {
+    set text {
+fn f():
+    t = ht_new()
+    ht_set(t, "a", 1)
+    ht_set(t, "b", 2)
+    ht_delete(t, "a")
+    [ht_get(t, "b"), ht_contains(t, "a"), ht_size(t)]
+f()
+    }
+    set hir [sourceHir $text]
+    list [native::evalHir $hir] [native::evalHir $hir -specialize 0]
+} -result {{list {{int 2} {bool false} {int 1}}} {list {{int 2} {bool false} {int 1}}}}
+
+test ht-repr-opt-off-1 {-repr-opt 0 gives the same result as the default, including across a resize} -body {
+    set text {
+fn build(t, i, n):
+    if i >= n:
+        return unit
+    ht_set(t, i, i)
+    build(t, i + 1, n)
+
+fn f():
+    t = ht_new()
+    build(t, 0, 60)
+    [ht_size(t), ht_capacity(t), ht_get(t, 59)]
+f()
+    }
+    set hir [sourceHir $text]
+    list [native::evalHir $hir] [native::evalHir $hir -repr-opt 0]
+} -result {{list {{int 60} {int 128} {int 59}}} {list {{int 60} {int 128} {int 59}}}}
+
+# ---------------------------------------------------------------------------
+# GC stress: heap keys/values reachable only through the table survive
+# collection; a deleted entry no longer keeps its value artificially live.
+
+test ht-gc-stress-1 {heap String keys and values survive GC while live in the table} -setup {
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+} -cleanup {
+    unset ::env(BOTLISH_NATIVE_GC_STRESS)
+} -body {
+    set text {
+fn label(prefix, i):
+    if i == 0:
+        return prefix
+    concat(label(prefix, i - 1), "x")
+
+fn build(t, i, n):
+    if i >= n:
+        return unit
+    ht_set(t, label("k", i), label("v", i))
+    build(t, i + 1, n)
+
+fn f():
+    t = ht_new()
+    build(t, 0, 40)
+    [ht_size(t), ht_get(t, label("k", 39)), ht_get(t, label("k", 17)), ht_get(t, label("k", 0))]
+f()
+    }
+    native::evalHir [sourceHir $text] -specialize 1
+} -result {list {{int 40} {str vxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx} {str vxxxxxxxxxxxxxxxxx} {str v}}}
+
+test ht-gc-stress-2 {a deleted entry's value is not kept artificially live, and later GC/allocation stays internally consistent} -body {
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    set text {
+fn build(t, i, n):
+    if i >= n:
+        return unit
+    ht_set(t, i, concat("val", "ue"))
+    build(t, i + 1, n)
+
+fn deleteEvens(t, i, n):
+    if i >= n:
+        return unit
+    if mod(i, 2) == 0:
+        ht_delete(t, i)
+    deleteEvens(t, i + 1, n)
+
+fn f():
+    t = ht_new()
+    build(t, 0, 60)
+    deleteEvens(t, 0, 60)
+    ht_size(t)
+f()
+    }
+    set report [native::allocationReport [sourceHir $text] summary]
+    unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    set total [dict get $report total]
+    list [expr {[dict get $total peakLiveObjects] >= [dict get $total currentLiveObjects]}] \
+        [expr {[dict get $report gc cycles] > 0}]
+} -result {1 1}
+
+# ---------------------------------------------------------------------------
+# Property/differential test (req #34): a deterministic sequence of
+# insert/replace/delete/get/contains, checked against a plain Tcl dict
+# reference model. The reference and the Botlish program run the identical
+# op sequence; final contents are compared as sets (ht_to_list's order is
+# slot order, not insertion order, so it is not compared positionally).
+
+proc genOps {seed n keyspace} {
+    set state $seed
+    proc lcg {stateVar} {
+        upvar 1 $stateVar s
+        set s [expr {($s * 1103515245 + 12345) % 2147483648}]
+        return $s
+    }
+    set ops {}
+    for {set i 0} {$i < $n} {incr i} {
+        set r [lcg state]
+        set key [expr {$r % $keyspace}]
+        set choice [expr {($r / $keyspace) % 3}]
+        set value [expr {($r / ($keyspace * 3)) % 1000}]
+        if {$choice == 2} {
+            lappend ops [list delete $key]
+        } else {
+            lappend ops [list set $key $value]
+        }
+    }
+    return $ops
+}
+
+# Reference model: applies OPS to a Tcl dict; returns the final dict.
+proc referenceApply {ops} {
+    set ref [dict create]
+    foreach op $ops {
+        lassign $op kind key value
+        if {$kind eq "delete"} {
+            dict unset ref $key
+        } else {
+            dict set ref $key $value
+        }
+    }
+    return $ref
+}
+
+# OPS as Botlish ht_set/ht_delete calls against table T, followed by an
+# expression yielding ht_to_list(T).
+proc opsToBotlish {ops} {
+    set lines {}
+    foreach op $ops {
+        lassign $op kind key value
+        if {$kind eq "delete"} {
+            lappend lines "    ht_delete(t, $key)"
+        } else {
+            lappend lines "    ht_set(t, $key, $value)"
+        }
+    }
+    return "fn f():\n    t = ht_new()\n[join $lines \n]\n    ht_to_list(t)\nf()\n"
+}
+
+proc propertyCheck {seed n keyspace} {
+    set ops [genOps $seed $n $keyspace]
+    set ref [referenceApply $ops]
+    set hir [sourceHir [opsToBotlish $ops]]
+    set value [native::evalHir $hir]
+    # value is {list {{list {{int K} {int V}}} ...}}: extract [K V] pairs.
+    set got [dict create]
+    foreach pair [lindex $value 1] {
+        set k [lindex $pair 1 0 1]
+        set v [lindex $pair 1 1 1]
+        dict set got $k $v
+    }
+    set refSorted [lsort -stride 2 -index 0 -integer [dict get $ref]]
+    set gotSorted [lsort -stride 2 -index 0 -integer [dict get $got]]
+    if {$refSorted eq $gotSorted} {
+        return match
+    }
+    return [list expected $refSorted got $gotSorted]
+}
+
+test ht-property-1 {200 ops over a 30-key keyspace match the reference dict model} -body {
+    propertyCheck 1 200 30
+} -result match
+
+test ht-property-2 {different seed, larger op count, forcing several resizes} -body {
+    propertyCheck 7 800 60
+} -result match
+
+test ht-property-3 {small keyspace, heavy churn: many collisions/tombstones/reuses} -body {
+    propertyCheck 42 500 6
+} -result match
+
+cleanupTests

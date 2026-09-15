@@ -49,6 +49,22 @@ proc core::primitives::greaterEqual {a b} {
     return [core::value::bool [expr {$x >= $y}]]
 }
 
+# Euclidean modulo: the result always satisfies 0 <= result < |b|, regardless
+# of the sign of a or b (Boute's definition), so callers normalizing an
+# index (e.g. hash(key) mod capacity) never need an extra abs/max. b == 0 is
+# a semantic ARITHMETIC error, not a crash or a silent default.
+proc core::primitives::modulo {a b} {
+    lassign [Ints mod $a $b] x y
+    if {$y == 0} {
+        core::semanticError ARITHMETIC "mod: division by zero"
+    }
+    set r [expr {$x % $y}]
+    if {$r < 0} {
+        set r [expr {$r + abs($y)}]
+    }
+    return [core::value::int $r]
+}
+
 proc core::primitives::valueEqual {a b} {
     return [core::value::bool [core::value::equal $a $b]]
 }
@@ -76,6 +92,13 @@ foreach {name impl result} {
         -param-types {int int} -result-type $result -runtime bigint
 }
 unset name impl result
+
+# General-purpose Euclidean modulo (see modulo above): the smallest addition
+# needed on top of the existing +-*<<=>>= to let ordinary Botlish normalize
+# a hash into a bucket index (hash mod capacity) -- nothing in the runtime or
+# compiler knows this native's caller might be a hash table.
+core::native::register mod  -arity 2 -impl core::primitives::modulo \
+    -param-types {int int} -result-type int -result-range nonneg -runtime bigint
 
 core::native::register ==   -arity 2 -impl core::primitives::valueEqual \
     -param-types {any any} -result-type bool -runtime structural-equality

@@ -1,0 +1,192 @@
+# native-hashing.test -- mod and hash (core/primitives.tcl, core/hashing.tcl,
+# native/src/runtime/ops.rs): the two general-purpose primitives the
+# hash-table milestone added on top of MutableArray. Neither is table
+# specific: mod is ordinary Euclidean modulo, hash is a structural hash
+# consistent with == over exactly the domain == already covers.
+#
+# Semantic checks are differential across every backend (see native.test's
+# header): interp, compile, cranelift-generic, cranelift must agree.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+proc sourceHir {text} {
+    return [surface::compile $text t.bot -strict 0]
+}
+
+proc sourceIR {text} {
+    return [hir::lower [sourceHir $text]]
+}
+
+set parityBackends {interp compile cranelift-generic cranelift}
+
+proc parity {text} {
+    set exprs [sourceIR $text]
+    set outcomes [lmap backend $::parityBackends {outcomeUnder $backend $exprs}]
+    if {[llength [lsort -unique $outcomes]] == 1} {
+        return same
+    }
+    return [join [lmap backend $::parityBackends outcome $outcomes {list $backend $outcome}] " / "]
+}
+
+# The outcome of source TEXT on cranelift: {value V} or {error CODE MESSAGE}.
+proc native {text} {
+    lrange [outcomeUnder cranelift [sourceIR $text]] 0 end-1
+}
+
+# ---------------------------------------------------------------------------
+# mod: Euclidean modulo, 0 <= result < |b|, regardless of the sign of a or b
+
+foreach {a b} {
+    7 3    -7 3    7 -3    -7 -3    0 5    1 1    -1 1    100 7    -100 7
+} {
+    test mod-sign-$a-$b "mod($a, $b) agrees on every backend and is nonneg" -body {
+        parity "mod($a, $b)"
+    } -result same
+}
+
+test mod-1 {mod(7, 3) is 1} -body {
+    native {mod(7, 3)}
+} -result {value 1}
+
+test mod-2 {mod(-7, 3) is 2, never negative} -body {
+    native {mod(-7, 3)}
+} -result {value 2}
+
+test mod-3 {mod(7, -3) is 1} -body {
+    native {mod(7, -3)}
+} -result {value 1}
+
+test mod-4 {mod is consistent with a = q*b + r conceptually: mod(100, 7) == 2} -body {
+    native {mod(100, 7)}
+} -result {value 2}
+
+test mod-zero-1 {mod by zero is an ARITHMETIC error, every backend} -body {
+    parity {mod(5, 0)}
+} -result same
+
+test mod-zero-2 {mod by zero's error code} -body {
+    native {mod(5, 0)}
+} -result {error {CORE SEMANTIC ARITHMETIC} {mod: division by zero}}
+
+test mod-type-1 {mod rejects non-Int operands, every backend} -body {
+    parity {mod("5", 3)}
+} -result same
+
+test mod-bigint-1 {mod works across the small/big boundary} -body {
+    parity {mod(100000000000000000000000000000000000007, 3)}
+} -result same
+
+test mod-bigint-2 {mod with a huge divisor stays consistent} -body {
+    parity {mod(7, 100000000000000000000000000000000000000)}
+} -result same
+
+# ---------------------------------------------------------------------------
+# hash: structural, consistent with ==
+
+test hash-deterministic-1 {hash is stable across repeated calls, same process} -body {
+    native {
+fn f():
+    a = hash("hello")
+    b = hash("hello")
+    a == b
+f()
+    }
+} -result {value true}
+
+test hash-consistent-with-eq-1 {distinct String objects with equal content hash equal} -body {
+    native {
+fn f():
+    a = concat("hel", "lo")
+    b = concat("hel", "lo")
+    hash(a) == hash(b)
+f()
+    }
+} -result {value true}
+
+test hash-kind-distinguishing-1 {Int 1 and Str "1" do not coincidentally hash equal} -body {
+    native {hash(1) == hash("1")}
+} -result {value false}
+
+test hash-list-order-1 {list hash depends on element order} -body {
+    native {hash([1, 2]) == hash([2, 1])}
+} -result {value false}
+
+test hash-list-content-1 {equal lists hash equal} -body {
+    native {hash([1, 2, "x"]) == hash([1, 2, "x"])}
+} -result {value true}
+
+# Result values have no surface-syntax constructor in Botlish today (no
+# native returns one, and .bot source has no ok(...)/error(...) literal:
+# see tests/results.test, which builds them at the core-IR level directly).
+# hash still supports Result structurally, exactly like ==, so this checks
+# it at that same core-IR level, through the interpreter -- a documented
+# scope note, not a gap this milestone introduces.
+test hash-result-1 {ok and error Results with the same payload hash differently} -body {
+    run {call {ref ==} \
+        {call {ref hash} {ok {const 1}}} \
+        {call {ref hash} {error-value {const 1}}}}
+} -result false
+
+test hash-result-2 {ok Results with equal payloads hash equal} -body {
+    run {call {ref ==} \
+        {call {ref hash} {ok {const 1}}} \
+        {call {ref hash} {ok {const 1}}}}
+} -result true
+
+test hash-callables-1 {hash is undefined for callables, like ==, every backend} -body {
+    parity {
+fn f():
+    unit
+hash(f)
+    }
+} -result same
+
+test hash-mutarray-1 {hash is undefined for MutableArray, every backend} -body {
+    parity {hash(mutable_array_allocate(1))}
+} -result same
+
+test hash-range-1 {hash never needs a bit beyond 61: nonneg and below 2^61} -body {
+    native {
+fn f():
+    h = hash("some longer string to hash, well past any short-string special case")
+    [h >= 0, h < 2305843009213693952]
+f()
+    }
+} -result {value {[true, true]}}
+
+test hash-parity-str-1 {hash of a String matches across every backend (bit-identical)} -body {
+    parity "hash(\"the quick brown fox\")"
+} -result same
+
+test hash-parity-int-1 {hash of an Int matches across every backend (bit-identical)} -body {
+    parity {hash(123456789)}
+} -result same
+
+test hash-parity-bigint-1 {hash of a BigInt matches across every backend} -body {
+    parity {hash(100000000000000000000000000000000000007)}
+} -result same
+
+test hash-parity-nested-1 {hash of nested aggregates matches across every backend} -body {
+    parity {hash([1, "two", [3, unit], ok("x")])}
+} -result same
+
+# ---------------------------------------------------------------------------
+# Zero-allocation: mod and hash of ordinary small/short values never allocate
+# a managed object (mod's result fits small by construction when |b| is
+# small; hash's result is always masked into the small range).
+
+test mod-alloc-1 {mod of small Ints allocates nothing} -body {
+    native::assertAllocations [sourceHir {mod(100, 7)}] 0
+} -result {}
+
+test hash-alloc-1 {hash of a short String allocates nothing beyond the String itself} -body {
+    set report [native::allocationReport [sourceHir {hash("abc")}] summary]
+    dict get $report total allocations
+} -result 0
+
+test hash-alloc-2 {hash of an Int allocates nothing} -body {
+    native::assertAllocations [sourceHir {hash(42)}] 0
+} -result {}
+
+cleanupTests

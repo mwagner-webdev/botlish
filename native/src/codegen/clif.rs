@@ -725,6 +725,8 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 // `call_allocating`. None for helpers that never allocate.
                 let (helper, extra, fallible, alloc): (&str, Option<u64>, bool, Option<(&'static str, u8)>) =
                     match op {
+                        IMod => ("rt_int_mod", None, true, None),
+                        Hash => ("rt_hash", None, true, None),
                         StrEq => ("rt_str_eq", None, false, None),
                         StrLen => ("rt_str_len", None, false, None),
                         Substr => ("rt_substr", None, true, Some(("substr", KIND_STR))),

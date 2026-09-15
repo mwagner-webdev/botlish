@@ -456,7 +456,7 @@ test native-spec-14 {guard accounting: blockers and emitted guards agree} -body 
             [dict get $report generic guards] [dict get $report specialized guards] \
             [dict get $report nirGuards]
     }
-} -result {{csv 17 17 0 0} {csv_chunked 29 29 1 1} {csv_geometric 24 24 0 0} {matmul 17 17 0 0} {string_replace 12 12 0 0} {string_reverse 4 4 0 0}}
+} -result {{csv 17 17 0 0} {csv_chunked 29 29 1 1} {csv_geometric 24 24 0 0} {hashtable 63 55 25 25} {matmul 17 17 0 0} {string_replace 12 12 0 0} {string_reverse 4 4 0 0}}
 
 # ---------------------------------------------------------------------------
 # Closures
@@ -490,7 +490,7 @@ test native-corpus-1 {every corpus program's sample runs natively to its expect:
         set value [native::evalHir [surface::readProgramFile $path]]
         expr {[core::value::show $value 1] eq $expected}
     }
-} -result {1 1 1 1 1 1}
+} -result {1 1 1 1 1 1 1}
 
 test native-gc-1 {collecting before every allocation changes nothing} -body {
     set text "[core::ReadFile [file join $::projectRoot examples stdlib csv.bot]]\ncsv_parse(\"a,\\\"b\\\"\\\"c\\\",d\\ne,f\\n\")"

@@ -18,6 +18,9 @@ pub enum RtError {
     NotBoolean { got: Value },
     NotCallable { got: Value },
     Equality { a: Value, b: Value },
+    /// `core::hashing::hash`: a value with no defined equality also has no
+    /// defined hash (same restriction as Equality, one value instead of two).
+    Unhashable { value: Value },
     /// Any other semantic error whose message is fully known: RANGE, ARITY,
     /// UNBOUND, DUPLICATE, ...
     Semantic { kind: &'static str, message: String },
@@ -31,7 +34,7 @@ pub enum RtError {
 /// Semantic error kinds of core/errors.tcl that NIR may raise.
 pub const SEMANTIC_KINDS: &[&str] = &[
     "UNBOUND", "DUPLICATE", "NOT-CALLABLE", "ARITY", "NOT-BOOLEAN", "TYPE", "EQUALITY", "RANGE",
-    "BREAK-OUTSIDE-LOOP", "CONTINUE-OUTSIDE-LOOP", "RETURN-OUTSIDE-CALLABLE", "UNCAUGHT-ERROR",
+    "ARITHMETIC", "BREAK-OUTSIDE-LOOP", "CONTINUE-OUTSIDE-LOOP", "RETURN-OUTSIDE-CALLABLE", "UNCAUGHT-ERROR",
 ];
 
 pub fn semantic_kind(name: &str) -> Option<&'static str> {
@@ -45,7 +48,7 @@ impl RtError {
             RtError::Type { .. } | RtError::ResultTag { .. } => vec!["CORE", "SEMANTIC", "TYPE"],
             RtError::NotBoolean { .. } => vec!["CORE", "SEMANTIC", "NOT-BOOLEAN"],
             RtError::NotCallable { .. } => vec!["CORE", "SEMANTIC", "NOT-CALLABLE"],
-            RtError::Equality { .. } => vec!["CORE", "SEMANTIC", "EQUALITY"],
+            RtError::Equality { .. } | RtError::Unhashable { .. } => vec!["CORE", "SEMANTIC", "EQUALITY"],
             RtError::Semantic { kind, .. } => vec!["CORE", "SEMANTIC", kind],
             RtError::StackOverflow => vec!["NATIVE", "LIMIT", "STACK"],
             RtError::Unsupported(_) => vec!["NATIVE", "UNSUPPORTED", "value"],
@@ -68,6 +71,9 @@ impl RtError {
             RtError::Equality { a, b } => {
                 format!("== is not defined for callables: {} == {}", show(*a), show(*b))
             }
+            RtError::Unhashable { value } => {
+                format!("hash is not defined for callables: {}", show(*value))
+            }
             RtError::Semantic { message, .. } => message.clone(),
             RtError::StackOverflow => "native stack exhausted: too many nested calls".to_string(),
             RtError::Unsupported(message) | RtError::Bug(message) => message.clone(),
@@ -82,6 +88,7 @@ impl RtError {
             | RtError::NotBoolean { got }
             | RtError::NotCallable { got } => vec![*got],
             RtError::Equality { a, b } => vec![*a, *b],
+            RtError::Unhashable { value } => vec![*value],
             _ => vec![],
         }
     }

@@ -100,6 +100,7 @@ namespace eval native::lower {
         +            {op iadd} \
         -            {op isub} \
         *            {op imul} \
+        mod          {op imod} \
         <            {op ilt} \
         <=           {op ile} \
         >            {op igt} \
@@ -126,7 +127,8 @@ namespace eval native::lower {
         ok?          {op isok} \
         error?       {op iserror} \
         result-value {op resultvalue} \
-        result-error {op resulterror}]
+        result-error {op resulterror} \
+        hash         {op hash}]
     # State of the program being lowered. hir is the view of the instance
     # being lowered, baseHir the program's semantic HIR.
     variable hir {}

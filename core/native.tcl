@@ -80,8 +80,11 @@ namespace eval core::native {
     #                        finalizing one (mutable_array_freeze)
     #   mutarray-mutate      mutates a MutableArray's slots in place
     #                        (mutable_array_set, mutable_array_copy)
+    #   hash                 computes a semantic hash of a value, recursing
+    #                        into any List/Result payload the way
+    #                        structural-equality does (core/hashing.tcl)
     variable runtimeTags {bigint string-alloc list-alloc result-alloc char-index
-        range-check structural-equality evidence mutarray-alloc mutarray-mutate}
+        range-check structural-equality evidence mutarray-alloc mutarray-mutate hash}
 }
 
 proc core::native::register {name args} {
