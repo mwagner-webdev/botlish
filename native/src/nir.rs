@@ -69,6 +69,24 @@ pub enum OpCode {
     /// operand (see hir/stringregion.tcl). Never fallible: RegionCheck
     /// already proved the region's bounds.
     RegionEq,
+    /// Decodes the one Unicode scalar starting at a known UTF-8 byte offset
+    /// of a String (base, byte_offset -- both ordinary tagged operands: the
+    /// offset is always a small Int, so keeping it tagged costs nothing --
+    /// no arithmetic-overflow check, no heap allocation, just a tag bit),
+    /// returning it as a one-character String -- the same result an
+    /// in-bounds `substring(base, i, i+1)` at the character index BYTE_OFFSET
+    /// corresponds to would produce, without ever decoding BASE's prefix to
+    /// find that byte offset (see native/lower.tcl's "String traversal"
+    /// section and hir/traversal.tcl). Never fallible: callers only ever
+    /// emit this at a byte offset already proven in range.
+    DecodeCharAt,
+    /// The UTF-8 byte length of a String's text (distinct from `StrLen`,
+    /// which counts Unicode scalars): a plain field read, no scanning.
+    /// Applied to `DecodeCharAt`'s own result, this gives the encoded
+    /// width of the scalar just decoded, so a traversal can advance its
+    /// carried byte offset by exactly that many bytes for the next
+    /// iteration (see hir/traversal.tcl).
+    StrByteLen,
     /// Representation transitions and raw (untagged machine-integer)
     /// arithmetic/comparison: see the "Representation" section of
     /// native/lower.tcl. A raw operand/result is never a tagged Value: it
@@ -127,6 +145,8 @@ impl OpCode {
             "hash" => Hash,
             "regioncheck" => RegionCheck,
             "regioneq" => RegionEq,
+            "decodecharat" => DecodeCharAt,
+            "strbytelen" => StrByteLen,
             "rbox" => RBox,
             "runbox" => RUnbox,
             "riadd" => RIAdd,
@@ -147,7 +167,8 @@ impl OpCode {
         match self {
             ListNew => None,
             StrLen | StrLower | ListLen | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList
-            | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | Hash | RBox | RUnbox => Some(1),
+            | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | Hash | RBox | RUnbox
+            | StrByteLen => Some(1),
             Substr | MutArraySet | RegionCheck => Some(3),
             RegionEq => Some(4),
             MutArrayCopy => Some(5),

@@ -186,6 +186,19 @@ pub struct Metrics {
     /// call, regardless of whether it is part of a copy.
     pub mutarray_reads: u64,
     pub mutarray_writes: u64,
+    /// Source UTF-8 bytes walked (`char_indices`/`chars().skip(..)`-style
+    /// decoding) solely to map a semantic (Unicode-scalar) String position
+    /// to a physical UTF-8 byte offset, when that offset is not already
+    /// carried in from a previous access -- rt_substr's and
+    /// rt_str_region_eq's non-ASCII paths, the two remaining places a
+    /// character index is located by decoding forward from byte 0 (see
+    /// their own comments). Never includes: the copy that follows a seek
+    /// (string_bytes_copied, separate), equality/hash comparison bytes, or
+    /// any use of rt_str_decode_char_at/rt_str_byte_len (the "String
+    /// traversal" ops below), which act at an already-carried byte offset
+    /// and so never seek at all. See hir/traversal.tcl and native/lower.tcl's
+    /// "String traversal" section for the optimization this measures.
+    pub utf8_seek_bytes: u64,
 }
 
 impl Metrics {
@@ -207,6 +220,7 @@ impl Metrics {
             mutarray_elements_copied: 0,
             mutarray_reads: 0,
             mutarray_writes: 0,
+            utf8_seek_bytes: 0,
         }
     }
 
@@ -288,6 +302,12 @@ impl Metrics {
     pub fn record_mutarray_write(&mut self) {
         if self.enabled() {
             self.mutarray_writes += 1;
+        }
+    }
+
+    pub fn record_utf8_seek(&mut self, bytes: usize) {
+        if self.enabled() {
+            self.utf8_seek_bytes += bytes as u64;
         }
     }
 
@@ -373,6 +393,7 @@ impl Metrics {
             ("mutableArrayElements", n(self.mutarray_elements_copied)),
         ]);
         let mutations = dict(&[("reads", n(self.mutarray_reads)), ("writes", n(self.mutarray_writes))]);
+        let traversal = dict(&[("utf8SeekBytes", n(self.utf8_seek_bytes))]);
         dict(&[
             ("total", total),
             ("byKind", by_kind),
@@ -380,6 +401,7 @@ impl Metrics {
             ("gc", gc),
             ("copies", copies),
             ("mutableArray", mutations),
+            ("traversal", traversal),
             ("sites", sites_tcl.to_string()),
         ])
     }

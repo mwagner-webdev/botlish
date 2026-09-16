@@ -158,6 +158,10 @@ namespace eval native::lower {
     # analysis of the program, and whether it is enabled at all.
     variable stringregion {}
     variable stringRegionOpt 1
+    # String traversal (see "String traversal" below): the hir::traversal
+    # analysis of the program, and whether it is enabled at all.
+    variable traversal {}
+    variable traversalOpt 1
 }
 
 # ---------------------------------------------------------------------------
@@ -409,6 +413,138 @@ namespace eval native::lower {
 # baseline.
 
 # ---------------------------------------------------------------------------
+# String traversal
+#
+# A provably forward, +1-per-iteration character scan (hir/traversal.tcl's
+# TraversalPlan) carries its physical UTF-8 byte position across the self-
+# tail loop as one *hidden* extra function parameter, instead of every
+# access re-locating the semantic character index from byte 0 (rt_substr's/
+# rt_str_region_eq's non-ASCII paths). This is the same "representation, not
+# semantics" discipline as the "Representation", "Scalar replacement" and
+# "String regions" sections above: no Botlish String, index, or
+# hir/specialize.tcl instance changes meaning; only how a proven-forward
+# scan's execution *carries state across iterations* changes.
+#
+# The hidden parameter
+# ---------------------
+# An instance hir::traversal.tcl gives a TraversalPlan gets one extra
+# register beyond its ordinary (source) parameters -- allocated right after
+# them (`[dict get $plan byteParamIndex]`, always the source parameter
+# count), so it becomes the function's last declared parameter. It holds an
+# ordinary *tagged* Int (never raw/untagged: unlike RawParams' whole-function
+# raw parameters, this never needs the "Representation" section's
+# raw-across-backedge machinery at all -- a traversal's carried byte offset
+# is always a small Int, so boxing/unboxing it costs nothing beyond a tag
+# bit, value.rs's make_small/small_of being pure bit operations with no
+# allocation). Concretely:
+#
+#   func F "clean_from" params=4 ...   ; the 4th slot (index 3) is the
+#                                       ; hidden byte position, never a
+#                                       ; Botlish `clean_from` parameter
+#
+# This reuses exactly the mechanism that already carries a self-tail loop's
+# ordinary parameters across its `tail`/`tailenv` backedge (ordinary NIR
+# registers rebound by Tail's argument list): the hidden parameter is not a
+# new codegen concept, just one more register in that same list (see
+# AppendTraversalArg below) -- native/src/codegen/clif.rs needs no change at
+# all, since its prologue, prologue-to-body jump and Tail lowering are
+# already generic in the number of declared parameters (native/src/nir.rs's
+# `f.params`, read from this function's own header).
+#
+# Recognizing an access: TraversalAccess
+# ----------------------------------------
+# hir/traversal.tcl's `accesses` names the exact call expressions -- each a
+# call forwarding to a recognized character-accessor instance (`peek`-shaped:
+# hir/traversal.tcl's CharAccessorShape; see that module's header for why a
+# *direct* `substring(text, i, i+1)` call is deliberately not recognized,
+# even though it is structurally simpler) -- that read the scanned String at
+# the loop's own induction index. Call (below) checks this *before* any of
+# its other dispatch (a native call, a block call, wantRegion/wantVirtual): when the
+# current function has an active TraversalPlan and E is one of its
+# recognized accesses, TraversalAccess lowers it directly, inline, in the
+# *caller's* own function body -- never emitting a `call`/`callenv` to
+# `peek`'s own compiled function at all for this one call site (the
+# smallest sound mechanism per the milestone's #17-18 option A: no new
+# interprocedural ABI, no companion call, `peek`'s own canonical function
+# still unconditionally emitted and still correct for every other caller).
+#
+# TraversalAccess reads the access call's own two argument expressions for
+# the scanned String and the index (`Expr fn ... tagged`: ordinary
+# expression lowering, so a raw-declared index parameter is transparently
+# reboxed by the existing TaggedOf machinery, exactly as any other tagged
+# consumer of it already is) and emits, matching `peek`'s own semantics
+# exactly (#30 of the milestone: EOF and bounds behavior unchanged):
+#
+#   len = strlen(text)
+#   if index >= len:
+#       result, nextByte = "", byteReg            ; unchanged: peek's own
+#                                                   ; EOF branch never reads
+#                                                   ; a byte position either
+#   else:
+#       result = decodecharat(text, byteReg)       ; op DecodeCharAt
+#       nextByte = byteReg + strbytelen(result)     ; op StrByteLen, iadd
+#
+# joined (the same shared-register `move`-then-`jump` idiom If already
+# uses) into RESULT (the access's own ordinary tagged return value -- the
+# one-character String a caller like `clean_char` receives exactly as
+# before: #10/#20 of the milestone, character materialization is
+# unaffected) and the function's new current byte position, saved in `fn
+# traversalByteReg` for whichever `tail`/`tailenv`/(exotic) `call` reads it
+# next.
+#
+# Only ever recognized when the result is wanted tagged (never region/
+# virtual: TraversalAccess is skipped, falling back to ordinary lowering,
+# if `want` is anything else -- #23's conservative fallback; the corpus
+# this milestone targets never asks for one at a recognized access site,
+# since hir/traversal.tcl only looks inside a self-tail call's own
+# argument subtree, never a `==`/`length` operand position).
+#
+# Threading the hidden parameter across calls: AppendTraversalArg
+# ------------------------------------------------------------------
+# Two call sites ever need the hidden parameter's *value*, both inside
+# Call's existing block-call dispatch:
+#
+#   self-tail (`tail`/`tailenv`)   the function's own current
+#                                   `fn traversalByteReg` (TraversalAccess
+#                                   already advanced it, earlier in this
+#                                   same statement's argument evaluation,
+#                                   before the backedge is emitted)
+#   ordinary direct call            a literal `int 0` -- sound because
+#   (`call`/`callenv`)              hir/traversal.tcl's ZeroStart already
+#                                   proved *every* such caller passes
+#                                   literal 0 for the scanned index itself,
+#                                   so byte offset 0 is exactly where this
+#                                   call's scan begins
+#
+# A generic/indirect call (`callvalue`, `rt_call_value`) can only ever
+# reach a *generic* instance (native/lower.tcl's own header: "Block values
+# are always generic instances"), and hir/traversal.tcl analyzes each used
+# instance -- generic or specialized -- independently from its own actual
+# callers, so this never needs special handling: a generic instance either
+# independently earns its own TraversalPlan (and every one of *its* actual
+# callers, direct calls only, already satisfies ZeroStart) or it does not,
+# and callvalue simply never supplies the hidden parameter because no
+# generic-entry caller (rt_call_value's fixed ABI) ever could -- so a
+# TraversalPlan is never given to an instance reachable that way in the
+# first place (ZeroStart only examines hir::specialize's own direct `calls`
+# edges, never a value-call site, so an instance with no direct callers at
+# all simply never proves ZeroStart and is never optimized).
+#
+# Interaction with scalar replacement / String regions
+# -------------------------------------------------------
+# hir/traversal.tcl itself excludes any instance hir::escape.tcl or
+# hir::stringregion.tcl also wants a companion function for, so a
+# TraversalPlan instance is only ever reached through the ordinary call/tail
+# ABI: CompanionFunction and RegionCompanionFunction never need the hidden
+# parameter at all (their own `fn traversal` is always ""), and only
+# Function's prologue ever allocates it.
+#
+# -string-traversal-opt 0 (or BOTLISH_NATIVE_STRING_TRAVERSAL_OPT=0)
+# disables this analysis and lowering outright, independent of every other
+# -*-opt flag, for differential (semantic and instrumentation) testing
+# against the unoptimized baseline.
+
+# ---------------------------------------------------------------------------
 # Entry point
 
 # The NIR of the program-mode HIR program HIR. Options:
@@ -426,6 +562,14 @@ namespace eval native::lower {
 #                      1, unless the environment variable
 #                      BOTLISH_NATIVE_STRING_REGION_OPT is 0; see the
 #                      "String regions" section above)
+#   -string-traversal-opt 1|0
+#                      carry a provably forward, +1-per-iteration character
+#                      scan's physical UTF-8 byte position across its self-
+#                      tail loop (hir/traversal.tcl) instead of relocating it
+#                      from byte 0 on every access (default 1, unless the
+#                      environment variable
+#                      BOTLISH_NATIVE_STRING_TRAVERSAL_OPT is 0; see the
+#                      "String traversal" section above)
 # Returns a dict:
 #   text        the NIR program
 #   functions   list of dicts, in id order: {id name block instance label
@@ -454,6 +598,8 @@ proc native::lower::program {hirProgram args} {
     variable escapeOpt
     variable stringregion
     variable stringRegionOpt
+    variable traversal
+    variable traversalOpt
 
     set default [expr {[info exists ::env(BOTLISH_NATIVE_SPECIALIZE)]
         && $::env(BOTLISH_NATIVE_SPECIALIZE) eq "0" ? 0 : 1}]
@@ -463,9 +609,11 @@ proc native::lower::program {hirProgram args} {
         && $::env(BOTLISH_NATIVE_ESCAPE_OPT) eq "0" ? 0 : 1}]
     set stringRegionDefault [expr {[info exists ::env(BOTLISH_NATIVE_STRING_REGION_OPT)]
         && $::env(BOTLISH_NATIVE_STRING_REGION_OPT) eq "0" ? 0 : 1}]
+    set traversalDefault [expr {[info exists ::env(BOTLISH_NATIVE_STRING_TRAVERSAL_OPT)]
+        && $::env(BOTLISH_NATIVE_STRING_TRAVERSAL_OPT) eq "0" ? 0 : 1}]
     set options [hir::Options native::lower::program \
         [list -specialize $default -repr-opt $reprDefault -escape-opt $escapeDefault \
-            -string-region-opt $stringRegionDefault] $args]
+            -string-region-opt $stringRegionDefault -string-traversal-opt $traversalDefault] $args]
     if {[hir::mode $hirProgram] ne "program"} {
         throw {NATIVE UNSUPPORTED sequence-mode} \
             "native lowering: only program-mode HIR can be compiled (sequence mode runs in an unknown environment)"
@@ -475,12 +623,15 @@ proc native::lower::program {hirProgram args} {
     set reprOpt [dict get $options -repr-opt]
     set escapeOpt [dict get $options -escape-opt]
     set stringRegionOpt [dict get $options -string-region-opt]
+    set traversalOpt [dict get $options -string-traversal-opt]
     set spec [hir::specialize::analyze $hirProgram -specialize [dict get $options -specialize]]
     set ranges [hir::range::analyze $hirProgram $spec]
     set escape [expr {$escapeOpt ? [hir::escape::analyze $hirProgram $spec]
         : [dict create arity {} wants {} virtual {}]}]
     set stringregion [expr {$stringRegionOpt ? [hir::stringregion::analyze $hirProgram $spec]
         : [dict create regionOf {} wants {} virtual {}]}]
+    set traversal [expr {$traversalOpt ? [hir::traversal::analyze $hirProgram $spec $stringregion $escape]
+        : [dict create plans {}]}]
     set context [dict get $spec context]
     set selfTail [dict get $context selfTails]
     set unproven [dict get $context unproven]
@@ -773,6 +924,7 @@ proc native::lower::Function {id} {
     variable captureLists
     variable currentInstance
     variable ranges
+    variable traversal
     set currentInstance $id
     set instance [hir::specialize::instance $spec $id]
     set region [dict get $instance block]
@@ -786,7 +938,8 @@ proc native::lower::Function {id} {
     set fn [dict create region $region instance $id targets [dict get $instance calls] \
         lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 \
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
-        locals [dict create] loops [dict create] broken [dict create] calls {} companion "" regionCompanion 0]
+        locals [dict create] loops [dict create] broken [dict create] calls {} companion "" regionCompanion 0 \
+        traversal "" traversalByteReg ""]
     if {$region eq "program"} {
         set name <program>
         set params {}
@@ -810,6 +963,15 @@ proc native::lower::Function {id} {
             dict set fn locals $b [list reg $r]
         }
     }
+    set extraParams 0
+    if {$region ne "program"} {
+        set plan [hir::traversal::plan $traversal $id]
+        if {$plan ne ""} {
+            dict set fn traversal $plan
+            dict set fn traversalByteReg [NewReg fn]
+            set extraParams 1
+        }
+    }
     EnterScope fn $scope
     set result [Sequence fn $body]
     if {$result ne "never"} {
@@ -823,7 +985,7 @@ proc native::lower::Function {id} {
     # pnames: the parameter names as block error messages show them.
     set key [expr {[dict get $instance generic] ? "generic"
         : [join [lmap t [dict get $instance args] {hir::types::show $t}] {, }]}]
-    set head "func [Placeholder $id] [Quote $name] params=[llength $params] env=$env regs=[dict get $fn nreg] pnames=[Quote [join $pnames { }]] captures=[llength $captures] instance=[Quote $key]"
+    set head "func [Placeholder $id] [Quote $name] params=[expr {[llength $params] + $extraParams}] env=$env regs=[dict get $fn nreg] pnames=[Quote [join $pnames { }]] captures=[llength $captures] instance=[Quote $key]"
     set rawRegs [lsort -integer [lmap r [dict keys [dict get $fn rawRegs]] {string range $r 1 end}]]
     if {$rawRegs ne ""} {
         append head " rawregs=[Quote [join $rawRegs { }]]"
@@ -877,7 +1039,8 @@ proc native::lower::CompanionFunction {id} {
     set fn [dict create region $region instance $id targets [dict get $instance calls] \
         lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 \
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
-        locals [dict create] loops [dict create] broken [dict create] calls {} companion $arity regionCompanion 0]
+        locals [dict create] loops [dict create] broken [dict create] calls {} companion $arity regionCompanion 0 \
+        traversal "" traversalByteReg ""]
     set name [hir::aot::BlockName $hir $region]
     set params [hir::get $hir $region params]
     set env [expr {$region ni $envless}]
@@ -968,7 +1131,8 @@ proc native::lower::RegionCompanionFunction {id} {
     set fn [dict create region $region instance $id targets [dict get $instance calls] \
         lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 \
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
-        locals [dict create] loops [dict create] broken [dict create] calls {} companion "" regionCompanion 1]
+        locals [dict create] loops [dict create] broken [dict create] calls {} companion "" regionCompanion 1 \
+        traversal "" traversalByteReg ""]
     set name [hir::aot::BlockName $hir $region]
     set params [hir::get $hir $region params]
     set env [expr {$region ni $envless}]
@@ -1542,9 +1706,27 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
     variable natives
     variable escape
     variable stringregion
+    variable traversal
     lassign [dict get $node target] targetKind target
     set calleeExpr [dict get $node callee]
     set argExprs [dict get $node args]
+
+    if {$wantVirtual eq "" && !$wantRegion} {
+        set plan [dict get $fn traversal]
+        if {$plan ne "" && $e in [dict get $plan accesses]} {
+            # A recognized single-character String traversal access (see
+            # native/lower.tcl's "String traversal" section and hir/
+            # traversal.tcl): lowered directly here, inline, in the caller's
+            # own body -- never as a `call`/`callenv` to its own callee
+            # function at all for this one call site. Only when an ordinary
+            # tagged result is wanted (#23's conservative fallback: hir/
+            # traversal.tcl never actually produces an access reachable in a
+            # region/virtual-consuming position, but this guard costs
+            # nothing and keeps that a soundness property of this lowering,
+            # not just of the analysis).
+            return [TraversalAccess fn $e $node $plan]
+        }
+    }
 
     if {$wantRegion && $targetKind eq "native"
             && [dict get [hir::symbol $hir $target] name] eq "substring" && [llength $argExprs] == 3} {
@@ -1694,10 +1876,19 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
         }
         if {$self} {
             dict lappend fn calls [list direct [Placeholder $instance] 1]
+            set tailArgs $argRegs
+            if {[dict get $fn traversal] ne ""} {
+                # This instance's own hidden byte-position parameter
+                # (native/lower.tcl's "String traversal" section): carries
+                # forward whatever TraversalAccess last advanced it to while
+                # lowering this same self-tail call's own argument
+                # expressions, above.
+                lappend tailArgs [dict get $fn traversalByteReg]
+            }
             if {$target in $envless} {
-                Emit fn [string trimright "tail [join $argRegs { }]"] $e
+                Emit fn [string trimright "tail [join $tailArgs { }]"] $e
             } else {
-                Emit fn [string trimright "tailenv $callee [join $argRegs { }]"] $e
+                Emit fn [string trimright "tailenv $callee [join $tailArgs { }]"] $e
             }
             return {never tagged}
         }
@@ -1743,6 +1934,15 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
         }
         set id [FunctionRef $instance]
         dict lappend fn calls [list direct $id $self]
+        set targetPlan [hir::traversal::plan $traversal $instance]
+        if {$targetPlan ne ""} {
+            # The callee has a TraversalPlan: hir/traversal.tcl's ZeroStart
+            # already proved every direct, non-self-tail caller of it
+            # (this call site included) passes literal 0 for its own scanned
+            # index, so its hidden byte-position parameter starts at byte
+            # offset 0 here -- exactly where a semantic index of 0 begins.
+            lappend argRegs [IntConst fn 0 $e]
+        }
         if {$target in $envless} {
             return [list [Assign fn [string trimright "call $id [join $argRegs { }]"] $e] tagged]
         }
@@ -1765,6 +1965,61 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
     }
     dict lappend fn calls [list value]
     return [list [Assign fn [string trimright "callvalue $callee [join $argRegs { }]"] $e] tagged]
+}
+
+# Lowers E, one of PLAN's recognized accesses (native/lower.tcl's "String
+# traversal" section, hir/traversal.tcl's TraversalPlan), inline: reads E's
+# own text/index argument expressions (ordinary `Expr fn ... tagged`
+# lowering -- a raw-declared index parameter is transparently reboxed by the
+# existing TaggedOf machinery, exactly as any other tagged consumer already
+# is), then decodes directly at the function's current carried byte
+# position instead of calling E's own callee. Matches the access's own
+# (peek-shaped) semantics exactly: `if index >= length(text): ""` else the
+# one-character String at that index -- never seeking to find it, since
+# PLAN's own soundness proof (hir/traversal.tcl's ZeroStart plus the
+# self-tail +1 step) is exactly what guarantees the carried byte position
+# already corresponds to `index`. Updates `fn traversalByteReg` to the
+# decoded scalar's advanced position, read back by Call's self-tail-call
+# (`tail`/`tailenv`) argument list once every access in this statement has
+# run. Always returns a tagged result (this instance's caller, Call, only
+# ever reaches here when an ordinary tagged value is wanted).
+proc native::lower::TraversalAccess {fnVar e node plan} {
+    upvar 1 $fnVar fn
+    set args [dict get $node args]
+    set textExpr [lindex $args [dict get $plan textArgOf $e]]
+    set indexExpr [lindex $args [dict get $plan indexArgOf $e]]
+    set textReg [Expr fn $textExpr]
+    if {$textReg eq "never"} {
+        return {never tagged}
+    }
+    set indexReg [Expr fn $indexExpr]
+    if {$indexReg eq "never"} {
+        return {never tagged}
+    }
+    set byteReg [dict get $fn traversalByteReg]
+    set lenReg [Assign fn "op strlen $textReg" $e]
+    set pastEnd [Assign fn "op ige $indexReg $lenReg" $e]
+    set emptyLabel [NewLabel fn]
+    set decodeLabel [NewLabel fn]
+    set joinLabel [NewLabel fn]
+    set resultReg [NewReg fn]
+    set nextByteReg [NewReg fn]
+    Emit fn "br $pastEnd $emptyLabel $decodeLabel" $e
+    EmitLabel fn $emptyLabel
+    set emptyStr [Assign fn "str [Quote {}]" $e]
+    Emit fn "$resultReg = move $emptyStr"
+    Emit fn "$nextByteReg = move $byteReg"
+    Emit fn "jump $joinLabel"
+    EmitLabel fn $decodeLabel
+    set charReg [Assign fn "op decodecharat $textReg $byteReg" $e]
+    set widthReg [Assign fn "op strbytelen $charReg" $e]
+    set advancedReg [Assign fn "op iadd $byteReg $widthReg" $e]
+    Emit fn "$resultReg = move $charReg"
+    Emit fn "$nextByteReg = move $advancedReg"
+    Emit fn "jump $joinLabel"
+    EmitLabel fn $joinLabel
+    dict set fn traversalByteReg $nextByteReg
+    return [list $resultReg tagged]
 }
 
 # 1 if expression E (an operand of a native `==`/`length` call TryStringRegionOp

@@ -1,0 +1,303 @@
+# native-string-traversal.test -- carrying a provably forward,
+# +1-per-iteration character scan's physical UTF-8 byte position across its
+# self-tail loop (hir/traversal.tcl, native/lower.tcl's "String traversal"
+# section): correctness across 1/2/3/4-byte and mixed-width scans, the
+# hidden extra parameter and decodecharat/strbytelen ops in NIR, the
+# utf8SeekBytes instrumentation collapsing to exactly 0 for an optimized
+# full scan, conservative fallback for a non-zero-start caller, and GC
+# stress.
+#
+# -string-traversal-opt 0 (or BOTLISH_NATIVE_STRING_TRAVERSAL_OPT=0)
+# disables the analysis outright: most tests here differentially compare it
+# against the default (on), the same way native-string-region.test's own
+# tests compare -string-region-opt 1 vs 0.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot examples stdlib corpus.tcl]
+
+interp recursionlimit {} 1000000
+
+proc sourceHir {text} {
+    return [surface::compile $text t.bot -strict 0]
+}
+
+# Asserts optimized (string-traversal-opt 1) and baseline (0) agree with the
+# reference interpreter on TEXT's value or error.
+proc assertParity {text} {
+    set hir [sourceHir $text]
+    set interp [core::evalProgram [hir::lower $hir]]
+    set on [native::evalHir $hir -string-traversal-opt 1]
+    set off [native::evalHir $hir -string-traversal-opt 0]
+    if {![core::value::equal $interp $on] || ![core::value::equal $interp $off]} {
+        error "string-traversal-opt 1 ($on) vs 0 ($off) vs interp ($interp) mismatch"
+    }
+    return $on
+}
+
+# TEXT's utf8SeekBytes under STRING-TRAVERSAL-OPT (1 or 0): source UTF-8
+# bytes walked solely to map a semantic character index to a physical byte
+# offset (native/src/runtime/metrics.rs's utf8_seek_bytes; never the O(1)
+# work of decodecharat/strbytelen at an already-carried position).
+proc seekBytes {text opt} {
+    return [dict get [native::allocationReport [sourceHir $text] summary 1 -string-traversal-opt $opt] traversal utf8SeekBytes]
+}
+
+# A peek-shaped one-character accessor, exactly the CSV-scanner/AI-cleaner
+# idiom this milestone targets (examples/stdlib/csv.bot's and
+# examples/stdlib/ai_text_clean.bot's own `peek`).
+set ::peekSrc {
+fn peek(text, index):
+    if index >= length(text):
+        return ""
+
+    substring(text, index, index + 1)
+}
+
+# text's characters from index on, reassembled unchanged (csv.bot's own
+# `character = peek(text, index)`-then-use idiom: the access is bound to a
+# local, not inlined directly into the self-tail call's own arguments).
+set ::scanCollectSrc "$::peekSrc
+fn scan_collect(text, index, done):
+    if index >= length(text):
+        return done
+    character = peek(text, index)
+    scan_collect(text, index + 1, concat(done, character))
+"
+
+# text's characters from index on, counted if they peek()-equal any of
+# LITERALS (ai_text_clean.bot's own idiom: `peek(text, index)` is nested
+# directly, unbound, in the self-tail call's own argument expressions --
+# `count + is_target(peek(text, index))` -- rather than bound to a local
+# first).
+proc scanCountSrc {literals} {
+    set checks [join [lmap l $literals {string cat "c == " $l}] " or "]
+    return "$::peekSrc
+fn is_target(c):
+    if $checks:
+        return 1
+    0
+
+fn scan_count(text, index, count):
+    if index >= length(text):
+        return count
+    scan_count(text, index + 1, count + is_target(peek(text, index)))
+"
+}
+
+# ---------------------------------------------------------------------------
+# Correctness: 1/2/3/4-byte and mixed-width forward scans (#22 of the
+# milestone), reassembling the scanned text exactly (scan_collect) so a
+# single incorrect width update anywhere would corrupt every later access.
+
+test traversal-ascii-1 {a full ASCII forward scan reassembles exactly, parity on/off} -body {
+    set text "$::scanCollectSrc
+fn f():
+    scan_collect([corpus::literal {the quick brown fox jumps}], 0, \"\")
+f()
+"
+    assertParity $text
+} -result [list str "the quick brown fox jumps"]
+
+test traversal-2byte-1 {a full 2-byte-scalar (BMP Latin-1 supplement) forward scan reassembles exactly} -body {
+    set text "$::scanCollectSrc
+fn f():
+    scan_collect([corpus::literal "éèêëé"], 0, \"\")
+f()
+"
+    assertParity $text
+} -result [list str "éèêëé"]
+
+test traversal-3byte-1 {a full 3-byte-scalar (CJK) forward scan reassembles exactly} -body {
+    set text "$::scanCollectSrc
+fn f():
+    scan_collect([corpus::literal "東京の報告"], 0, \"\")
+f()
+"
+    assertParity $text
+} -result [list str "東京の報告"]
+
+set ::grinning [encoding convertfrom utf-8 "\xf0\x9f\x98\x80"]
+set ::rocket [encoding convertfrom utf-8 "\xf0\x9f\x9a\x80"]
+set ::slightlySmiling [encoding convertfrom utf-8 "\xf0\x9f\x99\x82"]
+set ::fourByteText "$::grinning$::rocket$::grinning"
+set ::mixedWidthText "AéB東京$::slightlySmiling A$::slightlySmiling$::slightlySmiling$::slightlySmiling"
+
+test traversal-4byte-1 {a full 4-byte-scalar (supplementary-plane emoji) forward scan reassembles exactly} -body {
+    set text "$::scanCollectSrc
+fn f():
+    scan_collect([corpus::literal $::fourByteText], 0, \"\")
+f()
+"
+    assertParity $text
+} -result [list str $::fourByteText]
+
+test traversal-mixed-1 {a mixed 1/2/3/4-byte-width forward scan reassembles exactly (AeB/A-nihon-B/A-emoji-B shapes together)} -body {
+    set text "$::scanCollectSrc
+fn f():
+    scan_collect([corpus::literal $::mixedWidthText], 0, \"\")
+f()
+"
+    assertParity $text
+} -result [list str $::mixedWidthText]
+
+test traversal-single-char-1 {a single-character String scans correctly} -body {
+    set text "$::scanCollectSrc
+fn f():
+    scan_collect([corpus::literal a], 0, \"\")
+f()
+"
+    assertParity $text
+} -result [list str a]
+
+test traversal-empty-1 {an empty String scans correctly (no access ever runs)} -body {
+    set text "$::scanCollectSrc
+fn f():
+    scan_collect([corpus::literal {}], 0, \"\")
+f()
+"
+    assertParity $text
+} -result [list str ""]
+
+test traversal-early-exit-1 {a scan that returns before consuming the whole String still carries the byte position correctly for the characters it does read} -body {
+    set text "$::peekSrc
+fn stop_at_comma(text, index, done):
+    if index >= length(text):
+        return done
+    c = peek(text, index)
+    if c == \",\":
+        return done
+    stop_at_comma(text, index + 1, concat(done, c))
+
+fn f():
+    stop_at_comma([corpus::literal "éè,not read"], 0, \"\")
+f()
+"
+    assertParity $text
+} -result [list str "éè"]
+
+test traversal-bind-idiom-1 {csv.bot's own bind-then-use idiom (character = peek(text, index), used later) is recognized, not just an access inlined into the tail call's own arguments} -body {
+    set nirText [dict get [native::lower::program [sourceHir "$::scanCollectSrc
+fn f(text):
+    scan_collect(text, 0, \"\")
+"] -string-traversal-opt 1] text]
+    list [regexp {op decodecharat} $nirText] [regexp {op strbytelen} $nirText]
+} -result {1 1}
+
+test traversal-inline-idiom-1 {ai_text_clean.bot's own inline idiom (peek(text, index) nested directly in the self-tail call's own arguments) is recognized} -body {
+    set text [scanCountSrc [list [corpus::literal a] [corpus::literal e]]]
+    set nirText [dict get [native::lower::program [sourceHir "$text
+fn f(text):
+    scan_count(text, 0, 0)
+"] -string-traversal-opt 1] text]
+    list [regexp {op decodecharat} $nirText] [regexp {op strbytelen} $nirText]
+} -result {1 1}
+
+# ---------------------------------------------------------------------------
+# NIR structure (#43): the optimized function declares one hidden extra
+# parameter, carries decodecharat/strbytelen, and (with the optimizer off)
+# does neither.
+
+test traversal-nir-hidden-param-1 {optimized: scan_collect's compiled function declares one more parameter than its 3 source parameters (text, index, done)} -body {
+    set nirText [dict get [native::lower::program [sourceHir "$::scanCollectSrc
+fn f(text):
+    scan_collect(text, 0, \"\")
+"] -string-traversal-opt 1] text]
+    regexp {func \S+ "scan_collect"[^\n]*params=(\d+)} $nirText -> params
+    set params
+} -result 4
+
+test traversal-nir-off-1 {-string-traversal-opt 0: no hidden parameter, no decodecharat/strbytelen, ordinary calls to peek's own function} -body {
+    set nirText [dict get [native::lower::program [sourceHir "$::scanCollectSrc
+fn f(text):
+    scan_collect(text, 0, \"\")
+"] -string-traversal-opt 0] text]
+    regexp {func \S+ "scan_collect"[^\n]*params=(\d+)} $nirText -> params
+    list $params [regexp {op decodecharat} $nirText] [regexp {op strbytelen} $nirText] [regexp {call \S+ } $nirText]
+} -result {3 0 0 1}
+
+# ---------------------------------------------------------------------------
+# Conservative fallback (#7, #23): a scan whose only direct caller does not
+# pass literal 0 is not optimized, but stays correct.
+
+test traversal-nonzero-start-1 {a scan whose only caller passes a non-zero literal start index is not given a TraversalPlan, but remains correct (conservative fallback)} -body {
+    set text "$::scanCollectSrc
+fn f():
+    scan_collect([corpus::literal {the quick brown fox}], 4, \"\")
+f()
+"
+    set nirText [dict get [native::lower::program [sourceHir $text] -string-traversal-opt 1] text]
+    list [assertParity $text] [regexp {op decodecharat} $nirText]
+} -result [list [list str "quick brown fox"] 0]
+
+# ---------------------------------------------------------------------------
+# utf8SeekBytes (#8, #12-13 of the milestone): an optimized full scan over
+# non-ASCII text performs exactly zero source-byte seeking (every access
+# decodes at an already-carried byte position); with the optimizer off, the
+# same scan performs a nonzero, size-growing amount (rt_substr's non-ASCII
+# path re-locating each character index from byte 0).
+
+test traversal-seek-bytes-on-1 {optimized: a full non-ASCII scan's utf8SeekBytes is exactly 0} -body {
+    set text "$::scanCollectSrc
+fn f():
+    scan_collect([corpus::literal [string repeat é 200]], 0, \"\")
+f()
+"
+    seekBytes $text 1
+} -result 0
+
+test traversal-seek-bytes-off-1 {unoptimized (-string-traversal-opt 0): the same full non-ASCII scan performs nonzero seeking} -body {
+    set text "$::scanCollectSrc
+fn f():
+    scan_collect([corpus::literal [string repeat é 200]], 0, \"\")
+f()
+"
+    expr {[seekBytes $text 0] > 0}
+} -result 1
+
+test traversal-seek-bytes-ascii-1 {ASCII text needs no seeking either way (character index already is the byte offset)} -body {
+    set text "$::scanCollectSrc
+fn f():
+    scan_collect([corpus::literal [string repeat a 200]], 0, \"\")
+f()
+"
+    list [seekBytes $text 1] [seekBytes $text 0]
+} -result {0 0}
+
+# ---------------------------------------------------------------------------
+# Feature flag (#35): BOTLISH_NATIVE_STRING_TRAVERSAL_OPT=0 disables the
+# analysis exactly like -string-traversal-opt 0.
+
+test traversal-env-flag-1 {BOTLISH_NATIVE_STRING_TRAVERSAL_OPT=0 disables the optimization} -setup {
+    set ::env(BOTLISH_NATIVE_STRING_TRAVERSAL_OPT) 0
+} -cleanup {
+    unset ::env(BOTLISH_NATIVE_STRING_TRAVERSAL_OPT)
+} -body {
+    set nirText [dict get [native::lower::program [sourceHir "$::scanCollectSrc
+fn f(text):
+    scan_collect(text, 0, \"\")
+"]] text]
+    regexp {op decodecharat} $nirText
+} -result 0
+
+# ---------------------------------------------------------------------------
+# GC stress (#32): the scanned String stays rooted, and every decoded
+# one-character String is correctly rooted, under BOTLISH_NATIVE_GC_STRESS=1
+# (collect before every allocation).
+
+set ::party [encoding convertfrom utf-8 "\xf0\x9f\x8e\x89"]
+set ::gcStressText [string repeat "aé東$::party" 20]
+
+test traversal-gc-stress-1 {a long mixed-width scan survives GC stress and reassembles exactly} -setup {
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+} -cleanup {
+    unset ::env(BOTLISH_NATIVE_GC_STRESS)
+} -body {
+    native::evalHir [sourceHir "$::scanCollectSrc
+fn f():
+    scan_collect([corpus::literal $::gcStressText], 0, \"\")
+f()
+"]
+} -result [list str $::gcStressText]
+
+cleanupTests

@@ -22,6 +22,8 @@
 //! | rt_hash                | any                 | Int (61-bit); EQUALITY       | no        |
 //! | rt_str_len             | Str                 | Int                          | no        |
 //! | rt_substr              | Str, Int, Int       | Str; RANGE                   | yes       |
+//! | rt_str_decode_char_at  | Str, Int(byte off.) | one-char Str                 | yes       |
+//! | rt_str_byte_len        | Str                 | Int (UTF-8 byte length)      | no        |
 //! | rt_str_lower           | Str                 | Str                          | yes       |
 //! | rt_str_cat             | Str, Str            | Str                          | yes       |
 //! | rt_list_new            | count, *Value       | List                         | yes       |
@@ -322,7 +324,17 @@ pub extern "C" fn rt_substr(p: *mut Vm, s: Value, start: Value, end: Value) -> V
         vm(p).metrics.record_string_copy(bytes);
         return r;
     }
-    let text: String = obj.text.chars().skip(from).take(to - from).collect();
+    // Non-ASCII: character index `from` is not a byte offset, so it must be
+    // located by decoding forward from byte 0 -- the seek this milestone's
+    // traversal optimization (hir/traversal.tcl, native/lower.tcl's "String
+    // traversal" section) exists to avoid paying on every element of a
+    // monotonic scan. `utf8SeekBytes` counts exactly this: the UTF-8 source
+    // bytes walked here to map a semantic character index to a physical
+    // byte offset, not the copy that follows (record_string_copy, separate).
+    let mut indices = obj.text.char_indices();
+    let seek_start = indices.by_ref().nth(from).map_or(obj.text.len(), |(i, _)| i);
+    vm(p).metrics.record_utf8_seek(seek_start);
+    let text: String = obj.text[seek_start..].chars().take(to - from).collect();
     let bytes = text.len();
     let r = vm(p).new_str(text);
     vm(p).metrics.record_string_copy(bytes);
@@ -358,7 +370,7 @@ pub extern "C" fn rt_str_region_check(p: *mut Vm, s: Value, start: Value, end: V
 /// BASE\[START..END) (a region `rt_str_region_check` already validated)
 /// compared character-for-character against OTHER, with no allocation.
 /// Never fallible.
-pub extern "C" fn rt_str_region_eq(_p: *mut Vm, base: Value, start: Value, end: Value, other: Value) -> Value {
+pub extern "C" fn rt_str_region_eq(p: *mut Vm, base: Value, start: Value, end: Value, other: Value) -> Value {
     let b = str_of(base);
     let o = str_of(other);
     let from = int_small(start).expect("region start already validated") as usize;
@@ -369,8 +381,51 @@ pub extern "C" fn rt_str_region_eq(_p: *mut Vm, base: Value, start: Value, end: 
     if b.ascii {
         bool_value(b.text.as_bytes()[from..to] == *o.text.as_bytes())
     } else {
-        bool_value(b.text.chars().skip(from).take(to - from).eq(o.text.chars()))
+        // Same seek accounting as rt_substr's non-ASCII path: locating
+        // character index `from` still means decoding forward from byte 0.
+        let mut indices = b.text.char_indices();
+        let seek_start = indices.by_ref().nth(from).map_or(b.text.len(), |(i, _)| i);
+        vm(p).metrics.record_utf8_seek(seek_start);
+        bool_value(b.text[seek_start..].chars().take(to - from).eq(o.text.chars()))
     }
+}
+
+// ---------------------------------------------------------------------------
+// String traversal (native/lower.tcl's "String traversal" lowering,
+// hir/traversal.tcl): a provably forward, +1-per-iteration character scan
+// carries its physical UTF-8 byte position across the loop instead of
+// re-seeking from byte 0 each iteration -- see hir/traversal.tcl's header.
+// Neither op below ever seeks: both act at a byte offset the caller already
+// carries, so unlike rt_substr's/rt_str_region_eq's non-ASCII paths, neither
+// touches `utf8SeekBytes`.
+
+/// The one Unicode scalar at BASE's UTF-8 byte offset BYTE_OFFSET, as a
+/// one-character String -- the same result `substring(base, i, i+1)` would
+/// produce for the character index i that byte offset corresponds to.
+/// BYTE_OFFSET is an ordinary tagged small Int (never raw): a traversal's
+/// carried position never exceeds BASE's byte length, always well within
+/// small-Int range, so keeping it tagged costs no allocation, just a tag
+/// bit (value.rs's make_small/small_of are pure bit operations). Never
+/// fallible: callers (native/lower.tcl) only ever emit this at a byte
+/// offset already proven in range by the traversal's own bounds check, and
+/// a one-character String can never exceed MAX_COLLECTION_LENGTH.
+pub extern "C" fn rt_str_decode_char_at(p: *mut Vm, s: Value, byte_offset: Value) -> Value {
+    let obj = str_of(s);
+    let off = int_small(byte_offset).expect("decode_char_at: byte_offset must be a small Int") as usize;
+    let c = obj.text[off..]
+        .chars()
+        .next()
+        .expect("decode_char_at: byte_offset must be a valid, in-bounds UTF-8 boundary");
+    vm(p).new_str_known(c.to_string(), 1, c.is_ascii())
+}
+
+/// The UTF-8 byte length of S's text -- distinct from `rt_str_len`, which
+/// counts Unicode scalars. A plain field read (StrObj::text.len()), never a
+/// scan: applied to `rt_str_decode_char_at`'s own result, this gives the
+/// encoded width of the scalar just decoded, letting a traversal advance its
+/// carried byte offset by exactly that many bytes.
+pub extern "C" fn rt_str_byte_len(p: *mut Vm, s: Value) -> Value {
+    vm(p).new_int(str_of(s).text.len() as i64)
 }
 
 pub extern "C" fn rt_str_lower(p: *mut Vm, s: Value) -> Value {
@@ -701,11 +756,12 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         MkOk => rt_result_new(p, 1, a[0]),
         MkError => rt_result_new(p, 0, a[0]),
         Hash => rt_hash(p, a[0]),
-        RegionCheck | RegionEq | RBox | RUnbox | RIAdd | RISub | RIMul | RILt | RILe | RIGt | RIGe | RIEq => {
-            // Raw (untagged) representation ops and StringRegion ops never
-            // implement a dynamic native: native/lower.tcl emits them only
-            // directly, as `op` instructions inline in a function's own
-            // body.
+        RegionCheck | RegionEq | RBox | RUnbox | RIAdd | RISub | RIMul | RILt | RILe | RIGt | RIGe | RIEq
+        | DecodeCharAt | StrByteLen => {
+            // Raw (untagged) representation ops, StringRegion ops and String
+            // traversal ops never implement a dynamic native: native/lower.tcl
+            // emits them only directly, as `op` instructions inline in a
+            // function's own body.
             unreachable!("{op:?} is never a native implementation")
         }
     }
@@ -737,6 +793,8 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_substr, 4),
         h!(rt_str_region_check, 4),
         h!(rt_str_region_eq, 5),
+        h!(rt_str_decode_char_at, 3),
+        h!(rt_str_byte_len, 2),
         h!(rt_str_lower, 2),
         h!(rt_str_cat, 3),
         h!(rt_list_new, 3),
@@ -757,4 +815,137 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_closure_new, 5),
         h!(rt_call_value, 4),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime::metrics::AllocMode;
+    use crate::runtime::vm::{ProgramInfo, Vm};
+
+    fn vm() -> Box<Vm> {
+        Vm::new(std::rc::Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new() }), AllocMode::Summary)
+    }
+
+    fn str_val(vm: &mut Vm, s: &str) -> Value {
+        vm.new_str(s.to_string())
+    }
+
+    fn small(n: i64) -> Value {
+        make_small(n)
+    }
+
+    // -----------------------------------------------------------------------
+    // decode_char_at / str_byte_len: 1/2/3/4-byte scalars, mixed widths.
+
+    #[test]
+    fn decode_char_at_ascii() {
+        let mut vm = vm();
+        let s = str_val(&mut vm, "hello");
+        let c = rt_str_decode_char_at(&mut *vm, s, small(1));
+        assert_eq!(str_of(c).text.as_ref(), "e");
+        assert_eq!(rt_str_byte_len(&mut *vm, c), small(1));
+    }
+
+    #[test]
+    fn decode_char_at_two_byte() {
+        let mut vm = vm();
+        // "é" is U+00E9, 2 bytes in UTF-8.
+        let s = str_val(&mut vm, "a\u{e9}b");
+        let c = rt_str_decode_char_at(&mut *vm, s, small(1));
+        assert_eq!(str_of(c).text.as_ref(), "\u{e9}");
+        assert_eq!(rt_str_byte_len(&mut *vm, c), small(2));
+    }
+
+    #[test]
+    fn decode_char_at_three_byte() {
+        let mut vm = vm();
+        // "東" is U+6771, 3 bytes in UTF-8.
+        let s = str_val(&mut vm, "a\u{6771}b");
+        let c = rt_str_decode_char_at(&mut *vm, s, small(1));
+        assert_eq!(str_of(c).text.as_ref(), "\u{6771}");
+        assert_eq!(rt_str_byte_len(&mut *vm, c), small(3));
+    }
+
+    #[test]
+    fn decode_char_at_four_byte() {
+        let mut vm = vm();
+        // U+1F600 (grinning face) is 4 bytes in UTF-8.
+        let s = str_val(&mut vm, "a\u{1f600}b");
+        let c = rt_str_decode_char_at(&mut *vm, s, small(1));
+        assert_eq!(str_of(c).text.as_ref(), "\u{1f600}");
+        assert_eq!(rt_str_byte_len(&mut *vm, c), small(4));
+    }
+
+    #[test]
+    fn decode_char_at_mixed_width_sequence() {
+        // A|é|東|🙂|A: verify each character decodes correctly by carrying
+        // the byte offset forward exactly as native/lower.tcl's optimized
+        // loop would (byte_i += strbytelen(decoded)), never seeking.
+        let mut vm = vm();
+        let text = "A\u{e9}\u{6771}\u{1f642}A";
+        let s = str_val(&mut vm, text);
+        let mut byte_offset = 0i64;
+        let expected: Vec<char> = text.chars().collect();
+        for want in expected {
+            let c = rt_str_decode_char_at(&mut *vm, s, small(byte_offset));
+            let got: Vec<char> = str_of(c).text.chars().collect();
+            assert_eq!(got, vec![want]);
+            let width = rt_str_byte_len(&mut *vm, c);
+            byte_offset += small_of(width);
+        }
+        assert_eq!(byte_offset as usize, str_of(s).text.len());
+    }
+
+    // -----------------------------------------------------------------------
+    // utf8SeekBytes: only the non-ASCII, seek-from-zero paths ever record it;
+    // decode_char_at/str_byte_len never do (they act at an already-carried
+    // position).
+
+    #[test]
+    fn substr_ascii_records_no_seek() {
+        let mut vm = vm();
+        let s = str_val(&mut vm, "hello world");
+        rt_substr(&mut *vm, s, small(2), small(5));
+        assert_eq!(vm.metrics.utf8_seek_bytes, 0);
+    }
+
+    #[test]
+    fn substr_non_ascii_records_seek_bytes_to_the_start_offset() {
+        let mut vm = vm();
+        // Every character is 2 bytes ("é"): character index 3's byte offset
+        // is exactly 6.
+        let s = str_val(&mut vm, &"\u{e9}".repeat(10));
+        rt_substr(&mut *vm, s, small(3), small(4));
+        assert_eq!(vm.metrics.utf8_seek_bytes, 6);
+    }
+
+    #[test]
+    fn substr_non_ascii_seek_grows_with_start_index() {
+        let mut vm = vm();
+        let s = str_val(&mut vm, &"\u{e9}".repeat(50));
+        rt_substr(&mut *vm, s, small(1), small(2));
+        let first = vm.metrics.utf8_seek_bytes;
+        rt_substr(&mut *vm, s, small(40), small(41));
+        let second = vm.metrics.utf8_seek_bytes - first;
+        assert!(second > first, "seeking further into the String must walk more bytes ({first} then {second})");
+    }
+
+    #[test]
+    fn decode_char_at_records_no_seek_regardless_of_offset() {
+        let mut vm = vm();
+        let s = str_val(&mut vm, &"\u{6771}".repeat(50));
+        rt_str_decode_char_at(&mut *vm, s, small(90));
+        assert_eq!(vm.metrics.utf8_seek_bytes, 0);
+    }
+
+    #[test]
+    fn region_eq_non_ascii_records_seek_bytes() {
+        let mut vm = vm();
+        let base = str_val(&mut vm, &"\u{e9}".repeat(10));
+        let other = str_val(&mut vm, "\u{e9}");
+        rt_str_region_check(&mut *vm, base, small(3), small(4));
+        rt_str_region_eq(&mut *vm, base, small(3), small(4), other);
+        assert_eq!(vm.metrics.utf8_seek_bytes, 6);
+    }
 }

@@ -903,6 +903,20 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         RegionEq => ("rt_str_region_eq", None, false, None),
                         StrEq => ("rt_str_eq", None, false, None),
                         StrLen => ("rt_str_len", None, false, None),
+                        StrByteLen => ("rt_str_byte_len", None, false, None),
+                        // Never fallible (see ops.rs's rt_str_decode_char_at):
+                        // a one-character String can never exceed
+                        // MAX_COLLECTION_LENGTH. Still routed through
+                        // call_allocating (like Substr) for GC accounting and
+                        // site attribution, since it does allocate.
+                        DecodeCharAt => {
+                            return self.call_allocating(
+                                "rt_str_decode_char_at",
+                                &[self.vm, a[0], a[1]],
+                                "decodecharat",
+                                KIND_STR,
+                            );
+                        }
                         Substr => ("rt_substr", None, true, Some(("substr", KIND_STR))),
                         // Fallible: each may construct a new String/List,
                         // which the runtime rejects past
