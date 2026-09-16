@@ -476,7 +476,7 @@ test native-spec-14 {guard accounting: blockers and emitted guards agree} -body 
 # guard accounting (blockers == guards, checked by native::report itself)
 # counts the same region's guards once per NIR function it is lowered into,
 # exactly as it always has for hir::escape's own List companions.
-} -result {{csv 17 19 0 0} {csv_chunked 29 31 1 1} {csv_geometric 24 26 0 0} {csv_records 84 86 29 29} {hashtable 63 55 25 25} {matmul 17 17 0 0} {string_replace 12 12 0 0} {string_reverse 4 4 0 0}}
+} -result {{ai_text_clean 6 6 0 0} {csv 17 19 0 0} {csv_chunked 29 31 1 1} {csv_geometric 24 26 0 0} {csv_records 84 86 29 29} {hashtable 63 55 25 25} {matmul 17 17 0 0} {string_replace 12 12 0 0} {string_reverse 4 4 0 0}}
 
 # ---------------------------------------------------------------------------
 # Closures
@@ -510,7 +510,7 @@ test native-corpus-1 {every corpus program's sample runs natively to its expect:
         set value [native::evalHir [surface::readProgramFile $path]]
         expr {[core::value::show $value 1] eq $expected}
     }
-} -result {1 1 1 1 1 1 1 1}
+} -result {1 1 1 1 1 1 1 1 1}
 
 test native-gc-1 {collecting before every allocation changes nothing} -body {
     set text "[core::ReadFile [file join $::projectRoot examples stdlib csv.bot]]\ncsv_parse(\"a,\\\"b\\\"\\\"c\\\",d\\ne,f\\n\")"

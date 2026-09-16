@@ -43,9 +43,95 @@ proc corpusTests {name cases} {
 
 set lit corpus::literal
 
+# ---------------------------------------------------------------------------
+# ai_text_clean
+#
+# Punctuation and emoji constants, all \u/\U Tcl escapes per this file's
+# header. $lit turns the resulting Tcl string into a Botlish string literal
+# (raw UTF-8 bytes in the literal: surface/lexer.tcl's STRING token supports
+# only \\ \" \n \r \t, no \u escape of its own).
+
+set enDash \u2013
+set emDash \u2014
+set lsquo \u2018
+set rsquo \u2019
+set ldquo \u201c
+set rdquo \u201d
+set ellipsis \u2026
+set grin \U0001F600
+set joy \U0001F602
+set slightSmile \U0001F642
+set heartEyes \U0001F60D
+set fire \U0001F525
+set rocket \U0001F680
+set checkMark \u2705
+set crossMark \u274c
+set party \U0001F389
+set robot \U0001F916
+set thumbsUp \U0001F44D
+set bulb \U0001F4A1
+set allEmoji [list $grin $joy $slightSmile $heartEyes $fire $rocket $checkMark $crossMark $party $robot $thumbsUp $bulb]
+
+# A ~1.5 KB deterministic fixture mixing emoji, curly punctuation and
+# multilingual text (bench/ai_text_clean.tcl's "family C" shape, at
+# correctness-test scale): checked by length and hash() rather than by its
+# full (non-ASCII) content, matching this file's own \u-escape convention.
+set aiCleanSentence "Gr\u00fc\u00dfe $emDash \u6771\u4eac $slightSmile: ${ldquo}Here${rsquo}s the result$emDash\it${rsquo}s concise, readable${ellipsis}and ready to use.$rdquo $rocket$robot "
+set aiCleanFixture [string repeat $aiCleanSentence [expr {1500 / [string length $aiCleanSentence] + 1}]]
+set aiCleanFixture [string range $aiCleanFixture 0 1499]
+
+corpusTests ai_text_clean [list \
+    ascii              {plain ASCII text is unchanged} \
+        {clean_ai_text("The model generated this sentence.")} \
+        [value {"The model generated this sentence."}] \
+    empty              {the empty string} {clean_ai_text("")} [value {""}] \
+    en-dash            {en dash becomes a hyphen} \
+        "clean_ai_text([$lit "one${enDash}two"])" [value {"one-two"}] \
+    em-dash            {em dash becomes a hyphen} \
+        "clean_ai_text([$lit "AI${emDash}generated"])" [value {"AI-generated"}] \
+    single-quotes      {curly single quotes become an ASCII apostrophe} \
+        "clean_ai_text([$lit "${lsquo}hello${rsquo}"])" [value {"'hello'"}] \
+    double-quotes      {curly double quotes become an ASCII double quote} \
+        "clean_ai_text([$lit "${ldquo}hello${rdquo}"])" [value {"\"hello\""}] \
+    ellipsis           {the ellipsis character becomes three periods} \
+        "clean_ai_text([$lit "wait${ellipsis} what?"])" [value {"wait... what?"}] \
+    emoji-one          {a single emoji surrounded by spaces is removed, the spaces stay} \
+        "clean_ai_text([$lit "hello ${slightSmile} world"])" [value {"hello  world"}] \
+    emoji-each         {every benchmark emoji is removed, each on its own} \
+        "\[[join [lmap e $allEmoji {string cat "clean_ai_text(" [$lit $e] ")"}] ", "]\]" \
+        [value [string cat "\[" [join [lrepeat [llength $allEmoji] {""}] ", "] "\]"]] \
+    emoji-adjacent     {several emoji back to back are all removed, together} \
+        "clean_ai_text([$lit [string cat $grin $joy $slightSmile $rocket]])" [value {""}] \
+    emoji-beginning    {an emoji at the beginning of the text} \
+        "clean_ai_text([$lit "${robot} hello"])" [value {" hello"}] \
+    emoji-end          {an emoji at the end of the text} \
+        "clean_ai_text([$lit "hello ${robot}"])" [value {"hello "}] \
+    emoji-ascii        {an emoji directly adjacent to ASCII, no separating space} \
+        "clean_ai_text([$lit "a${robot}b"])" [value {"ab"}] \
+    emoji-bmp          {an emoji directly adjacent to a BMP non-ASCII character on both sides} \
+        "clean_ai_text([$lit "\u00e9${robot}\u00fc"]) == [$lit \u00e9\u00fc]" [value true] \
+    non-target-unicode {ordinary non-ASCII text (accented Latin, Greek, CJK, Hangul) is preserved exactly} \
+        "clean_ai_text([$lit "\u00e9\u00fc\u00f1\u03bb\u65e5\u672c\u8a9e\u4e2d\u6587\ud55c\uad6d\uc5b4"]) == [$lit "\u00e9\u00fc\u00f1\u03bb\u65e5\u672c\u8a9e\u4e2d\u6587\ud55c\uad6d\uc5b4"]" \
+        [value true] \
+    multilingual-emoji {emoji removed, curly punctuation normalized, ordinary non-ASCII text untouched} \
+        "clean_ai_text([$lit "Gr\u00fc\u00dfe ${emDash} \u6771\u4eac ${slightSmile}"]) == [$lit "Gr\u00fc\u00dfe - \u6771\u4eac "]" \
+        [value true] \
+    all-removable      {a string made entirely of removable emoji} \
+        "clean_ai_text([$lit [string cat $grin $joy $slightSmile $heartEyes $fire $rocket]])" [value {""}] \
+    all-replacement    {a string made entirely of replaced punctuation, nothing else} \
+        "clean_ai_text([$lit [string cat $enDash $emDash $lsquo $rsquo $ldquo $rdquo $ellipsis]])" \
+        [value {"--''\"\"..."}] \
+    combined           {the milestone's own combined example: emoji removed, dash and quotes and ellipsis normalized} \
+        "clean_ai_text([$lit "${robot} ${ldquo}AI${emDash}generated text${ellipsis}${rdquo} ${rocket}"])" \
+        [value {" \"AI-generated text...\" "}] \
+    large-fixture      {a ~1.5 KB deterministic fixture: length and hash() of the cleaned result agree} \
+        "\[length(clean_ai_text([$lit $aiCleanFixture])), hash(clean_ai_text([$lit $aiCleanFixture]))\]" \
+        [value {[1480, 1538372827348255129]}] \
+]
+
 test stdlib-0 {the corpus programs} -body {
     corpus::names
-} -result {csv csv_chunked csv_geometric csv_records hashtable matmul string_replace string_reverse}
+} -result {ai_text_clean csv csv_chunked csv_geometric csv_records hashtable matmul string_replace string_reverse}
 
 foreach name [corpus::names] {
     test stdlib-sample-$name "$name: the sample in the file runs to its expect: value" -body {

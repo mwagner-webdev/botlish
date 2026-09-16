@@ -1,0 +1,79 @@
+# A single left-to-right AI text cleaner, written in Botlish over the
+# string primitives (README §8: length, substring, concat, ==).
+#
+# clean_ai_text(text) models a common post-processing pass over
+# LLM-generated / user-facing text: it removes a small explicit set of
+# emoji and normalizes the "smart" punctuation a generator commonly emits,
+# leaving everything else -- including ordinary non-ASCII text -- exactly
+# as it was.
+#
+#   benchmark emoji (cleaner_emoji below)             -> removed
+#   EN DASH (U+2013) / EM DASH (U+2014)                -> "-"
+#   LEFT/RIGHT SINGLE QUOTATION MARK (U+2018/U+2019)   -> "'"
+#   LEFT/RIGHT DOUBLE QUOTATION MARK (U+201C/U+201D)   -> ASCII '"'
+#   HORIZONTAL ELLIPSIS (U+2026)                       -> "..."
+#   anything else                                      -> unchanged
+#
+# "Emoji" here is deliberately not general Unicode emoji detection: no
+# property tables, grapheme clusters, ZWJ sequences, variation selectors or
+# skin-tone composition. cleaner_emoji is a membership test against this
+# file's own explicit, small emoji set (surface identifiers cannot end in
+# "?" -- see surface/lexer.tcl -- so it isn't named cleaner_emoji? as a
+# general Unicode predicate might suggest).
+#
+# This file exists as much to exercise character-indexed String access
+# over non-ASCII text as to clean anything: the scan below is exactly
+# examples/stdlib/csv.bot's own peek() idiom (duplicated here -- the corpus
+# has no module system), and clean_from accumulates its result by repeated
+# concat, exactly like string_reverse.bot's reverse_from. See
+# bench/ai_text_clean.tcl for the traversal-cost workload this is for.
+#
+# expect: ["hello", "hello  world", "AI-generated", "\"hello\"", "'hello'", "wait... what?"]
+
+# The character at index, or "" past the end (examples/stdlib/csv.bot's peek).
+fn peek(text, index):
+    if index >= length(text):
+        return ""
+
+    substring(text, index, index + 1)
+
+# 1 if character (one peek()'d character) is in this benchmark's explicit
+# emoji set -- see the file header for why this is not general Unicode
+# emoji detection.
+fn cleaner_emoji(character):
+    (character == "😀" or character == "😂" or character == "🙂" or character == "😍"
+        or character == "🔥" or character == "🚀" or character == "✅" or character == "❌"
+        or character == "🎉" or character == "🤖" or character == "👍" or character == "💡")
+
+# character, cleaned in isolation: "" for a removed emoji, the ASCII
+# normalization of a targeted punctuation mark, or character itself
+# unchanged.
+fn clean_char(character):
+    if cleaner_emoji(character):
+        return ""
+
+    if character == "–" or character == "—":
+        return "-"
+
+    if character == "‘" or character == "’":
+        return "'"
+
+    if character == "“" or character == "”":
+        return "\""
+
+    if character == "…":
+        return "..."
+
+    character
+
+# text's characters from index on, cleaned and appended to done.
+fn clean_from(text, index, done):
+    if index >= length(text):
+        return done
+
+    clean_from(text, index + 1, concat(done, clean_char(peek(text, index))))
+
+fn clean_ai_text(text):
+    clean_from(text, 0, "")
+
+[clean_ai_text("hello"), clean_ai_text("hello 🙂 world"), clean_ai_text("AI—generated"), clean_ai_text("“hello”"), clean_ai_text("‘hello’"), clean_ai_text("wait… what?")]
