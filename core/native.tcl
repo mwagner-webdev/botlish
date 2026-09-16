@@ -82,7 +82,9 @@ namespace eval core::native {
     #                        (mutable_array_set, mutable_array_copy)
     #   hash                 computes a semantic hash of a value, recursing
     #                        into any List/Result payload the way
-    #                        structural-equality does (core/hashing.tcl)
+    #                        structural-equality does (core/hashing.tcl) --
+    #                        bootstrap native, candidate for stdlib
+    #                        replacement: see core/hashing.tcl's header
     variable runtimeTags {bigint string-alloc list-alloc result-alloc char-index
         range-check structural-equality evidence mutarray-alloc mutarray-mutate hash}
 }

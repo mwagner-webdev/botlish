@@ -49,7 +49,9 @@ pub enum OpCode {
     MkOk,
     MkError,
     /// Structural hash (core/hashing.tcl's hash): consistent with VEq,
-    /// masked to 61 bits so the result never needs a BigInt.
+    /// masked to 61 bits so the result never needs a BigInt. Bootstrap
+    /// native, candidate for stdlib replacement: see core/hashing.tcl's
+    /// header and ops.rs's `rt_hash`.
     Hash,
     /// Representation transitions and raw (untagged machine-integer)
     /// arithmetic/comparison: see the "Representation" section of

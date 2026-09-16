@@ -40,6 +40,13 @@
 # workload) and Int keys (to isolate hashing/probing cost from string
 # hashing cost) -- see bench/hashtable.tcl.
 #
+# hash() itself is a bootstrap native, not a permanent runtime primitive:
+# Botlish has no wrapping-integer type yet, so FNV-1a's wrapping arithmetic
+# cannot be written in Botlish today. Once that exists and this runtime's
+# hash semantics are actually specified, hash() should move to an ordinary
+# Botlish implementation and this table's dependency on it becomes a
+# dependency on stdlib, not on the runtime. See core/hashing.tcl's header.
+#
 # ht_get's absence convention
 # ----------------------------
 # Botlish has no way to construct a Result value from surface syntax today

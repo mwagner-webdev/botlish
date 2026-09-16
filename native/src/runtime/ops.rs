@@ -212,6 +212,16 @@ pub extern "C" fn rt_str_eq(_p: *mut Vm, a: Value, b: Value) -> Value {
 // both mask the final accumulator to 61 bits, so a hash result never needs a
 // BigInt (2^61 comfortably fits SMALL_MAX = 2^62 - 1) regardless of backend.
 // No random seed: see core/hashing.tcl's header for the stability contract.
+//
+// STATUS: bootstrap native -- candidate for stdlib replacement. This exists
+// as a native (here and in core/hashing.tcl) only because Botlish has no
+// wrapping-integer type to express FNV-1a's 64-bit wrapping multiply/XOR in
+// itself; `wrapping_mul` below is standing in for that missing language
+// feature, not evidence this belongs in the runtime long-term. Once Botlish
+// has wrapping arithmetic and this runtime's hash semantics are actually
+// specified (not just "whatever FNV-1a with these constants produces"),
+// move this to an ordinary Botlish implementation and delete both copies.
+// See core/hashing.tcl's header for the full rationale.
 
 const FNV_OFFSET: u64 = 0xcbf29ce484222325;
 const FNV_PRIME: u64 = 0x100000001b3;

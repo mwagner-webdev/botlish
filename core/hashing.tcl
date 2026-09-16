@@ -1,5 +1,32 @@
 # hashing.tcl -- native structural hash: hash(value) -> Int.
 #
+# STATUS: bootstrap native -- candidate for stdlib replacement.
+#
+#   This implementation is acceptable for now, but it is deliberately a
+#   native primitive rather than an ordinary Botlish one, purely because
+#   Botlish itself cannot yet express it: FNV-1a needs 64-bit *wrapping*
+#   multiplication/XOR over Int, and Botlish's only Int is arbitrary-
+#   precision (core/value.tcl) -- there is no wrapping integer type to write
+#   this algorithm in Botlish today. That is a gap in the language, not a
+#   reason this belongs in the runtime permanently. Do not let this native
+#   quietly become "just how hashing works" -- it is a stand-in.
+#
+#   Replace it with an ordinary Botlish implementation once BOTH of these
+#   are true:
+#     1. Botlish has a wrapping (fixed-width, e.g. 64-bit) integer type or
+#        equivalent wrapping arithmetic operators, so FNV-1a's step function
+#        can be written directly in Botlish instead of simulated here with
+#        `& Mask64` (Tcl) / `wrapping_mul` (Rust) on the runtime's own
+#        arbitrary-precision Int;
+#     2. the exact hash semantics this runtime should guarantee going
+#        forward are actually decided (algorithm, byte encoding, whether
+#        FNV-1a specifically is kept or replaced, seeding/collision-hardening
+#        policy) -- "whatever core/hashing.tcl currently does" is a
+#        placeholder, not a specification.
+#   Until then, this file and native/src/runtime/ops.rs's rt_hash are the
+#   two implementations that must stay byte-for-byte identical (see below);
+#   a Botlish replacement collapses that duplication to one.
+#
 # The smallest general-purpose primitive the hash-table milestone needs
 # beyond MutableArray and mod: a semantic hash consistent with
 # core::value::equal (core/value.tcl), so equal values always hash equal.
