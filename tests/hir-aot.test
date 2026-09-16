@@ -283,7 +283,7 @@ test hir-aot-corpus-1 {every corpus function has closed dispatch, except hashtab
         }
         list $name $open
     }
-} -result {{csv {}} {csv_chunked {}} {csv_geometric {}} {hashtable ht_fold} {matmul {}} {string_replace {}} {string_reverse {}}}
+} -result {{csv {}} {csv_chunked {}} {csv_geometric {}} {csv_records {}} {hashtable ht_fold} {matmul {}} {string_replace {}} {string_reverse {}}}
 
 test hir-aot-corpus-2 {string_reverse: guarded only by parameter kinds} -body {
     set a [corpusAot string_reverse]
