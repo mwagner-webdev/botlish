@@ -360,7 +360,7 @@ proc hir::exprsAt {hir origin} {
 }
 
 apply {{dir} {
-    foreach file {syntax resolve hygiene types refine lower format read aot specialize range induction escape} {
+    foreach file {syntax resolve hygiene types refine lower format read aot specialize range induction escape stringregion} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

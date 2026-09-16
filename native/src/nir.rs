@@ -53,6 +53,22 @@ pub enum OpCode {
     /// native, candidate for stdlib replacement: see core/hashing.tcl's
     /// header and ops.rs's `rt_hash`.
     Hash,
+    /// Validates a StringRegion's bounds (base String, start, end: character
+    /// indices) exactly as `Substr` would, without allocating or copying:
+    /// UNIT on success, RANGE on failure. Emitted once, at the point in
+    /// program order an ordinary `substr` call would have run, when
+    /// native/lower.tcl's string-region lowering (see native/lower.tcl's
+    /// "String regions" section and hir/stringregion.tcl) keeps a temporary
+    /// substring as (base, start, end) registers instead of materializing a
+    /// String. Strings are immutable, so a region proven valid here stays
+    /// valid for as long as its registers are live.
+    RegionCheck,
+    /// Compares a validated StringRegion (base, start, end) against an
+    /// ordinary String, character-for-character, with no allocation: the
+    /// non-materializing counterpart of `StrEq` for one region-shaped
+    /// operand (see hir/stringregion.tcl). Never fallible: RegionCheck
+    /// already proved the region's bounds.
+    RegionEq,
     /// Representation transitions and raw (untagged machine-integer)
     /// arithmetic/comparison: see the "Representation" section of
     /// native/lower.tcl. A raw operand/result is never a tagged Value: it
@@ -109,6 +125,8 @@ impl OpCode {
             "mkok" => MkOk,
             "mkerror" => MkError,
             "hash" => Hash,
+            "regioncheck" => RegionCheck,
+            "regioneq" => RegionEq,
             "rbox" => RBox,
             "runbox" => RUnbox,
             "riadd" => RIAdd,
@@ -130,7 +148,8 @@ impl OpCode {
             ListNew => None,
             StrLen | StrLower | ListLen | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList
             | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | Hash | RBox | RUnbox => Some(1),
-            Substr | MutArraySet => Some(3),
+            Substr | MutArraySet | RegionCheck => Some(3),
+            RegionEq => Some(4),
             MutArrayCopy => Some(5),
             _ => Some(2),
         }

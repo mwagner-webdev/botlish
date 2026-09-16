@@ -92,7 +92,7 @@ test csv-records-string-sharing-1 {row-table construction over parsed CSV alloca
     set tableStrings [dict get [allocationsOf $withTables] byKind String allocations]
     set presizedStrings [dict get [allocationsOf $withPresized] byKind String allocations]
     list $baseStrings $tableStrings $presizedStrings
-} -result {880 880 880}
+} -result {105 105 105}
 
 # The exact figure (a multiple of the CSV scanner's own per-character/per
 # -field allocation shape: every scan_unquoted call allocates a substring,
@@ -100,9 +100,22 @@ test csv-records-string-sharing-1 {row-table construction over parsed CSV alloca
 # than the three counts being equal (asserted above) -- this second test
 # pins the base count itself so a future change to the CSV scanner's own
 # allocation shape is visible here too, not just relatively.
-test csv-records-string-sharing-2 {the pinned base count itself (documents what "880" above is, independent of row-table construction)} -body {
+#
+# 880 before the String-region milestone (native/lower.tcl's "String
+# regions" section, hir/stringregion.tcl): peek(text, index)'s one-character
+# `substring(text, index, index+1)`, called from scan_unquoted and
+# scan_field purely to compare against a literal ("", ",", "\n", "\""),
+# allocated a temporary String on every character scanned. Neither call site
+# does anything else with that character, so hir::stringregion.tcl
+# recognizes both as consuming a StringRegion directly (`regioneq`) instead
+# -- scan_quoted's own peek() call still materializes, unchanged, since it
+# also feeds `concat` (a real, escaping use this milestone does not
+# optimize: see native/lower.tcl's "String regions" section). 105 is what
+# remains: exactly the real, escaping field/header Strings this fixture's
+# CSV actually contains, still allocated exactly as before.
+test csv-records-string-sharing-2 {the pinned base count itself (documents what "105" above is, independent of row-table construction)} -body {
     dict get [allocationsOf "csv_parse([corpus::literal [csvFixture]])"] byKind String allocations
-} -result 880
+} -result 105
 
 # ---------------------------------------------------------------------------
 # Presizing (req #24): a row wide enough to force the default table to

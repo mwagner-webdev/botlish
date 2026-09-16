@@ -1,0 +1,380 @@
+# native-string-region.test -- StringRegion representation of a temporary
+# substring consumed only by `==`/`length` (hir/stringregion.tcl,
+# native/lower.tcl's "String regions" section): one-character access,
+# temporary-substring comparison, escaping substrings, mixed use, bounds
+# errors, Unicode boundaries (ASCII/BMP/astral), and GC stress.
+#
+# -string-region-opt 0 (or BOTLISH_NATIVE_STRING_REGION_OPT=0) disables the
+# analysis outright: most tests here differentially compare it against the
+# default (on), the same way native-escape.test's own tests compare
+# -escape-opt 1 vs 0.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot examples stdlib corpus.tcl]
+
+interp recursionlimit {} 1000000
+
+proc sourceHir {text} {
+    return [surface::compile $text t.bot -strict 0]
+}
+
+# The String allocation count of TEXT under STRING-REGION-OPT (1 or 0).
+proc strAllocs {text opt} {
+    return [dict get [native::allocationReport [sourceHir $text] summary 1 -string-region-opt $opt] byKind String allocations]
+}
+
+# Asserts optimized (string-region-opt 1) and baseline (0) agree with the
+# reference interpreter on TEXT's value or error (the milestone's #25/#37).
+proc assertParity {text} {
+    set hir [sourceHir $text]
+    set interp [core::evalProgram [hir::lower $hir]]
+    set on [native::evalHir $hir -string-region-opt 1]
+    set off [native::evalHir $hir -string-region-opt 0]
+    if {![core::value::equal $interp $on] || ![core::value::equal $interp $off]} {
+        error "string-region-opt 1 ($on) vs 0 ($off) vs interp ($interp) mismatch"
+    }
+    return $on
+}
+
+# Like assertParity, for a program every backend agrees raises the same
+# semantic error (bounds tests, #31): returns {KIND MESSAGE}.
+proc assertErrorParity {text} {
+    set hir [sourceHir $text]
+    set exprs [hir::lower $hir]
+    foreach label {interp on off} {
+        switch -- $label {
+            interp { set code [catch {core::evalProgram $exprs} value options] }
+            on     { set code [catch {native::evalHir $hir -string-region-opt 1} value options] }
+            off    { set code [catch {native::evalHir $hir -string-region-opt 0} value options] }
+        }
+        if {!$code} {
+            error "$label: expected an error, got [core::value::show $value 1]"
+        }
+        set outcomes($label) [list [dict get $options -errorcode] $value]
+    }
+    if {$outcomes(on) ne $outcomes(off) || [lindex $outcomes(on) 0] ne [lindex $outcomes(interp) 0]} {
+        error "error mismatch: interp $outcomes(interp), on $outcomes(on), off $outcomes(off)"
+    }
+    return $outcomes(on)
+}
+
+# A peek-shaped one-character accessor, exactly the CSV-scanner idiom this
+# milestone targets (examples/stdlib/csv.bot's own `peek`).
+set ::peekSrc {
+fn peek(text, index):
+    if index >= length(text):
+        return ""
+
+    substring(text, index, index + 1)
+}
+
+# ---------------------------------------------------------------------------
+# One-character access (#27): repeated character inspection allocates no
+# temporary String, in ASCII, BMP non-ASCII, and supplementary-plane text.
+
+# A recursive scanner counting characters of TEXT that peek()-equal any of
+# LITERALS (early-return, like the rest of the corpus's own scan_* idiom --
+# no reliance on rebinding a name across a fallen-through `if`).
+proc scanCountSrc {literals} {
+    set checks [join [lmap l $literals {string cat "c == " $l}] " or "]
+    return "$::peekSrc
+fn scan(text, index, count):
+    if index >= length(text):
+        return count
+    c = peek(text, index)
+    if $checks:
+        return scan(text, index + 1, count + 1)
+    scan(text, index + 1, count)
+"
+}
+
+test region-char-ascii-1 {peek()'d ASCII characters compared to literals: zero String allocations for the comparisons} -body {
+    set text "[scanCountSrc [lmap v {a e i o u} {corpus::literal $v}]]
+fn f():
+    scan([corpus::literal {the quick brown fox}], 0, 0)
+f()
+"
+    list [assertParity $text] [strAllocs $text 1] [strAllocs $text 0]
+} -result {{int 5} 0 19}
+
+test region-char-bmp-1 {peek()'d BMP non-ASCII characters compared to literals: zero String allocations, correct content} -body {
+    set accented [list \u00e9 \u00e8 \u00ea \u00eb]
+    set text "[scanCountSrc [lmap v [lrange $accented 0 1] {corpus::literal $v}]]
+fn f():
+    scan([corpus::literal [join $accented ""]], 0, 0)
+f()
+"
+    list [assertParity $text] [strAllocs $text 1] [strAllocs $text 0]
+} -result {{int 2} 0 4}
+
+test region-char-astral-1 {peek()'d supplementary-plane characters compared to literals: zero String allocations, correct content} -body {
+    set emoji [encoding convertfrom utf-8 "\xf0\x9f\x98\x80"]
+    set text "$::peekSrc
+fn f(text):
+    \[peek(text, 0) == [corpus::literal a], peek(text, 1) == [corpus::literal $emoji], peek(text, 2) == [corpus::literal b], length(text)\]
+f([corpus::literal "a${emoji}b"])
+"
+    list [assertParity $text] [strAllocs $text 1] [strAllocs $text 0]
+} -result {{list {{bool true} {bool true} {bool true} {int 3}}} 0 3}
+
+set ::peekCallerSrc "$::peekSrc
+fn f(text, index):
+    peek(text, index) == \",\"
+"
+
+test region-char-nir-1 {NIR: peek's region companion validates bounds (regioncheck) and its ordinary function is unaffected} -body {
+    set nirText [dict get [native::lower::program [sourceHir $::peekCallerSrc] -string-region-opt 1] text]
+    list [regexp {regioncheck} $nirText] [regexp -all {op substr } $nirText] [regexp {results=3} $nirText] \
+        [regexp {retmulti} $nirText] [regexp {callmulti} $nirText]
+} -result {1 0 1 1 1}
+
+test region-char-nir-2 {without -string-region-opt, peek's body is an ordinary substr call, no region companion} -body {
+    set nirText [dict get [native::lower::program [sourceHir $::peekCallerSrc] -string-region-opt 0] text]
+    list [regexp {regioncheck} $nirText] [regexp {op substr } $nirText] [regexp {results=3} $nirText]
+} -result {0 1 0}
+
+# ---------------------------------------------------------------------------
+# Temporary substring comparison (#28): a longer (non-one-character) region
+# compared against a literal, then discarded.
+
+test region-compare-equal-1 {a multi-character temporary substring equal to a literal: no String allocation} -body {
+    set text {
+fn f(text):
+    substring(text, 0, 5) == "hello"
+
+f("hello world")
+}
+    list [assertParity $text] [strAllocs $text 1] [strAllocs $text 0]
+} -result {{bool true} 0 1}
+
+test region-compare-unequal-1 {a multi-character temporary substring unequal to a literal: no String allocation} -body {
+    set text {
+fn f(text):
+    substring(text, 0, 5) == "howdy"
+
+f("hello world")
+}
+    list [assertParity $text] [strAllocs $text 1] [strAllocs $text 0]
+} -result {{bool false} 0 1}
+
+test region-compare-unequal-length-1 {a temporary substring compared to a literal of different length: no String allocation} -body {
+    set text {
+fn f(text):
+    substring(text, 0, 5) == "hi"
+
+f("hello world")
+}
+    list [assertParity $text] [strAllocs $text 1] [strAllocs $text 0]
+} -result {{bool false} 0 1}
+
+test region-compare-nir-1 {NIR: a discarded temporary substring compared with == lowers to regioneq, not substr+streq} -body {
+    set text {
+fn f(text):
+    substring(text, 0, 5) == "hello"
+
+f("hello world")
+}
+    set nirText [dict get [native::lower::program [sourceHir $text] -string-region-opt 1] text]
+    list [regexp {regioneq} $nirText] [regexp {op substr } $nirText] [regexp {op streq} $nirText]
+} -result {1 0 0}
+
+# ---------------------------------------------------------------------------
+# length() of a region (#12 of the milestone): exact by construction
+# (Botlish substring bounds are already character indices).
+
+test region-length-1 {length(substring(...)) of a discarded temporary: no String allocation, exact value} -body {
+    set text {
+fn f(text):
+    length(substring(text, 2, 9))
+
+f("hello wonderful world")
+}
+    list [assertParity $text] [strAllocs $text 1] [strAllocs $text 0]
+} -result {{int 7} 0 1}
+
+test region-length-astral-1 {length() of a region spanning an astral character: exact (one scalar value, not code units)} -body {
+    set emoji [encoding convertfrom utf-8 "\xf0\x9f\x98\x80"]
+    set text "
+fn f(text):
+    length(substring(text, 1, 3))
+
+f(\"a${emoji}b\")
+"
+    list [assertParity $text] [strAllocs $text 1] [strAllocs $text 0]
+} -result {{int 2} 0 1}
+
+test region-length-nir-1 {NIR: length() of a discarded region lowers to a plain isub, not strlen+substr} -body {
+    set text {
+fn f(text):
+    length(substring(text, 2, 9))
+
+f("hello wonderful world")
+}
+    set nirText [dict get [native::lower::program [sourceHir $text] -string-region-opt 1] text]
+    list [regexp {op isub } $nirText] [regexp {op substr } $nirText] [regexp {op strlen } $nirText]
+} -result {1 0 0}
+
+# ---------------------------------------------------------------------------
+# Escaping substrings (#29): a real, independent String still materializes,
+# with correct contents, and the source is not retained beyond it.
+
+test region-escape-1 {a substring stored/returned still materializes as an ordinary String} -body {
+    set text {
+fn f(text):
+    substring(text, 6, 11)
+
+f("hello world")
+}
+    list [assertParity $text] [strAllocs $text 1] [strAllocs $text 0]
+} -result {{str world} 1 1}
+
+test region-escape-2 {a substring stored into a List escapes and materializes exactly once} -body {
+    set text {
+fn f(text):
+    [substring(text, 0, 5), substring(text, 6, 11)]
+
+f("hello world")
+}
+    list [assertParity $text] [strAllocs $text 1] [strAllocs $text 0]
+} -result {{list {{str hello} {str world}}} 2 2}
+
+test region-escape-large-source-1 {a small escaping substring of a large source materializes independently -- runtime String allocation is proportional to the substring, not the (statically constant) source} -body {
+    set big [string repeat "x" 100000]
+    set text "fn f(text):\n    substring(text, 0, 3)\n\nf([corpus::literal $big])"
+    set hir [sourceHir $text]
+    set value [native::evalHir $hir -string-region-opt 1]
+    list [core::value::show $value 1] [dict get [native::allocationReport $hir summary 1] byKind String payloadBytes]
+} -result {{"xxx"} 3}
+
+# ---------------------------------------------------------------------------
+# Mixed use (#30 of the milestone; a documented limitation, #24 of the
+# implementation report): a binding compared *and* concatenated is not
+# virtualized, so it materializes once, at the ordinary point, and both uses
+# read that one materialized String -- correct, just not allocation-free.
+
+test region-mixed-1 {compare then concat: one materialization, evaluated once, correct on every path} -body {
+    set text "$::peekSrc
+fn f(text):
+    c = peek(text, 0)
+    r = concat(c, \"!\")
+    if c == \"h\":
+        r
+    else:
+        \"no\"
+f(\"hello\")
+"
+    list [assertParity $text] [strAllocs $text 1] [strAllocs $text 0]
+} -result {{str h!} 2 2}
+
+# ---------------------------------------------------------------------------
+# Bounds errors (#31): optimized and unoptimized modes -- and the
+# interpreter -- agree exactly, including error kind and message.
+
+test region-bounds-negative-1 {start < 0} -body {
+    assertErrorParity {substring("hello", -1, 3)}
+} -result {{CORE SEMANTIC RANGE} {substring: range -1..3 is outside 0..5}}
+
+test region-bounds-too-long-1 {end beyond the String's length} -body {
+    assertErrorParity {substring("hello", 0, 10)}
+} -result {{CORE SEMANTIC RANGE} {substring: range 0..10 is outside 0..5}}
+
+test region-bounds-start-gt-end-1 {start > end} -body {
+    assertErrorParity {substring("hello", 3, 1)}
+} -result {{CORE SEMANTIC RANGE} {substring: range 3..1 is outside 0..5}}
+
+test region-bounds-empty-1 {start == end: an empty region, not an error} -body {
+    set text {substring("hello", 2, 2)}
+    list [assertParity $text] [strAllocs $text 1]
+} -result {{str {}} 1}
+
+test region-bounds-end-of-string-1 {end == the String's own length: the whole tail, not an error} -body {
+    set text {substring("hello", 2, 5)}
+    assertParity $text
+} -result {str llo}
+
+test region-bounds-through-peek-1 {a bounds error reached only through a region-eligible inline call (no binding)} -body {
+    set text "$::peekSrc
+fn f(text, index):
+    peek(text, index) == \"z\"
+f(\"hello\", -1)
+"
+    assertErrorParity $text
+} -result {{CORE SEMANTIC RANGE} {substring: range -1..0 is outside 0..5}}
+
+# ---------------------------------------------------------------------------
+# Unicode boundaries (#32): ASCII, BMP non-ASCII, astral, and mixed text --
+# character access, substring contents, length, equality and bounds all
+# agree across interpreter/native modes.
+
+test region-unicode-mixed-1 {a region spanning ASCII, BMP and astral characters: contents, length and equality all agree} -body {
+    set emoji [encoding convertfrom utf-8 "\xf0\x9f\x8c\x8d"]
+    set cafe "caf\u00e9"
+    set tail "${emoji}!"
+    set full "$cafe$tail"
+    set text "
+fn f(text):
+    \[substring(text, 0, 4) == [corpus::literal $cafe], length(substring(text, 4, 6)), substring(text, 4, 6) == [corpus::literal $tail]\]
+f([corpus::literal $full])
+"
+    list [assertParity $text] [strAllocs $text 1] [strAllocs $text 0]
+} -result {{list {{bool true} {int 2} {bool true}}} 0 3}
+
+# ---------------------------------------------------------------------------
+# GC stress (#33): a region's base String stays rooted for as long as the
+# region is used, under BOTLISH_NATIVE_GC_STRESS=1 (collect before every
+# allocation).
+
+test region-gc-stress-1 {repeated character comparisons over many peek() calls survive GC stress} -setup {
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+} -cleanup {
+    unset ::env(BOTLISH_NATIVE_GC_STRESS)
+} -body {
+    set text "[scanCountSrc [list [corpus::literal ,] [corpus::literal \n]]]
+fn f():
+    scan([corpus::literal "a,b,c\na,b,c\na,b,c\n"], 0, 0)
+f()
+"
+    native::evalHir [sourceHir $text] -string-region-opt 1
+} -result {int 9}
+
+test region-gc-stress-2 {a temporary substring comparison over many rows survives GC stress} -setup {
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+} -cleanup {
+    unset ::env(BOTLISH_NATIVE_GC_STRESS)
+} -body {
+    set rows {}
+    for {set i 0} {$i < 40} {incr i} { lappend rows "row$i,ok" }
+    set text [join $rows \n]\n
+    native::evalHir [sourceHir "
+fn count(text, index, hits):
+    if index + 2 > length(text):
+        return hits
+    if substring(text, index, index + 2) == \"ok\":
+        return count(text, index + 1, hits + 1)
+    count(text, index + 1, hits)
+
+fn f():
+    count([corpus::literal $text], 0, 0)
+f()
+    "] -string-region-opt 1
+} -result {int 40}
+
+# ---------------------------------------------------------------------------
+# The CSV corpus this milestone targets: peek()'d characters purely for
+# comparison allocate no temporary Strings; the real, escaping fields still
+# do (documented in native-csv-records.test's csv-records-string-sharing-2).
+
+test region-csv-corpus-1 {csv.bot's own peek() sites: string-region-opt materially reduces String allocations, same value either way} -body {
+    source [file join $::projectRoot examples stdlib corpus.tcl]
+    set text [corpus::literal "id,name\n1,Alice\n2,Bob\n3,Carol\n"]
+    set text "csv_parse($text)"
+    set hir [corpus::program csv $text]
+    set on [dict get [native::allocationReport $hir summary 1 -string-region-opt 1] byKind String allocations]
+    set off [dict get [native::allocationReport $hir summary 1 -string-region-opt 0] byKind String allocations]
+    set onValue [native::evalHir $hir -string-region-opt 1]
+    set offValue [native::evalHir $hir -string-region-opt 0]
+    list [expr {$on < $off}] [expr {$onValue eq $offValue}]
+} -result {1 1}
+
+cleanupTests

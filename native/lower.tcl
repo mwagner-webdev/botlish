@@ -154,6 +154,10 @@ namespace eval native::lower {
     # analysis of the program, and whether it is enabled at all.
     variable escape {}
     variable escapeOpt 1
+    # String regions (see "String regions" below): the hir::stringregion
+    # analysis of the program, and whether it is enabled at all.
+    variable stringregion {}
+    variable stringRegionOpt 1
 }
 
 # ---------------------------------------------------------------------------
@@ -301,6 +305,110 @@ namespace eval native::lower {
 # differential testing against the unoptimized baseline.
 
 # ---------------------------------------------------------------------------
+# String regions
+#
+# A temporary substring (`substring(text, a, b)`) hir/stringregion.tcl proves
+# is consumed only by `==` (resolving to `streq`: both operands statically
+# str-typed) or `length` may be represented, instead of an allocated String,
+# as a "StringRegion": the three registers (base text, start, end) an
+# ordinary `substr` call would have validated and copied from -- kept as-is,
+# never materialized. This is the String analogue of the "Representation"
+# section above (RawOf/TaggedOf for Int) and the "Scalar replacement"
+# section (virtual fields for List): the same *demand-driven* discipline,
+# just for a third semantic value's optimizer-internal representation.
+# `StringRegion` is never a Botlish source type (no `StringSlice`, `Span`, or
+# borrowed-String type is introduced): it is purely an optimizer
+# representation of an ordinary, already-immutable String value, valid only
+# while lowering can preserve the exact observable behavior a materialized
+# String would have had (see hir/stringregion.tcl's header for the full
+# recognition rules).
+#
+# Two shapes (hir/stringregion.tcl's Classify):
+#
+#   local    a plain `substring(text, a, b)` call, or a String literal,
+#            bound to a local binding every reference to which is a
+#            supported consumer (Bind evaluates it once, as a region, via
+#            `Expr fn ... region`; Ref hands its fields straight to the one
+#            or two consumers that use it -- there is never a "materialize
+#            it after all" path for such a binding, because
+#            hir::stringregion.tcl only ever calls one virtual if *every*
+#            reference already qualifies).
+#   remote   the same, but the region is *returned* by an exact, direct call
+#            to another instance whose own result is itself fully
+#            region-producing (`peek`-shaped helpers: a String-returning
+#            function whose every exit is a substring call or a literal).
+#            Exactly like escape's remote List case, this needs a second NIR
+#            function alongside the instance's ordinary one -- a *region
+#            companion* (RegionCompanionFunction), signature `results=3`,
+#            terminated by `retmulti`, reached only through
+#            `callmulti`/`callenvmulti`. The instance's ordinary, canonical
+#            String-returning function is still unconditionally emitted (a
+#            generic/indirect caller, or a caller with a mixed-use binding
+#            hir::stringregion.tcl declined to virtualize, keeps calling it,
+#            unaffected).
+#
+# A region is also produced *inline*, with no binding at all, when a
+# region-producing call is a direct operand of `==`/`length`
+# (`peek(text, i) == "\""`): Call's `wantRegion` asks the operand expression
+# for region form directly, exactly as NativeCall's raw-eligible operands
+# ask Expr for `raw` -- there is no separate "materialize, then compare"
+# step, and no need to check "every reference", since an inline operand has
+# exactly one use by construction.
+#
+# Consumers (deliberately narrow -- only what the corpus this milestone
+# targets, CSV scanning, actually exercises): `==` between two statically
+# str-typed operands lowers to `regioneq` (a region's three registers plus
+# the other, ordinary String register) instead of `streq` when one operand
+# is region-eligible; `length` of a region-eligible operand lowers to a
+# plain `isub end start` (exact by construction: Botlish substring bounds
+# are already Unicode-scalar/character indices, not bytes, so a region's
+# character count is always end-start, with no ASCII/byte-length caveat
+# needed). Hashing a region is not implemented (not exercised by the
+# corpus this milestone measured; see hir/stringregion.tcl and the
+# milestone's own guidance against implementing a consumer merely because
+# it is theoretically possible). Any other use (concat, storage, return, a
+# generic/indirect call) is never virtualized in the first place
+# (hir::stringregion::Bindings), so it simply materializes exactly as
+# before -- once, at the ordinary point Bind/Call already evaluate it.
+#
+# Bounds checking (#18 of this milestone): a `substring`-shaped region still
+# validates its bounds -- RegionCheck (`op regioncheck`), emitted at exactly
+# the point in program order the ordinary `substr` call would have run --
+# exactly as `rt_substr` does, just without allocating or copying. Once
+# validated, the region's registers stay valid for as long as they are live:
+# Strings are immutable, so nothing can invalidate a bound already proven.
+# `length`/`regioneq`, downstream of a `regioncheck` (or of a String
+# literal's always-valid trivial region), never re-check.
+#
+# GC rooting needs no new mechanism: a region's three fields are ordinary
+# tagged NIR registers (the base String, and two tagged Ints), each already
+# stored to its own shadow-stack slot on definition by codegen's `def`
+# (native/src/codegen/clif.rs), exactly as any other register is -- the base
+# String stays rooted for as long as its register is live, which is exactly
+# as long as the region itself is (see #33 of this milestone: no separate
+# "keep the source alive" mechanism is needed, or possible to get wrong,
+# because there is no mechanism at all beyond the ordinary one every
+# register already has).
+#
+# Large-source retention (#15/#42 of this milestone): a virtual region never
+# escapes as a semantic String -- hir::stringregion.tcl only recognizes a
+# binding virtual when *every* reference is `==`/`length`, so a region is
+# never itself the thing a caller stores or returns. A binding that *is*
+# stored or returned is, by that same rule, never virtualized: it
+# materializes (an ordinary, independent String, unrelated in size to its
+# source) at the one point it is bound, exactly as it always did. There is
+# therefore no new way for a large source String to be retained past a
+# temporary computation's end: the only registers a region keeps live are
+# the ones an equivalent unoptimized program would already keep live for the
+# length of the same temporary computation (the source text itself, plus two
+# Ints), never longer.
+#
+# -string-region-opt 0 (or BOTLISH_NATIVE_STRING_REGION_OPT=0) disables this
+# analysis and lowering outright, independent of -escape-opt/-repr-opt, for
+# differential (semantic and allocation) testing against the unoptimized
+# baseline.
+
+# ---------------------------------------------------------------------------
 # Entry point
 
 # The NIR of the program-mode HIR program HIR. Options:
@@ -311,6 +419,13 @@ namespace eval native::lower {
 #                      observed (default 1, unless the environment variable
 #                      BOTLISH_NATIVE_ESCAPE_OPT is 0; see the "Scalar
 #                      replacement" section above)
+#   -string-region-opt 1|0
+#                      represent a temporary substring hir/stringregion.tcl
+#                      proves is consumed only by `==`/`length` as a
+#                      StringRegion instead of an allocated String (default
+#                      1, unless the environment variable
+#                      BOTLISH_NATIVE_STRING_REGION_OPT is 0; see the
+#                      "String regions" section above)
 # Returns a dict:
 #   text        the NIR program
 #   functions   list of dicts, in id order: {id name block instance label
@@ -337,6 +452,8 @@ proc native::lower::program {hirProgram args} {
     variable reprOpt
     variable escape
     variable escapeOpt
+    variable stringregion
+    variable stringRegionOpt
 
     set default [expr {[info exists ::env(BOTLISH_NATIVE_SPECIALIZE)]
         && $::env(BOTLISH_NATIVE_SPECIALIZE) eq "0" ? 0 : 1}]
@@ -344,8 +461,11 @@ proc native::lower::program {hirProgram args} {
         && $::env(BOTLISH_NATIVE_REPR_OPT) eq "0" ? 0 : 1}]
     set escapeDefault [expr {[info exists ::env(BOTLISH_NATIVE_ESCAPE_OPT)]
         && $::env(BOTLISH_NATIVE_ESCAPE_OPT) eq "0" ? 0 : 1}]
+    set stringRegionDefault [expr {[info exists ::env(BOTLISH_NATIVE_STRING_REGION_OPT)]
+        && $::env(BOTLISH_NATIVE_STRING_REGION_OPT) eq "0" ? 0 : 1}]
     set options [hir::Options native::lower::program \
-        [list -specialize $default -repr-opt $reprDefault -escape-opt $escapeDefault] $args]
+        [list -specialize $default -repr-opt $reprDefault -escape-opt $escapeDefault \
+            -string-region-opt $stringRegionDefault] $args]
     if {[hir::mode $hirProgram] ne "program"} {
         throw {NATIVE UNSUPPORTED sequence-mode} \
             "native lowering: only program-mode HIR can be compiled (sequence mode runs in an unknown environment)"
@@ -354,10 +474,13 @@ proc native::lower::program {hirProgram args} {
     set hir $hirProgram
     set reprOpt [dict get $options -repr-opt]
     set escapeOpt [dict get $options -escape-opt]
+    set stringRegionOpt [dict get $options -string-region-opt]
     set spec [hir::specialize::analyze $hirProgram -specialize [dict get $options -specialize]]
     set ranges [hir::range::analyze $hirProgram $spec]
     set escape [expr {$escapeOpt ? [hir::escape::analyze $hirProgram $spec]
         : [dict create arity {} wants {} virtual {}]}]
+    set stringregion [expr {$stringRegionOpt ? [hir::stringregion::analyze $hirProgram $spec]
+        : [dict create regionOf {} wants {} virtual {}]}]
     set context [dict get $spec context]
     set selfTail [dict get $context selfTails]
     set unproven [dict get $context unproven]
@@ -380,18 +503,23 @@ proc native::lower::program {hirProgram args} {
         if {[dict exists $functions $key]} {
             continue
         }
-        dict set functions $key [expr {$mode eq "canonical" ? [Function $id] : [CompanionFunction $id]}]
+        dict set functions $key [switch -- $mode {
+            canonical { Function $id }
+            companion { CompanionFunction $id }
+            region    { RegionCompanionFunction $id }
+        }]
     }
     set hir $baseHir
 
-    # Function ids in program order: a companion right after its instance's
-    # canonical function (the order between the two is otherwise arbitrary;
-    # keeping it deterministic is all that matters here).
+    # Function ids in program order: a companion (List or String-region)
+    # right after its instance's canonical function (the order between the
+    # two is otherwise arbitrary; keeping it deterministic is all that
+    # matters here).
     set order [lmap key [dict keys $functions] {
         lassign [Unkey $key] id mode
         set block [dict get $spec instances $id block]
         list [expr {$block eq "program" ? 0 : [dict get $context positions $block]}] \
-            [string range $id 1 end] [expr {$mode eq "companion" ? 1 : 0}] $key
+            [string range $id 1 end] [dict get {canonical 0 companion 1 region 1} $mode] $key
     }]
     set order [lmap entry [lsort -integer -index 0 [lsort -integer -index 1 [lsort -integer -index 2 $order]]] {
         lindex $entry 3
@@ -555,6 +683,15 @@ proc native::lower::CompanionRef {id} {
     return [Placeholder $id companion]
 }
 
+# Like CompanionRef, for instance ID's *region* companion function (see the
+# "String regions" section above): callers must already know, from
+# hir::stringregion::wants, that this instance has one.
+proc native::lower::RegionCompanionRef {id} {
+    variable pending
+    lappend pending [list $id region]
+    return [Placeholder $id region]
+}
+
 # The key `program`'s `functions` dict uses for instance ID's function of
 # MODE (canonical or companion): also Placeholder's inner text, so a
 # Placeholder's text and its functions-dict key always agree.
@@ -649,7 +786,7 @@ proc native::lower::Function {id} {
     set fn [dict create region $region instance $id targets [dict get $instance calls] \
         lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 \
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
-        locals [dict create] loops [dict create] broken [dict create] calls {} companion ""]
+        locals [dict create] loops [dict create] broken [dict create] calls {} companion "" regionCompanion 0]
     if {$region eq "program"} {
         set name <program>
         set params {}
@@ -740,7 +877,7 @@ proc native::lower::CompanionFunction {id} {
     set fn [dict create region $region instance $id targets [dict get $instance calls] \
         lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 \
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
-        locals [dict create] loops [dict create] broken [dict create] calls {} companion $arity]
+        locals [dict create] loops [dict create] broken [dict create] calls {} companion $arity regionCompanion 0]
     set name [hir::aot::BlockName $hir $region]
     set params [hir::get $hir $region params]
     set env [expr {$region ni $envless}]
@@ -793,6 +930,97 @@ proc native::lower::CompanionFunction {id} {
     }]]
     set info [dict create id [Placeholder $id companion] name $name block $region instance $id \
         label "[hir::specialize::label $spec $id] (scalar)" generic [dict get $instance generic] \
+        envless [expr {!$env}] selfTailCalls $tails calls [dict get $fn calls] \
+        blockers $blockers guards [dict get $fn guards] knownErrorGuards [dict get $fn knownErrorGuards] \
+        rawUnboxes [dict get $fn rawUnboxes] rawBoxes [dict get $fn rawBoxes] \
+        rawArith [dict get $fn rawArith] rawCompare [dict get $fn rawCompare]]
+    return [list $text $info]
+}
+
+# Lowers the region companion function of instance ID (see the "String
+# regions" section above): the same instance as Function, but ending every
+# reachable exit in `retmulti` of its region fields (base, start, end --
+# hir::stringregion::classify) instead of materializing and `ret`ing a
+# String. hir::stringregion::wants ID must already be true. Returns
+# {TEXT INFO}, in the same shape as Function/CompanionFunction.
+proc native::lower::RegionCompanionFunction {id} {
+    variable hir
+    variable baseHir
+    variable spec
+    variable context
+    variable envless
+    variable captureLists
+    variable currentInstance
+    variable stringregion
+    set currentInstance $id
+    set instance [hir::specialize::instance $spec $id]
+    set region [dict get $instance block]
+    if {$region eq "program" || ![hir::stringregion::wants $stringregion $id]} {
+        throw {NATIVE BUG} "native lowering: instance $id has no string-region companion"
+    }
+    set hir [hir::specialize::view $baseHir $spec $id]
+    set analysis [hir::aot::analyzeRegion $hir $region $context]
+    CollectChecks $analysis
+    set blockers [llength [lmap b [dict get $analysis blockers] {
+        if {[dict get $b class] ne "representation"} continue
+        set b
+    }]]
+    set fn [dict create region $region instance $id targets [dict get $instance calls] \
+        lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 \
+        rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
+        locals [dict create] loops [dict create] broken [dict create] calls {} companion "" regionCompanion 1]
+    set name [hir::aot::BlockName $hir $region]
+    set params [hir::get $hir $region params]
+    set env [expr {$region ni $envless}]
+    set scope [hir::get $hir $region bodyScope]
+    set body [hir::get $hir $region body]
+    set rawParams [RawParams $id $instance $params]
+    foreach b $params raw $rawParams {
+        set r [NewReg fn]
+        if {$raw} {
+            MarkRaw fn $r
+            dict set fn locals $b [list rawreg $r]
+        } else {
+            dict set fn locals $b [list reg $r]
+        }
+    }
+    EnterScope fn $scope
+    if {$body eq ""} {
+        throw {NATIVE BUG} "native lowering: region companion of instance $id has an empty body"
+    }
+    set ok 1
+    foreach e [lrange $body 0 end-1] {
+        if {[Expr fn $e] eq "never"} {
+            set ok 0
+            break
+        }
+    }
+    if {$ok} {
+        set fields [Expr fn [lindex $body end] region]
+        if {$fields ne "never"} {
+            Emit fn "retmulti [join $fields { }]"
+        }
+    }
+    set pnames [lmap b $params {dict get [hir::binding $hir $b] name}]
+    set captures {}
+    if {$env} {
+        set captures [lmap b [dict get $captureLists $region] {dict get [hir::binding $hir $b] name}]
+    }
+    set key [expr {[dict get $instance generic] ? "generic"
+        : [join [lmap t [dict get $instance args] {hir::types::show $t}] {, }]}]
+    set head "func [Placeholder $id region] [Quote $name] params=[llength $params] env=$env regs=[dict get $fn nreg] pnames=[Quote [join $pnames { }]] captures=[llength $captures] instance=[Quote $key] results=3"
+    set rawRegs [lsort -integer [lmap r [dict keys [dict get $fn rawRegs]] {string range $r 1 end}]]
+    if {$rawRegs ne ""} {
+        append head " rawregs=[Quote [join $rawRegs { }]]"
+    }
+    append head " @$region"
+    set text "$head\n[join [dict get $fn lines] \n]\nend"
+    set tails [llength [lmap line [dict get $fn lines] {
+        if {![regexp {^\s+tail(env)? } $line]} continue
+        set line
+    }]]
+    set info [dict create id [Placeholder $id region] name $name block $region instance $id \
+        label "[hir::specialize::label $spec $id] (region)" generic [dict get $instance generic] \
         envless [expr {!$env}] selfTailCalls $tails calls [dict get $fn calls] \
         blockers $blockers guards [dict get $fn guards] knownErrorGuards [dict get $fn knownErrorGuards] \
         rawUnboxes [dict get $fn rawUnboxes] rawBoxes [dict get $fn rawBoxes] \
@@ -906,11 +1134,11 @@ proc native::lower::Expr {fnVar e {want tagged}} {
     set node [hir::node $hir $e]
     set repr tagged
     switch -- [dict get $node kind] {
-        const    { set result [Const fn $e $node] }
+        const    { lassign [ConstOrRegion fn $e $node $want] result repr }
         ref      { lassign [Ref fn $e $node $want] result repr }
         bind     { set result [Bind fn $e $node] }
         block    { set result [Closure fn $e] }
-        call     { lassign [Call fn $e $node $want] result repr }
+        call     { lassign [Call fn $e $node $want "" [expr {$want eq "region"}]] result repr }
         if       { set result [If fn $e $node] }
         loop     { set result [Loop fn $e $node] }
         return {
@@ -923,6 +1151,17 @@ proc native::lower::Expr {fnVar e {want tagged}} {
                 # arity, so VirtualValue's fields (not a materialized List)
                 # are what this return actually produces.
                 set fields [VirtualValue fn [dict get $node value] $companion]
+                if {$fields ne "never"} {
+                    Emit fn "retmulti [join $fields { }]" $e
+                }
+            } elseif {[dict get $fn regionCompanion]} {
+                # A region companion function (see the "String regions"
+                # section above): hir::stringregion::wants only ever holds
+                # when every reachable exit -- this one included --
+                # classifies region-producing, so its fields (not a
+                # materialized String) are what this return actually
+                # produces.
+                set fields [Expr fn [dict get $node value] region]
                 if {$fields ne "never"} {
                     Emit fn "retmulti [join $fields { }]" $e
                 }
@@ -1001,6 +1240,26 @@ proc native::lower::Const {fnVar e node} {
     throw {NATIVE INVALID-HIR} "native lowering: unexpected constant [core::value::show $value] ($e)"
 }
 
+# {RESULT REPR}: like Const, but when WANT is "region" and the constant is a
+# String, produces its trivial region directly -- a String literal is always
+# a region over itself (base = the literal, 0..its own character count),
+# needing no runtime bounds check at all (unlike a `substring` call's
+# region, whose bounds native/lower.tcl still validates: see RegionCheck in
+# the "String regions" section above). Every other constant is unaffected
+# (WANT=region is only ever asked by a caller that already confirmed, via
+# RegionEligible, that E is a String constant or a region-producing call).
+proc native::lower::ConstOrRegion {fnVar e node want} {
+    upvar 1 $fnVar fn
+    if {$want eq "region" && [core::value::kind [dict get $node value]] eq "str"} {
+        set text [core::value::strOf [dict get $node value]]
+        set base [Assign fn "str [Quote $text]" $e]
+        set start [IntConst fn 0 $e]
+        set end [IntConst fn [string length $text] $e]
+        return [list [list $base $start $end] region]
+    }
+    return [list [Const fn $e $node] tagged]
+}
+
 # An Int constant N: the tagged register (as before), with its raw
 # counterpart pre-computed and cached (fn rawCache) when N fits the small-Int
 # range, so arithmetic on a literal never round-trips through a redundant
@@ -1043,6 +1302,17 @@ proc native::lower::Ref {fnVar e node want} {
     lassign $access how where
     switch -- $how {
         reg     { return [list $where tagged] }
+        region  {
+            # A local hir::stringregion.tcl proved virtual: every reference
+            # is already known (hir::stringregion::Bindings) to be a
+            # supported consumer asking for region form directly -- a plain
+            # (tagged) reference to it would mean this analysis and this
+            # lowering have gone out of sync.
+            if {$want ne "region"} {
+                throw {NATIVE BUG} "native lowering: region binding $b referenced outside a recognized consumer ($e)"
+            }
+            return [list $where region]
+        }
         rawreg  {
             # A parameter RawParams proved raw for the whole function: WHERE
             # already *is* its raw register (Function), so a raw consumer
@@ -1131,6 +1401,7 @@ proc native::lower::Bind {fnVar e node} {
     variable hir
     variable context
     variable escape
+    variable stringregion
     variable currentInstance
     set valueExpr [dict get $node value]
     set b [dict get $node binding]
@@ -1159,6 +1430,20 @@ proc native::lower::Bind {fnVar e node} {
                 return never
             }
             dict set fn locals $b [list virtual $fields]
+            return ""
+        }
+        if {[hir::stringregion::virtual $stringregion $currentInstance $b]} {
+            # A region-producing value (hir/stringregion.tcl) every
+            # reference to which is already known to be a supported
+            # consumer (`==`/`length`): its fields, not a materialized
+            # String. Every reference to B is intercepted directly in Ref
+            # below -- nothing ever reads this local's "value" as a single
+            # tagged register.
+            set fields [Expr fn $valueExpr region]
+            if {$fields eq "never"} {
+                return never
+            }
+            dict set fn locals $b [list region $fields]
             return ""
         }
     }
@@ -1248,7 +1533,7 @@ proc native::lower::VirtualValue {fnVar e arity} {
 # returns "tagged" (Expr's tail reconciles a mismatch with WANT via
 # RawOf/TaggedOf; WANTVIRTUAL is never reconciled that way -- a caller that
 # passes it already knows, from hir::escape.tcl, that E recognizes).
-proc native::lower::Call {fnVar e node want {wantVirtual ""}} {
+proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
     upvar 1 $fnVar fn
     variable hir
     variable selfTail
@@ -1256,9 +1541,39 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""}} {
     variable unproven
     variable natives
     variable escape
+    variable stringregion
     lassign [dict get $node target] targetKind target
     set calleeExpr [dict get $node callee]
     set argExprs [dict get $node args]
+
+    if {$wantRegion && $targetKind eq "native"
+            && [dict get [hir::symbol $hir $target] name] eq "substring" && [llength $argExprs] == 3} {
+        # `substring(text, a, b)` asked for directly in region form (Bind, a
+        # region companion's exit, or an inline `==`/`length` operand):
+        # RegionEligible already confirmed E has exactly this shape. The
+        # three operands *are* the region -- text/a/b, evaluated exactly as
+        # an ordinary `substring` call would, with the same argument guards
+        # (EmitArgGuards) -- but bounds are validated with RegionCheck
+        # instead of the allocating, copying `substr`.
+        lassign $argExprs tExpr sExpr eExpr
+        set base [Expr fn $tExpr]
+        if {$base eq "never"} {
+            return {never tagged}
+        }
+        set start [Expr fn $sExpr]
+        if {$start eq "never"} {
+            return {never tagged}
+        }
+        set end [Expr fn $eExpr]
+        if {$end eq "never"} {
+            return {never tagged}
+        }
+        set meta [core::native::metadata substring]
+        EmitArgGuards fn $e $argExprs [list $base $start $end] [dict get $meta paramTypes] substring
+        dict lappend fn calls [list native substring]
+        Assign fn "op regioncheck $base $start $end" $e
+        return [list [list $base $start $end] region]
+    }
 
     if {$wantVirtual eq "" && $targetKind eq "native" && [llength $argExprs] == 2
             && [dict get [hir::symbol $hir $target] name] eq "list_get"
@@ -1329,6 +1644,10 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""}} {
         # intermediate tagged value only to unbox it straight back
         # (milestone #10); anything else evaluates tagged exactly as before.
         lassign [NativeCallOp $e $node] name op
+        set region [TryStringRegionOp fn $e $name $op $argExprs]
+        if {$region ne ""} {
+            return $region
+        }
         set rawEligible [expr {[dict exists $natives $name] ? [RawEligibleCall $e $argExprs $op] : 0}]
         set argRegs {}
         foreach arg $argExprs {
@@ -1403,6 +1722,25 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""}} {
             }
             return [list $dsts virtual]
         }
+        if {$wantRegion} {
+            # A recognized forwarding region (RegionEligible/hir::stringregion
+            # ::classify already confirmed this call is a `remote` region
+            # source): the target instance's region companion, reached
+            # through callmulti/callenvmulti, hands its (base, start, end)
+            # fields straight back with no String ever materialized.
+            if {![hir::stringregion::wants $stringregion $instance]} {
+                throw {NATIVE BUG} "native lowering: instance $instance has no region companion for $e"
+            }
+            set companionId [RegionCompanionRef $instance]
+            dict lappend fn calls [list direct $companionId 0]
+            set dsts [NewRegs fn 3]
+            if {$target in $envless} {
+                Emit fn [string trimright "[join $dsts { }] = callmulti $companionId [join $argRegs { }]"] $e
+            } else {
+                Emit fn [string trimright "[join $dsts { }] = callenvmulti $companionId $callee [join $argRegs { }]"] $e
+            }
+            return [list $dsts region]
+        }
         set id [FunctionRef $instance]
         dict lappend fn calls [list direct $id $self]
         if {$target in $envless} {
@@ -1412,6 +1750,9 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""}} {
     }
     if {$wantVirtual ne ""} {
         throw {NATIVE BUG} "native lowering: cannot virtualize call $e (not a recognized construction)"
+    }
+    if {$wantRegion} {
+        throw {NATIVE BUG} "native lowering: cannot form a region for call $e (not a recognized construction)"
     }
 
     set argRegs {}
@@ -1424,6 +1765,98 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""}} {
     }
     dict lappend fn calls [list value]
     return [list [Assign fn [string trimright "callvalue $callee [join $argRegs { }]"] $e] tagged]
+}
+
+# 1 if expression E (an operand of a native `==`/`length` call TryStringRegionOp
+# is deciding) can produce a StringRegion directly (`Expr fn E region`),
+# with no runtime kind guard needed first: a direct `substring` call, a
+# String literal, a `ref` to a binding hir::stringregion.tcl proved virtual,
+# or a direct call to another instance hir::stringregion.tcl recognizes as
+# region-producing (Classify's "remote" case). See the "String regions"
+# section above.
+proc native::lower::RegionEligible {e} {
+    variable hir
+    variable spec
+    variable stringregion
+    variable currentInstance
+    if {[hir::kind $hir $e] eq "ref"} {
+        set b [hir::get $hir $e binding]
+        return [expr {$b ne "" && [hir::stringregion::virtual $stringregion $currentInstance $b]}]
+    }
+    return [expr {[hir::stringregion::classify $hir $spec $stringregion $currentInstance $e] ne ""}]
+}
+
+# Tries to lower call E (native NAME, resolving to OP: NativeCallOp) as a
+# StringRegion-consuming operation instead of an ordinary `streq`/`strlen`:
+# "" if not applicable (the caller falls back to NativeCall's ordinary
+# path), else {RESULT REPR} (always "tagged": the *result* of `==`/`length`
+# is an ordinary Bool/Int -- only one *operand* is ever a region).
+#
+#   ==      both operands already statically str-typed (OP resolved to
+#           `streq`, so neither ever needs a runtime guard: see
+#           NativeCallOp) and at least one is RegionEligible: `regioneq`
+#           (that operand's region, the other evaluated ordinarily). Both
+#           operands are still evaluated in their original left-to-right
+#           order regardless of which one supplies the region (milestone
+#           #17: no reordering), preferring the left one as the region
+#           when both would qualify (the corpus never exercises
+#           region-vs-region, so this is a deliberate, documented
+#           narrowing, not a soundness requirement).
+#   length  its one argument is RegionEligible and -- like any other
+#           `length` call -- needs no guard already proven unnecessary: a
+#           plain `isub end start`, exact by construction (Botlish
+#           substring bounds are character indices already, so a region's
+#           character count is always end-start).
+#
+# Only ever tried when -string-region-opt is enabled.
+proc native::lower::TryStringRegionOp {fnVar e name op argExprs} {
+    upvar 1 $fnVar fn
+    variable guards
+    variable knownErrors
+    variable stringRegionOpt
+    if {!$stringRegionOpt} {
+        return ""
+    }
+    if {$name eq "==" && $op eq "streq" && [llength $argExprs] == 2} {
+        lassign $argExprs ea eb
+        set aRegion [RegionEligible $ea]
+        set bRegion [expr {!$aRegion && [RegionEligible $eb]}]
+        if {!$aRegion && !$bRegion} {
+            return ""
+        }
+        set ra [Expr fn $ea [expr {$aRegion ? "region" : "tagged"}]]
+        if {$ra eq "never"} {
+            return {never tagged}
+        }
+        set rb [Expr fn $eb [expr {$bRegion ? "region" : "tagged"}]]
+        if {$rb eq "never"} {
+            return {never tagged}
+        }
+        if {$aRegion} {
+            lassign $ra base start end
+            set other $rb
+        } else {
+            lassign $rb base start end
+            set other $ra
+        }
+        dict lappend fn calls [list native $name]
+        return [list [Assign fn "op regioneq $base $start $end $other" $e] tagged]
+    }
+    if {$name eq "length" && [llength $argExprs] == 1} {
+        set arg [lindex $argExprs 0]
+        set key [list $e $arg]
+        if {[dict exists $guards $key] || [dict exists $knownErrors $key] || ![RegionEligible $arg]} {
+            return ""
+        }
+        set region [Expr fn $arg region]
+        if {$region eq "never"} {
+            return {never tagged}
+        }
+        lassign $region base start end
+        dict lappend fn calls [list native $name]
+        return [list [Assign fn "op isub $end $start" $e] tagged]
+    }
+    return ""
 }
 
 # {NAME OP}: the native NODE's target's name, and the NIR op its call
@@ -1461,6 +1894,37 @@ proc native::lower::NativeCallOp {e node} {
     return [list $name $op]
 }
 
+# Emits the runtime kind guard (or known-error guard) hir::aot already
+# decided each of ARGEXPRS (call E's arguments, now lowered as ARGREGS) needs
+# for a call whose native's declared parameter types are PARAMTYPES -- shared
+# by NativeCall's ordinary path and the "String regions" section's own
+# `substring`-as-region lowering (Call's `wantRegion` case), which bypasses
+# NativeCall entirely but still owes its three operands the exact same
+# checks an ordinary `substring` call would have run.
+proc native::lower::EmitArgGuards {fnVar e argExprs argRegs paramTypes name} {
+    upvar 1 $fnVar fn
+    variable hir
+    variable guards
+    variable knownErrors
+    foreach arg $argExprs r $argRegs type $paramTypes {
+        if {$type in {"" any}} {
+            continue
+        }
+        set key [list $e $arg]
+        if {[dict exists $guards $key]} {
+            Emit fn "guard [core::type::base [dict get $guards $key]] $r [Quote $name]" $e
+            dict incr fn guards
+        } elseif {[dict exists $knownErrors $key]} {
+            # Statically of another kind: the check always fails.
+            Emit fn "guard [core::type::base $type] $r [Quote $name]" $e
+            dict incr fn knownErrorGuards
+        } elseif {![core::type::subtype [hir::types::semantic [hir::typeOf $hir $arg]] $type]
+                  && [hir::typeOf $hir $arg] ne "never"} {
+            throw {NATIVE BUG} "native lowering: hir::aot reports no check for argument $arg of $name ($e)"
+        }
+    }
+}
+
 proc native::lower::NativeCall {fnVar e node name argRegs rawEligible op want} {
     upvar 1 $fnVar fn
     variable hir
@@ -1492,23 +1956,7 @@ proc native::lower::NativeCall {fnVar e node name argRegs rawEligible op want} {
     # proved no check" assertion below still covers every call the same way
     # it always has.
     set argExprs [dict get $node args]
-    foreach arg $argExprs r $argRegs type [dict get $meta paramTypes] {
-        if {$type in {"" any}} {
-            continue
-        }
-        set key [list $e $arg]
-        if {[dict exists $guards $key]} {
-            Emit fn "guard [core::type::base [dict get $guards $key]] $r [Quote $name]" $e
-            dict incr fn guards
-        } elseif {[dict exists $knownErrors $key]} {
-            # Statically of another kind: the check always fails.
-            Emit fn "guard [core::type::base $type] $r [Quote $name]" $e
-            dict incr fn knownErrorGuards
-        } elseif {![core::type::subtype [hir::types::semantic [hir::typeOf $hir $arg]] $type]
-                  && [hir::typeOf $hir $arg] ne "never"} {
-            throw {NATIVE BUG} "native lowering: hir::aot reports no check for argument $arg of $name ($e)"
-        }
-    }
+    EmitArgGuards fn $e $argExprs $argRegs [dict get $meta paramTypes] $name
     if {$rawEligible} {
         # ARGREGS are already raw (Call requested it): lower directly, with
         # no RawOf needed on either operand.

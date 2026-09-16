@@ -50,16 +50,34 @@ fn signature<M: Module>(module: &M, params: usize) -> Signature {
 }
 
 /// Like `signature`, with RESULTS return values instead of always one: a
-/// scalar-replacement companion function (nir::Function::results > 1)
-/// returns several tagged Values directly (a Cranelift function may return
-/// any number of values), one per field of the fixed-shape aggregate its
-/// callers consume without ever materializing the canonical List object
-/// (see native/lower.tcl's "Scalar replacement" section and nir.rs's
+/// scalar-replacement or string-region companion function
+/// (nir::Function::results > 1) returns several tagged Values, one per
+/// field of the fixed-shape aggregate its callers consume without ever
+/// materializing the canonical List/String object (see native/lower.tcl's
+/// "Scalar replacement"/"String regions" sections and nir.rs's
 /// CallMulti/RetMulti).
+///
+/// RESULTS > 2 cannot return every field through an actual return register:
+/// the target calling convention (x86-64 SysV here) has only two integer
+/// return registers, and Cranelift's own ABI legalization rejects a bare
+/// function signature declaring more ("Use a StructReturn argument
+/// instead"). Such a function instead takes one extra trailing pointer
+/// parameter (RESULTS-1 words of scratch, caller-allocated) and returns
+/// only its first field normally; `Inst::RetMulti`/`Inst::CallMulti` (below)
+/// store/load the rest through that pointer. This is purely a calling-
+/// convention detail of a companion function Cranelift never exposes any
+/// other way (never a closure, never a Block value, never called from
+/// outside this same compilation): it changes nothing about NIR's own
+/// `retmulti`/`callmulti` text, which still lists every field.
 fn signature_n<M: Module>(module: &M, params: usize, results: usize) -> Signature {
     let mut sig = module.make_signature();
     for _ in 0..params {
         sig.params.push(AbiParam::new(I64));
+    }
+    if results > 2 {
+        sig.params.push(AbiParam::new(I64));
+        sig.returns.push(AbiParam::new(I64));
+        return sig;
     }
     for _ in 0..results.max(1) {
         sig.returns.push(AbiParam::new(I64));
@@ -214,6 +232,10 @@ struct Translator<'a, 'b, M: Module> {
     error_exit: ir::Block,
     refs: HashMap<ModuleFuncId, ir::FuncRef>,
     terminated: bool,
+    /// The hidden trailing pointer parameter of a `results > 2` function
+    /// (signature_n): `RetMulti` writes fields 1.. through it instead of
+    /// returning them. None for an ordinary (`results <= 2`) function.
+    result_buf: Option<ir::Value>,
 }
 
 impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
@@ -249,6 +271,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             error_exit,
             refs: HashMap::new(),
             terminated: false,
+            result_buf: None,
         }
     }
 
@@ -299,6 +322,13 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             } else {
                 self.def(i, v);
             }
+        }
+        if f.results > 2 {
+            // The hidden trailing pointer parameter signature_n adds for a
+            // `results > 2` companion: never a GC root itself (it points to
+            // the caller's own stack, not the heap), so it is read once here
+            // and never stored to the shadow stack.
+            self.result_buf = Some(params[next + f.params as usize]);
         }
         self.b.ins().jump(self.body, &[]);
 
@@ -398,7 +428,12 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
     /// literally 0 (true of every tagged Value already: see `check`).
     fn return_zeros(&mut self) {
         let zero = self.b.ins().iconst(I64, 0);
-        let zeros = vec![zero; self.f.results.max(1) as usize];
+        // A `results > 2` function's actual Cranelift return arity is 1
+        // (signature_n): its caller reads only that one word as the error
+        // sentinel and never touches the result buffer when it is 0, so
+        // there is nothing to write there on this path.
+        let n = if self.f.results > 2 { 1 } else { self.f.results.max(1) as usize };
+        let zeros = vec![zero; n];
         self.b.ins().return_(&zeros);
     }
 
@@ -454,6 +489,57 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             self.b.ins().store(MemFlagsData::trusted(), v, addr, 0);
         }
         (n, self.b.ins().stack_addr(I64, slot, 0))
+    }
+
+    /// A fresh, uninitialized WORDS-word stack slot's address: scratch space
+    /// a `results > 2` CallMulti/CallEnvMulti passes to its callee as the
+    /// hidden trailing pointer parameter (signature_n), for the callee's
+    /// RetMulti to write fields 1.. into. No GC hazard: nothing can allocate
+    /// between the callee's store into it and the caller's own `def` of the
+    /// loaded values right after the call returns (see Inst::RetMulti's and
+    /// Inst::CallMulti's own comments).
+    fn result_slot(&mut self, words: usize) -> ir::Value {
+        let slot = self.b.create_sized_stack_slot(StackSlotData::new(
+            StackSlotKind::ExplicitSlot,
+            (words * 8) as u32,
+            3,
+        ));
+        self.b.ins().stack_addr(I64, slot, 0)
+    }
+
+    /// Shared body of Inst::CallMulti/CallEnvMulti: calls FUNC (VALUES
+    /// already holding vm, and the closure for CallEnvMulti, ahead of the
+    /// ordinary arguments), checks its first result, and defines DSTS --
+    /// through the hidden result-buffer pointer (signature_n) when
+    /// `dsts.len() > 2`, or directly from the call's own return registers
+    /// otherwise. Never a GC hazard for the buffer case: the buffer holds
+    /// only the callee's already-computed fields for the short window
+    /// between its `store` (Inst::RetMulti) and this immediate `load`+`def`,
+    /// with no allocation possible in between (nothing in either sequence
+    /// calls a runtime helper).
+    fn call_multi(&mut self, dsts: &[Reg], func: nir::FuncId, values: &mut Vec<ir::Value>) {
+        let buf = (dsts.len() > 2).then(|| self.result_slot(dsts.len() - 1));
+        if let Some(ptr) = buf {
+            values.push(ptr);
+        }
+        let r = self.func_ref(self.symbols.direct[func as usize]);
+        let call = self.b.ins().call(r, values);
+        let results = self.b.inst_results(call).to_vec();
+        self.check(results[0]);
+        self.def(dsts[0], results[0]);
+        match buf {
+            Some(ptr) => {
+                for (i, d) in dsts[1..].iter().enumerate() {
+                    let v = self.b.ins().load(I64, MemFlagsData::trusted(), ptr, (i * 8) as i32);
+                    self.def(*d, v);
+                }
+            }
+            None => {
+                for (d, v) in dsts[1..].iter().zip(results[1..].iter()) {
+                    self.def(*d, *v);
+                }
+            }
+        }
     }
 
     /// I8 1 if V has semantic kind KIND.
@@ -658,24 +744,12 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             Inst::CallMulti { dsts, func, args } => {
                 let mut values = vec![self.vm];
                 values.extend(args.iter().map(|r| self.get(*r)));
-                let r = self.func_ref(self.symbols.direct[*func as usize]);
-                let call = self.b.ins().call(r, &values);
-                let results = self.b.inst_results(call).to_vec();
-                self.check(results[0]);
-                for (d, v) in dsts.iter().zip(results.iter()) {
-                    self.def(*d, *v);
-                }
+                self.call_multi(dsts, *func, &mut values);
             }
             Inst::CallEnvMulti { dsts, func, closure, args } => {
                 let mut values = vec![self.vm, self.get(*closure)];
                 values.extend(args.iter().map(|r| self.get(*r)));
-                let r = self.func_ref(self.symbols.direct[*func as usize]);
-                let call = self.b.ins().call(r, &values);
-                let results = self.b.inst_results(call).to_vec();
-                self.check(results[0]);
-                for (d, v) in dsts.iter().zip(results.iter()) {
-                    self.def(*d, *v);
-                }
+                self.call_multi(dsts, *func, &mut values);
             }
             Inst::CallValue { dst, callee, args } => {
                 let f = self.get(*callee);
@@ -725,7 +799,20 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             Inst::RetMulti(regs) => {
                 let values: Vec<_> = regs.iter().map(|r| self.get(*r)).collect();
                 self.b.ins().store(MemFlagsData::trusted(), self.base, self.vm, VM_SS_TOP_OFFSET);
-                self.b.ins().return_(&values);
+                if values.len() > 2 {
+                    // signature_n's hidden trailing pointer: fields 1.. go
+                    // through it (Cranelift/the target ABI has only two
+                    // integer return registers), field 0 returns normally
+                    // (call_multi's caller checks it for 0 exactly like any
+                    // other fallible call, never reading the buffer then).
+                    let buf = self.result_buf.expect("results>2 function must have a result buffer");
+                    for (i, v) in values[1..].iter().enumerate() {
+                        self.b.ins().store(MemFlagsData::trusted(), *v, buf, (i * 8) as i32);
+                    }
+                    self.b.ins().return_(&values[..1]);
+                } else {
+                    self.b.ins().return_(&values);
+                }
                 self.terminated = true;
             }
             Inst::Raise { kind, message } => {
@@ -812,6 +899,8 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                     match op {
                         IMod => ("rt_int_mod", None, true, None),
                         Hash => ("rt_hash", None, true, None),
+                        RegionCheck => ("rt_str_region_check", None, true, None),
+                        RegionEq => ("rt_str_region_eq", None, false, None),
                         StrEq => ("rt_str_eq", None, false, None),
                         StrLen => ("rt_str_len", None, false, None),
                         Substr => ("rt_substr", None, true, Some(("substr", KIND_STR))),

@@ -329,6 +329,50 @@ pub extern "C" fn rt_substr(p: *mut Vm, s: Value, start: Value, end: Value) -> V
     r
 }
 
+// ---------------------------------------------------------------------------
+// String regions (native/lower.tcl's string-region optimization,
+// hir/stringregion.tcl): a non-materializing internal counterpart of a
+// temporary `substring` result -- a validated (base, start, end) character
+// range that a supported consumer (equality, length) reads directly instead
+// of ever allocating a StrObj. Never a source-visible type: see
+// hir/stringregion.tcl's header.
+
+/// Validates a region's bounds exactly as `rt_substr` does, without
+/// allocating: UNIT on success, RANGE (matching `rt_substr`'s own message)
+/// on failure. Strings are immutable, so a region proven valid here stays
+/// valid for as long as its registers are live -- no re-check is ever needed
+/// at a consumer.
+pub extern "C" fn rt_str_region_check(p: *mut Vm, s: Value, start: Value, end: Value) -> Value {
+    let obj = str_of(s);
+    let len = obj.chars as i64;
+    match (int_small(start), int_small(end)) {
+        (Some(from), Some(to)) if from >= 0 && from <= to && to <= len => UNIT,
+        _ => {
+            let (from, to) = (int_to_big(start), int_to_big(end));
+            let message = format!("substring: range {from}..{to} is outside 0..{len}");
+            vm(p).fail(RtError::Semantic { kind: "RANGE", message })
+        }
+    }
+}
+
+/// BASE\[START..END) (a region `rt_str_region_check` already validated)
+/// compared character-for-character against OTHER, with no allocation.
+/// Never fallible.
+pub extern "C" fn rt_str_region_eq(_p: *mut Vm, base: Value, start: Value, end: Value, other: Value) -> Value {
+    let b = str_of(base);
+    let o = str_of(other);
+    let from = int_small(start).expect("region start already validated") as usize;
+    let to = int_small(end).expect("region end already validated") as usize;
+    if to - from != o.chars {
+        return bool_value(false);
+    }
+    if b.ascii {
+        bool_value(b.text.as_bytes()[from..to] == *o.text.as_bytes())
+    } else {
+        bool_value(b.text.chars().skip(from).take(to - from).eq(o.text.chars()))
+    }
+}
+
 pub extern "C" fn rt_str_lower(p: *mut Vm, s: Value) -> Value {
     // Simple (one-to-one) case mapping, like Tcl's string tolower.
     let text: String = str_of(s)
@@ -657,10 +701,11 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         MkOk => rt_result_new(p, 1, a[0]),
         MkError => rt_result_new(p, 0, a[0]),
         Hash => rt_hash(p, a[0]),
-        RBox | RUnbox | RIAdd | RISub | RIMul | RILt | RILe | RIGt | RIGe | RIEq => {
-            // Raw (untagged) representation ops never implement a dynamic
-            // native: native/lower.tcl emits them only directly, as `op`
-            // instructions inline in a function's own body.
+        RegionCheck | RegionEq | RBox | RUnbox | RIAdd | RISub | RIMul | RILt | RILe | RIGt | RIGe | RIEq => {
+            // Raw (untagged) representation ops and StringRegion ops never
+            // implement a dynamic native: native/lower.tcl emits them only
+            // directly, as `op` instructions inline in a function's own
+            // body.
             unreachable!("{op:?} is never a native implementation")
         }
     }
@@ -690,6 +735,8 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_hash, 2),
         h!(rt_str_len, 2),
         h!(rt_substr, 4),
+        h!(rt_str_region_check, 4),
+        h!(rt_str_region_eq, 5),
         h!(rt_str_lower, 2),
         h!(rt_str_cat, 3),
         h!(rt_list_new, 3),

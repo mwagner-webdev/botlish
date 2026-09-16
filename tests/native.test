@@ -466,7 +466,17 @@ test native-spec-14 {guard accounting: blockers and emitted guards agree} -body 
             [dict get $report generic guards] [dict get $report specialized guards] \
             [dict get $report nirGuards]
     }
-} -result {{csv 17 17 0 0} {csv_chunked 29 29 1 1} {csv_geometric 24 24 0 0} {csv_records 84 84 29 29} {hashtable 63 55 25 25} {matmul 17 17 0 0} {string_replace 12 12 0 0} {string_reverse 4 4 0 0}}
+# csv/csv_chunked/csv_geometric/csv_records's "generic guards" each grew by
+# a fixed +2 with the String-region milestone (native/lower.tcl's "String
+# regions" section): peek's generic instance needs 2 representation guards
+# (`text` proven str, the `>=` comparison's operands proven Int) and is now
+# lowered into two NIR functions, its ordinary one and its region companion
+# (hir::stringregion.tcl recognizes peek as region-producing, since every
+# scan_unquoted/scan_field call site consumes it only via `==`) -- ordinary
+# guard accounting (blockers == guards, checked by native::report itself)
+# counts the same region's guards once per NIR function it is lowered into,
+# exactly as it always has for hir::escape's own List companions.
+} -result {{csv 17 19 0 0} {csv_chunked 29 31 1 1} {csv_geometric 24 26 0 0} {csv_records 84 86 29 29} {hashtable 63 55 25 25} {matmul 17 17 0 0} {string_replace 12 12 0 0} {string_reverse 4 4 0 0}}
 
 # ---------------------------------------------------------------------------
 # Closures
