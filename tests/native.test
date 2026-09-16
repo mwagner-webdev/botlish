@@ -228,6 +228,16 @@ test native-string-1 {string primitives, non-ASCII characters and escapes} -body
          [parity "\[\"x\" == \"x\", \"x\" == \"y\", \"\" == \"\", substring(\"abc\", 3, 3)\]"]
 } -result {same same}
 
+# A supplementary-plane character (outside the Basic Multilingual Plane) is
+# one Unicode scalar value: length, indexing (substring) and equality all
+# agree with that across every backend. Tcl 9's strings are scalar-value
+# sequences, matching Botlish's own String semantics (core/core.tcl requires
+# Tcl 9 for exactly this reason).
+test native-string-astral-1 {a supplementary-plane character is one scalar value, not a surrogate pair} -body {
+    list [parity "\[length(\"\U0001F642\"), length(\"a\U0001F642b\"), substring(\"a\U0001F642b\", 1, 2), \"\U0001F642\" == \"\U0001F642\", \"\U0001F642\" == \"\U0001F643\"\]"] \
+         [native "\[length(\"\U0001F642\"), length(\"a\U0001F642b\"), substring(\"a\U0001F642b\", 1, 2), \"\U0001F642\" == \"\U0001F642\", \"\U0001F642\" == \"\U0001F643\"\]"]
+} -result "same {value {\[1, 3, \"\U0001F642\", true, false\]}}"
+
 test native-list-1 {list primitives and structural equality} -body {
     list [parity "xs = \[1, \[2, 3\], \"four\"\]\n\[list_length(xs), list_get(xs, 1), list_append(xs, 5), xs\]"] \
          [parity "\[\[1, \[2\]\] == \[1, \[2\]\], \[1\] == \[1, 2\], \[1\] == \[\"1\"\], \[\] == \[\]\]"]

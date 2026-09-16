@@ -99,6 +99,18 @@ f()
     }
 } -result {value {[2, 1]}}
 
+# A supplementary-plane character (outside the Basic Multilingual Plane) is
+# one Unicode scalar value, so hash(), ==, ht_get and ht_contains agree on a
+# key built from one across every backend, and length() sees one character,
+# never a surrogate pair (core/core.tcl requires Tcl 9 for exactly this).
+test ht-astral-key-1 {a supplementary-plane character key: hash/==/get/contains agree, and length() is one scalar value} -body {
+    parity "fn f():\n    t = ht_new()\n    ht_set(t, concat(\"x\", \"\U0001F642\"), 1)\n    \[ht_get(t, \"x\U0001F642\"), ht_contains(t, \"x\U0001F642\"), ht_contains(t, \"x\U0001F643\"), length(\"\U0001F642\")\]\nf()\n"
+} -result same
+
+test ht-astral-key-2 {a supplementary-plane character key: the exact value on the native backend} -body {
+    native "fn f():\n    t = ht_new()\n    ht_set(t, concat(\"x\", \"\U0001F642\"), 1)\n    \[ht_get(t, \"x\U0001F642\"), ht_contains(t, \"x\U0001F642\"), ht_contains(t, \"x\U0001F643\"), length(\"\U0001F642\")\]\nf()\n"
+} -result {value {[1, true, false, 1]}}
+
 test ht-int-keys-1 {Int keys work, distinct from String keys of the same text} -body {
     native {
 fn f():

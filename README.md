@@ -9,6 +9,15 @@ the language's own. Where Tcl behaves differently (truthiness, strings as
 values, exceptions, variable scope, command lookup), the evaluator does
 **not** inherit Tcl's behavior.
 
+**Requires Tcl 9.x** (`core/core.tcl` checks this at load time and fails
+clearly under Tcl 8.x rather than running with subtly wrong semantics).
+Botlish's String semantics count Unicode scalar values, matching the other
+backends (Rust/Cranelift); Tcl 9 represents strings the same way. Tcl 8.x
+represents a character outside the Basic Multilingual Plane as a surrogate
+pair, so `length` would disagree with every other backend by counting such
+characters twice -- a host limitation, not a Botlish semantics change, so
+it is not worked around here.
+
 There are three backends that implement the same semantics:
 
 * **`interp`**: the tree-walking reference interpreter (`core/evaluator.tcl`).
@@ -1347,10 +1356,11 @@ compiler compiles from HIR, the same way as `examples/surface/`.
 
 **Semantics chosen for the corpus**
 
-* `reverse_chars` reverses characters as the runtime indexes them (Tcl 8.6
-  string indices). Those aren't grapheme clusters: a combining mark ends up
-  before its base letter. Only BMP characters are tested, because this Tcl
-  build turns non-BMP characters into U+FFFD.
+* `reverse_chars` reverses characters as the runtime indexes them (Tcl 9
+  string indices, i.e. Unicode scalar values). Those aren't grapheme
+  clusters: a combining mark ends up before its base letter, and a
+  supplementary-plane character (outside the Basic Multilingual Plane) is
+  reversed as the single unit it is, not split into a surrogate pair.
 * `replace` with an empty needle returns the haystack unchanged.
   Replacements aren't rescanned.
 * `csv_parse` handles `,` separators, `\n` record endings (a final `\n`
@@ -1627,12 +1637,13 @@ Ints and use `rt_int_cmp` otherwise. `num-bigint` is an implementation
 detail: nothing about it is visible to programs.
 
 **Strings** are UTF-8 with a cached character count and an ASCII flag.
-`length` and `substring` count Unicode scalar values: ASCII strings are
-indexed in O(1), others by walking the characters. This matches Tcl 9. On
-Tcl 8.6, characters outside the BMP are not representable anyway (§18), so
-the corpus tests only use BMP characters. `lowercase` uses simple one-to-one
-case mapping, like Tcl's `string tolower`, and keeps a character whose
-lowercase form is several characters.
+`length` and `substring` count Unicode scalar values, including
+supplementary-plane characters as one unit each: ASCII strings are indexed
+in O(1), others by walking the characters. This matches Tcl 9, the Tcl
+reference implementation's required host (see this README's introduction),
+so the corpus tests (§18) exercise supplementary-plane characters like any
+other. `lowercase` uses simple one-to-one case mapping, like Tcl's `string
+tolower`, and keeps a character whose lowercase form is several characters.
 
 **Lists** are immutable vectors of values. `list_append` copies, as the
 reference runtime does, so CSV's quadratic behavior is kept deliberately

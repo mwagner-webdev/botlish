@@ -16,13 +16,25 @@ permissions:
 jobs:
   bench:
     runs-on: ubuntu-latest
+    env:
+      LANG: C.utf8
+      LC_ALL: C.utf8
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install Tcl 8.6
+      # ubuntu-latest (noble) ships only Tcl 8.6; Botlish's Tcl reference
+      # implementation requires Tcl 9.x (see README's introduction and
+      # core/core.tcl's version check), so Tcl 9 is installed from Ubuntu
+      # 25.04 (plucky)'s universe pool instead.
+      - name: Install Tcl 9
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends tcl8.6
+          set -eu
+          cd /tmp
+          base=http://archive.ubuntu.com/ubuntu/pool/universe
+          curl -fsSLO "$base/libt/libtommath/libtommath1_1.3.0-1_amd64.deb"
+          curl -fsSLO "$base/t/tcl9.0/libtcl9.0_9.0.1+dfsg-1_amd64.deb"
+          curl -fsSLO "$base/t/tcl9.0/tcl9.0_9.0.1+dfsg-1_amd64.deb"
+          sudo dpkg -i libtommath1_1.3.0-1_amd64.deb libtcl9.0_9.0.1+dfsg-1_amd64.deb tcl9.0_9.0.1+dfsg-1_amd64.deb
 
       # Fails if the backends disagree on any benchmark's value. Timings from
       # shared runners are noisy, so they are reported but never gate.
@@ -30,7 +42,7 @@ jobs:
         shell: bash
         env:
           RUNS: ${{ inputs.runs || '5' }}
-        run: tclsh8.6 bench/bench.tcl -runs "$RUNS" -markdown | tee bench.md
+        run: tclsh9.0 bench/bench.tcl -runs "$RUNS" -markdown | tee bench.md
 
       - name: Publish summary
         if: always()

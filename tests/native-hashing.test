@@ -159,6 +159,17 @@ test hash-parity-str-1 {hash of a String matches across every backend (bit-ident
     parity "hash(\"the quick brown fox\")"
 } -result same
 
+# A supplementary-plane character is one Unicode scalar value under Tcl 9
+# (core/core.tcl requires it for exactly this): hash sees the same code
+# point on every backend, with no surrogate-pair special case anywhere.
+test hash-parity-astral-1 {hash of a String with a supplementary-plane character matches across every backend} -body {
+    parity "hash(\"\U0001F642 quick brown fox\")"
+} -result same
+
+test hash-consistent-with-eq-astral-1 {distinct String objects with equal supplementary-plane content hash equal} -body {
+    native "fn f():\n    a = concat(\"x\", \"\U0001F642\")\n    b = concat(\"x\", \"\U0001F642\")\n    hash(a) == hash(b)\nf()\n"
+} -result {value true}
+
 test hash-parity-int-1 {hash of an Int matches across every backend (bit-identical)} -body {
     parity {hash(123456789)}
 } -result same

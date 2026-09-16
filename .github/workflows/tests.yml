@@ -17,14 +17,32 @@ jobs:
       fail-fast: false
       matrix:
         backend: [interp, compile]
+    env:
+      # Tcl 9's default I/O encoding profile is strict, unlike Tcl 8.6's
+      # lenient default: with no locale, the system encoding falls back to
+      # iso8859-1, and writing the corpus's non-ASCII/astral test output
+      # then fails outright instead of being silently mangled. C.utf8 is
+      # built into glibc, so this needs no locale-gen step.
+      LANG: C.utf8
+      LC_ALL: C.utf8
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install Tcl 8.6
+      # ubuntu-latest (noble) ships only Tcl 8.6; Botlish's Tcl reference
+      # implementation requires Tcl 9.x (see README's introduction and
+      # core/core.tcl's version check) for Unicode scalar-value String
+      # semantics, so Tcl 9 is installed from Ubuntu 25.04 (plucky)'s
+      # universe pool instead.
+      - name: Install Tcl 9
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends tcl8.6
-          echo 'puts "Tcl [info patchlevel], tcltest [package require tcltest 2.5]"' | tclsh8.6
+          set -eu
+          cd /tmp
+          base=http://archive.ubuntu.com/ubuntu/pool/universe
+          curl -fsSLO "$base/libt/libtommath/libtommath1_1.3.0-1_amd64.deb"
+          curl -fsSLO "$base/t/tcl9.0/libtcl9.0_9.0.1+dfsg-1_amd64.deb"
+          curl -fsSLO "$base/t/tcl9.0/tcl9.0_9.0.1+dfsg-1_amd64.deb"
+          sudo dpkg -i libtommath1_1.3.0-1_amd64.deb libtcl9.0_9.0.1+dfsg-1_amd64.deb tcl9.0_9.0.1+dfsg-1_amd64.deb
+          echo 'puts "Tcl [info patchlevel], tcltest [package require tcltest 2.5]"' | tclsh9.0
 
       # The corpus and native tests run every program on the Cranelift
       # backend too, whichever backend the suite targets.
@@ -37,21 +55,29 @@ jobs:
       - name: Run test suite
         env:
           CORE_BACKEND: ${{ matrix.backend }}
-        run: tclsh8.6 tests/all.tcl
+        run: tclsh9.0 tests/all.tcl
 
       - name: Run examples
-        run: tclsh8.6 main.tcl -backend ${{ matrix.backend }}
+        run: tclsh9.0 main.tcl -backend ${{ matrix.backend }}
 
   native:
     name: tests (cranelift coverage)
     runs-on: ubuntu-latest
+    env:
+      LANG: C.utf8
+      LC_ALL: C.utf8
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install Tcl 8.6
+      - name: Install Tcl 9
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends tcl8.6
+          set -eu
+          cd /tmp
+          base=http://archive.ubuntu.com/ubuntu/pool/universe
+          curl -fsSLO "$base/libt/libtommath/libtommath1_1.3.0-1_amd64.deb"
+          curl -fsSLO "$base/t/tcl9.0/libtcl9.0_9.0.1+dfsg-1_amd64.deb"
+          curl -fsSLO "$base/t/tcl9.0/tcl9.0_9.0.1+dfsg-1_amd64.deb"
+          sudo dpkg -i libtommath1_1.3.0-1_amd64.deb libtcl9.0_9.0.1+dfsg-1_amd64.deb tcl9.0_9.0.1+dfsg-1_amd64.deb
 
       - name: Build the native backend
         run: |
@@ -63,13 +89,13 @@ jobs:
       # only if a test fails for a reason other than a reported unsupported
       # construct.
       - name: Native coverage
-        run: tclsh8.6 tests/native-coverage.tcl | tee coverage.txt
+        run: tclsh9.0 tests/native-coverage.tcl | tee coverage.txt
 
       # The corpus and the source samples; examples/04-refinement-scope.ir
       # (returns a Block) and 05-refined-strings.ir (web library) need
       # unsupported constructs, and surface sample 10 expects an error.
       - name: Run examples
-        run: tclsh8.6 main.tcl -backend cranelift examples/stdlib/*.bot examples/surface/0*.bot examples/surface/1[1-3]*.bot examples/0[1-3]*.ir
+        run: tclsh9.0 main.tcl -backend cranelift examples/stdlib/*.bot examples/surface/0*.bot examples/surface/1[1-3]*.bot examples/0[1-3]*.ir
 
       - name: Publish summary
         if: always()

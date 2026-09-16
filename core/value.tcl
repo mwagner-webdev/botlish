@@ -76,7 +76,7 @@ proc core::value::withEvidence {v type} {
     if {[core::type::base $type] ne [kind $v]} {
         error "core::value::withEvidence: [show $v] is not of base type [core::type::show $type]"
     }
-    if {[kind $v] ni $core::type::evidenceKinds} {
+    if {[kind $v] ni $::core::type::evidenceKinds} {
         error "core::value::withEvidence: [kind $v] values cannot carry evidence"
     }
     set names [evidence $v]

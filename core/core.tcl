@@ -7,7 +7,13 @@
 #
 #   core::loadLibrary web
 
-package require Tcl 8.6
+if {[package vcompare [info tclversion] 9.0] < 0} {
+    error "Botlish's Tcl reference implementation requires Tcl 9.x for Unicode\
+        scalar-value string semantics (found Tcl [info patchlevel]); Tcl 8.x\
+        represents supplementary-plane characters as surrogate pairs, which\
+        disagrees with Botlish's String semantics and the other backends."
+}
+package require Tcl 9.0
 
 namespace eval core {
     variable home [file dirname [file normalize [info script]]]
