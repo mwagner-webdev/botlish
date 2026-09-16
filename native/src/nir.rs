@@ -176,11 +176,26 @@ pub enum Inst {
     Call { dst: Reg, func: FuncId, args: Vec<Reg> },
     CallEnv { dst: Reg, func: FuncId, closure: Reg, args: Vec<Reg> },
     CallValue { dst: Reg, callee: Reg, args: Vec<Reg> },
+    /// A direct call of a scalar-replacement companion function (a function
+    /// with `results` > 1: see Function::results): like Call, but the
+    /// callee returns several tagged Values at once -- the fields of a
+    /// fixed-shape aggregate whose canonical List object native/lower.tcl's
+    /// escape analysis proved this call site never needs (see hir/escape.tcl
+    /// and native/lower.tcl's "Scalar replacement" section). Never used for
+    /// an ordinary (results == 1) function.
+    CallMulti { dsts: Vec<Reg>, func: FuncId, args: Vec<Reg> },
+    /// CallMulti, with a closure (see CallEnv).
+    CallEnvMulti { dsts: Vec<Reg>, func: FuncId, closure: Reg, args: Vec<Reg> },
     Tail { args: Vec<Reg> },
     TailEnv { closure: Reg, args: Vec<Reg> },
     Br { cond: Reg, then: Label, otherwise: Label },
     Jump(Label),
     Ret(Reg),
+    /// Returns several tagged Values at once: the terminator of a
+    /// scalar-replacement companion function (Function::results > 1),
+    /// exactly as many as it declares. Never used for a `results == 1`
+    /// function (which always uses Ret).
+    RetMulti(Vec<Reg>),
     Raise { kind: String, message: String },
     Unreachable,
 }
@@ -194,6 +209,7 @@ impl Inst {
                 | Inst::Br { .. }
                 | Inst::Jump(_)
                 | Inst::Ret(_)
+                | Inst::RetMulti(_)
                 | Inst::Raise { .. }
                 | Inst::Unreachable
         )
@@ -208,6 +224,18 @@ pub struct Function {
     pub regs: u32,
     pub pnames: String,
     pub captures: u32,
+    /// The number of tagged Values this function returns: 1 for every
+    /// ordinary function (the `func` header omits `results=`, and every
+    /// `ret` returns one Reg); more than 1 only for a scalar-replacement
+    /// companion function native/lower.tcl emits alongside a specialized
+    /// instance's ordinary function, whose terminator is always RetMulti
+    /// with exactly this many registers (see the "Scalar replacement"
+    /// section of native/lower.tcl). Such a function is only ever reached
+    /// through CallMulti/CallEnvMulti from other NIR functions this same
+    /// compilation emits -- never through the generic entry (no closure or
+    /// Block value ever points to it) -- so codegen's generic entry wrapper
+    /// is a dead stub for it (see codegen/clif.rs's `define`).
+    pub results: u32,
     pub body: Vec<Inst>,
     /// The HIR expression each instruction in BODY (same index) originated
     /// from -- native/lower.tcl's trailing "@ExprId" annotation on nearly
@@ -459,6 +487,10 @@ fn parse_func_header(p: &Parser, tokens: &[Token]) -> Result<Function, NirError>
         }
     };
     let regs = num("regs")?;
+    let results = match kv.get("results") {
+        Some(v) => v.parse().or_else(|_| p.err("bad results"))?,
+        None => 1,
+    };
     let mut raw_regs = vec![false; regs as usize];
     if let Some(list) = kv.get("rawregs") {
         for tok in list.split_whitespace() {
@@ -476,6 +508,7 @@ fn parse_func_header(p: &Parser, tokens: &[Token]) -> Result<Function, NirError>
         regs,
         pnames: kv.get("pnames").cloned().unwrap_or_default(),
         captures: num("captures")?,
+        results,
         body: Vec::new(),
         origins: Vec::new(),
         raw_regs,
@@ -508,12 +541,30 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
             _ => p.err("expected a quoted string"),
         }
     };
-    if let Some(Token::Reg(dst)) = tokens.first() {
-        if tokens.get(1) != Some(&Token::Word("=".into())) {
+    if let Some(Token::Reg(_)) = tokens.first() {
+        // One or more leading registers (more than one only for
+        // callmulti/callenvmulti's dsts: see Inst::CallMulti) before "=".
+        let mut dsts = Vec::new();
+        let mut i = 0;
+        while let Some(Token::Reg(r)) = tokens.get(i) {
+            dsts.push(*r);
+            i += 1;
+        }
+        if tokens.get(i) != Some(&Token::Word("=".into())) {
             return p.err("expected =");
         }
-        let dst = *dst;
-        let rhs = tokens.get(2).and_then(word).unwrap_or("");
+        i += 1;
+        let rhs = tokens.get(i).and_then(word).unwrap_or("");
+        i += 1;
+        if rhs != "callmulti" && rhs != "callenvmulti" && dsts.len() != 1 {
+            return p.err(format!("{rhs} takes exactly one destination register"));
+        }
+        let dst = dsts[0];
+        // I is the index of the first operand after the rhs word: 3 for
+        // every ordinary (single-dst) instruction below, exactly as the
+        // literal indices already assumed; only callmulti/callenvmulti
+        // (dsts.len() possibly > 1) need I itself, since their operands
+        // start later when there is more than one destination register.
         return Ok(match rhs {
             "int" => {
                 let digits = tokens.get(3).and_then(word).unwrap_or("").to_string();
@@ -559,6 +610,10 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
             "call" => Inst::Call { dst, func: num(3)?, args: regs_from(4)? },
             "callenv" => Inst::CallEnv { dst, func: num(3)?, closure: reg(4)?, args: regs_from(5)? },
             "callvalue" => Inst::CallValue { dst, callee: reg(3)?, args: regs_from(4)? },
+            "callmulti" => Inst::CallMulti { dsts, func: num(i)?, args: regs_from(i + 1)? },
+            "callenvmulti" => {
+                Inst::CallEnvMulti { dsts, func: num(i)?, closure: reg(i + 1)?, args: regs_from(i + 2)? }
+            }
             other => return p.err(format!("unknown instruction {other}")),
         });
     }
@@ -577,6 +632,7 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
         "br" => Inst::Br { cond: reg(1)?, then: label(2)?, otherwise: label(3)? },
         "jump" => Inst::Jump(label(1)?),
         "ret" => Inst::Ret(reg(1)?),
+        "retmulti" => Inst::RetMulti(regs_from(1)?),
         "raise" => Inst::Raise {
             kind: tokens.get(1).and_then(word).unwrap_or("").to_string(),
             message: quoted(2)?,
@@ -690,6 +746,23 @@ fn validate(program: &Program) -> Result<(), NirError> {
                     used.extend([*dst, *callee]);
                     used.extend(args);
                 }
+                Inst::CallMulti { dsts, func: g, args } => {
+                    match func(*g) {
+                        Some(g) if !g.env && g.params as usize == args.len() && g.results as usize == dsts.len() => {}
+                        _ => return fail(ctx(format!("callmulti of {g}: bad target, arity or result count"))),
+                    }
+                    used.extend(dsts);
+                    used.extend(args);
+                }
+                Inst::CallEnvMulti { dsts, func: g, closure, args } => {
+                    match func(*g) {
+                        Some(g) if g.env && g.params as usize == args.len() && g.results as usize == dsts.len() => {}
+                        _ => return fail(ctx(format!("callenvmulti of {g}: bad target, arity or result count"))),
+                    }
+                    used.push(*closure);
+                    used.extend(dsts);
+                    used.extend(args);
+                }
                 Inst::Tail { args } | Inst::TailEnv { args, .. } => {
                     if args.len() != f.params as usize {
                         return fail(ctx("tail call arity".into()));
@@ -709,7 +782,22 @@ fn validate(program: &Program) -> Result<(), NirError> {
                     targets.extend([*then, *otherwise]);
                 }
                 Inst::Jump(l) => targets.push(*l),
-                Inst::Ret(r) => used.push(*r),
+                Inst::Ret(r) => {
+                    if f.results != 1 {
+                        return fail(ctx(format!("ret: function declares results={}, expected retmulti", f.results)));
+                    }
+                    used.push(*r);
+                }
+                Inst::RetMulti(rs) => {
+                    if rs.len() != f.results as usize {
+                        return fail(ctx(format!(
+                            "retmulti: {} value(s), function declares results={}",
+                            rs.len(),
+                            f.results
+                        )));
+                    }
+                    used.extend(rs);
+                }
             }
             if let Some(r) = used.iter().find(|r| **r >= f.regs) {
                 return fail(ctx(format!("register %{r} out of range")));
@@ -779,8 +867,9 @@ fn validate(program: &Program) -> Result<(), NirError> {
             }
         }
     }
-    if program.functions.is_empty() || program.functions[0].params != 0 || program.functions[0].env {
-        return fail("function 0 must be the program: no parameters, no environment".into());
+    if program.functions.is_empty() || program.functions[0].params != 0 || program.functions[0].env
+            || program.functions[0].results != 1 {
+        return fail("function 0 must be the program: no parameters, no environment, one result".into());
     }
     Ok(())
 }
