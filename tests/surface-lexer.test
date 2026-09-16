@@ -111,6 +111,11 @@ test lex-unsupported-characters {characters of deferred syntax} -body {
     list [lexError "a ! b"] [lexError "a / b"] [lexError "a.b"] [lexError "a; b"] [lexError "a::b"]
 } -result {{1:3 unexpected character "!"} {1:3 unexpected character "/"} {1:2 unexpected character "."} {1:2 unexpected character ";"} {no error}}
 
+test lex-reserved-range {".." is reserved for a future range syntax, whatever follows it} -body {
+    list [lexError "1..10"] [lexError "1 .. 10"] [lexError "foo..bar"] \
+         [lexError "1..=10"] [lexError "1..<10"]
+} -result {{1:2 '..' is reserved for future range syntax} {1:3 '..' is reserved for future range syntax} {1:4 '..' is reserved for future range syntax} {1:2 '..' is reserved for future range syntax} {1:2 '..' is reserved for future range syntax}}
+
 test lex-crlf {CRLF line endings} -body {
     tokens "if a:\r\n    b\r\nc\r\n"
 } -result {if IDENT:a : NEWLINE INDENT IDENT:b NEWLINE DEDENT IDENT:c NEWLINE EOF}
@@ -158,6 +163,14 @@ test lex-recover-characters {unexpected characters and ? are skipped} -body {
 test lex-recover-literals {bad integers and strings still produce tokens} -body {
     recovered "007 12ab \"a\\qb\"\n\"open"
 } -result {{INT:7 INT:12 STRING:aqb NEWLINE STRING:open NEWLINE EOF} {{1:1 invalid integer literal "007": leading zeros are not allowed} {1:5 invalid integer literal} {1:12 invalid escape "\q" in string} {2:1 unterminated string}}}
+
+test lex-recover-reserved-range {only the ".." is skipped; what follows lexes normally, unaffected} -body {
+    recovered "1..10\n1..=10\n1..<10"
+} -result {{INT:1 INT:10 NEWLINE INT:1 = INT:10 NEWLINE INT:1 < INT:10 NEWLINE EOF} {{1:2 '..' is reserved for future range syntax} {2:2 '..' is reserved for future range syntax} {3:2 '..' is reserved for future range syntax}}}
+
+test lex-recover-dot-regression {a single "." is unaffected: still an unexpected character, not reserved} -body {
+    recovered "a.b.c"
+} -result {{IDENT:a IDENT:b IDENT:c NEWLINE EOF} {{1:2 unexpected character "."} {1:4 unexpected character "."}}}
 
 test lex-recover-layout {tabs and inconsistent dedents keep the layout usable} -body {
     recovered "if a:\n\tb\nif c:\n    d\n  e"

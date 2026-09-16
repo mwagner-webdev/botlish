@@ -282,6 +282,17 @@ fn f ()
 ! 1:5 expected ":" after the "if" condition, found end of line
 ! 5:9 expected an expression, found end of line}
 
+test parse-reserved-range {".." is rejected as reserved before parsing begins} -body {
+    list [parseError "x = 1..10"] [parseError "x = a..b"]
+} -result {{1:6 '..' is reserved for future range syntax} {1:6 '..' is reserved for future range syntax}}
+
+test parse-recover-reserved-range {"..": the reserved diagnostic and the resulting stray token both surface} -body {
+    recoveredAst "a = 1..10\nb = 2"
+} -result {(error)
+(bind b (int 2))
+! 1:6 '..' is reserved for future range syntax
+! 1:8 expected end of line, found integer 10}
+
 test parse-recover-lexical {lexical and syntax errors together, in source order} -body {
     # "2 ! 3": the lexer skips "!", then the parser finds a stray 3.
     recoveredAst "a = \"open\nb = f(1\nc = 2 ! 3\nd = 007"
