@@ -265,28 +265,16 @@ test csv-records-gc-stress-allocation-consistency-1 {allocation report stays int
 } -result {1 1}
 
 # ---------------------------------------------------------------------------
-# Astral-plane Unicode (req #12: "\U0001F642" / a face emoji): this Tcl 8.6
-# build has no full-Unicode support (not built --enable-fullutf), so a
-# codepoint above U+FFFF cannot be produced with \U or [format %c] --
-# either silently becomes U+FFFD (REPLACEMENT CHARACTER) at Tcl's own
-# backslash-substitution step, before this test ever runs. Decoding the raw
-# UTF-8 bytes explicitly (encoding convertfrom, below) sidesteps that: Tcl
-# represents the result as a surrogate pair (2 Tcl "characters" for the one
-# codepoint), which is exactly what this section's own finding is about.
-#
-# The composed workload still works correctly with this Tcl-internal detour:
-# hash()/== operate on UTF-8-encoded bytes (core/hashing.tcl's Utf8Bytes),
-# and Tcl's own UTF-8 encoder recombines a surrogate pair back into the
-# correct 4-byte sequence -- verified below to parity-agree on all four
-# backends for ht_get/ht_contains keyed and valued by the emoji itself.
-# length(), however, genuinely disagrees: the interp/compile backends (Tcl
-# -hosted, core/strings.tcl's [string length]) count the surrogate pair as
-# 2, while cranelift (native/src/runtime, Rust's real Unicode scalar values,
-# str::chars().count()) correctly counts 1 -- a pre-existing limitation of
-# this specific Tcl build's Unicode support, not a Botlish language or
-# milestone defect (the existing corpus already avoids non-BMP characters
-# for the same reason: string_reverse.bot's own non-ASCII cases are all
-# within the BMP). Reported as a finding, not fixed (out of scope: req #31).
+# Astral-plane Unicode (req #12: "\U0001F642" / a face emoji): under Tcl 9
+# (core/core.tcl requires it -- see the README's introduction), a
+# supplementary-plane codepoint is one Tcl character, i.e. one Unicode
+# scalar value, exactly like Rust's str::chars(). hash()/== operate on
+# UTF-8-encoded bytes either way (core/hashing.tcl's Utf8Bytes), and
+# length() now agrees too: every backend counts the emoji as 1, not the
+# surrogate-pair-derived 2 that a Tcl 8.6 build (no full-Unicode support)
+# used to give the Tcl-hosted backends. Verified below to parity-agree on
+# all four backends for ht_get/ht_contains and length(), keyed and valued
+# by the emoji itself.
 
 set ::astralEmoji [encoding convertfrom utf-8 "\xf0\x9f\x99\x82"]
 
@@ -300,10 +288,10 @@ test csv-records-astral-2 {the emoji round-trips to its correct 4-byte UTF-8 enc
     native "fn f():\n    rows = csv_records([corpus::literal $csvText])\n    ht_get(list_get(rows, 0), \"mood\")\nf()"
 } -result [list value "\"$::astralEmoji\""]
 
-test csv-records-astral-length-disagreement-1 {DOCUMENTS the finding above: length() of the same astral character disagrees between the Tcl-hosted and native backends (this Tcl build's own limitation, not asserted as desired behavior)} -body {
-    set exprs [sourceIR "length([corpus::literal $::astralEmoji])"]
-    list [lindex [outcomeUnder interp $exprs] 1] [lindex [outcomeUnder cranelift $exprs] 1]
-} -result {2 1}
+test csv-records-astral-length-1 {length() of the astral-plane emoji is one Unicode scalar value, agreeing on every backend} -body {
+    list [parity "length([corpus::literal $::astralEmoji])"] \
+         [native "length([corpus::literal $::astralEmoji])"]
+} -result {same {value 1}}
 
 # ---------------------------------------------------------------------------
 # Allocation-site attribution (req #42): sites mode names the expected
