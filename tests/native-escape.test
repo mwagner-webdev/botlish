@@ -1,0 +1,258 @@
+# native-escape.test -- conservative escape analysis and scalar replacement
+# of fixed-shape immutable List aggregates (hir/escape.tcl, native/lower.tcl's
+# "Scalar replacement" section): local literals, closed-call returns, the
+# scalar-replacement companion function's ABI fallback, materialization
+# boundaries, effect ordering, and the CSV/HashTable corpus targets.
+#
+# -escape-opt 0 (or BOTLISH_NATIVE_ESCAPE_OPT=0) disables the analysis
+# outright: most tests here differentially compare it against the default
+# (on), the same way native-alloc.test's alloc-off-1 checks -specialize 0.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot examples stdlib corpus.tcl]
+
+interp recursionlimit {} 1000000
+
+proc sourceHir {text} {
+    return [surface::compile $text t.bot -strict 0]
+}
+
+# The List allocation count of TEXT under ESCAPE-OPT (1 or 0).
+proc listAllocs {text escapeOpt} {
+    return [dict get [native::allocationReport [sourceHir $text] summary 1 -escape-opt $escapeOpt] byKind List allocations]
+}
+
+# Asserts optimized (escape-opt 1) and baseline (escape-opt 0) agree on
+# TEXT's value: the differential-parity requirement every test here relies
+# on (the milestone's #37).
+proc assertParity {text} {
+    set hir [sourceHir $text]
+    set on [native::evalHir $hir -escape-opt 1]
+    set off [native::evalHir $hir -escape-opt 0]
+    if {$on ne $off} {
+        error "escape-opt 1 vs 0 mismatch: $on vs $off"
+    }
+    return $on
+}
+
+# ---------------------------------------------------------------------------
+# Local scalar replacement (#30)
+
+test escape-local-1 {a literal pair destructured by constant indexes allocates no List} -body {
+    set text "fn f():\n    pair = \[10, 20\]\n    x = list_get(pair, 0)\n    y = list_get(pair, 1)\n    x + y\n\nf()"
+    list [assertParity $text] [listAllocs $text 1] [listAllocs $text 0]
+} -result {{int 30} 0 1}
+
+test escape-local-2 {a literal triple, all three fields read} -body {
+    set text "fn f():\n    t = \[1, 2, 3\]\n    list_get(t, 0) + list_get(t, 1) + list_get(t, 2)\n\nf()"
+    list [assertParity $text] [listAllocs $text 1]
+} -result {{int 6} 0}
+
+test escape-local-3 {the NIR of a scalarized local literal has no listnew/listget} -body {
+    set text "fn f():\n    pair = \[10, 20\]\n    x = list_get(pair, 0)\n    y = list_get(pair, 1)\n    x + y\n\nf()"
+    set nirText [dict get [native::lower::program [sourceHir $text]] text]
+    list [regexp {listnew|listget} $nirText]
+} -result 0
+
+# ---------------------------------------------------------------------------
+# Closed-call return scalar replacement (#31, the hard acceptance requirement)
+
+test escape-remote-1 {callee -> [a,b], caller extracts 0/1: no List allocation} -body {
+    set text "fn pair():\n    \[1, 2\]\n\nfn f():\n    p = pair()\n    x = list_get(p, 0)\n    y = list_get(p, 1)\n    x + y\n\nf()"
+    list [assertParity $text] [listAllocs $text 1] [listAllocs $text 0]
+} -result {{int 3} 0 1}
+
+test escape-remote-2 {the callee's companion is emitted as an extra results=2 NIR function} -body {
+    set text "fn pair():\n    \[1, 2\]\n\nfn f():\n    p = pair()\n    list_get(p, 0)\n\nf()"
+    set nirText [dict get [native::lower::program [sourceHir $text]] text]
+    list [regexp -all {results=2} $nirText] [regexp {retmulti} $nirText] [regexp {callmulti} $nirText]
+} -result {1 1 1}
+
+test escape-remote-3 {a two-hop forward chain (a -> b -> [x,y]) still scalarizes} -body {
+    set text "fn base():\n    \[7, 8\]\n\nfn middle():\n    base()\n\nfn f():\n    p = middle()\n    list_get(p, 0) + list_get(p, 1)\n\nf()"
+    list [assertParity $text] [listAllocs $text 1] [listAllocs $text 0]
+} -result {{int 15} 0 1}
+
+# ---------------------------------------------------------------------------
+# Preserved canonical ABI fallback (#28)
+
+test escape-fallback-1 {the same callee still returns a real List to a caller that needs one} -body {
+    set text "fn pair():\n    \[1, 2\]\n\nfn scalarCaller():\n    p = pair()\n    list_get(p, 0)\n\nfn listCaller():\n    pair()\n\n\[scalarCaller(), listCaller()\]"
+    assertParity $text
+} -result {list {{int 1} {list {{int 1} {int 2}}}}}
+
+test escape-fallback-2 {that dual use emits both the canonical and the companion function} -body {
+    set text "fn pair():\n    \[1, 2\]\n\nfn scalarCaller():\n    p = pair()\n    list_get(p, 0)\n\nfn listCaller():\n    pair()\n\n\[scalarCaller(), listCaller()\]"
+    set functions [dict get [native::lower::program [sourceHir $text]] functions]
+    set names [lmap info $functions {
+        if {[dict get $info name] ne "pair"} continue
+        dict get $info label
+    }]
+    lsort $names
+} -result {pair<generic> {pair<generic> (scalar)}}
+
+# ---------------------------------------------------------------------------
+# Materialization boundary: mixed scalar/escaping uses (#32)
+
+test escape-mixed-1 {evaluated once, materialized once, no reevaluation} -body {
+    # make_pair() must run exactly once (its own [1,2] allocates once); the
+    # escaping use (list_length, which needs the real List) means p is not
+    # virtualized at all -- x reads the already-materialized List, same as
+    # unoptimized lowering, so semantics and allocation count are identical
+    # whether escape-opt is on or off (the milestone's #11: this is the
+    # "materialize once and reuse" outcome for a mixed binding).
+    set text "fn make_pair():\n    \[1, 2\]\n\nfn f():\n    p = make_pair()\n    x = list_get(p, 0)\n    y = list_length(p)\n    \[x, y\]\n\nf()"
+    list [assertParity $text] [listAllocs $text 1] [listAllocs $text 1] [listAllocs $text 0]
+} -result {{list {{int 1} {int 2}}} 2 2 2}
+
+# ---------------------------------------------------------------------------
+# Effectful elements: no duplication or reordering (#33)
+
+test escape-effects-1 {element expressions run exactly once, in source order} -body {
+    set text "fn side(n):\n    concat(\"x\", n)\n\nfn f():\n    pair = \[side(\"1\"), side(\"2\")\]\n    a = list_get(pair, 0)\n    b = list_get(pair, 1)\n    concat(a, b)\n\nf()"
+    list [assertParity $text] [listAllocs $text 1]
+} -result {{str x1x2} 0}
+
+test escape-effects-2 {the same, forwarded across a closed call} -body {
+    set text "fn side(n):\n    concat(\"x\", n)\n\nfn pair(a, b):\n    \[side(a), side(b)\]\n\nfn f():\n    p = pair(\"1\", \"2\")\n    concat(list_get(p, 0), list_get(p, 1))\n\nf()"
+    list [assertParity $text] [listAllocs $text 1]
+} -result {{str x1x2} 0}
+
+# ---------------------------------------------------------------------------
+# Genuinely escaping aggregates still materialize and behave normally (#34)
+
+test escape-escaping-1 {a returned-as-is pair still allocates and evaluates correctly} -body {
+    set text "fn pair():\n    \[1, 2\]\n\nfn f():\n    pair()\n\nf()"
+    list [assertParity $text] [listAllocs $text 1] [listAllocs $text 0]
+} -result {{list {{int 1} {int 2}}} 1 1}
+
+test escape-escaping-2 {a pair stored into another aggregate still allocates} -body {
+    set text "fn pair():\n    \[1, 2\]\n\nfn f():\n    p = pair()\n    \[p, p\]\n\nf()"
+    listAllocs $text 1
+} -result 2
+
+# ---------------------------------------------------------------------------
+# Dynamic indexing conservatively falls back (#35)
+
+test escape-dynamic-1 {a runtime-unknown index is never scalarized} -body {
+    set text "fn f(i):\n    pair = \[10, 20\]\n    list_get(pair, i)\n\nf(1)"
+    list [assertParity $text] [listAllocs $text 1] [listAllocs $text 0]
+} -result {{int 20} 1 1}
+
+# ---------------------------------------------------------------------------
+# GC stress (#36): heap-valued virtual fields must survive without the
+# former List object acting as their root.
+
+test escape-gc-stress-1 {virtual fields stay live under BOTLISH_NATIVE_GC_STRESS=1} -body {
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    set text "fn pair(a, b):\n    \[concat(a, \"!\"), concat(b, \"?\")\]\n\nfn f(n):\n    if n == 0:\n        p = pair(\"x\", \"y\")\n        return concat(list_get(p, 0), list_get(p, 1))\n    f(n - 1)\n\nf(2000)"
+    set result [catch {native::evalHir [sourceHir $text]} value]
+    unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    list $result $value
+} -result {0 {str x!y?}}
+
+# ---------------------------------------------------------------------------
+# Optimizer disabled (#37): the -escape-opt 0 flag/BOTLISH_NATIVE_ESCAPE_OPT
+# environment variable produce the guarded baseline (a plain List) and
+# nothing else changes.
+
+test escape-off-1 {escape-opt 0 emits no companion functions at all} -body {
+    set text "fn pair():\n    \[1, 2\]\n\nfn f():\n    p = pair()\n    list_get(p, 0)\n\nf()"
+    set nirText [dict get [native::lower::program [sourceHir $text] -escape-opt 0] text]
+    list [regexp {results=} $nirText] [regexp {retmulti|callmulti} $nirText] [native::evalHir [sourceHir $text] -escape-opt 0]
+} -result {0 0 {int 1}}
+
+test escape-off-2 {BOTLISH_NATIVE_ESCAPE_OPT=0 has the same effect as -escape-opt 0} -body {
+    set text "fn pair():\n    \[1, 2\]\n\nfn f():\n    p = pair()\n    list_get(p, 0)\n\nf()"
+    set ::env(BOTLISH_NATIVE_ESCAPE_OPT) 0
+    set nirText [dict get [native::lower::program [sourceHir $text]] text]
+    unset ::env(BOTLISH_NATIVE_ESCAPE_OPT)
+    regexp {results=} $nirText
+} -result 0
+
+# ---------------------------------------------------------------------------
+# The CSV corpus targets (#15, #38): scan_field's [field, next_index] and
+# scan_record's [fields, next_index] disappear on the optimized path,
+# without any change to csv.bot itself.
+
+set ::csvSource [regsub {\ncsv_parse\("name,age\\nAlice,30\\nBob,40\\n"\)\n$} \
+    [corpus::text csv] "\n"]
+
+proc csvHir {text} {
+    return [sourceHir "$::csvSource\n$text\n"]
+}
+
+test escape-csv-1 {csv_parse's value is unaffected by scalar replacement} -body {
+    assertParity [corpus::text csv]
+} -result {list {{list {{str name} {str age}}} {list {{str Alice} {str 30}}} {list {{str Bob} {str 40}}}}}
+
+test escape-csv-2 {scan_field's and scan_record's own literal construction sites drop to zero} -body {
+    set hir [csvHir {csv_parse("name,age\nAlice,30\nBob,40\n")}]
+    set report [native::allocationReport $hir sites]
+    set survivingLines [lsort -unique [lmap s [dict get $report sites] {
+        if {[dict get $s operation] ne "listnew"} continue
+        set loc [dict get $s location]
+        if {![dict exists $loc line]} continue
+        dict get $loc line
+    }]]
+    # csv.bot's own [field, next_index]/[fields, next_index] literals sit at
+    # these lines (scan_unquoted, scan_quoted, scan_record's two returns);
+    # none of them should still be allocating.
+    set targetLines {37 39 47 49 51 71 73}
+    lsort -unique [lmap l $survivingLines {
+        if {$l ni $targetLines} continue
+        set l
+    }]
+} -result {}
+
+test escape-csv-3 {the same corpus program allocates fewer Lists with escape-opt on} -body {
+    set hir [csvHir {csv_parse("name,age\nAlice,30\nBob,40\n")}]
+    set on [dict get [native::allocationReport $hir summary 1 -escape-opt 1] byKind List allocations]
+    set off [dict get [native::allocationReport $hir summary 1 -escape-opt 0] byKind List allocations]
+    expr {$on < $off}
+} -result 1
+
+# ---------------------------------------------------------------------------
+# HashTable rehash grouping (#16): a non-CSV case, and the structural
+# blocker when it cannot be scalarized (the aggregate is passed as a plain
+# call *argument*, not returned -- see hir/escape.tcl's header). This is an
+# anti-overfitting check: the optimizer must not special-case CSV, and must
+# not silently mis-scalarize a shape it cannot actually support.
+
+set ::htSource [regsub {\nsample\(\)\n$} [corpus::text hashtable] "\n"]
+
+proc htHir {text} {
+    return [sourceHir "$::htSource\n$text\n"]
+}
+
+test escape-hashtable-1 {HashTable set/get/delete is unaffected by scalar replacement} -body {
+    assertParity [corpus::text hashtable]
+} -result {list {{bool true} {bool true} {bool false} {bool false} {bool true} {int 1}}}
+
+test escape-hashtable-2 {rehash's [controls, keys, values] argument grouping is not scalarized (documented blocker)} -body {
+    # ht_rehash_insert/ht_rehash_scan receive `dest`/`src` as a plain
+    # parameter, not as a call result: hir/escape.tcl only recognizes an
+    # aggregate flowing out of a call (a bind or a return), never one
+    # flowing in as an argument, so this allocation count is identical with
+    # escape-opt on or off -- confirming the optimizer neither crashes on
+    # this shape nor (wrongly) claims to have removed it.
+    set hir [htHir {
+fn many():
+    t = ht_new()
+    ht_set(t, "a", 1)
+    ht_set(t, "b", 2)
+    ht_set(t, "c", 3)
+    ht_set(t, "d", 4)
+    ht_set(t, "e", 5)
+    ht_set(t, "f", 6)
+    ht_size(t)
+
+many()
+}]
+    set on [dict get [native::allocationReport $hir summary 1 -escape-opt 1] byKind List allocations]
+    set off [dict get [native::allocationReport $hir summary 1 -escape-opt 0] byKind List allocations]
+    list [native::evalHir $hir] $on [expr {$on == $off}]
+} -result {{int 6} 2 1}
+
+cleanupTests

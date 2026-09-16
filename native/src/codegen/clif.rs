@@ -46,11 +46,24 @@ pub struct Symbols {
 }
 
 fn signature<M: Module>(module: &M, params: usize) -> Signature {
+    signature_n(module, params, 1)
+}
+
+/// Like `signature`, with RESULTS return values instead of always one: a
+/// scalar-replacement companion function (nir::Function::results > 1)
+/// returns several tagged Values directly (a Cranelift function may return
+/// any number of values), one per field of the fixed-shape aggregate its
+/// callers consume without ever materializing the canonical List object
+/// (see native/lower.tcl's "Scalar replacement" section and nir.rs's
+/// CallMulti/RetMulti).
+fn signature_n<M: Module>(module: &M, params: usize, results: usize) -> Signature {
     let mut sig = module.make_signature();
     for _ in 0..params {
         sig.params.push(AbiParam::new(I64));
     }
-    sig.returns.push(AbiParam::new(I64));
+    for _ in 0..results.max(1) {
+        sig.returns.push(AbiParam::new(I64));
+    }
     sig
 }
 
@@ -70,9 +83,18 @@ pub fn declare<M: Module>(module: &mut M, program: &nir::Program, export: bool) 
     for f in &program.functions {
         let params = 1 + f.env as usize + f.params as usize;
         let name = format!("botlish_fn_{}", f.id);
-        let id = module.declare_function(&name, linkage, &signature(module, params)).map_err(module_error)?;
+        let id = module
+            .declare_function(&name, linkage, &signature_n(module, params, f.results as usize))
+            .map_err(module_error)?;
         symbols.names.insert(id.as_u32(), format!("{name} ({})", f.name));
         symbols.direct.push(id);
+        // A results>1 function (a scalar-replacement companion) is only
+        // ever reached through CallMulti/CallEnvMulti from other NIR this
+        // same program emits: no closure or Block value ever points to it
+        // (native/lower.tcl never hands one out as a value), so its generic
+        // entry is dead code. It is still declared and defined -- as a
+        // stub that never runs -- purely to keep `entry` indexed by FuncId
+        // like `direct` (see `define`'s "results > 1" branch).
         let name = format!("botlish_entry_{}", f.id);
         let id = module.declare_function(&name, linkage, &signature(module, 3)).map_err(module_error)?;
         symbols.names.insert(id.as_u32(), name);
@@ -96,7 +118,7 @@ pub fn define<M: Module>(
     let mut ctx = module.make_context();
     let mut fctx = FunctionBuilderContext::new();
 
-    ctx.func.signature = signature(module, 1 + f.env as usize + f.params as usize);
+    ctx.func.signature = signature_n(module, 1 + f.env as usize + f.params as usize, f.results as usize);
     ctx.func.name = UserFuncName::user(0, symbols.direct[f.id as usize].as_u32());
     let config = module.isa().frontend_config();
     {
@@ -120,6 +142,28 @@ pub fn define<M: Module>(
     // Generic entry: unpack the argument array and call the direct function.
     ctx.func.signature = signature(module, 3);
     ctx.func.name = UserFuncName::user(0, symbols.entry[f.id as usize].as_u32());
+    if f.results != 1 {
+        // A scalar-replacement companion (see nir::Function::results): no
+        // closure or Block value ever points to this function (it is only
+        // ever reached through CallMulti/CallEnvMulti from other NIR this
+        // compilation emits), so its generic entry can never actually run.
+        // Cranelift/cranelift-module still requires every declared function
+        // to be defined, so this stub is that definition: it traps
+        // immediately rather than mis-calling a multi-result function
+        // through a single-result ABI.
+        let mut fctx = FunctionBuilderContext::new();
+        let mut b = FunctionBuilder::new(&mut ctx.func, &mut fctx);
+        let block = b.create_block();
+        b.append_block_params_for_function_params(block);
+        b.switch_to_block(block);
+        b.ins().trap(ir::TrapCode::unwrap_user(1));
+        b.seal_all_blocks();
+        b.finalize(config);
+        module.define_function(symbols.entry[f.id as usize], &mut ctx).map_err(module_error)?;
+        size += ctx.compiled_code().map_or(0, |code| code.code_info().total_size);
+        module.clear_context(&mut ctx);
+        return Ok((listing.then_some(text), size));
+    }
     {
         let mut fctx = FunctionBuilderContext::new();
         let mut b = FunctionBuilder::new(&mut ctx.func, &mut fctx);
@@ -228,8 +272,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
 
         self.b.switch_to_block(overflow);
         self.call_helper("rt_stack_overflow", &[self.vm]);
-        let zero = self.b.ins().iconst(I64, 0);
-        self.b.ins().return_(&[zero]);
+        self.return_zeros();
 
         self.b.switch_to_block(setup);
         self.b.ins().store(MemFlagsData::trusted(), top, self.vm, VM_SS_TOP_OFFSET);
@@ -261,8 +304,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
 
         self.b.switch_to_block(self.error_exit);
         self.b.ins().store(MemFlagsData::trusted(), self.base, self.vm, VM_SS_TOP_OFFSET);
-        let zero = self.b.ins().iconst(I64, 0);
-        self.b.ins().return_(&[zero]);
+        self.return_zeros();
 
         self.b.switch_to_block(self.body);
         self.terminated = false;
@@ -343,6 +385,21 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             self.b.ins().store(MemFlagsData::trusted(), zero, self.vm, VM_ALLOC_SITE_OFFSET);
         }
         r
+    }
+
+    /// Returns F.RESULTS copies of the tagged 0 sentinel ("an error is
+    /// pending"): the prologue's stack-overflow path and the shared
+    /// error_exit block both need this, whether F is an ordinary
+    /// (results == 1) function or a scalar-replacement companion (see
+    /// nir::Function::results) -- a multi-result function's caller
+    /// (CallMulti/CallEnvMulti) only ever checks its first result register
+    /// for 0, exactly like an ordinary Call/CallEnv's single result, which
+    /// is why every non-error RetMulti must produce fields that are never
+    /// literally 0 (true of every tagged Value already: see `check`).
+    fn return_zeros(&mut self) {
+        let zero = self.b.ins().iconst(I64, 0);
+        let zeros = vec![zero; self.f.results.max(1) as usize];
+        self.b.ins().return_(&zeros);
     }
 
     /// Branches to the error exit if V is 0; continues in a new block.
@@ -598,6 +655,28 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 self.check(v);
                 self.def(*dst, v);
             }
+            Inst::CallMulti { dsts, func, args } => {
+                let mut values = vec![self.vm];
+                values.extend(args.iter().map(|r| self.get(*r)));
+                let r = self.func_ref(self.symbols.direct[*func as usize]);
+                let call = self.b.ins().call(r, &values);
+                let results = self.b.inst_results(call).to_vec();
+                self.check(results[0]);
+                for (d, v) in dsts.iter().zip(results.iter()) {
+                    self.def(*d, *v);
+                }
+            }
+            Inst::CallEnvMulti { dsts, func, closure, args } => {
+                let mut values = vec![self.vm, self.get(*closure)];
+                values.extend(args.iter().map(|r| self.get(*r)));
+                let r = self.func_ref(self.symbols.direct[*func as usize]);
+                let call = self.b.ins().call(r, &values);
+                let results = self.b.inst_results(call).to_vec();
+                self.check(results[0]);
+                for (d, v) in dsts.iter().zip(results.iter()) {
+                    self.def(*d, *v);
+                }
+            }
             Inst::CallValue { dst, callee, args } => {
                 let f = self.get(*callee);
                 let (n, ptr) = self.array(args);
@@ -641,6 +720,12 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 let v = self.get(*reg);
                 self.b.ins().store(MemFlagsData::trusted(), self.base, self.vm, VM_SS_TOP_OFFSET);
                 self.b.ins().return_(&[v]);
+                self.terminated = true;
+            }
+            Inst::RetMulti(regs) => {
+                let values: Vec<_> = regs.iter().map(|r| self.get(*r)).collect();
+                self.b.ins().store(MemFlagsData::trusted(), self.base, self.vm, VM_SS_TOP_OFFSET);
+                self.b.ins().return_(&values);
                 self.terminated = true;
             }
             Inst::Raise { kind, message } => {

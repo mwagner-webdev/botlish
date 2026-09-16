@@ -150,6 +150,10 @@ namespace eval native::lower {
     variable ranges {}
     variable currentInstance {}
     variable reprOpt 1
+    # Scalar replacement (see "Scalar replacement" below): the hir::escape
+    # analysis of the program, and whether it is enabled at all.
+    variable escape {}
+    variable escapeOpt 1
 }
 
 # ---------------------------------------------------------------------------
@@ -224,11 +228,89 @@ namespace eval native::lower {
 # is both safe and wanted; nothing here adds a new proof.
 
 # ---------------------------------------------------------------------------
+# Scalar replacement
+#
+# A fixed-shape immutable List value (`[e0, ..., en-1]`) whose object
+# identity hir/escape.tcl proves is never observed may stay a handful of
+# scalar registers instead of ever calling `listnew`, with every
+# `list_get(..., k)` reading it at a compile-time-constant position reading
+# the corresponding register directly instead of calling `listget`. This
+# holds for two shapes (hir/escape.tcl's Classify):
+#
+#   local    a plain `[e0, ..., en-1]` construction, bound to a local
+#            binding every one of whose references is such a `list_get`:
+#            purely intraprocedural, needs no ABI change at all -- Bind
+#            below just evaluates e0..en-1 into fresh registers instead of
+#            building a List from them, exactly as constant folding would.
+#   remote   the same, but the aggregate is *returned* by an exact, closed
+#            direct call to another (non-generic-required) instance whose
+#            own result is itself fully recognized this same way. This is
+#            the milestone's central case (#6-7): the allocation crosses a
+#            function boundary, so avoiding it needs the callee's fields
+#            back without ever materializing a List in between.
+#
+# The remote case is why every instance hir::escape::wants also gets a
+# second, additional NIR function emitted alongside its ordinary one
+# (CompanionFunction, vs. Function): a "scalar-replacement companion" whose
+# signature declares `results=N` (nir.rs's Function::results) and whose
+# every terminator is `retmulti` (N registers) instead of `ret` (one),
+# reached only through the internal `callmulti`/`callenvmulti` NIR ops
+# (nir.rs's CallMulti/CallEnvMulti) -- never through the generic entry ABI,
+# never as a Block value. This is deliberately the smallest calling
+# convention that fits the architecture (the milestone's #7): Cranelift
+# already supports a function returning several values natively, so no
+# out-pointer, no caller-allocated result slot, and no source-level
+# multiple return values are needed. It applies *only* to this one instance
+# for this one internal calling convention; the instance's ordinary
+# Function is still unconditionally emitted exactly as before (guards,
+# knownErrorGuards, its own List-returning `ret`), so a generic/indirect/
+# test-harness caller that needs the real List keeps working unchanged
+# (the milestone's #28) -- hir::escape::wants only ever *adds* a companion,
+# it never changes what a canonical function returns.
+#
+# Call (below), the shared block-call lowering every direct call already
+# goes through, is where both callers of a wanted instance meet: a `bind`
+# whose value is a recognized remote construction (Bind) and, inside a
+# companion's own body, one of its own recognized forwarding exits
+# (CompanionFunction/the `return` case of Expr) both ask Call for `results`
+# registers directly (its optional wantVirtual argument) instead of one
+# tagged register -- the same "ask for the representation actually wanted"
+# discipline as the raw/tagged demand-driven lowering above, just for an
+# aggregate's fields instead of an Int's bits. A self-tail call (already a
+# NIR `tail`/`tailenv` loop backedge, never a completion) is unaffected
+# either way: Call decides that before ever consulting wantVirtual.
+#
+# Effects, evaluation order and errors (#12-13) fall out of reusing exactly
+# the same argument-evaluation code Call and the native-call path already
+# run for an ordinary construction/call: nothing here evaluates anything an
+# unoptimized lowering would not have, in any different order, or fails to
+# check. GC rooting (#24) needs no new mechanism either: every field
+# register is an ordinary tagged NIR register, and codegen already stores
+# every register's value to its own shadow-stack slot on definition
+# (codegen/clif.rs's `def`) regardless of what produced it, so a field that
+# used to be a List element is rooted exactly as it was before, for as long
+# as its slot is live.
+#
+# hir::escape.tcl is conservative and additive only: a binding or an
+# instance this analysis does not recognize (any escaping use, a dynamic
+# index, an argument crossing a call boundary as a plain parameter rather
+# than a call result -- the HashTable rehash-grouping case, see
+# hir::escape.tcl's header -- a generic/indirect call, recursion without a
+# base case) simply lowers exactly as it always did. -escape-opt 0 (or
+# BOTLISH_NATIVE_ESCAPE_OPT=0) disables the analysis outright, for
+# differential testing against the unoptimized baseline.
+
+# ---------------------------------------------------------------------------
 # Entry point
 
 # The NIR of the program-mode HIR program HIR. Options:
 #   -specialize 1|0    specialize functions (default 1, unless the
 #                      environment variable BOTLISH_NATIVE_SPECIALIZE is 0)
+#   -escape-opt 1|0    scalar-replace fixed-shape immutable List aggregates
+#                      whose identity hir/escape.tcl proves is never
+#                      observed (default 1, unless the environment variable
+#                      BOTLISH_NATIVE_ESCAPE_OPT is 0; see the "Scalar
+#                      replacement" section above)
 # Returns a dict:
 #   text        the NIR program
 #   functions   list of dicts, in id order: {id name block instance label
@@ -253,12 +335,17 @@ proc native::lower::program {hirProgram args} {
     variable usedNatives
     variable ranges
     variable reprOpt
+    variable escape
+    variable escapeOpt
 
     set default [expr {[info exists ::env(BOTLISH_NATIVE_SPECIALIZE)]
         && $::env(BOTLISH_NATIVE_SPECIALIZE) eq "0" ? 0 : 1}]
     set reprDefault [expr {[info exists ::env(BOTLISH_NATIVE_REPR_OPT)]
         && $::env(BOTLISH_NATIVE_REPR_OPT) eq "0" ? 0 : 1}]
-    set options [hir::Options native::lower::program [list -specialize $default -repr-opt $reprDefault] $args]
+    set escapeDefault [expr {[info exists ::env(BOTLISH_NATIVE_ESCAPE_OPT)]
+        && $::env(BOTLISH_NATIVE_ESCAPE_OPT) eq "0" ? 0 : 1}]
+    set options [hir::Options native::lower::program \
+        [list -specialize $default -repr-opt $reprDefault -escape-opt $escapeDefault] $args]
     if {[hir::mode $hirProgram] ne "program"} {
         throw {NATIVE UNSUPPORTED sequence-mode} \
             "native lowering: only program-mode HIR can be compiled (sequence mode runs in an unknown environment)"
@@ -266,8 +353,11 @@ proc native::lower::program {hirProgram args} {
     set baseHir $hirProgram
     set hir $hirProgram
     set reprOpt [dict get $options -repr-opt]
+    set escapeOpt [dict get $options -escape-opt]
     set spec [hir::specialize::analyze $hirProgram -specialize [dict get $options -specialize]]
     set ranges [hir::range::analyze $hirProgram $spec]
+    set escape [expr {$escapeOpt ? [hir::escape::analyze $hirProgram $spec]
+        : [dict create arity {} wants {} virtual {}]}]
     set context [dict get $spec context]
     set selfTail [dict get $context selfTails]
     set unproven [dict get $context unproven]
@@ -282,33 +372,41 @@ proc native::lower::program {hirProgram args} {
     }
 
     set functions [dict create]
-    set pending [list [dict get $spec keys program]]
+    set pending [list [list [dict get $spec keys program] canonical]]
     while {$pending ne ""} {
-        set pending [lassign $pending id]
-        if {[dict exists $functions $id]} {
+        set pending [lassign $pending item]
+        lassign $item id mode
+        set key [Key $id $mode]
+        if {[dict exists $functions $key]} {
             continue
         }
-        dict set functions $id [Function $id]
+        dict set functions $key [expr {$mode eq "canonical" ? [Function $id] : [CompanionFunction $id]}]
     }
     set hir $baseHir
 
-    # Function ids in program order.
-    set order [lmap id [dict keys $functions] {
+    # Function ids in program order: a companion right after its instance's
+    # canonical function (the order between the two is otherwise arbitrary;
+    # keeping it deterministic is all that matters here).
+    set order [lmap key [dict keys $functions] {
+        lassign [Unkey $key] id mode
         set block [dict get $spec instances $id block]
         list [expr {$block eq "program" ? 0 : [dict get $context positions $block]}] \
-            [string range $id 1 end] $id
+            [string range $id 1 end] [expr {$mode eq "companion" ? 1 : 0}] $key
     }]
-    set order [lmap entry [lsort -integer -index 0 [lsort -integer -index 1 $order]] {lindex $entry 2}]
+    set order [lmap entry [lsort -integer -index 0 [lsort -integer -index 1 [lsort -integer -index 2 $order]]] {
+        lindex $entry 3
+    }]
     set map {}
     set index 0
-    foreach id $order {
-        lappend map [Placeholder $id] $index
+    foreach key $order {
+        lassign [Unkey $key] id mode
+        lappend map [Placeholder $id $mode] $index
         incr index
     }
     set texts {}
     set infos {}
-    foreach id $order {
-        lassign [dict get $functions $id] text info
+    foreach key $order {
+        lassign [dict get $functions $key] text info
         lappend texts [string map $map $text]
         lappend infos [string map $map $info]
     }
@@ -440,15 +538,37 @@ proc native::lower::BindingAccess {b e} {
 }
 
 # The NIR function id of instance ID: a placeholder that program replaces
-# with the final id. The instance will be lowered.
+# with the final id. The instance's ordinary (canonical, List-returning)
+# function will be lowered.
 proc native::lower::FunctionRef {id} {
     variable pending
-    lappend pending $id
-    return [Placeholder $id]
+    lappend pending [list $id canonical]
+    return [Placeholder $id canonical]
 }
 
-proc native::lower::Placeholder {id} {
-    return "[format %c 1]$id[format %c 2]"
+# Like FunctionRef, for instance ID's scalar-replacement companion function
+# (see the "Scalar replacement" section above): callers must already know,
+# from hir::escape::wants/arity, that this instance has one.
+proc native::lower::CompanionRef {id} {
+    variable pending
+    lappend pending [list $id companion]
+    return [Placeholder $id companion]
+}
+
+# The key `program`'s `functions` dict uses for instance ID's function of
+# MODE (canonical or companion): also Placeholder's inner text, so a
+# Placeholder's text and its functions-dict key always agree.
+proc native::lower::Key {id mode} {
+    return "$id.$mode"
+}
+
+# {ID MODE} from a Key/Placeholder text.
+proc native::lower::Unkey {key} {
+    return [split $key .]
+}
+
+proc native::lower::Placeholder {id {mode canonical}} {
+    return "[format %c 1][Key $id $mode][format %c 2]"
 }
 
 # FunctionRef of the generic instance of block E.
@@ -529,7 +649,7 @@ proc native::lower::Function {id} {
     set fn [dict create region $region instance $id targets [dict get $instance calls] \
         lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 \
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
-        locals [dict create] loops [dict create] broken [dict create] calls {}]
+        locals [dict create] loops [dict create] broken [dict create] calls {} companion ""]
     if {$region eq "program"} {
         set name <program>
         set params {}
@@ -588,11 +708,114 @@ proc native::lower::Function {id} {
     return [list $text $info]
 }
 
+# Lowers the scalar-replacement companion function of instance ID (see the
+# "Scalar replacement" section above): the same instance as Function, but
+# ending every reachable exit in `retmulti` of its recognized construction's
+# fields (hir::escape::classify) instead of materializing and `ret`ing a
+# List. hir::escape::wants ID must already be true (its arity is this
+# function's `results`). Returns {TEXT INFO}, in the same shape as Function.
+proc native::lower::CompanionFunction {id} {
+    variable hir
+    variable baseHir
+    variable spec
+    variable context
+    variable envless
+    variable captureLists
+    variable currentInstance
+    variable escape
+    set currentInstance $id
+    set instance [hir::specialize::instance $spec $id]
+    set region [dict get $instance block]
+    set arity [hir::escape::arity $escape $id]
+    if {$region eq "program" || $arity eq ""} {
+        throw {NATIVE BUG} "native lowering: instance $id has no scalar-replacement companion"
+    }
+    set hir [hir::specialize::view $baseHir $spec $id]
+    set analysis [hir::aot::analyzeRegion $hir $region $context]
+    CollectChecks $analysis
+    set blockers [llength [lmap b [dict get $analysis blockers] {
+        if {[dict get $b class] ne "representation"} continue
+        set b
+    }]]
+    set fn [dict create region $region instance $id targets [dict get $instance calls] \
+        lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 \
+        rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
+        locals [dict create] loops [dict create] broken [dict create] calls {} companion $arity]
+    set name [hir::aot::BlockName $hir $region]
+    set params [hir::get $hir $region params]
+    set env [expr {$region ni $envless}]
+    set scope [hir::get $hir $region bodyScope]
+    set body [hir::get $hir $region body]
+    set rawParams [RawParams $id $instance $params]
+    foreach b $params raw $rawParams {
+        set r [NewReg fn]
+        if {$raw} {
+            MarkRaw fn $r
+            dict set fn locals $b [list rawreg $r]
+        } else {
+            dict set fn locals $b [list reg $r]
+        }
+    }
+    EnterScope fn $scope
+    if {$body eq ""} {
+        throw {NATIVE BUG} "native lowering: companion of instance $id has an empty body"
+    }
+    set ok 1
+    foreach e [lrange $body 0 end-1] {
+        if {[Expr fn $e] eq "never"} {
+            set ok 0
+            break
+        }
+    }
+    if {$ok} {
+        set fields [VirtualValue fn [lindex $body end] $arity]
+        if {$fields ne "never"} {
+            Emit fn "retmulti [join $fields { }]"
+        }
+    }
+    set pnames [lmap b $params {dict get [hir::binding $hir $b] name}]
+    set captures {}
+    if {$env} {
+        set captures [lmap b [dict get $captureLists $region] {dict get [hir::binding $hir $b] name}]
+    }
+    set key [expr {[dict get $instance generic] ? "generic"
+        : [join [lmap t [dict get $instance args] {hir::types::show $t}] {, }]}]
+    set head "func [Placeholder $id companion] [Quote $name] params=[llength $params] env=$env regs=[dict get $fn nreg] pnames=[Quote [join $pnames { }]] captures=[llength $captures] instance=[Quote $key] results=$arity"
+    set rawRegs [lsort -integer [lmap r [dict keys [dict get $fn rawRegs]] {string range $r 1 end}]]
+    if {$rawRegs ne ""} {
+        append head " rawregs=[Quote [join $rawRegs { }]]"
+    }
+    append head " @$region"
+    set text "$head\n[join [dict get $fn lines] \n]\nend"
+    set tails [llength [lmap line [dict get $fn lines] {
+        if {![regexp {^\s+tail(env)? } $line]} continue
+        set line
+    }]]
+    set info [dict create id [Placeholder $id companion] name $name block $region instance $id \
+        label "[hir::specialize::label $spec $id] (scalar)" generic [dict get $instance generic] \
+        envless [expr {!$env}] selfTailCalls $tails calls [dict get $fn calls] \
+        blockers $blockers guards [dict get $fn guards] knownErrorGuards [dict get $fn knownErrorGuards] \
+        rawUnboxes [dict get $fn rawUnboxes] rawBoxes [dict get $fn rawBoxes] \
+        rawArith [dict get $fn rawArith] rawCompare [dict get $fn rawCompare]]
+    return [list $text $info]
+}
+
 proc native::lower::NewReg {fnVar} {
     upvar 1 $fnVar fn
     set r [dict get $fn nreg]
     dict incr fn nreg
     return %$r
+}
+
+# N fresh registers (NewReg), for a callmulti/callenvmulti's destinations or
+# a `retmulti`'s fields.
+proc native::lower::NewRegs {fnVar n} {
+    upvar 1 $fnVar fn
+    set regs {}
+    for {set i 0} {$i < $n} {incr i} {
+        lappend regs [NewReg fn]
+    }
+    return $regs
 }
 
 proc native::lower::NewLabel {fnVar} {
@@ -691,9 +914,23 @@ proc native::lower::Expr {fnVar e {want tagged}} {
         if       { set result [If fn $e $node] }
         loop     { set result [Loop fn $e $node] }
         return {
-            set value [Expr fn [dict get $node value]]
-            if {$value ne "never"} {
-                Emit fn "ret $value" $e
+            set companion [dict get $fn companion]
+            if {$companion ne ""} {
+                # A scalar-replacement companion function (see the "Scalar
+                # replacement" section above): hir::escape::wants only ever
+                # holds when every reachable exit -- this one included --
+                # classifies as a recognized construction of this same
+                # arity, so VirtualValue's fields (not a materialized List)
+                # are what this return actually produces.
+                set fields [VirtualValue fn [dict get $node value] $companion]
+                if {$fields ne "never"} {
+                    Emit fn "retmulti [join $fields { }]" $e
+                }
+            } else {
+                set value [Expr fn [dict get $node value]]
+                if {$value ne "never"} {
+                    Emit fn "ret $value" $e
+                }
             }
             set result never
         }
@@ -893,6 +1130,8 @@ proc native::lower::Bind {fnVar e node} {
     upvar 1 $fnVar fn
     variable hir
     variable context
+    variable escape
+    variable currentInstance
     set valueExpr [dict get $node value]
     set b [dict get $node binding]
     if {[hir::kind $hir $valueExpr] eq "block" && $valueExpr in [dict get $context envless]
@@ -904,6 +1143,24 @@ proc native::lower::Bind {fnVar e node} {
         # (hir::aot::materializedBlocks).
         dict set fn locals $b [list function $valueExpr]
         return ""
+    }
+    if {![dict get $node duplicate]} {
+        set virtualArity [hir::escape::virtualArity $escape $currentInstance $b]
+        if {$virtualArity ne ""} {
+            # A fixed-shape construction whose identity is never observed
+            # (hir/escape.tcl): its fields, not a materialized List (see
+            # the "Scalar replacement" section above). Every reference to B
+            # is already known (hir::escape::Bindings) to be a scalar
+            # `list_get` at a constant position, intercepted directly in
+            # NativeCall below -- nothing ever reads this local's "value"
+            # as a single register.
+            set fields [VirtualValue fn $valueExpr $virtualArity]
+            if {$fields eq "never"} {
+                return never
+            }
+            dict set fn locals $b [list virtual $fields]
+            return ""
+        }
     }
     set value [Expr fn $valueExpr]
     if {$value eq "never"} {
@@ -955,19 +1212,102 @@ proc native::lower::Closure {fnVar e} {
 # ---------------------------------------------------------------------------
 # Calls
 
+# The ARITY fields (a list of registers) of expression E, a call
+# hir::escape.tcl already classified (Bind, CompanionFunction, and Expr's
+# `return` case in companion mode: every caller already knows, from
+# hir::escape.tcl, that E recognizes with this arity) as a recognized
+# fixed-shape construction -- never a materialized List register. "never"
+# if evaluating one of its parts cannot complete normally.
+proc native::lower::VirtualValue {fnVar e arity} {
+    upvar 1 $fnVar fn
+    variable hir
+    set node [hir::node $hir $e]
+    if {[dict get $node kind] ne "call"} {
+        throw {NATIVE BUG} "native lowering: expected a recognized construction at $e"
+    }
+    lassign [Call fn $e $node tagged $arity] result repr
+    if {$result eq "never"} {
+        return never
+    }
+    if {$repr ne "virtual"} {
+        throw {NATIVE BUG} "native lowering: expected virtual fields at $e"
+    }
+    if {[hir::typeOf $hir $e] eq "never"} {
+        # HIR proved that no normal completion reaches past E (Expr's own
+        # tail does this same check for every other expression kind).
+        Emit fn unreachable $e
+        return never
+    }
+    return $result
+}
+
 # Returns {RESULT REPR}: REPR is "raw" only when Ref or Call produced it
-# directly; every other expression kind always returns "tagged" (Expr's tail
-# reconciles a mismatch with WANT via RawOf/TaggedOf).
-proc native::lower::Call {fnVar e node want} {
+# directly, "virtual" only when WANTVIRTUAL asked for it and got it (a list
+# of WANTVIRTUAL registers, the fields of a recognized construction: see the
+# "Scalar replacement" section above); every other expression kind always
+# returns "tagged" (Expr's tail reconciles a mismatch with WANT via
+# RawOf/TaggedOf; WANTVIRTUAL is never reconciled that way -- a caller that
+# passes it already knows, from hir::escape.tcl, that E recognizes).
+proc native::lower::Call {fnVar e node want {wantVirtual ""}} {
     upvar 1 $fnVar fn
     variable hir
     variable selfTail
     variable envless
     variable unproven
     variable natives
+    variable escape
     lassign [dict get $node target] targetKind target
     set calleeExpr [dict get $node callee]
     set argExprs [dict get $node args]
+
+    if {$wantVirtual eq "" && $targetKind eq "native" && [llength $argExprs] == 2
+            && [dict get [hir::symbol $hir $target] name] eq "list_get"
+            && [hir::kind $hir [lindex $argExprs 0]] eq "ref"} {
+        # A `list_get(ref, constant)` read of a fully virtual binding
+        # (hir::escape::virtualArity): the field register hir::escape.tcl
+        # already proved is the only way B is ever read, computed once when
+        # B was bound (Bind above) -- no `listget` call, and REF is not
+        # even evaluated (a plain reference has no effect of its own).
+        set b [hir::get $hir [lindex $argExprs 0] binding]
+        variable currentInstance
+        set virtualArity [expr {$b eq "" ? "" : [hir::escape::virtualArity $escape $currentInstance $b]}]
+        if {$virtualArity ne ""} {
+            set idxExpr [lindex $argExprs 1]
+            if {[hir::kind $hir $idxExpr] ne "const"
+                    || [core::value::kind [hir::get $hir $idxExpr value]] ne "int"} {
+                throw {NATIVE BUG} "native lowering: virtual binding $b read with a non-constant index at $e"
+            }
+            set idx [core::value::intOf [hir::get $hir $idxExpr value]]
+            if {$idx < 0 || $idx >= $virtualArity} {
+                throw {NATIVE BUG} "native lowering: virtual binding $b read out of range at $e"
+            }
+            set local [dict get $fn locals $b]
+            if {[lindex $local 0] ne "virtual"} {
+                throw {NATIVE BUG} "native lowering: binding $b was not lowered as virtual ($e)"
+            }
+            return [list [lindex [lindex $local 1] $idx] tagged]
+        }
+    }
+
+    if {$wantVirtual ne "" && $targetKind eq "native"} {
+        # A `[e0, ..., en-1]` construction VirtualValue asked for directly:
+        # hir::escape.tcl already confirmed this call recognizes with
+        # exactly this arity, so there is nothing to skip-callee-check or
+        # guard here (a `list` call can never fail) -- just the fields, in
+        # source evaluation order, never materialized into a List.
+        if {[dict get [hir::symbol $hir $target] name] ne "list" || [llength $argExprs] != $wantVirtual} {
+            throw {NATIVE BUG} "native lowering: expected a $wantVirtual-element list construction at $e"
+        }
+        set fields {}
+        foreach arg $argExprs {
+            set r [Expr fn $arg]
+            if {$r eq "never"} {
+                return {never tagged}
+            }
+            lappend fields $r
+        }
+        return [list $fields virtual]
+    }
 
     # The callee is evaluated first. A reference to a root native or to an
     # environment-free function needs no code (it cannot fail).
@@ -1033,9 +1373,8 @@ proc native::lower::Call {fnVar e node want} {
         if {![dict exists $fn targets $e]} {
             throw {NATIVE BUG} "native lowering: hir::specialize chose no instance for call $e"
         }
-        set id [expr {$self ? [Placeholder $instance] : [FunctionRef $instance]}]
-        dict lappend fn calls [list direct $id $self]
         if {$self} {
+            dict lappend fn calls [list direct [Placeholder $instance] 1]
             if {$target in $envless} {
                 Emit fn [string trimright "tail [join $argRegs { }]"] $e
             } else {
@@ -1043,10 +1382,36 @@ proc native::lower::Call {fnVar e node want} {
             }
             return {never tagged}
         }
+        if {$wantVirtual ne ""} {
+            # A recognized forwarding construction (VirtualValue): the
+            # target instance's scalar-replacement companion, reached
+            # through callmulti/callenvmulti, hands its fields straight
+            # back with no List ever materialized in between. Instance is
+            # never "" here: hir::escape.tcl only classifies a call this
+            # way when hir::specialize itself resolved a direct target for
+            # it (Classify consults the same `calls` map).
+            if {[hir::escape::arity $escape $instance] ne $wantVirtual} {
+                throw {NATIVE BUG} "native lowering: instance $instance has no $wantVirtual-arity scalar companion for $e"
+            }
+            set companionId [CompanionRef $instance]
+            dict lappend fn calls [list direct $companionId 0]
+            set dsts [NewRegs fn $wantVirtual]
+            if {$target in $envless} {
+                Emit fn [string trimright "[join $dsts { }] = callmulti $companionId [join $argRegs { }]"] $e
+            } else {
+                Emit fn [string trimright "[join $dsts { }] = callenvmulti $companionId $callee [join $argRegs { }]"] $e
+            }
+            return [list $dsts virtual]
+        }
+        set id [FunctionRef $instance]
+        dict lappend fn calls [list direct $id $self]
         if {$target in $envless} {
             return [list [Assign fn [string trimright "call $id [join $argRegs { }]"] $e] tagged]
         }
         return [list [Assign fn [string trimright "callenv $id $callee [join $argRegs { }]"] $e] tagged]
+    }
+    if {$wantVirtual ne ""} {
+        throw {NATIVE BUG} "native lowering: cannot virtualize call $e (not a recognized construction)"
     }
 
     set argRegs {}
