@@ -35,6 +35,8 @@
 #   inconsistent dedent        the line joins the enclosing level it passed
 #   unexpected character       skipped
 #   "?" after a name           skipped
+#   ".." (reserved)            skipped; anything after (e.g. "=" or "<") is
+#                              lexed normally and unaffected
 #   invalid integer            an INT of its digits (leading zeros dropped)
 #   unterminated string        the string ends at the end of line
 #   invalid escape             the escaped character is kept
@@ -190,6 +192,16 @@ proc surface::lexer::tokenize {source file} {
                 lappend tokens [Token INT [string range $source $i $end-1] $value \
                     [Span $file $i $end $line $lineStart]]
                 set i $end
+            }
+            {.} {
+                if {[string index $source $i+1] eq "."} {
+                    Report diagnostics $file $i $line $lineStart 2 \
+                        "'..' is reserved for future range syntax"
+                    incr i 2
+                } else {
+                    Report diagnostics $file $i $line $lineStart 1 "unexpected character \".\""
+                    incr i
+                }
             }
             {[A-Za-z_]} {
                 set j $i
