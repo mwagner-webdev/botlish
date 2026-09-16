@@ -45,7 +45,7 @@ set lit corpus::literal
 
 test stdlib-0 {the corpus programs} -body {
     corpus::names
-} -result {csv csv_chunked csv_geometric hashtable matmul string_replace string_reverse}
+} -result {csv csv_chunked csv_geometric csv_records hashtable matmul string_replace string_reverse}
 
 foreach name [corpus::names] {
     test stdlib-sample-$name "$name: the sample in the file runs to its expect: value" -body {
@@ -180,6 +180,61 @@ set csvCases [list \
 foreach corpusName {csv csv_geometric csv_chunked} {
     corpusTests $corpusName $csvCases
 }
+
+# ---------------------------------------------------------------------------
+# csv_records: CSV with a header row -> a List of mutable HashTables, one
+# per data row, keyed by the shared header Strings (see csv_records.bot's
+# header for the row-shape and duplicate-header policy these cases check).
+# Driver expressions read tables back with ht_get/ht_contains/ht_size (a
+# HashTable itself has no == and no display form worth comparing) rather
+# than comparing table values directly.
+
+set csvRecordsCases [list \
+    empty          {empty input has no rows, either variant} \
+        {[list_length(csv_records("")), list_length(csv_records_presized(""))]} \
+        [value {[0, 0]}] \
+    header-only    {a header row with no data rows has no rows} \
+        {list_length(csv_records("name,age\n"))} [value 0] \
+    one-row        {a row with exactly the header count of fields} \
+        "rows = csv_records([$lit "name,age,city\nAlice,31,Berlin\n"])\nr = list_get(rows, 0)\n\[list_length(rows), ht_get(r, \"name\"), ht_get(r, \"age\"), ht_get(r, \"city\"), ht_size(r)\]" \
+        [value {[1, "Alice", "31", "Berlin", 3]}] \
+    short-row      {fewer fields than headers omits the missing trailing keys} \
+        "rows = csv_records([$lit "a,b,c\nx,y\n"])\nr = list_get(rows, 0)\n\[ht_get(r, \"a\"), ht_get(r, \"b\"), ht_contains(r, \"c\"), ht_size(r)\]" \
+        [value {["x", "y", false, 2]}] \
+    long-row       {more fields than headers is a RANGE error} \
+        "csv_records([$lit "a,b\nx,y,z\n"])" {error {CORE SEMANTIC RANGE}} \
+    duplicate-header {a duplicate header replaces: one key, the later field's value} \
+        "rows = csv_records([$lit "name,name\nAlice,Bob\n"])\nr = list_get(rows, 0)\n\[ht_get(r, \"name\"), ht_size(r)\]" \
+        [value {["Bob", 1]}] \
+    duplicate-header-3 {a header repeated three times still replaces down to one key} \
+        "rows = csv_records([$lit "x,x,x\n1,2,3\n"])\nr = list_get(rows, 0)\n\[ht_get(r, \"x\"), ht_size(r)\]" \
+        [value {["3", 1]}] \
+    empty-header   {an empty header name is a valid key} \
+        "rows = csv_records([$lit ",b\nx,y\n"])\nr = list_get(rows, 0)\n\[ht_get(r, \"\"), ht_get(r, \"b\")\]" \
+        [value {["x", "y"]}] \
+    empty-field    {an empty field value is a valid value, distinct from absent} \
+        "rows = csv_records([$lit "a,b\n,y\n"])\nr = list_get(rows, 0)\n\[ht_contains(r, \"a\"), ht_get(r, \"a\"), ht_get(r, \"b\")\]" \
+        [value {[true, "", "y"]}] \
+    quoted         {a quoted field with an embedded comma and an escaped quote} \
+        "rows = csv_records([$lit "name,note\nAlice,\"hello, world\"\nBob,\"said \"\"hi\"\"\"\n"])\n\[ht_get(list_get(rows, 0), \"note\"), ht_get(list_get(rows, 1), \"note\")\]" \
+        [value {["hello, world", "said \"hi\""]}] \
+    non-ascii-header {a non-ASCII header (é)} \
+        "rows = csv_records([$lit "é,city\nvalue1,München\n"])\nr = list_get(rows, 0)\n\[ht_get(r, [$lit é]), ht_get(r, \"city\")\]" \
+        [value {["value1", "München"]}] \
+    non-ascii-header-2 {a multi-byte non-ASCII header (名前, Japanese for \"name\")} \
+        "rows = csv_records([$lit "名前,age\nアリス,31\n"])\nr = list_get(rows, 0)\n\[ht_get(r, [$lit 名前]), ht_get(r, \"age\")\]" \
+        [value {["アリス", "31"]}] \
+    presize-parity {presized and default tables agree on content, including a duplicate header} \
+        "rows = csv_records([$lit "a,a,b\n1,2,3\n"])\nprows = csv_records_presized([$lit "a,a,b\n1,2,3\n"])\nr = list_get(rows, 0)\np = list_get(prows, 0)\n\[ht_get(r, \"a\"), ht_get(r, \"b\"), ht_size(r), ht_get(p, \"a\"), ht_get(p, \"b\"), ht_size(p)\]" \
+        [value {["2", "3", 2, "2", "3", 2]}] \
+    many-rows      {100 generated rows: row count and one row's content} \
+        "rows = csv_records([$lit "id,name,mark\n$generatedCsv"])\nr = list_get(rows, 41)\n\[list_length(rows), ht_get(r, \"id\"), ht_get(r, \"name\"), ht_get(r, \"mark\")\]" \
+        [value {[100, "42", "name 42", "x"]}] \
+    many-rows-presized {100 generated rows, presized: same content as the default variant} \
+        "rows = csv_records_presized([$lit "id,name,mark\n$generatedCsv"])\nr = list_get(rows, 41)\n\[list_length(rows), ht_get(r, \"id\"), ht_get(r, \"name\"), ht_get(r, \"mark\")\]" \
+        [value {[100, "42", "name 42", "x"]}] \
+]
+corpusTests csv_records $csvRecordsCases
 
 # ---------------------------------------------------------------------------
 # matmul
