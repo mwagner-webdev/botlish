@@ -1,5 +1,11 @@
 # Notes for agents working in this repository
 
+## Git workflow
+
+Push finished work directly to `main`. This project does not use a
+feature-branch-plus-pull-request review cycle: don't open a PR unless
+explicitly asked to.
+
 ## Installing Tcl 9
 
 This project's reference evaluator requires Tcl 9.x (`core/core.tcl` checks
