@@ -297,7 +297,11 @@ test native-call-5 {known natives use no generic dispatch} -body {
 } -result {0 1}
 
 test native-call-6 {environment-free functions take no environment} -body {
-    set nir [nirOf "${countdown}fn start(n):\n    count(n, 0)\n\nk = 7\nfn addk(n):\n    n + k\n\n\[start(4), addk(1)\]"]
+    # addk is also referenced bare (a materialized value, not just a direct
+    # call): hir/blockescape.tcl's Block virtualization declines a binding
+    # with any use besides a direct call (see its header), so addk keeps
+    # its ordinary env=1 closure-taking function here, as this test expects.
+    set nir [nirOf "${countdown}fn start(n):\n    count(n, 0)\n\nk = 7\nfn addk(n):\n    n + k\n\n\[start(4), addk(1), addk\]"]
     set used [nirOf "fn twice(f, x):\n    f(f(x))\n\nfn inc(n):\n    n + 1\n\nfn unused():\n    0\n\ntwice(inc, 1)"]
     # Functions only called directly are never materialized as values; a
     # function passed as a value is its generic instance's constant closure.

@@ -154,6 +154,11 @@ namespace eval native::lower {
     # analysis of the program, and whether it is enabled at all.
     variable escape {}
     variable escapeOpt 1
+    # Block virtualization (see "Block virtualization" below): the
+    # hir::blockescape analysis of the program, and whether it is enabled
+    # at all.
+    variable blockescape {}
+    variable blockEscapeOpt 1
     # String regions (see "String regions" below): the hir::stringregion
     # analysis of the program, and whether it is enabled at all.
     variable stringregion {}
@@ -307,6 +312,63 @@ namespace eval native::lower {
 # base case) simply lowers exactly as it always did. -escape-opt 0 (or
 # BOTLISH_NATIVE_ESCAPE_OPT=0) disables the analysis outright, for
 # differential testing against the unoptimized baseline.
+#
+# ---------------------------------------------------------------------------
+# Block virtualization
+#
+# A Block value bound to a local name whose every use hir/blockescape.tcl
+# proves is a statically known direct call (never returned, stored, passed
+# to unknown code, or observed by identity) need not become a canonical
+# heap closure at all: a semantic Block is code identity plus a captured
+# lexical environment, not a mandatory heap object, exactly as a semantic
+# Int is not a mandatory tagged representation (the "Representation"
+# section above) and a fixed-shape List is not a mandatory allocated List
+# (the "Scalar replacement" section above). Bind (below), for such a
+# binding, evaluates its captures into ordinary registers -- the same
+# Access-driven evaluation Closure already performs for a real closure's
+# environment -- and stores them, with the callee instance
+# hir::blockescape.tcl resolved, as the binding's "virtualblock" local
+# value: no `closure` NIR instruction, no `rt_closure_new`, no capture-array
+# stack traffic at all.
+#
+# A direct call of such a binding (Call's early VirtualBlockCall case)
+# never evaluates the callee expression as a Block value either: it emits a
+# plain `call` of the callee instance's *internal variant*
+# (InternalFunction) with the ordinary call arguments followed by the
+# recorded capture registers -- the capture arguments are an internal ABI
+# detail, invisible to Botlish source (the milestone's #9), and the call
+# target is always statically direct (never a code-pointer load out of a
+# Block, since there is no Block).
+#
+# The internal variant is the smallest coherent NIR mechanism this needs
+# (deliberately not a new opcode, heap pseudo-object, or dynamic capture
+# dictionary): the same instance, the same body, as the callee's ordinary
+# (canonical) function, except env=0 and its capture bindings
+# (native::lower::captureLists) are ordinary trailing parameters instead of
+# an environment record -- so every reference to a captured binding inside
+# it is just that parameter's register (Access finds it already in `fn
+# locals`, exactly as an ordinary parameter is, and never emits a `capture
+# I` load). Cranelift already treats it as an entirely ordinary function
+# (no `env=1`, no `results=`), so it gets ordinary GC rooting (every
+# register, including a former capture, is stored to its own shadow-stack
+# slot on definition, precisely as "Scalar replacement" above reasons for a
+# virtual List field) and ordinary error/completion-code handling, with no
+# new runtime or codegen mechanism at all. It is built at most once per
+# callee instance, shared by every call site that demands it (like a
+# scalar-replacement companion), and is purely additive: the callee's
+# canonical, closure-taking function is still unconditionally emitted, so a
+# generic/indirect/escaping caller of the very same Block-producing source
+# keeps working completely unchanged (the milestone's #10 fallback
+# requirement) -- `return step` or `consume_unknown(step)` still build a
+# real heap closure, even for a `step` some other call site virtualizes.
+#
+# hir::blockescape.tcl is conservative and additive only, and declines
+# outright (never partially materializes) a binding with any escaping use
+# alongside its direct calls, a recursive block, or a block capturing a
+# forward-reference cell -- see its header for the exact criteria.
+# -block-escape-opt 0 (or BOTLISH_NATIVE_BLOCK_ESCAPE_OPT=0) disables the
+# analysis outright, for differential testing against the unoptimized
+# (canonical closure) baseline.
 
 # ---------------------------------------------------------------------------
 # String regions
@@ -596,6 +658,8 @@ proc native::lower::program {hirProgram args} {
     variable reprOpt
     variable escape
     variable escapeOpt
+    variable blockescape
+    variable blockEscapeOpt
     variable stringregion
     variable stringRegionOpt
     variable traversal
@@ -607,12 +671,15 @@ proc native::lower::program {hirProgram args} {
         && $::env(BOTLISH_NATIVE_REPR_OPT) eq "0" ? 0 : 1}]
     set escapeDefault [expr {[info exists ::env(BOTLISH_NATIVE_ESCAPE_OPT)]
         && $::env(BOTLISH_NATIVE_ESCAPE_OPT) eq "0" ? 0 : 1}]
+    set blockEscapeDefault [expr {[info exists ::env(BOTLISH_NATIVE_BLOCK_ESCAPE_OPT)]
+        && $::env(BOTLISH_NATIVE_BLOCK_ESCAPE_OPT) eq "0" ? 0 : 1}]
     set stringRegionDefault [expr {[info exists ::env(BOTLISH_NATIVE_STRING_REGION_OPT)]
         && $::env(BOTLISH_NATIVE_STRING_REGION_OPT) eq "0" ? 0 : 1}]
     set traversalDefault [expr {[info exists ::env(BOTLISH_NATIVE_STRING_TRAVERSAL_OPT)]
         && $::env(BOTLISH_NATIVE_STRING_TRAVERSAL_OPT) eq "0" ? 0 : 1}]
     set options [hir::Options native::lower::program \
         [list -specialize $default -repr-opt $reprDefault -escape-opt $escapeDefault \
+            -block-escape-opt $blockEscapeDefault \
             -string-region-opt $stringRegionDefault -string-traversal-opt $traversalDefault] $args]
     if {[hir::mode $hirProgram] ne "program"} {
         throw {NATIVE UNSUPPORTED sequence-mode} \
@@ -622,12 +689,15 @@ proc native::lower::program {hirProgram args} {
     set hir $hirProgram
     set reprOpt [dict get $options -repr-opt]
     set escapeOpt [dict get $options -escape-opt]
+    set blockEscapeOpt [dict get $options -block-escape-opt]
     set stringRegionOpt [dict get $options -string-region-opt]
     set traversalOpt [dict get $options -string-traversal-opt]
     set spec [hir::specialize::analyze $hirProgram -specialize [dict get $options -specialize]]
     set ranges [hir::range::analyze $hirProgram $spec]
     set escape [expr {$escapeOpt ? [hir::escape::analyze $hirProgram $spec]
         : [dict create arity {} wants {} virtual {}]}]
+    set blockescape [expr {$blockEscapeOpt ? [hir::blockescape::analyze $hirProgram $spec]
+        : [dict create virtual {} wants {}]}]
     set stringregion [expr {$stringRegionOpt ? [hir::stringregion::analyze $hirProgram $spec]
         : [dict create regionOf {} wants {} virtual {}]}]
     set traversal [expr {$traversalOpt ? [hir::traversal::analyze $hirProgram $spec $stringregion $escape]
@@ -658,6 +728,7 @@ proc native::lower::program {hirProgram args} {
             canonical { Function $id }
             companion { CompanionFunction $id }
             region    { RegionCompanionFunction $id }
+            internal  { InternalFunction $id }
         }]
     }
     set hir $baseHir
@@ -670,7 +741,7 @@ proc native::lower::program {hirProgram args} {
         lassign [Unkey $key] id mode
         set block [dict get $spec instances $id block]
         list [expr {$block eq "program" ? 0 : [dict get $context positions $block]}] \
-            [string range $id 1 end] [dict get {canonical 0 companion 1 region 1} $mode] $key
+            [string range $id 1 end] [dict get {canonical 0 companion 1 region 1 internal 1} $mode] $key
     }]
     set order [lmap entry [lsort -integer -index 0 [lsort -integer -index 1 [lsort -integer -index 2 $order]]] {
         lindex $entry 3
@@ -841,6 +912,16 @@ proc native::lower::RegionCompanionRef {id} {
     variable pending
     lappend pending [list $id region]
     return [Placeholder $id region]
+}
+
+# Like CompanionRef, for instance ID's *internal* (capture-explicit) variant
+# (see the "Block virtualization" section above): callers must already
+# know, from hir::blockescape::virtual, that some binding demands this
+# instance's internal variant.
+proc native::lower::InternalRef {id} {
+    variable pending
+    lappend pending [list $id internal]
+    return [Placeholder $id internal]
 }
 
 # The key `program`'s `functions` dict uses for instance ID's function of
@@ -1186,6 +1267,96 @@ proc native::lower::RegionCompanionFunction {id} {
     set info [dict create id [Placeholder $id region] name $name block $region instance $id \
         label "[hir::specialize::label $spec $id] (region)" generic [dict get $instance generic] \
         envless [expr {!$env}] selfTailCalls $tails calls [dict get $fn calls] \
+        blockers $blockers guards [dict get $fn guards] knownErrorGuards [dict get $fn knownErrorGuards] \
+        rawUnboxes [dict get $fn rawUnboxes] rawBoxes [dict get $fn rawBoxes] \
+        rawArith [dict get $fn rawArith] rawCompare [dict get $fn rawCompare]]
+    return [list $text $info]
+}
+
+# Lowers the internal (capture-explicit) variant of instance ID's block (see
+# the "Block virtualization" section above): the same instance and body as
+# Function, except env=0 -- its capture bindings (native::lower::
+# captureLists) are ordinary trailing parameters instead of an environment
+# record, so every reference to one inside the body is just that
+# parameter's register (Access finds it already in `fn locals`, exactly as
+# an ordinary parameter, and never emits a `capture I` load). Only ever
+# built for a block instance hir::blockescape::wants is true for; every
+# capture hir::blockescape.tcl let through is a plain already-resolved
+# value (never a forward-reference cell, never "self": see its header), so
+# no other part of this function's lowering needs to change at all -- same
+# guards, same known-error checks, same GC rooting (every parameter is
+# rooted from the prologue exactly like any other, "Scalar replacement"'s
+# reasoning applies unchanged), same completion-code handling. Returns
+# {TEXT INFO}, in the same shape as Function.
+proc native::lower::InternalFunction {id} {
+    variable hir
+    variable baseHir
+    variable spec
+    variable context
+    variable envless
+    variable captureLists
+    variable currentInstance
+    variable ranges
+    variable traversal
+    set currentInstance $id
+    set instance [hir::specialize::instance $spec $id]
+    set region [dict get $instance block]
+    if {$region eq "program" || $region in $envless} {
+        throw {NATIVE BUG} "native lowering: instance $id has no internal variant"
+    }
+    set hir [hir::specialize::view $baseHir $spec $id]
+    set analysis [hir::aot::analyzeRegion $hir $region $context]
+    CollectChecks $analysis
+    set blockers [llength [lmap b [dict get $analysis blockers] {
+        if {[dict get $b class] ne "representation"} continue
+        set b
+    }]]
+    set fn [dict create region $region instance $id targets [dict get $instance calls] \
+        lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 \
+        rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
+        locals [dict create] loops [dict create] broken [dict create] calls {} companion "" regionCompanion 0 \
+        traversal "" traversalByteReg ""]
+    set name [hir::aot::BlockName $hir $region]
+    set params [hir::get $hir $region params]
+    set scope [hir::get $hir $region bodyScope]
+    set body [hir::get $hir $region body]
+    set rawParams [RawParams $id $instance $params]
+    foreach b $params raw $rawParams {
+        set r [NewReg fn]
+        if {$raw} {
+            MarkRaw fn $r
+            dict set fn locals $b [list rawreg $r]
+        } else {
+            dict set fn locals $b [list reg $r]
+        }
+    }
+    set captureBindings [dict get $captureLists $region]
+    foreach b $captureBindings {
+        dict set fn locals $b [list reg [NewReg fn]]
+    }
+    EnterScope fn $scope
+    set result [Sequence fn $body]
+    if {$result ne "never"} {
+        Emit fn "ret $result"
+    }
+    set pnames [concat [lmap b $params {dict get [hir::binding $hir $b] name}] \
+        [lmap b $captureBindings {dict get [hir::binding $hir $b] name}]]
+    set key [expr {[dict get $instance generic] ? "generic"
+        : [join [lmap t [dict get $instance args] {hir::types::show $t}] {, }]}]
+    set head "func [Placeholder $id internal] [Quote $name] params=[expr {[llength $params] + [llength $captureBindings]}] env=0 regs=[dict get $fn nreg] pnames=[Quote [join $pnames { }]] captures=0 instance=[Quote $key]"
+    set rawRegs [lsort -integer [lmap r [dict keys [dict get $fn rawRegs]] {string range $r 1 end}]]
+    if {$rawRegs ne ""} {
+        append head " rawregs=[Quote [join $rawRegs { }]]"
+    }
+    append head " @$region"
+    set text "$head\n[join [dict get $fn lines] \n]\nend"
+    set tails [llength [lmap line [dict get $fn lines] {
+        if {![regexp {^\s+tail(env)? } $line]} continue
+        set line
+    }]]
+    set info [dict create id [Placeholder $id internal] name $name block $region instance $id \
+        label "[hir::specialize::label $spec $id] (internal)" generic [dict get $instance generic] \
+        envless 1 selfTailCalls $tails calls [dict get $fn calls] \
         blockers $blockers guards [dict get $fn guards] knownErrorGuards [dict get $fn knownErrorGuards] \
         rawUnboxes [dict get $fn rawUnboxes] rawBoxes [dict get $fn rawBoxes] \
         rawArith [dict get $fn rawArith] rawCompare [dict get $fn rawCompare]]
@@ -1565,6 +1736,7 @@ proc native::lower::Bind {fnVar e node} {
     variable hir
     variable context
     variable escape
+    variable blockescape
     variable stringregion
     variable currentInstance
     set valueExpr [dict get $node value]
@@ -1580,6 +1752,19 @@ proc native::lower::Bind {fnVar e node} {
         return ""
     }
     if {![dict get $node duplicate]} {
+        set blockTarget [hir::blockescape::virtual $blockescape $currentInstance $b]
+        if {$blockTarget ne ""} {
+            # A locally bound Block value every use of which
+            # hir::blockescape.tcl already proved is a statically known
+            # direct call (see the "Block virtualization" section above):
+            # its captures, evaluated now exactly as Closure would for a
+            # real closure's environment, not a heap Block. Every reference
+            # to B is already known to be the callee of such a call,
+            # intercepted directly in Call's VirtualBlockCall below --
+            # nothing ever reads this local's "value" as a callable Block.
+            dict set fn locals $b [list virtualblock $blockTarget [VirtualBlockCaptures fn $valueExpr]]
+            return ""
+        }
         set virtualArity [hir::escape::virtualArity $escape $currentInstance $b]
         if {$virtualArity ne ""} {
             # A fixed-shape construction whose identity is never observed
@@ -1632,19 +1817,15 @@ proc native::lower::Bind {fnVar e node} {
     return $value
 }
 
-# Creation of the Block value of block expression E.
-proc native::lower::Closure {fnVar e} {
+# The current SSA values of block expression E's captures
+# (native::lower::captureLists), in order: the same evaluation Closure runs
+# to build a real closure's environment array, reused as-is by
+# VirtualBlockCaptures below since a captured binding's value is exactly
+# the same ordinary value either way (the "Block virtualization" section
+# above's #8: captures remain ordinary values, closure or not).
+proc native::lower::CaptureValues {fnVar e} {
     upvar 1 $fnVar fn
-    variable envless
     variable captureLists
-    variable context
-    if {$e in $envless} {
-        if {[dict exists $context discarded $e] && ![dict exists $context bound $e]} {
-            # A value nothing uses (hir::aot::materializedBlocks).
-            return ""
-        }
-        return [Assign fn "fnvalue [GenericRef $e]" $e]
-    }
     set values {}
     foreach b [dict get $captureLists $e] {
         lassign [Access fn $b] how where
@@ -1655,7 +1836,32 @@ proc native::lower::Closure {fnVar e} {
             self       { lappend values [Assign fn self] }
         }
     }
+    return $values
+}
+
+# Creation of the Block value of block expression E.
+proc native::lower::Closure {fnVar e} {
+    upvar 1 $fnVar fn
+    variable envless
+    variable context
+    if {$e in $envless} {
+        if {[dict exists $context discarded $e] && ![dict exists $context bound $e]} {
+            # A value nothing uses (hir::aot::materializedBlocks).
+            return ""
+        }
+        return [Assign fn "fnvalue [GenericRef $e]" $e]
+    }
+    set values [CaptureValues fn $e]
     return [Assign fn [string trimright "closure [GenericRef $e] [join $values { }]"] $e]
+}
+
+# The capture registers of a virtualized Block binding's value expression E
+# (see the "Block virtualization" section above): evaluated once, when B is
+# bound, exactly like Closure's own environment evaluation -- no `closure`
+# NIR instruction, no heap Block, ever built for E.
+proc native::lower::VirtualBlockCaptures {fnVar e} {
+    upvar 1 $fnVar fn
+    return [CaptureValues fn $e]
 }
 
 # ---------------------------------------------------------------------------
@@ -1697,6 +1903,37 @@ proc native::lower::VirtualValue {fnVar e arity} {
 # returns "tagged" (Expr's tail reconciles a mismatch with WANT via
 # RawOf/TaggedOf; WANTVIRTUAL is never reconciled that way -- a caller that
 # passes it already knows, from hir::escape.tcl, that E recognizes).
+# Direct internal-variant call of a virtualized Block binding (see the
+# "Block virtualization" section above): CALLEEEXPR is never evaluated (no
+# Block value exists to call through), and CAPTURES -- the registers
+# VirtualBlockCaptures recorded when the binding was bound -- are appended
+# as ordinary trailing arguments to CALLEEINSTANCE's internal variant. TARGET
+# is the callee's block ExprId (for its arity/parameter names only); LOCAL is
+# the binding's stored `{virtualblock calleeInstance captures}` value.
+proc native::lower::VirtualBlockCall {fnVar e node target local} {
+    upvar 1 $fnVar fn
+    variable hir
+    lassign $local tag calleeInstance captures
+    set params [hir::get $hir $target params]
+    set argExprs [dict get $node args]
+    set argRegs {}
+    foreach arg $argExprs {
+        set r [Expr fn $arg]
+        if {$r eq "never"} {
+            return {never tagged}
+        }
+        lappend argRegs $r
+    }
+    if {[llength $params] != [llength $argRegs]} {
+        set pnames [lmap p $params {dict get [hir::binding $hir $p] name}]
+        Emit fn "raise ARITY [Quote "block ([join $pnames { }]) expects [llength $params] argument(s), got [llength $argRegs]"]" $e
+        return {never tagged}
+    }
+    set id [InternalRef $calleeInstance]
+    dict lappend fn calls [list direct $id 0]
+    return [list [Assign fn [string trimright "call $id [join [concat $argRegs $captures] { }]"] $e] tagged]
+}
+
 proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
     upvar 1 $fnVar fn
     variable hir
@@ -1710,6 +1947,22 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
     lassign [dict get $node target] targetKind target
     set calleeExpr [dict get $node callee]
     set argExprs [dict get $node args]
+
+    if {$wantVirtual eq "" && !$wantRegion && $targetKind eq "block"
+            && [hir::kind $hir $calleeExpr] eq "ref"} {
+        set calleeBinding [hir::get $hir $calleeExpr binding]
+        if {$calleeBinding ne "" && [dict exists $fn locals $calleeBinding]
+                && [lindex [dict get $fn locals $calleeBinding] 0] eq "virtualblock"} {
+            # A direct call of a Block binding hir::blockescape.tcl already
+            # proved nonescaping (Bind above stored its captures, not a
+            # heap Block, as this binding's local value): CALLEEEXPR is
+            # never evaluated at all (there is no Block value to produce),
+            # and the call goes straight to the callee instance's internal
+            # variant with the recorded captures appended (see the "Block
+            # virtualization" section above).
+            return [VirtualBlockCall fn $e $node $target [dict get $fn locals $calleeBinding]]
+        }
+    }
 
     if {$wantVirtual eq "" && !$wantRegion} {
         set plan [dict get $fn traversal]
