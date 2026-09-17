@@ -1,0 +1,38 @@
+# bench-backends.test -- benchmark report backend identity (bench/backends.tcl).
+#
+# The property under test is the one NATIVE-AUDIT.md's Appendix E flagged:
+# a benchmark report must not let "compile" (bench.tcl's Tcl-codegen
+# column) be mistaken for "native" (Cranelift machine-code execution).
+# Tests here check the display-name mapping directly rather than any
+# formatted table, per this cleanup's own instruction not to write brittle
+# tests against entire formatted output.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot bench backends.tcl]
+
+test bench-backends-1 {Tcl compile is labeled distinctly from Cranelift, and neither label says "native" or "compile" bare} -body {
+    set compile [bench::backends::displayName compile]
+    set native [bench::backends::displayName native]
+    list $compile $native [string equal $compile $native] \
+        [string match -nocase "*native*" $compile] [string match -nocase "*compile*" $native]
+} -result {{Tcl compile} Cranelift 0 0 0}
+
+test bench-backends-2 {every backend's display name is distinct} -body {
+    set ids {interp compile native python rust}
+    set labels [lmap id $ids {bench::backends::displayName $id}]
+    llength [lsort -unique $labels]
+} -result 5
+
+test bench-backends-3 {an id this module has no mapping for falls back to itself, not blank} -body {
+    bench::backends::displayName totally-unknown-backend
+} -result totally-unknown-backend
+
+test bench-backends-4 {the manifest names and describes every requested backend, in order} -body {
+    set manifest [bench::backends::manifest {interp compile native}]
+    list [string match "Backends:*" $manifest] \
+        [expr {[string first "Tcl interp" $manifest] < [string first "Tcl compile" $manifest]
+            && [string first "Tcl compile" $manifest] < [string first "Cranelift" $manifest]}] \
+        [string match -nocase "*JIT compile time excluded*" $manifest]
+} -result {1 1 1}
+
+cleanupTests

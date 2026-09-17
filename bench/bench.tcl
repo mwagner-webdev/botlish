@@ -27,16 +27,26 @@
 # process*, so the reported time -- like the interp/compile columns' -- is
 # genuine best-of-N execution with compilation excluded.
 #
-# A program that native code cannot run at all (a library native with no
-# native lowering, an unsupported HIR construct, or the native backend
-# simply not built) declines the comparison for that one row (shown as
-# n/a, no verdict emoji) rather than failing the whole benchmark run: a
-# missing native capability is a known, separate finding (NATIVE-AUDIT.md),
-# not a benchmark regression to gate on.
+# A program that native code cannot run at all declines the comparison for
+# that one row rather than failing the whole benchmark run: a missing
+# native capability is a known, separate finding (NATIVE-AUDIT.md), not a
+# benchmark regression to gate on. The row still says which of two very
+# different reasons that was, rather than a single ambiguous n/a: "unsupported"
+# (the native backend is built, but this program itself uses a construct
+# native lowering has no implementation for -- a real, reportable blocker)
+# versus n/a (the native backend has not been compiled at all this run, so
+# nothing about this program's own support was tested).
+#
+# See bench/backends.tcl for every column's display name and what a timed
+# number in it scopes to -- in particular, no column here is ever labeled
+# bare "compile": that ambiguity (Tcl's own codegen backend, not Cranelift)
+# is exactly what NATIVE-AUDIT.md's Appendix E found had been misread as
+# native execution.
 
 set root [file dirname [file dirname [file normalize [info script]]]]
 source [file join $root compiler compiler.tcl]
 source [file join $root native native.tcl]
+source [file join $root bench backends.tcl]
 
 set runs 5
 set markdown 0
@@ -75,24 +85,43 @@ proc best {program runs} {
 }
 
 # Best-of-RUNS native (Cranelift) execution of PROGRAM, entirely in one
-# subprocess (native::measure), with compilation excluded exactly like
-# `best` excludes it for the Tcl backends. Returns {microseconds value},
-# or {"" ""} if this program cannot be run natively at all -- declining the
-# comparison instead of failing the run (see this file's header).
+# subprocess (native::measure), with JIT compile time excluded exactly like
+# `best` excludes Tcl compilation for the Tcl backends -- native::measure's
+# own COMPILE_US/BEST_US split (see NATIVE-AUDIT.md's Appendix A) keeps
+# that separate rather than folding it into the timed region. Returns
+# {microseconds value status}: status is "ok", "unsupported" (the native
+# backend is built, but PROGRAM itself uses a construct native lowering has
+# no implementation for), or "not-built" (native::binary has not been
+# compiled this run at all, so PROGRAM's own support was never tested).
+# Either failure declines the comparison for this row instead of failing
+# the whole run (see this file's header).
 proc bestNative {program runs} {
+    if {[catch {native::binary}]} {
+        return {"" "" not-built}
+    }
     if {[catch {hir::build $program -strict 0} hir]} {
-        return {"" ""}
+        return {"" "" unsupported}
     }
     if {[catch {native::measure $hir $runs} result]} {
-        return {"" ""}
+        return {"" "" unsupported}
     }
     lassign $result lowerUs compileUs bestUs collections value
-    return [list $bestUs [core::formatValue $value]]
+    return [list $bestUs [core::formatValue $value] ok]
+}
+
+# "n/a" or "unsupported" (see bestNative) for the native column; MICROS'
+# ordinary formatting (fmtMicros) otherwise.
+proc fmtNative {micros status} {
+    if {$status eq "unsupported"} {
+        return unsupported
+    }
+    return [fmtMicros $micros]
 }
 
 if {[catch {native::binary}]} {
-    puts stderr "warning: native backend not built -- every native column will show n/a.\
-        Run \"cargo build --release --manifest-path native/Cargo.toml\" first."
+    puts stderr "Cranelift benchmark unavailable: native driver not built --\
+        every Cranelift column will show n/a. Run\
+        \"cargo build --release --manifest-path native/Cargo.toml\" first."
 }
 
 # Parses the "value: V" / "best_us: N" lines a bench/equivalents/* program
@@ -144,12 +173,16 @@ proc fmtMicros {micros} {
 }
 
 set columns [concat $backends {native python rust}]
+set columnLabels [lmap id $columns {bench::backends::displayName $id}]
 if {$markdown} {
-    puts "Tcl [info patchlevel], best of $runs runs, compilation excluded.\n"
-    puts "| program | [join $columns { | }] | speedup | 🏅 | values |"
-    puts "|---|[string repeat ---:| [llength $columns]]---:|---:|---|"
+    puts "```\n[bench::backends::manifest $columns]\n```\n"
+    puts "Tcl [info patchlevel], best of $runs runs, compilation excluded (Cranelift's JIT compile\
+        time specifically -- see the manifest above -- not just Tcl's).\n"
+    puts "| program | [join $columnLabels { | }] | speedup | 🏅 | values |"
+    puts "|---|[string repeat ---:| [llength $columnLabels]]---:|---:|---|"
 } else {
-    puts [format "%-20s %s %9s %4s" program [join [lmap b $columns {format "%14s" $b}] ""] speedup ""]
+    puts "[bench::backends::manifest $columns]\n"
+    puts [format "%-20s %s %9s %4s" program [join [lmap b $columnLabels {format "%14s" $b}] ""] speedup ""]
 }
 
 set disagreements 0
@@ -166,7 +199,7 @@ foreach path $files {
         lappend backendValues $value
     }
 
-    lassign [bestNative $program $runs] nativeMicros nativeValue
+    lassign [bestNative $program $runs] nativeMicros nativeValue nativeStatus
 
     set pyResult [runPythonEquivalent $root $base $runs]
     set rustResult [runRustEquivalent $root $base $runs]
@@ -208,8 +241,9 @@ foreach path $files {
     }
 
     set speedup [format "%.1fx" [expr {double([lindex $backendTimes 0]) / max(1, [lindex $backendTimes end])}]]
-    set allTimes [concat $backendTimes [list $nativeMicros $pyMicros $rustMicros]]
-    set cells [lmap micros $allTimes {fmtMicros $micros}]
+    set cells [concat [lmap micros $backendTimes {fmtMicros $micros}] \
+        [list [fmtNative $nativeMicros $nativeStatus]] \
+        [lmap micros [list $pyMicros $rustMicros] {fmtMicros $micros}]]
     set shown [string range [join [lsort -unique $allValues] " / "] 0 40]
     if {$markdown} {
         puts "| [file tail $path] | [join $cells { | }] | $speedup | $emoji | [expr {$allAgree ? "✅" : "❌ DIFFER"}] `$shown` |"
