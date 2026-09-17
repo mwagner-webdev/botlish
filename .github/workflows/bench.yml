@@ -36,8 +36,24 @@ jobs:
           curl -fsSLO "$base/t/tcl9.0/tcl9.0_9.0.1+dfsg-1_amd64.deb"
           sudo dpkg -i libtommath1_1.3.0-1_amd64.deb libtcl9.0_9.0.1+dfsg-1_amd64.deb tcl9.0_9.0.1+dfsg-1_amd64.deb
 
-      # Fails if the backends disagree on any benchmark's value. Timings from
-      # shared runners are noisy, so they are reported but never gate.
+      # bench.tcl shells out to python3 and rustc to run the reference
+      # programs under bench/equivalents/ alongside the Botlish backends.
+      # Both ship on ubuntu-latest already; this just makes sure and prints
+      # versions for the job log.
+      - name: Ensure Python and Rust toolchains
+        run: |
+          set -eu
+          if ! command -v rustc >/dev/null; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          fi
+          python3 --version
+          "$HOME/.cargo/bin/rustc" --version 2>/dev/null || rustc --version
+
+      # Fails if the Botlish backends disagree on any benchmark's value
+      # (the bench/equivalents/ Python and Rust columns are informational
+      # and never gate). Timings from shared runners are noisy, so they are
+      # reported but never gate either.
       - name: Run benchmarks
         shell: bash
         env:

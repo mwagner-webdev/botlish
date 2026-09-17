@@ -1,0 +1,4 @@
+# Binaries bench/bench.tcl compiles from bench/equivalents/rust/*.rs and
+# caches alongside the source, rebuilt automatically when the source changes.
+/bench/equivalents/rust/*
+!/bench/equivalents/rust/*.rs
