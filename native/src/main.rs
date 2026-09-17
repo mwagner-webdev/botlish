@@ -244,18 +244,26 @@ fn execute(command: &str, program: &nir::Program, runs: usize, alloc_mode: Alloc
     compiled.install_constants(&mut vm);
     let mut best = u128::MAX;
     let mut result = NO_VALUE;
+    let mut nanos: Vec<u128> = Vec::with_capacity(runs);
     for run in 0..runs {
         if run > 0 {
             vm.reset();
         }
         let started = Instant::now();
         result = (compiled.entry)(&mut *vm);
-        best = best.min(started.elapsed().as_micros());
+        let elapsed = started.elapsed();
+        nanos.push(elapsed.as_nanos());
+        best = best.min(elapsed.as_micros());
         if result == NO_VALUE {
             break;
         }
     }
     if command == "bench" {
+        // Diagnostic-only, additive: per-run nanosecond timings for a
+        // best/median distribution alongside the existing best-only
+        // "timing" line, whose contract is unchanged.
+        let times: Vec<String> = nanos.iter().map(|n| n.to_string()).collect();
+        emit(&format!("times {}", times.join(" ")));
         emit(&format!("timing {compile_us} {best} {runs} {}", vm.heap.collections));
     }
     if alloc_mode.enabled() {
