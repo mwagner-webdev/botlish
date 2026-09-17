@@ -432,9 +432,15 @@ proc hir::range::Call {hirVar ctxVar e node} {
         dict set ctx exprs $e $result
         return $result
     }
-    if {$targetKind eq "block" && [dict exists [dict get $ctx instanceCalls] $e]
-            && [dict get [dict get $ctx instanceCalls] $e] eq [dict get $ctx id]} {
-        dict lappend ctx selfCalls $argRanges
+    if {$targetKind eq "block" && [dict exists [dict get $ctx instanceCalls] $e]} {
+        # Every exact call this pass actually reaches (dead/unreachable
+        # call expressions never get here: Expr's reachability check above
+        # returns never before Call is even entered, so an argument from an
+        # unreachable path never contributes -- spec #31). Self and
+        # cross-instance targets are recorded uniformly; hir::range::analyze
+        # separates them when folding (self feeds this same instance's own
+        # fixpoint, cross feeds the callee's).
+        dict lappend ctx calls [list [dict get [dict get $ctx instanceCalls] $e] $argRanges]
     }
     return [unknown]
 }
@@ -515,6 +521,15 @@ proc hir::range::JoinBindings {saved after1 after0 branches} {
 
 # The binding a `ref` expression E names, if it is a proven-initialized local
 # or parameter (the only bindings ctx bindings tracks a range for), else "".
+#
+# Soundness: `local` and `param` are hir/hir.tcl's two immutable-lexical-
+# binding kinds (binding kind enum: root | ambient | param | local) -- both
+# are bound exactly once, to a value that never changes for the life of the
+# binding (spec #2, #25: a raw representation is a downstream consequence,
+# never a source-semantics change, and Botlish has no parameter mutation to
+# begin with). `root` (builtins/constants) and `ambient` (an open host
+# environment's names in -mode sequence: not a checked program, no static
+# facts to narrow) are excluded, unchanged from before this milestone.
 proc hir::range::RefBinding {hir e} {
     if {[hir::kind $hir $e] ne "ref"} {
         return ""
@@ -523,7 +538,7 @@ proc hir::range::RefBinding {hir e} {
     if {$b eq "" || [hir::get $hir $e init] eq "no"} {
         return ""
     }
-    if {[dict get [hir::binding $hir $b] kind] ne "local"} {
+    if {[dict get [hir::binding $hir $b] kind] ni {local param}} {
         return ""
     }
     return $b
@@ -634,22 +649,99 @@ proc hir::range::Narrowed {op rx ry} {
 }
 
 # The region of instance ID's view HIR (already specialize::view'd): a dict
-#   exprs      ExprId -> Range, for every reachable expression this pass
-#              could say something about
-#   result     the range of the region's normal completion (never if none)
-#   selfCalls  list of argument-Range-lists, one per call this pass found
-#              targeting this same instance (self tail calls and ordinary
-#              same-instance recursion alike)
+#   exprs   ExprId -> Range, for every reachable expression this pass could
+#           say something about
+#   result  the range of the region's normal completion (never if none)
+#   calls   list of {TargetInstanceId ArgumentRangeList}, one per exact
+#           block call this pass reached (hir::specialize's own "calls" --
+#           self tail calls, ordinary same-instance recursion, and calls of
+#           other instances alike); hir::range::analyze separates self from
+#           cross-instance when it folds these into entry facts
 proc hir::range::AnalyzeInstance {hir id instanceCalls block params assumed monotone} {
     set ctx [dict create bindings [dict create] returnRange never exprs [dict create] \
-        selfCalls {} id $id instanceCalls $instanceCalls monotone $monotone]
+        calls {} id $id instanceCalls $instanceCalls monotone $monotone]
     foreach b $params r $assumed {
         dict set ctx bindings $b $r
     }
     set body [expr {$block eq "program" ? [hir::roots $hir] : [hir::get $hir $block body]}]
     set final [Sequence hir ctx $body]
     set result [join $final [dict get $ctx returnRange]]
-    return [dict create exprs [dict get $ctx exprs] result $result selfCalls [dict get $ctx selfCalls]]
+    return [dict create exprs [dict get $ctx exprs] result $result calls [dict get $ctx calls]]
+}
+
+# The block ExprIds that materialize (hir/aot.tcl::materializedBlocks) as an
+# escaping Block value somewhere in the used instances' reachable code: a
+# value that can be called through unknown dynamic dispatch this analysis
+# has no edges for (spec #9, #28-29). Only a block's *generic* instance can
+# ever run such a call (hir::specialize's own materialization rule always
+# resolves a materialized value to the block's generic instance --
+# specialize.tcl's own header, "Closures over values stay generic" and "not
+# a static block"): a *specialized* instance's only possible callers are
+# exactly the direct calls hir::specialize resolved to it, so it is never
+# open regardless of this set.
+proc hir::range::OpenInstances {spec} {
+    set materialized [dict create]
+    foreach id [dict get $spec used] {
+        foreach block [dict get [dict get $spec instances $id] values] {
+            dict set materialized $block 1
+        }
+    }
+    set open [dict create]
+    foreach id [dict get $spec used] {
+        set instance [dict get $spec instances $id]
+        if {[dict get $instance generic] && [dict get $instance block] ne "program"
+                && [dict exists $materialized [dict get $instance block]]} {
+            dict set open $id 1
+        }
+    }
+    return $open
+}
+
+# Runs instance ID to its own local self-call fixpoint (self tail calls and
+# ordinary same-instance recursion, exactly the mechanism this module had
+# before interprocedural caller-propagation existed): ASSUMED is the entry
+# Range per parameter to start from; LOCKED marks indices hir/induction.tcl
+# already proved (never touched -- see analyze's own comment on this).
+# Returns {outcome ASSUMED'}: the last pass's AnalyzeInstance result and the
+# (possibly narrower-information, widened) settled entry Ranges.
+proc hir::range::SettleInstance {hir id instanceCalls block params assumed locked monotone} {
+    variable maxPasses
+    set n [llength $params]
+    set outcome {}
+    for {set pass 1} {$pass <= $maxPasses} {incr pass} {
+        set outcome [AnalyzeInstance $hir $id $instanceCalls $block $params $assumed $monotone]
+        set selfArgs {}
+        foreach pair [dict get $outcome calls] {
+            lassign $pair target argRanges
+            if {$target eq $id} {
+                lappend selfArgs $argRanges
+            }
+        }
+        if {$selfArgs eq ""} {
+            break
+        }
+        set next {}
+        for {set i 0} {$i < $n} {incr i} {
+            if {[dict exists $locked $i]} {
+                lappend next [lindex $assumed $i]
+                continue
+            }
+            set r never
+            foreach call $selfArgs {
+                set r [join $r [lindex $call $i]]
+            }
+            lappend next [join [lindex $assumed $i] $r]
+        }
+        if {$next eq $assumed} {
+            break
+        }
+        set widened {}
+        foreach a $assumed w $next {
+            lappend widened [widen $a $w]
+        }
+        set assumed $widened
+    }
+    return [list $outcome $assumed]
 }
 
 # ---------------------------------------------------------------------------
@@ -658,63 +750,239 @@ proc hir::range::AnalyzeInstance {hir id instanceCalls block params assumed mono
 # Range facts for every used instance of specialization ANALYSIS (the return
 # of hir::specialize::analyze) over program HIR. Returns a dict:
 #   instances  InstanceId -> {params {Range ...} exprs {ExprId Range ...} result Range}
+#
+# Two cooperating mechanisms feed a used instance's parameter entry facts:
+#
+#   * SettleInstance's own self-call fixpoint (unchanged from before this
+#     milestone): a self-recursive/self-tail call's argument ranges, fed
+#     back into the same instance's own assumption.
+#   * caller propagation (new): an *exact* call from another used instance
+#     (hir::specialize's own call resolution -- never an open/dynamic
+#     dispatch, which never appears in an instance's "calls" at all) seeds
+#     the callee with the caller's own already-proven Range for the
+#     argument expression, not just a syntactically literal one.
+#
+# Both read the caller/callee's Range the *same* way this module always
+# has (AnalyzeInstance's ctx exprs), so an argument may be a Ref, an
+# arithmetic expression, a branch-narrowed parameter reference, a known
+# native result, or anything else this analysis already prices in -- never
+# only a literal (spec #8).
+#
+# This is an ordinary monotone dataflow fixpoint over the "used" instance
+# graph (self-recursion and, rarely, mutual recursion between distinct
+# instances are its only cycles): each round re-settles every instance from
+# its current entry facts, then folds every exact call's argument ranges
+# into its callee's facts (join across every caller -- a safe hull, never
+# an intersection or "whichever call site ran first": spec #11) and widens
+# any bound that grew (same widen() as the self-call case) so growth jumps
+# straight to infinity in one step instead of climbing forever. A bound can
+# then change at most twice (unseen -> a first concrete value -> widened to
+# infinity), so convergence needs only as many rounds as the longest
+# caller-to-callee chain among the used instances, comfortably inside the
+# round budget below; stopping once nothing changed in a full round is
+# still sound if the budget is ever exhausted first, since every entry fact
+# an unfinished fixpoint leaves behind is still real, if not maximally
+# precise, evidence (never a guess).
+#
+# An instance flagged open (OpenInstances) never receives caller-propagated
+# facts for any parameter: its set of known callers is not the full set of
+# actual callers (spec #28-29), so joining only the known ones would be
+# unsound over-narrowing; it keeps whatever hir/induction.tcl proved and is
+# otherwise unknown, exactly as an instance with no known callers at all
+# already was before this milestone.
 proc hir::range::analyze {hir spec} {
-    variable maxPasses
-    set seeds [ExternalSeeds $hir $spec]
+    # hir/induction.tcl is fed only the old, purely syntactic external seeds
+    # (a literal argument, or a direct call to a native with context-free
+    # -result-range metadata) -- unchanged by, and entirely independent of,
+    # this proc's own caller-propagated seeding below, so its proof is
+    # exactly as sound and exactly as narrow as it was before this
+    # milestone (spec #17, #44: no induction capability change here).
+    set literalSeeds [ExternalSeeds $hir $spec]
     # hir/induction.tcl's proof, when it fires, replaces a parameter's own
-    # self-call feedback with a fixed answer (see the loop below): unlike an
-    # ordinary seed it is a *conclusion*, not just a starting guess, so nil
-    # widen must never touch it, or the very growth its equality-termination
-    # argument already accounts for would immediately widen it back to
-    # infinity (see hir/induction.tcl's header).
-    set induction [hir::induction::analyze $hir $spec $seeds]
-    set instances [dict create]
-    foreach id [dict get $spec used] {
+    # self-call feedback with a fixed answer (see below): unlike an ordinary
+    # seed it is a *conclusion*, not just a starting guess, so widen must
+    # never touch it, or the very growth its equality-termination argument
+    # already accounts for would immediately widen it back to infinity (see
+    # hir/induction.tcl's header).
+    set induction [hir::induction::analyze $hir $spec $literalSeeds]
+    set open [OpenInstances $spec]
+
+    set ids [dict get $spec used]
+    set blockOf [dict create]
+    set paramsOf [dict create]
+    set viewOf [dict create]
+    set instanceCallsOf [dict create]
+    set monotoneOf [dict create]
+    set lockedOf [dict create]
+    set assumed [dict create]
+    set outcomes [dict create]
+    # Indices this instance's own self-call feedback has, at some round,
+    # actually *destroyed*: widened a concrete entry fact all the way to
+    # unknown (never just started unknown with nothing yet to say -- see
+    # the caller-propagation fold below, which must tell the two apart).
+    set poisonedOf [dict create]
+
+    foreach id $ids {
         set instance [dict get $spec instances $id]
         set block [dict get $instance block]
+        dict set blockOf $id $block
         set params [expr {$block eq "program" ? {} : [hir::get $hir $block params]}]
-        set n [llength $params]
-        set assumed [expr {[dict exists $seeds $id] ? [dict get $seeds $id] : [lrepeat $n [unknown]]}]
+        dict set paramsOf $id $params
+        dict set viewOf $id [hir::specialize::view $hir $spec $id]
+        dict set instanceCallsOf $id [dict get $instance calls]
+        dict set monotoneOf $id [hir::induction::monotone $induction $id]
+
         set locked [dict create]
-        for {set i 0} {$i < $n} {incr i} {
+        set init {}
+        set i 0
+        foreach p $params {
             set override [hir::induction::of $induction $id $i]
             if {$override ne ""} {
-                lset assumed $i $override
                 dict set locked $i 1
+                lappend init $override
+            } else {
+                lappend init [unknown]
             }
+            incr i
         }
-        set view [hir::specialize::view $hir $spec $id]
-        set instanceCalls [dict get $instance calls]
-        set monotone [hir::induction::monotone $induction $id]
-        set outcome {}
-        for {set pass 1} {$pass <= $maxPasses} {incr pass} {
-            set outcome [AnalyzeInstance $view $id $instanceCalls $block $params $assumed $monotone]
-            set selfCalls [dict get $outcome selfCalls]
-            if {$selfCalls eq ""} {
-                break
+        dict set lockedOf $id $locked
+        dict set assumed $id $init
+        dict set poisonedOf $id [dict create]
+    }
+
+    # Whether ID calls itself at all (self tail calls and ordinary
+    # same-instance recursion alike -- hir::specialize's own "calls", not a
+    # separate notion): the fold below must tell a *genuinely* self-derived
+    # "unknown" (SettleInstance ran, found real self-call evidence, and it
+    # proved the entry unbounded -- see POISONEDOF) apart from an
+    # instance with no self-calls at all, whose entry fact is unknown only
+    # because nothing has said otherwise yet, never a conclusion. Only the
+    # first kind is safe to fold caller evidence into by *union* (it must
+    # never lose ground); the second is free to be replaced outright by a
+    # fresher, more precise caller computation as upstream callers
+    # themselves finish converging (spec #12-13, #15: this is exactly why
+    # work's parameter, having no self-calls, can still tighten from
+    # drive's own still-converging else-branch fact once drive settles,
+    # instead of being stuck at whatever drive's first, roughest pass gave
+    # it).
+    set selfRecursiveOf [dict create]
+    foreach id $ids {
+        dict set selfRecursiveOf $id [expr {$id in [dict values [dict get $instanceCallsOf $id]]}]
+    }
+
+    # A bound on rounds that scales with the instance count (a chain of N
+    # instances can need up to N rounds for its first real value to
+    # propagate end to end) plus a fixed cushion for the self-call/widen
+    # settling every instance also does each round -- finite, deterministic,
+    # never a per-interval or per-benchmark constant (spec #12, #24, #37).
+    set roundBudget [expr {[llength $ids] + 8}]
+    for {set round 1} {$round <= $roundBudget} {incr round} {
+        set changed 0
+        set contributions [dict create]
+        foreach id $ids {
+            set before [dict get $assumed $id]
+            lassign [SettleInstance [dict get $viewOf $id] $id [dict get $instanceCallsOf $id] \
+                [dict get $blockOf $id] [dict get $paramsOf $id] $before \
+                [dict get $lockedOf $id] [dict get $monotoneOf $id]] outcome settled
+            dict set outcomes $id $outcome
+            if {$settled ne $before} {
+                set locked [dict get $lockedOf $id]
+                set poisoned [dict get $poisonedOf $id]
+                set i 0
+                foreach b $before s $settled {
+                    if {![dict exists $locked $i] && $b ne [unknown] && $s eq [unknown]} {
+                        # Self-call feedback just destroyed a real entry
+                        # fact (a genuine widen, not "nothing proven yet"):
+                        # permanent, since a wider starting fact could only
+                        # make the same self-recursion at least as
+                        # unbounded, never less (the caller-propagation
+                        # fold below must never treat this "unknown" as an
+                        # empty slate safe to adopt a caller's Range into).
+                        dict set poisoned $i 1
+                    }
+                    incr i
+                }
+                dict set poisonedOf $id $poisoned
+                dict set assumed $id $settled
+                set changed 1
             }
-            set next {}
-            for {set i 0} {$i < $n} {incr i} {
-                if {[dict exists $locked $i]} {
-                    lappend next [lindex $assumed $i]
+            foreach pair [dict get $outcome calls] {
+                lassign $pair target argRanges
+                if {$target eq $id || [dict exists $open $target]} {
                     continue
                 }
-                set r never
-                foreach call $selfCalls {
-                    set r [join $r [lindex $call $i]]
+                set current [expr {[dict exists $contributions $target]
+                    ? [dict get $contributions $target] : [lrepeat [llength $argRanges] never]}]
+                set next {}
+                foreach c $current r $argRanges {
+                    lappend next [join $c $r]
                 }
-                lappend next [join [lindex $assumed $i] $r]
+                dict set contributions $target $next
             }
-            if {$next eq $assumed} {
-                break
-            }
-            set widened {}
-            foreach a $assumed w $next {
-                lappend widened [widen $a $w]
-            }
-            set assumed $widened
         }
-        dict set instances $id [dict create params $assumed exprs [dict get $outcome exprs] result [dict get $outcome result]]
+        dict for {target contribution} $contributions {
+            set locked [dict get $lockedOf $target]
+            set poisoned [dict get $poisonedOf $target]
+            set selfRecursive [dict get $selfRecursiveOf $target]
+            set current [dict get $assumed $target]
+            set next {}
+            set i 0
+            foreach o $current c $contribution {
+                if {[dict exists $locked $i]} {
+                    # Never touched: induction's own conclusion (see the
+                    # header on this proc), not an ordinary seed to widen.
+                    lappend next $o
+                } elseif {!$selfRecursive} {
+                    # No self-calls at all (SELFRECURSIVEOF, above): this
+                    # parameter's entry fact is *entirely* a function of its
+                    # exact callers, nothing here to preserve against, so
+                    # each round recomputes it fresh from this round's
+                    # calls instead of folding onto -- and thereby never
+                    # improving past -- a rougher fact an earlier round
+                    # (necessarily computed from a caller that had not yet
+                    # settled itself: work's caller drive is a self-tail
+                    # loop that only reaches its own [-∞,500] over several
+                    # rounds) happened to produce first.
+                    lappend next [expr {$c eq "never" ? [unknown] : $c}]
+                } elseif {[dict exists $poisoned $i]} {
+                    # This instance's own self-recursion already proved the
+                    # entry unbounded (id-processing loop, above): permanent,
+                    # and a caller's Range -- real or not yet -- cannot
+                    # un-prove it.
+                    lappend next [unknown]
+                } elseif {$o eq [unknown]} {
+                    # Self-recursive, but its own feedback has not (yet, or
+                    # ever, if it never needs to move past its seed) said
+                    # anything: the first real caller evidence is this
+                    # parameter's first fact, adopted exactly, for the same
+                    # reason as the non-self-recursive case above.
+                    lappend next [expr {$c eq "never" ? [unknown] : $c}]
+                } else {
+                    # A genuine, already-established self-derived fact
+                    # (drive's own [-∞,500], reached through its own
+                    # self-tail widening): callers can only ever add to it,
+                    # never replace it outright, and widen keeps that
+                    # addition from taking many rounds to reach its own
+                    # fixed point.
+                    lappend next [widen $o [join $o $c]]
+                }
+                incr i
+            }
+            if {$next ne $current} {
+                set changed 1
+            }
+            dict set assumed $target $next
+        }
+        if {!$changed} {
+            break
+        }
+    }
+
+    set instances [dict create]
+    foreach id $ids {
+        set outcome [dict get $outcomes $id]
+        dict set instances $id [dict create params [dict get $assumed $id] \
+            exprs [dict get $outcome exprs] result [dict get $outcome result]]
     }
     return [dict create instances $instances induction $induction]
 }

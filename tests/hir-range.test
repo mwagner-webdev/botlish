@@ -14,6 +14,15 @@ proc rangeOf {text} {
     return [list $hir $spec [hir::range::analyze $hir $spec]]
 }
 
+# Like rangeOf, but with specialization off (-specialize 0): every block has
+# exactly one (generic) instance, and every call -- direct or through a
+# materialized value alike -- resolves to it.
+proc rangeOfGeneric {text} {
+    set hir [surface::compile $text t.bot -strict 0]
+    set spec [hir::specialize::analyze $hir -specialize 0]
+    return [list $hir $spec [hir::range::analyze $hir $spec]]
+}
+
 # The used InstanceId of block-bound function NAME, whose key types show as
 # KEY (e.g. "int"), or its only/first used instance if KEY is "".
 proc rangeInstance {spec name {key ""}} {
@@ -31,6 +40,32 @@ proc rangeInstance {spec name {key ""}} {
 
 proc paramRanges {analysis id} {
     return [lmap p [dict get [dict get $analysis instances $id] params] {hir::range::show $p}]
+}
+
+# Instance ID's block's parameter binding named NAME.
+proc paramBinding {hir spec id name} {
+    set block [dict get [dict get $spec instances $id] block]
+    foreach b [hir::get $hir $block params] {
+        if {[dict get [hir::binding $hir $b] name] eq $name} {
+            return $b
+        }
+    }
+    error "no parameter \"$name\" on instance $id"
+}
+
+# The Range of every `ref` expression of BINDING that instance ID's analysis
+# recorded a fact for, in ExprId order (source order, for straight-line
+# branch bodies): every branch-local narrowing a reference to it saw, not
+# just its function-entry seed.
+proc refRanges {hir analysis id binding} {
+    set exprs [dict get [dict get $analysis instances $id] exprs]
+    set result {}
+    foreach e [lsort -dictionary [dict keys $exprs]] {
+        if {[hir::kind $hir $e] eq "ref" && [hir::get $hir $e binding] eq $binding} {
+            lappend result [hir::range::show [dict get $exprs $e]]
+        }
+    }
+    return $result
 }
 
 # ---------------------------------------------------------------------------
@@ -96,10 +131,15 @@ test range-analyze-2 {a non-recursive parameter seeded only by literal calls is 
     paramRanges $analysis [rangeInstance $spec add1]
 } -result {{[5, 9]}}
 
-test range-analyze-3 {a parameter with no literal argument anywhere stays unknown} -body {
+test range-analyze-3 {an exact call's Ref argument seeds the callee from the caller's own already-proven Range, not only a literal at the call site itself} -body {
     lassign [rangeOf "fn add1(x):\n    x + 1\n\nfn go(n):\n    add1(n)\n\ngo(3)"] hir spec analysis
     list [paramRanges $analysis [rangeInstance $spec add1]] [paramRanges $analysis [rangeInstance $spec go]]
-} -result {{{[-∞, +∞]}} {{[3, 3]}}}
+} -result {{{[3, 3]}} {{[3, 3]}}}
+
+test range-analyze-3b {a parameter with no evidence anywhere -- not even indirectly -- stays unknown: the callee only ever sees a genuinely unbounded expression's Range, never a syntactic "not a literal" restriction} -body {
+    lassign [rangeOf "fn add1(x):\n    x + 1\n\nfn go(xs):\n    add1(list_get(xs, 0))\n\ngo(\[1, 2\])"] hir spec analysis
+    paramRanges $analysis [rangeInstance $spec add1]
+} -result {{[-∞, +∞]}}
 
 test range-analyze-4 {a self-recursive counter decreasing to an == 0 guard: hir/induction.tcl proves it never goes negative either, on the side that grows} -body {
     lassign [rangeOf "fn count_up(n, acc):\n    if n == 0:\n        return acc\n    count_up(n - 1, acc + 1)\n\ncount_up(1000, 0)"] hir spec analysis
@@ -166,5 +206,95 @@ test range-induction-4 {an opaque, call-derived next value (csv's scan_records s
     lassign [paramRanges $analysis $id] textR indexR countR
     list $indexR [hir::range::fitsSmall [lindex [dict get [dict get $analysis instances $id] params] 1]]
 } -result {{[-∞, +∞]} 0}
+
+# ---------------------------------------------------------------------------
+# Parameter branch narrowing (this milestone's Part A): the same
+# ComparisonNarrowing machinery hir/range.tcl already had for `local`
+# bindings, extended to immutable function parameters.
+
+test range-narrow-param-1 {a `<`/`>=` guard narrows a parameter reference in each branch exactly as it already narrows a local, on both sides (spec #6, #34); the caller's own argument (an unbounded list element) is not itself informative, isolating this from Part B's own propagation} -body {
+    lassign [rangeOf "fn f(n):\n    if n < 2:\n        n\n    else:\n        n\n\nfn use(xs):\n    f(list_get(xs, 0))\n\nuse(\[1, 2\])"] hir spec analysis
+    set id [rangeInstance $spec f]
+    set b [paramBinding $hir $spec $id n]
+    refRanges $hir $analysis $id $b
+} -result {{[-∞, +∞]} {[-∞, 1]} {[2, +∞]}}
+
+test range-narrow-param-2 {branch narrowing on a parameter is not limited to a function's top-level body: it applies wherever it already applies to a local (spec #7)} -body {
+    lassign [rangeOf "fn f(outer, n):\n    if outer:\n        if n >= 0:\n            n\n\nfn use(xs):\n    f(true, list_get(xs, 0))\n\nuse(\[1, 2\])"] hir spec analysis
+    set id [rangeInstance $spec f]
+    set b [paramBinding $hir $spec $id n]
+    refRanges $hir $analysis $id $b
+} -result {{[-∞, +∞]} {[0, +∞]}}
+
+test range-narrow-param-3 {two nested comparisons on a parameter narrow it exactly as they would a local (spec #33)} -body {
+    lassign [rangeOf "fn f(n):\n    if n >= 0:\n        if n < 10:\n            n\n\nfn use(xs):\n    f(list_get(xs, 0))\n\nuse(\[1, 2\])"] hir spec analysis
+    set id [rangeInstance $spec f]
+    set b [paramBinding $hir $spec $id n]
+    refRanges $hir $analysis $id $b
+} -result {{[-∞, +∞]} {[0, +∞]} {[0, 9]}}
+
+test range-narrow-param-4 {a local binding narrows exactly as it did before this milestone (no regression: spec #38)} -body {
+    lassign [rangeOf "fn f(n):\n    b = n\n    if b >= 0:\n        b\n\nfn use(xs):\n    f(list_get(xs, 0))\n\nuse(\[1, 2\])"] hir spec analysis
+    set id [rangeInstance $spec f]
+    # b is a *local* duplicate-free bind of n, not n's own BindingId.
+    set localB ""
+    dict for {bid binding} [dict get $hir bindings] {
+        if {[dict get $binding kind] eq "local" && [dict get $binding name] eq "b"} {
+            set localB $bid
+        }
+    }
+    refRanges $hir $analysis $id $localB
+} -result {{[-∞, +∞]} {[0, +∞]}}
+
+# ---------------------------------------------------------------------------
+# Caller-to-callee range propagation (this milestone's Part B): an exact
+# call's argument Range -- however it was proven, not only a literal --
+# seeds the callee parameter it targets.
+
+test range-propagate-1 {an exact call's Ref argument, whose own Range the caller already proved, seeds the callee -- not only a syntactic literal (spec #8, #13, #15)} -body {
+    lassign [rangeOf "fn work(i):\n    i + 1\n\nfn drive(i, total):\n    if i <= 0:\n        total\n    else:\n        work(i)\n        drive(i - 1, total + 1)\n\ndrive(500, 0)"] hir spec analysis
+    list [paramRanges $analysis [rangeInstance $spec drive]] [paramRanges $analysis [rangeInstance $spec work]]
+} -result {{{[-∞, 500]} {[0, +∞]}} {{[1, 500]}}}
+
+test range-propagate-2 {fib's else branch proves n >= 2, and n-1/n-2 there inherit the tighter bound (spec #14, acceptance case)} -body {
+    lassign [rangeOf "fn fib(n):\n    if n < 2:\n        n\n    else:\n        fib(n - 1) + fib(n - 2)\n\nfib(18)"] hir spec analysis
+    set id [rangeInstance $spec fib]
+    set b [paramBinding $hir $spec $id n]
+    set entry [paramRanges $analysis $id]
+    set branchRefs [refRanges $hir $analysis $id $b]
+    set exprs [dict get [dict get $analysis instances $id] exprs]
+    set subExprRanges {}
+    foreach e [lsort -dictionary [dict keys $exprs]] {
+        if {[hir::kind $hir $e] eq "call"} {
+            lassign [hir::get $hir $e target] targetKind target
+            if {$targetKind eq "native" && [dict get [hir::symbol $hir $target] name] eq "-"} {
+                lappend subExprRanges [hir::range::show [dict get $exprs $e]]
+            }
+        }
+    }
+    list $entry $branchRefs $subExprRanges
+} -result {{{[-∞, 18]}} {{[-∞, 18]} {[-∞, 1]} {[2, 18]} {[2, 18]}} {{[1, 17]} {[0, 16]}}}
+
+test range-propagate-3 {multiple exact callers of the same instance join to a safe hull, not an intersection or whichever call site ran first (spec #11, #35)} -body {
+    lassign [rangeOf "fn f(x):\n    x + 0\n\nfn caller_a():\n    f(5)\n\nfn caller_b():\n    f(150)\n\n\[caller_a(), caller_b()\]"] hir spec analysis
+    paramRanges $analysis [rangeInstance $spec f]
+} -result {{[5, 150]}}
+
+test range-propagate-4 {a materialized (escaping) Block value's generic instance is never narrowed from a known direct caller's literal alone: the safe entry range must account for every possible caller, including the ones reachable only through the escaped value (spec #28-29, #36, #39)} -body {
+    lassign [rangeOfGeneric "fn f(x):\n    x + 0\n\nfn call_it(cb):\n    cb(1)\n\n\[f(5), call_it(f)\]"] hir spec analysis
+    paramRanges $analysis [rangeInstance $spec f]
+} -result {{[-∞, +∞]}}
+
+test range-propagate-5 {the same direct literal call, with nothing materializing f elsewhere, does narrow it: range-propagate-4's result is specifically because f escapes, not a blanket effect of -specialize 0 (spec #39)} -body {
+    lassign [rangeOfGeneric "fn f(x):\n    x + 0\n\nf(5)"] hir spec analysis
+    paramRanges $analysis [rangeInstance $spec f]
+} -result {{[5, 5]}}
+
+test range-propagate-6 {a self-recursive chain of caller-propagated facts (drive -> work, and drive's own self-tail feedback) converges to a fixed answer, deterministically, without oscillating or needing per-interval specialization (spec #12, #37)} -body {
+    lassign [rangeOf "fn work(i):\n    i + 1\n\nfn drive(i, total):\n    if i <= 0:\n        total\n    else:\n        work(i)\n        drive(i - 1, total + 1)\n\ndrive(500, 0)"] hir spec analysis1
+    lassign [rangeOf "fn work(i):\n    i + 1\n\nfn drive(i, total):\n    if i <= 0:\n        total\n    else:\n        work(i)\n        drive(i - 1, total + 1)\n\ndrive(500, 0)"] hir2 spec2 analysis2
+    list [dict get $spec used] [dict get $spec2 used] \
+        [paramRanges $analysis1 [rangeInstance $spec work]] [paramRanges $analysis2 [rangeInstance $spec2 work]]
+} -result {{i0 i2 i1} {i0 i2 i1} {{[1, 500]}} {{[1, 500]}}}
 
 cleanupTests
