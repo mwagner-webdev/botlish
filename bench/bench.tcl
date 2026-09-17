@@ -4,18 +4,39 @@
 #
 # Each program runs once untimed per backend (so compilation is excluded
 # from the measurement), then N timed runs; the best run is reported.
-# Alongside the Botlish backends, a hand-translated Python and Rust program
-# from bench/equivalents/{python,rust}/BASE.{py,rs} runs the same way (one
+# Alongside the Botlish backends (interp, compile, and native -- see
+# below), a hand-translated Python and Rust program from
+# bench/equivalents/{python,rust}/BASE.{py,rs} runs the same way (one
 # untimed warmup, then N timed runs, self-reporting its best time) when one
 # exists for a given BASE.ir, for a same-container reference comparison.
 # -markdown prints a Markdown table (e.g. for a CI job summary).
 # Exits with status 1 if the Botlish backends disagree on any program's
-# value. The Python/Rust columns are informational and never gate: their
-# values are still checked and flagged, but a mismatch there doesn't fail
-# the run.
+# value (native included, whenever it produces one at all -- see below).
+# The Python/Rust columns are informational and never gate: their values
+# are still checked and flagged, but a mismatch there doesn't fail the run.
+#
+# Native (Cranelift) column
+# --------------------------
+# The interp/compile backends run in this same Tcl process, so timing them
+# is just "call core::evalProgram N times". Native code does not: each
+# call would otherwise be a separate botlish-native subprocess, and timing
+# that in a loop would mostly measure process-spawn and re-JIT-compile
+# overhead, not the compiled function itself (see NATIVE-AUDIT.md). Instead
+# this uses native::measure (native/native.tcl), which spawns exactly one
+# subprocess that JIT-compiles once and then loops RUNS times *in that
+# process*, so the reported time -- like the interp/compile columns' -- is
+# genuine best-of-N execution with compilation excluded.
+#
+# A program that native code cannot run at all (a library native with no
+# native lowering, an unsupported HIR construct, or the native backend
+# simply not built) declines the comparison for that one row (shown as
+# n/a, no verdict emoji) rather than failing the whole benchmark run: a
+# missing native capability is a known, separate finding (NATIVE-AUDIT.md),
+# not a benchmark regression to gate on.
 
 set root [file dirname [file dirname [file normalize [info script]]]]
 source [file join $root compiler compiler.tcl]
+source [file join $root native native.tcl]
 
 set runs 5
 set markdown 0
@@ -34,6 +55,13 @@ if {$files eq ""} {
 # Recursion depth in the benchmarks exceeds Tcl's default nesting limit.
 interp recursionlimit {} 20000
 
+# The Tcl-hosted backends: both run core::evalProgram in this process, so
+# timing them by calling it in a loop is valid. native/native.tcl's
+# sourcing above registers "cranelift"/"cranelift-generic" too (each call
+# there is its own subprocess), but those are measured separately by
+# bestNative, not through this list or `best`.
+set backends {interp compile}
+
 proc best {program runs} {
     core::evalProgram $program
     set best ""
@@ -44,6 +72,27 @@ proc best {program runs} {
         }
     }
     return [list $best [core::formatValue $value]]
+}
+
+# Best-of-RUNS native (Cranelift) execution of PROGRAM, entirely in one
+# subprocess (native::measure), with compilation excluded exactly like
+# `best` excludes it for the Tcl backends. Returns {microseconds value},
+# or {"" ""} if this program cannot be run natively at all -- declining the
+# comparison instead of failing the run (see this file's header).
+proc bestNative {program runs} {
+    if {[catch {hir::build $program -strict 0} hir]} {
+        return {"" ""}
+    }
+    if {[catch {native::measure $hir $runs} result]} {
+        return {"" ""}
+    }
+    lassign $result lowerUs compileUs bestUs collections value
+    return [list $bestUs [core::formatValue $value]]
+}
+
+if {[catch {native::binary}]} {
+    puts stderr "warning: native backend not built -- every native column will show n/a.\
+        Run \"cargo build --release --manifest-path native/Cargo.toml\" first."
 }
 
 # Parses the "value: V" / "best_us: N" lines a bench/equivalents/* program
@@ -94,8 +143,7 @@ proc fmtMicros {micros} {
     return [format "%.2f us" $micros]
 }
 
-set backends [core::backends]
-set columns [concat $backends {python rust}]
+set columns [concat $backends {native python rust}]
 if {$markdown} {
     puts "Tcl [info patchlevel], best of $runs runs, compilation excluded.\n"
     puts "| program | [join $columns { | }] | speedup | 🏅 | values |"
@@ -118,6 +166,8 @@ foreach path $files {
         lappend backendValues $value
     }
 
+    lassign [bestNative $program $runs] nativeMicros nativeValue
+
     set pyResult [runPythonEquivalent $root $base $runs]
     set rustResult [runRustEquivalent $root $base $runs]
     set pyMicros ""; set pyValue ""
@@ -127,24 +177,30 @@ foreach path $files {
 
     # Only the Botlish backends gate the exit code; python/rust are shown
     # but informational, so an environment quirk in either can't turn a
-    # green run red.
-    set agree [expr {[llength [lsort -unique $backendValues]] == 1}]
+    # green run red. Native joins the gate whenever it produced a value at
+    # all (nativeValue ne ""): a program it declines to run natively
+    # (bestNative returned "") is absent, not disagreeing, so it never
+    # trips this on its own.
+    set botlishValues $backendValues
+    if {$nativeValue ne ""} { lappend botlishValues $nativeValue }
+    set agree [expr {[llength [lsort -unique $botlishValues]] == 1}]
     if {!$agree} {
         incr disagreements
     }
-    set allValues [concat $backendValues [list $pyValue $rustValue]]
+    set allValues [concat $botlishValues [list $pyValue $rustValue]]
     set allValues [lsearch -all -inline -not -exact $allValues ""]
     set allAgree [expr {[llength [lsort -unique $allValues]] == 1}]
 
-    # 🫩 while the compiled IR backend is still slower than Python, 🎉 once
-    # it beats Python, 🔥 once it beats Rust too.
+    # Native (Cranelift) is the baseline compared against Python/Rust: 🫩
+    # while it is still slower than Python, 🎉 once it beats Python, 🔥
+    # once it beats Rust too. No verdict (declined, not "🫩") when native
+    # couldn't run this program at all, or when there is no Python/Rust
+    # reference to compare against.
     set emoji ""
-    set compileIdx [lsearch $backends compile]
-    if {$compileIdx >= 0 && $pyMicros ne "" && $rustMicros ne ""} {
-        set compileMicros [lindex $backendTimes $compileIdx]
-        if {$compileMicros < $rustMicros} {
+    if {$nativeMicros ne "" && $pyMicros ne "" && $rustMicros ne ""} {
+        if {$nativeMicros < $rustMicros} {
             set emoji "🔥"
-        } elseif {$compileMicros < $pyMicros} {
+        } elseif {$nativeMicros < $pyMicros} {
             set emoji "🎉"
         } else {
             set emoji "🫩"
@@ -152,7 +208,7 @@ foreach path $files {
     }
 
     set speedup [format "%.1fx" [expr {double([lindex $backendTimes 0]) / max(1, [lindex $backendTimes end])}]]
-    set allTimes [concat $backendTimes [list $pyMicros $rustMicros]]
+    set allTimes [concat $backendTimes [list $nativeMicros $pyMicros $rustMicros]]
     set cells [lmap micros $allTimes {fmtMicros $micros}]
     set shown [string range [join [lsort -unique $allValues] " / "] 0 40]
     if {$markdown} {

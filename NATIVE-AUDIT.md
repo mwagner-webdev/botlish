@@ -712,19 +712,37 @@ item 29 asks Rust to demonstrate — and it demonstrates precisely the
 capability (non-escaping closure inlining) F1 recommends as the next
 milestone.
 
-## Appendix E — bench.tcl / CI does not exercise the native backend today
+## Appendix E — bench.tcl / CI did not exercise the native backend before this audit
 
-`bench/bench.tcl` sources only `compiler/compiler.tcl` (the Tcl-codegen
-backend), not `native/native.tcl` — so `core::backends` never includes
+**Fixed as a direct follow-up to this audit** (a later commit on this
+branch): `bench/bench.tcl` now sources `native/native.tcl` and reports a
+`native` column via `native::measure` (one subprocess that JIT-compiles
+once and loops in-process, exactly like §1's methodology here — not the
+generic per-call `core::evalProgram` path, which would reintroduce the
+wall/process-spawn overhead this audit's §1 specifically excluded), and
+`.github/workflows/bench.yml` now builds `native/` before running it. A
+program native code can't compile at all (e.g. `refined-checks.ir`, §5)
+shows `n/a` for that one row and is excluded from the pass/fail value-
+agreement gate, rather than failing the whole run. The baseline used to
+judge Botlish against Python/Rust (the 🔥/🎉/🫩 verdict) changed from the
+`compile` (Tcl-codegen) backend to this `native` column, for the same
+reason this whole audit exists: `compile` never touches Cranelift, GC
+rooting, or machine code, so it was never a meaningful stand-in for "native
+execution cost."
+
+Original finding, preserved for the record: at the time this audit ran,
+`bench/bench.tcl` sourced only `compiler/compiler.tcl` (the Tcl-codegen
+backend), not `native/native.tcl` — so `core::backends` never included
 `cranelift`/`cranelift-generic` in its default run, and
-`.github/workflows/bench.yml` never builds the Rust backend
-(`cargo build` does not appear in that workflow at all). This means the
-task's own framing — "recent performance comparisons suggest... native
-Botlish code is still substantially slower than expected" — was evidently
-based on ad hoc/manual runs, not CI, and no routine Botlish-native-in-process
-number existed anywhere in the repository before this audit (acceptance
-criterion #1 was, accordingly, not previously satisfied). This audit's
-in-process numbers (§1) are the first such measurement on record.
+`.github/workflows/bench.yml` never built the Rust backend at all. This
+meant the task's own framing — "recent performance comparisons suggest...
+native Botlish code is still substantially slower than expected" — was
+evidently based on ad hoc/manual runs, not CI, and no routine
+Botlish-native-in-process number existed anywhere in the repository before
+this audit (acceptance criterion #1 was, accordingly, not previously
+satisfied). This audit's in-process numbers (§1) were the first such
+measurement on record, and remain the ones to compare future native-column
+CI numbers against for regressions.
 
 ## Appendix F — Native backend diagnostic script
 
