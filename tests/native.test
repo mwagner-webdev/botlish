@@ -571,6 +571,52 @@ test native-diagnostic-3 {invalid NIR is rejected by the driver, not executed} -
 } -result {{NATIVE INVALID-NIR} {invalid NIR at line 0: function 0 (<program>): register %5 out of range}}
 
 # ---------------------------------------------------------------------------
+# Known-result lowering before the native-support check (NativeCall, native/
+# lower.tcl): a call HIR already proved the outcome of must lower to that
+# result even when the native has no entry in native/lower.tcl's own
+# `natives` table -- an operation already proven unnecessary should not need
+# a native implementation merely in order to disappear. "test-known-int?" is
+# registered the ordinary way (core::registerNative, like test_log above),
+# so it exists in the core native registry but, deliberately, nowhere in
+# native/lower.tcl -- exactly lib/web.tcl's Emailish?/UriQueryValue?/uriEscape
+# shape, kept minimal and general instead of tied to that library.
+
+test native-known-unsupported-1 {a proven call to an otherwise-unsupported native lowers to its known result, with no call left behind} -setup {
+    if {"test-known-int?" ni [core::native::names]} {
+        core::registerNative test-known-int? -arity 1 \
+            -impl {apply {{v} {core::value::bool [expr {[core::value::kind $v] eq "int"}]}}} \
+            -param-types any -tests-type int
+    }
+} -body {
+    set hirTrue [hir::build {{call {ref test-known-int?} {const 5}}}]
+    set hirFalse [hir::build {{call {ref test-known-int?} {const str x}}}]
+    set nirTrue [native::nir $hirTrue]
+    set nirFalse [native::nir $hirFalse]
+    list [regexp {bool true} $nirTrue] [regexp {bool false} $nirFalse] \
+        [string first "test-known-int?" $nirTrue] [string first "test-known-int?" $nirFalse] \
+        [lrange [outcomeUnder cranelift {{call {ref test-known-int?} {const 5}}}] 0 end-1] \
+        [lrange [outcomeUnder cranelift {{call {ref test-known-int?} {const str x}}}] 0 end-1]
+} -result {1 1 -1 -1 {value true} {value false}}
+
+test native-known-unsupported-2 {the same unsupported native still fails when its result is not statically known} -setup {
+    if {"test-known-int?" ni [core::native::names]} {
+        core::registerNative test-known-int? -arity 1 \
+            -impl {apply {{v} {core::value::bool [expr {[core::value::kind $v] eq "int"}]}}} \
+            -param-types any -tests-type int
+    }
+} -body {
+    # -specialize 0 lowers only the generic instance of f, whose parameter x
+    # keeps its unrefined "any" type (native/lower.tcl's own documented
+    # guarded baseline) -- so HIR has not proven the call's result, and the
+    # native-support check must still reject it.
+    set hir [hir::build {
+        {bind f {block {x} {call {ref test-known-int?} {ref x}}}}
+        {call {ref f} {const 5}}
+    }]
+    list [catch {native::nir $hir -specialize 0} message options] [dict get $options -errorcode]
+} -match glob -result {1 {NATIVE UNSUPPORTED {native test-known-int?}}}
+
+# ---------------------------------------------------------------------------
 # Representation: local unboxing of proven-small Int arithmetic (hir/range.tcl,
 # the "Representation" section of native/lower.tcl)
 

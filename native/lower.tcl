@@ -2192,14 +2192,19 @@ proc native::lower::NativeCall {fnVar e node name argRegs rawEligible op want} {
         Emit fn "raise ARITY [Quote "$name expects $arity argument(s), got [llength $argRegs]"]" $e
         return {never tagged}
     }
+    if {[dict get $node known] ne ""} {
+        # A type test HIR already decided statically (Call, above, already
+        # ran the arguments): the result exists, so nothing else does --
+        # not even a native implementation of NAME, whether or not
+        # native/lower.tcl otherwise supports it. An operation HIR has
+        # already proven unnecessary should not need to exist natively
+        # merely in order to disappear.
+        return [list [Assign fn "bool [expr {[dict get $node known] ? "true" : "false"}]" $e] tagged]
+    }
     if {![dict exists $natives $name]} {
         Unsupported $e "native $name" "the native \"$name\" has no native implementation"
     }
     dict lappend fn calls [list native $name]
-    if {[dict get $node known] ne ""} {
-        # A type test HIR decided: the arguments ran, nothing else does.
-        return [list [Assign fn "bool [expr {[dict get $node known] ? "true" : "false"}]" $e] tagged]
-    }
     set testsType [dict get $meta testsType]
     if {$testsType ne "" && [llength $testsType] > 1 && $name ni {ok? error?}} {
         Unsupported $e "native $name" "type tests of named types need evidence, which is not supported natively"
