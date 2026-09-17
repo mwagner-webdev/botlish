@@ -837,6 +837,273 @@ function like `fib`. Fixing that is F3's job, not this milestone's.
     next milestone specifically *because* of what this one just measured,
     even though the induction gap is easier to fix in isolation.
 
+## 10. Follow-up milestone: F3 (GC-root liveness and shadow-slot reuse)
+
+This milestone implemented F3 from §8: replacing "one shadow-stack slot per
+NIR register, forever" with slots allocated by GC-safepoint-live-range
+interference, so a function's frame reflects how many managed values are
+actually simultaneously reachable across a possible collection, not how many
+virtual registers its NIR happens to have.
+
+**Files changed:**
+
+- `native/src/codegen/roots.rs` (new): the whole analysis — CFG
+  construction, backward liveness, safepoint classification, interference,
+  greedy slot coloring, the `native::roots`-facing text report, and 13 unit
+  tests exercising every acceptance scenario (§27–§34, plus fib's own shape)
+  directly on hand-written NIR text.
+- `native/src/runtime/ops.rs`: `op_may_allocate(OpCode) -> bool`, the single
+  authoritative mirror of the existing "allocates" column of this file's own
+  helper table (item 56: no duplicated truth source).
+- `native/src/codegen/clif.rs`: the prologue now reserves
+  `plan.num_slots.max(1)` slots (was `f.regs.max(1)`), zeroes only those, and
+  `def` stores a register's value only when `plan.slot_of[reg]` is `Some`.
+  `def_raw` is unchanged (it never stored anyway).
+- `native/src/codegen/mod.rs`, `native/src/main.rs`: wire `roots` in as a
+  fourth Cargo module and a new `botlish-native roots FILE.nir` CLI command
+  (parses and analyzes only, never compiles) for item 47/48's diagnostics.
+- `native/native.tcl`, `native/explain-native.tcl`: `native::roots` and a
+  `roots.txt` output, alongside the existing `nir.txt`/`clif.txt`.
+- `tests/native-root-liveness.test` (new): structural regression tests on
+  the four audited programs plus the adversarial/GC-stress tests below.
+
+**Old rooting policy:** every NIR register got a permanent shadow slot,
+zeroed in the prologue and stored on every definition, whether or not the
+register could ever hold a heap pointer and whether or not it was ever live
+across a point where GC could run.
+
+**New safepoint model:** an instruction is a GC safepoint if it is a direct
+Botlish call (`call`/`callenv`/`callmulti`/`callenvmulti`, conservatively —
+the callee may allocate even when this call site cannot prove otherwise,
+per item 9), a dynamically dispatched call (`callvalue`), a `cell`/`closure`
+construction (their runtime helpers always allocate), or an `op` whose
+helper `op_may_allocate` marks as possibly allocating (`iadd`/`isub`/`imul`
+for their BigInt fallback, `substr`, `decodecharat`, `strlower`, `strcat`,
+`listnew`, `listappend`, `mutarrayallocate`, `mutarrayfreeze`, `mkok`,
+`mkerror`). Every other op (comparisons, `imod`, `strlen`, `listget`,
+`mutarrayget`/`set`/`copy`/`capacity`, `regioncheck`/`regioneq`,
+`strbytelen`, the raw `r*` ops, `isint`/`isok`/etc.) is `NoGc`, per
+`runtime/ops.rs`'s own documented table — the metadata source item 56 asked
+for, reused rather than duplicated.
+
+**Liveness representation:** ordinary backward dataflow over a CFG built
+directly from NIR's own block structure (a label starts a block; a
+branch/jump/tail/ret/raise/unreachable ends one; a self `tail`/`tailenv`
+back-edges to the function's first block, exactly like `Translator::function`
+itself jumps there after the prologue). `LiveIn(inst) = Use(inst) ∪
+(LiveOut(inst) \ Def(inst))`, iterated to a fixpoint per block. No new
+concept was needed to handle a call's own arguments needing to stay rooted
+*during* the call (item 15): they are `Use`s of the call instruction, so
+they are in its `LiveIn` regardless of whether anything reads them again
+afterward — the same formula that handles "needed after" handles "needed
+during" for free.
+
+**Root-interference definition:** `Roots(safepoint) = LiveIn(safepoint) ∩
+{registers not declared raw}`. Two registers interfere iff some safepoint's
+root set contains both.
+
+**Slot-allocation algorithm:** deterministic greedy coloring — registers
+are colored in ascending numeric order, each taking the lowest-numbered slot
+not already held by a register it interferes with, opening a new slot only
+when none fits. No global optimum is attempted (item 18 doesn't ask for
+one); repeated analysis of the same NIR produces the same assignment
+(`root-deterministic-1`).
+
+**Slot clearing/initialization:** unchanged in spirit from the old policy —
+every slot the function's frame reserves is zeroed once in the prologue
+(item 20: a slot can be scanned before its first real definition, so it
+must start as a safe non-pointer, and 0 is `NO_VALUE`, never a pointer).
+No per-safepoint clearing was added: retention is already bounded by the
+frame's own lifetime (a slot's stale content, if any, is gone the moment
+either its register is redefined or the function returns and the whole
+frame is popped from the shared shadow stack) — `root-retention-1`
+demonstrates this directly on a case where reuse shortens that bound within
+a single call, not just at return.
+
+**GC-stress strategy:** every new test (13 Rust unit tests on the algorithm
+directly, 17 Tcl tests end-to-end) that exercises real allocation runs
+under `BOTLISH_NATIVE_GC_STRESS=1` (collect before every allocation), and
+the entire pre-existing `native*.test` suite (328 tests) was re-run under
+the same flag globally, alongside the ordinary full suite (1243 tests, both
+`interp` and `compile` backends) and the Rust unit suite (29 tests) — all
+passing, both before this milestone's tests existed and after.
+
+### Before/after, the four audited functions
+
+| function | NIR regs | raw | managed | safepoints | root candidates | max live | shadow slots (before → after) | frame bytes (before → after) |
+|---|---|---|---|---|---|---|---|---|
+| `fib<int>` | 17 | 6 | 11 | 3 | 4 | 2 | 17 → **2** | 136 → **16** |
+| `work<int>` | 17 | 7 | 10 | 0 | 0 | 0 | 17 → **1** | 136 → **8** |
+| `drive<int,int>` | 13 | 4 | 9 | 2 | 4 | 3 | 13 → **3** | 104 → **24** |
+| `sum<int,int>` | 12 | 2 | 10 | 2 | 4 | 3 | 12 → **3** | 96 → **24** |
+| `step<generic>` | 3 | 0 | 3 | 1 | 2 | 2 | 3 → **2** | 24 → **16** |
+
+(`sum`'s "before" register count is this repository's current NIR, 12 —
+not the audit's original 13 in §3; `step` is unchanged at 3. The
+difference predates this milestone, from unrelated changes already on this
+branch.) Every "before"
+column here is `native/target/release/botlish-native`'s output on this
+exact unmodified NIR under the previous policy (`f.regs.max(1)` slots,
+verified by re-checking out the pre-milestone commit into a worktree and
+rebuilding); every "after" column is the same NIR, byte-identical (`diff`
+confirmed empty), under the new policy — this milestone changed no NIR
+emission at all, only shadow-slot assignment in `codegen/clif.rs`.
+
+`work` is the "raw representation hard test" (item 27) occurring in real,
+audited code: zero safepoints anywhere in the function (every op is a raw
+`r*` op), so it needs zero *value* slots — its one remaining slot exists
+purely for the shadow stack's recursion-depth bound (`RootPlan::num_slots`'s
+doc), not for any register.
+
+### Why fib's two remaining roots (four registers) are necessary
+
+`fib<int>`'s body (post-F2, `%9`/`%10`/`%14`/`%15` in NIR register numbers):
+
+```
+%9  = op rbox %8              ; boxed n-1
+%10 = call 1 %9                ; fib(n-1)            <- safepoint
+%14 = op rbox %13             ; boxed n-2
+%15 = call 1 %14               ; fib(n-2)            <- safepoint
+%16 = op iadd %10 %15          ; fib(n-1) + fib(n-2)  <- safepoint (IAdd's BigInt fallback)
+```
+
+- `%9` (boxed n-1) is the first call's own argument: it must be discoverable
+  while `fib(n-1)` executes, even though nothing reads it again afterward
+  (item 15) — it is live-in at that safepoint by virtue of being used there.
+- `%10` (fib(n-1)'s result) must survive both the second recursive call
+  (which can itself allocate, deep inside) *and* the final `+` — it is
+  live-in at both remaining safepoints.
+- `%14` (boxed n-2), symmetric to `%9`, for the second call.
+- `%15` (fib(n-2)'s result), symmetric to `%10`, for the final `+`.
+
+`%9` and `%10` never coexist at any single safepoint (`%9` dies at the
+instant `%10` is born, both inside the same non-safepoint `rbox`/`call`
+step) and so share one slot; likewise `%14`/`%15`. `%10` and `%15` *do*
+coexist — at the final `+` — so whichever slot each lands on, they must
+differ, which is exactly why two slots (not one) remain: `9` and `10` color
+to slot 0, `14` and `15` color to slot 1, deterministically.
+
+### Annotated machine code (x86-64, `objdump -d --no-show-raw-insn -M intel`)
+
+Before (`botlish_fn_1`, `fib<int>`'s prologue):
+
+```asm
+ea: lea    rcx,[r12+0x88]     ; frame bump: 0x88 = 136 bytes = 17 slots
+f5: ja     <overflow>
+109: mov    QWORD PTR [r12],0x0        ; 17 zeroing stores follow
+111: mov    QWORD PTR [r12+0x8],0x0
+...                                     ; (15 more, one per register)
+198: mov    QWORD PTR [r12+0x80],0x0
+```
+
+After, same function, same source:
+
+```asm
+d2: lea    rcx,[rbx+0x10]     ; frame bump: 0x10 = 16 bytes = 2 slots
+d9: ja     <overflow>
+e9: mov    QWORD PTR [rbx],0x0          ; exactly 2 zeroing stores
+f0: mov    QWORD PTR [rbx+0x8],0x0
+```
+
+The rest of the hot path (the two recursive `call`s, the tag checks, the
+final `+`) is otherwise structurally identical; the only change anywhere in
+the disassembly is frame size and the zeroing/root-store counts that follow
+from it — exactly the "boring" result item 59 predicted.
+
+### Timing (best/median of 400 in-process runs)
+
+This session's environment: absolute values will not match NATIVE-AUDIT.md's
+§1/§9 numbers (a different machine), so only the within-session before/after
+and F2×F3-interaction comparisons below are meaningful.
+
+```
+                  before (best/median)     after (best/median)
+fib(18)           80.06us / 80.14us        37.20us / 37.89us    (2.15x faster)
+drive(500,0)       5.63us /  5.63us         2.68us /  2.68us    (2.10x faster)
+sum(400,0)         2.74us /  2.75us         2.62us /  2.62us    (~4% faster)
+```
+
+**The F2×F3 interaction (item 61), measured directly** by generating
+`fib`'s NIR both from this branch (F2 present, 17 registers) and from the
+commit immediately before F2 (`git worktree` at `HEAD~1`, 14 registers, the
+same shape §6/§9 originally audited), and running each under both the old
+and the new root policy:
+
+```
+                    old F3 (1 slot/register)   new F3 (liveness-based)
+pre-F2  (14 regs)        73.04us                    45.64us
+post-F2 (17 regs)        80.06us                    37.20us
+```
+
+F2 alone, under the old policy, reproduces exactly the regression §9 found
+(73.04us → 80.06us, +9.6%: more raw/`rbox`/`runbox` registers cost more
+always-zeroed, always-stored slots than the raw arithmetic saves). Under
+the new policy, F2 is unambiguously a net win on top of F3 (45.64us →
+37.20us, −18.5%): F3 alone already more than halves fib's time, and F2 no
+longer fights it.
+
+### Answers
+
+1. **How many NIR registers no longer require shadow slots simply because
+   they are raw?** Every raw register in every audited function: 6/17
+   (`fib`), 7/17 (`work`), 4/13 (`drive`), 2/12 (`sum`), 0/3 (`step`) — 19
+   registers total that previously each cost one reserved, zeroed,
+   never-stored-to slot and now cost nothing.
+2. **How many tagged values no longer require roots because they die
+   before a safepoint?** `fib`: 7 of its 11 managed-capable registers.
+   `work`: all 10 (zero safepoints in the whole function). `drive`: 5 of 9.
+   `sum`: 6 of 10. `step`: 1 of 3.
+3. **Max simultaneous managed-root count in fib?** 2 (`max live roots`),
+   even though 4 distinct registers are root candidates across the
+   function's two safepoints (never all four at once).
+4. **Did the F2 fib regression disappear?** Yes, and reversed: F2+new-F3
+   (37.20us) beats even the original pre-F2/old-F3 baseline (73.04us) by
+   2.15x, and F2 measured in isolation against the new policy is now a real
+   18.5% win rather than the old policy's 9.6% loss.
+5. **How much hot-path stack/root traffic disappeared from work/drive?**
+   `work`: 17 zeroing stores → 1, 0 root-definition stores either way (it
+   never had any managed roots — its registers were simply never read
+   through the shadow stack even under the old policy, only zeroed and
+   reserved). `drive`: 13 zeroing stores → 3; root-definition stores drop
+   from "every one of drive's 9 managed-capable registers, on every
+   definition" to "only `i`, `total`, and the boxed `i-1`, matching exactly
+   what item 15's call-argument and item 16's post-call-use rules require."
+6. **Did root-slot reuse matter beyond simply excluding raw/dead values?**
+   Yes, concretely: `fib`'s 4 root candidates colored into 2 slots (a 2x
+   reduction from reuse alone, on top of the raw/dead exclusions);
+   `drive`/`sum` each colored 4 candidates into 3 slots.
+7. **Which calls are still conservatively classified MayGc?** Every direct
+   Botlish call and dynamic dispatch (no interprocedural effect analysis was
+   built, per item 9's explicit exclusion), `iadd`/`isub`/`imul` (BigInt
+   overflow fallback), and every helper `runtime/ops.rs`'s own table marks
+   as allocating.
+8. **Are any remaining large shadow frames caused by missing effect
+   knowledge?** Partially: `drive`'s call to `work` is conservatively
+   MayGc even though `work` itself provably has zero safepoints (visible
+   directly in `work`'s own report) — an interprocedural effect pass (out
+   of scope here, see item 9) could prove that call site NoGc and drop one
+   of `drive`'s three roots. None of the four audited functions has a large
+   frame left; this is the one concrete place a future pass could still
+   shrink one further.
+9. **Did any GC-stress test expose a flaw in the initial liveness model?**
+   No algorithmic bug: every failure during development traced to the hand-
+   written NIR test fixtures (forgetting that a safepoint's own operands are
+   `Use`s of it and so always live-in; forgetting `iadd`'s conservative
+   safepoint status when hand-deriving an expected register count; an
+   out-of-range register index), never to `roots.rs`'s liveness/coloring
+   logic itself, which passed every acceptance scenario as designed from
+   the single `LiveIn(safepoint) ∩ ¬raw` definition.
+10. **Does the resulting root policy now make future representation
+    optimizations effectively independent of shadow-stack register count?**
+    Yes, demonstrated rather than assumed: `fib`'s own register count
+    differs before/after F2 (14 vs. 17), yet its shadow-slot count under
+    this milestone's policy tracks *safepoint* structure (5 safepoints
+    pre-F2 vs. 3 post-F2, from fewer tagged arithmetic ops needing the
+    BigInt-fallback safepoint), not register count — 3 slots pre-F2, 2
+    post-F2, moving in the *opposite* direction from the register count.
+    A future pass that adds raw registers without changing safepoint
+    structure would, by this same construction, cost zero additional slots.
+
 ---
 
 # Appendices

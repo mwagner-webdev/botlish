@@ -58,6 +58,24 @@ use num_bigint::BigInt;
 use num_traits::Signed;
 use std::cmp::Ordering;
 
+/// Whether OP's runtime implementation may allocate (and so may trigger a
+/// collection): exactly the "allocates" column of the table above, in one
+/// place, so codegen::roots's safepoint classification (which Op instructions
+/// are GC safepoints) reads this instead of keeping its own copy of the same
+/// fact. `IAdd`/`ISub`/`IMul` are here because their fast (small-Int) path
+/// never allocates but their BigInt-overflow fallback (`rt_int_add` etc.)
+/// might; codegen has no cheaper way to tell the two paths apart from NIR
+/// alone, so the whole instruction is conservatively a safepoint (see
+/// codegen::roots's module doc).
+pub fn op_may_allocate(op: OpCode) -> bool {
+    use OpCode::*;
+    matches!(
+        op,
+        IAdd | ISub | IMul | Substr | DecodeCharAt | StrLower | StrCat | ListNew | ListAppend
+            | MutArrayAllocate | MutArrayFreeze | MkOk | MkError
+    )
+}
+
 pub type GenericEntry = extern "C" fn(*mut Vm, Value, *const Value) -> Value;
 
 fn vm<'a>(p: *mut Vm) -> &'a mut Vm {

@@ -20,6 +20,7 @@
 //! Self tail calls (NIR `tail`) rebind the parameter variables and jump back
 //! to the body block after the prologue: a CFG back edge, no call.
 
+use super::roots::{self, RootPlan};
 use super::{BackendError, Const, ConstPool, Site};
 use crate::nir::{self, Inst, OpCode, Reg};
 use crate::runtime::ops::helpers;
@@ -236,6 +237,11 @@ struct Translator<'a, 'b, M: Module> {
     /// (signature_n): `RetMulti` writes fields 1.. through it instead of
     /// returning them. None for an ordinary (`results <= 2`) function.
     result_buf: Option<ir::Value>,
+    /// Which shadow-stack slot (if any) each register needs: codegen::roots's
+    /// safepoint-liveness analysis, computed once per function before
+    /// translation begins. Replaces the old "one slot per register" policy
+    /// (see this file's header and `def`/`def_raw`).
+    plan: RootPlan,
 }
 
 impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
@@ -253,6 +259,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         let body = b.create_block();
         let error_exit = b.create_block();
         let placeholder = ir::Value::from_u32(0);
+        let plan = roots::plan(f);
         Translator {
             b,
             module,
@@ -271,6 +278,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             error_exit,
             refs: HashMap::new(),
             terminated: false,
+            plan,
             result_buf: None,
         }
     }
@@ -284,7 +292,14 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         self.vm = params[0];
 
         // Prologue: reserve and clear this frame's shadow-stack slots.
-        let slots = f.regs.max(1) as i64;
+        // `self.plan.num_slots` (codegen::roots), not `f.regs`: only
+        // registers that are both managed-capable and live across a GC
+        // safepoint get a slot at all, and two such registers share one
+        // when their safepoint-live ranges never overlap (see roots.rs's
+        // module doc). At least one slot always, regardless of rooting
+        // needs, so the shadow stack still bounds native recursion depth
+        // (see RootPlan::num_slots's doc).
+        let slots = self.plan.num_slots as i64;
         self.base = self.b.ins().load(I64, MemFlagsData::trusted(), self.vm, VM_SS_TOP_OFFSET);
         let top = self.b.ins().iadd_imm_s(self.base, slots * 8);
         let limit = self.b.ins().load(I64, MemFlagsData::trusted(), self.vm, VM_SS_LIMIT_OFFSET);
@@ -353,7 +368,16 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
 
     fn def(&mut self, reg: Reg, value: ir::Value) {
         self.b.def_var(self.vars[reg as usize], value);
-        self.b.ins().store(MemFlagsData::trusted(), value, self.base, (reg * 8) as i32);
+        // Only store when REG's root-liveness plan (codegen::roots) actually
+        // assigned it a shadow slot: a managed-capable register that is
+        // never live across a GC safepoint needs no root at all (see
+        // roots.rs's module doc, items 3 and 6 of this milestone's brief) --
+        // its value only ever needs to exist in this Cranelift variable, and
+        // Cranelift's own register allocator is responsible for that, not
+        // the shadow stack.
+        if let Some(slot) = self.plan.slot_of[reg as usize] {
+            self.b.ins().store(MemFlagsData::trusted(), value, self.base, (slot * 8) as i32);
+        }
     }
 
     /// Like `def`, for a register that holds a raw (untagged) machine

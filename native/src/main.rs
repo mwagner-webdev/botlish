@@ -5,6 +5,13 @@
 //!   botlish-native bench RUNS FILE.nir   compile once, run RUNS times
 //!   botlish-native clif FILE.nir         print the Cranelift IR of every function
 //!   botlish-native size FILE.nir         compile; print machine code sizes
+//!   botlish-native roots FILE.nir        print each function's GC-root report
+//!                                        (codegen::roots): NIR/raw/managed
+//!                                        register counts, safepoints, root
+//!                                        candidates, max simultaneous live
+//!                                        roots, and the shadow-slot count
+//!                                        they were colored into. Parses and
+//!                                        analyzes only -- never compiles.
 //!   botlish-native object OUT FILE.nir   write an object file (AOT smoke test)
 //!   botlish-native check FILE.nir        parse and validate only
 //! ```
@@ -102,7 +109,7 @@ fn extract_alloc_mode(args: &[String]) -> Option<(Vec<String>, AllocMode)> {
 
 fn cli(args: &[String]) -> i32 {
     let usage = || {
-        eprintln!("usage: botlish-native run|clif|size|check FILE.nir [--alloc off|summary|sites] | bench RUNS FILE.nir [--alloc ...] | object OUT FILE.nir");
+        eprintln!("usage: botlish-native run|clif|size|roots|check FILE.nir [--alloc off|summary|sites] | bench RUNS FILE.nir [--alloc ...] | object OUT FILE.nir");
         2
     };
     let Some((args, alloc_mode)) = extract_alloc_mode(args) else { return usage() };
@@ -117,7 +124,7 @@ fn cli(args: &[String]) -> i32 {
             _ => return usage(),
         },
         ("object", [_, file, ..]) => (1, file),
-        ("run" | "clif" | "size" | "check", [file, ..]) => (1, file),
+        ("run" | "clif" | "size" | "roots" | "check", [file, ..]) => (1, file),
         _ => return usage(),
     };
     let text = match read(file) {
@@ -137,6 +144,10 @@ fn cli(args: &[String]) -> i32 {
     match command {
         "check" => {
             emit("ok");
+            0
+        }
+        "roots" => {
+            emit(&codegen::roots::report(&program));
             0
         }
         "object" => {

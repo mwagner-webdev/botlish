@@ -17,6 +17,9 @@
 #                     ExprId (cross-reference against hir.txt's e<N> ids)
 #   nir.txt           native::nir: the NIR every instance lowers to
 #   clif.txt          native::clif: the Cranelift IR of every function
+#   roots.txt         native::roots: codegen::roots's per-function GC-root
+#                     report (register/safepoint/root-candidate counts and
+#                     the resulting shadow-slot count)
 #   program.nir       nir.txt's text again, as a standalone file the Rust
 #                     driver (native/target/release/botlish-native) can
 #                     take directly: `botlish-native clif|size|object|bench
@@ -92,6 +95,12 @@ if {[catch {native::clif $hir} clifText]} {
     W $outdir clif.txt "ERROR: $clifText"
 } else {
     W $outdir clif.txt $clifText
+}
+
+if {[catch {native::roots $hir} rootsText]} {
+    W $outdir roots.txt "ERROR: $rootsText"
+} else {
+    W $outdir roots.txt $rootsText
 }
 
 puts "wrote $outdir"

@@ -13,6 +13,7 @@
 //! program means.
 
 pub mod clif;
+pub mod roots;
 
 use crate::nir::{FuncId, Program};
 use crate::runtime::heap::object_size;

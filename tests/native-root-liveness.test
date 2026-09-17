@@ -1,0 +1,264 @@
+# native-root-liveness.test -- GC-root liveness (native/src/codegen/roots.rs):
+# shadow-stack slots are allocated by safepoint-live-range interference, not
+# one slot per NIR register (see native/src/codegen/clif.rs's header and
+# roots.rs's module doc). Two kinds of coverage:
+#
+#   * structural: the four native-audit programs' (fib, work/drive,
+#     sum/step) real shadow-slot counts, via `native::roots`, well below the
+#     old one-slot-per-register policy
+#   * adversarial: hand-written NIR text (bypassing HIR/lower.tcl entirely,
+#     for exact control over register/safepoint shape) exercising each
+#     acceptance scenario directly, run under BOTLISH_NATIVE_GC_STRESS=1 so
+#     an under-rooted value would actually be collected out from under a
+#     live register, not just silently tolerated by a collector that never
+#     runs.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+proc sourceHir {text} {
+    return [surface::compile $text t.bot -strict 0]
+}
+
+# The HIR of a bench/*.ir file (core IR s-expression text, not Botlish
+# surface syntax -- see native/explain-native.tcl, which loads bench
+# files the same way).
+proc sourceIrHir {path} {
+    return [hir::build [core::loadProgramFile $path] -strict 0]
+}
+
+# Runs raw NIR text TEXT directly (bypassing HIR/lower.tcl): {value V} or
+# {error CODE MESSAGE} (native::Outcome throws on error rather than
+# returning one, so this wraps it the way native.test's own `outcomeUnder`
+# pattern does).
+proc runNir {text args} {
+    set lines [native::Driver run $text {*}$args]
+    if {[catch {native::Outcome $lines} result options]} {
+        return [list error [dict get $options -errorcode] $result]
+    }
+    return [list value $result]
+}
+
+# TEXT's allocation report (native::allocationReport, but for raw NIR text
+# rather than an HIR program).
+proc allocReportOfNir {text} {
+    set lines [native::Driver run $text --alloc summary]
+    set line [lsearch -inline $lines {alloc *}]
+    native::Outcome $lines
+    return [lrange $line 1 end]
+}
+
+# TEXT's native::roots report (bypassing HIR/lower.tcl).
+proc rootsOfNir {text} {
+    return [join [native::Driver roots $text] \n]
+}
+
+# The block of a `native::roots`-style report REPORT for function NAME.
+# (`split $report "\n\n"` would split on every single newline, since Tcl's
+# split treats its second argument as a set of delimiter characters, not a
+# delimiter string -- map the blank-line separator to a single marker char
+# first.)
+proc rootsBlock {report name} {
+    foreach block [split [string map [list "\n\n" "\x01"] $report] "\x01"] {
+        if {[regexp "function \\d+ \"$name\"" $block]} {
+            return $block
+        }
+    }
+    error "no function named \"$name\" found in:\n$report"
+}
+
+proc slotsOf {report name} {
+    regexp {shadow slots: (\d+)} [rootsBlock $report $name] -> n
+    return $n
+}
+
+proc regsOf {report name} {
+    regexp {NIR regs: (\d+)} [rootsBlock $report $name] -> n
+    return $n
+}
+
+proc candidatesOf {report name} {
+    regexp {root candidates: (\d+)} [rootsBlock $report $name] -> n
+    return $n
+}
+
+proc safepointsOf {report name} {
+    regexp {safepoints: (\d+)} [rootsBlock $report $name] -> n
+    return $n
+}
+
+# Runs BODY under BOTLISH_NATIVE_GC_STRESS=1 (collect before every
+# allocation), restoring the environment afterward regardless of outcome.
+proc underGcStress {body} {
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        uplevel 1 $body
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+}
+
+set nirHeader "nir 1\n\n"
+
+# ---------------------------------------------------------------------------
+# Structural: the audit's four programs, well below the old policy (one slot
+# per NIR register -- 17, 17, 13, 12/3 respectively; see NATIVE-AUDIT.md).
+
+test root-structural-1 {fib<int>: far fewer shadow slots than its 17 NIR registers} -body {
+    set report [native::roots [sourceIrHir [file join $::projectRoot bench fib.ir]]]
+    list [regsOf $report fib] [expr {[slotsOf $report fib] < 17}] [expr {[slotsOf $report fib] <= 4}]
+} -result {17 1 1}
+
+test root-structural-2 {loop-count: work (no safepoint) needs no value slots; drive needs far fewer than 13} -body {
+    set report [native::roots [sourceIrHir [file join $::projectRoot bench loop-count.ir]]]
+    list [regsOf $report work] [safepointsOf $report work] [slotsOf $report work] \
+        [regsOf $report drive] [expr {[slotsOf $report drive] < 13}]
+} -result {17 0 1 13 1}
+
+test root-structural-3 {sum-refined: sum and step both need far fewer slots than their register counts} -body {
+    set report [native::roots [sourceIrHir [file join $::projectRoot bench sum-refined.ir]]]
+    list [expr {[slotsOf $report sum] < [regsOf $report sum]}] [expr {[slotsOf $report step] < [regsOf $report step]}]
+} -result {1 1}
+
+test root-structural-4 {F1 (closure virtualization) remains intact: sum-refined still has zero closures} -body {
+    set hir [sourceIrHir [file join $::projectRoot bench sum-refined.ir]]
+    dict get [native::allocationReport $hir summary 1] byKind Block allocations
+} -result 0
+
+# ---------------------------------------------------------------------------
+# #27: raw-only values need zero root slots.
+
+test root-raw-1 {a function with only raw temporaries needs zero value slots} -body {
+    set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=4 pnames=\"\" captures=0 rawregs=\"0 1 2\"\n    %0 = rawint 3\n    %1 = rawint 4\n    %2 = op riadd %0 %1\n    %3 = op rbox %2\n    ret %3\nend\n"
+    set report [rootsOfNir $text]
+    list [runNir $text] [candidatesOf $report "<program>"] [slotsOf $report "<program>"]
+} -result {{value {int 7}} 0 1}
+
+# ---------------------------------------------------------------------------
+# #28: tagged values that die before any safepoint need no slot. There is no
+# allocation at all here (imod's helper never allocates), so this also
+# demonstrates "no safepoint" directly: nothing to root, nothing that could
+# possibly collect.
+
+test root-dead-before-safepoint-1 {tagged values with no safepoint in the function need no slot} -body {
+    set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=3 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = int 7\n    %1 = int 2\n    %2 = op imod %0 %1\n    ret %2\nend\n"
+    set report [rootsOfNir $text]
+    list [underGcStress {runNir $text}] [safepointsOf $report "<program>"] [candidatesOf $report "<program>"]
+} -result {{value {int 1}} 0 0}
+
+# ---------------------------------------------------------------------------
+# #29: a managed value live across a real allocation must survive GC stress
+# (collect before every allocation).
+
+test root-live-across-gc-1 {a value live across a real allocation survives GC stress} -body {
+    set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=3 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = str \"kept\"\n    %1 = cell\n    %2 = op streq %0 %0\n    ret %2\nend\n"
+    underGcStress {runNir $text}
+} -result {value {bool true}}
+
+# ---------------------------------------------------------------------------
+# #46: a dead root is not artificially retained forever merely because its
+# slot is reused later. %2 (dynamic String "ab") is rooted across the first
+# cell allocation (needed again right after, by the streq), then dies; %7
+# (dynamic String "cd") is defined only afterward and, per root-reuse-1's
+# structural shape, shares %2's slot (they never coexist at any safepoint).
+# By the second cell allocation, %2's slot has been overwritten by %7, so
+# "ab" has no root left anywhere and is reclaimed then -- not held for the
+# rest of the function merely because its old slot still physically exists.
+
+test root-retention-1 {a rooted value's object is reclaimed once its slot is reused for an unrelated later root} -body {
+    set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=10 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = str \"a\"\n    %1 = str \"b\"\n    %2 = op strcat %0 %1\n    %3 = cell\n    %4 = op streq %2 %2\n    %5 = str \"c\"\n    %6 = str \"d\"\n    %7 = op strcat %5 %6\n    %8 = cell\n    %9 = op streq %7 %7\n    ret %9\nend\n"
+    set report [rootsOfNir $text]
+    set allocReport [underGcStress {allocReportOfNir $text}]
+    list [slotsOf $report "<program>"] [dict get $allocReport byKind String reclaimedObjects] \
+        [dict get $allocReport byKind String currentLiveObjects]
+} -result {2 1 1}
+
+# ---------------------------------------------------------------------------
+# #30: two values simultaneously live across a safepoint get distinct slots,
+# and both survive GC stress correctly.
+
+test root-two-roots-1 {two simultaneously live roots survive GC stress and never share a slot} -body {
+    set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=4 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = str \"a\"\n    %1 = str \"b\"\n    %2 = cell\n    %3 = op streq %0 %1\n    ret %3\nend\n"
+    set report [rootsOfNir $text]
+    list [underGcStress {runNir $text}] [slotsOf $report "<program>"]
+} -result {{value {bool false}} 2}
+
+# ---------------------------------------------------------------------------
+# #31: non-overlapping safepoint-live roots reuse one slot (the fundamental
+# slot-reuse case), and still produce the right value under stress.
+
+test root-reuse-1 {non-overlapping roots reuse a slot, correctly, under GC stress} -body {
+    set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=6 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = str \"a\"\n    %1 = str \"z\"\n    %2 = op strcat %0 %1\n    %3 = str \"b\"\n    %4 = str \"c\"\n    %5 = op strcat %3 %4\n    ret %5\nend\n"
+    set report [rootsOfNir $text]
+    list [underGcStress {runNir $text}] [expr {[slotsOf $report "<program>"] < [candidatesOf $report "<program>"]}]
+} -result {{value {str bc}} 1}
+
+# ---------------------------------------------------------------------------
+# #32: branches that each need their own root, never simultaneously, may
+# reuse one slot -- checked on both branches, under stress.
+
+test root-branch-1 {branch-local roots on either side survive stress and may share a slot} -body {
+    set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=4 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = bool true\n    br %0 L0 L1\n  label L0\n    %1 = str \"yes\"\n    %2 = op strcat %1 %1\n    jump L2\n  label L1\n    %3 = str \"no\"\n    %2 = op strcat %3 %3\n    jump L2\n  label L2\n    ret %2\nend\n"
+    underGcStress {runNir $text}
+} -result {value {str yesyes}}
+
+# ---------------------------------------------------------------------------
+# #33: a value carried across a loop containing a real allocation stays
+# rooted for every iteration under GC stress (the harshest test: every
+# single iteration collects first).
+
+test root-loop-carried-1 {a value carried across many loop iterations, each allocating, survives GC stress} -body {
+    set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=2 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = str \"\"\n    %1 = call 1 %0\n    ret %1\nend\nfunc 1 \"loop\" params=1 env=0 regs=6 pnames=\"acc\" captures=0 rawregs=\"\"\n  label L0\n    %1 = op strlen %0\n    %2 = int 20\n    %3 = op ilt %1 %2\n    br %3 L1 L2\n  label L1\n    %4 = str \"x\"\n    %5 = op strcat %0 %4\n    tail %5\n  label L2\n    ret %0\nend\n"
+    underGcStress {runNir $text}
+} -result {value {str xxxxxxxxxxxxxxxxxxxx}}
+
+# ---------------------------------------------------------------------------
+# #34: a value live only on the success path is not affected by, and does
+# not affect, an unrelated error-terminating path, under stress.
+
+test root-error-path-1 {a value used only on the success path is rooted there and produces the right result} -body {
+    set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=2 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = str \"hi\"\n    %1 = call 1 %0\n    ret %1\nend\nfunc 1 \"f\" params=1 env=0 regs=3 pnames=\"x\" captures=0 rawregs=\"\"\n    %1 = bool true\n    br %1 L0 L1\n  label L0\n    %2 = op strcat %0 %0\n    ret %2\n  label L1\n    raise BUG \"unreachable\"\nend\n"
+    underGcStress {runNir $text}
+} -result {value {str hihi}}
+
+test root-error-path-2 {a real error path (raise) still runs correctly, and reports the error, under stress} -body {
+    set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=1 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = call 1\n    ret %0\nend\nfunc 1 \"f\" params=0 env=0 regs=2 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = str \"a\"\n    %1 = op strcat %0 %0\n    raise ARITHMETIC \"boom\"\nend\n"
+    underGcStress {runNir $text}
+} -result {error {CORE SEMANTIC ARITHMETIC} boom}
+
+# ---------------------------------------------------------------------------
+# Determinism (#49): repeated `native::roots` calls on the same program
+# agree exactly (same text in, same report out).
+
+test root-deterministic-1 {native::roots is deterministic across repeated calls} -body {
+    set hir [sourceIrHir [file join $::projectRoot bench fib.ir]]
+    expr {[native::roots $hir] eq [native::roots $hir]}
+} -result 1
+
+# ---------------------------------------------------------------------------
+# Interaction with captured managed values through a virtual (non-escaping)
+# Block direct call (F1): confirms the captured value remains correctly
+# usable, with the F1 escape optimization still active (zero Block
+# allocations), now that F3 no longer roots every register unconditionally.
+
+test root-block-capture-1 {a captured managed value through a virtualized Block call is correct under stress} -body {
+    set text "fn f(n):\n    fn step(x):\n        x + n\n    step(10)\n\nf(5)"
+    underGcStress {
+        list [native::evalHir [sourceHir $text]] \
+            [dict get [native::allocationReport [sourceHir $text] summary 1] byKind Block allocations]
+    }
+} -result {{int 15} 0}
+
+# ---------------------------------------------------------------------------
+# StringRegion base across a real allocation (#37): the base String must
+# stay rooted; its raw/tagged-but-nonmanaged bounds cost no slot of their
+# own (whether they need one at all is native/lower.tcl's representation
+# analysis's call, unchanged by this milestone -- see roots.rs's module
+# doc: it only ever respects an existing `rawregs=` declaration).
+
+test root-string-region-1 {a StringRegion's base survives an allocation between its creation and use, under stress} -body {
+    set text "fn f(s):\n    r = substring(s, 1, 4)\n    junk = concat(\"pad\", \"ding\")\n    concat(r, junk)\n\nf(\"abcdef\")"
+    underGcStress {native::evalHir [sourceHir $text]}
+} -result {str bcdpadding}
+
+cleanupTests

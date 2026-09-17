@@ -158,6 +158,18 @@ proc native::clif {hir args} {
     return [join $lines \n]
 }
 
+# The GC-root report of every NIR function of the program-mode HIR program
+# HIR (codegen::roots's per-function diagnostics: register counts,
+# safepoints, root candidates, max simultaneous live roots, shadow slots).
+# Never compiles: parses and analyzes the NIR only.
+proc native::roots {hir args} {
+    set lines [Driver roots [nir $hir {*}$args]]
+    if {[regexp {^error } [lindex $lines 0]]} {
+        Outcome $lines
+    }
+    return [join $lines \n]
+}
+
 proc native::measure {hir runs args} {
     set lower [lindex [time {set text [nir $hir {*}$args]}] 0]
     set lines [Driver bench $text $runs]
