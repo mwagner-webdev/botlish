@@ -42,6 +42,20 @@ proc paramRanges {analysis id} {
     return [lmap p [dict get [dict get $analysis instances $id] params] {hir::range::show $p}]
 }
 
+# The Range hir/induction.tcl itself proved (not the eventual, possibly
+# further-joined, range analysis fact) for instance ID's parameter INDEX,
+# or "" if it proved nothing there -- the more direct check for whether a
+# nested/negative shape actually minted (or correctly declined) an
+# induction fact, independent of how the ordinary fixpoint happens to
+# settle a parameter this module never touched.
+proc inductionOf {analysis id index} {
+    set r [hir::induction::of [dict get $analysis induction] $id $index]
+    if {$r eq ""} {
+        return ""
+    }
+    return [hir::range::show $r]
+}
+
 # Instance ID's block's parameter binding named NAME.
 proc paramBinding {hir spec id name} {
     set block [dict get [dict get $spec instances $id] block]
@@ -206,6 +220,69 @@ test range-induction-4 {an opaque, call-derived next value (csv's scan_records s
     lassign [paramRanges $analysis $id] textR indexR countR
     list $indexR [hir::range::fitsSmall [lindex [dict get [dict get $analysis instances $id] params] 1]]
 } -result {{[-∞, +∞]} 0}
+
+# ---------------------------------------------------------------------------
+# hir/induction.tcl: nested guard recognition (the milestone that lifted
+# Guard's own top-level-body-list restriction so it can follow structurally
+# simple wrapper `if`s -- sum-refined.ir's own motivating shape, spec #3,
+# #16, #28-#35).
+
+test range-induction-nested-1 {a single harmless wrapper (an unrelated `if ok`) around the classic guard, with the guard's own `else` -- not a sibling after an elseless `if` -- as the recursive continuation: sum-refined's own shape, minimized} -body {
+    lassign [rangeOf "fn f(n, ok):\n    if ok:\n        if n == 0:\n            0\n        else:\n            f(n - 1, ok)\n    else:\n        1\n\nf(5, true)"] hir spec analysis
+    paramRanges $analysis [rangeInstance $spec f]
+} -result {{[0, 5]} {[-∞, +∞]}}
+
+test range-induction-nested-2 {two harmless wrappers stacked, each with its own unrelated condition, and each with something else entirely in its own dead branch} -body {
+    lassign [rangeOf "fn f(n, a, b):\n    if a:\n        if b:\n            if n == 0:\n                0\n            else:\n                f(n - 1, a, b)\n        else:\n            2\n    else:\n        1\n\nf(5, true, true)"] hir spec analysis
+    paramRanges $analysis [rangeInstance $spec f]
+} -result {{[0, 5]} {[-∞, +∞]} {[-∞, +∞]}}
+
+test range-induction-nested-3 {a wrapper whose dead branch raises an error rather than returning a plain value: Botlish's own semantic-completion classification (#15), not "return/break/continue" alone, decides what a branch may safely do without being on the recursive path} -body {
+    lassign [rangeOf "fn f(n, ok):\n    if ok:\n        if n == 0:\n            0\n        else:\n            f(n - 1, ok)\n    else:\n        error(\"bad\")\n\nf(5, true)"] hir spec analysis
+    paramRanges $analysis [rangeInstance $spec f]
+} -result {{[0, 5]} {[-∞, +∞]}}
+
+test range-induction-nested-4 {a wrapper whose own condition is a literal `true`: the dominance argument is purely structural (which single branch the calls are in), so a syntactically trivial wrapper needs no separate "known outcome" consultation to be looked through} -body {
+    lassign [rangeOf "fn f(n):\n    if true:\n        if n == 0:\n            0\n        else:\n            f(n - 1)\n    else:\n        1\n\nf(5)"] hir spec analysis
+    paramRanges $analysis [rangeInstance $spec f]
+} -result {{[0, 5]}}
+
+test range-induction-toplevel-else {a *new* top-level shape this milestone also covers: an `if`/`else` guard at the instance's own top level (no sibling code, no wrapper at all) whose `else` -- not trailing statements after an elseless `if` -- is the recursive continuation} -body {
+    lassign [rangeOf "fn count_up2(n, acc):\n    if n == 0:\n        acc\n    else:\n        count_up2(n - 1, acc + 1)\n\ncount_up2(1000, 0)"] hir spec analysis
+    paramRanges $analysis [rangeInstance $spec count_up2]
+} -result {{[0, 1000]} {[0, +∞]}}
+
+test range-induction-sum-refined {the actual acceptance benchmark (bench/sum-refined.ir): n's == 0 termination guard is nested one level beneath the semantically necessary outer `integer? acc` refinement guard, and is now recognized (was [-∞, 400] before this milestone -- see NATIVE-AUDIT.md's own F2 finding)} -body {
+    set program [core::loadProgramFile [file join $::projectRoot bench sum-refined.ir]]
+    set hir [hir::build $program -strict 0]
+    set spec [hir::specialize::analyze $hir]
+    set analysis [hir::range::analyze $hir $spec]
+    paramRanges $analysis [rangeInstance $spec sum]
+} -result {{[0, 400]} {[-∞, +∞]}}
+
+test range-induction-nondominating {spec #28: the nested `== 0` guard does not govern every recursive path -- the self-tail call is a sibling of the *outer* `if flag`, reachable whether or not that inner guard ever ran -- so no induction fact is minted for n at all} -body {
+    lassign [rangeOf "fn f(n, flag):\n    if flag:\n        if n == 0:\n            0\n    f(n - 1, flag)\n\nf(5, true)"] hir spec analysis
+    set id [rangeInstance $spec f]
+    inductionOf $analysis $id 0
+} -result {}
+
+test range-induction-shadowed {spec #29: a fresh local shadows the outer parameter's name before both the `== 0` guard and the self-tail call's own argument -- a distinct BindingId throughout (resolved and compared as such, never by name), so the call's argument no longer references the real parameter at all, ClassifyParam already calls it "other", and no induction fact is minted for it} -body {
+    lassign [rangeOf "fn f(n, ok):\n    if ok:\n        n = 9\n        if n == 0:\n            0\n        else:\n            f(n - 1, ok)\n    else:\n        1\n\nf(5, true)"] hir spec analysis
+    set id [rangeInstance $spec f]
+    inductionOf $analysis $id 0
+} -result {}
+
+test range-induction-alternate-path {spec #30-#31: one self-tail call decrements n, but a second, reachable on an alternate path, passes n unchanged -- ClassifyParam already disagrees between the two call sites, so Guard is never even asked, and no induction fact is minted} -body {
+    lassign [rangeOf "fn f(n, guard):\n    if guard:\n        if n == 0:\n            0\n        else:\n            f(n - 1)\n    else:\n        f(n)\n\nf(5, true)"] hir spec analysis
+    set id [rangeInstance $spec f]
+    inductionOf $analysis $id 0
+} -result {}
+
+test range-induction-ambiguous-guards {spec #31: two structurally independent copies of the same otherwise-provable guard, one per branch of an outer, unrelated condition -- both branches reach a self-tail call, so no single branch can be said to govern every recursive path, and this module declines rather than combine them} -body {
+    lassign [rangeOf "fn f(n, flag):\n    if flag:\n        if n == 0:\n            0\n        else:\n            f(n - 1, flag)\n    else:\n        if n == 0:\n            0\n        else:\n            f(n - 1, flag)\n\nf(5, true)"] hir spec analysis
+    set id [rangeInstance $spec f]
+    inductionOf $analysis $id 0
+} -result {}
 
 # ---------------------------------------------------------------------------
 # Parameter branch narrowing (this milestone's Part A): the same

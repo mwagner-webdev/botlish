@@ -1106,6 +1106,364 @@ longer fights it.
 
 ---
 
+## 11. Follow-up milestone: nested induction guard recognition
+
+This milestone implemented the "next worthwhile milestone" §9's item 10
+named as lower-risk and narrower in scope than F3: lifting
+`hir::induction::Guard`'s restriction to an instance's own top-level body
+list, so it can follow structurally simple nested control flow. It targets
+exactly the gap §7's F2 finding and §9 item 9 identified in advance:
+`sum-refined.ir`'s own `n == 0` termination guard, nested one level beneath
+the semantically necessary `integer? acc` refinement, which
+`hir::induction` previously never saw at all.
+
+**Files changed:** `hir/induction.tcl` (the traversal itself, plus new
+`guard`/`explain` diagnostics), `native/explain-native.tcl` (a new
+`induction.txt` output wired to `hir::induction::explain`),
+`tests/hir-range.test` (ten new regression tests). No other file changed:
+per spec #21, #23-#25, #27, this stays entirely inside the proof layer —
+`hir/range.tcl`'s consumption of induction's facts (`of`/`monotone`),
+`native/lower.tcl`'s representation lowering, and
+`native/src/codegen/roots.rs`'s GC-root policy are all untouched, and all
+three are exercised, not merely assumed, by the evidence below.
+
+### Old vs. new discovery strategy
+
+**Old:** `Guard` scanned exactly `hir::get $hir $block body` — the
+instance's own top-level statement list — once, for one shape: an elseless
+`if p == B` whose `return`/`break`/`continue`-terminated true branch is
+immediately followed, as literal top-level siblings, by every one of `p`'s
+self-tail calls. `sum-refined`'s guard fails this on two independent
+counts: it is nested inside `integer? acc`'s own then-branch, not at the
+instance's top level, and it is a full `if`/`else` (a bare trailing value
+`acc` in the true branch, the recursive `sum(n - 1, step(acc))` in an
+explicit `else`) — never a `return` followed by trailing siblings.
+
+**New:** `Guard` is now a small bounded-depth recursive traversal
+(`maxNestingDepth = 16`) tried at every body it descends into. At each
+body it first retries the *exact* old top-level pattern unchanged (so
+every previously-recognized shape is found the same way, at the same
+recursion depth 0, with the same result). If that does not match, it looks
+for the *new* shape this milestone adds — an `if`/`else` guard whose
+`else` (not trailing siblings) is the continuation — either directly, or
+one level beneath a *harmless wrapper*: an unrelated `if` where exactly
+one branch structurally reaches any of the parameter's self-tail calls at
+all, which it recurses into. Both the sibling-code guard and the
+`else`-guard shapes are tried at *every* depth reached this way, so
+`sum-refined`'s outer `integer? acc` wrapper is peeled once (depth 0 → 1)
+and the `n == 0`/`else` guard is then found directly at depth 1.
+
+### Proof conditions (unchanged in spirit, generalized in scope)
+
+- **Equality only**, `p == B` / `B == p` (`EqualityBound`, factored out of
+  the old inline check, otherwise byte-for-byte the same comparison).
+- **Step exactly ±1** (`ClassifyParam`/`ClassifyArg`, untouched).
+- **Coverage is always literal**, never approximate: whichever body a
+  guard's continuing side names (trailing siblings for the elseless form,
+  the `else` body for the new form) must contain every one of the
+  parameter's self-tail calls as an actual list member (`CoversAll`) — the
+  same check the old code always made, now also asked of an `else` body.
+- **Termination** (`TerminatingBranch`) now also accepts Botlish's `error`
+  completion (spec #15 names it explicitly; the old set was
+  `return`/`break`/`continue` only) and, only when there is no sibling
+  code after the guard to protect (`after eq ""`), any ordinary value
+  completion — exactly `sum-refined`'s own `if n == 0: acc` shape. An
+  `else`-guard needs no `TerminatingBranch` call at all: its two branches
+  are alternatives of the same `if`, never sequential, so nothing can fall
+  from one into the other regardless of how either completes.
+
+### How every recursive path is proven to pass through the guard
+
+Dominance is established structurally, not by a general CFG framework.
+`Guard` never accepts a wrapper unless exactly one of its two branches
+reaches any of the parameter's self-tail calls at all (`Reaches`/
+`AnyReaches`, an ordinary "does this subtree mention one of these
+expression ids" search that stops at a nested `block`'s own body — a
+different invocation). The *other* branch, proven to reach none of them,
+needs no further look, whatever it computes or however it completes
+(`error(...)`, an unrelated value, anything: spec #14). Two branches that
+both reach a call, or none where exactly one was expected, and `Guard`
+returns `""` rather than guess — this is exactly how the non-dominating
+shape (`range-induction-nondominating`) and the two ambiguous shapes
+(`range-induction-alternate-path`, `range-induction-ambiguous-guards`) are
+rejected: no special-case code for any of them, just the same "exactly one
+live branch" check failing to hold.
+
+### Binding identity and shadowing
+
+Every comparison (`IsRefTo`, `EqualityBound`, `ClassifyArg`) is against
+the candidate parameter's resolved `BindingId`, never a name, at every
+recursion depth — this did not need to change, since it was already true
+of the old code, and it is what makes shadowing safe with no separate
+check: `range-induction-shadowed`'s nested `n = 9` creates a distinct
+`BindingId`, so the self-tail call's own argument (which, after the
+rebind, resolves to that new binding) no longer references the real
+parameter at all, and `ClassifyParam` already calls it `other` before
+`Guard` is ever invoked for that parameter.
+
+### Fallback
+
+Every new branch point in `Guard` — the nesting-depth cap, "no candidate
+statement", "more than one candidate statement", "candidate is not an
+`if`", "both or neither branch is live", an `else`-guard whose condition
+does not name `p` or whose `else` does not literally cover every call —
+returns `""` (no proof), never a guess. A missed proof is silently exactly
+as sound as before this milestone (`hir/range.tcl`'s own ordinary and
+narrowing-aware analysis is unaffected either way); nothing here can mint
+a false induction fact.
+
+### Diagnostics
+
+`hir::induction::guard`/`explain` (new) expose, per attempted parameter,
+the guard's own condition expression and its nesting depth, the recursive
+update expression, and the resulting Range — or, when nothing was proven,
+`reason`'s own explanation, unchanged. `native/explain-native.tcl` now
+writes `induction.txt`. For `sum-refined.ir`:
+
+```
+sum<int, int>
+  induction parameter: n (param 0)
+    termination guard: e8 (n == 0)
+    guard nesting depth: 1
+    recursive update: e21 (n - 1)
+    result: bounded decreasing induction [0, 400]
+```
+
+`loop-count.ir`'s `drive<int, int>` — whose bound comes from ordinary
+`<=` comparison narrowing, not equality termination, both before and
+after this milestone — correctly still reports `not proven (unsupported
+relational form)`, distinguishing "this module has nothing to say" from
+"nothing proved n's range at all".
+
+### sum-refined: before/after facts
+
+`n`'s own range (`range-params.txt`/`range-exprs.txt`, `e<N>` ids
+cross-referenced against `hir.txt`):
+
+```
+                                BEFORE           AFTER
+entry n (param 0)               [-∞, 400]        [0, 400]
+n ref at the == 0 guard (e10)   [-∞, 400]        [0, 400]
+n ref on the recursive/         [-∞, 400]        [1, 400]
+  else path (e23, step's capture)
+n - 1 (e21)                     [-∞, 399]        [0, 399]
+```
+
+`acc` (param 1), `step<generic>`'s own parameter `x`, and `step`'s result
+are unchanged — still fully unknown end to end, exactly as spec #49/#8
+(§9 item 8) predicted: both depend on a callee's *return* range
+(`step`'s own result feeding `acc` forward), which no induction or range
+milestone has ever tracked, and this one does not either.
+
+### NIR
+
+```
+                          BEFORE                        AFTER
+n == 0                    op ieq %0 %4                  op rieq %0 %5     (raw compare)
+n - 1                     op isub %0 %8                 op risub %0 %10   (raw subtract)
+step(acc) call arg n      %0 (already tagged)            op rbox %0 → %8  (boxed back: step
+                                                                            stays generic/tagged,
+                                                                            spec #50, untouched)
+```
+
+`sum<int, int>`: `regs=12 rawregs="5 9"` → `regs=13 rawregs="0 5 10 11"` (n
+itself, register 0, becomes raw; the extra register is the one `rbox`).
+`step<generic>`'s own NIR (3 registers, no `rawregs` at all) is
+byte-for-byte unchanged — confirmed by `diff`, not assumed.
+
+### Machine code (`objdump -d --no-show-raw-insn -M intel`, whole object)
+
+Object size: 3560 → 3320 bytes. `sum`'s own compiled body: 107 → 65
+disassembled lines, tag-test/overflow-check instructions (`test`/`seto`)
+6 → 2 (the two that remain are `x`'s own representation-required kind
+guard inside `step`, and the closure-argument tag check that pattern still
+needs), `call` instructions 4 → 2 (the runtime helper call the tagged
+`n == 0` comparison's BigInt-fallback dispatch needed is gone entirely;
+the cold `error(...)` path's own call and the real call to `step` remain).
+
+Before, the hot compare (tagged, with its runtime-helper slow path):
+
+```asm
+12c: test   rbx,0x1                 ; small-int tag test
+133: jne    162                     ; fast path
+139: mov    edx,0x1
+13e: mov    rax,[rip+0x0]           ; rt_int_cmp-class helper
+...
+14b: call   rax                     ; <- runtime call, every iteration's slow-path dispatch
+...
+173: cmp    rcx,0x6
+177: je     218                     ; == 0 → return acc
+```
+
+After, the same comparison, raw:
+
+```asm
+112: sar    rsi,1                   ; runbox: n, tag bit shifted off
+115: mov    rbx,rsi
+11b: test   rbx,rbx                 ; == 0, one instruction
+11e: je     177                     ; == 0 → return acc
+```
+
+and the decrement, before (checked, tagged) vs. after (raw, unchecked —
+sound because the proven range already fits machine size):
+
+```asm
+; before                              ; after
+193: mov    rax,rbx                   16b: sub    rbx,0x1
+196: sub    rax,0x3
+19a: seto   cl
+19d: add    rax,0x1
+1a4: test   cl,cl
+1a6: je     1c0
+```
+
+### Shadow-slot / safepoint interaction with F3
+
+`native::roots` (built and run directly, `botlish-native roots`), same
+NIR before/after, unmodified `codegen/roots.rs`:
+
+| | NIR regs | raw regs | managed-capable | safepoints | root candidates | max live | shadow slots |
+|---|---|---|---|---|---|---|---|
+| `sum` before | 12 | 2 | 10 | 2 | 4 | 3 | 3 |
+| `sum` after | 13 | 4 | 9 | 1 | 2 | 2 | **2** |
+
+Shadow slots *dropped*, not merely held steady: the new `rbox` register
+adds one to the NIR register count, but F3's liveness-based coloring costs
+it nothing (it is a raw register, never a root candidate at all), and
+`n - 1` becoming raw (`risub`, never a GC safepoint) removes one of the
+two safepoints the tagged `isub`'s BigInt-overflow fallback used to need —
+one fewer safepoint means one fewer live-root obligation for the whole
+function, not just for `n`. This is a direct, measured confirmation that
+F2-style representation improvements and F3's safepoint-liveness policy
+compose correctly, in exactly the direction F3's own §10 answer 10
+predicted for a *safepoint*-reducing change (as opposed to F2's original
+regression on `fib`, which added registers without removing a safepoint).
+`fib<int>`, `work<int>`, `drive<int, int>`, and `step<generic>`'s own NIR
+and shadow-slot reports are all byte-for-byte unchanged (confirmed by
+`diff`, not assumed).
+
+### Timing (best/median, 400 in-process runs, `botlish-native bench`, three
+trials each; JIT/compile excluded)
+
+```
+                  before (best/median)     after (best/median)
+sum(400,0)         1557ns / 1575ns          1261ns / 1322ns     (~19% faster, best-of-3 trials)
+fib(18)           33783ns / 34161ns        33802ns / 34208ns    (unchanged: no NIR change)
+drive(500,0)       1548ns / 1650ns          1547ns / 1553ns     (unchanged: no NIR change)
+```
+
+`fib`/`drive`'s own `program.nir` is byte-identical before/after
+(`diff` confirmed empty, per instance), so their timing is reported only
+as the regression check spec #26/#27 asked for, not as evidence of this
+milestone's own effect. (Absolute values are this session's environment,
+not NATIVE-AUDIT.md's original §1/§9 machine — only within-session
+before/after comparisons are meaningful, same caveat §9/§10 already gave.)
+
+### sum scaling (spec #48; 200 runs each, after only — the structural
+facts above are seed-independent)
+
+```
+n        best/median (ns)
+100      335 / 351
+400      1261 / 1322
+1000     3114 / 3261
+5000     15466 / 16210
+```
+
+Scales linearly in `n` (≈3.1ns/unit throughout), as expected for a fixed
+per-iteration instruction count. `hir::induction::of` reproduces `[0, n]`
+at every size (checked directly, not just timed). Allocation summary
+(`botlish-native run --alloc summary`) shows **zero** `Block`/closure
+allocations both before and after, at every size — F1 fully intact.
+
+### Regression evidence
+
+- `tclsh9.0 tests/all.tcl` (both `interp` and `compile` backends): 1253/1253
+  passing (1243 pre-existing + 10 new `hir-range.test` cases covering the
+  old top-level shape, the new nested/`else`-guard shapes at 1-2 levels of
+  wrapping, an error-terminated wrapper, a trivially-true wrapper, a new
+  top-level `if`/`else` shape, and the non-dominating/shadowed/ambiguous
+  negative shapes).
+- `cargo test --release` (`native/`): 29/29 passing, unmodified.
+- `tests/native.test` and `tests/native-root-liveness.test` under
+  `BOTLISH_NATIVE_GC_STRESS=1`: 80/80 and 17/17 passing.
+- Differential backend check (`interp`/`compile`/`cranelift`/
+  `cranelift-generic`) on all three runnable benchmarks: identical results
+  everywhere a backend can run them at all (`interp` cannot run
+  `sum-refined`/`loop-count` at their full recursion depth regardless of
+  this milestone — confirmed identical on the unmodified `induction.tcl`
+  too, so a pre-existing Tcl-interpreter recursion-depth limit, not a
+  regression).
+
+### Answers
+
+1. **What exact syntactic restriction prevented sum-refined from being
+   recognized before?** Two, independent: `Guard` only ever scanned the
+   instance's own top-level body list (the guard is nested one level
+   inside `integer? acc`'s own then-branch), and it only recognized an
+   elseless `if` whose terminating branch is followed by trailing
+   siblings (sum-refined's guard is a full `if`/`else`, with the
+   recursive call in an explicit `else`, not a sibling).
+2. **What semantic condition replaced that restriction?** Structural
+   dominance: a guard mints a fact only when every one of the parameter's
+   self-tail calls is unconditionally reached through its continuing side
+   (trailing siblings, or an explicit `else`), checked the same literal
+   way as always, now reachable through zero or more wrapper `if`s whose
+   *other* branch is proven, by the same reachability search, to hold
+   none of those calls.
+3. **How does the new traversal prove every relevant recursive path
+   passes through the termination guard?** By construction, not by a
+   separate dominance framework: at each level it requires *exactly one*
+   branch (of a wrapper, or of the guard itself) to reach any self-tail
+   call at all; the other branch is proven off every relevant path by the
+   same check and is never examined further; two live branches or none
+   where one was expected is refused outright.
+4. **Which new range facts were derived for n?** Entry `[0, 400]` (was
+   `[-∞, 400]`), the guard's own ref `[0, 400]`, the recursive/`else`
+   path's ref `[1, 400]`, and `n - 1`'s own `[0, 399]`.
+5. **Which operations became raw as a direct result?** `n == 0`
+   (`ieq` → `rieq`) and `n - 1` (`isub` → `risub`); one `rbox` was added
+   to re-box `n` for `step`'s own (unchanged, generic) capture argument.
+6. **Did F3 successfully prevent those extra representation registers
+   from increasing root-frame size?** Yes, and better than "prevent":
+   shadow slots *dropped* (3 → 2), because the new register is raw (never
+   a root candidate) and `n - 1` becoming raw removed a GC safepoint
+   outright (the tagged subtract's BigInt-overflow fallback), which is a
+   `LiveIn(safepoint) ∩ ¬raw` win independent of register count.
+7. **What remains tagged in sum-refined, and why?** `acc`, `step`'s
+   `x`, and `step`'s own arithmetic/result — all depend on a callee's
+   *return* range (`step`'s result flowing into `acc`), which is outside
+   both this milestone's and F2's scope (spec #49); the `integer? acc`
+   guard's own runtime cost (verified absent from machine code, F4) and
+   the closure-construction ABI's stack traffic (F1, already addressed by
+   Block virtualization) are both unrelated to n and unaffected here.
+8. **Did step/acc remain blocked by missing call-result range
+   propagation?** Yes, exactly as predicted (spec #49): no call-result
+   tracking was added, so `acc`'s range stays fully unknown and `step`
+   stays permanently generic (spec #50), unchanged from before this
+   milestone.
+9. **Which nested patterns are deliberately still rejected?** A guard
+   whose recursive path is reachable without passing it at all (sibling
+   code outside the guarding `if`); two structurally independent copies of
+   the same guard on either side of an unrelated condition (no attempt to
+   combine them); disagreeing updates across self-tail call sites (caught
+   even earlier, by `ClassifyParam`); a shadowed comparison (caught by
+   `BindingId` identity, wherever in the pipeline that first applies); any
+   nesting beyond `maxNestingDepth` (16); a step other than exactly ±1; and
+   everything the module already declined before this milestone (opaque
+   updates, non-`==` termination forms, unstable bounds).
+10. **After this milestone, is there any known scalar proof/codegen
+    defect from the original four-program audit still unresolved?** F2's
+    call-result range-propagation gap (item 8/§9 answer 5's `fib`'s final
+    `+`, and this milestone's own `step`/`acc`) remains open by design —
+    a distinct, not-yet-scoped extension. `refined-checks.ir`'s F7 (no
+    native lowering for library-registered predicates) is untouched,
+    unrelated to induction. No new defect was introduced or found: every
+    function this session touched (`fib`, `work`, `drive`, `step`) has
+    byte-identical NIR/roots output to before this milestone.
+
+---
+
 # Appendices
 
 ## Appendix A — Reproducing this audit

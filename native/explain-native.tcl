@@ -15,6 +15,10 @@
 #                     every used instance
 #   range-exprs.txt   the same analysis's per-expression Range, keyed by
 #                     ExprId (cross-reference against hir.txt's e<N> ids)
+#   induction.txt     hir::induction::explain: per-parameter induction
+#                     provenance -- guard condition, its nesting depth,
+#                     recursive update, and the resulting Range, or why an
+#                     attempted parameter was not proven
 #   nir.txt           native::nir: the NIR every instance lowers to
 #   clif.txt          native::clif: the Cranelift IR of every function
 #   roots.txt         native::roots: codegen::roots's per-function GC-root
@@ -86,6 +90,8 @@ foreach id [dict get $spec used] {
     }
 }
 W $outdir range-exprs.txt $out2
+
+W $outdir induction.txt [hir::induction::explain $hir $spec [dict get $ranges induction]]
 
 set nirText [native::nir $hir]
 W $outdir nir.txt $nirText
