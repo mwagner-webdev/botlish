@@ -663,6 +663,27 @@ test native-aot-1 {the same lowering emits an object file} -body {
     list [lindex $result 0] [expr {$size > 200}] [string match *botlish_fn_1* $bytes] [string match *rt_int_add* $bytes]
 } -result {object 1 1 1}
 
+testConstraint readelf [expr {[auto_execok readelf] ne ""}]
+
+# codegen/clif.rs's Symbols::direct_helpers: a call to a statically known
+# runtime helper is relocated exactly like a recursive/direct Botlish call
+# (R_X86_64_PLT32, a direct `call rel32`), never the GOT-load-then-
+# call-through-register sequence (`mov reg, [rip+sym@GOTPCREL]; call reg`,
+# R_X86_64_GOTPCREL) a `Linkage::Import` callee gets by default. Checked on
+# the relocation table itself, not on exact bytes/addresses, so register
+# allocation or instruction scheduling changes cannot make this brittle.
+test native-aot-2 {the AOT object calls runtime helpers directly, not through the GOT} -constraints readelf -body {
+    set path [file join [temporaryDirectory] botlish-aot-reloc-test.obj]
+    file delete $path
+    native::object [sourceHir "${countdown}count(5, 0)"] $path
+    set relocs [exec readelf -r -W $path]
+    file delete $path
+    list [regexp -all {R_X86_64_GOTPCREL} $relocs] \
+         [regexp {R_X86_64_PLT32\s+\S+\s+rt_int_add\M} $relocs] \
+         [regexp {R_X86_64_PLT32\s+\S+\s+rt_stack_overflow\M} $relocs] \
+         [regexp {R_X86_64_PLT32\s+\S+\s+botlish_fn_\d+\M} $relocs]
+} -result {0 1 1 1}
+
 test native-diagnostic-1 {an unsupported construct reports location, HIR node and operation} -body {
     set hir [surface::compile "fn f(x):\n    test_log(x)\n\nf(1)" t.bot -strict 0]
     list [catch {native::nir $hir} message options] [dict get $options -errorcode] $message
