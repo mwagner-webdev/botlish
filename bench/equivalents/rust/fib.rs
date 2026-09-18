@@ -26,7 +26,7 @@ fn main() {
             positional.push(arg);
         }
     }
-    let n: i64 = positional.get(0).map(|s| s.parse().expect("n must be an integer")).unwrap_or(92);
+    let n: i64 = positional.get(0).map(|s| s.parse().expect("n must be an integer")).unwrap_or(28);
 
     fib(black_box(n)); // untimed warmup
     let mut best = f64::MAX;
