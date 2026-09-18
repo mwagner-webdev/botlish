@@ -44,6 +44,38 @@ pub struct Symbols {
     pub helpers: HashMap<&'static str, ModuleFuncId>,
     /// Module function id -> symbol name, for readable CLIF listings.
     pub names: HashMap<u32, String>,
+    /// Whether a call to a runtime helper should be emitted as a direct,
+    /// PC-relative call (see `Translator::helper_ref`) instead of the
+    /// address-then-indirect-call sequence Cranelift otherwise uses for a
+    /// `Linkage::Import` callee (an imported symbol is never "colocated":
+    /// `cranelift_module::Module::declare_func_in_func` sets
+    /// `ExtFuncData::colocated` from `Linkage::is_final()`, which is false
+    /// for `Import` -- see that method and `Linkage::is_final`'s doc).
+    ///
+    /// `helpers()` names the runtime's own extern "C" functions, always
+    /// linked into the very same executable as the code calling them: on
+    /// ELF/x86-64 (checked by `isa.name() == "x64"`; see below) a direct
+    /// `call` to such a symbol is emitted with `R_X86_64_PLT32`, which the
+    /// static linker resolves either straight to the definition (when it
+    /// is local to this link unit, as it always is here) or through a PLT
+    /// stub (if the symbol were ever satisfied by another shared object
+    /// instead) -- both cases are already exactly how the recursive/direct
+    /// Botlish calls this same backend emits are relocated (`Linkage::
+    /// Local`/`Export` are `is_final`), so treating a known runtime helper
+    /// the same way changes nothing about correctness, only which of two
+    /// call sequences Cranelift's x64 backend selects. `colocated` means
+    /// something else on other backends (e.g. AArch64's limited-range
+    /// branch encoding, `ir::ExtFuncData::colocated`'s own doc), so this is
+    /// restricted to the x64 backend specifically, not assumed in general.
+    ///
+    /// Only the AOT object backend (`emit_object`, `export == true`) sets
+    /// this: the JIT backend already resolves a helper's call target to an
+    /// absolute host address it computed itself (`CraneliftJit::compile`'s
+    /// `builder.symbol`), which is unaffected by (and does not need) this
+    /// distinction, and forcing `colocated` there would relax Cranelift's
+    /// own rel32-range check on a real address this backend cannot vouch
+    /// for the distance of.
+    pub direct_helpers: bool,
 }
 
 fn signature<M: Module>(module: &M, params: usize) -> Signature {
@@ -92,7 +124,9 @@ fn module_error(e: cranelift_module::ModuleError) -> BackendError {
 
 /// Declares the runtime helpers and every function of PROGRAM.
 pub fn declare<M: Module>(module: &mut M, program: &nir::Program, export: bool) -> Result<Symbols, BackendError> {
-    let mut symbols = Symbols { direct: vec![], entry: vec![], helpers: HashMap::new(), names: HashMap::new() };
+    let direct_helpers = export && module.isa().name() == "x64";
+    let mut symbols =
+        Symbols { direct: vec![], entry: vec![], helpers: HashMap::new(), names: HashMap::new(), direct_helpers };
     for (name, params, _) in helpers() {
         let id = module.declare_function(name, Linkage::Import, &signature(module, params)).map_err(module_error)?;
         symbols.helpers.insert(name, id);
@@ -413,9 +447,39 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         r
     }
 
+    /// Like `func_ref`, for a runtime helper (ID is one of `symbols.helpers`'
+    /// values): builds the `ir::FuncRef` with `colocated: true` when
+    /// `symbols.direct_helpers` says a direct call is safe for this helper
+    /// on this backend (see that field's doc), bypassing `declare_func_in_func`
+    /// (which would otherwise always set `colocated` from the symbol's
+    /// `Linkage::Import`, i.e. false: see `func_ref` above). Never used for
+    /// `CallValue`'s dynamic dispatch target -- only for the statically
+    /// known helper names `call_helper` passes here.
+    fn helper_ref(&mut self, id: ModuleFuncId) -> ir::FuncRef {
+        if let Some(r) = self.refs.get(&id) {
+            return *r;
+        }
+        let r = if self.symbols.direct_helpers {
+            let signature = self.module.declarations().get_function_decl(id).signature.clone();
+            let sig_ref = self.b.func.import_signature(signature);
+            let user_name_ref =
+                self.b.func.declare_imported_user_function(ir::UserExternalName { namespace: 0, index: id.as_u32() });
+            self.b.func.import_function(ir::ExtFuncData {
+                name: ir::ExternalName::user(user_name_ref),
+                signature: sig_ref,
+                colocated: true,
+                patchable: false,
+            })
+        } else {
+            self.module.declare_func_in_func(id, self.b.func)
+        };
+        self.refs.insert(id, r);
+        r
+    }
+
     fn call_helper(&mut self, name: &str, args: &[ir::Value]) -> ir::Value {
         let id = self.symbols.helpers[name];
-        let r = self.func_ref(id);
+        let r = self.helper_ref(id);
         let call = self.b.ins().call(r, args);
         self.b.inst_results(call)[0]
     }
