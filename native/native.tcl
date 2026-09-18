@@ -438,12 +438,93 @@ proc native::report {hir} {
 
 proc native::runProgram {exprs env {specialize ""}} {
     variable cache
+    set exprs [ExpandNativeBodies $exprs]
     set options [expr {$specialize eq "" ? {} : [list -specialize $specialize]}]
     set key [list $exprs $options [expr {[info exists ::env(BOTLISH_NATIVE_SPECIALIZE)] ? $::env(BOTLISH_NATIVE_SPECIALIZE) : ""}]]
     if {![dict exists $cache $key]} {
         dict set cache $key [nir [hir::build $exprs -strict 0] {*}$options]
     }
     return [core::completion::normal [Outcome [Driver run [dict get $cache $key]]]]
+}
+
+# Rewrites EXPRS (a program's raw core IR, before hir::build) so that every
+# direct call of a root name -- (call (ref NAME) ARG...) -- whose native
+# carries a -native-body (core/native.tcl's registry field) has that body
+# substituted in place of (ref NAME). After the rewrite the call is an
+# ordinary call of an inline (block PARAMS BODY...) literal: it needs no
+# entry in native/lower.tcl's own `natives` op whitelist, and compiles
+# through the same specialize/escape/range/lowering machinery any other
+# block call already does. Applied only here, at the native (Cranelift)
+# backend's own program entry point -- never by interp or the Tcl compiler
+# -- so a native whose Tcl -impl does something ordinary Botlish cannot
+# (attach evidence for an opaque refined result type, for example: see
+# core::type.tcl and core/native.tcl's nativeBody doc) keeps that behavior
+# on every other backend. -impl stays authoritative there; a -native-body
+# is authoritative only for what this backend executes.
+#
+# Purely syntactic and root-only: it does not resolve names against local
+# scope, so it substitutes NAME's native body even where a local `bind`
+# would shadow NAME before this call point. No program in this repository
+# does that for a native carrying -native-body today. A future iteration
+# that needs shadowing to win should run this after hir::build's own
+# resolution instead, keyed on a call's resolved `target` field rather than
+# the raw `ref` text -- a larger change, deliberately not made here.
+proc native::ExpandNativeBodies {exprs} {
+    set out {}
+    foreach expr $exprs {
+        lappend out [ExpandNativeBodiesIn $expr]
+    }
+    return $out
+}
+
+proc native::ExpandNativeBodiesIn {node} {
+    switch -- [core::ir::op $node] {
+        const - ref - continue {
+            return $node
+        }
+        bind {
+            return [list bind [lindex $node 1] [ExpandNativeBodiesIn [lindex $node 2]]]
+        }
+        block {
+            set body {}
+            foreach expr [core::ir::blockBody $node] {
+                lappend body [ExpandNativeBodiesIn $expr]
+            }
+            return [list block [lindex $node 1] {*}$body]
+        }
+        call {
+            set callee [lindex $node 1]
+            set nativeBody ""
+            if {[core::ir::op $callee] eq "ref" && [lindex $callee 1] in [core::native::names]} {
+                set nativeBody [dict get [core::native::metadata [lindex $callee 1]] nativeBody]
+            }
+            if {$nativeBody ne ""} {
+                set callee $nativeBody
+            }
+            set callee [ExpandNativeBodiesIn $callee]
+            set args {}
+            foreach expr [lrange $node 2 end] {
+                lappend args [ExpandNativeBodiesIn $expr]
+            }
+            return [list call $callee {*}$args]
+        }
+        if {
+            return [list if [ExpandNativeBodiesIn [lindex $node 1]] \
+                [ExpandNativeBodiesIn [lindex $node 2]] [ExpandNativeBodiesIn [lindex $node 3]]]
+        }
+        loop {
+            return [list loop [ExpandNativeBodiesIn [lindex $node 1]]]
+        }
+        return - ok - error-value {
+            return [list [core::ir::op $node] [ExpandNativeBodiesIn [lindex $node 1]]]
+        }
+        break {
+            if {[llength $node] == 2} {
+                return [list break [ExpandNativeBodiesIn [lindex $node 1]]]
+            }
+            return $node
+        }
+    }
 }
 
 proc native::runSequence {exprs env} {

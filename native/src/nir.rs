@@ -87,6 +87,14 @@ pub enum OpCode {
     /// carried byte offset by exactly that many bytes for the next
     /// iteration (see hir/traversal.tcl).
     StrByteLen,
+    /// A String's UTF-8 encoding as a List of Ints, one per byte (each
+    /// 0..255), in order (core/strings.tcl's `encode_utf8`): the general
+    /// byte-level access Botlish's String type otherwise never exposes
+    /// (String only ever counts/indexes by Unicode scalar -- see StrLen vs.
+    /// StrByteLen above). Ordinary library code (e.g. percent-encoding)
+    /// builds on this plus List/Int operations instead of needing its own
+    /// native.
+    StrUtf8Bytes,
     /// Representation transitions and raw (untagged machine-integer)
     /// arithmetic/comparison: see the "Representation" section of
     /// native/lower.tcl. A raw operand/result is never a tagged Value: it
@@ -147,6 +155,7 @@ impl OpCode {
             "regioneq" => RegionEq,
             "decodecharat" => DecodeCharAt,
             "strbytelen" => StrByteLen,
+            "strutf8bytes" => StrUtf8Bytes,
             "rbox" => RBox,
             "runbox" => RUnbox,
             "riadd" => RIAdd,
@@ -168,7 +177,7 @@ impl OpCode {
             ListNew => None,
             StrLen | StrLower | ListLen | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList
             | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | Hash | RBox | RUnbox
-            | StrByteLen => Some(1),
+            | StrByteLen | StrUtf8Bytes => Some(1),
             Substr | MutArraySet | RegionCheck => Some(3),
             RegionEq => Some(4),
             MutArrayCopy => Some(5),

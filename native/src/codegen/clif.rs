@@ -958,6 +958,9 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         // MAX_COLLECTION_LENGTH (Vm::reject_oversized_collection).
                         StrLower => ("rt_str_lower", None, true, Some(("strlower", KIND_STR))),
                         StrCat => ("rt_str_cat", None, true, Some(("strcat", KIND_STR))),
+                        StrUtf8Bytes => {
+                            ("rt_str_utf8_bytes", None, true, Some(("strutf8bytes", KIND_LIST)))
+                        }
                         ListLen => ("rt_list_len", None, false, None),
                         ListGet => ("rt_list_get", None, true, None),
                         ListAppend => ("rt_list_append", None, true, Some(("listappend", KIND_LIST))),

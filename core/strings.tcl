@@ -40,6 +40,25 @@ proc core::strings::concat {a b} {
     return [core::value::str "[Text $a concat][Text $b concat]"]
 }
 
+# S's UTF-8 encoding as a List of Ints, one per byte (each 0..255), in
+# order: the general byte-level access String otherwise never exposes
+# (String counts and indexes only by Unicode scalar -- length, substring).
+# Library string transforms that need to inspect or classify individual
+# bytes (percent-encoding, other byte-oriented text formats) build on this
+# plus ordinary List/Int operations, instead of each needing its own
+# native. Mirrors native/src/runtime/ops.rs's rt_str_utf8_bytes exactly
+# (Tcl's `encoding convertto utf-8` here, Rust's already-UTF-8 `String`
+# there): both walk the same byte sequence in the same order.
+proc core::strings::encodeUtf8 {s} {
+    set text [Text $s encode_utf8]
+    set bytes {}
+    foreach byte [split [encoding convertto utf-8 $text] ""] {
+        scan $byte %c code
+        lappend bytes [core::value::int $code]
+    }
+    return [core::value::listOf $bytes]
+}
+
 core::native::register length    -arity 1 -impl core::strings::length \
     -param-types {str} -result-type int -runtime char-index -result-range collection-length
 core::native::register substring -arity 3 -impl core::strings::substring \
@@ -49,3 +68,5 @@ core::native::register lowercase -arity 1 -impl core::strings::lowercase \
     -param-types {str} -result-type str -runtime string-alloc
 core::native::register concat    -arity 2 -impl core::strings::concat \
     -param-types {str str} -result-type str -runtime string-alloc
+core::native::register encode_utf8 -arity 1 -impl core::strings::encodeUtf8 \
+    -param-types {str} -result-type list -runtime list-alloc

@@ -26,6 +26,7 @@
 //! | rt_str_byte_len        | Str                 | Int (UTF-8 byte length)      | no        |
 //! | rt_str_lower           | Str                 | Str                          | yes       |
 //! | rt_str_cat             | Str, Str            | Str                          | yes       |
+//! | rt_str_utf8_bytes      | Str                 | List of Int (0..255); RANGE  | yes       |
 //! | rt_list_new            | count, *Value       | List                         | yes       |
 //! | rt_list_len            | List                | Int                          | no        |
 //! | rt_list_get            | List, Int           | element; RANGE               | no        |
@@ -71,8 +72,8 @@ pub fn op_may_allocate(op: OpCode) -> bool {
     use OpCode::*;
     matches!(
         op,
-        IAdd | ISub | IMul | Substr | DecodeCharAt | StrLower | StrCat | ListNew | ListAppend
-            | MutArrayAllocate | MutArrayFreeze | MkOk | MkError
+        IAdd | ISub | IMul | Substr | DecodeCharAt | StrLower | StrCat | StrUtf8Bytes | ListNew
+            | ListAppend | MutArrayAllocate | MutArrayFreeze | MkOk | MkError
     )
 }
 
@@ -465,6 +466,22 @@ pub extern "C" fn rt_str_lower(p: *mut Vm, s: Value) -> Value {
     r
 }
 
+/// S's UTF-8 encoding as a List of Ints (one per byte, each 0..255), in
+/// order (core/strings.tcl's `encode_utf8`): S's text is already a Rust
+/// `String`, so it is already valid UTF-8 -- this is a plain byte-by-byte
+/// read, never a re-encode. The general byte-level access String otherwise
+/// never exposes (see nir.rs's StrUtf8Bytes doc comment). Reuses
+/// `Vm::new_list`'s own MAX_COLLECTION_LENGTH check (same limit any other
+/// List/String construction enforces), so an oversized result fails RANGE
+/// exactly like `rt_list_new`'s would, not a special case here.
+pub extern "C" fn rt_str_utf8_bytes(p: *mut Vm, s: Value) -> Value {
+    let items: Vec<Value> = str_of(s).text.bytes().map(|b| vm(p).new_int(b as i64)).collect();
+    let n = items.len();
+    let r = vm(p).new_list(items);
+    vm(p).metrics.record_list_copy(n);
+    r
+}
+
 pub extern "C" fn rt_str_cat(p: *mut Vm, a: Value, b: Value) -> Value {
     let (x, y) = (str_of(a), str_of(b));
     let mut text = String::with_capacity(x.text.len() + y.text.len());
@@ -755,6 +772,7 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         Substr => rt_substr(p, a[0], a[1], a[2]),
         StrLower => rt_str_lower(p, a[0]),
         StrCat => rt_str_cat(p, a[0], a[1]),
+        StrUtf8Bytes => rt_str_utf8_bytes(p, a[0]),
         ListLen => rt_list_len(p, a[0]),
         ListGet => rt_list_get(p, a[0], a[1]),
         ListAppend => rt_list_append(p, a[0], a[1]),
@@ -815,6 +833,7 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_str_byte_len, 2),
         h!(rt_str_lower, 2),
         h!(rt_str_cat, 3),
+        h!(rt_str_utf8_bytes, 2),
         h!(rt_list_new, 3),
         h!(rt_list_len, 2),
         h!(rt_list_get, 3),
@@ -965,5 +984,57 @@ mod tests {
         rt_str_region_check(&mut *vm, base, small(3), small(4));
         rt_str_region_eq(&mut *vm, base, small(3), small(4), other);
         assert_eq!(vm.metrics.utf8_seek_bytes, 6);
+    }
+
+    // -----------------------------------------------------------------------
+    // utf8_bytes (core/strings.tcl's encode_utf8): 1/2/3/4-byte scalars,
+    // mixed widths, and the empty String -- the same width coverage as
+    // decode_char_at above, since both walk the same UTF-8 encoding.
+
+    fn utf8_bytes_of(vm: &mut Vm, v: Value) -> Vec<i64> {
+        let r = rt_str_utf8_bytes(vm, v);
+        list_of(r).items().iter().map(|&b| small_of(b)).collect()
+    }
+
+    #[test]
+    fn utf8_bytes_empty() {
+        let mut vm = vm();
+        let s = str_val(&mut vm, "");
+        assert_eq!(utf8_bytes_of(&mut vm, s), Vec::<i64>::new());
+    }
+
+    #[test]
+    fn utf8_bytes_ascii() {
+        let mut vm = vm();
+        let s = str_val(&mut vm, "AB");
+        assert_eq!(utf8_bytes_of(&mut vm, s), vec![65, 66]);
+    }
+
+    #[test]
+    fn utf8_bytes_two_byte() {
+        let mut vm = vm();
+        let s = str_val(&mut vm, "\u{e9}");
+        assert_eq!(utf8_bytes_of(&mut vm, s), vec![0xC3, 0xA9]);
+    }
+
+    #[test]
+    fn utf8_bytes_three_byte() {
+        let mut vm = vm();
+        let s = str_val(&mut vm, "\u{6771}");
+        assert_eq!(utf8_bytes_of(&mut vm, s), vec![0xE6, 0x9D, 0xB1]);
+    }
+
+    #[test]
+    fn utf8_bytes_four_byte() {
+        let mut vm = vm();
+        let s = str_val(&mut vm, "\u{1f600}");
+        assert_eq!(utf8_bytes_of(&mut vm, s), vec![0xF0, 0x9F, 0x98, 0x80]);
+    }
+
+    #[test]
+    fn utf8_bytes_mixed_width_sequence() {
+        let mut vm = vm();
+        let s = str_val(&mut vm, "a\u{e9}\u{1f600}");
+        assert_eq!(utf8_bytes_of(&mut vm, s), vec![97, 0xC3, 0xA9, 0xF0, 0x9F, 0x98, 0x80]);
     }
 }

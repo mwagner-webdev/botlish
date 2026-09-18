@@ -1,3 +1,13 @@
 source: bench/refined-checks.ir
 status: unsupported
-detail: ir {1 2}: e39: native lowering does not support native uriEscape: the native "uriEscape" has no native implementation
+detail: ir {0 2 2 3 2 2 1}: e11: native lowering does not support native Emailish?: the native "Emailish?" has no native implementation
+note: the previous blocker here, native uriEscape, is fixed (NATIVE-URI-ESCAPE.md):
+    lib/web.tcl's uriEscape now carries a -native-body (core/native.tcl), an
+    ordinary-Botlish implementation over the new general core/strings.tcl
+    native encode_utf8, that native/native.tcl's ExpandNativeBodies compiles
+    through the ordinary ("check"-style) block-lowering path instead of
+    native/lower.tcl's op whitelist. The benchmark's remaining blocker,
+    Emailish? (a library type-test predicate needing evidence-based dynamic
+    dispatch native/lower.tcl does not support -- see NativeCall's own
+    "type tests of named types need evidence" check), is unchanged and out
+    of scope for that milestone.

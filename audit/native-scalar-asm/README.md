@@ -38,7 +38,7 @@ are complete.
 | bench/fib.ir | compiled / inspected | [bench/fib.asm](bench/fib.asm) | 2 functions, 680 bytes |
 | bench/loop-count.ir | compiled / inspected | [bench/loop-count.asm](bench/loop-count.asm) | 3 functions, 798 bytes |
 | bench/sum-refined.ir | compiled / inspected | [bench/sum-refined.asm](bench/sum-refined.asm) | 3 functions, 787 bytes |
-| bench/refined-checks.ir | unsupported | [bench/refined-checks.status.txt](bench/refined-checks.status.txt) | ir {1 2}: e39: native lowering does not support native uriEscape: the native "uriEscape" has no native implementation |
+| bench/refined-checks.ir | unsupported | [bench/refined-checks.status.txt](bench/refined-checks.status.txt) | uriEscape fixed (NATIVE-URI-ESCAPE.md); now blocked one native later: ir {0 2 2 3 2 2 1}: e11: native lowering does not support native Emailish? |
 | examples/stdlib/ai_text_clean.bot | compiled / inspected | [examples-stdlib/ai_text_clean.asm](examples-stdlib/ai_text_clean.asm) | 5 functions, 3663 bytes |
 | examples/stdlib/csv.bot | compiled / inspected | [examples-stdlib/csv.asm](examples-stdlib/csv.asm) | 11 functions, 6228 bytes |
 | examples/stdlib/csv_chunked.bot | compiled / inspected | [examples-stdlib/csv_chunked.asm](examples-stdlib/csv_chunked.asm) | 21 functions, 13435 bytes |

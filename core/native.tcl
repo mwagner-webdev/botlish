@@ -13,6 +13,21 @@
 #                   argument (any = no requirement); a call that returns
 #                   proves its arguments had these types. "" = unknown.
 #   resultType      type of every result, or any
+#   nativeBody      "" or a (block PARAMS BODY...) core IR node, with
+#                   PARAMS matching arity, expressing the same operation as
+#                   impl in ordinary Botlish over other natives: an
+#                   *authoritative-for-native-compilation* implementation
+#                   the native (Cranelift) backend may use instead of
+#                   requiring an entry in its own op whitelist
+#                   (native/lower.tcl's `natives`) -- see native/native.tcl's
+#                   ExpandNativeBodies. impl (run by interp/compile, and by
+#                   the reference contract check) stays authoritative for
+#                   every other backend and for any semantics -- such as
+#                   attaching evidence for an opaque refined result type --
+#                   that ordinary Botlish cannot itself express (only a
+#                   trusted native impl may do that: see core/type.tcl).
+#                   A native's body sees only other root bindings (other
+#                   natives); it captures nothing from its call site.
 #   testsType       "" or a type T: the native is a *type test*, a pure
 #                   one-argument predicate returning exactly whether its
 #                   argument is a value of T (core::type::acceptsValue).
@@ -101,7 +116,8 @@ proc core::native::register {name args} {
         error "core::native::register: options must be -option value pairs"
     }
     set options [dict create -impl "" -arity "" -refines-true {} -refines-false {} \
-        -param-types "" -result-type any -tests-type "" -runtime {} -result-shape {} -result-range {}]
+        -param-types "" -result-type any -tests-type "" -runtime {} -result-shape {} -result-range {} \
+        -native-body {}]
     foreach {option value} $args {
         if {![dict exists $options $option]} {
             error "core::native::register: unknown option \"$option\""
@@ -178,6 +194,13 @@ proc core::native::register {name args} {
     if {$range ni {{} nonneg collection-length}} {
         error "core::native::register: bad -result-range \"$range\" for \"$name\""
     }
+    set nativeBody [dict get $options -native-body]
+    if {$nativeBody ne ""} {
+        if {[lindex $nativeBody 0] ne "block" || [llength [core::ir::blockParams $nativeBody]] != $arity} {
+            error "core::native::register: -native-body of \"$name\" must be a (block PARAMS BODY...)\
+                node with $arity parameter(s)"
+        }
+    }
     dict set registry $name [dict create \
         name $name \
         impl $impl \
@@ -187,7 +210,8 @@ proc core::native::register {name args} {
         paramTypes $paramTypes \
         resultType [CanonicalType $name -result-type [dict get $options -result-type]] \
         testsType $testsType \
-        runtime [lsort -unique [dict get $options -runtime]]         resultShape $shape resultRange $range]
+        runtime [lsort -unique [dict get $options -runtime]] \
+        resultShape $shape resultRange $range nativeBody $nativeBody]
     return [core::value::native $name]
 }
 
