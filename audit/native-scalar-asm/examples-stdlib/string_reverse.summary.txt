@@ -1,0 +1,40 @@
+source:  examples/stdlib/string_reverse.bot
+backend: Cranelift (specialize=1)
+asm:     string_reverse.asm
+machine-code bytes: 1172 (per function: 530 430 212)
+
+functions:
+  0 <program entry>: nir-regs=11
+  1 reverse_from<str, int, str>: nir-regs=18
+  2 reverse_chars<str>: nir-regs=5
+
+GC roots (string_reverse.asm's NIR ids match roots.txt's "function N"):
+  function 0 "<program>"
+    NIR regs: 11
+    raw regs: 0
+    managed-capable regs: 11
+    safepoints: 6
+    root candidates: 10
+    max live roots: 5
+    shadow slots: 5
+  
+  function 1 "reverse_from"
+    NIR regs: 18
+    raw regs: 6
+    managed-capable regs: 12
+    safepoints: 2
+    root candidates: 5
+    max live roots: 4
+    shadow slots: 4
+  
+  function 2 "reverse_chars"
+    NIR regs: 5
+    raw regs: 1
+    managed-capable regs: 4
+    safepoints: 1
+    root candidates: 3
+    max live roots: 3
+    shadow slots: 3
+
+mechanical pattern counts (triage only; see report for interpretation):
+  7 x calls to other rt_* helpers

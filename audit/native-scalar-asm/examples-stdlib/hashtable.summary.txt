@@ -1,0 +1,315 @@
+source:  examples/stdlib/hashtable.bot
+backend: Cranelift (specialize=1)
+asm:     hashtable.asm
+machine-code bytes: 18061 (per function: 172 85 85 85 85 548 696 208 184 184 184 184 184 268 299 355 1036 1568 581 389 596 708 1276 1124 961 833 1528 1132 1469 1054)
+
+functions:
+  0 <program entry>: nir-regs=1
+  1 ht_min_capacity<generic>: nir-regs=2
+  2 ht_empty_state<generic>: nir-regs=2
+  3 ht_occupied_state<generic>: nir-regs=2
+  4 ht_tombstone_state<generic>: nir-regs=2
+  5 ht_fill_empty<mutarray, int, int>: nir-regs=12
+  6 ht_alloc<int>: nir-regs=29
+  7 ht_new<generic>: nir-regs=2
+  8 ht_controls<mutarray>: nir-regs=4
+  9 ht_keys<mutarray>: nir-regs=4
+  10 ht_values<mutarray>: nir-regs=4
+  11 ht_size<mutarray>: nir-regs=4
+  12 ht_tombstones<mutarray>: nir-regs=4
+  13 ht_capacity<mutarray>: nir-regs=3
+  14 ht_probe_start<mutarray, str>: nir-regs=5
+  15 ht_probe_next<mutarray, int>: nir-regs=7
+  16 ht_find_get<mutarray, str, int>: nir-regs=28
+  17 ht_find_insert<mutarray, str, int, int>: nir-regs=41
+  18 ht_get<mutarray, str>: nir-regs=12
+  19 ht_contains<mutarray, str>: nir-regs=7
+  20 ht_rehash_probe<mutarray, int, int>: nir-regs=12
+  21 ht_rehash_insert<list<mutarray>, int, any, any>: nir-regs=21
+  22 ht_rehash_scan<list, int, int, list<mutarray>, int>: nir-regs=29
+  23 ht_rehash<mutarray, int>: nir-regs=41
+  24 ht_should_grow<mutarray>: nir-regs=15
+  25 ht_grow_or_clean<mutarray>: nir-regs=12
+  26 ht_place<mutarray, int, str, str>: nir-regs=31
+  27 ht_set<mutarray, str, str>: nir-regs=34
+  28 ht_delete<mutarray, str>: nir-regs=34
+  29 sample<generic>: nir-regs=28
+
+GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
+  function 0 "<program>"
+    NIR regs: 1
+    raw regs: 0
+    managed-capable regs: 1
+    safepoints: 1
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 1
+  
+  function 1 "ht_min_capacity"
+    NIR regs: 2
+    raw regs: 1
+    managed-capable regs: 1
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 1
+  
+  function 2 "ht_empty_state"
+    NIR regs: 2
+    raw regs: 1
+    managed-capable regs: 1
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 1
+  
+  function 3 "ht_occupied_state"
+    NIR regs: 2
+    raw regs: 1
+    managed-capable regs: 1
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 1
+  
+  function 4 "ht_tombstone_state"
+    NIR regs: 2
+    raw regs: 1
+    managed-capable regs: 1
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 1
+  
+  function 5 "ht_fill_empty"
+    NIR regs: 12
+    raw regs: 1
+    managed-capable regs: 11
+    safepoints: 2
+    root candidates: 4
+    max live roots: 4
+    shadow slots: 4
+  
+  function 6 "ht_alloc"
+    NIR regs: 29
+    raw regs: 9
+    managed-capable regs: 20
+    safepoints: 5
+    root candidates: 6
+    max live roots: 4
+    shadow slots: 4
+  
+  function 7 "ht_new"
+    NIR regs: 2
+    raw regs: 0
+    managed-capable regs: 2
+    safepoints: 2
+    root candidates: 1
+    max live roots: 1
+    shadow slots: 1
+  
+  function 8 "ht_controls"
+    NIR regs: 4
+    raw regs: 1
+    managed-capable regs: 3
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 1
+  
+  function 9 "ht_keys"
+    NIR regs: 4
+    raw regs: 1
+    managed-capable regs: 3
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 1
+  
+  function 10 "ht_values"
+    NIR regs: 4
+    raw regs: 1
+    managed-capable regs: 3
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 1
+  
+  function 11 "ht_size"
+    NIR regs: 4
+    raw regs: 1
+    managed-capable regs: 3
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 1
+  
+  function 12 "ht_tombstones"
+    NIR regs: 4
+    raw regs: 1
+    managed-capable regs: 3
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 1
+  
+  function 13 "ht_capacity"
+    NIR regs: 3
+    raw regs: 0
+    managed-capable regs: 3
+    safepoints: 1
+    root candidates: 1
+    max live roots: 1
+    shadow slots: 1
+  
+  function 14 "ht_probe_start"
+    NIR regs: 5
+    raw regs: 0
+    managed-capable regs: 5
+    safepoints: 1
+    root candidates: 2
+    max live roots: 2
+    shadow slots: 2
+  
+  function 15 "ht_probe_next"
+    NIR regs: 7
+    raw regs: 1
+    managed-capable regs: 6
+    safepoints: 2
+    root candidates: 4
+    max live roots: 3
+    shadow slots: 3
+  
+  function 16 "ht_find_get"
+    NIR regs: 28
+    raw regs: 3
+    managed-capable regs: 25
+    safepoints: 5
+    root candidates: 4
+    max live roots: 4
+    shadow slots: 4
+  
+  function 17 "ht_find_insert"
+    NIR regs: 41
+    raw regs: 2
+    managed-capable regs: 39
+    safepoints: 7
+    root candidates: 5
+    max live roots: 5
+    shadow slots: 5
+  
+  function 18 "ht_get"
+    NIR regs: 12
+    raw regs: 1
+    managed-capable regs: 11
+    safepoints: 3
+    root candidates: 4
+    max live roots: 3
+    shadow slots: 3
+  
+  function 19 "ht_contains"
+    NIR regs: 7
+    raw regs: 1
+    managed-capable regs: 6
+    safepoints: 2
+    root candidates: 3
+    max live roots: 3
+    shadow slots: 3
+  
+  function 20 "ht_rehash_probe"
+    NIR regs: 12
+    raw regs: 1
+    managed-capable regs: 11
+    safepoints: 2
+    root candidates: 5
+    max live roots: 4
+    shadow slots: 4
+  
+  function 21 "ht_rehash_insert"
+    NIR regs: 21
+    raw regs: 3
+    managed-capable regs: 18
+    safepoints: 2
+    root candidates: 7
+    max live roots: 6
+    shadow slots: 6
+  
+  function 22 "ht_rehash_scan"
+    NIR regs: 29
+    raw regs: 4
+    managed-capable regs: 25
+    safepoints: 3
+    root candidates: 9
+    max live roots: 7
+    shadow slots: 7
+  
+  function 23 "ht_rehash"
+    NIR regs: 41
+    raw regs: 10
+    managed-capable regs: 31
+    safepoints: 11
+    root candidates: 13
+    max live roots: 7
+    shadow slots: 7
+  
+  function 24 "ht_should_grow"
+    NIR regs: 15
+    raw regs: 3
+    managed-capable regs: 12
+    safepoints: 7
+    root candidates: 10
+    max live roots: 3
+    shadow slots: 3
+  
+  function 25 "ht_grow_or_clean"
+    NIR regs: 12
+    raw regs: 1
+    managed-capable regs: 11
+    safepoints: 7
+    root candidates: 6
+    max live roots: 3
+    shadow slots: 3
+  
+  function 26 "ht_place"
+    NIR regs: 31
+    raw regs: 4
+    managed-capable regs: 27
+    safepoints: 9
+    root candidates: 12
+    max live roots: 6
+    shadow slots: 6
+  
+  function 27 "ht_set"
+    NIR regs: 34
+    raw regs: 6
+    managed-capable regs: 28
+    safepoints: 11
+    root candidates: 10
+    max live roots: 5
+    shadow slots: 5
+  
+  function 28 "ht_delete"
+    NIR regs: 34
+    raw regs: 5
+    managed-capable regs: 29
+    safepoints: 10
+    root candidates: 11
+    max live roots: 4
+    shadow slots: 4
+  
+  function 29 "sample"
+    NIR regs: 28
+    raw regs: 0
+    managed-capable regs: 28
+    safepoints: 12
+    root candidates: 19
+    max live roots: 6
+    shadow slots: 6
+
+mechanical pattern counts (triage only; see report for interpretation):
+  8 x calls to rt_int_add
+  2 x calls to rt_int_sub
+  3 x calls to rt_int_mul
+  9 x calls to rt_int_cmp
+  134 x calls to other rt_* helpers
+  25 x guard/guardbool instructions

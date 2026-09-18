@@ -1,0 +1,83 @@
+source:  examples/stdlib/matmul.bot
+backend: Cranelift (specialize=1)
+asm:     matmul.asm
+machine-code bytes: 4991 (per function: 944 724 609 732 668 788 526)
+
+functions:
+  0 <program entry>: nir-regs=32
+  1 dot<list<int>, list<list<int>>, int, int, int, int>: nir-regs=18
+  2 product_row<list<int>, list<list<int>>, int, int, list<never>>: nir-regs=22
+  3 product_row<list<int>, list<list<int>>, int, int, list<int>>: nir-regs=19
+  4 product_rows<list<list<int>>, list<list<int>>, int, int, list<never>>: nir-regs=22
+  5 product_rows<list<list<int>>, list<list<int>>, int, int, list<list<int>>>: nir-regs=19
+  6 matmul<list<list<int>>, list<list<int>>>: nir-regs=18
+
+GC roots (matmul.asm's NIR ids match roots.txt's "function N"):
+  function 0 "<program>"
+    NIR regs: 32
+    raw regs: 12
+    managed-capable regs: 20
+    safepoints: 8
+    root candidates: 19
+    max live roots: 5
+    shadow slots: 5
+  
+  function 1 "dot"
+    NIR regs: 18
+    raw regs: 4
+    managed-capable regs: 14
+    safepoints: 2
+    root candidates: 7
+    max live roots: 6
+    shadow slots: 6
+  
+  function 2 "product_row"
+    NIR regs: 22
+    raw regs: 6
+    managed-capable regs: 16
+    safepoints: 3
+    root candidates: 11
+    max live roots: 8
+    shadow slots: 8
+  
+  function 3 "product_row"
+    NIR regs: 19
+    raw regs: 4
+    managed-capable regs: 15
+    safepoints: 3
+    root candidates: 10
+    max live roots: 7
+    shadow slots: 7
+  
+  function 4 "product_rows"
+    NIR regs: 22
+    raw regs: 5
+    managed-capable regs: 17
+    safepoints: 4
+    root candidates: 10
+    max live roots: 7
+    shadow slots: 7
+  
+  function 5 "product_rows"
+    NIR regs: 19
+    raw regs: 3
+    managed-capable regs: 16
+    safepoints: 4
+    root candidates: 11
+    max live roots: 8
+    shadow slots: 8
+  
+  function 6 "matmul"
+    NIR regs: 18
+    raw regs: 4
+    managed-capable regs: 14
+    safepoints: 3
+    root candidates: 5
+    max live roots: 5
+    shadow slots: 5
+
+mechanical pattern counts (triage only; see report for interpretation):
+  3 x calls to rt_int_add
+  1 x calls to rt_int_mul
+  2 x calls to rt_int_cmp
+  34 x calls to other rt_* helpers

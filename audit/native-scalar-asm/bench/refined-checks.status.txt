@@ -1,0 +1,3 @@
+source: bench/refined-checks.ir
+status: unsupported
+detail: ir {1 2}: e39: native lowering does not support native uriEscape: the native "uriEscape" has no native implementation

@@ -1,0 +1,122 @@
+source:  examples/stdlib/csv.bot
+backend: Cranelift (specialize=1)
+asm:     csv.asm
+machine-code bytes: 6228 (per function: 176 501 558 698 913 482 783 765 515 556 281)
+
+functions:
+  0 <program entry>: nir-regs=2
+  1 peek<str, int>: nir-regs=11
+  2 peek<str, int>: nir-regs=15
+  3 scan_unquoted<str, int, int>: nir-regs=28
+  4 scan_quoted<str, int, str>: nir-regs=34
+  5 scan_field<str, int>: nir-regs=17
+  6 scan_record<str, int, list<never>>: nir-regs=25
+  7 scan_record<str, int, list<str>>: nir-regs=23
+  8 scan_records<str, int, list<never>>: nir-regs=14
+  9 scan_records<str, int, list<list<str>>>: nir-regs=11
+  10 csv_parse<str>: nir-regs=5
+
+GC roots (csv.asm's NIR ids match roots.txt's "function N"):
+  function 0 "<program>"
+    NIR regs: 2
+    raw regs: 0
+    managed-capable regs: 2
+    safepoints: 1
+    root candidates: 1
+    max live roots: 1
+    shadow slots: 1
+  
+  function 1 "peek"
+    NIR regs: 11
+    raw regs: 1
+    managed-capable regs: 10
+    safepoints: 2
+    root candidates: 4
+    max live roots: 3
+    shadow slots: 3
+  
+  function 2 "peek"
+    NIR regs: 15
+    raw regs: 3
+    managed-capable regs: 12
+    safepoints: 1
+    root candidates: 3
+    max live roots: 3
+    shadow slots: 3
+  
+  function 3 "scan_unquoted"
+    NIR regs: 28
+    raw regs: 1
+    managed-capable regs: 27
+    safepoints: 3
+    root candidates: 4
+    max live roots: 4
+    shadow slots: 4
+  
+  function 4 "scan_quoted"
+    NIR regs: 34
+    raw regs: 6
+    managed-capable regs: 28
+    safepoints: 8
+    root candidates: 12
+    max live roots: 5
+    shadow slots: 5
+  
+  function 5 "scan_field"
+    NIR regs: 17
+    raw regs: 1
+    managed-capable regs: 16
+    safepoints: 4
+    root candidates: 5
+    max live roots: 3
+    shadow slots: 3
+  
+  function 6 "scan_record"
+    NIR regs: 25
+    raw regs: 2
+    managed-capable regs: 23
+    safepoints: 6
+    root candidates: 9
+    max live roots: 4
+    shadow slots: 4
+  
+  function 7 "scan_record"
+    NIR regs: 23
+    raw regs: 2
+    managed-capable regs: 21
+    safepoints: 5
+    root candidates: 8
+    max live roots: 4
+    shadow slots: 4
+  
+  function 8 "scan_records"
+    NIR regs: 14
+    raw regs: 2
+    managed-capable regs: 12
+    safepoints: 4
+    root candidates: 7
+    max live roots: 4
+    shadow slots: 4
+  
+  function 9 "scan_records"
+    NIR regs: 11
+    raw regs: 0
+    managed-capable regs: 11
+    safepoints: 3
+    root candidates: 6
+    max live roots: 4
+    shadow slots: 4
+  
+  function 10 "csv_parse"
+    NIR regs: 5
+    raw regs: 1
+    managed-capable regs: 4
+    safepoints: 2
+    root candidates: 3
+    max live roots: 3
+    shadow slots: 3
+
+mechanical pattern counts (triage only; see report for interpretation):
+  12 x calls to rt_int_add
+  3 x calls to rt_int_cmp
+  37 x calls to other rt_* helpers

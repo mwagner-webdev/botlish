@@ -1,0 +1,62 @@
+source:  examples/stdlib/ai_text_clean.bot
+backend: Cranelift (specialize=1)
+asm:     ai_text_clean.asm
+machine-code bytes: 3663 (per function: 620 1093 858 856 236)
+
+functions:
+  0 <program entry>: nir-regs=13
+  1 cleaner_emoji<str>: nir-regs=128
+  2 clean_char<str>: nir-regs=74
+  3 clean_from<str, int, str>: nir-regs=23
+  4 clean_ai_text<str>: nir-regs=7
+
+GC roots (ai_text_clean.asm's NIR ids match roots.txt's "function N"):
+  function 0 "<program>"
+    NIR regs: 13
+    raw regs: 0
+    managed-capable regs: 13
+    safepoints: 7
+    root candidates: 12
+    max live roots: 6
+    shadow slots: 6
+  
+  function 1 "cleaner_emoji"
+    NIR regs: 128
+    raw regs: 24
+    managed-capable regs: 104
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 1
+  
+  function 2 "clean_char"
+    NIR regs: 74
+    raw regs: 14
+    managed-capable regs: 60
+    safepoints: 1
+    root candidates: 1
+    max live roots: 1
+    shadow slots: 1
+  
+  function 3 "clean_from"
+    NIR regs: 23
+    raw regs: 3
+    managed-capable regs: 20
+    safepoints: 4
+    root candidates: 9
+    max live roots: 6
+    shadow slots: 6
+  
+  function 4 "clean_ai_text"
+    NIR regs: 7
+    raw regs: 2
+    managed-capable regs: 5
+    safepoints: 1
+    root candidates: 4
+    max live roots: 4
+    shadow slots: 4
+
+mechanical pattern counts (triage only; see report for interpretation):
+  1 x calls to rt_int_add
+  2 x calls to rt_int_cmp
+  30 x calls to other rt_* helpers

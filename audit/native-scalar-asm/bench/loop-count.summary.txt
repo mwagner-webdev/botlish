@@ -1,0 +1,42 @@
+source:  bench/loop-count.ir
+backend: Cranelift (specialize=1)
+asm:     loop-count.asm
+machine-code bytes: 798 (per function: 202 111 485)
+
+functions:
+  0 <program entry>: nir-regs=5
+  1 work<int>: nir-regs=17
+  2 drive<int, int>: nir-regs=13
+
+GC roots (loop-count.asm's NIR ids match roots.txt's "function N"):
+  function 0 "<program>"
+    NIR regs: 5
+    raw regs: 2
+    managed-capable regs: 3
+    safepoints: 1
+    root candidates: 2
+    max live roots: 2
+    shadow slots: 2
+  
+  function 1 "work"
+    NIR regs: 17
+    raw regs: 7
+    managed-capable regs: 10
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 1
+  
+  function 2 "drive"
+    NIR regs: 13
+    raw regs: 4
+    managed-capable regs: 9
+    safepoints: 2
+    root candidates: 4
+    max live roots: 3
+    shadow slots: 3
+
+mechanical pattern counts (triage only; see report for interpretation):
+  1 x calls to rt_int_add
+  1 x calls to rt_int_cmp
+  3 x calls to other rt_* helpers

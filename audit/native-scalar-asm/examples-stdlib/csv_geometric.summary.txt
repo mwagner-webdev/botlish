@@ -1,0 +1,163 @@
+source:  examples/stdlib/csv_geometric.bot
+backend: Cranelift (specialize=1)
+asm:     csv_geometric.asm
+machine-code bytes: 7751 (per function: 176 271 485 541 571 571 332 501 558 698 913 482 828 556 268)
+
+functions:
+  0 <program entry>: nir-regs=2
+  1 geo_new<generic>: nir-regs=6
+  2 geo_new_capacity<int, int>: nir-regs=11
+  3 geo_grow<mutarray, int>: nir-regs=13
+  4 geo_append<list[mutarray, int], str>: nir-regs=14
+  5 geo_append<list[mutarray, int], list>: nir-regs=14
+  6 geo_finish<list[mutarray, int]>: nir-regs=8
+  7 peek<str, int>: nir-regs=11
+  8 peek<str, int>: nir-regs=15
+  9 scan_unquoted<str, int, int>: nir-regs=28
+  10 scan_quoted<str, int, str>: nir-regs=34
+  11 scan_field<str, int>: nir-regs=17
+  12 scan_record<str, int, list[mutarray, int]>: nir-regs=25
+  13 scan_records<str, int, list[mutarray, int]>: nir-regs=12
+  14 csv_parse<str>: nir-regs=5
+
+GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
+  function 0 "<program>"
+    NIR regs: 2
+    raw regs: 0
+    managed-capable regs: 2
+    safepoints: 1
+    root candidates: 1
+    max live roots: 1
+    shadow slots: 1
+  
+  function 1 "geo_new"
+    NIR regs: 6
+    raw regs: 2
+    managed-capable regs: 4
+    safepoints: 2
+    root candidates: 3
+    max live roots: 2
+    shadow slots: 2
+  
+  function 2 "geo_new_capacity"
+    NIR regs: 11
+    raw regs: 2
+    managed-capable regs: 9
+    safepoints: 2
+    root candidates: 4
+    max live roots: 3
+    shadow slots: 3
+  
+  function 3 "geo_grow"
+    NIR regs: 13
+    raw regs: 2
+    managed-capable regs: 11
+    safepoints: 2
+    root candidates: 4
+    max live roots: 3
+    shadow slots: 3
+  
+  function 4 "geo_append"
+    NIR regs: 14
+    raw regs: 3
+    managed-capable regs: 11
+    safepoints: 3
+    root candidates: 6
+    max live roots: 3
+    shadow slots: 3
+  
+  function 5 "geo_append"
+    NIR regs: 14
+    raw regs: 3
+    managed-capable regs: 11
+    safepoints: 3
+    root candidates: 6
+    max live roots: 3
+    shadow slots: 3
+  
+  function 6 "geo_finish"
+    NIR regs: 8
+    raw regs: 2
+    managed-capable regs: 6
+    safepoints: 1
+    root candidates: 2
+    max live roots: 2
+    shadow slots: 2
+  
+  function 7 "peek"
+    NIR regs: 11
+    raw regs: 1
+    managed-capable regs: 10
+    safepoints: 2
+    root candidates: 4
+    max live roots: 3
+    shadow slots: 3
+  
+  function 8 "peek"
+    NIR regs: 15
+    raw regs: 3
+    managed-capable regs: 12
+    safepoints: 1
+    root candidates: 3
+    max live roots: 3
+    shadow slots: 3
+  
+  function 9 "scan_unquoted"
+    NIR regs: 28
+    raw regs: 1
+    managed-capable regs: 27
+    safepoints: 3
+    root candidates: 4
+    max live roots: 4
+    shadow slots: 4
+  
+  function 10 "scan_quoted"
+    NIR regs: 34
+    raw regs: 6
+    managed-capable regs: 28
+    safepoints: 8
+    root candidates: 12
+    max live roots: 5
+    shadow slots: 5
+  
+  function 11 "scan_field"
+    NIR regs: 17
+    raw regs: 1
+    managed-capable regs: 16
+    safepoints: 4
+    root candidates: 5
+    max live roots: 3
+    shadow slots: 3
+  
+  function 12 "scan_record"
+    NIR regs: 25
+    raw regs: 2
+    managed-capable regs: 23
+    safepoints: 7
+    root candidates: 9
+    max live roots: 4
+    shadow slots: 4
+  
+  function 13 "scan_records"
+    NIR regs: 12
+    raw regs: 0
+    managed-capable regs: 12
+    safepoints: 4
+    root candidates: 6
+    max live roots: 4
+    shadow slots: 4
+  
+  function 14 "csv_parse"
+    NIR regs: 5
+    raw regs: 1
+    managed-capable regs: 4
+    safepoints: 2
+    root candidates: 3
+    max live roots: 3
+    shadow slots: 3
+
+mechanical pattern counts (triage only; see report for interpretation):
+  13 x calls to rt_int_add
+  1 x calls to rt_int_mul
+  5 x calls to rt_int_cmp
+  47 x calls to other rt_* helpers

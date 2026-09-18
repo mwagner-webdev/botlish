@@ -4,7 +4,7 @@
 # tooling; see NATIVE-AUDIT.md). Works structurally on any program: no
 # benchmark or function is known by name.
 #
-#   tclsh9.0 native/explain-native.tcl PROGRAM.ir OUTDIR
+#   tclsh9.0 native/explain-native.tcl PROGRAM.{ir,bot} OUTDIR
 #
 # Writes, into OUTDIR:
 #   hir.txt           hir::format: resolved HIR, one line per expression
@@ -32,17 +32,22 @@
 
 set root [file dirname [file dirname [file normalize [info script]]]]
 source [file join $root compiler compiler.tcl]
+source [file join $root surface surface.tcl]
 source [file join $root native native.tcl]
 
 if {[llength $argv] != 2} {
-    puts stderr "usage: tclsh9.0 native/explain-native.tcl PROGRAM.ir OUTDIR"
+    puts stderr "usage: tclsh9.0 native/explain-native.tcl PROGRAM.{ir,bot} OUTDIR"
     exit 2
 }
 lassign $argv path outdir
 file mkdir $outdir
 
-set program [core::loadProgramFile $path]
-set hir [hir::build $program -strict 0]
+if {[file extension $path] eq ".bot"} {
+    set hir [surface::readProgramFile $path]
+} else {
+    set program [core::loadProgramFile $path]
+    set hir [hir::build $program -strict 0]
+}
 
 proc W {outdir name content} {
     set f [open [file join $outdir $name] w]
