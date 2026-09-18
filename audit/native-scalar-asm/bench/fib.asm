@@ -29,8 +29,8 @@ Disassembly of section .text:
   26:	lea    rax,[r12+0x8]
   2b:	mov    QWORD PTR [rdi],rax
   2e:	mov    r13,rdi
-  31:	mov    esi,0x39
-  36:	mov    QWORD PTR [r12],0x39
+  31:	mov    esi,0x2d
+  36:	mov    QWORD PTR [r12],0x2d
   3e:	mov    rdi,r13
   41:	call   46 <botlish_fn_0+0x46>
 			42: R_X86_64_PLT32	botlish_fn_1-0x4 ; fib<int>
