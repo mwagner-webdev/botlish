@@ -31,7 +31,7 @@ def parse_args(argv):
 
 if __name__ == "__main__":
     runs, positional = parse_args(sys.argv[1:])
-    n = int(positional[0]) if positional else 28
+    n = int(positional[0]) if positional else 22
 
     fib(n)  # untimed warmup
     best = None
