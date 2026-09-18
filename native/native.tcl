@@ -18,6 +18,9 @@
 #   native::nir HIR ?OPTIONS?           its NIR text
 #   native::clif HIR ?OPTIONS?          the Cranelift IR of its functions
 #   native::measure HIR RUNS ?OPTIONS?  {LOWER-US COMPILE-US BEST-US COLLECTIONS VALUE}
+#                                       BEST-US is fractional (nanosecond-
+#                                       derived) microseconds, not truncated
+#                                       to a whole number
 #   native::object HIR PATH ?OPTIONS?   writes an object file (AOT smoke test)
 #   native::report HIR                  guard accounting and instance counts
 #   native::codeSize HIR ?OPTIONS?      {TOTAL-BYTES {FUNCTION-BYTES ...}} of
@@ -174,11 +177,36 @@ proc native::measure {hir runs args} {
     set lower [lindex [time {set text [nir $hir {*}$args]}] 0]
     set lines [Driver bench $text $runs]
     set timing [lsearch -inline $lines {timing *}]
+    set times [lsearch -inline $lines {times *}]
     set value [Outcome $lines]
     if {$timing eq ""} {
         throw {NATIVE BUG} "native backend produced no timing:\n[join $lines \n]"
     }
     lassign $timing _ compile best _ collections
+    # BEST-US: the fastest run, in fractional microseconds. The "timing"
+    # line's own BEST-US (still parsed above, for COMPILE-US/COLLECTIONS)
+    # is Rust's Duration::as_micros() -- an integer, truncated to whole
+    # microseconds, so every sub-1.5us run reads as a flat "1" or "2". The
+    # "times" line (native/src/main.rs's per-run Duration::as_nanos(), full
+    # precision) is emitted alongside it purely as additional diagnostic
+    # detail today; recomputing BEST-US from it here, instead, keeps the
+    # same best-of-RUNS execution time this always measured, just without
+    # discarding precision main.rs already computed and sent. Falls back to
+    # the truncated integer only if a "times" line is ever absent (bench.tcl
+    # and the other bench/*.tcl scripts' own display formatting -- "%.2f
+    # us" -- already expects a possibly-fractional value).
+    if {$times ne ""} {
+        set nanos [lrange $times 1 end]
+        if {[llength $nanos]} {
+            set bestNanos [lindex $nanos 0]
+            foreach n [lrange $nanos 1 end] {
+                if {$n < $bestNanos} {
+                    set bestNanos $n
+                }
+            }
+            set best [expr {$bestNanos / 1000.0}]
+        }
+    }
     return [list $lower $compile $best $collections $value]
 }
 
