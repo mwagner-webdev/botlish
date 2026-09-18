@@ -1,7 +1,7 @@
 source:  examples/stdlib/matmul.bot
 backend: Cranelift (specialize=1)
 asm:     matmul.asm
-machine-code bytes: 4991 (per function: 944 724 609 732 668 788 526)
+machine-code bytes: 5271 (per function: 944 857 609 732 718 844 567)
 
 functions:
   0 <program entry>: nir-regs=32

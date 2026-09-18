@@ -89,10 +89,28 @@ pub struct StrObj {
     pub text: Box<str>,
 }
 
+/// A List's elements: a raw pointer plus a count, exactly like ClosureObj's
+/// `caps`/`ncaps` (see `rt_closure_new`/`free_object`) rather than `Vec`,
+/// whose field layout is not something generated native code may rely on
+/// (`Vec`'s fields are private and its layout unspecified). `len`/`ptr` have
+/// known, `#[repr(C)]` offsets (`LIST_LEN_OFFSET`/`LIST_PTR_OFFSET`) so
+/// Cranelift-generated code can load a List's length and index its elements
+/// directly, without a runtime call (codegen::clif's `list_get`). Backed by
+/// a `Box<[Value]>` (`Box::into_raw`/`Box::from_raw`, freed in
+/// `heap::free_object`), sound because a List is never mutated after
+/// construction (this module's header) -- `len`/`ptr` are set once, at
+/// `Vm::new_list`, and never change.
 #[repr(C)]
 pub struct ListObj {
     pub hdr: Header,
-    pub items: Vec<Value>,
+    pub len: usize,
+    pub ptr: *mut Value,
+}
+
+impl ListObj {
+    pub fn items(&self) -> &[Value] {
+        unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
+    }
 }
 
 /// A MutableArray: fixed-capacity, explicitly mutable indexed storage. Every
@@ -143,6 +161,8 @@ pub struct CellObj {
 
 pub const CLOSURE_CAPS_OFFSET: i32 = offset_of!(ClosureObj, caps) as i32;
 pub const CELL_VALUE_OFFSET: i32 = offset_of!(CellObj, value) as i32;
+pub const LIST_LEN_OFFSET: i32 = offset_of!(ListObj, len) as i32;
+pub const LIST_PTR_OFFSET: i32 = offset_of!(ListObj, ptr) as i32;
 
 #[inline]
 pub fn is_small(v: Value) -> bool {

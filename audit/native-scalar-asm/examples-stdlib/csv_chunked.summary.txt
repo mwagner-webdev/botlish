@@ -1,7 +1,7 @@
 source:  examples/stdlib/csv_chunked.bot
 backend: Cranelift (specialize=1)
 asm:     csv_chunked.asm
-machine-code bytes: 13355 (per function: 176 85 318 750 750 750 750 808 728 747 747 501 558 698 913 482 938 975 648 724 309)
+machine-code bytes: 13435 (per function: 176 85 318 750 750 750 750 840 776 747 747 501 558 698 913 482 938 975 648 724 309)
 
 functions:
   0 <program entry>: nir-regs=2

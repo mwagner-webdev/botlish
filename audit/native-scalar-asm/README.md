@@ -12,7 +12,7 @@ are complete.
 
 ## Compiler revision
 
-- git commit: 945d84b318601aab19cf7ca487440f0169aa0703
+- git commit: d5409cdff97b77ba3770b93a7d6eaf061a5ad1b3
 - Tcl: 9.0.1
 - rustc 1.98.1 (48a229cea 2026-09-01)
 - cranelift-codegen: 0.135.2
@@ -29,7 +29,7 @@ are complete.
 - native-compilable programs: 12
 - unsupported/failed programs: 1
 - total native functions inspected: 163
-- total committed disassembly bytes of machine code: 90186
+- total committed disassembly bytes of machine code: 90735
 
 ## Status
 
@@ -41,11 +41,11 @@ are complete.
 | bench/refined-checks.ir | unsupported | [bench/refined-checks.status.txt](bench/refined-checks.status.txt) | ir {1 2}: e39: native lowering does not support native uriEscape: the native "uriEscape" has no native implementation |
 | examples/stdlib/ai_text_clean.bot | compiled / inspected | [examples-stdlib/ai_text_clean.asm](examples-stdlib/ai_text_clean.asm) | 5 functions, 3663 bytes |
 | examples/stdlib/csv.bot | compiled / inspected | [examples-stdlib/csv.asm](examples-stdlib/csv.asm) | 11 functions, 6228 bytes |
-| examples/stdlib/csv_chunked.bot | compiled / inspected | [examples-stdlib/csv_chunked.asm](examples-stdlib/csv_chunked.asm) | 21 functions, 13355 bytes |
+| examples/stdlib/csv_chunked.bot | compiled / inspected | [examples-stdlib/csv_chunked.asm](examples-stdlib/csv_chunked.asm) | 21 functions, 13435 bytes |
 | examples/stdlib/csv_geometric.bot | compiled / inspected | [examples-stdlib/csv_geometric.asm](examples-stdlib/csv_geometric.asm) | 15 functions, 7365 bytes |
-| examples/stdlib/csv_records.bot | compiled / inspected | [examples-stdlib/csv_records.asm](examples-stdlib/csv_records.asm) | 59 functions, 30234 bytes |
+| examples/stdlib/csv_records.bot | compiled / inspected | [examples-stdlib/csv_records.asm](examples-stdlib/csv_records.asm) | 59 functions, 30423 bytes |
 | examples/stdlib/hashtable.bot | compiled / inspected | [examples-stdlib/hashtable.asm](examples-stdlib/hashtable.asm) | 30 functions, 17970 bytes |
-| examples/stdlib/matmul.bot | compiled / inspected | [examples-stdlib/matmul.asm](examples-stdlib/matmul.asm) | 7 functions, 4991 bytes |
+| examples/stdlib/matmul.bot | compiled / inspected | [examples-stdlib/matmul.asm](examples-stdlib/matmul.asm) | 7 functions, 5271 bytes |
 | examples/stdlib/string_replace.bot | compiled / inspected | [examples-stdlib/string_replace.asm](examples-stdlib/string_replace.asm) | 4 functions, 2943 bytes |
 | examples/stdlib/string_reverse.bot | compiled / inspected | [examples-stdlib/string_reverse.asm](examples-stdlib/string_reverse.asm) | 3 functions, 1172 bytes |
 

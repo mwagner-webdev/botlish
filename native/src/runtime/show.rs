@@ -33,7 +33,7 @@ fn show_into(v: Value, out: &mut String) {
         Kind::Unit => out.push_str("unit"),
         Kind::List => {
             out.push('[');
-            for (i, item) in list_of(v).items.iter().enumerate() {
+            for (i, item) in list_of(v).items().iter().enumerate() {
                 if i > 0 {
                     out.push_str(", ");
                 }
@@ -78,7 +78,7 @@ pub fn tcl_value(v: Value) -> Result<String, RtError> {
         Kind::Bool => tcl_list(&["bool".to_string(), (if v == TRUE { "true" } else { "false" }).to_string()]),
         Kind::Unit => "unit".to_string(),
         Kind::List => {
-            let items = list_of(v).items.iter().map(|item| tcl_value(*item)).collect::<Result<Vec<_>, _>>()?;
+            let items = list_of(v).items().iter().map(|item| tcl_value(*item)).collect::<Result<Vec<_>, _>>()?;
             tcl_list(&["list".to_string(), tcl_list(&items)])
         }
         Kind::Result => {

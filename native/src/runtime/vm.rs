@@ -211,8 +211,11 @@ impl Vm {
         if let Some(v) = self.reject_oversized_collection(items.len()) {
             return v;
         }
-        let bytes = items.capacity() * 8;
-        self.alloc(ListObj { hdr: Header::new(KIND_LIST, false), items }, bytes)
+        let boxed: Box<[Value]> = items.into_boxed_slice();
+        let len = boxed.len();
+        let bytes = len * 8;
+        let ptr = Box::into_raw(boxed) as *mut Value;
+        self.alloc(ListObj { hdr: Header::new(KIND_LIST, false), len, ptr }, bytes)
     }
 
     /// Enforces MAX_COLLECTION_LENGTH (see its doc comment): Some(NO_VALUE)

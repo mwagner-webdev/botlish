@@ -449,6 +449,94 @@ test native-spec-10 {heterogeneous lists and appends do not claim an element kin
          [native $appended]
 } -result {1 same {{list[int, str], int}} 1 same {error {CORE SEMANTIC TYPE} {+: expected int, got "a"}}}
 
+# ---------------------------------------------------------------------------
+# Inline ListGet fast path: a genuine dynamic list_get (not a compile-time-
+# constant index, so not native-spec-8's virtual-field read) inlines its
+# small-index test, bounds check and element load, instead of always calling
+# rt_list_get (codegen::clif's `Translator::list_get`). "icmp ult" is that
+# fast path's own fingerprint (the unsigned bounds compare): no other
+# lowering in this file emits it, so its count is a direct, non-brittle
+# structural proxy for "how many list_get sites got the inline treatment"
+# (item 47's "presence of expected load/check pattern", not a brittle
+# full-disassembly comparison).
+
+test native-listget-fast-1 {a dynamic list_get inlines its bounds check and load; rt_list_get is still declared (the cold fallback), just not the only path} -body {
+    set text "fn at(xs, i):\n    list_get(xs, i)\n\nat(\[10, 20, 30\], 1)"
+    set nir [nirOf $text]
+    set clif [clifOf $text]
+    set inst [lindex [nirInstances $nir at] 0]
+    set body [clifFunction $clif [nirFunctionId $nir at $inst]]
+    regexp {; u0:([0-9]+) = rt_list_get} $clif -> helperId
+    list [regexp -all {icmp ult} $body] [regexp -all "= u0:$helperId " $body] [native $text]
+} -result {1 1 {value 20}}
+
+test native-listget-fast-2 {BOTLISH_NATIVE_LISTGET_FAST_OPT=0 falls back to the old call-only lowering (no inline bounds check at all); both give the same result} -body {
+    set text "fn at(xs, i):\n    list_get(xs, i)\n\nat(\[10, 20, 30\], 1)"
+    set nir [nirOf $text]
+    set inst [lindex [nirInstances $nir at] 0]
+    set id [nirFunctionId $nir at $inst]
+    set onBody [clifFunction [clifOf $text] $id]
+    set onValue [native $text]
+    set ::env(BOTLISH_NATIVE_LISTGET_FAST_OPT) 0
+    try {
+        set offBody [clifFunction [clifOf $text] $id]
+        set offValue [native $text]
+    } finally {
+        unset ::env(BOTLISH_NATIVE_LISTGET_FAST_OPT)
+    }
+    list [regexp -all {icmp ult} $onBody] [regexp -all {icmp ult} $offBody] $onValue $offValue
+} -result {1 0 {value 20} {value 20}}
+
+test native-listget-fast-3 {matmul's dot inner loop: all three dynamic accesses (a_row[k], b[k], b[k][column]) inline their bounds check and load} -body {
+    set text "fn dot(a_row, b, column, k, count, total):\n    if k == count:\n        return total\n    term = list_get(a_row, k) * list_get(list_get(b, k), column)\n    dot(a_row, b, column, k + 1, count, total + term)\n\ndot(\[1, 2\], \[\[1, 2\], \[3, 4\]\], 0, 0, list_length(\[1, 2\]), 0)"
+    set nir [nirOf $text]
+    set inst [lindex [nirInstances $nir dot] 0]
+    set body [clifFunction [clifOf $text] [nirFunctionId $nir dot $inst]]
+    list [regexp -all {icmp ult} $body] [native $text]
+} -result {3 {value 7}}
+
+test native-listget-fast-4 {nested list_get(list_get(b, k), column): the first load's result is a valid receiver for the second's inline fast path too} -body {
+    set text "fn cell(m, r, c):\n    list_get(list_get(m, r), c) * 2\n\ncell(\[\[1, 2\], \[3, 4\]\], 1, 0)"
+    set nir [nirOf $text]
+    set inst [lindex [nirInstances $nir cell] 0]
+    set body [clifFunction [clifOf $text] [nirFunctionId $nir cell $inst]]
+    list [regexp -all {icmp ult} $body] [regexp {guard} $body] [native $text]
+} -result {2 0 {value 6}}
+
+test native-listget-fast-5 {RANGE errors (negative, ==length, >length, a BigInt index) are byte-identical whether the fast path is on or off} -body {
+    set cases [list \
+        "fn at(xs, i):\n    list_get(xs, i)\n\nat(\[1, 2\], 2)" \
+        "fn at(xs, i):\n    list_get(xs, i)\n\nat(\[\], 0)" \
+        "fn at(xs, i):\n    list_get(xs, i)\n\nat(\[1\], -1)" \
+        "fn at(xs, i):\n    list_get(xs, i)\n\nat(\[1\], 100000000000000000000)"]
+    set on [lmap c $cases {native $c}]
+    set ::env(BOTLISH_NATIVE_LISTGET_FAST_OPT) 0
+    try {
+        set off [lmap c $cases {native $c}]
+    } finally {
+        unset ::env(BOTLISH_NATIVE_LISTGET_FAST_OPT)
+    }
+    list [expr {$on eq $off}] $on
+} -result {1 {{error {CORE SEMANTIC RANGE} {list_get: index 2 is outside 0..1}} {error {CORE SEMANTIC RANGE} {list_get: index 0 is outside 0..-1}} {error {CORE SEMANTIC RANGE} {list_get: index -1 is outside 0..0}} {error {CORE SEMANTIC RANGE} {list_get: index 100000000000000000000 is outside 0..0}}}}
+
+test native-listget-fast-6 {boundary indices: a length-1 list at index 0 succeeds, at index 1 fails, and the empty list fails at index 0} -body {
+    list [native "fn at(xs, i):\n    list_get(xs, i)\n\nat(\[42\], 0)"] \
+         [native "fn at(xs, i):\n    list_get(xs, i)\n\nat(\[42\], 1)"] \
+         [native "fn at(xs, i):\n    list_get(xs, i)\n\nat(\[\], 0)"]
+} -result {{value 42} {error {CORE SEMANTIC RANGE} {list_get: index 1 is outside 0..0}} {error {CORE SEMANTIC RANGE} {list_get: index 0 is outside 0..-1}}}
+
+test native-listget-fast-7 {a managed element the fast path loads (no allocation of its own) stays correctly rooted across a later allocation, under GC stress} -body {
+    set text "fn f(xs, i):\n    v = list_get(xs, i)\n    y = concat(\"a very long string so it actually allocates\", \"more text here too\")\n    \[v, y\]\n\nf(\[\"first element also fairly long so nothing is virtualized away\", \"second\"\], 0)"
+    set normal [native $text]
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        set stressed [native $text]
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+    list [expr {$normal eq $stressed}] $normal
+} -result {1 {value {["first element also fairly long so nothing is virtualized away", "a very long string so it actually allocatesmore text here too"]}}}
+
 test native-spec-11 {errors and big Ints keep their semantics in specializations} -body {
     list [parity "fn double(x):\n    x * 2\n\n\[double(4611686018427387903), double(-4611686018427387904)\]"] \
          [parity "fn cut(s, n):\n    substring(s, 0, n)\n\ncut(\"abc\", 5)"] \

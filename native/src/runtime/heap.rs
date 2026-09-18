@@ -90,7 +90,7 @@ impl Heap {
             }
             header.marked = 1;
             match header.kind {
-                KIND_LIST => stack.extend_from_slice(&list_of(v).items),
+                KIND_LIST => stack.extend_from_slice(list_of(v).items()),
                 // Every slot is traced, initialized or not: allocation fills
                 // unused capacity with UNIT (Vm::new_mutarray), never
                 // uninitialized memory, so there is nothing here that could
@@ -189,7 +189,7 @@ pub unsafe fn object_size(object: *mut Header) -> usize {
         match (*object).kind {
             KIND_BIGINT => size_of::<BigIntObj>() + (as_ref::<BigIntObj>(v).n.bits() as usize / 8),
             KIND_STR => size_of::<StrObj>() + str_of(v).text.len(),
-            KIND_LIST => size_of::<ListObj>() + list_of(v).items.capacity() * 8,
+            KIND_LIST => size_of::<ListObj>() + list_of(v).len * 8,
             KIND_MUTARRAY => size_of::<MutArrayObj>() + mutarray_of(v).slots.len() * 8,
             KIND_RESULT => size_of::<ResultObj>(),
             KIND_CLOSURE => size_of::<ClosureObj>() + closure_of(v).ncaps * 8,
@@ -206,7 +206,10 @@ pub unsafe fn free_object(object: *mut Header) {
         match (*object).kind {
             KIND_BIGINT => drop(Box::from_raw(object as *mut BigIntObj)),
             KIND_STR => drop(Box::from_raw(object as *mut StrObj)),
-            KIND_LIST => drop(Box::from_raw(object as *mut ListObj)),
+            KIND_LIST => {
+                let l = Box::from_raw(object as *mut ListObj);
+                drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(l.ptr, l.len)));
+            }
             KIND_RESULT => drop(Box::from_raw(object as *mut ResultObj)),
             KIND_CLOSURE => {
                 let c = Box::from_raw(object as *mut ClosureObj);
@@ -246,8 +249,11 @@ mod tests {
     }
 
     fn list_val(heap: &mut Heap, metrics: &mut Metrics, items: Vec<Value>) -> Value {
-        let bytes = items.capacity() * 8;
-        let obj = ListObj { hdr: Header::new(KIND_LIST, false), items };
+        let boxed: Box<[Value]> = items.into_boxed_slice();
+        let len = boxed.len();
+        let bytes = len * 8;
+        let ptr = Box::into_raw(boxed) as *mut Value;
+        let obj = ListObj { hdr: Header::new(KIND_LIST, false), len, ptr };
         alloc(heap, metrics, obj, bytes)
     }
 

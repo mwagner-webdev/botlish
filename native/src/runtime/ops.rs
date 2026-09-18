@@ -195,7 +195,7 @@ fn equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
         Kind::Bool => a == b,
         Kind::Unit => true,
         Kind::List => {
-            let (xs, ys) = (&list_of(a).items, &list_of(b).items);
+            let (xs, ys) = (list_of(a).items(), list_of(b).items());
             if xs.len() != ys.len() {
                 return Ok(false);
             }
@@ -291,7 +291,7 @@ fn hash_mix(p: *mut Vm, h: u64, v: Value) -> Result<u64, ()> {
         Kind::Bool => fnv1a(h, &[(v == TRUE) as u8]),
         Kind::Unit => h,
         Kind::List => {
-            let items = &list_of(v).items;
+            let items = list_of(v).items();
             let mut h = fnv1a(h, &(items.len() as u64).to_le_bytes());
             for item in items {
                 let sub = hash_mix(p, FNV_OFFSET, *item)?;
@@ -490,11 +490,11 @@ pub extern "C" fn rt_list_new(p: *mut Vm, n: u64, items: *const Value) -> Value 
 }
 
 pub extern "C" fn rt_list_len(p: *mut Vm, l: Value) -> Value {
-    vm(p).new_int(list_of(l).items.len() as i64)
+    vm(p).new_int(list_of(l).len as i64)
 }
 
 pub extern "C" fn rt_list_get(p: *mut Vm, l: Value, index: Value) -> Value {
-    let items = &list_of(l).items;
+    let items = list_of(l).items();
     match int_small(index) {
         Some(i) if i >= 0 && (i as usize) < items.len() => items[i as usize],
         _ => {
@@ -506,7 +506,7 @@ pub extern "C" fn rt_list_get(p: *mut Vm, l: Value, index: Value) -> Value {
 }
 
 pub extern "C" fn rt_list_append(p: *mut Vm, l: Value, v: Value) -> Value {
-    let old = &list_of(l).items;
+    let old = list_of(l).items();
     // Elements copied: the existing list's backing store, memmoved whole.
     // The appended element itself is a fresh write of a given value, not a
     // copy of stored data, so it is not counted here.

@@ -242,6 +242,14 @@ struct Translator<'a, 'b, M: Module> {
     /// translation begins. Replaces the old "one slot per register" policy
     /// (see this file's header and `def`/`def_raw`).
     plan: RootPlan,
+    /// Whether `op listget` inlines its check-and-load fast path (`list_get`
+    /// below) instead of always calling `rt_list_get`. On by default;
+    /// BOTLISH_NATIVE_LISTGET_FAST_OPT=0 disables it, for differential
+    /// testing and benchmark comparison (mirrors heap.rs's
+    /// BOTLISH_NATIVE_GC_STRESS/MIN: a plain env var read once, since this
+    /// is a pure Cranelift-codegen choice, not something native/lower.tcl's
+    /// NIR emission needs to know about).
+    listget_fast: bool,
 }
 
 impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
@@ -260,6 +268,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         let error_exit = b.create_block();
         let placeholder = ir::Value::from_u32(0);
         let plan = roots::plan(f);
+        let listget_fast = std::env::var("BOTLISH_NATIVE_LISTGET_FAST_OPT").ok().as_deref() != Some("0");
         Translator {
             b,
             module,
@@ -280,6 +289,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             terminated: false,
             plan,
             result_buf: None,
+            listget_fast,
         }
     }
 
@@ -865,6 +875,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         match op {
             IAdd | ISub | IMul => self.int_arith(op, a[0], a[1]),
             ILt | ILe | IGt | IGe | IEq => self.int_compare(op, a[0], a[1]),
+            ListGet if self.listget_fast => self.list_get(a[0], a[1]),
             VEq => {
                 // Two small Ints compare as words; everything else structurally.
                 let (fast, slow, done, result) = self.both_small_split(a[0], a[1]);
@@ -1083,6 +1094,70 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         let flag = self.b.ins().icmp_imm_s(cc, order, 0);
         let r = self.bool_of(flag);
         self.b.ins().jump(done, &[BlockArg::Value(r)]);
+        self.b.switch_to_block(done);
+        result
+    }
+
+    /// `list_get(LIST, INDEX)`'s inline fast path: LIST and INDEX already
+    /// have semantic kinds List and Int respectively -- guaranteed, not
+    /// merely likely, exactly like every other operand this file's `op`
+    /// dispatches on (see ops.rs's module doc: "operands already have the
+    /// kinds the operation requires"), since native/lower.tcl's NativeCall
+    /// always runs EmitArgGuards before emitting `op listget` (a runtime
+    /// `guard list`/`guard int`, or no guard at all when hir::aot already
+    /// proved the argument's static type). So unlike codegen::clif's other
+    /// representation-uncertain fast paths (`both_small_split` and its
+    /// callers), this one needs no receiver-kind test at all: only INDEX's
+    /// *representation* (small tagged Int vs BigInt heap object) is still
+    /// open, since Kind::Int covers both. What remains genuinely dynamic --
+    /// decoding a small index, bounds-checking it, and loading the element
+    /// -- is inlined here; a BigInt index or an out-of-range/negative one
+    /// falls back to `rt_list_get`, which still defines every failure's
+    /// exact semantics (RANGE errors, BigInt indices) so this lowering
+    /// never duplicates that logic.
+    fn list_get(&mut self, list: ir::Value, index: ir::Value) -> ir::Value {
+        let done = self.b.create_block();
+        let result = self.b.append_block_param(done, I64);
+        let slow = self.b.create_block();
+
+        // INDEX is small (tagged: low bit 1) rather than a BigInt (heap
+        // pointer: low bit 0), exactly `both_small_split`'s own test.
+        let idx_tag = self.b.ins().band_imm_s(index, 1);
+        let idx_is_small = self.b.ins().icmp_imm_s(IntCC::NotEqual, idx_tag, 0);
+        let check_bounds = self.b.create_block();
+        self.b.ins().brif(idx_is_small, check_bounds, &[], slow, &[]);
+
+        // Bounds check: LIST's length is a small, nonnegative Int (its
+        // MAX_COLLECTION_LENGTH invariant), so comparing the *decoded*
+        // index against it as unsigned rejects a negative index (which
+        // wraps to a huge unsigned value) and an out-of-range one alike in
+        // one compare -- core/lists.tcl's `i < 0 || i >= length` in a
+        // single IntCC::UnsignedLessThan, not two checks.
+        self.b.switch_to_block(check_bounds);
+        let idx = self.b.ins().sshr_imm_s(index, 1);
+        let len = self.b.ins().load(I64, MemFlagsData::trusted(), list, LIST_LEN_OFFSET);
+        let in_bounds = self.b.ins().icmp(IntCC::UnsignedLessThan, idx, len);
+        let load_elem = self.b.create_block();
+        self.b.ins().brif(in_bounds, load_elem, &[], slow, &[]);
+
+        // Direct element load: LIST's elements live behind a raw pointer at
+        // LIST_PTR_OFFSET (value.rs's ListObj), exactly ClosureObj's own
+        // caps/ncaps pattern.
+        self.b.switch_to_block(load_elem);
+        let ptr = self.b.ins().load(I64, MemFlagsData::trusted(), list, LIST_PTR_OFFSET);
+        let byte_offset = self.b.ins().ishl_imm_s(idx, 3);
+        let addr = self.b.ins().iadd(ptr, byte_offset);
+        let elem = self.b.ins().load(I64, MemFlagsData::trusted(), addr, 0);
+        self.b.ins().jump(done, &[BlockArg::Value(elem)]);
+
+        // Cold fallback: a BigInt index, or a bounds failure -- rt_list_get
+        // re-derives the exact same RANGE error `list_get`'s Tcl semantics
+        // (core/lists.tcl) define, never duplicated here.
+        self.b.switch_to_block(slow);
+        let r = self.call_helper("rt_list_get", &[self.vm, list, index]);
+        self.check(r);
+        self.b.ins().jump(done, &[BlockArg::Value(r)]);
+
         self.b.switch_to_block(done);
         result
     }
