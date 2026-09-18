@@ -1,7 +1,7 @@
 source:  examples/stdlib/hashtable.bot
 backend: Cranelift (specialize=1)
 asm:     hashtable.asm
-machine-code bytes: 18061 (per function: 172 85 85 85 85 548 696 208 184 184 184 184 184 268 299 355 1036 1568 581 389 596 708 1276 1124 961 833 1528 1132 1469 1054)
+machine-code bytes: 17970 (per function: 172 85 85 85 85 548 696 208 184 184 184 184 184 268 299 355 1036 1568 581 389 596 639 1433 945 961 833 1528 1132 1469 1054)
 
 functions:
   0 <program entry>: nir-regs=1
@@ -25,9 +25,9 @@ functions:
   18 ht_get<mutarray, str>: nir-regs=12
   19 ht_contains<mutarray, str>: nir-regs=7
   20 ht_rehash_probe<mutarray, int, int>: nir-regs=12
-  21 ht_rehash_insert<list<mutarray>, int, any, any>: nir-regs=21
-  22 ht_rehash_scan<list, int, int, list<mutarray>, int>: nir-regs=29
-  23 ht_rehash<mutarray, int>: nir-regs=41
+  21 ht_rehash_insert<list<mutarray>, int, any, any>: nir-regs=14
+  22 ht_rehash_scan<list, int, int, list<mutarray>, int>: nir-regs=24
+  23 ht_rehash<mutarray, int>: nir-regs=30
   24 ht_should_grow<mutarray>: nir-regs=15
   25 ht_grow_or_clean<mutarray>: nir-regs=12
   26 ht_place<mutarray, int, str, str>: nir-regs=31
@@ -226,31 +226,31 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     shadow slots: 4
   
   function 21 "ht_rehash_insert"
-    NIR regs: 21
-    raw regs: 3
-    managed-capable regs: 18
+    NIR regs: 14
+    raw regs: 0
+    managed-capable regs: 14
     safepoints: 2
-    root candidates: 7
-    max live roots: 6
-    shadow slots: 6
+    root candidates: 8
+    max live roots: 7
+    shadow slots: 7
   
   function 22 "ht_rehash_scan"
-    NIR regs: 29
-    raw regs: 4
-    managed-capable regs: 25
+    NIR regs: 24
+    raw regs: 1
+    managed-capable regs: 23
     safepoints: 3
-    root candidates: 9
-    max live roots: 7
-    shadow slots: 7
+    root candidates: 13
+    max live roots: 11
+    shadow slots: 11
   
   function 23 "ht_rehash"
-    NIR regs: 41
-    raw regs: 10
-    managed-capable regs: 31
-    safepoints: 11
-    root candidates: 13
-    max live roots: 7
-    shadow slots: 7
+    NIR regs: 30
+    raw regs: 7
+    managed-capable regs: 23
+    safepoints: 9
+    root candidates: 11
+    max live roots: 10
+    shadow slots: 10
   
   function 24 "ht_should_grow"
     NIR regs: 15
@@ -311,5 +311,5 @@ mechanical pattern counts (triage only; see report for interpretation):
   2 x calls to rt_int_sub
   3 x calls to rt_int_mul
   9 x calls to rt_int_cmp
-  134 x calls to other rt_* helpers
+  123 x calls to other rt_* helpers
   25 x guard/guardbool instructions

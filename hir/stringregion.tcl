@@ -222,8 +222,8 @@ proc hir::stringregion::Bindings {hir spec regionOf} {
         # two operands are both statically str-typed (so NativeCallOp would
         # lower it to `streq`) -> the call's *other* operand ExprId.
         # lenArgs: the set of ExprIds that are the sole argument of a native
-        # `length` call. Built once per region, like hir::escape::Bindings's
-        # own listGetByArg.
+        # `length` call. Built once per region, like hir::escape::
+        # RegionInfo's own listGetByArg.
         set eqOther [dict create]
         set lenArgs [dict create]
         foreach e $exprs {

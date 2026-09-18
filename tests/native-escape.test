@@ -214,30 +214,28 @@ test escape-csv-3 {the same corpus program allocates fewer Lists with escape-opt
 } -result 1
 
 # ---------------------------------------------------------------------------
-# HashTable rehash grouping (#16): a non-CSV case, and the structural
-# blocker when it cannot be scalarized (the aggregate is passed as a plain
-# call *argument*, not returned -- see hir/escape.tcl's header). This is an
-# anti-overfitting check: the optimizer must not special-case CSV, and must
-# not silently mis-scalarize a shape it cannot actually support.
+# HashTable rehash grouping (#16): a non-CSV case. This *used* to document
+# a structural blocker (the aggregate is passed as a plain call *argument*,
+# not returned) this file's own local/remote Classify shapes alone cannot
+# reach -- native-param-aggregate.test's own paramagg-hashtable-2 now
+# covers the closed-call *parameter* shape (hir/escape.tcl's third
+# Classify case, `param`) that removes it: `dest`/`src` are local `[..]`
+# literals hir/escape.tcl recognizes (this file's own local case) and
+# forwarded unchanged through ht_rehash_scan's and ht_rehash_insert's own
+# parameters, which is exactly what that milestone added. This test now
+# only confirms scalar replacement + parameter virtualization together
+# still produce correct HashTable behavior; the "still not reduced"
+# assertion moved to native-param-aggregate.test's own history as
+# "now reduced".
 
 set ::htSource [regsub {\nsample\(\)\n$} [corpus::text hashtable] "\n"]
-
-proc htHir {text} {
-    return [sourceHir "$::htSource\n$text\n"]
-}
 
 test escape-hashtable-1 {HashTable set/get/delete is unaffected by scalar replacement} -body {
     assertParity [corpus::text hashtable]
 } -result {list {{bool true} {bool true} {bool false} {bool false} {bool true} {int 1}}}
 
-test escape-hashtable-2 {rehash's [controls, keys, values] argument grouping is not scalarized (documented blocker)} -body {
-    # ht_rehash_insert/ht_rehash_scan receive `dest`/`src` as a plain
-    # parameter, not as a call result: hir/escape.tcl only recognizes an
-    # aggregate flowing out of a call (a bind or a return), never one
-    # flowing in as an argument, so this allocation count is identical with
-    # escape-opt on or off -- confirming the optimizer neither crashes on
-    # this shape nor (wrongly) claims to have removed it.
-    set hir [htHir {
+test escape-hashtable-2 {rehash still evaluates correctly with escape-opt on or off} -body {
+    set driver {
 fn many():
     t = ht_new()
     ht_set(t, "a", 1)
@@ -249,10 +247,8 @@ fn many():
     ht_size(t)
 
 many()
-}]
-    set on [dict get [native::allocationReport $hir summary 1 -escape-opt 1] byKind List allocations]
-    set off [dict get [native::allocationReport $hir summary 1 -escape-opt 0] byKind List allocations]
-    list [native::evalHir $hir] $on [expr {$on == $off}]
-} -result {{int 6} 2 1}
+}
+    assertParity "$::htSource\n$driver\n"
+} -result {int 6}
 
 cleanupTests

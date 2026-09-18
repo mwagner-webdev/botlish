@@ -5,7 +5,21 @@
 #   hir::escape::wants $analysis $instanceId          -> 0 | 1
 #   hir::escape::arity $analysis $instanceId          -> N | ""
 #   hir::escape::virtualArity $analysis $instanceId $bindingId  -> N | ""
+#   hir::escape::paramVirtualArity $analysis $instanceId $bindingId  -> N | ""
+#   hir::escape::paramWants $analysis $instanceId     -> 0 | 1
 #   hir::escape::classify $hir $spec $analysis $instanceId $e   -> "" | {local N} | {remote N target}
+#
+# Parameter virtualization (the closed-call-boundary extension this module
+# was originally written up to, at #24 of its own header, as a "structural
+# blocker"): a fixed-shape List value crossing an *exact closed call's
+# parameter* need not materialize as a List either, when the value's actual
+# shape is proven by its callers (never merely assumed from the callee's own
+# access pattern) and every one of the parameter's own uses is itself
+# structural (see "Parameter/result virtualization across closed calls"
+# below for the two-pass analysis, and native/lower.tcl's "Parameter
+# virtualization" section for how a `fields`/`fieldscompanion` internal
+# variant is built from `paramVirtualArity`/`paramWants`, alongside the
+# instance's unconditionally still-emitted canonical, List-taking function).
 #
 # This is a *representation* analysis, in the same sense as hir/range.tcl:
 # nothing here changes what a Botlish List means, HIR types, or
@@ -28,10 +42,13 @@
 # itself recognized this same way. MutableArray, HashTable, Cell, closures,
 # Strings, foreign values, and arbitrary/unknown-length Lists are never
 # touched: they simply never match the recognizers below, so they always
-# fall back to ordinary lowering. Passing such an aggregate as a plain call
-# *argument* (rather than a call *result*) is also never recognized here --
-# see the "structural blocker" this leaves for HashTable's rehash grouping,
-# documented in native/lower.tcl.
+# fall back to ordinary lowering. Classify itself only ever recognizes a
+# *construction* (a literal, or a forwarding call result); passing such an
+# aggregate as a plain call *argument* is a separate, later concern this
+# file also now covers -- see "Parameter/result virtualization across
+# closed calls" below (this used to be a structural blocker for HashTable's
+# rehash grouping; it no longer is, for the exact-closed-call shapes that
+# section recognizes).
 #
 # What counts as "the aggregate's identity is never observed" (the
 # milestone's #4-5, kept deliberately narrow and conservative -- if
@@ -268,97 +285,6 @@ proc hir::escape::TrailingPositions {hir topBody exprs} {
     return $trailing
 }
 
-# {VIRTUAL WANTS}: VIRTUAL is InstanceId -> BindingId -> N, for every local
-# binding of every used instance that is bound (once, non-duplicate, kind
-# local, never captured by a nested closure) to a recognized construction
-# (Classify) all of whose references are `list_get(ref, constant)` at a
-# position within its arity. WANTS is a set (InstanceId -> 1) of the
-# instances directly demanded as a scalar-replacement-companion target by
-# such a binding's remote construction.
-proc hir::escape::Bindings {hir spec arity} {
-    set context [dict get $spec context]
-    set virtual [dict create]
-    set wants [dict create]
-    foreach id [dict get $spec used] {
-        set instance [dict get $spec instances $id]
-        set block [dict get $instance block]
-        set region [expr {$block eq "program" ? "program" : $block}]
-        set view [hir::specialize::view $hir $spec $id]
-        set exprs [dict get $context exprs $region]
-        set topBody [expr {$region eq "program" ? [hir::roots $view] : [hir::get $view $region body]}]
-        # A bind expression at a trailing position (the region's own body,
-        # or any nested if/loop body within it) is itself an implicit
-        # "return" of its value out of that scope -- an escaping use no
-        # `ref` node represents (see the file header's caution about not
-        # confusing "no observed use" with "no use").
-        set trailing [TrailingPositions $view $topBody $exprs]
-
-        set captured [dict create]
-        set refsByBinding [dict create]
-        set listGetByArg [dict create]
-        foreach e $exprs {
-            switch -- [hir::kind $view $e] {
-                block {
-                    foreach b [hir::get $view $e captures] {
-                        dict set captured $b 1
-                    }
-                }
-                ref {
-                    set b [hir::get $view $e binding]
-                    if {$b ne ""} {
-                        dict lappend refsByBinding $b $e
-                    }
-                }
-                call {
-                    set node [hir::node $view $e]
-                    lassign [dict get $node target] targetKind target
-                    if {$targetKind eq "native" && [dict get [hir::symbol $view $target] name] eq "list_get"
-                            && [llength [dict get $node args]] == 2} {
-                        dict set listGetByArg [lindex [dict get $node args] 0] $e
-                    }
-                }
-            }
-        }
-
-        foreach e $exprs {
-            if {[hir::kind $view $e] ne "bind"} {
-                continue
-            }
-            set node [hir::node $view $e]
-            if {[dict get $node duplicate]} {
-                continue
-            }
-            if {[dict exists $trailing $e]} {
-                continue
-            }
-            set b [dict get $node binding]
-            if {[dict get [hir::binding $view $b] kind] ne "local" || [dict exists $captured $b]} {
-                continue
-            }
-            set c [Classify $view $instance $arity [dict get $node value]]
-            if {$c eq ""} {
-                continue
-            }
-            lassign $c kind n target
-            set ok 1
-            foreach r [expr {[dict exists $refsByBinding $b] ? [dict get $refsByBinding $b] : {}}] {
-                if {![ScalarUse $view $listGetByArg $r $n]} {
-                    set ok 0
-                    break
-                }
-            }
-            if {!$ok} {
-                continue
-            }
-            dict set virtual $id $b $n
-            if {$kind eq "remote"} {
-                dict set wants $target 1
-            }
-        }
-    }
-    return [list $virtual $wants]
-}
-
 # 1 if reference R (to a virtual binding of arity N) is used only as the
 # first argument of a `list_get` call whose second argument is a
 # compile-time Int constant within 0..N-1 (LISTGETBYARG: first-arg ExprId ->
@@ -406,19 +332,463 @@ proc hir::escape::Propagate {wants forward} {
 }
 
 # ---------------------------------------------------------------------------
+# Parameter/result virtualization across closed calls
+#
+# Everything above this section is unchanged from the original local/remote
+# scalar replacement: a fixed-shape List that is *constructed* locally or
+# *returned* by a direct call may stay scalar. This section extends the same
+# discipline across an exact closed call's *parameter* boundary too: a
+# fixed-shape List value that a proven exact caller hands to a callee whose
+# own uses of that parameter are themselves all structural (Classify/
+# ScalarUse's same "list_get at a constant position" rule, plus a new
+# supported use -- forwarding the same value, unchanged, as an argument to
+# another exact closed call) need not be materialized at that boundary
+# either: its fields cross as ordinary internal-call arguments instead (see
+# native/lower.tcl's "Parameter virtualization" section for the lowering
+# side -- a `fields` internal variant, built the same way native/lower.tcl
+# already builds a scalar-replacement companion or a Block-virtualization
+# internal variant: additively, alongside the instance's unconditionally
+# still-emitted canonical function).
+#
+# Two passes, deliberately kept separate because they answer different
+# questions (the milestone's #41: shape is a caller-proven *value* fact,
+# never inferred merely from which indices a callee happens to read):
+#
+#   RawLocalArities / RawParamArities
+#       *Which* slots (a local binding, or a parameter) provably carry a
+#       fixed-shape value at all, and of what arity -- from real
+#       constructions only: a `[e0..en-1]` literal, a call to an
+#       instance whose own result Arities already recognizes, or (new)
+#       an exact caller's own already-fixed-shape slot forwarded
+#       unchanged. This is a monotonic (least-fixpoint) *growth*: once
+#       some slot's shape is provable, it can be cited as a source for
+#       another slot's shape, and so on along a chain of exact calls
+#       (the milestone's #23's `caller(state) -> helper1(state) ->
+#       helper2(state)` chain: `state`'s shape is immediate from its own
+#       literal construction; helper1's own `state` parameter's shape
+#       then follows from *that*, in a later round; helper2's parameter
+#       follows from helper1's in a further round). It says nothing yet
+#       about whether it is *safe* to actually represent that slot as
+#       scalar fields -- only that, semantically, it always would be an
+#       N-element List if it does exist.
+#
+#   Eligible
+#       Of the slots RawLocalArities/RawParamArities found a shape for,
+#       *which* are safe to actually virtualize: every reference to the
+#       slot, within its own instance's region, is either a `list_get`
+#       at a compile-time-constant in-range index, or the unchanged
+#       forwarding of the same value (same position, no re-wrapping) as
+#       an argument to another exact call whose own corresponding
+#       parameter is *also* kept eligible with the *same* arity. This is
+#       a monotonic *shrink* (a greatest fixpoint over the candidate set
+#       RawLocalArities/RawParamArities already fixed): start optimistic
+#       (every shaped slot is a candidate), then repeatedly drop any
+#       candidate with an unsupported use, including a forwarding use
+#       whose target has itself already been dropped -- exactly the
+#       "all relevant uses compatible, or preserve the canonical
+#       aggregate entirely" discipline #22 requires (never partial, never
+#       a late-materializing branch). An out-of-range constant index
+#       (#10) simply fails this check like any other unsupported use,
+#       which correctly declines virtualization and so preserves the
+#       real `list_get`'s ordinary runtime INDEX error.
+#
+# Multiple callers of the same parameter position (#42) are handled by
+# RawParamArities requiring *every* exact call site's argument to classify
+# to the identical arity before the parameter is even a candidate: any
+# caller with an unclassifiable or differently-shaped argument silently
+# withholds the fact, so the parameter simply never becomes eligible --
+# not a partial/unsound virtualization for the callers that *do* agree, and
+# not a special case, just the ordinary "no proof, no optimization" rule
+# every pass in this file already follows. An unknown/open/dynamic caller
+# (#43) is exactly the same case: since it is never present in any used
+# instance's `calls` map (hir::specialize only records *exact* resolved
+# direct calls there), it never contributes a proposed shape, so it can
+# never itself cause an unsound assumption -- it just means the parameter
+# it calls into, if some *other* exact caller's shape also fails to appear
+# unanimously, is not virtualized; the canonical function remains exactly
+# as callable as ever for it, unconditionally, the same fallback guarantee
+# every other case in this module already has.
+#
+# `hir::escape::wants` is not extended to track this new "companion needed
+# because some argument's classification was itself `remote`" case
+# precisely: native/lower.tcl's CompanionRef/CompanionFunction path already
+# builds an instance's companion purely on demand (gated only on
+# `hir::escape::arity`, not on `wants` -- `wants` is bookkeeping for
+# `explain`/diagnostics, never a lowering precondition), so no extra
+# propagation is needed for correctness here.
+
+# {CALLEE -> {{CALLER ARGEXPRS} ...}}: for every used instance CALLER, every
+# direct call recorded in its own `hir::specialize` instance.calls map
+# (i.e. every call HIR statically resolved to one exact callee instance),
+# grouped by callee -- the reverse of Arities'/Classify's own forward
+# `instance.calls` lookup, built once and reused by RawParamArities and (via
+# REGIONS' own argPos) Eligible.
+proc hir::escape::CallSites {hir spec} {
+    set sites [dict create]
+    foreach id [dict get $spec used] {
+        set instance [dict get $spec instances $id]
+        set calls [dict get $instance calls]
+        if {![dict size $calls]} {
+            continue
+        }
+        set view [hir::specialize::view $hir $spec $id]
+        dict for {ce callee} $calls {
+            set node [hir::node $view $ce]
+            if {[dict get $node kind] ne "call"} {
+                continue
+            }
+            dict lappend sites $callee [list $id [dict get $node args]]
+        }
+    }
+    return $sites
+}
+
+# Per used instance ID: the same region-scanning facts Bindings computes
+# (view, instance, region, exprs, trailing, captured, refsByBinding,
+# listGetByArg), plus ARGPOS (ref ExprId -> {calleeInstanceOrEmpty
+# argIndex}, for every `ref` used as a plain call argument anywhere in the
+# region -- calleeInstanceOrEmpty is "" unless the call is itself an exact
+# closed call HIR/specialize resolved). Computed once per instance and
+# shared by RawLocalArities, RawParamArities and Eligible, so none of them
+# re-scans the same region repeatedly.
+proc hir::escape::RegionInfo {hir spec id} {
+    set instance [dict get $spec instances $id]
+    set block [dict get $instance block]
+    set region [expr {$block eq "program" ? "program" : $block}]
+    set view [hir::specialize::view $hir $spec $id]
+    set context [dict get $spec context]
+    set exprs [dict get $context exprs $region]
+    set topBody [expr {$region eq "program" ? [hir::roots $view] : [hir::get $view $region body]}]
+    set trailing [TrailingPositions $view $topBody $exprs]
+    set captured [dict create]
+    set refsByBinding [dict create]
+    set listGetByArg [dict create]
+    set argPos [dict create]
+    foreach e $exprs {
+        switch -- [hir::kind $view $e] {
+            block {
+                foreach b [hir::get $view $e captures] {
+                    dict set captured $b 1
+                }
+            }
+            ref {
+                set b [hir::get $view $e binding]
+                if {$b ne ""} {
+                    dict lappend refsByBinding $b $e
+                }
+            }
+            call {
+                set node [hir::node $view $e]
+                lassign [dict get $node target] targetKind target
+                set args [dict get $node args]
+                if {$targetKind eq "native" && [dict get [hir::symbol $view $target] name] eq "list_get"
+                        && [llength $args] == 2} {
+                    dict set listGetByArg [lindex $args 0] $e
+                }
+                set callee ""
+                if {$targetKind eq "block" && [dict exists [dict get $instance calls] $e]} {
+                    set callee [dict get [dict get $instance calls] $e]
+                }
+                set i 0
+                foreach a $args {
+                    if {[hir::kind $view $a] eq "ref"} {
+                        dict set argPos $a [list $callee $i]
+                    }
+                    incr i
+                }
+            }
+        }
+    }
+    return [dict create view $view instance $instance region $region exprs $exprs \
+        trailing $trailing captured $captured refsByBinding $refsByBinding \
+        listGetByArg $listGetByArg argPos $argPos]
+}
+
+# The arity a caller's argument expression E (in VIEW/INSTANCE, CALLERID's
+# own region) proves for whatever parameter it is passed to, or "" if not
+# (yet -- this may be asked again in a later RawParamArities round)
+# provable: either a direct recognized construction (Classify -- a literal
+# or a call to an already-arity'd instance), or a `ref` to a binding this
+# same caller's own region already knows (RAWLOCAL/RAWPARAM, "so far": a
+# growing set, safe to consult mid-fixpoint since both are monotonic
+# growth-only facts, never revised).
+proc hir::escape::ArgShape {view instance arity rawLocal rawParam callerId e} {
+    set c [Classify $view $instance $arity $e]
+    if {$c ne ""} {
+        return [lindex $c 1]
+    }
+    if {[hir::kind $view $e] ne "ref"} {
+        return ""
+    }
+    set b [hir::get $view $e binding]
+    if {$b eq ""} {
+        return ""
+    }
+    if {[dict exists $rawLocal $callerId $b]} {
+        return [dict get $rawLocal $callerId $b]
+    }
+    if {[dict exists $rawParam $callerId $b]} {
+        return [dict get $rawParam $callerId $b]
+    }
+    return ""
+}
+
+# {RESULT TARGETS}: RESULT is InstanceId -> BindingId -> N, for every local
+# binding (kind local, non-duplicate, never captured by a nested block, not
+# itself an implicit trailing return of its own scope -- the same
+# structural preconditions the original local-only pass already required)
+# whose bound value Classify recognizes, *regardless* of how its references
+# go on to be used (a pure value-shape fact: see the file header above).
+# TARGETS is InstanceId -> BindingId -> target InstanceId, for exactly the
+# entries whose Classify was `remote` (their construction is itself a call
+# to a companion-eligible instance) -- consulted only for `wants`
+# bookkeeping (analyze, below); native/lower.tcl's own CompanionRef/
+# CompanionFunction path never needs it (it builds a companion purely on
+# demand from `arity`, not from `wants`).
+proc hir::escape::RawLocalArities {hir spec arity regions} {
+    set result [dict create]
+    set targets [dict create]
+    foreach id [dict get $spec used] {
+        set info [dict get $regions $id]
+        set view [dict get $info view]
+        set instance [dict get $info instance]
+        set trailing [dict get $info trailing]
+        set captured [dict get $info captured]
+        foreach e [dict get $info exprs] {
+            if {[hir::kind $view $e] ne "bind"} {
+                continue
+            }
+            set node [hir::node $view $e]
+            if {[dict get $node duplicate] || [dict exists $trailing $e]} {
+                continue
+            }
+            set b [dict get $node binding]
+            if {[dict get [hir::binding $view $b] kind] ne "local" || [dict exists $captured $b]} {
+                continue
+            }
+            set c [Classify $view $instance $arity [dict get $node value]]
+            if {$c eq ""} {
+                continue
+            }
+            lassign $c kind n target
+            dict set result $id $b $n
+            if {$kind eq "remote"} {
+                dict set targets $id $b $target
+            }
+        }
+    }
+    return [list $result $targets]
+}
+
+# RAWPARAM: InstanceId -> BindingId -> N, for every parameter binding of a
+# used, non-program instance every one of whose *exact* call sites
+# (CALLSITES) proves, via ArgShape, the identical arity at that position --
+# a pure value-shape fact (see the file header), independent of whether B's
+# own uses, or any forwarding caller's own uses, are themselves structurally
+# safe (Eligible decides that separately). An instance with no exact call
+# sites at all (CALLSITES has no entry for it: every actual call reaching it
+# is dynamic/indirect) never gets a parameter arity here, soundly (#43): no
+# caller ever proved a shape for it.
+proc hir::escape::RawParamArities {spec arity rawLocal callSites regions} {
+    set result [dict create]
+    set candidates [dict create]
+    foreach id [dict get $spec used] {
+        set instance [dict get $spec instances $id]
+        set block [dict get $instance block]
+        if {$block eq "program" || ![dict exists $callSites $id]} {
+            continue
+        }
+        set info [dict get $regions $id]
+        set params [hir::get [dict get $info view] $block params]
+        set captured [dict get $info captured]
+        set i 0
+        foreach p $params {
+            if {![dict exists $captured $p]} {
+                dict set candidates [list $id $i] $p
+            }
+            incr i
+        }
+    }
+    set changed 1
+    while {$changed} {
+        set changed 0
+        dict for {key p} $candidates {
+            lassign $key id i
+            if {[dict exists $result $id $p]} {
+                continue
+            }
+            set n ""
+            set ok 1
+            foreach site [dict get $callSites $id] {
+                lassign $site callerId callerArgs
+                if {$i >= [llength $callerArgs]} {
+                    set ok 0
+                    break
+                }
+                set argExpr [lindex $callerArgs $i]
+                if {$callerId eq $id && [hir::kind [dict get $regions $id view] $argExpr] eq "ref"
+                        && [hir::get [dict get $regions $id view] $argExpr binding] eq $p} {
+                    # A same-instance (self-tail or otherwise recursive)
+                    # call forwarding parameter P back to *itself*, at the
+                    # *same* position, completely unchanged: this carries
+                    # no new shape information (whatever N this parameter
+                    # ends up with, forwarding its own already-N-shaped
+                    # value back to itself is trivially still N) and, more
+                    # importantly, can never be *the* proof this parameter
+                    # needs -- requiring it to independently classify would
+                    # make a self-threaded builder/state loop (the
+                    # milestone's #25/#55) permanently unable to bootstrap
+                    # its own parameter's arity, since RESULT (this same
+                    # dict, still being computed) is exactly what its
+                    # ref-case would need to already know. Skipped, not
+                    # required to classify; some other, non-self-
+                    # referential call site still must (a parameter with
+                    # *only* self-referential call sites -- no real caller
+                    # at all -- never gets an arity, soundly).
+                    continue
+                }
+                set callerInfo [dict get $regions $callerId]
+                set cn [ArgShape [dict get $callerInfo view] [dict get $callerInfo instance] $arity \
+                    $rawLocal $result $callerId $argExpr]
+                if {$cn eq ""} {
+                    set ok 0
+                    break
+                }
+                if {$n eq ""} {
+                    set n $cn
+                } elseif {$n ne $cn} {
+                    set ok 0
+                    break
+                }
+            }
+            if {$ok && $n ne ""} {
+                dict set result $id $p $n
+                set changed 1
+            }
+        }
+    }
+    return $result
+}
+
+# The {InstanceId BindingId} -> N slots this milestone actually virtualizes:
+# RAWLOCAL union RAWPARAM's shaped candidates, pruned to those whose every
+# reference is a supported structural use (see the file header's
+# description of this pass). Never partial: a slot with any unsupported use
+# at all is dropped entirely, and every other slot whose only unsafe use was
+# forwarding into a since-dropped slot is dropped too, by iterating to a
+# fixed point.
+proc hir::escape::Eligible {rawLocal rawParam regions} {
+    set candidates [dict create]
+    dict for {id bindings} $rawLocal {
+        dict for {b n} $bindings {
+            dict set candidates [list $id $b] $n
+        }
+    }
+    dict for {id bindings} $rawParam {
+        dict for {b n} $bindings {
+            dict set candidates [list $id $b] $n
+        }
+    }
+    set changed 1
+    while {$changed} {
+        set changed 0
+        dict for {key n} $candidates {
+            lassign $key id b
+            if {![EligibleUse $candidates $regions $id $b $n]} {
+                dict unset candidates $key
+                set changed 1
+            }
+        }
+    }
+    return $candidates
+}
+
+# 1 if every reference to binding B (arity N) in instance ID's own region is
+# a supported structural use, checked against the *current* CANDIDATES set
+# (Eligible's caller re-runs this to a fixed point as CANDIDATES shrinks).
+proc hir::escape::EligibleUse {candidates regions id b n} {
+    set info [dict get $regions $id]
+    set view [dict get $info view]
+    set refsByBinding [dict get $info refsByBinding]
+    set listGetByArg [dict get $info listGetByArg]
+    set argPos [dict get $info argPos]
+    set refs [expr {[dict exists $refsByBinding $b] ? [dict get $refsByBinding $b] : {}}]
+    foreach r $refs {
+        if {[dict exists $listGetByArg $r]} {
+            if {![ScalarUse $view $listGetByArg $r $n]} {
+                return 0
+            }
+            continue
+        }
+        if {[dict exists $argPos $r]} {
+            lassign [dict get $argPos $r] callee argIndex
+            if {$callee eq "" || ![dict exists $regions $callee]} {
+                return 0
+            }
+            set calleeInfo [dict get $regions $callee]
+            set calleeInstance [dict get $calleeInfo instance]
+            set calleeBlock [dict get $calleeInstance block]
+            if {$calleeBlock eq "program"} {
+                return 0
+            }
+            set calleeParams [hir::get [dict get $calleeInfo view] $calleeBlock params]
+            if {$argIndex < 0 || $argIndex >= [llength $calleeParams]} {
+                return 0
+            }
+            set targetKey [list $callee [lindex $calleeParams $argIndex]]
+            if {![dict exists $candidates $targetKey] || [dict get $candidates $targetKey] != $n} {
+                return 0
+            }
+            continue
+        }
+        return 0
+    }
+    return 1
+}
+
+# ---------------------------------------------------------------------------
 # Entry point
 
 # The escape analysis of program HIR under specialization ANALYSIS
 # (hir::specialize::analyze). Returns a dict:
-#   arity     InstanceId -> N (see Arities)
-#   wants     set (InstanceId -> 1) of instances to also emit a
-#             scalar-replacement companion function for (see Propagate)
-#   virtual   InstanceId -> BindingId -> N (see Bindings)
-proc hir::escape::analyze {hir spec} {
+#   arity         InstanceId -> N (see Arities)
+#   wants         set (InstanceId -> 1) of instances to also emit a
+#                 scalar-replacement companion function for (see Propagate)
+#   virtual       InstanceId -> BindingId -> N, for a virtualized *local*
+#                 binding (see Eligible)
+#   paramVirtual  InstanceId -> BindingId -> N, for a virtualized
+#                 *parameter* binding (see Eligible; native/lower.tcl's
+#                 "Parameter virtualization" section builds an instance's
+#                 `fields`/`fieldscompanion` internal variant from this)
+proc hir::escape::analyze {hir spec {paramOpt 1}} {
     lassign [Arities $hir $spec] arity forward
-    lassign [Bindings $hir $spec $arity] virtual wants
+    set regions [dict create]
+    foreach id [dict get $spec used] {
+        dict set regions $id [RegionInfo $hir $spec $id]
+    }
+    lassign [RawLocalArities $hir $spec $arity $regions] rawLocal localTargets
+    set rawParam [dict create]
+    if {$paramOpt} {
+        set callSites [CallSites $hir $spec]
+        set rawParam [RawParamArities $spec $arity $rawLocal $callSites $regions]
+    }
+    set eligible [Eligible $rawLocal $rawParam $regions]
+    set virtual [dict create]
+    set paramVirtual [dict create]
+    set wants [dict create]
+    dict for {key n} $eligible {
+        lassign $key id b
+        if {[dict exists $rawParam $id $b]} {
+            dict set paramVirtual $id $b $n
+        } else {
+            dict set virtual $id $b $n
+            if {[dict exists $localTargets $id $b]} {
+                dict set wants [dict get $localTargets $id $b] 1
+            }
+        }
+    }
     set wants [Propagate $wants $forward]
-    return [dict create arity $arity wants $wants virtual $virtual]
+    return [dict create arity $arity wants $wants virtual $virtual paramVirtual $paramVirtual]
 }
 
 proc hir::escape::wants {analysis id} {
@@ -436,6 +806,25 @@ proc hir::escape::virtualArity {analysis id b} {
         return [dict get $virtual $id $b]
     }
     return ""
+}
+
+# Like virtualArity, for a *parameter* binding B of instance ID (Eligible's
+# paramVirtual): N if B should be received as N ordinary field
+# registers by ID's `fields`/`fieldscompanion` internal variant, "" if B
+# stays an ordinary single-register (List) parameter.
+proc hir::escape::paramVirtualArity {analysis id b} {
+    set paramVirtual [dict get $analysis paramVirtual]
+    if {[dict exists $paramVirtual $id $b]} {
+        return [dict get $paramVirtual $id $b]
+    }
+    return ""
+}
+
+# 1 if instance ID has any virtualized parameter at all (native/lower.tcl
+# consults this to decide whether to build ID's `fields`/`fieldscompanion`
+# internal variant in the first place).
+proc hir::escape::paramWants {analysis id} {
+    return [dict exists $analysis paramVirtual $id]
 }
 
 # {InstanceId Label} pairs (hir::specialize::label) of every instance a
@@ -471,13 +860,18 @@ proc hir::escape::explain {hir spec analysis} {
         set n [arity $analysis $id]
         set bindings [expr {[dict exists [dict get $analysis virtual] $id]
             ? [dict get [dict get $analysis virtual] $id] : {}}]
-        if {$n eq "" && $bindings eq ""} {
+        set params [expr {[dict exists [dict get $analysis paramVirtual] $id]
+            ? [dict get [dict get $analysis paramVirtual] $id] : {}}]
+        if {$n eq "" && $bindings eq "" && $params eq ""} {
             continue
         }
         lappend lines "[hir::specialize::label $spec $id] ($id):"
         if {$n ne ""} {
             lappend lines "  result shape: $n-element list[expr {[wants $analysis $id] ? \
                 " (scalar-replacement companion built)" : " (recognized, but no caller demands a companion)"}]"
+        }
+        foreach {b bn} $params {
+            lappend lines "  virtual parameter $b: $bn-element list, closed callers only (fields internal variant)"
         }
         foreach {b bn} $bindings {
             lappend lines "  virtual local $b: $bn-element list, never materialized"

@@ -414,7 +414,18 @@ test native-spec-7 {a callee's specialized result kind reaches its caller} -body
     list [regexp -all {guard} $specialized] [regexp {guard int %[0-9]+ "\+"} $generic] [parity $text]
 } -result {0 1 same}
 
-test native-spec-8 {List[Int] -> list_get -> Int: no kind guard, the range check stays} -body {
+test native-spec-8 {List[Int] -> list_get -> Int: no kind guard; a dynamic index's range check stays, a proven-in-range constant index's does not} -body {
+    # first_plus's single closed caller passes a literal `[1, 2]`: since
+    # hir/escape.tcl's parameter virtualization (native/lower.tcl's
+    # "Parameter virtualization" section) now proves xs is exactly a
+    # 2-element List and 0 is a compile-time-constant in-range index,
+    # list_get(xs, 0) is a direct field read -- no kind guard (as before)
+    # *and* no listget call at all (the bounds check that call would
+    # perform is now itself provably unnecessary, not merely elided).
+    # at's dynamic index `i` is not a compile-time constant, so it is
+    # never a candidate for this optimization (native-spec-8's own final
+    # check): its ordinary runtime range check is unaffected and still
+    # correctly raises on an out-of-range index.
     set text "fn first_plus(xs, n):\n    list_get(xs, 0) + n\n\nfirst_plus(\[1, 2\], 3)"
     set nir [nirOf $text]
     set body [nirFunction $nir first_plus {list<int>, int}]
@@ -422,7 +433,7 @@ test native-spec-8 {List[Int] -> list_get -> Int: no kind guard, the range check
          [regexp -all {guard} [nirFunction [nirOf $text -specialize 0] first_plus]] \
          [parity $text] [parity "fn first_plus(xs, n):\n    list_get(xs, 0) + n\n\nfirst_plus(\[\], 3)"] \
          [native "fn at(xs, i):\n    list_get(xs, i) + 1\n\nat(\[1, 2\], 2)"]
-} -result {{{list<int>, int}} 0 1 3 same same {error {CORE SEMANTIC RANGE} {list_get: index 2 is outside 0..1}}}
+} -result {{{list<int>, int}} 0 0 2 same same {error {CORE SEMANTIC RANGE} {list_get: index 2 is outside 0..1}}}
 
 test native-spec-9 {nested lists: the matrix's rows and entries are known} -body {
     set text "fn cell(m, r, c):\n    list_get(list_get(m, r), c) * 2\n\ncell(\[\[1, 2\], \[3, 4\]\], 1, 0)"
@@ -480,7 +491,21 @@ test native-spec-14 {guard accounting: blockers and emitted guards agree} -body 
 # guard accounting (blockers == guards, checked by native::report itself)
 # counts the same region's guards once per NIR function it is lowered into,
 # exactly as it always has for hir::escape's own List companions.
-} -result {{ai_text_clean 6 6 0 0} {csv 17 19 0 0} {csv_chunked 29 31 1 1} {csv_geometric 24 26 0 0} {csv_records 84 86 29 29} {hashtable 63 55 25 25} {matmul 17 17 0 0} {string_replace 12 12 0 0} {string_reverse 4 4 0 0}}
+#
+# csv_chunked/csv_geometric/csv_records/hashtable's "generic guards" each
+# *dropped* with the parameter/result-virtualization milestone
+# (native/lower.tcl's "Parameter virtualization" section): a fixed-shape
+# List parameter/local hir/escape.tcl's Eligible pass now proves is
+# virtualizable needs no kind guard at all at the constant-index reads it
+# is only ever used at (its own representation blocker is subtracted back
+# out of the reporting function's own `blockers` count for exactly this
+# reason -- native/lower.tcl's `skippedGuards` accounting, consulted by
+# every FUNCTION-BUILDING proc; see its own comment). hashtable's `table`
+# parameter itself is a MutableArray-as-record (unaffected: this milestone
+# is List-only), so its own drop is entirely from `ht_rehash`'s `dest`/
+# `src` List grouping (this file's/native-escape.test's own former
+# "documented blocker").
+} -result {{ai_text_clean 6 6 0 0} {csv 17 19 0 0} {csv_chunked 29 29 1 1} {csv_geometric 24 24 0 0} {csv_records 84 82 29 29} {hashtable 63 53 25 25} {matmul 17 17 0 0} {string_replace 12 12 0 0} {string_reverse 4 4 0 0}}
 
 # ---------------------------------------------------------------------------
 # Closures

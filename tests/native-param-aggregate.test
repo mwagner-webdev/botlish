@@ -1,0 +1,363 @@
+# native-param-aggregate.test -- closed-call fixed-shape List *parameter*
+# and *result* virtualization (hir/escape.tcl's "Parameter/result
+# virtualization across closed calls" section, native/lower.tcl's
+# "Parameter virtualization" section): the third Classify shape (`param`),
+# alongside the existing `local`/`remote` shapes native-escape.test covers
+# -- a fixed-shape List value crossing an exact closed call's parameter
+# boundary need not materialize either, when every closed caller proves the
+# same shape and every one of the parameter's own uses is itself
+# structural.
+#
+# -param-aggregate-opt 0 (or BOTLISH_NATIVE_PARAM_AGGREGATE_OPT=0) disables
+# this section's parameter-boundary growth pass independently of
+# -escape-opt (which still separately controls local/remote scalar
+# replacement, and this section together): most tests here differentially
+# compare it against the default (on), the same way native-escape.test's
+# escape-off-* checks do.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot examples stdlib corpus.tcl]
+
+interp recursionlimit {} 1000000
+
+proc sourceHir {text} {
+    return [surface::compile $text t.bot -strict 0]
+}
+
+# The List allocation count of TEXT under PARAM-AGGREGATE-OPT (1 or 0).
+proc listAllocs {text paramOpt} {
+    return [dict get [native::allocationReport [sourceHir $text] summary 1 -param-aggregate-opt $paramOpt] byKind List allocations]
+}
+
+# Asserts optimized (param-aggregate-opt 1) and baseline (param-aggregate-opt
+# 0) agree on TEXT's value.
+proc assertParity {text} {
+    set hir [sourceHir $text]
+    set on [native::evalHir $hir -param-aggregate-opt 1]
+    set off [native::evalHir $hir -param-aggregate-opt 0]
+    if {$on ne $off} {
+        error "param-aggregate-opt 1 vs 0 mismatch: $on vs $off"
+    }
+    return $on
+}
+
+set nirText ""
+proc nirOf {text args} {
+    return [dict get [native::lower::program [sourceHir $text] {*}$args] text]
+}
+
+# One NIR function's own text (its `func ... \n ... \nend` block, by name):
+# a scoped view so a check for "no listget/listnew" is never confused by an
+# unrelated allocation elsewhere in the same program (e.g. a caller's own
+# unrelated wrapping List). NAME may match more than one instance
+# (specializations); this returns the first. A manual line scan, rather
+# than a non-greedy `.*?end` regexp: Tcl's ARE engine's overall leftmost-
+# longest matching does not reliably honor a `*?` minimality hint once the
+# surrounding pattern also has variable-length parts, so a naive `.*?end`
+# can (and, empirically, does) swallow every function up to the *last*
+# `end` in the whole program instead of stopping at the first.
+proc funcNir {text name} {
+    set lines {}
+    set collecting 0
+    foreach line [split $text \n] {
+        if {!$collecting} {
+            if {[regexp "^func \\d+ \"$name\"" $line]} {
+                set collecting 1
+                lappend lines $line
+            }
+            continue
+        }
+        lappend lines $line
+        if {$line eq "end"} {
+            break
+        }
+    }
+    return [join $lines \n]
+}
+
+# ---------------------------------------------------------------------------
+# Parameter-side scalar replacement (#56, the hard acceptance case): a
+# builder-shaped `bump(state) -> [x, y+1]` closed chain unpacks/repacks
+# nothing.
+
+test paramagg-bump-1 {no input list_get, no output list_new, on the fully virtual closed path} -body {
+    set text "fn bump(state):\n    x = list_get(state, 0)\n    y = list_get(state, 1)\n    \[x, y + 1\]\n\nfn f():\n    r = bump(\[10, 20\])\n    list_get(r, 0) + list_get(r, 1)\n\nf()"
+    set text [funcNir [nirOf $text] bump]
+    list [regexp {listget|listnew} $text]
+} -result 0
+
+test paramagg-bump-2 {the same program's value and allocation count -- f()'s own trailing value is a plain Int, so the whole program allocates no List at all} -body {
+    set text "fn bump(state):\n    x = list_get(state, 0)\n    y = list_get(state, 1)\n    \[x, y + 1\]\n\nfn f():\n    r = bump(\[10, 20\])\n    list_get(r, 0) + list_get(r, 1)\n\nf()"
+    list [assertParity $text] [listAllocs $text 1] [listAllocs $text 0]
+} -result {{int 31} 0 1}
+
+# ---------------------------------------------------------------------------
+# A single field read (arity 1), and wider arities (2, 3, 5 -- #57: not
+# hardcoded to the builder's own shape)
+
+test paramagg-arity-1 {arity 1} -body {
+    set text "fn first(one):\n    list_get(one, 0)\n\nfn f():\n    first(\[42\])\n\nf()"
+    list [assertParity $text] [listAllocs $text 1]
+} -result {{int 42} 0}
+
+test paramagg-arity-2 {arity 2} -body {
+    set text "fn sum2(p):\n    list_get(p, 0) + list_get(p, 1)\n\nfn f():\n    sum2(\[1, 2\])\n\nf()"
+    list [assertParity $text] [listAllocs $text 1]
+} -result {{int 3} 0}
+
+test paramagg-arity-3 {arity 3} -body {
+    set text "fn sum3(p):\n    list_get(p, 0) + list_get(p, 1) + list_get(p, 2)\n\nfn f():\n    sum3(\[1, 2, 3\])\n\nf()"
+    list [assertParity $text] [listAllocs $text 1]
+} -result {{int 6} 0}
+
+test paramagg-arity-5 {arity 5} -body {
+    set text "fn sum5(p):\n    list_get(p, 0) + list_get(p, 1) + list_get(p, 2) + list_get(p, 3) + list_get(p, 4)\n\nfn f():\n    sum5(\[1, 2, 3, 4, 5\])\n\nf()"
+    list [assertParity $text] [listAllocs $text 1]
+} -result {{int 15} 0}
+
+# ---------------------------------------------------------------------------
+# Mixed virtual + ordinary parameters, stable ordering (#15)
+
+test paramagg-mixed-1 {a virtual aggregate parameter alongside an ordinary scalar one} -body {
+    set text "fn append(state, value):\n    storage = list_get(state, 0)\n    length = list_get(state, 1)\n    \[storage + value, length + 1\]\n\nfn f():\n    r = append(\[100, 0\], 5)\n    list_get(r, 0) + list_get(r, 1)\n\nf()"
+    list [assertParity $text] [listAllocs $text 1]
+} -result {{int 106} 0}
+
+test paramagg-mixed-2 {the fields variant's NIR parameter names preserve declared order} -body {
+    set text "fn append(state, value):\n    storage = list_get(state, 0)\n    length = list_get(state, 1)\n    \[storage + value, length + 1\]\n\nfn f():\n    r = append(\[100, 0\], 5)\n    list_get(r, 0)\n\nf()"
+    set text [nirOf $text]
+    regexp {pnames="state\.0 state\.1 value"} $text
+} -result 1
+
+# ---------------------------------------------------------------------------
+# Multiple virtual parameters (#14): not hardcoded to "exactly one"
+
+test paramagg-multi-param-1 {two separate virtual aggregate parameters} -body {
+    set text "fn merge(a, b):\n    list_get(a, 0) + list_get(a, 1) + list_get(b, 0) + list_get(b, 1)\n\nfn f():\n    merge(\[1, 2\], \[10, 20\])\n\nf()"
+    list [assertParity $text] [listAllocs $text 1]
+} -result {{int 33} 0}
+
+test paramagg-multi-param-2 {both fields expand in the NIR params list, in order} -body {
+    set text "fn merge(a, b):\n    list_get(a, 0) + list_get(a, 1) + list_get(b, 0) + list_get(b, 1)\n\nfn f():\n    merge(\[1, 2\], \[10, 20\])\n\nf()"
+    set text [nirOf $text]
+    regexp {pnames="a\.0 a\.1 b\.0 b\.1"} $text
+} -result 1
+
+# ---------------------------------------------------------------------------
+# Multiple direct calls of the same parameter (#53): not "single use"
+
+test paramagg-multi-use-1 {two separate field reads of the same parameter} -body {
+    set text "fn get_x(state):\n    list_get(state, 0)\n\nfn get_y(state):\n    list_get(state, 1)\n\nfn f():\n    s = \[7, 9\]\n    get_x(s) + get_y(s)\n\nf()"
+    list [assertParity $text] [listAllocs $text 1]
+} -result {{int 16} 0}
+
+# ---------------------------------------------------------------------------
+# Conditional call of the same virtual aggregate (#54)
+
+test paramagg-conditional-1 {both closed branches consume the same virtual shape} -body {
+    set text "fn use_a(state):\n    list_get(state, 0)\n\nfn use_b(state):\n    list_get(state, 1)\n\nfn f(cond):\n    s = \[1, 2\]\n    if cond:\n        use_a(s)\n    else:\n        use_b(s)\n\nf(true) + f(false)"
+    list [assertParity $text] [listAllocs $text 1]
+} -result {{int 3} 0}
+
+# ---------------------------------------------------------------------------
+# Closed aggregate-flow chain (#23, #52): caller -> helper1 -> helper2 ->
+# list_get, every boundary closed, all exact -- the canonical List never
+# materializes at any intermediate boundary.
+
+test paramagg-chain-1 {a 3-hop forwarding chain stays scalar throughout} -body {
+    set text "fn helper2(s):\n    list_get(s, 0) + list_get(s, 1)\n\nfn helper1(s):\n    helper2(s)\n\nfn caller():\n    state = \[3, 4\]\n    helper1(state)\n\ncaller()"
+    list [assertParity $text] [listAllocs $text 1]
+} -result {{int 7} 0}
+
+test paramagg-chain-2 {no function in the chain's NIR mentions listget/listnew} -body {
+    set text "fn helper2(s):\n    list_get(s, 0) + list_get(s, 1)\n\nfn helper1(s):\n    helper2(s)\n\nfn caller():\n    state = \[3, 4\]\n    helper1(state)\n\ncaller()"
+    set text [nirOf $text]
+    regexp {listget|listnew} $text
+} -result 0
+
+# ---------------------------------------------------------------------------
+# Recursive/self-tail state threading (#25, #55)
+
+test paramagg-selftail-1 {state threaded through a self-tail loop stays scalar throughout} -body {
+    # Every exit of loopState is itself recognized (the trailing `[x + 1,
+    # y]` construction, or the self-tail forwarding call): both its
+    # parameter and its own result stay virtual across every iteration.
+    set text "fn loopState(state, n):\n    if n == 0:\n        x = list_get(state, 0)\n        y = list_get(state, 1)\n        return \[x, y\]\n    x = list_get(state, 0)\n    y = list_get(state, 1)\n    loopState(\[x + 1, y\], n - 1)\n\nfn f():\n    r = loopState(\[0, 99\], 50)\n    list_get(r, 0) + list_get(r, 1)\n\nf()"
+    list [assertParity $text] [listAllocs $text 1]
+} -result {{int 149} 0}
+
+test paramagg-selftail-2 {the self-tail loop's own NIR is a `tail`, not a per-iteration call, with no listnew/listget anywhere in the whole program} -body {
+    set text "fn loopState(state, n):\n    if n == 0:\n        x = list_get(state, 0)\n        y = list_get(state, 1)\n        return \[x, y\]\n    x = list_get(state, 0)\n    y = list_get(state, 1)\n    loopState(\[x + 1, y\], n - 1)\n\nfn f():\n    r = loopState(\[0, 99\], 50)\n    list_get(r, 0)\n\nf()"
+    set text [nirOf $text]
+    list [regexp {listget|listnew} $text] [regexp {\mtail } $text]
+} -result {0 1}
+
+# A builder-style state-return variant, contrasted with paramagg-selftail-1:
+# here the loop's own base case returns the *state parameter itself*
+# (`return state`), an escaping/canonical use (the milestone's #8), so
+# hir::escape.tcl conservatively declines to virtualize fillFrom's own
+# parameter -- documenting exactly where this milestone's own
+# materialization boundary sits, matching item 55's own guidance ("the
+# first milestone may conservatively fall back" for such a loop). append's
+# own parameter is still independently eligible (its own uses are only
+# list_get and a recognized result construction), but this specific call
+# site cannot supply it fields, since fillFrom's own `state` never becomes
+# one (CanSupplyFields correctly falls back to append's canonical form
+# here -- see native/lower.tcl's own comment on why this is sound).
+
+test paramagg-selftail-3 {a bare `return state` conservatively declines virtualization, with correct semantics either way} -body {
+    set text "fn append(state, value):\n    storage = list_get(state, 0)\n    length = list_get(state, 1)\n    \[storage + value, length + 1\]\n\nfn fillFrom(state, n):\n    if n == 0:\n        return state\n    fillFrom(append(state, n), n - 1)\n\nfn f():\n    r = fillFrom(\[0, 0\], 5)\n    list_get(r, 0) + list_get(r, 1)\n\nf()"
+    assertParity $text
+} -result {int 20}
+
+# ---------------------------------------------------------------------------
+# Canonical materialization regression (#50): every one of these keeps
+# ordinary List semantics unchanged, with or without the optimization.
+
+test paramagg-canonical-return-1 {a parameter returned directly as itself is never virtualized} -body {
+    set text "fn identity(state):\n    state\n\nfn f():\n    r = identity(\[1, 2\])\n    list_get(r, 0)\n\nf()"
+    assertParity $text
+} -result {int 1}
+
+test paramagg-canonical-store-1 {a parameter stored into another List is never virtualized} -body {
+    set text "fn wrap(state):\n    \[state, state\]\n\nfn f():\n    r = wrap(\[1, 2\])\n    list_get(list_get(r, 0), 0)\n\nf()"
+    assertParity $text
+} -result {int 1}
+
+test paramagg-canonical-dynamic-1 {a dynamic (non-constant) index is never virtualized} -body {
+    set text "fn getAt(state, i):\n    list_get(state, i)\n\nfn f():\n    getAt(\[10, 20, 30\], 1)\n\nf()"
+    assertParity $text
+} -result {int 20}
+
+test paramagg-canonical-outofrange-1 {an out-of-range constant index preserves the ordinary runtime INDEX error} -body {
+    set text "fn bad(state):\n    list_get(state, 5)\n\nfn f():\n    bad(\[1, 2\])\n\nf()"
+    set hir [sourceHir $text]
+    lassign [list [catch {native::evalHir $hir -param-aggregate-opt 1} r1] [catch {native::evalHir $hir -param-aggregate-opt 0} r0]] c1 c0
+    list $c1 $c0 [expr {$r1 eq $r0}]
+} -result {1 1 1}
+
+test paramagg-canonical-mixed-caller-1 {one closed caller supplies fields, another only has a real List: both still work} -body {
+    # scalarCaller constructs a literal and can supply fields directly;
+    # dynamicCaller receives its List from a parameter with a dynamic
+    # index elsewhere in the same function, so it only ever has a
+    # materialized List in hand for THIS call. Both call the same shared
+    # fields callee, get; per call site, not globally, decides.
+    set text "fn get0(state):\n    list_get(state, 0)\n\nfn scalarCaller():\n    get0(\[1, 2\])\n\nfn dynamicCaller(state, i):\n    x = list_get(state, i)\n    y = get0(state)\n    x + y\n\n\[scalarCaller(), dynamicCaller(\[5, 6\], 1)\]"
+    assertParity $text
+} -result {list {{int 1} {int 11}}}
+
+# ---------------------------------------------------------------------------
+# Heterogeneous field kinds (#16): Int, String, Bool, List, MutableArray all
+# stay independently represented, not collapsed to `any`.
+
+test paramagg-heterogeneous-1 {mixed field kinds (Int, String, Bool) read independently} -body {
+    set text "fn describe(rec):\n    n = list_get(rec, 0)\n    s = list_get(rec, 1)\n    b = list_get(rec, 2)\n    if b:\n        concat(s, \" \")\n    else:\n        s\n\nfn f():\n    describe(\[3, \"x\", true\])\n\nf()"
+    list [assertParity $text] [listAllocs $text 1]
+} -result {{str {x }} 0}
+
+test paramagg-heterogeneous-2 {a MutableArray field, plain reference forwarding} -body {
+    set text "fn touch(rec):\n    arr = list_get(rec, 0)\n    mutable_array_set(arr, 0, 99)\n    mutable_array_get(arr, 0)\n\nfn f():\n    a = mutable_array_allocate(1)\n    touch(\[a, 0\])\n\nf()"
+    list [assertParity $text] [listAllocs $text 1]
+} -result {{int 99} 0}
+
+# ---------------------------------------------------------------------------
+# GC rooting (#58-59): managed fields (String, List, MutableArray) stay
+# rooted independently under stress, and a field that dies before a sibling
+# does is not kept retained merely because the sibling is still live.
+
+test paramagg-gc-stress-1 {heterogeneous virtual fields survive a forced collection while live} -body {
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    set text "fn build(rec, n):\n    s = list_get(rec, 0)\n    lst = list_get(rec, 1)\n    arr = list_get(rec, 2)\n    if n == 0:\n        mutable_array_set(arr, 0, 1)\n        return concat(s, list_get(lst, 0))\n    build(\[concat(s, \"x\"), lst, arr\], n - 1)\n\nfn f(n):\n    a = mutable_array_allocate(1)\n    build(\[\"y\", \[\"!\"\], a\], n)\n\nlength(f(2000))"
+    set result [catch {native::evalHir [sourceHir $text]} value]
+    unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    list $result $value
+} -result {0 {int 2002}}
+
+# ---------------------------------------------------------------------------
+# Optimizer disabled (#69): the -param-aggregate-opt 0 flag/
+# BOTLISH_NATIVE_PARAM_AGGREGATE_OPT environment variable produce the
+# guarded baseline (real listget/listnew calls) and nothing else changes,
+# independently of -escape-opt (still on).
+
+test paramagg-off-1 {param-aggregate-opt 0 emits no fields/fieldscompanion variant at all} -body {
+    set text "fn bump(state):\n    x = list_get(state, 0)\n    y = list_get(state, 1)\n    \[x, y + 1\]\n\nfn f():\n    r = bump(\[10, 20\])\n    list_get(r, 0)\n\nf()"
+    set text [nirOf $text -param-aggregate-opt 0]
+    list [regexp {\.0 |\.1 } $text] [native::evalHir [sourceHir "fn bump(state):\n    x = list_get(state, 0)\n    y = list_get(state, 1)\n    \[x, y + 1\]\n\nfn f():\n    r = bump(\[10, 20\])\n    list_get(r, 0)\n\nf()"] -param-aggregate-opt 0]
+} -result {0 {int 10}}
+
+test paramagg-off-2 {BOTLISH_NATIVE_PARAM_AGGREGATE_OPT=0 has the same effect as -param-aggregate-opt 0} -body {
+    set text "fn bump(state):\n    x = list_get(state, 0)\n    y = list_get(state, 1)\n    \[x, y + 1\]\n\nfn f():\n    r = bump(\[10, 20\])\n    list_get(r, 0)\n\nf()"
+    set ::env(BOTLISH_NATIVE_PARAM_AGGREGATE_OPT) 0
+    set text [nirOf $text]
+    unset ::env(BOTLISH_NATIVE_PARAM_AGGREGATE_OPT)
+    regexp {\.0 |\.1 } $text
+} -result 0
+
+test paramagg-off-3 {-escape-opt 0 also disables the parameter-boundary pass (it is part of the same analysis)} -body {
+    set text "fn bump(state):\n    x = list_get(state, 0)\n    y = list_get(state, 1)\n    \[x, y + 1\]\n\nfn f():\n    r = bump(\[10, 20\])\n    list_get(r, 0)\n\nf()"
+    set text [nirOf $text -escape-opt 0]
+    regexp {\.0 |\.1 } $text
+} -result 0
+
+# ---------------------------------------------------------------------------
+# Regression: existing local/remote scalar replacement and Block
+# virtualization stay green (#71) -- a smoke check here; the dedicated
+# suites (native-escape.test, native-block-escape.test) are the real
+# coverage, run separately.
+
+test paramagg-regress-1 {local scalar replacement is unaffected} -body {
+    set text "fn f():\n    pair = \[10, 20\]\n    list_get(pair, 0) + list_get(pair, 1)\n\nf()"
+    list [assertParity $text] [listAllocs $text 1]
+} -result {{int 30} 0}
+
+test paramagg-regress-2 {closed-call return (remote) scalar replacement is unaffected} -body {
+    set text "fn pair():\n    \[1, 2\]\n\nfn f():\n    p = pair()\n    list_get(p, 0) + list_get(p, 1)\n\nf()"
+    list [assertParity $text] [listAllocs $text 1]
+} -result {{int 3} 0}
+
+# ---------------------------------------------------------------------------
+# The stdlib corpus targets (#26-31): hashtable's rehash grouping and the
+# geometric/chunked builders' append fast path.
+
+test paramagg-hashtable-1 {HashTable set/get/delete is unaffected by parameter virtualization} -body {
+    assertParity [corpus::text hashtable]
+} -result {list {{bool true} {bool true} {bool false} {bool false} {bool true} {int 1}}}
+
+test paramagg-hashtable-2 {rehash's dest/src List grouping (the documented structural blocker) now scalarizes} -body {
+    # ht_rehash constructs `src`/`dest` as local [..] literals and forwards
+    # them, unchanged, through ht_rehash_scan's and ht_rehash_insert's own
+    # parameters -- exactly the closed aggregate-flow-region shape this
+    # milestone adds. Confirms native-escape.test's escape-hashtable-2
+    # "documented blocker" no longer applies to allocation count (that test
+    # is updated alongside this one).
+    set src [regsub {\nsample\(\)\n$} [corpus::text hashtable] "\n"]
+    set hir [sourceHir "$src\nfn many():\n    t = ht_new()\n    ht_set(t, \"a\", 1)\n    ht_set(t, \"b\", 2)\n    ht_set(t, \"c\", 3)\n    ht_set(t, \"d\", 4)\n    ht_set(t, \"e\", 5)\n    ht_set(t, \"f\", 6)\n    ht_size(t)\n\nmany()\n"]
+    set on [dict get [native::allocationReport $hir summary 1 -param-aggregate-opt 1] byKind List allocations]
+    set off [dict get [native::allocationReport $hir summary 1 -param-aggregate-opt 0] byKind List allocations]
+    list [native::evalHir $hir] [expr {$on < $off}]
+} -result {{int 6} 1}
+
+test paramagg-geometric-1 {GeometricBuilder's csv_parse value is unaffected} -body {
+    assertParity [corpus::text csv_geometric]
+} -result {list {{list {{str name} {str age}}} {list {{str Alice} {str 30}}} {list {{str Bob} {str 40}}}}}
+
+test paramagg-geometric-2 {geo_append's own input unpack/output rebox call sites drop out} -body {
+    set match [funcNir [nirOf [corpus::text csv_geometric]] geo_append]
+    list [regexp {listget|listnew} $match] [regexp {results=2} $match]
+} -result {0 1}
+
+test paramagg-chunked-1 {ChunkedBuilder's csv_parse value is unaffected} -body {
+    assertParity [corpus::text csv_chunked]
+} -result {list {{list {{str name} {str age}}} {list {{str Alice} {str 30}}} {list {{str Bob} {str 40}}}}}
+
+test paramagg-chunked-2 {chunked_append's own input unpack call sites drop out} -body {
+    set match [funcNir [nirOf [corpus::text csv_chunked]] chunked_append]
+    list [regexp {listget} $match] [regexp {results=3} $match]
+} -result {0 1}
+
+test paramagg-records-1 {csv_records composes both builder and HashTable virtualization successfully} -body {
+    assertParity [corpus::text csv_records]
+} -result {list {{int 2} {str Alice} {str 31} {str Berlin} {str Bob} {str Hamburg} {bool true}}}
+
+cleanupTests

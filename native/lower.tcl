@@ -154,6 +154,10 @@ namespace eval native::lower {
     # analysis of the program, and whether it is enabled at all.
     variable escape {}
     variable escapeOpt 1
+    # Parameter virtualization (see "Parameter virtualization" below):
+    # whether hir::escape::analyze's own parameter-boundary growth pass is
+    # enabled, independent of escapeOpt above.
+    variable paramAggregateOpt 1
     # Block virtualization (see "Block virtualization" below): the
     # hir::blockescape analysis of the program, and whether it is enabled
     # at all.
@@ -369,6 +373,126 @@ namespace eval native::lower {
 # -block-escape-opt 0 (or BOTLISH_NATIVE_BLOCK_ESCAPE_OPT=0) disables the
 # analysis outright, for differential testing against the unoptimized
 # (canonical closure) baseline.
+#
+# ---------------------------------------------------------------------------
+# Parameter virtualization
+#
+# The "Scalar replacement" section above already keeps a fixed-shape List
+# scalar when it is *constructed* locally or *returned* by a direct call
+# (hir/escape.tcl's `local`/`remote` cases). This section is the third,
+# closed-call-*parameter* case that module's own header used to call out as
+# a "structural blocker": a fixed-shape List value an exact caller hands
+# to a callee whose own uses of that parameter are themselves all
+# structural (hir::escape::paramVirtualArity) need not materialize at that
+# boundary either -- exactly the same "semantic aggregate, not a mandatory
+# heap representation" reasoning as Block virtualization above, just for a
+# List parameter instead of a Block's captured environment.
+#
+# Two additional NIR functions per eligible instance (hir::escape::
+# paramWants), built the same lazy, on-demand way (native/lower.tcl's
+# `pending` work list) as a scalar-replacement companion or a Block
+# internal variant, alongside the instance's *unconditionally* still-
+# emitted canonical function (so every open/dynamic/mismatched-shape caller
+# keeps calling a real List-taking function, completely unaffected):
+#
+#   fields            (FieldsFunction) the same instance and body as
+#                      Function, except every parameter
+#                      hir::escape::paramVirtualArity recognizes is
+#                      received as that many ordinary trailing-in-place
+#                      field registers instead of one List register
+#                      (SetupFieldParams) -- stored in `fn locals` exactly
+#                      like a virtualized *local* binding already is
+#                      (`{virtual fields}`), so the existing `list_get(ref,
+#                      constant)` interception in Call (the "Scalar
+#                      replacement" section's own mechanism) needs no
+#                      change at all to also serve a virtualized parameter:
+#                      it already only ever consults `fn locals`, never
+#                      which kind of binding put a `{virtual ...}` entry
+#                      there. Still ends in an ordinary `ret` of one
+#                      (possibly still-materialized) tagged List, exactly
+#                      like Function.
+#   fieldscompanion    (FieldsCompanionFunction) the same, but for an
+#                      instance hir::escape::wants *also* holds for (its
+#                      own result is itself recognized): ends in `retmulti`
+#                      of its own recognized construction's fields, exactly
+#                      like CompanionFunction, just with virtualized
+#                      parameters too. This is what lets a builder-style
+#                      `append(state, value) -> [storage2, length2]`
+#                      chain stay scalar on *both* its parameter and result
+#                      boundaries at once, reusing the exact same
+#                      results=N/retmulti/callmulti machinery "Scalar
+#                      replacement" already built -- no new multi-value ABI
+#                      mechanism for this milestone (#20-21 of the
+#                      milestone this was written for).
+#
+# A direct call site (Call's `targetKind eq "block"` branch) that reaches
+# an eligible instance (ParamFieldsUsable) evaluates each virtualized
+# parameter's own argument expression in *virtual field form* instead of a
+# single register (TryFields, via the shared CallArgs helper both the
+# self-tail and ordinary call paths use): a `ref` to a binding this same
+# caller's own `fn locals` already holds virtual (a local binding, or one
+# of *this* function's own virtualized parameters, forwarded unchanged --
+# read for free, already evaluated), or a `call` recognized the same way
+# VirtualValue already recognizes one (a literal, or a forwarding call to
+# another companion instance) -- reusing Call's own existing WANTVIRTUAL
+# machinery rather than duplicating it. hir::escape.tcl (its Eligible pass)
+# only ever proves a parameter position virtualizable when every one of its
+# exact callers' arguments already has one of exactly these two shapes, so
+# TryFields finding neither at such a call site is a lowering/analysis
+# inconsistency (NATIVE BUG), never a legitimate fallback path to build.
+#
+# This is why hir/escape.tcl calls its own growth pass a *pure value-shape*
+# fact and its shrink pass *eligibility* as two separate questions (see
+# that file's header): the caller-argument classification above never
+# depends on whether a slot's containing function *chose* to virtualize it
+# (that would be circular for a multi-hop forwarding chain), only on
+# whether the value it holds provably has that shape -- exactly the
+# soundness discipline the milestone's #41 requires.
+#
+# Self-tail calls (a loop backedge, `tail`/`tailenv`) are not a special
+# case: CallArgs applies the identical field-expansion to a self-tail
+# call's own arguments when the *current* function is itself a `fields`/
+# `fieldscompanion` variant (checked via `fn locals`, exactly like the
+# existing RawParams raw-argument case already does) -- so builder/state
+# self-tail loops thread their aggregate's fields through registers across
+# iterations, never reboxing into a List on the backedge (the milestone's
+# #25).
+#
+# Field-expansion is never attempted for a call whose target instance has a
+# hir/traversal.tcl TraversalPlan (ParamFieldsUsable): a plan's hidden
+# extra byte-position parameter is a *different* internal-ABI extension of
+# the same instance, and this milestone does not attempt to compose the
+# two (no stdlib workload needs both: a TraversalPlan only ever applies to
+# a String-scanning `peek`-shaped function, never a List-record accessor).
+# Block virtualization (this same file's previous section) is similarly
+# not composed with this one: a virtualized Block's own direct-call
+# arguments (VirtualBlockCall) are still evaluated as ordinary single
+# registers, even when one of them would itself be List-parameter-
+# eligible -- an intentionally narrow scope, not a soundness gap (the
+# canonical, materializing path is always still correct and always still
+# available).
+#
+# GC rooting needs no new mechanism, for exactly the reason "Scalar
+# replacement" above already gives: every field register -- whether a
+# `fields` variant's own parameter, or a forwarded value read out of an
+# already-rooted `fn locals` entry -- is an ordinary tagged NIR register,
+# stored to its own shadow-stack slot on definition by codegen's `def`
+# regardless of what produced it. Each field's *own* liveness (not the
+# List wrapper's, which no longer exists) governs how long it stays rooted,
+# so a field that dies before a sibling field does is not kept live merely
+# because the sibling still is (the milestone's #59) -- an actual
+# improvement over the canonical path, where the whole List object (and so
+# every field reachable from it) stays rooted for as long as the List
+# reference itself does.
+#
+# -param-aggregate-opt 0 (or BOTLISH_NATIVE_PARAM_AGGREGATE_OPT=0) disables
+# this section's parameter/result-boundary virtualization independently of
+# -escape-opt (which still separately controls local/remote scalar
+# replacement and this section together): hir::escape::analyze's own
+# growth pass for parameters is simply skipped, so no `fields`/
+# `fieldscompanion` variant is ever built and every call goes through the
+# canonical function exactly as before -- for differential testing against
+# the unoptimized baseline.
 
 # ---------------------------------------------------------------------------
 # String regions
@@ -617,6 +741,13 @@ namespace eval native::lower {
 #                      observed (default 1, unless the environment variable
 #                      BOTLISH_NATIVE_ESCAPE_OPT is 0; see the "Scalar
 #                      replacement" section above)
+#   -param-aggregate-opt 1|0
+#                      also virtualize a fixed-shape List parameter across
+#                      an exact closed call boundary (default 1, unless the
+#                      environment variable BOTLISH_NATIVE_PARAM_AGGREGATE_OPT
+#                      is 0; see the "Parameter virtualization" section
+#                      above; independent of -escape-opt, which still
+#                      separately controls local/remote scalar replacement)
 #   -string-region-opt 1|0
 #                      represent a temporary substring hir/stringregion.tcl
 #                      proves is consumed only by `==`/`length` as a
@@ -658,6 +789,7 @@ proc native::lower::program {hirProgram args} {
     variable reprOpt
     variable escape
     variable escapeOpt
+    variable paramAggregateOpt
     variable blockescape
     variable blockEscapeOpt
     variable stringregion
@@ -671,6 +803,8 @@ proc native::lower::program {hirProgram args} {
         && $::env(BOTLISH_NATIVE_REPR_OPT) eq "0" ? 0 : 1}]
     set escapeDefault [expr {[info exists ::env(BOTLISH_NATIVE_ESCAPE_OPT)]
         && $::env(BOTLISH_NATIVE_ESCAPE_OPT) eq "0" ? 0 : 1}]
+    set paramAggregateDefault [expr {[info exists ::env(BOTLISH_NATIVE_PARAM_AGGREGATE_OPT)]
+        && $::env(BOTLISH_NATIVE_PARAM_AGGREGATE_OPT) eq "0" ? 0 : 1}]
     set blockEscapeDefault [expr {[info exists ::env(BOTLISH_NATIVE_BLOCK_ESCAPE_OPT)]
         && $::env(BOTLISH_NATIVE_BLOCK_ESCAPE_OPT) eq "0" ? 0 : 1}]
     set stringRegionDefault [expr {[info exists ::env(BOTLISH_NATIVE_STRING_REGION_OPT)]
@@ -679,7 +813,7 @@ proc native::lower::program {hirProgram args} {
         && $::env(BOTLISH_NATIVE_STRING_TRAVERSAL_OPT) eq "0" ? 0 : 1}]
     set options [hir::Options native::lower::program \
         [list -specialize $default -repr-opt $reprDefault -escape-opt $escapeDefault \
-            -block-escape-opt $blockEscapeDefault \
+            -param-aggregate-opt $paramAggregateDefault -block-escape-opt $blockEscapeDefault \
             -string-region-opt $stringRegionDefault -string-traversal-opt $traversalDefault] $args]
     if {[hir::mode $hirProgram] ne "program"} {
         throw {NATIVE UNSUPPORTED sequence-mode} \
@@ -689,13 +823,14 @@ proc native::lower::program {hirProgram args} {
     set hir $hirProgram
     set reprOpt [dict get $options -repr-opt]
     set escapeOpt [dict get $options -escape-opt]
+    set paramAggregateOpt [dict get $options -param-aggregate-opt]
     set blockEscapeOpt [dict get $options -block-escape-opt]
     set stringRegionOpt [dict get $options -string-region-opt]
     set traversalOpt [dict get $options -string-traversal-opt]
     set spec [hir::specialize::analyze $hirProgram -specialize [dict get $options -specialize]]
     set ranges [hir::range::analyze $hirProgram $spec]
-    set escape [expr {$escapeOpt ? [hir::escape::analyze $hirProgram $spec]
-        : [dict create arity {} wants {} virtual {}]}]
+    set escape [expr {$escapeOpt ? [hir::escape::analyze $hirProgram $spec $paramAggregateOpt]
+        : [dict create arity {} wants {} virtual {} paramVirtual {}]}]
     set blockescape [expr {$blockEscapeOpt ? [hir::blockescape::analyze $hirProgram $spec]
         : [dict create virtual {} wants {}]}]
     set stringregion [expr {$stringRegionOpt ? [hir::stringregion::analyze $hirProgram $spec]
@@ -725,10 +860,12 @@ proc native::lower::program {hirProgram args} {
             continue
         }
         dict set functions $key [switch -- $mode {
-            canonical { Function $id }
-            companion { CompanionFunction $id }
-            region    { RegionCompanionFunction $id }
-            internal  { InternalFunction $id }
+            canonical       { Function $id }
+            companion       { CompanionFunction $id }
+            region          { RegionCompanionFunction $id }
+            internal        { InternalFunction $id }
+            fields          { FieldsFunction $id }
+            fieldscompanion { FieldsCompanionFunction $id }
         }]
     }
     set hir $baseHir
@@ -741,7 +878,8 @@ proc native::lower::program {hirProgram args} {
         lassign [Unkey $key] id mode
         set block [dict get $spec instances $id block]
         list [expr {$block eq "program" ? 0 : [dict get $context positions $block]}] \
-            [string range $id 1 end] [dict get {canonical 0 companion 1 region 1 internal 1} $mode] $key
+            [string range $id 1 end] \
+            [dict get {canonical 0 companion 1 region 1 internal 1 fields 1 fieldscompanion 1} $mode] $key
     }]
     set order [lmap entry [lsort -integer -index 0 [lsort -integer -index 1 [lsort -integer -index 2 $order]]] {
         lindex $entry 3
@@ -924,6 +1062,25 @@ proc native::lower::InternalRef {id} {
     return [Placeholder $id internal]
 }
 
+# Like FunctionRef, for instance ID's `fields` variant (see the "Parameter
+# virtualization" section above): callers must already know, from
+# ParamFieldsUsable/hir::escape::paramWants, that this instance has one.
+proc native::lower::FieldsRef {id} {
+    variable pending
+    lappend pending [list $id fields]
+    return [Placeholder $id fields]
+}
+
+# Like FieldsRef, for instance ID's `fieldscompanion` variant (see the
+# "Parameter virtualization" section above): callers must already know,
+# from ParamFieldsUsable *and* hir::escape::arity, that this instance has
+# one.
+proc native::lower::FieldsCompanionRef {id} {
+    variable pending
+    lappend pending [list $id fieldscompanion]
+    return [Placeholder $id fieldscompanion]
+}
+
 # The key `program`'s `functions` dict uses for instance ID's function of
 # MODE (canonical or companion): also Placeholder's inner text, so a
 # Placeholder's text and its functions-dict key always agree.
@@ -1017,7 +1174,7 @@ proc native::lower::Function {id} {
         set b
     }]]
     set fn [dict create region $region instance $id targets [dict get $instance calls] \
-        lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 \
+        lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 skippedGuards 0 \
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
         locals [dict create] loops [dict create] broken [dict create] calls {} companion "" regionCompanion 0 \
         traversal "" traversalByteReg ""]
@@ -1082,7 +1239,8 @@ proc native::lower::Function {id} {
     set info [dict create id [Placeholder $id] name $name block $region instance $id \
         label [hir::specialize::label $spec $id] generic [dict get $instance generic] \
         envless [expr {!$env}] selfTailCalls $tails calls [dict get $fn calls] \
-        blockers $blockers guards [dict get $fn guards] knownErrorGuards [dict get $fn knownErrorGuards] \
+        blockers [expr {$blockers - [dict get $fn skippedGuards]}] \
+        guards [dict get $fn guards] knownErrorGuards [dict get $fn knownErrorGuards] \
         rawUnboxes [dict get $fn rawUnboxes] rawBoxes [dict get $fn rawBoxes] \
         rawArith [dict get $fn rawArith] rawCompare [dict get $fn rawCompare]]
     return [list $text $info]
@@ -1118,7 +1276,7 @@ proc native::lower::CompanionFunction {id} {
         set b
     }]]
     set fn [dict create region $region instance $id targets [dict get $instance calls] \
-        lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 \
+        lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 skippedGuards 0 \
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
         locals [dict create] loops [dict create] broken [dict create] calls {} companion $arity regionCompanion 0 \
         traversal "" traversalByteReg ""]
@@ -1175,7 +1333,8 @@ proc native::lower::CompanionFunction {id} {
     set info [dict create id [Placeholder $id companion] name $name block $region instance $id \
         label "[hir::specialize::label $spec $id] (scalar)" generic [dict get $instance generic] \
         envless [expr {!$env}] selfTailCalls $tails calls [dict get $fn calls] \
-        blockers $blockers guards [dict get $fn guards] knownErrorGuards [dict get $fn knownErrorGuards] \
+        blockers [expr {$blockers - [dict get $fn skippedGuards]}] \
+        guards [dict get $fn guards] knownErrorGuards [dict get $fn knownErrorGuards] \
         rawUnboxes [dict get $fn rawUnboxes] rawBoxes [dict get $fn rawBoxes] \
         rawArith [dict get $fn rawArith] rawCompare [dict get $fn rawCompare]]
     return [list $text $info]
@@ -1210,7 +1369,7 @@ proc native::lower::RegionCompanionFunction {id} {
         set b
     }]]
     set fn [dict create region $region instance $id targets [dict get $instance calls] \
-        lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 \
+        lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 skippedGuards 0 \
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
         locals [dict create] loops [dict create] broken [dict create] calls {} companion "" regionCompanion 1 \
         traversal "" traversalByteReg ""]
@@ -1267,7 +1426,8 @@ proc native::lower::RegionCompanionFunction {id} {
     set info [dict create id [Placeholder $id region] name $name block $region instance $id \
         label "[hir::specialize::label $spec $id] (region)" generic [dict get $instance generic] \
         envless [expr {!$env}] selfTailCalls $tails calls [dict get $fn calls] \
-        blockers $blockers guards [dict get $fn guards] knownErrorGuards [dict get $fn knownErrorGuards] \
+        blockers [expr {$blockers - [dict get $fn skippedGuards]}] \
+        guards [dict get $fn guards] knownErrorGuards [dict get $fn knownErrorGuards] \
         rawUnboxes [dict get $fn rawUnboxes] rawBoxes [dict get $fn rawBoxes] \
         rawArith [dict get $fn rawArith] rawCompare [dict get $fn rawCompare]]
     return [list $text $info]
@@ -1312,7 +1472,7 @@ proc native::lower::InternalFunction {id} {
         set b
     }]]
     set fn [dict create region $region instance $id targets [dict get $instance calls] \
-        lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 \
+        lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 skippedGuards 0 \
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
         locals [dict create] loops [dict create] broken [dict create] calls {} companion "" regionCompanion 0 \
         traversal "" traversalByteReg ""]
@@ -1357,7 +1517,205 @@ proc native::lower::InternalFunction {id} {
     set info [dict create id [Placeholder $id internal] name $name block $region instance $id \
         label "[hir::specialize::label $spec $id] (internal)" generic [dict get $instance generic] \
         envless 1 selfTailCalls $tails calls [dict get $fn calls] \
-        blockers $blockers guards [dict get $fn guards] knownErrorGuards [dict get $fn knownErrorGuards] \
+        blockers [expr {$blockers - [dict get $fn skippedGuards]}] \
+        guards [dict get $fn guards] knownErrorGuards [dict get $fn knownErrorGuards] \
+        rawUnboxes [dict get $fn rawUnboxes] rawBoxes [dict get $fn rawBoxes] \
+        rawArith [dict get $fn rawArith] rawCompare [dict get $fn rawCompare]]
+    return [list $text $info]
+}
+
+# Like the parameter-registration loop Function/CompanionFunction/
+# RegionCompanionFunction each run, but for instance ID's `fields`/
+# `fieldscompanion` internal variant (see the "Parameter virtualization"
+# section above): a parameter B hir::escape::paramVirtualArity recognizes
+# is received as that many ordinary field registers, stored in `fn locals`
+# exactly like a virtualized *local* binding already is (`{virtual
+# fields}`) -- so the existing `list_get(ref, constant)` interception in
+# Call needs no change at all to also serve it. Every other parameter is
+# registered exactly as Function's own loop does, including RawParams
+# raw-eligibility. Returns the flattened NIR parameter names (one per
+# field for a virtualized parameter, its own name otherwise).
+proc native::lower::SetupFieldParams {fnVar id instance params} {
+    upvar 1 $fnVar fn
+    variable hir
+    variable escape
+    set rawParams [RawParams $id $instance $params]
+    set pnames {}
+    foreach b $params raw $rawParams {
+        set n [hir::escape::paramVirtualArity $escape $id $b]
+        set name [dict get [hir::binding $hir $b] name]
+        if {$n ne ""} {
+            set fields [NewRegs fn $n]
+            dict set fn locals $b [list virtual $fields]
+            for {set k 0} {$k < $n} {incr k} {
+                lappend pnames "$name.$k"
+            }
+            continue
+        }
+        set r [NewReg fn]
+        if {$raw} {
+            MarkRaw fn $r
+            dict set fn locals $b [list rawreg $r]
+        } else {
+            dict set fn locals $b [list reg $r]
+        }
+        lappend pnames $name
+    }
+    return $pnames
+}
+
+# Lowers the `fields` variant of instance ID (see the "Parameter
+# virtualization" section above): the same instance and body as Function,
+# except every parameter hir::escape::paramVirtualArity recognizes is
+# received as N ordinary field registers instead of one List register
+# (SetupFieldParams). Still ends in an ordinary `ret` of one tagged value,
+# exactly like Function -- hir::escape::paramWants ID must already be true.
+# Returns {TEXT INFO}, in the same shape as Function.
+proc native::lower::FieldsFunction {id} {
+    variable hir
+    variable baseHir
+    variable spec
+    variable context
+    variable envless
+    variable captureLists
+    variable currentInstance
+    variable escape
+    set currentInstance $id
+    set instance [hir::specialize::instance $spec $id]
+    set region [dict get $instance block]
+    if {$region eq "program" || ![hir::escape::paramWants $escape $id]} {
+        throw {NATIVE BUG} "native lowering: instance $id has no fields variant"
+    }
+    set hir [hir::specialize::view $baseHir $spec $id]
+    set analysis [hir::aot::analyzeRegion $hir $region $context]
+    CollectChecks $analysis
+    set blockers [llength [lmap b [dict get $analysis blockers] {
+        if {[dict get $b class] ne "representation"} continue
+        set b
+    }]]
+    set fn [dict create region $region instance $id targets [dict get $instance calls] \
+        lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 skippedGuards 0 \
+        rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
+        locals [dict create] loops [dict create] broken [dict create] calls {} companion "" regionCompanion 0 \
+        traversal "" traversalByteReg ""]
+    set name [hir::aot::BlockName $hir $region]
+    set params [hir::get $hir $region params]
+    set env [expr {$region ni $envless}]
+    set scope [hir::get $hir $region bodyScope]
+    set body [hir::get $hir $region body]
+    set pnames [SetupFieldParams fn $id $instance $params]
+    EnterScope fn $scope
+    set result [Sequence fn $body]
+    if {$result ne "never"} {
+        Emit fn "ret $result"
+    }
+    set captures {}
+    if {$env} {
+        set captures [lmap b [dict get $captureLists $region] {dict get [hir::binding $hir $b] name}]
+    }
+    set key [expr {[dict get $instance generic] ? "generic"
+        : [join [lmap t [dict get $instance args] {hir::types::show $t}] {, }]}]
+    set head "func [Placeholder $id fields] [Quote $name] params=[llength $pnames] env=$env regs=[dict get $fn nreg] pnames=[Quote [join $pnames { }]] captures=[llength $captures] instance=[Quote $key]"
+    set rawRegs [lsort -integer [lmap r [dict keys [dict get $fn rawRegs]] {string range $r 1 end}]]
+    if {$rawRegs ne ""} {
+        append head " rawregs=[Quote [join $rawRegs { }]]"
+    }
+    append head " @$region"
+    set text "$head\n[join [dict get $fn lines] \n]\nend"
+    set tails [llength [lmap line [dict get $fn lines] {
+        if {![regexp {^\s+tail(env)? } $line]} continue
+        set line
+    }]]
+    set info [dict create id [Placeholder $id fields] name $name block $region instance $id \
+        label "[hir::specialize::label $spec $id] (fields)" generic [dict get $instance generic] \
+        envless [expr {!$env}] selfTailCalls $tails calls [dict get $fn calls] \
+        blockers [expr {$blockers - [dict get $fn skippedGuards]}] \
+        guards [dict get $fn guards] knownErrorGuards [dict get $fn knownErrorGuards] \
+        rawUnboxes [dict get $fn rawUnboxes] rawBoxes [dict get $fn rawBoxes] \
+        rawArith [dict get $fn rawArith] rawCompare [dict get $fn rawCompare]]
+    return [list $text $info]
+}
+
+# Lowers the `fieldscompanion` variant of instance ID (see the "Parameter
+# virtualization" section above): the same instance and body as
+# CompanionFunction (ending every reachable exit in `retmulti` of its own
+# recognized construction's fields), except its parameters are received as
+# fields too (SetupFieldParams) -- both hir::escape::paramWants ID and
+# hir::escape::arity ID must already hold. Returns {TEXT INFO}, in the same
+# shape as CompanionFunction.
+proc native::lower::FieldsCompanionFunction {id} {
+    variable hir
+    variable baseHir
+    variable spec
+    variable context
+    variable envless
+    variable captureLists
+    variable currentInstance
+    variable escape
+    set currentInstance $id
+    set instance [hir::specialize::instance $spec $id]
+    set region [dict get $instance block]
+    set arity [hir::escape::arity $escape $id]
+    if {$region eq "program" || $arity eq "" || ![hir::escape::paramWants $escape $id]} {
+        throw {NATIVE BUG} "native lowering: instance $id has no fields+companion variant"
+    }
+    set hir [hir::specialize::view $baseHir $spec $id]
+    set analysis [hir::aot::analyzeRegion $hir $region $context]
+    CollectChecks $analysis
+    set blockers [llength [lmap b [dict get $analysis blockers] {
+        if {[dict get $b class] ne "representation"} continue
+        set b
+    }]]
+    set fn [dict create region $region instance $id targets [dict get $instance calls] \
+        lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 skippedGuards 0 \
+        rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
+        locals [dict create] loops [dict create] broken [dict create] calls {} companion $arity regionCompanion 0 \
+        traversal "" traversalByteReg ""]
+    set name [hir::aot::BlockName $hir $region]
+    set params [hir::get $hir $region params]
+    set env [expr {$region ni $envless}]
+    set scope [hir::get $hir $region bodyScope]
+    set body [hir::get $hir $region body]
+    set pnames [SetupFieldParams fn $id $instance $params]
+    EnterScope fn $scope
+    if {$body eq ""} {
+        throw {NATIVE BUG} "native lowering: fields+companion of instance $id has an empty body"
+    }
+    set ok 1
+    foreach e [lrange $body 0 end-1] {
+        if {[Expr fn $e] eq "never"} {
+            set ok 0
+            break
+        }
+    }
+    if {$ok} {
+        set fields [VirtualValue fn [lindex $body end] $arity]
+        if {$fields ne "never"} {
+            Emit fn "retmulti [join $fields { }]"
+        }
+    }
+    set captures {}
+    if {$env} {
+        set captures [lmap b [dict get $captureLists $region] {dict get [hir::binding $hir $b] name}]
+    }
+    set key [expr {[dict get $instance generic] ? "generic"
+        : [join [lmap t [dict get $instance args] {hir::types::show $t}] {, }]}]
+    set head "func [Placeholder $id fieldscompanion] [Quote $name] params=[llength $pnames] env=$env regs=[dict get $fn nreg] pnames=[Quote [join $pnames { }]] captures=[llength $captures] instance=[Quote $key] results=$arity"
+    set rawRegs [lsort -integer [lmap r [dict keys [dict get $fn rawRegs]] {string range $r 1 end}]]
+    if {$rawRegs ne ""} {
+        append head " rawregs=[Quote [join $rawRegs { }]]"
+    }
+    append head " @$region"
+    set text "$head\n[join [dict get $fn lines] \n]\nend"
+    set tails [llength [lmap line [dict get $fn lines] {
+        if {![regexp {^\s+tail(env)? } $line]} continue
+        set line
+    }]]
+    set info [dict create id [Placeholder $id fieldscompanion] name $name block $region instance $id \
+        label "[hir::specialize::label $spec $id] (fields, scalar)" generic [dict get $instance generic] \
+        envless [expr {!$env}] selfTailCalls $tails calls [dict get $fn calls] \
+        blockers [expr {$blockers - [dict get $fn skippedGuards]}] \
+        guards [dict get $fn guards] knownErrorGuards [dict get $fn knownErrorGuards] \
         rawUnboxes [dict get $fn rawUnboxes] rawBoxes [dict get $fn rawBoxes] \
         rawArith [dict get $fn rawArith] rawCompare [dict get $fn rawCompare]]
     return [list $text $info]
@@ -1896,6 +2254,170 @@ proc native::lower::VirtualValue {fnVar e arity} {
     return $result
 }
 
+# 1 if TARGET (a callee InstanceId, possibly "") has a `fields`/
+# `fieldscompanion` variant a direct call may actually use (see the
+# "Parameter virtualization" section above): hir::escape::paramWants holds
+# for it, and it has no hir/traversal.tcl TraversalPlan (that plan's own
+# hidden extra parameter is a different internal-ABI extension of the same
+# instance this milestone does not attempt to compose with).
+proc native::lower::ParamFieldsUsable {target} {
+    variable escape
+    variable traversal
+    if {$target eq "" || ![hir::escape::paramWants $escape $target]} {
+        return 0
+    }
+    return [expr {[hir::traversal::plan $traversal $target] eq ""}]
+}
+
+# One entry per PARAMS (TARGET's own declared parameters): TARGET's
+# hir::escape::paramVirtualArity at that position (N), or "" if that
+# parameter is not virtualized -- an all-"" list (in practice never
+# consulted, since ParamFieldsUsable gates every call site) if TARGET
+# cannot use fields at all.
+proc native::lower::FieldWidths {target params} {
+    variable escape
+    if {![ParamFieldsUsable $target]} {
+        return {}
+    }
+    return [lmap p $params {hir::escape::paramVirtualArity $escape $target $p}]
+}
+
+# 1 if every virtualized position of FIELDWIDTHS (FieldWidths) can actually
+# be supplied as fields *right now*, for THIS specific call site: a `call`
+# argument always can (TryFields's own `call` case recurses into Call,
+# which applies this same all-or-nothing discipline to its own arguments in
+# turn, so it can never itself be the reason a whole chain fails); a `ref`
+# argument can only if the binding it names is *currently* stored
+# `{virtual fields}` of the matching width in `fn locals` -- checkable
+# without evaluating anything.
+#
+# This exists because hir::escape.tcl's parameter-arity growth (
+# RawParamArities) is, by design (the file header's #41 soundness
+# requirement), a pure caller-proven *value-shape* fact -- computed from
+# every caller's argument, independent of whether that caller's own slot
+# ultimately turns out *eligible* (Eligible is a separate, later question).
+# So a target parameter can be soundly virtualizable (some OTHER caller
+# really does have fields to give it) while one particular caller does not
+# actually have them on hand at lowering time (its own forwarded slot had a
+# provable shape, but failed its own structural-use check for an unrelated
+# reason -- e.g. it was also returned as itself, or stored elsewhere). This
+# check is what makes that safe: the decision to use TARGET's `fields`/
+# `fieldscompanion` variant is made per call site, never assumed from
+# TARGET's own eligibility alone.
+proc native::lower::CanSupplyFields {fnVar argExprs fieldWidths} {
+    upvar 1 $fnVar fn
+    variable hir
+    set i 0
+    foreach arg $argExprs {
+        set width [expr {$i < [llength $fieldWidths] ? [lindex $fieldWidths $i] : ""}]
+        if {$width ne ""} {
+            switch -- [hir::kind $hir $arg] {
+                call {}
+                ref {
+                    set b [hir::get $hir $arg binding]
+                    if {$b eq "" || ![dict exists $fn locals $b]
+                            || [lindex [dict get $fn locals $b] 0] ne "virtual"
+                            || [llength [lindex [dict get $fn locals $b] 1]] != $width} {
+                        return 0
+                    }
+                }
+                default {
+                    return 0
+                }
+            }
+        }
+        incr i
+    }
+    return 1
+}
+
+# The N-field virtual form of argument expression E (a call's argument, at
+# a position hir::escape.tcl already proved this call's target instance
+# receives as N ordinary fields), or "" if E does not have one of the two
+# shapes hir::escape.tcl's Eligible pass ever accepts as a source: a `ref`
+# to a binding this same caller's own `fn locals` already holds virtual
+# (a virtualized local binding, or one of *this* function's own
+# virtualized parameters, forwarded unchanged -- already evaluated, read
+# here for free, exactly like the existing list_get(ref, constant)
+# interception reads one field), or a `call` node itself recognized this
+# same way (a `[e0..en-1]` literal, or a forwarding call to another
+# companion-eligible instance) -- reusing Call's own existing WANTVIRTUAL
+# machinery (VirtualValue's own mechanism) rather than duplicating it.
+# "never" if evaluating a construction's own parts cannot complete
+# normally. hir::escape.tcl only ever proves a call site eligible this way
+# when one of these two shapes is what is actually there, so CallArgs
+# treats "" here as a lowering/analysis inconsistency (NATIVE BUG), never a
+# legitimate fallback to build.
+proc native::lower::TryFields {fnVar e n} {
+    upvar 1 $fnVar fn
+    variable hir
+    switch -- [hir::kind $hir $e] {
+        ref {
+            set b [hir::get $hir $e binding]
+            if {$b eq "" || ![dict exists $fn locals $b]} {
+                return ""
+            }
+            set local [dict get $fn locals $b]
+            if {[lindex $local 0] ne "virtual"} {
+                return ""
+            }
+            set fields [lindex $local 1]
+            if {[llength $fields] != $n} {
+                return ""
+            }
+            return $fields
+        }
+        call {
+            set node [hir::node $hir $e]
+            lassign [Call fn $e $node tagged $n] result repr
+            if {$result eq "never"} {
+                return never
+            }
+            if {$repr ne "virtual"} {
+                return ""
+            }
+            return $result
+        }
+    }
+    return ""
+}
+
+# The flat NIR argument-register list for a call to a target whose own
+# declared parameters ARGEXPRS supplies values for: FIELDWIDTHS (FieldWidths
+# -- "" at a non-virtualized position, or the whole list when the target
+# cannot use fields at all) says which positions to evaluate in virtual
+# field form (TryFields) instead of one ordinary register; RAWSLOTS (empty
+# unless this is a self-tail call: see Call's own `self` case) says which
+# of the *remaining*, non-virtualized positions want Expr's `raw` form
+# instead of `tagged`. "never" if any argument cannot complete normally.
+proc native::lower::CallArgs {fnVar argExprs fieldWidths rawSlots} {
+    upvar 1 $fnVar fn
+    set regs {}
+    set i 0
+    foreach arg $argExprs {
+        set width [expr {$i < [llength $fieldWidths] ? [lindex $fieldWidths $i] : ""}]
+        if {$width ne ""} {
+            set fields [TryFields fn $arg $width]
+            if {$fields eq "never"} {
+                return never
+            }
+            if {$fields eq ""} {
+                throw {NATIVE BUG} "native lowering: expected $width virtual fields at $arg"
+            }
+            lappend regs {*}$fields
+        } else {
+            set argWant [expr {$i < [llength $rawSlots] && [lindex $rawSlots $i] ? "raw" : "tagged"}]
+            set r [Expr fn $arg $argWant]
+            if {$r eq "never"} {
+                return never
+            }
+            lappend regs $r
+        }
+        incr i
+    }
+    return $regs
+}
+
 # Returns {RESULT REPR}: REPR is "raw" only when Ref or Call produced it
 # directly, "virtual" only when WANTVIRTUAL asked for it and got it (a list
 # of WANTVIRTUAL registers, the fields of a recognized construction: see the
@@ -2013,29 +2535,46 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
     if {$wantVirtual eq "" && $targetKind eq "native" && [llength $argExprs] == 2
             && [dict get [hir::symbol $hir $target] name] eq "list_get"
             && [hir::kind $hir [lindex $argExprs 0]] eq "ref"} {
-        # A `list_get(ref, constant)` read of a fully virtual binding
-        # (hir::escape::virtualArity): the field register hir::escape.tcl
-        # already proved is the only way B is ever read, computed once when
-        # B was bound (Bind above) -- no `listget` call, and REF is not
-        # even evaluated (a plain reference has no effect of its own).
+        # A `list_get(ref, constant)` read of a binding *currently* lowered
+        # as virtual fields (`fn locals`'s own `{virtual fields}` tag,
+        # consulted directly rather than re-derived from hir::escape.tcl:
+        # the same binding is `{virtual ...}` in one lowering of its
+        # instance and an ordinary `{reg ...}` in another -- a local
+        # binding is virtual in every lowering of its instance alike, but a
+        # *parameter* SetupFieldParams recognizes is virtual only in that
+        # instance's `fields`/`fieldscompanion` variant, never in its
+        # canonical function, which must keep accepting a real List: see
+        # the "Parameter virtualization" section above). REF is not even
+        # evaluated (a plain reference has no effect of its own); a
+        # binding not currently virtual falls through to the ordinary
+        # NativeCall `listget` path below unchanged.
         set b [hir::get $hir [lindex $argExprs 0] binding]
-        variable currentInstance
-        set virtualArity [expr {$b eq "" ? "" : [hir::escape::virtualArity $escape $currentInstance $b]}]
-        if {$virtualArity ne ""} {
+        if {$b ne "" && [dict exists $fn locals $b] && [lindex [dict get $fn locals $b] 0] eq "virtual"} {
+            set fields [lindex [dict get $fn locals $b] 1]
             set idxExpr [lindex $argExprs 1]
             if {[hir::kind $hir $idxExpr] ne "const"
                     || [core::value::kind [hir::get $hir $idxExpr value]] ne "int"} {
                 throw {NATIVE BUG} "native lowering: virtual binding $b read with a non-constant index at $e"
             }
             set idx [core::value::intOf [hir::get $hir $idxExpr value]]
-            if {$idx < 0 || $idx >= $virtualArity} {
+            if {$idx < 0 || $idx >= [llength $fields]} {
                 throw {NATIVE BUG} "native lowering: virtual binding $b read out of range at $e"
             }
-            set local [dict get $fn locals $b]
-            if {[lindex $local 0] ne "virtual"} {
-                throw {NATIVE BUG} "native lowering: binding $b was not lowered as virtual ($e)"
+            variable guards
+            if {[dict exists $guards [list $e [lindex $argExprs 0]]]} {
+                # hir::aot::analyzeRegion counted a representation blocker
+                # for this operand (its own, coarser, per-instance
+                # representation analysis has no notion of hir::escape.tcl's
+                # finer per-binding proof that this value is always list-
+                # shaped by construction): the kind guard that blocker
+                # would otherwise need is genuinely unnecessary here, but
+                # still counted in `analysis blockers` below, so it must be
+                # subtracted back out to keep this function's own
+                # blockers==guards accounting (native::report's invariant)
+                # correct -- see FUNCTION-BUILDING procs' own blocker count.
+                dict incr fn skippedGuards
             }
-            return [list [lindex [lindex $local 1] $idx] tagged]
+            return [list [lindex $fields $idx] tagged]
         }
     }
 
@@ -2104,24 +2643,33 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
         # Expr's default tagged form immediately unboxed back (the
         # milestone's central case: see #9).
         set self [expr {$instance ne "" && [dict exists $selfTail $e] && $instance eq [dict get $fn instance]}]
-        set argRegs {}
-        set i 0
-        foreach arg $argExprs {
-            set argWant tagged
-            if {$self && $i < [llength $params]
-                    && [lindex [dict get $fn locals [lindex $params $i]] 0] eq "rawreg"} {
-                set argWant raw
-            }
-            set r [Expr fn $arg $argWant]
-            if {$r eq "never"} {
-                return {never tagged}
-            }
-            lappend argRegs $r
-            incr i
+        # A parameter position hir::escape.tcl proved this call's own
+        # target instance receives as N ordinary fields rather than one
+        # materialized List (see the "Parameter virtualization" section
+        # above): evaluated in that same virtual field form (CallArgs/
+        # TryFields) instead of a single register -- but only when this
+        # specific call site can actually supply them right now
+        # (CanSupplyFields; see its own comment for why TARGET's own
+        # eligibility alone is not enough). Never attempted for a
+        # region-result call (wantRegion): the two optimizations do not
+        # currently combine.
+        set fieldWidths [expr {$wantRegion ? {} : [FieldWidths $instance $params]}]
+        if {$fieldWidths ne "" && ![CanSupplyFields fn $argExprs $fieldWidths]} {
+            set fieldWidths {}
         }
-        if {[llength $params] != [llength $argRegs]} {
+        set rawSlots {}
+        if {$self} {
+            set rawSlots [lmap p $params {
+                expr {[dict exists $fn locals $p] && [lindex [dict get $fn locals $p] 0] eq "rawreg"}
+            }]
+        }
+        set argRegs [CallArgs fn $argExprs $fieldWidths $rawSlots]
+        if {$argRegs eq "never"} {
+            return {never tagged}
+        }
+        if {[llength $params] != [llength $argExprs]} {
             set pnames [lmap b $params {dict get [hir::binding $hir $b] name}]
-            Emit fn "raise ARITY [Quote "block ([join $pnames { }]) expects [llength $params] argument(s), got [llength $argRegs]"]" $e
+            Emit fn "raise ARITY [Quote "block ([join $pnames { }]) expects [llength $params] argument(s), got [llength $argExprs]"]" $e
             return {never tagged}
         }
         if {![dict exists $fn targets $e]} {
@@ -2147,16 +2695,22 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
         }
         if {$wantVirtual ne ""} {
             # A recognized forwarding construction (VirtualValue): the
-            # target instance's scalar-replacement companion, reached
-            # through callmulti/callenvmulti, hands its fields straight
-            # back with no List ever materialized in between. Instance is
-            # never "" here: hir::escape.tcl only classifies a call this
-            # way when hir::specialize itself resolved a direct target for
-            # it (Classify consults the same `calls` map).
+            # target instance's scalar-replacement companion (or, when its
+            # own parameters are also virtualized, its `fieldscompanion`
+            # variant: ParamFieldsUsable), reached through callmulti/
+            # callenvmulti, hands its fields straight back with no List
+            # ever materialized in between. Instance is never "" here:
+            # hir::escape.tcl only classifies a call this way when
+            # hir::specialize itself resolved a direct target for it
+            # (Classify consults the same `calls` map).
             if {[hir::escape::arity $escape $instance] ne $wantVirtual} {
                 throw {NATIVE BUG} "native lowering: instance $instance has no $wantVirtual-arity scalar companion for $e"
             }
-            set companionId [CompanionRef $instance]
+            if {$fieldWidths ne ""} {
+                set companionId [FieldsCompanionRef $instance]
+            } else {
+                set companionId [CompanionRef $instance]
+            }
             dict lappend fn calls [list direct $companionId 0]
             set dsts [NewRegs fn $wantVirtual]
             if {$target in $envless} {
@@ -2185,7 +2739,7 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
             }
             return [list $dsts region]
         }
-        set id [FunctionRef $instance]
+        set id [expr {$fieldWidths ne "" ? [FieldsRef $instance] : [FunctionRef $instance]}]
         dict lappend fn calls [list direct $id $self]
         set targetPlan [hir::traversal::plan $traversal $instance]
         if {$targetPlan ne ""} {
