@@ -229,14 +229,15 @@ proc hir::buildSyntax {nodes args} {
     dict for {f path} [dict get $options -files] {
         dict set hir files $f [dict create id $f path $path]
     }
+    ResolveModuleNativeTargets hir [dict get $options -module-native-targets]
+    ApplyNativeResultOverrides hir [dict get $options -native-result-overrides]
+    hir::types::infer hir
+    hir::modulebinding::validate hir
     if {[dict get $options -strict]} {
         foreach diagnostic [dict get $hir diagnostics] {
             core::semanticError [dict get $diagnostic kind] [dict get $diagnostic message]
         }
     }
-    ResolveModuleNativeTargets hir [dict get $options -module-native-targets]
-    ApplyNativeResultOverrides hir [dict get $options -native-result-overrides]
-    hir::types::infer hir
     return $hir
 }
 
@@ -477,7 +478,7 @@ proc hir::ApplyNativeResultOverrides {hirVar overrides} {
 }
 
 apply {{dir} {
-    foreach file {syntax resolve hygiene types refine lower format read aot specialize range induction escape blockescape stringregion traversal} {
+    foreach file {syntax resolve hygiene types modulebinding refine lower format read aot specialize range induction escape blockescape stringregion traversal} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

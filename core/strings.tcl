@@ -60,13 +60,13 @@ proc core::strings::encodeUtf8 {s} {
 }
 
 core::native::register length    -arity 1 -impl core::strings::length \
-    -param-types {str} -result-type int -runtime char-index -result-range collection-length
+    -param-types {str} -result-type int -runtime char-index -result-range collection-length -context-free 1
 core::native::register substring -arity 3 -impl core::strings::substring \
     -param-types {str int int} -result-type str \
-    -runtime {string-alloc char-index range-check}
+    -runtime {string-alloc char-index range-check} -context-free 1
 core::native::register lowercase -arity 1 -impl core::strings::lowercase \
-    -param-types {str} -result-type str -runtime string-alloc
+    -param-types {str} -result-type str -runtime string-alloc -context-free 1
 core::native::register concat    -arity 2 -impl core::strings::concat \
-    -param-types {str str} -result-type str -runtime string-alloc
+    -param-types {str str} -result-type str -runtime string-alloc -context-free 1
 core::native::register encode_utf8 -arity 1 -impl core::strings::encodeUtf8 \
-    -param-types {str} -result-type list -runtime list-alloc
+    -param-types {str} -result-type list -runtime list-alloc -context-free 1

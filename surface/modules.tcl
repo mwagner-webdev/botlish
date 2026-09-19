@@ -12,9 +12,9 @@
 # A file that starts with a `namespace NAME` declaration (parser.tcl's
 # NamespaceDecl; surface::ast's `program` node carries it as its own
 # `namespace`/`namespaceSpan` fields, never a body statement) is a module: a
-# namespace containing ordinary function definitions, nothing else (no
-# executable statements, no module-level values -- see AGENTS.md's "no
-# module-level values yet"). Every other .bot file (no `namespace`
+# namespace containing ordinary function definitions and immutable value bindings.
+# It has no executable top-level statements or mutable bindings. Every other .bot
+# file (no `namespace`
 # declaration) is an ordinary/entry program, exactly as before this
 # milestone; loading one that makes no qualified reference costs nothing
 # extra.
@@ -79,17 +79,16 @@
 # re-lowered or re-inlined per call site (contrast bench/refined-checks.ir's
 # old -native-body, native/native.tcl, which pasted a copy of its callee's
 # body into each call site's own IR -- see NATIVE-URI-ESCAPE.md \167 7).
-# Because it is an ordinary top-level function value with no free
-# variables, the existing escape/specialize/native-lowering pipeline
-# treats calls to it exactly like any other closed same-file call
-# (native/lower.tcl's `envless` set) -- no module-specific call form, no
-# runtime namespace lookup, is needed for that.
+# An envless module function uses the existing direct-call path. A module
+# function that reads a retained module value uses the existing closure and
+# hidden-environment machinery, still by its resolved BindingId: no
+# module-specific call form or runtime namespace lookup is introduced.
 #
 # What this deliberately leaves out (see AGENTS.md's milestone notes for
 # the full rationale): namespace aliasing/renaming, wildcard or selective
-# imports, re-exports, module-level values (mutable or immutable), module
-# initialization, separate/incremental compilation, a search path, package
-# versioning. A namespace's dependency graph must be acyclic (Error CYCLE);
+# imports, re-exports, mutable module bindings, lazy initialization,
+# separate/incremental compilation, a search path, package versioning. A
+# namespace's dependency graph must be acyclic (Error CYCLE);
 # ordinary same-module recursion (including mutual recursion) is unaffected
 # -- it was never a *module* dependency to begin with.
 
@@ -217,9 +216,9 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan} {
             "$path declares \"namespace [dict get $ast namespace]\", but only namespace \"$name\" can load from this path"
     }
     foreach statement [dict get $ast body] {
-        if {[dict get $statement kind] ne "function"} {
+        if {[dict get $statement kind] ni {function bind}} {
             Error INVALID-TOPLEVEL [dict get $statement span] \
-                "module \"$name\" ($path): only function definitions are allowed at module top level, found a \"[dict get $statement kind]\" statement"
+                "module \"$name\" ($path): only function definitions and immutable bindings are allowed at module top level, found a \"[dict get $statement kind]\" statement"
         }
     }
     dict set state stack [concat [dict get $state stack] [list $name]]

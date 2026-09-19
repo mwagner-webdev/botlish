@@ -408,18 +408,14 @@ too.
 
 ## 12. Runtime allocation/lookup accounting
 
-`native::allocationReport`, `-emit-clif`/`objdump` inspection: introducing
-the module mechanism itself adds no allocation and no lookup to an
-ordinary function call. The module-native bridge's own cost is a
-compile-time (Tcl-side, host-process) traversal plus, once per program
-build, parsing and resolving `lib/web.bot` -- nothing that runs inside
-the compiled program. At run time, `mathish::inc`/`web::uri_escape_text`
-are `envless` (no captures; `native/lower.tcl`'s existing analysis, which
-required no changes to recognize a module function this way), so their
-call sites skip evaluating the callee expression entirely (the existing
-`skipCallee` condition in `native::lower::Call`) -- exactly the same
-zero-lookup path an ordinary same-file top-level function call already
-took.
+The later immutable-module-binding extension is documented in
+MODULE-BINDINGS.md. `mathish::inc` remains envless and uses the existing
+direct-call path. `web::uri_escape_text` now captures `web::hex_digits`,
+so its one closure is created at program startup and its statically known
+`callenv` calls carry the existing hidden environment field. There is no
+runtime namespace/name lookup or dynamic dispatch; CLIF calls its compiled
+function directly. The table changes from one List allocation per call to
+one allocation per program execution.
 
 ## 13. Audit corpus
 
@@ -439,7 +435,7 @@ show for this specific native, gathered directly instead.
 
 ## 14. Regression status
 
-`tests/all.tcl` (interp + compile), `tests/surface-modules.test` (21/21),
+`tests/all.tcl` (interp + compile), `tests/surface-modules.test` (28/28),
 `tests/native-uri-escape.test` (18/18, unchanged), `tests/
 native-refinement-propagation.test` (14/14, one test rewritten per §8),
 `refined-checks.ir` on `cranelift`/`compile` (`[400, 0]`, with and without
@@ -529,25 +525,15 @@ Tcl's own recursion limit at this `n`, a pre-existing, unrelated fact
     and `compile`, with and without `BOTLISH_NATIVE_GC_STRESS=1`.
 
 13. **What module limitations are intentionally left for later?**
-    Everything spec §§20-28/52-54 named: no module-level values (mutable
-    or immutable), no module initialization, no namespace aliasing/
-    imports/re-exports, no separate/incremental compilation, no search
-    path/package registry/versioning, no visibility levels beyond "every
-    module-level definition is visible to a dependent module," no
-    cross-module *mutual* recursion (rejected as a cycle, same rule as any
-    other cross-module cycle).
+    MODULE-BINDINGS.md adds eager immutable values, but not mutable globals,
+    lazy cells, namespace aliasing/imports/re-exports, separate or
+    incremental compilation, a search path/package registry/versioning, or
+    cross-module mutual recursion. Module dependency cycles remain rejected.
 
-14. **Is the implementation ready for the next milestone (immutable
-    context-free module bindings)?** The namespace/section mechanism
-    already separates "a namespace's own definitions" (`hir modules`'
-    table, a `ScopeId`) from how those definitions execute, so adding an
-    ordinary top-level `bind` (a value, not a function) to a module
-    section's own node list needs no new namespace concept -- the same
-    `ProgramSection`/`ResolveQualifiedRef`/`qualifyModules` machinery
-    already resolves, qualifies and lowers an ordinary `bind` exactly as
-    it does a function's. What would still need designing (deliberately
-    not done here) is *initialization*: a module-level value's
-    initializer runs once, at the same "program start" point a module's
-    function definitions already do, but the surface/loader layer does
-    not yet reason about evaluation order or safety for anything other
-    than closure-creation, which has no observable side effects to order.
+14. **How are module values initialized safely?** Each ordinary module
+    `bind` is an ordinary program root. Dependency-first module order and
+    source order inside a module execute it once before the entry roots.
+    `hir/modulebinding.tcl` requires a context-free initializer and a
+    transitively immutable retained result; it uses resolved call targets
+    and native metadata, not source spelling. See MODULE-BINDINGS.md for
+    the complete rule, diagnostics, and `web::hex_digits` evidence.

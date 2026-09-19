@@ -171,9 +171,17 @@ proc core::compiler::evalHir {hir} {
     set unit [GenerateUnit program $exprs $hir]
     namespace eval ::core::compiler::code [dict get $unit code]
     set names {}
-    foreach b [dict get $hir scopes [hir::top $hir] bindings] {
-        if {[dict get $hir bindings $b kind] eq "local"} {
-            lappend names [dict get $hir bindings $b name]
+    set programScopes [list [hir::top $hir]]
+    if {[dict exists $hir modules]} {
+        dict for {namespace scope} [dict get $hir modules] {
+            lappend programScopes $scope
+        }
+    }
+    foreach scope $programScopes {
+        foreach b [dict get $hir scopes $scope bindings] {
+            if {[dict get $hir bindings $b kind] eq "local"} {
+                lappend names [dict get $hir bindings $b name]
+            }
         }
     }
     set mark [core::env::mark]
@@ -654,11 +662,16 @@ proc core::compiler::CompileBlockBody {outerVar e procName} {
     # Rebuild their frame variables from the captured frame's parent chain,
     # unless the block never reads them.
     set previous ""
+    set restoredFrames {}
     foreach id [lreverse [dict get $outer order]] {
         if {$e in $envless} {
             break
         }
         set frame [dict get $outer scopes $id frame]
+        if {$frame in $restoredFrames} {
+            continue
+        }
+        lappend restoredFrames $frame
         if {$previous eq ""} {
             Emit ctx "set $frame \$captured"
         } else {

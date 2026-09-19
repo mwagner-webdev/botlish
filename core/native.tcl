@@ -136,7 +136,7 @@ proc core::native::register {name args} {
     }
     set options [dict create -impl "" -arity "" -refines-true {} -refines-false {} \
         -param-types "" -result-type any -tests-type "" -runtime {} -result-shape {} -result-range {} \
-        -native-body {} -module-fn {}]
+        -native-body {} -module-fn {} -context-free 0]
     foreach {option value} $args {
         if {![dict exists $options $option]} {
             error "core::native::register: unknown option \"$option\""
@@ -150,6 +150,9 @@ proc core::native::register {name args} {
     set arity [dict get $options -arity]
     if {$arity ne "*" && !([string is digit -strict $arity])} {
         error "core::native::register: -arity must be a non-negative integer or *"
+    }
+    if {[dict get $options -context-free] ni {0 1}} {
+        error "core::native::register: -context-free of \"$name\" must be 0 or 1"
     }
     set testsType [dict get $options -tests-type]
     if {$testsType ne ""} {
@@ -234,7 +237,8 @@ proc core::native::register {name args} {
         resultType [CanonicalType $name -result-type [dict get $options -result-type]] \
         testsType $testsType \
         runtime [lsort -unique [dict get $options -runtime]] \
-        resultShape $shape resultRange $range nativeBody $nativeBody moduleFn $moduleFn]
+        resultShape $shape resultRange $range nativeBody $nativeBody moduleFn $moduleFn \
+        contextFree [dict get $options -context-free]]
     return [core::value::native $name]
 }
 
