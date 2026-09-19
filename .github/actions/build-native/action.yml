@@ -3,7 +3,12 @@ description: >
   Builds native/'s Rust driver (botlish-native), caching its dependency
   build. Centralizes the one piece of Cranelift-support logic every
   workflow that touches the native backend needs, so it is fixed and
-  upgraded in one place instead of three near-identical copies.
+  upgraded in one place instead of three near-identical copies. Assumes
+  the caller already ran .devcontainer/setup.sh (the "Install project
+  prerequisites" step every such workflow runs first), which is what pins
+  rustc to a stable toolchain new enough for the pinned
+  cranelift-*/wasmtime-internal-* crates (see AGENTS.md) -- this action
+  does not repeat that pin itself.
 
 runs:
   using: composite
@@ -21,13 +26,6 @@ runs:
         key: native-cargo-${{ runner.os }}-${{ hashFiles('native/Cargo.lock') }}
         restore-keys: native-cargo-${{ runner.os }}-
 
-    # native/Cargo.toml's pinned cranelift-*/wasmtime-internal-* crates need
-    # rustc 1.95+ (see AGENTS.md); the runner's preinstalled default can be
-    # older, so this always pins `stable` rather than trusting whatever is
-    # already selected.
     - name: Build native backend
       shell: bash
-      run: |
-        rustup toolchain install stable --profile minimal
-        rustup default stable
-        cargo build --release --manifest-path native/Cargo.toml
+      run: cargo build --release --manifest-path native/Cargo.toml
