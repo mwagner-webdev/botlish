@@ -140,7 +140,8 @@ proc hir::specialize::analyze {hir args} {
         specialize [dict get $options -specialize] \
         instances [dict create] keys [dict create] byBlock [dict create] \
         seeds [dict create] deps [dict create] refs [dict create] \
-        queue {} next 0 current "" building {} analyses 0]
+        queue {} next 0 current "" building {} analyses 0 \
+        refinementFacts [expr {[dict get $options -specialize] ? [RefinementFacts $hir] : {}}]]
     try {
         Instance program {}
         if {[dict get $state specialize]} {
@@ -303,6 +304,151 @@ proc hir::specialize::Fixpoint {} {
     }
 }
 
+# ---------------------------------------------------------------------------
+# Named-refinement propagation into parameter analysis
+#
+# A caller-proven named refinement (an opaque type like UriQueryValue, or a
+# validator-backed one) reaching a callee's parameter *analysis* is a
+# separate question from which specialized *instance* a call selects
+# (hir/specialize.tcl's own KeyType already strips named types from
+# instance identity, deliberately, to bound how many instances a program
+# creates). RefinementFacts computes, once, from the semantic HIR, what
+# every exact call of a block's parameter proves in common; RefineParams
+# widens that parameter's *seed type* for the instance's own region
+# re-inference (Analyze, below) accordingly -- never the instance's key.
+# See the milestone doc (opaque-refinement-native-preservation) for the
+# full argument; the short version is spec's own §17/18: sharing one
+# instance across callers that do and do not prove a fact is sound only
+# because a caller that does not prove it makes the intersection empty for
+# that parameter, so no fact is attached at all -- nothing here ever lets
+# one call site's proof leak into another's.
+
+# Widens TYPES (BindingId -> key type, upvar), for BLOCK's own parameters
+# only, with whatever named refinement RefinementFacts proved for them.
+proc hir::specialize::RefineParams {block typesVar} {
+    variable state
+    upvar 1 $typesVar types
+    set facts [dict get $state refinementFacts]
+    if {![dict exists $facts $block]} {
+        return
+    }
+    set blockFacts [dict get $facts $block]
+    foreach b [dict get $state hir exprs $block params] {
+        if {![dict exists $blockFacts $b]} {
+            continue
+        }
+        set keyType [dict get $types $b]
+        if {$keyType eq "never" || [hir::types::IsSpecific $keyType]} {
+            # Not a core (primitive/refined) type -- a callable or
+            # aggregate parameter (block, native, list): named refinement
+            # evidence is only ever defined for a primitive base, so there
+            # is nothing sound to widen here.
+            continue
+        }
+        set base [core::type::base $keyType]
+        if {$base eq ""} {
+            # Key type any (this instance was never called with a concrete
+            # argument its own key would reflect): nothing sound to widen.
+            continue
+        }
+        dict set types $b [core::type::Make $base [dict get $blockFacts $b]]
+    }
+}
+
+# The elements common to both lists A and B (a plain set intersection; named
+# refinement sets here are always short and unsorted).
+proc hir::specialize::Intersect {a b} {
+    set result {}
+    foreach x $a {
+        if {$x in $b} {
+            lappend result $x
+        }
+    }
+    return $result
+}
+
+# BlockExprId -> ParamBindingId -> {NAME...}: the named refinements every
+# *exact*, statically resolved call of that block's parameter proves,
+# intersected across every such call -- so a fact this returns holds
+# regardless of which call reached the parameter.
+#
+# Purely syntactic, over the semantic (unspecialized) HIR, computed once
+# before the fixpoint runs: not a fixpoint itself, and independent of which
+# instances specialization goes on to create -- exactly hir/range.tcl's own
+# "ExternalSeeds" precedent for numeric ranges (a syntactic look at each
+# call's argument expressions, no cross-instance dependency order), adapted
+# to a set-valued, intersection lattice instead of an interval one. The two
+# lattices differ for a reason: a numeric range genuinely widens across
+# recursive calls, so range.tcl needs a small internal fixpoint; a named
+# refinement is a property of an *immutable* binding's already-established
+# value, so a self/recursive call that forwards a parameter *unchanged*
+# trivially preserves whatever is eventually proved for it -- a structural
+# induction whose base case is exactly what the non-forwarding callers
+# prove -- and is simply skipped below, with no iteration needed.
+#
+# A call's argument that is anything other than an unchanged forward of the
+# very parameter it feeds contributes its own semantic type's evidence
+# (hir/types.tcl's Call already computed this on the first, generic pass --
+# including, after hir::ApplyNativeResultOverrides, a trusted native's
+# declared result). A transformed value (e.g. concat(q, "")) has no
+# evidence in its own semantic type unless the operation is itself known to
+# preserve it, so it correctly contributes {} -- dropping the fact for that
+# parameter unless some other call proves it independently.
+proc hir::specialize::RefinementFacts {hir} {
+    set callsByBlock [dict create]
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] ne "call"} {
+            continue
+        }
+        set target [dict get $node target]
+        if {[lindex $target 0] ne "block"} {
+            continue
+        }
+        set block [lindex $target 1]
+        set params [dict get $hir exprs $block params]
+        set args [dict get $node args]
+        if {[llength $params] != [llength $args]} {
+            continue
+        }
+        dict lappend callsByBlock $block $args
+    }
+    set facts [dict create]
+    dict for {block callArgsList} $callsByBlock {
+        set params [dict get $hir exprs $block params]
+        set proven [dict create]
+        set has [dict create]
+        foreach args $callArgsList {
+            foreach p $params a $args {
+                set argNode [dict get $hir exprs $a]
+                if {[dict get $argNode kind] eq "ref" && [dict get $argNode binding] eq $p} {
+                    # Unchanged forward of the parameter to itself (a self
+                    # or otherwise recursive call): no constraint.
+                    continue
+                }
+                set argType [hir::typeOf $hir $a]
+                set evidence [expr {$argType eq "never" || [hir::types::IsSpecific $argType]
+                    ? {} : [core::type::evidenceOf $argType]}]
+                if {![dict exists $has $p]} {
+                    dict set proven $p $evidence
+                    dict set has $p 1
+                } else {
+                    dict set proven $p [Intersect [dict get $proven $p] $evidence]
+                }
+            }
+        }
+        set blockFacts [dict create]
+        dict for {p evidence} $proven {
+            if {$evidence ne ""} {
+                dict set blockFacts $p $evidence
+            }
+        }
+        if {[dict size $blockFacts]} {
+            dict set facts $block $blockFacts
+        }
+    }
+    return $facts
+}
+
 # Analyzes instance ID once: infers its region, records its overlay, calls
 # and edges, and updates its result.
 proc hir::specialize::Analyze {id} {
@@ -334,6 +480,7 @@ proc hir::specialize::Analyze {id} {
             foreach b [dict get $state hir exprs $block params] type [dict get $instance args] {
                 dict set types $b $type
             }
+            RefineParams $block types
         }
         set scratch [dict get $state hir]
         set inferred [hir::types::inferRegion scratch $block $types hir::specialize::Handle]

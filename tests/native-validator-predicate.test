@@ -162,10 +162,10 @@ test native-validator-predicate-emailish-has-native-body {Emailish?'s registrati
     expr {[dict get [core::native::metadata Emailish?] nativeBody] ne ""}
 } -result 1
 
-test native-validator-predicate-refined-checks-blocker {refined-checks.ir's native blocker moved past Emailish?, to the opaque UriQueryValue? (NATIVE-TCL-UNICODE.md)} -body {
+test native-validator-predicate-refined-checks-blocker {refined-checks.ir's native blocker moved past Emailish?, to the opaque UriQueryValue? (NATIVE-TCL-UNICODE.md) -- UPDATED: the opaque-refinement-native-preservation milestone (tests/native-refinement-propagation.test) eliminates that call statically, so refined-checks.ir now runs to completion instead} -body {
     set exprs [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]
-    errorCodeOfUnder cranelift $exprs
-} -result {NATIVE UNSUPPORTED {native UriQueryValue?}}
+    outcomeUnder cranelift $exprs
+} -result {value {[400, 0]} {}}
 
 # ---------------------------------------------------------------------------
 # GC stress: NonEmpty?'s native-body (length + a raw-eligible comparison)

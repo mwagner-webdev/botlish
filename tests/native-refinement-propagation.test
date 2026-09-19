@@ -1,0 +1,222 @@
+# native-refinement-propagation.test -- the opaque-refinement-native-
+# preservation milestone: a trusted opaque refinement (UriQueryValue,
+# core/type.tcl) established by a native's declared -result-type
+# (uriEscape, lib/web.tcl) survives two boundaries that used to discard it
+# on the native (Cranelift) backend, far enough that a statically provable
+# UriQueryValue?(q) inside bench/refined-checks.ir's "check" folds away
+# with no runtime evidence representation at all.
+#
+# The two boundaries:
+#
+#   1. native/native.tcl's ExpandNativeBodies substitutes a trusted
+#      native's -native-body block for its call's callee, before HIR is
+#      built (milestone 1, NATIVE-URI-ESCAPE.md). Without
+#      hir::ApplyNativeResultOverrides (hir/hir.tcl), the substituted
+#      call's result type would be inferred from the body block like any
+#      ordinary call, discarding the native's own registered -result-type
+#      -- an opaque type (str[UriQueryValue]) no ordinary Botlish body can
+#      reconstruct structurally, by design (core/type.tcl).
+#
+#   2. hir/specialize.tcl's KeyType deliberately drops named-type
+#      refinements from a specialization *key* (so unrelated evidence
+#      combinations do not explode how many instances a program creates).
+#      Without hir::specialize::RefinementFacts/RefineParams, a
+#      specialized callee's *parameter analysis* would still only ever see
+#      the plain kind (str), never a caller-proven refinement -- even when
+#      every exact call reaching that parameter proves the same one.
+#
+# UriQueryValue itself gains no native implementation anywhere in this
+# file: every positive case here compiles and runs on cranelift only
+# because the call is eliminated *statically*, never because a runtime
+# evidence representation was added (there still isn't one -- see
+# native-validator-predicate-opaque-still-unsupported,
+# tests/native-validator-predicate.test).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+proc errorCodeOfUnder {backend exprs} {
+    set saved [core::useBackend]
+    core::useBackend $backend
+    try {
+        if {[catch {core::evalProgram $exprs} message options]} {
+            return [dict get $options -errorcode]
+        }
+        return "no error; value [core::formatValue $message]"
+    } finally {
+        core::useBackend $saved
+    }
+}
+
+# The HIR native::runProgram actually lowers for EXPRS: ExpandNativeBodies's
+# rewrite, then hir::build with the overrides it collected -- exactly
+# native::runProgram's own two steps (native/native.tcl), reproduced here
+# because runProgram itself only exposes the final run outcome, not the
+# intermediate HIR this file's structural assertions need.
+proc nativeHirOf {exprs} {
+    set expanded [native::ExpandNativeBodies $exprs]
+    set overrides $native::nativeResultOverrides
+    return [hir::build $expanded -strict 0 -native-result-overrides $overrides]
+}
+
+# ---------------------------------------------------------------------------
+# §1: the trusted native's declared result type survives -native-body
+# substitution (fix 1), independent of specialization or of "check" at all.
+
+test native-refinement-propagation-native-body-preserves-result-type {uriEscape's call keeps its declared str[UriQueryValue] result after -native-body substitution, at the program-level binding it feeds} -body {
+    set exprs {
+        {bind q {call {ref uriEscape} {const str {a b}}}}
+        {ref q}
+    }
+    hirRefTypes [nativeHirOf $exprs] q
+} -result {{str[UriQueryValue]}}
+
+test native-refinement-propagation-native-body-without-override-loses-it {control: without the override, the substituted call's result is only what the body infers -- not str[UriQueryValue] (confirms the override, not something else, is what fixes the case above)} -body {
+    set exprs {
+        {bind q {call {ref uriEscape} {const str {a b}}}}
+        {ref q}
+    }
+    set expanded [native::ExpandNativeBodies $exprs]
+    hirRefTypes [hir::build $expanded -strict 0] q
+} -result {any}
+
+# ---------------------------------------------------------------------------
+# §2: refined-checks.ir itself -- the acceptance target. UriQueryValue?(q)
+# inside "check" is eliminated statically; the benchmark now runs natively.
+
+test native-refinement-propagation-refined-checks-runs-natively {refined-checks.ir compiles and runs on cranelift, with UriQueryValue?(q) eliminated statically (no runtime evidence representation exists)} -body {
+    set exprs [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]
+    outcomeUnder cranelift $exprs
+} -result {value {[400, 0]} {}}
+
+test native-refinement-propagation-refined-checks-parity {refined-checks.ir's value agrees between compile and cranelift (interp is separately known to hit Tcl's own recursion limit at this n, unrelated to this milestone)} -body {
+    set exprs [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]
+    list [lindex [outcomeUnder compile $exprs] 1] [lindex [outcomeUnder cranelift $exprs] 1]
+} -result {{[400, 0]} {[400, 0]}}
+
+test native-refinement-propagation-refined-checks-no-explosion {"check" gets exactly one specialized instance (no generic instance in use): named-refinement propagation widens that one instance's parameter analysis, it does not fork new instances (spec's own §14/§18)} -body {
+    set exprs [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]
+    set hir [nativeHirOf $exprs]
+    set summary [hir::specialize::summary $hir [hir::specialize::analyze $hir]]
+    dict get $summary perFunction check
+} -result {generic 0 specializations 1}
+
+# ---------------------------------------------------------------------------
+# §3: the safety model. A single trusted caller lets the fact through; a
+# caller that cannot prove it must never let the fact leak into a shared
+# specialized instance -- native/lower.tcl has no way to execute a
+# genuinely dynamic UriQueryValue?, so an unsound leak here would show up
+# as a *wrong value* (silently folding an unproven call to true), not
+# merely a missed optimization. These probe that directly.
+
+proc inspectTrustedProgram {} {
+    return {
+        {bind inspect {block {q} {call {ref UriQueryValue?} {ref q}}}}
+        {bind trusted {call {ref uriEscape} {const str {a b}}}}
+        {call {ref inspect} {ref trusted}}
+    }
+}
+
+test native-refinement-propagation-positive-single-caller {a single trusted caller: inspect(uriEscape(...)) folds UriQueryValue? to true and needs no native implementation} -body {
+    outcomeUnder cranelift [inspectTrustedProgram]
+} -result {value true {}}
+
+proc inspectMixedProgram {} {
+    return {
+        {bind inspect {block {q} {call {ref UriQueryValue?} {ref q}}}}
+        {bind trusted {call {ref uriEscape} {const str {a b}}}}
+        {call {ref list}
+            {call {ref inspect} {ref trusted}}
+            {call {ref inspect} {const str plain}}}
+    }
+}
+
+test native-refinement-propagation-mixed-caller-dynamic-semantics {mixed callers (interp/compile): the trusted caller sees true, the untrusted one sees false -- proves the two are not conflated at the value level either} -body {
+    list [lindex [outcomeUnder interp [inspectMixedProgram]] 1] \
+        [lindex [outcomeUnder compile [inspectMixedProgram]] 1]
+} -result {{[true, false]} {[true, false]}}
+
+test native-refinement-propagation-mixed-caller-no-unsound-leak {mixed callers (cranelift): "inspect"'s shared instance must not fold UriQueryValue?(q) to true for the untrusted caller -- the correct, sound outcome here is that the call stays genuinely dynamic (still NATIVE UNSUPPORTED), never a silently wrong folded value} -body {
+    errorCodeOfUnder cranelift [inspectMixedProgram]
+} -result {NATIVE UNSUPPORTED {native UriQueryValue?}}
+
+# ---------------------------------------------------------------------------
+# §4: self-tail recursion. A trusted refinement forwarded unchanged through
+# every iteration is available at the end without being "rediscovered".
+
+proc loopProgram {} {
+    return {
+        {bind loopFn {block {n q}
+            {if {call {ref ==} {ref n} {const 0}}
+                {block {} {call {ref UriQueryValue?} {ref q}}}
+                {block {} {call {ref loopFn} {call {ref -} {ref n} {const 1}} {ref q}}}}}}
+        {bind trusted {call {ref uriEscape} {const str {a b}}}}
+        {call {ref loopFn} {const 5} {ref trusted}}
+    }
+}
+
+test native-refinement-propagation-recursive-forwarding {a trusted q forwarded unchanged through self-tail recursion still folds UriQueryValue?(q) to true at the base case} -body {
+    outcomeUnder cranelift [loopProgram]
+} -result {value true {}}
+
+# ---------------------------------------------------------------------------
+# §5: transformation invalidates the fact. Opaque refinement belongs to the
+# trusted producer's value, not to string contents -- concat's result is
+# not proven to carry it (and, checked here, does not dynamically either).
+
+proc concatProgram {} {
+    return {
+        {bind inspect {block {q} {call {ref UriQueryValue?} {ref q}}}}
+        {bind trusted {call {ref uriEscape} {const str {a b}}}}
+        {bind q2 {call {ref concat} {ref trusted} {const str {}}}}
+        {call {ref inspect} {ref q2}}
+    }
+}
+
+test native-refinement-propagation-transformation-invalidates-dynamically {concat(q, "") does not carry UriQueryValue evidence at the value level either (interp/compile): confirms the static non-propagation below is not over-conservative, it is correct} -body {
+    list [lindex [outcomeUnder interp [concatProgram]] 1] \
+        [lindex [outcomeUnder compile [concatProgram]] 1]
+} -result {false false}
+
+test native-refinement-propagation-transformation-invalidates-statically {concat(q, "") is not statically known to carry UriQueryValue: the call stays genuinely dynamic on cranelift (never wrongly folded to false either -- absence of proof is not proof of absence for an opaque type, spec's own §25)} -body {
+    errorCodeOfUnder cranelift [concatProgram]
+} -result {NATIVE UNSUPPORTED {native UriQueryValue?}}
+
+# ---------------------------------------------------------------------------
+# §6: opaque semantics are unchanged. A plain string with no trusted
+# producer anywhere stays genuinely dynamic and unsupported -- never folded
+# to false merely because no static evidence is visible (spec's own §25),
+# and never revalidatable structurally (UriQueryValue has no validator,
+# core/type.tcl's own precondition makes that impossible to register).
+
+test native-refinement-propagation-unknown-value-stays-unsupported {UriQueryValue?(plain string, no trusted producer) is still genuinely dynamic and unsupported on cranelift} -body {
+    set p {
+        {bind inspect {block {q} {call {ref UriQueryValue?} {ref q}}}}
+        {call {ref inspect} {const str plain}}
+    }
+    errorCodeOfUnder cranelift $p
+} -result {NATIVE UNSUPPORTED {native UriQueryValue?}}
+
+test native-refinement-propagation-unknown-value-not-folded-false {...and, on interp/compile where it does run, its real answer is false -- not a static "false" this milestone invented (guards against ever making the static analysis over-eager and wrong)} -body {
+    set p {
+        {bind inspect {block {q} {call {ref UriQueryValue?} {ref q}}}}
+        {call {ref inspect} {const str plain}}
+    }
+    list [lindex [outcomeUnder interp $p] 1] [lindex [outcomeUnder compile $p] 1]
+} -result {false false}
+
+# ---------------------------------------------------------------------------
+# §7: validator-backed predicates (Emailish?, NonEmpty?) are untouched by
+# this milestone's mechanism -- it only ever widens a parameter's *named
+# refinement* evidence, which core::type::evidenceOf only returns for a
+# refined core type, never for the block/native/list "IsSpecific" HIR
+# shapes those predicates' own native-body helpers use internally.
+
+test native-refinement-propagation-emailish-unaffected {Emailish? (validator-backed) still agrees between interp and cranelift, unaffected by this milestone (tests/native-tcl-unicode.test has the full coverage; this is just a non-regression pin)} -body {
+    set p {
+        {bind f {block {s} {call {ref Emailish?} {ref s}}}}
+        {call {ref f} {const str someone@example.com}}
+    }
+    list [lindex [outcomeUnder interp $p] 1] [lindex [outcomeUnder cranelift $p] 1]
+} -result {true true}
+
+::tcltest::cleanupTests

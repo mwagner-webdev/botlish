@@ -686,6 +686,15 @@ proc hir::types::Call {hirVar ctxVar e} {
             if {$spec && !$dead && [dict get $ctx reachable]} {
                 set result [{*}[dict get $ctx spec] call $e $block $argTypes]
             }
+            if {!$dead && [dict exists $node nativeResultOverride]} {
+                # A trusted native's declared result type survives -native-
+                # body substitution (hir::ApplyNativeResultOverrides):
+                # still run the spec handler above unconditionally, so
+                # instance discovery/edges for the substituted body are
+                # unaffected, but the call's own *type* is the registered
+                # one, not whatever the body block infers.
+                set result [dict get $node nativeResultOverride]
+            }
         } elseif {$spec} {
             set dead 1
         }

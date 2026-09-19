@@ -65,6 +65,13 @@ namespace eval native {
     # the number of native runs (for coverage reports, tests/native-coverage.tcl).
     variable unsupported {}
     variable runs 0
+    # Set by ExpandNativeBodies, consumed by runProgram: IR-PATH (the path a
+    # substituted call node has, before and after substitution -- see
+    # ExpandNativeBodiesIn) -> the native's own registered -result-type, for
+    # every call ExpandNativeBodies substituted a body into. Passed to
+    # hir::build as -native-result-overrides so the substituted call keeps
+    # its native's declared result type (hir::ApplyNativeResultOverrides).
+    variable nativeResultOverrides [dict create]
 }
 
 proc native::binary {} {
@@ -438,11 +445,13 @@ proc native::report {hir} {
 
 proc native::runProgram {exprs env {specialize ""}} {
     variable cache
+    variable nativeResultOverrides
     set exprs [ExpandNativeBodies $exprs]
+    set overrides $nativeResultOverrides
     set options [expr {$specialize eq "" ? {} : [list -specialize $specialize]}]
     set key [list $exprs $options [expr {[info exists ::env(BOTLISH_NATIVE_SPECIALIZE)] ? $::env(BOTLISH_NATIVE_SPECIALIZE) : ""}]]
     if {![dict exists $cache $key]} {
-        dict set cache $key [nir [hir::build $exprs -strict 0] {*}$options]
+        dict set cache $key [nir [hir::build $exprs -strict 0 -native-result-overrides $overrides] {*}$options]
     }
     return [core::completion::normal [Outcome [Driver run [dict get $cache $key]]]]
 }
@@ -470,25 +479,42 @@ proc native::runProgram {exprs env {specialize ""}} {
 # resolution instead, keyed on a call's resolved `target` field rather than
 # the raw `ref` text -- a larger change, deliberately not made here.
 proc native::ExpandNativeBodies {exprs} {
+    variable nativeResultOverrides
+    set nativeResultOverrides [dict create]
     set out {}
+    set index 0
     foreach expr $exprs {
-        lappend out [ExpandNativeBodiesIn $expr]
+        lappend out [ExpandNativeBodiesIn $expr [list $index]]
+        incr index
     }
     return $out
 }
 
-proc native::ExpandNativeBodiesIn {node} {
+# Rewrites NODE (see ExpandNativeBodies), recursively, tracking PATH: the IR
+# path hir::syntax::fromIR (hir/syntax.tcl) will assign the corresponding
+# built node -- computed the same way, index for index, so it stays correct
+# whether or not this specific node was substituted (substitution only ever
+# replaces a call's callee sub-node in place; it never inserts or removes a
+# sibling, so a call's own path is the same before and after). Every native
+# call substituted here records its PATH and its native's own registered
+# -result-type in nativeResultOverrides, for native::runProgram to pass to
+# hir::build as -native-result-overrides.
+proc native::ExpandNativeBodiesIn {node path} {
+    variable nativeResultOverrides
     switch -- [core::ir::op $node] {
         const - ref - continue {
             return $node
         }
         bind {
-            return [list bind [lindex $node 1] [ExpandNativeBodiesIn [lindex $node 2]]]
+            return [list bind [lindex $node 1] \
+                [ExpandNativeBodiesIn [lindex $node 2] [concat $path 2]]]
         }
         block {
             set body {}
+            set index 2
             foreach expr [core::ir::blockBody $node] {
-                lappend body [ExpandNativeBodiesIn $expr]
+                lappend body [ExpandNativeBodiesIn $expr [concat $path $index]]
+                incr index
             }
             return [list block [lindex $node 1] {*}$body]
         }
@@ -496,31 +522,39 @@ proc native::ExpandNativeBodiesIn {node} {
             set callee [lindex $node 1]
             set nativeBody ""
             if {[core::ir::op $callee] eq "ref" && [lindex $callee 1] in [core::native::names]} {
-                set nativeBody [dict get [core::native::metadata [lindex $callee 1]] nativeBody]
+                set meta [core::native::metadata [lindex $callee 1]]
+                set nativeBody [dict get $meta nativeBody]
+                if {$nativeBody ne ""} {
+                    dict set nativeResultOverrides $path [dict get $meta resultType]
+                }
             }
             if {$nativeBody ne ""} {
                 set callee $nativeBody
             }
-            set callee [ExpandNativeBodiesIn $callee]
+            set callee [ExpandNativeBodiesIn $callee [concat $path 1]]
             set args {}
+            set index 2
             foreach expr [lrange $node 2 end] {
-                lappend args [ExpandNativeBodiesIn $expr]
+                lappend args [ExpandNativeBodiesIn $expr [concat $path $index]]
+                incr index
             }
             return [list call $callee {*}$args]
         }
         if {
-            return [list if [ExpandNativeBodiesIn [lindex $node 1]] \
-                [ExpandNativeBodiesIn [lindex $node 2]] [ExpandNativeBodiesIn [lindex $node 3]]]
+            return [list if [ExpandNativeBodiesIn [lindex $node 1] [concat $path 1]] \
+                [ExpandNativeBodiesIn [lindex $node 2] [concat $path 2]] \
+                [ExpandNativeBodiesIn [lindex $node 3] [concat $path 3]]]
         }
         loop {
-            return [list loop [ExpandNativeBodiesIn [lindex $node 1]]]
+            return [list loop [ExpandNativeBodiesIn [lindex $node 1] [concat $path 1]]]
         }
         return - ok - error-value {
-            return [list [core::ir::op $node] [ExpandNativeBodiesIn [lindex $node 1]]]
+            return [list [core::ir::op $node] \
+                [ExpandNativeBodiesIn [lindex $node 1] [concat $path 1]]]
         }
         break {
             if {[llength $node] == 2} {
-                return [list break [ExpandNativeBodiesIn [lindex $node 1]]]
+                return [list break [ExpandNativeBodiesIn [lindex $node 1] [concat $path 1]]]
             }
             return $node
         }
