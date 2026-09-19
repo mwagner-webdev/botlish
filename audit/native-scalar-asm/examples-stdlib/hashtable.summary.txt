@@ -1,7 +1,7 @@
 source:  examples/stdlib/hashtable.bot
 backend: Cranelift (specialize=1)
 asm:     hashtable.asm
-machine-code bytes: 17970 (per function: 172 85 85 85 85 548 696 208 184 184 184 184 184 268 299 355 1036 1568 581 389 596 639 1433 945 961 833 1528 1132 1469 1054)
+machine-code bytes: 17432 (per function: 172 71 71 71 71 524 689 208 177 177 177 177 177 268 284 332 1020 1536 565 373 556 582 1353 928 953 825 1472 1108 1461 1054)
 
 functions:
   0 <program entry>: nir-regs=1
@@ -44,6 +44,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     root candidates: 0
     max live roots: 0
     shadow slots: 1
+    entry zero slots: 1
   
   function 1 "ht_min_capacity"
     NIR regs: 2
@@ -53,6 +54,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     root candidates: 0
     max live roots: 0
     shadow slots: 1
+    entry zero slots: 0
   
   function 2 "ht_empty_state"
     NIR regs: 2
@@ -62,6 +64,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     root candidates: 0
     max live roots: 0
     shadow slots: 1
+    entry zero slots: 0
   
   function 3 "ht_occupied_state"
     NIR regs: 2
@@ -71,6 +74,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     root candidates: 0
     max live roots: 0
     shadow slots: 1
+    entry zero slots: 0
   
   function 4 "ht_tombstone_state"
     NIR regs: 2
@@ -80,6 +84,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     root candidates: 0
     max live roots: 0
     shadow slots: 1
+    entry zero slots: 0
   
   function 5 "ht_fill_empty"
     NIR regs: 12
@@ -89,6 +94,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     root candidates: 4
     max live roots: 4
     shadow slots: 4
+    entry zero slots: 1
   
   function 6 "ht_alloc"
     NIR regs: 29
@@ -98,6 +104,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     root candidates: 6
     max live roots: 4
     shadow slots: 4
+    entry zero slots: 3
   
   function 7 "ht_new"
     NIR regs: 2
@@ -107,6 +114,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     root candidates: 1
     max live roots: 1
     shadow slots: 1
+    entry zero slots: 1
   
   function 8 "ht_controls"
     NIR regs: 4
@@ -116,6 +124,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     root candidates: 0
     max live roots: 0
     shadow slots: 1
+    entry zero slots: 0
   
   function 9 "ht_keys"
     NIR regs: 4
@@ -125,6 +134,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     root candidates: 0
     max live roots: 0
     shadow slots: 1
+    entry zero slots: 0
   
   function 10 "ht_values"
     NIR regs: 4
@@ -134,6 +144,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     root candidates: 0
     max live roots: 0
     shadow slots: 1
+    entry zero slots: 0
   
   function 11 "ht_size"
     NIR regs: 4
@@ -143,6 +154,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     root candidates: 0
     max live roots: 0
     shadow slots: 1
+    entry zero slots: 0
   
   function 12 "ht_tombstones"
     NIR regs: 4
@@ -152,6 +164,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     root candidates: 0
     max live roots: 0
     shadow slots: 1
+    entry zero slots: 0
   
   function 13 "ht_capacity"
     NIR regs: 3
@@ -161,6 +174,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     root candidates: 1
     max live roots: 1
     shadow slots: 1
+    entry zero slots: 0
   
   function 14 "ht_probe_start"
     NIR regs: 5
@@ -170,6 +184,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     root candidates: 2
     max live roots: 2
     shadow slots: 2
+    entry zero slots: 0
   
   function 15 "ht_probe_next"
     NIR regs: 7
@@ -179,6 +194,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     root candidates: 4
     max live roots: 3
     shadow slots: 3
+    entry zero slots: 0
   
   function 16 "ht_find_get"
     NIR regs: 28
@@ -188,6 +204,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     root candidates: 4
     max live roots: 4
     shadow slots: 4
+    entry zero slots: 1
   
   function 17 "ht_find_insert"
     NIR regs: 41
@@ -197,6 +214,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     root candidates: 5
     max live roots: 5
     shadow slots: 5
+    entry zero slots: 1
   
   function 18 "ht_get"
     NIR regs: 12
@@ -206,6 +224,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     root candidates: 4
     max live roots: 3
     shadow slots: 3
+    entry zero slots: 1
   
   function 19 "ht_contains"
     NIR regs: 7
@@ -215,6 +234,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     root candidates: 3
     max live roots: 3
     shadow slots: 3
+    entry zero slots: 1
   
   function 20 "ht_rehash_probe"
     NIR regs: 12
@@ -224,6 +244,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     root candidates: 5
     max live roots: 4
     shadow slots: 4
+    entry zero slots: 0
   
   function 21 "ht_rehash_insert"
     NIR regs: 14
@@ -233,6 +254,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     root candidates: 8
     max live roots: 7
     shadow slots: 7
+    entry zero slots: 0
   
   function 22 "ht_rehash_scan"
     NIR regs: 24
@@ -242,6 +264,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     root candidates: 13
     max live roots: 11
     shadow slots: 11
+    entry zero slots: 1
   
   function 23 "ht_rehash"
     NIR regs: 30
@@ -251,6 +274,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     root candidates: 11
     max live roots: 10
     shadow slots: 10
+    entry zero slots: 8
   
   function 24 "ht_should_grow"
     NIR regs: 15
@@ -260,6 +284,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     root candidates: 10
     max live roots: 3
     shadow slots: 3
+    entry zero slots: 2
   
   function 25 "ht_grow_or_clean"
     NIR regs: 12
@@ -269,6 +294,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     root candidates: 6
     max live roots: 3
     shadow slots: 3
+    entry zero slots: 2
   
   function 26 "ht_place"
     NIR regs: 31
@@ -278,6 +304,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     root candidates: 12
     max live roots: 6
     shadow slots: 6
+    entry zero slots: 2
   
   function 27 "ht_set"
     NIR regs: 34
@@ -287,6 +314,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     root candidates: 10
     max live roots: 5
     shadow slots: 5
+    entry zero slots: 2
   
   function 28 "ht_delete"
     NIR regs: 34
@@ -296,6 +324,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     root candidates: 11
     max live roots: 4
     shadow slots: 4
+    entry zero slots: 2
   
   function 29 "sample"
     NIR regs: 28
@@ -305,6 +334,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     root candidates: 19
     max live roots: 6
     shadow slots: 6
+    entry zero slots: 6
 
 mechanical pattern counts (triage only; see report for interpretation):
   8 x calls to rt_int_add

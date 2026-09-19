@@ -1,7 +1,7 @@
 source:  bench/refined-checks.ir
 backend: Cranelift (specialize=1)
 asm:     refined-checks.asm
-machine-code bytes: 26317 (per function: 460 624 1313 1385 544 597 499 270 625 625 625 681 793 1305 1369 544 597 499 270 625 625 625 681 793 1216 1216 1817 1521 687 1068 694 1124)
+machine-code bytes: 25602 (per function: 453 592 1297 1369 522 573 495 263 609 609 609 665 777 1289 1353 522 573 495 263 609 609 609 665 777 1099 1099 1817 1529 672 1028 685 1076)
 
 functions:
   0 <program entry>: nir-regs=16
@@ -46,6 +46,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     root candidates: 10
     max live roots: 5
     shadow slots: 5
+    entry zero slots: 4
   
   function 1 "check"
     NIR regs: 28
@@ -55,6 +56,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     root candidates: 6
     max live roots: 5
     shadow slots: 5
+    entry zero slots: 1
   
   function 2 ""
     NIR regs: 31
@@ -64,6 +66,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     root candidates: 12
     max live roots: 5
     shadow slots: 5
+    entry zero slots: 3
   
   function 3 ""
     NIR regs: 31
@@ -73,6 +76,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     root candidates: 12
     max live roots: 5
     shadow slots: 5
+    entry zero slots: 3
   
   function 4 "char_at"
     NIR regs: 6
@@ -82,6 +86,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     root candidates: 4
     max live roots: 3
     shadow slots: 3
+    entry zero slots: 0
   
   function 5 "char_at"
     NIR regs: 6
@@ -91,6 +96,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     root candidates: 3
     max live roots: 3
     shadow slots: 3
+    entry zero slots: 0
   
   function 6 "is_local_char"
     NIR regs: 42
@@ -100,6 +106,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     root candidates: 0
     max live roots: 0
     shadow slots: 1
+    entry zero slots: 0
   
   function 7 "is_label_char"
     NIR regs: 10
@@ -109,6 +116,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     root candidates: 0
     max live roots: 0
     shadow slots: 1
+    entry zero slots: 0
   
   function 8 "scan_local"
     NIR regs: 12
@@ -118,6 +126,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     root candidates: 5
     max live roots: 3
     shadow slots: 3
+    entry zero slots: 1
   
   function 9 "scan_label"
     NIR regs: 12
@@ -127,6 +136,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     root candidates: 5
     max live roots: 3
     shadow slots: 3
+    entry zero slots: 1
   
   function 10 "scan_alpha"
     NIR regs: 12
@@ -136,6 +146,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     root candidates: 4
     max live roots: 3
     shadow slots: 3
+    entry zero slots: 1
   
   function 11 "tld_ok"
     NIR regs: 11
@@ -145,6 +156,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     root candidates: 3
     max live roots: 2
     shadow slots: 2
+    entry zero slots: 0
   
   function 12 "domain_loop"
     NIR regs: 29
@@ -154,6 +166,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     root candidates: 7
     max live roots: 2
     shadow slots: 2
+    entry zero slots: 0
   
   function 13 ""
     NIR regs: 31
@@ -163,6 +176,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     root candidates: 12
     max live roots: 5
     shadow slots: 5
+    entry zero slots: 3
   
   function 14 ""
     NIR regs: 31
@@ -172,6 +186,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     root candidates: 12
     max live roots: 5
     shadow slots: 5
+    entry zero slots: 3
   
   function 15 "char_at"
     NIR regs: 6
@@ -181,6 +196,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     root candidates: 4
     max live roots: 3
     shadow slots: 3
+    entry zero slots: 0
   
   function 16 "char_at"
     NIR regs: 6
@@ -190,6 +206,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     root candidates: 3
     max live roots: 3
     shadow slots: 3
+    entry zero slots: 0
   
   function 17 "is_local_char"
     NIR regs: 42
@@ -199,6 +216,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     root candidates: 0
     max live roots: 0
     shadow slots: 1
+    entry zero slots: 0
   
   function 18 "is_label_char"
     NIR regs: 10
@@ -208,6 +226,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     root candidates: 0
     max live roots: 0
     shadow slots: 1
+    entry zero slots: 0
   
   function 19 "scan_local"
     NIR regs: 12
@@ -217,6 +236,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     root candidates: 5
     max live roots: 3
     shadow slots: 3
+    entry zero slots: 1
   
   function 20 "scan_label"
     NIR regs: 12
@@ -226,6 +246,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     root candidates: 5
     max live roots: 3
     shadow slots: 3
+    entry zero slots: 1
   
   function 21 "scan_alpha"
     NIR regs: 12
@@ -235,6 +256,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     root candidates: 4
     max live roots: 3
     shadow slots: 3
+    entry zero slots: 1
   
   function 22 "tld_ok"
     NIR regs: 11
@@ -244,6 +266,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     root candidates: 3
     max live roots: 2
     shadow slots: 2
+    entry zero slots: 0
   
   function 23 "domain_loop"
     NIR regs: 29
@@ -253,6 +276,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     root candidates: 7
     max live roots: 2
     shadow slots: 2
+    entry zero slots: 0
   
   function 24 ""
     NIR regs: 26
@@ -262,6 +286,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     root candidates: 24
     max live roots: 17
     shadow slots: 17
+    entry zero slots: 0
   
   function 25 ""
     NIR regs: 26
@@ -271,6 +296,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     root candidates: 24
     max live roots: 17
     shadow slots: 17
+    entry zero slots: 0
   
   function 26 "high_nibble"
     NIR regs: 93
@@ -280,6 +306,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     root candidates: 0
     max live roots: 0
     shadow slots: 1
+    entry zero slots: 0
   
   function 27 "is_unreserved"
     NIR regs: 62
@@ -289,6 +316,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     root candidates: 0
     max live roots: 0
     shadow slots: 1
+    entry zero slots: 0
   
   function 28 "hex_pair"
     NIR regs: 10
@@ -298,6 +326,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     root candidates: 4
     max live roots: 2
     shadow slots: 2
+    entry zero slots: 0
   
   function 29 "esc_bytes"
     NIR regs: 16
@@ -307,6 +336,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     root candidates: 11
     max live roots: 7
     shadow slots: 7
+    entry zero slots: 2
   
   function 30 "esc_char"
     NIR regs: 23
@@ -316,6 +346,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     root candidates: 9
     max live roots: 4
     shadow slots: 4
+    entry zero slots: 3
   
   function 31 "esc_from"
     NIR regs: 17
@@ -325,6 +356,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     root candidates: 11
     max live roots: 7
     shadow slots: 7
+    entry zero slots: 2
 
 mechanical pattern counts (triage only; see report for interpretation):
   32 x calls to rt_closure_new

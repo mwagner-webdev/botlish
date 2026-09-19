@@ -11,11 +11,16 @@
 //! A result of 0 means an error is pending in the VM; every caller branches
 //! to its own error exit, which pops its shadow frame and returns 0.
 //!
-//! Frame layout: the prologue reserves one shadow-stack slot per register
-//! (at least one, so native depth is bounded by the shadow stack), clears
-//! it, and every definition of a register is stored to its slot: the GC's
-//! precise roots (runtime/heap.rs). Register values live in Cranelift
-//! variables, so reads never touch memory.
+//! Frame layout: the prologue reserves this frame's physical shadow-stack
+//! slots (`codegen::roots::RootPlan::num_slots`, at least one, so native
+//! depth is bounded by the shadow stack), and every definition of a
+//! rooted register is stored to its slot: the GC's precise roots
+//! (runtime/heap.rs). A slot is zeroed at frame entry only when
+//! `RootPlan::entry_zero` says some reachable safepoint could otherwise
+//! scan it before a real Value has been stored there (codegen::roots's
+//! `entry_zero_slots`, F3b) -- not merely because the slot exists.
+//! Register values live in Cranelift variables, so reads never touch
+//! memory.
 //!
 //! Self tail calls (NIR `tail`) rebind the parameter variables and jump back
 //! to the body block after the prologue: a CFG back edge, no call.
@@ -284,6 +289,14 @@ struct Translator<'a, 'b, M: Module> {
     /// is a pure Cranelift-codegen choice, not something native/lower.tcl's
     /// NIR emission needs to know about).
     listget_fast: bool,
+    /// Whether the prologue zeroes only the physical shadow slots F3b's
+    /// per-slot definite-initialization analysis (codegen::roots's
+    /// `RootPlan::entry_zero`) says still need it, instead of eagerly
+    /// zeroing every slot the way F3 originally did. On by default;
+    /// BOTLISH_NATIVE_ROOT_INIT_OPT=0 restores the old eager-zero-every-slot
+    /// policy, for differential testing (mirrors `listget_fast`'s own env
+    /// var, same reasoning).
+    root_init_opt: bool,
 }
 
 impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
@@ -303,6 +316,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         let placeholder = ir::Value::from_u32(0);
         let plan = roots::plan(f);
         let listget_fast = std::env::var("BOTLISH_NATIVE_LISTGET_FAST_OPT").ok().as_deref() != Some("0");
+        let root_init_opt = std::env::var("BOTLISH_NATIVE_ROOT_INIT_OPT").ok().as_deref() != Some("0");
         Translator {
             b,
             module,
@@ -324,6 +338,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             plan,
             result_buf: None,
             listget_fast,
+            root_init_opt,
         }
     }
 
@@ -358,9 +373,20 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
 
         self.b.switch_to_block(setup);
         self.b.ins().store(MemFlagsData::trusted(), top, self.vm, VM_SS_TOP_OFFSET);
-        let zero = self.b.ins().iconst(I64, 0);
+        // F3b: zero only the physical slots codegen::roots's per-slot
+        // definite-initialization analysis says some reachable safepoint
+        // could otherwise scan before a valid Value has been stored into
+        // them (RootPlan::entry_zero); a slot every path to every reachable
+        // safepoint already stores a real Value into needs no prologue
+        // zero at all (see roots.rs's `entry_zero_slots` for the proof).
+        // BOTLISH_NATIVE_ROOT_INIT_OPT=0 restores the old "zero every slot"
+        // policy for differential testing.
+        let mut zero = None;
         for slot in 0..slots {
-            self.b.ins().store(MemFlagsData::trusted(), zero, self.base, (slot * 8) as i32);
+            if !self.root_init_opt || self.plan.entry_zero[slot as usize] {
+                let z = *zero.get_or_insert_with(|| self.b.ins().iconst(I64, 0));
+                self.b.ins().store(MemFlagsData::trusted(), z, self.base, (slot * 8) as i32);
+            }
         }
         let mut next = 1;
         if let Some(closure) = self.closure {

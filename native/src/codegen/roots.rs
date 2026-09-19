@@ -78,6 +78,18 @@ pub struct RootPlan {
     /// theoretical minimum slot count a perfect (non-greedy) allocator could
     /// not go below.
     pub max_live: u32,
+    /// F3b (per-physical-slot definite-initialization): indexed by physical
+    /// slot 0..num_slots, whether codegen::clif's prologue must zero that
+    /// slot at frame entry. `true` means some reachable GC safepoint is not
+    /// dominated, on every path from frame publication, by a store of a
+    /// valid Value into that slot, so the slot could otherwise reach a
+    /// safepoint holding leftover machine data; `false` means every
+    /// reachable safepoint is provably preceded by such a store on every
+    /// path, so the entry zero is redundant (see `entry_zero_slots`, this
+    /// module's own analysis, and clif.rs's prologue). This is a strictly
+    /// separate fact from `num_slots`/`slot_of` -- F3's own physical-slot
+    /// allocation is unchanged by it (milestone brief items 1, 34).
+    pub entry_zero: Vec<bool>,
 }
 
 impl RootPlan {
@@ -379,30 +391,207 @@ fn color(regs: u32, safepoint_roots: &[Vec<Reg>]) -> (Vec<Option<u32>>, u32, u32
     (slot_of, slot_members.len() as u32, root_candidates)
 }
 
+/// F3b: per-physical-slot definite-initialization dataflow, run after F3's
+/// own CFG/liveness/coloring (`slot_of`, already colored onto physical
+/// slots 0..NUM_SLOTS -- this function does not revisit *whether* a
+/// register is rooted or *which* physical slot it shares, only *whether
+/// that physical slot's prologue zero is still needed*: see this module's
+/// doc and the milestone brief's item 5, "analyze physical slots, not NIR
+/// registers").
+///
+/// Two-point per-slot lattice, UNINITIALIZED < INITIALIZED: this is a
+/// forward "must" dataflow, the mirror image of `analyze`'s backward "may"
+/// liveness. A definition of a register `slot_of` colors to physical slot S
+/// (`def_use`'s `defs`, restricted to slotted registers -- exactly the
+/// registers `codegen::clif::Translator::def` actually stores to the shadow
+/// stack, never `def_raw`'s, which are never candidates in the first place)
+/// is a one-way UNINITIALIZED -> INITIALIZED transition for S, and is never
+/// reversed: a physical slot's logical root going dead does not make the
+/// slot's *machine* contents invalid again (milestone brief item 22 -- a
+/// stale but valid Value is still GC-safe). CFG joins meet with logical AND
+/// ("definitely initialized" means "on every path reaching this point").
+/// Block 0 (the function's own entry, on first arrival -- not a self tail
+/// call's back edge to it, see `Cfg::build`'s doc) always contributes a
+/// fixed entry state as one of its effective predecessors: every slot a
+/// parameter register colors to (codegen::clif's prologue stores every
+/// parameter to its slot, unconditionally, right after the zero loop and
+/// before the body -- see `entry_zero_slots`'s own `entry_state`) starts
+/// INITIALIZED; every other slot starts UNINITIALIZED, since frame
+/// publication has stored nothing else into it yet. Since AND with
+/// UNINITIALIZED can never become INITIALIZED again, this is simplest
+/// expressed by seeding block 0's input at this fixed entry state outright
+/// rather than modeling a synthetic entry predecessor.
+///
+/// At a safepoint, every physical slot the GC could scan while this frame
+/// is published is checked against the *input* state to that instruction
+/// (before its own def, if it has one, takes effect -- mirrors `analyze`'s
+/// own `live_in_inst`, and for the same reason: a call's own destination
+/// register is not written until after it returns, i.e. after whatever
+/// safepoint inside it already ran). Every physical slot is checked, not
+/// only the ones live at that particular safepoint: the runtime scans the
+/// whole published shadow-stack region for this frame (`base..base +
+/// num_slots*8`, see runtime/heap.rs's and vm.rs's module docs) regardless
+/// of which registers happen to be live there, so an uninitialized slot is
+/// unsafe to scan even where nothing is nominally "rooted" at that point.
+///
+/// What counts as a "reachable safepoint" is exactly `is_safepoint` over
+/// F's own CFG (unchanged from F3): a call this function makes is itself
+/// conservatively a safepoint (module doc, item 2), which already accounts
+/// for GC running arbitrarily deep inside a callee -- this frame's own
+/// slots cannot change while suspended inside a call, so checking the state
+/// immediately before the call instruction is equivalent to checking it at
+/// every point GC could actually run during that call. The stack-overflow
+/// check and frame-publication store themselves are pure codegen::clif
+/// prologue machinery, never NIR instructions, so they are simply outside
+/// this CFG and impose no requirement here (milestone brief item 11):
+/// nothing before publication can force a slot's entry zero.
+fn entry_zero_slots(f: &Function, cfg: &Cfg, slot_of: &[Option<u32>], num_slots: u32) -> Vec<bool> {
+    let ns = num_slots as usize;
+    let nb = cfg.blocks.len();
+
+    let mut preds: Vec<Vec<usize>> = vec![Vec::new(); nb];
+    for (b, s) in cfg.succs.iter().enumerate() {
+        for &t in s {
+            preds[t].push(b);
+        }
+    }
+
+    // codegen::clif's prologue stores every parameter into its shadow slot
+    // (`Translator::function`'s `self.def(i, v)` loop) immediately after
+    // the (now conditional) zero loop and strictly before jumping into the
+    // body -- but that store is not an `f.body` instruction, so `def_use`
+    // never reports it as a def of register `i`. Without accounting for it
+    // here, a parameter that is also a root candidate would look forever
+    // UNINITIALIZED to this analysis and force a needless entry zero on
+    // every call (a self tail call's own back edge does not have this gap:
+    // `Inst::Tail`/`Inst::TailEnv` rebind parameters 0..f.params as
+    // ordinary `f.body` defs, already handled by `apply_block` below). This
+    // is exactly the real function entry's initial state -- i.e. block 0's
+    // input on first arrival, not on a back edge, which is what the
+    // `b == 0` case of `block_input` below seeds.
+    let mut entry_state = vec![false; ns];
+    for i in 0..f.params {
+        if let Some(slot) = slot_of[i as usize] {
+            entry_state[slot as usize] = true;
+        }
+    }
+
+    // The state a block's own instructions produce, given INPUT at its
+    // first instruction: a "gen" transfer only (see this function's doc --
+    // definite initialization is one-way, so there is no "kill").
+    let apply_block = |b: usize, input: &[bool]| -> Vec<bool> {
+        let (s, e) = cfg.blocks[b];
+        let mut state = input.to_vec();
+        for idx in s..e {
+            let (defs, _uses) = def_use(&f.body[idx], f.params);
+            for d in defs {
+                if let Some(slot) = slot_of[d as usize] {
+                    state[slot as usize] = true;
+                }
+            }
+        }
+        state
+    };
+    // A block's input state: AND of its predecessors' output (block 0 also
+    // always ANDs in the implicit entry edge -- ENTRY_STATE, i.e. exactly
+    // the parameter-bound slots, everything else UNINITIALIZED -- see this
+    // function's doc).
+    let block_input = |b: usize, block_out: &[Vec<bool>]| -> Vec<bool> {
+        let mut input = if b == 0 { entry_state.clone() } else { vec![true; ns] };
+        for &p in &preds[b] {
+            for s in 0..ns {
+                input[s] &= block_out[p][s];
+            }
+        }
+        input
+    };
+
+    // Forward "must" fixpoint: every block starts optimistic (all
+    // INITIALIZED, i.e. top of this lattice) and a block's state only ever
+    // loses bits as real predecessors are folded in, so this is monotone
+    // and bounded exactly like `analyze`'s own backward fixpoint (see its
+    // doc); `guard` exists for the same reason as there.
+    let mut block_out: Vec<Vec<bool>> = vec![vec![true; ns]; nb];
+    let mut guard = 0usize;
+    loop {
+        guard += 1;
+        if guard > (nb + f.body.len()) * 4 + 1000 {
+            panic!("root definite-init analysis failed to converge for function {} ({})", f.id, f.name);
+        }
+        let mut changed = false;
+        for b in 0..nb {
+            let input = block_input(b, &block_out);
+            let out = apply_block(b, &input);
+            if out != block_out[b] {
+                block_out[b] = out;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+
+    // Second pass, from the converged per-block inputs: walk every block's
+    // instructions forward once more, recording at each safepoint any slot
+    // not yet definitely INITIALIZED (see this function's doc for why the
+    // safepoint instruction's own def, if any, does not yet count).
+    let mut needs_zero = vec![false; ns];
+    for b in 0..nb {
+        let (s, e) = cfg.blocks[b];
+        let mut state = block_input(b, &block_out);
+        for idx in s..e {
+            let inst = &f.body[idx];
+            if is_safepoint(inst) {
+                for slot in 0..ns {
+                    if !state[slot] {
+                        needs_zero[slot] = true;
+                    }
+                }
+            }
+            let (defs, _uses) = def_use(inst, f.params);
+            for d in defs {
+                if let Some(slot) = slot_of[d as usize] {
+                    state[slot as usize] = true;
+                }
+            }
+        }
+    }
+    needs_zero
+}
+
 /// Computes F's root-allocation plan (see this module's doc).
 pub fn plan(f: &Function) -> RootPlan {
     let cfg = Cfg::build(f);
     let liveness = analyze(f, &cfg);
     let (slot_of, colored_slots, root_candidates) = color(f.regs, &liveness.safepoint_roots);
     let max_live = liveness.safepoint_roots.iter().map(Vec::len).max().unwrap_or(0) as u32;
+    // At least one slot always, so the shadow stack still bounds native
+    // recursion depth for a function with zero roots (see RootPlan's doc
+    // and codegen::clif's prologue).
+    let num_slots = colored_slots.max(1);
+    let entry_zero = entry_zero_slots(f, &cfg, &slot_of, num_slots);
     RootPlan {
         slot_of,
-        // At least one slot always, so the shadow stack still bounds native
-        // recursion depth for a function with zero roots (see RootPlan's
-        // doc and codegen::clif's prologue).
-        num_slots: colored_slots.max(1),
+        num_slots,
         safepoints: liveness.safepoint_roots.len() as u32,
         root_candidates,
         max_live,
+        entry_zero,
     }
 }
 
 /// A compact, per-function root report for PROGRAM (milestone brief item 48:
 /// "function fib<int>\nNIR regs: 17\nraw regs: 6\nsafepoints: 4\nroot
-/// candidates: 7\nmax live roots: 3\nshadow slots: 3"), read by
-/// `native/explain-native.tcl` (as `roots.txt`) and by `botlish-native
-/// roots FILE.nir` directly. Purely a rendering of `RootPlan`/`Function`'s
-/// own fields -- no analysis happens here.
+/// candidates: 7\nmax live roots: 3\nshadow slots: 3\nentry zero slots: 3"),
+/// read by `native/explain-native.tcl` (as `roots.txt`) and by
+/// `botlish-native roots FILE.nir` directly. Purely a rendering of
+/// `RootPlan`/`Function`'s own fields -- no analysis happens here.
+/// `shadow slots` (F3's physical-slot count) and `entry zero slots` (F3b's
+/// count of those physical slots that still need a prologue zero) are
+/// deliberately separate numbers (milestone brief item 34): the first is
+/// unaffected by this module's definite-initialization analysis, the
+/// second is entirely its output.
 pub fn report(program: &Program) -> String {
     let mut out = String::new();
     for f in &program.functions {
@@ -416,6 +605,7 @@ pub fn report(program: &Program) -> String {
         writeln!(out, "  root candidates: {}", plan.root_candidates).unwrap();
         writeln!(out, "  max live roots: {}", plan.max_live).unwrap();
         writeln!(out, "  shadow slots: {}", plan.num_slots).unwrap();
+        writeln!(out, "  entry zero slots: {}", plan.entry_zero.iter().filter(|z| **z).count()).unwrap();
         out.push('\n');
     }
     out
@@ -785,5 +975,183 @@ mod tests {
         assert_ne!(plan.slot_of[10], plan.slot_of[15]);
         assert_eq!(plan.slot_of[9], plan.slot_of[10]);
         assert_eq!(plan.slot_of[14], plan.slot_of[15]);
+    }
+
+    // -------------------------------------------------------------------
+    // F3b: per-physical-slot definite-initialization (RootPlan::entry_zero).
+
+    /// A parameter that is itself a root candidate needs no entry zero:
+    /// codegen::clif's prologue stores every parameter into its slot
+    /// (unconditionally, right after the zero loop, before the body ever
+    /// runs) even though that store is not an `f.body` instruction at all
+    /// -- the gap this test guards against is `entry_zero_slots` mistaking
+    /// "no `f.body` def" for "never initialized" and demanding a needless
+    /// zero on every call.
+    #[test]
+    fn parameter_root_needs_no_entry_zero() {
+        let f = parse_with_one_arg(
+            "    %0 = str \"seed\"\n",
+            concat!(
+                "func 1 \"f\" params=1 env=0 regs=3 pnames=\"p\" captures=0 rawregs=\"\"\n",
+                "    %1 = str \"x\"\n",
+                "    %2 = op strcat %0 %1\n",
+                "    ret %2\n",
+                "end\n",
+            ),
+        );
+        let plan = plan(&f);
+        assert_eq!(plan.safepoints, 1);
+        let slot = plan.slot_of[0].expect("the parameter is live across the strcat");
+        assert!(!plan.entry_zero[slot as usize], "the prologue's own parameter store already initializes it");
+    }
+
+    // -------------------------------------------------------------------
+    // Milestone brief item 20 / the sum-refined shape: a branch that
+    // returns before any safepoint must not force the other branch's
+    // (safepoint-reaching) slot to keep its entry zero.
+
+    #[test]
+    fn early_return_branch_without_safepoint_does_not_force_entry_zero() {
+        let f = parse_with_one_arg(
+            "    %0 = str \"seed\"\n",
+            concat!(
+                "func 1 \"f\" params=1 env=0 regs=5 pnames=\"p\" captures=0 rawregs=\"\"\n",
+                "    %1 = bool true\n",
+                "    br %1 L0 L1\n",
+                "  label L0\n",
+                "    ret %0\n",
+                "  label L1\n",
+                "    %2 = str \"x\"\n",
+                "    %3 = op strcat %0 %2\n",
+                "    ret %3\n",
+                "end\n",
+            ),
+        );
+        let plan = plan(&f);
+        assert_eq!(plan.safepoints, 1);
+        let slot0 = plan.slot_of[0].expect("the parameter is live across the strcat on the L1 path");
+        let slot2 = plan.slot_of[2].expect("the fresh string is live across the strcat too");
+        assert!(!plan.entry_zero[slot0 as usize], "L0 returns before any safepoint; L1 stores %0's slot at entry");
+        assert!(!plan.entry_zero[slot2 as usize], "%2 is stored before the only safepoint on the only path to it");
+    }
+
+    // -------------------------------------------------------------------
+    // Milestone brief item 18: a safepoint that can run before a candidate
+    // register's very first definition must keep that slot's entry zero,
+    // even though the same slot is safely reinitialized before a *later*
+    // safepoint.
+
+    #[test]
+    fn safepoint_before_first_definition_forces_entry_zero() {
+        let program = parse_program(concat!(
+            "nir 1\n\n",
+            "func 0 \"<program>\" params=0 env=0 regs=1 pnames=\"\" captures=0 rawregs=\"\"\n",
+            "    %0 = call 1\n",
+            "    ret %0\n",
+            "end\n",
+            "func 1 \"f\" params=0 env=0 regs=3 pnames=\"\" captures=0 rawregs=\"\"\n",
+            "    %0 = call 2\n", // safepoint #1: %1 does not exist yet on this path.
+            "    %1 = str \"a\"\n",
+            "    %2 = call 3 %1\n", // safepoint #2: %1 is live-in here.
+            "    ret %2\n",
+            "end\n",
+            "func 2 \"zero-arg\" params=0 env=0 regs=1 pnames=\"\" captures=0 rawregs=\"\"\n",
+            "    %0 = unit\n",
+            "    ret %0\n",
+            "end\n",
+            "func 3 \"one-arg\" params=1 env=0 regs=1 pnames=\"x\" captures=0 rawregs=\"\"\n",
+            "    ret %0\n",
+            "end\n",
+        ));
+        let plan = plan(&program.functions[1]);
+        assert_eq!(plan.safepoints, 2);
+        let slot = plan.slot_of[1].expect("%1 is live across the second call");
+        assert!(plan.entry_zero[slot as usize], "the first call can scan %1's slot before %1 is ever defined");
+    }
+
+    // -------------------------------------------------------------------
+    // Milestone brief item 19: a slot only conditionally defined before a
+    // safepoint must stay conservatively zeroed -- the false branch reaches
+    // the safepoint without ever storing to it.
+
+    #[test]
+    fn conditionally_defined_root_before_safepoint_forces_entry_zero() {
+        let f = parse_with_one_arg(
+            "    %0 = bool true\n",
+            concat!(
+                "func 1 \"f\" params=1 env=0 regs=5 pnames=\"cond\" captures=0 rawregs=\"\"\n",
+                "    br %0 L0 L1\n",
+                "  label L0\n",
+                "    %1 = str \"a\"\n",
+                "    jump L2\n",
+                "  label L1\n",
+                "    jump L2\n",
+                "  label L2\n",
+                "    %3 = call 1 %1\n", // safepoint: %1 is live-in, but only L0 defines it.
+                "    ret %3\n",
+                "end\n",
+            ),
+        );
+        let plan = plan(&f);
+        assert_eq!(plan.safepoints, 1);
+        let slot = plan.slot_of[1].expect("%1 is live across the call on the L2 join");
+        assert!(plan.entry_zero[slot as usize], "the L1 (false) branch reaches the safepoint without defining %1");
+    }
+
+    // -------------------------------------------------------------------
+    // Milestone brief item 21: two non-overlapping virtual roots colored
+    // onto the very same physical slot (see `non_overlapping_roots_reuse_
+    // one_slot`, F3's own test) must each be judged independently against
+    // that one physical slot, not against their own distinct register
+    // identity -- a later register reusing an earlier one's slot is not
+    // itself a reason to need an entry zero.
+
+    #[test]
+    fn colored_slot_reuse_does_not_force_bogus_entry_zero() {
+        let f = program_of(
+            6,
+            "",
+            concat!(
+                "    %0 = str \"a\"\n",
+                "    %1 = str \"z\"\n",
+                "    %2 = op strcat %0 %1\n", // safepoint #1: roots {0, 1}.
+                "    %3 = str \"b\"\n",
+                "    %4 = str \"c\"\n",
+                "    %5 = op strcat %3 %4\n", // safepoint #2: roots {3, 4}, never live with {0, 1}.
+                "    ret %5\n",
+            ),
+        );
+        let plan = plan(&f);
+        assert!(plan.num_slots < plan.root_candidates, "some slot must be reused (see the sibling F3 test)");
+        assert_eq!(plan.slot_of[3], plan.slot_of[0], "reg 3 should reuse reg 0's now-dead slot");
+        for slot in 0..plan.num_slots {
+            assert!(!plan.entry_zero[slot as usize], "every slot is stored to before its own safepoint either way");
+        }
+    }
+
+    // -------------------------------------------------------------------
+    // Milestone brief item 24: a loop-carried root (see `loop_carried_
+    // root_stays_rooted`, F3's own test) converges to "no entry zero" --
+    // the parameter is bound before the loop's first iteration and rebound
+    // by the `tail` at the end of every later one, always before the one
+    // safepoint inside the loop body.
+
+    #[test]
+    fn loop_carried_root_needs_no_entry_zero() {
+        let f = parse_with_one_arg(
+            "    %0 = str \"seed\"\n",
+            concat!(
+                "func 1 \"loop\" params=1 env=0 regs=3 pnames=\"acc\" captures=0 rawregs=\"\"\n",
+                "  label L0\n",
+                "    %1 = str \"x\"\n",
+                "    %2 = op strcat %0 %1\n",
+                "    tail %2\n",
+                "end\n",
+            ),
+        );
+        let plan = plan(&f);
+        assert_eq!(plan.safepoints, 1);
+        let slot = plan.slot_of[0].expect("the carried accumulator is live across the strcat");
+        assert!(!plan.entry_zero[slot as usize], "bound by the prologue, then rebound by every `tail`, before the loop's one safepoint");
     }
 }
