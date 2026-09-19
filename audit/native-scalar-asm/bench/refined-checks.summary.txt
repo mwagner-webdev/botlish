@@ -2,11 +2,11 @@ source:  bench/refined-checks.ir
 backend: Cranelift (specialize=1)
 asm:     refined-checks.asm
 vcode:   refined-checks.vcode
-machine-code bytes: 23750 (per function: 449 1060 1713 1425 672 1036 685 1084 600 1289 1361 500 520 401 165 609 609 609 673 777 1289 1361 500 520 401 165 609 609 609 673 777)
+machine-code bytes: 23770 (per function: 1061 468 1713 1425 672 1036 685 1084 600 1289 1361 500 520 401 165 609 609 609 673 777 1289 1361 500 520 401 165 609 609 609 673 777)
 
 functions:
-  0 <program entry>: nir-regs=15
-  1 web::uri_escape_text<str>: nir-regs=26
+  0 <program entry>: nir-regs=33
+  1 web::uri_escape_text<generic>: nir-regs=10
   2 high_nibble<generic>: nir-regs=93
   3 is_unreserved<generic>: nir-regs=62
   4 hex_pair<generic>: nir-regs=10
@@ -39,25 +39,25 @@ functions:
 
 GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
   function 0 "<program>"
-    NIR regs: 15
+    NIR regs: 33
     raw regs: 4
-    managed-capable regs: 11
-    safepoints: 4
-    root candidates: 10
-    max live roots: 5
-    shadow slots: 5
-    entry zero slots: 4
+    managed-capable regs: 29
+    safepoints: 6
+    root candidates: 28
+    max live roots: 16
+    shadow slots: 16
+    entry zero slots: 0
     storage: runtime stack
   
   function 1 "web::uri_escape_text"
-    NIR regs: 26
+    NIR regs: 10
     raw regs: 1
-    managed-capable regs: 25
-    safepoints: 6
-    root candidates: 24
-    max live roots: 17
-    shadow slots: 17
-    entry zero slots: 0
+    managed-capable regs: 9
+    safepoints: 5
+    root candidates: 8
+    max live roots: 4
+    shadow slots: 4
+    entry zero slots: 2
     storage: runtime stack
   
   function 2 "high_nibble"
@@ -380,7 +380,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     storage: runtime stack
 
 mechanical pattern counts (triage only; see report for interpretation):
-  28 x calls to rt_closure_new
+  29 x calls to rt_closure_new
   20 x calls to rt_int_add
   2 x calls to rt_int_sub
   54 x calls to rt_int_cmp
