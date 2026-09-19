@@ -54,21 +54,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      # ubuntu-latest (noble) ships only Tcl 8.6; Botlish's Tcl reference
-      # implementation requires Tcl 9.x (see README's introduction and
-      # core/core.tcl's version check), so Tcl 9 is installed from Ubuntu
-      # 25.04 (plucky)'s universe pool instead, exactly as tests.yml/
-      # bench.yml do.
-      - name: Install Tcl 9
-        run: |
-          set -eu
-          cd /tmp
-          base=http://archive.ubuntu.com/ubuntu/pool/universe
-          curl -fsSLO "$base/libt/libtommath/libtommath1_1.3.0-1_amd64.deb"
-          curl -fsSLO "$base/t/tcl9.0/libtcl9.0_9.0.1+dfsg-1_amd64.deb"
-          curl -fsSLO "$base/t/tcl9.0/tcl9.0_9.0.1+dfsg-1_amd64.deb"
-          sudo dpkg -i libtommath1_1.3.0-1_amd64.deb libtcl9.0_9.0.1+dfsg-1_amd64.deb tcl9.0_9.0.1+dfsg-1_amd64.deb
-          echo 'puts "Tcl [info patchlevel], tcltest [package require tcltest 2.5]"' | tclsh9.0
+      # Keep the devcontainer and GitHub Actions prerequisite setup in one
+      # place so they stay in sync.
+      - name: Install project prerequisites
+        run: bash .devcontainer/setup.sh
 
       # generate-scalar-audit.tcl's native::object needs the Cranelift
       # backend built.
