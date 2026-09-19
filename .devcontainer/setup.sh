@@ -4,9 +4,19 @@ set -euxo pipefail
 export LANG=C.utf8
 export LC_ALL=C.utf8
 
+if [[ ${EUID} -eq 0 ]]; then
+  SUDO=""
+else
+  if ! command -v sudo >/dev/null 2>&1; then
+    echo "sudo is required for the package-management steps in this setup script." >&2
+    exit 1
+  fi
+  SUDO="sudo -n"
+fi
+
 if ! command -v tclsh9.0 >/dev/null 2>&1; then
-  apt-get update
-  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+  $SUDO apt-get update
+  $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     ca-certificates \
     curl
 
@@ -15,7 +25,7 @@ if ! command -v tclsh9.0 >/dev/null 2>&1; then
   curl -fsSLO "$base/libt/libtommath/libtommath1_1.3.0-1_amd64.deb"
   curl -fsSLO "$base/t/tcl9.0/libtcl9.0_9.0.1+dfsg-1_amd64.deb"
   curl -fsSLO "$base/t/tcl9.0/tcl9.0_9.0.1+dfsg-1_amd64.deb"
-  dpkg -i libtommath1_1.3.0-1_amd64.deb libtcl9.0_9.0.1+dfsg-1_amd64.deb tcl9.0_9.0.1+dfsg-1_amd64.deb
+  $SUDO dpkg -i libtommath1_1.3.0-1_amd64.deb libtcl9.0_9.0.1+dfsg-1_amd64.deb tcl9.0_9.0.1+dfsg-1_amd64.deb
 fi
 
 export PATH="$HOME/.cargo/bin:$PATH"
