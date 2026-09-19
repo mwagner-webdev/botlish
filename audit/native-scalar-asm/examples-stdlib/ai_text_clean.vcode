@@ -1,7 +1,7 @@
 ; source:  examples/stdlib/ai_text_clean.bot
 ; backend: Cranelift (specialize=1), native::vcode
 ; format:  Cranelift Debug for VCode, pre-regalloc machine-level lowering
-; total machine code bytes: 3585  (per function: 613 1085 858 824 205)
+; total machine code bytes: 3494  (per function: 613 994 858 824 205)
 ;
 switch to block2
 inserted inst0: v1 = load.i64 notrap aligned v0

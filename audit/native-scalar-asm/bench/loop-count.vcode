@@ -1,7 +1,7 @@
 ; source:  bench/loop-count.ir
 ; backend: Cranelift (specialize=1), native::vcode
 ; format:  Cranelift Debug for VCode, pre-regalloc machine-level lowering
-; total machine code bytes: 745  (per function: 187 97 461)
+; total machine code bytes: 702  (per function: 187 54 461)
 ;
 switch to block2
 inserted inst0: v1 = load.i64 notrap aligned v0

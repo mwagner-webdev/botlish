@@ -1,7 +1,7 @@
 ; source:  examples/stdlib/string_reverse.bot
 ; backend: Cranelift (specialize=1), native::vcode
 ; format:  Cranelift Debug for VCode, pre-regalloc machine-level lowering
-; total machine code bytes: 1110  (per function: 523 398 189)
+; total machine code bytes: 1069  (per function: 523 357 189)
 ;
 switch to block2
 inserted inst0: v1 = load.i64 notrap aligned v0

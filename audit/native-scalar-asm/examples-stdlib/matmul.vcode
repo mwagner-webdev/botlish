@@ -1,7 +1,7 @@
 ; source:  examples/stdlib/matmul.bot
 ; backend: Cranelift (specialize=1), native::vcode
 ; format:  Cranelift Debug for VCode, pre-regalloc machine-level lowering
-; total machine code bytes: 4949  (per function: 917 808 544 676 665 788 551)
+; total machine code bytes: 4959  (per function: 917 818 544 676 665 788 551)
 ;
 switch to block2
 inserted inst0: v1 = load.i64 notrap aligned v0

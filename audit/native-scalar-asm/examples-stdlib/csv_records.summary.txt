@@ -2,7 +2,7 @@ source:  examples/stdlib/csv_records.bot
 backend: Cranelift (specialize=1)
 asm:     csv_records.asm
 vcode:   csv_records.vcode
-machine-code bytes: 29281 (per function: 172 184 461 517 396 396 396 183 469 534 676 887 469 837 584 268 71 71 71 71 524 689 208 581 271 177 251 177 251 177 251 177 251 177 269 269 284 284 332 332 1020 1536 565 556 582 1353 928 953 825 1472 1108 243 860 443 781 683 181 181 1366)
+machine-code bytes: 27901 (per function: 172 168 437 517 396 396 396 171 453 502 676 887 469 837 584 268 28 28 28 28 524 689 208 557 271 61 125 61 125 61 125 61 125 61 269 269 284 284 332 332 1020 1536 565 556 582 1353 928 953 825 1472 1108 243 860 443 781 683 181 181 1366)
 
 functions:
   0 <program entry>: nir-regs=1
@@ -75,6 +75,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 0
     shadow slots: 1
     entry zero slots: 1
+    storage: runtime stack
   
   function 1 "geo_new"
     NIR regs: 5
@@ -85,6 +86,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 1
     shadow slots: 1
     entry zero slots: 0
+    storage: native frame
   
   function 2 "geo_new_capacity"
     NIR regs: 11
@@ -95,6 +97,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 3
     shadow slots: 3
     entry zero slots: 0
+    storage: native frame
   
   function 3 "geo_grow"
     NIR regs: 13
@@ -105,6 +108,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 3
     shadow slots: 3
     entry zero slots: 0
+    storage: runtime stack
   
   function 4 "geo_append"
     NIR regs: 8
@@ -115,6 +119,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 3
     shadow slots: 3
     entry zero slots: 0
+    storage: runtime stack
   
   function 5 "geo_append"
     NIR regs: 8
@@ -125,6 +130,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 3
     shadow slots: 3
     entry zero slots: 0
+    storage: runtime stack
   
   function 6 "geo_append"
     NIR regs: 8
@@ -135,6 +141,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 3
     shadow slots: 3
     entry zero slots: 0
+    storage: runtime stack
   
   function 7 "geo_finish"
     NIR regs: 3
@@ -145,6 +152,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 2
     shadow slots: 2
     entry zero slots: 0
+    storage: native frame
   
   function 8 "peek"
     NIR regs: 11
@@ -155,6 +163,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 3
     shadow slots: 3
     entry zero slots: 0
+    storage: native frame
   
   function 9 "peek"
     NIR regs: 15
@@ -165,6 +174,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 3
     shadow slots: 3
     entry zero slots: 0
+    storage: native frame
   
   function 10 "scan_unquoted"
     NIR regs: 28
@@ -175,6 +185,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 4
     shadow slots: 4
     entry zero slots: 1
+    storage: runtime stack
   
   function 11 "scan_quoted"
     NIR regs: 34
@@ -185,6 +196,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 5
     shadow slots: 5
     entry zero slots: 2
+    storage: runtime stack
   
   function 12 "scan_field"
     NIR regs: 17
@@ -195,6 +207,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 3
     shadow slots: 3
     entry zero slots: 1
+    storage: runtime stack
   
   function 13 "scan_record"
     NIR regs: 27
@@ -205,6 +218,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 5
     shadow slots: 5
     entry zero slots: 1
+    storage: runtime stack
   
   function 14 "scan_records"
     NIR regs: 15
@@ -215,6 +229,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 6
     shadow slots: 6
     entry zero slots: 2
+    storage: runtime stack
   
   function 15 "csv_parse"
     NIR regs: 6
@@ -225,6 +240,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 4
     shadow slots: 4
     entry zero slots: 2
+    storage: runtime stack
   
   function 16 "ht_min_capacity"
     NIR regs: 2
@@ -233,8 +249,9 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     safepoints: 0
     root candidates: 0
     max live roots: 0
-    shadow slots: 1
+    shadow slots: 0
     entry zero slots: 0
+    storage: native frame
   
   function 17 "ht_empty_state"
     NIR regs: 2
@@ -243,8 +260,9 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     safepoints: 0
     root candidates: 0
     max live roots: 0
-    shadow slots: 1
+    shadow slots: 0
     entry zero slots: 0
+    storage: native frame
   
   function 18 "ht_occupied_state"
     NIR regs: 2
@@ -253,8 +271,9 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     safepoints: 0
     root candidates: 0
     max live roots: 0
-    shadow slots: 1
+    shadow slots: 0
     entry zero slots: 0
+    storage: native frame
   
   function 19 "ht_tombstone_state"
     NIR regs: 2
@@ -263,8 +282,9 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     safepoints: 0
     root candidates: 0
     max live roots: 0
-    shadow slots: 1
+    shadow slots: 0
     entry zero slots: 0
+    storage: native frame
   
   function 20 "ht_fill_empty"
     NIR regs: 12
@@ -275,6 +295,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 4
     shadow slots: 4
     entry zero slots: 1
+    storage: runtime stack
   
   function 21 "ht_alloc"
     NIR regs: 29
@@ -285,6 +306,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 4
     shadow slots: 4
     entry zero slots: 3
+    storage: runtime stack
   
   function 22 "ht_new"
     NIR regs: 2
@@ -295,6 +317,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 1
     shadow slots: 1
     entry zero slots: 1
+    storage: runtime stack
   
   function 23 "ht_capacity_for"
     NIR regs: 15
@@ -305,6 +328,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 3
     shadow slots: 3
     entry zero slots: 0
+    storage: native frame
   
   function 24 "ht_new_sized"
     NIR regs: 4
@@ -315,6 +339,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 2
     shadow slots: 2
     entry zero slots: 1
+    storage: runtime stack
   
   function 25 "ht_controls"
     NIR regs: 4
@@ -323,8 +348,9 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     safepoints: 0
     root candidates: 0
     max live roots: 0
-    shadow slots: 1
+    shadow slots: 0
     entry zero slots: 0
+    storage: native frame
   
   function 26 "ht_controls"
     NIR regs: 4
@@ -333,8 +359,9 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     safepoints: 0
     root candidates: 0
     max live roots: 0
-    shadow slots: 1
+    shadow slots: 0
     entry zero slots: 0
+    storage: native frame
   
   function 27 "ht_keys"
     NIR regs: 4
@@ -343,8 +370,9 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     safepoints: 0
     root candidates: 0
     max live roots: 0
-    shadow slots: 1
+    shadow slots: 0
     entry zero slots: 0
+    storage: native frame
   
   function 28 "ht_keys"
     NIR regs: 4
@@ -353,8 +381,9 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     safepoints: 0
     root candidates: 0
     max live roots: 0
-    shadow slots: 1
+    shadow slots: 0
     entry zero slots: 0
+    storage: native frame
   
   function 29 "ht_values"
     NIR regs: 4
@@ -363,8 +392,9 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     safepoints: 0
     root candidates: 0
     max live roots: 0
-    shadow slots: 1
+    shadow slots: 0
     entry zero slots: 0
+    storage: native frame
   
   function 30 "ht_values"
     NIR regs: 4
@@ -373,8 +403,9 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     safepoints: 0
     root candidates: 0
     max live roots: 0
-    shadow slots: 1
+    shadow slots: 0
     entry zero slots: 0
+    storage: native frame
   
   function 31 "ht_size"
     NIR regs: 4
@@ -383,8 +414,9 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     safepoints: 0
     root candidates: 0
     max live roots: 0
-    shadow slots: 1
+    shadow slots: 0
     entry zero slots: 0
+    storage: native frame
   
   function 32 "ht_size"
     NIR regs: 4
@@ -393,8 +425,9 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     safepoints: 0
     root candidates: 0
     max live roots: 0
-    shadow slots: 1
+    shadow slots: 0
     entry zero slots: 0
+    storage: native frame
   
   function 33 "ht_tombstones"
     NIR regs: 4
@@ -403,8 +436,9 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     safepoints: 0
     root candidates: 0
     max live roots: 0
-    shadow slots: 1
+    shadow slots: 0
     entry zero slots: 0
+    storage: native frame
   
   function 34 "ht_capacity"
     NIR regs: 3
@@ -415,6 +449,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 1
     shadow slots: 1
     entry zero slots: 0
+    storage: runtime stack
   
   function 35 "ht_capacity"
     NIR regs: 3
@@ -425,6 +460,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 1
     shadow slots: 1
     entry zero slots: 0
+    storage: runtime stack
   
   function 36 "ht_probe_start"
     NIR regs: 5
@@ -435,6 +471,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 2
     shadow slots: 2
     entry zero slots: 0
+    storage: runtime stack
   
   function 37 "ht_probe_start"
     NIR regs: 5
@@ -445,6 +482,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 2
     shadow slots: 2
     entry zero slots: 0
+    storage: runtime stack
   
   function 38 "ht_probe_next"
     NIR regs: 7
@@ -455,6 +493,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 3
     shadow slots: 3
     entry zero slots: 0
+    storage: runtime stack
   
   function 39 "ht_probe_next"
     NIR regs: 7
@@ -465,6 +504,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 3
     shadow slots: 3
     entry zero slots: 0
+    storage: runtime stack
   
   function 40 "ht_find_get"
     NIR regs: 28
@@ -475,6 +515,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 4
     shadow slots: 4
     entry zero slots: 1
+    storage: runtime stack
   
   function 41 "ht_find_insert"
     NIR regs: 41
@@ -485,6 +526,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 5
     shadow slots: 5
     entry zero slots: 1
+    storage: runtime stack
   
   function 42 "ht_get"
     NIR regs: 12
@@ -495,6 +537,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 3
     shadow slots: 3
     entry zero slots: 1
+    storage: runtime stack
   
   function 43 "ht_rehash_probe"
     NIR regs: 12
@@ -505,6 +548,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 4
     shadow slots: 4
     entry zero slots: 0
+    storage: runtime stack
   
   function 44 "ht_rehash_insert"
     NIR regs: 14
@@ -515,6 +559,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 7
     shadow slots: 7
     entry zero slots: 0
+    storage: runtime stack
   
   function 45 "ht_rehash_scan"
     NIR regs: 24
@@ -525,6 +570,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 11
     shadow slots: 11
     entry zero slots: 1
+    storage: runtime stack
   
   function 46 "ht_rehash"
     NIR regs: 30
@@ -535,6 +581,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 10
     shadow slots: 10
     entry zero slots: 8
+    storage: runtime stack
   
   function 47 "ht_should_grow"
     NIR regs: 15
@@ -545,6 +592,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 3
     shadow slots: 3
     entry zero slots: 2
+    storage: runtime stack
   
   function 48 "ht_grow_or_clean"
     NIR regs: 12
@@ -555,6 +603,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 3
     shadow slots: 3
     entry zero slots: 2
+    storage: runtime stack
   
   function 49 "ht_place"
     NIR regs: 31
@@ -565,6 +614,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 6
     shadow slots: 6
     entry zero slots: 2
+    storage: runtime stack
   
   function 50 "ht_set"
     NIR regs: 34
@@ -575,6 +625,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 5
     shadow slots: 5
     entry zero slots: 2
+    storage: runtime stack
   
   function 51 "row_new"
     NIR regs: 6
@@ -585,6 +636,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 1
     shadow slots: 1
     entry zero slots: 0
+    storage: runtime stack
   
   function 52 "row_fill"
     NIR regs: 17
@@ -595,6 +647,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 6
     shadow slots: 6
     entry zero slots: 0
+    storage: runtime stack
   
   function 53 "row_table"
     NIR regs: 9
@@ -605,6 +658,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 5
     shadow slots: 5
     entry zero slots: 1
+    storage: runtime stack
   
   function 54 "build_rows"
     NIR regs: 22
@@ -615,6 +669,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 8
     shadow slots: 8
     entry zero slots: 2
+    storage: runtime stack
   
   function 55 "csv_records_generic"
     NIR regs: 20
@@ -625,6 +680,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 7
     shadow slots: 7
     entry zero slots: 5
+    storage: runtime stack
   
   function 56 "csv_records"
     NIR regs: 3
@@ -635,6 +691,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 2
     shadow slots: 2
     entry zero slots: 0
+    storage: runtime stack
   
   function 57 "csv_records_presized"
     NIR regs: 3
@@ -645,6 +702,7 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 2
     shadow slots: 2
     entry zero slots: 0
+    storage: runtime stack
   
   function 58 "sample"
     NIR regs: 38
@@ -655,11 +713,12 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     max live roots: 8
     shadow slots: 8
     entry zero slots: 7
+    storage: runtime stack
 
 mechanical pattern counts (triage only; see report for interpretation):
   22 x calls to rt_int_add
   1 x calls to rt_int_sub
   7 x calls to rt_int_mul
   15 x calls to rt_int_cmp
-  196 x calls to other rt_* helpers
+  177 x calls to other rt_* helpers
   29 x guard/guardbool instructions

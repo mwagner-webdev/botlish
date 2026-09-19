@@ -2,7 +2,7 @@ source:  examples/stdlib/matmul.bot
 backend: Cranelift (specialize=1)
 asm:     matmul.asm
 vcode:   matmul.vcode
-machine-code bytes: 4949 (per function: 917 808 544 676 665 788 551)
+machine-code bytes: 4959 (per function: 917 818 544 676 665 788 551)
 
 functions:
   0 <program entry>: nir-regs=32
@@ -23,6 +23,7 @@ GC roots (matmul.asm's NIR ids match roots.txt's "function N"):
     max live roots: 5
     shadow slots: 5
     entry zero slots: 2
+    storage: runtime stack
   
   function 1 "dot"
     NIR regs: 18
@@ -33,6 +34,7 @@ GC roots (matmul.asm's NIR ids match roots.txt's "function N"):
     max live roots: 6
     shadow slots: 6
     entry zero slots: 0
+    storage: native frame
   
   function 2 "product_row"
     NIR regs: 22
@@ -43,6 +45,7 @@ GC roots (matmul.asm's NIR ids match roots.txt's "function N"):
     max live roots: 8
     shadow slots: 8
     entry zero slots: 0
+    storage: runtime stack
   
   function 3 "product_row"
     NIR regs: 19
@@ -53,6 +56,7 @@ GC roots (matmul.asm's NIR ids match roots.txt's "function N"):
     max live roots: 7
     shadow slots: 7
     entry zero slots: 0
+    storage: runtime stack
   
   function 4 "product_rows"
     NIR regs: 22
@@ -63,6 +67,7 @@ GC roots (matmul.asm's NIR ids match roots.txt's "function N"):
     max live roots: 7
     shadow slots: 7
     entry zero slots: 1
+    storage: runtime stack
   
   function 5 "product_rows"
     NIR regs: 19
@@ -73,6 +78,7 @@ GC roots (matmul.asm's NIR ids match roots.txt's "function N"):
     max live roots: 8
     shadow slots: 8
     entry zero slots: 1
+    storage: runtime stack
   
   function 6 "matmul"
     NIR regs: 18
@@ -83,9 +89,10 @@ GC roots (matmul.asm's NIR ids match roots.txt's "function N"):
     max live roots: 5
     shadow slots: 5
     entry zero slots: 3
+    storage: runtime stack
 
 mechanical pattern counts (triage only; see report for interpretation):
   3 x calls to rt_int_add
   1 x calls to rt_int_mul
   2 x calls to rt_int_cmp
-  34 x calls to other rt_* helpers
+  33 x calls to other rt_* helpers
