@@ -245,10 +245,40 @@ impl log::Log for VCodeLogger {
         if !self.enabled(record.metadata()) {
             return;
         }
+        let mut msg = record.args().to_string();
+        let trimmed = msg.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+
+        // Cranelift emits the actual pre-regalloc VCode first and then begins the
+        // later compile/verify/timing pass. Stop buffering as soon as the later
+        // pass starts so the captured output stays machine-lowering-only.
+        if trimmed.starts_with("****** START compiling")
+            || trimmed.starts_with("timing:")
+            || trimmed.starts_with("verifying inst")
+            || trimmed.starts_with("Number of CLIF instructions")
+            || trimmed.starts_with("Optimizing")
+        {
+            let buffer = VCODE_BUFFER.get_or_init(|| std::sync::Mutex::new(None));
+            let mut guard = buffer.lock().unwrap();
+            let text = guard.get_or_insert_with(String::new);
+            if !text.ends_with("\n") && !text.is_empty() {
+                text.push('\n');
+            }
+            if !text.contains("\n\n*** END VCODE ***\n") {
+                text.push_str("\n*** END VCODE ***\n");
+            }
+            return;
+        }
+
+        // Ignore any trace line after the VCode boundary has been closed.
         let buffer = VCODE_BUFFER.get_or_init(|| std::sync::Mutex::new(None));
         let mut guard = buffer.lock().unwrap();
         let text = guard.get_or_insert_with(String::new);
-        let mut msg = record.args().to_string();
+        if text.contains("\n*** END VCODE ***\n") {
+            return;
+        }
         if !msg.ends_with('\n') {
             msg.push('\n');
         }

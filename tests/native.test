@@ -108,6 +108,12 @@ proc vcodeOf {text args} {
     native::vcode [sourceHir $text] -specialize 1 {*}$args
 }
 
+test native-vcode-1 {captures only the pre-regalloc VCode, not compile-time log noise} -body {
+    set dump [vcodeOf "fn add(a, b):\n    a + b\n\nadd(1, 2)"]
+    list [string first "switch to block" $dump] [string first "****** START compiling" $dump] \
+        [string first "timing:" $dump]
+} -result {0 -1 -1}
+
 # The CLIF of NIR function number ID (botlish_fn_ID).
 proc clifFunction {clif id} {
     regexp "; function $id \[^\n\]*\n(.*?)\n\}" $clif -> body

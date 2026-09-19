@@ -10,24 +10,9 @@ This directory is not a canonical build product. It may be removed once the
 scalar audit (see /SCALAR-ASM-AUDIT.md) and any follow-up fixes it leads to
 are complete.
 
-## Artifact meaning
-
-Each audited program now has two machine-level artifacts side by side:
-
-- `.asm`: the final disassembly of the generated object file, after Cranelift
-  lowers to machine code and emits the ISA text.
-- `.vcode`: the pre-regalloc Cranelift VCode dump, the machine-lowering form
-  immediately before register allocation. This is the stage to inspect when
-  you want to understand the lowering decisions without the allocator's final
-  register assignment noise.
-
-This pairing is intentionally meant to compare the same source corpus before and
-after regalloc: the VCode explains the lowering structure, while the assembly
-shows the final instruction stream the backend emitted.
-
 ## Compiler revision
 
-- git commit: 67c0eb87d80f3bb0d5b0df48087d931388069036
+- git commit: 7c5d7c452518ab2cc33b2701e864377b0db25ef6
 - Tcl: 9.0.1
 - rustc 1.98.1 (48a229cea 2026-09-01)
 - cranelift-codegen: 0.135.2
