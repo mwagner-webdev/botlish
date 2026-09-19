@@ -1,0 +1,207 @@
+# native-tcl-unicode.test -- core/tclcompat.tcl's is_tcl_alpha/is_tcl_alnum
+# (the temporary Tcl-compatibility Unicode character-class primitives) and
+# lib/web.tcl's Emailish?, which now uses them through a -native-body
+# expressing emailRegex's exact grammar as ordinary core IR. See
+# NATIVE-TCL-UNICODE.md.
+#
+# Direct primitive coverage (spec: "prove the new primitives independently
+# of Emailish?") comes first, exercising the exact edge-case corpus
+# NATIVE-TCL-UNICODE.md characterizes against Tcl 9.0.1 itself: a letter in
+# several General_Category subcategories (Lu/Ll/Lm/Lo), a Unicode decimal
+# digit (Nd) outside ASCII, two "looks numeric but is not Nd" categories
+# (No, Nl) that must distinguish Tcl's alnum from Python's/Rust's broader
+# numeric predicates, a combining mark (Mn), and ordinary punctuation --
+# each labeled with why it is in the corpus, not just what it is.
+#
+# Emailish? parity then reuses the same 16-string corpus this milestone's
+# report cross-checks against the Python and Rust benchmark equivalents
+# (bench/equivalents/{python,rust}/refined_checks.py|rs) and against
+# interp/compile's own core::regex::matches-backed -impl, so a native-body
+# defect that happens to agree with itself on all four Botlish backends but
+# disagrees with the actual regex would still be caught.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+core::loadLibrary web
+
+set parityBackends {interp compile cranelift-generic cranelift}
+
+proc classifyProgram {native c} {
+    return [list [list call [list ref $native] [list const str $c]]]
+}
+
+proc emailishProgram {s} {
+    return [list [list call {ref Emailish?} [list const str $s]]]
+}
+
+proc errorCodeOfUnder {backend exprs} {
+    set saved [core::useBackend]
+    core::useBackend $backend
+    try {
+        if {[catch {core::evalProgram $exprs} message options]} {
+            return [dict get $options -errorcode]
+        }
+        return "no error; value [core::formatValue $message]"
+    } finally {
+        core::useBackend $saved
+    }
+}
+
+proc fourWay {exprs} {
+    set shown [lmap b $::parityBackends {lindex [outcomeUnder $b $exprs] 1}]
+    if {[llength [lsort -unique $shown]] != 1} {
+        error "mismatch across $::parityBackends: $shown"
+    }
+    return [lindex $shown 0]
+}
+
+# ---------------------------------------------------------------------------
+# is_tcl_alpha / is_tcl_alnum: direct, four-way parity, edge-case corpus.
+#
+# label                          char        General_Category   alpha alnum
+foreach {label char alpha alnum} {
+    ascii-letter                    A           true  true
+    ascii-digit                     9           false true
+    latin-e-acute-Ll                é      true  true
+    cjk-ri-Lo                       日      true  true
+    titlecase-Dz-Lt                 ǅ      true  true
+    modifier-letter-Lm              ʰ      true  true
+    arabic-indic-digit-Nd           ٠      false true
+    vulgar-fraction-3-4-No          ¾      false false
+    circled-digit-one-No            ①      false false
+    roman-numeral-one-Nl            Ⅰ      false false
+    combining-acute-accent-Mn       ́      false false
+    underscore-Pc                   _           false false
+    full-stop-Po                    .           false false
+} {
+    test native-tcl-unicode-alpha-$label "is_tcl_alpha($label) agrees across interp/compile/cranelift-generic/cranelift" -body {
+        fourWay [classifyProgram is_tcl_alpha $char]
+    } -result $alpha
+    test native-tcl-unicode-alnum-$label "is_tcl_alnum($label) agrees across interp/compile/cranelift-generic/cranelift" -body {
+        fourWay [classifyProgram is_tcl_alnum $char]
+    } -result $alnum
+}
+
+# ---------------------------------------------------------------------------
+# Contract: exactly one Unicode scalar, or RANGE -- the empty string and a
+# multi-scalar string are both out of domain, on every backend, with the
+# same error text (spec: "reject malformed primitive inputs consistently").
+
+foreach native {is_tcl_alpha is_tcl_alnum} {
+    test native-tcl-unicode-$native-range-empty "${native}('') is a RANGE error on every backend, with the same message" -body {
+        set msgs [lmap b $::parityBackends {lindex [outcomeUnder $b [classifyProgram $native {}]] 2}]
+        if {[llength [lsort -unique $msgs]] != 1} {
+            error "message mismatch across $::parityBackends: $msgs"
+        }
+        list [lindex [outcomeUnder interp [classifyProgram $native {}]] 0] [lindex $msgs 0]
+    } -result [list error "$native: expects a single Unicode scalar, got a string of length 0"]
+
+    test native-tcl-unicode-$native-range-multi "${native}('ab') is a RANGE error on every backend" -body {
+        lmap b $::parityBackends {lindex [outcomeUnder $b [classifyProgram $native ab]] 0}
+    } -result [lrepeat 4 error]
+}
+
+# ---------------------------------------------------------------------------
+# Native metadata: pure, nonallocating primitives -- no allocation-related
+# -runtime tag (string-alloc, list-alloc, result-alloc, mutarray-alloc,
+# mutarray-mutate), consistent with native/src/runtime/ops.rs's
+# tcl_alpha_char/tcl_alnum_char never allocating and being excluded from
+# op_may_allocate (spec: "should not have allocation/safepoint metadata
+# they do not need").
+
+foreach native {is_tcl_alpha is_tcl_alnum} {
+    test native-tcl-unicode-$native-metadata-nonallocating "$native declares no allocation -runtime tag" -body {
+        set tags [dict get [core::native::metadata $native] runtime]
+        lsearch -inline $tags {string-alloc list-alloc result-alloc mutarray-alloc mutarray-mutate}
+    } -result {}
+}
+
+# ---------------------------------------------------------------------------
+# Emailish?: four-way parity, the corpus NATIVE-TCL-UNICODE.md's report
+# cross-checks against Python/Rust too. Each case documents which grammar
+# position it forces Unicode classification in, or which negative case it
+# pins.
+
+foreach {label s expect} {
+    ascii-valid                       someone@example.com              true
+    ascii-invalid                     not-an-email                     false
+    short-tld-ok                      a@b.co                           true
+    tld-too-short                     a@b.c                            false
+    local-part-symbols                a.b_c%d+e-f@sub.example.com      true
+    missing-local-part                @example.com                     false
+    missing-domain                    a@                               false
+    empty-first-label                 a@.com                           false
+    empty-middle-label                a@b..com                         false
+    trailing-dot                      a@b.com.                         false
+    tld-with-digit                    a@b.c1                           false
+    unicode-alpha-local-part          café@example.com                 true
+    unicode-domain-label-and-tld      user@例え.テスト                  true
+    unicode-alpha-in-tld              user@example.co日                true
+    mixed-case-ascii-tld              a@b.cD                           true
+    empty-string                      {}                                false
+} {
+    test native-tcl-unicode-emailish-$label "Emailish?($label) agrees across interp/compile/cranelift-generic/cranelift" -body {
+        fourWay [emailishProgram $s]
+    } -result $expect
+}
+
+# A domain label containing a Unicode decimal digit (Nd) is valid alnum
+# (matches the "Unicode decimal digit in a position where alnum is
+# accepted" corpus requirement); the same position with a numeric-but-not-Nd
+# character (a Roman numeral, general category Nl) must be rejected --
+# distinguishing Tcl's alnum from Python's/Rust's broader is_alnum()/
+# is_alphabetic() the way NATIVE-TCL-UNICODE.md's report requires.
+test native-tcl-unicode-emailish-unicode-digit-in-label "Emailish?(a Unicode Nd digit in a domain label) is accepted" -body {
+    fourWay [emailishProgram "a@b٠.com"]
+} -result true
+
+test native-tcl-unicode-emailish-numeric-non-Nd-rejected "Emailish?(a numeric-but-not-Nd character where the TLD must be 2+ alpha) is rejected" -body {
+    fourWay [emailishProgram "a@例え.Ⅰ"]
+} -result false
+
+# ---------------------------------------------------------------------------
+# GC stress: the validator's own String traversal (substring/length calls)
+# and the classification primitives themselves must survive a collection
+# forced before every allocation.
+
+test native-tcl-unicode-emailish-gc-stress {Emailish? survives a collection forced before every allocation} -body {
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        lindex [outcomeUnder cranelift [emailishProgram {café@例え.テスト}]] 1
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+} -result true
+
+# ---------------------------------------------------------------------------
+# Disclosed optimization gap (spec §41-42, mirroring
+# native-validator-predicate-known-result-nir-shape for NonEmpty?): now
+# that Emailish? has a -native-body, ExpandNativeBodies substitutes it
+# *before* HIR is built, so the HIR-provably-redundant inner Emailish?
+# re-check in a pattern like refined-checks.ir's own -- an outer
+# `if Emailish?(s)` whose then-branch re-checks `Emailish?(s)` -- no longer
+# folds via native/lower.tcl's `known` short-circuit on cranelift: each
+# call site gets its own independently-compiled copy of the whole validator.
+# Never a correctness bug (both checks still evaluate the same value); pinned
+# here so a future fix to this is a deliberate, visible change, not silent.
+test native-tcl-unicode-emailish-known-result-nir-shape {a redundant Emailish? check inside its own true branch compiles to two independent copies of the validator (documented optimization gap, not a correctness bug)} -body {
+    set p {
+        {bind f {block {s}
+            {if {call {ref Emailish?} {ref s}}
+                {block {} {if {call {ref Emailish?} {ref s}} {block {} {const yes}} {block {} {const no}}}}
+                {block {} {const no}}}}}
+        {call {ref f} {const str someone@example.com}}
+    }
+    set hir [hir::build [native::ExpandNativeBodies $p] -strict 0]
+    set text [native::nir $hir]
+    # Two independent inlined copies of the validator, not one shared/folded
+    # call: "domain_loop" (a helper unique to Emailish?'s own native-body)
+    # names a compiled function twice, and the outer/inner call sites both
+    # genuinely scan the string (length is called once per copy per
+    # instance -- see native-validator-predicate-known-result-nir-shape's
+    # identical reasoning for NonEmpty?).
+    list [regexp -all {\"domain_loop\"} $text] \
+         [expr {[regexp -all {op strlen} $text] > 0}] \
+         [fourWay $p]
+} -result {2 1 {"yes"}}
+
+::tcltest::cleanupTests

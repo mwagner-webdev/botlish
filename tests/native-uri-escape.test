@@ -142,13 +142,18 @@ test native-uri-escape-gc-stress {uriEscape survives a collection forced before 
 # ---------------------------------------------------------------------------
 # refined-checks.ir's own blocker: uriEscape's native lowering now succeeds
 # (its -native-body needs no native/lower.tcl op-whitelist entry), so the
-# benchmark's Cranelift compilation progresses to its next, still-genuinely-
-# unsupported native, Emailish? -- not uriEscape. See NATIVE-URI-ESCAPE.md;
-# this milestone deliberately leaves Emailish? unfixed.
-test native-uri-escape-refined-checks-blocker {refined-checks.ir's native blocker moved from uriEscape to Emailish?} -body {
+# benchmark's Cranelift compilation progresses past uriEscape. At the time
+# this milestone (see NATIVE-URI-ESCAPE.md) landed, the next blocker was
+# Emailish?; the NATIVE-TCL-UNICODE.md milestone later gave Emailish? a
+# -native-body too, so the blocker has since moved again, to the opaque
+# UriQueryValue? (see tests/native-tcl-unicode.test). This test only pins
+# "uriEscape itself is not the blocker" -- which UNSUPPORTED native is
+# reported here is a later milestone's concern, tracked in its own test
+# file, not this one's.
+test native-uri-escape-refined-checks-blocker {refined-checks.ir's native blocker is no longer uriEscape} -body {
     set exprs [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]
     set code [errorCodeOfUnder cranelift $exprs]
-    return $code
-} -result {NATIVE UNSUPPORTED {native Emailish?}}
+    return [expr {$code eq {NATIVE UNSUPPORTED {native uriEscape}} ? "still uriEscape: $code" : "not uriEscape"}]
+} -result {not uriEscape}
 
 ::tcltest::cleanupTests

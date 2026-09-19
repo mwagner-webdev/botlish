@@ -95,6 +95,14 @@ pub enum OpCode {
     /// builds on this plus List/Int operations instead of needing its own
     /// native.
     StrUtf8Bytes,
+    /// Tcl 9-compatible Unicode alpha/alnum character classification
+    /// (core/tclcompat.tcl's `is_tcl_alpha`/`is_tcl_alnum`): the operand is
+    /// a one-Unicode-scalar String (RANGE if not). TEMPORARY compatibility
+    /// primitives -- see core/tclcompat.tcl's header -- not general
+    /// character-class ops and not related to StrUtf8Bytes (classification
+    /// is per Unicode scalar, never per UTF-8 byte).
+    StrIsTclAlpha,
+    StrIsTclAlnum,
     /// Representation transitions and raw (untagged machine-integer)
     /// arithmetic/comparison: see the "Representation" section of
     /// native/lower.tcl. A raw operand/result is never a tagged Value: it
@@ -156,6 +164,8 @@ impl OpCode {
             "decodecharat" => DecodeCharAt,
             "strbytelen" => StrByteLen,
             "strutf8bytes" => StrUtf8Bytes,
+            "strtclalpha" => StrIsTclAlpha,
+            "strtclalnum" => StrIsTclAlnum,
             "rbox" => RBox,
             "runbox" => RUnbox,
             "riadd" => RIAdd,
@@ -177,7 +187,7 @@ impl OpCode {
             ListNew => None,
             StrLen | StrLower | ListLen | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList
             | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | Hash | RBox | RUnbox
-            | StrByteLen | StrUtf8Bytes => Some(1),
+            | StrByteLen | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum => Some(1),
             Substr | MutArraySet | RegionCheck => Some(3),
             RegionEq => Some(4),
             MutArrayCopy => Some(5),

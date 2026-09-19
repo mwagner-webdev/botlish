@@ -12,7 +12,7 @@ are complete.
 
 ## Compiler revision
 
-- git commit: 853b8227139cabfcbaa58ce220e8e8c7ff3a77bc
+- git commit: 189bdf378dd7a9d061cbefc79b51a3b33e013700
 - Tcl: 9.0.1
 - rustc 1.98.1 (48a229cea 2026-09-01)
 - cranelift-codegen: 0.135.2
@@ -38,7 +38,7 @@ are complete.
 | bench/fib.ir | compiled / inspected | [bench/fib.asm](bench/fib.asm) | 2 functions, 680 bytes |
 | bench/loop-count.ir | compiled / inspected | [bench/loop-count.asm](bench/loop-count.asm) | 3 functions, 798 bytes |
 | bench/sum-refined.ir | compiled / inspected | [bench/sum-refined.asm](bench/sum-refined.asm) | 3 functions, 787 bytes |
-| bench/refined-checks.ir | unsupported | [bench/refined-checks.status.txt](bench/refined-checks.status.txt) | ir {0 2 2 3 2 2 1}: e11: native lowering does not support native Emailish?: the native "Emailish?" has no native implementation |
+| bench/refined-checks.ir | unsupported | [bench/refined-checks.status.txt](bench/refined-checks.status.txt) | ir {0 2 2 3 2 2 2 2 2 2 1}: e451: native lowering does not support native UriQueryValue?: the native "UriQueryValue?" has no native implementation |
 | examples/stdlib/ai_text_clean.bot | compiled / inspected | [examples-stdlib/ai_text_clean.asm](examples-stdlib/ai_text_clean.asm) | 5 functions, 3663 bytes |
 | examples/stdlib/csv.bot | compiled / inspected | [examples-stdlib/csv.asm](examples-stdlib/csv.asm) | 11 functions, 6228 bytes |
 | examples/stdlib/csv_chunked.bot | compiled / inspected | [examples-stdlib/csv_chunked.asm](examples-stdlib/csv_chunked.asm) | 21 functions, 13435 bytes |

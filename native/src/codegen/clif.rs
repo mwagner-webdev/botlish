@@ -1025,6 +1025,11 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         StrUtf8Bytes => {
                             ("rt_str_utf8_bytes", None, true, Some(("strutf8bytes", KIND_LIST)))
                         }
+                        // Never allocate (a Bool result, like StrEq); fallible
+                        // (RANGE) on an operand that is not one Unicode scalar,
+                        // like RegionCheck -- see ops.rs's rt_is_tcl_alpha/alnum.
+                        StrIsTclAlpha => ("rt_is_tcl_alpha", None, true, None),
+                        StrIsTclAlnum => ("rt_is_tcl_alnum", None, true, None),
                         ListLen => ("rt_list_len", None, false, None),
                         ListGet => ("rt_list_get", None, true, None),
                         ListAppend => ("rt_list_append", None, true, Some(("listappend", KIND_LIST))),

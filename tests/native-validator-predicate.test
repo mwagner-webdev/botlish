@@ -10,12 +10,17 @@
 # refined.test to test evidence-combination) a -native-body reproducing its
 # Tcl validator (length(v) > 0) in ordinary Botlish, independently of
 # Emailish: this file's job is to prove the *mechanism* is generic, not
-# specific to any one type. Emailish itself is deliberately left without a
-# -native-body (its validator needs Unicode-aware regex matching, not yet
-# expressible in ordinary core IR -- NATIVE-EMAILISH.md) and UriQueryValue
-# (opaque) never gets one, by construction: this file also pins both of
-# those still being rejected, so the validator/opaque distinction stays
-# provably intact.
+# specific to any one type. UriQueryValue (opaque) never gets one, by
+# construction: this file pins it still being rejected, so the
+# validator/opaque distinction stays provably intact.
+#
+# Emailish itself was originally left without a -native-body too (its
+# validator needed Unicode-aware character classification, not yet
+# expressible in ordinary core IR): the NATIVE-TCL-UNICODE.md milestone
+# closed that gap (core/tclcompat.tcl's is_tcl_alpha/is_tcl_alnum), and
+# Emailish? now has a -native-body -- see tests/native-tcl-unicode.test for
+# that milestone's own full regression coverage; only the assertions this
+# file already made about Emailish are updated below, to their new answers.
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 
@@ -136,31 +141,31 @@ test native-validator-predicate-validator-backed-has-native-body {NonEmpty?'s re
 } -result 1
 
 # ---------------------------------------------------------------------------
-# Emailish regression: still exactly the pre-milestone failure. Emailish is
-# validator-backed (not opaque), but its validator (core::regex::matches,
-# lib/web.tcl's emailRegex) needs Unicode-aware regex matching that ordinary
-# core IR cannot express yet (NATIVE-EMAILISH.md); it deliberately gets no
-# -native-body, so it is rejected by the same generic "no native
-# implementation" path as any other native lacking one -- never by a
-# named-type-specific rule in native/lower.tcl, which this milestone adds
-# none of.
+# Emailish: UPDATED by the Tcl-Unicode-character-classification milestone
+# (NATIVE-TCL-UNICODE.md). Emailish? now DOES carry a -native-body -- the
+# regex's exact grammar as ordinary core IR over the new is_tcl_alpha/
+# is_tcl_alnum primitives (lib/web.tcl) -- so it is no longer rejected on
+# cranelift. See tests/native-tcl-unicode.test for the full parity/edge-case
+# regression coverage this unlocked; the two assertions kept here are only
+# the ones this file already made about the opaque/validator distinction,
+# updated to their new, correct answers.
 
-test native-validator-predicate-emailish-still-unsupported {Emailish? (validator-backed, but no -native-body) is still rejected the same way, dynamically, on cranelift} -body {
+test native-validator-predicate-emailish-now-supported {Emailish? (validator-backed, now with a -native-body) runs on cranelift, agreeing with interp} -body {
     set p {
         {bind f {block {s} {call {ref Emailish?} {ref s}}}}
         {call {ref f} {const str someone@example.com}}
     }
-    errorCodeOfUnder cranelift $p
-} -result {NATIVE UNSUPPORTED {native Emailish?}}
+    list [lindex [outcomeUnder interp $p] 1] [lindex [outcomeUnder cranelift $p] 1]
+} -result {true true}
 
-test native-validator-predicate-emailish-has-no-native-body {Emailish?'s registration carries no -native-body (regex/Unicode classification still missing)} -body {
-    dict get [core::native::metadata Emailish?] nativeBody
-} -result {}
+test native-validator-predicate-emailish-has-native-body {Emailish?'s registration now carries a -native-body (NATIVE-TCL-UNICODE.md)} -body {
+    expr {[dict get [core::native::metadata Emailish?] nativeBody] ne ""}
+} -result 1
 
-test native-validator-predicate-refined-checks-blocker {refined-checks.ir's native blocker is still exactly Emailish?, unchanged by this milestone} -body {
+test native-validator-predicate-refined-checks-blocker {refined-checks.ir's native blocker moved past Emailish?, to the opaque UriQueryValue? (NATIVE-TCL-UNICODE.md)} -body {
     set exprs [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]
     errorCodeOfUnder cranelift $exprs
-} -result {NATIVE UNSUPPORTED {native Emailish?}}
+} -result {NATIVE UNSUPPORTED {native UriQueryValue?}}
 
 # ---------------------------------------------------------------------------
 # GC stress: NonEmpty?'s native-body (length + a raw-eligible comparison)

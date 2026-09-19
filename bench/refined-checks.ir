@@ -1,6 +1,16 @@
 # Repeated refined-type predicates: an outer Emailish? check whose result is
 # re-checked in the then branch (statically redundant), and UriQueryValue?
 # on a value whose type proves the answer.
+#
+# The first check's string is a Unicode-forcing case, not ASCII-only: "é"
+# (local part), "例え" (a domain label) and "テスト" (the TLD) are all
+# non-ASCII letters that Emailish?'s Tcl-compatible [:alpha:]/[:alnum:]
+# classes accept -- see NATIVE-TCL-UNICODE.md. This is deliberate: an
+# ASCII-only character-class regression (e.g. Rust's is_ascii_alphanumeric,
+# this benchmark's own mistake before this milestone -- see
+# bench/equivalents/rust/refined_checks.rs's header) would silently reject
+# it, so this benchmark itself now exercises the same Unicode boundary its
+# cross-language equivalents must agree on, not only the ASCII happy path.
 # requires: web
 
 {bind check
@@ -26,5 +36,5 @@
 {bind q {call {ref uriEscape} {const str {a b}}}}
 
 {call {ref list}
-    {call {ref check} {const 400} {const 0} {const str someone@example.com} {ref q}}
+    {call {ref check} {const 400} {const 0} {const str café@例え.テスト} {ref q}}
     {call {ref check} {const 400} {const 0} {const str not-an-email} {ref q}}}

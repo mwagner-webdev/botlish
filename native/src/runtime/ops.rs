@@ -27,6 +27,8 @@
 //! | rt_str_lower           | Str                 | Str                          | yes       |
 //! | rt_str_cat             | Str, Str            | Str                          | yes       |
 //! | rt_str_utf8_bytes      | Str                 | List of Int (0..255); RANGE  | yes       |
+//! | rt_is_tcl_alpha        | Str (1 scalar)      | Bool; RANGE if not 1 scalar  | no        |
+//! | rt_is_tcl_alnum        | Str (1 scalar)      | Bool; RANGE if not 1 scalar  | no        |
 //! | rt_list_new            | count, *Value       | List                         | yes       |
 //! | rt_list_len            | List                | Int                          | no        |
 //! | rt_list_get            | List, Int           | element; RANGE               | no        |
@@ -58,6 +60,7 @@ use crate::nir::OpCode;
 use num_bigint::BigInt;
 use num_traits::Signed;
 use std::cmp::Ordering;
+use unicode_general_category::{get_general_category, GeneralCategory};
 
 /// Whether OP's runtime implementation may allocate (and so may trigger a
 /// collection): exactly the "allocates" column of the table above, in one
@@ -496,6 +499,75 @@ pub extern "C" fn rt_str_cat(p: *mut Vm, a: Value, b: Value) -> Value {
 }
 
 // ---------------------------------------------------------------------------
+// Tcl-compatible Unicode character classification (core/tclcompat.tcl):
+// TEMPORARY compatibility primitives, not Botlish's eventual public
+// Unicode-classification API -- see that file's header for the full
+// rationale and the de-nativization path. Both reproduce Tcl 9's `[:alpha:]`
+// / `[:alnum:]` regexp bracket-expression classes exactly, empirically
+// characterized (not assumed from documentation) against Tcl 9.0.1:
+//
+//   alpha  General_Category in {Lu, Ll, Lt, Lm, Lo}         ("Letter")
+//   alnum  alpha, or General_Category == Nd                 ("Letter | Nd")
+//
+// Deliberately narrower than Rust's own `char::is_alphabetic`/
+// `is_alphanumeric` (the Unicode *Alphabetic*/derived-numeric properties,
+// which also admit e.g. Nl letter-numbers and other Other_Alphabetic marks
+// Tcl's classes do not: U+2160 ROMAN NUMERAL ONE tests alpha=false in Tcl
+// but is_alphabetic()==true in Rust) and than Python's `str.isalnum()`
+// (which also admits No/Nl, not just Nd) -- see NATIVE-TCL-UNICODE.md for
+// the full edge-case corpus both were checked against.
+//
+// `unicode-general-category` (Cargo.toml) supplies General_Category from
+// Unicode 16.0 data, which matches Tcl 9.0.1's own table exactly on every
+// corpus case tested, including code points assigned only as of Unicode
+// 15.0/15.1/16.0 (see NATIVE-TCL-UNICODE.md's Unicode-version-skew section)
+// -- chosen over hand-rolling a category table (spec's "avoid large
+// hand-maintained tables") and over a heavier general-purpose regex/ICU
+// dependency this reference runtime does not otherwise need.
+fn tcl_alpha_char(c: char) -> bool {
+    matches!(
+        get_general_category(c),
+        GeneralCategory::UppercaseLetter
+            | GeneralCategory::LowercaseLetter
+            | GeneralCategory::TitlecaseLetter
+            | GeneralCategory::ModifierLetter
+            | GeneralCategory::OtherLetter
+    )
+}
+
+fn tcl_alnum_char(c: char) -> bool {
+    tcl_alpha_char(c) || get_general_category(c) == GeneralCategory::DecimalNumber
+}
+
+/// S's one Unicode scalar, or a RANGE failure (core/tclcompat.tcl's own
+/// contract: these primitives are defined only for a one-scalar String,
+/// matching `rt_substr`'s RANGE convention for an out-of-domain argument
+/// rather than silently classifying just the first character of a longer
+/// string, or of the empty string).
+fn one_scalar(p: *mut Vm, s: Value, native: &str) -> Result<char, Value> {
+    let obj = str_of(s);
+    if obj.chars != 1 {
+        let message = format!("{native}: expects a single Unicode scalar, got a string of length {}", obj.chars);
+        return Err(vm(p).fail(RtError::Semantic { kind: "RANGE", message }));
+    }
+    Ok(obj.text.chars().next().expect("StrObj.chars == 1 but text has no scalar"))
+}
+
+pub extern "C" fn rt_is_tcl_alpha(p: *mut Vm, s: Value) -> Value {
+    match one_scalar(p, s, "is_tcl_alpha") {
+        Ok(c) => bool_value(tcl_alpha_char(c)),
+        Err(no_value) => no_value,
+    }
+}
+
+pub extern "C" fn rt_is_tcl_alnum(p: *mut Vm, s: Value) -> Value {
+    match one_scalar(p, s, "is_tcl_alnum") {
+        Ok(c) => bool_value(tcl_alnum_char(c)),
+        Err(no_value) => no_value,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Lists
 
 pub extern "C" fn rt_list_new(p: *mut Vm, n: u64, items: *const Value) -> Value {
@@ -773,6 +845,8 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         StrLower => rt_str_lower(p, a[0]),
         StrCat => rt_str_cat(p, a[0], a[1]),
         StrUtf8Bytes => rt_str_utf8_bytes(p, a[0]),
+        StrIsTclAlpha => rt_is_tcl_alpha(p, a[0]),
+        StrIsTclAlnum => rt_is_tcl_alnum(p, a[0]),
         ListLen => rt_list_len(p, a[0]),
         ListGet => rt_list_get(p, a[0], a[1]),
         ListAppend => rt_list_append(p, a[0], a[1]),
@@ -834,6 +908,8 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_str_lower, 2),
         h!(rt_str_cat, 3),
         h!(rt_str_utf8_bytes, 2),
+        h!(rt_is_tcl_alpha, 2),
+        h!(rt_is_tcl_alnum, 2),
         h!(rt_list_new, 3),
         h!(rt_list_len, 2),
         h!(rt_list_get, 3),

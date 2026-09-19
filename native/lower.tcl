@@ -113,6 +113,8 @@ namespace eval native::lower {
         lowercase    {op strlower} \
         concat       {op strcat} \
         encode_utf8  {op strutf8bytes} \
+        is_tcl_alpha {op strtclalpha} \
+        is_tcl_alnum {op strtclalnum} \
         list_length  {op listlen} \
         list_get     {op listget} \
         list_append  {op listappend} \

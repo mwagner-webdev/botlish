@@ -8,19 +8,32 @@
 // matches core::value::show's rendering of a Botlish list.
 //
 // Email grammar, matching lib/web.tcl's emailRegex:
-//   local: 1+ of [A-Za-z0-9._%+-]
+//   local: 1+ of [alnum . _ % + -]   (Tcl [:alnum:]: Unicode-aware, see below)
 //   '@'
-//   domain: 1+ of ( 1+ of [A-Za-z0-9-] followed by '.' )
-//   tld: 2+ letters, then end of string
+//   domain: 1+ of ( 1+ of [alnum -] followed by '.' )
+//   tld: 2+ [:alpha:] letters, then end of string
+//
+// "alnum"/"alpha" here are Tcl 9's own Unicode-aware [:alnum:]/[:alpha:]
+// regexp bracket-expression classes (core::regex::matches's semantics,
+// lib/web.tcl's own reference validator) -- NOT c.is_ascii_alphanumeric()/
+// is_ascii_alphabetic(), which this file used before this milestone. That
+// was a real semantic narrowing (a benchmark bug, not a broader/narrower
+// "simplification"): Tcl 9's [:alpha:]/[:alnum:] accept e.g. "café" and
+// "日本語", which the ASCII-only version silently rejected. See
+// tcl_unicode.rs and NATIVE-TCL-UNICODE.md for the exact classification
+// this now reproduces (matching native/src/runtime/ops.rs's
+// rt_is_tcl_alpha/rt_is_tcl_alnum and lib/web.tcl's Emailish? native-body).
+mod tcl_unicode;
+
 use std::hint::black_box;
 use std::time::Instant;
 
 fn is_local_char(c: char) -> bool {
-    c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '%' | '+' | '-')
+    tcl_unicode::tcl_alnum(c) || matches!(c, '.' | '_' | '%' | '+' | '-')
 }
 
 fn is_label_char(c: char) -> bool {
-    c.is_ascii_alphanumeric() || c == '-'
+    tcl_unicode::tcl_alnum(c) || c == '-'
 }
 
 fn emailish(s: &str) -> bool {
@@ -55,7 +68,7 @@ fn emailish(s: &str) -> bool {
         i += 1;
 
         let mut j = i;
-        while j < n && chars[j].is_ascii_alphabetic() {
+        while j < n && tcl_unicode::tcl_alpha(chars[j]) {
             j += 1;
         }
         if j == n && j - i >= 2 {
@@ -120,7 +133,7 @@ fn main() {
         }
     }
     let n0: i64 = positional.get(0).map(|s| s.parse().expect("n must be an integer")).unwrap_or(400);
-    let s1 = positional.get(1).cloned().unwrap_or_else(|| "someone@example.com".to_string());
+    let s1 = positional.get(1).cloned().unwrap_or_else(|| "café@例え.テスト".to_string());
     let s2 = positional.get(2).cloned().unwrap_or_else(|| "not-an-email".to_string());
     let raw_q = positional.get(3).cloned().unwrap_or_else(|| "a b".to_string());
 
