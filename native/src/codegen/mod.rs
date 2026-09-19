@@ -16,6 +16,7 @@ pub mod clif;
 pub mod roots;
 
 use crate::nir::{FuncId, Program};
+use crate::runtime::framemap;
 use crate::runtime::heap::object_size;
 use crate::runtime::ops::helpers;
 use crate::runtime::value::*;
@@ -110,6 +111,12 @@ pub struct CompiledProgram {
     pub code_sizes: Vec<u32>,
     /// Empty unless compiled with CompileOptions::alloc_sites.
     pub sites: Vec<Site>,
+    /// PC-indexed GC stack-map table for every compiled function (both its
+    /// direct entry and its generic entry -- see framemap's own doc): built
+    /// once, right here, after `finalize_definitions` makes absolute code
+    /// addresses available, the only point they exist. `Vm::set_framemap`
+    /// gives the collector (runtime/framewalk.rs) its own `Rc` clone.
+    pub framemap: std::rc::Rc<framemap::ProgramMap>,
     /// Keeps the machine code alive.
     _module: JITModule,
 }
@@ -196,20 +203,63 @@ impl CraneliftJit {
         let mut sites = Vec::new();
         let mut listing = options.clif.then(|| clif::legend(&symbols));
         let mut code_sizes = Vec::with_capacity(program.functions.len());
+        let mut defines = Vec::with_capacity(program.functions.len());
         for f in &program.functions {
-            let (text, size) =
+            let result =
                 clif::define(&mut module, &symbols, f, &mut pool, &mut sites, options.alloc_sites, options.clif)?;
-            code_sizes.push(size);
-            if let (Some(listing), Some(text)) = (listing.as_mut(), text) {
+            code_sizes.push(result.direct_size + result.entry_size);
+            if let (Some(listing), Some(text)) = (listing.as_mut(), &result.clif_text) {
                 listing.push('\n');
-                listing.push_str(&text);
+                listing.push_str(text);
             }
+            defines.push(result);
         }
         module.finalize_definitions().map_err(|e| BackendError::Codegen(format!("{e:?}")))?;
         let entry_ptr = module.get_finalized_function(symbols.direct[0]);
-        let generic_entries = symbols.entry.iter().map(|id| module.get_finalized_function(*id) as usize).collect();
+        let generic_entries: Vec<usize> =
+            symbols.entry.iter().map(|id| module.get_finalized_function(*id) as usize).collect();
         let entry: ProgramEntry = unsafe { std::mem::transmute(entry_ptr) };
-        Ok(CompiledProgram { entry, pool, generic_entries, clif: listing, vcode: None, code_sizes, sites, _module: module })
+
+        // Absolute function addresses only exist after `finalize_definitions`
+        // above, so the stack-map table (framemap's own doc) is built here,
+        // not inside the per-function loop: `defines[i].safepoints` (PC
+        // offsets relative to `botlish_fn_i`'s own start, already extracted
+        // in `clif::define`) becomes absolute by adding that start address.
+        // Both a NIR function's direct entry (real safepoints) and its
+        // generic entry (always empty -- see framemap::FunctionMap's doc:
+        // a trampoline the frame-walker must still recognize as Botlish
+        // code, never treat as a foreign boundary) are registered.
+        let mut framemap = framemap::ProgramMap::new();
+        for f in &program.functions {
+            let define = &defines[f.id as usize];
+            let direct_addr = module.get_finalized_function(symbols.direct[f.id as usize]) as usize;
+            let safepoints =
+                define.safepoints.iter().map(|&(pc, ref roots)| (pc, roots.clone())).collect();
+            framemap.push(framemap::FunctionMap {
+                code_start: direct_addr,
+                code_end: direct_addr + define.direct_size as usize,
+                safepoints,
+            });
+            let entry_addr = generic_entries[f.id as usize];
+            framemap.push(framemap::FunctionMap {
+                code_start: entry_addr,
+                code_end: entry_addr + define.entry_size as usize,
+                safepoints: Vec::new(),
+            });
+        }
+        framemap.finish();
+
+        Ok(CompiledProgram {
+            entry,
+            pool,
+            generic_entries,
+            clif: listing,
+            vcode: None,
+            code_sizes,
+            sites,
+            framemap: std::rc::Rc::new(framemap),
+            _module: module,
+        })
     }
 }
 

@@ -2,7 +2,7 @@ source:  examples/stdlib/matmul.bot
 backend: Cranelift (specialize=1)
 asm:     matmul.asm
 vcode:   matmul.vcode
-machine-code bytes: 4959 (per function: 917 818 544 676 665 788 551)
+machine-code bytes: 5140 (per function: 948 703 623 756 694 852 564)
 
 functions:
   0 <program entry>: nir-regs=32
@@ -23,7 +23,8 @@ GC roots (matmul.asm's NIR ids match roots.txt's "function N"):
     max live roots: 5
     shadow slots: 5
     entry zero slots: 2
-    storage: runtime stack
+    depth reservation: yes
+    storage: native frame
   
   function 1 "dot"
     NIR regs: 18
@@ -34,6 +35,7 @@ GC roots (matmul.asm's NIR ids match roots.txt's "function N"):
     max live roots: 6
     shadow slots: 6
     entry zero slots: 0
+    depth reservation: no
     storage: native frame
   
   function 2 "product_row"
@@ -45,7 +47,8 @@ GC roots (matmul.asm's NIR ids match roots.txt's "function N"):
     max live roots: 8
     shadow slots: 8
     entry zero slots: 0
-    storage: runtime stack
+    depth reservation: yes
+    storage: native frame
   
   function 3 "product_row"
     NIR regs: 19
@@ -56,7 +59,8 @@ GC roots (matmul.asm's NIR ids match roots.txt's "function N"):
     max live roots: 7
     shadow slots: 7
     entry zero slots: 0
-    storage: runtime stack
+    depth reservation: yes
+    storage: native frame
   
   function 4 "product_rows"
     NIR regs: 22
@@ -67,7 +71,8 @@ GC roots (matmul.asm's NIR ids match roots.txt's "function N"):
     max live roots: 7
     shadow slots: 7
     entry zero slots: 1
-    storage: runtime stack
+    depth reservation: yes
+    storage: native frame
   
   function 5 "product_rows"
     NIR regs: 19
@@ -78,7 +83,8 @@ GC roots (matmul.asm's NIR ids match roots.txt's "function N"):
     max live roots: 8
     shadow slots: 8
     entry zero slots: 1
-    storage: runtime stack
+    depth reservation: yes
+    storage: native frame
   
   function 6 "matmul"
     NIR regs: 18
@@ -89,7 +95,8 @@ GC roots (matmul.asm's NIR ids match roots.txt's "function N"):
     max live roots: 5
     shadow slots: 5
     entry zero slots: 3
-    storage: runtime stack
+    depth reservation: yes
+    storage: native frame
 
 mechanical pattern counts (triage only; see report for interpretation):
   3 x calls to rt_int_add

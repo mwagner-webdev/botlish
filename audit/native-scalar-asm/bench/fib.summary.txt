@@ -2,7 +2,7 @@ source:  bench/fib.ir
 backend: Cranelift (specialize=1)
 asm:     fib.asm
 vcode:   fib.vcode
-machine-code bytes: 680 (per function: 175 505)
+machine-code bytes: 700 (per function: 187 513)
 
 functions:
   0 <program entry>: nir-regs=3
@@ -18,7 +18,8 @@ GC roots (fib.asm's NIR ids match roots.txt's "function N"):
     max live roots: 1
     shadow slots: 1
     entry zero slots: 0
-    storage: runtime stack
+    depth reservation: yes
+    storage: native frame
   
   function 1 "fib"
     NIR regs: 17
@@ -29,7 +30,8 @@ GC roots (fib.asm's NIR ids match roots.txt's "function N"):
     max live roots: 2
     shadow slots: 2
     entry zero slots: 1
-    storage: runtime stack
+    depth reservation: yes
+    storage: native frame
 
 mechanical pattern counts (triage only; see report for interpretation):
   1 x calls to rt_int_add

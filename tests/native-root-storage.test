@@ -1,25 +1,28 @@
 # native-root-storage.test -- RootStorage (native/src/codegen/roots.rs,
-# native/src/codegen/clif.rs): the first step of the native-stack-
-# authoritative roadmap. A function eligible for RootStorage::NativeFrame
-# (one that contains no Botlish call -- see roots.rs's `eligible_for_
-# native_frame` doc) stores its physical root slots in a Cranelift-managed
-# native stack slot instead of the shared Botlish shadow-stack array, and
-# emits no separate stack-pointer bump/limit-check/restore sequence for
-# them at all. A function that contains any Botlish call (recursive or
-# not) still uses the original RootStorage::RuntimeStack mechanism,
-# unchanged.
+# native/src/codegen/clif.rs): on the x86-64 native-stack-map path (this
+# host), every function -- called or not, recursive or not -- now stores
+# its physical root slots in a Cranelift-managed native stack slot instead
+# of the shared Botlish shadow-stack array; the collector discovers them by
+# walking the native call stack and consulting per-safepoint stack maps
+# (runtime/framewalk.rs, runtime/framemap.rs), not through any Vm
+# registration this file's own CLIF assertions can see. A function that
+# contains a Botlish call still separately reserves a *minimal* one-slot
+# recursion-depth token in the shared shadow array
+# (`RootPlan::depth_reservation`) -- unchanged mechanism, fully decoupled
+# from where its actual roots live (see tests/native-stack-map.test for
+# this decoupling's own dedicated coverage, including fib<int>).
 #
 # Coverage:
 #   * structural: native::roots's "storage:" line, and native::clif's
 #     absence of the shared shadow-stack sequence (ss_top/ss_limit loads,
-#     rt_stack_overflow) for an eligible function
+#     rt_stack_overflow) for a function with no Botlish call (no depth
+#     reservation needed either)
 #   * adversarial: hand-written NIR run under BOTLISH_NATIVE_GC_STRESS=1,
-#     confirming a value physically stored in the new native root block (or
-#     the old shadow stack, for a call-crossing root) survives a real
-#     collection
-#   * the required fallback: any function containing a Botlish call (the
-#     recursive fib<int> shape, and a simpler call-crossing-root case)
-#     stays on RootStorage::RuntimeStack, byte-for-byte unchanged
+#     confirming a value physically stored in the native root block
+#     survives a real collection
+#   * a call-crossing root now also gets NativeFrame storage (discovered
+#     through stack maps across the call), while its function still keeps
+#     rt_stack_overflow for the unrelated depth reservation
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
@@ -172,38 +175,37 @@ test storage-multi-root-2 {two simultaneously live NativeFrame roots never share
 } -result {{native frame} 2 {value {bool false}}}
 
 # ---------------------------------------------------------------------------
-# The required fallback: any function containing a Botlish call stays on
-# RootStorage::RuntimeStack, unchanged -- fib<int> (the flagship recursive,
-# cross-call-rooted shape) and a smaller call-crossing-root case alike.
-# Without a stack-map/frame-walk mechanism (this milestone's own step 2),
-# the collector has no way to discover a NativeFrame function's roots once
-# another call nests on top of it, so this is the correctness-required
-# fallback the task's own brief anticipates, not an oversight.
+# A function containing a Botlish call now gets NativeFrame storage too
+# (fib<int>, the flagship recursive, cross-call-rooted shape, and a smaller
+# call-crossing-root case alike) -- the native-stack-map/frame-walk
+# mechanism discovers its roots regardless of how many further calls nest
+# on top of it. It still separately keeps rt_stack_overflow, for the
+# unrelated, decoupled recursion-depth reservation (tests/native-stack-
+# map.test covers that decoupling directly, including under real recursion
+# and GC stress).
 
-test storage-fib-1 {fib<int> (real cross-call roots) stays on RuntimeStack} -body {
+test storage-fib-1 {fib<int> (real cross-call roots) now uses NativeFrame storage} -body {
     set report [native::roots [sourceIrHir [file join $::projectRoot bench fib.ir]]]
     storageOf $report fib
-} -result {runtime stack}
+} -result {native frame}
 
-test storage-call-crossing-1 {a value that must survive a Botlish call forces RuntimeStack} -body {
+test storage-call-crossing-1 {a value that must survive a Botlish call now uses NativeFrame storage too} -body {
     set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=2 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = str \"a\"\n    %1 = call 1 %0\n    ret %1\nend\nfunc 1 \"f\" params=1 env=0 regs=3 pnames=\"x\" captures=0 rawregs=\"\"\n    %1 = str \"b\"\n    %2 = op strcat %0 %1\n    ret %2\nend\n"
     set report [rootsOfNir $text]
     list [storageOf $report "<program>"] [underGcStress {runNir $text}]
-} -result {{runtime stack} {value {str ab}}}
+} -result {{native frame} {value {str ab}}}
 
-test storage-call-crossing-2 {that call-crossing function's own CLIF still imports rt_stack_overflow (RuntimeStack, unchanged)} -body {
+test storage-call-crossing-2 {that call-crossing function's own CLIF still imports rt_stack_overflow (the unrelated depth reservation)} -body {
     set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=2 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = str \"a\"\n    %1 = call 1 %0\n    ret %1\nend\nfunc 1 \"f\" params=1 env=0 regs=3 pnames=\"x\" captures=0 rawregs=\"\"\n    %1 = str \"b\"\n    %2 = op strcat %0 %1\n    ret %2\nend\n"
     set clif [clifOfNir $text]
     usesHelper $clif [clifFunctionBlock $clif "<program>"] rt_stack_overflow
 } -result 1
 
 # ---------------------------------------------------------------------------
-# fib<int>'s own machine code is unaffected by this milestone: recompiling it
-# twice back to back (nothing else changed in between) produces identical
-# CLIF, confirming the RuntimeStack fallback path is deterministic and that
-# nothing about the RootStorage decision itself perturbs fib's own codegen.
+# fib<int>'s own machine code is deterministic: recompiling it twice back to
+# back (nothing else changed in between) produces identical CLIF.
 
-test storage-fib-2 {fib<int>'s CLIF is unaffected (deterministic, unchanged shape) by this milestone} -body {
+test storage-fib-2 {fib<int>'s CLIF is deterministic} -body {
     set hir [sourceIrHir [file join $::projectRoot bench fib.ir]]
     expr {[native::clif $hir] eq [native::clif $hir]}
 } -result 1

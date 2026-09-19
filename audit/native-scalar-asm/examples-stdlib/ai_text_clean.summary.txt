@@ -2,7 +2,7 @@ source:  examples/stdlib/ai_text_clean.bot
 backend: Cranelift (specialize=1)
 asm:     ai_text_clean.asm
 vcode:   ai_text_clean.vcode
-machine-code bytes: 3494 (per function: 613 994 858 824 205)
+machine-code bytes: 3625 (per function: 669 994 878 864 220)
 
 functions:
   0 <program entry>: nir-regs=13
@@ -21,7 +21,8 @@ GC roots (ai_text_clean.asm's NIR ids match roots.txt's "function N"):
     max live roots: 6
     shadow slots: 6
     entry zero slots: 5
-    storage: runtime stack
+    depth reservation: yes
+    storage: native frame
   
   function 1 "cleaner_emoji"
     NIR regs: 128
@@ -32,6 +33,7 @@ GC roots (ai_text_clean.asm's NIR ids match roots.txt's "function N"):
     max live roots: 0
     shadow slots: 0
     entry zero slots: 0
+    depth reservation: no
     storage: native frame
   
   function 2 "clean_char"
@@ -43,7 +45,8 @@ GC roots (ai_text_clean.asm's NIR ids match roots.txt's "function N"):
     max live roots: 1
     shadow slots: 1
     entry zero slots: 0
-    storage: runtime stack
+    depth reservation: yes
+    storage: native frame
   
   function 3 "clean_from"
     NIR regs: 23
@@ -54,7 +57,8 @@ GC roots (ai_text_clean.asm's NIR ids match roots.txt's "function N"):
     max live roots: 6
     shadow slots: 6
     entry zero slots: 2
-    storage: runtime stack
+    depth reservation: yes
+    storage: native frame
   
   function 4 "clean_ai_text"
     NIR regs: 7
@@ -65,7 +69,8 @@ GC roots (ai_text_clean.asm's NIR ids match roots.txt's "function N"):
     max live roots: 4
     shadow slots: 4
     entry zero slots: 0
-    storage: runtime stack
+    depth reservation: yes
+    storage: native frame
 
 mechanical pattern counts (triage only; see report for interpretation):
   1 x calls to rt_int_add

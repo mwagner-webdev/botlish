@@ -2,7 +2,7 @@ source:  examples/stdlib/csv.bot
 backend: Cranelift (specialize=1)
 asm:     csv.asm
 vcode:   csv.vcode
-machine-code bytes: 5949 (per function: 169 453 502 677 887 470 759 742 492 532 266)
+machine-code bytes: 5980 (per function: 181 365 430 703 925 482 788 773 512 540 281)
 
 functions:
   0 <program entry>: nir-regs=2
@@ -27,7 +27,8 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     max live roots: 1
     shadow slots: 1
     entry zero slots: 0
-    storage: runtime stack
+    depth reservation: yes
+    storage: native frame
   
   function 1 "peek"
     NIR regs: 11
@@ -38,6 +39,7 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     max live roots: 3
     shadow slots: 3
     entry zero slots: 0
+    depth reservation: no
     storage: native frame
   
   function 2 "peek"
@@ -49,6 +51,7 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     max live roots: 3
     shadow slots: 3
     entry zero slots: 0
+    depth reservation: no
     storage: native frame
   
   function 3 "scan_unquoted"
@@ -60,7 +63,8 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     max live roots: 4
     shadow slots: 4
     entry zero slots: 1
-    storage: runtime stack
+    depth reservation: yes
+    storage: native frame
   
   function 4 "scan_quoted"
     NIR regs: 34
@@ -71,7 +75,8 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     max live roots: 5
     shadow slots: 5
     entry zero slots: 2
-    storage: runtime stack
+    depth reservation: yes
+    storage: native frame
   
   function 5 "scan_field"
     NIR regs: 17
@@ -82,7 +87,8 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     max live roots: 3
     shadow slots: 3
     entry zero slots: 1
-    storage: runtime stack
+    depth reservation: yes
+    storage: native frame
   
   function 6 "scan_record"
     NIR regs: 25
@@ -93,7 +99,8 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     max live roots: 4
     shadow slots: 4
     entry zero slots: 1
-    storage: runtime stack
+    depth reservation: yes
+    storage: native frame
   
   function 7 "scan_record"
     NIR regs: 23
@@ -104,7 +111,8 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     max live roots: 4
     shadow slots: 4
     entry zero slots: 1
-    storage: runtime stack
+    depth reservation: yes
+    storage: native frame
   
   function 8 "scan_records"
     NIR regs: 14
@@ -115,7 +123,8 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     max live roots: 4
     shadow slots: 4
     entry zero slots: 1
-    storage: runtime stack
+    depth reservation: yes
+    storage: native frame
   
   function 9 "scan_records"
     NIR regs: 11
@@ -126,7 +135,8 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     max live roots: 4
     shadow slots: 4
     entry zero slots: 1
-    storage: runtime stack
+    depth reservation: yes
+    storage: native frame
   
   function 10 "csv_parse"
     NIR regs: 5
@@ -137,7 +147,8 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     max live roots: 3
     shadow slots: 3
     entry zero slots: 1
-    storage: runtime stack
+    depth reservation: yes
+    storage: native frame
 
 mechanical pattern counts (triage only; see report for interpretation):
   12 x calls to rt_int_add

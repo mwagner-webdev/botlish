@@ -1,0 +1,32 @@
+# Force frame pointers (`push rbp; mov rbp,rsp` at the start of every
+# non-trivial function) for this crate's own build.
+#
+# The native-stack-map GC root walker (runtime/framewalk.rs) discovers a
+# suspended Botlish frame's roots by walking the machine call stack's rbp
+# chain from wherever a collection happens to trigger (always somewhere
+# inside a runtime helper -- see Vm::alloc/collect_with) back up to the
+# nearest Botlish-compiled frame. Cranelift's x86-64 backend always
+# establishes an rbp-based frame for any function that makes a call
+# (verified against cranelift-codegen 0.135.2's `gen_prologue_frame_setup`
+# and this repo's own audit/native-scalar-asm disassembly), so every
+# Botlish frame already has one for free. rustc does not, by default, in
+# optimized builds: without this flag, `rbp` is just another
+# general-purpose register there, and the runtime helper frames the walker
+# must climb through (rt_cell_new, Vm::alloc, Vm::collect, ...) would have
+# no reliable frame-pointer chain to follow. This flag is the "smallest
+# explicit transition mechanism" the walker needs -- see NATIVE-STACK-MAPS.md.
+#
+# This only needs to cover this crate and its dependencies (the same
+# `rustflags` list applies to both, since Cargo does not offer a
+# lighter-weight per-crate override): none of those dependencies'
+# (cranelift-*, num-bigint, ...) own frames are ever walked -- GC only
+# triggers from inside Vm::alloc, reached directly from a small, fixed set
+# of this crate's own runtime helpers -- so the extra push/pop rbp they
+# pay for is pure overhead there, but it is compile-time-only cost (they
+# are not on any Botlish steady-state call path) and does not touch this
+# crate's own hot loops.
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "force-frame-pointers=yes"]
+
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "force-frame-pointers=yes"]

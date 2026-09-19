@@ -2,7 +2,7 @@ source:  bench/sum-refined.ir
 backend: Cranelift (specialize=1)
 asm:     sum-refined.asm
 vcode:   sum-refined.vcode
-machine-code bytes: 743 (per function: 187 256 300)
+machine-code bytes: 674 (per function: 200 268 206)
 
 functions:
   0 <program entry>: nir-regs=5
@@ -19,7 +19,8 @@ GC roots (sum-refined.asm's NIR ids match roots.txt's "function N"):
     max live roots: 2
     shadow slots: 2
     entry zero slots: 0
-    storage: runtime stack
+    depth reservation: yes
+    storage: native frame
   
   function 1 "sum"
     NIR regs: 13
@@ -30,7 +31,8 @@ GC roots (sum-refined.asm's NIR ids match roots.txt's "function N"):
     max live roots: 2
     shadow slots: 2
     entry zero slots: 0
-    storage: runtime stack
+    depth reservation: yes
+    storage: native frame
   
   function 2 "step"
     NIR regs: 3
@@ -41,6 +43,7 @@ GC roots (sum-refined.asm's NIR ids match roots.txt's "function N"):
     max live roots: 2
     shadow slots: 2
     entry zero slots: 0
+    depth reservation: no
     storage: native frame
 
 mechanical pattern counts (triage only; see report for interpretation):

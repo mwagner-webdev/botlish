@@ -2,6 +2,8 @@
 //! helper ABI generated code calls. Independent of Cranelift.
 
 pub mod error;
+pub mod framemap;
+pub mod framewalk;
 pub mod heap;
 pub mod metrics;
 pub mod ops;

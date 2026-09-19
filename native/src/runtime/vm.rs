@@ -9,6 +9,7 @@
 //!             closures of environment-free functions)
 
 use super::error::RtError;
+use super::framemap::ProgramMap;
 use super::heap::Heap;
 use super::metrics::{AllocMode, GcReason, Metrics};
 use super::value::*;
@@ -82,6 +83,18 @@ pub struct Vm {
     pub metrics: Metrics,
     const_table: Vec<Value>,
     statics: Vec<*mut Header>,
+    /// This program's PC-indexed stack-map table (runtime::framemap), set
+    /// once by `set_framemap` right after compiling (codegen::CompiledProgram
+    /// owns the original; this is an `Rc` clone). `collect_with` walks the
+    /// native call stack through it (runtime::framewalk) to discover every
+    /// active `RootStorage::NativeFrame` function's roots on the x86-64
+    /// stack-map path -- a fifth root source, alongside the shadow stack,
+    /// `native_roots_ptr`/`_len` (the fallback path's own, narrower
+    /// mechanism), the pending error, and `temp_roots`; see `collect_with`'s
+    /// own doc for why these never double-trace the same logical root.
+    /// Starts as an empty table (`ProgramMap::new()`), which simply finds no
+    /// roots -- harmless for the brief window before a program is compiled.
+    framemap: Rc<ProgramMap>,
 }
 
 pub const VM_SS_TOP_OFFSET: i32 = offset_of!(Vm, ss_top) as i32;
@@ -113,6 +126,7 @@ impl Vm {
             metrics: Metrics::new(alloc_mode),
             const_table: Vec::new(),
             statics: Vec::new(),
+            framemap: Rc::new(ProgramMap::new()),
         })
     }
 
@@ -121,6 +135,11 @@ impl Vm {
         self.const_table = table;
         self.consts = self.const_table.as_ptr();
         self.statics = statics;
+    }
+
+    /// Installs this program's stack-map table (see `framemap`'s own doc).
+    pub fn set_framemap(&mut self, framemap: Rc<ProgramMap>) {
+        self.framemap = framemap;
     }
 
     pub fn fail(&mut self, error: RtError) -> Value {
@@ -170,15 +189,40 @@ impl Vm {
         // The currently active RootStorage::NativeFrame function's own root
         // block, if any (see that field's doc): empty when no such function
         // is on the call stack right now (native_roots_ptr null, or -- same
-        // thing -- native_roots_len 0).
+        // thing -- native_roots_len 0). Fallback path only (non-x86-64, or
+        // any function `roots::plan` still routes there): on the stack-map
+        // path below, `native_roots_ptr`/`_len` are never written at all
+        // (codegen::clif's `prologue_native_frame`), so this is always empty
+        // there -- see `native_frame_roots` below for why this is not a
+        // double-count either way.
         let native = if self.native_roots_ptr.is_null() {
             &[][..]
         } else {
             unsafe { std::slice::from_raw_parts(self.native_roots_ptr, self.native_roots_len as usize) }
         };
+        // Every `RootStorage::NativeFrame` function currently suspended
+        // anywhere on the native call stack, on the x86-64 stack-map path
+        // (runtime::framewalk; a no-op elsewhere -- see that module's own
+        // `#[cfg]`-gated stub). This is the collector's replacement for
+        // `RuntimeStack` as root storage for such a function: a function
+        // covered by this walk never also stores a real Value into the
+        // shadow array `stack` above (`codegen::clif::Translator::def`
+        // stores to exactly one physical location per rooted register, and
+        // `RootPlan::storage` picks that location once, never both), and
+        // never also publishes to `native_roots_ptr`/`_len` (this module's
+        // own comment above) -- so this walk's roots, `stack`'s, and
+        // `native`'s are three disjoint sets of memory locations, never the
+        // same logical root scanned twice.
+        let mut native_frame_roots = Vec::new();
+        super::framewalk::walk(&self.framemap, |addr| native_frame_roots.push(unsafe { *addr }));
         let error_values = self.error.as_ref().map(|e| e.values()).unwrap_or_default();
-        let roots =
-            stack.iter().copied().chain(native.iter().copied()).chain(error_values).chain(self.temp_roots.iter().copied());
+        let roots = stack
+            .iter()
+            .copied()
+            .chain(native.iter().copied())
+            .chain(native_frame_roots)
+            .chain(error_values)
+            .chain(self.temp_roots.iter().copied());
         self.heap.collect(roots.collect::<Vec<_>>().into_iter(), &mut self.metrics, reason);
     }
 

@@ -1,7 +1,7 @@
 ; source:  bench/fib.ir
 ; backend: Cranelift (specialize=1), native::vcode
 ; format:  Cranelift Debug for VCode, pre-regalloc machine-level lowering
-; total machine code bytes: 680  (per function: 175 505)
+; total machine code bytes: 700  (per function: 187 513)
 ;
 switch to block2
 inserted inst0: v1 = load.i64 notrap aligned v0
@@ -15,24 +15,28 @@ inserted inst7: v7 = iconst.i64 0
 inserted inst8: return v7  ; v7 = 0
 switch to block4
 inserted inst9: store.i64 notrap aligned v3, v0
-inserted inst10: jump block0
+inserted inst10: v8 = iconst.i64 0
+inserted inst11: store.i64 notrap aligned v8, v1  ; v8 = 0
+inserted inst12: v9 = stack_addr.i64 ss0
+inserted inst13: jump block0
 switch to block1
-inserted inst11: store.i64 notrap aligned v1, v0
-inserted inst12: v8 = iconst.i64 0
-inserted inst13: return v8  ; v8 = 0
+inserted inst14: store.i64 notrap aligned v1, v0
+inserted inst15: v10 = iconst.i64 0
+inserted inst16: return v10  ; v10 = 0
 switch to block0
-inserted inst14: v9 = iconst.i64 45
-try_def_var: var0 = v9
-inserted inst15: store.i64 notrap aligned v9, v1  ; v9 = 45
-inserted inst16: v10 = iconst.i64 22
-try_def_var: var1 = v10
-inserted inst17: v11 = call fn1(v0, v9)  ; v9 = 45
-inserted inst18: brif.i64 v11, block5, block1
+inserted inst17: v11 = iconst.i64 45
+try_def_var: var0 = v11
+inserted inst18: store.i64 notrap aligned v11, v9  ; v11 = 45
+inserted inst19: v12 = iconst.i64 22
+try_def_var: var1 = v12
+inserted inst20: v13 = call fn1(v0, v11)  ; v11 = 45
+inserted inst21: brif.i64 v13, block5, block1
 switch to block5
-try_def_var: var2 = v11
-inserted inst19: store.i64 notrap aligned v1, v0
-inserted inst20: return v11
+try_def_var: var2 = v13
+inserted inst22: store.i64 notrap aligned v1, v0
+inserted inst23: return v13
 defining function funcid41: function u0:41(i64) -> i64 system_v {
+    ss0 = explicit_slot 8, align = 8
     sig0 = (i64) -> i64 system_v
     sig1 = (i64, i64) -> i64 system_v
     fn0 = u0:4 sig0
@@ -53,23 +57,26 @@ block3:
 
 block4:
     store.i64 notrap aligned v3, v0
+    v8 = iconst.i64 0
+    store notrap aligned v8, v1  ; v8 = 0
+    v9 = stack_addr.i64 ss0
     jump block0
 
 block1:
     store.i64 notrap aligned v1, v0
-    v8 = iconst.i64 0
-    return v8  ; v8 = 0
+    v10 = iconst.i64 0
+    return v10  ; v10 = 0
 
 block0:
-    v9 = iconst.i64 45
-    store notrap aligned v9, v1  ; v9 = 45
-    v10 = iconst.i64 22
-    v11 = call fn1(v0, v9)  ; v9 = 45
-    brif v11, block5, block1
+    v11 = iconst.i64 45
+    store notrap aligned v11, v9  ; v11 = 45
+    v12 = iconst.i64 22
+    v13 = call fn1(v0, v11), stack_map=[i64 @ ss0+0]  ; v11 = 45
+    brif v13, block5, block1
 
 block5:
     store.i64 notrap aligned v1, v0
-    return v11
+    return v13
 }
 
 *** END VCODE ***

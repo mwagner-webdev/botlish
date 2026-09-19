@@ -257,6 +257,7 @@ fn execute(command: &str, program: &nir::Program, runs: usize, alloc_mode: Alloc
 
     let mut vm = Vm::new(Rc::new(program_info(program)), alloc_mode);
     compiled.install_constants(&mut vm);
+    vm.set_framemap(compiled.framemap.clone());
     let mut best = u128::MAX;
     let mut result = NO_VALUE;
     let mut nanos: Vec<u128> = Vec::with_capacity(runs);

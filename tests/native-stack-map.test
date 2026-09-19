@@ -1,0 +1,283 @@
+# native-stack-map.test -- precise native-stack root maps and native frame
+# walking for GC (native/src/runtime/framemap.rs, native/src/runtime/
+# framewalk.rs, native/src/codegen/clif.rs's `mark_safepoint`): the second
+# step of the native-stack-authoritative roadmap, after
+# native-root-storage.test's first ("no separate Botlish frame for a
+# function that cannot recurse"). This step lets the collector discover
+# roots directly in active native Botlish frames -- including a
+# call-containing, recursive function like fib<int> -- by walking the
+# machine call stack's rbp chain and consulting per-safepoint Cranelift
+# stack maps, instead of requiring the shared RuntimeStack array as root
+# storage. RuntimeStack keeps exactly one job now: a minimal, decoupled
+# recursion-depth token (`RootPlan::depth_reservation`), unrelated to where
+# roots actually live.
+#
+# native-root-storage.test already covers the single-safepoint structural
+# and slot-reuse cases (now on the stack-map path for every function, not
+# just call-free ones) and updates the "fib<int>/call-crossing root" cases
+# this milestone specifically targets. This file adds the cases that are
+# new to *this* step: real multi-frame discovery (several suspended Botlish
+# frames with simultaneously live roots), a foreign (non-Botlish) frame
+# nested in the middle of a Botlish call chain, and fib<int> itself as the
+# flagship regression.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+proc sourceIrHir {path} {
+    return [hir::build [core::loadProgramFile $path] -strict 0]
+}
+
+proc sourceHir {text} {
+    return [surface::compile $text t.bot -strict 0]
+}
+
+proc sourceIR {text} {
+    return [hir::lower [sourceHir $text]]
+}
+
+# The outcome of surface source TEXT on the cranelift backend: {value V} or
+# {error CODE MESSAGE} (mirrors native.test's own `native` helper).
+proc native {text} {
+    lrange [outcomeUnder cranelift [sourceIR $text]] 0 end-1
+}
+
+proc rootsBlock {report name} {
+    foreach block [split [string map [list "\n\n" "\x01"] $report] "\x01"] {
+        if {[regexp "function \\d+ \"$name\"" $block]} {
+            return $block
+        }
+    }
+    error "no function named \"$name\" found in:\n$report"
+}
+
+proc storageOf {report name} {
+    regexp {storage: (native frame|runtime stack)} [rootsBlock $report $name] -> s
+    return $s
+}
+
+proc depthReservationOf {report name} {
+    regexp {depth reservation: (yes|no)} [rootsBlock $report $name] -> d
+    return $d
+}
+
+proc clifFunctionBlock {clifText name} {
+    set lines [split $clifText \n]
+    set start {}
+    set end [llength $lines]
+    for {set i 0} {$i < [llength $lines]} {incr i} {
+        set line [lindex $lines $i]
+        if {$start eq {} && [regexp "^; function \\d+ \"$name\":" $line]} {
+            set start $i
+            continue
+        }
+        if {$start ne {} && [regexp {^; function \d+ "} $line]} {
+            set end $i
+            break
+        }
+    }
+    if {$start eq {}} {
+        error "no function named \"$name\" found in CLIF:\n$clifText"
+    }
+    return [join [lrange $lines $start [expr {$end - 1}]] \n]
+}
+
+proc usesHelper {clifText functionBlock helperName} {
+    if {![regexp -line "^; u0:(\\d+) = $helperName\$" $clifText -> index]} {
+        error "helper $helperName not found in legend:\n$clifText"
+    }
+    return [regexp "u0:$index\[^0-9\]" $functionBlock]
+}
+
+# native.test's own helpers, duplicated minimally (see its header for why
+# each *.test file keeps its own small copy rather than sourcing another).
+proc nirOf {text args} {
+    native::nir [sourceHir $text] -specialize 1 {*}$args
+}
+
+proc nirFunctions {nir} {
+    set result {}
+    set current ""
+    foreach line [split $nir \n] {
+        if {$current eq ""} {
+            if {[regexp {^func ([0-9]+) "((?:[^"\\]|\\.)*)"} $line -> id name]} {
+                set current [list $id $name]
+                set body {}
+            }
+        } elseif {$line eq "end"} {
+            lappend result [concat $current [list [join $body \n]]]
+            set current ""
+        } else {
+            lappend body $line
+        }
+    }
+    return $result
+}
+
+proc nirFunction {nir name} {
+    foreach f [nirFunctions $nir] {
+        lassign $f id fname body
+        if {$fname eq $name} {
+            return $body
+        }
+    }
+    return ""
+}
+
+proc underGcStress {body} {
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        uplevel 1 $body
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+}
+
+# ---------------------------------------------------------------------------
+# fib<int> (the flagship recursive, cross-call-rooted shape): native-frame
+# storage, its own depth-token check kept, correct numerically, and its
+# generated CLIF text is unaffected by GC-stress mode (structural, not
+# behavioral). See NATIVE-STACK-MAPS.md for its before/after assembly.
+
+test stack-map-fib-1 {fib<int> uses NativeFrame storage with a depth reservation, both at once} -body {
+    set report [native::roots [sourceIrHir [file join $::projectRoot bench fib.ir]]]
+    list [storageOf $report fib] [depthReservationOf $report fib]
+} -result {{native frame} yes}
+
+test stack-map-fib-2 {fib<int>'s CLIF still imports rt_stack_overflow (the depth reservation, unchanged) even though its roots moved off RuntimeStack} -body {
+    set hir [sourceIrHir [file join $::projectRoot bench fib.ir]]
+    set clif [native::clif $hir]
+    usesHelper $clif [clifFunctionBlock $clif fib] rt_stack_overflow
+} -result 1
+
+test stack-map-fib-3 {fib<int> still computes the right answer, natively} -body {
+    native "fn fib(n):\n    if n < 2:\n        return n\n    fib(n - 1) + fib(n - 2)\n\nfib(15)"
+} -result {value 610}
+
+test stack-map-fib-4 {fib<int> under forced GC stress: every recursive call is a safepoint the walker must survive, even though this particular function never actually allocates for these inputs} -body {
+    underGcStress {
+        native "fn fib(n):\n    if n < 2:\n        return n\n    fib(n - 1) + fib(n - 2)\n\nfib(15)"
+    }
+} -result {value 610}
+
+# ---------------------------------------------------------------------------
+# Real multi-frame discovery: a non-tail recursive function whose own local
+# root (a freshly allocated, non-static string -- never optimized away, and
+# collectible if the walker ever failed to find it) must survive across its
+# own recursive call, while every ancestor frame's *own* copy of that same
+# local root is simultaneously live and must independently survive too.
+# Under BOTLISH_NATIVE_GC_STRESS=1, every one of the many `concat`
+# allocations this makes (one per recursion level, both going down and
+# coming back up) forces a real collection while some number of Botlish
+# frames are genuinely suspended on the native call stack -- this is a
+# collection actually finding roots in older caller frames (items 6/8/9 of
+# this milestone's own test list), not merely "doesn't crash because GC
+# never really ran" (fib<int> above, by contrast, never allocates at all
+# for small inputs, so its own GC-stress test exercises the depth check and
+# the walker's own bookkeeping but not a real multi-frame collection).
+#
+# The collector is currently non-moving (runtime/heap.rs's own doc), so
+# there is nothing to relocate yet -- this confirms *preservation* across a
+# real collection with several live caller frames, which is what "moving/
+# updating a rooted value in an older caller frame" (item 9) reduces to
+# today; runtime::framewalk's `walk` already hands the collector each
+# root's actual address (not just its value), so a future moving collector
+# could write an updated pointer back through that same address without
+# any change to this walk.
+
+proc buildSource {n} {
+    return "fn build(n):\n    if n < 1:\n        return \"\"\n    prefix = concat(\"x\", \"y\")\n    concat(prefix, build(n - 1))\n\nbuild($n)"
+}
+
+test stack-map-deep-1 {a non-tail recursive, allocating function computes the right answer at moderate depth} -body {
+    native [buildSource 40]
+} -result [list value "\"[string repeat xy 40]\""]
+
+test stack-map-deep-2 {...and still does, under GC stress, with every level's own root surviving while deeper levels are still recursing} -body {
+    underGcStress {
+        native [buildSource 40]
+    }
+} -result [list value "\"[string repeat xy 40]\""]
+
+test stack-map-deep-3 {a much deeper chain of simultaneously-live caller-frame roots, still correct under GC stress} -body {
+    underGcStress {
+        native [buildSource 200]
+    }
+} -result [list value "\"[string repeat xy 200]\""]
+
+# ---------------------------------------------------------------------------
+# Boundary termination: a dynamically dispatched call (`apply(f, x): f(x)`)
+# nests a non-Botlish `rt_call_value` frame between the outer caller and the
+# recursive, allocating function itself. The walker must not mistake that
+# foreign frame's own return address for the end of the Botlish call chain
+# (which would find zero roots at all beneath it) -- it must keep climbing
+# through it to reach `build`'s own frames. Wrong behavior here would
+# either crash (misreading a foreign frame as a Botlish one, per this
+# module's own doc on why "keep going either way" is required) or corrupt
+# this result (roots lost, prematurely collected under stress).
+
+test stack-map-callvalue-boundary-1 {a CallValue dispatch nests a foreign frame; the walk still finds every Botlish root beneath it, under GC stress} -body {
+    underGcStress {
+        native "fn build(n):\n    if n < 1:\n        return \"\"\n    prefix = concat(\"x\", \"y\")\n    concat(prefix, build(n - 1))\n\nfn apply(f, x):\n    f(x)\n\napply(build, 40)"
+    }
+} -result [list value "\"[string repeat xy 40]\""]
+
+test stack-map-callvalue-boundary-2 {confirms the program above really does dispatch through CallValue (rt_call_value), not a direct call} -body {
+    set nir [nirOf "fn build(n):\n    if n < 1:\n        return \"\"\n    prefix = concat(\"x\", \"y\")\n    concat(prefix, build(n - 1))\n\nfn apply(f, x):\n    f(x)\n\napply(build, 40)"]
+    regexp {callvalue} [nirFunction $nir apply]
+} -result 1
+
+# native.test's own helpers, duplicated minimally (see its header for why
+# each *.test file keeps its own small copy rather than sourcing another).
+proc nirOf {text args} {
+    native::nir [sourceHir $text] -specialize 1 {*}$args
+}
+
+proc nirFunctions {nir} {
+    set result {}
+    set current ""
+    foreach line [split $nir \n] {
+        if {$current eq ""} {
+            if {[regexp {^func ([0-9]+) "((?:[^"\\]|\\.)*)"} $line -> id name]} {
+                set current [list $id $name]
+                set body {}
+            }
+        } elseif {$line eq "end"} {
+            lappend result [concat $current [list [join $body \n]]]
+            set current ""
+        } else {
+            lappend body $line
+        }
+    }
+    return $result
+}
+
+proc nirFunction {nir name} {
+    foreach f [nirFunctions $nir] {
+        lassign $f id fname body
+        if {$fname eq $name} {
+            return $body
+        }
+    }
+    return ""
+}
+
+# ---------------------------------------------------------------------------
+# Slot reuse across different safepoints, on the stack-map path: two
+# sequential, non-overlapping "phases", each with its own cross-call root,
+# reuse the same physical native-frame slot (native-root-storage.test's
+# storage-multi-root-1 already covers this for a single-frame, no-call
+# function; this is the calling-function analogue, with each phase's root
+# crossing a real Botlish call). Both phases must still compute correctly
+# under GC stress even though they physically share one slot at different
+# safepoints (never simultaneously, so this is sound -- codegen::roots's
+# own coloring guarantee, now exercised through the stack map that
+# describes it).
+
+test stack-map-slot-reuse-1 {two non-overlapping cross-call roots that share a native slot both compute correctly under GC stress} -body {
+    underGcStress {
+        native "fn id(x):\n    x\n\nfn f(n):\n    a = concat(\"phase-one-\", \"value\")\n    b = id(a)\n    c = concat(\"phase-two-\", \"value\")\n    d = id(c)\n    concat(b, d)\n\nf(0)"
+    }
+} -result {value {"phase-one-valuephase-two-value"}}
+
+cleanupTests

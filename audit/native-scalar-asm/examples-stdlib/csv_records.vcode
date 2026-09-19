@@ -1,7 +1,7 @@
 ; source:  examples/stdlib/csv_records.bot
 ; backend: Cranelift (specialize=1), native::vcode
 ; format:  Cranelift Debug for VCode, pre-regalloc machine-level lowering
-; total machine code bytes: 27901  (per function: 172 168 437 517 396 396 396 171 453 502 676 887 469 837 584 268 28 28 28 28 524 689 208 557 271 61 125 61 125 61 125 61 125 61 269 269 284 284 332 332 1020 1536 565 556 582 1353 928 953 825 1472 1108 243 860 443 781 683 181 181 1366)
+; total machine code bytes: 28701  (per function: 172 78 357 533 402 402 402 81 365 430 702 925 481 890 592 285 28 28 28 28 540 712 220 493 286 61 125 61 125 61 125 61 125 61 281 281 297 297 347 347 1036 1592 589 572 612 1585 1030 977 841 1496 1132 256 908 462 893 723 194 194 1494)
 ;
 switch to block2
 inserted inst0: v1 = load.i64 notrap aligned v0

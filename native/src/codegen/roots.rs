@@ -52,69 +52,64 @@
 
 use crate::nir::{Function, Inst, Program, Reg};
 use crate::runtime::ops::op_may_allocate;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::fmt::Write as _;
 
 /// Where a function's physical root slots (`RootPlan::slot_of`/`num_slots`)
 /// actually live: this is a storage-location decision made *after* F3's own
-/// coloring, never a change to the coloring/liveness itself (milestone: use
-/// Cranelift's native frame for Botlish root slots instead of a separate
-/// Botlish runtime frame where the current runtime semantics permit it).
+/// coloring, never a change to the coloring/liveness itself.
 ///
 /// * `NativeFrame`: the physical slots live in a Cranelift-managed stack
-///   slot inside this function's own native frame (rbp/rsp-relative),
-///   published to the collector through `Vm::native_roots_ptr`/`_len`
-///   instead of the shared shadow-stack array -- see `eligible_for_native_frame`
-///   for exactly when this is sound, and codegen::clif's prologue for the
-///   publish/restore sequence. No separate Botlish-SP bump/limit-check
-///   sequence is emitted for such a function at all: nothing here needs the
-///   recursion-depth bound the shared array's limit check exists for (see
-///   that function's doc), and nothing needs the array's contiguous-region
-///   scan either, since `native_roots_ptr`/`_len` names exactly one
-///   function's own slots directly.
-/// * `RuntimeStack`: the original mechanism, unchanged -- the shared
-///   `Vm::shadow` array indexed via `ss_top`/`ss_limit`, scanned as one
-///   contiguous region covering every active frame at once. Still the only
-///   sound choice for a function that can recurse through a real Botlish
-///   call while holding a live root across it: without a stack-map/frame-
-///   walk mechanism (this milestone's own step 2, not implemented here),
-///   the collector has no way to find a `NativeFrame` function's roots once
-///   another such frame is nested on top of it deeper than the single
-///   `native_roots_ptr`/`_len` pair can name (see `eligible_for_native_frame`).
+///   slot inside this function's own native frame (rbp/rsp-relative).
+///   `plan`'s NATIVE_FRAME_SUPPORTED argument selects one of two ways the
+///   collector discovers these slots (see that argument's doc and
+///   codegen::clif's prologue for the actual emitted sequences):
+///
+///     - on the x86-64 native-stack-map path (NATIVE_FRAME_SUPPORTED true):
+///       every such function, called or not, recursive or not, qualifies.
+///       Its slots are discovered by the collector walking the machine
+///       call stack's rbp chain and consulting per-safepoint stack-map
+///       metadata (`RootPlan::safepoint_slots`, runtime/framewalk.rs) --
+///       no publish/restore of any kind is emitted for them.
+///     - on the fallback path (NATIVE_FRAME_SUPPORTED false, e.g. a
+///       non-x86-64 host where the frame-walker is not implemented): only
+///       a function with no Botlish call qualifies (`has_botlish_call`),
+///       exactly the original, narrower rule, published to the collector
+///       through `Vm::native_roots_ptr`/`_len` (at most one such
+///       registration can ever be active along any single call chain,
+///       since a function *with* a call is never eligible here).
+///
+/// * `RuntimeStack`: the shared `Vm::shadow` array indexed via
+///   `ss_top`/`ss_limit`, scanned as one contiguous region. Used as
+///   physical *root storage* only on the fallback path, for a function
+///   that contains a Botlish call (mirrors the original, pre-stack-map
+///   mechanism exactly). On the native-stack-map path this storage is
+///   never used for roots at all -- see `RootPlan::depth_reservation` for
+///   the unrelated, narrower way a call-containing function still touches
+///   this same shared array (a one-slot recursion-depth token, holding no
+///   Value and needing no stack-map entry).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RootStorage {
     NativeFrame,
     RuntimeStack,
 }
 
-/// Whether F may use `RootStorage::NativeFrame`: true iff F contains no
-/// Botlish call (`Call`/`CallEnv`/`CallMulti`/`CallEnvMulti`/`CallValue`) --
-/// a dynamically dispatched call is folded into `CallValue`, already
-/// covered. `Tail`/`TailEnv` (a self back-edge, codegen::clif's own doc)
-/// is deliberately not one of these: it is a CFG jump to this same frame's
-/// entry block, never a machine `call`, so it neither grows the native call
-/// stack nor creates a second frame whose roots would need separate
-/// discovery.
+/// Whether F contains a Botlish call (`Call`/`CallEnv`/`CallMulti`/
+/// `CallEnvMulti`/`CallValue` -- a dynamically dispatched call is folded
+/// into `CallValue`, already covered). `Tail`/`TailEnv` (a self back-edge,
+/// codegen::clif's own doc) is deliberately not one of these: it is a CFG
+/// jump to this same frame's entry block, never a machine `call`, so it
+/// neither grows the native call stack nor creates a second frame.
 ///
-/// This is the whole eligibility rule (see this module's doc and
-/// `RootStorage`'s), and it is intentionally conservative/narrow rather than
-/// "no GC can occur" (`root_candidates == 0` alone): a function with no
-/// Botlish calls cannot recurse through a call either, so it needs neither
-/// the shared array's recursion-depth bound (nothing here can grow the
-/// native call stack) nor a multi-frame discovery mechanism (at most one
-/// such function's `native_roots_ptr`/`_len` registration can ever be
-/// "active" along any single call chain, since every function that could
-/// call into one is, by having that very call, itself disqualified -- see
-/// codegen::clif's prologue doc for the full argument). A function *with*
-/// a Botlish call keeps the old `RuntimeStack` storage even when it has no
-/// root candidates of its own, unchanged from today (see `RootPlan::plan`'s
-/// `num_slots` floor, still exactly 1 there): eliminating its depth-bound
-/// participation is a different, unimplemented optimization this milestone
-/// does not attempt (it would not need `RootStorage::NativeFrame` at all,
-/// just a reason to skip the existing array altogether -- see this
-/// milestone's report for why that is left for later).
-fn eligible_for_native_frame(f: &Function) -> bool {
-    !f.body.iter().any(|inst| {
+/// Two independent things key off this predicate (see `RootPlan`'s
+/// `storage`/`depth_reservation` docs): on the fallback (non-native-stack-
+/// map) path it is exactly the old `RootStorage::NativeFrame` eligibility
+/// rule; on every path it is exactly `RootPlan::depth_reservation` --
+/// whether this function's own recursion depth still needs the shared
+/// shadow array's bound, decoupled from wherever its actual GC roots live
+/// (this milestone's own goal: see this module's doc and codegen::clif's).
+fn has_botlish_call(f: &Function) -> bool {
+    f.body.iter().any(|inst| {
         matches!(
             inst,
             Inst::Call { .. }
@@ -161,12 +156,32 @@ pub struct RootPlan {
     /// separate fact from `num_slots`/`slot_of` -- F3's own physical-slot
     /// allocation is unchanged by it (milestone brief items 1, 34).
     pub entry_zero: Vec<bool>,
-    /// Where these physical slots live: `RootStorage`'s own doc, computed by
-    /// `eligible_for_native_frame` alone -- a storage-location decision that
-    /// never revisits `slot_of`/`num_slots`/`entry_zero` above (this
-    /// module's own doc: "a storage-location change, not a new root
-    /// allocator").
+    /// Where these physical slots live: `RootStorage`'s own doc -- a
+    /// storage-location decision that never revisits
+    /// `slot_of`/`num_slots`/`entry_zero` above (this module's own doc: "a
+    /// storage-location change, not a new root allocator").
     pub storage: RootStorage,
+    /// Whether this function's own recursion depth still needs the shared
+    /// `RuntimeStack` array's bound: exactly `has_botlish_call(f)`,
+    /// decoupled from `storage` (this milestone's own goal -- see this
+    /// module's and codegen::clif's doc). When true, codegen::clif emits a
+    /// minimal one-slot bump/limit-check/restore against that shared array
+    /// purely to bound native recursion depth, storing no Value there and
+    /// needing no stack-map entry, *independent* of wherever this
+    /// function's actual GC roots live (`storage`/`safepoint_slots`).
+    pub depth_reservation: bool,
+    /// `RootStorage::NativeFrame` on the native-stack-map path only: for
+    /// each safepoint instruction (by its index into `f.body`), the
+    /// physical slots (`slot_of`'s values) live *at that specific point* --
+    /// a subset of the slots this function ever uses, precise per safepoint
+    /// exactly like `entry_zero_slots`'s own per-slot analysis (see this
+    /// module's doc, item 4: `Roots(safepoint) = LiveIn(safepoint)`
+    /// restricted to non-raw registers, mapped through `slot_of`). Read by
+    /// codegen::clif to attach Cranelift `UserStackMapEntry`s to the actual
+    /// machine call at each safepoint (`mark_safepoint`). Empty (no entry
+    /// for any index) whenever `storage` is not `NativeFrame` on this path,
+    /// or (the fallback path) when native stack maps are not in use at all.
+    pub safepoint_slots: BTreeMap<usize, Vec<u32>>,
 }
 
 impl RootPlan {
@@ -334,8 +349,15 @@ impl Cfg {
 /// `f.regs` bits, so the loop below terminates; `guard` only exists to turn a
 /// dataflow bug into a clear panic instead of a silent hang.
 struct Liveness {
-    /// Roots(safepoint) for every safepoint instruction, in program order.
+    /// Roots(safepoint) for every safepoint instruction (order matches
+    /// `safepoint_index`, not necessarily `f.body` order -- see `analyze`'s
+    /// own second pass -- but every consumer below is order-independent).
     safepoint_roots: Vec<Vec<Reg>>,
+    /// The `f.body` index of each entry of `safepoint_roots`, same length,
+    /// same order: lets `plan` build `RootPlan::safepoint_slots` (keyed by
+    /// body index, for codegen::clif's per-instruction lookup) without
+    /// re-walking the CFG.
+    safepoint_index: Vec<usize>,
 }
 
 fn analyze(f: &Function, cfg: &Cfg) -> Liveness {
@@ -396,6 +418,7 @@ fn analyze(f: &Function, cfg: &Cfg) -> Liveness {
     // Second pass: walk every block backward once more from its now-final
     // LiveOut, recording each safepoint's root set as we pass it.
     let mut safepoint_roots = Vec::new();
+    let mut safepoint_index = Vec::new();
     for b in 0..nb {
         let (s, e) = cfg.blocks[b];
         let mut live = live_out[b].clone();
@@ -413,11 +436,12 @@ fn analyze(f: &Function, cfg: &Cfg) -> Liveness {
                 let roots: Vec<Reg> =
                     (0..regs).filter(|&r| live_in_inst[r] && !f.raw_regs[r]).map(|r| r as Reg).collect();
                 safepoint_roots.push(roots);
+                safepoint_index.push(idx);
             }
             live = live_in_inst;
         }
     }
-    Liveness { safepoint_roots }
+    Liveness { safepoint_roots, safepoint_index }
 }
 
 /// Deterministic greedy coloring of the interference graph implied by
@@ -638,25 +662,57 @@ fn entry_zero_slots(f: &Function, cfg: &Cfg, slot_of: &[Option<u32>], num_slots:
 }
 
 /// Computes F's root-allocation plan (see this module's doc).
-pub fn plan(f: &Function) -> RootPlan {
+///
+/// NATIVE_FRAME_SUPPORTED: whether the collector can discover
+/// `RootStorage::NativeFrame` roots by walking the native machine stack and
+/// consulting per-safepoint stack maps (runtime/framewalk.rs) -- true on
+/// the primary x86-64 path (codegen::clif passes `module.isa().name() ==
+/// "x64"`, the same check `Symbols::direct_helpers` already uses), false on
+/// the fallback path where that walker is not implemented and `NativeFrame`
+/// keeps its original, narrower meaning (see `RootStorage`'s own doc for
+/// both). This is a pure storage/discovery decision: it never changes
+/// `slot_of`/`entry_zero`/liveness/coloring above, and on the fallback path
+/// it reproduces the pre-stack-map behavior exactly, byte for byte.
+pub fn plan(f: &Function, native_frame_supported: bool) -> RootPlan {
     let cfg = Cfg::build(f);
     let liveness = analyze(f, &cfg);
     let (slot_of, colored_slots, root_candidates) = color(f.regs, &liveness.safepoint_roots);
     let max_live = liveness.safepoint_roots.iter().map(Vec::len).max().unwrap_or(0) as u32;
-    let storage =
-        if eligible_for_native_frame(f) { RootStorage::NativeFrame } else { RootStorage::RuntimeStack };
+    let depth_reservation = has_botlish_call(f);
+    // On the native-stack-map path every function qualifies for NativeFrame
+    // (called or not: the frame-walker discovers roots across any number of
+    // nested native frames, so a Botlish call no longer disqualifies it --
+    // this milestone's own goal). On the fallback path, unchanged: only a
+    // function with no Botlish call qualifies (RootStorage's own doc).
+    let storage = if native_frame_supported || !depth_reservation {
+        RootStorage::NativeFrame
+    } else {
+        RootStorage::RuntimeStack
+    };
     // At least one slot always for RuntimeStack, so the shared shadow array
     // still bounds native recursion depth for a function with zero roots
-    // (see RootPlan's doc and codegen::clif's prologue). A NativeFrame
-    // function needs no such floor: `eligible_for_native_frame` already
-    // guarantees it contains no Botlish call, so it cannot recurse through
-    // one either -- zero physical slots there really does mean zero
-    // shadow-stack participation (see RootStorage's own doc).
+    // (see RootPlan's doc and codegen::clif's prologue) -- this is the
+    // fallback path's combined depth+storage floor, unchanged. A
+    // NativeFrame function needs no such floor regardless of calls: on the
+    // native-stack-map path, recursion depth is bounded by
+    // `depth_reservation`'s own, wholly separate one-slot reservation
+    // instead (codegen::clif); on the fallback path, NativeFrame implies no
+    // Botlish call at all (`!depth_reservation` above), so it cannot
+    // recurse through one either.
     let num_slots = match storage {
         RootStorage::RuntimeStack => colored_slots.max(1),
         RootStorage::NativeFrame => colored_slots,
     };
     let entry_zero = entry_zero_slots(f, &cfg, &slot_of, num_slots);
+    let mut safepoint_slots = BTreeMap::new();
+    if storage == RootStorage::NativeFrame {
+        for (&idx, roots) in liveness.safepoint_index.iter().zip(liveness.safepoint_roots.iter()) {
+            let mut slots: Vec<u32> = roots.iter().filter_map(|&r| slot_of[r as usize]).collect();
+            slots.sort_unstable();
+            slots.dedup();
+            safepoint_slots.insert(idx, slots);
+        }
+    }
     RootPlan {
         slot_of,
         num_slots,
@@ -664,6 +720,8 @@ pub fn plan(f: &Function) -> RootPlan {
         root_candidates,
         max_live,
         storage,
+        depth_reservation,
+        safepoint_slots,
         entry_zero,
     }
 }
@@ -680,9 +738,14 @@ pub fn plan(f: &Function) -> RootPlan {
 /// unaffected by this module's definite-initialization analysis, the
 /// second is entirely its output.
 pub fn report(program: &Program) -> String {
+    // Reflects what this host's actual JIT compile will decide
+    // (codegen::clif passes the same `isa.name() == "x64"` check): this CLI
+    // parses and analyzes only, never compiles (main.rs's own doc), so
+    // there is no `Module`/ISA here to ask directly.
+    let native_frame_supported = cfg!(target_arch = "x86_64");
     let mut out = String::new();
     for f in &program.functions {
-        let plan = plan(f);
+        let plan = plan(f, native_frame_supported);
         let (regs, raw) = RootPlan::counts(f);
         writeln!(out, "function {} \"{}\"", f.id, f.name).unwrap();
         writeln!(out, "  NIR regs: {regs}").unwrap();
@@ -693,6 +756,7 @@ pub fn report(program: &Program) -> String {
         writeln!(out, "  max live roots: {}", plan.max_live).unwrap();
         writeln!(out, "  shadow slots: {}", plan.num_slots).unwrap();
         writeln!(out, "  entry zero slots: {}", plan.entry_zero.iter().filter(|z| **z).count()).unwrap();
+        writeln!(out, "  depth reservation: {}", if plan.depth_reservation { "yes" } else { "no" }).unwrap();
         writeln!(
             out,
             "  storage: {}",
@@ -759,7 +823,7 @@ mod tests {
             "0 1 2",
             "    %0 = rawint 1\n    %1 = rawint 2\n    %2 = op riadd %0 %1\n    %3 = op rbox %2\n    ret %3\n",
         );
-        let plan = plan(&f);
+        let plan = plan(&f, true);
         assert_eq!(plan.safepoints, 0);
         assert_eq!(plan.root_candidates, 0);
         // This function also makes no Botlish call, so it is RootStorage::
@@ -780,7 +844,7 @@ mod tests {
     #[test]
     fn tagged_dead_before_safepoint_needs_no_slot() {
         let f = program_of(3, "", "    %0 = int 7\n    %1 = int 2\n    %2 = op imod %0 %1\n    ret %2\n");
-        let plan = plan(&f);
+        let plan = plan(&f, true);
         assert_eq!(plan.safepoints, 0);
         assert_eq!(plan.root_candidates, 0);
         assert!(plan.slot_of.iter().all(Option::is_none));
@@ -799,7 +863,7 @@ mod tests {
             "",
             "    %0 = str \"a\"\n    %1 = cell\n    %2 = op streq %0 %0\n    ret %2\n",
         );
-        let plan = plan(&f);
+        let plan = plan(&f, true);
         assert_eq!(plan.safepoints, 1);
         assert_eq!(plan.max_live, 1, "only %0 is live across the cell allocation");
         assert_eq!(plan.root_candidates, 1);
@@ -820,7 +884,7 @@ mod tests {
             "",
             "    %0 = str \"a\"\n    %1 = str \"b\"\n    %2 = op strcat %0 %1\n    ret %2\n",
         );
-        let plan = plan(&f);
+        let plan = plan(&f, true);
         assert_eq!(plan.safepoints, 1);
         // Both %0 and %1 are live-in at the strcat: they are its operands,
         // needed while it runs, even though neither survives past it.
@@ -839,7 +903,7 @@ mod tests {
             "",
             "    %0 = str \"a\"\n    %1 = str \"b\"\n    %2 = cell\n    %3 = op streq %0 %1\n    ret %3\n",
         );
-        let plan = plan(&f);
+        let plan = plan(&f, true);
         assert_eq!(plan.safepoints, 1);
         assert_eq!(plan.max_live, 2);
         assert!(plan.slot_of[0].is_some() && plan.slot_of[1].is_some());
@@ -867,7 +931,7 @@ mod tests {
                 "    ret %5\n",
             ),
         );
-        let plan = plan(&f);
+        let plan = plan(&f, true);
         assert!(
             plan.num_slots < plan.root_candidates,
             "some slot must be reused: {} candidates, {} slots",
@@ -903,7 +967,7 @@ mod tests {
             "    ret %2\n",
             "end\n",
         ));
-        let plan = plan(&f);
+        let plan = plan(&f, true);
         assert_eq!(plan.safepoints, 2);
         assert_eq!(plan.max_live, 1);
         // %1 and %3 never co-occur at any single safepoint: they may share.
@@ -928,7 +992,7 @@ mod tests {
                 "end\n",
             ),
         );
-        let plan = plan(&f);
+        let plan = plan(&f, true);
         assert_eq!(plan.safepoints, 1);
         // %0 (the carried accumulator) and %1 (this iteration's fresh
         // temporary) are both operands of the strcat, so both are live-in
@@ -961,7 +1025,7 @@ mod tests {
                 "end\n",
             ),
         );
-        let plan = plan(&f);
+        let plan = plan(&f, true);
         assert_eq!(plan.safepoints, 1);
         assert_eq!(plan.max_live, 1);
         assert!(plan.slot_of[0].is_some());
@@ -981,8 +1045,8 @@ mod tests {
             "    ret %5\n",
             "end\n",
         ));
-        let a = plan(&f).slot_of;
-        let b = plan(&f).slot_of;
+        let a = plan(&f, true).slot_of;
+        let b = plan(&f, true).slot_of;
         assert_eq!(a, b);
     }
 
@@ -1003,7 +1067,7 @@ mod tests {
             "    ret %0\n",
             "end\n",
         ));
-        let plan = plan(&program.functions[0]);
+        let plan = plan(&program.functions[0], true);
         assert_eq!(plan.safepoints, 1);
         assert_eq!(plan.max_live, 0, "the call has no argument and its result is only defined after it");
     }
@@ -1052,7 +1116,7 @@ mod tests {
                 "end\n",
             ),
         );
-        let plan = plan(&f);
+        let plan = plan(&f, true);
         // Two recursive calls, plus the final `+` that combines their
         // results (conservatively a safepoint too: see this test's doc).
         assert_eq!(plan.safepoints, 3);
@@ -1101,7 +1165,7 @@ mod tests {
                 "end\n",
             ),
         );
-        let plan = plan(&f);
+        let plan = plan(&f, true);
         assert_eq!(plan.safepoints, 1);
         let slot = plan.slot_of[0].expect("the parameter is live across the strcat");
         assert!(!plan.entry_zero[slot as usize], "the prologue's own parameter store already initializes it");
@@ -1129,7 +1193,7 @@ mod tests {
                 "end\n",
             ),
         );
-        let plan = plan(&f);
+        let plan = plan(&f, true);
         assert_eq!(plan.safepoints, 1);
         let slot0 = plan.slot_of[0].expect("the parameter is live across the strcat on the L1 path");
         let slot2 = plan.slot_of[2].expect("the fresh string is live across the strcat too");
@@ -1165,7 +1229,7 @@ mod tests {
             "    ret %0\n",
             "end\n",
         ));
-        let plan = plan(&program.functions[1]);
+        let plan = plan(&program.functions[1], true);
         assert_eq!(plan.safepoints, 2);
         let slot = plan.slot_of[1].expect("%1 is live across the second call");
         assert!(plan.entry_zero[slot as usize], "the first call can scan %1's slot before %1 is ever defined");
@@ -1194,7 +1258,7 @@ mod tests {
                 "end\n",
             ),
         );
-        let plan = plan(&f);
+        let plan = plan(&f, true);
         assert_eq!(plan.safepoints, 1);
         let slot = plan.slot_of[1].expect("%1 is live across the call on the L2 join");
         assert!(plan.entry_zero[slot as usize], "the L1 (false) branch reaches the safepoint without defining %1");
@@ -1223,7 +1287,7 @@ mod tests {
                 "    ret %5\n",
             ),
         );
-        let plan = plan(&f);
+        let plan = plan(&f, true);
         assert!(plan.num_slots < plan.root_candidates, "some slot must be reused (see the sibling F3 test)");
         assert_eq!(plan.slot_of[3], plan.slot_of[0], "reg 3 should reuse reg 0's now-dead slot");
         for slot in 0..plan.num_slots {
@@ -1251,7 +1315,7 @@ mod tests {
                 "end\n",
             ),
         );
-        let plan = plan(&f);
+        let plan = plan(&f, true);
         assert_eq!(plan.safepoints, 1);
         let slot = plan.slot_of[0].expect("the carried accumulator is live across the strcat");
         assert!(!plan.entry_zero[slot as usize], "bound by the prologue, then rebound by every `tail`, before the loop's one safepoint");
@@ -1259,13 +1323,15 @@ mod tests {
 
     // -------------------------------------------------------------------
     // RootStorage: native-stack-slot eligibility (native-stack-authoritative
-    // roadmap, step 1). `raw_only_needs_no_slots` above already covers "no
-    // roots, no calls -> NativeFrame with zero physical slots" directly.
+    // roadmap). `raw_only_needs_no_slots` above already covers "no roots,
+    // no calls -> NativeFrame with zero physical slots" directly (on both
+    // paths, since a no-call function is NativeFrame either way).
 
     /// A root candidate whose only safepoint is an internal (non-Botlish)
-    /// allocating op, with no Botlish call anywhere in the function: still
-    /// eligible for `NativeFrame`, with exactly the physical slots F3's own
-    /// coloring already decided (unaffected by the storage decision).
+    /// allocating op, with no Botlish call anywhere in the function: always
+    /// eligible for `NativeFrame` (both paths), with exactly the physical
+    /// slots F3's own coloring already decided (unaffected by the storage
+    /// decision), and no depth reservation (nothing here can recurse).
     #[test]
     fn root_with_no_botlish_calls_is_native_frame() {
         let f = program_of(
@@ -1273,17 +1339,20 @@ mod tests {
             "",
             "    %0 = str \"a\"\n    %1 = cell\n    %2 = op streq %0 %0\n    ret %2\n",
         );
-        let plan = plan(&f);
-        assert_eq!(plan.storage, RootStorage::NativeFrame);
-        assert_eq!(plan.num_slots, 1);
-        assert!(plan.slot_of[0].is_some());
+        for native_frame_supported in [true, false] {
+            let plan = plan(&f, native_frame_supported);
+            assert_eq!(plan.storage, RootStorage::NativeFrame);
+            assert_eq!(plan.num_slots, 1);
+            assert!(plan.slot_of[0].is_some());
+            assert!(!plan.depth_reservation);
+        }
     }
 
     /// A loop-carried root reached purely by a self `tail` back-edge (no
-    /// Botlish call at all): also `NativeFrame` -- a self tail call is a CFG
-    /// jump within this same frame, never a machine `call` (codegen::clif's
-    /// own doc), so it cannot grow the native call stack and needs no
-    /// recursion-depth bound.
+    /// Botlish call at all): also `NativeFrame` on both paths -- a self
+    /// tail call is a CFG jump within this same frame, never a machine
+    /// `call` (codegen::clif's own doc), so it cannot grow the native call
+    /// stack and needs no recursion-depth bound.
     #[test]
     fn tail_self_loop_alone_is_native_frame() {
         let f = parse_with_one_arg(
@@ -1297,18 +1366,20 @@ mod tests {
                 "end\n",
             ),
         );
-        assert_eq!(plan(&f).storage, RootStorage::NativeFrame);
+        assert_eq!(plan(&f, true).storage, RootStorage::NativeFrame);
+        assert_eq!(plan(&f, false).storage, RootStorage::NativeFrame);
     }
 
-    /// A direct Botlish call anywhere in the function disqualifies it from
-    /// `NativeFrame`, even when the call itself has no live roots (fib<int>'s
-    /// own shape, `fib_shape_needs_two_slots`, is the flagship instance: two
-    /// recursive calls with genuine cross-call roots). This is the "old path
-    /// still required" case: without a stack-map/frame-walk mechanism, the
-    /// collector cannot discover a `NativeFrame` function's roots once
-    /// another call nests on top of it (RootStorage's own doc).
+    /// A direct Botlish call anywhere in the function always sets
+    /// `depth_reservation` (fib<int>'s own shape, `fib_shape_needs_two_
+    /// slots`, is the flagship instance: two recursive calls with genuine
+    /// cross-call roots) -- but, on the native-stack-map path, no longer
+    /// forces `RuntimeStack` *storage*: the frame-walker can discover a
+    /// `NativeFrame` function's roots regardless of how many further calls
+    /// nest on top of it (this milestone's own goal). Only the fallback
+    /// path (no frame-walker) keeps the old, narrower rule.
     #[test]
-    fn any_botlish_call_forces_runtime_stack() {
+    fn any_botlish_call_sets_depth_reservation_but_only_fallback_forces_runtime_stack() {
         let program = parse_program(concat!(
             "nir 1\n\n",
             "func 0 \"<program>\" params=0 env=0 regs=1 pnames=\"\" captures=0 rawregs=\"\"\n",
@@ -1320,16 +1391,25 @@ mod tests {
             "    ret %0\n",
             "end\n",
         ));
-        let plan = plan(&program.functions[0]);
-        assert_eq!(plan.storage, RootStorage::RuntimeStack);
-        assert_eq!(plan.num_slots, 1, "RuntimeStack's own recursion-depth floor, unaffected by this milestone");
+        let native = plan(&program.functions[0], true);
+        assert_eq!(native.storage, RootStorage::NativeFrame, "the stack-map path discovers roots across calls too");
+        assert!(native.depth_reservation, "still needs the recursion-depth bound: it can recurse through this call");
+        assert_eq!(native.num_slots, 0, "no RuntimeStack floor: NativeFrame storage needs none");
+
+        let fallback = plan(&program.functions[0], false);
+        assert_eq!(fallback.storage, RootStorage::RuntimeStack, "no frame-walker: the old, narrower rule applies");
+        assert!(fallback.depth_reservation);
+        assert_eq!(fallback.num_slots, 1, "RuntimeStack's own recursion-depth floor, unchanged on the fallback path");
     }
 
     /// fib<int>'s own shape (`fib_shape_needs_two_slots`): two recursive
-    /// calls with cross-call roots. Confirms it stays on `RuntimeStack`
-    /// unchanged (see this module's and codegen::clif's doc for why).
+    /// calls with cross-call roots. On the native-stack-map path it now
+    /// gets `NativeFrame` storage (its two cross-call roots become
+    /// discoverable through stack maps) while still needing the depth
+    /// reservation (it can genuinely recurse); the fallback path keeps the
+    /// original `RuntimeStack` storage, unchanged.
     #[test]
-    fn fib_shape_stays_on_runtime_stack() {
+    fn fib_shape_moves_to_native_frame_on_stack_map_path_stays_on_fallback() {
         let f = parse_with_one_arg(
             "    %0 = int 5\n",
             concat!(
@@ -1361,6 +1441,29 @@ mod tests {
                 "end\n",
             ),
         );
-        assert_eq!(plan(&f).storage, RootStorage::RuntimeStack);
+        let native = plan(&f, true);
+        assert_eq!(native.storage, RootStorage::NativeFrame);
+        assert!(native.depth_reservation);
+        assert_eq!(native.num_slots, 2, "same F3 coloring as fib_shape_needs_two_slots, unaffected by storage");
+        // See fib_shape_needs_two_slots's own breakdown: %9/%10 share one
+        // physical slot (call it A), %14/%15 the other (B). Body indices
+        // (0-based, labels count too): %10 = call 1 %9 is instruction 13
+        // (live-in: just %9's slot, A); %15 = call 1 %14 is instruction 18
+        // (live-in: %10, carried across for the final `+`, on slot A, and
+        // %14, this call's own argument, on slot B); the final %16 = op
+        // iadd %10 %15 is instruction 19 (live-in: %10 on A, %15 on B).
+        let call1_slots = native.safepoint_slots.get(&13).expect("the first recursive call is a safepoint");
+        assert_eq!(call1_slots.len(), 1, "only %9 is live-in at the first call");
+        let slot_a = call1_slots[0];
+        let call2_slots = native.safepoint_slots.get(&18).expect("the second recursive call is a safepoint");
+        assert_eq!(call2_slots.len(), 2, "%10 (carried) and %14 (this call's own arg) are both live-in");
+        assert!(call2_slots.contains(&slot_a), "%10 still shares %9's slot A");
+        let slot_b = *call2_slots.iter().find(|&&s| s != slot_a).unwrap();
+        let add_slots = native.safepoint_slots.get(&19).expect("the final `+` is a safepoint");
+        assert_eq!(add_slots, &vec![slot_a.min(slot_b), slot_a.max(slot_b)], "both call results are live at the final +");
+
+        let fallback = plan(&f, false);
+        assert_eq!(fallback.storage, RootStorage::RuntimeStack);
+        assert!(fallback.safepoint_slots.is_empty(), "safepoint_slots is only populated for NativeFrame storage");
     }
 }

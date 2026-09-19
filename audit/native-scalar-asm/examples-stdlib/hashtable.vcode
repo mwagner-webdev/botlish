@@ -1,7 +1,7 @@
 ; source:  examples/stdlib/hashtable.bot
 ; backend: Cranelift (specialize=1), native::vcode
 ; format:  Cranelift Debug for VCode, pre-regalloc machine-level lowering
-; total machine code bytes: 16680  (per function: 172 28 28 28 28 524 689 208 61 61 61 61 61 268 284 332 1020 1536 565 373 556 582 1353 928 953 825 1472 1108 1461 1054)
+; total machine code bytes: 17415  (per function: 172 28 28 28 28 540 712 220 61 61 61 61 61 280 297 347 1036 1592 589 389 572 612 1585 1030 977 841 1496 1132 1477 1102)
 ;
 switch to block2
 inserted inst0: v1 = load.i64 notrap aligned v0
