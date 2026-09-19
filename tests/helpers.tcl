@@ -161,9 +161,15 @@ if {"test-log" ni [core::native::names]} {
     core::registerNative test-tick -arity 0 -impl testTickImpl
 
     # A second validator type on str, to combine evidence with Emailish.
+    # Its predicate also carries a -native-body (length(v) > 0, exactly the
+    # Tcl validator above): an independent, generic proof that a
+    # validator-backed named-type predicate can run on the native (Cranelift)
+    # backend today, through the same mechanism NAME-agnostic native/lower.tcl
+    # already gives any native with a -native-body -- see NATIVE-EMAILISH.md.
     core::type::register NonEmpty -base str \
         -validator {apply {{v} {expr {[string length [core::value::strOf $v]] > 0}}}}
-    core::type::definePredicate NonEmpty
+    core::type::definePredicate NonEmpty "" \
+        {block {v} {call {ref >} {call {ref length} {ref v}} {const 0}}}
 
     # A native that breaks its declared contract: it claims to return a
     # UriQueryValue but returns a plain string.

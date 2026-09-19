@@ -101,7 +101,26 @@ proc core::type::metadata {name} {
 # NAME. It is declared a type test of NAME (see native.tcl -tests-type), so
 # it refines its argument to NAME in the true branch and compilers may
 # decide it from static types.
-proc core::type::definePredicate {name {predicateName ""}} {
+#
+# NATIVEBODY, if given, is a (block {v} BODY...) core IR node (see
+# core/native.tcl's -native-body) computing the same 0/1 membership as
+# NAME's -validator, in ordinary Botlish over other natives -- forwarded
+# verbatim to -native-body. It is meaningful only for a *validator-backed*
+# NAME: PredicateImpl's contract is core::type::validate, which for a
+# validator type is "evidence, or run the validator" (never revalidate an
+# opaque type -- see core::type::validate above), so NATIVEBODY must
+# likewise decide membership without evidence, exactly as the validator
+# does. Passing one for an opaque NAME would be wrong (it has no validator
+# to reproduce: only evidence proves membership) and is not done by any
+# caller today. Omitted (the default): the predicate has no -native-body,
+# exactly as before -- the native (Cranelift) backend has no executable
+# form of it and rejects a dynamic call, whether NAME is opaque or
+# validator-backed. This is what lets validator-backed named-type
+# predicates run natively in general, through the same call-site body
+# substitution native/native.tcl's ExpandNativeBodies already gives any
+# native (see NATIVE-EMAILISH.md): native/lower.tcl needs no named-type
+# awareness at all.
+proc core::type::definePredicate {name {predicateName ""} {nativeBody ""}} {
     if {$predicateName eq ""} {
         set predicateName $name?
     }
@@ -110,7 +129,8 @@ proc core::type::definePredicate {name {predicateName ""}} {
         -impl [list core::type::PredicateImpl $name] \
         -param-types [list $base] \
         -tests-type [list refined $base [list $name]] \
-        -runtime evidence]
+        -runtime evidence \
+        -native-body $nativeBody]
 }
 
 # The runtime has already checked the base kind (a -tests-type contract).

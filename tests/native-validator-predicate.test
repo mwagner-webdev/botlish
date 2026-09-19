@@ -1,0 +1,179 @@
+# native-validator-predicate.test -- core::type::definePredicate's optional
+# -native-body (core/type.tcl, forwarded to core/native.tcl's existing
+# -native-body field): the general mechanism that lets a *validator-backed*
+# named-type predicate run on the native (Cranelift) backend, reusing
+# native/native.tcl's ExpandNativeBodies exactly as uriEscape already does
+# (tests/native-uri-escape.test) -- no native/lower.tcl change at all. See
+# NATIVE-EMAILISH.md.
+#
+# tests/helpers.tcl gives the synthetic NonEmpty type (already used by
+# refined.test to test evidence-combination) a -native-body reproducing its
+# Tcl validator (length(v) > 0) in ordinary Botlish, independently of
+# Emailish: this file's job is to prove the *mechanism* is generic, not
+# specific to any one type. Emailish itself is deliberately left without a
+# -native-body (its validator needs Unicode-aware regex matching, not yet
+# expressible in ordinary core IR -- NATIVE-EMAILISH.md) and UriQueryValue
+# (opaque) never gets one, by construction: this file also pins both of
+# those still being rejected, so the validator/opaque distinction stays
+# provably intact.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+set parityBackends {interp compile cranelift-generic cranelift}
+
+proc nonEmptyProgram {s} {
+    return [list [list call {ref NonEmpty?} [list const str $s]]]
+}
+
+proc errorCodeOfUnder {backend exprs} {
+    set saved [core::useBackend]
+    core::useBackend $backend
+    try {
+        if {[catch {core::evalProgram $exprs} message options]} {
+            return [dict get $options -errorcode]
+        }
+        return "no error; value [core::formatValue $message]"
+    } finally {
+        core::useBackend $saved
+    }
+}
+
+# ---------------------------------------------------------------------------
+# A validator-backed predicate with a -native-body now runs, and agrees,
+# dynamically, on every backend -- including cranelift, which had no way to
+# execute it at all before this milestone (NATIVE UNSUPPORTED).
+
+foreach {name s expect} {
+    nonempty     hi {true}
+    empty        {} {false}
+} {
+    test native-validator-predicate-parity-$name "NonEmpty?($s) agrees across interp/compile/cranelift-generic/cranelift" -body {
+        set exprs [nonEmptyProgram $s]
+        set shown [lmap b $::parityBackends {lindex [outcomeUnder $b $exprs] 1}]
+        if {[llength [lsort -unique $shown]] != 1} {
+            error "mismatch across $::parityBackends: $shown"
+        }
+        lindex $shown 0
+    } -result $expect
+}
+
+# ---------------------------------------------------------------------------
+# A call the runtime never needed a validator for -- either because the
+# argument's static type already decides it, or because an enclosing branch
+# already refined it -- still needs no native implementation at all: known
+# results fold before any backend-implementation requirement is even
+# consulted (native/lower.tcl's NativeCall, `known` short-circuit), same as
+# before this milestone. This exercises the case through NonEmpty? itself,
+# once as the argument's own declared static type, once as a branch fact.
+
+test native-validator-predicate-known-result-static-type {a param-kind error is not folded away (still requires the runtime check); the native-body's own inlined guard (length's, not NonEmpty?'s) reports it} -body {
+    outcomeUnder cranelift {{call {ref NonEmpty?} {const 5}}}
+} -result {error {CORE SEMANTIC TYPE} {length: expected str, got 5} {}}
+
+test native-validator-predicate-known-result-branch-fact {a redundant NonEmpty? check, proven by an enclosing refinement, still evaluates correctly natively} -body {
+    set p {
+        {bind f {block {s}
+            {if {call {ref NonEmpty?} {ref s}}
+                {block {} {if {call {ref NonEmpty?} {ref s}} {block {} {const yes}} {block {} {const no}}}}
+                {block {} {const no}}}}}
+        {call {ref f} {const str hi}}
+    }
+    lmap b $::parityBackends {lindex [outcomeUnder $b $p] 1}
+} -result {{"yes"} {"yes"} {"yes"} {"yes"}}
+
+# NIR shape: a native-body call is substituted before HIR is built (see
+# native/native.tcl's ExpandNativeBodies header), so unlike a plain native
+# call, its refinement/known-result identity is not visible to HIR any
+# more -- the outer (genuinely dynamic) and inner (HIR-provably-redundant)
+# NonEmpty? checks both compile to a real call of the validator body (each
+# lowered twice more, generic instance plus the one specialized instance
+# `f` uses here -- see hir/specialize.tcl -- so 2 call sites x 2 instances
+# = 4 `op strlen`, not 2). This is a real, minor optimization gap the
+# -native-body reuse introduces (a provably-redundant validator call is not
+# eliminated, unlike a provably-redundant ordinary native call): still
+# correct, never wrong, and out of this milestone's scope to close (no
+# general inliner; see NATIVE-EMAILISH.md and native/native.tcl's own
+# ExpandNativeBodies header on why this is purely syntactic, pre-HIR
+# substitution). This test pins the count today so a future fix is a
+# deliberate, visible change here rather than a silent one.
+test native-validator-predicate-known-result-nir-shape {both the dynamic and the HIR-redundant NonEmpty? check compile to a real call (documented optimization gap, not a correctness bug)} -body {
+    set p {
+        {bind f {block {s}
+            {if {call {ref NonEmpty?} {ref s}}
+                {block {} {if {call {ref NonEmpty?} {ref s}} {block {} {const yes}} {block {} {const no}}}}
+                {block {} {const no}}}}}
+        {call {ref f} {const str hi}}
+    }
+    set hir [hir::build [native::ExpandNativeBodies $p] -strict 0]
+    regexp -all {op strlen} [native::nir $hir]
+} -result 4
+
+# ---------------------------------------------------------------------------
+# Opaque trust boundary: UriQueryValue (no validator, evidence-only) never
+# gets a -native-body (core::type::definePredicate is called for it with no
+# third argument, same as before this milestone) and stays genuinely
+# unsupported dynamically on the native backend -- distinct from a
+# validator-backed predicate, which this milestone makes runnable. A
+# validator-backed predicate must never be revalidatable as if it were
+# opaque-evidence-only, nor may an opaque predicate silently start being
+# "just run a validator": these two assertions, together with the parity
+# tests above, are the regression coverage for that distinction.
+
+test native-validator-predicate-opaque-still-unsupported {UriQueryValue? (opaque, no validator) is still rejected dynamically on cranelift} -body {
+    set p {
+        {bind f {block {q} {call {ref UriQueryValue?} {ref q}}}}
+        {call {ref f} {const str a%20b}}
+    }
+    errorCodeOfUnder cranelift $p
+} -result {NATIVE UNSUPPORTED {native UriQueryValue?}}
+
+test native-validator-predicate-opaque-has-no-native-body {UriQueryValue?'s registration carries no -native-body} -body {
+    dict get [core::native::metadata UriQueryValue?] nativeBody
+} -result {}
+
+test native-validator-predicate-validator-backed-has-native-body {NonEmpty?'s registration carries the -native-body this milestone added} -body {
+    expr {[dict get [core::native::metadata NonEmpty?] nativeBody] ne ""}
+} -result 1
+
+# ---------------------------------------------------------------------------
+# Emailish regression: still exactly the pre-milestone failure. Emailish is
+# validator-backed (not opaque), but its validator (core::regex::matches,
+# lib/web.tcl's emailRegex) needs Unicode-aware regex matching that ordinary
+# core IR cannot express yet (NATIVE-EMAILISH.md); it deliberately gets no
+# -native-body, so it is rejected by the same generic "no native
+# implementation" path as any other native lacking one -- never by a
+# named-type-specific rule in native/lower.tcl, which this milestone adds
+# none of.
+
+test native-validator-predicate-emailish-still-unsupported {Emailish? (validator-backed, but no -native-body) is still rejected the same way, dynamically, on cranelift} -body {
+    set p {
+        {bind f {block {s} {call {ref Emailish?} {ref s}}}}
+        {call {ref f} {const str someone@example.com}}
+    }
+    errorCodeOfUnder cranelift $p
+} -result {NATIVE UNSUPPORTED {native Emailish?}}
+
+test native-validator-predicate-emailish-has-no-native-body {Emailish?'s registration carries no -native-body (regex/Unicode classification still missing)} -body {
+    dict get [core::native::metadata Emailish?] nativeBody
+} -result {}
+
+test native-validator-predicate-refined-checks-blocker {refined-checks.ir's native blocker is still exactly Emailish?, unchanged by this milestone} -body {
+    set exprs [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]
+    errorCodeOfUnder cranelift $exprs
+} -result {NATIVE UNSUPPORTED {native Emailish?}}
+
+# ---------------------------------------------------------------------------
+# GC stress: NonEmpty?'s native-body (length + a raw-eligible comparison)
+# allocates nothing, but must still survive a collection forced before every
+# allocation elsewhere in the same run.
+
+test native-validator-predicate-gc-stress {NonEmpty? survives a collection forced before every allocation} -body {
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        lindex [outcomeUnder cranelift [nonEmptyProgram {hello there}]] 0
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+} -result {value}
+
+::tcltest::cleanupTests
