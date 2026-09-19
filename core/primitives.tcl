@@ -89,7 +89,7 @@ foreach {name impl result} {
     >= greaterEqual bool
 } {
     core::native::register $name -arity 2 -impl core::primitives::$impl \
-        -param-types {int int} -result-type $result -runtime bigint
+        -param-types {int int} -result-type $result -runtime bigint -context-free 1
 }
 unset name impl result
 
@@ -98,11 +98,11 @@ unset name impl result
 # a hash into a bucket index (hash mod capacity) -- nothing in the runtime or
 # compiler knows this native's caller might be a hash table.
 core::native::register mod  -arity 2 -impl core::primitives::modulo \
-    -param-types {int int} -result-type int -result-range nonneg -runtime bigint
+    -param-types {int int} -result-type int -result-range nonneg -runtime bigint -context-free 1
 
 core::native::register ==   -arity 2 -impl core::primitives::valueEqual \
-    -param-types {any any} -result-type bool -runtime structural-equality
+    -param-types {any any} -result-type bool -runtime structural-equality -context-free 1
 core::native::register eq   -arity 2 -impl core::primitives::stringEqual \
-    -param-types {str str} -result-type bool
+    -param-types {str str} -result-type bool -context-free 1
 core::native::register list -arity * -impl core::primitives::makeList \
-    -result-type list -runtime list-alloc -result-shape elements
+    -result-type list -runtime list-alloc -result-shape elements -context-free 1

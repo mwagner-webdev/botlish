@@ -40,8 +40,8 @@ proc core::lists::append {l v} {
 }
 
 core::native::register list_length -arity 1 -impl core::lists::length \
-    -param-types {list} -result-type int -result-range collection-length
+    -param-types {list} -result-type int -result-range collection-length -context-free 1
 core::native::register list_get    -arity 2 -impl core::lists::get \
-    -param-types {list int} -result-type any -runtime range-check     -result-shape {element 0 1}
+    -param-types {list int} -result-type any -runtime range-check     -result-shape {element 0 1} -context-free 1
 core::native::register list_append -arity 2 -impl core::lists::append \
-    -param-types {list any} -result-type list -runtime list-alloc     -result-shape {append 0 1}
+    -param-types {list any} -result-type list -runtime list-alloc     -result-shape {append 0 1} -context-free 1

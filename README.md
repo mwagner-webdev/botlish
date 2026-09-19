@@ -526,9 +526,10 @@ Surface syntax beyond the minimal language of §17, macros, objects, assignment,
 variables, exceptions, `?` propagation, pattern matching, a type checker
 beyond refinement tracking, async, coroutines, threads, or FFI. A small
 one-file/one-namespace module system *is* implemented (§17's `namespace`/
-`mod::name` syntax, `surface/modules.tcl`, NATIVE-MODULES.md) -- but only
-cross-file callable definitions: no module-level values, no aliasing/
-imports/re-exports, no search path, no package manager.
+`mod::name` syntax, `surface/modules.tcl`, NATIVE-MODULES.md, and
+MODULE-BINDINGS.md). Modules may retain ordinary immutable bindings whose
+initializers are context-free; there are no mutable module bindings,
+aliasing/imports/re-exports, search paths, or package management.
 
 ## 12. The compiler backend
 
@@ -1202,21 +1203,23 @@ The full grammar is at the top of `surface/parser.tcl`.
 
 One source file is one namespace is one compilation/dependency unit. A
 file that starts with `namespace NAME` (its only legal position) is a
-*module*: a namespace of ordinary function definitions, nothing else (no
-module-level values, no side effects). `NAME` maps to exactly one file,
-`lib/NAME.bot` (`core::libraryDir`, the same directory as the existing
-`lib/NAME.tcl` native-library convention) -- no search path, so there is
-never more than one candidate file for a name. Another file uses a
-module's definition as `NAME::symbol(...)`: an ordinary, non-aliasable
-qualified reference (no `import`; the set of namespaces a file needs is
-discovered from its own `NAME::symbol` references, transitively, and
-loaded at most once each). `::` is definition/provenance qualification,
-never confused with `.`'s (future) value-access syntax. A module function
-is resolved to a stable binding identity before lowering, compiled once,
-and called directly from every reference to it, in any file -- see
-NATIVE-MODULES.md for the design and `surface/modules.tcl` for the
-implementation. Deliberately not built: namespace aliasing, module-level
-values, re-exports, a search path, or anything package-manager-shaped.
+*module*: a namespace of ordinary function definitions and immutable value
+bindings. A value initializer executes once before the entry program, after
+its dependency modules and after earlier values in the same source file. It
+must be context-free and must retain a transitively immutable result; there
+are no mutable module bindings or top-level expression statements. `NAME`
+maps to exactly one file, `lib/NAME.bot` (`core::libraryDir`, the same
+directory as the existing `lib/NAME.tcl` native-library convention) -- no
+search path, so there is never more than one candidate file for a name.
+Another file uses a module definition as `NAME::symbol`: an ordinary,
+non-aliasable qualified reference (no `import`; dependencies are discovered
+from qualified references transitively and loaded at most once). `::` is
+definition/provenance qualification, never confused with `.`'s (future)
+value-access syntax. Resolution fixes a stable binding identity before
+lowering; a module value does not use a runtime namespace lookup. See
+NATIVE-MODULES.md, MODULE-BINDINGS.md, and `surface/modules.tcl` for the
+implementation. Deliberately not built: namespace aliasing, re-exports, a
+search path, or anything package-manager-shaped.
 
 ### Lowering
 

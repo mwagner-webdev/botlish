@@ -145,7 +145,7 @@ proc core::mutarray::freeze {v count} {
 }
 
 core::native::register mutable_array_allocate -arity 1 -impl core::mutarray::allocate \
-    -param-types {int} -result-type mutarray -runtime mutarray-alloc
+    -param-types {int} -result-type mutarray -runtime mutarray-alloc -context-free 1
 core::native::register mutable_array_capacity -arity 1 -impl core::mutarray::capacity \
     -param-types {mutarray} -result-type int -result-range collection-length
 core::native::register mutable_array_get -arity 2 -impl core::mutarray::get \

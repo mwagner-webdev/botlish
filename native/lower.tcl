@@ -1213,6 +1213,13 @@ proc native::lower::Function {id} {
             set extraParams 1
         }
     }
+    # Module scopes share this one program function. Deferred references from
+    # module functions need their cells before initializers and closures run.
+    if {$region eq "program" && [dict exists $hir modules]} {
+        dict for {moduleName moduleScope} [dict get $hir modules] {
+            EnterScope fn $moduleScope
+        }
+    }
     EnterScope fn $scope
     set result [Sequence fn $body]
     if {$result ne "never"} {
@@ -2459,6 +2466,40 @@ proc native::lower::VirtualBlockCall {fnVar e node target local} {
     return [list [Assign fn [string trimright "call $id [join [concat $argRegs $captures] { }]"] $e] tagged]
 }
 
+# The native-to-module bridge changes a root native call's resolved target to
+# a module Block. When that Block has captures, the root native value is not
+# its closure; fetch the already-resolved module binding instead. This uses
+# only HIR BindingIds, never a run-time namespace/name lookup.
+proc native::lower::ModuleBridgeBinding {calleeExpr targetKind} {
+    variable hir
+    if {$targetKind ne "block" || [hir::kind $hir $calleeExpr] ne "ref"} {
+        return ""
+    }
+    set rootBinding [hir::get $hir $calleeExpr binding]
+    if {$rootBinding eq "" || [dict get [hir::binding $hir $rootBinding] kind] ne "root"} {
+        return ""
+    }
+    set rootValue [dict get [hir::binding $hir $rootBinding] value]
+    if {[core::value::kind $rootValue] ne "native"} {
+        return ""
+    }
+    set nativeName [core::value::nativeName $rootValue]
+    set moduleFn [dict get [core::native::metadata $nativeName] moduleFn]
+    if {$moduleFn eq ""} {
+        return ""
+    }
+    lassign $moduleFn namespace symbol
+    if {![dict exists $hir modules $namespace]} {
+        return ""
+    }
+    set scope [dict get $hir modules $namespace]
+    set qualified [format {%s::%s} $namespace $symbol]
+    if {![dict exists $hir scopes $scope names $qualified]} {
+        return ""
+    }
+    return [dict get $hir scopes $scope names $qualified]
+}
+
 proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
     upvar 1 $fnVar fn
     variable hir
@@ -2602,12 +2643,29 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
     }
 
     # The callee is evaluated first. A reference to a root native or to an
-    # environment-free function needs no code (it cannot fail).
+    # environment-free function needs no code. A module-native bridge with a
+    # captured module value instead reads the module function binding itself.
     set callee ""
-    set skipCallee [expr {[hir::kind $hir $calleeExpr] eq "ref" && ![dict exists $unproven $calleeExpr]
-        && (($targetKind eq "native" && [dict get [hir::binding $hir [hir::get $hir $calleeExpr binding]] kind] eq "root")
-            || ($targetKind eq "block" && $target in $envless && [hir::get $hir $calleeExpr init] ne "no"))}]
-    if {!$skipCallee} {
+    set bridgeBinding [ModuleBridgeBinding $calleeExpr $targetKind]
+    set bridgeEnvless [expr {$bridgeBinding ne "" && $target in $envless}]
+    set skipCallee [expr {[hir::kind $hir $calleeExpr] eq "ref"
+        && ![dict exists $unproven $calleeExpr]
+        && ($bridgeEnvless || ($bridgeBinding eq "" &&
+            (($targetKind eq "native" && [dict get [hir::binding $hir [hir::get $hir $calleeExpr binding]] kind] eq "root")
+                || ($targetKind eq "block" && $target in $envless && [hir::get $hir $calleeExpr init] ne "no"))))}]
+    if {$bridgeBinding ne "" && !$skipCallee} {
+        lassign [Access fn $bridgeBinding] how where
+        switch -- $how {
+            reg { set callee $where }
+            cell { set callee [Assign fn "cellget $where" $e] }
+            rawreg { set callee [TaggedOf fn $where] }
+            fnvalue { set callee [Assign fn "fnvalue $where" $e] }
+            self { set callee [Assign fn self $e] }
+            default {
+                throw {NATIVE BUG} "native lowering: module bridge binding $bridgeBinding has inaccessible storage $how"
+            }
+        }
+    } elseif {!$skipCallee} {
         set callee [Expr fn $calleeExpr]
         if {$callee eq "never"} {
             return {never tagged}

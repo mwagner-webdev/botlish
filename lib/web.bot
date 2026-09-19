@@ -28,8 +28,9 @@
 # UriQueryValue -- this module never has to forge that itself.
 namespace web
 
+hex_digits = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F"]
+
 fn uri_escape_text(s):
-    hex_digits = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F"]
 
     fn high_nibble(b):
         if b <= 15:

@@ -173,16 +173,140 @@ test surface-modules-same-module-recursion-is-not-a-cycle {ordinary same-module 
 } -result {value {[true, false]} {}}
 
 # ---------------------------------------------------------------------------
-# Module top level: functions only, no module-level values or statements.
+# Module top level: immutable bindings are ordinary bindings, initialized in
+# dependency and textual order before the entry program. Bare statements
+# remain forbidden.
 
-test surface-modules-toplevel-value-rejected {a module-level value binding is rejected} -body {
+test surface-modules-immutable-values-parity {scalar, nested List, helper-created List, and cross-module values agree on every backend} -body {
     withScratchLibrary {
-        writeModule $dir a "namespace a\n\nhex_digits = \[1, 2, 3\]\n"
-        set main [writeMain $dir "a::hex_digits\n"]
-        catch {surface::readProgramFile $main} message options
-        dict get $options -errorcode
+        writeModule $dir constants {namespace constants
+base = 41
+answer = base + 1
+message = "ok"
+ints = [1, 2]
+words = [["a"], ["b"]]
+fn make_table():
+    list_append([3], 4)
+table = make_table()
+fn word(n):
+    list_get(words, n)
+}
+        set main [writeMain $dir {constants = 999
+[constants::answer, constants::message, constants::ints, constants::words, constants::table, constants::word(1)]
+}]
+        set hir [surface::readProgramFile $main]
+        set exprs [hir::lower $hir]
+        set scope [dict get $hir modules constants]
+        set words [dict get $hir scopes $scope names constants::words]
+        set refs {}
+        foreach e [hir::walk $hir] {
+            if {[hir::kind $hir $e] eq "ref" && [hir::get $hir $e binding] eq $words} {
+                lappend refs $e
+            }
+        }
+        set outcomes [lmap backend $::parityBackends {outcomeUnder $backend $exprs}]
+        list [lindex $outcomes 0] [expr {[llength [lsort -unique $outcomes]] == 1}] \
+            [llength $refs] [llength [lsort -unique [lmap e $refs {hir::get $hir $e binding}]]]
     }
-} -result {SURFACE MODULE INVALID-TOPLEVEL}
+} -result {{value {[42, "ok", [1, 2], [["a"], ["b"]], [3, 4], ["b"]]} {}} 1 2 1}
+
+test surface-modules-immutable-value-once-native {a retained List is built once at startup and passed directly to two calls} -body {
+    withScratchLibrary {
+        set module [writeModule $dir constants {namespace constants
+digits = ["0", "1"]
+fn digit(n):
+    list_get(digits, n)
+}]
+        set main [writeMain $dir {[constants::digit(0), constants::digit(1)]
+}]
+        set hir [surface::readProgramFile $main]
+        set nir [dict get [native::lower::program $hir -repr-opt 0] text]
+        set report [native::allocationReport $hir sites]
+        set moduleLists 0
+        foreach site [dict get $report sites] {
+            if {[dict get $site operation] eq "listnew"
+                    && [dict get [dict get $site location] file] eq $module} {
+                incr moduleLists [dict get $site allocations]
+            }
+        }
+        list [regexp -all {op listnew} $nir] \
+            [regexp {func [0-9]+ "constants::digit" params=2 env=0 .*pnames="n constants::digits"} $nir] \
+            [regexp {closure|callenv} $nir] [regexp -all {call [0-9]+ } $nir] \
+            $moduleLists [dict get $report byKind List allocations]
+    }
+} -result {2 1 0 2 1 2}
+
+test surface-modules-value-dependencies-initialize-first {a dependency module value initializes before a dependent module initializer reads it} -body {
+    withScratchLibrary {
+        writeModule $dir constants {namespace constants
+answer = 41
+}
+        writeModule $dir use {namespace use
+answer = constants::answer + 1
+}
+        set main [writeMain $dir {use::answer
+}]
+        set exprs [hir::lower [surface::readProgramFile $main]]
+        set outcomes [lmap backend $::parityBackends {outcomeUnder $backend $exprs}]
+        list [llength [lsort -unique $outcomes]] [lindex $outcomes 0]
+    }
+} -result {1 {value 42 {}}}
+test surface-modules-context-dependent-initializer-rejected-transitively {an unclassified native reached through a helper is context-dependent} -body {
+    withScratchLibrary {
+        writeModule $dir a {namespace a
+fn denied():
+    mutable_array_capacity(mutable_array_allocate(1))
+value = denied()
+}
+        set main [writeMain $dir {a::value
+}]
+        catch {surface::readProgramFile $main} message options
+        list [dict get $options -errorcode] [string match {*context-free*mutable_array_capacity*} $message]
+    }
+} -result {{CORE SEMANTIC MODULE-CONTEXT} 1}
+
+test surface-modules-mutable-retained-values-rejected {direct and nested MutableArray results are separately diagnosed as retained mutability} -body {
+    withScratchLibrary {
+        writeModule $dir a {namespace a
+value = mutable_array_allocate(1)
+}
+        set main [writeMain $dir {a::value
+}]
+        catch {surface::readProgramFile $main} direct directOptions
+        writeModule $dir a {namespace a
+value = [mutable_array_allocate(1)]
+}
+        catch {surface::readProgramFile $main} nested nestedOptions
+        list [dict get $directOptions -errorcode] [string match {*MutableArray*} $direct] \
+            [dict get $nestedOptions -errorcode] [string match {*List element*MutableArray*} $nested]
+    }
+} -result {{CORE SEMANTIC MODULE-IMMUTABLE} 1 {CORE SEMANTIC MODULE-IMMUTABLE} 1}
+
+test surface-modules-initializer-error-uses-normal-completion {a context-free initializer error terminates startup through the ordinary error path} -body {
+    withScratchLibrary {
+        writeModule $dir a {namespace a
+value = mod(1, 0)
+}
+        set main [writeMain $dir {a::value
+}]
+        set exprs [hir::lower [surface::readProgramFile $main]]
+        set outcomes [lmap backend $::parityBackends {outcomeUnder $backend $exprs}]
+        list [llength [lsort -unique $outcomes]] [lindex $outcomes 0]
+    }
+} -result {1 {error {CORE SEMANTIC ARITHMETIC} {mod: division by zero} {}}}
+test surface-modules-value-forward-read-rejected {a module value can only read an earlier value in the same source file} -body {
+    withScratchLibrary {
+        writeModule $dir a {namespace a
+a = b
+b = 4
+value = a
+}
+        set main [writeMain $dir {a::value
+}]
+        catch {surface::readProgramFile $main} message options
+        list [dict get $options -errorcode] [string match {*used before its binding*} $message]
+    }
+} -result {{CORE SEMANTIC UNBOUND} 1}
 
 test surface-modules-toplevel-statement-rejected {a bare module-level expression statement is rejected} -body {
     withScratchLibrary {
@@ -249,6 +373,39 @@ proc outcomeUnderValue {backend exprs} {
     }
 }
 
+test surface-modules-uri-hex-digits-startup {web::hex_digits is one startup List; uri_escape_text has one startup closure and static callenv access} -body {
+    core::loadLibrary web
+    set hir [native::buildProgramHir {
+        {bind s {const str "a b"}}
+        {call {ref uriEscape} {ref s}}
+    }]
+    set lowered [native::lower::program $hir -repr-opt 0]
+    set nir [dict get $lowered text]
+    set report [native::allocationReport $hir sites]
+    set hexLists 0
+    set uriStartupBlocks 0
+    foreach site [dict get $report sites] {
+        set location [dict get $site location]
+        if {[dict get $site operation] eq "listnew"
+                && [string match {*hex_digits=/value} [dict get $location node]]} {
+            incr hexLists [dict get $site allocations]
+        }
+        if {[dict get $site operation] eq "closure"
+                && [dict get $location node] eq "uri_escape_text()/block"} {
+            incr uriStartupBlocks [dict get $site allocations]
+        }
+    }
+    set uriInfo {}
+    foreach info [dict get $lowered functions] {
+        if {[dict get $info name] eq "web::uri_escape_text"} {
+            set uriInfo $info
+        }
+    }
+    list [regexp -all {op listnew} $nir] $hexLists \
+        [regexp {func [0-9]+ "web::uri_escape_text" params=1 env=1 .*captures=1} $nir] \
+        [dict get $uriInfo envless] $uriStartupBlocks \
+        [regexp -all {closure 1 } $nir] [regexp -all {callenv 1 } $nir]
+} -result {1 1 1 0 1 1 1}
 test surface-modules-uri-escape-native-parity {uriEscape's escaped text agrees interp vs. cranelift; only cranelift drops evidence} -body {
     core::loadLibrary web
     set exprs {
