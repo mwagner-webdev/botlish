@@ -46,11 +46,8 @@ jobs:
 
       # The corpus and native tests run every program on the Cranelift
       # backend too, whichever backend the suite targets.
-      - name: Build the native backend
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-          cargo build --release --manifest-path native/Cargo.toml
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
 
       - name: Run test suite
         env:
@@ -79,11 +76,8 @@ jobs:
           curl -fsSLO "$base/t/tcl9.0/tcl9.0_9.0.1+dfsg-1_amd64.deb"
           sudo dpkg -i libtommath1_1.3.0-1_amd64.deb libtcl9.0_9.0.1+dfsg-1_amd64.deb tcl9.0_9.0.1+dfsg-1_amd64.deb
 
-      - name: Build the native backend
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-          cargo build --release --manifest-path native/Cargo.toml
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
 
       # Runs the whole suite on cranelift and classifies every test; fails
       # only if a test fails for a reason other than a reported unsupported

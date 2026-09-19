@@ -70,28 +70,10 @@ jobs:
           sudo dpkg -i libtommath1_1.3.0-1_amd64.deb libtcl9.0_9.0.1+dfsg-1_amd64.deb tcl9.0_9.0.1+dfsg-1_amd64.deb
           echo 'puts "Tcl [info patchlevel], tcltest [package require tcltest 2.5]"' | tclsh9.0
 
-      # native/Cargo.lock pins the dependency graph, so it is the cache
-      # key: a hit skips rebuilding cranelift/wasmtime-internal-* (the bulk
-      # of native/'s build time) entirely -- same pattern as bench.yml.
-      - name: Cache native backend build
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            native/target
-          key: native-cargo-${{ runner.os }}-${{ hashFiles('native/Cargo.lock') }}
-          restore-keys: native-cargo-${{ runner.os }}-
-
-      # generate-scalar-audit.tcl's native::object needs rustc 1.95+ for
-      # the pinned cranelift-*/wasmtime-internal-* crates (AGENTS.md):
-      # ubuntu-latest's preinstalled default can be older, so this always
-      # pins `stable` rather than trusting whatever is already selected.
-      - name: Build the native backend
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-          cargo build --release --manifest-path native/Cargo.toml
+      # generate-scalar-audit.tcl's native::object needs the Cranelift
+      # backend built.
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
 
       - name: Regenerate the scalar assembly audit corpus
         run: tclsh9.0 native/generate-scalar-audit.tcl
