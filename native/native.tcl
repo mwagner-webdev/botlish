@@ -443,15 +443,30 @@ proc native::report {hir} {
 # ---------------------------------------------------------------------------
 # Backend entry points (core::registerBackend)
 
+# The HIR the native backend actually lowers for a program's raw core IR
+# EXPRS: ExpandNativeBodies's substitution, then hir::build with the
+# overrides ExpandNativeBodies collected -- runProgram's own two steps,
+# factored out so every other caller that needs this same HIR (the
+# scalar-asm-audit generator, explain-native.tcl, bench.tcl's Cranelift
+# column) shares one implementation instead of separately reproducing it.
+# That reproduction is exactly how this diverged before: the scalar-asm-
+# audit generator's own hand-copied version fell out of sync with
+# -native-result-overrides and reported a false NATIVE UNSUPPORTED for
+# bench/refined-checks.ir until it was fixed to match runProgram's steps
+# again (see git history) -- bench.tcl's Cranelift column had the same
+# hand-copied omission and is fixed here by switching it to this instead.
+proc native::buildProgramHir {exprs args} {
+    variable nativeResultOverrides
+    set expanded [ExpandNativeBodies $exprs]
+    return [hir::build $expanded -strict 0 -native-result-overrides $nativeResultOverrides {*}$args]
+}
+
 proc native::runProgram {exprs env {specialize ""}} {
     variable cache
-    variable nativeResultOverrides
-    set exprs [ExpandNativeBodies $exprs]
-    set overrides $nativeResultOverrides
     set options [expr {$specialize eq "" ? {} : [list -specialize $specialize]}]
     set key [list $exprs $options [expr {[info exists ::env(BOTLISH_NATIVE_SPECIALIZE)] ? $::env(BOTLISH_NATIVE_SPECIALIZE) : ""}]]
     if {![dict exists $cache $key]} {
-        dict set cache $key [nir [hir::build $exprs -strict 0 -native-result-overrides $overrides] {*}$options]
+        dict set cache $key [nir [buildProgramHir $exprs] {*}$options]
     }
     return [core::completion::normal [Outcome [Driver run [dict get $cache $key]]]]
 }

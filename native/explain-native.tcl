@@ -45,8 +45,7 @@ file mkdir $outdir
 if {[file extension $path] eq ".bot"} {
     set hir [surface::readProgramFile $path]
 } else {
-    set program [core::loadProgramFile $path]
-    set hir [hir::build $program -strict 0]
+    set hir [native::buildProgramHir [core::loadProgramFile $path]]
 }
 
 proc W {outdir name content} {

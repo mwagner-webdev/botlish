@@ -99,7 +99,7 @@ proc bestNative {program runs} {
     if {[catch {native::binary}]} {
         return {"" "" not-built}
     }
-    if {[catch {hir::build $program -strict 0} hir]} {
+    if {[catch {native::buildProgramHir $program} hir]} {
         return {"" "" unsupported}
     }
     if {[catch {native::measure $hir $runs} result]} {
