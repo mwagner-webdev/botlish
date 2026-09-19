@@ -1,0 +1,31 @@
+name: Build native (Cranelift) backend
+description: >
+  Builds native/'s Rust driver (botlish-native), caching its dependency
+  build. Centralizes the one piece of Cranelift-support logic every
+  workflow that touches the native backend needs, so it is fixed and
+  upgraded in one place instead of three near-identical copies. Assumes
+  the caller already ran .devcontainer/setup.sh (the "Install project
+  prerequisites" step every such workflow runs first), which is what pins
+  rustc to a stable toolchain new enough for the pinned
+  cranelift-*/wasmtime-internal-* crates (see AGENTS.md) -- this action
+  does not repeat that pin itself.
+
+runs:
+  using: composite
+  steps:
+    # native/Cargo.lock pins the dependency graph, so it is the cache key: a
+    # hit skips rebuilding cranelift/wasmtime-internal-* (the bulk of
+    # native/'s build time) entirely.
+    - name: Cache native backend build
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          native/target
+        key: native-cargo-${{ runner.os }}-${{ hashFiles('native/Cargo.lock') }}
+        restore-keys: native-cargo-${{ runner.os }}-
+
+    - name: Build native backend
+      shell: bash
+      run: cargo build --release --manifest-path native/Cargo.toml

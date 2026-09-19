@@ -47,15 +47,12 @@ proc errorCodeOfUnder {backend exprs} {
     }
 }
 
-# The HIR native::runProgram actually lowers for EXPRS: ExpandNativeBodies's
-# rewrite, then hir::build with the overrides it collected -- exactly
-# native::runProgram's own two steps (native/native.tcl), reproduced here
-# because runProgram itself only exposes the final run outcome, not the
-# intermediate HIR this file's structural assertions need.
+# The HIR native::runProgram actually lowers for EXPRS: native::buildProgramHir
+# (native/native.tcl), exposed here because runProgram itself only returns
+# the final run outcome, not the intermediate HIR this file's structural
+# assertions need.
 proc nativeHirOf {exprs} {
-    set expanded [native::ExpandNativeBodies $exprs]
-    set overrides $native::nativeResultOverrides
-    return [hir::build $expanded -strict 0 -native-result-overrides $overrides]
+    return [native::buildProgramHir $exprs]
 }
 
 # ---------------------------------------------------------------------------

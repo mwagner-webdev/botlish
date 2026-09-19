@@ -28,29 +28,15 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # ubuntu-latest (noble) ships only Tcl 8.6; Botlish's Tcl reference
-      # implementation requires Tcl 9.x (see README's introduction and
-      # core/core.tcl's version check) for Unicode scalar-value String
-      # semantics, so Tcl 9 is installed from Ubuntu 25.04 (plucky)'s
-      # universe pool instead.
-      - name: Install Tcl 9
-        run: |
-          set -eu
-          cd /tmp
-          base=http://archive.ubuntu.com/ubuntu/pool/universe
-          curl -fsSLO "$base/libt/libtommath/libtommath1_1.3.0-1_amd64.deb"
-          curl -fsSLO "$base/t/tcl9.0/libtcl9.0_9.0.1+dfsg-1_amd64.deb"
-          curl -fsSLO "$base/t/tcl9.0/tcl9.0_9.0.1+dfsg-1_amd64.deb"
-          sudo dpkg -i libtommath1_1.3.0-1_amd64.deb libtcl9.0_9.0.1+dfsg-1_amd64.deb tcl9.0_9.0.1+dfsg-1_amd64.deb
-          echo 'puts "Tcl [info patchlevel], tcltest [package require tcltest 2.5]"' | tclsh9.0
+      # Keep the devcontainer and GitHub Actions prerequisite setup in one
+      # place so they stay in sync.
+      - name: Install project prerequisites
+        run: bash .devcontainer/setup.sh
 
       # The corpus and native tests run every program on the Cranelift
       # backend too, whichever backend the suite targets.
-      - name: Build the native backend
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-          cargo build --release --manifest-path native/Cargo.toml
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
 
       - name: Run test suite
         env:
@@ -69,21 +55,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install Tcl 9
-        run: |
-          set -eu
-          cd /tmp
-          base=http://archive.ubuntu.com/ubuntu/pool/universe
-          curl -fsSLO "$base/libt/libtommath/libtommath1_1.3.0-1_amd64.deb"
-          curl -fsSLO "$base/t/tcl9.0/libtcl9.0_9.0.1+dfsg-1_amd64.deb"
-          curl -fsSLO "$base/t/tcl9.0/tcl9.0_9.0.1+dfsg-1_amd64.deb"
-          sudo dpkg -i libtommath1_1.3.0-1_amd64.deb libtcl9.0_9.0.1+dfsg-1_amd64.deb tcl9.0_9.0.1+dfsg-1_amd64.deb
+      - name: Install project prerequisites
+        run: bash .devcontainer/setup.sh
 
-      - name: Build the native backend
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-          cargo build --release --manifest-path native/Cargo.toml
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
 
       # Runs the whole suite on cranelift and classifies every test; fails
       # only if a test fails for a reason other than a reported unsupported

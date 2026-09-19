@@ -22,19 +22,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # ubuntu-latest (noble) ships only Tcl 8.6; Botlish's Tcl reference
-      # implementation requires Tcl 9.x (see README's introduction and
-      # core/core.tcl's version check), so Tcl 9 is installed from Ubuntu
-      # 25.04 (plucky)'s universe pool instead.
-      - name: Install Tcl 9
-        run: |
-          set -eu
-          cd /tmp
-          base=http://archive.ubuntu.com/ubuntu/pool/universe
-          curl -fsSLO "$base/libt/libtommath/libtommath1_1.3.0-1_amd64.deb"
-          curl -fsSLO "$base/t/tcl9.0/libtcl9.0_9.0.1+dfsg-1_amd64.deb"
-          curl -fsSLO "$base/t/tcl9.0/tcl9.0_9.0.1+dfsg-1_amd64.deb"
-          sudo dpkg -i libtommath1_1.3.0-1_amd64.deb libtcl9.0_9.0.1+dfsg-1_amd64.deb tcl9.0_9.0.1+dfsg-1_amd64.deb
+      # Keep the devcontainer and GitHub Actions prerequisite setup in one
+      # place so they stay in sync.
+      - name: Install project prerequisites
+        run: bash .devcontainer/setup.sh
 
       # bench.tcl shells out to python3 to run the reference programs under
       # bench/equivalents/. python3 ships on ubuntu-latest already; this
@@ -42,34 +33,15 @@ jobs:
       - name: Ensure Python toolchain
         run: python3 --version
 
-      # native/Cargo.lock pins the dependency graph, so it is the cache key:
-      # a hit skips rebuilding cranelift/wasmtime-internal-* (the bulk of
-      # native/'s build time) entirely.
-      - name: Cache native backend build
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            native/target
-          key: native-cargo-${{ runner.os }}-${{ hashFiles('native/Cargo.lock') }}
-          restore-keys: native-cargo-${{ runner.os }}-
-
       # bench.tcl's native column, and bench/equivalents/rust/*.rs's own
-      # column, both need the Cranelift backend built (rustc 1.95+ for the
-      # pinned cranelift-*/wasmtime-internal-* crates -- see AGENTS.md;
-      # ubuntu-latest's preinstalled default can be older, so this always
-      # pins `stable` rather than trusting whatever is already selected).
-      # bench.tcl itself degrades a program's Cranelift column, not a
-      # failure, if this step is ever skipped (n/a: never built this run)
-      # or a program can't be lowered natively (unsupported: built, but
-      # this program uses a construct native lowering has no
-      # implementation for -- see bench.tcl's header and NATIVE-AUDIT.md).
-      - name: Build native backend
-        run: |
-          rustup toolchain install stable --profile minimal
-          rustup default stable
-          cargo build --release --manifest-path native/Cargo.toml
+      # column, both need the Cranelift backend built. bench.tcl itself
+      # degrades a program's Cranelift column, not a failure, if this step
+      # is ever skipped (n/a: never built this run) or a program can't be
+      # lowered natively (unsupported: built, but this program uses a
+      # construct native lowering has no implementation for -- see
+      # bench.tcl's header and NATIVE-AUDIT.md).
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
 
       # Fails if the Botlish backends -- interp, compile, and native, once
       # native produces a value at all -- disagree on any benchmark's value
