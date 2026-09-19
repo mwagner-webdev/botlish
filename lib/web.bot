@@ -1,0 +1,146 @@
+# web.bot -- the "web" namespace: ordinary Botlish library functions used
+# from other files as web::NAME (surface/modules.tcl).
+#
+# uri_escape_text is the executable percent-encoding algorithm NATIVE-URI-
+# ESCAPE.md moved out of lib/web.tcl's uriEscape native -native-body (raw
+# core IR, pasted into every call site) and into this ordinary cross-file
+# Botlish module definition, so it is resolved and compiled once, like any
+# other function, instead of copied. It is the same algorithm as
+# core::web::uriEscape's Tcl implementation, over the general
+# core/strings.tcl native encode_utf8 (str -> list of Int, one UTF-8 byte
+# per element): percent-encode every UTF-8 byte of s except the RFC 3986
+# unreserved characters (A-Za-z0-9._~-), as uppercase %XX.
+#
+# high_nibble/is_unreserved are single ascending threshold ladders (Botlish
+# has no integer division and no and/or primitive; a boundary walk over
+# disjoint, already-ordered ranges needs neither). esc_bytes/esc_char/
+# esc_from accumulate their result by repeated concat, the same recursive
+# idiom examples/stdlib/string_reverse.bot's reverse_from and
+# examples/stdlib/ai_text_clean.bot's clean_from already use.
+#
+# This module has no bearing on UriQueryValue's opaque evidence: only the
+# escaped *text* is computed here. Only a trusted native -impl may attach
+# UriQueryValue's runtime evidence (core/type.tcl); lib/web.tcl's uriEscape
+# native keeps doing that for interp/compile, and the native (Cranelift)
+# backend keeps the native's own registered result type for the call
+# (native/native.tcl's module-native bridge), so the value this function
+# computes is still treated, everywhere the type system looks at it, as a
+# UriQueryValue -- this module never has to forge that itself.
+namespace web
+
+fn uri_escape_text(s):
+    hex_digits = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F"]
+
+    fn high_nibble(b):
+        if b <= 15:
+            0
+        else:
+            if b <= 31:
+                1
+            else:
+                if b <= 47:
+                    2
+                else:
+                    if b <= 63:
+                        3
+                    else:
+                        if b <= 79:
+                            4
+                        else:
+                            if b <= 95:
+                                5
+                            else:
+                                if b <= 111:
+                                    6
+                                else:
+                                    if b <= 127:
+                                        7
+                                    else:
+                                        if b <= 143:
+                                            8
+                                        else:
+                                            if b <= 159:
+                                                9
+                                            else:
+                                                if b <= 175:
+                                                    10
+                                                else:
+                                                    if b <= 191:
+                                                        11
+                                                    else:
+                                                        if b <= 207:
+                                                            12
+                                                        else:
+                                                            if b <= 223:
+                                                                13
+                                                            else:
+                                                                if b <= 239:
+                                                                    14
+                                                                else:
+                                                                    15
+
+    fn is_unreserved(b):
+        if b <= 44:
+            false
+        else:
+            if b <= 46:
+                true
+            else:
+                if b <= 47:
+                    false
+                else:
+                    if b <= 57:
+                        true
+                    else:
+                        if b <= 64:
+                            false
+                        else:
+                            if b <= 90:
+                                true
+                            else:
+                                if b <= 94:
+                                    false
+                                else:
+                                    if b <= 95:
+                                        true
+                                    else:
+                                        if b <= 96:
+                                            false
+                                        else:
+                                            if b <= 122:
+                                                true
+                                            else:
+                                                if b <= 125:
+                                                    false
+                                                else:
+                                                    if b <= 126:
+                                                        true
+                                                    else:
+                                                        false
+
+    fn hex_pair(b):
+        concat(list_get(hex_digits, high_nibble(b)), list_get(hex_digits, mod(b, 16)))
+
+    fn esc_bytes(bytes, i, acc):
+        if i >= list_length(bytes):
+            acc
+        else:
+            esc_bytes(bytes, i + 1, concat(acc, concat("%", hex_pair(list_get(bytes, i)))))
+
+    fn esc_char(c):
+        bytes = encode_utf8(c)
+        if list_length(bytes) == 1:
+            if is_unreserved(list_get(bytes, 0)):
+                c
+            else:
+                esc_bytes(bytes, 0, "")
+        else:
+            esc_bytes(bytes, 0, "")
+
+    fn esc_from(text, i, acc):
+        if i >= length(text):
+            acc
+        else:
+            esc_from(text, i + 1, concat(acc, esc_char(substring(text, i, i + 1))))
+
+    esc_from(s, 0, "")

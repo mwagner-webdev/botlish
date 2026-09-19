@@ -9,7 +9,9 @@
 #   surface::lowerToHir AST ?-strict 1|0?   HIR                   (lower.tcl)
 #   surface::hirExprs HIR ID                HIR expressions from AST node ID
 #   surface::compile SOURCE ?FILENAME? ?-strict 1|0?   parse + lowerToHir
-#   surface::readProgramFile PATH ?-strict 1|0?        compile a .bot file
+#   surface::readProgramFile PATH ?-strict 1|0?        compile a .bot file,
+#       resolving its module-qualified (mod::name) references across files
+#       (surface/modules.tcl)
 #
 # Pipeline:
 #
@@ -42,16 +44,19 @@ proc surface::compile {source args} {
 }
 
 # The HIR of the source file PATH, after loading the libraries it names in
-# "# requires: NAME" comments (as for .ir and .hir files).
+# "# requires: NAME" comments (as for .ir and .hir files), and every module
+# its own module-qualified (mod::name) references need, transitively
+# (surface/modules.tcl; no "# requires:"-style declaration needed for
+# those -- see modules.tcl's header).
 proc surface::readProgramFile {path args} {
     foreach name [core::programFileRequires $path] {
         core::loadLibrary $name
     }
-    return [surface::compile [core::ReadFile $path] $path {*}$args]
+    return [surface::modules::compileProgramFile $path {*}$args]
 }
 
 apply {{dir} {
-    foreach name {ast lexer parser lower} {
+    foreach name {ast lexer parser lower modules} {
         uplevel #0 [list source [file join $dir $name.tcl]]
     }
 }} $surface::home

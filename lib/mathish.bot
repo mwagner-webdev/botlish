@@ -1,0 +1,9 @@
+# mathish.bot -- minimal demonstration module (surface/modules.tcl): a
+# namespace with one trivial function, used from examples/surface/14-
+# modules.bot and tests/surface-modules.test as the smallest possible
+# cross-file example: one file, one namespace, one function, called from
+# another file as mathish::inc(...).
+namespace mathish
+
+fn inc(x):
+    x + 1

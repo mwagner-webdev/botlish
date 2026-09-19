@@ -8,14 +8,19 @@
 #
 # The two boundaries:
 #
-#   1. native/native.tcl's ExpandNativeBodies substitutes a trusted
-#      native's -native-body block for its call's callee, before HIR is
-#      built (milestone 1, NATIVE-URI-ESCAPE.md). Without
-#      hir::ApplyNativeResultOverrides (hir/hir.tcl), the substituted
-#      call's result type would be inferred from the body block like any
-#      ordinary call, discarding the native's own registered -result-type
-#      -- an opaque type (str[UriQueryValue]) no ordinary Botlish body can
-#      reconstruct structurally, by design (core/type.tcl).
+#   1. native/native.tcl's module-native bridge (ModuleNativeBridge/
+#      buildProgramHir) retargets a trusted native's call to the ordinary
+#      cross-file Botlish definition its registry names (-module-fn,
+#      core/native.tcl; today only uriEscape, web::uri_escape_text,
+#      lib/web.bot -- see NATIVE-MODULES.md; a milestone-1-era predecessor,
+#      -native-body/ExpandNativeBodies, pasting a copy of the native's body
+#      into the call site's own IR, did the same job before modules
+#      existed -- NATIVE-URI-ESCAPE.md). Without
+#      hir::ApplyNativeResultOverrides (hir/hir.tcl), the retargeted call's
+#      result type would be the module function's own plain inferred type,
+#      discarding the native's own registered -result-type -- an opaque
+#      type (str[UriQueryValue]) no ordinary Botlish body can reconstruct
+#      structurally, by design (core/type.tcl).
 #
 #   2. hir/specialize.tcl's KeyType deliberately drops named-type
 #      refinements from a specialization *key* (so unrelated evidence
@@ -67,13 +72,17 @@ test native-refinement-propagation-native-body-preserves-result-type {uriEscape'
     hirRefTypes [nativeHirOf $exprs] q
 } -result {{str[UriQueryValue]}}
 
-test native-refinement-propagation-native-body-without-override-loses-it {control: without the override, the substituted call's result is only what the body infers -- not str[UriQueryValue] (confirms the override, not something else, is what fixes the case above)} -body {
-    set exprs {
-        {bind q {call {ref uriEscape} {const str {a b}}}}
-        {ref q}
-    }
-    set expanded [native::ExpandNativeBodies $exprs]
-    hirRefTypes [hir::build $expanded -strict 0] q
+test native-refinement-propagation-native-body-without-override-loses-it {control: web::uri_escape_text itself (no native, no override) is not str[UriQueryValue] -- the opaque type is never forged by the module mechanism, only ever supplied by the native's own registered contract (confirms the override, not something else, is what fixes the case above)} -body {
+    core::loadLibrary web
+    set loaded [surface::modules::LoadNamespaces {web}]
+    set qref [hir::syntax::refNode {ir {}} "web::uri_escape_text"]
+    dict set qref qualified {web uri_escape_text}
+    set nodes [list \
+        [hir::syntax::bindNode {ir {}} q \
+            [hir::syntax::callNode {ir {}} $qref [hir::syntax::constNode {ir {}} str {a b}]]] \
+        [hir::syntax::refNode {ir {}} q]]
+    hirRefTypes [hir::buildSyntax $nodes -strict 0 -files [dict get $loaded files] \
+        -modules [dict get $loaded sections]] q
 } -result {any}
 
 # ---------------------------------------------------------------------------

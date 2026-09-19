@@ -36,6 +36,9 @@
 #   symbols      SymbolId  -> symbol
 #   types        TypeId    -> type form (interned; see types.tcl)
 #   files        FileId    -> {id path}: source files origins refer to
+#   modules      NAMESPACE -> ScopeId of that namespace's own module
+#                section scope (surface/modules.tcl, hir/resolve.tcl's
+#                ResolveQualifiedRef); absent for a program with no modules
 #   diagnostics  list of {kind KIND message TEXT expr ExprId}
 #
 # IDs are strings with a kind prefix, allocated monotonically per program in
@@ -185,17 +188,43 @@ proc hir::build {exprs args} {
 #
 #   -origin O       origin of the program scope
 #   -files D        FileId -> path of the files origins refer to
+#   -modules D      a list of {namespace NS nodes SECTION-NODES origin
+#                   SECTION-ORIGIN} dicts (surface/modules.tcl's own
+#                   sections: one per namespace NODES needs, transitively,
+#                   dependencies first) -- see hir::resolve::program
+#   -module-native-targets D   flat NATIVE-NAME NAMESPACE NAME triples:
+#                   every reference to root native NATIVE-NAME is typed,
+#                   from here on, as a call of the ordinary function
+#                   NAMESPACE::NAME already resolved elsewhere in NODES
+#                   (its own module section, hir::resolve's `modules`
+#                   table -- see hir/resolve.tcl), instead of as a call of
+#                   the native itself -- see hir::types::BindingType and
+#                   native/native.tcl's module-native bridge, its only
+#                   caller (the native (Cranelift) backend's own way of
+#                   using an ordinary cross-file Botlish definition, such as
+#                   lib/web.bot's web::uri_escape_text, as a native's
+#                   *executable* implementation, while every other backend
+#                   keeps calling the native's own registered -impl).
+#                   Resolved by binding identity right after resolve/hygiene
+#                   (below), not by re-matching text later, so it survives
+#                   hir/specialize.tcl's own per-instance re-inference (which
+#                   re-runs hir::types::Call, and so would otherwise
+#                   recompute a plain native call's target fresh every time)
+#                   and cannot mistake a locally shadowed name for the
+#                   native, since it is keyed on the native's own resolved
+#                   root BindingId, never on source text.
 #
 # This is how frontends construct HIR: they state what was written and where;
 # resolution, hygiene (hygiene.tcl), types and refinements happen here.
 proc hir::buildSyntax {nodes args} {
     set options [Options hir::buildSyntax \
-        {-mode program -strict 1 -origin "" -files {} -native-result-overrides {}} $args]
+        {-mode program -strict 1 -origin "" -files {} -modules {} -native-result-overrides {} \
+            -module-native-targets {}} $args]
     set mode [dict get $options -mode]
     if {$mode ni {program sequence}} {
         error "hir::build: -mode must be program or sequence"
     }
-    set hir [hir::resolve::program $nodes $mode [dict get $options -origin]]
+    set hir [hir::resolve::program $nodes $mode [dict get $options -origin] [dict get $options -modules]]
     hir::hygiene::apply hir
     dict for {f path} [dict get $options -files] {
         dict set hir files $f [dict create id $f path $path]
@@ -205,9 +234,48 @@ proc hir::buildSyntax {nodes args} {
             core::semanticError [dict get $diagnostic kind] [dict get $diagnostic message]
         }
     }
+    ResolveModuleNativeTargets hir [dict get $options -module-native-targets]
     ApplyNativeResultOverrides hir [dict get $options -native-result-overrides]
     hir::types::infer hir
     return $hir
+}
+
+# Resolves TARGETS (flat NATIVE-NAME NAMESPACE NAME triples,
+# hir::buildSyntax's -module-native-targets) into HIR's own
+# moduleNativeTargets field: NATIVE-NAME -> {BLOCK-EXPRID ARITY}, consulted
+# by hir::types::BindingType. NAMESPACE::NAME must already be a module
+# definition somewhere in this same HIR (hir::resolve has already run, so
+# its `modules` table, hir/resolve.tcl, is populated): a caller-side bug (a
+# namespace/name the loader never actually merged in) is a plain Tcl
+# error, not a user-facing diagnostic.
+proc hir::ResolveModuleNativeTargets {hirVar targets} {
+    upvar 1 $hirVar hir
+    if {$targets eq ""} {
+        return
+    }
+    set resolved [dict create]
+    foreach {nativeName ns name} $targets {
+        if {![dict exists $hir modules $ns]} {
+            error "hir::buildSyntax: -module-native-targets: module \"$ns\" was not loaded into this program"
+        }
+        set bodyScope [dict get $hir modules $ns]
+        # hir::hygiene::qualifyModules (run between hir::resolve::program
+        # and here -- hir::buildSyntax) has already renamed every binding
+        # this scope declares, and its own `names` entry, from NAME to
+        # "${ns}::${name}"; look it up under that spelling.
+        set qualified "${ns}::${name}"
+        if {![dict exists $hir scopes $bodyScope names $qualified]} {
+            error "hir::buildSyntax: -module-native-targets: module \"$ns\" has no definition \"$name\""
+        }
+        set b [dict get $hir scopes $bodyScope names $qualified]
+        set bindExpr [dict get $hir bindings $b declaredBy]
+        set value [dict get $hir exprs $bindExpr value]
+        if {[dict get $hir exprs $value kind] ne "block"} {
+            error "hir::buildSyntax: -module-native-targets: \"${ns}::${name}\" is not bound to a function"
+        }
+        dict set resolved $nativeName [list $value [llength [dict get $hir exprs $value params]]]
+    }
+    dict set hir moduleNativeTargets $resolved
 }
 
 proc hir::Options {command defaults given} {

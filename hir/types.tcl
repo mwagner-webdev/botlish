@@ -424,7 +424,25 @@ proc hir::types::BindingType {hir ctx b} {
         return [dict get $ctx types $b]
     }
     if {[dict get $hir bindings $b kind] eq "root"} {
-        return [ofValue [dict get $hir bindings $b value]]
+        set value [dict get $hir bindings $b value]
+        if {[core::value::kind $value] eq "native" && [dict exists $hir moduleNativeTargets]} {
+            set name [core::value::nativeName $value]
+            if {[dict exists $hir moduleNativeTargets $name]} {
+                # This backend's own hir::buildSyntax -module-native-targets
+                # (hir.tcl) redirected native NAME to an ordinary top-level
+                # function elsewhere in this same HIR: a reference to the
+                # native is typed as a call of that function, not of the
+                # native, on every inference of it (including
+                # hir/specialize.tcl's own per-instance re-inference, which
+                # calls BindingType again -- so this stays correct there
+                # too, unlike a one-shot post-hoc edit of a single call's
+                # `target` field would). Every other backend leaves
+                # moduleNativeTargets unset, so this is a no-op for them.
+                lassign [dict get $hir moduleNativeTargets $name] block arity
+                return [list block $block $arity any]
+            }
+        }
+        return [ofValue $value]
     }
     return [ForwardType $hir $b]
 }

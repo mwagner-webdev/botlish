@@ -13,6 +13,25 @@
 #                   argument (any = no requirement); a call that returns
 #                   proves its arguments had these types. "" = unknown.
 #   resultType      type of every result, or any
+#   moduleFn        "" or {NAMESPACE NAME}: the native (Cranelift) backend
+#                   may use the ordinary cross-file Botlish function
+#                   NAMESPACE::NAME (surface/modules.tcl) as this native's
+#                   *executable* implementation, instead of requiring an
+#                   entry in its own op whitelist (native/lower.tcl's
+#                   `natives`) or a -native-body -- see native/native.tcl's
+#                   module-native bridge. impl (run by interp/compile, and
+#                   by the reference contract check) stays authoritative for
+#                   every other backend and for any semantics -- such as
+#                   attaching evidence for an opaque refined result type --
+#                   that ordinary Botlish cannot itself express (only a
+#                   trusted native impl may do that: see core/type.tcl); the
+#                   native keeps its own registered -result-type for the
+#                   call's static type on every backend, moduleFn or not
+#                   (hir/hir.tcl's -native-result-overrides). A native's
+#                   module function sees only its own module's other
+#                   definitions and ordinary root natives; it captures
+#                   nothing from the call site (an ordinary top-level
+#                   function, no different from any other module export).
 #   nativeBody      "" or a (block PARAMS BODY...) core IR node, with
 #                   PARAMS matching arity, expressing the same operation as
 #                   impl in ordinary Botlish over other natives: an
@@ -117,7 +136,7 @@ proc core::native::register {name args} {
     }
     set options [dict create -impl "" -arity "" -refines-true {} -refines-false {} \
         -param-types "" -result-type any -tests-type "" -runtime {} -result-shape {} -result-range {} \
-        -native-body {}]
+        -native-body {} -module-fn {}]
     foreach {option value} $args {
         if {![dict exists $options $option]} {
             error "core::native::register: unknown option \"$option\""
@@ -201,6 +220,10 @@ proc core::native::register {name args} {
                 node with $arity parameter(s)"
         }
     }
+    set moduleFn [dict get $options -module-fn]
+    if {$moduleFn ne "" && [llength $moduleFn] != 2} {
+        error "core::native::register: -module-fn of \"$name\" must be a {NAMESPACE NAME} pair"
+    }
     dict set registry $name [dict create \
         name $name \
         impl $impl \
@@ -211,7 +234,7 @@ proc core::native::register {name args} {
         resultType [CanonicalType $name -result-type [dict get $options -result-type]] \
         testsType $testsType \
         runtime [lsort -unique [dict get $options -runtime]] \
-        resultShape $shape resultRange $range nativeBody $nativeBody]
+        resultShape $shape resultRange $range nativeBody $nativeBody moduleFn $moduleFn]
     return [core::value::native $name]
 }
 

@@ -1,0 +1,269 @@
+# surface-modules.test -- the one-file/one-namespace module system
+# (surface/modules.tcl, surface/parser.tcl's `namespace`/`mod::name`
+# syntax, hir/hir.tcl's -module-native-targets, native/native.tcl's
+# module-native bridge).
+#
+# lib/mathish.bot (namespace mathish, one function inc) is the permanent
+# minimal cross-file fixture (also used by examples/surface/14-modules.bot);
+# throwaway fixtures for the error-diagnostic and structural tests below
+# live in a scratch directory this file points $::core::libraryDir at for
+# the duration of each such test (restored after), so they never pollute
+# the real lib/.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 100000
+
+set parityBackends {interp compile cranelift-generic cranelift}
+
+# "same" if every backend agrees on the outcome of the .bot program file
+# PATH; otherwise every outcome, backend by backend.
+proc moduleParity {path} {
+    set hir [surface::readProgramFile $path -strict 0]
+    set exprs [hir::lower $hir]
+    set outcomes [lmap backend $::parityBackends {outcomeUnder $backend $exprs}]
+    if {[llength [lsort -unique $outcomes]] == 1} {
+        return same
+    }
+    return [join [lmap backend $::parityBackends outcome $outcomes {list $backend $outcome}] " / "]
+}
+
+# Runs SCRIPT with $::core::libraryDir pointed at a fresh scratch directory
+# (for throwaway module fixtures), passing that directory as its own
+# argument; restores the real library directory afterward regardless of
+# outcome.
+proc withScratchLibrary {script} {
+    set saved $::core::libraryDir
+    set dir [tcltest::makeDirectory modules-scratch-[pid]-[incr ::scratchLibraryCounter]]
+    set ::core::libraryDir $dir
+    try {
+        uplevel 1 [list apply [list {dir} $script] $dir]
+    } finally {
+        set ::core::libraryDir $saved
+        tcltest::removeDirectory [file tail $dir]
+    }
+}
+set ::scratchLibraryCounter 0
+
+# Writes CONTENT to $dir/NAME.bot.
+proc writeModule {dir name content} {
+    set path [file join $dir $name.bot]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8
+    puts -nonewline $channel $content
+    close $channel
+    return $path
+}
+
+# Writes CONTENT (an ordinary, non-module entry program) to $dir/main.bot and
+# returns its path.
+proc writeMain {dir content} {
+    return [writeModule $dir main $content]
+}
+
+# ---------------------------------------------------------------------------
+# The minimal cross-file example, end to end, on every backend.
+
+test surface-modules-mathish-parity {mathish::inc, called twice, agrees on every backend} -body {
+    moduleParity [file join $::projectRoot examples surface 14-modules.bot]
+} -result same
+
+test surface-modules-mathish-interp {mathish::inc(41) is 42, interpreted} -body {
+    outcomeUnder interp [hir::lower [surface::readProgramFile \
+        [file join $::projectRoot examples surface 14-modules.bot]]]
+} -result {value {[42, 2]} {}}
+
+# ---------------------------------------------------------------------------
+# Structural: one compiled definition, direct calls from both call sites
+# (not one body copy per call site -- contrast the old -native-body).
+
+test surface-modules-one-definition {a module function is compiled once, called directly from both call sites} -body {
+    set hir [surface::readProgramFile [file join $::projectRoot examples surface 14-modules.bot]]
+    set nir [native::nir $hir]
+    list [regexp -all {func \d+ "mathish::inc"} $nir] [regexp -all {call \d+ } $nir]
+} -result {1 2}
+
+# ---------------------------------------------------------------------------
+# Namespace identity and provenance.
+
+test surface-modules-two-namespaces-same-symbol {a::parse and b::parse resolve independently} -body {
+    withScratchLibrary {
+        writeModule $dir a "namespace a\n\nfn parse(x):\n    x + 1\n"
+        writeModule $dir b "namespace b\n\nfn parse(x):\n    x + 100\n"
+        set main [writeMain $dir "\[a::parse(1), b::parse(1)\]\n"]
+        outcomeUnder interp [hir::lower [surface::readProgramFile $main]]
+    }
+} -result {value {[2, 101]} {}}
+
+test surface-modules-transitive-dependency {a module's own qualified references are loaded transitively} -body {
+    withScratchLibrary {
+        writeModule $dir base "namespace base\n\nfn unit_value(x):\n    x + 1\n"
+        writeModule $dir mid "namespace mid\n\nfn twice(x):\n    base::unit_value(base::unit_value(x))\n"
+        set main [writeMain $dir "mid::twice(0)\n"]
+        outcomeUnder interp [hir::lower [surface::readProgramFile $main]]
+    }
+} -result {value 2 {}}
+
+test surface-modules-local-cannot-shadow-qualified {a local binding named like the namespace cannot shadow a qualified reference} -body {
+    withScratchLibrary {
+        writeModule $dir a "namespace a\n\nfn value(x):\n    x + 1\n"
+        set main [writeMain $dir "a = 999\na::value(1)\n"]
+        outcomeUnder interp [hir::lower [surface::readProgramFile $main]]
+    }
+} -result {value 2 {}}
+
+# ---------------------------------------------------------------------------
+# Diagnostics: unknown namespace vs. unknown symbol.
+
+test surface-modules-unknown-namespace {calling into a namespace with no module file is a distinct diagnostic} -body {
+    withScratchLibrary {
+        set main [writeMain $dir "missing::foo()\n"]
+        catch {surface::readProgramFile $main} message options
+        list [dict get $options -errorcode] [string match "*unknown namespace*" $message]
+    }
+} -result {{SURFACE MODULE UNKNOWN-NAMESPACE} 1}
+
+test surface-modules-unknown-symbol {calling an undefined function of a real namespace is a distinct diagnostic} -body {
+    withScratchLibrary {
+        writeModule $dir a "namespace a\n\nfn value(x):\n    x\n"
+        set main [writeMain $dir "a::does_not_exist()\n"]
+        catch {surface::readProgramFile $main} message options
+        list [dict get $options -errorcode] [string match "*no definition*does_not_exist*" $message]
+    }
+} -result {{SURFACE MODULE UNKNOWN-SYMBOL} 1}
+
+test surface-modules-namespace-mismatch {a module file declaring the wrong namespace is a distinct diagnostic} -body {
+    withScratchLibrary {
+        writeModule $dir a "namespace not_a\n\nfn value(x):\n    x\n"
+        set main [writeMain $dir "a::value(1)\n"]
+        catch {surface::readProgramFile $main} message options
+        list [dict get $options -errorcode] [string match "*declares*not_a*" $message]
+    }
+} -result {{SURFACE MODULE NAMESPACE-MISMATCH} 1}
+
+test surface-modules-missing-namespace-decl {a module file with no namespace declaration is a distinct diagnostic} -body {
+    withScratchLibrary {
+        writeModule $dir a "fn value(x):\n    x\n"
+        set main [writeMain $dir "a::value(1)\n"]
+        catch {surface::readProgramFile $main} message options
+        dict get $options -errorcode
+    }
+} -result {SURFACE MODULE NAMESPACE-MISMATCH}
+
+# ---------------------------------------------------------------------------
+# Module dependency cycles.
+
+test surface-modules-cycle {a module dependency cycle is rejected with a clear diagnostic} -body {
+    withScratchLibrary {
+        writeModule $dir a "namespace a\n\nfn f(x):\n    b::g(x)\n"
+        writeModule $dir b "namespace b\n\nfn g(x):\n    a::f(x)\n"
+        set main [writeMain $dir "a::f(1)\n"]
+        catch {surface::readProgramFile $main} message options
+        list [dict get $options -errorcode] [string match "*cycle*a*b*" $message]
+    }
+} -result {{SURFACE MODULE CYCLE} 1}
+
+test surface-modules-same-module-recursion-is-not-a-cycle {ordinary same-module (mutual) recursion is unaffected} -body {
+    withScratchLibrary {
+        writeModule $dir parity "namespace parity\n\nfn even(n):\n    if n == 0:\n        true\n    else:\n        odd(n - 1)\n\nfn odd(n):\n    if n == 0:\n        false\n    else:\n        even(n - 1)\n"
+        set main [writeMain $dir "\[parity::even(10), parity::even(7)\]\n"]
+        outcomeUnder interp [hir::lower [surface::readProgramFile $main]]
+    }
+} -result {value {[true, false]} {}}
+
+# ---------------------------------------------------------------------------
+# Module top level: functions only, no module-level values or statements.
+
+test surface-modules-toplevel-value-rejected {a module-level value binding is rejected} -body {
+    withScratchLibrary {
+        writeModule $dir a "namespace a\n\nhex_digits = \[1, 2, 3\]\n"
+        set main [writeMain $dir "a::hex_digits\n"]
+        catch {surface::readProgramFile $main} message options
+        dict get $options -errorcode
+    }
+} -result {SURFACE MODULE INVALID-TOPLEVEL}
+
+test surface-modules-toplevel-statement-rejected {a bare module-level expression statement is rejected} -body {
+    withScratchLibrary {
+        writeModule $dir a "namespace a\n\n1 + 1\n"
+        set main [writeMain $dir "a::f()\n"]
+        catch {surface::readProgramFile $main} message options
+        dict get $options -errorcode
+    }
+} -result {SURFACE MODULE INVALID-TOPLEVEL}
+
+test surface-modules-duplicate-definition-rejected {two definitions of the same name in one module are rejected} -body {
+    withScratchLibrary {
+        writeModule $dir a "namespace a\n\nfn f(x):\n    x\n\nfn f(x):\n    x + 1\n"
+        set main [writeMain $dir "a::f(1)\n"]
+        catch {surface::readProgramFile $main} message options
+        dict get $options -errorcode
+    }
+} -result {CORE SEMANTIC DUPLICATE}
+
+# ---------------------------------------------------------------------------
+# No namespace aliasing: syntax resembling it is rejected (not silently
+# accepted as an alias).
+
+test surface-modules-namespace-decl-must-be-first {a "namespace" declaration elsewhere in the file is a syntax error} -body {
+    catch {surface::parse "x = 1\nnamespace web\n" t.bot} message options
+    lrange [dict get $options -errorcode] 0 1
+} -result {SURFACE SYNTAX}
+
+test surface-modules-no-import-alias-syntax {an "import ... as" line is rejected (no such syntax exists)} -body {
+    catch {surface::parse "import web as w\n" t.bot} message options
+    lrange [dict get $options -errorcode] 0 1
+} -result {SURFACE SYNTAX}
+
+test surface-modules-double-colon-single-level-only {a::b::c (two levels) is rejected} -body {
+    catch {surface::parse "a::b::c\n" t.bot} message options
+    lrange [dict get $options -errorcode] 0 1
+} -result {SURFACE SYNTAX}
+
+# ---------------------------------------------------------------------------
+# uriEscape: the module-native bridge (native/native.tcl), lib/web.bot.
+
+test surface-modules-uri-escape-uses-web-module {uriEscape's native call lowers to a direct call of web::uri_escape_text} -body {
+    core::loadLibrary web
+    set hir [native::buildProgramHir {
+        {bind s {const str "a b"}}
+        {call {ref uriEscape} {ref s}}
+    }]
+    set callE [lindex [hirFind $hir call] end]
+    lassign [hir::get $hir $callE target] kind block
+    list $kind [dict get [hir::node $hir $block] kind] \
+        [hir::types::show [hir::typeOf $hir $callE]]
+} -result [list block block str\[UriQueryValue\]]
+
+# The raw value core::evalProgram returns under BACKEND (no evidence-vs-
+# not-evidence stringification quirks -- used only for the direct-text
+# comparison below).
+proc outcomeUnderValue {backend exprs} {
+    set saved [core::useBackend]
+    core::useBackend $backend
+    try {
+        return [core::evalProgram $exprs]
+    } finally {
+        core::useBackend $saved
+    }
+}
+
+test surface-modules-uri-escape-native-parity {uriEscape's escaped text agrees interp vs. cranelift; only cranelift drops evidence} -body {
+    core::loadLibrary web
+    set exprs {
+        {bind s {const str "a b/c%d~e_f.g@h"}}
+        {call {ref uriEscape} {ref s}}
+    }
+    set interpValue [core::value::show [outcomeUnderValue interp $exprs] 1]
+    set nativeValue [core::value::show [native::evalHir [native::buildProgramHir $exprs]] 1]
+    list $interpValue $nativeValue
+} -result {{"a%20b%2Fc%25d~e_f.g%40h"#{UriQueryValue}} {"a%20b%2Fc%25d~e_f.g%40h"}}
+
+test surface-modules-refined-checks-still-400-0 {refined-checks.ir is unchanged on cranelift: [400, 0]} -body {
+    core::loadLibrary web
+    set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
+    core::value::show [native::evalHir $hir] 1
+} -result {[400, 0]}
+
+cleanupTests

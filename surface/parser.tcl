@@ -5,7 +5,8 @@
 # Recursive descent over the tokens of lexer.tcl. The grammar, with layout
 # already turned into NEWLINE / INDENT / DEDENT tokens:
 #
-#   program      = { NEWLINE | statement } EOF
+#   program      = [ namespaceDecl ] { NEWLINE | statement } EOF
+#   namespaceDecl = "namespace" IDENT NEWLINE
 #   statement    = simple NEWLINE | valued | function | if | loop
 #   simple       = binding | return | break | continue | expression
 #   valued       = IDENT "=" if | "return" if | "break" if
@@ -27,7 +28,8 @@
 #   unary        = "-" unary | postfix
 #   postfix      = primary { "(" [ arguments ] ")" }
 #   arguments    = expression { "," expression } [ "," ]
-#   primary      = INT | STRING | "true" | "false" | "unit" | IDENT
+#   primary      = INT | STRING | "true" | "false" | "unit"
+#                | IDENT [ "::" IDENT ]
 #                | "[" [ arguments ] "]" | "(" expression ")"
 #
 # An if is a value where a statement's value ends the statement: the right
@@ -155,9 +157,33 @@ proc surface::parser::SpanFrom {pVar start} {
 proc surface::parser::Program {pVar} {
     upvar 1 $pVar p
     set start [dict get [Peek p] span]
+    set namespaceName ""
+    set namespaceSpan ""
+    while {[Kind p] eq "NEWLINE"} {
+        Advance p
+    }
+    if {[Kind p] eq "namespace"} {
+        lassign [NamespaceDecl p] namespaceName namespaceSpan
+    }
     set body [Statements p {EOF}]
     set end [dict get [Peek p] span]
-    return [surface::ast::node program [surface::ast::cover $start $end] body $body]
+    return [surface::ast::node program [surface::ast::cover $start $end] body $body \
+        namespace $namespaceName namespaceSpan $namespaceSpan]
+}
+
+# "namespace" IDENT NEWLINE, as the very first statement of a file (a
+# declaration, not an ordinary statement: it introduces no HIR node -- see
+# surface/modules.tcl). Returns {NAME SPAN}.
+proc surface::parser::NamespaceDecl {pVar} {
+    upvar 1 $pVar p
+    Advance p
+    set name [Expect p IDENT "a namespace name after \"namespace\""]
+    set token [Peek p]
+    if {[dict get $token kind] ne "NEWLINE"} {
+        Fail $token "expected end of line, found [Describe $token]"
+    }
+    Advance p
+    return [list [dict get $name value] [dict get $name span]]
 }
 
 # Statements up to a token of a kind in STOP (not consumed).
@@ -242,6 +268,7 @@ proc surface::parser::Statement {pVar} {
         loop   { return [Loop p] }
         INDENT { Fail $token "unexpected indentation" }
         else   { Fail $token "\"else\" without a matching \"if\"" }
+        namespace { Fail $token "a \"namespace\" declaration must be the first statement in the file" }
     }
     set statement [Simple p]
     if {[dict get $statement kind] in {bind return break}
@@ -513,6 +540,13 @@ proc surface::parser::Primary {pVar} {
         }
         IDENT {
             Advance p
+            if {[Kind p] eq "::"} {
+                Advance p
+                set member [Expect p IDENT "a name after \"::\""]
+                return [surface::ast::node qualname [SpanFrom p $span] \
+                    namespace [dict get $token value] namespaceSpan $span \
+                    name [dict get $member value] nameSpan [dict get $member span]]
+            }
             return [surface::ast::node name $span name [dict get $token value]]
         }
         [ {

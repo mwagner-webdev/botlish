@@ -11,12 +11,14 @@
 #   1. Loads/lowers the program to HIR the same way main.tcl and
 #      bench/corpus.tcl do (core::loadProgramFile for .ir, surface::
 #      readProgramFile for .bot), routing a .ir program through
-#      native::buildProgramHir -- the same ExpandNativeBodies-then-hir::build
-#      sequence native::runProgram itself uses before compiling, so a native
-#      registered with a -native-body (core/native.tcl; currently only
-#      uriEscape, lib/web.tcl) is audited as the native backend actually
-#      runs it, not reported unsupported merely because this script
-#      bypassed that step.
+#      native::buildProgramHir -- the same ExpandNativeBodies/module-native-
+#      bridge-then-hir::buildSyntax sequence native::runProgram itself uses
+#      before compiling, so a native registered with a -native-body or a
+#      -module-fn (core/native.tcl; currently only uriEscape, -module-fn
+#      {web uri_escape_text}, lib/web.tcl/lib/web.bot -- see
+#      NATIVE-MODULES.md) is audited as the native backend actually runs
+#      it, not reported unsupported merely because this script bypassed
+#      that step.
 #   2. Attempts native::object (specialize 1, the default "cranelift"
 #      backend) to an object file in a scratch temp directory.
 #   3. On success: disassembles the object with `objdump -dr

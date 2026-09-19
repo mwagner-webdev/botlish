@@ -581,6 +581,20 @@ proc core::compiler::GenerateUnit {mode exprs {unitHir ""}} {
     set blockProcs [dict create]
     set ctx [NewContext 0 [expr {$mode eq "program"}]]
     PushScope ctx [hir::top $hir] [dict create materialized 1 frame base locals {}]
+    if {[dict exists $hir modules]} {
+        # Every module's own section (surface/modules.tcl, hir/resolve.tcl's
+        # ProgramSection) is a *separate* "program"-kind ScopeId -- so two
+        # namespaces can freely declare the same plain name -- but, like
+        # hir::top's own scope, an ordinary top-level one: at run time
+        # (core/env.tcl) every top-level binding, from every section and
+        # the referencing program alike, lives in the very same program
+        # frame, never a nested one. Each section's own scope is pushed
+        # under that same frame accordingly (not opened as a new one),
+        # exactly mirroring the interpreter.
+        dict for {ns scopeId} [dict get $hir modules] {
+            PushScope ctx $scopeId [dict create materialized 1 frame base locals {}]
+        }
+    }
     set result [CompileSequence ctx [hir::roots $hir]]
     Emit ctx "return [BoxWord $result]"
     set name unit[NewId]

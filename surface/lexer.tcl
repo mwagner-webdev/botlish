@@ -10,8 +10,8 @@
 #   INT       decimal digits, no leading zeros              value: the digits
 #   STRING    "..." on one line; escapes \\ \" \n \r \t     value: decoded text
 #   keywords  fn if else loop return break continue true false unit and or not
-#             (kind is the word itself)
-#   operators ( ) [ ] , : = == != < <= > >= + - *   (kind is the text itself)
+#             namespace (kind is the word itself)
+#   operators ( ) [ ] , : :: = == != < <= > >= + - *   (kind is the text itself)
 #   NEWLINE   end of a logical line
 #   INDENT    the next logical line is indented deeper
 #   DEDENT    one indentation level ends
@@ -47,9 +47,10 @@
 #                              statement (see UnclosedBefore)
 
 namespace eval surface::lexer {
-    variable keywords {fn if else loop return break continue true false unit and or not}
-    # Longest operators first.
-    variable operators {== != <= >= ( ) [ ] , : = < > + - *}
+    variable keywords {fn if else loop return break continue true false unit and or not namespace}
+    # Longest operators first ("::" before ":", so a module-qualified name
+    # like web::uri_escape does not lex as ":" ":").
+    variable operators {== != <= >= :: ( ) [ ] , : = < > + - *}
 }
 
 proc surface::lex {source {filename <input>}} {

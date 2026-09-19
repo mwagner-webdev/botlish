@@ -15,6 +15,13 @@
 #   ambient binding of the host environment (sequence mode). Otherwise it is
 #   unresolved: {UNBOUND "unbound name ..."}. A root reference (a syntax ref
 #   with root 1) denotes the root binding of its name regardless.
+# * A module-qualified reference (surface/modules.tcl's "NAMESPACE::NAME", a
+#   syntax ref node carrying a `qualified {NAMESPACE NAME}` field) is not an
+#   ordinary name: it is resolved directly against NAMESPACE's own module
+#   section scope (ResolveQualifiedRef), always "yes" (a module's
+#   definitions are all bound, unconditionally, before any code that can
+#   reference them runs -- surface/modules.tcl), and captured by nothing
+#   (like a root reference).
 # * Whether the binding has its value when the reference is evaluated:
 #     yes       it is bound earlier in the same invocation, or is a
 #               parameter or root binding
@@ -39,20 +46,50 @@
 namespace eval hir::resolve {}
 
 # The HIR of the syntax nodes NODES (syntax.tcl) in MODE; ORIGIN is the
-# origin of the program scope.
-proc hir::resolve::program {nodes mode origin} {
+# origin of the program scope. MODULES (program mode only): a list of
+# {namespace NS nodes SECTION-NODES origin SECTION-ORIGIN} dicts --
+# surface/modules.tcl's own sections, one per namespace NODES needs,
+# dependencies first -- each resolved into its OWN "program"-kind scope
+# (ProgramSection), a sibling of NODES' own top scope, before NODES itself
+# is resolved. A "program"-kind scope, unlike a block's, has invocation ""
+# (the same tag as every other top-level scope: see ResolveRef's "same
+# invocation" test), so hir::lower's core IR keeps every module's own
+# bindings as ordinary flat top-level statements, in the SAME interpreter
+# frame as everything else -- necessary because a block/call boundary
+# would make its bindings unreachable from any sibling top-level code once
+# the call returns (blocks only ever expose values through capture or
+# their own return value, never bindings by name). Each such scope is
+# still a genuinely separate ScopeId, so two different namespaces can
+# freely declare the very same plain name (e.g. both a "parse") with no
+# collision: hir::hygiene::qualifyModules (hir/hygiene.tcl) renames every
+# binding a namespace's own section scope declares to its qualified
+# spelling afterward, so no two modules' definitions ever share a lowered
+# core IR name either.
+proc hir::resolve::program {nodes mode origin {modules {}}} {
     set hir [hir::Empty $mode]
     dict set hir bound [dict create]
+    set roots {}
     if {$mode eq "program"} {
         set root [NewScope hir root "" "" "" {builtin root}]
         set top [NewScope hir program $root "" "" $origin]
+        # Set before resolving any module section: a root reference
+        # (hir::resolve::ResolveRef) checks hir::top's own scope KIND, not
+        # its identity, to confirm program mode -- true of every section's
+        # own "program"-kind scope too, so this only needs to exist, not
+        # to be the scope currently being walked.
+        dict set hir top $top
+        foreach section $modules {
+            lappend roots {*}[ProgramSection hir $root [dict get $section namespace] \
+                [dict get $section nodes] [dict get $section origin]]
+        }
         Declare hir $top [hir::syntax::scopeBindNames $nodes]
     } else {
         set top [NewScope hir ambient "" "" "" {host environment}]
+        dict set hir top $top
     }
-    dict set hir top $top
     set ctx [dict create scope $top callable "" loop "" blocks {}]
-    dict set hir roots [Sequence hir $nodes $ctx]
+    lappend roots {*}[Sequence hir $nodes $ctx]
+    dict set hir roots $roots
     if {$mode eq "program"} {
         # Root bindings are created on first reference, so ids depend only on
         # the program; the rest exist too, for scope queries.
@@ -62,6 +99,21 @@ proc hir::resolve::program {nodes mode origin} {
     }
     dict unset hir bound
     return $hir
+}
+
+# Resolves one module section (see hir::resolve::program's MODULES): a
+# "program"-kind scope of its own, a sibling of the referencing code's own
+# top scope, both children of the same ROOT. Records its scope as
+# namespace NAMESPACE's own in HIR's `modules` table (consulted by
+# ResolveQualifiedRef and by hir::hygiene::qualifyModules). Returns the
+# section's own resolved ExprIds, in order (to append to `roots`).
+proc hir::resolve::ProgramSection {hirVar root namespaceName nodes origin} {
+    upvar 1 $hirVar hir
+    set scope [NewScope hir program $root "" "" $origin]
+    Declare hir $scope [hir::syntax::scopeBindNames $nodes]
+    dict set hir modules $namespaceName $scope
+    set ctx [dict create scope $scope callable "" loop "" blocks {}]
+    return [Sequence hir $nodes $ctx]
 }
 
 proc hir::resolve::RootNames {} {
@@ -192,7 +244,11 @@ proc hir::resolve::Expr {hirVar node ctx} {
             SetField hir $e value [core::ir::literalValue [list const {*}$literal]]
         }
         ref {
-            ResolveRef hir $e [dict get $node name] [dict get $node root] $ctx
+            if {[dict exists $node qualified]} {
+                ResolveQualifiedRef hir $e [dict get $node qualified]
+            } else {
+                ResolveRef hir $e [dict get $node name] [dict get $node root] $ctx
+            }
         }
         bind {
             set name [dict get $node name]
@@ -315,6 +371,42 @@ proc hir::resolve::Sequence {hirVar nodes ctx} {
         lappend ids [Expr hir $node $ctx]
     }
     return $ids
+}
+
+# Resolves module-qualified reference E (a {NAMESPACE NAME} pair) directly
+# against NAMESPACE's own module section scope (hir::resolve::program's
+# MODULES parameter records it in hir's `modules` table as each section is
+# resolved, before the referencing code; surface/modules.tcl always orders
+# a namespace's own section ahead of any code that references it, so the
+# table already has NAMESPACE's entry by the time this runs). Deliberately
+# not hir::resolve::Lookup's ordinary lexical
+# walk: a qualified reference denotes exactly the one binding NAMESPACE's
+# own module file declares NAME to be, immune to any local binding named
+# NAMESPACE or NAME (no local scope is ever consulted at all) -- and,
+# unlike native/native.tcl's superseded -native-body/ExpandNativeBodies
+# (NATIVE-URI-ESCAPE.md), this runs as part of hir::resolve's own ordinary
+# walk, after full lexical resolution of everything reachable so far, never
+# as raw pre-resolution text substitution.
+#
+# Every reference reaching here was already validated, by
+# surface::modules::CollectAndLoad, to name a namespace that was loaded and
+# a definition it actually has, before this HIR was ever built -- so
+# failure here is an internal invariant violation (a caller that built
+# syntax nodes without going through surface/modules.tcl), not a
+# user-facing diagnostic.
+proc hir::resolve::ResolveQualifiedRef {hirVar e pair} {
+    upvar 1 $hirVar hir
+    lassign $pair ns name
+    SetField hir $e name "${ns}::${name}"
+    if {![dict exists $hir modules $ns]} {
+        core::malformed "unresolved module reference ${ns}::${name}: module \"$ns\" was not loaded into this program" [list ref "${ns}::${name}"]
+    }
+    set bodyScope [dict get $hir modules $ns]
+    if {![dict exists $hir scopes $bodyScope names $name]} {
+        core::malformed "unresolved module reference ${ns}::${name}: namespace \"$ns\" has no definition \"$name\"" [list ref "${ns}::${name}"]
+    }
+    SetField hir $e binding [dict get $hir scopes $bodyScope names $name]
+    SetField hir $e init yes
 }
 
 # Resolves reference E to NAME; ROOT 1: to the root binding NAME, whatever

@@ -16,13 +16,16 @@
 # -----
 # Every node is a dict with `kind`, `span` and `id` plus per-kind fields:
 #
-#   program    body (statements), diagnostics (syntax errors, see below)
+#   program    body (statements), diagnostics (syntax errors, see below),
+#              namespace (the declared module namespace name, or "" for an
+#              ordinary/entry program -- see surface/modules.tcl)
 #   suite      body (statements)                 an indented block
 #   int        text (canonical decimal digits)
 #   string     value (the decoded text)
 #   bool       value (true | false)
 #   unit
 #   name       name
+#   qualname   namespace, name, namespaceSpan, nameSpan  (NAMESPACE::NAME)
 #   list       items (expressions)
 #   call       callee, args
 #   unary      op (-), opSpan, operand
@@ -305,6 +308,7 @@ proc surface::ast::Expr {node show} {
         bool    { return "(bool [dict get $node value])$at" }
         unit    { return "(unit)$at" }
         name    { return "(name [dict get $node name])$at" }
+        qualname { return "(qualname [dict get $node namespace]::[dict get $node name])$at" }
         error   { return "(error)$at" }
         list {
             return "([::join [concat list [lmap item [dict get $node items] {Expr $item $show}]] { }])$at"

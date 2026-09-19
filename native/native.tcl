@@ -55,6 +55,9 @@
 if {[info commands ::core::compiler::evalHir] eq ""} {
     source [file join [file dirname [file dirname [file normalize [info script]]]] compiler compiler.tcl]
 }
+if {[info commands ::surface::modules::LoadNamespaces] eq ""} {
+    source [file join [file dirname [file dirname [file normalize [info script]]]] surface surface.tcl]
+}
 source [file join [file dirname [file normalize [info script]]] lower.tcl]
 
 namespace eval native {
@@ -72,6 +75,12 @@ namespace eval native {
     # hir::build as -native-result-overrides so the substituted call keeps
     # its native's declared result type (hir::ApplyNativeResultOverrides).
     variable nativeResultOverrides [dict create]
+    # Also set by ExpandNativeBodies's traversal (a call's native's registry
+    # metadata is checked there either way): IR-PATH -> native NAME, for
+    # every call of a native whose registry carries a -module-fn (currently
+    # only uriEscape, -module-fn {web uri_escape_text}) -- the module-native
+    # bridge's own input; see buildProgramHir and ModuleNativeBridge below.
+    variable moduleNativeCalls [dict create]
 }
 
 proc native::binary {} {
@@ -444,8 +453,10 @@ proc native::report {hir} {
 # Backend entry points (core::registerBackend)
 
 # The HIR the native backend actually lowers for a program's raw core IR
-# EXPRS: ExpandNativeBodies's substitution, then hir::build with the
-# overrides ExpandNativeBodies collected -- runProgram's own two steps,
+# EXPRS: ExpandNativeBodies's substitution, the module-native bridge
+# (ModuleNativeBridge, below) prepending whatever modules it needs, then
+# hir::buildSyntax with the overrides and module-native targets
+# ExpandNativeBodies/ModuleNativeBridge collected -- runProgram's own steps,
 # factored out so every other caller that needs this same HIR (the
 # scalar-asm-audit generator, explain-native.tcl, bench.tcl's Cranelift
 # column) shares one implementation instead of separately reproducing it.
@@ -458,7 +469,54 @@ proc native::report {hir} {
 proc native::buildProgramHir {exprs args} {
     variable nativeResultOverrides
     set expanded [ExpandNativeBodies $exprs]
-    return [hir::build $expanded -strict 0 -native-result-overrides $nativeResultOverrides {*}$args]
+    set bridge [ModuleNativeBridge]
+    set nodes {}
+    set index 0
+    foreach expr $expanded {
+        lappend nodes [hir::syntax::fromIR $expr [list $index]]
+        incr index
+    }
+    return [hir::buildSyntax $nodes -strict 0 -origin {ir {}} \
+        -files [dict get $bridge files] -modules [dict get $bridge sections] \
+        -native-result-overrides $nativeResultOverrides \
+        -module-native-targets [dict get $bridge targets] {*}$args]
+}
+
+# The module-native bridge: loads (surface/modules.tcl), once per program
+# build, every module a native call the preceding ExpandNativeBodies
+# traversal recorded in moduleNativeCalls actually needs (a native whose
+# registry carries -module-fn -- currently only uriEscape, -module-fn {web
+# uri_escape_text}; core/native.tcl), and returns
+#
+#   {sections SECTIONS files FILES targets TARGETS}
+#
+# ready for hir::buildSyntax: SECTIONS (the modules' own function
+# definitions, compiled once, dependencies first) as -modules; FILES to
+# merge into -files; TARGETS (flat native NAME NAMESPACE FUNCTION-NAME
+# triples) as -module-native-targets, so hir::types::BindingType
+# (hir/types.tcl) types every reference to that native as a call of the
+# already-resolved NAMESPACE::FUNCTION-NAME instead. This is the only
+# caller of surface::modules' namespace-name-only entry point
+# (surface::modules::LoadNamespaces): every other user of the module
+# system (an ordinary .bot program's own mod::name references) goes
+# through surface::modules::compileProgramFile instead, driven by source
+# syntax rather than native registry metadata.
+proc native::ModuleNativeBridge {} {
+    variable moduleNativeCalls
+    set namespaces {}
+    set targets {}
+    foreach name [lsort -unique [dict values $moduleNativeCalls]] {
+        lassign [dict get [core::native::metadata $name] moduleFn] ns fn
+        if {$ns ni $namespaces} {
+            lappend namespaces $ns
+        }
+        lappend targets $name $ns $fn
+    }
+    if {$namespaces eq ""} {
+        return [dict create sections {} files {} targets {}]
+    }
+    set loaded [surface::modules::LoadNamespaces $namespaces]
+    return [dict create sections [dict get $loaded sections] files [dict get $loaded files] targets $targets]
 }
 
 proc native::runProgram {exprs env {specialize ""}} {
@@ -495,7 +553,9 @@ proc native::runProgram {exprs env {specialize ""}} {
 # the raw `ref` text -- a larger change, deliberately not made here.
 proc native::ExpandNativeBodies {exprs} {
     variable nativeResultOverrides
+    variable moduleNativeCalls
     set nativeResultOverrides [dict create]
+    set moduleNativeCalls [dict create]
     set out {}
     set index 0
     foreach expr $exprs {
@@ -516,6 +576,7 @@ proc native::ExpandNativeBodies {exprs} {
 # hir::build as -native-result-overrides.
 proc native::ExpandNativeBodiesIn {node path} {
     variable nativeResultOverrides
+    variable moduleNativeCalls
     switch -- [core::ir::op $node] {
         const - ref - continue {
             return $node
@@ -540,6 +601,10 @@ proc native::ExpandNativeBodiesIn {node path} {
                 set meta [core::native::metadata [lindex $callee 1]]
                 set nativeBody [dict get $meta nativeBody]
                 if {$nativeBody ne ""} {
+                    dict set nativeResultOverrides $path [dict get $meta resultType]
+                }
+                if {[dict get $meta moduleFn] ne ""} {
+                    dict set moduleNativeCalls $path [lindex $callee 1]
                     dict set nativeResultOverrides $path [dict get $meta resultType]
                 }
             }

@@ -19,6 +19,8 @@
 #   "text"                const str text
 #   true / false / unit   ^true / ^false / ^unit
 #   x                     ref x
+#   mod::x                ref "mod::x"          module-qualified; see
+#                         surface/modules.tcl for how "mod::x" is bound
 #   [a, b]                call ^list a b
 #   f(a, b)               call f a b
 #   a OP b                call ^OP a b              OP: + - * == < <= > >=
@@ -67,7 +69,15 @@ proc surface::lowerToHir {ast args} {
     set hir [hir::buildSyntax $nodes -strict 0 \
         -origin [surface::lower::Origin [dict get $ast span] ""] \
         -files [dict create f1 [dict get $ast span file]]]
-    if {[dict get $options -strict]} {
+    return [surface::lower::Finish $hir [dict get $options -strict]]
+}
+
+# The tail both surface::lowerToHir and surface::modules::compileProgramFile
+# (surface/modules.tcl) share: with STRICT 1, raise the first HIR diagnostic
+# as a semantic error (with its source location); otherwise return HIR as
+# built, diagnostics and all.
+proc surface::lower::Finish {hir strict} {
+    if {$strict} {
         foreach diagnostic [hir::diagnostics $hir] {
             core::semanticError [dict get $diagnostic kind] \
                 "[surface::originLocation $hir [hir::get $hir [dict get $diagnostic expr] origin]]: [dict get $diagnostic message]"
@@ -145,6 +155,21 @@ proc surface::lower::Node {node} {
         }
         name {
             return [hir::syntax::refNode $origin [dict get $node name]]
+        }
+        qualname {
+            # A module-qualified reference: not an ordinary lexical name at
+            # all (see hir/resolve.tcl's ResolveQualifiedRef, which reads
+            # the extra `qualified` field below directly rather than
+            # walking scopes) -- it resolves straight to NAMESPACE's own
+            # module section scope (surface/modules.tcl), immune to
+            # any local binding named NAMESPACE or NAME. The "NAMESPACE::
+            # NAME" spelling is kept as the node's ordinary `name` too,
+            # purely for display (hir::format, diagnostics): no local
+            # binding can ever spell "::", so it is never ambiguous with an
+            # ordinary reference even where shown together.
+            set ref [hir::syntax::refNode $origin "[dict get $node namespace]::[dict get $node name]"]
+            dict set ref qualified [list [dict get $node namespace] [dict get $node name]]
+            return $ref
         }
         list {
             return [hir::syntax::callNode $origin \

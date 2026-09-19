@@ -522,9 +522,13 @@ Implementation notes (not part of the semantics):
 
 ## 11. Not implemented (deliberately)
 
-Surface syntax beyond the minimal language of §17, macros, modules, objects, assignment, mutable
+Surface syntax beyond the minimal language of §17, macros, objects, assignment, mutable
 variables, exceptions, `?` propagation, pattern matching, a type checker
-beyond refinement tracking, async, coroutines, threads, or FFI.
+beyond refinement tracking, async, coroutines, threads, or FFI. A small
+one-file/one-namespace module system *is* implemented (§17's `namespace`/
+`mod::name` syntax, `surface/modules.tcl`, NATIVE-MODULES.md) -- but only
+cross-file callable definitions: no module-level values, no aliasing/
+imports/re-exports, no search path, no package manager.
 
 ## 12. The compiler backend
 
@@ -1193,6 +1197,26 @@ add10(32)          # 42 (add captures x)
   `integer?` or `test-log` can't be named from source yet.
 
 The full grammar is at the top of `surface/parser.tcl`.
+
+### Modules
+
+One source file is one namespace is one compilation/dependency unit. A
+file that starts with `namespace NAME` (its only legal position) is a
+*module*: a namespace of ordinary function definitions, nothing else (no
+module-level values, no side effects). `NAME` maps to exactly one file,
+`lib/NAME.bot` (`core::libraryDir`, the same directory as the existing
+`lib/NAME.tcl` native-library convention) -- no search path, so there is
+never more than one candidate file for a name. Another file uses a
+module's definition as `NAME::symbol(...)`: an ordinary, non-aliasable
+qualified reference (no `import`; the set of namespaces a file needs is
+discovered from its own `NAME::symbol` references, transitively, and
+loaded at most once each). `::` is definition/provenance qualification,
+never confused with `.`'s (future) value-access syntax. A module function
+is resolved to a stable binding identity before lowering, compiled once,
+and called directly from every reference to it, in any file -- see
+NATIVE-MODULES.md for the design and `surface/modules.tcl` for the
+implementation. Deliberately not built: namespace aliasing, module-level
+values, re-exports, a search path, or anything package-manager-shaped.
 
 ### Lowering
 

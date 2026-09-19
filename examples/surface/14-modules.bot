@@ -1,0 +1,7 @@
+# A module-qualified call: mathish::inc (lib/mathish.bot, namespace
+# mathish) is an ordinary cross-file function, compiled once and called
+# here from two call sites (surface/modules.tcl).
+#
+# expect: [42, 2]
+
+[mathish::inc(41), mathish::inc(1)]
