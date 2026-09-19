@@ -252,7 +252,8 @@ foreach name $benchFiles {
     set status [dict create source "bench/$name" kind unknown]
     if {[catch {
         set program [native::ExpandNativeBodies [core::loadProgramFile $path]]
-        set hir [hir::build $program -strict 0]
+        set hir [hir::build $program -strict 0 \
+            -native-result-overrides $native::nativeResultOverrides]
     } err]} {
         dict set status kind failed
         dict set status detail "could not load/build HIR: $err"

@@ -1,0 +1,335 @@
+source:  bench/refined-checks.ir
+backend: Cranelift (specialize=1)
+asm:     refined-checks.asm
+machine-code bytes: 26317 (per function: 460 624 1313 1385 544 597 499 270 625 625 625 681 793 1305 1369 544 597 499 270 625 625 625 681 793 1216 1216 1817 1521 687 1068 694 1124)
+
+functions:
+  0 <program entry>: nir-regs=16
+  1 check<int, int, str, str>: nir-regs=28
+  2 <str>: nir-regs=31
+  3 <generic>: nir-regs=31
+  4 char_at<generic>: nir-regs=6
+  5 char_at<generic>: nir-regs=6
+  6 is_local_char<str>: nir-regs=42
+  7 is_label_char<str>: nir-regs=10
+  8 scan_local<generic>: nir-regs=12
+  9 scan_label<generic>: nir-regs=12
+  10 scan_alpha<generic>: nir-regs=12
+  11 tld_ok<generic>: nir-regs=11
+  12 domain_loop<generic>: nir-regs=29
+  13 <str>: nir-regs=31
+  14 <generic>: nir-regs=31
+  15 char_at<generic>: nir-regs=6
+  16 char_at<generic>: nir-regs=6
+  17 is_local_char<str>: nir-regs=42
+  18 is_label_char<str>: nir-regs=10
+  19 scan_local<generic>: nir-regs=12
+  20 scan_label<generic>: nir-regs=12
+  21 scan_alpha<generic>: nir-regs=12
+  22 tld_ok<generic>: nir-regs=11
+  23 domain_loop<generic>: nir-regs=29
+  24 <str>: nir-regs=26
+  25 <generic>: nir-regs=26
+  26 high_nibble<generic>: nir-regs=93
+  27 is_unreserved<generic>: nir-regs=62
+  28 hex_pair<generic>: nir-regs=10
+  29 esc_bytes<generic>: nir-regs=16
+  30 esc_char<generic>: nir-regs=23
+  31 esc_from<generic>: nir-regs=17
+
+GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
+  function 0 "<program>"
+    NIR regs: 16
+    raw regs: 4
+    managed-capable regs: 12
+    safepoints: 4
+    root candidates: 10
+    max live roots: 5
+    shadow slots: 5
+  
+  function 1 "check"
+    NIR regs: 28
+    raw regs: 7
+    managed-capable regs: 21
+    safepoints: 3
+    root candidates: 6
+    max live roots: 5
+    shadow slots: 5
+  
+  function 2 ""
+    NIR regs: 31
+    raw regs: 3
+    managed-capable regs: 28
+    safepoints: 10
+    root candidates: 12
+    max live roots: 5
+    shadow slots: 5
+  
+  function 3 ""
+    NIR regs: 31
+    raw regs: 3
+    managed-capable regs: 28
+    safepoints: 10
+    root candidates: 12
+    max live roots: 5
+    shadow slots: 5
+  
+  function 4 "char_at"
+    NIR regs: 6
+    raw regs: 1
+    managed-capable regs: 5
+    safepoints: 2
+    root candidates: 4
+    max live roots: 3
+    shadow slots: 3
+  
+  function 5 "char_at"
+    NIR regs: 6
+    raw regs: 1
+    managed-capable regs: 5
+    safepoints: 1
+    root candidates: 3
+    max live roots: 3
+    shadow slots: 3
+  
+  function 6 "is_local_char"
+    NIR regs: 42
+    raw regs: 10
+    managed-capable regs: 32
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 1
+  
+  function 7 "is_label_char"
+    NIR regs: 10
+    raw regs: 2
+    managed-capable regs: 8
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 1
+  
+  function 8 "scan_local"
+    NIR regs: 12
+    raw regs: 1
+    managed-capable regs: 11
+    safepoints: 3
+    root candidates: 5
+    max live roots: 3
+    shadow slots: 3
+  
+  function 9 "scan_label"
+    NIR regs: 12
+    raw regs: 1
+    managed-capable regs: 11
+    safepoints: 3
+    root candidates: 5
+    max live roots: 3
+    shadow slots: 3
+  
+  function 10 "scan_alpha"
+    NIR regs: 12
+    raw regs: 1
+    managed-capable regs: 11
+    safepoints: 2
+    root candidates: 4
+    max live roots: 3
+    shadow slots: 3
+  
+  function 11 "tld_ok"
+    NIR regs: 11
+    raw regs: 1
+    managed-capable regs: 10
+    safepoints: 2
+    root candidates: 3
+    max live roots: 2
+    shadow slots: 2
+  
+  function 12 "domain_loop"
+    NIR regs: 29
+    raw regs: 4
+    managed-capable regs: 25
+    safepoints: 4
+    root candidates: 7
+    max live roots: 2
+    shadow slots: 2
+  
+  function 13 ""
+    NIR regs: 31
+    raw regs: 3
+    managed-capable regs: 28
+    safepoints: 10
+    root candidates: 12
+    max live roots: 5
+    shadow slots: 5
+  
+  function 14 ""
+    NIR regs: 31
+    raw regs: 3
+    managed-capable regs: 28
+    safepoints: 10
+    root candidates: 12
+    max live roots: 5
+    shadow slots: 5
+  
+  function 15 "char_at"
+    NIR regs: 6
+    raw regs: 1
+    managed-capable regs: 5
+    safepoints: 2
+    root candidates: 4
+    max live roots: 3
+    shadow slots: 3
+  
+  function 16 "char_at"
+    NIR regs: 6
+    raw regs: 1
+    managed-capable regs: 5
+    safepoints: 1
+    root candidates: 3
+    max live roots: 3
+    shadow slots: 3
+  
+  function 17 "is_local_char"
+    NIR regs: 42
+    raw regs: 10
+    managed-capable regs: 32
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 1
+  
+  function 18 "is_label_char"
+    NIR regs: 10
+    raw regs: 2
+    managed-capable regs: 8
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 1
+  
+  function 19 "scan_local"
+    NIR regs: 12
+    raw regs: 1
+    managed-capable regs: 11
+    safepoints: 3
+    root candidates: 5
+    max live roots: 3
+    shadow slots: 3
+  
+  function 20 "scan_label"
+    NIR regs: 12
+    raw regs: 1
+    managed-capable regs: 11
+    safepoints: 3
+    root candidates: 5
+    max live roots: 3
+    shadow slots: 3
+  
+  function 21 "scan_alpha"
+    NIR regs: 12
+    raw regs: 1
+    managed-capable regs: 11
+    safepoints: 2
+    root candidates: 4
+    max live roots: 3
+    shadow slots: 3
+  
+  function 22 "tld_ok"
+    NIR regs: 11
+    raw regs: 1
+    managed-capable regs: 10
+    safepoints: 2
+    root candidates: 3
+    max live roots: 2
+    shadow slots: 2
+  
+  function 23 "domain_loop"
+    NIR regs: 29
+    raw regs: 4
+    managed-capable regs: 25
+    safepoints: 4
+    root candidates: 7
+    max live roots: 2
+    shadow slots: 2
+  
+  function 24 ""
+    NIR regs: 26
+    raw regs: 1
+    managed-capable regs: 25
+    safepoints: 6
+    root candidates: 24
+    max live roots: 17
+    shadow slots: 17
+  
+  function 25 ""
+    NIR regs: 26
+    raw regs: 1
+    managed-capable regs: 25
+    safepoints: 6
+    root candidates: 24
+    max live roots: 17
+    shadow slots: 17
+  
+  function 26 "high_nibble"
+    NIR regs: 93
+    raw regs: 31
+    managed-capable regs: 62
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 1
+  
+  function 27 "is_unreserved"
+    NIR regs: 62
+    raw regs: 12
+    managed-capable regs: 50
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 1
+  
+  function 28 "hex_pair"
+    NIR regs: 10
+    raw regs: 1
+    managed-capable regs: 9
+    safepoints: 2
+    root candidates: 4
+    max live roots: 2
+    shadow slots: 2
+  
+  function 29 "esc_bytes"
+    NIR regs: 16
+    raw regs: 1
+    managed-capable regs: 15
+    safepoints: 4
+    root candidates: 11
+    max live roots: 7
+    shadow slots: 7
+  
+  function 30 "esc_char"
+    NIR regs: 23
+    raw regs: 5
+    managed-capable regs: 18
+    safepoints: 4
+    root candidates: 9
+    max live roots: 4
+    shadow slots: 4
+  
+  function 31 "esc_from"
+    NIR regs: 17
+    raw regs: 2
+    managed-capable regs: 15
+    safepoints: 5
+    root candidates: 11
+    max live roots: 7
+    shadow slots: 7
+
+mechanical pattern counts (triage only; see report for interpretation):
+  32 x calls to rt_closure_new
+  20 x calls to rt_int_add
+  2 x calls to rt_int_sub
+  54 x calls to rt_int_cmp
+  112 x calls to other rt_* helpers
+  29 x guard/guardbool instructions
