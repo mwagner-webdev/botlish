@@ -2,7 +2,7 @@ source:  examples/stdlib/string_replace.bot
 backend: Cranelift (specialize=1)
 asm:     string_replace.asm
 vcode:   string_replace.vcode
-machine-code bytes: 2943 (per function: 696 612 1196 439)
+machine-code bytes: 2777 (per function: 673 580 1132 392)
 
 functions:
   0 <program entry>: nir-regs=21
@@ -19,6 +19,7 @@ GC roots (string_replace.asm's NIR ids match roots.txt's "function N"):
     root candidates: 20
     max live roots: 7
     shadow slots: 7
+    entry zero slots: 4
   
   function 1 "matches_at"
     NIR regs: 12
@@ -28,6 +29,7 @@ GC roots (string_replace.asm's NIR ids match roots.txt's "function N"):
     root candidates: 4
     max live roots: 4
     shadow slots: 4
+    entry zero slots: 0
   
   function 2 "replace_from"
     NIR regs: 26
@@ -37,6 +39,7 @@ GC roots (string_replace.asm's NIR ids match roots.txt's "function N"):
     root candidates: 14
     max live roots: 7
     shadow slots: 7
+    entry zero slots: 0
   
   function 3 "replace"
     NIR regs: 16
@@ -46,6 +49,7 @@ GC roots (string_replace.asm's NIR ids match roots.txt's "function N"):
     root candidates: 6
     max live roots: 6
     shadow slots: 6
+    entry zero slots: 0
 
 mechanical pattern counts (triage only; see report for interpretation):
   4 x calls to rt_int_add

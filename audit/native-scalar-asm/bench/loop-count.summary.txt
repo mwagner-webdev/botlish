@@ -2,7 +2,7 @@ source:  bench/loop-count.ir
 backend: Cranelift (specialize=1)
 asm:     loop-count.asm
 vcode:   loop-count.vcode
-machine-code bytes: 798 (per function: 202 111 485)
+machine-code bytes: 745 (per function: 187 97 461)
 
 functions:
   0 <program entry>: nir-regs=5
@@ -18,6 +18,7 @@ GC roots (loop-count.asm's NIR ids match roots.txt's "function N"):
     root candidates: 2
     max live roots: 2
     shadow slots: 2
+    entry zero slots: 0
   
   function 1 "work"
     NIR regs: 17
@@ -27,6 +28,7 @@ GC roots (loop-count.asm's NIR ids match roots.txt's "function N"):
     root candidates: 0
     max live roots: 0
     shadow slots: 1
+    entry zero slots: 0
   
   function 2 "drive"
     NIR regs: 13
@@ -36,6 +38,7 @@ GC roots (loop-count.asm's NIR ids match roots.txt's "function N"):
     root candidates: 4
     max live roots: 3
     shadow slots: 3
+    entry zero slots: 0
 
 mechanical pattern counts (triage only; see report for interpretation):
   1 x calls to rt_int_add

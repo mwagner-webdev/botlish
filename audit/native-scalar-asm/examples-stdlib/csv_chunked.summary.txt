@@ -2,7 +2,7 @@ source:  examples/stdlib/csv_chunked.bot
 backend: Cranelift (specialize=1)
 asm:     csv_chunked.asm
 vcode:   csv_chunked.vcode
-machine-code bytes: 13435 (per function: 176 85 318 750 750 750 750 840 776 747 747 501 558 698 913 482 938 975 648 724 309)
+machine-code bytes: 12781 (per function: 169 71 318 702 702 702 702 808 728 710 710 469 534 677 887 470 899 936 609 684 294)
 
 functions:
   0 <program entry>: nir-regs=2
@@ -36,6 +36,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     root candidates: 1
     max live roots: 1
     shadow slots: 1
+    entry zero slots: 0
   
   function 1 "chunk_size"
     NIR regs: 2
@@ -45,6 +46,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     root candidates: 0
     max live roots: 0
     shadow slots: 1
+    entry zero slots: 0
   
   function 2 "chunked_new"
     NIR regs: 5
@@ -54,6 +56,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     root candidates: 2
     max live roots: 2
     shadow slots: 2
+    entry zero slots: 2
   
   function 3 "chunked_append"
     NIR regs: 20
@@ -63,6 +66,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     root candidates: 7
     max live roots: 4
     shadow slots: 4
+    entry zero slots: 0
   
   function 4 "chunked_append"
     NIR regs: 20
@@ -72,6 +76,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     root candidates: 7
     max live roots: 4
     shadow slots: 4
+    entry zero slots: 0
   
   function 5 "chunked_append"
     NIR regs: 20
@@ -81,6 +86,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     root candidates: 7
     max live roots: 4
     shadow slots: 4
+    entry zero slots: 0
   
   function 6 "chunked_append"
     NIR regs: 20
@@ -90,6 +96,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     root candidates: 7
     max live roots: 4
     shadow slots: 4
+    entry zero slots: 0
   
   function 7 "chunked_copy_chunks"
     NIR regs: 20
@@ -99,6 +106,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     root candidates: 8
     max live roots: 6
     shadow slots: 6
+    entry zero slots: 0
   
   function 8 "chunked_copy_chunks"
     NIR regs: 20
@@ -108,6 +116,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     root candidates: 8
     max live roots: 6
     shadow slots: 6
+    entry zero slots: 0
   
   function 9 "chunked_finish"
     NIR regs: 17
@@ -117,6 +126,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     root candidates: 10
     max live roots: 7
     shadow slots: 7
+    entry zero slots: 3
   
   function 10 "chunked_finish"
     NIR regs: 17
@@ -126,6 +136,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     root candidates: 10
     max live roots: 7
     shadow slots: 7
+    entry zero slots: 3
   
   function 11 "peek"
     NIR regs: 11
@@ -135,6 +146,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     root candidates: 4
     max live roots: 3
     shadow slots: 3
+    entry zero slots: 0
   
   function 12 "peek"
     NIR regs: 15
@@ -144,6 +156,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     root candidates: 3
     max live roots: 3
     shadow slots: 3
+    entry zero slots: 0
   
   function 13 "scan_unquoted"
     NIR regs: 28
@@ -153,6 +166,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     root candidates: 4
     max live roots: 4
     shadow slots: 4
+    entry zero slots: 1
   
   function 14 "scan_quoted"
     NIR regs: 34
@@ -162,6 +176,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     root candidates: 12
     max live roots: 5
     shadow slots: 5
+    entry zero slots: 2
   
   function 15 "scan_field"
     NIR regs: 17
@@ -171,6 +186,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     root candidates: 5
     max live roots: 3
     shadow slots: 3
+    entry zero slots: 1
   
   function 16 "scan_record"
     NIR regs: 31
@@ -180,6 +196,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     root candidates: 14
     max live roots: 6
     shadow slots: 6
+    entry zero slots: 1
   
   function 17 "scan_record"
     NIR regs: 29
@@ -189,6 +206,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     root candidates: 13
     max live roots: 6
     shadow slots: 6
+    entry zero slots: 1
   
   function 18 "scan_records"
     NIR regs: 21
@@ -198,6 +216,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     root candidates: 13
     max live roots: 8
     shadow slots: 8
+    entry zero slots: 3
   
   function 19 "scan_records"
     NIR regs: 18
@@ -207,6 +226,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     root candidates: 10
     max live roots: 8
     shadow slots: 8
+    entry zero slots: 3
   
   function 20 "csv_parse"
     NIR regs: 7
@@ -216,6 +236,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     root candidates: 5
     max live roots: 5
     shadow slots: 5
+    entry zero slots: 3
 
 mechanical pattern counts (triage only; see report for interpretation):
   20 x calls to rt_int_add

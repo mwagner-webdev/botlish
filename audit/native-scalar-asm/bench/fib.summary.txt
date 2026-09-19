@@ -17,6 +17,7 @@ GC roots (fib.asm's NIR ids match roots.txt's "function N"):
     root candidates: 1
     max live roots: 1
     shadow slots: 1
+    entry zero slots: 0
   
   function 1 "fib"
     NIR regs: 17
@@ -26,6 +27,7 @@ GC roots (fib.asm's NIR ids match roots.txt's "function N"):
     root candidates: 4
     max live roots: 2
     shadow slots: 2
+    entry zero slots: 1
 
 mechanical pattern counts (triage only; see report for interpretation):
   1 x calls to rt_int_add

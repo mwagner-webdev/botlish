@@ -2,7 +2,7 @@ source:  examples/stdlib/csv_geometric.bot
 backend: Cranelift (specialize=1)
 asm:     csv_geometric.asm
 vcode:   csv_geometric.vcode
-machine-code bytes: 7365 (per function: 176 184 485 541 422 422 198 501 558 698 913 482 886 616 283)
+machine-code bytes: 7032 (per function: 169 184 461 517 396 396 183 469 534 677 887 470 837 584 268)
 
 functions:
   0 <program entry>: nir-regs=2
@@ -30,6 +30,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     root candidates: 1
     max live roots: 1
     shadow slots: 1
+    entry zero slots: 0
   
   function 1 "geo_new"
     NIR regs: 5
@@ -39,6 +40,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     root candidates: 1
     max live roots: 1
     shadow slots: 1
+    entry zero slots: 0
   
   function 2 "geo_new_capacity"
     NIR regs: 11
@@ -48,6 +50,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     root candidates: 4
     max live roots: 3
     shadow slots: 3
+    entry zero slots: 0
   
   function 3 "geo_grow"
     NIR regs: 13
@@ -57,6 +60,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     root candidates: 4
     max live roots: 3
     shadow slots: 3
+    entry zero slots: 0
   
   function 4 "geo_append"
     NIR regs: 8
@@ -66,6 +70,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     root candidates: 5
     max live roots: 3
     shadow slots: 3
+    entry zero slots: 0
   
   function 5 "geo_append"
     NIR regs: 8
@@ -75,6 +80,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     root candidates: 5
     max live roots: 3
     shadow slots: 3
+    entry zero slots: 0
   
   function 6 "geo_finish"
     NIR regs: 3
@@ -84,6 +90,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     root candidates: 2
     max live roots: 2
     shadow slots: 2
+    entry zero slots: 0
   
   function 7 "peek"
     NIR regs: 11
@@ -93,6 +100,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     root candidates: 4
     max live roots: 3
     shadow slots: 3
+    entry zero slots: 0
   
   function 8 "peek"
     NIR regs: 15
@@ -102,6 +110,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     root candidates: 3
     max live roots: 3
     shadow slots: 3
+    entry zero slots: 0
   
   function 9 "scan_unquoted"
     NIR regs: 28
@@ -111,6 +120,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     root candidates: 4
     max live roots: 4
     shadow slots: 4
+    entry zero slots: 1
   
   function 10 "scan_quoted"
     NIR regs: 34
@@ -120,6 +130,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     root candidates: 12
     max live roots: 5
     shadow slots: 5
+    entry zero slots: 2
   
   function 11 "scan_field"
     NIR regs: 17
@@ -129,6 +140,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     root candidates: 5
     max live roots: 3
     shadow slots: 3
+    entry zero slots: 1
   
   function 12 "scan_record"
     NIR regs: 27
@@ -138,6 +150,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     root candidates: 11
     max live roots: 5
     shadow slots: 5
+    entry zero slots: 1
   
   function 13 "scan_records"
     NIR regs: 15
@@ -147,6 +160,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     root candidates: 8
     max live roots: 6
     shadow slots: 6
+    entry zero slots: 2
   
   function 14 "csv_parse"
     NIR regs: 6
@@ -156,6 +170,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     root candidates: 4
     max live roots: 4
     shadow slots: 4
+    entry zero slots: 2
 
 mechanical pattern counts (triage only; see report for interpretation):
   13 x calls to rt_int_add
