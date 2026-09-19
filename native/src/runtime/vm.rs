@@ -59,6 +59,20 @@ pub struct Vm {
     /// allocating helper. Only written by generated code in Sites mode
     /// (see metrics.rs); read and reset to 0 by `Vm::alloc`.
     pub alloc_site: u32,
+    /// The currently active `RootStorage::NativeFrame` function's own root
+    /// block (null when none is active): codegen::clif's prologue publishes
+    /// its Cranelift stack slot's address and slot count here instead of
+    /// participating in `ss_top`/`ss_limit`/`shadow` below, and restores
+    /// whatever was here on entry before returning (see codegen::roots's
+    /// `RootStorage` doc for why at most one such registration can ever be
+    /// active at a time). Scanned by `collect_with` alongside the shadow
+    /// stack, the pending error, and `temp_roots` -- a fourth, minimal root
+    /// source, not a replacement for any of the others.
+    pub native_roots_ptr: *mut Value,
+    /// A plain word (not `u32`) so generated code can store/reload it with
+    /// the same I64 op it already uses for `native_roots_ptr`, without a
+    /// second width.
+    pub native_roots_len: u64,
     ss_base: *mut Value,
     shadow: Vec<Value>,
     pub heap: Heap,
@@ -74,6 +88,8 @@ pub const VM_SS_TOP_OFFSET: i32 = offset_of!(Vm, ss_top) as i32;
 pub const VM_SS_LIMIT_OFFSET: i32 = offset_of!(Vm, ss_limit) as i32;
 pub const VM_CONSTS_OFFSET: i32 = offset_of!(Vm, consts) as i32;
 pub const VM_ALLOC_SITE_OFFSET: i32 = offset_of!(Vm, alloc_site) as i32;
+pub const VM_NATIVE_ROOTS_PTR_OFFSET: i32 = offset_of!(Vm, native_roots_ptr) as i32;
+pub const VM_NATIVE_ROOTS_LEN_OFFSET: i32 = offset_of!(Vm, native_roots_len) as i32;
 
 impl Vm {
     pub fn new(info: Rc<ProgramInfo>, alloc_mode: AllocMode) -> Box<Vm> {
@@ -86,6 +102,8 @@ impl Vm {
             ss_limit: limit,
             consts: std::ptr::null(),
             alloc_site: 0,
+            native_roots_ptr: std::ptr::null_mut(),
+            native_roots_len: 0,
             ss_base: base,
             shadow,
             heap: Heap::new(),
@@ -149,8 +167,18 @@ impl Vm {
         let stack = unsafe {
             std::slice::from_raw_parts(self.ss_base, self.ss_top.offset_from(self.ss_base) as usize)
         };
+        // The currently active RootStorage::NativeFrame function's own root
+        // block, if any (see that field's doc): empty when no such function
+        // is on the call stack right now (native_roots_ptr null, or -- same
+        // thing -- native_roots_len 0).
+        let native = if self.native_roots_ptr.is_null() {
+            &[][..]
+        } else {
+            unsafe { std::slice::from_raw_parts(self.native_roots_ptr, self.native_roots_len as usize) }
+        };
         let error_values = self.error.as_ref().map(|e| e.values()).unwrap_or_default();
-        let roots = stack.iter().copied().chain(error_values).chain(self.temp_roots.iter().copied());
+        let roots =
+            stack.iter().copied().chain(native.iter().copied()).chain(error_values).chain(self.temp_roots.iter().copied());
         self.heap.collect(roots.collect::<Vec<_>>().into_iter(), &mut self.metrics, reason);
     }
 
@@ -162,6 +190,8 @@ impl Vm {
     /// its first GC cycle, not folded into stale totals.
     pub fn reset(&mut self) {
         self.ss_top = self.ss_base;
+        self.native_roots_ptr = std::ptr::null_mut();
+        self.native_roots_len = 0;
         self.error = None;
         self.temp_roots.clear();
         self.metrics.reset();

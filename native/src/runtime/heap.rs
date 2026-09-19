@@ -8,9 +8,14 @@
 //! `MIN_THRESHOLD`, 1 MB). It never runs except inside an allocation.
 //!
 //! Roots are precise:
-//!   * the shadow stack: every register of every active native frame (the
-//!     generated prologue reserves and clears one slot per register, and every
-//!     definition of a register is stored to its slot)
+//!   * the shadow stack: every register of every active `RootStorage::
+//!     RuntimeStack` frame (the generated prologue reserves and clears one
+//!     slot per register, and every definition of a register is stored to
+//!     its slot)
+//!   * `Vm::native_roots_ptr`/`_len`: the currently active `RootStorage::
+//!     NativeFrame` function's own root block, if any (its slots live in
+//!     its own Cranelift-managed native frame instead of the shadow stack
+//!     above -- see codegen::roots's `RootStorage` doc)
 //!   * the values of a pending error
 //!   * `Vm::temp_roots`, for runtime code that holds values across an
 //!     allocation

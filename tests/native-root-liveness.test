@@ -109,11 +109,16 @@ test root-structural-1 {fib<int>: far fewer shadow slots than its 17 NIR registe
     list [regsOf $report fib] [expr {[slotsOf $report fib] < 17}] [expr {[slotsOf $report fib] <= 4}]
 } -result {17 1 1}
 
-test root-structural-2 {loop-count: work (no safepoint) needs no value slots; drive needs far fewer than 13} -body {
+# work makes no Botlish call at all (pure arithmetic), so it is
+# RootStorage::NativeFrame (native/src/codegen/roots.rs's eligibility rule):
+# no recursion-depth floor applies, so its shadow-slot count is a true zero,
+# not the RuntimeStack floor of 1 a call-containing function like drive
+# still gets.
+test root-structural-2 {loop-count: work (no safepoint, no calls) needs zero slots; drive needs far fewer than 13} -body {
     set report [native::roots [sourceIrHir [file join $::projectRoot bench loop-count.ir]]]
     list [regsOf $report work] [safepointsOf $report work] [slotsOf $report work] \
         [regsOf $report drive] [expr {[slotsOf $report drive] < 13}]
-} -result {17 0 1 13 1}
+} -result {17 0 0 13 1}
 
 test root-structural-3 {sum-refined: sum and step both need far fewer slots than their register counts} -body {
     set report [native::roots [sourceIrHir [file join $::projectRoot bench sum-refined.ir]]]
@@ -128,11 +133,13 @@ test root-structural-4 {F1 (closure virtualization) remains intact: sum-refined 
 # ---------------------------------------------------------------------------
 # #27: raw-only values need zero root slots.
 
+# No Botlish call here either, so this is RootStorage::NativeFrame too: zero
+# slots, not the RuntimeStack floor of 1 (see root-structural-2 above).
 test root-raw-1 {a function with only raw temporaries needs zero value slots} -body {
     set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=4 pnames=\"\" captures=0 rawregs=\"0 1 2\"\n    %0 = rawint 3\n    %1 = rawint 4\n    %2 = op riadd %0 %1\n    %3 = op rbox %2\n    ret %3\nend\n"
     set report [rootsOfNir $text]
     list [runNir $text] [candidatesOf $report "<program>"] [slotsOf $report "<program>"]
-} -result {{value {int 7}} 0 1}
+} -result {{value {int 7}} 0 0}
 
 # ---------------------------------------------------------------------------
 # #28: tagged values that die before any safepoint need no slot. There is no

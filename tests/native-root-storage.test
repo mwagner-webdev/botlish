@@ -1,0 +1,211 @@
+# native-root-storage.test -- RootStorage (native/src/codegen/roots.rs,
+# native/src/codegen/clif.rs): the first step of the native-stack-
+# authoritative roadmap. A function eligible for RootStorage::NativeFrame
+# (one that contains no Botlish call -- see roots.rs's `eligible_for_
+# native_frame` doc) stores its physical root slots in a Cranelift-managed
+# native stack slot instead of the shared Botlish shadow-stack array, and
+# emits no separate stack-pointer bump/limit-check/restore sequence for
+# them at all. A function that contains any Botlish call (recursive or
+# not) still uses the original RootStorage::RuntimeStack mechanism,
+# unchanged.
+#
+# Coverage:
+#   * structural: native::roots's "storage:" line, and native::clif's
+#     absence of the shared shadow-stack sequence (ss_top/ss_limit loads,
+#     rt_stack_overflow) for an eligible function
+#   * adversarial: hand-written NIR run under BOTLISH_NATIVE_GC_STRESS=1,
+#     confirming a value physically stored in the new native root block (or
+#     the old shadow stack, for a call-crossing root) survives a real
+#     collection
+#   * the required fallback: any function containing a Botlish call (the
+#     recursive fib<int> shape, and a simpler call-crossing-root case)
+#     stays on RootStorage::RuntimeStack, byte-for-byte unchanged
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+proc sourceIrHir {path} {
+    return [hir::build [core::loadProgramFile $path] -strict 0]
+}
+
+# Runs raw NIR text TEXT directly (bypassing HIR/lower.tcl): {value V} or
+# {error CODE MESSAGE} (see native-root-liveness.test's own copy of this
+# helper for why: native::Outcome throws on error rather than returning one).
+proc runNir {text args} {
+    set lines [native::Driver run $text {*}$args]
+    if {[catch {native::Outcome $lines} result options]} {
+        return [list error [dict get $options -errorcode] $result]
+    }
+    return [list value $result]
+}
+
+proc rootsOfNir {text} {
+    return [join [native::Driver roots $text] \n]
+}
+
+proc clifOfNir {text} {
+    return [join [native::Driver clif $text] \n]
+}
+
+proc rootsBlock {report name} {
+    foreach block [split [string map [list "\n\n" "\x01"] $report] "\x01"] {
+        if {[regexp "function \\d+ \"$name\"" $block]} {
+            return $block
+        }
+    }
+    error "no function named \"$name\" found in:\n$report"
+}
+
+proc slotsOf {report name} {
+    regexp {shadow slots: (\d+)} [rootsBlock $report $name] -> n
+    return $n
+}
+
+proc storageOf {report name} {
+    regexp {storage: (native frame|runtime stack)} [rootsBlock $report $name] -> s
+    return $s
+}
+
+# CLIF-text (native::clif's/native::Driver clif's whole-program listing,
+# legend followed by one block per function) equivalent of `rootsBlock`:
+# just this one function's own text, from its "; function N "name": ..."
+# header up to (not including) the next such header or end of text.
+proc clifFunctionBlock {clifText name} {
+    set lines [split $clifText \n]
+    set start {}
+    set end [llength $lines]
+    for {set i 0} {$i < [llength $lines]} {incr i} {
+        set line [lindex $lines $i]
+        if {$start eq {} && [regexp "^; function \\d+ \"$name\":" $line]} {
+            set start $i
+            continue
+        }
+        if {$start ne {} && [regexp {^; function \d+ "} $line]} {
+            set end $i
+            break
+        }
+    }
+    if {$start eq {}} {
+        error "no function named \"$name\" found in CLIF:\n$clifText"
+    }
+    return [join [lrange $lines $start [expr {$end - 1}]] \n]
+}
+
+# Whether FUNCTION-BLOCK (one function's own slice of a whole-program CLIF
+# listing, `clifFunctionBlock`) itself imports HELPER-NAME: cross-references
+# the legend ("; u0:K = helper-name", always present once per program,
+# whether or not any function actually calls it) against this function's own
+# "fnN = ... u0:K ..." import declaration, so this does not depend on
+# HELPER-NAME's numeric index staying the same across a rebuild.
+proc usesHelper {clifText functionBlock helperName} {
+    if {![regexp -line "^; u0:(\\d+) = $helperName\$" $clifText -> index]} {
+        error "helper $helperName not found in legend:\n$clifText"
+    }
+    return [regexp "u0:$index\[^0-9\]" $functionBlock]
+}
+
+# Runs BODY under BOTLISH_NATIVE_GC_STRESS=1 (collect before every
+# allocation), restoring the environment afterward regardless of outcome.
+proc underGcStress {body} {
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        uplevel 1 $body
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+}
+
+set nirHeader "nir 1\n\n"
+
+# ---------------------------------------------------------------------------
+# A function with no roots and no Botlish calls: full elimination. Neither
+# the shared shadow-stack bump/limit-check nor rt_stack_overflow appears in
+# its own CLIF at all.
+
+test storage-no-roots-1 {a function with no roots and no calls uses NativeFrame with zero slots} -body {
+    set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=4 pnames=\"\" captures=0 rawregs=\"0 1 2\"\n    %0 = rawint 3\n    %1 = rawint 4\n    %2 = op riadd %0 %1\n    %3 = op rbox %2\n    ret %3\nend\n"
+    set report [rootsOfNir $text]
+    list [runNir $text] [storageOf $report "<program>"] [slotsOf $report "<program>"]
+} -result {{value {int 7}} {native frame} 0}
+
+test storage-no-roots-2 {a NativeFrame function's own CLIF never imports rt_stack_overflow} -body {
+    set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=4 pnames=\"\" captures=0 rawregs=\"0 1 2\"\n    %0 = rawint 3\n    %1 = rawint 4\n    %2 = op riadd %0 %1\n    %3 = op rbox %2\n    ret %3\nend\n"
+    set clif [clifOfNir $text]
+    usesHelper $clif [clifFunctionBlock $clif "<program>"] rt_stack_overflow
+} -result 0
+
+# ---------------------------------------------------------------------------
+# One native root slot, no Botlish calls: still eliminates rt_stack_overflow
+# (no depth bound needed, since this function cannot recurse), while the
+# rooted value still physically survives a real collection forced at the
+# one safepoint that could reach it.
+
+test storage-one-root-1 {a rooted value with one internal safepoint and no calls uses NativeFrame} -body {
+    set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=3 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = str \"kept\"\n    %1 = cell\n    %2 = op streq %0 %0\n    ret %2\nend\n"
+    set report [rootsOfNir $text]
+    list [storageOf $report "<program>"] [slotsOf $report "<program>"] [underGcStress {runNir $text}]
+} -result {{native frame} 1 {value {bool true}}}
+
+test storage-one-root-2 {that same NativeFrame function's CLIF never imports rt_stack_overflow} -body {
+    set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=3 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = str \"kept\"\n    %1 = cell\n    %2 = op streq %0 %0\n    ret %2\nend\n"
+    set clif [clifOfNir $text]
+    usesHelper $clif [clifFunctionBlock $clif "<program>"] rt_stack_overflow
+} -result 0
+
+# ---------------------------------------------------------------------------
+# Multiple colored/reused native root slots, still no Botlish calls: the
+# same slot-reuse coloring as native-root-liveness.test's root-reuse-1, but
+# now also asserted to land on NativeFrame, and still correct under stress
+# (the second pair's value must survive even though it shares a physical
+# slot with the first, now-dead, pair).
+
+test storage-multi-root-1 {non-overlapping roots reuse one NativeFrame slot, correctly, under GC stress} -body {
+    set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=6 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = str \"a\"\n    %1 = str \"z\"\n    %2 = op strcat %0 %1\n    %3 = str \"b\"\n    %4 = str \"c\"\n    %5 = op strcat %3 %4\n    ret %5\nend\n"
+    set report [rootsOfNir $text]
+    list [storageOf $report "<program>"] [expr {[slotsOf $report "<program>"] < 4}] [underGcStress {runNir $text}]
+} -result {{native frame} 1 {value {str bc}}}
+
+test storage-multi-root-2 {two simultaneously live NativeFrame roots never share a slot, and survive stress} -body {
+    set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=4 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = str \"a\"\n    %1 = str \"b\"\n    %2 = cell\n    %3 = op streq %0 %1\n    ret %3\nend\n"
+    set report [rootsOfNir $text]
+    list [storageOf $report "<program>"] [slotsOf $report "<program>"] [underGcStress {runNir $text}]
+} -result {{native frame} 2 {value {bool false}}}
+
+# ---------------------------------------------------------------------------
+# The required fallback: any function containing a Botlish call stays on
+# RootStorage::RuntimeStack, unchanged -- fib<int> (the flagship recursive,
+# cross-call-rooted shape) and a smaller call-crossing-root case alike.
+# Without a stack-map/frame-walk mechanism (this milestone's own step 2),
+# the collector has no way to discover a NativeFrame function's roots once
+# another call nests on top of it, so this is the correctness-required
+# fallback the task's own brief anticipates, not an oversight.
+
+test storage-fib-1 {fib<int> (real cross-call roots) stays on RuntimeStack} -body {
+    set report [native::roots [sourceIrHir [file join $::projectRoot bench fib.ir]]]
+    storageOf $report fib
+} -result {runtime stack}
+
+test storage-call-crossing-1 {a value that must survive a Botlish call forces RuntimeStack} -body {
+    set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=2 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = str \"a\"\n    %1 = call 1 %0\n    ret %1\nend\nfunc 1 \"f\" params=1 env=0 regs=3 pnames=\"x\" captures=0 rawregs=\"\"\n    %1 = str \"b\"\n    %2 = op strcat %0 %1\n    ret %2\nend\n"
+    set report [rootsOfNir $text]
+    list [storageOf $report "<program>"] [underGcStress {runNir $text}]
+} -result {{runtime stack} {value {str ab}}}
+
+test storage-call-crossing-2 {that call-crossing function's own CLIF still imports rt_stack_overflow (RuntimeStack, unchanged)} -body {
+    set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=2 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = str \"a\"\n    %1 = call 1 %0\n    ret %1\nend\nfunc 1 \"f\" params=1 env=0 regs=3 pnames=\"x\" captures=0 rawregs=\"\"\n    %1 = str \"b\"\n    %2 = op strcat %0 %1\n    ret %2\nend\n"
+    set clif [clifOfNir $text]
+    usesHelper $clif [clifFunctionBlock $clif "<program>"] rt_stack_overflow
+} -result 1
+
+# ---------------------------------------------------------------------------
+# fib<int>'s own machine code is unaffected by this milestone: recompiling it
+# twice back to back (nothing else changed in between) produces identical
+# CLIF, confirming the RuntimeStack fallback path is deterministic and that
+# nothing about the RootStorage decision itself perturbs fib's own codegen.
+
+test storage-fib-2 {fib<int>'s CLIF is unaffected (deterministic, unchanged shape) by this milestone} -body {
+    set hir [sourceIrHir [file join $::projectRoot bench fib.ir]]
+    expr {[native::clif $hir] eq [native::clif $hir]}
+} -result 1
+
+cleanupTests

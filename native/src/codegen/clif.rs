@@ -11,26 +11,50 @@
 //! A result of 0 means an error is pending in the VM; every caller branches
 //! to its own error exit, which pops its shadow frame and returns 0.
 //!
-//! Frame layout: the prologue reserves this frame's physical shadow-stack
-//! slots (`codegen::roots::RootPlan::num_slots`, at least one, so native
-//! depth is bounded by the shadow stack), and every definition of a
-//! rooted register is stored to its slot: the GC's precise roots
-//! (runtime/heap.rs). A slot is zeroed at frame entry only when
+//! Frame layout: the prologue reserves this frame's physical root slots
+//! (`codegen::roots::RootPlan::num_slots`), and every definition of a
+//! rooted register is stored to its slot: one of the GC's precise root
+//! sources (runtime/heap.rs). A slot is zeroed at frame entry only when
 //! `RootPlan::entry_zero` says some reachable safepoint could otherwise
 //! scan it before a real Value has been stored there (codegen::roots's
 //! `entry_zero_slots`, F3b) -- not merely because the slot exists.
 //! Register values live in Cranelift variables, so reads never touch
 //! memory.
 //!
+//! Where those physical slots actually live depends on `RootPlan::storage`
+//! (codegen::roots's `RootStorage`, see its own doc for the eligibility
+//! rule and why it is sound):
+//!
+//!   * `RuntimeStack` (the original mechanism): the shared shadow-stack
+//!     array, indexed via `vm.ss_top`/`ss_limit`; at least one slot always,
+//!     so the shared array's bounds check still bounds native recursion
+//!     depth even for a function with zero roots (`prologue_runtime_stack`).
+//!   * `NativeFrame` (this milestone): this function's own Cranelift-
+//!     managed native stack slot -- no separate frame, no bump/limit-check/
+//!     restore of a second stack pointer at all. Only eligible for a
+//!     function that makes no Botlish call (so it cannot recurse through
+//!     one, needing no depth bound of its own); when it has any root
+//!     candidates, its one native stack slot's address and length are
+//!     published to `vm.native_roots_ptr`/`_len` so the collector can still
+//!     find them (`prologue_native_frame`).
+//!
+//! Either way, `self.base` is simply "the address slot 0 lives at" for the
+//! rest of this file: `def`/`def_raw`/`zero_root_slots` address every
+//! physical slot as `self.base + slot*8` without needing to know which
+//! storage this turned out to be.
+//!
 //! Self tail calls (NIR `tail`) rebind the parameter variables and jump back
 //! to the body block after the prologue: a CFG back edge, no call.
 
-use super::roots::{self, RootPlan};
+use super::roots::{self, RootPlan, RootStorage};
 use super::{BackendError, Const, ConstPool, Site};
 use crate::nir::{self, Inst, OpCode, Reg};
 use crate::runtime::ops::helpers;
 use crate::runtime::value::*;
-use crate::runtime::vm::{VM_ALLOC_SITE_OFFSET, VM_CONSTS_OFFSET, VM_SS_LIMIT_OFFSET, VM_SS_TOP_OFFSET};
+use crate::runtime::vm::{
+    VM_ALLOC_SITE_OFFSET, VM_CONSTS_OFFSET, VM_NATIVE_ROOTS_LEN_OFFSET, VM_NATIVE_ROOTS_PTR_OFFSET,
+    VM_SS_LIMIT_OFFSET, VM_SS_TOP_OFFSET,
+};
 use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::{
     types, AbiParam, BlockArg, InstBuilder, MemFlagsData, Signature, StackSlotData, StackSlotKind,
@@ -268,6 +292,14 @@ struct Translator<'a, 'b, M: Module> {
     labels: HashMap<nir::Label, ir::Block>,
     vm: ir::Value,
     base: ir::Value,
+    /// For `RootStorage::NativeFrame` with `num_slots > 0` only: the
+    /// previous contents of `vm.native_roots_ptr`/`_len` (whatever the
+    /// caller, or no one, had published there), saved once in the prologue
+    /// and restored at every return path (see `restore_root_frame`). None
+    /// for `RuntimeStack` (which restores `ss_top` from `base` instead, see
+    /// `restore_root_frame`) and for a `NativeFrame` function with zero
+    /// physical slots (nothing was ever published, so nothing needs saving).
+    saved_native_roots: Option<(ir::Value, ir::Value)>,
     body: ir::Block,
     error_exit: ir::Block,
     refs: HashMap<ModuleFuncId, ir::FuncRef>,
@@ -331,6 +363,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             labels: HashMap::new(),
             vm: placeholder,
             base: placeholder,
+            saved_native_roots: None,
             body,
             error_exit,
             refs: HashMap::new(),
@@ -350,44 +383,9 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         let params = self.b.block_params(entry).to_vec();
         self.vm = params[0];
 
-        // Prologue: reserve and clear this frame's shadow-stack slots.
-        // `self.plan.num_slots` (codegen::roots), not `f.regs`: only
-        // registers that are both managed-capable and live across a GC
-        // safepoint get a slot at all, and two such registers share one
-        // when their safepoint-live ranges never overlap (see roots.rs's
-        // module doc). At least one slot always, regardless of rooting
-        // needs, so the shadow stack still bounds native recursion depth
-        // (see RootPlan::num_slots's doc).
-        let slots = self.plan.num_slots as i64;
-        self.base = self.b.ins().load(I64, MemFlagsData::trusted(), self.vm, VM_SS_TOP_OFFSET);
-        let top = self.b.ins().iadd_imm_s(self.base, slots * 8);
-        let limit = self.b.ins().load(I64, MemFlagsData::trusted(), self.vm, VM_SS_LIMIT_OFFSET);
-        let over = self.b.ins().icmp(IntCC::UnsignedGreaterThan, top, limit);
-        let overflow = self.b.create_block();
-        let setup = self.b.create_block();
-        self.b.ins().brif(over, overflow, &[], setup, &[]);
-
-        self.b.switch_to_block(overflow);
-        self.call_helper("rt_stack_overflow", &[self.vm]);
-        self.return_zeros();
-
-        self.b.switch_to_block(setup);
-        self.b.ins().store(MemFlagsData::trusted(), top, self.vm, VM_SS_TOP_OFFSET);
-        // F3b: zero only the physical slots codegen::roots's per-slot
-        // definite-initialization analysis says some reachable safepoint
-        // could otherwise scan before a valid Value has been stored into
-        // them (RootPlan::entry_zero); a slot every path to every reachable
-        // safepoint already stores a real Value into needs no prologue
-        // zero at all (see roots.rs's `entry_zero_slots` for the proof).
-        // BOTLISH_NATIVE_ROOT_INIT_OPT=0 restores the old "zero every slot"
-        // policy for differential testing.
-        let mut zero = None;
-        for slot in 0..slots {
-            if !self.root_init_opt || self.plan.entry_zero[slot as usize] {
-                let z = *zero.get_or_insert_with(|| self.b.ins().iconst(I64, 0));
-                self.b.ins().store(MemFlagsData::trusted(), z, self.base, (slot * 8) as i32);
-            }
-        }
+        // Prologue: reserve and clear this frame's physical root slots,
+        // wherever they live (see `prologue_root_frame`).
+        self.prologue_root_frame();
         let mut next = 1;
         if let Some(closure) = self.closure {
             self.b.def_var(closure, params[1]);
@@ -418,7 +416,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         self.b.ins().jump(self.body, &[]);
 
         self.b.switch_to_block(self.error_exit);
-        self.b.ins().store(MemFlagsData::trusted(), self.base, self.vm, VM_SS_TOP_OFFSET);
+        self.restore_root_frame();
         self.return_zeros();
 
         self.b.switch_to_block(self.body);
@@ -431,6 +429,134 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             return Err(BackendError::Bug(format!("function {} falls off its end", f.id)));
         }
         Ok(())
+    }
+
+    /// Reserves and clears this frame's physical root slots (codegen::
+    /// roots's `RootPlan::num_slots`/`slot_of`/`entry_zero`), in whichever
+    /// storage `self.plan.storage` says they live: the shared shadow-stack
+    /// array (`RootStorage::RuntimeStack`, unchanged from before this
+    /// milestone) or this function's own Cranelift-managed native frame
+    /// (`RootStorage::NativeFrame`, this milestone's own mechanism -- see
+    /// codegen::roots's `RootStorage` doc for the eligibility rule and why
+    /// it is sound). Either way, sets `self.base` to the address `def`/
+    /// `def_raw` store physical slot N at `self.base + N*8` -- `def`'s own
+    /// code is unchanged by which storage this turns out to be.
+    fn prologue_root_frame(&mut self) {
+        match self.plan.storage {
+            RootStorage::RuntimeStack => self.prologue_runtime_stack(),
+            RootStorage::NativeFrame if self.plan.num_slots == 0 => {
+                // Nothing to reserve, zero, or bound: `eligible_for_native_frame`
+                // already proved this function contains no Botlish call, so
+                // it cannot recurse through one either, and it has no root
+                // candidates at all (see `RootPlan::plan`'s num_slots, which
+                // applies no floor here) -- zero shadow-stack participation,
+                // full stop. `self.base` stays the unused placeholder `new`
+                // set it to: `def`/`def_raw` never read it when no register
+                // has a slot, and `restore_root_frame` below never touches
+                // it either (`self.saved_native_roots` stays None).
+            }
+            RootStorage::NativeFrame => self.prologue_native_frame(),
+        }
+    }
+
+    /// `RootStorage::RuntimeStack`'s prologue: reserve and clear this
+    /// frame's slots in the shared shadow-stack array, exactly as before
+    /// this milestone. `self.plan.num_slots` (codegen::roots), not
+    /// `f.regs`: only registers that are both managed-capable and live
+    /// across a GC safepoint get a slot at all, and two such registers
+    /// share one when their safepoint-live ranges never overlap (see
+    /// roots.rs's module doc). At least one slot always, regardless of
+    /// rooting needs, so the shadow stack still bounds native recursion
+    /// depth (see RootPlan::num_slots's doc).
+    fn prologue_runtime_stack(&mut self) {
+        let slots = self.plan.num_slots as i64;
+        self.base = self.b.ins().load(I64, MemFlagsData::trusted(), self.vm, VM_SS_TOP_OFFSET);
+        let top = self.b.ins().iadd_imm_s(self.base, slots * 8);
+        let limit = self.b.ins().load(I64, MemFlagsData::trusted(), self.vm, VM_SS_LIMIT_OFFSET);
+        let over = self.b.ins().icmp(IntCC::UnsignedGreaterThan, top, limit);
+        let overflow = self.b.create_block();
+        let setup = self.b.create_block();
+        self.b.ins().brif(over, overflow, &[], setup, &[]);
+
+        self.b.switch_to_block(overflow);
+        self.call_helper("rt_stack_overflow", &[self.vm]);
+        self.return_zeros();
+
+        self.b.switch_to_block(setup);
+        self.b.ins().store(MemFlagsData::trusted(), top, self.vm, VM_SS_TOP_OFFSET);
+        self.zero_root_slots(slots);
+    }
+
+    /// `RootStorage::NativeFrame`'s prologue for a function with at least
+    /// one physical root slot: allocates ONE Cranelift explicit stack slot
+    /// (this function's own native frame, not the shared shadow array) to
+    /// hold every physical slot contiguously, publishes its address and
+    /// slot count to `vm.native_roots_ptr`/`_len` (so the collector can
+    /// find it -- see runtime/heap.rs's and vm.rs's module docs), and saves
+    /// whatever was published there before so `restore_root_frame` can put
+    /// it back. No recursion-depth check: `eligible_for_native_frame`
+    /// already proved this function contains no Botlish call, so nothing
+    /// here can grow the native call stack, and (see codegen::roots's
+    /// `RootStorage` doc) at most one such registration can ever be active
+    /// along any single call chain, so a plain save/restore pair -- not a
+    /// list -- is sound.
+    fn prologue_native_frame(&mut self) {
+        let slots = self.plan.num_slots as i64;
+        let slot = self.b.create_sized_stack_slot(StackSlotData::new(
+            StackSlotKind::ExplicitSlot,
+            (slots * 8) as u32,
+            3,
+        ));
+        self.base = self.b.ins().stack_addr(I64, slot, 0);
+        let saved_ptr = self.b.ins().load(I64, MemFlagsData::trusted(), self.vm, VM_NATIVE_ROOTS_PTR_OFFSET);
+        let saved_len = self.b.ins().load(I64, MemFlagsData::trusted(), self.vm, VM_NATIVE_ROOTS_LEN_OFFSET);
+        self.saved_native_roots = Some((saved_ptr, saved_len));
+        self.b.ins().store(MemFlagsData::trusted(), self.base, self.vm, VM_NATIVE_ROOTS_PTR_OFFSET);
+        let count = self.iconst(slots as u64);
+        self.b.ins().store(MemFlagsData::trusted(), count, self.vm, VM_NATIVE_ROOTS_LEN_OFFSET);
+        self.zero_root_slots(slots);
+    }
+
+    /// F3b: zeroes only the physical slots codegen::roots's per-slot
+    /// definite-initialization analysis says some reachable safepoint could
+    /// otherwise scan before a valid Value has been stored into them
+    /// (RootPlan::entry_zero); a slot every path to every reachable
+    /// safepoint already stores a real Value into needs no prologue zero at
+    /// all (see roots.rs's `entry_zero_slots` for the proof).
+    /// BOTLISH_NATIVE_ROOT_INIT_OPT=0 restores the old "zero every slot"
+    /// policy for differential testing. Shared between both storage modes:
+    /// `self.base` already names wherever slot N actually lives (see
+    /// `prologue_root_frame`).
+    fn zero_root_slots(&mut self, slots: i64) {
+        let mut zero = None;
+        for slot in 0..slots {
+            if !self.root_init_opt || self.plan.entry_zero[slot as usize] {
+                let z = *zero.get_or_insert_with(|| self.b.ins().iconst(I64, 0));
+                self.b.ins().store(MemFlagsData::trusted(), z, self.base, (slot * 8) as i32);
+            }
+        }
+    }
+
+    /// Restores whatever this frame's prologue displaced, on every path out
+    /// of the function (each `Ret`/`RetMulti` and the shared `error_exit`):
+    /// `RuntimeStack` pops the shared shadow-stack array back to this
+    /// frame's own base; `NativeFrame` (when it published anything at all,
+    /// i.e. `self.plan.num_slots > 0`) restores whatever `vm.native_roots_
+    /// ptr`/`_len` held before this frame's prologue overwrote them. A
+    /// `NativeFrame` function with zero physical slots published nothing,
+    /// so there is nothing to restore.
+    fn restore_root_frame(&mut self) {
+        match self.plan.storage {
+            RootStorage::RuntimeStack => {
+                self.b.ins().store(MemFlagsData::trusted(), self.base, self.vm, VM_SS_TOP_OFFSET);
+            }
+            RootStorage::NativeFrame => {
+                if let Some((ptr, len)) = self.saved_native_roots {
+                    self.b.ins().store(MemFlagsData::trusted(), ptr, self.vm, VM_NATIVE_ROOTS_PTR_OFFSET);
+                    self.b.ins().store(MemFlagsData::trusted(), len, self.vm, VM_NATIVE_ROOTS_LEN_OFFSET);
+                }
+            }
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -916,13 +1042,13 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             }
             Inst::Ret(reg) => {
                 let v = self.get(*reg);
-                self.b.ins().store(MemFlagsData::trusted(), self.base, self.vm, VM_SS_TOP_OFFSET);
+                self.restore_root_frame();
                 self.b.ins().return_(&[v]);
                 self.terminated = true;
             }
             Inst::RetMulti(regs) => {
                 let values: Vec<_> = regs.iter().map(|r| self.get(*r)).collect();
-                self.b.ins().store(MemFlagsData::trusted(), self.base, self.vm, VM_SS_TOP_OFFSET);
+                self.restore_root_frame();
                 if values.len() > 2 {
                     // signature_n's hidden trailing pointer: fields 1.. go
                     // through it (Cranelift/the target ABI has only two
