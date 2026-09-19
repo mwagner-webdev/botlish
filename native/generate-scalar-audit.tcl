@@ -167,7 +167,7 @@ proc Triage {asm nirText} {
 # ---------------------------------------------------------------------------
 # Per-program processing
 
-proc ProcessProgram {label sourcePath hir asmPath summaryPath statusVar} {
+proc ProcessProgram {label sourcePath hir asmPath vcodePath summaryPath statusVar} {
     upvar 1 $statusVar status
     global scratch
 
@@ -211,11 +211,24 @@ proc ProcessProgram {label sourcePath hir asmPath summaryPath statusVar} {
     W $asmPath "$header$asm\n"
     file delete -force $objPath
 
+    if {[catch {native::vcode $hir} vcodeText]} {
+        dict set status kind failed
+        dict set status detail "vcode dump unavailable: $vcodeText"
+        return
+    }
+    set vcodeHeader "; source:  $sourcePath\n"
+    append vcodeHeader "; backend: Cranelift (specialize=1), native::vcode\n"
+    append vcodeHeader "; format:  Cranelift Debug for VCode, pre-regalloc machine-level lowering\n"
+    append vcodeHeader "; total machine code bytes: $totalBytes  (per function: $perFunctionBytes)\n"
+    append vcodeHeader ";\n"
+    W $vcodePath "$vcodeHeader$vcodeText\n"
+
     set triage [Triage $asm $nirText]
 
     set summary "source:  $sourcePath\n"
     append summary "backend: Cranelift (specialize=1)\n"
     append summary "asm:     [file tail $asmPath]\n"
+    append summary "vcode:   [file tail $vcodePath]\n"
     append summary "machine-code bytes: $totalBytes (per function: $perFunctionBytes)\n\n"
     append summary "functions:\n"
     foreach id [lsort -integer [dict keys $funcs]] {
@@ -251,6 +264,7 @@ foreach name $benchFiles {
     set path [file join $benchDir $name]
     set base [file rootname $name]
     set asmPath [file join $outdir bench "$base.asm"]
+    set vcodePath [file join $outdir bench "$base.vcode"]
     set summaryPath [file join $outdir bench "$base.summary.txt"]
     set status [dict create source "bench/$name" kind unknown]
     if {[catch {
@@ -259,10 +273,10 @@ foreach name $benchFiles {
         dict set status kind failed
         dict set status detail "could not load/build HIR: $err"
     } else {
-        ProcessProgram $base "bench/$name" $hir $asmPath $summaryPath status
+        ProcessProgram $base "bench/$name" $hir $asmPath $vcodePath $summaryPath status
     }
     if {[dict get $status kind] ne "ok"} {
-        file delete -force $asmPath $summaryPath
+        file delete -force $asmPath $vcodePath $summaryPath
         set statusPath [file join $outdir bench "$base.status.txt"]
         W $statusPath "source: bench/$name\nstatus: [dict get $status kind]\ndetail: [dict get $status detail]\n"
     } else {
@@ -277,6 +291,7 @@ puts "== examples/stdlib/ =="
 foreach name [corpus::names] {
     set path [corpus::path $name]
     set asmPath [file join $outdir examples-stdlib "$name.asm"]
+    set vcodePath [file join $outdir examples-stdlib "$name.vcode"]
     set summaryPath [file join $outdir examples-stdlib "$name.summary.txt"]
     set status [dict create source "examples/stdlib/$name.bot" kind unknown]
     if {[catch {
@@ -286,10 +301,10 @@ foreach name [corpus::names] {
         dict set status kind failed
         dict set status detail "could not load/build HIR: $err"
     } else {
-        ProcessProgram $name "examples/stdlib/$name.bot" $hir $asmPath $summaryPath status
+        ProcessProgram $name "examples/stdlib/$name.bot" $hir $asmPath $vcodePath $summaryPath status
     }
     if {[dict get $status kind] ne "ok"} {
-        file delete -force $asmPath $summaryPath
+        file delete -force $asmPath $vcodePath $summaryPath
         set statusPath [file join $outdir examples-stdlib "$name.status.txt"]
         W $statusPath "source: examples/stdlib/$name.bot\nstatus: [dict get $status kind]\ndetail: [dict get $status detail]\n"
     } else {
@@ -360,14 +375,14 @@ append index "- unsupported/failed programs: $unsupportedCount\n"
 append index "- total native functions inspected: $totalFunctions\n"
 append index "- total committed disassembly bytes of machine code: $totalBytes\n\n"
 append index "## Status\n\n"
-append index "| file | status | assembly | notes |\n"
+append index "| file | status | asm / vcode | notes |\n"
 append index "|---|---|---|---|\n"
 foreach r $results {
     set src [dict get $r source]
     set group [expr {[string match "bench/*" $src] ? "bench" : "examples-stdlib"}]
     set base [file rootname [file tail $src]]
     if {[dict get $r kind] eq "ok"} {
-        append index "| $src | compiled / inspected | \[$group/$base.asm\]($group/$base.asm) | [dict get $r functions] functions, [dict get $r bytes] bytes |\n"
+        append index "| $src | compiled / inspected | \[$group/$base.asm\]($group/$base.asm) / \[$group/$base.vcode\]($group/$base.vcode) | [dict get $r functions] functions, [dict get $r bytes] bytes |\n"
     } else {
         set detail [string map {"\n" " "} [dict get $r detail]]
         if {[string length $detail] > 160} { set detail "[string range $detail 0 157]..." }

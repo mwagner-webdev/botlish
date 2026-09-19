@@ -104,6 +104,8 @@ pub struct CompiledProgram {
     /// Address of each function's generic entry.
     pub generic_entries: Vec<usize>,
     pub clif: Option<String>,
+    /// Pre-regalloc Cranelift VCode emitted by the lowering pipeline.
+    pub vcode: Option<String>,
     /// Machine code bytes of each function (with its generic entry).
     pub code_sizes: Vec<u32>,
     /// Empty unless compiled with CompileOptions::alloc_sites.
@@ -154,6 +156,8 @@ impl CompiledProgram {
 pub struct CompileOptions {
     /// Keep the CLIF of every function.
     pub clif: bool,
+    /// Capture the pre-regalloc Cranelift VCode for this compilation.
+    pub vcode: bool,
     /// Emit the extra "store this instruction's site id into vm.alloc_site"
     /// before each allocating helper call, and build CompiledProgram::sites
     /// (runtime/metrics.rs's AllocMode::Sites). False recompiles to exactly
@@ -180,8 +184,8 @@ fn isa(pic: bool) -> Result<OwnedTargetIsa, BackendError> {
 
 pub struct CraneliftJit;
 
-impl Backend for CraneliftJit {
-    fn compile(&mut self, program: &Program, options: &CompileOptions) -> Result<CompiledProgram, BackendError> {
+impl CraneliftJit {
+    fn compile_actual(&mut self, program: &Program, options: &CompileOptions) -> Result<CompiledProgram, BackendError> {
         let mut builder = JITBuilder::with_isa(isa(false)?, cranelift_module::default_libcall_names());
         for (name, _, address) in helpers() {
             builder.symbol(name, address);
@@ -205,7 +209,74 @@ impl Backend for CraneliftJit {
         let entry_ptr = module.get_finalized_function(symbols.direct[0]);
         let generic_entries = symbols.entry.iter().map(|id| module.get_finalized_function(*id) as usize).collect();
         let entry: ProgramEntry = unsafe { std::mem::transmute(entry_ptr) };
-        Ok(CompiledProgram { entry, pool, generic_entries, clif: listing, code_sizes, sites, _module: module })
+        Ok(CompiledProgram { entry, pool, generic_entries, clif: listing, vcode: None, code_sizes, sites, _module: module })
+    }
+}
+
+impl Backend for CraneliftJit {
+    fn compile(&mut self, program: &Program, options: &CompileOptions) -> Result<CompiledProgram, BackendError> {
+        if options.vcode {
+            let capture = VCodeCapture::new();
+            let result = capture.run(|| self.compile_actual(program, options));
+            let mut compiled = result?;
+            compiled.vcode = capture.take();
+            return Ok(compiled);
+        }
+        self.compile_actual(program, options)
+    }
+}
+
+static VCODE_BUFFER: std::sync::OnceLock<std::sync::Mutex<Option<String>>> = std::sync::OnceLock::new();
+static VCODE_LOGGER: VCodeLogger = VCodeLogger;
+static VCODE_LOGGER_INIT: std::sync::Once = std::sync::Once::new();
+
+struct VCodeCapture {
+    buffer: &'static std::sync::Mutex<Option<String>>,
+}
+
+struct VCodeLogger;
+
+impl log::Log for VCodeLogger {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        metadata.level() <= log::Level::Trace
+    }
+
+    fn log(&self, record: &log::Record) {
+        if !self.enabled(record.metadata()) {
+            return;
+        }
+        let buffer = VCODE_BUFFER.get_or_init(|| std::sync::Mutex::new(None));
+        let mut guard = buffer.lock().unwrap();
+        let text = guard.get_or_insert_with(String::new);
+        let mut msg = record.args().to_string();
+        if !msg.ends_with('\n') {
+            msg.push('\n');
+        }
+        text.push_str(&msg);
+    }
+
+    fn flush(&self) {}
+}
+
+impl VCodeCapture {
+    fn new() -> Self {
+        VCODE_LOGGER_INIT.call_once(|| {
+            log::set_logger(&VCODE_LOGGER).unwrap();
+            log::set_max_level(log::LevelFilter::Trace);
+        });
+        let buffer = VCODE_BUFFER.get_or_init(|| std::sync::Mutex::new(None));
+        let mut guard = buffer.lock().unwrap();
+        *guard = Some(String::new());
+        Self { buffer }
+    }
+
+    fn run<T>(&self, f: impl FnOnce() -> Result<T, BackendError>) -> Result<T, BackendError> {
+        f()
+    }
+
+    fn take(&self) -> Option<String> {
+        let mut guard = self.buffer.lock().unwrap();
+        guard.take()
     }
 }
 

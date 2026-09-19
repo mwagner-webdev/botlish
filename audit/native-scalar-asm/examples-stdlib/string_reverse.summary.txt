@@ -1,7 +1,8 @@
 source:  examples/stdlib/string_reverse.bot
 backend: Cranelift (specialize=1)
 asm:     string_reverse.asm
-machine-code bytes: 1110 (per function: 523 398 189)
+vcode:   string_reverse.vcode
+machine-code bytes: 1172 (per function: 530 430 212)
 
 functions:
   0 <program entry>: nir-regs=11
@@ -17,7 +18,6 @@ GC roots (string_reverse.asm's NIR ids match roots.txt's "function N"):
     root candidates: 10
     max live roots: 5
     shadow slots: 5
-    entry zero slots: 4
   
   function 1 "reverse_from"
     NIR regs: 18
@@ -27,7 +27,6 @@ GC roots (string_reverse.asm's NIR ids match roots.txt's "function N"):
     root candidates: 5
     max live roots: 4
     shadow slots: 4
-    entry zero slots: 0
   
   function 2 "reverse_chars"
     NIR regs: 5
@@ -37,7 +36,6 @@ GC roots (string_reverse.asm's NIR ids match roots.txt's "function N"):
     root candidates: 3
     max live roots: 3
     shadow slots: 3
-    entry zero slots: 0
 
 mechanical pattern counts (triage only; see report for interpretation):
   7 x calls to other rt_* helpers

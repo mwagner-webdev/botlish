@@ -177,6 +177,15 @@ proc native::clif {hir args} {
     return [join $lines \n]
 }
 
+# The pre-regalloc Cranelift VCode of the program-mode HIR program HIR.
+proc native::vcode {hir args} {
+    set lines [Driver vcode [nir $hir {*}$args]]
+    if {[regexp {^error } [lindex $lines 0]]} {
+        Outcome $lines
+    }
+    return [join $lines \n]
+}
+
 # The GC-root report of every NIR function of the program-mode HIR program
 # HIR (codegen::roots's per-function diagnostics: register counts,
 # safepoints, root candidates, max simultaneous live roots, shadow slots).

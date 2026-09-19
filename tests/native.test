@@ -102,6 +102,12 @@ proc clifOf {text args} {
     native::clif [sourceHir $text] -specialize 1 {*}$args
 }
 
+# The lowered Cranelift VCode for source TEXT (pre-regalloc, exactly the
+# machine-level stage the final codegen uses before allocation).
+proc vcodeOf {text args} {
+    native::vcode [sourceHir $text] -specialize 1 {*}$args
+}
+
 # The CLIF of NIR function number ID (botlish_fn_ID).
 proc clifFunction {clif id} {
     regexp "; function $id \[^\n\]*\n(.*?)\n\}" $clif -> body

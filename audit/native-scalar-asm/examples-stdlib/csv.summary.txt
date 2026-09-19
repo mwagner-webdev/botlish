@@ -1,7 +1,8 @@
 source:  examples/stdlib/csv.bot
 backend: Cranelift (specialize=1)
 asm:     csv.asm
-machine-code bytes: 5997 (per function: 169 469 534 677 887 470 759 742 492 532 266)
+vcode:   csv.vcode
+machine-code bytes: 6228 (per function: 176 501 558 698 913 482 783 765 515 556 281)
 
 functions:
   0 <program entry>: nir-regs=2
@@ -25,7 +26,6 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     root candidates: 1
     max live roots: 1
     shadow slots: 1
-    entry zero slots: 0
   
   function 1 "peek"
     NIR regs: 11
@@ -35,7 +35,6 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     root candidates: 4
     max live roots: 3
     shadow slots: 3
-    entry zero slots: 0
   
   function 2 "peek"
     NIR regs: 15
@@ -45,7 +44,6 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     root candidates: 3
     max live roots: 3
     shadow slots: 3
-    entry zero slots: 0
   
   function 3 "scan_unquoted"
     NIR regs: 28
@@ -55,7 +53,6 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     root candidates: 4
     max live roots: 4
     shadow slots: 4
-    entry zero slots: 1
   
   function 4 "scan_quoted"
     NIR regs: 34
@@ -65,7 +62,6 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     root candidates: 12
     max live roots: 5
     shadow slots: 5
-    entry zero slots: 2
   
   function 5 "scan_field"
     NIR regs: 17
@@ -75,7 +71,6 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     root candidates: 5
     max live roots: 3
     shadow slots: 3
-    entry zero slots: 1
   
   function 6 "scan_record"
     NIR regs: 25
@@ -85,7 +80,6 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     root candidates: 9
     max live roots: 4
     shadow slots: 4
-    entry zero slots: 1
   
   function 7 "scan_record"
     NIR regs: 23
@@ -95,7 +89,6 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     root candidates: 8
     max live roots: 4
     shadow slots: 4
-    entry zero slots: 1
   
   function 8 "scan_records"
     NIR regs: 14
@@ -105,7 +98,6 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     root candidates: 7
     max live roots: 4
     shadow slots: 4
-    entry zero slots: 1
   
   function 9 "scan_records"
     NIR regs: 11
@@ -115,7 +107,6 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     root candidates: 6
     max live roots: 4
     shadow slots: 4
-    entry zero slots: 1
   
   function 10 "csv_parse"
     NIR regs: 5
@@ -125,7 +116,6 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     root candidates: 3
     max live roots: 3
     shadow slots: 3
-    entry zero slots: 1
 
 mechanical pattern counts (triage only; see report for interpretation):
   12 x calls to rt_int_add

@@ -1,7 +1,8 @@
 source:  examples/stdlib/matmul.bot
 backend: Cranelift (specialize=1)
 asm:     matmul.asm
-machine-code bytes: 4949 (per function: 917 808 544 676 665 788 551)
+vcode:   matmul.vcode
+machine-code bytes: 5271 (per function: 944 857 609 732 718 844 567)
 
 functions:
   0 <program entry>: nir-regs=32
@@ -21,7 +22,6 @@ GC roots (matmul.asm's NIR ids match roots.txt's "function N"):
     root candidates: 19
     max live roots: 5
     shadow slots: 5
-    entry zero slots: 2
   
   function 1 "dot"
     NIR regs: 18
@@ -31,7 +31,6 @@ GC roots (matmul.asm's NIR ids match roots.txt's "function N"):
     root candidates: 7
     max live roots: 6
     shadow slots: 6
-    entry zero slots: 0
   
   function 2 "product_row"
     NIR regs: 22
@@ -41,7 +40,6 @@ GC roots (matmul.asm's NIR ids match roots.txt's "function N"):
     root candidates: 11
     max live roots: 8
     shadow slots: 8
-    entry zero slots: 0
   
   function 3 "product_row"
     NIR regs: 19
@@ -51,7 +49,6 @@ GC roots (matmul.asm's NIR ids match roots.txt's "function N"):
     root candidates: 10
     max live roots: 7
     shadow slots: 7
-    entry zero slots: 0
   
   function 4 "product_rows"
     NIR regs: 22
@@ -61,7 +58,6 @@ GC roots (matmul.asm's NIR ids match roots.txt's "function N"):
     root candidates: 10
     max live roots: 7
     shadow slots: 7
-    entry zero slots: 1
   
   function 5 "product_rows"
     NIR regs: 19
@@ -71,7 +67,6 @@ GC roots (matmul.asm's NIR ids match roots.txt's "function N"):
     root candidates: 11
     max live roots: 8
     shadow slots: 8
-    entry zero slots: 1
   
   function 6 "matmul"
     NIR regs: 18
@@ -81,7 +76,6 @@ GC roots (matmul.asm's NIR ids match roots.txt's "function N"):
     root candidates: 5
     max live roots: 5
     shadow slots: 5
-    entry zero slots: 3
 
 mechanical pattern counts (triage only; see report for interpretation):
   3 x calls to rt_int_add

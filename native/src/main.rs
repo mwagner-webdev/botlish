@@ -109,7 +109,7 @@ fn extract_alloc_mode(args: &[String]) -> Option<(Vec<String>, AllocMode)> {
 
 fn cli(args: &[String]) -> i32 {
     let usage = || {
-        eprintln!("usage: botlish-native run|clif|size|roots|check FILE.nir [--alloc off|summary|sites] | bench RUNS FILE.nir [--alloc ...] | object OUT FILE.nir");
+        eprintln!("usage: botlish-native run|clif|vcode|size|roots|check FILE.nir [--alloc off|summary|sites] | bench RUNS FILE.nir [--alloc ...] | object OUT FILE.nir");
         2
     };
     let Some((args, alloc_mode)) = extract_alloc_mode(args) else { return usage() };
@@ -124,7 +124,7 @@ fn cli(args: &[String]) -> i32 {
             _ => return usage(),
         },
         ("object", [_, file, ..]) => (1, file),
-        ("run" | "clif" | "size" | "roots" | "check", [file, ..]) => (1, file),
+        ("run" | "clif" | "vcode" | "size" | "roots" | "check", [file, ..]) => (1, file),
         _ => return usage(),
     };
     let text = match read(file) {
@@ -231,7 +231,7 @@ fn sites_tcl(sites: &[Site], stats: &std::collections::HashMap<u32, SiteStats>) 
 fn execute(command: &str, program: &nir::Program, runs: usize, alloc_mode: AllocMode) -> i32 {
     let started = Instant::now();
     let mut backend = CraneliftJit;
-    let options = CompileOptions { clif: command == "clif", alloc_sites: alloc_mode.sites() };
+    let options = CompileOptions { clif: command == "clif", vcode: command == "vcode", alloc_sites: alloc_mode.sites() };
     let compiled = match backend.compile(program, &options) {
         Ok(c) => c,
         Err(e) => {
@@ -242,6 +242,10 @@ fn execute(command: &str, program: &nir::Program, runs: usize, alloc_mode: Alloc
     let compile_us = started.elapsed().as_micros();
     if command == "clif" {
         emit(compiled.clif.as_deref().unwrap_or(""));
+        return 0;
+    }
+    if command == "vcode" {
+        emit(compiled.vcode.as_deref().unwrap_or(""));
         return 0;
     }
     if command == "size" {
