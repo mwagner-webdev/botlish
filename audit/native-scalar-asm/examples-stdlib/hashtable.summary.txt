@@ -2,7 +2,7 @@ source:  examples/stdlib/hashtable.bot
 backend: Cranelift (specialize=1)
 asm:     hashtable.asm
 vcode:   hashtable.vcode
-machine-code bytes: 13704 (per function: 45 28 28 28 28 412 524 110 61 61 61 61 61 174 190 233 860 1328 437 261 436 456 1257 803 841 681 1240 908 1253 838)
+machine-code bytes: 13552 (per function: 45 28 28 28 28 412 524 116 61 61 61 61 61 174 190 233 852 1312 437 261 428 458 1153 803 841 681 1232 892 1253 838)
 
 functions:
   0 <program entry>: nir-regs=1
@@ -10,9 +10,9 @@ functions:
   2 ht_empty_state<generic>: nir-regs=2
   3 ht_occupied_state<generic>: nir-regs=2
   4 ht_tombstone_state<generic>: nir-regs=2
-  5 ht_fill_empty<mutarray, int, int>: nir-regs=12
+  5 ht_fill_empty<mutarray, int, int>: nir-regs=14
   6 ht_alloc<int>: nir-regs=29
-  7 ht_new<generic>: nir-regs=2
+  7 ht_new<generic>: nir-regs=4
   8 ht_controls<mutarray>: nir-regs=4
   9 ht_keys<mutarray>: nir-regs=4
   10 ht_values<mutarray>: nir-regs=4
@@ -21,19 +21,19 @@ functions:
   13 ht_capacity<mutarray>: nir-regs=3
   14 ht_probe_start<mutarray, str>: nir-regs=5
   15 ht_probe_next<mutarray, int>: nir-regs=7
-  16 ht_find_get<mutarray, str, int>: nir-regs=28
-  17 ht_find_insert<mutarray, str, int, int>: nir-regs=41
+  16 ht_find_get<mutarray, str, int>: nir-regs=32
+  17 ht_find_insert<mutarray, str, int, int>: nir-regs=47
   18 ht_get<mutarray, str>: nir-regs=12
   19 ht_contains<mutarray, str>: nir-regs=7
-  20 ht_rehash_probe<mutarray, int, int>: nir-regs=12
-  21 ht_rehash_insert<list<mutarray>, int, any, any>: nir-regs=14
-  22 ht_rehash_scan<list, int, int, list<mutarray>, int>: nir-regs=24
+  20 ht_rehash_probe<mutarray, int, int>: nir-regs=14
+  21 ht_rehash_insert<list<mutarray>, int, any, any>: nir-regs=16
+  22 ht_rehash_scan<list, int, int, list<mutarray>, int>: nir-regs=29
   23 ht_rehash<mutarray, int>: nir-regs=30
   24 ht_should_grow<mutarray>: nir-regs=15
   25 ht_grow_or_clean<mutarray>: nir-regs=12
-  26 ht_place<mutarray, int, str, str>: nir-regs=31
-  27 ht_set<mutarray, str, str>: nir-regs=34
-  28 ht_delete<mutarray, str>: nir-regs=34
+  26 ht_place<mutarray, int, str, str>: nir-regs=35
+  27 ht_set<mutarray, str, str>: nir-regs=36
+  28 ht_delete<mutarray, str>: nir-regs=36
   29 sample<generic>: nir-regs=28
 
 GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
@@ -98,9 +98,9 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 5 "ht_fill_empty"
-    NIR regs: 12
-    raw regs: 1
-    managed-capable regs: 11
+    NIR regs: 14
+    raw regs: 2
+    managed-capable regs: 12
     safepoints: 2
     root candidates: 4
     max live roots: 4
@@ -122,9 +122,9 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 7 "ht_new"
-    NIR regs: 2
-    raw regs: 0
-    managed-capable regs: 2
+    NIR regs: 4
+    raw regs: 1
+    managed-capable regs: 3
     safepoints: 2
     root candidates: 1
     max live roots: 1
@@ -230,9 +230,9 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 16 "ht_find_get"
-    NIR regs: 28
-    raw regs: 3
-    managed-capable regs: 25
+    NIR regs: 32
+    raw regs: 5
+    managed-capable regs: 27
     safepoints: 5
     root candidates: 4
     max live roots: 4
@@ -242,9 +242,9 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 17 "ht_find_insert"
-    NIR regs: 41
-    raw regs: 2
-    managed-capable regs: 39
+    NIR regs: 47
+    raw regs: 5
+    managed-capable regs: 42
     safepoints: 7
     root candidates: 5
     max live roots: 5
@@ -278,9 +278,9 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 20 "ht_rehash_probe"
-    NIR regs: 12
-    raw regs: 1
-    managed-capable regs: 11
+    NIR regs: 14
+    raw regs: 2
+    managed-capable regs: 12
     safepoints: 2
     root candidates: 5
     max live roots: 4
@@ -290,9 +290,9 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 21 "ht_rehash_insert"
-    NIR regs: 14
-    raw regs: 0
-    managed-capable regs: 14
+    NIR regs: 16
+    raw regs: 1
+    managed-capable regs: 15
     safepoints: 2
     root candidates: 8
     max live roots: 7
@@ -302,13 +302,13 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 22 "ht_rehash_scan"
-    NIR regs: 24
-    raw regs: 1
-    managed-capable regs: 23
-    safepoints: 3
-    root candidates: 13
-    max live roots: 11
-    shadow slots: 11
+    NIR regs: 29
+    raw regs: 5
+    managed-capable regs: 24
+    safepoints: 2
+    root candidates: 11
+    max live roots: 10
+    shadow slots: 10
     entry zero slots: 1
     depth reservation: no
     storage: native frame
@@ -350,9 +350,9 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 26 "ht_place"
-    NIR regs: 31
-    raw regs: 4
-    managed-capable regs: 27
+    NIR regs: 35
+    raw regs: 6
+    managed-capable regs: 29
     safepoints: 9
     root candidates: 12
     max live roots: 6
@@ -362,9 +362,9 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 27 "ht_set"
-    NIR regs: 34
-    raw regs: 6
-    managed-capable regs: 28
+    NIR regs: 36
+    raw regs: 7
+    managed-capable regs: 29
     safepoints: 11
     root candidates: 10
     max live roots: 5
@@ -374,9 +374,9 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 28 "ht_delete"
-    NIR regs: 34
-    raw regs: 5
-    managed-capable regs: 29
+    NIR regs: 36
+    raw regs: 6
+    managed-capable regs: 30
     safepoints: 10
     root candidates: 11
     max live roots: 4
@@ -398,7 +398,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
 
 mechanical pattern counts (triage only; see report for interpretation):
-  8 x calls to rt_int_add
+  7 x calls to rt_int_add
   2 x calls to rt_int_sub
   3 x calls to rt_int_mul
   9 x calls to rt_int_cmp
