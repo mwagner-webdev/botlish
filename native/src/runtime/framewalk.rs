@@ -20,7 +20,7 @@
 //! does, by construction (`codegen::roots::is_safepoint` only fires for an
 //! instruction that itself compiles to a runtime or Botlish call). This
 //! crate's own runtime helpers (rt_cell_new, Vm::alloc, ...) are built with
-//! the identical prologue shape because `native/.cargo/config.toml` forces
+//! the identical prologue shape because `.cargo/config.toml` forces
 //! `-C force-frame-pointers=yes` for this crate's own build (confirmed by
 //! disassembling this crate's own release binary, with and without that
 //! flag -- see that config file's own comment).

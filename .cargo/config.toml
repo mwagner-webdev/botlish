@@ -1,7 +1,21 @@
 # Force frame pointers (`push rbp; mov rbp,rsp` at the start of every
-# non-trivial function) for this crate's own build.
+# non-trivial function) for native/'s build.
 #
-# The native-stack-map GC root walker (runtime/framewalk.rs) discovers a
+# This file lives at the REPO ROOT, not native/.cargo/config.toml, even
+# though native/ is the only crate it applies to. Cargo's config-file
+# discovery walks up from the current *working directory* at invocation
+# time, not from --manifest-path's directory: the canonical build command
+# this repo documents (AGENTS.md, .github/actions/build-native) is `cargo
+# build --release --manifest-path native/Cargo.toml`, run with CWD at the
+# repo root -- a config file placed at native/.cargo/config.toml is never
+# found that way (confirmed empirically: rt_cell_new disassembled with no
+# `push rbp` at all when the config lived there and the build ran with
+# --manifest-path from the repo root, despite `cd native && cargo build`
+# picking it up perfectly, since CWD was native/ in that case). Repo root
+# is an ancestor of both `native/` and the repo root itself, so this
+# location is found either way.
+#
+# The native-stack-map GC root walker (native/src/runtime/framewalk.rs) discovers a
 # suspended Botlish frame's roots by walking the machine call stack's rbp
 # chain from wherever a collection happens to trigger (always somewhere
 # inside a runtime helper -- see Vm::alloc/collect_with) back up to the

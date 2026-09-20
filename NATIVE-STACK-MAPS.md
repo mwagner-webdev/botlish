@@ -124,7 +124,7 @@ step never computes a stack-slot offset itself.
   before the `push`.
 - Rust code does **not** get this for free: `rt_cell_new` (a representative
   runtime helper) disassembles with no `push rbp` at all in a plain release
-  build. `native/.cargo/config.toml` adds `-C force-frame-pointers=yes` for
+  build. `.cargo/config.toml` adds `-C force-frame-pointers=yes` for
   this crate's own build; the same helper then disassembles with the
   identical `push rbp; mov rbp,rsp` shape, confirmed by disassembling this
   crate's own release binary both ways.
@@ -332,7 +332,7 @@ configurations).
 
 Best-of-N, JIT compile time excluded (`native::measure`); "before" =
 `c8be6d1`/this commit's parent (rebuilt fresh in a separate worktree, same
-Cranelift pin, same rustc), "after" = this commit. `native/.cargo/config.toml`
+Cranelift pin, same rustc), "after" = this commit. `.cargo/config.toml`
 (force-frame-pointers) applies to both the runtime helpers *and* is a
 build-time-only cost — it does not add instructions to any Botlish call.
 
@@ -405,10 +405,51 @@ this milestone, and why the compile-time metadata format does not
 foreclose it: §1's `FunctionMap` mentions no register, x86-64 or
 otherwise).
 
+## Addendum: CI failure and fix (config-file discovery is CWD-based)
+
+The first push of this milestone (commit `43aa3a1`) passed the full suite,
+including under `BOTLISH_NATIVE_GC_STRESS=1`, in this session's own sandbox
+— but failed CI with 39 test failures, many crashing with `child killed:
+segmentation violation`, the rest producing corrupted values (e.g.
+`root-retention-1` under-collecting, `stack-map-slot-reuse-1` reading one
+root's slot into another's result). All were GC-stress/allocation-heavy
+scenarios — exactly the ones that actually exercise `runtime::framewalk`.
+
+Root cause: this session always built with `cd native && cargo build
+--release`, so `native/.cargo/config.toml` was always discovered (CWD was
+`native/`). CI, and this repo's own documented build command (`AGENTS.md`),
+instead run `cargo build --release --manifest-path native/Cargo.toml` from
+the **repo root**. Cargo's `.cargo/config.toml` discovery walks up from the
+current *working directory* at invocation time — never from
+`--manifest-path`'s directory — so that invocation never found the config
+file at all, and `-C force-frame-pointers=yes` silently never applied.
+Every runtime-helper frame the walker climbs through then lacked a
+frame-pointer chain, so `runtime::framewalk::walk` read garbage at
+`[rbp+0]`/`[rbp+8]` partway up the ascent: sometimes a wild pointer
+(segfault), sometimes plausible-looking garbage misread as a root address
+(silent corruption) — matching every observed symptom.
+
+Confirmed empirically, not just reasoned about: with the config file still
+at `native/.cargo/config.toml`, a *full, from-scratch* rebuild (every
+dependency recompiled, cache eliminated as a variable) via `cargo build
+--release --manifest-path native/Cargo.toml` run **from the repo root**
+still disassembled `rt_cell_new` with no `push rbp` at all — proving this
+was a config-discovery bug, not a stale-cache artifact.
+
+Fix: moved the file to the repo root (`.cargo/config.toml`) — an ancestor
+of both `native/` (so `cd native && cargo build` still finds it) and the
+repo root itself (so `--manifest-path native/Cargo.toml` invoked from
+there, matching CI and `AGENTS.md`, finds it too). Re-verified the same
+way: a from-scratch build via the exact CI invocation now disassembles
+`rt_cell_new` with `push rbp; mov rbp,rsp`, and the full suite (interp/
+compile backends) plus every previously-failing GC-stress test passes
+against a binary built that way.
+
 ## Files changed
 
-- `native/.cargo/config.toml` (new): forces frame pointers for this
-  crate's own build.
+- `.cargo/config.toml` (new; at the repo root, not `native/.cargo/`, for
+  the reason in the addendum above): forces frame pointers for `native/`'s
+  build.
 - `native/src/runtime/framemap.rs` (new): the stack-map table (§1).
 - `native/src/runtime/framewalk.rs` (new): the x86-64 frame walker (§4-5).
 - `native/src/codegen/roots.rs`: `plan`'s `native_frame_supported`
