@@ -143,16 +143,16 @@ proc underGcStress {body} {
 # active native stack bounds instead. See PHASE-B-MILESTONE.md for the
 # updated assumption set.
 
-test stack-map-fib-1 {fib<int> uses NativeFrame storage without a shadow depth reservation on the primary path} -body {
+test stack-map-fib-1 {fib<int> keeps NativeFrame storage and retains the shadow depth reservation until native guard-page overflow is implemented} -body {
     set report [native::roots [sourceIrHir [file join $::projectRoot bench fib.ir]]]
     list [storageOf $report fib] [depthReservationOf $report fib]
-} -result {{native frame} no}
+} -result {{native frame} yes}
 
-test stack-map-fib-2 {fib<int>'s CLIF no longer imports the shadow depth-token overflow helper after Phase B} -body {
+test stack-map-fib-2 {fib<int>'s CLIF still imports the shadow depth-token overflow helper while the actual native guard-page path is pending} -body {
     set hir [sourceIrHir [file join $::projectRoot bench fib.ir]]
     set clif [native::clif $hir]
     usesHelper $clif [clifFunctionBlock $clif fib] rt_stack_overflow
-} -result 0
+} -result 1
 
 test stack-map-fib-3 {fib<int> still computes the right answer, natively} -body {
     native "fn fib(n):\n    if n < 2:\n        return n\n    fib(n - 1) + fib(n - 2)\n\nfib(15)"

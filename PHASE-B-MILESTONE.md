@@ -1,63 +1,64 @@
-# Phase B milestone: native stack bounds replace the remaining shadow recursion guard
+# Phase B milestone: NativeStack bounds are useful, but real native guard-page overflow remains pending
 
-This document records the Phase B change in the native runtime and the updated test assumptions that go with it.
+This document records the current state of the native-stack-overflow work accurately: the `NativeStack` bounds integration and the frame-walk bounds validation are useful improvements, but they do not implement the real Linux guard-page control path for native stack exhaustion.
 
-## Scope
+## Current status
 
-This milestone does not re-implement the earlier Phase A root-storage work. The stack-map/native-frame root discovery already in place remains the basis of the design. The remaining gap was the last primary-path recursion-depth token: a shared shadow-stack reservation that still existed even though root storage had already moved off the runtime shadow stack.
+The repository already has several important pieces in place:
 
-Phase B removes that remaining shadow recursion-depth guard from the primary x86_64/Linux path and replaces it with the active native stack bounds.
+- `NativeStack` reads the active thread stack bounds and exposes `contains_address`/`contains_frame` checks.
+- `framewalk.rs` stops walking when the rbp chain or safepoint addresses leave the bounds of the active stack.
+- the collector continues to rely on native frame root discovery and stack maps for GC root traversal.
 
-## New contract
+Those are valid improvements, but they are not the same thing as native-stack-overflow detection. A frame walker runs during collection, after the stack has already been reached; it cannot detect the ordinary guard-page fault that occurs when recursive execution pushes past the native stack limit.
+
+The current implementation therefore keeps the existing shadow-recursion reservation as the actual overflow-safety mechanism until a real signal-and-recovery path is demonstrated.
+
+## Safe contract for now
 
 On the primary path:
 
-- GC roots live in native frame slots, discovered through stack maps plus the rbp chain.
-- The collector walks the active native call stack and uses per-safepoint metadata to find live roots.
-- Recursion overflow is detected using the current thread's native stack bounds, not a one-slot `ss_top`/`ss_limit` reservation.
-- The old `rt_stack_overflow` helper is no longer expected on the primary path for the shadow depth-token case.
+- GC roots still live in native frame slots and are discovered through stack maps plus the rbp chain.
+- the collector may still use `NativeStack` bounds to constrain frame walking and to reject out-of-bounds frames during collection.
+- recursion overflow is still guarded by the existing shadow depth token until the real guard-page signal path is in place.
+- `rt_stack_overflow` remains expected on recursive call paths where the old guard is still the effective overflow check.
 
 On the legacy fallback path:
 
-- The old `RuntimeStack` guard remains available for unsupported hosts / non-stack-map execution.
-- That fallback still preserves the older behavior and safety net, but it is no longer the default when the native frame-walk path is active.
+- the old `RuntimeStack` guard remains available for unsupported hosts or non-stack-map execution.
+- fallback behavior is still preserved as a compatibility and safety net.
 
-## Why the change is correct
+## Why this is the correct interim state
 
-The underlying GC behavior is unchanged: the test suite still checks the same things as before, just under the new assumption that stack overflow protection comes from the machine stack itself rather than the shadow stack.
+The root cause is that guard-page faults are not equivalent to frame-walk termination:
 
-The core invariants remain:
+- `framewalk.rs` only runs while collecting, not while ordinary recursive execution is still pushing frames
+- the OS produces a SIGSEGV/SIGBUS when the stack hits the guard page
+- the runtime must positively identify that fault as belonging to the active native stack guard region and recover through a safe, controlled path
+- that actual fault-handling mechanism is not yet implemented, so removing the shadow depth reservation would discard the only working overflow safety mechanism
 
-- root discovery still works across calls and recursive frames
-- stack maps still locate live values in suspended Botlish frames
-- collections under `BOTLISH_NATIVE_GC_STRESS` still preserve live roots
-- function behavior and runtime semantics are unchanged
+This milestone therefore keeps the old shadow depth bookkeeping in place while retaining the NativeStack/framewalk improvements as independent work.
 
-The only changed assumption is where the recursion limit is enforced.
+## Test expectations retained
 
-## Updated test assumptions
+The current test suite reflects the safe intermediate state:
 
-The tests now capture the Phase B contract rather than the old shadow-depth implementation detail.
+- `fib<int>` keeps `NativeFrame` storage
+- recursive functions on the primary path still import the shadow depth-token overflow helper until the real guard-page path exists
+- the new `NativeStack` bounds checks remain valid and independent of overflow detection
+- the runtime still distinguishes genuine stack-overflow conditions from unrelated faults only once that actual signal path is added
 
-Examples:
+This is intentionally conservative: it preserves the working runtime safety mechanism while leaving the separate native-stack-bounds improvement in place.
 
-- `fib<int>` still uses `NativeFrame` storage
-- `fib<int>` no longer expects a shadow depth reservation on the primary path
-- call-crossing roots still resolve to native frame storage
-- `rt_stack_overflow` is no longer required in the primary stack-map CLIF path for these cases
+## Deliverable status
 
-This preserves the same functional coverage as before while removing the implementation-specific expectation that a recursion guard must use the shared runtime shadow stack.
+The project is not yet ready to claim the Phase B milestone as complete. The missing pieces are:
 
-## Coverage retained
+- actual guard-page size/region discovery for the active thread
+- exact Linux fault signal behavior on guard-page access
+- whether `sigaltstack` is required and how it is used safely
+- a real recovery path that leaves the signal handler and resumes execution on a usable stack
+- a test that intentionally exhausts the real native stack and verifies the controlled Botlish stack-overflow result
+- a test showing an unrelated invalid-memory fault is not classified as stack overflow
 
-The rewritten suite still covers the same functionality as the pre-change version:
-
-- root storage layout
-- native frame reuse and slot assignment
-- multi-frame root discovery across recursive calls
-- foreign frame boundary handling
-- GC under stress
-- call-crossing root survival
-- value preservation across later allocations
-
-In short, the behavior remains the same; only the overflow mechanism moves from the shadow stack to the thread's actual native stack bounds.
+Until that is implemented and demonstrated, the shadow depth reservation remains necessary and correct.
