@@ -1,270 +1,235 @@
 ; source:  examples/stdlib/string_replace.bot
 ; backend: Cranelift (specialize=1), native::vcode
 ; format:  Cranelift Debug for VCode, pre-regalloc machine-level lowering
-; total machine code bytes: 2822  (per function: 736 476 1204 406)
+; total machine code bytes: 2322  (per function: 561 476 1012 273)
 ;
 switch to block2
-inserted inst0: v1 = load.i64 notrap aligned v0
-inserted inst2: v3 = iadd.i64 v1, v2  ; v2 = 8
-inserted inst3: v4 = load.i64 notrap aligned v0+8
-inserted inst4: v5 = icmp.i64 ugt v3, v4
-inserted inst5: brif.i8 v5, block3, block4
-switch to block3
-inserted inst6: v6 = call fn0(v0)
-inserted inst7: v7 = iconst.i64 0
-inserted inst8: return v7  ; v7 = 0
-switch to block4
-inserted inst9: store.i64 notrap aligned v3, v0
-inserted inst10: v8 = iconst.i64 0
-inserted inst11: store.i64 notrap aligned v8, v1  ; v8 = 0
-inserted inst12: v9 = stack_addr.i64 ss0
-inserted inst13: v10 = iconst.i64 0
-inserted inst14: store.i64 notrap aligned v10, v9+24  ; v10 = 0
-inserted inst15: store.i64 notrap aligned v10, v9+32  ; v10 = 0
-inserted inst16: store.i64 notrap aligned v10, v9+40  ; v10 = 0
-inserted inst17: store.i64 notrap aligned v10, v9+48  ; v10 = 0
-inserted inst18: jump block0
+inserted inst0: v1 = stack_addr.i64 ss0
+inserted inst1: v2 = iconst.i64 0
+inserted inst2: store.i64 notrap aligned v2, v1+24  ; v2 = 0
+inserted inst3: store.i64 notrap aligned v2, v1+32  ; v2 = 0
+inserted inst4: store.i64 notrap aligned v2, v1+40  ; v2 = 0
+inserted inst5: store.i64 notrap aligned v2, v1+48  ; v2 = 0
+inserted inst6: jump block0
 switch to block1
-inserted inst19: store.i64 notrap aligned v1, v0
-inserted inst20: v11 = iconst.i64 0
-inserted inst21: return v11  ; v11 = 0
+inserted inst7: v3 = iconst.i64 0
+inserted inst8: return v3  ; v3 = 0
 switch to block0
-inserted inst22: v12 = load.i64 notrap aligned v0+16
-inserted inst23: v13 = load.i64 notrap aligned v12
-try_def_var: var0 = v13
-inserted inst24: store.i64 notrap aligned v13, v9
-inserted inst25: v14 = load.i64 notrap aligned v0+16
-inserted inst26: v15 = load.i64 notrap aligned v14+8
-try_def_var: var1 = v15
-inserted inst27: store.i64 notrap aligned v15, v9+8
-inserted inst28: v16 = load.i64 notrap aligned v0+16
-inserted inst29: v17 = load.i64 notrap aligned v16+16
-try_def_var: var2 = v17
-inserted inst30: store.i64 notrap aligned v17, v9+16
-inserted inst31: v18 = call fn1(v0, v13, v15, v17)
-inserted inst32: brif.i64 v18, block5, block1
+inserted inst9: v4 = load.i64 notrap aligned v0+16
+inserted inst10: v5 = load.i64 notrap aligned v4
+try_def_var: var0 = v5
+inserted inst11: store.i64 notrap aligned v5, v1
+inserted inst12: v6 = load.i64 notrap aligned v0+16
+inserted inst13: v7 = load.i64 notrap aligned v6+8
+try_def_var: var1 = v7
+inserted inst14: store.i64 notrap aligned v7, v1+8
+inserted inst15: v8 = load.i64 notrap aligned v0+16
+inserted inst16: v9 = load.i64 notrap aligned v8+16
+try_def_var: var2 = v9
+inserted inst17: store.i64 notrap aligned v9, v1+16
+inserted inst18: v10 = call fn0(v0, v5, v7, v9)
+inserted inst19: brif.i64 v10, block3, block1
+switch to block3
+try_def_var: var3 = v10
+inserted inst20: store.i64 notrap aligned v10, v1
+inserted inst21: v11 = load.i64 notrap aligned v0+16
+inserted inst22: v12 = load.i64 notrap aligned v11
+try_def_var: var4 = v12
+inserted inst23: store.i64 notrap aligned v12, v1+8
+inserted inst24: v13 = load.i64 notrap aligned v0+16
+inserted inst25: v14 = load.i64 notrap aligned v13+24
+try_def_var: var5 = v14
+inserted inst26: store.i64 notrap aligned v14, v1+16
+inserted inst27: v15 = load.i64 notrap aligned v0+16
+inserted inst28: v16 = load.i64 notrap aligned v15+32
+try_def_var: var6 = v16
+inserted inst29: store.i64 notrap aligned v16, v1+24
+inserted inst30: v17 = call fn0(v0, v12, v14, v16)
+inserted inst31: brif.i64 v17, block4, block1
+switch to block4
+try_def_var: var7 = v17
+inserted inst32: store.i64 notrap aligned v17, v1+8
+inserted inst33: v18 = load.i64 notrap aligned v0+16
+inserted inst34: v19 = load.i64 notrap aligned v18+40
+try_def_var: var8 = v19
+inserted inst35: store.i64 notrap aligned v19, v1+16
+inserted inst36: v20 = load.i64 notrap aligned v0+16
+inserted inst37: v21 = load.i64 notrap aligned v20+48
+try_def_var: var9 = v21
+inserted inst38: store.i64 notrap aligned v21, v1+24
+inserted inst39: v22 = load.i64 notrap aligned v0+16
+inserted inst40: v23 = load.i64 notrap aligned v22+24
+try_def_var: var10 = v23
+inserted inst41: store.i64 notrap aligned v23, v1+32
+inserted inst42: v24 = call fn0(v0, v19, v21, v23)
+inserted inst43: brif.i64 v24, block5, block1
 switch to block5
-try_def_var: var3 = v18
-inserted inst33: store.i64 notrap aligned v18, v9
-inserted inst34: v19 = load.i64 notrap aligned v0+16
-inserted inst35: v20 = load.i64 notrap aligned v19
-try_def_var: var4 = v20
-inserted inst36: store.i64 notrap aligned v20, v9+8
-inserted inst37: v21 = load.i64 notrap aligned v0+16
-inserted inst38: v22 = load.i64 notrap aligned v21+24
-try_def_var: var5 = v22
-inserted inst39: store.i64 notrap aligned v22, v9+16
-inserted inst40: v23 = load.i64 notrap aligned v0+16
-inserted inst41: v24 = load.i64 notrap aligned v23+32
-try_def_var: var6 = v24
-inserted inst42: store.i64 notrap aligned v24, v9+24
-inserted inst43: v25 = call fn1(v0, v20, v22, v24)
-inserted inst44: brif.i64 v25, block6, block1
+try_def_var: var11 = v24
+inserted inst44: store.i64 notrap aligned v24, v1+16
+inserted inst45: v25 = load.i64 notrap aligned v0+16
+inserted inst46: v26 = load.i64 notrap aligned v25+56
+try_def_var: var12 = v26
+inserted inst47: store.i64 notrap aligned v26, v1+24
+inserted inst48: v27 = load.i64 notrap aligned v0+16
+inserted inst49: v28 = load.i64 notrap aligned v27
+try_def_var: var13 = v28
+inserted inst50: store.i64 notrap aligned v28, v1+32
+inserted inst51: v29 = load.i64 notrap aligned v0+16
+inserted inst52: v30 = load.i64 notrap aligned v29+64
+try_def_var: var14 = v30
+inserted inst53: store.i64 notrap aligned v30, v1+40
+inserted inst54: v31 = call fn0(v0, v26, v28, v30)
+inserted inst55: brif.i64 v31, block6, block1
 switch to block6
-try_def_var: var7 = v25
-inserted inst45: store.i64 notrap aligned v25, v9+8
-inserted inst46: v26 = load.i64 notrap aligned v0+16
-inserted inst47: v27 = load.i64 notrap aligned v26+40
-try_def_var: var8 = v27
-inserted inst48: store.i64 notrap aligned v27, v9+16
-inserted inst49: v28 = load.i64 notrap aligned v0+16
-inserted inst50: v29 = load.i64 notrap aligned v28+48
-try_def_var: var9 = v29
-inserted inst51: store.i64 notrap aligned v29, v9+24
-inserted inst52: v30 = load.i64 notrap aligned v0+16
-inserted inst53: v31 = load.i64 notrap aligned v30+24
-try_def_var: var10 = v31
-inserted inst54: store.i64 notrap aligned v31, v9+32
-inserted inst55: v32 = call fn1(v0, v27, v29, v31)
-inserted inst56: brif.i64 v32, block7, block1
+try_def_var: var15 = v31
+inserted inst56: store.i64 notrap aligned v31, v1+24
+inserted inst57: v32 = load.i64 notrap aligned v0+16
+inserted inst58: v33 = load.i64 notrap aligned v32+64
+try_def_var: var16 = v33
+inserted inst59: store.i64 notrap aligned v33, v1+32
+inserted inst60: v34 = load.i64 notrap aligned v0+16
+inserted inst61: v35 = load.i64 notrap aligned v34+8
+try_def_var: var17 = v35
+inserted inst62: store.i64 notrap aligned v35, v1+40
+inserted inst63: v36 = load.i64 notrap aligned v0+16
+inserted inst64: v37 = load.i64 notrap aligned v36+16
+try_def_var: var18 = v37
+inserted inst65: store.i64 notrap aligned v37, v1+48
+inserted inst66: v38 = call fn0(v0, v33, v35, v37)
+inserted inst67: brif.i64 v38, block7, block1
 switch to block7
-try_def_var: var11 = v32
-inserted inst57: store.i64 notrap aligned v32, v9+16
-inserted inst58: v33 = load.i64 notrap aligned v0+16
-inserted inst59: v34 = load.i64 notrap aligned v33+56
-try_def_var: var12 = v34
-inserted inst60: store.i64 notrap aligned v34, v9+24
-inserted inst61: v35 = load.i64 notrap aligned v0+16
-inserted inst62: v36 = load.i64 notrap aligned v35
-try_def_var: var13 = v36
-inserted inst63: store.i64 notrap aligned v36, v9+32
-inserted inst64: v37 = load.i64 notrap aligned v0+16
-inserted inst65: v38 = load.i64 notrap aligned v37+64
-try_def_var: var14 = v38
-inserted inst66: store.i64 notrap aligned v38, v9+40
-inserted inst67: v39 = call fn1(v0, v34, v36, v38)
-inserted inst68: brif.i64 v39, block8, block1
+try_def_var: var19 = v38
+inserted inst68: store.i64 notrap aligned v38, v1+32
+inserted inst69: v43 = iconst.i64 5
+inserted inst70: v44 = stack_addr.i64 ss1
+inserted inst71: store.i64 notrap aligned v39, v44
+inserted inst72: v45 = stack_addr.i64 ss1+8
+inserted inst73: store.i64 notrap aligned v40, v45
+inserted inst74: v46 = stack_addr.i64 ss1+16
+inserted inst75: store.i64 notrap aligned v41, v46
+inserted inst76: v47 = stack_addr.i64 ss1+24
+inserted inst77: store.i64 notrap aligned v42, v47
+inserted inst78: v48 = stack_addr.i64 ss1+32
+inserted inst79: store.i64 notrap aligned v38, v48
+inserted inst80: v49 = stack_addr.i64 ss1
+inserted inst81: v50 = call fn1(v0, v43, v49)  ; v43 = 5
+inserted inst82: brif.i64 v50, block8, block1
 switch to block8
-try_def_var: var15 = v39
-inserted inst69: store.i64 notrap aligned v39, v9+24
-inserted inst70: v40 = load.i64 notrap aligned v0+16
-inserted inst71: v41 = load.i64 notrap aligned v40+64
-try_def_var: var16 = v41
-inserted inst72: store.i64 notrap aligned v41, v9+32
-inserted inst73: v42 = load.i64 notrap aligned v0+16
-inserted inst74: v43 = load.i64 notrap aligned v42+8
-try_def_var: var17 = v43
-inserted inst75: store.i64 notrap aligned v43, v9+40
-inserted inst76: v44 = load.i64 notrap aligned v0+16
-inserted inst77: v45 = load.i64 notrap aligned v44+16
-try_def_var: var18 = v45
-inserted inst78: store.i64 notrap aligned v45, v9+48
-inserted inst79: v46 = call fn1(v0, v41, v43, v45)
-inserted inst80: brif.i64 v46, block9, block1
-switch to block9
-try_def_var: var19 = v46
-inserted inst81: store.i64 notrap aligned v46, v9+32
-inserted inst82: v51 = iconst.i64 5
-inserted inst83: v52 = stack_addr.i64 ss1
-inserted inst84: store.i64 notrap aligned v47, v52
-inserted inst85: v53 = stack_addr.i64 ss1+8
-inserted inst86: store.i64 notrap aligned v48, v53
-inserted inst87: v54 = stack_addr.i64 ss1+16
-inserted inst88: store.i64 notrap aligned v49, v54
-inserted inst89: v55 = stack_addr.i64 ss1+24
-inserted inst90: store.i64 notrap aligned v50, v55
-inserted inst91: v56 = stack_addr.i64 ss1+32
-inserted inst92: store.i64 notrap aligned v46, v56
-inserted inst93: v57 = stack_addr.i64 ss1
-inserted inst94: v58 = call fn2(v0, v51, v57)  ; v51 = 5
-inserted inst95: brif.i64 v58, block10, block1
-switch to block10
-try_def_var: var20 = v58
-inserted inst96: store.i64 notrap aligned v1, v0
-inserted inst97: return v58
+try_def_var: var20 = v50
+inserted inst83: return v50
 defining function funcid41: function u0:41(i64) -> i64 system_v {
     ss0 = explicit_slot 56, align = 8
     ss1 = explicit_slot 40, align = 8
-    sig0 = (i64) -> i64 system_v
-    sig1 = (i64, i64, i64, i64) -> i64 system_v
-    sig2 = (i64, i64, i64) -> i64 system_v
-    fn0 = u0:4 sig0
-    fn1 = colocated u0:47 sig1
-    fn2 = u0:24 sig2
+    sig0 = (i64, i64, i64, i64) -> i64 system_v
+    sig1 = (i64, i64, i64) -> i64 system_v
+    fn0 = colocated u0:47 sig0
+    fn1 = u0:24 sig1
 
 block2(v0: i64):
-    v1 = load.i64 notrap aligned v0
-    v2 = iconst.i64 8
-    v3 = iadd v1, v2  ; v2 = 8
-    v4 = load.i64 notrap aligned v0+8
-    v5 = icmp ugt v3, v4
-    brif v5, block3, block4
-
-block3:
-    v6 = call fn0(v0)
-    v7 = iconst.i64 0
-    return v7  ; v7 = 0
-
-block4:
-    store.i64 notrap aligned v3, v0
-    v8 = iconst.i64 0
-    store notrap aligned v8, v1  ; v8 = 0
-    v9 = stack_addr.i64 ss0
-    v10 = iconst.i64 0
-    store notrap aligned v10, v9+24  ; v10 = 0
-    store notrap aligned v10, v9+32  ; v10 = 0
-    store notrap aligned v10, v9+40  ; v10 = 0
-    store notrap aligned v10, v9+48  ; v10 = 0
+    v1 = stack_addr.i64 ss0
+    v2 = iconst.i64 0
+    store notrap aligned v2, v1+24  ; v2 = 0
+    store notrap aligned v2, v1+32  ; v2 = 0
+    store notrap aligned v2, v1+40  ; v2 = 0
+    store notrap aligned v2, v1+48  ; v2 = 0
     jump block0
 
 block1:
-    store.i64 notrap aligned v1, v0
-    v11 = iconst.i64 0
-    return v11  ; v11 = 0
+    v3 = iconst.i64 0
+    return v3  ; v3 = 0
 
 block0:
-    v12 = load.i64 notrap aligned v0+16
-    v13 = load.i64 notrap aligned v12
-    store notrap aligned v13, v9
-    v14 = load.i64 notrap aligned v0+16
-    v15 = load.i64 notrap aligned v14+8
-    store notrap aligned v15, v9+8
-    v16 = load.i64 notrap aligned v0+16
-    v17 = load.i64 notrap aligned v16+16
-    store notrap aligned v17, v9+16
-    v18 = call fn1(v0, v13, v15, v17), stack_map=[i64 @ ss0+0, i64 @ ss0+8, i64 @ ss0+16]
-    v47 -> v18
-    brif v18, block5, block1
+    v4 = load.i64 notrap aligned v0+16
+    v5 = load.i64 notrap aligned v4
+    store notrap aligned v5, v1
+    v6 = load.i64 notrap aligned v0+16
+    v7 = load.i64 notrap aligned v6+8
+    store notrap aligned v7, v1+8
+    v8 = load.i64 notrap aligned v0+16
+    v9 = load.i64 notrap aligned v8+16
+    store notrap aligned v9, v1+16
+    v10 = call fn0(v0, v5, v7, v9), stack_map=[i64 @ ss0+0, i64 @ ss0+8, i64 @ ss0+16]
+    v39 -> v10
+    brif v10, block3, block1
+
+block3:
+    store.i64 notrap aligned v10, v1
+    v11 = load.i64 notrap aligned v0+16
+    v12 = load.i64 notrap aligned v11
+    store notrap aligned v12, v1+8
+    v13 = load.i64 notrap aligned v0+16
+    v14 = load.i64 notrap aligned v13+24
+    store notrap aligned v14, v1+16
+    v15 = load.i64 notrap aligned v0+16
+    v16 = load.i64 notrap aligned v15+32
+    store notrap aligned v16, v1+24
+    v17 = call fn0(v0, v12, v14, v16), stack_map=[i64 @ ss0+0, i64 @ ss0+8, i64 @ ss0+16, i64 @ ss0+24]
+    v40 -> v17
+    brif v17, block4, block1
+
+block4:
+    store.i64 notrap aligned v17, v1+8
+    v18 = load.i64 notrap aligned v0+16
+    v19 = load.i64 notrap aligned v18+40
+    store notrap aligned v19, v1+16
+    v20 = load.i64 notrap aligned v0+16
+    v21 = load.i64 notrap aligned v20+48
+    store notrap aligned v21, v1+24
+    v22 = load.i64 notrap aligned v0+16
+    v23 = load.i64 notrap aligned v22+24
+    store notrap aligned v23, v1+32
+    v24 = call fn0(v0, v19, v21, v23), stack_map=[i64 @ ss0+0, i64 @ ss0+8, i64 @ ss0+16, i64 @ ss0+24, i64 @ ss0+32]
+    v41 -> v24
+    brif v24, block5, block1
 
 block5:
-    store.i64 notrap aligned v18, v9
-    v19 = load.i64 notrap aligned v0+16
-    v20 = load.i64 notrap aligned v19
-    store notrap aligned v20, v9+8
-    v21 = load.i64 notrap aligned v0+16
-    v22 = load.i64 notrap aligned v21+24
-    store notrap aligned v22, v9+16
-    v23 = load.i64 notrap aligned v0+16
-    v24 = load.i64 notrap aligned v23+32
-    store notrap aligned v24, v9+24
-    v25 = call fn1(v0, v20, v22, v24), stack_map=[i64 @ ss0+0, i64 @ ss0+8, i64 @ ss0+16, i64 @ ss0+24]
-    v48 -> v25
-    brif v25, block6, block1
+    store.i64 notrap aligned v24, v1+16
+    v25 = load.i64 notrap aligned v0+16
+    v26 = load.i64 notrap aligned v25+56
+    store notrap aligned v26, v1+24
+    v27 = load.i64 notrap aligned v0+16
+    v28 = load.i64 notrap aligned v27
+    store notrap aligned v28, v1+32
+    v29 = load.i64 notrap aligned v0+16
+    v30 = load.i64 notrap aligned v29+64
+    store notrap aligned v30, v1+40
+    v31 = call fn0(v0, v26, v28, v30), stack_map=[i64 @ ss0+0, i64 @ ss0+8, i64 @ ss0+16, i64 @ ss0+24, i64 @ ss0+32, i64 @ ss0+40]
+    v42 -> v31
+    brif v31, block6, block1
 
 block6:
-    store.i64 notrap aligned v25, v9+8
-    v26 = load.i64 notrap aligned v0+16
-    v27 = load.i64 notrap aligned v26+40
-    store notrap aligned v27, v9+16
-    v28 = load.i64 notrap aligned v0+16
-    v29 = load.i64 notrap aligned v28+48
-    store notrap aligned v29, v9+24
-    v30 = load.i64 notrap aligned v0+16
-    v31 = load.i64 notrap aligned v30+24
-    store notrap aligned v31, v9+32
-    v32 = call fn1(v0, v27, v29, v31), stack_map=[i64 @ ss0+0, i64 @ ss0+8, i64 @ ss0+16, i64 @ ss0+24, i64 @ ss0+32]
-    v49 -> v32
-    brif v32, block7, block1
+    store.i64 notrap aligned v31, v1+24
+    v32 = load.i64 notrap aligned v0+16
+    v33 = load.i64 notrap aligned v32+64
+    store notrap aligned v33, v1+32
+    v34 = load.i64 notrap aligned v0+16
+    v35 = load.i64 notrap aligned v34+8
+    store notrap aligned v35, v1+40
+    v36 = load.i64 notrap aligned v0+16
+    v37 = load.i64 notrap aligned v36+16
+    store notrap aligned v37, v1+48
+    v38 = call fn0(v0, v33, v35, v37), stack_map=[i64 @ ss0+0, i64 @ ss0+8, i64 @ ss0+16, i64 @ ss0+24, i64 @ ss0+32, i64 @ ss0+40, i64 @ ss0+48]
+    brif v38, block7, block1
 
 block7:
-    store.i64 notrap aligned v32, v9+16
-    v33 = load.i64 notrap aligned v0+16
-    v34 = load.i64 notrap aligned v33+56
-    store notrap aligned v34, v9+24
-    v35 = load.i64 notrap aligned v0+16
-    v36 = load.i64 notrap aligned v35
-    store notrap aligned v36, v9+32
-    v37 = load.i64 notrap aligned v0+16
-    v38 = load.i64 notrap aligned v37+64
-    store notrap aligned v38, v9+40
-    v39 = call fn1(v0, v34, v36, v38), stack_map=[i64 @ ss0+0, i64 @ ss0+8, i64 @ ss0+16, i64 @ ss0+24, i64 @ ss0+32, i64 @ ss0+40]
-    v50 -> v39
-    brif v39, block8, block1
+    store.i64 notrap aligned v38, v1+32
+    v43 = iconst.i64 5
+    v44 = stack_addr.i64 ss1
+    store.i64 notrap aligned v39, v44
+    v45 = stack_addr.i64 ss1+8
+    store.i64 notrap aligned v40, v45
+    v46 = stack_addr.i64 ss1+16
+    store.i64 notrap aligned v41, v46
+    v47 = stack_addr.i64 ss1+24
+    store.i64 notrap aligned v42, v47
+    v48 = stack_addr.i64 ss1+32
+    store.i64 notrap aligned v38, v48
+    v49 = stack_addr.i64 ss1
+    v50 = call fn1(v0, v43, v49), stack_map=[i64 @ ss0+0, i64 @ ss0+8, i64 @ ss0+16, i64 @ ss0+24, i64 @ ss0+32]  ; v43 = 5
+    brif v50, block8, block1
 
 block8:
-    store.i64 notrap aligned v39, v9+24
-    v40 = load.i64 notrap aligned v0+16
-    v41 = load.i64 notrap aligned v40+64
-    store notrap aligned v41, v9+32
-    v42 = load.i64 notrap aligned v0+16
-    v43 = load.i64 notrap aligned v42+8
-    store notrap aligned v43, v9+40
-    v44 = load.i64 notrap aligned v0+16
-    v45 = load.i64 notrap aligned v44+16
-    store notrap aligned v45, v9+48
-    v46 = call fn1(v0, v41, v43, v45), stack_map=[i64 @ ss0+0, i64 @ ss0+8, i64 @ ss0+16, i64 @ ss0+24, i64 @ ss0+32, i64 @ ss0+40, i64 @ ss0+48]
-    brif v46, block9, block1
-
-block9:
-    store.i64 notrap aligned v46, v9+32
-    v51 = iconst.i64 5
-    v52 = stack_addr.i64 ss1
-    store.i64 notrap aligned v47, v52
-    v53 = stack_addr.i64 ss1+8
-    store.i64 notrap aligned v48, v53
-    v54 = stack_addr.i64 ss1+16
-    store.i64 notrap aligned v49, v54
-    v55 = stack_addr.i64 ss1+24
-    store.i64 notrap aligned v50, v55
-    v56 = stack_addr.i64 ss1+32
-    store.i64 notrap aligned v46, v56
-    v57 = stack_addr.i64 ss1
-    v58 = call fn2(v0, v51, v57), stack_map=[i64 @ ss0+0, i64 @ ss0+8, i64 @ ss0+16, i64 @ ss0+24, i64 @ ss0+32]  ; v51 = 5
-    brif v58, block10, block1
-
-block10:
-    store.i64 notrap aligned v1, v0
-    return v58
+    return v50
 }
 
 *** END VCODE ***

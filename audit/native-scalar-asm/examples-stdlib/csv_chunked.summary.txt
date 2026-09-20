@@ -2,7 +2,7 @@ source:  examples/stdlib/csv_chunked.bot
 backend: Cranelift (specialize=1)
 asm:     csv_chunked.asm
 vcode:   csv_chunked.vcode
-machine-code bytes: 13223 (per function: 181 28 333 726 726 726 726 824 752 734 734 365 430 703 925 482 1013 1030 694 780 311)
+machine-code bytes: 10496 (per function: 68 28 206 574 574 574 574 672 592 577 577 365 430 585 770 352 799 833 537 612 197)
 
 functions:
   0 <program entry>: nir-regs=2
@@ -37,7 +37,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     max live roots: 1
     shadow slots: 1
     entry zero slots: 0
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 1 "chunk_size"
@@ -61,7 +61,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     max live roots: 2
     shadow slots: 2
     entry zero slots: 2
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 3 "chunked_append"
@@ -73,7 +73,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     max live roots: 4
     shadow slots: 4
     entry zero slots: 0
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 4 "chunked_append"
@@ -85,7 +85,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     max live roots: 4
     shadow slots: 4
     entry zero slots: 0
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 5 "chunked_append"
@@ -97,7 +97,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     max live roots: 4
     shadow slots: 4
     entry zero slots: 0
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 6 "chunked_append"
@@ -109,7 +109,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     max live roots: 4
     shadow slots: 4
     entry zero slots: 0
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 7 "chunked_copy_chunks"
@@ -121,7 +121,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     max live roots: 6
     shadow slots: 6
     entry zero slots: 0
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 8 "chunked_copy_chunks"
@@ -133,7 +133,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     max live roots: 6
     shadow slots: 6
     entry zero slots: 0
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 9 "chunked_finish"
@@ -145,7 +145,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     max live roots: 7
     shadow slots: 7
     entry zero slots: 3
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 10 "chunked_finish"
@@ -157,7 +157,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     max live roots: 7
     shadow slots: 7
     entry zero slots: 3
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 11 "peek"
@@ -193,7 +193,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     max live roots: 4
     shadow slots: 4
     entry zero slots: 1
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 14 "scan_quoted"
@@ -205,7 +205,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     max live roots: 5
     shadow slots: 5
     entry zero slots: 2
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 15 "scan_field"
@@ -217,7 +217,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     max live roots: 3
     shadow slots: 3
     entry zero slots: 1
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 16 "scan_record"
@@ -229,7 +229,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     max live roots: 6
     shadow slots: 6
     entry zero slots: 1
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 17 "scan_record"
@@ -241,7 +241,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     max live roots: 6
     shadow slots: 6
     entry zero slots: 1
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 18 "scan_records"
@@ -253,7 +253,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     max live roots: 8
     shadow slots: 8
     entry zero slots: 3
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 19 "scan_records"
@@ -265,7 +265,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     max live roots: 8
     shadow slots: 8
     entry zero slots: 3
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 20 "csv_parse"
@@ -277,12 +277,12 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     max live roots: 5
     shadow slots: 5
     entry zero slots: 3
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
 
 mechanical pattern counts (triage only; see report for interpretation):
   20 x calls to rt_int_add
   2 x calls to rt_int_mul
   9 x calls to rt_int_cmp
-  70 x calls to other rt_* helpers
+  52 x calls to other rt_* helpers
   1 x guard/guardbool instructions
