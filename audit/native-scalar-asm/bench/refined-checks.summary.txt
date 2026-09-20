@@ -2,7 +2,7 @@ source:  bench/refined-checks.ir
 backend: Cranelift (specialize=1)
 asm:     refined-checks.asm
 vcode:   refined-checks.vcode
-machine-code bytes: 21002 (per function: 935 365 1713 1425 539 932 545 988 504 1185 1225 427 456 401 165 489 489 497 553 641 1185 1225 427 456 401 165 489 489 497 553 641)
+machine-code bytes: 24327 (per function: 1183 478 1713 1425 687 1084 697 1140 624 1449 1417 427 456 401 165 617 617 625 681 793 1449 1417 427 456 401 165 617 617 625 681 793)
 
 functions:
   0 <program entry>: nir-regs=33
@@ -47,7 +47,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     max live roots: 16
     shadow slots: 16
     entry zero slots: 0
-    depth reservation: no
+    depth reservation: yes
     storage: native frame
   
   function 1 "web::uri_escape_text"
@@ -59,7 +59,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     max live roots: 4
     shadow slots: 4
     entry zero slots: 2
-    depth reservation: no
+    depth reservation: yes
     storage: native frame
   
   function 2 "high_nibble"
@@ -95,7 +95,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     max live roots: 2
     shadow slots: 2
     entry zero slots: 0
-    depth reservation: no
+    depth reservation: yes
     storage: native frame
   
   function 5 "esc_bytes"
@@ -107,7 +107,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     max live roots: 7
     shadow slots: 7
     entry zero slots: 2
-    depth reservation: no
+    depth reservation: yes
     storage: native frame
   
   function 6 "esc_char"
@@ -119,7 +119,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     max live roots: 4
     shadow slots: 4
     entry zero slots: 3
-    depth reservation: no
+    depth reservation: yes
     storage: native frame
   
   function 7 "esc_from"
@@ -131,7 +131,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     max live roots: 7
     shadow slots: 7
     entry zero slots: 2
-    depth reservation: no
+    depth reservation: yes
     storage: native frame
   
   function 8 "check"
@@ -143,7 +143,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     max live roots: 5
     shadow slots: 5
     entry zero slots: 1
-    depth reservation: no
+    depth reservation: yes
     storage: native frame
   
   function 9 ""
@@ -155,7 +155,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     max live roots: 5
     shadow slots: 5
     entry zero slots: 3
-    depth reservation: no
+    depth reservation: yes
     storage: native frame
   
   function 10 ""
@@ -167,7 +167,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     max live roots: 5
     shadow slots: 5
     entry zero slots: 3
-    depth reservation: no
+    depth reservation: yes
     storage: native frame
   
   function 11 "char_at"
@@ -227,7 +227,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     max live roots: 3
     shadow slots: 3
     entry zero slots: 1
-    depth reservation: no
+    depth reservation: yes
     storage: native frame
   
   function 16 "scan_label"
@@ -239,7 +239,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     max live roots: 3
     shadow slots: 3
     entry zero slots: 1
-    depth reservation: no
+    depth reservation: yes
     storage: native frame
   
   function 17 "scan_alpha"
@@ -251,7 +251,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     max live roots: 3
     shadow slots: 3
     entry zero slots: 1
-    depth reservation: no
+    depth reservation: yes
     storage: native frame
   
   function 18 "tld_ok"
@@ -263,7 +263,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     max live roots: 2
     shadow slots: 2
     entry zero slots: 0
-    depth reservation: no
+    depth reservation: yes
     storage: native frame
   
   function 19 "domain_loop"
@@ -275,7 +275,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     max live roots: 2
     shadow slots: 2
     entry zero slots: 0
-    depth reservation: no
+    depth reservation: yes
     storage: native frame
   
   function 20 ""
@@ -287,7 +287,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     max live roots: 5
     shadow slots: 5
     entry zero slots: 3
-    depth reservation: no
+    depth reservation: yes
     storage: native frame
   
   function 21 ""
@@ -299,7 +299,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     max live roots: 5
     shadow slots: 5
     entry zero slots: 3
-    depth reservation: no
+    depth reservation: yes
     storage: native frame
   
   function 22 "char_at"
@@ -359,7 +359,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     max live roots: 3
     shadow slots: 3
     entry zero slots: 1
-    depth reservation: no
+    depth reservation: yes
     storage: native frame
   
   function 27 "scan_label"
@@ -371,7 +371,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     max live roots: 3
     shadow slots: 3
     entry zero slots: 1
-    depth reservation: no
+    depth reservation: yes
     storage: native frame
   
   function 28 "scan_alpha"
@@ -383,7 +383,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     max live roots: 3
     shadow slots: 3
     entry zero slots: 1
-    depth reservation: no
+    depth reservation: yes
     storage: native frame
   
   function 29 "tld_ok"
@@ -395,7 +395,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     max live roots: 2
     shadow slots: 2
     entry zero slots: 0
-    depth reservation: no
+    depth reservation: yes
     storage: native frame
   
   function 30 "domain_loop"
@@ -407,7 +407,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     max live roots: 2
     shadow slots: 2
     entry zero slots: 0
-    depth reservation: no
+    depth reservation: yes
     storage: native frame
 
 mechanical pattern counts (triage only; see report for interpretation):
@@ -415,5 +415,5 @@ mechanical pattern counts (triage only; see report for interpretation):
   20 x calls to rt_int_add
   2 x calls to rt_int_sub
   54 x calls to rt_int_cmp
-  79 x calls to other rt_* helpers
+  100 x calls to other rt_* helpers
   29 x guard/guardbool instructions
