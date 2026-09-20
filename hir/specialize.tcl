@@ -50,12 +50,11 @@
 # --------------------------
 # A call of a known block B with argument types T1..Tn (in instance I):
 #
-#   * B is not a static block (hir::aot::StaticBlocks: it captures a binding
-#     that is not bound to a static block, i.e. a value): B<generic>.
-#     Closures over values stay generic; their captures' kinds would depend
-#     on the closure instance. A static block's captures are functions, the
-#     same for every creation, so its instances may be specialized even if a
-#     backend passes it an environment (a forward reference's cell).
+#   * Static blocks specialize normally. Exact calls of value-capturing
+#     closures may specialize when every capture has a proven Int kind.
+#     Captured types are joined across creations, so a shared instance is
+#     valid for every creation. Other value-capturing closures stay generic
+#     to bound code growth. A materialized Block retains a generic entry.
 #   * a self tail call (hir::aot::selfTailCalls) whose key types are all
 #     subtypes of I's own: I itself, so the call stays a loop. Otherwise
 #     the key is the pointwise lub of I's key and the call's, which is
@@ -134,10 +133,10 @@ namespace eval hir::specialize {
 
 proc hir::specialize::analyze {hir args} {
     variable state
-    set options [hir::Options hir::specialize::analyze {-specialize 1} $args]
+    set options [hir::Options hir::specialize::analyze {-specialize 1 -call-facts-opt 1} $args]
     set context [hir::aot::context $hir]
     set state [dict create hir $hir context $context \
-        specialize [dict get $options -specialize] \
+        specialize [dict get $options -specialize] callFactsOpt [dict get $options -call-facts-opt] \
         instances [dict create] keys [dict create] byBlock [dict create] \
         seeds [dict create] deps [dict create] refs [dict create] \
         queue {} next 0 current "" building {} analyses 0 \
@@ -558,8 +557,25 @@ proc hir::specialize::Handle {op args} {
             lassign $args e block argTypes
             set region [dict get $state instances $current block]
             set keyArgs [lmap type $argTypes {KeyType $type}]
+            # Exact closure calls can specialize: captured types are joined
+            # across creations, and a growing join requeues instances.
             if {$block ni [dict get $state context statics]} {
-                set keyArgs [GenericKey $block]
+                # Bound code growth for value-capturing closures. Scalar Int
+                # captures can feed the existing raw representation path;
+                # aggregate and managed captures retain the generic entry.
+                set scalarCaptures [dict exists $state seeds $block]
+                if {$scalarCaptures} {
+                    foreach b [dict get $state hir exprs $block captures] {
+                        if {![dict exists $state seeds $block $b]
+                                || [hir::types::kindOf [dict get $state seeds $block $b]] ne "int"} {
+                            set scalarCaptures 0
+                            break
+                        }
+                    }
+                }
+                if {![dict get $state callFactsOpt] || !$scalarCaptures} {
+                    set keyArgs [GenericKey $block]
+                }
             }
             set target ""
             if {$block eq $region && [dict exists $state context selfTails $e]} {

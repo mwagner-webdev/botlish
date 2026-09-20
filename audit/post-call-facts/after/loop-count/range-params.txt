@@ -1,0 +1,9 @@
+instance i0 (<program>): generic=1 block=program
+  result range: [-∞, +∞]
+instance i2 (work<int>): generic=0 block=e2
+  param 0 (i) range: [1, 500]
+  result range: [7, 7]
+instance i1 (drive<int, int>): generic=0 block=e26
+  param 0 (i) range: [-∞, 500]
+  param 1 (total) range: [0, +∞]
+  result range: [-∞, +∞]

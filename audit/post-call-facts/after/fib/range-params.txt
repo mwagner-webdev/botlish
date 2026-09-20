@@ -1,0 +1,5 @@
+instance i0 (<program>): generic=1 block=program
+  result range: [-∞, +∞]
+instance i1 (fib<int>): generic=0 block=e2
+  param 0 (n) range: [-∞, 22]
+  result range: [-∞, +∞]

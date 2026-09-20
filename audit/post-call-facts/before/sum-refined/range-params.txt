@@ -1,0 +1,9 @@
+instance i0 (<program>): generic=1 block=program
+  result range: [-∞, +∞]
+instance i1 (sum<int, int>): generic=0 block=e2
+  param 0 (n) range: [0, 400]
+  param 1 (acc) range: [-∞, +∞]
+  result range: [-∞, +∞]
+instance i2 (step<generic>): generic=1 block=e14
+  param 0 (x) range: [-∞, +∞]
+  result range: [-∞, +∞]

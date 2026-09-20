@@ -55,12 +55,13 @@ proc W {outdir name content} {
     close $f
 }
 
+set callFactsOpt [expr {[info exists ::env(BOTLISH_NATIVE_CALL_FACTS_OPT)]
+    && $::env(BOTLISH_NATIVE_CALL_FACTS_OPT) eq "0" ? 0 : 1}]
+set spec [hir::specialize::analyze $hir -call-facts-opt $callFactsOpt]
+set ranges [hir::range::analyze $hir $spec $callFactsOpt]
 W $outdir hir.txt [hir::format $hir]
 W $outdir aot.txt [hir::aot::explain $hir]
-W $outdir aot-spec.txt [hir::specialize::explain $hir]
-
-set spec [hir::specialize::analyze $hir]
-set ranges [hir::range::analyze $hir $spec]
+W $outdir aot-spec.txt [hir::specialize::explain $hir $spec]
 
 set out {}
 foreach id [dict get $spec used] {
@@ -94,6 +95,25 @@ foreach id [dict get $spec used] {
     }
 }
 W $outdir range-exprs.txt $out2
+
+# Exact call boundaries: target instance, argument type/range, and the
+# successful-result range. This is analysis provenance, not an effect claim.
+set callText {}
+foreach id [dict get $spec used] {
+    set instance [hir::specialize::instance $spec $id]
+    set view [hir::specialize::view $hir $spec $id]
+    foreach {e target} [dict get $instance calls] {
+        if {![hir::get $view $e reachable]} {continue}
+        append callText "[hir::specialize::label $spec $id] $e -> [hir::specialize::label $spec $target]\n"
+        set i 0
+        foreach a [hir::get $view $e args] {
+            append callText "  arg$i: [hir::types::show [hir::typeOf $view $a]], range [hir::range::show [hir::range::of $ranges $id $a]]\n"
+            incr i
+        }
+        append callText "  successful result: [hir::types::show [hir::typeOf $view $e]], range [hir::range::show [hir::range::of $ranges $id $e]]\n"
+    }
+}
+W $outdir call-facts.txt $callText
 
 W $outdir induction.txt [hir::induction::explain $hir $spec [dict get $ranges induction]]
 

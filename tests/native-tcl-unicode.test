@@ -193,12 +193,7 @@ test native-tcl-unicode-emailish-known-result-nir-shape {a redundant Emailish? c
     }
     set hir [hir::build [native::ExpandNativeBodies $p] -strict 0]
     set text [native::nir $hir]
-    # Two independent inlined copies of the validator, not one shared/folded
-    # call: "domain_loop" (a helper unique to Emailish?'s own native-body)
-    # names a compiled function twice, and the outer/inner call sites both
-    # genuinely scan the string (length is called once per copy per
-    # instance -- see native-validator-predicate-known-result-nir-shape's
-    # identical reasoning for NonEmpty?).
+    # Both independent validator calls still scan the string.
     list [regexp -all {\"domain_loop\"} $text] \
          [expr {[regexp -all {op strlen} $text] > 0}] \
          [fourWay $p]

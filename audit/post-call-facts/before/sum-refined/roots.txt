@@ -1,0 +1,35 @@
+function 0 "<program>"
+  NIR regs: 5
+  raw regs: 2
+  managed-capable regs: 3
+  safepoints: 1
+  root candidates: 2
+  max live roots: 2
+  shadow slots: 2
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 1 "sum"
+  NIR regs: 13
+  raw regs: 4
+  managed-capable regs: 9
+  safepoints: 1
+  root candidates: 2
+  max live roots: 2
+  shadow slots: 2
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 2 "step"
+  NIR regs: 3
+  raw regs: 0
+  managed-capable regs: 3
+  safepoints: 1
+  root candidates: 2
+  max live roots: 2
+  shadow slots: 2
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame

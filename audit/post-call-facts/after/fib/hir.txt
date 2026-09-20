@@ -1,0 +1,28 @@
+program s2 binds b1 fib
+e1 bind b1 fib : block(e2)/1 -> int
+    e2 block s3 (b2 n) captures (b1 fib) : block(e2)/1 -> int
+        e3 if : int
+            e4 call native(<) : bool
+                e5 ref b3 < : native <
+                e6 ref b2 n : any
+                e7 const 2 : int
+            then s4
+                e8 ref b2 n : int
+            else s5
+                e9 call native(+) : int
+                    e10 ref b4 + : native +
+                    e11 call block(e2) : int
+                        e12 ref b1 fib : block(e2)/1 -> int deferred
+                        e13 call native(-) : int
+                            e14 ref b5 - : native -
+                            e15 ref b2 n : int
+                            e16 const 1 : int
+                    e17 call block(e2) : int
+                        e18 ref b1 fib : block(e2)/1 -> int deferred
+                        e19 call native(-) : int
+                            e20 ref b5 - : native -
+                            e21 ref b2 n : int
+                            e22 const 2 : int
+e23 call block(e2) : int
+    e24 ref b1 fib : block(e2)/1 -> int
+    e25 const 22 : int

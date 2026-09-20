@@ -1,0 +1,20 @@
+<program>: closed (transitively guarded)   [program, ir {}]
+  dispatch: closed -- functions: drive (non-tail)
+  blockers: none
+  runtime:  none
+
+work: guarded   [e2, ir {0 2}]
+  params:   i : any   result: int
+  dispatch: closed -- natives: *, +, >=, -
+  blockers:
+    ir {0 2 2 1 2 2 2}  e7  UnknownParameterKind: * needs int; parameter i (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+drive: guarded   [e26, ir {1 2}]
+  params:   i : any, total : any   result: any
+  captures: drive (block), work (block)
+  dispatch: closed -- natives: <=, -, +; functions: drive (self, tail), work (non-tail)
+  blockers:
+    ir {1 2 2 1 2}  e30  UnknownParameterKind: <= needs int; parameter i (no annotation, no call-site inference) has no static kind
+    ir {1 2 2 3 2 3 2}  e41  UnknownParameterKind: + needs int; parameter total (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values

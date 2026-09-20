@@ -1,0 +1,22 @@
+<program>: closed (transitively guarded)   [program, ir {}]
+  dispatch: closed -- functions: sum (non-tail)
+  blockers: none
+  runtime:  none
+
+sum: guarded   [e2, ir {0 2}]
+  params:   n : any, acc : any   result: any
+  captures: sum (block)
+  dispatch: closed -- natives: integer?, ==, -; functions: step (non-tail), sum (self, tail)
+  blockers:
+    ir {0 2 2 2 2 3 3 2 2}  e23  UnknownParameterKind: - needs int; parameter n (no annotation, no call-site inference) has no static kind
+  note:     ir {0 2 2 2 2 3 2 2}  e14  creates a closure capturing values
+  runtime:  bigint, closure-env, result-alloc, structural-equality, tagged-values
+
+step: guarded   [e14, ir {0 2 2 2 2 3 2 2}]
+  params:   x : any   result: int
+  captures: n (value)
+  dispatch: closed -- natives: +
+  blockers:
+    ir {0 2 2 2 2 3 2 2 2 2}  e17  UnknownParameterKind: + needs int; parameter x (no annotation, no call-site inference) has no static kind
+    ir {0 2 2 2 2 3 2 2 2 3}  e18  UnknownParameterKind: + needs int; parameter n (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values

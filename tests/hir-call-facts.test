@@ -1,0 +1,125 @@
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot native native.tcl]
+
+proc callFacts {text} {
+    set hir [surface::compile $text t.bot -strict 0]
+    set spec [hir::specialize::analyze $hir]
+    return [list $hir $spec [hir::range::analyze $hir $spec]]
+}
+proc factId {spec name} {
+    foreach id [dict get $spec used] {
+        if {[dict get $spec instances $id name] eq $name} {return $id}
+    }
+    error "missing $name"
+}
+proc factResult {analysis id} {
+    return [hir::range::show [dict get $analysis instances $id result]]
+}
+proc callResults {analysis spec caller} {
+    set id [factId $spec $caller]
+    set result {}
+    foreach e [dict keys [dict get $spec instances $id calls]] {
+        lappend result [hir::range::show [hir::range::of $analysis $id $e]]
+    }
+    return $result
+}
+
+test call-facts-sum-1 {exact captured closure call specializes and keeps its generic entry} -body {
+    set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench sum-refined.ir]]]
+    set on [native::nir $hir]
+    set off [native::nir $hir -call-facts-opt 0]
+    list [expr {[string first {instance="int"} $on] >= 0}] \
+         [expr {[string first {guard int %0} $on] < 0}] \
+         [expr {[string first {guard int %0} $off] >= 0}]
+} -result {1 1 1}
+
+test call-facts-generic-1 {an open Block call keeps step's generic Int guard} -body {
+    set hir [surface::compile "fn step(x):\n    x + 1\n\nfn apply(f, x):\n    f(x)\n\napply(step, \"wrong\")" t.bot -strict 0]
+    set nir [native::nir $hir]
+    list [expr {[string first {instance="generic"} $nir] >= 0}] \
+         [expr {[string first {guard int} $nir] >= 0}]
+} -result {1 1}
+
+test call-facts-result-1 {callee returning constant flows to caller} -body {
+    lassign [callFacts "fn f(x):\n    if x > 0:\n        7\n    else:\n        7\n\nfn g(x):\n    f(x)\n\ng(1)"] hir spec analysis
+    list [factResult $analysis [factId $spec f]] [callResults $analysis $spec g]
+} -result {{[7, 7]} {{[7, 7]}}}
+
+test call-facts-result-2 {returning alternatives join instead of inventing a constant} -body {
+    lassign [callFacts "fn f(x):\n    if x > 0:\n        4\n    else:\n        9\n\nfn g(x):\n    f(x)\n\ng(1)"] hir spec analysis
+    list [factResult $analysis [factId $spec f]] [callResults $analysis $spec g]
+} -result {{[4, 9]} {{[4, 9]}}}
+
+test call-facts-result-3 {an error-only branch does not pollute successful result facts} -body {
+    lassign [callFacts "fn f(x):\n    if x > 0:\n        1 + \"bad\"\n    else:\n        7\n\nfn g(x):\n    f(x)\n\ng(0)"] hir spec analysis
+    list [factResult $analysis [factId $spec f]] [callResults $analysis $spec g]
+} -result {{[7, 7]} {{[7, 7]}}}
+
+test call-facts-work-1 {work exposes seven; drive still calls it} -body {
+    set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench loop-count.ir]]]
+    set spec [hir::specialize::analyze $hir]
+    set analysis [hir::range::analyze $hir $spec]
+    set nir [native::nir $hir]
+    list [factResult $analysis [factId $spec work]] [lindex [callResults $analysis $spec drive] 0] \
+         [expr {[string first { = call } $nir] >= 0}]
+} -result {{[7, 7]} {[7, 7]} 1}
+
+test call-facts-module-1 {closed-call value facts cross a module boundary} -body {
+    set saved $::core::libraryDir
+    set ::core::libraryDir [file join $::projectRoot audit post-native-stack module-cases]
+    try {
+        set hir [surface::readProgramFile [file join $::core::libraryDir main.bot]]
+        set spec [hir::specialize::analyze $hir]
+        set analysis [hir::range::analyze $hir $spec]
+        set id [factId $spec plain::inc]
+        list [hir::range::show [lindex [dict get $analysis instances $id params] 0]] \
+             [factResult $analysis $id]
+    } finally {
+        set ::core::libraryDir $saved
+    }
+} -result {{[1, 1]} {[2, 2]}}
+
+proc factOutcome {hir opt} {
+    set code [catch {native::evalHir $hir -call-facts-opt $opt} value options]
+    if {$code} {
+        return [list error [dict get $options -errorcode] $value]
+    }
+    return [list value $value]
+}
+test call-facts-differential-1 {normal, BigInt, wrong-kind, and Error paths agree on and off} -body {
+    set cases {}
+    foreach text {
+        {fn step(x):
+    x + 1
+
+step(7)}
+        {fn step(x):
+    x + 1
+
+step(4611686018427387904)}
+        {fn step(x):
+    x + 1
+
+step("wrong")}
+    } {
+        lappend cases [surface::compile $text t.bot -strict 0]
+    }
+    foreach arg {0 1} {
+        lappend cases [surface::compile "fn f(x):\n    if x > 0:\n        1 + \"bad\"\n    else:\n        7\n\nfn g(x):\n    f(x) + 1\n\ng($arg)" t.bot -strict 0]
+    }
+    lappend cases [native::buildProgramHir {
+        {bind f {block {x}
+            {if {call {ref >} {ref x} {const 0}}
+                {block {} {error-value {const bad}}}
+                {block {} {const 7}}}}}
+        {call {ref f} {const 1}}
+    }]
+    set equal {}
+    foreach hir $cases {
+        lappend equal [expr {[factOutcome $hir 0] eq [factOutcome $hir 1]}]
+    }
+    set equal
+} -result {1 1 1 1 1 1}
+
+cleanupTests

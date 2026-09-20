@@ -1,0 +1,201 @@
+; source:  bench/loop-count.ir
+; backend: Cranelift (specialize=1), native::vcode
+; format:  Cranelift Debug for VCode, pre-regalloc machine-level lowering
+; total machine code bytes: 503  (per function: 84 54 365)
+;
+vcode from lowering:
+VCode {
+  Entry block: 0
+Block 0([]):
+    (original IR block: block2)
+    (successor: Block 1([]))
+  Inst 0: args %v192=%rdi
+  Inst 1: jmp     label1
+Block 1([]):
+    (original IR block: block0)
+    (successor: Block 3([]))
+    (successor: Block 2([]))
+  Inst 2: movl $0x3e9, %v202
+  Inst 3: movq $0x3e9, <offset:1>+(%rsp)
+  Inst 4: movl $0x1, %v201
+  Inst 5: movq $0x1, <offset:1>+8(%rsp)
+  Inst 6: call    User(userextname0)
+    UserStackMap { by_type: [(types::I64, CompoundBitSet {0, 8})], sp_to_sized_stack_slots: None }
+  Inst 7: testq %v200, %v200
+  Inst 8: jnz     label3; j label2
+Block 2([]):
+    (original IR block: block1)
+  Inst 9: uninit  %v198
+  Inst 10: xorq %v198, (%v199 <- %v198)
+  Inst 11: rets %v199=%rax
+Block 3([]):
+    (original IR block: block3)
+  Inst 12: rets %v200=%rax
+}
+vcode from lowering:
+VCode {
+  Entry block: 0
+Block 0([]):
+    (original IR block: block0)
+  Inst 0: args %v192=%rdi
+  Inst 1: call    User(userextname0)
+  Inst 2: rets %v196=%rax
+}
+vcode from lowering:
+VCode {
+  Entry block: 0
+Block 0([]):
+    (original IR block: block2)
+    (successor: Block 1([]))
+  Inst 0: args %v193=%rsi
+  Inst 1: jmp     label1
+Block 1([]):
+    (original IR block: block0)
+    (successor: Block 2([]))
+  Inst 2: sarq $1, (%v206 <- %v193)
+  Inst 3: imulq $0x3, %v206, %v205
+  Inst 4: leaq 7(%v205), %v204
+  Inst 5: jmp     label2
+Block 2([]):
+    (original IR block: block3)
+    (successor: Block 4([]))
+    (successor: Block 3([]))
+  Inst 6: testq %v204, %v204
+  Inst 7: jnl     label4; j label3
+Block 3([]):
+    (original IR block: block5)
+    (successor: Block 2([]))
+  Inst 8: jmp     label2
+Block 4([]):
+    (original IR block: block4)
+    (successor: Block 5([]))
+  Inst 9: jmp     label5
+Block 5([]):
+    (original IR block: block6)
+  Inst 10: movl $0xf, %v203
+  Inst 11: rets %v203=%rax
+}
+vcode from lowering:
+VCode {
+  Entry block: 0
+Block 0([]):
+    (original IR block: block0)
+  Inst 0: args %v192=%rdi %v194=%rdx
+  Inst 1: movq (%v194), %v198
+  Inst 2: call    User(userextname0)
+  Inst 3: rets %v197=%rax
+}
+vcode from lowering:
+VCode {
+  Entry block: 0
+Block 0([]):
+    (original IR block: block2)
+    (successor: Block 1([VReg(vreg = 193, class = Int), VReg(vreg = 194, class = Int)]))
+  Inst 0: args %v192=%rdi %v193=%rsi %v194=%rdx
+  Inst 1: movq %v193, <offset:1>+(%rsp)
+  Inst 2: movq %v194, <offset:1>+8(%rsp)
+  Inst 3: jmp     label1
+Block 1([VReg(vreg = 201, class = Int), VReg(vreg = 202, class = Int)]):
+    (original IR block: block0)
+    (successor: Block 3([]))
+    (successor: Block 2([]))
+  Inst 4: testq $0x1, %v201
+  Inst 5: jnz     label3; j label2
+Block 2([]):
+    (original IR block: block4)
+    (successor: Block 4([VReg(vreg = 249, class = Int)]))
+  Inst 6: movl $0x1, %v253
+  Inst 7: load_ext_name userextname0+0, %v252
+  Inst 8: call    *%v252
+  Inst 9: movl $0x2, %v250
+  Inst 10: testq %v251, %v251
+  Inst 11: cmovleq (%rip), (%v249 <- %v250)
+  Inst 12: jmp     label4
+Block 3([]):
+    (original IR block: block3)
+    (successor: Block 4([VReg(vreg = 247, class = Int)]))
+  Inst 13: movl $0x2, %v248
+  Inst 14: cmpq $0x1, %v201
+  Inst 15: cmovleq (%rip), (%v247 <- %v248)
+  Inst 16: jmp     label4
+Block 4([VReg(vreg = 217, class = Int)]):
+    (original IR block: block5)
+    (successor: Block 14([]))
+    (successor: Block 5([]))
+  Inst 17: cmpq $0x6, %v217
+  Inst 18: jz      label14; j label5
+Block 5([]):
+    (original IR block: block7)
+    (successor: Block 7([]))
+    (successor: Block 6([]))
+  Inst 19: sarq $1, (%v246 <- %v201)
+  Inst 20: subq $0x1, (%v245 <- %v246)
+  Inst 21: shlq $1, (%v244 <- %v245)
+  Inst 22: orq $0x1, (%v243 <- %v244)
+  Inst 23: movq %v243, <offset:1>+0x10(%rsp)
+  Inst 24: call    User(userextname1)
+    UserStackMap { by_type: [(types::I64, CompoundBitSet {0, 8, 16})], sp_to_sized_stack_slots: None }
+  Inst 25: testq %v242, %v242
+  Inst 26: jnz     label7; j label6
+Block 6([]):
+    (original IR block: block1)
+  Inst 27: uninit  %v240
+  Inst 28: xorq %v240, (%v241 <- %v240)
+  Inst 29: rets %v241=%rax
+Block 7([]):
+    (original IR block: block9)
+    (successor: Block 9([]))
+    (successor: Block 8([]))
+  Inst 30: movq $0xf, <offset:1>+(%rsp)
+  Inst 31: testq $0x1, %v202
+  Inst 32: jnz     label9; j label8
+Block 8([]):
+    (successor: Block 12([]))
+  Inst 33: jmp     label12
+Block 9([]):
+    (original IR block: block10)
+    (successor: Block 10([]))
+    (successor: Block 11([]))
+  Inst 34: addq $0xe, (%v238 <- %v202)
+  Inst 35: seto %v239
+  Inst 36: testb %v239, %v239
+  Inst 37: jnz     label10; j label11
+Block 10([]):
+    (successor: Block 12([]))
+  Inst 38: jmp     label12
+Block 11([]):
+    (successor: Block 13([VReg(vreg = 238, class = Int)]))
+  Inst 39: jmp     label13
+Block 12([]):
+    (original IR block: block11)
+    (successor: Block 13([VReg(vreg = 235, class = Int)]))
+  Inst 40: movl $0xf, %v237
+  Inst 41: load_ext_name userextname2+0, %v236
+  Inst 42: call    *%v236
+    UserStackMap { by_type: [(types::I64, CompoundBitSet {0, 8, 16})], sp_to_sized_stack_slots: None }
+  Inst 43: jmp     label13
+Block 13([VReg(vreg = 234, class = Int)]):
+    (original IR block: block12)
+    (successor: Block 1([VReg(vreg = 243, class = Int), VReg(vreg = 234, class = Int)]))
+  Inst 44: movq %v243, <offset:1>+(%rsp)
+  Inst 45: movq %v234, <offset:1>+8(%rsp)
+  Inst 46: jmp     label1
+Block 14([]):
+    (original IR block: block6)
+    (successor: Block 15([]))
+  Inst 47: jmp     label15
+Block 15([]):
+    (original IR block: block8)
+  Inst 48: rets %v202=%rax
+}
+vcode from lowering:
+VCode {
+  Entry block: 0
+Block 0([]):
+    (original IR block: block0)
+  Inst 0: args %v192=%rdi %v194=%rdx
+  Inst 1: movq (%v194), %v200
+  Inst 2: movq 8(%v194), %v199
+  Inst 3: call    User(userextname0)
+  Inst 4: rets %v198=%rax
+}

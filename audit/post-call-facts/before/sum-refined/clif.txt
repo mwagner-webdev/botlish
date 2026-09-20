@@ -1,0 +1,229 @@
+; u0:0 = rt_type_error
+; u0:1 = rt_not_boolean
+; u0:2 = rt_unbound
+; u0:3 = rt_raise
+; u0:4 = rt_stack_overflow
+; u0:5 = rt_int_add
+; u0:6 = rt_int_sub
+; u0:7 = rt_int_mul
+; u0:8 = rt_int_mod
+; u0:9 = rt_int_cmp
+; u0:10 = rt_value_eq
+; u0:11 = rt_str_eq
+; u0:12 = rt_hash
+; u0:13 = rt_str_len
+; u0:14 = rt_substr
+; u0:15 = rt_str_region_check
+; u0:16 = rt_str_region_eq
+; u0:17 = rt_str_decode_char_at
+; u0:18 = rt_str_byte_len
+; u0:19 = rt_str_lower
+; u0:20 = rt_str_cat
+; u0:21 = rt_str_utf8_bytes
+; u0:22 = rt_is_tcl_alpha
+; u0:23 = rt_is_tcl_alnum
+; u0:24 = rt_list_new
+; u0:25 = rt_list_len
+; u0:26 = rt_list_get
+; u0:27 = rt_list_append
+; u0:28 = rt_mutarray_allocate
+; u0:29 = rt_mutarray_capacity
+; u0:30 = rt_mutarray_get
+; u0:31 = rt_mutarray_set
+; u0:32 = rt_mutarray_copy
+; u0:33 = rt_mutarray_freeze
+; u0:34 = rt_is_kind
+; u0:35 = rt_is_result
+; u0:36 = rt_result_payload
+; u0:37 = rt_result_new
+; u0:38 = rt_cell_new
+; u0:39 = rt_closure_new
+; u0:40 = rt_call_value
+; u0:41 = botlish_fn_0 (<program>)
+; u0:42 = botlish_entry_0
+; u0:43 = botlish_fn_1 (sum)
+; u0:44 = botlish_entry_1
+; u0:45 = botlish_fn_2 (step)
+; u0:46 = botlish_entry_2
+
+; function 0 "<program>": botlish_fn_0
+function u0:41(i64) -> i64 system_v {
+    ss0 = explicit_slot 16, align = 8
+    sig0 = (i64, i64, i64) -> i64 system_v
+    fn0 = colocated u0:43 sig0
+
+block2(v0: i64):
+    v1 = stack_addr.i64 ss0
+    jump block0
+
+block1:
+    v2 = iconst.i64 0
+    return v2  ; v2 = 0
+
+block0:
+    v3 = iconst.i64 801
+    store notrap aligned v3, v1  ; v3 = 801
+    v4 = iconst.i64 400
+    v5 = iconst.i64 1
+    store notrap aligned v5, v1+8  ; v5 = 1
+    v6 = iconst.i64 0
+    v7 = call fn0(v0, v3, v5), stack_map=[i64 @ ss0+0, i64 @ ss0+8]  ; v3 = 801, v5 = 1
+    brif v7, block3, block1
+
+block3:
+    return v7
+}
+
+; function 1 "sum": botlish_fn_1
+function u0:43(i64, i64, i64) -> i64 system_v {
+    ss0 = explicit_slot 16, align = 8
+    sig0 = (i64, i64, i64) -> i64 system_v
+    sig1 = (i64, i64, i64) -> i64 system_v
+    fn0 = colocated u0:45 sig0
+    fn1 = u0:3 sig1
+
+block2(v0: i64, v1: i64, v2: i64):
+    v3 = stack_addr.i64 ss0
+    v4 = iconst.i64 1
+    v5 = sshr v1, v4  ; v4 = 1
+    store notrap aligned v2, v3
+    jump block0(v5, v2)
+
+block1:
+    v6 = iconst.i64 0
+    return v6  ; v6 = 0
+
+block0(v38: i64, v39: i64):
+    v12 -> v38
+    v20 -> v38
+    v19 -> v39
+    v28 -> v39
+    v31 -> v39
+    v37 -> v39
+    v7 = iconst.i64 6
+    v8 = iconst.i64 6
+    v9 = icmp eq v7, v8  ; v7 = 6, v8 = 6
+    brif v9, block3, block4
+
+block3:
+    v10 = iconst.i64 1
+    v11 = iconst.i64 0
+    v13 = icmp.i64 eq v12, v11  ; v11 = 0
+    v14 = iconst.i64 6
+    v15 = iconst.i64 2
+    v16 = select v13, v14, v15  ; v14 = 6, v15 = 2
+    v17 = iconst.i64 6
+    v18 = icmp eq v16, v17  ; v17 = 6
+    brif v18, block5, block6
+
+block5:
+    jump block7
+
+block6:
+    v21 = iconst.i64 1
+    v22 = ishl.i64 v20, v21  ; v21 = 1
+    v23 = iconst.i64 1
+    v24 = bor v22, v23  ; v23 = 1
+    store notrap aligned v24, v3+8
+    v25 = iconst.i64 3
+    v26 = iconst.i64 1
+    v27 = isub.i64 v20, v26  ; v26 = 1
+    v30 -> v27
+    v29 = call fn0(v0, v28, v24), stack_map=[i64 @ ss0+0, i64 @ ss0+8]
+    brif v29, block8, block1
+
+block8:
+    store.i64 notrap aligned v29, v3
+    jump block0(v30, v29)
+
+block7:
+    jump block9
+
+block4:
+    v32 = load.i64 notrap aligned v0+16
+    v33 = load.i64 notrap aligned v32
+    v34 = load.i64 notrap aligned v0+16
+    v35 = load.i64 notrap aligned v34+8
+    v36 = call fn1(v0, v33, v35)
+    jump block1
+
+block9:
+    return v37
+}
+
+; function 2 "step": botlish_fn_2
+function u0:45(i64, i64, i64) -> i64 system_v {
+    ss0 = explicit_slot 16, align = 8
+    sig0 = (i64, i64, i64, i64) -> i64 system_v
+    sig1 = (i64, i64, i64) -> i64 system_v
+    fn0 = u0:0 sig0
+    fn1 = u0:5 sig1
+
+block2(v0: i64, v1: i64, v2: i64):
+    v5 -> v1
+    v24 -> v1
+    v37 -> v1
+    v25 -> v2
+    v38 -> v2
+    v3 = stack_addr.i64 ss0
+    store notrap aligned v1, v3
+    store notrap aligned v2, v3+8
+    jump block0
+
+block1:
+    v4 = iconst.i64 0
+    return v4  ; v4 = 0
+
+block0:
+    v7 = iconst.i64 1
+    v8 = band.i64 v5, v7  ; v7 = 1
+    v9 = iconst.i64 0
+    v10 = icmp ne v8, v9  ; v9 = 0
+    v11 = iconst.i8 1
+    brif v10, block3(v11), block4  ; v11 = 1
+
+block4:
+    v12 = iconst.i64 7
+    v13 = band.i64 v5, v12  ; v12 = 7
+    v14 = iconst.i64 0
+    v15 = icmp eq v13, v14  ; v14 = 0
+    v16 = iconst.i8 0
+    brif v15, block5, block3(v16)  ; v16 = 0
+
+block5:
+    v17 = load.i8 notrap aligned v5
+    v18 = iconst.i8 1
+    v19 = icmp eq v17, v18  ; v18 = 1
+    jump block3(v19)
+
+block3(v6: i8):
+    brif v6, block7, block6
+
+block6:
+    v20 = iconst.i64 0
+    v21 = load.i64 notrap aligned v0+16
+    v22 = load.i64 notrap aligned v21+16
+    v23 = call fn0(v0, v5, v20, v22)  ; v20 = 0
+    jump block1
+
+block7:
+    v26 = band.i64 v24, v25
+    v27 = iconst.i64 1
+    v28 = band v26, v27  ; v27 = 1
+    v29 = iconst.i64 0
+    v30 = icmp ne v28, v29  ; v29 = 0
+    brif v30, block8, block9
+
+block8:
+    v32 = iconst.i64 -1
+    v33 = iadd.i64 v25, v32  ; v32 = -1
+    v34, v35 = sadd_overflow.i64 v24, v33
+    brif v35, block9, block10(v34)
+
+block9:
+    v36 = call fn1(v0, v24, v25), stack_map=[i64 @ ss0+0, i64 @ ss0+8]
+    jump block10(v36)
+
+block10(v31: i64):
+    return v31
+}

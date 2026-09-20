@@ -1,0 +1,21 @@
+<program>: closed   [i0, ir {}]
+  calls:    drive<int, int>
+  guards:   0
+  runtime:  none
+
+work (semantic): guarded   [UnknownParameterKind 1]
+work<int>: closed   [i2, ir {0 2}]
+  params:   i : int
+  result:   int
+  guards:   0
+  runtime:  bigint
+
+drive (semantic): guarded   [UnknownParameterKind 2]
+drive<int, int>: closed   [i1, ir {1 2}]
+  params:   i : int, total : int
+  result:   int
+  calls:    drive<int, int>, work<int>
+  guards:   0
+  runtime:  bigint
+
+guards: generic 3, specialized 0; instances: 0 generic, 2 specialized

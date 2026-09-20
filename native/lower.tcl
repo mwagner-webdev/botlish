@@ -758,6 +758,10 @@ namespace eval native::lower {
 #                      1, unless the environment variable
 #                      BOTLISH_NATIVE_STRING_REGION_OPT is 0; see the
 #                      "String regions" section above)
+#   -call-facts-opt 1|0
+#                      propagate value facts through exact closed calls
+#                      (default 1; BOTLISH_NATIVE_CALL_FACTS_OPT=0 disables
+#                      the new propagation for differential testing)
 #   -string-traversal-opt 1|0
 #                      carry a provably forward, +1-per-iteration character
 #                      scan's physical UTF-8 byte position across its self-
@@ -789,6 +793,7 @@ proc native::lower::program {hirProgram args} {
     variable pending
     variable usedNatives
     variable ranges
+    variable callFactsOpt
     variable reprOpt
     variable escape
     variable escapeOpt
@@ -812,12 +817,15 @@ proc native::lower::program {hirProgram args} {
         && $::env(BOTLISH_NATIVE_BLOCK_ESCAPE_OPT) eq "0" ? 0 : 1}]
     set stringRegionDefault [expr {[info exists ::env(BOTLISH_NATIVE_STRING_REGION_OPT)]
         && $::env(BOTLISH_NATIVE_STRING_REGION_OPT) eq "0" ? 0 : 1}]
+    set callFactsDefault [expr {[info exists ::env(BOTLISH_NATIVE_CALL_FACTS_OPT)]
+        && $::env(BOTLISH_NATIVE_CALL_FACTS_OPT) eq "0" ? 0 : 1}]
     set traversalDefault [expr {[info exists ::env(BOTLISH_NATIVE_STRING_TRAVERSAL_OPT)]
         && $::env(BOTLISH_NATIVE_STRING_TRAVERSAL_OPT) eq "0" ? 0 : 1}]
     set options [hir::Options native::lower::program \
         [list -specialize $default -repr-opt $reprDefault -escape-opt $escapeDefault \
             -param-aggregate-opt $paramAggregateDefault -block-escape-opt $blockEscapeDefault \
-            -string-region-opt $stringRegionDefault -string-traversal-opt $traversalDefault] $args]
+            -string-region-opt $stringRegionDefault -string-traversal-opt $traversalDefault \
+            -call-facts-opt $callFactsDefault] $args]
     if {[hir::mode $hirProgram] ne "program"} {
         throw {NATIVE UNSUPPORTED sequence-mode} \
             "native lowering: only program-mode HIR can be compiled (sequence mode runs in an unknown environment)"
@@ -825,13 +833,15 @@ proc native::lower::program {hirProgram args} {
     set baseHir $hirProgram
     set hir $hirProgram
     set reprOpt [dict get $options -repr-opt]
+    set callFactsOpt [dict get $options -call-facts-opt]
     set escapeOpt [dict get $options -escape-opt]
     set paramAggregateOpt [dict get $options -param-aggregate-opt]
     set blockEscapeOpt [dict get $options -block-escape-opt]
     set stringRegionOpt [dict get $options -string-region-opt]
     set traversalOpt [dict get $options -string-traversal-opt]
-    set spec [hir::specialize::analyze $hirProgram -specialize [dict get $options -specialize]]
-    set ranges [hir::range::analyze $hirProgram $spec]
+    set spec [hir::specialize::analyze $hirProgram -specialize [dict get $options -specialize] \
+        -call-facts-opt [dict get $options -call-facts-opt]]
+    set ranges [hir::range::analyze $hirProgram $spec [dict get $options -call-facts-opt]]
     set escape [expr {$escapeOpt ? [hir::escape::analyze $hirProgram $spec $paramAggregateOpt]
         : [dict create arity {} wants {} virtual {} paramVirtual {}]}]
     set blockescape [expr {$blockEscapeOpt ? [hir::blockescape::analyze $hirProgram $spec]
@@ -2500,6 +2510,24 @@ proc native::lower::ModuleBridgeBinding {calleeExpr targetKind} {
     return [dict get $hir scopes $scope names $qualified]
 }
 
+# Preserve the exact call and its completion handling, then substitute a
+# successful-result constant for later value uses when the per-instance range
+# analysis proves one. This is not an effect or totality optimization.
+proc native::lower::ClosedResult {fnVar e result} {
+    upvar 1 $fnVar fn
+    variable callFactsOpt
+    variable ranges
+    variable currentInstance
+    variable hir
+    if {$callFactsOpt && [hir::types::kindOf [hir::typeOf $hir $e]] eq "int"} {
+        set range [hir::range::of $ranges $currentInstance $e]
+        if {$range ne "never" && [hir::range::fitsSmall $range] && [dict get $range min] eq [dict get $range max]} {
+            return [list [IntConst fn [dict get $range min] $e] tagged]
+        }
+    }
+    return [list $result tagged]
+}
+
 proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
     upvar 1 $fnVar fn
     variable hir
@@ -2812,9 +2840,11 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
             lappend argRegs [IntConst fn 0 $e]
         }
         if {$target in $envless} {
-            return [list [Assign fn [string trimright "call $id [join $argRegs { }]"] $e] tagged]
+            set result [Assign fn [string trimright "call $id [join $argRegs { }]"] $e]
+        } else {
+            set result [Assign fn [string trimright "callenv $id $callee [join $argRegs { }]"] $e]
         }
-        return [list [Assign fn [string trimright "callenv $id $callee [join $argRegs { }]"] $e] tagged]
+        return [ClosedResult fn $e $result]
     }
     if {$wantVirtual ne ""} {
         throw {NATIVE BUG} "native lowering: cannot virtualize call $e (not a recognized construction)"

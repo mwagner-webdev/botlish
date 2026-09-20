@@ -118,7 +118,7 @@ test root-structural-2 {loop-count: work (no safepoint, no calls) needs zero slo
     set report [native::roots [sourceIrHir [file join $::projectRoot bench loop-count.ir]]]
     list [regsOf $report work] [safepointsOf $report work] [slotsOf $report work] \
         [regsOf $report drive] [expr {[slotsOf $report drive] < 13}]
-} -result {17 0 0 13 1}
+} -result {17 0 0 15 1}
 
 test root-structural-3 {sum-refined: sum and step both need far fewer slots than their register counts} -body {
     set report [native::roots [sourceIrHir [file join $::projectRoot bench sum-refined.ir]]]

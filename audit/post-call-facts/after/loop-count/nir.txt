@@ -1,0 +1,60 @@
+nir 1
+
+func 0 "<program>" params=0 env=0 regs=5 pnames="" captures=0 instance="generic" rawregs="1 3"
+    %0 = int 500 @e47
+    %1 = rawint 500
+    %2 = int 0 @e48
+    %3 = rawint 0
+    %4 = call 2 %0 %2 @e45
+    ret %4
+end
+
+func 1 "work" params=1 env=0 regs=17 pnames="i" captures=0 instance="int" rawregs="2 4 5 8 9 12 15" @e2
+    jump L0 @e3
+  label L0
+    %2 = op runbox %0
+    %3 = int 3 @e8
+    %4 = rawint 3
+    %5 = op rimul %2 %4 @e5
+    %6 = op rbox %5
+    %7 = int 7 @e13
+    %8 = rawint 7
+    %9 = op riadd %5 %8 @e10
+    %10 = op rbox %9
+    %11 = int 0 @e18
+    %12 = rawint 0
+    %13 = op rige %9 %12 @e15
+    br %13 L2 L3 @e14
+  label L2
+    %15 = op risub %9 %5 @e20
+    %16 = op rbox %15
+    %1 = move %16 @e19
+    jump L1 @e19
+  label L3
+    jump L0 @e24
+  label L1
+    ret %1
+end
+
+func 2 "drive" params=2 env=0 regs=15 pnames="i total" captures=0 instance="int, int" rawregs="3 6 8 9 13" @e26
+    %2 = int 0 @e31
+    %3 = rawint 0
+    %4 = op ile %0 %2 @e28
+    br %4 L0 L1 @e27
+  label L0
+    %5 = move %1
+    jump L2
+  label L1
+    %6 = op runbox %0
+    %7 = int 1 @e38
+    %8 = rawint 1
+    %9 = op risub %6 %8 @e35
+    %10 = op rbox %9
+    %11 = call 1 %0 @e42
+    %12 = int 7 @e42
+    %13 = rawint 7
+    %14 = op iadd %1 %12 @e39
+    tail %10 %14 @e33
+  label L2
+    ret %5
+end

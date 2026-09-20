@@ -39,39 +39,29 @@
 # path), and `if` branches (joined; the known-branch shortcut reuses
 # hir::types::KnownOutcome so a statically decided condition does not lose
 # precision). Every other expression's range is unknown: nothing here infers
-# a bound from a call whose target's own result this pass has not computed,
-# from a list/aggregate read, or from a branch condition (e.g. `i <
+# a bound from an exact call until its successful-result summary is known,
+# from an open call, a list/aggregate read, or from a branch condition (e.g. `i <
 # length(xs)` proves nothing about i's range: that needs relational
 # reasoning intervals cannot express, so it is not attempted; see #19 of the
 # milestone this module was written for).
 #
 # Parameters: interprocedural seeding
 # ------------------------------------
-# A parameter's range is seeded only from *syntactically evident* arguments
-# passed to it by other instances' direct calls (ExternalSeeds/SeedRange: a
-# syntactic look at each call's argument expressions, not a fixpoint over the
-# caller's own analysis, so instances need no dependency order): a literal
-# Int, or a direct call to a native whose -result-range metadata is a
-# context-free guarantee (nonneg, collection-length; e.g. a parameter passed
-# only `list_length(row)`-shaped arguments gets a genuine finite range with
-# no relational reasoning). A call from an instance
-# back to itself (hir::specialize's `calls`, self tail calls and ordinary
-# same-instance recursion alike) instead feeds back through a small internal
-# fixpoint: analyze the region under the current assumption, see what range
-# the self calls' arguments would have, join it into the assumption, and
-# repeat (widening a bound to infinity the first time it grows, so this
-# always reaches a fixed point in a few passes: see #16-18 of the milestone).
-# A parameter with no literal external argument and no self-recursive
+# ExternalSeeds supplies syntactically evident initial arguments: Int
+# literals and context-free native result metadata. The instance fixpoint
+# then joins ranges from every reached exact call site, including ranges
+# derived from caller parameters and branch narrowing. Same-instance calls
+# feed a local widening step; cross-instance calls feed the outer rounds.
+# Open generic entries remain unknown when materialized Block values may
+# reach them through dynamic dispatch.
+# A parameter with no proven caller argument and no self-recursive
 # feedback stays unknown (Option A of the milestone's #13: a parameter's
 # incoming magnitude is never assumed small merely because it is a Botlish
 # Int).
 #
-# This is deliberately not a full interprocedural analysis: a non-recursive
-# instance's parameters are seeded once from literal arguments and never
-# revisited. That is sound (seeding never over-approximates: unknown is
-# always a safe fallback) but not maximally precise; it is enough to prove
-# what the corpus needs (loop counters seeded by a literal 0) without a
-# cross-instance worklist.
+# Exact-call arguments and successful-result ranges now settle together in
+# the instance rounds below. No value fact implies completion or an effect.
+
 
 namespace eval hir::range {
     # The runtime's tagged small-Int range (see the file header).
@@ -364,11 +354,14 @@ proc hir::range::Expr {hirVar ctxVar e} {
         }
         loop {
             set saved [dict get $ctx bindings]
+            dict set ctx breakRanges $e never
             foreach child [dict get $node body] {
                 Expr hir ctx $child
             }
+            set result [dict get $ctx breakRanges $e]
+            dict unset ctx breakRanges $e
             dict set ctx bindings $saved
-            return [unknown]
+            return $result
         }
         return {
             set value [dict get $node value]
@@ -379,8 +372,11 @@ proc hir::range::Expr {hirVar ctxVar e} {
             return never
         }
         break {
-            if {[dict get $node value] ne ""} {
-                Expr hir ctx [dict get $node value]
+            set value [dict get $node value]
+            set r [expr {$value eq "" ? [unknown] : [Expr hir ctx $value]}]
+            set target [dict get $node target]
+            if {$r ne "never" && $target ne "" && [dict exists $ctx breakRanges $target]} {
+                dict set ctx breakRanges $target [join [dict get $ctx breakRanges $target] $r]
             }
             return never
         }
@@ -395,6 +391,55 @@ proc hir::range::Expr {hirVar ctxVar e} {
             return [unknown]
         }
     }
+}
+
+# If a successful native addition computed a + K, then a later subtraction
+# of the same immutable binding is K. This local algebraic identity is valid
+# for arbitrary-precision Ints and says nothing about whether either call
+# completes. It covers returning paths such as work's b - a.
+proc hir::range::DifferenceOffset {hir left right} {
+    set rightNode [hir::node $hir $right]
+    if {[dict get $rightNode kind] ne "ref"} {
+        return ""
+    }
+    set rightBinding [dict get $rightNode binding]
+    set leftNode [hir::node $hir $left]
+    if {[dict get $leftNode kind] ne "ref"} {
+        return ""
+    }
+    set leftBinding [dict get $leftNode binding]
+    set declaration [dict get [hir::binding $hir $leftBinding] declaredBy]
+    if {$declaration eq ""} {
+        return ""
+    }
+    set bound [hir::node $hir $declaration]
+    if {[dict get $bound kind] ne "bind"} {
+        return ""
+    }
+    set value [hir::node $hir [dict get $bound value]]
+    if {[dict get $value kind] ne "call" || [lindex [dict get $value target] 0] ne "native"} {
+        return ""
+    }
+    if {[llength [dict get $value args]] != 2} {return ""}
+    set symbol [lindex [dict get $value target] 1]
+    if {[dict get [hir::symbol $hir $symbol] name] ne "+"} {
+        return ""
+    }
+    foreach {a b} [list [lindex [dict get $value args] 0] [lindex [dict get $value args] 1]] {
+        # The two operands may appear in either order.
+        foreach pair [list [list $a $b] [list $b $a]] {
+            lassign $pair same constant
+            set sameNode [hir::node $hir $same]
+            set constantNode [hir::node $hir $constant]
+            if {[dict get $sameNode kind] eq "ref"
+                    && [dict get $sameNode binding] eq $rightBinding
+                    && [dict get $constantNode kind] eq "const"
+                    && [core::value::kind [dict get $constantNode value]] eq "int"} {
+                return [core::value::intOf [dict get $constantNode value]]
+            }
+        }
+    }
+    return ""
 }
 
 proc hir::range::Call {hirVar ctxVar e node} {
@@ -413,13 +458,20 @@ proc hir::range::Call {hirVar ctxVar e node} {
     }
     lassign [dict get $node target] targetKind target
     if {$targetKind eq "native"} {
+        if {[hir::typeOf $hir $e] eq "never"} {
+            # A proven error contributes no successful Int result.
+            return never
+        }
         set name [dict get [hir::symbol $hir $target] name]
         set result [unknown]
         if {$name in {+ - *} && [llength $argRanges] == 2} {
             lassign $argRanges x y
             switch -- $name {
                 + { set result [add $x $y] }
-                - { set result [sub $x $y] }
+                - {
+                    set offset [DifferenceOffset $hir [lindex [dict get $node args] 0] [lindex [dict get $node args] 1]]
+                    set result [expr {$offset eq "" ? [sub $x $y] : [point $offset]}]
+                }
                 * { set result [mul $x $y] }
             }
         } else {
@@ -440,7 +492,13 @@ proc hir::range::Call {hirVar ctxVar e node} {
         # cross-instance targets are recorded uniformly; hir::range::analyze
         # separates them when folding (self feeds this same instance's own
         # fixpoint, cross feeds the callee's).
-        dict lappend ctx calls [list [dict get [dict get $ctx instanceCalls] $e] $argRanges]
+        set targetId [dict get [dict get $ctx instanceCalls] $e]
+        dict lappend ctx calls [list $targetId $argRanges]
+        set results [dict get $ctx calleeResults]
+        set result [expr {[dict exists $results $targetId] ? [dict get $results $targetId] : [unknown]}]
+        if {$result eq "never"} {set result [unknown]}
+        dict set ctx exprs $e $result
+        return $result
     }
     return [unknown]
 }
@@ -657,9 +715,9 @@ proc hir::range::Narrowed {op rx ry} {
 #           self tail calls, ordinary same-instance recursion, and calls of
 #           other instances alike); hir::range::analyze separates self from
 #           cross-instance when it folds these into entry facts
-proc hir::range::AnalyzeInstance {hir id instanceCalls block params assumed monotone} {
-    set ctx [dict create bindings [dict create] returnRange never exprs [dict create] \
-        calls {} id $id instanceCalls $instanceCalls monotone $monotone]
+proc hir::range::AnalyzeInstance {hir id instanceCalls block params assumed monotone calleeResults} {
+    set ctx [dict create bindings [dict create] returnRange never breakRanges {} exprs [dict create] \
+        calls {} id $id instanceCalls $instanceCalls monotone $monotone calleeResults $calleeResults]
     foreach b $params r $assumed {
         dict set ctx bindings $b $r
     }
@@ -704,12 +762,12 @@ proc hir::range::OpenInstances {spec} {
 # already proved (never touched -- see analyze's own comment on this).
 # Returns {outcome ASSUMED'}: the last pass's AnalyzeInstance result and the
 # (possibly narrower-information, widened) settled entry Ranges.
-proc hir::range::SettleInstance {hir id instanceCalls block params assumed locked monotone} {
+proc hir::range::SettleInstance {hir id instanceCalls block params assumed locked monotone calleeResults} {
     variable maxPasses
     set n [llength $params]
     set outcome {}
     for {set pass 1} {$pass <= $maxPasses} {incr pass} {
-        set outcome [AnalyzeInstance $hir $id $instanceCalls $block $params $assumed $monotone]
+        set outcome [AnalyzeInstance $hir $id $instanceCalls $block $params $assumed $monotone $calleeResults]
         set selfArgs {}
         foreach pair [dict get $outcome calls] {
             lassign $pair target argRanges
@@ -790,7 +848,7 @@ proc hir::range::SettleInstance {hir id instanceCalls block params assumed locke
 # unsound over-narrowing; it keeps whatever hir/induction.tcl proved and is
 # otherwise unknown, exactly as an instance with no known callers at all
 # already was before this milestone.
-proc hir::range::analyze {hir spec} {
+proc hir::range::analyze {hir spec {callFactsOpt 1}} {
     # hir/induction.tcl is fed only the old, purely syntactic external seeds
     # (a literal argument, or a direct call to a native with context-free
     # -result-range metadata) -- unchanged by, and entirely independent of,
@@ -816,6 +874,8 @@ proc hir::range::analyze {hir spec} {
     set lockedOf [dict create]
     set assumed [dict create]
     set outcomes [dict create]
+    set calleeResults [dict create]
+    set resultPoisoned [dict create]
     # Indices this instance's own self-call feedback has, at some round,
     # actually *destroyed*: widened a concrete entry fact all the way to
     # unknown (never just started unknown with nothing yet to say -- see
@@ -875,7 +935,7 @@ proc hir::range::analyze {hir spec} {
     # propagate end to end) plus a fixed cushion for the self-call/widen
     # settling every instance also does each round -- finite, deterministic,
     # never a per-interval or per-benchmark constant (spec #12, #24, #37).
-    set roundBudget [expr {[llength $ids] + 8}]
+    set roundBudget [expr {4 * [llength $ids] + 16}]
     for {set round 1} {$round <= $roundBudget} {incr round} {
         set changed 0
         set contributions [dict create]
@@ -883,7 +943,7 @@ proc hir::range::analyze {hir spec} {
             set before [dict get $assumed $id]
             lassign [SettleInstance [dict get $viewOf $id] $id [dict get $instanceCallsOf $id] \
                 [dict get $blockOf $id] [dict get $paramsOf $id] $before \
-                [dict get $lockedOf $id] [dict get $monotoneOf $id]] outcome settled
+                [dict get $lockedOf $id] [dict get $monotoneOf $id] $calleeResults] outcome settled
             dict set outcomes $id $outcome
             if {$settled ne $before} {
                 set locked [dict get $lockedOf $id]
@@ -973,8 +1033,39 @@ proc hir::range::analyze {hir spec} {
             }
             dict set assumed $target $next
         }
+        # Successful value ranges are per instance; no effect fact follows.
+        # An initial unknown is provisional while caller entry ranges settle.
+        # Once a concrete summary appears it can only widen. If later caller
+        # evidence destroys it, unknown is permanent for this analysis.
+        if {$callFactsOpt} {
+            foreach id $ids {
+                set inferred [dict get $outcomes $id result]
+                if {![dict exists $calleeResults $id]} {
+                    set next $inferred
+                } else {
+                    set old [dict get $calleeResults $id]
+                    if {[dict exists $resultPoisoned $id]} {
+                        set next [unknown]
+                    } elseif {$old eq [unknown]} {
+                        set next $inferred
+                    } else {
+                        set next [join $old $inferred]
+                        if {$next eq [unknown] && $old ne [unknown]} {
+                            dict set resultPoisoned $id 1
+                        }
+                    }
+                }
+                if {![dict exists $calleeResults $id] || [dict get $calleeResults $id] ne $next} {
+                    dict set calleeResults $id $next
+                    set changed 1
+                }
+            }
+        }
         if {!$changed} {
             break
+        }
+        if {$round == $roundBudget} {
+            throw {HIR RANGE LIMIT} "hir::range: closed-call facts did not converge"
         }
     }
 

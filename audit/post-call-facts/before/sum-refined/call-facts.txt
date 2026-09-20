@@ -1,0 +1,11 @@
+<program> e30 -> sum<int, int>
+  arg0: int, range [400, 400]
+  arg1: int, range [0, 0]
+  successful result: int, range [-∞, +∞]
+sum<int, int> e25 -> step<generic>
+  arg0: int, range [-∞, +∞]
+  successful result: int, range [-∞, +∞]
+sum<int, int> e19 -> sum<int, int>
+  arg0: int, range [0, 399]
+  arg1: int, range [-∞, +∞]
+  successful result: int, range [-∞, +∞]

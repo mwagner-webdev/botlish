@@ -1,0 +1,11 @@
+<program> e45 -> drive<int, int>
+  arg0: int, range [500, 500]
+  arg1: int, range [0, 0]
+  successful result: int, range [-∞, +∞]
+drive<int, int> e42 -> work<int>
+  arg0: int, range [1, 500]
+  successful result: int, range [-∞, +∞]
+drive<int, int> e33 -> drive<int, int>
+  arg0: int, range [0, 499]
+  arg1: int, range [-∞, +∞]
+  successful result: int, range [-∞, +∞]

@@ -87,10 +87,10 @@ test hir-specialize-5 {-specialize 0: generic instances with the semantic types}
          [specStatus $hir $analysis inc<generic>]
 } -result {inc<generic> {} {guarded 1}}
 
-test hir-specialize-6 {closures over values stay generic; static blocks are specialized} -body {
+test hir-specialize-6 {exact closure calls specialize while the generic entry remains} -body {
     lassign [specOf "fn make_adder(k):\n    fn add(y):\n        y + k\n    add(1)\n\nmake_adder(2)"] hir analysis
     list [specLabels $analysis make_adder] [specLabels $analysis add] [specResult $analysis add<generic>]
-} -result {make_adder<int> add<generic> int}
+} -result {make_adder<int> {add<int> add<generic>} int}
 
 # ---------------------------------------------------------------------------
 # Recursion and the result fixpoint
