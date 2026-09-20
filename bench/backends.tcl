@@ -23,7 +23,8 @@ namespace eval bench::backends {
         compile "Tcl compile" \
         native  "Cranelift" \
         python  "Python" \
-        rust    "Rust"]
+        rust    "Rust" \
+        go      "Go"]
 
     # Internal id -> {what it is, and what a timed number in its column
     # scopes to}. Every description says in-process execution (bench.tcl
@@ -39,7 +40,8 @@ namespace eval bench::backends {
         compile "Tcl source/codegen backend (not Cranelift) -- in-process execution" \
         native  "Cranelift native machine-code backend -- in-process execution, JIT compile time excluded" \
         python  "reference implementation -- in-process execution" \
-        rust    "reference implementation -- in-process execution"]
+        rust    "reference implementation -- in-process execution" \
+        go      "reference implementation -- in-process execution"]
 }
 
 # The unambiguous display name of internal backend/column id ID: ID itself

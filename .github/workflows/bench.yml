@@ -27,11 +27,15 @@ jobs:
       - name: Install project prerequisites
         run: bash .devcontainer/setup.sh
 
-      # bench.tcl shells out to python3 to run the reference programs under
-      # bench/equivalents/. python3 ships on ubuntu-latest already; this
-      # just prints its version for the job log.
+      # bench.tcl shells out to python3 and go to run the reference programs
+      # under bench/equivalents/. Both ship on ubuntu-latest already, but the
+      # job log still prints their versions so the benchmark environment is
+      # explicit in CI.
       - name: Ensure Python toolchain
         run: python3 --version
+
+      - name: Ensure Go toolchain
+        run: go version
 
       # bench.tcl's native column, and bench/equivalents/rust/*.rs's own
       # column, both need the Cranelift backend built. bench.tcl itself

@@ -288,26 +288,12 @@ if {$natives ne ""} {
 if {"cranelift" in $backends} {
     lappend columns alloc
 }
-# speedups: the Tcl compiler's time over cranelift's and cranelift-generic's
-# over cranelift's when they run, else the interpreter's over the last
-# backend's.
-set speedups {}
-foreach pair {{compile cranelift} {cranelift-generic cranelift}} {
-    if {[lindex $pair 0] in $backends && [lindex $pair 1] in $backends} {
-        lappend speedups $pair
-    }
-}
-if {$speedups eq ""} {
-    set speedups [list [list [lindex $backends 0] [lindex $backends end]]]
-}
-set speedupNames [lmap pair $speedups {join $pair /}]
 if {$markdown} {
     puts "Tcl [info patchlevel], best of $runs runs, wall time, compilation excluded (compile columns: native lowering in Tcl + Cranelift JIT; code: generic -> specialized machine code bytes, NIR functions, kind guards).\n"
-    puts "| algorithm | input | [join $columns { | }] | [join [lmap n $speedupNames {string cat "speedup ($n)"}] { | }] | values |"
-    puts "|---|---|[string repeat ---:| [expr {[llength $columns] + [llength $speedups]}]]---|"
+    puts "| algorithm | input | [join $columns { | }] | values |"
+    puts "|---|---|[string repeat ---:| [llength $columns]]---|"
 } else {
-    puts [format "%-16s %-14s%s%s" algorithm input \
-        [join [lmap b $columns {format " %21s" $b}] ""] [join [lmap n $speedupNames {format " %24s" $n}] ""]]
+    puts [format "%-16s %-14s%s" "algorithm" "input" [join [lmap b $columns {format " %21s" $b}] ""]]
 }
 
 set disagreements 0
@@ -339,14 +325,6 @@ foreach algorithm $algorithms {
         if {!$agree} {
             incr disagreements
         }
-        set speedupCells [lmap pair $speedups {
-            lassign $pair slower faster
-            if {[dict get $times $slower] eq "" || [dict get $times $faster] eq ""} {
-                string cat ""
-            } else {
-                format "%.1fx" [expr {double([dict get $times $slower]) / max(1, [dict get $times $faster])}]
-            }
-        }]
         set cells [lmap backend $backends {bench::cell [dict get $times $backend]}]
         foreach b $natives {
             lappend cells [bench::compileCell [dict get $compileTimes $b]]
@@ -359,10 +337,10 @@ foreach algorithm $algorithms {
         }
         set check [expr {$agree ? "agree" : "DIFFER: $values"}]
         if {$markdown} {
-            puts "| $algorithm | $size | [join $cells { | }] | [join $speedupCells { | }] | [expr {$agree ? "✅" : "❌ $check"}] |"
+            puts "| $algorithm | $size | [join $cells { | }] | [expr {$agree ? "✅" : "❌ $check"}] |"
         } else {
-            puts [format "%-16s %-14s%s%s  %s" $algorithm $size \
-                [join [lmap c $cells {format " %21s" $c}] ""] [join [lmap c $speedupCells {format " %24s" $c}] ""] $check]
+            puts [format "%-16s %-14s%s  %s" $algorithm $size \
+                [join [lmap c $cells {format " %21s" $c}] ""] $check]
         }
         flush stdout
     }

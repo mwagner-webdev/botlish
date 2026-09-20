@@ -5,14 +5,14 @@
 # Each program runs once untimed per backend (so compilation is excluded
 # from the measurement), then N timed runs; the best run is reported.
 # Alongside the Botlish backends (interp, compile, and native -- see
-# below), a hand-translated Python and Rust program from
-# bench/equivalents/{python,rust}/BASE.{py,rs} runs the same way (one
+# below), hand-translated Python, Rust, and Go programs from
+# bench/equivalents/{python,rust,go}/BASE.{py,rs,go} run the same way (one
 # untimed warmup, then N timed runs, self-reporting its best time) when one
 # exists for a given BASE.ir, for a same-container reference comparison.
 # -markdown prints a Markdown table (e.g. for a CI job summary).
 # Exits with status 1 if the Botlish backends disagree on any program's
 # value (native included, whenever it produces one at all -- see below).
-# The Python/Rust columns are informational and never gate: their values
+# The Python/Rust/Go columns are informational and never gate: their values
 # are still checked and flagged, but a mismatch there doesn't fail the run.
 #
 # Native (Cranelift) column
@@ -162,6 +162,19 @@ proc runRustEquivalent {root base runs} {
     return [parseEquivalentOutput [exec $bin --runs $runs]]
 }
 
+# Same as runRustEquivalent, but for bench/equivalents/go/BASE.go. The Go
+# source is compiled once and cached beside the source to keep repeated runs
+# cheap while still matching the Python/Rust reference execution model.
+proc runGoEquivalent {root base runs} {
+    set src [file join $root bench equivalents go "$base.go"]
+    if {![file exists $src]} { return "" }
+    set bin [file join $root bench equivalents go $base]
+    if {![file exists $bin] || [file mtime $src] > [file mtime $bin]} {
+        exec go build -o $bin $src 2>@1
+    }
+    return [parseEquivalentOutput [exec $bin --runs $runs]]
+}
+
 # microseconds -> "N.N ms" above 1ms, "N.NN us" below (backend times run to
 # the hundreds of thousands of microseconds; Rust's frequently sub-1us).
 proc fmtMicros {micros} {
@@ -172,17 +185,17 @@ proc fmtMicros {micros} {
     return [format "%.2f us" $micros]
 }
 
-set columns [concat $backends {native python rust}]
+set columns [concat $backends {native python rust go}]
 set columnLabels [lmap id $columns {bench::backends::displayName $id}]
 if {$markdown} {
     puts "```\n[bench::backends::manifest $columns]\n```\n"
     puts "Tcl [info patchlevel], best of $runs runs, compilation excluded (Cranelift's JIT compile\
         time specifically -- see the manifest above -- not just Tcl's).\n"
-    puts "| program | [join $columnLabels { | }] | speedup | 🏅 | values |"
-    puts "|---|[string repeat ---:| [llength $columnLabels]]---:|---:|---|"
+    puts "| program | [join $columnLabels { | }] | 🏅 | values |"
+    puts "|---|[string repeat ---:| [llength $columnLabels]]---:|---|"
 } else {
     puts "[bench::backends::manifest $columns]\n"
-    puts [format "%-20s %s %9s %4s" program [join [lmap b $columnLabels {format "%14s" $b}] ""] speedup ""]
+    puts [format "%-20s %s %4s" "program" [join [lmap b $columnLabels {format "%14s" $b}] ""] ""]
 }
 
 set disagreements 0
@@ -203,13 +216,16 @@ foreach path $files {
 
     set pyResult [runPythonEquivalent $root $base $runs]
     set rustResult [runRustEquivalent $root $base $runs]
+    set goResult [runGoEquivalent $root $base $runs]
     set pyMicros ""; set pyValue ""
     if {$pyResult ne ""} { lassign $pyResult pyMicros pyValue }
     set rustMicros ""; set rustValue ""
     if {$rustResult ne ""} { lassign $rustResult rustMicros rustValue }
+    set goMicros ""; set goValue ""
+    if {$goResult ne ""} { lassign $goResult goMicros goValue }
 
-    # Only the Botlish backends gate the exit code; python/rust are shown
-    # but informational, so an environment quirk in either can't turn a
+    # Only the Botlish backends gate the exit code; python/rust/go are shown
+    # but informational, so an environment quirk in any one can't turn a
     # green run red. Native joins the gate whenever it produced a value at
     # all (nativeValue ne ""): a program it declines to run natively
     # (bestNative returned "") is absent, not disagreeing, so it never
@@ -220,36 +236,33 @@ foreach path $files {
     if {!$agree} {
         incr disagreements
     }
-    set allValues [concat $botlishValues [list $pyValue $rustValue]]
+    set allValues [concat $botlishValues [list $pyValue $rustValue $goValue]]
     set allValues [lsearch -all -inline -not -exact $allValues ""]
     set allAgree [expr {[llength [lsort -unique $allValues]] == 1}]
 
-    # Native (Cranelift) is the baseline compared against Python/Rust: 🫩
-    # while it is still slower than Python, 🎉 once it beats Python, 🔥
-    # once it beats Rust too. No verdict (declined, not "🫩") when native
-    # couldn't run this program at all, or when there is no Python/Rust
-    # reference to compare against.
+    # Native (Cranelift) is the baseline compared against the reference
+    # implementations: 🫩 while it is still slower than Go, 🎉 once it beats
+    # Go. Rust remains informational here; the goal is to beat Go, not
+    # Python. No verdict (declined, not "🫩") when native couldn't run
+    # this program at all, or when there is no Go reference to compare.
     set emoji ""
-    if {$nativeMicros ne "" && $pyMicros ne "" && $rustMicros ne ""} {
-        if {$nativeMicros < $rustMicros} {
-            set emoji "🔥"
-        } elseif {$nativeMicros < $pyMicros} {
+    if {$nativeMicros ne "" && $goMicros ne ""} {
+        if {$nativeMicros < $goMicros} {
             set emoji "🎉"
         } else {
             set emoji "🫩"
         }
     }
 
-    set speedup [format "%.1fx" [expr {double([lindex $backendTimes 0]) / max(1, [lindex $backendTimes end])}]]
     set cells [concat [lmap micros $backendTimes {fmtMicros $micros}] \
         [list [fmtNative $nativeMicros $nativeStatus]] \
-        [lmap micros [list $pyMicros $rustMicros] {fmtMicros $micros}]]
+        [lmap micros [list $pyMicros $rustMicros $goMicros] {fmtMicros $micros}]]
     set shown [string range [join [lsort -unique $allValues] " / "] 0 40]
     if {$markdown} {
-        puts "| [file tail $path] | [join $cells { | }] | $speedup | $emoji | [expr {$allAgree ? "✅" : "❌ DIFFER"}] `$shown` |"
+        puts "| [file tail $path] | [join $cells { | }] | $emoji | [expr {$allAgree ? "✅" : "❌ DIFFER"}] `$shown` |"
     } else {
-        puts [format "%-20s %s %9s %4s%s" [file tail $path] \
-            [join [lmap c $cells {format "%14s" $c}] ""] $speedup $emoji \
+        puts [format "%-20s %s %4s%s" [file tail $path] \
+            [join [lmap c $cells {format "%14s" $c}] ""] $emoji \
             [expr {$allAgree ? "" : "  VALUES DIFFER: $allValues"}]]
     }
 }
