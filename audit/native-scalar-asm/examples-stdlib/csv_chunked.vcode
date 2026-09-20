@@ -1,46 +1,81 @@
 ; source:  examples/stdlib/csv_chunked.bot
 ; backend: Cranelift (specialize=1), native::vcode
 ; format:  Cranelift Debug for VCode, pre-regalloc machine-level lowering
-; total machine code bytes: 10496  (per function: 68 28 206 574 574 574 574 672 592 577 577 365 430 585 770 352 799 833 537 612 197)
+; total machine code bytes: 13223  (per function: 181 28 333 726 726 726 726 824 752 734 734 365 430 703 925 482 1013 1030 694 780 311)
 ;
 switch to block2
-inserted inst0: v1 = stack_addr.i64 ss0
-inserted inst1: jump block0
-switch to block1
-inserted inst2: v2 = iconst.i64 0
-inserted inst3: return v2  ; v2 = 0
-switch to block0
-inserted inst4: v3 = load.i64 notrap aligned v0+16
-inserted inst5: v4 = load.i64 notrap aligned v3
-try_def_var: var0 = v4
-inserted inst6: store.i64 notrap aligned v4, v1
-inserted inst7: v5 = call fn0(v0, v4)
-inserted inst8: brif.i64 v5, block3, block1
+inserted inst0: v1 = load.i64 notrap aligned v0
+inserted inst2: v3 = iadd.i64 v1, v2  ; v2 = 8
+inserted inst3: v4 = load.i64 notrap aligned v0+8
+inserted inst4: v5 = icmp.i64 ugt v3, v4
+inserted inst5: brif.i8 v5, block3, block4
 switch to block3
-try_def_var: var1 = v5
-inserted inst9: return v5
+inserted inst6: v6 = call fn0(v0)
+inserted inst7: v7 = iconst.i64 0
+inserted inst8: return v7  ; v7 = 0
+switch to block4
+inserted inst9: store.i64 notrap aligned v3, v0
+inserted inst10: v8 = iconst.i64 0
+inserted inst11: store.i64 notrap aligned v8, v1  ; v8 = 0
+inserted inst12: v9 = stack_addr.i64 ss0
+inserted inst13: jump block0
+switch to block1
+inserted inst14: store.i64 notrap aligned v1, v0
+inserted inst15: v10 = iconst.i64 0
+inserted inst16: return v10  ; v10 = 0
+switch to block0
+inserted inst17: v11 = load.i64 notrap aligned v0+16
+inserted inst18: v12 = load.i64 notrap aligned v11
+try_def_var: var0 = v12
+inserted inst19: store.i64 notrap aligned v12, v9
+inserted inst20: v13 = call fn1(v0, v12)
+inserted inst21: brif.i64 v13, block5, block1
+switch to block5
+try_def_var: var1 = v13
+inserted inst22: store.i64 notrap aligned v1, v0
+inserted inst23: return v13
 defining function funcid41: function u0:41(i64) -> i64 system_v {
     ss0 = explicit_slot 8, align = 8
-    sig0 = (i64, i64) -> i64 system_v
-    fn0 = colocated u0:81 sig0
+    sig0 = (i64) -> i64 system_v
+    sig1 = (i64, i64) -> i64 system_v
+    fn0 = u0:4 sig0
+    fn1 = colocated u0:81 sig1
 
 block2(v0: i64):
-    v1 = stack_addr.i64 ss0
+    v1 = load.i64 notrap aligned v0
+    v2 = iconst.i64 8
+    v3 = iadd v1, v2  ; v2 = 8
+    v4 = load.i64 notrap aligned v0+8
+    v5 = icmp ugt v3, v4
+    brif v5, block3, block4
+
+block3:
+    v6 = call fn0(v0)
+    v7 = iconst.i64 0
+    return v7  ; v7 = 0
+
+block4:
+    store.i64 notrap aligned v3, v0
+    v8 = iconst.i64 0
+    store notrap aligned v8, v1  ; v8 = 0
+    v9 = stack_addr.i64 ss0
     jump block0
 
 block1:
-    v2 = iconst.i64 0
-    return v2  ; v2 = 0
+    store.i64 notrap aligned v1, v0
+    v10 = iconst.i64 0
+    return v10  ; v10 = 0
 
 block0:
-    v3 = load.i64 notrap aligned v0+16
-    v4 = load.i64 notrap aligned v3
-    store notrap aligned v4, v1
-    v5 = call fn0(v0, v4), stack_map=[i64 @ ss0+0]
-    brif v5, block3, block1
+    v11 = load.i64 notrap aligned v0+16
+    v12 = load.i64 notrap aligned v11
+    store notrap aligned v12, v9
+    v13 = call fn1(v0, v12), stack_map=[i64 @ ss0+0]
+    brif v13, block5, block1
 
-block3:
-    return v5
+block5:
+    store.i64 notrap aligned v1, v0
+    return v13
 }
 
 *** END VCODE ***

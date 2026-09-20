@@ -2,7 +2,7 @@ source:  examples/stdlib/csv_geometric.bot
 backend: Cranelift (specialize=1)
 asm:     csv_geometric.asm
 vcode:   csv_geometric.vcode
-machine-code bytes: 5349 (per function: 68 78 357 397 272 272 81 365 430 585 770 352 695 456 171)
+machine-code bytes: 6706 (per function: 181 78 357 533 402 402 81 365 430 703 925 482 890 592 285)
 
 functions:
   0 <program entry>: nir-regs=2
@@ -31,7 +31,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     max live roots: 1
     shadow slots: 1
     entry zero slots: 0
-    depth reservation: no
+    depth reservation: yes
     storage: native frame
   
   function 1 "geo_new"
@@ -67,7 +67,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     max live roots: 3
     shadow slots: 3
     entry zero slots: 0
-    depth reservation: no
+    depth reservation: yes
     storage: native frame
   
   function 4 "geo_append"
@@ -79,7 +79,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     max live roots: 3
     shadow slots: 3
     entry zero slots: 0
-    depth reservation: no
+    depth reservation: yes
     storage: native frame
   
   function 5 "geo_append"
@@ -91,7 +91,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     max live roots: 3
     shadow slots: 3
     entry zero slots: 0
-    depth reservation: no
+    depth reservation: yes
     storage: native frame
   
   function 6 "geo_finish"
@@ -139,7 +139,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     max live roots: 4
     shadow slots: 4
     entry zero slots: 1
-    depth reservation: no
+    depth reservation: yes
     storage: native frame
   
   function 10 "scan_quoted"
@@ -151,7 +151,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     max live roots: 5
     shadow slots: 5
     entry zero slots: 2
-    depth reservation: no
+    depth reservation: yes
     storage: native frame
   
   function 11 "scan_field"
@@ -163,7 +163,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     max live roots: 3
     shadow slots: 3
     entry zero slots: 1
-    depth reservation: no
+    depth reservation: yes
     storage: native frame
   
   function 12 "scan_record"
@@ -175,7 +175,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     max live roots: 5
     shadow slots: 5
     entry zero slots: 1
-    depth reservation: no
+    depth reservation: yes
     storage: native frame
   
   function 13 "scan_records"
@@ -187,7 +187,7 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     max live roots: 6
     shadow slots: 6
     entry zero slots: 2
-    depth reservation: no
+    depth reservation: yes
     storage: native frame
   
   function 14 "csv_parse"
@@ -199,11 +199,11 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     max live roots: 4
     shadow slots: 4
     entry zero slots: 2
-    depth reservation: no
+    depth reservation: yes
     storage: native frame
 
 mechanical pattern counts (triage only; see report for interpretation):
   13 x calls to rt_int_add
   1 x calls to rt_int_mul
   5 x calls to rt_int_cmp
-  23 x calls to other rt_* helpers
+  33 x calls to other rt_* helpers
