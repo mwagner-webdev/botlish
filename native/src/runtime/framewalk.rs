@@ -72,6 +72,7 @@
 //! choice anywhere -- a DWARF-based walker could read the very same table
 //! -- so switching later remains possible without touching it.
 use super::framemap::ProgramMap;
+use super::native_stack::NativeStack;
 use super::value::Value;
 
 /// A defensive bound on how many frames the ascent will ever visit before
@@ -127,10 +128,19 @@ fn current_rbp() -> usize {
 /// below as defensive backstops rather than as the intended termination
 /// condition.
 #[cfg(target_arch = "x86_64")]
-pub fn walk(map: &ProgramMap, mut visit: impl FnMut(*mut Value)) {
+pub fn walk(map: &ProgramMap, visit: impl FnMut(*mut Value)) {
+    let native_stack = NativeStack::current().unwrap_or_default();
+    walk_with_stack(map, native_stack, visit);
+}
+
+#[cfg(target_arch = "x86_64")]
+pub fn walk_with_stack(map: &ProgramMap, native_stack: NativeStack, mut visit: impl FnMut(*mut Value)) {
     let mut rbp = current_rbp();
     for _ in 0..MAX_FRAMES {
         if rbp == 0 || rbp % 8 != 0 {
+            break;
+        }
+        if !native_stack.contains_frame(rbp) {
             break;
         }
         // SAFETY: `rbp` is either the register value just read above (this
@@ -146,14 +156,22 @@ pub fn walk(map: &ProgramMap, mut visit: impl FnMut(*mut Value)) {
             (*base, *base.add(1))
         };
 
+        if !native_stack.contains_address(return_addr) {
+            break;
+        }
+
         for &offset in map.roots_at(return_addr) {
             // This safepoint's own SP (this module's header derivation),
             // plus this root's byte offset within it.
-            let addr = (rbp + 16 + offset as usize) as *mut Value;
+            let sp = rbp + 16;
+            if !native_stack.contains_address(sp) {
+                break;
+            }
+            let addr = (sp + offset as usize) as *mut Value;
             visit(addr);
         }
 
-        if saved_rbp <= rbp {
+        if saved_rbp <= rbp || !native_stack.contains_frame(saved_rbp) {
             break;
         }
         rbp = saved_rbp;

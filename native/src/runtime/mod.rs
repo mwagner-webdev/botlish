@@ -6,6 +6,7 @@ pub mod framemap;
 pub mod framewalk;
 pub mod heap;
 pub mod metrics;
+pub mod native_stack;
 pub mod ops;
 pub mod show;
 pub mod value;

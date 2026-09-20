@@ -5,24 +5,22 @@
 # of the shared Botlish shadow-stack array; the collector discovers them by
 # walking the native call stack and consulting per-safepoint stack maps
 # (runtime/framewalk.rs, runtime/framemap.rs), not through any Vm
-# registration this file's own CLIF assertions can see. A function that
-# contains a Botlish call still separately reserves a *minimal* one-slot
-# recursion-depth token in the shared shadow array
-# (`RootPlan::depth_reservation`) -- unchanged mechanism, fully decoupled
-# from where its actual roots live (see tests/native-stack-map.test for
-# this decoupling's own dedicated coverage, including fib<int>).
+# registration this file's own CLIF assertions can see. Phase B removes the
+# remaining shadow recursion-depth token from the primary path: recursion
+# overflow protection is delegated to the active native stack bounds instead
+# of a shared `ss_top`/`ss_limit` reservation. The fallback path still keeps
+# the legacy `RuntimeStack` guard, but the primary path does not.
 #
 # Coverage:
 #   * structural: native::roots's "storage:" line, and native::clif's
 #     absence of the shared shadow-stack sequence (ss_top/ss_limit loads,
-#     rt_stack_overflow) for a function with no Botlish call (no depth
-#     reservation needed either)
+#     rt_stack_overflow) for a function with no Botlish call, and also for
+#     call-crossing roots on the primary stack-map path
 #   * adversarial: hand-written NIR run under BOTLISH_NATIVE_GC_STRESS=1,
 #     confirming a value physically stored in the native root block
 #     survives a real collection
-#   * a call-crossing root now also gets NativeFrame storage (discovered
-#     through stack maps across the call), while its function still keeps
-#     rt_stack_overflow for the unrelated depth reservation
+#   * call-crossing roots keep NativeFrame storage and no longer rely on the
+#     old shadow-depth overflow helper on the primary path
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
@@ -179,10 +177,9 @@ test storage-multi-root-2 {two simultaneously live NativeFrame roots never share
 # (fib<int>, the flagship recursive, cross-call-rooted shape, and a smaller
 # call-crossing-root case alike) -- the native-stack-map/frame-walk
 # mechanism discovers its roots regardless of how many further calls nest
-# on top of it. It still separately keeps rt_stack_overflow, for the
-# unrelated, decoupled recursion-depth reservation (tests/native-stack-
-# map.test covers that decoupling directly, including under real recursion
-# and GC stress).
+# on top of it. On the primary x86_64/Linux path, recursion overflow is
+# enforced by the native stack bound itself, not by a shared shadow-depth
+# token. The stack-map tests below cover that phase-B behavior directly.
 
 test storage-fib-1 {fib<int> (real cross-call roots) now uses NativeFrame storage} -body {
     set report [native::roots [sourceIrHir [file join $::projectRoot bench fib.ir]]]

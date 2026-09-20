@@ -12,6 +12,7 @@ use super::error::RtError;
 use super::framemap::ProgramMap;
 use super::heap::Heap;
 use super::metrics::{AllocMode, GcReason, Metrics};
+use super::native_stack::NativeStack;
 use super::value::*;
 use crate::nir::OpCode;
 use std::cell::RefCell;
@@ -95,6 +96,10 @@ pub struct Vm {
     /// Starts as an empty table (`ProgramMap::new()`), which simply finds no
     /// roots -- harmless for the brief window before a program is compiled.
     framemap: Rc<ProgramMap>,
+    /// Native stack ownership and bounds for the active execution thread.
+    /// This is the Phase-B replacement for the remaining shadow depth-token
+    /// bookkeeping on the supported x86-64/Linux path.
+    pub native_stack: NativeStack,
 }
 
 pub const VM_SS_TOP_OFFSET: i32 = offset_of!(Vm, ss_top) as i32;
@@ -110,6 +115,7 @@ impl Vm {
         let base = shadow.as_mut_ptr();
         let limit = unsafe { base.add(SHADOW_STACK_SLOTS) };
         PROGRAM.with(|p| *p.borrow_mut() = Some(info.clone()));
+        let native_stack = NativeStack::current().unwrap_or_default();
         Box::new(Vm {
             ss_top: base,
             ss_limit: limit,
@@ -127,6 +133,7 @@ impl Vm {
             const_table: Vec::new(),
             statics: Vec::new(),
             framemap: Rc::new(ProgramMap::new()),
+            native_stack,
         })
     }
 

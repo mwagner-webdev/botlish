@@ -42,6 +42,7 @@ dependencies = [
  "cranelift-module",
  "cranelift-native",
  "cranelift-object",
+ "libc",
  "log",
  "num-bigint",
  "num-traits",

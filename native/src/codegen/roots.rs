@@ -678,12 +678,12 @@ pub fn plan(f: &Function, native_frame_supported: bool) -> RootPlan {
     let liveness = analyze(f, &cfg);
     let (slot_of, colored_slots, root_candidates) = color(f.regs, &liveness.safepoint_roots);
     let max_live = liveness.safepoint_roots.iter().map(Vec::len).max().unwrap_or(0) as u32;
-    let depth_reservation = has_botlish_call(f);
-    // On the native-stack-map path every function qualifies for NativeFrame
-    // (called or not: the frame-walker discovers roots across any number of
-    // nested native frames, so a Botlish call no longer disqualifies it --
-    // this milestone's own goal). On the fallback path, unchanged: only a
-    // function with no Botlish call qualifies (RootStorage's own doc).
+    let depth_reservation = if native_frame_supported { false } else { has_botlish_call(f) };
+    // On the primary native-stack-map path the active OS thread stack is the
+    // authoritative overflow boundary, so there is no remaining shadow-stack
+    // recursion-depth token. Only the legacy fallback path keeps the old
+    // RuntimeStack depth reservation. The native-frame root storage decision is
+    // otherwise unchanged.
     let storage = if native_frame_supported || !depth_reservation {
         RootStorage::NativeFrame
     } else {
@@ -1393,7 +1393,7 @@ mod tests {
         ));
         let native = plan(&program.functions[0], true);
         assert_eq!(native.storage, RootStorage::NativeFrame, "the stack-map path discovers roots across calls too");
-        assert!(native.depth_reservation, "still needs the recursion-depth bound: it can recurse through this call");
+        assert!(!native.depth_reservation, "primary x86-64/Linux path uses the native stack for overflow, not the shadow-depth token");
         assert_eq!(native.num_slots, 0, "no RuntimeStack floor: NativeFrame storage needs none");
 
         let fallback = plan(&program.functions[0], false);
@@ -1443,7 +1443,7 @@ mod tests {
         );
         let native = plan(&f, true);
         assert_eq!(native.storage, RootStorage::NativeFrame);
-        assert!(native.depth_reservation);
+        assert!(!native.depth_reservation, "primary x86-64/Linux stack overflow protection is native-stack-based");
         assert_eq!(native.num_slots, 2, "same F3 coloring as fib_shape_needs_two_slots, unaffected by storage");
         // See fib_shape_needs_two_slots's own breakdown: %9/%10 share one
         // physical slot (call it A), %14/%15 the other (B). Body indices
