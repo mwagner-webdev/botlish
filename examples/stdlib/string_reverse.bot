@@ -1,7 +1,7 @@
 # String reverse, written in Botlish over the string primitives.
 #
 # reverse_chars reverses the units that length and substring count. Today
-# those are the runtime's characters (Tcl 8.6 string indices), not grapheme
+# those are the runtime's characters (Tcl 9 string indices), not grapheme
 # clusters: a base letter followed by a combining mark is two units, and its
 # mark ends up before the letter.
 #

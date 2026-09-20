@@ -5,7 +5,7 @@
 # hir::stringregion analysis that drives the optimization itself -- not
 # assumed patterns.
 #
-#   tclsh bench/substr_classify.tcl [PROGRAM ...]
+#   tclsh9.0 bench/substr_classify.tcl [PROGRAM ...]
 #
 # With no arguments, classifies every algorithm in the corpus
 # (examples/stdlib/corpus.tcl) that calls `substring` at all (csv,

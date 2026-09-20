@@ -18,9 +18,9 @@ jobs:
       matrix:
         backend: [interp, compile]
     env:
-      # Tcl 9's default I/O encoding profile is strict, unlike Tcl 8.6's
-      # lenient default: with no locale, the system encoding falls back to
-      # iso8859-1, and writing the corpus's non-ASCII/astral test output
+      # Tcl 9's default I/O encoding profile is strict: with no locale, the
+      # system encoding falls back to iso8859-1, and writing the corpus's
+      # non-ASCII/astral test output then fails outright instead of being
       # then fails outright instead of being silently mangled. C.utf8 is
       # built into glibc, so this needs no locale-gen step.
       LANG: C.utf8

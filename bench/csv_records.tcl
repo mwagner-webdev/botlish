@@ -9,7 +9,7 @@
 # bench/hashtable.tcl counts probes with a Tcl-side model of the identical
 # algorithm rather than instrumenting hashtable.bot itself (req #50).
 #
-#   tclsh bench/csv_records.tcl [-rows N N N] [-cols N N N] [-runs N] [-all]
+#   tclsh9.0 bench/csv_records.tcl [-rows N N N] [-cols N N N] [-runs N] [-all]
 #
 # Reports, per (rows, cols) size:
 #

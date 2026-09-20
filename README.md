@@ -68,22 +68,22 @@ main.tcl         example runner
 ```
 
 ```sh
-tclsh tests/all.tcl                         # test suite, interp and compile
+tclsh9.0 tests/all.tcl                         # test suite, interp and compile
 cargo build --release --manifest-path native/Cargo.toml   # build the native backend (§20)
-tclsh tests/native-coverage.tcl             # test suite on cranelift, classified (§20)
-tclsh main.tcl -backend cranelift FILE.bot  # run natively
-tclsh main.tcl -emit-nir -emit-clif FILE.bot   # show NIR, then Cranelift IR, of every function
-CORE_BACKEND=compile tclsh tests/all.tcl    # test suite, one backend
-tclsh main.tcl                              # run all examples (interp)
-tclsh main.tcl -backend compile -code FILE.ir   # compile, show generated Tcl, run
-tclsh main.tcl -hir FILE.ir                 # show the program's HIR, run
-tclsh main.tcl -backend compile FILE.hir    # read HIR text, compile it, run
-tclsh main.tcl examples/surface/03-closure.bot            # run source (interp)
-tclsh main.tcl -backend compile -hir -ast FILE.bot   # show AST and HIR, compile, run
-tclsh bench/bench.tcl                       # compare backends on bench/*.ir
-tclsh bench/corpus.tcl                      # baseline timings of the algorithm corpus (§18)
-tclsh main.tcl -aot examples/stdlib/matmul.bot   # closed-AOT readiness report (§19)
-tclsh main.tcl -aot-spec examples/stdlib/matmul.bot   # the same per specialized instance (§21)
+tclsh9.0 tests/native-coverage.tcl             # test suite on cranelift, classified (§20)
+tclsh9.0 main.tcl -backend cranelift FILE.bot  # run natively
+tclsh9.0 main.tcl -emit-nir -emit-clif FILE.bot   # show NIR, then Cranelift IR, of every function
+CORE_BACKEND=compile tclsh9.0 tests/all.tcl    # test suite, one backend
+tclsh9.0 main.tcl                              # run all examples (interp)
+tclsh9.0 main.tcl -backend compile -code FILE.ir   # compile, show generated Tcl, run
+tclsh9.0 main.tcl -hir FILE.ir                 # show the program's HIR, run
+tclsh9.0 main.tcl -backend compile FILE.hir    # read HIR text, compile it, run
+tclsh9.0 main.tcl examples/surface/03-closure.bot            # run source (interp)
+tclsh9.0 main.tcl -backend compile -hir -ast FILE.bot   # show AST and HIR, compile, run
+tclsh9.0 bench/bench.tcl                       # compare backends on bench/*.ir
+tclsh9.0 bench/corpus.tcl                      # baseline timings of the algorithm corpus (§18)
+tclsh9.0 main.tcl -aot examples/stdlib/matmul.bot   # closed-AOT readiness report (§19)
+tclsh9.0 main.tcl -aot-spec examples/stdlib/matmul.bot   # the same per specialized instance (§21)
 ```
 
 ```tcl
@@ -709,9 +709,9 @@ representation: the compiler maps a block's `EXPR` to the proc it generates.
 `core::compiler::programTypes EXPRS` reports the inferred types of
 program-level bindings. `core::compiler::bindingTypes EXPRS` reports the type
 of every `bind` at any depth, including refinements in force at that point.
-`tclsh main.tcl -backend compile -code FILE.ir` shows the generated code.
+`tclsh9.0 main.tcl -backend compile -code FILE.ir` shows the generated code.
 
-**Performance** (`tclsh bench/bench.tcl`, best of 5, excluding compilation):
+**Performance** (`tclsh9.0 bench/bench.tcl`, best of 5, excluding compilation):
 
 | program | interp | compile, untyped | compile, typed |
 |---------|-------:|-----------------:|---------------:|
@@ -1376,7 +1376,7 @@ compile them. None of them has a native shortcut.
 | `matmul.bot` | `matmul(a, b)` | Int matrix product over nested lists |
 
 Each file is a normal program: its functions followed by a sample
-expression with a `# expect:` comment, so `tclsh main.tcl FILE` runs it.
+expression with a `# expect:` comment, so `tclsh9.0 main.tcl FILE` runs it.
 `examples/stdlib/corpus.tcl` appends a driver expression to a program, and
 runs the result on a backend. The interpreter runs the lowered IR, and the
 compiler compiles from HIR, the same way as `examples/surface/`.
@@ -1412,7 +1412,7 @@ algorithm, non-ASCII text, 64-bit overflow, errors) on all three backends
 (interp, compile, cranelift) and requires each to produce the stated
 outcome. `tests/lists.test` covers the list primitives.
 
-**Benchmarks.** `tclsh bench/corpus.tcl [-runs N] [-markdown] [-all]` times
+**Benchmarks.** `tclsh9.0 bench/corpus.tcl [-runs N] [-markdown] [-all]` times
 every algorithm at several input sizes on every backend. Each measurement
 runs in a fresh process, so measurements can't disturb each other, and
 compilation is excluded. Cases marked slow skip the interpreter unless
@@ -1420,8 +1420,8 @@ you pass `-all`. A backend is a case in `corpus::run` and a column; the
 native backend's numbers and compile times are in §20. The table below is
 the historical Tcl baseline.
 
-`tclsh bench/corpus.tcl -runs 3` (Tcl 8.6.17 on Windows, best of 3, wall
-time, compilation excluded). "compile, before" is the first compiler, from
+`tclsh9.0 bench/corpus.tcl -runs 3` (best of 3, wall time, compilation
+excluded). "compile, before" is the first compiler, from
 before direct native calls, envless functions and self-tail loops (Â§13);
 "skipped" is a slow case, run with `-all`:
 
@@ -1477,8 +1477,8 @@ emits no code, knows no native by name, and says nothing about any
 particular backend.
 
 ```sh
-tclsh main.tcl -aot FILE          # readable report, then run
-tclsh main.tcl -aot-data FILE     # the analysis dict
+tclsh9.0 main.tcl -aot FILE          # readable report, then run
+tclsh9.0 main.tcl -aot-data FILE     # the analysis dict
 ```
 
 ```tcl
@@ -1590,11 +1590,11 @@ algorithm corpus (§18) unchanged.
 
 ```sh
 cargo build --release --manifest-path native/Cargo.toml   # Rust 1.96+, Cranelift 0.135
-tclsh main.tcl -backend cranelift examples/stdlib/csv.bot
-tclsh main.tcl -emit-nir examples/stdlib/matmul.bot       # native IR
-tclsh main.tcl -emit-clif examples/stdlib/matmul.bot      # Cranelift IR
-tclsh tests/native-coverage.tcl                           # whole suite on cranelift, classified
-tclsh bench/corpus.tcl                                    # corpus timings, all backends
+tclsh9.0 main.tcl -backend cranelift examples/stdlib/csv.bot
+tclsh9.0 main.tcl -emit-nir examples/stdlib/matmul.bot       # native IR
+tclsh9.0 main.tcl -emit-clif examples/stdlib/matmul.bot      # Cranelift IR
+tclsh9.0 tests/native-coverage.tcl                           # whole suite on cranelift, classified
+tclsh9.0 bench/corpus.tcl                                    # corpus timings, all backends
 ```
 
 ```tcl
@@ -1802,8 +1802,8 @@ backends.
 
 ### Corpus
 
-`tclsh bench/corpus.tcl -runs 3 -markdown` (Tcl 8.6.17, Windows, x86-64;
-best of 3, wall time). The compile columns are native lowering in Tcl
+`tclsh9.0 bench/corpus.tcl -runs 3 -markdown` (best of 3, wall time). The
+compile columns are native lowering in Tcl
 (including the specialization analysis) + Cranelift code generation and JIT
 linking. "code" is generic → specialized: machine code bytes, NIR functions
 and kind guards in the NIR.
@@ -1861,10 +1861,10 @@ and HIR types stay exactly what they were. It closes all 50 of the corpus's
 kind guards (§19) without changing the corpus. It adds no syntax.
 
 ```sh
-tclsh main.tcl -aot-spec examples/stdlib/csv.bot          # instances, facts, blockers
-tclsh main.tcl -emit-nir examples/stdlib/csv.bot          # specialized NIR
-tclsh main.tcl -backend cranelift-generic -emit-nir FILE  # the unspecialized NIR
-BOTLISH_NATIVE_SPECIALIZE=0 tclsh tests/native-coverage.tcl
+tclsh9.0 main.tcl -aot-spec examples/stdlib/csv.bot          # instances, facts, blockers
+tclsh9.0 main.tcl -emit-nir examples/stdlib/csv.bot          # specialized NIR
+tclsh9.0 main.tcl -backend cranelift-generic -emit-nir FILE  # the unspecialized NIR
+BOTLISH_NATIVE_SPECIALIZE=0 tclsh9.0 tests/native-coverage.tcl
 ```
 
 ```tcl
@@ -2086,7 +2086,7 @@ The second instance of the accumulating functions is the self-tail-call
 widening at work: the first call passes `[]`, the loop passes a non-empty
 list, and `list<never>` ∪ `list<str>` is `list<str>`, which then loops.
 
-Representative NIR (`tclsh main.tcl -emit-nir examples/stdlib/matmul.bot`).
+Representative NIR (`tclsh9.0 main.tcl -emit-nir examples/stdlib/matmul.bot`).
 The generic `dot` checks 8 operands; `dot<list<int>, list<list<int>>, int,
 int, int, int>` checks none, reads Ints out of `list<list<int>>`, multiplies
 them without a guard, and loops:
@@ -2257,8 +2257,8 @@ already recompiles to change what's measured. From Tcl:
 future collection/optimizer tests ("this steady-state lookup allocates zero
 objects").
 
-**Corpus baseline** (`tclsh bench/corpus.tcl -runs 3 -all -backends
-cranelift`, summary mode, last of 3 runs; Tcl 8.6.17, Linux, x86-64):
+**Corpus baseline** (`tclsh9.0 bench/corpus.tcl -runs 3 -all -backends
+cranelift`, summary mode, last of 3 runs):
 
 | algorithm | input | allocations | allocated | peak live | GC cycles | string copied | list elems copied |
 |---|---|---:|---:|---:|---:|---:|---:|
@@ -2326,7 +2326,7 @@ are `num-bigint` limb buffers, the shadow stack (a fixed `Vec<Value>`,
 ~32 MB), Cranelift/JIT code memory, and general process bookkeeping.
 
 ```sh
-tclsh bench/corpus.tcl -runs 3 -all -backends cranelift   # alloc column, cranelift only
+tclsh9.0 bench/corpus.tcl -runs 3 -all -backends cranelift   # alloc column, cranelift only
 ```
 ```tcl
 native::allocationReport $hir summary            ;# or sites, ?runs? ?options?

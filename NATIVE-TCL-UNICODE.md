@@ -201,7 +201,7 @@ Checked directly, not assumed:
 | Python 3.11.15's `unicodedata` | 14.0.0 (`unicodedata.unidata_version`) |
 
 Tcl 9.0.1's own bundled Unicode version is not printed anywhere reachable
-from `tclsh`, so it was inferred by testing code points assigned only in
+from `tclsh9.0`, so it was inferred by testing code points assigned only in
 specific Unicode releases: **Todhri** (U+105C0, assigned Unicode 16.0,
 2024) tests `alpha=1` in Tcl 9.0.1, and so do Kawi (U+11F04, Unicode 15.0)
 and a CJK Extension I character (U+2EBF0, Unicode 15.1); a Nag Mundari

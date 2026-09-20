@@ -1,6 +1,6 @@
 # bench.tcl -- compares backends on the programs in bench/*.ir.
 #
-#   tclsh bench/bench.tcl [-runs N] [-markdown] [FILE.ir ...]
+#   tclsh9.0 bench/bench.tcl [-runs N] [-markdown] [FILE.ir ...]
 #
 # Each program runs once untimed per backend (so compilation is excluded
 # from the measurement), then N timed runs; the best run is reported.

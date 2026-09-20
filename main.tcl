@@ -1,7 +1,7 @@
 # main.tcl -- example runner.
 #
-#   tclsh main.tcl [-backend interp|compile|cranelift|cranelift-generic] [-code] [-hir] [-ast]
-#                  [-aot] [-aot-data] [-aot-spec] [-emit-nir] [-emit-clif] [FILE.ir|FILE.hir|FILE.bot ...]
+#   tclsh9.0 main.tcl [-backend interp|compile|cranelift|cranelift-generic] [-code] [-hir] [-ast]
+#                    [-aot] [-aot-data] [-aot-spec] [-emit-nir] [-emit-clif] [FILE.ir|FILE.hir|FILE.bot ...]
 #
 # Runs the given program files (default: every examples/*.ir) and prints
 # each program's value, with runtime evidence shown as "text"#{Type}. With

@@ -1,7 +1,7 @@
 # native-coverage.tcl -- runs the whole test suite on the Cranelift backend
 # and classifies every test.
 #
-#   tclsh tests/native-coverage.tcl [-verbose]
+#   tclsh9.0 tests/native-coverage.tcl [-verbose]
 #
 # Every test is exactly one of:
 #

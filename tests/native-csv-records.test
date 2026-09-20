@@ -284,7 +284,7 @@ test csv-records-gc-stress-allocation-consistency-1 {allocation report stays int
 # scalar value, exactly like Rust's str::chars(). hash()/== operate on
 # UTF-8-encoded bytes either way (core/hashing.tcl's Utf8Bytes), and
 # length() now agrees too: every backend counts the emoji as 1, not the
-# surrogate-pair-derived 2 that a Tcl 8.6 build (no full-Unicode support)
+# surrogate-pair-derived 2 that an older Tcl build (no full-Unicode support)
 # used to give the Tcl-hosted backends. Verified below to parity-agree on
 # all four backends for ht_get/ht_contains and length(), keyed and valued
 # by the emoji itself.

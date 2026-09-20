@@ -1,12 +1,12 @@
 # corpus.tcl -- baseline timings of the Botlish algorithm corpus
 # (examples/stdlib/*.bot) on every backend.
 #
-#   tclsh bench/corpus.tcl [-runs N] [-markdown] [-all] [-backends {B ...}] [ALGORITHM ...]
+#   tclsh9.0 bench/corpus.tcl [-runs N] [-markdown] [-all] [-backends {B ...}] [ALGORITHM ...]
 #
 # For each algorithm and input size, every backend runs the corpus program
 # on the same deterministic input: once untimed (so the compiler's
 # compilation is excluded), then N timed runs (default 3); the best run is
-# reported, as wall time. Each measurement runs in a fresh tclsh process:
+# reported, as wall time. Each measurement runs in a fresh tclsh9.0 process:
 # the reference runtime never reclaims environments, so measurements in one
 # process would disturb each other.
 #
@@ -30,7 +30,7 @@
 #
 # A backend is a name corpus::run (examples/stdlib/corpus.tcl) understands.
 #
-# Internal: tclsh bench/corpus.tcl -measure ALGORITHM SIZE BACKEND RUNS
+# Internal: tclsh9.0 bench/corpus.tcl -measure ALGORITHM SIZE BACKEND RUNS
 # prints "MICROSECONDS LENGTH CRC ?{LOWER-MICROSECONDS JIT-MICROSECONDS}
 # {CODE-BYTES FUNCTIONS GUARDS} {ALLOCATIONS BYTES PEAK-BYTES GC-CYCLES
 # STRING-BYTES-COPIED LIST-ELEMENTS-COPIED MUTABLE-ARRAY-ELEMENTS-COPIED

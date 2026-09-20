@@ -15,7 +15,7 @@
 # criterion" cross-language check (spec item 29), kept as a runnable script
 # rather than only prose in NATIVE-TCL-UNICODE.md.
 #
-#   tclsh bench/check-unicode-parity.tcl
+#   tclsh9.0 bench/check-unicode-parity.tcl
 
 set root [file dirname [file dirname [file normalize [info script]]]]
 source [file join $root compiler compiler.tcl]

@@ -1,7 +1,7 @@
 # hashtable.tcl -- benchmarks and metrics for examples/stdlib/hashtable.bot
 # (the hash-table milestone's adversarial workload), on the native backend.
 #
-#   tclsh bench/hashtable.tcl [-sizes N N N] [-runs N]
+#   tclsh9.0 bench/hashtable.tcl [-sizes N N N] [-runs N]
 #
 # Reports, per size, in the shape milestone req #60 asks for:
 #
