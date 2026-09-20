@@ -84,10 +84,8 @@ use std::fmt::Write as _;
 ///   physical *root storage* only on the fallback path, for a function
 ///   that contains a Botlish call (mirrors the original, pre-stack-map
 ///   mechanism exactly). On the native-stack-map path this storage is
-///   never used for roots at all -- see `RootPlan::depth_reservation` for
-///   the unrelated, narrower way a call-containing function still touches
-///   this same shared array (a one-slot recursion-depth token, holding no
-///   Value and needing no stack-map entry).
+///   never used for roots. On x86-64/Linux it is not allocated; other
+///   targets retain its safe depth and root-storage fallback.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RootStorage {
     NativeFrame,
@@ -101,13 +99,8 @@ pub enum RootStorage {
 /// jump to this same frame's entry block, never a machine `call`, so it
 /// neither grows the native call stack nor creates a second frame.
 ///
-/// Two independent things key off this predicate (see `RootPlan`'s
-/// `storage`/`depth_reservation` docs): on the fallback (non-native-stack-
-/// map) path it is exactly the old `RootStorage::NativeFrame` eligibility
-/// rule; on every path it is exactly `RootPlan::depth_reservation` --
-/// whether this function's own recursion depth still needs the shared
-/// shadow array's bound, decoupled from wherever its actual GC roots live
-/// (this milestone's own goal: see this module's doc and codegen::clif's).
+/// This predicate determines fallback RuntimeStack storage and, on
+/// platforms without native guard handling, the depth reservation.
 fn has_botlish_call(f: &Function) -> bool {
     f.body.iter().any(|inst| {
         matches!(
@@ -161,14 +154,8 @@ pub struct RootPlan {
     /// `slot_of`/`num_slots`/`entry_zero` above (this module's own doc: "a
     /// storage-location change, not a new root allocator").
     pub storage: RootStorage,
-    /// Whether this function's own recursion depth still needs the shared
-    /// `RuntimeStack` array's bound: exactly `has_botlish_call(f)`,
-    /// decoupled from `storage` (this milestone's own goal -- see this
-    /// module's and codegen::clif's doc). When true, codegen::clif emits a
-    /// minimal one-slot bump/limit-check/restore against that shared array
-    /// purely to bound native recursion depth, storing no Value there and
-    /// needing no stack-map entry, *independent* of wherever this
-    /// function's actual GC roots live (`storage`/`safepoint_slots`).
+    /// Fallback-only shadow recursion bound. False on x86-64/Linux,
+    /// where the native pthread guard provides overflow protection.
     pub depth_reservation: bool,
     /// `RootStorage::NativeFrame` on the native-stack-map path only: for
     /// each safepoint instruction (by its index into `f.body`), the
@@ -678,27 +665,21 @@ pub fn plan(f: &Function, native_frame_supported: bool) -> RootPlan {
     let liveness = analyze(f, &cfg);
     let (slot_of, colored_slots, root_candidates) = color(f.regs, &liveness.safepoint_roots);
     let max_live = liveness.safepoint_roots.iter().map(Vec::len).max().unwrap_or(0) as u32;
-    let depth_reservation = has_botlish_call(f);
+    let has_call = has_botlish_call(f);
+    let depth_reservation = has_call && !(native_frame_supported && crate::runtime::native_stack::native_stack_overflow_supported());
     // On the native-stack-map path every function qualifies for NativeFrame
     // (called or not: the frame-walker discovers roots across any number of
     // nested native frames, so a Botlish call no longer disqualifies it --
     // this milestone's own goal). On the fallback path, unchanged: only a
     // function with no Botlish call qualifies (RootStorage's own doc).
-    let storage = if native_frame_supported || !depth_reservation {
+    let storage = if native_frame_supported || !has_call {
         RootStorage::NativeFrame
     } else {
         RootStorage::RuntimeStack
     };
-    // At least one slot always for RuntimeStack, so the shared shadow array
-    // still bounds native recursion depth for a function with zero roots
-    // (see RootPlan's doc and codegen::clif's prologue) -- this is the
-    // fallback path's combined depth+storage floor, unchanged. A
-    // NativeFrame function needs no such floor regardless of calls: on the
-    // native-stack-map path, recursion depth is bounded by
-    // `depth_reservation`'s own, wholly separate one-slot reservation
-    // instead (codegen::clif); on the fallback path, NativeFrame implies no
-    // Botlish call at all (`!depth_reservation` above), so it cannot
-    // recurse through one either.
+    // Fallback RuntimeStack storage retains its one-slot minimum for
+    // recursion protection. NativeFrame needs only actual colored roots;
+    // Linux's native guard protects recursion independently.
     let num_slots = match storage {
         RootStorage::RuntimeStack => colored_slots.max(1),
         RootStorage::NativeFrame => colored_slots,
@@ -1393,7 +1374,7 @@ mod tests {
         ));
         let native = plan(&program.functions[0], true);
         assert_eq!(native.storage, RootStorage::NativeFrame, "the stack-map path discovers roots across calls too");
-        assert!(native.depth_reservation, "still needs the recursion-depth bound: it can recurse through this call");
+        assert_eq!(native.depth_reservation, !crate::runtime::native_stack::native_stack_overflow_supported());
         assert_eq!(native.num_slots, 0, "no RuntimeStack floor: NativeFrame storage needs none");
 
         let fallback = plan(&program.functions[0], false);
@@ -1443,7 +1424,7 @@ mod tests {
         );
         let native = plan(&f, true);
         assert_eq!(native.storage, RootStorage::NativeFrame);
-        assert!(native.depth_reservation);
+        assert_eq!(native.depth_reservation, !crate::runtime::native_stack::native_stack_overflow_supported());
         assert_eq!(native.num_slots, 2, "same F3 coloring as fib_shape_needs_two_slots, unaffected by storage");
         // See fib_shape_needs_two_slots's own breakdown: %9/%10 share one
         // physical slot (call it A), %14/%15 the other (B). Body indices

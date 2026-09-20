@@ -1,0 +1,31 @@
+# Linux x86-64 native stack guard integration.
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+testConstraint nativeStackGuard [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64}}]
+
+set fixtureDir [file join $::projectRoot native tests fixtures]
+set binary [native::binary]
+
+test native-stack-shallow-1 {ordinary recursive calls remain ABI-valid} -constraints nativeStackGuard -body {
+    exec $binary run [file join $fixtureDir fib.nir]
+} -match glob -result {value *}
+
+test native-stack-overflow-1 {two separate exhausted stacks report the same controlled error} -constraints nativeStackGuard -body {
+    set path [file join $fixtureDir stack_overflow.ir]
+    set first [exec env BOTLISH_NATIVE_STACK_BYTES=4194304 $binary run $path]
+    set second [exec env BOTLISH_NATIVE_STACK_BYTES=4194304 $binary run $path]
+    list $first $second
+} -result [list {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}}                 {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}}]
+
+test native-stack-overflow-wide-1 {a large native frame probes each page before exhausting the guard} -constraints nativeStackGuard -body {
+    exec env BOTLISH_NATIVE_STACK_BYTES=4194304 $binary run [file join $fixtureDir large_frame_overflow.nir]
+} -result {error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}}
+
+test native-stack-gc-1 {400 live recursive allocating frames survive forced GC} -constraints nativeStackGuard -body {
+    set output [exec env BOTLISH_NATIVE_GC_STRESS=1 $binary run [file join $fixtureDir build400.nir]]
+    set value [lindex [lindex $output 1] 1]
+    expr {$value eq [string repeat xy 400]}
+} -result 1
+
+cleanupTests

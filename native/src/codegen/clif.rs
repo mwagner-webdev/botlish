@@ -9,7 +9,7 @@
 //! ```
 //!
 //! A result of 0 means an error is pending in the VM; every caller branches
-//! to its own error exit, which pops its shadow frame and returns 0.
+//! to its own error exit, which restores any fallback root frame and returns 0.
 //!
 //! Frame layout: the prologue reserves this frame's physical root slots
 //! (`codegen::roots::RootPlan::num_slots`), and every definition of a
@@ -45,15 +45,9 @@
 //!     with no Botlish call, published to `vm.native_roots_ptr`/`_len`
 //!     (`prologue_native_frame`).
 //!
-//! These two are independent of `RootPlan::depth_reservation` (true iff
-//! this function contains a Botlish call, regardless of `storage`): when
-//! set, the prologue *also* reserves and checks one slot of the shared
-//! shadow array purely to bound recursion depth (`prologue_depth_token`),
-//! storing no Value there (zeroed, never scanned as a root) and totally
-//! disjoint from wherever this function's actual roots live. This is the
-//! milestone's own decoupling: a calling/recursive function like `fib<int>`
-//! keeps its `RuntimeStack` depth check while its roots move to native
-//! slots discovered through stack maps.
+//! On x86-64/Linux the pthread guard handles native overflow, so a
+//! calling function has no Botlish-specific depth-token instructions.
+//! Other targets retain the one-slot shadow depth check.
 //!
 //! Whichever combination applies, `self.base` is simply "the address slot 0
 //! lives at" for the rest of this file: `def`/`def_raw`/`zero_root_slots`
@@ -363,12 +357,7 @@ struct Translator<'a, 'b, M: Module> {
     /// function with zero physical slots (nothing was ever published, so
     /// nothing needs saving).
     saved_native_roots: Option<(ir::Value, ir::Value)>,
-    /// `RootPlan::depth_reservation` only: the shared shadow array's
-    /// `ss_top` *before* this frame's one-slot depth-token bump
-    /// (`prologue_depth_token`), restored at every return path
-    /// (`restore_root_frame`) -- completely disjoint from `saved_native_
-    /// roots`/`base` above, since this token never holds a root (see this
-    /// file's header).
+    /// Fallback target only: saved shadow depth token.
     depth_token: Option<ir::Value>,
     /// The stack-map path's own Cranelift stack slot backing `self.base`,
     /// for `mark_safepoint` to attach `UserStackMapEntry`s against (needs
@@ -530,27 +519,10 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         Ok(())
     }
 
-    /// Reserves and clears this frame's physical root slots (codegen::
-    /// roots's `RootPlan::num_slots`/`slot_of`/`entry_zero`), in whichever
-    /// storage `self.plan.storage` says they live (see this file's header),
-    /// *and*, independently, reserves this frame's minimal recursion-depth
-    /// token in the shared shadow array when `self.plan.depth_reservation`
-    /// says this function needs one (`prologue_depth_token`) -- the two are
-    /// fully decoupled: a `NativeFrame` function on the stack-map path can
-    /// have both, either, or neither, unlike before this milestone, when a
-    /// function's own depth-token need was exactly its `RuntimeStack`
-    /// storage need. Sets `self.base` to the address `def`/`def_raw` store
-    /// physical slot N at `self.base + N*8` -- `def`'s own code is
-    /// unchanged by which storage this turns out to be.
+    /// Reserves the physical root slots. A fallback target may also reserve
+    /// a shadow depth token; the x86-64/Linux path emits no such token.
     fn prologue_root_frame(&mut self) {
-        // Depth check first, before anything else touches the frame: if it
-        // overflows, this function bails out having published nothing yet
-        // (no native-frame slot, no fallback registration), so the bail
-        // path needs no root-frame teardown at all (see
-        // `prologue_depth_token`'s own doc). Only on `NativeFrame`: the
-        // `RuntimeStack` storage path's own `prologue_runtime_stack` already
-        // provides its own (combined root-storage-and-depth) bound below --
-        // calling both would double-reserve the shared array.
+        // Fallback NativeFrame storage keeps the legacy depth bound.
         if self.plan.storage == RootStorage::NativeFrame && self.plan.depth_reservation {
             self.prologue_depth_token();
         }

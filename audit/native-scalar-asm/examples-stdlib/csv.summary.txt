@@ -2,7 +2,7 @@ source:  examples/stdlib/csv.bot
 backend: Cranelift (specialize=1)
 asm:     csv.asm
 vcode:   csv.vcode
-machine-code bytes: 5980 (per function: 181 365 430 703 925 482 788 773 512 540 281)
+machine-code bytes: 4731 (per function: 68 365 430 585 770 352 618 611 361 404 167)
 
 functions:
   0 <program entry>: nir-regs=2
@@ -27,7 +27,7 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     max live roots: 1
     shadow slots: 1
     entry zero slots: 0
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 1 "peek"
@@ -63,7 +63,7 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     max live roots: 4
     shadow slots: 4
     entry zero slots: 1
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 4 "scan_quoted"
@@ -75,7 +75,7 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     max live roots: 5
     shadow slots: 5
     entry zero slots: 2
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 5 "scan_field"
@@ -87,7 +87,7 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     max live roots: 3
     shadow slots: 3
     entry zero slots: 1
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 6 "scan_record"
@@ -99,7 +99,7 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     max live roots: 4
     shadow slots: 4
     entry zero slots: 1
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 7 "scan_record"
@@ -111,7 +111,7 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     max live roots: 4
     shadow slots: 4
     entry zero slots: 1
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 8 "scan_records"
@@ -123,7 +123,7 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     max live roots: 4
     shadow slots: 4
     entry zero slots: 1
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 9 "scan_records"
@@ -135,7 +135,7 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     max live roots: 4
     shadow slots: 4
     entry zero slots: 1
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 10 "csv_parse"
@@ -147,10 +147,10 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     max live roots: 3
     shadow slots: 3
     entry zero slots: 1
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
 
 mechanical pattern counts (triage only; see report for interpretation):
   12 x calls to rt_int_add
   3 x calls to rt_int_cmp
-  35 x calls to other rt_* helpers
+  26 x calls to other rt_* helpers

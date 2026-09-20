@@ -12,13 +12,14 @@ use super::error::RtError;
 use super::framemap::ProgramMap;
 use super::heap::Heap;
 use super::metrics::{AllocMode, GcReason, Metrics};
+use super::native_stack::NativeStack;
 use super::value::*;
 use crate::nir::OpCode;
 use std::cell::RefCell;
 use std::mem::offset_of;
 use std::rc::Rc;
 
-/// Shadow stack capacity in slots (one per register of an active frame).
+/// Fallback shadow stack capacity in Value slots.
 const SHADOW_STACK_SLOTS: usize = 1 << 22;
 
 pub struct FunctionInfo {
@@ -95,6 +96,7 @@ pub struct Vm {
     /// Starts as an empty table (`ProgramMap::new()`), which simply finds no
     /// roots -- harmless for the brief window before a program is compiled.
     framemap: Rc<ProgramMap>,
+    native_stack: Option<NativeStack>,
 }
 
 pub const VM_SS_TOP_OFFSET: i32 = offset_of!(Vm, ss_top) as i32;
@@ -106,9 +108,13 @@ pub const VM_NATIVE_ROOTS_LEN_OFFSET: i32 = offset_of!(Vm, native_roots_len) as 
 
 impl Vm {
     pub fn new(info: Rc<ProgramInfo>, alloc_mode: AllocMode) -> Box<Vm> {
-        let mut shadow = vec![0u64; SHADOW_STACK_SLOTS];
-        let base = shadow.as_mut_ptr();
-        let limit = unsafe { base.add(SHADOW_STACK_SLOTS) };
+        let mut shadow = if super::native_stack::native_stack_overflow_supported() {
+            Vec::new()
+        } else {
+            vec![0u64; SHADOW_STACK_SLOTS]
+        };
+        let base = if shadow.is_empty() { std::ptr::null_mut() } else { shadow.as_mut_ptr() };
+        let limit = if shadow.is_empty() { base } else { unsafe { base.add(SHADOW_STACK_SLOTS) } };
         PROGRAM.with(|p| *p.borrow_mut() = Some(info.clone()));
         Box::new(Vm {
             ss_top: base,
@@ -127,6 +133,12 @@ impl Vm {
             const_table: Vec::new(),
             statics: Vec::new(),
             framemap: Rc::new(ProgramMap::new()),
+            native_stack: {
+                #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+                { Some(NativeStack::current().expect("pthread stack bounds")) }
+                #[cfg(not(all(target_arch = "x86_64", target_os = "linux")))]
+                { None }
+            },
         })
     }
 
@@ -183,8 +195,10 @@ impl Vm {
     }
 
     fn collect_with(&mut self, reason: GcReason) {
-        let stack = unsafe {
-            std::slice::from_raw_parts(self.ss_base, self.ss_top.offset_from(self.ss_base) as usize)
+        let stack = if self.shadow.is_empty() {
+            &[][..]
+        } else {
+            unsafe { std::slice::from_raw_parts(self.ss_base, self.ss_top.offset_from(self.ss_base) as usize) }
         };
         // The currently active RootStorage::NativeFrame function's own root
         // block, if any (see that field's doc): empty when no such function
@@ -214,7 +228,7 @@ impl Vm {
         // `native`'s are three disjoint sets of memory locations, never the
         // same logical root scanned twice.
         let mut native_frame_roots = Vec::new();
-        super::framewalk::walk(&self.framemap, |addr| native_frame_roots.push(unsafe { *addr }));
+        super::framewalk::walk(&self.framemap, self.native_stack.as_ref(), |addr| native_frame_roots.push(unsafe { *addr }));
         let error_values = self.error.as_ref().map(|e| e.values()).unwrap_or_default();
         let roots = stack
             .iter()

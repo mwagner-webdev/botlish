@@ -72,15 +72,11 @@
 //! choice anywhere -- a DWARF-based walker could read the very same table
 //! -- so switching later remains possible without touching it.
 use super::framemap::ProgramMap;
+use super::native_stack::NativeStack;
 use super::value::Value;
 
-/// A defensive bound on how many frames the ascent will ever visit before
-/// giving up: not a real limit on legitimate recursion depth (that is
-/// `RuntimeStack`'s own `ss_limit` check's job, unchanged by this
-/// milestone -- see codegen::clif's `prologue_depth_token`), purely a
-/// guard against an unbounded loop if the frame-pointer chain is ever
-/// somehow corrupted or misread. Generous relative to any depth
-/// `RuntimeStack`'s own bound (`vm::SHADOW_STACK_SLOTS`) would allow.
+/// Defensive cap against a malformed frame-pointer chain. The native
+/// stack bound is the authoritative address range on x86-64/Linux.
 const MAX_FRAMES: usize = 1 << 22;
 
 /// Reads the current value of the `rbp` register. `#[inline(always)]`: an
@@ -127,10 +123,10 @@ fn current_rbp() -> usize {
 /// below as defensive backstops rather than as the intended termination
 /// condition.
 #[cfg(target_arch = "x86_64")]
-pub fn walk(map: &ProgramMap, mut visit: impl FnMut(*mut Value)) {
+pub fn walk(map: &ProgramMap, stack: Option<&NativeStack>, mut visit: impl FnMut(*mut Value)) {
     let mut rbp = current_rbp();
     for _ in 0..MAX_FRAMES {
-        if rbp == 0 || rbp % 8 != 0 {
+        if rbp == 0 || rbp % 8 != 0 || stack.is_some_and(|s| !s.contains(rbp, 16)) {
             break;
         }
         // SAFETY: `rbp` is either the register value just read above (this
@@ -149,8 +145,9 @@ pub fn walk(map: &ProgramMap, mut visit: impl FnMut(*mut Value)) {
         for &offset in map.roots_at(return_addr) {
             // This safepoint's own SP (this module's header derivation),
             // plus this root's byte offset within it.
-            let addr = (rbp + 16 + offset as usize) as *mut Value;
-            visit(addr);
+            let Some(root_addr) = rbp.checked_add(16).and_then(|p| p.checked_add(offset as usize)) else { break; };
+            if stack.is_some_and(|s| !s.contains(root_addr, 8)) { continue; }
+            visit(root_addr as *mut Value);
         }
 
         if saved_rbp <= rbp {
@@ -161,7 +158,7 @@ pub fn walk(map: &ProgramMap, mut visit: impl FnMut(*mut Value)) {
 }
 
 #[cfg(not(target_arch = "x86_64"))]
-pub fn walk(_map: &ProgramMap, _visit: impl FnMut(*mut Value)) {
+pub fn walk(_map: &ProgramMap, _stack: Option<&NativeStack>, _visit: impl FnMut(*mut Value)) {
     // No frame-walker on this host: every function stays on the fallback
     // RootStorage rules (codegen::roots's `plan`, `native_frame_supported
     // = false`), so there is nothing for this walk to find -- see
@@ -184,8 +181,16 @@ mod tests {
     fn walk_with_empty_map_finds_nothing_and_terminates() {
         let map = ProgramMap::new();
         let mut count = 0;
-        walk(&map, |_| count += 1);
+        walk(&map, None, |_| count += 1);
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn walk_stops_at_explicit_out_of_bounds_frame() {
+        let map = ProgramMap::new();
+        let stack = NativeStack { low_bound: 1, high_bound: 2, guard_low: 0,
+            saved_sp: None, state: super::super::native_stack::StackState::Active };
+        walk(&map, Some(&stack), |_| panic!("out-of-bounds walk visited root"));
     }
 
     /// A synthetic `ProgramMap` entry that can never match any real return
@@ -197,7 +202,7 @@ mod tests {
         map.push(FunctionMap { code_start: 0x1000, code_end: 0x2000, safepoints: vec![(0x10, vec![0])] });
         map.finish();
         let mut count = 0;
-        walk(&map, |_| count += 1);
+        walk(&map, None, |_| count += 1);
         assert_eq!(count, 0);
     }
 }

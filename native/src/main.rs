@@ -33,8 +33,8 @@
 //!                                                  runtime/metrics.rs's Tcl dict)
 //! ```
 //!
-//! Native code runs on a thread with a large stack; the shadow stack bounds
-//! the call depth (NATIVE LIMIT STACK).
+//! Native code runs on a worker pthread with a large native stack. On
+//! x86-64/Linux its guard supplies overflow protection.
 
 mod codegen;
 mod nir;
@@ -51,7 +51,11 @@ use std::time::Instant;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let worker = std::thread::Builder::new().stack_size(1 << 30).spawn(move || cli(&args)).expect("thread");
+    let stack_size = std::env::var("BOTLISH_NATIVE_STACK_BYTES")
+        .ok().and_then(|text| text.parse::<usize>().ok())
+        .filter(|&size| size >= 1 << 20)
+        .unwrap_or(1 << 30);
+    let worker = std::thread::Builder::new().stack_size(stack_size).spawn(move || cli(&args)).expect("thread");
     let status = match worker.join() {
         Ok(status) => status,
         Err(panic) => {
@@ -258,6 +262,12 @@ fn execute(command: &str, program: &nir::Program, runs: usize, alloc_mode: Alloc
     let mut vm = Vm::new(Rc::new(program_info(program)), alloc_mode);
     compiled.install_constants(&mut vm);
     vm.set_framemap(compiled.framemap.clone());
+    #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+    let _overflow_guard = {
+        let stack = runtime::native_stack::NativeStack::current().expect("pthread stack bounds");
+        runtime::platform::x86_64_linux::OverflowGuard::install(&stack).expect("pthread stack guard")
+    };
+
     let mut best = u128::MAX;
     let mut result = NO_VALUE;
     let mut nanos: Vec<u128> = Vec::with_capacity(runs);

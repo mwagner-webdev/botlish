@@ -694,7 +694,7 @@ test native-aot-2 {the AOT object calls runtime helpers directly, not through th
          [regexp {R_X86_64_PLT32\s+\S+\s+rt_int_add\M} $relocs] \
          [regexp {R_X86_64_PLT32\s+\S+\s+rt_stack_overflow\M} $relocs] \
          [regexp {R_X86_64_PLT32\s+\S+\s+botlish_fn_\d+\M} $relocs]
-} -result {0 1 1 1}
+} -result [list 0 1 [expr {$::tcl_platform(os) eq "Linux" && $::tcl_platform(machine) in {x86_64 amd64} ? 0 : 1}] 1]
 
 test native-diagnostic-1 {an unsupported construct reports location, HIR node and operation} -body {
     set hir [surface::compile "fn f(x):\n    test_log(x)\n\nf(1)" t.bot -strict 0]

@@ -1,28 +1,6 @@
-# native-root-storage.test -- RootStorage (native/src/codegen/roots.rs,
-# native/src/codegen/clif.rs): on the x86-64 native-stack-map path (this
-# host), every function -- called or not, recursive or not -- now stores
-# its physical root slots in a Cranelift-managed native stack slot instead
-# of the shared Botlish shadow-stack array; the collector discovers them by
-# walking the native call stack and consulting per-safepoint stack maps
-# (runtime/framewalk.rs, runtime/framemap.rs), not through any Vm
-# registration this file's own CLIF assertions can see. A function that
-# contains a Botlish call still separately reserves a *minimal* one-slot
-# recursion-depth token in the shared shadow array
-# (`RootPlan::depth_reservation`) -- unchanged mechanism, fully decoupled
-# from where its actual roots live (see tests/native-stack-map.test for
-# this decoupling's own dedicated coverage, including fib<int>).
-#
-# Coverage:
-#   * structural: native::roots's "storage:" line, and native::clif's
-#     absence of the shared shadow-stack sequence (ss_top/ss_limit loads,
-#     rt_stack_overflow) for a function with no Botlish call (no depth
-#     reservation needed either)
-#   * adversarial: hand-written NIR run under BOTLISH_NATIVE_GC_STRESS=1,
-#     confirming a value physically stored in the native root block
-#     survives a real collection
-#   * a call-crossing root now also gets NativeFrame storage (discovered
-#     through stack maps across the call), while its function still keeps
-#     rt_stack_overflow for the unrelated depth reservation
+# Native root storage remains independent of overflow protection.
+# x86-64/Linux uses native slots and a pthread guard. Other targets retain
+# their RuntimeStack root and depth fallback.
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
@@ -195,11 +173,11 @@ test storage-call-crossing-1 {a value that must survive a Botlish call now uses 
     list [storageOf $report "<program>"] [underGcStress {runNir $text}]
 } -result {{native frame} {value {str ab}}}
 
-test storage-call-crossing-2 {that call-crossing function's own CLIF still imports rt_stack_overflow (the unrelated depth reservation)} -body {
+test storage-call-crossing-2 {call-crossing roots no longer force a depth helper on x86-64/Linux} -body {
     set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=2 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = str \"a\"\n    %1 = call 1 %0\n    ret %1\nend\nfunc 1 \"f\" params=1 env=0 regs=3 pnames=\"x\" captures=0 rawregs=\"\"\n    %1 = str \"b\"\n    %2 = op strcat %0 %1\n    ret %2\nend\n"
     set clif [clifOfNir $text]
     usesHelper $clif [clifFunctionBlock $clif "<program>"] rt_stack_overflow
-} -result 1
+} -result [expr {$::tcl_platform(os) eq "Linux" && $::tcl_platform(machine) in {x86_64 amd64} ? 0 : 1}]
 
 # ---------------------------------------------------------------------------
 # fib<int>'s own machine code is deterministic: recompiling it twice back to

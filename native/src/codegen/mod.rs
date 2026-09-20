@@ -185,6 +185,12 @@ fn isa(pic: bool) -> Result<OwnedTargetIsa, BackendError> {
     set(&mut flags, "opt_level", "speed")?;
     set(&mut flags, "use_colocated_libcalls", "false")?;
     set(&mut flags, "is_pic", if pic { "true" } else { "false" })?;
+    // Probe only large frames (default spacing: one 4 KiB page). Without
+    // this, a large Cranelift frame can jump over pthread's guard entirely.
+    if crate::runtime::native_stack::native_stack_overflow_supported() {
+        set(&mut flags, "enable_probestack", "true")?;
+        set(&mut flags, "probestack_strategy", "inline")?;
+    }
     let isa = cranelift_native::builder().map_err(|e| BackendError::Codegen(e.to_string()))?;
     isa.finish(settings::Flags::new(flags)).map_err(|e| BackendError::Codegen(e.to_string()))
 }

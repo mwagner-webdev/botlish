@@ -1,25 +1,6 @@
-# native-stack-map.test -- precise native-stack root maps and native frame
-# walking for GC (native/src/runtime/framemap.rs, native/src/runtime/
-# framewalk.rs, native/src/codegen/clif.rs's `mark_safepoint`): the second
-# step of the native-stack-authoritative roadmap, after
-# native-root-storage.test's first ("no separate Botlish frame for a
-# function that cannot recurse"). This step lets the collector discover
-# roots directly in active native Botlish frames -- including a
-# call-containing, recursive function like fib<int> -- by walking the
-# machine call stack's rbp chain and consulting per-safepoint Cranelift
-# stack maps, instead of requiring the shared RuntimeStack array as root
-# storage. RuntimeStack keeps exactly one job now: a minimal, decoupled
-# recursion-depth token (`RootPlan::depth_reservation`), unrelated to where
-# roots actually live.
-#
-# native-root-storage.test already covers the single-safepoint structural
-# and slot-reuse cases (now on the stack-map path for every function, not
-# just call-free ones) and updates the "fib<int>/call-crossing root" cases
-# this milestone specifically targets. This file adds the cases that are
-# new to *this* step: real multi-frame discovery (several suspended Botlish
-# frames with simultaneously live roots), a foreign (non-Botlish) frame
-# nested in the middle of a Botlish call chain, and fib<int> itself as the
-# flagship regression.
+# Precise native stack maps and frame walking. Phase B removes the
+# separate shadow depth token on x86-64/Linux; fallback targets retain it.
+# These tests cover recursive roots, helper frames, and GC stress.
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
@@ -139,16 +120,16 @@ proc underGcStress {body} {
 # generated CLIF text is unaffected by GC-stress mode (structural, not
 # behavioral). See NATIVE-STACK-MAPS.md for its before/after assembly.
 
-test stack-map-fib-1 {fib<int> uses NativeFrame storage with a depth reservation, both at once} -body {
+test stack-map-fib-1 {fib<int> uses native roots and target-specific overflow protection} -body {
     set report [native::roots [sourceIrHir [file join $::projectRoot bench fib.ir]]]
     list [storageOf $report fib] [depthReservationOf $report fib]
-} -result {{native frame} yes}
+} -result [list {native frame} [expr {$::tcl_platform(os) eq "Linux" && $::tcl_platform(machine) in {x86_64 amd64} ? "no" : "yes"}]]
 
-test stack-map-fib-2 {fib<int>'s CLIF still imports rt_stack_overflow (the depth reservation, unchanged) even though its roots moved off RuntimeStack} -body {
+test stack-map-fib-2 {fib<int> has no depth helper on x86-64/Linux} -body {
     set hir [sourceIrHir [file join $::projectRoot bench fib.ir]]
     set clif [native::clif $hir]
     usesHelper $clif [clifFunctionBlock $clif fib] rt_stack_overflow
-} -result 1
+} -result [expr {$::tcl_platform(os) eq "Linux" && $::tcl_platform(machine) in {x86_64 amd64} ? 0 : 1}]
 
 test stack-map-fib-3 {fib<int> still computes the right answer, natively} -body {
     native "fn fib(n):\n    if n < 2:\n        return n\n    fib(n - 1) + fib(n - 2)\n\nfib(15)"

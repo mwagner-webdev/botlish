@@ -15,6 +15,7 @@ log = "0.4"
 num-bigint = "0.4"
 num-traits = "0.2"
 unicode-general-category = "1.1.0"
+libc = "0.2"
 
 [profile.release]
 debug = 1

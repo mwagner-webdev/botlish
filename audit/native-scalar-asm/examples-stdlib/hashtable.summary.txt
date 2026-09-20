@@ -2,7 +2,7 @@ source:  examples/stdlib/hashtable.bot
 backend: Cranelift (specialize=1)
 asm:     hashtable.asm
 vcode:   hashtable.vcode
-machine-code bytes: 17415 (per function: 172 28 28 28 28 540 712 220 61 61 61 61 61 280 297 347 1036 1592 589 389 572 612 1585 1030 977 841 1496 1132 1477 1102)
+machine-code bytes: 13704 (per function: 45 28 28 28 28 412 524 110 61 61 61 61 61 174 190 233 860 1328 437 261 436 456 1257 803 841 681 1240 908 1253 838)
 
 functions:
   0 <program entry>: nir-regs=1
@@ -46,7 +46,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     max live roots: 0
     shadow slots: 0
     entry zero slots: 0
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 1 "ht_min_capacity"
@@ -106,7 +106,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     max live roots: 4
     shadow slots: 4
     entry zero slots: 1
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 6 "ht_alloc"
@@ -118,7 +118,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     max live roots: 4
     shadow slots: 4
     entry zero slots: 3
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 7 "ht_new"
@@ -130,7 +130,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     max live roots: 1
     shadow slots: 1
     entry zero slots: 1
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 8 "ht_controls"
@@ -202,7 +202,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     max live roots: 1
     shadow slots: 1
     entry zero slots: 0
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 14 "ht_probe_start"
@@ -214,7 +214,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     max live roots: 2
     shadow slots: 2
     entry zero slots: 0
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 15 "ht_probe_next"
@@ -226,7 +226,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     max live roots: 3
     shadow slots: 3
     entry zero slots: 0
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 16 "ht_find_get"
@@ -238,7 +238,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     max live roots: 4
     shadow slots: 4
     entry zero slots: 1
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 17 "ht_find_insert"
@@ -250,7 +250,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     max live roots: 5
     shadow slots: 5
     entry zero slots: 1
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 18 "ht_get"
@@ -262,7 +262,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     max live roots: 3
     shadow slots: 3
     entry zero slots: 1
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 19 "ht_contains"
@@ -274,7 +274,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     max live roots: 3
     shadow slots: 3
     entry zero slots: 1
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 20 "ht_rehash_probe"
@@ -286,7 +286,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     max live roots: 4
     shadow slots: 4
     entry zero slots: 0
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 21 "ht_rehash_insert"
@@ -298,7 +298,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     max live roots: 7
     shadow slots: 7
     entry zero slots: 0
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 22 "ht_rehash_scan"
@@ -310,7 +310,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     max live roots: 11
     shadow slots: 11
     entry zero slots: 1
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 23 "ht_rehash"
@@ -322,7 +322,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     max live roots: 10
     shadow slots: 10
     entry zero slots: 8
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 24 "ht_should_grow"
@@ -334,7 +334,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     max live roots: 3
     shadow slots: 3
     entry zero slots: 2
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 25 "ht_grow_or_clean"
@@ -346,7 +346,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     max live roots: 3
     shadow slots: 3
     entry zero slots: 2
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 26 "ht_place"
@@ -358,7 +358,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     max live roots: 6
     shadow slots: 6
     entry zero slots: 2
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 27 "ht_set"
@@ -370,7 +370,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     max live roots: 5
     shadow slots: 5
     entry zero slots: 2
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 28 "ht_delete"
@@ -382,7 +382,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     max live roots: 4
     shadow slots: 4
     entry zero slots: 2
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
   
   function 29 "sample"
@@ -394,7 +394,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     max live roots: 6
     shadow slots: 6
     entry zero slots: 6
-    depth reservation: yes
+    depth reservation: no
     storage: native frame
 
 mechanical pattern counts (triage only; see report for interpretation):
@@ -402,5 +402,5 @@ mechanical pattern counts (triage only; see report for interpretation):
   2 x calls to rt_int_sub
   3 x calls to rt_int_mul
   9 x calls to rt_int_cmp
-  114 x calls to other rt_* helpers
+  93 x calls to other rt_* helpers
   25 x guard/guardbool instructions

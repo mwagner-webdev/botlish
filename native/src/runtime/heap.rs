@@ -12,10 +12,7 @@
 //!     RuntimeStack` frame (the generated prologue reserves and clears one
 //!     slot per register, and every definition of a register is stored to
 //!     its slot) -- on the x86-64 stack-map path this region only ever
-//!     holds `RootPlan::depth_reservation`'s own zeroed, root-free
-//!     recursion-depth tokens (see codegen::clif's module doc), so this
-//!     source is a no-op there in the new steady state, without needing any
-//!     special-casing here
+//!     is empty and not allocated on x86-64/Linux
 //!   * `Vm::native_roots_ptr`/`_len`: the currently active `RootStorage::
 //!     NativeFrame` function's own root block, on the fallback (non-x86-64)
 //!     path only -- see codegen::roots's `RootStorage` doc
@@ -24,7 +21,7 @@
 //!     for however many such frames are nested, discovered via per-safepoint
 //!     stack maps (`runtime::framemap`) instead of any registration Vm
 //!     holds -- the collector's replacement for `RuntimeStack` as *root
-//!     storage* (not as the still-unchanged recursion-depth bound) for
+//!     storage for
 //!     every function this milestone covers, `fib<int>` included
 //!   * the values of a pending error
 //!   * `Vm::temp_roots`, for runtime code that holds values across an

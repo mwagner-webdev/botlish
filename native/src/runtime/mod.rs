@@ -6,6 +6,9 @@ pub mod framemap;
 pub mod framewalk;
 pub mod heap;
 pub mod metrics;
+pub mod native_stack;
+#[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+pub mod platform;
 pub mod ops;
 pub mod show;
 pub mod value;
