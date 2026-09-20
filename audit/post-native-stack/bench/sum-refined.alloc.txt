@@ -1,0 +1,30 @@
+Botlish managed heap allocation report
+
+allocated:
+    0 objects
+    0 B
+
+peak live:
+    0 objects
+    0 B
+
+GC:
+    0 cycles
+    0 B reclaimed
+    0.0 ms total
+    0.0 ms max
+
+by kind:
+
+copies:
+    String       0 B
+    List         0 elements
+    MutableArray 0 elements
+
+mutable array:
+    0 reads, 0 writes
+
+static (constant table, excluded from GC/live/peak):
+    3 objects, 189 B
+
+excluded: num-bigint limb buffers, the shadow stack (fixed ~32 MB), Cranelift/JIT code, process bookkeeping.

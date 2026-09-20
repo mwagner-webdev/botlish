@@ -1,0 +1,4 @@
+namespace scalar
+base = 7
+fn add(x):
+    x + base

@@ -1,0 +1,406 @@
+source:  examples/stdlib/hashtable.bot
+backend: Cranelift (specialize=1)
+asm:     hashtable.asm
+vcode:   hashtable.vcode
+machine-code bytes: 13704 (per function: 45 28 28 28 28 412 524 110 61 61 61 61 61 174 190 233 860 1328 437 261 436 456 1257 803 841 681 1240 908 1253 838)
+
+functions:
+  0 <program entry>: nir-regs=1
+  1 ht_min_capacity<generic>: nir-regs=2
+  2 ht_empty_state<generic>: nir-regs=2
+  3 ht_occupied_state<generic>: nir-regs=2
+  4 ht_tombstone_state<generic>: nir-regs=2
+  5 ht_fill_empty<mutarray, int, int>: nir-regs=12
+  6 ht_alloc<int>: nir-regs=29
+  7 ht_new<generic>: nir-regs=2
+  8 ht_controls<mutarray>: nir-regs=4
+  9 ht_keys<mutarray>: nir-regs=4
+  10 ht_values<mutarray>: nir-regs=4
+  11 ht_size<mutarray>: nir-regs=4
+  12 ht_tombstones<mutarray>: nir-regs=4
+  13 ht_capacity<mutarray>: nir-regs=3
+  14 ht_probe_start<mutarray, str>: nir-regs=5
+  15 ht_probe_next<mutarray, int>: nir-regs=7
+  16 ht_find_get<mutarray, str, int>: nir-regs=28
+  17 ht_find_insert<mutarray, str, int, int>: nir-regs=41
+  18 ht_get<mutarray, str>: nir-regs=12
+  19 ht_contains<mutarray, str>: nir-regs=7
+  20 ht_rehash_probe<mutarray, int, int>: nir-regs=12
+  21 ht_rehash_insert<list<mutarray>, int, any, any>: nir-regs=14
+  22 ht_rehash_scan<list, int, int, list<mutarray>, int>: nir-regs=24
+  23 ht_rehash<mutarray, int>: nir-regs=30
+  24 ht_should_grow<mutarray>: nir-regs=15
+  25 ht_grow_or_clean<mutarray>: nir-regs=12
+  26 ht_place<mutarray, int, str, str>: nir-regs=31
+  27 ht_set<mutarray, str, str>: nir-regs=34
+  28 ht_delete<mutarray, str>: nir-regs=34
+  29 sample<generic>: nir-regs=28
+
+GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
+  function 0 "<program>"
+    NIR regs: 1
+    raw regs: 0
+    managed-capable regs: 1
+    safepoints: 1
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 0
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+
+  function 1 "ht_min_capacity"
+    NIR regs: 2
+    raw regs: 1
+    managed-capable regs: 1
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 0
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+
+  function 2 "ht_empty_state"
+    NIR regs: 2
+    raw regs: 1
+    managed-capable regs: 1
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 0
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+
+  function 3 "ht_occupied_state"
+    NIR regs: 2
+    raw regs: 1
+    managed-capable regs: 1
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 0
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+
+  function 4 "ht_tombstone_state"
+    NIR regs: 2
+    raw regs: 1
+    managed-capable regs: 1
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 0
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+
+  function 5 "ht_fill_empty"
+    NIR regs: 12
+    raw regs: 1
+    managed-capable regs: 11
+    safepoints: 2
+    root candidates: 4
+    max live roots: 4
+    shadow slots: 4
+    entry zero slots: 1
+    depth reservation: no
+    storage: native frame
+
+  function 6 "ht_alloc"
+    NIR regs: 29
+    raw regs: 9
+    managed-capable regs: 20
+    safepoints: 5
+    root candidates: 6
+    max live roots: 4
+    shadow slots: 4
+    entry zero slots: 3
+    depth reservation: no
+    storage: native frame
+
+  function 7 "ht_new"
+    NIR regs: 2
+    raw regs: 0
+    managed-capable regs: 2
+    safepoints: 2
+    root candidates: 1
+    max live roots: 1
+    shadow slots: 1
+    entry zero slots: 1
+    depth reservation: no
+    storage: native frame
+
+  function 8 "ht_controls"
+    NIR regs: 4
+    raw regs: 1
+    managed-capable regs: 3
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 0
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+
+  function 9 "ht_keys"
+    NIR regs: 4
+    raw regs: 1
+    managed-capable regs: 3
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 0
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+
+  function 10 "ht_values"
+    NIR regs: 4
+    raw regs: 1
+    managed-capable regs: 3
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 0
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+
+  function 11 "ht_size"
+    NIR regs: 4
+    raw regs: 1
+    managed-capable regs: 3
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 0
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+
+  function 12 "ht_tombstones"
+    NIR regs: 4
+    raw regs: 1
+    managed-capable regs: 3
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 0
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+
+  function 13 "ht_capacity"
+    NIR regs: 3
+    raw regs: 0
+    managed-capable regs: 3
+    safepoints: 1
+    root candidates: 1
+    max live roots: 1
+    shadow slots: 1
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+
+  function 14 "ht_probe_start"
+    NIR regs: 5
+    raw regs: 0
+    managed-capable regs: 5
+    safepoints: 1
+    root candidates: 2
+    max live roots: 2
+    shadow slots: 2
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+
+  function 15 "ht_probe_next"
+    NIR regs: 7
+    raw regs: 1
+    managed-capable regs: 6
+    safepoints: 2
+    root candidates: 4
+    max live roots: 3
+    shadow slots: 3
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+
+  function 16 "ht_find_get"
+    NIR regs: 28
+    raw regs: 3
+    managed-capable regs: 25
+    safepoints: 5
+    root candidates: 4
+    max live roots: 4
+    shadow slots: 4
+    entry zero slots: 1
+    depth reservation: no
+    storage: native frame
+
+  function 17 "ht_find_insert"
+    NIR regs: 41
+    raw regs: 2
+    managed-capable regs: 39
+    safepoints: 7
+    root candidates: 5
+    max live roots: 5
+    shadow slots: 5
+    entry zero slots: 1
+    depth reservation: no
+    storage: native frame
+
+  function 18 "ht_get"
+    NIR regs: 12
+    raw regs: 1
+    managed-capable regs: 11
+    safepoints: 3
+    root candidates: 4
+    max live roots: 3
+    shadow slots: 3
+    entry zero slots: 1
+    depth reservation: no
+    storage: native frame
+
+  function 19 "ht_contains"
+    NIR regs: 7
+    raw regs: 1
+    managed-capable regs: 6
+    safepoints: 2
+    root candidates: 3
+    max live roots: 3
+    shadow slots: 3
+    entry zero slots: 1
+    depth reservation: no
+    storage: native frame
+
+  function 20 "ht_rehash_probe"
+    NIR regs: 12
+    raw regs: 1
+    managed-capable regs: 11
+    safepoints: 2
+    root candidates: 5
+    max live roots: 4
+    shadow slots: 4
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+
+  function 21 "ht_rehash_insert"
+    NIR regs: 14
+    raw regs: 0
+    managed-capable regs: 14
+    safepoints: 2
+    root candidates: 8
+    max live roots: 7
+    shadow slots: 7
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+
+  function 22 "ht_rehash_scan"
+    NIR regs: 24
+    raw regs: 1
+    managed-capable regs: 23
+    safepoints: 3
+    root candidates: 13
+    max live roots: 11
+    shadow slots: 11
+    entry zero slots: 1
+    depth reservation: no
+    storage: native frame
+
+  function 23 "ht_rehash"
+    NIR regs: 30
+    raw regs: 7
+    managed-capable regs: 23
+    safepoints: 9
+    root candidates: 11
+    max live roots: 10
+    shadow slots: 10
+    entry zero slots: 8
+    depth reservation: no
+    storage: native frame
+
+  function 24 "ht_should_grow"
+    NIR regs: 15
+    raw regs: 3
+    managed-capable regs: 12
+    safepoints: 7
+    root candidates: 10
+    max live roots: 3
+    shadow slots: 3
+    entry zero slots: 2
+    depth reservation: no
+    storage: native frame
+
+  function 25 "ht_grow_or_clean"
+    NIR regs: 12
+    raw regs: 1
+    managed-capable regs: 11
+    safepoints: 7
+    root candidates: 6
+    max live roots: 3
+    shadow slots: 3
+    entry zero slots: 2
+    depth reservation: no
+    storage: native frame
+
+  function 26 "ht_place"
+    NIR regs: 31
+    raw regs: 4
+    managed-capable regs: 27
+    safepoints: 9
+    root candidates: 12
+    max live roots: 6
+    shadow slots: 6
+    entry zero slots: 2
+    depth reservation: no
+    storage: native frame
+
+  function 27 "ht_set"
+    NIR regs: 34
+    raw regs: 6
+    managed-capable regs: 28
+    safepoints: 11
+    root candidates: 10
+    max live roots: 5
+    shadow slots: 5
+    entry zero slots: 2
+    depth reservation: no
+    storage: native frame
+
+  function 28 "ht_delete"
+    NIR regs: 34
+    raw regs: 5
+    managed-capable regs: 29
+    safepoints: 10
+    root candidates: 11
+    max live roots: 4
+    shadow slots: 4
+    entry zero slots: 2
+    depth reservation: no
+    storage: native frame
+
+  function 29 "sample"
+    NIR regs: 28
+    raw regs: 0
+    managed-capable regs: 28
+    safepoints: 12
+    root candidates: 19
+    max live roots: 6
+    shadow slots: 6
+    entry zero slots: 6
+    depth reservation: no
+    storage: native frame
+
+mechanical pattern counts (triage only; see report for interpretation):
+  8 x calls to rt_int_add
+  2 x calls to rt_int_sub
+  3 x calls to rt_int_mul
+  9 x calls to rt_int_cmp
+  93 x calls to other rt_* helpers
+  25 x guard/guardbool instructions

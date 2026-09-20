@@ -1,0 +1,288 @@
+nir 1
+
+func 0 "<program>" params=0 env=0 regs=2 pnames="" captures=0 instance="generic"
+    %0 = str "name,age\nAlice,30\nBob,40\n" @e243
+    %1 = call 10 %0 @e241
+    ret %1
+end
+
+func 1 "peek" params=2 env=0 regs=11 pnames="text index" captures=0 instance="str, int" rawregs="8" @e2
+    %2 = op strlen %0 @e7
+    %3 = op ige %1 %2 @e4
+    br %3 L0 L1 @e3
+  label L0
+    %5 = str "" @e11
+    ret %5 @e10
+  label L1
+    %6 = unit
+    %4 = move %6
+    jump L2
+  label L2
+    %7 = int 1 @e19
+    %8 = rawint 1
+    %9 = op iadd %1 %7 @e16
+    %10 = op substr %0 %1 %9 @e12
+    ret %10
+end
+
+func 2 "peek" params=2 env=0 regs=15 pnames="text index" captures=0 instance="str, int" results=3 rawregs="7 9 12" @e2
+    %2 = op strlen %0 @e7
+    %3 = op ige %1 %2 @e4
+    br %3 L0 L1 @e3
+  label L0
+    %5 = str "" @e11
+    %6 = int 0 @e11
+    %7 = rawint 0
+    %8 = int 0 @e11
+    %9 = rawint 0
+    retmulti %5 %6 %8 @e10
+  label L1
+    %10 = unit
+    %4 = move %10
+    jump L2
+  label L2
+    %11 = int 1 @e19
+    %12 = rawint 1
+    %13 = op iadd %1 %11 @e16
+    %14 = op regioncheck %0 %1 %13 @e12
+    retmulti %0 %1 %13
+end
+
+func 3 "scan_unquoted" params=3 env=0 regs=28 pnames="text start index" captures=0 instance="str, int, int" results=2 rawregs="26" @e21
+    %3 %4 %5 = callmulti 2 %0 %2 @e23
+    %6 = str "" @e33
+    %7 = op regioneq %3 %4 %5 %6 @e30
+    br %7 L0 L1 @e29
+  label L0
+    %9 = bool true @e34
+    %8 = move %9
+    jump L2
+  label L1
+    %10 = str "," @e39
+    %11 = op regioneq %3 %4 %5 %10 @e36
+    br %11 L3 L4 @e35
+  label L3
+    %13 = bool true @e40
+    %12 = move %13
+    jump L5
+  label L4
+    %14 = bool false @e41
+    %12 = move %14
+    jump L5
+  label L5
+    %8 = move %12
+    jump L2
+  label L2
+    br %8 L6 L7 @e28
+  label L6
+    %16 = bool true @e42
+    %15 = move %16
+    jump L8
+  label L7
+    %17 = str "\n" @e47
+    %18 = op regioneq %3 %4 %5 %17 @e44
+    br %18 L9 L10 @e43
+  label L9
+    %20 = bool true @e48
+    %19 = move %20
+    jump L11
+  label L10
+    %21 = bool false @e49
+    %19 = move %21
+    jump L11
+  label L11
+    %15 = move %19
+    jump L8
+  label L8
+    br %15 L12 L13 @e27
+  label L12
+    %23 = op substr %0 %1 %2 @e53
+    retmulti %23 %2 @e50
+  label L13
+    %24 = unit
+    %22 = move %24
+    jump L14
+  label L14
+    %25 = int 1 @e66
+    %26 = rawint 1
+    %27 = op iadd %2 %25 @e63
+    tail %0 %1 %27 @e59
+end
+
+func 4 "scan_quoted" params=3 env=0 regs=34 pnames="text index field" captures=0 instance="str, int, str" results=2 rawregs="6 8 12 21 27 31" @e68
+    %3 = call 1 %0 %1 @e70
+    %4 = str "\"" @e78
+    %5 = int 0 @e78
+    %6 = rawint 0
+    %7 = int 1 @e78
+    %8 = rawint 1
+    %9 = op regioneq %4 %5 %7 %3 @e75
+    br %9 L0 L1 @e74
+  label L0
+    %11 = int 1 @e88
+    %12 = rawint 1
+    %13 = op iadd %1 %11 @e85
+    %14 %15 %16 = callmulti 2 %0 %13 @e82
+    %17 = str "\"" @e89
+    %18 = op regioneq %14 %15 %16 %17 @e80
+    br %18 L3 L4 @e79
+  label L3
+    %20 = int 2 @e97
+    %21 = rawint 2
+    %22 = op iadd %1 %20 @e94
+    %23 = str "\"" @e101
+    %24 = op strcat %2 %23 @e98
+    tail %0 %22 %24 @e91
+  label L4
+    %25 = unit
+    %19 = move %25
+    jump L5
+  label L5
+    %26 = int 1 @e109
+    %27 = rawint 1
+    %28 = op iadd %1 %26 @e106
+    retmulti %2 %28 @e102
+  label L1
+    %29 = unit
+    %10 = move %29
+    jump L2
+  label L2
+    %30 = int 1 @e116
+    %31 = rawint 1
+    %32 = op iadd %1 %30 @e113
+    %33 = op strcat %2 %3 @e117
+    tail %0 %32 %33 @e110
+end
+
+func 5 "scan_field" params=2 env=0 regs=17 pnames="text index" captures=0 instance="str, int" results=2 rawregs="9" @e122
+    %2 %3 %4 = callmulti 2 %0 %1 @e126
+    %5 = str "\"" @e130
+    %6 = op regioneq %2 %3 %4 %5 @e124
+    br %6 L0 L1 @e123
+  label L0
+    %8 = int 1 @e138
+    %9 = rawint 1
+    %10 = op iadd %1 %8 @e135
+    %11 = str "" @e139
+    %12 %13 = callmulti 4 %0 %10 %11 @e132
+    retmulti %12 %13 @e131
+  label L1
+    %14 = unit
+    %7 = move %14
+    jump L2
+  label L2
+    %15 %16 = callmulti 3 %0 %1 %1 @e140
+    retmulti %15 %16
+end
+
+func 6 "scan_record" params=3 env=0 regs=25 pnames="text index fields" captures=0 instance="str, int, list<never>" results=2 rawregs="13 22" @e146
+    %3 %4 = callmulti 5 %0 %1 @e148
+    %5 = op listappend %2 %3 @e153
+    %6 %7 %8 = callmulti 2 %0 %4 @e166
+    %9 = str "," @e174
+    %10 = op regioneq %6 %7 %8 %9 @e171
+    br %10 L0 L1 @e170
+  label L0
+    %12 = int 1 @e182
+    %13 = rawint 1
+    %14 = op iadd %4 %12 @e179
+    %15 %16 = callmulti 7 %0 %14 %5 @e176
+    retmulti %15 %16 @e175
+  label L1
+    %17 = unit
+    %11 = move %17
+    jump L2
+  label L2
+    %18 = str "\n" @e188
+    %19 = op regioneq %6 %7 %8 %18 @e185
+    br %19 L3 L4 @e184
+  label L3
+    %21 = int 1 @e196
+    %22 = rawint 1
+    %23 = op iadd %4 %21 @e193
+    retmulti %5 %23 @e189
+  label L4
+    %24 = unit
+    %20 = move %24
+    jump L5
+  label L5
+    retmulti %5 %4
+end
+
+func 7 "scan_record" params=3 env=0 regs=23 pnames="text index fields" captures=0 instance="str, int, list<str>" results=2 rawregs="13 20" @e146
+    %3 %4 = callmulti 5 %0 %1 @e148
+    %5 = op listappend %2 %3 @e153
+    %6 %7 %8 = callmulti 2 %0 %4 @e166
+    %9 = str "," @e174
+    %10 = op regioneq %6 %7 %8 %9 @e171
+    br %10 L0 L1 @e170
+  label L0
+    %12 = int 1 @e182
+    %13 = rawint 1
+    %14 = op iadd %4 %12 @e179
+    tail %0 %14 %5 @e176
+  label L1
+    %15 = unit
+    %11 = move %15
+    jump L2
+  label L2
+    %16 = str "\n" @e188
+    %17 = op regioneq %6 %7 %8 %16 @e185
+    br %17 L3 L4 @e184
+  label L3
+    %19 = int 1 @e196
+    %20 = rawint 1
+    %21 = op iadd %4 %19 @e193
+    retmulti %5 %21 @e189
+  label L4
+    %22 = unit
+    %18 = move %22
+    jump L5
+  label L5
+    retmulti %5 %4
+end
+
+func 8 "scan_records" params=3 env=0 regs=14 pnames="text index records" captures=0 instance="str, int, list<never>" rawregs="3 5" @e202
+    %3 = op runbox %1
+    %4 = op strlen %0 @e207
+    %5 = op runbox %4
+    %6 = op rige %3 %5 @e204
+    br %6 L0 L1 @e203
+  label L0
+    ret %2 @e210
+  label L1
+    %8 = unit
+    %7 = move %8
+    jump L2
+  label L2
+    %9 = op listnew @e217
+    %10 %11 = callmulti 6 %0 %1 %9 @e213
+    %12 = op listappend %2 %10 @e226
+    %13 = call 9 %0 %11 %12 @e219
+    ret %13
+end
+
+func 9 "scan_records" params=3 env=0 regs=11 pnames="text index records" captures=0 instance="str, int, list<list<str>>" @e202
+    %3 = op strlen %0 @e207
+    %4 = op ige %1 %3 @e204
+    br %4 L0 L1 @e203
+  label L0
+    ret %2 @e210
+  label L1
+    %6 = unit
+    %5 = move %6
+    jump L2
+  label L2
+    %7 = op listnew @e217
+    %8 %9 = callmulti 6 %0 %1 %7 @e213
+    %10 = op listappend %2 %8 @e226
+    tail %0 %9 %10 @e219
+end
+
+func 10 "csv_parse" params=1 env=0 regs=5 pnames="text" captures=0 instance="str" rawregs="2" @e234
+    %1 = int 0 @e238
+    %2 = rawint 0
+    %3 = op listnew @e239
+    %4 = call 8 %0 %1 %3 @e235
+    ret %4
+end

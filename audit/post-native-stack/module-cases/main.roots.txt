@@ -1,0 +1,47 @@
+function 0 "<program>"
+  NIR regs: 17
+  raw regs: 6
+  managed-capable regs: 11
+  safepoints: 5
+  root candidates: 10
+  max live roots: 4
+  shadow slots: 4
+  entry zero slots: 1
+  depth reservation: no
+  storage: native frame
+
+function 1 "plain::inc"
+  NIR regs: 6
+  raw regs: 3
+  managed-capable regs: 3
+  safepoints: 0
+  root candidates: 0
+  max live roots: 0
+  shadow slots: 0
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 2 "scalar::add"
+  NIR regs: 3
+  raw regs: 0
+  managed-capable regs: 3
+  safepoints: 1
+  root candidates: 2
+  max live roots: 2
+  shadow slots: 2
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 3 "managed::get"
+  NIR regs: 3
+  raw regs: 0
+  managed-capable regs: 3
+  safepoints: 0
+  root candidates: 0
+  max live roots: 0
+  shadow slots: 0
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame

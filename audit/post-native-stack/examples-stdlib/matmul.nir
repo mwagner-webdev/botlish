@@ -1,0 +1,187 @@
+nir 1
+
+func 0 "<program>" params=0 env=0 regs=32 pnames="" captures=0 instance="generic" rawregs="1 3 5 8 10 12 16 18 21 23 26 28"
+    %0 = int 1 @e138
+    %1 = rawint 1
+    %2 = int 2 @e139
+    %3 = rawint 2
+    %4 = int 3 @e140
+    %5 = rawint 3
+    %6 = op listnew %0 %2 %4 @e136
+    %7 = int 4 @e143
+    %8 = rawint 4
+    %9 = int 5 @e144
+    %10 = rawint 5
+    %11 = int 6 @e145
+    %12 = rawint 6
+    %13 = op listnew %7 %9 %11 @e141
+    %14 = op listnew %6 %13 @e134
+    %15 = int 7 @e150
+    %16 = rawint 7
+    %17 = int 8 @e151
+    %18 = rawint 8
+    %19 = op listnew %15 %17 @e148
+    %20 = int 9 @e154
+    %21 = rawint 9
+    %22 = int 10 @e155
+    %23 = rawint 10
+    %24 = op listnew %20 %22 @e152
+    %25 = int 11 @e158
+    %26 = rawint 11
+    %27 = int 12 @e159
+    %28 = rawint 12
+    %29 = op listnew %25 %27 @e156
+    %30 = op listnew %19 %24 %29 @e146
+    %31 = call 6 %14 %30 @e132
+    ret %31
+end
+
+func 1 "dot" params=6 env=0 regs=18 pnames="a_row b column k count total" captures=0 instance="list<int>, list<list<int>>, int, int, int, int" rawregs="3 4 15 16" @e2
+    %6 = op rieq %3 %4 @e4
+    br %6 L0 L1 @e3
+  label L0
+    ret %5 @e8
+  label L1
+    %8 = unit
+    %7 = move %8
+    jump L2
+  label L2
+    %9 = op rbox %3
+    %10 = op listget %0 %9 @e13
+    %11 = op listget %1 %9 @e19
+    %12 = op listget %11 %2 @e17
+    %13 = op imul %10 %12 @e11
+    %14 = int 1 @e32
+    %15 = rawint 1
+    %16 = op riadd %3 %15 @e29
+    %17 = op iadd %5 %13 @e34
+    tail %0 %1 %2 %16 %4 %17 @e24
+end
+
+func 2 "product_row" params=5 env=0 regs=22 pnames="a_row b column columns row" captures=0 instance="list<int>, list<list<int>>, int, int, list<never>" rawregs="5 6 11 14 17 18" @e39
+    %5 = op runbox %2
+    %6 = op runbox %3
+    %7 = op rieq %5 %6 @e41
+    br %7 L0 L1 @e40
+  label L0
+    ret %4 @e45
+  label L1
+    %9 = unit
+    %8 = move %9
+    jump L2
+  label L2
+    %10 = int 0 @e53
+    %11 = rawint 0
+    %12 = op listlen %0 @e54
+    %13 = int 0 @e57
+    %14 = rawint 0
+    %15 = call 1 %0 %1 %2 %10 %12 %13 @e48
+    %16 = int 1 @e65
+    %17 = rawint 1
+    %18 = op riadd %5 %17 @e62
+    %19 = op rbox %18
+    %20 = op listappend %4 %15 @e67
+    %21 = call 3 %0 %1 %19 %3 %20 @e58
+    ret %21
+end
+
+func 3 "product_row" params=5 env=0 regs=19 pnames="a_row b column columns row" captures=0 instance="list<int>, list<list<int>>, int, int, list<int>" rawregs="3 10 13 16" @e39
+    %5 = op rbox %3
+    %6 = op ieq %2 %5 @e41
+    br %6 L0 L1 @e40
+  label L0
+    ret %4 @e45
+  label L1
+    %8 = unit
+    %7 = move %8
+    jump L2
+  label L2
+    %9 = int 0 @e53
+    %10 = rawint 0
+    %11 = op listlen %0 @e54
+    %12 = int 0 @e57
+    %13 = rawint 0
+    %14 = call 1 %0 %1 %2 %9 %11 %12 @e48
+    %15 = int 1 @e65
+    %16 = rawint 1
+    %17 = op iadd %2 %15 @e62
+    %18 = op listappend %4 %14 @e67
+    tail %0 %1 %17 %3 %18 @e58
+end
+
+func 4 "product_rows" params=5 env=0 regs=22 pnames="a b i columns rows" captures=0 instance="list<list<int>>, list<list<int>>, int, int, list<never>" rawregs="5 7 13 17 18" @e72
+    %5 = op runbox %2
+    %6 = op listlen %0 @e77
+    %7 = op runbox %6
+    %8 = op rieq %5 %7 @e74
+    br %8 L0 L1 @e73
+  label L0
+    ret %4 @e80
+  label L1
+    %10 = unit
+    %9 = move %10
+    jump L2
+  label L2
+    %11 = op listget %0 %2 @e85
+    %12 = int 0 @e90
+    %13 = rawint 0
+    %14 = op listnew @e92
+    %15 = call 2 %11 %1 %12 %3 %14 @e83
+    %16 = int 1 @e101
+    %17 = rawint 1
+    %18 = op riadd %5 %17 @e98
+    %19 = op rbox %18
+    %20 = op listappend %4 %15 @e103
+    %21 = call 5 %0 %1 %19 %3 %20 @e94
+    ret %21
+end
+
+func 5 "product_rows" params=5 env=0 regs=19 pnames="a b i columns rows" captures=0 instance="list<list<int>>, list<list<int>>, int, int, list<list<int>>" rawregs="3 11 16" @e72
+    %5 = op listlen %0 @e77
+    %6 = op ieq %2 %5 @e74
+    br %6 L0 L1 @e73
+  label L0
+    ret %4 @e80
+  label L1
+    %8 = unit
+    %7 = move %8
+    jump L2
+  label L2
+    %9 = op listget %0 %2 @e85
+    %10 = int 0 @e90
+    %11 = rawint 0
+    %12 = op rbox %3
+    %13 = op listnew @e92
+    %14 = call 2 %9 %1 %10 %12 %13 @e83
+    %15 = int 1 @e101
+    %16 = rawint 1
+    %17 = op iadd %2 %15 @e98
+    %18 = op listappend %4 %14 @e103
+    tail %0 %1 %17 %3 %18 @e94
+end
+
+func 6 "matmul" params=2 env=0 regs=18 pnames="a b" captures=0 instance="list<list<int>>, list<list<int>>" rawregs="3 5 11 13" @e108
+    %2 = op listlen %0 @e112
+    %3 = op runbox %2
+    %4 = int 0 @e115
+    %5 = rawint 0
+    %6 = op rieq %3 %5 @e110
+    br %6 L0 L1 @e109
+  label L0
+    %8 = op listnew @e117
+    ret %8 @e116
+  label L1
+    %9 = unit
+    %7 = move %9
+    jump L2
+  label L2
+    %10 = int 0 @e123
+    %11 = rawint 0
+    %12 = int 0 @e129
+    %13 = rawint 0
+    %14 = op listget %1 %12 @e126
+    %15 = op listlen %14 @e124
+    %16 = op listnew @e130
+    %17 = call 4 %0 %1 %10 %15 %16 @e119
+    ret %17
+end

@@ -1,0 +1,4 @@
+namespace managed
+digits = [10, 20]
+fn get(i):
+    list_get(digits, i)

@@ -1,0 +1,38 @@
+program s2 binds b1 sum
+e1 bind b1 sum : block(e2)/2 -> any
+    e2 block s3 (b2 n, b3 acc) captures (b1 sum) : block(e2)/2 -> any
+        e3 if : any
+            e4 call native(integer?) : bool
+                e5 ref b4 integer? : native integer?
+                e6 ref b3 acc : any
+            then s4 refines b3 acc : int
+                e7 if : any
+                    e8 call native(==) : bool
+                        e9 ref b5 == : native ==
+                        e10 ref b2 n : any
+                        e11 const 0 : int
+                    then s5
+                        e12 ref b3 acc : int
+                    else s6 binds b6 step
+                        e13 bind b6 step : block(e14)/1 -> int
+                            e14 block s7 (b7 x) captures (b2 n) : block(e14)/1 -> int
+                                e15 call native(+) : int
+                                    e16 ref b8 + : native +
+                                    e17 ref b7 x : any
+                                    e18 ref b2 n : any deferred
+                        e19 call block(e2) : any
+                            e20 ref b1 sum : block(e2)/2 -> any deferred
+                            e21 call native(-) : int
+                                e22 ref b9 - : native -
+                                e23 ref b2 n : any
+                                e24 const 1 : int
+                            e25 call block(e14) : int
+                                e26 ref b6 step : block(e14)/1 -> int
+                                e27 ref b3 acc : int
+            else s8
+                e28 error : result
+                    e29 const not_an_integer : str
+e30 call block(e2) : any
+    e31 ref b1 sum : block(e2)/2 -> any
+    e32 const 400 : int
+    e33 const 0 : int

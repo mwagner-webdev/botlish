@@ -1,0 +1,45 @@
+Botlish managed heap allocation report
+
+allocated:
+    20819 objects
+    980.1 KB
+
+peak live:
+    20819 objects
+    980.1 KB
+
+GC:
+    0 cycles
+    0 B reclaimed
+    0.0 ms total
+    0.0 ms max
+
+by kind:
+    String      13609   566.8 KB
+    List            5   288 B
+    Block        7205   413.0 KB
+
+copies:
+    String       22.4 KB
+    List         21 elements
+    MutableArray 0 elements
+
+mutable array:
+    0 reads, 0 writes
+
+static (constant table, excluded from GC/live/peak):
+    38 objects, 1.7 KB
+
+top allocation sites by bytes:
+     1. func char_at                     substr           9200 allocations  381.6 KB
+     2. func char_at                     substr           4400 allocations  184.8 KB
+     3. func                             closure           800 allocations  57.6 KB
+     4. func                             closure           800 allocations  44.8 KB
+     5. func                             closure           800 allocations  44.8 KB
+     6. func                             closure           800 allocations  44.8 KB
+     7. func                             closure           800 allocations  44.8 KB
+     8. func                             closure           800 allocations  38.4 KB
+     9. func                             closure           400 allocations  28.8 KB
+    10. func                             closure           400 allocations  22.4 KB
+
+excluded: num-bigint limb buffers, the shadow stack (fixed ~32 MB), Cranelift/JIT code, process bookkeeping.

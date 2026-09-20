@@ -1,0 +1,939 @@
+program s2 binds b35 check, b36 q
+e1 bind b1 web::hex_digits : list
+    e2 call native(list) : list
+        e3 ref b3 list : native list
+        e4 const str 0 : str
+        e5 const str 1 : str
+        e6 const str 2 : str
+        e7 const str 3 : str
+        e8 const str 4 : str
+        e9 const str 5 : str
+        e10 const str 6 : str
+        e11 const str 7 : str
+        e12 const str 8 : str
+        e13 const str 9 : str
+        e14 const str A : str
+        e15 const str B : str
+        e16 const str C : str
+        e17 const str D : str
+        e18 const str E : str
+        e19 const str F : str
+e20 bind b2 web::uri_escape_text : block(e21)/1 -> any
+    e21 block s4 (b4 s) captures (b1 web::hex_digits) binds b5 high_nibble, b6 is_unreserved, b7 hex_pair, b8 esc_bytes, b9 esc_char, b10 esc_from : block(e21)/1 -> any
+        e22 bind b5 high_nibble : block(e23)/1 -> int
+            e23 block s5 (b11 b) captures () : block(e23)/1 -> int
+                e24 if : int
+                    e25 call native(<=) : bool
+                        e26 ref b12 <= : native <=
+                        e27 ref b11 b : any
+                        e28 const 15 : int
+                    then s6
+                        e29 const 0 : int
+                    else s7
+                        e30 if : int
+                            e31 call native(<=) : bool
+                                e32 ref b12 <= : native <=
+                                e33 ref b11 b : int
+                                e34 const 31 : int
+                            then s8
+                                e35 const 1 : int
+                            else s9
+                                e36 if : int
+                                    e37 call native(<=) : bool
+                                        e38 ref b12 <= : native <=
+                                        e39 ref b11 b : int
+                                        e40 const 47 : int
+                                    then s10
+                                        e41 const 2 : int
+                                    else s11
+                                        e42 if : int
+                                            e43 call native(<=) : bool
+                                                e44 ref b12 <= : native <=
+                                                e45 ref b11 b : int
+                                                e46 const 63 : int
+                                            then s12
+                                                e47 const 3 : int
+                                            else s13
+                                                e48 if : int
+                                                    e49 call native(<=) : bool
+                                                        e50 ref b12 <= : native <=
+                                                        e51 ref b11 b : int
+                                                        e52 const 79 : int
+                                                    then s14
+                                                        e53 const 4 : int
+                                                    else s15
+                                                        e54 if : int
+                                                            e55 call native(<=) : bool
+                                                                e56 ref b12 <= : native <=
+                                                                e57 ref b11 b : int
+                                                                e58 const 95 : int
+                                                            then s16
+                                                                e59 const 5 : int
+                                                            else s17
+                                                                e60 if : int
+                                                                    e61 call native(<=) : bool
+                                                                        e62 ref b12 <= : native <=
+                                                                        e63 ref b11 b : int
+                                                                        e64 const 111 : int
+                                                                    then s18
+                                                                        e65 const 6 : int
+                                                                    else s19
+                                                                        e66 if : int
+                                                                            e67 call native(<=) : bool
+                                                                                e68 ref b12 <= : native <=
+                                                                                e69 ref b11 b : int
+                                                                                e70 const 127 : int
+                                                                            then s20
+                                                                                e71 const 7 : int
+                                                                            else s21
+                                                                                e72 if : int
+                                                                                    e73 call native(<=) : bool
+                                                                                        e74 ref b12 <= : native <=
+                                                                                        e75 ref b11 b : int
+                                                                                        e76 const 143 : int
+                                                                                    then s22
+                                                                                        e77 const 8 : int
+                                                                                    else s23
+                                                                                        e78 if : int
+                                                                                            e79 call native(<=) : bool
+                                                                                                e80 ref b12 <= : native <=
+                                                                                                e81 ref b11 b : int
+                                                                                                e82 const 159 : int
+                                                                                            then s24
+                                                                                                e83 const 9 : int
+                                                                                            else s25
+                                                                                                e84 if : int
+                                                                                                    e85 call native(<=) : bool
+                                                                                                        e86 ref b12 <= : native <=
+                                                                                                        e87 ref b11 b : int
+                                                                                                        e88 const 175 : int
+                                                                                                    then s26
+                                                                                                        e89 const 10 : int
+                                                                                                    else s27
+                                                                                                        e90 if : int
+                                                                                                            e91 call native(<=) : bool
+                                                                                                                e92 ref b12 <= : native <=
+                                                                                                                e93 ref b11 b : int
+                                                                                                                e94 const 191 : int
+                                                                                                            then s28
+                                                                                                                e95 const 11 : int
+                                                                                                            else s29
+                                                                                                                e96 if : int
+                                                                                                                    e97 call native(<=) : bool
+                                                                                                                        e98 ref b12 <= : native <=
+                                                                                                                        e99 ref b11 b : int
+                                                                                                                        e100 const 207 : int
+                                                                                                                    then s30
+                                                                                                                        e101 const 12 : int
+                                                                                                                    else s31
+                                                                                                                        e102 if : int
+                                                                                                                            e103 call native(<=) : bool
+                                                                                                                                e104 ref b12 <= : native <=
+                                                                                                                                e105 ref b11 b : int
+                                                                                                                                e106 const 223 : int
+                                                                                                                            then s32
+                                                                                                                                e107 const 13 : int
+                                                                                                                            else s33
+                                                                                                                                e108 if : int
+                                                                                                                                    e109 call native(<=) : bool
+                                                                                                                                        e110 ref b12 <= : native <=
+                                                                                                                                        e111 ref b11 b : int
+                                                                                                                                        e112 const 239 : int
+                                                                                                                                    then s34
+                                                                                                                                        e113 const 14 : int
+                                                                                                                                    else s35
+                                                                                                                                        e114 const 15 : int
+        e115 bind b6 is_unreserved : block(e116)/1 -> bool
+            e116 block s36 (b13 b) captures () : block(e116)/1 -> bool
+                e117 if : bool
+                    e118 call native(<=) : bool
+                        e119 ref b12 <= : native <=
+                        e120 ref b13 b : any
+                        e121 const 44 : int
+                    then s37
+                        e122 ref b14 false : bool
+                    else s38
+                        e123 if : bool
+                            e124 call native(<=) : bool
+                                e125 ref b12 <= : native <=
+                                e126 ref b13 b : int
+                                e127 const 46 : int
+                            then s39
+                                e128 ref b15 true : bool
+                            else s40
+                                e129 if : bool
+                                    e130 call native(<=) : bool
+                                        e131 ref b12 <= : native <=
+                                        e132 ref b13 b : int
+                                        e133 const 47 : int
+                                    then s41
+                                        e134 ref b14 false : bool
+                                    else s42
+                                        e135 if : bool
+                                            e136 call native(<=) : bool
+                                                e137 ref b12 <= : native <=
+                                                e138 ref b13 b : int
+                                                e139 const 57 : int
+                                            then s43
+                                                e140 ref b15 true : bool
+                                            else s44
+                                                e141 if : bool
+                                                    e142 call native(<=) : bool
+                                                        e143 ref b12 <= : native <=
+                                                        e144 ref b13 b : int
+                                                        e145 const 64 : int
+                                                    then s45
+                                                        e146 ref b14 false : bool
+                                                    else s46
+                                                        e147 if : bool
+                                                            e148 call native(<=) : bool
+                                                                e149 ref b12 <= : native <=
+                                                                e150 ref b13 b : int
+                                                                e151 const 90 : int
+                                                            then s47
+                                                                e152 ref b15 true : bool
+                                                            else s48
+                                                                e153 if : bool
+                                                                    e154 call native(<=) : bool
+                                                                        e155 ref b12 <= : native <=
+                                                                        e156 ref b13 b : int
+                                                                        e157 const 94 : int
+                                                                    then s49
+                                                                        e158 ref b14 false : bool
+                                                                    else s50
+                                                                        e159 if : bool
+                                                                            e160 call native(<=) : bool
+                                                                                e161 ref b12 <= : native <=
+                                                                                e162 ref b13 b : int
+                                                                                e163 const 95 : int
+                                                                            then s51
+                                                                                e164 ref b15 true : bool
+                                                                            else s52
+                                                                                e165 if : bool
+                                                                                    e166 call native(<=) : bool
+                                                                                        e167 ref b12 <= : native <=
+                                                                                        e168 ref b13 b : int
+                                                                                        e169 const 96 : int
+                                                                                    then s53
+                                                                                        e170 ref b14 false : bool
+                                                                                    else s54
+                                                                                        e171 if : bool
+                                                                                            e172 call native(<=) : bool
+                                                                                                e173 ref b12 <= : native <=
+                                                                                                e174 ref b13 b : int
+                                                                                                e175 const 122 : int
+                                                                                            then s55
+                                                                                                e176 ref b15 true : bool
+                                                                                            else s56
+                                                                                                e177 if : bool
+                                                                                                    e178 call native(<=) : bool
+                                                                                                        e179 ref b12 <= : native <=
+                                                                                                        e180 ref b13 b : int
+                                                                                                        e181 const 125 : int
+                                                                                                    then s57
+                                                                                                        e182 ref b14 false : bool
+                                                                                                    else s58
+                                                                                                        e183 if : bool
+                                                                                                            e184 call native(<=) : bool
+                                                                                                                e185 ref b12 <= : native <=
+                                                                                                                e186 ref b13 b : int
+                                                                                                                e187 const 126 : int
+                                                                                                            then s59
+                                                                                                                e188 ref b15 true : bool
+                                                                                                            else s60
+                                                                                                                e189 ref b14 false : bool
+        e190 bind b7 hex_pair : block(e191)/1 -> str
+            e191 block s61 (b16 b) captures (b1 web::hex_digits, b5 high_nibble) : block(e191)/1 -> str
+                e192 call native(concat) : str
+                    e193 ref b17 concat : native concat
+                    e194 call native(list_get) : any
+                        e195 ref b18 list_get : native list_get
+                        e196 ref b1 web::hex_digits : list deferred
+                        e197 call block(e23) : int
+                            e198 ref b5 high_nibble : block(e23)/1 -> int deferred
+                            e199 ref b16 b : any
+                    e200 call native(list_get) : any
+                        e201 ref b18 list_get : native list_get
+                        e202 ref b1 web::hex_digits : list deferred
+                        e203 call native(mod) : int
+                            e204 ref b19 mod : native mod
+                            e205 ref b16 b : any
+                            e206 const 16 : int
+        e207 bind b8 esc_bytes : block(e208)/3 -> any
+            e208 block s62 (b20 bytes, b21 i, b22 acc) captures (b8 esc_bytes, b7 hex_pair) : block(e208)/3 -> any
+                e209 if : any
+                    e210 call native(>=) : bool
+                        e211 ref b23 >= : native >=
+                        e212 ref b21 i : any
+                        e213 call native(list_length) : int
+                            e214 ref b24 list_length : native list_length
+                            e215 ref b20 bytes : any
+                    then s63
+                        e216 ref b22 acc : any
+                    else s64
+                        e217 call block(e208) : any
+                            e218 ref b8 esc_bytes : block(e208)/3 -> any deferred
+                            e219 ref b20 bytes : list
+                            e220 call native(+) : int
+                                e221 ref b25 + : native +
+                                e222 ref b21 i : int
+                                e223 const 1 : int
+                            e224 call native(concat) : str
+                                e225 ref b17 concat : native concat
+                                e226 ref b22 acc : any
+                                e227 call native(concat) : str
+                                    e228 ref b17 concat : native concat
+                                    e229 const str % : str
+                                    e230 call block(e191) : str
+                                        e231 ref b7 hex_pair : block(e191)/1 -> str deferred
+                                        e232 call native(list_get) : any
+                                            e233 ref b18 list_get : native list_get
+                                            e234 ref b20 bytes : list
+                                            e235 ref b21 i : int
+        e236 bind b9 esc_char : block(e237)/1 -> any
+            e237 block s65 (b26 c) captures (b6 is_unreserved, b8 esc_bytes) binds b27 bytes : block(e237)/1 -> any
+                e238 bind b27 bytes : list
+                    e239 call native(encode_utf8) : list
+                        e240 ref b28 encode_utf8 : native encode_utf8
+                        e241 ref b26 c : any
+                e242 if : any
+                    e243 call native(==) : bool
+                        e244 ref b29 == : native ==
+                        e245 call native(list_length) : int
+                            e246 ref b24 list_length : native list_length
+                            e247 ref b27 bytes : list
+                        e248 const 1 : int
+                    then s66
+                        e249 if : any
+                            e250 call block(e116) : bool
+                                e251 ref b6 is_unreserved : block(e116)/1 -> bool deferred
+                                e252 call native(list_get) : any
+                                    e253 ref b18 list_get : native list_get
+                                    e254 ref b27 bytes : list
+                                    e255 const 0 : int
+                            then s67
+                                e256 ref b26 c : str
+                            else s68
+                                e257 call block(e208) : any
+                                    e258 ref b8 esc_bytes : block(e208)/3 -> any deferred
+                                    e259 ref b27 bytes : list
+                                    e260 const 0 : int
+                                    e261 const str {} : str
+                    else s69
+                        e262 call block(e208) : any
+                            e263 ref b8 esc_bytes : block(e208)/3 -> any deferred
+                            e264 ref b27 bytes : list
+                            e265 const 0 : int
+                            e266 const str {} : str
+        e267 bind b10 esc_from : block(e268)/3 -> any
+            e268 block s70 (b30 text, b31 i, b32 acc) captures (b10 esc_from, b9 esc_char) : block(e268)/3 -> any
+                e269 if : any
+                    e270 call native(>=) : bool
+                        e271 ref b23 >= : native >=
+                        e272 ref b31 i : any
+                        e273 call native(length) : int
+                            e274 ref b33 length : native length
+                            e275 ref b30 text : any
+                    then s71
+                        e276 ref b32 acc : any
+                    else s72
+                        e277 call block(e268) : any
+                            e278 ref b10 esc_from : block(e268)/3 -> any deferred
+                            e279 ref b30 text : str
+                            e280 call native(+) : int
+                                e281 ref b25 + : native +
+                                e282 ref b31 i : int
+                                e283 const 1 : int
+                            e284 call native(concat) : str
+                                e285 ref b17 concat : native concat
+                                e286 ref b32 acc : any
+                                e287 call block(e237) : any
+                                    e288 ref b9 esc_char : block(e237)/1 -> any deferred
+                                    e289 call native(substring) : str
+                                        e290 ref b34 substring : native substring
+                                        e291 ref b30 text : str
+                                        e292 ref b31 i : int
+                                        e293 call native(+) : int
+                                            e294 ref b25 + : native +
+                                            e295 ref b31 i : int
+                                            e296 const 1 : int
+        e297 call block(e268) : any
+            e298 ref b10 esc_from : block(e268)/3 -> any
+            e299 ref b4 s : any
+            e300 const 0 : int
+            e301 const str {} : str
+e302 bind b35 check : block(e303)/4 -> any
+    e303 block s73 (b37 n, b38 acc, b39 s, b40 q) captures (b35 check) : block(e303)/4 -> any
+        e304 if : any
+            e305 call native(<=) : bool
+                e306 ref b12 <= : native <=
+                e307 ref b37 n : any
+                e308 const 0 : int
+            then s74
+                e309 ref b38 acc : any
+            else s75 binds b41 hit
+                e310 bind b41 hit : int
+                    e311 if : int
+                        e312 call block(e313) : bool
+                            e313 block s76 (b42 v) captures () binds b43 n, b44 char_at, b45 is_local_char, b46 is_label_char, b47 scan_local, b48 scan_label, b49 scan_alpha, b50 tld_ok, b51 domain_loop, b52 localEnd : block(e313)/1 -> bool
+                                e314 bind b43 n : int
+                                    e315 call native(length) : int
+                                        e316 ref b33 length : native length
+                                        e317 ref b42 v : any
+                                e318 bind b44 char_at : block(e319)/1 -> str
+                                    e319 block s77 (b53 i) captures (b42 v) : block(e319)/1 -> str
+                                        e320 call native(substring) : str
+                                            e321 ref b34 substring : native substring
+                                            e322 ref b42 v : str deferred
+                                            e323 ref b53 i : any
+                                            e324 call native(+) : int
+                                                e325 ref b25 + : native +
+                                                e326 ref b53 i : any
+                                                e327 const 1 : int
+                                e328 bind b45 is_local_char : block(e329)/1 -> bool
+                                    e329 block s78 (b54 c) captures () : block(e329)/1 -> bool
+                                        e330 if : bool
+                                            e331 call native(is_tcl_alnum) : bool
+                                                e332 ref b55 is_tcl_alnum : native is_tcl_alnum
+                                                e333 ref b54 c : any
+                                            then s79
+                                                e334 ref b15 true : bool
+                                            else s80
+                                                e335 if : bool
+                                                    e336 call native(==) : bool
+                                                        e337 ref b29 == : native ==
+                                                        e338 ref b54 c : str
+                                                        e339 const str . : str
+                                                    then s81
+                                                        e340 ref b15 true : bool
+                                                    else s82
+                                                        e341 if : bool
+                                                            e342 call native(==) : bool
+                                                                e343 ref b29 == : native ==
+                                                                e344 ref b54 c : str
+                                                                e345 const str _ : str
+                                                            then s83
+                                                                e346 ref b15 true : bool
+                                                            else s84
+                                                                e347 if : bool
+                                                                    e348 call native(==) : bool
+                                                                        e349 ref b29 == : native ==
+                                                                        e350 ref b54 c : str
+                                                                        e351 const str % : str
+                                                                    then s85
+                                                                        e352 ref b15 true : bool
+                                                                    else s86
+                                                                        e353 if : bool
+                                                                            e354 call native(==) : bool
+                                                                                e355 ref b29 == : native ==
+                                                                                e356 ref b54 c : str
+                                                                                e357 const str + : str
+                                                                            then s87
+                                                                                e358 ref b15 true : bool
+                                                                            else s88
+                                                                                e359 call native(==) : bool
+                                                                                    e360 ref b29 == : native ==
+                                                                                    e361 ref b54 c : str
+                                                                                    e362 const str - : str
+                                e363 bind b46 is_label_char : block(e364)/1 -> bool
+                                    e364 block s89 (b56 c) captures () : block(e364)/1 -> bool
+                                        e365 if : bool
+                                            e366 call native(is_tcl_alnum) : bool
+                                                e367 ref b55 is_tcl_alnum : native is_tcl_alnum
+                                                e368 ref b56 c : any
+                                            then s90
+                                                e369 ref b15 true : bool
+                                            else s91
+                                                e370 call native(==) : bool
+                                                    e371 ref b29 == : native ==
+                                                    e372 ref b56 c : str
+                                                    e373 const str - : str
+                                e374 bind b47 scan_local : block(e375)/1 -> int
+                                    e375 block s92 (b57 i) captures (b43 n, b45 is_local_char, b44 char_at, b47 scan_local) : block(e375)/1 -> int
+                                        e376 if : int
+                                            e377 call native(>=) : bool
+                                                e378 ref b23 >= : native >=
+                                                e379 ref b57 i : any
+                                                e380 ref b43 n : int deferred
+                                            then s93
+                                                e381 ref b57 i : int
+                                            else s94
+                                                e382 if : int
+                                                    e383 call block(e329) : bool
+                                                        e384 ref b45 is_local_char : block(e329)/1 -> bool deferred
+                                                        e385 call block(e319) : str
+                                                            e386 ref b44 char_at : block(e319)/1 -> str deferred
+                                                            e387 ref b57 i : int
+                                                    then s95
+                                                        e388 call block(e375) : int
+                                                            e389 ref b47 scan_local : block(e375)/1 -> int deferred
+                                                            e390 call native(+) : int
+                                                                e391 ref b25 + : native +
+                                                                e392 ref b57 i : int
+                                                                e393 const 1 : int
+                                                    else s96
+                                                        e394 ref b57 i : int
+                                e395 bind b48 scan_label : block(e396)/1 -> int
+                                    e396 block s97 (b58 i) captures (b43 n, b46 is_label_char, b44 char_at, b48 scan_label) : block(e396)/1 -> int
+                                        e397 if : int
+                                            e398 call native(>=) : bool
+                                                e399 ref b23 >= : native >=
+                                                e400 ref b58 i : any
+                                                e401 ref b43 n : int deferred
+                                            then s98
+                                                e402 ref b58 i : int
+                                            else s99
+                                                e403 if : int
+                                                    e404 call block(e364) : bool
+                                                        e405 ref b46 is_label_char : block(e364)/1 -> bool deferred
+                                                        e406 call block(e319) : str
+                                                            e407 ref b44 char_at : block(e319)/1 -> str deferred
+                                                            e408 ref b58 i : int
+                                                    then s100
+                                                        e409 call block(e396) : int
+                                                            e410 ref b48 scan_label : block(e396)/1 -> int deferred
+                                                            e411 call native(+) : int
+                                                                e412 ref b25 + : native +
+                                                                e413 ref b58 i : int
+                                                                e414 const 1 : int
+                                                    else s101
+                                                        e415 ref b58 i : int
+                                e416 bind b49 scan_alpha : block(e417)/1 -> int
+                                    e417 block s102 (b59 i) captures (b43 n, b44 char_at, b49 scan_alpha) : block(e417)/1 -> int
+                                        e418 if : int
+                                            e419 call native(>=) : bool
+                                                e420 ref b23 >= : native >=
+                                                e421 ref b59 i : any
+                                                e422 ref b43 n : int deferred
+                                            then s103
+                                                e423 ref b59 i : int
+                                            else s104
+                                                e424 if : int
+                                                    e425 call native(is_tcl_alpha) : bool
+                                                        e426 ref b60 is_tcl_alpha : native is_tcl_alpha
+                                                        e427 call block(e319) : str
+                                                            e428 ref b44 char_at : block(e319)/1 -> str deferred
+                                                            e429 ref b59 i : int
+                                                    then s105
+                                                        e430 call block(e417) : int
+                                                            e431 ref b49 scan_alpha : block(e417)/1 -> int deferred
+                                                            e432 call native(+) : int
+                                                                e433 ref b25 + : native +
+                                                                e434 ref b59 i : int
+                                                                e435 const 1 : int
+                                                    else s106
+                                                        e436 ref b59 i : int
+                                e437 bind b50 tld_ok : block(e438)/1 -> bool
+                                    e438 block s107 (b61 i) captures (b49 scan_alpha, b43 n) binds b62 e : block(e438)/1 -> bool
+                                        e439 bind b62 e : int
+                                            e440 call block(e417) : int
+                                                e441 ref b49 scan_alpha : block(e417)/1 -> int deferred
+                                                e442 ref b61 i : any
+                                        e443 if : bool
+                                            e444 call native(==) : bool
+                                                e445 ref b29 == : native ==
+                                                e446 ref b62 e : int
+                                                e447 ref b43 n : int deferred
+                                            then s108
+                                                e448 call native(>=) : bool
+                                                    e449 ref b23 >= : native >=
+                                                    e450 call native(-) : int
+                                                        e451 ref b63 - : native -
+                                                        e452 ref b62 e : int
+                                                        e453 ref b61 i : any
+                                                    e454 const 2 : int
+                                            else s109
+                                                e455 ref b14 false : bool
+                                e456 bind b51 domain_loop : block(e457)/1 -> int
+                                    e457 block s110 (b64 i) captures (b48 scan_label, b43 n, b44 char_at, b50 tld_ok, b51 domain_loop) binds b65 labelEnd : block(e457)/1 -> int
+                                        e458 bind b65 labelEnd : int
+                                            e459 call block(e396) : int
+                                                e460 ref b48 scan_label : block(e396)/1 -> int deferred
+                                                e461 ref b64 i : any
+                                        e462 if : int
+                                            e463 call native(==) : bool
+                                                e464 ref b29 == : native ==
+                                                e465 ref b65 labelEnd : int
+                                                e466 ref b64 i : any
+                                            then s111
+                                                e467 const -1 : int
+                                            else s112
+                                                e468 if : int
+                                                    e469 call native(>=) : bool
+                                                        e470 ref b23 >= : native >=
+                                                        e471 ref b65 labelEnd : int
+                                                        e472 ref b43 n : int deferred
+                                                    then s113
+                                                        e473 const -1 : int
+                                                    else s114
+                                                        e474 if : int
+                                                            e475 call native(==) : bool
+                                                                e476 ref b29 == : native ==
+                                                                e477 call block(e319) : str
+                                                                    e478 ref b44 char_at : block(e319)/1 -> str deferred
+                                                                    e479 ref b65 labelEnd : int
+                                                                e480 const str . : str
+                                                            then s115 binds b66 i2
+                                                                e481 bind b66 i2 : int
+                                                                    e482 call native(+) : int
+                                                                        e483 ref b25 + : native +
+                                                                        e484 ref b65 labelEnd : int
+                                                                        e485 const 1 : int
+                                                                e486 if : int
+                                                                    e487 call block(e438) : bool
+                                                                        e488 ref b50 tld_ok : block(e438)/1 -> bool deferred
+                                                                        e489 ref b66 i2 : int
+                                                                    then s116
+                                                                        e490 ref b43 n : int deferred
+                                                                    else s117
+                                                                        e491 call block(e457) : int
+                                                                            e492 ref b51 domain_loop : block(e457)/1 -> int deferred
+                                                                            e493 ref b66 i2 : int
+                                                            else s118
+                                                                e494 const -1 : int
+                                e495 bind b52 localEnd : int
+                                    e496 call block(e375) : int
+                                        e497 ref b47 scan_local : block(e375)/1 -> int
+                                        e498 const 0 : int
+                                e499 if : bool
+                                    e500 call native(==) : bool
+                                        e501 ref b29 == : native ==
+                                        e502 ref b52 localEnd : int
+                                        e503 const 0 : int
+                                    then s119
+                                        e504 ref b14 false : bool
+                                    else s120
+                                        e505 if : bool
+                                            e506 call native(>=) : bool
+                                                e507 ref b23 >= : native >=
+                                                e508 ref b52 localEnd : int
+                                                e509 ref b43 n : int
+                                            then s121
+                                                e510 ref b14 false : bool
+                                            else s122
+                                                e511 if : bool
+                                                    e512 call native(==) : bool
+                                                        e513 ref b29 == : native ==
+                                                        e514 call block(e319) : str
+                                                            e515 ref b44 char_at : block(e319)/1 -> str
+                                                            e516 ref b52 localEnd : int
+                                                        e517 const str @ : str
+                                                    then s123 binds b67 afterAt
+                                                        e518 bind b67 afterAt : int
+                                                            e519 call native(+) : int
+                                                                e520 ref b25 + : native +
+                                                                e521 ref b52 localEnd : int
+                                                                e522 const 1 : int
+                                                        e523 call native(==) : bool
+                                                            e524 ref b29 == : native ==
+                                                            e525 call block(e457) : int
+                                                                e526 ref b51 domain_loop : block(e457)/1 -> int
+                                                                e527 ref b67 afterAt : int
+                                                            e528 ref b43 n : int
+                                                    else s124
+                                                        e529 ref b14 false : bool
+                            e530 ref b39 s : any
+                        then s125
+                            e531 if : int
+                                e532 call block(e533) : bool
+                                    e533 block s126 (b68 v) captures () binds b69 n, b70 char_at, b71 is_local_char, b72 is_label_char, b73 scan_local, b74 scan_label, b75 scan_alpha, b76 tld_ok, b77 domain_loop, b78 localEnd : block(e533)/1 -> bool
+                                        e534 bind b69 n : int
+                                            e535 call native(length) : int
+                                                e536 ref b33 length : native length
+                                                e537 ref b68 v : any
+                                        e538 bind b70 char_at : block(e539)/1 -> str
+                                            e539 block s127 (b79 i) captures (b68 v) : block(e539)/1 -> str
+                                                e540 call native(substring) : str
+                                                    e541 ref b34 substring : native substring
+                                                    e542 ref b68 v : str deferred
+                                                    e543 ref b79 i : any
+                                                    e544 call native(+) : int
+                                                        e545 ref b25 + : native +
+                                                        e546 ref b79 i : any
+                                                        e547 const 1 : int
+                                        e548 bind b71 is_local_char : block(e549)/1 -> bool
+                                            e549 block s128 (b80 c) captures () : block(e549)/1 -> bool
+                                                e550 if : bool
+                                                    e551 call native(is_tcl_alnum) : bool
+                                                        e552 ref b55 is_tcl_alnum : native is_tcl_alnum
+                                                        e553 ref b80 c : any
+                                                    then s129
+                                                        e554 ref b15 true : bool
+                                                    else s130
+                                                        e555 if : bool
+                                                            e556 call native(==) : bool
+                                                                e557 ref b29 == : native ==
+                                                                e558 ref b80 c : str
+                                                                e559 const str . : str
+                                                            then s131
+                                                                e560 ref b15 true : bool
+                                                            else s132
+                                                                e561 if : bool
+                                                                    e562 call native(==) : bool
+                                                                        e563 ref b29 == : native ==
+                                                                        e564 ref b80 c : str
+                                                                        e565 const str _ : str
+                                                                    then s133
+                                                                        e566 ref b15 true : bool
+                                                                    else s134
+                                                                        e567 if : bool
+                                                                            e568 call native(==) : bool
+                                                                                e569 ref b29 == : native ==
+                                                                                e570 ref b80 c : str
+                                                                                e571 const str % : str
+                                                                            then s135
+                                                                                e572 ref b15 true : bool
+                                                                            else s136
+                                                                                e573 if : bool
+                                                                                    e574 call native(==) : bool
+                                                                                        e575 ref b29 == : native ==
+                                                                                        e576 ref b80 c : str
+                                                                                        e577 const str + : str
+                                                                                    then s137
+                                                                                        e578 ref b15 true : bool
+                                                                                    else s138
+                                                                                        e579 call native(==) : bool
+                                                                                            e580 ref b29 == : native ==
+                                                                                            e581 ref b80 c : str
+                                                                                            e582 const str - : str
+                                        e583 bind b72 is_label_char : block(e584)/1 -> bool
+                                            e584 block s139 (b81 c) captures () : block(e584)/1 -> bool
+                                                e585 if : bool
+                                                    e586 call native(is_tcl_alnum) : bool
+                                                        e587 ref b55 is_tcl_alnum : native is_tcl_alnum
+                                                        e588 ref b81 c : any
+                                                    then s140
+                                                        e589 ref b15 true : bool
+                                                    else s141
+                                                        e590 call native(==) : bool
+                                                            e591 ref b29 == : native ==
+                                                            e592 ref b81 c : str
+                                                            e593 const str - : str
+                                        e594 bind b73 scan_local : block(e595)/1 -> int
+                                            e595 block s142 (b82 i) captures (b69 n, b71 is_local_char, b70 char_at, b73 scan_local) : block(e595)/1 -> int
+                                                e596 if : int
+                                                    e597 call native(>=) : bool
+                                                        e598 ref b23 >= : native >=
+                                                        e599 ref b82 i : any
+                                                        e600 ref b69 n : int deferred
+                                                    then s143
+                                                        e601 ref b82 i : int
+                                                    else s144
+                                                        e602 if : int
+                                                            e603 call block(e549) : bool
+                                                                e604 ref b71 is_local_char : block(e549)/1 -> bool deferred
+                                                                e605 call block(e539) : str
+                                                                    e606 ref b70 char_at : block(e539)/1 -> str deferred
+                                                                    e607 ref b82 i : int
+                                                            then s145
+                                                                e608 call block(e595) : int
+                                                                    e609 ref b73 scan_local : block(e595)/1 -> int deferred
+                                                                    e610 call native(+) : int
+                                                                        e611 ref b25 + : native +
+                                                                        e612 ref b82 i : int
+                                                                        e613 const 1 : int
+                                                            else s146
+                                                                e614 ref b82 i : int
+                                        e615 bind b74 scan_label : block(e616)/1 -> int
+                                            e616 block s147 (b83 i) captures (b69 n, b72 is_label_char, b70 char_at, b74 scan_label) : block(e616)/1 -> int
+                                                e617 if : int
+                                                    e618 call native(>=) : bool
+                                                        e619 ref b23 >= : native >=
+                                                        e620 ref b83 i : any
+                                                        e621 ref b69 n : int deferred
+                                                    then s148
+                                                        e622 ref b83 i : int
+                                                    else s149
+                                                        e623 if : int
+                                                            e624 call block(e584) : bool
+                                                                e625 ref b72 is_label_char : block(e584)/1 -> bool deferred
+                                                                e626 call block(e539) : str
+                                                                    e627 ref b70 char_at : block(e539)/1 -> str deferred
+                                                                    e628 ref b83 i : int
+                                                            then s150
+                                                                e629 call block(e616) : int
+                                                                    e630 ref b74 scan_label : block(e616)/1 -> int deferred
+                                                                    e631 call native(+) : int
+                                                                        e632 ref b25 + : native +
+                                                                        e633 ref b83 i : int
+                                                                        e634 const 1 : int
+                                                            else s151
+                                                                e635 ref b83 i : int
+                                        e636 bind b75 scan_alpha : block(e637)/1 -> int
+                                            e637 block s152 (b84 i) captures (b69 n, b70 char_at, b75 scan_alpha) : block(e637)/1 -> int
+                                                e638 if : int
+                                                    e639 call native(>=) : bool
+                                                        e640 ref b23 >= : native >=
+                                                        e641 ref b84 i : any
+                                                        e642 ref b69 n : int deferred
+                                                    then s153
+                                                        e643 ref b84 i : int
+                                                    else s154
+                                                        e644 if : int
+                                                            e645 call native(is_tcl_alpha) : bool
+                                                                e646 ref b60 is_tcl_alpha : native is_tcl_alpha
+                                                                e647 call block(e539) : str
+                                                                    e648 ref b70 char_at : block(e539)/1 -> str deferred
+                                                                    e649 ref b84 i : int
+                                                            then s155
+                                                                e650 call block(e637) : int
+                                                                    e651 ref b75 scan_alpha : block(e637)/1 -> int deferred
+                                                                    e652 call native(+) : int
+                                                                        e653 ref b25 + : native +
+                                                                        e654 ref b84 i : int
+                                                                        e655 const 1 : int
+                                                            else s156
+                                                                e656 ref b84 i : int
+                                        e657 bind b76 tld_ok : block(e658)/1 -> bool
+                                            e658 block s157 (b85 i) captures (b75 scan_alpha, b69 n) binds b86 e : block(e658)/1 -> bool
+                                                e659 bind b86 e : int
+                                                    e660 call block(e637) : int
+                                                        e661 ref b75 scan_alpha : block(e637)/1 -> int deferred
+                                                        e662 ref b85 i : any
+                                                e663 if : bool
+                                                    e664 call native(==) : bool
+                                                        e665 ref b29 == : native ==
+                                                        e666 ref b86 e : int
+                                                        e667 ref b69 n : int deferred
+                                                    then s158
+                                                        e668 call native(>=) : bool
+                                                            e669 ref b23 >= : native >=
+                                                            e670 call native(-) : int
+                                                                e671 ref b63 - : native -
+                                                                e672 ref b86 e : int
+                                                                e673 ref b85 i : any
+                                                            e674 const 2 : int
+                                                    else s159
+                                                        e675 ref b14 false : bool
+                                        e676 bind b77 domain_loop : block(e677)/1 -> int
+                                            e677 block s160 (b87 i) captures (b74 scan_label, b69 n, b70 char_at, b76 tld_ok, b77 domain_loop) binds b88 labelEnd : block(e677)/1 -> int
+                                                e678 bind b88 labelEnd : int
+                                                    e679 call block(e616) : int
+                                                        e680 ref b74 scan_label : block(e616)/1 -> int deferred
+                                                        e681 ref b87 i : any
+                                                e682 if : int
+                                                    e683 call native(==) : bool
+                                                        e684 ref b29 == : native ==
+                                                        e685 ref b88 labelEnd : int
+                                                        e686 ref b87 i : any
+                                                    then s161
+                                                        e687 const -1 : int
+                                                    else s162
+                                                        e688 if : int
+                                                            e689 call native(>=) : bool
+                                                                e690 ref b23 >= : native >=
+                                                                e691 ref b88 labelEnd : int
+                                                                e692 ref b69 n : int deferred
+                                                            then s163
+                                                                e693 const -1 : int
+                                                            else s164
+                                                                e694 if : int
+                                                                    e695 call native(==) : bool
+                                                                        e696 ref b29 == : native ==
+                                                                        e697 call block(e539) : str
+                                                                            e698 ref b70 char_at : block(e539)/1 -> str deferred
+                                                                            e699 ref b88 labelEnd : int
+                                                                        e700 const str . : str
+                                                                    then s165 binds b89 i2
+                                                                        e701 bind b89 i2 : int
+                                                                            e702 call native(+) : int
+                                                                                e703 ref b25 + : native +
+                                                                                e704 ref b88 labelEnd : int
+                                                                                e705 const 1 : int
+                                                                        e706 if : int
+                                                                            e707 call block(e658) : bool
+                                                                                e708 ref b76 tld_ok : block(e658)/1 -> bool deferred
+                                                                                e709 ref b89 i2 : int
+                                                                            then s166
+                                                                                e710 ref b69 n : int deferred
+                                                                            else s167
+                                                                                e711 call block(e677) : int
+                                                                                    e712 ref b77 domain_loop : block(e677)/1 -> int deferred
+                                                                                    e713 ref b89 i2 : int
+                                                                    else s168
+                                                                        e714 const -1 : int
+                                        e715 bind b78 localEnd : int
+                                            e716 call block(e595) : int
+                                                e717 ref b73 scan_local : block(e595)/1 -> int
+                                                e718 const 0 : int
+                                        e719 if : bool
+                                            e720 call native(==) : bool
+                                                e721 ref b29 == : native ==
+                                                e722 ref b78 localEnd : int
+                                                e723 const 0 : int
+                                            then s169
+                                                e724 ref b14 false : bool
+                                            else s170
+                                                e725 if : bool
+                                                    e726 call native(>=) : bool
+                                                        e727 ref b23 >= : native >=
+                                                        e728 ref b78 localEnd : int
+                                                        e729 ref b69 n : int
+                                                    then s171
+                                                        e730 ref b14 false : bool
+                                                    else s172
+                                                        e731 if : bool
+                                                            e732 call native(==) : bool
+                                                                e733 ref b29 == : native ==
+                                                                e734 call block(e539) : str
+                                                                    e735 ref b70 char_at : block(e539)/1 -> str
+                                                                    e736 ref b78 localEnd : int
+                                                                e737 const str @ : str
+                                                            then s173 binds b90 afterAt
+                                                                e738 bind b90 afterAt : int
+                                                                    e739 call native(+) : int
+                                                                        e740 ref b25 + : native +
+                                                                        e741 ref b78 localEnd : int
+                                                                        e742 const 1 : int
+                                                                e743 call native(==) : bool
+                                                                    e744 ref b29 == : native ==
+                                                                    e745 call block(e677) : int
+                                                                        e746 ref b77 domain_loop : block(e677)/1 -> int
+                                                                        e747 ref b90 afterAt : int
+                                                                    e748 ref b69 n : int
+                                                            else s174
+                                                                e749 ref b14 false : bool
+                                    e750 ref b39 s : any
+                                then s175
+                                    e751 if : int
+                                        e752 call native(UriQueryValue?) : bool
+                                            e753 ref b91 UriQueryValue? : native UriQueryValue?
+                                            e754 ref b40 q : any
+                                        then s176 refines b40 q : str[UriQueryValue]
+                                            e755 const 1 : int
+                                        else s177
+                                            e756 const 0 : int
+                                else s178
+                                    e757 const 0 : int
+                        else s179
+                            e758 const 0 : int
+                e759 call block(e303) : any
+                    e760 ref b35 check : block(e303)/4 -> any deferred
+                    e761 call native(-) : int
+                        e762 ref b63 - : native -
+                        e763 ref b37 n : int
+                        e764 const 1 : int
+                    e765 call native(+) : int
+                        e766 ref b25 + : native +
+                        e767 ref b38 acc : any
+                        e768 ref b41 hit : int
+                    e769 ref b39 s : any
+                    e770 ref b40 q : any
+e771 bind b36 q : str[UriQueryValue]
+    e772 call block(e21) : str[UriQueryValue]
+        e773 ref b92 uriEscape : block(e21)/1 -> any
+        e774 const str {a b} : str
+e775 call native(list) : list
+    e776 ref b3 list : native list
+    e777 call block(e303) : any
+        e778 ref b35 check : block(e303)/4 -> any
+        e779 const 400 : int
+        e780 const 0 : int
+        e781 const str café@例え.テスト : str
+        e782 ref b36 q : str[UriQueryValue]
+    e783 call block(e303) : any
+        e784 ref b35 check : block(e303)/4 -> any
+        e785 const 400 : int
+        e786 const 0 : int
+        e787 const str not-an-email : str
+        e788 ref b36 q : str[UriQueryValue]

@@ -1,0 +1,37 @@
+program s2
+e1 bind b1 plain::inc : block(e2)/1 -> int
+    e2 block s4 (b2 x) captures () : block(e2)/1 -> int
+        e3 call native(+) : int
+            e4 ref b3 + : native +
+            e5 ref b2 x : any
+            e6 const 1 : int
+e7 bind b4 scalar::base : int
+    e8 const 7 : int
+e9 bind b5 scalar::add : block(e10)/1 -> int
+    e10 block s6 (b6 x) captures (b4 scalar::base) : block(e10)/1 -> int
+        e11 call native(+) : int
+            e12 ref b3 + : native +
+            e13 ref b6 x : any
+            e14 ref b4 scalar::base : int deferred
+e15 bind b7 managed::digits : list
+    e16 call native(list) : list
+        e17 ref b9 list : native list
+        e18 const 10 : int
+        e19 const 20 : int
+e20 bind b8 managed::get : block(e21)/1 -> any
+    e21 block s8 (b10 i) captures (b7 managed::digits) : block(e21)/1 -> any
+        e22 call native(list_get) : any
+            e23 ref b11 list_get : native list_get
+            e24 ref b7 managed::digits : list deferred
+            e25 ref b10 i : any
+e26 call native(list) : list
+    e27 ref b9 list : native list
+    e28 call block(e2) : int
+        e29 ref b1 plain::inc : block(e2)/1 -> int
+        e30 const 1 : int
+    e31 call block(e10) : int
+        e32 ref b5 scalar::add : block(e10)/1 -> int
+        e33 const 1 : int
+    e34 call block(e21) : any
+        e35 ref b8 managed::get : block(e21)/1 -> any
+        e36 const 1 : int

@@ -1,0 +1,35 @@
+Botlish managed heap allocation report
+
+allocated:
+    2 objects
+    88 B
+
+peak live:
+    2 objects
+    88 B
+
+GC:
+    0 cycles
+    0 B reclaimed
+    0.0 ms total
+    0.0 ms max
+
+by kind:
+    List            2   88 B
+
+copies:
+    String       0 B
+    List         5 elements
+    MutableArray 0 elements
+
+mutable array:
+    0 reads, 0 writes
+
+static (constant table, excluded from GC/live/peak):
+    2 objects, 89 B
+
+top allocation sites by bytes:
+     1. /mnt/c/Users/MarkusWagner/dev/botlish/audit/post-native-stack/module-cases/main.bot:1 listnew             1 allocations  48 B
+     2. /mnt/c/Users/MarkusWagner/dev/botlish/audit/post-native-stack/module-cases/managed.bot:2 listnew             1 allocations  40 B
+
+excluded: num-bigint limb buffers, the shadow stack (fixed ~32 MB), Cranelift/JIT code, process bookkeeping.
