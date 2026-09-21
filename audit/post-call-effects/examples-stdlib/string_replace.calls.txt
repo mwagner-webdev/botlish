@@ -1,0 +1,8 @@
+exact_calls=7 false_false=0 false_true=0 true_false=0 true_true=7 completion_checks_removed=0 call_safepoints_removed=0
+call caller=0 caller_name="<program>" callee=3 callee_name="replace" may_error=true may_gc=true
+call caller=0 caller_name="<program>" callee=3 callee_name="replace" may_error=true may_gc=true
+call caller=0 caller_name="<program>" callee=3 callee_name="replace" may_error=true may_gc=true
+call caller=0 caller_name="<program>" callee=3 callee_name="replace" may_error=true may_gc=true
+call caller=0 caller_name="<program>" callee=3 callee_name="replace" may_error=true may_gc=true
+call caller=2 caller_name="replace_from" callee=1 callee_name="matches_at" may_error=true may_gc=true
+call caller=3 caller_name="replace" callee=2 callee_name="replace_from" may_error=true may_gc=true

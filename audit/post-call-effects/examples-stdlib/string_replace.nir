@@ -1,0 +1,104 @@
+nir 1 call-effects=1
+
+func 0 "<program>" params=0 env=0 regs=21 pnames="" captures=0 instance="generic"
+    %0 = str "abc" @e120
+    %1 = str "x" @e121
+    %2 = str "y" @e122
+    %3 = call 3 %0 %1 %2 @e118
+    %4 = str "abc" @e125
+    %5 = str "b" @e126
+    %6 = str "X" @e127
+    %7 = call 3 %4 %5 %6 @e123
+    %8 = str "aaaa" @e130
+    %9 = str "aa" @e131
+    %10 = str "b" @e132
+    %11 = call 3 %8 %9 %10 @e128
+    %12 = str "abcabc" @e135
+    %13 = str "abc" @e136
+    %14 = str "" @e137
+    %15 = call 3 %12 %13 %14 @e133
+    %16 = str "" @e140
+    %17 = str "x" @e141
+    %18 = str "y" @e142
+    %19 = call 3 %16 %17 %18 @e138
+    %20 = op listnew %3 %7 %11 %15 %19 @e116
+    ret %20
+end
+
+func 1 "matches_at" params=3 env=0 regs=12 pnames="haystack needle index" captures=0 instance="str, str, int" @e2
+    %3 = op strlen %1 @e7
+    %4 = op iadd %2 %3 @e4
+    %5 = op strlen %0 @e14
+    %6 = op igt %4 %5 @e11
+    br %6 L0 L1 @e10
+  label L0
+    %8 = bool false @e18
+    ret %8 @e17
+  label L1
+    %9 = unit
+    %7 = move %9
+    jump L2
+  label L2
+    %10 = op regioncheck %0 %2 %4 @e21
+    %11 = op regioneq %0 %2 %4 %1 @e19
+    ret %11
+end
+
+func 2 "replace_from" params=6 env=0 regs=26 pnames="haystack needle replacement index run_start done" captures=0 instance="str, str, str, int, int, str" rawregs="24" @e28
+    %6 = op strlen %1 @e35
+    %7 = op iadd %3 %6 @e32
+    %8 = op strlen %0 @e38
+    %9 = op igt %7 %8 @e30
+    br %9 L0 L1 @e29
+  label L0
+    %11 = op strlen %0 @e49
+    %12 = op substr %0 %4 %11 @e45
+    %13 = op strcat %5 %12 @e42
+    ret %13 @e41
+  label L1
+    %14 = unit
+    %10 = move %14
+    jump L2
+  label L2
+    %15 = call 1 %0 %1 %3 @e53
+    br %15 L3 L4 @e52
+  label L3
+    %17 = op substr %0 %4 %3 @e62
+    %18 = op strcat %5 %17 @e59
+    %19 = op strlen %1 @e71
+    %20 = op iadd %3 %19 @e68
+    %21 = op strcat %18 %2 @e82
+    tail %0 %1 %2 %20 %20 %21 @e75
+  label L4
+    %22 = unit
+    %16 = move %22
+    jump L5
+  label L5
+    %23 = int 1 @e94
+    %24 = rawint 1
+    %25 = op iadd %3 %23 @e91
+    tail %0 %1 %2 %25 %4 %5 @e86
+end
+
+func 3 "replace" params=3 env=0 regs=16 pnames="haystack needle replacement" captures=0 instance="str, str, str" rawregs="4 6 11 13" @e98
+    %3 = op strlen %1 @e102
+    %4 = op runbox %3
+    %5 = int 0 @e105
+    %6 = rawint 0
+    %7 = op rieq %4 %6 @e100
+    br %7 L0 L1 @e99
+  label L0
+    ret %0 @e106
+  label L1
+    %9 = unit
+    %8 = move %9
+    jump L2
+  label L2
+    %10 = int 0 @e113
+    %11 = rawint 0
+    %12 = int 0 @e114
+    %13 = rawint 0
+    %14 = str "" @e115
+    %15 = call 2 %0 %1 %2 %10 %12 %14 @e108
+    ret %15
+end

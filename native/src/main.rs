@@ -3,6 +3,7 @@
 //! ```text
 //!   botlish-native run FILE.nir          compile (Cranelift JIT) and run
 //!   botlish-native bench RUNS FILE.nir   compile once, run RUNS times
+//!   botlish-native batch CALLS FILE.nir  time CALLS entries in one region
 //!   botlish-native clif FILE.nir         print the Cranelift IR of every function
 //!   botlish-native size FILE.nir         compile; print machine code sizes
 //!   botlish-native roots FILE.nir        print each function's GC-root report
@@ -12,6 +13,8 @@
 //!                                        roots, and the shadow-slot count
 //!                                        they were colored into. Parses and
 //!                                        analyzes only -- never compiles.
+//!   botlish-native calls FILE.nir        print settled exact-call effects
+//!                                        without compiling
 //!   botlish-native object OUT FILE.nir   write an object file (AOT smoke test)
 //!   botlish-native check FILE.nir        parse and validate only
 //! ```
@@ -113,7 +116,7 @@ fn extract_alloc_mode(args: &[String]) -> Option<(Vec<String>, AllocMode)> {
 
 fn cli(args: &[String]) -> i32 {
     let usage = || {
-        eprintln!("usage: botlish-native run|clif|vcode|size|roots|check FILE.nir [--alloc off|summary|sites] | bench RUNS FILE.nir [--alloc ...] | object OUT FILE.nir");
+        eprintln!("usage: botlish-native run|clif|vcode|size|roots|calls|check FILE.nir [--alloc off|summary|sites] | bench RUNS FILE.nir [--alloc ...] | batch CALLS FILE.nir | object OUT FILE.nir");
         2
     };
     let Some((args, alloc_mode)) = extract_alloc_mode(args) else { return usage() };
@@ -127,8 +130,12 @@ fn cli(args: &[String]) -> i32 {
             Ok(n) if n > 0 => (n, file),
             _ => return usage(),
         },
+        ("batch", [calls, file, ..]) => match calls.parse::<usize>() {
+            Ok(n) if n > 0 => (n, file),
+            _ => return usage(),
+        },
         ("object", [_, file, ..]) => (1, file),
-        ("run" | "clif" | "vcode" | "size" | "roots" | "check", [file, ..]) => (1, file),
+        ("run" | "clif" | "vcode" | "size" | "roots" | "calls" | "check", [file, ..]) => (1, file),
         _ => return usage(),
     };
     let text = match read(file) {
@@ -152,6 +159,10 @@ fn cli(args: &[String]) -> i32 {
         }
         "roots" => {
             emit(&codegen::roots::report(&program));
+            0
+        }
+        "calls" => {
+            emit(&call_effect_report(&program));
             0
         }
         "object" => {
@@ -178,6 +189,40 @@ fn cli(args: &[String]) -> i32 {
         }
         _ => execute(command, &program, runs, alloc_mode),
     }
+}
+
+fn call_effect_report(program: &nir::Program) -> String {
+    let mut matrix = [[0_u32; 2]; 2];
+    let mut lines = Vec::new();
+    for (caller, function) in program.functions.iter().enumerate() {
+        for inst in &function.body {
+            let (callee, may_error, may_gc) = match inst {
+                nir::Inst::Call { func, may_error, may_gc, .. }
+                | nir::Inst::CallEnv { func, may_error, may_gc, .. }
+                | nir::Inst::CallMulti { func, may_error, may_gc, .. }
+                | nir::Inst::CallEnvMulti { func, may_error, may_gc, .. } =>
+                    (*func, *may_error, *may_gc),
+                _ => continue,
+            };
+            matrix[may_error as usize][may_gc as usize] += 1;
+            lines.push(format!(
+                "call caller={} caller_name={:?} callee={} callee_name={:?} may_error={} may_gc={}",
+                caller, function.name, callee, program.functions[callee as usize].name, may_error, may_gc,
+            ));
+        }
+    }
+    let total: u32 = matrix.iter().flatten().sum();
+    lines.insert(0, format!(
+        "exact_calls={} false_false={} false_true={} true_false={} true_true={} completion_checks_removed={} call_safepoints_removed={}",
+        total,
+        matrix[0][0],
+        matrix[0][1],
+        matrix[1][0],
+        matrix[1][1],
+        matrix[0][0] + matrix[0][1],
+        matrix[0][0] + matrix[1][0],
+    ));
+    lines.join("\n")
 }
 
 fn program_info(program: &nir::Program) -> ProgramInfo {
@@ -271,26 +316,40 @@ fn execute(command: &str, program: &nir::Program, runs: usize, alloc_mode: Alloc
     let mut best = u128::MAX;
     let mut result = NO_VALUE;
     let mut nanos: Vec<u128> = Vec::with_capacity(runs);
-    for run in 0..runs {
-        if run > 0 {
-            vm.reset();
-        }
-        let started = Instant::now();
+    if command == "batch" {
         result = (compiled.entry)(&mut *vm);
-        let elapsed = started.elapsed();
-        nanos.push(elapsed.as_nanos());
-        best = best.min(elapsed.as_micros());
-        if result == NO_VALUE {
-            break;
+        vm.reset();
+        let started = Instant::now();
+        for _ in 0..runs {
+            result = (compiled.entry)(&mut *vm);
+            if result == NO_VALUE {
+                break;
+            }
         }
-    }
-    if command == "bench" {
-        // Diagnostic-only, additive: per-run nanosecond timings for a
-        // best/median distribution alongside the existing best-only
-        // "timing" line, whose contract is unchanged.
-        let times: Vec<String> = nanos.iter().map(|n| n.to_string()).collect();
-        emit(&format!("times {}", times.join(" ")));
-        emit(&format!("timing {compile_us} {best} {runs} {}", vm.heap.collections));
+        let elapsed = started.elapsed().as_nanos();
+        emit(&format!("batch {runs} {elapsed} {:.3}", elapsed as f64 / runs as f64));
+    } else {
+        for run in 0..runs {
+            if run > 0 {
+                vm.reset();
+            }
+            let started = Instant::now();
+            result = (compiled.entry)(&mut *vm);
+            let elapsed = started.elapsed();
+            nanos.push(elapsed.as_nanos());
+            best = best.min(elapsed.as_micros());
+            if result == NO_VALUE {
+                break;
+            }
+        }
+        if command == "bench" {
+            // Diagnostic-only, additive: per-run nanosecond timings for a
+            // best/median distribution alongside the existing best-only
+            // "timing" line, whose contract is unchanged.
+            let times: Vec<String> = nanos.iter().map(|n| n.to_string()).collect();
+            emit(&format!("times {}", times.join(" ")));
+            emit(&format!("timing {compile_us} {best} {runs} {}", vm.heap.collections));
+        }
     }
     if alloc_mode.enabled() {
         let sites = alloc_mode.sites().then(|| sites_tcl(&compiled.sites, &vm.metrics.sites)).unwrap_or_default();

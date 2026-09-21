@@ -1,0 +1,62 @@
+Botlish managed heap allocation report
+
+allocated:
+    20819 objects
+    980.1 KB
+
+peak live:
+    20819 objects
+    980.1 KB
+
+GC:
+    0 cycles
+    0 B reclaimed
+    0.0 ms total
+    0.0 ms max
+
+by kind:
+    String      13609   566.8 KB
+    List            5   288 B
+    Block        7205   413.0 KB
+
+copies:
+    String       22.4 KB
+    List         21 elements
+    MutableArray 0 elements
+
+mutable array:
+    0 reads, 0 writes
+
+static (constant table, excluded from GC/live/peak):
+    38 objects, 1.7 KB
+
+top allocation sites by bytes:
+     1. func char_at                     substr           9200 allocations  381.6 KB
+     2. func char_at                     substr           4400 allocations  184.8 KB
+     3. func                             closure           800 allocations  57.6 KB
+     4. func                             closure           800 allocations  44.8 KB
+     5. func                             closure           800 allocations  44.8 KB
+     6. func                             closure           800 allocations  44.8 KB
+     7. func                             closure           800 allocations  44.8 KB
+     8. func                             closure           800 allocations  38.4 KB
+     9. func                             closure           400 allocations  28.8 KB
+    10. func                             closure           400 allocations  22.4 KB
+    11. func                             closure           400 allocations  22.4 KB
+    12. func                             closure           400 allocations  22.4 KB
+    13. func                             closure           400 allocations  22.4 KB
+    14. func                             closure           400 allocations  19.2 KB
+    15. /mnt/c/Users/MarkusWagner/dev/botlish/lib/web.bot:31 listnew             1 allocations  152 B
+    16. /mnt/c/Users/MarkusWagner/dev/botlish/lib/web.bot:145 strcat              3 allocations  130 B
+    17. /mnt/c/Users/MarkusWagner/dev/botlish/lib/web.bot:145 substr              3 allocations  123 B
+    18. /mnt/c/Users/MarkusWagner/dev/botlish/lib/web.bot:132 strutf8bytes        3 allocations  96 B
+    19. /mnt/c/Users/MarkusWagner/dev/botlish/lib/web.bot:33 closure             1 allocations  48 B
+    20. /mnt/c/Users/MarkusWagner/dev/botlish/lib/web.bot:122 closure             1 allocations  48 B
+    21. /mnt/c/Users/MarkusWagner/dev/botlish/lib/web.bot:125 closure             1 allocations  48 B
+    22. /mnt/c/Users/MarkusWagner/dev/botlish/lib/web.bot:131 closure             1 allocations  48 B
+    23. /mnt/c/Users/MarkusWagner/dev/botlish/lib/web.bot:141 closure             1 allocations  48 B
+    24. /mnt/c/Users/MarkusWagner/dev/botlish/lib/web.bot:129 strcat              1 allocations  43 B
+    25. /mnt/c/Users/MarkusWagner/dev/botlish/lib/web.bot:129 strcat              1 allocations  43 B
+    26. /mnt/c/Users/MarkusWagner/dev/botlish/lib/web.bot:123 strcat              1 allocations  42 B
+    27. func <program>                   listnew             1 allocations  40 B
+
+excluded: num-bigint limb buffers, the shadow stack (fixed ~32 MB), Cranelift/JIT code, process bookkeeping.

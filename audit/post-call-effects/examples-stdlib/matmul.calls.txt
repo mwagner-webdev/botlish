@@ -1,0 +1,9 @@
+exact_calls=8 false_false=0 false_true=0 true_false=0 true_true=8 completion_checks_removed=0 call_safepoints_removed=0
+call caller=0 caller_name="<program>" callee=6 callee_name="matmul" may_error=true may_gc=true
+call caller=2 caller_name="product_row" callee=1 callee_name="dot" may_error=true may_gc=true
+call caller=2 caller_name="product_row" callee=3 callee_name="product_row" may_error=true may_gc=true
+call caller=3 caller_name="product_row" callee=1 callee_name="dot" may_error=true may_gc=true
+call caller=4 caller_name="product_rows" callee=2 callee_name="product_row" may_error=true may_gc=true
+call caller=4 caller_name="product_rows" callee=5 callee_name="product_rows" may_error=true may_gc=true
+call caller=5 caller_name="product_rows" callee=2 callee_name="product_row" may_error=true may_gc=true
+call caller=6 caller_name="matmul" callee=4 callee_name="product_rows" may_error=true may_gc=true

@@ -1,0 +1,532 @@
+nir 1 call-effects=1
+
+func 0 "<program>" params=0 env=0 regs=2 pnames="" captures=0 instance="generic"
+    %0 = str "name,age\nAlice,30\nBob,40\n" @e407
+    %1 = call 20 %0 @e405
+    ret %1
+end
+
+func 1 "chunk_size" params=0 env=0 regs=2 pnames="" captures=0 instance="generic" rawregs="1" @e2
+    %0 = int 64 @e3
+    %1 = rawint 64
+    ret %0
+end
+
+func 2 "chunked_new" params=0 env=0 regs=7 pnames="" captures=0 instance="generic" results=3 rawregs="3 6" @e5
+    %0 = op listnew @e8
+    %1 = call 1 @e12
+    %2 = int 64 @e12
+    %3 = rawint 64
+    %4 = op mutarrayallocate %2 @e10
+    %5 = int 0 @e14
+    %6 = rawint 0
+    retmulti %0 %4 %5
+end
+
+func 3 "chunked_append" params=4 env=0 regs=24 pnames="builder.0 builder.1 builder.2 value" captures=0 instance="list[list<never>, mutarray, int], str" results=3 rawregs="6 12 15 18 22" @e16
+    %4 = call 1 @e36
+    %5 = int 64 @e36
+    %6 = rawint 64
+    %7 = op ieq %2 %5 @e33
+    br %7 L0 L1 @e32
+  label L0
+    %9 = op listappend %0 %1 @e39
+    %10 = call 1 @e46
+    %11 = int 64 @e46
+    %12 = rawint 64
+    %13 = op mutarrayallocate %11 @e44
+    %14 = int 0 @e51
+    %15 = rawint 0
+    %16 = op mutarrayset %13 %14 %3 @e48
+    %17 = int 1 @e58
+    %18 = rawint 1
+    retmulti %9 %13 %17 @e53
+  label L1
+    %19 = unit
+    %8 = move %19
+    jump L2
+  label L2
+    %20 = op mutarrayset %1 %2 %3 @e59
+    %21 = int 1 @e71
+    %22 = rawint 1
+    %23 = op iadd %2 %21 @e68
+    retmulti %0 %1 %23
+end
+
+func 4 "chunked_append" params=4 env=0 regs=24 pnames="builder.0 builder.1 builder.2 value" captures=0 instance="list[list<mutarray>, mutarray, int], str" results=3 rawregs="6 12 15 18 22" @e16
+    %4 = call 1 @e36
+    %5 = int 64 @e36
+    %6 = rawint 64
+    %7 = op ieq %2 %5 @e33
+    br %7 L0 L1 @e32
+  label L0
+    %9 = op listappend %0 %1 @e39
+    %10 = call 1 @e46
+    %11 = int 64 @e46
+    %12 = rawint 64
+    %13 = op mutarrayallocate %11 @e44
+    %14 = int 0 @e51
+    %15 = rawint 0
+    %16 = op mutarrayset %13 %14 %3 @e48
+    %17 = int 1 @e58
+    %18 = rawint 1
+    retmulti %9 %13 %17 @e53
+  label L1
+    %19 = unit
+    %8 = move %19
+    jump L2
+  label L2
+    %20 = op mutarrayset %1 %2 %3 @e59
+    %21 = int 1 @e71
+    %22 = rawint 1
+    %23 = op iadd %2 %21 @e68
+    retmulti %0 %1 %23
+end
+
+func 5 "chunked_append" params=4 env=0 regs=24 pnames="builder.0 builder.1 builder.2 value" captures=0 instance="list[list<never>, mutarray, int], list" results=3 rawregs="6 12 15 18 22" @e16
+    %4 = call 1 @e36
+    %5 = int 64 @e36
+    %6 = rawint 64
+    %7 = op ieq %2 %5 @e33
+    br %7 L0 L1 @e32
+  label L0
+    %9 = op listappend %0 %1 @e39
+    %10 = call 1 @e46
+    %11 = int 64 @e46
+    %12 = rawint 64
+    %13 = op mutarrayallocate %11 @e44
+    %14 = int 0 @e51
+    %15 = rawint 0
+    %16 = op mutarrayset %13 %14 %3 @e48
+    %17 = int 1 @e58
+    %18 = rawint 1
+    retmulti %9 %13 %17 @e53
+  label L1
+    %19 = unit
+    %8 = move %19
+    jump L2
+  label L2
+    %20 = op mutarrayset %1 %2 %3 @e59
+    %21 = int 1 @e71
+    %22 = rawint 1
+    %23 = op iadd %2 %21 @e68
+    retmulti %0 %1 %23
+end
+
+func 6 "chunked_append" params=4 env=0 regs=24 pnames="builder.0 builder.1 builder.2 value" captures=0 instance="list[list<mutarray>, mutarray, int], list" results=3 rawregs="6 12 15 18 22" @e16
+    %4 = call 1 @e36
+    %5 = int 64 @e36
+    %6 = rawint 64
+    %7 = op ieq %2 %5 @e33
+    br %7 L0 L1 @e32
+  label L0
+    %9 = op listappend %0 %1 @e39
+    %10 = call 1 @e46
+    %11 = int 64 @e46
+    %12 = rawint 64
+    %13 = op mutarrayallocate %11 @e44
+    %14 = int 0 @e51
+    %15 = rawint 0
+    %16 = op mutarrayset %13 %14 %3 @e48
+    %17 = int 1 @e58
+    %18 = rawint 1
+    retmulti %9 %13 %17 @e53
+  label L1
+    %19 = unit
+    %8 = move %19
+    jump L2
+  label L2
+    %20 = op mutarrayset %1 %2 %3 @e59
+    %21 = int 1 @e71
+    %22 = rawint 1
+    %23 = op iadd %2 %21 @e68
+    retmulti %0 %1 %23
+end
+
+func 7 "chunked_copy_chunks" params=4 env=0 regs=24 pnames="chunks index final offset" captures=0 instance="list<never>, int, mutarray, int" rawregs="10 13 15 17 18 22" @e73
+    %4 = op listlen %0 @e78
+    %5 = op ige %1 %4 @e75
+    br %5 L0 L1 @e74
+  label L0
+    ret %3 @e81
+  label L1
+    %7 = unit
+    %6 = move %7
+    jump L2
+  label L2
+    %8 = op listget %0 %1 @e84
+    %9 = int 0 @e93
+    %10 = rawint 0
+    %11 = call 1 @e94
+    %12 = int 64 @e94
+    %13 = rawint 64
+    guard mutarray %8 "mutable_array_copy" @e88
+    %14 = op mutarraycopy %2 %3 %8 %9 %12 @e88
+    %15 = op runbox %1
+    %16 = int 1 @e102
+    %17 = rawint 1
+    %18 = op riadd %15 %17 @e99
+    %19 = op rbox %18
+    %20 = call 1 @e107
+    %21 = int 64 @e107
+    %22 = rawint 64
+    %23 = op iadd %3 %21 @e104
+    tail %0 %19 %2 %23 @e96
+end
+
+func 8 "chunked_copy_chunks" params=4 env=0 regs=24 pnames="chunks index final offset" captures=0 instance="list<mutarray>, int, mutarray, int" rawregs="10 13 15 17 18 22" @e73
+    %4 = op listlen %0 @e78
+    %5 = op ige %1 %4 @e75
+    br %5 L0 L1 @e74
+  label L0
+    ret %3 @e81
+  label L1
+    %7 = unit
+    %6 = move %7
+    jump L2
+  label L2
+    %8 = op listget %0 %1 @e84
+    %9 = int 0 @e93
+    %10 = rawint 0
+    %11 = call 1 @e94
+    %12 = int 64 @e94
+    %13 = rawint 64
+    %14 = op mutarraycopy %2 %3 %8 %9 %12 @e88
+    %15 = op runbox %1
+    %16 = int 1 @e102
+    %17 = rawint 1
+    %18 = op riadd %15 %17 @e99
+    %19 = op rbox %18
+    %20 = call 1 @e107
+    %21 = int 64 @e107
+    %22 = rawint 64
+    %23 = op iadd %3 %21 @e104
+    tail %0 %19 %2 %23 @e96
+end
+
+func 9 "chunked_finish" params=3 env=0 regs=19 pnames="builder.0 builder.1 builder.2" captures=0 instance="list[list<never>, mutarray, int]" rawregs="6 11 13 16" @e110
+    %3 = op listlen %0 @e131
+    %4 = call 1 @e134
+    %5 = int 64 @e134
+    %6 = rawint 64
+    %7 = op imul %3 %5 @e129
+    %8 = op iadd %7 %2 @e127
+    %9 = op mutarrayallocate %8 @e138
+    %10 = int 0 @e145
+    %11 = rawint 0
+    %12 = int 0 @e147
+    %13 = rawint 0
+    %14 = call 7 %0 %10 %9 %12 @e142
+    %15 = int 0 @e153
+    %16 = rawint 0
+    %17 = op mutarraycopy %9 %14 %1 %15 %2 @e148
+    %18 = op mutarrayfreeze %9 %8 @e155
+    ret %18
+end
+
+func 10 "chunked_finish" params=3 env=0 regs=19 pnames="builder.0 builder.1 builder.2" captures=0 instance="list[list<mutarray>, mutarray, int]" rawregs="6 11 13 16" @e110
+    %3 = op listlen %0 @e131
+    %4 = call 1 @e134
+    %5 = int 64 @e134
+    %6 = rawint 64
+    %7 = op imul %3 %5 @e129
+    %8 = op iadd %7 %2 @e127
+    %9 = op mutarrayallocate %8 @e138
+    %10 = int 0 @e145
+    %11 = rawint 0
+    %12 = int 0 @e147
+    %13 = rawint 0
+    %14 = call 8 %0 %10 %9 %12 @e142
+    %15 = int 0 @e153
+    %16 = rawint 0
+    %17 = op mutarraycopy %9 %14 %1 %15 %2 @e148
+    %18 = op mutarrayfreeze %9 %8 @e155
+    ret %18
+end
+
+func 11 "peek" params=2 env=0 regs=11 pnames="text index" captures=0 instance="str, int" rawregs="8" @e160
+    %2 = op strlen %0 @e165
+    %3 = op ige %1 %2 @e162
+    br %3 L0 L1 @e161
+  label L0
+    %5 = str "" @e169
+    ret %5 @e168
+  label L1
+    %6 = unit
+    %4 = move %6
+    jump L2
+  label L2
+    %7 = int 1 @e177
+    %8 = rawint 1
+    %9 = op iadd %1 %7 @e174
+    %10 = op substr %0 %1 %9 @e170
+    ret %10
+end
+
+func 12 "peek" params=2 env=0 regs=15 pnames="text index" captures=0 instance="str, int" results=3 rawregs="7 9 12" @e160
+    %2 = op strlen %0 @e165
+    %3 = op ige %1 %2 @e162
+    br %3 L0 L1 @e161
+  label L0
+    %5 = str "" @e169
+    %6 = int 0 @e169
+    %7 = rawint 0
+    %8 = int 0 @e169
+    %9 = rawint 0
+    retmulti %5 %6 %8 @e168
+  label L1
+    %10 = unit
+    %4 = move %10
+    jump L2
+  label L2
+    %11 = int 1 @e177
+    %12 = rawint 1
+    %13 = op iadd %1 %11 @e174
+    %14 = op regioncheck %0 %1 %13 @e170
+    retmulti %0 %1 %13
+end
+
+func 13 "scan_unquoted" params=3 env=0 regs=28 pnames="text start index" captures=0 instance="str, int, int" results=2 rawregs="26" @e179
+    %3 %4 %5 = callmulti 12 %0 %2 @e181
+    %6 = str "" @e191
+    %7 = op regioneq %3 %4 %5 %6 @e188
+    br %7 L0 L1 @e187
+  label L0
+    %9 = bool true @e192
+    %8 = move %9
+    jump L2
+  label L1
+    %10 = str "," @e197
+    %11 = op regioneq %3 %4 %5 %10 @e194
+    br %11 L3 L4 @e193
+  label L3
+    %13 = bool true @e198
+    %12 = move %13
+    jump L5
+  label L4
+    %14 = bool false @e199
+    %12 = move %14
+    jump L5
+  label L5
+    %8 = move %12
+    jump L2
+  label L2
+    br %8 L6 L7 @e186
+  label L6
+    %16 = bool true @e200
+    %15 = move %16
+    jump L8
+  label L7
+    %17 = str "\n" @e205
+    %18 = op regioneq %3 %4 %5 %17 @e202
+    br %18 L9 L10 @e201
+  label L9
+    %20 = bool true @e206
+    %19 = move %20
+    jump L11
+  label L10
+    %21 = bool false @e207
+    %19 = move %21
+    jump L11
+  label L11
+    %15 = move %19
+    jump L8
+  label L8
+    br %15 L12 L13 @e185
+  label L12
+    %23 = op substr %0 %1 %2 @e211
+    retmulti %23 %2 @e208
+  label L13
+    %24 = unit
+    %22 = move %24
+    jump L14
+  label L14
+    %25 = int 1 @e224
+    %26 = rawint 1
+    %27 = op iadd %2 %25 @e221
+    tail %0 %1 %27 @e217
+end
+
+func 14 "scan_quoted" params=3 env=0 regs=34 pnames="text index field" captures=0 instance="str, int, str" results=2 rawregs="6 8 12 21 27 31" @e226
+    %3 = call 11 %0 %1 @e228
+    %4 = str "\"" @e236
+    %5 = int 0 @e236
+    %6 = rawint 0
+    %7 = int 1 @e236
+    %8 = rawint 1
+    %9 = op regioneq %4 %5 %7 %3 @e233
+    br %9 L0 L1 @e232
+  label L0
+    %11 = int 1 @e246
+    %12 = rawint 1
+    %13 = op iadd %1 %11 @e243
+    %14 %15 %16 = callmulti 12 %0 %13 @e240
+    %17 = str "\"" @e247
+    %18 = op regioneq %14 %15 %16 %17 @e238
+    br %18 L3 L4 @e237
+  label L3
+    %20 = int 2 @e255
+    %21 = rawint 2
+    %22 = op iadd %1 %20 @e252
+    %23 = str "\"" @e259
+    %24 = op strcat %2 %23 @e256
+    tail %0 %22 %24 @e249
+  label L4
+    %25 = unit
+    %19 = move %25
+    jump L5
+  label L5
+    %26 = int 1 @e267
+    %27 = rawint 1
+    %28 = op iadd %1 %26 @e264
+    retmulti %2 %28 @e260
+  label L1
+    %29 = unit
+    %10 = move %29
+    jump L2
+  label L2
+    %30 = int 1 @e274
+    %31 = rawint 1
+    %32 = op iadd %1 %30 @e271
+    %33 = op strcat %2 %3 @e275
+    tail %0 %32 %33 @e268
+end
+
+func 15 "scan_field" params=2 env=0 regs=17 pnames="text index" captures=0 instance="str, int" results=2 rawregs="9" @e280
+    %2 %3 %4 = callmulti 12 %0 %1 @e284
+    %5 = str "\"" @e288
+    %6 = op regioneq %2 %3 %4 %5 @e282
+    br %6 L0 L1 @e281
+  label L0
+    %8 = int 1 @e296
+    %9 = rawint 1
+    %10 = op iadd %1 %8 @e293
+    %11 = str "" @e297
+    %12 %13 = callmulti 14 %0 %10 %11 @e290
+    retmulti %12 %13 @e289
+  label L1
+    %14 = unit
+    %7 = move %14
+    jump L2
+  label L2
+    %15 %16 = callmulti 13 %0 %1 %1 @e298
+    retmulti %15 %16
+end
+
+func 16 "scan_record" params=5 env=0 regs=31 pnames="text index fields.0 fields.1 fields.2" captures=0 instance="str, int, list[list<never>, mutarray, int]" results=2 rawregs="17 27" @e304
+    %5 %6 = callmulti 15 %0 %1 @e306
+    %7 %8 %9 = callmulti 3 %2 %3 %4 %5 @e311
+    %10 %11 %12 = callmulti 12 %0 %6 @e324
+    %13 = str "," @e332
+    %14 = op regioneq %10 %11 %12 %13 @e329
+    br %14 L0 L1 @e328
+  label L0
+    %16 = int 1 @e340
+    %17 = rawint 1
+    %18 = op iadd %6 %16 @e337
+    %19 %20 = callmulti 17 %0 %18 %7 %8 %9 @e334
+    retmulti %19 %20 @e333
+  label L1
+    %21 = unit
+    %15 = move %21
+    jump L2
+  label L2
+    %22 = str "\n" @e346
+    %23 = op regioneq %10 %11 %12 %22 @e343
+    br %23 L3 L4 @e342
+  label L3
+    %25 = call 10 %7 %8 %9 @e350
+    %26 = int 1 @e356
+    %27 = rawint 1
+    %28 = op iadd %6 %26 @e353
+    retmulti %25 %28 @e347
+  label L4
+    %29 = unit
+    %24 = move %29
+    jump L5
+  label L5
+    %30 = call 10 %7 %8 %9 @e359
+    retmulti %30 %6
+end
+
+func 17 "scan_record" params=5 env=0 regs=29 pnames="text index fields.0 fields.1 fields.2" captures=0 instance="str, int, list[list<mutarray>, mutarray, int]" results=2 rawregs="17 25" @e304
+    %5 %6 = callmulti 15 %0 %1 @e306
+    %7 %8 %9 = callmulti 4 %2 %3 %4 %5 @e311
+    %10 %11 %12 = callmulti 12 %0 %6 @e324
+    %13 = str "," @e332
+    %14 = op regioneq %10 %11 %12 %13 @e329
+    br %14 L0 L1 @e328
+  label L0
+    %16 = int 1 @e340
+    %17 = rawint 1
+    %18 = op iadd %6 %16 @e337
+    tail %0 %18 %7 %8 %9 @e334
+  label L1
+    %19 = unit
+    %15 = move %19
+    jump L2
+  label L2
+    %20 = str "\n" @e346
+    %21 = op regioneq %10 %11 %12 %20 @e343
+    br %21 L3 L4 @e342
+  label L3
+    %23 = call 10 %7 %8 %9 @e350
+    %24 = int 1 @e356
+    %25 = rawint 1
+    %26 = op iadd %6 %24 @e353
+    retmulti %23 %26 @e347
+  label L4
+    %27 = unit
+    %22 = move %27
+    jump L5
+  label L5
+    %28 = call 10 %7 %8 %9 @e359
+    retmulti %28 %6
+end
+
+func 18 "scan_records" params=5 env=0 regs=21 pnames="text index records.0 records.1 records.2" captures=0 instance="str, int, list[list<never>, mutarray, int]" rawregs="5 7" @e364
+    %5 = op runbox %1
+    %6 = op strlen %0 @e369
+    %7 = op runbox %6
+    %8 = op rige %5 %7 @e366
+    br %8 L0 L1 @e365
+  label L0
+    %10 = call 9 %2 %3 %4 @e373
+    ret %10 @e372
+  label L1
+    %11 = unit
+    %9 = move %11
+    jump L2
+  label L2
+    %12 %13 %14 = callmulti 2 @e381
+    %15 %16 = callmulti 16 %0 %1 %12 %13 %14 @e377
+    %17 %18 %19 = callmulti 5 %2 %3 %4 %15 @e390
+    %20 = call 19 %0 %16 %17 %18 %19 @e383
+    ret %20
+end
+
+func 19 "scan_records" params=5 env=0 regs=18 pnames="text index records.0 records.1 records.2" captures=0 instance="str, int, list[list<mutarray>, mutarray, int]" @e364
+    %5 = op strlen %0 @e369
+    %6 = op ige %1 %5 @e366
+    br %6 L0 L1 @e365
+  label L0
+    %8 = call 10 %2 %3 %4 @e373
+    ret %8 @e372
+  label L1
+    %9 = unit
+    %7 = move %9
+    jump L2
+  label L2
+    %10 %11 %12 = callmulti 2 @e381
+    %13 %14 = callmulti 16 %0 %1 %10 %11 %12 @e377
+    %15 %16 %17 = callmulti 6 %2 %3 %4 %13 @e390
+    tail %0 %14 %15 %16 %17 @e383
+end
+
+func 20 "csv_parse" params=1 env=0 regs=7 pnames="text" captures=0 instance="str" rawregs="2" @e398
+    %1 = int 0 @e402
+    %2 = rawint 0
+    %3 %4 %5 = callmulti 2 @e403
+    %6 = call 18 %0 %1 %3 %4 %5 @e399
+    ret %6
+end

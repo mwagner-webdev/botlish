@@ -1,0 +1,7 @@
+exact_calls=6 false_false=0 false_true=0 true_false=0 true_true=6 completion_checks_removed=0 call_safepoints_removed=0
+call caller=0 caller_name="<program>" callee=2 callee_name="reverse_chars" may_error=true may_gc=true
+call caller=0 caller_name="<program>" callee=2 callee_name="reverse_chars" may_error=true may_gc=true
+call caller=0 caller_name="<program>" callee=2 callee_name="reverse_chars" may_error=true may_gc=true
+call caller=0 caller_name="<program>" callee=2 callee_name="reverse_chars" may_error=true may_gc=true
+call caller=0 caller_name="<program>" callee=2 callee_name="reverse_chars" may_error=true may_gc=true
+call caller=2 caller_name="reverse_chars" callee=1 callee_name="reverse_from" may_error=true may_gc=true

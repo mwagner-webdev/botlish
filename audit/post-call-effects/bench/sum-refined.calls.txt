@@ -1,0 +1,3 @@
+exact_calls=2 false_false=0 false_true=2 true_false=0 true_true=0 completion_checks_removed=2 call_safepoints_removed=0
+call caller=0 caller_name="<program>" callee=1 callee_name="sum" may_error=false may_gc=true
+call caller=1 caller_name="sum" callee=2 callee_name="step" may_error=false may_gc=true
