@@ -2,7 +2,7 @@ source:  bench/loop-count.ir
 backend: Cranelift (specialize=1)
 asm:     loop-count.asm
 vcode:   loop-count.vcode
-machine-code bytes: 503 (per function: 84 54 365)
+machine-code bytes: 418 (per function: 63 54 301)
 
 functions:
   0 <program entry>: nir-regs=5
@@ -14,6 +14,7 @@ GC roots (loop-count.asm's NIR ids match roots.txt's "function N"):
     NIR regs: 5
     raw regs: 2
     managed-capable regs: 3
+    effects: may_error=false may_gc=true
     safepoints: 1
     root candidates: 2
     max live roots: 2
@@ -26,6 +27,7 @@ GC roots (loop-count.asm's NIR ids match roots.txt's "function N"):
     NIR regs: 17
     raw regs: 7
     managed-capable regs: 10
+    effects: may_error=false may_gc=false
     safepoints: 0
     root candidates: 0
     max live roots: 0
@@ -38,8 +40,9 @@ GC roots (loop-count.asm's NIR ids match roots.txt's "function N"):
     NIR regs: 15
     raw regs: 5
     managed-capable regs: 10
-    safepoints: 2
-    root candidates: 4
+    effects: may_error=false may_gc=true
+    safepoints: 1
+    root candidates: 3
     max live roots: 3
     shadow slots: 3
     entry zero slots: 0

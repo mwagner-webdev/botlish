@@ -15,6 +15,7 @@ GC roots (string_replace.asm's NIR ids match roots.txt's "function N"):
     NIR regs: 21
     raw regs: 0
     managed-capable regs: 21
+    effects: may_error=true may_gc=true
     safepoints: 6
     root candidates: 20
     max live roots: 7
@@ -27,6 +28,7 @@ GC roots (string_replace.asm's NIR ids match roots.txt's "function N"):
     NIR regs: 12
     raw regs: 0
     managed-capable regs: 12
+    effects: may_error=true may_gc=true
     safepoints: 1
     root candidates: 4
     max live roots: 4
@@ -39,6 +41,7 @@ GC roots (string_replace.asm's NIR ids match roots.txt's "function N"):
     NIR regs: 26
     raw regs: 1
     managed-capable regs: 25
+    effects: may_error=true may_gc=true
     safepoints: 9
     root candidates: 14
     max live roots: 7
@@ -51,6 +54,7 @@ GC roots (string_replace.asm's NIR ids match roots.txt's "function N"):
     NIR regs: 16
     raw regs: 4
     managed-capable regs: 12
+    effects: may_error=true may_gc=true
     safepoints: 1
     root candidates: 6
     max live roots: 6

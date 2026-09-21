@@ -18,6 +18,7 @@ GC roots (matmul.asm's NIR ids match roots.txt's "function N"):
     NIR regs: 32
     raw regs: 12
     managed-capable regs: 20
+    effects: may_error=true may_gc=true
     safepoints: 8
     root candidates: 19
     max live roots: 5
@@ -30,6 +31,7 @@ GC roots (matmul.asm's NIR ids match roots.txt's "function N"):
     NIR regs: 18
     raw regs: 4
     managed-capable regs: 14
+    effects: may_error=true may_gc=true
     safepoints: 2
     root candidates: 7
     max live roots: 6
@@ -42,6 +44,7 @@ GC roots (matmul.asm's NIR ids match roots.txt's "function N"):
     NIR regs: 22
     raw regs: 6
     managed-capable regs: 16
+    effects: may_error=true may_gc=true
     safepoints: 3
     root candidates: 11
     max live roots: 8
@@ -54,6 +57,7 @@ GC roots (matmul.asm's NIR ids match roots.txt's "function N"):
     NIR regs: 19
     raw regs: 4
     managed-capable regs: 15
+    effects: may_error=true may_gc=true
     safepoints: 3
     root candidates: 10
     max live roots: 7
@@ -66,6 +70,7 @@ GC roots (matmul.asm's NIR ids match roots.txt's "function N"):
     NIR regs: 22
     raw regs: 5
     managed-capable regs: 17
+    effects: may_error=true may_gc=true
     safepoints: 4
     root candidates: 10
     max live roots: 7
@@ -78,6 +83,7 @@ GC roots (matmul.asm's NIR ids match roots.txt's "function N"):
     NIR regs: 19
     raw regs: 3
     managed-capable regs: 16
+    effects: may_error=true may_gc=true
     safepoints: 4
     root candidates: 11
     max live roots: 8
@@ -90,6 +96,7 @@ GC roots (matmul.asm's NIR ids match roots.txt's "function N"):
     NIR regs: 18
     raw regs: 4
     managed-capable regs: 14
+    effects: may_error=true may_gc=true
     safepoints: 3
     root candidates: 5
     max live roots: 5
