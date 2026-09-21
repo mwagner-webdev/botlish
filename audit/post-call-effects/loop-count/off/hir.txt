@@ -1,0 +1,53 @@
+program s2 binds b1 work, b2 drive
+e1 bind b1 work : block(e2)/1 -> int
+    e2 block s3 (b3 i) captures () : block(e2)/1 -> int
+        e3 loop s4 binds b4 a, b5 b : int
+            e4 bind b4 a : int
+                e5 call native(*) : int
+                    e6 ref b6 * : native *
+                    e7 ref b3 i : any
+                    e8 const 3 : int
+            e9 bind b5 b : int
+                e10 call native(+) : int
+                    e11 ref b7 + : native +
+                    e12 ref b4 a : int
+                    e13 const 7 : int
+            e14 if : never
+                e15 call native(>=) : bool
+                    e16 ref b8 >= : native >=
+                    e17 ref b5 b : int
+                    e18 const 0 : int
+                then s5
+                    e19 break -> e3 : never
+                        e20 call native(-) : int
+                            e21 ref b9 - : native -
+                            e22 ref b5 b : int
+                            e23 ref b4 a : int
+                else s6
+                    e24 continue -> e3 : never
+e25 bind b2 drive : block(e26)/2 -> any
+    e26 block s7 (b10 i, b11 total) captures (b2 drive, b1 work) : block(e26)/2 -> any
+        e27 if : any
+            e28 call native(<=) : bool
+                e29 ref b12 <= : native <=
+                e30 ref b10 i : any
+                e31 const 0 : int
+            then s8
+                e32 ref b11 total : any
+            else s9
+                e33 call block(e26) : any
+                    e34 ref b2 drive : block(e26)/2 -> any deferred
+                    e35 call native(-) : int
+                        e36 ref b9 - : native -
+                        e37 ref b10 i : int
+                        e38 const 1 : int
+                    e39 call native(+) : int
+                        e40 ref b7 + : native +
+                        e41 ref b11 total : any
+                        e42 call block(e2) : int
+                            e43 ref b1 work : block(e2)/1 -> int deferred
+                            e44 ref b10 i : int
+e45 call block(e26) : any
+    e46 ref b2 drive : block(e26)/2 -> any
+    e47 const 500 : int
+    e48 const 0 : int

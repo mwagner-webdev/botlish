@@ -1,0 +1,12 @@
+<program>: closed (transitively guarded)   [program, ir {}]
+  dispatch: closed -- functions: fib (non-tail)
+  blockers: none
+  runtime:  none
+
+fib: guarded   [e2, ir {0 2}]
+  params:   n : any   result: int
+  captures: fib (block)
+  dispatch: closed -- natives: <, +, - x2; functions: fib (self, non-tail)
+  blockers:
+    ir {0 2 2 1 2}  e6  UnknownParameterKind: < needs int; parameter n (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values

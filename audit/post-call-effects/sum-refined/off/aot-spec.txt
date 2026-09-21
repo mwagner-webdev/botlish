@@ -1,0 +1,28 @@
+<program>: closed   [i0, ir {}]
+  calls:    sum<int, int>
+  guards:   0
+  runtime:  none
+
+sum (semantic): guarded   [UnknownParameterKind 1]
+sum<int, int>: closed   [i1, ir {0 2}]
+  params:   n : int, acc : int
+  result:   int
+  calls:    step<int>, sum<int, int>
+  guards:   0
+  runtime:  bigint, closure-env
+
+step (semantic): guarded   [UnknownParameterKind 2]
+step<int>: closed   [i2, ir {0 2 2 2 2 3 2 2}]
+  params:   x : int
+  result:   int
+  guards:   0
+  runtime:  bigint
+
+step<generic>: guarded   [i3, ir {0 2 2 2 2 3 2 2}]
+  params:   x : any
+  result:   int
+  guards:   1
+    ir {0 2 2 2 2 3 2 2 2 2}  e17  UnknownParameterKind: + needs int; parameter x (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+guards: generic 3, specialized 1; instances: 1 generic, 2 specialized

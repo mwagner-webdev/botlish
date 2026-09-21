@@ -945,16 +945,16 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
     /// between its `store` (Inst::RetMulti) and this immediate `load`+`def`,
     /// with no allocation possible in between (nothing in either sequence
     /// calls a runtime helper).
-    fn call_multi(&mut self, dsts: &[Reg], func: nir::FuncId, values: &mut Vec<ir::Value>) {
+    fn call_multi(&mut self, dsts: &[Reg], func: nir::FuncId, values: &mut Vec<ir::Value>, may_error: bool, may_gc: bool) {
         let buf = (dsts.len() > 2).then(|| self.result_slot(dsts.len() - 1));
         if let Some(ptr) = buf {
             values.push(ptr);
         }
         let r = self.func_ref(self.symbols.direct[func as usize]);
         let call = self.b.ins().call(r, values);
-        self.mark_safepoint(call);
+        if may_gc { self.mark_safepoint(call); }
         let results = self.b.inst_results(call).to_vec();
-        self.check(results[0]);
+        if may_error { self.check(results[0]); }
         self.def(dsts[0], results[0]);
         match buf {
             Some(ptr) => {
@@ -1152,35 +1152,35 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                     self.def(*dst, v);
                 }
             }
-            Inst::Call { dst, func, args } => {
+            Inst::Call { dst, func, args, may_error, may_gc } => {
                 let mut values = vec![self.vm];
                 values.extend(args.iter().map(|r| self.get(*r)));
                 let r = self.func_ref(self.symbols.direct[*func as usize]);
                 let call = self.b.ins().call(r, &values);
-                self.mark_safepoint(call);
+                if *may_gc { self.mark_safepoint(call); }
                 let v = self.b.inst_results(call)[0];
-                self.check(v);
+                if *may_error { self.check(v); }
                 self.def(*dst, v);
             }
-            Inst::CallEnv { dst, func, closure, args } => {
+            Inst::CallEnv { dst, func, closure, args, may_error, may_gc } => {
                 let mut values = vec![self.vm, self.get(*closure)];
                 values.extend(args.iter().map(|r| self.get(*r)));
                 let r = self.func_ref(self.symbols.direct[*func as usize]);
                 let call = self.b.ins().call(r, &values);
-                self.mark_safepoint(call);
+                if *may_gc { self.mark_safepoint(call); }
                 let v = self.b.inst_results(call)[0];
-                self.check(v);
+                if *may_error { self.check(v); }
                 self.def(*dst, v);
             }
-            Inst::CallMulti { dsts, func, args } => {
+            Inst::CallMulti { dsts, func, args, may_error, may_gc } => {
                 let mut values = vec![self.vm];
                 values.extend(args.iter().map(|r| self.get(*r)));
-                self.call_multi(dsts, *func, &mut values);
+                self.call_multi(dsts, *func, &mut values, *may_error, *may_gc);
             }
-            Inst::CallEnvMulti { dsts, func, closure, args } => {
+            Inst::CallEnvMulti { dsts, func, closure, args, may_error, may_gc } => {
                 let mut values = vec![self.vm, self.get(*closure)];
                 values.extend(args.iter().map(|r| self.get(*r)));
-                self.call_multi(dsts, *func, &mut values);
+                self.call_multi(dsts, *func, &mut values, *may_error, *may_gc);
             }
             Inst::CallValue { dst, callee, args } => {
                 let f = self.get(*callee);

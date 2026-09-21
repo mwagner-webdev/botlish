@@ -80,6 +80,14 @@ pub fn op_may_allocate(op: OpCode) -> bool {
     )
 }
 
+/// Whether OP can report a Botlish semantic error by returning NO_VALUE.
+pub fn op_may_error(op: OpCode) -> bool {
+    use OpCode::*;
+    matches!(op, IMod | VEq | Hash | Substr | StrCat | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum
+        | ListNew | ListGet | ListAppend | MutArrayAllocate | MutArrayGet | MutArraySet | MutArrayCopy | MutArrayFreeze
+        | ResultValue | ResultError | RegionCheck)
+}
+
 pub type GenericEntry = extern "C" fn(*mut Vm, Value, *const Value) -> Value;
 
 fn vm<'a>(p: *mut Vm) -> &'a mut Vm {
@@ -963,7 +971,7 @@ mod tests {
     #[test]
     fn decode_char_at_two_byte() {
         let mut vm = vm();
-        // "é" is U+00E9, 2 bytes in UTF-8.
+        // U+00E9 is 2 bytes in UTF-8.
         let s = str_val(&mut vm, "a\u{e9}b");
         let c = rt_str_decode_char_at(&mut *vm, s, small(1));
         assert_eq!(str_of(c).text.as_ref(), "\u{e9}");
@@ -973,7 +981,7 @@ mod tests {
     #[test]
     fn decode_char_at_three_byte() {
         let mut vm = vm();
-        // "東" is U+6771, 3 bytes in UTF-8.
+        // U+6771 is 3 bytes in UTF-8.
         let s = str_val(&mut vm, "a\u{6771}b");
         let c = rt_str_decode_char_at(&mut *vm, s, small(1));
         assert_eq!(str_of(c).text.as_ref(), "\u{6771}");
@@ -992,7 +1000,7 @@ mod tests {
 
     #[test]
     fn decode_char_at_mixed_width_sequence() {
-        // A|é|東|🙂|A: verify each character decodes correctly by carrying
+        // A mixed-width sequence: verify each character decodes correctly by carrying
         // the byte offset forward exactly as native/lower.tcl's optimized
         // loop would (byte_i += strbytelen(decoded)), never seeking.
         let mut vm = vm();
@@ -1026,7 +1034,7 @@ mod tests {
     #[test]
     fn substr_non_ascii_records_seek_bytes_to_the_start_offset() {
         let mut vm = vm();
-        // Every character is 2 bytes ("é"): character index 3's byte offset
+        // Every character is U+00E9 (2 bytes): character index 3 has byte offset
         // is exactly 6.
         let s = str_val(&mut vm, &"\u{e9}".repeat(10));
         rt_substr(&mut *vm, s, small(3), small(4));

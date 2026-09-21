@@ -819,13 +819,15 @@ proc native::lower::program {hirProgram args} {
         && $::env(BOTLISH_NATIVE_STRING_REGION_OPT) eq "0" ? 0 : 1}]
     set callFactsDefault [expr {[info exists ::env(BOTLISH_NATIVE_CALL_FACTS_OPT)]
         && $::env(BOTLISH_NATIVE_CALL_FACTS_OPT) eq "0" ? 0 : 1}]
+    set callEffectsDefault [expr {[info exists ::env(BOTLISH_NATIVE_CALL_EFFECTS_OPT)]
+        && $::env(BOTLISH_NATIVE_CALL_EFFECTS_OPT) eq "0" ? 0 : 1}]
     set traversalDefault [expr {[info exists ::env(BOTLISH_NATIVE_STRING_TRAVERSAL_OPT)]
         && $::env(BOTLISH_NATIVE_STRING_TRAVERSAL_OPT) eq "0" ? 0 : 1}]
     set options [hir::Options native::lower::program \
         [list -specialize $default -repr-opt $reprDefault -escape-opt $escapeDefault \
             -param-aggregate-opt $paramAggregateDefault -block-escape-opt $blockEscapeDefault \
             -string-region-opt $stringRegionDefault -string-traversal-opt $traversalDefault \
-            -call-facts-opt $callFactsDefault] $args]
+            -call-facts-opt $callFactsDefault -call-effects-opt $callEffectsDefault] $args]
     if {[hir::mode $hirProgram] ne "program"} {
         throw {NATIVE UNSUPPORTED sequence-mode} \
             "native lowering: only program-mode HIR can be compiled (sequence mode runs in an unknown environment)"
@@ -834,6 +836,7 @@ proc native::lower::program {hirProgram args} {
     set hir $hirProgram
     set reprOpt [dict get $options -repr-opt]
     set callFactsOpt [dict get $options -call-facts-opt]
+    set callEffectsOpt [dict get $options -call-effects-opt]
     set escapeOpt [dict get $options -escape-opt]
     set paramAggregateOpt [dict get $options -param-aggregate-opt]
     set blockEscapeOpt [dict get $options -block-escape-opt]
@@ -912,7 +915,7 @@ proc native::lower::program {hirProgram args} {
         lappend infos [string map $map $info]
     }
 
-    set header [list "nir 1"]
+    set header [list "nir 1 call-effects=$callEffectsOpt"]
     foreach name [lsort $usedNatives] {
         set meta [core::native::metadata $name]
         set kinds [lmap type [dict get $meta paramTypes] {

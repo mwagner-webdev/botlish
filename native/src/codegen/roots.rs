@@ -191,7 +191,7 @@ fn is_safepoint(inst: &Inst) -> bool {
     match inst {
         Inst::Cell { .. } | Inst::Closure { .. } => true,
         Inst::Op { op, .. } => op_may_allocate(*op),
-        Inst::Call { .. } | Inst::CallEnv { .. } | Inst::CallMulti { .. } | Inst::CallEnvMulti { .. } => true,
+        Inst::Call { may_gc, .. } | Inst::CallEnv { may_gc, .. } | Inst::CallMulti { may_gc, .. } | Inst::CallEnvMulti { may_gc, .. } => *may_gc,
         Inst::CallValue { .. } => true,
         _ => false,
     }
@@ -732,6 +732,7 @@ pub fn report(program: &Program) -> String {
         writeln!(out, "  NIR regs: {regs}").unwrap();
         writeln!(out, "  raw regs: {raw}").unwrap();
         writeln!(out, "  managed-capable regs: {}", regs - raw).unwrap();
+        writeln!(out, "  effects: may_error={} may_gc={}", f.may_error, f.may_gc).unwrap();
         writeln!(out, "  safepoints: {}", plan.safepoints).unwrap();
         writeln!(out, "  root candidates: {}", plan.root_candidates).unwrap();
         writeln!(out, "  max live roots: {}", plan.max_live).unwrap();
@@ -774,7 +775,7 @@ mod tests {
     /// BODY as its instructions.
     fn program_of(regs: u32, rawregs: &str, body: &str) -> nir::Function {
         let text = format!(
-            "nir 1\n\nfunc 0 \"<program>\" params=0 env=0 regs={regs} pnames=\"\" captures=0 rawregs=\"{rawregs}\"\n{body}end\n"
+            "nir 1 call-effects=0\n\nfunc 0 \"<program>\" params=0 env=0 regs={regs} pnames=\"\" captures=0 rawregs=\"{rawregs}\"\n{body}end\n"
         );
         parse_one(&text)
     }
@@ -786,7 +787,7 @@ mod tests {
     /// argument. Returns function 1.
     fn parse_with_one_arg(entry_arg: &str, func1_text: &str) -> nir::Function {
         let text = format!(
-            "nir 1\n\nfunc 0 \"<program>\" params=0 env=0 regs=2 pnames=\"\" captures=0 rawregs=\"\"\n{entry_arg}    %1 = call 1 %0\n    ret %1\nend\n{func1_text}"
+            "nir 1 call-effects=0\n\nfunc 0 \"<program>\" params=0 env=0 regs=2 pnames=\"\" captures=0 rawregs=\"\"\n{entry_arg}    %1 = call 1 %0\n    ret %1\nend\n{func1_text}"
         );
         parse_program(&text).functions.into_iter().nth(1).unwrap()
     }
@@ -932,7 +933,7 @@ mod tests {
     #[test]
     fn branch_local_roots_do_not_interfere() {
         let f = parse_one(concat!(
-            "nir 1\n\n",
+            "nir 1 call-effects=0\n\n",
             "func 0 \"<program>\" params=0 env=0 regs=4 pnames=\"\" captures=0 rawregs=\"\"\n",
             "    %0 = bool true\n",
             "    br %0 L0 L1\n",
@@ -1019,7 +1020,7 @@ mod tests {
     #[test]
     fn assignment_is_deterministic() {
         let f = parse_one(concat!(
-            "nir 1\n\n",
+            "nir 1 call-effects=0\n\n",
             "func 0 \"<program>\" params=0 env=0 regs=6 pnames=\"\" captures=0 rawregs=\"\"\n",
             "    %0 = str \"a\"\n    %1 = str \"b\"\n    %2 = op strcat %0 %1\n",
             "    %3 = str \"c\"\n    %4 = str \"d\"\n    %5 = op strcat %3 %4\n",
@@ -1038,7 +1039,7 @@ mod tests {
     #[test]
     fn direct_call_is_a_conservative_safepoint() {
         let program = parse_program(concat!(
-            "nir 1\n\n",
+            "nir 1 call-effects=0\n\n",
             "func 0 \"<program>\" params=0 env=0 regs=1 pnames=\"\" captures=0 rawregs=\"\"\n",
             "    %0 = call 1\n",
             "    ret %0\n",
@@ -1191,7 +1192,7 @@ mod tests {
     #[test]
     fn safepoint_before_first_definition_forces_entry_zero() {
         let program = parse_program(concat!(
-            "nir 1\n\n",
+            "nir 1 call-effects=0\n\n",
             "func 0 \"<program>\" params=0 env=0 regs=1 pnames=\"\" captures=0 rawregs=\"\"\n",
             "    %0 = call 1\n",
             "    ret %0\n",
@@ -1362,7 +1363,7 @@ mod tests {
     #[test]
     fn any_botlish_call_sets_depth_reservation_but_only_fallback_forces_runtime_stack() {
         let program = parse_program(concat!(
-            "nir 1\n\n",
+            "nir 1 call-effects=0\n\n",
             "func 0 \"<program>\" params=0 env=0 regs=1 pnames=\"\" captures=0 rawregs=\"\"\n",
             "    %0 = call 1\n",
             "    ret %0\n",

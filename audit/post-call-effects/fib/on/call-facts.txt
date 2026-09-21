@@ -1,0 +1,9 @@
+<program> e23 -> fib<int>
+  arg0: int, range [22, 22]
+  successful result: int, range [-∞, +∞]
+fib<int> e11 -> fib<int>
+  arg0: int, range [1, 21]
+  successful result: int, range [-∞, +∞]
+fib<int> e17 -> fib<int>
+  arg0: int, range [0, 20]
+  successful result: int, range [-∞, +∞]

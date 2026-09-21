@@ -6,6 +6,7 @@
 use crate::runtime::value::Kind;
 use std::collections::HashSet;
 use std::fmt;
+use crate::runtime::ops::{op_may_allocate, op_may_error};
 
 pub type Reg = u32;
 pub type Label = u32;
@@ -232,8 +233,8 @@ pub enum Inst {
     Guard { kind: Kind, value: Reg, context: String },
     GuardBool { value: Reg },
     Op { dst: Reg, op: OpCode, args: Vec<Reg> },
-    Call { dst: Reg, func: FuncId, args: Vec<Reg> },
-    CallEnv { dst: Reg, func: FuncId, closure: Reg, args: Vec<Reg> },
+    Call { dst: Reg, func: FuncId, args: Vec<Reg>, may_error: bool, may_gc: bool },
+    CallEnv { dst: Reg, func: FuncId, closure: Reg, args: Vec<Reg>, may_error: bool, may_gc: bool },
     CallValue { dst: Reg, callee: Reg, args: Vec<Reg> },
     /// A direct call of a scalar-replacement companion function (a function
     /// with `results` > 1: see Function::results): like Call, but the
@@ -242,9 +243,9 @@ pub enum Inst {
     /// escape analysis proved this call site never needs (see hir/escape.tcl
     /// and native/lower.tcl's "Scalar replacement" section). Never used for
     /// an ordinary (results == 1) function.
-    CallMulti { dsts: Vec<Reg>, func: FuncId, args: Vec<Reg> },
+    CallMulti { dsts: Vec<Reg>, func: FuncId, args: Vec<Reg>, may_error: bool, may_gc: bool },
     /// CallMulti, with a closure (see CallEnv).
-    CallEnvMulti { dsts: Vec<Reg>, func: FuncId, closure: Reg, args: Vec<Reg> },
+    CallEnvMulti { dsts: Vec<Reg>, func: FuncId, closure: Reg, args: Vec<Reg>, may_error: bool, may_gc: bool },
     Tail { args: Vec<Reg> },
     TailEnv { closure: Reg, args: Vec<Reg> },
     Br { cond: Reg, then: Label, otherwise: Label },
@@ -295,6 +296,9 @@ pub struct Function {
     /// Block value ever points to it) -- so codegen's generic entry wrapper
     /// is a dead stub for it (see codegen/clif.rs's `define`).
     pub results: u32,
+    /// Settled closed-call effect summary for this exact NIR function.
+    pub may_error: bool,
+    pub may_gc: bool,
     pub body: Vec<Inst>,
     /// The HIR expression each instruction in BODY (same index) originated
     /// from -- native/lower.tcl's trailing "@ExprId" annotation on nearly
@@ -472,6 +476,7 @@ pub fn parse(text: &str) -> Result<Program, NirError> {
     let mut program = Program { natives: Vec::new(), functions: Vec::new() };
     let mut current: Option<Function> = None;
     let mut seen_header = false;
+    let mut call_effects = true;
     for (index, raw) in text.lines().enumerate() {
         p.line = index + 1;
         let (tokens, origin) = tokenize(raw).or_else(|m| p.err(m))?;
@@ -479,9 +484,10 @@ pub fn parse(text: &str) -> Result<Program, NirError> {
             continue;
         }
         if !seen_header {
-            if tokens != [Token::Word("nir".into()), Token::Word("1".into())] {
+            if tokens.len() < 2 || tokens[0] != Token::Word("nir".into()) || tokens[1] != Token::Word("1".into()) {
                 return p.err("expected \"nir 1\"");
             }
+            call_effects = !matches!(tokens.get(2), Some(Token::Pair(k, v)) if k == "call-effects" && v == "0");
             seen_header = true;
             continue;
         }
@@ -507,7 +513,62 @@ pub fn parse(text: &str) -> Result<Program, NirError> {
         return p.err("missing end");
     }
     validate(&program)?;
+    summarize_call_effects(&mut program, call_effects);
     Ok(program)
+}
+
+fn summarize_call_effects(program: &mut Program, enabled: bool) {
+    let n = program.functions.len();
+    let mut local = vec![(false, false); n];
+    for (i, f) in program.functions.iter().enumerate() {
+        for inst in &f.body {
+            match inst {
+                Inst::Guard { .. } | Inst::GuardBool { .. } | Inst::CellCheck { .. }
+                    | Inst::Raise { .. } => local[i].0 = true,
+                Inst::Op { op, .. } => {
+                    local[i].0 |= op_may_error(*op);
+                    local[i].1 |= op_may_allocate(*op);
+                }
+                Inst::Cell { .. } | Inst::Closure { .. } => local[i].1 = true,
+                Inst::CallValue { .. } => local[i] = (true, true),
+                _ => {}
+            }
+        }
+    }
+    let mut effects = local.clone();
+    loop {
+        let old = effects.clone();
+        for (i, f) in program.functions.iter().enumerate() {
+            let mut e = local[i];
+            for inst in &f.body {
+                let target = match inst {
+                    Inst::Call { func, .. } | Inst::CallEnv { func, .. }
+                        | Inst::CallMulti { func, .. } | Inst::CallEnvMulti { func, .. } => Some(*func as usize),
+                    _ => None,
+                };
+                if let Some(target) = target {
+                    e.0 |= old[target].0;
+                    e.1 |= old[target].1;
+                }
+            }
+            effects[i] = e;
+        }
+        if effects == old { break; }
+    }
+    for (i, f) in program.functions.iter_mut().enumerate() {
+        (f.may_error, f.may_gc) = effects[i];
+        for inst in &mut f.body {
+            match inst {
+                Inst::Call { func, may_error, may_gc, .. }
+                    | Inst::CallEnv { func, may_error, may_gc, .. }
+                    | Inst::CallMulti { func, may_error, may_gc, .. }
+                    | Inst::CallEnvMulti { func, may_error, may_gc, .. } => {
+                        (*may_error, *may_gc) = if enabled { effects[*func as usize] } else { (true, true) };
+                    }
+                _ => {}
+            }
+        }
+    }
 }
 
 fn pairs(tokens: &[Token]) -> std::collections::HashMap<String, String> {
@@ -568,6 +629,8 @@ fn parse_func_header(p: &Parser, tokens: &[Token]) -> Result<Function, NirError>
         pnames: kv.get("pnames").cloned().unwrap_or_default(),
         captures: num("captures")?,
         results,
+        may_error: true,
+        may_gc: true,
         body: Vec::new(),
         origins: Vec::new(),
         raw_regs,
@@ -666,12 +729,12 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
                 let Some(op) = OpCode::parse(name) else { return p.err(format!("unknown op {name}")) };
                 Inst::Op { dst, op, args: regs_from(4)? }
             }
-            "call" => Inst::Call { dst, func: num(3)?, args: regs_from(4)? },
-            "callenv" => Inst::CallEnv { dst, func: num(3)?, closure: reg(4)?, args: regs_from(5)? },
+            "call" => Inst::Call { dst, func: num(3)?, args: regs_from(4)?, may_error: true, may_gc: true },
+            "callenv" => Inst::CallEnv { dst, func: num(3)?, closure: reg(4)?, args: regs_from(5)?, may_error: true, may_gc: true },
             "callvalue" => Inst::CallValue { dst, callee: reg(3)?, args: regs_from(4)? },
-            "callmulti" => Inst::CallMulti { dsts, func: num(i)?, args: regs_from(i + 1)? },
+            "callmulti" => Inst::CallMulti { dsts, func: num(i)?, args: regs_from(i + 1)?, may_error: true, may_gc: true },
             "callenvmulti" => {
-                Inst::CallEnvMulti { dsts, func: num(i)?, closure: reg(i + 1)?, args: regs_from(i + 2)? }
+                Inst::CallEnvMulti { dsts, func: num(i)?, closure: reg(i + 1)?, args: regs_from(i + 2)?, may_error: true, may_gc: true }
             }
             other => return p.err(format!("unknown instruction {other}")),
         });
@@ -785,7 +848,7 @@ fn validate(program: &Program) -> Result<(), NirError> {
                     used.push(*dst);
                     used.extend(args);
                 }
-                Inst::Call { dst, func: g, args } => {
+                Inst::Call { dst, func: g, args, .. } => {
                     match func(*g) {
                         Some(g) if !g.env && g.params as usize == args.len() => {}
                         _ => return fail(ctx(format!("call of {g}: bad target or arity"))),
@@ -793,7 +856,7 @@ fn validate(program: &Program) -> Result<(), NirError> {
                     used.push(*dst);
                     used.extend(args);
                 }
-                Inst::CallEnv { dst, func: g, closure, args } => {
+                Inst::CallEnv { dst, func: g, closure, args, .. } => {
                     match func(*g) {
                         Some(g) if g.env && g.params as usize == args.len() => {}
                         _ => return fail(ctx(format!("callenv of {g}: bad target or arity"))),
@@ -805,7 +868,7 @@ fn validate(program: &Program) -> Result<(), NirError> {
                     used.extend([*dst, *callee]);
                     used.extend(args);
                 }
-                Inst::CallMulti { dsts, func: g, args } => {
+                Inst::CallMulti { dsts, func: g, args, .. } => {
                     match func(*g) {
                         Some(g) if !g.env && g.params as usize == args.len() && g.results as usize == dsts.len() => {}
                         _ => return fail(ctx(format!("callmulti of {g}: bad target, arity or result count"))),
@@ -813,7 +876,7 @@ fn validate(program: &Program) -> Result<(), NirError> {
                     used.extend(dsts);
                     used.extend(args);
                 }
-                Inst::CallEnvMulti { dsts, func: g, closure, args } => {
+                Inst::CallEnvMulti { dsts, func: g, closure, args, .. } => {
                     match func(*g) {
                         Some(g) if g.env && g.params as usize == args.len() && g.results as usize == dsts.len() => {}
                         _ => return fail(ctx(format!("callenvmulti of {g}: bad target, arity or result count"))),
@@ -931,4 +994,66 @@ fn validate(program: &Program) -> Result<(), NirError> {
         return fail("function 0 must be the program: no parameters, no environment, one result".into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod effect_tests {
+    use super::*;
+
+    fn function(effect_body: &str) -> String {
+        format!("func 1 \"f\" params=0 env=0 regs=3 pnames=\"\" captures=0 rawregs=\"\"\n{effect_body}    ret %0\nend\n")
+    }
+
+    fn with_callee(body: &str, enabled: bool) -> Program {
+        let flag = if enabled { 1 } else { 0 };
+        let text = format!(
+            "nir 1 call-effects={flag}\n\nfunc 0 \"<program>\" params=0 env=0 regs=1 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = call 1\n    ret %0\nend\n{}",
+            function(body)
+        );
+        parse(&text).unwrap()
+    }
+
+    #[test]
+    fn call_effects_independence_matrix() {
+        let cases = [
+            ("    %0 = unit\n", (false, false)),
+            ("    %1 = int 1\n    %2 = int 0\n    %0 = op imod %1 %2\n", (true, false)),
+            ("    %1 = unit\n    %0 = op mkok %1\n", (false, true)),
+            ("    %1 = str \"x\"\n    %2 = int 0\n    %0 = op substr %1 %2 %2\n", (true, true)),
+        ];
+        for (body, expected) in cases {
+            let p = with_callee(body, true);
+            assert_eq!((p.functions[1].may_error, p.functions[1].may_gc), expected);
+            match &p.functions[0].body[0] {
+                Inst::Call { may_error, may_gc, .. } => assert_eq!((*may_error, *may_gc), expected),
+                _ => panic!("expected call"),
+            }
+        }
+    }
+
+    #[test]
+    fn call_effects_propagate_transitively_and_recursively() {
+        let text = concat!(
+            "nir 1\n\n",
+            "func 0 \"<program>\" params=0 env=0 regs=1 pnames=\"\" captures=0 rawregs=\"\"\n",
+            "    %0 = call 1\n    ret %0\nend\n",
+            "func 1 \"a\" params=0 env=0 regs=1 pnames=\"\" captures=0 rawregs=\"\"\n",
+            "    %0 = call 2\n    ret %0\nend\n",
+            "func 2 \"cycle\" params=0 env=0 regs=3 pnames=\"\" captures=0 rawregs=\"\"\n",
+            "    %0 = unit\n    %1 = op mkok %0\n    %2 = call 2\n    ret %2\nend\n"
+        );
+        let p = parse(text).unwrap();
+        assert!(p.functions.iter().all(|f| f.may_gc));
+        assert!(p.functions.iter().all(|f| !f.may_error));
+    }
+
+    #[test]
+    fn call_effects_off_keeps_call_bookkeeping_conservative() {
+        let p = with_callee("    %0 = unit\n", false);
+        assert_eq!((p.functions[1].may_error, p.functions[1].may_gc), (false, false));
+        match &p.functions[0].body[0] {
+            Inst::Call { may_error, may_gc, .. } => assert!(*may_error && *may_gc),
+            _ => panic!("expected call"),
+        }
+    }
 }

@@ -1,0 +1,6 @@
+sum<int, int>
+  induction parameter: n (param 0)
+    termination guard: e8 (n == 0)
+    guard nesting depth: 1
+    recursive update: e21 (n - 1)
+    result: bounded decreasing induction [0, 400]
