@@ -54,3 +54,27 @@ rustup default stable
 
 then build as usual. Without this, `cranelift`/`cranelift-generic` tests
 and benchmarks report `{error {NATIVE NOT-BUILT}}` instead of running.
+
+## Running Linux tests from Windows with WSL
+
+The Windows development machine has an Ubuntu 24.04 WSL distribution with
+the repository toolchain already installed. Run Linux-native validation from
+PowerShell through that distribution, using the mounted Windows checkout:
+
+```powershell
+wsl.exe -d Ubuntu-24.04 -- bash -lc 'cd /mnt/c/Users/MarkusWagner/dev/botlish && export LANG=C.utf8 LC_ALL=C.utf8 && tclsh9.0 tests/all.tcl'
+```
+
+The WSL checkout is the same working tree as the Windows checkout, not a
+separate clone. Check `git status` before running tests and do not stash or
+discard changes merely to switch environments.
+
+For mandatory native GC-stress validation, build the release backend and run
+the suite with stress enabled inside WSL:
+
+```powershell
+wsl.exe -d Ubuntu-24.04 -- bash -lc 'cd /mnt/c/Users/MarkusWagner/dev/botlish && export LANG=C.utf8 LC_ALL=C.utf8 BOTLISH_NATIVE_GC_STRESS=1 && cargo build --release --manifest-path native/Cargo.toml && tclsh9.0 tests/all.tcl'
+```
+
+Use WSL for Linux GC-stress results when validating native stack walking;
+Windows-native execution exercises a different stack/guard implementation.
