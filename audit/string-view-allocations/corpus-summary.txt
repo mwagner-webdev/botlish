@@ -1,0 +1,14 @@
+program            alloc_on  alloc_off     str_on    str_off   code_bytes
+fib                       0          0          0          0          394
+loop-count                0          0          0          0          418
+sum-refined               0          0          0          0          292
+refined-checks         7219      22419          9      15209        20846
+ai_text_clean           111        111        110        110         3003
+csv                      19         56          6         43         4731
+csv_chunked              22         59          6         43        10347
+csv_geometric            23         60          6         43         5333
+csv_records              83        209         18        144        21919
+hashtable                 5          5          0          0        13166
+matmul                   16         16          0          0         4160
+string_replace           26         36         25         35         2322
+string_reverse           23         23         22         22          798

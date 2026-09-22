@@ -2541,6 +2541,7 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
     variable escape
     variable stringregion
     variable traversal
+    variable stringRegionOpt
     lassign [dict get $node target] targetKind target
     set calleeExpr [dict get $node callee]
     set argExprs [dict get $node args]
@@ -2650,6 +2651,32 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
                 dict incr fn skippedGuards
             }
             return [list [lindex $fields $idx] tagged]
+        }
+    }
+
+    if {$wantVirtual eq "" && !$wantRegion && $targetKind eq "block" && $stringRegionOpt} {
+        # A direct call to an instance hir::stringregion.tcl's ConsumingParams
+        # proved region-consuming at some parameter (e.g. `is_local_char
+        # (char_at(i))`, lib/web.tcl's Emailish? native-body): if the
+        # argument at that position is itself region-eligible, its body is
+        # lowered directly here, inline, in the caller's own function --
+        # never as a `call`/`callenv` to its own compiled function at all
+        # for this one call site (the "String traversal" section's
+        # TraversalAccess precedent: no interprocedural ABI, no companion
+        # call, the instance's own canonical function still unconditionally
+        # emitted and still correct for every other caller). Only the first
+        # consuming parameter with a region-eligible argument is used
+        # (mirrors TryStringRegionOp's own "prefer the left operand"
+        # narrowing for `==`: the corpus this milestone targets never
+        # exercises more than one).
+        set consumerInstance [expr {[dict exists $fn targets $e] ? [dict get $fn targets $e] : ""}]
+        if {$consumerInstance ne ""} {
+            foreach k [hir::stringregion::consumingParamsOf $stringregion $consumerInstance] {
+                set argExpr [lindex $argExprs $k]
+                if {$argExpr ne "" && [RegionEligible $argExpr]} {
+                    return [InlineRegionConsumerCall fn $argExpr $consumerInstance $k]
+                }
+            }
         }
     }
 
@@ -3012,7 +3039,137 @@ proc native::lower::TryStringRegionOp {fnVar e name op argExprs} {
         dict lappend fn calls [list native $name]
         return [list [Assign fn "op isub $end $start" $e] tagged]
     }
+    if {$name in {is_tcl_alpha is_tcl_alnum} && [llength $argExprs] == 1} {
+        # core/tclcompat.tcl's one-scalar classification: a region-eligible
+        # sole argument classifies directly from the region's own text (see
+        # ops.rs's rt_str_region_is_tcl_alpha/alnum), never materializing the
+        # one-character String `char_at`-shaped source code (hir/
+        # stringregion.tcl's ConsumingNative) usually builds just to classify
+        # it once and discard it. Same RANGE contract as the materializing
+        # op (both guard/knownError-free by construction: is_tcl_alpha/
+        # is_tcl_alnum accept any str, never needing a kind guard).
+        set arg [lindex $argExprs 0]
+        if {![RegionEligible $arg]} {
+            return ""
+        }
+        set region [Expr fn $arg region]
+        if {$region eq "never"} {
+            return {never tagged}
+        }
+        lassign $region base start end
+        set rop [expr {$name eq "is_tcl_alpha" ? "strregiontclalpha" : "strregiontclalnum"}]
+        dict lappend fn calls [list native $name]
+        return [list [Assign fn "op $rop $base $start $end" $e] tagged]
+    }
     return ""
+}
+
+# 1 if E (in VIEW) is a `ref` naming binding B.
+proc native::lower::IsRefToBinding {view e b} {
+    return [expr {[hir::kind $view $e] eq "ref" && [hir::get $view $e binding] eq $b}]
+}
+
+# Lowers region-consumer instance CALLEEVIEW's own expression E, directly in
+# the caller's function FN, substituting REGION (a {base start end} triple
+# already lowered in the caller) for every reference to its designated
+# consuming parameter B (hir::stringregion::ConsumingParams already proved
+# every such reference is one of the three node kinds handled below) --
+# never emitting a call to CALLEEVIEW's own compiled function for this call
+# site at all (see native/lower.tcl's "String regions" section and the
+# "String traversal" section's identical TraversalAccess precedent). Trusts
+# ConsumingShape's own structural proof rather than re-deriving it: any
+# expression shape besides `if`, a `ref` (to B or to a root true/false/
+# native value), or a call to `==`/`length`/a ConsumingNative is a
+# hir::stringregion.tcl bug, not a case this lowering falls back from.
+proc native::lower::EmitRegionConsumerBody {fnVar calleeView e b region} {
+    upvar 1 $fnVar fn
+    switch -- [hir::kind $calleeView $e] {
+        ref {
+            set rb [hir::get $calleeView $e binding]
+            return [RootValue fn $e [hir::binding $calleeView $rb]]
+        }
+        if {
+            set node [hir::node $calleeView $e]
+            set test [EmitRegionConsumerBody fn $calleeView [dict get $node condition] $b $region]
+            if {$test eq "never"} {
+                return never
+            }
+            set then [NewLabel fn]
+            set else [NewLabel fn]
+            set join [NewLabel fn]
+            set result [NewReg fn]
+            Emit fn "br $test $then $else" $e
+            set joined 0
+            foreach {label bodyKey} [list $then thenBody $else elseBody] {
+                EmitLabel fn $label
+                set body [dict get $node $bodyKey]
+                set value [EmitRegionConsumerBody fn $calleeView [lindex $body 0] $b $region]
+                if {$value ne "never"} {
+                    Emit fn "$result = move $value"
+                    Emit fn "jump $join"
+                    set joined 1
+                }
+            }
+            if {!$joined} {
+                return never
+            }
+            EmitLabel fn $join
+            return $result
+        }
+        call {
+            set node [hir::node $calleeView $e]
+            lassign [dict get $node target] targetKind target
+            set name [dict get [hir::symbol $calleeView $target] name]
+            set args [dict get $node args]
+            lassign $region base start end
+            dict lappend fn calls [list native $name]
+            if {$name eq "==" && [llength $args] == 2} {
+                lassign $args pa pb
+                set litExpr [expr {[IsRefToBinding $calleeView $pa $b] ? $pb : $pa}]
+                set litValue [hir::get $calleeView $litExpr value]
+                set litReg [Assign fn "str [Quote [core::value::strOf $litValue]]" $litExpr]
+                return [Assign fn "op regioneq $base $start $end $litReg" $e]
+            }
+            if {$name eq "length" && [llength $args] == 1} {
+                return [Assign fn "op isub $end $start" $e]
+            }
+            # is_tcl_alpha/is_tcl_alnum: ConsumingShape's own structural
+            # check allows no other native call to appear here.
+            set rop [expr {$name eq "is_tcl_alpha" ? "strregiontclalpha" : "strregiontclalnum"}]
+            return [Assign fn "op $rop $base $start $end" $e]
+        }
+    }
+    throw {NATIVE BUG} "native lowering: unexpected region-consumer body shape at $e"
+}
+
+# Lowers a direct call to CALLEEID (view BASEHIR/SPEC), given a region-
+# eligible argument expression ARGEXPR at its consuming parameter index
+# PARAMINDEX (hir::stringregion::consumingParamsOf), by inlining CALLEEID's
+# own body against that region (EmitRegionConsumerBody) instead of an actual
+# call. Returns {RESULT tagged}, exactly like Call's other dispatch cases.
+proc native::lower::InlineRegionConsumerCall {fnVar argExpr calleeId paramIndex} {
+    upvar 1 $fnVar fn
+    variable baseHir
+    variable spec
+    set region [Expr fn $argExpr region]
+    if {$region eq "never"} {
+        return {never tagged}
+    }
+    set calleeView [hir::specialize::view $baseHir $spec $calleeId]
+    set calleeInstance [hir::specialize::instance $spec $calleeId]
+    set block [dict get $calleeInstance block]
+    set b [lindex [hir::get $calleeView $block params] $paramIndex]
+    set body [hir::get $calleeView $block body]
+    foreach stmt [lrange $body 0 end-1] {
+        if {[EmitRegionConsumerBody fn $calleeView $stmt $b $region] eq "never"} {
+            return {never tagged}
+        }
+    }
+    set result [EmitRegionConsumerBody fn $calleeView [lindex $body end] $b $region]
+    if {$result eq "never"} {
+        return {never tagged}
+    }
+    return [list $result tagged]
 }
 
 # {NAME OP}: the native NODE's target's name, and the NIR op its call

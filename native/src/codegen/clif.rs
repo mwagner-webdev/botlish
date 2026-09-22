@@ -1363,6 +1363,14 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         // like RegionCheck -- see ops.rs's rt_is_tcl_alpha/alnum.
                         StrIsTclAlpha => ("rt_is_tcl_alpha", None, true, None),
                         StrIsTclAlnum => ("rt_is_tcl_alnum", None, true, None),
+                        // Same contract as StrIsTclAlpha/StrIsTclAlnum, over
+                        // a validated StringRegion (base, start, end)
+                        // instead of a materialized one-character String --
+                        // never allocates, RANGE-fallible on the same
+                        // not-exactly-one-scalar condition (ops.rs's
+                        // rt_str_region_is_tcl_alpha/alnum).
+                        StrRegionIsTclAlpha => ("rt_str_region_is_tcl_alpha", None, true, None),
+                        StrRegionIsTclAlnum => ("rt_str_region_is_tcl_alnum", None, true, None),
                         ListLen => ("rt_list_len", None, false, None),
                         ListGet => ("rt_list_get", None, true, None),
                         ListAppend => ("rt_list_append", None, true, Some(("listappend", KIND_LIST))),

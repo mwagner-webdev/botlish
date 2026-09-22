@@ -29,6 +29,8 @@
 //! | rt_str_utf8_bytes      | Str                 | List of Int (0..255); RANGE  | yes       |
 //! | rt_is_tcl_alpha        | Str (1 scalar)      | Bool; RANGE if not 1 scalar  | no        |
 //! | rt_is_tcl_alnum        | Str (1 scalar)      | Bool; RANGE if not 1 scalar  | no        |
+//! | rt_str_region_is_tcl_alpha | Str,Int,Int (region, 1 scalar) | Bool; RANGE | no    |
+//! | rt_str_region_is_tcl_alnum | Str,Int,Int (region, 1 scalar) | Bool; RANGE | no    |
 //! | rt_list_new            | count, *Value       | List                         | yes       |
 //! | rt_list_len            | List                | Int                          | no        |
 //! | rt_list_get            | List, Int           | element; RANGE               | no        |
@@ -85,7 +87,7 @@ pub fn op_may_error(op: OpCode) -> bool {
     use OpCode::*;
     matches!(op, IMod | VEq | Hash | Substr | StrCat | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum
         | ListNew | ListGet | ListAppend | MutArrayAllocate | MutArrayGet | MutArraySet | MutArrayCopy | MutArrayFreeze
-        | ResultValue | ResultError | RegionCheck)
+        | ResultValue | ResultError | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum)
 }
 
 pub type GenericEntry = extern "C" fn(*mut Vm, Value, *const Value) -> Value;
@@ -575,6 +577,53 @@ pub extern "C" fn rt_is_tcl_alnum(p: *mut Vm, s: Value) -> Value {
     }
 }
 
+/// A validated StringRegion's (`rt_str_region_check` already checked BASE\
+/// [START..END)'s bounds) one Unicode scalar, or the same RANGE failure
+/// `one_scalar` reports for a materialized String of any length besides
+/// one -- the non-materializing counterpart of `one_scalar` for
+/// `rt_str_region_is_tcl_alpha`/`rt_str_region_is_tcl_alnum` (native/
+/// lower.tcl's "String regions" section, hir/stringregion.tcl's
+/// ConsumingParams). Every one-character region this milestone's own
+/// recognized shape ever produces is already exactly width 1 by
+/// construction (it always traces back to a `char_at`-shaped
+/// `substring(text, i, i+1)`), but the check stays general -- exactly as
+/// `rt_str_region_eq` stays sound for a region of any width -- rather than
+/// assuming the specific shape that led here.
+fn region_one_scalar(p: *mut Vm, base: Value, start: Value, end: Value, native: &str) -> Result<char, Value> {
+    let b = str_of(base);
+    let from = int_small(start).expect("region start already validated") as usize;
+    let to = int_small(end).expect("region end already validated") as usize;
+    if to - from != 1 {
+        let message = format!("{native}: expects a single Unicode scalar, got a string of length {}", to - from);
+        return Err(vm(p).fail(RtError::Semantic { kind: "RANGE", message }));
+    }
+    if b.ascii {
+        Ok(b.text.as_bytes()[from] as char)
+    } else {
+        // Same seek accounting as rt_substr's/rt_str_region_eq's non-ASCII
+        // paths: locating character index `from` still means decoding
+        // forward from byte 0.
+        let mut indices = b.text.char_indices();
+        let seek_start = indices.by_ref().nth(from).map_or(b.text.len(), |(i, _)| i);
+        vm(p).metrics.record_utf8_seek(seek_start);
+        Ok(b.text[seek_start..].chars().next().expect("region already validated"))
+    }
+}
+
+pub extern "C" fn rt_str_region_is_tcl_alpha(p: *mut Vm, base: Value, start: Value, end: Value) -> Value {
+    match region_one_scalar(p, base, start, end, "is_tcl_alpha") {
+        Ok(c) => bool_value(tcl_alpha_char(c)),
+        Err(no_value) => no_value,
+    }
+}
+
+pub extern "C" fn rt_str_region_is_tcl_alnum(p: *mut Vm, base: Value, start: Value, end: Value) -> Value {
+    match region_one_scalar(p, base, start, end, "is_tcl_alnum") {
+        Ok(c) => bool_value(tcl_alnum_char(c)),
+        Err(no_value) => no_value,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Lists
 
@@ -875,7 +924,7 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         MkError => rt_result_new(p, 0, a[0]),
         Hash => rt_hash(p, a[0]),
         RegionCheck | RegionEq | RBox | RUnbox | RIAdd | RISub | RIMul | RILt | RILe | RIGt | RIGe | RIEq
-        | DecodeCharAt | StrByteLen => {
+        | DecodeCharAt | StrByteLen | StrRegionIsTclAlpha | StrRegionIsTclAlnum => {
             // Raw (untagged) representation ops, StringRegion ops and String
             // traversal ops never implement a dynamic native: native/lower.tcl
             // emits them only directly, as `op` instructions inline in a
@@ -918,6 +967,8 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_str_utf8_bytes, 2),
         h!(rt_is_tcl_alpha, 2),
         h!(rt_is_tcl_alnum, 2),
+        h!(rt_str_region_is_tcl_alpha, 4),
+        h!(rt_str_region_is_tcl_alnum, 4),
         h!(rt_list_new, 3),
         h!(rt_list_len, 2),
         h!(rt_list_get, 3),
@@ -1068,6 +1119,55 @@ mod tests {
         rt_str_region_check(&mut *vm, base, small(3), small(4));
         rt_str_region_eq(&mut *vm, base, small(3), small(4), other);
         assert_eq!(vm.metrics.utf8_seek_bytes, 6);
+    }
+
+    // -----------------------------------------------------------------------
+    // rt_str_region_is_tcl_alpha/alnum: the non-materializing counterpart of
+    // rt_is_tcl_alpha/rt_is_tcl_alnum (one_scalar's RANGE contract, the same
+    // ASCII/non-ASCII seek split as rt_str_region_eq), never allocating.
+
+    #[test]
+    fn region_classify_matches_materializing_form_ascii_and_non_ascii() {
+        let mut vm = vm();
+        let base = str_val(&mut vm, "a1\u{e9}\u{6771}!");
+        for (i, (alpha, alnum)) in [(true, true), (false, true), (true, true), (true, true), (false, false)]
+            .into_iter()
+            .enumerate()
+        {
+            let i = i as i64;
+            assert_eq!(
+                rt_str_region_is_tcl_alpha(&mut *vm, base, small(i), small(i + 1)),
+                bool_value(alpha)
+            );
+            assert_eq!(
+                rt_str_region_is_tcl_alnum(&mut *vm, base, small(i), small(i + 1)),
+                bool_value(alnum)
+            );
+        }
+    }
+
+    #[test]
+    fn region_classify_range_error_on_non_one_scalar_width() {
+        let mut vm = vm();
+        let base = str_val(&mut vm, "hello");
+        assert_eq!(rt_str_region_is_tcl_alpha(&mut *vm, base, small(1), small(3)), NO_VALUE);
+        assert_eq!(rt_str_region_is_tcl_alnum(&mut *vm, base, small(2), small(2)), NO_VALUE);
+    }
+
+    #[test]
+    fn region_classify_non_ascii_records_seek_bytes() {
+        let mut vm = vm();
+        let base = str_val(&mut vm, &"\u{6771}".repeat(10));
+        rt_str_region_is_tcl_alpha(&mut *vm, base, small(3), small(4));
+        assert_eq!(vm.metrics.utf8_seek_bytes, 9);
+    }
+
+    #[test]
+    fn region_classify_ascii_records_no_seek() {
+        let mut vm = vm();
+        let base = str_val(&mut vm, "hello");
+        rt_str_region_is_tcl_alnum(&mut *vm, base, small(3), small(4));
+        assert_eq!(vm.metrics.utf8_seek_bytes, 0);
     }
 
     // -----------------------------------------------------------------------

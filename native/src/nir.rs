@@ -104,6 +104,16 @@ pub enum OpCode {
     /// is per Unicode scalar, never per UTF-8 byte).
     StrIsTclAlpha,
     StrIsTclAlnum,
+    /// `StrIsTclAlpha`/`StrIsTclAlnum`'s non-materializing counterpart for a
+    /// validated StringRegion operand (base, start, end -- exactly
+    /// `RegionCheck`'s three operands): classifies the region's one Unicode
+    /// scalar directly from BASE's text at the byte span [start, end)
+    /// denotes, with no String ever allocated for it (see hir/
+    /// stringregion.tcl's ConsumingParams and native/lower.tcl's "String
+    /// regions" section). RANGE, exactly like the materializing ops, when
+    /// the region is not exactly one Unicode scalar wide.
+    StrRegionIsTclAlpha,
+    StrRegionIsTclAlnum,
     /// Representation transitions and raw (untagged machine-integer)
     /// arithmetic/comparison: see the "Representation" section of
     /// native/lower.tcl. A raw operand/result is never a tagged Value: it
@@ -167,6 +177,8 @@ impl OpCode {
             "strutf8bytes" => StrUtf8Bytes,
             "strtclalpha" => StrIsTclAlpha,
             "strtclalnum" => StrIsTclAlnum,
+            "strregiontclalpha" => StrRegionIsTclAlpha,
+            "strregiontclalnum" => StrRegionIsTclAlnum,
             "rbox" => RBox,
             "runbox" => RUnbox,
             "riadd" => RIAdd,
@@ -189,7 +201,7 @@ impl OpCode {
             StrLen | StrLower | ListLen | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList
             | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | Hash | RBox | RUnbox
             | StrByteLen | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum => Some(1),
-            Substr | MutArraySet | RegionCheck => Some(3),
+            Substr | MutArraySet | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum => Some(3),
             RegionEq => Some(4),
             MutArrayCopy => Some(5),
             _ => Some(2),
