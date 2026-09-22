@@ -11,6 +11,7 @@
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot examples stdlib corpus.tcl]
 
 interp recursionlimit {} 1000000
 
@@ -290,5 +291,327 @@ test blockescape-sum-refined-2 {sum-refined's NIR has no closure/callenv/rt_clos
     set nirText [dict get [native::lower::program $hir] text]
     list [regexp {closure |callenv} $nirText] [regexp {"step" params=2 env=0 regs=\d+ pnames="x n" captures=0} $nirText]
 } -result {0 1}
+
+# ---------------------------------------------------------------------------
+# Capture-explicit StringRegion companions (the "capture-explicit
+# StringRegion" milestone): a blockescape-virtual Block whose result some
+# caller wants in StringRegion form no longer forces materialization --
+# native/lower.tcl's Call dispatches such a call to the callee's *internal
+# region companion* instead of its ordinary internal variant, reusing the
+# exact same flattened captures either way. char_at's own before/after shape
+# is exercised directly on refined-checks.ir further below; the fixtures
+# here are deliberately independent of Emailish?/web.tcl (#33/#34): the same
+# composition, proven general.
+
+# The Block allocation count of TEXT under BLOCK-ESCAPE-OPT/STRING-REGION-OPT
+# (each 1 or 0).
+proc blockAllocsOpt {text blockEscapeOpt stringRegionOpt} {
+    return [dict get [native::allocationReport [sourceHir $text] summary 1 \
+        -block-escape-opt $blockEscapeOpt -string-region-opt $stringRegionOpt] byKind Block allocations]
+}
+
+# ---------------------------------------------------------------------------
+# Minimal independent fixture (#34, #75): a nonescaping `at` whose result is
+# consumed only in region form by a nonescaping `scan` -- zero Block
+# allocation, no source-specific recognition of any kind.
+
+set ::atScanSrc {
+fn outer(s):
+    fn at(i):
+        substring(s, i, i + 1)
+    fn scan(i):
+        if at(i) == "x":
+            true
+        else:
+            false
+    scan(1)
+
+outer("axb")
+}
+
+test blockescape-region-companion-minimal-1 {a nonescaping char-accessor consumed only in region form allocates no Block} -body {
+    # Baseline (block-escape-opt 0) materializes both at and scan (2
+    # closures); the optimized path allocates neither.
+    list [assertParity $::atScanSrc] [blockAllocs $::atScanSrc 1] [blockAllocs $::atScanSrc 0]
+} -result {{bool true} 0 2}
+
+test blockescape-region-companion-minimal-2 {at's NIR has no closure/callenvmulti, and env=0/results=3} -body {
+    set nirText [dict get [native::lower::program [sourceHir $::atScanSrc]] text]
+    list [regexp {closure |callenvmulti} $nirText] \
+        [regexp {"at" params=2 env=0 regs=\d+ pnames="i s" captures=0 instance="generic" results=3} $nirText]
+} -result {0 1}
+
+test blockescape-region-companion-minimal-3 {scan's captures flatten through at to [s], never [at]} -body {
+    set nirText [dict get [native::lower::program [sourceHir $::atScanSrc]] text]
+    regexp {"scan" params=2 env=0 regs=\d+ pnames="i s" captures=0} $nirText
+} -result 1
+
+test blockescape-region-companion-minimal-4 {the region call is a direct callmulti, never callenvmulti} -body {
+    set nirText [dict get [native::lower::program [sourceHir $::atScanSrc]] text]
+    list [regexp {callmulti} $nirText] [regexp {callenvmulti} $nirText]
+} -result {1 0}
+
+# ---------------------------------------------------------------------------
+# Mixed ordinary + region consumer (#35, #14): the same virtualized `at`
+# serves an ordinary (materializing) String caller and a region caller,
+# neither forcing the other's representation.
+
+set ::atMixedSrc {
+fn outer(s):
+    fn at(i):
+        substring(s, i, i + 1)
+    fn use(i, j):
+        x = at(i)
+        if at(j) == ":":
+            concat(x, "!")
+        else:
+            concat(x, "?")
+    use(0, 1)
+
+outer("a:b")
+}
+
+test blockescape-region-companion-mixed-1 {a virtualized at serves both an ordinary and a region caller correctly} -body {
+    # Baseline (block-escape-opt 0) materializes both at and use (2
+    # closures); the optimized path allocates neither (x still materializes
+    # a String -- it genuinely escapes into concat -- but never a Block).
+    list [assertParity $::atMixedSrc] [blockAllocs $::atMixedSrc 1] [blockAllocs $::atMixedSrc 0]
+} -result {{str a!} 0 2}
+
+test blockescape-region-companion-mixed-2 {at gets both an ordinary internal variant and an internal region companion} -body {
+    set nirText [dict get [native::lower::program [sourceHir $::atMixedSrc]] text]
+    set atLines [regexp -all -inline -line {^func \d+ "at" params=2 env=0.*$} $nirText]
+    set withResults [llength [lsearch -all -inline -regexp $atLines {results=3}]]
+    list [regexp {closure |callenvmulti} $nirText] [llength $atLines] $withResults
+} -result {0 2 1}
+
+# ---------------------------------------------------------------------------
+# Escaping closure coexisting with a virtualized region-result closure in
+# the same program (#16, #36): the canonical, closure-taking entry (and its
+# canonical region companion, for a generic/dynamic caller) is retained for
+# a Block that genuinely escapes, while a *different* nonescaping closure in
+# the same program is virtualized and served through the new internal
+# region companion -- neither representation forces the other. (A single
+# binding cannot itself have both an escaping and a virtualizable use:
+# hir/blockescape.tcl's RefsAsCalls declines virtualization the moment any
+# reference is not an exact call, so this fixture demonstrates the
+# coexistence at the whole-program level, which is what #15's "canonical
+# entries remain available" and #16's "mixed materialized and virtual
+# callers" actually require of lowering.)
+
+set ::mixedProgramSrc {
+fn makeAccessor(s):
+    fn at(i):
+        substring(s, i, i + 1)
+    at
+
+fn scanner(s2):
+    fn at2(i):
+        substring(s2, i, i + 1)
+    fn scan(i):
+        at2(i) == "z"
+    scan(2)
+
+acc = makeAccessor("hello")
+[acc(1), scanner("zzzzz")]
+}
+
+test blockescape-region-companion-escaping-coexist-1 {an escaping closure and a virtualized region-result closure coexist correctly} -body {
+    # Optimized: only the genuinely escaping `at` allocates (1 Block); `at2`
+    # and `scan` never do. Baseline (block-escape-opt 0) also materializes
+    # at2 and scan (3 Blocks total), confirming the optimized path is
+    # strictly fewer, not merely different.
+    set on [blockAllocs $::mixedProgramSrc 1]
+    set off [blockAllocs $::mixedProgramSrc 0]
+    list [assertParity $::mixedProgramSrc] $on $off
+} -result {{list {{str e} {bool true}}} 1 3}
+
+test blockescape-region-companion-escaping-coexist-2 {the escaping at still builds a canonical closure; at2 never does} -body {
+    set nirText [dict get [native::lower::program [sourceHir $::mixedProgramSrc]] text]
+    list [regexp {closure } $nirText] [regexp {callenvmulti} $nirText] \
+        [regexp {"at2" params=2 env=0 regs=\d+ pnames="i s2" captures=0 instance="generic" results=3} $nirText]
+} -result {1 0 1}
+
+# ---------------------------------------------------------------------------
+# GC stress adversarial case (#29, #43): the captured base String must stay
+# correctly rooted across a self-tail loop that both calls the internal
+# region companion (never allocates) and, on the same iteration, calls the
+# ordinary internal variant (materializes, and can allocate/collect) before
+# using the region-eligible capture again on the next iteration.
+
+test blockescape-region-companion-gc-stress-1 {a captured base String survives a self-tail loop mixing region and ordinary char_at-shaped calls, under GC stress} -body {
+    set text {
+fn f(n, s):
+    fn at(i):
+        substring(s, i, i + 1)
+    fn scan(i, acc):
+        if i >= n:
+            acc
+        else:
+            if at(i) == "x":
+                scan(i + 1, concat(acc, at(i)))
+            else:
+                scan(i + 1, acc)
+    scan(0, "")
+
+f(6, "xoxoxo")
+}
+    set baseline [assertParity $text]
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    set result [catch {native::evalHir [sourceHir $text]} value]
+    unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    list $baseline $result $value [blockAllocs $text 1]
+} -result {{str xxx} 0 {str xxx} 0}
+
+# ---------------------------------------------------------------------------
+# Error/Unicode parity (#69): a locally-bound (blockescape-eligible) char
+# accessor's bounds and classification errors, and non-ASCII/astral
+# behavior, exactly match the unoptimized baseline -- not just the
+# top-level-function StringRegion consumer shapes native-string-view.test/
+# native-string-region.test already cover (those never exercise this
+# milestone's own new dispatch at all: a top-level `fn` is never a
+# blockescape candidate in the first place, only a *locally bound* closure
+# is).
+
+# Asserts optimized (both opts 1) and baseline (both opts 0) raise the same
+# semantic error, agreeing with the reference interpreter too. Returns
+# {ERRORCODE MESSAGE}.
+proc assertErrorParity {text} {
+    set hir [sourceHir $text]
+    set exprs [hir::lower $hir]
+    foreach label {interp on off} {
+        switch -- $label {
+            interp { set code [catch {core::evalProgram $exprs} value options] }
+            on     { set code [catch {native::evalHir $hir -block-escape-opt 1 -string-region-opt 1} value options] }
+            off    { set code [catch {native::evalHir $hir -block-escape-opt 0 -string-region-opt 0} value options] }
+        }
+        if {!$code} {
+            error "$label: expected an error, got [core::value::show $value 1]"
+        }
+        set outcomes($label) [list [dict get $options -errorcode] $value]
+    }
+    if {$outcomes(on) ne $outcomes(off) || [lindex $outcomes(on) 0] ne [lindex $outcomes(interp) 0]} {
+        error "error mismatch: interp $outcomes(interp), on $outcomes(on), off $outcomes(off)"
+    }
+    return $outcomes(on)
+}
+
+test blockescape-region-companion-bounds-error-1 {a locally-bound char accessor's out-of-range region access raises the same RANGE error, optimized and baseline} -body {
+    set text {
+fn outer(s, i):
+    fn at(j):
+        substring(s, j, j + 1)
+    fn scan(k):
+        at(k) == "z"
+    scan(i)
+
+outer("ab", 5)
+}
+    assertErrorParity $text
+} -result {{CORE SEMANTIC RANGE} {substring: range 5..6 is outside 0..2}}
+
+test blockescape-region-companion-unicode-1 {a locally-bound char accessor over an astral-plane String classifies correctly, in region form, with zero Block allocation} -body {
+    set emoji [encoding convertfrom utf-8 "\xf0\x9f\x98\x80"]
+    set text "
+fn outer(s):
+    fn at(i):
+        substring(s, i, i + 1)
+    fn scan(i):
+        is_tcl_alpha(at(i))
+    \[scan(0), scan(1)\]
+
+outer([corpus::literal "a$emoji"])
+"
+    list [assertParity $text] [blockAllocs $text 1]
+} -result {{list {{bool true} {bool false}}} 0}
+
+# ---------------------------------------------------------------------------
+# Flag composition (#70-73): the four combinations of -block-escape-opt and
+# -string-region-opt degrade conservatively, and neither optimization
+# requires the other to be enabled.
+
+test blockescape-region-companion-flags-both-on {both on: zero Block allocation, region form used} -body {
+    list [dict get [native::allocationReport [sourceHir $::atScanSrc] summary 1 \
+            -block-escape-opt 1 -string-region-opt 1] byKind Block allocations] \
+        [native::evalHir [sourceHir $::atScanSrc] -block-escape-opt 1 -string-region-opt 1]
+} -result {0 {bool true}}
+
+test blockescape-region-companion-flags-blockescape-only {block-escape on, string-region off: at still virtualizes (ordinary internal variant), no dependency on StringRegion} -body {
+    set nirText [dict get [native::lower::program [sourceHir $::atScanSrc] -string-region-opt 0] text]
+    list [blockAllocsOpt $::atScanSrc 1 0] [regexp {closure |callenvmulti} $nirText] \
+        [native::evalHir [sourceHir $::atScanSrc] -block-escape-opt 1 -string-region-opt 0]
+} -result {0 0 {bool true}}
+
+test blockescape-region-companion-flags-stringregion-only {string-region on, block-escape off: pre-milestone behavior -- a real at closure and its canonical region companion} -body {
+    # Both at and scan materialize (2 closures) with block-escape off; at's
+    # region use still reaches its canonical, closure-taking region
+    # companion through callenvmulti, exactly the pre-milestone shape.
+    set nirText [dict get [native::lower::program [sourceHir $::atScanSrc] -block-escape-opt 0] text]
+    list [blockAllocsOpt $::atScanSrc 0 1] [regexp {closure } $nirText] [regexp {callenvmulti} $nirText] \
+        [native::evalHir [sourceHir $::atScanSrc] -block-escape-opt 0 -string-region-opt 1]
+} -result {2 1 1 {bool true}}
+
+test blockescape-region-companion-flags-both-off {both off: the fully unoptimized baseline} -body {
+    list [blockAllocsOpt $::atScanSrc 0 0] \
+        [native::evalHir [sourceHir $::atScanSrc] -block-escape-opt 0 -string-region-opt 0]
+} -result {2 {bool true}}
+
+# ---------------------------------------------------------------------------
+# refined-checks itself (the primary acceptance case, #2, #18-19, #47, #85):
+# char_at's own two recurrent 800+400 Block allocation sites are gone, and
+# the whole program's Block allocation count collapses to the one surviving
+# module-startup web::uri_escape_text closure (out of this milestone's
+# scope, #48).
+
+test blockescape-region-companion-refined-checks-1 {refined-checks.ir: Block allocations collapse from 1201 to 1 (module-startup uri_escape_text only)} -body {
+    core::loadLibrary web
+    set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
+    set on [native::allocationReport $hir summary 1]
+    list [native::evalHir $hir] [dict get $on total allocations] [dict get $on byKind Block allocations] \
+        [dict get $on byKind String allocations] [dict get $on byKind List allocations]
+} -result {{list {{int 400} {int 0}}} 15 1 9 5}
+
+test blockescape-region-companion-refined-checks-2 {refined-checks.ir: char_at's NIR has no closure/callenvmulti, and env=0/results=3} -body {
+    core::loadLibrary web
+    set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
+    set nirText [dict get [native::lower::program $hir] text]
+    list [regexp {"char_at" params=1} $nirText] \
+        [llength [regexp -all -inline {"char_at" params=2 env=0 regs=\d+ pnames="i v" captures=0 instance="generic" results=3} $nirText]] \
+        [regexp {callenvmulti} $nirText]
+} -result {0 2 0}
+
+test blockescape-region-companion-refined-checks-3 {refined-checks.ir: scanner helpers flatten captures from [n, char_at] to [n, v]} -body {
+    core::loadLibrary web
+    set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
+    set nirText [dict get [native::lower::program $hir] text]
+    set names {scan_local scan_label scan_alpha tld_ok domain_loop}
+    set stale 0
+    set flattened 0
+    foreach name $names {
+        if {[regexp "\"$name\" params=3 env=0 \[^\\n\]*pnames=\"i n char_at\"" $nirText]} {
+            incr stale
+        }
+        if {[llength [regexp -all -inline "\"$name\" params=3 env=0 \[^\\n\]*pnames=\"i n v\"" $nirText]] == 2} {
+            incr flattened
+        }
+    }
+    list $stale $flattened [llength $names]
+} -result {0 5 5}
+
+test blockescape-region-companion-refined-checks-4 {refined-checks.ir under GC stress: unchanged value, on the composed representation} -body {
+    core::loadLibrary web
+    set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    set result [catch {native::evalHir $hir} value]
+    unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    list $result $value
+} -result {0 {list {{int 400} {int 0}}}}
+
+test blockescape-region-companion-refined-checks-5 {refined-checks.ir: self-tail scanner lowering is still a loop backedge (tail, never tailenv/a recursive call), and the loop-backedge count is unchanged from before this milestone} -body {
+    core::loadLibrary web
+    set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
+    set nirText [dict get [native::lower::program $hir] text]
+    list [regexp {tailenv} $nirText] [llength [regexp -all -inline -line {^\s+tail .*$} $nirText]]
+} -result {0 11}
 
 cleanupTests

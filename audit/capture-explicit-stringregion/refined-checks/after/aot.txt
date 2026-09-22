@@ -1,0 +1,229 @@
+<program>: closed (transitively guarded)   [program, ir {}]
+  dispatch: closed -- natives: list x2; functions: check (non-tail), web::uri_escape_text (non-tail)
+  blockers: none
+  note:     line 33:19  e21  creates a closure capturing values
+  runtime:  closure-env, list-alloc
+
+web::uri_escape_text: closed (transitively guarded)   [e21, line 33:19]
+  params:   s : any   result: any
+  captures: web::hex_digits (value)
+  dispatch: closed -- functions: esc_from (tail)
+  blockers: none
+  note:     line 122:16  e191  creates a closure capturing values
+  note:     line 125:17  e208  creates a closure capturing values
+  note:     line 131:16  e237  creates a closure capturing values
+  note:     line 141:16  e268  creates a closure capturing values
+  runtime:  closure-env
+
+high_nibble: guarded   [e23, line 35:19]
+  params:   b : any   result: int
+  dispatch: closed -- natives: <= x15
+  blockers:
+    line 36:12  e27  UnknownParameterKind: <= needs int; parameter b (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+is_unreserved: guarded   [e116, line 83:21]
+  params:   b : any   result: bool
+  dispatch: closed -- natives: <= x12
+  blockers:
+    line 84:12  e120  UnknownParameterKind: <= needs int; parameter b (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+hex_pair: guarded   [e191, line 122:16]
+  params:   b : any   result: str
+  captures: web::hex_digits (value), high_nibble (block)
+  dispatch: closed -- natives: concat, list_get x2, mod; functions: high_nibble (non-tail)
+  blockers:
+    line 123:16  e194  UnknownAggregateElementType: concat needs str; the element read by list_get at line 123:16 has no static kind
+    line 123:54  e200  UnknownAggregateElementType: concat needs str; the element read by list_get at line 123:54 has no static kind
+    line 123:79  e205  UnknownParameterKind: mod needs int; parameter b (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, range-check, string-alloc, tagged-values
+
+esc_bytes: guarded   [e208, line 125:17]
+  params:   bytes : any, i : any, acc : any   result: any
+  captures: esc_bytes (value), hex_pair (value)
+  dispatch: closed -- natives: >=, list_length, +, concat x2, list_get; functions: esc_bytes (self, tail), hex_pair (non-tail)
+  blockers:
+    line 126:12  e212  UnknownParameterKind: >= needs int; parameter i (no annotation, no call-site inference) has no static kind
+    line 126:29  e215  UnknownParameterKind: list_length needs list; parameter bytes (no annotation, no call-site inference) has no static kind
+    line 129:44  e226  UnknownParameterKind: concat needs str; parameter acc (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, closure-env, range-check, string-alloc, tagged-values
+
+esc_char: guarded   [e237, line 131:16]
+  params:   c : any   result: any
+  captures: is_unreserved (block), esc_bytes (value)
+  dispatch: closed -- natives: encode_utf8, ==, list_length, list_get; functions: esc_bytes (tail), is_unreserved (non-tail)
+  blockers:
+    line 132:29  e241  UnknownParameterKind: encode_utf8 needs str; parameter c (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, closure-env, list-alloc, range-check, tagged-values
+
+esc_from: guarded   [e268, line 141:16]
+  params:   text : any, i : any, acc : any   result: any
+  captures: esc_from (value), esc_char (value)
+  dispatch: closed -- natives: >=, length, + x2, concat, substring; functions: esc_char (non-tail), esc_from (self, tail)
+  blockers:
+    line 142:12  e272  UnknownParameterKind: >= needs int; parameter i (no annotation, no call-site inference) has no static kind
+    line 142:24  e275  UnknownParameterKind: length needs str; parameter text (no annotation, no call-site inference) has no static kind
+    line 145:42  e286  UnknownParameterKind: concat needs str; parameter acc (no annotation, no call-site inference) has no static kind
+    line 145:47  e287  UnknownCallResultKind: concat needs str; the result of esc_char at line 145:47 has no static kind
+  runtime:  bigint, char-index, closure-env, range-check, string-alloc, tagged-values
+
+check: guarded   [e303, ir {0 2}]
+  params:   n : any, acc : any, s : any, q : any   result: any
+  captures: check (block)
+  dispatch: closed -- natives: <=, UriQueryValue?, -, +; functions: block e313 (non-tail), block e533 (non-tail), check (self, tail)
+  blockers:
+    ir {0 2 2 1 2}  e307  UnknownParameterKind: <= needs int; parameter n (no annotation, no call-site inference) has no static kind
+    ir {0 2 2 3 2 2 2 2 2 2 1 2}  e754  UnknownParameterKind: UriQueryValue? needs str; parameter q (no annotation, no call-site inference) has no static kind
+    ir {0 2 2 3 3 3 2}  e767  UnknownParameterKind: + needs int; parameter acc (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, evidence, tagged-values
+
+block e313: guarded   [e313, ir {0 2 2 3 2 2 1 1}]
+  params:   v : any   result: bool
+  dispatch: closed -- natives: length, == x3, >=, +; functions: char_at (non-tail), domain_loop (non-tail), scan_local (non-tail)
+  blockers:
+    ir {0 2 2 3 2 2 1 1 2 2 2}  e317  UnknownParameterKind: length needs str; parameter v (no annotation, no call-site inference) has no static kind
+  note:     ir {0 2 2 3 2 2 1 1 3 2}  e319  creates a closure capturing values
+  note:     ir {0 2 2 3 2 2 1 1 6 2}  e375  creates a closure capturing values
+  note:     ir {0 2 2 3 2 2 1 1 7 2}  e396  creates a closure capturing values
+  note:     ir {0 2 2 3 2 2 1 1 8 2}  e417  creates a closure capturing values
+  note:     ir {0 2 2 3 2 2 1 1 9 2}  e438  creates a closure capturing values
+  note:     ir {0 2 2 3 2 2 1 1 10 2}  e457  creates a closure capturing values
+  runtime:  bigint, char-index, closure-env, tagged-values
+
+char_at: guarded   [e319, ir {0 2 2 3 2 2 1 1 3 2}]
+  params:   i : any   result: str
+  captures: v (value)
+  dispatch: closed -- natives: substring, +
+  blockers:
+    ir {0 2 2 3 2 2 1 1 3 2 2 3}  e323  UnknownParameterKind: substring needs int; parameter i (no annotation, no call-site inference) has no static kind
+    ir {0 2 2 3 2 2 1 1 3 2 2 4 2}  e326  UnknownParameterKind: + needs int; parameter i (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, char-index, range-check, string-alloc, tagged-values
+
+is_local_char: guarded   [e329, ir {0 2 2 3 2 2 1 1 4 2}]
+  params:   c : any   result: bool
+  dispatch: closed -- natives: is_tcl_alnum, == x5
+  blockers:
+    ir {0 2 2 3 2 2 1 1 4 2 2 1 2}  e333  UnknownParameterKind: is_tcl_alnum needs str; parameter c (no annotation, no call-site inference) has no static kind
+  runtime:  char-index, range-check, tagged-values
+
+is_label_char: guarded   [e364, ir {0 2 2 3 2 2 1 1 5 2}]
+  params:   c : any   result: bool
+  dispatch: closed -- natives: is_tcl_alnum, ==
+  blockers:
+    ir {0 2 2 3 2 2 1 1 5 2 2 1 2}  e368  UnknownParameterKind: is_tcl_alnum needs str; parameter c (no annotation, no call-site inference) has no static kind
+  runtime:  char-index, range-check, tagged-values
+
+scan_local: guarded   [e375, ir {0 2 2 3 2 2 1 1 6 2}]
+  params:   i : any   result: int
+  captures: n (value), is_local_char (block), char_at (value), scan_local (value)
+  dispatch: closed -- natives: >=, +; functions: char_at (non-tail), is_local_char (non-tail), scan_local (self, tail)
+  blockers:
+    ir {0 2 2 3 2 2 1 1 6 2 2 1 2}  e379  UnknownParameterKind: >= needs int; parameter i (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, closure-env, tagged-values
+
+scan_label: guarded   [e396, ir {0 2 2 3 2 2 1 1 7 2}]
+  params:   i : any   result: int
+  captures: n (value), is_label_char (block), char_at (value), scan_label (value)
+  dispatch: closed -- natives: >=, +; functions: char_at (non-tail), is_label_char (non-tail), scan_label (self, tail)
+  blockers:
+    ir {0 2 2 3 2 2 1 1 7 2 2 1 2}  e400  UnknownParameterKind: >= needs int; parameter i (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, closure-env, tagged-values
+
+scan_alpha: guarded   [e417, ir {0 2 2 3 2 2 1 1 8 2}]
+  params:   i : any   result: int
+  captures: n (value), char_at (value), scan_alpha (value)
+  dispatch: closed -- natives: >=, is_tcl_alpha, +; functions: char_at (non-tail), scan_alpha (self, tail)
+  blockers:
+    ir {0 2 2 3 2 2 1 1 8 2 2 1 2}  e421  UnknownParameterKind: >= needs int; parameter i (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, char-index, closure-env, range-check, tagged-values
+
+tld_ok: guarded   [e438, ir {0 2 2 3 2 2 1 1 9 2}]
+  params:   i : any   result: bool
+  captures: scan_alpha (value), n (value)
+  dispatch: closed -- natives: ==, >=, -; functions: scan_alpha (non-tail)
+  blockers:
+    ir {0 2 2 3 2 2 1 1 9 2 3 2 2 2 3}  e453  UnknownParameterKind: - needs int; parameter i (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, closure-env, tagged-values
+
+domain_loop: closed (transitively guarded)   [e457, ir {0 2 2 3 2 2 1 1 10 2}]
+  params:   i : any   result: int
+  captures: scan_label (value), n (value), char_at (value), tld_ok (value), domain_loop (value)
+  dispatch: closed -- natives: == x2, >=, +; functions: char_at (non-tail), domain_loop (self, tail), scan_label (non-tail), tld_ok (non-tail)
+  blockers: none
+  runtime:  bigint, closure-env, structural-equality
+
+block e533: guarded   [e533, ir {0 2 2 3 2 2 2 2 1 1}]
+  params:   v : any   result: bool
+  dispatch: closed -- natives: length, == x3, >=, +; functions: char_at (non-tail), domain_loop (non-tail), scan_local (non-tail)
+  blockers:
+    ir {0 2 2 3 2 2 2 2 1 1 2 2 2}  e537  UnknownParameterKind: length needs str; parameter v (no annotation, no call-site inference) has no static kind
+  note:     ir {0 2 2 3 2 2 2 2 1 1 3 2}  e539  creates a closure capturing values
+  note:     ir {0 2 2 3 2 2 2 2 1 1 6 2}  e595  creates a closure capturing values
+  note:     ir {0 2 2 3 2 2 2 2 1 1 7 2}  e616  creates a closure capturing values
+  note:     ir {0 2 2 3 2 2 2 2 1 1 8 2}  e637  creates a closure capturing values
+  note:     ir {0 2 2 3 2 2 2 2 1 1 9 2}  e658  creates a closure capturing values
+  note:     ir {0 2 2 3 2 2 2 2 1 1 10 2}  e677  creates a closure capturing values
+  runtime:  bigint, char-index, closure-env, tagged-values
+
+char_at: guarded   [e539, ir {0 2 2 3 2 2 2 2 1 1 3 2}]
+  params:   i : any   result: str
+  captures: v (value)
+  dispatch: closed -- natives: substring, +
+  blockers:
+    ir {0 2 2 3 2 2 2 2 1 1 3 2 2 3}  e543  UnknownParameterKind: substring needs int; parameter i (no annotation, no call-site inference) has no static kind
+    ir {0 2 2 3 2 2 2 2 1 1 3 2 2 4 2}  e546  UnknownParameterKind: + needs int; parameter i (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, char-index, range-check, string-alloc, tagged-values
+
+is_local_char: guarded   [e549, ir {0 2 2 3 2 2 2 2 1 1 4 2}]
+  params:   c : any   result: bool
+  dispatch: closed -- natives: is_tcl_alnum, == x5
+  blockers:
+    ir {0 2 2 3 2 2 2 2 1 1 4 2 2 1 2}  e553  UnknownParameterKind: is_tcl_alnum needs str; parameter c (no annotation, no call-site inference) has no static kind
+  runtime:  char-index, range-check, tagged-values
+
+is_label_char: guarded   [e584, ir {0 2 2 3 2 2 2 2 1 1 5 2}]
+  params:   c : any   result: bool
+  dispatch: closed -- natives: is_tcl_alnum, ==
+  blockers:
+    ir {0 2 2 3 2 2 2 2 1 1 5 2 2 1 2}  e588  UnknownParameterKind: is_tcl_alnum needs str; parameter c (no annotation, no call-site inference) has no static kind
+  runtime:  char-index, range-check, tagged-values
+
+scan_local: guarded   [e595, ir {0 2 2 3 2 2 2 2 1 1 6 2}]
+  params:   i : any   result: int
+  captures: n (value), is_local_char (block), char_at (value), scan_local (value)
+  dispatch: closed -- natives: >=, +; functions: char_at (non-tail), is_local_char (non-tail), scan_local (self, tail)
+  blockers:
+    ir {0 2 2 3 2 2 2 2 1 1 6 2 2 1 2}  e599  UnknownParameterKind: >= needs int; parameter i (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, closure-env, tagged-values
+
+scan_label: guarded   [e616, ir {0 2 2 3 2 2 2 2 1 1 7 2}]
+  params:   i : any   result: int
+  captures: n (value), is_label_char (block), char_at (value), scan_label (value)
+  dispatch: closed -- natives: >=, +; functions: char_at (non-tail), is_label_char (non-tail), scan_label (self, tail)
+  blockers:
+    ir {0 2 2 3 2 2 2 2 1 1 7 2 2 1 2}  e620  UnknownParameterKind: >= needs int; parameter i (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, closure-env, tagged-values
+
+scan_alpha: guarded   [e637, ir {0 2 2 3 2 2 2 2 1 1 8 2}]
+  params:   i : any   result: int
+  captures: n (value), char_at (value), scan_alpha (value)
+  dispatch: closed -- natives: >=, is_tcl_alpha, +; functions: char_at (non-tail), scan_alpha (self, tail)
+  blockers:
+    ir {0 2 2 3 2 2 2 2 1 1 8 2 2 1 2}  e641  UnknownParameterKind: >= needs int; parameter i (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, char-index, closure-env, range-check, tagged-values
+
+tld_ok: guarded   [e658, ir {0 2 2 3 2 2 2 2 1 1 9 2}]
+  params:   i : any   result: bool
+  captures: scan_alpha (value), n (value)
+  dispatch: closed -- natives: ==, >=, -; functions: scan_alpha (non-tail)
+  blockers:
+    ir {0 2 2 3 2 2 2 2 1 1 9 2 3 2 2 2 3}  e673  UnknownParameterKind: - needs int; parameter i (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, closure-env, tagged-values
+
+domain_loop: closed (transitively guarded)   [e677, ir {0 2 2 3 2 2 2 2 1 1 10 2}]
+  params:   i : any   result: int
+  captures: scan_label (value), n (value), char_at (value), tld_ok (value), domain_loop (value)
+  dispatch: closed -- natives: == x2, >=, +; functions: char_at (non-tail), domain_loop (self, tail), scan_label (non-tail), tld_ok (non-tail)
+  blockers: none
+  runtime:  bigint, closure-env, structural-equality

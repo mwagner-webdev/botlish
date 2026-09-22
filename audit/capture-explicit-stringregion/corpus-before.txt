@@ -1,0 +1,13 @@
+fib                total=0      block=0      str=0      list=0      funcs=2    bytes=394     value=17711
+loop-count         total=0      block=0      str=0      list=0      funcs=3    bytes=418     value=3500
+sum-refined        total=0      block=0      str=0      list=0      funcs=3    bytes=292     value=80200
+refined-checks     total=1215   block=1201   str=9      list=5      funcs=27   bytes=18894   value=[400, 0]
+ai_text_clean      total=111    block=0      str=110    list=1      funcs=5    bytes=3003    value=["hello", "hello  world", "AI-generated", "\"hello\"", "'hello'", "wait... what?"]
+csv                total=19     block=0      str=6      list=13     funcs=11   bytes=4731    value=[["name", "age"], ["Alice", "30"], ["Bob", "40"]]
+csv_chunked        total=22     block=0      str=6      list=8      funcs=21   bytes=10347   value=[["name", "age"], ["Alice", "30"], ["Bob", "40"]]
+csv_geometric      total=23     block=0      str=6      list=4      funcs=15   bytes=5333    value=[["name", "age"], ["Alice", "30"], ["Bob", "40"]]
+csv_records        total=83     block=0      str=18     list=11     funcs=59   bytes=21919   value=[2, "Alice", "31", "Berlin", "Bob", "Hamburg", true]
+hashtable          total=5      block=0      str=0      list=1      funcs=30   bytes=13166   value=[true, true, false, false, true, 1]
+matmul             total=16     block=0      str=0      list=16     funcs=7    bytes=4160    value=[[58, 64], [139, 154]]
+string_replace     total=26     block=0      str=25     list=1      funcs=4    bytes=2322    value=["abc", "aXc", "bb", "", ""]
+string_reverse     total=23     block=0      str=22     list=1      funcs=3    bytes=798     value=["", "a", "cba", "dcba", "üöä"]

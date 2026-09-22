@@ -3,7 +3,7 @@
 # them as a code identity plus ordinary capture *values* instead of ever
 # building a heap Block object.
 #
-#   set analysis [hir::blockescape::analyze $hir $spec $stringregion]
+#   set analysis [hir::blockescape::analyze $hir $spec]
 #   hir::blockescape::virtual $analysis $instanceId $bindingId  -> "" | calleeInstanceId
 #   hir::blockescape::wants $analysis $calleeInstanceId          -> 0 | 1
 #   hir::blockescape::captures $analysis $calleeInstanceId       -> BindingId list
@@ -291,7 +291,7 @@ proc hir::blockescape::FlattenBinding {view envless eligible candidates memoVar 
 # set (InstanceId -> 1) of the callee instances some such binding demands an
 # internal (capture-explicit) variant for. CAPTURES is InstanceId ->
 # flattened BindingId list (FlattenBinding), for every instance in WANTS.
-proc hir::blockescape::Bindings {hir spec stringregion} {
+proc hir::blockescape::Bindings {hir spec} {
     set context [dict get $spec context]
     set envless [dict get $context envless]
     set virtual [dict create]
@@ -372,21 +372,7 @@ proc hir::blockescape::Bindings {hir spec stringregion} {
                     continue
                 }
                 set linst [dict get $singleInstance $b]
-                if {$linst eq "" || [hir::stringregion::wants $stringregion $linst]} {
-                    # hir::stringregion.tcl already proved some caller
-                    # asks for THIS instance's result in region form (a
-                    # base/start/end triple: e.g. an immediate `==`/
-                    # `length`/classification consumer, hir/stringregion
-                    # .tcl's own Class A/B/C) -- native/lower.tcl's Call
-                    # always reaches such a use through the instance's
-                    # *canonical*, closure-taking region companion
-                    # (`callenvmulti`, a real captured environment
-                    # register), never a capture-explicit internal
-                    # variant, so this candidate must stay materialized
-                    # for that companion to have a real closure to call
-                    # through (see native/lower.tcl's "String regions"
-                    # section; composing the two optimizations further is
-                    # out of this milestone's scope).
+                if {$linst eq ""} {
                     dict set eligible $b 0
                     set changed 1
                     continue
@@ -501,15 +487,21 @@ proc hir::blockescape::Bindings {hir spec stringregion} {
 # Entry point
 
 # The Block-escape analysis of program HIR under specialization SPEC
-# (hir::specialize::analyze) and the already-computed hir::stringregion
-# analysis STRINGREGION (see Bindings's own use of its `wants` query).
-# Returns a dict:
+# (hir::specialize::analyze). This module is independent of
+# hir::stringregion.tcl: a candidate whose result some caller wants in
+# StringRegion "region" form is no longer excluded here (see
+# native/lower.tcl's "Block virtualization" section, "Composing with
+# String regions") -- native/lower.tcl's Call
+# resolves, per call site, whether an ordinary or region-result internal
+# variant is what that particular use needs, using this analysis' `virtual`
+# /`wants`/`captures` together with hir::stringregion::wants, never by this
+# module declining a candidate on stringregion's behalf. Returns a dict:
 #   virtual       BindingId -> calleeInstanceId (see Bindings)
 #   wants         set (InstanceId -> 1) of callee instances to also emit a
 #                 capture-explicit internal variant for
 #   flatCaptures  InstanceId -> flattened BindingId list (see Bindings)
-proc hir::blockescape::analyze {hir spec stringregion} {
-    lassign [Bindings $hir $spec $stringregion] virtual wants flatCaptures
+proc hir::blockescape::analyze {hir spec} {
+    lassign [Bindings $hir $spec] virtual wants flatCaptures
     return [dict create virtual $virtual wants $wants flatCaptures $flatCaptures]
 }
 

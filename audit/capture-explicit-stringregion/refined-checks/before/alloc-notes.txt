@@ -1,0 +1,44 @@
+value: [400, 0]
+total: allocations 1215 allocatedBytes 58317 headerBytes 48520 payloadBytes 9797 currentLiveObjects 1215 currentLiveBytes 58317 peakLiveObjects 1215 peakLiveBytes 58317 objects
+  String: allocations 9 allocatedBytes 381 headerBytes 360 payloadBytes 21 currentLiveObjects 9 currentLiveBytes 381 reclaimedObjects 0 reclaimedBytes 0
+  List: allocations 5 allocatedBytes 288 headerBytes 120 payloadBytes 168 currentLiveObjects 5 currentLiveBytes 288 reclaimedObjects 0 reclaimedBytes 0
+  MutableArray: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+  BigInt: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+  Result: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+  Block: allocations 1201 allocatedBytes 57648 headerBytes 48040 payloadBytes 9608 currentLiveObjects 1201 currentLiveBytes 57648 reclaimedObjects 0 reclaimedBytes 0
+  Cell: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+  Native: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+
+--- func headers mentioning char_at ---
+func 11 "char_at" params=1 env=1 regs=6 pnames="i" captures=1 instance="generic" rawregs="3" @e319
+func 12 "char_at" params=1 env=1 regs=6 pnames="i" captures=1 instance="generic" results=3 rawregs="3" @e319
+func 13 "scan_local" params=3 env=0 regs=33 pnames="i n char_at" captures=0 instance="generic" rawregs="31" @e375
+func 14 "scan_label" params=3 env=0 regs=17 pnames="i n char_at" captures=0 instance="generic" rawregs="15" @e396
+func 15 "scan_alpha" params=3 env=0 regs=13 pnames="i n char_at" captures=0 instance="generic" rawregs="11" @e417
+func 16 "tld_ok" params=3 env=0 regs=11 pnames="i n char_at" captures=0 instance="generic" rawregs="8" @e438
+func 17 "domain_loop" params=3 env=0 regs=25 pnames="i n char_at" captures=0 instance="generic" rawregs="7 11 19 24" @e457
+func 20 "char_at" params=1 env=1 regs=6 pnames="i" captures=1 instance="generic" rawregs="3" @e539
+func 21 "char_at" params=1 env=1 regs=6 pnames="i" captures=1 instance="generic" results=3 rawregs="3" @e539
+func 22 "scan_local" params=3 env=0 regs=33 pnames="i n char_at" captures=0 instance="generic" rawregs="31" @e595
+func 23 "scan_label" params=3 env=0 regs=17 pnames="i n char_at" captures=0 instance="generic" rawregs="15" @e616
+func 24 "scan_alpha" params=3 env=0 regs=13 pnames="i n char_at" captures=0 instance="generic" rawregs="11" @e637
+func 25 "tld_ok" params=3 env=0 regs=11 pnames="i n char_at" captures=0 instance="generic" rawregs="8" @e658
+func 26 "domain_loop" params=3 env=0 regs=25 pnames="i n char_at" captures=0 instance="generic" rawregs="7 11 19 24" @e677
+
+rt_closure_new count: 5
+callenvmulti count: 12
+callmulti count: 0
+
+--- scanner func headers ---
+func 13 "scan_local" params=3 env=0 regs=33 pnames="i n char_at" captures=0 instance="generic" rawregs="31" @e375
+func 14 "scan_label" params=3 env=0 regs=17 pnames="i n char_at" captures=0 instance="generic" rawregs="15" @e396
+func 15 "scan_alpha" params=3 env=0 regs=13 pnames="i n char_at" captures=0 instance="generic" rawregs="11" @e417
+func 16 "tld_ok" params=3 env=0 regs=11 pnames="i n char_at" captures=0 instance="generic" rawregs="8" @e438
+func 17 "domain_loop" params=3 env=0 regs=25 pnames="i n char_at" captures=0 instance="generic" rawregs="7 11 19 24" @e457
+func 22 "scan_local" params=3 env=0 regs=33 pnames="i n char_at" captures=0 instance="generic" rawregs="31" @e595
+func 23 "scan_label" params=3 env=0 regs=17 pnames="i n char_at" captures=0 instance="generic" rawregs="15" @e616
+func 24 "scan_alpha" params=3 env=0 regs=13 pnames="i n char_at" captures=0 instance="generic" rawregs="11" @e637
+func 25 "tld_ok" params=3 env=0 regs=11 pnames="i n char_at" captures=0 instance="generic" rawregs="8" @e658
+func 26 "domain_loop" params=3 env=0 regs=25 pnames="i n char_at" captures=0 instance="generic" rawregs="7 11 19 24" @e677
+
+--- explain ---

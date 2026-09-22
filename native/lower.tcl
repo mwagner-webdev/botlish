@@ -386,11 +386,11 @@ namespace eval native::lower {
 # keeps working completely unchanged (the milestone's #10 fallback
 # requirement) -- `return step` or `consume_unknown(step)` still build a
 # real heap closure, even for a `step` some other call site virtualizes; a
-# captured-but-ineligible callee (e.g. one some caller asks for in
-# StringRegion "region" form -- see hir/blockescape.tcl's own header)
-# simply stays a genuine, terminal capture -- an ordinary Block value --
-# in every eligible sibling's own flattened list, gracefully degrading
-# rather than losing the sibling's own virtualization.
+# captured-but-ineligible callee (one some use this analysis cannot vouch
+# for as an exact call at all) simply stays a genuine, terminal capture --
+# an ordinary Block value -- in every eligible sibling's own flattened
+# list, gracefully degrading rather than losing the sibling's own
+# virtualization.
 #
 # hir::blockescape.tcl is conservative and additive only, and declines
 # outright (never partially materializes) a binding with any use it cannot
@@ -400,6 +400,52 @@ namespace eval native::lower {
 # BOTLISH_NATIVE_BLOCK_ESCAPE_OPT=0) disables the analysis outright, for
 # differential testing against the unoptimized (canonical closure)
 # baseline.
+#
+# Composing with String regions: capture-explicit region companions
+# ---------------------------------------------------------------------
+# A candidate whose result some caller asks for in StringRegion "region"
+# form (the "String regions" section below -- e.g. `char_at(i) == "@"`, or
+# `is_local_char(char_at(i))` through a ConsumingParams inline call) is
+# *not* excluded from virtualization: the same de-closure conversion above
+# applies, and Call's own dispatch (below, the FlattenedVirtualCall/
+# FlattenedVirtualRegionCall split) resolves, per call site, which of the
+# candidate's two internal variants that particular use needs.
+#
+# An earlier version of this composition (see git history) declined a
+# candidate outright the moment hir::stringregion.tcl proved any caller
+# wanted its result as a region: the only region companion that existed
+# then (RegionCompanionFunction, below) took a real closure/environment
+# register (`callenvmulti`, "capture 0" reads), which a capture-explicit
+# candidate -- by definition, no closure object -- cannot supply. That
+# mismatch is what this section's own internal *region* companion
+# (InternalRegionCompanionFunction, InternalRegionCompanionRef) resolves:
+# it is InternalFunction's own env=0/capture-explicit-parameters shape,
+# generated from the exact same instance and body as the ordinary,
+# closure-taking RegionCompanionFunction, ending in the same `retmulti` of
+# region fields instead of `ret`ing a materialized String. Nothing here
+# fabricates an environment, a fake closure, or a transient Block to bridge
+# the two: the region companion's own captures are simply the same ordinary
+# capture *values* (hir::blockescape::captures) the ordinary internal
+# variant already receives as trailing parameters -- the smallest
+# composition of the two existing "capture representation" (canonical
+# environment vs. capture-explicit) and "result representation" (ordinary
+# vs. StringRegion) dimensions, not a third representation of either.
+#
+# Demand-driven, like every other variant in this file: InternalRegionCompanionRef
+# only ever enters native::lower::program's `pending` work list when Call's
+# FlattenedVirtualRegionCall actually needs it (some call site asks for
+# region form), so a candidate with only ordinary-result callers never gets
+# one, and a candidate with both ordinary- and region-result callers gets
+# both internal variants -- sharing the callee instance's one flattened
+# capture list either way (never independently re-derived, never
+# re-ordered: see FlattenedVirtualRegionCall's own comment). The
+# candidate's canonical, closure-taking function and its canonical region
+# companion (RegionCompanionFunction) remain unconditionally available too,
+# for any caller that genuinely needs a real Block value or reaches the
+# candidate through the closure-taking region companion some other way
+# (e.g. a generic/indirect call) -- exactly the same "purely additive,
+# canonical entry still correct for every other caller" discipline this
+# section's own ordinary internal variant already established.
 #
 # ---------------------------------------------------------------------------
 # Parameter virtualization
@@ -587,6 +633,20 @@ namespace eval native::lower {
 # generic/indirect call) is never virtualized in the first place
 # (hir::stringregion::Bindings), so it simply materializes exactly as
 # before -- once, at the ordinary point Bind/Call already evaluate it.
+#
+# A "remote" region whose call target is itself hir::blockescape.tcl-virtual
+# (a nonescaping local Block, called only through statically known direct
+# calls -- see the "Block virtualization" section above) is not reached
+# through this section's own RegionCompanionFunction/`callenvmulti` at all:
+# Call's early FlattenedVirtualCall/FlattenedVirtualRegionCall dispatch
+# resolves it first, straight to the callee's *internal* region companion
+# (InternalRegionCompanionFunction), with no closure ever built and no
+# environment register ever read. RegionCompanionFunction and this
+# section's own analysis are otherwise completely unaware of Block
+# virtualization -- hir::stringregion.tcl classifies a `remote` region by
+# instance alone, never by how the callee happens to be represented at
+# lowering time -- so hir::blockescape.tcl's own header, not this section,
+# is where that composition is documented in full.
 #
 # Bounds checking (#18 of this milestone): a `substring`-shaped region still
 # validates its bounds -- RegionCheck (`op regioncheck`), emitted at exactly
@@ -873,14 +933,17 @@ proc native::lower::program {hirProgram args} {
         : [dict create arity {} wants {} virtual {} paramVirtual {}]}]
     set stringregion [expr {$stringRegionOpt ? [hir::stringregion::analyze $hirProgram $spec]
         : [dict create regionOf {} wants {} virtual {}]}]
-    # hir::blockescape.tcl needs stringregion's own `wants` (computed
-    # first, above) to decline a candidate whose result some caller asks
-    # for in region form (a base/start/end triple, `Call`'s own `wantRegion`
-    # path): that path always reaches the candidate's *canonical*, closure-
-    # taking region companion via `callenvmulti` (a real captured
-    # environment register), never a capture-explicit internal variant --
-    # see hir/blockescape.tcl's own comment on this exclusion.
-    set blockescape [expr {$blockEscapeOpt ? [hir::blockescape::analyze $hirProgram $spec $stringregion]
+    # hir::blockescape.tcl and hir::stringregion.tcl are now independent
+    # analyses (composed only here, at lowering time -- see native/lower
+    # .tcl's "Block virtualization" and "String regions" sections): a
+    # candidate B whose result some caller asks for in region form is no
+    # longer declined outright. Call's own dispatch (FlattenedVirtualCall/
+    # FlattenedVirtualRegionCall) resolves, per call site, whether the
+    # ordinary capture-explicit internal variant or the capture-explicit
+    # *region companion* internal variant is the one actually demanded, so
+    # this ordering (stringregion before blockescape) is no longer a
+    # dependency -- only kept for determinism/readability.
+    set blockescape [expr {$blockEscapeOpt ? [hir::blockescape::analyze $hirProgram $spec]
         : [dict create virtual {} wants {} flatCaptures {}]}]
     set traversal [expr {$traversalOpt ? [hir::traversal::analyze $hirProgram $spec $stringregion $escape]
         : [dict create plans {}]}]
@@ -923,6 +986,7 @@ proc native::lower::program {hirProgram args} {
             companion       { CompanionFunction $id }
             region          { RegionCompanionFunction $id }
             internal        { InternalFunction $id }
+            internalregion  { InternalRegionCompanionFunction $id }
             fields          { FieldsFunction $id }
             fieldscompanion { FieldsCompanionFunction $id }
         }]
@@ -938,7 +1002,7 @@ proc native::lower::program {hirProgram args} {
         set block [dict get $spec instances $id block]
         list [expr {$block eq "program" ? 0 : [dict get $context positions $block]}] \
             [string range $id 1 end] \
-            [dict get {canonical 0 companion 1 region 1 internal 1 fields 1 fieldscompanion 1} $mode] $key
+            [dict get {canonical 0 companion 1 region 1 internal 1 internalregion 1 fields 1 fieldscompanion 1} $mode] $key
     }]
     set order [lmap entry [lsort -integer -index 0 [lsort -integer -index 1 [lsort -integer -index 2 $order]]] {
         lindex $entry 3
@@ -1119,6 +1183,20 @@ proc native::lower::InternalRef {id} {
     variable pending
     lappend pending [list $id internal]
     return [Placeholder $id internal]
+}
+
+# Like InternalRef, for instance ID's *internal region companion* (see the
+# "Block virtualization" and "String regions" sections above): the
+# composition this milestone adds -- a capture-explicit calling convention
+# (no environment register) together with a StringRegion (base, start, end)
+# multi-value result, instead of either alone. Callers must already know,
+# from hir::blockescape::virtual (ID is some binding's flattened-capture
+# target) AND hir::stringregion::wants (some caller demands ID's result in
+# region form), that this variant is needed.
+proc native::lower::InternalRegionCompanionRef {id} {
+    variable pending
+    lappend pending [list $id internalregion]
+    return [Placeholder $id internalregion]
 }
 
 # Like FunctionRef, for instance ID's `fields` variant (see the "Parameter
@@ -1582,6 +1660,112 @@ proc native::lower::InternalFunction {id} {
     }]]
     set info [dict create id [Placeholder $id internal] name $name block $region instance $id \
         label "[hir::specialize::label $spec $id] (internal)" generic [dict get $instance generic] \
+        envless 1 selfTailCalls $tails calls [dict get $fn calls] \
+        blockers [expr {$blockers - [dict get $fn skippedGuards]}] \
+        guards [dict get $fn guards] knownErrorGuards [dict get $fn knownErrorGuards] \
+        rawUnboxes [dict get $fn rawUnboxes] rawBoxes [dict get $fn rawBoxes] \
+        rawArith [dict get $fn rawArith] rawCompare [dict get $fn rawCompare]]
+    return [list $text $info]
+}
+
+# Lowers the internal *region companion* of instance ID (the composition
+# this milestone adds): the same instance and body as InternalFunction
+# (env=0, its capture bindings ordinary trailing parameters -- see that
+# proc's own comment), except every reachable exit ends in `retmulti` of its
+# region fields (hir::stringregion::classify), exactly like
+# RegionCompanionFunction, instead of materializing and `ret`ing a String.
+# Only ever built for a block instance BOTH hir::blockescape::wants (some
+# binding demands its internal variant) AND hir::stringregion::wants (some
+# caller demands its result in region form) hold for -- demand-driven, like
+# every other variant here: native::lower::program's `pending` work list
+# only ever builds this when some actual call site (Call's
+# FlattenedVirtualRegionCall) asks for it. Reuses exactly the same
+# `native::lower::captureLists` override InternalFunction does (the
+# identical flattened, deterministic BindingId list hir::blockescape
+# ::captures computed -- never independently re-derived, and always in the
+# same order), so the ordinary internal variant and this one agree on
+# capture identity, order, and representation by construction. Returns
+# {TEXT INFO}, in the same shape as InternalFunction/RegionCompanionFunction.
+proc native::lower::InternalRegionCompanionFunction {id} {
+    variable hir
+    variable baseHir
+    variable spec
+    variable context
+    variable envless
+    variable captureLists
+    variable currentInstance
+    variable ranges
+    variable stringregion
+    set currentInstance $id
+    set instance [hir::specialize::instance $spec $id]
+    set region [dict get $instance block]
+    if {$region eq "program" || $region in $envless || ![hir::stringregion::wants $stringregion $id]} {
+        throw {NATIVE BUG} "native lowering: instance $id has no internal region companion"
+    }
+    set hir [hir::specialize::view $baseHir $spec $id]
+    set analysis [hir::aot::analyzeRegion $hir $region $context]
+    CollectChecks $analysis
+    set blockers [llength [lmap b [dict get $analysis blockers] {
+        if {[dict get $b class] ne "representation"} continue
+        set b
+    }]]
+    set fn [dict create region $region instance $id targets [dict get $instance calls] \
+        lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 skippedGuards 0 \
+        rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
+        locals [dict create] loops [dict create] broken [dict create] calls {} companion "" regionCompanion 1 \
+        traversal "" traversalByteReg ""]
+    set name [hir::aot::BlockName $hir $region]
+    set params [hir::get $hir $region params]
+    set scope [hir::get $hir $region bodyScope]
+    set body [hir::get $hir $region body]
+    set rawParams [RawParams $id $instance $params]
+    foreach b $params raw $rawParams {
+        set r [NewReg fn]
+        if {$raw} {
+            MarkRaw fn $r
+            dict set fn locals $b [list rawreg $r]
+        } else {
+            dict set fn locals $b [list reg $r]
+        }
+    }
+    set captureBindings [dict get $captureLists $region]
+    foreach b $captureBindings {
+        dict set fn locals $b [list reg [NewReg fn]]
+    }
+    EnterScope fn $scope
+    if {$body eq ""} {
+        throw {NATIVE BUG} "native lowering: internal region companion of instance $id has an empty body"
+    }
+    set ok 1
+    foreach e [lrange $body 0 end-1] {
+        if {[Expr fn $e] eq "never"} {
+            set ok 0
+            break
+        }
+    }
+    if {$ok} {
+        set fields [Expr fn [lindex $body end] region]
+        if {$fields ne "never"} {
+            Emit fn "retmulti [join $fields { }]"
+        }
+    }
+    set pnames [concat [lmap b $params {dict get [hir::binding $hir $b] name}] \
+        [lmap b $captureBindings {dict get [hir::binding $hir $b] name}]]
+    set key [expr {[dict get $instance generic] ? "generic"
+        : [join [lmap t [dict get $instance args] {hir::types::show $t}] {, }]}]
+    set head "func [Placeholder $id internalregion] [Quote $name] params=[expr {[llength $params] + [llength $captureBindings]}] env=0 regs=[dict get $fn nreg] pnames=[Quote [join $pnames { }]] captures=0 instance=[Quote $key] results=3"
+    set rawRegs [lsort -integer [lmap r [dict keys [dict get $fn rawRegs]] {string range $r 1 end}]]
+    if {$rawRegs ne ""} {
+        append head " rawregs=[Quote [join $rawRegs { }]]"
+    }
+    append head " @$region"
+    set text "$head\n[join [dict get $fn lines] \n]\nend"
+    set tails [llength [lmap line [dict get $fn lines] {
+        if {![regexp {^\s+tail(env)? } $line]} continue
+        set line
+    }]]
+    set info [dict create id [Placeholder $id internalregion] name $name block $region instance $id \
+        label "[hir::specialize::label $spec $id] (internal region)" generic [dict get $instance generic] \
         envless 1 selfTailCalls $tails calls [dict get $fn calls] \
         blockers [expr {$blockers - [dict get $fn skippedGuards]}] \
         guards [dict get $fn guards] knownErrorGuards [dict get $fn knownErrorGuards] \
@@ -2568,6 +2752,63 @@ proc native::lower::FlattenedVirtualCall {fnVar e node target targetInstance cap
     return [list [Assign fn [string trimright "call $id [join [concat $argRegs $captureRegs] { }]"] $e] tagged]
 }
 
+# Like FlattenedVirtualCall, but for a call E whose result is wanted as a
+# StringRegion (Call's wantRegion): hir::stringregion.tcl already proved
+# TARGETINSTANCE's own result is fully region-producing and some caller --
+# this one -- demands its region companion (hir::stringregion::wants).
+# CALLEEEXPR is never evaluated (there is no Block value to produce, for
+# exactly the reason FlattenedVirtualCall's own comment gives): the call
+# goes straight to TARGETINSTANCE's *internal region companion*
+# (InternalRegionCompanionRef) instead of its ordinary internal variant --
+# the composition this milestone adds, a capture-explicit calling
+# convention together with a multi-value region result. CAPTUREBINDINGS is
+# exactly the same flattened list (hir::blockescape::captures), in the same
+# order, FlattenedVirtualCall's own ordinary-result dispatch uses for the
+# very same TARGETINSTANCE -- never independently re-derived, so the two
+# variants agree on capture identity/order/representation by construction
+# (the milestone's #9).
+proc native::lower::FlattenedVirtualRegionCall {fnVar e node target targetInstance captureBindings} {
+    upvar 1 $fnVar fn
+    variable hir
+    variable selfTail
+    variable currentInstance
+    set params [hir::get $hir $target params]
+    set argExprs [dict get $node args]
+    # A self-tail recursive call is never itself asked for a region result:
+    # hir/stringregion.tcl's Exits/SelfTailExit never treats a self-tail
+    # loop backedge as a reachable exit to classify in the first place, so
+    # this instance's own `wants`-demanded exits never include one. Handled
+    # defensively anyway, mirroring FlattenedVirtualCall's own self branch,
+    # rather than assumed unreachable.
+    set self [expr {$targetInstance eq $currentInstance && [dict exists $selfTail $e]}]
+    set rawSlots {}
+    if {$self} {
+        set rawSlots [lmap p $params {
+            expr {[dict exists $fn locals $p] && [lindex [dict get $fn locals $p] 0] eq "rawreg"}
+        }]
+    }
+    set argRegs [CallArgs fn $argExprs {} $rawSlots]
+    if {$argRegs eq "never"} {
+        return {never region}
+    }
+    if {[llength $params] != [llength $argRegs]} {
+        set pnames [lmap p $params {dict get [hir::binding $hir $p] name}]
+        Emit fn "raise ARITY [Quote "block ([join $pnames { }]) expects [llength $params] argument(s), got [llength $argRegs]"]" $e
+        return {never region}
+    }
+    set captureRegs [CaptureRegsOf fn $captureBindings]
+    if {$self} {
+        dict lappend fn calls [list direct [Placeholder $targetInstance internalregion] 1]
+        Emit fn [string trimright "tail [join [concat $argRegs $captureRegs] { }]"] $e
+        return {never region}
+    }
+    set id [InternalRegionCompanionRef $targetInstance]
+    dict lappend fn calls [list direct $id 0]
+    set dsts [NewRegs fn 3]
+    Emit fn [string trimright "[join $dsts { }] = callmulti $id [join [concat $argRegs $captureRegs] { }]"] $e
+    return [list $dsts region]
+}
+
 # The native-to-module bridge changes a root native call's resolved target to
 # a module Block. When that Block has captures, the root native value is not
 # its closure; fetch the already-resolved module binding instead. This uses
@@ -2637,26 +2878,41 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
     set calleeExpr [dict get $node callee]
     set argExprs [dict get $node args]
 
-    if {$wantVirtual eq "" && !$wantRegion && $targetKind eq "block"
+    if {$wantVirtual eq "" && $targetKind eq "block"
             && [hir::kind $hir $calleeExpr] eq "ref"} {
         set calleeBinding [hir::get $hir $calleeExpr binding]
         set flattenedTarget [expr {$calleeBinding ne "" ? [hir::blockescape::virtual $blockescape $currentInstance $calleeBinding] : ""}]
         if {$flattenedTarget ne ""} {
             # A direct call of a Block binding hir::blockescape.tcl already
             # proved eligible for de-closure conversion: CALLEEEXPR is
-            # never evaluated at all (there is no Block value to produce),
-            # and the call goes straight to the callee instance's internal
-            # variant with its flattened captures appended (see the "Block
-            # virtualization" section above and FlattenedVirtualCall's own
-            # comment). This is the *only* place a virtualized Block
-            # binding's captures are ever resolved -- never at `bind` time
-            # (Bind's own virtualized case is a no-op) -- so it fires
-            # identically whether CALLEEBINDING was bound in this same
-            # region, in an enclosing region (a sibling call from inside
-            # another eligible candidate's own body), or is this very
-            # instance's own binding (a recursive call).
-            return [FlattenedVirtualCall fn $e $node $target $flattenedTarget \
-                [hir::blockescape::captures $blockescape $flattenedTarget]]
+            # never evaluated at all (there is no Block value to produce).
+            # This is the *only* place a virtualized Block binding's
+            # captures are ever resolved -- never at `bind` time (Bind's
+            # own virtualized case is a no-op) -- so it fires identically
+            # whether CALLEEBINDING was bound in this same region, in an
+            # enclosing region (a sibling call from inside another
+            # eligible candidate's own body), or is this very instance's
+            # own binding (a recursive call).
+            #
+            # An ordinary-result call goes straight to the callee
+            # instance's internal variant with its flattened captures
+            # appended (FlattenedVirtualCall). A region-result call --
+            # hir::stringregion.tcl already proved this exact instance's
+            # own result is fully region-producing, and this call site is
+            # the demand -- goes instead to its *internal region
+            # companion* (FlattenedVirtualRegionCall): the composition
+            # this milestone adds, so a candidate hir::blockescape.tcl no
+            # longer declines merely because some caller wants a region
+            # result (see hir/blockescape.tcl's own header and the "Block
+            # virtualization"/"String regions" sections above).
+            set captureBindings [hir::blockescape::captures $blockescape $flattenedTarget]
+            if {$wantRegion} {
+                if {![hir::stringregion::wants $stringregion $flattenedTarget]} {
+                    throw {NATIVE BUG} "native lowering: instance $flattenedTarget has no region companion for virtualized call $e"
+                }
+                return [FlattenedVirtualRegionCall fn $e $node $target $flattenedTarget $captureBindings]
+            }
+            return [FlattenedVirtualCall fn $e $node $target $flattenedTarget $captureBindings]
         }
     }
 

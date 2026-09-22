@@ -1,0 +1,47 @@
+refined-checks.ir -- compiler/runtime metrics, before vs after this milestone
+(both states: -block-escape-opt 1 -string-region-opt 1, the default)
+==========================================================================
+
+allocation (native::allocationReport summary, canonical run):
+  total objects:        1215 (before)   vs     15 (after)
+  Block objects:        1201 (before)   vs      1 (after)
+  String objects:          9 (before)   vs      9 (after)   [unchanged]
+  List objects:             5 (before)   vs      5 (after)   [unchanged]
+
+machine code bytes (botlish-native size):
+  18894 (before) vs 17772 (after)   -- -1122 bytes (-5.9%)
+
+function count (NIR functions emitted):
+  27 (before) vs 25 (after) -- char_at's canonical (env=1, ordinary) and
+  canonical region companion (env=1, results=3) entries, 2 per specialize
+  instance x 2 instances = 4 functions, are no longer referenced by any
+  caller and so never built; its two internal region companions (env=0,
+  results=3), 1 per instance x 2 instances = 2 functions, replace them.
+
+NIR op counts (whole-program):
+  closure:        5 (before) vs   1 (after)   -- -4 (char_at's own two
+                  specialize instances' closures gone; the one remaining
+                  is web::uri_escape_text's own unrelated module closure)
+  callenv:        1 (before) vs   1 (after)   -- unchanged (unrelated call)
+  callenvmulti:  12 (before) vs   0 (after)   -- -12 (char_at's own region
+                  companion calls, now callmulti instead)
+  callmulti:      0 (before) vs  12 (after)   -- +12 (the same 12 call
+                  sites, now direct/capture-explicit)
+  call (direct):  25 (before) vs  25 (after)  -- unchanged
+  tail:           11 (before) vs  11 (after)  -- unchanged (self-tail loop
+                  backedge count and shape identical)
+  tailenv:         0 (before) vs   0 (after)  -- unchanged
+
+roots/safepoints (botlish-native roots, summed over all functions):
+  safepoints:       73 (before) vs  65 (after)   -- -8
+  root candidates: 153 (before) vs 141 (after)   -- -12
+  native-frame root slots: 109 (before) vs 103 (after)  -- -6
+  entry-zero slots: 21 (before) vs  17 (after)   -- -4
+
+value/correctness (canonical run and BOTLISH_NATIVE_GC_STRESS=1):
+  [400, 0] on every backend, before vs after, stress vs non-stress --
+  identical.
+
+benchmark timing (bench/bench.tcl, best of 5, Cranelift JIT-compile
+excluded):
+  502.67 us (before) vs 464.25 us (after)  -- -7.6%
