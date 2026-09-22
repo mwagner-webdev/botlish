@@ -2,7 +2,7 @@ source:  bench/refined-checks.ir
 backend: Cranelift (specialize=1)
 asm:     refined-checks.asm
 vcode:   refined-checks.vcode
-machine-code bytes: 20986 (per function: 935 365 1713 1425 527 932 541 988 504 1185 1225 427 456 401 165 489 489 497 553 641 1185 1225 427 456 401 165 489 489 497 553 641)
+machine-code bytes: 20846 (per function: 935 365 1713 1425 527 932 541 988 504 1185 1225 427 456 849 617 505 553 641 1185 1225 427 456 849 617 505 553 641)
 
 functions:
   0 <program entry>: nir-regs=33
@@ -18,24 +18,20 @@ functions:
   10 <generic>: nir-regs=31
   11 char_at<generic>: nir-regs=6
   12 char_at<generic>: nir-regs=6
-  13 is_local_char<str>: nir-regs=42
-  14 is_label_char<str>: nir-regs=10
-  15 scan_local<generic>: nir-regs=12
-  16 scan_label<generic>: nir-regs=12
-  17 scan_alpha<generic>: nir-regs=12
-  18 tld_ok<generic>: nir-regs=11
-  19 domain_loop<generic>: nir-regs=29
-  20 <str>: nir-regs=31
-  21 <generic>: nir-regs=31
-  22 char_at<generic>: nir-regs=6
-  23 char_at<generic>: nir-regs=6
-  24 is_local_char<str>: nir-regs=42
-  25 is_label_char<str>: nir-regs=10
-  26 scan_local<generic>: nir-regs=12
-  27 scan_label<generic>: nir-regs=12
-  28 scan_alpha<generic>: nir-regs=12
-  29 tld_ok<generic>: nir-regs=11
-  30 domain_loop<generic>: nir-regs=29
+  13 scan_local<generic>: nir-regs=34
+  14 scan_label<generic>: nir-regs=18
+  15 scan_alpha<generic>: nir-regs=14
+  16 tld_ok<generic>: nir-regs=11
+  17 domain_loop<generic>: nir-regs=29
+  18 <str>: nir-regs=31
+  19 <generic>: nir-regs=31
+  20 char_at<generic>: nir-regs=6
+  21 char_at<generic>: nir-regs=6
+  22 scan_local<generic>: nir-regs=34
+  23 scan_label<generic>: nir-regs=18
+  24 scan_alpha<generic>: nir-regs=14
+  25 tld_ok<generic>: nir-regs=11
+  26 domain_loop<generic>: nir-regs=29
 
 GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
   function 0 "<program>"
@@ -207,36 +203,10 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 13 "is_local_char"
-    NIR regs: 42
-    raw regs: 10
-    managed-capable regs: 32
-    effects: may_error=true may_gc=false
-    safepoints: 0
-    root candidates: 0
-    max live roots: 0
-    shadow slots: 0
-    entry zero slots: 0
-    depth reservation: no
-    storage: native frame
-  
-  function 14 "is_label_char"
-    NIR regs: 10
-    raw regs: 2
-    managed-capable regs: 8
-    effects: may_error=true may_gc=false
-    safepoints: 0
-    root candidates: 0
-    max live roots: 0
-    shadow slots: 0
-    entry zero slots: 0
-    depth reservation: no
-    storage: native frame
-  
-  function 15 "scan_local"
-    NIR regs: 12
+  function 13 "scan_local"
+    NIR regs: 34
     raw regs: 1
-    managed-capable regs: 11
+    managed-capable regs: 33
     effects: may_error=true may_gc=true
     safepoints: 2
     root candidates: 4
@@ -246,10 +216,10 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 16 "scan_label"
-    NIR regs: 12
+  function 14 "scan_label"
+    NIR regs: 18
     raw regs: 1
-    managed-capable regs: 11
+    managed-capable regs: 17
     effects: may_error=true may_gc=true
     safepoints: 2
     root candidates: 4
@@ -259,10 +229,10 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 17 "scan_alpha"
-    NIR regs: 12
+  function 15 "scan_alpha"
+    NIR regs: 14
     raw regs: 1
-    managed-capable regs: 11
+    managed-capable regs: 13
     effects: may_error=true may_gc=true
     safepoints: 2
     root candidates: 4
@@ -272,7 +242,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 18 "tld_ok"
+  function 16 "tld_ok"
     NIR regs: 11
     raw regs: 1
     managed-capable regs: 10
@@ -285,7 +255,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 19 "domain_loop"
+  function 17 "domain_loop"
     NIR regs: 29
     raw regs: 4
     managed-capable regs: 25
@@ -298,7 +268,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 20 ""
+  function 18 ""
     NIR regs: 31
     raw regs: 3
     managed-capable regs: 28
@@ -311,7 +281,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 21 ""
+  function 19 ""
     NIR regs: 31
     raw regs: 3
     managed-capable regs: 28
@@ -324,7 +294,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 22 "char_at"
+  function 20 "char_at"
     NIR regs: 6
     raw regs: 1
     managed-capable regs: 5
@@ -337,7 +307,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 23 "char_at"
+  function 21 "char_at"
     NIR regs: 6
     raw regs: 1
     managed-capable regs: 5
@@ -350,36 +320,10 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 24 "is_local_char"
-    NIR regs: 42
-    raw regs: 10
-    managed-capable regs: 32
-    effects: may_error=true may_gc=false
-    safepoints: 0
-    root candidates: 0
-    max live roots: 0
-    shadow slots: 0
-    entry zero slots: 0
-    depth reservation: no
-    storage: native frame
-  
-  function 25 "is_label_char"
-    NIR regs: 10
-    raw regs: 2
-    managed-capable regs: 8
-    effects: may_error=true may_gc=false
-    safepoints: 0
-    root candidates: 0
-    max live roots: 0
-    shadow slots: 0
-    entry zero slots: 0
-    depth reservation: no
-    storage: native frame
-  
-  function 26 "scan_local"
-    NIR regs: 12
+  function 22 "scan_local"
+    NIR regs: 34
     raw regs: 1
-    managed-capable regs: 11
+    managed-capable regs: 33
     effects: may_error=true may_gc=true
     safepoints: 2
     root candidates: 4
@@ -389,10 +333,10 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 27 "scan_label"
-    NIR regs: 12
+  function 23 "scan_label"
+    NIR regs: 18
     raw regs: 1
-    managed-capable regs: 11
+    managed-capable regs: 17
     effects: may_error=true may_gc=true
     safepoints: 2
     root candidates: 4
@@ -402,10 +346,10 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 28 "scan_alpha"
-    NIR regs: 12
+  function 24 "scan_alpha"
+    NIR regs: 14
     raw regs: 1
-    managed-capable regs: 11
+    managed-capable regs: 13
     effects: may_error=true may_gc=true
     safepoints: 2
     root candidates: 4
@@ -415,7 +359,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 29 "tld_ok"
+  function 25 "tld_ok"
     NIR regs: 11
     raw regs: 1
     managed-capable regs: 10
@@ -428,7 +372,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 30 "domain_loop"
+  function 26 "domain_loop"
     NIR regs: 29
     raw regs: 4
     managed-capable regs: 25
