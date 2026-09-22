@@ -2,3 +2,9 @@
 # caches alongside the source, rebuilt automatically when the source changes.
 /bench/equivalents/rust/*
 !/bench/equivalents/rust/*.rs
+
+# Same for the Go equivalents (bench/equivalents/go/*.go): cached binaries
+# have no way to be checked stale and compile quickly, so they are not
+# committed.
+/bench/equivalents/go/*
+!/bench/equivalents/go/*.go
