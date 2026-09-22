@@ -101,6 +101,11 @@ namespace eval native::lower {
         -            {op isub} \
         *            {op imul} \
         mod          {op imod} \
+        bit_and      {op iand} \
+        bit_or       {op ior} \
+        bit_xor      {op ixor} \
+        shift_left   {op ishl} \
+        shift_right  {op ishr} \
         <            {op ilt} \
         <=           {op ile} \
         >            {op igt} \

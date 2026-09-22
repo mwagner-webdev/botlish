@@ -16,6 +16,8 @@
 //! |------------------------|---------------------|------------------------------|-----------|
 //! | rt_int_add/sub/mul     | Int, Int            | Int                          | big Ints  |
 //! | rt_int_mod             | Int, Int            | Int (0<=r<|b|); ARITHMETIC   | no        |
+//! | rt_int_and/or/xor      | Int, Int            | Int (two's-complement)       | big Ints  |
+//! | rt_int_shl/shr         | Int, Int(shift>=0)  | Int; RANGE if shift invalid  | big Ints  |
 //! | rt_int_cmp             | Int, Int            | -1/0/1 (raw i64)             | no        |
 //! | rt_value_eq            | any, any            | Bool; EQUALITY on callables  | no        |
 //! | rt_str_eq              | Str, Str            | Bool                         | no        |
@@ -77,15 +79,15 @@ pub fn op_may_allocate(op: OpCode) -> bool {
     use OpCode::*;
     matches!(
         op,
-        IAdd | ISub | IMul | Substr | DecodeCharAt | StrLower | StrCat | StrUtf8Bytes | ListNew
-            | ListAppend | MutArrayAllocate | MutArrayFreeze | MkOk | MkError
+        IAdd | ISub | IMul | IAnd | IOr | IXor | IShl | IShr | Substr | DecodeCharAt | StrLower | StrCat
+            | StrUtf8Bytes | ListNew | ListAppend | MutArrayAllocate | MutArrayFreeze | MkOk | MkError
     )
 }
 
 /// Whether OP can report a Botlish semantic error by returning NO_VALUE.
 pub fn op_may_error(op: OpCode) -> bool {
     use OpCode::*;
-    matches!(op, IMod | VEq | Hash | Substr | StrCat | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum
+    matches!(op, IMod | IShl | IShr | VEq | Hash | Substr | StrCat | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum
         | ListNew | ListGet | ListAppend | MutArrayAllocate | MutArrayGet | MutArraySet | MutArrayCopy | MutArrayFreeze
         | ResultValue | ResultError | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum)
 }
@@ -176,6 +178,71 @@ pub extern "C" fn rt_int_mod(p: *mut Vm, a: Value, b: Value) -> Value {
         r += bb.abs();
     }
     vm(p).new_big(r)
+}
+
+/// Maximum shift amount `rt_int_shl`/`rt_int_shr` accept: generous enough for
+/// any real bit-manipulation use (nibble/byte positioning shifts by 4), but
+/// finite, so a shift amount does not try to allocate an astronomically
+/// large BigInt. Not a language-visible width limit on Int itself.
+const MAX_SHIFT: i64 = 1 << 20;
+
+/// The nonnegative i64 shift amount B, or a RANGE failure recorded on P (also
+/// returned as `None`) if B is negative, not a small Int, or exceeds
+/// MAX_SHIFT.
+fn shift_amount(p: *mut Vm, b: Value) -> Option<u32> {
+    match int_small(b) {
+        Some(k) if (0..=MAX_SHIFT).contains(&k) => Some(k as u32),
+        _ => {
+            vm(p).fail(RtError::Semantic {
+                kind: "RANGE",
+                message: format!("shift amount out of range (0..{MAX_SHIFT})"),
+            });
+            None
+        }
+    }
+}
+
+/// Bitwise AND/OR/XOR (two's-complement, matching Tcl's own `&`/`|`/`^` and
+/// `num_bigint::BigInt`'s BitAnd/BitOr/BitXor): total over every Int, never
+/// fails. core/primitives.tcl documents these as the reference semantics;
+/// this is the same computation over the runtime's own Int representation.
+pub extern "C" fn rt_int_and(p: *mut Vm, a: Value, b: Value) -> Value {
+    int_binary(p, a, b, |x, y| Some(x & y), |x, y| x & y)
+}
+
+pub extern "C" fn rt_int_or(p: *mut Vm, a: Value, b: Value) -> Value {
+    int_binary(p, a, b, |x, y| Some(x | y), |x, y| x | y)
+}
+
+pub extern "C" fn rt_int_xor(p: *mut Vm, a: Value, b: Value) -> Value {
+    int_binary(p, a, b, |x, y| Some(x ^ y), |x, y| x ^ y)
+}
+
+/// A << K (exact: A * 2^K), K a nonnegative Int (see shift_amount).
+pub extern "C" fn rt_int_shl(p: *mut Vm, a: Value, b: Value) -> Value {
+    let Some(k) = shift_amount(p, b) else { return NO_VALUE };
+    if let Some(x) = int_small(a) {
+        if k < 63 {
+            if let Some(r) = x.checked_shl(k) {
+                return vm(p).new_int(r);
+            }
+        }
+    }
+    vm(p).new_big(int_to_big(a) << (k as usize))
+}
+
+/// A >> K: arithmetic (sign-extending) shift, i.e. floor(A / 2^K) -- the
+/// two's-complement convention `num_bigint::BigInt`'s `Shr` also follows, so
+/// the small-Int and BigInt paths agree exactly. Never fails once K itself is
+/// valid: a right shift only ever shrinks magnitude.
+pub extern "C" fn rt_int_shr(p: *mut Vm, a: Value, b: Value) -> Value {
+    let Some(k) = shift_amount(p, b) else { return NO_VALUE };
+    if let Some(x) = int_small(a) {
+        // i64 >> is arithmetic (sign-extending); a shift of >= 63 is
+        // reliably all-sign-bits, matching an exact BigInt shift's limit.
+        return vm(p).new_int(x >> k.min(63));
+    }
+    vm(p).new_big(int_to_big(a) >> (k as usize))
 }
 
 fn int_compare(a: Value, b: Value) -> Ordering {
@@ -899,6 +966,11 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         ISub => rt_int_sub(p, a[0], a[1]),
         IMul => rt_int_mul(p, a[0], a[1]),
         IMod => rt_int_mod(p, a[0], a[1]),
+        IAnd => rt_int_and(p, a[0], a[1]),
+        IOr => rt_int_or(p, a[0], a[1]),
+        IXor => rt_int_xor(p, a[0], a[1]),
+        IShl => rt_int_shl(p, a[0], a[1]),
+        IShr => rt_int_shr(p, a[0], a[1]),
         ILt => cmp(|o| o == Ordering::Less),
         ILe => cmp(|o| o != Ordering::Greater),
         IGt => cmp(|o| o == Ordering::Greater),
@@ -962,6 +1034,11 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_int_sub, 3),
         h!(rt_int_mul, 3),
         h!(rt_int_mod, 3),
+        h!(rt_int_and, 3),
+        h!(rt_int_or, 3),
+        h!(rt_int_xor, 3),
+        h!(rt_int_shl, 3),
+        h!(rt_int_shr, 3),
         h!(rt_int_cmp, 3),
         h!(rt_value_eq, 3),
         h!(rt_str_eq, 3),

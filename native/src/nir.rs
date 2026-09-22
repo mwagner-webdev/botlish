@@ -19,6 +19,15 @@ pub enum OpCode {
     IMul,
     /// Euclidean modulo (core/primitives.tcl's modulo): 0 <= result < |b|.
     IMod,
+    /// Bitwise AND/OR/XOR, two's-complement, total over every Int (never
+    /// fails): core/scalarbits.tcl's `bit_and`/`bit_or`/`bit_xor`.
+    IAnd,
+    IOr,
+    IXor,
+    /// A << K / A >> K (K a nonnegative Int shift amount; RANGE if not):
+    /// core/scalarbits.tcl's `shift_left`/`shift_right`.
+    IShl,
+    IShr,
     ILt,
     ILe,
     IGt,
@@ -139,6 +148,11 @@ impl OpCode {
             "isub" => ISub,
             "imul" => IMul,
             "imod" => IMod,
+            "iand" => IAnd,
+            "ior" => IOr,
+            "ixor" => IXor,
+            "ishl" => IShl,
+            "ishr" => IShr,
             "ilt" => ILt,
             "ile" => ILe,
             "igt" => IGt,

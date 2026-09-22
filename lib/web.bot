@@ -11,9 +11,15 @@
 # per element): percent-encode every UTF-8 byte of s except the RFC 3986
 # unreserved characters (A-Za-z0-9._~-), as uppercase %XX.
 #
-# high_nibble/is_unreserved are single ascending threshold ladders (Botlish
-# has no integer division and no and/or primitive; a boundary walk over
-# disjoint, already-ordered ranges needs neither). esc_bytes/esc_char/
+# high_nibble extracts the high half of a byte and normalizes it to a
+# logical nibble via the Byte/Nibble/HighNibble scalar domains and typed bit
+# arithmetic (core/scalarbits.tcl, lib/byte.bot; see
+# BYTE-NIBBLE-BIT-ARITHMETIC.md): byte::high_nibble(b) is the position-
+# preserving extraction (b & 0xF0), and byte::nibble(...) normalizes that to
+# the logical 0..15 value hex_pair/hex_digits index with.
+# is_unreserved is still a single ascending threshold ladder (deliberately
+# unchanged: URI-grammar/ASCII interpretation is a later milestone's target,
+# not this one's -- see BYTE-NIBBLE-BIT-ARITHMETIC.md). esc_bytes/esc_char/
 # esc_from accumulate their result by repeated concat, the same recursive
 # idiom examples/stdlib/string_reverse.bot's reverse_from and
 # examples/stdlib/ai_text_clean.bot's clean_from already use.
@@ -33,52 +39,7 @@ hex_digits = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "
 fn uri_escape_text(s):
 
     fn high_nibble(b):
-        if b <= 15:
-            0
-        else:
-            if b <= 31:
-                1
-            else:
-                if b <= 47:
-                    2
-                else:
-                    if b <= 63:
-                        3
-                    else:
-                        if b <= 79:
-                            4
-                        else:
-                            if b <= 95:
-                                5
-                            else:
-                                if b <= 111:
-                                    6
-                                else:
-                                    if b <= 127:
-                                        7
-                                    else:
-                                        if b <= 143:
-                                            8
-                                        else:
-                                            if b <= 159:
-                                                9
-                                            else:
-                                                if b <= 175:
-                                                    10
-                                                else:
-                                                    if b <= 191:
-                                                        11
-                                                    else:
-                                                        if b <= 207:
-                                                            12
-                                                        else:
-                                                            if b <= 223:
-                                                                13
-                                                            else:
-                                                                if b <= 239:
-                                                                    14
-                                                                else:
-                                                                    15
+        byte::nibble(byte::high_nibble(b))
 
     fn is_unreserved(b):
         if b <= 44:

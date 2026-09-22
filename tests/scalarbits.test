@@ -1,0 +1,147 @@
+# scalarbits.test -- Byte/Nibble/LowNibble/HighNibble (core/scalarbits.tcl):
+# checked construction, predicates, and the generic bitwise Int primitives,
+# on interp/compile (core IR level; native/cross-file byte::/nibble
+# integration is tests/native-byte.test).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+# ---------------------------------------------------------------------------
+# Bitwise primitives: total (AND/OR/XOR), checked (shift amount).
+
+test scalarbits-bitand-1 {AND masks to the mask's own bits} -body {
+    list [run {call {ref bit_and} {const 171} {const 240}}] \
+         [run {call {ref bit_and} {const 171} {const 15}}]
+} -result {160 11}
+
+test scalarbits-bitor-1 {basic OR} -body {
+    run {call {ref bit_or} {const 5} {const 8}}
+} -result 13
+
+test scalarbits-bitxor-1 {basic XOR} -body {
+    run {call {ref bit_xor} {const 255} {const 15}}
+} -result 240
+
+test scalarbits-bitand-negative {AND is well-defined (two's complement) for negative operands} -body {
+    list [run {call {ref bit_and} {const -5} {const 240}}] [differential {{call {ref bit_and} {const -5} {const 240}}}]
+} -result {240 same}
+
+test scalarbits-bitand-bigint {bitwise ops work on values outside the small-Int range} -body {
+    run {call {ref bit_and} {const 1000000000000000000000000000000} {const 15}}
+} -result 0
+
+test scalarbits-shift-left-1 {shift_left is exact multiplication by 2^k} -body {
+    list [run {call {ref shift_left} {const 1} {const 4}}] [run {call {ref shift_left} {const 1} {const 0}}]
+} -result {16 1}
+
+test scalarbits-shift-right-1 {shift_right is exact floor division by 2^k} -body {
+    list [run {call {ref shift_right} {const 171} {const 4}}] [run {call {ref shift_right} {const 15} {const 4}}]
+} -result {10 0}
+
+test scalarbits-shift-negative-amount {a negative shift amount is a RANGE error, not silent truncation} -body {
+    list [errorCodeOf {call {ref shift_left} {const 1} {const -1}}] \
+         [errorCodeOf {call {ref shift_right} {const 1} {const -1}}]
+} -result {{CORE SEMANTIC RANGE} {CORE SEMANTIC RANGE}}
+
+test scalarbits-shift-huge-amount {an absurdly large shift amount is RANGE, not an attempted allocation} -body {
+    errorCodeOf {call {ref shift_left} {const 1} {const 100000000000}}
+} -result {CORE SEMANTIC RANGE}
+
+test scalarbits-bitwise-differential {bitwise ops agree between interp and compile} -body {
+    differential {
+        {call {ref list}
+            {call {ref bit_and} {const 171} {const 15}}
+            {call {ref bit_or} {const 171} {const 15}}
+            {call {ref bit_xor} {const 171} {const 15}}
+            {call {ref shift_left} {const 3} {const 5}}
+            {call {ref shift_right} {const 200} {const 3}}}
+    }
+} -result same
+
+# ---------------------------------------------------------------------------
+# The four scalar domains: checked construction.
+
+test scalarbits-byte-valid {Byte(x) succeeds for 0..255, unchanged} -body {
+    list [run {call {ref Byte} {const 0}}] [run {call {ref Byte} {const 255}}] [run {call {ref Byte} {const 128}}]
+} -result {0 255 128}
+
+test scalarbits-byte-boundary {Byte boundary: -1 and 256 fail, 0 and 255 succeed} -body {
+    list [errorCodeOf {call {ref Byte} {const -1}}] [run {call {ref Byte} {const 0}}] \
+         [run {call {ref Byte} {const 255}}] [errorCodeOf {call {ref Byte} {const 256}}]
+} -result {{CORE SEMANTIC RANGE} 0 255 {CORE SEMANTIC RANGE}}
+
+test scalarbits-nibble-boundary {Nibble boundary: -1 and 16 fail, 0 and 15 succeed} -body {
+    list [errorCodeOf {call {ref Nibble} {const -1}}] [run {call {ref Nibble} {const 0}}] \
+         [run {call {ref Nibble} {const 15}}] [errorCodeOf {call {ref Nibble} {const 16}}]
+} -result {{CORE SEMANTIC RANGE} 0 15 {CORE SEMANTIC RANGE}}
+
+test scalarbits-lownibble-domain {LowNibble accepts exactly 0..15, same domain as Nibble} -body {
+    list [run {call {ref LowNibble} {const 0}}] [run {call {ref LowNibble} {const 15}}] \
+         [errorCodeOf {call {ref LowNibble} {const 16}}] [errorCodeOf {call {ref LowNibble} {const -1}}]
+} -result {0 15 {CORE SEMANTIC RANGE} {CORE SEMANTIC RANGE}}
+
+test scalarbits-highnibble-exact-set {HighNibble accepts exactly {0,16,...,240}, not every int in [0,240]} -body {
+    set ok {}
+    set rejected {}
+    for {set n 0} {$n <= 240} {incr n 16} {
+        lappend ok [run [list call {ref HighNibble} [list const $n]]]
+    }
+    foreach n {-1 0 1 10 15 17 31 33 239 241 255} {
+        set fail [expr {$n % 16 != 0 || $n < 0 || $n > 240}]
+        set code [errorCodeOf [list call {ref HighNibble} [list const $n]]]
+        if {$fail} {
+            lappend rejected [expr {$code eq "CORE SEMANTIC RANGE"}]
+        } else {
+            lappend rejected [expr {[run [list call {ref HighNibble} [list const $n]]] == $n}]
+        }
+    }
+    list [expr {$ok eq {0 16 32 48 64 80 96 112 128 144 160 176 192 208 224 240}}] \
+         [expr {"0" ni $rejected}]
+} -result {1 1}
+
+test scalarbits-highnibble-interval-not-enough {HighNibble distinguishes "in interval" from "in exact valid set"} -body {
+    # 10, 15, 17, 241 are all inside interval [0,240]-ish territory but not
+    # multiples of 16 (or out of range): each must still fail.
+    list [errorCodeOf {call {ref HighNibble} {const 10}}] \
+         [errorCodeOf {call {ref HighNibble} {const 15}}] \
+         [errorCodeOf {call {ref HighNibble} {const 17}}] \
+         [errorCodeOf {call {ref HighNibble} {const 241}}] \
+         [run {call {ref HighNibble} {const 0}}] \
+         [run {call {ref HighNibble} {const 240}}]
+} -result {{CORE SEMANTIC RANGE} {CORE SEMANTIC RANGE} {CORE SEMANTIC RANGE} {CORE SEMANTIC RANGE} 0 240}
+
+test scalarbits-constructors-differential {checked constructors agree between interp and compile, success and failure alike} -body {
+    list [differential {{call {ref Byte} {const 255}}}] \
+         [differential {{call {ref Byte} {const 256}}}] \
+         [differential {{call {ref HighNibble} {const 32}}}] \
+         [differential {{call {ref HighNibble} {const 33}}}]
+} -result {same same same same}
+
+# ---------------------------------------------------------------------------
+# Predicates: Byte?/Nibble?/LowNibble?/HighNibble? (definePredicate).
+
+test scalarbits-predicates-1 {each predicate answers exactly its own domain} -body {
+    run {call {ref list}
+        {call {ref Byte?} {const 300}}
+        {call {ref Byte?} {const 200}}
+        {call {ref HighNibble?} {const 32}}
+        {call {ref HighNibble?} {const 33}}
+        {call {ref Nibble?} {const 15}}
+        {call {ref Nibble?} {const 16}}}
+} -result {[false, true, true, false, true, false]}
+
+test scalarbits-predicates-refine {a true Byte? branch refines the argument's static type} -body {
+    set p {{bind x {const 200}}
+           {if {call {ref Byte?} {ref x}} {block {} {bind seen {ref x}} {ref seen}} {block {} {const -1}}}}
+    list [run {*}$p] [differential $p]
+} -result {200 same}
+
+# ---------------------------------------------------------------------------
+# No runtime wrapper: every value here is a plain Int.
+
+test scalarbits-no-wrapper {Byte/Nibble/HighNibble values are ordinary Ints, kind-wise} -body {
+    run {call {ref list}
+        {call {ref integer?} {call {ref Byte} {const 200}}}
+        {call {ref integer?} {call {ref HighNibble} {const 32}}}}
+} -result {[true, true]}
+
+cleanupTests

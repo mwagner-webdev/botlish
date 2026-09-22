@@ -70,17 +70,114 @@ namespace eval hir::range {
     # Self-recursive parameter feedback passes before giving up (each pass
     # either converges or widens a bound to infinity, so few are needed).
     variable maxPasses 4
+    # Exact-value-set cardinality budget (see "Exact value sets" below): the
+    # largest sorted set of alternatives a Range may carry alongside its
+    # interval. Must be at least 16 (HighNibble's own exact domain,
+    # core/scalarbits.tcl); chosen at 32 to leave headroom for a small
+    # branch join (spec #27's own "16 or 32 are reasonable" -- a named
+    # compiler constant, not a magic number at each call site) without
+    # inviting the combinatorial growth #28-30 warn against.
+    variable maxExactValues 32
 }
 
 # ---------------------------------------------------------------------------
 # The Range lattice
+#
+# Exact value sets
+# ----------------
+# A Range may optionally carry a third fact alongside its interval: `exact`,
+# a sorted, duplicate-free Tcl list of every value the expression could
+# actually take -- strictly more precise than the interval alone whenever
+# the set is sparse (HighNibble's {0,16,...,240} inside [0,240]) or a small
+# join of otherwise-unrelated points ({0,255} inside [0,255]). Absent
+# (ExactOf returns "") means "not tracked", never "no values" -- an empty
+# set never appears on a live Range; a computation that would produce one
+# (e.g. narrowing to an unsatisfiable equality) simply falls back to
+# interval-only precision instead of trying to represent unreachability
+# through this lattice (hir/range.tcl already has "never" as its bottom for
+# expressions; reusing it for a *binding's* narrowed fact would need
+# plumbing this milestone deliberately does not add -- see
+# BYTE-NIBBLE-BIT-ARITHMETIC.md's own account of this scope decision).
+#
+# This is a strict *addition* to the interval Range that existed before this
+# milestone (spec #26): every proc below that does not mention `exact`
+# explicitly still computes min/max exactly as it always did, and simply
+# carries no `exact` key -- ExactOf then reads that the same as "not
+# tracked". Only join, add/sub/mul and the two Narrowed-family branch-
+# narrowing procs (below) ever populate or filter it. Bounded by
+# maxExactValues throughout: crossing it always widens to interval-only,
+# never grows past it (spec #27-30). Normalize (below) additionally drops a
+# set that is exactly as precise as its own interval -- a dense run
+# {0,1,...,15} says nothing an ordinary [0,15] Range doesn't already (spec
+# #106-108) -- so a tracked `exact` key, when present, is always genuinely
+# more informative than the interval alone.
+
+# The exact value set of R, or "" if not tracked. A point range (min==max)
+# always answers its own singleton, even with no explicit `exact` key
+# (Normalize itself never sets one there -- a 1-element set spanning
+# min==max is exactly the interval it already is, so storing it separately
+# would violate Normalize's own "redundant with the interval" rule): this
+# is spec #85's "singleton set reuses the existing exact-constant
+# representation" -- point's own {min max} pair -- made concrete, and it is
+# what lets a later join (e.g. `point(1)` then `point(4)`) recover a real
+# two-element exact set instead of silently losing precision because each
+# side's own single value had nothing stored under `exact`.
+proc hir::range::ExactOf {r} {
+    if {[dict exists $r exact]} {
+        return [dict get $r exact]
+    }
+    variable maxExactValues
+    set mn [dict get $r min]
+    set mx [dict get $r max]
+    if {$mn eq "-inf" || $mx eq "+inf" || $mx - $mn + 1 > $maxExactValues} {
+        return ""
+    }
+    # A finite, in-budget interval's members are exactly {mn, mn+1, ...,
+    # mx}, whether or not Normalize chose to store that list explicitly
+    # (dense sets are deliberately not stored, per this file's own header
+    # and spec #106-107 -- redundant with the interval for *display*, but
+    # composition (CrossExact, join) still needs to reconstruct it on
+    # demand: otherwise a cheap exact transfer like {1,2}+{10,20} -> four
+    # values, spec #29, would wrongly degrade the moment either side's own
+    # set was small enough to be dense).
+    set values {}
+    for {set v $mn} {$v <= $mx} {incr v} {
+        lappend values $v
+    }
+    return $values
+}
+
+# R with its `exact` key set to VALUES (a list, possibly unsorted/with
+# duplicates) if that is both nonempty and within budget and not merely the
+# same information R's own interval already carries; otherwise R unchanged
+# (no `exact` key). The single normalization point every producer below
+# funnels through, so "exact is a subset of interval, and only ever present
+# when it adds information" is one invariant enforced in one place (spec
+# #82-83, #106).
+proc hir::range::Normalize {r values} {
+    variable maxExactValues
+    if {[llength $values] == 0 || [llength $values] > $maxExactValues} {
+        return $r
+    }
+    # Not `-integer`: Botlish Int is arbitrary-precision (spec #18) and can
+    # exceed Tcl's native integer sort, which overflows past roughly 64
+    # bits; `-command`/[expr] both accept Tcl 9's own bignums correctly.
+    set sorted [lsort -unique -command {apply {{a b} {expr {$a < $b ? -1 : ($a > $b)}}}} $values]
+    set mn [dict get $r min]
+    set mx [dict get $r max]
+    if {$mn ne "-inf" && $mx ne "+inf" && [llength $sorted] == $mx - $mn + 1} {
+        # Dense: {mn, mn+1, ..., mx} is exactly the interval -- redundant.
+        return $r
+    }
+    return [dict merge $r [dict create exact $sorted]]
+}
 
 proc hir::range::unknown {} {
     return {min -inf max +inf}
 }
 
 proc hir::range::point {n} {
-    return [dict create min $n max $n]
+    return [Normalize [dict create min $n max $n] [list $n]]
 }
 
 proc hir::range::nonneg {} {
@@ -136,14 +233,30 @@ proc hir::range::join {a b} {
     if {$b eq "never"} {
         return $a
     }
-    return [dict create min [Min [dict get $a min] [dict get $b min]] \
+    set r [dict create min [Min [dict get $a min] [dict get $b min]] \
         max [Max [dict get $a max] [dict get $b max]]]
+    set ea [ExactOf $a]
+    set eb [ExactOf $b]
+    if {$ea eq "" || $eb eq ""} {
+        return $r
+    }
+    # Both sides tracked: the join's exact set is their union (spec #31 --
+    # `if cond: x=0 else: x=255` is exactly this, each branch a `point`),
+    # within budget or not tracked at all (spec #26-27: interval precision
+    # above is unaffected either way).
+    return [Normalize $r [concat $ea $eb]]
 }
 
 # NEW after a join of OLD with a freshly computed contribution: OLD with any
 # bound that grew pushed to infinity, so repeated growth (an unbounded
 # induction variable) reaches a fixed point in one step instead of counting
-# up forever (see the milestone's #18).
+# up forever (see the milestone's #18). Deliberately never carries an
+# `exact` key forward (NEW's own -- dict create below never sets one):
+# widening is specifically for an induction variable's per-round growth,
+# which this lattice already treats as unbounded once it triggers, so there
+# is no finite set left to track through it (spec #26 still holds: OLD's
+# interval survives exactly as before, only the exact-set *addition* this
+# milestone made is what widen conservatively drops).
 proc hir::range::widen {old new} {
     set mn [dict get $new min]
     set mx [dict get $new max]
@@ -181,20 +294,47 @@ proc hir::range::SubBound {x y} {
     return [expr {$x - $y}]
 }
 
+# The exact set of OP applied pairwise to every value of A's exact set with
+# every value of B's, within budget -- or "" if either input is untracked or
+# the cross product would exceed it (spec #28-30: bounded evaluation, never
+# an unconditional Cartesian product). OPPROC is a 2-argument Tcl command
+# computing the same operation R's own interval fields already reflect
+# (AddBound/SubBound/plain `*`), so a cheap transfer like {1,2}+{10,20} ->
+# {11,12,21,22} (spec #29) stays exact while a pair of 32-value sets (spec
+# #30) falls back to R's interval alone, cheaply (checked before the O(n*m)
+# work, not after).
+proc hir::range::CrossExact {r a b opProc} {
+    variable maxExactValues
+    set ea [ExactOf $a]
+    set eb [ExactOf $b]
+    if {$ea eq "" || $eb eq "" || [llength $ea] * [llength $eb] > $maxExactValues} {
+        return $r
+    }
+    set values {}
+    foreach x $ea {
+        foreach y $eb {
+            lappend values [{*}$opProc $x $y]
+        }
+    }
+    return [Normalize $r $values]
+}
+
 proc hir::range::add {a b} {
     if {$a eq "never" || $b eq "never"} {
         return never
     }
-    return [dict create min [AddBound [dict get $a min] [dict get $b min]] \
+    set r [dict create min [AddBound [dict get $a min] [dict get $b min]] \
         max [AddBound [dict get $a max] [dict get $b max]]]
+    return [CrossExact $r $a $b {apply {{x y} {expr {$x + $y}}}}]
 }
 
 proc hir::range::sub {a b} {
     if {$a eq "never" || $b eq "never"} {
         return never
     }
-    return [dict create min [SubBound [dict get $a min] [dict get $b max]] \
+    set r [dict create min [SubBound [dict get $a min] [dict get $b max]] \
         max [SubBound [dict get $a max] [dict get $b min]]]
+    return [CrossExact $r $a $b {apply {{x y} {expr {$x - $y}}}}]
 }
 
 # The product's range from the four endpoint products, or unknown if any
@@ -216,7 +356,8 @@ proc hir::range::mul {a b} {
         if {$lo eq "" || $p < $lo} { set lo $p }
         if {$hi eq "" || $p > $hi} { set hi $p }
     }
-    return [dict create min $lo max $hi]
+    set r [dict create min $lo max $hi]
+    return [CrossExact $r $a $b {apply {{x y} {expr {$x * $y}}}}]
 }
 
 proc hir::range::show {r} {
@@ -225,7 +366,91 @@ proc hir::range::show {r} {
     }
     set mn [dict get $r min]
     set mx [dict get $r max]
-    return "\[[expr {$mn eq {-inf} ? "-∞" : $mn}], [expr {$mx eq {+inf} ? "+∞" : $mx}]\]"
+    set base "\[[expr {$mn eq {-inf} ? "-∞" : $mn}], [expr {$mx eq {+inf} ? "+∞" : $mx}]\]"
+    # Only ever displays an *explicitly* tracked exact set, or a bare
+    # point's own trivial singleton -- never ExactOf's broader on-demand
+    # reconstruction of an arbitrary small dense interval (ExactOf itself
+    # needs that reconstruction for composition, spec #29, but showing it
+    # for every small range no wider than the budget would defeat
+    # Normalize's whole "a dense set is redundant with its interval" point,
+    # spec #106-107, and make an ordinary bounded loop's range look like it
+    # is carrying sparse information it is not).
+    if {[dict exists $r exact]} {
+        set exact [dict get $r exact]
+    } elseif {$mn ne "-inf" && $mn eq $mx} {
+        set exact [list $mn]
+    } else {
+        set exact ""
+    }
+    if {$exact eq ""} {
+        return $base
+    }
+    return "$base {[::join $exact ,]}"
+}
+
+# A sound (not necessarily tightest) interval for bitwise NAME (bit_and,
+# bit_or, bit_xor, shift_right -- core/scalarbits.tcl) applied to X, Y,
+# proven purely from general nonnegative-integer reasoning about the
+# operation itself, never from any named type (spec #17, #35: this stays a
+# capability of the interval lattice, with no concept here named Byte or
+# HighNibble). No exact-set derivation is attempted (that would need
+# known-bits-style reasoning this milestone deliberately defers -- spec
+# #86); only the interval improves.
+#
+#   bit_and: AND's result bits are a subset of whichever operand is
+#     nonnegative (a set bit needs both operands set, and a nonnegative
+#     literal/value has no bits set outside its own magnitude), so
+#     0 <= x&y <= that operand's own max -- true for *any* integer on the
+#     other side, positive or negative (spec #16's `Byte & LowNibble ->
+#     LowNibble`-shaped facts fall out of exactly this, generically: no
+#     dedicated per-type rule needed, per spec #17).
+#   bit_or, bit_xor: for two nonnegative operands, the result is bounded by
+#     their sum (a loose but sound bound -- neither operation can set a bit
+#     beyond the highest either operand or their carry-free combination
+#     could reach); bit_or's result is also never below either operand's own
+#     minimum.
+#   shift_right: an arithmetic right shift of a nonnegative value only ever
+#     shrinks it, so its range is bounded by the shifted value's own
+#     (unaffected by the shift amount, which this proc does not need to
+#     know).
+proc hir::range::BitOp {name x y} {
+    if {$x eq "never" || $y eq "never"} {
+        return never
+    }
+    set xmn [dict get $x min]
+    set xmx [dict get $x max]
+    set ymn [dict get $y min]
+    set ymx [dict get $y max]
+    switch -- $name {
+        bit_and {
+            if {$ymn ne "-inf" && $ymn >= 0} {
+                return [dict create min 0 max $ymx]
+            }
+            if {$xmn ne "-inf" && $xmn >= 0} {
+                return [dict create min 0 max $xmx]
+            }
+            return [unknown]
+        }
+        bit_or {
+            if {$xmn eq "-inf" || $xmn < 0 || $ymn eq "-inf" || $ymn < 0} {
+                return [unknown]
+            }
+            return [dict create min [Max $xmn $ymn] max [AddBound $xmx $ymx]]
+        }
+        bit_xor {
+            if {$xmn eq "-inf" || $xmn < 0 || $ymn eq "-inf" || $ymn < 0} {
+                return [unknown]
+            }
+            return [dict create min 0 max [AddBound $xmx $ymx]]
+        }
+        shift_right {
+            if {$xmn eq "-inf" || $xmn < 0} {
+                return [unknown]
+            }
+            return [dict create min 0 max $xmx]
+        }
+    }
+    return [unknown]
 }
 
 # ---------------------------------------------------------------------------
@@ -474,6 +699,9 @@ proc hir::range::Call {hirVar ctxVar e node} {
                 }
                 * { set result [mul $x $y] }
             }
+        } elseif {$name in {bit_and bit_or bit_xor shift_right} && [llength $argRanges] == 2} {
+            lassign $argRanges x y
+            set result [BitOp $name $x $y]
         } else {
             set meta [core::native::metadata $name]
             switch -- [dict get $meta resultRange] {
@@ -620,7 +848,14 @@ proc hir::range::ComparisonNarrowing {hir ctx condition outcome} {
         return {}
     }
     if {$name eq "=="} {
-        return [EqualityNarrowing $hir $ctx $condition $args $outcome]
+        set facts [EqualityNarrowing $hir $ctx $condition $args $outcome]
+        if {$facts eq {}} {
+            # No induction-proved termination guard for this condition:
+            # fall back to the general exact-value-set rule (spec #33),
+            # independent of any monotonicity proof.
+            set facts [ExactEqualityNarrowing $hir $ctx $args $outcome]
+        }
+        return $facts
     }
     if {$name ni {< <= > >=}} {
         return {}
@@ -680,7 +915,11 @@ proc hir::range::EqualityNarrowing {hir ctx condition args outcome} {
 
 # The Range of X narrowed by "X OP Y", given X's own range RX and Y's range
 # RY, or "" if OP gives no new information (Y unbounded on the relevant
-# side).
+# side). If RX already tracks an exact set, it is filtered to the elements
+# still within the narrowed interval too (spec #32: `x = {1,4,7,10}; x < 7`
+# narrows the true branch to {1,4}, the false branch to {7,10}) -- reusing
+# this same interval narrowing to select the filter, rather than a separate
+# "exact-set branch engine" (spec #32's own instruction).
 proc hir::range::Narrowed {op rx ry} {
     set mn [dict get $rx min]
     set mx [dict get $rx max]
@@ -703,7 +942,77 @@ proc hir::range::Narrowed {op rx ry} {
         }
         default { return "" }
     }
-    return [dict create min $mn max $mx]
+    set r [dict create min $mn max $mx]
+    set exact [ExactOf $rx]
+    if {$exact eq ""} {
+        return $r
+    }
+    set filtered {}
+    foreach v $exact {
+        if {($mn eq "-inf" || $v >= $mn) && ($mx eq "+inf" || $v <= $mx)} {
+            lappend filtered $v
+        }
+    }
+    if {$filtered eq ""} {
+        # Would-be-empty: fall back to interval-only rather than
+        # representing unreachability through this lattice (see this
+        # file's "Exact value sets" header).
+        return $r
+    }
+    return [Normalize $r $filtered]
+}
+
+# General exact-set equality narrowing (spec #33), independent of
+# hir/induction.tcl's own monotone-termination proof (EqualityNarrowing,
+# above): "x == K" (K a proven single point) narrows x's range to exactly
+# {K} in the true branch; the false branch removes K from x's own tracked
+# exact set, if it had one (spec #33's own `{0,16,32}` minus 16 example).
+# Symmetric in EA/EB (unlike EqualityNarrowing, which resolves a specific
+# proof's own P/B roles): each ref'd side is narrowed independently from the
+# other side's already-computed Range.
+proc hir::range::ExactEqualityNarrowing {hir ctx args outcome} {
+    lassign $args ea eb
+    set exprs [dict get $ctx exprs]
+    set ra [expr {[dict exists $exprs $ea] ? [dict get $exprs $ea] : [unknown]}]
+    set rb [expr {[dict exists $exprs $eb] ? [dict get $exprs $eb] : [unknown]}]
+    set facts [dict create]
+    foreach pair [list [list $ea $ra $rb] [list $eb $rb $ra]] {
+        lassign $pair selfExpr selfRange otherRange
+        set b [RefBinding $hir $selfExpr]
+        if {$b eq ""} {
+            continue
+        }
+        set n [PointEqualityNarrow $selfRange $otherRange $outcome]
+        if {$n ne ""} {
+            dict set facts $b $n
+        }
+    }
+    return $facts
+}
+
+# X's Range narrowed by "X == Y" (OUTCOME 1) or "X != Y" (OUTCOME 0), given
+# Y's own Range OTHER: when OTHER is a proven single point K, X narrows to
+# exactly {K} if true, or has K removed from its own tracked exact set if
+# false (no new fact if X has no exact set to filter, or OTHER is not a
+# single known point -- this is deliberately scoped to spec #33's own case,
+# not a general disequality solver).
+proc hir::range::PointEqualityNarrow {self other outcome} {
+    if {[dict get $other min] ne [dict get $other max] || [dict get $other min] eq "-inf"} {
+        return ""
+    }
+    set k [dict get $other min]
+    if {$outcome} {
+        return [point $k]
+    }
+    set exact [ExactOf $self]
+    if {$exact eq "" || $k ni $exact} {
+        return ""
+    }
+    set remaining [lsearch -all -inline -not -exact $exact $k]
+    if {$remaining eq ""} {
+        return ""
+    }
+    return [Normalize $self $remaining]
 }
 
 # The region of instance ID's view HIR (already specialize::view'd): a dict

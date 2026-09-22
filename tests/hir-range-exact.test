@@ -1,0 +1,202 @@
+# hir-range-exact.test -- bounded exact finite-value facts (hir/range.tcl's
+# `exact` field, added alongside the pre-existing interval Range): the
+# lattice itself, independently of Byte/Nibble/HighNibble -- HighNibble is
+# only the motivating *user* of this capability (core/scalarbits.tcl), not
+# something this file's own analysis logic knows about (spec #35).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+proc rangeOf {text} {
+    set hir [surface::compile $text t.bot -strict 0]
+    set spec [hir::specialize::analyze $hir]
+    return [list $hir $spec [hir::range::analyze $hir $spec]]
+}
+
+# The Range hir::range proved for function NAME's own *result* (its final
+# expression), given a program TEXT ending in at least one call to NAME so
+# it has a used instance.
+proc resultRangeOf {text name} {
+    lassign [rangeOf $text] hir spec analysis
+    foreach id [dict get $spec used] {
+        if {[dict get [dict get $spec instances $id] name] eq $name} {
+            return [hir::range::show [dict get [dict get $analysis instances $id] result]]
+        }
+    }
+    error "no used instance named \"$name\""
+}
+
+# ---------------------------------------------------------------------------
+# The lattice itself: join, widen, narrow, normalization (spec #82-86,
+# #106-109), independent of any HIR walk.
+
+test range-exact-point {a point range's exact set is its own single value} -body {
+    hir::range::show [hir::range::point 7]
+} -result {[7, 7] {7}}
+
+test range-exact-join-small {joining two points within budget keeps a real exact set} -body {
+    hir::range::show [hir::range::join [hir::range::point 1] [hir::range::point 4]]
+} -result {[1, 4] {1,4}}
+
+test range-exact-join-never {joining with "never" (bottom) is identity, exact set included} -body {
+    hir::range::show [hir::range::join never [hir::range::point 9]]
+} -result {[9, 9] {9}}
+
+test range-exact-join-one-untracked-drops {joining a tracked side with an untracked side drops to interval only} -body {
+    hir::range::show [hir::range::join [hir::range::point 5] [hir::range::unknown]]
+} -result {[-∞, +∞]}
+
+test range-exact-widen-drops {widening never carries an exact set forward, even when it would still fit} -body {
+    hir::range::show [hir::range::widen [hir::range::point 1] [hir::range::point 2]]
+} -result {[-∞, +∞]}
+
+test range-exact-dense-canonicalizes-to-interval {a dense contiguous exact set is redundant with its interval and is not stored} -body {
+    hir::range::show [hir::range::Normalize [dict create min 0 max 3] {0 1 2 3}]
+} -result {[0, 3]}
+
+test range-exact-sparse-survives-normalize {a sparse exact set (skips values within its own interval) is genuinely more informative and is kept} -body {
+    hir::range::show [hir::range::Normalize [dict create min 0 max 240] {0 16 32 48 64 80 96 112 128 144 160 176 192 208 224 240}]
+} -result {[0, 240] {0,16,32,48,64,80,96,112,128,144,160,176,192,208,224,240}}
+
+test range-exact-budget-blocks-storage {a set larger than the budget is not stored at all (falls back to interval)} -body {
+    set big {}
+    for {set i 0} {$i < 40} {incr i} { lappend big $i }
+    hir::range::show [hir::range::Normalize [dict create min 0 max 39] $big]
+} -result {[0, 39]}
+
+test range-exact-cheap-transfer {small-set addition is exact: {1,2}+{10,20} -> {11,12,21,22}} -body {
+    set a [hir::range::join [hir::range::point 1] [hir::range::point 2]]
+    set b [hir::range::join [hir::range::point 10] [hir::range::point 20]]
+    hir::range::show [hir::range::add $a $b]
+} -result {[11, 22] {11,12,21,22}}
+
+test range-exact-expensive-transfer-widens {two 32-value sets do not trigger a 1024-pair cross product: the interval survives, the exact set does not} -body {
+    set av {}
+    for {set i 0} {$i < 32} {incr i} { lappend av $i }
+    set bv {}
+    for {set i 0} {$i < 32} {incr i} { lappend bv [expr {100 + $i}] }
+    set a [hir::range::Normalize [dict create min 0 max 31] $av]
+    set b [hir::range::Normalize [dict create min 100 max 131] $bv]
+    hir::range::show [hir::range::add $a $b]
+} -result {[100, 162]}
+
+test range-exact-mul-transfer {multiplication also propagates exact sets within budget} -body {
+    set a [hir::range::join [hir::range::point 2] [hir::range::point 3]]
+    set b [hir::range::point 5]
+    hir::range::show [hir::range::mul $a $b]
+} -result {[10, 15] {10,15}}
+
+# ---------------------------------------------------------------------------
+# HIR-level: branch joins, comparison filtering, equality filtering (spec
+# #31-34), exercised through ordinary Botlish source.
+
+test range-exact-branch-join {if/else assigning two literals joins to a two-element exact set (spec #31)} -body {
+    resultRangeOf {
+fn target(c):
+    x = if c:
+        0
+    else:
+        255
+    x
+
+target(true)
+} target
+} -result {[0, 255] {0,255}}
+
+test range-exact-branch-join-three-way {a three-way literal join stays exact} -body {
+    resultRangeOf {
+fn pick(c, d):
+    x = if c:
+        1
+    else:
+        if d:
+            5
+        else:
+            9
+    x
+
+pick(true, true)
+} pick
+} -result {[1, 9] {1,5,9}}
+
+test range-exact-comparison-filter {a `<` branch filters an already-exact caller-seeded parameter (spec #32)} -body {
+    lassign [rangeOf {
+fn target(c, x):
+    if x < 7:
+        x
+    else:
+        x
+
+target(true, 1)
+target(true, 4)
+target(true, 7)
+target(true, 10)
+}] hir spec analysis
+    set id ""
+    foreach candidate [dict get $spec used] {
+        if {[dict get [dict get $spec instances $candidate] name] eq "target"} { set id $candidate }
+    }
+    set got {}
+    dict for {e r} [dict get [dict get $analysis instances $id] exprs] {
+        if {[hir::kind $hir $e] eq "ref"} {
+            lappend got [hir::range::show $r]
+        }
+    }
+    lsort -unique $got
+} -result {{[1, 10] {1,4,7,10}} {[1, 6] {1,4}} {[7, 10] {7,10}}}
+
+# The Range of each `ref` expression seen inside NAME's own used instance
+# (unique, sorted for a stable result) -- for inspecting a value *inside* a
+# branch, where the whole function's own result (the join of every branch)
+# would hide the narrowing this file is actually testing.
+proc refRangesOf {text name} {
+    lassign [rangeOf $text] hir spec analysis
+    set id ""
+    foreach candidate [dict get $spec used] {
+        if {[dict get [dict get $spec instances $candidate] name] eq $name} { set id $candidate }
+    }
+    set got {}
+    dict for {e r} [dict get [dict get $analysis instances $id] exprs] {
+        if {[hir::kind $hir $e] eq "ref"} {
+            lappend got [hir::range::show $r]
+        }
+    }
+    lsort -unique $got
+}
+
+test range-exact-equality-filter-true {"x == K" narrows x to exactly {K} in the true branch} -body {
+    refRangesOf {
+fn target(x):
+    if x == 16:
+        x
+    else:
+        -1
+
+target(16)
+} target
+} -result {{[16, 16] {16}}}
+
+test range-exact-equality-filter-false {"x != K" removes K from x's own tracked exact set in the false branch (spec #33)} -body {
+    refRangesOf {
+fn pick(c):
+    x = if c:
+        0
+    else:
+        if c:
+            16
+        else:
+            32
+    x
+
+fn target(c):
+    x = pick(c)
+    if x == 16:
+        -1
+    else:
+        x
+
+target(true)
+} target
+} -result {{[-∞, +∞]} {[0, 32] {0,16,32}} {[0, 32] {0,32}}}
+
+cleanupTests

@@ -1,0 +1,61 @@
+# byte.bot -- the "byte" namespace: byte/bit-domain operations on Botlish's
+# Byte/Nibble/LowNibble/HighNibble scalar types (core/scalarbits.tcl).
+#
+# Every function here is ordinary, plainly-typed Botlish over the bitwise
+# primitives core/scalarbits.tcl registers as root natives (bit_and, bit_or,
+# bit_xor, shift_left, shift_right -- already in native/lower.tcl's own op
+# table, so each compiles inline wherever it is called, module function or
+# not). This is deliberately NOT a thin wrapper around a separate native
+# with a declared HighNibble/LowNibble/Nibble result type: that shape was
+# tried first and does not natively compile from a call site *inside* a
+# cross-file module function (which is exactly this file's own shape, and
+# web.bot's high_nibble's) -- native lowering's -native-body/-module-fn
+# bridge (native/native.tcl) is a syntactic pre-pass over only the entry
+# program's own raw core IR, so it can substitute a native called directly
+# from an .ir program's top level, but never one called from inside a .bot
+# module's own compiled body (core/scalarbits.tcl's header has the full
+# trace). Plain functions over already-lowerable primitives sidestep that
+# wall entirely, at the cost of the nominal type label itself not surviving
+# the call boundary -- hir/range.tcl's exact-value-set analysis (extended by
+# this milestone) recovers the same *fact* precision independently of that
+# label: byte::high_nibble's result is provably interval [0,240], exact set
+# {0,16,...,240}, regardless of what nominal type inference calls it.
+#
+#   byte::high_nibble(b)   position-preserving high-half extraction: b&0xF0
+#   byte::low_nibble(b)    position-preserving low-half extraction: b&0x0F
+#   byte::nibble(x)        positioned nibble (either half) -> logical Nibble
+#                          (0..15): (x&0x0F)|(x>>4) -- correct and total for
+#                          any x in Byte's own domain (0..255): recovers x
+#                          unchanged when x is already low-positioned
+#                          (x<=15, so x>>4=0) and x>>4 when x is high-
+#                          positioned (x's low 4 bits are 0 by construction,
+#                          so x&0x0F=0) -- one branch-free formula, no
+#                          special-casing of which half x came from.
+#   byte::complement(b)    one's complement over Byte's 8-bit domain: b^0xFF
+#                          (never Int's own arbitrary-precision complement).
+#   byte::position_low(n)  Nibble -> LowNibble: representation-preserving.
+#   byte::position_high(n) Nibble -> HighNibble: n<<4, positioned.
+#
+# ASCII/encoding interpretation, `is_unreserved`, and URI grammar are
+# deliberately absent: `byte::` holds only operations intrinsic to byte/bit
+# representation (core/scalarbits.tcl's header, and the milestone's own
+# namespace discipline -- see BYTE-NIBBLE-BIT-ARITHMETIC.md).
+namespace byte
+
+fn high_nibble(b):
+    bit_and(b, 240)
+
+fn low_nibble(b):
+    bit_and(b, 15)
+
+fn nibble(x):
+    bit_or(bit_and(x, 15), shift_right(x, 4))
+
+fn complement(b):
+    bit_xor(b, 255)
+
+fn position_low(n):
+    n
+
+fn position_high(n):
+    shift_left(n, 4)

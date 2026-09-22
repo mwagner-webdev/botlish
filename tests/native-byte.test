@@ -1,0 +1,240 @@
+# native-byte.test -- byte::high_nibble/byte::low_nibble/byte::nibble/
+# byte::complement/byte::position_low/byte::position_high (lib/byte.bot)
+# and the generic bit_and/bit_or/bit_xor/shift_left/shift_right primitives
+# (core/scalarbits.tcl) on the native (Cranelift) backend, and web.bot's
+# rewritten high_nibble via bench/refined-checks.ir -- the milestone's
+# primary acceptance case. See BYTE-NIBBLE-BIT-ARITHMETIC.md.
+#
+# byte::high_nibble/byte::low_nibble/byte::nibble/etc. are ordinary,
+# plainly-typed Botlish functions (not natives with a declared HighNibble/
+# LowNibble/Nibble result type): that shape does not compile natively from
+# a call site *inside* a cross-file module function (lib/byte.bot's own
+# shape, and web.bot's) -- core/scalarbits.tcl's header has the discovery
+# and the full trace. This file's parity checks are exactly what proves the
+# plain-function design still computes the right values on every backend.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 100000
+
+set parityBackends {interp compile cranelift-generic cranelift}
+
+# "same" if every backend agrees on the outcome of the .bot program file
+# PATH; otherwise every outcome, backend by backend (surface-modules.test's
+# own moduleParity, duplicated here to keep this file self-contained).
+proc moduleParity {path} {
+    set hir [surface::readProgramFile $path -strict 0]
+    set exprs [hir::lower $hir]
+    set outcomes [lmap backend $::parityBackends {outcomeUnder $backend $exprs}]
+    if {[llength [lsort -unique $outcomes]] == 1} {
+        return same
+    }
+    return [join [lmap backend $::parityBackends outcome $outcomes {list $backend $outcome}] " / "]
+}
+
+# The interp value of the .bot program file PATH (asserts every backend
+# agrees first, via moduleParity, then returns interp's own shown value).
+proc moduleValue {path} {
+    set same [moduleParity $path]
+    if {$same ne "same"} {
+        error "backends disagree: $same"
+    }
+    set hir [surface::readProgramFile $path -strict 0]
+    lindex [outcomeUnder interp [hir::lower $hir]] 1
+}
+
+# ---------------------------------------------------------------------------
+# byte::high_nibble/byte::low_nibble/byte::nibble/byte::complement/
+# byte::position_low/byte::position_high: cross-backend parity and values.
+
+test native-byte-basic-parity {byte:: operations agree on every backend} -body {
+    set path [makeFile {[byte::high_nibble(171), byte::low_nibble(171), byte::nibble(byte::high_nibble(171)),
+ byte::nibble(byte::low_nibble(171)), byte::complement(0), byte::complement(240),
+ byte::position_low(10), byte::position_high(10)]} native-byte-basic.bot]
+    try {
+        list [moduleParity $path] [moduleValue $path]
+    } finally {
+        removeFile native-byte-basic.bot
+    }
+} -result {same {[160, 11, 10, 11, 255, 15, 10, 160]}}
+
+# `if` is a value only as the whole right side of a binding/return/break
+# (surface/parser.tcl's own grammar comment), never a nested expression
+# (e.g. a call argument) -- so each exhaustive check below binds its `if`
+# result to a local first (next_acc), then passes that plain ref on.
+
+test native-byte-reconstruction-exhaustive {byte::high_nibble(b) | byte::low_nibble(b) == b for every b in 0..255 (spec #66)} -body {
+    set body {
+fn check_all(i, acc):
+    if i > 255:
+        acc
+    else:
+        ok = bit_or(byte::high_nibble(i), byte::low_nibble(i)) == i
+        next_acc = if acc:
+            ok
+        else:
+            false
+        check_all(i + 1, next_acc)
+
+check_all(0, true)
+}
+    set path [makeFile $body native-byte-reconstruct.bot]
+    try {
+        moduleValue $path
+    } finally {
+        removeFile native-byte-reconstruct.bot
+    }
+} -result true
+
+test native-byte-normalization-exhaustive {byte::nibble(byte::high_nibble(b)) == b div 16, byte::nibble(byte::low_nibble(b)) == b mod 16, for every b in 0..255 (spec #67)} -body {
+    set body {
+fn check_all(i, acc):
+    if i > 255:
+        acc
+    else:
+        hi_ok = byte::nibble(byte::high_nibble(i)) == shift_right(i, 4)
+        lo_ok = byte::nibble(byte::low_nibble(i)) == mod(i, 16)
+        both_ok = if hi_ok:
+            lo_ok
+        else:
+            false
+        next_acc = if acc:
+            both_ok
+        else:
+            false
+        check_all(i + 1, next_acc)
+
+check_all(0, true)
+}
+    set path [makeFile $body native-byte-normalize.bot]
+    try {
+        moduleValue $path
+    } finally {
+        removeFile native-byte-normalize.bot
+    }
+} -result true
+
+test native-byte-complement-exhaustive {byte::complement is its own inverse for every b in 0..255} -body {
+    set body {
+fn check_all(i, acc):
+    if i > 255:
+        acc
+    else:
+        ok = byte::complement(byte::complement(i)) == i
+        next_acc = if acc:
+            ok
+        else:
+            false
+        check_all(i + 1, next_acc)
+
+check_all(0, true)
+}
+    set path [makeFile $body native-byte-complement.bot]
+    try {
+        moduleValue $path
+    } finally {
+        removeFile native-byte-complement.bot
+    }
+} -result true
+
+test native-byte-position-exhaustive {position_low/position_high round-trip through nibble, for every n in 0..15} -body {
+    set body {
+fn check_all(i, acc):
+    if i > 15:
+        acc
+    else:
+        low_ok = byte::nibble(byte::position_low(i)) == i
+        high_ok = byte::nibble(byte::position_high(i)) == i
+        ok = if low_ok:
+            high_ok
+        else:
+            false
+        next_acc = if acc:
+            ok
+        else:
+            false
+        check_all(i + 1, next_acc)
+
+check_all(0, true)
+}
+    set path [makeFile $body native-byte-position.bot]
+    try {
+        moduleValue $path
+    } finally {
+        removeFile native-byte-position.bot
+    }
+} -result true
+
+# ---------------------------------------------------------------------------
+# Generic bitwise primitives: parity on the native backend directly (core
+# IR, no module needed -- bit_and/bit_or/bit_xor/shift_left/shift_right are
+# root natives).
+
+proc sourceIR {text} {
+    return [hir::lower [surface::compile $text t.bot -strict 0]]
+}
+proc parity {text} {
+    set exprs [sourceIR $text]
+    set outcomes [lmap backend $::parityBackends {outcomeUnder $backend $exprs}]
+    if {[llength [lsort -unique $outcomes]] == 1} { return same }
+    return [join [lmap backend $::parityBackends outcome $outcomes {list $backend $outcome}] " / "]
+}
+
+test native-bitops-parity {bit_and/bit_or/bit_xor/shift_left/shift_right agree on every backend} -body {
+    parity {[bit_and(171, 15), bit_or(5, 8), bit_xor(255, 15), shift_left(3, 5), shift_right(200, 3)]}
+} -result same
+
+test native-bitops-value {generic bitwise ops compute the right value on cranelift} -body {
+    lindex [outcomeUnder cranelift [sourceIR {[bit_and(171, 15), bit_or(5, 8), bit_xor(255, 15), shift_left(3, 5), shift_right(200, 3)]}]] 1
+} -result {[11, 13, 240, 96, 25]}
+
+test native-shift-range-error-parity {an out-of-range shift amount is the same error on every backend} -body {
+    parity {shift_left(1, -1)}
+} -result same
+
+# ---------------------------------------------------------------------------
+# byte::high_nibble compiles to mask/shift, not a branch ladder (spec #21,
+# #53, #69, #90): the AND-mask extraction itself is unconditional in the
+# generated NIR (no `guard`/`raise` instruction at all -- byte::high_nibble/
+# byte::low_nibble need no runtime validation for any Int input, per
+# core/scalarbits.tcl's by-construction argument).
+
+test native-byte-high-nibble-nir-is-mask-not-branch {byte::high_nibble's own NIR has no comparison/branch instruction} -body {
+    set path [makeFile "fn extract(b):\n    byte::high_nibble(b)\n\nextract(200)\n" native-byte-nir.bot]
+    try {
+        set hir [surface::readProgramFile $path -strict 0]
+        set nir [native::nir $hir]
+        # The generated NIR for `extract` contains a raw bitwise-AND op and
+        # no comparison op at all.
+        list [expr {[string first "op iand" $nir] >= 0 || [string first "iand " $nir] >= 0}] \
+             [expr {[string first "ilt" $nir] < 0 && [string first "ile" $nir] < 0
+                     && [string first "igt" $nir] < 0 && [string first "ige" $nir] < 0}]
+    } finally {
+        removeFile native-byte-nir.bot
+    }
+} -result {1 1}
+
+# ---------------------------------------------------------------------------
+# The primary acceptance case: web.bot's high_nibble, exercised through
+# bench/refined-checks.ir on every backend (NATIVE-OPAQUE-REFINEMENT.md's
+# own benchmark, unmodified apart from web.bot's own high_nibble body).
+
+test native-refined-checks-cranelift-value {refined-checks.ir still computes [400, 0] on cranelift after the high_nibble rewrite} -body {
+    set exprs [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]
+    lindex [outcomeUnder cranelift $exprs] 1
+} -result {[400, 0]}
+
+test native-refined-checks-compile-cranelift-agree {compile and cranelift agree on refined-checks.ir (interp hits Tcl's own recursion limit at this depth, pre-existing and unrelated -- see NATIVE-OPAQUE-REFINEMENT.md \167 12)} -body {
+    set exprs [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]
+    list [outcomeUnder compile $exprs] [outcomeUnder cranelift $exprs]
+} -result {{value {[400, 0]} {}} {value {[400, 0]} {}}}
+
+test native-refined-checks-no-old-ladder {web.bot's high_nibble no longer contains the old 15-branch threshold ladder} -body {
+    set text [read [open [file join $::projectRoot lib web.bot]]]
+    list [expr {[string first "b <= 239" $text] < 0}] \
+         [expr {[string first "byte::high_nibble" $text] >= 0}] \
+         [expr {[string first "byte::nibble" $text] >= 0}]
+} -result {1 1 1}
+
+cleanupTests

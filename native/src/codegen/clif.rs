@@ -1271,6 +1271,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         let a: Vec<ir::Value> = args.iter().map(|r| self.get(*r)).collect();
         match op {
             IAdd | ISub | IMul => self.int_arith(op, a[0], a[1]),
+            IAnd | IOr | IXor => self.int_bitop(op, a[0], a[1]),
             ILt | ILe | IGt | IGe | IEq => self.int_compare(op, a[0], a[1]),
             ListGet if self.listget_fast => self.list_get(a[0], a[1]),
             VEq => {
@@ -1330,6 +1331,17 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 let (helper, extra, fallible, alloc): (&str, Option<u64>, bool, Option<(&'static str, u8)>) =
                     match op {
                         IMod => ("rt_int_mod", None, true, None),
+                        // Shifts always take the plain helper path (like
+                        // IMod): unlike IAdd/ISub/IMul/IAnd/IOr/IXor, a
+                        // shift's tagged-word representation does not
+                        // correspond to shifting the logical integer at all,
+                        // so there is no cheap tagged-word trick to inline
+                        // here -- see int_bitop's own doc for the AND/OR/XOR
+                        // case, which does have one. Fallible: RANGE on an
+                        // invalid shift amount (ops.rs's shift_amount). May
+                        // allocate: the BigInt path (op_may_allocate above).
+                        IShl => ("rt_int_shl", None, true, None),
+                        IShr => ("rt_int_shr", None, true, None),
                         Hash => ("rt_hash", None, true, None),
                         RegionCheck => ("rt_str_region_check", None, true, None),
                         RegionEq => ("rt_str_region_eq", None, false, None),
@@ -1484,6 +1496,53 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         // call either way, so an allocation-free slow path never leaves a
         // stale site id to misattribute a later allocation.
         let r = self.call_allocating(helper, &[self.vm, a, b], operation, KIND_BIGINT);
+        self.b.ins().jump(done, &[BlockArg::Value(r)]);
+        self.b.switch_to_block(done);
+        result
+    }
+
+    /// Bitwise AND/OR/XOR directly on the tagged words, never falling to a
+    /// helper: unlike `+`/`-`/`*` (which can leave the small-Int range and
+    /// need a BigInt fallback), AND/OR/XOR of two tagged Ints can never
+    /// produce a result that needs more bits than the wider of its two
+    /// operands already had, so a *proven-small* operand pair's tagged-word
+    /// result is always itself proven small too -- no overflow check, no
+    /// slow branch, ever. Both operands here are ordinary tagged Values
+    /// (`2n+1`), not necessarily proven small by hir/range.tcl (that
+    /// analysis is consulted only for the separate raw/unboxed
+    /// representation tier -- see native/lower.tcl's "Representation"
+    /// section); this still works for two arbitrary tagged small Ints
+    /// because the tag bit (bit 0) is 1 on both, so:
+    ///   AND: (2x+1) & (2y+1) = 2(x&y) + 1 -- tag bit survives automatically
+    ///   OR:  (2x+1) | (2y+1) = 2(x|y) + 1 -- likewise
+    ///   XOR: (2x+1) ^ (2y+1) = 2(x^y) + 0 -- the two 1-tag-bits cancel, so
+    ///        the raw xor's own bit 0 must be forced back to 1 afterward
+    /// A BigInt operand (heap pointer, tag bit 0) never reaches this
+    /// function: EmitArgGuards/hir::aot already proved both operands Int-
+    /// kind, but "Int" spans both small and BigInt representations, so a
+    /// genuine BigInt operand is still possible here -- handled by
+    /// `both_small_split`'s runtime test exactly as `int_arith` does,
+    /// falling to `rt_int_and`/`rt_int_or`/`rt_int_xor` (ops.rs) in that
+    /// case, which is correct (if slower) for any Int, tagged or not.
+    fn int_bitop(&mut self, op: OpCode, a: ir::Value, b: ir::Value) -> ir::Value {
+        let (fast, slow, done, result) = self.both_small_split(a, b);
+        self.b.switch_to_block(fast);
+        let r = match op {
+            OpCode::IAnd => self.b.ins().band(a, b),
+            OpCode::IOr => self.b.ins().bor(a, b),
+            _ => {
+                let x = self.b.ins().bxor(a, b);
+                self.b.ins().bor_imm_s(x, 1)
+            }
+        };
+        self.b.ins().jump(done, &[BlockArg::Value(r)]);
+        self.b.switch_to_block(slow);
+        let helper = match op {
+            OpCode::IAnd => "rt_int_and",
+            OpCode::IOr => "rt_int_or",
+            _ => "rt_int_xor",
+        };
+        let r = self.call_helper(helper, &[self.vm, a, b]);
         self.b.ins().jump(done, &[BlockArg::Value(r)]);
         self.b.switch_to_block(done);
         result
