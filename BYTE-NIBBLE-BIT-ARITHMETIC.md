@@ -477,13 +477,19 @@ unsupported on Cranelift rather than silently divergent.
   `native-int-2` ("values beyond 64 bits stay exact"). Bisected directly
   (reverting only `hir/range.tcl` on top of the same Rust/NIR changes made
   the crash disappear, isolating it to this file, not the Cranelift
-  codegen) to `ExactOf`'s dense-range reconstruction loop: a bytecode-
-  compiled `for {...} {incr v} {...}` loop's `incr` step used native
-  64-bit arithmetic and silently *wrapped* rather than promoted to a
-  bignum at exactly `i64::MAX` (`9223372036854775807` -> `incr`
-  produced `-9223372036854775808`), turning a single-iteration point
-  reconstruction into a multi-billion-iteration runaway that allocated
-  until the process was killed. Fixed with a `while`/`expr {$v + 1}` loop
+  codegen) to `ExactOf`'s dense-range reconstruction loop: Tcl 9.0.1's
+  bytecode-compiled `incr` -- specifically `incr` as it runs inside a
+  *proc*, where it is compiled, not typed interactively at tclsh's own top
+  level, where it is not -- silently *wraps* via native 64-bit arithmetic
+  instead of promoting to a bignum at exactly `i64::MAX`. Confirmed
+  minimally: `proc p {} { set v 9223372036854775807; incr v; return $v }`
+  returns `-9223372036854775808`; the identical `incr` typed at the top
+  level of an interactive `tclsh9.0` session correctly returns
+  `9223372036854775808`. Every proc in `hir/range.tcl` is compiled, so
+  `ExactOf`'s `for {...} {incr v} {...}` loop hit this, turning a
+  single-iteration point reconstruction into a multi-billion-iteration
+  runaway that allocated until the process was killed. Fixed with a
+  `while`/`expr {$v + 1}` loop
   (Tcl 9's ordinary arbitrary-precision addition, exactly like every other
   bound this file computes) instead of `incr`; pinned with two new
   regression tests (`tests/hir-range-exact.test`'s

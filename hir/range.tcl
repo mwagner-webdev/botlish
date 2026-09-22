@@ -140,14 +140,17 @@ proc hir::range::ExactOf {r} {
     # demand: otherwise a cheap exact transfer like {1,2}+{10,20} -> four
     # values, spec #29, would wrongly degrade the moment either side's own
     # set was small enough to be dense).
-    # Not `incr v` (a bytecode-compiled `for` loop's `incr` step can use
-    # native 64-bit arithmetic and *wrap* rather than promote to a bignum,
-    # confirmed directly at exactly this boundary: `incr` on
-    # 9223372036854775807 -- i64::MAX -- silently produced
-    # -9223372036854775808, turning this loop into a runaway multi-billion-
-    # iteration one instead of the single iteration a point range needs;
-    # see BYTE-NIBBLE-BIT-ARITHMETIC.md's own account). `expr {$v + 1}`
-    # uses Tcl 9's ordinary arbitrary-precision addition, exactly like every
+    # Not `incr v`: Tcl 9.0.1's bytecode-compiled `incr` (i.e. `incr` as it
+    # runs inside a *proc*, not typed interactively at the top level) wraps
+    # via native 64-bit arithmetic instead of promoting to a bignum exactly
+    # at the i64 boundary -- confirmed directly and minimally (a bare `incr`
+    # on 9223372036854775807 -- i64::MAX -- inside a one-line proc returns
+    # -9223372036854775808; the identical `incr` typed at tclsh's top level
+    # correctly returns 9223372036854775808). Every proc in this file is
+    # compiled, so this loop hit it, turning a single-iteration point
+    # reconstruction into a multi-billion-iteration runaway (see
+    # BYTE-NIBBLE-BIT-ARITHMETIC.md's own account). `expr {$v + 1}` uses
+    # Tcl 9's ordinary arbitrary-precision addition, exactly like every
     # other bound computed in this file, and is not vulnerable to this.
     set values {}
     set v $mn
