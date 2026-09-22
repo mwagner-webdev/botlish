@@ -50,7 +50,7 @@ namespace eval surface::lexer {
     variable keywords {fn if else loop return break continue true false unit and or not namespace}
     # Longest operators first ("::" before ":", so a module-qualified name
     # like web::uri_escape does not lex as ":" ":").
-    variable operators {== != <= >= :: ( ) [ ] , : = < > + - *}
+    variable operators {== != <= >= :: -> ( ) [ ] , : = < > + - *}
 }
 
 proc surface::lex {source {filename <input>}} {

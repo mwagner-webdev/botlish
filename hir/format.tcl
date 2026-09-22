@@ -146,6 +146,9 @@ proc hir::format::Expr {hir e indent origins linesVar} {
         block {
             set text "block [dict get $node bodyScope] ([BindingList $hir [dict get $node params]])"
             append text " captures ([BindingList $hir [dict get $node captures]])"
+            if {[dict get $node declaredResult] ne {}} {
+                append text [format { declares %s} [hir::types::show [dict get $node declaredResult]]]
+            }
             set binds [Binds $hir [dict get $node bodyScope]]
             if {$binds ne ""} {
                 append text " $binds"

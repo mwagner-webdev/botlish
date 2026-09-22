@@ -53,6 +53,8 @@ proc core::type::register {name args} {
         error "core::type::register: options must be -option value pairs"
     }
     set options [dict create -base "" -validator "" -opaque 0]
+    dict set options -parents {}
+    dict set options -integer-domain {}
     foreach {option value} $args {
         if {![dict exists $options $option]} {
             error "core::type::register: unknown option \"$option\""
@@ -62,8 +64,17 @@ proc core::type::register {name args} {
     set base [dict get $options -base]
     set validator [dict get $options -validator]
     set opaque [dict get $options -opaque]
+    set parents [dict get $options -parents]
+    set integerDomain [dict get $options -integer-domain]
     if {$base ni $primitives} {
         error "core::type::register: -base must be one of: $primitives"
+    }
+    if {$integerDomain ne {}} {
+        if {$base ne {int} || $validator ne {} || $opaque} {
+            error {core::type::register: -integer-domain requires -base int and supplies the validator}
+        }
+        set integerDomain [NormalizeIntegerDomain $integerDomain]
+        set validator [list core::type::IntegerDomainValidator $integerDomain]
     }
     if {$opaque ni {0 1}} {
         error "core::type::register: -opaque must be 0 or 1"
@@ -74,8 +85,44 @@ proc core::type::register {name args} {
     if {$opaque && $base ni $evidenceKinds} {
         error "core::type::register: opaque types need a base that carries evidence ($evidenceKinds)"
     }
-    dict set registry $name [dict create name $name base $base validator $validator opaque $opaque]
+    foreach parent $parents {
+        if {![dict exists $registry $parent]} { error [format {core::type::register: unknown parent type %s} $parent] }
+        if {[dict get $registry $parent base] ne $base} { error [format {core::type::register: parent %s has a different base} $parent] }
+    }
+    dict set registry $name [dict create name $name base $base validator $validator opaque $opaque parents $parents integerDomain $integerDomain]
     return $name
+}
+
+proc core::type::NormalizeIntegerDomain {domain} {
+    switch -- [lindex $domain 0] {
+        interval {
+            if {[llength $domain] != 3} { error {core::type::register: interval domain needs LO and HI} }
+            lassign $domain _ lo hi
+            if {![string is entier -strict $lo] || ![string is entier -strict $hi] || $lo > $hi} {
+                error {core::type::register: invalid integer interval}
+            }
+            return [list interval $lo $hi]
+        }
+        exact {
+            if {[llength $domain] != 2 || [lindex $domain 1] eq {}} {
+                error {core::type::register: exact integer domain needs values}
+            }
+            foreach value [lindex $domain 1] {
+                if {![string is entier -strict $value]} { error {core::type::register: exact domain contains a non-integer} }
+            }
+            set values [lsort -unique -command {apply {{a b} {expr {$a < $b ? -1 : ($a > $b)}}}} [lindex $domain 1]]
+            return [list exact $values]
+        }
+        default { error {core::type::register: integer domain must be interval or exact} }
+    }
+}
+
+proc core::type::IntegerDomainValidator {domain v} {
+    set n [core::value::intOf $v]
+    switch -- [lindex $domain 0] {
+        interval { lassign $domain _ lo hi; return [expr {$n >= $lo && $n <= $hi}] }
+        exact { return [expr {$n in [lindex $domain 1]}] }
+    }
 }
 
 proc core::type::names {} {
@@ -94,6 +141,40 @@ proc core::type::metadata {name} {
         error "core::type: no type named \"$name\""
     }
     return [dict get $registry $name]
+}
+
+# A sound optimizer summary derived from a semantic integer domain.
+proc core::type::integerFacts {type} {
+    set type [normalize $type]
+    if {[base $type] ne {int}} { return {} }
+    set result {}
+    foreach name [evidenceOf $type] {
+        set domain [dict get [metadata $name] integerDomain]
+        if {$domain eq {}} { continue }
+        if {[lindex $domain 0] eq {interval}} {
+            lassign $domain _ lo hi
+            set facts [dict create min $lo max $hi]
+        } else {
+            set values [lindex $domain 1]
+            set facts [dict create min [lindex $values 0] max [lindex $values end] exact $values]
+        }
+        set result [expr {$result eq {} ? $facts : [IntersectIntegerFacts $result $facts]}]
+    }
+    return $result
+}
+
+proc core::type::IntersectIntegerFacts {a b} {
+    set lo [expr {[dict get $a min] > [dict get $b min] ? [dict get $a min] : [dict get $b min]}]
+    set hi [expr {[dict get $a max] < [dict get $b max] ? [dict get $a max] : [dict get $b max]}]
+    set exact {}
+    foreach source [list $a $b] {
+        if {![dict exists $source exact]} { continue }
+        set values [lmap v [dict get $source exact] {if {$v >= $lo && $v <= $hi} {set v} else continue}]
+        set exact [expr {$exact eq {} ? $values : [lmap v $exact {if {$v in $values} {set v} else continue}]}]
+    }
+    set result [dict create min $lo max $hi]
+    if {$exact ne {}} { dict set result exact $exact }
+    return $result
 }
 
 # Registers NAME? (or PREDICATE-NAME): an ordinary native predicate that
@@ -205,6 +286,18 @@ proc core::type::evidenceOf {type} {
     return {}
 }
 
+proc core::type::evidenceClosure {type} {
+    set work [evidenceOf $type]
+    set result {}
+    while {$work ne {}} {
+        set work [lassign $work name]
+        if {$name in $result} { continue }
+        lappend result $name
+        lappend work {*}[dict get [metadata $name] parents]
+    }
+    return $result
+}
+
 # 1 if every value of A is a value of B.
 proc core::type::subtype {a b} {
     set a [normalize $a]
@@ -215,8 +308,9 @@ proc core::type::subtype {a b} {
     if {$a eq "any" || [base $a] ne [base $b]} {
         return 0
     }
+    set have [evidenceClosure $a]
     foreach name [evidenceOf $b] {
-        if {$name ni [evidenceOf $a]} {
+        if {$name ni $have} {
             return 0
         }
     }
@@ -232,9 +326,19 @@ proc core::type::lub {a b} {
         return any
     }
     set shared {}
-    foreach name [evidenceOf $a] {
-        if {$name in [evidenceOf $b]} {
+    set ae [evidenceClosure $a]
+    set be [evidenceClosure $b]
+    foreach name $ae {
+        if {$name in $be} {
             lappend shared $name
+        }
+    }
+    foreach name $shared {
+        foreach other $shared {
+            if {$name ne $other && $name in [evidenceClosure $other]} {
+                set shared [lsearch -all -inline -not -exact $shared $name]
+                break
+            }
         }
     }
     return [Make [base $a] $shared]

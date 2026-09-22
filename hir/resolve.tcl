@@ -297,6 +297,16 @@ proc hir::resolve::Expr {hirVar node ctx} {
             SetField hir $e bodyScope $bodyScope
             SetField hir $e params $params
             SetField hir $e captures {}
+            set declared [expr {[dict exists $node declaredResult] ? [dict get $node declaredResult] : {}}]
+            if {$declared ne {}} {
+                if {[catch {core::type::normalize $declared} normalized]} {
+                    hir::Diagnose hir TYPE [format {unknown or invalid result type %s} $declared] $e
+                    set declared {}
+                } else {
+                    set declared $normalized
+                }
+            }
+            SetField hir $e declaredResult $declared
             SetField hir $e resultType ""
             set inner [dict create scope $bodyScope callable $e loop "" \
                 blocks [concat [dict get $ctx blocks] [list [list $e $bodyScope]]]]

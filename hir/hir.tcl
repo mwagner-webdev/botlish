@@ -232,6 +232,7 @@ proc hir::buildSyntax {nodes args} {
     ResolveModuleNativeTargets hir [dict get $options -module-native-targets]
     ApplyNativeResultOverrides hir [dict get $options -native-result-overrides]
     hir::types::infer hir
+    hir::range::verifyDeclaredResults hir
     hir::modulebinding::validate hir
     if {[dict get $options -strict]} {
         foreach diagnostic [dict get $hir diagnostics] {
@@ -337,6 +338,26 @@ proc hir::bindingType {hir b} {
         return any
     }
     return [dict get $hir types $t]
+}
+
+# Public ordinary-function signatures exported by loaded module sections.
+# The block result is the single authoritative semantic signature used by
+# calls and specialization; parameters remain unannotated in this milestone.
+proc hir::moduleSignatures {hir} {
+    set signatures [dict create]
+    if {![dict exists $hir modules]} { return $signatures }
+    dict for {namespace scope} [dict get $hir modules] {
+        foreach b [dict get $hir scopes $scope bindings] {
+            set declaration [dict get $hir bindings $b declaredBy]
+            if {$declaration eq {}} { continue }
+            set value [dict get $hir exprs $declaration value]
+            if {[dict get $hir exprs $value kind] ne {block}} { continue }
+            set params [lrepeat [llength [dict get $hir exprs $value params]] any]
+            set result [hir::type $hir [dict get $hir exprs $value resultType]]
+            dict set signatures [dict get $hir bindings $b name] [dict create params $params result $result block $value]
+        }
+    }
+    return $signatures
 }
 
 # Sub-expressions of E in evaluation order (branch and loop bodies included).

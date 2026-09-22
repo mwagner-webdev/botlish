@@ -34,7 +34,7 @@
 #
 # byte::high_nibble/byte::low_nibble/byte::nibble/byte::complement/
 # byte::position_low/byte::position_high (lib/byte.bot) are ordinary,
-# plainly-typed Botlish functions built from the bitwise primitives below --
+# Botlish functions with verified result contracts, built from the bitwise primitives below --
 # not separate natives. byte::high_nibble(0xAB) is HighNibble(0xA0), not
 # logical Nibble(0xA): position-preserving extraction, never folded into
 # normalization itself (spec's own #3-4); byte::nibble(...) is the separate
@@ -48,15 +48,10 @@
 # high_nibble's shape -- discovered directly while building this milestone
 # (BYTE-NIBBLE-BIT-ARITHMETIC.md's own trace). Plain functions over
 # `bit_and`/`bit_or`/`bit_xor`/`shift_left`/`shift_right` sidestep this
-# entirely (those five are already in native/lower.tcl's own op table, so
-# no substitution of any kind is ever needed for a call to them, from any
-# call site) at the cost of the nominal HighNibble/LowNibble/Nibble type
-# label not surviving that same call boundary; hir/range.tcl's exact-value-
-# set analysis (extended by this milestone) recovers equivalent *fact*
-# precision -- interval [0,240] and exact set {0,16,...,240} for
-# byte::high_nibble's result -- independently of that label, which is what
-# items 103/105 of the milestone's own spec actually ask diagnostics to
-# show.
+# entirely (those five are already in native/lower.tcl's own op table).
+# Ordinary block metadata now carries the verified nominal result through
+# module resolution and specialization, and the integer-domain descriptor
+# below seeds hir/range.tcl at every caller.
 
 namespace eval core::scalarbits {}
 
@@ -163,10 +158,11 @@ proc core::scalarbits::IsHighNibble {v} {
     return [expr {$n >= 0 && $n <= 240 && ($n % 16) == 0}]
 }
 
-core::type::register Byte       -base int -validator [list core::scalarbits::InRange 0 255]
-core::type::register Nibble     -base int -validator [list core::scalarbits::InRange 0 15]
-core::type::register LowNibble  -base int -validator [list core::scalarbits::InRange 0 15]
-core::type::register HighNibble -base int -validator core::scalarbits::IsHighNibble
+core::type::register Byte       -base int -integer-domain {interval 0 255}
+core::type::register Nibble     -base int -parents Byte -integer-domain {interval 0 15}
+core::type::register LowNibble  -base int -parents Byte -integer-domain {interval 0 15}
+core::type::register HighNibble -base int -parents Byte \
+    -integer-domain {exact {0 16 32 48 64 80 96 112 128 144 160 176 192 208 224 240}}
 
 core::type::definePredicate Byte
 core::type::definePredicate Nibble
@@ -191,4 +187,3 @@ foreach typeName {Byte Nibble LowNibble HighNibble} {
         -param-types int -result-type $typeName -context-free 1
 }
 unset typeName
-

@@ -104,7 +104,8 @@ namespace eval hir::range {
 # explicitly still computes min/max exactly as it always did, and simply
 # carries no `exact` key -- ExactOf then reads that the same as "not
 # tracked". Only join, add/sub/mul and the two Narrowed-family branch-
-# narrowing procs (below) ever populate or filter it. Bounded by
+# narrowing, bounded constant-mask transfer, and semantic type seeding also
+# populate or filter it. Bounded by
 # maxExactValues throughout: crossing it always widens to interval-only,
 # never grows past it (spec #27-30). Normalize (below) additionally drops a
 # set that is exactly as precise as its own interval -- a dense run
@@ -184,6 +185,56 @@ proc hir::range::Normalize {r values} {
         return $r
     }
     return [dict merge $r [dict create exact $sorted]]
+}
+
+# Intersects an existing flow fact with the bound supplied by a semantic
+# integer type. Empty intersections remain conservative because this lattice
+# deliberately has no binding-level bottom.
+proc hir::range::intersect {a b} {
+    if {$a eq {never}} { return never }
+    set amn [dict get $a min]
+    set bmn [dict get $b min]
+    set amx [dict get $a max]
+    set bmx [dict get $b max]
+    if {$amn eq {-inf}} {
+        set mn $bmn
+    } elseif {$bmn eq {-inf}} {
+        set mn $amn
+    } else {
+        set mn [Max $amn $bmn]
+    }
+    if {$amx eq {+inf}} {
+        set mx $bmx
+    } elseif {$bmx eq {+inf}} {
+        set mx $amx
+    } else {
+        set mx [Min $amx $bmx]
+    }
+    if {$mn ne {-inf} && $mx ne {+inf} && $mn > $mx} { return $a }
+    set r [dict create min $mn max $mx]
+    set ea [ExactOf $a]
+    set eb [ExactOf $b]
+    if {$ea eq {} && $eb eq {}} { return $r }
+    set source [expr {$ea eq {} ? $eb : $ea}]
+    set values [lmap v $source {
+        if {($mn ne {-inf} && $v < $mn) || ($mx ne {+inf} && $v > $mx) \
+                || ($ea ne {} && $eb ne {} && $v ni $eb)} continue
+        set v
+    }]
+    if {$values eq {}} { return $r }
+    return [Normalize $r $values]
+}
+
+proc hir::range::TypeFact {type} {
+    if {[catch {core::type::integerFacts $type} facts]} { return [unknown] }
+    if {$facts eq {}} { return [unknown] }
+    set r [dict create min [dict get $facts min] max [dict get $facts max]]
+    return [expr {[dict exists $facts exact] ? [Normalize $r [dict get $facts exact]] : $r}]
+}
+
+proc hir::range::ConstrainType {hir e r} {
+    if {$r eq {never}} { return never }
+    return [intersect $r [TypeFact [hir::typeOf $hir $e]]]
 }
 
 proc hir::range::unknown {} {
@@ -407,9 +458,8 @@ proc hir::range::show {r} {
 # proven purely from general nonnegative-integer reasoning about the
 # operation itself, never from any named type (spec #17, #35: this stays a
 # capability of the interval lattice, with no concept here named Byte or
-# HighNibble). No exact-set derivation is attempted (that would need
-# known-bits-style reasoning this milestone deliberately defers -- spec
-# #86); only the interval improves.
+# HighNibble). AND with a nonnegative constant also gets bounded submask
+# enumeration; general known-bits reasoning remains deliberately deferred.
 #
 #   bit_and: AND's result bits are a subset of whichever operand is
 #     nonnegative (a set bit needs both operands set, and a nonnegative
@@ -438,10 +488,14 @@ proc hir::range::BitOp {name x y} {
     switch -- $name {
         bit_and {
             if {$ymn ne "-inf" && $ymn >= 0} {
-                return [dict create min 0 max $ymx]
+                set r [dict create min 0 max $ymx]
+                if {$ymn eq $ymx} { return [AndMaskExact $r $ymn] }
+                return $r
             }
             if {$xmn ne "-inf" && $xmn >= 0} {
-                return [dict create min 0 max $xmx]
+                set r [dict create min 0 max $xmx]
+                if {$xmn eq $xmx} { return [AndMaskExact $r $xmn] }
+                return $r
             }
             return [unknown]
         }
@@ -465,6 +519,18 @@ proc hir::range::BitOp {name x y} {
         }
     }
     return [unknown]
+}
+
+proc hir::range::AndMaskExact {r mask} {
+    variable maxExactValues
+    set values {0}
+    set sub $mask
+    while {$sub != 0} {
+        lappend values $sub
+        if {[llength $values] > $maxExactValues} { return $r }
+        set sub [expr {($sub - 1) & $mask}]
+    }
+    return [Normalize $r $values]
 }
 
 # ---------------------------------------------------------------------------
@@ -569,6 +635,7 @@ proc hir::range::Expr {hirVar ctxVar e} {
             set b [dict get $node binding]
             set bindings [dict get $ctx bindings]
             set r [expr {[dict exists $bindings $b] ? [dict get $bindings $b] : [unknown]}]
+            set r [ConstrainType $hir $e $r]
             dict set ctx exprs $e $r
             return $r
         }
@@ -723,6 +790,7 @@ proc hir::range::Call {hirVar ctxVar e node} {
                 collection-length { set result [collectionLength] }
             }
         }
+        set result [ConstrainType $hir $e $result]
         dict set ctx exprs $e $result
         return $result
     }
@@ -738,11 +806,48 @@ proc hir::range::Call {hirVar ctxVar e node} {
         dict lappend ctx calls [list $targetId $argRanges]
         set results [dict get $ctx calleeResults]
         set result [expr {[dict exists $results $targetId] ? [dict get $results $targetId] : [unknown]}]
+        set result [ConstrainType $hir $e $result]
         if {$result eq "never"} {set result [unknown]}
         dict set ctx exprs $e $result
         return $result
     }
+    if {$targetKind eq {block}} {
+        set result [ConstrainType $hir $e [unknown]]
+        dict set ctx exprs $e $result
+        return $result
+    }
     return [unknown]
+}
+
+proc hir::range::ProvesType {range type} {
+    set facts [core::type::integerFacts $type]
+    if {$facts eq {} || $range eq {never}} { return 0 }
+    if {[dict exists $facts exact]} {
+        set actual [ExactOf $range]
+        if {$actual eq {}} { return 0 }
+        foreach v $actual { if {$v ni [dict get $facts exact]} { return 0 } }
+        return 1
+    }
+    set mn [dict get $range min]
+    set mx [dict get $range max]
+    return [expr {$mn ne {-inf} && $mx ne {+inf} && $mn >= [dict get $facts min] && $mx <= [dict get $facts max]}]
+}
+
+proc hir::range::verifyDeclaredResults {hirVar} {
+    upvar 1 $hirVar hir
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] ne {block} || [dict get $node declaredResult] eq {}} { continue }
+        set params [dict get $node params]
+        set outcome [AnalyzeInstance $hir verify {} $e $params \
+            [lrepeat [llength $params] [unknown]] {} {}]
+        set result [dict get $outcome result]
+        set declared [dict get $node declaredResult]
+        set inferred [hir::type $hir [dict get $node inferredResultType]]
+        if {![hir::types::subtype $inferred $declared] && ![ProvesType $result $declared]} {
+            hir::Diagnose hir TYPE [format {function result does not prove declared type %s (facts: %s)} \
+                [core::type::show $declared] [show $result]] $e
+        }
+    }
 }
 
 proc hir::range::If {hirVar ctxVar e node} {

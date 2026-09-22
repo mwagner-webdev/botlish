@@ -226,7 +226,7 @@ proc surface::lower::Node {node} {
             }]
             set block [hir::syntax::blockNode \
                 [Origin [dict get $node paramsSpan] [dict get $node id]/block] \
-                $params [Sequence [dict get $node body body]]]
+                $params [Sequence [dict get $node body body]] [dict get $node resultType]]
             return [hir::syntax::bindNode $origin [dict get $node name] $block]
         }
         if {
