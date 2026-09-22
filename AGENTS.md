@@ -40,6 +40,54 @@ and with no locale the system encoding falls back to `iso8859-1`, which
 makes writing non-ASCII/astral output fail outright instead of being
 silently mangled.
 
+### Known Tcl core bug: compiled `incr` wraps instead of promoting at the i64 boundary
+
+Confirmed directly (BYTE-NIBBLE-BIT-ARITHMETIC.md's own account has the full
+trace) and **still present as of Tcl 9.0.4 and the 9.1a1 alpha** -- not
+fixed upstream, so there is currently no newer version to pin instead:
+
+```tcl
+proc p {} { set v 9223372036854775807; incr v; return $v }
+puts [p]   ;# -9223372036854775808 -- WRONG (silently wraps)
+
+set v 9223372036854775807
+incr v
+puts $v    ;# 9223372036854775808  -- correct (typed at tclsh's own top level, not compiled)
+```
+
+`incr` as it runs inside a compiled `proc` (`generic/tclExecute.c`'s
+`INST_INCR_SCALAR1_IMM`/`INST_INCR_SCALAR_IMM` handler) computes the
+overflow-detecting sum correctly, but on the *overflow* branch re-derives
+the result via plain `Tcl_WideInt` addition (`TclNewIntObj`/`TclSetIntObj`
+with `w + increment`) instead of promoting to a bignum -- the exact
+computation that just overflowed, repeated, then stored as if it hadn't.
+Verified via direct source diff across `core-9-0-1`, `core-9-0-2`,
+`core-9-0-3`, `core-9-0-4` and `core-9-1-a1` (github.com/tcltk/tcl): the
+relevant lines are byte-for-byte identical in every one of them; none of
+their release notes mention it. `incr` typed directly at tclsh's
+interactive top level (uncompiled) is unaffected -- only code inside a
+`proc`, where bytecode compilation applies, hits this.
+
+**Practical consequence for any code in this repo**: never use `incr` in a
+loop whose counter could plausibly reach `i64::MAX`/`i64::MIN`
+(9223372036854775807 / -9223372036854775808) -- use
+`set v [expr {$v + 1}]` instead, which correctly uses Tcl 9's ordinary
+arbitrary-precision `expr` arithmetic. Botlish's own `Int` is
+arbitrary-precision (this project's whole point), so any Tcl-side loop that
+iterates over or reconstructs a range of Botlish Int values is a candidate
+for this -- `hir/range.tcl`'s `ExactOf` hit it exactly this way; see that
+file's own comment.
+
+**Do not "fix" this by pinning a newer Tcl 9**: no released or alpha
+version fixes it (checked above), and the Ubuntu packages newer than
+`9.0.1+dfsg-1` (`9.0.2`, `9.0.3`, `9.0.4`, all still in the same `universe`
+pool path) require `glibc >= 2.42`, which this sandbox's (and, as of this
+writing, GitHub Actions' `ubuntu-latest`) base image does not have --
+installing one over `9.0.1` breaks `tclsh9.0` outright (`GLIBC_2.42' not
+found`) until it's downgraded back. `9.0.1` remains the correct pin for
+both this reason and because it is not actually behind on this specific
+bug.
+
 ## Building the native (Cranelift) backend
 
 `cargo build --release --manifest-path native/Cargo.toml` needs a rustc new

@@ -485,7 +485,17 @@ unsupported on Cranelift rather than silently divergent.
   minimally: `proc p {} { set v 9223372036854775807; incr v; return $v }`
   returns `-9223372036854775808`; the identical `incr` typed at the top
   level of an interactive `tclsh9.0` session correctly returns
-  `9223372036854775808`. Every proc in `hir/range.tcl` is compiled, so
+  `9223372036854775808`. Confirmed via `generic/tclExecute.c`'s own source
+  (github.com/tcltk/tcl) that this is a genuine, still-unfixed Tcl core bug,
+  not a quirk of this sandbox's specific build: `INST_INCR_SCALAR1_IMM`/
+  `INST_INCR_SCALAR_IMM`'s overflow branch re-derives its result via plain
+  `Tcl_WideInt` addition instead of promoting to a bignum, and the relevant
+  lines are byte-for-byte identical across `core-9-0-1` through the latest
+  patch release `core-9-0-4` and the `core-9-1-a1` alpha -- see AGENTS.md's
+  own "Known Tcl core bug" section for the full account and why this
+  project's Tcl pin is not being changed because of it (no available
+  version fixes it, and the newer Ubuntu packages are not even installable
+  in this environment). Every proc in `hir/range.tcl` is compiled, so
   `ExactOf`'s `for {...} {incr v} {...}` loop hit this, turning a
   single-iteration point reconstruction into a multi-billion-iteration
   runaway that allocated until the process was killed. Fixed with a
