@@ -44,7 +44,10 @@ silently mangled.
 
 Confirmed directly (BYTE-NIBBLE-BIT-ARITHMETIC.md's own account has the full
 trace) and **still present as of Tcl 9.0.4 and the 9.1a1 alpha** -- not
-fixed upstream, so there is currently no newer version to pin instead:
+fixed upstream, so there is currently no newer version to pin instead.
+A minimal standalone reproduction, for filing an upstream bug report, is
+committed at `tcl-incr-i64-wrap-bug.tcl` (run with `tclsh9.0
+tcl-incr-i64-wrap-bug.tcl`):
 
 ```tcl
 proc p {} { set v 9223372036854775807; incr v; return $v }
