@@ -1,0 +1,396 @@
+# hir-closed-call-params.test -- closed-call parameter fact propagation:
+# whether facts proven about an argument at an exact call site become
+# usable facts about the corresponding callee parameter (see
+# CLOSED-CALL-PARAMETER-FACTS.md).
+#
+# This milestone's audit found the mechanism already implemented: hir/
+# range.tcl's own interprocedural fixpoint (built for the prior "closed-call
+# value facts" milestone, CLOSED-CALL-FACTS.md) already folds every exact
+# caller's argument Range -- interval *and* sparse exact set alike -- into
+# its callee's parameter entry facts, joined across every caller, correctly
+# excluding open/dynamic callers, and correctly participating in
+# self-recursive and forwarding fixpoints. No new propagation mechanism was
+# added. These tests pin that existing behavior down directly at the
+# parameter level (dict get ... params), the one place the prior
+# milestone's own tests did not look, plus the one real end-to-end case
+# (byte::nibble, from bench/refined-checks.ir) this milestone exists to
+# answer. No test here mentions Byte/Nibble/HighNibble in any assertion
+# except the real-corpus one, and that one only because it *is* the
+# question this milestone was asked to answer -- the rest use plain
+# integer literals to show the mechanism owes nothing to that domain.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot native native.tcl]
+
+proc closedCallFacts {text} {
+    set hir [surface::compile $text t.bot -strict 0]
+    set spec [hir::specialize::analyze $hir]
+    return [list $hir $spec [hir::range::analyze $hir $spec]]
+}
+
+# Every used InstanceId of SPEC whose block is named NAME (there may be more
+# than one: a specialized instance and a separate generic one for the same
+# source function, e.g. a value that both a direct exact call and a dynamic
+# dispatch can reach).
+proc instancesNamed {spec name} {
+    set out {}
+    foreach id [dict get $spec used] {
+        if {[dict get [dict get $spec instances $id] name] eq $name} {
+            lappend out $id
+        }
+    }
+    return $out
+}
+
+# The single used instance of SPEC named NAME, erroring if there is not
+# exactly one (tests that need to disambiguate generic-vs-specialized query
+# instancesNamed/instanceGeneric directly instead).
+proc instanceNamed {spec name} {
+    set ids [instancesNamed $spec $name]
+    if {[llength $ids] != 1} {
+        error "expected exactly one instance named \"$name\", found $ids"
+    }
+    return [lindex $ids 0]
+}
+
+proc instanceGeneric {spec id} {
+    return [dict get [dict get $spec instances $id] generic]
+}
+
+proc paramRanges {analysis id} {
+    return [lmap r [dict get [dict get $analysis instances $id] params] {hir::range::show $r}]
+}
+
+# ---------------------------------------------------------------------------
+# The real acceptance case: byte::nibble(byte::high_nibble(b)) in the actual
+# web.bot/refined-checks chain. Direct corpus evidence, not a synthetic
+# stand-in: byte::high_nibble's declared HighNibble result (verified,
+# CROSS-MODULE-REFINED-SIGNATURES.md) seeds the call expression's Range via
+# hir::range::TypeFact/ConstrainType; that Range is then this call's own
+# argument Range to byte::nibble, and hir::range::analyze's ordinary
+# cross-instance fold (the same fold every test below exercises with plain
+# integers) carries it onto byte::nibble<int>'s own parameter entry -- no
+# code path here is specific to Byte/Nibble/HighNibble by name.
+
+proc refinedChecksFacts {} {
+    set hir [native::buildProgramHir [core::loadProgramFile \
+        [file join $::projectRoot bench refined-checks.ir]]]
+    set spec [hir::specialize::analyze $hir]
+    return [list $hir $spec [hir::range::analyze $hir $spec]]
+}
+
+test closed-call-real-byte-nibble-param {byte::nibble<int>'s own parameter x carries HighNibble's interval and sparse exact set, from its one real exact caller} -body {
+    lassign [refinedChecksFacts] hir spec analysis
+    paramRanges $analysis [instanceNamed $spec byte::nibble]
+} -result {{[0, 240] {0,16,32,48,64,80,96,112,128,144,160,176,192,208,224,240}}}
+
+test closed-call-real-byte-nibble-is-closed {byte::nibble's real used instance is specialized (closed), not the generic entry, and its instance identity is by kind only (int), not by the caller's own HighNibble-refined type} -body {
+    lassign [refinedChecksFacts] hir spec analysis
+    set id [instanceNamed $spec byte::nibble]
+    list [instanceGeneric $spec $id] [hir::specialize::label $spec $id]
+} -result {0 byte::nibble<int>}
+
+test closed-call-real-byte-nibble-body-sees-fact {the parameter's own ref expressions inside byte::nibble's body already see the joined caller fact (not just the entry summary)} -body {
+    lassign [refinedChecksFacts] hir spec analysis
+    set id [instanceNamed $spec byte::nibble]
+    set exprs [dict get [dict get $analysis instances $id] exprs]
+    set got {}
+    dict for {e r} $exprs {
+        if {[hir::kind $hir $e] eq "ref"} {
+            lappend got [hir::range::show $r]
+        }
+    }
+    lsort -unique $got
+} -result {{[0, 240] {0,16,32,48,64,80,96,112,128,144,160,176,192,208,224,240}}}
+
+# ---------------------------------------------------------------------------
+# Single exact caller: an ordinary sparse exact set, unrelated to any named
+# scalar domain, reaches a closed callee's own parameter unchanged.
+
+test closed-call-single-exact-caller {a single caller's sparse exact set becomes the callee parameter's own fact} -body {
+    lassign [closedCallFacts {
+fn f(x):
+    x
+
+fn caller():
+    y = if true:
+        1
+    else:
+        if true:
+            7
+        else:
+            42
+    f(y)
+
+caller()
+}] hir spec analysis
+    paramRanges $analysis [instanceNamed $spec f]
+} -result {{[1, 1] {1}}}
+
+# ---------------------------------------------------------------------------
+# Two-call join (spec's own dedicated test): two disjoint sparse sets from
+# two different call sites of the same instance join to their union, within
+# budget -- neither is dropped in favor of the other.
+
+test closed-call-two-site-join {two call sites of the same instance each passing a two-element sparse set join to the four-element union} -body {
+    lassign [closedCallFacts {
+fn f(x):
+    x
+
+fn caller(c):
+    if c:
+        f(1)
+    else:
+        f(4)
+    if c:
+        f(7)
+    else:
+        f(10)
+
+caller(true)
+}] hir spec analysis
+    paramRanges $analysis [instanceNamed $spec f]
+} -result {{[1, 10] {1,4,7,10}}}
+
+# ---------------------------------------------------------------------------
+# Weaker caller: a sparse-set caller and a caller whose value the analysis
+# cannot bound at all feed the *same* instance (both key as plain int). The
+# joined parameter fact must weaken -- no optimism, spec #28.
+
+test closed-call-weaker-caller-widens {a sparse caller and a caller the analysis cannot bound share one instance; the joined fact soundly widens rather than keeping the sparse set} -body {
+    lassign [closedCallFacts {
+fn narrow(v):
+    bit_and(v, 240)
+
+fn f(x):
+    x
+
+fn a(b):
+    f(narrow(b))
+
+fn wide(n):
+    f(mod(n, 1000000))
+
+a(171)
+wide(55)
+}] hir spec analysis
+    paramRanges $analysis [instanceNamed $spec f]
+} -result {{[0, +∞]}}
+
+# ---------------------------------------------------------------------------
+# Exact-set union within budget (spec #29) and beyond it (spec #30): the
+# same 32-value cardinality budget hir/range.tcl's own lattice already
+# enforces for every other exact-set computation also bounds this fold.
+
+test closed-call-exact-union-within-budget {two disjoint eight-value sets from two branches join to their sixteen-value union, still tracked} -body {
+    lassign [closedCallFacts {
+fn f(x):
+    x
+
+fn caller(c):
+    if c:
+        f(0)
+        f(16)
+        f(32)
+        f(48)
+        f(64)
+        f(80)
+        f(96)
+        f(112)
+    else:
+        f(128)
+        f(144)
+        f(160)
+        f(176)
+        f(192)
+        f(208)
+        f(224)
+        f(240)
+
+caller(true)
+}] hir spec analysis
+    paramRanges $analysis [instanceNamed $spec f]
+} -result {{[0, 240] {0,16,32,48,64,80,96,112,128,144,160,176,192,208,224,240}}}
+
+test closed-call-exact-union-exceeds-budget {34 distinct literal callers exceed the 32-value budget: the interval survives, the exact set does not} -body {
+    set lines {}
+    for {set i 0} {$i < 34} {incr i} { lappend lines "    f($i)" }
+    lassign [closedCallFacts "fn f(x):\n    x\n\nfn caller():\n[join $lines \n]\n\ncaller()\n"] hir spec analysis
+    paramRanges $analysis [instanceNamed $spec f]
+} -result {{[0, 33]}}
+
+# ---------------------------------------------------------------------------
+# Open/dynamic caller fallback (spec #19, #28-29 of the milestone doc, and
+# BYTE-NIBBLE's own "materialized values keep a generic entry"): a value
+# reachable through unknown dynamic dispatch must never receive a narrow
+# fact merely because *some* direct caller happens to be narrow. The
+# specialized instance a direct exact call resolves to, and the separate
+# generic instance a dynamic call resolves to, must not contaminate each
+# other.
+
+test closed-call-open-caller-fallback {a direct exact caller's narrow fact stays on the specialized instance; the same function's dynamically-dispatched generic instance stays fully unknown} -body {
+    lassign [closedCallFacts {
+fn f(x):
+    x
+
+fn apply(g, v):
+    g(v)
+
+f(16)
+apply(f, 999999999)
+}] hir spec analysis
+    set specializedId ""
+    set genericId ""
+    foreach id [instancesNamed $spec f] {
+        if {[instanceGeneric $spec $id]} {
+            set genericId $id
+        } else {
+            set specializedId $id
+        }
+    }
+    list [paramRanges $analysis $specializedId] [paramRanges $analysis $genericId]
+} -result {{{[16, 16] {16}}} {{[-∞, +∞]}}}
+
+# ---------------------------------------------------------------------------
+# Branch-narrowed caller facts (spec #31-32, #77): a caller's own local flow
+# narrowing (not just its parameter's global type/entry fact) is what
+# reaches the closed call, because the argument expression is read through
+# the caller's own already-narrowed `ctx bindings`, not through the
+# parameter's un-narrowed entry range.
+
+test closed-call-branch-narrowed-argument {an "if x < 7" branch's narrowed exact set is what reaches the closed call on that path, not the caller's own wider entry fact} -body {
+    lassign [closedCallFacts {
+fn pick(c):
+    if c:
+        1
+    else:
+        if c:
+            4
+        else:
+            if c:
+                7
+            else:
+                10
+
+fn f(x):
+    x
+
+fn caller(c):
+    x = pick(c)
+    if x < 7:
+        f(x)
+    else:
+        -1
+
+caller(true)
+}] hir spec analysis
+    paramRanges $analysis [instanceNamed $spec f]
+} -result {{[1, 6] {1,4}}}
+
+# ---------------------------------------------------------------------------
+# Forwarding chain (spec #82): f forwards its parameter unchanged to g; the
+# fact reaches g transitively through the ordinary cross-instance fixpoint,
+# with no direct caller of g at all.
+
+test closed-call-forwarding-chain {a sparse exact set reaches a transitively-forwarded parameter with no direct caller} -body {
+    lassign [closedCallFacts {
+fn g(y):
+    y
+
+fn f(x):
+    g(x)
+
+f(1)
+f(4)
+f(7)
+f(10)
+}] hir spec analysis
+    paramRanges $analysis [instanceNamed $spec g]
+} -result {{[1, 10] {1,4,7,10}}}
+
+# ---------------------------------------------------------------------------
+# Self-tail forwarding (spec #83) and transformed recursion (spec #84): a
+# parameter forwarded unchanged across a self-tail backedge keeps its exact
+# fact; a parameter *transformed* on the backedge (n - 1 each call) widens
+# soundly instead of incorrectly keeping only its entry value.
+
+test closed-call-self-tail-forwarding {a parameter passed through a self-tail call unchanged keeps its exact caller fact across the backedge} -body {
+    lassign [closedCallFacts {
+fn walk(x, n):
+    if n <= 0:
+        x
+    else:
+        walk(x, n - 1)
+
+walk(7, 3)
+}] hir spec analysis
+    paramRanges $analysis [instanceNamed $spec walk]
+} -result {{[7, 7] {7}} {[-∞, 3]}}
+
+test closed-call-recursive-transformation-widens {a parameter transformed on the self-tail backedge (n - 1) widens rather than retaining only its entry value} -body {
+    lassign [closedCallFacts {
+fn count(n):
+    if n <= 0:
+        0
+    else:
+        count(n - 1)
+
+count(500)
+}] hir spec analysis
+    paramRanges $analysis [instanceNamed $spec count]
+} -result {{[-∞, 500]}}
+
+# ---------------------------------------------------------------------------
+# Plain interval facts (spec #76): a caller-side value the analysis cannot
+# reduce to a sparse set (mod's own wide, non-literal result) still narrows
+# through a caller's own branch guards to a genuine interval-only fact.
+
+test closed-call-generic-interval-only {a caller value with no exact set of its own still narrows through branch guards to a plain interval fact} -body {
+    lassign [closedCallFacts {
+fn f(x):
+    x
+
+fn caller(n):
+    if n >= 10:
+        if n < 21:
+            f(n)
+        else:
+            0
+    else:
+        0
+
+caller(mod(999999, 1000000))
+}] hir spec analysis
+    paramRanges $analysis [instanceNamed $spec f]
+} -result {{[10, 20]}}
+
+# ---------------------------------------------------------------------------
+# Dense exact sets stay canonicalized to their interval (spec #74, and the
+# same Normalize invariant hir-range-exact.test already pins in isolation):
+# a joined callee parameter fact is not exempt from that rule merely because
+# it arrived through caller propagation rather than a local computation.
+
+test closed-call-dense-join-canonicalizes {two call sites whose combined literals are dense relative to their own interval do not retain a redundant exact set} -body {
+    lassign [closedCallFacts {
+fn f(x):
+    x
+
+fn caller(c):
+    if c:
+        f(0)
+        f(1)
+        f(2)
+        f(3)
+    else:
+        f(4)
+        f(5)
+        f(6)
+        f(7)
+
+caller(true)
+}] hir spec analysis
+    paramRanges $analysis [instanceNamed $spec f]
+} -result {{[0, 7]}}
+
+cleanupTests
