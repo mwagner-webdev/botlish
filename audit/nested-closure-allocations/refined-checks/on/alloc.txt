@@ -1,0 +1,46 @@
+Botlish managed heap allocation report
+
+allocated:
+    1215 objects
+    58.3 KB
+
+peak live:
+    1215 objects
+    58.3 KB
+
+GC:
+    0 cycles
+    0 B reclaimed
+    0.0 ms total
+    0.0 ms max
+
+by kind:
+    String          9   381 B
+    List            5   288 B
+    Block        1201   57.6 KB
+
+copies:
+    String       21 B
+    List         21 elements
+    MutableArray 0 elements
+
+mutable array:
+    0 reads, 0 writes
+
+static (constant table, excluded from GC/live/peak):
+    38 objects, 1.7 KB
+
+top allocation sites by bytes:
+     1. func                             closure           800 allocations  38.4 KB
+     2. func                             closure           400 allocations  19.2 KB
+     3. /home/user/botlish/lib/web.bot:31 listnew             1 allocations  152 B
+     4. /home/user/botlish/lib/web.bot:145 strcat              3 allocations  130 B
+     5. /home/user/botlish/lib/web.bot:145 substr              3 allocations  123 B
+     6. /home/user/botlish/lib/web.bot:132 strutf8bytes        3 allocations  96 B
+     7. /home/user/botlish/lib/web.bot:33 closure             1 allocations  48 B
+     8. /home/user/botlish/lib/web.bot:129 strcat              1 allocations  43 B
+     9. /home/user/botlish/lib/web.bot:129 strcat              1 allocations  43 B
+    10. /home/user/botlish/lib/web.bot:123 strcat              1 allocations  42 B
+    11. func <program>                   listnew             1 allocations  40 B
+
+excluded: num-bigint limb buffers, the shadow stack (fixed ~32 MB), Cranelift/JIT code, process bookkeeping.

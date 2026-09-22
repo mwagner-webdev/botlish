@@ -1,0 +1,36 @@
+refined-checks.ir -- compiler/runtime metrics, block-escape-opt on vs off
+==========================================================================
+
+allocation (native::allocationReport summary, canonical run):
+  total objects:      1215 (on)   vs   7219 (off)
+  Block objects:      1201 (on)   vs   7205 (off)
+  String objects:        9 (on)   vs      9 (off)   [String-view milestone, unaffected]
+  List objects:           5 (on)   vs      5 (off)
+
+machine code bytes (botlish-native size):
+  18894 (on) vs 20846 (off)   -- -1952 bytes (-9.4%)
+
+function count (NIR functions emitted):
+  27 (on) vs 27 (off) -- unchanged: 10 canonical closure-taking functions
+  (scan_local/scan_label/scan_alpha/tld_ok/domain_loop x2 specializations)
+  became unreachable and were dropped by existing reachability accounting;
+  their internal (capture-explicit) variants take the same 10 function
+  slots.
+
+NIR op counts (whole-program):
+  closure:       5 (on)  vs  29 (off)   -- -24
+  callenv:       1 (on)  vs  20 (off)   -- -19
+  callenvmulti: 12 (on)  vs  12 (off)   -- unchanged (char_at's region
+                companion: StringRegion, untouched by this milestone)
+  call (direct): 25 (on)  vs   6 (off)  -- +19
+
+roots/safepoints (botlish-native roots, summed over all 27 functions):
+  safepoints:      73 (on) vs  97 (off)   -- -24
+  root candidates: 153 (on) vs 180 (off)  -- -27
+  shadow slots:    109 (on) vs 103 (off)  -- +6 (more live registers per
+                   function once captures become ordinary parameters --
+                   see the milestone's #73 register-pressure caveat)
+  entry-zero slots: 21 (on) vs  28 (off)  -- -7
+
+value/correctness (canonical run and BOTLISH_NATIVE_GC_STRESS=1):
+  [400, 0] on every backend, on vs off, stress vs non-stress -- identical.

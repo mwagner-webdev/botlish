@@ -1,0 +1,245 @@
+<program>: closed (transitively guarded)   [i0, ir {}]
+  calls:    check<int, int, str, str>, web::uri_escape_text<generic>
+  guards:   0
+  runtime:  closure-env, list-alloc
+
+web::uri_escape_text (semantic): closed   [no blockers]
+web::uri_escape_text<generic>: closed (transitively guarded)   [i1, line 33:19]
+  params:   s : any
+  result:   any
+  calls:    esc_from<generic>
+  guards:   0
+  runtime:  closure-env
+
+high_nibble (semantic): guarded   [UnknownParameterKind 1]
+high_nibble<generic>: guarded   [i7, line 35:19]
+  params:   b : any
+  result:   int
+  guards:   1
+    line 36:12  e27  UnknownParameterKind: <= needs int; parameter b (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+is_unreserved (semantic): guarded   [UnknownParameterKind 1]
+is_unreserved<generic>: guarded   [i4, line 83:21]
+  params:   b : any
+  result:   bool
+  guards:   1
+    line 84:12  e120  UnknownParameterKind: <= needs int; parameter b (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+hex_pair (semantic): guarded   [UnknownAggregateElementType 2, UnknownParameterKind 1]
+hex_pair<generic>: guarded   [i6, line 122:16]
+  params:   b : any
+  result:   str
+  calls:    high_nibble<generic>
+  guards:   1
+    line 123:79  e205  UnknownParameterKind: mod needs int; parameter b (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, range-check, string-alloc, tagged-values
+
+esc_bytes (semantic): guarded   [UnknownParameterKind 3]
+esc_bytes<generic>: guarded   [i5, line 125:17]
+  params:   bytes : any, i : any, acc : any
+  result:   any
+  calls:    esc_bytes<generic>, hex_pair<generic>
+  guards:   3
+    line 126:12  e212  UnknownParameterKind: >= needs int; parameter i (no annotation, no call-site inference) has no static kind
+    line 126:29  e215  UnknownParameterKind: list_length needs list; parameter bytes (no annotation, no call-site inference) has no static kind
+    line 129:44  e226  UnknownParameterKind: concat needs str; parameter acc (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, closure-env, range-check, string-alloc, tagged-values
+
+esc_char (semantic): guarded   [UnknownParameterKind 1]
+esc_char<generic>: guarded   [i3, line 131:16]
+  params:   c : any
+  result:   any
+  calls:    esc_bytes<generic>, is_unreserved<generic>
+  guards:   1
+    line 132:29  e241  UnknownParameterKind: encode_utf8 needs str; parameter c (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, closure-env, list-alloc, range-check, tagged-values
+
+esc_from (semantic): guarded   [UnknownParameterKind 3, UnknownCallResultKind 1]
+esc_from<generic>: guarded   [i2, line 141:16]
+  params:   text : any, i : any, acc : any
+  result:   any
+  calls:    esc_char<generic>, esc_from<generic>
+  guards:   4
+    line 142:12  e272  UnknownParameterKind: >= needs int; parameter i (no annotation, no call-site inference) has no static kind
+    line 142:24  e275  UnknownParameterKind: length needs str; parameter text (no annotation, no call-site inference) has no static kind
+    line 145:42  e286  UnknownParameterKind: concat needs str; parameter acc (no annotation, no call-site inference) has no static kind
+    line 145:47  e287  UnknownCallResultKind: concat needs str; the result of esc_char at line 145:47 has no static kind
+  runtime:  bigint, char-index, closure-env, range-check, string-alloc, tagged-values
+
+check (semantic): guarded   [UnknownParameterKind 3]
+check<int, int, str, str>: closed (transitively guarded)   [i8, ir {0 2}]
+  params:   n : int, acc : int, s : str, q : str
+  result:   int
+  calls:    block e313<str>, block e533<str>, check<int, int, str, str>
+  guards:   0
+  runtime:  bigint
+
+ (semantic): guarded   [UnknownParameterKind 1]
+block e313<str>: closed (transitively guarded)   [i9, ir {0 2 2 3 2 2 1 1}]
+  params:   v : str
+  result:   bool
+  calls:    char_at<generic>, domain_loop<generic>, scan_local<generic>
+  guards:   0
+  runtime:  bigint, char-index, closure-env
+
+block e313<generic>: guarded   [i27, ir {0 2 2 3 2 2 1 1}]
+  params:   v : any
+  result:   bool
+  calls:    char_at<generic>, domain_loop<generic>, scan_local<generic>
+  guards:   1
+    ir {0 2 2 3 2 2 1 1 2 2 2}  e317  UnknownParameterKind: length needs str; parameter v (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, char-index, closure-env, tagged-values
+
+char_at (semantic): guarded   [UnknownParameterKind 2]
+char_at<generic>: guarded   [i11, ir {0 2 2 3 2 2 1 1 3 2}]
+  params:   i : any
+  result:   str
+  guards:   2
+    ir {0 2 2 3 2 2 1 1 3 2 2 3}  e323  UnknownParameterKind: substring needs int; parameter i (no annotation, no call-site inference) has no static kind
+    ir {0 2 2 3 2 2 1 1 3 2 2 4 2}  e326  UnknownParameterKind: + needs int; parameter i (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, char-index, range-check, string-alloc, tagged-values
+
+is_local_char (semantic): guarded   [UnknownParameterKind 1]
+is_local_char<str>: closed   [i12, ir {0 2 2 3 2 2 1 1 4 2}]
+  params:   c : str
+  result:   bool
+  guards:   0
+  runtime:  char-index, range-check
+
+is_label_char (semantic): guarded   [UnknownParameterKind 1]
+is_label_char<str>: closed   [i15, ir {0 2 2 3 2 2 1 1 5 2}]
+  params:   c : str
+  result:   bool
+  guards:   0
+  runtime:  char-index, range-check
+
+scan_local (semantic): guarded   [UnknownParameterKind 1]
+scan_local<generic>: guarded   [i10, ir {0 2 2 3 2 2 1 1 6 2}]
+  params:   i : any
+  result:   int
+  calls:    char_at<generic>, is_local_char<str>, scan_local<generic>
+  guards:   1
+    ir {0 2 2 3 2 2 1 1 6 2 2 1 2}  e379  UnknownParameterKind: >= needs int; parameter i (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, closure-env, tagged-values
+
+scan_label (semantic): guarded   [UnknownParameterKind 1]
+scan_label<generic>: guarded   [i14, ir {0 2 2 3 2 2 1 1 7 2}]
+  params:   i : any
+  result:   int
+  calls:    char_at<generic>, is_label_char<str>, scan_label<generic>
+  guards:   1
+    ir {0 2 2 3 2 2 1 1 7 2 2 1 2}  e400  UnknownParameterKind: >= needs int; parameter i (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, closure-env, tagged-values
+
+scan_alpha (semantic): guarded   [UnknownParameterKind 1]
+scan_alpha<generic>: guarded   [i17, ir {0 2 2 3 2 2 1 1 8 2}]
+  params:   i : any
+  result:   int
+  calls:    char_at<generic>, scan_alpha<generic>
+  guards:   1
+    ir {0 2 2 3 2 2 1 1 8 2 2 1 2}  e421  UnknownParameterKind: >= needs int; parameter i (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, char-index, closure-env, range-check, tagged-values
+
+tld_ok (semantic): guarded   [UnknownParameterKind 1]
+tld_ok<generic>: guarded   [i16, ir {0 2 2 3 2 2 1 1 9 2}]
+  params:   i : any
+  result:   bool
+  calls:    scan_alpha<generic>
+  guards:   1
+    ir {0 2 2 3 2 2 1 1 9 2 3 2 2 2 3}  e453  UnknownParameterKind: - needs int; parameter i (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, closure-env, tagged-values
+
+domain_loop (semantic): closed   [no blockers]
+domain_loop<generic>: closed (transitively guarded)   [i13, ir {0 2 2 3 2 2 1 1 10 2}]
+  params:   i : any
+  result:   int
+  calls:    char_at<generic>, domain_loop<generic>, scan_label<generic>, tld_ok<generic>
+  guards:   0
+  runtime:  bigint, closure-env, structural-equality
+
+ (semantic): guarded   [UnknownParameterKind 1]
+block e533<str>: closed (transitively guarded)   [i18, ir {0 2 2 3 2 2 2 2 1 1}]
+  params:   v : str
+  result:   bool
+  calls:    char_at<generic>, domain_loop<generic>, scan_local<generic>
+  guards:   0
+  runtime:  bigint, char-index, closure-env
+
+block e533<generic>: guarded   [i28, ir {0 2 2 3 2 2 2 2 1 1}]
+  params:   v : any
+  result:   bool
+  calls:    char_at<generic>, domain_loop<generic>, scan_local<generic>
+  guards:   1
+    ir {0 2 2 3 2 2 2 2 1 1 2 2 2}  e537  UnknownParameterKind: length needs str; parameter v (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, char-index, closure-env, tagged-values
+
+char_at (semantic): guarded   [UnknownParameterKind 2]
+char_at<generic>: guarded   [i20, ir {0 2 2 3 2 2 2 2 1 1 3 2}]
+  params:   i : any
+  result:   str
+  guards:   2
+    ir {0 2 2 3 2 2 2 2 1 1 3 2 2 3}  e543  UnknownParameterKind: substring needs int; parameter i (no annotation, no call-site inference) has no static kind
+    ir {0 2 2 3 2 2 2 2 1 1 3 2 2 4 2}  e546  UnknownParameterKind: + needs int; parameter i (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, char-index, range-check, string-alloc, tagged-values
+
+is_local_char (semantic): guarded   [UnknownParameterKind 1]
+is_local_char<str>: closed   [i21, ir {0 2 2 3 2 2 2 2 1 1 4 2}]
+  params:   c : str
+  result:   bool
+  guards:   0
+  runtime:  char-index, range-check
+
+is_label_char (semantic): guarded   [UnknownParameterKind 1]
+is_label_char<str>: closed   [i24, ir {0 2 2 3 2 2 2 2 1 1 5 2}]
+  params:   c : str
+  result:   bool
+  guards:   0
+  runtime:  char-index, range-check
+
+scan_local (semantic): guarded   [UnknownParameterKind 1]
+scan_local<generic>: guarded   [i19, ir {0 2 2 3 2 2 2 2 1 1 6 2}]
+  params:   i : any
+  result:   int
+  calls:    char_at<generic>, is_local_char<str>, scan_local<generic>
+  guards:   1
+    ir {0 2 2 3 2 2 2 2 1 1 6 2 2 1 2}  e599  UnknownParameterKind: >= needs int; parameter i (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, closure-env, tagged-values
+
+scan_label (semantic): guarded   [UnknownParameterKind 1]
+scan_label<generic>: guarded   [i23, ir {0 2 2 3 2 2 2 2 1 1 7 2}]
+  params:   i : any
+  result:   int
+  calls:    char_at<generic>, is_label_char<str>, scan_label<generic>
+  guards:   1
+    ir {0 2 2 3 2 2 2 2 1 1 7 2 2 1 2}  e620  UnknownParameterKind: >= needs int; parameter i (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, closure-env, tagged-values
+
+scan_alpha (semantic): guarded   [UnknownParameterKind 1]
+scan_alpha<generic>: guarded   [i26, ir {0 2 2 3 2 2 2 2 1 1 8 2}]
+  params:   i : any
+  result:   int
+  calls:    char_at<generic>, scan_alpha<generic>
+  guards:   1
+    ir {0 2 2 3 2 2 2 2 1 1 8 2 2 1 2}  e641  UnknownParameterKind: >= needs int; parameter i (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, char-index, closure-env, range-check, tagged-values
+
+tld_ok (semantic): guarded   [UnknownParameterKind 1]
+tld_ok<generic>: guarded   [i25, ir {0 2 2 3 2 2 2 2 1 1 9 2}]
+  params:   i : any
+  result:   bool
+  calls:    scan_alpha<generic>
+  guards:   1
+    ir {0 2 2 3 2 2 2 2 1 1 9 2 3 2 2 2 3}  e673  UnknownParameterKind: - needs int; parameter i (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, closure-env, tagged-values
+
+domain_loop (semantic): closed   [no blockers]
+domain_loop<generic>: closed (transitively guarded)   [i22, ir {0 2 2 3 2 2 2 2 1 1 10 2}]
+  params:   i : any
+  result:   int
+  calls:    char_at<generic>, domain_loop<generic>, scan_label<generic>, tld_ok<generic>
+  guards:   0
+  runtime:  bigint, closure-env, structural-equality
+
+guards: generic 34, specialized 25; instances: 21 generic, 7 specialized

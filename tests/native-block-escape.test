@@ -139,18 +139,66 @@ test blockescape-open-call-1 {a closure passed as an ordinary argument still all
 } -result {{int 15} 1 1}
 
 # ---------------------------------------------------------------------------
-# Recursive Block (#30): a self-referencing local closure is conservatively
-# declined (NeedsSelf), not attempted -- documented limitation, not a
-# semantic requirement.
+# Recursive Block (de-closure conversion #21, #92): a self-referencing local
+# closure whose only self-reference is its own exact recursive call no
+# longer needs "self" (the running closure's own identity) as a value at
+# all, so it virtualizes too -- captures become ordinary trailing loop-
+# carried parameters, and a self-tail recursive call becomes a loop
+# backedge exactly as it would for a materialized closure, with zero
+# per-invocation Block allocation.
 
-test blockescape-recursive-1 {a self-recursive local closure that also captures an outer value still allocates (declined, not a semantic requirement)} -body {
+test blockescape-recursive-1 {a self-recursive local closure that also captures an outer value now virtualizes: zero Block allocation} -body {
     # step must capture something real (n) as well as itself, or it is
     # simply an ordinary envless self-recursive function (no closure of any
     # kind is ever built for it, optimized or not) and this test would
     # exercise nothing.
     set text "fn f(n):\n    fn step(x):\n        if x == 0:\n            n\n        else:\n            step(x - 1)\n    step(5)\n\nf(100)"
-    list [assertParity $text] [expr {[blockAllocs $text 1] > 0}]
-} -result {{int 100} 1}
+    list [assertParity $text] [blockAllocs $text 1] [blockAllocs $text 0]
+} -result {{int 100} 0 1}
+
+test blockescape-recursive-2 {the internal variant's recursive call is a `tail` loop backedge, with captures re-passed, never a closure or callenv} -body {
+    set text "fn f(n):\n    fn step(x):\n        if x == 0:\n            n\n        else:\n            step(x - 1)\n    step(5)\n\nf(100)"
+    set nirText [dict get [native::lower::program [sourceHir $text]] text]
+    list [regexp {closure |callenv } $nirText] [regexp {tail %\d+ %\d+} $nirText]
+} -result {0 1}
+
+test blockescape-recursive-non-tail-1 {a non-tail self-recursive virtualized closure still computes correctly (an ordinary recursive call, not a loop)} -body {
+    set text "fn f(n):\n    fn fact(x):\n        if x <= 1:\n            n\n        else:\n            x * fact(x - 1)\n    fact(5)\n\nf(1)"
+    list [assertParity $text] [blockAllocs $text 1] [blockAllocs $text 0]
+} -result {{int 120} 0 1}
+
+# ---------------------------------------------------------------------------
+# Closure captured by another closure (de-closure conversion #18-20, #33): a
+# sibling Block that only ever calls another local Block exactly, with
+# matching arity, does not force the callee to materialize either -- this
+# is the refined-checks dominant shape (char_at called only from inside
+# scan_local/scan_label/scan_alpha's own bodies) in miniature.
+
+test blockescape-sibling-1 {a closure captured only by another closure's own exact call, transitively, allocates no Block for either} -body {
+    set text "fn f(v):\n    fn inner(i):\n        v + i\n    fn outer(i):\n        inner(i) * 2\n    outer(3)\n\nf(10)"
+    list [assertParity $text] [blockAllocs $text 1] [blockAllocs $text 0]
+} -result {{int 26} 0 2}
+
+test blockescape-sibling-2 {the outer closure's own internal variant receives the inner closure's captures directly (flattened), not the inner closure itself} -body {
+    set text "fn f(v):\n    fn inner(i):\n        v + i\n    fn outer(i):\n        inner(i) * 2\n    outer(3)\n\nf(10)"
+    set nirText [dict get [native::lower::program [sourceHir $text]] text]
+    list [regexp {closure |callenv } $nirText] [regexp {"outer" params=2 env=0 regs=\d+ pnames="i v"} $nirText]
+} -result {0 1}
+
+test blockescape-sibling-chain-1 {a three-deep capture chain (A captures x, B captures A, C captures B) flattens transitively to zero Block allocation} -body {
+    set text "fn f(v):\n    fn a(i):\n        v + i\n    fn b(i):\n        a(i) * 2\n    fn c(i):\n        b(i) + 1\n    c(3)\n\nf(10)"
+    list [assertParity $text] [blockAllocs $text 1] [blockAllocs $text 0]
+} -result {{int 27} 0 3}
+
+test blockescape-sibling-escaping-1 {a closure captured by an escaping sibling still materializes both, conservatively} -body {
+    # inner is captured only by outer's own body, but outer itself escapes
+    # (returned), so outer's real environment must carry a real inner
+    # value: neither virtualizes.
+    set text "fn f(v):\n    fn inner(i):\n        v + i\n    fn outer(i):\n        inner(i) * 2\n    outer\n\ng = f(10)\ng(3)"
+    set on [blockAllocs $text 1]
+    set off [blockAllocs $text 0]
+    list [assertParity $text] $on [expr {$on == $off}]
+} -result {{int 26} 2 1}
 
 # ---------------------------------------------------------------------------
 # GC stress (#28-29, #46): a captured managed (String) value stays correctly
@@ -163,6 +211,35 @@ test blockescape-gc-stress-1 {a captured String stays live under BOTLISH_NATIVE_
     unset ::env(BOTLISH_NATIVE_GC_STRESS)
     list $result $value
 } -result {0 {str go!}}
+
+# de-closure conversion's own adversarial case (milestone #30-34): a managed
+# (String) capture threaded transitively through a sibling capture chain
+# AND a self-tail recursive loop, allocating (and so potentially
+# collecting) after every use of the capture -- both the outer and the
+# inner virtualized closure's own capture registers must stay correctly
+# rooted across every one of those calls.
+
+test blockescape-gc-stress-2 {a managed capture threaded through a de-closure-converted sibling+self-tail chain survives GC stress} -body {
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    set text "fn f(n, s):\n    fn build(x):\n        concat(s, x)\n    fn scan(i):\n        if i >= n:\n            build(\"done\")\n        else:\n            concat(build(\"x\"), scan(i + 1))\n    scan(0)\n\nf(3, \"go-\")"
+    set on [blockAllocs $text 1]
+    set result [catch {native::evalHir [sourceHir $text]} value]
+    unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    list $result $value $on
+} -result {0 {str go-xgo-xgo-xgo-done} 0}
+
+test blockescape-multi-managed-capture-1 {a virtualized closure with three captures (String, Int, Bool) passes all three correctly} -body {
+    set text "fn f(s, n, flag):\n    fn combine(x):\n        if flag:\n            concat(concat(s, x), n)\n        else:\n            concat(x, s)\n    concat(combine(\"-\"), combine(\"+\"))\n\nf(\"hi\", \"7\", true)"
+    list [assertParity $text] [blockAllocs $text 1] [blockAllocs $text 0]
+} -result {{str hi-7hi+7} 0 1}
+
+test blockescape-loop-creation-1 {a de-closure-converted closure created repeatedly by a recursive outer function allocates zero Blocks total, not once per outer invocation} -body {
+    # The refined-checks dominant shape in miniature: driver recurses
+    # NTIMES, each time invoking f(n), which creates (and, unoptimized,
+    # would allocate) step exactly once per invocation.
+    set text "fn f(n):\n    fn step(x):\n        x + n\n    step(n)\n\nfn driver(i):\n    if i <= 0:\n        0\n    else:\n        f(i) + driver(i - 1)\n\ndriver(50)"
+    list [assertParity $text] [blockAllocs $text 1] [blockAllocs $text 0]
+} -result {{int 2550} 0 50}
 
 # ---------------------------------------------------------------------------
 # Effectful captures: evaluated exactly once, at bind time, never re-run per

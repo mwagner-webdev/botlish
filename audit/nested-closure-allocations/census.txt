@@ -1,0 +1,29 @@
+hex_pair<generic> (i6): internal variant, captures [web::hex_digits]
+esc_bytes<generic> (i5): internal variant, captures [web::hex_digits]
+esc_char<generic> (i3): internal variant, captures [web::hex_digits]
+esc_from<generic> (i2): internal variant, captures [web::hex_digits]
+scan_local<generic> (i10): internal variant, captures [n, char_at]
+scan_label<generic> (i14): internal variant, captures [n, char_at]
+scan_alpha<generic> (i17): internal variant, captures [n, char_at]
+tld_ok<generic> (i16): internal variant, captures [n, char_at]
+domain_loop<generic> (i13): internal variant, captures [n, char_at]
+scan_local<generic> (i19): internal variant, captures [n, char_at]
+scan_label<generic> (i23): internal variant, captures [n, char_at]
+scan_alpha<generic> (i26): internal variant, captures [n, char_at]
+tld_ok<generic> (i25): internal variant, captures [n, char_at]
+domain_loop<generic> (i22): internal variant, captures [n, char_at]
+---wanted instances---
+i6 -> hex_pair<generic>
+i5 -> esc_bytes<generic>
+i3 -> esc_char<generic>
+i2 -> esc_from<generic>
+i10 -> scan_local<generic>
+i14 -> scan_label<generic>
+i17 -> scan_alpha<generic>
+i16 -> tld_ok<generic>
+i13 -> domain_loop<generic>
+i19 -> scan_local<generic>
+i23 -> scan_label<generic>
+i26 -> scan_alpha<generic>
+i25 -> tld_ok<generic>
+i22 -> domain_loop<generic>

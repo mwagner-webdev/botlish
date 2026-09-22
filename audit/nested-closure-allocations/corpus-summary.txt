@@ -1,0 +1,14 @@
+program           total_on total_off  block_on block_off    str_on   str_off  list_on list_off
+fib                      0         0         0         0         0         0        0        0
+loop-count               0         0         0         0         0         0        0        0
+sum-refined              0       400         0       400         0         0        0        0
+refined-checks        1215      7219      1201      7205         9         9        5        5
+ai_text_clean          111       111         0         0       110       110        1        1
+csv                     19        19         0         0         6         6       13       13
+csv_chunked             22        22         0         0         6         6        8        8
+csv_geometric           23        23         0         0         6         6        4        4
+csv_records             83        83         0         0        18        18       11       11
+hashtable                5         5         0         0         0         0        1        1
+matmul                  16        16         0         0         0         0       16       16
+string_replace          26        26         0         0        25        25        1        1
+string_reverse          23        23         0         0        22        22        1        1

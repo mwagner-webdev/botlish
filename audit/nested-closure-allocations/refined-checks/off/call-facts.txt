@@ -1,0 +1,178 @@
+<program> e772 -> web::uri_escape_text<generic>
+  arg0: str, range [-∞, +∞]
+  successful result: str[UriQueryValue], range [-∞, +∞]
+<program> e777 -> check<int, int, str, str>
+  arg0: int, range [400, 400]
+  arg1: int, range [0, 0]
+  arg2: str, range [-∞, +∞]
+  arg3: str[UriQueryValue], range [-∞, +∞]
+  successful result: int, range [-∞, +∞]
+<program> e783 -> check<int, int, str, str>
+  arg0: int, range [400, 400]
+  arg1: int, range [0, 0]
+  arg2: str, range [-∞, +∞]
+  arg3: str[UriQueryValue], range [-∞, +∞]
+  successful result: int, range [-∞, +∞]
+web::uri_escape_text<generic> e297 -> esc_from<generic>
+  arg0: any, range [-∞, +∞]
+  arg1: int, range [0, 0]
+  arg2: str, range [-∞, +∞]
+  successful result: any, range [-∞, +∞]
+hex_pair<generic> e197 -> high_nibble<generic>
+  arg0: any, range [-∞, +∞]
+  successful result: int, range [0, 15]
+esc_bytes<generic> e230 -> hex_pair<generic>
+  arg0: any, range [-∞, +∞]
+  successful result: str, range [-∞, +∞]
+esc_bytes<generic> e217 -> esc_bytes<generic>
+  arg0: list, range [-∞, +∞]
+  arg1: int, range [-∞, 4611686018427387903]
+  arg2: str, range [-∞, +∞]
+  successful result: any, range [-∞, +∞]
+esc_char<generic> e250 -> is_unreserved<generic>
+  arg0: any, range [-∞, +∞]
+  successful result: bool, range [-∞, +∞]
+esc_char<generic> e257 -> esc_bytes<generic>
+  arg0: list, range [-∞, +∞]
+  arg1: int, range [0, 0]
+  arg2: str, range [-∞, +∞]
+  successful result: any, range [-∞, +∞]
+esc_char<generic> e262 -> esc_bytes<generic>
+  arg0: list, range [-∞, +∞]
+  arg1: int, range [0, 0]
+  arg2: str, range [-∞, +∞]
+  successful result: any, range [-∞, +∞]
+esc_from<generic> e287 -> esc_char<generic>
+  arg0: str, range [-∞, +∞]
+  successful result: any, range [-∞, +∞]
+esc_from<generic> e277 -> esc_from<generic>
+  arg0: str, range [-∞, +∞]
+  arg1: int, range [-∞, 4611686018427387903]
+  arg2: str, range [-∞, +∞]
+  successful result: any, range [-∞, +∞]
+check<int, int, str, str> e312 -> block e313<str>
+  arg0: str, range [-∞, +∞]
+  successful result: bool, range [-∞, +∞]
+check<int, int, str, str> e532 -> block e533<str>
+  arg0: str, range [-∞, +∞]
+  successful result: bool, range [-∞, +∞]
+check<int, int, str, str> e759 -> check<int, int, str, str>
+  arg0: int, range [0, 399]
+  arg1: int, range [0, +∞]
+  arg2: str, range [-∞, +∞]
+  arg3: str[UriQueryValue], range [-∞, +∞]
+  successful result: int, range [-∞, +∞]
+block e313<str> e496 -> scan_local<generic>
+  arg0: int, range [0, 0]
+  successful result: int, range [-∞, +∞]
+block e313<str> e514 -> char_at<generic>
+  arg0: int, range [-∞, 4611686018427387902]
+  successful result: str, range [-∞, +∞]
+block e313<str> e525 -> domain_loop<generic>
+  arg0: int, range [-∞, 4611686018427387903]
+  successful result: int, range [-∞, +∞]
+block e313<generic> e496 -> scan_local<generic>
+  arg0: int, range [0, 0]
+  successful result: int, range [-∞, +∞]
+block e313<generic> e514 -> char_at<generic>
+  arg0: int, range [-∞, 4611686018427387902]
+  successful result: str, range [-∞, +∞]
+block e313<generic> e525 -> domain_loop<generic>
+  arg0: int, range [-∞, 4611686018427387903]
+  successful result: int, range [-∞, +∞]
+scan_local<generic> e385 -> char_at<generic>
+  arg0: int, range [-∞, +∞]
+  successful result: str, range [-∞, +∞]
+scan_local<generic> e383 -> is_local_char<str>
+  arg0: str, range [-∞, +∞]
+  successful result: bool, range [-∞, +∞]
+scan_local<generic> e388 -> scan_local<generic>
+  arg0: int, range [-∞, +∞]
+  successful result: int, range [-∞, +∞]
+scan_label<generic> e406 -> char_at<generic>
+  arg0: int, range [-∞, +∞]
+  successful result: str, range [-∞, +∞]
+scan_label<generic> e404 -> is_label_char<str>
+  arg0: str, range [-∞, +∞]
+  successful result: bool, range [-∞, +∞]
+scan_label<generic> e409 -> scan_label<generic>
+  arg0: int, range [-∞, +∞]
+  successful result: int, range [-∞, +∞]
+scan_alpha<generic> e427 -> char_at<generic>
+  arg0: int, range [-∞, +∞]
+  successful result: str, range [-∞, +∞]
+scan_alpha<generic> e430 -> scan_alpha<generic>
+  arg0: int, range [-∞, +∞]
+  successful result: int, range [-∞, +∞]
+tld_ok<generic> e440 -> scan_alpha<generic>
+  arg0: any, range [-∞, +∞]
+  successful result: int, range [-∞, +∞]
+domain_loop<generic> e459 -> scan_label<generic>
+  arg0: any, range [-∞, +∞]
+  successful result: int, range [-∞, +∞]
+domain_loop<generic> e477 -> char_at<generic>
+  arg0: int, range [-∞, +∞]
+  successful result: str, range [-∞, +∞]
+domain_loop<generic> e487 -> tld_ok<generic>
+  arg0: int, range [-∞, +∞]
+  successful result: bool, range [-∞, +∞]
+domain_loop<generic> e491 -> domain_loop<generic>
+  arg0: int, range [-∞, +∞]
+  successful result: int, range [-∞, +∞]
+block e533<str> e716 -> scan_local<generic>
+  arg0: int, range [0, 0]
+  successful result: int, range [-∞, +∞]
+block e533<str> e734 -> char_at<generic>
+  arg0: int, range [-∞, 4611686018427387902]
+  successful result: str, range [-∞, +∞]
+block e533<str> e745 -> domain_loop<generic>
+  arg0: int, range [-∞, 4611686018427387903]
+  successful result: int, range [-∞, +∞]
+block e533<generic> e716 -> scan_local<generic>
+  arg0: int, range [0, 0]
+  successful result: int, range [-∞, +∞]
+block e533<generic> e734 -> char_at<generic>
+  arg0: int, range [-∞, 4611686018427387902]
+  successful result: str, range [-∞, +∞]
+block e533<generic> e745 -> domain_loop<generic>
+  arg0: int, range [-∞, 4611686018427387903]
+  successful result: int, range [-∞, +∞]
+scan_local<generic> e605 -> char_at<generic>
+  arg0: int, range [-∞, +∞]
+  successful result: str, range [-∞, +∞]
+scan_local<generic> e603 -> is_local_char<str>
+  arg0: str, range [-∞, +∞]
+  successful result: bool, range [-∞, +∞]
+scan_local<generic> e608 -> scan_local<generic>
+  arg0: int, range [-∞, +∞]
+  successful result: int, range [-∞, +∞]
+scan_label<generic> e626 -> char_at<generic>
+  arg0: int, range [-∞, +∞]
+  successful result: str, range [-∞, +∞]
+scan_label<generic> e624 -> is_label_char<str>
+  arg0: str, range [-∞, +∞]
+  successful result: bool, range [-∞, +∞]
+scan_label<generic> e629 -> scan_label<generic>
+  arg0: int, range [-∞, +∞]
+  successful result: int, range [-∞, +∞]
+scan_alpha<generic> e647 -> char_at<generic>
+  arg0: int, range [-∞, +∞]
+  successful result: str, range [-∞, +∞]
+scan_alpha<generic> e650 -> scan_alpha<generic>
+  arg0: int, range [-∞, +∞]
+  successful result: int, range [-∞, +∞]
+tld_ok<generic> e660 -> scan_alpha<generic>
+  arg0: any, range [-∞, +∞]
+  successful result: int, range [-∞, +∞]
+domain_loop<generic> e679 -> scan_label<generic>
+  arg0: any, range [-∞, +∞]
+  successful result: int, range [-∞, +∞]
+domain_loop<generic> e697 -> char_at<generic>
+  arg0: int, range [-∞, +∞]
+  successful result: str, range [-∞, +∞]
+domain_loop<generic> e707 -> tld_ok<generic>
+  arg0: int, range [-∞, +∞]
+  successful result: bool, range [-∞, +∞]
+domain_loop<generic> e711 -> domain_loop<generic>
+  arg0: int, range [-∞, +∞]
+  successful result: int, range [-∞, +∞]

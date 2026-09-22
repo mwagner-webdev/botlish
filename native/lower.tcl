@@ -321,61 +321,85 @@ namespace eval native::lower {
 # differential testing against the unoptimized baseline.
 #
 # ---------------------------------------------------------------------------
-# Block virtualization
+# Block virtualization (de-closure conversion)
 #
 # A Block value bound to a local name whose every use hir/blockescape.tcl
-# proves is a statically known direct call (never returned, stored, passed
-# to unknown code, or observed by identity) need not become a canonical
-# heap closure at all: a semantic Block is code identity plus a captured
-# lexical environment, not a mandatory heap object, exactly as a semantic
-# Int is not a mandatory tagged representation (the "Representation"
-# section above) and a fixed-shape List is not a mandatory allocated List
-# (the "Scalar replacement" section above). Bind (below), for such a
-# binding, evaluates its captures into ordinary registers -- the same
-# Access-driven evaluation Closure already performs for a real closure's
-# environment -- and stores them, with the callee instance
-# hir::blockescape.tcl resolved, as the binding's "virtualblock" local
-# value: no `closure` NIR instruction, no `rt_closure_new`, no capture-array
-# stack traffic at all.
+# proves is a statically known direct call -- from its own enclosing
+# region, from inside another nonescaping sibling Block's own body, or its
+# own exact recursive call -- need not become a canonical heap closure at
+# all: a semantic Block is code identity plus a captured lexical
+# environment, not a mandatory heap object, exactly as a semantic Int is
+# not a mandatory tagged representation (the "Representation" section
+# above) and a fixed-shape List is not a mandatory allocated List (the
+# "Scalar replacement" section above). Bind (below), for such a binding,
+# does nothing at all -- no closure, no captures evaluated, no local
+# stored -- exactly like an envless function bound in statement position:
+# hir::blockescape.tcl's own proof already guarantees every reference to
+# it is intercepted before ever being evaluated as a value (below), so
+# there is nothing here to compute yet.
 #
-# A direct call of such a binding (Call's early VirtualBlockCall case)
-# never evaluates the callee expression as a Block value either: it emits a
-# plain `call` of the callee instance's *internal variant*
-# (InternalFunction) with the ordinary call arguments followed by the
-# recorded capture registers -- the capture arguments are an internal ABI
-# detail, invisible to Botlish source (the milestone's #9), and the call
-# target is always statically direct (never a code-pointer load out of a
-# Block, since there is no Block).
+# A direct call of such a binding (Call's early FlattenedVirtualCall
+# dispatch, keyed by BindingId via hir::blockescape::virtual -- so it
+# fires identically whether the binding was bound in the calling
+# function's own region or an enclosing one) never evaluates the callee
+# expression as a Block value: it emits a plain `call` (or, for the
+# callee's own self-tail recursive call, a `tail` loop backedge) to the
+# callee instance's *internal variant* (InternalFunction), with the
+# ordinary call arguments followed by the callee's *flattened* capture
+# registers (hir::blockescape::captures), resolved fresh -- via
+# CaptureRegsOf -- in the calling function's own current scope. This is
+# sound by construction (hir/blockescape.tcl's FlattenBinding): every
+# binding a callee's flattened list names is already, transitively, a
+# subset of whatever the calling function's own params/captures/locals
+# already are, so Access always finds it. The capture arguments are an
+# internal ABI detail, invisible to Botlish source (the milestone's #9),
+# and the call target is always statically direct (never a code-pointer
+# load out of a Block, since there is no Block).
 #
 # The internal variant is the smallest coherent NIR mechanism this needs
 # (deliberately not a new opcode, heap pseudo-object, or dynamic capture
 # dictionary): the same instance, the same body, as the callee's ordinary
 # (canonical) function, except env=0 and its capture bindings
-# (native::lower::captureLists) are ordinary trailing parameters instead of
+# (native::lower::captureLists, overridden from hir::blockescape::captures
+# for a wants-flagged instance) are ordinary trailing parameters instead of
 # an environment record -- so every reference to a captured binding inside
 # it is just that parameter's register (Access finds it already in `fn
 # locals`, exactly as an ordinary parameter is, and never emits a `capture
-# I` load). Cranelift already treats it as an entirely ordinary function
-# (no `env=1`, no `results=`), so it gets ordinary GC rooting (every
-# register, including a former capture, is stored to its own shadow-stack
-# slot on definition, precisely as "Scalar replacement" above reasons for a
-# virtual List field) and ordinary error/completion-code handling, with no
-# new runtime or codegen mechanism at all. It is built at most once per
-# callee instance, shared by every call site that demands it (like a
-# scalar-replacement companion), and is purely additive: the callee's
-# canonical, closure-taking function is still unconditionally emitted, so a
+# I` load), and a reference to the callee's *own* binding (a recursive
+# self-call) needs no "self" (running-closure identity) value at all --
+# FlattenedVirtualCall recognizes it as the same instance currently being
+# lowered and calls back into it directly, re-passing the same capture
+# registers, in a `tail` loop backedge for a self-tail call (never
+# `tailenv`: there is no environment register to carry) or an ordinary
+# `call` otherwise (the milestone's #21-22: non-tail recursion needs no
+# special support of its own). Cranelift already treats an internal
+# variant as an entirely ordinary function (no `env=1`, no `results=`), so
+# it gets ordinary GC rooting (every register, including a former capture,
+# is stored to its own shadow-stack slot on definition, precisely as
+# "Scalar replacement" above reasons for a virtual List field) and
+# ordinary error/completion-code handling, with no new runtime or codegen
+# mechanism at all. It is built at most once per callee instance, shared
+# by every call site that demands it (like a scalar-replacement
+# companion), and is purely additive: the callee's canonical,
+# closure-taking function is still unconditionally emitted, so a
 # generic/indirect/escaping caller of the very same Block-producing source
 # keeps working completely unchanged (the milestone's #10 fallback
 # requirement) -- `return step` or `consume_unknown(step)` still build a
-# real heap closure, even for a `step` some other call site virtualizes.
+# real heap closure, even for a `step` some other call site virtualizes; a
+# captured-but-ineligible callee (e.g. one some caller asks for in
+# StringRegion "region" form -- see hir/blockescape.tcl's own header)
+# simply stays a genuine, terminal capture -- an ordinary Block value --
+# in every eligible sibling's own flattened list, gracefully degrading
+# rather than losing the sibling's own virtualization.
 #
 # hir::blockescape.tcl is conservative and additive only, and declines
-# outright (never partially materializes) a binding with any escaping use
-# alongside its direct calls, a recursive block, or a block capturing a
-# forward-reference cell -- see its header for the exact criteria.
-# -block-escape-opt 0 (or BOTLISH_NATIVE_BLOCK_ESCAPE_OPT=0) disables the
-# analysis outright, for differential testing against the unoptimized
-# (canonical closure) baseline.
+# outright (never partially materializes) a binding with any use it cannot
+# vouch for as an exact call, or one capturing a forward-reference cell --
+# see its header for the exact criteria and the bounded, single-region
+# transitive fixpoint this now is. -block-escape-opt 0 (or
+# BOTLISH_NATIVE_BLOCK_ESCAPE_OPT=0) disables the analysis outright, for
+# differential testing against the unoptimized (canonical closure)
+# baseline.
 #
 # ---------------------------------------------------------------------------
 # Parameter virtualization
@@ -469,7 +493,7 @@ namespace eval native::lower {
 # a String-scanning `peek`-shaped function, never a List-record accessor).
 # Block virtualization (this same file's previous section) is similarly
 # not composed with this one: a virtualized Block's own direct-call
-# arguments (VirtualBlockCall) are still evaluated as ordinary single
+# arguments (FlattenedVirtualCall) are still evaluated as ordinary single
 # registers, even when one of them would itself be List-parameter-
 # eligible -- an intentionally narrow scope, not a soundness gap (the
 # canonical, materializing path is always still correct and always still
@@ -847,10 +871,17 @@ proc native::lower::program {hirProgram args} {
     set ranges [hir::range::analyze $hirProgram $spec [dict get $options -call-facts-opt]]
     set escape [expr {$escapeOpt ? [hir::escape::analyze $hirProgram $spec $paramAggregateOpt]
         : [dict create arity {} wants {} virtual {} paramVirtual {}]}]
-    set blockescape [expr {$blockEscapeOpt ? [hir::blockescape::analyze $hirProgram $spec]
-        : [dict create virtual {} wants {}]}]
     set stringregion [expr {$stringRegionOpt ? [hir::stringregion::analyze $hirProgram $spec]
         : [dict create regionOf {} wants {} virtual {}]}]
+    # hir::blockescape.tcl needs stringregion's own `wants` (computed
+    # first, above) to decline a candidate whose result some caller asks
+    # for in region form (a base/start/end triple, `Call`'s own `wantRegion`
+    # path): that path always reaches the candidate's *canonical*, closure-
+    # taking region companion via `callenvmulti` (a real captured
+    # environment register), never a capture-explicit internal variant --
+    # see hir/blockescape.tcl's own comment on this exclusion.
+    set blockescape [expr {$blockEscapeOpt ? [hir::blockescape::analyze $hirProgram $spec $stringregion]
+        : [dict create virtual {} wants {} flatCaptures {}]}]
     set traversal [expr {$traversalOpt ? [hir::traversal::analyze $hirProgram $spec $stringregion $escape]
         : [dict create plans {}]}]
     set context [dict get $spec context]
@@ -864,6 +895,18 @@ proc native::lower::program {hirProgram args} {
         if {$e ne "program" && $e ni $envless} {
             dict set captureLists $e [CaptureList $e]
         }
+    }
+    # A block instance hir::blockescape.tcl proved eligible for de-closure
+    # conversion (see native/lower.tcl's "Block virtualization" section)
+    # uses its *flattened* capture list -- possibly wider than its own
+    # structural captures (a captured, itself-eligible candidate is
+    # replaced by that candidate's own flattened captures) -- as ordinary
+    # trailing parameters of its internal variant, in place of the
+    # structural CaptureList above.
+    foreach pair [hir::blockescape::wantedInstances $hirProgram $spec $blockescape] {
+        lassign $pair wantedId label
+        set wantedBlock [dict get [hir::specialize::instance $spec $wantedId] block]
+        dict set captureLists $wantedBlock [hir::blockescape::captures $blockescape $wantedId]
     }
 
     set functions [dict create]
@@ -2137,13 +2180,18 @@ proc native::lower::Bind {fnVar e node} {
         if {$blockTarget ne ""} {
             # A locally bound Block value every use of which
             # hir::blockescape.tcl already proved is a statically known
-            # direct call (see the "Block virtualization" section above):
-            # its captures, evaluated now exactly as Closure would for a
-            # real closure's environment, not a heap Block. Every reference
-            # to B is already known to be the callee of such a call,
-            # intercepted directly in Call's VirtualBlockCall below --
-            # nothing ever reads this local's "value" as a callable Block.
-            dict set fn locals $b [list virtualblock $blockTarget [VirtualBlockCaptures fn $valueExpr]]
+            # direct call -- from this region, from a sibling nonescaping
+            # Block's own body, or from its own recursion (see the "Block
+            # virtualization" section above): nothing to run. Every
+            # reference is intercepted directly in Call's
+            # FlattenedVirtualCall below, which resolves the callee
+            # instance's flattened captures fresh, in whatever scope the
+            # call itself appears -- always a subset of bindings already in
+            # scope there, by construction (hir/blockescape.tcl's
+            # FlattenBinding) -- so (like an envless function bound in
+            # statement position) nothing ever reads this local's "value"
+            # as a callable Block, and there is nothing to evaluate or
+            # store here at all.
             return ""
         }
         set virtualArity [hir::escape::virtualArity $escape $currentInstance $b]
@@ -2198,17 +2246,21 @@ proc native::lower::Bind {fnVar e node} {
     return $value
 }
 
-# The current SSA values of block expression E's captures
-# (native::lower::captureLists), in order: the same evaluation Closure runs
-# to build a real closure's environment array, reused as-is by
-# VirtualBlockCaptures below since a captured binding's value is exactly
-# the same ordinary value either way (the "Block virtualization" section
-# above's #8: captures remain ordinary values, closure or not).
-proc native::lower::CaptureValues {fnVar e} {
+# The current SSA values of BINDINGS (a BindingId list, most often
+# native::lower::captureLists's own entry for some block expression), in
+# order: the same evaluation Closure runs to build a real closure's
+# environment array, reused as-is by Call's FlattenedVirtualCall below
+# since a captured binding's value is exactly the same ordinary value
+# either way (the "Block virtualization" section above's #8: captures
+# remain ordinary values, closure or not) -- resolved fresh in the current
+# function's own scope every time it is asked for, never stored once and
+# threaded through a `bind` (see FlattenedVirtualCall's own comment for
+# why every binding this is ever asked to resolve is already guaranteed to
+# be in scope).
+proc native::lower::CaptureRegsOf {fnVar bindings} {
     upvar 1 $fnVar fn
-    variable captureLists
     set values {}
-    foreach b [dict get $captureLists $e] {
+    foreach b $bindings {
         lassign [Access fn $b] how where
         switch -- $how {
             reg - cell { lappend values $where }
@@ -2218,6 +2270,14 @@ proc native::lower::CaptureValues {fnVar e} {
         }
     }
     return $values
+}
+
+# The current SSA values of block expression E's captures
+# (native::lower::captureLists).
+proc native::lower::CaptureValues {fnVar e} {
+    upvar 1 $fnVar fn
+    variable captureLists
+    return [CaptureRegsOf fn [dict get $captureLists $e]]
 }
 
 # Creation of the Block value of block expression E.
@@ -2234,15 +2294,6 @@ proc native::lower::Closure {fnVar e} {
     }
     set values [CaptureValues fn $e]
     return [Assign fn [string trimright "closure [GenericRef $e] [join $values { }]"] $e]
-}
-
-# The capture registers of a virtualized Block binding's value expression E
-# (see the "Block virtualization" section above): evaluated once, when B is
-# bound, exactly like Closure's own environment evaluation -- no `closure`
-# NIR instruction, no heap Block, ever built for E.
-proc native::lower::VirtualBlockCaptures {fnVar e} {
-    upvar 1 $fnVar fn
-    return [CaptureValues fn $e]
 }
 
 # ---------------------------------------------------------------------------
@@ -2448,35 +2499,73 @@ proc native::lower::CallArgs {fnVar argExprs fieldWidths rawSlots} {
 # returns "tagged" (Expr's tail reconciles a mismatch with WANT via
 # RawOf/TaggedOf; WANTVIRTUAL is never reconciled that way -- a caller that
 # passes it already knows, from hir::escape.tcl, that E recognizes).
-# Direct internal-variant call of a virtualized Block binding (see the
-# "Block virtualization" section above): CALLEEEXPR is never evaluated (no
-# Block value exists to call through), and CAPTURES -- the registers
-# VirtualBlockCaptures recorded when the binding was bound -- are appended
-# as ordinary trailing arguments to CALLEEINSTANCE's internal variant. TARGET
-# is the callee's block ExprId (for its arity/parameter names only); LOCAL is
-# the binding's stored `{virtualblock calleeInstance captures}` value.
-proc native::lower::VirtualBlockCall {fnVar e node target local} {
+# Direct internal-variant call of a Block binding hir::blockescape.tcl
+# proved eligible for de-closure conversion (see the "Block virtualization"
+# section above): CALLEEEXPR is never evaluated (no Block value exists to
+# call through). CAPTUREBINDINGS -- CALLEEINSTANCE's own flattened capture
+# list (hir::blockescape::captures) -- is resolved fresh, in the CURRENT
+# function's own scope (CaptureRegsOf), every time this is called: by
+# construction (hir/blockescape.tcl's FlattenBinding), every one of those
+# bindings is already in scope wherever this call appears, whether that is
+# the enclosing region's own top-level body, another eligible candidate's
+# own body (a sibling call), or CALLEEINSTANCE's own body (a recursive
+# call: CALLEEINSTANCE equals the CURRENT instance being lowered) -- so
+# the same registers this function already has for its own params/captures
+# serve directly as the callee's capture arguments, with no intervening
+# `bind` or stored value, and no "self" (running-closure identity) value
+# is ever needed even for a recursive call.
+#
+# A recursive self-tail call (hir::aot::selfTailCalls, exactly the
+# condition Call's own ordinary self-tail branch below checks for a
+# materialized closure) still becomes a loop backedge -- `tail`, never
+# `tailenv`: an internal variant has no environment/closure register at
+# all -- with its own capture registers re-passed as ordinary trailing
+# loop-carried parameters, so a self-tail recursive de-closure-converted
+# function keeps the existing self-tail-to-loop optimization (the
+# milestone's #92) exactly as a materialized closure would, just with no
+# per-call closure allocation and no environment register at all. Any
+# other (non-tail) recursive or sibling call is an ordinary `call` to the
+# callee's own internal variant (the milestone's #22: non-tail recursion
+# needs no special support of its own).
+proc native::lower::FlattenedVirtualCall {fnVar e node target targetInstance captureBindings} {
     upvar 1 $fnVar fn
     variable hir
-    lassign $local tag calleeInstance captures
+    variable selfTail
+    variable currentInstance
     set params [hir::get $hir $target params]
     set argExprs [dict get $node args]
-    set argRegs {}
-    foreach arg $argExprs {
-        set r [Expr fn $arg]
-        if {$r eq "never"} {
-            return {never tagged}
-        }
-        lappend argRegs $r
+    # A recursive self-tail call (target is the instance currently being
+    # lowered): each of ITS OWN declared parameter slots may be RawParams-
+    # declared raw (native/lower.tcl's "Representation" section) -- exactly
+    # the same condition Call's own ordinary self-tail branch below checks
+    # -- so its argument must be evaluated in that same representation
+    # (CallArgs), never eagerly tagged, or the backedge's own raw/tagged
+    # parameter-slot discipline (nir.rs's validation) is violated.
+    set self [expr {$targetInstance eq $currentInstance && [dict exists $selfTail $e]}]
+    set rawSlots {}
+    if {$self} {
+        set rawSlots [lmap p $params {
+            expr {[dict exists $fn locals $p] && [lindex [dict get $fn locals $p] 0] eq "rawreg"}
+        }]
+    }
+    set argRegs [CallArgs fn $argExprs {} $rawSlots]
+    if {$argRegs eq "never"} {
+        return {never tagged}
     }
     if {[llength $params] != [llength $argRegs]} {
         set pnames [lmap p $params {dict get [hir::binding $hir $p] name}]
         Emit fn "raise ARITY [Quote "block ([join $pnames { }]) expects [llength $params] argument(s), got [llength $argRegs]"]" $e
         return {never tagged}
     }
-    set id [InternalRef $calleeInstance]
+    set captureRegs [CaptureRegsOf fn $captureBindings]
+    if {$self} {
+        dict lappend fn calls [list direct [Placeholder $targetInstance internal] 1]
+        Emit fn [string trimright "tail [join [concat $argRegs $captureRegs] { }]"] $e
+        return {never tagged}
+    }
+    set id [InternalRef $targetInstance]
     dict lappend fn calls [list direct $id 0]
-    return [list [Assign fn [string trimright "call $id [join [concat $argRegs $captures] { }]"] $e] tagged]
+    return [list [Assign fn [string trimright "call $id [join [concat $argRegs $captureRegs] { }]"] $e] tagged]
 }
 
 # The native-to-module bridge changes a root native call's resolved target to
@@ -2539,6 +2628,8 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
     variable unproven
     variable natives
     variable escape
+    variable blockescape
+    variable currentInstance
     variable stringregion
     variable traversal
     variable stringRegionOpt
@@ -2549,16 +2640,23 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
     if {$wantVirtual eq "" && !$wantRegion && $targetKind eq "block"
             && [hir::kind $hir $calleeExpr] eq "ref"} {
         set calleeBinding [hir::get $hir $calleeExpr binding]
-        if {$calleeBinding ne "" && [dict exists $fn locals $calleeBinding]
-                && [lindex [dict get $fn locals $calleeBinding] 0] eq "virtualblock"} {
+        set flattenedTarget [expr {$calleeBinding ne "" ? [hir::blockescape::virtual $blockescape $currentInstance $calleeBinding] : ""}]
+        if {$flattenedTarget ne ""} {
             # A direct call of a Block binding hir::blockescape.tcl already
-            # proved nonescaping (Bind above stored its captures, not a
-            # heap Block, as this binding's local value): CALLEEEXPR is
+            # proved eligible for de-closure conversion: CALLEEEXPR is
             # never evaluated at all (there is no Block value to produce),
             # and the call goes straight to the callee instance's internal
-            # variant with the recorded captures appended (see the "Block
-            # virtualization" section above).
-            return [VirtualBlockCall fn $e $node $target [dict get $fn locals $calleeBinding]]
+            # variant with its flattened captures appended (see the "Block
+            # virtualization" section above and FlattenedVirtualCall's own
+            # comment). This is the *only* place a virtualized Block
+            # binding's captures are ever resolved -- never at `bind` time
+            # (Bind's own virtualized case is a no-op) -- so it fires
+            # identically whether CALLEEBINDING was bound in this same
+            # region, in an enclosing region (a sibling call from inside
+            # another eligible candidate's own body), or is this very
+            # instance's own binding (a recursive call).
+            return [FlattenedVirtualCall fn $e $node $target $flattenedTarget \
+                [hir::blockescape::captures $blockescape $flattenedTarget]]
         }
     }
 
