@@ -199,4 +199,26 @@ target(true)
 } target
 } -result {{[-∞, +∞]} {[0, 32] {0,16,32}} {[0, 32] {0,32}}}
 
+# ---------------------------------------------------------------------------
+# Regression: ExactOf's reconstruction loop must promote to a bignum, not
+# wrap, at Tcl's own native-integer boundary. `for {...} {incr v} {...}`
+# was found to wrap `incr` at i64::MAX (9223372036854775807 -> a fresh
+# `for` loop's `incr` compiled to native machine arithmetic rather than
+# Tcl 9's arbitrary-precision `expr`), turning a single-iteration point
+# reconstruction into a multi-billion-iteration runaway that OOM-killed the
+# process -- caught directly by tests/native.test's own pre-existing
+# native-int-2 (values beyond 64 bits stay exact) once this file's `exact`
+# addition started reconstructing dense ranges on demand. Fixed with a
+# `while`/`expr {$v + 1}` loop instead of `incr`; this test pins it so a
+# future regression fails fast here instead of OOM-killing whatever else
+# happens to run this code path next.
+
+test range-exact-boundary-no-wrap {ExactOf at Tcl's native-int boundary does not wrap (regression)} -body {
+    hir::range::ExactOf [dict create min 9223372036854775807 max 9223372036854775807]
+} -result {9223372036854775807}
+
+test range-exact-boundary-add {arithmetic straddling the native-int boundary stays exact and terminates} -body {
+    hir::range::show [hir::range::add [hir::range::point 9223372036854775807] [hir::range::point 1]]
+} -result {[9223372036854775808, 9223372036854775808] {9223372036854775808}}
+
 cleanupTests

@@ -471,6 +471,29 @@ unsupported on Cranelift rather than silently divergent.
   underlying assertions) to include the new exact-set annotations --
   exactly the same kind of intentional pin update
   `NATIVE-OPAQUE-REFINEMENT.md` \167 1 made for its own milestone.
+- **A real bug found and fixed by this regression pass**: the first full
+  `tests/all.tcl` run after this milestone's `hir/range.tcl` changes landed
+  OOM-killed the test process inside `native.test`'s own pre-existing
+  `native-int-2` ("values beyond 64 bits stay exact"). Bisected directly
+  (reverting only `hir/range.tcl` on top of the same Rust/NIR changes made
+  the crash disappear, isolating it to this file, not the Cranelift
+  codegen) to `ExactOf`'s dense-range reconstruction loop: a bytecode-
+  compiled `for {...} {incr v} {...}` loop's `incr` step used native
+  64-bit arithmetic and silently *wrapped* rather than promoted to a
+  bignum at exactly `i64::MAX` (`9223372036854775807` -> `incr`
+  produced `-9223372036854775808`), turning a single-iteration point
+  reconstruction into a multi-billion-iteration runaway that allocated
+  until the process was killed. Fixed with a `while`/`expr {$v + 1}` loop
+  (Tcl 9's ordinary arbitrary-precision addition, exactly like every other
+  bound this file computes) instead of `incr`; pinned with two new
+  regression tests (`tests/hir-range-exact.test`'s
+  `range-exact-boundary-no-wrap`/`range-exact-boundary-add`). Full
+  `tests/all.tcl` (1553 tests) and `tests/native.test` in isolation (89
+  tests) both re-verified clean afterward, including under an artificially
+  tight memory ulimit that reliably reproduced the original crash. This is
+  the reason `spec #18`'s "Botlish Int is arbitrary-precision" note appears
+  throughout this file's own comments -- it is not boilerplate, it is what
+  this exact bug violated.
 
 ## 11. Benchmark evidence: `refined-checks`
 
