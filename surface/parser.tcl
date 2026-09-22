@@ -329,6 +329,7 @@ proc surface::parser::Value {pVar} {
 
 proc surface::parser::Function {pVar} {
     upvar 1 $pVar p
+    dict set p allowFunctionResult 1
     set start [dict get [Advance p] span]
     set name [Expect p IDENT "a function name after \"fn\""]
     set open [Expect p ( "\"(\" after the function name"]
@@ -346,7 +347,8 @@ proc surface::parser::Function {pVar} {
     set body [Suite p "the parameter list"]
     return [surface::ast::node function [SpanFrom p $start] \
         name [dict get $name value] nameSpan [dict get $name span] \
-        params $params paramsSpan [SpanFrom p [dict get $open span]] body $body]
+        params $params paramsSpan [SpanFrom p [dict get $open span]] \
+        resultType [dict get $body resultType] resultTypeSpan [dict get $body resultTypeSpan] body $body]
 }
 
 proc surface::parser::If {pVar} {
@@ -373,6 +375,16 @@ proc surface::parser::Loop {pVar} {
 # ":" NEWLINE INDENT statements DEDENT, after AFTER (for messages).
 proc surface::parser::Suite {pVar after} {
     upvar 1 $pVar p
+    set resultType {}
+    set resultTypeSpan {}
+    set allowResult [expr {[dict exists $p allowFunctionResult] && [dict get $p allowFunctionResult]}]
+    dict set p allowFunctionResult 0
+    if {$allowResult && [Kind p] eq {->}} {
+        Advance p
+        set type [Expect p IDENT {a result type after ->}]
+        set resultType [dict get $type value]
+        set resultTypeSpan [dict get $type span]
+    }
     Expect p : "\":\" after $after"
     set token [Peek p]
     if {[dict get $token kind] ne "NEWLINE"} {
@@ -391,9 +403,9 @@ proc surface::parser::Suite {pVar after} {
     }
     if {$body eq ""} {
         # Every statement of the block was skipped by recovery.
-        return [surface::ast::node suite $start body {}]
+        return [surface::ast::node suite $start body {} resultType $resultType resultTypeSpan $resultTypeSpan]
     }
-    return [surface::ast::node suite [SpanFrom p $start] body $body]
+    return [surface::ast::node suite [SpanFrom p $start] body $body resultType $resultType resultTypeSpan $resultTypeSpan]
 }
 
 # ---------------------------------------------------------------------------

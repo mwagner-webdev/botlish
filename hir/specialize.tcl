@@ -483,6 +483,9 @@ proc hir::specialize::Analyze {id} {
         }
         set scratch [dict get $state hir]
         set inferred [hir::types::inferRegion scratch $block $types hir::specialize::Handle]
+        if {$block ne {program} && [dict get $semantic exprs $block declaredResult] ne {}} {
+            set inferred [dict get $semantic exprs $block declaredResult]
+        }
 
         set overlay [dict create]
         set reachable [dict create]

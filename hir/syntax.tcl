@@ -61,13 +61,13 @@ proc hir::syntax::bindNode {origin name value} {
 
 # PARAMS: {NAME ORIGIN} pairs. Duplicate names are a DUPLICATE diagnostic of
 # the built HIR, not a construction error.
-proc hir::syntax::blockNode {origin params body} {
+proc hir::syntax::blockNode {origin params body {declaredResult {}}} {
     foreach param $params {
         if {[llength $param] != 2 || [lindex $param 0] eq ""} {
             core::malformed "block parameters must be {NAME ORIGIN} pairs" [list block $params]
         }
     }
-    return [Node block $origin params $params body $body]
+    return [Node block $origin params $params body $body declaredResult $declaredResult]
 }
 
 proc hir::syntax::callNode {origin callee args} {

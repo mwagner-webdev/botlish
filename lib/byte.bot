@@ -1,7 +1,7 @@
 # byte.bot -- the "byte" namespace: byte/bit-domain operations on Botlish's
 # Byte/Nibble/LowNibble/HighNibble scalar types (core/scalarbits.tcl).
 #
-# Every function here is ordinary, plainly-typed Botlish over the bitwise
+# Every function here is ordinary Botlish with a verified refined result
 # primitives core/scalarbits.tcl registers as root natives (bit_and, bit_or,
 # bit_xor, shift_left, shift_right -- already in native/lower.tcl's own op
 # table, so each compiles inline wherever it is called, module function or
@@ -15,16 +15,14 @@
 # from an .ir program's top level, but never one called from inside a .bot
 # module's own compiled body (core/scalarbits.tcl's header has the full
 # trace). Plain functions over already-lowerable primitives sidestep that
-# wall entirely, at the cost of the nominal type label itself not surviving
-# the call boundary -- hir/range.tcl's exact-value-set analysis (extended by
-# this milestone) recovers the same *fact* precision independently of that
-# label: byte::high_nibble's result is provably interval [0,240], exact set
-# {0,16,...,240}, regardless of what nominal type inference calls it.
+# wall entirely. Optional result contracts now preserve each nominal type
+# across ordinary module calls; hir/range.tcl derives interval and exact-set
+# facts from that semantic type without reanalyzing this body at call sites.
 #
 #   byte::high_nibble(b)   position-preserving high-half extraction: b&0xF0
 #   byte::low_nibble(b)    position-preserving low-half extraction: b&0x0F
 #   byte::nibble(x)        positioned nibble (either half) -> logical Nibble
-#                          (0..15): (x&0x0F)|(x>>4) -- correct and total for
+#                          (0..15): ((x&0x0F)|(x>>4))&0x0F -- correct for
 #                          any x in Byte's own domain (0..255): recovers x
 #                          unchanged when x is already low-positioned
 #                          (x<=15, so x>>4=0) and x>>4 when x is high-
@@ -42,20 +40,20 @@
 # namespace discipline -- see BYTE-NIBBLE-BIT-ARITHMETIC.md).
 namespace byte
 
-fn high_nibble(b):
+fn high_nibble(b) -> HighNibble:
     bit_and(b, 240)
 
-fn low_nibble(b):
+fn low_nibble(b) -> LowNibble:
     bit_and(b, 15)
 
-fn nibble(x):
-    bit_or(bit_and(x, 15), shift_right(x, 4))
+fn nibble(x) -> Nibble:
+    bit_and(bit_or(bit_and(x, 15), shift_right(x, 4)), 15)
 
-fn complement(b):
-    bit_xor(b, 255)
+fn complement(b) -> Byte:
+    bit_and(bit_xor(b, 255), 255)
 
-fn position_low(n):
-    n
+fn position_low(n) -> LowNibble:
+    bit_and(n, 15)
 
-fn position_high(n):
-    shift_left(n, 4)
+fn position_high(n) -> HighNibble:
+    bit_and(shift_left(n, 4), 240)

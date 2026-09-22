@@ -616,7 +616,8 @@ proc hir::types::Block {hirVar outerVar e self} {
         {*}[dict get $outer spec] create $e $seeds
         return [list block $e $arity any]
     }
-    set assumed never
+    set declared [dict get $node declaredResult]
+    set assumed [expr {$declared eq {} ? {never} : $declared}]
     set attempts [expr {$self eq "" ? 1 : 3}]
     for {set attempt 1} {$attempt <= $attempts} {incr attempt} {
         if {$attempt == $attempts && $attempts > 1} {
@@ -635,6 +636,8 @@ proc hir::types::Block {hirVar outerVar e self} {
         }
         set assumed $result
     }
+    dict set hir exprs $e inferredResultType [intern hir $result]
+    if {$declared ne {}} { set result $declared }
     dict set hir exprs $e resultType [intern hir $result]
     return [list block $e $arity $result]
 }

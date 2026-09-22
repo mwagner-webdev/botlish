@@ -1,0 +1,148 @@
+# refined-signatures.test -- verified ordinary-function result contracts.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+test refined-signature-syntax-1 {result-only annotations are optional AST metadata} -body {
+    set plain [lindex [dict get [surface::parse {fn f(x):
+    x} plain.bot] body] 0]
+    set typed [lindex [dict get [surface::parse {fn f(x) -> HighNibble:
+    bit_and(x, 240)} typed.bot] body] 0]
+    list [dict get $plain resultType] [dict get $typed resultType]
+} -result {{} HighNibble}
+
+test refined-signature-syntax-2 {unknown result types are semantic errors} -body {
+    catch {surface::compile {fn f() -> MissingType:
+    1} unknown.bot} message options
+    list [dict get $options -errorcode] [string match {*unknown or invalid result type*} $message]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test refined-signature-syntax-3 {arrows are not accepted on non-function suites} -body {
+    catch {surface::parse {if true -> Nibble:
+    1} bad-arrow.bot} message options
+    lrange [dict get $options -errorcode] 0 1
+} -result {SURFACE SYNTAX}
+
+test refined-signature-verify-0 {ordinary primitive result declarations use semantic subtype checking} -body {
+    set h [surface::compile {fn f() -> bool:
+    true
+f()} primitive.bot]
+    hir::types::show [hir::typeOf $h [lindex [hirFind $h call] end]]
+} -result bool
+
+test refined-signature-verify-1 {constant-mask facts verify a sparse refined result} -body {
+    set h [surface::compile {fn f(x) -> HighNibble:
+    bit_and(x, 240)
+f(17)} test.bot]
+    set block [lindex [hirFind $h block] 0]
+    list [hir::types::show [hir::type $h [hir::get $h $block resultType]]] \
+        [hir::types::show [hir::type $h [hir::get $h $block inferredResultType]]]
+} -result {{int[HighNibble]} int}
+
+test refined-signature-verify-2 {an invalid sparse result is rejected at definition time} -body {
+    catch {surface::compile {fn bad() -> HighNibble:
+    15} bad.bot} message options
+    list [dict get $options -errorcode] [string match {*does not prove declared type*} $message]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test refined-signature-verify-3 {a finite branch join proves a sparse result} -body {
+    set h [surface::compile {fn f(x) -> HighNibble:
+    if x:
+        0
+    else:
+        240
+f(true)} branch.bot]
+    hir::types::show [hir::typeOf $h [lindex [hirFind $h call] end]]
+} -result {int[HighNibble]}
+
+test refined-signature-verify-4 {an interval hull alone does not prove a sparse result} -body {
+    catch {surface::compile {fn f(x) -> HighNibble:
+    bit_or(bit_and(x, 128), bit_and(x, 112))} hull.bot} message
+    string match {*does not prove declared type*} $message
+} -result 1
+
+test refined-signature-forward-1 {same-module calls and forwarding retain the declared result} -body {
+    set h [surface::compile {fn a(x) -> HighNibble:
+    bit_and(x, 240)
+fn b(x):
+    a(x)
+b(17)} forward.bot]
+    set blocks [hirFind $h block]
+    lmap block $blocks {hir::types::show [hir::type $h [hir::get $h $block resultType]]}
+} -result {{int[HighNibble]} {int[HighNibble]}}
+
+test refined-signature-specialize-1 {specialized instances retain the public contract} -body {
+    set h [surface::compile {fn f(x) -> HighNibble:
+    bit_and(x, 240)
+[f(17), f(33)]} specialize.bot]
+    set spec [hir::specialize::analyze $h]
+    set results {}
+    foreach id [dict get $spec used] {
+        if {[dict get $spec instances $id block] eq {program}} continue
+        lappend results [hir::types::show [dict get $spec instances $id result]]
+    }
+    lsort -unique $results
+} -result {{int[HighNibble]}}
+
+test refined-signature-domain-1 {canonical scalar domains seed bounded optimizer facts} -body {
+    list [hir::range::show [hir::range::TypeFact Byte]] \
+        [hir::range::show [hir::range::TypeFact Nibble]] \
+        [hir::range::show [hir::range::TypeFact LowNibble]] \
+        [hir::range::show [hir::range::TypeFact HighNibble]]
+} -result {{[0, 255]} {[0, 15]} {[0, 15]} {[0, 240] {0,16,32,48,64,80,96,112,128,144,160,176,192,208,224,240}}}
+
+test refined-signature-domain-2 {nibble identities are distinct Byte subtypes} -body {
+    list [core::type::subtype Nibble Byte] [core::type::subtype LowNibble Byte] \
+        [core::type::subtype HighNibble Byte] [core::type::subtype Nibble LowNibble] \
+        [core::type::subtype LowNibble Nibble]
+} -result {1 1 1 0 0}
+
+test refined-signature-narrow-1 {type-seeded sparse facts compose with inequality narrowing} -body {
+    set h [hir::range::TypeFact HighNibble]
+    list [hir::range::show [hir::range::Narrowed < $h [hir::range::point 100]]] \
+        [hir::range::show [hir::range::PointEqualityNarrow $h [hir::range::point 160] 0]]
+} -result {{[0, 99] {0,16,32,48,64,80,96}} {[0, 240] {0,16,32,48,64,80,96,112,128,144,176,192,208,224,240}}}
+
+test refined-signature-cross-module-1 {a qualified byte call retains type and facts across the real module boundary} -body {
+    set path [makeFile {byte::high_nibble(171)
+} refined-signature-main.bot]
+    try {
+        set h [surface::readProgramFile $path]
+        set spec [hir::specialize::analyze $h]
+        set ranges [hir::range::analyze $h $spec]
+        set found {}
+        foreach id [dict get $spec used] {
+            set view [hir::specialize::view $h $spec $id]
+            foreach e [dict get [dict get $spec instances $id] reachable] {
+                if {[hir::kind $view $e] ne {call} || [hir::types::show [hir::typeOf $view $e]] ne {int[HighNibble]}} continue
+                lappend found [hir::types::show [hir::typeOf $view $e]] \
+                    [hir::range::show [hir::range::of $ranges $id $e]] [hir::format::Target $view [hir::get $view $e target]]
+            }
+        }
+        set found
+    } finally {
+        removeFile refined-signature-main.bot
+    }
+} -result {{int[HighNibble]} {[0, 240] {0,16,32,48,64,80,96,112,128,144,160,176,192,208,224,240}} block(e2)}
+
+test refined-signature-web-1 {web high_nibble infers Nibble transitively without a declaration} -body {
+    set path [makeFile {web::uri_escape_text
+} refined-signature-web.bot]
+    try {
+        set h [surface::readProgramFile $path]
+        set results {}
+        foreach e [hirFind $h block] {
+            set scope [hir::get $h $e bodyScope]
+            foreach b [hir::get $h $e params] {
+                if {[dict get [hir::binding $h $b] name] eq {b} \
+                        && [hir::types::show [hir::type $h [hir::get $h $e resultType]]] eq {int[Nibble]}} {
+                    lappend results [dict get [hir::binding $h $b] name] [dict get [hir::node $h $e] declaredResult]
+                }
+            }
+        }
+        set results
+    } finally {
+        removeFile refined-signature-web.bot
+    }
+} -result {b {}}
+
+cleanupTests

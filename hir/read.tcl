@@ -354,7 +354,8 @@ proc hir::read::Expr {hirVar level s path block} {
             }
         }
         block {
-            if {![regexp {^(s[0-9]+) \((.*?)\) captures \((.*?)\)(?: binds (.*))?$} $head -> body params captures binds]} {
+            if {![regexp {^(s[0-9]+) \((.*?)\) captures \((.*?)\)(?: declares (\S+))?(?: binds (.*))?$} \
+                    $head -> body params captures declared binds]} {
                 Fail $number "expected \"block SCOPE (PARAMS) captures (BINDINGS) ?binds ...?\""
             }
             NewScope hir $body block $s $e $e [list ir $path] $number
@@ -375,6 +376,10 @@ proc hir::read::Expr {hirVar level s path block} {
             SetField hir $e params $paramIds
             SetField hir $e captures [dict keys [BindingList $captures $number]]
             SetField hir $e resultType [hir::types::intern hir [lindex $type 3]]
+            set declaredType {}
+            if {$declared ne {}} { set declaredType [ParseType $declared $number] }
+            SetField hir $e declaredResult $declaredType
+            SetField hir $e inferredResultType [hir::types::intern hir [lindex $type 3]]
             set ids {}
             set index 2
             while {[AtLevel $hir $inner]} {
