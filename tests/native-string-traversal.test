@@ -265,6 +265,32 @@ f()
 } -result {0 0}
 
 # ---------------------------------------------------------------------------
+# Copy accounting (STRING-BYTES-CONSTRUCTION-AUDIT.md): decodecharat's own
+# result is a fresh String copy (String::from(char)) exactly like substr's
+# or strcat's, so it must contribute to "copies stringBytes" like every
+# other String-producing op does. Before this milestone's diagnostic fix,
+# rt_str_decode_char_at never called record_string_copy, silently
+# undercounting this metric by exactly its own contribution -- found by
+# reconciling ai_text_clean's own "copies stringBytes" against
+# byKind.String.payloadBytes (they must agree: every String this program
+# allocates is produced by exactly one copy, decodecharat's included) and
+# confirmed here for "the quick brown fox jumps" (25 ASCII characters):
+# decodecharat copies 1 byte per character (25 total) and the concat
+# accumulator copies a whole growing prefix each step (1+2+...+25 = 325),
+# for 350 total -- which must equal the String kind's own total payload
+# bytes, since every String this program allocates is a full copy.
+test traversal-string-copy-accounting-1 {decodecharat's own copied bytes are counted in "copies stringBytes", not silently dropped} -body {
+    set text "$::scanCollectSrc
+fn f():
+    scan_collect([corpus::literal {the quick brown fox jumps}], 0, \"\")
+f()
+"
+    set report [native::allocationReport [sourceHir $text] summary 1]
+    list [dict get $report copies stringBytes] \
+        [expr {[dict get $report copies stringBytes] == [dict get $report byKind String payloadBytes]}]
+} -result {350 1}
+
+# ---------------------------------------------------------------------------
 # Feature flag (#35): BOTLISH_NATIVE_STRING_TRAVERSAL_OPT=0 disables the
 # analysis exactly like -string-traversal-opt 0.
 

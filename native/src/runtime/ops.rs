@@ -448,7 +448,17 @@ pub extern "C" fn rt_str_decode_char_at(p: *mut Vm, s: Value, byte_offset: Value
         .chars()
         .next()
         .expect("decode_char_at: byte_offset must be a valid, in-bounds UTF-8 boundary");
-    vm(p).new_str_known(c.to_string(), 1, c.is_ascii())
+    let bytes = c.len_utf8();
+    let r = vm(p).new_str_known(c.to_string(), 1, c.is_ascii());
+    // Diagnostic-only (STRING-BYTES-CONSTRUCTION-AUDIT.md): every other
+    // String-producing op (rt_substr, rt_str_cat, rt_str_lower) reports its
+    // own copied bytes via record_string_copy; this one silently didn't,
+    // undercounting "copies: stringBytes" by exactly this op's contribution
+    // (confirmed by reconciling allocationReport's byKind.String.payloadBytes
+    // against copies.stringBytes on bench/ai_text_clean.tcl). No semantic
+    // change: c.to_string()'s allocation and copy already happened above.
+    vm(p).metrics.record_string_copy(bytes);
+    r
 }
 
 /// The UTF-8 byte length of S's text -- distinct from `rt_str_len`, which
