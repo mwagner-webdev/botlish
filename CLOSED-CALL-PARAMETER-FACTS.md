@@ -328,17 +328,14 @@ behave identically for a hypothetical future `type ProtocolTag = Byte in
   explosion, consistent with spec §71's own concern. This table is
   unchanged from what `HEAD~1` would already report, since this milestone
   added no analysis.
-- GC-stress (`BOTLISH_NATIVE_GC_STRESS=1 tclsh9.0 tests/all.tcl`): launched
-  per spec §58, since this milestone touches closed-call plumbing
-  conceptually even though it ends up changing none of it. No rooting
-  behavior *could* have changed, because `git status`/`git diff` on this
-  branch show no change to any compiler or runtime source file (`hir/*`,
-  `native/lower.tcl`, `native/src/**`) -- only the new test file and this
-  report. A full GC-stress pass runs both backends with a collection
-  forced before every allocation and is considerably slower than the
-  ordinary run; it was left running to completion in the background as a
-  final confirmation and did not gate finalizing this report, since no
-  source change exists for it to catch.
+- GC-stress (`BOTLISH_NATIVE_GC_STRESS=1 tclsh9.0 tests/all.tcl`): run per
+  spec §58, since this milestone touches closed-call plumbing conceptually
+  even though it ends up changing none of it. Completed clean: **1,585/
+  1,585 passed, 0 failed, 0 skipped**, both backends -- the same total as
+  the ordinary run, confirming no rooting or allocation behavior changed
+  (expected, since `git status`/`git diff` on this branch show no change
+  to any compiler or runtime source file: only the new test file and this
+  report).
 
 (The one full-suite run captured before the native backend was rebuilt on
 this sandbox showed only the expected `NATIVE NOT-BUILT` failures in
