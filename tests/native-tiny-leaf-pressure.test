@@ -1,0 +1,156 @@
+# native-tiny-leaf-pressure.test -- TINY-LEAF-DEFAULT-ON.md's synthetic
+# call-site-count pressure audit: the one obvious remaining code-growth
+# risk tiny exact-leaf inlining's per-callee op-count budget (8) does not
+# by itself bound -- a tiny leaf called from many exact sites. This is a
+# measurement/audit suite, not a policy test: it exists to make the risk
+# observable and to pin that inlining stays semantically correct and
+# deterministic under pressure, not to freeze any particular growth
+# threshold into the compiler's contract (no production call-site-count
+# budget exists; see native/lower.tcl's LeafInlineEligible and
+# TINY-LEAF-DEFAULT-ON.md).
+#
+# The fixture generator and measurement procs live in
+# bench/tiny-leaf-pressure.tcl (reused, not duplicated, by
+# `tclsh9.0 bench/tiny-leaf-pressure.tcl`, which prints the full report
+# table TINY-LEAF-DEFAULT-ON.md quotes).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot bench tiny-leaf-pressure.tcl]
+
+interp recursionlimit {} 100000
+
+# ---------------------------------------------------------------------------
+# Semantic parity: inline on vs off must agree at every call-site count,
+# both leaf sizes, both fixture shapes (spec's own mandatory differential
+# requirement, stressed here at higher multiplicity than
+# native-tiny-leaf-inline.test's own on/off tests already cover).
+
+test tiny-leaf-pressure-parity-1op-direct {a 1-op leaf: inline on/off agree at every call-site count, direct-only} -body {
+    set mismatches {}
+    foreach n $tinyLeafPressure::callSiteCounts {
+        set m [tinyLeafPressure::measure 1 $n 0]
+        if {[dict get $m valueOn] ne [dict get $m valueOff]} {
+            lappend mismatches [list $n [dict get $m valueOn] [dict get $m valueOff]]
+        }
+    }
+    set mismatches
+} -result {}
+
+test tiny-leaf-pressure-parity-8op-chain-direct {an 8-op (chain) leaf: inline on/off agree at every call-site count, direct-only} -body {
+    set mismatches {}
+    foreach n $tinyLeafPressure::callSiteCounts {
+        set m [tinyLeafPressure::measure 8 $n 0 chain]
+        if {[dict get $m valueOn] ne [dict get $m valueOff]} {
+            lappend mismatches [list $n [dict get $m valueOn] [dict get $m valueOff]]
+        }
+    }
+    set mismatches
+} -result {}
+
+test tiny-leaf-pressure-parity-8op-horner-direct {an 8-op (horner, fold-resistant) leaf: inline on/off agree at every call-site count, direct-only} -body {
+    set mismatches {}
+    foreach n $tinyLeafPressure::callSiteCounts {
+        set m [tinyLeafPressure::measure 8 $n 0 horner]
+        if {[dict get $m valueOn] ne [dict get $m valueOff]} {
+            lappend mismatches [list $n [dict get $m valueOn] [dict get $m valueOff]]
+        }
+    }
+    set mismatches
+} -result {}
+
+test tiny-leaf-pressure-parity-dynamic {every leaf/call-site-count combination still agrees on/off with one additional dynamic (never-inlined) caller present} -body {
+    set mismatches {}
+    foreach ops {1 8} {
+        foreach n {1 8 64 256} {
+            set m [tinyLeafPressure::measure $ops $n 1]
+            if {[dict get $m valueOn] ne [dict get $m valueOff]} {
+                lappend mismatches [list $ops $n [dict get $m valueOn] [dict get $m valueOff]]
+            }
+        }
+    }
+    set mismatches
+} -result {}
+
+# ---------------------------------------------------------------------------
+# Structural sanity: every exact direct call site to an eligible leaf
+# inlines (no call-site-count budget exists yet -- spec's own item 39,
+# "no production call-site-count budget"), deterministically.
+
+test tiny-leaf-pressure-all-sites-inline {at 256 direct call sites to an eligible 1-op leaf, every site inlines: zero call/callenv instructions to it survive} -body {
+    set hir [tinyLeafPressure::hirOf 1 256 0]
+    set nir [native::nir $hir -tiny-leaf-inline-opt 1]
+    # Only the top-level program's own single call to caller() itself
+    # remains (caller is never itself tiny-leaf eligible: its own body
+    # calls leaf, a Block target, which LeafExprEligible categorically
+    # excludes -- native/lower.tcl's own rule 4).
+    regexp -all {= call(env)? } $nir
+} -result 1
+
+test tiny-leaf-pressure-deterministic-256 {256-call-site lowering is deterministic: two independent lowerings of the same HIR produce byte-identical NIR and identical whole-program object size} -body {
+    set hir [tinyLeafPressure::hirOf 8 256 0 horner]
+    set nirA [native::nir $hir -tiny-leaf-inline-opt 1]
+    set nirB [native::nir $hir -tiny-leaf-inline-opt 1]
+    set sizeA [native::codeSize $hir -tiny-leaf-inline-opt 1]
+    set sizeB [native::codeSize $hir -tiny-leaf-inline-opt 1]
+    list [expr {$nirA eq $nirB}] [expr {$sizeA eq $sizeB}]
+} -result {1 1}
+
+# ---------------------------------------------------------------------------
+# Fixture B: a dynamic use forces the canonical (generic) instance to stay
+# separately compiled, isolating true inline-duplication cost from the
+# "callee becomes unreachable" effect fixture A also benefits from (spec's
+# own items 68-71).
+
+test tiny-leaf-pressure-dynamic-keeps-canonical {with one dynamic caller present, the leaf's own generic instance stays a separately compiled function even though all 64 direct sites inline} -body {
+    set hir [tinyLeafPressure::hirOf 1 64 1]
+    set nir [native::nir $hir -tiny-leaf-inline-opt 1]
+    # "leaf" appears exactly once (its own generic instance, kept alive by
+    # the dynamic use -- its <int> instance's 64 direct call sites all
+    # inlined and left no separate function to also match). The 2 surviving
+    # call/callenv instructions are the top-level program's own calls to
+    # caller() and apply(...) -- neither is itself tiny-leaf eligible
+    # (caller calls leaf, a Block target; apply's own g(v) is a dynamic,
+    # non-exact call) -- not calls to leaf.
+    list [regexp -all {"leaf"} $nir] [regexp -all {= call(env)? } $nir]
+} -result {1 2}
+
+# ---------------------------------------------------------------------------
+# Budget sentinel (spec's own items 29-31): high expansion pressure,
+# deliberately phrased as measurement + parity + determinism, never as "N
+# call sites must inline forever" -- no production call-site budget exists
+# in this milestone, and this test must not freeze its absence into a
+# semantic contract.
+
+test tiny-leaf-pressure-sentinel-128-8op {sentinel: an 8-op fold-resistant leaf at 128 exact call sites -- semantic parity, deterministic output, and a real machine-code measurement are all available; this does not assert that 128 sites must always inline (no such policy exists yet)} -body {
+    set hir [tinyLeafPressure::hirOf 8 128 0 horner]
+    set valueOn [native::evalHir $hir -tiny-leaf-inline-opt 1]
+    set valueOff [native::evalHir $hir -tiny-leaf-inline-opt 0]
+    set sizeA [native::codeSize $hir -tiny-leaf-inline-opt 1]
+    set sizeB [native::codeSize $hir -tiny-leaf-inline-opt 1]
+    list [expr {$valueOn eq $valueOff}] [expr {$sizeA eq $sizeB}] \
+        [expr {[lindex $sizeA 0] > 0}]
+} -result {1 1 1}
+
+# ---------------------------------------------------------------------------
+# Code-size trend (report-relevant, not a frozen threshold): across this
+# corpus's own synthetic pressure range, whole-program bytes with inlining
+# on never exceed the explicit-off baseline, even for the fold-resistant
+# leaf and even at the highest tested count. This is current-behavior
+# evidence (spec's own item 31), not a claim that stays true at any N.
+
+test tiny-leaf-pressure-no-growth-observed {whole-program machine code with inlining on does not exceed the explicit-off baseline at any tested call-site count, either leaf style, direct-only or with a dynamic caller present} -body {
+    set grew {}
+    foreach dynamic {0 1} {
+        foreach {ops style} {1 chain 8 chain 8 horner} {
+            foreach n $tinyLeafPressure::callSiteCounts {
+                set m [tinyLeafPressure::measure $ops $n $dynamic $style]
+                if {[dict get $m bytesOn] > [dict get $m bytesOff]} {
+                    lappend grew [list $ops $style $n $dynamic [dict get $m bytesOn] [dict get $m bytesOff]]
+                }
+            }
+        }
+    }
+    set grew
+} -result {}
+
+cleanupTests
