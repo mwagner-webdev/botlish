@@ -1,0 +1,503 @@
+# typed-callable-escape.test -- typed-callable contract preservation
+# (TYPED-CALLABLE-ESCAPE-SOUNDNESS.md).
+#
+# A typed callable (a function with >=1 declared parameter type) may never
+# reach a call site where its declared parameter contract could no longer
+# be statically checked. Exact callable identity may pass through an
+# ordinary immutable alias, a capture, or a return; it must not be allowed
+# to escape into an untyped/generic callable representation (an ordinary
+# call argument, an "if"/loop-break join with a different callable, or a
+# Result wrapper) -- hir/callables.tcl's new hir::callables::verify pass,
+# a compile-time-only check with no runtime counterpart.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+set ::byteDecl "type Byte = Int in 0..255\n\n"
+
+proc rejects {source} {
+    catch {surface::compile $source reject.bot} message options
+    list [dict get $options -errorcode] \
+        [string match {*typed parameter requirements that cannot be preserved*} $message]
+}
+
+proc accepts {source} {
+    surface::compile $source accept.bot
+    return 1
+}
+
+# ---------------------------------------------------------------------------
+# The concrete bug (spec #2, #67 before/after)
+
+test callable-escape-bug-rejected {the reported unsound program is now a compile-time error, not 9999} -body {
+    rejects [format {%sfn take_byte(x: Byte) -> int:
+    x
+
+fn apply(f, v):
+    f(v)
+
+apply(take_byte, 9999)} $::byteDecl]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test callable-escape-bug-not-a-range-error {the rejection is the erasure diagnostic, not a range/admissibility one} -body {
+    catch {surface::compile [format {%sfn take_byte(x: Byte) -> int:
+    x
+
+fn apply(f, v):
+    f(v)
+
+apply(take_byte, 9999)} $::byteDecl] reject2.bot} message
+    string match {*cannot be proven to satisfy*} $message
+} -result 0
+
+# ---------------------------------------------------------------------------
+# Escaping through an untyped higher-order parameter (spec #12-13, #50)
+
+test callable-escape-apply-bad-arg-rejected {apply(take_byte, 9999) is rejected} -body {
+    rejects [format {%sfn take_byte(x: Byte) -> int:
+    x
+
+fn apply(f, v):
+    f(v)
+
+apply(take_byte, 9999)} $::byteDecl]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test callable-escape-apply-good-arg-still-rejected {apply(take_byte, 7) is rejected too: the escape is unsafe regardless of the value (spec #50's "must never be accepted merely by ignoring the contract")} -body {
+    rejects [format {%sfn take_byte(x: Byte) -> int:
+    x
+
+fn apply(f, v):
+    f(v)
+
+apply(take_byte, 7)} $::byteDecl]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test callable-escape-ordinary-untyped-callable-unaffected {an ordinary untyped callable still passes through apply freely (spec #14, #51)} -body {
+    accepts {fn identity(x):
+    x
+
+fn apply(f, v):
+    f(v)
+
+apply(identity, 9999)}
+} -result 1
+
+# ---------------------------------------------------------------------------
+# Exact direct calls unchanged (spec #25, #48)
+
+test callable-escape-direct-call-valid-unaffected {take_byte(7) remains valid} -body {
+    accepts [format {%sfn take_byte(x: Byte) -> int:
+    x
+take_byte(7)} $::byteDecl]
+} -result 1
+
+test callable-escape-direct-call-invalid-unaffected {take_byte(9999) remains a compile error, unrelated to the new erasure diagnostic} -body {
+    catch {surface::compile [format {%sfn take_byte(x: Byte) -> int:
+    x
+take_byte(9999)} $::byteDecl] direct-bad.bot} message options
+    list [dict get $options -errorcode] [string match {*cannot be proven to satisfy*} $message]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+# ---------------------------------------------------------------------------
+# Exact local alias (spec #4, #16)
+
+test callable-escape-alias-valid {f = take_byte; f(7) remains legal: exact identity survives an immutable alias} -body {
+    accepts [format {%sfn take_byte(x: Byte) -> int:
+    x
+
+f = take_byte
+f(7)} $::byteDecl]
+} -result 1
+
+test callable-escape-alias-invalid {f = take_byte; f(9999) is rejected by the ordinary admissibility check (unmodified), because f still resolves exactly} -body {
+    catch {surface::compile [format {%sfn take_byte(x: Byte) -> int:
+    x
+
+f = take_byte
+f(9999)} $::byteDecl] alias-bad.bot} message options
+    list [dict get $options -errorcode] [string match {*cannot be proven to satisfy*} $message]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+# ---------------------------------------------------------------------------
+# Multiple (transitive) aliases (spec #17)
+
+test callable-escape-transitive-alias-valid {g = f = take_byte; g(7) remains legal} -body {
+    accepts [format {%sfn take_byte(x: Byte) -> int:
+    x
+
+f = take_byte
+g = f
+g(7)} $::byteDecl]
+} -result 1
+
+test callable-escape-transitive-alias-invalid {g = f = take_byte; g(9999) is rejected} -body {
+    catch {surface::compile [format {%sfn take_byte(x: Byte) -> int:
+    x
+
+f = take_byte
+g = f
+g(9999)} $::byteDecl] transitive-bad.bot} message options
+    list [dict get $options -errorcode] [string match {*cannot be proven to satisfy*} $message]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+# ---------------------------------------------------------------------------
+# Branch joins (spec #18-19, #58)
+
+test callable-escape-branch-join-same-callable-ok {both branches the same exact typed callable: no erasure, remains legal} -body {
+    accepts [format {%sfn take_byte(x: Byte) -> int:
+    x
+fn choose(cond):
+    f = if cond:
+        take_byte
+    else:
+        take_byte
+    f(7)
+choose(true)} $::byteDecl]
+} -result 1
+
+test callable-escape-branch-join-different-callables-rejected {branches with two different typed callables are rejected at the join (real, non-constant condition -- forces an actual join, not a known-branch shortcut)} -body {
+    rejects [format {%sfn take_byte(x: Byte) -> int:
+    x
+fn take_other(x):
+    x
+fn choose(cond):
+    f = if cond:
+        take_byte
+    else:
+        take_other
+    f(7)
+choose(true)}  $::byteDecl]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test callable-escape-branch-join-untyped-vs-typed-rejected {one branch untyped, the other a typed callable: still rejected -- the typed side's contract would be erased} -body {
+    rejects [format {%sfn take_byte(x: Byte) -> int:
+    x
+fn other(x):
+    x
+fn choose(cond):
+    f = if cond:
+        take_byte
+    else:
+        other
+    f(7)
+choose(true)} $::byteDecl]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test callable-escape-branch-join-two-untyped-ok {two different, both-untyped callables joined in a branch remain unrestricted (no precondition to lose)} -body {
+    accepts {fn identity(x):
+    x
+fn other(x):
+    x
+fn choose(cond):
+    f = if cond:
+        identity
+    else:
+        other
+    f(9999)
+choose(true)}
+} -result 1
+
+test callable-escape-branch-known-condition-preserves-identity {a compile-time-known condition selects one branch outright: no join happens, so the live branch's exact identity survives} -body {
+    accepts [format {%sfn take_byte(x: Byte) -> int:
+    x
+f = if true:
+    take_byte
+else:
+    take_byte
+f(7)} $::byteDecl]
+} -result 1
+
+# ---------------------------------------------------------------------------
+# Return (spec #22, #57)
+
+test callable-escape-return-preserved-valid {a function returning a typed callable preserves its exact identity: calling the result is checked normally} -body {
+    accepts [format {%sfn take_byte(x: Byte) -> int:
+    x
+
+fn chooser():
+    take_byte
+
+f = chooser()
+f(7)} $::byteDecl]
+} -result 1
+
+test callable-escape-return-preserved-invalid {...and a bad argument through that same preserved identity is still rejected} -body {
+    catch {surface::compile [format {%sfn take_byte(x: Byte) -> int:
+    x
+
+fn chooser():
+    take_byte
+
+f = chooser()
+f(9999)} $::byteDecl] return-bad.bot} message options
+    list [dict get $options -errorcode] [string match {*cannot be proven to satisfy*} $message]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test callable-escape-return-join-different-rejected {a function whose own return sites join two different typed/untyped callables is rejected at the return} -body {
+    rejects [format {%sfn take_byte(x: Byte) -> int:
+    x
+fn take_other(x):
+    x
+fn chooser(cond):
+    if cond:
+        return take_byte
+    take_other
+chooser(true)} $::byteDecl]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+# ---------------------------------------------------------------------------
+# Capture (spec #20, #56)
+
+test callable-escape-capture-typed-wrapper-valid {a closure capturing a typed callable, itself declaring a compatible typed parameter, checks statically and accepts a valid argument} -body {
+    accepts [format {%sfn take_byte(x: Byte) -> int:
+    x
+
+fn outer():
+    f = take_byte
+    fn inner(v: Byte):
+        f(v)
+    inner(7)
+
+outer()} $::byteDecl]
+} -result 1
+
+test callable-escape-capture-typed-wrapper-invalid {...and rejects an invalid one, through the ordinary (unmodified) admissibility check -- capture alone does not erase identity} -body {
+    catch {surface::compile [format {%sfn take_byte(x: Byte) -> int:
+    x
+
+fn outer():
+    f = take_byte
+    fn inner(v: Byte):
+        f(v)
+    inner(9999)
+
+outer()} $::byteDecl] capture-bad.bot} message options
+    list [dict get $options -errorcode] [string match {*cannot be proven to satisfy*} $message]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test callable-escape-capture-untyped-wrapper-rejected {a closure capturing a typed callable through its own UNTYPED parameter cannot prove that parameter's admissibility either -- rejected regardless of what the wrapper's own caller passes (no way to establish the inner call is safe without a typed wrapper parameter)} -body {
+    rejects [format {%sfn take_byte(x: Byte) -> int:
+    x
+
+fn outer():
+    f = take_byte
+    fn inner(v):
+        f(v)
+    inner(7)
+
+outer()} $::byteDecl]
+} -result {{CORE SEMANTIC TYPE} 0}
+
+# ---------------------------------------------------------------------------
+# Loop break (spec #58's "at least one branch/join" -- loop break is the
+# same joining mechanism as an "if")
+
+test callable-escape-loop-break-different-rejected {a loop breaking with two different typed/untyped callables is rejected at the break} -body {
+    rejects [format {%sfn take_byte(x: Byte) -> int:
+    x
+fn other(x):
+    x
+fn pick(cond):
+    loop:
+        if cond:
+            break take_byte
+        break other
+    unit
+pick(true)} $::byteDecl]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+# ---------------------------------------------------------------------------
+# Typed result alone remains unrestricted (spec #15, #52)
+
+test callable-escape-typed-result-only-unrestricted {a callable whose only declared type is its own result gains no new restriction as a first-class value} -body {
+    accepts {type Small = Int in 0..10
+
+fn make_small(x) -> Small:
+    if x < 0:
+        0
+    else:
+        1
+
+fn apply(f, v):
+    f(v)
+
+apply(make_small, 5)}
+} -result 1
+
+# ---------------------------------------------------------------------------
+# Mixed typed/untyped parameters (spec #53)
+
+test callable-escape-mixed-typed-untyped-params-rejected {a callable with one typed and one untyped parameter is precondition-bearing and protected the same way} -body {
+    rejects [format {%sfn f(x: Byte, y):
+    x
+
+fn apply(g, v):
+    g(v)
+
+apply(f, 7)} $::byteDecl]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+# ---------------------------------------------------------------------------
+# Source-defined types, not just Byte (spec #54-55)
+
+test callable-escape-source-defined-type-alias-valid {a source-defined bounded type's callable survives an exact alias} -body {
+    accepts {type Small = Int in 0..10
+
+fn take_small(x: Small) -> int:
+    x
+
+f = take_small
+f(7)}
+} -result 1
+
+test callable-escape-source-defined-type-escape-rejected {...and is protected against the same untyped-parameter escape} -body {
+    rejects {type Small = Int in 0..10
+
+fn take_small(x: Small) -> int:
+    x
+
+fn apply(f, v):
+    f(v)
+
+apply(take_small, 3)}
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test callable-escape-sparse-type-exact-alias {a sparse source-defined type's callable, reached through an exact alias, still uses ordinary exact-set admissibility -- valid membership} -body {
+    accepts {type Mark = Int in {0,4,8,12}
+
+fn take_mark(x: Mark) -> int:
+    x
+
+f = take_mark
+f(4)}
+} -result 1
+
+test callable-escape-sparse-type-exact-alias-invalid {...and rejects non-membership the same way} -body {
+    catch {surface::compile {type Mark = Int in {0,4,8,12}
+
+fn take_mark(x: Mark) -> int:
+    x
+
+f = take_mark
+f(5)} sparse-bad.bot} message options
+    list [dict get $options -errorcode] [string match {*cannot be proven to satisfy*} $message]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+# ---------------------------------------------------------------------------
+# Cross-module callable value (spec #23, #59)
+
+test callable-escape-cross-module-alias-valid {a cross-module typed function's value survives an exact local alias, same as a local one} -body {
+    set libPath [file join $::core::libraryDir typedcallablelib.bot]
+    set ch [open $libPath w]
+    puts $ch {namespace typedcallablelib
+
+type Small = Int in 0..10
+
+fn take_small(x: Small) -> Small:
+    x
+}
+    close $ch
+    set mainPath [makeFile {f = typedcallablelib::take_small
+f(7)
+} typed-callable-cross-module.bot]
+    try {
+        set h [surface::readProgramFile $mainPath -strict 0]
+        llength [hir::diagnostics $h]
+    } finally {
+        file delete $libPath
+        removeFile typed-callable-cross-module.bot
+    }
+} -result 0
+
+test callable-escape-cross-module-escape-rejected {...and the cross-module callable is protected against the same untyped-parameter escape} -body {
+    set libPath [file join $::core::libraryDir typedcallablelib2.bot]
+    set ch [open $libPath w]
+    puts $ch {namespace typedcallablelib2
+
+type Small = Int in 0..10
+
+fn take_small(x: Small) -> Small:
+    x
+}
+    close $ch
+    set mainPath [makeFile {fn apply(f, v):
+    f(v)
+apply(typedcallablelib2::take_small, 3)
+} typed-callable-cross-module-bad.bot]
+    try {
+        set h [surface::readProgramFile $mainPath -strict 0]
+        set diags [hir::diagnostics $h]
+        list [llength $diags] \
+            [string match {*typed parameter requirements that cannot be preserved*} [dict get [lindex $diags 0] message]]
+    } finally {
+        file delete $libPath
+        removeFile typed-callable-cross-module-bad.bot
+    }
+} -result {1 1}
+
+# ---------------------------------------------------------------------------
+# Semantic soundness: legal calls make an "unreachable" branch actually
+# unreachable (spec #29, #60) -- this does not require branch elimination,
+# only that no legal, statically-checked call path can inject a value that
+# would take it.
+
+test callable-escape-semantic-soundness-legal-calls-only {every legal direct call to a Byte-typed parameter satisfies x <= 255, so the "else" branch is semantically unreachable for any legal invocation; the only way to reach it (an erased dynamic call with an out-of-range value) is exactly what this milestone now rejects at compile time} -body {
+    set h [surface::compile [format {%sfn always_true_for_byte(x: Byte) -> int:
+    if x <= 255:
+        1
+    else:
+        2
+always_true_for_byte(200)} $::byteDecl] soundness.bot]
+    set escape [catch {surface::compile [format {%sfn always_true_for_byte(x: Byte) -> int:
+    if x <= 255:
+        1
+    else:
+        2
+
+fn apply(f, v):
+    f(v)
+
+apply(always_true_for_byte, 9999)} $::byteDecl] soundness-escape.bot}]
+    list [expr {$h ne ""}] $escape
+} -result {1 1}
+
+# ---------------------------------------------------------------------------
+# No runtime check anywhere (spec #27, #65)
+
+test callable-escape-no-runtime-helper {no new runtime callable-check helper was added} -body {
+    set names [core::native::names]
+    list [lsearch -glob $names {*check_callable*}] [lsearch -glob $names {*assert_parameter*}] \
+        [lsearch -glob $names {*validate_dynamic_call*}] [lsearch -glob $names {*typed_call_guard*}]
+} -result {-1 -1 -1 -1}
+
+test callable-escape-no-new-error-completion {a typed callable still has no possible parameter-validation Error completion} -body {
+    set h [surface::compile [format {%sfn take_byte(x: Byte) -> int:
+    x + 1} $::byteDecl] noerror.bot]
+    set block [lindex [hirFind $h block] end]
+    hir::types::show [hir::type $h [hir::get $h $block resultType]]
+} -result int
+
+# ---------------------------------------------------------------------------
+# Backend parity (spec #61): rejection happens during HIR construction,
+# before any backend is chosen, so it is identical for every backend.
+
+test callable-escape-backend-parity {the bug program is rejected identically regardless of which backend would eventually run it} -body {
+    set src [format {%sfn take_byte(x: Byte) -> int:
+    x
+
+fn apply(f, v):
+    f(v)
+
+apply(take_byte, 9999)} $::byteDecl]
+    set results {}
+    foreach backend {interp compile} {
+        set saved [core::useBackend]
+        core::useBackend $backend
+        catch {surface::compile $src "parity-$backend.bot"} message options
+        lappend results [dict get $options -errorcode]
+        core::useBackend $saved
+    }
+    set results
+} -result {{CORE SEMANTIC TYPE} {CORE SEMANTIC TYPE}}
+
+cleanupTests

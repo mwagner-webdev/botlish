@@ -318,6 +318,16 @@ better fact, not of any new peephole.
 
 ## Dynamic/function-value call handling
 
+**Superseded.** This section's own empirical finding (a typed callable
+passed through an untyped higher-order parameter compiles and evaluates
+correctly, "because no optimization currently exploits the false fact")
+was subsequently identified as a genuine soundness bug, not merely a
+documented limitation: `TYPED-CALLABLE-ESCAPE-SOUNDNESS.md` closes it --
+`apply(take_byte, 9999)` (this section's own example) is now a
+compile-time error. The audit and reasoning below are kept for their own
+historical record of what this milestone actually shipped with, not as a
+description of current behavior.
+
 Audited directly (`hir::types::Call`'s existing target resolution) rather
 than assumed. A call's `target` field resolves to `{block B}` -- the only
 shape `VerifyCall` checks -- exactly when ordinary, single-pass, whole-

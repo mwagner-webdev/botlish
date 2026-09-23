@@ -248,6 +248,7 @@ proc hir::buildSyntax {nodes args} {
     hir::types::infer hir
     hir::range::verifyDeclaredResults hir
     hir::range::verifyDeclaredParams hir
+    hir::callables::verify hir
     hir::modulebinding::validate hir
     if {[dict get $options -strict]} {
         foreach diagnostic [dict get $hir diagnostics] {
@@ -528,7 +529,7 @@ proc hir::ApplyNativeResultOverrides {hirVar overrides} {
 }
 
 apply {{dir} {
-    foreach file {syntax resolve hygiene sourcetypes types modulebinding refine lower format read aot specialize range induction escape blockescape stringregion traversal} {
+    foreach file {syntax resolve hygiene sourcetypes types modulebinding refine lower format read aot specialize range callables induction escape blockescape stringregion traversal} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home
