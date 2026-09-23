@@ -350,8 +350,9 @@ correct and unaffected by this milestone's default flip.
 - `tests/native-tiny-leaf-pressure.test`: 9/9 (new, § 10).
 - `cargo test --release --manifest-path native/Cargo.toml`: 60/60 (no Rust
   source changed).
-- `tclsh9.0 tests/all.tcl`, **no environment override** (the new default,
-  1644 tests, both backends): [FINAL NUMBERS -- see below]
+- `tclsh9.0 tests/all.tcl`, **no environment override** (the new default):
+  **1644/1644 passed, 0 failed, 0 skipped**, both backends -- this is the
+  milestone's own central acceptance criterion (spec item 43), confirmed.
 - `BOTLISH_NATIVE_GC_STRESS=1 tclsh9.0 tests/all.tcl`, default-on: 1635/1635
   (interp) and 1644/1644 (compile), 0 failed -- run before the three
   default-pinning tests were added to the interp pass's own on-disk
