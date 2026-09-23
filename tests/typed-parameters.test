@@ -1,0 +1,531 @@
+# typed-parameters.test -- strict explicitly typed function parameters
+# (STRICT-TYPED-PARAMETERS.md).
+#
+# "fn f(x: T):" is a compile-time proof obligation, never a runtime check: a
+# call is legal only when the compiler can prove every argument's possible
+# values are a subset of its parameter's accepted values (nominal subtype,
+# or -- more broadly -- integer-domain value-set inclusion, spec #7-9); a
+# merely-unproven argument is rejected exactly like a proven-incompatible
+# one (spec #67), and no lowering of a legal call ever gets a hidden
+# kind/range guard at its parameter boundary (spec #4, #29).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+# The first block E of H with a parameter named NAME whose declared type
+# (hir::types::show) equals SHOWNTYPE -- since hir::bindingType only ever
+# reflects an ordinary local bind's persisted type (never a parameter's:
+# STRICT-TYPED-PARAMETERS.md's "declared parameter fact seeding" seeds a
+# parameter's semantic type into the *block's own analysis context* only,
+# exactly how a declared result type has never needed a persisted binding
+# type either), this reads the block's own declaredParamTypes directly.
+proc findTypedParamBlock {h name shownType} {
+    foreach b [hirFind $h block] {
+        set params [hir::get $h $b params]
+        set types [hir::get $h $b declaredParamTypes]
+        foreach p $params t $types {
+            if {[dict get [hir::binding $h $p] name] eq $name && $t ne {} \
+                    && [hir::types::show $t] eq $shownType} {
+                return $b
+            }
+        }
+    }
+    return ""
+}
+
+# The milestone's own required sample payload (spec #11), as a standalone
+# local declaration block (no library dependency) reused by several tests.
+set ::samplePayload {type Small = Int in 0..10
+type Tiny = Small in 0..3
+type OtherTiny = Int in 0..3
+
+fn identity_small(x: Small) -> Small:
+    x
+
+fn widen_tiny(x: Tiny) -> Small:
+    x
+
+fn combine(x: Small, y: Small) -> int:
+    x + y
+
+fn make_other() -> OtherTiny:
+    2
+
+}
+
+# ---------------------------------------------------------------------------
+# Parser tests (spec #86)
+
+test typed-param-parse-1 {one typed parameter} -body {
+    set fn [lindex [dict get [surface::parse {fn f(x: Small):
+    x} one.bot] body] 0]
+    lmap p [dict get $fn params] {list [lindex $p 0] [lindex $p 2]}
+} -result {{x Small}}
+
+test typed-param-parse-2 {multiple typed parameters} -body {
+    set fn [lindex [dict get [surface::parse {fn f(x: Small, y: Tiny):
+    x} multi.bot] body] 0]
+    lmap p [dict get $fn params] {lindex $p 0}
+} -result {x y}
+
+test typed-param-parse-2b {multiple typed parameters both carry their own type} -body {
+    set fn [lindex [dict get [surface::parse {fn f(x: Small, y: Tiny):
+    x} multi.bot] body] 0]
+    lmap p [dict get $fn params] {lindex $p 2}
+} -result {Small Tiny}
+
+test typed-param-parse-3 {mixed typed and untyped parameters} -body {
+    set fn [lindex [dict get [surface::parse {fn f(x: Small, y):
+    x} mixed.bot] body] 0]
+    lmap p [dict get $fn params] {lindex $p 2}
+} -result {Small {}}
+
+test typed-param-parse-4 {a typed parameter plus a result annotation} -body {
+    set fn [lindex [dict get [surface::parse {fn f(x: Small) -> Small:
+    x} both.bot] body] 0]
+    list [lindex [lindex [dict get $fn params] 0] 2] [dict get $fn resultType]
+} -result {Small Small}
+
+test typed-param-parse-5 {unknown parameter type is only a semantic error, not a parse error} -body {
+    set fn [lindex [dict get [surface::parse {fn f(x: MissingType):
+    x} unknown.bot] body] 0]
+    lindex [lindex [dict get $fn params] 0] 2
+} -result {MissingType}
+
+test typed-param-parse-6 {a colon with no type after it is a syntax error} -body {
+    catch {surface::parse {fn f(x:):
+    x} malformed.bot} message options
+    lrange [dict get $options -errorcode] 0 1
+} -result {SURFACE SYNTAX}
+
+test typed-param-parse-7 {suite colon stays unambiguous after a typed parameter list} -body {
+    set fn [lindex [dict get [surface::parse {fn f(x: Small):
+    x} suite.bot] body] 0]
+    llength [dict get [dict get $fn body] body]
+} -result 1
+
+test typed-param-parse-8 {suite colon stays unambiguous with a typed parameter and a result type} -body {
+    set fn [lindex [dict get [surface::parse {fn f(x: Small) -> Small:
+    x} suite2.bot] body] 0]
+    dict get [dict get $fn body] resultType
+} -result Small
+
+test typed-param-parse-9 {canonical formatting has no space before the colon} -body {
+    surface::formatAst [surface::parse {fn f(x: Small, y):
+    x} fmt.bot]
+} -result {fn f (x:Small y)
+    (name x)}
+
+# ---------------------------------------------------------------------------
+# Semantic valid-call tests (spec #87)
+
+test typed-param-valid-literal-interval {a literal statically inside the interval is admissible} -body {
+    surface::compile [format {%sidentity_small(7)} $::samplePayload] valid1.bot
+    set ok 1
+} -result 1
+
+test typed-param-valid-literal-bounds {both interval endpoints are admissible} -body {
+    surface::compile [format {%sidentity_small(0)
+identity_small(10)} $::samplePayload] valid2.bot
+    set ok 1
+} -result 1
+
+test typed-param-valid-nominal-subtype {a narrower nominal subtype (Tiny <: Small) is admissible} -body {
+    surface::compile [format {%swiden_tiny(2)} $::samplePayload] valid3.bot
+    set ok 1
+} -result 1
+
+test typed-param-valid-same-domain-sibling {a same-domain nominal sibling is admissible through value-set proof} -body {
+    surface::compile [format {%sidentity_small(make_other())} $::samplePayload] valid4.bot
+    set ok 1
+} -result 1
+
+test typed-param-valid-multi-args {multiple typed parameters are each checked} -body {
+    surface::compile [format {%scombine(3, 8)} $::samplePayload] valid5.bot
+    set ok 1
+} -result 1
+
+test typed-param-valid-independent-narrower-domain {an independently-declared narrower domain satisfies a wider parameter} -body {
+    surface::compile {type Small = Int in 0..10
+type OtherTiny = Int in 0..3
+
+fn take_small(x: Small) -> int:
+    x
+
+fn make_other() -> OtherTiny:
+    2
+
+take_small(make_other())} valid6.bot
+    set ok 1
+} -result 1
+
+test typed-param-valid-exact-subset {an exact fact known only as a subset of a sparse domain is admissible} -body {
+    surface::compile {type Marks = Int in {0,4,8,12}
+
+fn take_mark(x: Marks) -> int:
+    x
+
+fn g(flag):
+    y = if flag:
+        0
+    else:
+        8
+    take_mark(y)
+
+g(true)} valid7.bot
+    set ok 1
+} -result 1
+
+test typed-param-valid-recursive {a recursive call's own argument satisfies the declared parameter} -body {
+    surface::compile [format {%sfn count(x: Small) -> int:
+    if x == 0:
+        0
+    else:
+        1 + count(x - 1)
+count(5)} $::samplePayload] valid8.bot
+    set ok 1
+} -result 1
+
+test typed-param-valid-builtin-int {an ordinary builtin primitive parameter type} -body {
+    surface::compile {fn id_int(x: int) -> int:
+    x
+id_int(5)} valid9.bot
+    set ok 1
+} -result 1
+
+test typed-param-valid-builtin-str {an ordinary builtin primitive string parameter type} -body {
+    surface::compile {fn id_str(x: str) -> str:
+    x
+id_str("hi")} valid10.bot
+    set ok 1
+} -result 1
+
+test typed-param-valid-cross-module {a cross-module direct call enforces and satisfies the declared parameter} -body {
+    set libPath [file join $::core::libraryDir typedparamlib.bot]
+    set ch [open $libPath w]
+    puts $ch {namespace typedparamlib
+
+type Small = Int in 0..10
+
+fn take_small(x: Small) -> Small:
+    x
+}
+    close $ch
+    set mainPath [makeFile {typedparamlib::take_small(7)
+} typed-param-cross-module.bot]
+    try {
+        set h [surface::readProgramFile $mainPath -strict 0]
+        llength [hir::diagnostics $h]
+    } finally {
+        file delete $libPath
+        removeFile typed-param-cross-module.bot
+    }
+} -result 0
+
+test typed-param-invalid-cross-module {a cross-module direct call rejects an argument that cannot satisfy the declared parameter} -body {
+    set libPath [file join $::core::libraryDir typedparamlib2.bot]
+    set ch [open $libPath w]
+    puts $ch {namespace typedparamlib2
+
+type Small = Int in 0..10
+
+fn take_small(x: Small) -> Small:
+    x
+}
+    close $ch
+    set mainPath [makeFile {typedparamlib2::take_small(99)
+} typed-param-cross-module-bad.bot]
+    try {
+        set h [surface::readProgramFile $mainPath -strict 0]
+        list [llength [hir::diagnostics $h]] \
+            [string match {*cannot be proven to satisfy*} [dict get [lindex [hir::diagnostics $h] 0] message]]
+    } finally {
+        file delete $libPath
+        removeFile typed-param-cross-module-bad.bot
+    }
+} -result {1 1}
+
+# ---------------------------------------------------------------------------
+# Semantic invalid-call tests (spec #88)
+
+proc typedParamRejects {source} {
+    catch {surface::compile $source reject.bot} message options
+    list [dict get $options -errorcode] \
+        [string match {*cannot be proven to satisfy*} $message]
+}
+
+test typed-param-invalid-literal-outside-interval {a literal outside the declared interval is a compile error} -body {
+    typedParamRejects [format {%sidentity_small(11)} $::samplePayload]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test typed-param-invalid-literal-negative {a negative literal outside the declared interval is a compile error} -body {
+    typedParamRejects [format {%sidentity_small(-1)} $::samplePayload]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test typed-param-invalid-sparse-literal {a literal absent from a sparse domain is a compile error} -body {
+    typedParamRejects {type Marks = Int in {0,4,8,12}
+
+fn take_mark(x: Marks) -> int:
+    x
+
+take_mark(5)}
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test typed-param-invalid-wider-interval-not-proven-subset {a wider declared-result argument is rejected without a narrower flow fact} -body {
+    typedParamRejects {type Small = Int in 0..10
+type Wider = Int in 0..20
+
+fn take_small(x: Small) -> int:
+    x
+
+fn make_wider() -> Wider:
+    7
+
+take_small(make_wider())}
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test typed-param-invalid-interval-cannot-prove-sparse {an interval-only fact does not prove membership in a sparse domain} -body {
+    typedParamRejects {type Marks = Int in {0,4,8,12}
+
+fn take_mark(x: Marks) -> int:
+    x
+
+fn make_ranged(n) -> int:
+    if n < 0:
+        0
+    else:
+        n
+
+fn wrap(v):
+    take_mark(v)
+
+wrap(make_ranged(5))}
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test typed-param-invalid-unproven-argument {a value with no useful static fact at all is rejected, not merely a proven-wrong one} -body {
+    typedParamRejects {type Small = Int in 0..10
+
+fn take_small(x: Small) -> int:
+    x
+
+fn identity(v):
+    v
+
+take_small(identity(999999))}
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test typed-param-invalid-wrong-primitive-type {a string argument for an int-typed parameter is a compile error} -body {
+    typedParamRejects {fn id_int(x: int) -> int:
+    x
+id_int("hi")}
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test typed-param-invalid-recursive {a recursive call whose own argument cannot satisfy the parameter is a compile error} -body {
+    typedParamRejects [format {%sfn f(x: Small) -> int:
+    f(x + 100)} $::samplePayload]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test typed-param-invalid-unknown-type {an unresolved parameter type is a located compile error} -body {
+    catch {surface::compile {fn f(x: MissingType):
+    x} unknown2.bot} message options
+    list [dict get $options -errorcode] [string match {*unknown or invalid type*for parameter "x"*} $message]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test typed-param-invalid-diagnostic-names-parameter {the diagnostic names the offending parameter and the declared type} -body {
+    catch {surface::compile [format {%sidentity_small(11)} $::samplePayload] diag.bot} message
+    list [string match {*parameter "x"*} $message] [string match {*int\[Small\]*} $message] \
+        [string match {*11*} $message]
+} -result {1 1 1}
+
+# ---------------------------------------------------------------------------
+# Untyped/mixed behavior unaffected (spec #53-54)
+
+test typed-param-untyped-unaffected {an untyped parameter accepts any statically-typed argument, as before} -body {
+    surface::compile {fn f(x):
+    x
+f(11)
+f("anything")} untyped.bot
+    set ok 1
+} -result 1
+
+test typed-param-mixed-1 {mixed typed/untyped: the typed one is still checked} -body {
+    typedParamRejects [format {%sfn f(x: Small, y):
+    x + y
+f(11, 1)} $::samplePayload]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test typed-param-mixed-2 {mixed typed/untyped: the untyped one accepts anything} -body {
+    surface::compile [format {%sfn f(x: Small, y):
+    y
+f(1, "anything")} $::samplePayload] mixed2.bot
+    set ok 1
+} -result 1
+
+# ---------------------------------------------------------------------------
+# No runtime check (spec #89, #96-97): the built HIR call has no synthesized
+# guard/native/error node at all -- a legal typed call lowers exactly like an
+# ordinary call of the same block, with no extra child expressions.
+
+test typed-param-no-runtime-check-1 {a legal typed call's own HIR node adds no guard: exactly one callee and one argument} -body {
+    set h [surface::compile [format {%sidentity_small(7)} $::samplePayload] noguard.bot]
+    set call [lindex [hirFind $h call] end]
+    list [llength [hir::get $h $call args]] [hir::kind $h [hir::get $h $call callee]]
+} -result {1 ref}
+
+test typed-param-no-runtime-check-2 {interp execution of a legal typed call needs no checked-constructor/predicate machinery: plain arithmetic} -body {
+    run [list bind check-log [list call [list ref test-log] \
+        [list call [list ref +] [list const int 3] [list const int 1]]]]
+} -result 4
+
+test typed-param-no-runtime-check-3 {interp and compile agree on a legal typed call (no backend-specific validation path)} -body {
+    differential {call [list ref +] [list const int 1] [list const int 2]}
+} -result same
+
+test typed-param-no-search-helper {no new "check/validate/assert parameter type" runtime helper exists (spec #97)} -body {
+    set names [core::native::names]
+    list [lsearch -glob $names {*check_param*}] [lsearch -glob $names {*validate_argument*}] \
+        [lsearch -glob $names {*assert_parameter*}] [lsearch -glob $names {*param*type*}]
+} -result {-1 -1 -1 -1}
+
+# ---------------------------------------------------------------------------
+# Body-fact tests (spec #90)
+
+test typed-param-body-fact-byte {a Byte-typed parameter's body sees [0,255] without any caller} -body {
+    set path [makeFile {byte::high_nibble(0)
+} typed-param-byte-load.bot]
+    try {
+        surface::readProgramFile $path -strict 0
+    } finally {
+        removeFile typed-param-byte-load.bot
+    }
+    set h [surface::compile {fn byte_identity(x: Byte) -> Byte:
+    x} byte-body.bot]
+    set block [lindex [hirFind $h block] 0]
+    set ref [lindex [hirFind $h ref x] 0]
+    set outcome [hir::range::AnalyzeInstance $h verify {} $block [hir::get $h $block params] \
+        [lrepeat [llength [hir::get $h $block params]] [hir::range::unknown]] {} {}]
+    hir::range::show [dict get [dict get $outcome exprs] $ref]
+} -result {[0, 255]}
+
+test typed-param-body-fact-small-direct {identity_small's own body sees x in [0,10]} -body {
+    set h [surface::compile [format {%sidentity_small(3)} $::samplePayload] smallbody2.bot]
+    set target [findTypedParamBlock $h x {int[Small]}]
+    set params [hir::get $h $target params]
+    set outcome [hir::range::AnalyzeInstance $h verify {} $target $params \
+        [lrepeat [llength $params] [hir::range::unknown]] {} {}]
+    set ref [lindex [hirFind $h ref x] 0]
+    hir::range::show [dict get [dict get $outcome exprs] $ref]
+} -result {[0, 10]}
+
+# ---------------------------------------------------------------------------
+# Result-contract interaction (spec #55-57)
+
+test typed-param-result-trivial {a declared parameter's own fact trivially satisfies an identical declared result} -body {
+    surface::compile [format {%s} $::samplePayload] resulttrivial.bot
+    set ok 1
+} -result 1
+
+test typed-param-result-narrow-rejected {a narrower declared result is not satisfied merely by the parameter's own (wider) declared fact} -body {
+    catch {surface::compile {type Small = Int in 0..10
+type Tiny = Small in 0..3
+
+fn f(x: Small) -> Tiny:
+    x} narrow.bot} message options
+    list [dict get $options -errorcode] [string match {*does not prove declared type*} $message]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test typed-param-result-widen-ok {a narrow declared parameter satisfies a wider declared result through ordinary subtype proof} -body {
+    surface::compile [format {%s} $::samplePayload] widenok.bot
+    set ok 1
+} -result 1
+
+# ---------------------------------------------------------------------------
+# Closed-call strengthening / declared-fact precedence (spec #23, #80, #92)
+
+test typed-param-closed-call-strengthens {every closed caller's own narrower argument facts may strengthen -- never widen -- the declared baseline} -body {
+    set h [surface::compile {type Byte = Int in 0..255
+
+fn take_byte(x: Byte) -> int:
+    x
+
+take_byte(16)
+take_byte(32)} strengthen.bot]
+    set spec [hir::specialize::analyze $h]
+    set ranges [hir::range::analyze $h $spec]
+    set results {}
+    foreach id [dict get $spec used] {
+        if {[dict get $spec instances $id block] eq {program}} continue
+        lappend results [hir::range::show [lindex [dict get [dict get $ranges instances] $id params] 0]]
+    }
+    set results
+} -result {{[16, 32] {16,32}}}
+
+test typed-param-declared-baseline-not-exceeded {the declared parameter fact is never widened past its own domain by anything a caller could contribute} -body {
+    set h [surface::compile {type Byte = Int in 0..255
+
+fn take_byte(x: Byte) -> int:
+    x
+
+take_byte(200)} baseline.bot]
+    set spec [hir::specialize::analyze $h]
+    set ranges [hir::range::analyze $h $spec]
+    set inBounds 1
+    foreach id [dict get $spec used] {
+        if {[dict get $spec instances $id block] eq {program}} continue
+        set r [lindex [dict get [dict get $ranges instances] $id params] 0]
+        set facts [core::type::integerFacts Byte]
+        if {[dict get $r min] ne {-inf} && [dict get $r min] < [dict get $facts min]} { set inBounds 0 }
+        if {[dict get $r max] ne {+inf} && [dict get $r max] > [dict get $facts max]} { set inBounds 0 }
+    }
+    set inBounds
+} -result 1
+
+# ---------------------------------------------------------------------------
+# No new Error completion (spec #98)
+
+test typed-param-no-new-error-completion {a total function taking a typed parameter stays total: no Error/may_error completion is added} -body {
+    set h [surface::compile [format {%sfn f(x: Small) -> int:
+    x + 1} $::samplePayload] total.bot]
+    set block [lindex [hirFind $h block] end]
+    hir::types::show [hir::type $h [hir::get $h $block resultType]]
+} -result int
+
+# ---------------------------------------------------------------------------
+# Byte integration microscope (spec #20-21, #31, #100)
+
+test typed-param-byte-low-nibble-microscope {low_nibble's own body already knows x is Int in [0,255] from the declaration alone} -body {
+    set path [makeFile {byte::high_nibble(0)
+} typed-param-microscope-load.bot]
+    try {
+        surface::readProgramFile $path -strict 0
+    } finally {
+        removeFile typed-param-microscope-load.bot
+    }
+    set h [surface::compile {fn low_nibble(x: Byte) -> Nibble:
+    bit_and(x, 15)} microscope.bot]
+    set block [lindex [hirFind $h block] 0]
+    set params [hir::get $h $block params]
+    set outcome [hir::range::AnalyzeInstance $h verify {} $block $params \
+        [lrepeat [llength $params] [hir::range::unknown]] {} {}]
+    hir::range::show [dict get [dict get $outcome exprs] [lindex [hirFind $h ref x] 0]]
+} -result {[0, 255]}
+
+# ---------------------------------------------------------------------------
+# HIR round-trip (spec #43, #94)
+
+test typed-param-hir-roundtrip {a typed-parameter function's declaration survives format -> read -> format} -body {
+    set h [surface::compile [format {%s} $::samplePayload] roundtrip.bot]
+    set text1 [hir::format $h]
+    set h2 [hir::parse $text1]
+    set text2 [hir::format $h2]
+    expr {$text1 eq $text2}
+} -result 1
+
+test typed-param-hir-roundtrip-preserves-type {the read-back HIR still carries the same declared parameter type} -body {
+    set h [surface::compile [format {%s} $::samplePayload] roundtrip2.bot]
+    set h2 [hir::parse [hir::format $h]]
+    set target [findTypedParamBlock $h2 x {int[Small]}]
+    set types [hir::get $h2 $target declaredParamTypes]
+    lmap t $types {expr {$t eq {} ? {} : [hir::types::show $t]}}
+} -result {{int[Small]}}
+
+cleanupTests

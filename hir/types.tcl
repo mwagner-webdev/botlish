@@ -629,6 +629,21 @@ proc hir::types::Block {hirVar outerVar e self} {
         if {$self ne ""} {
             dict set ctx types $self [list block $e $arity $assumed]
         }
+        # A parameter annotation seeds its binding's semantic type directly
+        # (never a runtime check, STRICT-TYPED-PARAMETERS.md): from here on
+        # the body sees x as T, exactly as if a caller-independent fact had
+        # already been proven -- because, by the time any call reaches this
+        # body, one has (hir::range::verifyDeclaredParams rejects every
+        # call whose argument is not statically admissible for T before
+        # this attempt ever ran). This also lets hir::range's own
+        # TypeFact/ConstrainType (already applied to every ref's own
+        # semantic type) seed x's declared range/exact-set facts for free,
+        # with no separate parameter-fact mechanism.
+        foreach b [dict get $node params] declaredType [dict get $node declaredParamTypes] {
+            if {$declaredType ne {}} {
+                dict set ctx types $b $declaredType
+            }
+        }
         set body [Sequence hir ctx [dict get $node body]]
         set result [lub $body [dict get $ctx returnType]]
         if {$self eq "" || $result eq $assumed || $assumed eq "any"} {

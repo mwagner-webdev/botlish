@@ -11,7 +11,8 @@
 #   statement    = simple NEWLINE | valued | function | if | loop
 #   simple       = binding | return | break | continue | expression
 #   valued       = IDENT "=" if | "return" if | "break" if
-#   function     = "fn" IDENT "(" [ IDENT { "," IDENT } [ "," ] ] ")" ":" suite
+#   function     = "fn" IDENT "(" [ param { "," param } [ "," ] ] ")" [ "->" IDENT ] ":" suite
+#   param        = IDENT [ ":" IDENT ]
 #   if           = "if" expression ":" suite [ "else" ":" suite ]
 #   loop         = "loop" ":" suite
 #   suite        = NEWLINE INDENT { NEWLINE | statement } DEDENT
@@ -362,7 +363,15 @@ proc surface::parser::Function {pVar} {
     set params {}
     while {[Kind p] ne ")"} {
         set param [Expect p IDENT "a parameter name"]
-        lappend params [list [dict get $param value] [dict get $param span]]
+        set type ""
+        set typeSpan ""
+        if {[Kind p] eq ":"} {
+            Advance p
+            set typeToken [Expect p IDENT "a parameter type after \":\""]
+            set type [dict get $typeToken value]
+            set typeSpan [dict get $typeToken span]
+        }
+        lappend params [list [dict get $param value] [dict get $param span] $type $typeSpan]
         if {[Kind p] eq ","} {
             Advance p
         } elseif {[Kind p] ne ")"} {

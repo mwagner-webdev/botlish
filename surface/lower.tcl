@@ -253,9 +253,10 @@ proc surface::lower::Node {node} {
                 lassign $param name span
                 list $name [Origin $span "[dict get $node id]/($name)"]
             }]
+            set paramTypes [lmap param [dict get $node params] {lindex $param 2}]
             set block [hir::syntax::blockNode \
                 [Origin [dict get $node paramsSpan] [dict get $node id]/block] \
-                $params [Sequence [dict get $node body body]] [dict get $node resultType]]
+                $params [Sequence [dict get $node body body]] [dict get $node resultType] $paramTypes]
             return [hir::syntax::bindNode $origin [dict get $node name] $block]
         }
         if {

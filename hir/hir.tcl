@@ -247,6 +247,7 @@ proc hir::buildSyntax {nodes args} {
     ApplyNativeResultOverrides hir [dict get $options -native-result-overrides]
     hir::types::infer hir
     hir::range::verifyDeclaredResults hir
+    hir::range::verifyDeclaredParams hir
     hir::modulebinding::validate hir
     if {[dict get $options -strict]} {
         foreach diagnostic [dict get $hir diagnostics] {
@@ -363,7 +364,12 @@ proc hir::bindingType {hir b} {
 
 # Public ordinary-function signatures exported by loaded module sections.
 # The block result is the single authoritative semantic signature used by
-# calls and specialization; parameters remain unannotated in this milestone.
+# calls and specialization; PARAMS is "any" for an untyped parameter, or its
+# declared type (STRICT-TYPED-PARAMETERS.md) otherwise. This is descriptive
+# metadata only: module sections are combined into one HIR before any
+# checking runs (surface/modules.tcl), so a cross-module call is already an
+# ordinary direct call by the time hir::range::verifyDeclaredParams sees it,
+# needing no separate signature-lookup path of its own.
 proc hir::moduleSignatures {hir} {
     set signatures [dict create]
     if {![dict exists $hir modules]} { return $signatures }
@@ -373,7 +379,9 @@ proc hir::moduleSignatures {hir} {
             if {$declaration eq {}} { continue }
             set value [dict get $hir exprs $declaration value]
             if {[dict get $hir exprs $value kind] ne {block}} { continue }
-            set params [lrepeat [llength [dict get $hir exprs $value params]] any]
+            set params [lmap t [dict get $hir exprs $value declaredParamTypes] {
+                expr {$t eq {} ? {any} : $t}
+            }]
             set result [hir::type $hir [dict get $hir exprs $value resultType]]
             dict set signatures [dict get $hir bindings $b name] [dict create params $params result $result block $value]
         }

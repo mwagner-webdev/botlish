@@ -177,6 +177,22 @@ proc hir::read::BindingList {text number} {
     return $result
 }
 
+# {ID NAME TYPE ...} from "b1 x:Small, b2 y" (hir::format::ParamList's own
+# format) -- TYPE is "" for an untyped parameter.
+proc hir::read::ParamList {text number} {
+    set result {}
+    if {$text eq ""} {
+        return $result
+    }
+    foreach item [split [string map {", " \x01} $text] \x01] {
+        if {![regexp {^(b[0-9]+) ([^: ]+)(?::([^: ]+))?$} $item -> b name type]} {
+            Fail $number "expected \"BINDING NAME[:TYPE]\", got \"$item\""
+        }
+        lappend result $b $name $type
+    }
+    return $result
+}
+
 proc hir::read::NewBinding {hirVar b name kind s origin number} {
     upvar 1 $hirVar hir
     if {[dict exists $hir bindings $b]} {
@@ -415,10 +431,12 @@ proc hir::read::Expr {hirVar level s path block} {
             }
             NewScope hir $body block $s $e $e [list ir $path] $number
             set paramIds {}
+            set declaredParamTypes {}
             set index 0
-            foreach {b name} [BindingList $params $number] {
+            foreach {b name typeText} [ParamList $params $number] {
                 NewBinding hir $b $name param $body [list ir [concat $path 1 $index]] $number
                 lappend paramIds $b
+                lappend declaredParamTypes [expr {$typeText eq {} ? {} : [ParseType $typeText $number]}]
                 incr index
             }
             Declare hir $body $binds local $number
@@ -429,6 +447,7 @@ proc hir::read::Expr {hirVar level s path block} {
             }
             SetField hir $e bodyScope $body
             SetField hir $e params $paramIds
+            SetField hir $e declaredParamTypes $declaredParamTypes
             SetField hir $e captures [dict keys [BindingList $captures $number]]
             SetField hir $e resultType [hir::types::intern hir [lindex $type 3]]
             set declaredType {}

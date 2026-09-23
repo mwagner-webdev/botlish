@@ -276,7 +276,10 @@ proc hir::resolve::Expr {hirVar node ctx} {
         block {
             set bodyScope [NewScope hir block $scope $e $e $origin]
             set params {}
-            foreach param [dict get $node params] {
+            set paramTypes [expr {[dict exists $node paramTypes] ? [dict get $node paramTypes]
+                : [lrepeat [llength [dict get $node params]] {}]}]
+            set declaredParamTypes {}
+            foreach param [dict get $node params] paramType $paramTypes {
                 lassign $param name paramOrigin
                 set first [expr {[dict exists $hir scopes $bodyScope names $name]
                     ? [dict get $hir scopes $bodyScope names $name] : ""}]
@@ -290,12 +293,30 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 }
                 dict set hir bound $b 1
                 lappend params $b
+                # A parameter annotation is a compile-time proof obligation
+                # (STRICT-TYPED-PARAMETERS.md), resolved with the same
+                # visibility rules as a declared result type: forward
+                # references to a same-batch source-defined type already
+                # work because hir::sourcetypes::apply registers every type
+                # declaration before this pass runs at all.
+                if {$paramType eq {}} {
+                    lappend declaredParamTypes {}
+                    continue
+                }
+                if {[catch {core::type::normalize $paramType} normalized]} {
+                    hir::Diagnose hir TYPE \
+                        [format {unknown or invalid type %s for parameter "%s"} $paramType $name] $e
+                    lappend declaredParamTypes {}
+                } else {
+                    lappend declaredParamTypes $normalized
+                }
             }
             set body [dict get $node body]
             Declare hir $bodyScope [hir::syntax::scopeBindNames $body]
             AddClosure hir $scope $e
             SetField hir $e bodyScope $bodyScope
             SetField hir $e params $params
+            SetField hir $e declaredParamTypes $declaredParamTypes
             SetField hir $e captures {}
             set declared [expr {[dict exists $node declaredResult] ? [dict get $node declaredResult] : {}}]
             if {$declared ne {}} {

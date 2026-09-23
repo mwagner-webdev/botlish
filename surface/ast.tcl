@@ -33,8 +33,10 @@
 #   binary     op (+ - * == != < <= > >=), opSpan, left, right
 #   logical    op (and | or), opSpan, left, right
 #   bind       name, nameSpan, value (an expression or an if)
-#   function   name, nameSpan, params ({NAME SPAN} pairs), paramsSpan (from
-#              "(" to the end of the body: the function literal), body (suite)
+#   function   name, nameSpan, params ({NAME SPAN TYPE TYPESPAN} tuples --
+#              TYPE is "" and TYPESPAN is "" for an untyped parameter),
+#              paramsSpan (from "(" to the end of the body: the function
+#              literal), body (suite)
 #   if         condition, then (suite), else (suite or "")
 #   loop       body (suite)
 #   return     value (an expression, an if, or "")
@@ -385,7 +387,10 @@ proc surface::ast::Statement {node indent show linesVar} {
             return
         }
         function {
-            set params [lmap pair [dict get $node params] {lindex $pair 0}]
+            set params [lmap pair [dict get $node params] {
+                lassign $pair name _ type
+                expr {$type eq "" ? $name : "$name:$type"}
+            }]
             lappend lines "${pad}fn [dict get $node name] ($params)$at"
             Body [dict get $node body] [expr {$indent + 1}] $show lines
             return

@@ -78,6 +78,21 @@ proc hir::format::BindingList {hir bindings} {
     return [join [lmap b $bindings {BindingLabel $hir $b}] {, }]
 }
 
+# Like BindingList, but for a block's own PARAMS: appends ":TYPE" (hir::
+# types::show) after a typed parameter's label, one entry of DECLAREDTYPES
+# (parallel to PARAMS, "" for untyped) per parameter.
+proc hir::format::ParamList {hir params declaredTypes} {
+    set items {}
+    foreach b $params type $declaredTypes {
+        set label [BindingLabel $hir $b]
+        if {$type ne {}} {
+            append label ":[hir::types::show $type]"
+        }
+        lappend items $label
+    }
+    return [join $items {, }]
+}
+
 proc hir::format::Binds {hir s} {
     set locals [lmap b [dict get $hir scopes $s bindings] {
         if {[dict get $hir bindings $b kind] ne "local"} continue
@@ -164,7 +179,7 @@ proc hir::format::Expr {hir e indent origins linesVar} {
             Expr $hir [dict get $node value] $inner $origins lines
         }
         block {
-            set text "block [dict get $node bodyScope] ([BindingList $hir [dict get $node params]])"
+            set text "block [dict get $node bodyScope] ([ParamList $hir [dict get $node params] [dict get $node declaredParamTypes]])"
             append text " captures ([BindingList $hir [dict get $node captures]])"
             if {[dict get $node declaredResult] ne {}} {
                 append text [format { declares %s} [hir::types::show [dict get $node declaredResult]]]

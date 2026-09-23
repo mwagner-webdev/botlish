@@ -162,6 +162,8 @@ proc surface::modules::RemapFile {node fileId} {
             }
             dict set node params $params
             dict set node body [lmap child [dict get $node body] {RemapFile $child $fileId}]
+            # paramTypes carries no origin of its own (plain type-name
+            # strings, resolved later by hir/resolve.tcl): nothing to remap.
         }
         call {
             dict set node callee [RemapFile [dict get $node callee] $fileId]

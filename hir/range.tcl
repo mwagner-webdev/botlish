@@ -953,6 +953,103 @@ proc hir::range::verifyDeclaredResults {hirVar} {
     }
 }
 
+# Compile-time call admissibility (STRICT-TYPED-PARAMETERS.md): a call whose
+# target is a directly-known block declaring one or more parameter types is
+# legal only when the compiler can prove, for every typed parameter, that
+# the argument's possible values are a subset of the parameter's accepted
+# values -- exactly the same nominal-subtype-or-integer-domain-fact proof
+# verifyDeclaredResults already uses for a declared result (subtype OR
+# ProvesType, never a runtime guard). A merely-unproven argument is rejected
+# exactly like a proven-incompatible one: there is no third, "insert a
+# check" outcome.
+#
+# Runs once per block (and once for the program root), each with its own
+# *local*, non-interprocedural AnalyzeInstance pass -- exactly
+# verifyDeclaredResults's own "verify" call, never hir::range::analyze's
+# interprocedural closed-call fixpoint. This is deliberate, not merely
+# convenient: it is what makes spec #24 ("an invalid caller must not
+# pollute the callee fixpoint") true by construction, since this pass never
+# touches that fixpoint's `calls`/`contributions` machinery at all, and it
+# is also what makes a recursive call's own argument checked soundly (a
+# self-call inside a block's own body is just another expression this same
+# local pass already walks, seeded by the same declared-parameter facts
+# hir::types::Block already gave the body -- no separate recursion handling
+# needed).
+proc hir::range::verifyDeclaredParams {hirVar} {
+    upvar 1 $hirVar hir
+    set blocks [list program]
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] eq {block}} { lappend blocks $e }
+    }
+    foreach block $blocks {
+        if {$block eq {program}} {
+            set params {}
+            set body [hir::roots $hir]
+        } else {
+            set node [dict get $hir exprs $block]
+            set params [dict get $node params]
+            set body [dict get $node body]
+        }
+        set outcome [AnalyzeInstance $hir verify {} $block $params \
+            [lrepeat [llength $params] [unknown]] {} {}]
+        set ranges [dict get $outcome exprs]
+        foreach e $body {
+            VerifyCallArguments hir $ranges $e
+        }
+    }
+}
+
+# Walks every call reachable from E within its own block/program (spec #58:
+# a nested block's body is its own region, so this never descends into a
+# closure's own body -- that gets its own top-level call from
+# verifyDeclaredParams's own "blocks" loop above; hir::children's "block"
+# case would otherwise recurse into it).
+proc hir::range::VerifyCallArguments {hirVar ranges e} {
+    upvar 1 $hirVar hir
+    set node [dict get $hir exprs $e]
+    set kind [dict get $node kind]
+    if {$kind eq {call}} {
+        VerifyCall hir $ranges $e $node
+    }
+    if {$kind eq {block}} {
+        return
+    }
+    foreach child [hir::children $hir $e] {
+        VerifyCallArguments hir $ranges $child
+    }
+}
+
+# Checks one call E's arguments against its target's declared parameter
+# types, if any (a call whose target is not a directly-known block -- an
+# unresolved dynamic dispatch -- is outside this feature's scope; see
+# STRICT-TYPED-PARAMETERS.md's "Dynamic/function-value call handling").
+proc hir::range::VerifyCall {hirVar ranges e node} {
+    upvar 1 $hirVar hir
+    lassign [dict get $node target] targetKind targetBlock
+    if {$targetKind ne {block}} { return }
+    set targetNode [dict get $hir exprs $targetBlock]
+    set declaredTypes [dict get $targetNode declaredParamTypes]
+    set params [dict get $targetNode params]
+    set args [dict get $node args]
+    if {[llength $args] != [llength $params]} {
+        # An arity mismatch is diagnosed elsewhere (or the call never
+        # completes normally); nothing sound to check argument-by-argument.
+        return
+    }
+    foreach arg $args paramBinding $params declaredType $declaredTypes {
+        if {$declaredType eq {}} { continue }
+        set argType [hir::typeOf $hir $arg]
+        set argRange [expr {[dict exists $ranges $arg] ? [dict get $ranges $arg] : [unknown]}]
+        if {[hir::types::subtype $argType $declaredType] || [ProvesType $argRange $declaredType]} {
+            continue
+        }
+        hir::Diagnose hir TYPE [format \
+            {argument for parameter "%s" cannot be proven to satisfy %s (argument type: %s, facts: %s)} \
+            [dict get $hir bindings $paramBinding name] [core::type::show $declaredType] \
+            [hir::types::show $argType] [show $argRange]] $arg
+    }
+}
+
 proc hir::range::If {hirVar ctxVar e node} {
     upvar 1 $hirVar hir $ctxVar ctx
     set condition [dict get $node condition]

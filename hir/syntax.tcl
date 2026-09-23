@@ -14,7 +14,11 @@
 #   ref       name, root (1: denotes the root binding NAME whatever local
 #             bindings are called; see hygiene.tcl)
 #   bind      name, value
-#   block     params ({NAME ORIGIN} pairs), body (nodes)
+#   block     params ({NAME ORIGIN} pairs), body (nodes), paramTypes
+#             (one raw type-name string per param, "" for an untyped
+#             parameter -- surface/parser.tcl's "x: T" annotation, unresolved
+#             until hir/resolve.tcl normalizes it into declaredParamTypes;
+#             see this file's blockNode)
 #   call      callee, args
 #   if        condition, thenOrigin, thenBody, elseOrigin, elseBody
 #   loop      bodyOrigin, body
@@ -60,14 +64,22 @@ proc hir::syntax::bindNode {origin name value} {
 }
 
 # PARAMS: {NAME ORIGIN} pairs. Duplicate names are a DUPLICATE diagnostic of
-# the built HIR, not a construction error.
-proc hir::syntax::blockNode {origin params body {declaredResult {}}} {
+# the built HIR, not a construction error. PARAMTYPES, if given, is one raw
+# type-name string per param ("" for untyped); defaults to all-"" (every
+# param untyped) when omitted, so every existing caller (fromIR, and any
+# hand-built syntax that predates parameter typing) is unaffected.
+proc hir::syntax::blockNode {origin params body {declaredResult {}} {paramTypes {}}} {
     foreach param $params {
         if {[llength $param] != 2 || [lindex $param 0] eq ""} {
             core::malformed "block parameters must be {NAME ORIGIN} pairs" [list block $params]
         }
     }
-    return [Node block $origin params $params body $body declaredResult $declaredResult]
+    if {$paramTypes eq {}} {
+        set paramTypes [lrepeat [llength $params] {}]
+    } elseif {[llength $paramTypes] != [llength $params]} {
+        core::malformed "block paramTypes must have one entry per parameter" [list block $params $paramTypes]
+    }
+    return [Node block $origin params $params body $body declaredResult $declaredResult paramTypes $paramTypes]
 }
 
 proc hir::syntax::callNode {origin callee args} {
