@@ -12,10 +12,20 @@
 # {refined str {Emailish}}. normalize produces the canonical form, and all
 # registries store canonical types.
 #
-# Named types are registered from Tcl (there is no type declaration IR yet):
+# Named types are registered from Tcl:
 #
 #   core::type::register Emailish -base str -validator {core::regex::matches $re}
 #   core::type::register UriQueryValue -base str -opaque 1
+#
+# A named integer-domain refinement ("type Byte = Int in 0..255",
+# lib/byte.bot) is the one thing Botlish source itself can declare
+# directly, via -integer-domain below; hir/sourcetypes.tcl turns such a
+# declaration into exactly the -integer-domain register call this file
+# always accepted (see SOURCE-DEFINED-INTEGER-DOMAINS.md). -source below
+# marks such an entry, purely so hir/sourcetypes.tcl can unregister it
+# again between compilations (core::type::unregister) -- everything else
+# about it (validation, subtyping, facts) is identical to a Tcl-registered
+# type.
 #
 # A *validator* type is structural: a command prefix, called with the value,
 # decides membership (1/0). An *opaque* type has no validator: a value
@@ -52,7 +62,7 @@ proc core::type::register {name args} {
     if {[llength $args] % 2} {
         error "core::type::register: options must be -option value pairs"
     }
-    set options [dict create -base "" -validator "" -opaque 0]
+    set options [dict create -base "" -validator "" -opaque 0 -source 0]
     dict set options -parents {}
     dict set options -integer-domain {}
     foreach {option value} $args {
@@ -66,6 +76,7 @@ proc core::type::register {name args} {
     set opaque [dict get $options -opaque]
     set parents [dict get $options -parents]
     set integerDomain [dict get $options -integer-domain]
+    set source [dict get $options -source]
     if {$base ni $primitives} {
         error "core::type::register: -base must be one of: $primitives"
     }
@@ -89,8 +100,26 @@ proc core::type::register {name args} {
         if {![dict exists $registry $parent]} { error [format {core::type::register: unknown parent type %s} $parent] }
         if {[dict get $registry $parent base] ne $base} { error [format {core::type::register: parent %s has a different base} $parent] }
     }
-    dict set registry $name [dict create name $name base $base validator $validator opaque $opaque parents $parents integerDomain $integerDomain]
+    dict set registry $name [dict create name $name base $base validator $validator opaque $opaque \
+        parents $parents integerDomain $integerDomain source $source]
     return $name
+}
+
+# Removes a -source 1 type NAME from the registry (hir/sourcetypes.tcl's own
+# per-compilation reset -- see SOURCE-DEFINED-INTEGER-DOMAINS.md's
+# "Compilation isolation"). Never removes a compiler-registered (-source 0)
+# type: those are process-global builtins by design, exactly as before this
+# milestone, and unregistering one would be a bug in the caller, not a
+# reset -- a plain Tcl error, not a semantic one.
+proc core::type::unregister {name} {
+    variable registry
+    if {![dict exists $registry $name]} {
+        return
+    }
+    if {![dict get $registry $name source]} {
+        error "core::type::unregister: \"$name\" is not a source-defined type"
+    }
+    dict unset registry $name
 }
 
 proc core::type::NormalizeIntegerDomain {domain} {
@@ -123,6 +152,114 @@ proc core::type::IntegerDomainValidator {domain v} {
         interval { lassign $domain _ lo hi; return [expr {$n >= $lo && $n <= $hi}] }
         exact { return [expr {$n in [lindex $domain 1]}] }
     }
+}
+
+# 1 if every integer CHILD (a normalized integer domain, as
+# NormalizeIntegerDomain produces) admits is also admitted by PARENT: the
+# one generic domain-algebra operation hir/sourcetypes.tcl needs to verify
+# "type Child = Parent in Domain" (spec items 30-34) -- reused, not
+# duplicated, by every combination of interval/exact child and parent.
+#
+# The one non-trivial case is an interval child under a sparse exact parent
+# (item 34): every integer in the child's own interval must be one of the
+# parent's finitely many values. Checking that exactly means walking the
+# child interval, which is a real (bounded) cost at declaration time, not
+# the unbounded optimizer-precision budget of hir/range.tcl's own exact-set
+# analysis (item 42-43: a different, deliberately separate limit) -- see
+# maxIntervalUnderExactParent below.
+proc core::type::integerDomainSubset {child parent} {
+    variable maxIntervalUnderExactParent
+    switch -- [lindex $parent 0] {
+        interval {
+            lassign $parent _ plo phi
+            switch -- [lindex $child 0] {
+                interval {
+                    lassign $child _ clo chi
+                    return [expr {$clo >= $plo && $chi <= $phi}]
+                }
+                exact {
+                    foreach v [lindex $child 1] {
+                        if {$v < $plo || $v > $phi} { return 0 }
+                    }
+                    return 1
+                }
+            }
+        }
+        exact {
+            set members [dict create]
+            foreach v [lindex $parent 1] { dict set members $v 1 }
+            switch -- [lindex $child 0] {
+                interval {
+                    lassign $child _ clo chi
+                    if {$chi - $clo + 1 > $maxIntervalUnderExactParent} {
+                        error [format {core::type::integerDomainSubset: an interval child of a finite (exact-set) parent is only checked up to %d values (this milestone's own declaration-time limit -- distinct from hir/range.tcl's separate optimizer exact-set budget); %d..%d has %d} \
+                            $maxIntervalUnderExactParent $clo $chi [expr {$chi - $clo + 1}]]
+                    }
+                    for {set v $clo} {$v <= $chi} {incr v} {
+                        if {![dict exists $members $v]} { return 0 }
+                    }
+                    return 1
+                }
+                exact {
+                    foreach v [lindex $child 1] {
+                        if {![dict exists $members $v]} { return 0 }
+                    }
+                    return 1
+                }
+            }
+        }
+    }
+}
+
+namespace eval core::type {
+    # Declaration-time-only bound on how large an interval child's own
+    # domain may be when its parent is a sparse (exact) set: checking
+    # membership of every one of its values costs O(n), so this exists to
+    # keep a pathological declaration (e.g. "0..10000000000 in a 3-value
+    # exact parent") a clear, immediate diagnostic instead of a compiler
+    # hang. It is not a language-level maximum on any type's own domain
+    # size (item 43) -- an interval or exact-set *type* may be as large as
+    # it likes; only THIS specific validation shape is bounded.
+    variable maxIntervalUnderExactParent 100000
+}
+
+# A human-readable rendering of a normalized integer domain, for
+# diagnostics ("the domain of X is not a subset of its parent's domain ...").
+proc core::type::showIntegerDomain {domain} {
+    if {[lindex $domain 0] eq {interval}} {
+        lassign $domain _ lo hi
+        return "\[$lo, $hi\]"
+    }
+    return "{[join [lindex $domain 1] {, }]}"
+}
+
+# Checked construction from an arbitrary Int: succeeds (returning the same
+# Int, refined) iff the value is actually in the named type NAME's domain,
+# else raises {CORE SEMANTIC RANGE} -- never masks or truncates. The one
+# generic implementation behind every named refined-int type's checked
+# constructor (Byte(x), a source-declared Small(x), ...): registered once
+# per type name as that name's own native -impl (core/scalarbits.tcl
+# formerly did this itself for its four names; hir/sourcetypes.tcl now does
+# the same for a source declaration -- see item 66's "do not add a separate
+# constructor implementation per declared type").
+proc core::type::CheckedConstruct {typeName v} {
+    core::value::expect int $v $typeName
+    if {![validate $typeName $v]} {
+        core::semanticError RANGE \
+            "$typeName: [core::value::show $v] is not a valid $typeName"
+    }
+    return $v
+}
+
+# Registers NAME's checked constructor (a root native NAME(x), CheckedConstruct
+# above) and membership predicate (NAME?, definePredicate) -- the two
+# ordinary things every named refined int type gets, generically, whether
+# NAME came from compiler registration or a source declaration.
+proc core::type::declareIntConstructor {name} {
+    core::native::register $name -arity 1 \
+        -impl [list core::type::CheckedConstruct $name] \
+        -param-types int -result-type $name -context-free 1
+    definePredicate $name
 }
 
 proc core::type::names {} {

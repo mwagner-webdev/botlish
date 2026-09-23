@@ -40,6 +40,12 @@
 #   return     value (an expression, an if, or "")
 #   break      value (an expression, an if, or "")
 #   continue
+#   typedecl   name, nameSpan, parent, parentSpan, domain -- a top-level
+#              bounded-integer-refinement declaration (surface/parser.tcl's
+#              TypeDecl; see hir/sourcetypes.tcl for what it means). `domain`
+#              is {kind interval lo LO loSpan .. hi HI hiSpan .. span ..} or
+#              {kind exact values {V...} spans {SPAN...} span ..}, LO/HI/V
+#              decimal text (a leading "-" allowed).
 #   error      a statement that could not be parsed (recovering parses only)
 #
 # Node ids
@@ -362,11 +368,22 @@ proc surface::ast::If {node prefix indent show linesVar} {
     }
 }
 
+proc surface::ast::DomainText {domain} {
+    if {[dict get $domain kind] eq "interval"} {
+        return "[dict get $domain lo]..[dict get $domain hi]"
+    }
+    return "\{[join [dict get $domain values] {, }]\}"
+}
+
 proc surface::ast::Statement {node indent show linesVar} {
     upvar 1 $linesVar lines
     set pad [string repeat {    } $indent]
     set at [At $node $show]
     switch -- [dict get $node kind] {
+        typedecl {
+            lappend lines "${pad}type [dict get $node name] = [dict get $node parent] in [DomainText [dict get $node domain]]$at"
+            return
+        }
         function {
             set params [lmap pair [dict get $node params] {lindex $pair 0}]
             lappend lines "${pad}fn [dict get $node name] ($params)$at"

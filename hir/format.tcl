@@ -42,12 +42,32 @@ proc hir::format {hir args} {
         dict set options $option $value
     }
     set lines {}
+    foreach entry [hir::sourceTypes $hir] {
+        lappend lines [hir::format::TypeDecl $entry]
+    }
     set top [dict get $hir top]
     lappend lines [string trimright "[dict get $hir scopes $top kind] $top [hir::format::Binds $hir $top]"]
     foreach e [dict get $hir roots] {
         hir::format::Expr $hir $e 0 [dict get $options -origins] lines
     }
     return [join $lines \n]
+}
+
+# One line for a source-defined type (hir::sourceTypes's own {name .. parent
+# .. domain ..} entries): "type NAME parent PARENT domain interval LO HI" or
+# "type NAME parent PARENT domain exact V...". Read back by hir::read::
+# TypeDecl (read.tcl), which re-registers it (hir::sourcetypes::RegisterOne)
+# before any expression line is parsed -- so a serialized HIR's own
+# `declares TYPE`/`: TYPE` text (below) resolves exactly as it did when the
+# HIR was first built, without needing the original Botlish source again.
+proc hir::format::TypeDecl {entry} {
+    set domain [dict get $entry domain]
+    if {[lindex $domain 0] eq {interval}} {
+        set domainText "interval [lindex $domain 1] [lindex $domain 2]"
+    } else {
+        set domainText "exact [lindex $domain 1]"
+    }
+    return "type [dict get $entry name] parent [dict get $entry parent] domain $domainText"
 }
 
 proc hir::format::BindingLabel {hir b} {

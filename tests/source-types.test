@@ -1,0 +1,474 @@
+# source-types.test -- source-defined bounded integer refinement types
+# ("type Child = Parent in Domain", surface/parser.tcl's TypeDecl,
+# hir/sourcetypes.tcl): the *generic* language feature, independent of
+# Byte/Nibble/LowNibble/HighNibble (whose own migration to lib/byte.bot is
+# covered by tests/native-byte.test and tests/refined-signatures.test's
+# domain-1/domain-2/narrow-1/cross-module-1). See
+# SOURCE-DEFINED-INTEGER-DOMAINS.md for the full design writeup.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+# "LOCATION MESSAGE" of the semantic error SOURCE raises building HIR
+# (strict), or "no error" / "unexpected error: ...".
+proc typeError {source} {
+    if {![catch {surface::compile $source t.bot -strict 1} message]} {
+        return "no error"
+    }
+    if {[regexp {^t\.bot:([0-9]+:[0-9]+): (.*)$} $message -> where text]} {
+        return "$where $text"
+    }
+    return "unexpected error: $message"
+}
+
+# ---------------------------------------------------------------------------
+# Parser/surface
+
+test source-type-parse-interval {a simple interval declaration parses as a typedecl node} -body {
+    set node [lindex [dict get [surface::parse {type Small = Int in 0..10} t.bot] body] 0]
+    list [dict get $node kind] [dict get $node name] [dict get $node parent] [dict get $node domain]
+} -result {typedecl Small Int {kind interval lo 0 loSpan {file t.bot start 20 end 21 line 1 column 21 endLine 1 endColumn 22} hi 10 hiSpan {file t.bot start 23 end 25 line 1 column 24 endLine 1 endColumn 26} span {file t.bot start 20 end 25 line 1 column 21 endLine 1 endColumn 26}}}
+
+test source-type-parse-multiline-exact {a multiline exact declaration with a trailing comma parses, whitespace/comments included} -body {
+    set node [lindex [dict get [surface::parse "type HighNibble = Byte in \{\n    # a comment\n    0, 16, 32,\n\}" t.bot] body] 0]
+    list [dict get $node kind] [dict get $node domain kind] [dict get $node domain values]
+} -result {typedecl exact {0 16 32}}
+
+test source-type-parse-negative {negative interval bounds and exact-set members parse} -body {
+    set node1 [lindex [dict get [surface::parse {type SmallSigned = Int in -8..7} t.bot] body] 0]
+    set node2 [lindex [dict get [surface::parse {type SparseSigned = Int in {-4, -1, 0, 3}} t.bot] body] 0]
+    list [dict get $node1 domain lo] [dict get $node1 domain hi] [dict get $node2 domain values]
+} -result {-8 7 {-4 -1 0 3}}
+
+proc firstDiagnostic {source} {
+    return [dict get [lindex [dict get [surface::parse $source t.bot -recover 1] diagnostics] 0] message]
+}
+
+test source-type-parse-malformed-range {a non-literal after "in" or ".." is rejected (no expressions in a domain)} -body {
+    list [firstDiagnostic {type Bad = Int in 0..x}] [firstDiagnostic {type Bad = Int in x..10}]
+} -result {{expected an integer literal, found name "x"} {expected an integer literal, found name "x"}}
+
+test source-type-parse-malformed-set {non-integer / call / arithmetic items in a domain set are rejected} -body {
+    list [firstDiagnostic {type Bad = Int in {1, f(), 3}}] [firstDiagnostic {type Bad = Int in {1 + 2, 4}}]
+} -result [list {expected an integer literal, found name "f"} [format {expected "," or "%s" in the type domain, found "+"} \}]]
+
+test source-type-parse-unknown-parent {an unknown/wrong-kind parent is a semantic (not syntax) error} -body {
+    list [typeError {type Tiny = MissingType in 0..3
+1
+}] [typeError {type Strange = String in 0..3
+1
+}]
+} -result {{1:13 unknown parent type "MissingType"} {1:16 unknown parent type "String"}}
+
+test source-type-nested-rejected {a type declaration nested in a function/if/loop is a syntax error} -body {
+    catch {surface::parse "fn f():\n    type Small = Int in 0..10\n    1\n" t.bot} message options
+    list [lrange [dict get $options -errorcode] 0 1] [string match {*top level*} $message]
+} -result {{SURFACE SYNTAX} 1}
+
+test source-type-not-special-cased {the syntax works in an ordinary user module, exactly as the spec's own example} -body {
+    set h [surface::compile {type Small = Int in 10..20
+
+fn f() -> Small:
+    12
+
+f()
+} t.bot]
+    hir::types::show [hir::typeOf $h [lindex [hirFind $h call] end]]
+} -result {int[Small]}
+
+# ---------------------------------------------------------------------------
+# Semantic validation
+
+test source-type-cycle {a parent cycle is diagnosed, not an infinite loop} -body {
+    typeError {type A = B in 0..1
+type B = A in 0..1
+1
+}
+} -result {1:6 type declaration cycle: "A" depends on its own declaration through its chain of parents}
+
+test source-type-empty-range {a reversed interval (lo > hi) is rejected as empty, not a silent bottom type} -body {
+    typeError {type Empty = Int in 10..0
+1
+}
+} -result {1:21 empty integer range: 10..0 (a type declaration's interval needs lo <= hi; an empty/bottom refinement is out of scope)}
+
+test source-type-empty-set {an empty finite domain is rejected at parse time} -body {
+    catch {surface::parse {type Empty = Int in {}} t.bot} message options
+    list [lrange [dict get $options -errorcode] 0 1] [string match {*must not be empty*} $message]
+} -result {{SURFACE SYNTAX} 1}
+
+test source-type-duplicate-exact-value {a duplicate value in a finite domain is a declaration error, not silently canonicalized} -body {
+    typeError {type T = Int in {1, 4, 1}
+1
+}
+} -result {1:24 duplicate value 1 in this type's finite domain}
+
+test source-type-exact-ordering-irrelevant {source ordering of a finite domain does not affect its canonical (sorted) meaning} -body {
+    set h1 [surface::compile {type T = Int in {7, 1, 4}
+1
+} t.bot]
+    set h2 [surface::compile {type T = Int in {1, 4, 7}
+1
+} t.bot]
+    list [hir::sourceTypes $h1] [expr {[hir::sourceTypes $h1] eq [hir::sourceTypes $h2]}]
+} -result [list [list [dict create name T parent Int domain {exact {1 4 7}}]] 1]
+
+test source-type-builtin-redefinition {"Int" cannot be redeclared as a source type} -body {
+    typeError {type Int = Int in 0..10
+1
+}
+} -result {1:6 "Int" is the compiler's own built-in integer type and cannot be redeclared}
+
+test source-type-duplicate-declaration {redeclaring a name in the same batch is rejected, never silently overwritten} -body {
+    typeError {type Small = Int in 0..10
+type Small = Int in 0..20
+1
+}
+} -result {2:6 type "Small" is already declared}
+
+# ---------------------------------------------------------------------------
+# Domain-subset validation (items 30-34)
+
+test source-type-interval-under-interval {a valid and an invalid interval child of an interval parent} -body {
+    list [typeError {type Byte = Int in 0..255
+type Nibble = Byte in 0..15
+1
+}] [typeError {type Byte = Int in 0..255
+type Bad = Byte in 0..300
+1
+}]
+} -result {{no error} {2:20 the domain of "Bad" is not a subset of its parent "Byte"'s domain [0, 255]}}
+
+test source-type-exact-under-interval {every exact value inside its interval parent is valid (HighNibble's own shape)} -body {
+    typeError {type Byte = Int in 0..255
+type HighNibble = Byte in {0, 16, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176, 192, 208, 224, 240}
+1
+}
+} -result {no error}
+
+test source-type-exact-under-exact {exact child of exact parent: valid subset accepted, non-subset rejected} -body {
+    list [typeError {type A = Int in {1, 4, 7, 10}
+type B = A in {1, 7}
+1
+}] [typeError {type A = Int in {1, 4, 7, 10}
+type C = A in {1, 8}
+1
+}]
+} -result {{no error} {2:15 the domain of "C" is not a subset of its parent "A"'s domain {1, 4, 7, 10}}}
+
+test source-type-interval-under-sparse-exact {an interval child under a sparse exact parent is checked exactly, not by min/max alone} -body {
+    list [typeError {type Sparse = Int in {1, 2, 4, 5}
+type Child = Sparse in 1..2
+1
+}] [typeError {type Sparse = Int in {1, 2, 4, 5}
+type Child = Sparse in 1..4
+1
+}]
+} -result {{no error} {2:24 the domain of "Child" is not a subset of its parent "Sparse"'s domain {1, 2, 4, 5}}}
+
+# ---------------------------------------------------------------------------
+# Result contracts (items 59-62)
+
+test source-type-result-contract-valid {a source-declared result type verifies exactly like a compiler-registered one} -body {
+    set h [surface::compile {type Small = Int in 0..10
+
+fn f() -> Small:
+    7
+
+f()
+} t.bot]
+    hir::types::show [hir::typeOf $h [lindex [hirFind $h call] end]]
+} -result {int[Small]}
+
+test source-type-result-contract-invalid {an unproven/invalid result is rejected at definition time, not weakened for being source-declared} -body {
+    typeError {type Small = Int in 0..10
+
+fn f() -> Small:
+    20
+
+1
+}
+} -result {3:5 function result does not prove declared type int[Small] (facts: [20, 20] {20})}
+
+test source-type-sparse-result-contract {a sparse source-declared result: exact-set proof works unchanged} -body {
+    set h [surface::compile {type Sparse = Int in {0, 4, 8, 12}
+
+fn f(x) -> Sparse:
+    y = bit_and(x, 12)
+    y
+
+f(255)
+} t.bot]
+    hir::types::show [hir::typeOf $h [lindex [hirFind $h call] end]]
+} -result {int[Sparse]}
+
+test source-type-interval-cannot-prove-sparse {an interval hull alone cannot prove a sparse source-declared result} -body {
+    typeError {type Sparse = Int in {0, 4, 8, 12}
+
+fn h(x) -> Sparse:
+    y = bit_and(x, 15)
+    z = if y > 12:
+        12
+    else:
+        y
+    z
+
+1
+}
+} -result {3:5 function result does not prove declared type int[Sparse] (facts: [0, 12])}
+
+# ---------------------------------------------------------------------------
+# Constructors (items 66-72)
+
+test source-type-constructor-success {Small(0)/Small(10) succeed} -body {
+    set h [surface::compile {type Small = Int in 0..10
+
+[Small(0), Small(10)]
+} t.bot]
+    set exprs [hir::lower $h]
+    core::useBackend interp
+    core::formatValue [core::evalProgram $exprs]
+} -result {[0, 10]}
+
+test source-type-constructor-failure {Small(-1)/Small(11) fail with the same RANGE error class as a compiler-registered refined type} -body {
+    set h1 [surface::compile {type Small = Int in 0..10
+Small(-1)
+} t.bot]
+    set h2 [surface::compile {type Small = Int in 0..10
+Small(11)
+} t.bot]
+    list [errorCodeOf {*}[hir::lower $h1]] [errorCodeOf {*}[hir::lower $h2]]
+} -result {{CORE SEMANTIC RANGE} {CORE SEMANTIC RANGE}}
+
+test source-type-sparse-constructor {Tags(4) succeeds, Tags(5) fails, for a sparse source-declared domain} -body {
+    set h1 [surface::compile {type Tags = Int in {1, 4, 7}
+Tags(4)
+} t.bot]
+    set h2 [surface::compile {type Tags = Int in {1, 4, 7}
+Tags(5)
+} t.bot]
+    list [core::formatValue [core::evalProgram [hir::lower $h1]]] [errorCodeOf {*}[hir::lower $h2]]
+} -result {4 {CORE SEMANTIC RANGE}}
+
+test source-type-constructors-interp-compile-parity {constructors agree between interp and compile, success and failure alike} -body {
+    set h [surface::compile {type Small = Int in 0..10
+Small(7)
+} t.bot]
+    set exprsOk [hir::lower $h]
+    set h2 [surface::compile {type Small = Int in 0..10
+Small(20)
+} t.bot]
+    set exprsBad [hir::lower $h2]
+    list [differential $exprsOk] [differential $exprsBad]
+} -result {same same}
+
+# ---------------------------------------------------------------------------
+# Nominal distinctness, subtyping, transitivity (items 74-76)
+
+test source-type-nominal-distinct {two source types with the identical domain are not the same type} -body {
+    set h [surface::compile {type A = Int in 0..15
+type B = Int in 0..15
+1
+} t.bot]
+    list [core::type::subtype A B] [core::type::subtype B A] [expr {[core::type::metadata A] eq [core::type::metadata B]}]
+} -result {0 0 0}
+
+test source-type-explicit-parent-not-inferred {a numerically-equal type is not automatically a supertype without an explicit parent declaration} -body {
+    surface::compile {type A = Int in 0..15
+type B = Int in 0..15
+type Child = A in 0..7
+1
+} t.bot
+    list [core::type::subtype Child A] [core::type::subtype Child B]
+} -result {1 0}
+
+test source-type-transitivity {C <: B <: A <: Int through the generic subtype machinery} -body {
+    surface::compile {type A = Int in 0..255
+type B = A in 0..31
+type C = B in 0..7
+1
+} t.bot
+    list [core::type::subtype C B] [core::type::subtype C A] [core::type::subtype C int]
+} -result {1 1 1}
+
+# ---------------------------------------------------------------------------
+# Range/exact fact seeding (items 63-65)
+
+test source-type-interval-fact-seeding {a source-declared interval type seeds [lo,hi] through the existing generic path} -body {
+    surface::compile {type Small = Int in 10..20
+1
+} t.bot
+    hir::range::show [hir::range::TypeFact Small]
+} -result {[10, 20]}
+
+test source-type-sparse-fact-seeding {a source-declared sparse type seeds both the interval hull and the exact set} -body {
+    surface::compile {type Tags = Int in {1, 4, 7}
+1
+} t.bot
+    hir::range::show [hir::range::TypeFact Tags]
+} -result {[1, 7] {1,4,7}}
+
+test source-type-dense-canonicalization {a dense finite domain's semantic identity stays exact, but its range facts canonicalize to an interval like any other dense set} -body {
+    surface::compile {type Dense = Int in {0, 1, 2, 3}
+1
+} t.bot
+    list [hir::range::show [hir::range::TypeFact Dense]] [dict get [core::type::metadata Dense] integerDomain]
+} -result {{[0, 3]} {exact {0 1 2 3}}}
+
+# ---------------------------------------------------------------------------
+# Optimizer exact-set budget vs. semantic domain size (items 42-45)
+
+test source-type-over-budget-exact-set-stays-semantically-exact {a >32-value source domain remains a sound, exact semantic type even though hir/range.tcl's own 32-value analysis budget cannot materialize it as an exact fact} -body {
+    set values {}
+    for {set i 0} {$i < 40} {incr i} { lappend values [expr {$i * 2}] }
+    set src "type Big = Int in \{[join $values {, }]\}\n\n\[Big(0), Big(78)\]\n"
+    set h [surface::compile $src t.bot]
+    set exprs [hir::lower $h]
+    core::useBackend interp
+    set ok [core::formatValue [core::evalProgram $exprs]]
+    set badSrc "type Big = Int in \{[join $values {, }]\}\nBig(1)\n"
+    set errCode [errorCodeOf {*}[hir::lower [surface::compile $badSrc t.bot]]]
+    set fact [hir::range::show [hir::range::TypeFact Big]]
+    list $ok $errCode $fact
+} -result {{[0, 78]} {CORE SEMANTIC RANGE} {[0, 78]}}
+
+# ---------------------------------------------------------------------------
+# Compilation isolation (items 109-111)
+
+test source-type-repeated-compilation {compiling the same source-defined-type program twice in one process succeeds both times, with equivalent metadata} -body {
+    set src {type Small = Int in 0..10
+Small(7)
+}
+    set h1 [surface::compile $src t.bot]
+    set h2 [surface::compile $src t.bot]
+    list [core::formatValue [core::evalProgram [hir::lower $h1]]] \
+         [core::formatValue [core::evalProgram [hir::lower $h2]]] \
+         [expr {[hir::sourceTypes $h1] eq [hir::sourceTypes $h2]}]
+} -result {7 7 1}
+
+test source-type-sequential-non-leaking-compilation {two sequential programs declaring the same spelling with different domains do not leak into each other} -body {
+    set h1 [surface::compile {type Small = Int in 0..10
+Small(10)
+} t.bot]
+    set v1 [core::formatValue [core::evalProgram [hir::lower $h1]]]
+    set h2 [surface::compile {type Small = Int in 100..110
+Small(10)
+} t.bot]
+    set e2 [errorCodeOf {*}[hir::lower $h2]]
+    set h3 [surface::compile {type Small = Int in 100..110
+Small(105)
+} t.bot]
+    set v3 [core::formatValue [core::evalProgram [hir::lower $h3]]]
+    list $v1 $e2 $v3
+} -result {10 {CORE SEMANTIC RANGE} 105}
+
+# ---------------------------------------------------------------------------
+# Module tests (items 108, 89-90)
+
+test source-type-same-module-forward-parent {"type Byte" then "type Nibble = Byte" in the same module, parent-before-child} -body {
+    set h [surface::compile {type Byte = Int in 0..255
+type Nibble = Byte in 0..15
+1
+} t.bot]
+    list [core::type::subtype Nibble Byte] [hir::sourceTypes $h]
+} -result {1 {{name Byte parent Int domain {interval 0 255}} {name Nibble parent Byte domain {interval 0 15}}}}
+
+test source-type-cross-module {a type declared in a namespace module is usable, as a result type, by code that loads that module (surface/modules.tcl maps a namespace to exactly one file under core::libraryDir -- the byte:: vertical is exactly this, tests/native-byte.test; here with a throwaway synthetic module)} -body {
+    set libPath [file join $::core::libraryDir srctypeslib.bot]
+    set ch [open $libPath w]
+    puts $ch {namespace srctypeslib
+
+type Widget = Int in 0..100
+
+fn make() -> Widget:
+    50
+}
+    close $ch
+    set mainPath [makeFile {srctypeslib::make()
+} srctypeslib-main.bot]
+    try {
+        set h [surface::readProgramFile $mainPath -strict 0]
+        list [llength [hir::diagnostics $h]] [hir::types::show [hir::typeOf $h [lindex [hirFind $h call] end]]]
+    } finally {
+        file delete $libPath
+        removeFile srctypeslib-main.bot
+    }
+} -result {0 {int[Widget]}}
+
+test source-type-unused-declaration-no-runtime-code {an unused type declaration adds no NIR/runtime value} -body {
+    set h [surface::compile {type Small = Int in 0..10
+42
+} t.bot]
+    list [hir::roots $h] [core::formatValue [core::evalProgram [hir::lower $h]]]
+} -result {e1 42}
+
+# ---------------------------------------------------------------------------
+# HIR round trip (items 55-57)
+
+test source-type-hir-format-shows-declaration {hir::format prints a source-declared type's own domain, not just its name} -body {
+    set h [surface::compile {type Tags = Int in {1, 4, 7}
+
+fn f() -> Tags:
+    4
+
+f()
+} t.bot]
+    lindex [split [hir::format $h] \n] 0
+} -result {type Tags parent Int domain exact 1 4 7}
+
+test source-type-hir-roundtrip-interval {source -> HIR -> format -> read -> range analysis: an interval domain survives identically} -body {
+    set h1 [surface::compile {type Byte = Int in 0..255
+type Nibble = Byte in 0..15
+
+fn f() -> Nibble:
+    5
+
+f()
+} t.bot]
+    set text [hir::format $h1]
+    set h2 [hir::parse $text]
+    list [expr {[hir::format $h2] eq $text}] [hir::range::show [hir::range::TypeFact Nibble]] \
+         [core::type::subtype Nibble Byte]
+} -result {1 {[0, 15]} 1}
+
+test source-type-hir-roundtrip-exact {source -> HIR -> format -> read -> range analysis: a finite domain survives identically} -body {
+    set h1 [surface::compile {type Tags = Int in {1, 4, 7}
+
+fn f() -> Tags:
+    4
+
+f()
+} t.bot]
+    set text [hir::format $h1]
+    set h2 [hir::parse $text]
+    set exprs [hir::lower $h2]
+    core::useBackend interp
+    list [expr {[hir::format $h2] eq $text}] [core::formatValue [core::evalProgram $exprs]] \
+         [hir::range::show [hir::range::TypeFact Tags]]
+} -result {1 4 {[1, 7] {1,4,7}}}
+
+test source-type-hir-roundtrip-no-decls-unaffected {a plain HIR with no source-defined types formats/reads exactly as before this milestone} -body {
+    set h [hir::build {{call {ref +} {const 1} {const 2}}}]
+    set text [hir::format $h]
+    list [expr {[string first "type " $text] == 0}] [expr {[hir::format [hir::parse $text]] eq $text}]
+} -result {0 1}
+
+# ---------------------------------------------------------------------------
+# Diagnostic / explain output (items 116-119)
+
+test source-type-explain {hir::sourcetypes::explain gives an auditable per-type stanza, provenance included} -body {
+    set h [surface::compile {type Byte = Int in 0..255
+type HighNibble = Byte in {0, 16, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176, 192, 208, 224, 240}
+1
+} t.bot]
+    hir::sourcetypes::explain $h
+} -result {type Byte
+    parent: Int
+    domain: interval [0, 255]
+
+type HighNibble
+    parent: Byte
+    domain: exact {0, 16, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176, 192, 208, 224, 240}
+    hull: [0, 240]}
+
+cleanupTests

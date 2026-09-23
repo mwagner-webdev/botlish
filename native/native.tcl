@@ -488,7 +488,8 @@ proc native::buildProgramHir {exprs args} {
     return [hir::buildSyntax $nodes -strict 0 -origin {ir {}} \
         -files [dict get $bridge files] -modules [dict get $bridge sections] \
         -native-result-overrides $nativeResultOverrides \
-        -module-native-targets [dict get $bridge targets] {*}$args]
+        -module-native-targets [dict get $bridge targets] \
+        -type-decls [dict get $bridge typeDecls] {*}$args]
 }
 
 # The module-native bridge: loads (surface/modules.tcl), once per program
@@ -497,10 +498,14 @@ proc native::buildProgramHir {exprs args} {
 # registry carries -module-fn -- currently only uriEscape, -module-fn {web
 # uri_escape_text}; core/native.tcl), and returns
 #
-#   {sections SECTIONS files FILES targets TARGETS}
+#   {sections SECTIONS files FILES targets TARGETS typeDecls TYPEDECLS}
 #
 # ready for hir::buildSyntax: SECTIONS (the modules' own function
-# definitions, compiled once, dependencies first) as -modules; FILES to
+# definitions, compiled once, dependencies first) as -modules; TYPEDECLS
+# (those modules' own "type ..." declarations, surface/lower.tcl's
+# TypeDeclOf dicts) as -type-decls, so a bridged native's module function
+# can itself use a source-declared type (hir/sourcetypes.tcl) exactly as an
+# ordinary cross-file caller would; FILES to
 # merge into -files; TARGETS (flat native NAME NAMESPACE FUNCTION-NAME
 # triples) as -module-native-targets, so hir::types::BindingType
 # (hir/types.tcl) types every reference to that native as a call of the
@@ -522,10 +527,11 @@ proc native::ModuleNativeBridge {} {
         lappend targets $name $ns $fn
     }
     if {$namespaces eq ""} {
-        return [dict create sections {} files {} targets {}]
+        return [dict create sections {} files {} targets {} typeDecls {}]
     }
     set loaded [surface::modules::LoadNamespaces $namespaces]
-    return [dict create sections [dict get $loaded sections] files [dict get $loaded files] targets $targets]
+    return [dict create sections [dict get $loaded sections] files [dict get $loaded files] \
+        targets $targets typeDecls [dict get $loaded typeDecls]]
 }
 
 proc native::runProgram {exprs env {specialize ""}} {

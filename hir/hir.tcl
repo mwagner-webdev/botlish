@@ -131,7 +131,7 @@ proc hir::Empty {mode} {
     return [dict create mode $mode roots {} top "" \
         exprs [dict create] scopes [dict create] bindings [dict create] \
         symbols [dict create] types [dict create] typeIds [dict create] files [dict create] \
-        diagnostics {} counters [dict create]]
+        diagnostics {} counters [dict create] sourceTypes {}]
 }
 
 proc hir::NewId {hirVar kind} {
@@ -214,17 +214,31 @@ proc hir::build {exprs args} {
 #                   native, since it is keyed on the native's own resolved
 #                   root BindingId, never on source text.
 #
+#   -type-decls D   surface/lower.tcl's TypeDeclOf dicts (one per "type
+#                   Child = Parent in Domain" declaration the caller found,
+#                   across every module section plus its own top level, in
+#                   dependency-load order) -- validated and registered by
+#                   hir::sourcetypes::apply before resolution/type inference
+#                   below, so a `-> Child` result-type annotation resolves
+#                   exactly like a compiler-registered refined type. Their
+#                   canonical metadata is kept as HIR's own `sourceTypes`
+#                   field (hir/format.tcl, hir/read.tcl's round-trip). Empty
+#                   by default: every caller but the surface frontend
+#                   (surface/lower.tcl, surface/modules.tcl) and hir::read.
+#
 # This is how frontends construct HIR: they state what was written and where;
 # resolution, hygiene (hygiene.tcl), types and refinements happen here.
 proc hir::buildSyntax {nodes args} {
     set options [Options hir::buildSyntax \
         {-mode program -strict 1 -origin "" -files {} -modules {} -native-result-overrides {} \
-            -module-native-targets {}} $args]
+            -module-native-targets {} -type-decls {}} $args]
     set mode [dict get $options -mode]
     if {$mode ni {program sequence}} {
         error "hir::build: -mode must be program or sequence"
     }
+    set sourceTypes [hir::sourcetypes::apply [dict get $options -type-decls]]
     set hir [hir::resolve::program $nodes $mode [dict get $options -origin] [dict get $options -modules]]
+    dict set hir sourceTypes $sourceTypes
     hir::hygiene::apply hir
     dict for {f path} [dict get $options -files] {
         dict set hir files $f [dict create id $f path $path]
@@ -298,6 +312,13 @@ proc hir::mode {hir}        { return [dict get $hir mode] }
 proc hir::roots {hir}       { return [dict get $hir roots] }
 proc hir::top {hir}         { return [dict get $hir top] }
 proc hir::diagnostics {hir} { return [dict get $hir diagnostics] }
+
+# The source-defined type declarations this HIR's own build registered
+# (hir::sourcetypes::apply's return value): a list of {name .. parent ..
+# domain ..}, in dependency order. Empty for a program that declared none.
+proc hir::sourceTypes {hir} {
+    return [expr {[dict exists $hir sourceTypes] ? [dict get $hir sourceTypes] : {}}]
+}
 
 proc hir::node {hir e} {
     return [dict get $hir exprs $e]
@@ -499,7 +520,7 @@ proc hir::ApplyNativeResultOverrides {hirVar overrides} {
 }
 
 apply {{dir} {
-    foreach file {syntax resolve hygiene types modulebinding refine lower format read aot specialize range induction escape blockescape stringregion traversal} {
+    foreach file {syntax resolve hygiene sourcetypes types modulebinding refine lower format read aot specialize range induction escape blockescape stringregion traversal} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

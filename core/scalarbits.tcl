@@ -1,5 +1,13 @@
-# scalarbits.tcl -- bounded scalar Int domains (Byte, Nibble, LowNibble,
-# HighNibble) and the typed bit arithmetic that makes them useful.
+# scalarbits.tcl -- the generic bitwise Int primitives Byte/Nibble/bit
+# arithmetic is built from (bit_and, bit_or, bit_xor, shift_left,
+# shift_right).
+#
+# The Byte/Nibble/LowNibble/HighNibble bounded-integer domains themselves
+# are no longer registered here: they are ordinary Botlish source
+# declarations in lib/byte.bot (see SOURCE-DEFINED-INTEGER-DOMAINS.md,
+# which supersedes this file's own former #161-189 for exactly what moved
+# and why). What is still true of them, unchanged by where they are
+# declared:
 #
 # Semantic domains (all four are ordinary refined `int` types -- see
 # type.tcl's header -- validator-backed, not opaque: membership is decided
@@ -7,7 +15,7 @@
 # like Emailish/NonEmpty. No runtime wrapper object exists for any of them:
 # a Byte/Nibble/LowNibble/HighNibble value is, at every backend and at every
 # layer, an ordinary Botlish Int. See BYTE-NIBBLE-BIT-ARITHMETIC.md for the
-# full design writeup this file implements.
+# full design writeup this file used to implement.
 #
 #   Byte        0..255                a plain 8-bit value
 #   Nibble      0..15                 a logical 4-bit value
@@ -30,7 +38,9 @@
 # exists for a -native-body to compose), so `Byte(x)` etc. are native-
 # unsupported on cranelift/cranelift-generic, reported (not silently
 # swallowed) exactly like any other not-yet-native-lowerable call --
-# see native/lower.tcl's Unsupported.
+# see native/lower.tcl's Unsupported. This is now a property of every
+# source-declared bounded-integer type generically (hir/sourcetypes.tcl's
+# own core::type::declareIntConstructor), not something this file arranges.
 #
 # byte::high_nibble/byte::low_nibble/byte::nibble/byte::complement/
 # byte::position_low/byte::position_high (lib/byte.bot) are ordinary,
@@ -141,49 +151,10 @@ foreach {name impl} {
 }
 unset name impl
 
-# ---------------------------------------------------------------------------
-# The four scalar domains.
-
-proc core::scalarbits::InRange {lo hi v} {
-    set n [core::value::intOf $v]
-    return [expr {$n >= $lo && $n <= $hi}]
-}
-
-# HighNibble's exact 16-value domain: {0, 16, 32, ..., 240} -- 0 <= n <= 240
-# and n's low 4 bits are all zero. This is the motivating case for exact
-# finite-value facts (hir/range.tcl): the interval [0,240] alone accepts
-# every multiple of 1 in that range, not just multiples of 16.
-proc core::scalarbits::IsHighNibble {v} {
-    set n [core::value::intOf $v]
-    return [expr {$n >= 0 && $n <= 240 && ($n % 16) == 0}]
-}
-
-core::type::register Byte       -base int -integer-domain {interval 0 255}
-core::type::register Nibble     -base int -parents Byte -integer-domain {interval 0 15}
-core::type::register LowNibble  -base int -parents Byte -integer-domain {interval 0 15}
-core::type::register HighNibble -base int -parents Byte \
-    -integer-domain {exact {0 16 32 48 64 80 96 112 128 144 160 176 192 208 224 240}}
-
-core::type::definePredicate Byte
-core::type::definePredicate Nibble
-core::type::definePredicate LowNibble
-core::type::definePredicate HighNibble
-
-# Checked construction from an arbitrary Int: succeeds (returning the same
-# Int, refined) iff the value is actually in the named type's domain, else
-# raises {CORE SEMANTIC RANGE} -- never masks or truncates (spec #9-10).
-proc core::scalarbits::CheckedConstruct {typeName v} {
-    core::value::expect int $v $typeName
-    if {![core::type::validate $typeName $v]} {
-        core::semanticError RANGE \
-            "$typeName: [core::value::show $v] is not a valid $typeName"
-    }
-    return $v
-}
-
-foreach typeName {Byte Nibble LowNibble HighNibble} {
-    core::native::register $typeName -arity 1 \
-        -impl [list core::scalarbits::CheckedConstruct $typeName] \
-        -param-types int -result-type $typeName -context-free 1
-}
-unset typeName
+# The four scalar domains (Byte, Nibble, LowNibble, HighNibble) are no
+# longer registered here: they are ordinary Botlish source declarations in
+# lib/byte.bot now (see SOURCE-DEFINED-INTEGER-DOMAINS.md). This file keeps
+# only the primitive bit operations above, which those declarations' own
+# functions (byte::high_nibble et al.) are built from -- and which stay
+# root natives regardless of what domains are ever declared over their
+# results, exactly as before this milestone.

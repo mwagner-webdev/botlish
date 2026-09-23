@@ -1,5 +1,5 @@
-# byte.bot -- the "byte" namespace: byte/bit-domain operations on Botlish's
-# Byte/Nibble/LowNibble/HighNibble scalar types (core/scalarbits.tcl).
+# byte.bot -- the "byte" namespace: the Byte/Nibble/LowNibble/HighNibble
+# scalar types (declared below) and byte/bit-domain operations over them.
 #
 # Every function here is ordinary Botlish with a verified refined result
 # primitives core/scalarbits.tcl registers as root natives (bit_and, bit_or,
@@ -39,6 +39,42 @@
 # representation (core/scalarbits.tcl's header, and the milestone's own
 # namespace discipline -- see BYTE-NIBBLE-BIT-ARITHMETIC.md).
 namespace byte
+
+# The four scalar domains this milestone's own byte/bit-domain operations
+# are typed over. These used to be compiler-side Tcl registrations
+# (core/scalarbits.tcl); they are ordinary Botlish source declarations now
+# (see SOURCE-DEFINED-INTEGER-DOMAINS.md) -- the compiler knows what a
+# bounded integer refinement *is* (a named subtype of Int, or of another
+# such subtype, whose values are exactly an inclusive interval or a finite
+# set of integers); this file is what says Byte/Nibble/LowNibble/HighNibble
+# *are* ones, and what their own domains are. No downstream machinery
+# (result-contract verification, range/exact-set analysis, checked
+# constructors, native lowering) treats these four names specially:
+# everything below is the same generic feature any other source-defined
+# "type Child = Parent in Domain" declaration gets.
+#
+#   Byte        0..255                a plain 8-bit value
+#   Nibble      0..15                 a logical 4-bit value
+#   LowNibble   0..15                 a nibble already positioned in the low
+#                                     half of a Byte (numerically identical
+#                                     to Nibble's domain, but a distinct,
+#                                     nominal type: LowNibble means "already
+#                                     positioned", Nibble means "logical
+#                                     value" -- see item 6/74 of the report)
+#   HighNibble  {0,16,32,...,240}     a nibble positioned in the high half of
+#                                     a Byte -- 16 exact values, not every
+#                                     integer in [0,240]
+type Byte = Int in 0..255
+
+type Nibble = Byte in 0..15
+type LowNibble = Byte in 0..15
+
+type HighNibble = Byte in {
+    0, 16, 32, 48,
+    64, 80, 96, 112,
+    128, 144, 160, 176,
+    192, 208, 224, 240
+}
 
 fn high_nibble(b) -> HighNibble:
     bit_and(b, 240)

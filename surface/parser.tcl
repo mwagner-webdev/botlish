@@ -5,8 +5,9 @@
 # Recursive descent over the tokens of lexer.tcl. The grammar, with layout
 # already turned into NEWLINE / INDENT / DEDENT tokens:
 #
-#   program      = [ namespaceDecl ] { NEWLINE | statement } EOF
+#   program      = [ namespaceDecl ] { NEWLINE | topStatement } EOF
 #   namespaceDecl = "namespace" IDENT NEWLINE
+#   topStatement = typeDecl | statement
 #   statement    = simple NEWLINE | valued | function | if | loop
 #   simple       = binding | return | break | continue | expression
 #   valued       = IDENT "=" if | "return" if | "break" if
@@ -18,6 +19,25 @@
 #   return       = "return" [ expression ]
 #   break        = "break" [ expression ]
 #   continue     = "continue"
+#
+#   typeDecl     = "type" IDENT "=" IDENT "in" domain NEWLINE
+#   domain       = signedInt ".." signedInt
+#                | "{" signedInt { "," signedInt } [ "," ] "}"
+#   signedInt    = [ "-" ] INT
+#
+# A typeDecl is a declaration, not a statement with runtime meaning (see
+# surface/ast.tcl's `typedecl` node and hir/sourcetypes.tcl): it is only
+# legal directly at a program's or module's own top level, never nested in
+# a function/if/loop suite -- Statement rejects it there, using Parser
+# state's own `topLevel` flag (set/cleared around Suite, below). The "in"
+# of a domain is not a reserved word: it is recognized contextually,
+# immediately after a typeDecl's parent type name, exactly the way "->"
+# result-type parsing here is contextual (allowFunctionResult) rather than
+# a global keyword reservation. "type" itself is different: it *is* a
+# reserved keyword (lexer.tcl), since auditing the existing corpus (see
+# SOURCE-DEFINED-INTEGER-DOMAINS.md) found no program using "type" or "in"
+# as an ordinary name.
+#
 #   expression   = disjunction
 #   disjunction  = conjunction { "or" conjunction }
 #   conjunction  = inversion { "and" inversion }
@@ -84,7 +104,7 @@ proc surface::parseTokens {tokens args} {
         dict set options $option $value
     }
     set p [dict create tokens $tokens pos 0 last [dict get [lindex $tokens 0] span] \
-        recover [dict get $options -recover] diagnostics {}]
+        recover [dict get $options -recover] diagnostics {} topLevel 1]
     set program [surface::parser::Program p]
     dict set program diagnostics [dict get $p diagnostics]
     return $program
@@ -266,6 +286,12 @@ proc surface::parser::Statement {pVar} {
         fn     { return [Function p] }
         if     { return [If p] }
         loop   { return [Loop p] }
+        type {
+            if {![dict get $p topLevel]} {
+                Fail $token "a type declaration is only allowed at the top level of a module, not nested in a function/if/loop"
+            }
+            return [TypeDecl p]
+        }
         INDENT { Fail $token "unexpected indentation" }
         else   { Fail $token "\"else\" without a matching \"if\"" }
         namespace { Fail $token "a \"namespace\" declaration must be the first statement in the file" }
@@ -351,6 +377,98 @@ proc surface::parser::Function {pVar} {
         resultType [dict get $body resultType] resultTypeSpan [dict get $body resultTypeSpan] body $body]
 }
 
+# "type" IDENT "=" IDENT "in" domain NEWLINE -- a top-level type declaration
+# (see this file's own header, and hir/sourcetypes.tcl for what it means).
+# "in" is not a keyword: it is the ordinary IDENT expected right here, by
+# spelling, immediately after the parent type name (deliberately, so "in"
+# stays free for ordinary use everywhere else -- see #49 in
+# SOURCE-DEFINED-INTEGER-DOMAINS.md).
+proc surface::parser::TypeDecl {pVar} {
+    upvar 1 $pVar p
+    set start [dict get [Advance p] span]
+    set name [Expect p IDENT "a type name after \"type\""]
+    Expect p = "\"=\" after the type name"
+    set parent [Expect p IDENT "a parent type name"]
+    set inToken [Peek p]
+    if {[dict get $inToken kind] ne "IDENT" || [dict get $inToken value] ne "in"} {
+        Fail $inToken "expected \"in\" after the parent type name, found [Describe $inToken]"
+    }
+    Advance p
+    set domain [Domain p]
+    set node [surface::ast::node typedecl [SpanFrom p $start] \
+        name [dict get $name value] nameSpan [dict get $name span] \
+        parent [dict get $parent value] parentSpan [dict get $parent span] \
+        domain $domain]
+    set next [Peek p]
+    if {[dict get $next kind] ne "NEWLINE"} {
+        Fail $next "expected end of line, found [Describe $next]"
+    }
+    Advance p
+    return $node
+}
+
+# signedInt ".." signedInt | "{" signedInt { "," signedInt } [ "," ] "}"
+proc surface::parser::Domain {pVar} {
+    upvar 1 $pVar p
+    if {[Kind p] eq "\{"} {
+        return [ExactDomain p]
+    }
+    set start [dict get [Peek p] span]
+    set lo [SignedInt p]
+    if {[Kind p] ne ".."} {
+        Fail [Peek p] "expected \"..\" or \"\{\" in a type declaration's domain, found [Describe [Peek p]]"
+    }
+    Advance p
+    set hi [SignedInt p]
+    return [dict create kind interval \
+        lo [lindex $lo 0] loSpan [lindex $lo 1] \
+        hi [lindex $hi 0] hiSpan [lindex $hi 1] \
+        span [surface::ast::cover $start [dict get $p last]]]
+}
+
+proc surface::parser::ExactDomain {pVar} {
+    upvar 1 $pVar p
+    set start [dict get [Advance p] span]
+    set values {}
+    set spans {}
+    while {[Kind p] ne "\}"} {
+        lassign [SignedInt p] value span
+        lappend values $value
+        lappend spans $span
+        if {[Kind p] eq ","} {
+            Advance p
+        } elseif {[Kind p] ne "\}"} {
+            Fail [Peek p] "expected \",\" or \"\}\" in the type domain, found [Describe [Peek p]]"
+        }
+    }
+    if {$values eq ""} {
+        Fail [Peek p] "a type declaration's finite domain must not be empty"
+    }
+    Advance p
+    return [dict create kind exact values $values spans $spans \
+        span [surface::ast::cover $start [dict get $p last]]]
+}
+
+# The decimal text and span of an optionally negative integer literal, as
+# {TEXT SPAN}. Only a literal: no arithmetic, no named constant, no call --
+# a type declaration's domain is dedicated grammar, not an ordinary
+# expression (see this file's own header).
+proc surface::parser::SignedInt {pVar} {
+    upvar 1 $pVar p
+    set start [dict get [Peek p] span]
+    set negative 0
+    if {[Kind p] eq "-"} {
+        Advance p
+        set negative 1
+    }
+    set token [Expect p INT "an integer literal"]
+    set text [dict get $token value]
+    if {$negative && $text ne "0"} {
+        set text -$text
+    }
+    return [list $text [SpanFrom p $start]]
+}
+
 proc surface::parser::If {pVar} {
     upvar 1 $pVar p
     set start [dict get [Advance p] span]
@@ -397,7 +515,10 @@ proc surface::parser::Suite {pVar after} {
     }
     Advance p
     set start [dict get [Peek p] span]
+    set savedTopLevel [dict get $p topLevel]
+    dict set p topLevel 0
     set body [Statements p {DEDENT EOF}]
+    dict set p topLevel $savedTopLevel
     if {[Kind p] eq "DEDENT"} {
         Advance p
     }

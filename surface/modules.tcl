@@ -12,8 +12,10 @@
 # A file that starts with a `namespace NAME` declaration (parser.tcl's
 # NamespaceDecl; surface::ast's `program` node carries it as its own
 # `namespace`/`namespaceSpan` fields, never a body statement) is a module: a
-# namespace containing ordinary function definitions and immutable value bindings.
-# It has no executable top-level statements or mutable bindings. Every other .bot
+# namespace containing ordinary function definitions, immutable value
+# bindings, and type declarations (surface/parser.tcl's `typedecl` --
+# hir/sourcetypes.tcl; SOURCE-DEFINED-INTEGER-DOMAINS.md). It has no
+# executable top-level statements or mutable bindings. Every other .bot
 # file (no `namespace`
 # declaration) is an ordinary/entry program, exactly as before this
 # milestone; loading one that makes no qualified reference costs nothing
@@ -216,9 +218,9 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan} {
             "$path declares \"namespace [dict get $ast namespace]\", but only namespace \"$name\" can load from this path"
     }
     foreach statement [dict get $ast body] {
-        if {[dict get $statement kind] ni {function bind}} {
+        if {[dict get $statement kind] ni {function bind typedecl}} {
             Error INVALID-TOPLEVEL [dict get $statement span] \
-                "module \"$name\" ($path): only function definitions and immutable bindings are allowed at module top level, found a \"[dict get $statement kind]\" statement"
+                "module \"$name\" ($path): only function definitions, immutable bindings and type declarations are allowed at module top level, found a \"[dict get $statement kind]\" statement"
         }
     }
     dict set state stack [concat [dict get $state stack] [list $name]]
@@ -226,9 +228,14 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan} {
     dict set state files $fileId $path
     dict incr state nextFile
     CollectAndLoad state $ast
-    set functionNames [lmap statement [dict get $ast body] {dict get $statement name}]
+    set functionNames [lmap statement [dict get $ast body] {
+        if {[dict get $statement kind] eq "typedecl"} continue
+        dict get $statement name
+    }]
     dict set state loaded $name $functionNames
-    set statements [lmap node [surface::lower::Sequence [dict get $ast body]] {RemapFile $node $fileId}]
+    lassign [surface::lower::SplitTypeDecls [dict get $ast body]] executable decls
+    dict set state typeDecls [concat [dict get $state typeDecls] $decls]
+    set statements [lmap node [surface::lower::Sequence $executable] {RemapFile $node $fileId}]
     set origin [RemapOrigin [surface::lower::Origin [dict get $ast span] "namespace"] $fileId]
     set section [dict create namespace $name nodes $statements origin $origin]
     dict set state sections [concat [dict get $state sections] [list $section]]
@@ -271,12 +278,12 @@ proc surface::modules::LoadNamespaces {namespaces args} {
         dict set options $option $value
     }
     set state [dict create files [dict create] nextFile [dict get $options -start-file] \
-        loaded [dict create] stack {} sections {}]
+        loaded [dict create] stack {} sections {} typeDecls {}]
     foreach name $namespaces {
         LoadNamespace state $name ""
     }
     return [dict create sections [dict get $state sections] files [dict get $state files] \
-        functions [dict get $state loaded]]
+        functions [dict get $state loaded] typeDecls [dict get $state typeDecls]]
 }
 
 # The HIR of the .bot program file PATH, after loading (and compiling once,
@@ -292,10 +299,13 @@ proc surface::modules::compileProgramFile {path args} {
     }
     set ast [surface::parse [core::ReadFile $path] $path]
     set state [dict create files [dict create f1 [dict get $ast span file]] nextFile 2 \
-        loaded [dict create] stack {} sections {}]
+        loaded [dict create] stack {} sections {} typeDecls {}]
     CollectAndLoad state $ast
-    set hir [hir::buildSyntax [surface::lower::Sequence [dict get $ast body]] -strict 0 \
+    lassign [surface::lower::SplitTypeDecls [dict get $ast body]] executable ownDecls
+    set decls [concat [dict get $state typeDecls] $ownDecls]
+    set hir [hir::buildSyntax [surface::lower::Sequence $executable] -strict 0 \
         -origin [surface::lower::Origin [dict get $ast span] ""] \
-        -files [dict get $state files] -modules [dict get $state sections]]
+        -files [dict get $state files] -modules [dict get $state sections] \
+        -type-decls $decls]
     return [surface::lower::Finish $hir [dict get $options -strict]]
 }

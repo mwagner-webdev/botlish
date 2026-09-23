@@ -167,6 +167,85 @@ check_all(0, true)
 } -result true
 
 # ---------------------------------------------------------------------------
+# Byte/Nibble/LowNibble/HighNibble checked construction and predicates
+# (lib/byte.bot's own source declarations -- see
+# SOURCE-DEFINED-INTEGER-DOMAINS.md): equivalent, source-based coverage of
+# what used to be tested directly against the raw-IR root natives
+# core/scalarbits.tcl registered (tests/scalarbits.test, before the
+# migration). Referencing byte::high_nibble is what loads byte.bot (and so
+# registers Byte/Nibble/LowNibble/HighNibble) through the ordinary module
+# system -- see moduleValue/moduleParity above.
+
+test native-byte-constructors-valid {Byte/Nibble/LowNibble/HighNibble constructors succeed at their boundaries, on interp/compile (checked constructors are still native-unsupported -- see native-byte-constructors-cranelift-unsupported below)} -body {
+    set path [makeFile {byte::high_nibble(0)
+[Byte(0), Byte(255), Nibble(0), Nibble(15), LowNibble(0), LowNibble(15), HighNibble(0), HighNibble(240)]} native-byte-ctor-ok.bot]
+    try {
+        set exprs [hir::lower [surface::readProgramFile $path -strict 0]]
+        list [lindex [outcomeUnder interp $exprs] 1] [lindex [outcomeUnder compile $exprs] 1]
+    } finally {
+        removeFile native-byte-ctor-ok.bot
+    }
+} -result {{[0, 255, 0, 15, 0, 15, 0, 240]} {[0, 255, 0, 15, 0, 15, 0, 240]}}
+
+test native-byte-constructors-cranelift-unsupported {a checked constructor stays native-unsupported for a source-declared type, exactly as it was for the old compiler-registered Byte (item 70-71: no new unchecked native path)} -body {
+    set path [makeFile {byte::high_nibble(0)
+Byte(200)} native-byte-ctor-cranelift.bot]
+    try {
+        set exprs [hir::lower [surface::readProgramFile $path -strict 0]]
+        set outcome [outcomeUnder cranelift $exprs]
+        list [lindex $outcome 0] [lindex $outcome 1]
+    } finally {
+        removeFile native-byte-ctor-cranelift.bot
+    }
+} -result {error {NATIVE UNSUPPORTED {native Byte}}}
+
+test native-byte-constructors-boundary {Byte/Nibble/LowNibble/HighNibble constructors fail just outside their domains} -body {
+    set path [makeFile {byte::high_nibble(0)
+Byte(256)} native-byte-ctor-bad1.bot]
+    set path2 [makeFile {byte::high_nibble(0)
+Nibble(16)} native-byte-ctor-bad2.bot]
+    set path3 [makeFile {byte::high_nibble(0)
+HighNibble(17)} native-byte-ctor-bad3.bot]
+    try {
+        list [lindex [outcomeUnder interp [hir::lower [surface::readProgramFile $path -strict 0]]] 1] \
+             [lindex [outcomeUnder interp [hir::lower [surface::readProgramFile $path2 -strict 0]]] 1] \
+             [lindex [outcomeUnder interp [hir::lower [surface::readProgramFile $path3 -strict 0]]] 1]
+    } finally {
+        removeFile native-byte-ctor-bad1.bot
+        removeFile native-byte-ctor-bad2.bot
+        removeFile native-byte-ctor-bad3.bot
+    }
+} -result {{CORE SEMANTIC RANGE} {CORE SEMANTIC RANGE} {CORE SEMANTIC RANGE}}
+
+test native-byte-highnibble-exact-not-interval {HighNibble distinguishes "in [0,240]" from "in its own 16-value exact set"} -body {
+    set path [makeFile {byte::high_nibble(0)
+HighNibble(17)} native-byte-highnibble-not-mult.bot]
+    try {
+        lindex [outcomeUnder interp [hir::lower [surface::readProgramFile $path -strict 0]]] 1
+    } finally {
+        removeFile native-byte-highnibble-not-mult.bot
+    }
+} -result {CORE SEMANTIC RANGE}
+
+# Nibble and LowNibble are nominally distinct despite an identical (0..15)
+# numeric domain -- generic nominal-distinctness coverage (items 6, 74-76)
+# lives in tests/source-types.test with its own synthetic types; this is
+# the Byte-vertical-specific instance of it.
+test native-byte-nibble-lownibble-distinct {Nibble and LowNibble each show their own name in HIR, for the identical [0,15] domain} -body {
+    set path [makeFile {n = byte::nibble(byte::high_nibble(160))
+l = byte::position_low(10)
+0} native-byte-nominal.bot]
+    try {
+        set hir [surface::readProgramFile $path -strict 0]
+        set text [hir::format $hir]
+    } finally {
+        removeFile native-byte-nominal.bot
+    }
+    list [expr {[string first {int[Nibble]} $text] >= 0}] \
+         [expr {[string first {int[LowNibble]} $text] >= 0}]
+} -result {1 1}
+
+# ---------------------------------------------------------------------------
 # Generic bitwise primitives: parity on the native backend directly (core
 # IR, no module needed -- bit_and/bit_or/bit_xor/shift_left/shift_right are
 # root natives).

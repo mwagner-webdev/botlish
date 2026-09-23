@@ -10,8 +10,9 @@
 #   INT       decimal digits, no leading zeros              value: the digits
 #   STRING    "..." on one line; escapes \\ \" \n \r \t     value: decoded text
 #   keywords  fn if else loop return break continue true false unit and or not
-#             namespace (kind is the word itself)
-#   operators ( ) [ ] , : :: = == != < <= > >= + - *   (kind is the text itself)
+#             namespace type (kind is the word itself)
+#   operators ( ) [ ] { } , : :: = == != < <= > >= + - * -> ..
+#             (kind is the text itself)
 #   NEWLINE   end of a logical line
 #   INDENT    the next logical line is indented deeper
 #   DEDENT    one indentation level ends
@@ -35,8 +36,6 @@
 #   inconsistent dedent        the line joins the enclosing level it passed
 #   unexpected character       skipped
 #   "?" after a name           skipped
-#   ".." (reserved)            skipped; anything after (e.g. "=" or "<") is
-#                              lexed normally and unaffected
 #   invalid integer            an INT of its digits (leading zeros dropped)
 #   unterminated string        the string ends at the end of line
 #   invalid escape             the escaped character is kept
@@ -47,10 +46,14 @@
 #                              statement (see UnclosedBefore)
 
 namespace eval surface::lexer {
-    variable keywords {fn if else loop return break continue true false unit and or not namespace}
+    variable keywords {fn if else loop return break continue true false unit and or not namespace type}
     # Longest operators first ("::" before ":", so a module-qualified name
-    # like web::uri_escape does not lex as ":" ":").
-    variable operators {== != <= >= :: -> ( ) [ ] , : = < > + - *}
+    # like web::uri_escape does not lex as ":" ":"). "{" and "}" are not
+    # ordinary block syntax (Botlish blocks are ":" + indentation): they
+    # denote only a type declaration's finite integer-set domain
+    # (surface/parser.tcl's Domain), a context-sensitive meaning decided by
+    # the parser, not the lexer -- the lexer just hands back a token.
+    variable operators [list == != <= >= :: -> ( ) \[ \] \{ \} , : = < > + - *]
 }
 
 proc surface::lex {source {filename <input>}} {
@@ -147,7 +150,7 @@ proc surface::lexer::tokenize {source file} {
                     foreach bracket [lreverse $brackets] {
                         lassign $bracket opener span
                         lappend diagnostics [surface::diagnostic $span "\"$opener\" is never closed"]
-                        lappend tokens [Token [expr {$opener eq "(" ? ")" : "\]"}] "" "" $here]
+                        lappend tokens [Token [Closer $opener] "" "" $here]
                     }
                     set brackets {}
                 }
@@ -196,8 +199,7 @@ proc surface::lexer::tokenize {source file} {
             }
             {.} {
                 if {[string index $source $i+1] eq "."} {
-                    Report diagnostics $file $i $line $lineStart 2 \
-                        "'..' is reserved for future range syntax"
+                    lappend tokens [Token .. .. "" [Span $file $i [expr {$i + 2}] $line $lineStart]]
                     incr i 2
                 } else {
                     Report diagnostics $file $i $line $lineStart 1 "unexpected character \".\""
@@ -236,11 +238,11 @@ proc surface::lexer::tokenize {source file} {
                 set span [Span $file $i $j $line $lineStart]
                 set i $j
                 switch -- $found {
-                    ( - [ {
+                    ( - [ - \{ {
                         lappend brackets [list $found $span [lindex $indents end]]
                     }
-                    ) - ] {
-                        set opener [expr {$found eq ")" ? "(" : "\["}]
+                    ) - ] - \} {
+                        set opener [dict get {) ( ] [ \} \{} $found]
                         if {$brackets eq ""} {
                             lappend diagnostics [surface::diagnostic $span "unmatched \"$found\""]
                             continue
@@ -261,8 +263,7 @@ proc surface::lexer::tokenize {source file} {
     foreach bracket [lreverse $brackets] {
         lassign $bracket opener span
         lappend diagnostics [surface::diagnostic $span "\"$opener\" is never closed"]
-        set closer [expr {$opener eq "(" ? ")" : "\]"}]
-        lappend tokens [Token $closer "" "" $here]
+        lappend tokens [Token [Closer $opener] "" "" $here]
     }
     if {$tokens ne "" && [dict get [lindex $tokens end] kind] ni {NEWLINE INDENT DEDENT}} {
         lappend tokens [Token NEWLINE "" "" $here]
@@ -289,6 +290,11 @@ proc surface::lexer::UnclosedBefore {source start indent} {
 
 proc surface::lexer::Token {kind text value span} {
     return [dict create kind $kind text $text value $value span $span]
+}
+
+# The closing bracket for OPENER ("(", "[" or "{").
+proc surface::lexer::Closer {opener} {
+    return [dict get {( ) [ \] \{ \}} $opener]
 }
 
 # The span of offsets START..END on the line starting at LINESTART.

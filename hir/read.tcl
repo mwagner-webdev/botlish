@@ -21,6 +21,9 @@
 
 namespace eval hir::read {
     variable flags {unbound before-binding deferred duplicate unreachable}
+    # TypeDecls' own result from the current Program call, for Program to
+    # store as the returned HIR's `sourceTypes` field.
+    variable lastTypeDecls {}
 }
 
 # The HIR program described by TEXT.
@@ -61,8 +64,58 @@ proc hir::read::Lines {text} {
     return $lines
 }
 
+# Consumes LINES' own leading "type NAME parent PARENT domain ..." lines
+# (hir::format::TypeDecl's own text -- see format.tcl), re-registering each
+# through the exact same hir::sourcetypes::apply path a fresh source compile
+# uses, so a type a serialized HIR names ("declares Small", ": int[Small]")
+# resolves identically whether this HIR came straight from surface source or
+# was read back from text with no source in sight (item 55-56's round trip).
+# Returns LINES with those consumed.
+proc hir::read::TypeDecls {lines} {
+    set decls {}
+    set rest $lines
+    foreach entry $lines {
+        lassign $entry indent content number
+        if {$indent != 0} { break }
+        set decl [TypeDeclLine $content $number]
+        if {$decl eq ""} { break }
+        lappend decls $decl
+        set rest [lrange $rest 1 end]
+    }
+    set registered {}
+    if {$decls ne ""} {
+        set registered [hir::sourcetypes::apply $decls]
+    }
+    variable lastTypeDecls
+    set lastTypeDecls $registered
+    return $rest
+}
+
+# The surface/lower.tcl-shaped decl dict for one "type ..." HIR text line
+# (NUMBER only for a synthetic span: HIR text has no file/column of its
+# own), or "" if CONTENT is not a type-declaration line.
+proc hir::read::TypeDeclLine {content number} {
+    set span [dict create file <hir-text> line $number column 1]
+    if {[regexp {^type (\S+) parent (\S+) domain interval (-?[0-9]+) (-?[0-9]+)$} $content \
+            -> name parent lo hi]} {
+        set domain [dict create kind interval lo $lo loSpan $span hi $hi hiSpan $span span $span]
+    } elseif {[regexp {^type (\S+) parent (\S+) domain exact (.+)$} $content -> name parent valuesText]} {
+        set values [split $valuesText]
+        set spans [lrepeat [llength $values] $span]
+        set domain [dict create kind exact values $values spans $spans span $span]
+    } else {
+        return ""
+    }
+    return [dict create name $name nameSpan $span parent $parent parentSpan $span \
+        domain $domain domainSpan $span]
+}
+
 proc hir::read::Program {text} {
     set lines [Lines $text]
+    if {$lines eq ""} {
+        Fail 0 "empty HIR text"
+    }
+    set lines [TypeDecls $lines]
     if {$lines eq ""} {
         Fail 0 "empty HIR text"
     }
@@ -93,6 +146,8 @@ proc hir::read::Program {text} {
     dict set hir roots $roots
     dict unset hir lines
     dict unset hir pos
+    variable lastTypeDecls
+    dict set hir sourceTypes $lastTypeDecls
     Finish hir
     return $hir
 }

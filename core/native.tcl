@@ -274,6 +274,16 @@ proc core::native::names {} {
     return [dict keys $registry]
 }
 
+# Removes a previously registered native NAME. Only hir/sourcetypes.tcl uses
+# this, to undo the root constructor/predicate natives it registers for a
+# source-declared type at the start of the next compilation (see
+# SOURCE-DEFINED-INTEGER-DOMAINS.md's "Compilation isolation") -- ordinary
+# (compiler-registered, process-lifetime) natives are never unregistered.
+proc core::native::unregister {name} {
+    variable registry
+    dict unset registry $name
+}
+
 proc core::native::metadata {name} {
     variable registry
     if {![dict exists $registry $name]} {

@@ -1,6 +1,42 @@
 # refined-signatures.test -- verified ordinary-function result contracts.
+#
+# Byte/Nibble/LowNibble/HighNibble are ordinary Botlish source declarations
+# (lib/byte.bot) now, not compiler-registered globals (see
+# SOURCE-DEFINED-INTEGER-DOMAINS.md): a bare `surface::compile` (no module
+# loading) no longer has them. Tests below that are really about *generic*
+# range/exact-set/closed-call machinery, merely using HighNibble's own
+# 16-value sparse shape as a convenient example, now declare their own
+# local "type HighNibble = ..." (item 135's own "testing generic
+# integer-domain machinery: use a source-local test type"); tests that are
+# specifically about the migrated Byte vertical (canonical domain facts,
+# nibble-identity subtyping) load lib/byte.bot for real, through the
+# ordinary module system, via loadByteLibrary below ("testing Byte/Nibble
+# specifically: load the actual byte library").
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+# HighNibble's own domain, as a standalone local type declaration (matches
+# lib/byte.bot's), for tests that need a convenient 16-value sparse example
+# type without depending on byte.bot's own global registration.
+set ::highNibbleDecl "type HighNibble = Int in \{\n    0, 16, 32, 48,\n    64, 80, 96, 112,\n    128, 144, 160, 176,\n    192, 208, 224, 240\n\}\n\n"
+
+# Loads lib/byte.bot for real (a trivial program referencing byte::
+# high_nibble, through the ordinary module system), registering
+# Byte/Nibble/LowNibble/HighNibble exactly as any program depending on
+# byte:: would -- so a directly-following core::type::/hir::range:: query
+# by name resolves them, per this compiler's own compilation-isolation
+# model (a query must immediately follow the build that registered what it
+# looks up -- see SOURCE-DEFINED-INTEGER-DOMAINS.md's "Compilation
+# isolation").
+proc loadByteLibrary {} {
+    set path [makeFile {byte::high_nibble(0)
+} refined-signature-load-byte.bot]
+    try {
+        surface::readProgramFile $path -strict 0
+    } finally {
+        removeFile refined-signature-load-byte.bot
+    }
+}
 
 test refined-signature-syntax-1 {result-only annotations are optional AST metadata} -body {
     set plain [lindex [dict get [surface::parse {fn f(x):
@@ -30,34 +66,34 @@ f()} primitive.bot]
 } -result bool
 
 test refined-signature-verify-1 {constant-mask facts verify a sparse refined result} -body {
-    set h [surface::compile {fn f(x) -> HighNibble:
+    set h [surface::compile [format {%sfn f(x) -> HighNibble:
     bit_and(x, 240)
-f(17)} test.bot]
+f(17)} $::highNibbleDecl] test.bot]
     set block [lindex [hirFind $h block] 0]
     list [hir::types::show [hir::type $h [hir::get $h $block resultType]]] \
         [hir::types::show [hir::type $h [hir::get $h $block inferredResultType]]]
 } -result {{int[HighNibble]} int}
 
 test refined-signature-verify-2 {an invalid sparse result is rejected at definition time} -body {
-    catch {surface::compile {fn bad() -> HighNibble:
-    15} bad.bot} message options
+    catch {surface::compile [format {%sfn bad() -> HighNibble:
+    15} $::highNibbleDecl] bad.bot} message options
     list [dict get $options -errorcode] [string match {*does not prove declared type*} $message]
 } -result {{CORE SEMANTIC TYPE} 1}
 
 test refined-signature-verify-3 {a finite branch join proves a sparse result} -body {
-    set h [surface::compile {fn f(x) -> HighNibble:
+    set h [surface::compile [format {%sfn f(x) -> HighNibble:
     if x:
         0
     else:
         240
-f(true)} branch.bot]
+f(true)} $::highNibbleDecl] branch.bot]
     hir::types::show [hir::typeOf $h [lindex [hirFind $h call] end]]
 } -result {int[HighNibble]}
 
 test refined-signature-verify-4 {bounded-bit-shift-lowering: bit_or now combines two AND masks' own exact sets generically, proving a sparse result an interval-only hull could not (was: "an interval hull alone does not prove a sparse result" -- for an *unconstrained* x, 128 and 112 are disjoint, contiguous bitmasks together spanning HighNibble's own domain, so bit_and(x,128) is exactly {0,128} and bit_and(x,112) is exactly {0,16,...,112}; hir/range.tcl's BitOp now tries the exact cross product for bit_or too, and their union is exactly HighNibble's own 16-value domain -- no HighNibble-specific code, purely the generic exact-set transfer this milestone adds)} -body {
-    set h [surface::compile {fn f(x) -> HighNibble:
+    set h [surface::compile [format {%sfn f(x) -> HighNibble:
     bit_or(bit_and(x, 128), bit_and(x, 112))
-f(17)} hull.bot]
+f(17)} $::highNibbleDecl] hull.bot]
     hir::types::show [hir::typeOf $h [lindex [hirFind $h call] end]]
 } -result {int[HighNibble]}
 
@@ -68,25 +104,25 @@ test refined-signature-verify-4b {an interval hull alone still does not prove a 
     # transfer then has nothing exact to combine on that side and falls
     # back to the sound (but not sparse) interval sum, same as before this
     # milestone.
-    catch {surface::compile {fn f(x) -> HighNibble:
-    bit_or(bit_and(x, 63), bit_and(x, 192))} hull.bot} message
+    catch {surface::compile [format {%sfn f(x) -> HighNibble:
+    bit_or(bit_and(x, 63), bit_and(x, 192))} $::highNibbleDecl] hull.bot} message
     string match {*does not prove declared type*} $message
 } -result 1
 
 test refined-signature-forward-1 {same-module calls and forwarding retain the declared result} -body {
-    set h [surface::compile {fn a(x) -> HighNibble:
+    set h [surface::compile [format {%sfn a(x) -> HighNibble:
     bit_and(x, 240)
 fn b(x):
     a(x)
-b(17)} forward.bot]
+b(17)} $::highNibbleDecl] forward.bot]
     set blocks [hirFind $h block]
     lmap block $blocks {hir::types::show [hir::type $h [hir::get $h $block resultType]]}
 } -result {{int[HighNibble]} {int[HighNibble]}}
 
 test refined-signature-specialize-1 {specialized instances retain the public contract} -body {
-    set h [surface::compile {fn f(x) -> HighNibble:
+    set h [surface::compile [format {%sfn f(x) -> HighNibble:
     bit_and(x, 240)
-[f(17), f(33)]} specialize.bot]
+[f(17), f(33)]} $::highNibbleDecl] specialize.bot]
     set spec [hir::specialize::analyze $h]
     set results {}
     foreach id [dict get $spec used] {
@@ -97,6 +133,7 @@ test refined-signature-specialize-1 {specialized instances retain the public con
 } -result {{int[HighNibble]}}
 
 test refined-signature-domain-1 {canonical scalar domains seed bounded optimizer facts} -body {
+    loadByteLibrary
     list [hir::range::show [hir::range::TypeFact Byte]] \
         [hir::range::show [hir::range::TypeFact Nibble]] \
         [hir::range::show [hir::range::TypeFact LowNibble]] \
@@ -104,12 +141,14 @@ test refined-signature-domain-1 {canonical scalar domains seed bounded optimizer
 } -result {{[0, 255]} {[0, 15]} {[0, 15]} {[0, 240] {0,16,32,48,64,80,96,112,128,144,160,176,192,208,224,240}}}
 
 test refined-signature-domain-2 {nibble identities are distinct Byte subtypes} -body {
+    loadByteLibrary
     list [core::type::subtype Nibble Byte] [core::type::subtype LowNibble Byte] \
         [core::type::subtype HighNibble Byte] [core::type::subtype Nibble LowNibble] \
         [core::type::subtype LowNibble Nibble]
 } -result {1 1 1 0 0}
 
 test refined-signature-narrow-1 {type-seeded sparse facts compose with inequality narrowing} -body {
+    loadByteLibrary
     set h [hir::range::TypeFact HighNibble]
     list [hir::range::show [hir::range::Narrowed < $h [hir::range::point 100]]] \
         [hir::range::show [hir::range::PointEqualityNarrow $h [hir::range::point 160] 0]]

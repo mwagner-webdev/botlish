@@ -65,11 +65,40 @@ proc surface::lowerToHir {ast args} {
             surface::raise $diagnostic
         }
     }
-    set nodes [surface::lower::Sequence [dict get $ast body]]
+    lassign [surface::lower::SplitTypeDecls [dict get $ast body]] executable decls
+    set nodes [surface::lower::Sequence $executable]
     set hir [hir::buildSyntax $nodes -strict 0 \
         -origin [surface::lower::Origin [dict get $ast span] ""] \
-        -files [dict create f1 [dict get $ast span file]]]
+        -files [dict create f1 [dict get $ast span file]] \
+        -type-decls $decls]
     return [surface::lower::Finish $hir [dict get $options -strict]]
+}
+
+# STATEMENTS split into {EXECUTABLE DECLS}: EXECUTABLE keeps every statement
+# with runtime meaning, in order (ready for Sequence); DECLS is the type
+# declarations among them (surface/parser.tcl's `typedecl` nodes), converted
+# to the plain dicts hir::buildSyntax's -type-decls option takes (see
+# hir/sourcetypes.tcl) -- a type declaration is compile-time-only metadata,
+# never lowered to an hir/syntax.tcl node (spec items 21-22: no bind, no
+# runtime value, no NIR).
+proc surface::lower::SplitTypeDecls {statements} {
+    set executable {}
+    set decls {}
+    foreach statement $statements {
+        if {[dict get $statement kind] eq "typedecl"} {
+            lappend decls [TypeDeclOf $statement]
+        } else {
+            lappend executable $statement
+        }
+    }
+    return [list $executable $decls]
+}
+
+proc surface::lower::TypeDeclOf {node} {
+    return [dict create \
+        name [dict get $node name] nameSpan [dict get $node nameSpan] \
+        parent [dict get $node parent] parentSpan [dict get $node parentSpan] \
+        domain [dict get $node domain] domainSpan [dict get $node domain span]]
 }
 
 # The tail both surface::lowerToHir and surface::modules::compileProgramFile
