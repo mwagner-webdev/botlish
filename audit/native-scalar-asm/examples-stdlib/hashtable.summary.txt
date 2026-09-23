@@ -2,39 +2,35 @@ source:  examples/stdlib/hashtable.bot
 backend: Cranelift (specialize=1)
 asm:     hashtable.asm
 vcode:   hashtable.vcode
-machine-code bytes: 13166 (per function: 45 28 28 28 28 396 524 99 61 61 61 61 61 167 179 245 820 1264 429 253 412 444 1129 766 817 665 1176 860 1221 838)
+machine-code bytes: 12868 (per function: 45 388 524 70 61 61 61 61 61 167 179 245 804 1248 429 253 380 439 1113 766 817 665 1168 836 1189 838)
 
 functions:
   0 <program entry>: nir-regs=1
-  1 ht_min_capacity<generic>: nir-regs=2
-  2 ht_empty_state<generic>: nir-regs=2
-  3 ht_occupied_state<generic>: nir-regs=2
-  4 ht_tombstone_state<generic>: nir-regs=2
-  5 ht_fill_empty<mutarray, int, int>: nir-regs=14
-  6 ht_alloc<int>: nir-regs=29
-  7 ht_new<generic>: nir-regs=4
-  8 ht_controls<mutarray>: nir-regs=4
-  9 ht_keys<mutarray>: nir-regs=4
-  10 ht_values<mutarray>: nir-regs=4
-  11 ht_size<mutarray>: nir-regs=4
-  12 ht_tombstones<mutarray>: nir-regs=4
-  13 ht_capacity<mutarray>: nir-regs=3
-  14 ht_probe_start<mutarray, str>: nir-regs=5
-  15 ht_probe_next<mutarray, int>: nir-regs=7
-  16 ht_find_get<mutarray, str, int>: nir-regs=32
-  17 ht_find_insert<mutarray, str, int, int>: nir-regs=47
-  18 ht_get<mutarray, str>: nir-regs=12
-  19 ht_contains<mutarray, str>: nir-regs=7
-  20 ht_rehash_probe<mutarray, int, int>: nir-regs=14
-  21 ht_rehash_insert<list<mutarray>, int, any, any>: nir-regs=16
-  22 ht_rehash_scan<list, int, int, list<mutarray>, int>: nir-regs=29
-  23 ht_rehash<mutarray, int>: nir-regs=30
-  24 ht_should_grow<mutarray>: nir-regs=15
-  25 ht_grow_or_clean<mutarray>: nir-regs=12
-  26 ht_place<mutarray, int, str, str>: nir-regs=35
-  27 ht_set<mutarray, str, str>: nir-regs=36
-  28 ht_delete<mutarray, str>: nir-regs=36
-  29 sample<generic>: nir-regs=28
+  1 ht_fill_empty<mutarray, int, int>: nir-regs=13
+  2 ht_alloc<int>: nir-regs=29
+  3 ht_new<generic>: nir-regs=3
+  4 ht_controls<mutarray>: nir-regs=4
+  5 ht_keys<mutarray>: nir-regs=4
+  6 ht_values<mutarray>: nir-regs=4
+  7 ht_size<mutarray>: nir-regs=4
+  8 ht_tombstones<mutarray>: nir-regs=4
+  9 ht_capacity<mutarray>: nir-regs=3
+  10 ht_probe_start<mutarray, str>: nir-regs=5
+  11 ht_probe_next<mutarray, int>: nir-regs=7
+  12 ht_find_get<mutarray, str, int>: nir-regs=30
+  13 ht_find_insert<mutarray, str, int, int>: nir-regs=44
+  14 ht_get<mutarray, str>: nir-regs=12
+  15 ht_contains<mutarray, str>: nir-regs=7
+  16 ht_rehash_probe<mutarray, int, int>: nir-regs=13
+  17 ht_rehash_insert<list<mutarray>, int, any, any>: nir-regs=15
+  18 ht_rehash_scan<list, int, int, list<mutarray>, int>: nir-regs=28
+  19 ht_rehash<mutarray, int>: nir-regs=30
+  20 ht_should_grow<mutarray>: nir-regs=15
+  21 ht_grow_or_clean<mutarray>: nir-regs=12
+  22 ht_place<mutarray, int, str, str>: nir-regs=33
+  23 ht_set<mutarray, str, str>: nir-regs=35
+  24 ht_delete<mutarray, str>: nir-regs=35
+  25 sample<generic>: nir-regs=28
 
 GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
   function 0 "<program>"
@@ -50,62 +46,10 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 1 "ht_min_capacity"
-    NIR regs: 2
-    raw regs: 1
-    managed-capable regs: 1
-    effects: may_error=false may_gc=false
-    safepoints: 0
-    root candidates: 0
-    max live roots: 0
-    shadow slots: 0
-    entry zero slots: 0
-    depth reservation: no
-    storage: native frame
-  
-  function 2 "ht_empty_state"
-    NIR regs: 2
-    raw regs: 1
-    managed-capable regs: 1
-    effects: may_error=false may_gc=false
-    safepoints: 0
-    root candidates: 0
-    max live roots: 0
-    shadow slots: 0
-    entry zero slots: 0
-    depth reservation: no
-    storage: native frame
-  
-  function 3 "ht_occupied_state"
-    NIR regs: 2
-    raw regs: 1
-    managed-capable regs: 1
-    effects: may_error=false may_gc=false
-    safepoints: 0
-    root candidates: 0
-    max live roots: 0
-    shadow slots: 0
-    entry zero slots: 0
-    depth reservation: no
-    storage: native frame
-  
-  function 4 "ht_tombstone_state"
-    NIR regs: 2
-    raw regs: 1
-    managed-capable regs: 1
-    effects: may_error=false may_gc=false
-    safepoints: 0
-    root candidates: 0
-    max live roots: 0
-    shadow slots: 0
-    entry zero slots: 0
-    depth reservation: no
-    storage: native frame
-  
-  function 5 "ht_fill_empty"
-    NIR regs: 14
+  function 1 "ht_fill_empty"
+    NIR regs: 13
     raw regs: 2
-    managed-capable regs: 12
+    managed-capable regs: 11
     effects: may_error=true may_gc=true
     safepoints: 1
     root candidates: 4
@@ -115,7 +59,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 6 "ht_alloc"
+  function 2 "ht_alloc"
     NIR regs: 29
     raw regs: 9
     managed-capable regs: 20
@@ -128,10 +72,10 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 7 "ht_new"
-    NIR regs: 4
+  function 3 "ht_new"
+    NIR regs: 3
     raw regs: 1
-    managed-capable regs: 3
+    managed-capable regs: 2
     effects: may_error=true may_gc=true
     safepoints: 1
     root candidates: 1
@@ -141,7 +85,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 8 "ht_controls"
+  function 4 "ht_controls"
     NIR regs: 4
     raw regs: 1
     managed-capable regs: 3
@@ -154,7 +98,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 9 "ht_keys"
+  function 5 "ht_keys"
     NIR regs: 4
     raw regs: 1
     managed-capable regs: 3
@@ -167,7 +111,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 10 "ht_values"
+  function 6 "ht_values"
     NIR regs: 4
     raw regs: 1
     managed-capable regs: 3
@@ -180,7 +124,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 11 "ht_size"
+  function 7 "ht_size"
     NIR regs: 4
     raw regs: 1
     managed-capable regs: 3
@@ -193,7 +137,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 12 "ht_tombstones"
+  function 8 "ht_tombstones"
     NIR regs: 4
     raw regs: 1
     managed-capable regs: 3
@@ -206,7 +150,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 13 "ht_capacity"
+  function 9 "ht_capacity"
     NIR regs: 3
     raw regs: 0
     managed-capable regs: 3
@@ -219,7 +163,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 14 "ht_probe_start"
+  function 10 "ht_probe_start"
     NIR regs: 5
     raw regs: 0
     managed-capable regs: 5
@@ -232,7 +176,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 15 "ht_probe_next"
+  function 11 "ht_probe_next"
     NIR regs: 7
     raw regs: 1
     managed-capable regs: 6
@@ -245,10 +189,10 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 16 "ht_find_get"
-    NIR regs: 32
+  function 12 "ht_find_get"
+    NIR regs: 30
     raw regs: 5
-    managed-capable regs: 27
+    managed-capable regs: 25
     effects: may_error=true may_gc=true
     safepoints: 1
     root candidates: 3
@@ -258,10 +202,10 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 17 "ht_find_insert"
-    NIR regs: 47
+  function 13 "ht_find_insert"
+    NIR regs: 44
     raw regs: 5
-    managed-capable regs: 42
+    managed-capable regs: 39
     effects: may_error=true may_gc=true
     safepoints: 2
     root candidates: 4
@@ -271,7 +215,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 18 "ht_get"
+  function 14 "ht_get"
     NIR regs: 12
     raw regs: 1
     managed-capable regs: 11
@@ -284,7 +228,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 19 "ht_contains"
+  function 15 "ht_contains"
     NIR regs: 7
     raw regs: 1
     managed-capable regs: 6
@@ -297,10 +241,10 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 20 "ht_rehash_probe"
-    NIR regs: 14
+  function 16 "ht_rehash_probe"
+    NIR regs: 13
     raw regs: 2
-    managed-capable regs: 12
+    managed-capable regs: 11
     effects: may_error=true may_gc=true
     safepoints: 1
     root candidates: 4
@@ -310,10 +254,10 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 21 "ht_rehash_insert"
-    NIR regs: 16
+  function 17 "ht_rehash_insert"
+    NIR regs: 15
     raw regs: 1
-    managed-capable regs: 15
+    managed-capable regs: 14
     effects: may_error=true may_gc=true
     safepoints: 1
     root candidates: 7
@@ -323,10 +267,10 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 22 "ht_rehash_scan"
-    NIR regs: 29
+  function 18 "ht_rehash_scan"
+    NIR regs: 28
     raw regs: 5
-    managed-capable regs: 24
+    managed-capable regs: 23
     effects: may_error=true may_gc=true
     safepoints: 1
     root candidates: 10
@@ -336,7 +280,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 23 "ht_rehash"
+  function 19 "ht_rehash"
     NIR regs: 30
     raw regs: 7
     managed-capable regs: 23
@@ -349,7 +293,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 24 "ht_should_grow"
+  function 20 "ht_should_grow"
     NIR regs: 15
     raw regs: 3
     managed-capable regs: 12
@@ -362,7 +306,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 25 "ht_grow_or_clean"
+  function 21 "ht_grow_or_clean"
     NIR regs: 12
     raw regs: 1
     managed-capable regs: 11
@@ -375,10 +319,10 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 26 "ht_place"
-    NIR regs: 35
+  function 22 "ht_place"
+    NIR regs: 33
     raw regs: 6
-    managed-capable regs: 29
+    managed-capable regs: 27
     effects: may_error=true may_gc=true
     safepoints: 2
     root candidates: 8
@@ -388,10 +332,10 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 27 "ht_set"
-    NIR regs: 36
+  function 23 "ht_set"
+    NIR regs: 35
     raw regs: 7
-    managed-capable regs: 29
+    managed-capable regs: 28
     effects: may_error=true may_gc=true
     safepoints: 6
     root candidates: 9
@@ -401,10 +345,10 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 28 "ht_delete"
-    NIR regs: 36
+  function 24 "ht_delete"
+    NIR regs: 35
     raw regs: 6
-    managed-capable regs: 30
+    managed-capable regs: 29
     effects: may_error=true may_gc=true
     safepoints: 3
     root candidates: 9
@@ -414,7 +358,7 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 29 "sample"
+  function 25 "sample"
     NIR regs: 28
     raw regs: 0
     managed-capable regs: 28
