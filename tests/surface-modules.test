@@ -79,8 +79,14 @@ test surface-modules-mathish-interp {mathish::inc(41) is 42, interpreted} -body 
 # (not one body copy per call site -- contrast the old -native-body).
 
 test surface-modules-one-definition {a module function is compiled once, called directly from both call sites} -body {
+    # -tiny-leaf-inline-opt 0: this is a standalone-lowering test of
+    # cross-module instance sharing itself (mathish::inc must not be
+    # accidentally duplicated per call site) -- an orthogonal, lower-level
+    # concern than tiny-leaf inlining, which would otherwise inline
+    # mathish::inc's own trivial body (x + 1) away at both call sites,
+    # leaving no separate function or call instruction to count.
     set hir [surface::readProgramFile [file join $::projectRoot examples surface 14-modules.bot]]
-    set nir [native::nir $hir]
+    set nir [native::nir $hir -tiny-leaf-inline-opt 0]
     list [regexp -all {func \d+ "mathish::inc"} $nir] [regexp -all {call \d+ } $nir]
 } -result {1 2}
 

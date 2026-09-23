@@ -183,7 +183,11 @@ test native-int-4 {factorial of 30 through non-tail recursion} -body {
 test native-guard-1 {a known operation on an unknown kind is guarded, not dispatched} -body {
     # x + 1 with x proven a small Int (called only with the literal 1: see
     # hir/range.tcl) lowers to raw arithmetic (op riadd), not op iadd.
-    set body [nirFunction [nirOf "fn inc(x):\n    x + 1\n\ninc(1)" -specialize 0] inc]
+    # -tiny-leaf-inline-opt 0: this is a standalone-lowering test of inc's
+    # own generic-instance guard/raw-arith shape, unrelated to tiny-leaf
+    # inlining (inc's one call site would otherwise inline it away, leaving
+    # no separate "inc" function for nirFunction to find at all).
+    set body [nirFunction [nirOf "fn inc(x):\n    x + 1\n\ninc(1)" -specialize 0 -tiny-leaf-inline-opt 0] inc]
     list [regexp {guard int %0 "\+"} $body] [regexp {op r?iadd} $body] [regexp {callvalue} $body]
 } -result {1 1 0}
 
@@ -342,9 +346,13 @@ test native-call-8 {mutual recursion through a forward reference} -body {
 set pick "fn pick(flag):\n    if flag:\n        return 1\n    \"one\"\n\n"
 
 test native-spec-1 {a parameter's kind guard is removed in the specialization, kept in the generic function} -body {
+    # -tiny-leaf-inline-opt 0: standalone-lowering test of inc's own
+    # specialized/generic instance bodies -- inc's one call site would
+    # otherwise inline it away entirely (specialization mechanics predate
+    # tiny-leaf inlining and are orthogonal to it).
     set text "fn inc(x):\n    x + 1\n\ninc(1)"
-    set specialized [nirOf $text]
-    set generic [nirOf $text -specialize 0]
+    set specialized [nirOf $text -tiny-leaf-inline-opt 0]
+    set generic [nirOf $text -specialize 0 -tiny-leaf-inline-opt 0]
     list [nirInstances $specialized inc] [regexp {guard} [nirFunction $specialized inc int]] \
          [regexp {op r?iadd} [nirFunction $specialized inc int]] \
          [nirInstances $generic inc] [regexp {guard int %0} [nirFunction $generic inc generic]] \
@@ -352,8 +360,15 @@ test native-spec-1 {a parameter's kind guard is removed in the specialization, k
 } -result {int 0 1 generic 1 same}
 
 test native-spec-2 {one function, several instances: Int, String and the generic fallback} -body {
+    # -tiny-leaf-inline-opt 0: standalone-lowering test of specialization
+    # instance creation itself (how many distinct instances same(x,y) gets
+    # for different argument-kind combinations) -- its {int, int} instance
+    # (x==y over two proven Ints) is itself tiny-leaf eligible and would
+    # otherwise inline away at its one call site, leaving nothing for
+    # nirInstances/nirFunction to find, which is not what this test means
+    # to measure.
     set text "${pick}fn same(x, y):\n    x == y\n\n\[same(1, 1), same(\"a\", \"b\"), same(pick(true), pick(false)), same(pick(false), \"one\")\]"
-    set nir [nirOf $text]
+    set nir [nirOf $text -tiny-leaf-inline-opt 0]
     # pick returns an Int or a String: same(pick(...), ...) runs the generic
     # function (structural equality); the known calls compare words or strings.
     list [nirInstances $nir same] \
@@ -378,7 +393,12 @@ test native-spec-2b {a type test's refinement removes the guard on its path, gen
 } -result {{int generic} 0 1 0 1 {[42, 0]}}
 
 test native-spec-3 {calls with the same argument kinds reuse one instance} -body {
-    set nir [nirOf "fn inc(x):\n    x + 1\n\nfn twice(y):\n    inc(inc(y))\n\n\[inc(1), inc(2), twice(3), inc(4 * 5)\]"]
+    # -tiny-leaf-inline-opt 0: standalone-lowering test of instance reuse
+    # itself (does every call site of inc(x) with an Int argument resolve
+    # to the same instance id) -- with tiny-leaf inlining on, every one of
+    # those call sites inlines inc's own body directly and no "call"
+    # instruction referencing a shared instance id survives to count.
+    set nir [nirOf "fn inc(x):\n    x + 1\n\nfn twice(y):\n    inc(inc(y))\n\n\[inc(1), inc(2), twice(3), inc(4 * 5)\]" -tiny-leaf-inline-opt 0]
     set id [nirFunctionId $nir inc int]
     list [nirInstances $nir inc] [nirInstances $nir twice] \
          [regexp -all "call $id " [nirFunction $nir <program>]] [regexp -all "call $id " [nirFunction $nir twice int]]
@@ -559,8 +579,14 @@ test native-spec-11 {errors and big Ints keep their semantics in specializations
 } -result {same same same same same same}
 
 test native-spec-12 {specializations are implementation artifacts: Block values are generic} -body {
+    # -tiny-leaf-inline-opt 0: standalone-lowering test of instance
+    # existence (inc(1)'s own int instance alongside the generic instance
+    # a dynamic use forces) -- the int instance's one direct call site
+    # (inc(1)) is itself tiny-leaf eligible and would otherwise inline
+    # away, leaving nirInstances unable to observe that it was ever
+    # created.
     set text "fn inc(x):\n    x + 1\n\nfn apply(f, v):\n    f(v)\n\nfn same(g):\n    g == inc\n\n\[inc(1), apply(inc, 2), same(inc)\]"
-    set nir [nirOf $text]
+    set nir [nirOf $text -tiny-leaf-inline-opt 0]
     list [nirInstances $nir inc] [regexp "fnvalue [nirFunctionId $nir inc generic]" [nirFunction $nir <program>]] \
          [parity $text]
 } -result {{int generic} 1 same}
@@ -770,9 +796,18 @@ test native-known-unsupported-2 {the same unsupported native still fails when it
 # Representation: local unboxing of proven-small Int arithmetic (hir/range.tcl,
 # the "Representation" section of native/lower.tcl)
 
+# native-repr-1/2/3/6/7/9/20/21 (below): -tiny-leaf-inline-opt 0.
+# Standalone-lowering tests of the pre-existing -repr-opt raw/tagged
+# representation machinery, each over a fixture that -- with tiny-leaf
+# inlining on -- would inline away at its own single call site, leaving
+# nirFunction nothing separate to inspect: an orthogonal, lower-level
+# concern than tiny-leaf inlining (this same raw/tagged decision runs
+# identically whether the body ends up inlined into a caller or compiled
+# as its own function; these tests exist to pin its own behavior in
+# isolation).
 test native-repr-1 {a parameter proven small by its only (literal) callers gets raw arithmetic; a BigInt literal does not} -body {
-    set small [nirFunction [nirOf "fn add1(x):\n    x + 1\n\n\[add1(5), add1(9)\]"] add1]
-    set big [nirFunction [nirOf "fn add1(x):\n    x + 1\n\nadd1(100000000000000000000)"] add1]
+    set small [nirFunction [nirOf "fn add1(x):\n    x + 1\n\n\[add1(5), add1(9)\]" -tiny-leaf-inline-opt 0] add1]
+    set big [nirFunction [nirOf "fn add1(x):\n    x + 1\n\nadd1(100000000000000000000)" -tiny-leaf-inline-opt 0] add1]
     list [regexp {op runbox} $small] [regexp {op riadd} $small] [regexp {op rbox} $small] \
          [regexp {op iadd} $small] \
          [regexp {op runbox} $big] [regexp {op iadd} $big]
@@ -780,12 +815,12 @@ test native-repr-1 {a parameter proven small by its only (literal) callers gets 
 
 test native-repr-2 {arithmetic whose result could leave the small range stays tagged, and still overflows to BigInt correctly} -body {
     set text "fn add1(x):\n    x + 1\n\nadd1($::hir::range::smallMax)"
-    set body [nirFunction [nirOf $text] add1]
+    set body [nirFunction [nirOf $text -tiny-leaf-inline-opt 0] add1]
     list [regexp {op iadd} $body] [regexp {op riadd} $body] [parity $text] [native $text]
 } -result {1 0 same {value 4611686018427387904}}
 
 test native-repr-3 {comparisons between two proven-small Ints compile as a direct raw comparison} -body {
-    set body [nirFunction [nirOf "fn small(x):\n    x < 100\n\n\[small(1), small(2)\]"] small]
+    set body [nirFunction [nirOf "fn small(x):\n    x < 100\n\n\[small(1), small(2)\]" -tiny-leaf-inline-opt 0] small]
     list [regexp {op rilt} $body] [regexp {op ilt} $body]
 } -result {1 0}
 
@@ -803,16 +838,16 @@ test native-repr-5 {a branch join is conservative: one small literal and one tha
 
 test native-repr-6 {a proven-small local crossing an ABI boundary (return, generic call, list) is boxed exactly once} -body {
     set text "fn f(x):\n    x + 1\n\n\[f(1), f(2)\]"
-    set body [nirFunction [nirOf $text] f]
+    set body [nirFunction [nirOf $text -tiny-leaf-inline-opt 0] f]
     list [regexp {ret %[0-9]+} $body] [regexp -all {op rbox} $body] [parity $text]
 } -result {1 1 same}
 
 test native-repr-7 {-repr-opt 0 (and BOTLISH_NATIVE_REPR_OPT=0) disables local unboxing without changing values} -body {
     set text "fn add1(x):\n    x + 1\n\n\[add1(5), add1(9)\]"
-    set on [nirFunction [nirOf $text] add1]
-    set off [nirFunction [nirOf $text -repr-opt 0] add1]
+    set on [nirFunction [nirOf $text -tiny-leaf-inline-opt 0] add1]
+    set off [nirFunction [nirOf $text -repr-opt 0 -tiny-leaf-inline-opt 0] add1]
     set ::env(BOTLISH_NATIVE_REPR_OPT) 0
-    set envOff [nirFunction [nirOf $text] add1]
+    set envOff [nirFunction [nirOf $text -tiny-leaf-inline-opt 0] add1]
     unset ::env(BOTLISH_NATIVE_REPR_OPT)
     list [regexp {op riadd} $on] [regexp {op iadd} $off] [regexp {op riadd} $off] \
          [regexp {op iadd} $envOff] \
@@ -834,8 +869,8 @@ test native-repr-8 {differential: interp, compile, cranelift-generic and craneli
 
 test native-repr-9 {representation statistics: emitted raw ops are counted, and drop to zero with -repr-opt 0} -body {
     set hir [sourceHir "fn add1(x):\n    x + 1\n\n\[add1(5), add1(9)\]"]
-    set on [dict get [native::lower::program $hir] statistics]
-    set off [dict get [native::lower::program $hir -repr-opt 0] statistics]
+    set on [dict get [native::lower::program $hir -tiny-leaf-inline-opt 0] statistics]
+    set off [dict get [native::lower::program $hir -repr-opt 0 -tiny-leaf-inline-opt 0] statistics]
     list [expr {[dict get $on rawUnboxes] > 0}] [expr {[dict get $on rawBoxes] > 0}] \
          [expr {[dict get $on rawArith] > 0}] [dict get $off rawUnboxes] [dict get $off rawBoxes] [dict get $off rawArith]
 } -result {1 1 1 0 0 0}
@@ -936,14 +971,17 @@ test native-repr-19 {a self-tail loop whose raw parameter never crosses a tagged
 
 test native-repr-20 {a raw-safe arithmetic chain nested inside another raw-eligible operation stays fully raw with zero intermediate boxes, boxing only once, at the function's own tagged-return boundary} -body {
     set text "fn f(x):\n    ((x + 1) * 2 - 3) + 10\n\n\[f(1), f(100)\]"
-    set body [nirFunction [nirOf $text] f]
+    set body [nirFunction [nirOf $text -tiny-leaf-inline-opt 0] f]
     list [regexp -all {op riadd} $body] [regexp {op rimul} $body] [regexp {op risub} $body] \
          [regexp -all {op rbox} $body] [regexp -all {op runbox} $body] [parity $text]
 } -result {2 1 1 1 1 same}
 
 test native-repr-21 {a raw-provable value passed to an ordinary (non-self-tail) call still boxes exactly once: this cleanup removes only boxes nothing needed, never a genuine ABI boundary} -body {
+    # -tiny-leaf-inline-opt 0: helper(x): x is itself a trivial (0-op) tiny
+    # leaf; this test is about boxing at an ordinary call boundary, so it
+    # needs that boundary to still exist to inspect.
     set text "fn helper(x):\n    x\n\nfn f(n):\n    if n == 0:\n        return helper(n)\n    f(n - 1)\n\nf(5)"
-    set body [nirFunction [nirOf $text] f]
+    set body [nirFunction [nirOf $text -tiny-leaf-inline-opt 0] f]
     list [regexp {op rbox} $body] [regexp {call [0-9]+ %[0-9]+} $body] [native $text]
 } -result {1 1 {value 0}}
 

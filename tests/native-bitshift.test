@@ -27,9 +27,19 @@ proc parity {text} {
 
 # The NIR text of a plain (non-.bot, no module) program TEXT, compiled and
 # lowered directly (no bench/refined-checks.ir needed for the synthetic
-# eligibility/rejection cases below).
+# eligibility/rejection cases below). -tiny-leaf-inline-opt 0: every test in
+# this file uses this (together with FunctionBody) to inspect a specific
+# function F's own standalone-compiled body -- exactly the shape
+# TINY-LEAF-DEFAULT-ON.md's own "F is itself often a tiny eligible leaf with
+# one caller" case, which would otherwise inline F away and leave nothing
+# for FunctionBody to find. This file's own subject (RawEligibleShift/
+# RawIntOp's raw-representation decision) is a lower, orthogonal layer that
+# runs identically whether its host body ends up inlined into a caller or
+# compiled as its own function -- standalone inspection is the right way to
+# pin it in isolation (see native/lower.tcl's own "Tiny exact-leaf inlining"
+# section and TINY-LEAF-DEFAULT-ON.md's own report).
 proc nirOf {text} {
-    return [native::nir [surface::compile $text t.bot -strict 0]]
+    return [native::nir [surface::compile $text t.bot -strict 0] -tiny-leaf-inline-opt 0]
 }
 
 # The substring of NIR-or-CLIF TEXT holding just function NAME's own body:
@@ -100,8 +110,14 @@ test bitshift-real-byte-nibble-fact-shift-is-0-15 {inside the same instance, x >
     lsort -unique $found
 } -result {{[0, 15]}}
 
+# The four tests below (-tiny-leaf-inline-opt 0) inspect byte::nibble's/
+# byte::high_nibble's own standalone-compiled bodies -- BOUNDED-BIT-SHIFT-
+# LOWERING.md's own subject, a lower layer than tiny-leaf inlining (which
+# TINY-LEAF-DEFAULT-ON.md's own report shows now inlines byte::nibble away
+# at its one real call site by default; see native-tiny-leaf-inline.test's
+# own tiny-leaf-real-* tests for that composed, end-to-end shape instead).
 test bitshift-real-byte-nibble-nir-raw-shift-no-mask-no-helper {byte::nibble's own optimized NIR body: a raw shift (rishr), and no surviving iand/ior/rt_int_shr on this path (spec \167 51, \167 62)} -body {
-    set body [FunctionBody [native::nir [refinedChecksHir]] byte::nibble "\nend"]
+    set body [FunctionBody [native::nir [refinedChecksHir] -tiny-leaf-inline-opt 0] byte::nibble "\nend"]
     list [expr {[string first "op rishr" $body] >= 0}] \
          [expr {[string first "op iand" $body] < 0}] \
          [expr {[string first "op ior" $body] < 0}] \
@@ -109,17 +125,17 @@ test bitshift-real-byte-nibble-nir-raw-shift-no-mask-no-helper {byte::nibble's o
 } -result {1 1 1 1}
 
 test bitshift-real-byte-nibble-no-guard {no runtime kind guard survives on this path either -- every operand was already statically proven int} -body {
-    set body [FunctionBody [native::nir [refinedChecksHir]] byte::nibble "\nend"]
+    set body [FunctionBody [native::nir [refinedChecksHir] -tiny-leaf-inline-opt 0] byte::nibble "\nend"]
     expr {[string first "guard" $body] < 0}
 } -result 1
 
 test bitshift-real-byte-nibble-clif-no-helper-call {byte::nibble's own Cranelift IR body makes no call at all (no rt_int_shr, no BigInt/kind-guard fallback branch): true machine-lowering evidence, not just NIR text (spec \167 73-76)} -body {
-    set body [FunctionBody [native::clif [refinedChecksHir]] byte::nibble "\n; function "]
+    set body [FunctionBody [native::clif [refinedChecksHir] -tiny-leaf-inline-opt 0] byte::nibble "\n; function "]
     list [expr {[string first "call " $body] < 0}] [expr {[string first "sshr" $body] >= 0}]
 } -result {1 1}
 
 test bitshift-real-byte-high-nibble-unchanged {byte::high_nibble (AND/OR/XOR deliberately left on their existing tagged-word fast path, spec \167 32) still lowers to op iand, not raw} -body {
-    set body [FunctionBody [native::nir [refinedChecksHir]] byte::high_nibble "\nend"]
+    set body [FunctionBody [native::nir [refinedChecksHir] -tiny-leaf-inline-opt 0] byte::high_nibble "\nend"]
     list [expr {[string first "op iand" $body] >= 0}] [expr {[string first "rishr" $body] < 0}]
 } -result {1 1}
 
