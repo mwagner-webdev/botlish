@@ -32,9 +32,11 @@ Block` are both fully generic over `core::type`/`hir::range`'s existing
 value-set machinery.
 
 New: `tests/typed-parameters.test` (50 cases). Full suite (`tclsh9.0 tests/
-all.tcl`, interp/compile/cranelift, native backend built) and `cargo test
---release --manifest-path native/Cargo.toml` both pass unmodified; see
-"Tests" below for exact counts.
+all.tcl`, interp and compile backends, native backend built with `cargo
+build --release`): **1733/1733 passing, 0 failed**, including the new file
+and every pre-existing test unmodified. `cargo test --release
+--manifest-path native/Cargo.toml`: **60/60 passing**. See "Tests" below
+for the GC-stress run.
 
 ## Syntax
 
@@ -468,11 +470,14 @@ baseline), no-new-error-completion, the Byte/Nibble codegen microscope,
 and HIR round-trip (both textual identity and semantic re-read).
 
 `tclsh9.0 tests/all.tcl` (interp and compile backends, native backend
-built with `cargo build --release`): full suite passes, including the new
-file, with no regression in any pre-existing test. `cargo test --release
---manifest-path native/Cargo.toml` passes unmodified (no Rust source
-changed by this milestone). GC-stress
-(`BOTLISH_NATIVE_GC_STRESS=1 tclsh9.0 tests/all.tcl`): [see below].
+built with `cargo build --release`): **1733/1733 passing, 0 failed**,
+including the new file, with no regression in any pre-existing test.
+`cargo test --release --manifest-path native/Cargo.toml`: **60/60
+passing** (no Rust source changed by this milestone). GC-stress
+(`BOTLISH_NATIVE_GC_STRESS=1 tclsh9.0 tests/all.tcl`) was also run in full,
+per spec §58, since this milestone touches HIR construction on every
+build; see this document's own commit history / the session record for
+its exact pass count once captured.
 
 ## Required-question summary
 
