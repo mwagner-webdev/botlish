@@ -489,3 +489,52 @@ fn caller():
 caller()}
     native::evalHir [sourceHir $text]
 } -result {list {{int 50} {int 42}}}
+
+# ---------------------------------------------------------------------------
+# The default itself (TINY-LEAF-DEFAULT-ON.md, item 49): compiling with no
+# -tiny-leaf-inline-opt option at all, and with no BOTLISH_NATIVE_TINY_LEAF
+# _INLINE_OPT set, must match explicit "1" and differ from explicit "0" --
+# pinned directly so the production default cannot silently drift back to
+# off (or to some other value) without a test noticing.
+
+test tiny-leaf-default-matches-explicit-on {compiling with no option at all (and no env override) produces the same NIR as -tiny-leaf-inline-opt 1, and differs from explicit 0, for the real acceptance case} -body {
+    if {[info exists ::env(BOTLISH_NATIVE_TINY_LEAF_INLINE_OPT)]} {
+        unset ::env(BOTLISH_NATIVE_TINY_LEAF_INLINE_OPT)
+    }
+    set hir [refinedChecksHir]
+    set nirDefault [native::nir $hir]
+    set nirOn [native::nir $hir -tiny-leaf-inline-opt 1]
+    set nirOff [native::nir $hir -tiny-leaf-inline-opt 0]
+    list [expr {$nirDefault eq $nirOn}] [expr {$nirDefault eq $nirOff}]
+} -result {1 0}
+
+test tiny-leaf-default-is-on-for-synthetic-leaf {the default also inlines a plain synthetic eligible leaf at its one exact call site, with no option given} -body {
+    if {[info exists ::env(BOTLISH_NATIVE_TINY_LEAF_INLINE_OPT)]} {
+        unset ::env(BOTLISH_NATIVE_TINY_LEAF_INLINE_OPT)
+    }
+    set text {fn add_one(x):
+    x + 1
+
+fn caller():
+    add_one(41)
+
+caller()}
+    set nirText [dict get [native::lower::program [sourceHir $text]] text]
+    NoCallIn [FunctionBody $nirText caller]
+} -result 1
+
+test tiny-leaf-env-precedence-matches-convention {BOTLISH_NATIVE_TINY_LEAF_INLINE_OPT sets the default exactly like every other -*-opt env var, and an explicit command option still overrides it either way} -body {
+    set hir [refinedChecksHir]
+    set nirOn [native::nir $hir -tiny-leaf-inline-opt 1]
+    set nirOff [native::nir $hir -tiny-leaf-inline-opt 0]
+    set results {}
+    foreach envVal {0 1} {
+        set ::env(BOTLISH_NATIVE_TINY_LEAF_INLINE_OPT) $envVal
+        set expected [expr {$envVal ? $nirOn : $nirOff}]
+        lappend results [expr {[native::nir $hir] eq $expected}]
+        lappend results [expr {[native::nir $hir -tiny-leaf-inline-opt 1] eq $nirOn}]
+        lappend results [expr {[native::nir $hir -tiny-leaf-inline-opt 0] eq $nirOff}]
+    }
+    unset ::env(BOTLISH_NATIVE_TINY_LEAF_INLINE_OPT)
+    set results
+} -result {1 1 1 1 1 1}
