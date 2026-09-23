@@ -1,0 +1,491 @@
+# native-tiny-leaf-inline.test -- TINY-EXACT-LEAF-INLINING.md: the narrowest,
+# deliberately non-general exact-leaf inliner (native/lower.tcl's
+# LeafInlineEligible/InlineLeafCall, the "Tiny exact-leaf inlining" section),
+# plus the real byte::high_nibble/byte::nibble/web::high_nibble acceptance
+# case: a direct exact call whose callee is a tiny (small, straight-line,
+# environment-free, nonrecursive, guard/error-free) leaf is lowered directly
+# into the caller's own function, with no `call`/`callenv` instruction for
+# that call site at all.
+#
+# -tiny-leaf-inline-opt 1 (or BOTLISH_NATIVE_TINY_LEAF_INLINE_OPT=1) turns it
+# on; it defaults *off* (see native/lower.tcl's own tinyLeafInlineDefault
+# comment: many pre-existing tests across this suite locate a named
+# function's own compiled body by its quoted name, and never expected a
+# plain top-level function with one caller to stop being separately
+# emitted). Every differential test here compares explicit on (1) against
+# explicit off (0); this file's own nirTextOf helper defaults new NIR-
+# inspection fixtures to on (1) unless a test overrides it, so an eligible
+# fixture's own "does it inline" question stays independent of the global
+# default.
+#
+# No assertion in the synthetic (non-corpus) tests names Byte/Nibble/
+# HighNibble/byte::/web:: or any function from that vertical: eligibility
+# and expansion are purely structural/effect-based (see native/lower.tcl's
+# own section header).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 100000
+
+proc sourceHir {text} {
+    return [surface::compile $text t.bot -strict 0]
+}
+
+proc nirTextOf {text args} {
+    return [dict get [native::lower::program [sourceHir $text] -tiny-leaf-inline-opt 1 {*}$args] text]
+}
+
+# The substring of NIR text TEXT holding just function NAME's own body (see
+# tests/native-bitshift.test's own FunctionBody, duplicated here so this
+# file stays independently sourceable).
+proc FunctionBody {text name} {
+    set idx [string first "\"$name\"" $text]
+    if {$idx < 0} {
+        error "function \"$name\" not found"
+    }
+    set endIdx [string first "\nend" $text $idx]
+    if {$endIdx < 0} {
+        set endIdx [string length $text]
+    }
+    return [string range $text $idx $endIdx]
+}
+
+# 1 if BODY (a FunctionBody substring) contains no `call`/`callenv`
+# instruction at all -- the structural signature of "every call site in this
+# function was inlined (or this function makes no calls to begin with)".
+proc NoCallIn {body} {
+    return [expr {![regexp {= call(env)? } $body]}]
+}
+
+proc HasCallIn {body} {
+    return [expr {[regexp {= call(env)? } $body]}]
+}
+
+# The real acceptance case: byte::nibble/byte::high_nibble's closed
+# instances in the actual refined-checks.ir/web.bot chain (identical to
+# tests/native-bitshift.test's own refinedChecksHir).
+proc refinedChecksHir {} {
+    return [native::buildProgramHir [core::loadProgramFile \
+        [file join $::projectRoot bench refined-checks.ir]]]
+}
+
+# ---------------------------------------------------------------------------
+# The real acceptance case: web.bot's local `high_nibble` (nested inside
+# uri_escape_text) composes byte::high_nibble(b) then byte::nibble(...).
+# Before this milestone (BOUNDED-BIT-SHIFT-LOWERING.md \167 6): two real
+# `call` instructions. After: zero.
+
+test tiny-leaf-real-high-nibble-no-calls {web.bot's local high_nibble wrapper contains no call/callenv to either helper (spec's own primary acceptance case)} -body {
+    set nirText [native::nir [refinedChecksHir] -tiny-leaf-inline-opt 1]
+    set body [FunctionBody $nirText high_nibble]
+    NoCallIn $body
+} -result 1
+
+test tiny-leaf-real-high-nibble-no-calls-off {with the flag off, the same wrapper still contains exactly the two ordinary calls (confirms the "before" shape, not merely that the flag exists)} -body {
+    set nirText [dict get [native::lower::program [refinedChecksHir] -tiny-leaf-inline-opt 0] text]
+    set body [FunctionBody $nirText high_nibble]
+    list [HasCallIn $body] [regexp -all {= call(env)? } $body]
+} -result {1 2}
+
+test tiny-leaf-real-high-nibble-has-mask-and-shift {the wrapper's own body now contains the two helpers' own operations directly (a mask and a shift), not just "no call"} -body {
+    set nirText [native::nir [refinedChecksHir] -tiny-leaf-inline-opt 1]
+    set body [FunctionBody $nirText high_nibble]
+    list [expr {[string first "op iand" $body] >= 0}] \
+        [expr {[string first "rishr" $body] >= 0 || [string first "op ishr" $body] >= 0}]
+} -result {1 1}
+
+test tiny-leaf-real-value-unchanged {the real program's own value is unchanged by tiny-leaf inlining} -body {
+    list [native::evalHir [refinedChecksHir] -tiny-leaf-inline-opt 1] \
+        [native::evalHir [refinedChecksHir] -tiny-leaf-inline-opt 0]
+} -result {{list {{int 400} {int 0}}} {list {{int 400} {int 0}}}}
+
+# byte::high_nibble/byte::nibble each have exactly one caller in this real
+# corpus program (CLOSED-CALL-PARAMETER-FACTS.md's own finding); once that
+# one call site inlines, native::lower::program's ordinary reachability
+# worklist (unchanged -- no new DCE pass) naturally no longer emits either
+# function's own separate machine code. This is exactly the "unless
+# existing DCE independently proves it unused" exception the milestone's
+# own spec allows (spec \167 9, \167 36-37): the *source* functions remain
+# ordinary, valid, separately callable Botlish (lib/byte.bot is untouched),
+# just not materialized into *this particular* compiled program once
+# nothing in it still calls them the ordinary way. The synthetic
+# tiny-leaf-canonical-still-callable-value test below covers the "still
+# has another live caller" case directly, with a NIR check that the
+# canonical function *does* survive there.
+test tiny-leaf-real-helpers-not-separately-emitted {byte::high_nibble/byte::nibble no longer appear as separate compiled functions at all: reachability (unchanged), not a new DCE pass, since their one caller inlined away} -body {
+    set nirText [native::nir [refinedChecksHir] -tiny-leaf-inline-opt 1]
+    list [expr {[string first "\"byte::high_nibble\"" $nirText] >= 0}] \
+        [expr {[string first "\"byte::nibble\"" $nirText] >= 0}]
+} -result {0 0}
+
+# ---------------------------------------------------------------------------
+# A generic, non-byte leaf: proves the mechanism is not Byte/Nibble-specific.
+
+test tiny-leaf-generic-add-one-inlines {a plain, non-byte tiny leaf (x + 1) inlines at its one exact call site} -body {
+    set body [FunctionBody [nirTextOf {fn add_one(x):
+    x + 1
+
+fn caller():
+    add_one(41)
+
+caller()}] caller]
+    list [NoCallIn $body] [expr {[string first "iadd" $body] >= 0 || [string first "riadd" $body] >= 0}]
+} -result {1 1}
+
+test tiny-leaf-generic-add-one-value {inlining add_one does not change its value} -body {
+    native::evalHir [sourceHir {fn add_one(x):
+    x + 1
+
+add_one(41)}]
+} -result {int 42}
+
+test tiny-leaf-generic-add-one-off {with the flag off, the same call is an ordinary call} -body {
+    set body [FunctionBody [nirTextOf {fn add_one(x):
+    x + 1
+
+fn caller():
+    add_one(41)
+
+caller()} -tiny-leaf-inline-opt 0] caller]
+    HasCallIn $body
+} -result 1
+
+# ---------------------------------------------------------------------------
+# Eligibility: what the mechanism accepts and declines (structural only).
+
+test tiny-leaf-eligible-multi-op-budget {a straight-line leaf with exactly 8 native calls (the budget) still inlines} -body {
+    set body [FunctionBody [nirTextOf {fn big(x):
+    x + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1
+
+fn caller():
+    big(0)
+
+caller()}] caller]
+    NoCallIn $body
+} -result 1
+
+test tiny-leaf-ineligible-over-budget {one more operation (9) than the budget declines, falling back to an ordinary call} -body {
+    set body [FunctionBody [nirTextOf {fn big(x):
+    x + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1
+
+fn caller():
+    big(0)
+
+caller()}] caller]
+    HasCallIn $body
+} -result 1
+
+test tiny-leaf-ineligible-branch {a leaf with a conditional declines (no control flow is ever inlined)} -body {
+    set body [FunctionBody [nirTextOf {fn abs_like(x):
+    if x < 0:
+        0 - x
+    else:
+        x
+
+fn caller():
+    abs_like(0 - 5)
+
+caller()}] caller]
+    HasCallIn $body
+} -result 1
+
+test tiny-leaf-ineligible-loop {a leaf with a loop declines} -body {
+    set body [FunctionBody [nirTextOf {fn spin(n):
+    total = 0
+    i = 0
+    loop:
+        if i >= n:
+            break total
+        total = total + i
+        i = i + 1
+
+fn caller():
+    spin(3)
+
+caller()}] caller]
+    HasCallIn $body
+} -result 1
+
+test tiny-leaf-ineligible-self-recursive {a self-recursive leaf declines (a call to a Block target inside the body is never allowed, which trivially rules out recursion too)} -body {
+    set body [FunctionBody [nirTextOf {fn fact(n):
+    if n <= 1:
+        1
+    else:
+        n * fact(n - 1)
+
+fn caller():
+    fact(5)
+
+caller()}] caller]
+    HasCallIn $body
+} -result 1
+
+test tiny-leaf-ineligible-mutually-recursive {mutually recursive leaves both decline (each contains a call to another Block target)} -body {
+    set body [FunctionBody [nirTextOf {fn is_even(n):
+    if n == 0:
+        true
+    else:
+        is_odd(n - 1)
+
+fn is_odd(n):
+    if n == 0:
+        false
+    else:
+        is_even(n - 1)
+
+fn caller():
+    is_even(6)
+
+caller()}] caller]
+    HasCallIn $body
+} -result 1
+
+test tiny-leaf-ineligible-captures {a leaf that captures an enclosing local (needs an environment) declines} -body {
+    set body [FunctionBody [nirTextOf {fn f(n):
+    fn step(x):
+        x + n
+    step(5)
+
+f(10)}] f]
+    HasCallIn $body
+} -result 1
+
+test tiny-leaf-ineligible-allocating {a leaf that allocates (constructs a List) declines} -body {
+    set body [FunctionBody [nirTextOf {fn pair(x):
+    [x, x]
+
+fn caller():
+    pair(3)
+
+caller()}] caller]
+    HasCallIn $body
+} -result 1
+
+test tiny-leaf-ineligible-mutating {a leaf that mutates a MutableArray declines (allocation/mutation, not proven effect-free)} -body {
+    set body [FunctionBody [nirTextOf {fn touch(a):
+    mutable_array_set(a, 0, 1)
+
+fn caller():
+    touch(mutable_array_allocate(1))
+
+caller()}] caller]
+    HasCallIn $body
+} -result 1
+
+test tiny-leaf-ineligible-erroring-mod {a leaf using mod (can raise on a zero divisor; no error-safety proof exists for it) declines} -body {
+    set body [FunctionBody [nirTextOf {fn m(x):
+    mod(x, 3)
+
+fn caller():
+    m(10)
+
+caller()}] caller]
+    HasCallIn $body
+} -result 1
+
+test tiny-leaf-ineligible-shift-unproven-count {a leaf shifting by a genuinely unproven (not a single joined value) amount declines: the generic shift's own RANGE check is not statically excluded. Two callers passing different literal counts, not one: a single caller's own literal count would itself get proven a single value by the existing closed-call parameter-fact fixpoint (CLOSED-CALL-PARAMETER-FACTS.md) and legitimately inline -- this is deliberately the case that fixpoint cannot narrow to a point} -body {
+    set body [FunctionBody [nirTextOf {fn sh(x, k):
+    shift_right(x, k)
+
+fn caller(pick):
+    if pick:
+        sh(200, 2)
+    else:
+        sh(200, 5)
+
+caller(true)}] caller]
+    HasCallIn $body
+} -result 1
+
+test tiny-leaf-eligible-shift-proven-count {a leaf shifting by a proven-safe constant amount inlines: the real byte::nibble shape, in miniature, same-module} -body {
+    set body [FunctionBody [nirTextOf {fn sh(x):
+    shift_right(x, 4)
+
+fn caller():
+    sh(200)
+
+caller()}] caller]
+    NoCallIn $body
+} -result 1
+
+test tiny-leaf-dynamic-call-not-inlined {a call through a first-class value (unknown target) never inlines, even though the same function's own direct call site does} -body {
+    set text {fn inc(x):
+    x + 1
+
+fn apply(g, y):
+    g(y)
+
+[inc(5), apply(inc, 5)]}
+    set nirText [nirTextOf $text]
+    set applyBody [FunctionBody $nirText apply]
+    list [regexp {callvalue} $applyBody] [expr {[string first "\"inc\"" $nirText] >= 0}] \
+        [native::evalHir [sourceHir $text]]
+} -result {1 1 {list {{int 6} {int 6}}}}
+
+test tiny-leaf-dynamic-call-top-level-site-still-inlines {the *other* (direct, top-level) call to the very same eligible leaf still inlines, independent of the dynamic call elsewhere} -body {
+    set text {fn inc(x):
+    x + 1
+
+fn apply(g, y):
+    g(y)
+
+fn caller():
+    inc(5)
+
+[caller(), apply(inc, 5)]}
+    list [NoCallIn [FunctionBody [nirTextOf $text] caller]] [native::evalHir [sourceHir $text]]
+} -result {1 {list {{int 6} {int 6}}}}
+
+# ---------------------------------------------------------------------------
+# Argument evaluation semantics (mandatory: spec \167\167 13-18, 61-64).
+#
+# Observable evaluation order/count on the *native* backend has no test-log/
+# test-tick primitive (those are interp/compile-only Tcl-backed test
+# natives, not in native/lower.tcl's own op table -- see tests/helpers.tcl's
+# own header): a MutableArray slot is this file's own observable sequence,
+# using only ordinary, already-native-lowerable operations.
+
+test tiny-leaf-argument-evaluated-once {a callee parameter referenced twice in its body still evaluates its one argument expression exactly once} -body {
+    set text {fn double_use(x):
+    x + x
+
+fn next(a):
+    v = mutable_array_get(a, 0)
+    mutable_array_set(a, 0, v + 1)
+    v
+
+fn run():
+    a = mutable_array_allocate(1)
+    mutable_array_set(a, 0, 10)
+    r = double_use(next(a))
+    [r, mutable_array_get(a, 0)]
+
+run()}
+    list [native::evalHir [sourceHir $text] -tiny-leaf-inline-opt 1] \
+        [native::evalHir [sourceHir $text] -tiny-leaf-inline-opt 0] \
+        [NoCallIn [FunctionBody [nirTextOf $text] run]]
+} -result {{list {{int 20} {int 11}}} {list {{int 20} {int 11}}} 0}
+
+test tiny-leaf-unused-argument-still-evaluated {a callee parameter the body never references still has its own argument evaluated exactly once} -body {
+    set text {fn ignore_second(x, y):
+    x + 1
+
+fn next(a):
+    v = mutable_array_get(a, 0)
+    mutable_array_set(a, 0, v + 1)
+    v
+
+fn run():
+    a = mutable_array_allocate(1)
+    mutable_array_set(a, 0, 0)
+    r = ignore_second(5, next(a))
+    [r, mutable_array_get(a, 0)]
+
+run()}
+    list [native::evalHir [sourceHir $text] -tiny-leaf-inline-opt 1] \
+        [native::evalHir [sourceHir $text] -tiny-leaf-inline-opt 0]
+} -result {{list {{int 6} {int 1}}} {list {{int 6} {int 1}}}}
+
+test tiny-leaf-argument-order-preserved {two argument expressions with observable effects still evaluate left to right, matching ordinary (uninlined) call semantics exactly} -body {
+    set text {fn combine(a, b):
+    a - b
+
+fn next(arr):
+    v = mutable_array_get(arr, 0)
+    mutable_array_set(arr, 0, v + 1)
+    v
+
+fn run():
+    arr = mutable_array_allocate(1)
+    mutable_array_set(arr, 0, 0)
+    combine(next(arr), next(arr))
+
+run()}
+    list [native::evalHir [sourceHir $text] -tiny-leaf-inline-opt 1] \
+        [native::evalHir [sourceHir $text] -tiny-leaf-inline-opt 0]
+} -result {{int -1} {int -1}}
+
+test tiny-leaf-argument-error-preserved {an argument expression that raises still raises the same error, before the (inlined-away) callee's own body ever runs} -body {
+    set text {fn double_use(x):
+    x + x
+
+fn caller():
+    double_use(mod(5, 0))
+
+caller()}
+    set onCode [catch {native::evalHir [sourceHir $text] -tiny-leaf-inline-opt 1} onMsg onOpts]
+    set offCode [catch {native::evalHir [sourceHir $text] -tiny-leaf-inline-opt 0} offMsg offOpts]
+    list $onCode $offCode [dict get $onOpts -errorcode] [dict get $onOpts -errorcode] \
+        [expr {[dict get $onOpts -errorcode] eq [dict get $offOpts -errorcode]}]
+} -result {1 1 {CORE SEMANTIC ARITHMETIC} {CORE SEMANTIC ARITHMETIC} 1}
+
+# ---------------------------------------------------------------------------
+# Multi-call-site behavior (spec \167 40, \167 71): every exact call site to the
+# same small eligible leaf inlines independently -- this milestone's own
+# budget is purely per-callee-body-size (LEAFINLINEMAXOPS), not additionally
+# weighted by call-site count (spec \167 41's own "state so explicitly": no
+# callee-size x call-site-count global budget exists in this milestone).
+
+test tiny-leaf-multi-call-site-all-inline {a tiny leaf called from five distinct exact sites inlines at every one of them, deterministically} -body {
+    set text {fn sq(x):
+    x * x
+
+fn caller():
+    sq(1) + sq(2) + sq(3) + sq(4) + sq(5)
+
+caller()}
+    set body [FunctionBody [nirTextOf $text] caller]
+    list [NoCallIn $body] [native::evalHir [sourceHir $text]]
+} -result {1 {int 55}}
+
+test tiny-leaf-multi-call-site-deterministic {the same program lowered twice produces byte-identical NIR (deterministic inlining, no hash-order dependence)} -body {
+    set text {fn sq(x):
+    x * x
+
+fn caller():
+    sq(1) + sq(2) + sq(3) + sq(4) + sq(5)
+
+caller()}
+    set hir [sourceHir $text]
+    expr {[native::nir $hir] eq [native::nir $hir]}
+} -result 1
+
+# ---------------------------------------------------------------------------
+# The canonical function remains an ordinary, separately callable Botlish
+# function (spec \167 9, \167 104): not removed merely because one call site
+# inlined, as long as something else still reaches it the ordinary way.
+
+test tiny-leaf-canonical-still-callable-value {a leaf inlined at one call site and called ordinarily (through a dynamic value) at another still gives the same value both ways} -body {
+    set text {fn inc(x):
+    x + 1
+
+fn apply(g, y):
+    g(y)
+
+[inc(5), apply(inc, 5)]}
+    native::evalHir [sourceHir $text]
+} -result {list {{int 6} {int 6}}}
+
+# ---------------------------------------------------------------------------
+# GC stress smoke test (full-suite GC stress is run separately, per
+# BOTLISH_NATIVE_GC_STRESS=1 tclsh9.0 tests/all.tcl -- this just exercises an
+# inlined call inside an allocating caller under forced collection).
+
+test tiny-leaf-gc-stress-smoke {an inlined leaf's own caller still allocates/collects correctly around it} -body {
+    set text {fn double_use(x):
+    x + x
+
+fn build(n, i, acc):
+    if i >= n:
+        acc
+    else:
+        build(n, i + 1, concat(acc, "x"))
+
+fn caller():
+    s = build(50, 0, "")
+    [length(s), double_use(21)]
+
+caller()}
+    native::evalHir [sourceHir $text]
+} -result {list {{int 50} {int 42}}}

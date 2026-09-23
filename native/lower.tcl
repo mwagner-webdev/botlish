@@ -185,6 +185,26 @@ namespace eval native::lower {
     # analysis of the program, and whether it is enabled at all.
     variable traversal {}
     variable traversalOpt 1
+    # Tiny exact-leaf inlining (see "Tiny exact-leaf inlining" below):
+    # whether it is enabled at all, and a memo cache InstanceId -> 0|1 (reset
+    # at the start of every native::lower::program call), since
+    # LeafInlineEligible's own answer for a given callee instance never
+    # changes within one lowering and the same callee may be reached from
+    # several exact call sites.
+    variable tinyLeafInlineOpt 0
+    variable leafEligible {}
+    # The small, fixed, auditable operation-count budget (TINY-EXACT-LEAF-
+    # INLINING.md): comfortably above both real target bodies
+    # (byte::high_nibble's 1 native call, byte::nibble's 4), with headroom
+    # for a small synthetic multi-op test, not guessed large.
+    variable leafInlineMaxOps 8
+    # The fixed, generic set of native ops (the same op table above) a tiny
+    # leaf's body may call: pure, total, allocation-free scalar Int
+    # arithmetic/comparison/bitwise ops, plus shift (LeafShiftSafe proves
+    # its own error-safety separately) -- deliberately not `imod` (no
+    # existing error-safety proof for it), not `veq`/`streq` (not proven
+    # allocation-free), and nothing else in the `natives` table above.
+    variable leafInlineSafeOps {iadd isub imul ilt ile igt ige ieq iand ior ixor ishr ishl}
 }
 
 # ---------------------------------------------------------------------------
@@ -907,6 +927,8 @@ proc native::lower::program {hirProgram args} {
     variable stringRegionOpt
     variable traversal
     variable traversalOpt
+    variable tinyLeafInlineOpt
+    variable leafEligible
 
     set default [expr {[info exists ::env(BOTLISH_NATIVE_SPECIALIZE)]
         && $::env(BOTLISH_NATIVE_SPECIALIZE) eq "0" ? 0 : 1}]
@@ -926,11 +948,28 @@ proc native::lower::program {hirProgram args} {
         && $::env(BOTLISH_NATIVE_CALL_EFFECTS_OPT) eq "0" ? 0 : 1}]
     set traversalDefault [expr {[info exists ::env(BOTLISH_NATIVE_STRING_TRAVERSAL_OPT)]
         && $::env(BOTLISH_NATIVE_STRING_TRAVERSAL_OPT) eq "0" ? 0 : 1}]
+    # Default *off* (every other -*-opt flag above defaults on): evidence,
+    # not caution for its own sake (TINY-EXACT-LEAF-INLINING.md's own
+    # report) -- a materialized function that inlining's own ordinary,
+    # unchanged reachability worklist stops emitting once its last caller
+    # inlines away (native::lower::program's own pending-function loop,
+    # above) is completely sound, but a wide swath of *pre-existing* tests
+    # across this suite locate a named function's own compiled body via its
+    # quoted name (FunctionBody-style helpers throughout tests/native-*
+    # .test) and never expected a plain top-level `fn f(x): ...` with one
+    # caller to stop being separately emitted. Defaulting this flag on
+    # would silently break that established testing idiom in many
+    # unrelated files having nothing to do with this milestone -- exactly
+    # the "debugger/provenance uncertainty" case the milestone's own spec
+    # names as its own explicit reason to default off.
+    set tinyLeafInlineDefault [expr {[info exists ::env(BOTLISH_NATIVE_TINY_LEAF_INLINE_OPT)]
+        && $::env(BOTLISH_NATIVE_TINY_LEAF_INLINE_OPT) eq "1" ? 1 : 0}]
     set options [hir::Options native::lower::program \
         [list -specialize $default -repr-opt $reprDefault -escape-opt $escapeDefault \
             -param-aggregate-opt $paramAggregateDefault -block-escape-opt $blockEscapeDefault \
             -string-region-opt $stringRegionDefault -string-traversal-opt $traversalDefault \
-            -call-facts-opt $callFactsDefault -call-effects-opt $callEffectsDefault] $args]
+            -call-facts-opt $callFactsDefault -call-effects-opt $callEffectsDefault \
+            -tiny-leaf-inline-opt $tinyLeafInlineDefault] $args]
     if {[hir::mode $hirProgram] ne "program"} {
         throw {NATIVE UNSUPPORTED sequence-mode} \
             "native lowering: only program-mode HIR can be compiled (sequence mode runs in an unknown environment)"
@@ -945,6 +984,8 @@ proc native::lower::program {hirProgram args} {
     set blockEscapeOpt [dict get $options -block-escape-opt]
     set stringRegionOpt [dict get $options -string-region-opt]
     set traversalOpt [dict get $options -string-traversal-opt]
+    set tinyLeafInlineOpt [dict get $options -tiny-leaf-inline-opt]
+    set leafEligible [dict create]
     set spec [hir::specialize::analyze $hirProgram -specialize [dict get $options -specialize] \
         -call-facts-opt [dict get $options -call-facts-opt]]
     set ranges [hir::range::analyze $hirProgram $spec [dict get $options -call-facts-opt]]
@@ -2893,6 +2934,7 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
     variable stringregion
     variable traversal
     variable stringRegionOpt
+    variable tinyLeafInlineOpt
     lassign [dict get $node target] targetKind target
     set calleeExpr [dict get $node callee]
     set argExprs [dict get $node args]
@@ -3231,6 +3273,18 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
             }
             return [list $dsts region]
         }
+        if {$tinyLeafInlineOpt && $fieldWidths eq "" && [LeafInlineEligible $instance]} {
+            # A tiny exact-leaf callee (LeafInlineEligible: straight-line,
+            # environment-free, nonrecursive, small, guard/error-free body --
+            # see "Tiny exact-leaf inlining" below): its body is lowered
+            # directly here, inline, in the caller's own function -- never
+            # as a `call`/`callenv` to its own compiled function at all for
+            # this one call site (the "String regions"/"String traversal"
+            # sections' own precedent). ARGREGS is already this call's own
+            # ordinary, already-evaluated (exactly once, left-to-right)
+            # argument registers.
+            return [InlineLeafCall fn $e $node $instance $argRegs]
+        }
         set id [expr {$fieldWidths ne "" ? [FieldsRef $instance] : [FunctionRef $instance]}]
         dict lappend fn calls [list direct $id $self]
         set targetPlan [hir::traversal::plan $traversal $instance]
@@ -3539,6 +3593,386 @@ proc native::lower::InlineRegionConsumerCall {fnVar argExpr calleeId paramIndex}
         }
     }
     set result [EmitRegionConsumerBody fn $calleeView [lindex $body end] $b $region]
+    if {$result eq "never"} {
+        return {never tagged}
+    }
+    return [list $result tagged]
+}
+
+# ---------------------------------------------------------------------------
+# Tiny exact-leaf inlining (TINY-EXACT-LEAF-INLINING.md)
+#
+# The narrowest, deliberately non-general form of inlining this compiler
+# does. A direct call E (target instance CALLEEID, chosen by hir::specialize
+# like any other exact call) whose own callee instance LeafInlineEligible
+# proves is a "tiny exact leaf" is lowered (InlineLeafCall) by re-running the
+# ordinary per-expression lowering (Sequence/Expr/Bind/NativeCall -- the same
+# procs an ordinary function body already goes through) directly against the
+# callee's own body, in the caller's own function, instead of ever emitting
+# a `call`/`callenv` instruction for this call site. Exactly like the
+# "String regions"/"String traversal" sections above: this never touches
+# HIR, and never requires the callee's own canonical function to disappear
+# -- whatever else in the program still calls it the ordinary way keeps it
+# reachable through native::lower::program's own worklist, unchanged.
+#
+# Eligibility (LeafInlineEligible) is purely structural/effect-based, with
+# no callee name anywhere in it:
+#
+#   - the call's own target is an *exact* instance (hir::specialize already
+#     resolved it -- Call only reaches this dispatch when `fn targets`
+#     names one) and needs no environment (its block is in ENVLESS: no
+#     captures, so no closure value, no capture-list bookkeeping);
+#   - its body is a straight-line sequence of `bind`/plain-expression
+#     statements -- no `if`, `loop`, `break`, `continue`, `return`, `ok`,
+#     `error`, or nested `block` anywhere in it (LeafExprEligible's own
+#     allowlist accepts only `const`, `ref`, `bind`, and a safe native
+#     `call`) -- which, since `block` is the only HIR shape that could
+#     recurse or capture an environment, also makes the body trivially
+#     nonrecursive and closure-free with no separate check needed;
+#   - every call in the body targets a *native*, never another `block`
+#     (this alone rules out recursion, mutual recursion, and any other
+#     internal function call: a leaf with zero calls to Botlish functions
+#     cannot recurse through one);
+#   - every such native call resolves (NativeCallOp) to one of a small,
+#     fixed, generic set of pure, total, allocation-free scalar Int ops
+#     (LEAFINLINESAFEOPS, above: the arithmetic/comparison/bitwise/shift
+#     family already in the `natives` op table -- deliberately not `imod`,
+#     not equality across non-Int kinds, not any string/list/hash/mutable-
+#     array op, none of which this milestone attempts to prove error- or
+#     allocation-free);
+#   - none of the body's own calls is *proven* to always raise
+#     (hir::aot's own `knownErrors` blocker fact -- computed here for the
+#     callee's own instance specifically, via the same
+#     hir::aot::analyzeRegion + CollectChecks every ordinary function
+#     lowering already runs for itself, in Function above). An ordinary,
+#     merely-*unproven* runtime kind guard (`guards`) is deliberately *not*
+#     a reason to decline: EmitArgGuards emits that exact same check
+#     wherever NativeCall runs a native call, inlined here or not -- the
+#     real byte::high_nibble(b) case (its own `b` is not statically proven
+#     int at web.bot's call site) needs exactly this to still inline (the
+#     milestone's own mandatory acceptance target): the check simply moves
+#     with the operation, on the same value, checked before it is used
+#     either way, so this introduces no new possible failure and preserves
+#     the same error on the same input;
+#   - a shift call (`ishr`/`ishl`) additionally proves (LeafShiftSafe) its
+#     own shift amount a single already-known value strictly within
+#     RAWSHIFTMAX (the same bound RawEligibleShift already uses): the only
+#     one of these ops whose generic runtime helper can otherwise raise a
+#     semantic RANGE error, so this is the one place eligibility directly
+#     proves an otherwise-possible error path statically excluded, rather
+#     than merely reading an existing blocker fact -- deliberately narrower
+#     than RawEligibleShift's own raw-*representation* proof: this only
+#     needs the shift to be unable to *error*, not to be raw-lowerable, so
+#     it does not require the shifted value's own sign or size at all
+#     (core::scalarbits::shiftRight/shiftLeft only ever check the amount);
+#     whether the shift ends up raw or tagged afterward is still entirely
+#     NativeCall's own ordinary, unrelated decision, made the same way
+#     whether this body was inlined or not (spec's own "do not force
+#     rawness");
+#   - the body's own total native-call count does not exceed
+#     LEAFINLINEMAXOPS (8, above): comfortably above both real target
+#     bodies (byte::high_nibble's 1 call, byte::nibble's 4), with headroom
+#     for a small synthetic multi-op test, not guessed large.
+#
+# Argument evaluation (InlineLeafCall): CALLERARGREGS is the *same* already-
+# lowered list Call's own ordinary block-call path already computed
+# (CallArgs, just above this dispatch) -- every argument expression is
+# evaluated exactly once, in its own original left-to-right order, with
+# whatever side effects or errors it may have, *before* InlineLeafCall is
+# ever reached at all: an unused callee parameter's own argument is still
+# evaluated (CallArgs evaluates every argument unconditionally, whether or
+# not the callee body ever references the corresponding parameter), and an
+# argument that itself "never"s (errors) short-circuits Call itself before
+# InlineLeafCall is ever reached. Substitution needs no bespoke environment
+# of its own: `fn locals` is already keyed by BindingId, and hir.tcl's IDs
+# are allocated once, monotonically, over the *whole* program (hir/hir.tcl's
+# own header) -- so a callee's own parameter BindingId can never collide
+# with any binding already live in the caller's `fn locals`. Binding the
+# callee's parameter BindingIds directly to the caller's own already-
+# evaluated argument registers (`[list reg $r]`, the same shape Function
+# itself gives an ordinary parameter) is therefore both sufficient and safe:
+# every `ref` to that parameter anywhere in the callee's body resolves
+# through the *ordinary* Access/Ref machinery, identically to any other
+# already-bound local, with no new code path in either proc.
+#
+# Facts and provenance: HIR/CURRENTINSTANCE/GUARDS/KNOWNERRORS are switched
+# to the callee's own specialized view and instance id for exactly the
+# duration of lowering its body (saved and restored around it -- the same
+# discipline If/Loop already use for `fn rawCache`), so hir::range::of,
+# RawEligibleCall/RawEligibleShift/PureBitwiseEligible and every other
+# lowering-time decision inside the callee's own body read *its own*
+# instance's already-computed facts (hir::range::analyze already analyzed
+# every used instance, callees included, in one whole-program fixpoint --
+# nothing here recomputes them): an intermediate value can stay raw across
+# what used to be the function boundary exactly when ordinary
+# representation analysis would already keep it raw within one function,
+# with no inlining-specific representation rule of any kind. Every emitted
+# instruction still carries its own HIR expression id (Emit's own `@E`
+# suffix, unchanged), so it still names its true origin inside the callee's
+# own source -- byte::nibble's `x & 15` stays traceable to byte::nibble's
+# own expression, not to a synthetic node, even though it now runs inside
+# its caller's own compiled function.
+
+# 1 if instance ID is a tiny exact leaf (see above): memoized in
+# LEAFELIGIBLE (reset once per native::lower::program call), since the same
+# callee instance may be reached from several exact call sites.
+proc native::lower::LeafInlineEligible {id} {
+    variable leafEligible
+    if {[dict exists $leafEligible $id]} {
+        return [dict get $leafEligible $id]
+    }
+    set ok [LeafInlineEligibleUncached $id]
+    dict set leafEligible $id $ok
+    return $ok
+}
+
+proc native::lower::LeafInlineEligibleUncached {id} {
+    variable baseHir
+    variable spec
+    variable context
+    variable envless
+    variable hir
+    variable currentInstance
+    variable guards
+    variable knownErrors
+    set instance [hir::specialize::instance $spec $id]
+    set block [dict get $instance block]
+    if {$block eq "program" || $block ni $envless} {
+        return 0
+    }
+    set savedHir $hir
+    set savedInstance $currentInstance
+    set hir [hir::specialize::view $baseHir $spec $id]
+    set currentInstance $id
+    # Structure-only pre-filter (LeafBlockLooksSmall), before ever paying
+    # for hir::aot::analyzeRegion: compile-time cost (spec's own \167 90 "a
+    # tiny exact-leaf pass should be cheap") -- a branchy/loopy/large/
+    # internal-calling body is rejected by a single cheap walk of its own
+    # shape, with no per-instance analysis run for it at all. Only a body
+    # that already structurally looks like a candidate pays for the full
+    # guard/known-error analysis below.
+    if {![LeafBlockLooksSmall $block]} {
+        set hir $savedHir
+        set currentInstance $savedInstance
+        return 0
+    }
+    set savedGuards $guards
+    set savedKnownErrors $knownErrors
+    CollectChecks [hir::aot::analyzeRegion $hir $block $context]
+    set body [hir::get $hir $block body]
+    set ops 0
+    set ok [expr {$body ne "" && [LeafBodyEligible $body ops]}]
+    set hir $savedHir
+    set currentInstance $savedInstance
+    set guards $savedGuards
+    set knownErrors $savedKnownErrors
+    return $ok
+}
+
+# The cheap half of LeafInlineEligible: BLOCK's own body shape and op-count
+# budget alone (LeafExprStructural, below), with no guard/known-error/shift-
+# safety analysis at all -- gates whether the more expensive
+# hir::aot::analyzeRegion + CollectChecks is ever run for this instance.
+proc native::lower::LeafBlockLooksSmall {block} {
+    variable hir
+    set body [hir::get $hir $block body]
+    if {$body eq ""} {
+        return 0
+    }
+    set ops 0
+    foreach s $body {
+        if {![LeafExprStructural $s ops]} {
+            return 0
+        }
+    }
+    return 1
+}
+
+# Structure/op-count-only half of LeafExprEligible's own allowlist (same
+# shape, minus the guard/known-error/shift-safety checks, which need
+# GUARDS/KNOWNERRORS already populated for this instance -- see
+# LeafBlockLooksSmall above).
+proc native::lower::LeafExprStructural {e opsVar} {
+    upvar 1 $opsVar ops
+    variable hir
+    variable leafInlineSafeOps
+    variable leafInlineMaxOps
+    set node [hir::node $hir $e]
+    switch -- [dict get $node kind] {
+        const { return 1 }
+        ref    { return 1 }
+        bind   { return [LeafExprStructural [dict get $node value] ops] }
+        call {
+            lassign [dict get $node target] targetKind target
+            if {$targetKind ne "native"} {
+                return 0
+            }
+            lassign [NativeCallOp $e $node] name op
+            if {$op eq "" || $op ni $leafInlineSafeOps} {
+                return 0
+            }
+            foreach a [dict get $node args] {
+                if {![LeafExprStructural $a ops]} {
+                    return 0
+                }
+            }
+            incr ops
+            return [expr {$ops <= $leafInlineMaxOps}]
+        }
+    }
+    return 0
+}
+
+proc native::lower::LeafBodyEligible {stmts opsVar} {
+    upvar 1 $opsVar ops
+    foreach s $stmts {
+        if {![LeafExprEligible $s ops]} {
+            return 0
+        }
+    }
+    return 1
+}
+
+# 1 if E (in the callee's own view, HIR/CURRENTINSTANCE/GUARDS/KNOWNERRORS
+# already switched to it by the caller) is one of LeafInlineEligible's
+# allowed body shapes, counting every native call it contains into OPSVAR
+# and declining once LEAFINLINEMAXOPS is exceeded.
+proc native::lower::LeafExprEligible {e opsVar} {
+    upvar 1 $opsVar ops
+    variable hir
+    variable guards
+    variable knownErrors
+    variable leafInlineSafeOps
+    variable leafInlineMaxOps
+    set node [hir::node $hir $e]
+    switch -- [dict get $node kind] {
+        const { return 1 }
+        ref    { return 1 }
+        bind   { return [LeafExprEligible [dict get $node value] ops] }
+        call {
+            lassign [dict get $node target] targetKind target
+            if {$targetKind ne "native"} {
+                return 0
+            }
+            lassign [NativeCallOp $e $node] name op
+            if {$op eq "" || $op ni $leafInlineSafeOps} {
+                return 0
+            }
+            set argExprs [dict get $node args]
+            foreach a $argExprs {
+                if {![LeafExprEligible $a ops]} {
+                    return 0
+                }
+                set key [list $e $a]
+                if {[dict exists $knownErrors $key]} {
+                    # A representation blocker (an ordinary runtime kind
+                    # guard, GUARDS above) is deliberately *not* checked
+                    # here: EmitArgGuards emits that exact same check
+                    # wherever NativeCall runs, inlined or not -- the same
+                    # single contract check, on the same value, in the same
+                    # position relative to its own operand's evaluation,
+                    # just relocated into the caller's own function. A
+                    # KNOWNERRORS entry is different in kind (the call is
+                    # *proven* to always raise, not merely unproven-safe),
+                    # so that alone still declines eligibility.
+                    return 0
+                }
+            }
+            if {$op in {ishr ishl} && ![LeafShiftSafe $e $argExprs]} {
+                return 0
+            }
+            incr ops
+            return [expr {$ops <= $leafInlineMaxOps}]
+        }
+    }
+    return 0
+}
+
+# 1 if shift call E's (op ishr/ishl, ARGEXPRS = {value amount}) own amount
+# operand is a single already-proven value strictly within RAWSHIFTMAX: the
+# only condition (core/scalarbits.tcl's CheckShiftAmount) under which the
+# generic shift_right/shift_left helper this call would otherwise lower to
+# can raise {CORE SEMANTIC RANGE} -- proven the same way RawEligibleShift
+# already proves it for its own, stricter, raw-representation purpose,
+# reusing the same RAWSHIFTMAX bound (deliberately not the shifted value's
+# own sign/size: unlike raw eligibility, error-safety here does not depend
+# on it at all -- core::scalarbits::shiftRight/shiftLeft only ever check the
+# amount).
+proc native::lower::LeafShiftSafe {e argExprs} {
+    variable ranges
+    variable currentInstance
+    variable rawShiftMax
+    if {[llength $argExprs] != 2} {
+        return 0
+    }
+    lassign $argExprs ex ek
+    set rangeK [hir::range::of $ranges $currentInstance $ek]
+    set kmn [dict get $rangeK min]
+    set kmx [dict get $rangeK max]
+    if {$kmn eq "-inf" || $kmn ne $kmx || $kmn < 0 || $kmn >= $rawShiftMax} {
+        return 0
+    }
+    return 1
+}
+
+# Lowers exact direct call E (node NODE, callee instance CALLEEID,
+# LeafInlineEligible already proved -- CALLERARGREGS its own already-
+# evaluated argument registers, Call's own ordinary CallArgs, in the
+# caller's original left-to-right evaluation order) by re-running the
+# ordinary per-expression lowering (Sequence/Expr/Bind/NativeCall -- the
+# same procs an ordinary function body already goes through) directly
+# against the callee's own body, in the caller's own function FN, with
+# HIR/CURRENTINSTANCE/GUARDS/KNOWNERRORS switched to the callee's own
+# specialized view for the duration (saved and restored around it) and its
+# parameter BindingIds bound, in FN's own `locals`, directly to
+# CALLERARGREGS (see the section header above for why this substitution is
+# sufficient and safe). Returns {RESULT tagged}, exactly like Call's other
+# dispatch cases -- never emits a `call`/`callenv` instruction for E at all.
+proc native::lower::InlineLeafCall {fnVar e node calleeId callerArgRegs} {
+    upvar 1 $fnVar fn
+    variable hir
+    variable baseHir
+    variable spec
+    variable context
+    variable currentInstance
+    variable guards
+    variable knownErrors
+    set instance [hir::specialize::instance $spec $calleeId]
+    set block [dict get $instance block]
+    set calleeView [hir::specialize::view $baseHir $spec $calleeId]
+    set params [hir::get $calleeView $block params]
+    set body [hir::get $calleeView $block body]
+
+    set savedHir $hir
+    set savedInstance $currentInstance
+    set savedGuards $guards
+    set savedKnownErrors $knownErrors
+    set savedLocals {}
+    foreach b $params {
+        lappend savedLocals [expr {[dict exists $fn locals $b] ? [dict get $fn locals $b] : ""}]
+    }
+
+    set hir $calleeView
+    set currentInstance $calleeId
+    CollectChecks [hir::aot::analyzeRegion $hir $block $context]
+    foreach b $params r $callerArgRegs {
+        dict set fn locals $b [list reg $r]
+    }
+    EnterScope fn [hir::get $hir $block bodyScope]
+    set result [Sequence fn $body]
+
+    set hir $savedHir
+    set currentInstance $savedInstance
+    set guards $savedGuards
+    set knownErrors $savedKnownErrors
+    foreach b $params saved $savedLocals {
+        if {$saved eq ""} {
+            dict unset fn locals $b
+        } else {
+            dict set fn locals $b $saved
+        }
+    }
+
     if {$result eq "never"} {
         return {never tagged}
     }
