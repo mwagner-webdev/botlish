@@ -720,11 +720,11 @@ unmodified, territory, not this milestone's).
   pre-existing `native-*.test` fixtures via the `FunctionBody`-by-name
   idiom, § 11's own account) and then confirmed fully clean once the
   default was corrected to off.
-- `BOTLISH_NATIVE_GC_STRESS=1 tclsh9.0 tests/all.tcl`: run this session;
-  expected to confirm the existing root-map/safepoint machinery handles an
-  inlined leaf's own caller correctly under forced collection, with no
-  rooting change needed anywhere in this diff (§ 13) -- update this line
-  with the final pass/fail count once that run completes.
+- `BOTLISH_NATIVE_GC_STRESS=1 tclsh9.0 tests/all.tcl`: **1635/1635 passed,
+  0 failed, 0 skipped**, both backends -- confirming the existing root-map/
+  safepoint machinery handles an inlined leaf's own caller correctly under
+  forced collection, with no rooting change needed anywhere in this diff
+  (§ 13).
 
 ## 16. Required questions
 
