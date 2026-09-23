@@ -474,10 +474,10 @@ built with `cargo build --release`): **1733/1733 passing, 0 failed**,
 including the new file, with no regression in any pre-existing test.
 `cargo test --release --manifest-path native/Cargo.toml`: **60/60
 passing** (no Rust source changed by this milestone). GC-stress
-(`BOTLISH_NATIVE_GC_STRESS=1 tclsh9.0 tests/all.tcl`) was also run in full,
-per spec §58, since this milestone touches HIR construction on every
-build; see this document's own commit history / the session record for
-its exact pass count once captured.
+(`BOTLISH_NATIVE_GC_STRESS=1 tclsh9.0 tests/all.tcl`, run per spec §58
+since this milestone touches HIR construction on every build):
+**1733/1733 passing, 0 failed** -- identical to the ordinary run,
+confirming no rooting/allocation-behavior regression.
 
 ## Required-question summary
 
