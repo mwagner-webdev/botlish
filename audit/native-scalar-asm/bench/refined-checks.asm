@@ -3,7 +3,7 @@
 ; object:  ELF64 x86-64, unlinked (Botlish-generated code only; runtime
 ;          helpers are unresolved imports, so their bodies are not present)
 ; format:  objdump -dr --no-show-raw-insn -M intel
-; total machine code bytes: 16713  (per function: 937 203 329 112 109 1425 484 864 506 952 504 681 769 450 884 644 540 540 636 681 769 450 884 644 540 540 636)
+; total machine code bytes: 16411  (per function: 937 203 40 112 96 1425 484 864 506 952 504 681 769 450 884 644 540 540 636 681 769 450 884 644 540 540 636)
 ;
 ; function symbol -> Botlish label:
 ;   botlish_fn_0 / botlish_entry_0 -> <program entry>
@@ -275,3842 +275,3775 @@ Disassembly of section .text:
 0000000000000450 <botlish_fn_2: byte::nibble<int>>:
      450:	push   rbp
      451:	mov    rbp,rsp
-     454:	sub    rsp,0x40
-     458:	mov    QWORD PTR [rsp+0x20],rbx
-     45d:	mov    QWORD PTR [rsp+0x28],r12
-     462:	mov    QWORD PTR [rsp+0x30],r13
-     467:	mov    r12,rdi
-     46a:	mov    QWORD PTR [rsp+0x10],0x0
-     473:	mov    QWORD PTR [rsp],rsi
-     477:	mov    QWORD PTR [rsp+0x8],0x1f
-     480:	test   rsi,0x1
-     487:	jne    4a5 <botlish_fn_2+0x55>
-     48d:	mov    edx,0x1f
-     492:	mov    rbx,rsi
-     495:	mov    rdi,r12
-     498:	call   49d <botlish_fn_2+0x4d>
-			499: R_X86_64_PLT32	rt_int_and-0x4
-     49d:	mov    rsi,rax
-     4a0:	jmp    4ac <botlish_fn_2+0x5c>
-     4a5:	mov    rbx,rsi
-     4a8:	and    rsi,0x1f
-     4ac:	mov    QWORD PTR [rsp+0x8],rsi
-     4b1:	mov    r13,rsi
-     4b4:	mov    edx,0x9
-     4b9:	mov    QWORD PTR [rsp+0x10],0x9
-     4c2:	mov    rsi,rbx
-     4c5:	mov    rdi,r12
-     4c8:	call   4cd <botlish_fn_2+0x7d>
-			4c9: R_X86_64_PLT32	rt_int_shr-0x4
-     4cd:	test   rax,rax
-     4d0:	jne    4f1 <botlish_fn_2+0xa1>
-     4d6:	xor    rax,rax
-     4d9:	mov    rbx,QWORD PTR [rsp+0x20]
-     4de:	mov    r12,QWORD PTR [rsp+0x28]
-     4e3:	mov    r13,QWORD PTR [rsp+0x30]
-     4e8:	add    rsp,0x40
-     4ec:	mov    rsp,rbp
-     4ef:	pop    rbp
-     4f0:	ret
-     4f1:	mov    QWORD PTR [rsp],rax
-     4f5:	mov    rsi,r13
-     4f8:	mov    rcx,rsi
-     4fb:	and    rcx,rax
-     4fe:	mov    rdx,rax
-     501:	test   rcx,0x1
-     508:	jne    51e <botlish_fn_2+0xce>
-     50e:	mov    rdi,r12
-     511:	call   516 <botlish_fn_2+0xc6>
-			512: R_X86_64_PLT32	rt_int_or-0x4
-     516:	mov    rsi,rax
-     519:	jmp    521 <botlish_fn_2+0xd1>
-     51e:	or     rsi,rdx
-     521:	mov    QWORD PTR [rsp],rsi
-     525:	mov    QWORD PTR [rsp+0x8],0x1f
-     52e:	test   rsi,0x1
-     535:	jne    54d <botlish_fn_2+0xfd>
-     53b:	mov    edx,0x1f
-     540:	mov    rdi,r12
-     543:	call   548 <botlish_fn_2+0xf8>
-			544: R_X86_64_PLT32	rt_int_and-0x4
-     548:	jmp    554 <botlish_fn_2+0x104>
-     54d:	and    rsi,0x1f
-     551:	mov    rax,rsi
-     554:	mov    rbx,QWORD PTR [rsp+0x20]
-     559:	mov    r12,QWORD PTR [rsp+0x28]
-     55e:	mov    r13,QWORD PTR [rsp+0x30]
-     563:	add    rsp,0x40
-     567:	mov    rsp,rbp
-     56a:	pop    rbp
-     56b:	ret
+     454:	sar    rsi,0x5
+     458:	shl    rsi,1
+     45b:	mov    rax,rsi
+     45e:	or     rax,0x1
+     462:	mov    rsp,rbp
+     465:	pop    rbp
+     466:	ret
 
-000000000000056c <botlish_entry_2: byte::nibble<int>>:
-     56c:	push   rbp
-     56d:	mov    rbp,rsp
-     570:	mov    rsi,QWORD PTR [rdx]
-     573:	call   578 <botlish_entry_2+0xc>
-			574: R_X86_64_PLT32	botlish_fn_2-0x4 ; byte::nibble<int>
-     578:	mov    rsp,rbp
-     57b:	pop    rbp
-     57c:	ret
+0000000000000467 <botlish_entry_2: byte::nibble<int>>:
+     467:	push   rbp
+     468:	mov    rbp,rsp
+     46b:	mov    rsi,QWORD PTR [rdx]
+     46e:	call   473 <botlish_entry_2+0xc>
+			46f: R_X86_64_PLT32	botlish_fn_2-0x4 ; byte::nibble<int>
+     473:	mov    rsp,rbp
+     476:	pop    rbp
+     477:	ret
 
-000000000000057d <botlish_fn_3: web::uri_escape_text<generic>>:
-     57d:	push   rbp
-     57e:	mov    rbp,rsp
-     581:	sub    rsp,0x20
-     585:	mov    QWORD PTR [rsp],rdx
-     589:	mov    r9,rdx
-     58c:	mov    edx,0x1
-     591:	mov    QWORD PTR [rsp+0x8],0x1
-     59a:	mov    rax,QWORD PTR [rdi+0x10]
-     59e:	mov    rcx,QWORD PTR [rax+0xa0]
-     5a5:	mov    QWORD PTR [rsp+0x10],rcx
-     5aa:	mov    rax,QWORD PTR [rsi+0x20]
-     5ae:	mov    r8,QWORD PTR [rax]
-     5b1:	mov    QWORD PTR [rsp+0x18],r8
-     5b6:	mov    rsi,r9
-     5b9:	call   5be <botlish_fn_3+0x41>
-			5ba: R_X86_64_PLT32	botlish_fn_9-0x4 ; esc_from<generic>
-     5be:	test   rax,rax
-     5c1:	jne    5d3 <botlish_fn_3+0x56>
-     5c7:	xor    rax,rax
-     5ca:	add    rsp,0x20
-     5ce:	mov    rsp,rbp
-     5d1:	pop    rbp
-     5d2:	ret
-     5d3:	add    rsp,0x20
-     5d7:	mov    rsp,rbp
-     5da:	pop    rbp
-     5db:	ret
+0000000000000478 <botlish_fn_3: web::uri_escape_text<generic>>:
+     478:	push   rbp
+     479:	mov    rbp,rsp
+     47c:	sub    rsp,0x20
+     480:	mov    QWORD PTR [rsp],rdx
+     484:	mov    r9,rdx
+     487:	mov    edx,0x1
+     48c:	mov    QWORD PTR [rsp+0x8],0x1
+     495:	mov    rax,QWORD PTR [rdi+0x10]
+     499:	mov    rcx,QWORD PTR [rax+0xa0]
+     4a0:	mov    QWORD PTR [rsp+0x10],rcx
+     4a5:	mov    rax,QWORD PTR [rsi+0x20]
+     4a9:	mov    r8,QWORD PTR [rax]
+     4ac:	mov    QWORD PTR [rsp+0x18],r8
+     4b1:	mov    rsi,r9
+     4b4:	call   4b9 <botlish_fn_3+0x41>
+			4b5: R_X86_64_PLT32	botlish_fn_9-0x4 ; esc_from<generic>
+     4b9:	test   rax,rax
+     4bc:	jne    4ce <botlish_fn_3+0x56>
+     4c2:	xor    rax,rax
+     4c5:	add    rsp,0x20
+     4c9:	mov    rsp,rbp
+     4cc:	pop    rbp
+     4cd:	ret
+     4ce:	add    rsp,0x20
+     4d2:	mov    rsp,rbp
+     4d5:	pop    rbp
+     4d6:	ret
 
-00000000000005dc <botlish_entry_3: web::uri_escape_text<generic>>:
-     5dc:	push   rbp
-     5dd:	mov    rbp,rsp
-     5e0:	mov    rdx,QWORD PTR [rdx]
-     5e3:	call   5e8 <botlish_entry_3+0xc>
-			5e4: R_X86_64_PLT32	botlish_fn_3-0x4 ; web::uri_escape_text<generic>
-     5e8:	mov    rsp,rbp
-     5eb:	pop    rbp
-     5ec:	ret
+00000000000004d7 <botlish_entry_3: web::uri_escape_text<generic>>:
+     4d7:	push   rbp
+     4d8:	mov    rbp,rsp
+     4db:	mov    rdx,QWORD PTR [rdx]
+     4de:	call   4e3 <botlish_entry_3+0xc>
+			4df: R_X86_64_PLT32	botlish_fn_3-0x4 ; web::uri_escape_text<generic>
+     4e3:	mov    rsp,rbp
+     4e6:	pop    rbp
+     4e7:	ret
 
-00000000000005ed <botlish_fn_4: high_nibble<generic>>:
-     5ed:	push   rbp
-     5ee:	mov    rbp,rsp
-     5f1:	sub    rsp,0x20
-     5f5:	mov    QWORD PTR [rsp+0x10],r12
-     5fa:	mov    r12,rdi
-     5fd:	mov    QWORD PTR [rsp],rsi
-     601:	mov    rdi,r12
-     604:	call   609 <botlish_fn_4+0x1c>
-			605: R_X86_64_PLT32	botlish_fn_1-0x4 ; byte::high_nibble<generic>
-     609:	test   rax,rax
-     60c:	je     62a <botlish_fn_4+0x3d>
-     612:	mov    QWORD PTR [rsp],rax
-     616:	mov    rsi,rax
-     619:	mov    rdi,r12
-     61c:	call   621 <botlish_fn_4+0x34>
-			61d: R_X86_64_PLT32	botlish_fn_2-0x4 ; byte::nibble<int>
-     621:	test   rax,rax
-     624:	jne    63b <botlish_fn_4+0x4e>
-     62a:	xor    rax,rax
-     62d:	mov    r12,QWORD PTR [rsp+0x10]
-     632:	add    rsp,0x20
-     636:	mov    rsp,rbp
-     639:	pop    rbp
-     63a:	ret
-     63b:	mov    r12,QWORD PTR [rsp+0x10]
-     640:	add    rsp,0x20
-     644:	mov    rsp,rbp
-     647:	pop    rbp
-     648:	ret
+00000000000004e8 <botlish_fn_4: high_nibble<generic>>:
+     4e8:	push   rbp
+     4e9:	mov    rbp,rsp
+     4ec:	sub    rsp,0x20
+     4f0:	mov    QWORD PTR [rsp+0x10],r12
+     4f5:	mov    r12,rdi
+     4f8:	mov    QWORD PTR [rsp],rsi
+     4fc:	mov    rdi,r12
+     4ff:	call   504 <botlish_fn_4+0x1c>
+			500: R_X86_64_PLT32	botlish_fn_1-0x4 ; byte::high_nibble<generic>
+     504:	test   rax,rax
+     507:	mov    rsi,rax
+     50a:	jne    521 <botlish_fn_4+0x39>
+     510:	xor    rax,rax
+     513:	mov    r12,QWORD PTR [rsp+0x10]
+     518:	add    rsp,0x20
+     51c:	mov    rsp,rbp
+     51f:	pop    rbp
+     520:	ret
+     521:	mov    rdi,r12
+     524:	call   529 <botlish_fn_4+0x41>
+			525: R_X86_64_PLT32	botlish_fn_2-0x4 ; byte::nibble<int>
+     529:	mov    r12,QWORD PTR [rsp+0x10]
+     52e:	add    rsp,0x20
+     532:	mov    rsp,rbp
+     535:	pop    rbp
+     536:	ret
 
-0000000000000649 <botlish_entry_4: high_nibble<generic>>:
-     649:	push   rbp
-     64a:	mov    rbp,rsp
-     64d:	mov    rsi,QWORD PTR [rdx]
-     650:	call   655 <botlish_entry_4+0xc>
-			651: R_X86_64_PLT32	botlish_fn_4-0x4 ; high_nibble<generic>
-     655:	mov    rsp,rbp
-     658:	pop    rbp
-     659:	ret
-     65a:	add    BYTE PTR [rax],al
-     65c:	add    BYTE PTR [rax],al
-	...
+0000000000000537 <botlish_entry_4: high_nibble<generic>>:
+     537:	push   rbp
+     538:	mov    rbp,rsp
+     53b:	mov    rsi,QWORD PTR [rdx]
+     53e:	call   543 <botlish_entry_4+0xc>
+			53f: R_X86_64_PLT32	botlish_fn_4-0x4 ; high_nibble<generic>
+     543:	mov    rsp,rbp
+     546:	pop    rbp
+     547:	ret
 
-0000000000000660 <botlish_fn_5: is_unreserved<generic>>:
-     660:	push   rbp
-     661:	mov    rbp,rsp
-     664:	sub    rsp,0x20
-     668:	mov    QWORD PTR [rsp],rbx
-     66c:	mov    QWORD PTR [rsp+0x8],r12
-     671:	mov    QWORD PTR [rsp+0x10],r13
-     676:	mov    r8d,0x1
-     67c:	test   rsi,0x1
-     683:	jne    6a3 <botlish_fn_5+0x43>
-     689:	xor    r8d,r8d
-     68c:	test   rsi,0x7
-     693:	jne    6a3 <botlish_fn_5+0x43>
-     699:	movzx  rax,BYTE PTR [rsi]
-     69d:	cmp    al,0x1
-     69f:	sete   r8b
-     6a3:	test   r8b,r8b
-     6a6:	jne    6dc <botlish_fn_5+0x7c>
-     6ac:	mov    rdx,QWORD PTR [rdi+0x10]
-     6b0:	mov    rcx,QWORD PTR [rdx+0xa8]
-     6b7:	xor    rbx,rbx
-     6ba:	mov    rdx,rbx
-     6bd:	call   6c2 <botlish_fn_5+0x62>
-			6be: R_X86_64_PLT32	rt_type_error-0x4
-     6c2:	mov    rax,rbx
-     6c5:	mov    rbx,QWORD PTR [rsp]
-     6c9:	mov    r12,QWORD PTR [rsp+0x8]
-     6ce:	mov    r13,QWORD PTR [rsp+0x10]
-     6d3:	add    rsp,0x20
-     6d7:	mov    rsp,rbp
-     6da:	pop    rbp
-     6db:	ret
-     6dc:	mov    r12,rdi
-     6df:	test   rsi,0x1
-     6e6:	mov    rbx,rsi
-     6e9:	jne    714 <botlish_fn_5+0xb4>
-     6ef:	mov    edx,0x59
-     6f4:	mov    rsi,rbx
-     6f7:	mov    rdi,r12
-     6fa:	call   6ff <botlish_fn_5+0x9f>
-			6fb: R_X86_64_PLT32	rt_int_cmp-0x4
-     6ff:	mov    ecx,0x2
-     704:	test   rax,rax
-     707:	cmovle rcx,QWORD PTR [rip+0x461]        # b70 <botlish_fn_5+0x510>
-     70f:	jmp    728 <botlish_fn_5+0xc8>
-     714:	mov    ecx,0x2
-     719:	mov    rsi,rbx
-     71c:	cmp    rsi,0x59
-     720:	cmovle rcx,QWORD PTR [rip+0x448]        # b70 <botlish_fn_5+0x510>
-     728:	mov    eax,0x6
-     72d:	mov    r13,rax
-     730:	cmp    rcx,0x6
-     734:	je     b53 <botlish_fn_5+0x4f3>
-     73a:	mov    rsi,rbx
-     73d:	test   rsi,0x1
-     744:	jne    76f <botlish_fn_5+0x10f>
-     74a:	mov    edx,0x5d
-     74f:	mov    rsi,rbx
-     752:	mov    rdi,r12
-     755:	call   75a <botlish_fn_5+0xfa>
-			756: R_X86_64_PLT32	rt_int_cmp-0x4
-     75a:	mov    ecx,0x2
-     75f:	test   rax,rax
-     762:	cmovle rcx,QWORD PTR [rip+0x406]        # b70 <botlish_fn_5+0x510>
-     76a:	jmp    783 <botlish_fn_5+0x123>
-     76f:	mov    ecx,0x2
-     774:	mov    rsi,rbx
-     777:	cmp    rsi,0x5d
-     77b:	cmovle rcx,QWORD PTR [rip+0x3ed]        # b70 <botlish_fn_5+0x510>
-     783:	cmp    rcx,0x6
-     787:	je     b4b <botlish_fn_5+0x4eb>
-     78d:	mov    rsi,rbx
-     790:	test   rsi,0x1
-     797:	jne    7c2 <botlish_fn_5+0x162>
-     79d:	mov    edx,0x5f
-     7a2:	mov    rsi,rbx
-     7a5:	mov    rdi,r12
-     7a8:	call   7ad <botlish_fn_5+0x14d>
-			7a9: R_X86_64_PLT32	rt_int_cmp-0x4
-     7ad:	mov    ecx,0x2
-     7b2:	test   rax,rax
-     7b5:	cmovle rcx,QWORD PTR [rip+0x3b3]        # b70 <botlish_fn_5+0x510>
-     7bd:	jmp    7d6 <botlish_fn_5+0x176>
-     7c2:	mov    ecx,0x2
+0000000000000548 <botlish_fn_5: is_unreserved<generic>>:
+     548:	push   rbp
+     549:	mov    rbp,rsp
+     54c:	sub    rsp,0x20
+     550:	mov    QWORD PTR [rsp],rbx
+     554:	mov    QWORD PTR [rsp+0x8],r12
+     559:	mov    QWORD PTR [rsp+0x10],r13
+     55e:	mov    r8d,0x1
+     564:	test   rsi,0x1
+     56b:	jne    58b <botlish_fn_5+0x43>
+     571:	xor    r8d,r8d
+     574:	test   rsi,0x7
+     57b:	jne    58b <botlish_fn_5+0x43>
+     581:	movzx  rax,BYTE PTR [rsi]
+     585:	cmp    al,0x1
+     587:	sete   r8b
+     58b:	test   r8b,r8b
+     58e:	jne    5c4 <botlish_fn_5+0x7c>
+     594:	mov    rdx,QWORD PTR [rdi+0x10]
+     598:	mov    rcx,QWORD PTR [rdx+0xa8]
+     59f:	xor    rbx,rbx
+     5a2:	mov    rdx,rbx
+     5a5:	call   5aa <botlish_fn_5+0x62>
+			5a6: R_X86_64_PLT32	rt_type_error-0x4
+     5aa:	mov    rax,rbx
+     5ad:	mov    rbx,QWORD PTR [rsp]
+     5b1:	mov    r12,QWORD PTR [rsp+0x8]
+     5b6:	mov    r13,QWORD PTR [rsp+0x10]
+     5bb:	add    rsp,0x20
+     5bf:	mov    rsp,rbp
+     5c2:	pop    rbp
+     5c3:	ret
+     5c4:	mov    r12,rdi
+     5c7:	test   rsi,0x1
+     5ce:	mov    rbx,rsi
+     5d1:	jne    5fc <botlish_fn_5+0xb4>
+     5d7:	mov    edx,0x59
+     5dc:	mov    rsi,rbx
+     5df:	mov    rdi,r12
+     5e2:	call   5e7 <botlish_fn_5+0x9f>
+			5e3: R_X86_64_PLT32	rt_int_cmp-0x4
+     5e7:	mov    ecx,0x2
+     5ec:	test   rax,rax
+     5ef:	cmovle rcx,QWORD PTR [rip+0x461]        # a58 <botlish_fn_5+0x510>
+     5f7:	jmp    610 <botlish_fn_5+0xc8>
+     5fc:	mov    ecx,0x2
+     601:	mov    rsi,rbx
+     604:	cmp    rsi,0x59
+     608:	cmovle rcx,QWORD PTR [rip+0x448]        # a58 <botlish_fn_5+0x510>
+     610:	mov    eax,0x6
+     615:	mov    r13,rax
+     618:	cmp    rcx,0x6
+     61c:	je     a3b <botlish_fn_5+0x4f3>
+     622:	mov    rsi,rbx
+     625:	test   rsi,0x1
+     62c:	jne    657 <botlish_fn_5+0x10f>
+     632:	mov    edx,0x5d
+     637:	mov    rsi,rbx
+     63a:	mov    rdi,r12
+     63d:	call   642 <botlish_fn_5+0xfa>
+			63e: R_X86_64_PLT32	rt_int_cmp-0x4
+     642:	mov    ecx,0x2
+     647:	test   rax,rax
+     64a:	cmovle rcx,QWORD PTR [rip+0x406]        # a58 <botlish_fn_5+0x510>
+     652:	jmp    66b <botlish_fn_5+0x123>
+     657:	mov    ecx,0x2
+     65c:	mov    rsi,rbx
+     65f:	cmp    rsi,0x5d
+     663:	cmovle rcx,QWORD PTR [rip+0x3ed]        # a58 <botlish_fn_5+0x510>
+     66b:	cmp    rcx,0x6
+     66f:	je     a33 <botlish_fn_5+0x4eb>
+     675:	mov    rsi,rbx
+     678:	test   rsi,0x1
+     67f:	jne    6aa <botlish_fn_5+0x162>
+     685:	mov    edx,0x5f
+     68a:	mov    rsi,rbx
+     68d:	mov    rdi,r12
+     690:	call   695 <botlish_fn_5+0x14d>
+			691: R_X86_64_PLT32	rt_int_cmp-0x4
+     695:	mov    ecx,0x2
+     69a:	test   rax,rax
+     69d:	cmovle rcx,QWORD PTR [rip+0x3b3]        # a58 <botlish_fn_5+0x510>
+     6a5:	jmp    6be <botlish_fn_5+0x176>
+     6aa:	mov    ecx,0x2
+     6af:	mov    rsi,rbx
+     6b2:	cmp    rsi,0x5f
+     6b6:	cmovle rcx,QWORD PTR [rip+0x39a]        # a58 <botlish_fn_5+0x510>
+     6be:	cmp    rcx,0x6
+     6c2:	je     a29 <botlish_fn_5+0x4e1>
+     6c8:	mov    rsi,rbx
+     6cb:	test   rsi,0x1
+     6d2:	jne    6fd <botlish_fn_5+0x1b5>
+     6d8:	mov    edx,0x73
+     6dd:	mov    rsi,rbx
+     6e0:	mov    rdi,r12
+     6e3:	call   6e8 <botlish_fn_5+0x1a0>
+			6e4: R_X86_64_PLT32	rt_int_cmp-0x4
+     6e8:	mov    ecx,0x2
+     6ed:	test   rax,rax
+     6f0:	cmovle rcx,QWORD PTR [rip+0x360]        # a58 <botlish_fn_5+0x510>
+     6f8:	jmp    711 <botlish_fn_5+0x1c9>
+     6fd:	mov    ecx,0x2
+     702:	mov    rsi,rbx
+     705:	cmp    rsi,0x73
+     709:	cmovle rcx,QWORD PTR [rip+0x347]        # a58 <botlish_fn_5+0x510>
+     711:	cmp    rcx,0x6
+     715:	je     a21 <botlish_fn_5+0x4d9>
+     71b:	mov    rsi,rbx
+     71e:	test   rsi,0x1
+     725:	jne    750 <botlish_fn_5+0x208>
+     72b:	mov    edx,0x81
+     730:	mov    rsi,rbx
+     733:	mov    rdi,r12
+     736:	call   73b <botlish_fn_5+0x1f3>
+			737: R_X86_64_PLT32	rt_int_cmp-0x4
+     73b:	mov    ecx,0x2
+     740:	test   rax,rax
+     743:	cmovle rcx,QWORD PTR [rip+0x30d]        # a58 <botlish_fn_5+0x510>
+     74b:	jmp    767 <botlish_fn_5+0x21f>
+     750:	mov    ecx,0x2
+     755:	mov    rsi,rbx
+     758:	cmp    rsi,0x81
+     75f:	cmovle rcx,QWORD PTR [rip+0x2f1]        # a58 <botlish_fn_5+0x510>
+     767:	cmp    rcx,0x6
+     76b:	je     a17 <botlish_fn_5+0x4cf>
+     771:	mov    rsi,rbx
+     774:	test   rsi,0x1
+     77b:	jne    7a6 <botlish_fn_5+0x25e>
+     781:	mov    edx,0xb5
+     786:	mov    rsi,rbx
+     789:	mov    rdi,r12
+     78c:	call   791 <botlish_fn_5+0x249>
+			78d: R_X86_64_PLT32	rt_int_cmp-0x4
+     791:	mov    ecx,0x2
+     796:	test   rax,rax
+     799:	cmovle rcx,QWORD PTR [rip+0x2b7]        # a58 <botlish_fn_5+0x510>
+     7a1:	jmp    7bd <botlish_fn_5+0x275>
+     7a6:	mov    ecx,0x2
+     7ab:	mov    rsi,rbx
+     7ae:	cmp    rsi,0xb5
+     7b5:	cmovle rcx,QWORD PTR [rip+0x29b]        # a58 <botlish_fn_5+0x510>
+     7bd:	cmp    rcx,0x6
+     7c1:	je     a0f <botlish_fn_5+0x4c7>
      7c7:	mov    rsi,rbx
-     7ca:	cmp    rsi,0x5f
-     7ce:	cmovle rcx,QWORD PTR [rip+0x39a]        # b70 <botlish_fn_5+0x510>
-     7d6:	cmp    rcx,0x6
-     7da:	je     b41 <botlish_fn_5+0x4e1>
-     7e0:	mov    rsi,rbx
-     7e3:	test   rsi,0x1
-     7ea:	jne    815 <botlish_fn_5+0x1b5>
-     7f0:	mov    edx,0x73
-     7f5:	mov    rsi,rbx
-     7f8:	mov    rdi,r12
-     7fb:	call   800 <botlish_fn_5+0x1a0>
-			7fc: R_X86_64_PLT32	rt_int_cmp-0x4
-     800:	mov    ecx,0x2
-     805:	test   rax,rax
-     808:	cmovle rcx,QWORD PTR [rip+0x360]        # b70 <botlish_fn_5+0x510>
-     810:	jmp    829 <botlish_fn_5+0x1c9>
-     815:	mov    ecx,0x2
-     81a:	mov    rsi,rbx
-     81d:	cmp    rsi,0x73
-     821:	cmovle rcx,QWORD PTR [rip+0x347]        # b70 <botlish_fn_5+0x510>
-     829:	cmp    rcx,0x6
-     82d:	je     b39 <botlish_fn_5+0x4d9>
-     833:	mov    rsi,rbx
-     836:	test   rsi,0x1
-     83d:	jne    868 <botlish_fn_5+0x208>
-     843:	mov    edx,0x81
-     848:	mov    rsi,rbx
-     84b:	mov    rdi,r12
-     84e:	call   853 <botlish_fn_5+0x1f3>
-			84f: R_X86_64_PLT32	rt_int_cmp-0x4
-     853:	mov    ecx,0x2
-     858:	test   rax,rax
-     85b:	cmovle rcx,QWORD PTR [rip+0x30d]        # b70 <botlish_fn_5+0x510>
-     863:	jmp    87f <botlish_fn_5+0x21f>
-     868:	mov    ecx,0x2
-     86d:	mov    rsi,rbx
-     870:	cmp    rsi,0x81
-     877:	cmovle rcx,QWORD PTR [rip+0x2f1]        # b70 <botlish_fn_5+0x510>
-     87f:	cmp    rcx,0x6
-     883:	je     b2f <botlish_fn_5+0x4cf>
-     889:	mov    rsi,rbx
-     88c:	test   rsi,0x1
-     893:	jne    8be <botlish_fn_5+0x25e>
-     899:	mov    edx,0xb5
-     89e:	mov    rsi,rbx
-     8a1:	mov    rdi,r12
-     8a4:	call   8a9 <botlish_fn_5+0x249>
-			8a5: R_X86_64_PLT32	rt_int_cmp-0x4
-     8a9:	mov    ecx,0x2
-     8ae:	test   rax,rax
-     8b1:	cmovle rcx,QWORD PTR [rip+0x2b7]        # b70 <botlish_fn_5+0x510>
-     8b9:	jmp    8d5 <botlish_fn_5+0x275>
-     8be:	mov    ecx,0x2
-     8c3:	mov    rsi,rbx
-     8c6:	cmp    rsi,0xb5
-     8cd:	cmovle rcx,QWORD PTR [rip+0x29b]        # b70 <botlish_fn_5+0x510>
-     8d5:	cmp    rcx,0x6
-     8d9:	je     b27 <botlish_fn_5+0x4c7>
-     8df:	mov    rsi,rbx
-     8e2:	test   rsi,0x1
-     8e9:	jne    914 <botlish_fn_5+0x2b4>
-     8ef:	mov    edx,0xbd
-     8f4:	mov    rsi,rbx
-     8f7:	mov    rdi,r12
-     8fa:	call   8ff <botlish_fn_5+0x29f>
-			8fb: R_X86_64_PLT32	rt_int_cmp-0x4
-     8ff:	mov    ecx,0x2
-     904:	test   rax,rax
-     907:	cmovle rcx,QWORD PTR [rip+0x261]        # b70 <botlish_fn_5+0x510>
-     90f:	jmp    92b <botlish_fn_5+0x2cb>
-     914:	mov    ecx,0x2
-     919:	mov    rsi,rbx
-     91c:	cmp    rsi,0xbd
-     923:	cmovle rcx,QWORD PTR [rip+0x245]        # b70 <botlish_fn_5+0x510>
-     92b:	cmp    rcx,0x6
-     92f:	je     b1d <botlish_fn_5+0x4bd>
-     935:	mov    rsi,rbx
-     938:	test   rsi,0x1
-     93f:	jne    96b <botlish_fn_5+0x30b>
-     945:	mov    edx,0xbf
-     94a:	mov    rsi,rbx
-     94d:	mov    rdi,r12
-     950:	call   955 <botlish_fn_5+0x2f5>
-			951: R_X86_64_PLT32	rt_int_cmp-0x4
-     955:	mov    r11d,0x2
-     95b:	test   rax,rax
-     95e:	cmovle r11,QWORD PTR [rip+0x20a]        # b70 <botlish_fn_5+0x510>
-     966:	jmp    983 <botlish_fn_5+0x323>
-     96b:	mov    r11d,0x2
-     971:	mov    rsi,rbx
-     974:	cmp    rsi,0xbf
-     97b:	cmovle r11,QWORD PTR [rip+0x1ed]        # b70 <botlish_fn_5+0x510>
-     983:	cmp    r11,0x6
-     987:	je     b15 <botlish_fn_5+0x4b5>
-     98d:	mov    rsi,rbx
-     990:	test   rsi,0x1
-     997:	jne    9c2 <botlish_fn_5+0x362>
-     99d:	mov    edx,0xc1
-     9a2:	mov    rsi,rbx
-     9a5:	mov    rdi,r12
-     9a8:	call   9ad <botlish_fn_5+0x34d>
-			9a9: R_X86_64_PLT32	rt_int_cmp-0x4
-     9ad:	mov    ecx,0x2
-     9b2:	test   rax,rax
-     9b5:	cmovle rcx,QWORD PTR [rip+0x1b3]        # b70 <botlish_fn_5+0x510>
-     9bd:	jmp    9d9 <botlish_fn_5+0x379>
-     9c2:	mov    ecx,0x2
-     9c7:	mov    rsi,rbx
-     9ca:	cmp    rsi,0xc1
-     9d1:	cmovle rcx,QWORD PTR [rip+0x197]        # b70 <botlish_fn_5+0x510>
-     9d9:	cmp    rcx,0x6
-     9dd:	je     b0b <botlish_fn_5+0x4ab>
-     9e3:	mov    rsi,rbx
-     9e6:	test   rsi,0x1
-     9ed:	jne    a18 <botlish_fn_5+0x3b8>
-     9f3:	mov    edx,0xf5
-     9f8:	mov    rsi,rbx
-     9fb:	mov    rdi,r12
-     9fe:	call   a03 <botlish_fn_5+0x3a3>
-			9ff: R_X86_64_PLT32	rt_int_cmp-0x4
-     a03:	mov    ecx,0x2
-     a08:	test   rax,rax
-     a0b:	cmovle rcx,QWORD PTR [rip+0x15d]        # b70 <botlish_fn_5+0x510>
-     a13:	jmp    a2f <botlish_fn_5+0x3cf>
-     a18:	mov    ecx,0x2
-     a1d:	mov    rsi,rbx
-     a20:	cmp    rsi,0xf5
-     a27:	cmovle rcx,QWORD PTR [rip+0x141]        # b70 <botlish_fn_5+0x510>
-     a2f:	cmp    rcx,0x6
-     a33:	je     b03 <botlish_fn_5+0x4a3>
-     a39:	mov    rsi,rbx
-     a3c:	test   rsi,0x1
-     a43:	jne    a6e <botlish_fn_5+0x40e>
-     a49:	mov    edx,0xfb
-     a4e:	mov    rsi,rbx
-     a51:	mov    rdi,r12
-     a54:	call   a59 <botlish_fn_5+0x3f9>
-			a55: R_X86_64_PLT32	rt_int_cmp-0x4
-     a59:	mov    ecx,0x2
-     a5e:	test   rax,rax
-     a61:	cmovle rcx,QWORD PTR [rip+0x107]        # b70 <botlish_fn_5+0x510>
-     a69:	jmp    a85 <botlish_fn_5+0x425>
-     a6e:	mov    ecx,0x2
-     a73:	mov    rsi,rbx
-     a76:	cmp    rsi,0xfb
-     a7d:	cmovle rcx,QWORD PTR [rip+0xeb]        # b70 <botlish_fn_5+0x510>
-     a85:	cmp    rcx,0x6
-     a89:	je     af9 <botlish_fn_5+0x499>
-     a8f:	mov    rsi,rbx
-     a92:	test   rsi,0x1
-     a99:	jne    ac5 <botlish_fn_5+0x465>
-     a9f:	mov    edx,0xfd
-     aa4:	mov    rsi,rbx
-     aa7:	mov    rdi,r12
-     aaa:	call   aaf <botlish_fn_5+0x44f>
-			aab: R_X86_64_PLT32	rt_int_cmp-0x4
-     aaf:	mov    r8d,0x2
-     ab5:	test   rax,rax
-     ab8:	cmovle r8,QWORD PTR [rip+0xb0]        # b70 <botlish_fn_5+0x510>
-     ac0:	jmp    add <botlish_fn_5+0x47d>
-     ac5:	mov    r8d,0x2
-     acb:	mov    rsi,rbx
-     ace:	cmp    rsi,0xfd
-     ad5:	cmovle r8,QWORD PTR [rip+0x93]        # b70 <botlish_fn_5+0x510>
-     add:	cmp    r8,0x6
-     ae1:	je     af1 <botlish_fn_5+0x491>
-     ae7:	mov    eax,0x2
-     aec:	jmp    b58 <botlish_fn_5+0x4f8>
-     af1:	mov    rax,r13
-     af4:	jmp    b58 <botlish_fn_5+0x4f8>
-     af9:	mov    eax,0x2
-     afe:	jmp    b58 <botlish_fn_5+0x4f8>
-     b03:	mov    rax,r13
-     b06:	jmp    b58 <botlish_fn_5+0x4f8>
-     b0b:	mov    eax,0x2
-     b10:	jmp    b58 <botlish_fn_5+0x4f8>
-     b15:	mov    rax,r13
-     b18:	jmp    b58 <botlish_fn_5+0x4f8>
-     b1d:	mov    eax,0x2
-     b22:	jmp    b58 <botlish_fn_5+0x4f8>
-     b27:	mov    rax,r13
-     b2a:	jmp    b58 <botlish_fn_5+0x4f8>
-     b2f:	mov    eax,0x2
-     b34:	jmp    b58 <botlish_fn_5+0x4f8>
-     b39:	mov    rax,r13
-     b3c:	jmp    b58 <botlish_fn_5+0x4f8>
-     b41:	mov    eax,0x2
-     b46:	jmp    b58 <botlish_fn_5+0x4f8>
-     b4b:	mov    rax,r13
-     b4e:	jmp    b58 <botlish_fn_5+0x4f8>
-     b53:	mov    eax,0x2
-     b58:	mov    rbx,QWORD PTR [rsp]
-     b5c:	mov    r12,QWORD PTR [rsp+0x8]
-     b61:	mov    r13,QWORD PTR [rsp+0x10]
-     b66:	add    rsp,0x20
-     b6a:	mov    rsp,rbp
-     b6d:	pop    rbp
-     b6e:	ret
-     b6f:	add    BYTE PTR [rsi],al
-     b71:	add    BYTE PTR [rax],al
-     b73:	add    BYTE PTR [rax],al
-     b75:	add    BYTE PTR [rax],al
+     7ca:	test   rsi,0x1
+     7d1:	jne    7fc <botlish_fn_5+0x2b4>
+     7d7:	mov    edx,0xbd
+     7dc:	mov    rsi,rbx
+     7df:	mov    rdi,r12
+     7e2:	call   7e7 <botlish_fn_5+0x29f>
+			7e3: R_X86_64_PLT32	rt_int_cmp-0x4
+     7e7:	mov    ecx,0x2
+     7ec:	test   rax,rax
+     7ef:	cmovle rcx,QWORD PTR [rip+0x261]        # a58 <botlish_fn_5+0x510>
+     7f7:	jmp    813 <botlish_fn_5+0x2cb>
+     7fc:	mov    ecx,0x2
+     801:	mov    rsi,rbx
+     804:	cmp    rsi,0xbd
+     80b:	cmovle rcx,QWORD PTR [rip+0x245]        # a58 <botlish_fn_5+0x510>
+     813:	cmp    rcx,0x6
+     817:	je     a05 <botlish_fn_5+0x4bd>
+     81d:	mov    rsi,rbx
+     820:	test   rsi,0x1
+     827:	jne    853 <botlish_fn_5+0x30b>
+     82d:	mov    edx,0xbf
+     832:	mov    rsi,rbx
+     835:	mov    rdi,r12
+     838:	call   83d <botlish_fn_5+0x2f5>
+			839: R_X86_64_PLT32	rt_int_cmp-0x4
+     83d:	mov    r11d,0x2
+     843:	test   rax,rax
+     846:	cmovle r11,QWORD PTR [rip+0x20a]        # a58 <botlish_fn_5+0x510>
+     84e:	jmp    86b <botlish_fn_5+0x323>
+     853:	mov    r11d,0x2
+     859:	mov    rsi,rbx
+     85c:	cmp    rsi,0xbf
+     863:	cmovle r11,QWORD PTR [rip+0x1ed]        # a58 <botlish_fn_5+0x510>
+     86b:	cmp    r11,0x6
+     86f:	je     9fd <botlish_fn_5+0x4b5>
+     875:	mov    rsi,rbx
+     878:	test   rsi,0x1
+     87f:	jne    8aa <botlish_fn_5+0x362>
+     885:	mov    edx,0xc1
+     88a:	mov    rsi,rbx
+     88d:	mov    rdi,r12
+     890:	call   895 <botlish_fn_5+0x34d>
+			891: R_X86_64_PLT32	rt_int_cmp-0x4
+     895:	mov    ecx,0x2
+     89a:	test   rax,rax
+     89d:	cmovle rcx,QWORD PTR [rip+0x1b3]        # a58 <botlish_fn_5+0x510>
+     8a5:	jmp    8c1 <botlish_fn_5+0x379>
+     8aa:	mov    ecx,0x2
+     8af:	mov    rsi,rbx
+     8b2:	cmp    rsi,0xc1
+     8b9:	cmovle rcx,QWORD PTR [rip+0x197]        # a58 <botlish_fn_5+0x510>
+     8c1:	cmp    rcx,0x6
+     8c5:	je     9f3 <botlish_fn_5+0x4ab>
+     8cb:	mov    rsi,rbx
+     8ce:	test   rsi,0x1
+     8d5:	jne    900 <botlish_fn_5+0x3b8>
+     8db:	mov    edx,0xf5
+     8e0:	mov    rsi,rbx
+     8e3:	mov    rdi,r12
+     8e6:	call   8eb <botlish_fn_5+0x3a3>
+			8e7: R_X86_64_PLT32	rt_int_cmp-0x4
+     8eb:	mov    ecx,0x2
+     8f0:	test   rax,rax
+     8f3:	cmovle rcx,QWORD PTR [rip+0x15d]        # a58 <botlish_fn_5+0x510>
+     8fb:	jmp    917 <botlish_fn_5+0x3cf>
+     900:	mov    ecx,0x2
+     905:	mov    rsi,rbx
+     908:	cmp    rsi,0xf5
+     90f:	cmovle rcx,QWORD PTR [rip+0x141]        # a58 <botlish_fn_5+0x510>
+     917:	cmp    rcx,0x6
+     91b:	je     9eb <botlish_fn_5+0x4a3>
+     921:	mov    rsi,rbx
+     924:	test   rsi,0x1
+     92b:	jne    956 <botlish_fn_5+0x40e>
+     931:	mov    edx,0xfb
+     936:	mov    rsi,rbx
+     939:	mov    rdi,r12
+     93c:	call   941 <botlish_fn_5+0x3f9>
+			93d: R_X86_64_PLT32	rt_int_cmp-0x4
+     941:	mov    ecx,0x2
+     946:	test   rax,rax
+     949:	cmovle rcx,QWORD PTR [rip+0x107]        # a58 <botlish_fn_5+0x510>
+     951:	jmp    96d <botlish_fn_5+0x425>
+     956:	mov    ecx,0x2
+     95b:	mov    rsi,rbx
+     95e:	cmp    rsi,0xfb
+     965:	cmovle rcx,QWORD PTR [rip+0xeb]        # a58 <botlish_fn_5+0x510>
+     96d:	cmp    rcx,0x6
+     971:	je     9e1 <botlish_fn_5+0x499>
+     977:	mov    rsi,rbx
+     97a:	test   rsi,0x1
+     981:	jne    9ad <botlish_fn_5+0x465>
+     987:	mov    edx,0xfd
+     98c:	mov    rsi,rbx
+     98f:	mov    rdi,r12
+     992:	call   997 <botlish_fn_5+0x44f>
+			993: R_X86_64_PLT32	rt_int_cmp-0x4
+     997:	mov    r8d,0x2
+     99d:	test   rax,rax
+     9a0:	cmovle r8,QWORD PTR [rip+0xb0]        # a58 <botlish_fn_5+0x510>
+     9a8:	jmp    9c5 <botlish_fn_5+0x47d>
+     9ad:	mov    r8d,0x2
+     9b3:	mov    rsi,rbx
+     9b6:	cmp    rsi,0xfd
+     9bd:	cmovle r8,QWORD PTR [rip+0x93]        # a58 <botlish_fn_5+0x510>
+     9c5:	cmp    r8,0x6
+     9c9:	je     9d9 <botlish_fn_5+0x491>
+     9cf:	mov    eax,0x2
+     9d4:	jmp    a40 <botlish_fn_5+0x4f8>
+     9d9:	mov    rax,r13
+     9dc:	jmp    a40 <botlish_fn_5+0x4f8>
+     9e1:	mov    eax,0x2
+     9e6:	jmp    a40 <botlish_fn_5+0x4f8>
+     9eb:	mov    rax,r13
+     9ee:	jmp    a40 <botlish_fn_5+0x4f8>
+     9f3:	mov    eax,0x2
+     9f8:	jmp    a40 <botlish_fn_5+0x4f8>
+     9fd:	mov    rax,r13
+     a00:	jmp    a40 <botlish_fn_5+0x4f8>
+     a05:	mov    eax,0x2
+     a0a:	jmp    a40 <botlish_fn_5+0x4f8>
+     a0f:	mov    rax,r13
+     a12:	jmp    a40 <botlish_fn_5+0x4f8>
+     a17:	mov    eax,0x2
+     a1c:	jmp    a40 <botlish_fn_5+0x4f8>
+     a21:	mov    rax,r13
+     a24:	jmp    a40 <botlish_fn_5+0x4f8>
+     a29:	mov    eax,0x2
+     a2e:	jmp    a40 <botlish_fn_5+0x4f8>
+     a33:	mov    rax,r13
+     a36:	jmp    a40 <botlish_fn_5+0x4f8>
+     a3b:	mov    eax,0x2
+     a40:	mov    rbx,QWORD PTR [rsp]
+     a44:	mov    r12,QWORD PTR [rsp+0x8]
+     a49:	mov    r13,QWORD PTR [rsp+0x10]
+     a4e:	add    rsp,0x20
+     a52:	mov    rsp,rbp
+     a55:	pop    rbp
+     a56:	ret
+     a57:	add    BYTE PTR [rsi],al
+     a59:	add    BYTE PTR [rax],al
+     a5b:	add    BYTE PTR [rax],al
+     a5d:	add    BYTE PTR [rax],al
 	...
 
-0000000000000b78 <botlish_entry_5: is_unreserved<generic>>:
-     b78:	push   rbp
-     b79:	mov    rbp,rsp
-     b7c:	mov    rsi,QWORD PTR [rdx]
-     b7f:	call   b84 <botlish_entry_5+0xc>
-			b80: R_X86_64_PLT32	botlish_fn_5-0x4 ; is_unreserved<generic>
-     b84:	mov    rsp,rbp
-     b87:	pop    rbp
-     b88:	ret
+0000000000000a60 <botlish_entry_5: is_unreserved<generic>>:
+     a60:	push   rbp
+     a61:	mov    rbp,rsp
+     a64:	mov    rsi,QWORD PTR [rdx]
+     a67:	call   a6c <botlish_entry_5+0xc>
+			a68: R_X86_64_PLT32	botlish_fn_5-0x4 ; is_unreserved<generic>
+     a6c:	mov    rsp,rbp
+     a6f:	pop    rbp
+     a70:	ret
 
-0000000000000b89 <botlish_fn_6: hex_pair<generic>>:
-     b89:	push   rbp
-     b8a:	mov    rbp,rsp
-     b8d:	sub    rsp,0x30
-     b91:	mov    QWORD PTR [rsp+0x10],rbx
-     b96:	mov    QWORD PTR [rsp+0x18],r12
-     b9b:	mov    QWORD PTR [rsp+0x20],r13
-     ba0:	mov    QWORD PTR [rsp+0x28],r14
-     ba5:	mov    r12,rdi
-     ba8:	mov    QWORD PTR [rsp],rsi
-     bac:	mov    r13,rsi
-     baf:	mov    QWORD PTR [rsp+0x8],rdx
-     bb4:	mov    rbx,rdx
-     bb7:	mov    rsi,r13
-     bba:	mov    rdi,r12
-     bbd:	call   bc2 <botlish_fn_6+0x39>
-			bbe: R_X86_64_PLT32	botlish_fn_4-0x4 ; high_nibble<generic>
-     bc2:	test   rax,rax
-     bc5:	je     cf3 <botlish_fn_6+0x16a>
-     bcb:	test   rax,0x1
-     bd1:	jne    bdf <botlish_fn_6+0x56>
-     bd7:	mov    rdx,rax
-     bda:	jmp    bf5 <botlish_fn_6+0x6c>
-     bdf:	mov    rdx,QWORD PTR [rbx+0x8]
-     be3:	mov    rcx,rax
-     be6:	sar    rcx,1
-     be9:	cmp    rcx,rdx
-     bec:	jb     c11 <botlish_fn_6+0x88>
-     bf2:	mov    rdx,rax
-     bf5:	mov    rsi,rbx
-     bf8:	mov    rdi,r12
-     bfb:	call   c00 <botlish_fn_6+0x77>
-			bfc: R_X86_64_PLT32	rt_list_get-0x4
-     c00:	test   rax,rax
-     c03:	je     cf3 <botlish_fn_6+0x16a>
-     c09:	mov    rsi,rax
-     c0c:	jmp    c19 <botlish_fn_6+0x90>
-     c11:	mov    rax,QWORD PTR [rbx+0x10]
-     c15:	mov    rsi,QWORD PTR [rax+rcx*8]
-     c19:	mov    QWORD PTR [rsp],rsi
-     c1d:	mov    r14,rsi
-     c20:	mov    ecx,0x1
-     c25:	mov    rsi,r13
-     c28:	test   rsi,0x1
-     c2f:	jne    c4d <botlish_fn_6+0xc4>
-     c35:	xor    ecx,ecx
-     c37:	test   rsi,0x7
-     c3e:	jne    c4d <botlish_fn_6+0xc4>
-     c44:	movzx  rax,BYTE PTR [rsi]
-     c48:	cmp    al,0x1
-     c4a:	sete   cl
-     c4d:	test   cl,cl
-     c4f:	jne    c70 <botlish_fn_6+0xe7>
-     c55:	mov    rdi,r12
-     c58:	mov    rax,QWORD PTR [rdi+0x10]
-     c5c:	mov    rcx,QWORD PTR [rax+0xb0]
-     c63:	xor    rdx,rdx
-     c66:	call   c6b <botlish_fn_6+0xe2>
-			c67: R_X86_64_PLT32	rt_type_error-0x4
-     c6b:	jmp    cf3 <botlish_fn_6+0x16a>
-     c70:	mov    edx,0x21
-     c75:	mov    rdi,r12
-     c78:	call   c7d <botlish_fn_6+0xf4>
-			c79: R_X86_64_PLT32	rt_int_mod-0x4
-     c7d:	test   rax,rax
-     c80:	je     cf3 <botlish_fn_6+0x16a>
-     c86:	test   rax,0x1
-     c8c:	jne    c9d <botlish_fn_6+0x114>
-     c92:	mov    rdx,rax
-     c95:	mov    rsi,rbx
-     c98:	jmp    cb6 <botlish_fn_6+0x12d>
-     c9d:	mov    rdi,QWORD PTR [rbx+0x8]
-     ca1:	mov    rsi,rax
-     ca4:	sar    rsi,1
-     ca7:	mov    rdx,rax
-     caa:	cmp    rsi,rdi
-     cad:	jb     ccf <botlish_fn_6+0x146>
-     cb3:	mov    rsi,rbx
-     cb6:	mov    rdi,r12
-     cb9:	call   cbe <botlish_fn_6+0x135>
-			cba: R_X86_64_PLT32	rt_list_get-0x4
-     cbe:	test   rax,rax
-     cc1:	je     cf3 <botlish_fn_6+0x16a>
-     cc7:	mov    rdx,rax
-     cca:	jmp    cda <botlish_fn_6+0x151>
-     ccf:	mov    rax,rbx
-     cd2:	mov    rax,QWORD PTR [rax+0x10]
-     cd6:	mov    rdx,QWORD PTR [rax+rsi*8]
-     cda:	mov    QWORD PTR [rsp+0x8],rdx
-     cdf:	mov    rsi,r14
-     ce2:	mov    rdi,r12
-     ce5:	call   cea <botlish_fn_6+0x161>
-			ce6: R_X86_64_PLT32	rt_str_cat-0x4
-     cea:	test   rax,rax
-     ced:	jne    d13 <botlish_fn_6+0x18a>
-     cf3:	xor    rax,rax
-     cf6:	mov    rbx,QWORD PTR [rsp+0x10]
-     cfb:	mov    r12,QWORD PTR [rsp+0x18]
-     d00:	mov    r13,QWORD PTR [rsp+0x20]
-     d05:	mov    r14,QWORD PTR [rsp+0x28]
-     d0a:	add    rsp,0x30
-     d0e:	mov    rsp,rbp
-     d11:	pop    rbp
-     d12:	ret
-     d13:	mov    rbx,QWORD PTR [rsp+0x10]
-     d18:	mov    r12,QWORD PTR [rsp+0x18]
-     d1d:	mov    r13,QWORD PTR [rsp+0x20]
-     d22:	mov    r14,QWORD PTR [rsp+0x28]
-     d27:	add    rsp,0x30
-     d2b:	mov    rsp,rbp
-     d2e:	pop    rbp
-     d2f:	ret
+0000000000000a71 <botlish_fn_6: hex_pair<generic>>:
+     a71:	push   rbp
+     a72:	mov    rbp,rsp
+     a75:	sub    rsp,0x30
+     a79:	mov    QWORD PTR [rsp+0x10],rbx
+     a7e:	mov    QWORD PTR [rsp+0x18],r12
+     a83:	mov    QWORD PTR [rsp+0x20],r13
+     a88:	mov    QWORD PTR [rsp+0x28],r14
+     a8d:	mov    r12,rdi
+     a90:	mov    QWORD PTR [rsp],rsi
+     a94:	mov    r13,rsi
+     a97:	mov    QWORD PTR [rsp+0x8],rdx
+     a9c:	mov    rbx,rdx
+     a9f:	mov    rsi,r13
+     aa2:	mov    rdi,r12
+     aa5:	call   aaa <botlish_fn_6+0x39>
+			aa6: R_X86_64_PLT32	botlish_fn_4-0x4 ; high_nibble<generic>
+     aaa:	test   rax,rax
+     aad:	je     bdb <botlish_fn_6+0x16a>
+     ab3:	test   rax,0x1
+     ab9:	jne    ac7 <botlish_fn_6+0x56>
+     abf:	mov    rdx,rax
+     ac2:	jmp    add <botlish_fn_6+0x6c>
+     ac7:	mov    rdx,QWORD PTR [rbx+0x8]
+     acb:	mov    rcx,rax
+     ace:	sar    rcx,1
+     ad1:	cmp    rcx,rdx
+     ad4:	jb     af9 <botlish_fn_6+0x88>
+     ada:	mov    rdx,rax
+     add:	mov    rsi,rbx
+     ae0:	mov    rdi,r12
+     ae3:	call   ae8 <botlish_fn_6+0x77>
+			ae4: R_X86_64_PLT32	rt_list_get-0x4
+     ae8:	test   rax,rax
+     aeb:	je     bdb <botlish_fn_6+0x16a>
+     af1:	mov    rsi,rax
+     af4:	jmp    b01 <botlish_fn_6+0x90>
+     af9:	mov    rax,QWORD PTR [rbx+0x10]
+     afd:	mov    rsi,QWORD PTR [rax+rcx*8]
+     b01:	mov    QWORD PTR [rsp],rsi
+     b05:	mov    r14,rsi
+     b08:	mov    ecx,0x1
+     b0d:	mov    rsi,r13
+     b10:	test   rsi,0x1
+     b17:	jne    b35 <botlish_fn_6+0xc4>
+     b1d:	xor    ecx,ecx
+     b1f:	test   rsi,0x7
+     b26:	jne    b35 <botlish_fn_6+0xc4>
+     b2c:	movzx  rax,BYTE PTR [rsi]
+     b30:	cmp    al,0x1
+     b32:	sete   cl
+     b35:	test   cl,cl
+     b37:	jne    b58 <botlish_fn_6+0xe7>
+     b3d:	mov    rdi,r12
+     b40:	mov    rax,QWORD PTR [rdi+0x10]
+     b44:	mov    rcx,QWORD PTR [rax+0xb0]
+     b4b:	xor    rdx,rdx
+     b4e:	call   b53 <botlish_fn_6+0xe2>
+			b4f: R_X86_64_PLT32	rt_type_error-0x4
+     b53:	jmp    bdb <botlish_fn_6+0x16a>
+     b58:	mov    edx,0x21
+     b5d:	mov    rdi,r12
+     b60:	call   b65 <botlish_fn_6+0xf4>
+			b61: R_X86_64_PLT32	rt_int_mod-0x4
+     b65:	test   rax,rax
+     b68:	je     bdb <botlish_fn_6+0x16a>
+     b6e:	test   rax,0x1
+     b74:	jne    b85 <botlish_fn_6+0x114>
+     b7a:	mov    rdx,rax
+     b7d:	mov    rsi,rbx
+     b80:	jmp    b9e <botlish_fn_6+0x12d>
+     b85:	mov    rdi,QWORD PTR [rbx+0x8]
+     b89:	mov    rsi,rax
+     b8c:	sar    rsi,1
+     b8f:	mov    rdx,rax
+     b92:	cmp    rsi,rdi
+     b95:	jb     bb7 <botlish_fn_6+0x146>
+     b9b:	mov    rsi,rbx
+     b9e:	mov    rdi,r12
+     ba1:	call   ba6 <botlish_fn_6+0x135>
+			ba2: R_X86_64_PLT32	rt_list_get-0x4
+     ba6:	test   rax,rax
+     ba9:	je     bdb <botlish_fn_6+0x16a>
+     baf:	mov    rdx,rax
+     bb2:	jmp    bc2 <botlish_fn_6+0x151>
+     bb7:	mov    rax,rbx
+     bba:	mov    rax,QWORD PTR [rax+0x10]
+     bbe:	mov    rdx,QWORD PTR [rax+rsi*8]
+     bc2:	mov    QWORD PTR [rsp+0x8],rdx
+     bc7:	mov    rsi,r14
+     bca:	mov    rdi,r12
+     bcd:	call   bd2 <botlish_fn_6+0x161>
+			bce: R_X86_64_PLT32	rt_str_cat-0x4
+     bd2:	test   rax,rax
+     bd5:	jne    bfb <botlish_fn_6+0x18a>
+     bdb:	xor    rax,rax
+     bde:	mov    rbx,QWORD PTR [rsp+0x10]
+     be3:	mov    r12,QWORD PTR [rsp+0x18]
+     be8:	mov    r13,QWORD PTR [rsp+0x20]
+     bed:	mov    r14,QWORD PTR [rsp+0x28]
+     bf2:	add    rsp,0x30
+     bf6:	mov    rsp,rbp
+     bf9:	pop    rbp
+     bfa:	ret
+     bfb:	mov    rbx,QWORD PTR [rsp+0x10]
+     c00:	mov    r12,QWORD PTR [rsp+0x18]
+     c05:	mov    r13,QWORD PTR [rsp+0x20]
+     c0a:	mov    r14,QWORD PTR [rsp+0x28]
+     c0f:	add    rsp,0x30
+     c13:	mov    rsp,rbp
+     c16:	pop    rbp
+     c17:	ret
 
-0000000000000d30 <botlish_entry_6: hex_pair<generic>>:
-     d30:	push   rbp
-     d31:	mov    rbp,rsp
-     d34:	mov    rsi,QWORD PTR [rdx]
-     d37:	mov    rdx,QWORD PTR [rdx+0x8]
-     d3b:	call   d40 <botlish_entry_6+0x10>
-			d3c: R_X86_64_PLT32	botlish_fn_6-0x4 ; hex_pair<generic>
-     d40:	mov    rsp,rbp
-     d43:	pop    rbp
-     d44:	ret
-     d45:	add    BYTE PTR [rax],al
+0000000000000c18 <botlish_entry_6: hex_pair<generic>>:
+     c18:	push   rbp
+     c19:	mov    rbp,rsp
+     c1c:	mov    rsi,QWORD PTR [rdx]
+     c1f:	mov    rdx,QWORD PTR [rdx+0x8]
+     c23:	call   c28 <botlish_entry_6+0x10>
+			c24: R_X86_64_PLT32	botlish_fn_6-0x4 ; hex_pair<generic>
+     c28:	mov    rsp,rbp
+     c2b:	pop    rbp
+     c2c:	ret
+     c2d:	add    BYTE PTR [rax],al
 	...
 
-0000000000000d48 <botlish_fn_7: esc_bytes<generic>>:
-     d48:	push   rbp
-     d49:	mov    rbp,rsp
-     d4c:	sub    rsp,0x70
-     d50:	mov    QWORD PTR [rsp+0x40],rbx
-     d55:	mov    QWORD PTR [rsp+0x48],r12
-     d5a:	mov    QWORD PTR [rsp+0x50],r13
-     d5f:	mov    QWORD PTR [rsp+0x58],r14
-     d64:	mov    QWORD PTR [rsp+0x60],r15
-     d69:	mov    r13,rdi
-     d6c:	mov    QWORD PTR [rsp+0x28],0x0
-     d75:	mov    QWORD PTR [rsp],rsi
-     d79:	mov    QWORD PTR [rsp+0x8],rdx
-     d7e:	mov    QWORD PTR [rsp+0x10],rcx
-     d83:	mov    QWORD PTR [rsp+0x18],r8
-     d88:	mov    r12,r8
-     d8b:	mov    r14,rcx
-     d8e:	mov    r15,rdx
-     d91:	xor    eax,eax
-     d93:	test   rsi,0x7
-     d9a:	jne    dab <botlish_fn_7+0x63>
-     da0:	movzx  r8,BYTE PTR [rsi]
-     da4:	cmp    r8b,0x3
-     da8:	sete   al
-     dab:	test   al,al
-     dad:	jne    dd0 <botlish_fn_7+0x88>
-     db3:	mov    rdi,r13
-     db6:	mov    rax,QWORD PTR [rdi+0x10]
-     dba:	mov    rcx,QWORD PTR [rax+0xb8]
-     dc1:	mov    edx,0x4
-     dc6:	call   dcb <botlish_fn_7+0x83>
-			dc7: R_X86_64_PLT32	rt_type_error-0x4
-     dcb:	jmp    fd6 <botlish_fn_7+0x28e>
-     dd0:	mov    rbx,rsi
-     dd3:	mov    rdi,r13
-     dd6:	call   ddb <botlish_fn_7+0x93>
-			dd7: R_X86_64_PLT32	rt_list_len-0x4
-     ddb:	mov    ecx,0x1
-     de0:	mov    rsi,r15
-     de3:	test   rsi,0x1
-     dea:	jne    e10 <botlish_fn_7+0xc8>
-     df0:	xor    ecx,ecx
-     df2:	mov    rsi,r15
-     df5:	test   rsi,0x7
-     dfc:	jne    e10 <botlish_fn_7+0xc8>
-     e02:	mov    rsi,r15
-     e05:	movzx  rcx,BYTE PTR [rsi]
-     e09:	rex cmp cl,0x1
-     e0d:	sete   cl
-     e10:	test   cl,cl
-     e12:	jne    e36 <botlish_fn_7+0xee>
-     e18:	mov    rdi,r13
-     e1b:	mov    rax,QWORD PTR [rdi+0x10]
-     e1f:	mov    rcx,QWORD PTR [rax+0xc0]
-     e26:	xor    rdx,rdx
-     e29:	mov    rsi,r15
-     e2c:	call   e31 <botlish_fn_7+0xe9>
-			e2d: R_X86_64_PLT32	rt_type_error-0x4
-     e31:	jmp    fd6 <botlish_fn_7+0x28e>
-     e36:	mov    rsi,r15
-     e39:	mov    rcx,rsi
-     e3c:	and    rcx,rax
-     e3f:	mov    rdx,rax
-     e42:	test   rcx,0x1
-     e49:	jne    e6f <botlish_fn_7+0x127>
-     e4f:	mov    rsi,r15
-     e52:	mov    rdi,r13
-     e55:	call   e5a <botlish_fn_7+0x112>
-			e56: R_X86_64_PLT32	rt_int_cmp-0x4
-     e5a:	mov    ecx,0x2
-     e5f:	test   rax,rax
-     e62:	cmovge rcx,QWORD PTR [rip+0x1de]        # 1048 <botlish_fn_7+0x300>
-     e6a:	jmp    e82 <botlish_fn_7+0x13a>
-     e6f:	mov    ecx,0x2
-     e74:	mov    rsi,r15
-     e77:	cmp    rsi,rdx
-     e7a:	cmovge rcx,QWORD PTR [rip+0x1c6]        # 1048 <botlish_fn_7+0x300>
-     e82:	cmp    rcx,0x6
-     e86:	je     1021 <botlish_fn_7+0x2d9>
-     e8c:	mov    QWORD PTR [rsp+0x20],0x3
-     e95:	mov    rsi,r15
-     e98:	test   rsi,0x1
-     e9f:	je     eba <botlish_fn_7+0x172>
-     ea5:	mov    rsi,r15
-     ea8:	mov    rax,rsi
-     eab:	add    rax,0x2
-     eaf:	seto   cl
-     eb2:	test   cl,cl
-     eb4:	je     eca <botlish_fn_7+0x182>
-     eba:	mov    edx,0x3
-     ebf:	mov    rsi,r15
-     ec2:	mov    rdi,r13
-     ec5:	call   eca <botlish_fn_7+0x182>
-			ec6: R_X86_64_PLT32	rt_int_add-0x4
-     eca:	mov    QWORD PTR [rsp+0x8],rax
-     ecf:	mov    rdi,r13
-     ed2:	mov    QWORD PTR [rsp+0x30],rax
-     ed7:	mov    rax,QWORD PTR [rdi+0x10]
-     edb:	mov    rsi,QWORD PTR [rax+0xc8]
-     ee2:	mov    QWORD PTR [rsp+0x20],rsi
-     ee7:	mov    QWORD PTR [rsp+0x38],rsi
-     eec:	mov    rsi,r15
-     eef:	test   rsi,0x1
-     ef6:	jne    f04 <botlish_fn_7+0x1bc>
-     efc:	mov    rdx,r15
-     eff:	jmp    f1d <botlish_fn_7+0x1d5>
-     f04:	mov    rcx,QWORD PTR [rbx+0x8]
-     f08:	mov    rsi,r15
-     f0b:	mov    rax,rsi
-     f0e:	sar    rax,1
-     f11:	cmp    rax,rcx
-     f14:	jb     f39 <botlish_fn_7+0x1f1>
-     f1a:	mov    rdx,r15
-     f1d:	mov    rsi,rbx
-     f20:	mov    rdi,r13
-     f23:	call   f28 <botlish_fn_7+0x1e0>
-			f24: R_X86_64_PLT32	rt_list_get-0x4
-     f28:	test   rax,rax
-     f2b:	je     fd6 <botlish_fn_7+0x28e>
-     f31:	mov    rsi,rax
-     f34:	jmp    f41 <botlish_fn_7+0x1f9>
-     f39:	mov    rcx,QWORD PTR [rbx+0x10]
-     f3d:	mov    rsi,QWORD PTR [rcx+rax*8]
-     f41:	mov    QWORD PTR [rsp+0x28],rsi
-     f46:	mov    rdx,r12
-     f49:	mov    rdi,r13
-     f4c:	call   f51 <botlish_fn_7+0x209>
-			f4d: R_X86_64_PLT32	botlish_fn_6-0x4 ; hex_pair<generic>
-     f51:	test   rax,rax
-     f54:	je     fd6 <botlish_fn_7+0x28e>
-     f5a:	mov    QWORD PTR [rsp+0x28],rax
-     f5f:	mov    rdx,rax
-     f62:	mov    rsi,QWORD PTR [rsp+0x38]
-     f67:	mov    rdi,r13
-     f6a:	call   f6f <botlish_fn_7+0x227>
-			f6b: R_X86_64_PLT32	rt_str_cat-0x4
-     f6f:	test   rax,rax
-     f72:	je     fd6 <botlish_fn_7+0x28e>
-     f78:	mov    QWORD PTR [rsp+0x20],rax
-     f7d:	mov    rdx,rax
-     f80:	xor    eax,eax
-     f82:	mov    rsi,r14
-     f85:	test   rsi,0x7
-     f8c:	jne    f9d <botlish_fn_7+0x255>
-     f92:	movzx  rdi,BYTE PTR [rsi]
-     f96:	cmp    dil,0x2
-     f9a:	sete   al
-     f9d:	test   al,al
-     f9f:	jne    fc5 <botlish_fn_7+0x27d>
-     fa5:	mov    rdi,r13
-     fa8:	mov    rdi,QWORD PTR [rdi+0x10]
-     fac:	mov    rcx,QWORD PTR [rdi+0xd0]
-     fb3:	mov    edx,0x1
-     fb8:	mov    rdi,r13
-     fbb:	call   fc0 <botlish_fn_7+0x278>
-			fbc: R_X86_64_PLT32	rt_type_error-0x4
-     fc0:	jmp    fd6 <botlish_fn_7+0x28e>
-     fc5:	mov    rdi,r13
-     fc8:	call   fcd <botlish_fn_7+0x285>
-			fc9: R_X86_64_PLT32	rt_str_cat-0x4
-     fcd:	test   rax,rax
-     fd0:	jne    ffb <botlish_fn_7+0x2b3>
-     fd6:	xor    rax,rax
-     fd9:	mov    rbx,QWORD PTR [rsp+0x40]
-     fde:	mov    r12,QWORD PTR [rsp+0x48]
-     fe3:	mov    r13,QWORD PTR [rsp+0x50]
-     fe8:	mov    r14,QWORD PTR [rsp+0x58]
-     fed:	mov    r15,QWORD PTR [rsp+0x60]
-     ff2:	add    rsp,0x70
-     ff6:	mov    rsp,rbp
-     ff9:	pop    rbp
-     ffa:	ret
-     ffb:	mov    QWORD PTR [rsp],rbx
-     fff:	mov    rcx,QWORD PTR [rsp+0x30]
-    1004:	mov    QWORD PTR [rsp+0x8],rcx
-    1009:	mov    QWORD PTR [rsp+0x10],rax
-    100e:	mov    QWORD PTR [rsp+0x18],r12
-    1013:	mov    rsi,rbx
-    1016:	mov    r14,rax
-    1019:	mov    r15,rcx
-    101c:	jmp    d91 <botlish_fn_7+0x49>
-    1021:	mov    rax,r14
-    1024:	mov    rbx,QWORD PTR [rsp+0x40]
-    1029:	mov    r12,QWORD PTR [rsp+0x48]
-    102e:	mov    r13,QWORD PTR [rsp+0x50]
-    1033:	mov    r14,QWORD PTR [rsp+0x58]
-    1038:	mov    r15,QWORD PTR [rsp+0x60]
-    103d:	add    rsp,0x70
-    1041:	mov    rsp,rbp
-    1044:	pop    rbp
-    1045:	ret
-    1046:	add    BYTE PTR [rax],al
-    1048:	(bad)
-    1049:	add    BYTE PTR [rax],al
-    104b:	add    BYTE PTR [rax],al
-    104d:	add    BYTE PTR [rax],al
+0000000000000c30 <botlish_fn_7: esc_bytes<generic>>:
+     c30:	push   rbp
+     c31:	mov    rbp,rsp
+     c34:	sub    rsp,0x70
+     c38:	mov    QWORD PTR [rsp+0x40],rbx
+     c3d:	mov    QWORD PTR [rsp+0x48],r12
+     c42:	mov    QWORD PTR [rsp+0x50],r13
+     c47:	mov    QWORD PTR [rsp+0x58],r14
+     c4c:	mov    QWORD PTR [rsp+0x60],r15
+     c51:	mov    r13,rdi
+     c54:	mov    QWORD PTR [rsp+0x28],0x0
+     c5d:	mov    QWORD PTR [rsp],rsi
+     c61:	mov    QWORD PTR [rsp+0x8],rdx
+     c66:	mov    QWORD PTR [rsp+0x10],rcx
+     c6b:	mov    QWORD PTR [rsp+0x18],r8
+     c70:	mov    r12,r8
+     c73:	mov    r14,rcx
+     c76:	mov    r15,rdx
+     c79:	xor    eax,eax
+     c7b:	test   rsi,0x7
+     c82:	jne    c93 <botlish_fn_7+0x63>
+     c88:	movzx  r8,BYTE PTR [rsi]
+     c8c:	cmp    r8b,0x3
+     c90:	sete   al
+     c93:	test   al,al
+     c95:	jne    cb8 <botlish_fn_7+0x88>
+     c9b:	mov    rdi,r13
+     c9e:	mov    rax,QWORD PTR [rdi+0x10]
+     ca2:	mov    rcx,QWORD PTR [rax+0xb8]
+     ca9:	mov    edx,0x4
+     cae:	call   cb3 <botlish_fn_7+0x83>
+			caf: R_X86_64_PLT32	rt_type_error-0x4
+     cb3:	jmp    ebe <botlish_fn_7+0x28e>
+     cb8:	mov    rbx,rsi
+     cbb:	mov    rdi,r13
+     cbe:	call   cc3 <botlish_fn_7+0x93>
+			cbf: R_X86_64_PLT32	rt_list_len-0x4
+     cc3:	mov    ecx,0x1
+     cc8:	mov    rsi,r15
+     ccb:	test   rsi,0x1
+     cd2:	jne    cf8 <botlish_fn_7+0xc8>
+     cd8:	xor    ecx,ecx
+     cda:	mov    rsi,r15
+     cdd:	test   rsi,0x7
+     ce4:	jne    cf8 <botlish_fn_7+0xc8>
+     cea:	mov    rsi,r15
+     ced:	movzx  rcx,BYTE PTR [rsi]
+     cf1:	rex cmp cl,0x1
+     cf5:	sete   cl
+     cf8:	test   cl,cl
+     cfa:	jne    d1e <botlish_fn_7+0xee>
+     d00:	mov    rdi,r13
+     d03:	mov    rax,QWORD PTR [rdi+0x10]
+     d07:	mov    rcx,QWORD PTR [rax+0xc0]
+     d0e:	xor    rdx,rdx
+     d11:	mov    rsi,r15
+     d14:	call   d19 <botlish_fn_7+0xe9>
+			d15: R_X86_64_PLT32	rt_type_error-0x4
+     d19:	jmp    ebe <botlish_fn_7+0x28e>
+     d1e:	mov    rsi,r15
+     d21:	mov    rcx,rsi
+     d24:	and    rcx,rax
+     d27:	mov    rdx,rax
+     d2a:	test   rcx,0x1
+     d31:	jne    d57 <botlish_fn_7+0x127>
+     d37:	mov    rsi,r15
+     d3a:	mov    rdi,r13
+     d3d:	call   d42 <botlish_fn_7+0x112>
+			d3e: R_X86_64_PLT32	rt_int_cmp-0x4
+     d42:	mov    ecx,0x2
+     d47:	test   rax,rax
+     d4a:	cmovge rcx,QWORD PTR [rip+0x1de]        # f30 <botlish_fn_7+0x300>
+     d52:	jmp    d6a <botlish_fn_7+0x13a>
+     d57:	mov    ecx,0x2
+     d5c:	mov    rsi,r15
+     d5f:	cmp    rsi,rdx
+     d62:	cmovge rcx,QWORD PTR [rip+0x1c6]        # f30 <botlish_fn_7+0x300>
+     d6a:	cmp    rcx,0x6
+     d6e:	je     f09 <botlish_fn_7+0x2d9>
+     d74:	mov    QWORD PTR [rsp+0x20],0x3
+     d7d:	mov    rsi,r15
+     d80:	test   rsi,0x1
+     d87:	je     da2 <botlish_fn_7+0x172>
+     d8d:	mov    rsi,r15
+     d90:	mov    rax,rsi
+     d93:	add    rax,0x2
+     d97:	seto   cl
+     d9a:	test   cl,cl
+     d9c:	je     db2 <botlish_fn_7+0x182>
+     da2:	mov    edx,0x3
+     da7:	mov    rsi,r15
+     daa:	mov    rdi,r13
+     dad:	call   db2 <botlish_fn_7+0x182>
+			dae: R_X86_64_PLT32	rt_int_add-0x4
+     db2:	mov    QWORD PTR [rsp+0x8],rax
+     db7:	mov    rdi,r13
+     dba:	mov    QWORD PTR [rsp+0x30],rax
+     dbf:	mov    rax,QWORD PTR [rdi+0x10]
+     dc3:	mov    rsi,QWORD PTR [rax+0xc8]
+     dca:	mov    QWORD PTR [rsp+0x20],rsi
+     dcf:	mov    QWORD PTR [rsp+0x38],rsi
+     dd4:	mov    rsi,r15
+     dd7:	test   rsi,0x1
+     dde:	jne    dec <botlish_fn_7+0x1bc>
+     de4:	mov    rdx,r15
+     de7:	jmp    e05 <botlish_fn_7+0x1d5>
+     dec:	mov    rcx,QWORD PTR [rbx+0x8]
+     df0:	mov    rsi,r15
+     df3:	mov    rax,rsi
+     df6:	sar    rax,1
+     df9:	cmp    rax,rcx
+     dfc:	jb     e21 <botlish_fn_7+0x1f1>
+     e02:	mov    rdx,r15
+     e05:	mov    rsi,rbx
+     e08:	mov    rdi,r13
+     e0b:	call   e10 <botlish_fn_7+0x1e0>
+			e0c: R_X86_64_PLT32	rt_list_get-0x4
+     e10:	test   rax,rax
+     e13:	je     ebe <botlish_fn_7+0x28e>
+     e19:	mov    rsi,rax
+     e1c:	jmp    e29 <botlish_fn_7+0x1f9>
+     e21:	mov    rcx,QWORD PTR [rbx+0x10]
+     e25:	mov    rsi,QWORD PTR [rcx+rax*8]
+     e29:	mov    QWORD PTR [rsp+0x28],rsi
+     e2e:	mov    rdx,r12
+     e31:	mov    rdi,r13
+     e34:	call   e39 <botlish_fn_7+0x209>
+			e35: R_X86_64_PLT32	botlish_fn_6-0x4 ; hex_pair<generic>
+     e39:	test   rax,rax
+     e3c:	je     ebe <botlish_fn_7+0x28e>
+     e42:	mov    QWORD PTR [rsp+0x28],rax
+     e47:	mov    rdx,rax
+     e4a:	mov    rsi,QWORD PTR [rsp+0x38]
+     e4f:	mov    rdi,r13
+     e52:	call   e57 <botlish_fn_7+0x227>
+			e53: R_X86_64_PLT32	rt_str_cat-0x4
+     e57:	test   rax,rax
+     e5a:	je     ebe <botlish_fn_7+0x28e>
+     e60:	mov    QWORD PTR [rsp+0x20],rax
+     e65:	mov    rdx,rax
+     e68:	xor    eax,eax
+     e6a:	mov    rsi,r14
+     e6d:	test   rsi,0x7
+     e74:	jne    e85 <botlish_fn_7+0x255>
+     e7a:	movzx  rdi,BYTE PTR [rsi]
+     e7e:	cmp    dil,0x2
+     e82:	sete   al
+     e85:	test   al,al
+     e87:	jne    ead <botlish_fn_7+0x27d>
+     e8d:	mov    rdi,r13
+     e90:	mov    rdi,QWORD PTR [rdi+0x10]
+     e94:	mov    rcx,QWORD PTR [rdi+0xd0]
+     e9b:	mov    edx,0x1
+     ea0:	mov    rdi,r13
+     ea3:	call   ea8 <botlish_fn_7+0x278>
+			ea4: R_X86_64_PLT32	rt_type_error-0x4
+     ea8:	jmp    ebe <botlish_fn_7+0x28e>
+     ead:	mov    rdi,r13
+     eb0:	call   eb5 <botlish_fn_7+0x285>
+			eb1: R_X86_64_PLT32	rt_str_cat-0x4
+     eb5:	test   rax,rax
+     eb8:	jne    ee3 <botlish_fn_7+0x2b3>
+     ebe:	xor    rax,rax
+     ec1:	mov    rbx,QWORD PTR [rsp+0x40]
+     ec6:	mov    r12,QWORD PTR [rsp+0x48]
+     ecb:	mov    r13,QWORD PTR [rsp+0x50]
+     ed0:	mov    r14,QWORD PTR [rsp+0x58]
+     ed5:	mov    r15,QWORD PTR [rsp+0x60]
+     eda:	add    rsp,0x70
+     ede:	mov    rsp,rbp
+     ee1:	pop    rbp
+     ee2:	ret
+     ee3:	mov    QWORD PTR [rsp],rbx
+     ee7:	mov    rcx,QWORD PTR [rsp+0x30]
+     eec:	mov    QWORD PTR [rsp+0x8],rcx
+     ef1:	mov    QWORD PTR [rsp+0x10],rax
+     ef6:	mov    QWORD PTR [rsp+0x18],r12
+     efb:	mov    rsi,rbx
+     efe:	mov    r14,rax
+     f01:	mov    r15,rcx
+     f04:	jmp    c79 <botlish_fn_7+0x49>
+     f09:	mov    rax,r14
+     f0c:	mov    rbx,QWORD PTR [rsp+0x40]
+     f11:	mov    r12,QWORD PTR [rsp+0x48]
+     f16:	mov    r13,QWORD PTR [rsp+0x50]
+     f1b:	mov    r14,QWORD PTR [rsp+0x58]
+     f20:	mov    r15,QWORD PTR [rsp+0x60]
+     f25:	add    rsp,0x70
+     f29:	mov    rsp,rbp
+     f2c:	pop    rbp
+     f2d:	ret
+     f2e:	add    BYTE PTR [rax],al
+     f30:	(bad)
+     f31:	add    BYTE PTR [rax],al
+     f33:	add    BYTE PTR [rax],al
+     f35:	add    BYTE PTR [rax],al
 	...
 
-0000000000001050 <botlish_entry_7: esc_bytes<generic>>:
-    1050:	push   rbp
-    1051:	mov    rbp,rsp
-    1054:	mov    rsi,QWORD PTR [rdx]
-    1057:	mov    r9,QWORD PTR [rdx+0x8]
-    105b:	mov    rcx,QWORD PTR [rdx+0x10]
-    105f:	mov    r8,QWORD PTR [rdx+0x18]
-    1063:	mov    rdx,r9
-    1066:	call   106b <botlish_entry_7+0x1b>
-			1067: R_X86_64_PLT32	botlish_fn_7-0x4 ; esc_bytes<generic>
-    106b:	mov    rsp,rbp
-    106e:	pop    rbp
-    106f:	ret
+0000000000000f38 <botlish_entry_7: esc_bytes<generic>>:
+     f38:	push   rbp
+     f39:	mov    rbp,rsp
+     f3c:	mov    rsi,QWORD PTR [rdx]
+     f3f:	mov    r9,QWORD PTR [rdx+0x8]
+     f43:	mov    rcx,QWORD PTR [rdx+0x10]
+     f47:	mov    r8,QWORD PTR [rdx+0x18]
+     f4b:	mov    rdx,r9
+     f4e:	call   f53 <botlish_entry_7+0x1b>
+			f4f: R_X86_64_PLT32	botlish_fn_7-0x4 ; esc_bytes<generic>
+     f53:	mov    rsp,rbp
+     f56:	pop    rbp
+     f57:	ret
 
-0000000000001070 <botlish_fn_8: esc_char<generic>>:
-    1070:	push   rbp
-    1071:	mov    rbp,rsp
-    1074:	sub    rsp,0x50
-    1078:	mov    QWORD PTR [rsp+0x20],rbx
-    107d:	mov    QWORD PTR [rsp+0x28],r12
-    1082:	mov    QWORD PTR [rsp+0x30],r13
-    1087:	mov    QWORD PTR [rsp+0x38],r14
-    108c:	mov    QWORD PTR [rsp+0x40],r15
-    1091:	mov    QWORD PTR [rsp+0x10],0x0
-    109a:	mov    QWORD PTR [rsp+0x18],0x0
-    10a3:	mov    QWORD PTR [rsp],rsi
-    10a7:	mov    QWORD PTR [rsp+0x8],rdx
-    10ac:	mov    rbx,rdx
-    10af:	xor    r9d,r9d
-    10b2:	test   rsi,0x7
-    10b9:	jne    10c9 <botlish_fn_8+0x59>
-    10bf:	movzx  rax,BYTE PTR [rsi]
-    10c3:	cmp    al,0x2
-    10c5:	sete   r9b
-    10c9:	test   r9b,r9b
-    10cc:	jne    10ec <botlish_fn_8+0x7c>
-    10d2:	mov    rax,QWORD PTR [rdi+0x10]
-    10d6:	mov    rcx,QWORD PTR [rax+0xd8]
-    10dd:	mov    edx,0x1
-    10e2:	call   10e7 <botlish_fn_8+0x77>
-			10e3: R_X86_64_PLT32	rt_type_error-0x4
-    10e7:	jmp    11ec <botlish_fn_8+0x17c>
-    10ec:	mov    r12,rdi
-    10ef:	mov    r15,rsi
-    10f2:	call   10f7 <botlish_fn_8+0x87>
-			10f3: R_X86_64_PLT32	rt_str_utf8_bytes-0x4
-    10f7:	mov    rcx,rax
-    10fa:	mov    r13,rax
-    10fd:	test   rax,rcx
-    1100:	je     11ec <botlish_fn_8+0x17c>
-    1106:	mov    rax,r13
-    1109:	mov    QWORD PTR [rsp],rax
-    110d:	mov    rsi,r13
-    1110:	mov    rdi,r12
-    1113:	call   1118 <botlish_fn_8+0xa8>
-			1114: R_X86_64_PLT32	rt_list_len-0x4
-    1118:	mov    edx,0x1
-    111d:	sar    rax,1
-    1120:	cmp    rax,0x1
-    1124:	je     115f <botlish_fn_8+0xef>
-    112a:	mov    QWORD PTR [rsp+0x10],0x1
-    1133:	mov    rdi,r12
-    1136:	mov    rax,QWORD PTR [rdi+0x10]
-    113a:	mov    rcx,QWORD PTR [rax+0xa0]
-    1141:	mov    QWORD PTR [rsp+0x18],rcx
-    1146:	mov    rsi,r13
-    1149:	mov    r8,rbx
-    114c:	call   1151 <botlish_fn_8+0xe1>
-			114d: R_X86_64_PLT32	botlish_fn_7-0x4 ; esc_bytes<generic>
-    1151:	test   rax,rax
-    1154:	je     11ec <botlish_fn_8+0x17c>
-    115a:	jmp    1217 <botlish_fn_8+0x1a7>
-    115f:	mov    rsi,r13
-    1162:	mov    r14,rdx
-    1165:	mov    rax,QWORD PTR [rsi+0x8]
-    1169:	mov    r13,rsi
-    116c:	test   rax,rax
-    116f:	jne    1194 <botlish_fn_8+0x124>
-    1175:	mov    rdx,r14
-    1178:	mov    rsi,r13
-    117b:	mov    rdi,r12
-    117e:	call   1183 <botlish_fn_8+0x113>
-			117f: R_X86_64_PLT32	rt_list_get-0x4
-    1183:	test   rax,rax
-    1186:	je     11ec <botlish_fn_8+0x17c>
-    118c:	mov    rsi,rax
-    118f:	jmp    119e <botlish_fn_8+0x12e>
-    1194:	mov    rsi,r13
-    1197:	mov    rcx,QWORD PTR [rsi+0x10]
-    119b:	mov    rsi,QWORD PTR [rcx]
-    119e:	mov    rdi,r12
-    11a1:	call   11a6 <botlish_fn_8+0x136>
-			11a2: R_X86_64_PLT32	botlish_fn_5-0x4 ; is_unreserved<generic>
-    11a6:	test   rax,rax
-    11a9:	je     11ec <botlish_fn_8+0x17c>
-    11af:	cmp    rax,0x6
-    11b3:	je     1214 <botlish_fn_8+0x1a4>
-    11b9:	mov    QWORD PTR [rsp+0x10],0x1
-    11c2:	mov    rdi,r12
-    11c5:	mov    r8,QWORD PTR [rdi+0x10]
-    11c9:	mov    rcx,QWORD PTR [r8+0xa0]
-    11d0:	mov    QWORD PTR [rsp+0x18],rcx
-    11d5:	mov    rdx,r14
-    11d8:	mov    rsi,r13
-    11db:	mov    r8,rbx
-    11de:	call   11e3 <botlish_fn_8+0x173>
-			11df: R_X86_64_PLT32	botlish_fn_7-0x4 ; esc_bytes<generic>
-    11e3:	test   rax,rax
-    11e6:	jne    1211 <botlish_fn_8+0x1a1>
-    11ec:	xor    rax,rax
-    11ef:	mov    rbx,QWORD PTR [rsp+0x20]
-    11f4:	mov    r12,QWORD PTR [rsp+0x28]
-    11f9:	mov    r13,QWORD PTR [rsp+0x30]
-    11fe:	mov    r14,QWORD PTR [rsp+0x38]
-    1203:	mov    r15,QWORD PTR [rsp+0x40]
-    1208:	add    rsp,0x50
-    120c:	mov    rsp,rbp
-    120f:	pop    rbp
-    1210:	ret
-    1211:	mov    r15,rax
-    1214:	mov    rax,r15
-    1217:	mov    rbx,QWORD PTR [rsp+0x20]
-    121c:	mov    r12,QWORD PTR [rsp+0x28]
-    1221:	mov    r13,QWORD PTR [rsp+0x30]
-    1226:	mov    r14,QWORD PTR [rsp+0x38]
-    122b:	mov    r15,QWORD PTR [rsp+0x40]
-    1230:	add    rsp,0x50
-    1234:	mov    rsp,rbp
-    1237:	pop    rbp
-    1238:	ret
+0000000000000f58 <botlish_fn_8: esc_char<generic>>:
+     f58:	push   rbp
+     f59:	mov    rbp,rsp
+     f5c:	sub    rsp,0x50
+     f60:	mov    QWORD PTR [rsp+0x20],rbx
+     f65:	mov    QWORD PTR [rsp+0x28],r12
+     f6a:	mov    QWORD PTR [rsp+0x30],r13
+     f6f:	mov    QWORD PTR [rsp+0x38],r14
+     f74:	mov    QWORD PTR [rsp+0x40],r15
+     f79:	mov    QWORD PTR [rsp+0x10],0x0
+     f82:	mov    QWORD PTR [rsp+0x18],0x0
+     f8b:	mov    QWORD PTR [rsp],rsi
+     f8f:	mov    QWORD PTR [rsp+0x8],rdx
+     f94:	mov    rbx,rdx
+     f97:	xor    r9d,r9d
+     f9a:	test   rsi,0x7
+     fa1:	jne    fb1 <botlish_fn_8+0x59>
+     fa7:	movzx  rax,BYTE PTR [rsi]
+     fab:	cmp    al,0x2
+     fad:	sete   r9b
+     fb1:	test   r9b,r9b
+     fb4:	jne    fd4 <botlish_fn_8+0x7c>
+     fba:	mov    rax,QWORD PTR [rdi+0x10]
+     fbe:	mov    rcx,QWORD PTR [rax+0xd8]
+     fc5:	mov    edx,0x1
+     fca:	call   fcf <botlish_fn_8+0x77>
+			fcb: R_X86_64_PLT32	rt_type_error-0x4
+     fcf:	jmp    10d4 <botlish_fn_8+0x17c>
+     fd4:	mov    r12,rdi
+     fd7:	mov    r15,rsi
+     fda:	call   fdf <botlish_fn_8+0x87>
+			fdb: R_X86_64_PLT32	rt_str_utf8_bytes-0x4
+     fdf:	mov    rcx,rax
+     fe2:	mov    r13,rax
+     fe5:	test   rax,rcx
+     fe8:	je     10d4 <botlish_fn_8+0x17c>
+     fee:	mov    rax,r13
+     ff1:	mov    QWORD PTR [rsp],rax
+     ff5:	mov    rsi,r13
+     ff8:	mov    rdi,r12
+     ffb:	call   1000 <botlish_fn_8+0xa8>
+			ffc: R_X86_64_PLT32	rt_list_len-0x4
+    1000:	mov    edx,0x1
+    1005:	sar    rax,1
+    1008:	cmp    rax,0x1
+    100c:	je     1047 <botlish_fn_8+0xef>
+    1012:	mov    QWORD PTR [rsp+0x10],0x1
+    101b:	mov    rdi,r12
+    101e:	mov    rax,QWORD PTR [rdi+0x10]
+    1022:	mov    rcx,QWORD PTR [rax+0xa0]
+    1029:	mov    QWORD PTR [rsp+0x18],rcx
+    102e:	mov    rsi,r13
+    1031:	mov    r8,rbx
+    1034:	call   1039 <botlish_fn_8+0xe1>
+			1035: R_X86_64_PLT32	botlish_fn_7-0x4 ; esc_bytes<generic>
+    1039:	test   rax,rax
+    103c:	je     10d4 <botlish_fn_8+0x17c>
+    1042:	jmp    10ff <botlish_fn_8+0x1a7>
+    1047:	mov    rsi,r13
+    104a:	mov    r14,rdx
+    104d:	mov    rax,QWORD PTR [rsi+0x8]
+    1051:	mov    r13,rsi
+    1054:	test   rax,rax
+    1057:	jne    107c <botlish_fn_8+0x124>
+    105d:	mov    rdx,r14
+    1060:	mov    rsi,r13
+    1063:	mov    rdi,r12
+    1066:	call   106b <botlish_fn_8+0x113>
+			1067: R_X86_64_PLT32	rt_list_get-0x4
+    106b:	test   rax,rax
+    106e:	je     10d4 <botlish_fn_8+0x17c>
+    1074:	mov    rsi,rax
+    1077:	jmp    1086 <botlish_fn_8+0x12e>
+    107c:	mov    rsi,r13
+    107f:	mov    rcx,QWORD PTR [rsi+0x10]
+    1083:	mov    rsi,QWORD PTR [rcx]
+    1086:	mov    rdi,r12
+    1089:	call   108e <botlish_fn_8+0x136>
+			108a: R_X86_64_PLT32	botlish_fn_5-0x4 ; is_unreserved<generic>
+    108e:	test   rax,rax
+    1091:	je     10d4 <botlish_fn_8+0x17c>
+    1097:	cmp    rax,0x6
+    109b:	je     10fc <botlish_fn_8+0x1a4>
+    10a1:	mov    QWORD PTR [rsp+0x10],0x1
+    10aa:	mov    rdi,r12
+    10ad:	mov    r8,QWORD PTR [rdi+0x10]
+    10b1:	mov    rcx,QWORD PTR [r8+0xa0]
+    10b8:	mov    QWORD PTR [rsp+0x18],rcx
+    10bd:	mov    rdx,r14
+    10c0:	mov    rsi,r13
+    10c3:	mov    r8,rbx
+    10c6:	call   10cb <botlish_fn_8+0x173>
+			10c7: R_X86_64_PLT32	botlish_fn_7-0x4 ; esc_bytes<generic>
+    10cb:	test   rax,rax
+    10ce:	jne    10f9 <botlish_fn_8+0x1a1>
+    10d4:	xor    rax,rax
+    10d7:	mov    rbx,QWORD PTR [rsp+0x20]
+    10dc:	mov    r12,QWORD PTR [rsp+0x28]
+    10e1:	mov    r13,QWORD PTR [rsp+0x30]
+    10e6:	mov    r14,QWORD PTR [rsp+0x38]
+    10eb:	mov    r15,QWORD PTR [rsp+0x40]
+    10f0:	add    rsp,0x50
+    10f4:	mov    rsp,rbp
+    10f7:	pop    rbp
+    10f8:	ret
+    10f9:	mov    r15,rax
+    10fc:	mov    rax,r15
+    10ff:	mov    rbx,QWORD PTR [rsp+0x20]
+    1104:	mov    r12,QWORD PTR [rsp+0x28]
+    1109:	mov    r13,QWORD PTR [rsp+0x30]
+    110e:	mov    r14,QWORD PTR [rsp+0x38]
+    1113:	mov    r15,QWORD PTR [rsp+0x40]
+    1118:	add    rsp,0x50
+    111c:	mov    rsp,rbp
+    111f:	pop    rbp
+    1120:	ret
 
-0000000000001239 <botlish_entry_8: esc_char<generic>>:
-    1239:	push   rbp
-    123a:	mov    rbp,rsp
-    123d:	mov    rsi,QWORD PTR [rdx]
-    1240:	mov    rdx,QWORD PTR [rdx+0x8]
-    1244:	call   1249 <botlish_entry_8+0x10>
-			1245: R_X86_64_PLT32	botlish_fn_8-0x4 ; esc_char<generic>
-    1249:	mov    rsp,rbp
-    124c:	pop    rbp
-    124d:	ret
+0000000000001121 <botlish_entry_8: esc_char<generic>>:
+    1121:	push   rbp
+    1122:	mov    rbp,rsp
+    1125:	mov    rsi,QWORD PTR [rdx]
+    1128:	mov    rdx,QWORD PTR [rdx+0x8]
+    112c:	call   1131 <botlish_entry_8+0x10>
+			112d: R_X86_64_PLT32	botlish_fn_8-0x4 ; esc_char<generic>
+    1131:	mov    rsp,rbp
+    1134:	pop    rbp
+    1135:	ret
 	...
 
-0000000000001250 <botlish_fn_9: esc_from<generic>>:
-    1250:	push   rbp
-    1251:	mov    rbp,rsp
-    1254:	sub    rsp,0x70
-    1258:	mov    QWORD PTR [rsp+0x40],rbx
-    125d:	mov    QWORD PTR [rsp+0x48],r12
-    1262:	mov    QWORD PTR [rsp+0x50],r13
-    1267:	mov    QWORD PTR [rsp+0x58],r14
-    126c:	mov    QWORD PTR [rsp+0x60],r15
-    1271:	mov    r13,rdi
-    1274:	mov    QWORD PTR [rsp+0x28],0x0
-    127d:	mov    QWORD PTR [rsp],rsi
-    1281:	mov    QWORD PTR [rsp+0x8],rdx
-    1286:	mov    QWORD PTR [rsp+0x10],rcx
-    128b:	mov    QWORD PTR [rsp+0x18],r8
-    1290:	mov    r12,r8
-    1293:	mov    r14,rcx
-    1296:	mov    QWORD PTR [rsp+0x30],rdx
-    129b:	xor    eax,eax
-    129d:	test   rsi,0x7
-    12a4:	jne    12b3 <botlish_fn_9+0x63>
-    12aa:	movzx  rax,BYTE PTR [rsi]
-    12ae:	cmp    al,0x2
-    12b0:	sete   al
-    12b3:	test   al,al
-    12b5:	jne    12d8 <botlish_fn_9+0x88>
-    12bb:	mov    rdi,r13
-    12be:	mov    rax,QWORD PTR [rdi+0x10]
-    12c2:	mov    rcx,QWORD PTR [rax+0xe0]
-    12c9:	mov    edx,0x1
-    12ce:	call   12d3 <botlish_fn_9+0x83>
-			12cf: R_X86_64_PLT32	rt_type_error-0x4
-    12d3:	jmp    151c <botlish_fn_9+0x2cc>
-    12d8:	mov    rbx,rsi
-    12db:	mov    rdi,r13
-    12de:	call   12e3 <botlish_fn_9+0x93>
-			12df: R_X86_64_PLT32	rt_str_len-0x4
-    12e3:	mov    edx,0x1
-    12e8:	mov    r15,rdx
-    12eb:	mov    ecx,0x1
-    12f0:	mov    rsi,QWORD PTR [rsp+0x30]
-    12f5:	test   rsi,0x1
-    12fc:	jne    1326 <botlish_fn_9+0xd6>
-    1302:	xor    ecx,ecx
-    1304:	mov    rsi,QWORD PTR [rsp+0x30]
-    1309:	test   rsi,0x7
-    1310:	jne    1326 <botlish_fn_9+0xd6>
-    1316:	mov    rsi,QWORD PTR [rsp+0x30]
-    131b:	movzx  rcx,BYTE PTR [rsi]
-    131f:	rex cmp cl,0x1
-    1323:	sete   cl
-    1326:	test   cl,cl
-    1328:	jne    134e <botlish_fn_9+0xfe>
-    132e:	mov    rdi,r13
-    1331:	mov    rax,QWORD PTR [rdi+0x10]
-    1335:	mov    rcx,QWORD PTR [rax+0xc0]
-    133c:	xor    rdx,rdx
-    133f:	mov    rsi,QWORD PTR [rsp+0x30]
-    1344:	call   1349 <botlish_fn_9+0xf9>
-			1345: R_X86_64_PLT32	rt_type_error-0x4
-    1349:	jmp    151c <botlish_fn_9+0x2cc>
-    134e:	mov    rsi,QWORD PTR [rsp+0x30]
-    1353:	mov    rcx,rsi
-    1356:	and    rcx,rax
-    1359:	mov    rdx,rax
-    135c:	test   rcx,0x1
-    1363:	jne    138b <botlish_fn_9+0x13b>
-    1369:	mov    rsi,QWORD PTR [rsp+0x30]
-    136e:	mov    rdi,r13
-    1371:	call   1376 <botlish_fn_9+0x126>
-			1372: R_X86_64_PLT32	rt_int_cmp-0x4
-    1376:	mov    ecx,0x2
-    137b:	test   rax,rax
-    137e:	cmovge rcx,QWORD PTR [rip+0x20a]        # 1590 <botlish_fn_9+0x340>
-    1386:	jmp    13a0 <botlish_fn_9+0x150>
-    138b:	mov    ecx,0x2
-    1390:	mov    rsi,QWORD PTR [rsp+0x30]
-    1395:	cmp    rsi,rdx
-    1398:	cmovge rcx,QWORD PTR [rip+0x1f0]        # 1590 <botlish_fn_9+0x340>
-    13a0:	cmp    rcx,0x6
-    13a4:	je     1569 <botlish_fn_9+0x319>
-    13aa:	mov    QWORD PTR [rsp+0x20],0x3
-    13b3:	mov    rsi,QWORD PTR [rsp+0x30]
-    13b8:	test   rsi,0x1
-    13bf:	je     13dc <botlish_fn_9+0x18c>
-    13c5:	mov    rsi,QWORD PTR [rsp+0x30]
-    13ca:	mov    rax,rsi
-    13cd:	add    rax,0x2
-    13d1:	seto   cl
-    13d4:	test   cl,cl
-    13d6:	je     13ee <botlish_fn_9+0x19e>
-    13dc:	mov    edx,0x3
-    13e1:	mov    rsi,QWORD PTR [rsp+0x30]
-    13e6:	mov    rdi,r13
-    13e9:	call   13ee <botlish_fn_9+0x19e>
-			13ea: R_X86_64_PLT32	rt_int_add-0x4
-    13ee:	mov    QWORD PTR [rsp+0x20],rax
-    13f3:	mov    QWORD PTR [rsp+0x38],rax
-    13f8:	mov    QWORD PTR [rsp+0x28],0x3
-    1401:	mov    rsi,QWORD PTR [rsp+0x30]
-    1406:	test   rsi,0x1
-    140d:	je     142a <botlish_fn_9+0x1da>
-    1413:	mov    rsi,QWORD PTR [rsp+0x30]
-    1418:	mov    rcx,rsi
-    141b:	add    rcx,0x2
-    141f:	seto   al
-    1422:	test   al,al
-    1424:	je     143f <botlish_fn_9+0x1ef>
-    142a:	mov    edx,0x3
-    142f:	mov    rsi,QWORD PTR [rsp+0x30]
-    1434:	mov    rdi,r13
-    1437:	call   143c <botlish_fn_9+0x1ec>
-			1438: R_X86_64_PLT32	rt_int_add-0x4
-    143c:	mov    rcx,rax
-    143f:	mov    QWORD PTR [rsp+0x28],rcx
-    1444:	mov    rdx,QWORD PTR [rsp+0x30]
-    1449:	mov    rsi,rbx
-    144c:	mov    rdi,r13
-    144f:	call   1454 <botlish_fn_9+0x204>
-			1450: R_X86_64_PLT32	rt_substr-0x4
-    1454:	test   rax,rax
-    1457:	je     151c <botlish_fn_9+0x2cc>
-    145d:	mov    QWORD PTR [rsp+0x8],rax
-    1462:	mov    rsi,rax
-    1465:	mov    rdx,r12
-    1468:	mov    rdi,r13
-    146b:	call   1470 <botlish_fn_9+0x220>
-			146c: R_X86_64_PLT32	botlish_fn_8-0x4 ; esc_char<generic>
-    1470:	test   rax,rax
-    1473:	je     151c <botlish_fn_9+0x2cc>
-    1479:	mov    QWORD PTR [rsp+0x8],rax
-    147e:	xor    ecx,ecx
-    1480:	mov    rsi,r14
-    1483:	test   rsi,0x7
-    148a:	jne    149b <botlish_fn_9+0x24b>
-    1490:	movzx  rdi,BYTE PTR [rsi]
-    1494:	cmp    dil,0x2
-    1498:	sete   cl
-    149b:	test   cl,cl
-    149d:	jne    14be <botlish_fn_9+0x26e>
-    14a3:	mov    rdi,r13
-    14a6:	mov    r9,QWORD PTR [rdi+0x10]
-    14aa:	mov    rcx,QWORD PTR [r9+0xd0]
-    14b1:	mov    rdx,r15
-    14b4:	call   14b9 <botlish_fn_9+0x269>
-			14b5: R_X86_64_PLT32	rt_type_error-0x4
-    14b9:	jmp    151c <botlish_fn_9+0x2cc>
-    14be:	mov    rdx,r15
-    14c1:	xor    ecx,ecx
-    14c3:	test   rax,0x7
-    14c9:	je     14d7 <botlish_fn_9+0x287>
-    14cf:	mov    r8,rax
-    14d2:	jmp    14e5 <botlish_fn_9+0x295>
-    14d7:	movzx  rcx,BYTE PTR [rax]
-    14db:	mov    r8,rax
-    14de:	rex cmp cl,0x2
-    14e2:	sete   cl
-    14e5:	test   cl,cl
-    14e7:	jne    1508 <botlish_fn_9+0x2b8>
-    14ed:	mov    rdi,r13
-    14f0:	mov    rax,QWORD PTR [rdi+0x10]
-    14f4:	mov    rcx,QWORD PTR [rax+0xd0]
-    14fb:	mov    rsi,r8
-    14fe:	call   1503 <botlish_fn_9+0x2b3>
-			14ff: R_X86_64_PLT32	rt_type_error-0x4
-    1503:	jmp    151c <botlish_fn_9+0x2cc>
-    1508:	mov    rdx,r8
-    150b:	mov    rdi,r13
-    150e:	call   1513 <botlish_fn_9+0x2c3>
-			150f: R_X86_64_PLT32	rt_str_cat-0x4
-    1513:	test   rax,rax
-    1516:	jne    1541 <botlish_fn_9+0x2f1>
-    151c:	xor    rax,rax
-    151f:	mov    rbx,QWORD PTR [rsp+0x40]
-    1524:	mov    r12,QWORD PTR [rsp+0x48]
-    1529:	mov    r13,QWORD PTR [rsp+0x50]
-    152e:	mov    r14,QWORD PTR [rsp+0x58]
-    1533:	mov    r15,QWORD PTR [rsp+0x60]
-    1538:	add    rsp,0x70
-    153c:	mov    rsp,rbp
-    153f:	pop    rbp
-    1540:	ret
-    1541:	mov    QWORD PTR [rsp],rbx
-    1545:	mov    rcx,QWORD PTR [rsp+0x38]
-    154a:	mov    QWORD PTR [rsp+0x8],rcx
-    154f:	mov    QWORD PTR [rsp+0x10],rax
-    1554:	mov    QWORD PTR [rsp+0x18],r12
-    1559:	mov    rsi,rbx
-    155c:	mov    r14,rax
-    155f:	mov    QWORD PTR [rsp+0x30],rcx
-    1564:	jmp    129b <botlish_fn_9+0x4b>
-    1569:	mov    rax,r14
-    156c:	mov    rbx,QWORD PTR [rsp+0x40]
-    1571:	mov    r12,QWORD PTR [rsp+0x48]
-    1576:	mov    r13,QWORD PTR [rsp+0x50]
-    157b:	mov    r14,QWORD PTR [rsp+0x58]
-    1580:	mov    r15,QWORD PTR [rsp+0x60]
-    1585:	add    rsp,0x70
-    1589:	mov    rsp,rbp
-    158c:	pop    rbp
-    158d:	ret
-    158e:	add    BYTE PTR [rax],al
-    1590:	(bad)
-    1591:	add    BYTE PTR [rax],al
-    1593:	add    BYTE PTR [rax],al
-    1595:	add    BYTE PTR [rax],al
+0000000000001138 <botlish_fn_9: esc_from<generic>>:
+    1138:	push   rbp
+    1139:	mov    rbp,rsp
+    113c:	sub    rsp,0x70
+    1140:	mov    QWORD PTR [rsp+0x40],rbx
+    1145:	mov    QWORD PTR [rsp+0x48],r12
+    114a:	mov    QWORD PTR [rsp+0x50],r13
+    114f:	mov    QWORD PTR [rsp+0x58],r14
+    1154:	mov    QWORD PTR [rsp+0x60],r15
+    1159:	mov    r13,rdi
+    115c:	mov    QWORD PTR [rsp+0x28],0x0
+    1165:	mov    QWORD PTR [rsp],rsi
+    1169:	mov    QWORD PTR [rsp+0x8],rdx
+    116e:	mov    QWORD PTR [rsp+0x10],rcx
+    1173:	mov    QWORD PTR [rsp+0x18],r8
+    1178:	mov    r12,r8
+    117b:	mov    r14,rcx
+    117e:	mov    QWORD PTR [rsp+0x30],rdx
+    1183:	xor    eax,eax
+    1185:	test   rsi,0x7
+    118c:	jne    119b <botlish_fn_9+0x63>
+    1192:	movzx  rax,BYTE PTR [rsi]
+    1196:	cmp    al,0x2
+    1198:	sete   al
+    119b:	test   al,al
+    119d:	jne    11c0 <botlish_fn_9+0x88>
+    11a3:	mov    rdi,r13
+    11a6:	mov    rax,QWORD PTR [rdi+0x10]
+    11aa:	mov    rcx,QWORD PTR [rax+0xe0]
+    11b1:	mov    edx,0x1
+    11b6:	call   11bb <botlish_fn_9+0x83>
+			11b7: R_X86_64_PLT32	rt_type_error-0x4
+    11bb:	jmp    1404 <botlish_fn_9+0x2cc>
+    11c0:	mov    rbx,rsi
+    11c3:	mov    rdi,r13
+    11c6:	call   11cb <botlish_fn_9+0x93>
+			11c7: R_X86_64_PLT32	rt_str_len-0x4
+    11cb:	mov    edx,0x1
+    11d0:	mov    r15,rdx
+    11d3:	mov    ecx,0x1
+    11d8:	mov    rsi,QWORD PTR [rsp+0x30]
+    11dd:	test   rsi,0x1
+    11e4:	jne    120e <botlish_fn_9+0xd6>
+    11ea:	xor    ecx,ecx
+    11ec:	mov    rsi,QWORD PTR [rsp+0x30]
+    11f1:	test   rsi,0x7
+    11f8:	jne    120e <botlish_fn_9+0xd6>
+    11fe:	mov    rsi,QWORD PTR [rsp+0x30]
+    1203:	movzx  rcx,BYTE PTR [rsi]
+    1207:	rex cmp cl,0x1
+    120b:	sete   cl
+    120e:	test   cl,cl
+    1210:	jne    1236 <botlish_fn_9+0xfe>
+    1216:	mov    rdi,r13
+    1219:	mov    rax,QWORD PTR [rdi+0x10]
+    121d:	mov    rcx,QWORD PTR [rax+0xc0]
+    1224:	xor    rdx,rdx
+    1227:	mov    rsi,QWORD PTR [rsp+0x30]
+    122c:	call   1231 <botlish_fn_9+0xf9>
+			122d: R_X86_64_PLT32	rt_type_error-0x4
+    1231:	jmp    1404 <botlish_fn_9+0x2cc>
+    1236:	mov    rsi,QWORD PTR [rsp+0x30]
+    123b:	mov    rcx,rsi
+    123e:	and    rcx,rax
+    1241:	mov    rdx,rax
+    1244:	test   rcx,0x1
+    124b:	jne    1273 <botlish_fn_9+0x13b>
+    1251:	mov    rsi,QWORD PTR [rsp+0x30]
+    1256:	mov    rdi,r13
+    1259:	call   125e <botlish_fn_9+0x126>
+			125a: R_X86_64_PLT32	rt_int_cmp-0x4
+    125e:	mov    ecx,0x2
+    1263:	test   rax,rax
+    1266:	cmovge rcx,QWORD PTR [rip+0x20a]        # 1478 <botlish_fn_9+0x340>
+    126e:	jmp    1288 <botlish_fn_9+0x150>
+    1273:	mov    ecx,0x2
+    1278:	mov    rsi,QWORD PTR [rsp+0x30]
+    127d:	cmp    rsi,rdx
+    1280:	cmovge rcx,QWORD PTR [rip+0x1f0]        # 1478 <botlish_fn_9+0x340>
+    1288:	cmp    rcx,0x6
+    128c:	je     1451 <botlish_fn_9+0x319>
+    1292:	mov    QWORD PTR [rsp+0x20],0x3
+    129b:	mov    rsi,QWORD PTR [rsp+0x30]
+    12a0:	test   rsi,0x1
+    12a7:	je     12c4 <botlish_fn_9+0x18c>
+    12ad:	mov    rsi,QWORD PTR [rsp+0x30]
+    12b2:	mov    rax,rsi
+    12b5:	add    rax,0x2
+    12b9:	seto   cl
+    12bc:	test   cl,cl
+    12be:	je     12d6 <botlish_fn_9+0x19e>
+    12c4:	mov    edx,0x3
+    12c9:	mov    rsi,QWORD PTR [rsp+0x30]
+    12ce:	mov    rdi,r13
+    12d1:	call   12d6 <botlish_fn_9+0x19e>
+			12d2: R_X86_64_PLT32	rt_int_add-0x4
+    12d6:	mov    QWORD PTR [rsp+0x20],rax
+    12db:	mov    QWORD PTR [rsp+0x38],rax
+    12e0:	mov    QWORD PTR [rsp+0x28],0x3
+    12e9:	mov    rsi,QWORD PTR [rsp+0x30]
+    12ee:	test   rsi,0x1
+    12f5:	je     1312 <botlish_fn_9+0x1da>
+    12fb:	mov    rsi,QWORD PTR [rsp+0x30]
+    1300:	mov    rcx,rsi
+    1303:	add    rcx,0x2
+    1307:	seto   al
+    130a:	test   al,al
+    130c:	je     1327 <botlish_fn_9+0x1ef>
+    1312:	mov    edx,0x3
+    1317:	mov    rsi,QWORD PTR [rsp+0x30]
+    131c:	mov    rdi,r13
+    131f:	call   1324 <botlish_fn_9+0x1ec>
+			1320: R_X86_64_PLT32	rt_int_add-0x4
+    1324:	mov    rcx,rax
+    1327:	mov    QWORD PTR [rsp+0x28],rcx
+    132c:	mov    rdx,QWORD PTR [rsp+0x30]
+    1331:	mov    rsi,rbx
+    1334:	mov    rdi,r13
+    1337:	call   133c <botlish_fn_9+0x204>
+			1338: R_X86_64_PLT32	rt_substr-0x4
+    133c:	test   rax,rax
+    133f:	je     1404 <botlish_fn_9+0x2cc>
+    1345:	mov    QWORD PTR [rsp+0x8],rax
+    134a:	mov    rsi,rax
+    134d:	mov    rdx,r12
+    1350:	mov    rdi,r13
+    1353:	call   1358 <botlish_fn_9+0x220>
+			1354: R_X86_64_PLT32	botlish_fn_8-0x4 ; esc_char<generic>
+    1358:	test   rax,rax
+    135b:	je     1404 <botlish_fn_9+0x2cc>
+    1361:	mov    QWORD PTR [rsp+0x8],rax
+    1366:	xor    ecx,ecx
+    1368:	mov    rsi,r14
+    136b:	test   rsi,0x7
+    1372:	jne    1383 <botlish_fn_9+0x24b>
+    1378:	movzx  rdi,BYTE PTR [rsi]
+    137c:	cmp    dil,0x2
+    1380:	sete   cl
+    1383:	test   cl,cl
+    1385:	jne    13a6 <botlish_fn_9+0x26e>
+    138b:	mov    rdi,r13
+    138e:	mov    r9,QWORD PTR [rdi+0x10]
+    1392:	mov    rcx,QWORD PTR [r9+0xd0]
+    1399:	mov    rdx,r15
+    139c:	call   13a1 <botlish_fn_9+0x269>
+			139d: R_X86_64_PLT32	rt_type_error-0x4
+    13a1:	jmp    1404 <botlish_fn_9+0x2cc>
+    13a6:	mov    rdx,r15
+    13a9:	xor    ecx,ecx
+    13ab:	test   rax,0x7
+    13b1:	je     13bf <botlish_fn_9+0x287>
+    13b7:	mov    r8,rax
+    13ba:	jmp    13cd <botlish_fn_9+0x295>
+    13bf:	movzx  rcx,BYTE PTR [rax]
+    13c3:	mov    r8,rax
+    13c6:	rex cmp cl,0x2
+    13ca:	sete   cl
+    13cd:	test   cl,cl
+    13cf:	jne    13f0 <botlish_fn_9+0x2b8>
+    13d5:	mov    rdi,r13
+    13d8:	mov    rax,QWORD PTR [rdi+0x10]
+    13dc:	mov    rcx,QWORD PTR [rax+0xd0]
+    13e3:	mov    rsi,r8
+    13e6:	call   13eb <botlish_fn_9+0x2b3>
+			13e7: R_X86_64_PLT32	rt_type_error-0x4
+    13eb:	jmp    1404 <botlish_fn_9+0x2cc>
+    13f0:	mov    rdx,r8
+    13f3:	mov    rdi,r13
+    13f6:	call   13fb <botlish_fn_9+0x2c3>
+			13f7: R_X86_64_PLT32	rt_str_cat-0x4
+    13fb:	test   rax,rax
+    13fe:	jne    1429 <botlish_fn_9+0x2f1>
+    1404:	xor    rax,rax
+    1407:	mov    rbx,QWORD PTR [rsp+0x40]
+    140c:	mov    r12,QWORD PTR [rsp+0x48]
+    1411:	mov    r13,QWORD PTR [rsp+0x50]
+    1416:	mov    r14,QWORD PTR [rsp+0x58]
+    141b:	mov    r15,QWORD PTR [rsp+0x60]
+    1420:	add    rsp,0x70
+    1424:	mov    rsp,rbp
+    1427:	pop    rbp
+    1428:	ret
+    1429:	mov    QWORD PTR [rsp],rbx
+    142d:	mov    rcx,QWORD PTR [rsp+0x38]
+    1432:	mov    QWORD PTR [rsp+0x8],rcx
+    1437:	mov    QWORD PTR [rsp+0x10],rax
+    143c:	mov    QWORD PTR [rsp+0x18],r12
+    1441:	mov    rsi,rbx
+    1444:	mov    r14,rax
+    1447:	mov    QWORD PTR [rsp+0x30],rcx
+    144c:	jmp    1183 <botlish_fn_9+0x4b>
+    1451:	mov    rax,r14
+    1454:	mov    rbx,QWORD PTR [rsp+0x40]
+    1459:	mov    r12,QWORD PTR [rsp+0x48]
+    145e:	mov    r13,QWORD PTR [rsp+0x50]
+    1463:	mov    r14,QWORD PTR [rsp+0x58]
+    1468:	mov    r15,QWORD PTR [rsp+0x60]
+    146d:	add    rsp,0x70
+    1471:	mov    rsp,rbp
+    1474:	pop    rbp
+    1475:	ret
+    1476:	add    BYTE PTR [rax],al
+    1478:	(bad)
+    1479:	add    BYTE PTR [rax],al
+    147b:	add    BYTE PTR [rax],al
+    147d:	add    BYTE PTR [rax],al
 	...
 
-0000000000001598 <botlish_entry_9: esc_from<generic>>:
-    1598:	push   rbp
-    1599:	mov    rbp,rsp
-    159c:	mov    rsi,QWORD PTR [rdx]
-    159f:	mov    r9,QWORD PTR [rdx+0x8]
-    15a3:	mov    rcx,QWORD PTR [rdx+0x10]
-    15a7:	mov    r8,QWORD PTR [rdx+0x18]
-    15ab:	mov    rdx,r9
-    15ae:	call   15b3 <botlish_entry_9+0x1b>
-			15af: R_X86_64_PLT32	botlish_fn_9-0x4 ; esc_from<generic>
+0000000000001480 <botlish_entry_9: esc_from<generic>>:
+    1480:	push   rbp
+    1481:	mov    rbp,rsp
+    1484:	mov    rsi,QWORD PTR [rdx]
+    1487:	mov    r9,QWORD PTR [rdx+0x8]
+    148b:	mov    rcx,QWORD PTR [rdx+0x10]
+    148f:	mov    r8,QWORD PTR [rdx+0x18]
+    1493:	mov    rdx,r9
+    1496:	call   149b <botlish_entry_9+0x1b>
+			1497: R_X86_64_PLT32	botlish_fn_9-0x4 ; esc_from<generic>
+    149b:	mov    rsp,rbp
+    149e:	pop    rbp
+    149f:	ret
+
+00000000000014a0 <botlish_fn_10: check<int, int, str, str>>:
+    14a0:	push   rbp
+    14a1:	mov    rbp,rsp
+    14a4:	sub    rsp,0x60
+    14a8:	mov    QWORD PTR [rsp+0x30],rbx
+    14ad:	mov    QWORD PTR [rsp+0x38],r12
+    14b2:	mov    QWORD PTR [rsp+0x40],r13
+    14b7:	mov    QWORD PTR [rsp+0x48],r14
+    14bc:	mov    QWORD PTR [rsp+0x50],r15
+    14c1:	mov    QWORD PTR [rsp+0x20],0x0
+    14ca:	mov    QWORD PTR [rsp],rsi
+    14ce:	mov    QWORD PTR [rsp+0x8],rdx
+    14d3:	mov    QWORD PTR [rsp+0x10],rcx
+    14d8:	mov    r12,rcx
+    14db:	mov    QWORD PTR [rsp+0x18],r8
+    14e0:	mov    r14,r8
+    14e3:	mov    r13,rsi
+    14e6:	mov    r15,rdx
+    14e9:	test   r13,0x1
+    14f0:	jne    151b <botlish_fn_10+0x7b>
+    14f6:	mov    edx,0x1
+    14fb:	mov    rbx,rdi
+    14fe:	mov    rsi,r13
+    1501:	call   1506 <botlish_fn_10+0x66>
+			1502: R_X86_64_PLT32	rt_int_cmp-0x4
+    1506:	mov    ecx,0x2
+    150b:	test   rax,rax
+    150e:	cmovle rcx,QWORD PTR [rip+0x152]        # 1668 <botlish_fn_10+0x1c8>
+    1516:	jmp    152f <botlish_fn_10+0x8f>
+    151b:	mov    rbx,rdi
+    151e:	mov    ecx,0x2
+    1523:	cmp    r13,0x1
+    1527:	cmovle rcx,QWORD PTR [rip+0x139]        # 1668 <botlish_fn_10+0x1c8>
+    152f:	cmp    rcx,0x6
+    1533:	je     163c <botlish_fn_10+0x19c>
+    1539:	mov    rax,QWORD PTR [rbx+0x10]
+    153d:	mov    rax,QWORD PTR [rax+0xe8]
+    1544:	mov    rsi,r12
+    1547:	mov    rdi,rbx
+    154a:	call   154f <botlish_fn_10+0xaf>
+			154b: R_X86_64_PLT32	botlish_fn_11-0x4 ; <str>
+    154f:	test   rax,rax
+    1552:	je     1593 <botlish_fn_10+0xf3>
+    1558:	cmp    rax,0x6
+    155c:	je     1574 <botlish_fn_10+0xd4>
+    1562:	mov    edx,0x1
+    1567:	mov    QWORD PTR [rsp],0x1
+    156f:	jmp    15d5 <botlish_fn_10+0x135>
+    1574:	mov    rax,QWORD PTR [rbx+0x10]
+    1578:	mov    rax,QWORD PTR [rax+0xf0]
+    157f:	mov    rsi,r12
+    1582:	mov    rdi,rbx
+    1585:	call   158a <botlish_fn_10+0xea>
+			1586: R_X86_64_PLT32	botlish_fn_19-0x4 ; <str>
+    158a:	test   rax,rax
+    158d:	jne    15b8 <botlish_fn_10+0x118>
+    1593:	xor    rax,rax
+    1596:	mov    rbx,QWORD PTR [rsp+0x30]
+    159b:	mov    r12,QWORD PTR [rsp+0x38]
+    15a0:	mov    r13,QWORD PTR [rsp+0x40]
+    15a5:	mov    r14,QWORD PTR [rsp+0x48]
+    15aa:	mov    r15,QWORD PTR [rsp+0x50]
+    15af:	add    rsp,0x60
     15b3:	mov    rsp,rbp
     15b6:	pop    rbp
     15b7:	ret
-
-00000000000015b8 <botlish_fn_10: check<int, int, str, str>>:
-    15b8:	push   rbp
-    15b9:	mov    rbp,rsp
-    15bc:	sub    rsp,0x60
-    15c0:	mov    QWORD PTR [rsp+0x30],rbx
-    15c5:	mov    QWORD PTR [rsp+0x38],r12
-    15ca:	mov    QWORD PTR [rsp+0x40],r13
-    15cf:	mov    QWORD PTR [rsp+0x48],r14
-    15d4:	mov    QWORD PTR [rsp+0x50],r15
-    15d9:	mov    QWORD PTR [rsp+0x20],0x0
-    15e2:	mov    QWORD PTR [rsp],rsi
-    15e6:	mov    QWORD PTR [rsp+0x8],rdx
-    15eb:	mov    QWORD PTR [rsp+0x10],rcx
-    15f0:	mov    r12,rcx
-    15f3:	mov    QWORD PTR [rsp+0x18],r8
-    15f8:	mov    r14,r8
-    15fb:	mov    r13,rsi
-    15fe:	mov    r15,rdx
-    1601:	test   r13,0x1
-    1608:	jne    1633 <botlish_fn_10+0x7b>
-    160e:	mov    edx,0x1
-    1613:	mov    rbx,rdi
-    1616:	mov    rsi,r13
-    1619:	call   161e <botlish_fn_10+0x66>
-			161a: R_X86_64_PLT32	rt_int_cmp-0x4
-    161e:	mov    ecx,0x2
-    1623:	test   rax,rax
-    1626:	cmovle rcx,QWORD PTR [rip+0x152]        # 1780 <botlish_fn_10+0x1c8>
-    162e:	jmp    1647 <botlish_fn_10+0x8f>
-    1633:	mov    rbx,rdi
-    1636:	mov    ecx,0x2
-    163b:	cmp    r13,0x1
-    163f:	cmovle rcx,QWORD PTR [rip+0x139]        # 1780 <botlish_fn_10+0x1c8>
-    1647:	cmp    rcx,0x6
-    164b:	je     1754 <botlish_fn_10+0x19c>
-    1651:	mov    rax,QWORD PTR [rbx+0x10]
-    1655:	mov    rax,QWORD PTR [rax+0xe8]
-    165c:	mov    rsi,r12
-    165f:	mov    rdi,rbx
-    1662:	call   1667 <botlish_fn_10+0xaf>
-			1663: R_X86_64_PLT32	botlish_fn_11-0x4 ; <str>
-    1667:	test   rax,rax
-    166a:	je     16ab <botlish_fn_10+0xf3>
-    1670:	cmp    rax,0x6
-    1674:	je     168c <botlish_fn_10+0xd4>
-    167a:	mov    edx,0x1
-    167f:	mov    QWORD PTR [rsp],0x1
-    1687:	jmp    16ed <botlish_fn_10+0x135>
-    168c:	mov    rax,QWORD PTR [rbx+0x10]
-    1690:	mov    rax,QWORD PTR [rax+0xf0]
-    1697:	mov    rsi,r12
-    169a:	mov    rdi,rbx
-    169d:	call   16a2 <botlish_fn_10+0xea>
-			169e: R_X86_64_PLT32	botlish_fn_19-0x4 ; <str>
-    16a2:	test   rax,rax
-    16a5:	jne    16d0 <botlish_fn_10+0x118>
-    16ab:	xor    rax,rax
-    16ae:	mov    rbx,QWORD PTR [rsp+0x30]
-    16b3:	mov    r12,QWORD PTR [rsp+0x38]
-    16b8:	mov    r13,QWORD PTR [rsp+0x40]
-    16bd:	mov    r14,QWORD PTR [rsp+0x48]
-    16c2:	mov    r15,QWORD PTR [rsp+0x50]
-    16c7:	add    rsp,0x60
-    16cb:	mov    rsp,rbp
-    16ce:	pop    rbp
-    16cf:	ret
-    16d0:	cmp    rax,0x6
-    16d4:	je     16e4 <botlish_fn_10+0x12c>
-    16da:	mov    edx,0x1
-    16df:	jmp    16e9 <botlish_fn_10+0x131>
-    16e4:	mov    edx,0x3
-    16e9:	mov    QWORD PTR [rsp],rdx
-    16ed:	sar    r13,1
-    16f0:	sub    r13,0x1
-    16f4:	shl    r13,1
-    16f7:	or     r13,0x1
-    16fb:	mov    QWORD PTR [rsp+0x20],r13
-    1700:	mov    rsi,r15
-    1703:	mov    r8,rsi
-    1706:	and    r8,rdx
-    1709:	test   r8,0x1
-    1710:	je     172b <botlish_fn_10+0x173>
-    1716:	lea    r11,[rdx-0x1]
-    171a:	mov    rax,rsi
-    171d:	add    rax,r11
-    1720:	seto   cl
-    1723:	test   cl,cl
-    1725:	je     1733 <botlish_fn_10+0x17b>
-    172b:	mov    rdi,rbx
-    172e:	call   1733 <botlish_fn_10+0x17b>
-			172f: R_X86_64_PLT32	rt_int_add-0x4
-    1733:	mov    QWORD PTR [rsp],r13
-    1737:	mov    QWORD PTR [rsp+0x8],rax
-    173c:	mov    QWORD PTR [rsp+0x10],r12
-    1741:	mov    r8,r14
-    1744:	mov    QWORD PTR [rsp+0x18],r8
-    1749:	mov    rdi,rbx
-    174c:	mov    r15,rax
-    174f:	jmp    1601 <botlish_fn_10+0x49>
-    1754:	mov    rax,r15
-    1757:	mov    rbx,QWORD PTR [rsp+0x30]
-    175c:	mov    r12,QWORD PTR [rsp+0x38]
-    1761:	mov    r13,QWORD PTR [rsp+0x40]
-    1766:	mov    r14,QWORD PTR [rsp+0x48]
-    176b:	mov    r15,QWORD PTR [rsp+0x50]
-    1770:	add    rsp,0x60
-    1774:	mov    rsp,rbp
-    1777:	pop    rbp
-    1778:	ret
-    1779:	add    BYTE PTR [rax],al
-    177b:	add    BYTE PTR [rax],al
-    177d:	add    BYTE PTR [rax],al
-    177f:	add    BYTE PTR [rsi],al
-    1781:	add    BYTE PTR [rax],al
-    1783:	add    BYTE PTR [rax],al
-    1785:	add    BYTE PTR [rax],al
+    15b8:	cmp    rax,0x6
+    15bc:	je     15cc <botlish_fn_10+0x12c>
+    15c2:	mov    edx,0x1
+    15c7:	jmp    15d1 <botlish_fn_10+0x131>
+    15cc:	mov    edx,0x3
+    15d1:	mov    QWORD PTR [rsp],rdx
+    15d5:	sar    r13,1
+    15d8:	sub    r13,0x1
+    15dc:	shl    r13,1
+    15df:	or     r13,0x1
+    15e3:	mov    QWORD PTR [rsp+0x20],r13
+    15e8:	mov    rsi,r15
+    15eb:	mov    r8,rsi
+    15ee:	and    r8,rdx
+    15f1:	test   r8,0x1
+    15f8:	je     1613 <botlish_fn_10+0x173>
+    15fe:	lea    r11,[rdx-0x1]
+    1602:	mov    rax,rsi
+    1605:	add    rax,r11
+    1608:	seto   cl
+    160b:	test   cl,cl
+    160d:	je     161b <botlish_fn_10+0x17b>
+    1613:	mov    rdi,rbx
+    1616:	call   161b <botlish_fn_10+0x17b>
+			1617: R_X86_64_PLT32	rt_int_add-0x4
+    161b:	mov    QWORD PTR [rsp],r13
+    161f:	mov    QWORD PTR [rsp+0x8],rax
+    1624:	mov    QWORD PTR [rsp+0x10],r12
+    1629:	mov    r8,r14
+    162c:	mov    QWORD PTR [rsp+0x18],r8
+    1631:	mov    rdi,rbx
+    1634:	mov    r15,rax
+    1637:	jmp    14e9 <botlish_fn_10+0x49>
+    163c:	mov    rax,r15
+    163f:	mov    rbx,QWORD PTR [rsp+0x30]
+    1644:	mov    r12,QWORD PTR [rsp+0x38]
+    1649:	mov    r13,QWORD PTR [rsp+0x40]
+    164e:	mov    r14,QWORD PTR [rsp+0x48]
+    1653:	mov    r15,QWORD PTR [rsp+0x50]
+    1658:	add    rsp,0x60
+    165c:	mov    rsp,rbp
+    165f:	pop    rbp
+    1660:	ret
+    1661:	add    BYTE PTR [rax],al
+    1663:	add    BYTE PTR [rax],al
+    1665:	add    BYTE PTR [rax],al
+    1667:	add    BYTE PTR [rsi],al
+    1669:	add    BYTE PTR [rax],al
+    166b:	add    BYTE PTR [rax],al
+    166d:	add    BYTE PTR [rax],al
 	...
 
-0000000000001788 <botlish_entry_10: check<int, int, str, str>>:
-    1788:	push   rbp
-    1789:	mov    rbp,rsp
-    178c:	mov    rsi,QWORD PTR [rdx]
-    178f:	mov    r9,QWORD PTR [rdx+0x8]
-    1793:	mov    rcx,QWORD PTR [rdx+0x10]
-    1797:	mov    r8,QWORD PTR [rdx+0x18]
-    179b:	mov    rdx,r9
-    179e:	call   17a3 <botlish_entry_10+0x1b>
-			179f: R_X86_64_PLT32	botlish_fn_10-0x4 ; check<int, int, str, str>
-    17a3:	mov    rsp,rbp
-    17a6:	pop    rbp
-    17a7:	ret
+0000000000001670 <botlish_entry_10: check<int, int, str, str>>:
+    1670:	push   rbp
+    1671:	mov    rbp,rsp
+    1674:	mov    rsi,QWORD PTR [rdx]
+    1677:	mov    r9,QWORD PTR [rdx+0x8]
+    167b:	mov    rcx,QWORD PTR [rdx+0x10]
+    167f:	mov    r8,QWORD PTR [rdx+0x18]
+    1683:	mov    rdx,r9
+    1686:	call   168b <botlish_entry_10+0x1b>
+			1687: R_X86_64_PLT32	botlish_fn_10-0x4 ; check<int, int, str, str>
+    168b:	mov    rsp,rbp
+    168e:	pop    rbp
+    168f:	ret
 
-00000000000017a8 <botlish_fn_11: <str>>:
-    17a8:	push   rbp
-    17a9:	mov    rbp,rsp
-    17ac:	sub    rsp,0x50
-    17b0:	mov    QWORD PTR [rsp+0x30],rbx
-    17b5:	mov    QWORD PTR [rsp+0x38],r12
-    17ba:	mov    QWORD PTR [rsp+0x40],r13
-    17bf:	mov    QWORD PTR [rsp+0x48],r14
-    17c4:	mov    r13,rdi
-    17c7:	mov    QWORD PTR [rsp+0x18],0x0
-    17d0:	mov    QWORD PTR [rsp],rsi
-    17d4:	mov    r14,rsi
-    17d7:	mov    rsi,r14
-    17da:	mov    rdi,r13
-    17dd:	call   17e2 <botlish_fn_11+0x3a>
-			17de: R_X86_64_PLT32	rt_str_len-0x4
-    17e2:	mov    rbx,rax
-    17e5:	mov    QWORD PTR [rsp+0x8],rax
-    17ea:	mov    esi,0x1
-    17ef:	mov    QWORD PTR [rsp+0x10],0x1
-    17f8:	mov    rcx,r14
-    17fb:	mov    rdx,rbx
-    17fe:	mov    rdi,r13
-    1801:	call   1806 <botlish_fn_11+0x5e>
-			1802: R_X86_64_PLT32	botlish_fn_14-0x4 ; scan_local<generic>
-    1806:	mov    r12,rax
-    1809:	test   r12,r12
-    180c:	je     1969 <botlish_fn_11+0x1c1>
-    1812:	mov    QWORD PTR [rsp+0x10],r12
-    1817:	test   r12,0x1
-    181e:	jne    1849 <botlish_fn_11+0xa1>
-    1824:	mov    edx,0x1
-    1829:	mov    rsi,r12
-    182c:	mov    rdi,r13
-    182f:	call   1834 <botlish_fn_11+0x8c>
-			1830: R_X86_64_PLT32	rt_int_cmp-0x4
-    1834:	mov    ecx,0x2
-    1839:	test   rax,rax
-    183c:	cmove  rcx,QWORD PTR [rip+0x1c4]        # 1a08 <botlish_fn_11+0x260>
-    1844:	jmp    185a <botlish_fn_11+0xb2>
-    1849:	mov    ecx,0x2
-    184e:	cmp    r12,0x1
-    1852:	cmove  rcx,QWORD PTR [rip+0x1ae]        # 1a08 <botlish_fn_11+0x260>
-    185a:	cmp    rcx,0x6
-    185e:	je     19e4 <botlish_fn_11+0x23c>
-    1864:	mov    rcx,r12
-    1867:	and    rcx,rbx
-    186a:	test   rcx,0x1
-    1871:	jne    189a <botlish_fn_11+0xf2>
-    1877:	mov    rdx,rbx
-    187a:	mov    rsi,r12
-    187d:	mov    rdi,r13
-    1880:	call   1885 <botlish_fn_11+0xdd>
-			1881: R_X86_64_PLT32	rt_int_cmp-0x4
-    1885:	mov    ecx,0x2
-    188a:	test   rax,rax
-    188d:	cmovge rcx,QWORD PTR [rip+0x173]        # 1a08 <botlish_fn_11+0x260>
-    1895:	jmp    18aa <botlish_fn_11+0x102>
-    189a:	mov    ecx,0x2
-    189f:	cmp    r12,rbx
-    18a2:	cmovge rcx,QWORD PTR [rip+0x15e]        # 1a08 <botlish_fn_11+0x260>
-    18aa:	cmp    rcx,0x6
-    18ae:	je     19da <botlish_fn_11+0x232>
-    18b4:	lea    rcx,[rsp+0x20]
-    18b9:	mov    rdx,r14
-    18bc:	mov    rsi,r12
-    18bf:	mov    rdi,r13
-    18c2:	call   18c7 <botlish_fn_11+0x11f>
-			18c3: R_X86_64_PLT32	botlish_fn_13-0x4 ; char_at<generic>
-    18c7:	test   rax,rax
-    18ca:	mov    rsi,rax
-    18cd:	je     1969 <botlish_fn_11+0x1c1>
-    18d3:	mov    rdx,QWORD PTR [rsp+0x20]
-    18d8:	mov    rcx,QWORD PTR [rsp+0x28]
-    18dd:	mov    rdi,r13
-    18e0:	mov    rax,QWORD PTR [rdi+0x10]
-    18e4:	mov    r8,QWORD PTR [rax+0x108]
-    18eb:	call   18f0 <botlish_fn_11+0x148>
-			18ec: R_X86_64_PLT32	rt_str_region_eq-0x4
-    18f0:	cmp    rax,0x6
-    18f4:	je     1907 <botlish_fn_11+0x15f>
-    18fa:	mov    ecx,0x2
-    18ff:	mov    rax,rcx
-    1902:	jmp    19e9 <botlish_fn_11+0x241>
-    1907:	mov    QWORD PTR [rsp+0x18],0x3
-    1910:	test   r12,0x1
-    1917:	jne    1925 <botlish_fn_11+0x17d>
-    191d:	mov    rcx,r12
-    1920:	jmp    193a <botlish_fn_11+0x192>
-    1925:	mov    rsi,r12
-    1928:	add    rsi,0x2
-    192c:	mov    rcx,r12
-    192f:	seto   al
-    1932:	test   al,al
-    1934:	je     194d <botlish_fn_11+0x1a5>
-    193a:	mov    edx,0x3
-    193f:	mov    rsi,rcx
-    1942:	mov    rdi,r13
-    1945:	call   194a <botlish_fn_11+0x1a2>
-			1946: R_X86_64_PLT32	rt_int_add-0x4
-    194a:	mov    rsi,rax
-    194d:	mov    QWORD PTR [rsp+0x10],rsi
-    1952:	mov    rcx,r14
-    1955:	mov    rdx,rbx
-    1958:	mov    rdi,r13
-    195b:	call   1960 <botlish_fn_11+0x1b8>
-			195c: R_X86_64_PLT32	botlish_fn_18-0x4 ; domain_loop<generic>
-    1960:	test   rax,rax
-    1963:	jne    1989 <botlish_fn_11+0x1e1>
-    1969:	xor    rax,rax
-    196c:	mov    rbx,QWORD PTR [rsp+0x30]
-    1971:	mov    r12,QWORD PTR [rsp+0x38]
-    1976:	mov    r13,QWORD PTR [rsp+0x40]
-    197b:	mov    r14,QWORD PTR [rsp+0x48]
-    1980:	add    rsp,0x50
-    1984:	mov    rsp,rbp
-    1987:	pop    rbp
-    1988:	ret
-    1989:	mov    rcx,rax
-    198c:	and    rcx,rbx
-    198f:	mov    rsi,rax
-    1992:	test   rcx,0x1
-    1999:	jne    19c2 <botlish_fn_11+0x21a>
-    199f:	mov    rdx,rbx
-    19a2:	mov    rdi,r13
-    19a5:	call   19aa <botlish_fn_11+0x202>
-			19a6: R_X86_64_PLT32	rt_int_cmp-0x4
-    19aa:	mov    ecx,0x2
-    19af:	test   rax,rax
-    19b2:	mov    rax,rcx
-    19b5:	cmove  rax,QWORD PTR [rip+0x4b]        # 1a08 <botlish_fn_11+0x260>
-    19bd:	jmp    19e9 <botlish_fn_11+0x241>
-    19c2:	mov    rdx,rbx
-    19c5:	mov    eax,0x2
-    19ca:	cmp    rsi,rdx
-    19cd:	cmove  rax,QWORD PTR [rip+0x33]        # 1a08 <botlish_fn_11+0x260>
-    19d5:	jmp    19e9 <botlish_fn_11+0x241>
-    19da:	mov    eax,0x2
-    19df:	jmp    19e9 <botlish_fn_11+0x241>
-    19e4:	mov    eax,0x2
-    19e9:	mov    rbx,QWORD PTR [rsp+0x30]
-    19ee:	mov    r12,QWORD PTR [rsp+0x38]
-    19f3:	mov    r13,QWORD PTR [rsp+0x40]
-    19f8:	mov    r14,QWORD PTR [rsp+0x48]
-    19fd:	add    rsp,0x50
-    1a01:	mov    rsp,rbp
-    1a04:	pop    rbp
-    1a05:	ret
-    1a06:	add    BYTE PTR [rax],al
-    1a08:	(bad)
-    1a09:	add    BYTE PTR [rax],al
-    1a0b:	add    BYTE PTR [rax],al
-    1a0d:	add    BYTE PTR [rax],al
+0000000000001690 <botlish_fn_11: <str>>:
+    1690:	push   rbp
+    1691:	mov    rbp,rsp
+    1694:	sub    rsp,0x50
+    1698:	mov    QWORD PTR [rsp+0x30],rbx
+    169d:	mov    QWORD PTR [rsp+0x38],r12
+    16a2:	mov    QWORD PTR [rsp+0x40],r13
+    16a7:	mov    QWORD PTR [rsp+0x48],r14
+    16ac:	mov    r13,rdi
+    16af:	mov    QWORD PTR [rsp+0x18],0x0
+    16b8:	mov    QWORD PTR [rsp],rsi
+    16bc:	mov    r14,rsi
+    16bf:	mov    rsi,r14
+    16c2:	mov    rdi,r13
+    16c5:	call   16ca <botlish_fn_11+0x3a>
+			16c6: R_X86_64_PLT32	rt_str_len-0x4
+    16ca:	mov    rbx,rax
+    16cd:	mov    QWORD PTR [rsp+0x8],rax
+    16d2:	mov    esi,0x1
+    16d7:	mov    QWORD PTR [rsp+0x10],0x1
+    16e0:	mov    rcx,r14
+    16e3:	mov    rdx,rbx
+    16e6:	mov    rdi,r13
+    16e9:	call   16ee <botlish_fn_11+0x5e>
+			16ea: R_X86_64_PLT32	botlish_fn_14-0x4 ; scan_local<generic>
+    16ee:	mov    r12,rax
+    16f1:	test   r12,r12
+    16f4:	je     1851 <botlish_fn_11+0x1c1>
+    16fa:	mov    QWORD PTR [rsp+0x10],r12
+    16ff:	test   r12,0x1
+    1706:	jne    1731 <botlish_fn_11+0xa1>
+    170c:	mov    edx,0x1
+    1711:	mov    rsi,r12
+    1714:	mov    rdi,r13
+    1717:	call   171c <botlish_fn_11+0x8c>
+			1718: R_X86_64_PLT32	rt_int_cmp-0x4
+    171c:	mov    ecx,0x2
+    1721:	test   rax,rax
+    1724:	cmove  rcx,QWORD PTR [rip+0x1c4]        # 18f0 <botlish_fn_11+0x260>
+    172c:	jmp    1742 <botlish_fn_11+0xb2>
+    1731:	mov    ecx,0x2
+    1736:	cmp    r12,0x1
+    173a:	cmove  rcx,QWORD PTR [rip+0x1ae]        # 18f0 <botlish_fn_11+0x260>
+    1742:	cmp    rcx,0x6
+    1746:	je     18cc <botlish_fn_11+0x23c>
+    174c:	mov    rcx,r12
+    174f:	and    rcx,rbx
+    1752:	test   rcx,0x1
+    1759:	jne    1782 <botlish_fn_11+0xf2>
+    175f:	mov    rdx,rbx
+    1762:	mov    rsi,r12
+    1765:	mov    rdi,r13
+    1768:	call   176d <botlish_fn_11+0xdd>
+			1769: R_X86_64_PLT32	rt_int_cmp-0x4
+    176d:	mov    ecx,0x2
+    1772:	test   rax,rax
+    1775:	cmovge rcx,QWORD PTR [rip+0x173]        # 18f0 <botlish_fn_11+0x260>
+    177d:	jmp    1792 <botlish_fn_11+0x102>
+    1782:	mov    ecx,0x2
+    1787:	cmp    r12,rbx
+    178a:	cmovge rcx,QWORD PTR [rip+0x15e]        # 18f0 <botlish_fn_11+0x260>
+    1792:	cmp    rcx,0x6
+    1796:	je     18c2 <botlish_fn_11+0x232>
+    179c:	lea    rcx,[rsp+0x20]
+    17a1:	mov    rdx,r14
+    17a4:	mov    rsi,r12
+    17a7:	mov    rdi,r13
+    17aa:	call   17af <botlish_fn_11+0x11f>
+			17ab: R_X86_64_PLT32	botlish_fn_13-0x4 ; char_at<generic>
+    17af:	test   rax,rax
+    17b2:	mov    rsi,rax
+    17b5:	je     1851 <botlish_fn_11+0x1c1>
+    17bb:	mov    rdx,QWORD PTR [rsp+0x20]
+    17c0:	mov    rcx,QWORD PTR [rsp+0x28]
+    17c5:	mov    rdi,r13
+    17c8:	mov    rax,QWORD PTR [rdi+0x10]
+    17cc:	mov    r8,QWORD PTR [rax+0x108]
+    17d3:	call   17d8 <botlish_fn_11+0x148>
+			17d4: R_X86_64_PLT32	rt_str_region_eq-0x4
+    17d8:	cmp    rax,0x6
+    17dc:	je     17ef <botlish_fn_11+0x15f>
+    17e2:	mov    ecx,0x2
+    17e7:	mov    rax,rcx
+    17ea:	jmp    18d1 <botlish_fn_11+0x241>
+    17ef:	mov    QWORD PTR [rsp+0x18],0x3
+    17f8:	test   r12,0x1
+    17ff:	jne    180d <botlish_fn_11+0x17d>
+    1805:	mov    rcx,r12
+    1808:	jmp    1822 <botlish_fn_11+0x192>
+    180d:	mov    rsi,r12
+    1810:	add    rsi,0x2
+    1814:	mov    rcx,r12
+    1817:	seto   al
+    181a:	test   al,al
+    181c:	je     1835 <botlish_fn_11+0x1a5>
+    1822:	mov    edx,0x3
+    1827:	mov    rsi,rcx
+    182a:	mov    rdi,r13
+    182d:	call   1832 <botlish_fn_11+0x1a2>
+			182e: R_X86_64_PLT32	rt_int_add-0x4
+    1832:	mov    rsi,rax
+    1835:	mov    QWORD PTR [rsp+0x10],rsi
+    183a:	mov    rcx,r14
+    183d:	mov    rdx,rbx
+    1840:	mov    rdi,r13
+    1843:	call   1848 <botlish_fn_11+0x1b8>
+			1844: R_X86_64_PLT32	botlish_fn_18-0x4 ; domain_loop<generic>
+    1848:	test   rax,rax
+    184b:	jne    1871 <botlish_fn_11+0x1e1>
+    1851:	xor    rax,rax
+    1854:	mov    rbx,QWORD PTR [rsp+0x30]
+    1859:	mov    r12,QWORD PTR [rsp+0x38]
+    185e:	mov    r13,QWORD PTR [rsp+0x40]
+    1863:	mov    r14,QWORD PTR [rsp+0x48]
+    1868:	add    rsp,0x50
+    186c:	mov    rsp,rbp
+    186f:	pop    rbp
+    1870:	ret
+    1871:	mov    rcx,rax
+    1874:	and    rcx,rbx
+    1877:	mov    rsi,rax
+    187a:	test   rcx,0x1
+    1881:	jne    18aa <botlish_fn_11+0x21a>
+    1887:	mov    rdx,rbx
+    188a:	mov    rdi,r13
+    188d:	call   1892 <botlish_fn_11+0x202>
+			188e: R_X86_64_PLT32	rt_int_cmp-0x4
+    1892:	mov    ecx,0x2
+    1897:	test   rax,rax
+    189a:	mov    rax,rcx
+    189d:	cmove  rax,QWORD PTR [rip+0x4b]        # 18f0 <botlish_fn_11+0x260>
+    18a5:	jmp    18d1 <botlish_fn_11+0x241>
+    18aa:	mov    rdx,rbx
+    18ad:	mov    eax,0x2
+    18b2:	cmp    rsi,rdx
+    18b5:	cmove  rax,QWORD PTR [rip+0x33]        # 18f0 <botlish_fn_11+0x260>
+    18bd:	jmp    18d1 <botlish_fn_11+0x241>
+    18c2:	mov    eax,0x2
+    18c7:	jmp    18d1 <botlish_fn_11+0x241>
+    18cc:	mov    eax,0x2
+    18d1:	mov    rbx,QWORD PTR [rsp+0x30]
+    18d6:	mov    r12,QWORD PTR [rsp+0x38]
+    18db:	mov    r13,QWORD PTR [rsp+0x40]
+    18e0:	mov    r14,QWORD PTR [rsp+0x48]
+    18e5:	add    rsp,0x50
+    18e9:	mov    rsp,rbp
+    18ec:	pop    rbp
+    18ed:	ret
+    18ee:	add    BYTE PTR [rax],al
+    18f0:	(bad)
+    18f1:	add    BYTE PTR [rax],al
+    18f3:	add    BYTE PTR [rax],al
+    18f5:	add    BYTE PTR [rax],al
 	...
 
-0000000000001a10 <botlish_entry_11: <str>>:
-    1a10:	push   rbp
-    1a11:	mov    rbp,rsp
-    1a14:	mov    rsi,QWORD PTR [rdx]
-    1a17:	call   1a1c <botlish_entry_11+0xc>
-			1a18: R_X86_64_PLT32	botlish_fn_11-0x4 ; <str>
-    1a1c:	mov    rsp,rbp
-    1a1f:	pop    rbp
-    1a20:	ret
-    1a21:	add    BYTE PTR [rax],al
-    1a23:	add    BYTE PTR [rax],al
-    1a25:	add    BYTE PTR [rax],al
+00000000000018f8 <botlish_entry_11: <str>>:
+    18f8:	push   rbp
+    18f9:	mov    rbp,rsp
+    18fc:	mov    rsi,QWORD PTR [rdx]
+    18ff:	call   1904 <botlish_entry_11+0xc>
+			1900: R_X86_64_PLT32	botlish_fn_11-0x4 ; <str>
+    1904:	mov    rsp,rbp
+    1907:	pop    rbp
+    1908:	ret
+    1909:	add    BYTE PTR [rax],al
+    190b:	add    BYTE PTR [rax],al
+    190d:	add    BYTE PTR [rax],al
 	...
 
-0000000000001a28 <botlish_fn_12: <generic>>:
-    1a28:	push   rbp
-    1a29:	mov    rbp,rsp
-    1a2c:	sub    rsp,0x60
-    1a30:	mov    QWORD PTR [rsp+0x30],rbx
-    1a35:	mov    QWORD PTR [rsp+0x38],r12
-    1a3a:	mov    QWORD PTR [rsp+0x40],r13
-    1a3f:	mov    QWORD PTR [rsp+0x48],r14
-    1a44:	mov    QWORD PTR [rsp+0x50],r15
-    1a49:	mov    QWORD PTR [rsp+0x18],0x0
-    1a52:	mov    QWORD PTR [rsp],rsi
-    1a56:	xor    r8d,r8d
-    1a59:	test   rsi,0x7
-    1a60:	jne    1a70 <botlish_fn_12+0x48>
-    1a66:	movzx  rax,BYTE PTR [rsi]
-    1a6a:	cmp    al,0x2
-    1a6c:	sete   r8b
-    1a70:	test   r8b,r8b
-    1a73:	jne    1a93 <botlish_fn_12+0x6b>
-    1a79:	mov    rdx,QWORD PTR [rdi+0x10]
-    1a7d:	mov    rcx,QWORD PTR [rdx+0xe0]
-    1a84:	mov    edx,0x1
-    1a89:	call   1a8e <botlish_fn_12+0x66>
-			1a8a: R_X86_64_PLT32	rt_type_error-0x4
-    1a8e:	jmp    1c28 <botlish_fn_12+0x200>
-    1a93:	mov    r13,rsi
-    1a96:	mov    r14,rdi
-    1a99:	call   1a9e <botlish_fn_12+0x76>
-			1a9a: R_X86_64_PLT32	rt_str_len-0x4
-    1a9e:	mov    rbx,rax
-    1aa1:	mov    QWORD PTR [rsp+0x8],rax
-    1aa6:	mov    edx,0x1
-    1aab:	mov    r15,rdx
-    1aae:	mov    QWORD PTR [rsp+0x10],0x1
-    1ab7:	mov    rcx,r13
-    1aba:	mov    rdx,rbx
-    1abd:	mov    rsi,r15
-    1ac0:	mov    rdi,r14
-    1ac3:	call   1ac8 <botlish_fn_12+0xa0>
-			1ac4: R_X86_64_PLT32	botlish_fn_14-0x4 ; scan_local<generic>
-    1ac8:	mov    r12,rax
-    1acb:	test   r12,r12
-    1ace:	je     1c28 <botlish_fn_12+0x200>
-    1ad4:	mov    QWORD PTR [rsp+0x10],r12
-    1ad9:	test   r12,0x1
-    1ae0:	jne    1b09 <botlish_fn_12+0xe1>
-    1ae6:	mov    rdx,r15
-    1ae9:	mov    rsi,r12
-    1aec:	mov    rdi,r14
-    1aef:	call   1af4 <botlish_fn_12+0xcc>
-			1af0: R_X86_64_PLT32	rt_int_cmp-0x4
-    1af4:	mov    ecx,0x2
-    1af9:	test   rax,rax
-    1afc:	cmove  rcx,QWORD PTR [rip+0x1cc]        # 1cd0 <botlish_fn_12+0x2a8>
-    1b04:	jmp    1b1a <botlish_fn_12+0xf2>
-    1b09:	mov    ecx,0x2
-    1b0e:	cmp    r12,0x1
-    1b12:	cmove  rcx,QWORD PTR [rip+0x1b6]        # 1cd0 <botlish_fn_12+0x2a8>
-    1b1a:	cmp    rcx,0x6
-    1b1e:	je     1ca8 <botlish_fn_12+0x280>
-    1b24:	mov    rax,r12
-    1b27:	and    rax,rbx
-    1b2a:	test   rax,0x1
-    1b30:	jne    1b59 <botlish_fn_12+0x131>
-    1b36:	mov    rdx,rbx
-    1b39:	mov    rsi,r12
-    1b3c:	mov    rdi,r14
-    1b3f:	call   1b44 <botlish_fn_12+0x11c>
-			1b40: R_X86_64_PLT32	rt_int_cmp-0x4
-    1b44:	mov    ecx,0x2
-    1b49:	test   rax,rax
-    1b4c:	cmovge rcx,QWORD PTR [rip+0x17c]        # 1cd0 <botlish_fn_12+0x2a8>
-    1b54:	jmp    1b69 <botlish_fn_12+0x141>
-    1b59:	mov    ecx,0x2
-    1b5e:	cmp    r12,rbx
-    1b61:	cmovge rcx,QWORD PTR [rip+0x167]        # 1cd0 <botlish_fn_12+0x2a8>
-    1b69:	cmp    rcx,0x6
-    1b6d:	je     1c9e <botlish_fn_12+0x276>
-    1b73:	lea    rcx,[rsp+0x20]
-    1b78:	mov    rdx,r13
-    1b7b:	mov    rsi,r12
-    1b7e:	mov    rdi,r14
-    1b81:	call   1b86 <botlish_fn_12+0x15e>
-			1b82: R_X86_64_PLT32	botlish_fn_13-0x4 ; char_at<generic>
-    1b86:	test   rax,rax
-    1b89:	mov    rsi,rax
-    1b8c:	je     1c28 <botlish_fn_12+0x200>
-    1b92:	mov    rdx,QWORD PTR [rsp+0x20]
-    1b97:	mov    rcx,QWORD PTR [rsp+0x28]
-    1b9c:	mov    rdi,r14
-    1b9f:	mov    rax,QWORD PTR [rdi+0x10]
-    1ba3:	mov    r8,QWORD PTR [rax+0x108]
-    1baa:	call   1baf <botlish_fn_12+0x187>
-			1bab: R_X86_64_PLT32	rt_str_region_eq-0x4
-    1baf:	cmp    rax,0x6
-    1bb3:	je     1bc6 <botlish_fn_12+0x19e>
-    1bb9:	mov    ecx,0x2
-    1bbe:	mov    rax,rcx
-    1bc1:	jmp    1cad <botlish_fn_12+0x285>
-    1bc6:	mov    QWORD PTR [rsp+0x18],0x3
-    1bcf:	test   r12,0x1
-    1bd6:	jne    1be4 <botlish_fn_12+0x1bc>
-    1bdc:	mov    rdi,r12
-    1bdf:	jmp    1bf9 <botlish_fn_12+0x1d1>
-    1be4:	mov    rsi,r12
-    1be7:	add    rsi,0x2
-    1beb:	mov    rdi,r12
-    1bee:	seto   al
-    1bf1:	test   al,al
-    1bf3:	je     1c0c <botlish_fn_12+0x1e4>
-    1bf9:	mov    edx,0x3
-    1bfe:	mov    rsi,rdi
-    1c01:	mov    rdi,r14
-    1c04:	call   1c09 <botlish_fn_12+0x1e1>
-			1c05: R_X86_64_PLT32	rt_int_add-0x4
-    1c09:	mov    rsi,rax
-    1c0c:	mov    QWORD PTR [rsp+0x10],rsi
-    1c11:	mov    rcx,r13
-    1c14:	mov    rdx,rbx
-    1c17:	mov    rdi,r14
-    1c1a:	call   1c1f <botlish_fn_12+0x1f7>
-			1c1b: R_X86_64_PLT32	botlish_fn_18-0x4 ; domain_loop<generic>
-    1c1f:	test   rax,rax
-    1c22:	jne    1c4d <botlish_fn_12+0x225>
-    1c28:	xor    rax,rax
-    1c2b:	mov    rbx,QWORD PTR [rsp+0x30]
-    1c30:	mov    r12,QWORD PTR [rsp+0x38]
-    1c35:	mov    r13,QWORD PTR [rsp+0x40]
-    1c3a:	mov    r14,QWORD PTR [rsp+0x48]
-    1c3f:	mov    r15,QWORD PTR [rsp+0x50]
-    1c44:	add    rsp,0x60
-    1c48:	mov    rsp,rbp
-    1c4b:	pop    rbp
-    1c4c:	ret
-    1c4d:	mov    rcx,rax
-    1c50:	and    rcx,rbx
-    1c53:	mov    rsi,rax
-    1c56:	test   rcx,0x1
-    1c5d:	jne    1c86 <botlish_fn_12+0x25e>
-    1c63:	mov    rdx,rbx
-    1c66:	mov    rdi,r14
-    1c69:	call   1c6e <botlish_fn_12+0x246>
-			1c6a: R_X86_64_PLT32	rt_int_cmp-0x4
-    1c6e:	mov    ecx,0x2
-    1c73:	test   rax,rax
-    1c76:	mov    rax,rcx
-    1c79:	cmove  rax,QWORD PTR [rip+0x4f]        # 1cd0 <botlish_fn_12+0x2a8>
-    1c81:	jmp    1cad <botlish_fn_12+0x285>
-    1c86:	mov    rdx,rbx
-    1c89:	mov    eax,0x2
-    1c8e:	cmp    rsi,rdx
-    1c91:	cmove  rax,QWORD PTR [rip+0x37]        # 1cd0 <botlish_fn_12+0x2a8>
-    1c99:	jmp    1cad <botlish_fn_12+0x285>
-    1c9e:	mov    eax,0x2
-    1ca3:	jmp    1cad <botlish_fn_12+0x285>
-    1ca8:	mov    eax,0x2
-    1cad:	mov    rbx,QWORD PTR [rsp+0x30]
-    1cb2:	mov    r12,QWORD PTR [rsp+0x38]
-    1cb7:	mov    r13,QWORD PTR [rsp+0x40]
-    1cbc:	mov    r14,QWORD PTR [rsp+0x48]
-    1cc1:	mov    r15,QWORD PTR [rsp+0x50]
-    1cc6:	add    rsp,0x60
-    1cca:	mov    rsp,rbp
-    1ccd:	pop    rbp
-    1cce:	ret
-    1ccf:	add    BYTE PTR [rsi],al
-    1cd1:	add    BYTE PTR [rax],al
-    1cd3:	add    BYTE PTR [rax],al
-    1cd5:	add    BYTE PTR [rax],al
+0000000000001910 <botlish_fn_12: <generic>>:
+    1910:	push   rbp
+    1911:	mov    rbp,rsp
+    1914:	sub    rsp,0x60
+    1918:	mov    QWORD PTR [rsp+0x30],rbx
+    191d:	mov    QWORD PTR [rsp+0x38],r12
+    1922:	mov    QWORD PTR [rsp+0x40],r13
+    1927:	mov    QWORD PTR [rsp+0x48],r14
+    192c:	mov    QWORD PTR [rsp+0x50],r15
+    1931:	mov    QWORD PTR [rsp+0x18],0x0
+    193a:	mov    QWORD PTR [rsp],rsi
+    193e:	xor    r8d,r8d
+    1941:	test   rsi,0x7
+    1948:	jne    1958 <botlish_fn_12+0x48>
+    194e:	movzx  rax,BYTE PTR [rsi]
+    1952:	cmp    al,0x2
+    1954:	sete   r8b
+    1958:	test   r8b,r8b
+    195b:	jne    197b <botlish_fn_12+0x6b>
+    1961:	mov    rdx,QWORD PTR [rdi+0x10]
+    1965:	mov    rcx,QWORD PTR [rdx+0xe0]
+    196c:	mov    edx,0x1
+    1971:	call   1976 <botlish_fn_12+0x66>
+			1972: R_X86_64_PLT32	rt_type_error-0x4
+    1976:	jmp    1b10 <botlish_fn_12+0x200>
+    197b:	mov    r13,rsi
+    197e:	mov    r14,rdi
+    1981:	call   1986 <botlish_fn_12+0x76>
+			1982: R_X86_64_PLT32	rt_str_len-0x4
+    1986:	mov    rbx,rax
+    1989:	mov    QWORD PTR [rsp+0x8],rax
+    198e:	mov    edx,0x1
+    1993:	mov    r15,rdx
+    1996:	mov    QWORD PTR [rsp+0x10],0x1
+    199f:	mov    rcx,r13
+    19a2:	mov    rdx,rbx
+    19a5:	mov    rsi,r15
+    19a8:	mov    rdi,r14
+    19ab:	call   19b0 <botlish_fn_12+0xa0>
+			19ac: R_X86_64_PLT32	botlish_fn_14-0x4 ; scan_local<generic>
+    19b0:	mov    r12,rax
+    19b3:	test   r12,r12
+    19b6:	je     1b10 <botlish_fn_12+0x200>
+    19bc:	mov    QWORD PTR [rsp+0x10],r12
+    19c1:	test   r12,0x1
+    19c8:	jne    19f1 <botlish_fn_12+0xe1>
+    19ce:	mov    rdx,r15
+    19d1:	mov    rsi,r12
+    19d4:	mov    rdi,r14
+    19d7:	call   19dc <botlish_fn_12+0xcc>
+			19d8: R_X86_64_PLT32	rt_int_cmp-0x4
+    19dc:	mov    ecx,0x2
+    19e1:	test   rax,rax
+    19e4:	cmove  rcx,QWORD PTR [rip+0x1cc]        # 1bb8 <botlish_fn_12+0x2a8>
+    19ec:	jmp    1a02 <botlish_fn_12+0xf2>
+    19f1:	mov    ecx,0x2
+    19f6:	cmp    r12,0x1
+    19fa:	cmove  rcx,QWORD PTR [rip+0x1b6]        # 1bb8 <botlish_fn_12+0x2a8>
+    1a02:	cmp    rcx,0x6
+    1a06:	je     1b90 <botlish_fn_12+0x280>
+    1a0c:	mov    rax,r12
+    1a0f:	and    rax,rbx
+    1a12:	test   rax,0x1
+    1a18:	jne    1a41 <botlish_fn_12+0x131>
+    1a1e:	mov    rdx,rbx
+    1a21:	mov    rsi,r12
+    1a24:	mov    rdi,r14
+    1a27:	call   1a2c <botlish_fn_12+0x11c>
+			1a28: R_X86_64_PLT32	rt_int_cmp-0x4
+    1a2c:	mov    ecx,0x2
+    1a31:	test   rax,rax
+    1a34:	cmovge rcx,QWORD PTR [rip+0x17c]        # 1bb8 <botlish_fn_12+0x2a8>
+    1a3c:	jmp    1a51 <botlish_fn_12+0x141>
+    1a41:	mov    ecx,0x2
+    1a46:	cmp    r12,rbx
+    1a49:	cmovge rcx,QWORD PTR [rip+0x167]        # 1bb8 <botlish_fn_12+0x2a8>
+    1a51:	cmp    rcx,0x6
+    1a55:	je     1b86 <botlish_fn_12+0x276>
+    1a5b:	lea    rcx,[rsp+0x20]
+    1a60:	mov    rdx,r13
+    1a63:	mov    rsi,r12
+    1a66:	mov    rdi,r14
+    1a69:	call   1a6e <botlish_fn_12+0x15e>
+			1a6a: R_X86_64_PLT32	botlish_fn_13-0x4 ; char_at<generic>
+    1a6e:	test   rax,rax
+    1a71:	mov    rsi,rax
+    1a74:	je     1b10 <botlish_fn_12+0x200>
+    1a7a:	mov    rdx,QWORD PTR [rsp+0x20]
+    1a7f:	mov    rcx,QWORD PTR [rsp+0x28]
+    1a84:	mov    rdi,r14
+    1a87:	mov    rax,QWORD PTR [rdi+0x10]
+    1a8b:	mov    r8,QWORD PTR [rax+0x108]
+    1a92:	call   1a97 <botlish_fn_12+0x187>
+			1a93: R_X86_64_PLT32	rt_str_region_eq-0x4
+    1a97:	cmp    rax,0x6
+    1a9b:	je     1aae <botlish_fn_12+0x19e>
+    1aa1:	mov    ecx,0x2
+    1aa6:	mov    rax,rcx
+    1aa9:	jmp    1b95 <botlish_fn_12+0x285>
+    1aae:	mov    QWORD PTR [rsp+0x18],0x3
+    1ab7:	test   r12,0x1
+    1abe:	jne    1acc <botlish_fn_12+0x1bc>
+    1ac4:	mov    rdi,r12
+    1ac7:	jmp    1ae1 <botlish_fn_12+0x1d1>
+    1acc:	mov    rsi,r12
+    1acf:	add    rsi,0x2
+    1ad3:	mov    rdi,r12
+    1ad6:	seto   al
+    1ad9:	test   al,al
+    1adb:	je     1af4 <botlish_fn_12+0x1e4>
+    1ae1:	mov    edx,0x3
+    1ae6:	mov    rsi,rdi
+    1ae9:	mov    rdi,r14
+    1aec:	call   1af1 <botlish_fn_12+0x1e1>
+			1aed: R_X86_64_PLT32	rt_int_add-0x4
+    1af1:	mov    rsi,rax
+    1af4:	mov    QWORD PTR [rsp+0x10],rsi
+    1af9:	mov    rcx,r13
+    1afc:	mov    rdx,rbx
+    1aff:	mov    rdi,r14
+    1b02:	call   1b07 <botlish_fn_12+0x1f7>
+			1b03: R_X86_64_PLT32	botlish_fn_18-0x4 ; domain_loop<generic>
+    1b07:	test   rax,rax
+    1b0a:	jne    1b35 <botlish_fn_12+0x225>
+    1b10:	xor    rax,rax
+    1b13:	mov    rbx,QWORD PTR [rsp+0x30]
+    1b18:	mov    r12,QWORD PTR [rsp+0x38]
+    1b1d:	mov    r13,QWORD PTR [rsp+0x40]
+    1b22:	mov    r14,QWORD PTR [rsp+0x48]
+    1b27:	mov    r15,QWORD PTR [rsp+0x50]
+    1b2c:	add    rsp,0x60
+    1b30:	mov    rsp,rbp
+    1b33:	pop    rbp
+    1b34:	ret
+    1b35:	mov    rcx,rax
+    1b38:	and    rcx,rbx
+    1b3b:	mov    rsi,rax
+    1b3e:	test   rcx,0x1
+    1b45:	jne    1b6e <botlish_fn_12+0x25e>
+    1b4b:	mov    rdx,rbx
+    1b4e:	mov    rdi,r14
+    1b51:	call   1b56 <botlish_fn_12+0x246>
+			1b52: R_X86_64_PLT32	rt_int_cmp-0x4
+    1b56:	mov    ecx,0x2
+    1b5b:	test   rax,rax
+    1b5e:	mov    rax,rcx
+    1b61:	cmove  rax,QWORD PTR [rip+0x4f]        # 1bb8 <botlish_fn_12+0x2a8>
+    1b69:	jmp    1b95 <botlish_fn_12+0x285>
+    1b6e:	mov    rdx,rbx
+    1b71:	mov    eax,0x2
+    1b76:	cmp    rsi,rdx
+    1b79:	cmove  rax,QWORD PTR [rip+0x37]        # 1bb8 <botlish_fn_12+0x2a8>
+    1b81:	jmp    1b95 <botlish_fn_12+0x285>
+    1b86:	mov    eax,0x2
+    1b8b:	jmp    1b95 <botlish_fn_12+0x285>
+    1b90:	mov    eax,0x2
+    1b95:	mov    rbx,QWORD PTR [rsp+0x30]
+    1b9a:	mov    r12,QWORD PTR [rsp+0x38]
+    1b9f:	mov    r13,QWORD PTR [rsp+0x40]
+    1ba4:	mov    r14,QWORD PTR [rsp+0x48]
+    1ba9:	mov    r15,QWORD PTR [rsp+0x50]
+    1bae:	add    rsp,0x60
+    1bb2:	mov    rsp,rbp
+    1bb5:	pop    rbp
+    1bb6:	ret
+    1bb7:	add    BYTE PTR [rsi],al
+    1bb9:	add    BYTE PTR [rax],al
+    1bbb:	add    BYTE PTR [rax],al
+    1bbd:	add    BYTE PTR [rax],al
 	...
 
-0000000000001cd8 <botlish_entry_12: <generic>>:
-    1cd8:	push   rbp
-    1cd9:	mov    rbp,rsp
-    1cdc:	mov    rsi,QWORD PTR [rdx]
-    1cdf:	call   1ce4 <botlish_entry_12+0xc>
-			1ce0: R_X86_64_PLT32	botlish_fn_12-0x4 ; <generic>
-    1ce4:	mov    rsp,rbp
-    1ce7:	pop    rbp
-    1ce8:	ret
+0000000000001bc0 <botlish_entry_12: <generic>>:
+    1bc0:	push   rbp
+    1bc1:	mov    rbp,rsp
+    1bc4:	mov    rsi,QWORD PTR [rdx]
+    1bc7:	call   1bcc <botlish_entry_12+0xc>
+			1bc8: R_X86_64_PLT32	botlish_fn_12-0x4 ; <generic>
+    1bcc:	mov    rsp,rbp
+    1bcf:	pop    rbp
+    1bd0:	ret
 
-0000000000001ce9 <botlish_fn_13: char_at<generic>>:
-    1ce9:	push   rbp
-    1cea:	mov    rbp,rsp
-    1ced:	sub    rsp,0x50
-    1cf1:	mov    QWORD PTR [rsp+0x20],rbx
-    1cf6:	mov    QWORD PTR [rsp+0x28],r12
-    1cfb:	mov    QWORD PTR [rsp+0x30],r13
-    1d00:	mov    QWORD PTR [rsp+0x38],r14
-    1d05:	mov    QWORD PTR [rsp+0x40],r15
-    1d0a:	mov    r14,rcx
-    1d0d:	mov    QWORD PTR [rsp],rsi
-    1d11:	mov    QWORD PTR [rsp+0x8],rdx
-    1d16:	mov    r13,rdx
-    1d19:	mov    QWORD PTR [rsp+0x10],0x3
-    1d22:	mov    r9d,0x1
-    1d28:	test   rsi,0x1
-    1d2f:	jne    1d4f <botlish_fn_13+0x66>
-    1d35:	xor    r9d,r9d
-    1d38:	test   rsi,0x7
-    1d3f:	jne    1d4f <botlish_fn_13+0x66>
-    1d45:	movzx  rax,BYTE PTR [rsi]
-    1d49:	cmp    al,0x1
-    1d4b:	sete   r9b
-    1d4f:	test   r9b,r9b
-    1d52:	jne    1d70 <botlish_fn_13+0x87>
-    1d58:	mov    rax,QWORD PTR [rdi+0x10]
-    1d5c:	mov    rcx,QWORD PTR [rax+0x110]
-    1d63:	xor    rdx,rdx
-    1d66:	call   1d6b <botlish_fn_13+0x82>
-			1d67: R_X86_64_PLT32	rt_type_error-0x4
-    1d6b:	jmp    1e2d <botlish_fn_13+0x144>
-    1d70:	mov    r12,rdi
-    1d73:	test   rsi,0x1
-    1d7a:	jne    1d88 <botlish_fn_13+0x9f>
-    1d80:	mov    rbx,rsi
-    1d83:	jmp    1da5 <botlish_fn_13+0xbc>
-    1d88:	mov    rax,rsi
-    1d8b:	add    rax,0x2
-    1d8f:	mov    rbx,rsi
-    1d92:	seto   cl
-    1d95:	test   cl,cl
-    1d97:	jne    1da5 <botlish_fn_13+0xbc>
-    1d9d:	mov    r15,rax
-    1da0:	jmp    1db8 <botlish_fn_13+0xcf>
-    1da5:	mov    edx,0x3
-    1daa:	mov    rsi,rbx
-    1dad:	mov    rdi,r12
-    1db0:	call   1db5 <botlish_fn_13+0xcc>
-			1db1: R_X86_64_PLT32	rt_int_add-0x4
-    1db5:	mov    r15,rax
-    1db8:	mov    ecx,0x1
-    1dbd:	mov    rsi,rbx
-    1dc0:	test   rsi,0x1
-    1dc7:	jne    1ded <botlish_fn_13+0x104>
-    1dcd:	xor    ecx,ecx
-    1dcf:	mov    rsi,rbx
-    1dd2:	test   rsi,0x7
-    1dd9:	jne    1ded <botlish_fn_13+0x104>
-    1ddf:	mov    rsi,rbx
-    1de2:	movzx  rcx,BYTE PTR [rsi]
-    1de6:	rex cmp cl,0x1
-    1dea:	sete   cl
-    1ded:	test   cl,cl
-    1def:	jne    1e13 <botlish_fn_13+0x12a>
-    1df5:	mov    rdi,r12
-    1df8:	mov    rsi,QWORD PTR [rdi+0x10]
-    1dfc:	mov    rcx,QWORD PTR [rsi+0x118]
-    1e03:	xor    rdx,rdx
-    1e06:	mov    rsi,rbx
-    1e09:	call   1e0e <botlish_fn_13+0x125>
-			1e0a: R_X86_64_PLT32	rt_type_error-0x4
-    1e0e:	jmp    1e2d <botlish_fn_13+0x144>
-    1e13:	mov    rdi,r12
-    1e16:	mov    rcx,r15
-    1e19:	mov    rdx,rbx
-    1e1c:	mov    rsi,r13
-    1e1f:	call   1e24 <botlish_fn_13+0x13b>
-			1e20: R_X86_64_PLT32	rt_str_region_check-0x4
-    1e24:	test   rax,rax
-    1e27:	jne    1e52 <botlish_fn_13+0x169>
-    1e2d:	xor    rax,rax
-    1e30:	mov    rbx,QWORD PTR [rsp+0x20]
-    1e35:	mov    r12,QWORD PTR [rsp+0x28]
-    1e3a:	mov    r13,QWORD PTR [rsp+0x30]
-    1e3f:	mov    r14,QWORD PTR [rsp+0x38]
-    1e44:	mov    r15,QWORD PTR [rsp+0x40]
-    1e49:	add    rsp,0x50
-    1e4d:	mov    rsp,rbp
-    1e50:	pop    rbp
-    1e51:	ret
-    1e52:	mov    rcx,r14
-    1e55:	mov    rsi,rbx
-    1e58:	mov    QWORD PTR [rcx],rsi
-    1e5b:	mov    rax,r15
-    1e5e:	mov    QWORD PTR [rcx+0x8],rax
-    1e62:	mov    rax,r13
-    1e65:	mov    rbx,QWORD PTR [rsp+0x20]
-    1e6a:	mov    r12,QWORD PTR [rsp+0x28]
-    1e6f:	mov    r13,QWORD PTR [rsp+0x30]
-    1e74:	mov    r14,QWORD PTR [rsp+0x38]
-    1e79:	mov    r15,QWORD PTR [rsp+0x40]
-    1e7e:	add    rsp,0x50
-    1e82:	mov    rsp,rbp
-    1e85:	pop    rbp
-    1e86:	ret
+0000000000001bd1 <botlish_fn_13: char_at<generic>>:
+    1bd1:	push   rbp
+    1bd2:	mov    rbp,rsp
+    1bd5:	sub    rsp,0x50
+    1bd9:	mov    QWORD PTR [rsp+0x20],rbx
+    1bde:	mov    QWORD PTR [rsp+0x28],r12
+    1be3:	mov    QWORD PTR [rsp+0x30],r13
+    1be8:	mov    QWORD PTR [rsp+0x38],r14
+    1bed:	mov    QWORD PTR [rsp+0x40],r15
+    1bf2:	mov    r14,rcx
+    1bf5:	mov    QWORD PTR [rsp],rsi
+    1bf9:	mov    QWORD PTR [rsp+0x8],rdx
+    1bfe:	mov    r13,rdx
+    1c01:	mov    QWORD PTR [rsp+0x10],0x3
+    1c0a:	mov    r9d,0x1
+    1c10:	test   rsi,0x1
+    1c17:	jne    1c37 <botlish_fn_13+0x66>
+    1c1d:	xor    r9d,r9d
+    1c20:	test   rsi,0x7
+    1c27:	jne    1c37 <botlish_fn_13+0x66>
+    1c2d:	movzx  rax,BYTE PTR [rsi]
+    1c31:	cmp    al,0x1
+    1c33:	sete   r9b
+    1c37:	test   r9b,r9b
+    1c3a:	jne    1c58 <botlish_fn_13+0x87>
+    1c40:	mov    rax,QWORD PTR [rdi+0x10]
+    1c44:	mov    rcx,QWORD PTR [rax+0x110]
+    1c4b:	xor    rdx,rdx
+    1c4e:	call   1c53 <botlish_fn_13+0x82>
+			1c4f: R_X86_64_PLT32	rt_type_error-0x4
+    1c53:	jmp    1d15 <botlish_fn_13+0x144>
+    1c58:	mov    r12,rdi
+    1c5b:	test   rsi,0x1
+    1c62:	jne    1c70 <botlish_fn_13+0x9f>
+    1c68:	mov    rbx,rsi
+    1c6b:	jmp    1c8d <botlish_fn_13+0xbc>
+    1c70:	mov    rax,rsi
+    1c73:	add    rax,0x2
+    1c77:	mov    rbx,rsi
+    1c7a:	seto   cl
+    1c7d:	test   cl,cl
+    1c7f:	jne    1c8d <botlish_fn_13+0xbc>
+    1c85:	mov    r15,rax
+    1c88:	jmp    1ca0 <botlish_fn_13+0xcf>
+    1c8d:	mov    edx,0x3
+    1c92:	mov    rsi,rbx
+    1c95:	mov    rdi,r12
+    1c98:	call   1c9d <botlish_fn_13+0xcc>
+			1c99: R_X86_64_PLT32	rt_int_add-0x4
+    1c9d:	mov    r15,rax
+    1ca0:	mov    ecx,0x1
+    1ca5:	mov    rsi,rbx
+    1ca8:	test   rsi,0x1
+    1caf:	jne    1cd5 <botlish_fn_13+0x104>
+    1cb5:	xor    ecx,ecx
+    1cb7:	mov    rsi,rbx
+    1cba:	test   rsi,0x7
+    1cc1:	jne    1cd5 <botlish_fn_13+0x104>
+    1cc7:	mov    rsi,rbx
+    1cca:	movzx  rcx,BYTE PTR [rsi]
+    1cce:	rex cmp cl,0x1
+    1cd2:	sete   cl
+    1cd5:	test   cl,cl
+    1cd7:	jne    1cfb <botlish_fn_13+0x12a>
+    1cdd:	mov    rdi,r12
+    1ce0:	mov    rsi,QWORD PTR [rdi+0x10]
+    1ce4:	mov    rcx,QWORD PTR [rsi+0x118]
+    1ceb:	xor    rdx,rdx
+    1cee:	mov    rsi,rbx
+    1cf1:	call   1cf6 <botlish_fn_13+0x125>
+			1cf2: R_X86_64_PLT32	rt_type_error-0x4
+    1cf6:	jmp    1d15 <botlish_fn_13+0x144>
+    1cfb:	mov    rdi,r12
+    1cfe:	mov    rcx,r15
+    1d01:	mov    rdx,rbx
+    1d04:	mov    rsi,r13
+    1d07:	call   1d0c <botlish_fn_13+0x13b>
+			1d08: R_X86_64_PLT32	rt_str_region_check-0x4
+    1d0c:	test   rax,rax
+    1d0f:	jne    1d3a <botlish_fn_13+0x169>
+    1d15:	xor    rax,rax
+    1d18:	mov    rbx,QWORD PTR [rsp+0x20]
+    1d1d:	mov    r12,QWORD PTR [rsp+0x28]
+    1d22:	mov    r13,QWORD PTR [rsp+0x30]
+    1d27:	mov    r14,QWORD PTR [rsp+0x38]
+    1d2c:	mov    r15,QWORD PTR [rsp+0x40]
+    1d31:	add    rsp,0x50
+    1d35:	mov    rsp,rbp
+    1d38:	pop    rbp
+    1d39:	ret
+    1d3a:	mov    rcx,r14
+    1d3d:	mov    rsi,rbx
+    1d40:	mov    QWORD PTR [rcx],rsi
+    1d43:	mov    rax,r15
+    1d46:	mov    QWORD PTR [rcx+0x8],rax
+    1d4a:	mov    rax,r13
+    1d4d:	mov    rbx,QWORD PTR [rsp+0x20]
+    1d52:	mov    r12,QWORD PTR [rsp+0x28]
+    1d57:	mov    r13,QWORD PTR [rsp+0x30]
+    1d5c:	mov    r14,QWORD PTR [rsp+0x38]
+    1d61:	mov    r15,QWORD PTR [rsp+0x40]
+    1d66:	add    rsp,0x50
+    1d6a:	mov    rsp,rbp
+    1d6d:	pop    rbp
+    1d6e:	ret
 
-0000000000001e87 <botlish_entry_13: char_at<generic>>:
-    1e87:	push   rbp
-    1e88:	mov    rbp,rsp
-    1e8b:	ud2
-    1e8d:	add    BYTE PTR [rax],al
+0000000000001d6f <botlish_entry_13: char_at<generic>>:
+    1d6f:	push   rbp
+    1d70:	mov    rbp,rsp
+    1d73:	ud2
+    1d75:	add    BYTE PTR [rax],al
 	...
 
-0000000000001e90 <botlish_fn_14: scan_local<generic>>:
-    1e90:	push   rbp
-    1e91:	mov    rbp,rsp
-    1e94:	sub    rsp,0x80
-    1e9b:	mov    QWORD PTR [rsp+0x50],rbx
-    1ea0:	mov    QWORD PTR [rsp+0x58],r12
-    1ea5:	mov    QWORD PTR [rsp+0x60],r13
-    1eaa:	mov    QWORD PTR [rsp+0x68],r14
-    1eaf:	mov    QWORD PTR [rsp+0x70],r15
-    1eb4:	mov    rax,rdi
-    1eb7:	mov    QWORD PTR [rsp+0x18],0x0
-    1ec0:	mov    QWORD PTR [rsp],rsi
-    1ec4:	mov    r14,rsi
-    1ec7:	mov    QWORD PTR [rsp+0x8],rdx
-    1ecc:	mov    QWORD PTR [rsp+0x10],rcx
-    1ed1:	mov    r12,rcx
-    1ed4:	mov    r11d,0x1
-    1eda:	mov    rsi,r14
-    1edd:	test   rsi,0x1
-    1ee4:	jne    1f06 <botlish_fn_14+0x76>
-    1eea:	xor    r11d,r11d
-    1eed:	test   rsi,0x7
-    1ef4:	jne    1f06 <botlish_fn_14+0x76>
-    1efa:	movzx  rdi,BYTE PTR [rsi]
-    1efe:	cmp    dil,0x1
-    1f02:	sete   r11b
-    1f06:	test   r11b,r11b
-    1f09:	jne    1f2a <botlish_fn_14+0x9a>
-    1f0f:	mov    rdi,rax
-    1f12:	mov    r9,QWORD PTR [rdi+0x10]
-    1f16:	mov    rcx,QWORD PTR [r9+0xc0]
-    1f1d:	xor    rdx,rdx
-    1f20:	call   1f25 <botlish_fn_14+0x95>
-			1f21: R_X86_64_PLT32	rt_type_error-0x4
-    1f25:	jmp    1fdd <botlish_fn_14+0x14d>
-    1f2a:	mov    r13,rdx
-    1f2d:	mov    r10,rsi
-    1f30:	and    r10,r13
-    1f33:	mov    r14,rsi
-    1f36:	test   r10,0x1
-    1f3d:	jne    1f69 <botlish_fn_14+0xd9>
-    1f43:	mov    rbx,rax
-    1f46:	mov    rdx,r13
-    1f49:	mov    rsi,r14
-    1f4c:	mov    rdi,rbx
-    1f4f:	call   1f54 <botlish_fn_14+0xc4>
-			1f50: R_X86_64_PLT32	rt_int_cmp-0x4
-    1f54:	mov    ecx,0x2
-    1f59:	test   rax,rax
-    1f5c:	cmovge rcx,QWORD PTR [rip+0x24c]        # 21b0 <botlish_fn_14+0x320>
-    1f64:	jmp    1f7f <botlish_fn_14+0xef>
-    1f69:	mov    rbx,rax
-    1f6c:	mov    ecx,0x2
-    1f71:	mov    rsi,r14
-    1f74:	cmp    rsi,r13
-    1f77:	cmovge rcx,QWORD PTR [rip+0x231]        # 21b0 <botlish_fn_14+0x320>
-    1f7f:	mov    eax,0x6
-    1f84:	mov    QWORD PTR [rsp+0x30],rax
-    1f89:	cmp    rcx,0x6
-    1f8d:	je     2183 <botlish_fn_14+0x2f3>
-    1f93:	lea    rcx,[rsp+0x20]
-    1f98:	mov    rdx,r12
-    1f9b:	mov    rsi,r14
-    1f9e:	mov    rdi,rbx
-    1fa1:	call   1fa6 <botlish_fn_14+0x116>
-			1fa2: R_X86_64_PLT32	botlish_fn_13-0x4 ; char_at<generic>
-    1fa6:	mov    rsi,rax
-    1fa9:	mov    r15,rax
-    1fac:	test   rax,rsi
-    1faf:	je     1fdd <botlish_fn_14+0x14d>
-    1fb5:	mov    rdx,QWORD PTR [rsp+0x20]
-    1fba:	mov    QWORD PTR [rsp+0x40],rdx
-    1fbf:	mov    rcx,QWORD PTR [rsp+0x28]
-    1fc4:	mov    QWORD PTR [rsp+0x38],rcx
-    1fc9:	mov    rsi,r15
-    1fcc:	mov    rdi,rbx
-    1fcf:	call   1fd4 <botlish_fn_14+0x144>
-			1fd0: R_X86_64_PLT32	rt_str_region_is_tcl_alnum-0x4
-    1fd4:	test   rax,rax
-    1fd7:	jne    2005 <botlish_fn_14+0x175>
-    1fdd:	xor    rax,rax
-    1fe0:	mov    rbx,QWORD PTR [rsp+0x50]
-    1fe5:	mov    r12,QWORD PTR [rsp+0x58]
-    1fea:	mov    r13,QWORD PTR [rsp+0x60]
-    1fef:	mov    r14,QWORD PTR [rsp+0x68]
-    1ff4:	mov    r15,QWORD PTR [rsp+0x70]
-    1ff9:	add    rsp,0x80
-    2000:	mov    rsp,rbp
-    2003:	pop    rbp
-    2004:	ret
-    2005:	cmp    rax,0x6
-    2009:	je     2104 <botlish_fn_14+0x274>
-    200f:	mov    rax,QWORD PTR [rbx+0x10]
-    2013:	mov    r8,QWORD PTR [rax+0x120]
-    201a:	mov    rcx,QWORD PTR [rsp+0x38]
-    201f:	mov    rdx,QWORD PTR [rsp+0x40]
-    2024:	mov    rsi,r15
-    2027:	mov    rdi,rbx
-    202a:	call   202f <botlish_fn_14+0x19f>
-			202b: R_X86_64_PLT32	rt_str_region_eq-0x4
-    202f:	cmp    rax,0x6
-    2033:	je     20fa <botlish_fn_14+0x26a>
-    2039:	mov    rax,QWORD PTR [rbx+0x10]
-    203d:	mov    r8,QWORD PTR [rax+0x128]
-    2044:	mov    rcx,QWORD PTR [rsp+0x38]
-    2049:	mov    rdx,QWORD PTR [rsp+0x40]
-    204e:	mov    rsi,r15
-    2051:	mov    rdi,rbx
-    2054:	call   2059 <botlish_fn_14+0x1c9>
-			2055: R_X86_64_PLT32	rt_str_region_eq-0x4
-    2059:	cmp    rax,0x6
-    205d:	je     20f0 <botlish_fn_14+0x260>
-    2063:	mov    rax,QWORD PTR [rbx+0x10]
-    2067:	mov    r8,QWORD PTR [rax+0xc8]
-    206e:	mov    rcx,QWORD PTR [rsp+0x38]
-    2073:	mov    rdx,QWORD PTR [rsp+0x40]
-    2078:	mov    rsi,r15
-    207b:	mov    rdi,rbx
-    207e:	call   2083 <botlish_fn_14+0x1f3>
-			207f: R_X86_64_PLT32	rt_str_region_eq-0x4
-    2083:	cmp    rax,0x6
-    2087:	je     20e6 <botlish_fn_14+0x256>
-    208d:	mov    rax,QWORD PTR [rbx+0x10]
-    2091:	mov    r8,QWORD PTR [rax+0x110]
-    2098:	mov    rcx,QWORD PTR [rsp+0x38]
-    209d:	mov    rdx,QWORD PTR [rsp+0x40]
-    20a2:	mov    rsi,r15
-    20a5:	mov    rdi,rbx
-    20a8:	call   20ad <botlish_fn_14+0x21d>
-			20a9: R_X86_64_PLT32	rt_str_region_eq-0x4
-    20ad:	cmp    rax,0x6
-    20b1:	je     20dc <botlish_fn_14+0x24c>
-    20b7:	mov    rax,QWORD PTR [rbx+0x10]
-    20bb:	mov    r8,QWORD PTR [rax+0x130]
-    20c2:	mov    rcx,QWORD PTR [rsp+0x38]
-    20c7:	mov    rdx,QWORD PTR [rsp+0x40]
-    20cc:	mov    rsi,r15
-    20cf:	mov    rdi,rbx
-    20d2:	call   20d7 <botlish_fn_14+0x247>
-			20d3: R_X86_64_PLT32	rt_str_region_eq-0x4
-    20d7:	jmp    2109 <botlish_fn_14+0x279>
-    20dc:	mov    rax,QWORD PTR [rsp+0x30]
-    20e1:	jmp    2109 <botlish_fn_14+0x279>
-    20e6:	mov    rax,QWORD PTR [rsp+0x30]
-    20eb:	jmp    2109 <botlish_fn_14+0x279>
-    20f0:	mov    rax,QWORD PTR [rsp+0x30]
-    20f5:	jmp    2109 <botlish_fn_14+0x279>
-    20fa:	mov    rax,QWORD PTR [rsp+0x30]
-    20ff:	jmp    2109 <botlish_fn_14+0x279>
-    2104:	mov    rax,QWORD PTR [rsp+0x30]
-    2109:	cmp    rax,0x6
-    210d:	je     211b <botlish_fn_14+0x28b>
-    2113:	mov    rax,r14
-    2116:	jmp    2186 <botlish_fn_14+0x2f6>
-    211b:	mov    QWORD PTR [rsp+0x18],0x3
-    2124:	mov    rsi,r14
-    2127:	test   rsi,0x1
-    212e:	je     2154 <botlish_fn_14+0x2c4>
-    2134:	mov    rsi,r14
-    2137:	mov    rax,rsi
-    213a:	add    rax,0x2
-    213e:	seto   cl
-    2141:	test   cl,cl
-    2143:	jne    2154 <botlish_fn_14+0x2c4>
-    2149:	mov    rsi,rax
-    214c:	mov    r14,rax
-    214f:	jmp    216a <botlish_fn_14+0x2da>
-    2154:	mov    edx,0x3
-    2159:	mov    rsi,r14
-    215c:	mov    rdi,rbx
-    215f:	call   2164 <botlish_fn_14+0x2d4>
-			2160: R_X86_64_PLT32	rt_int_add-0x4
-    2164:	mov    rsi,rax
-    2167:	mov    r14,rax
-    216a:	mov    QWORD PTR [rsp],rsi
-    216e:	mov    QWORD PTR [rsp+0x8],r13
-    2173:	mov    QWORD PTR [rsp+0x10],r12
-    2178:	mov    rax,rbx
-    217b:	mov    rdx,r13
-    217e:	jmp    1ed4 <botlish_fn_14+0x44>
-    2183:	mov    rax,r14
-    2186:	mov    rbx,QWORD PTR [rsp+0x50]
-    218b:	mov    r12,QWORD PTR [rsp+0x58]
-    2190:	mov    r13,QWORD PTR [rsp+0x60]
-    2195:	mov    r14,QWORD PTR [rsp+0x68]
-    219a:	mov    r15,QWORD PTR [rsp+0x70]
-    219f:	add    rsp,0x80
-    21a6:	mov    rsp,rbp
-    21a9:	pop    rbp
-    21aa:	ret
-    21ab:	add    BYTE PTR [rax],al
-    21ad:	add    BYTE PTR [rax],al
-    21af:	add    BYTE PTR [rsi],al
-    21b1:	add    BYTE PTR [rax],al
-    21b3:	add    BYTE PTR [rax],al
-    21b5:	add    BYTE PTR [rax],al
+0000000000001d78 <botlish_fn_14: scan_local<generic>>:
+    1d78:	push   rbp
+    1d79:	mov    rbp,rsp
+    1d7c:	sub    rsp,0x80
+    1d83:	mov    QWORD PTR [rsp+0x50],rbx
+    1d88:	mov    QWORD PTR [rsp+0x58],r12
+    1d8d:	mov    QWORD PTR [rsp+0x60],r13
+    1d92:	mov    QWORD PTR [rsp+0x68],r14
+    1d97:	mov    QWORD PTR [rsp+0x70],r15
+    1d9c:	mov    rax,rdi
+    1d9f:	mov    QWORD PTR [rsp+0x18],0x0
+    1da8:	mov    QWORD PTR [rsp],rsi
+    1dac:	mov    r14,rsi
+    1daf:	mov    QWORD PTR [rsp+0x8],rdx
+    1db4:	mov    QWORD PTR [rsp+0x10],rcx
+    1db9:	mov    r12,rcx
+    1dbc:	mov    r11d,0x1
+    1dc2:	mov    rsi,r14
+    1dc5:	test   rsi,0x1
+    1dcc:	jne    1dee <botlish_fn_14+0x76>
+    1dd2:	xor    r11d,r11d
+    1dd5:	test   rsi,0x7
+    1ddc:	jne    1dee <botlish_fn_14+0x76>
+    1de2:	movzx  rdi,BYTE PTR [rsi]
+    1de6:	cmp    dil,0x1
+    1dea:	sete   r11b
+    1dee:	test   r11b,r11b
+    1df1:	jne    1e12 <botlish_fn_14+0x9a>
+    1df7:	mov    rdi,rax
+    1dfa:	mov    r9,QWORD PTR [rdi+0x10]
+    1dfe:	mov    rcx,QWORD PTR [r9+0xc0]
+    1e05:	xor    rdx,rdx
+    1e08:	call   1e0d <botlish_fn_14+0x95>
+			1e09: R_X86_64_PLT32	rt_type_error-0x4
+    1e0d:	jmp    1ec5 <botlish_fn_14+0x14d>
+    1e12:	mov    r13,rdx
+    1e15:	mov    r10,rsi
+    1e18:	and    r10,r13
+    1e1b:	mov    r14,rsi
+    1e1e:	test   r10,0x1
+    1e25:	jne    1e51 <botlish_fn_14+0xd9>
+    1e2b:	mov    rbx,rax
+    1e2e:	mov    rdx,r13
+    1e31:	mov    rsi,r14
+    1e34:	mov    rdi,rbx
+    1e37:	call   1e3c <botlish_fn_14+0xc4>
+			1e38: R_X86_64_PLT32	rt_int_cmp-0x4
+    1e3c:	mov    ecx,0x2
+    1e41:	test   rax,rax
+    1e44:	cmovge rcx,QWORD PTR [rip+0x24c]        # 2098 <botlish_fn_14+0x320>
+    1e4c:	jmp    1e67 <botlish_fn_14+0xef>
+    1e51:	mov    rbx,rax
+    1e54:	mov    ecx,0x2
+    1e59:	mov    rsi,r14
+    1e5c:	cmp    rsi,r13
+    1e5f:	cmovge rcx,QWORD PTR [rip+0x231]        # 2098 <botlish_fn_14+0x320>
+    1e67:	mov    eax,0x6
+    1e6c:	mov    QWORD PTR [rsp+0x30],rax
+    1e71:	cmp    rcx,0x6
+    1e75:	je     206b <botlish_fn_14+0x2f3>
+    1e7b:	lea    rcx,[rsp+0x20]
+    1e80:	mov    rdx,r12
+    1e83:	mov    rsi,r14
+    1e86:	mov    rdi,rbx
+    1e89:	call   1e8e <botlish_fn_14+0x116>
+			1e8a: R_X86_64_PLT32	botlish_fn_13-0x4 ; char_at<generic>
+    1e8e:	mov    rsi,rax
+    1e91:	mov    r15,rax
+    1e94:	test   rax,rsi
+    1e97:	je     1ec5 <botlish_fn_14+0x14d>
+    1e9d:	mov    rdx,QWORD PTR [rsp+0x20]
+    1ea2:	mov    QWORD PTR [rsp+0x40],rdx
+    1ea7:	mov    rcx,QWORD PTR [rsp+0x28]
+    1eac:	mov    QWORD PTR [rsp+0x38],rcx
+    1eb1:	mov    rsi,r15
+    1eb4:	mov    rdi,rbx
+    1eb7:	call   1ebc <botlish_fn_14+0x144>
+			1eb8: R_X86_64_PLT32	rt_str_region_is_tcl_alnum-0x4
+    1ebc:	test   rax,rax
+    1ebf:	jne    1eed <botlish_fn_14+0x175>
+    1ec5:	xor    rax,rax
+    1ec8:	mov    rbx,QWORD PTR [rsp+0x50]
+    1ecd:	mov    r12,QWORD PTR [rsp+0x58]
+    1ed2:	mov    r13,QWORD PTR [rsp+0x60]
+    1ed7:	mov    r14,QWORD PTR [rsp+0x68]
+    1edc:	mov    r15,QWORD PTR [rsp+0x70]
+    1ee1:	add    rsp,0x80
+    1ee8:	mov    rsp,rbp
+    1eeb:	pop    rbp
+    1eec:	ret
+    1eed:	cmp    rax,0x6
+    1ef1:	je     1fec <botlish_fn_14+0x274>
+    1ef7:	mov    rax,QWORD PTR [rbx+0x10]
+    1efb:	mov    r8,QWORD PTR [rax+0x120]
+    1f02:	mov    rcx,QWORD PTR [rsp+0x38]
+    1f07:	mov    rdx,QWORD PTR [rsp+0x40]
+    1f0c:	mov    rsi,r15
+    1f0f:	mov    rdi,rbx
+    1f12:	call   1f17 <botlish_fn_14+0x19f>
+			1f13: R_X86_64_PLT32	rt_str_region_eq-0x4
+    1f17:	cmp    rax,0x6
+    1f1b:	je     1fe2 <botlish_fn_14+0x26a>
+    1f21:	mov    rax,QWORD PTR [rbx+0x10]
+    1f25:	mov    r8,QWORD PTR [rax+0x128]
+    1f2c:	mov    rcx,QWORD PTR [rsp+0x38]
+    1f31:	mov    rdx,QWORD PTR [rsp+0x40]
+    1f36:	mov    rsi,r15
+    1f39:	mov    rdi,rbx
+    1f3c:	call   1f41 <botlish_fn_14+0x1c9>
+			1f3d: R_X86_64_PLT32	rt_str_region_eq-0x4
+    1f41:	cmp    rax,0x6
+    1f45:	je     1fd8 <botlish_fn_14+0x260>
+    1f4b:	mov    rax,QWORD PTR [rbx+0x10]
+    1f4f:	mov    r8,QWORD PTR [rax+0xc8]
+    1f56:	mov    rcx,QWORD PTR [rsp+0x38]
+    1f5b:	mov    rdx,QWORD PTR [rsp+0x40]
+    1f60:	mov    rsi,r15
+    1f63:	mov    rdi,rbx
+    1f66:	call   1f6b <botlish_fn_14+0x1f3>
+			1f67: R_X86_64_PLT32	rt_str_region_eq-0x4
+    1f6b:	cmp    rax,0x6
+    1f6f:	je     1fce <botlish_fn_14+0x256>
+    1f75:	mov    rax,QWORD PTR [rbx+0x10]
+    1f79:	mov    r8,QWORD PTR [rax+0x110]
+    1f80:	mov    rcx,QWORD PTR [rsp+0x38]
+    1f85:	mov    rdx,QWORD PTR [rsp+0x40]
+    1f8a:	mov    rsi,r15
+    1f8d:	mov    rdi,rbx
+    1f90:	call   1f95 <botlish_fn_14+0x21d>
+			1f91: R_X86_64_PLT32	rt_str_region_eq-0x4
+    1f95:	cmp    rax,0x6
+    1f99:	je     1fc4 <botlish_fn_14+0x24c>
+    1f9f:	mov    rax,QWORD PTR [rbx+0x10]
+    1fa3:	mov    r8,QWORD PTR [rax+0x130]
+    1faa:	mov    rcx,QWORD PTR [rsp+0x38]
+    1faf:	mov    rdx,QWORD PTR [rsp+0x40]
+    1fb4:	mov    rsi,r15
+    1fb7:	mov    rdi,rbx
+    1fba:	call   1fbf <botlish_fn_14+0x247>
+			1fbb: R_X86_64_PLT32	rt_str_region_eq-0x4
+    1fbf:	jmp    1ff1 <botlish_fn_14+0x279>
+    1fc4:	mov    rax,QWORD PTR [rsp+0x30]
+    1fc9:	jmp    1ff1 <botlish_fn_14+0x279>
+    1fce:	mov    rax,QWORD PTR [rsp+0x30]
+    1fd3:	jmp    1ff1 <botlish_fn_14+0x279>
+    1fd8:	mov    rax,QWORD PTR [rsp+0x30]
+    1fdd:	jmp    1ff1 <botlish_fn_14+0x279>
+    1fe2:	mov    rax,QWORD PTR [rsp+0x30]
+    1fe7:	jmp    1ff1 <botlish_fn_14+0x279>
+    1fec:	mov    rax,QWORD PTR [rsp+0x30]
+    1ff1:	cmp    rax,0x6
+    1ff5:	je     2003 <botlish_fn_14+0x28b>
+    1ffb:	mov    rax,r14
+    1ffe:	jmp    206e <botlish_fn_14+0x2f6>
+    2003:	mov    QWORD PTR [rsp+0x18],0x3
+    200c:	mov    rsi,r14
+    200f:	test   rsi,0x1
+    2016:	je     203c <botlish_fn_14+0x2c4>
+    201c:	mov    rsi,r14
+    201f:	mov    rax,rsi
+    2022:	add    rax,0x2
+    2026:	seto   cl
+    2029:	test   cl,cl
+    202b:	jne    203c <botlish_fn_14+0x2c4>
+    2031:	mov    rsi,rax
+    2034:	mov    r14,rax
+    2037:	jmp    2052 <botlish_fn_14+0x2da>
+    203c:	mov    edx,0x3
+    2041:	mov    rsi,r14
+    2044:	mov    rdi,rbx
+    2047:	call   204c <botlish_fn_14+0x2d4>
+			2048: R_X86_64_PLT32	rt_int_add-0x4
+    204c:	mov    rsi,rax
+    204f:	mov    r14,rax
+    2052:	mov    QWORD PTR [rsp],rsi
+    2056:	mov    QWORD PTR [rsp+0x8],r13
+    205b:	mov    QWORD PTR [rsp+0x10],r12
+    2060:	mov    rax,rbx
+    2063:	mov    rdx,r13
+    2066:	jmp    1dbc <botlish_fn_14+0x44>
+    206b:	mov    rax,r14
+    206e:	mov    rbx,QWORD PTR [rsp+0x50]
+    2073:	mov    r12,QWORD PTR [rsp+0x58]
+    2078:	mov    r13,QWORD PTR [rsp+0x60]
+    207d:	mov    r14,QWORD PTR [rsp+0x68]
+    2082:	mov    r15,QWORD PTR [rsp+0x70]
+    2087:	add    rsp,0x80
+    208e:	mov    rsp,rbp
+    2091:	pop    rbp
+    2092:	ret
+    2093:	add    BYTE PTR [rax],al
+    2095:	add    BYTE PTR [rax],al
+    2097:	add    BYTE PTR [rsi],al
+    2099:	add    BYTE PTR [rax],al
+    209b:	add    BYTE PTR [rax],al
+    209d:	add    BYTE PTR [rax],al
 	...
 
-00000000000021b8 <botlish_entry_14: scan_local<generic>>:
-    21b8:	push   rbp
-    21b9:	mov    rbp,rsp
-    21bc:	mov    rsi,QWORD PTR [rdx]
-    21bf:	mov    r8,QWORD PTR [rdx+0x8]
-    21c3:	mov    rcx,QWORD PTR [rdx+0x10]
-    21c7:	mov    rdx,r8
-    21ca:	call   21cf <botlish_entry_14+0x17>
-			21cb: R_X86_64_PLT32	botlish_fn_14-0x4 ; scan_local<generic>
-    21cf:	mov    rsp,rbp
-    21d2:	pop    rbp
-    21d3:	ret
-    21d4:	add    BYTE PTR [rax],al
+00000000000020a0 <botlish_entry_14: scan_local<generic>>:
+    20a0:	push   rbp
+    20a1:	mov    rbp,rsp
+    20a4:	mov    rsi,QWORD PTR [rdx]
+    20a7:	mov    r8,QWORD PTR [rdx+0x8]
+    20ab:	mov    rcx,QWORD PTR [rdx+0x10]
+    20af:	mov    rdx,r8
+    20b2:	call   20b7 <botlish_entry_14+0x17>
+			20b3: R_X86_64_PLT32	botlish_fn_14-0x4 ; scan_local<generic>
+    20b7:	mov    rsp,rbp
+    20ba:	pop    rbp
+    20bb:	ret
+    20bc:	add    BYTE PTR [rax],al
 	...
 
-00000000000021d8 <botlish_fn_15: scan_label<generic>>:
-    21d8:	push   rbp
-    21d9:	mov    rbp,rsp
-    21dc:	sub    rsp,0x80
-    21e3:	mov    QWORD PTR [rsp+0x50],rbx
-    21e8:	mov    QWORD PTR [rsp+0x58],r12
-    21ed:	mov    QWORD PTR [rsp+0x60],r13
-    21f2:	mov    QWORD PTR [rsp+0x68],r14
-    21f7:	mov    QWORD PTR [rsp+0x70],r15
-    21fc:	mov    QWORD PTR [rsp+0x18],0x0
-    2205:	mov    QWORD PTR [rsp],rsi
-    2209:	mov    r14,rsi
-    220c:	mov    QWORD PTR [rsp+0x8],rdx
-    2211:	mov    QWORD PTR [rsp+0x10],rcx
-    2216:	mov    r12,rcx
-    2219:	mov    r11d,0x1
-    221f:	mov    rsi,r14
-    2222:	test   rsi,0x1
-    2229:	jne    2249 <botlish_fn_15+0x71>
-    222f:	xor    r11d,r11d
-    2232:	test   rsi,0x7
-    2239:	jne    2249 <botlish_fn_15+0x71>
-    223f:	movzx  rax,BYTE PTR [rsi]
-    2243:	cmp    al,0x1
-    2245:	sete   r11b
-    2249:	test   r11b,r11b
-    224c:	jne    226a <botlish_fn_15+0x92>
-    2252:	mov    rax,QWORD PTR [rdi+0x10]
-    2256:	mov    rcx,QWORD PTR [rax+0xc0]
-    225d:	xor    rdx,rdx
-    2260:	call   2265 <botlish_fn_15+0x8d>
-			2261: R_X86_64_PLT32	rt_type_error-0x4
-    2265:	jmp    2316 <botlish_fn_15+0x13e>
-    226a:	mov    r13,rdx
-    226d:	mov    rax,rsi
-    2270:	and    rax,r13
-    2273:	mov    r14,rsi
-    2276:	test   rax,0x1
-    227c:	jne    22a5 <botlish_fn_15+0xcd>
-    2282:	mov    rbx,rdi
-    2285:	mov    rdx,r13
-    2288:	mov    rsi,r14
-    228b:	call   2290 <botlish_fn_15+0xb8>
-			228c: R_X86_64_PLT32	rt_int_cmp-0x4
-    2290:	mov    ecx,0x2
-    2295:	test   rax,rax
-    2298:	cmovge rcx,QWORD PTR [rip+0x178]        # 2418 <botlish_fn_15+0x240>
-    22a0:	jmp    22bb <botlish_fn_15+0xe3>
-    22a5:	mov    rbx,rdi
-    22a8:	mov    ecx,0x2
-    22ad:	mov    rsi,r14
-    22b0:	cmp    rsi,r13
-    22b3:	cmovge rcx,QWORD PTR [rip+0x15d]        # 2418 <botlish_fn_15+0x240>
-    22bb:	mov    eax,0x6
-    22c0:	mov    QWORD PTR [rsp+0x30],rax
-    22c5:	cmp    rcx,0x6
-    22c9:	je     23ec <botlish_fn_15+0x214>
-    22cf:	lea    rcx,[rsp+0x20]
-    22d4:	mov    rdx,r12
-    22d7:	mov    rsi,r14
-    22da:	mov    rdi,rbx
-    22dd:	call   22e2 <botlish_fn_15+0x10a>
-			22de: R_X86_64_PLT32	botlish_fn_13-0x4 ; char_at<generic>
-    22e2:	test   rax,rax
-    22e5:	mov    r15,rax
-    22e8:	je     2316 <botlish_fn_15+0x13e>
-    22ee:	mov    rdx,QWORD PTR [rsp+0x20]
-    22f3:	mov    QWORD PTR [rsp+0x40],rdx
-    22f8:	mov    rcx,QWORD PTR [rsp+0x28]
-    22fd:	mov    QWORD PTR [rsp+0x38],rcx
-    2302:	mov    rsi,r15
-    2305:	mov    rdi,rbx
-    2308:	call   230d <botlish_fn_15+0x135>
-			2309: R_X86_64_PLT32	rt_str_region_is_tcl_alnum-0x4
-    230d:	test   rax,rax
-    2310:	jne    233e <botlish_fn_15+0x166>
-    2316:	xor    rax,rax
-    2319:	mov    rbx,QWORD PTR [rsp+0x50]
-    231e:	mov    r12,QWORD PTR [rsp+0x58]
-    2323:	mov    r13,QWORD PTR [rsp+0x60]
-    2328:	mov    r14,QWORD PTR [rsp+0x68]
-    232d:	mov    r15,QWORD PTR [rsp+0x70]
-    2332:	add    rsp,0x80
-    2339:	mov    rsp,rbp
-    233c:	pop    rbp
-    233d:	ret
-    233e:	cmp    rax,0x6
-    2342:	je     236d <botlish_fn_15+0x195>
-    2348:	mov    r11,QWORD PTR [rbx+0x10]
-    234c:	mov    r8,QWORD PTR [r11+0x130]
-    2353:	mov    rcx,QWORD PTR [rsp+0x38]
-    2358:	mov    rdx,QWORD PTR [rsp+0x40]
-    235d:	mov    rsi,r15
-    2360:	mov    rdi,rbx
-    2363:	call   2368 <botlish_fn_15+0x190>
-			2364: R_X86_64_PLT32	rt_str_region_eq-0x4
-    2368:	jmp    2372 <botlish_fn_15+0x19a>
-    236d:	mov    rax,QWORD PTR [rsp+0x30]
-    2372:	cmp    rax,0x6
-    2376:	je     2384 <botlish_fn_15+0x1ac>
-    237c:	mov    rax,r14
-    237f:	jmp    23ef <botlish_fn_15+0x217>
-    2384:	mov    QWORD PTR [rsp+0x18],0x3
-    238d:	mov    rsi,r14
-    2390:	test   rsi,0x1
-    2397:	je     23bd <botlish_fn_15+0x1e5>
-    239d:	mov    rsi,r14
-    23a0:	mov    rax,rsi
-    23a3:	add    rax,0x2
-    23a7:	seto   cl
-    23aa:	test   cl,cl
-    23ac:	jne    23bd <botlish_fn_15+0x1e5>
-    23b2:	mov    rsi,rax
-    23b5:	mov    r14,rax
-    23b8:	jmp    23d3 <botlish_fn_15+0x1fb>
-    23bd:	mov    edx,0x3
-    23c2:	mov    rsi,r14
-    23c5:	mov    rdi,rbx
-    23c8:	call   23cd <botlish_fn_15+0x1f5>
-			23c9: R_X86_64_PLT32	rt_int_add-0x4
-    23cd:	mov    rsi,rax
-    23d0:	mov    r14,rax
-    23d3:	mov    QWORD PTR [rsp],rsi
-    23d7:	mov    QWORD PTR [rsp+0x8],r13
-    23dc:	mov    QWORD PTR [rsp+0x10],r12
-    23e1:	mov    rdx,r13
-    23e4:	mov    rdi,rbx
-    23e7:	jmp    2219 <botlish_fn_15+0x41>
-    23ec:	mov    rax,r14
-    23ef:	mov    rbx,QWORD PTR [rsp+0x50]
-    23f4:	mov    r12,QWORD PTR [rsp+0x58]
-    23f9:	mov    r13,QWORD PTR [rsp+0x60]
-    23fe:	mov    r14,QWORD PTR [rsp+0x68]
-    2403:	mov    r15,QWORD PTR [rsp+0x70]
-    2408:	add    rsp,0x80
-    240f:	mov    rsp,rbp
-    2412:	pop    rbp
-    2413:	ret
-    2414:	add    BYTE PTR [rax],al
-    2416:	add    BYTE PTR [rax],al
-    2418:	(bad)
-    2419:	add    BYTE PTR [rax],al
-    241b:	add    BYTE PTR [rax],al
-    241d:	add    BYTE PTR [rax],al
+00000000000020c0 <botlish_fn_15: scan_label<generic>>:
+    20c0:	push   rbp
+    20c1:	mov    rbp,rsp
+    20c4:	sub    rsp,0x80
+    20cb:	mov    QWORD PTR [rsp+0x50],rbx
+    20d0:	mov    QWORD PTR [rsp+0x58],r12
+    20d5:	mov    QWORD PTR [rsp+0x60],r13
+    20da:	mov    QWORD PTR [rsp+0x68],r14
+    20df:	mov    QWORD PTR [rsp+0x70],r15
+    20e4:	mov    QWORD PTR [rsp+0x18],0x0
+    20ed:	mov    QWORD PTR [rsp],rsi
+    20f1:	mov    r14,rsi
+    20f4:	mov    QWORD PTR [rsp+0x8],rdx
+    20f9:	mov    QWORD PTR [rsp+0x10],rcx
+    20fe:	mov    r12,rcx
+    2101:	mov    r11d,0x1
+    2107:	mov    rsi,r14
+    210a:	test   rsi,0x1
+    2111:	jne    2131 <botlish_fn_15+0x71>
+    2117:	xor    r11d,r11d
+    211a:	test   rsi,0x7
+    2121:	jne    2131 <botlish_fn_15+0x71>
+    2127:	movzx  rax,BYTE PTR [rsi]
+    212b:	cmp    al,0x1
+    212d:	sete   r11b
+    2131:	test   r11b,r11b
+    2134:	jne    2152 <botlish_fn_15+0x92>
+    213a:	mov    rax,QWORD PTR [rdi+0x10]
+    213e:	mov    rcx,QWORD PTR [rax+0xc0]
+    2145:	xor    rdx,rdx
+    2148:	call   214d <botlish_fn_15+0x8d>
+			2149: R_X86_64_PLT32	rt_type_error-0x4
+    214d:	jmp    21fe <botlish_fn_15+0x13e>
+    2152:	mov    r13,rdx
+    2155:	mov    rax,rsi
+    2158:	and    rax,r13
+    215b:	mov    r14,rsi
+    215e:	test   rax,0x1
+    2164:	jne    218d <botlish_fn_15+0xcd>
+    216a:	mov    rbx,rdi
+    216d:	mov    rdx,r13
+    2170:	mov    rsi,r14
+    2173:	call   2178 <botlish_fn_15+0xb8>
+			2174: R_X86_64_PLT32	rt_int_cmp-0x4
+    2178:	mov    ecx,0x2
+    217d:	test   rax,rax
+    2180:	cmovge rcx,QWORD PTR [rip+0x178]        # 2300 <botlish_fn_15+0x240>
+    2188:	jmp    21a3 <botlish_fn_15+0xe3>
+    218d:	mov    rbx,rdi
+    2190:	mov    ecx,0x2
+    2195:	mov    rsi,r14
+    2198:	cmp    rsi,r13
+    219b:	cmovge rcx,QWORD PTR [rip+0x15d]        # 2300 <botlish_fn_15+0x240>
+    21a3:	mov    eax,0x6
+    21a8:	mov    QWORD PTR [rsp+0x30],rax
+    21ad:	cmp    rcx,0x6
+    21b1:	je     22d4 <botlish_fn_15+0x214>
+    21b7:	lea    rcx,[rsp+0x20]
+    21bc:	mov    rdx,r12
+    21bf:	mov    rsi,r14
+    21c2:	mov    rdi,rbx
+    21c5:	call   21ca <botlish_fn_15+0x10a>
+			21c6: R_X86_64_PLT32	botlish_fn_13-0x4 ; char_at<generic>
+    21ca:	test   rax,rax
+    21cd:	mov    r15,rax
+    21d0:	je     21fe <botlish_fn_15+0x13e>
+    21d6:	mov    rdx,QWORD PTR [rsp+0x20]
+    21db:	mov    QWORD PTR [rsp+0x40],rdx
+    21e0:	mov    rcx,QWORD PTR [rsp+0x28]
+    21e5:	mov    QWORD PTR [rsp+0x38],rcx
+    21ea:	mov    rsi,r15
+    21ed:	mov    rdi,rbx
+    21f0:	call   21f5 <botlish_fn_15+0x135>
+			21f1: R_X86_64_PLT32	rt_str_region_is_tcl_alnum-0x4
+    21f5:	test   rax,rax
+    21f8:	jne    2226 <botlish_fn_15+0x166>
+    21fe:	xor    rax,rax
+    2201:	mov    rbx,QWORD PTR [rsp+0x50]
+    2206:	mov    r12,QWORD PTR [rsp+0x58]
+    220b:	mov    r13,QWORD PTR [rsp+0x60]
+    2210:	mov    r14,QWORD PTR [rsp+0x68]
+    2215:	mov    r15,QWORD PTR [rsp+0x70]
+    221a:	add    rsp,0x80
+    2221:	mov    rsp,rbp
+    2224:	pop    rbp
+    2225:	ret
+    2226:	cmp    rax,0x6
+    222a:	je     2255 <botlish_fn_15+0x195>
+    2230:	mov    r11,QWORD PTR [rbx+0x10]
+    2234:	mov    r8,QWORD PTR [r11+0x130]
+    223b:	mov    rcx,QWORD PTR [rsp+0x38]
+    2240:	mov    rdx,QWORD PTR [rsp+0x40]
+    2245:	mov    rsi,r15
+    2248:	mov    rdi,rbx
+    224b:	call   2250 <botlish_fn_15+0x190>
+			224c: R_X86_64_PLT32	rt_str_region_eq-0x4
+    2250:	jmp    225a <botlish_fn_15+0x19a>
+    2255:	mov    rax,QWORD PTR [rsp+0x30]
+    225a:	cmp    rax,0x6
+    225e:	je     226c <botlish_fn_15+0x1ac>
+    2264:	mov    rax,r14
+    2267:	jmp    22d7 <botlish_fn_15+0x217>
+    226c:	mov    QWORD PTR [rsp+0x18],0x3
+    2275:	mov    rsi,r14
+    2278:	test   rsi,0x1
+    227f:	je     22a5 <botlish_fn_15+0x1e5>
+    2285:	mov    rsi,r14
+    2288:	mov    rax,rsi
+    228b:	add    rax,0x2
+    228f:	seto   cl
+    2292:	test   cl,cl
+    2294:	jne    22a5 <botlish_fn_15+0x1e5>
+    229a:	mov    rsi,rax
+    229d:	mov    r14,rax
+    22a0:	jmp    22bb <botlish_fn_15+0x1fb>
+    22a5:	mov    edx,0x3
+    22aa:	mov    rsi,r14
+    22ad:	mov    rdi,rbx
+    22b0:	call   22b5 <botlish_fn_15+0x1f5>
+			22b1: R_X86_64_PLT32	rt_int_add-0x4
+    22b5:	mov    rsi,rax
+    22b8:	mov    r14,rax
+    22bb:	mov    QWORD PTR [rsp],rsi
+    22bf:	mov    QWORD PTR [rsp+0x8],r13
+    22c4:	mov    QWORD PTR [rsp+0x10],r12
+    22c9:	mov    rdx,r13
+    22cc:	mov    rdi,rbx
+    22cf:	jmp    2101 <botlish_fn_15+0x41>
+    22d4:	mov    rax,r14
+    22d7:	mov    rbx,QWORD PTR [rsp+0x50]
+    22dc:	mov    r12,QWORD PTR [rsp+0x58]
+    22e1:	mov    r13,QWORD PTR [rsp+0x60]
+    22e6:	mov    r14,QWORD PTR [rsp+0x68]
+    22eb:	mov    r15,QWORD PTR [rsp+0x70]
+    22f0:	add    rsp,0x80
+    22f7:	mov    rsp,rbp
+    22fa:	pop    rbp
+    22fb:	ret
+    22fc:	add    BYTE PTR [rax],al
+    22fe:	add    BYTE PTR [rax],al
+    2300:	(bad)
+    2301:	add    BYTE PTR [rax],al
+    2303:	add    BYTE PTR [rax],al
+    2305:	add    BYTE PTR [rax],al
 	...
 
-0000000000002420 <botlish_entry_15: scan_label<generic>>:
-    2420:	push   rbp
-    2421:	mov    rbp,rsp
-    2424:	mov    rsi,QWORD PTR [rdx]
-    2427:	mov    r8,QWORD PTR [rdx+0x8]
-    242b:	mov    rcx,QWORD PTR [rdx+0x10]
-    242f:	mov    rdx,r8
-    2432:	call   2437 <botlish_entry_15+0x17>
-			2433: R_X86_64_PLT32	botlish_fn_15-0x4 ; scan_label<generic>
-    2437:	mov    rsp,rbp
-    243a:	pop    rbp
-    243b:	ret
-    243c:	add    BYTE PTR [rax],al
+0000000000002308 <botlish_entry_15: scan_label<generic>>:
+    2308:	push   rbp
+    2309:	mov    rbp,rsp
+    230c:	mov    rsi,QWORD PTR [rdx]
+    230f:	mov    r8,QWORD PTR [rdx+0x8]
+    2313:	mov    rcx,QWORD PTR [rdx+0x10]
+    2317:	mov    rdx,r8
+    231a:	call   231f <botlish_entry_15+0x17>
+			231b: R_X86_64_PLT32	botlish_fn_15-0x4 ; scan_label<generic>
+    231f:	mov    rsp,rbp
+    2322:	pop    rbp
+    2323:	ret
+    2324:	add    BYTE PTR [rax],al
 	...
 
-0000000000002440 <botlish_fn_16: scan_alpha<generic>>:
-    2440:	push   rbp
-    2441:	mov    rbp,rsp
-    2444:	sub    rsp,0x50
-    2448:	mov    QWORD PTR [rsp+0x30],rbx
-    244d:	mov    QWORD PTR [rsp+0x38],r12
-    2452:	mov    QWORD PTR [rsp+0x40],r13
-    2457:	mov    QWORD PTR [rsp+0x48],r14
-    245c:	mov    r14,rdi
-    245f:	mov    QWORD PTR [rsp+0x18],0x0
-    2468:	mov    QWORD PTR [rsp],rsi
-    246c:	mov    r13,rsi
-    246f:	mov    QWORD PTR [rsp+0x8],rdx
-    2474:	mov    r12,rdx
-    2477:	mov    QWORD PTR [rsp+0x10],rcx
-    247c:	mov    rbx,rcx
-    247f:	mov    r11d,0x1
+0000000000002328 <botlish_fn_16: scan_alpha<generic>>:
+    2328:	push   rbp
+    2329:	mov    rbp,rsp
+    232c:	sub    rsp,0x50
+    2330:	mov    QWORD PTR [rsp+0x30],rbx
+    2335:	mov    QWORD PTR [rsp+0x38],r12
+    233a:	mov    QWORD PTR [rsp+0x40],r13
+    233f:	mov    QWORD PTR [rsp+0x48],r14
+    2344:	mov    r14,rdi
+    2347:	mov    QWORD PTR [rsp+0x18],0x0
+    2350:	mov    QWORD PTR [rsp],rsi
+    2354:	mov    r13,rsi
+    2357:	mov    QWORD PTR [rsp+0x8],rdx
+    235c:	mov    r12,rdx
+    235f:	mov    QWORD PTR [rsp+0x10],rcx
+    2364:	mov    rbx,rcx
+    2367:	mov    r11d,0x1
+    236d:	mov    rsi,r13
+    2370:	test   rsi,0x1
+    2377:	jne    2397 <botlish_fn_16+0x6f>
+    237d:	xor    r11d,r11d
+    2380:	test   rsi,0x7
+    2387:	jne    2397 <botlish_fn_16+0x6f>
+    238d:	movzx  rax,BYTE PTR [rsi]
+    2391:	cmp    al,0x1
+    2393:	sete   r11b
+    2397:	test   r11b,r11b
+    239a:	jne    23bb <botlish_fn_16+0x93>
+    23a0:	mov    rdi,r14
+    23a3:	mov    rax,QWORD PTR [rdi+0x10]
+    23a7:	mov    rcx,QWORD PTR [rax+0xc0]
+    23ae:	xor    rdx,rdx
+    23b1:	call   23b6 <botlish_fn_16+0x8e>
+			23b2: R_X86_64_PLT32	rt_type_error-0x4
+    23b6:	jmp    244a <botlish_fn_16+0x122>
+    23bb:	mov    rax,rsi
+    23be:	and    rax,r12
+    23c1:	mov    r13,rsi
+    23c4:	test   rax,0x1
+    23ca:	jne    23f3 <botlish_fn_16+0xcb>
+    23d0:	mov    rdx,r12
+    23d3:	mov    rsi,r13
+    23d6:	mov    rdi,r14
+    23d9:	call   23de <botlish_fn_16+0xb6>
+			23da: R_X86_64_PLT32	rt_int_cmp-0x4
+    23de:	mov    ecx,0x2
+    23e3:	test   rax,rax
+    23e6:	cmovge rcx,QWORD PTR [rip+0x112]        # 2500 <botlish_fn_16+0x1d8>
+    23ee:	jmp    2406 <botlish_fn_16+0xde>
+    23f3:	mov    ecx,0x2
+    23f8:	mov    rsi,r13
+    23fb:	cmp    rsi,r12
+    23fe:	cmovge rcx,QWORD PTR [rip+0xfa]        # 2500 <botlish_fn_16+0x1d8>
+    2406:	cmp    rcx,0x6
+    240a:	je     24de <botlish_fn_16+0x1b6>
+    2410:	lea    rcx,[rsp+0x20]
+    2415:	mov    rdx,rbx
+    2418:	mov    rsi,r13
+    241b:	mov    rdi,r14
+    241e:	call   2423 <botlish_fn_16+0xfb>
+			241f: R_X86_64_PLT32	botlish_fn_13-0x4 ; char_at<generic>
+    2423:	test   rax,rax
+    2426:	mov    rsi,rax
+    2429:	je     244a <botlish_fn_16+0x122>
+    242f:	mov    rdx,QWORD PTR [rsp+0x20]
+    2434:	mov    rcx,QWORD PTR [rsp+0x28]
+    2439:	mov    rdi,r14
+    243c:	call   2441 <botlish_fn_16+0x119>
+			243d: R_X86_64_PLT32	rt_str_region_is_tcl_alpha-0x4
+    2441:	test   rax,rax
+    2444:	jne    246a <botlish_fn_16+0x142>
+    244a:	xor    rax,rax
+    244d:	mov    rbx,QWORD PTR [rsp+0x30]
+    2452:	mov    r12,QWORD PTR [rsp+0x38]
+    2457:	mov    r13,QWORD PTR [rsp+0x40]
+    245c:	mov    r14,QWORD PTR [rsp+0x48]
+    2461:	add    rsp,0x50
+    2465:	mov    rsp,rbp
+    2468:	pop    rbp
+    2469:	ret
+    246a:	cmp    rax,0x6
+    246e:	je     247c <botlish_fn_16+0x154>
+    2474:	mov    rax,r13
+    2477:	jmp    24e1 <botlish_fn_16+0x1b9>
+    247c:	mov    QWORD PTR [rsp+0x18],0x3
     2485:	mov    rsi,r13
     2488:	test   rsi,0x1
-    248f:	jne    24af <botlish_fn_16+0x6f>
-    2495:	xor    r11d,r11d
-    2498:	test   rsi,0x7
-    249f:	jne    24af <botlish_fn_16+0x6f>
-    24a5:	movzx  rax,BYTE PTR [rsi]
-    24a9:	cmp    al,0x1
-    24ab:	sete   r11b
-    24af:	test   r11b,r11b
-    24b2:	jne    24d3 <botlish_fn_16+0x93>
-    24b8:	mov    rdi,r14
-    24bb:	mov    rax,QWORD PTR [rdi+0x10]
-    24bf:	mov    rcx,QWORD PTR [rax+0xc0]
-    24c6:	xor    rdx,rdx
-    24c9:	call   24ce <botlish_fn_16+0x8e>
-			24ca: R_X86_64_PLT32	rt_type_error-0x4
-    24ce:	jmp    2562 <botlish_fn_16+0x122>
-    24d3:	mov    rax,rsi
-    24d6:	and    rax,r12
-    24d9:	mov    r13,rsi
-    24dc:	test   rax,0x1
-    24e2:	jne    250b <botlish_fn_16+0xcb>
-    24e8:	mov    rdx,r12
-    24eb:	mov    rsi,r13
-    24ee:	mov    rdi,r14
-    24f1:	call   24f6 <botlish_fn_16+0xb6>
-			24f2: R_X86_64_PLT32	rt_int_cmp-0x4
-    24f6:	mov    ecx,0x2
-    24fb:	test   rax,rax
-    24fe:	cmovge rcx,QWORD PTR [rip+0x112]        # 2618 <botlish_fn_16+0x1d8>
-    2506:	jmp    251e <botlish_fn_16+0xde>
-    250b:	mov    ecx,0x2
-    2510:	mov    rsi,r13
-    2513:	cmp    rsi,r12
-    2516:	cmovge rcx,QWORD PTR [rip+0xfa]        # 2618 <botlish_fn_16+0x1d8>
-    251e:	cmp    rcx,0x6
-    2522:	je     25f6 <botlish_fn_16+0x1b6>
-    2528:	lea    rcx,[rsp+0x20]
-    252d:	mov    rdx,rbx
-    2530:	mov    rsi,r13
-    2533:	mov    rdi,r14
-    2536:	call   253b <botlish_fn_16+0xfb>
-			2537: R_X86_64_PLT32	botlish_fn_13-0x4 ; char_at<generic>
-    253b:	test   rax,rax
-    253e:	mov    rsi,rax
-    2541:	je     2562 <botlish_fn_16+0x122>
-    2547:	mov    rdx,QWORD PTR [rsp+0x20]
-    254c:	mov    rcx,QWORD PTR [rsp+0x28]
-    2551:	mov    rdi,r14
-    2554:	call   2559 <botlish_fn_16+0x119>
-			2555: R_X86_64_PLT32	rt_str_region_is_tcl_alpha-0x4
-    2559:	test   rax,rax
-    255c:	jne    2582 <botlish_fn_16+0x142>
-    2562:	xor    rax,rax
-    2565:	mov    rbx,QWORD PTR [rsp+0x30]
-    256a:	mov    r12,QWORD PTR [rsp+0x38]
-    256f:	mov    r13,QWORD PTR [rsp+0x40]
-    2574:	mov    r14,QWORD PTR [rsp+0x48]
-    2579:	add    rsp,0x50
-    257d:	mov    rsp,rbp
-    2580:	pop    rbp
-    2581:	ret
-    2582:	cmp    rax,0x6
-    2586:	je     2594 <botlish_fn_16+0x154>
-    258c:	mov    rax,r13
-    258f:	jmp    25f9 <botlish_fn_16+0x1b9>
-    2594:	mov    QWORD PTR [rsp+0x18],0x3
-    259d:	mov    rsi,r13
-    25a0:	test   rsi,0x1
-    25a7:	je     25cd <botlish_fn_16+0x18d>
-    25ad:	mov    rsi,r13
-    25b0:	mov    r11,rsi
-    25b3:	add    r11,0x2
-    25b7:	seto   al
-    25ba:	test   al,al
-    25bc:	jne    25cd <botlish_fn_16+0x18d>
-    25c2:	mov    rsi,r11
-    25c5:	mov    r13,r11
-    25c8:	jmp    25e3 <botlish_fn_16+0x1a3>
-    25cd:	mov    edx,0x3
-    25d2:	mov    rsi,r13
-    25d5:	mov    rdi,r14
-    25d8:	call   25dd <botlish_fn_16+0x19d>
-			25d9: R_X86_64_PLT32	rt_int_add-0x4
-    25dd:	mov    rsi,rax
-    25e0:	mov    r13,rax
-    25e3:	mov    QWORD PTR [rsp],rsi
-    25e7:	mov    QWORD PTR [rsp+0x8],r12
-    25ec:	mov    QWORD PTR [rsp+0x10],rbx
-    25f1:	jmp    247f <botlish_fn_16+0x3f>
-    25f6:	mov    rax,r13
-    25f9:	mov    rbx,QWORD PTR [rsp+0x30]
-    25fe:	mov    r12,QWORD PTR [rsp+0x38]
-    2603:	mov    r13,QWORD PTR [rsp+0x40]
-    2608:	mov    r14,QWORD PTR [rsp+0x48]
-    260d:	add    rsp,0x50
-    2611:	mov    rsp,rbp
-    2614:	pop    rbp
-    2615:	ret
-    2616:	add    BYTE PTR [rax],al
-    2618:	(bad)
-    2619:	add    BYTE PTR [rax],al
-    261b:	add    BYTE PTR [rax],al
-    261d:	add    BYTE PTR [rax],al
+    248f:	je     24b5 <botlish_fn_16+0x18d>
+    2495:	mov    rsi,r13
+    2498:	mov    r11,rsi
+    249b:	add    r11,0x2
+    249f:	seto   al
+    24a2:	test   al,al
+    24a4:	jne    24b5 <botlish_fn_16+0x18d>
+    24aa:	mov    rsi,r11
+    24ad:	mov    r13,r11
+    24b0:	jmp    24cb <botlish_fn_16+0x1a3>
+    24b5:	mov    edx,0x3
+    24ba:	mov    rsi,r13
+    24bd:	mov    rdi,r14
+    24c0:	call   24c5 <botlish_fn_16+0x19d>
+			24c1: R_X86_64_PLT32	rt_int_add-0x4
+    24c5:	mov    rsi,rax
+    24c8:	mov    r13,rax
+    24cb:	mov    QWORD PTR [rsp],rsi
+    24cf:	mov    QWORD PTR [rsp+0x8],r12
+    24d4:	mov    QWORD PTR [rsp+0x10],rbx
+    24d9:	jmp    2367 <botlish_fn_16+0x3f>
+    24de:	mov    rax,r13
+    24e1:	mov    rbx,QWORD PTR [rsp+0x30]
+    24e6:	mov    r12,QWORD PTR [rsp+0x38]
+    24eb:	mov    r13,QWORD PTR [rsp+0x40]
+    24f0:	mov    r14,QWORD PTR [rsp+0x48]
+    24f5:	add    rsp,0x50
+    24f9:	mov    rsp,rbp
+    24fc:	pop    rbp
+    24fd:	ret
+    24fe:	add    BYTE PTR [rax],al
+    2500:	(bad)
+    2501:	add    BYTE PTR [rax],al
+    2503:	add    BYTE PTR [rax],al
+    2505:	add    BYTE PTR [rax],al
 	...
 
-0000000000002620 <botlish_entry_16: scan_alpha<generic>>:
-    2620:	push   rbp
-    2621:	mov    rbp,rsp
-    2624:	mov    rsi,QWORD PTR [rdx]
-    2627:	mov    r8,QWORD PTR [rdx+0x8]
-    262b:	mov    rcx,QWORD PTR [rdx+0x10]
-    262f:	mov    rdx,r8
-    2632:	call   2637 <botlish_entry_16+0x17>
-			2633: R_X86_64_PLT32	botlish_fn_16-0x4 ; scan_alpha<generic>
-    2637:	mov    rsp,rbp
-    263a:	pop    rbp
-    263b:	ret
-    263c:	add    BYTE PTR [rax],al
+0000000000002508 <botlish_entry_16: scan_alpha<generic>>:
+    2508:	push   rbp
+    2509:	mov    rbp,rsp
+    250c:	mov    rsi,QWORD PTR [rdx]
+    250f:	mov    r8,QWORD PTR [rdx+0x8]
+    2513:	mov    rcx,QWORD PTR [rdx+0x10]
+    2517:	mov    rdx,r8
+    251a:	call   251f <botlish_entry_16+0x17>
+			251b: R_X86_64_PLT32	botlish_fn_16-0x4 ; scan_alpha<generic>
+    251f:	mov    rsp,rbp
+    2522:	pop    rbp
+    2523:	ret
+    2524:	add    BYTE PTR [rax],al
 	...
 
-0000000000002640 <botlish_fn_17: tld_ok<generic>>:
-    2640:	push   rbp
-    2641:	mov    rbp,rsp
-    2644:	sub    rsp,0x40
-    2648:	mov    QWORD PTR [rsp+0x20],rbx
-    264d:	mov    QWORD PTR [rsp+0x28],r12
-    2652:	mov    QWORD PTR [rsp+0x30],r13
-    2657:	mov    QWORD PTR [rsp+0x38],r14
-    265c:	mov    rbx,rdi
-    265f:	mov    QWORD PTR [rsp],rsi
-    2663:	mov    r12,rsi
-    2666:	mov    QWORD PTR [rsp+0x8],rdx
-    266b:	mov    r14,rdx
-    266e:	mov    QWORD PTR [rsp+0x10],rcx
-    2673:	mov    rdx,r14
+0000000000002528 <botlish_fn_17: tld_ok<generic>>:
+    2528:	push   rbp
+    2529:	mov    rbp,rsp
+    252c:	sub    rsp,0x40
+    2530:	mov    QWORD PTR [rsp+0x20],rbx
+    2535:	mov    QWORD PTR [rsp+0x28],r12
+    253a:	mov    QWORD PTR [rsp+0x30],r13
+    253f:	mov    QWORD PTR [rsp+0x38],r14
+    2544:	mov    rbx,rdi
+    2547:	mov    QWORD PTR [rsp],rsi
+    254b:	mov    r12,rsi
+    254e:	mov    QWORD PTR [rsp+0x8],rdx
+    2553:	mov    r14,rdx
+    2556:	mov    QWORD PTR [rsp+0x10],rcx
+    255b:	mov    rdx,r14
+    255e:	mov    rsi,r12
+    2561:	mov    rdi,rbx
+    2564:	call   2569 <botlish_fn_17+0x41>
+			2565: R_X86_64_PLT32	botlish_fn_16-0x4 ; scan_alpha<generic>
+    2569:	mov    rsi,rax
+    256c:	mov    r13,rax
+    256f:	test   rax,rsi
+    2572:	je     2635 <botlish_fn_17+0x10d>
+    2578:	mov    rax,r13
+    257b:	mov    QWORD PTR [rsp+0x8],rax
+    2580:	mov    rdx,r14
+    2583:	and    rax,rdx
+    2586:	test   rax,0x1
+    258c:	jne    25b5 <botlish_fn_17+0x8d>
+    2592:	mov    rsi,r13
+    2595:	mov    rdi,rbx
+    2598:	call   259d <botlish_fn_17+0x75>
+			2599: R_X86_64_PLT32	rt_int_cmp-0x4
+    259d:	mov    ecx,0x2
+    25a2:	test   rax,rax
+    25a5:	cmove  rcx,QWORD PTR [rip+0x15b]        # 2708 <botlish_fn_17+0x1e0>
+    25ad:	mov    rax,r13
+    25b0:	jmp    25c8 <botlish_fn_17+0xa0>
+    25b5:	mov    ecx,0x2
+    25ba:	mov    rax,r13
+    25bd:	cmp    rax,rdx
+    25c0:	cmove  rcx,QWORD PTR [rip+0x140]        # 2708 <botlish_fn_17+0x1e0>
+    25c8:	cmp    rcx,0x6
+    25cc:	je     25df <botlish_fn_17+0xb7>
+    25d2:	mov    ecx,0x2
+    25d7:	mov    rax,rcx
+    25da:	jmp    26e7 <botlish_fn_17+0x1bf>
+    25df:	mov    ecx,0x1
+    25e4:	mov    rsi,r12
+    25e7:	test   rsi,0x1
+    25ee:	jne    2614 <botlish_fn_17+0xec>
+    25f4:	xor    ecx,ecx
+    25f6:	mov    rsi,r12
+    25f9:	test   rsi,0x7
+    2600:	jne    2614 <botlish_fn_17+0xec>
+    2606:	mov    rsi,r12
+    2609:	movzx  rcx,BYTE PTR [rsi]
+    260d:	rex cmp cl,0x1
+    2611:	sete   cl
+    2614:	test   cl,cl
+    2616:	jne    2655 <botlish_fn_17+0x12d>
+    261c:	mov    rdi,rbx
+    261f:	mov    rsi,QWORD PTR [rdi+0x10]
+    2623:	mov    rcx,QWORD PTR [rsi+0x130]
+    262a:	xor    rdx,rdx
+    262d:	mov    rsi,r12
+    2630:	call   2635 <botlish_fn_17+0x10d>
+			2631: R_X86_64_PLT32	rt_type_error-0x4
+    2635:	xor    rax,rax
+    2638:	mov    rbx,QWORD PTR [rsp+0x20]
+    263d:	mov    r12,QWORD PTR [rsp+0x28]
+    2642:	mov    r13,QWORD PTR [rsp+0x30]
+    2647:	mov    r14,QWORD PTR [rsp+0x38]
+    264c:	add    rsp,0x40
+    2650:	mov    rsp,rbp
+    2653:	pop    rbp
+    2654:	ret
+    2655:	mov    rsi,r12
+    2658:	mov    rdi,rax
+    265b:	and    rdi,rsi
+    265e:	test   rdi,0x1
+    2665:	jne    2676 <botlish_fn_17+0x14e>
+    266b:	mov    rdx,r12
+    266e:	mov    rsi,rax
+    2671:	jmp    2699 <botlish_fn_17+0x171>
     2676:	mov    rsi,r12
-    2679:	mov    rdi,rbx
-    267c:	call   2681 <botlish_fn_17+0x41>
-			267d: R_X86_64_PLT32	botlish_fn_16-0x4 ; scan_alpha<generic>
-    2681:	mov    rsi,rax
-    2684:	mov    r13,rax
-    2687:	test   rax,rsi
-    268a:	je     274d <botlish_fn_17+0x10d>
-    2690:	mov    rax,r13
-    2693:	mov    QWORD PTR [rsp+0x8],rax
-    2698:	mov    rdx,r14
-    269b:	and    rax,rdx
-    269e:	test   rax,0x1
-    26a4:	jne    26cd <botlish_fn_17+0x8d>
-    26aa:	mov    rsi,r13
-    26ad:	mov    rdi,rbx
-    26b0:	call   26b5 <botlish_fn_17+0x75>
-			26b1: R_X86_64_PLT32	rt_int_cmp-0x4
-    26b5:	mov    ecx,0x2
-    26ba:	test   rax,rax
-    26bd:	cmove  rcx,QWORD PTR [rip+0x15b]        # 2820 <botlish_fn_17+0x1e0>
-    26c5:	mov    rax,r13
-    26c8:	jmp    26e0 <botlish_fn_17+0xa0>
-    26cd:	mov    ecx,0x2
-    26d2:	mov    rax,r13
-    26d5:	cmp    rax,rdx
-    26d8:	cmove  rcx,QWORD PTR [rip+0x140]        # 2820 <botlish_fn_17+0x1e0>
-    26e0:	cmp    rcx,0x6
-    26e4:	je     26f7 <botlish_fn_17+0xb7>
-    26ea:	mov    ecx,0x2
-    26ef:	mov    rax,rcx
-    26f2:	jmp    27ff <botlish_fn_17+0x1bf>
-    26f7:	mov    ecx,0x1
-    26fc:	mov    rsi,r12
-    26ff:	test   rsi,0x1
-    2706:	jne    272c <botlish_fn_17+0xec>
-    270c:	xor    ecx,ecx
-    270e:	mov    rsi,r12
-    2711:	test   rsi,0x7
-    2718:	jne    272c <botlish_fn_17+0xec>
-    271e:	mov    rsi,r12
-    2721:	movzx  rcx,BYTE PTR [rsi]
-    2725:	rex cmp cl,0x1
-    2729:	sete   cl
-    272c:	test   cl,cl
-    272e:	jne    276d <botlish_fn_17+0x12d>
-    2734:	mov    rdi,rbx
-    2737:	mov    rsi,QWORD PTR [rdi+0x10]
-    273b:	mov    rcx,QWORD PTR [rsi+0x130]
-    2742:	xor    rdx,rdx
-    2745:	mov    rsi,r12
-    2748:	call   274d <botlish_fn_17+0x10d>
-			2749: R_X86_64_PLT32	rt_type_error-0x4
-    274d:	xor    rax,rax
-    2750:	mov    rbx,QWORD PTR [rsp+0x20]
-    2755:	mov    r12,QWORD PTR [rsp+0x28]
-    275a:	mov    r13,QWORD PTR [rsp+0x30]
-    275f:	mov    r14,QWORD PTR [rsp+0x38]
-    2764:	add    rsp,0x40
-    2768:	mov    rsp,rbp
-    276b:	pop    rbp
-    276c:	ret
-    276d:	mov    rsi,r12
-    2770:	mov    rdi,rax
-    2773:	and    rdi,rsi
-    2776:	test   rdi,0x1
-    277d:	jne    278e <botlish_fn_17+0x14e>
-    2783:	mov    rdx,r12
-    2786:	mov    rsi,rax
-    2789:	jmp    27b1 <botlish_fn_17+0x171>
-    278e:	mov    rsi,r12
-    2791:	mov    r8,rax
-    2794:	sub    r8,rsi
-    2797:	mov    r13,rax
-    279a:	seto   r10b
-    279e:	lea    rsi,[r8+0x1]
-    27a2:	test   r10b,r10b
-    27a5:	je     27bc <botlish_fn_17+0x17c>
-    27ab:	mov    rdx,r12
-    27ae:	mov    rsi,r13
-    27b1:	mov    rdi,rbx
-    27b4:	call   27b9 <botlish_fn_17+0x179>
-			27b5: R_X86_64_PLT32	rt_int_sub-0x4
-    27b9:	mov    rsi,rax
-    27bc:	test   rsi,0x1
-    27c3:	jne    27ee <botlish_fn_17+0x1ae>
-    27c9:	mov    edx,0x5
-    27ce:	mov    rdi,rbx
-    27d1:	call   27d6 <botlish_fn_17+0x196>
-			27d2: R_X86_64_PLT32	rt_int_cmp-0x4
-    27d6:	mov    ecx,0x2
-    27db:	test   rax,rax
-    27de:	mov    rax,rcx
-    27e1:	cmovge rax,QWORD PTR [rip+0x37]        # 2820 <botlish_fn_17+0x1e0>
-    27e9:	jmp    27ff <botlish_fn_17+0x1bf>
-    27ee:	mov    eax,0x2
-    27f3:	cmp    rsi,0x5
-    27f7:	cmovge rax,QWORD PTR [rip+0x21]        # 2820 <botlish_fn_17+0x1e0>
-    27ff:	mov    rbx,QWORD PTR [rsp+0x20]
-    2804:	mov    r12,QWORD PTR [rsp+0x28]
-    2809:	mov    r13,QWORD PTR [rsp+0x30]
-    280e:	mov    r14,QWORD PTR [rsp+0x38]
-    2813:	add    rsp,0x40
-    2817:	mov    rsp,rbp
-    281a:	pop    rbp
-    281b:	ret
-    281c:	add    BYTE PTR [rax],al
-    281e:	add    BYTE PTR [rax],al
-    2820:	(bad)
-    2821:	add    BYTE PTR [rax],al
-    2823:	add    BYTE PTR [rax],al
-    2825:	add    BYTE PTR [rax],al
+    2679:	mov    r8,rax
+    267c:	sub    r8,rsi
+    267f:	mov    r13,rax
+    2682:	seto   r10b
+    2686:	lea    rsi,[r8+0x1]
+    268a:	test   r10b,r10b
+    268d:	je     26a4 <botlish_fn_17+0x17c>
+    2693:	mov    rdx,r12
+    2696:	mov    rsi,r13
+    2699:	mov    rdi,rbx
+    269c:	call   26a1 <botlish_fn_17+0x179>
+			269d: R_X86_64_PLT32	rt_int_sub-0x4
+    26a1:	mov    rsi,rax
+    26a4:	test   rsi,0x1
+    26ab:	jne    26d6 <botlish_fn_17+0x1ae>
+    26b1:	mov    edx,0x5
+    26b6:	mov    rdi,rbx
+    26b9:	call   26be <botlish_fn_17+0x196>
+			26ba: R_X86_64_PLT32	rt_int_cmp-0x4
+    26be:	mov    ecx,0x2
+    26c3:	test   rax,rax
+    26c6:	mov    rax,rcx
+    26c9:	cmovge rax,QWORD PTR [rip+0x37]        # 2708 <botlish_fn_17+0x1e0>
+    26d1:	jmp    26e7 <botlish_fn_17+0x1bf>
+    26d6:	mov    eax,0x2
+    26db:	cmp    rsi,0x5
+    26df:	cmovge rax,QWORD PTR [rip+0x21]        # 2708 <botlish_fn_17+0x1e0>
+    26e7:	mov    rbx,QWORD PTR [rsp+0x20]
+    26ec:	mov    r12,QWORD PTR [rsp+0x28]
+    26f1:	mov    r13,QWORD PTR [rsp+0x30]
+    26f6:	mov    r14,QWORD PTR [rsp+0x38]
+    26fb:	add    rsp,0x40
+    26ff:	mov    rsp,rbp
+    2702:	pop    rbp
+    2703:	ret
+    2704:	add    BYTE PTR [rax],al
+    2706:	add    BYTE PTR [rax],al
+    2708:	(bad)
+    2709:	add    BYTE PTR [rax],al
+    270b:	add    BYTE PTR [rax],al
+    270d:	add    BYTE PTR [rax],al
 	...
 
-0000000000002828 <botlish_entry_17: tld_ok<generic>>:
-    2828:	push   rbp
-    2829:	mov    rbp,rsp
-    282c:	mov    rsi,QWORD PTR [rdx]
-    282f:	mov    r8,QWORD PTR [rdx+0x8]
-    2833:	mov    rcx,QWORD PTR [rdx+0x10]
-    2837:	mov    rdx,r8
-    283a:	call   283f <botlish_entry_17+0x17>
-			283b: R_X86_64_PLT32	botlish_fn_17-0x4 ; tld_ok<generic>
-    283f:	mov    rsp,rbp
-    2842:	pop    rbp
-    2843:	ret
-    2844:	add    BYTE PTR [rax],al
+0000000000002710 <botlish_entry_17: tld_ok<generic>>:
+    2710:	push   rbp
+    2711:	mov    rbp,rsp
+    2714:	mov    rsi,QWORD PTR [rdx]
+    2717:	mov    r8,QWORD PTR [rdx+0x8]
+    271b:	mov    rcx,QWORD PTR [rdx+0x10]
+    271f:	mov    rdx,r8
+    2722:	call   2727 <botlish_entry_17+0x17>
+			2723: R_X86_64_PLT32	botlish_fn_17-0x4 ; tld_ok<generic>
+    2727:	mov    rsp,rbp
+    272a:	pop    rbp
+    272b:	ret
+    272c:	add    BYTE PTR [rax],al
 	...
 
-0000000000002848 <botlish_fn_18: domain_loop<generic>>:
-    2848:	push   rbp
-    2849:	mov    rbp,rsp
-    284c:	sub    rsp,0x70
-    2850:	mov    QWORD PTR [rsp+0x40],rbx
-    2855:	mov    QWORD PTR [rsp+0x48],r12
-    285a:	mov    QWORD PTR [rsp+0x50],r13
-    285f:	mov    QWORD PTR [rsp+0x58],r14
-    2864:	mov    QWORD PTR [rsp+0x60],r15
-    2869:	mov    QWORD PTR [rsp+0x18],0x0
-    2872:	mov    QWORD PTR [rsp],rsi
-    2876:	mov    QWORD PTR [rsp+0x8],rdx
-    287b:	mov    QWORD PTR [rsp+0x10],rcx
-    2880:	lea    rbx,[rsp+0x20]
-    2885:	mov    r12,rdi
-    2888:	mov    r13,rcx
-    288b:	mov    r14,rdx
-    288e:	mov    QWORD PTR [rsp+0x30],rsi
-    2893:	mov    rcx,r13
-    2896:	mov    rdx,r14
-    2899:	mov    rsi,QWORD PTR [rsp+0x30]
-    289e:	mov    rdi,r12
-    28a1:	call   28a6 <botlish_fn_18+0x5e>
-			28a2: R_X86_64_PLT32	botlish_fn_15-0x4 ; scan_label<generic>
-    28a6:	mov    rcx,rax
-    28a9:	mov    r15,rax
-    28ac:	test   rax,rcx
-    28af:	je     29ff <botlish_fn_18+0x1b7>
-    28b5:	mov    rax,r15
-    28b8:	mov    QWORD PTR [rsp],rax
-    28bc:	mov    rdx,QWORD PTR [rsp+0x30]
-    28c1:	and    rax,rdx
-    28c4:	test   rax,0x1
-    28ca:	jne    28e9 <botlish_fn_18+0xa1>
-    28d0:	mov    rsi,r15
-    28d3:	mov    rdi,r12
-    28d6:	call   28db <botlish_fn_18+0x93>
-			28d7: R_X86_64_PLT32	rt_value_eq-0x4
-    28db:	test   rax,rax
-    28de:	je     29ff <botlish_fn_18+0x1b7>
-    28e4:	jmp    28f9 <botlish_fn_18+0xb1>
-    28e9:	mov    eax,0x2
-    28ee:	cmp    r15,rdx
-    28f1:	cmove  rax,QWORD PTR [rip+0x187]        # 2a80 <botlish_fn_18+0x238>
-    28f9:	cmp    rax,0x6
-    28fd:	je     2a55 <botlish_fn_18+0x20d>
-    2903:	mov    rax,r15
-    2906:	and    rax,r14
-    2909:	test   rax,0x1
-    290f:	jne    2938 <botlish_fn_18+0xf0>
-    2915:	mov    rdx,r14
-    2918:	mov    rsi,r15
-    291b:	mov    rdi,r12
-    291e:	call   2923 <botlish_fn_18+0xdb>
-			291f: R_X86_64_PLT32	rt_int_cmp-0x4
-    2923:	mov    ecx,0x2
-    2928:	test   rax,rax
-    292b:	cmovge rcx,QWORD PTR [rip+0x14d]        # 2a80 <botlish_fn_18+0x238>
-    2933:	jmp    2948 <botlish_fn_18+0x100>
-    2938:	mov    ecx,0x2
-    293d:	cmp    r15,r14
-    2940:	cmovge rcx,QWORD PTR [rip+0x138]        # 2a80 <botlish_fn_18+0x238>
-    2948:	cmp    rcx,0x6
-    294c:	je     2a46 <botlish_fn_18+0x1fe>
-    2952:	mov    rcx,rbx
-    2955:	mov    rdx,r13
-    2958:	mov    rsi,r15
-    295b:	mov    rdi,r12
-    295e:	call   2963 <botlish_fn_18+0x11b>
-			295f: R_X86_64_PLT32	botlish_fn_13-0x4 ; char_at<generic>
-    2963:	test   rax,rax
-    2966:	je     29ff <botlish_fn_18+0x1b7>
-    296c:	mov    rdx,QWORD PTR [rsp+0x20]
-    2971:	mov    rcx,QWORD PTR [rsp+0x28]
-    2976:	mov    rsi,QWORD PTR [r12+0x10]
-    297b:	mov    r8,QWORD PTR [rsi+0x120]
-    2982:	mov    rsi,rax
-    2985:	mov    rdi,r12
-    2988:	call   298d <botlish_fn_18+0x145>
-			2989: R_X86_64_PLT32	rt_str_region_eq-0x4
-    298d:	cmp    rax,0x6
-    2991:	je     29a3 <botlish_fn_18+0x15b>
-    2997:	mov    r14,0xffffffffffffffff
-    299e:	jmp    2a4d <botlish_fn_18+0x205>
-    29a3:	mov    QWORD PTR [rsp+0x18],0x3
-    29ac:	test   r15,0x1
-    29b3:	je     29cb <botlish_fn_18+0x183>
-    29b9:	mov    rdx,r15
-    29bc:	add    rdx,0x2
-    29c0:	seto   al
-    29c3:	test   al,al
-    29c5:	je     29de <botlish_fn_18+0x196>
-    29cb:	mov    edx,0x3
-    29d0:	mov    rsi,r15
-    29d3:	mov    rdi,r12
-    29d6:	call   29db <botlish_fn_18+0x193>
-			29d7: R_X86_64_PLT32	rt_int_add-0x4
-    29db:	mov    rdx,rax
-    29de:	mov    QWORD PTR [rsp],rdx
-    29e2:	mov    r15,rdx
-    29e5:	mov    rcx,r13
-    29e8:	mov    rdx,r14
-    29eb:	mov    rsi,r15
-    29ee:	mov    rdi,r12
-    29f1:	call   29f6 <botlish_fn_18+0x1ae>
-			29f2: R_X86_64_PLT32	botlish_fn_17-0x4 ; tld_ok<generic>
-    29f6:	test   rax,rax
-    29f9:	jne    2a24 <botlish_fn_18+0x1dc>
-    29ff:	xor    rax,rax
-    2a02:	mov    rbx,QWORD PTR [rsp+0x40]
-    2a07:	mov    r12,QWORD PTR [rsp+0x48]
-    2a0c:	mov    r13,QWORD PTR [rsp+0x50]
-    2a11:	mov    r14,QWORD PTR [rsp+0x58]
-    2a16:	mov    r15,QWORD PTR [rsp+0x60]
-    2a1b:	add    rsp,0x70
-    2a1f:	mov    rsp,rbp
-    2a22:	pop    rbp
-    2a23:	ret
-    2a24:	cmp    rax,0x6
-    2a28:	je     2a4d <botlish_fn_18+0x205>
-    2a2e:	mov    QWORD PTR [rsp],r15
-    2a32:	mov    QWORD PTR [rsp+0x8],r14
-    2a37:	mov    QWORD PTR [rsp+0x10],r13
-    2a3c:	mov    QWORD PTR [rsp+0x30],r15
-    2a41:	jmp    2893 <botlish_fn_18+0x4b>
-    2a46:	mov    r14,0xffffffffffffffff
-    2a4d:	mov    rax,r14
-    2a50:	jmp    2a5c <botlish_fn_18+0x214>
-    2a55:	mov    rax,0xffffffffffffffff
-    2a5c:	mov    rbx,QWORD PTR [rsp+0x40]
-    2a61:	mov    r12,QWORD PTR [rsp+0x48]
-    2a66:	mov    r13,QWORD PTR [rsp+0x50]
-    2a6b:	mov    r14,QWORD PTR [rsp+0x58]
-    2a70:	mov    r15,QWORD PTR [rsp+0x60]
-    2a75:	add    rsp,0x70
-    2a79:	mov    rsp,rbp
-    2a7c:	pop    rbp
-    2a7d:	ret
-    2a7e:	add    BYTE PTR [rax],al
-    2a80:	(bad)
-    2a81:	add    BYTE PTR [rax],al
-    2a83:	add    BYTE PTR [rax],al
-    2a85:	add    BYTE PTR [rax],al
+0000000000002730 <botlish_fn_18: domain_loop<generic>>:
+    2730:	push   rbp
+    2731:	mov    rbp,rsp
+    2734:	sub    rsp,0x70
+    2738:	mov    QWORD PTR [rsp+0x40],rbx
+    273d:	mov    QWORD PTR [rsp+0x48],r12
+    2742:	mov    QWORD PTR [rsp+0x50],r13
+    2747:	mov    QWORD PTR [rsp+0x58],r14
+    274c:	mov    QWORD PTR [rsp+0x60],r15
+    2751:	mov    QWORD PTR [rsp+0x18],0x0
+    275a:	mov    QWORD PTR [rsp],rsi
+    275e:	mov    QWORD PTR [rsp+0x8],rdx
+    2763:	mov    QWORD PTR [rsp+0x10],rcx
+    2768:	lea    rbx,[rsp+0x20]
+    276d:	mov    r12,rdi
+    2770:	mov    r13,rcx
+    2773:	mov    r14,rdx
+    2776:	mov    QWORD PTR [rsp+0x30],rsi
+    277b:	mov    rcx,r13
+    277e:	mov    rdx,r14
+    2781:	mov    rsi,QWORD PTR [rsp+0x30]
+    2786:	mov    rdi,r12
+    2789:	call   278e <botlish_fn_18+0x5e>
+			278a: R_X86_64_PLT32	botlish_fn_15-0x4 ; scan_label<generic>
+    278e:	mov    rcx,rax
+    2791:	mov    r15,rax
+    2794:	test   rax,rcx
+    2797:	je     28e7 <botlish_fn_18+0x1b7>
+    279d:	mov    rax,r15
+    27a0:	mov    QWORD PTR [rsp],rax
+    27a4:	mov    rdx,QWORD PTR [rsp+0x30]
+    27a9:	and    rax,rdx
+    27ac:	test   rax,0x1
+    27b2:	jne    27d1 <botlish_fn_18+0xa1>
+    27b8:	mov    rsi,r15
+    27bb:	mov    rdi,r12
+    27be:	call   27c3 <botlish_fn_18+0x93>
+			27bf: R_X86_64_PLT32	rt_value_eq-0x4
+    27c3:	test   rax,rax
+    27c6:	je     28e7 <botlish_fn_18+0x1b7>
+    27cc:	jmp    27e1 <botlish_fn_18+0xb1>
+    27d1:	mov    eax,0x2
+    27d6:	cmp    r15,rdx
+    27d9:	cmove  rax,QWORD PTR [rip+0x187]        # 2968 <botlish_fn_18+0x238>
+    27e1:	cmp    rax,0x6
+    27e5:	je     293d <botlish_fn_18+0x20d>
+    27eb:	mov    rax,r15
+    27ee:	and    rax,r14
+    27f1:	test   rax,0x1
+    27f7:	jne    2820 <botlish_fn_18+0xf0>
+    27fd:	mov    rdx,r14
+    2800:	mov    rsi,r15
+    2803:	mov    rdi,r12
+    2806:	call   280b <botlish_fn_18+0xdb>
+			2807: R_X86_64_PLT32	rt_int_cmp-0x4
+    280b:	mov    ecx,0x2
+    2810:	test   rax,rax
+    2813:	cmovge rcx,QWORD PTR [rip+0x14d]        # 2968 <botlish_fn_18+0x238>
+    281b:	jmp    2830 <botlish_fn_18+0x100>
+    2820:	mov    ecx,0x2
+    2825:	cmp    r15,r14
+    2828:	cmovge rcx,QWORD PTR [rip+0x138]        # 2968 <botlish_fn_18+0x238>
+    2830:	cmp    rcx,0x6
+    2834:	je     292e <botlish_fn_18+0x1fe>
+    283a:	mov    rcx,rbx
+    283d:	mov    rdx,r13
+    2840:	mov    rsi,r15
+    2843:	mov    rdi,r12
+    2846:	call   284b <botlish_fn_18+0x11b>
+			2847: R_X86_64_PLT32	botlish_fn_13-0x4 ; char_at<generic>
+    284b:	test   rax,rax
+    284e:	je     28e7 <botlish_fn_18+0x1b7>
+    2854:	mov    rdx,QWORD PTR [rsp+0x20]
+    2859:	mov    rcx,QWORD PTR [rsp+0x28]
+    285e:	mov    rsi,QWORD PTR [r12+0x10]
+    2863:	mov    r8,QWORD PTR [rsi+0x120]
+    286a:	mov    rsi,rax
+    286d:	mov    rdi,r12
+    2870:	call   2875 <botlish_fn_18+0x145>
+			2871: R_X86_64_PLT32	rt_str_region_eq-0x4
+    2875:	cmp    rax,0x6
+    2879:	je     288b <botlish_fn_18+0x15b>
+    287f:	mov    r14,0xffffffffffffffff
+    2886:	jmp    2935 <botlish_fn_18+0x205>
+    288b:	mov    QWORD PTR [rsp+0x18],0x3
+    2894:	test   r15,0x1
+    289b:	je     28b3 <botlish_fn_18+0x183>
+    28a1:	mov    rdx,r15
+    28a4:	add    rdx,0x2
+    28a8:	seto   al
+    28ab:	test   al,al
+    28ad:	je     28c6 <botlish_fn_18+0x196>
+    28b3:	mov    edx,0x3
+    28b8:	mov    rsi,r15
+    28bb:	mov    rdi,r12
+    28be:	call   28c3 <botlish_fn_18+0x193>
+			28bf: R_X86_64_PLT32	rt_int_add-0x4
+    28c3:	mov    rdx,rax
+    28c6:	mov    QWORD PTR [rsp],rdx
+    28ca:	mov    r15,rdx
+    28cd:	mov    rcx,r13
+    28d0:	mov    rdx,r14
+    28d3:	mov    rsi,r15
+    28d6:	mov    rdi,r12
+    28d9:	call   28de <botlish_fn_18+0x1ae>
+			28da: R_X86_64_PLT32	botlish_fn_17-0x4 ; tld_ok<generic>
+    28de:	test   rax,rax
+    28e1:	jne    290c <botlish_fn_18+0x1dc>
+    28e7:	xor    rax,rax
+    28ea:	mov    rbx,QWORD PTR [rsp+0x40]
+    28ef:	mov    r12,QWORD PTR [rsp+0x48]
+    28f4:	mov    r13,QWORD PTR [rsp+0x50]
+    28f9:	mov    r14,QWORD PTR [rsp+0x58]
+    28fe:	mov    r15,QWORD PTR [rsp+0x60]
+    2903:	add    rsp,0x70
+    2907:	mov    rsp,rbp
+    290a:	pop    rbp
+    290b:	ret
+    290c:	cmp    rax,0x6
+    2910:	je     2935 <botlish_fn_18+0x205>
+    2916:	mov    QWORD PTR [rsp],r15
+    291a:	mov    QWORD PTR [rsp+0x8],r14
+    291f:	mov    QWORD PTR [rsp+0x10],r13
+    2924:	mov    QWORD PTR [rsp+0x30],r15
+    2929:	jmp    277b <botlish_fn_18+0x4b>
+    292e:	mov    r14,0xffffffffffffffff
+    2935:	mov    rax,r14
+    2938:	jmp    2944 <botlish_fn_18+0x214>
+    293d:	mov    rax,0xffffffffffffffff
+    2944:	mov    rbx,QWORD PTR [rsp+0x40]
+    2949:	mov    r12,QWORD PTR [rsp+0x48]
+    294e:	mov    r13,QWORD PTR [rsp+0x50]
+    2953:	mov    r14,QWORD PTR [rsp+0x58]
+    2958:	mov    r15,QWORD PTR [rsp+0x60]
+    295d:	add    rsp,0x70
+    2961:	mov    rsp,rbp
+    2964:	pop    rbp
+    2965:	ret
+    2966:	add    BYTE PTR [rax],al
+    2968:	(bad)
+    2969:	add    BYTE PTR [rax],al
+    296b:	add    BYTE PTR [rax],al
+    296d:	add    BYTE PTR [rax],al
 	...
 
-0000000000002a88 <botlish_entry_18: domain_loop<generic>>:
-    2a88:	push   rbp
-    2a89:	mov    rbp,rsp
-    2a8c:	mov    rsi,QWORD PTR [rdx]
-    2a8f:	mov    r8,QWORD PTR [rdx+0x8]
-    2a93:	mov    rcx,QWORD PTR [rdx+0x10]
-    2a97:	mov    rdx,r8
-    2a9a:	call   2a9f <botlish_entry_18+0x17>
-			2a9b: R_X86_64_PLT32	botlish_fn_18-0x4 ; domain_loop<generic>
-    2a9f:	mov    rsp,rbp
-    2aa2:	pop    rbp
-    2aa3:	ret
-    2aa4:	add    BYTE PTR [rax],al
+0000000000002970 <botlish_entry_18: domain_loop<generic>>:
+    2970:	push   rbp
+    2971:	mov    rbp,rsp
+    2974:	mov    rsi,QWORD PTR [rdx]
+    2977:	mov    r8,QWORD PTR [rdx+0x8]
+    297b:	mov    rcx,QWORD PTR [rdx+0x10]
+    297f:	mov    rdx,r8
+    2982:	call   2987 <botlish_entry_18+0x17>
+			2983: R_X86_64_PLT32	botlish_fn_18-0x4 ; domain_loop<generic>
+    2987:	mov    rsp,rbp
+    298a:	pop    rbp
+    298b:	ret
+    298c:	add    BYTE PTR [rax],al
 	...
 
-0000000000002aa8 <botlish_fn_19: <str>>:
-    2aa8:	push   rbp
-    2aa9:	mov    rbp,rsp
-    2aac:	sub    rsp,0x50
-    2ab0:	mov    QWORD PTR [rsp+0x30],rbx
-    2ab5:	mov    QWORD PTR [rsp+0x38],r12
-    2aba:	mov    QWORD PTR [rsp+0x40],r13
-    2abf:	mov    QWORD PTR [rsp+0x48],r14
-    2ac4:	mov    r13,rdi
-    2ac7:	mov    QWORD PTR [rsp+0x18],0x0
-    2ad0:	mov    QWORD PTR [rsp],rsi
-    2ad4:	mov    r14,rsi
-    2ad7:	mov    rsi,r14
-    2ada:	mov    rdi,r13
-    2add:	call   2ae2 <botlish_fn_19+0x3a>
-			2ade: R_X86_64_PLT32	rt_str_len-0x4
-    2ae2:	mov    rbx,rax
-    2ae5:	mov    QWORD PTR [rsp+0x8],rax
-    2aea:	mov    esi,0x1
-    2aef:	mov    QWORD PTR [rsp+0x10],0x1
-    2af8:	mov    rcx,r14
-    2afb:	mov    rdx,rbx
-    2afe:	mov    rdi,r13
-    2b01:	call   2b06 <botlish_fn_19+0x5e>
-			2b02: R_X86_64_PLT32	botlish_fn_22-0x4 ; scan_local<generic>
-    2b06:	mov    r12,rax
-    2b09:	test   r12,r12
-    2b0c:	je     2c69 <botlish_fn_19+0x1c1>
-    2b12:	mov    QWORD PTR [rsp+0x10],r12
-    2b17:	test   r12,0x1
-    2b1e:	jne    2b49 <botlish_fn_19+0xa1>
-    2b24:	mov    edx,0x1
-    2b29:	mov    rsi,r12
-    2b2c:	mov    rdi,r13
-    2b2f:	call   2b34 <botlish_fn_19+0x8c>
-			2b30: R_X86_64_PLT32	rt_int_cmp-0x4
-    2b34:	mov    ecx,0x2
-    2b39:	test   rax,rax
-    2b3c:	cmove  rcx,QWORD PTR [rip+0x1c4]        # 2d08 <botlish_fn_19+0x260>
-    2b44:	jmp    2b5a <botlish_fn_19+0xb2>
-    2b49:	mov    ecx,0x2
-    2b4e:	cmp    r12,0x1
-    2b52:	cmove  rcx,QWORD PTR [rip+0x1ae]        # 2d08 <botlish_fn_19+0x260>
-    2b5a:	cmp    rcx,0x6
-    2b5e:	je     2ce4 <botlish_fn_19+0x23c>
-    2b64:	mov    rcx,r12
-    2b67:	and    rcx,rbx
-    2b6a:	test   rcx,0x1
-    2b71:	jne    2b9a <botlish_fn_19+0xf2>
-    2b77:	mov    rdx,rbx
-    2b7a:	mov    rsi,r12
-    2b7d:	mov    rdi,r13
-    2b80:	call   2b85 <botlish_fn_19+0xdd>
-			2b81: R_X86_64_PLT32	rt_int_cmp-0x4
-    2b85:	mov    ecx,0x2
-    2b8a:	test   rax,rax
-    2b8d:	cmovge rcx,QWORD PTR [rip+0x173]        # 2d08 <botlish_fn_19+0x260>
-    2b95:	jmp    2baa <botlish_fn_19+0x102>
-    2b9a:	mov    ecx,0x2
-    2b9f:	cmp    r12,rbx
-    2ba2:	cmovge rcx,QWORD PTR [rip+0x15e]        # 2d08 <botlish_fn_19+0x260>
-    2baa:	cmp    rcx,0x6
-    2bae:	je     2cda <botlish_fn_19+0x232>
-    2bb4:	lea    rcx,[rsp+0x20]
-    2bb9:	mov    rdx,r14
-    2bbc:	mov    rsi,r12
-    2bbf:	mov    rdi,r13
-    2bc2:	call   2bc7 <botlish_fn_19+0x11f>
-			2bc3: R_X86_64_PLT32	botlish_fn_21-0x4 ; char_at<generic>
-    2bc7:	test   rax,rax
-    2bca:	mov    rsi,rax
-    2bcd:	je     2c69 <botlish_fn_19+0x1c1>
-    2bd3:	mov    rdx,QWORD PTR [rsp+0x20]
-    2bd8:	mov    rcx,QWORD PTR [rsp+0x28]
-    2bdd:	mov    rdi,r13
-    2be0:	mov    rax,QWORD PTR [rdi+0x10]
-    2be4:	mov    r8,QWORD PTR [rax+0x108]
-    2beb:	call   2bf0 <botlish_fn_19+0x148>
-			2bec: R_X86_64_PLT32	rt_str_region_eq-0x4
-    2bf0:	cmp    rax,0x6
-    2bf4:	je     2c07 <botlish_fn_19+0x15f>
-    2bfa:	mov    ecx,0x2
-    2bff:	mov    rax,rcx
-    2c02:	jmp    2ce9 <botlish_fn_19+0x241>
-    2c07:	mov    QWORD PTR [rsp+0x18],0x3
-    2c10:	test   r12,0x1
-    2c17:	jne    2c25 <botlish_fn_19+0x17d>
-    2c1d:	mov    rcx,r12
-    2c20:	jmp    2c3a <botlish_fn_19+0x192>
-    2c25:	mov    rsi,r12
-    2c28:	add    rsi,0x2
-    2c2c:	mov    rcx,r12
-    2c2f:	seto   al
-    2c32:	test   al,al
-    2c34:	je     2c4d <botlish_fn_19+0x1a5>
-    2c3a:	mov    edx,0x3
-    2c3f:	mov    rsi,rcx
-    2c42:	mov    rdi,r13
-    2c45:	call   2c4a <botlish_fn_19+0x1a2>
-			2c46: R_X86_64_PLT32	rt_int_add-0x4
-    2c4a:	mov    rsi,rax
-    2c4d:	mov    QWORD PTR [rsp+0x10],rsi
-    2c52:	mov    rcx,r14
-    2c55:	mov    rdx,rbx
-    2c58:	mov    rdi,r13
-    2c5b:	call   2c60 <botlish_fn_19+0x1b8>
-			2c5c: R_X86_64_PLT32	botlish_fn_26-0x4 ; domain_loop<generic>
-    2c60:	test   rax,rax
-    2c63:	jne    2c89 <botlish_fn_19+0x1e1>
-    2c69:	xor    rax,rax
-    2c6c:	mov    rbx,QWORD PTR [rsp+0x30]
-    2c71:	mov    r12,QWORD PTR [rsp+0x38]
-    2c76:	mov    r13,QWORD PTR [rsp+0x40]
-    2c7b:	mov    r14,QWORD PTR [rsp+0x48]
-    2c80:	add    rsp,0x50
-    2c84:	mov    rsp,rbp
-    2c87:	pop    rbp
-    2c88:	ret
-    2c89:	mov    rcx,rax
-    2c8c:	and    rcx,rbx
-    2c8f:	mov    rsi,rax
-    2c92:	test   rcx,0x1
-    2c99:	jne    2cc2 <botlish_fn_19+0x21a>
-    2c9f:	mov    rdx,rbx
-    2ca2:	mov    rdi,r13
-    2ca5:	call   2caa <botlish_fn_19+0x202>
-			2ca6: R_X86_64_PLT32	rt_int_cmp-0x4
-    2caa:	mov    ecx,0x2
-    2caf:	test   rax,rax
-    2cb2:	mov    rax,rcx
-    2cb5:	cmove  rax,QWORD PTR [rip+0x4b]        # 2d08 <botlish_fn_19+0x260>
-    2cbd:	jmp    2ce9 <botlish_fn_19+0x241>
-    2cc2:	mov    rdx,rbx
-    2cc5:	mov    eax,0x2
-    2cca:	cmp    rsi,rdx
-    2ccd:	cmove  rax,QWORD PTR [rip+0x33]        # 2d08 <botlish_fn_19+0x260>
-    2cd5:	jmp    2ce9 <botlish_fn_19+0x241>
-    2cda:	mov    eax,0x2
-    2cdf:	jmp    2ce9 <botlish_fn_19+0x241>
-    2ce4:	mov    eax,0x2
-    2ce9:	mov    rbx,QWORD PTR [rsp+0x30]
-    2cee:	mov    r12,QWORD PTR [rsp+0x38]
-    2cf3:	mov    r13,QWORD PTR [rsp+0x40]
-    2cf8:	mov    r14,QWORD PTR [rsp+0x48]
-    2cfd:	add    rsp,0x50
-    2d01:	mov    rsp,rbp
-    2d04:	pop    rbp
-    2d05:	ret
-    2d06:	add    BYTE PTR [rax],al
-    2d08:	(bad)
-    2d09:	add    BYTE PTR [rax],al
-    2d0b:	add    BYTE PTR [rax],al
-    2d0d:	add    BYTE PTR [rax],al
+0000000000002990 <botlish_fn_19: <str>>:
+    2990:	push   rbp
+    2991:	mov    rbp,rsp
+    2994:	sub    rsp,0x50
+    2998:	mov    QWORD PTR [rsp+0x30],rbx
+    299d:	mov    QWORD PTR [rsp+0x38],r12
+    29a2:	mov    QWORD PTR [rsp+0x40],r13
+    29a7:	mov    QWORD PTR [rsp+0x48],r14
+    29ac:	mov    r13,rdi
+    29af:	mov    QWORD PTR [rsp+0x18],0x0
+    29b8:	mov    QWORD PTR [rsp],rsi
+    29bc:	mov    r14,rsi
+    29bf:	mov    rsi,r14
+    29c2:	mov    rdi,r13
+    29c5:	call   29ca <botlish_fn_19+0x3a>
+			29c6: R_X86_64_PLT32	rt_str_len-0x4
+    29ca:	mov    rbx,rax
+    29cd:	mov    QWORD PTR [rsp+0x8],rax
+    29d2:	mov    esi,0x1
+    29d7:	mov    QWORD PTR [rsp+0x10],0x1
+    29e0:	mov    rcx,r14
+    29e3:	mov    rdx,rbx
+    29e6:	mov    rdi,r13
+    29e9:	call   29ee <botlish_fn_19+0x5e>
+			29ea: R_X86_64_PLT32	botlish_fn_22-0x4 ; scan_local<generic>
+    29ee:	mov    r12,rax
+    29f1:	test   r12,r12
+    29f4:	je     2b51 <botlish_fn_19+0x1c1>
+    29fa:	mov    QWORD PTR [rsp+0x10],r12
+    29ff:	test   r12,0x1
+    2a06:	jne    2a31 <botlish_fn_19+0xa1>
+    2a0c:	mov    edx,0x1
+    2a11:	mov    rsi,r12
+    2a14:	mov    rdi,r13
+    2a17:	call   2a1c <botlish_fn_19+0x8c>
+			2a18: R_X86_64_PLT32	rt_int_cmp-0x4
+    2a1c:	mov    ecx,0x2
+    2a21:	test   rax,rax
+    2a24:	cmove  rcx,QWORD PTR [rip+0x1c4]        # 2bf0 <botlish_fn_19+0x260>
+    2a2c:	jmp    2a42 <botlish_fn_19+0xb2>
+    2a31:	mov    ecx,0x2
+    2a36:	cmp    r12,0x1
+    2a3a:	cmove  rcx,QWORD PTR [rip+0x1ae]        # 2bf0 <botlish_fn_19+0x260>
+    2a42:	cmp    rcx,0x6
+    2a46:	je     2bcc <botlish_fn_19+0x23c>
+    2a4c:	mov    rcx,r12
+    2a4f:	and    rcx,rbx
+    2a52:	test   rcx,0x1
+    2a59:	jne    2a82 <botlish_fn_19+0xf2>
+    2a5f:	mov    rdx,rbx
+    2a62:	mov    rsi,r12
+    2a65:	mov    rdi,r13
+    2a68:	call   2a6d <botlish_fn_19+0xdd>
+			2a69: R_X86_64_PLT32	rt_int_cmp-0x4
+    2a6d:	mov    ecx,0x2
+    2a72:	test   rax,rax
+    2a75:	cmovge rcx,QWORD PTR [rip+0x173]        # 2bf0 <botlish_fn_19+0x260>
+    2a7d:	jmp    2a92 <botlish_fn_19+0x102>
+    2a82:	mov    ecx,0x2
+    2a87:	cmp    r12,rbx
+    2a8a:	cmovge rcx,QWORD PTR [rip+0x15e]        # 2bf0 <botlish_fn_19+0x260>
+    2a92:	cmp    rcx,0x6
+    2a96:	je     2bc2 <botlish_fn_19+0x232>
+    2a9c:	lea    rcx,[rsp+0x20]
+    2aa1:	mov    rdx,r14
+    2aa4:	mov    rsi,r12
+    2aa7:	mov    rdi,r13
+    2aaa:	call   2aaf <botlish_fn_19+0x11f>
+			2aab: R_X86_64_PLT32	botlish_fn_21-0x4 ; char_at<generic>
+    2aaf:	test   rax,rax
+    2ab2:	mov    rsi,rax
+    2ab5:	je     2b51 <botlish_fn_19+0x1c1>
+    2abb:	mov    rdx,QWORD PTR [rsp+0x20]
+    2ac0:	mov    rcx,QWORD PTR [rsp+0x28]
+    2ac5:	mov    rdi,r13
+    2ac8:	mov    rax,QWORD PTR [rdi+0x10]
+    2acc:	mov    r8,QWORD PTR [rax+0x108]
+    2ad3:	call   2ad8 <botlish_fn_19+0x148>
+			2ad4: R_X86_64_PLT32	rt_str_region_eq-0x4
+    2ad8:	cmp    rax,0x6
+    2adc:	je     2aef <botlish_fn_19+0x15f>
+    2ae2:	mov    ecx,0x2
+    2ae7:	mov    rax,rcx
+    2aea:	jmp    2bd1 <botlish_fn_19+0x241>
+    2aef:	mov    QWORD PTR [rsp+0x18],0x3
+    2af8:	test   r12,0x1
+    2aff:	jne    2b0d <botlish_fn_19+0x17d>
+    2b05:	mov    rcx,r12
+    2b08:	jmp    2b22 <botlish_fn_19+0x192>
+    2b0d:	mov    rsi,r12
+    2b10:	add    rsi,0x2
+    2b14:	mov    rcx,r12
+    2b17:	seto   al
+    2b1a:	test   al,al
+    2b1c:	je     2b35 <botlish_fn_19+0x1a5>
+    2b22:	mov    edx,0x3
+    2b27:	mov    rsi,rcx
+    2b2a:	mov    rdi,r13
+    2b2d:	call   2b32 <botlish_fn_19+0x1a2>
+			2b2e: R_X86_64_PLT32	rt_int_add-0x4
+    2b32:	mov    rsi,rax
+    2b35:	mov    QWORD PTR [rsp+0x10],rsi
+    2b3a:	mov    rcx,r14
+    2b3d:	mov    rdx,rbx
+    2b40:	mov    rdi,r13
+    2b43:	call   2b48 <botlish_fn_19+0x1b8>
+			2b44: R_X86_64_PLT32	botlish_fn_26-0x4 ; domain_loop<generic>
+    2b48:	test   rax,rax
+    2b4b:	jne    2b71 <botlish_fn_19+0x1e1>
+    2b51:	xor    rax,rax
+    2b54:	mov    rbx,QWORD PTR [rsp+0x30]
+    2b59:	mov    r12,QWORD PTR [rsp+0x38]
+    2b5e:	mov    r13,QWORD PTR [rsp+0x40]
+    2b63:	mov    r14,QWORD PTR [rsp+0x48]
+    2b68:	add    rsp,0x50
+    2b6c:	mov    rsp,rbp
+    2b6f:	pop    rbp
+    2b70:	ret
+    2b71:	mov    rcx,rax
+    2b74:	and    rcx,rbx
+    2b77:	mov    rsi,rax
+    2b7a:	test   rcx,0x1
+    2b81:	jne    2baa <botlish_fn_19+0x21a>
+    2b87:	mov    rdx,rbx
+    2b8a:	mov    rdi,r13
+    2b8d:	call   2b92 <botlish_fn_19+0x202>
+			2b8e: R_X86_64_PLT32	rt_int_cmp-0x4
+    2b92:	mov    ecx,0x2
+    2b97:	test   rax,rax
+    2b9a:	mov    rax,rcx
+    2b9d:	cmove  rax,QWORD PTR [rip+0x4b]        # 2bf0 <botlish_fn_19+0x260>
+    2ba5:	jmp    2bd1 <botlish_fn_19+0x241>
+    2baa:	mov    rdx,rbx
+    2bad:	mov    eax,0x2
+    2bb2:	cmp    rsi,rdx
+    2bb5:	cmove  rax,QWORD PTR [rip+0x33]        # 2bf0 <botlish_fn_19+0x260>
+    2bbd:	jmp    2bd1 <botlish_fn_19+0x241>
+    2bc2:	mov    eax,0x2
+    2bc7:	jmp    2bd1 <botlish_fn_19+0x241>
+    2bcc:	mov    eax,0x2
+    2bd1:	mov    rbx,QWORD PTR [rsp+0x30]
+    2bd6:	mov    r12,QWORD PTR [rsp+0x38]
+    2bdb:	mov    r13,QWORD PTR [rsp+0x40]
+    2be0:	mov    r14,QWORD PTR [rsp+0x48]
+    2be5:	add    rsp,0x50
+    2be9:	mov    rsp,rbp
+    2bec:	pop    rbp
+    2bed:	ret
+    2bee:	add    BYTE PTR [rax],al
+    2bf0:	(bad)
+    2bf1:	add    BYTE PTR [rax],al
+    2bf3:	add    BYTE PTR [rax],al
+    2bf5:	add    BYTE PTR [rax],al
 	...
 
-0000000000002d10 <botlish_entry_19: <str>>:
-    2d10:	push   rbp
-    2d11:	mov    rbp,rsp
-    2d14:	mov    rsi,QWORD PTR [rdx]
-    2d17:	call   2d1c <botlish_entry_19+0xc>
-			2d18: R_X86_64_PLT32	botlish_fn_19-0x4 ; <str>
-    2d1c:	mov    rsp,rbp
-    2d1f:	pop    rbp
-    2d20:	ret
-    2d21:	add    BYTE PTR [rax],al
-    2d23:	add    BYTE PTR [rax],al
-    2d25:	add    BYTE PTR [rax],al
+0000000000002bf8 <botlish_entry_19: <str>>:
+    2bf8:	push   rbp
+    2bf9:	mov    rbp,rsp
+    2bfc:	mov    rsi,QWORD PTR [rdx]
+    2bff:	call   2c04 <botlish_entry_19+0xc>
+			2c00: R_X86_64_PLT32	botlish_fn_19-0x4 ; <str>
+    2c04:	mov    rsp,rbp
+    2c07:	pop    rbp
+    2c08:	ret
+    2c09:	add    BYTE PTR [rax],al
+    2c0b:	add    BYTE PTR [rax],al
+    2c0d:	add    BYTE PTR [rax],al
 	...
 
-0000000000002d28 <botlish_fn_20: <generic>>:
-    2d28:	push   rbp
-    2d29:	mov    rbp,rsp
-    2d2c:	sub    rsp,0x60
-    2d30:	mov    QWORD PTR [rsp+0x30],rbx
-    2d35:	mov    QWORD PTR [rsp+0x38],r12
-    2d3a:	mov    QWORD PTR [rsp+0x40],r13
-    2d3f:	mov    QWORD PTR [rsp+0x48],r14
-    2d44:	mov    QWORD PTR [rsp+0x50],r15
-    2d49:	mov    QWORD PTR [rsp+0x18],0x0
-    2d52:	mov    QWORD PTR [rsp],rsi
-    2d56:	xor    r8d,r8d
-    2d59:	test   rsi,0x7
-    2d60:	jne    2d70 <botlish_fn_20+0x48>
-    2d66:	movzx  rax,BYTE PTR [rsi]
-    2d6a:	cmp    al,0x2
-    2d6c:	sete   r8b
-    2d70:	test   r8b,r8b
-    2d73:	jne    2d93 <botlish_fn_20+0x6b>
-    2d79:	mov    rdx,QWORD PTR [rdi+0x10]
-    2d7d:	mov    rcx,QWORD PTR [rdx+0xe0]
-    2d84:	mov    edx,0x1
-    2d89:	call   2d8e <botlish_fn_20+0x66>
-			2d8a: R_X86_64_PLT32	rt_type_error-0x4
-    2d8e:	jmp    2f28 <botlish_fn_20+0x200>
-    2d93:	mov    r13,rsi
-    2d96:	mov    r14,rdi
-    2d99:	call   2d9e <botlish_fn_20+0x76>
-			2d9a: R_X86_64_PLT32	rt_str_len-0x4
-    2d9e:	mov    rbx,rax
-    2da1:	mov    QWORD PTR [rsp+0x8],rax
-    2da6:	mov    edx,0x1
-    2dab:	mov    r15,rdx
-    2dae:	mov    QWORD PTR [rsp+0x10],0x1
-    2db7:	mov    rcx,r13
-    2dba:	mov    rdx,rbx
-    2dbd:	mov    rsi,r15
-    2dc0:	mov    rdi,r14
-    2dc3:	call   2dc8 <botlish_fn_20+0xa0>
-			2dc4: R_X86_64_PLT32	botlish_fn_22-0x4 ; scan_local<generic>
-    2dc8:	mov    r12,rax
-    2dcb:	test   r12,r12
-    2dce:	je     2f28 <botlish_fn_20+0x200>
-    2dd4:	mov    QWORD PTR [rsp+0x10],r12
-    2dd9:	test   r12,0x1
-    2de0:	jne    2e09 <botlish_fn_20+0xe1>
-    2de6:	mov    rdx,r15
-    2de9:	mov    rsi,r12
-    2dec:	mov    rdi,r14
-    2def:	call   2df4 <botlish_fn_20+0xcc>
-			2df0: R_X86_64_PLT32	rt_int_cmp-0x4
-    2df4:	mov    ecx,0x2
-    2df9:	test   rax,rax
-    2dfc:	cmove  rcx,QWORD PTR [rip+0x1cc]        # 2fd0 <botlish_fn_20+0x2a8>
-    2e04:	jmp    2e1a <botlish_fn_20+0xf2>
-    2e09:	mov    ecx,0x2
-    2e0e:	cmp    r12,0x1
-    2e12:	cmove  rcx,QWORD PTR [rip+0x1b6]        # 2fd0 <botlish_fn_20+0x2a8>
-    2e1a:	cmp    rcx,0x6
-    2e1e:	je     2fa8 <botlish_fn_20+0x280>
-    2e24:	mov    rax,r12
-    2e27:	and    rax,rbx
-    2e2a:	test   rax,0x1
-    2e30:	jne    2e59 <botlish_fn_20+0x131>
-    2e36:	mov    rdx,rbx
-    2e39:	mov    rsi,r12
-    2e3c:	mov    rdi,r14
-    2e3f:	call   2e44 <botlish_fn_20+0x11c>
-			2e40: R_X86_64_PLT32	rt_int_cmp-0x4
-    2e44:	mov    ecx,0x2
-    2e49:	test   rax,rax
-    2e4c:	cmovge rcx,QWORD PTR [rip+0x17c]        # 2fd0 <botlish_fn_20+0x2a8>
-    2e54:	jmp    2e69 <botlish_fn_20+0x141>
-    2e59:	mov    ecx,0x2
-    2e5e:	cmp    r12,rbx
-    2e61:	cmovge rcx,QWORD PTR [rip+0x167]        # 2fd0 <botlish_fn_20+0x2a8>
-    2e69:	cmp    rcx,0x6
-    2e6d:	je     2f9e <botlish_fn_20+0x276>
-    2e73:	lea    rcx,[rsp+0x20]
-    2e78:	mov    rdx,r13
-    2e7b:	mov    rsi,r12
-    2e7e:	mov    rdi,r14
-    2e81:	call   2e86 <botlish_fn_20+0x15e>
-			2e82: R_X86_64_PLT32	botlish_fn_21-0x4 ; char_at<generic>
-    2e86:	test   rax,rax
-    2e89:	mov    rsi,rax
-    2e8c:	je     2f28 <botlish_fn_20+0x200>
-    2e92:	mov    rdx,QWORD PTR [rsp+0x20]
-    2e97:	mov    rcx,QWORD PTR [rsp+0x28]
-    2e9c:	mov    rdi,r14
-    2e9f:	mov    rax,QWORD PTR [rdi+0x10]
-    2ea3:	mov    r8,QWORD PTR [rax+0x108]
-    2eaa:	call   2eaf <botlish_fn_20+0x187>
-			2eab: R_X86_64_PLT32	rt_str_region_eq-0x4
-    2eaf:	cmp    rax,0x6
-    2eb3:	je     2ec6 <botlish_fn_20+0x19e>
-    2eb9:	mov    ecx,0x2
-    2ebe:	mov    rax,rcx
-    2ec1:	jmp    2fad <botlish_fn_20+0x285>
-    2ec6:	mov    QWORD PTR [rsp+0x18],0x3
-    2ecf:	test   r12,0x1
-    2ed6:	jne    2ee4 <botlish_fn_20+0x1bc>
-    2edc:	mov    rdi,r12
-    2edf:	jmp    2ef9 <botlish_fn_20+0x1d1>
-    2ee4:	mov    rsi,r12
-    2ee7:	add    rsi,0x2
-    2eeb:	mov    rdi,r12
-    2eee:	seto   al
-    2ef1:	test   al,al
-    2ef3:	je     2f0c <botlish_fn_20+0x1e4>
-    2ef9:	mov    edx,0x3
-    2efe:	mov    rsi,rdi
-    2f01:	mov    rdi,r14
-    2f04:	call   2f09 <botlish_fn_20+0x1e1>
-			2f05: R_X86_64_PLT32	rt_int_add-0x4
-    2f09:	mov    rsi,rax
-    2f0c:	mov    QWORD PTR [rsp+0x10],rsi
-    2f11:	mov    rcx,r13
-    2f14:	mov    rdx,rbx
-    2f17:	mov    rdi,r14
-    2f1a:	call   2f1f <botlish_fn_20+0x1f7>
-			2f1b: R_X86_64_PLT32	botlish_fn_26-0x4 ; domain_loop<generic>
-    2f1f:	test   rax,rax
-    2f22:	jne    2f4d <botlish_fn_20+0x225>
-    2f28:	xor    rax,rax
-    2f2b:	mov    rbx,QWORD PTR [rsp+0x30]
-    2f30:	mov    r12,QWORD PTR [rsp+0x38]
-    2f35:	mov    r13,QWORD PTR [rsp+0x40]
-    2f3a:	mov    r14,QWORD PTR [rsp+0x48]
-    2f3f:	mov    r15,QWORD PTR [rsp+0x50]
-    2f44:	add    rsp,0x60
-    2f48:	mov    rsp,rbp
-    2f4b:	pop    rbp
-    2f4c:	ret
-    2f4d:	mov    rcx,rax
-    2f50:	and    rcx,rbx
-    2f53:	mov    rsi,rax
-    2f56:	test   rcx,0x1
-    2f5d:	jne    2f86 <botlish_fn_20+0x25e>
-    2f63:	mov    rdx,rbx
-    2f66:	mov    rdi,r14
-    2f69:	call   2f6e <botlish_fn_20+0x246>
-			2f6a: R_X86_64_PLT32	rt_int_cmp-0x4
-    2f6e:	mov    ecx,0x2
-    2f73:	test   rax,rax
-    2f76:	mov    rax,rcx
-    2f79:	cmove  rax,QWORD PTR [rip+0x4f]        # 2fd0 <botlish_fn_20+0x2a8>
-    2f81:	jmp    2fad <botlish_fn_20+0x285>
-    2f86:	mov    rdx,rbx
-    2f89:	mov    eax,0x2
-    2f8e:	cmp    rsi,rdx
-    2f91:	cmove  rax,QWORD PTR [rip+0x37]        # 2fd0 <botlish_fn_20+0x2a8>
-    2f99:	jmp    2fad <botlish_fn_20+0x285>
-    2f9e:	mov    eax,0x2
-    2fa3:	jmp    2fad <botlish_fn_20+0x285>
-    2fa8:	mov    eax,0x2
-    2fad:	mov    rbx,QWORD PTR [rsp+0x30]
-    2fb2:	mov    r12,QWORD PTR [rsp+0x38]
-    2fb7:	mov    r13,QWORD PTR [rsp+0x40]
-    2fbc:	mov    r14,QWORD PTR [rsp+0x48]
-    2fc1:	mov    r15,QWORD PTR [rsp+0x50]
-    2fc6:	add    rsp,0x60
-    2fca:	mov    rsp,rbp
-    2fcd:	pop    rbp
-    2fce:	ret
-    2fcf:	add    BYTE PTR [rsi],al
-    2fd1:	add    BYTE PTR [rax],al
-    2fd3:	add    BYTE PTR [rax],al
-    2fd5:	add    BYTE PTR [rax],al
+0000000000002c10 <botlish_fn_20: <generic>>:
+    2c10:	push   rbp
+    2c11:	mov    rbp,rsp
+    2c14:	sub    rsp,0x60
+    2c18:	mov    QWORD PTR [rsp+0x30],rbx
+    2c1d:	mov    QWORD PTR [rsp+0x38],r12
+    2c22:	mov    QWORD PTR [rsp+0x40],r13
+    2c27:	mov    QWORD PTR [rsp+0x48],r14
+    2c2c:	mov    QWORD PTR [rsp+0x50],r15
+    2c31:	mov    QWORD PTR [rsp+0x18],0x0
+    2c3a:	mov    QWORD PTR [rsp],rsi
+    2c3e:	xor    r8d,r8d
+    2c41:	test   rsi,0x7
+    2c48:	jne    2c58 <botlish_fn_20+0x48>
+    2c4e:	movzx  rax,BYTE PTR [rsi]
+    2c52:	cmp    al,0x2
+    2c54:	sete   r8b
+    2c58:	test   r8b,r8b
+    2c5b:	jne    2c7b <botlish_fn_20+0x6b>
+    2c61:	mov    rdx,QWORD PTR [rdi+0x10]
+    2c65:	mov    rcx,QWORD PTR [rdx+0xe0]
+    2c6c:	mov    edx,0x1
+    2c71:	call   2c76 <botlish_fn_20+0x66>
+			2c72: R_X86_64_PLT32	rt_type_error-0x4
+    2c76:	jmp    2e10 <botlish_fn_20+0x200>
+    2c7b:	mov    r13,rsi
+    2c7e:	mov    r14,rdi
+    2c81:	call   2c86 <botlish_fn_20+0x76>
+			2c82: R_X86_64_PLT32	rt_str_len-0x4
+    2c86:	mov    rbx,rax
+    2c89:	mov    QWORD PTR [rsp+0x8],rax
+    2c8e:	mov    edx,0x1
+    2c93:	mov    r15,rdx
+    2c96:	mov    QWORD PTR [rsp+0x10],0x1
+    2c9f:	mov    rcx,r13
+    2ca2:	mov    rdx,rbx
+    2ca5:	mov    rsi,r15
+    2ca8:	mov    rdi,r14
+    2cab:	call   2cb0 <botlish_fn_20+0xa0>
+			2cac: R_X86_64_PLT32	botlish_fn_22-0x4 ; scan_local<generic>
+    2cb0:	mov    r12,rax
+    2cb3:	test   r12,r12
+    2cb6:	je     2e10 <botlish_fn_20+0x200>
+    2cbc:	mov    QWORD PTR [rsp+0x10],r12
+    2cc1:	test   r12,0x1
+    2cc8:	jne    2cf1 <botlish_fn_20+0xe1>
+    2cce:	mov    rdx,r15
+    2cd1:	mov    rsi,r12
+    2cd4:	mov    rdi,r14
+    2cd7:	call   2cdc <botlish_fn_20+0xcc>
+			2cd8: R_X86_64_PLT32	rt_int_cmp-0x4
+    2cdc:	mov    ecx,0x2
+    2ce1:	test   rax,rax
+    2ce4:	cmove  rcx,QWORD PTR [rip+0x1cc]        # 2eb8 <botlish_fn_20+0x2a8>
+    2cec:	jmp    2d02 <botlish_fn_20+0xf2>
+    2cf1:	mov    ecx,0x2
+    2cf6:	cmp    r12,0x1
+    2cfa:	cmove  rcx,QWORD PTR [rip+0x1b6]        # 2eb8 <botlish_fn_20+0x2a8>
+    2d02:	cmp    rcx,0x6
+    2d06:	je     2e90 <botlish_fn_20+0x280>
+    2d0c:	mov    rax,r12
+    2d0f:	and    rax,rbx
+    2d12:	test   rax,0x1
+    2d18:	jne    2d41 <botlish_fn_20+0x131>
+    2d1e:	mov    rdx,rbx
+    2d21:	mov    rsi,r12
+    2d24:	mov    rdi,r14
+    2d27:	call   2d2c <botlish_fn_20+0x11c>
+			2d28: R_X86_64_PLT32	rt_int_cmp-0x4
+    2d2c:	mov    ecx,0x2
+    2d31:	test   rax,rax
+    2d34:	cmovge rcx,QWORD PTR [rip+0x17c]        # 2eb8 <botlish_fn_20+0x2a8>
+    2d3c:	jmp    2d51 <botlish_fn_20+0x141>
+    2d41:	mov    ecx,0x2
+    2d46:	cmp    r12,rbx
+    2d49:	cmovge rcx,QWORD PTR [rip+0x167]        # 2eb8 <botlish_fn_20+0x2a8>
+    2d51:	cmp    rcx,0x6
+    2d55:	je     2e86 <botlish_fn_20+0x276>
+    2d5b:	lea    rcx,[rsp+0x20]
+    2d60:	mov    rdx,r13
+    2d63:	mov    rsi,r12
+    2d66:	mov    rdi,r14
+    2d69:	call   2d6e <botlish_fn_20+0x15e>
+			2d6a: R_X86_64_PLT32	botlish_fn_21-0x4 ; char_at<generic>
+    2d6e:	test   rax,rax
+    2d71:	mov    rsi,rax
+    2d74:	je     2e10 <botlish_fn_20+0x200>
+    2d7a:	mov    rdx,QWORD PTR [rsp+0x20]
+    2d7f:	mov    rcx,QWORD PTR [rsp+0x28]
+    2d84:	mov    rdi,r14
+    2d87:	mov    rax,QWORD PTR [rdi+0x10]
+    2d8b:	mov    r8,QWORD PTR [rax+0x108]
+    2d92:	call   2d97 <botlish_fn_20+0x187>
+			2d93: R_X86_64_PLT32	rt_str_region_eq-0x4
+    2d97:	cmp    rax,0x6
+    2d9b:	je     2dae <botlish_fn_20+0x19e>
+    2da1:	mov    ecx,0x2
+    2da6:	mov    rax,rcx
+    2da9:	jmp    2e95 <botlish_fn_20+0x285>
+    2dae:	mov    QWORD PTR [rsp+0x18],0x3
+    2db7:	test   r12,0x1
+    2dbe:	jne    2dcc <botlish_fn_20+0x1bc>
+    2dc4:	mov    rdi,r12
+    2dc7:	jmp    2de1 <botlish_fn_20+0x1d1>
+    2dcc:	mov    rsi,r12
+    2dcf:	add    rsi,0x2
+    2dd3:	mov    rdi,r12
+    2dd6:	seto   al
+    2dd9:	test   al,al
+    2ddb:	je     2df4 <botlish_fn_20+0x1e4>
+    2de1:	mov    edx,0x3
+    2de6:	mov    rsi,rdi
+    2de9:	mov    rdi,r14
+    2dec:	call   2df1 <botlish_fn_20+0x1e1>
+			2ded: R_X86_64_PLT32	rt_int_add-0x4
+    2df1:	mov    rsi,rax
+    2df4:	mov    QWORD PTR [rsp+0x10],rsi
+    2df9:	mov    rcx,r13
+    2dfc:	mov    rdx,rbx
+    2dff:	mov    rdi,r14
+    2e02:	call   2e07 <botlish_fn_20+0x1f7>
+			2e03: R_X86_64_PLT32	botlish_fn_26-0x4 ; domain_loop<generic>
+    2e07:	test   rax,rax
+    2e0a:	jne    2e35 <botlish_fn_20+0x225>
+    2e10:	xor    rax,rax
+    2e13:	mov    rbx,QWORD PTR [rsp+0x30]
+    2e18:	mov    r12,QWORD PTR [rsp+0x38]
+    2e1d:	mov    r13,QWORD PTR [rsp+0x40]
+    2e22:	mov    r14,QWORD PTR [rsp+0x48]
+    2e27:	mov    r15,QWORD PTR [rsp+0x50]
+    2e2c:	add    rsp,0x60
+    2e30:	mov    rsp,rbp
+    2e33:	pop    rbp
+    2e34:	ret
+    2e35:	mov    rcx,rax
+    2e38:	and    rcx,rbx
+    2e3b:	mov    rsi,rax
+    2e3e:	test   rcx,0x1
+    2e45:	jne    2e6e <botlish_fn_20+0x25e>
+    2e4b:	mov    rdx,rbx
+    2e4e:	mov    rdi,r14
+    2e51:	call   2e56 <botlish_fn_20+0x246>
+			2e52: R_X86_64_PLT32	rt_int_cmp-0x4
+    2e56:	mov    ecx,0x2
+    2e5b:	test   rax,rax
+    2e5e:	mov    rax,rcx
+    2e61:	cmove  rax,QWORD PTR [rip+0x4f]        # 2eb8 <botlish_fn_20+0x2a8>
+    2e69:	jmp    2e95 <botlish_fn_20+0x285>
+    2e6e:	mov    rdx,rbx
+    2e71:	mov    eax,0x2
+    2e76:	cmp    rsi,rdx
+    2e79:	cmove  rax,QWORD PTR [rip+0x37]        # 2eb8 <botlish_fn_20+0x2a8>
+    2e81:	jmp    2e95 <botlish_fn_20+0x285>
+    2e86:	mov    eax,0x2
+    2e8b:	jmp    2e95 <botlish_fn_20+0x285>
+    2e90:	mov    eax,0x2
+    2e95:	mov    rbx,QWORD PTR [rsp+0x30]
+    2e9a:	mov    r12,QWORD PTR [rsp+0x38]
+    2e9f:	mov    r13,QWORD PTR [rsp+0x40]
+    2ea4:	mov    r14,QWORD PTR [rsp+0x48]
+    2ea9:	mov    r15,QWORD PTR [rsp+0x50]
+    2eae:	add    rsp,0x60
+    2eb2:	mov    rsp,rbp
+    2eb5:	pop    rbp
+    2eb6:	ret
+    2eb7:	add    BYTE PTR [rsi],al
+    2eb9:	add    BYTE PTR [rax],al
+    2ebb:	add    BYTE PTR [rax],al
+    2ebd:	add    BYTE PTR [rax],al
 	...
 
-0000000000002fd8 <botlish_entry_20: <generic>>:
-    2fd8:	push   rbp
-    2fd9:	mov    rbp,rsp
-    2fdc:	mov    rsi,QWORD PTR [rdx]
-    2fdf:	call   2fe4 <botlish_entry_20+0xc>
-			2fe0: R_X86_64_PLT32	botlish_fn_20-0x4 ; <generic>
-    2fe4:	mov    rsp,rbp
-    2fe7:	pop    rbp
-    2fe8:	ret
+0000000000002ec0 <botlish_entry_20: <generic>>:
+    2ec0:	push   rbp
+    2ec1:	mov    rbp,rsp
+    2ec4:	mov    rsi,QWORD PTR [rdx]
+    2ec7:	call   2ecc <botlish_entry_20+0xc>
+			2ec8: R_X86_64_PLT32	botlish_fn_20-0x4 ; <generic>
+    2ecc:	mov    rsp,rbp
+    2ecf:	pop    rbp
+    2ed0:	ret
 
-0000000000002fe9 <botlish_fn_21: char_at<generic>>:
-    2fe9:	push   rbp
-    2fea:	mov    rbp,rsp
-    2fed:	sub    rsp,0x50
-    2ff1:	mov    QWORD PTR [rsp+0x20],rbx
-    2ff6:	mov    QWORD PTR [rsp+0x28],r12
-    2ffb:	mov    QWORD PTR [rsp+0x30],r13
-    3000:	mov    QWORD PTR [rsp+0x38],r14
-    3005:	mov    QWORD PTR [rsp+0x40],r15
-    300a:	mov    r14,rcx
-    300d:	mov    QWORD PTR [rsp],rsi
-    3011:	mov    QWORD PTR [rsp+0x8],rdx
-    3016:	mov    r13,rdx
-    3019:	mov    QWORD PTR [rsp+0x10],0x3
-    3022:	mov    r9d,0x1
-    3028:	test   rsi,0x1
-    302f:	jne    304f <botlish_fn_21+0x66>
-    3035:	xor    r9d,r9d
-    3038:	test   rsi,0x7
-    303f:	jne    304f <botlish_fn_21+0x66>
-    3045:	movzx  rax,BYTE PTR [rsi]
-    3049:	cmp    al,0x1
-    304b:	sete   r9b
-    304f:	test   r9b,r9b
-    3052:	jne    3070 <botlish_fn_21+0x87>
-    3058:	mov    rax,QWORD PTR [rdi+0x10]
-    305c:	mov    rcx,QWORD PTR [rax+0x110]
-    3063:	xor    rdx,rdx
-    3066:	call   306b <botlish_fn_21+0x82>
-			3067: R_X86_64_PLT32	rt_type_error-0x4
-    306b:	jmp    312d <botlish_fn_21+0x144>
-    3070:	mov    r12,rdi
-    3073:	test   rsi,0x1
-    307a:	jne    3088 <botlish_fn_21+0x9f>
-    3080:	mov    rbx,rsi
-    3083:	jmp    30a5 <botlish_fn_21+0xbc>
-    3088:	mov    rax,rsi
-    308b:	add    rax,0x2
-    308f:	mov    rbx,rsi
-    3092:	seto   cl
-    3095:	test   cl,cl
-    3097:	jne    30a5 <botlish_fn_21+0xbc>
-    309d:	mov    r15,rax
-    30a0:	jmp    30b8 <botlish_fn_21+0xcf>
-    30a5:	mov    edx,0x3
-    30aa:	mov    rsi,rbx
-    30ad:	mov    rdi,r12
-    30b0:	call   30b5 <botlish_fn_21+0xcc>
-			30b1: R_X86_64_PLT32	rt_int_add-0x4
-    30b5:	mov    r15,rax
-    30b8:	mov    ecx,0x1
-    30bd:	mov    rsi,rbx
-    30c0:	test   rsi,0x1
-    30c7:	jne    30ed <botlish_fn_21+0x104>
-    30cd:	xor    ecx,ecx
-    30cf:	mov    rsi,rbx
-    30d2:	test   rsi,0x7
-    30d9:	jne    30ed <botlish_fn_21+0x104>
-    30df:	mov    rsi,rbx
-    30e2:	movzx  rcx,BYTE PTR [rsi]
-    30e6:	rex cmp cl,0x1
-    30ea:	sete   cl
-    30ed:	test   cl,cl
-    30ef:	jne    3113 <botlish_fn_21+0x12a>
-    30f5:	mov    rdi,r12
-    30f8:	mov    rsi,QWORD PTR [rdi+0x10]
-    30fc:	mov    rcx,QWORD PTR [rsi+0x118]
-    3103:	xor    rdx,rdx
-    3106:	mov    rsi,rbx
-    3109:	call   310e <botlish_fn_21+0x125>
-			310a: R_X86_64_PLT32	rt_type_error-0x4
-    310e:	jmp    312d <botlish_fn_21+0x144>
-    3113:	mov    rdi,r12
-    3116:	mov    rcx,r15
-    3119:	mov    rdx,rbx
-    311c:	mov    rsi,r13
-    311f:	call   3124 <botlish_fn_21+0x13b>
-			3120: R_X86_64_PLT32	rt_str_region_check-0x4
-    3124:	test   rax,rax
-    3127:	jne    3152 <botlish_fn_21+0x169>
-    312d:	xor    rax,rax
-    3130:	mov    rbx,QWORD PTR [rsp+0x20]
-    3135:	mov    r12,QWORD PTR [rsp+0x28]
-    313a:	mov    r13,QWORD PTR [rsp+0x30]
-    313f:	mov    r14,QWORD PTR [rsp+0x38]
-    3144:	mov    r15,QWORD PTR [rsp+0x40]
-    3149:	add    rsp,0x50
-    314d:	mov    rsp,rbp
-    3150:	pop    rbp
-    3151:	ret
-    3152:	mov    rcx,r14
-    3155:	mov    rsi,rbx
-    3158:	mov    QWORD PTR [rcx],rsi
-    315b:	mov    rax,r15
-    315e:	mov    QWORD PTR [rcx+0x8],rax
-    3162:	mov    rax,r13
-    3165:	mov    rbx,QWORD PTR [rsp+0x20]
-    316a:	mov    r12,QWORD PTR [rsp+0x28]
-    316f:	mov    r13,QWORD PTR [rsp+0x30]
-    3174:	mov    r14,QWORD PTR [rsp+0x38]
-    3179:	mov    r15,QWORD PTR [rsp+0x40]
-    317e:	add    rsp,0x50
-    3182:	mov    rsp,rbp
-    3185:	pop    rbp
-    3186:	ret
+0000000000002ed1 <botlish_fn_21: char_at<generic>>:
+    2ed1:	push   rbp
+    2ed2:	mov    rbp,rsp
+    2ed5:	sub    rsp,0x50
+    2ed9:	mov    QWORD PTR [rsp+0x20],rbx
+    2ede:	mov    QWORD PTR [rsp+0x28],r12
+    2ee3:	mov    QWORD PTR [rsp+0x30],r13
+    2ee8:	mov    QWORD PTR [rsp+0x38],r14
+    2eed:	mov    QWORD PTR [rsp+0x40],r15
+    2ef2:	mov    r14,rcx
+    2ef5:	mov    QWORD PTR [rsp],rsi
+    2ef9:	mov    QWORD PTR [rsp+0x8],rdx
+    2efe:	mov    r13,rdx
+    2f01:	mov    QWORD PTR [rsp+0x10],0x3
+    2f0a:	mov    r9d,0x1
+    2f10:	test   rsi,0x1
+    2f17:	jne    2f37 <botlish_fn_21+0x66>
+    2f1d:	xor    r9d,r9d
+    2f20:	test   rsi,0x7
+    2f27:	jne    2f37 <botlish_fn_21+0x66>
+    2f2d:	movzx  rax,BYTE PTR [rsi]
+    2f31:	cmp    al,0x1
+    2f33:	sete   r9b
+    2f37:	test   r9b,r9b
+    2f3a:	jne    2f58 <botlish_fn_21+0x87>
+    2f40:	mov    rax,QWORD PTR [rdi+0x10]
+    2f44:	mov    rcx,QWORD PTR [rax+0x110]
+    2f4b:	xor    rdx,rdx
+    2f4e:	call   2f53 <botlish_fn_21+0x82>
+			2f4f: R_X86_64_PLT32	rt_type_error-0x4
+    2f53:	jmp    3015 <botlish_fn_21+0x144>
+    2f58:	mov    r12,rdi
+    2f5b:	test   rsi,0x1
+    2f62:	jne    2f70 <botlish_fn_21+0x9f>
+    2f68:	mov    rbx,rsi
+    2f6b:	jmp    2f8d <botlish_fn_21+0xbc>
+    2f70:	mov    rax,rsi
+    2f73:	add    rax,0x2
+    2f77:	mov    rbx,rsi
+    2f7a:	seto   cl
+    2f7d:	test   cl,cl
+    2f7f:	jne    2f8d <botlish_fn_21+0xbc>
+    2f85:	mov    r15,rax
+    2f88:	jmp    2fa0 <botlish_fn_21+0xcf>
+    2f8d:	mov    edx,0x3
+    2f92:	mov    rsi,rbx
+    2f95:	mov    rdi,r12
+    2f98:	call   2f9d <botlish_fn_21+0xcc>
+			2f99: R_X86_64_PLT32	rt_int_add-0x4
+    2f9d:	mov    r15,rax
+    2fa0:	mov    ecx,0x1
+    2fa5:	mov    rsi,rbx
+    2fa8:	test   rsi,0x1
+    2faf:	jne    2fd5 <botlish_fn_21+0x104>
+    2fb5:	xor    ecx,ecx
+    2fb7:	mov    rsi,rbx
+    2fba:	test   rsi,0x7
+    2fc1:	jne    2fd5 <botlish_fn_21+0x104>
+    2fc7:	mov    rsi,rbx
+    2fca:	movzx  rcx,BYTE PTR [rsi]
+    2fce:	rex cmp cl,0x1
+    2fd2:	sete   cl
+    2fd5:	test   cl,cl
+    2fd7:	jne    2ffb <botlish_fn_21+0x12a>
+    2fdd:	mov    rdi,r12
+    2fe0:	mov    rsi,QWORD PTR [rdi+0x10]
+    2fe4:	mov    rcx,QWORD PTR [rsi+0x118]
+    2feb:	xor    rdx,rdx
+    2fee:	mov    rsi,rbx
+    2ff1:	call   2ff6 <botlish_fn_21+0x125>
+			2ff2: R_X86_64_PLT32	rt_type_error-0x4
+    2ff6:	jmp    3015 <botlish_fn_21+0x144>
+    2ffb:	mov    rdi,r12
+    2ffe:	mov    rcx,r15
+    3001:	mov    rdx,rbx
+    3004:	mov    rsi,r13
+    3007:	call   300c <botlish_fn_21+0x13b>
+			3008: R_X86_64_PLT32	rt_str_region_check-0x4
+    300c:	test   rax,rax
+    300f:	jne    303a <botlish_fn_21+0x169>
+    3015:	xor    rax,rax
+    3018:	mov    rbx,QWORD PTR [rsp+0x20]
+    301d:	mov    r12,QWORD PTR [rsp+0x28]
+    3022:	mov    r13,QWORD PTR [rsp+0x30]
+    3027:	mov    r14,QWORD PTR [rsp+0x38]
+    302c:	mov    r15,QWORD PTR [rsp+0x40]
+    3031:	add    rsp,0x50
+    3035:	mov    rsp,rbp
+    3038:	pop    rbp
+    3039:	ret
+    303a:	mov    rcx,r14
+    303d:	mov    rsi,rbx
+    3040:	mov    QWORD PTR [rcx],rsi
+    3043:	mov    rax,r15
+    3046:	mov    QWORD PTR [rcx+0x8],rax
+    304a:	mov    rax,r13
+    304d:	mov    rbx,QWORD PTR [rsp+0x20]
+    3052:	mov    r12,QWORD PTR [rsp+0x28]
+    3057:	mov    r13,QWORD PTR [rsp+0x30]
+    305c:	mov    r14,QWORD PTR [rsp+0x38]
+    3061:	mov    r15,QWORD PTR [rsp+0x40]
+    3066:	add    rsp,0x50
+    306a:	mov    rsp,rbp
+    306d:	pop    rbp
+    306e:	ret
 
-0000000000003187 <botlish_entry_21: char_at<generic>>:
-    3187:	push   rbp
-    3188:	mov    rbp,rsp
-    318b:	ud2
-    318d:	add    BYTE PTR [rax],al
+000000000000306f <botlish_entry_21: char_at<generic>>:
+    306f:	push   rbp
+    3070:	mov    rbp,rsp
+    3073:	ud2
+    3075:	add    BYTE PTR [rax],al
 	...
 
-0000000000003190 <botlish_fn_22: scan_local<generic>>:
-    3190:	push   rbp
-    3191:	mov    rbp,rsp
-    3194:	sub    rsp,0x80
-    319b:	mov    QWORD PTR [rsp+0x50],rbx
-    31a0:	mov    QWORD PTR [rsp+0x58],r12
-    31a5:	mov    QWORD PTR [rsp+0x60],r13
-    31aa:	mov    QWORD PTR [rsp+0x68],r14
-    31af:	mov    QWORD PTR [rsp+0x70],r15
-    31b4:	mov    rax,rdi
-    31b7:	mov    QWORD PTR [rsp+0x18],0x0
-    31c0:	mov    QWORD PTR [rsp],rsi
-    31c4:	mov    r14,rsi
-    31c7:	mov    QWORD PTR [rsp+0x8],rdx
-    31cc:	mov    QWORD PTR [rsp+0x10],rcx
-    31d1:	mov    r12,rcx
-    31d4:	mov    r11d,0x1
-    31da:	mov    rsi,r14
-    31dd:	test   rsi,0x1
-    31e4:	jne    3206 <botlish_fn_22+0x76>
-    31ea:	xor    r11d,r11d
-    31ed:	test   rsi,0x7
-    31f4:	jne    3206 <botlish_fn_22+0x76>
-    31fa:	movzx  rdi,BYTE PTR [rsi]
-    31fe:	cmp    dil,0x1
-    3202:	sete   r11b
-    3206:	test   r11b,r11b
-    3209:	jne    322a <botlish_fn_22+0x9a>
-    320f:	mov    rdi,rax
-    3212:	mov    r9,QWORD PTR [rdi+0x10]
-    3216:	mov    rcx,QWORD PTR [r9+0xc0]
-    321d:	xor    rdx,rdx
-    3220:	call   3225 <botlish_fn_22+0x95>
-			3221: R_X86_64_PLT32	rt_type_error-0x4
-    3225:	jmp    32dd <botlish_fn_22+0x14d>
-    322a:	mov    r13,rdx
-    322d:	mov    r10,rsi
-    3230:	and    r10,r13
-    3233:	mov    r14,rsi
-    3236:	test   r10,0x1
-    323d:	jne    3269 <botlish_fn_22+0xd9>
-    3243:	mov    rbx,rax
-    3246:	mov    rdx,r13
-    3249:	mov    rsi,r14
-    324c:	mov    rdi,rbx
-    324f:	call   3254 <botlish_fn_22+0xc4>
-			3250: R_X86_64_PLT32	rt_int_cmp-0x4
-    3254:	mov    ecx,0x2
-    3259:	test   rax,rax
-    325c:	cmovge rcx,QWORD PTR [rip+0x24c]        # 34b0 <botlish_fn_22+0x320>
-    3264:	jmp    327f <botlish_fn_22+0xef>
-    3269:	mov    rbx,rax
-    326c:	mov    ecx,0x2
-    3271:	mov    rsi,r14
-    3274:	cmp    rsi,r13
-    3277:	cmovge rcx,QWORD PTR [rip+0x231]        # 34b0 <botlish_fn_22+0x320>
-    327f:	mov    eax,0x6
-    3284:	mov    QWORD PTR [rsp+0x30],rax
-    3289:	cmp    rcx,0x6
-    328d:	je     3483 <botlish_fn_22+0x2f3>
-    3293:	lea    rcx,[rsp+0x20]
-    3298:	mov    rdx,r12
-    329b:	mov    rsi,r14
-    329e:	mov    rdi,rbx
-    32a1:	call   32a6 <botlish_fn_22+0x116>
-			32a2: R_X86_64_PLT32	botlish_fn_21-0x4 ; char_at<generic>
-    32a6:	mov    rsi,rax
-    32a9:	mov    r15,rax
-    32ac:	test   rax,rsi
-    32af:	je     32dd <botlish_fn_22+0x14d>
-    32b5:	mov    rdx,QWORD PTR [rsp+0x20]
-    32ba:	mov    QWORD PTR [rsp+0x40],rdx
-    32bf:	mov    rcx,QWORD PTR [rsp+0x28]
-    32c4:	mov    QWORD PTR [rsp+0x38],rcx
-    32c9:	mov    rsi,r15
-    32cc:	mov    rdi,rbx
-    32cf:	call   32d4 <botlish_fn_22+0x144>
-			32d0: R_X86_64_PLT32	rt_str_region_is_tcl_alnum-0x4
-    32d4:	test   rax,rax
-    32d7:	jne    3305 <botlish_fn_22+0x175>
-    32dd:	xor    rax,rax
-    32e0:	mov    rbx,QWORD PTR [rsp+0x50]
-    32e5:	mov    r12,QWORD PTR [rsp+0x58]
-    32ea:	mov    r13,QWORD PTR [rsp+0x60]
-    32ef:	mov    r14,QWORD PTR [rsp+0x68]
-    32f4:	mov    r15,QWORD PTR [rsp+0x70]
-    32f9:	add    rsp,0x80
-    3300:	mov    rsp,rbp
-    3303:	pop    rbp
-    3304:	ret
-    3305:	cmp    rax,0x6
-    3309:	je     3404 <botlish_fn_22+0x274>
-    330f:	mov    rax,QWORD PTR [rbx+0x10]
-    3313:	mov    r8,QWORD PTR [rax+0x120]
-    331a:	mov    rcx,QWORD PTR [rsp+0x38]
-    331f:	mov    rdx,QWORD PTR [rsp+0x40]
-    3324:	mov    rsi,r15
-    3327:	mov    rdi,rbx
-    332a:	call   332f <botlish_fn_22+0x19f>
-			332b: R_X86_64_PLT32	rt_str_region_eq-0x4
-    332f:	cmp    rax,0x6
-    3333:	je     33fa <botlish_fn_22+0x26a>
-    3339:	mov    rax,QWORD PTR [rbx+0x10]
-    333d:	mov    r8,QWORD PTR [rax+0x128]
-    3344:	mov    rcx,QWORD PTR [rsp+0x38]
-    3349:	mov    rdx,QWORD PTR [rsp+0x40]
-    334e:	mov    rsi,r15
-    3351:	mov    rdi,rbx
-    3354:	call   3359 <botlish_fn_22+0x1c9>
-			3355: R_X86_64_PLT32	rt_str_region_eq-0x4
-    3359:	cmp    rax,0x6
-    335d:	je     33f0 <botlish_fn_22+0x260>
-    3363:	mov    rax,QWORD PTR [rbx+0x10]
-    3367:	mov    r8,QWORD PTR [rax+0xc8]
-    336e:	mov    rcx,QWORD PTR [rsp+0x38]
-    3373:	mov    rdx,QWORD PTR [rsp+0x40]
-    3378:	mov    rsi,r15
-    337b:	mov    rdi,rbx
-    337e:	call   3383 <botlish_fn_22+0x1f3>
-			337f: R_X86_64_PLT32	rt_str_region_eq-0x4
-    3383:	cmp    rax,0x6
-    3387:	je     33e6 <botlish_fn_22+0x256>
-    338d:	mov    rax,QWORD PTR [rbx+0x10]
-    3391:	mov    r8,QWORD PTR [rax+0x110]
-    3398:	mov    rcx,QWORD PTR [rsp+0x38]
-    339d:	mov    rdx,QWORD PTR [rsp+0x40]
-    33a2:	mov    rsi,r15
-    33a5:	mov    rdi,rbx
-    33a8:	call   33ad <botlish_fn_22+0x21d>
-			33a9: R_X86_64_PLT32	rt_str_region_eq-0x4
-    33ad:	cmp    rax,0x6
-    33b1:	je     33dc <botlish_fn_22+0x24c>
-    33b7:	mov    rax,QWORD PTR [rbx+0x10]
-    33bb:	mov    r8,QWORD PTR [rax+0x130]
-    33c2:	mov    rcx,QWORD PTR [rsp+0x38]
-    33c7:	mov    rdx,QWORD PTR [rsp+0x40]
-    33cc:	mov    rsi,r15
-    33cf:	mov    rdi,rbx
-    33d2:	call   33d7 <botlish_fn_22+0x247>
-			33d3: R_X86_64_PLT32	rt_str_region_eq-0x4
-    33d7:	jmp    3409 <botlish_fn_22+0x279>
-    33dc:	mov    rax,QWORD PTR [rsp+0x30]
-    33e1:	jmp    3409 <botlish_fn_22+0x279>
-    33e6:	mov    rax,QWORD PTR [rsp+0x30]
-    33eb:	jmp    3409 <botlish_fn_22+0x279>
-    33f0:	mov    rax,QWORD PTR [rsp+0x30]
-    33f5:	jmp    3409 <botlish_fn_22+0x279>
-    33fa:	mov    rax,QWORD PTR [rsp+0x30]
-    33ff:	jmp    3409 <botlish_fn_22+0x279>
-    3404:	mov    rax,QWORD PTR [rsp+0x30]
-    3409:	cmp    rax,0x6
-    340d:	je     341b <botlish_fn_22+0x28b>
-    3413:	mov    rax,r14
-    3416:	jmp    3486 <botlish_fn_22+0x2f6>
-    341b:	mov    QWORD PTR [rsp+0x18],0x3
-    3424:	mov    rsi,r14
-    3427:	test   rsi,0x1
-    342e:	je     3454 <botlish_fn_22+0x2c4>
-    3434:	mov    rsi,r14
-    3437:	mov    rax,rsi
-    343a:	add    rax,0x2
-    343e:	seto   cl
-    3441:	test   cl,cl
-    3443:	jne    3454 <botlish_fn_22+0x2c4>
-    3449:	mov    rsi,rax
-    344c:	mov    r14,rax
-    344f:	jmp    346a <botlish_fn_22+0x2da>
-    3454:	mov    edx,0x3
-    3459:	mov    rsi,r14
-    345c:	mov    rdi,rbx
-    345f:	call   3464 <botlish_fn_22+0x2d4>
-			3460: R_X86_64_PLT32	rt_int_add-0x4
-    3464:	mov    rsi,rax
-    3467:	mov    r14,rax
-    346a:	mov    QWORD PTR [rsp],rsi
-    346e:	mov    QWORD PTR [rsp+0x8],r13
-    3473:	mov    QWORD PTR [rsp+0x10],r12
-    3478:	mov    rax,rbx
-    347b:	mov    rdx,r13
-    347e:	jmp    31d4 <botlish_fn_22+0x44>
-    3483:	mov    rax,r14
-    3486:	mov    rbx,QWORD PTR [rsp+0x50]
-    348b:	mov    r12,QWORD PTR [rsp+0x58]
-    3490:	mov    r13,QWORD PTR [rsp+0x60]
-    3495:	mov    r14,QWORD PTR [rsp+0x68]
-    349a:	mov    r15,QWORD PTR [rsp+0x70]
-    349f:	add    rsp,0x80
-    34a6:	mov    rsp,rbp
-    34a9:	pop    rbp
-    34aa:	ret
-    34ab:	add    BYTE PTR [rax],al
-    34ad:	add    BYTE PTR [rax],al
-    34af:	add    BYTE PTR [rsi],al
-    34b1:	add    BYTE PTR [rax],al
-    34b3:	add    BYTE PTR [rax],al
-    34b5:	add    BYTE PTR [rax],al
+0000000000003078 <botlish_fn_22: scan_local<generic>>:
+    3078:	push   rbp
+    3079:	mov    rbp,rsp
+    307c:	sub    rsp,0x80
+    3083:	mov    QWORD PTR [rsp+0x50],rbx
+    3088:	mov    QWORD PTR [rsp+0x58],r12
+    308d:	mov    QWORD PTR [rsp+0x60],r13
+    3092:	mov    QWORD PTR [rsp+0x68],r14
+    3097:	mov    QWORD PTR [rsp+0x70],r15
+    309c:	mov    rax,rdi
+    309f:	mov    QWORD PTR [rsp+0x18],0x0
+    30a8:	mov    QWORD PTR [rsp],rsi
+    30ac:	mov    r14,rsi
+    30af:	mov    QWORD PTR [rsp+0x8],rdx
+    30b4:	mov    QWORD PTR [rsp+0x10],rcx
+    30b9:	mov    r12,rcx
+    30bc:	mov    r11d,0x1
+    30c2:	mov    rsi,r14
+    30c5:	test   rsi,0x1
+    30cc:	jne    30ee <botlish_fn_22+0x76>
+    30d2:	xor    r11d,r11d
+    30d5:	test   rsi,0x7
+    30dc:	jne    30ee <botlish_fn_22+0x76>
+    30e2:	movzx  rdi,BYTE PTR [rsi]
+    30e6:	cmp    dil,0x1
+    30ea:	sete   r11b
+    30ee:	test   r11b,r11b
+    30f1:	jne    3112 <botlish_fn_22+0x9a>
+    30f7:	mov    rdi,rax
+    30fa:	mov    r9,QWORD PTR [rdi+0x10]
+    30fe:	mov    rcx,QWORD PTR [r9+0xc0]
+    3105:	xor    rdx,rdx
+    3108:	call   310d <botlish_fn_22+0x95>
+			3109: R_X86_64_PLT32	rt_type_error-0x4
+    310d:	jmp    31c5 <botlish_fn_22+0x14d>
+    3112:	mov    r13,rdx
+    3115:	mov    r10,rsi
+    3118:	and    r10,r13
+    311b:	mov    r14,rsi
+    311e:	test   r10,0x1
+    3125:	jne    3151 <botlish_fn_22+0xd9>
+    312b:	mov    rbx,rax
+    312e:	mov    rdx,r13
+    3131:	mov    rsi,r14
+    3134:	mov    rdi,rbx
+    3137:	call   313c <botlish_fn_22+0xc4>
+			3138: R_X86_64_PLT32	rt_int_cmp-0x4
+    313c:	mov    ecx,0x2
+    3141:	test   rax,rax
+    3144:	cmovge rcx,QWORD PTR [rip+0x24c]        # 3398 <botlish_fn_22+0x320>
+    314c:	jmp    3167 <botlish_fn_22+0xef>
+    3151:	mov    rbx,rax
+    3154:	mov    ecx,0x2
+    3159:	mov    rsi,r14
+    315c:	cmp    rsi,r13
+    315f:	cmovge rcx,QWORD PTR [rip+0x231]        # 3398 <botlish_fn_22+0x320>
+    3167:	mov    eax,0x6
+    316c:	mov    QWORD PTR [rsp+0x30],rax
+    3171:	cmp    rcx,0x6
+    3175:	je     336b <botlish_fn_22+0x2f3>
+    317b:	lea    rcx,[rsp+0x20]
+    3180:	mov    rdx,r12
+    3183:	mov    rsi,r14
+    3186:	mov    rdi,rbx
+    3189:	call   318e <botlish_fn_22+0x116>
+			318a: R_X86_64_PLT32	botlish_fn_21-0x4 ; char_at<generic>
+    318e:	mov    rsi,rax
+    3191:	mov    r15,rax
+    3194:	test   rax,rsi
+    3197:	je     31c5 <botlish_fn_22+0x14d>
+    319d:	mov    rdx,QWORD PTR [rsp+0x20]
+    31a2:	mov    QWORD PTR [rsp+0x40],rdx
+    31a7:	mov    rcx,QWORD PTR [rsp+0x28]
+    31ac:	mov    QWORD PTR [rsp+0x38],rcx
+    31b1:	mov    rsi,r15
+    31b4:	mov    rdi,rbx
+    31b7:	call   31bc <botlish_fn_22+0x144>
+			31b8: R_X86_64_PLT32	rt_str_region_is_tcl_alnum-0x4
+    31bc:	test   rax,rax
+    31bf:	jne    31ed <botlish_fn_22+0x175>
+    31c5:	xor    rax,rax
+    31c8:	mov    rbx,QWORD PTR [rsp+0x50]
+    31cd:	mov    r12,QWORD PTR [rsp+0x58]
+    31d2:	mov    r13,QWORD PTR [rsp+0x60]
+    31d7:	mov    r14,QWORD PTR [rsp+0x68]
+    31dc:	mov    r15,QWORD PTR [rsp+0x70]
+    31e1:	add    rsp,0x80
+    31e8:	mov    rsp,rbp
+    31eb:	pop    rbp
+    31ec:	ret
+    31ed:	cmp    rax,0x6
+    31f1:	je     32ec <botlish_fn_22+0x274>
+    31f7:	mov    rax,QWORD PTR [rbx+0x10]
+    31fb:	mov    r8,QWORD PTR [rax+0x120]
+    3202:	mov    rcx,QWORD PTR [rsp+0x38]
+    3207:	mov    rdx,QWORD PTR [rsp+0x40]
+    320c:	mov    rsi,r15
+    320f:	mov    rdi,rbx
+    3212:	call   3217 <botlish_fn_22+0x19f>
+			3213: R_X86_64_PLT32	rt_str_region_eq-0x4
+    3217:	cmp    rax,0x6
+    321b:	je     32e2 <botlish_fn_22+0x26a>
+    3221:	mov    rax,QWORD PTR [rbx+0x10]
+    3225:	mov    r8,QWORD PTR [rax+0x128]
+    322c:	mov    rcx,QWORD PTR [rsp+0x38]
+    3231:	mov    rdx,QWORD PTR [rsp+0x40]
+    3236:	mov    rsi,r15
+    3239:	mov    rdi,rbx
+    323c:	call   3241 <botlish_fn_22+0x1c9>
+			323d: R_X86_64_PLT32	rt_str_region_eq-0x4
+    3241:	cmp    rax,0x6
+    3245:	je     32d8 <botlish_fn_22+0x260>
+    324b:	mov    rax,QWORD PTR [rbx+0x10]
+    324f:	mov    r8,QWORD PTR [rax+0xc8]
+    3256:	mov    rcx,QWORD PTR [rsp+0x38]
+    325b:	mov    rdx,QWORD PTR [rsp+0x40]
+    3260:	mov    rsi,r15
+    3263:	mov    rdi,rbx
+    3266:	call   326b <botlish_fn_22+0x1f3>
+			3267: R_X86_64_PLT32	rt_str_region_eq-0x4
+    326b:	cmp    rax,0x6
+    326f:	je     32ce <botlish_fn_22+0x256>
+    3275:	mov    rax,QWORD PTR [rbx+0x10]
+    3279:	mov    r8,QWORD PTR [rax+0x110]
+    3280:	mov    rcx,QWORD PTR [rsp+0x38]
+    3285:	mov    rdx,QWORD PTR [rsp+0x40]
+    328a:	mov    rsi,r15
+    328d:	mov    rdi,rbx
+    3290:	call   3295 <botlish_fn_22+0x21d>
+			3291: R_X86_64_PLT32	rt_str_region_eq-0x4
+    3295:	cmp    rax,0x6
+    3299:	je     32c4 <botlish_fn_22+0x24c>
+    329f:	mov    rax,QWORD PTR [rbx+0x10]
+    32a3:	mov    r8,QWORD PTR [rax+0x130]
+    32aa:	mov    rcx,QWORD PTR [rsp+0x38]
+    32af:	mov    rdx,QWORD PTR [rsp+0x40]
+    32b4:	mov    rsi,r15
+    32b7:	mov    rdi,rbx
+    32ba:	call   32bf <botlish_fn_22+0x247>
+			32bb: R_X86_64_PLT32	rt_str_region_eq-0x4
+    32bf:	jmp    32f1 <botlish_fn_22+0x279>
+    32c4:	mov    rax,QWORD PTR [rsp+0x30]
+    32c9:	jmp    32f1 <botlish_fn_22+0x279>
+    32ce:	mov    rax,QWORD PTR [rsp+0x30]
+    32d3:	jmp    32f1 <botlish_fn_22+0x279>
+    32d8:	mov    rax,QWORD PTR [rsp+0x30]
+    32dd:	jmp    32f1 <botlish_fn_22+0x279>
+    32e2:	mov    rax,QWORD PTR [rsp+0x30]
+    32e7:	jmp    32f1 <botlish_fn_22+0x279>
+    32ec:	mov    rax,QWORD PTR [rsp+0x30]
+    32f1:	cmp    rax,0x6
+    32f5:	je     3303 <botlish_fn_22+0x28b>
+    32fb:	mov    rax,r14
+    32fe:	jmp    336e <botlish_fn_22+0x2f6>
+    3303:	mov    QWORD PTR [rsp+0x18],0x3
+    330c:	mov    rsi,r14
+    330f:	test   rsi,0x1
+    3316:	je     333c <botlish_fn_22+0x2c4>
+    331c:	mov    rsi,r14
+    331f:	mov    rax,rsi
+    3322:	add    rax,0x2
+    3326:	seto   cl
+    3329:	test   cl,cl
+    332b:	jne    333c <botlish_fn_22+0x2c4>
+    3331:	mov    rsi,rax
+    3334:	mov    r14,rax
+    3337:	jmp    3352 <botlish_fn_22+0x2da>
+    333c:	mov    edx,0x3
+    3341:	mov    rsi,r14
+    3344:	mov    rdi,rbx
+    3347:	call   334c <botlish_fn_22+0x2d4>
+			3348: R_X86_64_PLT32	rt_int_add-0x4
+    334c:	mov    rsi,rax
+    334f:	mov    r14,rax
+    3352:	mov    QWORD PTR [rsp],rsi
+    3356:	mov    QWORD PTR [rsp+0x8],r13
+    335b:	mov    QWORD PTR [rsp+0x10],r12
+    3360:	mov    rax,rbx
+    3363:	mov    rdx,r13
+    3366:	jmp    30bc <botlish_fn_22+0x44>
+    336b:	mov    rax,r14
+    336e:	mov    rbx,QWORD PTR [rsp+0x50]
+    3373:	mov    r12,QWORD PTR [rsp+0x58]
+    3378:	mov    r13,QWORD PTR [rsp+0x60]
+    337d:	mov    r14,QWORD PTR [rsp+0x68]
+    3382:	mov    r15,QWORD PTR [rsp+0x70]
+    3387:	add    rsp,0x80
+    338e:	mov    rsp,rbp
+    3391:	pop    rbp
+    3392:	ret
+    3393:	add    BYTE PTR [rax],al
+    3395:	add    BYTE PTR [rax],al
+    3397:	add    BYTE PTR [rsi],al
+    3399:	add    BYTE PTR [rax],al
+    339b:	add    BYTE PTR [rax],al
+    339d:	add    BYTE PTR [rax],al
 	...
 
-00000000000034b8 <botlish_entry_22: scan_local<generic>>:
-    34b8:	push   rbp
-    34b9:	mov    rbp,rsp
-    34bc:	mov    rsi,QWORD PTR [rdx]
-    34bf:	mov    r8,QWORD PTR [rdx+0x8]
-    34c3:	mov    rcx,QWORD PTR [rdx+0x10]
-    34c7:	mov    rdx,r8
-    34ca:	call   34cf <botlish_entry_22+0x17>
-			34cb: R_X86_64_PLT32	botlish_fn_22-0x4 ; scan_local<generic>
-    34cf:	mov    rsp,rbp
-    34d2:	pop    rbp
-    34d3:	ret
-    34d4:	add    BYTE PTR [rax],al
+00000000000033a0 <botlish_entry_22: scan_local<generic>>:
+    33a0:	push   rbp
+    33a1:	mov    rbp,rsp
+    33a4:	mov    rsi,QWORD PTR [rdx]
+    33a7:	mov    r8,QWORD PTR [rdx+0x8]
+    33ab:	mov    rcx,QWORD PTR [rdx+0x10]
+    33af:	mov    rdx,r8
+    33b2:	call   33b7 <botlish_entry_22+0x17>
+			33b3: R_X86_64_PLT32	botlish_fn_22-0x4 ; scan_local<generic>
+    33b7:	mov    rsp,rbp
+    33ba:	pop    rbp
+    33bb:	ret
+    33bc:	add    BYTE PTR [rax],al
 	...
 
-00000000000034d8 <botlish_fn_23: scan_label<generic>>:
-    34d8:	push   rbp
-    34d9:	mov    rbp,rsp
-    34dc:	sub    rsp,0x80
-    34e3:	mov    QWORD PTR [rsp+0x50],rbx
-    34e8:	mov    QWORD PTR [rsp+0x58],r12
-    34ed:	mov    QWORD PTR [rsp+0x60],r13
-    34f2:	mov    QWORD PTR [rsp+0x68],r14
-    34f7:	mov    QWORD PTR [rsp+0x70],r15
-    34fc:	mov    QWORD PTR [rsp+0x18],0x0
-    3505:	mov    QWORD PTR [rsp],rsi
-    3509:	mov    r14,rsi
-    350c:	mov    QWORD PTR [rsp+0x8],rdx
-    3511:	mov    QWORD PTR [rsp+0x10],rcx
-    3516:	mov    r12,rcx
-    3519:	mov    r11d,0x1
-    351f:	mov    rsi,r14
-    3522:	test   rsi,0x1
-    3529:	jne    3549 <botlish_fn_23+0x71>
-    352f:	xor    r11d,r11d
-    3532:	test   rsi,0x7
-    3539:	jne    3549 <botlish_fn_23+0x71>
-    353f:	movzx  rax,BYTE PTR [rsi]
-    3543:	cmp    al,0x1
-    3545:	sete   r11b
-    3549:	test   r11b,r11b
-    354c:	jne    356a <botlish_fn_23+0x92>
-    3552:	mov    rax,QWORD PTR [rdi+0x10]
-    3556:	mov    rcx,QWORD PTR [rax+0xc0]
-    355d:	xor    rdx,rdx
-    3560:	call   3565 <botlish_fn_23+0x8d>
-			3561: R_X86_64_PLT32	rt_type_error-0x4
-    3565:	jmp    3616 <botlish_fn_23+0x13e>
-    356a:	mov    r13,rdx
-    356d:	mov    rax,rsi
-    3570:	and    rax,r13
-    3573:	mov    r14,rsi
-    3576:	test   rax,0x1
-    357c:	jne    35a5 <botlish_fn_23+0xcd>
-    3582:	mov    rbx,rdi
-    3585:	mov    rdx,r13
-    3588:	mov    rsi,r14
-    358b:	call   3590 <botlish_fn_23+0xb8>
-			358c: R_X86_64_PLT32	rt_int_cmp-0x4
-    3590:	mov    ecx,0x2
-    3595:	test   rax,rax
-    3598:	cmovge rcx,QWORD PTR [rip+0x178]        # 3718 <botlish_fn_23+0x240>
-    35a0:	jmp    35bb <botlish_fn_23+0xe3>
-    35a5:	mov    rbx,rdi
-    35a8:	mov    ecx,0x2
-    35ad:	mov    rsi,r14
-    35b0:	cmp    rsi,r13
-    35b3:	cmovge rcx,QWORD PTR [rip+0x15d]        # 3718 <botlish_fn_23+0x240>
-    35bb:	mov    eax,0x6
-    35c0:	mov    QWORD PTR [rsp+0x30],rax
-    35c5:	cmp    rcx,0x6
-    35c9:	je     36ec <botlish_fn_23+0x214>
-    35cf:	lea    rcx,[rsp+0x20]
-    35d4:	mov    rdx,r12
-    35d7:	mov    rsi,r14
-    35da:	mov    rdi,rbx
-    35dd:	call   35e2 <botlish_fn_23+0x10a>
-			35de: R_X86_64_PLT32	botlish_fn_21-0x4 ; char_at<generic>
-    35e2:	test   rax,rax
-    35e5:	mov    r15,rax
-    35e8:	je     3616 <botlish_fn_23+0x13e>
-    35ee:	mov    rdx,QWORD PTR [rsp+0x20]
-    35f3:	mov    QWORD PTR [rsp+0x40],rdx
-    35f8:	mov    rcx,QWORD PTR [rsp+0x28]
-    35fd:	mov    QWORD PTR [rsp+0x38],rcx
-    3602:	mov    rsi,r15
-    3605:	mov    rdi,rbx
-    3608:	call   360d <botlish_fn_23+0x135>
-			3609: R_X86_64_PLT32	rt_str_region_is_tcl_alnum-0x4
-    360d:	test   rax,rax
-    3610:	jne    363e <botlish_fn_23+0x166>
-    3616:	xor    rax,rax
-    3619:	mov    rbx,QWORD PTR [rsp+0x50]
-    361e:	mov    r12,QWORD PTR [rsp+0x58]
-    3623:	mov    r13,QWORD PTR [rsp+0x60]
-    3628:	mov    r14,QWORD PTR [rsp+0x68]
-    362d:	mov    r15,QWORD PTR [rsp+0x70]
-    3632:	add    rsp,0x80
-    3639:	mov    rsp,rbp
-    363c:	pop    rbp
-    363d:	ret
-    363e:	cmp    rax,0x6
-    3642:	je     366d <botlish_fn_23+0x195>
-    3648:	mov    r11,QWORD PTR [rbx+0x10]
-    364c:	mov    r8,QWORD PTR [r11+0x130]
-    3653:	mov    rcx,QWORD PTR [rsp+0x38]
-    3658:	mov    rdx,QWORD PTR [rsp+0x40]
-    365d:	mov    rsi,r15
-    3660:	mov    rdi,rbx
-    3663:	call   3668 <botlish_fn_23+0x190>
-			3664: R_X86_64_PLT32	rt_str_region_eq-0x4
-    3668:	jmp    3672 <botlish_fn_23+0x19a>
-    366d:	mov    rax,QWORD PTR [rsp+0x30]
-    3672:	cmp    rax,0x6
-    3676:	je     3684 <botlish_fn_23+0x1ac>
-    367c:	mov    rax,r14
-    367f:	jmp    36ef <botlish_fn_23+0x217>
-    3684:	mov    QWORD PTR [rsp+0x18],0x3
-    368d:	mov    rsi,r14
-    3690:	test   rsi,0x1
-    3697:	je     36bd <botlish_fn_23+0x1e5>
-    369d:	mov    rsi,r14
-    36a0:	mov    rax,rsi
-    36a3:	add    rax,0x2
-    36a7:	seto   cl
-    36aa:	test   cl,cl
-    36ac:	jne    36bd <botlish_fn_23+0x1e5>
-    36b2:	mov    rsi,rax
-    36b5:	mov    r14,rax
-    36b8:	jmp    36d3 <botlish_fn_23+0x1fb>
-    36bd:	mov    edx,0x3
-    36c2:	mov    rsi,r14
-    36c5:	mov    rdi,rbx
-    36c8:	call   36cd <botlish_fn_23+0x1f5>
-			36c9: R_X86_64_PLT32	rt_int_add-0x4
-    36cd:	mov    rsi,rax
-    36d0:	mov    r14,rax
-    36d3:	mov    QWORD PTR [rsp],rsi
-    36d7:	mov    QWORD PTR [rsp+0x8],r13
-    36dc:	mov    QWORD PTR [rsp+0x10],r12
-    36e1:	mov    rdx,r13
-    36e4:	mov    rdi,rbx
-    36e7:	jmp    3519 <botlish_fn_23+0x41>
-    36ec:	mov    rax,r14
-    36ef:	mov    rbx,QWORD PTR [rsp+0x50]
-    36f4:	mov    r12,QWORD PTR [rsp+0x58]
-    36f9:	mov    r13,QWORD PTR [rsp+0x60]
-    36fe:	mov    r14,QWORD PTR [rsp+0x68]
-    3703:	mov    r15,QWORD PTR [rsp+0x70]
-    3708:	add    rsp,0x80
-    370f:	mov    rsp,rbp
-    3712:	pop    rbp
-    3713:	ret
-    3714:	add    BYTE PTR [rax],al
-    3716:	add    BYTE PTR [rax],al
-    3718:	(bad)
-    3719:	add    BYTE PTR [rax],al
-    371b:	add    BYTE PTR [rax],al
-    371d:	add    BYTE PTR [rax],al
+00000000000033c0 <botlish_fn_23: scan_label<generic>>:
+    33c0:	push   rbp
+    33c1:	mov    rbp,rsp
+    33c4:	sub    rsp,0x80
+    33cb:	mov    QWORD PTR [rsp+0x50],rbx
+    33d0:	mov    QWORD PTR [rsp+0x58],r12
+    33d5:	mov    QWORD PTR [rsp+0x60],r13
+    33da:	mov    QWORD PTR [rsp+0x68],r14
+    33df:	mov    QWORD PTR [rsp+0x70],r15
+    33e4:	mov    QWORD PTR [rsp+0x18],0x0
+    33ed:	mov    QWORD PTR [rsp],rsi
+    33f1:	mov    r14,rsi
+    33f4:	mov    QWORD PTR [rsp+0x8],rdx
+    33f9:	mov    QWORD PTR [rsp+0x10],rcx
+    33fe:	mov    r12,rcx
+    3401:	mov    r11d,0x1
+    3407:	mov    rsi,r14
+    340a:	test   rsi,0x1
+    3411:	jne    3431 <botlish_fn_23+0x71>
+    3417:	xor    r11d,r11d
+    341a:	test   rsi,0x7
+    3421:	jne    3431 <botlish_fn_23+0x71>
+    3427:	movzx  rax,BYTE PTR [rsi]
+    342b:	cmp    al,0x1
+    342d:	sete   r11b
+    3431:	test   r11b,r11b
+    3434:	jne    3452 <botlish_fn_23+0x92>
+    343a:	mov    rax,QWORD PTR [rdi+0x10]
+    343e:	mov    rcx,QWORD PTR [rax+0xc0]
+    3445:	xor    rdx,rdx
+    3448:	call   344d <botlish_fn_23+0x8d>
+			3449: R_X86_64_PLT32	rt_type_error-0x4
+    344d:	jmp    34fe <botlish_fn_23+0x13e>
+    3452:	mov    r13,rdx
+    3455:	mov    rax,rsi
+    3458:	and    rax,r13
+    345b:	mov    r14,rsi
+    345e:	test   rax,0x1
+    3464:	jne    348d <botlish_fn_23+0xcd>
+    346a:	mov    rbx,rdi
+    346d:	mov    rdx,r13
+    3470:	mov    rsi,r14
+    3473:	call   3478 <botlish_fn_23+0xb8>
+			3474: R_X86_64_PLT32	rt_int_cmp-0x4
+    3478:	mov    ecx,0x2
+    347d:	test   rax,rax
+    3480:	cmovge rcx,QWORD PTR [rip+0x178]        # 3600 <botlish_fn_23+0x240>
+    3488:	jmp    34a3 <botlish_fn_23+0xe3>
+    348d:	mov    rbx,rdi
+    3490:	mov    ecx,0x2
+    3495:	mov    rsi,r14
+    3498:	cmp    rsi,r13
+    349b:	cmovge rcx,QWORD PTR [rip+0x15d]        # 3600 <botlish_fn_23+0x240>
+    34a3:	mov    eax,0x6
+    34a8:	mov    QWORD PTR [rsp+0x30],rax
+    34ad:	cmp    rcx,0x6
+    34b1:	je     35d4 <botlish_fn_23+0x214>
+    34b7:	lea    rcx,[rsp+0x20]
+    34bc:	mov    rdx,r12
+    34bf:	mov    rsi,r14
+    34c2:	mov    rdi,rbx
+    34c5:	call   34ca <botlish_fn_23+0x10a>
+			34c6: R_X86_64_PLT32	botlish_fn_21-0x4 ; char_at<generic>
+    34ca:	test   rax,rax
+    34cd:	mov    r15,rax
+    34d0:	je     34fe <botlish_fn_23+0x13e>
+    34d6:	mov    rdx,QWORD PTR [rsp+0x20]
+    34db:	mov    QWORD PTR [rsp+0x40],rdx
+    34e0:	mov    rcx,QWORD PTR [rsp+0x28]
+    34e5:	mov    QWORD PTR [rsp+0x38],rcx
+    34ea:	mov    rsi,r15
+    34ed:	mov    rdi,rbx
+    34f0:	call   34f5 <botlish_fn_23+0x135>
+			34f1: R_X86_64_PLT32	rt_str_region_is_tcl_alnum-0x4
+    34f5:	test   rax,rax
+    34f8:	jne    3526 <botlish_fn_23+0x166>
+    34fe:	xor    rax,rax
+    3501:	mov    rbx,QWORD PTR [rsp+0x50]
+    3506:	mov    r12,QWORD PTR [rsp+0x58]
+    350b:	mov    r13,QWORD PTR [rsp+0x60]
+    3510:	mov    r14,QWORD PTR [rsp+0x68]
+    3515:	mov    r15,QWORD PTR [rsp+0x70]
+    351a:	add    rsp,0x80
+    3521:	mov    rsp,rbp
+    3524:	pop    rbp
+    3525:	ret
+    3526:	cmp    rax,0x6
+    352a:	je     3555 <botlish_fn_23+0x195>
+    3530:	mov    r11,QWORD PTR [rbx+0x10]
+    3534:	mov    r8,QWORD PTR [r11+0x130]
+    353b:	mov    rcx,QWORD PTR [rsp+0x38]
+    3540:	mov    rdx,QWORD PTR [rsp+0x40]
+    3545:	mov    rsi,r15
+    3548:	mov    rdi,rbx
+    354b:	call   3550 <botlish_fn_23+0x190>
+			354c: R_X86_64_PLT32	rt_str_region_eq-0x4
+    3550:	jmp    355a <botlish_fn_23+0x19a>
+    3555:	mov    rax,QWORD PTR [rsp+0x30]
+    355a:	cmp    rax,0x6
+    355e:	je     356c <botlish_fn_23+0x1ac>
+    3564:	mov    rax,r14
+    3567:	jmp    35d7 <botlish_fn_23+0x217>
+    356c:	mov    QWORD PTR [rsp+0x18],0x3
+    3575:	mov    rsi,r14
+    3578:	test   rsi,0x1
+    357f:	je     35a5 <botlish_fn_23+0x1e5>
+    3585:	mov    rsi,r14
+    3588:	mov    rax,rsi
+    358b:	add    rax,0x2
+    358f:	seto   cl
+    3592:	test   cl,cl
+    3594:	jne    35a5 <botlish_fn_23+0x1e5>
+    359a:	mov    rsi,rax
+    359d:	mov    r14,rax
+    35a0:	jmp    35bb <botlish_fn_23+0x1fb>
+    35a5:	mov    edx,0x3
+    35aa:	mov    rsi,r14
+    35ad:	mov    rdi,rbx
+    35b0:	call   35b5 <botlish_fn_23+0x1f5>
+			35b1: R_X86_64_PLT32	rt_int_add-0x4
+    35b5:	mov    rsi,rax
+    35b8:	mov    r14,rax
+    35bb:	mov    QWORD PTR [rsp],rsi
+    35bf:	mov    QWORD PTR [rsp+0x8],r13
+    35c4:	mov    QWORD PTR [rsp+0x10],r12
+    35c9:	mov    rdx,r13
+    35cc:	mov    rdi,rbx
+    35cf:	jmp    3401 <botlish_fn_23+0x41>
+    35d4:	mov    rax,r14
+    35d7:	mov    rbx,QWORD PTR [rsp+0x50]
+    35dc:	mov    r12,QWORD PTR [rsp+0x58]
+    35e1:	mov    r13,QWORD PTR [rsp+0x60]
+    35e6:	mov    r14,QWORD PTR [rsp+0x68]
+    35eb:	mov    r15,QWORD PTR [rsp+0x70]
+    35f0:	add    rsp,0x80
+    35f7:	mov    rsp,rbp
+    35fa:	pop    rbp
+    35fb:	ret
+    35fc:	add    BYTE PTR [rax],al
+    35fe:	add    BYTE PTR [rax],al
+    3600:	(bad)
+    3601:	add    BYTE PTR [rax],al
+    3603:	add    BYTE PTR [rax],al
+    3605:	add    BYTE PTR [rax],al
 	...
 
-0000000000003720 <botlish_entry_23: scan_label<generic>>:
-    3720:	push   rbp
-    3721:	mov    rbp,rsp
-    3724:	mov    rsi,QWORD PTR [rdx]
-    3727:	mov    r8,QWORD PTR [rdx+0x8]
-    372b:	mov    rcx,QWORD PTR [rdx+0x10]
-    372f:	mov    rdx,r8
-    3732:	call   3737 <botlish_entry_23+0x17>
-			3733: R_X86_64_PLT32	botlish_fn_23-0x4 ; scan_label<generic>
-    3737:	mov    rsp,rbp
-    373a:	pop    rbp
-    373b:	ret
-    373c:	add    BYTE PTR [rax],al
+0000000000003608 <botlish_entry_23: scan_label<generic>>:
+    3608:	push   rbp
+    3609:	mov    rbp,rsp
+    360c:	mov    rsi,QWORD PTR [rdx]
+    360f:	mov    r8,QWORD PTR [rdx+0x8]
+    3613:	mov    rcx,QWORD PTR [rdx+0x10]
+    3617:	mov    rdx,r8
+    361a:	call   361f <botlish_entry_23+0x17>
+			361b: R_X86_64_PLT32	botlish_fn_23-0x4 ; scan_label<generic>
+    361f:	mov    rsp,rbp
+    3622:	pop    rbp
+    3623:	ret
+    3624:	add    BYTE PTR [rax],al
 	...
 
-0000000000003740 <botlish_fn_24: scan_alpha<generic>>:
-    3740:	push   rbp
-    3741:	mov    rbp,rsp
-    3744:	sub    rsp,0x50
-    3748:	mov    QWORD PTR [rsp+0x30],rbx
-    374d:	mov    QWORD PTR [rsp+0x38],r12
-    3752:	mov    QWORD PTR [rsp+0x40],r13
-    3757:	mov    QWORD PTR [rsp+0x48],r14
-    375c:	mov    r14,rdi
-    375f:	mov    QWORD PTR [rsp+0x18],0x0
-    3768:	mov    QWORD PTR [rsp],rsi
-    376c:	mov    r13,rsi
-    376f:	mov    QWORD PTR [rsp+0x8],rdx
-    3774:	mov    r12,rdx
-    3777:	mov    QWORD PTR [rsp+0x10],rcx
-    377c:	mov    rbx,rcx
-    377f:	mov    r11d,0x1
+0000000000003628 <botlish_fn_24: scan_alpha<generic>>:
+    3628:	push   rbp
+    3629:	mov    rbp,rsp
+    362c:	sub    rsp,0x50
+    3630:	mov    QWORD PTR [rsp+0x30],rbx
+    3635:	mov    QWORD PTR [rsp+0x38],r12
+    363a:	mov    QWORD PTR [rsp+0x40],r13
+    363f:	mov    QWORD PTR [rsp+0x48],r14
+    3644:	mov    r14,rdi
+    3647:	mov    QWORD PTR [rsp+0x18],0x0
+    3650:	mov    QWORD PTR [rsp],rsi
+    3654:	mov    r13,rsi
+    3657:	mov    QWORD PTR [rsp+0x8],rdx
+    365c:	mov    r12,rdx
+    365f:	mov    QWORD PTR [rsp+0x10],rcx
+    3664:	mov    rbx,rcx
+    3667:	mov    r11d,0x1
+    366d:	mov    rsi,r13
+    3670:	test   rsi,0x1
+    3677:	jne    3697 <botlish_fn_24+0x6f>
+    367d:	xor    r11d,r11d
+    3680:	test   rsi,0x7
+    3687:	jne    3697 <botlish_fn_24+0x6f>
+    368d:	movzx  rax,BYTE PTR [rsi]
+    3691:	cmp    al,0x1
+    3693:	sete   r11b
+    3697:	test   r11b,r11b
+    369a:	jne    36bb <botlish_fn_24+0x93>
+    36a0:	mov    rdi,r14
+    36a3:	mov    rax,QWORD PTR [rdi+0x10]
+    36a7:	mov    rcx,QWORD PTR [rax+0xc0]
+    36ae:	xor    rdx,rdx
+    36b1:	call   36b6 <botlish_fn_24+0x8e>
+			36b2: R_X86_64_PLT32	rt_type_error-0x4
+    36b6:	jmp    374a <botlish_fn_24+0x122>
+    36bb:	mov    rax,rsi
+    36be:	and    rax,r12
+    36c1:	mov    r13,rsi
+    36c4:	test   rax,0x1
+    36ca:	jne    36f3 <botlish_fn_24+0xcb>
+    36d0:	mov    rdx,r12
+    36d3:	mov    rsi,r13
+    36d6:	mov    rdi,r14
+    36d9:	call   36de <botlish_fn_24+0xb6>
+			36da: R_X86_64_PLT32	rt_int_cmp-0x4
+    36de:	mov    ecx,0x2
+    36e3:	test   rax,rax
+    36e6:	cmovge rcx,QWORD PTR [rip+0x112]        # 3800 <botlish_fn_24+0x1d8>
+    36ee:	jmp    3706 <botlish_fn_24+0xde>
+    36f3:	mov    ecx,0x2
+    36f8:	mov    rsi,r13
+    36fb:	cmp    rsi,r12
+    36fe:	cmovge rcx,QWORD PTR [rip+0xfa]        # 3800 <botlish_fn_24+0x1d8>
+    3706:	cmp    rcx,0x6
+    370a:	je     37de <botlish_fn_24+0x1b6>
+    3710:	lea    rcx,[rsp+0x20]
+    3715:	mov    rdx,rbx
+    3718:	mov    rsi,r13
+    371b:	mov    rdi,r14
+    371e:	call   3723 <botlish_fn_24+0xfb>
+			371f: R_X86_64_PLT32	botlish_fn_21-0x4 ; char_at<generic>
+    3723:	test   rax,rax
+    3726:	mov    rsi,rax
+    3729:	je     374a <botlish_fn_24+0x122>
+    372f:	mov    rdx,QWORD PTR [rsp+0x20]
+    3734:	mov    rcx,QWORD PTR [rsp+0x28]
+    3739:	mov    rdi,r14
+    373c:	call   3741 <botlish_fn_24+0x119>
+			373d: R_X86_64_PLT32	rt_str_region_is_tcl_alpha-0x4
+    3741:	test   rax,rax
+    3744:	jne    376a <botlish_fn_24+0x142>
+    374a:	xor    rax,rax
+    374d:	mov    rbx,QWORD PTR [rsp+0x30]
+    3752:	mov    r12,QWORD PTR [rsp+0x38]
+    3757:	mov    r13,QWORD PTR [rsp+0x40]
+    375c:	mov    r14,QWORD PTR [rsp+0x48]
+    3761:	add    rsp,0x50
+    3765:	mov    rsp,rbp
+    3768:	pop    rbp
+    3769:	ret
+    376a:	cmp    rax,0x6
+    376e:	je     377c <botlish_fn_24+0x154>
+    3774:	mov    rax,r13
+    3777:	jmp    37e1 <botlish_fn_24+0x1b9>
+    377c:	mov    QWORD PTR [rsp+0x18],0x3
     3785:	mov    rsi,r13
     3788:	test   rsi,0x1
-    378f:	jne    37af <botlish_fn_24+0x6f>
-    3795:	xor    r11d,r11d
-    3798:	test   rsi,0x7
-    379f:	jne    37af <botlish_fn_24+0x6f>
-    37a5:	movzx  rax,BYTE PTR [rsi]
-    37a9:	cmp    al,0x1
-    37ab:	sete   r11b
-    37af:	test   r11b,r11b
-    37b2:	jne    37d3 <botlish_fn_24+0x93>
-    37b8:	mov    rdi,r14
-    37bb:	mov    rax,QWORD PTR [rdi+0x10]
-    37bf:	mov    rcx,QWORD PTR [rax+0xc0]
-    37c6:	xor    rdx,rdx
-    37c9:	call   37ce <botlish_fn_24+0x8e>
-			37ca: R_X86_64_PLT32	rt_type_error-0x4
-    37ce:	jmp    3862 <botlish_fn_24+0x122>
-    37d3:	mov    rax,rsi
-    37d6:	and    rax,r12
-    37d9:	mov    r13,rsi
-    37dc:	test   rax,0x1
-    37e2:	jne    380b <botlish_fn_24+0xcb>
-    37e8:	mov    rdx,r12
-    37eb:	mov    rsi,r13
-    37ee:	mov    rdi,r14
-    37f1:	call   37f6 <botlish_fn_24+0xb6>
-			37f2: R_X86_64_PLT32	rt_int_cmp-0x4
-    37f6:	mov    ecx,0x2
-    37fb:	test   rax,rax
-    37fe:	cmovge rcx,QWORD PTR [rip+0x112]        # 3918 <botlish_fn_24+0x1d8>
-    3806:	jmp    381e <botlish_fn_24+0xde>
-    380b:	mov    ecx,0x2
-    3810:	mov    rsi,r13
-    3813:	cmp    rsi,r12
-    3816:	cmovge rcx,QWORD PTR [rip+0xfa]        # 3918 <botlish_fn_24+0x1d8>
-    381e:	cmp    rcx,0x6
-    3822:	je     38f6 <botlish_fn_24+0x1b6>
-    3828:	lea    rcx,[rsp+0x20]
-    382d:	mov    rdx,rbx
-    3830:	mov    rsi,r13
-    3833:	mov    rdi,r14
-    3836:	call   383b <botlish_fn_24+0xfb>
-			3837: R_X86_64_PLT32	botlish_fn_21-0x4 ; char_at<generic>
-    383b:	test   rax,rax
-    383e:	mov    rsi,rax
-    3841:	je     3862 <botlish_fn_24+0x122>
-    3847:	mov    rdx,QWORD PTR [rsp+0x20]
-    384c:	mov    rcx,QWORD PTR [rsp+0x28]
-    3851:	mov    rdi,r14
-    3854:	call   3859 <botlish_fn_24+0x119>
-			3855: R_X86_64_PLT32	rt_str_region_is_tcl_alpha-0x4
-    3859:	test   rax,rax
-    385c:	jne    3882 <botlish_fn_24+0x142>
-    3862:	xor    rax,rax
-    3865:	mov    rbx,QWORD PTR [rsp+0x30]
-    386a:	mov    r12,QWORD PTR [rsp+0x38]
-    386f:	mov    r13,QWORD PTR [rsp+0x40]
-    3874:	mov    r14,QWORD PTR [rsp+0x48]
-    3879:	add    rsp,0x50
-    387d:	mov    rsp,rbp
-    3880:	pop    rbp
-    3881:	ret
-    3882:	cmp    rax,0x6
-    3886:	je     3894 <botlish_fn_24+0x154>
-    388c:	mov    rax,r13
-    388f:	jmp    38f9 <botlish_fn_24+0x1b9>
-    3894:	mov    QWORD PTR [rsp+0x18],0x3
-    389d:	mov    rsi,r13
-    38a0:	test   rsi,0x1
-    38a7:	je     38cd <botlish_fn_24+0x18d>
-    38ad:	mov    rsi,r13
-    38b0:	mov    r11,rsi
-    38b3:	add    r11,0x2
-    38b7:	seto   al
-    38ba:	test   al,al
-    38bc:	jne    38cd <botlish_fn_24+0x18d>
-    38c2:	mov    rsi,r11
-    38c5:	mov    r13,r11
-    38c8:	jmp    38e3 <botlish_fn_24+0x1a3>
-    38cd:	mov    edx,0x3
-    38d2:	mov    rsi,r13
-    38d5:	mov    rdi,r14
-    38d8:	call   38dd <botlish_fn_24+0x19d>
-			38d9: R_X86_64_PLT32	rt_int_add-0x4
-    38dd:	mov    rsi,rax
-    38e0:	mov    r13,rax
-    38e3:	mov    QWORD PTR [rsp],rsi
-    38e7:	mov    QWORD PTR [rsp+0x8],r12
-    38ec:	mov    QWORD PTR [rsp+0x10],rbx
-    38f1:	jmp    377f <botlish_fn_24+0x3f>
-    38f6:	mov    rax,r13
-    38f9:	mov    rbx,QWORD PTR [rsp+0x30]
-    38fe:	mov    r12,QWORD PTR [rsp+0x38]
-    3903:	mov    r13,QWORD PTR [rsp+0x40]
-    3908:	mov    r14,QWORD PTR [rsp+0x48]
-    390d:	add    rsp,0x50
-    3911:	mov    rsp,rbp
-    3914:	pop    rbp
-    3915:	ret
-    3916:	add    BYTE PTR [rax],al
-    3918:	(bad)
-    3919:	add    BYTE PTR [rax],al
-    391b:	add    BYTE PTR [rax],al
-    391d:	add    BYTE PTR [rax],al
+    378f:	je     37b5 <botlish_fn_24+0x18d>
+    3795:	mov    rsi,r13
+    3798:	mov    r11,rsi
+    379b:	add    r11,0x2
+    379f:	seto   al
+    37a2:	test   al,al
+    37a4:	jne    37b5 <botlish_fn_24+0x18d>
+    37aa:	mov    rsi,r11
+    37ad:	mov    r13,r11
+    37b0:	jmp    37cb <botlish_fn_24+0x1a3>
+    37b5:	mov    edx,0x3
+    37ba:	mov    rsi,r13
+    37bd:	mov    rdi,r14
+    37c0:	call   37c5 <botlish_fn_24+0x19d>
+			37c1: R_X86_64_PLT32	rt_int_add-0x4
+    37c5:	mov    rsi,rax
+    37c8:	mov    r13,rax
+    37cb:	mov    QWORD PTR [rsp],rsi
+    37cf:	mov    QWORD PTR [rsp+0x8],r12
+    37d4:	mov    QWORD PTR [rsp+0x10],rbx
+    37d9:	jmp    3667 <botlish_fn_24+0x3f>
+    37de:	mov    rax,r13
+    37e1:	mov    rbx,QWORD PTR [rsp+0x30]
+    37e6:	mov    r12,QWORD PTR [rsp+0x38]
+    37eb:	mov    r13,QWORD PTR [rsp+0x40]
+    37f0:	mov    r14,QWORD PTR [rsp+0x48]
+    37f5:	add    rsp,0x50
+    37f9:	mov    rsp,rbp
+    37fc:	pop    rbp
+    37fd:	ret
+    37fe:	add    BYTE PTR [rax],al
+    3800:	(bad)
+    3801:	add    BYTE PTR [rax],al
+    3803:	add    BYTE PTR [rax],al
+    3805:	add    BYTE PTR [rax],al
 	...
 
-0000000000003920 <botlish_entry_24: scan_alpha<generic>>:
-    3920:	push   rbp
-    3921:	mov    rbp,rsp
-    3924:	mov    rsi,QWORD PTR [rdx]
-    3927:	mov    r8,QWORD PTR [rdx+0x8]
-    392b:	mov    rcx,QWORD PTR [rdx+0x10]
-    392f:	mov    rdx,r8
-    3932:	call   3937 <botlish_entry_24+0x17>
-			3933: R_X86_64_PLT32	botlish_fn_24-0x4 ; scan_alpha<generic>
-    3937:	mov    rsp,rbp
-    393a:	pop    rbp
-    393b:	ret
-    393c:	add    BYTE PTR [rax],al
+0000000000003808 <botlish_entry_24: scan_alpha<generic>>:
+    3808:	push   rbp
+    3809:	mov    rbp,rsp
+    380c:	mov    rsi,QWORD PTR [rdx]
+    380f:	mov    r8,QWORD PTR [rdx+0x8]
+    3813:	mov    rcx,QWORD PTR [rdx+0x10]
+    3817:	mov    rdx,r8
+    381a:	call   381f <botlish_entry_24+0x17>
+			381b: R_X86_64_PLT32	botlish_fn_24-0x4 ; scan_alpha<generic>
+    381f:	mov    rsp,rbp
+    3822:	pop    rbp
+    3823:	ret
+    3824:	add    BYTE PTR [rax],al
 	...
 
-0000000000003940 <botlish_fn_25: tld_ok<generic>>:
-    3940:	push   rbp
-    3941:	mov    rbp,rsp
-    3944:	sub    rsp,0x40
-    3948:	mov    QWORD PTR [rsp+0x20],rbx
-    394d:	mov    QWORD PTR [rsp+0x28],r12
-    3952:	mov    QWORD PTR [rsp+0x30],r13
-    3957:	mov    QWORD PTR [rsp+0x38],r14
-    395c:	mov    rbx,rdi
-    395f:	mov    QWORD PTR [rsp],rsi
-    3963:	mov    r12,rsi
-    3966:	mov    QWORD PTR [rsp+0x8],rdx
-    396b:	mov    r14,rdx
-    396e:	mov    QWORD PTR [rsp+0x10],rcx
-    3973:	mov    rdx,r14
+0000000000003828 <botlish_fn_25: tld_ok<generic>>:
+    3828:	push   rbp
+    3829:	mov    rbp,rsp
+    382c:	sub    rsp,0x40
+    3830:	mov    QWORD PTR [rsp+0x20],rbx
+    3835:	mov    QWORD PTR [rsp+0x28],r12
+    383a:	mov    QWORD PTR [rsp+0x30],r13
+    383f:	mov    QWORD PTR [rsp+0x38],r14
+    3844:	mov    rbx,rdi
+    3847:	mov    QWORD PTR [rsp],rsi
+    384b:	mov    r12,rsi
+    384e:	mov    QWORD PTR [rsp+0x8],rdx
+    3853:	mov    r14,rdx
+    3856:	mov    QWORD PTR [rsp+0x10],rcx
+    385b:	mov    rdx,r14
+    385e:	mov    rsi,r12
+    3861:	mov    rdi,rbx
+    3864:	call   3869 <botlish_fn_25+0x41>
+			3865: R_X86_64_PLT32	botlish_fn_24-0x4 ; scan_alpha<generic>
+    3869:	mov    rsi,rax
+    386c:	mov    r13,rax
+    386f:	test   rax,rsi
+    3872:	je     3935 <botlish_fn_25+0x10d>
+    3878:	mov    rax,r13
+    387b:	mov    QWORD PTR [rsp+0x8],rax
+    3880:	mov    rdx,r14
+    3883:	and    rax,rdx
+    3886:	test   rax,0x1
+    388c:	jne    38b5 <botlish_fn_25+0x8d>
+    3892:	mov    rsi,r13
+    3895:	mov    rdi,rbx
+    3898:	call   389d <botlish_fn_25+0x75>
+			3899: R_X86_64_PLT32	rt_int_cmp-0x4
+    389d:	mov    ecx,0x2
+    38a2:	test   rax,rax
+    38a5:	cmove  rcx,QWORD PTR [rip+0x15b]        # 3a08 <botlish_fn_25+0x1e0>
+    38ad:	mov    rax,r13
+    38b0:	jmp    38c8 <botlish_fn_25+0xa0>
+    38b5:	mov    ecx,0x2
+    38ba:	mov    rax,r13
+    38bd:	cmp    rax,rdx
+    38c0:	cmove  rcx,QWORD PTR [rip+0x140]        # 3a08 <botlish_fn_25+0x1e0>
+    38c8:	cmp    rcx,0x6
+    38cc:	je     38df <botlish_fn_25+0xb7>
+    38d2:	mov    ecx,0x2
+    38d7:	mov    rax,rcx
+    38da:	jmp    39e7 <botlish_fn_25+0x1bf>
+    38df:	mov    ecx,0x1
+    38e4:	mov    rsi,r12
+    38e7:	test   rsi,0x1
+    38ee:	jne    3914 <botlish_fn_25+0xec>
+    38f4:	xor    ecx,ecx
+    38f6:	mov    rsi,r12
+    38f9:	test   rsi,0x7
+    3900:	jne    3914 <botlish_fn_25+0xec>
+    3906:	mov    rsi,r12
+    3909:	movzx  rcx,BYTE PTR [rsi]
+    390d:	rex cmp cl,0x1
+    3911:	sete   cl
+    3914:	test   cl,cl
+    3916:	jne    3955 <botlish_fn_25+0x12d>
+    391c:	mov    rdi,rbx
+    391f:	mov    rsi,QWORD PTR [rdi+0x10]
+    3923:	mov    rcx,QWORD PTR [rsi+0x130]
+    392a:	xor    rdx,rdx
+    392d:	mov    rsi,r12
+    3930:	call   3935 <botlish_fn_25+0x10d>
+			3931: R_X86_64_PLT32	rt_type_error-0x4
+    3935:	xor    rax,rax
+    3938:	mov    rbx,QWORD PTR [rsp+0x20]
+    393d:	mov    r12,QWORD PTR [rsp+0x28]
+    3942:	mov    r13,QWORD PTR [rsp+0x30]
+    3947:	mov    r14,QWORD PTR [rsp+0x38]
+    394c:	add    rsp,0x40
+    3950:	mov    rsp,rbp
+    3953:	pop    rbp
+    3954:	ret
+    3955:	mov    rsi,r12
+    3958:	mov    rdi,rax
+    395b:	and    rdi,rsi
+    395e:	test   rdi,0x1
+    3965:	jne    3976 <botlish_fn_25+0x14e>
+    396b:	mov    rdx,r12
+    396e:	mov    rsi,rax
+    3971:	jmp    3999 <botlish_fn_25+0x171>
     3976:	mov    rsi,r12
-    3979:	mov    rdi,rbx
-    397c:	call   3981 <botlish_fn_25+0x41>
-			397d: R_X86_64_PLT32	botlish_fn_24-0x4 ; scan_alpha<generic>
-    3981:	mov    rsi,rax
-    3984:	mov    r13,rax
-    3987:	test   rax,rsi
-    398a:	je     3a4d <botlish_fn_25+0x10d>
-    3990:	mov    rax,r13
-    3993:	mov    QWORD PTR [rsp+0x8],rax
-    3998:	mov    rdx,r14
-    399b:	and    rax,rdx
-    399e:	test   rax,0x1
-    39a4:	jne    39cd <botlish_fn_25+0x8d>
-    39aa:	mov    rsi,r13
-    39ad:	mov    rdi,rbx
-    39b0:	call   39b5 <botlish_fn_25+0x75>
-			39b1: R_X86_64_PLT32	rt_int_cmp-0x4
-    39b5:	mov    ecx,0x2
-    39ba:	test   rax,rax
-    39bd:	cmove  rcx,QWORD PTR [rip+0x15b]        # 3b20 <botlish_fn_25+0x1e0>
-    39c5:	mov    rax,r13
-    39c8:	jmp    39e0 <botlish_fn_25+0xa0>
-    39cd:	mov    ecx,0x2
-    39d2:	mov    rax,r13
-    39d5:	cmp    rax,rdx
-    39d8:	cmove  rcx,QWORD PTR [rip+0x140]        # 3b20 <botlish_fn_25+0x1e0>
-    39e0:	cmp    rcx,0x6
-    39e4:	je     39f7 <botlish_fn_25+0xb7>
-    39ea:	mov    ecx,0x2
-    39ef:	mov    rax,rcx
-    39f2:	jmp    3aff <botlish_fn_25+0x1bf>
-    39f7:	mov    ecx,0x1
-    39fc:	mov    rsi,r12
-    39ff:	test   rsi,0x1
-    3a06:	jne    3a2c <botlish_fn_25+0xec>
-    3a0c:	xor    ecx,ecx
-    3a0e:	mov    rsi,r12
-    3a11:	test   rsi,0x7
-    3a18:	jne    3a2c <botlish_fn_25+0xec>
-    3a1e:	mov    rsi,r12
-    3a21:	movzx  rcx,BYTE PTR [rsi]
-    3a25:	rex cmp cl,0x1
-    3a29:	sete   cl
-    3a2c:	test   cl,cl
-    3a2e:	jne    3a6d <botlish_fn_25+0x12d>
-    3a34:	mov    rdi,rbx
-    3a37:	mov    rsi,QWORD PTR [rdi+0x10]
-    3a3b:	mov    rcx,QWORD PTR [rsi+0x130]
-    3a42:	xor    rdx,rdx
-    3a45:	mov    rsi,r12
-    3a48:	call   3a4d <botlish_fn_25+0x10d>
-			3a49: R_X86_64_PLT32	rt_type_error-0x4
-    3a4d:	xor    rax,rax
-    3a50:	mov    rbx,QWORD PTR [rsp+0x20]
-    3a55:	mov    r12,QWORD PTR [rsp+0x28]
-    3a5a:	mov    r13,QWORD PTR [rsp+0x30]
-    3a5f:	mov    r14,QWORD PTR [rsp+0x38]
-    3a64:	add    rsp,0x40
-    3a68:	mov    rsp,rbp
-    3a6b:	pop    rbp
-    3a6c:	ret
-    3a6d:	mov    rsi,r12
-    3a70:	mov    rdi,rax
-    3a73:	and    rdi,rsi
-    3a76:	test   rdi,0x1
-    3a7d:	jne    3a8e <botlish_fn_25+0x14e>
-    3a83:	mov    rdx,r12
-    3a86:	mov    rsi,rax
-    3a89:	jmp    3ab1 <botlish_fn_25+0x171>
-    3a8e:	mov    rsi,r12
-    3a91:	mov    r8,rax
-    3a94:	sub    r8,rsi
-    3a97:	mov    r13,rax
-    3a9a:	seto   r10b
-    3a9e:	lea    rsi,[r8+0x1]
-    3aa2:	test   r10b,r10b
-    3aa5:	je     3abc <botlish_fn_25+0x17c>
-    3aab:	mov    rdx,r12
-    3aae:	mov    rsi,r13
-    3ab1:	mov    rdi,rbx
-    3ab4:	call   3ab9 <botlish_fn_25+0x179>
-			3ab5: R_X86_64_PLT32	rt_int_sub-0x4
-    3ab9:	mov    rsi,rax
-    3abc:	test   rsi,0x1
-    3ac3:	jne    3aee <botlish_fn_25+0x1ae>
-    3ac9:	mov    edx,0x5
-    3ace:	mov    rdi,rbx
-    3ad1:	call   3ad6 <botlish_fn_25+0x196>
-			3ad2: R_X86_64_PLT32	rt_int_cmp-0x4
-    3ad6:	mov    ecx,0x2
-    3adb:	test   rax,rax
-    3ade:	mov    rax,rcx
-    3ae1:	cmovge rax,QWORD PTR [rip+0x37]        # 3b20 <botlish_fn_25+0x1e0>
-    3ae9:	jmp    3aff <botlish_fn_25+0x1bf>
-    3aee:	mov    eax,0x2
-    3af3:	cmp    rsi,0x5
-    3af7:	cmovge rax,QWORD PTR [rip+0x21]        # 3b20 <botlish_fn_25+0x1e0>
-    3aff:	mov    rbx,QWORD PTR [rsp+0x20]
-    3b04:	mov    r12,QWORD PTR [rsp+0x28]
-    3b09:	mov    r13,QWORD PTR [rsp+0x30]
-    3b0e:	mov    r14,QWORD PTR [rsp+0x38]
-    3b13:	add    rsp,0x40
-    3b17:	mov    rsp,rbp
-    3b1a:	pop    rbp
-    3b1b:	ret
-    3b1c:	add    BYTE PTR [rax],al
-    3b1e:	add    BYTE PTR [rax],al
-    3b20:	(bad)
-    3b21:	add    BYTE PTR [rax],al
-    3b23:	add    BYTE PTR [rax],al
-    3b25:	add    BYTE PTR [rax],al
+    3979:	mov    r8,rax
+    397c:	sub    r8,rsi
+    397f:	mov    r13,rax
+    3982:	seto   r10b
+    3986:	lea    rsi,[r8+0x1]
+    398a:	test   r10b,r10b
+    398d:	je     39a4 <botlish_fn_25+0x17c>
+    3993:	mov    rdx,r12
+    3996:	mov    rsi,r13
+    3999:	mov    rdi,rbx
+    399c:	call   39a1 <botlish_fn_25+0x179>
+			399d: R_X86_64_PLT32	rt_int_sub-0x4
+    39a1:	mov    rsi,rax
+    39a4:	test   rsi,0x1
+    39ab:	jne    39d6 <botlish_fn_25+0x1ae>
+    39b1:	mov    edx,0x5
+    39b6:	mov    rdi,rbx
+    39b9:	call   39be <botlish_fn_25+0x196>
+			39ba: R_X86_64_PLT32	rt_int_cmp-0x4
+    39be:	mov    ecx,0x2
+    39c3:	test   rax,rax
+    39c6:	mov    rax,rcx
+    39c9:	cmovge rax,QWORD PTR [rip+0x37]        # 3a08 <botlish_fn_25+0x1e0>
+    39d1:	jmp    39e7 <botlish_fn_25+0x1bf>
+    39d6:	mov    eax,0x2
+    39db:	cmp    rsi,0x5
+    39df:	cmovge rax,QWORD PTR [rip+0x21]        # 3a08 <botlish_fn_25+0x1e0>
+    39e7:	mov    rbx,QWORD PTR [rsp+0x20]
+    39ec:	mov    r12,QWORD PTR [rsp+0x28]
+    39f1:	mov    r13,QWORD PTR [rsp+0x30]
+    39f6:	mov    r14,QWORD PTR [rsp+0x38]
+    39fb:	add    rsp,0x40
+    39ff:	mov    rsp,rbp
+    3a02:	pop    rbp
+    3a03:	ret
+    3a04:	add    BYTE PTR [rax],al
+    3a06:	add    BYTE PTR [rax],al
+    3a08:	(bad)
+    3a09:	add    BYTE PTR [rax],al
+    3a0b:	add    BYTE PTR [rax],al
+    3a0d:	add    BYTE PTR [rax],al
 	...
 
-0000000000003b28 <botlish_entry_25: tld_ok<generic>>:
-    3b28:	push   rbp
-    3b29:	mov    rbp,rsp
-    3b2c:	mov    rsi,QWORD PTR [rdx]
-    3b2f:	mov    r8,QWORD PTR [rdx+0x8]
-    3b33:	mov    rcx,QWORD PTR [rdx+0x10]
-    3b37:	mov    rdx,r8
-    3b3a:	call   3b3f <botlish_entry_25+0x17>
-			3b3b: R_X86_64_PLT32	botlish_fn_25-0x4 ; tld_ok<generic>
-    3b3f:	mov    rsp,rbp
-    3b42:	pop    rbp
-    3b43:	ret
-    3b44:	add    BYTE PTR [rax],al
+0000000000003a10 <botlish_entry_25: tld_ok<generic>>:
+    3a10:	push   rbp
+    3a11:	mov    rbp,rsp
+    3a14:	mov    rsi,QWORD PTR [rdx]
+    3a17:	mov    r8,QWORD PTR [rdx+0x8]
+    3a1b:	mov    rcx,QWORD PTR [rdx+0x10]
+    3a1f:	mov    rdx,r8
+    3a22:	call   3a27 <botlish_entry_25+0x17>
+			3a23: R_X86_64_PLT32	botlish_fn_25-0x4 ; tld_ok<generic>
+    3a27:	mov    rsp,rbp
+    3a2a:	pop    rbp
+    3a2b:	ret
+    3a2c:	add    BYTE PTR [rax],al
 	...
 
-0000000000003b48 <botlish_fn_26: domain_loop<generic>>:
-    3b48:	push   rbp
-    3b49:	mov    rbp,rsp
-    3b4c:	sub    rsp,0x70
-    3b50:	mov    QWORD PTR [rsp+0x40],rbx
-    3b55:	mov    QWORD PTR [rsp+0x48],r12
-    3b5a:	mov    QWORD PTR [rsp+0x50],r13
-    3b5f:	mov    QWORD PTR [rsp+0x58],r14
-    3b64:	mov    QWORD PTR [rsp+0x60],r15
-    3b69:	mov    QWORD PTR [rsp+0x18],0x0
-    3b72:	mov    QWORD PTR [rsp],rsi
-    3b76:	mov    QWORD PTR [rsp+0x8],rdx
-    3b7b:	mov    QWORD PTR [rsp+0x10],rcx
-    3b80:	lea    rbx,[rsp+0x20]
-    3b85:	mov    r12,rdi
-    3b88:	mov    r13,rcx
-    3b8b:	mov    r14,rdx
-    3b8e:	mov    QWORD PTR [rsp+0x30],rsi
-    3b93:	mov    rcx,r13
-    3b96:	mov    rdx,r14
-    3b99:	mov    rsi,QWORD PTR [rsp+0x30]
-    3b9e:	mov    rdi,r12
-    3ba1:	call   3ba6 <botlish_fn_26+0x5e>
-			3ba2: R_X86_64_PLT32	botlish_fn_23-0x4 ; scan_label<generic>
-    3ba6:	mov    rcx,rax
-    3ba9:	mov    r15,rax
-    3bac:	test   rax,rcx
-    3baf:	je     3cff <botlish_fn_26+0x1b7>
-    3bb5:	mov    rax,r15
-    3bb8:	mov    QWORD PTR [rsp],rax
-    3bbc:	mov    rdx,QWORD PTR [rsp+0x30]
-    3bc1:	and    rax,rdx
-    3bc4:	test   rax,0x1
-    3bca:	jne    3be9 <botlish_fn_26+0xa1>
-    3bd0:	mov    rsi,r15
-    3bd3:	mov    rdi,r12
-    3bd6:	call   3bdb <botlish_fn_26+0x93>
-			3bd7: R_X86_64_PLT32	rt_value_eq-0x4
-    3bdb:	test   rax,rax
-    3bde:	je     3cff <botlish_fn_26+0x1b7>
-    3be4:	jmp    3bf9 <botlish_fn_26+0xb1>
-    3be9:	mov    eax,0x2
-    3bee:	cmp    r15,rdx
-    3bf1:	cmove  rax,QWORD PTR [rip+0x187]        # 3d80 <botlish_fn_26+0x238>
-    3bf9:	cmp    rax,0x6
-    3bfd:	je     3d55 <botlish_fn_26+0x20d>
-    3c03:	mov    rax,r15
-    3c06:	and    rax,r14
-    3c09:	test   rax,0x1
-    3c0f:	jne    3c38 <botlish_fn_26+0xf0>
-    3c15:	mov    rdx,r14
-    3c18:	mov    rsi,r15
-    3c1b:	mov    rdi,r12
-    3c1e:	call   3c23 <botlish_fn_26+0xdb>
-			3c1f: R_X86_64_PLT32	rt_int_cmp-0x4
-    3c23:	mov    ecx,0x2
-    3c28:	test   rax,rax
-    3c2b:	cmovge rcx,QWORD PTR [rip+0x14d]        # 3d80 <botlish_fn_26+0x238>
-    3c33:	jmp    3c48 <botlish_fn_26+0x100>
-    3c38:	mov    ecx,0x2
-    3c3d:	cmp    r15,r14
-    3c40:	cmovge rcx,QWORD PTR [rip+0x138]        # 3d80 <botlish_fn_26+0x238>
-    3c48:	cmp    rcx,0x6
-    3c4c:	je     3d46 <botlish_fn_26+0x1fe>
-    3c52:	mov    rcx,rbx
-    3c55:	mov    rdx,r13
-    3c58:	mov    rsi,r15
-    3c5b:	mov    rdi,r12
-    3c5e:	call   3c63 <botlish_fn_26+0x11b>
-			3c5f: R_X86_64_PLT32	botlish_fn_21-0x4 ; char_at<generic>
-    3c63:	test   rax,rax
-    3c66:	je     3cff <botlish_fn_26+0x1b7>
-    3c6c:	mov    rdx,QWORD PTR [rsp+0x20]
-    3c71:	mov    rcx,QWORD PTR [rsp+0x28]
-    3c76:	mov    rsi,QWORD PTR [r12+0x10]
-    3c7b:	mov    r8,QWORD PTR [rsi+0x120]
-    3c82:	mov    rsi,rax
-    3c85:	mov    rdi,r12
-    3c88:	call   3c8d <botlish_fn_26+0x145>
-			3c89: R_X86_64_PLT32	rt_str_region_eq-0x4
-    3c8d:	cmp    rax,0x6
-    3c91:	je     3ca3 <botlish_fn_26+0x15b>
-    3c97:	mov    r14,0xffffffffffffffff
-    3c9e:	jmp    3d4d <botlish_fn_26+0x205>
-    3ca3:	mov    QWORD PTR [rsp+0x18],0x3
-    3cac:	test   r15,0x1
-    3cb3:	je     3ccb <botlish_fn_26+0x183>
-    3cb9:	mov    rdx,r15
-    3cbc:	add    rdx,0x2
-    3cc0:	seto   al
-    3cc3:	test   al,al
-    3cc5:	je     3cde <botlish_fn_26+0x196>
-    3ccb:	mov    edx,0x3
-    3cd0:	mov    rsi,r15
-    3cd3:	mov    rdi,r12
-    3cd6:	call   3cdb <botlish_fn_26+0x193>
-			3cd7: R_X86_64_PLT32	rt_int_add-0x4
-    3cdb:	mov    rdx,rax
-    3cde:	mov    QWORD PTR [rsp],rdx
-    3ce2:	mov    r15,rdx
-    3ce5:	mov    rcx,r13
-    3ce8:	mov    rdx,r14
-    3ceb:	mov    rsi,r15
-    3cee:	mov    rdi,r12
-    3cf1:	call   3cf6 <botlish_fn_26+0x1ae>
-			3cf2: R_X86_64_PLT32	botlish_fn_25-0x4 ; tld_ok<generic>
-    3cf6:	test   rax,rax
-    3cf9:	jne    3d24 <botlish_fn_26+0x1dc>
-    3cff:	xor    rax,rax
-    3d02:	mov    rbx,QWORD PTR [rsp+0x40]
-    3d07:	mov    r12,QWORD PTR [rsp+0x48]
-    3d0c:	mov    r13,QWORD PTR [rsp+0x50]
-    3d11:	mov    r14,QWORD PTR [rsp+0x58]
-    3d16:	mov    r15,QWORD PTR [rsp+0x60]
-    3d1b:	add    rsp,0x70
-    3d1f:	mov    rsp,rbp
-    3d22:	pop    rbp
-    3d23:	ret
-    3d24:	cmp    rax,0x6
-    3d28:	je     3d4d <botlish_fn_26+0x205>
-    3d2e:	mov    QWORD PTR [rsp],r15
-    3d32:	mov    QWORD PTR [rsp+0x8],r14
-    3d37:	mov    QWORD PTR [rsp+0x10],r13
-    3d3c:	mov    QWORD PTR [rsp+0x30],r15
-    3d41:	jmp    3b93 <botlish_fn_26+0x4b>
-    3d46:	mov    r14,0xffffffffffffffff
-    3d4d:	mov    rax,r14
-    3d50:	jmp    3d5c <botlish_fn_26+0x214>
-    3d55:	mov    rax,0xffffffffffffffff
-    3d5c:	mov    rbx,QWORD PTR [rsp+0x40]
-    3d61:	mov    r12,QWORD PTR [rsp+0x48]
-    3d66:	mov    r13,QWORD PTR [rsp+0x50]
-    3d6b:	mov    r14,QWORD PTR [rsp+0x58]
-    3d70:	mov    r15,QWORD PTR [rsp+0x60]
-    3d75:	add    rsp,0x70
-    3d79:	mov    rsp,rbp
-    3d7c:	pop    rbp
-    3d7d:	ret
-    3d7e:	add    BYTE PTR [rax],al
-    3d80:	(bad)
-    3d81:	add    BYTE PTR [rax],al
-    3d83:	add    BYTE PTR [rax],al
-    3d85:	add    BYTE PTR [rax],al
+0000000000003a30 <botlish_fn_26: domain_loop<generic>>:
+    3a30:	push   rbp
+    3a31:	mov    rbp,rsp
+    3a34:	sub    rsp,0x70
+    3a38:	mov    QWORD PTR [rsp+0x40],rbx
+    3a3d:	mov    QWORD PTR [rsp+0x48],r12
+    3a42:	mov    QWORD PTR [rsp+0x50],r13
+    3a47:	mov    QWORD PTR [rsp+0x58],r14
+    3a4c:	mov    QWORD PTR [rsp+0x60],r15
+    3a51:	mov    QWORD PTR [rsp+0x18],0x0
+    3a5a:	mov    QWORD PTR [rsp],rsi
+    3a5e:	mov    QWORD PTR [rsp+0x8],rdx
+    3a63:	mov    QWORD PTR [rsp+0x10],rcx
+    3a68:	lea    rbx,[rsp+0x20]
+    3a6d:	mov    r12,rdi
+    3a70:	mov    r13,rcx
+    3a73:	mov    r14,rdx
+    3a76:	mov    QWORD PTR [rsp+0x30],rsi
+    3a7b:	mov    rcx,r13
+    3a7e:	mov    rdx,r14
+    3a81:	mov    rsi,QWORD PTR [rsp+0x30]
+    3a86:	mov    rdi,r12
+    3a89:	call   3a8e <botlish_fn_26+0x5e>
+			3a8a: R_X86_64_PLT32	botlish_fn_23-0x4 ; scan_label<generic>
+    3a8e:	mov    rcx,rax
+    3a91:	mov    r15,rax
+    3a94:	test   rax,rcx
+    3a97:	je     3be7 <botlish_fn_26+0x1b7>
+    3a9d:	mov    rax,r15
+    3aa0:	mov    QWORD PTR [rsp],rax
+    3aa4:	mov    rdx,QWORD PTR [rsp+0x30]
+    3aa9:	and    rax,rdx
+    3aac:	test   rax,0x1
+    3ab2:	jne    3ad1 <botlish_fn_26+0xa1>
+    3ab8:	mov    rsi,r15
+    3abb:	mov    rdi,r12
+    3abe:	call   3ac3 <botlish_fn_26+0x93>
+			3abf: R_X86_64_PLT32	rt_value_eq-0x4
+    3ac3:	test   rax,rax
+    3ac6:	je     3be7 <botlish_fn_26+0x1b7>
+    3acc:	jmp    3ae1 <botlish_fn_26+0xb1>
+    3ad1:	mov    eax,0x2
+    3ad6:	cmp    r15,rdx
+    3ad9:	cmove  rax,QWORD PTR [rip+0x187]        # 3c68 <botlish_fn_26+0x238>
+    3ae1:	cmp    rax,0x6
+    3ae5:	je     3c3d <botlish_fn_26+0x20d>
+    3aeb:	mov    rax,r15
+    3aee:	and    rax,r14
+    3af1:	test   rax,0x1
+    3af7:	jne    3b20 <botlish_fn_26+0xf0>
+    3afd:	mov    rdx,r14
+    3b00:	mov    rsi,r15
+    3b03:	mov    rdi,r12
+    3b06:	call   3b0b <botlish_fn_26+0xdb>
+			3b07: R_X86_64_PLT32	rt_int_cmp-0x4
+    3b0b:	mov    ecx,0x2
+    3b10:	test   rax,rax
+    3b13:	cmovge rcx,QWORD PTR [rip+0x14d]        # 3c68 <botlish_fn_26+0x238>
+    3b1b:	jmp    3b30 <botlish_fn_26+0x100>
+    3b20:	mov    ecx,0x2
+    3b25:	cmp    r15,r14
+    3b28:	cmovge rcx,QWORD PTR [rip+0x138]        # 3c68 <botlish_fn_26+0x238>
+    3b30:	cmp    rcx,0x6
+    3b34:	je     3c2e <botlish_fn_26+0x1fe>
+    3b3a:	mov    rcx,rbx
+    3b3d:	mov    rdx,r13
+    3b40:	mov    rsi,r15
+    3b43:	mov    rdi,r12
+    3b46:	call   3b4b <botlish_fn_26+0x11b>
+			3b47: R_X86_64_PLT32	botlish_fn_21-0x4 ; char_at<generic>
+    3b4b:	test   rax,rax
+    3b4e:	je     3be7 <botlish_fn_26+0x1b7>
+    3b54:	mov    rdx,QWORD PTR [rsp+0x20]
+    3b59:	mov    rcx,QWORD PTR [rsp+0x28]
+    3b5e:	mov    rsi,QWORD PTR [r12+0x10]
+    3b63:	mov    r8,QWORD PTR [rsi+0x120]
+    3b6a:	mov    rsi,rax
+    3b6d:	mov    rdi,r12
+    3b70:	call   3b75 <botlish_fn_26+0x145>
+			3b71: R_X86_64_PLT32	rt_str_region_eq-0x4
+    3b75:	cmp    rax,0x6
+    3b79:	je     3b8b <botlish_fn_26+0x15b>
+    3b7f:	mov    r14,0xffffffffffffffff
+    3b86:	jmp    3c35 <botlish_fn_26+0x205>
+    3b8b:	mov    QWORD PTR [rsp+0x18],0x3
+    3b94:	test   r15,0x1
+    3b9b:	je     3bb3 <botlish_fn_26+0x183>
+    3ba1:	mov    rdx,r15
+    3ba4:	add    rdx,0x2
+    3ba8:	seto   al
+    3bab:	test   al,al
+    3bad:	je     3bc6 <botlish_fn_26+0x196>
+    3bb3:	mov    edx,0x3
+    3bb8:	mov    rsi,r15
+    3bbb:	mov    rdi,r12
+    3bbe:	call   3bc3 <botlish_fn_26+0x193>
+			3bbf: R_X86_64_PLT32	rt_int_add-0x4
+    3bc3:	mov    rdx,rax
+    3bc6:	mov    QWORD PTR [rsp],rdx
+    3bca:	mov    r15,rdx
+    3bcd:	mov    rcx,r13
+    3bd0:	mov    rdx,r14
+    3bd3:	mov    rsi,r15
+    3bd6:	mov    rdi,r12
+    3bd9:	call   3bde <botlish_fn_26+0x1ae>
+			3bda: R_X86_64_PLT32	botlish_fn_25-0x4 ; tld_ok<generic>
+    3bde:	test   rax,rax
+    3be1:	jne    3c0c <botlish_fn_26+0x1dc>
+    3be7:	xor    rax,rax
+    3bea:	mov    rbx,QWORD PTR [rsp+0x40]
+    3bef:	mov    r12,QWORD PTR [rsp+0x48]
+    3bf4:	mov    r13,QWORD PTR [rsp+0x50]
+    3bf9:	mov    r14,QWORD PTR [rsp+0x58]
+    3bfe:	mov    r15,QWORD PTR [rsp+0x60]
+    3c03:	add    rsp,0x70
+    3c07:	mov    rsp,rbp
+    3c0a:	pop    rbp
+    3c0b:	ret
+    3c0c:	cmp    rax,0x6
+    3c10:	je     3c35 <botlish_fn_26+0x205>
+    3c16:	mov    QWORD PTR [rsp],r15
+    3c1a:	mov    QWORD PTR [rsp+0x8],r14
+    3c1f:	mov    QWORD PTR [rsp+0x10],r13
+    3c24:	mov    QWORD PTR [rsp+0x30],r15
+    3c29:	jmp    3a7b <botlish_fn_26+0x4b>
+    3c2e:	mov    r14,0xffffffffffffffff
+    3c35:	mov    rax,r14
+    3c38:	jmp    3c44 <botlish_fn_26+0x214>
+    3c3d:	mov    rax,0xffffffffffffffff
+    3c44:	mov    rbx,QWORD PTR [rsp+0x40]
+    3c49:	mov    r12,QWORD PTR [rsp+0x48]
+    3c4e:	mov    r13,QWORD PTR [rsp+0x50]
+    3c53:	mov    r14,QWORD PTR [rsp+0x58]
+    3c58:	mov    r15,QWORD PTR [rsp+0x60]
+    3c5d:	add    rsp,0x70
+    3c61:	mov    rsp,rbp
+    3c64:	pop    rbp
+    3c65:	ret
+    3c66:	add    BYTE PTR [rax],al
+    3c68:	(bad)
+    3c69:	add    BYTE PTR [rax],al
+    3c6b:	add    BYTE PTR [rax],al
+    3c6d:	add    BYTE PTR [rax],al
 	...
 
-0000000000003d88 <botlish_entry_26: domain_loop<generic>>:
-    3d88:	push   rbp
-    3d89:	mov    rbp,rsp
-    3d8c:	mov    rsi,QWORD PTR [rdx]
-    3d8f:	mov    r8,QWORD PTR [rdx+0x8]
-    3d93:	mov    rcx,QWORD PTR [rdx+0x10]
-    3d97:	mov    rdx,r8
-    3d9a:	call   3d9f <botlish_entry_26+0x17>
-			3d9b: R_X86_64_PLT32	botlish_fn_26-0x4 ; domain_loop<generic>
-    3d9f:	mov    rsp,rbp
-    3da2:	pop    rbp
-    3da3:	ret
+0000000000003c70 <botlish_entry_26: domain_loop<generic>>:
+    3c70:	push   rbp
+    3c71:	mov    rbp,rsp
+    3c74:	mov    rsi,QWORD PTR [rdx]
+    3c77:	mov    r8,QWORD PTR [rdx+0x8]
+    3c7b:	mov    rcx,QWORD PTR [rdx+0x10]
+    3c7f:	mov    rdx,r8
+    3c82:	call   3c87 <botlish_entry_26+0x17>
+			3c83: R_X86_64_PLT32	botlish_fn_26-0x4 ; domain_loop<generic>
+    3c87:	mov    rsp,rbp
+    3c8a:	pop    rbp
+    3c8b:	ret
