@@ -191,7 +191,7 @@ namespace eval native::lower {
     # LeafInlineEligible's own answer for a given callee instance never
     # changes within one lowering and the same callee may be reached from
     # several exact call sites.
-    variable tinyLeafInlineOpt 0
+    variable tinyLeafInlineOpt 1
     variable leafEligible {}
     # The small, fixed, auditable operation-count budget (TINY-EXACT-LEAF-
     # INLINING.md): comfortably above both real target bodies
@@ -948,22 +948,26 @@ proc native::lower::program {hirProgram args} {
         && $::env(BOTLISH_NATIVE_CALL_EFFECTS_OPT) eq "0" ? 0 : 1}]
     set traversalDefault [expr {[info exists ::env(BOTLISH_NATIVE_STRING_TRAVERSAL_OPT)]
         && $::env(BOTLISH_NATIVE_STRING_TRAVERSAL_OPT) eq "0" ? 0 : 1}]
-    # Default *off* (every other -*-opt flag above defaults on): evidence,
-    # not caution for its own sake (TINY-EXACT-LEAF-INLINING.md's own
-    # report) -- a materialized function that inlining's own ordinary,
-    # unchanged reachability worklist stops emitting once its last caller
-    # inlines away (native::lower::program's own pending-function loop,
-    # above) is completely sound, but a wide swath of *pre-existing* tests
-    # across this suite locate a named function's own compiled body via its
-    # quoted name (FunctionBody-style helpers throughout tests/native-*
-    # .test) and never expected a plain top-level `fn f(x): ...` with one
-    # caller to stop being separately emitted. Defaulting this flag on
-    # would silently break that established testing idiom in many
-    # unrelated files having nothing to do with this milestone -- exactly
-    # the "debugger/provenance uncertainty" case the milestone's own spec
-    # names as its own explicit reason to default off.
+    # Default *on* (TINY-LEAF-DEFAULT-ON.md), matching every other -*-opt
+    # flag above: TINY-EXACT-LEAF-INLINING.md's own milestone defaulted this
+    # off because a wide swath of *pre-existing* tests located a named
+    # function's own compiled body via its quoted name (FunctionBody-style
+    # helpers throughout tests/native-*.test) and never expected a plain
+    # top-level `fn f(x): ...` with one caller to stop being separately
+    # emitted once inlining removed its last caller -- a test-methodology
+    # gap, not an optimizer defect (that milestone's own extensive
+    # differential/GC-stress/determinism evidence already supported
+    # default-on). TINY-LEAF-DEFAULT-ON.md's own milestone adapted every
+    # affected test to its real intent (explicit -tiny-leaf-inline-opt 0 for
+    # a genuine standalone-lowering inspection, inspecting the surviving
+    # optimized caller where that is what the test actually meant, or a
+    # tcltest constraint where the assertion is genuinely configuration-
+    # specific) and made this the supported normal configuration. Explicit
+    # -tiny-leaf-inline-opt 0 (or BOTLISH_NATIVE_TINY_LEAF_INLINE_OPT=0)
+    # still disables it completely, for standalone-lowering tests,
+    # differential comparison, and debugging.
     set tinyLeafInlineDefault [expr {[info exists ::env(BOTLISH_NATIVE_TINY_LEAF_INLINE_OPT)]
-        && $::env(BOTLISH_NATIVE_TINY_LEAF_INLINE_OPT) eq "1" ? 1 : 0}]
+        && $::env(BOTLISH_NATIVE_TINY_LEAF_INLINE_OPT) eq "0" ? 0 : 1}]
     set options [hir::Options native::lower::program \
         [list -specialize $default -repr-opt $reprDefault -escape-opt $escapeDefault \
             -param-aggregate-opt $paramAggregateDefault -block-escape-opt $blockEscapeDefault \
