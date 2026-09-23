@@ -585,34 +585,32 @@ control-flow fixtures with no reference to `Byte`/`Nibble`/`HighNibble`/
 to turn on; unset or `0` stays off), threaded through
 `native::lower::program` exactly like every other `-*-opt` flag.
 
-**Default: off** -- the one flag in this file that inverts the convention
-every other optimization here uses (all of `-repr-opt`/`-escape-opt`/
-`-block-escape-opt`/`-string-region-opt`/`-string-traversal-opt`/
-`-param-aggregate-opt` default *on*). This is evidence-based, not
-precautionary boilerplate: turning tiny-leaf inlining on by default, while
-developing this milestone, broke a substantial number of **pre-existing**
-tests across `tests/native-bitshift.test` and other files, whose own
-methodology looks up a named function's compiled body by its quoted name
-(`FunctionBody`-style helpers, used pervasively across `tests/native-*
-.test`) -- a plain top-level `fn f(x): shift_right(x, 4)` with one caller,
-exactly the shape several pre-existing synthetic fixtures use, is now a
-tiny eligible leaf, and its own canonical function legitimately, correctly
-stops being separately emitted (§ 7) the moment its one caller inlines,
-which those tests never anticipated. This is precisely the milestone's own
-named condition for defaulting off (spec § 59: "if debugger/provenance
-uncertainty remains, default-off may be more appropriate") -- here,
-"provenance" specifically means *external tooling's* assumption that every
-named function stays separately addressable, not this milestone's own
-internal provenance (§ 5.4, which is unaffected either way). Rather than
-touch a wide, unrelated swath of pre-existing test files to accommodate a
-new optimization (out of this milestone's own "smallest capability"
-scope), the flag defaults off; every test this milestone added exercises
-it explicitly (`1` or `0`), and the real acceptance case is demonstrated
-with it explicitly turned on (§ 6). Turning it on globally remains a
-one-flag, fully reversible follow-up once (if ever) the wider suite's own
-function-lookup idiom is made robust to it -- not attempted here, since
-that is a change to many unrelated test files' own methodology, not to
-this optimization itself.
+**Default: on, as of `TINY-LEAF-DEFAULT-ON.md` (amended -- superseding this
+section).** At the time this report was written, the flag defaulted *off*:
+turning tiny-leaf inlining on by default, while developing this milestone,
+broke a number of **pre-existing** tests across `tests/native-bitshift
+.test` and other files, whose own methodology looked up a named function's
+compiled body by its quoted name (`FunctionBody`-style helpers, used
+pervasively across `tests/native-*.test`) -- a plain top-level `fn f(x):
+shift_right(x, 4)` with one caller, exactly the shape several pre-existing
+synthetic fixtures used, is a tiny eligible leaf, and its own canonical
+function legitimately, correctly stops being separately emitted (§ 7) the
+moment its one caller inlines, which those tests never anticipated. That
+was correctly diagnosed at the time as a test-methodology gap, not an
+optimizer defect (this report's own extensive differential/GC-stress/
+determinism/corpus evidence already supported default-on), and the
+immediately following milestone (`TINY-LEAF-DEFAULT-ON.md`) did exactly the
+follow-up work this section originally deferred: reproduced every failure,
+classified each one (all were standalone-lowering tests; zero were
+optimizer bugs), adapted each to its real intent (an explicit
+`-tiny-leaf-inline-opt 0` for a genuine standalone-lowering inspection, or
+inspecting the surviving optimized caller/operation where that is what the
+test actually meant), and flipped the default. See that report for the
+full accounting, the newly-added call-site-count pressure audit, and the
+current, supported configuration. Explicit `-tiny-leaf-inline-opt 0` (or
+`BOTLISH_NATIVE_TINY_LEAF_INLINE_OPT=0`) still disables the feature
+completely, unchanged, for standalone-lowering tests, differential
+comparison, and debugging.
 
 Compile-time cost (spec § 90): `native::lower::program` on
 `bench/refined-checks.ir`, averaged over 20 runs -- 220.9ms with the flag
