@@ -1313,6 +1313,22 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             RIAdd => self.b.ins().iadd(a[0], a[1]),
             RISub => self.b.ins().isub(a[0], a[1]),
             RIMul => self.b.ins().imul(a[0], a[1]),
+            // native/lower.tcl's RawEligibleShift already proved a[0]
+            // nonnegative and small and a[1] a single small value strictly
+            // below the host word width, so this is a direct host machine
+            // shift on the raw i64 operand -- never the tagged word (a
+            // tagged small Int's own low bit is the representation tag, not
+            // part of the logical integer, so shifting it directly would be
+            // wrong: see this file's own int_bitop for the analogous
+            // AND/OR/XOR case, which *can* operate on the tagged word
+            // because bitwise-AND/OR/XOR of two tag-1 words keeps the tag
+            // bit fixed -- a shift has no such property). `sshr` (not
+            // `ushr`): Botlish's own shift_right is an arithmetic
+            // (sign-extending) shift, and RawEligibleShift's nonnegative
+            // requirement on a[0] makes the two coincide for every value
+            // that reaches here.
+            RIShr => self.b.ins().sshr(a[0], a[1]),
+            RIShl => self.b.ins().ishl(a[0], a[1]),
             RILt | RILe | RIGt | RIGe | RIEq => {
                 let cc = match op {
                     RILt => IntCC::SignedLessThan,

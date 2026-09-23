@@ -54,9 +54,22 @@ f(true)} branch.bot]
     hir::types::show [hir::typeOf $h [lindex [hirFind $h call] end]]
 } -result {int[HighNibble]}
 
-test refined-signature-verify-4 {an interval hull alone does not prove a sparse result} -body {
+test refined-signature-verify-4 {bounded-bit-shift-lowering: bit_or now combines two AND masks' own exact sets generically, proving a sparse result an interval-only hull could not (was: "an interval hull alone does not prove a sparse result" -- for an *unconstrained* x, 128 and 112 are disjoint, contiguous bitmasks together spanning HighNibble's own domain, so bit_and(x,128) is exactly {0,128} and bit_and(x,112) is exactly {0,16,...,112}; hir/range.tcl's BitOp now tries the exact cross product for bit_or too, and their union is exactly HighNibble's own 16-value domain -- no HighNibble-specific code, purely the generic exact-set transfer this milestone adds)} -body {
+    set h [surface::compile {fn f(x) -> HighNibble:
+    bit_or(bit_and(x, 128), bit_and(x, 112))
+f(17)} hull.bot]
+    hir::types::show [hir::typeOf $h [lindex [hirFind $h call] end]]
+} -result {int[HighNibble]}
+
+test refined-signature-verify-4b {an interval hull alone still does not prove a sparse result when the exact-set budget is exceeded on one side} -body {
+    # 63 (0b00111111, 6 bits) would need 64 submasks to enumerate exactly --
+    # over hir/range.tcl's own 32-value budget -- so bit_and(x,63) stays
+    # interval-only ([0,63], no exact set); bit_or's own cross-exact
+    # transfer then has nothing exact to combine on that side and falls
+    # back to the sound (but not sparse) interval sum, same as before this
+    # milestone.
     catch {surface::compile {fn f(x) -> HighNibble:
-    bit_or(bit_and(x, 128), bit_and(x, 112))} hull.bot} message
+    bit_or(bit_and(x, 63), bit_and(x, 192))} hull.bot} message
     string match {*does not prove declared type*} $message
 } -result 1
 

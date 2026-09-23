@@ -138,6 +138,16 @@ pub enum OpCode {
     RIGt,
     RIGe,
     RIEq,
+    /// Raw (untagged) shift, native/lower.tcl's RawEligibleShift: unlike
+    /// IShl/IShr (always a helper call -- see the "Representation" section
+    /// of native/lower.tcl), emitted only when range analysis proves the
+    /// shifted value nonnegative and small, the shift amount a single
+    /// already-known small value, and the result small too -- no BigInt
+    /// case, no invalid-shift-amount case, so codegen (unlike IShl/IShr)
+    /// lowers these directly to a host machine shift instruction, exactly
+    /// like RIAdd/RISub/RIMul do for `+`/`-`/`*`.
+    RIShr,
+    RIShl,
 }
 
 impl OpCode {
@@ -203,6 +213,8 @@ impl OpCode {
             "rigt" => RIGt,
             "rige" => RIGe,
             "rieq" => RIEq,
+            "rishr" => RIShr,
+            "rishl" => RIShl,
             _ => return None,
         })
     }
@@ -224,13 +236,14 @@ impl OpCode {
 
     /// 1 if OP's result is a raw (untagged) machine integer, not a Value.
     pub fn raw_result(self) -> bool {
-        matches!(self, OpCode::RUnbox | OpCode::RIAdd | OpCode::RISub | OpCode::RIMul)
+        matches!(self, OpCode::RUnbox | OpCode::RIAdd | OpCode::RISub | OpCode::RIMul
+            | OpCode::RIShr | OpCode::RIShl)
     }
 
     /// 1 if OP's operands are raw (untagged) machine integers, not Values.
     pub fn raw_operands(self) -> bool {
         use OpCode::*;
-        matches!(self, RBox | RIAdd | RISub | RIMul | RILt | RILe | RIGt | RIGe | RIEq)
+        matches!(self, RBox | RIAdd | RISub | RIMul | RILt | RILe | RIGt | RIGe | RIEq | RIShr | RIShl)
     }
 }
 

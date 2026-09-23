@@ -78,6 +78,30 @@ namespace eval hir::range {
     # compiler constant, not a magic number at each call site) without
     # inviting the combinatorial growth #28-30 warn against.
     variable maxExactValues 32
+    # The largest shift_left amount BitOp will actually compute a bound
+    # for (see BitOp's own shift_left case): shift_left's result grows the
+    # shifted value's own bit-length by the shift amount itself, unlike
+    # +/-/*, whose result bit-length is only roughly the sum of its
+    # operands' -- so, unlike every other transfer in this file, a small,
+    # easily-representable *fact* (an ordinary small Int shift amount) can
+    # demand an astronomically large *bound* even though computing that
+    # bound never itself needs an unbounded number of steps (Tcl's own
+    # arbitrary-precision `<<` is linear in the result's bit-length, not
+    # exponential). The actual, measured hazard is downstream: every other
+    # producer in this file eventually compares a candidate bound against
+    # the literal sentinels "-inf"/"+inf" (`ne`/`eq`, e.g. Normalize's own
+    # dense-interval check) -- a *string* comparison that forces Tcl to
+    # materialize the bound's full decimal text first, which for a
+    # multi-hundred-thousand-bit integer is quadratic and, confirmed
+    # directly, costs tens of seconds even before core/scalarbits.tcl's own
+    # MAX_SHIFT (1<<20) is reached (a shift amount that large is not even
+    # adversarial -- it is a value this milestone's own generic shift
+    # contract accepts as valid). 4096 is comfortably above every realistic
+    # bit-manipulation shift (nibble/byte/word positioning) while keeping
+    # the worst case a few milliseconds; beyond it BitOp simply declines
+    # (falls back to `unknown`) rather than trying to compute and propagate
+    # a bound of a size nothing downstream can afford to look at.
+    variable maxShiftLeftAmount 4096
 }
 
 # ---------------------------------------------------------------------------
@@ -360,14 +384,25 @@ proc hir::range::SubBound {x y} {
 }
 
 # The exact set of OP applied pairwise to every value of A's exact set with
-# every value of B's, within budget -- or "" if either input is untracked or
-# the cross product would exceed it (spec #28-30: bounded evaluation, never
-# an unconditional Cartesian product). OPPROC is a 2-argument Tcl command
-# computing the same operation R's own interval fields already reflect
-# (AddBound/SubBound/plain `*`), so a cheap transfer like {1,2}+{10,20} ->
-# {11,12,21,22} (spec #29) stays exact while a pair of 32-value sets (spec
-# #30) falls back to R's interval alone, cheaply (checked before the O(n*m)
-# work, not after).
+# every value of B's, within budget -- or R unchanged if either input is
+# untracked or the cross product would exceed it (spec #28-30: bounded
+# evaluation, never an unconditional Cartesian product). OPPROC is a
+# 2-argument Tcl command computing OP itself (AddBound/SubBound/plain `*`,
+# or a bitwise/shift operator -- BitOp below).
+#
+# When it succeeds, the returned Range's min/max are recomputed from the
+# actual computed values, not merely R's own (possibly looser) interval:
+# for `+`/`-`/`*` this changes nothing (interval arithmetic is already tight
+# for two real intervals, and a tracked exact set's own min/max always equal
+# its Range's min/max, so the corner values interval arithmetic used are
+# always themselves members of the cross product -- recomputing from the
+# full cross product can only ever reproduce the same bound). For
+# bitwise/shift operations (BitOp's own callers), R's interval is often only
+# a sound *superset* bound (e.g. AND's "0..the nonnegative operand's own
+# max"), so recomputing from the actual pairwise results is what lets a
+# genuinely sparse case (`{0,16,...,240} & {15}`) collapse all the way to a
+# single point instead of merely decorating a loose interval with a
+# same-shaped exact list (spec #7, #11-13).
 proc hir::range::CrossExact {r a b opProc} {
     variable maxExactValues
     set ea [ExactOf $a]
@@ -381,7 +416,13 @@ proc hir::range::CrossExact {r a b opProc} {
             lappend values [{*}$opProc $x $y]
         }
     }
-    return [Normalize $r $values]
+    set mn ""
+    set mx ""
+    foreach v $values {
+        if {$mn eq "" || $v < $mn} { set mn $v }
+        if {$mx eq "" || $v > $mx} { set mx $v }
+    }
+    return [Normalize [dict create min $mn max $mx] $values]
 }
 
 proc hir::range::add {a b} {
@@ -453,13 +494,21 @@ proc hir::range::show {r} {
     return "$base {[::join $exact ,]}"
 }
 
-# A sound (not necessarily tightest) interval for bitwise NAME (bit_and,
-# bit_or, bit_xor, shift_right -- core/scalarbits.tcl) applied to X, Y,
-# proven purely from general nonnegative-integer reasoning about the
-# operation itself, never from any named type (spec #17, #35: this stays a
-# capability of the interval lattice, with no concept here named Byte or
-# HighNibble). AND with a nonnegative constant also gets bounded submask
-# enumeration; general known-bits reasoning remains deliberately deferred.
+# A sound (not necessarily tightest) interval for bitwise/shift NAME
+# (bit_and, bit_or, bit_xor, shift_left, shift_right -- core/scalarbits.tcl)
+# applied to X, Y, proven purely from general nonnegative-integer reasoning
+# about the operation itself, never from any named type (spec #17, #35: this
+# stays a capability of the interval lattice, with no concept here named
+# Byte or HighNibble). Every case additionally tries CrossExact first: when
+# both operands carry a tracked (or reconstructible) exact set within
+# budget, the true pairwise result is used directly, which is often
+# strictly tighter than the sound interval bound below (spec #7-9, #11-13);
+# CrossExact itself declines (returning its input unchanged) whenever that
+# is not cheap, so every case still falls back to the interval-only
+# reasoning that existed before this was added. AND with a nonnegative
+# constant also gets bounded submask enumeration when the exact cross
+# product itself was not available; general known-bits reasoning remains
+# deliberately deferred.
 #
 #   bit_and: AND's result bits are a subset of whichever operand is
 #     nonnegative (a set bit needs both operands set, and a nonnegative
@@ -473,10 +522,15 @@ proc hir::range::show {r} {
 #     beyond the highest either operand or their carry-free combination
 #     could reach); bit_or's result is also never below either operand's own
 #     minimum.
-#   shift_right: an arithmetic right shift of a nonnegative value only ever
-#     shrinks it, so its range is bounded by the shifted value's own
-#     (unaffected by the shift amount, which this proc does not need to
-#     know).
+#   shift_right: an arithmetic right shift of a nonnegative value by a
+#     nonnegative amount only ever shrinks it towards 0, so a known bound on
+#     the shift amount (Y) tightens the result on both ends (ShiftRightBound
+#     below); with no such bound, the result is still bounded by the
+#     shifted value's own range (unaffected by an unknown/possibly-negative
+#     shift amount, matching this proc's behavior before Y was consulted).
+#   shift_left: for nonnegative X and Y, `x << y` is monotonically
+#     increasing in both, so the sound bound is [xmn<<ymn, xmx<<ymx]
+#     (arbitrary-precision, never truncated -- spec #18-19, #39).
 proc hir::range::BitOp {name x y} {
     if {$x eq "never" || $y eq "never"} {
         return never
@@ -487,38 +541,87 @@ proc hir::range::BitOp {name x y} {
     set ymx [dict get $y max]
     switch -- $name {
         bit_and {
+            set r [unknown]
             if {$ymn ne "-inf" && $ymn >= 0} {
                 set r [dict create min 0 max $ymx]
-                if {$ymn eq $ymx} { return [AndMaskExact $r $ymn] }
-                return $r
-            }
-            if {$xmn ne "-inf" && $xmn >= 0} {
+            } elseif {$xmn ne "-inf" && $xmn >= 0} {
                 set r [dict create min 0 max $xmx]
-                if {$xmn eq $xmx} { return [AndMaskExact $r $xmn] }
-                return $r
             }
-            return [unknown]
+            set cross [CrossExact $r $x $y {apply {{a b} {expr {$a & $b}}}}]
+            if {$cross ne $r} {
+                return $cross
+            }
+            if {$ymn ne "-inf" && $ymn >= 0 && $ymn eq $ymx} {
+                return [AndMaskExact $r $ymn]
+            }
+            if {$xmn ne "-inf" && $xmn >= 0 && $xmn eq $xmx} {
+                return [AndMaskExact $r $xmn]
+            }
+            return $r
         }
         bit_or {
-            if {$xmn eq "-inf" || $xmn < 0 || $ymn eq "-inf" || $ymn < 0} {
-                return [unknown]
+            set r [unknown]
+            if {$xmn ne "-inf" && $xmn >= 0 && $ymn ne "-inf" && $ymn >= 0} {
+                set r [dict create min [Max $xmn $ymn] max [AddBound $xmx $ymx]]
             }
-            return [dict create min [Max $xmn $ymn] max [AddBound $xmx $ymx]]
+            return [CrossExact $r $x $y {apply {{a b} {expr {$a | $b}}}}]
         }
         bit_xor {
-            if {$xmn eq "-inf" || $xmn < 0 || $ymn eq "-inf" || $ymn < 0} {
-                return [unknown]
+            set r [unknown]
+            if {$xmn ne "-inf" && $xmn >= 0 && $ymn ne "-inf" && $ymn >= 0} {
+                set r [dict create min 0 max [AddBound $xmx $ymx]]
             }
-            return [dict create min 0 max [AddBound $xmx $ymx]]
+            return [CrossExact $r $x $y {apply {{a b} {expr {$a ^ $b}}}}]
         }
         shift_right {
             if {$xmn eq "-inf" || $xmn < 0} {
                 return [unknown]
             }
-            return [dict create min 0 max $xmx]
+            set r [dict create min 0 max $xmx]
+            if {$ymn eq "-inf" || $ymn < 0} {
+                # An unproven/possibly-negative shift amount: keep the old,
+                # shift-amount-independent bound (spec #21: a shift's
+                # validity is a separate fact, consulted later by raw
+                # eligibility -- not assumed here).
+                return $r
+            }
+            set mx [ShiftRightBound $xmx $ymn]
+            set mn [expr {$ymx eq "+inf" ? 0 : [ShiftRightBound $xmn $ymx]}]
+            set r [dict create min $mn max $mx]
+            return [CrossExact $r $x $y {apply {{a b} {expr {$a >> $b}}}}]
+        }
+        shift_left {
+            if {$xmn eq "-inf" || $xmn < 0 || $ymn eq "-inf" || $ymn < 0} {
+                return [unknown]
+            }
+            variable maxShiftLeftAmount
+            if {$ymx eq "+inf" || $ymx > $maxShiftLeftAmount} {
+                # See maxShiftLeftAmount's own comment: beyond this, even a
+                # perfectly ordinary (MAX_SHIFT-valid) shift amount can
+                # demand a bound too large for the rest of this file to
+                # affordably compare against its "-inf"/"+inf" sentinels.
+                return [unknown]
+            }
+            set mn [expr {$xmn << $ymn}]
+            set mx [expr {$xmx eq "+inf" ? "+inf" : ($xmx << $ymx)}]
+            set r [dict create min $mn max $mx]
+            return [CrossExact $r $x $y {apply {{a b} {expr {$a << $b}}}}]
         }
     }
     return [unknown]
+}
+
+# A sound bound on X >> Y for nonnegative finite X and nonnegative Y (Y may
+# be +inf, the limiting case: a nonnegative value shifted by an
+# ever-growing amount approaches, and is bounded by, 0).
+proc hir::range::ShiftRightBound {a b} {
+    if {$a eq "+inf"} {
+        return +inf
+    }
+    if {$b eq "+inf"} {
+        return 0
+    }
+    return [expr {$a >> $b}]
 }
 
 proc hir::range::AndMaskExact {r mask} {
@@ -780,7 +883,7 @@ proc hir::range::Call {hirVar ctxVar e node} {
                 }
                 * { set result [mul $x $y] }
             }
-        } elseif {$name in {bit_and bit_or bit_xor shift_right} && [llength $argRanges] == 2} {
+        } elseif {$name in {bit_and bit_or bit_xor shift_right shift_left} && [llength $argRanges] == 2} {
             lassign $argRanges x y
             set result [BitOp $name $x $y]
         } else {

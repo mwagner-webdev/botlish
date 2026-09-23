@@ -1,0 +1,183 @@
+# hir-range-bitop.test -- BOUNDED-BIT-SHIFT-LOWERING.md's Phase A: generic
+# bounded exact-set transfer for bit_and/bit_or/bit_xor (hir::range::BitOp,
+# via the generalized hir::range::CrossExact), and shift_right/shift_left
+# transfer that actually consults the shift amount. Deliberately generic --
+# no assertion here names Byte/Nibble/HighNibble/byte::nibble; HighNibble's
+# own 16-value domain is reused only as test *data* in a couple of cases
+# (same precedent as tests/hir-range-exact.test), never as a named concept
+# any assertion depends on. The real byte::nibble body's own facts are
+# pinned separately, in tests/native-bitshift.test (which needs the full
+# corpus/native-lowering machinery this file does not source).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+# ---------------------------------------------------------------------------
+# Small helpers over hir::range::BitOp directly: a Range built from a
+# min/max/exact triple (the exact list, when given, need not be sorted or
+# deduplicated -- Normalize handles both).
+proc rangeFrom {mn mx {exact {}}} {
+    set r [dict create min $mn max $mx]
+    if {$exact ne {}} {
+        return [hir::range::Normalize $r $exact]
+    }
+    return $r
+}
+
+proc bitop {name a b} {
+    return [hir::range::show [hir::range::BitOp $name $a $b]]
+}
+
+# ---------------------------------------------------------------------------
+# Exact-set transfer: bit_and (spec #7-8, #11-13).
+
+test bitop-and-primary-sparse-mask {a sparse 16-value set ANDed with a mask covering none of its set bits proves the exact singleton 0 -- the milestone's own mandatory case, entirely generic} -body {
+    bitop bit_and [rangeFrom 0 240 {0 16 32 48 64 80 96 112 128 144 160 176 192 208 224 240}] [rangeFrom 15 15]
+} -result {[0, 0] {0}}
+
+test bitop-and-exact-1 {spec #8's own example: {1,2,4,8} & {3} -> {0,1,2}, which is dense relative to its own [0,2] interval and so canonicalizes without a separate exact key (spec #12)} -body {
+    bitop bit_and [rangeFrom 1 8 {1 2 4 8}] [rangeFrom 3 3]
+} -result {[0, 2]}
+
+test bitop-and-exact-2 {spec #8's own example: {0,1,2,3} & {1} -> {0,1}, likewise dense} -body {
+    bitop bit_and [rangeFrom 0 3 {0 1 2 3}] [rangeFrom 1 1]
+} -result {[0, 1]}
+
+test bitop-and-exact-3 {spec #8's own example: {8,12} & {7} -> {0,4}, genuinely sparse relative to [0,4] and kept} -body {
+    bitop bit_and [rangeFrom 8 12 {8 12}] [rangeFrom 7 7]
+} -result {[0, 4] {0,4}}
+
+test bitop-and-both-sides-sparse {exact transfer is symmetric: a sparse set on either side is consulted} -body {
+    bitop bit_and [rangeFrom 3 3] [rangeFrom 1 8 {1 2 4 8}]
+} -result {[0, 2]}
+
+test bitop-and-mask-fallback-still-works {a constant mask with no exact fact on the other operand still gets bounded submask enumeration (pre-existing behavior, preserved)} -body {
+    bitop bit_and [hir::range::unknown] [rangeFrom 15 15]
+} -result {[0, 15]}
+
+test bitop-and-negative-mask-no-submask-enumeration {a negative constant "mask" never reaches submask enumeration (AndMaskExact assumes a nonnegative mask)} -body {
+    bitop bit_and [hir::range::unknown] [rangeFrom -1 -1]
+} -result {[-∞, +∞]}
+
+# ---------------------------------------------------------------------------
+# Exact-set transfer: bit_or / bit_xor (spec #9).
+
+test bitop-or-exact {{0,16} | {1,2} stays exact within budget: 0 does not survive ORed with a nonzero value, so the true cross product ({1,2,17,18}) is tighter at both ends than the loose sum bound ([0,18]) would suggest} -body {
+    bitop bit_or [rangeFrom 0 16 {0 16}] [rangeFrom 1 2 {1 2}]
+} -result {[1, 18] {1,2,17,18}}
+
+test bitop-xor-exact {{0,16} ^ {1,2} stays exact within budget} -body {
+    bitop bit_xor [rangeFrom 0 16 {0 16}] [rangeFrom 1 2 {1 2}]
+} -result {[1, 18] {1,2,17,18}}
+
+test bitop-or-combines-two-and-masks {generic bit_or transfer combines two already-sparse bit_and results into their true union, with no OR-specific or mask-specific rule (mirrors refined-signature-verify-4's own real HIR-level case)} -body {
+    set unk [hir::range::unknown]
+    set left [hir::range::BitOp bit_and $unk [rangeFrom 128 128]]
+    set right [hir::range::BitOp bit_and $unk [rangeFrom 112 112]]
+    bitop bit_or $left $right
+} -result {[0, 240] {0,16,32,48,64,80,96,112,128,144,160,176,192,208,224,240}}
+
+# ---------------------------------------------------------------------------
+# Budget: never an unconditional Cartesian product (spec #6, #30, #81-82).
+
+test bitop-budget-rejects-expensive-and {two 32-value sets do not trigger a 1024-pair evaluation for bit_and: the interval survives, no exact set does} -body {
+    set av {}
+    for {set i 0} {$i < 32} {incr i} { lappend av $i }
+    set bv {}
+    for {set i 0} {$i < 32} {incr i} { lappend bv [expr {100 + $i}] }
+    bitop bit_and [rangeFrom 0 31 $av] [rangeFrom 100 131 $bv]
+} -result {[0, 131]}
+
+test bitop-budget-rejects-expensive-or {the same budget bounds bit_or} -body {
+    set av {}
+    for {set i 0} {$i < 32} {incr i} { lappend av $i }
+    set bv {}
+    for {set i 0} {$i < 32} {incr i} { lappend bv [expr {100 + $i}] }
+    bitop bit_or [rangeFrom 0 31 $av] [rangeFrom 100 131 $bv]
+} -result {[100, 162]}
+
+test bitop-budget-large-mask-no-full-submask-enumeration {a mask with too many set bits to enumerate within budget does not enumerate all its submasks (pre-existing AndMaskExact behavior, unaffected)} -body {
+    bitop bit_and [hir::range::unknown] [rangeFrom 63 63]
+} -result {[0, 63]}
+
+# ---------------------------------------------------------------------------
+# Dense results canonicalize to a plain interval (spec #12, #16).
+
+test bitop-and-dense-canonicalizes {an exact cross product covering every value of its own interval drops the redundant exact key} -body {
+    bitop bit_and [rangeFrom 0 15 {0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15}] [rangeFrom 15 15]
+} -result {[0, 15]}
+
+# ---------------------------------------------------------------------------
+# Point results reuse the ordinary singleton representation (spec #13).
+
+test bitop-and-point-result-is-a-point {a singleton exact result is representable as an ordinary point Range, not a separate "bitwise constant" notion} -body {
+    set r [hir::range::BitOp bit_and [rangeFrom 0 240 {0 16 32 48 64 80 96 112 128 144 160 176 192 208 224 240}] [rangeFrom 15 15]]
+    list [dict get $r min] [dict get $r max] [hir::range::ExactOf $r]
+} -result {0 0 0}
+
+# ---------------------------------------------------------------------------
+# shift_right: must use the shift amount, not just the shifted value's own
+# range (spec #14-17).
+
+test bitop-shift-right-ignored-before {a bare interval for x, with no shift-amount fact at all, still only bounds by x's own range (sound fallback, unchanged from before this milestone)} -body {
+    bitop shift_right [rangeFrom 0 240] [hir::range::unknown]
+} -result {[0, 240]}
+
+test bitop-shift-right-constant-interval {spec #15's own primary case: x:[0,240], k: exact 4 -> [0,15], without x needing an exact set} -body {
+    bitop shift_right [rangeFrom 0 240] [rangeFrom 4 4]
+} -result {[0, 15]}
+
+test bitop-shift-right-exact-transfer {spec #16's own primary case: x:{0,16,...,240}, k:{4} -> the true cross product, which is dense and canonicalizes to [0,15]} -body {
+    bitop shift_right [rangeFrom 0 240 {0 16 32 48 64 80 96 112 128 144 160 176 192 208 224 240}] [rangeFrom 4 4]
+} -result {[0, 15]}
+
+test bitop-shift-right-variable-amount-exact {a small exact shift-amount set combines with a tracked x via the same exact transfer} -body {
+    bitop shift_right [rangeFrom 0 3 {0 1 2 3}] [rangeFrom 1 2 {1 2}]
+} -result {[0, 1]}
+
+test bitop-shift-right-unbounded-amount {an unbounded-above shift amount still soundly bounds the minimum at 0} -body {
+    bitop shift_right [rangeFrom 0 240] [rangeFrom 4 +inf]
+} -result {[0, 15]}
+
+test bitop-shift-right-negative-amount-conservative {a possibly-negative shift amount falls back to the shift-amount-independent bound rather than guessing} -body {
+    bitop shift_right [rangeFrom 0 240] [hir::range::unknown]
+} -result {[0, 240]}
+
+test bitop-shift-right-negative-x-unknown {a possibly-negative shifted value stays unknown, unaffected by this milestone (spec #19, #47)} -body {
+    bitop shift_right [rangeFrom -5 240] [rangeFrom 4 4]
+} -result {[-∞, +∞]}
+
+# ---------------------------------------------------------------------------
+# shift_left: symmetric interval treatment where sound (spec #18).
+
+test bitop-shift-left-interval {[min<<k, max<<k] for nonnegative x and a nonnegative constant k, arbitrary-precision (no truncation) -- x's own interval here (51 values) exceeds the exact-set budget, so this exercises the plain interval bound alone, not CrossExact's automatic dense reconstruction} -body {
+    bitop shift_left [rangeFrom 0 50] [rangeFrom 4 4]
+} -result {[0, 800]}
+
+test bitop-shift-left-small-interval-reconstructs-exact {a small-enough x interval (within budget) is reconstructed on demand by CrossExact even with no exact key explicitly stored, giving the true (sparser) shifted set rather than just the endpoint bound} -body {
+    bitop shift_left [rangeFrom 0 15] [rangeFrom 4 4]
+} -result {[0, 240] {0,16,32,48,64,80,96,112,128,144,160,176,192,208,224,240}}
+
+test bitop-shift-left-exact-transfer {an exact shift-left cross product stays exact within budget} -body {
+    bitop shift_left [rangeFrom 0 3 {0 1 2 3}] [rangeFrom 4 4]
+} -result {[0, 48] {0,16,32,48}}
+
+test bitop-shift-left-negative-fallback {a possibly-negative shift amount or shifted value falls back to unknown rather than guessing (spec #19)} -body {
+    list [bitop shift_left [rangeFrom -5 15] [rangeFrom 4 4]] [bitop shift_left [rangeFrom 0 15] [hir::range::unknown]]
+} -result {{[-∞, +∞]} {[-∞, +∞]}}
+
+test bitop-shift-left-unbounded-amount {an unbounded-above shift amount falls back to unknown: unlike shift_right (whose growth is bounded, shrinking towards 0), shift_left's result can grow without limit, and this file never attempts to compute or compare a bound that large (see maxShiftLeftAmount)} -body {
+    bitop shift_left [rangeFrom 0 15] [rangeFrom 4 +inf]
+} -result {[-∞, +∞]}
+
+test bitop-shift-left-amount-too-large-falls-back {a shift amount whose own upper bound exceeds the bounded-cost threshold falls back to unknown, even though it is still comfortably within the language's own much larger MAX_SHIFT contract (spec #92's own compile-time-cost concern, confirmed directly: an unguarded computation here measured tens of seconds for a single MAX_SHIFT-sized shift)} -body {
+    bitop shift_left [rangeFrom 0 15] [rangeFrom 5000 5000]
+} -result {[-∞, +∞]}
+
+test bitop-shift-left-amount-at-threshold-still-works {right at the threshold, the bound is still computed exactly (not merely "did not crash")} -body {
+    set got [bitop shift_left [rangeFrom 1 1] [rangeFrom 4096 4096]]
+    set huge [expr {1 << 4096}]
+    set want [format {[%s, %s] {%s}} $huge $huge $huge]
+    expr {$got eq $want}
+} -result 1
+
+cleanupTests

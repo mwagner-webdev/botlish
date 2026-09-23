@@ -158,6 +158,12 @@ namespace eval native::lower {
     variable ranges {}
     variable currentInstance {}
     variable reprOpt 1
+    # The widest shift amount a raw (host machine i64) shift may use (see
+    # RawEligibleShift): the host word width, not core/scalarbits.tcl's own
+    # much larger MAX_SHIFT -- a proven-constant shift count under this bound
+    # is always also within MAX_SHIFT, so raw eligibility never needs to
+    # consult that separate, generic-path-only contract.
+    variable rawShiftMax 64
     # Scalar replacement (see "Scalar replacement" below): the hir::escape
     # analysis of the program, and whether it is enabled at all.
     variable escape {}
@@ -194,9 +200,16 @@ namespace eval native::lower {
 # hir/range.tcl's header). -repr-opt 0 (or BOTLISH_NATIVE_REPR_OPT=0)
 # disables it, for differential testing and benchmark comparison.
 #
-# The rewrite applies only to `+ - * < <= > >= ==` on two Ints already
-# proven that kind by a guard or by a static type (representation is
-# strictly downstream of the guard/kind machinery: see RawArithOrCompare).
+# The rewrite applies to `+ - * < <= > >= ==` on two Ints already proven that
+# kind by a guard or by a static type (representation is strictly downstream
+# of the guard/kind machinery: see RawIntOp), and, since the bounded-shift-
+# lowering milestone, to `>>`/`<<` (shift_right/shift_left) once both the
+# shifted value and the shift amount are additionally proven safe
+# (RawEligibleShift): nonnegative, in range, and (for the shift amount) a
+# single already-known value -- AND/OR/XOR are deliberately not part of this
+# tier (see below): they already have their own branch-free tagged-word fast
+# path (native/src/codegen/clif.rs's int_bitop), which a raw promotion would
+# only duplicate, not improve.
 # Every "logical" NIR register a binding, a call argument, or a branch join
 # is ever known by stays tagged, exactly as it is today; raw registers are
 # purely local temporaries introduced and consumed within one function's
@@ -223,14 +236,15 @@ namespace eval native::lower {
 #
 #   ref   a local/parameter register already stored raw (a self-tail-proven
 #         parameter, RawParams): returned as-is, no conversion at all.
-#   call  a native `+ - * < <= > >= ==` whose operands need no runtime kind
-#         guard (RawEligibleCall) and whose operand/result ranges are proven
-#         small (hir/range.tcl): its own operands are demanded raw too (so a
-#         chain like `(i + 1) * 2 - 3` stays raw throughout, recursively),
-#         and the arithmetic result is boxed only if the caller wanted tagged
-#         -- a comparison's result is always a tagged Bool regardless, since
-#         raw is purely an Int representation (see #11 of the milestone this
-#         was written for; Bool representation is untouched).
+#   call  a native `+ - * < <= > >= ==` or a proven-safe `>>`/`<<` whose
+#         operands need no runtime kind guard (RawEligibleCall) and whose
+#         operand/result ranges are proven small (hir/range.tcl): its own
+#         operands are demanded raw too (so a chain like `(i + 1) * 2 - 3`,
+#         or a shift chained onto one, stays raw throughout, recursively),
+#         and the arithmetic/shift result is boxed only if the caller wanted
+#         tagged -- a comparison's result is always a tagged Bool regardless,
+#         since raw is purely an Int representation (see #11 of the
+#         milestone this was written for; Bool representation is untouched).
 #
 # Every other expression kind (and a raw-ineligible call, or one whose
 # operand needs a guard: guards run on tagged registers, so representation
@@ -3634,6 +3648,12 @@ proc native::lower::NativeCall {fnVar e node name argRegs rawEligible op want} {
     # it always has.
     set argExprs [dict get $node args]
     EmitArgGuards fn $e $argExprs $argRegs [dict get $meta paramTypes] $name
+    if {[PureBitwiseEligible $e $argExprs $op]} {
+        set folded [FoldPureBitwise fn $e $argExprs $argRegs $op $want]
+        if {$folded ne ""} {
+            return $folded
+        }
+    }
     if {$rawEligible} {
         # ARGREGS are already raw (Call requested it): lower directly, with
         # no RawOf needed on either operand.
@@ -3641,8 +3661,9 @@ proc native::lower::NativeCall {fnVar e node name argRegs rawEligible op want} {
         set rawOp [dict get {
             iadd riadd  isub risub  imul rimul
             ilt  rilt   ile  rile   igt  rigt   ige rige   ieq rieq
+            ishr rishr  ishl rishl
         } $op]
-        set arith [expr {$op in {iadd isub imul}}]
+        set arith [expr {$op in {iadd isub imul ishr ishl}}]
         if {$arith} {
             set r [AssignRaw fn "op $rawOp $xa $xb" $e]
         } else {
@@ -3659,11 +3680,112 @@ proc native::lower::NativeCall {fnVar e node name argRegs rawEligible op want} {
         }
         return [list [TaggedOf fn $r] tagged]
     }
-    set raw [RawArithOrCompare fn $e $argExprs $argRegs $op $want]
+    set raw [RawIntOp fn $e $argExprs $argRegs $op $want]
     if {$raw ne ""} {
         return $raw
     }
     return [list [Assign fn [string trimright "op $op [join $argRegs { }]"] $e] tagged]
+}
+
+# ---------------------------------------------------------------------------
+# Pure bitwise simplification (spec #23-27): a lowering-time-only decision,
+# exactly like raw representation itself -- never a HIR rewrite, never
+# changes what a value *is*, only which instructions native code emits for
+# it. Both procs below are gated on PureBitwiseEligible's own guard-safety
+# check, which mirrors RawEligibleCall's: a call whose operand still needs a
+# runtime kind guard is not proven to even evaluate to an Int, so neither a
+# constant nor an algebraic-identity replacement would be sound (spec #26).
+# argRegs are already fully evaluated by the time NativeCall runs (Call
+# always evaluates every argument first, unconditionally), so choosing not
+# to emit iand/ior/ixor here never skips an evaluation that may have had a
+# side effect -- it only ever discards the (already pure, allocation-free,
+# total) operation itself.
+
+# Whether E (a call to the pure, total, two-operand bitwise native OP: iand,
+# ior, or ixor) is eligible for FoldPureBitwise below.
+proc native::lower::PureBitwiseEligible {e argExprs op} {
+    variable reprOpt
+    variable guards
+    variable knownErrors
+    if {!$reprOpt || $op ni {iand ior ixor} || [llength $argExprs] != 2} {
+        return 0
+    }
+    foreach a $argExprs {
+        set key [list $e $a]
+        if {[dict exists $guards $key] || [dict exists $knownErrors $key]} {
+            return 0
+        }
+    }
+    return 1
+}
+
+# {REG REPR}, or "" to fall back to the ordinary `op iand/ior/ixor` emission.
+# Two independent, purely generic simplifications, both decided from
+# hir/range.tcl's own already-computed facts (no code here names a type or a
+# specific mask):
+#
+#   1. E's own result is a single proven value (a point Range): the whole
+#      call becomes that Int constant directly (spec #23-26's own worked
+#      example, `x & 15 -> 0` for the real HighNibble-domain caller).
+#
+#   2. Otherwise, for `ior`/`ixor`: if one operand is provably exactly 0,
+#      the result is unconditionally the other operand's own value (`0|x`,
+#      `x|0`, `0^x`, `x^0` all equal `x` for ordinary Int bit semantics --
+#      spec #27). For `iand`: if one operand (B) is a single proven constant
+#      and the other (A) is nonnegative, and the call's own already-computed
+#      result range/exact-set exactly equals A's own, then this AND changes
+#      nothing: AND-with-any-mask can only ever clear bits of a nonnegative
+#      A (so `a&b <= a` for every a>=0, any b), so a value set that maps
+#      *onto itself* under a fixed mask must map every element to itself
+#      (a self-map of a finite set bounded above by the identity, hitting
+#      every element, is forced to be the identity) -- this is what removes
+#      the real body's own trailing `bit_and(..., 15)` once the OR it wraps
+#      has already been proven to stay within `[0, 15]` (spec #3's "final
+#      masking required by its broad all-Int implementation").
+proc native::lower::FoldPureBitwise {fnVar e argExprs argRegs op want} {
+    upvar 1 $fnVar fn
+    variable ranges
+    variable currentInstance
+    set resultRange [hir::range::of $ranges $currentInstance $e]
+    set rmn [dict get $resultRange min]
+    if {$rmn ne "-inf" && $rmn eq [dict get $resultRange max]} {
+        return [WantConvert fn [IntConst fn $rmn $e] $want]
+    }
+    lassign $argExprs ea eb
+    lassign $argRegs ra rb
+    set eaRange [hir::range::of $ranges $currentInstance $ea]
+    set ebRange [hir::range::of $ranges $currentInstance $eb]
+    if {$op eq "iand"} {
+        set eamn [dict get $eaRange min]
+        set eamx [dict get $eaRange max]
+        set ebmn [dict get $ebRange min]
+        set ebmx [dict get $ebRange max]
+        if {$eamn ne "-inf" && $eamn >= 0 && $ebmn ne "-inf" && $ebmn eq $ebmx
+                && $resultRange eq $eaRange} {
+            return [WantConvert fn $ra $want]
+        }
+        if {$ebmn ne "-inf" && $ebmn >= 0 && $eamn ne "-inf" && $eamn eq $eamx
+                && $resultRange eq $ebRange} {
+            return [WantConvert fn $rb $want]
+        }
+        return ""
+    }
+    foreach {zeroRange keepReg} [list $eaRange $rb $ebRange $ra] {
+        if {[dict get $zeroRange min] eq 0 && [dict get $zeroRange max] eq 0} {
+            return [WantConvert fn $keepReg $want]
+        }
+    }
+    return ""
+}
+
+# {REG REPR}: REG converted to WANT's representation (both already-known
+# representations: REG is always tagged here), reusing RawOf's own cache.
+proc native::lower::WantConvert {fnVar reg want} {
+    upvar 1 $fnVar fn
+    if {$want eq "raw"} {
+        return [list [RawOf fn $reg] raw]
+    }
+    return [list $reg tagged]
 }
 
 # ---------------------------------------------------------------------------
@@ -3683,19 +3805,27 @@ proc native::lower::NativeCall {fnVar e node name argRegs rawEligible op want} {
 # raw-representable `+ - * < <= > >= ==`, there are exactly two arguments,
 # *neither* needs a runtime kind guard or known-error guard (CollectChecks's
 # guards/knownErrors: those run on a tagged register, so representation
-# stays strictly downstream of them, same as always -- see RawArithOrCompare
-# below for the case where a guard *is* needed first), and both operands'
-# (and, for arithmetic, the result's) ranges hir/range.tcl proved fit the
-# small-Int representation. Decided purely from ARG-EXPRS/E, before either
-# argument is lowered, so Call can ask each for raw directly instead of
-# tagged-then-RawOf.
+# stays strictly downstream of them, same as always -- see RawIntOp below for
+# the case where a guard *is* needed first), and both operands' (and, for
+# arithmetic, the result's) ranges hir/range.tcl proved fit the small-Int
+# representation. Decided purely from ARG-EXPRS/E, before either argument is
+# lowered, so Call can ask each for raw directly instead of tagged-then-RawOf.
+# `ishr`/`ishl` (proven-safe shifts -- RawEligibleShift) get the same
+# treatment through the same entry point, so a shift chained onto another
+# raw-eligible expression never needlessly boxes the intermediate value.
 proc native::lower::RawEligibleCall {e argExprs op} {
     variable reprOpt
     variable ranges
     variable currentInstance
     variable guards
     variable knownErrors
-    if {!$reprOpt || $op ni {iadd isub imul ilt ile igt ige ieq} || [llength $argExprs] != 2} {
+    if {!$reprOpt || [llength $argExprs] != 2} {
+        return 0
+    }
+    if {$op in {ishr ishl}} {
+        return [RawEligibleShift $e $argExprs $op]
+    }
+    if {$op ni {iadd isub imul ilt ile igt ige ieq}} {
         return 0
     }
     lassign $argExprs ea eb
@@ -3723,22 +3853,107 @@ proc native::lower::RawEligibleCall {e argExprs op} {
     return 1
 }
 
-# The RawEligibleCall-declined path: OP already ran on tagged ARG-REGS (a
-# guard may just have checked one of them), so this only asks whether the two
-# operands' ranges retroactively also fit the small-Int representation --
-# unlike RawEligibleCall, it consumes already-lowered registers, converting
-# with RawOf rather than asking Expr to produce raw from scratch. Emits the
-# raw form and returns {REG REPR} (comparisons: always tagged; arithmetic:
-# raw if WANT is raw, else reboxed once). Otherwise emits nothing and returns
-# "": the caller falls back to the plain tagged `op`.
-proc native::lower::RawArithOrCompare {fnVar e argExprs argRegs op want} {
-    upvar 1 $fnVar fn
+# Raw-shift eligibility (spec #33-41, #47): OP (ishr/ishl) qualifies for raw
+# lowering only when every semantic obligation is statically proven, so the
+# generic runtime helper (rt_int_shl/rt_int_shr: BigInt promotion, the
+# 0<=k<=MAX_SHIFT validity check) can be skipped entirely rather than merely
+# inlined --
+#
+#   * neither operand needs a runtime kind guard or known-error guard (same
+#     discipline as RawEligibleCall's own arithmetic/comparison case);
+#   * the shifted value X's own range fits the small-Int representation and
+#     is proven nonnegative -- deliberately conservative (spec #47): a raw
+#     right shift of a negative host machine integer is an arithmetic shift
+#     (sign-extending), which happens to match Botlish's own arbitrary-
+#     precision floor-shift semantics for negative operands too, but this
+#     milestone does not attempt to prove that equivalence rigorously for
+#     every case (e.g. a negative X straddling a raw/BigInt representation
+#     boundary), so negative X is simply left on the generic path;
+#   * the shift amount K's range is a single already-proven value (spec
+#     #40's own conservative first cut -- an interval would also be sound
+#     for shift_right specifically, since it is monotonically non-increasing
+#     in K, but a single proven value is enough for the mandatory case and
+#     keeps this proc's own soundness argument trivial for shift_left too,
+#     where growth makes an interval-only proof more delicate), itself
+#     nonnegative and strictly below rawShiftMax -- far inside the
+#     language's own MAX_SHIFT contract (core/scalarbits.tcl), so a shift
+#     amount that passes this check can never be the invalid-shift error
+#     case;
+#   * E's own already-computed result range (hir::range::of -- Phase A's own
+#     shift_right/shift_left transfer) also fits the small-Int
+#     representation, so the raw result never needs to escape into BigInt
+#     (this is the load-bearing check for shift_left, spec #38-39; for
+#     shift_right it is automatically true whenever X's own range fits,
+#     since a nonnegative right shift never grows the value, but checking it
+#     uniformly keeps both operations under one proof).
+proc native::lower::RawEligibleShift {e argExprs op} {
     variable reprOpt
     variable ranges
     variable currentInstance
-    if {!$reprOpt || $op ni {iadd isub imul ilt ile igt ige ieq} || [llength $argExprs] != 2} {
+    variable guards
+    variable knownErrors
+    variable rawShiftMax
+    if {!$reprOpt || [llength $argExprs] != 2} {
+        return 0
+    }
+    lassign $argExprs ex ek
+    foreach a [list $ex $ek] {
+        set key [list $e $a]
+        if {[dict exists $guards $key] || [dict exists $knownErrors $key]} {
+            return 0
+        }
+    }
+    set rangeX [hir::range::of $ranges $currentInstance $ex]
+    if {![hir::range::fitsSmall $rangeX] || [dict get $rangeX min] eq "-inf"
+            || [dict get $rangeX min] < 0} {
+        return 0
+    }
+    set rangeK [hir::range::of $ranges $currentInstance $ek]
+    set kmn [dict get $rangeK min]
+    set kmx [dict get $rangeK max]
+    if {$kmn eq "-inf" || $kmn ne $kmx || $kmn < 0 || $kmn >= $rawShiftMax} {
+        return 0
+    }
+    set resultRange [hir::range::of $ranges $currentInstance $e]
+    return [hir::range::fitsSmall $resultRange]
+}
+
+# The RawEligibleCall-declined path: OP already ran on tagged ARG-REGS (a
+# guard may just have checked one of them), so this only asks whether the
+# operands' ranges retroactively also qualify for raw lowering -- unlike
+# RawEligibleCall, it consumes already-lowered registers, converting with
+# RawOf rather than asking Expr to produce raw from scratch. Emits the raw
+# form and returns {REG REPR} (comparisons: always tagged; arithmetic and
+# shifts: raw if WANT is raw, else reboxed once). Otherwise emits nothing and
+# returns "": the caller falls back to the plain tagged `op`. Formerly
+# RawArithOrCompare; renamed once shifts joined arithmetic/comparison as a
+# third kind of raw-eligible integer operation (spec #31).
+proc native::lower::RawIntOp {fnVar e argExprs argRegs op want} {
+    upvar 1 $fnVar fn
+    variable reprOpt
+    if {!$reprOpt || [llength $argExprs] != 2} {
         return ""
     }
+    if {$op in {ishr ishl}} {
+        if {![RawEligibleShift $e $argExprs $op]} {
+            return ""
+        }
+        lassign $argRegs ra rb
+        set xa [RawOf fn $ra]
+        set xb [RawOf fn $rb]
+        set rawOp [expr {$op eq "ishr" ? "rishr" : "rishl"}]
+        set r [AssignRaw fn "op $rawOp $xa $xb" $e]
+        dict incr fn rawArith
+        if {$want eq "raw"} {
+            return [list $r raw]
+        }
+        return [list [TaggedOf fn $r] tagged]
+    }
+    if {$op ni {iadd isub imul ilt ile igt ige ieq}} {
+        return ""
+    }
+    variable ranges
+    variable currentInstance
     lassign $argExprs ea eb
     lassign $argRegs ra rb
     set rangeA [hir::range::of $ranges $currentInstance $ea]

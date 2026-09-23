@@ -1,0 +1,237 @@
+# native-bitshift.test -- BOUNDED-BIT-SHIFT-LOWERING.md's Phase C: raw
+# (untagged) machine-integer lowering for proven-safe shift_right/shift_left
+# (native/lower.tcl's RawEligibleShift/RawIntOp, native/src/nir.rs's
+# RIShr/RIShl, native/src/codegen/clif.rs's direct `sshr`/`ishl` lowering),
+# plus the real byte::nibble closed instance's own fact-to-machine-code
+# chain (the milestone's mandatory acceptance case) and the generic-helper
+# fallback's continued correctness. No assertion in the synthetic (non-
+# corpus) tests names Byte/Nibble/HighNibble or any function from that
+# vertical -- see BOUNDED-BIT-SHIFT-LOWERING.md \167 3 and \167 57.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 100000
+
+set parityBackends {interp compile cranelift-generic cranelift}
+
+proc sourceIR {text} {
+    return [hir::lower [surface::compile $text t.bot -strict 0]]
+}
+proc parity {text} {
+    set exprs [sourceIR $text]
+    set outcomes [lmap backend $::parityBackends {outcomeUnder $backend $exprs}]
+    if {[llength [lsort -unique $outcomes]] == 1} { return same }
+    return [join [lmap backend $::parityBackends outcome $outcomes {list $backend $outcome}] " / "]
+}
+
+# The NIR text of a plain (non-.bot, no module) program TEXT, compiled and
+# lowered directly (no bench/refined-checks.ir needed for the synthetic
+# eligibility/rejection cases below).
+proc nirOf {text} {
+    return [native::nir [surface::compile $text t.bot -strict 0]]
+}
+
+# The substring of NIR-or-CLIF TEXT holding just function NAME's own body:
+# from its quoted name to the line before the *next* function/comment
+# marker MARKER ("\nend" for NIR, "\n; function " for CLIF's own per-
+# function header comment that always immediately precedes the next
+# function's body -- see native/native.tcl's own `legend`/clif dump shape).
+proc FunctionBody {text name marker} {
+    set idx [string first "\"$name\"" $text]
+    if {$idx < 0} {
+        error "function \"$name\" not found"
+    }
+    set endIdx [string first $marker $text $idx]
+    if {$endIdx < 0} {
+        set endIdx [string length $text]
+    }
+    return [string range $text $idx $endIdx]
+}
+
+proc refinedChecksHir {} {
+    return [native::buildProgramHir [core::loadProgramFile \
+        [file join $::projectRoot bench refined-checks.ir]]]
+}
+
+# ---------------------------------------------------------------------------
+# The real acceptance case: byte::nibble's closed instance in the actual
+# refined-checks.ir/web.bot chain.
+
+test bitshift-real-byte-nibble-fact-and-is-zero {inside the real closed byte::nibble instance (whose actual body is bit_and(bit_or(bit_and(x,15), shift_right(x,4)), 15) -- the inner x&15 is the milestone's own mandatory exact-zero case; the outer bit_and(...,15) is the "final masking" its broad all-Int implementation adds, whose own result is the non-degenerate [0,15] that Phase B's generic AND-identity, not BitOp's range facts alone, later proves redundant)} -body {
+    set hir [refinedChecksHir]
+    set spec [hir::specialize::analyze $hir]
+    set ranges [hir::range::analyze $hir $spec]
+    set id ""
+    foreach candidate [dict get $spec used] {
+        if {[dict get [dict get $spec instances $candidate] name] eq "byte::nibble"} { set id $candidate }
+    }
+    set view [hir::specialize::view $hir $spec $id]
+    set found {}
+    foreach e [dict get [dict get $spec instances $id] reachable] {
+        if {[hir::kind $view $e] ne "call"} continue
+        lassign [hir::get $view $e target] targetKind target
+        if {$targetKind ne "native"} continue
+        if {[dict get [hir::symbol $view $target] name] eq "bit_and"} {
+            lappend found [hir::range::show [hir::range::of $ranges $id $e]]
+        }
+    }
+    lsort -unique $found
+} -result {{[0, 0] {0}} {[0, 15]}}
+
+test bitshift-real-byte-nibble-fact-shift-is-0-15 {inside the same instance, x >> 4 is proven [0,15] (Phase A's shift transfer using the shift amount)} -body {
+    set hir [refinedChecksHir]
+    set spec [hir::specialize::analyze $hir]
+    set ranges [hir::range::analyze $hir $spec]
+    set id ""
+    foreach candidate [dict get $spec used] {
+        if {[dict get [dict get $spec instances $candidate] name] eq "byte::nibble"} { set id $candidate }
+    }
+    set view [hir::specialize::view $hir $spec $id]
+    set found {}
+    foreach e [dict get [dict get $spec instances $id] reachable] {
+        if {[hir::kind $view $e] ne "call"} continue
+        lassign [hir::get $view $e target] targetKind target
+        if {$targetKind ne "native"} continue
+        if {[dict get [hir::symbol $view $target] name] eq "shift_right"} {
+            lappend found [hir::range::show [hir::range::of $ranges $id $e]]
+        }
+    }
+    lsort -unique $found
+} -result {{[0, 15]}}
+
+test bitshift-real-byte-nibble-nir-raw-shift-no-mask-no-helper {byte::nibble's own optimized NIR body: a raw shift (rishr), and no surviving iand/ior/rt_int_shr on this path (spec \167 51, \167 62)} -body {
+    set body [FunctionBody [native::nir [refinedChecksHir]] byte::nibble "\nend"]
+    list [expr {[string first "op rishr" $body] >= 0}] \
+         [expr {[string first "op iand" $body] < 0}] \
+         [expr {[string first "op ior" $body] < 0}] \
+         [expr {[string first "op ishr" $body] < 0}]
+} -result {1 1 1 1}
+
+test bitshift-real-byte-nibble-no-guard {no runtime kind guard survives on this path either -- every operand was already statically proven int} -body {
+    set body [FunctionBody [native::nir [refinedChecksHir]] byte::nibble "\nend"]
+    expr {[string first "guard" $body] < 0}
+} -result 1
+
+test bitshift-real-byte-nibble-clif-no-helper-call {byte::nibble's own Cranelift IR body makes no call at all (no rt_int_shr, no BigInt/kind-guard fallback branch): true machine-lowering evidence, not just NIR text (spec \167 73-76)} -body {
+    set body [FunctionBody [native::clif [refinedChecksHir]] byte::nibble "\n; function "]
+    list [expr {[string first "call " $body] < 0}] [expr {[string first "sshr" $body] >= 0}]
+} -result {1 1}
+
+test bitshift-real-byte-high-nibble-unchanged {byte::high_nibble (AND/OR/XOR deliberately left on their existing tagged-word fast path, spec \167 32) still lowers to op iand, not raw} -body {
+    set body [FunctionBody [native::nir [refinedChecksHir]] byte::high_nibble "\nend"]
+    list [expr {[string first "op iand" $body] >= 0}] [expr {[string first "rishr" $body] < 0}]
+} -result {1 1}
+
+# ---------------------------------------------------------------------------
+# Raw shift eligibility: synthetic, generic cases (no Byte/Nibble names).
+
+test bitshift-raw-eligible-basic {a small nonnegative operand and a single proven-safe shift count lower as a raw shift} -body {
+    set body [FunctionBody [nirOf {fn f(x):
+    shift_right(x, 4)
+f(200)}] f "\nend"]
+    list [expr {[string first "op rishr" $body] >= 0}] [expr {[string first "op ishr" $body] < 0}]
+} -result {1 1}
+
+test bitshift-raw-eligible-shift-left {shift_left gets the same raw treatment symmetrically once its own result is also proven small (spec \167 48)} -body {
+    set body [FunctionBody [nirOf {fn f(x):
+    shift_left(x, 4)
+f(5)}] f "\nend"]
+    list [expr {[string first "op rishl" $body] >= 0}] [expr {[string first "op ishl" $body] < 0}]
+} -result {1 1}
+
+test bitshift-raw-rejected-negative-operand {a shifted value whose proven range includes negative values stays on the generic path (spec \167 47, deliberately conservative)} -body {
+    set body [FunctionBody [nirOf {fn f(c):
+    x = if c:
+        -5
+    else:
+        100
+    shift_right(x, 3)
+f(true)}] f "\nend"]
+    list [expr {[string first "op rishr" $body] < 0}] [expr {[string first "op ishr" $body] >= 0}]
+} -result {1 1}
+
+test bitshift-raw-rejected-bigint-operand {an operand well beyond the small-Int range stays on the generic path (no raw promotion of a BigInt shift)} -body {
+    set body [FunctionBody [nirOf {fn f(x):
+    shift_right(x, 4)
+f(123456789012345678901234567890)}] f "\nend"]
+    list [expr {[string first "op rishr" $body] < 0}] [expr {[string first "op ishr" $body] >= 0}]
+} -result {1 1}
+
+test bitshift-raw-rejected-nonconstant-count {a shift amount that is not a single proven value (two callers passing different counts) stays on the generic path} -body {
+    set body [FunctionBody [nirOf {fn f(x, k):
+    shift_right(x, k)
+f(50, 2)
+f(50, 5)}] f "\nend"]
+    list [expr {[string first "op rishr" $body] < 0}] [expr {[string first "op ishr" $body] >= 0}]
+} -result {1 1}
+
+test bitshift-raw-rejected-count-too-wide {a proven-constant shift count at or beyond the raw (host word) width stays on the generic path, even though it is comfortably within the language's own much larger MAX_SHIFT} -body {
+    set body [FunctionBody [nirOf {fn f(x):
+    shift_right(x, 64)
+f(50)}] f "\nend"]
+    list [expr {[string first "op rishr" $body] < 0}] [expr {[string first "op ishr" $body] >= 0}]
+} -result {1 1}
+
+test bitshift-raw-rejected-shift-left-result-overflow {shift_left whose own proven result range no longer fits the small-Int representation stays on the generic path (spec \167 38-39: growth, not the operand's own rawness, gates shift-left)} -body {
+    set body [FunctionBody [nirOf {fn f(x):
+    shift_left(x, 60)
+f(1000000)}] f "\nend"]
+    list [expr {[string first "op rishl" $body] < 0}] [expr {[string first "op ishl" $body] >= 0}]
+} -result {1 1}
+
+test bitshift-raw-rejected-still-needs-guard {an operand not statically proven int (so it still needs a runtime kind guard) never reaches raw eligibility, matching RawEligibleCall's own arithmetic-case discipline} -body {
+    set body [FunctionBody [nirOf {fn f(x):
+    shift_right(x, 4)
+
+fn pick(c):
+    if c:
+        5
+    else:
+        "s"
+
+f(pick(true))}] f "\nend"]
+    list [expr {[string first "guard" $body] >= 0}] [expr {[string first "op rishr" $body] < 0}]
+} -result {1 1}
+
+# ---------------------------------------------------------------------------
+# Chained raw operands: a shift consuming another raw-eligible expression's
+# own result stays raw throughout (spec \167 37), matching the milestone's own
+# "keep raw values raw across chains" instruction.
+
+test bitshift-raw-chain-no-redundant-boxing {x+1, then shifted, stays raw end to end: one shift, not a box/unbox/box cycle in between} -body {
+    set body [FunctionBody [nirOf {fn f(x):
+    shift_right(x + 1, 4)
+f(200)}] f "\nend"]
+    list [expr {[string first "op rishr" $body] >= 0}] [expr {[string first "op riadd" $body] >= 0}]
+} -result {1 1}
+
+# ---------------------------------------------------------------------------
+# Generic-helper preservation: an ordinary shift that never qualifies for
+# raw lowering still gets full generic (arbitrary-precision, validated)
+# semantics on every backend, exactly as before this milestone (spec \167 42,
+# \167 88-89).
+
+test bitshift-generic-negative-parity {negative Int >> k keeps its correct arbitrary-precision (floor) semantics on every backend, unaffected by raw eligibility's own nonnegative-only restriction} -body {
+    parity {[shift_right(-1, 3), shift_right(-200, 4), shift_right(-17, 1)]}
+} -result same
+
+test bitshift-generic-negative-value {shift_right(-1, 3) is -1 (arithmetic/floor shift, sign-extending), matching Botlish's arbitrary-precision Int semantics, not a two's-complement machine-width truncation} -body {
+    lindex [outcomeUnder cranelift [sourceIR {shift_right(-1, 3)}]] 1
+} -result {-1}
+
+test bitshift-generic-bigint-parity {shift_left/shift_right on operands and results well beyond 64 bits remain correct on every backend (no regression from the new raw-eligibility machinery, spec \167 44, \167 83, \167 89)} -body {
+    parity {[shift_left(123456789012345678901234567890, 40),
+             shift_right(123456789012345678901234567890123456789012345678, 30)]}
+} -result same
+
+test bitshift-generic-invalid-count-parity {an out-of-range shift count (negative, or beyond the language's own MAX_SHIFT) keeps its RANGE error on every backend, whether or not the shifted value would otherwise have been raw-eligible (spec \167 21, \167 45)} -body {
+    parity {[shift_right(200, -1), shift_left(5, 99999999999)]}
+} -result same
+
+test bitshift-generic-boundary-values-parity {near the raw/small-Int representation boundary (hir::range::smallMax and just beyond it), shift results stay correct on every backend} -body {
+    parity {[shift_right(4611686018427387903, 1), shift_right(4611686018427387904, 1),
+             shift_left(2305843009213693951, 1), shift_left(2305843009213693952, 1)]}
+} -result same
+
+cleanupTests
