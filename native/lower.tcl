@@ -136,7 +136,8 @@ namespace eval native::lower {
         error?       {op iserror} \
         result-value {op resultvalue} \
         result-error {op resulterror} \
-        hash         {op hash}]
+        hash         {op hash} \
+        char_codepoint {op charcodepoint}]
     # State of the program being lowered. hir is the view of the instance
     # being lowered, baseHir the program's semantic HIR.
     variable hir {}
@@ -2232,13 +2233,14 @@ proc native::lower::Const {fnVar e node} {
     switch -- [core::value::kind $value] {
         int  { return [IntConst fn [core::value::intOf $value] $e] }
         str  { return [Assign fn "str [Quote [core::value::strOf $value]]" $e] }
+        UnicodeChar { return [Assign fn "char [core::value::charOf $value]" $e] }
         list {
             # (const list {...}): a list of literal elements.
             set items [lmap item [core::value::items $value] {
-                if {[core::value::kind $item] eq "int"} {
-                    IntConst fn [core::value::intOf $item] $e
-                } else {
-                    Assign fn "str [Quote [core::value::strOf $item]]" $e
+                switch -- [core::value::kind $item] {
+                    int { IntConst fn [core::value::intOf $item] $e }
+                    UnicodeChar { Assign fn "char [core::value::charOf $item]" $e }
+                    default { Assign fn "str [Quote [core::value::strOf $item]]" $e }
                 }
             }]
             return [Assign fn "op listnew [join $items { }]" $e]

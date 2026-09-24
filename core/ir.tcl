@@ -3,6 +3,7 @@
 # IR nodes are Tcl lists whose first element is the operation name:
 #
 #   (const LITERAL)             (const TYPE LITERAL)   TYPE: int str list
+#                                                        UnicodeChar
 #   (bind NAME EXPR)
 #   (ref NAME)
 #   (block PARAMS BODY...)
@@ -91,6 +92,11 @@ proc core::ir::CheckShape {node} {
                             core::malformed "list literal must be a Tcl list" $node
                         }
                     }
+                    UnicodeChar {
+                        if {![core::value::isValidScalar $text]} {
+                            core::malformed "not a Unicode scalar value" $node
+                        }
+                    }
                     default {
                         core::malformed "unknown literal type \"$type\"" $node
                     }
@@ -169,6 +175,7 @@ proc core::ir::literalValue {node} {
     switch -- $type {
         int  { return [core::value::int $text] }
         str  { return [core::value::str $text] }
+        UnicodeChar { return [core::value::char $text] }
         list {
             set items {}
             foreach element $text {

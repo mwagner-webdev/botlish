@@ -9,6 +9,10 @@
 #   IDENT     [A-Za-z_][A-Za-z0-9_]*, not a keyword        value: the name
 #   INT       decimal digits, no leading zeros              value: the digits
 #   STRING    "..." on one line; escapes \\ \" \n \r \t     value: decoded text
+#   CHAR      '...' on one line, exactly one decoded Unicode scalar value;
+#             escapes \\ \' \n \r \t                        value: the
+#             scalar's canonical decimal codepoint (like an INT token's
+#             digits) -- see UNICODE-CHAR-LITERALS.md
 #   keywords  fn if else loop return break continue true false unit and or not
 #             namespace type (kind is the word itself)
 #   operators ( ) [ ] { } , : :: = == != < <= > >= + - * -> ..
@@ -171,6 +175,10 @@ proc surface::lexer::tokenize {source file} {
             }
             {"} {
                 lappend tokens [String $source $i $file $line $lineStart diagnostics]
+                set i [dict get [lindex $tokens end] span end]
+            }
+            {'} {
+                lappend tokens [Char $source $i $file $line $lineStart diagnostics]
                 set i [dict get [lindex $tokens end] span end]
             }
             {[0-9]} {
@@ -350,5 +358,81 @@ proc surface::lexer::String {source start file line lineStart diagnosticsVar} {
         incr i
     }
     return [Token STRING [string range $source $start $i-1] $value \
+        [Span $file $start $i $line $lineStart]]
+}
+
+# The Unicode scalar value (a host integer) of the single Tcl character CH.
+proc surface::lexer::Codepoint {ch} {
+    scan $ch %c codepoint
+    return $codepoint
+}
+
+# The CHAR token starting at the quote at offset START. A character literal
+# must decode to exactly one Unicode scalar value (see
+# UNICODE-CHAR-LITERALS.md): the lexer counts decoded Unicode *scalars*, not
+# UTF-8 bytes or raw source characters before escape processing -- SOURCE is
+# already a fully UTF-8-decoded Tcl string by the time lexing sees it
+# (core::ReadFile), and Tcl 9's strings are themselves sequences of Unicode
+# scalar values (string index/length never split a supplementary-plane
+# character), so no separate decoder is needed here (reusing exactly what
+# String already relies on). The escape vocabulary mirrors String's own
+# (\\ \n \r \t), substituting \' for \" since a character literal is quoted
+# with '.
+proc surface::lexer::Char {source start file line lineStart diagnosticsVar} {
+    upvar 1 $diagnosticsVar diagnostics
+    set n [string length $source]
+    set i [expr {$start + 1}]
+    set scalars {}
+    set ok 1
+    while 1 {
+        if {$i >= $n || [string index $source $i] eq "\n"
+                || ([string index $source $i] eq "\r" && [string index $source $i+1] eq "\n")} {
+            Report diagnostics $file $start $line $lineStart [expr {$i - $start}] "unterminated character literal"
+            set ok 0
+            break
+        }
+        set c [string index $source $i]
+        if {$c eq "'"} {
+            incr i
+            break
+        }
+        if {$c eq "\\"} {
+            set e [string index $source $i+1]
+            switch -- $e {
+                \\ { lappend scalars [Codepoint \\] }
+                '  { lappend scalars [Codepoint '] }
+                n  { lappend scalars [Codepoint \n] }
+                r  { lappend scalars [Codepoint \r] }
+                t  { lappend scalars [Codepoint \t] }
+                default {
+                    if {$e eq "" || $e eq "\n"} {
+                        incr i
+                        continue
+                    }
+                    Report diagnostics $file $i $line $lineStart 2 "invalid escape \"\\$e\" in character literal"
+                    set ok 0
+                    lappend scalars [Codepoint $e]
+                }
+            }
+            incr i 2
+            continue
+        }
+        lappend scalars [Codepoint $c]
+        incr i
+    }
+    if {$ok} {
+        if {[llength $scalars] == 0} {
+            Report diagnostics $file $start $line $lineStart [expr {$i - $start}] \
+                "empty character literal: a character literal must contain exactly one Unicode scalar value"
+        } elseif {[llength $scalars] > 1} {
+            Report diagnostics $file $start $line $lineStart [expr {$i - $start}] \
+                "character literal contains more than one Unicode scalar value (a character literal is one Unicode scalar, never a grapheme cluster)"
+        } elseif {![core::value::isValidScalar [lindex $scalars 0]]} {
+            Report diagnostics $file $start $line $lineStart [expr {$i - $start}] \
+                "not a Unicode scalar value: surrogates (U+D800..U+DFFF) are never valid UnicodeChar values"
+        }
+    }
+    set value [expr {[llength $scalars] == 1 ? [lindex $scalars 0] : 0}]
+    return [Token CHAR [string range $source $start $i-1] $value \
         [Span $file $start $i $line $lineStart]]
 }

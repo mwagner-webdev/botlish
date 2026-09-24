@@ -22,6 +22,9 @@
 #   suite      body (statements)                 an indented block
 #   int        text (canonical decimal digits)
 #   string     value (the decoded text)
+#   char       text (canonical decimal codepoint of the one Unicode scalar
+#              value the literal decoded to -- UnicodeChar, never String;
+#              see UNICODE-CHAR-LITERALS.md)
 #   bool       value (true | false)
 #   unit
 #   name       name
@@ -312,6 +315,7 @@ proc surface::ast::Expr {node show} {
     set at [At $node $show]
     switch -- [dict get $node kind] {
         int     { return "(int [dict get $node text])$at" }
+        char    { return "(char [dict get $node text])$at" }
         string  { return "(str [Quote [dict get $node value]])$at" }
         bool    { return "(bool [dict get $node value])$at" }
         unit    { return "(unit)$at" }

@@ -73,7 +73,7 @@ namespace eval core::hashing {
     variable Mask61    0x1FFFFFFFFFFFFFFF
     # Kind tags mixed in before each value's payload, so e.g. int 1 and str
     # "1" never hash the same by coincidence of byte content.
-    variable KindTag [dict create int 0 str 1 bool 2 unit 3 list 4 result 5]
+    variable KindTag [dict create int 0 str 1 bool 2 unit 3 list 4 result 5 UnicodeChar 6]
 }
 
 # H folded over one more byte (0..255), wrapped to 64 bits.
@@ -137,6 +137,13 @@ proc core::hashing::Mix {h v} {
         }
         unit {
             return $h
+        }
+        UnicodeChar {
+            # Canonical decimal codepoint text, matching how Int's own
+            # canonical decimal text is hashed above: same encoding, no
+            # separate binary scheme to keep in sync with native/src/
+            # runtime/ops.rs's rt_hash.
+            return [Bytes $h [Utf8Bytes [core::value::charOf $v]]]
         }
         list {
             set items [core::value::items $v]

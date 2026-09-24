@@ -17,6 +17,8 @@
 #
 #   42                    const 42
 #   "text"                const str text
+#   'A'                   const UnicodeChar 65        never String (see
+#                         UNICODE-CHAR-LITERALS.md)
 #   true / false / unit   ^true / ^false / ^unit
 #   x                     ref x
 #   mod::x                ref "mod::x"          module-qualified; see
@@ -175,6 +177,9 @@ proc surface::lower::Node {node} {
         }
         string {
             return [hir::syntax::constNode $origin str [dict get $node value]]
+        }
+        char {
+            return [hir::syntax::constNode $origin UnicodeChar [dict get $node text]]
         }
         bool {
             return [hir::syntax::rootRef $origin [dict get $node value]]

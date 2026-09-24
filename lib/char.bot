@@ -1,0 +1,22 @@
+# char.bot -- the "char" namespace: operations over UnicodeChar.
+#
+# UnicodeChar itself is a builtin type, available wherever an ordinary
+# builtin scalar type name is (no "char::..." reference needed to make a
+# parameter/result annotation of it resolve -- see UNICODE-CHAR-LITERALS.md
+# item 21). This module only supplies char::codepoint, the one explicit,
+# total operation that observes a UnicodeChar's Unicode scalar value as an
+# ordinary Int -- exactly the byte::high_nibble/lib/byte.bot pattern:
+# codepoint is an otherwise-plain Botlish function, its one primitive
+# operation (char_codepoint) a root native (core/unicodechar.tcl) the
+# language cannot express any other way, since nothing in ordinary Botlish
+# can extract a UnicodeChar's payload.
+#
+#   char::codepoint(c)   the Unicode scalar value of c, as an Int
+#                         (char::codepoint('A') = 65, char::codepoint('😀')
+#                         = 128512) -- total, never fails.
+#
+# No Int -> UnicodeChar conversion is provided (deliberately: see item 5).
+namespace char
+
+fn codepoint(c: UnicodeChar) -> int:
+    char_codepoint(c)

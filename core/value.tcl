@@ -13,6 +13,14 @@
 #                             display ignore it.
 #   {bool true|false}         Boolean
 #   {unit}                    the unit value
+#   {UnicodeChar CODEPOINT}   exactly one Unicode scalar value (U+0000..U+D7FF
+#                             or U+E000..U+10FFFF; never a surrogate),
+#                             CODEPOINT its canonical decimal value. Distinct
+#                             from Int: same tagged-list shape as {int N},
+#                             but a different tag, so a UnicodeChar can never
+#                             be mistaken for an Int by kind (see
+#                             UNICODE-CHAR-LITERALS.md). Immutable, no
+#                             evidence.
 #   {list ITEMS}              ITEMS is a Tcl list of runtime values
 #   {result ok|error VALUE}   Result
 #   {block PARAMS BODY ENV CODE}
@@ -31,11 +39,24 @@
 # file should construct and inspect values only through these procedures.
 
 namespace eval core::value {
-    variable kinds {int str bool unit list result block native mutarray}
+    variable kinds {int str bool unit list result block native mutarray UnicodeChar}
 }
 
 proc core::value::isCanonicalInt {text} {
     regexp {^(?:0|-?[1-9][0-9]*)$} $text
+}
+
+# 1 if TEXT is the canonical decimal form of a Unicode scalar value: an
+# integer in 0..0xD7FF or 0xE000..0x10FFFF. Surrogates (0xD800..0xDFFF) are
+# never scalar values (see UNICODE-CHAR-LITERALS.md); this is the one place
+# that rule is enforced, so both the lexer's own literal validation and
+# core::value::char share it.
+proc core::value::isValidScalar {text} {
+    if {![isCanonicalInt $text]} {
+        return 0
+    }
+    set n $text
+    return [expr {($n >= 0 && $n <= 0xD7FF) || ($n >= 0xE000 && $n <= 0x10FFFF)}]
 }
 
 # ---------------------------------------------------------------------------
@@ -50,6 +71,17 @@ proc core::value::int {digits} {
 
 proc core::value::str {text} {
     return [list str $text]
+}
+
+# CODEPOINT (canonical decimal text) must be a valid Unicode scalar value
+# (isValidScalar): never a surrogate, never above U+10FFFF. This is the only
+# constructor of a UnicodeChar value -- there is no Int -> UnicodeChar
+# conversion (see UNICODE-CHAR-LITERALS.md item 5).
+proc core::value::char {codepoint} {
+    if {![isValidScalar $codepoint]} {
+        error "core::value::char: not a Unicode scalar value: \"$codepoint\""
+    }
+    return [list UnicodeChar $codepoint]
 }
 
 # ---------------------------------------------------------------------------
@@ -162,6 +194,7 @@ proc core::value::expect {kind v context} {
 proc core::value::intOf {v}  { Require int $v;  return [lindex $v 1] }
 proc core::value::strOf {v}  { Require str $v;  return [lindex $v 1] }
 proc core::value::items {v}  { Require list $v; return [lindex $v 1] }
+proc core::value::charOf {v} { Require UnicodeChar $v; return [lindex $v 1] }
 
 # Returns host 1/0 for a language Boolean.
 proc core::value::isTrue {v} {
@@ -219,8 +252,11 @@ proc core::value::equal {a b} {
         return 0
     }
     switch -- $ka {
-        int - str - bool {
-            # Integers are canonical, so textual identity is numeric equality.
+        int - str - bool - UnicodeChar {
+            # Integers and codepoints are canonical, so textual identity is
+            # numeric equality. UnicodeChar never compares equal to Int or
+            # String: different kinds are rejected above, before this
+            # switch runs (no coercive equality).
             return [string equal [lindex $a 1] [lindex $b 1]]
         }
         unit {
@@ -262,6 +298,11 @@ proc core::value::show {v {withEvidence 0}} {
         }
         bool { return [lindex $v 1] }
         unit { return unit }
+        UnicodeChar {
+            set ch [format %c [lindex $v 1]]
+            set escaped [string map {\\ \\\\ ' \\' \n \\n \r \\r \t \\t} $ch]
+            return "'$escaped'"
+        }
         list {
             set parts {}
             foreach item [lindex $v 1] {

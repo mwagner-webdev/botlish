@@ -56,6 +56,11 @@ pub enum OpCode {
     IsError,
     ResultValue,
     ResultError,
+    /// The Unicode scalar value of a UnicodeChar operand, as an Int
+    /// (char::codepoint/char_codepoint, core/unicodechar.tcl): total, never
+    /// fails. A scalar value always fits the small-Int range, so the result
+    /// is always an immediate small Int, never a BigInt.
+    CharCodepoint,
     MkOk,
     MkError,
     /// Structural hash (core/hashing.tcl's hash): consistent with VEq,
@@ -191,6 +196,7 @@ impl OpCode {
             "iserror" => IsError,
             "resultvalue" => ResultValue,
             "resulterror" => ResultError,
+            "charcodepoint" => CharCodepoint,
             "mkok" => MkOk,
             "mkerror" => MkError,
             "hash" => Hash,
@@ -226,7 +232,7 @@ impl OpCode {
             ListNew => None,
             StrLen | StrLower | ListLen | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList
             | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | Hash | RBox | RUnbox
-            | StrByteLen | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum => Some(1),
+            | StrByteLen | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum | CharCodepoint => Some(1),
             Substr | MutArraySet | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum => Some(3),
             RegionEq => Some(4),
             MutArrayCopy => Some(5),
@@ -257,6 +263,11 @@ pub enum Inst {
     /// `op rbox` of it never needs a check.
     RawInt { dst: Reg, digits: String },
     Str { dst: Reg, text: String },
+    /// A UnicodeChar constant: DIGITS is the canonical decimal codepoint
+    /// (must be a valid Unicode scalar value, never a surrogate -- see
+    /// UNICODE-CHAR-LITERALS.md); codegen packs it as the immediate
+    /// `make_char` word directly, no allocation and no runtime call.
+    Char { dst: Reg, digits: String },
     Bool { dst: Reg, value: bool },
     Unit { dst: Reg },
     Native { dst: Reg, native: u32 },
@@ -742,6 +753,14 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
                 Inst::RawInt { dst, digits }
             }
             "str" => Inst::Str { dst, text: quoted(3)? },
+            "char" => {
+                let digits = tokens.get(3).and_then(word).unwrap_or("").to_string();
+                let Ok(codepoint) = digits.parse::<u32>() else { return p.err("bad char literal") };
+                if !crate::runtime::value::is_valid_scalar(codepoint) {
+                    return p.err("char literal is not a Unicode scalar value");
+                }
+                Inst::Char { dst, digits }
+            }
             "bool" => match tokens.get(3).and_then(word) {
                 Some("true") => Inst::Bool { dst, value: true },
                 Some("false") => Inst::Bool { dst, value: false },
@@ -845,6 +864,7 @@ fn validate(program: &Program) -> Result<(), NirError> {
                 Inst::Int { dst, .. }
                 | Inst::RawInt { dst, .. }
                 | Inst::Str { dst, .. }
+                | Inst::Char { dst, .. }
                 | Inst::Bool { dst, .. }
                 | Inst::Unit { dst }
                 | Inst::Native { dst, .. }

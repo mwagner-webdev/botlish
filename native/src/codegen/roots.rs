@@ -207,6 +207,7 @@ fn def_use(inst: &Inst, params: u32) -> (Vec<Reg>, Vec<Reg>) {
         Inst::Int { dst, .. }
         | Inst::RawInt { dst, .. }
         | Inst::Str { dst, .. }
+        | Inst::Char { dst, .. }
         | Inst::Bool { dst, .. }
         | Inst::Unit { dst }
         | Inst::Native { dst, .. }

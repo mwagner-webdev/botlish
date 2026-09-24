@@ -1,0 +1,516 @@
+# unicode-char.test -- UnicodeChar scalar type, single-quoted character
+# literals, and List[UnicodeChar] (UNICODE-CHAR-LITERALS.md).
+#
+# UnicodeChar is a distinct builtin semantic scalar: exactly one Unicode
+# scalar value, never an Int, never a String, never implicitly convertible
+# to or from either. Its scalar value is observed only through the explicit,
+# total char::codepoint/char_codepoint operation. This file pins that
+# distinction end to end: lexing, parsing, type inference/admissibility,
+# List[UnicodeChar] inference and projection, HIR round-trip, cross-module
+# behavior, dynamic/untyped soundness, and interp/compile/cranelift parity.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot native native.tcl]
+
+proc sourceHir {text} {
+    return [surface::compile $text t.bot -strict 0]
+}
+
+proc sourceIR {text} {
+    return [hir::lower [sourceHir $text]]
+}
+
+set ::parityBackends {interp compile cranelift-generic cranelift}
+
+# "same" if every backend agrees on the outcome of source TEXT; otherwise a
+# list of every disagreeing backend's own outcome (see helpers.tcl's
+# outcomeUnder/differential -- this is native.test's own parity, extended to
+# the two cranelift backends).
+proc parity {text} {
+    set exprs [sourceIR $text]
+    set outcomes [lmap backend $::parityBackends {outcomeUnder $backend $exprs}]
+    if {[llength [lsort -unique $outcomes]] == 1} {
+        return same
+    }
+    return [join [lmap backend $::parityBackends outcome $outcomes {list $backend $outcome}] " / "]
+}
+
+# {ERRORCODE 1} if SOURCE fails to compile with a message matching PATTERN
+# (a static/semantic rejection, never a runtime one).
+proc rejects {source pattern} {
+    catch {surface::compile $source reject.bot} message options
+    list [dict get $options -errorcode] [string match $pattern $message]
+}
+
+# ---------------------------------------------------------------------------
+# Lexer (spec items 6, 8-13, 60-64)
+
+test char-lex-basic {a single-quoted literal is a CHAR token whose value is the decimal codepoint} -body {
+    set tokens [surface::lex {'A'}]
+    list [dict get [lindex $tokens 0] kind] [dict get [lindex $tokens 0] value]
+} -result {CHAR 65}
+
+test char-lex-dash {'-' lexes to U+002D} -body {
+    dict get [lindex [surface::lex {'-'}] 0] value
+} -result 45
+
+test char-lex-non-ascii-bmp {'é' (one Unicode scalar, two UTF-8 bytes) lexes to its scalar value, not its byte length} -body {
+    dict get [lindex [surface::lex "'é'"] 0] value
+} -result 233
+
+test char-lex-supplementary {'😀' (a supplementary-plane scalar) lexes to its full codepoint} -body {
+    dict get [lindex [surface::lex "'\U0001F600'"] 0] value
+} -result 128512
+
+foreach {name literal expected} {
+    escape-backslash {'\\'} 92
+    escape-quote     {'\''} 39
+    escape-newline   {'\n'} 10
+    escape-return    {'\r'} 13
+    escape-tab       {'\t'} 9
+} {
+    test char-lex-$name "escape $literal decodes to one scalar, U+[format %04X $expected]" -body {
+        set tokens [surface::lex $literal]
+        list [dict get [lindex $tokens 0] kind] [dict get [lindex $tokens 0] value]
+    } -result [list CHAR $expected]
+}
+
+test char-lex-empty {'' is a syntax error naming "exactly one Unicode scalar value"} -body {
+    catch {surface::lex {''}} message options
+    list [lrange [dict get $options -errorcode] 0 1] [string match {*exactly one Unicode scalar*} $message]
+} -result {{SURFACE SYNTAX} 1}
+
+test char-lex-multi-char {'ab' (two raw scalars) is rejected as more than one Unicode scalar} -body {
+    catch {surface::lex {'ab'}} message options
+    list [lrange [dict get $options -errorcode] 0 1] [string match {*more than one Unicode scalar*} $message]
+} -result {{SURFACE SYNTAX} 1}
+
+test char-lex-combining {a base letter followed by a combining accent (two Unicode scalars) is rejected even though it visually resembles one character} -body {
+    catch {surface::lex "'é'"} message options
+    list [lrange [dict get $options -errorcode] 0 1] [string match {*more than one Unicode scalar*} $message]
+} -result {{SURFACE SYNTAX} 1}
+
+test char-lex-unterminated {an unterminated character literal is a syntax error, not a silent recovery into the next line} -body {
+    catch {surface::lex "'A"} message options
+    list [lrange [dict get $options -errorcode] 0 1] [string match {*unterminated character literal*} $message]
+} -result {{SURFACE SYNTAX} 1}
+
+test char-lex-raw-newline {a raw (unescaped) newline inside quotes is a syntax error: a character literal cannot span lines} -body {
+    catch {surface::lex "'\n'"} message options
+    lrange [dict get $options -errorcode] 0 1
+} -result {SURFACE SYNTAX}
+
+test char-lex-invalid-escape {an unrecognized escape is a located diagnostic} -body {
+    catch {surface::lex {'\q'}} message options
+    list [lrange [dict get $options -errorcode] 0 1] [string match {*invalid escape*} $message]
+} -result {{SURFACE SYNTAX} 1}
+
+test char-lex-quote-unaffected {a single quote inside a double-quoted STRING is unaffected (existing String lexing is untouched)} -body {
+    set tokens [surface::lex {"it's fine"}]
+    list [dict get [lindex $tokens 0] kind] [dict get [lindex $tokens 0] value]
+} -result {STRING {it's fine}}
+
+# ---------------------------------------------------------------------------
+# Parser / AST (spec items 13, 46)
+
+test char-parse-node {a character literal parses to a dedicated "char" AST node, not a string literal plus a conversion} -body {
+    set expr [lindex [dict get [surface::parse {x = 'A'} p.bot] body] 0]
+    list [dict get $expr value kind] [dict get $expr value text]
+} -result {char 65}
+
+test char-format-ast {surface::formatAst renders a character literal as its decimal codepoint, deterministically (never depends on terminal encoding)} -body {
+    surface::formatAst [surface::parse {x = 'A'} p.bot]
+} -result {(bind x (char 65))}
+
+test char-format-ast-supplementary {formatAst of a supplementary-plane literal} -body {
+    surface::formatAst [surface::parse "x = '\U0001F600'" p.bot]
+} -result {(bind x (char 128512))}
+
+# ---------------------------------------------------------------------------
+# Unicode scalar validation (spec items 1, 10)
+
+test char-value-surrogate-rejected {core::value::char refuses a surrogate codepoint (0xD800..0xDFFF are never Unicode scalar values)} -body {
+    catch {core::value::char 0xD800} message
+    string match {*not a Unicode scalar value*} $message
+} -result 1
+
+test char-value-valid-boundaries {the scalar range's own edges (0, 0xD7FF, 0xE000, 0x10FFFF) are all valid} -body {
+    lmap n {0 0xD7FF 0xE000 0x10FFFF} {
+        expr {[catch {core::value::char [expr {$n}]}] == 0}
+    }
+} -result {1 1 1 1}
+
+test char-value-above-max-rejected {a codepoint above U+10FFFF is rejected} -body {
+    catch {core::value::char [expr {0x110000}]} message
+    string match {*not a Unicode scalar value*} $message
+} -result 1
+
+test char-ir-const-shape {core IR spells a UnicodeChar literal as (const UnicodeChar CODEPOINT), a dedicated literal type -- never a plain Int const with a side table} -body {
+    core::ir::literalValue {const UnicodeChar 65}
+} -result {UnicodeChar 65}
+
+# ---------------------------------------------------------------------------
+# Semantic type: UnicodeChar != Int, UnicodeChar != String (spec items 3, 7, 24-25, 30, 87)
+
+test char-type-distinct-from-string {"A" is String, 'A' is UnicodeChar: deliberately different source constructs and types} -body {
+    list [core::type::show [hir::types::ofValue [core::value::str A]]] \
+        [core::type::show [hir::types::ofValue [core::value::char 65]]]
+} -result {str UnicodeChar}
+
+test char-type-show {hir::types::show renders the builtin type name UnicodeChar, not a runtime implementation tag} -body {
+    hir::types::show UnicodeChar
+} -result UnicodeChar
+
+test char-identity-accepts-char {identity(c: UnicodeChar) accepts a UnicodeChar argument} -body {
+    surface::compile {fn identity(c: UnicodeChar) -> UnicodeChar:
+    c
+
+identity('A')} ok.bot
+    set ok 1
+} -result 1
+
+test char-identity-rejects-int {identity(c: UnicodeChar) rejects an Int argument: Int is not implicitly UnicodeChar even though 65 is numerically 'A'} -body {
+    rejects {fn identity(c: UnicodeChar) -> UnicodeChar:
+    c
+
+identity(65)} {*cannot be proven to satisfy*}
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test char-identity-rejects-string {identity(c: UnicodeChar) rejects a one-character String argument} -body {
+    rejects {fn identity(c: UnicodeChar) -> UnicodeChar:
+    c
+
+identity("A")} {*cannot be proven to satisfy*}
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test char-take-int-rejects-char {a plain int parameter rejects a UnicodeChar argument: no implicit UnicodeChar -> Int conversion} -body {
+    rejects {fn take_int(x: int):
+    unit
+
+take_int('A')} {*cannot be proven to satisfy*}
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test char-take-int-accepts-codepoint {take_int(char_codepoint('A')) is the legal spelling} -body {
+    surface::compile {fn take_int(x: int):
+    unit
+
+take_int(char_codepoint('A'))} ok2.bot
+    set ok 1
+} -result 1
+
+# A bare call of the root native char_codepoint is not itself a typed
+# callable invocation (that compile-time check applies to a declared
+# function parameter -- see char-module-codepoint-rejects-int below for the
+# char::codepoint spelling, which does go through such a wrapper); the
+# native's own declared -param-types UnicodeChar is still enforced
+# dynamically, exactly like any other native's declared parameter type
+# (e.g. bit_and's -param-types {int int}), never as numeric value-set
+# admissibility.
+test char-codepoint-rejects-int {char_codepoint(65): 65 is not dynamically of kind UnicodeChar, so char::codepoint's total contract still rejects it at run time, never silently treating it as a codepoint} -body {
+    outcomeUnder interp [sourceIR {char_codepoint(65)}]
+} -result {error {CORE SEMANTIC TYPE} {char_codepoint: expected UnicodeChar, got 65} {}}
+
+test char-codepoint-rejects-string {char_codepoint("A"): a one-character String is not dynamically a UnicodeChar either} -body {
+    outcomeUnder interp [sourceIR {char_codepoint("A")}]
+} -result {error {CORE SEMANTIC TYPE} {char_codepoint: expected UnicodeChar, got "A"} {}}
+
+test char-equality-same {'A' == 'A' is true} -body {
+    outcomeUnder interp [sourceIR {'A' == 'A'}]
+} -result {value true {}}
+
+test char-equality-different {'A' == 'B' is false} -body {
+    outcomeUnder interp [sourceIR {'A' == 'B'}]
+} -result {value false {}}
+
+test char-equality-not-coercive-int {'A' == 65 is false, not a compile error and not numeric coercion (== accepts any/any)} -body {
+    outcomeUnder interp [sourceIR {'A' == 65}]
+} -result {value false {}}
+
+test char-equality-not-coercive-string {'A' == "A" is false: different runtime kinds are never equal} -body {
+    outcomeUnder interp [sourceIR {'A' == "A"}]
+} -result {value false {}}
+
+test char-kind-distinct {kind('A') is neither kind(65) nor kind("A")} -body {
+    list [core::value::kind [core::value::char 65]] [core::value::kind [core::value::int 65]] \
+        [core::value::kind [core::value::str A]]
+} -result {UnicodeChar int str}
+
+# ---------------------------------------------------------------------------
+# char::codepoint semantics (spec items 4, 26-29, 65-66)
+
+test char-codepoint-ascii {char::codepoint('A') = 65} -body {
+    outcomeUnder interp [sourceIR {char_codepoint('A')}]
+} -result {value 65 {}}
+
+test char-codepoint-bmp {char::codepoint('é') = 233 (the scalar value, not its two UTF-8 bytes 195/169)} -body {
+    outcomeUnder interp [sourceIR "char_codepoint('é')"]
+} -result {value 233 {}}
+
+test char-codepoint-supplementary {char::codepoint('😀') = 128512} -body {
+    outcomeUnder interp [sourceIR "char_codepoint('\U0001F600')"]
+} -result {value 128512 {}}
+
+test char-codepoint-total {char::codepoint has no Error completion: it is a plain Int-returning call, never a Result} -body {
+    hir::types::show [hir::typeOf [sourceHir {char_codepoint('A')}] \
+        [lindex [hirFind [sourceHir {char_codepoint('A')}] call] 0]]
+} -result int
+
+# ---------------------------------------------------------------------------
+# List[UnicodeChar] inference and projection (spec items 34-40, 90)
+
+test char-list-infers-applied-type {['-', '.', '_', '~'] infers as List[UnicodeChar] through ordinary homogeneous List construction inference, no char-specific rule} -body {
+    set h [sourceHir {['-', '.', '_', '~']}]
+    hir::types::show [hir::typeOf $h [lindex [hirFind $h call] 0]]
+} -result {List[UnicodeChar]}
+
+test char-list-mixed-codepoints {['A', 'é', '😀'] (different UTF-8 lengths and numeric values) is still List[UnicodeChar]: element semantic type, not encoding size, decides it} -body {
+    set h [sourceHir "\['A', 'é', '\U0001F600'\]"]
+    hir::types::show [hir::typeOf $h [lindex [hirFind $h call] 0]]
+} -result {List[UnicodeChar]}
+
+test char-list-string-mix-not-uniform {['A', "A"] (UnicodeChar and String) is neither List[UnicodeChar] nor List[String]: ordinary heterogeneous List behavior, no coercion} -body {
+    set h [sourceHir {['A', "A"]}]
+    hir::types::show [hir::typeOf $h [lindex [hirFind $h call] 0]]
+} -result list
+
+test char-consume-list {consume(chars: List[UnicodeChar]) accepts a char list literal} -body {
+    surface::compile {fn consume(chars: List[UnicodeChar]) -> UnicodeChar:
+    list_get(chars, 0)
+
+consume(['-', '.', '_', '~'])} ok3.bot
+    set ok 1
+} -result 1
+
+test char-consume-rejects-string-list {consume(List[UnicodeChar]) rejects a List[String] argument} -body {
+    rejects {fn consume(chars: List[UnicodeChar]) -> UnicodeChar:
+    list_get(chars, 0)
+
+consume(["-", ".", "_", "~"])} {*cannot be proven to satisfy*}
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test char-consume-rejects-int-list {consume(List[UnicodeChar]) rejects a List[int] argument} -body {
+    rejects {fn consume(chars: List[UnicodeChar]) -> UnicodeChar:
+    list_get(chars, 0)
+
+consume([45, 46, 95, 126])} {*cannot be proven to satisfy*}
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test char-list-get-projects {list_get(List[UnicodeChar], i) is typed UnicodeChar, recovered through the existing applied-type machinery with no List-specific char code} -body {
+    set h [sourceHir {fn first(chars: List[UnicodeChar]) -> UnicodeChar:
+    list_get(chars, 0)}]
+    hir::types::show [hir::typeOf $h [lindex [hirFind $h call] 0]]
+} -result UnicodeChar
+
+test char-alias-propagation {an alias (copy = chars) preserves the applied List[UnicodeChar] type} -body {
+    surface::compile {fn chars() -> List[UnicodeChar]:
+    ['A', 'B']
+
+fn first(chars: List[UnicodeChar]) -> UnicodeChar:
+    copy = chars
+    list_get(copy, 0)} ok4.bot
+    set ok 1
+} -result 1
+
+test char-required-basic-payload {the milestone's own required payload (spec item 85) compiles end to end} -body {
+    surface::compile {fn identity(c: UnicodeChar) -> UnicodeChar:
+    c
+
+fn code(c: UnicodeChar) -> int:
+    char_codepoint(c)
+
+fn first(chars: List[UnicodeChar]) -> UnicodeChar:
+    list_get(chars, 0)
+
+fn sample() -> int:
+    chars = ['-', '.', '_', '~']
+    code(first(chars))} payload.bot
+    set ok 1
+} -result 1
+
+test char-required-basic-payload-value {sample() above evaluates to code point 45 ('-')} -body {
+    outcomeUnder interp [sourceIR {fn identity(c: UnicodeChar) -> UnicodeChar:
+    c
+
+fn code(c: UnicodeChar) -> int:
+    char_codepoint(c)
+
+fn first(chars: List[UnicodeChar]) -> UnicodeChar:
+    list_get(chars, 0)
+
+fn sample() -> int:
+    chars = ['-', '.', '_', '~']
+    code(first(chars))
+
+sample()}]
+} -result {value 45 {}}
+
+# ---------------------------------------------------------------------------
+# Typed-callable escape soundness regression (spec items 41, 78, 102-27)
+
+test char-typed-callable-escape-rejected {a function consuming UnicodeChar remains a typed callable: passing it into an untyped erasing higher-order context is rejected} -body {
+    catch {surface::compile {fn consume(c: UnicodeChar) -> UnicodeChar:
+    c
+
+fn apply(f, v):
+    f(v)
+
+apply(consume, 'A')} escape.bot} message options
+    list [dict get $options -errorcode] [string match {*typed parameter requirements that cannot be preserved*} $message]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test char-typed-callable-alias-still-works {an exact alias of a typed callable stays valid, and still rejects a wrongly-typed argument} -body {
+    list [catch {surface::compile {fn consume(c: UnicodeChar) -> UnicodeChar:
+    c
+
+f = consume
+f('A')} alias-ok.bot}] \
+        [rejects {fn consume(c: UnicodeChar) -> UnicodeChar:
+    c
+
+f = consume
+f(65)} {*cannot be proven to satisfy*}]
+} -result {0 {{CORE SEMANTIC TYPE} 1}}
+
+test char-container-erasure-ordinary {a List[UnicodeChar] erased through an untyped passthrough loses its precision, exactly like any other container (no runtime reconstruction, no char-specific rule)} -body {
+    rejects {fn passthrough(x):
+    x
+
+fn consume(chars: List[UnicodeChar]) -> UnicodeChar:
+    list_get(chars, 0)
+
+chars = ['A']
+lost = passthrough(chars)
+consume(lost)} {*cannot be proven to satisfy*}
+} -result {{CORE SEMANTIC TYPE} 1}
+
+# ---------------------------------------------------------------------------
+# Dynamic/untyped soundness (spec items 16-17, 88-89)
+
+test char-dynamic-soundness-arithmetic {a UnicodeChar reaching untyped arithmetic through a dynamic path raises a TYPE error at run time, exactly as for any other non-Int value -- never treated as an Int} -body {
+    outcomeUnder interp [sourceIR {fn add_one(x):
+    x + 1
+
+add_one('A')}]
+} -result {error {CORE SEMANTIC TYPE} {+: expected int, got 'A'} {}}
+
+test char-dynamic-soundness-compile-backend {the same dynamic TYPE error on the Tcl compile backend} -body {
+    outcomeUnder compile [sourceIR {fn add_one(x):
+    x + 1
+
+add_one('A')}]
+} -result {error {CORE SEMANTIC TYPE} {+: expected int, got 'A'} {}}
+
+# ---------------------------------------------------------------------------
+# HIR round-trip (spec items 43, 91)
+
+test char-hir-roundtrip {format -> parse -> format is byte-identical for a program mixing ASCII, quote/backslash, control escape, non-ASCII BMP and supplementary-plane UnicodeChar constants} -body {
+    set h [sourceHir "fn f(c: UnicodeChar, xs: List\[UnicodeChar\]) -> UnicodeChar:
+    c
+
+a = 'A'
+b = '\\''
+c = '\\\\'
+n = '\\n'
+e = 'é'
+g = '\U0001F600'"]
+    set text1 [hir::format $h]
+    set text2 [hir::format [hir::parse $text1]]
+    expr {$text1 eq $text2}
+} -result 1
+
+test char-hir-roundtrip-preserves-value {the read-back HIR's constant is still a live UnicodeChar 128512, not merely round-tripped text} -body {
+    set h [sourceHir "'\U0001F600'"]
+    set h2 [hir::parse [hir::format $h]]
+    set e [lindex [hirFind $h2 const] 0]
+    list [hir::types::show [hir::typeOf $h2 $e]] [core::value::show [hir::get $h2 $e value]]
+} -result {UnicodeChar '😀'}
+
+test char-hir-roundtrip-preserves-type {the read-back HIR's parameter/result types round-trip (UnicodeChar and List[UnicodeChar] both)} -body {
+    set h [sourceHir {fn f(c: UnicodeChar, xs: List[UnicodeChar]) -> UnicodeChar:
+    c}]
+    set h2 [hir::parse [hir::format $h]]
+    set block [lindex [hirFind $h2 block] 0]
+    list [lmap t [hir::get $h2 $block declaredParamTypes] {hir::types::show $t}] \
+        [hir::types::show [hir::get $h2 $block declaredResult]]
+} -result {{UnicodeChar {List[UnicodeChar]}} UnicodeChar}
+
+# ---------------------------------------------------------------------------
+# Source-type coexistence (spec item 92) and repeated-compilation isolation (93)
+
+test char-coexists-with-source-defined-type {a source-defined integer refinement (Small) and the builtin UnicodeChar resolve with no registry collision or ambiguity} -body {
+    surface::compile {type Small = Int in 0..10
+
+fn one() -> Small:
+    1
+
+fn f(c: UnicodeChar) -> int:
+    char_codepoint(c)
+
+f('A')} coexist.bot
+    set ok 1
+} -result 1
+
+test char-repeated-compilation-isolated {compiling several UnicodeChar programs repeatedly in one process needs no per-compilation registration and leaves no cross-run state} -body {
+    for {set i 0} {$i < 20} {incr i} {
+        surface::compile "x = char_codepoint('A')" rep$i.bot
+    }
+    set ok 1
+} -result 1
+
+# ---------------------------------------------------------------------------
+# Cross-module: char::codepoint via lib/char.bot (spec items 21, 59, 76-77)
+
+test char-module-codepoint {char::codepoint(c), the module-qualified spelling, resolves and type-checks exactly like the root native} -body {
+    set mainPath [makeFile {fn f(c: UnicodeChar) -> int:
+    char::codepoint(c)
+
+f('A')
+} char-module-main.bot]
+    outcomeUnder interp [hir::lower [surface::readProgramFile $mainPath]]
+} -result {value 65 {}}
+
+test char-module-codepoint-rejects-int {char::codepoint(65), across the module boundary, is still a compile-time error} -body {
+    set mainPath [makeFile {char::codepoint(65)
+} char-module-reject.bot]
+    catch {surface::readProgramFile $mainPath} message options
+    list [dict get $options -errorcode] [string match {*cannot be proven to satisfy*} $message]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+# ---------------------------------------------------------------------------
+# Backend parity: interp / compile / cranelift-generic / cranelift (spec item 84)
+
+foreach {name src} {
+    literal-ascii            {'A'}
+    literal-bmp               "'é'"
+    literal-supplementary     "'\U0001F600'"
+    codepoint-ascii            {char_codepoint('A')}
+    codepoint-bmp              "char_codepoint('é')"
+    codepoint-supplementary    "char_codepoint('\U0001F600')"
+    equality-same              {'A' == 'A'}
+    equality-different          {'A' == 'B'}
+    list-construction           {['-', '.', '_', '~']}
+    list-get                    {list_get(['-', '.', '_', '~'], 0)}
+    dynamic-type-error           {fn add_one(x):
+    x + 1
+
+add_one('A')}
+} {
+    test char-parity-$name "backend parity: $name" -body {
+        parity $src
+    } -result same
+}
+
+# ---------------------------------------------------------------------------
+# Allocation (spec items 15-20, 52): an immediate representation allocates
+# nothing on the native backend for a character literal or char::codepoint.
+
+test char-native-no-allocation {char::codepoint('A') allocates nothing on the native backend: UnicodeChar is an immediate, not a heap object} -body {
+    set h [sourceHir {fn cp() -> int:
+    char_codepoint('A')
+
+cp()}]
+    dict get [native::allocationReport $h summary] total allocations
+} -result 0
+
+cleanupTests

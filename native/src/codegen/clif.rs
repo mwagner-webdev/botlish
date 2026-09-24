@@ -979,6 +979,10 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 return self.b.ins().icmp_imm_s(IntCC::Equal, x, TRUE as i64);
             }
             Kind::Unit => return self.b.ins().icmp_imm_s(IntCC::Equal, v, UNIT as i64),
+            Kind::UnicodeChar => {
+                let x = self.b.ins().band_imm_s(v, CHAR_TAG_MASK as i64);
+                return self.b.ins().icmp_imm_s(IntCC::Equal, x, CHAR_TAG as i64);
+            }
             _ => {}
         }
         let done = self.b.create_block();
@@ -999,7 +1003,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             Kind::Block => KIND_CLOSURE,
             Kind::Native => KIND_NATIVE,
             Kind::MutArray => KIND_MUTARRAY,
-            Kind::Bool | Kind::Unit => unreachable!(),
+            Kind::Bool | Kind::Unit | Kind::UnicodeChar => unreachable!(),
         };
         let low3 = self.b.ins().band_imm_s(v, 7);
         let pointer = self.b.ins().icmp_imm_s(IntCC::Equal, low3, 0);
@@ -1055,6 +1059,15 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             }
             Inst::Str { dst, text } => {
                 let v = self.string(text);
+                self.def(*dst, v);
+            }
+            Inst::Char { dst, digits } => {
+                // Always fits: validated (a Unicode scalar value, <=
+                // 0x10FFFF) when this instruction was parsed (nir.rs). An
+                // ordinary immediate constant, exactly like Bool/Unit: no
+                // allocation, no GC root.
+                let codepoint: u32 = digits.parse().expect("validated char literal");
+                let v = self.iconst(make_char(codepoint));
                 self.def(*dst, v);
             }
             Inst::Bool { dst, value } => {
@@ -1430,6 +1443,10 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         IsError => ("rt_is_result", Some(0), false, None),
                         ResultValue => ("rt_result_payload", Some(1), true, None),
                         ResultError => ("rt_result_payload", Some(0), true, None),
+                        // Total, never fails, never allocates (always an
+                        // immediate small Int result): see ops.rs's
+                        // rt_char_codepoint.
+                        CharCodepoint => ("rt_char_codepoint", None, false, None),
                         MkOk | MkError => {
                             let ok = self.iconst((op == MkOk) as u64);
                             let operation = if op == MkOk { "mkok" } else { "mkerror" };

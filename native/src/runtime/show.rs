@@ -31,6 +31,22 @@ fn show_into(v: Value, out: &mut String) {
         }
         Kind::Bool => out.push_str(if v == TRUE { "true" } else { "false" }),
         Kind::Unit => out.push_str("unit"),
+        Kind::UnicodeChar => {
+            // Matches core::value::show's UnicodeChar rendering exactly
+            // (core/value.tcl): single-quoted, the same escape vocabulary
+            // as a character literal.
+            out.push('\'');
+            let c = char::from_u32(char_of(v)).expect("UnicodeChar payload is a valid Unicode scalar value");
+            match c {
+                '\\' => out.push_str("\\\\"),
+                '\'' => out.push_str("\\'"),
+                '\n' => out.push_str("\\n"),
+                '\r' => out.push_str("\\r"),
+                '\t' => out.push_str("\\t"),
+                c => out.push(c),
+            }
+            out.push('\'');
+        }
         Kind::List => {
             out.push('[');
             for (i, item) in list_of(v).items().iter().enumerate() {
@@ -77,6 +93,11 @@ pub fn tcl_value(v: Value) -> Result<String, RtError> {
         Kind::Str => tcl_list(&["str".to_string(), str_of(v).text.to_string()]),
         Kind::Bool => tcl_list(&["bool".to_string(), (if v == TRUE { "true" } else { "false" }).to_string()]),
         Kind::Unit => "unit".to_string(),
+        // Matches core::value::char's own representation exactly
+        // ({UnicodeChar CODEPOINT}, core/value.tcl), so a value crossing
+        // back to the Tcl host round-trips through core::ir::literalValue
+        // unchanged.
+        Kind::UnicodeChar => tcl_list(&["UnicodeChar".to_string(), char_of(v).to_string()]),
         Kind::List => {
             let items = list_of(v).items().iter().map(|item| tcl_value(*item)).collect::<Result<Vec<_>, _>>()?;
             tcl_list(&["list".to_string(), tcl_list(&items)])

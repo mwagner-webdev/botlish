@@ -49,7 +49,7 @@
 #   unary        = "-" unary | postfix
 #   postfix      = primary { "(" [ arguments ] ")" }
 #   arguments    = expression { "," expression } [ "," ]
-#   primary      = INT | STRING | "true" | "false" | "unit"
+#   primary      = INT | STRING | CHAR | "true" | "false" | "unit"
 #                | IDENT [ "::" IDENT ]
 #                | "[" [ arguments ] "]" | "(" expression ")"
 #
@@ -148,6 +148,7 @@ proc surface::parser::Describe {token} {
         IDENT   { return "name \"[dict get $token text]\"" }
         INT     { return "integer [dict get $token text]" }
         STRING  { return "string [dict get $token text]" }
+        CHAR    { return "character [dict get $token text]" }
         default { return "\"[dict get $token text]\"" }
     }
 }
@@ -698,6 +699,10 @@ proc surface::parser::Primary {pVar} {
         STRING {
             Advance p
             return [surface::ast::node string $span value [dict get $token value]]
+        }
+        CHAR {
+            Advance p
+            return [surface::ast::node char $span text [dict get $token value]]
         }
         true - false {
             Advance p

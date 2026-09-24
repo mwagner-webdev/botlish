@@ -38,7 +38,12 @@
 # (compiler/types.tcl) consumes the same definitions for its static types.
 
 namespace eval core::type {
-    variable primitives {int str bool unit list result block native mutarray}
+    # UnicodeChar is a builtin primitive here (not a source-defined int
+    # refinement, item 2 of UNICODE-CHAR-LITERALS.md): the type name is
+    # spelled exactly as the runtime kind tag (core::value.tcl), so no
+    # alias/translation layer is needed anywhere a plain primitive name is
+    # accepted (hir::types::resolveNamed, hir::read::ParseType, ...).
+    variable primitives {int str bool unit list result block native mutarray UnicodeChar}
     # Kinds whose runtime representation can carry evidence (see value.tcl).
     variable evidenceKinds {str}
     # NAME -> {name NAME base KIND validator CMD opaque 0|1}

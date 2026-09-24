@@ -275,6 +275,9 @@ fn equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
         Kind::Str => str_of(a).text == str_of(b).text,
         Kind::Bool => a == b,
         Kind::Unit => true,
+        // Immediate, canonical (one codepoint, one word): word equality is
+        // exactly value equality, like Bool.
+        Kind::UnicodeChar => a == b,
         Kind::List => {
             let (xs, ys) = (list_of(a).items(), list_of(b).items());
             if xs.len() != ys.len() {
@@ -345,8 +348,8 @@ fn hash_mix(p: *mut Vm, h: u64, v: Value) -> Result<u64, ()> {
         return Err(());
     }
     // Kind tags matching core/hashing.tcl's KindTag dict exactly (int str
-    // bool unit list result -> 0 1 2 3 4 5), so e.g. Int 1 and Str "1" never
-    // collide by coincidence of payload bytes alone.
+    // bool unit list result UnicodeChar -> 0 1 2 3 4 5 6), so e.g. Int 1 and
+    // Str "1" never collide by coincidence of payload bytes alone.
     let tag = match kind {
         Kind::Int => 0u8,
         Kind::Str => 1,
@@ -354,6 +357,7 @@ fn hash_mix(p: *mut Vm, h: u64, v: Value) -> Result<u64, ()> {
         Kind::Unit => 3,
         Kind::List => 4,
         Kind::Result => 5,
+        Kind::UnicodeChar => 6,
         Kind::Block | Kind::Native | Kind::MutArray => unreachable!(),
     };
     let h = fnv1a(h, &[tag]);
@@ -371,6 +375,9 @@ fn hash_mix(p: *mut Vm, h: u64, v: Value) -> Result<u64, ()> {
         Kind::Str => fnv1a(h, str_of(v).text.as_bytes()),
         Kind::Bool => fnv1a(h, &[(v == TRUE) as u8]),
         Kind::Unit => h,
+        // Canonical decimal codepoint text, matching how Int's own text is
+        // hashed above (core/hashing.tcl's identical choice).
+        Kind::UnicodeChar => fnv1a(h, char_of(v).to_string().as_bytes()),
         Kind::List => {
             let items = list_of(v).items();
             let mut h = fnv1a(h, &(items.len() as u64).to_le_bytes());
@@ -867,6 +874,17 @@ pub extern "C" fn rt_mutarray_freeze(p: *mut Vm, arr: Value, count: Value) -> Va
 }
 
 // ---------------------------------------------------------------------------
+// UnicodeChar (char::codepoint/char_codepoint, core/unicodechar.tcl): total,
+// never fails. A Unicode scalar value is always <= 0x10FFFF, well inside the
+// small-Int range, so the result is always an immediate small Int -- no
+// allocation, matching the operand it reads from (see runtime/value.rs's
+// own header).
+
+pub extern "C" fn rt_char_codepoint(_p: *mut Vm, v: Value) -> Value {
+    make_small(char_of(v) as i64)
+}
+
+// ---------------------------------------------------------------------------
 // Kinds and Results
 
 pub extern "C" fn rt_is_kind(_p: *mut Vm, v: Value, kind: u64) -> Value {
@@ -1002,6 +1020,7 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         IsError => rt_is_result(p, a[0], 0),
         ResultValue => rt_result_payload(p, a[0], 1),
         ResultError => rt_result_payload(p, a[0], 0),
+        CharCodepoint => rt_char_codepoint(p, a[0]),
         MkOk => rt_result_new(p, 1, a[0]),
         MkError => rt_result_new(p, 0, a[0]),
         Hash => rt_hash(p, a[0]),
@@ -1071,6 +1090,7 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_is_result, 3),
         h!(rt_result_payload, 3),
         h!(rt_result_new, 3),
+        h!(rt_char_codepoint, 2),
         h!(rt_cell_new, 1),
         h!(rt_closure_new, 5),
         h!(rt_call_value, 4),

@@ -8,6 +8,15 @@
 //!   ...00000110   true           (6)
 //!   ...00001010   unit           (10)
 //!   ...00001110   unbound cell   (14)  never a program value
+//!   ccc...ccc100  UnicodeChar, stored as (codepoint << 3) | 4: an immediate
+//!                 (never heap-allocated, never a GC root) carrying its
+//!                 21-bit Unicode scalar value CCC directly in the word, the
+//!                 same "tag + payload" shape as a small Int but with a
+//!                 distinct low-bits tag (`0b100`, disjoint from a small
+//!                 Int's `0b...1`, a heap pointer's `0b...000`, and the
+//!                 fixed constants' exact values above) so a UnicodeChar can
+//!                 never be mistaken for an Int by kind, even through a
+//!                 dynamic/untyped path (see UNICODE-CHAR-LITERALS.md).
 //!   pppp...p000   pointer to a heap object (non-null, 8-byte aligned)
 //!   0             no value: an error is pending (never a program value)
 //! ```
@@ -30,6 +39,17 @@ pub const UNBOUND: Value = 14;
 
 pub const SMALL_MIN: i64 = -(1 << 62);
 pub const SMALL_MAX: i64 = (1 << 62) - 1;
+
+/// Low-bits tag of an immediate UnicodeChar word (see this module's own
+/// header): disjoint from a small Int's `& 1 == 1`, a heap pointer's
+/// `& 7 == 0`, and the fixed constants' exact values (2/6/10/14, none of
+/// which have low 3 bits `0b100`).
+pub const CHAR_TAG: u64 = 0b100;
+pub const CHAR_TAG_MASK: u64 = 0b111;
+
+pub const MAX_SCALAR: u32 = 0x10FFFF;
+pub const SURROGATE_LO: u32 = 0xD800;
+pub const SURROGATE_HI: u32 = 0xDFFF;
 
 /// The runtime's enforced ceiling on a String's character count or a List's
 /// element count (`Vm::new_str`/`new_str_known`/`new_list`): a String/List
@@ -190,6 +210,32 @@ pub fn is_pointer(v: Value) -> bool {
     v != 0 && v & 7 == 0
 }
 
+/// 1 if N is a valid Unicode scalar value (0..=0xD7FF or 0xE000..=0x10FFFF:
+/// never a surrogate) -- the one validity rule for a UnicodeChar codepoint,
+/// shared by the lexer's own literal validation (core/value.tcl's
+/// isValidScalar) and this runtime's `make_char`.
+#[inline]
+pub fn is_valid_scalar(n: u32) -> bool {
+    n <= MAX_SCALAR && !(SURROGATE_LO..=SURROGATE_HI).contains(&n)
+}
+
+#[inline]
+pub fn is_char(v: Value) -> bool {
+    v & CHAR_TAG_MASK == CHAR_TAG
+}
+
+#[inline]
+pub fn char_of(v: Value) -> u32 {
+    debug_assert!(is_char(v));
+    (v >> 3) as u32
+}
+
+#[inline]
+pub fn make_char(codepoint: u32) -> Value {
+    debug_assert!(is_valid_scalar(codepoint));
+    ((codepoint as u64) << 3) | CHAR_TAG
+}
+
 #[inline]
 pub fn bool_value(b: bool) -> Value {
     if b { TRUE } else { FALSE }
@@ -213,6 +259,12 @@ pub enum Kind {
     Block,
     Native,
     MutArray,
+    /// A distinct semantic scalar (never Int, never Str): see this module's
+    /// own header and UNICODE-CHAR-LITERALS.md. Named to match its source
+    /// spelling exactly (core/type.tcl's primitive name), not abbreviated
+    /// like the other variants' lowercase tags, since Kind::name's string
+    /// *is* the language-level type name here.
+    UnicodeChar,
 }
 
 impl Kind {
@@ -227,6 +279,7 @@ impl Kind {
             "block" => Kind::Block,
             "native" => Kind::Native,
             "mutarray" => Kind::MutArray,
+            "UnicodeChar" => Kind::UnicodeChar,
             _ => return None,
         })
     }
@@ -242,6 +295,7 @@ impl Kind {
             Kind::Block => "block",
             Kind::Native => "native",
             Kind::MutArray => "mutarray",
+            Kind::UnicodeChar => "UnicodeChar",
         }
     }
 
@@ -250,8 +304,10 @@ impl Kind {
     }
 
     pub fn from_code(code: u8) -> Kind {
-        [Kind::Int, Kind::Str, Kind::Bool, Kind::Unit, Kind::List, Kind::Result, Kind::Block, Kind::Native, Kind::MutArray]
-            [code as usize]
+        [
+            Kind::Int, Kind::Str, Kind::Bool, Kind::Unit, Kind::List, Kind::Result, Kind::Block, Kind::Native,
+            Kind::MutArray, Kind::UnicodeChar,
+        ][code as usize]
     }
 }
 
@@ -264,6 +320,9 @@ pub fn kind_of(v: Value) -> Kind {
         TRUE | FALSE => return Kind::Bool,
         UNIT => return Kind::Unit,
         _ => {}
+    }
+    if is_char(v) {
+        return Kind::UnicodeChar;
     }
     match heap_kind(v) {
         KIND_BIGINT => Kind::Int,
