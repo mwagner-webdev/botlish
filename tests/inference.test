@@ -180,7 +180,7 @@ test types-2 {program-level binding types} -body {
         {bind p {ref +}}
         {bind u {call {ref result-value} {ref r}}}
     }] {hir::types::show $type}
-} -result {n int s str b bool r result l list p {native +} u any}
+} -result {n int s str b bool r result l {List[int]} p {native +} u any}
 
 test types-3 {typed arithmetic compiles to inline code without generic calls} -body {
     set code [core::compiler::generatedCode [core::readProgramFile [file join $::projectRoot bench fib.ir]]]

@@ -48,6 +48,6 @@ e26 call native(list) : list
         e33 const hi : str
     e34 call block(e2) : any
         e35 ref b1 describe : block(e2)/1 -> any
-        e36 call native(list) : list
+        e36 call native(list) : List[never]
             e37 ref b8 list : native list
     e38 ref b3 known : str

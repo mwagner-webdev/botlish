@@ -39,6 +39,58 @@ namespace eval hir::types {
     # depth. Lattices of bounded types have finite height.
     variable aggregateDepth 3
     variable shapeLength 8
+    # Registered *type constructors* (MINIMAL-APPLIED-LIST-TYPES.md): NAME
+    # -> arity. A source type annotation "NAME[ARG]" (surface::parser::
+    # TypeExpr) is resolved generically against this table (resolveNamed/
+    # resolveApplication below), not by special-casing "List" in the
+    # parser or in hir::resolve.tcl. List is the only constructor this
+    # milestone registers; a future ImmutableSet[T] needs only another
+    # entry here (plus a case in resolveApplication), never a grammar or
+    # representation change.
+    variable constructors [dict create List 1]
+}
+
+# The canonical resolved type for a bare (unapplied) type name NAME -- an
+# ordinary named/primitive type (core::type::normalize, unchanged), or a
+# Tcl error if NAME is itself a registered type constructor used with no
+# type argument at all ("fn f(x: List):" -- an arity error, not "unknown
+# type": #5/#49 of MINIMAL-APPLIED-LIST-TYPES.md). Called only from
+# hir::resolve::ResolveTypeExpr, which turns the error into a located HIR
+# diagnostic exactly as a plain core::type::normalize failure always has.
+proc hir::types::resolveNamed {name} {
+    variable constructors
+    if {[dict exists $constructors $name]} {
+        error "type constructor \"$name\" requires [dict get $constructors $name]\
+            type argument(s) (e.g. $name\[...\])"
+    }
+    return [core::type::normalize $name]
+}
+
+# The canonical resolved type for type constructor CTOR applied to ARGS (a
+# list of already-resolved types, one per this grammar's single bracketed
+# type argument). Raises a Tcl error -- again turned into a located HIR
+# diagnostic by the caller -- for an unregistered constructor name, an
+# ordinary type used as if it were one ("Small[Int]"), or the wrong number
+# of arguments. List is the only registered constructor; its resolved type
+# is the *same* structural {list ELEM} form hir::types::MakeList already
+# produces for an ordinary List value's inferred element type (Call, below)
+# -- one canonical representation for "a List of ELEM", not a parallel
+# constructor-specific encoding (spec item 83).
+proc hir::types::resolveApplication {ctor argTypes} {
+    variable constructors
+    if {![dict exists $constructors $ctor]} {
+        if {[core::type::valid $ctor]} {
+            error "\"$ctor\" is not a type constructor"
+        }
+        error "unknown type constructor \"$ctor\""
+    }
+    set arity [dict get $constructors $ctor]
+    if {[llength $argTypes] != $arity} {
+        error "\"$ctor\" takes $arity type argument(s), got [llength $argTypes]"
+    }
+    switch -- $ctor {
+        List { return [MakeList [lindex $argTypes 0] {} 0 0] }
+    }
 }
 
 proc hir::types::IsSpecific {type} {
@@ -248,9 +300,19 @@ proc hir::types::show {type} {
             block  { return "block([lindex $type 1])/[lindex $type 2] -> [show [lindex $type 3]]" }
             list {
                 if {[llength $type] == 3} {
+                    # A positional (heterogeneous) shape: internal
+                    # specialization/aggregate-fact detail, never a source-
+                    # spellable declared type (ResolveTypeExpr never
+                    # produces one -- see Call's Unshaped stripping below),
+                    # so it keeps its own pre-existing notation rather than
+                    # applied-type bracket syntax.
                     return "list\[[join [lmap p [lindex $type 2] {show $p}] {, }]\]"
                 }
-                return "list<[show [lindex $type 1]]>"
+                # The canonical applied-type notation (MINIMAL-APPLIED-
+                # LIST-TYPES.md): the same "List[T]" a source annotation
+                # spells, so a diagnostic quoting this text is directly
+                # source-legible.
+                return "List\[[show [lindex $type 1]]\]"
             }
         }
     }
@@ -699,8 +761,31 @@ proc hir::types::Call {hirVar ctxVar e} {
                         set dead 1
                     }
                 }
-                if {!$dead && [dict get $meta resultShape] ne ""} {
-                    set result [ShapeResult $hir [dict get $meta resultShape] $argExprs $argTypes $result]
+            }
+            if {!$dead && [dict get $meta resultShape] ne ""} {
+                # -result-shape (core/native.tcl) lets a static analysis
+                # that tracks list contents do better than the native's own
+                # declared -result-type without knowing it by name. This
+                # used to run only during specialization's own region
+                # inference; it now also runs here, in ordinary whole-
+                # program semantic inference, which is exactly what lets an
+                # ordinary List construction/element-read
+                # (list/list_get/list_append, core/lists.tcl,
+                # core/primitives.tcl) carry or recover a concrete List[T]
+                # applied type with no List-specific inference code of its
+                # own (MINIMAL-APPLIED-LIST-TYPES.md).
+                set result [ShapeResult $hir [dict get $meta resultShape] $argExprs $argTypes $result]
+                if {!$spec} {
+                    # Ordinary inference tracks only a List's element type
+                    # (the applied List[T] a source annotation can spell),
+                    # never a positional shape: only hir/specialize.tcl's
+                    # own per-instance region inference needs positional
+                    # precision, and stripping it here keeps every ordinary
+                    # List value's canonical type exactly the same 2-form
+                    # {list ELEM} a declared List[T] annotation resolves to
+                    # (hir::types::resolveApplication), so admissibility can
+                    # compare the two structurally.
+                    set result [Unshaped $result]
                 }
             }
             if {!$dead} {

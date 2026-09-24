@@ -354,6 +354,33 @@ proc surface::parser::Value {pVar} {
     return [Expression p]
 }
 
+# TypeName [ "[" TypeExpr "]" ] -- a possibly-applied type expression
+# (MINIMAL-APPLIED-LIST-TYPES.md). A bare name (no "[...]") is returned as
+# the plain name string, exactly as before this feature (so every existing
+# bare-type-name consumer -- surface::ast::showType, hir::resolve, and every
+# test that reads a param/result type as a plain string -- is unaffected);
+# an applied type is a {NAME ARG} pair, ARG itself a TypeExpr, recursively
+# representable ("List[List[Small]]" needs no separate grammar). The parser
+# is generic over the head name: it does not know "List" is special. Only
+# one type argument is ever parsed (no "A[X, Y]"): resolution (hir::resolve
+# ::ResolveTypeExpr) decides whether a name is a registered constructor and
+# checks its own arity against however many arguments this grammar can ever
+# produce (one), so "List[A, B]" is already a syntax error here, and a
+# constructor of higher arity would need no grammar change, only another
+# constructor-side arity number.
+proc surface::parser::TypeExpr {pVar what} {
+    upvar 1 $pVar p
+    set token [Expect p IDENT $what]
+    set name [dict get $token value]
+    if {[Kind p] ne "\["} {
+        return $name
+    }
+    Advance p
+    set arg [TypeExpr p "a type argument after \"\["]
+    Expect p \] "\"\]\" after the type argument"
+    return [list $name $arg]
+}
+
 proc surface::parser::Function {pVar} {
     upvar 1 $pVar p
     dict set p allowFunctionResult 1
@@ -367,9 +394,9 @@ proc surface::parser::Function {pVar} {
         set typeSpan ""
         if {[Kind p] eq ":"} {
             Advance p
-            set typeToken [Expect p IDENT "a parameter type after \":\""]
-            set type [dict get $typeToken value]
-            set typeSpan [dict get $typeToken span]
+            set typeStart [dict get [Peek p] span]
+            set type [TypeExpr p "a parameter type after \":\""]
+            set typeSpan [SpanFrom p $typeStart]
         }
         lappend params [list [dict get $param value] [dict get $param span] $type $typeSpan]
         if {[Kind p] eq ","} {
@@ -508,9 +535,9 @@ proc surface::parser::Suite {pVar after} {
     dict set p allowFunctionResult 0
     if {$allowResult && [Kind p] eq {->}} {
         Advance p
-        set type [Expect p IDENT {a result type after ->}]
-        set resultType [dict get $type value]
-        set resultTypeSpan [dict get $type span]
+        set typeStart [dict get [Peek p] span]
+        set resultType [TypeExpr p {a result type after ->}]
+        set resultTypeSpan [SpanFrom p $typeStart]
     }
     Expect p : "\":\" after $after"
     set token [Peek p]

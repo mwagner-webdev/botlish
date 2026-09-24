@@ -266,6 +266,14 @@ proc hir::read::ParseType {text number} {
     if {[regexp {^block\((e[0-9]+)\)/([0-9]+) -> (.+)$} $text -> e arity result]} {
         return [list block $e $arity [ParseType $result $number]]
     }
+    if {[regexp {^List\[(.+)\]$} $text -> inner]} {
+        # hir::types::show's own applied-type notation (MINIMAL-APPLIED-
+        # LIST-TYPES.md): always exactly "List[" + show(ELEM) + "]", so the
+        # greedy (.+) correctly spans a nested "List[List[...]]" too -- it
+        # can only ever stop at the final "]", the one this format always
+        # closes with.
+        return [list list [ParseType $inner $number]]
+    }
     if {[regexp {^([a-z]+)\[([^\]]*)\]$} $text -> base names]} {
         set text [list refined $base [split $names ,]]
     }

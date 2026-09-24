@@ -460,16 +460,16 @@ test native-spec-8 {List[Int] -> list_get -> Int: no kind guard; a dynamic index
     # correctly raises on an out-of-range index.
     set text "fn first_plus(xs, n):\n    list_get(xs, 0) + n\n\nfirst_plus(\[1, 2\], 3)"
     set nir [nirOf $text]
-    set body [nirFunction $nir first_plus {list<int>, int}]
+    set body [nirFunction $nir first_plus {List[int], int}]
     list [nirInstances $nir first_plus] [regexp {guard} $body] [regexp {op listget %0 %[0-9]+} $body] \
          [regexp -all {guard} [nirFunction [nirOf $text -specialize 0] first_plus]] \
          [parity $text] [parity "fn first_plus(xs, n):\n    list_get(xs, 0) + n\n\nfirst_plus(\[\], 3)"] \
          [native "fn at(xs, i):\n    list_get(xs, i) + 1\n\nat(\[1, 2\], 2)"]
-} -result {{{list<int>, int}} 0 0 2 same same {error {CORE SEMANTIC RANGE} {list_get: index 2 is outside 0..1}}}
+} -result {{{List[int], int}} 0 0 2 same same {error {CORE SEMANTIC RANGE} {list_get: index 2 is outside 0..1}}}
 
 test native-spec-9 {nested lists: the matrix's rows and entries are known} -body {
     set text "fn cell(m, r, c):\n    list_get(list_get(m, r), c) * 2\n\ncell(\[\[1, 2\], \[3, 4\]\], 1, 0)"
-    set body [nirFunction [nirOf $text] cell {list<list<int>>, int, int}]
+    set body [nirFunction [nirOf $text] cell {List[List[int]], int, int}]
     list [regexp {guard} $body] [parity $text] [native $text]
 } -result {0 same {value 6}}
 

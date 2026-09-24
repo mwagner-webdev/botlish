@@ -222,6 +222,38 @@ proc hir::resolve::SetField {hirVar e key value} {
     dict set hir exprs $e $key $value
 }
 
+# The canonical resolved type named by TYPEEXPR (a surface::parser::
+# TypeExpr: a bare name string, or a {NAME ARG} pair for one applied type
+# argument -- e.g. "List[Small]"), or a Tcl error (unknown name, an
+# ordinary type used as a constructor, an unregistered constructor, or the
+# wrong arity), caught by both callers below exactly as a plain
+# core::type::normalize failure always was (MINIMAL-APPLIED-LIST-TYPES.md).
+# A bare name is resolved by hir::types::resolveNamed, an applied one by
+# hir::types::resolveApplication -- the one place that knows which names
+# are registered type constructors, so this proc stays fully generic over
+# constructor identity.
+proc hir::resolve::ResolveTypeExpr {typeExpr} {
+    if {[llength $typeExpr] == 1} {
+        return [hir::types::resolveNamed $typeExpr]
+    }
+    lassign $typeExpr name arg
+    return [hir::types::resolveApplication $name [list [ResolveTypeExpr $arg]]]
+}
+
+# TYPEEXPR as canonical source text ("List[Small]"), for a diagnostic about
+# a type expression that failed to resolve (so there is no resolved type
+# to format with hir::types::show yet). Mirrors surface::ast::showType's
+# identical notation over the identical data shape; kept as its own tiny
+# proc rather than a cross-layer call, since hir/*.tcl has no dependency on
+# surface/*.tcl anywhere else.
+proc hir::resolve::ShowTypeExpr {typeExpr} {
+    if {[llength $typeExpr] == 1} {
+        return $typeExpr
+    }
+    lassign $typeExpr name arg
+    return "$name\[[ShowTypeExpr $arg]\]"
+}
+
 # Resolves the syntax NODE in context CTX:
 #   scope     ScopeId the node is evaluated in
 #   callable  the enclosing block ExprId ("" at unit level)
@@ -303,9 +335,9 @@ proc hir::resolve::Expr {hirVar node ctx} {
                     lappend declaredParamTypes {}
                     continue
                 }
-                if {[catch {core::type::normalize $paramType} normalized]} {
+                if {[catch {ResolveTypeExpr $paramType} normalized]} {
                     hir::Diagnose hir TYPE \
-                        [format {unknown or invalid type %s for parameter "%s"} $paramType $name] $e
+                        [format {unknown or invalid type %s for parameter "%s"} [ShowTypeExpr $paramType] $name] $e
                     lappend declaredParamTypes {}
                 } else {
                     lappend declaredParamTypes $normalized
@@ -320,8 +352,8 @@ proc hir::resolve::Expr {hirVar node ctx} {
             SetField hir $e captures {}
             set declared [expr {[dict exists $node declaredResult] ? [dict get $node declaredResult] : {}}]
             if {$declared ne {}} {
-                if {[catch {core::type::normalize $declared} normalized]} {
-                    hir::Diagnose hir TYPE [format {unknown or invalid result type %s} $declared] $e
+                if {[catch {ResolveTypeExpr $declared} normalized]} {
+                    hir::Diagnose hir TYPE [format {unknown or invalid result type %s} [ShowTypeExpr $declared]] $e
                     set declared {}
                 } else {
                     set declared $normalized

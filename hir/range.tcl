@@ -936,6 +936,36 @@ proc hir::range::ProvesType {range type} {
     return [expr {$mn ne {-inf} && $mx ne {+inf} && $mn >= [dict get $facts min] && $mx <= [dict get $facts max]}]
 }
 
+# 1 if a value of static type ARGTYPE (with flow-sensitive Range ARGRANGE,
+# [unknown] if none) is provably accepted where DECLARED is required --
+# the one admissibility operation verifyDeclaredResults/VerifyCall both
+# use, for a parameter and for a declared result alike (spec item 41-42 of
+# MINIMAL-APPLIED-LIST-TYPES.md).
+#
+# An ordinary (non-applied) DECLARED keeps exactly STRICT-TYPED-PARAMETERS.
+# md's own two-part proof: nominal subtype, or the argument's own Range/
+# exact-set fact is a subset of DECLARED's integer-domain facts.
+#
+# An applied List[T] DECLARED (hir::types::IsList) is deliberately *not*
+# fed through either of those: hir::types::subtype's own list case is
+# covariant (built for hir/specialize.tcl's positional-shape lattice, an
+# unrelated internal use this proc must not disturb), and ProvesType only
+# ever means integer-domain membership -- core::type::integerFacts would
+# simply raise on a {list ...} type. List[T] admissibility is instead
+# exact structural equality of the argument's own (already Unshaped,
+# ordinary-inference-only) applied type against DECLARED: List[A] accepts
+# only List[A], never List[B] merely because A<:B, and never a broad/
+# unknown list or a non-list value -- the initial invariant rule (spec
+# items 24-26, 70), chosen because List's own mutability/aliasing
+# semantics have not been audited for anything more permissive, not
+# because it was hard to make covariant.
+proc hir::range::ProvesValueAcceptedBy {argType argRange declared} {
+    if {[hir::types::IsList $declared]} {
+        return [expr {[hir::types::Unshaped $argType] eq $declared}]
+    }
+    return [expr {[hir::types::subtype $argType $declared] || [ProvesType $argRange $declared]}]
+}
+
 proc hir::range::verifyDeclaredResults {hirVar} {
     upvar 1 $hirVar hir
     dict for {e node} [dict get $hir exprs] {
@@ -946,9 +976,9 @@ proc hir::range::verifyDeclaredResults {hirVar} {
         set result [dict get $outcome result]
         set declared [dict get $node declaredResult]
         set inferred [hir::type $hir [dict get $node inferredResultType]]
-        if {![hir::types::subtype $inferred $declared] && ![ProvesType $result $declared]} {
+        if {![ProvesValueAcceptedBy $inferred $result $declared]} {
             hir::Diagnose hir TYPE [format {function result does not prove declared type %s (facts: %s)} \
-                [core::type::show $declared] [show $result]] $e
+                [hir::types::show $declared] [show $result]] $e
         }
     }
 }
@@ -1040,12 +1070,12 @@ proc hir::range::VerifyCall {hirVar ranges e node} {
         if {$declaredType eq {}} { continue }
         set argType [hir::typeOf $hir $arg]
         set argRange [expr {[dict exists $ranges $arg] ? [dict get $ranges $arg] : [unknown]}]
-        if {[hir::types::subtype $argType $declaredType] || [ProvesType $argRange $declaredType]} {
+        if {[ProvesValueAcceptedBy $argType $argRange $declaredType]} {
             continue
         }
         hir::Diagnose hir TYPE [format \
             {argument for parameter "%s" cannot be proven to satisfy %s (argument type: %s, facts: %s)} \
-            [dict get $hir bindings $paramBinding name] [core::type::show $declaredType] \
+            [dict get $hir bindings $paramBinding name] [hir::types::show $declaredType] \
             [hir::types::show $argType] [show $argRange]] $arg
     }
 }

@@ -30,7 +30,7 @@ test hir-type-3 {known native calls receive their result types} -body {
                  {call {ref result-value} {ok {const 1}}} \
                  {call {ref integer?} {const x}}]
     shownTypes $h [hir::roots $h]
-} -result {int {str[UriQueryValue]} list bool any bool}
+} -result {int {str[UriQueryValue]} {List[int]} bool any bool}
 
 test hir-type-4 {if receives the joined type of its branches} -body {
     set h [hirOf {bind f {block {flag s}

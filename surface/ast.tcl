@@ -377,6 +377,21 @@ proc surface::ast::DomainText {domain} {
     return "\{[join [dict get $domain values] {, }]\}"
 }
 
+# TYPE (a surface::parser::TypeExpr result: a bare name string, or a
+# {NAME ARG} pair for an applied type) as canonical source text, e.g.
+# "List[Small]" or "List[List[Small]]". Mirrors hir::types::show's own
+# bracket notation for a *resolved* applied type (MINIMAL-APPLIED-LIST-
+# TYPES.md), but over the raw, possibly-unresolvable surface syntax --
+# surface/ast.tcl has no dependency on hir/*.tcl, so this is its own tiny
+# formatter, not a call into hir::types::show.
+proc surface::ast::showType {type} {
+    if {[llength $type] == 1} {
+        return $type
+    }
+    lassign $type name arg
+    return "$name\[[showType $arg]\]"
+}
+
 proc surface::ast::Statement {node indent show linesVar} {
     upvar 1 $linesVar lines
     set pad [string repeat {    } $indent]
@@ -389,9 +404,15 @@ proc surface::ast::Statement {node indent show linesVar} {
         function {
             set params [lmap pair [dict get $node params] {
                 lassign $pair name _ type
-                expr {$type eq "" ? $name : "$name:$type"}
+                expr {$type eq "" ? $name : "$name:[showType $type]"}
             }]
-            lappend lines "${pad}fn [dict get $node name] ($params)$at"
+            # Explicit join, not a bare "($params)" interpolation: a typed
+            # parameter's label can now contain "[" "]" (an applied type,
+            # e.g. "List[Small]"), and Tcl's own list-to-string conversion
+            # would brace-quote such an element for eval-safety, which
+            # "(x:List[Small] y)" does not need (join, unlike bare
+            # interpolation of a list value, never adds that quoting).
+            lappend lines "${pad}fn [dict get $node name] ([join $params { }])$at"
             Body [dict get $node body] [expr {$indent + 1}] $show lines
             return
         }

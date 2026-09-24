@@ -104,8 +104,8 @@ test hir-specialize-7 {self recursion uses one instance} -body {
 
 test hir-specialize-8 {a self tail call with other kinds widens to the lub of both keys} -body {
     lassign [specOf "fn swap(a, b, n):\n    if n == 0:\n        return a\n    swap(b, a, n - 1)\n\nfn grow(acc, n):\n    if n == 0:\n        return acc\n    grow(list_append(acc, n), n - 1)\n\n\[swap(1, \"x\", 3), grow(\[\], 3)\]"] hir analysis
-    list [specLabels $analysis swap] [specLabels $analysis grow] [specResult $analysis {grow<list<never>, int>}]
-} -result {{{swap<int, str, int>} {swap<any, any, int>}} {{grow<list<never>, int>} {grow<list<int>, int>}} list<int>}
+    list [specLabels $analysis swap] [specLabels $analysis grow] [specResult $analysis {grow<List[never], int>}]
+} -result {{{swap<int, str, int>} {swap<any, any, int>}} {{grow<List[never], int>} {grow<List[int], int>}} {List[int]}}
 
 test hir-specialize-9 {mutual recursion reaches a fixpoint with one instance each} -body {
     lassign [specOf "fn even(n):\n    if n == 0:\n        return true\n    odd(n - 1)\n\nfn odd(n):\n    if n == 0:\n        return false\n    even(n - 1)\n\neven(10)"] hir analysis
@@ -142,7 +142,7 @@ test hir-specialize-13 {explosion control: polymorphic recursion terminates} -bo
     set labels [specLabels $analysis nest]
     list [expr {[llength $labels] <= $hir::specialize::limit + 1}] [lindex $labels 0] [lindex $labels end] \
          [specResult $analysis {nest<int, int>}]
-} -result {1 {nest<int, int>} {nest<list<list<list<list>>>, int>} int}
+} -result {1 {nest<int, int>} {nest<List[List[List[list]]], int>} int}
 
 # ---------------------------------------------------------------------------
 # Aggregate facts
@@ -151,7 +151,7 @@ test hir-specialize-14 {list literals} -body {
     list [aggregateType "\[1, 2, 3\]"] [aggregateType "\[\"a\", \"b\"\]"] \
          [aggregateType "\[\[1, 2\], \[3, 4\]\]"] [aggregateType "\[\[1\], \[\"a\"\]\]"] \
          [aggregateType "\[1, \"a\"\]"] [aggregateType "\[\]"]
-} -result {list<int> list<str> list<list<int>> {list[list<int>, list<str>]} {list[int, str]} list<never>}
+} -result {{List[int]} {List[str]} {List[List[int]]} {list[List[int], List[str]]} {list[int, str]} {List[never]}}
 
 test hir-specialize-15 {list_get: element kinds, positions of fixed shapes, and nothing for an empty list} -body {
     list [aggregateType "xs = \[1, 2\]\nlist_get(xs, 1)"] \
@@ -165,7 +165,7 @@ test hir-specialize-16 {list_append keeps a homogeneous element kind and joins o
     list [aggregateType "list_append(\[1\], 2)"] [aggregateType "list_append(\[1\], \"a\")"] \
          [aggregateType "list_append(\[\], \"a\")"] [aggregateType "list_append(\[\"a\", 1\], 2)"] \
          [aggregateType "list_append(\[\[1\]\], \[2\])"]
-} -result {list<int> list list<str> list list<list<int>>}
+} -result {{List[int]} list {List[str]} list {List[List[int]]}}
 
 test hir-specialize-17 {aggregate types are bounded} -body {
     list [hir::types::show [hir::types::canonical {list {list {list {list int}}}}]] \
@@ -173,7 +173,7 @@ test hir-specialize-17 {aggregate types are bounded} -body {
          [hir::types::show [hir::types::lub {list int} {list never}]] \
          [hir::types::subtype {list never} {list int}] [hir::types::subtype {list any {int str}} {list any {int any}}] \
          [hir::types::subtype list {list int}]
-} -result {list<list<list<list>>> list list<int> 1 1 0}
+} -result {{List[List[List[list]]]} list {List[int]} 1 1 0}
 
 # ---------------------------------------------------------------------------
 # The corpus

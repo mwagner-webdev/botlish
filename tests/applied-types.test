@@ -1,0 +1,545 @@
+# applied-types.test -- generic type-application syntax and List[T]
+# (MINIMAL-APPLIED-LIST-TYPES.md).
+#
+# The parser is generic over "NAME[TypeExpr]"; List is the one registered
+# type constructor. List[T] is not a new parallel type representation: it
+# is the *same* structural {list ELEM} form hir/types.tcl already used
+# internally for aggregate/specialization facts, now also produced by
+# ordinary (non-specialization) semantic inference and spellable in a
+# parameter/result annotation. Admissibility for an applied type is exact
+# structural equality (invariant), never hir::types::subtype's own
+# (covariant, specialization-only) list case and never integer ProvesType.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+set ::smallDecl "type Small = Int in 0..10\n\nfn one() -> Small:\n    1\n\nfn two() -> Small:\n    2\n\n"
+
+proc appliedTypeRejects {source} {
+    catch {surface::compile $source reject.bot} message options
+    list [dict get $options -errorcode] \
+        [expr {[string match {*cannot be proven to satisfy*} $message]
+            || [string match {*unknown or invalid*} $message]
+            || [string match {*does not prove declared type*} $message]}]
+}
+
+# ---------------------------------------------------------------------------
+# Syntax (spec items 1, 7, 80-81)
+
+test applied-type-parse-bare {a bare type name parses exactly as before (no representation change for the untyped-application case)} -body {
+    set fn [lindex [dict get [surface::parse {fn f(x: Small):
+    x} bare.bot] body] 0]
+    lindex [lindex [dict get $fn params] 0] 2
+} -result Small
+
+test applied-type-parse-applied {"List[Small]" parses to a {NAME ARG} pair} -body {
+    set fn [lindex [dict get [surface::parse {fn f(x: List[Small]):
+    x} applied.bot] body] 0]
+    lindex [lindex [dict get $fn params] 0] 2
+} -result {List Small}
+
+test applied-type-parse-nested {"List[List[Small]]" parses recursively, no grammar redesign needed} -body {
+    set fn [lindex [dict get [surface::parse {fn f(x: List[List[Small]]):
+    x} nested.bot] body] 0]
+    lindex [lindex [dict get $fn params] 0] 2
+} -result {List {List Small}}
+
+test applied-type-parse-result {an applied result type parses the same way as a parameter type} -body {
+    set fn [lindex [dict get [surface::parse {fn f() -> List[Small]:
+    1} result.bot] body] 0]
+    dict get $fn resultType
+} -result {List Small}
+
+test applied-type-parse-canonical-format {canonical AST formatting spells the applied type back with brackets, no space before the colon} -body {
+    surface::formatAst [surface::parse {fn f(x: List[Small], y):
+    x} fmt.bot]
+} -result {fn f (x:List[Small] y)
+    (name x)}
+
+# Item 80's own required malformed-syntax cases: "List[" / "List[]" /
+# "List[Small" / "List[Small]]" all fail at PARSE time (a bracket that
+# never closes, or closes with nothing -- or too much -- inside it); a
+# grammatically well-formed but semantically bad annotation ("Missing[Small]",
+# "Small[Int]") parses fine and fails only at resolution -- covered
+# separately above/below by applied-type-unknown-constructor and
+# applied-type-not-a-constructor (spec 80: "appropriate ... diagnostics
+# depending on where each fails").
+foreach {name source pattern} {
+    unterminated-open {fn f(x: List[):
+    x}                 {*does not match*}
+    empty-brackets     {fn f(x: List[]):
+    x}                 {*a type argument*}
+    missing-close      {fn f(x: List[Small):
+    x}                 {*does not match*}
+    double-close       {fn f(x: List[Small]]):
+    x}                 {*does not match*}
+} {
+    test applied-type-malformed-$name "malformed applied-type syntax: $name" -body {
+        catch {surface::parse $source $name.bot} message options
+        list [lrange [dict get $options -errorcode] 0 1] [string match $pattern $message]
+    } -result {{SURFACE SYNTAX} 1}
+}
+
+test applied-type-malformed-comma-arity {"List[A, B]" is a syntax error: the grammar is unary-only (a comma is not part of a single TypeExpr)} -body {
+    catch {surface::parse {type A = Int in 0..3
+fn f(x: List[A, A]):
+    x} comma.bot} message options
+    lrange [dict get $options -errorcode] 0 1
+} -result {SURFACE SYNTAX}
+
+# ---------------------------------------------------------------------------
+# Resolution: unknown constructor, wrong kind, wrong arity, unknown argument
+
+test applied-type-unknown-constructor {"Missing[Small]" is a located semantic error, not a parse error} -body {
+    appliedTypeRejects {type Small = Int in 0..10
+fn f(x: Missing[Small]):
+    x}
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test applied-type-not-a-constructor {an ordinary named type used with brackets ("Small[int]") is rejected as "not a type constructor" (the type argument itself, "int", is perfectly valid -- this isolates the specific failure)} -body {
+    appliedTypeRejects {type Small = Int in 0..10
+fn f(x: Small[int]):
+    x}
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test applied-type-bare-list-arity {bare "List" with no type argument is an arity error, not "unknown type"} -body {
+    appliedTypeRejects {fn f(x: List):
+    x}
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test applied-type-unknown-argument {"List[Missing]" (an unknown type *argument*) is rejected} -body {
+    appliedTypeRejects {fn f(x: List[Missing]):
+    x}
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test applied-type-source-defined-argument {a source-defined type is usable as List's type argument} -body {
+    surface::compile [format {%sfn consume(xs: List[Small]) -> int:
+    1
+consume([one(), two()])} $::smallDecl] srcarg.bot
+    set ok 1
+} -result 1
+
+# ---------------------------------------------------------------------------
+# Canonical representation: semantic equality, not formatted strings (spec 10, 83-88)
+
+test applied-type-semantic-equality {List[Small] and List[Tiny] are distinct applied types (recursive comparison of constructor+argument), even though Tiny <: Small} -body {
+    set h [surface::compile [format {%stype Tiny = Small in 0..3
+fn t() -> Tiny:
+    1
+fn make_smalls() -> List[Small]:
+    [one(), two()]
+fn make_tinys() -> List[Tiny]:
+    [t()]
+1} $::smallDecl] equal.bot -strict 0]
+    set smallsBlock [hir::get $h [lindex [hirFind $h bind make_smalls] 0] value]
+    set tinysBlock [hir::get $h [lindex [hirFind $h bind make_tinys] 0] value]
+    set smallsType [hir::get $h $smallsBlock declaredResult]
+    set tinysType [hir::get $h $tinysBlock declaredResult]
+    list [hir::types::show $smallsType] [hir::types::show $tinysType] \
+        [expr {$smallsType eq $tinysType}]
+} -result {{List[int[Small]]} {List[int[Tiny]]} 0}
+
+test applied-type-structural-not-nominal {two independent List[Small] applications in the same compilation denote the identical resolved type (structural, not two separately-registered names)} -body {
+    surface::compile [format {%sfn make_smalls() -> List[Small]:
+    [one(), two()]
+fn consume(xs: List[Small]) -> int:
+    1
+consume(make_smalls())} $::smallDecl] structural.bot
+    set ok 1
+} -result 1
+
+# ---------------------------------------------------------------------------
+# HIR round-trip and formatting (spec 44, 87)
+
+test applied-type-hir-show {hir::types::show renders an applied List type with source-legible bracket notation} -body {
+    hir::types::show [hir::types::resolveApplication List [list int]]
+} -result {List[int]}
+
+test applied-type-hir-show-nested {nested applied types render recursively} -body {
+    hir::types::show [hir::types::resolveApplication List [list [hir::types::resolveApplication List [list int]]]]
+} -result {List[List[int]]}
+
+test applied-type-hir-roundtrip {format -> parse -> format is byte-identical for a program using List[T] in parameter and result position} -body {
+    set h [surface::compile [format {%sfn make_smalls() -> List[Small]:
+    [one(), two()]
+fn consume(xs: List[Small]) -> int:
+    1
+consume(make_smalls())} $::smallDecl] roundtrip.bot]
+    set text1 [hir::format $h]
+    set text2 [hir::format [hir::parse $text1]]
+    expr {$text1 eq $text2}
+} -result 1
+
+test applied-type-hir-roundtrip-preserves-type {the read-back HIR's declaredParamTypes is semantically live (a real applied type, not just round-tripped text)} -body {
+    set h [surface::compile [format {%sfn consume(xs: List[Small]) -> int:
+    1} $::smallDecl] roundtrip2.bot]
+    set h2 [hir::parse [hir::format $h]]
+    set block [lindex [hirFind $h2 block] end]
+    hir::types::show [lindex [hir::get $h2 $block declaredParamTypes] 0]
+} -result {List[int[Small]]}
+
+test applied-type-hir-roundtrip-nested {a nested List[List[T]] parameter round-trips too} -body {
+    set h [surface::compile [format {%sfn consume(xss: List[List[Small]]) -> int:
+    1} $::smallDecl] roundtrip3.bot]
+    set text1 [hir::format $h]
+    set text2 [hir::format [hir::parse $text1]]
+    expr {$text1 eq $text2}
+} -result 1
+
+# ---------------------------------------------------------------------------
+# Module signatures (spec 45, 74)
+
+test applied-type-module-signature {hir::moduleSignatures reports an exported function's real List[T] parameter/result type, not a placeholder} -body {
+    set libPath [file join $::core::libraryDir appliedtypeslib.bot]
+    set ch [open $libPath w]
+    puts $ch [format {namespace appliedtypeslib
+
+%sfn make_smalls() -> List[Small]:
+    [one(), two()]
+
+fn consume(xs: List[Small]) -> int:
+    1
+} $::smallDecl]
+    close $ch
+    set mainPath [makeFile {appliedtypeslib::consume(appliedtypeslib::make_smalls())
+} applied-type-module-main.bot]
+    try {
+        set h [surface::readProgramFile $mainPath -strict 0]
+        set sigs [hir::moduleSignatures $h]
+        list [hir::types::show [lindex [dict get [dict get $sigs appliedtypeslib::consume] params] 0]] \
+             [hir::types::show [dict get [dict get $sigs appliedtypeslib::make_smalls] result]] \
+             [llength [hir::diagnostics $h]]
+    } finally {
+        file delete $libPath
+        removeFile applied-type-module-main.bot
+    }
+} -result {{List[int[Small]]} {List[int[Small]]} 0}
+
+# ---------------------------------------------------------------------------
+# List construction inference: homogeneous, sibling LUB, heterogeneous, empty
+# (spec 15-21)
+
+test applied-type-construct-homogeneous {[one(), two()] infers List[Small] with no source annotation on the binding} -body {
+    set h [surface::compile [format {%sxs = [one(), two()]
+1} $::smallDecl] homog.bot -strict 0]
+    set bindExpr [lindex [hirFind $h bind xs] 0]
+    hir::types::show [hir::typeOf $h $bindExpr]
+} -result {List[int[Small]]}
+
+test applied-type-construct-lub-sibling {[tinyValue, smallValue] infers List[Small] when lub(Tiny, Small) = Small} -body {
+    surface::compile [format {%stype Tiny = Small in 0..3
+fn t() -> Tiny:
+    1
+fn consume(xs: List[Small]) -> int:
+    1
+consume([t(), one()])} $::smallDecl] lubsib.bot
+    set ok 1
+} -result 1
+
+test applied-type-construct-same-domain-siblings-not-conflated {same-domain siblings A, B do not become List[A]/List[B]; the common type is the broad Int} -body {
+    set h [surface::compile {type A = Int in 0..3
+type B = Int in 0..3
+
+fn make_a() -> A:
+    1
+fn make_b() -> B:
+    1
+xs = [make_a(), make_b()]
+1} siblings.bot -strict 0]
+    set bindExpr [lindex [hirFind $h bind xs] 0]
+    hir::types::show [hir::typeOf $h $bindExpr]
+} -result {List[int]}
+
+test applied-type-construct-heterogeneous {[1, "x"] does not become a false precise List[T]; it stays the existing broad/aggregate representation} -body {
+    appliedTypeRejects {fn f(xs: List[int]) -> int:
+    1
+f([1, "x"])}
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test applied-type-construct-empty {[] does not satisfy any List[T] parameter (no contextual typing)} -body {
+    appliedTypeRejects [format {%sfn consume(xs: List[Small]) -> int:
+    1
+consume([])} $::smallDecl]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+# ---------------------------------------------------------------------------
+# Parameter and result contracts (spec 23, 27-28)
+
+test applied-type-param-accepted {a value statically known as List[Small] satisfies a List[Small] parameter} -body {
+    surface::compile [format {%sfn consume(xs: List[Small]) -> int:
+    1
+consume([one(), two()])} $::smallDecl] paramok.bot
+    set ok 1
+} -result 1
+
+test applied-type-param-rejected-broad {an unproven/broad List does not satisfy a List[Small] parameter} -body {
+    appliedTypeRejects [format {%sfn make_ints():
+    [1, 2]
+fn consume(xs: List[Small]) -> int:
+    1
+consume(make_ints())} $::smallDecl]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test applied-type-param-rejected-non-list {a non-List value does not satisfy a List[T] parameter} -body {
+    appliedTypeRejects [format {%sfn consume(xs: List[Small]) -> int:
+    1
+consume(1)} $::smallDecl]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test applied-type-param-body-fact {inside consume(xs: List[Small]), xs's declared type is unconditionally List[Small] -- caller-independent (declaredParamTypes, not a persisted binding type -- STRICT-TYPED-PARAMETERS.md's own note: a parameter's seeded type is never in hir::bindingType)} -body {
+    set h [surface::compile [format {%sfn consume(xs: List[Small]) -> int:
+    1} $::smallDecl] bodyfact.bot -strict 0]
+    set block [lindex [hirFind $h block] end]
+    hir::types::show [lindex [hir::get $h $block declaredParamTypes] 0]
+} -result {List[int[Small]]}
+
+test applied-type-result-accepted {a body inferred as List[Small] satisfies a declared List[Small] result} -body {
+    surface::compile [format {%sfn make_smalls() -> List[Small]:
+    [one(), two()]} $::smallDecl] resultok.bot
+    set ok 1
+} -result 1
+
+test applied-type-result-rejected {a broad/wrong-element body does not satisfy a declared List[Small] result} -body {
+    appliedTypeRejects [format {%sfn make_smalls() -> List[Small]:
+    [1, 2]} $::smallDecl]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+# ---------------------------------------------------------------------------
+# Invariant container compatibility (spec 24-26, 69-70)
+
+test applied-type-invariant-sibling-rejected {List[B] is not admissible as List[A] merely because scalar B is admissible to scalar A (A, B same-domain siblings)} -body {
+    appliedTypeRejects {type A = Int in 0..3
+type B = Int in 0..3
+
+fn make_b() -> B:
+    1
+
+fn make_bs() -> List[B]:
+    [make_b()]
+
+fn take_as(xs: List[A]) -> int:
+    0
+
+take_as(make_bs())}
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test applied-type-invariant-sibling-scalar-still-valid {the scalar analogue of the same program (take_a(B-value)) remains valid, contrasting container invariance with scalar admissibility} -body {
+    surface::compile {type A = Int in 0..3
+type B = Int in 0..3
+
+fn make_b() -> B:
+    1
+
+fn take_a(x: A) -> int:
+    0
+
+take_a(make_b())} scalarsibling.bot
+    set ok 1
+} -result 1
+
+test applied-type-invariant-subtype-element-rejected {List[Tiny] is not admissible as List[Small] merely because Tiny <: Small} -body {
+    appliedTypeRejects [format {%stype Tiny = Small in 0..3
+fn t() -> Tiny:
+    1
+fn make_tinys() -> List[Tiny]:
+    [t()]
+fn take_smalls(xs: List[Small]) -> int:
+    0
+take_smalls(make_tinys())} $::smallDecl]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+# ---------------------------------------------------------------------------
+# Element read: the canonical List access primitive statically returns T
+# (spec 29-32, 71) and composes with existing scalar range facts (90-93)
+
+test applied-type-element-read-type {reading a List[Small] element through list_get statically returns Small} -body {
+    set h [surface::compile [format {%sfn read_small(xs: List[Small]) -> Small:
+    list_get(xs, 0)} $::smallDecl] readtype.bot -strict 0]
+    set call [lindex [hirFind $h call] end]
+    hir::types::show [hir::typeOf $h $call]
+} -result {int[Small]}
+
+test applied-type-element-read-result-verifies {the read_small result contract verifies with no caller-derived rescue} -body {
+    surface::compile [format {%sfn read_small(xs: List[Small]) -> Small:
+    list_get(xs, 0)} $::smallDecl] readverify.bot
+    set ok 1
+} -result 1
+
+test applied-type-element-read-range-fact {the vertical proof: List[Small] -> element read -> Small -> the existing [0,10] range fact, composing container typing with the bounded-integer machinery} -body {
+    set h [surface::compile [format {%sfn read_small(xs: List[Small]) -> Small:
+    list_get(xs, 0)} $::smallDecl] readrange.bot -strict 0]
+    set block [lindex [hirFind $h block] end]
+    set params [hir::get $h $block params]
+    set outcome [hir::range::AnalyzeInstance $h verify {} $block $params \
+        [lrepeat [llength $params] [hir::range::unknown]] {} {}]
+    hir::range::show [dict get $outcome result]
+} -result {[0, 10]}
+
+test applied-type-element-read-preserves-bounds-error {list_get's own bounds RANGE error is unchanged -- only the successful value's type improved} -body {
+    errorCodeOf {bind small {const int 1}} \
+        {call {ref list_get} {call {ref list} {const int 1}} {const int 5}}
+} -result {CORE SEMANTIC RANGE}
+
+# ---------------------------------------------------------------------------
+# Alias and return propagation (spec 34-37, 72-73, 76)
+
+test applied-type-alias-preserved {ys = xs preserves List[Small] through ordinary immutable binding} -body {
+    surface::compile [format {%sfn consume(xs: List[Small]) -> Small:
+    ys = xs
+    list_get(ys, 0)} $::smallDecl] alias.bot
+    set ok 1
+} -result 1
+
+test applied-type-return-propagation {make_smalls() : List[Small] is accepted directly by consume(xs: List[Small]) across the function boundary} -body {
+    surface::compile [format {%sfn make_smalls() -> List[Small]:
+    [one(), two()]
+fn consume(xs: List[Small]) -> int:
+    1
+consume(make_smalls())} $::smallDecl] returnprop.bot
+    set ok 1
+} -result 1
+
+test applied-type-erasure-vs-consume {passthrough(xs) may lose List[Small] (an untyped parameter erases it), but a later consume() of the erased value is then rejected -- lost proof precision, not a soundness hole} -body {
+    appliedTypeRejects [format {%sfn passthrough(x):
+    x
+fn make_smalls() -> List[Small]:
+    [one(), two()]
+fn consume(xs: List[Small]) -> int:
+    1
+consume(passthrough(make_smalls()))} $::smallDecl]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test applied-type-erasure-passthrough-alone-is-legal {passthrough(xs) by itself (never re-consumed by a typed List[T] parameter) remains legal: erasure is not itself an error} -body {
+    surface::compile [format {%sfn passthrough(x):
+    x
+fn make_smalls() -> List[Small]:
+    [one(), two()]
+1 + list_length(passthrough(make_smalls()))} $::smallDecl] passthroughok.bot
+    set ok 1
+} -result 1
+
+# ---------------------------------------------------------------------------
+# Cross-module (spec 45, 74)
+
+test applied-type-cross-module-valid {a cross-module direct call enforces and satisfies a declared List[Small] parameter} -body {
+    set libPath [file join $::core::libraryDir appliedtypeslib2.bot]
+    set ch [open $libPath w]
+    puts $ch [format {namespace appliedtypeslib2
+
+%sfn make_smalls() -> List[Small]:
+    [one(), two()]
+
+fn consume(xs: List[Small]) -> int:
+    1
+} $::smallDecl]
+    close $ch
+    set mainPath [makeFile {appliedtypeslib2::consume(appliedtypeslib2::make_smalls())
+} applied-type-cross-module-ok.bot]
+    try {
+        set h [surface::readProgramFile $mainPath -strict 0]
+        llength [hir::diagnostics $h]
+    } finally {
+        file delete $libPath
+        removeFile applied-type-cross-module-ok.bot
+    }
+} -result 0
+
+test applied-type-cross-module-invalid {a cross-module direct call rejects a broad-List argument against a declared List[Small] parameter} -body {
+    set libPath [file join $::core::libraryDir appliedtypeslib3.bot]
+    set ch [open $libPath w]
+    puts $ch [format {namespace appliedtypeslib3
+
+%sfn consume(xs: List[Small]) -> int:
+    1
+} $::smallDecl]
+    close $ch
+    set mainPath [makeFile {fn make_ints():
+    [1, 2]
+appliedtypeslib3::consume(make_ints())
+} applied-type-cross-module-bad.bot]
+    try {
+        set h [surface::readProgramFile $mainPath -strict 0]
+        list [llength [hir::diagnostics $h]] \
+            [string match {*cannot be proven to satisfy*} [dict get [lindex [hir::diagnostics $h] 0] message]]
+    } finally {
+        file delete $libPath
+        removeFile applied-type-cross-module-bad.bot
+    }
+} -result {1 1}
+
+# ---------------------------------------------------------------------------
+# Typed-callable escape soundness stays intact for an applied parameter type
+# (spec 38, 75-76)
+
+test applied-type-callable-escape-still-rejected {a function whose only declared parameter is List[Small] is still a "typed callable" (>=1 declared param type): passing it through an untyped higher-order parameter is still rejected} -body {
+    catch {surface::compile [format {%sfn consume(xs: List[Small]) -> int:
+    0
+
+fn apply(f, v):
+    f(v)
+
+apply(consume, [one()])} $::smallDecl] escape.bot} message options
+    list [dict get $options -errorcode] \
+        [string match {*typed parameter requirements that cannot be preserved*} $message]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test applied-type-callable-escape-exact-alias-still-legal {exact aliasing of the same callable (f = consume) remains fully first-class, unaffected by its parameter being an applied type} -body {
+    surface::compile [format {%sfn consume(xs: List[Small]) -> int:
+    0
+
+f = consume
+f([one()])} $::smallDecl] alias2.bot
+    set ok 1
+} -result 1
+
+# ---------------------------------------------------------------------------
+# Repeated/sequential compilation isolation (spec 82, source-defined
+# element types used inside List[T] must not leak stale metadata)
+
+test applied-type-repeated-compilation {compiling the same List[T]-over-a-source-type program twice in one process succeeds both times} -body {
+    set src [format {%sfn consume(xs: List[Small]) -> int:
+    list_length(xs)
+consume([one(), two()])} $::smallDecl]
+    set h1 [surface::compile $src rep1.bot]
+    set h2 [surface::compile $src rep2.bot]
+    list [core::formatValue [core::evalProgram [hir::lower $h1]]] \
+         [core::formatValue [core::evalProgram [hir::lower $h2]]]
+} -result {2 2}
+
+test applied-type-sequential-non-leaking {two sequential programs declaring the same spelling "Small" with different domains, each used as List[Small]'s element, do not leak into each other} -body {
+    set h1 [surface::compile {type Small = Int in 0..10
+
+fn mk() -> Small:
+    10
+
+fn consume(xs: List[Small]) -> int:
+    list_length(xs)
+
+consume([mk()])
+} seq1.bot]
+    set v1 [core::formatValue [core::evalProgram [hir::lower $h1]]]
+    set h2 [surface::compile {type Small = Int in 100..110
+
+fn mk() -> Small:
+    10
+
+fn consume(xs: List[Small]) -> int:
+    list_length(xs)
+
+consume([mk()])
+} seq2.bot -strict 0]
+    set e2 [llength [hir::diagnostics $h2]]
+    set h3 [surface::compile {type Small = Int in 100..110
+
+fn mk() -> Small:
+    105
+
+fn consume(xs: List[Small]) -> int:
+    list_length(xs)
+
+consume([mk()])
+} seq3.bot]
+    set v3 [core::formatValue [core::evalProgram [hir::lower $h3]]]
+    list $v1 [expr {$e2 > 0}] $v3
+} -result {1 1 1}
+
+cleanupTests

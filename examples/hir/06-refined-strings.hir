@@ -21,7 +21,7 @@ e1 bind b1 contact : block(e2)/1 -> result
             else s5
                 e11 error : result
                     e12 ref b2 address : str
-e13 call native(list) : list
+e13 call native(list) : List[result]
     e14 ref b5 list : native list
     e15 call block(e2) : result
         e16 ref b1 contact : block(e2)/1 -> result
