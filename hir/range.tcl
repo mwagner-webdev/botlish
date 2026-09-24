@@ -772,6 +772,23 @@ proc hir::range::Expr {hirVar ctxVar e} {
             dict set ctx bindings $saved
             return $result
         }
+        listloop {
+            # The listloop's own value is a List, never rangeable (always
+            # `unknown`); this still visits the iterable and body so any
+            # Int sub-expressions inside them (e.g. char::codepoint(c),
+            # Byte(...)) get their own range facts recorded, exactly as a
+            # bare loop's body already does. The element binding needs no
+            # seed of its own: an unseeded binding's `ref` case already
+            # falls back to `unknown` (line ~740), the same answer a
+            # not-provably-int element would get anyway.
+            set saved [dict get $ctx bindings]
+            Expr hir ctx [dict get $node iterable]
+            foreach child [dict get $node body] {
+                Expr hir ctx $child
+            }
+            dict set ctx bindings $saved
+            return [unknown]
+        }
         return {
             set value [dict get $node value]
             set r [expr {$value eq "" ? [unknown] : [Expr hir ctx $value]}]

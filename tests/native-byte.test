@@ -187,9 +187,17 @@ test native-byte-constructors-valid {Byte/Nibble/LowNibble/HighNibble constructo
     }
 } -result {{[0, 255, 0, 15, 0, 15, 0, 240]} {[0, 255, 0, 15, 0, 15, 0, 240]}}
 
-test native-byte-constructors-cranelift-unsupported {a checked constructor stays native-unsupported for a source-declared type, exactly as it was for the old compiler-registered Byte (item 70-71: no new unchecked native path)} -body {
+# BYTE-SET.md: generic native (Cranelift) support for a checked *interval*-
+# domain constructor over a genuinely dynamic Int (composed entirely from
+# existing NIR forms in native/lower.tcl -- no Byte-specific native path).
+# Byte(200) now succeeds on cranelift/cranelift-generic exactly as it
+# already did on interp/compile, replacing this test's own former pin of
+# the pre-existing NATIVE UNSUPPORTED limitation.
+test native-byte-constructors-cranelift-supported {a checked constructor over an interval domain (Byte) is natively supported for a genuinely dynamic value} -body {
     set path [makeFile {byte::high_nibble(0)
-Byte(200)} native-byte-ctor-cranelift.bot]
+fn check(n):
+    Byte(n)
+check(mod(50000, 201))} native-byte-ctor-cranelift.bot]
     try {
         set exprs [hir::lower [surface::readProgramFile $path -strict 0]]
         set outcome [outcomeUnder cranelift $exprs]
@@ -197,7 +205,35 @@ Byte(200)} native-byte-ctor-cranelift.bot]
     } finally {
         removeFile native-byte-ctor-cranelift.bot
     }
-} -result {error {NATIVE UNSUPPORTED {native Byte}}}
+} -result {value 152}
+
+test native-byte-constructors-cranelift-range-error {a checked constructor over an interval domain (Byte) raises the same RANGE error natively, for a genuinely dynamic out-of-domain value} -body {
+    set path [makeFile {byte::high_nibble(0)
+fn check(n):
+    Byte(n)
+check(mod(50000, 201) + 200)} native-byte-ctor-cranelift-bad.bot]
+    try {
+        set exprs [hir::lower [surface::readProgramFile $path -strict 0]]
+        set outcome [outcomeUnder cranelift $exprs]
+        list [lindex $outcome 0] [lindex $outcome 1]
+    } finally {
+        removeFile native-byte-ctor-cranelift-bad.bot
+    }
+} -result {error {CORE SEMANTIC RANGE}}
+
+test native-byte-constructors-cranelift-exact-domain-still-unsupported {a checked constructor over an *exact* (non-interval) domain (HighNibble) remains native-unsupported, unaffected by the interval-domain support above} -body {
+    set path [makeFile {byte::high_nibble(0)
+fn check(n):
+    HighNibble(n)
+check(mod(500, 241))} native-byte-ctor-cranelift-exact.bot]
+    try {
+        set exprs [hir::lower [surface::readProgramFile $path -strict 0]]
+        set outcome [outcomeUnder cranelift $exprs]
+        list [lindex $outcome 0] [lindex $outcome 1]
+    } finally {
+        removeFile native-byte-ctor-cranelift-exact.bot
+    }
+} -result {error {NATIVE UNSUPPORTED {native HighNibble}}}
 
 test native-byte-constructors-boundary {Byte/Nibble/LowNibble/HighNibble constructors fail just outside their domains} -body {
     set path [makeFile {byte::high_nibble(0)

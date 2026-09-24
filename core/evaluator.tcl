@@ -35,6 +35,7 @@ namespace eval core::interp {
         call        core::forms::op-call \
         if          core::forms::op-if \
         loop        core::forms::op-loop \
+        listloop    core::forms::op-listloop \
         return      core::forms::op-return \
         break       core::forms::op-break \
         continue    core::forms::op-continue \
@@ -163,6 +164,51 @@ proc core::forms::op-loop {node env} {
             }
         }
     }
+}
+
+# (listloop LIST-EXPR (block (ELEM) BODY...)): evaluates LIST-EXPR once,
+# then iterates its items left to right, each iteration in a fresh scope
+# (exactly like op-loop's own body) that binds ELEM to the current item.
+# `return`/an error propagate directly out of the loop, exactly as they
+# already do in op-loop; `break` ends the loop with its own payload (or
+# unit) as the *whole* listloop's result; an ordinary (`value`) completion
+# contributes its value to the result being built, while `continue`
+# contributes nothing -- both simply move on to the next item. Exhausting
+# the list without a `break` completes normally with the List of every
+# contributed value, in order.
+proc core::forms::op-listloop {node env} {
+    set listExpr [lindex $node 1]
+    set elementBlock [lindex $node 2]
+    set param [lindex [core::ir::blockParams $elementBlock] 0]
+    set body [core::ir::blockBody $elementBlock]
+    set listValue [core::interp::valueOf [core::interp::evalIn $listExpr $env]]
+    set items [core::value::items [core::value::expect list $listValue "loop iterable"]]
+    set results {}
+    foreach item $items {
+        set iterationEnv [core::env::child $env]
+        core::env::define $iterationEnv $param $item
+        core::env::declare $iterationEnv [core::ir::scopeBindNames $body]
+        try {
+            set completion [core::interp::evalSequence $body $iterationEnv]
+        } finally {
+            core::env::release $iterationEnv
+        }
+        switch -- [core::completion::kind $completion] {
+            value {
+                lappend results [core::completion::payload $completion]
+            }
+            continue {
+                # contributes nothing; next iteration
+            }
+            break {
+                return [core::completion::normal [core::completion::payload $completion]]
+            }
+            return - propagate-error {
+                return $completion
+            }
+        }
+    }
+    return [core::completion::normal [core::value::listOf $results]]
 }
 
 proc core::forms::op-return {node env} {

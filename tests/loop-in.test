@@ -1,0 +1,221 @@
+# loop-in.test -- "loop x in EXPR:" (core IR: listloop), the minimal
+# element-binding List-traversal extension added for BYTE-SET.md.
+#
+# Covers the construct on its own (not only through byte::set): typing,
+# left-to-right order, evaluating the iterable exactly once, an empty
+# List, break/continue/return/error composition, nested loops, and
+# four-way backend parity.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+set parityBackends {interp compile cranelift-generic cranelift}
+
+proc loopSourceHir {text} {
+    return [surface::compile $text t.bot -strict 0]
+}
+
+proc loopParity {text} {
+    set exprs [hir::lower [loopSourceHir $text]]
+    set outcomes [lmap backend $::parityBackends {outcomeUnder $backend $exprs}]
+    if {[llength [lsort -unique $outcomes]] == 1} { return same }
+    return [join [lmap backend $::parityBackends outcome $outcomes {list $backend $outcome}] " / "]
+}
+
+proc loopInterpValue {text} {
+    lindex [outcomeUnder interp [hir::lower [loopSourceHir $text]]] 1
+}
+
+# ---------------------------------------------------------------------------
+# Basic shape, order, typing
+
+test loop-in-basic-map {loop x in EXPR: BODY collects each iteration's body value, in order} -body {
+    loopInterpValue {loop x in [1, 2, 3]:
+    x + x
+}
+} -result {[2, 4, 6]}
+
+test loop-in-parity {loop x in EXPR: agrees on every backend} -body {
+    loopParity {loop x in [1, 2, 3]:
+    x + x
+}
+} -result same
+
+test loop-in-empty-list {an empty iterable runs the body zero times and yields an empty List, no error} -body {
+    loopInterpValue {loop x in []:
+    x
+}
+} -result {[]}
+
+test loop-in-empty-list-parity {the empty case agrees on every backend} -body {
+    loopParity {loop x in []:
+    x
+}
+} -result same
+
+test loop-in-one-element {a single-element List contributes exactly one value} -body {
+    loopInterpValue {loop x in [7]:
+    x * 2
+}
+} -result {[14]}
+
+test loop-in-left-to-right {elements are visited left to right (order-sensitive body)} -body {
+    loopInterpValue {result = loop x in [1, 2, 3, 4]:
+    x
+result
+}
+} -result {[1, 2, 3, 4]}
+
+test loop-in-element-type-list-of-t {List[T] gives the loop binding type T, no runtime check} -body {
+    set hir [loopSourceHir {fn f(xs: List[int]):
+    loop x in xs:
+        x + 1
+
+f([1, 2])}]
+    llength [hir::diagnostics $hir]
+} -result 0
+
+test loop-in-broad-element-type {a broad/unknown-element List gives the binding a broad (any) type, not a validation error} -body {
+    set hir [loopSourceHir {fn passthrough(x):
+    x
+
+loop x in passthrough([1, 2, 3]):
+    x}]
+    llength [hir::diagnostics $hir]
+} -result 0
+
+test loop-in-static-type {loop x in EXPR: BODY has static type List[R], R the body's own type} -body {
+    set hir [loopSourceHir {v = loop x in [1, 2, 3]:
+    x + 1
+v}]
+    set e [lindex [dict get $hir roots] end]
+    hir::types::show [hir::typeOf $hir $e]
+} -result {List[int]}
+
+# ---------------------------------------------------------------------------
+# Iterable evaluated exactly once (raw core IR, test-tick/test-log's own
+# hyphenated names are not valid Botlish surface identifiers -- matching
+# loops.test's own convention for these side-effect-counting fixtures)
+
+test loop-in-iterable-evaluated-once {the iterable expression is evaluated exactly once, not once per iteration} -setup resetEffects -body {
+    list [run {listloop {call {block {} {call {ref test-tick}} {const list {1 2 3}}}} {block {x} {ref x}}}] \
+         $::testTicks
+} -result {{[1, 2, 3]} 1}
+
+# ---------------------------------------------------------------------------
+# break / continue / return / error composition
+
+test loop-in-break-overrides {break VALUE ends the loop immediately with VALUE as the whole loop's result, discarding the accumulator} -body {
+    loopInterpValue {loop x in [1, 2, 3]:
+    if x == 2:
+        break "stopped"
+    else:
+        x
+}
+} -result {"stopped"}
+
+test loop-in-break-parity {break override agrees on every backend} -body {
+    loopParity {loop x in [1, 2, 3]:
+    if x == 2:
+        break "stopped"
+    else:
+        x
+}
+} -result same
+
+test loop-in-continue-skips {continue contributes nothing for that iteration and moves on} -body {
+    loopInterpValue {loop x in [1, 2, 3]:
+    if x == 2:
+        continue
+    else:
+        x
+}
+} -result {[1, 3]}
+
+test loop-in-continue-parity {continue agrees on every backend} -body {
+    loopParity {loop x in [1, 2, 3]:
+    if x == 2:
+        continue
+    else:
+        x
+}
+} -result same
+
+test loop-in-return-propagates {return inside the body returns from the enclosing function, not merely the loop} -body {
+    loopInterpValue {fn f():
+    loop x in [1, 2, 3]:
+        if x == 2:
+            return "escaped"
+        else:
+            x
+    "unreachable"
+
+f()}
+} -result {"escaped"}
+
+test loop-in-return-parity {return-from-inside-loop agrees on every backend} -body {
+    loopParity {fn f():
+    loop x in [1, 2, 3]:
+        if x == 2:
+            return "escaped"
+        else:
+            x
+    "unreachable"
+
+f()}
+} -result same
+
+test loop-in-error-propagates {a failing checked construction inside the body propagates the ordinary error, with no partial result} -body {
+    outcomeUnder interp [hir::lower [loopSourceHir {type Small = Int in 0..10
+loop x in [1, 20, 2]:
+    Small(x)
+}]]
+} -result {error {CORE SEMANTIC RANGE} {Small: 20 is not a valid Small} {}}
+
+test loop-in-error-parity {the error case agrees on every backend (error kind -- native's own message cannot show the dynamic value, exactly like an ordinary checked constructor's own cranelift message: see BYTE-SET.md)} -body {
+    set exprs [hir::lower [loopSourceHir {type Small = Int in 0..10
+loop x in [1, 20, 2]:
+    Small(x)
+}]]
+    lmap backend $::parityBackends {
+        set outcome [outcomeUnder $backend $exprs]
+        list [lindex $outcome 0] [lindex $outcome 1]
+    }
+} -result {{error {CORE SEMANTIC RANGE}} {error {CORE SEMANTIC RANGE}} {error {CORE SEMANTIC RANGE}} {error {CORE SEMANTIC RANGE}}}
+
+# ---------------------------------------------------------------------------
+# Nested loops
+
+test loop-in-nested {a nested loop x in EXPR: composes naturally (already the ordinary evaluation-order case)} -body {
+    loopInterpValue {loop x in [1, 2]:
+    loop y in [10, 20]:
+        x + y
+}
+} -result {[[11, 21], [12, 22]]}
+
+test loop-in-nested-parity {nested loops agree on every backend (interp/compile/cranelift-generic/cranelift)} -body {
+    loopParity {loop x in [1, 2]:
+    loop y in [10, 20]:
+        x + y
+}
+} -result same
+
+# ---------------------------------------------------------------------------
+# break/continue lexical-boundary rules are unchanged (shared with the
+# pre-existing bare `loop:`, pinned in loops.test): a `loop x in ...:` is an
+# ordinary loop scope for this purpose, verified directly here too (raw
+# core IR, matching loops.test's own boundary-test style).
+
+test loop-in-break-outside-callable-boundary {break cannot cross an ordinary callable boundary from inside a loop x in ...: body} -body {
+    core::eval {listloop {const list {1}} {block {x} {call {block {} {break}}}}}
+} -returnCodes error -errorCode {CORE SEMANTIC BREAK-OUTSIDE-LOOP} -result {break outside lexical loop}
+
+test loop-in-continue-outside-callable-boundary {continue cannot cross an ordinary callable boundary from inside a loop x in ...: body} -body {
+    core::eval {listloop {const list {1}} {block {x} {call {block {} {continue}}}}}
+} -returnCodes error -errorCode {CORE SEMANTIC CONTINUE-OUTSIDE-LOOP} -result {continue outside lexical loop}
+
+test loop-in-continue-outside-loop {continue outside any loop is still rejected} -body {
+    core::eval {continue}
+} -returnCodes error -errorCode {CORE SEMANTIC CONTINUE-OUTSIDE-LOOP} -match glob -result *
+
+cleanupTests

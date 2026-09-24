@@ -13,6 +13,7 @@
 #   call       (call CALLEE ARG...)      one call form, whatever the target
 #   if         (if COND (block {} THEN...) (block {} ELSE...))
 #   loop       (loop (block {} BODY...))
+#   listloop   (listloop ITERABLE (block (ELEM) BODY...))
 #   return     (return VALUE)
 #   break      (break) / (break VALUE)
 #   continue   (continue)
@@ -60,6 +61,11 @@ proc hir::lower::expr {hir e} {
         }
         loop {
             return [list loop [list block {} {*}[Exprs $hir [dict get $node body]]]]
+        }
+        listloop {
+            set elemName [dict get $hir bindings [dict get $node elementBinding] name]
+            return [list listloop [expr $hir [dict get $node iterable]] \
+                [list block [list $elemName] {*}[Exprs $hir [dict get $node body]]]]
         }
         return {
             return [list return [expr $hir [dict get $node value]]]

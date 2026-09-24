@@ -1,0 +1,306 @@
+# byte-set.test -- byte::set(List[UnicodeChar]) -> ImmutableSet[Byte]
+# (lib/byte.bot): UnicodeChar -> char::codepoint -> checked Byte
+# construction -> ImmutableSet, expressed as ordinary Botlish library code
+# using the new "loop x in EXPR:" traversal (core/ir.tcl's `listloop`; see
+# tests/loop-in.test for the construct's own dedicated coverage). See
+# BYTE-SET.md.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 100000
+
+set parityBackends {interp compile cranelift-generic cranelift}
+
+# "same" if every backend agrees on the outcome of the .bot program file
+# PATH; otherwise every outcome, backend by backend (native-byte.test's own
+# moduleParity, duplicated here to keep this file self-contained).
+proc moduleParity {path} {
+    set hir [surface::readProgramFile $path -strict 0]
+    set exprs [hir::lower $hir]
+    set outcomes [lmap backend $::parityBackends {outcomeUnder $backend $exprs}]
+    if {[llength [lsort -unique $outcomes]] == 1} {
+        return same
+    }
+    return [join [lmap backend $::parityBackends outcome $outcomes {list $backend $outcome}] " / "]
+}
+
+proc moduleValue {path} {
+    set hir [surface::readProgramFile $path -strict 0]
+    lindex [outcomeUnder interp [hir::lower $hir]] 1
+}
+
+# Every backend's own {KIND} for an error outcome of PATH (message text
+# deliberately excluded: native/lower.tcl's own generic checked-domain
+# construction cannot render the actual dynamic value in its message --
+# see BYTE-SET.md -- so only interp/compile show it).
+proc moduleErrorKinds {path} {
+    set hir [surface::readProgramFile $path -strict 0]
+    set exprs [hir::lower $hir]
+    lmap backend $::parityBackends {
+        set outcome [outcomeUnder $backend $exprs]
+        list [lindex $outcome 0] [lindex $outcome 1]
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Acceptance table (spec items 34-38, 66-69): valid conversions, boundaries,
+# rejections, duplicates, mixed failure -- each on all four backends.
+
+test byte-set-basic {byte::set(['A', 'é', 'ÿ']) -> ImmutableSet[Byte]{65, 233, 255}} -body {
+    set path [makeFile {byte::set(['A', 'é', 'ÿ'])} byte-set-basic.bot]
+    try {
+        list [moduleParity $path] [moduleValue $path]
+    } finally {
+        removeFile byte-set-basic.bot
+    }
+} -result {same {{65, 233, 255}}}
+
+test byte-set-empty {byte::set([]) -> the empty ImmutableSet[Byte]} -body {
+    set path [makeFile {byte::set([])} byte-set-empty.bot]
+    try {
+        list [moduleParity $path] [moduleValue $path]
+    } finally {
+        removeFile byte-set-empty.bot
+    }
+} -result {same {{}}}
+
+test byte-set-single {byte::set(['A']) -> ImmutableSet[Byte]{65}} -body {
+    set path [makeFile {byte::set(['A'])} byte-set-single.bot]
+    try {
+        list [moduleParity $path] [moduleValue $path]
+    } finally {
+        removeFile byte-set-single.bot
+    }
+} -result {same {{65}}}
+
+test byte-set-duplicates {byte::set(['A', 'A']) is the same set as byte::set(['A']) -- ordinary ImmutableSet dedup, no byte::set-specific logic} -body {
+    set path [makeFile {byte::set(['A', 'A'])} byte-set-dup.bot]
+    try {
+        list [moduleParity $path] [moduleValue $path]
+    } finally {
+        removeFile byte-set-dup.bot
+    }
+} -result {same {{65}}}
+
+test byte-set-duplicate-three {byte::set(['A', 'A', 'B']) is the same set as byte::set(['A', 'B'])} -body {
+    set pathAB [makeFile {byte::set(['A', 'A', 'B'])} byte-set-dup3.bot]
+    set pathA [makeFile {byte::set(['A', 'B'])} byte-set-dup3b.bot]
+    try {
+        list [moduleValue $pathAB] [moduleValue $pathA]
+    } finally {
+        removeFile byte-set-dup3.bot
+        removeFile byte-set-dup3b.bot
+    }
+} -result {{{65, 66}} {{65, 66}}}
+
+test byte-set-boundary-0 {U+0041 'A' well inside the domain and byte::set(['A','B']) both succeed} -body {
+    set path [makeFile {byte::set(['A', 'B'])} byte-set-ab.bot]
+    try {
+        list [moduleParity $path] [moduleValue $path]
+    } finally {
+        removeFile byte-set-ab.bot
+    }
+} -result {same {{65, 66}}}
+
+test byte-set-boundary-255 {byte::set(['ÿ']) (U+00FF, scalar 255) succeeds at Byte's own upper boundary} -body {
+    set path [makeFile {byte::set(['ÿ'])} byte-set-255.bot]
+    try {
+        list [moduleParity $path] [moduleValue $path]
+    } finally {
+        removeFile byte-set-255.bot
+    }
+} -result {same {{255}}}
+
+test byte-set-boundary-256-fails {byte::set(['Ā']) (U+0100, scalar 256) fails the checked Byte construction just past the boundary} -body {
+    set path [makeFile {byte::set(['Ā'])} byte-set-256.bot]
+    try {
+        moduleErrorKinds $path
+    } finally {
+        removeFile byte-set-256.bot
+    }
+} -result {{error {CORE SEMANTIC RANGE}} {error {CORE SEMANTIC RANGE}} {error {CORE SEMANTIC RANGE}} {error {CORE SEMANTIC RANGE}}}
+
+test byte-set-astral-fails {byte::set(['😀']) (U+1F600, scalar 128512) fails -- never UTF-8 encoded into four bytes} -body {
+    set path [makeFile {byte::set(['😀'])} byte-set-astral.bot]
+    try {
+        moduleErrorKinds $path
+    } finally {
+        removeFile byte-set-astral.bot
+    }
+} -result {{error {CORE SEMANTIC RANGE}} {error {CORE SEMANTIC RANGE}} {error {CORE SEMANTIC RANGE}} {error {CORE SEMANTIC RANGE}}}
+
+test byte-set-mixed-failure {byte::set(['A', 'Ā', 'B']) fails at the first invalid element, left to right, with no partial successful result} -body {
+    set path [makeFile {byte::set(['A', 'Ā', 'B'])} byte-set-mixed.bot]
+    try {
+        moduleErrorKinds $path
+    } finally {
+        removeFile byte-set-mixed.bot
+    }
+} -result {{error {CORE SEMANTIC RANGE}} {error {CORE SEMANTIC RANGE}} {error {CORE SEMANTIC RANGE}} {error {CORE SEMANTIC RANGE}}}
+
+test byte-set-canonical-payload {byte::set(['-', '.', '_', '~']) -- the motivating four-character URI-unreserved payload} -body {
+    set path [makeFile {byte::set(['-', '.', '_', '~'])} byte-set-canonical.bot]
+    try {
+        list [moduleParity $path] [moduleValue $path]
+    } finally {
+        removeFile byte-set-canonical.bot
+    }
+} -result {same {{45, 46, 95, 126}}}
+
+# ---------------------------------------------------------------------------
+# UnicodeChar vs UTF-8 distinction (spec items 2-3, 36): byte::set(['é'])
+# must contain the scalar value 233 as one Byte, never the two UTF-8 bytes
+# 0xC3 (195) 0xA9 (169).
+
+test byte-set-not-utf8 {byte::set(['é']) contains the one Byte 233 (its Unicode scalar value), never the two UTF-8 encoding bytes 195/169} -body {
+    set path [makeFile {byte::set(['é'])} byte-set-notutf8.bot]
+    try {
+        moduleValue $path
+    } finally {
+        removeFile byte-set-notutf8.bot
+    }
+} -result {{233}}
+
+# ---------------------------------------------------------------------------
+# Membership sanity (spec item 43), through the pre-existing generic
+# ImmutableSet membership native -- no byte::set-specific membership code.
+
+test byte-set-membership {every canonical-payload byte is a member, and an unrelated byte is not} -body {
+    set path [makeFile {s = byte::set(['-', '.', '_', '~'])
+[immutable_set_contains(s, Byte(45)), immutable_set_contains(s, Byte(46)),
+ immutable_set_contains(s, Byte(95)), immutable_set_contains(s, Byte(126)),
+ immutable_set_contains(s, Byte(65))]} byte-set-membership.bot]
+    try {
+        list [moduleParity $path] [moduleValue $path]
+    } finally {
+        removeFile byte-set-membership.bot
+    }
+} -result {same {[true, true, true, true, false]}}
+
+# ---------------------------------------------------------------------------
+# Result type: ImmutableSet[Byte], statically proven, and preserves the
+# semantic distinction between UnicodeChar and Byte/Int (spec item 44).
+
+test byte-set-result-type {byte::set(...) has static type ImmutableSet[Byte]} -body {
+    set path [makeFile {byte::set(['A'])} byte-set-type.bot]
+    try {
+        set hir [surface::readProgramFile $path -strict 0]
+        set e [lindex [dict get $hir roots] end]
+        hir::types::show [hir::typeOf $hir $e]
+    } finally {
+        removeFile byte-set-type.bot
+    }
+} -result {ImmutableSet[int[Byte]]}
+
+test byte-set-char-not-equal-byte {byte::set's conversion is explicit: the source UnicodeChar and the resulting Byte/Int remain distinct values elsewhere (ordinary equality, unaffected by byte::set)} -body {
+    set path [makeFile {['-' == 45, Byte(45) == 45]} byte-set-equality.bot]
+    try {
+        moduleValue $path
+    } finally {
+        removeFile byte-set-equality.bot
+    }
+} -result {[false, true]}
+
+# ---------------------------------------------------------------------------
+# Input contract: List[UnicodeChar] is a caller proof obligation (spec
+# items 33, 71) -- rejected statically, no dynamic element scanning.
+
+test byte-set-rejects-string-list {byte::set(["A"]) (List[str]) is a static compile error, not scanned at runtime} -body {
+    set path [makeFile {byte::set(["A"])} byte-set-strlist.bot]
+    try {
+        catch {surface::readProgramFile $path -strict 1} err options
+        dict get $options -errorcode
+    } finally {
+        removeFile byte-set-strlist.bot
+    }
+} -result {CORE SEMANTIC TYPE}
+
+test byte-set-rejects-int-list {byte::set([65]) (List[int]) is a static compile error, not scanned at runtime} -body {
+    set path [makeFile {byte::set([65])} byte-set-intlist.bot]
+    try {
+        catch {surface::readProgramFile $path -strict 1} err options
+        dict get $options -errorcode
+    } finally {
+        removeFile byte-set-intlist.bot
+    }
+} -result {CORE SEMANTIC TYPE}
+
+test byte-set-accepts-char-list {byte::set(['A']) (List[UnicodeChar]) has no static diagnostic} -body {
+    set path [makeFile {byte::set(['A'])} byte-set-charlist.bot]
+    try {
+        llength [hir::diagnostics [surface::readProgramFile $path -strict 0]]
+    } finally {
+        removeFile byte-set-charlist.bot
+    }
+} -result 0
+
+# ---------------------------------------------------------------------------
+# Module retention (spec items 39-42): the canonical four-character payload,
+# built once at module initialization and reused by every later call.
+# Written directly into the real lib/ directory (immutable-set.test's own
+# convention for a synthetic module that must see the real byte.bot), with
+# a name distinctive enough not to collide with any real library file.
+
+test byte-set-module-retained-value {additional_unreserved_chars = byte::set([...]) at module scope is retained: built once, reused by repeated calls} -body {
+    set libPath [file join $::core::libraryDir bytesetretentionlib.bot]
+    set ch [open $libPath w]
+    fconfigure $ch -encoding utf-8
+    puts -nonewline $ch {namespace bytesetretentionlib
+additional_unreserved_chars = byte::set(['-', '.', '_', '~'])
+
+fn has_dash() -> bool:
+    immutable_set_contains(additional_unreserved_chars, Byte(45))
+}
+    close $ch
+    set mainPath [makeFile {[bytesetretentionlib::has_dash(), bytesetretentionlib::has_dash()]} byte-set-retention-main.bot]
+    try {
+        set hir [surface::readProgramFile $mainPath]
+        set diagCount [llength [hir::diagnostics $hir]]
+        set value [core::value::show [core::evalProgram [hir::lower $hir]]]
+        native::lower::program $hir -repr-opt 0
+        set report [native::allocationReport $hir sites]
+        set setfromlistAllocations 0
+        foreach site [dict get $report sites] {
+            if {[dict get $site operation] eq "setfromlist"} {
+                incr setfromlistAllocations [dict get $site allocations]
+            }
+        }
+        list $diagCount $value $setfromlistAllocations
+    } finally {
+        removeFile byte-set-retention-main.bot
+        file delete $libPath
+    }
+} -result {0 {[true, true]} 1}
+
+# ---------------------------------------------------------------------------
+# Generic checked-constructor regression (spec item 47): native support for
+# checked interval-domain construction is generic, not Byte-specific --
+# pinned here too (fully covered on cranelift/cranelift-generic in
+# native-byte.test's own native-byte-constructors-cranelift-* tests).
+
+test byte-set-generic-constructor-regression {a source-declared Small = Int in 0..10 gets the identical generic checked-constructor treatment byte::set's own Byte(...) calls use, dynamic value included} -body {
+    set path [makeFile {type Small = Int in 0..10
+fn check(n):
+    Small(n)
+[check(mod(500, 11)), check(0), check(10)]} byte-set-small.bot]
+    try {
+        list [moduleParity $path] [moduleValue $path]
+    } finally {
+        removeFile byte-set-small.bot
+    }
+} -result {same {[5, 0, 10]}}
+
+test byte-set-generic-constructor-regression-failure {Small(n) for a dynamic out-of-domain n fails the same way on every backend (kind only: see moduleErrorKinds)} -body {
+    set path [makeFile {type Small = Int in 0..10
+fn check(n):
+    Small(n)
+check(mod(500, 11) + 10)} byte-set-small-bad.bot]
+    try {
+        moduleErrorKinds $path
+    } finally {
+        removeFile byte-set-small-bad.bot
+    }
+} -result {{error {CORE SEMANTIC RANGE}} {error {CORE SEMANTIC RANGE}} {error {CORE SEMANTIC RANGE}} {error {CORE SEMANTIC RANGE}}}
+
+cleanupTests

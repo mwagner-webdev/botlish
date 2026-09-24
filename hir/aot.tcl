@@ -243,6 +243,11 @@ proc hir::aot::context {hir} {
             block { set bodies [list [hir::get $hir $e body]] }
             if    { set bodies [list [hir::get $hir $e thenBody] [hir::get $hir $e elseBody]] }
             loop  { set bodies [list [concat [hir::get $hir $e body] [list ""]]] }
+            listloop {
+                # Unlike `loop`, a listloop body's last value is used (it
+                # contributes to the accumulated result): not discarded.
+                set bodies [list [hir::get $hir $e body]]
+            }
         }
         foreach body $bodies {
             foreach child [lrange $body 0 end-1] {
@@ -654,6 +659,10 @@ proc hir::aot::Visit {hir stateVar region e tails statics} {
             set condition [dict get $node condition]
             Require $hir state $region $e $condition bool NOT-BOOLEAN
         }
+        listloop {
+            set iterable [dict get $node iterable]
+            Require $hir state $region $e $iterable list TYPE
+        }
         return - break - continue {
             if {[dict get $node target] eq ""} {
                 Block state $region [Blocker $hir UnresolvedControl $e "" "" {} \
@@ -839,7 +848,7 @@ proc hir::aot::Cause {hir e {depth 0}} {
                 }
             }
         }
-        if - loop {
+        if - loop - listloop {
             return [dict merge $cause [dict create cause merge]]
         }
     }

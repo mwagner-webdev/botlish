@@ -33,6 +33,15 @@
 #                          (never Int's own arbitrary-precision complement).
 #   byte::position_low(n)  Nibble -> LowNibble: representation-preserving.
 #   byte::position_high(n) Nibble -> HighNibble: n<<4, positioned.
+#   byte::set(chars)       List[UnicodeChar] -> ImmutableSet[Byte]: each
+#                          char's own Unicode scalar value (char::codepoint),
+#                          checked into Byte's domain (0..255) -- never UTF-8
+#                          encoding, so 'é' (U+00E9) becomes the one Byte 233,
+#                          not the two UTF-8 bytes 0xC3 0xA9 -- see
+#                          BYTE-SET.md. Fails (the ordinary checked-Byte-
+#                          construction RANGE error) for any char outside
+#                          Byte's domain (e.g. 'Ā', U+0100, or any astral
+#                          character).
 #
 # ASCII/encoding interpretation, `is_unreserved`, and URI grammar are
 # deliberately absent: `byte::` holds only operations intrinsic to byte/bit
@@ -93,3 +102,15 @@ fn position_low(n) -> LowNibble:
 
 fn position_high(n) -> HighNibble:
     bit_and(shift_left(n, 4), 240)
+
+# List[UnicodeChar] -> ImmutableSet[Byte]: each char's own Unicode scalar
+# value (char::codepoint), explicitly checked into Byte's domain (the
+# generic source-defined-type checked constructor every Byte(...) call
+# already uses -- see SOURCE-DEFINED-INTEGER-DOMAINS.md). Never UTF-8:
+# a scalar value outside 0..255 fails through that same checked
+# construction (the ordinary RANGE error), not truncation, masking, or
+# encoding into more than one Byte -- see BYTE-SET.md.
+fn set(chars: List[UnicodeChar]) -> ImmutableSet[Byte]:
+    bytes = loop c in chars:
+        Byte(char::codepoint(c))
+    immutable_set_from_list(bytes)

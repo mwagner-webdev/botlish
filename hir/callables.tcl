@@ -151,6 +151,12 @@ proc hir::callables::WalkExpr {hirVar e} {
                 WalkExpr hir $child
             }
         }
+        listloop {
+            WalkExpr hir [dict get $node iterable]
+            foreach child [dict get $node body] {
+                WalkExpr hir $child
+            }
+        }
         return {
             set value [dict get $node value]
             if {$value ne ""} {

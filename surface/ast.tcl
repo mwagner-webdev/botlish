@@ -41,7 +41,12 @@
 #              paramsSpan (from "(" to the end of the body: the function
 #              literal), body (suite)
 #   if         condition, then (suite), else (suite or "")
-#   loop       body (suite)
+#   loop       elementName, elementNameSpan, iterable (an expression, or ""
+#              for the plain form), body (suite) -- "loop x in EXPR:"
+#              (elementName/iterable both set) is a List traversal binding
+#              x fresh each iteration; plain "loop:" (both "") repeats until
+#              break, as before this feature (see core/ir.tcl's `listloop`
+#              and this file's own Statement/Children/Ids below)
 #   return     value (an expression, an if, or "")
 #   break      value (an expression, an if, or "")
 #   continue
@@ -206,6 +211,9 @@ proc surface::ast::Ids {node id} {
             }
         }
         loop {
+            if {[dict get $node iterable] ne ""} {
+                dict set node iterable [Ids [dict get $node iterable] $id/iterable]
+            }
             dict set node body [Suite [dict get $node body] $id]
         }
     }
@@ -237,7 +245,12 @@ proc surface::ast::Children {node} {
             return [expr {[dict get $node value] eq "" ? {} : [list [dict get $node value]]}]
         }
         function           { return [list [dict get $node body]] }
-        loop               { return [list [dict get $node body]] }
+        loop {
+            if {[dict get $node iterable] ne ""} {
+                return [list [dict get $node iterable] [dict get $node body]]
+            }
+            return [list [dict get $node body]]
+        }
         if {
             set children [list [dict get $node condition] [dict get $node then]]
             if {[dict get $node else] ne ""} {
@@ -425,7 +438,11 @@ proc surface::ast::Statement {node indent show linesVar} {
             return
         }
         loop {
-            lappend lines "${pad}loop$at"
+            if {[dict get $node iterable] ne ""} {
+                lappend lines "${pad}loop [dict get $node elementName] in [Expr [dict get $node iterable] $show]$at"
+            } else {
+                lappend lines "${pad}loop$at"
+            }
             Body [dict get $node body] [expr {$indent + 1}] $show lines
             return
         }

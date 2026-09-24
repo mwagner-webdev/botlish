@@ -1380,7 +1380,7 @@ proc native::lower::Function {id} {
     set fn [dict create region $region instance $id targets [dict get $instance calls] \
         lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 skippedGuards 0 \
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
-        locals [dict create] loops [dict create] broken [dict create] calls {} companion "" regionCompanion 0 \
+        locals [dict create] loops [dict create] broken [dict create] continued [dict create] calls {} companion "" regionCompanion 0 \
         traversal "" traversalByteReg ""]
     if {$region eq "program"} {
         set name <program>
@@ -1489,7 +1489,7 @@ proc native::lower::CompanionFunction {id} {
     set fn [dict create region $region instance $id targets [dict get $instance calls] \
         lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 skippedGuards 0 \
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
-        locals [dict create] loops [dict create] broken [dict create] calls {} companion $arity regionCompanion 0 \
+        locals [dict create] loops [dict create] broken [dict create] continued [dict create] calls {} companion $arity regionCompanion 0 \
         traversal "" traversalByteReg ""]
     set name [hir::aot::BlockName $hir $region]
     set params [hir::get $hir $region params]
@@ -1582,7 +1582,7 @@ proc native::lower::RegionCompanionFunction {id} {
     set fn [dict create region $region instance $id targets [dict get $instance calls] \
         lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 skippedGuards 0 \
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
-        locals [dict create] loops [dict create] broken [dict create] calls {} companion "" regionCompanion 1 \
+        locals [dict create] loops [dict create] broken [dict create] continued [dict create] calls {} companion "" regionCompanion 1 \
         traversal "" traversalByteReg ""]
     set name [hir::aot::BlockName $hir $region]
     set params [hir::get $hir $region params]
@@ -1685,7 +1685,7 @@ proc native::lower::InternalFunction {id} {
     set fn [dict create region $region instance $id targets [dict get $instance calls] \
         lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 skippedGuards 0 \
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
-        locals [dict create] loops [dict create] broken [dict create] calls {} companion "" regionCompanion 0 \
+        locals [dict create] loops [dict create] broken [dict create] continued [dict create] calls {} companion "" regionCompanion 0 \
         traversal "" traversalByteReg ""]
     set name [hir::aot::BlockName $hir $region]
     set params [hir::get $hir $region params]
@@ -1779,7 +1779,7 @@ proc native::lower::InternalRegionCompanionFunction {id} {
     set fn [dict create region $region instance $id targets [dict get $instance calls] \
         lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 skippedGuards 0 \
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
-        locals [dict create] loops [dict create] broken [dict create] calls {} companion "" regionCompanion 1 \
+        locals [dict create] loops [dict create] broken [dict create] continued [dict create] calls {} companion "" regionCompanion 1 \
         traversal "" traversalByteReg ""]
     set name [hir::aot::BlockName $hir $region]
     set params [hir::get $hir $region params]
@@ -1913,7 +1913,7 @@ proc native::lower::FieldsFunction {id} {
     set fn [dict create region $region instance $id targets [dict get $instance calls] \
         lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 skippedGuards 0 \
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
-        locals [dict create] loops [dict create] broken [dict create] calls {} companion "" regionCompanion 0 \
+        locals [dict create] loops [dict create] broken [dict create] continued [dict create] calls {} companion "" regionCompanion 0 \
         traversal "" traversalByteReg ""]
     set name [hir::aot::BlockName $hir $region]
     set params [hir::get $hir $region params]
@@ -1986,7 +1986,7 @@ proc native::lower::FieldsCompanionFunction {id} {
     set fn [dict create region $region instance $id targets [dict get $instance calls] \
         lines {} nreg 0 nlabel 0 guards 0 knownErrorGuards 0 skippedGuards 0 \
         rawCache [dict create] rawRegs [dict create] rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0 \
-        locals [dict create] loops [dict create] broken [dict create] calls {} companion $arity regionCompanion 0 \
+        locals [dict create] loops [dict create] broken [dict create] continued [dict create] calls {} companion $arity regionCompanion 0 \
         traversal "" traversalByteReg ""]
     set name [hir::aot::BlockName $hir $region]
     set params [hir::get $hir $region params]
@@ -2151,6 +2151,7 @@ proc native::lower::Expr {fnVar e {want tagged}} {
         call     { lassign [Call fn $e $node $want "" [expr {$want eq "region"}]] result repr }
         if       { set result [If fn $e $node] }
         loop     { set result [Loop fn $e $node] }
+        listloop { set result [ListLoop fn $e $node] }
         return {
             set companion [dict get $fn companion]
             if {$companion ne ""} {
@@ -2202,6 +2203,7 @@ proc native::lower::Expr {fnVar e {want tagged}} {
         continue {
             lassign [dict get $fn loops [dict get $node target]] head
             Emit fn "jump $head" $e
+            dict set fn continued [dict get $node target] 1
             set result never
         }
         ok - error {
@@ -4053,6 +4055,56 @@ proc native::lower::EmitArgGuards {fnVar e argExprs argRegs paramTypes name} {
     }
 }
 
+# Checked construction for a source-defined *interval*-domain integer
+# refinement (Byte(x), a source-declared Small(x), ... --
+# SOURCE-DEFINED-INTEGER-DOMAINS.md): NAME's own registered -impl is
+# {core::type::CheckedConstruct NAME}, the one generic Tcl implementation
+# every such type's constructor shares (core/type.tcl), never a per-type
+# native. This is composed entirely from *existing* NIR forms (guard, op
+# ige/ile, br/raise/label) -- no new NIR instruction and no Rust codegen
+# change: NAME's own LO/HI domain bounds are ordinary compile-time-known Int
+# constants (hir/sourcetypes.tcl already validated and registered them when
+# the type was declared), so the only genuinely dynamic thing here is the
+# *value* being checked, exactly the shape an ordinary hand-written `if v >=
+# LO and v <= HI` guard already lowers to. Returns {REG tagged} when NAME is
+# such a constructor over an interval domain (the only domain shape this
+# handles: byte::set's own Byte(...) calls, and every other interval-domain
+# type, e.g. Nibble/LowNibble/a source-declared Small); "" for anything else
+# (an *exact*-domain constructor such as HighNibble, or an ordinary
+# unsupported native), so the caller falls through to the existing {NATIVE
+# UNSUPPORTED} diagnostic completely unchanged -- no Byte-specific path, no
+# special-casing by name anywhere in this proc.
+proc native::lower::CheckedIntDomainConstruct {fnVar e node name meta argRegs} {
+    upvar 1 $fnVar fn
+    set impl [dict get $meta impl]
+    if {[lindex $impl 0] ne "core::type::CheckedConstruct"} {
+        return ""
+    }
+    set typeName [lindex $impl 1]
+    set domain [dict get [core::type::metadata $typeName] integerDomain]
+    if {[lindex $domain 0] ne "interval"} {
+        return ""
+    }
+    lassign $domain _ lo hi
+    dict lappend fn calls [list native $name]
+    EmitArgGuards fn $e [dict get $node args] $argRegs [dict get $meta paramTypes] $name
+    set v [lindex $argRegs 0]
+    set loReg [IntConst fn $lo $e]
+    set hiReg [IntConst fn $hi $e]
+    set okLo [Assign fn "op ige $v $loReg" $e]
+    set checkHi [NewLabel fn]
+    set fail [NewLabel fn]
+    set ok [NewLabel fn]
+    Emit fn "br $okLo $checkHi $fail" $e
+    EmitLabel fn $checkHi
+    set okHi [Assign fn "op ile $v $hiReg" $e]
+    Emit fn "br $okHi $ok $fail" $e
+    EmitLabel fn $fail
+    Emit fn "raise RANGE [Quote "$typeName: value is not a valid $typeName"]" $e
+    EmitLabel fn $ok
+    return [list $v tagged]
+}
+
 proc native::lower::NativeCall {fnVar e node name argRegs rawEligible op want} {
     upvar 1 $fnVar fn
     variable hir
@@ -4075,6 +4127,10 @@ proc native::lower::NativeCall {fnVar e node name argRegs rawEligible op want} {
         return [list [Assign fn "bool [expr {[dict get $node known] ? "true" : "false"}]" $e] tagged]
     }
     if {![dict exists $natives $name]} {
+        set checked [CheckedIntDomainConstruct fn $e $node $name $meta $argRegs]
+        if {$checked ne ""} {
+            return $checked
+        }
         Unsupported $e "native $name" "the native \"$name\" has no native implementation"
     }
     dict lappend fn calls [list native $name]
@@ -4532,6 +4588,85 @@ proc native::lower::If {fnVar e node} {
     }
     EmitLabel fn $join
     return $result
+}
+
+# (listloop LIST-EXPR (block (ELEM) BODY...)): lowers directly to the shape
+# item 50 of BYTE-SET.md describes -- evaluate the list once, an index/
+# accumulator pair rebound at the loop's own back edge (exactly the
+# multi-definition-site register pattern `If`'s own join register already
+# uses, just fed back to the loop head instead of a forward join), a
+# `listget` at the proven-in-bounds index each iteration (no spurious user-
+# visible bounds Error: the generated index is always < the list's own
+# length by construction), and `listappend` to grow the result. `break`/
+# `continue`/`return`/an error inside the body compose completely unchanged
+# -- `dict set fn loops $e [list $head $exit $resultReg]` is the *same*
+# mechanism a bare `loop` already registers, so the existing Break/Continue
+# lowering (native::lower::Expr's own `break`/`continue` cases) needs no
+# change at all to make a `break` here overwrite $resultReg and jump
+# straight to $exit, or a `continue` jump straight back to $head.
+proc native::lower::ListLoop {fnVar e node} {
+    upvar 1 $fnVar fn
+    variable hir
+    set iterExpr [dict get $node iterable]
+    set iterReg [Expr fn $iterExpr]
+    if {$iterReg eq "never"} {
+        return never
+    }
+    EmitArgGuards fn $e [list $iterExpr] [list $iterReg] {list} "loop"
+    set lenReg [Assign fn "op listlen $iterReg" $e]
+    set idx0 [IntConst fn 0 $e]
+    set acc0 [Assign fn "op listnew" $e]
+    set idxReg [NewReg fn]
+    set accReg [NewReg fn]
+    set resultReg [NewReg fn]
+    Emit fn "$idxReg = move $idx0" $e
+    Emit fn "$accReg = move $acc0" $e
+    set head [NewLabel fn]
+    set bodyLabel [NewLabel fn]
+    # `continue`'s own target (registered below): only advances the index
+    # and loops back -- it must NOT re-run the accumulation step, exactly
+    # like the interpreter's own "contributes nothing" continue case. A
+    # normal (non-continue) body completion reaches the same label via its
+    # own explicit jump, after first accumulating its value -- so the index
+    # is advanced exactly once per iteration either way, unlike jumping
+    # straight back to $head, which would never advance the index at all
+    # for a `continue`d iteration.
+    set continueLabel [NewLabel fn]
+    set normalExit [NewLabel fn]
+    set exit [NewLabel fn]
+    Emit fn "jump $head" $e
+    EmitLabel fn $head
+    set cmp [Assign fn "op ilt $idxReg $lenReg" $e]
+    Emit fn "br $cmp $bodyLabel $normalExit" $e
+    EmitLabel fn $bodyLabel
+    set saved [dict get $fn locals]
+    set savedRaw [dict get $fn rawCache]
+    dict set fn loops $e [list $continueLabel $exit $resultReg]
+    EnterScope fn [dict get $node bodyScope]
+    set elemReg [Assign fn "op listget $iterReg $idxReg" $e]
+    dict set fn locals [dict get $node elementBinding] [list reg $elemReg]
+    set bodyValue [Sequence fn [dict get $node body]]
+    set usedContinue [dict exists $fn continued $e]
+    if {$bodyValue ne "never"} {
+        set accNext [Assign fn "op listappend $accReg $bodyValue" $e]
+        Emit fn "$accReg = move $accNext" $e
+        Emit fn "jump $continueLabel" $e
+    }
+    dict unset fn continued $e
+    dict set fn locals $saved
+    dict set fn rawCache $savedRaw
+    dict unset fn loops $e
+    if {$bodyValue ne "never" || $usedContinue} {
+        EmitLabel fn $continueLabel
+        set idxNext [Assign fn "op iadd $idxReg [IntConst fn 1 $e]" $e]
+        Emit fn "$idxReg = move $idxNext" $e
+        Emit fn "jump $head" $e
+    }
+    EmitLabel fn $normalExit
+    Emit fn "$resultReg = move $accReg" $e
+    Emit fn "jump $exit" $e
+    EmitLabel fn $exit
+    return $resultReg
 }
 
 proc native::lower::Loop {fnVar e node} {

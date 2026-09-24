@@ -10,6 +10,7 @@
 #   (call CALLEE ARG...)
 #   (if CONDITION THEN-BLOCK ELSE-BLOCK)
 #   (loop BODY-BLOCK)
+#   (listloop LIST-EXPR ELEMENT-BLOCK)
 #   (return EXPR)
 #   (break)                     (break EXPR)
 #   (continue)
@@ -18,6 +19,22 @@
 #
 # THEN-BLOCK, ELSE-BLOCK and BODY-BLOCK must be syntactic (block {} ...) nodes:
 # their bodies are lexically part of the enclosing code.
+#
+# (listloop LIST-EXPR ELEMENT-BLOCK): the surface `loop x in EXPR:` form
+# (see surface/parser.tcl). LIST-EXPR is evaluated once, in the enclosing
+# scope. ELEMENT-BLOCK must be a syntactic (block (ELEM) BODY...) node with
+# exactly one parameter -- otherwise exactly like BODY-BLOCK above, lexically
+# part of the enclosing code (not a callable boundary: `return` inside it
+# still returns from the enclosing function), and, like a loop body, a valid
+# target for `break`/`continue`. Iterates LIST-EXPR's elements left to right,
+# binding ELEM fresh (immutable) each iteration. An iteration whose body
+# completes with an ordinary value contributes that value to the result,
+# built in order; `continue` contributes nothing for that iteration; `break`
+# (with or without a value) ends the loop immediately, its own value (or
+# unit) becoming the *whole* listloop's result, overriding whatever was
+# accumulated so far -- exactly `loop`'s own break semantics. If the list is
+# exhausted without a `break`, the result is the List of every iteration's
+# contributed value, in that order (empty for an empty LIST-EXPR).
 #
 # This file knows syntax only; it does not evaluate anything.
 
@@ -69,6 +86,19 @@ proc core::ir::CheckInlineBlock {blockNode owner role} {
     CheckShape $blockNode
     if {[llength [blockParams $blockNode]] != 0} {
         core::malformed "$role of [lindex $owner 0] must be a block without parameters" $owner
+    }
+}
+
+# Like CheckInlineBlock, for a listloop's ELEMENT-BLOCK: lexically part of
+# its owner exactly the same way, but with exactly one parameter (the
+# per-iteration element binding) rather than none.
+proc core::ir::CheckElementBlock {blockNode owner role} {
+    if {[catch {llength $blockNode} n] || $n == 0 || [lindex $blockNode 0] ne "block"} {
+        core::malformed "$role of [lindex $owner 0] must be a (block (ELEM) ...) node" $owner
+    }
+    CheckShape $blockNode
+    if {[llength [blockParams $blockNode]] != 1} {
+        core::malformed "$role of [lindex $owner 0] must be a block with exactly one parameter" $owner
     }
 }
 
@@ -126,6 +156,10 @@ proc core::ir::CheckShape {node} {
         loop {
             ExpectLength $node 2 2 "(loop BODY-BLOCK)"
             CheckInlineBlock [lindex $node 1] $node "body"
+        }
+        listloop {
+            ExpectLength $node 3 3 "(listloop LIST-EXPR ELEMENT-BLOCK)"
+            CheckElementBlock [lindex $node 2] $node "body"
         }
         return {
             ExpectLength $node 2 2 "(return EXPR)"
@@ -220,6 +254,9 @@ proc core::ir::CollectBindNames {node namesVar} {
         if {
             CollectBindNames [lindex $node 1] names
         }
+        listloop {
+            CollectBindNames [lindex $node 1] names
+        }
         return - ok - error-value {
             CollectBindNames [lindex $node 1] names
         }
@@ -248,6 +285,12 @@ proc core::ir::containsBlock {exprs} {
             }
             loop {
                 if {[containsBlock [blockBody [lindex $expr 1]]]} {
+                    return 1
+                }
+            }
+            listloop {
+                if {[containsBlock [list [lindex $expr 1]]]
+                    || [containsBlock [blockBody [lindex $expr 2]]]} {
                     return 1
                 }
             }
@@ -324,6 +367,13 @@ proc core::ir::check {node {context {callable 0 loop 0}}} {
         loop {
             set inner [dict replace $context loop 1]
             foreach expr [blockBody [lindex $node 1]] {
+                check $expr $inner
+            }
+        }
+        listloop {
+            check [lindex $node 1] $context
+            set inner [dict replace $context loop 1]
+            foreach expr [blockBody [lindex $node 2]] {
                 check $expr $inner
             }
         }

@@ -97,6 +97,13 @@ proc hir::modulebinding::ContextExpr {hir e stateVar} {
         loop {
             return [ContextSequence $hir [dict get $node body] state]
         }
+        listloop {
+            set result [ContextExpr $hir [dict get $node iterable] state]
+            if {[lindex $result 0] ne "ok"} {
+                return $result
+            }
+            return [ContextSequence $hir [dict get $node body] state]
+        }
         call {
             foreach child [dict get $node args] {
                 set result [ContextExpr $hir $child state]
@@ -257,6 +264,37 @@ proc hir::modulebinding::ImmutableExpr {hir e factsVar activeVar} {
         }
         loop - break - continue {
             return {bad unknown "control-flow result cannot be proven immutable"}
+        }
+        listloop {
+            # Unlike a bare `loop` (whose result is whatever an arbitrary,
+            # data-dependent `break` supplies, never proven here), a
+            # listloop's own result is exactly the List of every iteration's
+            # own body value -- provable the same way `list(...)`'s own
+            # per-argument proof already is (ImmutableNative's `list` case,
+            # below), just with the element binding's own fact seeded from
+            # each of the iterable's own item proofs in turn: this is the
+            # one general rule that lets an exact, context-free call like
+            # `byte::set(['-', '.', '_', '~'])` prove retainable, without
+            # any byte::set-specific code here (see BYTE-SET.md).
+            set iterProof [ImmutableExpr $hir [dict get $node iterable] facts active]
+            if {[lindex $iterProof 0] ne "ok"} {
+                return $iterProof
+            }
+            if {[lindex $iterProof 1 0] ne "list"} {
+                return {bad unknown "listloop iterable is not structurally known"}
+            }
+            set elementBinding [dict get $node elementBinding]
+            set results {}
+            foreach itemProof [lindex $iterProof 1 1] {
+                set bodyFacts $facts
+                dict set bodyFacts $elementBinding $itemProof
+                set bodyResult [ImmutableSequence $hir [dict get $node body] bodyFacts active]
+                if {[lindex $bodyResult 0] ne "ok"} {
+                    return $bodyResult
+                }
+                lappend results [lindex $bodyResult 1]
+            }
+            return [list ok [list list $results]]
         }
         ok - error {
             return {bad unknown "Result values are not retained module values yet"}

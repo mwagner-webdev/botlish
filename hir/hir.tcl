@@ -406,6 +406,9 @@ proc hir::children {hir e} {
                 [dict get $node thenBody] [dict get $node elseBody]]
         }
         loop  { return [dict get $node body] }
+        listloop {
+            return [concat [list [dict get $node iterable]] [dict get $node body]]
+        }
     }
 }
 

@@ -765,6 +765,9 @@ proc core::compiler::CompileForm {ctxVar e} {
         loop {
             return [CompileLoop ctx $e]
         }
+        listloop {
+            return [CompileListLoop ctx $e]
+        }
         return {
             set value [CompileExpr ctx [N $e value]]
             if {[OpType $value] eq "never"} {
@@ -1286,6 +1289,64 @@ proc core::compiler::CompileLoop {ctxVar e} {
     PopScope ctx
     Indent ctx -1
     Emit ctx "\}"
+    return [Op box "\$$result" any]
+}
+
+# (listloop ITERABLE-EXPR (block (ELEM) BODY...)): evaluates the iterable
+# once, then a Tcl `foreach` over its items -- mirroring CompileLoop's own
+# `while 1`/Tcl-`break`/Tcl-`continue` reuse exactly (dict set ctx loops $e
+# $result makes the existing, unmodified `break`/`continue` compiled forms
+# already do the right thing here: a `break` sets $result and Tcl-breaks out
+# of this same `foreach`; a `continue` is a plain Tcl `continue`, skipping
+# straight to the next item without running the accumulation line below).
+# Exhausting the items normally (no break) sets $result to the List built
+# from every iteration's own (non-`never`) body value, in order.
+proc core::compiler::CompileListLoop {ctxVar e} {
+    upvar 1 $ctxVar ctx
+    set iterable [CompileExpr ctx [N $e iterable]]
+    if {[OpType $iterable] eq "never"} {
+        return $iterable
+    }
+    set result [NewTemp]
+    set acc [NewTemp]
+    set items [NewTemp]
+    set item [NewTemp]
+    set parentFrame [CurrentFrameExpr $ctx]
+    Emit ctx "set $items \[core::value::items \[core::value::expect list [BoxWord $iterable] {loop iterable}\]\]"
+    Emit ctx "set $acc \{\}"
+    # $result must start unset on every logical execution of this listloop,
+    # not merely once per compiled proc: when this listloop is itself
+    # nested inside another loop, its own compiled code (including this
+    # line) is re-executed once per outer iteration within the *same* Tcl
+    # proc activation, where a once-set Tcl variable otherwise stays set.
+    Emit ctx "unset -nocomplain $result"
+    Emit ctx "foreach $item \$$items \{"
+    Indent ctx 1
+    set scopeId [N $e bodyScope]
+    OpenScope ctx $scopeId $parentFrame
+    set b [N $e elementBinding]
+    if {[dict get $ctx scopes $scopeId materialized]} {
+        set frame [dict get $ctx scopes $scopeId frame]
+        Emit ctx "core::env::define \$$frame [Word [B $b name]] \$$item"
+    } else {
+        dict set ctx scopes $scopeId locals $b [list box "\$$item"]
+    }
+    DeclareScope ctx $scopeId
+    dict set ctx loops $e $result
+    set bodyValue [CompileSequence ctx [N $e body]]
+    dict unset ctx loops $e
+    if {[OpType $bodyValue] ne "never"} {
+        Emit ctx "lappend $acc [BoxWord $bodyValue]"
+    }
+    PopScope ctx
+    Indent ctx -1
+    Emit ctx "\}"
+    # A `break` inside the body already set $result (and left the Tcl
+    # `foreach` via a real Tcl `break`) before this point ever runs; only an
+    # ordinary exhaustion of the items (no break) leaves $result unset here,
+    # in which case it becomes the List built from every iteration's own
+    # contributed value.
+    Emit ctx "if \{!\[info exists $result\]\} \{ set $result \[core::value::listOf \$$acc\] \}"
     return [Op box "\$$result" any]
 }
 

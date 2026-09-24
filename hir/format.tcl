@@ -233,6 +233,19 @@ proc hir::format::Expr {hir e indent origins linesVar} {
                 Expr $hir $child $inner $origins lines
             }
         }
+        listloop {
+            set text "listloop [dict get $node bodyScope]\
+                ([ParamList $hir [list [dict get $node elementBinding]] {{}}])"
+            set binds [Binds $hir [dict get $node bodyScope]]
+            if {$binds ne ""} {
+                append text " $binds"
+            }
+            Line $hir $e $text $indent $origins lines
+            Expr $hir [dict get $node iterable] $inner $origins lines
+            foreach child [dict get $node body] {
+                Expr $hir $child $inner $origins lines
+            }
+        }
         return - break - continue {
             set target [dict get $node target]
             set text "[dict get $node kind] -> [expr {$target eq "" ? "?" : $target}]"

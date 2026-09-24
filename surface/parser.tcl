@@ -10,11 +10,11 @@
 #   topStatement = typeDecl | statement
 #   statement    = simple NEWLINE | valued | function | if | loop
 #   simple       = binding | return | break | continue | expression
-#   valued       = IDENT "=" if | "return" if | "break" if
+#   valued       = IDENT "=" (if|loop) | "return" (if|loop) | "break" (if|loop)
 #   function     = "fn" IDENT "(" [ param { "," param } [ "," ] ] ")" [ "->" IDENT ] ":" suite
 #   param        = IDENT [ ":" IDENT ]
 #   if           = "if" expression ":" suite [ "else" ":" suite ]
-#   loop         = "loop" ":" suite
+#   loop         = "loop" [ IDENT "in" expression ] ":" suite
 #   suite        = NEWLINE INDENT { NEWLINE | statement } DEDENT
 #   binding      = IDENT "=" expression
 #   return       = "return" [ expression ]
@@ -34,7 +34,10 @@
 # of a domain is not a reserved word: it is recognized contextually,
 # immediately after a typeDecl's parent type name, exactly the way "->"
 # result-type parsing here is contextual (allowFunctionResult) rather than
-# a global keyword reservation. "type" itself is different: it *is* a
+# a global keyword reservation -- `loop`'s own "in" (an element-binding
+# List traversal, "loop x in EXPR:") reuses this identical contextual
+# recognition, immediately after the loop variable's name (Loop, below).
+# "type" itself is different: it *is* a
 # reserved keyword (lexer.tcl), since auditing the existing corpus (see
 # SOURCE-DEFINED-INTEGER-DOMAINS.md) found no program using "type" or "in"
 # as an ordinary name.
@@ -53,9 +56,11 @@
 #                | IDENT [ "::" IDENT ]
 #                | "[" [ arguments ] "]" | "(" expression ")"
 #
-# An if is a value where a statement's value ends the statement: the right
-# side of a binding, or the value of return or break (`x = if c:` followed
-# by its suites). Binary arithmetic, and and or are left-associative;
+# An if (or a loop, including "loop x in EXPR:") is a value where a
+# statement's value ends the statement: the right side of a binding, or the
+# value of return or break (`x = if c:` or `x = loop c in EXPR:`, each
+# followed by its suite(s)) -- never a nested expression (e.g. a call
+# argument). Binary arithmetic, and and or are left-associative;
 # comparisons do not chain.
 #
 # Without -recover, the first syntax error (lexical or grammatical) is raised
@@ -301,8 +306,8 @@ proc surface::parser::Statement {pVar} {
     set statement [Simple p]
     if {[dict get $statement kind] in {bind return break}
             && [dict get $statement value] ne ""
-            && [dict get $statement value kind] eq "if"} {
-        # The if's suites ended the line.
+            && [dict get $statement value kind] in {if loop}} {
+        # The if's (or loop's) suite(s) already ended the line.
         return $statement
     }
     set next [Peek p]
@@ -346,11 +351,14 @@ proc surface::parser::Simple {pVar} {
     return [Expression p]
 }
 
-# A statement's value: an if or an expression.
+# A statement's value: an if, a loop, or an expression.
 proc surface::parser::Value {pVar} {
     upvar 1 $pVar p
     if {[Kind p] eq "if"} {
         return [If p]
+    }
+    if {[Kind p] eq "loop"} {
+        return [Loop p]
     }
     return [Expression p]
 }
@@ -523,8 +531,23 @@ proc surface::parser::If {pVar} {
 proc surface::parser::Loop {pVar} {
     upvar 1 $pVar p
     set start [dict get [Advance p] span]
+    set elementName ""
+    set elementNameSpan ""
+    set iterable ""
+    if {[Kind p] eq "IDENT"} {
+        set nameToken [Advance p]
+        set elementName [dict get $nameToken value]
+        set elementNameSpan [dict get $nameToken span]
+        set inToken [Peek p]
+        if {[dict get $inToken kind] ne "IDENT" || [dict get $inToken value] ne "in"} {
+            Fail $inToken "expected \"in\" after the loop variable, found [Describe $inToken]"
+        }
+        Advance p
+        set iterable [Expression p]
+    }
     set body [Suite p "\"loop\""]
-    return [surface::ast::node loop [SpanFrom p $start] body $body]
+    return [surface::ast::node loop [SpanFrom p $start] \
+        elementName $elementName elementNameSpan $elementNameSpan iterable $iterable body $body]
 }
 
 # ":" NEWLINE INDENT statements DEDENT, after AFTER (for messages).

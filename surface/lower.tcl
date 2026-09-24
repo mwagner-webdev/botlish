@@ -36,6 +36,8 @@
 #   if c: t else: e       if c {t...} {e...}    inline branches; a missing
 #                         else is an empty branch (value unit)
 #   loop: body            loop {body...}        inline body
+#   loop x in e: body     listloop e {x} {body...}  element binding traversal
+#                         of a List (see core/ir.tcl's `listloop`)
 #   return / return e     return ^unit / return e
 #   break / break e       break / break e
 #   continue              continue
@@ -279,6 +281,14 @@ proc surface::lower::Node {node} {
         }
         loop {
             set body [dict get $node body]
+            if {[dict get $node iterable] ne ""} {
+                return [hir::syntax::listLoopNode $origin \
+                    [Node [dict get $node iterable]] \
+                    [dict get $node elementName] \
+                    [Origin [dict get $node elementNameSpan] "[dict get $node id]/([dict get $node elementName])"] \
+                    [Origin [dict get $body span] [dict get $body id]/body] \
+                    [Sequence [dict get $body body]]]
+            }
             return [hir::syntax::loopNode $origin \
                 [Origin [dict get $body span] [dict get $body id]/body] \
                 [Sequence [dict get $body body]]]

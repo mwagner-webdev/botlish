@@ -392,6 +392,19 @@ proc hir::resolve::Expr {hirVar node ctx} {
             SetField hir $e bodyScope $iteration
             SetField hir $e body [Sequence hir $body [dict replace $ctx scope $iteration loop $e]]
         }
+        listloop {
+            SetField hir $e iterable [Expr hir [dict get $node iterable] $ctx]
+            set body [dict get $node body]
+            set iteration [NewScope hir loop $scope \
+                [dict get $hir scopes $scope invocation] $e [dict get $node bodyOrigin]]
+            set elementBinding [NewBinding hir [dict get $node elementName] param \
+                $iteration [dict get $node elementOrigin]]
+            dict set hir bound $elementBinding 1
+            Declare hir $iteration [hir::syntax::scopeBindNames $body]
+            SetField hir $e bodyScope $iteration
+            SetField hir $e elementBinding $elementBinding
+            SetField hir $e body [Sequence hir $body [dict replace $ctx scope $iteration loop $e]]
+        }
         return {
             SetField hir $e value [Expr hir [dict get $node value] $ctx]
             SetField hir $e target [dict get $ctx callable]
