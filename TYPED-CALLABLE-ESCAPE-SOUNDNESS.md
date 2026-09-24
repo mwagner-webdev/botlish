@@ -421,8 +421,10 @@ built): **1768/1768 passing, 0 failed** -- exactly 35 more than the
 previous milestone's own 1733 (this file's new tests), with no other
 change. `cargo test --release --manifest-path native/Cargo.toml`:
 **60/60 passing** (no Rust source changed). GC-stress
-(`BOTLISH_NATIVE_GC_STRESS=1 tclsh9.0 tests/all.tcl`): run per spec §63,
-since this milestone adds a new HIR pass that runs on every build.
+(`BOTLISH_NATIVE_GC_STRESS=1 tclsh9.0 tests/all.tcl`, run per spec §63
+since this milestone adds a new HIR pass that runs on every build):
+**1768/1768 passing, 0 failed** -- identical to the ordinary run on both
+backends, confirming no rooting/allocation-behavior regression.
 
 ## Backend parity
 
