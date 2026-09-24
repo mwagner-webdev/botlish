@@ -46,8 +46,8 @@
 ;   botlish_fn_37 / botlish_entry_37 -> ht_find_insert<mutarray, any, int, int>
 ;   botlish_fn_38 / botlish_entry_38 -> ht_get<any, str>
 ;   botlish_fn_39 / botlish_entry_39 -> ht_rehash_probe<mutarray, int, int>
-;   botlish_fn_40 / botlish_entry_40 -> ht_rehash_insert<list<mutarray>, int, any, any>
-;   botlish_fn_41 / botlish_entry_41 -> ht_rehash_scan<list, int, int, list<mutarray>, int>
+;   botlish_fn_40 / botlish_entry_40 -> ht_rehash_insert<List[mutarray], int, any, any>
+;   botlish_fn_41 / botlish_entry_41 -> ht_rehash_scan<list, int, int, List[mutarray], int>
 ;   botlish_fn_42 / botlish_entry_42 -> ht_rehash<mutarray, int>
 ;   botlish_fn_43 / botlish_entry_43 -> ht_should_grow<mutarray>
 ;   botlish_fn_44 / botlish_entry_44 -> ht_grow_or_clean<mutarray>
@@ -3353,7 +3353,7 @@ Disassembly of section .text:
     2bfa:	pop    rbp
     2bfb:	ret
 
-0000000000002bfc <botlish_fn_40: ht_rehash_insert<list<mutarray>, int, any, any>>:
+0000000000002bfc <botlish_fn_40: ht_rehash_insert<List[mutarray], int, any, any>>:
     2bfc:	push   rbp
     2bfd:	mov    rbp,rsp
     2c00:	sub    rsp,0x80
@@ -3445,7 +3445,7 @@ Disassembly of section .text:
     2d5a:	pop    rbp
     2d5b:	ret
 
-0000000000002d5c <botlish_entry_40: ht_rehash_insert<list<mutarray>, int, any, any>>:
+0000000000002d5c <botlish_entry_40: ht_rehash_insert<List[mutarray], int, any, any>>:
     2d5c:	push   rbp
     2d5d:	mov    rbp,rsp
     2d60:	sub    rsp,0x10
@@ -3458,13 +3458,13 @@ Disassembly of section .text:
     2d7b:	mov    QWORD PTR [rsp],r11
     2d7f:	mov    rdx,r10
     2d82:	call   2d87 <botlish_entry_40+0x2b>
-			2d83: R_X86_64_PLT32	botlish_fn_40-0x4 ; ht_rehash_insert<list<mutarray>, int, any, any>
+			2d83: R_X86_64_PLT32	botlish_fn_40-0x4 ; ht_rehash_insert<List[mutarray], int, any, any>
     2d87:	add    rsp,0x10
     2d8b:	mov    rsp,rbp
     2d8e:	pop    rbp
     2d8f:	ret
 
-0000000000002d90 <botlish_fn_41: ht_rehash_scan<list, int, int, list<mutarray>, int>>:
+0000000000002d90 <botlish_fn_41: ht_rehash_scan<list, int, int, List[mutarray], int>>:
     2d90:	push   rbp
     2d91:	mov    rbp,rsp
     2d94:	sub    rsp,0xc0
@@ -3627,7 +3627,7 @@ Disassembly of section .text:
     305e:	mov    rdi,QWORD PTR [rsp+0x60]
     3063:	mov    r8,rbx
     3066:	call   306b <botlish_fn_41+0x2db>
-			3067: R_X86_64_PLT32	botlish_fn_40-0x4 ; ht_rehash_insert<list<mutarray>, int, any, any>
+			3067: R_X86_64_PLT32	botlish_fn_40-0x4 ; ht_rehash_insert<List[mutarray], int, any, any>
     306b:	test   rax,rax
     306e:	jne    30ab <botlish_fn_41+0x31b>
     3074:	xor    rax,rax
@@ -3679,7 +3679,7 @@ Disassembly of section .text:
     3155:	add    BYTE PTR [rax],al
 	...
 
-0000000000003158 <botlish_entry_41: ht_rehash_scan<list, int, int, list<mutarray>, int>>:
+0000000000003158 <botlish_entry_41: ht_rehash_scan<list, int, int, List[mutarray], int>>:
     3158:	push   rbp
     3159:	mov    rbp,rsp
     315c:	sub    rsp,0x30
@@ -3699,7 +3699,7 @@ Disassembly of section .text:
     3196:	mov    QWORD PTR [rsp+0x18],rdx
     319b:	mov    rdx,rax
     319e:	call   31a3 <botlish_entry_41+0x4b>
-			319f: R_X86_64_PLT32	botlish_fn_41-0x4 ; ht_rehash_scan<list, int, int, list<mutarray>, int>
+			319f: R_X86_64_PLT32	botlish_fn_41-0x4 ; ht_rehash_scan<list, int, int, List[mutarray], int>
     31a3:	mov    r12,QWORD PTR [rsp+0x20]
     31a8:	add    rsp,0x30
     31ac:	mov    rsp,rbp
@@ -3805,7 +3805,7 @@ Disassembly of section .text:
     3364:	mov    r9,QWORD PTR [rsp+0x88]
     336c:	mov    rdi,r13
     336f:	call   3374 <botlish_fn_42+0x1c3>
-			3370: R_X86_64_PLT32	botlish_fn_41-0x4 ; ht_rehash_scan<list, int, int, list<mutarray>, int>
+			3370: R_X86_64_PLT32	botlish_fn_41-0x4 ; ht_rehash_scan<list, int, int, List[mutarray], int>
     3374:	test   rax,rax
     3377:	je     33f8 <botlish_fn_42+0x247>
     337d:	mov    edx,0x1

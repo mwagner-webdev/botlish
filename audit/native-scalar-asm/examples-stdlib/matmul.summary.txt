@@ -6,12 +6,12 @@ machine-code bytes: 4160 (per function: 750 703 483 596 536 684 408)
 
 functions:
   0 <program entry>: nir-regs=32
-  1 dot<list<int>, list<list<int>>, int, int, int, int>: nir-regs=18
-  2 product_row<list<int>, list<list<int>>, int, int, list<never>>: nir-regs=22
-  3 product_row<list<int>, list<list<int>>, int, int, list<int>>: nir-regs=19
-  4 product_rows<list<list<int>>, list<list<int>>, int, int, list<never>>: nir-regs=22
-  5 product_rows<list<list<int>>, list<list<int>>, int, int, list<list<int>>>: nir-regs=19
-  6 matmul<list<list<int>>, list<list<int>>>: nir-regs=18
+  1 dot<List[int], List[List[int]], int, int, int, int>: nir-regs=18
+  2 product_row<List[int], List[List[int]], int, int, List[never]>: nir-regs=22
+  3 product_row<List[int], List[List[int]], int, int, List[int]>: nir-regs=19
+  4 product_rows<List[List[int]], List[List[int]], int, int, List[never]>: nir-regs=22
+  5 product_rows<List[List[int]], List[List[int]], int, int, List[List[int]]>: nir-regs=19
+  6 matmul<List[List[int]], List[List[int]]>: nir-regs=18
 
 GC roots (matmul.asm's NIR ids match roots.txt's "function N"):
   function 0 "<program>"

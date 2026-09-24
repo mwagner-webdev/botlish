@@ -22,8 +22,8 @@ functions:
   14 ht_get<mutarray, str>: nir-regs=12
   15 ht_contains<mutarray, str>: nir-regs=7
   16 ht_rehash_probe<mutarray, int, int>: nir-regs=13
-  17 ht_rehash_insert<list<mutarray>, int, any, any>: nir-regs=15
-  18 ht_rehash_scan<list, int, int, list<mutarray>, int>: nir-regs=28
+  17 ht_rehash_insert<List[mutarray], int, any, any>: nir-regs=15
+  18 ht_rehash_scan<list, int, int, List[mutarray], int>: nir-regs=28
   19 ht_rehash<mutarray, int>: nir-regs=30
   20 ht_should_grow<mutarray>: nir-regs=15
   21 ht_grow_or_clean<mutarray>: nir-regs=12

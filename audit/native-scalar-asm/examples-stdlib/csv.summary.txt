@@ -11,10 +11,10 @@ functions:
   3 scan_unquoted<str, int, int>: nir-regs=28
   4 scan_quoted<str, int, str>: nir-regs=34
   5 scan_field<str, int>: nir-regs=17
-  6 scan_record<str, int, list<never>>: nir-regs=25
-  7 scan_record<str, int, list<str>>: nir-regs=23
-  8 scan_records<str, int, list<never>>: nir-regs=14
-  9 scan_records<str, int, list<list<str>>>: nir-regs=11
+  6 scan_record<str, int, List[never]>: nir-regs=25
+  7 scan_record<str, int, List[str]>: nir-regs=23
+  8 scan_records<str, int, List[never]>: nir-regs=14
+  9 scan_records<str, int, List[List[str]]>: nir-regs=11
   10 csv_parse<str>: nir-regs=5
 
 GC roots (csv.asm's NIR ids match roots.txt's "function N"):

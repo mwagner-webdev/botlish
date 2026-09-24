@@ -12,10 +12,10 @@
 ;   botlish_fn_3 / botlish_entry_3 -> scan_unquoted<str, int, int>
 ;   botlish_fn_4 / botlish_entry_4 -> scan_quoted<str, int, str>
 ;   botlish_fn_5 / botlish_entry_5 -> scan_field<str, int>
-;   botlish_fn_6 / botlish_entry_6 -> scan_record<str, int, list<never>>
-;   botlish_fn_7 / botlish_entry_7 -> scan_record<str, int, list<str>>
-;   botlish_fn_8 / botlish_entry_8 -> scan_records<str, int, list<never>>
-;   botlish_fn_9 / botlish_entry_9 -> scan_records<str, int, list<list<str>>>
+;   botlish_fn_6 / botlish_entry_6 -> scan_record<str, int, List[never]>
+;   botlish_fn_7 / botlish_entry_7 -> scan_record<str, int, List[str]>
+;   botlish_fn_8 / botlish_entry_8 -> scan_records<str, int, List[never]>
+;   botlish_fn_9 / botlish_entry_9 -> scan_records<str, int, List[List[str]]>
 ;   botlish_fn_10 / botlish_entry_10 -> csv_parse<str>
 
 
@@ -689,7 +689,7 @@ Disassembly of section .text:
      976:	mov    rbp,rsp
      979:	ud2
 
-000000000000097b <botlish_fn_6: scan_record<str, int, list<never>>>:
+000000000000097b <botlish_fn_6: scan_record<str, int, List[never]>>:
      97b:	push   rbp
      97c:	mov    rbp,rsp
      97f:	sub    rsp,0x70
@@ -816,7 +816,7 @@ Disassembly of section .text:
      b5f:	mov    rsi,QWORD PTR [rsp+0x30]
      b64:	mov    rdi,r13
      b67:	call   b6c <botlish_fn_6+0x1f1>
-			b68: R_X86_64_PLT32	botlish_fn_7-0x4 ; scan_record<str, int, list<str>>
+			b68: R_X86_64_PLT32	botlish_fn_7-0x4 ; scan_record<str, int, List[str]>
      b6c:	test   rax,rax
      b6f:	jne    b9d <botlish_fn_6+0x222>
      b75:	xor    rdx,rdx
@@ -840,12 +840,12 @@ Disassembly of section .text:
      bbd:	pop    rbp
      bbe:	ret
 
-0000000000000bbf <botlish_entry_6: scan_record<str, int, list<never>>>:
+0000000000000bbf <botlish_entry_6: scan_record<str, int, List[never]>>:
      bbf:	push   rbp
      bc0:	mov    rbp,rsp
      bc3:	ud2
 
-0000000000000bc5 <botlish_fn_7: scan_record<str, int, list<str>>>:
+0000000000000bc5 <botlish_fn_7: scan_record<str, int, List[str]>>:
      bc5:	push   rbp
      bc6:	mov    rbp,rsp
      bc9:	sub    rsp,0x80
@@ -985,12 +985,12 @@ Disassembly of section .text:
      df8:	mov    r13,QWORD PTR [rsp+0x38]
      dfd:	jmp    c0e <botlish_fn_7+0x49>
 
-0000000000000e02 <botlish_entry_7: scan_record<str, int, list<str>>>:
+0000000000000e02 <botlish_entry_7: scan_record<str, int, List[str]>>:
      e02:	push   rbp
      e03:	mov    rbp,rsp
      e06:	ud2
 
-0000000000000e08 <botlish_fn_8: scan_records<str, int, list<never>>>:
+0000000000000e08 <botlish_fn_8: scan_records<str, int, List[never]>>:
      e08:	push   rbp
      e09:	mov    rbp,rsp
      e0c:	sub    rsp,0x40
@@ -1029,7 +1029,7 @@ Disassembly of section .text:
      e89:	mov    rsi,rbx
      e8c:	mov    rdi,r12
      e8f:	call   e94 <botlish_fn_8+0x8c>
-			e90: R_X86_64_PLT32	botlish_fn_6-0x4 ; scan_record<str, int, list<never>>
+			e90: R_X86_64_PLT32	botlish_fn_6-0x4 ; scan_record<str, int, List[never]>
      e94:	test   rax,rax
      e97:	je     ee0 <botlish_fn_8+0xd8>
      e9d:	mov    QWORD PTR [rsp+0x8],rax
@@ -1048,7 +1048,7 @@ Disassembly of section .text:
      ecc:	mov    rsi,rbx
      ecf:	mov    rdi,r12
      ed2:	call   ed7 <botlish_fn_8+0xcf>
-			ed3: R_X86_64_PLT32	botlish_fn_9-0x4 ; scan_records<str, int, list<list<str>>>
+			ed3: R_X86_64_PLT32	botlish_fn_9-0x4 ; scan_records<str, int, List[List[str]]>
      ed7:	test   rax,rax
      eda:	jne    f00 <botlish_fn_8+0xf8>
      ee0:	xor    rax,rax
@@ -1078,7 +1078,7 @@ Disassembly of section .text:
      f3b:	pop    rbp
      f3c:	ret
 
-0000000000000f3d <botlish_entry_8: scan_records<str, int, list<never>>>:
+0000000000000f3d <botlish_entry_8: scan_records<str, int, List[never]>>:
      f3d:	push   rbp
      f3e:	mov    rbp,rsp
      f41:	mov    rsi,QWORD PTR [rdx]
@@ -1086,7 +1086,7 @@ Disassembly of section .text:
      f48:	mov    rcx,QWORD PTR [rdx+0x10]
      f4c:	mov    rdx,r8
      f4f:	call   f54 <botlish_entry_8+0x17>
-			f50: R_X86_64_PLT32	botlish_fn_8-0x4 ; scan_records<str, int, list<never>>
+			f50: R_X86_64_PLT32	botlish_fn_8-0x4 ; scan_records<str, int, List[never]>
      f54:	mov    rsp,rbp
      f57:	pop    rbp
      f58:	ret
@@ -1095,7 +1095,7 @@ Disassembly of section .text:
      f5d:	add    BYTE PTR [rax],al
 	...
 
-0000000000000f60 <botlish_fn_9: scan_records<str, int, list<list<str>>>>:
+0000000000000f60 <botlish_fn_9: scan_records<str, int, List[List[str]]>>:
      f60:	push   rbp
      f61:	mov    rbp,rsp
      f64:	sub    rsp,0x40
@@ -1147,7 +1147,7 @@ Disassembly of section .text:
     101f:	mov    rsi,rbx
     1022:	mov    rdi,r13
     1025:	call   102a <botlish_fn_9+0xca>
-			1026: R_X86_64_PLT32	botlish_fn_6-0x4 ; scan_record<str, int, list<never>>
+			1026: R_X86_64_PLT32	botlish_fn_6-0x4 ; scan_record<str, int, List[never]>
     102a:	test   rax,rax
     102d:	je     1057 <botlish_fn_9+0xf7>
     1033:	mov    QWORD PTR [rsp+0x8],rax
@@ -1190,7 +1190,7 @@ Disassembly of section .text:
     10b5:	add    BYTE PTR [rax],al
 	...
 
-00000000000010b8 <botlish_entry_9: scan_records<str, int, list<list<str>>>>:
+00000000000010b8 <botlish_entry_9: scan_records<str, int, List[List[str]]>>:
     10b8:	push   rbp
     10b9:	mov    rbp,rsp
     10bc:	mov    rsi,QWORD PTR [rdx]
@@ -1198,7 +1198,7 @@ Disassembly of section .text:
     10c3:	mov    rcx,QWORD PTR [rdx+0x10]
     10c7:	mov    rdx,r8
     10ca:	call   10cf <botlish_entry_9+0x17>
-			10cb: R_X86_64_PLT32	botlish_fn_9-0x4 ; scan_records<str, int, list<list<str>>>
+			10cb: R_X86_64_PLT32	botlish_fn_9-0x4 ; scan_records<str, int, List[List[str]]>
     10cf:	mov    rsp,rbp
     10d2:	pop    rbp
     10d3:	ret
@@ -1227,7 +1227,7 @@ Disassembly of section .text:
     1126:	mov    rsi,r12
     1129:	mov    rdi,r13
     112c:	call   1131 <botlish_fn_10+0x5d>
-			112d: R_X86_64_PLT32	botlish_fn_8-0x4 ; scan_records<str, int, list<never>>
+			112d: R_X86_64_PLT32	botlish_fn_8-0x4 ; scan_records<str, int, List[never]>
     1131:	test   rax,rax
     1134:	jne    1150 <botlish_fn_10+0x7c>
     113a:	xor    rax,rax

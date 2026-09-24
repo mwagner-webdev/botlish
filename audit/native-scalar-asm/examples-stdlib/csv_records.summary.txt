@@ -45,8 +45,8 @@ functions:
   37 ht_find_insert<mutarray, any, int, int>: nir-regs=44
   38 ht_get<any, str>: nir-regs=12
   39 ht_rehash_probe<mutarray, int, int>: nir-regs=13
-  40 ht_rehash_insert<list<mutarray>, int, any, any>: nir-regs=15
-  41 ht_rehash_scan<list, int, int, list<mutarray>, int>: nir-regs=28
+  40 ht_rehash_insert<List[mutarray], int, any, any>: nir-regs=15
+  41 ht_rehash_scan<list, int, int, List[mutarray], int>: nir-regs=28
   42 ht_rehash<mutarray, int>: nir-regs=30
   43 ht_should_grow<mutarray>: nir-regs=15
   44 ht_grow_or_clean<mutarray>: nir-regs=12

@@ -7,12 +7,12 @@
 ;
 ; function symbol -> Botlish label:
 ;   botlish_fn_0 / botlish_entry_0 -> <program entry>
-;   botlish_fn_1 / botlish_entry_1 -> dot<list<int>, list<list<int>>, int, int, int, int>
-;   botlish_fn_2 / botlish_entry_2 -> product_row<list<int>, list<list<int>>, int, int, list<never>>
-;   botlish_fn_3 / botlish_entry_3 -> product_row<list<int>, list<list<int>>, int, int, list<int>>
-;   botlish_fn_4 / botlish_entry_4 -> product_rows<list<list<int>>, list<list<int>>, int, int, list<never>>
-;   botlish_fn_5 / botlish_entry_5 -> product_rows<list<list<int>>, list<list<int>>, int, int, list<list<int>>>
-;   botlish_fn_6 / botlish_entry_6 -> matmul<list<list<int>>, list<list<int>>>
+;   botlish_fn_1 / botlish_entry_1 -> dot<List[int], List[List[int]], int, int, int, int>
+;   botlish_fn_2 / botlish_entry_2 -> product_row<List[int], List[List[int]], int, int, List[never]>
+;   botlish_fn_3 / botlish_entry_3 -> product_row<List[int], List[List[int]], int, int, List[int]>
+;   botlish_fn_4 / botlish_entry_4 -> product_rows<List[List[int]], List[List[int]], int, int, List[never]>
+;   botlish_fn_5 / botlish_entry_5 -> product_rows<List[List[int]], List[List[int]], int, int, List[List[int]]>
+;   botlish_fn_6 / botlish_entry_6 -> matmul<List[List[int]], List[List[int]]>
 
 
 matmul.asm.o:     file format elf64-x86-64
@@ -127,7 +127,7 @@ Disassembly of section .text:
  23e:	mov    rsi,r12
  241:	mov    rdi,rbx
  244:	call   249 <botlish_fn_0+0x249>
-			245: R_X86_64_PLT32	botlish_fn_6-0x4 ; matmul<list<list<int>>, list<list<int>>>
+			245: R_X86_64_PLT32	botlish_fn_6-0x4 ; matmul<List[List[int]], List[List[int]]>
  249:	test   rax,rax
  24c:	jne    281 <botlish_fn_0+0x281>
  252:	xor    rax,rax
@@ -157,7 +157,7 @@ Disassembly of section .text:
  2b9:	pop    rbp
  2ba:	ret
 
-00000000000002bb <botlish_fn_1: dot<list<int>, list<list<int>>, int, int, int, int>>:
+00000000000002bb <botlish_fn_1: dot<List[int], List[List[int]], int, int, int, int>>:
  2bb:	push   rbp
  2bc:	mov    rbp,rsp
  2bf:	sub    rsp,0x80
@@ -312,7 +312,7 @@ Disassembly of section .text:
  520:	pop    rbp
  521:	ret
 
-0000000000000522 <botlish_entry_1: dot<list<int>, list<list<int>>, int, int, int, int>>:
+0000000000000522 <botlish_entry_1: dot<List[int], List[List[int]], int, int, int, int>>:
  522:	push   rbp
  523:	mov    rbp,rsp
  526:	sub    rsp,0x10
@@ -325,13 +325,13 @@ Disassembly of section .text:
  541:	mov    QWORD PTR [rsp],r11
  545:	mov    rdx,r10
  548:	call   54d <botlish_entry_1+0x2b>
-			549: R_X86_64_PLT32	botlish_fn_1-0x4 ; dot<list<int>, list<list<int>>, int, int, int, int>
+			549: R_X86_64_PLT32	botlish_fn_1-0x4 ; dot<List[int], List[List[int]], int, int, int, int>
  54d:	add    rsp,0x10
  551:	mov    rsp,rbp
  554:	pop    rbp
  555:	ret
 
-0000000000000556 <botlish_fn_2: product_row<list<int>, list<list<int>>, int, int, list<never>>>:
+0000000000000556 <botlish_fn_2: product_row<List[int], List[List[int]], int, int, List[never]>>:
  556:	push   rbp
  557:	mov    rbp,rsp
  55a:	sub    rsp,0xa0
@@ -373,7 +373,7 @@ Disassembly of section .text:
  604:	mov    rsi,r15
  607:	mov    rdi,QWORD PTR [rsp+0x50]
  60c:	call   611 <botlish_fn_2+0xbb>
-			60d: R_X86_64_PLT32	botlish_fn_1-0x4 ; dot<list<int>, list<list<int>>, int, int, int, int>
+			60d: R_X86_64_PLT32	botlish_fn_1-0x4 ; dot<List[int], List[List[int]], int, int, int, int>
  611:	test   rax,rax
  614:	je     675 <botlish_fn_2+0x11f>
  61a:	mov    QWORD PTR [rsp+0x20],rax
@@ -397,7 +397,7 @@ Disassembly of section .text:
  661:	mov    r8,r13
  664:	mov    r9,rax
  667:	call   66c <botlish_fn_2+0x116>
-			668: R_X86_64_PLT32	botlish_fn_3-0x4 ; product_row<list<int>, list<list<int>>, int, int, list<int>>
+			668: R_X86_64_PLT32	botlish_fn_3-0x4 ; product_row<List[int], List[List[int]], int, int, List[int]>
  66c:	test   rax,rax
  66f:	jne    6a6 <botlish_fn_2+0x150>
  675:	xor    rax,rax
@@ -430,7 +430,7 @@ Disassembly of section .text:
  705:	pop    rbp
  706:	ret
 
-0000000000000707 <botlish_entry_2: product_row<list<int>, list<list<int>>, int, int, list<never>>>:
+0000000000000707 <botlish_entry_2: product_row<List[int], List[List[int]], int, int, List[never]>>:
  707:	push   rbp
  708:	mov    rbp,rsp
  70b:	mov    rsi,QWORD PTR [rdx]
@@ -440,7 +440,7 @@ Disassembly of section .text:
  71a:	mov    r9,QWORD PTR [rdx+0x20]
  71e:	mov    rdx,r10
  721:	call   726 <botlish_entry_2+0x1f>
-			722: R_X86_64_PLT32	botlish_fn_2-0x4 ; product_row<list<int>, list<list<int>>, int, int, list<never>>
+			722: R_X86_64_PLT32	botlish_fn_2-0x4 ; product_row<List[int], List[List[int]], int, int, List[never]>
  726:	mov    rsp,rbp
  729:	pop    rbp
  72a:	ret
@@ -448,7 +448,7 @@ Disassembly of section .text:
  72d:	add    BYTE PTR [rax],al
 	...
 
-0000000000000730 <botlish_fn_3: product_row<list<int>, list<list<int>>, int, int, list<int>>>:
+0000000000000730 <botlish_fn_3: product_row<List[int], List[List[int]], int, int, List[int]>>:
  730:	push   rbp
  731:	mov    rbp,rsp
  734:	sub    rsp,0x90
@@ -509,7 +509,7 @@ Disassembly of section .text:
  82a:	mov    rsi,rbx
  82d:	mov    rdi,r15
  830:	call   835 <botlish_fn_3+0x105>
-			831: R_X86_64_PLT32	botlish_fn_1-0x4 ; dot<list<int>, list<list<int>>, int, int, int, int>
+			831: R_X86_64_PLT32	botlish_fn_1-0x4 ; dot<List[int], List[List[int]], int, int, int, int>
  835:	test   rax,rax
  838:	je     8bd <botlish_fn_3+0x18d>
  83e:	mov    QWORD PTR [rsp+0x30],rax
@@ -578,7 +578,7 @@ Disassembly of section .text:
  945:	add    BYTE PTR [rax],al
 	...
 
-0000000000000948 <botlish_entry_3: product_row<list<int>, list<list<int>>, int, int, list<int>>>:
+0000000000000948 <botlish_entry_3: product_row<List[int], List[List[int]], int, int, List[int]>>:
  948:	push   rbp
  949:	mov    rbp,rsp
  94c:	mov    rsi,QWORD PTR [rdx]
@@ -588,12 +588,12 @@ Disassembly of section .text:
  95b:	mov    r9,QWORD PTR [rdx+0x20]
  95f:	mov    rdx,r10
  962:	call   967 <botlish_entry_3+0x1f>
-			963: R_X86_64_PLT32	botlish_fn_3-0x4 ; product_row<list<int>, list<list<int>>, int, int, list<int>>
+			963: R_X86_64_PLT32	botlish_fn_3-0x4 ; product_row<List[int], List[List[int]], int, int, List[int]>
  967:	mov    rsp,rbp
  96a:	pop    rbp
  96b:	ret
 
-000000000000096c <botlish_fn_4: product_rows<list<list<int>>, list<list<int>>, int, int, list<never>>>:
+000000000000096c <botlish_fn_4: product_rows<List[List[int]], List[List[int]], int, int, List[never]>>:
  96c:	push   rbp
  96d:	mov    rbp,rsp
  970:	sub    rsp,0x80
@@ -660,7 +660,7 @@ Disassembly of section .text:
  a6b:	mov    rdi,r15
  a6e:	mov    r8,r12
  a71:	call   a76 <botlish_fn_4+0x10a>
-			a72: R_X86_64_PLT32	botlish_fn_2-0x4 ; product_row<list<int>, list<list<int>>, int, int, list<never>>
+			a72: R_X86_64_PLT32	botlish_fn_2-0x4 ; product_row<List[int], List[List[int]], int, int, List[never]>
  a76:	test   rax,rax
  a79:	je     ad5 <botlish_fn_4+0x169>
  a7f:	mov    QWORD PTR [rsp+0x20],rax
@@ -684,7 +684,7 @@ Disassembly of section .text:
  ac1:	mov    r8,r12
  ac4:	mov    r9,rax
  ac7:	call   acc <botlish_fn_4+0x160>
-			ac8: R_X86_64_PLT32	botlish_fn_5-0x4 ; product_rows<list<list<int>>, list<list<int>>, int, int, list<list<int>>>
+			ac8: R_X86_64_PLT32	botlish_fn_5-0x4 ; product_rows<List[List[int]], List[List[int]], int, int, List[List[int]]>
  acc:	test   rax,rax
  acf:	jne    afd <botlish_fn_4+0x191>
  ad5:	xor    rax,rax
@@ -717,7 +717,7 @@ Disassembly of section .text:
  b4a:	pop    rbp
  b4b:	ret
 
-0000000000000b4c <botlish_entry_4: product_rows<list<list<int>>, list<list<int>>, int, int, list<never>>>:
+0000000000000b4c <botlish_entry_4: product_rows<List[List[int]], List[List[int]], int, int, List[never]>>:
  b4c:	push   rbp
  b4d:	mov    rbp,rsp
  b50:	mov    rsi,QWORD PTR [rdx]
@@ -727,12 +727,12 @@ Disassembly of section .text:
  b5f:	mov    r9,QWORD PTR [rdx+0x20]
  b63:	mov    rdx,r10
  b66:	call   b6b <botlish_entry_4+0x1f>
-			b67: R_X86_64_PLT32	botlish_fn_4-0x4 ; product_rows<list<list<int>>, list<list<int>>, int, int, list<never>>
+			b67: R_X86_64_PLT32	botlish_fn_4-0x4 ; product_rows<List[List[int]], List[List[int]], int, int, List[never]>
  b6b:	mov    rsp,rbp
  b6e:	pop    rbp
  b6f:	ret
 
-0000000000000b70 <botlish_fn_5: product_rows<list<list<int>>, list<list<int>>, int, int, list<list<int>>>>:
+0000000000000b70 <botlish_fn_5: product_rows<List[List[int]], List[List[int]], int, int, List[List[int]]>>:
  b70:	push   rbp
  b71:	mov    rbp,rsp
  b74:	sub    rsp,0x90
@@ -820,7 +820,7 @@ Disassembly of section .text:
  cda:	mov    rdx,rbx
  cdd:	mov    rdi,r14
  ce0:	call   ce5 <botlish_fn_5+0x175>
-			ce1: R_X86_64_PLT32	botlish_fn_2-0x4 ; product_row<list<int>, list<list<int>>, int, int, list<never>>
+			ce1: R_X86_64_PLT32	botlish_fn_2-0x4 ; product_row<List[int], List[List[int]], int, int, List[never]>
  ce5:	test   rax,rax
  ce8:	je     d6d <botlish_fn_5+0x1fd>
  cee:	mov    QWORD PTR [rsp+0x20],rax
@@ -889,7 +889,7 @@ Disassembly of section .text:
  df5:	add    BYTE PTR [rax],al
 	...
 
-0000000000000df8 <botlish_entry_5: product_rows<list<list<int>>, list<list<int>>, int, int, list<list<int>>>>:
+0000000000000df8 <botlish_entry_5: product_rows<List[List[int]], List[List[int]], int, int, List[List[int]]>>:
  df8:	push   rbp
  df9:	mov    rbp,rsp
  dfc:	mov    rsi,QWORD PTR [rdx]
@@ -899,12 +899,12 @@ Disassembly of section .text:
  e0b:	mov    r9,QWORD PTR [rdx+0x20]
  e0f:	mov    rdx,r10
  e12:	call   e17 <botlish_entry_5+0x1f>
-			e13: R_X86_64_PLT32	botlish_fn_5-0x4 ; product_rows<list<list<int>>, list<list<int>>, int, int, list<list<int>>>
+			e13: R_X86_64_PLT32	botlish_fn_5-0x4 ; product_rows<List[List[int]], List[List[int]], int, int, List[List[int]]>
  e17:	mov    rsp,rbp
  e1a:	pop    rbp
  e1b:	ret
 
-0000000000000e1c <botlish_fn_6: matmul<list<list<int>>, list<list<int>>>>:
+0000000000000e1c <botlish_fn_6: matmul<List[List[int]], List[List[int]]>>:
  e1c:	push   rbp
  e1d:	mov    rbp,rsp
  e20:	sub    rsp,0x50
@@ -963,7 +963,7 @@ Disassembly of section .text:
  ef7:	mov    rdi,r12
  efa:	mov    r8,r14
  efd:	call   f02 <botlish_fn_6+0xe6>
-			efe: R_X86_64_PLT32	botlish_fn_4-0x4 ; product_rows<list<list<int>>, list<list<int>>, int, int, list<never>>
+			efe: R_X86_64_PLT32	botlish_fn_4-0x4 ; product_rows<List[List[int]], List[List[int]], int, int, List[never]>
  f02:	test   rax,rax
  f05:	je     f3f <botlish_fn_6+0x123>
  f0b:	mov    rbx,QWORD PTR [rsp+0x30]
@@ -999,13 +999,13 @@ Disassembly of section .text:
  f7a:	pop    rbp
  f7b:	ret
 
-0000000000000f7c <botlish_entry_6: matmul<list<list<int>>, list<list<int>>>>:
+0000000000000f7c <botlish_entry_6: matmul<List[List[int]], List[List[int]]>>:
  f7c:	push   rbp
  f7d:	mov    rbp,rsp
  f80:	mov    rsi,QWORD PTR [rdx]
  f83:	mov    rdx,QWORD PTR [rdx+0x8]
  f87:	call   f8c <botlish_entry_6+0x10>
-			f88: R_X86_64_PLT32	botlish_fn_6-0x4 ; matmul<list<list<int>>, list<list<int>>>
+			f88: R_X86_64_PLT32	botlish_fn_6-0x4 ; matmul<List[List[int]], List[List[int]]>
  f8c:	mov    rsp,rbp
  f8f:	pop    rbp
  f90:	ret

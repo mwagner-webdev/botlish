@@ -7,23 +7,23 @@ machine-code bytes: 10103 (per function: 68 195 542 542 542 542 592 520 540 540 
 functions:
   0 <program entry>: nir-regs=2
   1 chunked_new<generic>: nir-regs=6
-  2 chunked_append<list[list<never>, mutarray, int], str>: nir-regs=22
-  3 chunked_append<list[list<mutarray>, mutarray, int], str>: nir-regs=22
-  4 chunked_append<list[list<never>, mutarray, int], list>: nir-regs=22
-  5 chunked_append<list[list<mutarray>, mutarray, int], list>: nir-regs=22
-  6 chunked_copy_chunks<list<never>, int, mutarray, int>: nir-regs=22
-  7 chunked_copy_chunks<list<mutarray>, int, mutarray, int>: nir-regs=22
-  8 chunked_finish<list[list<never>, mutarray, int]>: nir-regs=18
-  9 chunked_finish<list[list<mutarray>, mutarray, int]>: nir-regs=18
+  2 chunked_append<list[List[never], mutarray, int], str>: nir-regs=22
+  3 chunked_append<list[List[mutarray], mutarray, int], str>: nir-regs=22
+  4 chunked_append<list[List[never], mutarray, int], list>: nir-regs=22
+  5 chunked_append<list[List[mutarray], mutarray, int], list>: nir-regs=22
+  6 chunked_copy_chunks<List[never], int, mutarray, int>: nir-regs=22
+  7 chunked_copy_chunks<List[mutarray], int, mutarray, int>: nir-regs=22
+  8 chunked_finish<list[List[never], mutarray, int]>: nir-regs=18
+  9 chunked_finish<list[List[mutarray], mutarray, int]>: nir-regs=18
   10 peek<str, int>: nir-regs=11
   11 peek<str, int>: nir-regs=15
   12 scan_unquoted<str, int, int>: nir-regs=28
   13 scan_quoted<str, int, str>: nir-regs=34
   14 scan_field<str, int>: nir-regs=17
-  15 scan_record<str, int, list[list<never>, mutarray, int]>: nir-regs=31
-  16 scan_record<str, int, list[list<mutarray>, mutarray, int]>: nir-regs=29
-  17 scan_records<str, int, list[list<never>, mutarray, int]>: nir-regs=21
-  18 scan_records<str, int, list[list<mutarray>, mutarray, int]>: nir-regs=18
+  15 scan_record<str, int, list[List[never], mutarray, int]>: nir-regs=31
+  16 scan_record<str, int, list[List[mutarray], mutarray, int]>: nir-regs=29
+  17 scan_records<str, int, list[List[never], mutarray, int]>: nir-regs=21
+  18 scan_records<str, int, list[List[mutarray], mutarray, int]>: nir-regs=18
   19 csv_parse<str>: nir-regs=7
 
 GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):

@@ -8,23 +8,23 @@
 ; function symbol -> Botlish label:
 ;   botlish_fn_0 / botlish_entry_0 -> <program entry>
 ;   botlish_fn_1 / botlish_entry_1 -> chunked_new<generic>
-;   botlish_fn_2 / botlish_entry_2 -> chunked_append<list[list<never>, mutarray, int], str>
-;   botlish_fn_3 / botlish_entry_3 -> chunked_append<list[list<mutarray>, mutarray, int], str>
-;   botlish_fn_4 / botlish_entry_4 -> chunked_append<list[list<never>, mutarray, int], list>
-;   botlish_fn_5 / botlish_entry_5 -> chunked_append<list[list<mutarray>, mutarray, int], list>
-;   botlish_fn_6 / botlish_entry_6 -> chunked_copy_chunks<list<never>, int, mutarray, int>
-;   botlish_fn_7 / botlish_entry_7 -> chunked_copy_chunks<list<mutarray>, int, mutarray, int>
-;   botlish_fn_8 / botlish_entry_8 -> chunked_finish<list[list<never>, mutarray, int]>
-;   botlish_fn_9 / botlish_entry_9 -> chunked_finish<list[list<mutarray>, mutarray, int]>
+;   botlish_fn_2 / botlish_entry_2 -> chunked_append<list[List[never], mutarray, int], str>
+;   botlish_fn_3 / botlish_entry_3 -> chunked_append<list[List[mutarray], mutarray, int], str>
+;   botlish_fn_4 / botlish_entry_4 -> chunked_append<list[List[never], mutarray, int], list>
+;   botlish_fn_5 / botlish_entry_5 -> chunked_append<list[List[mutarray], mutarray, int], list>
+;   botlish_fn_6 / botlish_entry_6 -> chunked_copy_chunks<List[never], int, mutarray, int>
+;   botlish_fn_7 / botlish_entry_7 -> chunked_copy_chunks<List[mutarray], int, mutarray, int>
+;   botlish_fn_8 / botlish_entry_8 -> chunked_finish<list[List[never], mutarray, int]>
+;   botlish_fn_9 / botlish_entry_9 -> chunked_finish<list[List[mutarray], mutarray, int]>
 ;   botlish_fn_10 / botlish_entry_10 -> peek<str, int>
 ;   botlish_fn_11 / botlish_entry_11 -> peek<str, int>
 ;   botlish_fn_12 / botlish_entry_12 -> scan_unquoted<str, int, int>
 ;   botlish_fn_13 / botlish_entry_13 -> scan_quoted<str, int, str>
 ;   botlish_fn_14 / botlish_entry_14 -> scan_field<str, int>
-;   botlish_fn_15 / botlish_entry_15 -> scan_record<str, int, list[list<never>, mutarray, int]>
-;   botlish_fn_16 / botlish_entry_16 -> scan_record<str, int, list[list<mutarray>, mutarray, int]>
-;   botlish_fn_17 / botlish_entry_17 -> scan_records<str, int, list[list<never>, mutarray, int]>
-;   botlish_fn_18 / botlish_entry_18 -> scan_records<str, int, list[list<mutarray>, mutarray, int]>
+;   botlish_fn_15 / botlish_entry_15 -> scan_record<str, int, list[List[never], mutarray, int]>
+;   botlish_fn_16 / botlish_entry_16 -> scan_record<str, int, list[List[mutarray], mutarray, int]>
+;   botlish_fn_17 / botlish_entry_17 -> scan_records<str, int, list[List[never], mutarray, int]>
+;   botlish_fn_18 / botlish_entry_18 -> scan_records<str, int, list[List[mutarray], mutarray, int]>
 ;   botlish_fn_19 / botlish_entry_19 -> csv_parse<str>
 
 
@@ -119,7 +119,7 @@ Disassembly of section .text:
       fd:	add    BYTE PTR [rax],al
 	...
 
-0000000000000100 <botlish_fn_2: chunked_append<list[list<never>, mutarray, int], str>>:
+0000000000000100 <botlish_fn_2: chunked_append<list[List[never], mutarray, int], str>>:
      100:	push   rbp
      101:	mov    rbp,rsp
      104:	sub    rsp,0x60
@@ -251,13 +251,13 @@ Disassembly of section .text:
      2f5:	add    BYTE PTR [rax],al
 	...
 
-00000000000002f8 <botlish_entry_2: chunked_append<list[list<never>, mutarray, int], str>>:
+00000000000002f8 <botlish_entry_2: chunked_append<list[List[never], mutarray, int], str>>:
      2f8:	push   rbp
      2f9:	mov    rbp,rsp
      2fc:	ud2
 	...
 
-0000000000000300 <botlish_fn_3: chunked_append<list[list<mutarray>, mutarray, int], str>>:
+0000000000000300 <botlish_fn_3: chunked_append<list[List[mutarray], mutarray, int], str>>:
      300:	push   rbp
      301:	mov    rbp,rsp
      304:	sub    rsp,0x60
@@ -389,13 +389,13 @@ Disassembly of section .text:
      4f5:	add    BYTE PTR [rax],al
 	...
 
-00000000000004f8 <botlish_entry_3: chunked_append<list[list<mutarray>, mutarray, int], str>>:
+00000000000004f8 <botlish_entry_3: chunked_append<list[List[mutarray], mutarray, int], str>>:
      4f8:	push   rbp
      4f9:	mov    rbp,rsp
      4fc:	ud2
 	...
 
-0000000000000500 <botlish_fn_4: chunked_append<list[list<never>, mutarray, int], list>>:
+0000000000000500 <botlish_fn_4: chunked_append<list[List[never], mutarray, int], list>>:
      500:	push   rbp
      501:	mov    rbp,rsp
      504:	sub    rsp,0x60
@@ -527,13 +527,13 @@ Disassembly of section .text:
      6f5:	add    BYTE PTR [rax],al
 	...
 
-00000000000006f8 <botlish_entry_4: chunked_append<list[list<never>, mutarray, int], list>>:
+00000000000006f8 <botlish_entry_4: chunked_append<list[List[never], mutarray, int], list>>:
      6f8:	push   rbp
      6f9:	mov    rbp,rsp
      6fc:	ud2
 	...
 
-0000000000000700 <botlish_fn_5: chunked_append<list[list<mutarray>, mutarray, int], list>>:
+0000000000000700 <botlish_fn_5: chunked_append<list[List[mutarray], mutarray, int], list>>:
      700:	push   rbp
      701:	mov    rbp,rsp
      704:	sub    rsp,0x60
@@ -665,13 +665,13 @@ Disassembly of section .text:
      8f5:	add    BYTE PTR [rax],al
 	...
 
-00000000000008f8 <botlish_entry_5: chunked_append<list[list<mutarray>, mutarray, int], list>>:
+00000000000008f8 <botlish_entry_5: chunked_append<list[List[mutarray], mutarray, int], list>>:
      8f8:	push   rbp
      8f9:	mov    rbp,rsp
      8fc:	ud2
 	...
 
-0000000000000900 <botlish_fn_6: chunked_copy_chunks<list<never>, int, mutarray, int>>:
+0000000000000900 <botlish_fn_6: chunked_copy_chunks<List[never], int, mutarray, int>>:
      900:	push   rbp
      901:	mov    rbp,rsp
      904:	sub    rsp,0x60
@@ -804,7 +804,7 @@ Disassembly of section .text:
      afd:	add    BYTE PTR [rax],al
 	...
 
-0000000000000b00 <botlish_entry_6: chunked_copy_chunks<list<never>, int, mutarray, int>>:
+0000000000000b00 <botlish_entry_6: chunked_copy_chunks<List[never], int, mutarray, int>>:
      b00:	push   rbp
      b01:	mov    rbp,rsp
      b04:	mov    rsi,QWORD PTR [rdx]
@@ -813,12 +813,12 @@ Disassembly of section .text:
      b0f:	mov    r8,QWORD PTR [rdx+0x18]
      b13:	mov    rdx,r9
      b16:	call   b1b <botlish_entry_6+0x1b>
-			b17: R_X86_64_PLT32	botlish_fn_6-0x4 ; chunked_copy_chunks<list<never>, int, mutarray, int>
+			b17: R_X86_64_PLT32	botlish_fn_6-0x4 ; chunked_copy_chunks<List[never], int, mutarray, int>
      b1b:	mov    rsp,rbp
      b1e:	pop    rbp
      b1f:	ret
 
-0000000000000b20 <botlish_fn_7: chunked_copy_chunks<list<mutarray>, int, mutarray, int>>:
+0000000000000b20 <botlish_fn_7: chunked_copy_chunks<List[mutarray], int, mutarray, int>>:
      b20:	push   rbp
      b21:	mov    rbp,rsp
      b24:	sub    rsp,0x60
@@ -939,7 +939,7 @@ Disassembly of section .text:
      cf5:	add    BYTE PTR [rax],al
 	...
 
-0000000000000cf8 <botlish_entry_7: chunked_copy_chunks<list<mutarray>, int, mutarray, int>>:
+0000000000000cf8 <botlish_entry_7: chunked_copy_chunks<List[mutarray], int, mutarray, int>>:
      cf8:	push   rbp
      cf9:	mov    rbp,rsp
      cfc:	mov    rsi,QWORD PTR [rdx]
@@ -948,12 +948,12 @@ Disassembly of section .text:
      d07:	mov    r8,QWORD PTR [rdx+0x18]
      d0b:	mov    rdx,r9
      d0e:	call   d13 <botlish_entry_7+0x1b>
-			d0f: R_X86_64_PLT32	botlish_fn_7-0x4 ; chunked_copy_chunks<list<mutarray>, int, mutarray, int>
+			d0f: R_X86_64_PLT32	botlish_fn_7-0x4 ; chunked_copy_chunks<List[mutarray], int, mutarray, int>
      d13:	mov    rsp,rbp
      d16:	pop    rbp
      d17:	ret
 
-0000000000000d18 <botlish_fn_8: chunked_finish<list[list<never>, mutarray, int]>>:
+0000000000000d18 <botlish_fn_8: chunked_finish<list[List[never], mutarray, int]>>:
      d18:	push   rbp
      d19:	mov    rbp,rsp
      d1c:	sub    rsp,0x70
@@ -1030,7 +1030,7 @@ Disassembly of section .text:
      e4a:	mov    rdi,r13
      e4d:	mov    rdx,r8
      e50:	call   e55 <botlish_fn_8+0x13d>
-			e51: R_X86_64_PLT32	botlish_fn_6-0x4 ; chunked_copy_chunks<list<never>, int, mutarray, int>
+			e51: R_X86_64_PLT32	botlish_fn_6-0x4 ; chunked_copy_chunks<List[never], int, mutarray, int>
      e55:	test   rax,rax
      e58:	mov    rdx,rax
      e5b:	je     e9c <botlish_fn_8+0x184>
@@ -1075,7 +1075,7 @@ Disassembly of section .text:
      eed:	add    BYTE PTR [rax],al
 	...
 
-0000000000000ef0 <botlish_entry_8: chunked_finish<list[list<never>, mutarray, int]>>:
+0000000000000ef0 <botlish_entry_8: chunked_finish<list[List[never], mutarray, int]>>:
      ef0:	push   rbp
      ef1:	mov    rbp,rsp
      ef4:	mov    rsi,QWORD PTR [rdx]
@@ -1083,14 +1083,14 @@ Disassembly of section .text:
      efb:	mov    rcx,QWORD PTR [rdx+0x10]
      eff:	mov    rdx,r8
      f02:	call   f07 <botlish_entry_8+0x17>
-			f03: R_X86_64_PLT32	botlish_fn_8-0x4 ; chunked_finish<list[list<never>, mutarray, int]>
+			f03: R_X86_64_PLT32	botlish_fn_8-0x4 ; chunked_finish<list[List[never], mutarray, int]>
      f07:	mov    rsp,rbp
      f0a:	pop    rbp
      f0b:	ret
      f0c:	add    BYTE PTR [rax],al
 	...
 
-0000000000000f10 <botlish_fn_9: chunked_finish<list[list<mutarray>, mutarray, int]>>:
+0000000000000f10 <botlish_fn_9: chunked_finish<list[List[mutarray], mutarray, int]>>:
      f10:	push   rbp
      f11:	mov    rbp,rsp
      f14:	sub    rsp,0x70
@@ -1167,7 +1167,7 @@ Disassembly of section .text:
     1042:	mov    rdi,r13
     1045:	mov    rdx,r8
     1048:	call   104d <botlish_fn_9+0x13d>
-			1049: R_X86_64_PLT32	botlish_fn_7-0x4 ; chunked_copy_chunks<list<mutarray>, int, mutarray, int>
+			1049: R_X86_64_PLT32	botlish_fn_7-0x4 ; chunked_copy_chunks<List[mutarray], int, mutarray, int>
     104d:	test   rax,rax
     1050:	mov    rdx,rax
     1053:	je     1094 <botlish_fn_9+0x184>
@@ -1212,7 +1212,7 @@ Disassembly of section .text:
     10e5:	add    BYTE PTR [rax],al
 	...
 
-00000000000010e8 <botlish_entry_9: chunked_finish<list[list<mutarray>, mutarray, int]>>:
+00000000000010e8 <botlish_entry_9: chunked_finish<list[List[mutarray], mutarray, int]>>:
     10e8:	push   rbp
     10e9:	mov    rbp,rsp
     10ec:	mov    rsi,QWORD PTR [rdx]
@@ -1220,7 +1220,7 @@ Disassembly of section .text:
     10f3:	mov    rcx,QWORD PTR [rdx+0x10]
     10f7:	mov    rdx,r8
     10fa:	call   10ff <botlish_entry_9+0x17>
-			10fb: R_X86_64_PLT32	botlish_fn_9-0x4 ; chunked_finish<list[list<mutarray>, mutarray, int]>
+			10fb: R_X86_64_PLT32	botlish_fn_9-0x4 ; chunked_finish<list[List[mutarray], mutarray, int]>
     10ff:	mov    rsp,rbp
     1102:	pop    rbp
     1103:	ret
@@ -1860,7 +1860,7 @@ Disassembly of section .text:
     1a36:	mov    rbp,rsp
     1a39:	ud2
 
-0000000000001a3b <botlish_fn_15: scan_record<str, int, list[list<never>, mutarray, int]>>:
+0000000000001a3b <botlish_fn_15: scan_record<str, int, list[List[never], mutarray, int]>>:
     1a3b:	push   rbp
     1a3c:	mov    rbp,rsp
     1a3f:	sub    rsp,0xa0
@@ -1896,7 +1896,7 @@ Disassembly of section .text:
     1ac9:	mov    rsi,QWORD PTR [rsp+0x50]
     1ace:	mov    rdi,r13
     1ad1:	call   1ad6 <botlish_fn_15+0x9b>
-			1ad2: R_X86_64_PLT32	botlish_fn_2-0x4 ; chunked_append<list[list<never>, mutarray, int], str>
+			1ad2: R_X86_64_PLT32	botlish_fn_2-0x4 ; chunked_append<list[List[never], mutarray, int], str>
     1ad6:	test   rax,rax
     1ad9:	je     1cdc <botlish_fn_15+0x2a1>
     1adf:	mov    QWORD PTR [rsp+0x8],rax
@@ -1943,7 +1943,7 @@ Disassembly of section .text:
     1b86:	mov    rsi,QWORD PTR [rsp+0x68]
     1b8b:	mov    rdi,r13
     1b8e:	call   1b93 <botlish_fn_15+0x158>
-			1b8f: R_X86_64_PLT32	botlish_fn_9-0x4 ; chunked_finish<list[list<mutarray>, mutarray, int]>
+			1b8f: R_X86_64_PLT32	botlish_fn_9-0x4 ; chunked_finish<list[List[mutarray], mutarray, int]>
     1b93:	test   rax,rax
     1b96:	je     1cdc <botlish_fn_15+0x2a1>
     1b9c:	mov    rdx,r14
@@ -1961,7 +1961,7 @@ Disassembly of section .text:
     1bd7:	mov    rsi,QWORD PTR [rsp+0x68]
     1bdc:	mov    rdi,r13
     1bdf:	call   1be4 <botlish_fn_15+0x1a9>
-			1be0: R_X86_64_PLT32	botlish_fn_9-0x4 ; chunked_finish<list[list<mutarray>, mutarray, int]>
+			1be0: R_X86_64_PLT32	botlish_fn_9-0x4 ; chunked_finish<list[List[mutarray], mutarray, int]>
     1be4:	test   rax,rax
     1be7:	je     1cdc <botlish_fn_15+0x2a1>
     1bed:	mov    QWORD PTR [rsp],rax
@@ -2018,7 +2018,7 @@ Disassembly of section .text:
     1cc4:	mov    r8,QWORD PTR [rsp+0x60]
     1cc9:	mov    r9,QWORD PTR [rsp+0x58]
     1cce:	call   1cd3 <botlish_fn_15+0x298>
-			1ccf: R_X86_64_PLT32	botlish_fn_16-0x4 ; scan_record<str, int, list[list<mutarray>, mutarray, int]>
+			1ccf: R_X86_64_PLT32	botlish_fn_16-0x4 ; scan_record<str, int, list[List[mutarray], mutarray, int]>
     1cd3:	test   rax,rax
     1cd6:	jne    1d10 <botlish_fn_15+0x2d5>
     1cdc:	xor    rdx,rdx
@@ -2042,12 +2042,12 @@ Disassembly of section .text:
     1d3c:	pop    rbp
     1d3d:	ret
 
-0000000000001d3e <botlish_entry_15: scan_record<str, int, list[list<never>, mutarray, int]>>:
+0000000000001d3e <botlish_entry_15: scan_record<str, int, list[List[never], mutarray, int]>>:
     1d3e:	push   rbp
     1d3f:	mov    rbp,rsp
     1d42:	ud2
 
-0000000000001d44 <botlish_fn_16: scan_record<str, int, list[list<mutarray>, mutarray, int]>>:
+0000000000001d44 <botlish_fn_16: scan_record<str, int, list[List[mutarray], mutarray, int]>>:
     1d44:	push   rbp
     1d45:	mov    rbp,rsp
     1d48:	sub    rsp,0xb0
@@ -2086,7 +2086,7 @@ Disassembly of section .text:
     1df1:	mov    rdi,QWORD PTR [rsp+0x50]
     1df6:	mov    r9,r15
     1df9:	call   1dfe <botlish_fn_16+0xba>
-			1dfa: R_X86_64_PLT32	botlish_fn_3-0x4 ; chunked_append<list[list<mutarray>, mutarray, int], str>
+			1dfa: R_X86_64_PLT32	botlish_fn_3-0x4 ; chunked_append<list[List[mutarray], mutarray, int], str>
     1dfe:	test   rax,rax
     1e01:	je     1f27 <botlish_fn_16+0x1e3>
     1e07:	mov    QWORD PTR [rsp+0x8],rax
@@ -2133,7 +2133,7 @@ Disassembly of section .text:
     1eb4:	mov    rsi,QWORD PTR [rsp+0x70]
     1eb9:	mov    rdi,QWORD PTR [rsp+0x50]
     1ebe:	call   1ec3 <botlish_fn_16+0x17f>
-			1ebf: R_X86_64_PLT32	botlish_fn_9-0x4 ; chunked_finish<list[list<mutarray>, mutarray, int]>
+			1ebf: R_X86_64_PLT32	botlish_fn_9-0x4 ; chunked_finish<list[List[mutarray], mutarray, int]>
     1ec3:	test   rax,rax
     1ec6:	je     1f27 <botlish_fn_16+0x1e3>
     1ecc:	mov    rdx,QWORD PTR [rsp+0x78]
@@ -2151,7 +2151,7 @@ Disassembly of section .text:
     1f0f:	mov    rsi,QWORD PTR [rsp+0x70]
     1f14:	mov    rdi,QWORD PTR [rsp+0x50]
     1f19:	call   1f1e <botlish_fn_16+0x1da>
-			1f1a: R_X86_64_PLT32	botlish_fn_9-0x4 ; chunked_finish<list[list<mutarray>, mutarray, int]>
+			1f1a: R_X86_64_PLT32	botlish_fn_9-0x4 ; chunked_finish<list[List[mutarray], mutarray, int]>
     1f1e:	test   rax,rax
     1f21:	jne    1f61 <botlish_fn_16+0x21d>
     1f27:	xor    rdx,rdx
@@ -2223,12 +2223,12 @@ Disassembly of section .text:
     2061:	mov    r13,rsi
     2064:	jmp    1db7 <botlish_fn_16+0x73>
 
-0000000000002069 <botlish_entry_16: scan_record<str, int, list[list<mutarray>, mutarray, int]>>:
+0000000000002069 <botlish_entry_16: scan_record<str, int, list[List[mutarray], mutarray, int]>>:
     2069:	push   rbp
     206a:	mov    rbp,rsp
     206d:	ud2
 
-000000000000206f <botlish_fn_17: scan_records<str, int, list[list<never>, mutarray, int]>>:
+000000000000206f <botlish_fn_17: scan_records<str, int, list[List[never], mutarray, int]>>:
     206f:	push   rbp
     2070:	mov    rbp,rsp
     2073:	sub    rsp,0xa0
@@ -2277,7 +2277,7 @@ Disassembly of section .text:
     213c:	mov    rsi,rbx
     213f:	mov    rdi,r12
     2142:	call   2147 <botlish_fn_17+0xd8>
-			2143: R_X86_64_PLT32	botlish_fn_15-0x4 ; scan_record<str, int, list[list<never>, mutarray, int]>
+			2143: R_X86_64_PLT32	botlish_fn_15-0x4 ; scan_record<str, int, list[List[never], mutarray, int]>
     2147:	test   rax,rax
     214a:	je     21fe <botlish_fn_17+0x18f>
     2150:	mov    QWORD PTR [rsp+0x8],rax
@@ -2290,7 +2290,7 @@ Disassembly of section .text:
     216d:	mov    rsi,r15
     2170:	mov    rdi,r12
     2173:	call   2178 <botlish_fn_17+0x109>
-			2174: R_X86_64_PLT32	botlish_fn_4-0x4 ; chunked_append<list[list<never>, mutarray, int], list>
+			2174: R_X86_64_PLT32	botlish_fn_4-0x4 ; chunked_append<list[List[never], mutarray, int], list>
     2178:	test   rax,rax
     217b:	je     21fe <botlish_fn_17+0x18f>
     2181:	mov    QWORD PTR [rsp+0x8],rax
@@ -2303,7 +2303,7 @@ Disassembly of section .text:
     21a2:	mov    rsi,rbx
     21a5:	mov    rdi,r12
     21a8:	call   21ad <botlish_fn_17+0x13e>
-			21a9: R_X86_64_PLT32	botlish_fn_18-0x4 ; scan_records<str, int, list[list<mutarray>, mutarray, int]>
+			21a9: R_X86_64_PLT32	botlish_fn_18-0x4 ; scan_records<str, int, list[List[mutarray], mutarray, int]>
     21ad:	test   rax,rax
     21b0:	je     21fe <botlish_fn_17+0x18f>
     21b6:	mov    rbx,QWORD PTR [rsp+0x70]
@@ -2320,7 +2320,7 @@ Disassembly of section .text:
     21ea:	mov    rsi,r15
     21ed:	mov    rdi,r12
     21f0:	call   21f5 <botlish_fn_17+0x186>
-			21f1: R_X86_64_PLT32	botlish_fn_8-0x4 ; chunked_finish<list[list<never>, mutarray, int]>
+			21f1: R_X86_64_PLT32	botlish_fn_8-0x4 ; chunked_finish<list[List[never], mutarray, int]>
     21f5:	test   rax,rax
     21f8:	jne    222f <botlish_fn_17+0x1c0>
     21fe:	xor    rax,rax
@@ -2343,7 +2343,7 @@ Disassembly of section .text:
     225b:	pop    rbp
     225c:	ret
 
-000000000000225d <botlish_entry_17: scan_records<str, int, list[list<never>, mutarray, int]>>:
+000000000000225d <botlish_entry_17: scan_records<str, int, list[List[never], mutarray, int]>>:
     225d:	push   rbp
     225e:	mov    rbp,rsp
     2261:	mov    rsi,QWORD PTR [rdx]
@@ -2353,7 +2353,7 @@ Disassembly of section .text:
     2270:	mov    r9,QWORD PTR [rdx+0x20]
     2274:	mov    rdx,r10
     2277:	call   227c <botlish_entry_17+0x1f>
-			2278: R_X86_64_PLT32	botlish_fn_17-0x4 ; scan_records<str, int, list[list<never>, mutarray, int]>
+			2278: R_X86_64_PLT32	botlish_fn_17-0x4 ; scan_records<str, int, list[List[never], mutarray, int]>
     227c:	mov    rsp,rbp
     227f:	pop    rbp
     2280:	ret
@@ -2362,7 +2362,7 @@ Disassembly of section .text:
     2285:	add    BYTE PTR [rax],al
 	...
 
-0000000000002288 <botlish_fn_18: scan_records<str, int, list[list<mutarray>, mutarray, int]>>:
+0000000000002288 <botlish_fn_18: scan_records<str, int, list[List[mutarray], mutarray, int]>>:
     2288:	push   rbp
     2289:	mov    rbp,rsp
     228c:	sub    rsp,0xb0
@@ -2426,7 +2426,7 @@ Disassembly of section .text:
     23a1:	mov    rsi,r12
     23a4:	mov    rdi,r15
     23a7:	call   23ac <botlish_fn_18+0x124>
-			23a8: R_X86_64_PLT32	botlish_fn_15-0x4 ; scan_record<str, int, list[list<never>, mutarray, int]>
+			23a8: R_X86_64_PLT32	botlish_fn_15-0x4 ; scan_record<str, int, list[List[never], mutarray, int]>
     23ac:	test   rax,rax
     23af:	je     2441 <botlish_fn_18+0x1b9>
     23b5:	mov    QWORD PTR [rsp+0x8],rax
@@ -2439,7 +2439,7 @@ Disassembly of section .text:
     23d4:	mov    rdi,r15
     23d7:	mov    r9,rbx
     23da:	call   23df <botlish_fn_18+0x157>
-			23db: R_X86_64_PLT32	botlish_fn_5-0x4 ; chunked_append<list[list<mutarray>, mutarray, int], list>
+			23db: R_X86_64_PLT32	botlish_fn_5-0x4 ; chunked_append<list[List[mutarray], mutarray, int], list>
     23df:	test   rax,rax
     23e2:	je     2441 <botlish_fn_18+0x1b9>
     23e8:	mov    rdx,QWORD PTR [rsp+0x50]
@@ -2459,7 +2459,7 @@ Disassembly of section .text:
     242b:	mov    rsi,QWORD PTR [rsp+0x60]
     2430:	mov    rdi,r15
     2433:	call   2438 <botlish_fn_18+0x1b0>
-			2434: R_X86_64_PLT32	botlish_fn_9-0x4 ; chunked_finish<list[list<mutarray>, mutarray, int]>
+			2434: R_X86_64_PLT32	botlish_fn_9-0x4 ; chunked_finish<list[List[mutarray], mutarray, int]>
     2438:	test   rax,rax
     243b:	jne    2478 <botlish_fn_18+0x1f0>
     2441:	xor    rax,rax
@@ -2489,7 +2489,7 @@ Disassembly of section .text:
     24b5:	add    BYTE PTR [rax],al
 	...
 
-00000000000024b8 <botlish_entry_18: scan_records<str, int, list[list<mutarray>, mutarray, int]>>:
+00000000000024b8 <botlish_entry_18: scan_records<str, int, list[List[mutarray], mutarray, int]>>:
     24b8:	push   rbp
     24b9:	mov    rbp,rsp
     24bc:	mov    rsi,QWORD PTR [rdx]
@@ -2499,7 +2499,7 @@ Disassembly of section .text:
     24cb:	mov    r9,QWORD PTR [rdx+0x20]
     24cf:	mov    rdx,r10
     24d2:	call   24d7 <botlish_entry_18+0x1f>
-			24d3: R_X86_64_PLT32	botlish_fn_18-0x4 ; scan_records<str, int, list[list<mutarray>, mutarray, int]>
+			24d3: R_X86_64_PLT32	botlish_fn_18-0x4 ; scan_records<str, int, list[List[mutarray], mutarray, int]>
     24d7:	mov    rsp,rbp
     24da:	pop    rbp
     24db:	ret
@@ -2533,7 +2533,7 @@ Disassembly of section .text:
     2553:	mov    rsi,r12
     2556:	mov    rdi,r13
     2559:	call   255e <botlish_fn_19+0x82>
-			255a: R_X86_64_PLT32	botlish_fn_17-0x4 ; scan_records<str, int, list[list<never>, mutarray, int]>
+			255a: R_X86_64_PLT32	botlish_fn_17-0x4 ; scan_records<str, int, list[List[never], mutarray, int]>
     255e:	test   rax,rax
     2561:	jne    257d <botlish_fn_19+0xa1>
     2567:	xor    rax,rax
