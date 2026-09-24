@@ -447,13 +447,21 @@ separately for the `listloop` construct on its own (independent of
 
 ## Tests
 
-- **`tests/loop-in.test`** (23 cases): the `loop x in EXPR:` construct on
+- **`tests/loop-in.test`** (31 cases): the `loop x in EXPR:` construct on
   its own — basic map shape and parity, empty List, one element,
   left-to-right order, `List[T]`/broad element typing, static result type
   (`List[R]`), the iterable evaluated exactly once (side-effect counting),
   `break`/`continue`/`return`/error composition (each with a four-backend
-  parity pin), nested loops, and the pre-existing lexical break/continue
-  boundary rules re-verified for `listloop`'s own scope kind.
+  parity pin), nested loops, the pre-existing lexical break/continue
+  boundary rules re-verified for `listloop`'s own scope kind, and (added by
+  the follow-up `LISTLOOP-BREAK-TYPE-SOUNDNESS.md` audit) 8 adversarial
+  soundness cases pinning that a reachable `break VALUE`/bare `break`
+  incompatible with a declared `List[R]` result is rejected at compile
+  time, that a compatible `break List[R]` payload verifies and returns the
+  payload (not the accumulated prefix) at runtime with four-backend parity,
+  that an undeclared incompatible case infers the conservative `any` rather
+  than a falsely-precise `List[R]`, and that a no-break listloop keeps its
+  exact `List[R]` typing.
 - **`tests/byte-set.test`** (21 cases): the full acceptance table (basic,
   empty, single, two forms of duplicate collapsing, the 0/255 boundaries,
   the 256/astral/mixed failures, the canonical four-character payload),
@@ -503,6 +511,17 @@ BOTLISH_NATIVE_GC_STRESS=1 tclsh9.0 tests/all.tcl
   a loop, on both the interp's own Tcl-list accumulator and the native
   backend's `listappend`-based one) or in the new native checked-domain
   range-check path.
+- **Update (`LISTLOOP-BREAK-TYPE-SOUNDNESS.md` follow-up audit):** 8
+  adversarial `listloop`/`break`-typing soundness tests were added to
+  `tests/loop-in.test` (23 → 31 cases) with no production code change (see
+  that report for the full account). Final counts after that addition:
+  `tclsh9.0 tests/all.tcl` **2016/2016 passing, 0 failed** on each backend
+  (69 test files, 0 skipped); `cargo test --release --manifest-path
+  native/Cargo.toml` **60/60 passing**, unchanged; `BOTLISH_NATIVE_GC_
+  STRESS=1 tclsh9.0 tests/all.tcl` **2016/2016 passing, 0 failed** on each
+  backend, run in isolation (an earlier run concurrent with the ordinary
+  suite produced two spurious, contention-caused failures in unrelated
+  exhaustive native-byte tests; re-run alone, both passed).
 - One pre-existing test's pinned expectation needed updating, unrelated to
   semantics: `refined-signature-cross-module-1`
   (`tests/refined-signatures.test`) asserts an exact `block(eN)` expr-id
