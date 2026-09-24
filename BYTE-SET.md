@@ -483,7 +483,35 @@ cargo test --release --manifest-path native/Cargo.toml
 BOTLISH_NATIVE_GC_STRESS=1 tclsh9.0 tests/all.tcl
 ```
 
-<!-- REGRESSION-COUNTS-PLACEHOLDER -->
+- `tclsh9.0 tests/all.tcl` (interp and compile backends, native backend
+  built with `cargo build --release --manifest-path native/Cargo.toml`):
+  **2008/2008 passing, 0 failed** on each backend (69 test files, 0
+  skipped) — 1962 pre-existing (baseline before this milestone) + 2 new
+  files (`tests/loop-in.test`, 23; `tests/byte-set.test`, 21) + 2
+  test-count changes in `tests/native-byte.test` (one pinned expectation
+  replaced by three new cases, net +2), including every pre-existing test
+  passing unmodified except the one documented pin update below.
+- `cargo test --release --manifest-path native/Cargo.toml`: **60/60
+  passing** — unchanged from the pre-milestone baseline (no Rust source
+  was touched by this milestone at all: the native checked-constructor fix
+  is composed entirely from existing NIR forms in `native/lower.tcl`, a
+  Tcl file).
+- `BOTLISH_NATIVE_GC_STRESS=1 tclsh9.0 tests/all.tcl`: **2008/2008
+  passing, 0 failed** on each backend — identical to the ordinary run,
+  confirming no rooting/allocation-behavior regression in the new
+  `listloop` accumulation path (`List`/`ImmutableSet` construction inside
+  a loop, on both the interp's own Tcl-list accumulator and the native
+  backend's `listappend`-based one) or in the new native checked-domain
+  range-check path.
+- One pre-existing test's pinned expectation needed updating, unrelated to
+  semantics: `refined-signature-cross-module-1`
+  (`tests/refined-signatures.test`) asserts an exact `block(eN)` expr-id
+  string from `lib/byte.bot`'s own resolved HIR; adding `byte::set` to the
+  end of that file shifted that id (`e2` -> `e7`) the same way any content
+  addition to a `.bot` file shifts later expr-id numbering. The asserted
+  type (`int[HighNibble]`) and range facts
+  (`[0, 240] {0,16,32,...,240}`) are byte-for-byte unchanged; only the id
+  offset was updated, with a comment explaining why.
 
 ## Deferred (unchanged scope)
 
