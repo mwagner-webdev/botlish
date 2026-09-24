@@ -10,8 +10,13 @@ whose `List[T] -> ImmutableSet[T]` relationship is expressed the same way
 `list`/`list_get`/`list_append`'s own element-typing already is (native
 `-result-shape` metadata `hir/types.tcl` already consulted in ordinary
 inference) -- no source-level generic function, no new inference machinery.
-`immutable_set_contains` is a second native: total membership, `Bool`,
-never an Error completion. Construction deduplicates by Botlish's existing
+`immutable_set_contains` is a second native returning `Bool`: absence is an
+ordinary `false`, not a failure, for any query value whose required
+equality comparisons are defined; if determining membership actually
+requires comparing against a runtime kind for which ordinary Botlish
+equality is undefined (Block/Native/MutableArray), the pre-existing
+`EQUALITY` failure propagates, exactly as it already does for `==`.
+Construction deduplicates by Botlish's existing
 generic value equality (`core::value::equal`/`rt_value_eq`); set equality
 (`==`) is independent of construction/insertion order. The reference
 representation is deliberately the simplest sound one: an ordinary
@@ -277,8 +282,9 @@ since dedup never needs to compare it against anything
 
 ## Membership semantics
 
-`immutable_set_contains(set, value)` is `Bool`, never an Error completion:
-absence is an ordinary `false`, not a failure (pinned:
+`immutable_set_contains(set, value)` returns `Bool` for any query whose
+required equality comparisons are defined: absence is an ordinary `false`,
+not a failure (pinned:
 `set-membership-absent`). A query value of a different *ordinary*
 comparable kind than the set's members simply never matches --
 `contains({'A','B'}, 65)` is `false`, not a `TYPE` error (`set-membership-
@@ -784,8 +790,13 @@ structural applied type with a distinct, immutable runtime value kind on
 every backend. A `List[T]` converts to `ImmutableSet[T]` through one
 generic builtin construction relationship, expressed as native metadata,
 never a source-level generic function. Construction deduplicates members by
-ordinary Botlish value equality. Membership is an ordinary total `Bool`
-query for a valid set. Set equality is independent of insertion/
+ordinary Botlish value equality. Membership returns an ordinary `Bool` for
+any query whose required equality comparisons are defined over a valid
+set; it is not unconditionally total, since ordinary Botlish equality
+itself is undefined for some runtime kinds (Block/Native/MutableArray),
+and a membership query that actually requires comparing against one of
+those propagates the pre-existing `EQUALITY` failure instead of returning
+`Bool`. Set equality is independent of insertion/
 construction order. The first runtime representation is deliberately
 simple (an O(n^2) deduplicated vector) and commits to no hashing, bitset,
 or compile-time lookup lowering. Typed parameters/results/HIR/module

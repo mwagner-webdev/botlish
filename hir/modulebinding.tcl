@@ -167,7 +167,7 @@ proc hir::modulebinding::ImmutableExpr {hir e factsVar activeVar} {
     switch -- [dict get $node kind] {
         const {
             set kind [core::value::kind [dict get $node value]]
-            if {$kind in {int str bool unit}} {
+            if {$kind in {int str bool unit UnicodeChar}} {
                 return [list ok [list scalar $kind]]
             }
             return [list bad unknown "literal value kind $kind"]

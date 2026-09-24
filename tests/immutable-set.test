@@ -608,13 +608,82 @@ fn contains_one():
     }
 } -result {1 1 {[true, true]}}
 
-# The precursor payload chars = ['-', '.', '_', '~'] cannot yet be a module-
-# retained value: UnicodeChar literals are not part of hir::modulebinding's
-# existing const-literal proof (its `const` case only accepts int/str/bool/
-# unit -- a pre-existing gap from the UnicodeChar milestone, unrelated to
-# and out of scope for this one). Pinned here so a future fix is visible as
-# an intentional change to this expectation, not a silent regression.
-test set-module-retained-value-unicodechar-limitation {a module-scope List[UnicodeChar] literal (and therefore any ImmutableSet[UnicodeChar] built from it) is not yet a retainable module value -- a documented pre-existing limitation} -body {
+# UNICODECHAR-MODULE-RETENTION.md: UnicodeChar literals now participate in
+# hir::modulebinding's const-literal proof exactly like int/str/bool/unit,
+# closing the gap the UnicodeChar milestone left behind. The three payloads
+# below are this closure's required direct/List/ImmutableSet retention
+# checks (spec items 24-26); this replaces the old
+# set-module-retained-value-unicodechar-limitation fixture, which pinned the
+# now-fixed gap as an intentional, expected-to-change limitation.
+
+test set-module-retained-value-unicodechar-direct {a module-scope UnicodeChar literal binding is retained -- dash = '-' -- exactly like the int/str/bool/unit case} -body {
+    set dir [tcltest::makeDirectory set-retained-char-direct-scratch]
+    set saved $::core::libraryDir
+    set ::core::libraryDir $dir
+    try {
+        set mpath [file join $dir constants.bot]
+        set ch [open $mpath w]
+        fconfigure $ch -encoding utf-8
+        puts -nonewline $ch {namespace constants
+dash = '-'
+fn get_dash() -> UnicodeChar:
+    dash
+}
+        close $ch
+        set mainpath [file join $dir main.bot]
+        set ch [open $mainpath w]
+        fconfigure $ch -encoding utf-8
+        puts -nonewline $ch {constants::get_dash()
+}
+        close $ch
+        set hir [surface::readProgramFile $mainpath]
+        list [llength [hir::diagnostics $hir]] \
+            [core::value::show [core::evalProgram [hir::lower $hir]]]
+    } finally {
+        set ::core::libraryDir $saved
+        tcltest::removeDirectory [file tail $dir]
+    }
+} -result {0 '-'}
+
+test set-module-retained-value-unicodechar-list {a module-scope List[UnicodeChar] literal is retained (built once at startup), matching ordinary List retention} -body {
+    set dir [tcltest::makeDirectory set-retained-char-list-scratch]
+    set saved $::core::libraryDir
+    set ::core::libraryDir $dir
+    try {
+        set mpath [file join $dir constants.bot]
+        set ch [open $mpath w]
+        fconfigure $ch -encoding utf-8
+        puts -nonewline $ch {namespace constants
+chars = ['-', '.', '_', '~']
+fn first() -> UnicodeChar:
+    list_get(chars, 0)
+}
+        close $ch
+        set mainpath [file join $dir main.bot]
+        set ch [open $mainpath w]
+        fconfigure $ch -encoding utf-8
+        puts -nonewline $ch {constants::first()
+}
+        close $ch
+        set hir [surface::readProgramFile $mainpath]
+        set nir [dict get [native::lower::program $hir -repr-opt 0] text]
+        set report [native::allocationReport $hir sites]
+        set moduleLists 0
+        foreach site [dict get $report sites] {
+            if {[dict get $site operation] eq "listnew"
+                    && [dict get [dict get $site location] file] eq $mpath} {
+                incr moduleLists [dict get $site allocations]
+            }
+        }
+        list [regexp -all {op listnew} $nir] $moduleLists \
+            [core::value::show [core::evalProgram [hir::lower $hir]]]
+    } finally {
+        set ::core::libraryDir $saved
+        tcltest::removeDirectory [file tail $dir]
+    }
+} -result {1 1 '-'}
+
+test set-module-retained-value-unicodechar {a module-scope ImmutableSet[UnicodeChar] binding (the byte::set precursor shape) is retained -- built once at startup, not reconstructed per call} -body {
     set dir [tcltest::makeDirectory set-retained-char-scratch]
     set saved $::core::libraryDir
     set ::core::libraryDir $dir
@@ -624,21 +693,33 @@ test set-module-retained-value-unicodechar-limitation {a module-scope List[Unico
         fconfigure $ch -encoding utf-8
         puts -nonewline $ch {namespace constants
 chars = immutable_set_from_list(['-', '.', '_', '~'])
+fn has_dash() -> bool:
+    immutable_set_contains(chars, '-')
 }
         close $ch
         set mainpath [file join $dir main.bot]
         set ch [open $mainpath w]
         fconfigure $ch -encoding utf-8
-        puts -nonewline $ch {constants::chars
+        puts -nonewline $ch {[constants::has_dash(), constants::has_dash()]
 }
         close $ch
-        catch {surface::readProgramFile $mainpath} message options
-        list [dict get $options -errorcode] [string match {*literal value kind UnicodeChar*} $message]
+        set hir [surface::readProgramFile $mainpath]
+        set nir [dict get [native::lower::program $hir -repr-opt 0] text]
+        set report [native::allocationReport $hir sites]
+        set moduleSets 0
+        foreach site [dict get $report sites] {
+            if {[dict get $site operation] eq "setfromlist"
+                    && [dict get [dict get $site location] file] eq $mpath} {
+                incr moduleSets [dict get $site allocations]
+            }
+        }
+        list [regexp -all {op setfromlist} $nir] $moduleSets \
+            [core::value::show [core::evalProgram [hir::lower $hir]]]
     } finally {
         set ::core::libraryDir $saved
         tcltest::removeDirectory [file tail $dir]
     }
-} -result {{CORE SEMANTIC MODULE-IMMUTABLE} 1}
+} -result {1 1 {[true, true]}}
 
 # ---------------------------------------------------------------------------
 # Source-type isolation across repeated/sequential compilation (spec 84)
