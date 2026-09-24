@@ -43,7 +43,18 @@ namespace eval core::type {
     # spelled exactly as the runtime kind tag (core::value.tcl), so no
     # alias/translation layer is needed anywhere a plain primitive name is
     # accepted (hir::types::resolveNamed, hir::read::ParseType, ...).
-    variable primitives {int str bool unit list result block native mutarray UnicodeChar}
+    #
+    # immutableSet is the broad ImmutableSet runtime kind (MINIMAL-IMMUTABLE-
+    # SET.md), spelled the same way "list" is spelled for List: the applied,
+    # source-spellable constructor name is capitalized ("ImmutableSet",
+    # hir::types::constructors) and distinct from this bare primitive name,
+    # exactly mirroring the List/"list" split -- so this string is also the
+    # HIR structural applied-type tag ({immutableSet ELEM}, hir/types.tcl)
+    # and every native's -param-types spelling of "a value of set kind",
+    # which is what keeps hir::types::narrow's fact-preserving check
+    # (`fact eq [kindOf $current]`) correct for a precise ImmutableSet[T]
+    # argument the same way it already is for List[T].
+    variable primitives {int str bool unit list result block native mutarray UnicodeChar immutableSet}
     # Kinds whose runtime representation can carry evidence (see value.tcl).
     variable evidenceKinds {str}
     # NAME -> {name NAME base KIND validator CMD opaque 0|1}

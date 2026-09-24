@@ -156,6 +156,7 @@ proc hir::modulebinding::ContextBlock {hir block stateVar} {
 # Proof values:
 #   {scalar KIND}
 #   {list ITEM-PROOFS}
+#   {set ITEM-PROOFS}
 #   {block EXPR CAPTURE-PROOFS}
 #
 # A plain List type alone is deliberately not enough: its items could be
@@ -324,6 +325,21 @@ proc hir::modulebinding::ImmutableNative {hir symbol proofs} {
                 return {bad unknown "list_append source List is not structurally known"}
             }
             return [list ok [list list [concat [lindex $sourceProof 1] [lindex $proofs 1]]]]
+        }
+        immutable_set_from_list {
+            # MINIMAL-IMMUTABLE-SET.md item 36: the same structural-proof
+            # pattern list_append uses above -- immutable_set_from_list's
+            # source List must itself be structurally known (built from
+            # `list`/`list_append`, not e.g. a mutable-array freeze whose
+            # proof this pass cannot see through) for the resulting
+            # ImmutableSet to be a retainable module value. Construction's
+            # own dedup is a runtime detail, not part of this static proof:
+            # the element proofs it retains are the source List's, verbatim.
+            set sourceProof [lindex $proofs 0]
+            if {[lindex $sourceProof 0] ne "list"} {
+                return {bad unknown "immutable_set_from_list source List is not structurally known"}
+            }
+            return [list ok [list set [lindex $sourceProof 1]]]
         }
     }
     set kind [core::type::base [dict get $meta resultType]]

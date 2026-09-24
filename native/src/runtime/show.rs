@@ -57,6 +57,19 @@ fn show_into(v: Value, out: &mut String) {
             }
             out.push(']');
         }
+        Kind::ImmutableSet => {
+            // Matches core::value::show's ImmutableSet rendering exactly
+            // (core/value.tcl): braces, punctuation only -- no semantic
+            // ordering is implied (MINIMAL-IMMUTABLE-SET.md item 87).
+            out.push('{');
+            for (i, item) in set_of(v).items().iter().enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                show_into(*item, out);
+            }
+            out.push('}');
+        }
         Kind::Result => {
             let r = result_of(v);
             out.push_str(if r.ok { "ok(" } else { "error(" });
@@ -101,6 +114,12 @@ pub fn tcl_value(v: Value) -> Result<String, RtError> {
         Kind::List => {
             let items = list_of(v).items().iter().map(|item| tcl_value(*item)).collect::<Result<Vec<_>, _>>()?;
             tcl_list(&["list".to_string(), tcl_list(&items)])
+        }
+        Kind::ImmutableSet => {
+            // Matches core::value::immutableSet's own representation
+            // exactly ({immutableSet ITEMS}, core/value.tcl).
+            let items = set_of(v).items().iter().map(|item| tcl_value(*item)).collect::<Result<Vec<_>, _>>()?;
+            tcl_list(&["immutableSet".to_string(), tcl_list(&items)])
         }
         Kind::Result => {
             let r = result_of(v);

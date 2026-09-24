@@ -43,6 +43,15 @@ pub enum OpCode {
     ListLen,
     ListGet,
     ListAppend,
+    /// List -> ImmutableSet, deduplicating by VEq's own rule (MINIMAL-
+    /// IMMUTABLE-SET.md's `immutable_set_from_list`): O(n^2), the
+    /// deliberately simple first representation -- no inline fast path
+    /// (item 64), always a helper call (ops.rs's `rt_set_from_list`).
+    SetFromList,
+    /// Total membership on an ImmutableSet operand (`immutable_set_contains`):
+    /// false for an absent value, never an Error completion. Always a
+    /// helper call (`rt_set_contains`), like SetFromList.
+    SetContains,
     MutArrayAllocate,
     MutArrayCapacity,
     MutArrayGet,
@@ -183,6 +192,8 @@ impl OpCode {
             "listlen" => ListLen,
             "listget" => ListGet,
             "listappend" => ListAppend,
+            "setfromlist" => SetFromList,
+            "setcontains" => SetContains,
             "mutarrayallocate" => MutArrayAllocate,
             "mutarraycapacity" => MutArrayCapacity,
             "mutarrayget" => MutArrayGet,
@@ -232,7 +243,7 @@ impl OpCode {
             ListNew => None,
             StrLen | StrLower | ListLen | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList
             | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | Hash | RBox | RUnbox
-            | StrByteLen | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum | CharCodepoint => Some(1),
+            | StrByteLen | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum | CharCodepoint | SetFromList => Some(1),
             Substr | MutArraySet | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum => Some(3),
             RegionEq => Some(4),
             MutArrayCopy => Some(5),

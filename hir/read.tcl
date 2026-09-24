@@ -274,6 +274,13 @@ proc hir::read::ParseType {text number} {
         # closes with.
         return [list list [ParseType $inner $number]]
     }
+    if {[regexp {^ImmutableSet\[(.+)\]$} $text -> inner]} {
+        # The same applied-type notation, for ImmutableSet[T] (MINIMAL-
+        # IMMUTABLE-SET.md) -- distinguished from List[T] above only by the
+        # literal head word, which can never collide since "List" and
+        # "ImmutableSet" are different constructor names.
+        return [list immutableSet [ParseType $inner $number]]
+    }
     if {[regexp {^([a-z]+)\[([^\]]*)\]$} $text -> base names]} {
         set text [list refined $base [split $names ,]]
     }

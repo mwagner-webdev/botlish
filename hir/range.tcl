@@ -959,8 +959,24 @@ proc hir::range::ProvesType {range type} {
 # items 24-26, 70), chosen because List's own mutability/aliasing
 # semantics have not been audited for anything more permissive, not
 # because it was hard to make covariant.
+#
+# An applied ImmutableSet[T] DECLARED (hir::types::IsSet) takes the
+# identical path, for the identical reason (MINIMAL-IMMUTABLE-SET.md):
+# ImmutableSet[A] accepts only ImmutableSet[A], never ImmutableSet[B]
+# merely because A<:B or because A and B are same-domain siblings, and
+# never a broad/unknown set or a non-set value -- invariant from the
+# start, even though the set itself is immutable, because immutability
+# alone does not license covariance without a variance system this
+# milestone deliberately does not build.
 proc hir::range::ProvesValueAcceptedBy {argType argRange declared} {
-    if {[hir::types::IsList $declared]} {
+    if {[hir::types::IsList $declared] || [hir::types::IsSet $declared]} {
+        # ImmutableSet[T] (MINIMAL-IMMUTABLE-SET.md) is exactly as invariant
+        # as List[T], for the identical reason: a set's own mutability/
+        # aliasing semantics (here, immutable -- but no variance system
+        # exists to make that fact usable) have not been audited for
+        # anything more permissive than exact structural equality of the
+        # already-Unshaped (a no-op for a set, which never has a shape)
+        # applied type.
         return [expr {[hir::types::Unshaped $argType] eq $declared}]
     }
     return [expr {[hir::types::subtype $argType $declared] || [ProvesType $argRange $declared]}]

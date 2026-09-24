@@ -72,6 +72,8 @@
 #                                     index given by Int argument I
 #                     append L V      a list of list argument L's elements
 #                                     followed by argument V
+#                     immutable-set L an ImmutableSet of list argument L's
+#                                     element type (MINIMAL-IMMUTABLE-SET.md)
 #   resultRange     "" (nothing known) or a fact about every Int result, for
 #                   hir/range.tcl's representation analysis. Pure metadata,
 #                   like runtime and resultShape: a guarantee the
@@ -119,8 +121,9 @@ namespace eval core::native {
     #                        structural-equality does (core/hashing.tcl) --
     #                        bootstrap native, candidate for stdlib
     #                        replacement: see core/hashing.tcl's header
+    #   set-alloc            allocates a new ImmutableSet (core/immutableset.tcl)
     variable runtimeTags {bigint string-alloc list-alloc result-alloc char-index
-        range-check structural-equality evidence mutarray-alloc mutarray-mutate hash}
+        range-check structural-equality evidence mutarray-alloc mutarray-mutate hash set-alloc}
 }
 
 proc core::native::register {name args} {
@@ -258,6 +261,7 @@ proc core::native::ValidShape {shape count} {
         ""       { return [expr {$length == 0}] }
         elements { return [expr {$length == 1}] }
         element - append { return [expr {$length == 3 && $count ne ""}] }
+        immutable-set { return [expr {$length == 2}] }
     }
     return 0
 }

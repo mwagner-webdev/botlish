@@ -52,7 +52,9 @@
 #     never a value to persist or compare across program versions
 #
 # Supported key domain: int, str, bool, unit, list (of hashable values),
-# result (of a hashable payload) -- exactly core::value::equal's domain.
+# result (of a hashable payload), UnicodeChar, immutableSet (of hashable
+# members, combined order-independently to match core::value::equal's own
+# order-independent set equality) -- exactly core::value::equal's domain.
 # Like ==, hash is undefined for block/native/mutarray (EQUALITY error):
 # see core::value::equal's header. The hash-table milestone's realistic
 # benchmarked domain is narrower still (String keys, matching the upcoming
@@ -73,7 +75,7 @@ namespace eval core::hashing {
     variable Mask61    0x1FFFFFFFFFFFFFFF
     # Kind tags mixed in before each value's payload, so e.g. int 1 and str
     # "1" never hash the same by coincidence of byte content.
-    variable KindTag [dict create int 0 str 1 bool 2 unit 3 list 4 result 5 UnicodeChar 6]
+    variable KindTag [dict create int 0 str 1 bool 2 unit 3 list 4 result 5 UnicodeChar 6 immutableSet 7]
 }
 
 # H folded over one more byte (0..255), wrapped to 64 bits.
@@ -160,6 +162,25 @@ proc core::hashing::Mix {h v} {
             variable FnvOffset
             set sub [Mix $FnvOffset [core::value::resultPayload $v]]
             return [Bytes $h [LeBytes $sub]]
+        }
+        immutableSet {
+            # Order-independent (XOR-combined member sub-hashes), matching
+            # core::value::equal's own order-independent set equality: two
+            # equal sets must hash equal regardless of construction order.
+            # No ImmutableSet-specific hashing *API* is added (MINIMAL-
+            # IMMUTABLE-SET.md item 92) -- this only keeps the existing,
+            # pre-existing generic `hash` native (core::value::equal's own
+            # "hash consistent with equal" contract, this file's header)
+            # total for the new kind instead of silently mishandling it.
+            set items [core::value::immutableSetItems $v]
+            set h [Bytes $h [LeBytes [llength $items]]]
+            set combined 0
+            foreach item $items {
+                variable FnvOffset
+                variable Mask64
+                set combined [expr {($combined ^ [Mix $FnvOffset $item]) & $Mask64}]
+            }
+            return [Bytes $h [LeBytes $combined]]
         }
     }
 }

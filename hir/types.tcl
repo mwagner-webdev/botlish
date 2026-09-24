@@ -15,12 +15,17 @@
 #                                   type ELEM ({list never}: the empty list)
 #   {list ELEM {P0 P1 ...}}         a list of exactly n elements, element i
 #                                   of static type Pi; ELEM is their lub
+#   {immutableSet ELEM}             an ImmutableSet (MINIMAL-IMMUTABLE-SET.
+#                                   md) whose every member has static type
+#                                   ELEM; structurally parallel to {list
+#                                   ELEM}, but never has a positional shape
+#                                   (a set is semantically unordered)
 #
-# The list forms are *aggregate facts*. Semantic inference (infer) never
-# produces them: a program's HIR types stay what they were. Only
-# specialization inference (inferRegion, used by hir/specialize.tcl) tracks
-# what lists contain. They are bounded (see MakeList), so analyses over them
-# terminate.
+# The list and immutableSet forms are *aggregate facts*. Semantic inference
+# (infer) never produces a *shaped* (positional) one: a program's HIR types
+# stay what they were. Only specialization inference (inferRegion, used by
+# hir/specialize.tcl) tracks a List's positional shape. Both forms are
+# bounded (see MakeList/MakeSet), so analyses over them terminate.
 #
 # These are semantic facts, not representation: nothing here says how a
 # backend stores a value. The procedures handle the extra forms and delegate
@@ -42,12 +47,13 @@ namespace eval hir::types {
     # Registered *type constructors* (MINIMAL-APPLIED-LIST-TYPES.md): NAME
     # -> arity. A source type annotation "NAME[ARG]" (surface::parser::
     # TypeExpr) is resolved generically against this table (resolveNamed/
-    # resolveApplication below), not by special-casing "List" in the
-    # parser or in hir::resolve.tcl. List is the only constructor this
-    # milestone registers; a future ImmutableSet[T] needs only another
-    # entry here (plus a case in resolveApplication), never a grammar or
-    # representation change.
-    variable constructors [dict create List 1]
+    # resolveApplication below), not by special-casing a constructor's name
+    # in the parser or in hir::resolve.tcl. ImmutableSet (MINIMAL-IMMUTABLE-
+    # SET.md) is this registry's second entry, added with no grammar or
+    # resolution-mechanism change -- confirming the List[T] milestone's own
+    # claim that a future unary container needs only another entry here
+    # (plus a case in resolveApplication/MakeSet below), never new syntax.
+    variable constructors [dict create List 1 ImmutableSet 1]
 }
 
 # The canonical resolved type for a bare (unapplied) type name NAME -- an
@@ -90,17 +96,24 @@ proc hir::types::resolveApplication {ctor argTypes} {
     }
     switch -- $ctor {
         List { return [MakeList [lindex $argTypes 0] {} 0 0] }
+        ImmutableSet { return [MakeSet [lindex $argTypes 0] 0] }
     }
 }
 
 proc hir::types::IsSpecific {type} {
     return [expr {$type eq "never"
-                  || ([llength $type] > 1 && [lindex $type 0] in {native block list})}]
+                  || ([llength $type] > 1 && [lindex $type 0] in {native block list immutableSet})}]
 }
 
 # 1 if TYPE is a list form ({list ELEM} or {list ELEM SHAPE}).
 proc hir::types::IsList {type} {
     return [expr {[lindex $type 0] eq "list" && [llength $type] in {2 3}}]
+}
+
+# 1 if TYPE is a set form ({immutableSet ELEM}). Never a 3-element shaped
+# form: a set has no positional shape (MINIMAL-IMMUTABLE-SET.md item 39).
+proc hir::types::IsSet {type} {
+    return [expr {[lindex $type 0] eq "immutableSet" && [llength $type] == 2}]
 }
 
 # TYPE in canonical form (core types are normalized by core::type).
@@ -144,6 +157,23 @@ proc hir::types::MakeList {elem {positions {}} {shaped 0} {depth 0}} {
     return [list list $elem]
 }
 
+# The canonical set form of an ImmutableSet whose members have type ELEM,
+# nested DEPTH list/set forms deep. No positional shape exists for a set
+# (item 39): this is MakeList's own element-typing half, without the
+# shaped/positions machinery that exists only for List's own heterogeneous-
+# element tracking.
+proc hir::types::MakeSet {elem depth} {
+    variable aggregateDepth
+    if {$depth >= $aggregateDepth} {
+        return immutableSet
+    }
+    set elem [Unshaped [Bound $elem [expr {$depth + 1}]]]
+    if {$elem eq "any"} {
+        return immutableSet
+    }
+    return [list immutableSet $elem]
+}
+
 # TYPE with the aggregate bounds applied, nested DEPTH list forms deep.
 proc hir::types::Bound {type depth} {
     variable aggregateDepth
@@ -152,6 +182,9 @@ proc hir::types::Bound {type depth} {
             return [MakeList [lindex $type 1] [lindex $type 2] 1 $depth]
         }
         return [MakeList [lindex $type 1] {} 0 $depth]
+    }
+    if {[IsSet $type]} {
+        return [MakeSet [lindex $type 1] $depth]
     }
     if {[lindex $type 0] eq "block" && [llength $type] == 4} {
         set result [expr {$depth >= $aggregateDepth ? "any" : [Bound [lindex $type 3] [expr {$depth + 1}]]}]
@@ -231,6 +264,15 @@ proc hir::types::lub {a b} {
             return [MakeList $elem [lmap pa $sa pb $sb {lub $pa $pb}] 1]
         }
         return [MakeList $elem]
+    }
+    if {[IsSet $a] && [IsSet $b]} {
+        # Unlike List's own (specialization-motivated) covariant element-lub
+        # above, two differently-elemented ImmutableSets widen straight to
+        # the broad kind, never to ImmutableSet[lub(A,B)] (item 38): the
+        # $a eq $b case above already returns the identical set type when
+        # both branches agree, and this milestone deliberately does not
+        # invent element-lub for sets merely because List has one.
+        return immutableSet
     }
     if {[IsSpecific $a] || [IsSpecific $b]} {
         set kind [kindOf $a]
@@ -313,6 +355,13 @@ proc hir::types::show {type} {
                 # spells, so a diagnostic quoting this text is directly
                 # source-legible.
                 return "List\[[show [lindex $type 1]]\]"
+            }
+            immutableSet {
+                # Same convention as List[T] above: the canonical applied-
+                # type notation, matching what a declared ImmutableSet[T]
+                # annotation spells (a set form is always 2-element -- it
+                # never has a positional shape to special-case).
+                return "ImmutableSet\[[show [lindex $type 1]]\]"
             }
         }
     }
@@ -466,6 +515,24 @@ proc hir::types::ShapeResult {hir shape argExprs argTypes result} {
                 return [MakeList [lub [lindex $list 1] [lindex $argTypes $v]]]
             }
             return $result
+        }
+        immutable-set {
+            # List[T] -> ImmutableSet[T] (MINIMAL-IMMUTABLE-SET.md item 24):
+            # immutable_set_from_list's own -result-shape. Generic over T
+            # exactly the way `element`/`append` above are generic over a
+            # List's own element type -- no ImmutableSet-specific inference
+            # code beyond this one shape case, reusing the same elementOf
+            # this proc's List cases already use.
+            lassign $shape _ l
+            set elem [elementOf [lindex $argTypes $l]]
+            if {$elem eq ""} {
+                # The argument's own type carries no element information
+                # (a broad/heterogeneous List, or a non-List static type):
+                # the broad ImmutableSet kind, never a false precise one
+                # (item 27).
+                return $result
+            }
+            return [MakeSet $elem 0]
         }
     }
     return $result

@@ -103,6 +103,7 @@ impl Heap {
             header.marked = 1;
             match header.kind {
                 KIND_LIST => stack.extend_from_slice(list_of(v).items()),
+                KIND_SET => stack.extend_from_slice(set_of(v).items()),
                 // Every slot is traced, initialized or not: allocation fills
                 // unused capacity with UNIT (Vm::new_mutarray), never
                 // uninitialized memory, so there is nothing here that could
@@ -202,6 +203,7 @@ pub unsafe fn object_size(object: *mut Header) -> usize {
             KIND_BIGINT => size_of::<BigIntObj>() + (as_ref::<BigIntObj>(v).n.bits() as usize / 8),
             KIND_STR => size_of::<StrObj>() + str_of(v).text.len(),
             KIND_LIST => size_of::<ListObj>() + list_of(v).len * 8,
+            KIND_SET => size_of::<SetObj>() + set_of(v).len * 8,
             KIND_MUTARRAY => size_of::<MutArrayObj>() + mutarray_of(v).slots.len() * 8,
             KIND_RESULT => size_of::<ResultObj>(),
             KIND_CLOSURE => size_of::<ClosureObj>() + closure_of(v).ncaps * 8,
@@ -221,6 +223,10 @@ pub unsafe fn free_object(object: *mut Header) {
             KIND_LIST => {
                 let l = Box::from_raw(object as *mut ListObj);
                 drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(l.ptr, l.len)));
+            }
+            KIND_SET => {
+                let s = Box::from_raw(object as *mut SetObj);
+                drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(s.ptr, s.len)));
             }
             KIND_RESULT => drop(Box::from_raw(object as *mut ResultObj)),
             KIND_CLOSURE => {

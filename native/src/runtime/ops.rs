@@ -37,6 +37,8 @@
 //! | rt_list_len            | List                | Int                          | no        |
 //! | rt_list_get            | List, Int           | element; RANGE               | no        |
 //! | rt_list_append         | List, any           | new List (copy)              | yes       |
+//! | rt_set_from_list       | List                | ImmutableSet; EQUALITY       | yes       |
+//! | rt_set_contains        | ImmutableSet, any   | Bool; EQUALITY               | no        |
 //! | rt_mutarray_allocate   | count                | MutableArray (slots = UNIT)  | yes       |
 //! | rt_mutarray_capacity   | MutableArray         | Int                          | no        |
 //! | rt_mutarray_get        | MutableArray, Int    | element; RANGE               | no        |
@@ -81,6 +83,7 @@ pub fn op_may_allocate(op: OpCode) -> bool {
         op,
         IAdd | ISub | IMul | IAnd | IOr | IXor | IShl | IShr | Substr | DecodeCharAt | StrLower | StrCat
             | StrUtf8Bytes | ListNew | ListAppend | MutArrayAllocate | MutArrayFreeze | MkOk | MkError
+            | SetFromList
     )
 }
 
@@ -89,7 +92,15 @@ pub fn op_may_error(op: OpCode) -> bool {
     use OpCode::*;
     matches!(op, IMod | IShl | IShr | VEq | Hash | Substr | StrCat | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum
         | ListNew | ListGet | ListAppend | MutArrayAllocate | MutArrayGet | MutArraySet | MutArrayCopy | MutArrayFreeze
-        | ResultValue | ResultError | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum)
+        | ResultValue | ResultError | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum
+        // Construction (dedup) and membership (a linear equal-scan) can
+        // both raise EQUALITY through the same pre-existing
+        // core::value::equal restriction (Block/Native/MutArray have no
+        // structural equality) -- never a new failure mode this milestone
+        // invents: see rt_set_from_list's and rt_set_contains's own doc
+        // comments, and MINIMAL-IMMUTABLE-SET.md's "Deduplication
+        // semantics"/"Membership semantics".
+        | SetFromList | SetContains)
 }
 
 pub type GenericEntry = extern "C" fn(*mut Vm, Value, *const Value) -> Value;
@@ -271,6 +282,7 @@ fn equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
         return Ok(false);
     }
     Ok(match ka {
+        Kind::ImmutableSet => set_equal(p, a, b)?,
         Kind::Int => a == b || (!is_small(a) && !is_small(b) && int_compare(a, b) == Ordering::Equal),
         Kind::Str => str_of(a).text == str_of(b).text,
         Kind::Bool => a == b,
@@ -296,6 +308,33 @@ fn equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
         }
         Kind::Block | Kind::Native | Kind::MutArray => unreachable!(),
     })
+}
+
+/// Set equality, independent of construction/insertion order (MINIMAL-
+/// IMMUTABLE-SET.md item 16, matching core::value::equal's own Tcl-side
+/// implementation exactly): both operands are already deduplicated by
+/// construction, so equal cardinality plus "every member of A has an equal
+/// member in B" is exactly set equality. O(n^2), the same complexity as
+/// construction/membership -- the simple representation's deliberate cost
+/// (see this module's own doc comment for `rt_set_from_list`).
+fn set_equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
+    let (xs, ys) = (set_of(a).items(), set_of(b).items());
+    if xs.len() != ys.len() {
+        return Ok(false);
+    }
+    for x in xs {
+        let mut found = false;
+        for y in ys {
+            if equal(p, *x, *y)? {
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 pub extern "C" fn rt_value_eq(p: *mut Vm, a: Value, b: Value) -> Value {
@@ -348,8 +387,9 @@ fn hash_mix(p: *mut Vm, h: u64, v: Value) -> Result<u64, ()> {
         return Err(());
     }
     // Kind tags matching core/hashing.tcl's KindTag dict exactly (int str
-    // bool unit list result UnicodeChar -> 0 1 2 3 4 5 6), so e.g. Int 1 and
-    // Str "1" never collide by coincidence of payload bytes alone.
+    // bool unit list result UnicodeChar immutableSet -> 0 1 2 3 4 5 6 7), so
+    // e.g. Int 1 and Str "1" never collide by coincidence of payload bytes
+    // alone.
     let tag = match kind {
         Kind::Int => 0u8,
         Kind::Str => 1,
@@ -358,6 +398,7 @@ fn hash_mix(p: *mut Vm, h: u64, v: Value) -> Result<u64, ()> {
         Kind::List => 4,
         Kind::Result => 5,
         Kind::UnicodeChar => 6,
+        Kind::ImmutableSet => 7,
         Kind::Block | Kind::Native | Kind::MutArray => unreachable!(),
     };
     let h = fnv1a(h, &[tag]);
@@ -392,6 +433,23 @@ fn hash_mix(p: *mut Vm, h: u64, v: Value) -> Result<u64, ()> {
             let h = fnv1a(h, &[r.ok as u8]);
             let sub = hash_mix(p, FNV_OFFSET, r.payload)?;
             fnv1a(h, &sub.to_le_bytes())
+        }
+        Kind::ImmutableSet => {
+            // Order-independent (XOR-combined member sub-hashes), matching
+            // `set_equal`'s own order-independent equality and core/
+            // hashing.tcl's identical Tcl-side choice: two equal sets must
+            // hash equal regardless of construction order. No ImmutableSet-
+            // specific hashing API is added (item 92) -- this only keeps
+            // the existing, pre-existing generic `hash` native total for
+            // the new kind.
+            let items = set_of(v).items();
+            let mut h = fnv1a(h, &(items.len() as u64).to_le_bytes());
+            let mut combined = 0u64;
+            for item in items {
+                combined ^= hash_mix(p, FNV_OFFSET, *item)?;
+            }
+            h = fnv1a(h, &combined.to_le_bytes());
+            h
         }
         Kind::Block | Kind::Native | Kind::MutArray => unreachable!(),
     })
@@ -750,6 +808,71 @@ pub extern "C" fn rt_list_append(p: *mut Vm, l: Value, v: Value) -> Value {
 }
 
 // ---------------------------------------------------------------------------
+// ImmutableSet (MINIMAL-IMMUTABLE-SET.md): deliberately the simplest sound
+// representation -- an ordinary owned Value array, exactly like ListObj, with
+// O(n^2) construction (dedup) and membership (both a linear scan using
+// `equal`). No hashing, no bitmap, no perfect hash: this milestone commits
+// only to the *semantics* (dedup by value equality, order-independent
+// equality, total membership), never to any particular representation --
+// see rt_set_from_list's own note on why this is deliberate.
+
+/// L -> ImmutableSet, deduplicating by `equal` (core::value::equal's own
+/// rule), O(n^2): the reference/first representation this milestone commits
+/// to. A future representation (a Byte bitmap, a domain-indexed bitset, a
+/// hash-consed table) may replace this without changing dedup/membership/
+/// equality semantics at all -- this is the semantic reference behavior,
+/// not a performance baseline to preserve.
+pub extern "C" fn rt_set_from_list(p: *mut Vm, l: Value) -> Value {
+    let source = list_of(l).items();
+    let mut items: Vec<Value> = Vec::with_capacity(source.len());
+    for &item in source {
+        let mut seen = false;
+        for &existing in items.iter() {
+            match equal(p, existing, item) {
+                Ok(true) => {
+                    seen = true;
+                    break;
+                }
+                Ok(false) => {}
+                Err(()) => return NO_VALUE,
+            }
+        }
+        if !seen {
+            items.push(item);
+        }
+    }
+    let elements = items.len();
+    let r = vm(p).new_set(items);
+    vm(p).metrics.record_list_copy(elements);
+    r
+}
+
+/// Membership: false for an absent value, never an Error *completion*
+/// (items 19-20) -- there is no Result/ok-error wrapping here, unlike a
+/// language-level Botlish Error. S must already be an ImmutableSet (the
+/// dynamic dispatch guard/-param-types check ahead of this call enforces
+/// that); V may be any value of any kind -- a mismatched ordinary kind
+/// (e.g. Int vs UnicodeChar) simply never compares equal to any member, not
+/// a TYPE error (item 20). The one honest exception, inherited unchanged
+/// from `equal`/`core::value::equal` (never invented for sets specifically,
+/// per item 17-18's own instruction to reuse existing equality as-is): if V
+/// or a member being compared against it is Block/Native/MutArray, that one
+/// comparison raises the same pre-existing EQUALITY runtime trap `==`
+/// already has for those kinds -- see MINIMAL-IMMUTABLE-SET.md's
+/// "Membership semantics" for why this is a documented consequence, not a
+/// new failure mode.
+pub extern "C" fn rt_set_contains(p: *mut Vm, s: Value, v: Value) -> Value {
+    for &item in set_of(s).items() {
+        match equal(p, item, v) {
+            Ok(true) => return TRUE,
+            Ok(false) => {}
+            Err(()) => return NO_VALUE,
+        }
+    }
+    bool_value(false)
+}
+
+// ---------------------------------------------------------------------------
 // MutableArrays: fixed-capacity, explicitly mutable indexed storage
 // (value.rs's MutArrayObj). Every constructor/mutator here is the runtime
 // substrate only -- growth policy, chunking and finalization strategy are
@@ -1007,6 +1130,8 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         ListLen => rt_list_len(p, a[0]),
         ListGet => rt_list_get(p, a[0], a[1]),
         ListAppend => rt_list_append(p, a[0], a[1]),
+        SetFromList => rt_set_from_list(p, a[0]),
+        SetContains => rt_set_contains(p, a[0], a[1]),
         MutArrayAllocate => rt_mutarray_allocate(p, a[0]),
         MutArrayCapacity => rt_mutarray_capacity(p, a[0]),
         MutArrayGet => rt_mutarray_get(p, a[0], a[1]),
@@ -1080,6 +1205,8 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_list_len, 2),
         h!(rt_list_get, 3),
         h!(rt_list_append, 3),
+        h!(rt_set_from_list, 2),
+        h!(rt_set_contains, 3),
         h!(rt_mutarray_allocate, 2),
         h!(rt_mutarray_capacity, 2),
         h!(rt_mutarray_get, 3),

@@ -306,6 +306,21 @@ impl Vm {
         self.alloc(ListObj { hdr: Header::new(KIND_LIST, false), len, ptr }, bytes)
     }
 
+    /// An ImmutableSet of ITEMS, which must already be deduplicated (the one
+    /// caller, `rt_set_from_list`, guarantees this): mirrors `new_list`
+    /// exactly (MINIMAL-IMMUTABLE-SET.md item 31), under KIND_SET instead of
+    /// KIND_LIST so the two runtime kinds are never confused.
+    pub fn new_set(&mut self, items: Vec<Value>) -> Value {
+        if let Some(v) = self.reject_oversized_collection(items.len()) {
+            return v;
+        }
+        let boxed: Box<[Value]> = items.into_boxed_slice();
+        let len = boxed.len();
+        let bytes = len * 8;
+        let ptr = Box::into_raw(boxed) as *mut Value;
+        self.alloc(SetObj { hdr: Header::new(KIND_SET, false), len, ptr }, bytes)
+    }
+
     /// Enforces MAX_COLLECTION_LENGTH (see its doc comment): Some(NO_VALUE)
     /// with a pending RANGE error if LEN exceeds it, else None (construct as
     /// normal). Every String/List constructor routes through this, so

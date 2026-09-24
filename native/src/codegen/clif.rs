@@ -1003,6 +1003,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             Kind::Block => KIND_CLOSURE,
             Kind::Native => KIND_NATIVE,
             Kind::MutArray => KIND_MUTARRAY,
+            Kind::ImmutableSet => KIND_SET,
             Kind::Bool | Kind::Unit | Kind::UnicodeChar => unreachable!(),
         };
         let low3 = self.b.ins().band_imm_s(v, 7);
@@ -1415,6 +1416,26 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         ListLen => ("rt_list_len", None, false, None),
                         ListGet => ("rt_list_get", None, true, None),
                         ListAppend => ("rt_list_append", None, true, Some(("listappend", KIND_LIST))),
+                        // Deliberately no inline fast path (item 64: "a
+                        // helper/runtime call is entirely acceptable"),
+                        // unlike ListGet's own listget_fast special case
+                        // above -- this milestone commits only to the
+                        // simple O(n^2) reference semantics.
+                        SetFromList => {
+                            let v = self.call_allocating(
+                                "rt_set_from_list",
+                                &[self.vm, a[0]],
+                                "setfromlist",
+                                KIND_SET,
+                            );
+                            self.check(v);
+                            return v;
+                        }
+                        // Never allocates, but may fail (EQUALITY: see
+                        // ops.rs's rt_set_contains), so it takes the plain
+                        // (non-allocating) helper path below with `fallible`
+                        // true, exactly like ListGet.
+                        SetContains => ("rt_set_contains", None, true, None),
                         MutArrayAllocate => {
                             let v = self.call_allocating(
                                 "rt_mutarray_allocate",

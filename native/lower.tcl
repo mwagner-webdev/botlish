@@ -123,6 +123,8 @@ namespace eval native::lower {
         list_length  {op listlen} \
         list_get     {op listget} \
         list_append  {op listappend} \
+        immutable_set_from_list {op setfromlist} \
+        immutable_set_contains  {op setcontains} \
         mutable_array_allocate {op mutarrayallocate} \
         mutable_array_capacity {op mutarraycapacity} \
         mutable_array_get      {op mutarrayget} \

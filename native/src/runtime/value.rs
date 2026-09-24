@@ -77,6 +77,10 @@ pub const KIND_CELL: u8 = 7;
 /// MutArrayObj). Distinct from KIND_LIST, whose ListObj is never mutated
 /// after construction.
 pub const KIND_MUTARRAY: u8 = 8;
+/// An ImmutableSet (MINIMAL-IMMUTABLE-SET.md, SetObj): distinct from
+/// KIND_LIST so a set and a List, even one with identical elements, are
+/// never the same runtime kind.
+pub const KIND_SET: u8 = 9;
 
 #[repr(C)]
 pub struct Header {
@@ -128,6 +132,28 @@ pub struct ListObj {
 }
 
 impl ListObj {
+    pub fn items(&self) -> &[Value] {
+        unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
+    }
+}
+
+/// An ImmutableSet's members: a raw pointer plus a count, structurally
+/// identical to ListObj (MINIMAL-IMMUTABLE-SET.md item 31: reusing List's
+/// own simple storage shape rather than inventing a new one), but under its
+/// own `Header::kind` (KIND_SET) so it remains a genuinely distinct runtime
+/// kind -- `heap_kind`/`kind_of` can never confuse a set with a List, so
+/// untyped code cannot feed one to a List operation. Never mutated after
+/// `Vm::new_set` (there is no in-place insertion/removal), and already
+/// deduplicated by `rt_set_from_list`'s own O(n^2) `equal`-based scan before
+/// this object is ever allocated.
+#[repr(C)]
+pub struct SetObj {
+    pub hdr: Header,
+    pub len: usize,
+    pub ptr: *mut Value,
+}
+
+impl SetObj {
     pub fn items(&self) -> &[Value] {
         unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
     }
@@ -265,6 +291,12 @@ pub enum Kind {
     /// like the other variants' lowercase tags, since Kind::name's string
     /// *is* the language-level type name here.
     UnicodeChar,
+    /// An ImmutableSet (MINIMAL-IMMUTABLE-SET.md): distinct from List, even
+    /// one with identical elements. Named to match its HIR structural tag
+    /// and every native's -param-types spelling ("immutableSet",
+    /// core/type.tcl's broad primitive name) exactly, the same List/"list"
+    /// split UnicodeChar's own comment above describes for its own name.
+    ImmutableSet,
 }
 
 impl Kind {
@@ -280,6 +312,7 @@ impl Kind {
             "native" => Kind::Native,
             "mutarray" => Kind::MutArray,
             "UnicodeChar" => Kind::UnicodeChar,
+            "immutableSet" => Kind::ImmutableSet,
             _ => return None,
         })
     }
@@ -296,6 +329,7 @@ impl Kind {
             Kind::Native => "native",
             Kind::MutArray => "mutarray",
             Kind::UnicodeChar => "UnicodeChar",
+            Kind::ImmutableSet => "immutableSet",
         }
     }
 
@@ -306,7 +340,7 @@ impl Kind {
     pub fn from_code(code: u8) -> Kind {
         [
             Kind::Int, Kind::Str, Kind::Bool, Kind::Unit, Kind::List, Kind::Result, Kind::Block, Kind::Native,
-            Kind::MutArray, Kind::UnicodeChar,
+            Kind::MutArray, Kind::UnicodeChar, Kind::ImmutableSet,
         ][code as usize]
     }
 }
@@ -332,6 +366,7 @@ pub fn kind_of(v: Value) -> Kind {
         KIND_CLOSURE => Kind::Block,
         KIND_NATIVE => Kind::Native,
         KIND_MUTARRAY => Kind::MutArray,
+        KIND_SET => Kind::ImmutableSet,
         _ => panic!("not a program value: {v:#x}"),
     }
 }
@@ -347,6 +382,11 @@ pub fn str_of<'a>(v: Value) -> &'a StrObj {
 
 pub fn list_of<'a>(v: Value) -> &'a ListObj {
     debug_assert_eq!(heap_kind(v), KIND_LIST);
+    unsafe { as_ref(v) }
+}
+
+pub fn set_of<'a>(v: Value) -> &'a SetObj {
+    debug_assert_eq!(heap_kind(v), KIND_SET);
     unsafe { as_ref(v) }
 }
 

@@ -22,6 +22,20 @@
 #                             UNICODE-CHAR-LITERALS.md). Immutable, no
 #                             evidence.
 #   {list ITEMS}              ITEMS is a Tcl list of runtime values
+#   {immutableSet ITEMS}      an immutable set of unique Botlish values
+#                             (core::value::equal): ITEMS is a Tcl list of
+#                             members, already deduplicated at construction
+#                             (core::immutableset::Dedup is the one caller
+#                             that guarantees this -- this constructor does
+#                             not re-deduplicate). Kept in first-occurrence
+#                             order purely as an implementation/display
+#                             detail: a set has no semantic order (MINIMAL-
+#                             IMMUTABLE-SET.md). A distinct runtime kind
+#                             from List: {list ...} and {immutableSet ...}
+#                             are never confused by core::value::kind, so
+#                             untyped code cannot feed a set to a List
+#                             operation. Immutable: there is no in-place
+#                             insertion/removal operation.
 #   {result ok|error VALUE}   Result
 #   {block PARAMS BODY ENV CODE}
 #                             Block: parameters, body expressions (IR),
@@ -39,7 +53,7 @@
 # file should construct and inspect values only through these procedures.
 
 namespace eval core::value {
-    variable kinds {int str bool unit list result block native mutarray UnicodeChar}
+    variable kinds {int str bool unit list result block native mutarray UnicodeChar immutableSet}
 }
 
 proc core::value::isCanonicalInt {text} {
@@ -142,6 +156,14 @@ proc core::value::listOf {items} {
     return [list list $items]
 }
 
+# ITEMS must already be deduplicated by core::value::equal -- the one caller
+# that guarantees this is core::immutableset::Dedup (core/immutableset.tcl);
+# this constructor does not re-deduplicate.
+proc core::value::immutableSet {items} {
+    foreach item $items { check $item }
+    return [list immutableSet $items]
+}
+
 proc core::value::ok {payload} {
     return [list result ok [check $payload]]
 }
@@ -195,6 +217,7 @@ proc core::value::intOf {v}  { Require int $v;  return [lindex $v 1] }
 proc core::value::strOf {v}  { Require str $v;  return [lindex $v 1] }
 proc core::value::items {v}  { Require list $v; return [lindex $v 1] }
 proc core::value::charOf {v} { Require UnicodeChar $v; return [lindex $v 1] }
+proc core::value::immutableSetItems {v} { Require immutableSet $v; return [lindex $v 1] }
 
 # Returns host 1/0 for a language Boolean.
 proc core::value::isTrue {v} {
@@ -217,7 +240,7 @@ proc core::value::mutarrayId {v}  { Require mutarray $v; return [lindex $v 1] }
 proc core::value::containsBlock {v} {
     switch -- [kind $v] {
         block  { return 1 }
-        list {
+        list - immutableSet {
             foreach item [lindex $v 1] {
                 if {[containsBlock $item]} {
                     return 1
@@ -279,6 +302,32 @@ proc core::value::equal {a b} {
             return [expr {[lindex $a 1] eq [lindex $b 1]
                           && [equal [lindex $a 2] [lindex $b 2]]}]
         }
+        immutableSet {
+            # Set equality, independent of construction/insertion order
+            # (MINIMAL-IMMUTABLE-SET.md item 16): both operands are already
+            # deduplicated by construction, so equal cardinality plus "every
+            # member of A has an equal member in B" is exactly set equality
+            # (a bijection must exist between two duplicate-free sets of the
+            # same size where every A-member matches some B-member).
+            set xs [lindex $a 1]
+            set ys [lindex $b 1]
+            if {[llength $xs] != [llength $ys]} {
+                return 0
+            }
+            foreach x $xs {
+                set found 0
+                foreach y $ys {
+                    if {[equal $x $y]} {
+                        set found 1
+                        break
+                    }
+                }
+                if {!$found} {
+                    return 0
+                }
+            }
+            return 1
+        }
     }
 }
 
@@ -311,6 +360,14 @@ proc core::value::show {v {withEvidence 0}} {
             return "\[[join $parts {, }]\]"
         }
         result { return "[lindex $v 1]([show [lindex $v 2] $withEvidence])" }
+        immutableSet {
+            # Punctuation only; no semantic ordering is implied (item 87).
+            set parts {}
+            foreach item [lindex $v 1] {
+                lappend parts [show $item $withEvidence]
+            }
+            return "{[join $parts {, }]}"
+        }
         block  { return "<block ([join [lindex $v 1] { }])>" }
         native { return "<native [lindex $v 1]>" }
         mutarray { return "<mutable-array capacity=[core::value::intOf [core::mutarray::capacity $v]]>" }
