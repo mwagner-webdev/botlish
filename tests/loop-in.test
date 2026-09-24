@@ -218,4 +218,98 @@ test loop-in-continue-outside-loop {continue outside any loop is still rejected}
     core::eval {continue}
 } -returnCodes error -errorCode {CORE SEMANTIC CONTINUE-OUTSIDE-LOOP} -match glob -result *
 
+# ---------------------------------------------------------------------------
+# Adversarial soundness: break VALUE overrides the whole listloop's result
+# (discarding the accumulated List), so a listloop's static result type must
+# account for every reachable break payload's type, not merely the List[R]
+# of its own per-iteration (non-break) completion. The dangerous case: an
+# incompatible scalar break reachable from a broad List[int] parameter, with
+# a declared -> List[int] result -- if this verified, f([0]) would return
+# 123 (an int), not a List[int], at runtime.
+
+test loop-in-break-scalar-declared-result-rejected {a reachable break of a scalar incompatible with the declared List[int] result must not verify: at runtime, an input containing 0 would make the whole function's value 123, not a List[int]} -body {
+    catch {surface::compile {fn f(xs: List[int]) -> List[int]:
+    loop x in xs:
+        if x == 0:
+            break 123
+        x
+
+f([1, 2])} scalar-break-rejected.bot} message options
+    list [dict get $options -errorcode] [string match {*does not prove declared type*} $message]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test loop-in-break-scalar-declared-result-rejected-diagnostic {the same rejection, inspected as a kept (non-strict) TYPE diagnostic rather than a thrown error, confirming it is produced during ordinary semantic verification} -body {
+    set hir [loopSourceHir {fn f(xs: List[int]) -> List[int]:
+    loop x in xs:
+        if x == 0:
+            break 123
+        x
+
+f([1, 2])}]
+    set diags [hir::diagnostics $hir]
+    list [llength $diags] [dict get [lindex $diags 0] kind] \
+        [string match {*does not prove declared type*} [dict get [lindex $diags 0] message]]
+} -result {1 TYPE 1}
+
+test loop-in-break-list-declared-result-accepted {a reachable break whose payload is itself a compatible List[int] verifies against the declared List[int] result -- contrasting the incompatible-scalar-break rejection above} -body {
+    set hir [loopSourceHir {fn f(xs: List[int]) -> List[int]:
+    loop x in xs:
+        if x == 0:
+            break [1, 2]
+        x
+
+f([5, 0, 9])}]
+    llength [hir::diagnostics $hir]
+} -result 0
+
+test loop-in-break-list-runtime-returns-payload {with the compatible break above, an input that actually reaches the break returns the explicit break payload, not the accumulated prefix ([5] would have been collected before the break)} -body {
+    loopInterpValue {fn f(xs: List[int]) -> List[int]:
+    loop x in xs:
+        if x == 0:
+            break [1, 2]
+        x
+
+f([5, 0, 9])}
+} -result {[1, 2]}
+
+test loop-in-break-list-runtime-parity {the compatible-List-break-payload-overrides-the-loop runtime rule agrees on every backend} -body {
+    loopParity {loop x in [5, 0, 9]:
+    if x == 0:
+        break [1, 2]
+    else:
+        x
+}
+} -result same
+
+test loop-in-break-bare-declared-result-rejected {a reachable bare break (loop value unit) is likewise incompatible with a declared List[int] result} -body {
+    set hir [loopSourceHir {fn f(xs: List[int]) -> List[int]:
+    loop x in xs:
+        if x == 0:
+            break
+        x
+
+f([1, 2])}]
+    set diags [hir::diagnostics $hir]
+    list [llength $diags] [expr {[llength $diags] > 0
+        && [string match {*does not prove declared type*} [dict get [lindex $diags 0] message]]}]
+} -result {1 1}
+
+test loop-in-break-scalar-undeclared-inferred-type {with no declared result, a listloop whose only reachable completions are an incompatible scalar break and a List[int] exhaustion must not be inferred as the falsely-precise List[int]: some conservative type both completions actually satisfy is required instead} -body {
+    set hir [loopSourceHir {fn f(xs: List[int]):
+    loop x in xs:
+        if x == 0:
+            break 123
+        x}]
+    set ll [hirFind $hir listloop]
+    list [llength $ll] [hir::types::show [hir::typeOf $hir [lindex $ll 0]]]
+} -result {1 any}
+
+test loop-in-no-break-still-precise {a listloop with no break at all keeps its precise List[R] typing (byte::set's own no-break shape), unaffected by the break-payload join added above} -body {
+    set hir [loopSourceHir {v = loop x in [1, 2, 3]:
+    x + 1
+v}]
+    set e [lindex [dict get $hir roots] end]
+    hir::types::show [hir::typeOf $hir $e]
+} -result {List[int]}
+
 cleanupTests
