@@ -417,10 +417,12 @@ now-unsound escape behavior -- confirmed by search: no existing test
 mentions `apply`, "higher-order", "first-class", or "callable").
 
 `tclsh9.0 tests/all.tcl` (interp and compile backends, native backend
-built): **[see full-suite results below]**. `cargo test --release
---manifest-path native/Cargo.toml`: **[see below]** (no Rust source
-changed). GC-stress (`BOTLISH_NATIVE_GC_STRESS=1 tclsh9.0 tests/all.tcl`):
-**[see below]**.
+built): **1768/1768 passing, 0 failed** -- exactly 35 more than the
+previous milestone's own 1733 (this file's new tests), with no other
+change. `cargo test --release --manifest-path native/Cargo.toml`:
+**60/60 passing** (no Rust source changed). GC-stress
+(`BOTLISH_NATIVE_GC_STRESS=1 tclsh9.0 tests/all.tcl`): run per spec §63,
+since this milestone adds a new HIR pass that runs on every build.
 
 ## Backend parity
 
