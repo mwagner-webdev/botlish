@@ -1,0 +1,66 @@
+# ascii.bot -- the "ascii" namespace: structural ASCII classification of
+# Byte values.
+#
+#   ascii::is_digit(b)        '0'..'9'   (48..57)
+#   ascii::is_upper(b)        'A'..'Z'   (65..90)
+#   ascii::is_lower(b)        'a'..'z'   (97..122)
+#   ascii::is_alphabetic(b)   is_upper(b) or is_lower(b)
+#   ascii::is_alphanumeric(b) is_alphabetic(b) or is_digit(b)
+#
+# Every predicate is total over Byte's own 256-value domain and locale-,
+# encoding- and platform-independent: no libc isdigit/isalpha/isalnum, no
+# Tcl character classes, no Unicode categories, no case folding, no UTF-8.
+# A high-bit byte (128..255) is simply not ASCII -- every predicate answers
+# false for it, never an error (a Byte is always a valid Byte; classifying
+# it is total).
+#
+# Byte is the parameter type, never Int/UnicodeChar/str: this namespace
+# classifies byte *values*, not Unicode scalars or source characters (see
+# ASCII-AND-URI-UNRESERVED.md). The boundary constants below (48, 57, 65,
+# 90, 97, 122) are ordinary Int literals compared directly against the
+# Byte parameter -- Byte is `Int in 0..255` (lib/byte.bot), so an Int-typed
+# comparison operand needs no conversion; wrapping every boundary in its
+# own runtime Byte(...) checked construction would add nothing but
+# nominal symmetry (see the report's "Boundary representation choice").
+#
+# This namespace deliberately owns only ASCII *structure*: is_digit,
+# is_upper, is_lower, is_alphabetic, is_alphanumeric, and nothing else --
+# no is_uri_unreserved, is_identifier_char, is_control, is_hex_digit, to_
+# upper/to_lower, case-insensitive/locale flags. URI-specific punctuation
+# ('-' '.' '_' '~') is policy, owned by web.bot's own is_unreserved, which
+# composes ascii::is_alphanumeric with its own retained punctuation set --
+# never duplicated or folded into an ASCII class here.
+#
+# This file has no qualified reference into "byte" (or any other
+# namespace): it is a leaf module, and Byte's own declaration (lib/byte.
+# bot's `type Byte = Int in 0..255`) is registered globally the moment
+# *any* qualified `byte::...` reference anywhere in a compiled program's
+# dependency graph loads that file (surface/modules.tcl's
+# QualifiedRefs-driven dependency discovery: a bare type-annotation name
+# like this file's own "b: Byte" is never itself such a reference). In
+# practice this is never a gap for real programs: every actual consumer of
+# `ascii::` here (`web::is_unreserved`, lib/web.bot) already depends on
+# `byte::` directly (for `byte::set`), so `Byte` is always registered by
+# the time this file's own signatures need it. A standalone caller that
+# uses only `ascii::` and needs to construct a `Byte` itself already needs
+# some `byte::...` reference to do that (there is no other way to name the
+# `Byte` constructor), which is what pulls `byte.bot` in -- see this
+# repository's existing `byte::high_nibble(0)`-as-dependency-anchor idiom
+# (tests/byte-set.test, tests/native-byte.test) for the same situation
+# pre-dating this file.
+namespace ascii
+
+fn is_digit(b: Byte) -> bool:
+    b >= 48 and b <= 57
+
+fn is_upper(b: Byte) -> bool:
+    b >= 65 and b <= 90
+
+fn is_lower(b: Byte) -> bool:
+    b >= 97 and b <= 122
+
+fn is_alphabetic(b: Byte) -> bool:
+    is_upper(b) or is_lower(b)
+
+fn is_alphanumeric(b: Byte) -> bool:
+    is_alphabetic(b) or is_digit(b)

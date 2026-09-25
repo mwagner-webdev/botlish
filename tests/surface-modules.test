@@ -379,7 +379,25 @@ proc outcomeUnderValue {backend exprs} {
     }
 }
 
-test surface-modules-uri-hex-digits-startup {web::hex_digits is one startup List; uri_escape_text has one startup closure and static callenv access} -body {
+# ASCII-AND-URI-UNRESERVED.md: is_unreserved moved out of uri_escape_text
+# (it is now the top-level web::is_unreserved) and web.bot gained its own
+# retained additional_unreserved_chars = byte::set(['-', '.', '_', '~']).
+# That changes three of this test's own startup-shape numbers, all for
+# the same underlying reason -- is_unreserved is no longer a value nested
+# inside uri_escape_text's own closure, but a sibling module value
+# uri_escape_text now captures separately:
+#   - 3 "op listnew", not 1: hex_digits' own list (unchanged), plus the
+#     four-char ['-', '.', '_', '~'] list byte::set consumes, plus
+#     byte::set's own internal accumulator list (lib/byte.bot's `loop c
+#     in chars: Byte(char::codepoint(c))`, unrelated to hex_digits/
+#     is_unreserved but part of the same module-init sequence now that
+#     `byte::set` is loaded).
+#   - uri_escape_text's own closure captures=2, not 1: hex_digits (as
+#     before) AND the is_unreserved closure (esc_char's one call site).
+# hexLists, uriStartupBlocks (one closure for uri_escape_text ITSELF,
+# regardless of what it captures), envless, and the closure/callenv
+# existence checks are all unaffected.
+test surface-modules-uri-hex-digits-startup {web::hex_digits is one startup List; uri_escape_text has one startup closure, now over two captures (hex_digits and is_unreserved), and static callenv access} -body {
     core::loadLibrary web
     set hir [native::buildProgramHir {
         {bind s {const str "a b"}}
@@ -408,10 +426,10 @@ test surface-modules-uri-hex-digits-startup {web::hex_digits is one startup List
         }
     }
     list [regexp -all {op listnew} $nir] $hexLists \
-        [regexp {func [0-9]+ "web::uri_escape_text" params=1 env=1 .*captures=1} $nir] \
+        [regexp {func [0-9]+ "web::uri_escape_text" params=1 env=1 .*captures=2} $nir] \
         [dict get $uriInfo envless] $uriStartupBlocks \
         [expr {[regexp -all {closure [0-9]+ } $nir] > 0}] [expr {[regexp -all {callenv [0-9]+ } $nir] > 0}]
-} -result {1 1 1 0 1 1 1}
+} -result {3 1 1 0 1 1 1}
 test surface-modules-uri-escape-native-parity {uriEscape's escaped text agrees interp vs. cranelift; only cranelift drops evidence} -body {
     core::loadLibrary web
     set exprs {

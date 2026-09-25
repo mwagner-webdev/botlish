@@ -559,17 +559,27 @@ test blockescape-region-companion-flags-both-off {both off: the fully unoptimize
 # ---------------------------------------------------------------------------
 # refined-checks itself (the primary acceptance case, #2, #18-19, #47, #85):
 # char_at's own two recurrent 800+400 Block allocation sites are gone, and
-# the whole program's Block allocation count collapses to the one surviving
-# module-startup web::uri_escape_text closure (out of this milestone's
-# scope, #48).
-
-test blockescape-region-companion-refined-checks-1 {refined-checks.ir: Block allocations collapse from 1201 to 1 (module-startup uri_escape_text only)} -body {
+# the whole program's Block allocation count collapses to the module-
+# startup closures (out of this milestone's scope, #48).
+#
+# ASCII-AND-URI-UNRESERVED.md moved is_unreserved out of uri_escape_text
+# (it is now the top-level web::is_unreserved, its own module-startup
+# closure) and gave web.bot its own retained additional_unreserved_chars
+# = byte::set(['-', '.', '_', '~']). That raises this test's own startup
+# totals, all still one-time module-init costs, never per-call: Block 1
+# -> 2 (uri_escape_text's closure, as before, plus is_unreserved's own);
+# List 5 -> 11 (hex_digits' list and byte::set's internal accumulator/
+# listappend machinery, as before, plus the new four-char punctuation
+# list byte::set consumes and its own accumulator/appends); ImmutableSet
+# 0 -> 1 (additional_unreserved_chars itself, byte::set's terminal
+# setfromlist); String unaffected (9); total 15 -> 23.
+test blockescape-region-companion-refined-checks-1 {refined-checks.ir: Block allocations collapse from 1201 to 2 (module-startup uri_escape_text and is_unreserved closures only)} -body {
     core::loadLibrary web
     set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
     set on [native::allocationReport $hir summary 1]
     list [native::evalHir $hir] [dict get $on total allocations] [dict get $on byKind Block allocations] \
         [dict get $on byKind String allocations] [dict get $on byKind List allocations]
-} -result {{list {{int 400} {int 0}}} 15 1 9 5}
+} -result {{list {{int 400} {int 0}}} 23 2 9 11}
 
 test blockescape-region-companion-refined-checks-2 {refined-checks.ir: char_at's NIR has no closure/callenvmulti, and env=0/results=3} -body {
     core::loadLibrary web

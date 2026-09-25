@@ -17,12 +17,30 @@
 # BYTE-NIBBLE-BIT-ARITHMETIC.md): byte::high_nibble(b) is the position-
 # preserving extraction (b & 0xF0), and byte::nibble(...) normalizes that to
 # the logical 0..15 value hex_pair/hex_digits index with.
-# is_unreserved is still a single ascending threshold ladder (deliberately
-# unchanged: URI-grammar/ASCII interpretation is a later milestone's target,
-# not this one's -- see BYTE-NIBBLE-BIT-ARITHMETIC.md). esc_bytes/esc_char/
-# esc_from accumulate their result by repeated concat, the same recursive
-# idiom examples/stdlib/string_reverse.bot's reverse_from and
-# examples/stdlib/ai_text_clean.bot's clean_from already use.
+#
+# is_unreserved (ASCII-AND-URI-UNRESERVED.md) is now the compositional form
+# the earlier milestones' own comments already anticipated: ASCII letters
+# or digits (ascii::is_alphanumeric, lib/ascii.bot -- structural fact,
+# owned by the "ascii" namespace) OR membership in
+# additional_unreserved_chars, the four-byte '-' '.' '_' '~' set RFC 3986
+# additionally exempts from percent-encoding (URI *policy*, owned here,
+# never folded into ascii::'s own structural classes). The set is built
+# once, from byte::set(['-', '.', '_', '~']) (lib/byte.bot,
+# BYTE-SET.md/MINIMAL-IMMUTABLE-SET.md's retained-module-value machinery),
+# and reused by every is_unreserved call -- never reconstructed per call.
+# esc_char, is_unreserved's one call site, still receives each UTF-8 byte
+# of a single-byte-encoded char as a plain Int from encode_utf8
+# (core/strings.tcl's -result-type list, never Byte-typed); it establishes
+# is_unreserved's own Byte proof explicitly, with one checked Byte(...)
+# construction per byte -- exactly the strict-typed-parameter contract
+# ascii::'s own predicates already enforce (never an implicit Int->Byte
+# conversion). This checked construction never fails here (list_get(bytes,
+# 0) is always one ordinary 0..255 UTF-8 byte value).
+#
+# esc_bytes/esc_char/esc_from accumulate their result by repeated concat,
+# the same recursive idiom examples/stdlib/string_reverse.bot's
+# reverse_from and examples/stdlib/ai_text_clean.bot's clean_from already
+# use.
 #
 # This module has no bearing on UriQueryValue's opaque evidence: only the
 # escaped *text* is computed here. Only a trusted native -impl may attach
@@ -36,49 +54,15 @@ namespace web
 
 hex_digits = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F"]
 
+additional_unreserved_chars = byte::set(['-', '.', '_', '~'])
+
+fn is_unreserved(b: Byte) -> bool:
+    ascii::is_alphanumeric(b) or immutable_set_contains(additional_unreserved_chars, b)
+
 fn uri_escape_text(s):
 
     fn high_nibble(b):
         byte::nibble(byte::high_nibble(b))
-
-    fn is_unreserved(b):
-        if b <= 44:
-            false
-        else:
-            if b <= 46:
-                true
-            else:
-                if b <= 47:
-                    false
-                else:
-                    if b <= 57:
-                        true
-                    else:
-                        if b <= 64:
-                            false
-                        else:
-                            if b <= 90:
-                                true
-                            else:
-                                if b <= 94:
-                                    false
-                                else:
-                                    if b <= 95:
-                                        true
-                                    else:
-                                        if b <= 96:
-                                            false
-                                        else:
-                                            if b <= 122:
-                                                true
-                                            else:
-                                                if b <= 125:
-                                                    false
-                                                else:
-                                                    if b <= 126:
-                                                        true
-                                                    else:
-                                                        false
 
     fn hex_pair(b):
         concat(list_get(hex_digits, high_nibble(b)), list_get(hex_digits, mod(b, 16)))
@@ -92,7 +76,7 @@ fn uri_escape_text(s):
     fn esc_char(c):
         bytes = encode_utf8(c)
         if list_length(bytes) == 1:
-            if is_unreserved(list_get(bytes, 0)):
+            if is_unreserved(Byte(list_get(bytes, 0))):
                 c
             else:
                 esc_bytes(bytes, 0, "")
