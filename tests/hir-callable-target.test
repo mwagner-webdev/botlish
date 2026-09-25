@@ -1,0 +1,203 @@
+# hir-callable-target.test -- M2 (EXACT-CALLABLE-TARGET-PROVENANCE.md):
+# pins the call *form* (direct call/callenv vs. indirect callvalue) native
+# lowering chooses for a call through a callable value, for exactly the
+# shapes the milestone's investigation exercised. This is a regression
+# test, not new machinery: every fixture here already lowers the way it
+# asserts on the pre-M2 tree (git blame this file's own introducing
+# commit) -- M2 added no production code, only this pin.
+#
+# native::lower::Call (native/lower.tcl) emits `call`/`callenv` for any HIR
+# call node whose semantic `target` field already resolved to an exact
+# `{block B ...}` (hir::types::Call, hir/types.tcl) -- and `callvalue`
+# otherwise. Whether that target is exact is entirely decided upstream, by
+# ordinary type inference; native lowering itself has no separate "is this
+# devirtualizable" analysis to add. These tests inspect the NIR text
+# native::lower::program produces, the same technique
+# tests/native-block-escape.test's own `blockescape-single-2` already uses.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+proc sourceHir {text} {
+    return [surface::compile $text t.bot -strict 0]
+}
+
+# The NIR text for TEXT, with tiny-exact-leaf inlining disabled (it would
+# otherwise fold a one-op callee's body into its caller and remove the call
+# instruction this test wants to inspect entirely -- TINY-EXACT-LEAF-
+# INLINING.md, orthogonal to call-target provenance).
+proc nirOf {text} {
+    return [dict get [native::lower::program [sourceHir $text] -tiny-leaf-inline-opt 0] text]
+}
+
+# ---------------------------------------------------------------------------
+# Positive: an exact callable forwarded through an ordinary *untyped* call
+# argument to a shared instance's own untyped parameter has no compiler
+# proof of a singleton target (hir::specialize::KeyType reduces any Block-
+# typed argument to the bare "block" kind, discarding which block, by
+# design -- M2 spec items 6-7 explicitly forbid changing this). The call
+# through that parameter therefore remains indirect even with exactly one
+# caller: this is the correct, sound "genuinely open" result (M2 Outcome
+# C), not a bug this milestone leaves unfixed. (A *typed* callable, e.g.
+# `fn foo(x: Byte)`, cannot even reach this position at all --
+# hir::callables::verify already rejects it at compile time, per
+# typed-callable-escape.test.)
+
+test callable-target-forwarded-param-one-caller-stays-indirect {a callable forwarded through an ordinary untyped parameter, even with a single caller, has no singleton-target proof and stays a callvalue (M2 Outcome C)} -body {
+    set text {fn foo(x):
+    x + 1
+
+fn apply(f, x):
+    f(x)
+
+apply(foo, 1)}
+    regexp {callvalue} [nirOf $text]
+} -result 1
+
+test callable-target-forwarded-param-two-callers-share-instance-stays-indirect {two callers of the same untyped-parameter instance passing different callables: still one shared instance, still indirect (the anti-unsoundness regression: M2 spec items 30-31)} -body {
+    set text {fn foo(x):
+    x + 1
+
+fn bar(x):
+    x + 2
+
+fn apply(f, x):
+    f(x)
+
+apply(foo, 1)
+apply(bar, 2)}
+    set hir [sourceHir $text]
+    set analysis [hir::specialize::analyze $hir]
+    set labels [lmap id [dict get $analysis used] {
+        if {[dict get $analysis instances $id name] ne "apply"} continue
+        hir::specialize::label $analysis $id
+    }]
+    list $labels [regexp {callvalue} [nirOf $text]]
+} -result {{{apply<block, int>}} 1}
+
+# ---------------------------------------------------------------------------
+# Alias: an immutable top-level alias of an exact function is itself typed
+# exactly as that function (hir::types::Bind); calling through it is an
+# ordinary direct call, indistinguishable from calling the function by name.
+
+test callable-target-immutable-alias-is-direct-call {calling through an immutable alias of an exact function lowers as an ordinary direct call, never callvalue} -body {
+    set text {fn foo(x):
+    x + 1
+
+f = foo
+
+f(7)}
+    set nirText [nirOf $text]
+    list [regexp {callvalue} $nirText] [regexp {= call \d+ } $nirText]
+} -result {0 1}
+
+# ---------------------------------------------------------------------------
+# Capture: a nested function forwarding a captured exact alias down through
+# another nested (envless) function's own explicit parameter -- exactly the
+# static-block/env-to-param transport `esc_char`'s real call to
+# `web::is_unreserved` uses (NATIVE-URI-ESCAPE.md/M0-MODULE-CLOSURE-AND-
+# URI-BASELINE.md) -- stays a direct call: the exact identity survives the
+# capture-to-parameter transport unchanged.
+
+test callable-target-capture-forwarded-through-nested-param-is-direct {an exact callable captured by an outer function and forwarded to an inner function through its own parameter (the esc_char shape) stays a direct call} -body {
+    set text {fn foo(x):
+    x + 1
+
+fn outer():
+    f = foo
+    fn inner(y):
+        f(y)
+    inner(1)
+
+outer()}
+    set nirText [nirOf $text]
+    list [regexp {callvalue} $nirText] [regexp {= call \d+ } $nirText]
+} -result {0 1}
+
+# ---------------------------------------------------------------------------
+# Environment-bearing closure: a closure with a real capture (not merely a
+# captured *reference* to a top-level function) is still devirtualizable at
+# the code-target level -- the desired `callenv B, E, args` shape (M2 spec
+# item 12), not a `callvalue`. The environment (the closure's own captured
+# `limit`) must still be threaded through, not discarded.
+
+test callable-target-environment-bearing-closure-is-direct-callenv {an exact closure with a real capture, called through an immutable alias, lowers as a direct callenv carrying its own environment, never callvalue} -body {
+    set text {fn make_pred(limit):
+    fn pred(x):
+        x < limit
+    pred
+
+f = make_pred(10)
+
+f(5)}
+    set nirText [nirOf $text]
+    list [regexp {callvalue} $nirText] [regexp {= callenv \d+ } $nirText]
+} -result {0 1}
+
+test callable-target-environment-bearing-closure-effects-are-clean {the direct callenv to a non-erroring closure body gets may_error=false/may_gc=false from existing, unmodified effect analysis (no M2-specific effect annotation)} -body {
+    set text {fn make_pred(limit):
+    fn pred(x):
+        x < limit
+    pred
+
+f = make_pred(10)
+
+f(5)}
+    set hir [sourceHir $text]
+    set effects [native::Driver calls [nirOf $text]]
+    lmap line $effects {
+        if {![string match {*callee_name="pred"*} $line]} continue
+        list [string match {*may_error=false*} $line] [string match {*may_gc=false*} $line]
+    }
+} -result {{1 1}}
+
+# ---------------------------------------------------------------------------
+# Erroring exact callee: devirtualization (a direct call/callenv) must not
+# be conflated with non-erroring -- a genuinely fallible exact target keeps
+# may_error=true after it becomes a direct call (M2 spec item 35).
+
+test callable-target-erroring-exact-callee-keeps-may-error-true {calling a genuinely-erroring exact callee through an alias is still a direct call, and still may_error=true} -body {
+    set text {fn foo(x):
+    mod(x, 0)
+
+f = foo
+
+f(5)}
+    set nirText [nirOf $text]
+    set hir [sourceHir $text]
+    set effects [native::Driver calls $nirText]
+    list [regexp {callvalue} $nirText] [lmap line $effects {
+        if {![string match {*callee_name="foo"*} $line]} continue
+        string match {*may_error=true*} $line
+    }]
+} -result {0 1}
+
+# ---------------------------------------------------------------------------
+# The real motivating path: esc_char -> web::is_unreserved (a typed,
+# declared-Byte-parameter callable, forwarded to a nested function through
+# a captured immutable module binding, exactly the capture-to-parameter
+# shape above) is already a direct callenv to a statically known target
+# before M2 -- confirmed directly against the frozen benchmark, not a
+# synthetic stand-in (M2 spec item 3).
+
+test callable-target-uri-esc-char-is-unreserved-already-direct {esc_char's call to web::is_unreserved, in the real frozen uri-steady.bot, is already a direct callenv to a statically-known target, not a callvalue (M2's own real-path finding: no first loss found here)} -body {
+    set hir [surface::readProgramFile [file join $::projectRoot bench uri-steady.bot]]
+    set nirText [dict get [native::lower::program $hir] text]
+    # esc_char<generic>'s own body: find its "func N ... pnames=... " header
+    # and confirm the function contains no callvalue, and does contain a
+    # callenv to web::is_unreserved's own function number.
+    set escCharFunc ""
+    set uriFunc ""
+    foreach {whole id name} [regexp -all -inline {func (\d+) "([^"]*)"} $nirText] {
+        if {$name eq "esc_char"} { set escCharFunc $id }
+        if {$name eq "web::is_unreserved"} { set uriFunc $id }
+    }
+    if {$escCharFunc eq "" || $uriFunc eq ""} {
+        error "could not find esc_char/web::is_unreserved in NIR"
+    }
+    # Extract esc_char's own function body text.
+    regexp "func $escCharFunc \[^\n\]*\n(.*?)\nend" $nirText -> body
+    list [regexp {callvalue} $body] [regexp "callenv $uriFunc " $body]
+} -result {0 1}
+
+cleanupTests
