@@ -1,0 +1,12 @@
+# S0 miscompile repro (same root cause): from_int<int>'s entry Range is [45,45], so a
+# BigInt reaching it through the handled call is compared raw. interp: [45, [1, 2]].
+a = byte::from_int(45)
+ns = [0 - 100000000000000000000000, 100000000000000000000000]
+bs = loop n in ns:
+    b = byte::from_int(n):
+        on BelowRange:
+            1
+        on AboveRange:
+            2
+    b
+[a, bs]

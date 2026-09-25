@@ -1,0 +1,12 @@
+diagnostics: 0
+
+e77 (call) from-int-nonneg.bot:176 -> byte::from_int
+  declaredErrors={AboveRange BelowRange} effectiveErrors={AboveRange} mayReturnNormally=1 resultRangeFact=[0, 255]
+e79 (call) from-int-nonneg.bot:176 -> char::codepoint
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, 1114111]
+e99 (call) from-int-nonneg.bot:10 -> byte::from_int
+  declaredErrors={AboveRange BelowRange} effectiveErrors={AboveRange} mayReturnNormally=1 resultRangeFact=[0, 255]
+e101 (call) from-int-nonneg.bot:10 -> nonneg
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, +∞]
+e116 (handle) from-int-nonneg.bot:13 -> g
+  declaredErrors={AboveRange} effectiveErrors={AboveRange} mayReturnNormally=1 resultRangeFact=-

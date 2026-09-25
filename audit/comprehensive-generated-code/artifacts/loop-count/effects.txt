@@ -1,0 +1,3 @@
+exact_calls=2 false_false=1 false_true=1 true_false=0 true_true=0 completion_checks_removed=2 call_safepoints_removed=1
+call caller=0 caller_name="<program>" callee=2 callee_name="drive" may_error=false may_gc=true
+call caller=2 caller_name="drive" callee=1 callee_name="work" may_error=false may_gc=false

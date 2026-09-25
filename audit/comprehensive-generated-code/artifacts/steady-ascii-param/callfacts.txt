@@ -1,0 +1,47 @@
+<program> e420 steady-ascii-param.bot:7 -> byte::from_int<int>
+    arg0: type int, range [-∞, +∞]
+    result: type int[Byte], range [0, 255]; semantic effectiveErrors (not stamped)
+<program> e502 steady-ascii-param.bot:28 -> rep<List[int], int, int>
+    arg0: type List[int[Byte]], range [-∞, +∞]
+    arg1: type int, range [1024, 1024] {1024}
+    arg2: type int, range [0, 0] {0}
+    result: type int, range [-∞, +∞]; semantic effectiveErrors {}
+ascii::is_alphabetic<int> e133 ascii.bot:63 -> ascii::is_upper<int>
+    arg0: type int[Byte], range [0, 255]
+    result: type bool, range [-∞, +∞]; semantic effectiveErrors {}
+ascii::is_alphabetic<int> e138 ascii.bot:63 -> ascii::is_lower<int>
+    arg0: type int[Byte], range [0, 255]
+    result: type bool, range [-∞, +∞]; semantic effectiveErrors {}
+ascii::is_alphanumeric<int> e146 ascii.bot:66 -> ascii::is_alphabetic<int>
+    arg0: type int[Byte], range [0, 255]
+    result: type bool, range [-∞, +∞]; semantic effectiveErrors {}
+ascii::is_alphanumeric<int> e151 ascii.bot:66 -> ascii::is_digit<int>
+    arg0: type int[Byte], range [0, 255]
+    result: type bool, range [-∞, +∞]; semantic effectiveErrors {}
+cls<int, List[int]> e429 steady-ascii-param.bot:14 -> ascii::is_alphanumeric<int>
+    arg0: type int[Byte], range [0, 255]
+    result: type bool, range [-∞, +∞]; semantic effectiveErrors {}
+count<List[int], int, int> e453 steady-ascii-param.bot:19 -> cls<int, List[int]>
+    arg0: type int, range [-∞, +∞]
+    arg1: type List[int], range [-∞, +∞]
+    result: type bool, range [-∞, +∞]; semantic effectiveErrors {}
+count<List[int], int, int> e460 steady-ascii-param.bot:20 -> count<List[int], int, int>
+    arg0: type List[int], range [-∞, +∞]
+    arg1: type int, range [1, 4611686018427387903]
+    arg2: type int, range [1, +∞]
+    result: type int, range [-∞, +∞]; semantic effectiveErrors {}
+count<List[int], int, int> e471 steady-ascii-param.bot:22 -> count<List[int], int, int>
+    arg0: type List[int], range [-∞, +∞]
+    arg1: type int, range [1, 4611686018427387903]
+    arg2: type int, range [0, +∞]
+    result: type int, range [-∞, +∞]; semantic effectiveErrors {}
+rep<List[int], int, int> e497 steady-ascii-param.bot:27 -> count<List[int], int, int>
+    arg0: type List[int], range [-∞, +∞]
+    arg1: type int, range [0, 0] {0}
+    arg2: type int, range [0, 0] {0}
+    result: type int, range [-∞, +∞]; semantic effectiveErrors {}
+rep<List[int], int, int> e487 steady-ascii-param.bot:27 -> rep<List[int], int, int>
+    arg0: type List[int], range [-∞, +∞]
+    arg1: type int, range [0, 1023]
+    arg2: type int, range [-∞, +∞]
+    result: type int, range [-∞, +∞]; semantic effectiveErrors {}

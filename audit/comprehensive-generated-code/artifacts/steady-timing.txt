@@ -1,0 +1,17 @@
+# Steady-state Byte/ASCII timing (baseline A tree, commit 39bac41; the probes'
+# NIR is identical after the C1 fix). Commands, run on an idle machine:
+#   tclsh9.0 audit/comprehensive-generated-code/tools/measure.tcl PROBE RUNS SESSIONS ?LOWER-OPTIONS?
+# native::measure: JIT compile excluded; each session reports its best of RUNS.
+
+## 262,144 classifications (1024 passes x 256 Bytes), 7 sessions x best of 50
+steady-ascii-capture.bot : value=63488 median=6535.77 us min=6483.07 us max=6549.51 us sessions={6506.59 6505.73 6539.08 6483.07 6549.51 6537.31 6535.77}
+steady-ascii-param.bot : value=63488 median=4293.27 us min=4274.27 us max=4340.52 us sessions={4340.52 4302.95 4293.27 4274.27 4295.86 4290.08 4278.15}
+steady-ascii.bot : value=63488 median=3601.48 us min=3594.69 us max=3638.55 us sessions={3601.48 3598.23 3594.69 3603.31 3638.55 3618.99 3595.16}
+
+## setup cost (the same program with 0 passes) and -specialize 0 control, 5 sessions x best of 50
+steady-ascii (0 passes) : value=0 median=27.51 us min=25.95 us max=29.33 us
+steady-ascii (0 passes) -specialize 0: value=0 median=25.91 us min=25.64 us max=27.33 us
+steady-ascii (1024 passes) : value=63488 median=3585.48 us min=3576.46 us max=3586.43 us
+steady-ascii (1024 passes) -specialize 0: value=63488 median=3579.37 us min=3562.26 us max=3597.45 us
+# -specialize 0 compiles the ASCII chain from semantic types (declared Byte
+# parameters honored): no guards, same code, same time -- see report F05.

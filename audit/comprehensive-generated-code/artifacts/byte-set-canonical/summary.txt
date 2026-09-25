@@ -1,0 +1,15 @@
+source: audit/comprehensive-generated-code/probes/byte-set-canonical.bot
+lower options: 
+static diagnostics: 0
+NIR functions: 4; machine code bytes: 1183
+allocation (one run): allocations=7 bytes=312 List=6 static=2
+  sites:
+    byte-set-canonical.bot:3 listnew x1
+    byte.bot:175 listnew x1
+    byte.bot:175 listappend x4
+    byte.bot:177 setfromlist x1
+
+  0 <program><generic>                       regs=6   params=0 env=0 bytes=190   op:listnew=1 call=1
+  1 char::codepoint<UnicodeChar>             regs=2   params=1 env=0 bytes=39    op:charcodepoint=1
+  2 byte::from_int<int>                      regs=9   params=1 env=0 bytes=329   op:ilt=1 br=2 fail=2 op:igt=1
+  3 byte::set<List[UnicodeChar]>             regs=17  params=1 env=0 bytes=625   op:listlen=1 op:listnew=1 op:ilt=1 br=1 op:listget=1 call=2 op:listappend=1 op:iadd=1 op:setfromlist=1

@@ -1,0 +1,359 @@
+# nir.txt without func 0 "<program>" (256-element literal list); regenerate with tools/probe.tcl
+nir 1 call-effects=1
+
+func 1 "char::codepoint" params=1 env=0 regs=2 pnames="c" captures=0 instance="UnicodeChar" @e2
+    %1 = op charcodepoint %0 @e3
+    ret %1
+end
+
+func 2 "byte::from_int" params=1 env=0 regs=9 pnames="value" captures=0 instance="int" rawregs="2 6" @e58
+    %1 = int 0 @e63
+    %2 = rawint 0
+    %3 = op ilt %0 %1 @e60
+    br %3 L0 L1 @e59
+  label L0
+    faildeclared 1 "BelowRange" @e64
+  label L1
+    %5 = int 255 @e69
+    %6 = rawint 255
+    %7 = op igt %0 %5 @e66
+    br %7 L3 L4 @e65
+  label L3
+    faildeclared 2 "AboveRange" @e70
+  label L4
+    %8 = move %0
+    jump L5
+  label L5
+    %4 = move %8
+    jump L2
+  label L2
+    ret %4
+end
+
+func 3 "byte::set" params=1 env=0 regs=17 pnames="chars" captures=0 instance="List[UnicodeChar]" rawregs="3 14" @e73
+    %1 = op listlen %0 @e75
+    %2 = int 0 @e75
+    %3 = rawint 0
+    %4 = op listnew @e75
+    %5 = move %2 @e75
+    %6 = move %4 @e75
+    jump L0 @e75
+  label L0
+    %8 = op ilt %5 %1 @e75
+    br %8 L1 L3 @e75
+  label L1
+    %9 = op listget %0 %5 @e75
+    %10 = call 1 %9 @e79
+    %11 = call 2 %10 @e77
+    %12 = op listappend %6 %11 @e75
+    %6 = move %12 @e75
+    jump L2 @e75
+  label L2
+    %13 = int 1 @e75
+    %14 = rawint 1
+    %15 = op iadd %5 %13 @e75
+    %5 = move %15 @e75
+    jump L0 @e75
+  label L3
+    %7 = move %6 @e75
+    jump L4 @e75
+  label L4
+    %16 = op setfromlist %7 @e82
+    ret %16
+end
+
+func 4 "ascii::is_digit" params=1 env=0 regs=12 pnames="b" captures=0 instance="generic" rawregs="2 6" @e86
+    %1 = int 48 @e91
+    %2 = rawint 48
+    guard int %0 ">=" @e88
+    %3 = op ige %0 %1 @e88
+    br %3 L0 L1 @e87
+  label L0
+    %5 = int 57 @e96
+    %6 = rawint 57
+    %7 = op ile %0 %5 @e93
+    br %7 L3 L4 @e92
+  label L3
+    %9 = bool true @e97
+    %8 = move %9
+    jump L5
+  label L4
+    %10 = bool false @e98
+    %8 = move %10
+    jump L5
+  label L5
+    %4 = move %8
+    jump L2
+  label L1
+    %11 = bool false @e99
+    %4 = move %11
+    jump L2
+  label L2
+    ret %4
+end
+
+func 5 "ascii::is_upper" params=1 env=0 regs=12 pnames="b" captures=0 instance="generic" rawregs="2 6" @e101
+    %1 = int 65 @e106
+    %2 = rawint 65
+    guard int %0 ">=" @e103
+    %3 = op ige %0 %1 @e103
+    br %3 L0 L1 @e102
+  label L0
+    %5 = int 90 @e111
+    %6 = rawint 90
+    %7 = op ile %0 %5 @e108
+    br %7 L3 L4 @e107
+  label L3
+    %9 = bool true @e112
+    %8 = move %9
+    jump L5
+  label L4
+    %10 = bool false @e113
+    %8 = move %10
+    jump L5
+  label L5
+    %4 = move %8
+    jump L2
+  label L1
+    %11 = bool false @e114
+    %4 = move %11
+    jump L2
+  label L2
+    ret %4
+end
+
+func 6 "ascii::is_lower" params=1 env=0 regs=12 pnames="b" captures=0 instance="generic" rawregs="2 6" @e116
+    %1 = int 97 @e121
+    %2 = rawint 97
+    guard int %0 ">=" @e118
+    %3 = op ige %0 %1 @e118
+    br %3 L0 L1 @e117
+  label L0
+    %5 = int 122 @e126
+    %6 = rawint 122
+    %7 = op ile %0 %5 @e123
+    br %7 L3 L4 @e122
+  label L3
+    %9 = bool true @e127
+    %8 = move %9
+    jump L5
+  label L4
+    %10 = bool false @e128
+    %8 = move %10
+    jump L5
+  label L5
+    %4 = move %8
+    jump L2
+  label L1
+    %11 = bool false @e129
+    %4 = move %11
+    jump L2
+  label L2
+    ret %4
+end
+
+func 7 "ascii::is_alphabetic" params=1 env=0 regs=8 pnames="b" captures=0 instance="generic" @e131
+    %1 = call 5 %0 @e133
+    br %1 L0 L1 @e132
+  label L0
+    %3 = bool true @e136
+    %2 = move %3
+    jump L2
+  label L1
+    %4 = call 6 %0 @e138
+    br %4 L3 L4 @e137
+  label L3
+    %6 = bool true @e141
+    %5 = move %6
+    jump L5
+  label L4
+    %7 = bool false @e142
+    %5 = move %7
+    jump L5
+  label L5
+    %2 = move %5
+    jump L2
+  label L2
+    ret %2
+end
+
+func 8 "ascii::is_alphanumeric" params=1 env=0 regs=8 pnames="b" captures=0 instance="generic" @e144
+    %1 = call 7 %0 @e146
+    br %1 L0 L1 @e145
+  label L0
+    %3 = bool true @e149
+    %2 = move %3
+    jump L2
+  label L1
+    %4 = call 4 %0 @e151
+    br %4 L3 L4 @e150
+  label L3
+    %6 = bool true @e154
+    %5 = move %6
+    jump L5
+  label L4
+    %7 = bool false @e155
+    %5 = move %7
+    jump L5
+  label L5
+    %2 = move %5
+    jump L2
+  label L2
+    ret %2
+end
+
+func 9 "web::is_unreserved" params=1 env=1 regs=9 pnames="b" captures=1 instance="generic" @e185
+    %1 = call 8 %0 @e187
+    br %1 L0 L1 @e186
+  label L0
+    %3 = bool true @e190
+    %2 = move %3
+    jump L2
+  label L1
+    %4 = capture 0
+    %5 = op setcontains %4 %0 @e192
+    br %5 L3 L4 @e191
+  label L3
+    %7 = bool true @e196
+    %6 = move %7
+    jump L5
+  label L4
+    %8 = bool false @e197
+    %6 = move %8
+    jump L5
+  label L5
+    %2 = move %6
+    jump L2
+  label L2
+    ret %2
+end
+
+func 10 "web::uri_escape_text" params=1 env=1 regs=7 pnames="s" captures=2 instance="generic" rawregs="2" @e199
+    %1 = int 0 @e319
+    %2 = rawint 0
+    %3 = str "" @e320
+    %4 = capture 1
+    %5 = capture 0
+    %6 = call 15 %0 %1 %3 %4 %5 @e316
+    ret %6
+end
+
+func 11 "high_nibble" params=1 env=0 regs=15 pnames="b" captures=0 instance="generic" rawregs="2 5 7 8 10 11 14" @e201
+    %1 = int 240 @e11
+    %2 = rawint 240
+    guard int %0 "bit_and" @e8
+    %3 = op iand %0 %1 @e8
+    %4 = int 15 @e27
+    %5 = rawint 15
+    %6 = int 0 @e24
+    %7 = rawint 0
+    %8 = op runbox %3
+    %9 = int 4 @e31
+    %10 = rawint 4
+    %11 = op rishr %8 %10 @e28
+    %12 = op rbox %11
+    %13 = int 15 @e32
+    %14 = rawint 15
+    ret %12
+end
+
+func 12 "hex_pair" params=2 env=0 regs=9 pnames="b web::hex_digits" captures=0 instance="generic" rawregs="5" @e208
+    %2 = call 11 %0 @e214
+    %3 = op listget %1 %2 @e211
+    %4 = int 16 @e223
+    %5 = rawint 16
+    guard int %0 "mod" @e220
+    %6 = op imod %0 %4 @e220
+    %7 = op listget %1 %6 @e217
+    %8 = op strcat %3 %7 @e209
+    ret %8
+end
+
+func 13 "esc_bytes" params=4 env=0 regs=15 pnames="bytes i acc web::hex_digits" captures=0 instance="generic" rawregs="8" @e225
+    guard list %0 "list_length" @e230
+    %4 = op listlen %0 @e230
+    guard int %1 ">=" @e227
+    %5 = op ige %1 %4 @e227
+    br %5 L0 L1 @e226
+  label L0
+    %6 = move %2
+    jump L2
+  label L1
+    %7 = int 1 @e240
+    %8 = rawint 1
+    %9 = op iadd %1 %7 @e237
+    %10 = str "%" @e246
+    %11 = op listget %0 %1 @e249
+    %12 = call 12 %11 %3 @e247
+    %13 = op strcat %10 %12 @e244
+    guard str %2 "concat" @e241
+    %14 = op strcat %2 %13 @e241
+    tail %0 %9 %14 %3 @e234
+  label L2
+    ret %6
+end
+
+func 14 "esc_char" params=3 env=0 regs=23 pnames="c web::is_unreserved web::hex_digits" captures=0 instance="generic" rawregs="5 7 11 16 20" @e254
+    guard str %0 "encode_utf8" @e256
+    %3 = op strutf8bytes %0 @e256
+    %4 = op listlen %3 @e262
+    %5 = op runbox %4
+    %6 = int 1 @e265
+    %7 = rawint 1
+    %8 = op rieq %5 %7 @e260
+    br %8 L0 L1 @e259
+  label L0
+    %10 = int 0 @e270
+    %11 = rawint 0
+    %12 = op listget %3 %10 @e267
+    %13 = callenv 9 %1 %12 @e272
+    br %13 L3 L4 @e271
+  label L3
+    %14 = move %0
+    jump L5
+  label L4
+    %15 = int 0 @e279
+    %16 = rawint 0
+    %17 = str "" @e280
+    %18 = call 13 %3 %15 %17 %2 @e276
+    %14 = move %18
+    jump L5
+  label L5
+    %9 = move %14
+    jump L2
+  label L1
+    %19 = int 0 @e284
+    %20 = rawint 0
+    %21 = str "" @e285
+    %22 = call 13 %3 %19 %21 %2 @e281
+    %9 = move %22
+    jump L2
+  label L2
+    ret %9
+end
+
+func 15 "esc_from" params=5 env=0 regs=17 pnames="text i acc web::is_unreserved web::hex_digits" captures=0 instance="generic" rawregs="9 12" @e287
+    guard str %0 "length" @e292
+    %5 = op strlen %0 @e292
+    guard int %1 ">=" @e289
+    %6 = op ige %1 %5 @e289
+    br %6 L0 L1 @e288
+  label L0
+    %7 = move %2
+    jump L2
+  label L1
+    %8 = int 1 @e302
+    %9 = rawint 1
+    %10 = op iadd %1 %8 @e299
+    %11 = int 1 @e315
+    %12 = rawint 1
+    %13 = op iadd %1 %11 @e312
+    %14 = op substr %0 %1 %13 @e308
+    %15 = call 14 %14 %3 %4 @e306
+    guard str %2 "concat" @e303
+    guard str %15 "concat" @e303
+    %16 = op strcat %2 %15 @e303
+    tail %0 %10 %16 %3 %4 @e296
+  label L2
+    ret %7
+end

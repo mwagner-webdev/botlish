@@ -1,0 +1,9 @@
+# byte::set on a List[UnicodeChar] that is not a literal (a listloop's
+# result), so the static completion proof cannot enumerate it: AboveRange
+# stays a runtime obligation (handled). U+0100 fails at runtime.
+cs = loop c in ['A', 'Ā', 'B']:
+    c
+s = byte::set(cs):
+    on AboveRange:
+        byte::set(['A'])
+s

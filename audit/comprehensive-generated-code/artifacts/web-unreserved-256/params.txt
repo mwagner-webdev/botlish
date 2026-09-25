@@ -1,0 +1,56 @@
+i0 <program>
+i2 char::codepoint<UnicodeChar>
+    param c: declared=UnicodeChar first-ref-view-type=UnicodeChar entry-range=[-∞, +∞]
+    result range: [0, +∞]
+i16 byte::high_nibble<generic>
+    param b: declared=- first-ref-view-type=any entry-range=[-∞, +∞]
+    result range: [0, 240] {0,16,32,48,64,80,96,112,128,144,160,176,192,208,224,240}
+i17 byte::nibble<int>
+    param x: declared=- first-ref-view-type=int[HighNibble] entry-range=[0, 240] {0,16,32,48,64,80,96,112,128,144,160,176,192,208,224,240}
+    result range: [0, 15]
+i3 byte::from_int<int>
+    param value: declared=int first-ref-view-type=int entry-range=[-∞, +∞]
+    result range: [0, 255]
+i1 byte::set<List[UnicodeChar]>
+    param chars: declared=List[UnicodeChar] first-ref-view-type=List[UnicodeChar] entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i9 ascii::is_digit<generic>
+    param b: declared=int[Byte] first-ref-view-type=any entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i7 ascii::is_upper<generic>
+    param b: declared=int[Byte] first-ref-view-type=any entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i8 ascii::is_lower<generic>
+    param b: declared=int[Byte] first-ref-view-type=any entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i6 ascii::is_alphabetic<generic>
+    param b: declared=int[Byte] first-ref-view-type=any entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i5 ascii::is_alphanumeric<generic>
+    param b: declared=int[Byte] first-ref-view-type=any entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i4 web::is_unreserved<generic>
+    param b: declared=int[Byte] first-ref-view-type=any entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i10 web::uri_escape_text<generic>
+    param s: declared=- first-ref-view-type=any entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i15 high_nibble<generic>
+    param b: declared=- first-ref-view-type=any entry-range=[-∞, +∞]
+    result range: [0, 15]
+i14 hex_pair<generic>
+    param b: declared=- first-ref-view-type=any entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i13 esc_bytes<generic>
+    param bytes: declared=- first-ref-view-type=any entry-range=[-∞, +∞]
+    param i: declared=- first-ref-view-type=any entry-range=[-∞, +∞]
+    param acc: declared=- first-ref-view-type=any entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i12 esc_char<generic>
+    param c: declared=- first-ref-view-type=any entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i11 esc_from<generic>
+    param text: declared=- first-ref-view-type=any entry-range=[-∞, +∞]
+    param i: declared=- first-ref-view-type=any entry-range=[-∞, +∞]
+    param acc: declared=- first-ref-view-type=any entry-range=[-∞, +∞]
+    result range: [-∞, +∞]

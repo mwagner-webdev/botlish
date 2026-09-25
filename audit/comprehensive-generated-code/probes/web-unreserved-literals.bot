@@ -1,0 +1,4 @@
+# web::is_unreserved on exact literal Bytes: the program of
+# tests/web-unreserved.test web-unreserved-set-built-once.
+[web::is_unreserved(45), web::is_unreserved(46), web::is_unreserved(95),
+web::is_unreserved(126), web::is_unreserved(65), web::is_unreserved(128)]

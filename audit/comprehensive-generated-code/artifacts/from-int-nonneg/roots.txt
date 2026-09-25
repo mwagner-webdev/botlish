@@ -1,0 +1,51 @@
+function 0 "<program>"
+  NIR regs: 29
+  raw regs: 8
+  managed-capable regs: 21
+  effects: may_error=true may_gc=true
+  safepoints: 5
+  root candidates: 11
+  max live roots: 5
+  shadow slots: 5
+  entry zero slots: 2
+  depth reservation: no
+  storage: native frame
+
+function 1 "byte::from_int"
+  NIR regs: 9
+  raw regs: 2
+  managed-capable regs: 7
+  effects: may_error=true may_gc=false
+  safepoints: 0
+  root candidates: 0
+  max live roots: 0
+  shadow slots: 0
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 2 "nonneg"
+  NIR regs: 8
+  raw regs: 2
+  managed-capable regs: 6
+  effects: may_error=false may_gc=true
+  safepoints: 1
+  root candidates: 2
+  max live roots: 2
+  shadow slots: 2
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 3 "g"
+  NIR regs: 3
+  raw regs: 0
+  managed-capable regs: 3
+  effects: may_error=true may_gc=true
+  safepoints: 1
+  root candidates: 1
+  max live roots: 1
+  shadow slots: 1
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame

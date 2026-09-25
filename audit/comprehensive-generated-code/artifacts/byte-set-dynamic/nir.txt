@@ -1,0 +1,113 @@
+nir 1 call-effects=1
+
+func 0 "<program>" params=0 env=0 regs=23 pnames="" captures=0 instance="generic" rawregs="6 15"
+    %0 = char 65 @e89
+    %1 = char 256 @e90
+    %2 = char 66 @e91
+    %3 = op listnew %0 %1 %2 @e87
+    %4 = op listlen %3 @e86
+    %5 = int 0 @e86
+    %6 = rawint 0
+    %7 = op listnew @e86
+    %8 = move %5 @e86
+    %9 = move %7 @e86
+    jump L0 @e86
+  label L0
+    %11 = op ilt %8 %4 @e86
+    br %11 L1 L3 @e86
+  label L1
+    %12 = op listget %3 %8 @e86
+    %13 = op listappend %9 %12 @e86
+    %9 = move %13 @e86
+    jump L2 @e86
+  label L2
+    %14 = int 1 @e86
+    %15 = rawint 1
+    %16 = op iadd %8 %14 @e86
+    %8 = move %16 @e86
+    jump L0 @e86
+  label L3
+    %10 = move %9 @e86
+    jump L4 @e86
+  label L4
+    pusherrorexit L5 @e94
+    %18 = call 3 %10 @e95
+    poperrorexit @e94
+    %17 = move %18 @e94
+    jump L6 @e94
+  label L5
+    %19 = declarederroreq 2 @e94
+    br %19 L7 L8 @e94
+  label L7
+    cleardeclarederror @e94
+    %20 = char 65 @e102
+    %21 = op listnew %20 @e100
+    %22 = call 3 %21 @e98
+    %17 = move %22 @e94
+    jump L6 @e94
+  label L8
+    reraise @e94
+  label L6
+    ret %17
+end
+
+func 1 "char::codepoint" params=1 env=0 regs=2 pnames="c" captures=0 instance="UnicodeChar" @e2
+    %1 = op charcodepoint %0 @e3
+    ret %1
+end
+
+func 2 "byte::from_int" params=1 env=0 regs=9 pnames="value" captures=0 instance="int" rawregs="2 6" @e58
+    %1 = int 0 @e63
+    %2 = rawint 0
+    %3 = op ilt %0 %1 @e60
+    br %3 L0 L1 @e59
+  label L0
+    faildeclared 1 "BelowRange" @e64
+  label L1
+    %5 = int 255 @e69
+    %6 = rawint 255
+    %7 = op igt %0 %5 @e66
+    br %7 L3 L4 @e65
+  label L3
+    faildeclared 2 "AboveRange" @e70
+  label L4
+    %8 = move %0
+    jump L5
+  label L5
+    %4 = move %8
+    jump L2
+  label L2
+    ret %4
+end
+
+func 3 "byte::set" params=1 env=0 regs=17 pnames="chars" captures=0 instance="List[UnicodeChar]" rawregs="3 14" @e73
+    %1 = op listlen %0 @e75
+    %2 = int 0 @e75
+    %3 = rawint 0
+    %4 = op listnew @e75
+    %5 = move %2 @e75
+    %6 = move %4 @e75
+    jump L0 @e75
+  label L0
+    %8 = op ilt %5 %1 @e75
+    br %8 L1 L3 @e75
+  label L1
+    %9 = op listget %0 %5 @e75
+    %10 = call 1 %9 @e79
+    %11 = call 2 %10 @e77
+    %12 = op listappend %6 %11 @e75
+    %6 = move %12 @e75
+    jump L2 @e75
+  label L2
+    %13 = int 1 @e75
+    %14 = rawint 1
+    %15 = op iadd %5 %13 @e75
+    %5 = move %15 @e75
+    jump L0 @e75
+  label L3
+    %7 = move %6 @e75
+    jump L4 @e75
+  label L4
+    %16 = op setfromlist %7 @e82
+    ret %16
+end

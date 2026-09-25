@@ -1,0 +1,3 @@
+<program> e85 from-int-literal.bot:4 -> byte::from_int<int>
+    arg0: type int, range [45, 45] {45}
+    result: type int[Byte], range [0, 255]; semantic effectiveErrors {}

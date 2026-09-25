@@ -1,0 +1,38 @@
+source: examples/stdlib/hashtable.bot
+lower options: 
+static diagnostics: 0
+NIR functions: 26; machine code bytes: 12868
+allocation (one run): allocations=5 bytes=400 List=1 MutableArray=4 static=12
+  sites:
+    hashtable.bot:102 mutarrayallocate x1
+    hashtable.bot:104 mutarrayallocate x1
+    hashtable.bot:105 mutarrayallocate x1
+    hashtable.bot:106 mutarrayallocate x1
+    hashtable.bot:374 listnew x1
+
+  0 <program><generic>                       regs=1   params=0 env=0 bytes=45    call=1
+  1 ht_fill_empty<mutarray, int, int>        regs=13  params=3 env=0 bytes=388   op:ige=1 br=1 op:mutarrayset=1 op:iadd=1 tail=1
+  2 ht_alloc<int>                            regs=29  params=1 env=0 bytes=524   op:mutarrayallocate=4 call=1 op:mutarrayset=5
+  3 ht_new<generic>                          regs=3   params=0 env=0 bytes=70    call=1
+  4 ht_controls<mutarray>                    regs=4   params=1 env=0 bytes=61    op:mutarrayget=1
+  5 ht_keys<mutarray>                        regs=4   params=1 env=0 bytes=61    op:mutarrayget=1
+  6 ht_values<mutarray>                      regs=4   params=1 env=0 bytes=61    op:mutarrayget=1
+  7 ht_size<mutarray>                        regs=4   params=1 env=0 bytes=61    op:mutarrayget=1
+  8 ht_tombstones<mutarray>                  regs=4   params=1 env=0 bytes=61    op:mutarrayget=1
+  9 ht_capacity<mutarray>                    regs=3   params=1 env=0 bytes=167   call=1 guard=1 op:mutarraycapacity=1
+ 10 ht_probe_start<mutarray, str>            regs=5   params=2 env=0 bytes=179   op:hash=1 call=1 op:imod=1
+ 11 ht_probe_next<mutarray, int>             regs=7   params=2 env=0 bytes=245   op:iadd=1 call=1 op:imod=1
+ 12 ht_find_get<mutarray, str, int>          regs=30  params=3 env=0 bytes=804   call=3 guard=2 op:mutarrayget=2 op:veq=3 br=4 op:risub=1 op:rbox=1 tail=1
+ 13 ht_find_insert<mutarray, str, int, int>  regs=44  params=4 env=0 bytes=1248  call=4 guard=2 op:mutarrayget=2 op:veq=4 br=8 op:ige=1 op:ilt=1 tail=2
+ 14 ht_get<mutarray, str>                    regs=12  params=2 env=0 bytes=429   call=3 op:ilt=1 br=1 guard=1 op:mutarrayget=1
+ 15 ht_contains<mutarray, str>               regs=7   params=2 env=0 bytes=253   call=2 op:ige=1
+ 16 ht_rehash_probe<mutarray, int, int>      regs=13  params=3 env=0 bytes=380   op:mutarrayget=1 op:veq=1 br=1 op:iadd=1 op:imod=1 tail=1
+ 17 ht_rehash_insert<List[mutarray], int, any, any> regs=15  params=6 env=0 bytes=439   op:hash=1 op:imod=1 call=1 op:mutarrayset=3
+ 18 ht_rehash_scan<list, int, int, List[mutarray], int> regs=28  params=9 env=0 bytes=1113  op:rbox=2 op:ige=1 br=2 guard=3 op:mutarrayget=3 op:veq=1 call=1 op:runbox=1 op:riadd=1 tail=1
+ 19 ht_rehash<mutarray, int>                 regs=30  params=2 env=0 bytes=766   call=6 op:mutarrayallocate=3 op:mutarrayset=4
+ 20 ht_should_grow<mutarray>                 regs=15  params=1 env=0 bytes=817   call=3 guard=2 op:iadd=2 op:imul=2 op:igt=1
+ 21 ht_grow_or_clean<mutarray>               regs=12  params=1 env=0 bytes=665   call=6 guard=2 op:igt=1 br=1 op:imul=1
+ 22 ht_place<mutarray, int, str, str>        regs=33  params=4 env=0 bytes=1168  call=5 guard=5 op:mutarrayget=1 op:mutarrayset=5 op:iadd=1 op:veq=1 br=1 op:isub=1
+ 23 ht_set<mutarray, str, str>               regs=35  params=3 env=0 bytes=836   call=10 op:risub=2 op:rbox=2 guard=2 op:mutarrayget=1 op:veq=1 br=2 op:mutarrayset=1
+ 24 ht_delete<mutarray, str>                 regs=35  params=2 env=0 bytes=1189  call=7 op:ilt=1 br=1 guard=5 op:mutarrayset=5 op:isub=1 op:iadd=1
+ 25 sample<generic>                          regs=28  params=0 env=0 bytes=838   call=11 op:veq=2 op:listnew=1

@@ -1,0 +1,73 @@
+<program> e176 web.bot:65 -> byte::set<List[UnicodeChar]>
+    arg0: type List[UnicodeChar], range [-∞, +∞]
+    result: type ImmutableSet[int[Byte]], range [-∞, +∞]; semantic effectiveErrors {}
+<program> e584 web-unreserved-256.bot:5 -> byte::from_int<int>
+    arg0: type int, range [-∞, +∞]
+    result: type int[Byte], range [0, 255]; semantic effectiveErrors (not stamped)
+<program> e589 web-unreserved-256.bot:10 -> web::is_unreserved<generic>
+    arg0: type int[Byte], range [0, 255]
+    result: type bool, range [-∞, +∞]; semantic effectiveErrors {}
+byte::set<List[UnicodeChar]> e79 web-unreserved-256.bot:176 -> char::codepoint<UnicodeChar>
+    arg0: type UnicodeChar, range [-∞, +∞]
+    result: type int, range [0, +∞]; semantic effectiveErrors {}
+byte::set<List[UnicodeChar]> e77 web-unreserved-256.bot:176 -> byte::from_int<int>
+    arg0: type int, range [0, +∞]
+    result: type int[Byte], range [0, 255]; semantic effectiveErrors {AboveRange}
+ascii::is_alphabetic<generic> e133 ascii.bot:63 -> ascii::is_upper<generic>
+    arg0: type any, range [-∞, +∞]
+    result: type bool, range [-∞, +∞]; semantic effectiveErrors {}
+ascii::is_alphabetic<generic> e138 ascii.bot:63 -> ascii::is_lower<generic>
+    arg0: type any, range [-∞, +∞]
+    result: type bool, range [-∞, +∞]; semantic effectiveErrors {}
+ascii::is_alphanumeric<generic> e146 ascii.bot:66 -> ascii::is_alphabetic<generic>
+    arg0: type any, range [-∞, +∞]
+    result: type bool, range [-∞, +∞]; semantic effectiveErrors {}
+ascii::is_alphanumeric<generic> e151 ascii.bot:66 -> ascii::is_digit<generic>
+    arg0: type any, range [-∞, +∞]
+    result: type bool, range [-∞, +∞]; semantic effectiveErrors {}
+web::is_unreserved<generic> e187 web.bot:68 -> ascii::is_alphanumeric<generic>
+    arg0: type any, range [-∞, +∞]
+    result: type bool, range [-∞, +∞]; semantic effectiveErrors {}
+web::uri_escape_text<generic> e316 web.bot:101 -> esc_from<generic>
+    arg0: type any, range [-∞, +∞]
+    arg1: type int, range [0, 0] {0}
+    arg2: type str, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+high_nibble<generic> e204 web.bot:73 -> byte::high_nibble<generic>
+    arg0: type any, range [-∞, +∞]
+    result: type int[HighNibble], range [0, 240] {0,16,32,48,64,80,96,112,128,144,160,176,192,208,224,240}; semantic effectiveErrors {}
+high_nibble<generic> e202 web.bot:73 -> byte::nibble<int>
+    arg0: type int[HighNibble], range [0, 240] {0,16,32,48,64,80,96,112,128,144,160,176,192,208,224,240}
+    result: type int[Nibble], range [0, 15]; semantic effectiveErrors {}
+hex_pair<generic> e214 web.bot:76 -> high_nibble<generic>
+    arg0: type any, range [-∞, +∞]
+    result: type int[Nibble], range [0, 15]; semantic effectiveErrors {}
+esc_bytes<generic> e247 web.bot:82 -> hex_pair<generic>
+    arg0: type any, range [-∞, +∞]
+    result: type str, range [-∞, +∞]; semantic effectiveErrors {}
+esc_bytes<generic> e234 web.bot:82 -> esc_bytes<generic>
+    arg0: type list, range [-∞, +∞]
+    arg1: type int, range [-∞, 4611686018427387903]
+    arg2: type str, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+esc_char<generic> e272 web.bot:88 -> web::is_unreserved<generic>
+    arg0: type int[Byte], range [0, 255]
+    result: type bool, range [-∞, +∞]; semantic effectiveErrors {}
+esc_char<generic> e276 web.bot:91 -> esc_bytes<generic>
+    arg0: type List[int[Byte]], range [-∞, +∞]
+    arg1: type int, range [0, 0] {0}
+    arg2: type str, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+esc_char<generic> e281 web.bot:93 -> esc_bytes<generic>
+    arg0: type List[int[Byte]], range [-∞, +∞]
+    arg1: type int, range [0, 0] {0}
+    arg2: type str, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+esc_from<generic> e306 web.bot:99 -> esc_char<generic>
+    arg0: type str, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+esc_from<generic> e296 web.bot:99 -> esc_from<generic>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [-∞, 4611686018427387903]
+    arg2: type str, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}

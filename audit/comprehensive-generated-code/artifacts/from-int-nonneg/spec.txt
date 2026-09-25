@@ -1,0 +1,7 @@
+i0 <program>: generic=1 key={} result=List[int]
+    call e117 from-int-nonneg.bot:13 -> i1 g<int>
+i3 byte::from_int<int>: generic=0 key={int} result=int[Byte]
+i2 nonneg<int>: generic=0 key={int} result=int
+i1 g<int>: generic=0 key={int} result=int
+    call e101 from-int-nonneg.bot:10 -> i2 nonneg<int>
+    call e99 from-int-nonneg.bot:10 -> i3 byte::from_int<int>

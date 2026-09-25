@@ -1,0 +1,9 @@
+<program> e117 from-int-nonneg.bot:13 -> g<int>
+    arg0: type int, range [-∞, +∞]
+    result: type int, range [0, 255]; semantic effectiveErrors (not stamped)
+g<int> e101 from-int-nonneg.bot:10 -> nonneg<int>
+    arg0: type int, range [-∞, +∞]
+    result: type int, range [0, +∞]; semantic effectiveErrors {}
+g<int> e99 from-int-nonneg.bot:10 -> byte::from_int<int>
+    arg0: type int, range [0, +∞]
+    result: type int[Byte], range [0, 255]; semantic effectiveErrors {AboveRange}

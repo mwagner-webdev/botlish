@@ -1,0 +1,26 @@
+source: examples/stdlib/csv.bot
+lower options: 
+static diagnostics: 0
+NIR functions: 11; machine code bytes: 4731
+allocation (one run): allocations=19 bytes=691 String=6 List=13 static=5
+  sites:
+    csv.bot:37 substr x6
+    csv.bot:64 listappend x3
+    csv.bot:64 listappend x3
+    csv.bot:80 listnew x1
+    csv.bot:81 listappend x1
+    csv.bot:80 listnew x2
+    csv.bot:81 listappend x2
+    csv.bot:84 listnew x1
+
+  0 <program><generic>                       regs=2   params=0 env=0 bytes=68    call=1
+  1 peek<str, int>                           regs=11  params=2 env=0 bytes=365   op:strlen=1 op:ige=1 br=1 op:iadd=1 op:substr=1
+  2 peek<str, int>                           regs=15  params=2 env=0 bytes=430   op:strlen=1 op:ige=1 br=1 op:iadd=1 op:regioncheck=1
+  3 scan_unquoted<str, int, int>             regs=28  params=3 env=0 bytes=585   callmulti=1 op:regioneq=3 br=5 op:substr=1 op:iadd=1 tail=1
+  4 scan_quoted<str, int, str>               regs=34  params=3 env=0 bytes=770   call=1 op:regioneq=2 br=2 op:iadd=4 callmulti=1 op:strcat=2 tail=2
+  5 scan_field<str, int>                     regs=17  params=2 env=0 bytes=352   callmulti=3 op:regioneq=1 br=1 op:iadd=1
+  6 scan_record<str, int, List[never]>       regs=25  params=3 env=0 bytes=618   callmulti=3 op:listappend=1 op:regioneq=2 br=2 op:iadd=2
+  7 scan_record<str, int, List[str]>         regs=23  params=3 env=0 bytes=611   callmulti=2 op:listappend=1 op:regioneq=2 br=2 op:iadd=2 tail=1
+  8 scan_records<str, int, List[never]>      regs=14  params=3 env=0 bytes=361   op:runbox=2 op:strlen=1 op:rige=1 br=1 op:listnew=1 callmulti=1 op:listappend=1 call=1
+  9 scan_records<str, int, List[List[str]]>  regs=11  params=3 env=0 bytes=404   op:strlen=1 op:ige=1 br=1 op:listnew=1 callmulti=1 op:listappend=1 tail=1
+ 10 csv_parse<str>                           regs=5   params=1 env=0 bytes=167   op:listnew=1 call=1

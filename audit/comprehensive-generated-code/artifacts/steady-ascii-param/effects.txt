@@ -1,0 +1,10 @@
+exact_calls=9 false_false=6 false_true=0 true_false=1 true_true=2 completion_checks_removed=6 call_safepoints_removed=7
+call caller=0 caller_name="<program>" callee=1 callee_name="byte::from_int" may_error=true may_gc=false
+call caller=0 caller_name="<program>" callee=9 callee_name="rep" may_error=true may_gc=true
+call caller=5 caller_name="ascii::is_alphabetic" callee=3 callee_name="ascii::is_upper" may_error=false may_gc=false
+call caller=5 caller_name="ascii::is_alphabetic" callee=4 callee_name="ascii::is_lower" may_error=false may_gc=false
+call caller=6 caller_name="ascii::is_alphanumeric" callee=5 callee_name="ascii::is_alphabetic" may_error=false may_gc=false
+call caller=6 caller_name="ascii::is_alphanumeric" callee=2 callee_name="ascii::is_digit" may_error=false may_gc=false
+call caller=7 caller_name="cls" callee=6 callee_name="ascii::is_alphanumeric" may_error=false may_gc=false
+call caller=8 caller_name="count" callee=7 callee_name="cls" may_error=false may_gc=false
+call caller=9 caller_name="rep" callee=8 callee_name="count" may_error=true may_gc=true

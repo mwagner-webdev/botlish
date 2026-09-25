@@ -1,0 +1,17 @@
+i0 <program>: generic=1 key={} result=List[str]
+    call e225 ai_text_clean.bot:79 -> i1 clean_ai_text<str>
+    call e228 ai_text_clean.bot:79 -> i1 clean_ai_text<str>
+    call e231 ai_text_clean.bot:79 -> i1 clean_ai_text<str>
+    call e234 ai_text_clean.bot:79 -> i1 clean_ai_text<str>
+    call e237 ai_text_clean.bot:79 -> i1 clean_ai_text<str>
+    call e240 ai_text_clean.bot:79 -> i1 clean_ai_text<str>
+i3 peek<str, int>: generic=0 key={str int} result=str
+i5 cleaner_emoji<str>: generic=0 key={str} result=bool
+i4 clean_char<str>: generic=0 key={str} result=str
+    call e128 ai_text_clean.bot:52 -> i5 cleaner_emoji<str>
+i2 clean_from<str, int, str>: generic=0 key={str int str} result=str
+    call e212 ai_text_clean.bot:74 -> i3 peek<str, int>
+    call e210 ai_text_clean.bot:74 -> i4 clean_char<str>
+    call e200 ai_text_clean.bot:74 -> i2 clean_from<str, int, str>
+i1 clean_ai_text<str>: generic=0 key={str} result=str
+    call e218 ai_text_clean.bot:77 -> i2 clean_from<str, int, str>

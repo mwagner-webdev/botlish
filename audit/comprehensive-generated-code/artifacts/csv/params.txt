@@ -1,0 +1,42 @@
+i0 <program>
+i5 peek<str, int>
+    param text: declared=- first-ref-view-type=str entry-range=[-∞, +∞]
+    param index: declared=- first-ref-view-type=int entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i7 scan_unquoted<str, int, int>
+    param text: declared=- first-ref-view-type=str entry-range=[-∞, +∞]
+    param start: declared=- first-ref-view-type=int entry-range=[-∞, +∞]
+    param index: declared=- first-ref-view-type=int entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i6 scan_quoted<str, int, str>
+    param text: declared=- first-ref-view-type=str entry-range=[-∞, +∞]
+    param index: declared=- first-ref-view-type=int entry-range=[-∞, +∞]
+    param field: declared=- first-ref-view-type=str entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i4 scan_field<str, int>
+    param text: declared=- first-ref-view-type=str entry-range=[-∞, +∞]
+    param index: declared=- first-ref-view-type=int entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i3 scan_record<str, int, List[never]>
+    param text: declared=- first-ref-view-type=str entry-range=[-∞, +∞]
+    param index: declared=- first-ref-view-type=int entry-range=[-∞, 4611686018427387902]
+    param fields: declared=- first-ref-view-type=List[never] entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i8 scan_record<str, int, List[str]>
+    param text: declared=- first-ref-view-type=str entry-range=[-∞, +∞]
+    param index: declared=- first-ref-view-type=int entry-range=[-∞, +∞]
+    param fields: declared=- first-ref-view-type=List[str] entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i2 scan_records<str, int, List[never]>
+    param text: declared=- first-ref-view-type=str entry-range=[-∞, +∞]
+    param index: declared=- first-ref-view-type=int entry-range=[0, 0] {0}
+    param records: declared=- first-ref-view-type=List[never] entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i9 scan_records<str, int, List[List[str]]>
+    param text: declared=- first-ref-view-type=str entry-range=[-∞, +∞]
+    param index: declared=- first-ref-view-type=int entry-range=[-∞, +∞]
+    param records: declared=- first-ref-view-type=List[List[str]] entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i1 csv_parse<str>
+    param text: declared=- first-ref-view-type=str entry-range=[-∞, +∞]
+    result range: [-∞, +∞]

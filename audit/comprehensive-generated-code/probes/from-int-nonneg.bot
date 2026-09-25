@@ -1,0 +1,16 @@
+# Probe B: byte::from_int on a statically nonnegative Int. nonneg/g are
+# verbatim tests/errors.test errors-byte-from-int-partial-range-elimination;
+# the driver loop supplies unconstrained inputs.
+fn nonneg(m) -> int:
+    if m < 0:
+        0 - m
+    else:
+        m
+fn g(m) -> int errors AboveRange:
+    byte::from_int(nonneg(m))
+ns = [0 - 7, 45, 300]
+loop n in ns:
+    r = g(n):
+        on AboveRange:
+            0
+    r

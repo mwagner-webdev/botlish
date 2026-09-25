@@ -1,0 +1,5 @@
+exact_calls=4 false_false=1 false_true=0 true_false=1 true_true=2 completion_checks_removed=1 call_safepoints_removed=2
+call caller=0 caller_name="<program>" callee=3 callee_name="byte::set" may_error=true may_gc=true
+call caller=0 caller_name="<program>" callee=3 callee_name="byte::set" may_error=true may_gc=true
+call caller=3 caller_name="byte::set" callee=1 callee_name="char::codepoint" may_error=false may_gc=false
+call caller=3 caller_name="byte::set" callee=2 callee_name="byte::from_int" may_error=true may_gc=false

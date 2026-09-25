@@ -1,0 +1,19 @@
+i0 <program>
+i3 peek<str, int>
+    param text: declared=- first-ref-view-type=str entry-range=[-∞, +∞]
+    param index: declared=- first-ref-view-type=int entry-range=[0, 4611686018427387902]
+    result range: [-∞, +∞]
+i5 cleaner_emoji<str>
+    param character: declared=- first-ref-view-type=str entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i4 clean_char<str>
+    param character: declared=- first-ref-view-type=str entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i2 clean_from<str, int, str>
+    param text: declared=- first-ref-view-type=str entry-range=[-∞, +∞]
+    param index: declared=- first-ref-view-type=int entry-range=[0, +∞]
+    param done: declared=- first-ref-view-type=str entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i1 clean_ai_text<str>
+    param text: declared=- first-ref-view-type=str entry-range=[-∞, +∞]
+    result range: [-∞, +∞]

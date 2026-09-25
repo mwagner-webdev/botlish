@@ -1,0 +1,4 @@
+# Probe D: byte::from_int on the exact literal 45 (statically safe, no
+# handler). Shape of tests/errors.test errors-byte-from-int-known-safe-
+# literal-no-handler (which uses 5).
+byte::from_int(45)

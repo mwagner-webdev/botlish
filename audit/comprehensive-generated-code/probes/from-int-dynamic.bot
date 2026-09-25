@@ -1,0 +1,11 @@
+# Probe A: byte::from_int on an unconstrained Int (a listloop element: no
+# range fact reaches it), both errors handled. Shape of tests/ascii.test's
+# loop-over-ns programs.
+ns = [0 - 1, 45, 300]
+loop n in ns:
+    b = byte::from_int(n):
+        on BelowRange:
+            0
+        on AboveRange:
+            0
+    b

@@ -1,0 +1,202 @@
+diagnostics: 0
+
+e26 (call) hashtable.bot:98 -> ht_empty_state
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, 0] {0}
+e28 (call) hashtable.bot:99 -> ht_fill_empty
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e42 (call) hashtable.bot:103 -> ht_fill_empty
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e87 (call) hashtable.bot:115 -> ht_alloc
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e89 (call) hashtable.bot:115 -> ht_min_capacity
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[8, 8] {8}
+e106 (call) hashtable.bot:125 -> ht_capacity_for
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e115 (call) hashtable.bot:128 -> ht_alloc
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e117 (call) hashtable.bot:128 -> ht_capacity_for
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e120 (call) hashtable.bot:128 -> ht_min_capacity
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[8, 8] {8}
+e156 (call) hashtable.bot:149 -> ht_controls
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e166 (call) hashtable.bot:155 -> ht_capacity
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, 4611686018427387903]
+e177 (call) hashtable.bot:158 -> ht_capacity
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, 4611686018427387903]
+e183 (call) hashtable.bot:164 -> ht_controls
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e195 (call) hashtable.bot:166 -> ht_empty_state
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, 0] {0}
+e207 (call) hashtable.bot:169 -> ht_occupied_state
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[1, 1] {1}
+e214 (call) hashtable.bot:169 -> ht_keys
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e224 (call) hashtable.bot:172 -> ht_find_get
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e228 (call) hashtable.bot:172 -> ht_probe_next
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, +∞]
+e235 (call) hashtable.bot:179 -> ht_controls
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e247 (call) hashtable.bot:181 -> ht_empty_state
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, 0] {0}
+e263 (call) hashtable.bot:187 -> ht_occupied_state
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[1, 1] {1}
+e270 (call) hashtable.bot:187 -> ht_keys
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e285 (call) hashtable.bot:190 -> ht_tombstone_state
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[2, 2] {2}
+e296 (call) hashtable.bot:191 -> ht_find_insert
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e300 (call) hashtable.bot:191 -> ht_probe_next
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, +∞]
+e305 (call) hashtable.bot:193 -> ht_find_insert
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e309 (call) hashtable.bot:193 -> ht_probe_next
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, +∞]
+e317 (call) hashtable.bot:200 -> ht_find_get
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e321 (call) hashtable.bot:200 -> ht_probe_start
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, +∞]
+e334 (call) hashtable.bot:204 -> ht_values
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e342 (call) hashtable.bot:207 -> ht_find_get
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e346 (call) hashtable.bot:207 -> ht_probe_start
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, +∞]
+e362 (call) hashtable.bot:216 -> ht_empty_state
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, 0] {0}
+e366 (call) hashtable.bot:219 -> ht_rehash_probe
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e385 (call) hashtable.bot:226 -> ht_rehash_probe
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e399 (call) hashtable.bot:227 -> ht_occupied_state
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[1, 1] {1}
+e439 (call) hashtable.bot:240 -> ht_occupied_state
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[1, 1] {1}
+e457 (call) hashtable.bot:243 -> ht_rehash_insert
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e463 (call) hashtable.bot:245 -> ht_rehash_scan
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e478 (call) hashtable.bot:251 -> ht_controls
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e481 (call) hashtable.bot:251 -> ht_keys
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e484 (call) hashtable.bot:251 -> ht_values
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e488 (call) hashtable.bot:252 -> ht_capacity
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, 4611686018427387903]
+e495 (call) hashtable.bot:254 -> ht_fill_empty
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e510 (call) hashtable.bot:256 -> ht_rehash_scan
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e552 (call) hashtable.bot:266 -> ht_size
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e555 (call) hashtable.bot:266 -> ht_tombstones
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e569 (call) hashtable.bot:267 -> ht_capacity
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, 4611686018427387903]
+e578 (call) hashtable.bot:270 -> ht_tombstones
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e581 (call) hashtable.bot:270 -> ht_size
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e584 (call) hashtable.bot:271 -> ht_rehash
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e587 (call) hashtable.bot:271 -> ht_capacity
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, 4611686018427387903]
+e590 (call) hashtable.bot:273 -> ht_rehash
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e595 (call) hashtable.bot:273 -> ht_capacity
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, 4611686018427387903]
+e602 (call) hashtable.bot:300 -> ht_controls
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e614 (call) hashtable.bot:302 -> ht_occupied_state
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[1, 1] {1}
+e618 (call) hashtable.bot:303 -> ht_keys
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e625 (call) hashtable.bot:304 -> ht_values
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e636 (call) hashtable.bot:305 -> ht_size
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e644 (call) hashtable.bot:306 -> ht_tombstone_state
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[2, 2] {2}
+e652 (call) hashtable.bot:307 -> ht_tombstones
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e660 (call) hashtable.bot:312 -> ht_find_insert
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e664 (call) hashtable.bot:312 -> ht_probe_start
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, +∞]
+e673 (call) hashtable.bot:313 -> ht_controls
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e685 (call) hashtable.bot:315 -> ht_occupied_state
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[1, 1] {1}
+e689 (call) hashtable.bot:316 -> ht_values
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e697 (call) hashtable.bot:319 -> ht_should_grow
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e700 (call) hashtable.bot:320 -> ht_grow_or_clean
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e704 (call) hashtable.bot:321 -> ht_place
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e707 (call) hashtable.bot:321 -> ht_find_insert
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e711 (call) hashtable.bot:321 -> ht_probe_start
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, +∞]
+e721 (call) hashtable.bot:323 -> ht_place
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e730 (call) hashtable.bot:332 -> ht_find_get
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e734 (call) hashtable.bot:332 -> ht_probe_start
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, +∞]
+e747 (call) hashtable.bot:336 -> ht_controls
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e751 (call) hashtable.bot:336 -> ht_tombstone_state
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[2, 2] {2}
+e755 (call) hashtable.bot:337 -> ht_keys
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e762 (call) hashtable.bot:338 -> ht_values
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e773 (call) hashtable.bot:339 -> ht_size
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e783 (call) hashtable.bot:340 -> ht_tombstones
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e802 (call) hashtable.bot:351 -> ht_controls
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e806 (call) hashtable.bot:351 -> ht_occupied_state
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[1, 1] {1}
+e814 (call) hashtable.bot:352 -> ht_keys
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e820 (call) hashtable.bot:352 -> ht_values
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e825 (call) hashtable.bot:353 -> ht_fold
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e835 (call) hashtable.bot:355 -> ht_fold
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e856 (call) hashtable.bot:362 -> ht_fold
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e860 (call) hashtable.bot:362 -> ht_capacity
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, 4611686018427387903]
+e869 (call) hashtable.bot:368 -> ht_new
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e871 (call) hashtable.bot:369 -> ht_set
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e876 (call) hashtable.bot:370 -> ht_set
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e881 (call) hashtable.bot:371 -> ht_set
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e887 (call) hashtable.bot:372 -> ht_contains
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e891 (call) hashtable.bot:373 -> ht_delete
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e899 (call) hashtable.bot:374 -> ht_get
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e905 (call) hashtable.bot:374 -> ht_contains
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e909 (call) hashtable.bot:374 -> ht_contains
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e915 (call) hashtable.bot:374 -> ht_get
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e920 (call) hashtable.bot:374 -> ht_size
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e923 (call) hashtable.bot:376 -> sample
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]

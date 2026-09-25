@@ -1,0 +1,22 @@
+i0 <program>: generic=1 key={} result=int
+    call e420 steady-ascii-param.bot:7 -> i1 byte::from_int<int>
+    call e502 steady-ascii-param.bot:28 -> i2 rep<List[int], int, int>
+i1 byte::from_int<int>: generic=0 key={int} result=int[Byte]
+i9 ascii::is_digit<int>: generic=0 key={int} result=bool
+i7 ascii::is_upper<int>: generic=0 key={int} result=bool
+i8 ascii::is_lower<int>: generic=0 key={int} result=bool
+i6 ascii::is_alphabetic<int>: generic=0 key={int} result=bool
+    call e133 ascii.bot:63 -> i7 ascii::is_upper<int>
+    call e138 ascii.bot:63 -> i8 ascii::is_lower<int>
+i5 ascii::is_alphanumeric<int>: generic=0 key={int} result=bool
+    call e146 ascii.bot:66 -> i6 ascii::is_alphabetic<int>
+    call e151 ascii.bot:66 -> i9 ascii::is_digit<int>
+i4 cls<int, List[int]>: generic=0 key={int {List[int]}} result=bool
+    call e429 steady-ascii-param.bot:14 -> i5 ascii::is_alphanumeric<int>
+i3 count<List[int], int, int>: generic=0 key={{List[int]} int int} result=int
+    call e453 steady-ascii-param.bot:19 -> i4 cls<int, List[int]>
+    call e460 steady-ascii-param.bot:20 -> i3 count<List[int], int, int>
+    call e471 steady-ascii-param.bot:22 -> i3 count<List[int], int, int>
+i2 rep<List[int], int, int>: generic=0 key={{List[int]} int int} result=int
+    call e497 steady-ascii-param.bot:27 -> i3 count<List[int], int, int>
+    call e487 steady-ascii-param.bot:27 -> i2 rep<List[int], int, int>

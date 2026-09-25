@@ -1,0 +1,66 @@
+== refined-checks
+other           7781 B   45.9%
+guard/error     2127 B   12.6%
+callee-save     2117 B   12.5%
+root-store      1419 B    8.4%
+frame           1183 B    7.0%
+bool             860 B    5.1%
+helper-call      725 B    4.3%
+call             385 B    2.3%
+padding          342 B    2.0%
+total          16939 B
+== csv_records
+other           8185 B   40.1%
+callee-save     2861 B   14.0%
+guard/error     2830 B   13.9%
+root-store      2091 B   10.3%
+frame           1973 B    9.7%
+helper-call      905 B    4.4%
+call             720 B    3.5%
+bool             512 B    2.5%
+padding          312 B    1.5%
+total          20389 B
+== byte-set-canonical
+other            409 B   36.8%
+root-store       153 B   13.8%
+frame            124 B   11.2%
+guard/error      121 B   10.9%
+callee-save      117 B   10.5%
+helper-call       65 B    5.8%
+bool              60 B    5.4%
+call              35 B    3.1%
+padding           28 B    2.5%
+total           1112 B
+== ai_text_clean
+other           1575 B   56.0%
+callee-save      272 B    9.7%
+root-store       242 B    8.6%
+frame            211 B    7.5%
+bool             172 B    6.1%
+helper-call      140 B    5.0%
+guard/error      120 B    4.3%
+call              70 B    2.5%
+padding            8 B    0.3%
+total           2810 B
+== web-unreserved-256
+root-store      9735 B   60.6%
+other           3105 B   19.3%
+guard/error      970 B    6.0%
+callee-save      792 B    4.9%
+frame            574 B    3.6%
+helper-call      335 B    2.1%
+bool             268 B    1.7%
+call             165 B    1.0%
+padding          131 B    0.8%
+total          16075 B
+== ascii-256
+root-store      6267 B   79.9%
+other            806 B   10.3%
+frame            200 B    2.6%
+callee-save      188 B    2.4%
+guard/error      113 B    1.4%
+call              85 B    1.1%
+helper-call       80 B    1.0%
+bool              76 B    1.0%
+padding           25 B    0.3%
+total           7840 B

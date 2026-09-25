@@ -1,0 +1,248 @@
+diagnostics: 0
+
+e41 (call) csv_records.bot:118 -> geo_new_capacity
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[1, 9223372036854775806]
+e70 (call) csv_records.bot:126 -> geo_grow
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e124 (call) csv_records.bot:146 -> peek
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e160 (call) csv_records.bot:150 -> scan_unquoted
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e171 (call) csv_records.bot:153 -> peek
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e183 (call) csv_records.bot:155 -> peek
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e192 (call) csv_records.bot:156 -> scan_quoted
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e211 (call) csv_records.bot:160 -> scan_quoted
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e227 (call) csv_records.bot:163 -> peek
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e233 (call) csv_records.bot:164 -> scan_quoted
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e241 (call) csv_records.bot:166 -> scan_unquoted
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e249 (call) csv_records.bot:169 -> scan_field
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e254 (call) csv_records.bot:170 -> geo_append
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e267 (call) csv_records.bot:172 -> peek
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e277 (call) csv_records.bot:174 -> scan_record
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e293 (call) csv_records.bot:177 -> geo_finish
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e302 (call) csv_records.bot:179 -> geo_finish
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e316 (call) csv_records.bot:183 -> geo_finish
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e320 (call) csv_records.bot:185 -> scan_record
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e324 (call) csv_records.bot:185 -> geo_new
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e326 (call) csv_records.bot:186 -> scan_records
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e333 (call) csv_records.bot:186 -> geo_append
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e342 (call) csv_records.bot:189 -> scan_records
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e346 (call) csv_records.bot:189 -> geo_new
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e373 (call) csv_records.bot:212 -> ht_empty_state
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, 0] {0}
+e375 (call) csv_records.bot:213 -> ht_fill_empty
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e389 (call) csv_records.bot:217 -> ht_fill_empty
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e434 (call) csv_records.bot:229 -> ht_alloc
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e436 (call) csv_records.bot:229 -> ht_min_capacity
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[8, 8] {8}
+e453 (call) csv_records.bot:235 -> ht_capacity_for
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e462 (call) csv_records.bot:238 -> ht_alloc
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e464 (call) csv_records.bot:238 -> ht_capacity_for
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e467 (call) csv_records.bot:238 -> ht_min_capacity
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[8, 8] {8}
+e503 (call) csv_records.bot:256 -> ht_controls
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e513 (call) csv_records.bot:259 -> ht_capacity
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, 4611686018427387903]
+e524 (call) csv_records.bot:262 -> ht_capacity
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, 4611686018427387903]
+e530 (call) csv_records.bot:265 -> ht_controls
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e542 (call) csv_records.bot:267 -> ht_empty_state
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, 0] {0}
+e554 (call) csv_records.bot:270 -> ht_occupied_state
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[1, 1] {1}
+e561 (call) csv_records.bot:270 -> ht_keys
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e571 (call) csv_records.bot:273 -> ht_find_get
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e575 (call) csv_records.bot:273 -> ht_probe_next
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, +∞]
+e582 (call) csv_records.bot:276 -> ht_controls
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e594 (call) csv_records.bot:278 -> ht_empty_state
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, 0] {0}
+e610 (call) csv_records.bot:284 -> ht_occupied_state
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[1, 1] {1}
+e617 (call) csv_records.bot:284 -> ht_keys
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e632 (call) csv_records.bot:287 -> ht_tombstone_state
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[2, 2] {2}
+e643 (call) csv_records.bot:288 -> ht_find_insert
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e647 (call) csv_records.bot:288 -> ht_probe_next
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, +∞]
+e652 (call) csv_records.bot:290 -> ht_find_insert
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e656 (call) csv_records.bot:290 -> ht_probe_next
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, +∞]
+e664 (call) csv_records.bot:293 -> ht_find_get
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e668 (call) csv_records.bot:293 -> ht_probe_start
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, +∞]
+e681 (call) csv_records.bot:297 -> ht_values
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e689 (call) csv_records.bot:300 -> ht_find_get
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e693 (call) csv_records.bot:300 -> ht_probe_start
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, +∞]
+e709 (call) csv_records.bot:304 -> ht_empty_state
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, 0] {0}
+e713 (call) csv_records.bot:307 -> ht_rehash_probe
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e732 (call) csv_records.bot:311 -> ht_rehash_probe
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e746 (call) csv_records.bot:312 -> ht_occupied_state
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[1, 1] {1}
+e786 (call) csv_records.bot:322 -> ht_occupied_state
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[1, 1] {1}
+e804 (call) csv_records.bot:325 -> ht_rehash_insert
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e810 (call) csv_records.bot:327 -> ht_rehash_scan
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e825 (call) csv_records.bot:330 -> ht_controls
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e828 (call) csv_records.bot:330 -> ht_keys
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e831 (call) csv_records.bot:330 -> ht_values
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e835 (call) csv_records.bot:331 -> ht_capacity
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, 4611686018427387903]
+e842 (call) csv_records.bot:333 -> ht_fill_empty
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e857 (call) csv_records.bot:335 -> ht_rehash_scan
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e899 (call) csv_records.bot:343 -> ht_size
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e902 (call) csv_records.bot:343 -> ht_tombstones
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e916 (call) csv_records.bot:344 -> ht_capacity
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, 4611686018427387903]
+e925 (call) csv_records.bot:347 -> ht_tombstones
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e928 (call) csv_records.bot:347 -> ht_size
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e931 (call) csv_records.bot:348 -> ht_rehash
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e934 (call) csv_records.bot:348 -> ht_capacity
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, 4611686018427387903]
+e937 (call) csv_records.bot:350 -> ht_rehash
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e942 (call) csv_records.bot:350 -> ht_capacity
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, 4611686018427387903]
+e949 (call) csv_records.bot:353 -> ht_controls
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e961 (call) csv_records.bot:355 -> ht_occupied_state
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[1, 1] {1}
+e965 (call) csv_records.bot:356 -> ht_keys
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e972 (call) csv_records.bot:357 -> ht_values
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e983 (call) csv_records.bot:358 -> ht_size
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e991 (call) csv_records.bot:359 -> ht_tombstone_state
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[2, 2] {2}
+e999 (call) csv_records.bot:360 -> ht_tombstones
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e1007 (call) csv_records.bot:365 -> ht_find_insert
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e1011 (call) csv_records.bot:365 -> ht_probe_start
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, +∞]
+e1020 (call) csv_records.bot:366 -> ht_controls
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e1032 (call) csv_records.bot:368 -> ht_occupied_state
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[1, 1] {1}
+e1036 (call) csv_records.bot:369 -> ht_values
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e1044 (call) csv_records.bot:372 -> ht_should_grow
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e1047 (call) csv_records.bot:373 -> ht_grow_or_clean
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e1051 (call) csv_records.bot:374 -> ht_place
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e1054 (call) csv_records.bot:374 -> ht_find_insert
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e1058 (call) csv_records.bot:374 -> ht_probe_start
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, +∞]
+e1068 (call) csv_records.bot:376 -> ht_place
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e1079 (call) csv_records.bot:386 -> ht_new_sized
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e1082 (call) csv_records.bot:388 -> ht_new
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e1093 (call) csv_records.bot:399 -> ht_set
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e1104 (call) csv_records.bot:400 -> row_fill
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e1117 (call) csv_records.bot:405 -> row_new
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e1121 (call) csv_records.bot:406 -> row_fill
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e1140 (call) csv_records.bot:414 -> geo_finish
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e1144 (call) csv_records.bot:416 -> row_table
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e1153 (call) csv_records.bot:417 -> build_rows
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e1162 (call) csv_records.bot:417 -> geo_append
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e1170 (call) csv_records.bot:424 -> csv_parse
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e1188 (call) csv_records.bot:429 -> build_rows
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e1196 (call) csv_records.bot:429 -> geo_new
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e1201 (call) csv_records.bot:434 -> csv_records_generic
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e1207 (call) csv_records.bot:439 -> csv_records_generic
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e1214 (call) csv_records.bot:447 -> csv_records
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e1218 (call) csv_records.bot:448 -> csv_records_presized
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e1240 (call) csv_records.bot:452 -> ht_get
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e1244 (call) csv_records.bot:452 -> ht_get
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e1251 (call) csv_records.bot:452 -> ht_size
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e1254 (call) csv_records.bot:452 -> ht_size
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e1265 (call) csv_records.bot:453 -> ht_get
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e1269 (call) csv_records.bot:453 -> ht_get
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e1273 (call) csv_records.bot:453 -> ht_get
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e1277 (call) csv_records.bot:453 -> ht_get
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e1281 (call) csv_records.bot:453 -> ht_get
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e1286 (call) csv_records.bot:455 -> sample
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]

@@ -1,0 +1,25 @@
+function 0 "<program>"
+  NIR regs: 31
+  raw regs: 9
+  managed-capable regs: 22
+  effects: may_error=true may_gc=true
+  safepoints: 6
+  root candidates: 14
+  max live roots: 6
+  shadow slots: 6
+  entry zero slots: 3
+  depth reservation: no
+  storage: native frame
+
+function 1 "byte::from_int"
+  NIR regs: 10
+  raw regs: 3
+  managed-capable regs: 7
+  effects: may_error=true may_gc=false
+  safepoints: 0
+  root candidates: 0
+  max live roots: 0
+  shadow slots: 0
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame

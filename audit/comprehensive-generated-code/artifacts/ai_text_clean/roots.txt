@@ -1,0 +1,64 @@
+function 0 "<program>"
+  NIR regs: 13
+  raw regs: 0
+  managed-capable regs: 13
+  effects: may_error=true may_gc=true
+  safepoints: 7
+  root candidates: 12
+  max live roots: 6
+  shadow slots: 6
+  entry zero slots: 5
+  depth reservation: no
+  storage: native frame
+
+function 1 "cleaner_emoji"
+  NIR regs: 128
+  raw regs: 24
+  managed-capable regs: 104
+  effects: may_error=false may_gc=false
+  safepoints: 0
+  root candidates: 0
+  max live roots: 0
+  shadow slots: 0
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 2 "clean_char"
+  NIR regs: 74
+  raw regs: 14
+  managed-capable regs: 60
+  effects: may_error=false may_gc=false
+  safepoints: 0
+  root candidates: 0
+  max live roots: 0
+  shadow slots: 0
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 3 "clean_from"
+  NIR regs: 23
+  raw regs: 3
+  managed-capable regs: 20
+  effects: may_error=true may_gc=true
+  safepoints: 3
+  root candidates: 8
+  max live roots: 6
+  shadow slots: 6
+  entry zero slots: 2
+  depth reservation: no
+  storage: native frame
+
+function 4 "clean_ai_text"
+  NIR regs: 7
+  raw regs: 2
+  managed-capable regs: 5
+  effects: may_error=true may_gc=true
+  safepoints: 1
+  root candidates: 4
+  max live roots: 4
+  shadow slots: 4
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame

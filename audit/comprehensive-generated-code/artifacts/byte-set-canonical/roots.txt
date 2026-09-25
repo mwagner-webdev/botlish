@@ -1,0 +1,51 @@
+function 0 "<program>"
+  NIR regs: 6
+  raw regs: 0
+  managed-capable regs: 6
+  effects: may_error=true may_gc=true
+  safepoints: 2
+  root candidates: 5
+  max live roots: 4
+  shadow slots: 4
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 1 "char::codepoint"
+  NIR regs: 2
+  raw regs: 0
+  managed-capable regs: 2
+  effects: may_error=false may_gc=false
+  safepoints: 0
+  root candidates: 0
+  max live roots: 0
+  shadow slots: 0
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 2 "byte::from_int"
+  NIR regs: 9
+  raw regs: 2
+  managed-capable regs: 7
+  effects: may_error=true may_gc=false
+  safepoints: 0
+  root candidates: 0
+  max live roots: 0
+  shadow slots: 0
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 3 "byte::set"
+  NIR regs: 17
+  raw regs: 2
+  managed-capable regs: 15
+  effects: may_error=true may_gc=true
+  safepoints: 4
+  root candidates: 8
+  max live roots: 5
+  shadow slots: 5
+  entry zero slots: 2
+  depth reservation: no
+  storage: native frame

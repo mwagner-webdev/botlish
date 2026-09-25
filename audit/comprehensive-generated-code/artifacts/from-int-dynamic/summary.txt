@@ -1,0 +1,12 @@
+source: audit/comprehensive-generated-code/probes/from-int-dynamic.bot
+lower options: 
+static diagnostics: 0
+NIR functions: 2; machine code bytes: 1135
+allocation (one run): allocations=5 bytes=192 List=5 static=2
+  sites:
+    from-int-dynamic.bot:4 listnew x1
+    from-int-dynamic.bot:5 listnew x1
+    from-int-dynamic.bot:5 listappend x3
+
+  0 <program><generic>                       regs=32  params=0 env=0 bytes=806   op:risub=1 op:rbox=1 op:listnew=2 op:listlen=1 op:ilt=1 br=3 op:listget=1 pusherrorexit=1 call=1 poperrorexit=1 declarederroreq=2 cleardeclarederror=2 reraise=1 op:listappend=1 op:iadd=1
+  1 byte::from_int<int>                      regs=9   params=1 env=0 bytes=329   op:ilt=1 br=2 fail=2 op:igt=1

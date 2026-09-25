@@ -1,0 +1,23 @@
+i0 <program>: generic=1 key={} result=int
+    call e420 steady-ascii-capture.bot:9 -> i1 byte::from_int<int>
+    call e501 steady-ascii-capture.bot:30 -> i2 rep<List[int], int, int>
+i1 byte::from_int<int>: generic=0 key={int} result=int[Byte]
+i9 ascii::is_digit<generic>: generic=1 key={any} result=bool
+i7 ascii::is_upper<generic>: generic=1 key={any} result=bool
+i8 ascii::is_lower<generic>: generic=1 key={any} result=bool
+i6 ascii::is_alphabetic<generic>: generic=1 key={any} result=bool
+    call e133 ascii.bot:63 -> i7 ascii::is_upper<generic>
+    call e138 ascii.bot:63 -> i8 ascii::is_lower<generic>
+i5 ascii::is_alphanumeric<generic>: generic=1 key={any} result=bool
+    call e146 ascii.bot:66 -> i6 ascii::is_alphabetic<generic>
+    call e151 ascii.bot:66 -> i9 ascii::is_digit<generic>
+i3 count<List[int], int, int>: generic=0 key={{List[int]} int int} result=int
+    call e453 steady-ascii-capture.bot:21 -> i4 cls<generic>
+    call e459 steady-ascii-capture.bot:22 -> i3 count<List[int], int, int>
+    call e470 steady-ascii-capture.bot:24 -> i3 count<List[int], int, int>
+    materializes Block values: e429
+i4 cls<generic>: generic=1 key={any} result=bool
+    call e431 steady-ascii-capture.bot:17 -> i5 ascii::is_alphanumeric<generic>
+i2 rep<List[int], int, int>: generic=0 key={{List[int]} int int} result=int
+    call e496 steady-ascii-capture.bot:29 -> i3 count<List[int], int, int>
+    call e486 steady-ascii-capture.bot:29 -> i2 rep<List[int], int, int>

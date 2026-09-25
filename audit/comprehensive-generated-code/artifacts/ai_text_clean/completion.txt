@@ -1,0 +1,24 @@
+diagnostics: 0
+
+e128 (call) ai_text_clean.bot:52 -> cleaner_emoji
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e200 (call) ai_text_clean.bot:74 -> clean_from
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e210 (call) ai_text_clean.bot:74 -> clean_char
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e212 (call) ai_text_clean.bot:74 -> peek
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e218 (call) ai_text_clean.bot:77 -> clean_from
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e225 (call) ai_text_clean.bot:79 -> clean_ai_text
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e228 (call) ai_text_clean.bot:79 -> clean_ai_text
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e231 (call) ai_text_clean.bot:79 -> clean_ai_text
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e234 (call) ai_text_clean.bot:79 -> clean_ai_text
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e237 (call) ai_text_clean.bot:79 -> clean_ai_text
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e240 (call) ai_text_clean.bot:79 -> clean_ai_text
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]

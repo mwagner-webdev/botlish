@@ -1,0 +1,129 @@
+function 0 "<program>"
+  NIR regs: 539
+  raw regs: 262
+  managed-capable regs: 277
+  effects: may_error=true may_gc=true
+  safepoints: 5
+  root candidates: 266
+  max live roots: 256
+  shadow slots: 256
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 1 "byte::from_int"
+  NIR regs: 9
+  raw regs: 2
+  managed-capable regs: 7
+  effects: may_error=true may_gc=false
+  safepoints: 0
+  root candidates: 0
+  max live roots: 0
+  shadow slots: 0
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 2 "ascii::is_digit"
+  NIR regs: 13
+  raw regs: 3
+  managed-capable regs: 10
+  effects: may_error=false may_gc=false
+  safepoints: 0
+  root candidates: 0
+  max live roots: 0
+  shadow slots: 0
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 3 "ascii::is_upper"
+  NIR regs: 13
+  raw regs: 3
+  managed-capable regs: 10
+  effects: may_error=false may_gc=false
+  safepoints: 0
+  root candidates: 0
+  max live roots: 0
+  shadow slots: 0
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 4 "ascii::is_lower"
+  NIR regs: 13
+  raw regs: 3
+  managed-capable regs: 10
+  effects: may_error=false may_gc=false
+  safepoints: 0
+  root candidates: 0
+  max live roots: 0
+  shadow slots: 0
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 5 "ascii::is_alphabetic"
+  NIR regs: 8
+  raw regs: 0
+  managed-capable regs: 8
+  effects: may_error=false may_gc=false
+  safepoints: 0
+  root candidates: 0
+  max live roots: 0
+  shadow slots: 0
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 6 "ascii::is_alphanumeric"
+  NIR regs: 8
+  raw regs: 0
+  managed-capable regs: 8
+  effects: may_error=false may_gc=false
+  safepoints: 0
+  root candidates: 0
+  max live roots: 0
+  shadow slots: 0
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 7 "cls"
+  NIR regs: 13
+  raw regs: 2
+  managed-capable regs: 11
+  effects: may_error=false may_gc=false
+  safepoints: 0
+  root candidates: 0
+  max live roots: 0
+  shadow slots: 0
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 8 "count"
+  NIR regs: 22
+  raw regs: 7
+  managed-capable regs: 15
+  effects: may_error=true may_gc=true
+  safepoints: 1
+  root candidates: 4
+  max live roots: 4
+  shadow slots: 4
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 9 "rep"
+  NIR regs: 18
+  raw regs: 6
+  managed-capable regs: 12
+  effects: may_error=true may_gc=true
+  safepoints: 2
+  root candidates: 6
+  max live roots: 5
+  shadow slots: 5
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame

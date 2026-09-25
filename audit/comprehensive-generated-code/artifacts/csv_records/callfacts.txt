@@ -1,0 +1,476 @@
+<program> e1286 csv_records.bot:455 -> sample<generic>
+    result: type list[int, any, any, any, any, any, bool], range [-∞, +∞]; semantic effectiveErrors {}
+geo_grow<mutarray, int> e41 csv_records.bot:118 -> geo_new_capacity<int, int>
+    arg0: type int, range [0, 4611686018427387903]
+    arg1: type int, range [0, +∞]
+    result: type int, range [1, +∞]; semantic effectiveErrors {}
+geo_append<list[mutarray, int], str> e70 csv_records.bot:126 -> geo_grow<mutarray, int>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type int, range [-∞, +∞]
+    result: type mutarray, range [-∞, +∞]; semantic effectiveErrors {}
+geo_append<list[mutarray, int], list> e70 csv_records.bot:126 -> geo_grow<mutarray, int>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type int, range [-∞, +∞]
+    result: type mutarray, range [-∞, +∞]; semantic effectiveErrors {}
+geo_append<list[mutarray, int], mutarray> e70 csv_records.bot:126 -> geo_grow<mutarray, int>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type int, range [-∞, +∞]
+    result: type mutarray, range [-∞, +∞]; semantic effectiveErrors {}
+scan_unquoted<str, int, int> e124 csv_records.bot:146 -> peek<str, int>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [-∞, +∞]
+    result: type str, range [-∞, +∞]; semantic effectiveErrors {}
+scan_unquoted<str, int, int> e160 csv_records.bot:150 -> scan_unquoted<str, int, int>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [-∞, +∞]
+    arg2: type int, range [-∞, +∞]
+    result: type list[str, int], range [-∞, +∞]; semantic effectiveErrors {}
+scan_quoted<str, int, str> e171 csv_records.bot:153 -> peek<str, int>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [-∞, +∞]
+    result: type str, range [-∞, +∞]; semantic effectiveErrors {}
+scan_quoted<str, int, str> e183 csv_records.bot:155 -> peek<str, int>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [-∞, +∞]
+    result: type str, range [-∞, +∞]; semantic effectiveErrors {}
+scan_quoted<str, int, str> e192 csv_records.bot:156 -> scan_quoted<str, int, str>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [-∞, +∞]
+    arg2: type str, range [-∞, +∞]
+    result: type list[str, int], range [-∞, +∞]; semantic effectiveErrors {}
+scan_quoted<str, int, str> e211 csv_records.bot:160 -> scan_quoted<str, int, str>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [-∞, +∞]
+    arg2: type str, range [-∞, +∞]
+    result: type list[str, int], range [-∞, +∞]; semantic effectiveErrors {}
+scan_field<str, int> e227 csv_records.bot:163 -> peek<str, int>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [-∞, +∞]
+    result: type str, range [-∞, +∞]; semantic effectiveErrors {}
+scan_field<str, int> e233 csv_records.bot:164 -> scan_quoted<str, int, str>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [-∞, +∞]
+    arg2: type str, range [-∞, +∞]
+    result: type list[str, int], range [-∞, +∞]; semantic effectiveErrors {}
+scan_field<str, int> e241 csv_records.bot:166 -> scan_unquoted<str, int, int>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [-∞, +∞]
+    arg2: type int, range [-∞, +∞]
+    result: type list[str, int], range [-∞, +∞]; semantic effectiveErrors {}
+scan_record<str, int, list[mutarray, int]> e249 csv_records.bot:169 -> scan_field<str, int>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [-∞, +∞]
+    result: type list[str, int], range [-∞, +∞]; semantic effectiveErrors {}
+scan_record<str, int, list[mutarray, int]> e254 csv_records.bot:170 -> geo_append<list[mutarray, int], str>
+    arg0: type list[mutarray, int], range [-∞, +∞]
+    arg1: type str, range [-∞, +∞]
+    result: type list[mutarray, int], range [-∞, +∞]; semantic effectiveErrors {}
+scan_record<str, int, list[mutarray, int]> e267 csv_records.bot:172 -> peek<str, int>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [-∞, +∞]
+    result: type str, range [-∞, +∞]; semantic effectiveErrors {}
+scan_record<str, int, list[mutarray, int]> e277 csv_records.bot:174 -> scan_record<str, int, list[mutarray, int]>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [-∞, +∞]
+    arg2: type list[mutarray, int], range [-∞, +∞]
+    result: type list[list, int], range [-∞, +∞]; semantic effectiveErrors {}
+scan_record<str, int, list[mutarray, int]> e293 csv_records.bot:177 -> geo_finish<list[mutarray, int]>
+    arg0: type list[mutarray, int], range [-∞, +∞]
+    result: type list, range [-∞, +∞]; semantic effectiveErrors {}
+scan_record<str, int, list[mutarray, int]> e302 csv_records.bot:179 -> geo_finish<list[mutarray, int]>
+    arg0: type list[mutarray, int], range [-∞, +∞]
+    result: type list, range [-∞, +∞]; semantic effectiveErrors {}
+scan_records<str, int, list[mutarray, int]> e316 csv_records.bot:183 -> geo_finish<list[mutarray, int]>
+    arg0: type list[mutarray, int], range [-∞, +∞]
+    result: type list, range [-∞, +∞]; semantic effectiveErrors {}
+scan_records<str, int, list[mutarray, int]> e324 csv_records.bot:185 -> geo_new<generic>
+    result: type list[mutarray, int], range [-∞, +∞]; semantic effectiveErrors {}
+scan_records<str, int, list[mutarray, int]> e320 csv_records.bot:185 -> scan_record<str, int, list[mutarray, int]>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [-∞, 4611686018427387902]
+    arg2: type list[mutarray, int], range [-∞, +∞]
+    result: type list[list, int], range [-∞, +∞]; semantic effectiveErrors {}
+scan_records<str, int, list[mutarray, int]> e333 csv_records.bot:186 -> geo_append<list[mutarray, int], list>
+    arg0: type list[mutarray, int], range [-∞, +∞]
+    arg1: type list, range [-∞, +∞]
+    result: type list[mutarray, int], range [-∞, +∞]; semantic effectiveErrors {}
+scan_records<str, int, list[mutarray, int]> e326 csv_records.bot:186 -> scan_records<str, int, list[mutarray, int]>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [-∞, +∞]
+    arg2: type list[mutarray, int], range [-∞, +∞]
+    result: type list, range [-∞, +∞]; semantic effectiveErrors {}
+csv_parse<str> e346 csv_records.bot:189 -> geo_new<generic>
+    result: type list[mutarray, int], range [-∞, +∞]; semantic effectiveErrors {}
+csv_parse<str> e342 csv_records.bot:189 -> scan_records<str, int, list[mutarray, int]>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [0, 0] {0}
+    arg2: type list[mutarray, int], range [-∞, +∞]
+    result: type list, range [-∞, +∞]; semantic effectiveErrors {}
+ht_fill_empty<mutarray, int, int> e373 csv_records.bot:212 -> ht_empty_state<generic>
+    result: type int, range [0, 0] {0}; semantic effectiveErrors {}
+ht_fill_empty<mutarray, int, int> e375 csv_records.bot:213 -> ht_fill_empty<mutarray, int, int>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type int, range [1, +∞]
+    arg2: type int, range [1, +∞]
+    result: type unit, range [-∞, +∞]; semantic effectiveErrors {}
+ht_alloc<int> e389 csv_records.bot:217 -> ht_fill_empty<mutarray, int, int>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type int, range [0, 0] {0}
+    arg2: type int, range [-∞, +∞]
+    result: type unit, range [-∞, +∞]; semantic effectiveErrors {}
+ht_new<generic> e436 csv_records.bot:229 -> ht_min_capacity<generic>
+    result: type int, range [8, 8] {8}; semantic effectiveErrors {}
+ht_new<generic> e434 csv_records.bot:229 -> ht_alloc<int>
+    arg0: type int, range [8, 8] {8}
+    result: type mutarray, range [-∞, +∞]; semantic effectiveErrors {}
+ht_capacity_for<int, int> e453 csv_records.bot:235 -> ht_capacity_for<int, int>
+    arg0: type int, range [0, 4611686018427387903]
+    arg1: type int, range [-∞, +∞]
+    result: type int, range [-∞, +∞]; semantic effectiveErrors {}
+ht_new_sized<int> e467 csv_records.bot:238 -> ht_min_capacity<generic>
+    result: type int, range [8, 8] {8}; semantic effectiveErrors {}
+ht_new_sized<int> e464 csv_records.bot:238 -> ht_capacity_for<int, int>
+    arg0: type int, range [0, 4611686018427387903]
+    arg1: type int, range [8, 8] {8}
+    result: type int, range [-∞, +∞]; semantic effectiveErrors {}
+ht_new_sized<int> e462 csv_records.bot:238 -> ht_alloc<int>
+    arg0: type int, range [-∞, +∞]
+    result: type mutarray, range [-∞, +∞]; semantic effectiveErrors {}
+ht_capacity<mutarray> e503 csv_records.bot:256 -> ht_controls<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_capacity<generic> e503 csv_records.bot:256 -> ht_controls<generic>
+    arg0: type any, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_probe_start<mutarray, any> e513 csv_records.bot:259 -> ht_capacity<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type int, range [0, 4611686018427387903]; semantic effectiveErrors {}
+ht_probe_start<any, str> e513 csv_records.bot:259 -> ht_capacity<generic>
+    arg0: type any, range [-∞, +∞]
+    result: type int, range [0, 4611686018427387903]; semantic effectiveErrors {}
+ht_probe_next<mutarray, int> e524 csv_records.bot:262 -> ht_capacity<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type int, range [0, 4611686018427387903]; semantic effectiveErrors {}
+ht_probe_next<any, int> e524 csv_records.bot:262 -> ht_capacity<generic>
+    arg0: type any, range [-∞, +∞]
+    result: type int, range [0, 4611686018427387903]; semantic effectiveErrors {}
+ht_find_get<any, str, int> e530 csv_records.bot:265 -> ht_controls<generic>
+    arg0: type any, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_find_get<any, str, int> e542 csv_records.bot:267 -> ht_empty_state<generic>
+    result: type int, range [0, 0] {0}; semantic effectiveErrors {}
+ht_find_get<any, str, int> e554 csv_records.bot:270 -> ht_occupied_state<generic>
+    result: type int, range [1, 1] {1}; semantic effectiveErrors {}
+ht_find_get<any, str, int> e561 csv_records.bot:270 -> ht_keys<generic>
+    arg0: type any, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_find_get<any, str, int> e575 csv_records.bot:273 -> ht_probe_next<any, int>
+    arg0: type any, range [-∞, +∞]
+    arg1: type int, range [0, +∞]
+    result: type int, range [0, +∞]; semantic effectiveErrors {}
+ht_find_get<any, str, int> e571 csv_records.bot:273 -> ht_find_get<any, str, int>
+    arg0: type any, range [-∞, +∞]
+    arg1: type str, range [-∞, +∞]
+    arg2: type int, range [0, +∞]
+    result: type int, range [-∞, +∞]; semantic effectiveErrors {}
+ht_find_insert<mutarray, any, int, int> e582 csv_records.bot:276 -> ht_controls<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_find_insert<mutarray, any, int, int> e594 csv_records.bot:278 -> ht_empty_state<generic>
+    result: type int, range [0, 0] {0}; semantic effectiveErrors {}
+ht_find_insert<mutarray, any, int, int> e610 csv_records.bot:284 -> ht_occupied_state<generic>
+    result: type int, range [1, 1] {1}; semantic effectiveErrors {}
+ht_find_insert<mutarray, any, int, int> e617 csv_records.bot:284 -> ht_keys<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_find_insert<mutarray, any, int, int> e632 csv_records.bot:287 -> ht_tombstone_state<generic>
+    result: type int, range [2, 2] {2}; semantic effectiveErrors {}
+ht_find_insert<mutarray, any, int, int> e647 csv_records.bot:288 -> ht_probe_next<mutarray, int>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type int, range [0, +∞]
+    result: type int, range [0, +∞]; semantic effectiveErrors {}
+ht_find_insert<mutarray, any, int, int> e643 csv_records.bot:288 -> ht_find_insert<mutarray, any, int, int>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type any, range [-∞, +∞]
+    arg2: type int, range [0, +∞]
+    arg3: type int, range [0, +∞]
+    result: type int, range [-∞, +∞]; semantic effectiveErrors {}
+ht_find_insert<mutarray, any, int, int> e656 csv_records.bot:290 -> ht_probe_next<mutarray, int>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type int, range [0, +∞]
+    result: type int, range [0, +∞]; semantic effectiveErrors {}
+ht_find_insert<mutarray, any, int, int> e652 csv_records.bot:290 -> ht_find_insert<mutarray, any, int, int>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type any, range [-∞, +∞]
+    arg2: type int, range [0, +∞]
+    arg3: type int, range [-∞, +∞]
+    result: type int, range [-∞, +∞]; semantic effectiveErrors {}
+ht_get<any, str> e668 csv_records.bot:293 -> ht_probe_start<any, str>
+    arg0: type any, range [-∞, +∞]
+    arg1: type str, range [-∞, +∞]
+    result: type int, range [0, +∞]; semantic effectiveErrors {}
+ht_get<any, str> e664 csv_records.bot:293 -> ht_find_get<any, str, int>
+    arg0: type any, range [-∞, +∞]
+    arg1: type str, range [-∞, +∞]
+    arg2: type int, range [0, +∞]
+    result: type int, range [-∞, +∞]; semantic effectiveErrors {}
+ht_get<any, str> e681 csv_records.bot:297 -> ht_values<generic>
+    arg0: type any, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_rehash_probe<mutarray, int, int> e709 csv_records.bot:304 -> ht_empty_state<generic>
+    result: type int, range [0, 0] {0}; semantic effectiveErrors {}
+ht_rehash_probe<mutarray, int, int> e713 csv_records.bot:307 -> ht_rehash_probe<mutarray, int, int>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type int, range [0, +∞]
+    arg2: type int, range [0, 9223372036854775806]
+    result: type int, range [-∞, +∞]; semantic effectiveErrors {}
+ht_rehash_insert<List[mutarray], int, any, any> e732 csv_records.bot:311 -> ht_rehash_probe<mutarray, int, int>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type int, range [0, +∞]
+    arg2: type int, range [0, 9223372036854775806]
+    result: type int, range [-∞, +∞]; semantic effectiveErrors {}
+ht_rehash_insert<List[mutarray], int, any, any> e746 csv_records.bot:312 -> ht_occupied_state<generic>
+    result: type int, range [1, 1] {1}; semantic effectiveErrors {}
+ht_rehash_scan<list, int, int, List[mutarray], int> e786 csv_records.bot:322 -> ht_occupied_state<generic>
+    result: type int, range [1, 1] {1}; semantic effectiveErrors {}
+ht_rehash_scan<list, int, int, List[mutarray], int> e804 csv_records.bot:325 -> ht_rehash_insert<List[mutarray], int, any, any>
+    arg0: type List[mutarray], range [-∞, +∞]
+    arg1: type int, range [0, 9223372036854775806]
+    arg2: type any, range [-∞, +∞]
+    arg3: type any, range [-∞, +∞]
+    result: type unit, range [-∞, +∞]; semantic effectiveErrors {}
+ht_rehash_scan<list, int, int, List[mutarray], int> e810 csv_records.bot:327 -> ht_rehash_scan<list, int, int, List[mutarray], int>
+    arg0: type list, range [-∞, +∞]
+    arg1: type int, range [1, 4611686018427387903]
+    arg2: type int, range [1, 4611686018427387903]
+    arg3: type List[mutarray], range [-∞, +∞]
+    arg4: type int, range [0, 9223372036854775806]
+    result: type unit, range [-∞, +∞]; semantic effectiveErrors {}
+ht_rehash<mutarray, int> e825 csv_records.bot:330 -> ht_controls<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_rehash<mutarray, int> e828 csv_records.bot:330 -> ht_keys<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_rehash<mutarray, int> e831 csv_records.bot:330 -> ht_values<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_rehash<mutarray, int> e835 csv_records.bot:331 -> ht_capacity<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type int, range [0, 4611686018427387903]; semantic effectiveErrors {}
+ht_rehash<mutarray, int> e842 csv_records.bot:333 -> ht_fill_empty<mutarray, int, int>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type int, range [0, 0] {0}
+    arg2: type int, range [0, 9223372036854775806]
+    result: type unit, range [-∞, +∞]; semantic effectiveErrors {}
+ht_rehash<mutarray, int> e857 csv_records.bot:335 -> ht_rehash_scan<list, int, int, List[mutarray], int>
+    arg0: type list, range [-∞, +∞]
+    arg1: type int, range [0, 0] {0}
+    arg2: type int, range [0, 4611686018427387903]
+    arg3: type List[mutarray], range [-∞, +∞]
+    arg4: type int, range [0, 9223372036854775806]
+    result: type unit, range [-∞, +∞]; semantic effectiveErrors {}
+ht_should_grow<mutarray> e899 csv_records.bot:343 -> ht_size<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_should_grow<mutarray> e902 csv_records.bot:343 -> ht_tombstones<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_should_grow<mutarray> e916 csv_records.bot:344 -> ht_capacity<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type int, range [0, 4611686018427387903]; semantic effectiveErrors {}
+ht_grow_or_clean<mutarray> e925 csv_records.bot:347 -> ht_tombstones<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_grow_or_clean<mutarray> e928 csv_records.bot:347 -> ht_size<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_grow_or_clean<mutarray> e934 csv_records.bot:348 -> ht_capacity<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type int, range [0, 4611686018427387903]; semantic effectiveErrors {}
+ht_grow_or_clean<mutarray> e931 csv_records.bot:348 -> ht_rehash<mutarray, int>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type int, range [0, 4611686018427387903]
+    result: type unit, range [-∞, +∞]; semantic effectiveErrors {}
+ht_grow_or_clean<mutarray> e942 csv_records.bot:350 -> ht_capacity<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type int, range [0, 4611686018427387903]; semantic effectiveErrors {}
+ht_grow_or_clean<mutarray> e937 csv_records.bot:350 -> ht_rehash<mutarray, int>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type int, range [0, 9223372036854775806]
+    result: type unit, range [-∞, +∞]; semantic effectiveErrors {}
+ht_place<mutarray, int, any, any> e949 csv_records.bot:353 -> ht_controls<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_place<mutarray, int, any, any> e961 csv_records.bot:355 -> ht_occupied_state<generic>
+    result: type int, range [1, 1] {1}; semantic effectiveErrors {}
+ht_place<mutarray, int, any, any> e965 csv_records.bot:356 -> ht_keys<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_place<mutarray, int, any, any> e972 csv_records.bot:357 -> ht_values<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_place<mutarray, int, any, any> e983 csv_records.bot:358 -> ht_size<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_place<mutarray, int, any, any> e991 csv_records.bot:359 -> ht_tombstone_state<generic>
+    result: type int, range [2, 2] {2}; semantic effectiveErrors {}
+ht_place<mutarray, int, any, any> e999 csv_records.bot:360 -> ht_tombstones<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_set<mutarray, any, any> e1011 csv_records.bot:365 -> ht_probe_start<mutarray, any>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type any, range [-∞, +∞]
+    result: type int, range [0, +∞]; semantic effectiveErrors {}
+ht_set<mutarray, any, any> e1007 csv_records.bot:365 -> ht_find_insert<mutarray, any, int, int>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type any, range [-∞, +∞]
+    arg2: type int, range [0, +∞]
+    arg3: type int, range [-1, -1] {-1}
+    result: type int, range [-∞, +∞]; semantic effectiveErrors {}
+ht_set<mutarray, any, any> e1020 csv_records.bot:366 -> ht_controls<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_set<mutarray, any, any> e1032 csv_records.bot:368 -> ht_occupied_state<generic>
+    result: type int, range [1, 1] {1}; semantic effectiveErrors {}
+ht_set<mutarray, any, any> e1036 csv_records.bot:369 -> ht_values<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_set<mutarray, any, any> e1044 csv_records.bot:372 -> ht_should_grow<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type bool, range [-∞, +∞]; semantic effectiveErrors {}
+ht_set<mutarray, any, any> e1047 csv_records.bot:373 -> ht_grow_or_clean<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type unit, range [-∞, +∞]; semantic effectiveErrors {}
+ht_set<mutarray, any, any> e1058 csv_records.bot:374 -> ht_probe_start<mutarray, any>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type any, range [-∞, +∞]
+    result: type int, range [0, +∞]; semantic effectiveErrors {}
+ht_set<mutarray, any, any> e1054 csv_records.bot:374 -> ht_find_insert<mutarray, any, int, int>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type any, range [-∞, +∞]
+    arg2: type int, range [0, +∞]
+    arg3: type int, range [-1, -1] {-1}
+    result: type int, range [-∞, +∞]; semantic effectiveErrors {}
+ht_set<mutarray, any, any> e1051 csv_records.bot:374 -> ht_place<mutarray, int, any, any>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type int, range [-∞, +∞]
+    arg2: type any, range [-∞, +∞]
+    arg3: type any, range [-∞, +∞]
+    result: type unit, range [-∞, +∞]; semantic effectiveErrors {}
+ht_set<mutarray, any, any> e1068 csv_records.bot:376 -> ht_place<mutarray, int, any, any>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type int, range [-∞, +∞]
+    arg2: type any, range [-∞, +∞]
+    arg3: type any, range [-∞, +∞]
+    result: type unit, range [-∞, +∞]; semantic effectiveErrors {}
+row_new<bool, int> e1079 csv_records.bot:386 -> ht_new_sized<int>
+    arg0: type int, range [0, 4611686018427387903]
+    result: type mutarray, range [-∞, +∞]; semantic effectiveErrors {}
+row_new<bool, int> e1082 csv_records.bot:388 -> ht_new<generic>
+    result: type mutarray, range [-∞, +∞]; semantic effectiveErrors {}
+row_fill<mutarray, any, any, int, int> e1093 csv_records.bot:399 -> ht_set<mutarray, any, any>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type any, range [-∞, +∞]
+    arg2: type any, range [-∞, +∞]
+    result: type unit, range [-∞, +∞]; semantic effectiveErrors {}
+row_fill<mutarray, any, any, int, int> e1104 csv_records.bot:400 -> row_fill<mutarray, any, any, int, int>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type list, range [-∞, +∞]
+    arg2: type list, range [-∞, +∞]
+    arg3: type int, range [1, 4611686018427387903]
+    arg4: type int, range [1, 4611686018427387903]
+    result: type mutarray, range [-∞, +∞]; semantic effectiveErrors {}
+row_table<any, int, any, bool> e1117 csv_records.bot:405 -> row_new<bool, int>
+    arg0: type bool, range [-∞, +∞]
+    arg1: type int, range [0, 4611686018427387903]
+    result: type mutarray, range [-∞, +∞]; semantic effectiveErrors {}
+row_table<any, int, any, bool> e1121 csv_records.bot:406 -> row_fill<mutarray, any, any, int, int>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type any, range [-∞, +∞]
+    arg2: type any, range [-∞, +∞]
+    arg3: type int, range [0, 0] {0}
+    arg4: type int, range [0, 4611686018427387903]
+    result: type mutarray, range [-∞, +∞]; semantic effectiveErrors {}
+build_rows<list, int, any, int, list[mutarray, int], bool> e1140 csv_records.bot:414 -> geo_finish<list[mutarray, int]>
+    arg0: type list[mutarray, int], range [-∞, +∞]
+    result: type list, range [-∞, +∞]; semantic effectiveErrors {}
+build_rows<list, int, any, int, list[mutarray, int], bool> e1144 csv_records.bot:416 -> row_table<any, int, any, bool>
+    arg0: type any, range [-∞, +∞]
+    arg1: type int, range [0, 4611686018427387903]
+    arg2: type any, range [-∞, +∞]
+    arg3: type bool, range [-∞, +∞]
+    result: type mutarray, range [-∞, +∞]; semantic effectiveErrors {}
+build_rows<list, int, any, int, list[mutarray, int], bool> e1162 csv_records.bot:417 -> geo_append<list[mutarray, int], mutarray>
+    arg0: type list[mutarray, int], range [-∞, +∞]
+    arg1: type mutarray, range [-∞, +∞]
+    result: type list[mutarray, int], range [-∞, +∞]; semantic effectiveErrors {}
+build_rows<list, int, any, int, list[mutarray, int], bool> e1153 csv_records.bot:417 -> build_rows<list, int, any, int, list[mutarray, int], bool>
+    arg0: type list, range [-∞, +∞]
+    arg1: type int, range [2, 4611686018427387903]
+    arg2: type any, range [-∞, +∞]
+    arg3: type int, range [0, 4611686018427387903]
+    arg4: type list[mutarray, int], range [-∞, +∞]
+    arg5: type bool, range [-∞, +∞]
+    result: type list, range [-∞, +∞]; semantic effectiveErrors {}
+csv_records_generic<str, bool> e1170 csv_records.bot:424 -> csv_parse<str>
+    arg0: type str, range [-∞, +∞]
+    result: type list, range [-∞, +∞]; semantic effectiveErrors {}
+csv_records_generic<str, bool> e1196 csv_records.bot:429 -> geo_new<generic>
+    result: type list[mutarray, int], range [-∞, +∞]; semantic effectiveErrors {}
+csv_records_generic<str, bool> e1188 csv_records.bot:429 -> build_rows<list, int, any, int, list[mutarray, int], bool>
+    arg0: type list, range [-∞, +∞]
+    arg1: type int, range [1, 1] {1}
+    arg2: type any, range [-∞, +∞]
+    arg3: type int, range [0, 4611686018427387903]
+    arg4: type list[mutarray, int], range [-∞, +∞]
+    arg5: type bool, range [-∞, +∞]
+    result: type list, range [-∞, +∞]; semantic effectiveErrors {}
+csv_records<str> e1201 csv_records.bot:434 -> csv_records_generic<str, bool>
+    arg0: type str, range [-∞, +∞]
+    arg1: type bool, range [-∞, +∞]
+    result: type list, range [-∞, +∞]; semantic effectiveErrors {}
+csv_records_presized<str> e1207 csv_records.bot:439 -> csv_records_generic<str, bool>
+    arg0: type str, range [-∞, +∞]
+    arg1: type bool, range [-∞, +∞]
+    result: type list, range [-∞, +∞]; semantic effectiveErrors {}
+sample<generic> e1214 csv_records.bot:447 -> csv_records<str>
+    arg0: type str, range [-∞, +∞]
+    result: type list, range [-∞, +∞]; semantic effectiveErrors {}
+sample<generic> e1218 csv_records.bot:448 -> csv_records_presized<str>
+    arg0: type str, range [-∞, +∞]
+    result: type list, range [-∞, +∞]; semantic effectiveErrors {}
+sample<generic> e1240 csv_records.bot:452 -> ht_get<any, str>
+    arg0: type any, range [-∞, +∞]
+    arg1: type str, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+sample<generic> e1244 csv_records.bot:452 -> ht_get<any, str>
+    arg0: type any, range [-∞, +∞]
+    arg1: type str, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+sample<generic> e1251 csv_records.bot:452 -> ht_size<generic>
+    arg0: type any, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+sample<generic> e1254 csv_records.bot:452 -> ht_size<generic>
+    arg0: type any, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+sample<generic> e1265 csv_records.bot:453 -> ht_get<any, str>
+    arg0: type any, range [-∞, +∞]
+    arg1: type str, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+sample<generic> e1269 csv_records.bot:453 -> ht_get<any, str>
+    arg0: type any, range [-∞, +∞]
+    arg1: type str, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+sample<generic> e1273 csv_records.bot:453 -> ht_get<any, str>
+    arg0: type any, range [-∞, +∞]
+    arg1: type str, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+sample<generic> e1277 csv_records.bot:453 -> ht_get<any, str>
+    arg0: type any, range [-∞, +∞]
+    arg1: type str, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+sample<generic> e1281 csv_records.bot:453 -> ht_get<any, str>
+    arg0: type any, range [-∞, +∞]
+    arg1: type str, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}

@@ -1,0 +1,499 @@
+nir 1 call-effects=1
+
+func 0 "<program>" params=0 env=0 regs=13 pnames="" captures=0 instance="generic"
+    %0 = str "hello" @e227
+    %1 = call 4 %0 @e225
+    %2 = str "hello 🙂 world" @e230
+    %3 = call 4 %2 @e228
+    %4 = str "AI—generated" @e233
+    %5 = call 4 %4 @e231
+    %6 = str "“hello”" @e236
+    %7 = call 4 %6 @e234
+    %8 = str "‘hello’" @e239
+    %9 = call 4 %8 @e237
+    %10 = str "wait… what?" @e242
+    %11 = call 4 %10 @e240
+    %12 = op listnew %1 %3 %5 %7 %9 %11 @e223
+    ret %12
+end
+
+func 1 "cleaner_emoji" params=1 env=0 regs=128 pnames="character" captures=0 instance="str" rawregs="3 5 11 13 22 24 33 35 44 46 55 57 66 68 77 79 88 90 99 101 110 112 121 123" @e21
+    %1 = str "😀" @e36
+    %2 = int 0 @e36
+    %3 = rawint 0
+    %4 = int 1 @e36
+    %5 = rawint 1
+    %6 = op regioneq %1 %2 %4 %0 @e33
+    br %6 L0 L1 @e32
+  label L0
+    %8 = bool true @e37
+    %7 = move %8
+    jump L2
+  label L1
+    %9 = str "😂" @e42
+    %10 = int 0 @e42
+    %11 = rawint 0
+    %12 = int 1 @e42
+    %13 = rawint 1
+    %14 = op regioneq %9 %10 %12 %0 @e39
+    br %14 L3 L4 @e38
+  label L3
+    %16 = bool true @e43
+    %15 = move %16
+    jump L5
+  label L4
+    %17 = bool false @e44
+    %15 = move %17
+    jump L5
+  label L5
+    %7 = move %15
+    jump L2
+  label L2
+    br %7 L6 L7 @e31
+  label L6
+    %19 = bool true @e45
+    %18 = move %19
+    jump L8
+  label L7
+    %20 = str "🙂" @e50
+    %21 = int 0 @e50
+    %22 = rawint 0
+    %23 = int 1 @e50
+    %24 = rawint 1
+    %25 = op regioneq %20 %21 %23 %0 @e47
+    br %25 L9 L10 @e46
+  label L9
+    %27 = bool true @e51
+    %26 = move %27
+    jump L11
+  label L10
+    %28 = bool false @e52
+    %26 = move %28
+    jump L11
+  label L11
+    %18 = move %26
+    jump L8
+  label L8
+    br %18 L12 L13 @e30
+  label L12
+    %30 = bool true @e53
+    %29 = move %30
+    jump L14
+  label L13
+    %31 = str "😍" @e58
+    %32 = int 0 @e58
+    %33 = rawint 0
+    %34 = int 1 @e58
+    %35 = rawint 1
+    %36 = op regioneq %31 %32 %34 %0 @e55
+    br %36 L15 L16 @e54
+  label L15
+    %38 = bool true @e59
+    %37 = move %38
+    jump L17
+  label L16
+    %39 = bool false @e60
+    %37 = move %39
+    jump L17
+  label L17
+    %29 = move %37
+    jump L14
+  label L14
+    br %29 L18 L19 @e29
+  label L18
+    %41 = bool true @e61
+    %40 = move %41
+    jump L20
+  label L19
+    %42 = str "🔥" @e66
+    %43 = int 0 @e66
+    %44 = rawint 0
+    %45 = int 1 @e66
+    %46 = rawint 1
+    %47 = op regioneq %42 %43 %45 %0 @e63
+    br %47 L21 L22 @e62
+  label L21
+    %49 = bool true @e67
+    %48 = move %49
+    jump L23
+  label L22
+    %50 = bool false @e68
+    %48 = move %50
+    jump L23
+  label L23
+    %40 = move %48
+    jump L20
+  label L20
+    br %40 L24 L25 @e28
+  label L24
+    %52 = bool true @e69
+    %51 = move %52
+    jump L26
+  label L25
+    %53 = str "🚀" @e74
+    %54 = int 0 @e74
+    %55 = rawint 0
+    %56 = int 1 @e74
+    %57 = rawint 1
+    %58 = op regioneq %53 %54 %56 %0 @e71
+    br %58 L27 L28 @e70
+  label L27
+    %60 = bool true @e75
+    %59 = move %60
+    jump L29
+  label L28
+    %61 = bool false @e76
+    %59 = move %61
+    jump L29
+  label L29
+    %51 = move %59
+    jump L26
+  label L26
+    br %51 L30 L31 @e27
+  label L30
+    %63 = bool true @e77
+    %62 = move %63
+    jump L32
+  label L31
+    %64 = str "✅" @e82
+    %65 = int 0 @e82
+    %66 = rawint 0
+    %67 = int 1 @e82
+    %68 = rawint 1
+    %69 = op regioneq %64 %65 %67 %0 @e79
+    br %69 L33 L34 @e78
+  label L33
+    %71 = bool true @e83
+    %70 = move %71
+    jump L35
+  label L34
+    %72 = bool false @e84
+    %70 = move %72
+    jump L35
+  label L35
+    %62 = move %70
+    jump L32
+  label L32
+    br %62 L36 L37 @e26
+  label L36
+    %74 = bool true @e85
+    %73 = move %74
+    jump L38
+  label L37
+    %75 = str "❌" @e90
+    %76 = int 0 @e90
+    %77 = rawint 0
+    %78 = int 1 @e90
+    %79 = rawint 1
+    %80 = op regioneq %75 %76 %78 %0 @e87
+    br %80 L39 L40 @e86
+  label L39
+    %82 = bool true @e91
+    %81 = move %82
+    jump L41
+  label L40
+    %83 = bool false @e92
+    %81 = move %83
+    jump L41
+  label L41
+    %73 = move %81
+    jump L38
+  label L38
+    br %73 L42 L43 @e25
+  label L42
+    %85 = bool true @e93
+    %84 = move %85
+    jump L44
+  label L43
+    %86 = str "🎉" @e98
+    %87 = int 0 @e98
+    %88 = rawint 0
+    %89 = int 1 @e98
+    %90 = rawint 1
+    %91 = op regioneq %86 %87 %89 %0 @e95
+    br %91 L45 L46 @e94
+  label L45
+    %93 = bool true @e99
+    %92 = move %93
+    jump L47
+  label L46
+    %94 = bool false @e100
+    %92 = move %94
+    jump L47
+  label L47
+    %84 = move %92
+    jump L44
+  label L44
+    br %84 L48 L49 @e24
+  label L48
+    %96 = bool true @e101
+    %95 = move %96
+    jump L50
+  label L49
+    %97 = str "🤖" @e106
+    %98 = int 0 @e106
+    %99 = rawint 0
+    %100 = int 1 @e106
+    %101 = rawint 1
+    %102 = op regioneq %97 %98 %100 %0 @e103
+    br %102 L51 L52 @e102
+  label L51
+    %104 = bool true @e107
+    %103 = move %104
+    jump L53
+  label L52
+    %105 = bool false @e108
+    %103 = move %105
+    jump L53
+  label L53
+    %95 = move %103
+    jump L50
+  label L50
+    br %95 L54 L55 @e23
+  label L54
+    %107 = bool true @e109
+    %106 = move %107
+    jump L56
+  label L55
+    %108 = str "👍" @e114
+    %109 = int 0 @e114
+    %110 = rawint 0
+    %111 = int 1 @e114
+    %112 = rawint 1
+    %113 = op regioneq %108 %109 %111 %0 @e111
+    br %113 L57 L58 @e110
+  label L57
+    %115 = bool true @e115
+    %114 = move %115
+    jump L59
+  label L58
+    %116 = bool false @e116
+    %114 = move %116
+    jump L59
+  label L59
+    %106 = move %114
+    jump L56
+  label L56
+    br %106 L60 L61 @e22
+  label L60
+    %118 = bool true @e117
+    %117 = move %118
+    jump L62
+  label L61
+    %119 = str "💡" @e122
+    %120 = int 0 @e122
+    %121 = rawint 0
+    %122 = int 1 @e122
+    %123 = rawint 1
+    %124 = op regioneq %119 %120 %122 %0 @e119
+    br %124 L63 L64 @e118
+  label L63
+    %126 = bool true @e123
+    %125 = move %126
+    jump L65
+  label L64
+    %127 = bool false @e124
+    %125 = move %127
+    jump L65
+  label L65
+    %117 = move %125
+    jump L62
+  label L62
+    ret %117
+end
+
+func 2 "clean_char" params=1 env=0 regs=74 pnames="character" captures=0 instance="str" rawregs="7 9 15 17 27 29 35 37 47 49 55 57 67 69" @e126
+    %1 = call 1 %0 @e128
+    br %1 L0 L1 @e127
+  label L0
+    %3 = str "" @e132
+    ret %3 @e131
+  label L1
+    %4 = unit
+    %2 = move %4
+    jump L2
+  label L2
+    %5 = str "–" @e138
+    %6 = int 0 @e138
+    %7 = rawint 0
+    %8 = int 1 @e138
+    %9 = rawint 1
+    %10 = op regioneq %5 %6 %8 %0 @e135
+    br %10 L3 L4 @e134
+  label L3
+    %12 = bool true @e139
+    %11 = move %12
+    jump L5
+  label L4
+    %13 = str "—" @e144
+    %14 = int 0 @e144
+    %15 = rawint 0
+    %16 = int 1 @e144
+    %17 = rawint 1
+    %18 = op regioneq %13 %14 %16 %0 @e141
+    br %18 L6 L7 @e140
+  label L6
+    %20 = bool true @e145
+    %19 = move %20
+    jump L8
+  label L7
+    %21 = bool false @e146
+    %19 = move %21
+    jump L8
+  label L8
+    %11 = move %19
+    jump L5
+  label L5
+    br %11 L9 L10 @e133
+  label L9
+    %23 = str "-" @e148
+    ret %23 @e147
+  label L10
+    %24 = unit
+    %22 = move %24
+    jump L11
+  label L11
+    %25 = str "‘" @e154
+    %26 = int 0 @e154
+    %27 = rawint 0
+    %28 = int 1 @e154
+    %29 = rawint 1
+    %30 = op regioneq %25 %26 %28 %0 @e151
+    br %30 L12 L13 @e150
+  label L12
+    %32 = bool true @e155
+    %31 = move %32
+    jump L14
+  label L13
+    %33 = str "’" @e160
+    %34 = int 0 @e160
+    %35 = rawint 0
+    %36 = int 1 @e160
+    %37 = rawint 1
+    %38 = op regioneq %33 %34 %36 %0 @e157
+    br %38 L15 L16 @e156
+  label L15
+    %40 = bool true @e161
+    %39 = move %40
+    jump L17
+  label L16
+    %41 = bool false @e162
+    %39 = move %41
+    jump L17
+  label L17
+    %31 = move %39
+    jump L14
+  label L14
+    br %31 L18 L19 @e149
+  label L18
+    %43 = str "'" @e164
+    ret %43 @e163
+  label L19
+    %44 = unit
+    %42 = move %44
+    jump L20
+  label L20
+    %45 = str "“" @e170
+    %46 = int 0 @e170
+    %47 = rawint 0
+    %48 = int 1 @e170
+    %49 = rawint 1
+    %50 = op regioneq %45 %46 %48 %0 @e167
+    br %50 L21 L22 @e166
+  label L21
+    %52 = bool true @e171
+    %51 = move %52
+    jump L23
+  label L22
+    %53 = str "”" @e176
+    %54 = int 0 @e176
+    %55 = rawint 0
+    %56 = int 1 @e176
+    %57 = rawint 1
+    %58 = op regioneq %53 %54 %56 %0 @e173
+    br %58 L24 L25 @e172
+  label L24
+    %60 = bool true @e177
+    %59 = move %60
+    jump L26
+  label L25
+    %61 = bool false @e178
+    %59 = move %61
+    jump L26
+  label L26
+    %51 = move %59
+    jump L23
+  label L23
+    br %51 L27 L28 @e165
+  label L27
+    %63 = str "\"" @e180
+    ret %63 @e179
+  label L28
+    %64 = unit
+    %62 = move %64
+    jump L29
+  label L29
+    %65 = str "…" @e185
+    %66 = int 0 @e185
+    %67 = rawint 0
+    %68 = int 1 @e185
+    %69 = rawint 1
+    %70 = op regioneq %65 %66 %68 %0 @e182
+    br %70 L30 L31 @e181
+  label L30
+    %72 = str "..." @e187
+    ret %72 @e186
+  label L31
+    %73 = unit
+    %71 = move %73
+    jump L32
+  label L32
+    ret %0
+end
+
+func 3 "clean_from" params=4 env=0 regs=23 pnames="text index done" captures=0 instance="str, int, str" rawregs="8 10 11" @e190
+    %4 = op strlen %0 @e195
+    %5 = op ige %1 %4 @e192
+    br %5 L0 L1 @e191
+  label L0
+    ret %2 @e198
+  label L1
+    %7 = unit
+    %6 = move %7
+    jump L2
+  label L2
+    %8 = op runbox %1
+    %9 = int 1 @e206
+    %10 = rawint 1
+    %11 = op riadd %8 %10 @e203
+    %12 = op rbox %11
+    %13 = op strlen %0 @e212
+    %14 = op ige %1 %13 @e212
+    br %14 L3 L4 @e212
+  label L3
+    %17 = str "" @e212
+    %15 = move %17
+    %16 = move %3
+    jump L5
+  label L4
+    %18 = op decodecharat %0 %3 @e212
+    %19 = op strbytelen %18 @e212
+    %20 = op iadd %3 %19 @e212
+    %15 = move %18
+    %16 = move %20
+    jump L5
+  label L5
+    %21 = call 2 %15 @e210
+    %22 = op strcat %2 %21 @e207
+    tail %0 %12 %22 %16 @e200
+end
+
+func 4 "clean_ai_text" params=1 env=0 regs=7 pnames="text" captures=0 instance="str" rawregs="2 5" @e217
+    %1 = int 0 @e221
+    %2 = rawint 0
+    %3 = str "" @e222
+    %4 = int 0 @e218
+    %5 = rawint 0
+    %6 = call 3 %0 %1 %3 %4 @e218
+    ret %6
+end

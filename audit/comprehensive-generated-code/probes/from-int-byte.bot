@@ -1,0 +1,6 @@
+# Probe C: byte::from_int on a statically Byte-range Int (byte::complement's
+# declared Byte result on an unconstrained input): effectiveErrors = {}, no
+# handler needed.
+ns = [0 - 7, 45, 300]
+loop n in ns:
+    byte::from_int(byte::complement(n))

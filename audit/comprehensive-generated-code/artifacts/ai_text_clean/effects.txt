@@ -1,0 +1,10 @@
+exact_calls=9 false_false=2 false_true=0 true_false=0 true_true=7 completion_checks_removed=2 call_safepoints_removed=2
+call caller=0 caller_name="<program>" callee=4 callee_name="clean_ai_text" may_error=true may_gc=true
+call caller=0 caller_name="<program>" callee=4 callee_name="clean_ai_text" may_error=true may_gc=true
+call caller=0 caller_name="<program>" callee=4 callee_name="clean_ai_text" may_error=true may_gc=true
+call caller=0 caller_name="<program>" callee=4 callee_name="clean_ai_text" may_error=true may_gc=true
+call caller=0 caller_name="<program>" callee=4 callee_name="clean_ai_text" may_error=true may_gc=true
+call caller=0 caller_name="<program>" callee=4 callee_name="clean_ai_text" may_error=true may_gc=true
+call caller=2 caller_name="clean_char" callee=1 callee_name="cleaner_emoji" may_error=false may_gc=false
+call caller=3 caller_name="clean_from" callee=2 callee_name="clean_char" may_error=false may_gc=false
+call caller=4 caller_name="clean_ai_text" callee=3 callee_name="clean_from" may_error=true may_gc=true

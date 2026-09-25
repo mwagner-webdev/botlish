@@ -1,0 +1,9 @@
+<program> e85 byte-set-canonical.bot:3 -> byte::set<List[UnicodeChar]>
+    arg0: type List[UnicodeChar], range [-∞, +∞]
+    result: type ImmutableSet[int[Byte]], range [-∞, +∞]; semantic effectiveErrors {}
+byte::set<List[UnicodeChar]> e79 byte-set-canonical.bot:176 -> char::codepoint<UnicodeChar>
+    arg0: type UnicodeChar, range [-∞, +∞]
+    result: type int, range [0, +∞]; semantic effectiveErrors {}
+byte::set<List[UnicodeChar]> e77 byte-set-canonical.bot:176 -> byte::from_int<int>
+    arg0: type int, range [0, +∞]
+    result: type int[Byte], range [0, 255]; semantic effectiveErrors {AboveRange}

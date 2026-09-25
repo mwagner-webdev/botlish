@@ -1,0 +1,22 @@
+i0 <program>
+i1 byte::high_nibble<int>
+    param b: declared=- first-ref-view-type=int entry-range=[0, 0] {0}
+    result range: [0, 0] {0}
+i2 byte::from_int<int>
+    param value: declared=int first-ref-view-type=int entry-range=[-∞, +∞]
+    result range: [0, 255]
+i3 ascii::is_digit<int>
+    param b: declared=int[Byte] first-ref-view-type=int[Byte] entry-range=[0, 255]
+    result range: [-∞, +∞]
+i4 ascii::is_upper<int>
+    param b: declared=int[Byte] first-ref-view-type=int[Byte] entry-range=[0, 255]
+    result range: [-∞, +∞]
+i5 ascii::is_lower<int>
+    param b: declared=int[Byte] first-ref-view-type=int[Byte] entry-range=[0, 255]
+    result range: [-∞, +∞]
+i6 ascii::is_alphabetic<int>
+    param b: declared=int[Byte] first-ref-view-type=int[Byte] entry-range=[0, 255]
+    result range: [-∞, +∞]
+i7 ascii::is_alphanumeric<int>
+    param b: declared=int[Byte] first-ref-view-type=int[Byte] entry-range=[0, 255]
+    result range: [-∞, +∞]

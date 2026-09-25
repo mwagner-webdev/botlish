@@ -1,0 +1,10 @@
+i0 <program>
+i3 byte::from_int<int>
+    param value: declared=int first-ref-view-type=int entry-range=[0, +∞]
+    result range: [0, 255]
+i2 nonneg<int>
+    param m: declared=- first-ref-view-type=int entry-range=[-∞, +∞]
+    result range: [0, +∞]
+i1 g<int>
+    param m: declared=- first-ref-view-type=int entry-range=[-∞, +∞]
+    result range: [0, 255]

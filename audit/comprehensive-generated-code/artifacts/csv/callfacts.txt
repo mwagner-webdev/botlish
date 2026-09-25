@@ -1,0 +1,95 @@
+<program> e241 csv.bot:86 -> csv_parse<str>
+    arg0: type str, range [-∞, +∞]
+    result: type List[List[str]], range [-∞, +∞]; semantic effectiveErrors {}
+scan_unquoted<str, int, int> e23 csv.bot:35 -> peek<str, int>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [-∞, +∞]
+    result: type str, range [-∞, +∞]; semantic effectiveErrors {}
+scan_unquoted<str, int, int> e59 csv.bot:39 -> scan_unquoted<str, int, int>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [-∞, +∞]
+    arg2: type int, range [-∞, +∞]
+    result: type list[str, int], range [-∞, +∞]; semantic effectiveErrors {}
+scan_quoted<str, int, str> e70 csv.bot:44 -> peek<str, int>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [-∞, +∞]
+    result: type str, range [-∞, +∞]; semantic effectiveErrors {}
+scan_quoted<str, int, str> e82 csv.bot:46 -> peek<str, int>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [-∞, +∞]
+    result: type str, range [-∞, +∞]; semantic effectiveErrors {}
+scan_quoted<str, int, str> e91 csv.bot:47 -> scan_quoted<str, int, str>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [-∞, +∞]
+    arg2: type str, range [-∞, +∞]
+    result: type list[str, int], range [-∞, +∞]; semantic effectiveErrors {}
+scan_quoted<str, int, str> e110 csv.bot:51 -> scan_quoted<str, int, str>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [-∞, +∞]
+    arg2: type str, range [-∞, +∞]
+    result: type list[str, int], range [-∞, +∞]; semantic effectiveErrors {}
+scan_field<str, int> e126 csv.bot:55 -> peek<str, int>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [-∞, +∞]
+    result: type str, range [-∞, +∞]; semantic effectiveErrors {}
+scan_field<str, int> e132 csv.bot:56 -> scan_quoted<str, int, str>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [-∞, +∞]
+    arg2: type str, range [-∞, +∞]
+    result: type list[str, int], range [-∞, +∞]; semantic effectiveErrors {}
+scan_field<str, int> e140 csv.bot:58 -> scan_unquoted<str, int, int>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [-∞, +∞]
+    arg2: type int, range [-∞, +∞]
+    result: type list[str, int], range [-∞, +∞]; semantic effectiveErrors {}
+scan_record<str, int, List[never]> e148 csv.bot:63 -> scan_field<str, int>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [-∞, 4611686018427387902]
+    result: type list[str, int], range [-∞, +∞]; semantic effectiveErrors {}
+scan_record<str, int, List[never]> e166 csv.bot:66 -> peek<str, int>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [-∞, +∞]
+    result: type str, range [-∞, +∞]; semantic effectiveErrors {}
+scan_record<str, int, List[never]> e176 csv.bot:68 -> scan_record<str, int, List[str]>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [-∞, +∞]
+    arg2: type List[str], range [-∞, +∞]
+    result: type list[List[str], int], range [-∞, +∞]; semantic effectiveErrors {}
+scan_record<str, int, List[str]> e148 csv.bot:63 -> scan_field<str, int>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [-∞, +∞]
+    result: type list[str, int], range [-∞, +∞]; semantic effectiveErrors {}
+scan_record<str, int, List[str]> e166 csv.bot:66 -> peek<str, int>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [-∞, +∞]
+    result: type str, range [-∞, +∞]; semantic effectiveErrors {}
+scan_record<str, int, List[str]> e176 csv.bot:68 -> scan_record<str, int, List[str]>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [-∞, +∞]
+    arg2: type List[str], range [-∞, +∞]
+    result: type list[List[str], int], range [-∞, +∞]; semantic effectiveErrors {}
+scan_records<str, int, List[never]> e213 csv.bot:80 -> scan_record<str, int, List[never]>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [0, 0] {0}
+    arg2: type List[never], range [-∞, +∞]
+    result: type list[List[str], int], range [-∞, +∞]; semantic effectiveErrors {}
+scan_records<str, int, List[never]> e219 csv.bot:81 -> scan_records<str, int, List[List[str]]>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [-∞, +∞]
+    arg2: type List[List[str]], range [-∞, +∞]
+    result: type List[List[str]], range [-∞, +∞]; semantic effectiveErrors {}
+scan_records<str, int, List[List[str]]> e213 csv.bot:80 -> scan_record<str, int, List[never]>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [-∞, 4611686018427387902]
+    arg2: type List[never], range [-∞, +∞]
+    result: type list[List[str], int], range [-∞, +∞]; semantic effectiveErrors {}
+scan_records<str, int, List[List[str]]> e219 csv.bot:81 -> scan_records<str, int, List[List[str]]>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [-∞, +∞]
+    arg2: type List[List[str]], range [-∞, +∞]
+    result: type List[List[str]], range [-∞, +∞]; semantic effectiveErrors {}
+csv_parse<str> e235 csv.bot:84 -> scan_records<str, int, List[never]>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [0, 0] {0}
+    arg2: type List[never], range [-∞, +∞]
+    result: type List[List[str]], range [-∞, +∞]; semantic effectiveErrors {}

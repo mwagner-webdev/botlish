@@ -1,0 +1,3 @@
+# byte::set module-initializer shape, standalone: verbatim
+# tests/byte-set.test byte-set-canonical.
+byte::set(['-', '.', '_', '~'])

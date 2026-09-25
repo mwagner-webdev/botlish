@@ -1,0 +1,8 @@
+i0 <program>: generic=1 key={} result=ImmutableSet[int[Byte]]
+    call e95 byte-set-dynamic.bot:6 -> i1 byte::set<List[UnicodeChar]>
+    call e98 byte-set-dynamic.bot:8 -> i1 byte::set<List[UnicodeChar]>
+i2 char::codepoint<UnicodeChar>: generic=0 key={UnicodeChar} result=int
+i3 byte::from_int<int>: generic=0 key={int} result=int[Byte]
+i1 byte::set<List[UnicodeChar]>: generic=0 key={{List[UnicodeChar]}} result=ImmutableSet[int[Byte]]
+    call e79 byte-set-dynamic.bot:176 -> i2 char::codepoint<UnicodeChar>
+    call e77 byte-set-dynamic.bot:176 -> i3 byte::from_int<int>

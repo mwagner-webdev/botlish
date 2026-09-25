@@ -1,0 +1,142 @@
+function 0 "<program>"
+  NIR regs: 2
+  raw regs: 0
+  managed-capable regs: 2
+  effects: may_error=true may_gc=true
+  safepoints: 1
+  root candidates: 1
+  max live roots: 1
+  shadow slots: 1
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 1 "peek"
+  NIR regs: 11
+  raw regs: 1
+  managed-capable regs: 10
+  effects: may_error=true may_gc=true
+  safepoints: 2
+  root candidates: 4
+  max live roots: 3
+  shadow slots: 3
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 2 "peek"
+  NIR regs: 15
+  raw regs: 3
+  managed-capable regs: 12
+  effects: may_error=true may_gc=true
+  safepoints: 1
+  root candidates: 3
+  max live roots: 3
+  shadow slots: 3
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 3 "scan_unquoted"
+  NIR regs: 28
+  raw regs: 1
+  managed-capable regs: 27
+  effects: may_error=true may_gc=true
+  safepoints: 3
+  root candidates: 4
+  max live roots: 4
+  shadow slots: 4
+  entry zero slots: 1
+  depth reservation: no
+  storage: native frame
+
+function 4 "scan_quoted"
+  NIR regs: 34
+  raw regs: 6
+  managed-capable regs: 28
+  effects: may_error=true may_gc=true
+  safepoints: 8
+  root candidates: 12
+  max live roots: 5
+  shadow slots: 5
+  entry zero slots: 2
+  depth reservation: no
+  storage: native frame
+
+function 5 "scan_field"
+  NIR regs: 17
+  raw regs: 1
+  managed-capable regs: 16
+  effects: may_error=true may_gc=true
+  safepoints: 4
+  root candidates: 5
+  max live roots: 3
+  shadow slots: 3
+  entry zero slots: 1
+  depth reservation: no
+  storage: native frame
+
+function 6 "scan_record"
+  NIR regs: 25
+  raw regs: 2
+  managed-capable regs: 23
+  effects: may_error=true may_gc=true
+  safepoints: 6
+  root candidates: 9
+  max live roots: 4
+  shadow slots: 4
+  entry zero slots: 1
+  depth reservation: no
+  storage: native frame
+
+function 7 "scan_record"
+  NIR regs: 23
+  raw regs: 2
+  managed-capable regs: 21
+  effects: may_error=true may_gc=true
+  safepoints: 5
+  root candidates: 8
+  max live roots: 4
+  shadow slots: 4
+  entry zero slots: 1
+  depth reservation: no
+  storage: native frame
+
+function 8 "scan_records"
+  NIR regs: 14
+  raw regs: 2
+  managed-capable regs: 12
+  effects: may_error=true may_gc=true
+  safepoints: 4
+  root candidates: 7
+  max live roots: 4
+  shadow slots: 4
+  entry zero slots: 1
+  depth reservation: no
+  storage: native frame
+
+function 9 "scan_records"
+  NIR regs: 11
+  raw regs: 0
+  managed-capable regs: 11
+  effects: may_error=true may_gc=true
+  safepoints: 3
+  root candidates: 6
+  max live roots: 4
+  shadow slots: 4
+  entry zero slots: 1
+  depth reservation: no
+  storage: native frame
+
+function 10 "csv_parse"
+  NIR regs: 5
+  raw regs: 1
+  managed-capable regs: 4
+  effects: may_error=true may_gc=true
+  safepoints: 2
+  root candidates: 3
+  max live roots: 3
+  shadow slots: 3
+  entry zero slots: 1
+  depth reservation: no
+  storage: native frame

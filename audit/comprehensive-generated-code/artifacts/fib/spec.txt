@@ -1,0 +1,5 @@
+i0 <program>: generic=1 key={} result=int
+    call e23 ? -> i1 fib<int>
+i1 fib<int>: generic=0 key={int} result=int
+    call e11 ? -> i1 fib<int>
+    call e17 ? -> i1 fib<int>

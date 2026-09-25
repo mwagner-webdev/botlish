@@ -1,0 +1,109 @@
+i0 <program>
+i3 ht_min_capacity<generic>
+    result range: [8, 8] {8}
+i6 ht_empty_state<generic>
+    result range: [0, 0] {0}
+i12 ht_occupied_state<generic>
+    result range: [1, 1] {1}
+i14 ht_tombstone_state<generic>
+    result range: [2, 2] {2}
+i5 ht_fill_empty<mutarray, int, int>
+    param controls: declared=- first-ref-view-type=mutarray entry-range=[-∞, +∞]
+    param i: declared=- first-ref-view-type=int entry-range=[0, +∞]
+    param capacity: declared=- first-ref-view-type=int entry-range=[0, 9223372036854775806]
+    result range: [-∞, +∞]
+i4 ht_alloc<int>
+    param capacity: declared=- first-ref-view-type=int entry-range=[8, 8] {8}
+    result range: [-∞, +∞]
+i2 ht_new<generic>
+    result range: [-∞, +∞]
+i10 ht_controls<mutarray>
+    param table: declared=- first-ref-view-type=mutarray entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i13 ht_keys<mutarray>
+    param table: declared=- first-ref-view-type=mutarray entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i16 ht_values<mutarray>
+    param table: declared=- first-ref-view-type=mutarray entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i18 ht_size<mutarray>
+    param table: declared=- first-ref-view-type=mutarray entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i19 ht_tombstones<mutarray>
+    param table: declared=- first-ref-view-type=mutarray entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i9 ht_capacity<mutarray>
+    param table: declared=- first-ref-view-type=mutarray entry-range=[-∞, +∞]
+    result range: [0, 4611686018427387903]
+i8 ht_probe_start<mutarray, str>
+    param table: declared=- first-ref-view-type=mutarray entry-range=[-∞, +∞]
+    param key: declared=- first-ref-view-type=str entry-range=[-∞, +∞]
+    result range: [0, +∞]
+i15 ht_probe_next<mutarray, int>
+    param table: declared=- first-ref-view-type=mutarray entry-range=[-∞, +∞]
+    param index: declared=- first-ref-view-type=int entry-range=[0, +∞]
+    result range: [0, +∞]
+i27 ht_find_get<mutarray, str, int>
+    param table: declared=- first-ref-view-type=mutarray entry-range=[-∞, +∞]
+    param key: declared=- first-ref-view-type=str entry-range=[-∞, +∞]
+    param index: declared=- first-ref-view-type=int entry-range=[0, +∞]
+    result range: [-∞, +∞]
+i11 ht_find_insert<mutarray, str, int, int>
+    param table: declared=- first-ref-view-type=mutarray entry-range=[-∞, +∞]
+    param key: declared=- first-ref-view-type=str entry-range=[-∞, +∞]
+    param index: declared=- first-ref-view-type=int entry-range=[0, +∞]
+    param first_tombstone: declared=- first-ref-view-type=int entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i29 ht_get<mutarray, str>
+    param table: declared=- first-ref-view-type=mutarray entry-range=[-∞, +∞]
+    param key: declared=- first-ref-view-type=str entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i26 ht_contains<mutarray, str>
+    param table: declared=- first-ref-view-type=mutarray entry-range=[-∞, +∞]
+    param key: declared=- first-ref-view-type=str entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i24 ht_rehash_probe<mutarray, int, int>
+    param newControls: declared=- first-ref-view-type=mutarray entry-range=[-∞, +∞]
+    param index: declared=- first-ref-view-type=int entry-range=[0, +∞]
+    param capacity: declared=- first-ref-view-type=int entry-range=[0, 9223372036854775806]
+    result range: [-∞, +∞]
+i23 ht_rehash_insert<List[mutarray], int, any, any>
+    param dest: declared=- first-ref-view-type=List[mutarray] entry-range=[-∞, +∞]
+    param capacity: declared=- first-ref-view-type=int entry-range=[0, 9223372036854775806]
+    param key: declared=- first-ref-view-type=any entry-range=[-∞, +∞]
+    param value: declared=- first-ref-view-type=any entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i22 ht_rehash_scan<list, int, int, List[mutarray], int>
+    param src: declared=- first-ref-view-type=list entry-range=[-∞, +∞]
+    param i: declared=- first-ref-view-type=int entry-range=[0, +∞]
+    param oldCapacity: declared=- first-ref-view-type=int entry-range=[0, 4611686018427387903]
+    param dest: declared=- first-ref-view-type=List[mutarray] entry-range=[-∞, +∞]
+    param newCapacity: declared=- first-ref-view-type=int entry-range=[0, 9223372036854775806]
+    result range: [-∞, +∞]
+i21 ht_rehash<mutarray, int>
+    param table: declared=- first-ref-view-type=mutarray entry-range=[-∞, +∞]
+    param newCapacity: declared=- first-ref-view-type=int entry-range=[0, 9223372036854775806]
+    result range: [-∞, +∞]
+i17 ht_should_grow<mutarray>
+    param table: declared=- first-ref-view-type=mutarray entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i20 ht_grow_or_clean<mutarray>
+    param table: declared=- first-ref-view-type=mutarray entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i25 ht_place<mutarray, int, str, str>
+    param table: declared=- first-ref-view-type=mutarray entry-range=[-∞, +∞]
+    param index: declared=- first-ref-view-type=int entry-range=[-∞, +∞]
+    param key: declared=- first-ref-view-type=str entry-range=[-∞, +∞]
+    param value: declared=- first-ref-view-type=str entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i7 ht_set<mutarray, str, str>
+    param table: declared=- first-ref-view-type=mutarray entry-range=[-∞, +∞]
+    param key: declared=- first-ref-view-type=str entry-range=[-∞, +∞]
+    param value: declared=- first-ref-view-type=str entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i28 ht_delete<mutarray, str>
+    param table: declared=- first-ref-view-type=mutarray entry-range=[-∞, +∞]
+    param key: declared=- first-ref-view-type=str entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i1 sample<generic>
+    result range: [-∞, +∞]

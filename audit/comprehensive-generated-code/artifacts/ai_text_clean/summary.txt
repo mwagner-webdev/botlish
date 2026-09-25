@@ -1,0 +1,15 @@
+source: examples/stdlib/ai_text_clean.bot
+lower options: 
+static diagnostics: 0
+NIR functions: 5; machine code bytes: 3003
+allocation (one run): allocations=111 bytes=4855 String=110 List=1 static=30
+  sites:
+    ai_text_clean.bot:79 listnew x1
+    ai_text_clean.bot:74 decodecharat x55
+    ai_text_clean.bot:74 strcat x55
+
+  0 <program><generic>                       regs=13  params=0 env=0 bytes=505   call=6 op:listnew=1
+  1 cleaner_emoji<str>                       regs=128 params=1 env=0 bytes=994   op:regioneq=12 br=22
+  2 clean_char<str>                          regs=74  params=1 env=0 bytes=685   call=1 br=11 op:regioneq=7
+  3 clean_from<str, int, str>                regs=23  params=4 env=0 bytes=712   op:strlen=2 op:ige=2 br=2 op:runbox=1 op:riadd=1 op:rbox=1 op:decodecharat=1 op:strbytelen=1 op:iadd=1 call=1 op:strcat=1 tail=1
+  4 clean_ai_text<str>                       regs=7   params=1 env=0 bytes=107   call=1

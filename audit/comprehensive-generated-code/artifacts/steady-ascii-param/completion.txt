@@ -1,0 +1,30 @@
+diagnostics: 0
+
+e77 (call) steady-ascii-param.bot:176 -> byte::from_int
+  declaredErrors={AboveRange BelowRange} effectiveErrors={AboveRange} mayReturnNormally=1 resultRangeFact=[0, 255]
+e79 (call) steady-ascii-param.bot:176 -> char::codepoint
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, 1114111]
+e133 (call) ascii.bot:63 -> ascii::is_upper
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e138 (call) ascii.bot:63 -> ascii::is_lower
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e146 (call) ascii.bot:66 -> ascii::is_alphabetic
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e151 (call) ascii.bot:66 -> ascii::is_digit
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e419 (handle) steady-ascii-param.bot:7 -> byte::from_int
+  declaredErrors={AboveRange BelowRange} effectiveErrors={AboveRange BelowRange} mayReturnNormally=1 resultRangeFact=-
+e429 (call) steady-ascii-param.bot:14 -> ascii::is_alphanumeric
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e453 (call) steady-ascii-param.bot:19 -> cls
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e460 (call) steady-ascii-param.bot:20 -> count
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e471 (call) steady-ascii-param.bot:22 -> count
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e487 (call) steady-ascii-param.bot:27 -> rep
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e497 (call) steady-ascii-param.bot:27 -> count
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]
+e502 (call) steady-ascii-param.bot:28 -> rep
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[-∞, +∞]

@@ -1,0 +1,8 @@
+i0 <program>
+i2 work<int>
+    param i: declared=- first-ref-view-type=int entry-range=[1, 500]
+    result range: [7, 7] {7}
+i1 drive<int, int>
+    param i: declared=- first-ref-view-type=int entry-range=[-∞, 500]
+    param total: declared=- first-ref-view-type=int entry-range=[0, +∞]
+    result range: [-∞, +∞]

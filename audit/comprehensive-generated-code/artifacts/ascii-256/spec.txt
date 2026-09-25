@@ -1,0 +1,19 @@
+i0 <program>: generic=1 key={} result=List[List[bool]]
+    call e156 ascii-256.bot:3 -> i1 byte::high_nibble<int>
+    call e422 ascii-256.bot:6 -> i2 byte::from_int<int>
+    call e429 ascii-256.bot:11 -> i3 ascii::is_digit<int>
+    call e432 ascii-256.bot:11 -> i4 ascii::is_upper<int>
+    call e435 ascii-256.bot:11 -> i5 ascii::is_lower<int>
+    call e438 ascii-256.bot:11 -> i6 ascii::is_alphabetic<int>
+    call e441 ascii-256.bot:11 -> i7 ascii::is_alphanumeric<int>
+i1 byte::high_nibble<int>: generic=0 key={int} result=int[HighNibble]
+i2 byte::from_int<int>: generic=0 key={int} result=int[Byte]
+i3 ascii::is_digit<int>: generic=0 key={int} result=bool
+i4 ascii::is_upper<int>: generic=0 key={int} result=bool
+i5 ascii::is_lower<int>: generic=0 key={int} result=bool
+i6 ascii::is_alphabetic<int>: generic=0 key={int} result=bool
+    call e133 ascii.bot:63 -> i4 ascii::is_upper<int>
+    call e138 ascii.bot:63 -> i5 ascii::is_lower<int>
+i7 ascii::is_alphanumeric<int>: generic=0 key={int} result=bool
+    call e146 ascii.bot:66 -> i6 ascii::is_alphabetic<int>
+    call e151 ascii.bot:66 -> i3 ascii::is_digit<int>

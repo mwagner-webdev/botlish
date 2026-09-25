@@ -1,0 +1,4 @@
+# Probe E: byte::from_int(999) -- statically KNOWN-ERROR, never reaches
+# codegen. Verbatim tests/errors.test errors-byte-from-int-known-failure-literal.
+byte::high_nibble(0)
+byte::from_int(999)

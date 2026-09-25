@@ -1,0 +1,38 @@
+<program> e225 ai_text_clean.bot:79 -> clean_ai_text<str>
+    arg0: type str, range [-∞, +∞]
+    result: type str, range [-∞, +∞]; semantic effectiveErrors {}
+<program> e228 ai_text_clean.bot:79 -> clean_ai_text<str>
+    arg0: type str, range [-∞, +∞]
+    result: type str, range [-∞, +∞]; semantic effectiveErrors {}
+<program> e231 ai_text_clean.bot:79 -> clean_ai_text<str>
+    arg0: type str, range [-∞, +∞]
+    result: type str, range [-∞, +∞]; semantic effectiveErrors {}
+<program> e234 ai_text_clean.bot:79 -> clean_ai_text<str>
+    arg0: type str, range [-∞, +∞]
+    result: type str, range [-∞, +∞]; semantic effectiveErrors {}
+<program> e237 ai_text_clean.bot:79 -> clean_ai_text<str>
+    arg0: type str, range [-∞, +∞]
+    result: type str, range [-∞, +∞]; semantic effectiveErrors {}
+<program> e240 ai_text_clean.bot:79 -> clean_ai_text<str>
+    arg0: type str, range [-∞, +∞]
+    result: type str, range [-∞, +∞]; semantic effectiveErrors {}
+clean_char<str> e128 ai_text_clean.bot:52 -> cleaner_emoji<str>
+    arg0: type str, range [-∞, +∞]
+    result: type bool, range [-∞, +∞]; semantic effectiveErrors {}
+clean_from<str, int, str> e212 ai_text_clean.bot:74 -> peek<str, int>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [0, 4611686018427387902]
+    result: type str, range [-∞, +∞]; semantic effectiveErrors {}
+clean_from<str, int, str> e210 ai_text_clean.bot:74 -> clean_char<str>
+    arg0: type str, range [-∞, +∞]
+    result: type str, range [-∞, +∞]; semantic effectiveErrors {}
+clean_from<str, int, str> e200 ai_text_clean.bot:74 -> clean_from<str, int, str>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [1, 4611686018427387903]
+    arg2: type str, range [-∞, +∞]
+    result: type str, range [-∞, +∞]; semantic effectiveErrors {}
+clean_ai_text<str> e218 ai_text_clean.bot:77 -> clean_from<str, int, str>
+    arg0: type str, range [-∞, +∞]
+    arg1: type int, range [0, 0] {0}
+    arg2: type str, range [-∞, +∞]
+    result: type str, range [-∞, +∞]; semantic effectiveErrors {}

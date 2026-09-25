@@ -1,0 +1,17 @@
+# S0 miscompile repro (hir/range.tcl ignored `handle`): a handled call is invisible to
+# the range fixpoint, so f<int>'s entry Range is [5,5] from f(5) alone; raw x + 1 then
+# overflows the small-Int tag. interp: [6, [4611686018427387904]].
+error Neg
+fn f(x: int) -> int errors Neg:
+    if x < 0:
+        fail Neg
+    else:
+        x + 1
+a = f(5)
+ns = [4611686018427387903]
+bs = loop n in ns:
+    r = f(n):
+        on Neg:
+            0
+    r
+[a, bs]

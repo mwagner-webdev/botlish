@@ -1,0 +1,17 @@
+# S0 miscompile repro (same root cause): the handler body's return is invisible to g's
+# result Range ([5,5]), so native::lower::ClosedResult substitutes 5 for g(x).
+# interp: [4611686018427387904, 6].
+error Neg
+fn f(x: int) -> int errors Neg:
+    if x < 0:
+        fail Neg
+    else:
+        x
+fn g(x: int) -> int:
+    r = f(x):
+        on Neg:
+            return 4611686018427387903
+    5
+fn h(x: int) -> int:
+    g(x) + 1
+[h(0 - 1), h(3)]

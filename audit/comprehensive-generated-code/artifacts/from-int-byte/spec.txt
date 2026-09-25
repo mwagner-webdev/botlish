@@ -1,0 +1,5 @@
+i0 <program>: generic=1 key={} result=List[int[Byte]]
+    call e98 from-int-byte.bot:6 -> i1 byte::complement<int>
+    call e96 from-int-byte.bot:6 -> i2 byte::from_int<int>
+i1 byte::complement<int>: generic=0 key={int} result=int[Byte]
+i2 byte::from_int<int>: generic=0 key={int} result=int[Byte]

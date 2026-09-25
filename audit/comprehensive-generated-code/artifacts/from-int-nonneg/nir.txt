@@ -1,0 +1,106 @@
+nir 1 call-effects=1
+
+func 0 "<program>" params=0 env=0 regs=29 pnames="" captures=0 instance="generic" rawregs="1 3 4 7 9 13 24 27"
+    %0 = int 0 @e109
+    %1 = rawint 0
+    %2 = int 7 @e110
+    %3 = rawint 7
+    %4 = op risub %1 %3 @e107
+    %5 = op rbox %4
+    %6 = int 45 @e111
+    %7 = rawint 45
+    %8 = int 300 @e112
+    %9 = rawint 300
+    %10 = op listnew %5 %6 %8 @e105
+    %11 = op listlen %10 @e113
+    %12 = int 0 @e113
+    %13 = rawint 0
+    %14 = op listnew @e113
+    %15 = move %12 @e113
+    %16 = move %14 @e113
+    jump L0 @e113
+  label L0
+    %18 = op ilt %15 %11 @e113
+    br %18 L1 L3 @e113
+  label L1
+    %19 = op listget %10 %15 @e113
+    pusherrorexit L5 @e116
+    %21 = call 3 %19 @e117
+    poperrorexit @e116
+    %20 = move %21 @e116
+    jump L6 @e116
+  label L5
+    %22 = declarederroreq 2 @e116
+    br %22 L7 L8 @e116
+  label L7
+    cleardeclarederror @e116
+    %23 = int 0 @e120
+    %24 = rawint 0
+    %20 = move %23 @e116
+    jump L6 @e116
+  label L8
+    reraise @e116
+  label L6
+    %25 = op listappend %16 %20 @e113
+    %16 = move %25 @e113
+    jump L2 @e113
+  label L2
+    %26 = int 1 @e113
+    %27 = rawint 1
+    %28 = op iadd %15 %26 @e113
+    %15 = move %28 @e113
+    jump L0 @e113
+  label L3
+    %17 = move %16 @e113
+    jump L4 @e113
+  label L4
+    ret %17
+end
+
+func 1 "byte::from_int" params=1 env=0 regs=9 pnames="value" captures=0 instance="int" rawregs="2 6" @e58
+    %1 = int 0 @e63
+    %2 = rawint 0
+    %3 = op ilt %0 %1 @e60
+    br %3 L0 L1 @e59
+  label L0
+    faildeclared 1 "BelowRange" @e64
+  label L1
+    %5 = int 255 @e69
+    %6 = rawint 255
+    %7 = op igt %0 %5 @e66
+    br %7 L3 L4 @e65
+  label L3
+    faildeclared 2 "AboveRange" @e70
+  label L4
+    %8 = move %0
+    jump L5
+  label L5
+    %4 = move %8
+    jump L2
+  label L2
+    ret %4
+end
+
+func 2 "nonneg" params=1 env=0 regs=8 pnames="m" captures=0 instance="int" rawregs="2 6" @e86
+    %1 = int 0 @e91
+    %2 = rawint 0
+    %3 = op ilt %0 %1 @e88
+    br %3 L0 L1 @e87
+  label L0
+    %5 = int 0 @e94
+    %6 = rawint 0
+    %7 = op isub %5 %0 @e92
+    %4 = move %7
+    jump L2
+  label L1
+    %4 = move %0
+    jump L2
+  label L2
+    ret %4
+end
+
+func 3 "g" params=1 env=0 regs=3 pnames="m" captures=0 instance="int" @e98
+    %1 = call 2 %0 @e101
+    %2 = call 1 %1 @e99
+    ret %2
+end

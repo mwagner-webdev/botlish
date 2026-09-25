@@ -1,0 +1,6 @@
+<program> e98 from-int-byte.bot:6 -> byte::complement<int>
+    arg0: type int, range [-∞, +∞]
+    result: type int[Byte], range [0, 255]; semantic effectiveErrors {}
+<program> e96 from-int-byte.bot:6 -> byte::from_int<int>
+    arg0: type int[Byte], range [0, 255]
+    result: type int[Byte], range [0, 255]; semantic effectiveErrors {}

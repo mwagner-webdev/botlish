@@ -1,0 +1,31 @@
+i0 <program>: generic=1 key={} result=List[List[str]]
+    call e241 csv.bot:86 -> i1 csv_parse<str>
+i5 peek<str, int>: generic=0 key={str int} result=str
+i7 scan_unquoted<str, int, int>: generic=0 key={str int int} result=list[str, int]
+    call e23 csv.bot:35 -> i5 peek<str, int>
+    call e59 csv.bot:39 -> i7 scan_unquoted<str, int, int>
+i6 scan_quoted<str, int, str>: generic=0 key={str int str} result=list[str, int]
+    call e70 csv.bot:44 -> i5 peek<str, int>
+    call e82 csv.bot:46 -> i5 peek<str, int>
+    call e91 csv.bot:47 -> i6 scan_quoted<str, int, str>
+    call e110 csv.bot:51 -> i6 scan_quoted<str, int, str>
+i4 scan_field<str, int>: generic=0 key={str int} result=list[str, int]
+    call e126 csv.bot:55 -> i5 peek<str, int>
+    call e132 csv.bot:56 -> i6 scan_quoted<str, int, str>
+    call e140 csv.bot:58 -> i7 scan_unquoted<str, int, int>
+i3 scan_record<str, int, List[never]>: generic=0 key={str int {List[never]}} result=list[List[str], int]
+    call e148 csv.bot:63 -> i4 scan_field<str, int>
+    call e166 csv.bot:66 -> i5 peek<str, int>
+    call e176 csv.bot:68 -> i8 scan_record<str, int, List[str]>
+i8 scan_record<str, int, List[str]>: generic=0 key={str int {List[str]}} result=list[List[str], int]
+    call e148 csv.bot:63 -> i4 scan_field<str, int>
+    call e166 csv.bot:66 -> i5 peek<str, int>
+    call e176 csv.bot:68 -> i8 scan_record<str, int, List[str]>
+i2 scan_records<str, int, List[never]>: generic=0 key={str int {List[never]}} result=List[List[str]]
+    call e213 csv.bot:80 -> i3 scan_record<str, int, List[never]>
+    call e219 csv.bot:81 -> i9 scan_records<str, int, List[List[str]]>
+i9 scan_records<str, int, List[List[str]]>: generic=0 key={str int {List[List[str]]}} result=List[List[str]]
+    call e213 csv.bot:80 -> i3 scan_record<str, int, List[never]>
+    call e219 csv.bot:81 -> i9 scan_records<str, int, List[List[str]]>
+i1 csv_parse<str>: generic=0 key={str} result=List[List[str]]
+    call e235 csv.bot:84 -> i2 scan_records<str, int, List[never]>

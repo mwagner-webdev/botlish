@@ -1,0 +1,10 @@
+i0 <program>
+i2 char::codepoint<UnicodeChar>
+    param c: declared=UnicodeChar first-ref-view-type=UnicodeChar entry-range=[-∞, +∞]
+    result range: [0, +∞]
+i3 byte::from_int<int>
+    param value: declared=int first-ref-view-type=int entry-range=[0, +∞]
+    result range: [0, 255]
+i1 byte::set<List[UnicodeChar]>
+    param chars: declared=List[UnicodeChar] first-ref-view-type=List[UnicodeChar] entry-range=[-∞, +∞]
+    result range: [-∞, +∞]

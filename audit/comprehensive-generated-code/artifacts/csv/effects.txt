@@ -1,0 +1,17 @@
+exact_calls=16 false_false=0 false_true=0 true_false=0 true_true=16 completion_checks_removed=0 call_safepoints_removed=0
+call caller=0 caller_name="<program>" callee=10 callee_name="csv_parse" may_error=true may_gc=true
+call caller=3 caller_name="scan_unquoted" callee=2 callee_name="peek" may_error=true may_gc=true
+call caller=4 caller_name="scan_quoted" callee=1 callee_name="peek" may_error=true may_gc=true
+call caller=4 caller_name="scan_quoted" callee=2 callee_name="peek" may_error=true may_gc=true
+call caller=5 caller_name="scan_field" callee=2 callee_name="peek" may_error=true may_gc=true
+call caller=5 caller_name="scan_field" callee=4 callee_name="scan_quoted" may_error=true may_gc=true
+call caller=5 caller_name="scan_field" callee=3 callee_name="scan_unquoted" may_error=true may_gc=true
+call caller=6 caller_name="scan_record" callee=5 callee_name="scan_field" may_error=true may_gc=true
+call caller=6 caller_name="scan_record" callee=2 callee_name="peek" may_error=true may_gc=true
+call caller=6 caller_name="scan_record" callee=7 callee_name="scan_record" may_error=true may_gc=true
+call caller=7 caller_name="scan_record" callee=5 callee_name="scan_field" may_error=true may_gc=true
+call caller=7 caller_name="scan_record" callee=2 callee_name="peek" may_error=true may_gc=true
+call caller=8 caller_name="scan_records" callee=6 callee_name="scan_record" may_error=true may_gc=true
+call caller=8 caller_name="scan_records" callee=9 callee_name="scan_records" may_error=true may_gc=true
+call caller=9 caller_name="scan_records" callee=6 callee_name="scan_record" may_error=true may_gc=true
+call caller=10 caller_name="csv_parse" callee=8 callee_name="scan_records" may_error=true may_gc=true

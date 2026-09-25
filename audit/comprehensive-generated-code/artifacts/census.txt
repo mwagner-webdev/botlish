@@ -1,0 +1,501 @@
+== refined-checks  (bytes=17855 allocations=23)
+    call                                         32
+    callenv                                      2
+    callmulti                                    12
+    capture                                      3
+    closure                                      2
+    exact calls                                  46
+    exact calls with may_error check             45
+    faildeclared                                 2
+    functions                                    33
+    genericFunctions                             26
+    guard int generic-instance param             19
+    guard list generic-instance param            1
+    guard str generic-instance local             1
+    guard str generic-instance param             6
+    op charcodepoint                             1
+    op imod                                      1
+    op listappend                                1
+    op listget                                   5
+    op listlen                                   3
+    op listnew                                   4
+    op regioncheck                               2
+    op regioneq                                  18
+    op setcontains                               1
+    op setfromlist                               1
+    op strcat                                    4
+    op strlen                                    5
+    op strregiontclalnum                         4
+    op strregiontclalpha                         2
+    op strutf8bytes                              1
+    op substr                                    1
+    op veq                                       2
+    rawop                                        3
+    rbox                                         2
+    runbox                                       3
+    tagged-int iadd                              19
+    tagged-int ieq                               10
+    tagged-int ige                               19
+    tagged-int igt                               1
+    tagged-int ile                               4
+    tagged-int ilt                               2
+    tagged-int isub                              2
+    tail                                         11
+    unreachable                                  1
+== web-unreserved-256  (bytes=16497 allocations=268)
+    call                                         15
+    callenv                                      2
+    capture                                      3
+    closure                                      2
+    exact calls                                  17
+    exact calls with may_error check             16
+    faildeclared                                 2
+    functions                                    16
+    genericFunctions                             12
+    guard int generic-instance param             7
+    guard list generic-instance param            1
+    guard str generic-instance local             1
+    guard str generic-instance param             4
+    op charcodepoint                             1
+    op imod                                      1
+    op listappend                                2
+    op listget                                   6
+    op listlen                                   4
+    op listnew                                   5
+    op setcontains                               1
+    op setfromlist                               1
+    op strcat                                    4
+    op strlen                                    1
+    op strutf8bytes                              1
+    op substr                                    1
+    pusherrorexit                                1
+    rawop                                        2
+    rbox                                         1
+    reraise                                      1
+    runbox                                       2
+    tagged-int iadd                              5
+    tagged-int ige                               5
+    tagged-int igt                               1
+    tagged-int ile                               3
+    tagged-int ilt                               3
+    tail                                         2
+== web-unreserved-literals  (bytes=7141 allocations=11)
+    call                                         14
+    callenv                                      7
+    capture                                      3
+    closure                                      2
+    exact calls                                  21
+    exact calls with may_error check             20
+    faildeclared                                 2
+    functions                                    16
+    genericFunctions                             12
+    guard int generic-instance param             7
+    guard list generic-instance param            1
+    guard str generic-instance local             1
+    guard str generic-instance param             4
+    op charcodepoint                             1
+    op imod                                      1
+    op listappend                                1
+    op listget                                   5
+    op listlen                                   3
+    op listnew                                   4
+    op setcontains                               1
+    op setfromlist                               1
+    op strcat                                    4
+    op strlen                                    1
+    op strutf8bytes                              1
+    op substr                                    1
+    rawop                                        2
+    rbox                                         1
+    runbox                                       2
+    tagged-int iadd                              4
+    tagged-int ige                               5
+    tagged-int igt                               1
+    tagged-int ile                               3
+    tagged-int ilt                               2
+    tail                                         2
+== ascii-256  (bytes=7951 allocations=514)
+    call                                         10
+    exact calls                                  10
+    exact calls with may_error check             1
+    faildeclared                                 2
+    functions                                    7
+    op listappend                                1
+    op listget                                   1
+    op listlen                                   1
+    op listnew                                   3
+    pusherrorexit                                1
+    rawop                                        6
+    reraise                                      1
+    runbox                                       3
+    tagged-int iadd                              1
+    tagged-int igt                               1
+    tagged-int ilt                               2
+== steady-ascii  (bytes=8647 allocations=258)
+    call                                         8
+    exact calls                                  8
+    exact calls with may_error check             3
+    faildeclared                                 2
+    functions                                    9
+    op listappend                                1
+    op listget                                   2
+    op listlen                                   2
+    op listnew                                   2
+    pusherrorexit                                1
+    rawop                                        9
+    rbox                                         3
+    reraise                                      1
+    runbox                                       6
+    tagged-int iadd                              3
+    tagged-int ige                               1
+    tagged-int igt                               1
+    tagged-int ile                               1
+    tagged-int ilt                               2
+    tail                                         3
+== steady-ascii-capture  (bytes=9823 allocations=258)
+    call                                         9
+    exact calls                                  9
+    exact calls with may_error check             9
+    faildeclared                                 2
+    functions                                    10
+    genericFunctions                             6
+    guard int generic-instance param             3
+    op listappend                                1
+    op listget                                   2
+    op listlen                                   3
+    op listnew                                   2
+    pusherrorexit                                1
+    rawop                                        4
+    rbox                                         3
+    reraise                                      1
+    runbox                                       4
+    tagged-int iadd                              3
+    tagged-int ige                               4
+    tagged-int igt                               1
+    tagged-int ile                               4
+    tagged-int ilt                               2
+    tail                                         3
+== steady-ascii-param  (bytes=8782 allocations=258)
+    call                                         9
+    exact calls                                  9
+    exact calls with may_error check             3
+    faildeclared                                 2
+    functions                                    10
+    op listappend                                1
+    op listget                                   2
+    op listlen                                   3
+    op listnew                                   2
+    pusherrorexit                                1
+    rawop                                        10
+    rbox                                         3
+    reraise                                      1
+    runbox                                       7
+    tagged-int iadd                              3
+    tagged-int ige                               1
+    tagged-int igt                               1
+    tagged-int ile                               1
+    tagged-int ilt                               2
+    tail                                         3
+== byte-set-canonical  (bytes=1183 allocations=7)
+    call                                         3
+    exact calls                                  3
+    exact calls with may_error check             2
+    faildeclared                                 2
+    functions                                    4
+    op charcodepoint                             1
+    op listappend                                1
+    op listget                                   1
+    op listlen                                   1
+    op listnew                                   2
+    op setfromlist                               1
+    tagged-int iadd                              1
+    tagged-int igt                               1
+    tagged-int ilt                               2
+== byte-set-dynamic  (bytes=1791 allocations=11)
+    call                                         4
+    exact calls                                  4
+    exact calls with may_error check             3
+    faildeclared                                 2
+    functions                                    4
+    op charcodepoint                             1
+    op listappend                                2
+    op listget                                   2
+    op listlen                                   2
+    op listnew                                   4
+    op setfromlist                               1
+    pusherrorexit                                1
+    reraise                                      1
+    tagged-int iadd                              2
+    tagged-int igt                               1
+    tagged-int ilt                               3
+== from-int-literal  (bytes=168 allocations=0)
+    call                                         1
+    exact calls                                  1
+    exact calls with may_error check             1
+    faildeclared                                 2
+    functions                                    2
+    rawop                                        2
+    runbox                                       1
+== from-int-dynamic  (bytes=1135 allocations=5)
+    call                                         1
+    exact calls                                  1
+    exact calls with may_error check             1
+    faildeclared                                 2
+    functions                                    2
+    op listappend                                1
+    op listget                                   1
+    op listlen                                   1
+    op listnew                                   2
+    pusherrorexit                                1
+    rawop                                        1
+    rbox                                         1
+    reraise                                      1
+    tagged-int iadd                              1
+    tagged-int igt                               1
+    tagged-int ilt                               2
+== from-int-nonneg  (bytes=1432 allocations=5)
+    call                                         3
+    exact calls                                  3
+    exact calls with may_error check             2
+    faildeclared                                 2
+    functions                                    4
+    op listappend                                1
+    op listget                                   1
+    op listlen                                   1
+    op listnew                                   2
+    pusherrorexit                                1
+    rawop                                        1
+    rbox                                         1
+    reraise                                      1
+    tagged-int iadd                              1
+    tagged-int igt                               1
+    tagged-int ilt                               3
+    tagged-int isub                              1
+== from-int-byte  (bytes=940 allocations=5)
+    call                                         1
+    exact calls                                  1
+    exact calls with may_error check             1
+    faildeclared                                 2
+    functions                                    2
+    op listappend                                1
+    op listget                                   1
+    op listlen                                   1
+    op listnew                                   2
+    rawop                                        3
+    rbox                                         1
+    runbox                                       1
+    tagged-int iadd                              1
+    tagged-int ilt                               1
+== ai_text_clean  (bytes=3003 allocations=111)
+    call                                         9
+    exact calls                                  9
+    exact calls with may_error check             7
+    functions                                    5
+    op decodecharat                              1
+    op listnew                                   1
+    op regioneq                                  19
+    op strbytelen                                1
+    op strcat                                    1
+    op strlen                                    2
+    rawop                                        1
+    rbox                                         1
+    runbox                                       1
+    tagged-int iadd                              1
+    tagged-int ige                               2
+    tail                                         1
+== csv  (bytes=4731 allocations=19)
+    call                                         4
+    callmulti                                    12
+    exact calls                                  16
+    exact calls with may_error check             16
+    functions                                    11
+    op listappend                                4
+    op listnew                                   3
+    op regioncheck                               1
+    op regioneq                                  10
+    op strcat                                    2
+    op strlen                                    4
+    op substr                                    2
+    rawop                                        1
+    runbox                                       2
+    tagged-int iadd                              12
+    tagged-int ige                               3
+    tail                                         5
+== csv_chunked  (bytes=10103 allocations=22)
+    call                                         12
+    callmulti                                    19
+    exact calls                                  31
+    exact calls with may_error check             31
+    functions                                    20
+    genericFunctions                             1
+    guard mutarray specialized-instance local    1
+    op listappend                                4
+    op listget                                   2
+    op listlen                                   4
+    op listnew                                   1
+    op regioncheck                               1
+    op regioneq                                  10
+    op strcat                                    2
+    op strlen                                    4
+    op substr                                    2
+    rawop                                        3
+    rbox                                         2
+    runbox                                       4
+    tagged-int iadd                              20
+    tagged-int ieq                               4
+    tagged-int ige                               5
+    tagged-int imul                              2
+    tail                                         7
+== csv_geometric  (bytes=5333 allocations=23)
+    call                                         9
+    callmulti                                    12
+    exact calls                                  21
+    exact calls with may_error check             20
+    functions                                    15
+    genericFunctions                             1
+    op regioncheck                               1
+    op regioneq                                  8
+    op strcat                                    2
+    op strlen                                    3
+    op substr                                    2
+    tagged-int iadd                              13
+    tagged-int ige                               3
+    tagged-int ile                               1
+    tagged-int ilt                               1
+    tagged-int imul                              1
+    tail                                         5
+== csv_records  (bytes=21624 allocations=83)
+    call                                         84
+    callmulti                                    14
+    exact calls                                  98
+    exact calls with may_error check             96
+    functions                                    55
+    genericFunctions                             8
+    guard int specialized-instance local         6
+    guard list specialized-instance local        1
+    guard list specialized-instance param        3
+    guard mutarray generic-instance local        1
+    guard mutarray generic-instance param        4
+    guard mutarray specialized-instance local    11
+    guard mutarray specialized-instance param    3
+    op hash                                      3
+    op imod                                      6
+    op listget                                   7
+    op listlen                                   5
+    op listnew                                   2
+    op regioncheck                               1
+    op regioneq                                  8
+    op strcat                                    2
+    op strlen                                    3
+    op substr                                    2
+    op veq                                       13
+    rawop                                        7
+    rbox                                         10
+    runbox                                       4
+    tagged-int iadd                              21
+    tagged-int ige                               8
+    tagged-int igt                               2
+    tagged-int ile                               2
+    tagged-int ilt                               3
+    tagged-int imul                              7
+    tagged-int isub                              1
+    tail                                         14
+== hashtable  (bytes=12868 allocations=5)
+    call                                         68
+    exact calls                                  68
+    exact calls with may_error check             68
+    functions                                    26
+    genericFunctions                             2
+    guard int specialized-instance local         8
+    guard mutarray specialized-instance local    14
+    guard mutarray specialized-instance param    3
+    op hash                                      2
+    op imod                                      4
+    op listnew                                   1
+    op veq                                       13
+    rawop                                        4
+    rbox                                         5
+    runbox                                       1
+    tagged-int iadd                              7
+    tagged-int ige                               4
+    tagged-int igt                               2
+    tagged-int ilt                               3
+    tagged-int imul                              3
+    tagged-int isub                              2
+    tail                                         6
+== matmul  (bytes=4160 allocations=16)
+    call                                         8
+    exact calls                                  8
+    exact calls with may_error check             8
+    functions                                    7
+    op listappend                                4
+    op listget                                   6
+    op listlen                                   6
+    op listnew                                   11
+    rawop                                        7
+    rbox                                         5
+    runbox                                       5
+    tagged-int iadd                              3
+    tagged-int ieq                               2
+    tagged-int imul                              1
+    tail                                         3
+== string_replace  (bytes=2322 allocations=26)
+    call                                         7
+    exact calls                                  7
+    exact calls with may_error check             7
+    functions                                    4
+    op listnew                                   1
+    op regioncheck                               1
+    op regioneq                                  1
+    op strcat                                    3
+    op strlen                                    7
+    op substr                                    2
+    rawop                                        1
+    runbox                                       1
+    tagged-int iadd                              4
+    tagged-int igt                               2
+    tail                                         2
+== string_reverse  (bytes=798 allocations=23)
+    call                                         6
+    exact calls                                  6
+    exact calls with may_error check             6
+    functions                                    3
+    op listnew                                   1
+    op strcat                                    1
+    op strlen                                    1
+    op substr                                    1
+    rawop                                        3
+    rbox                                         2
+    runbox                                       1
+    tail                                         1
+== fib  (bytes=394 allocations=0)
+    call                                         3
+    exact calls                                  3
+    exact calls with may_error check             0
+    functions                                    2
+    rawop                                        2
+    rbox                                         2
+    runbox                                       1
+    tagged-int iadd                              1
+    tagged-int ilt                               1
+== loop-count  (bytes=418 allocations=0)
+    call                                         2
+    exact calls                                  2
+    exact calls with may_error check             0
+    functions                                    3
+    rawop                                        5
+    rbox                                         4
+    runbox                                       2
+    tagged-int iadd                              1
+    tagged-int ile                               1
+    tail                                         1
+== sum-refined  (bytes=292 allocations=0)
+    call                                         2
+    exact calls                                  2
+    exact calls with may_error check             0
+    functions                                    3
+    rawop                                        2
+    rbox                                         1
+    tagged-int iadd                              1
+    tail                                         1
+    unreachable                                  1

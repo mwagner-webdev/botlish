@@ -1,0 +1,70 @@
+
+program.o:     file format elf64-x86-64
+
+
+Disassembly of section .text:
+
+0000000000000000 <botlish_fn_0>:  ;; <program><generic>
+   0:	push   rbp
+   1:	mov    rbp,rsp
+   4:	mov    esi,0x5b
+   9:	call   e <botlish_fn_0+0xe>
+			a: R_X86_64_PLT32	botlish_fn_1-0x4
+   e:	test   rax,rax
+  11:	jne    1f <botlish_fn_0+0x1f>
+  17:	xor    rax,rax
+  1a:	mov    rsp,rbp
+  1d:	pop    rbp
+  1e:	ret
+  1f:	mov    rsp,rbp
+  22:	pop    rbp
+  23:	ret
+
+0000000000000024 <botlish_entry_0>:  ;; <program><generic>
+  24:	push   rbp
+  25:	mov    rbp,rsp
+  28:	call   2d <botlish_entry_0+0x9>
+			29: R_X86_64_PLT32	botlish_fn_0-0x4
+  2d:	mov    rsp,rbp
+  30:	pop    rbp
+  31:	ret
+
+0000000000000032 <botlish_fn_1>:  ;; byte::from_int<int>
+  32:	push   rbp
+  33:	mov    rbp,rsp
+  36:	mov    rax,rsi
+  39:	sar    rax,1
+  3c:	test   rax,rax
+  3f:	jl     70 <botlish_fn_1+0x3e>
+  45:	cmp    rax,0xff
+  4b:	jg     59 <botlish_fn_1+0x27>
+  51:	mov    rax,rsi
+  54:	mov    rsp,rbp
+  57:	pop    rbp
+  58:	ret
+  59:	mov    rax,QWORD PTR [rdi+0x10]
+  5d:	mov    rdx,QWORD PTR [rax+0x8]
+  61:	mov    esi,0x2
+  66:	call   6b <botlish_fn_1+0x39>
+			67: R_X86_64_PLT32	rt_fail_declared-0x4
+  6b:	jmp    81 <botlish_fn_1+0x4f>
+  70:	mov    rax,QWORD PTR [rdi+0x10]
+  74:	mov    rdx,QWORD PTR [rax]
+  77:	mov    esi,0x1
+  7c:	call   81 <botlish_fn_1+0x4f>
+			7d: R_X86_64_PLT32	rt_fail_declared-0x4
+  81:	xor    rax,rax
+  84:	mov    rsp,rbp
+  87:	pop    rbp
+  88:	ret
+
+0000000000000089 <botlish_entry_1>:  ;; byte::from_int<int>
+  89:	push   rbp
+  8a:	mov    rbp,rsp
+  8d:	mov    rsi,QWORD PTR [rdx]
+  90:	call   95 <botlish_entry_1+0xc>
+			91: R_X86_64_PLT32	botlish_fn_1-0x4
+  95:	mov    rsp,rbp
+  98:	pop    rbp
+  99:	ret
+

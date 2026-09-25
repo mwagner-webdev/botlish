@@ -1,0 +1,337 @@
+function 0 "<program>"
+  NIR regs: 1
+  raw regs: 0
+  managed-capable regs: 1
+  effects: may_error=true may_gc=true
+  safepoints: 1
+  root candidates: 0
+  max live roots: 0
+  shadow slots: 0
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 1 "ht_fill_empty"
+  NIR regs: 13
+  raw regs: 2
+  managed-capable regs: 11
+  effects: may_error=true may_gc=true
+  safepoints: 1
+  root candidates: 4
+  max live roots: 4
+  shadow slots: 4
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 2 "ht_alloc"
+  NIR regs: 29
+  raw regs: 9
+  managed-capable regs: 20
+  effects: may_error=true may_gc=true
+  safepoints: 5
+  root candidates: 6
+  max live roots: 4
+  shadow slots: 4
+  entry zero slots: 3
+  depth reservation: no
+  storage: native frame
+
+function 3 "ht_new"
+  NIR regs: 3
+  raw regs: 1
+  managed-capable regs: 2
+  effects: may_error=true may_gc=true
+  safepoints: 1
+  root candidates: 1
+  max live roots: 1
+  shadow slots: 1
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 4 "ht_controls"
+  NIR regs: 4
+  raw regs: 1
+  managed-capable regs: 3
+  effects: may_error=true may_gc=false
+  safepoints: 0
+  root candidates: 0
+  max live roots: 0
+  shadow slots: 0
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 5 "ht_keys"
+  NIR regs: 4
+  raw regs: 1
+  managed-capable regs: 3
+  effects: may_error=true may_gc=false
+  safepoints: 0
+  root candidates: 0
+  max live roots: 0
+  shadow slots: 0
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 6 "ht_values"
+  NIR regs: 4
+  raw regs: 1
+  managed-capable regs: 3
+  effects: may_error=true may_gc=false
+  safepoints: 0
+  root candidates: 0
+  max live roots: 0
+  shadow slots: 0
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 7 "ht_size"
+  NIR regs: 4
+  raw regs: 1
+  managed-capable regs: 3
+  effects: may_error=true may_gc=false
+  safepoints: 0
+  root candidates: 0
+  max live roots: 0
+  shadow slots: 0
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 8 "ht_tombstones"
+  NIR regs: 4
+  raw regs: 1
+  managed-capable regs: 3
+  effects: may_error=true may_gc=false
+  safepoints: 0
+  root candidates: 0
+  max live roots: 0
+  shadow slots: 0
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 9 "ht_capacity"
+  NIR regs: 3
+  raw regs: 0
+  managed-capable regs: 3
+  effects: may_error=true may_gc=false
+  safepoints: 0
+  root candidates: 0
+  max live roots: 0
+  shadow slots: 0
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 10 "ht_probe_start"
+  NIR regs: 5
+  raw regs: 0
+  managed-capable regs: 5
+  effects: may_error=true may_gc=false
+  safepoints: 0
+  root candidates: 0
+  max live roots: 0
+  shadow slots: 0
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 11 "ht_probe_next"
+  NIR regs: 7
+  raw regs: 1
+  managed-capable regs: 6
+  effects: may_error=true may_gc=true
+  safepoints: 1
+  root candidates: 3
+  max live roots: 3
+  shadow slots: 3
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 12 "ht_find_get"
+  NIR regs: 30
+  raw regs: 5
+  managed-capable regs: 25
+  effects: may_error=true may_gc=true
+  safepoints: 1
+  root candidates: 3
+  max live roots: 3
+  shadow slots: 3
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 13 "ht_find_insert"
+  NIR regs: 44
+  raw regs: 5
+  managed-capable regs: 39
+  effects: may_error=true may_gc=true
+  safepoints: 2
+  root candidates: 4
+  max live roots: 4
+  shadow slots: 4
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 14 "ht_get"
+  NIR regs: 12
+  raw regs: 1
+  managed-capable regs: 11
+  effects: may_error=true may_gc=true
+  safepoints: 1
+  root candidates: 3
+  max live roots: 3
+  shadow slots: 3
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 15 "ht_contains"
+  NIR regs: 7
+  raw regs: 1
+  managed-capable regs: 6
+  effects: may_error=true may_gc=true
+  safepoints: 1
+  root candidates: 3
+  max live roots: 3
+  shadow slots: 3
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 16 "ht_rehash_probe"
+  NIR regs: 13
+  raw regs: 2
+  managed-capable regs: 11
+  effects: may_error=true may_gc=true
+  safepoints: 1
+  root candidates: 4
+  max live roots: 4
+  shadow slots: 4
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 17 "ht_rehash_insert"
+  NIR regs: 15
+  raw regs: 1
+  managed-capable regs: 14
+  effects: may_error=true may_gc=true
+  safepoints: 1
+  root candidates: 7
+  max live roots: 7
+  shadow slots: 7
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 18 "ht_rehash_scan"
+  NIR regs: 28
+  raw regs: 5
+  managed-capable regs: 23
+  effects: may_error=true may_gc=true
+  safepoints: 1
+  root candidates: 10
+  max live roots: 10
+  shadow slots: 10
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 19 "ht_rehash"
+  NIR regs: 30
+  raw regs: 7
+  managed-capable regs: 23
+  effects: may_error=true may_gc=true
+  safepoints: 5
+  root candidates: 11
+  max live roots: 10
+  shadow slots: 10
+  entry zero slots: 4
+  depth reservation: no
+  storage: native frame
+
+function 20 "ht_should_grow"
+  NIR regs: 15
+  raw regs: 3
+  managed-capable regs: 12
+  effects: may_error=true may_gc=true
+  safepoints: 4
+  root candidates: 10
+  max live roots: 3
+  shadow slots: 3
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 21 "ht_grow_or_clean"
+  NIR regs: 12
+  raw regs: 1
+  managed-capable regs: 11
+  effects: may_error=true may_gc=true
+  safepoints: 3
+  root candidates: 5
+  max live roots: 3
+  shadow slots: 3
+  entry zero slots: 1
+  depth reservation: no
+  storage: native frame
+
+function 22 "ht_place"
+  NIR regs: 33
+  raw regs: 6
+  managed-capable regs: 27
+  effects: may_error=true may_gc=true
+  safepoints: 2
+  root candidates: 8
+  max live roots: 5
+  shadow slots: 5
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 23 "ht_set"
+  NIR regs: 35
+  raw regs: 7
+  managed-capable regs: 28
+  effects: may_error=true may_gc=true
+  safepoints: 6
+  root candidates: 9
+  max live roots: 5
+  shadow slots: 5
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 24 "ht_delete"
+  NIR regs: 35
+  raw regs: 6
+  managed-capable regs: 29
+  effects: may_error=true may_gc=true
+  safepoints: 3
+  root candidates: 9
+  max live roots: 4
+  shadow slots: 4
+  entry zero slots: 1
+  depth reservation: no
+  storage: native frame
+
+function 25 "sample"
+  NIR regs: 28
+  raw regs: 0
+  managed-capable regs: 28
+  effects: may_error=true may_gc=true
+  safepoints: 11
+  root candidates: 19
+  max live roots: 6
+  shadow slots: 6
+  entry zero slots: 6
+  depth reservation: no
+  storage: native frame

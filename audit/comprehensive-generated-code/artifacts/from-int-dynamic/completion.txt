@@ -1,0 +1,8 @@
+diagnostics: 0
+
+e77 (call) from-int-dynamic.bot:176 -> byte::from_int
+  declaredErrors={AboveRange BelowRange} effectiveErrors={AboveRange} mayReturnNormally=1 resultRangeFact=[0, 255]
+e79 (call) from-int-dynamic.bot:176 -> char::codepoint
+  declaredErrors={} effectiveErrors={} mayReturnNormally=1 resultRangeFact=[0, 1114111]
+e97 (handle) from-int-dynamic.bot:6 -> byte::from_int
+  declaredErrors={AboveRange BelowRange} effectiveErrors={AboveRange BelowRange} mayReturnNormally=1 resultRangeFact=-

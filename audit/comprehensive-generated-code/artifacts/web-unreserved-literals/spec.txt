@@ -1,0 +1,45 @@
+i0 <program>: generic=1 key={} result=List[bool]
+    call e176 web.bot:65 -> i1 byte::set<List[UnicodeChar]>
+    call e323 web-unreserved-literals.bot:3 -> i4 web::is_unreserved<generic>
+    call e326 web-unreserved-literals.bot:3 -> i4 web::is_unreserved<generic>
+    call e329 web-unreserved-literals.bot:3 -> i4 web::is_unreserved<generic>
+    call e332 web-unreserved-literals.bot:4 -> i4 web::is_unreserved<generic>
+    call e335 web-unreserved-literals.bot:4 -> i4 web::is_unreserved<generic>
+    call e338 web-unreserved-literals.bot:4 -> i4 web::is_unreserved<generic>
+    materializes Block values: e185 e199
+i2 char::codepoint<UnicodeChar>: generic=0 key={UnicodeChar} result=int
+i16 byte::high_nibble<generic>: generic=1 key={any} result=int[HighNibble]
+i17 byte::nibble<int>: generic=0 key={int} result=int[Nibble]
+i3 byte::from_int<int>: generic=0 key={int} result=int[Byte]
+i1 byte::set<List[UnicodeChar]>: generic=0 key={{List[UnicodeChar]}} result=ImmutableSet[int[Byte]]
+    call e79 web-unreserved-literals.bot:176 -> i2 char::codepoint<UnicodeChar>
+    call e77 web-unreserved-literals.bot:176 -> i3 byte::from_int<int>
+i9 ascii::is_digit<generic>: generic=1 key={any} result=bool
+i7 ascii::is_upper<generic>: generic=1 key={any} result=bool
+i8 ascii::is_lower<generic>: generic=1 key={any} result=bool
+i6 ascii::is_alphabetic<generic>: generic=1 key={any} result=bool
+    call e133 ascii.bot:63 -> i7 ascii::is_upper<generic>
+    call e138 ascii.bot:63 -> i8 ascii::is_lower<generic>
+i5 ascii::is_alphanumeric<generic>: generic=1 key={any} result=bool
+    call e146 ascii.bot:66 -> i6 ascii::is_alphabetic<generic>
+    call e151 ascii.bot:66 -> i9 ascii::is_digit<generic>
+i4 web::is_unreserved<generic>: generic=1 key={any} result=bool
+    call e187 web.bot:68 -> i5 ascii::is_alphanumeric<generic>
+i10 web::uri_escape_text<generic>: generic=1 key={any} result=any
+    call e316 web.bot:101 -> i11 esc_from<generic>
+    materializes Block values: e208 e225 e254 e287
+i15 high_nibble<generic>: generic=1 key={any} result=int[Nibble]
+    call e204 web.bot:73 -> i16 byte::high_nibble<generic>
+    call e202 web.bot:73 -> i17 byte::nibble<int>
+i14 hex_pair<generic>: generic=1 key={any} result=str
+    call e214 web.bot:76 -> i15 high_nibble<generic>
+i13 esc_bytes<generic>: generic=1 key={any any any} result=any
+    call e247 web.bot:82 -> i14 hex_pair<generic>
+    call e234 web.bot:82 -> i13 esc_bytes<generic>
+i12 esc_char<generic>: generic=1 key={any} result=any
+    call e272 web.bot:88 -> i4 web::is_unreserved<generic>
+    call e276 web.bot:91 -> i13 esc_bytes<generic>
+    call e281 web.bot:93 -> i13 esc_bytes<generic>
+i11 esc_from<generic>: generic=1 key={any any any} result=any
+    call e306 web.bot:99 -> i12 esc_char<generic>
+    call e296 web.bot:99 -> i11 esc_from<generic>

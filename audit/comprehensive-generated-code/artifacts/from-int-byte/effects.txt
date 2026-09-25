@@ -1,0 +1,2 @@
+exact_calls=1 false_false=0 false_true=0 true_false=1 true_true=0 completion_checks_removed=0 call_safepoints_removed=1
+call caller=0 caller_name="<program>" callee=1 callee_name="byte::from_int" may_error=true may_gc=false

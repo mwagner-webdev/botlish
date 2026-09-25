@@ -1,0 +1,7 @@
+i0 <program>
+i1 byte::complement<int>
+    param b: declared=- first-ref-view-type=int entry-range=[-∞, +∞]
+    result range: [0, 255]
+i2 byte::from_int<int>
+    param value: declared=int first-ref-view-type=int entry-range=[0, 255]
+    result range: [0, 255]

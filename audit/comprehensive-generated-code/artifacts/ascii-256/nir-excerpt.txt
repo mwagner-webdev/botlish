@@ -1,0 +1,166 @@
+# nir.txt without func 0 "<program>" (256-element literal list); regenerate with tools/probe.tcl
+nir 1 call-effects=1
+
+func 1 "byte::from_int" params=1 env=0 regs=9 pnames="value" captures=0 instance="int" rawregs="2 6" @e58
+    %1 = int 0 @e63
+    %2 = rawint 0
+    %3 = op ilt %0 %1 @e60
+    br %3 L0 L1 @e59
+  label L0
+    faildeclared 1 "BelowRange" @e64
+  label L1
+    %5 = int 255 @e69
+    %6 = rawint 255
+    %7 = op igt %0 %5 @e66
+    br %7 L3 L4 @e65
+  label L3
+    faildeclared 2 "AboveRange" @e70
+  label L4
+    %8 = move %0
+    jump L5
+  label L5
+    %4 = move %8
+    jump L2
+  label L2
+    ret %4
+end
+
+func 2 "ascii::is_digit" params=1 env=0 regs=13 pnames="b" captures=0 instance="int" rawregs="1 3 7" @e86
+    %1 = op runbox %0
+    %2 = int 48 @e91
+    %3 = rawint 48
+    %4 = op rige %1 %3 @e88
+    br %4 L0 L1 @e87
+  label L0
+    %6 = int 57 @e96
+    %7 = rawint 57
+    %8 = op rile %1 %7 @e93
+    br %8 L3 L4 @e92
+  label L3
+    %10 = bool true @e97
+    %9 = move %10
+    jump L5
+  label L4
+    %11 = bool false @e98
+    %9 = move %11
+    jump L5
+  label L5
+    %5 = move %9
+    jump L2
+  label L1
+    %12 = bool false @e99
+    %5 = move %12
+    jump L2
+  label L2
+    ret %5
+end
+
+func 3 "ascii::is_upper" params=1 env=0 regs=13 pnames="b" captures=0 instance="int" rawregs="1 3 7" @e101
+    %1 = op runbox %0
+    %2 = int 65 @e106
+    %3 = rawint 65
+    %4 = op rige %1 %3 @e103
+    br %4 L0 L1 @e102
+  label L0
+    %6 = int 90 @e111
+    %7 = rawint 90
+    %8 = op rile %1 %7 @e108
+    br %8 L3 L4 @e107
+  label L3
+    %10 = bool true @e112
+    %9 = move %10
+    jump L5
+  label L4
+    %11 = bool false @e113
+    %9 = move %11
+    jump L5
+  label L5
+    %5 = move %9
+    jump L2
+  label L1
+    %12 = bool false @e114
+    %5 = move %12
+    jump L2
+  label L2
+    ret %5
+end
+
+func 4 "ascii::is_lower" params=1 env=0 regs=13 pnames="b" captures=0 instance="int" rawregs="1 3 7" @e116
+    %1 = op runbox %0
+    %2 = int 97 @e121
+    %3 = rawint 97
+    %4 = op rige %1 %3 @e118
+    br %4 L0 L1 @e117
+  label L0
+    %6 = int 122 @e126
+    %7 = rawint 122
+    %8 = op rile %1 %7 @e123
+    br %8 L3 L4 @e122
+  label L3
+    %10 = bool true @e127
+    %9 = move %10
+    jump L5
+  label L4
+    %11 = bool false @e128
+    %9 = move %11
+    jump L5
+  label L5
+    %5 = move %9
+    jump L2
+  label L1
+    %12 = bool false @e129
+    %5 = move %12
+    jump L2
+  label L2
+    ret %5
+end
+
+func 5 "ascii::is_alphabetic" params=1 env=0 regs=8 pnames="b" captures=0 instance="int" @e131
+    %1 = call 3 %0 @e133
+    br %1 L0 L1 @e132
+  label L0
+    %3 = bool true @e136
+    %2 = move %3
+    jump L2
+  label L1
+    %4 = call 4 %0 @e138
+    br %4 L3 L4 @e137
+  label L3
+    %6 = bool true @e141
+    %5 = move %6
+    jump L5
+  label L4
+    %7 = bool false @e142
+    %5 = move %7
+    jump L5
+  label L5
+    %2 = move %5
+    jump L2
+  label L2
+    ret %2
+end
+
+func 6 "ascii::is_alphanumeric" params=1 env=0 regs=8 pnames="b" captures=0 instance="int" @e144
+    %1 = call 5 %0 @e146
+    br %1 L0 L1 @e145
+  label L0
+    %3 = bool true @e149
+    %2 = move %3
+    jump L2
+  label L1
+    %4 = call 2 %0 @e151
+    br %4 L3 L4 @e150
+  label L3
+    %6 = bool true @e154
+    %5 = move %6
+    jump L5
+  label L4
+    %7 = bool false @e155
+    %5 = move %7
+    jump L5
+  label L5
+    %2 = move %5
+    jump L2
+  label L2
+    ret %2
+end

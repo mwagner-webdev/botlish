@@ -1,0 +1,32 @@
+i0 <program>
+i1 byte::from_int<int>
+    param value: declared=int first-ref-view-type=int entry-range=[-∞, +∞]
+    result range: [0, 255]
+i9 ascii::is_digit<generic>
+    param b: declared=int[Byte] first-ref-view-type=any entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i7 ascii::is_upper<generic>
+    param b: declared=int[Byte] first-ref-view-type=any entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i8 ascii::is_lower<generic>
+    param b: declared=int[Byte] first-ref-view-type=any entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i6 ascii::is_alphabetic<generic>
+    param b: declared=int[Byte] first-ref-view-type=any entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i5 ascii::is_alphanumeric<generic>
+    param b: declared=int[Byte] first-ref-view-type=any entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i3 count<List[int], int, int>
+    param xs: declared=List[int[Byte]] first-ref-view-type=List[int] entry-range=[-∞, +∞]
+    param i: declared=int first-ref-view-type=int entry-range=[0, +∞]
+    param acc: declared=int first-ref-view-type=int entry-range=[0, +∞]
+    result range: [-∞, +∞]
+i4 cls<generic>
+    param b: declared=int[Byte] first-ref-view-type=any entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i2 rep<List[int], int, int>
+    param xs: declared=List[int[Byte]] first-ref-view-type=List[int] entry-range=[-∞, +∞]
+    param k: declared=int first-ref-view-type=int entry-range=[-∞, 1024]
+    param acc: declared=int first-ref-view-type=int entry-range=[-∞, +∞]
+    result range: [-∞, +∞]

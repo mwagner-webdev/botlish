@@ -1,0 +1,317 @@
+<program> e923 hashtable.bot:376 -> sample<generic>
+    result: type list[bool, bool, bool, bool, bool, any], range [-∞, +∞]; semantic effectiveErrors {}
+ht_fill_empty<mutarray, int, int> e26 hashtable.bot:98 -> ht_empty_state<generic>
+    result: type int, range [0, 0] {0}; semantic effectiveErrors {}
+ht_fill_empty<mutarray, int, int> e28 hashtable.bot:99 -> ht_fill_empty<mutarray, int, int>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type int, range [1, 9223372036854775806]
+    arg2: type int, range [1, 9223372036854775806]
+    result: type unit, range [-∞, +∞]; semantic effectiveErrors {}
+ht_alloc<int> e42 hashtable.bot:103 -> ht_fill_empty<mutarray, int, int>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type int, range [0, 0] {0}
+    arg2: type int, range [8, 8] {8}
+    result: type unit, range [-∞, +∞]; semantic effectiveErrors {}
+ht_new<generic> e89 hashtable.bot:115 -> ht_min_capacity<generic>
+    result: type int, range [8, 8] {8}; semantic effectiveErrors {}
+ht_new<generic> e87 hashtable.bot:115 -> ht_alloc<int>
+    arg0: type int, range [8, 8] {8}
+    result: type mutarray, range [-∞, +∞]; semantic effectiveErrors {}
+ht_capacity<mutarray> e156 hashtable.bot:149 -> ht_controls<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_probe_start<mutarray, str> e166 hashtable.bot:155 -> ht_capacity<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type int, range [0, 4611686018427387903]; semantic effectiveErrors {}
+ht_probe_next<mutarray, int> e177 hashtable.bot:158 -> ht_capacity<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type int, range [0, 4611686018427387903]; semantic effectiveErrors {}
+ht_find_get<mutarray, str, int> e183 hashtable.bot:164 -> ht_controls<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_find_get<mutarray, str, int> e195 hashtable.bot:166 -> ht_empty_state<generic>
+    result: type int, range [0, 0] {0}; semantic effectiveErrors {}
+ht_find_get<mutarray, str, int> e207 hashtable.bot:169 -> ht_occupied_state<generic>
+    result: type int, range [1, 1] {1}; semantic effectiveErrors {}
+ht_find_get<mutarray, str, int> e214 hashtable.bot:169 -> ht_keys<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_find_get<mutarray, str, int> e228 hashtable.bot:172 -> ht_probe_next<mutarray, int>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type int, range [0, +∞]
+    result: type int, range [0, +∞]; semantic effectiveErrors {}
+ht_find_get<mutarray, str, int> e224 hashtable.bot:172 -> ht_find_get<mutarray, str, int>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type str, range [-∞, +∞]
+    arg2: type int, range [0, +∞]
+    result: type int, range [-∞, +∞]; semantic effectiveErrors {}
+ht_find_insert<mutarray, str, int, int> e235 hashtable.bot:179 -> ht_controls<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_find_insert<mutarray, str, int, int> e247 hashtable.bot:181 -> ht_empty_state<generic>
+    result: type int, range [0, 0] {0}; semantic effectiveErrors {}
+ht_find_insert<mutarray, str, int, int> e263 hashtable.bot:187 -> ht_occupied_state<generic>
+    result: type int, range [1, 1] {1}; semantic effectiveErrors {}
+ht_find_insert<mutarray, str, int, int> e270 hashtable.bot:187 -> ht_keys<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_find_insert<mutarray, str, int, int> e285 hashtable.bot:190 -> ht_tombstone_state<generic>
+    result: type int, range [2, 2] {2}; semantic effectiveErrors {}
+ht_find_insert<mutarray, str, int, int> e300 hashtable.bot:191 -> ht_probe_next<mutarray, int>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type int, range [0, +∞]
+    result: type int, range [0, +∞]; semantic effectiveErrors {}
+ht_find_insert<mutarray, str, int, int> e296 hashtable.bot:191 -> ht_find_insert<mutarray, str, int, int>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type str, range [-∞, +∞]
+    arg2: type int, range [0, +∞]
+    arg3: type int, range [0, +∞]
+    result: type int, range [-∞, +∞]; semantic effectiveErrors {}
+ht_find_insert<mutarray, str, int, int> e309 hashtable.bot:193 -> ht_probe_next<mutarray, int>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type int, range [0, +∞]
+    result: type int, range [0, +∞]; semantic effectiveErrors {}
+ht_find_insert<mutarray, str, int, int> e305 hashtable.bot:193 -> ht_find_insert<mutarray, str, int, int>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type str, range [-∞, +∞]
+    arg2: type int, range [0, +∞]
+    arg3: type int, range [-∞, +∞]
+    result: type int, range [-∞, +∞]; semantic effectiveErrors {}
+ht_get<mutarray, str> e321 hashtable.bot:200 -> ht_probe_start<mutarray, str>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type str, range [-∞, +∞]
+    result: type int, range [0, +∞]; semantic effectiveErrors {}
+ht_get<mutarray, str> e317 hashtable.bot:200 -> ht_find_get<mutarray, str, int>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type str, range [-∞, +∞]
+    arg2: type int, range [0, +∞]
+    result: type int, range [-∞, +∞]; semantic effectiveErrors {}
+ht_get<mutarray, str> e334 hashtable.bot:204 -> ht_values<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_contains<mutarray, str> e346 hashtable.bot:207 -> ht_probe_start<mutarray, str>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type str, range [-∞, +∞]
+    result: type int, range [0, +∞]; semantic effectiveErrors {}
+ht_contains<mutarray, str> e342 hashtable.bot:207 -> ht_find_get<mutarray, str, int>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type str, range [-∞, +∞]
+    arg2: type int, range [0, +∞]
+    result: type int, range [-∞, +∞]; semantic effectiveErrors {}
+ht_rehash_probe<mutarray, int, int> e362 hashtable.bot:216 -> ht_empty_state<generic>
+    result: type int, range [0, 0] {0}; semantic effectiveErrors {}
+ht_rehash_probe<mutarray, int, int> e366 hashtable.bot:219 -> ht_rehash_probe<mutarray, int, int>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type int, range [0, +∞]
+    arg2: type int, range [0, 9223372036854775806]
+    result: type int, range [-∞, +∞]; semantic effectiveErrors {}
+ht_rehash_insert<List[mutarray], int, any, any> e385 hashtable.bot:226 -> ht_rehash_probe<mutarray, int, int>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type int, range [0, +∞]
+    arg2: type int, range [0, 9223372036854775806]
+    result: type int, range [-∞, +∞]; semantic effectiveErrors {}
+ht_rehash_insert<List[mutarray], int, any, any> e399 hashtable.bot:227 -> ht_occupied_state<generic>
+    result: type int, range [1, 1] {1}; semantic effectiveErrors {}
+ht_rehash_scan<list, int, int, List[mutarray], int> e439 hashtable.bot:240 -> ht_occupied_state<generic>
+    result: type int, range [1, 1] {1}; semantic effectiveErrors {}
+ht_rehash_scan<list, int, int, List[mutarray], int> e457 hashtable.bot:243 -> ht_rehash_insert<List[mutarray], int, any, any>
+    arg0: type List[mutarray], range [-∞, +∞]
+    arg1: type int, range [0, 9223372036854775806]
+    arg2: type any, range [-∞, +∞]
+    arg3: type any, range [-∞, +∞]
+    result: type unit, range [-∞, +∞]; semantic effectiveErrors {}
+ht_rehash_scan<list, int, int, List[mutarray], int> e463 hashtable.bot:245 -> ht_rehash_scan<list, int, int, List[mutarray], int>
+    arg0: type list, range [-∞, +∞]
+    arg1: type int, range [1, 4611686018427387903]
+    arg2: type int, range [1, 4611686018427387903]
+    arg3: type List[mutarray], range [-∞, +∞]
+    arg4: type int, range [0, 9223372036854775806]
+    result: type unit, range [-∞, +∞]; semantic effectiveErrors {}
+ht_rehash<mutarray, int> e478 hashtable.bot:251 -> ht_controls<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_rehash<mutarray, int> e481 hashtable.bot:251 -> ht_keys<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_rehash<mutarray, int> e484 hashtable.bot:251 -> ht_values<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_rehash<mutarray, int> e488 hashtable.bot:252 -> ht_capacity<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type int, range [0, 4611686018427387903]; semantic effectiveErrors {}
+ht_rehash<mutarray, int> e495 hashtable.bot:254 -> ht_fill_empty<mutarray, int, int>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type int, range [0, 0] {0}
+    arg2: type int, range [0, 9223372036854775806]
+    result: type unit, range [-∞, +∞]; semantic effectiveErrors {}
+ht_rehash<mutarray, int> e510 hashtable.bot:256 -> ht_rehash_scan<list, int, int, List[mutarray], int>
+    arg0: type list, range [-∞, +∞]
+    arg1: type int, range [0, 0] {0}
+    arg2: type int, range [0, 4611686018427387903]
+    arg3: type List[mutarray], range [-∞, +∞]
+    arg4: type int, range [0, 9223372036854775806]
+    result: type unit, range [-∞, +∞]; semantic effectiveErrors {}
+ht_should_grow<mutarray> e552 hashtable.bot:266 -> ht_size<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_should_grow<mutarray> e555 hashtable.bot:266 -> ht_tombstones<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_should_grow<mutarray> e569 hashtable.bot:267 -> ht_capacity<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type int, range [0, 4611686018427387903]; semantic effectiveErrors {}
+ht_grow_or_clean<mutarray> e578 hashtable.bot:270 -> ht_tombstones<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_grow_or_clean<mutarray> e581 hashtable.bot:270 -> ht_size<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_grow_or_clean<mutarray> e587 hashtable.bot:271 -> ht_capacity<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type int, range [0, 4611686018427387903]; semantic effectiveErrors {}
+ht_grow_or_clean<mutarray> e584 hashtable.bot:271 -> ht_rehash<mutarray, int>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type int, range [0, 4611686018427387903]
+    result: type unit, range [-∞, +∞]; semantic effectiveErrors {}
+ht_grow_or_clean<mutarray> e595 hashtable.bot:273 -> ht_capacity<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type int, range [0, 4611686018427387903]; semantic effectiveErrors {}
+ht_grow_or_clean<mutarray> e590 hashtable.bot:273 -> ht_rehash<mutarray, int>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type int, range [0, 9223372036854775806]
+    result: type unit, range [-∞, +∞]; semantic effectiveErrors {}
+ht_place<mutarray, int, str, str> e602 hashtable.bot:300 -> ht_controls<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_place<mutarray, int, str, str> e614 hashtable.bot:302 -> ht_occupied_state<generic>
+    result: type int, range [1, 1] {1}; semantic effectiveErrors {}
+ht_place<mutarray, int, str, str> e618 hashtable.bot:303 -> ht_keys<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_place<mutarray, int, str, str> e625 hashtable.bot:304 -> ht_values<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_place<mutarray, int, str, str> e636 hashtable.bot:305 -> ht_size<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_place<mutarray, int, str, str> e644 hashtable.bot:306 -> ht_tombstone_state<generic>
+    result: type int, range [2, 2] {2}; semantic effectiveErrors {}
+ht_place<mutarray, int, str, str> e652 hashtable.bot:307 -> ht_tombstones<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_set<mutarray, str, str> e664 hashtable.bot:312 -> ht_probe_start<mutarray, str>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type str, range [-∞, +∞]
+    result: type int, range [0, +∞]; semantic effectiveErrors {}
+ht_set<mutarray, str, str> e660 hashtable.bot:312 -> ht_find_insert<mutarray, str, int, int>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type str, range [-∞, +∞]
+    arg2: type int, range [0, +∞]
+    arg3: type int, range [-1, -1] {-1}
+    result: type int, range [-∞, +∞]; semantic effectiveErrors {}
+ht_set<mutarray, str, str> e673 hashtable.bot:313 -> ht_controls<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_set<mutarray, str, str> e685 hashtable.bot:315 -> ht_occupied_state<generic>
+    result: type int, range [1, 1] {1}; semantic effectiveErrors {}
+ht_set<mutarray, str, str> e689 hashtable.bot:316 -> ht_values<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_set<mutarray, str, str> e697 hashtable.bot:319 -> ht_should_grow<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type bool, range [-∞, +∞]; semantic effectiveErrors {}
+ht_set<mutarray, str, str> e700 hashtable.bot:320 -> ht_grow_or_clean<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type unit, range [-∞, +∞]; semantic effectiveErrors {}
+ht_set<mutarray, str, str> e711 hashtable.bot:321 -> ht_probe_start<mutarray, str>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type str, range [-∞, +∞]
+    result: type int, range [0, +∞]; semantic effectiveErrors {}
+ht_set<mutarray, str, str> e707 hashtable.bot:321 -> ht_find_insert<mutarray, str, int, int>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type str, range [-∞, +∞]
+    arg2: type int, range [0, +∞]
+    arg3: type int, range [-1, -1] {-1}
+    result: type int, range [-∞, +∞]; semantic effectiveErrors {}
+ht_set<mutarray, str, str> e704 hashtable.bot:321 -> ht_place<mutarray, int, str, str>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type int, range [-∞, +∞]
+    arg2: type str, range [-∞, +∞]
+    arg3: type str, range [-∞, +∞]
+    result: type unit, range [-∞, +∞]; semantic effectiveErrors {}
+ht_set<mutarray, str, str> e721 hashtable.bot:323 -> ht_place<mutarray, int, str, str>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type int, range [-∞, +∞]
+    arg2: type str, range [-∞, +∞]
+    arg3: type str, range [-∞, +∞]
+    result: type unit, range [-∞, +∞]; semantic effectiveErrors {}
+ht_delete<mutarray, str> e734 hashtable.bot:332 -> ht_probe_start<mutarray, str>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type str, range [-∞, +∞]
+    result: type int, range [0, +∞]; semantic effectiveErrors {}
+ht_delete<mutarray, str> e730 hashtable.bot:332 -> ht_find_get<mutarray, str, int>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type str, range [-∞, +∞]
+    arg2: type int, range [0, +∞]
+    result: type int, range [-∞, +∞]; semantic effectiveErrors {}
+ht_delete<mutarray, str> e747 hashtable.bot:336 -> ht_controls<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_delete<mutarray, str> e751 hashtable.bot:336 -> ht_tombstone_state<generic>
+    result: type int, range [2, 2] {2}; semantic effectiveErrors {}
+ht_delete<mutarray, str> e755 hashtable.bot:337 -> ht_keys<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_delete<mutarray, str> e762 hashtable.bot:338 -> ht_values<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_delete<mutarray, str> e773 hashtable.bot:339 -> ht_size<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+ht_delete<mutarray, str> e783 hashtable.bot:340 -> ht_tombstones<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+sample<generic> e869 hashtable.bot:368 -> ht_new<generic>
+    result: type mutarray, range [-∞, +∞]; semantic effectiveErrors {}
+sample<generic> e871 hashtable.bot:369 -> ht_set<mutarray, str, str>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type str, range [-∞, +∞]
+    arg2: type str, range [-∞, +∞]
+    result: type unit, range [-∞, +∞]; semantic effectiveErrors {}
+sample<generic> e876 hashtable.bot:370 -> ht_set<mutarray, str, str>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type str, range [-∞, +∞]
+    arg2: type str, range [-∞, +∞]
+    result: type unit, range [-∞, +∞]; semantic effectiveErrors {}
+sample<generic> e881 hashtable.bot:371 -> ht_set<mutarray, str, str>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type str, range [-∞, +∞]
+    arg2: type str, range [-∞, +∞]
+    result: type unit, range [-∞, +∞]; semantic effectiveErrors {}
+sample<generic> e887 hashtable.bot:372 -> ht_contains<mutarray, str>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type str, range [-∞, +∞]
+    result: type bool, range [-∞, +∞]; semantic effectiveErrors {}
+sample<generic> e891 hashtable.bot:373 -> ht_delete<mutarray, str>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type str, range [-∞, +∞]
+    result: type unit, range [-∞, +∞]; semantic effectiveErrors {}
+sample<generic> e899 hashtable.bot:374 -> ht_get<mutarray, str>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type str, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+sample<generic> e905 hashtable.bot:374 -> ht_contains<mutarray, str>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type str, range [-∞, +∞]
+    result: type bool, range [-∞, +∞]; semantic effectiveErrors {}
+sample<generic> e909 hashtable.bot:374 -> ht_contains<mutarray, str>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type str, range [-∞, +∞]
+    result: type bool, range [-∞, +∞]; semantic effectiveErrors {}
+sample<generic> e915 hashtable.bot:374 -> ht_get<mutarray, str>
+    arg0: type mutarray, range [-∞, +∞]
+    arg1: type str, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}
+sample<generic> e920 hashtable.bot:374 -> ht_size<mutarray>
+    arg0: type mutarray, range [-∞, +∞]
+    result: type any, range [-∞, +∞]; semantic effectiveErrors {}

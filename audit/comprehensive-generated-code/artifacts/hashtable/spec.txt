@@ -1,0 +1,118 @@
+i0 <program>: generic=1 key={} result=list[bool, bool, bool, bool, bool, any]
+    call e923 hashtable.bot:376 -> i1 sample<generic>
+i3 ht_min_capacity<generic>: generic=1 key={} result=int
+i6 ht_empty_state<generic>: generic=1 key={} result=int
+i12 ht_occupied_state<generic>: generic=1 key={} result=int
+i14 ht_tombstone_state<generic>: generic=1 key={} result=int
+i5 ht_fill_empty<mutarray, int, int>: generic=0 key={mutarray int int} result=unit
+    call e26 hashtable.bot:98 -> i6 ht_empty_state<generic>
+    call e28 hashtable.bot:99 -> i5 ht_fill_empty<mutarray, int, int>
+i4 ht_alloc<int>: generic=0 key={int} result=mutarray
+    call e42 hashtable.bot:103 -> i5 ht_fill_empty<mutarray, int, int>
+i2 ht_new<generic>: generic=1 key={} result=mutarray
+    call e89 hashtable.bot:115 -> i3 ht_min_capacity<generic>
+    call e87 hashtable.bot:115 -> i4 ht_alloc<int>
+i10 ht_controls<mutarray>: generic=0 key={mutarray} result=any
+i13 ht_keys<mutarray>: generic=0 key={mutarray} result=any
+i16 ht_values<mutarray>: generic=0 key={mutarray} result=any
+i18 ht_size<mutarray>: generic=0 key={mutarray} result=any
+i19 ht_tombstones<mutarray>: generic=0 key={mutarray} result=any
+i9 ht_capacity<mutarray>: generic=0 key={mutarray} result=int
+    call e156 hashtable.bot:149 -> i10 ht_controls<mutarray>
+i8 ht_probe_start<mutarray, str>: generic=0 key={mutarray str} result=int
+    call e166 hashtable.bot:155 -> i9 ht_capacity<mutarray>
+i15 ht_probe_next<mutarray, int>: generic=0 key={mutarray int} result=int
+    call e177 hashtable.bot:158 -> i9 ht_capacity<mutarray>
+i27 ht_find_get<mutarray, str, int>: generic=0 key={mutarray str int} result=int
+    call e183 hashtable.bot:164 -> i10 ht_controls<mutarray>
+    call e195 hashtable.bot:166 -> i6 ht_empty_state<generic>
+    call e207 hashtable.bot:169 -> i12 ht_occupied_state<generic>
+    call e214 hashtable.bot:169 -> i13 ht_keys<mutarray>
+    call e228 hashtable.bot:172 -> i15 ht_probe_next<mutarray, int>
+    call e224 hashtable.bot:172 -> i27 ht_find_get<mutarray, str, int>
+i11 ht_find_insert<mutarray, str, int, int>: generic=0 key={mutarray str int int} result=int
+    call e235 hashtable.bot:179 -> i10 ht_controls<mutarray>
+    call e247 hashtable.bot:181 -> i6 ht_empty_state<generic>
+    call e263 hashtable.bot:187 -> i12 ht_occupied_state<generic>
+    call e270 hashtable.bot:187 -> i13 ht_keys<mutarray>
+    call e285 hashtable.bot:190 -> i14 ht_tombstone_state<generic>
+    call e300 hashtable.bot:191 -> i15 ht_probe_next<mutarray, int>
+    call e296 hashtable.bot:191 -> i11 ht_find_insert<mutarray, str, int, int>
+    call e309 hashtable.bot:193 -> i15 ht_probe_next<mutarray, int>
+    call e305 hashtable.bot:193 -> i11 ht_find_insert<mutarray, str, int, int>
+i29 ht_get<mutarray, str>: generic=0 key={mutarray str} result=any
+    call e321 hashtable.bot:200 -> i8 ht_probe_start<mutarray, str>
+    call e317 hashtable.bot:200 -> i27 ht_find_get<mutarray, str, int>
+    call e334 hashtable.bot:204 -> i16 ht_values<mutarray>
+i26 ht_contains<mutarray, str>: generic=0 key={mutarray str} result=bool
+    call e346 hashtable.bot:207 -> i8 ht_probe_start<mutarray, str>
+    call e342 hashtable.bot:207 -> i27 ht_find_get<mutarray, str, int>
+i24 ht_rehash_probe<mutarray, int, int>: generic=0 key={mutarray int int} result=int
+    call e362 hashtable.bot:216 -> i6 ht_empty_state<generic>
+    call e366 hashtable.bot:219 -> i24 ht_rehash_probe<mutarray, int, int>
+i23 ht_rehash_insert<List[mutarray], int, any, any>: generic=0 key={{List[mutarray]} int any any} result=unit
+    call e385 hashtable.bot:226 -> i24 ht_rehash_probe<mutarray, int, int>
+    call e399 hashtable.bot:227 -> i12 ht_occupied_state<generic>
+i22 ht_rehash_scan<list, int, int, List[mutarray], int>: generic=0 key={list int int {List[mutarray]} int} result=unit
+    call e439 hashtable.bot:240 -> i12 ht_occupied_state<generic>
+    call e457 hashtable.bot:243 -> i23 ht_rehash_insert<List[mutarray], int, any, any>
+    call e463 hashtable.bot:245 -> i22 ht_rehash_scan<list, int, int, List[mutarray], int>
+i21 ht_rehash<mutarray, int>: generic=0 key={mutarray int} result=unit
+    call e478 hashtable.bot:251 -> i10 ht_controls<mutarray>
+    call e481 hashtable.bot:251 -> i13 ht_keys<mutarray>
+    call e484 hashtable.bot:251 -> i16 ht_values<mutarray>
+    call e488 hashtable.bot:252 -> i9 ht_capacity<mutarray>
+    call e495 hashtable.bot:254 -> i5 ht_fill_empty<mutarray, int, int>
+    call e510 hashtable.bot:256 -> i22 ht_rehash_scan<list, int, int, List[mutarray], int>
+i17 ht_should_grow<mutarray>: generic=0 key={mutarray} result=bool
+    call e552 hashtable.bot:266 -> i18 ht_size<mutarray>
+    call e555 hashtable.bot:266 -> i19 ht_tombstones<mutarray>
+    call e569 hashtable.bot:267 -> i9 ht_capacity<mutarray>
+i20 ht_grow_or_clean<mutarray>: generic=0 key={mutarray} result=unit
+    call e578 hashtable.bot:270 -> i19 ht_tombstones<mutarray>
+    call e581 hashtable.bot:270 -> i18 ht_size<mutarray>
+    call e587 hashtable.bot:271 -> i9 ht_capacity<mutarray>
+    call e584 hashtable.bot:271 -> i21 ht_rehash<mutarray, int>
+    call e595 hashtable.bot:273 -> i9 ht_capacity<mutarray>
+    call e590 hashtable.bot:273 -> i21 ht_rehash<mutarray, int>
+i25 ht_place<mutarray, int, str, str>: generic=0 key={mutarray int str str} result=unit
+    call e602 hashtable.bot:300 -> i10 ht_controls<mutarray>
+    call e614 hashtable.bot:302 -> i12 ht_occupied_state<generic>
+    call e618 hashtable.bot:303 -> i13 ht_keys<mutarray>
+    call e625 hashtable.bot:304 -> i16 ht_values<mutarray>
+    call e636 hashtable.bot:305 -> i18 ht_size<mutarray>
+    call e644 hashtable.bot:306 -> i14 ht_tombstone_state<generic>
+    call e652 hashtable.bot:307 -> i19 ht_tombstones<mutarray>
+i7 ht_set<mutarray, str, str>: generic=0 key={mutarray str str} result=unit
+    call e664 hashtable.bot:312 -> i8 ht_probe_start<mutarray, str>
+    call e660 hashtable.bot:312 -> i11 ht_find_insert<mutarray, str, int, int>
+    call e673 hashtable.bot:313 -> i10 ht_controls<mutarray>
+    call e685 hashtable.bot:315 -> i12 ht_occupied_state<generic>
+    call e689 hashtable.bot:316 -> i16 ht_values<mutarray>
+    call e697 hashtable.bot:319 -> i17 ht_should_grow<mutarray>
+    call e700 hashtable.bot:320 -> i20 ht_grow_or_clean<mutarray>
+    call e711 hashtable.bot:321 -> i8 ht_probe_start<mutarray, str>
+    call e707 hashtable.bot:321 -> i11 ht_find_insert<mutarray, str, int, int>
+    call e704 hashtable.bot:321 -> i25 ht_place<mutarray, int, str, str>
+    call e721 hashtable.bot:323 -> i25 ht_place<mutarray, int, str, str>
+i28 ht_delete<mutarray, str>: generic=0 key={mutarray str} result=unit
+    call e734 hashtable.bot:332 -> i8 ht_probe_start<mutarray, str>
+    call e730 hashtable.bot:332 -> i27 ht_find_get<mutarray, str, int>
+    call e747 hashtable.bot:336 -> i10 ht_controls<mutarray>
+    call e751 hashtable.bot:336 -> i14 ht_tombstone_state<generic>
+    call e755 hashtable.bot:337 -> i13 ht_keys<mutarray>
+    call e762 hashtable.bot:338 -> i16 ht_values<mutarray>
+    call e773 hashtable.bot:339 -> i18 ht_size<mutarray>
+    call e783 hashtable.bot:340 -> i19 ht_tombstones<mutarray>
+i1 sample<generic>: generic=1 key={} result=list[bool, bool, bool, bool, bool, any]
+    call e869 hashtable.bot:368 -> i2 ht_new<generic>
+    call e871 hashtable.bot:369 -> i7 ht_set<mutarray, str, str>
+    call e876 hashtable.bot:370 -> i7 ht_set<mutarray, str, str>
+    call e881 hashtable.bot:371 -> i7 ht_set<mutarray, str, str>
+    call e887 hashtable.bot:372 -> i26 ht_contains<mutarray, str>
+    call e891 hashtable.bot:373 -> i28 ht_delete<mutarray, str>
+    call e899 hashtable.bot:374 -> i29 ht_get<mutarray, str>
+    call e905 hashtable.bot:374 -> i26 ht_contains<mutarray, str>
+    call e909 hashtable.bot:374 -> i26 ht_contains<mutarray, str>
+    call e915 hashtable.bot:374 -> i29 ht_get<mutarray, str>
+    call e920 hashtable.bot:374 -> i18 ht_size<mutarray>

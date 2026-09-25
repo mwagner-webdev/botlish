@@ -1,0 +1,3 @@
+steady-ascii-capture.bot : value=63488 median=6529.35 us min=6493.97 us max=6577.35 us sessions={6577.35 6540.41 6526.14 6529.35 6535.35 6493.97 6511.33}
+steady-ascii-param.bot : value=63488 median=4279.97 us min=4270.13 us max=4294.49 us sessions={4270.13 4291.21 4279.97 4290.27 4276.24 4277.81 4294.49}
+steady-ascii.bot : value=63488 median=3584.31 us min=3553.13 us max=3618.15 us sessions={3618.15 3584.31 3586.30 3587.62 3579.65 3581.46 3553.13}
