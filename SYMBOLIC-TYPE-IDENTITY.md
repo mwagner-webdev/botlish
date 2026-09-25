@@ -340,7 +340,28 @@ No `native/`, `hir/completions.tcl`, `hir/range.tcl`, `lib/byte.bot`,
 
 ## Full regression / GC stress
 
-<!-- FILLED IN BELOW ONCE THE RUNS COMPLETE -->
+Exact counts, all three required runs, no failures:
+
+```
+$ tclsh9.0 tests/all.tcl
+######## backend: interp
+######## backend: compile
+all.tcl: Total 2102  Passed 2102  Skipped 0  Failed 0
+Sourced 73 Test Files.
+
+$ cargo test --release --manifest-path native/Cargo.toml
+test result: ok. 60 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+
+$ BOTLISH_NATIVE_GC_STRESS=1 tclsh9.0 tests/all.tcl
+######## backend: interp
+######## backend: compile
+all.tcl: Total 2102  Passed 2102  Skipped 0  Failed 0
+Sourced 73 Test Files.
+```
+
+(2102 is the combined interp+compile total across all 73 test files,
+including the 9 new `tests/symbolic-type-identity.test` tests, unchanged in
+count between the ordinary and GC-stress runs.)
 
 ## Required architecture questions
 
