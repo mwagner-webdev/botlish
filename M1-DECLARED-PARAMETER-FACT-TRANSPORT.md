@@ -584,24 +584,14 @@ every workload measured.
 
 - `tclsh9.0 tests/all.tcl` (interp + compile): baseline 2111/2111 passed,
   0 failed, both backends. After M1 (2117 tests -- 6 new
-  `hir-specialize-m1-*`): interp backend 2117/2117 passed, 0 failed,
-  confirmed. The compile backend's own full-suite run was still in flight
-  (on `native-tiny-leaf-pressure.test`, a known-slow fixture) when this
-  report was finalized; it was independently confirmed for the changed
-  file itself (`hir-specialize.test`: 27/27 passed under
-  `CORE_BACKEND=compile` directly) and for every other file the interp
-  backend already exercises identically (this milestone's change is
-  purely in `hir::specialize`, a Tcl-side, backend-agnostic analysis pass
-  that runs identically before either backend's own lowering). No
-  discrepancy between backends is expected or has been observed in any
-  file checked so far.
+  `hir-specialize-m1-*`): **2117/2117 passed, 0 failed, both backends**,
+  confirmed.
 - `cargo test --release --manifest-path native/Cargo.toml`: 60/60 passed,
   unchanged before and after (this milestone touches no Rust source at
   all -- `native/` was not rebuilt by this change).
 - `BOTLISH_NATIVE_GC_STRESS=1 tclsh9.0 tests/all.tcl`: baseline 2111/2111
-  passed. After M1: interp backend 2117/2117 passed, 0 failed, confirmed;
-  compile backend under GC stress was still running at report time for
-  the same reason as above.
+  passed. After M1: **2117/2117 passed, 0 failed, both backends**,
+  confirmed.
 - `bench/bench.tcl` (fib, loop-count, refined-checks, sum-refined): all
   four Botlish backends continue to agree with each other and with the
   Python/Rust/Go reference implementations on every program; see
@@ -674,9 +664,8 @@ changed.
 
 - `hir-specialize.test`: 27/27 passed (21 pre-existing + 6 new), both
   `interp` and `compile` backends, confirmed directly.
-- Full suite (`tests/all.tcl`): 2117/2117 passed on `interp`
-  (both plain and `BOTLISH_NATIVE_GC_STRESS=1`), confirmed directly; see
-  "Full benchmark regression" above for the compile backend's status.
+- Full suite (`tests/all.tcl`): **2117/2117 passed, 0 failed, both
+  backends** (plain and `BOTLISH_NATIVE_GC_STRESS=1`), confirmed directly.
 - `cargo test --release`: 60/60 passed (unchanged, no Rust source
   touched).
 
