@@ -100,6 +100,16 @@ pub fn op_may_error(op: OpCode) -> bool {
         // invents: see rt_set_from_list's and rt_set_contains's own doc
         // comments, and MINIMAL-IMMUTABLE-SET.md's "Deduplication
         // semantics"/"Membership semantics".
+        //
+        // SetContainsTotal is deliberately *not* listed here: it is
+        // SetContains at a call site native/lower.tcl's own static
+        // equality-totality proof (hir::types::IsEqualityTotal) already
+        // showed can never reach rt_set_contains's EQUALITY branch --
+        // op_may_error is keyed by opcode, not by which runtime helper an
+        // opcode happens to share, so giving the proven-safe invocation its
+        // own opcode is what lets it (and only it) fall out of this list
+        // (M3-EQUALITY-TOTAL-SETCONTAINS-EFFECT.md). Generic SetContains
+        // keeps its unconditional classification.
         | SetFromList | SetContains)
 }
 
@@ -1176,6 +1186,13 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         ListAppend => rt_list_append(p, a[0], a[1]),
         SetFromList => rt_set_from_list(p, a[0]),
         SetContains => rt_set_contains(p, a[0], a[1]),
+        // Same runtime helper as SetContains: the distinction is purely an
+        // op_may_error classification (see OpCode::SetContainsTotal's own
+        // doc comment). Unreachable via a Native value's own generic entry
+        // (native/lower.tcl's NativeImpl never selects this opcode for a
+        // native declaration's `impl=`), kept here only for apply_op's own
+        // match exhaustiveness.
+        SetContainsTotal => rt_set_contains(p, a[0], a[1]),
         MutArrayAllocate => rt_mutarray_allocate(p, a[0]),
         MutArrayCapacity => rt_mutarray_capacity(p, a[0]),
         MutArrayGet => rt_mutarray_get(p, a[0], a[1]),

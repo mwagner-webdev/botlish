@@ -1481,6 +1481,17 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                         // (non-allocating) helper path below with `fallible`
                         // true, exactly like ListGet.
                         SetContains => ("rt_set_contains", None, true, None),
+                        // Same helper as SetContains; `fallible: false`
+                        // (no `self.check` after the call) matches this
+                        // opcode's own `op_may_error = false` classification
+                        // (ops.rs): native/lower.tcl only ever emits this
+                        // opcode where it has already statically proven
+                        // rt_set_contains's EQUALITY branch is unreachable
+                        // for this call's own operand types, so skipping the
+                        // local NO_VALUE check here is sound, not merely an
+                        // effect-analysis simplification (M3-EQUALITY-TOTAL-
+                        // SETCONTAINS-EFFECT.md).
+                        SetContainsTotal => ("rt_set_contains", None, false, None),
                         MutArrayAllocate => {
                             let v = self.call_allocating(
                                 "rt_mutarray_allocate",

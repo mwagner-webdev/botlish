@@ -124,7 +124,7 @@ namespace eval native::lower {
         list_get     {op listget} \
         list_append  {op listappend} \
         immutable_set_from_list {op setfromlist} \
-        immutable_set_contains  {op setcontains} \
+        immutable_set_contains  {equality-set} \
         mutable_array_allocate {op mutarrayallocate} \
         mutable_array_capacity {op mutarraycapacity} \
         mutable_array_get      {op mutarrayget} \
@@ -4013,7 +4013,12 @@ proc native::lower::InlineLeafCall {fnVar e node calleeId callerArgRegs} {
 
 # {NAME OP}: the native NODE's target's name, and the NIR op its call
 # resolves to (an "equality" implementation picks veq/ieq/streq from the two
-# argument expressions' static types, exactly as NativeCall always has) --
+# argument expressions' static types, exactly as NativeCall always has;
+# an "equality-set" implementation -- immutable_set_contains -- picks
+# setcontainstotal over the generic setcontains the identical way, from the
+# set's own element type and the needle's own type, both already available
+# as ordinary HIR types at this call node, no different from =='s own two
+# argument expressions: see M3-EQUALITY-TOTAL-SETCONTAINS-EFFECT.md) --
 # purely static, so eligibility (RawEligibleCall) can be decided before any
 # argument is lowered. OP is "" for a name native/lower.tcl does not
 # implement (NativeCall's own existence check reports that properly; this
@@ -4027,23 +4032,58 @@ proc native::lower::NativeCallOp {e node} {
         return [list $name ""]
     }
     set impl [dict get $natives $name]
-    if {[lindex $impl 0] ne "equality"} {
-        return [list $name [lindex $impl 1]]
-    }
     set argExprs [dict get $node args]
-    if {[llength $argExprs] != 2} {
-        return [list $name veq]
+    switch -- [lindex $impl 0] {
+        equality {
+            if {[llength $argExprs] != 2} {
+                return [list $name veq]
+            }
+            lassign $argExprs a b
+            set ka [hir::types::kindOf [hir::typeOf $hir $a]]
+            set kb [hir::types::kindOf [hir::typeOf $hir $b]]
+            set op veq
+            if {$ka eq $kb && $ka eq "int"} {
+                set op ieq
+            } elseif {$ka eq $kb && $ka eq "str"} {
+                set op streq
+            }
+            return [list $name $op]
+        }
+        equality-set {
+            # SetContains's generic form (rt_set_contains) can raise
+            # EQUALITY comparing the needle against a member whose runtime
+            # kind lacks structural equality (Block/Native/MutArray) --
+            # unconditionally true of the *native's own* signature
+            # (-param-types {immutableSet any}). At one particular call
+            # node, though, the set's own applied element type and the
+            # needle's own static type may both already be proven
+            # equality-total (hir::types::IsEqualityTotal), in which case
+            # this invocation's own runtime operands can never reach that
+            # failure -- so it lowers to setcontainstotal, a non-erroring
+            # sibling NIR op of the identical runtime operation (op_may_error
+            # is opcode-keyed, not native-keyed: see native/src/runtime/
+            # ops.rs). Generic SetContains itself is untouched: any call
+            # whose set/needle types are not both proven total -- including
+            # a broad/unresolved ImmutableSet, or an "any" needle -- still
+            # resolves to plain setcontains here, exactly as before this
+            # milestone.
+            set op setcontains
+            if {[llength $argExprs] == 2} {
+                lassign $argExprs setArg needleArg
+                set setType [hir::typeOf $hir $setArg]
+                set needleType [hir::typeOf $hir $needleArg]
+                if {[hir::types::IsSet $setType]
+                        && [hir::types::IsEqualityTotal [lindex $setType 1]]
+                        && [hir::types::IsEqualityTotal $needleType]} {
+                    set op setcontainstotal
+                }
+            }
+            return [list $name $op]
+        }
+        default {
+            return [list $name [lindex $impl 1]]
+        }
     }
-    lassign $argExprs a b
-    set ka [hir::types::kindOf [hir::typeOf $hir $a]]
-    set kb [hir::types::kindOf [hir::typeOf $hir $b]]
-    set op veq
-    if {$ka eq $kb && $ka eq "int"} {
-        set op ieq
-    } elseif {$ka eq $kb && $ka eq "str"} {
-        set op streq
-    }
-    return [list $name $op]
 }
 
 # Emits the runtime kind guard (or known-error guard) hir::aot already
@@ -4551,11 +4591,21 @@ proc native::lower::TaggedOf {fnVar reg} {
     return $r
 }
 
-# The NIR operation implementing native NAME for generic calls.
+# The NIR operation implementing native NAME for generic (dynamically
+# dispatched) calls -- always the conservative/generic op, never a
+# call-site-refined one like setcontainstotal: a Native value called
+# through rt_call_value carries no per-call-site static proof, only NAME's
+# own signature, so it must use the same opcode -- and therefore the same
+# op_may_error classification -- every ordinary generic SetContains
+# invocation does.
 proc native::lower::NativeImpl {name} {
     variable natives
     set impl [dict get $natives $name]
-    return [expr {[lindex $impl 0] eq "equality" ? "veq" : [lindex $impl 1]}]
+    switch -- [lindex $impl 0] {
+        equality     { return veq }
+        equality-set { return setcontains }
+        default      { return [lindex $impl 1] }
+    }
 }
 
 # ---------------------------------------------------------------------------

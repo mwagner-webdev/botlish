@@ -1,0 +1,359 @@
+# setcontains-equality-total.test -- M3
+# (M3-EQUALITY-TOTAL-SETCONTAINS-EFFECT.md): SetContains's generic form
+# (immutable_set_contains -> op setcontains -> rt_set_contains) is
+# unconditionally may_error, because ordinary Botlish equality is undefined
+# for Block/Native/MutableArray operands (MINIMAL-IMMUTABLE-SET.md's own
+# "Membership semantics"). At a particular call site, though, the set's own
+# applied element type and the needle's own static type may both already be
+# proven equality-total (hir::types::IsEqualityTotal, hir/types.tcl) -- in
+# which case native/lower.tcl's NativeCallOp lowers that one invocation to
+# a distinct, non-erroring sibling NIR opcode, setcontainstotal, instead of
+# the generic setcontains. Same runtime helper (rt_set_contains,
+# unmodified) either way: this is purely an op_may_error classification
+# split (native/src/runtime/ops.rs), not a new runtime operation. Generic
+# SetContains itself remains unconditionally may_error.
+#
+# These tests pin the NIR opcode native lowering chooses and the resulting
+# function/call-edge may_error facts -- the same "inspect the NIR text/call-
+# effects report directly" technique tests/hir-callable-target.test (M2)
+# already uses, since the compiler introduces no new HIR-visible construct
+# here (no syntax change, no new source-level type).
+#
+# The synthetic fixtures below declare their own local "Byte" domain
+# (type Byte = Int in 0..255) rather than importing the real lib/byte.bot
+# module: surface::compile (unlike surface::readProgramFile) does not
+# resolve module-qualified (mod::name) references, and pulling in the real
+# byte::/web:: modules is unnecessary here -- hir::types::IsEqualityTotal
+# is deliberately not Byte-name-special-cased (spec item 19), so a locally-
+# declared same-shaped domain exercises the identical mechanism. The real
+# Byte/web::is_unreserved acceptance case is covered separately below, by
+# loading the frozen bench/uri-steady.bot itself.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+proc sourceHir {text} {
+    return [surface::compile $text t.bot -strict 0]
+}
+
+proc sourceIR {text} {
+    return [hir::lower [sourceHir $text]]
+}
+
+# The NIR text for TEXT, with tiny-exact-leaf inlining disabled (it would
+# otherwise fold a one-op callee's body into its caller and remove the call
+# instruction/local op these tests want to inspect entirely -- TINY-EXACT-
+# LEAF-INLINING.md, orthogonal to this milestone).
+proc nirOf {text} {
+    return [dict get [native::lower::program [sourceHir $text] -tiny-leaf-inline-opt 0] text]
+}
+
+# The call-effects report line for a call whose callee is CALLEENAME, in
+# TEXT's own NIR (native::Driver's "calls" subcommand, native/src/main.rs's
+# call_effect_report -- the same technique tests/hir-callable-target.test
+# uses).
+proc calleeEffectLine {text calleeName} {
+    set effects [native::Driver calls [nirOf $text]]
+    foreach line $effects {
+        if {[string match "*callee_name=\"$calleeName\"*" $line]} {
+            return $line
+        }
+    }
+    return ""
+}
+
+# Two specialized instances of the same function print the *identical*
+# NIR "name" (native::nir has no <label> suffix baked into the name field
+# itself -- only the func header's own separate instance="..." attribute
+# distinguishes them, e.g. "immutableSet, int" vs "generic"). For a fixture
+# with more than one instance of CALLEENAME, this finds the one NIR
+# function id whose own func header carries INSTANCEATTR and returns the
+# call-effects report line for a call into exactly that id (never a
+# same-named sibling instance).
+proc effectLineForInstance {text calleeName instanceAttr} {
+    set nirText [nirOf $text]
+    set id ""
+    foreach {- fid} [regexp -all -inline \
+            "func (\\d+) \"$calleeName\"\[^\\n\]*instance=\"$instanceAttr\"" \
+            $nirText] {
+        set id $fid
+    }
+    if {$id eq ""} {
+        error "no instance of $calleeName with instance=\"$instanceAttr\" found"
+    }
+    foreach line [native::Driver calls $nirText] {
+        if {[string match "*callee=$id *" $line]} {
+            return $line
+        }
+    }
+    return ""
+}
+
+set ::smallDecl "type Small = Int in 0..10\n\nfn one() -> Small:\n    1\n\n"
+set ::byteDecl "type Byte = Int in 0..255\n\nfn byteA() -> Byte:\n    97\n\nfn byteB() -> Byte:\n    122\n\n"
+
+# ---------------------------------------------------------------------------
+# Positive fixtures: element type and needle type both proven equality-total
+# -> setcontainstotal, non-erroring (spec items 7-10, 22, 58-59).
+
+test setcontains-total-byte {ImmutableSet[Byte] x Byte: the principal M3 acceptance case -- setcontainstotal, contains_byte becomes may_error=false} -body {
+    set text [format {%sfn contains_byte(s: ImmutableSet[Byte], b: Byte) -> Bool:
+    immutable_set_contains(s, b)
+
+contains_byte(immutable_set_from_list([byteA(), byteB()]), byteA())} $::byteDecl]
+    set nirText [nirOf $text]
+    list [regexp {op setcontainstotal} $nirText] [regexp {op setcontains } $nirText] \
+        [string match {*may_error=false*} [calleeEffectLine $text contains_byte]]
+} -result {1 0 1}
+
+test setcontains-total-int {ImmutableSet[Int] x Int: Byte is not name-special-cased -- plain Int qualifies the identical way, through hir::types::IsEqualityTotal alone} -body {
+    set text {fn contains_int(s: ImmutableSet[int], x: int) -> Bool:
+    immutable_set_contains(s, x)
+
+contains_int(immutable_set_from_list([1, 2, 3]), 2)}
+    set nirText [nirOf $text]
+    list [regexp {op setcontainstotal} $nirText] \
+        [string match {*may_error=false*} [calleeEffectLine $text contains_int]]
+} -result {1 1}
+
+test setcontains-total-source-defined-domain {a source-defined bounded Int domain other than Byte (Small = Int in 0..10) qualifies too -- the proof derives from kindOf collapsing any refined int domain to plain int, never a hard-coded "Byte" name (spec items 8, 22, 59)} -body {
+    set text [format {%sfn contains_small(s: ImmutableSet[Small], x: Small) -> Bool:
+    immutable_set_contains(s, x)
+
+contains_small(immutable_set_from_list([one()]), one())} $::smallDecl]
+    set nirText [nirOf $text]
+    list [regexp {op setcontainstotal} $nirText] \
+        [string match {*may_error=false*} [calleeEffectLine $text contains_small]]
+} -result {1 1}
+
+test setcontains-total-bool {ImmutableSet[Bool] x Bool qualifies (spec item 10)} -body {
+    set text {fn contains_bool(s: ImmutableSet[bool], x: bool) -> Bool:
+    immutable_set_contains(s, x)
+
+contains_bool(immutable_set_from_list([true, false]), true)}
+    regexp {op setcontainstotal} [nirOf $text]
+} -result 1
+
+test setcontains-total-string {ImmutableSet[String] x String qualifies (spec item 10)} -body {
+    set text {fn contains_str(s: ImmutableSet[str], x: str) -> Bool:
+    immutable_set_contains(s, x)
+
+contains_str(immutable_set_from_list(["a", "b"]), "a")}
+    regexp {op setcontainstotal} [nirOf $text]
+} -result 1
+
+test setcontains-total-unicodechar {ImmutableSet[UnicodeChar] x UnicodeChar qualifies (spec item 10) -- the real web::is_unreserved shape, in miniature, without Byte} -body {
+    set text {fn contains_char(s: ImmutableSet[UnicodeChar], x: UnicodeChar) -> Bool:
+    immutable_set_contains(s, x)
+
+contains_char(immutable_set_from_list(['-', '.', '_', '~']), '-')}
+    regexp {op setcontainstotal} [nirOf $text]
+} -result 1
+
+test setcontains-total-runtime-present-and-absent {both membership outcomes (present and absent) are equally non-erroring -- the proof is "cannot raise EQUALITY", not "membership succeeds" (spec item 38)} -body {
+    set text [format {%sfn contains_byte(s: ImmutableSet[Byte], b: Byte) -> Bool:
+    immutable_set_contains(s, b)
+
+s = immutable_set_from_list([byteA()])
+[contains_byte(s, byteA()), contains_byte(s, byteB())]} $::byteDecl]
+    set exprs [sourceIR $text]
+    lmap backend {interp compile cranelift-generic cranelift} {
+        outcomeUnder $backend $exprs
+    }
+} -result {{value {[true, false]} {}} {value {[true, false]} {}} {value {[true, false]} {}} {value {[true, false]} {}}}
+
+test setcontains-total-empty-set {an empty ImmutableSet[Byte] is non-erroring through the identical static proof -- no dedicated empty-set effect rule, no inference from dynamic emptiness (spec items 39-40)} -body {
+    set text [format {%sfn mk(xs: List[Byte]) -> ImmutableSet[Byte]:
+    immutable_set_from_list(xs)
+
+fn contains_byte(s: ImmutableSet[Byte], b: Byte) -> Bool:
+    immutable_set_contains(s, b)
+
+contains_byte(mk([]), byteA())} $::byteDecl]
+    set nirText [nirOf $text]
+    list [regexp {op setcontainstotal} $nirText] \
+        [string match {*may_error=false*} [calleeEffectLine $text contains_byte]] \
+        [core::value::show [core::evalProgram [sourceIR $text]]]
+} -result {1 1 false}
+
+# ---------------------------------------------------------------------------
+# Negative fixtures: sound-but-incomplete -- generic SetContains remains
+# may_error=true whenever the proof cannot be made (spec items 12, 15, 34,
+# 52, 54, 60).
+
+# NOTE: an untyped parameter is NOT automatically "broad" merely for lack of
+# a declared type -- hir::specialize::KeyType still keys a per-call-site
+# instance off the caller's own concrete argument kind (this predates M3;
+# it is the same mechanism that makes e.g. m1-exact-call-propagation
+# specialize), so a single caller passing a Byte would in fact give this
+# instance a precise int view, making it a (correct) *positive* case, not
+# the intended negative control. hir::specialize::limit exhaustion
+# (mirroring tests/hir-specialize.test's own hir-specialize-m1-explosion-
+# generic fixture) forces genuine genericity -- both call sites' own kinds
+# (int and str) share one generic instance, so x's own view is genuinely
+# "any" inside it, independent of which kind any particular caller passes.
+test setcontains-broad-needle-stays-erroring {ImmutableSet[Byte] x any (a genuinely broad/statically-unresolved needle): stays plain setcontains, may_error=true (spec items 12, 60)} -body {
+    set saved $hir::specialize::limit
+    set hir::specialize::limit 1
+    try {
+        set text [format {%sfn contains_unknown(s: ImmutableSet[Byte], x):
+    immutable_set_contains(s, x)
+
+[contains_unknown(immutable_set_from_list([byteA()]), byteA()),
+ contains_unknown(immutable_set_from_list([byteA()]), "z")]} $::byteDecl]
+        set nirText [nirOf $text]
+        # limit=1 gives the *first* call's own key its own precise instance
+        # (instance="immutableSet, int", setcontainstotal -- correctly, its
+        # own x really is int[Byte] there) and spills the second, divergent
+        # key over to a shared instance="generic" fallback, whose own x
+        # view is genuinely "any": this test's own subject. Both instances
+        # print the identical NIR function name "contains_unknown" (only
+        # the func header's own instance="..." attribute distinguishes
+        # them), so effectLineForInstance disambiguates by NIR function id,
+        # not by name.
+        regexp {func \d+ "contains_unknown"[^\n]*instance="generic"[^\n]*\n(?:.*\n)*?end} $nirText genericBody
+        list [regexp {op setcontains } $genericBody] [regexp {op setcontainstotal} $genericBody] \
+            [string match {*may_error=true*} [effectLineForInstance $text contains_unknown generic]]
+    } finally {
+        set hir::specialize::limit $saved
+    }
+} -result {1 0 1}
+
+test setcontains-broad-set-stays-erroring {an ImmutableSet erased to the broad kind through an untyped passthrough (element type unknown at this call): stays plain setcontains, may_error=true (spec item 34)} -body {
+    set text [format {%sfn passthrough(x):
+    x
+
+fn contains_erased(s, x) -> Bool:
+    immutable_set_contains(passthrough(s), x)
+
+contains_erased(immutable_set_from_list([byteA()]), byteA())} $::byteDecl]
+    set nirText [nirOf $text]
+    list [regexp {op setcontains } $nirText] [regexp {op setcontainstotal} $nirText]
+} -result {1 0}
+
+test setcontains-unsupported-kind-runtime-equality {an ImmutableSet of untyped-closure (Block-kind) members, queried with another closure: stays plain setcontains/may_error=true, and genuinely raises the pre-existing EQUALITY error at runtime -- confirming this milestone never weakens the real failure mode it is refining around (spec items 11, 26-28, 35, 61)} -body {
+    set text {fn g(x):
+    x
+
+fn h(x):
+    x + 1
+
+fn contains_block(s, needle):
+    immutable_set_contains(s, needle)
+
+contains_block(immutable_set_from_list([g]), h)}
+    set nirText [nirOf $text]
+    list [regexp {op setcontains } $nirText] [regexp {op setcontainstotal} $nirText] \
+        [errorCodeOf {*}[sourceIR $text]]
+} -result {1 0 {CORE SEMANTIC EQUALITY}}
+
+test setcontains-error-propagation-control {a caller of a genuinely equality-fallible (broad-needle, forced generic) SetContains keeps its own completion retest -- confirming the refinement is invocation-specific, not a global opcode reclassification (spec item 36)} -body {
+    set saved $hir::specialize::limit
+    set hir::specialize::limit 1
+    try {
+        set text [format {%sfn contains_unknown(s: ImmutableSet[Byte], x):
+    immutable_set_contains(s, x)
+
+fn caller(s, x):
+    contains_unknown(s, x)
+
+[caller(immutable_set_from_list([byteA()]), byteA()),
+ caller(immutable_set_from_list([byteA()]), "z")]} $::byteDecl]
+        set nirText [nirOf $text]
+        string match {*may_error=true*} [effectLineForInstance $text contains_unknown generic]
+    } finally {
+        set hir::specialize::limit $saved
+    }
+} -result 1
+
+# ---------------------------------------------------------------------------
+# The real URI path: web::is_unreserved's own SetContains, and the M2-
+# identified residual (esc_char -> web::is_unreserved's caller-side
+# completion retest), through the frozen bench/uri-steady.bot itself, not a
+# synthetic stand-in (spec items 32-33, 65-66, 81).
+
+test setcontains-uri-web-is-unreserved-local-op-total {web::is_unreserved's own body: the immutable_set_contains(additional_unreserved_chars, b) call lowers to setcontainstotal, not setcontains -- additional_unreserved_chars : ImmutableSet[Byte], b : Byte, both statically proven equality-total} -body {
+    set hir [surface::readProgramFile [file join $::projectRoot bench uri-steady.bot]]
+    set nirText [dict get [native::lower::program $hir -tiny-leaf-inline-opt 0] text]
+    regexp {func \d+ "web::is_unreserved[^\n]*\n(?:.*\n)*?end} $nirText body
+    regexp {op setcontainstotal} $body
+} -result 1
+
+test setcontains-uri-web-is-unreserved-may-error-false {web::is_unreserved's own function-level may_error becomes false: SetContains was its only fallible local op, and it is now proven non-erroring (spec item 32)} -body {
+    set hir [surface::readProgramFile [file join $::projectRoot bench uri-steady.bot]]
+    set nirText [dict get [native::lower::program $hir -tiny-leaf-inline-opt 0] text]
+    set effects [native::Driver calls $nirText]
+    set found 0
+    foreach line $effects {
+        if {[string match {*callee_name="web::is_unreserved*} $line]} {
+            set found 1
+            if {![string match {*may_error=false*} $line]} {
+                return "not false: $line"
+            }
+        }
+    }
+    expr {$found ? "all-false" : "not-found"}
+} -result all-false
+
+test setcontains-uri-esc-char-edge-becomes-non-erroring {esc_char -> web::is_unreserved's edge, M2's own identified residual, naturally collapses to may_error=false through existing, unmodified call-effect propagation -- no esc_char-specific or web::is_unreserved-specific code} -body {
+    set hir [surface::readProgramFile [file join $::projectRoot bench uri-steady.bot]]
+    set nirText [dict get [native::lower::program $hir -tiny-leaf-inline-opt 0] text]
+    set effects [native::Driver calls $nirText]
+    set lines [lmap line $effects {
+        if {![string match {*caller_name="esc_char"*callee_name="web::is_unreserved*} $line]} continue
+        set line
+    }]
+    list [llength $lines] [lmap l $lines {string match {*may_error=false*} $l}]
+} -result {1 1}
+
+# ---------------------------------------------------------------------------
+# M1/M2 regression controls (spec items 72-73): this milestone must not move
+# either fact.
+
+proc specLabelsOf {analysis name} {
+    lmap id [dict get $analysis used] {
+        if {[dict get $analysis instances $id name] ne $name} continue
+        hir::specialize::label $analysis $id
+    }
+}
+
+proc specInstanceOf {analysis label} {
+    foreach id [dict get $analysis used] {
+        if {[hir::specialize::label $analysis $id] eq $label} {
+            return [dict get $analysis instances $id]
+        }
+    }
+    error "no used instance $label"
+}
+
+# The view type of instance LABEL's parameter index I, as seen by the first
+# reachable ref to it within the block's own body -- the identical technique
+# tests/hir-specialize.test's own paramViewType uses (M1's own regression
+# helper, duplicated here to keep this file self-contained).
+proc paramViewTypeOf {hir analysis label i} {
+    set instance [specInstanceOf $analysis $label]
+    set block [dict get $instance block]
+    set view [hir::specialize::view $hir $analysis [dict get $instance id]]
+    set b [lindex [hir::get $hir $block params] $i]
+    foreach e [dict get [dict get $analysis context] exprs $block] {
+        if {[hir::kind $view $e] eq "ref" && [hir::get $view $e binding] eq $b} {
+            return [hir::types::show [hir::typeOf $view $e]]
+        }
+    }
+    return [hir::types::show [dict get $instance args] $i]
+}
+
+test setcontains-m1-control-is-unreserved-param-view-unchanged {web::is_unreserved<generic>'s own declared-Byte parameter view (M1's own subject) is unaffected by M3} -body {
+    set hir [surface::readProgramFile [file join $::projectRoot bench uri-steady.bot]]
+    set analysis [hir::specialize::analyze $hir]
+    paramViewTypeOf $hir $analysis {web::is_unreserved<generic>} 0
+} -result {int[Byte]}
+
+test setcontains-m2-control-esc-char-edge-still-direct-callenv {esc_char -> web::is_unreserved is still a direct callenv (M2's own subject), never callvalue, after M3} -body {
+    set hir [surface::readProgramFile [file join $::projectRoot bench uri-steady.bot]]
+    set nirText [dict get [native::lower::program $hir -tiny-leaf-inline-opt 0] text]
+    regexp {func \d+ "esc_char[^\n]*\n(?:.*\n)*?end} $nirText body
+    list [regexp {= callenv \d+ } $body] [regexp {callvalue} $body]
+} -result {1 0}
+
+cleanupTests

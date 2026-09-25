@@ -296,6 +296,34 @@ proc hir::types::narrow {current fact} {
     return [core::type::narrow $current $fact]
 }
 
+# 1 if every value of static TYPE is guaranteed to support Botlish's
+# ordinary structural equality unconditionally: the compile-time mirror of
+# the *actual* equality-totality condition both equality implementations
+# enforce (core/value.tcl's core::value::equal and native/src/runtime/
+# ops.rs's equal, byte-for-byte the same rule): a comparison can only ever
+# fail (raise EQUALITY) when one of its two operands has runtime kind
+# Block, Native, or MutableArray. Every other kind (Int -- and so every
+# source-defined bounded-integer domain over it, e.g. Byte/Nibble/Small,
+# since kindOf collapses a refinement to its base kind -- Str, Bool, Unit,
+# UnicodeChar) is unconditionally safe, regardless of which *other*
+# equality-total kind it is compared against (mismatched kinds simply
+# compare unequal, never fail: see equal's own "ka != kb -> false" branch,
+# checked only *after* its Block/Native/MutArray guard). "any"/an
+# unresolved or broad aggregate kind (a bare "list"/"immutableSet" with no
+# known element type, or "" for a type with no fixed kind at all) is
+# conservatively not proven: a value of that static type could still be
+# one of the three unsafe kinds at runtime.
+#
+# Deliberately narrow (this is SetContains's own effect refinement's
+# "minimum useful proof" -- M3-EQUALITY-TOTAL-SETCONTAINS-EFFECT.md): does
+# not recurse into a List[T]/ImmutableSet[T] element type, so a precise
+# List[Byte] is not (yet) proven total even though core::value::equal's own
+# recursive list case would make it so -- sound but incomplete, never
+# unsound, and not needed by this milestone's own motivating call site.
+proc hir::types::IsEqualityTotal {type} {
+    return [expr {[kindOf $type] in {int str bool unit UnicodeChar}}]
+}
+
 # The runtime value kind every value of TYPE has, or "" if not fixed.
 proc hir::types::kindOf {type} {
     if {$type eq "never"} {

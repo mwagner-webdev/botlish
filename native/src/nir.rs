@@ -52,6 +52,23 @@ pub enum OpCode {
     /// false for an absent value, never an Error completion. Always a
     /// helper call (`rt_set_contains`), like SetFromList.
     SetContains,
+    /// SetContains, at a call site native/lower.tcl's `NativeCallOp`
+    /// (`equality-set`) has statically proven equality-total: the set's own
+    /// applied element type and the needle's own static type are both one
+    /// of `hir::types::IsEqualityTotal`'s kinds (Int and every source-
+    /// defined bounded-integer domain over it, Str, Bool, Unit,
+    /// UnicodeChar), so the runtime operands this specific invocation can
+    /// ever pass to `rt_set_contains` can never include a Block/Native/
+    /// MutArray value -- the only way that helper's own equality can raise
+    /// EQUALITY (see ops.rs's `equal`). Same runtime helper
+    /// (`rt_set_contains`, unmodified) as `SetContains`: this is purely an
+    /// `op_may_error` classification split, not a new runtime operation
+    /// (M3-EQUALITY-TOTAL-SETCONTAINS-EFFECT.md). Generic `SetContains`
+    /// itself remains unconditionally `may_error` -- this sibling opcode is
+    /// only ever emitted for one particular, statically-proven call site,
+    /// never for `immutable_set_contains`'s own generic/dynamically-
+    /// dispatched entry (native/lower.tcl's `NativeImpl`).
+    SetContainsTotal,
     MutArrayAllocate,
     MutArrayCapacity,
     MutArrayGet,
@@ -194,6 +211,7 @@ impl OpCode {
             "listappend" => ListAppend,
             "setfromlist" => SetFromList,
             "setcontains" => SetContains,
+            "setcontainstotal" => SetContainsTotal,
             "mutarrayallocate" => MutArrayAllocate,
             "mutarraycapacity" => MutArrayCapacity,
             "mutarrayget" => MutArrayGet,
