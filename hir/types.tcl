@@ -535,21 +535,43 @@ proc hir::types::ShapeResult {hir shape argExprs argTypes result} {
             return [MakeSet $elem 0]
         }
         typed {
-            # {typed NAME}: this native's result is a List whose every
-            # element is of the source-defined type NAME -- a fixed,
-            # argument-independent fact about the native itself (e.g.
+            # {typed NAME LO HI}: this native's result is a List whose
+            # every element is an Int in LO..HI -- a fixed, argument-
+            # independent semantic fact about the native itself (e.g.
             # encode_utf8's every UTF-8 code unit is definitionally in
-            # Byte's own 0..255 domain, STATIC-COMPLETION-PROOFS.md), not
-            # something derived from this call's own arguments the way
-            # `element`/`append`/`immutable-set` above are. NAME is
-            # resolved here, lazily, against whatever the compiling
-            # program's own source-defined-type registry currently holds
-            # (core/native.tcl's ValidShape comment): if the compiling
-            # program never declared NAME (e.g. it never loaded the
-            # library module that does), this falls back to the native's
-            # own plain declared -result-type, never a false claim.
-            lassign $shape _ name
+            # 0..255, STATIC-COMPLETION-PROOFS.md), not something derived
+            # from this call's own arguments the way `element`/`append`/
+            # `immutable-set` above are. NAME is resolved here, lazily,
+            # against whatever the compiling program's own source-defined-
+            # type registry currently holds (core/native.tcl's ValidShape
+            # comment): if the compiling program never declared NAME (e.g.
+            # it never loaded the library module that does), this falls
+            # back to the native's own plain declared -result-type, never a
+            # false claim.
+            #
+            # Resolving the name is not, by itself, proof that the
+            # native's elements inhabit it: the same spelling can validly
+            # denote an unrelated or narrower domain in a different
+            # compiling program (SYMBOLIC-TYPE-IDENTITY.md's own
+            # motivating example: a program-local `type Byte = Int in
+            # 0..15` must not make encode_utf8's result List[Byte] just
+            # because "Byte" happens to resolve). So NAME's resolved type
+            # is validated against the native's own LO..HI guarantee with
+            # hir::range::ProvesType -- the same admissibility check a
+            # declared function result type is already held to
+            # (hir/range.tcl's verifyDeclaredResults) -- and the result
+            # narrows to NAME only when that proof succeeds; otherwise this
+            # falls back to the native's own plain declared -result-type,
+            # exactly as when NAME is not registered at all. The target
+            # type's own domain always comes from the registry (via
+            # ProvesType/core::type::integerFacts); no domain is ever
+            # hardcoded here for any particular NAME.
+            lassign $shape _ name lo hi
             if {![core::type::isNamed $name]} {
+                return $result
+            }
+            set resolved [core::type::normalize $name]
+            if {![hir::range::ProvesType [dict create min $lo max $hi] $resolved]} {
                 return $result
             }
             return [MakeList $name]

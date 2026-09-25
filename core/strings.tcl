@@ -70,4 +70,4 @@ core::native::register concat    -arity 2 -impl core::strings::concat \
     -param-types {str str} -result-type str -runtime string-alloc -context-free 1
 core::native::register encode_utf8 -arity 1 -impl core::strings::encodeUtf8 \
     -param-types {str} -result-type list -runtime list-alloc -context-free 1 \
-    -result-shape {typed Byte}
+    -result-shape {typed Byte 0 255}

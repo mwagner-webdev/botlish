@@ -1,0 +1,127 @@
+# symbolic-type-identity.test -- symbolic native result-type metadata
+# ({typed NAME LO HI}, core/native.tcl / hir/types.tcl::ShapeResult) must
+# assign a source-defined type only when the compiler can prove the
+# native's own guaranteed value domain is admissible in whatever NAME
+# currently resolves to -- never merely because the spelling matches. See
+# SYMBOLIC-TYPE-IDENTITY.md.
+#
+# encode_utf8 (core/strings.tcl) is this milestone's only current use of
+# {typed NAME LO HI} (STATIC-COMPLETION-PROOFS.md's own "UTF-8 result
+# type" section): its every element is definitionally an Int in 0..255;
+# whether that also makes the result List[Byte] depends on what "Byte"
+# resolves to in the compiling program's own source-defined-type registry,
+# not on the name alone.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+# The static type (hir::types::show) of the last `call` expression HIR
+# finds walking SRC's HIR, in pre-order (encode_utf8/list_get are both root
+# natives, so a program calling them needs no module import).
+proc lastCallType {src} {
+    set h [surface::compile $src t.bot]
+    set last ""
+    foreach e [hir::walk $h] {
+        if {[hir::kind $h $e] eq "call"} {
+            set last $e
+        }
+    }
+    if {$last eq ""} {
+        error "lastCallType: no call expression found"
+    }
+    return [hir::types::show [hir::typeOf $h $last]]
+}
+
+# ---------------------------------------------------------------------------
+# Acceptance matrix (spec item 35)
+
+test symbolic-type-identity-canonical-byte {canonical Byte = Int in 0..255: encode_utf8's guaranteed 0..255 domain is admissible, so the result narrows to List[Byte]} -body {
+    lastCallType {type Byte = Int in 0..255
+encode_utf8("A")
+}
+} -result {List[int[Byte]]}
+
+test symbolic-type-identity-narrow-byte-rejected {a same-spelled but narrower Byte = Int in 0..15 cannot prove membership (UTF-8 may emit values above 15): encode_utf8 must not be typed List[Byte]} -body {
+    lastCallType {type Byte = Int in 0..15
+encode_utf8("A")
+}
+} -result list
+
+test symbolic-type-identity-wide-superset-byte {a same-spelled compatible superset Byte = Int in 0..1000 admits the native's 0..255 guarantee: this is a sound narrowing (semantic admissibility, not canonical-name identity)} -body {
+    lastCallType {type Byte = Int in 0..1000
+encode_utf8("A")
+}
+} -result {List[int[Byte]]}
+
+test symbolic-type-identity-no-byte-declared {no source-defined Byte at all: falls back to encode_utf8's own plain declared -result-type, never a false claim -- the "Unrelated" decl exists only to force hir::sourcetypes::apply's own Reset (compilation isolation), clearing any Byte a prior test in this process may have left registered} -body {
+    lastCallType {type Unrelated = Int in 0..1
+encode_utf8("A")
+}
+} -result list
+
+# ---------------------------------------------------------------------------
+# Incompatible same-name kind (spec items 11, 13): Botlish's current type-
+# declaration grammar (surface/parser.tcl's TypeDecl) only ever produces
+# int-based types -- "type NAME = PARENT in DOMAIN" requires PARENT to be
+# Int or another already-int-based type (hir/sourcetypes.tcl's RegisterOne
+# rejects any other parent with "is not an integer-domain type"), so there
+# is no legal Botlish *source* construct that declares a non-int type named
+# "Byte". This test exercises the general resolver directly instead (the
+# same core::type registry every source declaration ultimately populates,
+# and the same hir::types::ShapeResult entry point ordinary compilation
+# calls) with a type registered the way a hypothetical non-int same-named
+# declaration would leave the registry, to prove the mechanism is sound
+# for that case too, not merely untested. This is not a new type-system
+# construct: core::type::register itself, with a non-int -base, is
+# pre-existing, general machinery (every compiler-registered validator
+# type -- Emailish, UriQueryValue, NonEmpty -- already uses it).
+test symbolic-type-identity-incompatible-kind {a same-named but non-int-based Byte cannot make an Int-producing native's result List[Byte]: name resolution succeeds (isNamed is true) but semantic membership is not proven, so this falls back} -setup {
+    core::type::register Byte -base str -validator {apply {v} {return 1}} -source 1
+} -cleanup {
+    core::type::unregister Byte
+} -body {
+    list [core::type::isNamed Byte] \
+        [hir::types::show [hir::types::ShapeResult {} {typed Byte 0 255} {} {} list]]
+} -result {1 list}
+
+# ---------------------------------------------------------------------------
+# Canonical standard-library case, static-only (spec item 23): representative
+# ASCII, multi-byte, and astral inputs. Runtime byte values already have
+# full coverage (tests/native-uri-escape.test); this pins only the static
+# type list_get(encode_utf8(...), 0) infers, which is what actually gates
+# web::is_unreserved(b: Byte) accepting b with no conversion (item 24).
+
+foreach {name text} {
+    ascii     A
+    two-byte  é
+    astral    😀
+} {
+    test symbolic-type-identity-list-get-$name "list_get(encode_utf8(\"$name\"), 0) : Byte, with the real standard-library Byte = Int in 0..255" -body {
+        lastCallType [format {type Byte = Int in 0..255
+bytes = encode_utf8("%s")
+list_get(bytes, 0)
+} $text]
+    } -result {int[Byte]}
+}
+
+# ---------------------------------------------------------------------------
+# Web regression (spec items 24-26): lib/web.bot is unmodified source; its
+# clean path (list_get(encode_utf8(c), 0) flowing directly into
+# is_unreserved(b: Byte), no conversion/handler) must still compile with no
+# diagnostics and produce the exact same escaped text it always has.
+# tests/native-uri-escape.test's own uriEscape-native text-parity table
+# (unmodified, run as part of the full suite) is the broader four-backend
+# check of this same pipeline; this test pins the static-diagnostics-free
+# property directly.
+
+test symbolic-type-identity-web-regression-clean-compile {a program that loads lib/web.bot and calls uri_escape_text over ASCII, multi-byte, and astral text produces zero diagnostics and the expected percent-encoded text -- list_get(encode_utf8(c), 0) still statically satisfies is_unreserved's declared Byte parameter} -body {
+    set path [makeFile {web::uri_escape_text("aA1 é😀")} symbolic-type-identity-web.bot]
+    try {
+        set h [surface::readProgramFile $path -strict 0]
+        list [hir::diagnostics $h] [core::formatValue [core::evalProgram [hir::lower $h]]]
+    } finally {
+        removeFile symbolic-type-identity-web.bot
+    }
+} -result {{} {"aA1%20%C3%A9%F0%9F%98%80"}}
+
+::tcltest::cleanupTests

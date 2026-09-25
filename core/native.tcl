@@ -74,6 +74,17 @@
 #                                     followed by argument V
 #                     immutable-set L an ImmutableSet of list argument L's
 #                                     element type (MINIMAL-IMMUTABLE-SET.md)
+#                     typed NAME LO HI  every element is an Int in LO..HI (a
+#                                     fixed fact about the native itself, not
+#                                     derived from this call's own arguments);
+#                                     additionally NAME-typed iff NAME
+#                                     currently resolves, in the compiling
+#                                     program's own source-defined-type
+#                                     registry, to a type whose domain
+#                                     provably admits every value in LO..HI
+#                                     (hir::range::ProvesType) -- never merely
+#                                     because NAME resolves at all
+#                                     (SYMBOLIC-TYPE-IDENTITY.md)
 #   resultRange     "" (nothing known) or a fact about every Int result, for
 #                   hir/range.tcl's representation analysis. Pure metadata,
 #                   like runtime and resultShape: a guarantee the
@@ -252,16 +263,29 @@ proc core::native::ValidShape {shape count} {
         return 0
     }
     if {[lindex $shape 0] eq {typed}} {
-        # {typed NAME}: every element of the result List is of the
-        # source-defined type NAME, resolved lazily by hir::types::
+        # {typed NAME LO HI}: every element of the result List is an Int
+        # in LO..HI -- a semantic fact this native's own implementation
+        # actually guarantees, independent of any source-defined type --
+        # *and*, if the symbolic name NAME currently resolves (in whatever
+        # source-defined-type registry a compiling program has loaded) to a
+        # type whose own domain admits every value in LO..HI, the result is
+        # additionally NAME-typed. NAME is resolved lazily by hir::types::
         # ShapeResult at type-inference time (never here at registration
         # time, since a native like encode_utf8 is registered once at core
         # bootstrap, long before a compiling program's own `type NAME = ...`
         # declaration -- e.g. lib/byte.bot's Byte -- has been parsed; NAME
-        # is just a symbolic reference until then). Its own argument is a
-        # type name, not an argument index, so it is exempt from the
-        # digit-index check below.
-        return [expr {$length == 2}]
+        # is just a symbolic reference until then). Resolving the name is
+        # not, by itself, proof of membership: the same spelling can denote
+        # an unrelated or narrower domain in a different compiling program
+        # (SYMBOLIC-TYPE-IDENTITY.md) -- ShapeResult verifies LO..HI is
+        # actually admissible in whatever NAME resolves to before ever
+        # narrowing the result to it, falling back to this native's own
+        # plain declared -result-type otherwise. LO and HI are a fixed
+        # fact about the native itself, not argument indices, so this whole
+        # shape is exempt from the digit-index check below.
+        if {$length != 4} { return 0 }
+        lassign $shape _ name lo hi
+        return [expr {[string is entier -strict $lo] && [string is entier -strict $hi] && $lo <= $hi}]
     }
     set indices [lrange $shape 1 end]
     foreach index $indices {
