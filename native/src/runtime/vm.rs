@@ -79,6 +79,16 @@ pub struct Vm {
     shadow: Vec<Value>,
     pub heap: Heap,
     pub error: Option<RtError>,
+    /// The identity of the most recent unhandled `fail` (EXPLICIT-ERROR-
+    /// COMPLETIONS.md), a small 1-indexed id native/lower.tcl assigns each
+    /// declared error name at NIR-build time (0 = none pending). Set by
+    /// `rt_fail_declared` alongside `error` (a fallback RtError, in case
+    /// this propagates uncaught all the way to the program boundary);
+    /// cleared, along with `error`, by `rt_clear_declared_error` when a
+    /// `handle` (codegen::clif's PushErrorExit/PopErrorExit) catches it.
+    /// Never itself a GC root: an id is a small compile-time constant, not
+    /// a heap value.
+    pub declared_error: u32,
     pub temp_roots: Vec<Value>,
     pub info: Rc<ProgramInfo>,
     pub metrics: Metrics,
@@ -127,6 +137,7 @@ impl Vm {
             shadow,
             heap: Heap::new(),
             error: None,
+            declared_error: 0,
             temp_roots: Vec::new(),
             info,
             metrics: Metrics::new(alloc_mode),
@@ -251,6 +262,7 @@ impl Vm {
         self.native_roots_ptr = std::ptr::null_mut();
         self.native_roots_len = 0;
         self.error = None;
+        self.declared_error = 0;
         self.temp_roots.clear();
         self.metrics.reset();
         self.collect_with(GcReason::Explicit);

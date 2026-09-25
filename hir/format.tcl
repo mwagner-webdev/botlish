@@ -45,6 +45,9 @@ proc hir::format {hir args} {
     foreach entry [hir::sourceTypes $hir] {
         lappend lines [hir::format::TypeDecl $entry]
     }
+    foreach name [hir::errorDecls $hir] {
+        lappend lines "error $name"
+    }
     set top [dict get $hir top]
     lappend lines [string trimright "[dict get $hir scopes $top kind] $top [hir::format::Binds $hir $top]"]
     foreach e [dict get $hir roots] {
@@ -184,6 +187,9 @@ proc hir::format::Expr {hir e indent origins linesVar} {
             if {[dict get $node declaredResult] ne {}} {
                 append text [format { declares %s} [hir::types::show [dict get $node declaredResult]]]
             }
+            if {[dict get $node declaredErrors] ne {}} {
+                append text " errors [join [dict get $node declaredErrors] {, }]"
+            }
             set binds [Binds $hir [dict get $node bodyScope]]
             if {$binds ne ""} {
                 append text " $binds"
@@ -257,6 +263,25 @@ proc hir::format::Expr {hir e indent origins linesVar} {
         ok - error {
             Line $hir $e [dict get $node kind] $indent $origins lines
             Expr $hir [dict get $node value] $inner $origins lines
+        }
+        fail {
+            Line $hir $e "fail [dict get $node name]" $indent $origins lines
+        }
+        handle {
+            Line $hir $e handle $indent $origins lines
+            Expr $hir [dict get $node call] $inner $origins lines
+            foreach name [dict get $node handlerNames] s [dict get $node handlerScopes] \
+                    body [dict get $node handlerBodies] {
+                set header "[string repeat {    } $inner]on $name $s"
+                set binds [Binds $hir $s]
+                if {$binds ne ""} {
+                    append header " $binds"
+                }
+                lappend lines $header
+                foreach child $body {
+                    Expr $hir $child [expr {$inner + 1}] $origins lines
+                }
+            }
         }
     }
 }

@@ -128,6 +128,22 @@ proc hir::modulebinding::ContextExpr {hir e stateVar} {
                 }
             }
         }
+        fail {
+            return {ok}
+        }
+        handle {
+            set result [ContextExpr $hir [dict get $node call] state]
+            if {[lindex $result 0] ne "ok"} {
+                return $result
+            }
+            foreach body [dict get $node handlerBodies] {
+                set result [ContextSequence $hir $body state]
+                if {[lindex $result 0] ne "ok"} {
+                    return $result
+                }
+            }
+            return {ok}
+        }
         default {
             return [list bad "unsupported initializer expression [dict get $node kind]"]
         }
@@ -245,15 +261,15 @@ proc hir::modulebinding::ImmutableExpr {hir e factsVar activeVar} {
         if {
             set thenFacts $facts
             set then [ImmutableSequence $hir [dict get $node thenBody] thenFacts active]
-            if {[lindex $then 0] ne "ok"} {
+            if {[lindex $then 0] in {bad return}} {
                 return $then
             }
             set elseFacts $facts
             set else [ImmutableSequence $hir [dict get $node elseBody] elseFacts active]
-            if {[lindex $else 0] ne "ok"} {
+            if {[lindex $else 0] in {bad return}} {
                 return $else
             }
-            return [MergeBranchProofs $then $else]
+            return [MergeDivergentProofs $then $else]
         }
         return {
             set result [ImmutableExpr $hir [dict get $node value] facts active]
@@ -298,6 +314,52 @@ proc hir::modulebinding::ImmutableExpr {hir e factsVar activeVar} {
         }
         ok - error {
             return {bad unknown "Result values are not retained module values yet"}
+        }
+        fail {
+            # A `fail` completion never itself produces a value here: it is
+            # not "unprovable" the way a mutable/unknown value is (`bad`) --
+            # it necessarily diverges out of this expression entirely, to
+            # whichever `handle` node's own `on` clause (elsewhere in the
+            # call graph this pass is walking) actually receives it, and
+            # that handler body's own value is separately proven where it
+            # lives (the `handle` case below). `diverge` lets a sibling
+            # branch's own proof stand on its own (MergeDivergentProofs)
+            # instead of forcing every transitively-reachable `fail` inside
+            # an inlined callee body (e.g. byte::from_int's own) to itself
+            # carry a retainable value, which it never can by construction.
+            # hir/errorsets.tcl has already proven, completely separately,
+            # that every `fail` this pass encounters is legitimately
+            # handled or re-declared somewhere -- this pass only needs to
+            # avoid mistaking "diverges" for "unprovable".
+            return {diverge}
+        }
+        handle {
+            # Whichever of the call's own success or a handler's body
+            # actually runs is a data-dependent choice (which declared
+            # error, if any, the call produces): every live possibility
+            # must itself be proven immutable, folded pairwise through the
+            # same `choice` proof an `if`'s two branches already use
+            # (MergeBranchProofs), except a possibility that itself only
+            # diverges (its own body ends in a `fail`, e.g. re-raising a
+            # partially-handled error) contributes no value of its own and
+            # is dropped from the fold (MergeDivergentProofs) -- e.g. what
+            # lets `byte::set([...]): on BelowRange: {} on AboveRange: {}`
+            # retain as a module binding (BYTE-SET.md's own listloop case
+            # above is the identical idea one level up: prove every
+            # reachable possibility, never pick one arbitrarily).
+            set merged [ImmutableExpr $hir [dict get $node call] facts active]
+            if {[lindex $merged 0] in {bad return}} {
+                return $merged
+            }
+            foreach body [dict get $node handlerBodies] {
+                set bodyFacts $facts
+                set bodyProof [ImmutableSequence $hir $body bodyFacts active]
+                if {[lindex $bodyProof 0] in {bad return}} {
+                    return $bodyProof
+                }
+                set merged [MergeDivergentProofs $merged $bodyProof]
+            }
+            return $merged
         }
         default {
             return [list bad unknown "initializer expression [dict get $node kind]"]
@@ -419,4 +481,21 @@ proc hir::modulebinding::MergeBranchProofs {then else} {
     # Both branch proofs are immutable. Keep both possibilities instead of
     # pretending a conditional has a compile-time-selected retained value.
     return [list ok [list choice [lindex $then 1] [lindex $else 1]]]
+}
+
+# Like MergeBranchProofs, but either side may instead be {diverge} (a `fail`
+# that never reaches this point with a value of its own -- see ImmutableExpr's
+# own `fail` case). A diverging side contributes nothing to the choice: the
+# other side's own proof stands alone. Both diverging propagates {diverge}
+# onward unchanged (some further-out `handle` -- or hir/errorsets.tcl's
+# separate, already-completed proof that every `fail` is legitimately
+# handled or re-declared -- accounts for it, not this pass).
+proc hir::modulebinding::MergeDivergentProofs {a b} {
+    if {[lindex $a 0] eq "diverge"} {
+        return $b
+    }
+    if {[lindex $b 0] eq "diverge"} {
+        return $a
+    }
+    return [MergeBranchProofs $a $b]
 }

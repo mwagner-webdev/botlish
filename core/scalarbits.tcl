@@ -28,19 +28,18 @@
 #                                     a Byte -- 16 exact values, not every
 #                                     integer in [0,240]
 #
-# Checked construction from Int (Byte(x), Nibble(x), LowNibble(x),
-# HighNibble(x)) enforces each domain exactly, raising {CORE SEMANTIC RANGE}
-# for an invalid value -- never masking or silently truncating (masking is
-# what the explicit byte::high_nibble/byte::low_nibble bit operations below
-# are for). These four constructors are supported on interp/compile only:
-# unlike the bitwise primitives below, a checked constructor's failure path
-# has no native (Cranelift) implementation yet (no core-IR "raise" primitive
-# exists for a -native-body to compose), so `Byte(x)` etc. are native-
-# unsupported on cranelift/cranelift-generic, reported (not silently
-# swallowed) exactly like any other not-yet-native-lowerable call --
-# see native/lower.tcl's Unsupported. This is now a property of every
-# source-declared bounded-integer type generically (hir/sourcetypes.tcl's
-# own core::type::declareIntConstructor), not something this file arranges.
+# Checked construction from Int is no longer a callable type name
+# (EXPLICIT-ERROR-COMPLETIONS.md removes source-level `Byte(x)`/`Nibble(x)`/
+# `LowNibble(x)`/`HighNibble(x)` entirely -- spec items 19-20: a type name
+# is not a magical value-level function). byte::from_int (lib/byte.bot) is
+# now the one ordinary, explicitly-fallible Int -> Byte conversion,
+# declaring `errors BelowRange, AboveRange` and produced through the
+# source-level `fail` primitive -- an application-visible declared error,
+# not the old undeclared {CORE SEMANTIC RANGE}. This is now a property of
+# every source-declared bounded-integer type generically
+# (hir/sourcetypes.tcl's own core::type::declareIntConstructor, which
+# registers only the NAME? membership predicate now, no callable
+# constructor), not something this file arranges.
 #
 # byte::high_nibble/byte::low_nibble/byte::nibble/byte::complement/
 # byte::position_low/byte::position_high (lib/byte.bot) are ordinary,

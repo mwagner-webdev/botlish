@@ -220,9 +220,9 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan} {
             "$path declares \"namespace [dict get $ast namespace]\", but only namespace \"$name\" can load from this path"
     }
     foreach statement [dict get $ast body] {
-        if {[dict get $statement kind] ni {function bind typedecl}} {
+        if {[dict get $statement kind] ni {function bind typedecl errordecl}} {
             Error INVALID-TOPLEVEL [dict get $statement span] \
-                "module \"$name\" ($path): only function definitions, immutable bindings and type declarations are allowed at module top level, found a \"[dict get $statement kind]\" statement"
+                "module \"$name\" ($path): only function definitions, immutable bindings, type declarations and error declarations are allowed at module top level, found a \"[dict get $statement kind]\" statement"
         }
     }
     dict set state stack [concat [dict get $state stack] [list $name]]
@@ -231,12 +231,13 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan} {
     dict incr state nextFile
     CollectAndLoad state $ast
     set functionNames [lmap statement [dict get $ast body] {
-        if {[dict get $statement kind] eq "typedecl"} continue
+        if {[dict get $statement kind] in {typedecl errordecl}} continue
         dict get $statement name
     }]
     dict set state loaded $name $functionNames
-    lassign [surface::lower::SplitTypeDecls [dict get $ast body]] executable decls
+    lassign [surface::lower::SplitTypeDecls [dict get $ast body]] executable decls errorDecls
     dict set state typeDecls [concat [dict get $state typeDecls] $decls]
+    dict set state errorDecls [concat [dict get $state errorDecls] $errorDecls]
     set statements [lmap node [surface::lower::Sequence $executable] {RemapFile $node $fileId}]
     set origin [RemapOrigin [surface::lower::Origin [dict get $ast span] "namespace"] $fileId]
     set section [dict create namespace $name nodes $statements origin $origin]
@@ -280,12 +281,13 @@ proc surface::modules::LoadNamespaces {namespaces args} {
         dict set options $option $value
     }
     set state [dict create files [dict create] nextFile [dict get $options -start-file] \
-        loaded [dict create] stack {} sections {} typeDecls {}]
+        loaded [dict create] stack {} sections {} typeDecls {} errorDecls {}]
     foreach name $namespaces {
         LoadNamespace state $name ""
     }
     return [dict create sections [dict get $state sections] files [dict get $state files] \
-        functions [dict get $state loaded] typeDecls [dict get $state typeDecls]]
+        functions [dict get $state loaded] typeDecls [dict get $state typeDecls] \
+        errorDecls [dict get $state errorDecls]]
 }
 
 # The HIR of the .bot program file PATH, after loading (and compiling once,
@@ -301,13 +303,14 @@ proc surface::modules::compileProgramFile {path args} {
     }
     set ast [surface::parse [core::ReadFile $path] $path]
     set state [dict create files [dict create f1 [dict get $ast span file]] nextFile 2 \
-        loaded [dict create] stack {} sections {} typeDecls {}]
+        loaded [dict create] stack {} sections {} typeDecls {} errorDecls {}]
     CollectAndLoad state $ast
-    lassign [surface::lower::SplitTypeDecls [dict get $ast body]] executable ownDecls
+    lassign [surface::lower::SplitTypeDecls [dict get $ast body]] executable ownDecls ownErrorDecls
     set decls [concat [dict get $state typeDecls] $ownDecls]
+    set errorDecls [concat [dict get $state errorDecls] $ownErrorDecls]
     set hir [hir::buildSyntax [surface::lower::Sequence $executable] -strict 0 \
         -origin [surface::lower::Origin [dict get $ast span] ""] \
         -files [dict get $state files] -modules [dict get $state sections] \
-        -type-decls $decls]
+        -type-decls $decls -error-decls $errorDecls]
     return [surface::lower::Finish $hir [dict get $options -strict]]
 }

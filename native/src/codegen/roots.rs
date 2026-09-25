@@ -50,7 +50,7 @@
 //! storing, unconditionally at every definition of a slotted register,
 //! exactly the simplest sound model the brief asks for).
 
-use crate::nir::{Function, Inst, Program, Reg};
+use crate::nir::{Function, Inst, Label, Program, Reg};
 use crate::runtime::ops::op_may_allocate;
 use std::collections::{BTreeMap, HashSet};
 use std::fmt::Write as _;
@@ -203,7 +203,10 @@ fn is_safepoint(inst: &Inst) -> bool {
 /// being a terminator with no successor (see `Cfg::build`).
 fn def_use(inst: &Inst, params: u32) -> (Vec<Reg>, Vec<Reg>) {
     match inst {
-        Inst::Label(_) | Inst::Unreachable | Inst::Raise { .. } => (vec![], vec![]),
+        Inst::Label(_) | Inst::Unreachable | Inst::Raise { .. }
+        | Inst::Fail { .. } | Inst::ClearDeclaredError
+        | Inst::PushErrorExit(_) | Inst::PopErrorExit | Inst::Reraise => (vec![], vec![]),
+        Inst::DeclaredErrorEq { dst, .. } => (vec![*dst], vec![]),
         Inst::Int { dst, .. }
         | Inst::RawInt { dst, .. }
         | Inst::Str { dst, .. }
@@ -312,7 +315,8 @@ impl Cfg {
                 // exactly like codegen::clif's own translation (see this
                 // module's doc).
                 Inst::Tail { .. } | Inst::TailEnv { .. } => succs[bidx].push(0),
-                Inst::Ret(_) | Inst::RetMulti(_) | Inst::Raise { .. } | Inst::Unreachable => {}
+                Inst::Ret(_) | Inst::RetMulti(_) | Inst::Raise { .. } | Inst::Unreachable
+                    | Inst::Fail { .. } | Inst::Reraise => {}
                 // Not a terminator: this block was only split here because
                 // the next instruction is a label (implicit fallthrough), or
                 // this is the function's very last, terminator-ending block
@@ -321,6 +325,51 @@ impl Cfg {
                 _ => {
                     if bidx + 1 < blocks.len() {
                         succs[bidx].push(bidx + 1);
+                    }
+                }
+            }
+        }
+        // A handled call (EXPLICIT-ERROR-COMPLETIONS.md's `handle`,
+        // codegen::clif's PushErrorExit/PopErrorExit) redirects every
+        // `may_error` check's own error-exit branch, for the span between
+        // them, to the handler-dispatch label instead of this function's
+        // ordinary error_exit -- entirely at Cranelift-codegen level, so
+        // this NIR-level Cfg otherwise has no edge there at all (no
+        // explicit `br`/`jump` names that label from inside the span).
+        // Without one, this module's own backward liveness (`analyze`,
+        // below) would not know a register a handler body reads (e.g. an
+        // outer binding `on E: x + 1` closes over) must stay live -- and
+        // therefore rooted -- across every safepoint inside the handled
+        // call, which is a GC-safety bug (a collection mid-call could move
+        // or free it before the handler ever runs), not merely an
+        // imprecision. Conservative and sound: every block touched by an
+        // active PushErrorExit span gets an edge to that span's own catch
+        // label, so liveness propagates backward through the whole span
+        // exactly as if the redirected branch were an ordinary visible one.
+        let mut active_catch = vec![None; n];
+        let mut catch_stack: Vec<Label> = Vec::new();
+        for i in 0..n {
+            active_catch[i] = catch_stack.last().copied();
+            match &f.body[i] {
+                Inst::PushErrorExit(l) => catch_stack.push(*l),
+                Inst::PopErrorExit => {
+                    catch_stack.pop();
+                }
+                _ => {}
+            }
+        }
+        for (bidx, &(s, e)) in blocks.iter().enumerate() {
+            let mut needed: Vec<Label> = Vec::new();
+            for l in active_catch[s..e].iter().flatten() {
+                if !needed.contains(l) {
+                    needed.push(*l);
+                }
+            }
+            for l in needed {
+                if let Some(&target_idx) = label_index.get(&l) {
+                    let target_block = block_of[target_idx];
+                    if !succs[bidx].contains(&target_block) {
+                        succs[bidx].push(target_block);
                     }
                 }
             }

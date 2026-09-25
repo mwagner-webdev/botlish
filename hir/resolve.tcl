@@ -87,7 +87,7 @@ proc hir::resolve::program {nodes mode origin {modules {}}} {
         set top [NewScope hir ambient "" "" "" {host environment}]
         dict set hir top $top
     }
-    set ctx [dict create scope $top callable "" loop "" blocks {}]
+    set ctx [dict create scope $top callable "" loop "" blocks {} errors {}]
     lappend roots {*}[Sequence hir $nodes $ctx]
     dict set hir roots $roots
     if {$mode eq "program"} {
@@ -112,7 +112,7 @@ proc hir::resolve::ProgramSection {hirVar root namespaceName nodes origin} {
     set scope [NewScope hir program $root "" "" $origin]
     Declare hir $scope [hir::syntax::scopeBindNames $nodes]
     dict set hir modules $namespaceName $scope
-    set ctx [dict create scope $scope callable "" loop "" blocks {}]
+    set ctx [dict create scope $scope callable "" loop "" blocks {} errors {}]
     return [Sequence hir $nodes $ctx]
 }
 
@@ -361,7 +361,27 @@ proc hir::resolve::Expr {hirVar node ctx} {
             }
             SetField hir $e declaredResult $declared
             SetField hir $e resultType ""
-            set inner [dict create scope $bodyScope callable $e loop "" \
+            set declaredErrorPairs [expr {[dict exists $node declaredErrors] ? [dict get $node declaredErrors] : {}}]
+            set errorNames {}
+            set seenErrors [dict create]
+            foreach pair $declaredErrorPairs {
+                lassign $pair errName errSpan
+                if {[dict exists $seenErrors $errName]} {
+                    hir::Diagnose hir DUPLICATE \
+                        "duplicate error \"$errName\" in the same function's \"errors\" declaration" $e
+                    continue
+                }
+                dict set seenErrors $errName 1
+                if {![hir::errordecls::isDeclared $errName]} {
+                    hir::Diagnose hir UNDECLARED-ERROR \
+                        "unknown error \"$errName\": no \"error $errName\" declaration is visible" $e
+                    continue
+                }
+                lappend errorNames $errName
+            }
+            set errorNames [lsort -unique $errorNames]
+            SetField hir $e declaredErrors $errorNames
+            set inner [dict create scope $bodyScope callable $e loop "" errors $errorNames \
                 blocks [concat [dict get $ctx blocks] [list [list $e $bodyScope]]]]
             SetField hir $e body [Sequence hir $body $inner]
         }
@@ -431,6 +451,51 @@ proc hir::resolve::Expr {hirVar node ctx} {
         }
         ok - error {
             SetField hir $e value [Expr hir [dict get $node value] $ctx]
+        }
+        fail {
+            set name [dict get $node name]
+            SetField hir $e name $name
+            if {![hir::errordecls::isDeclared $name]} {
+                hir::Diagnose hir UNDECLARED-ERROR \
+                    "unknown error \"$name\": no \"error $name\" declaration is visible" $e
+            } elseif {$name ni [dict get $ctx errors]} {
+                hir::Diagnose hir UNHANDLED-ERROR \
+                    "\"fail $name\" is not admitted here: the enclosing function does not declare \"errors $name\"" $e
+            }
+        }
+        handle {
+            set callExpr [Expr hir [dict get $node call] $ctx]
+            if {[dict get $hir exprs $callExpr kind] ne "call"} {
+                core::malformed "the handled expression of \"handle\" must be a call" $node
+            }
+            SetField hir $e call $callExpr
+            set names {}
+            set scopes {}
+            set bodies {}
+            set seen [dict create]
+            foreach handler [dict get $node handlers] {
+                set name [dict get $handler name]
+                set body [dict get $handler body]
+                if {[dict exists $seen $name]} {
+                    hir::Diagnose hir DUPLICATE \
+                        "duplicate \"on $name\" handler in the same handled call" $e
+                    continue
+                }
+                dict set seen $name 1
+                if {![hir::errordecls::isDeclared $name]} {
+                    hir::Diagnose hir UNDECLARED-ERROR \
+                        "unknown error \"$name\": no \"error $name\" declaration is visible" $e
+                }
+                set branch [NewScope hir branch $scope \
+                    [dict get $hir scopes $scope invocation] $e [dict get $handler origin]]
+                Declare hir $branch [hir::syntax::scopeBindNames $body]
+                lappend names $name
+                lappend scopes $branch
+                lappend bodies [Sequence hir $body [dict replace $ctx scope $branch]]
+            }
+            SetField hir $e handlerNames $names
+            SetField hir $e handlerScopes $scopes
+            SetField hir $e handlerBodies $bodies
         }
         default {
             core::malformed "unknown syntax node kind \"$kind\"" $node

@@ -251,13 +251,28 @@ proc core::type::showIntegerDomain {domain} {
 
 # Checked construction from an arbitrary Int: succeeds (returning the same
 # Int, refined) iff the value is actually in the named type NAME's domain,
-# else raises {CORE SEMANTIC RANGE} -- never masks or truncates. The one
-# generic implementation behind every named refined-int type's checked
-# constructor (Byte(x), a source-declared Small(x), ...): registered once
-# per type name as that name's own native -impl (core/scalarbits.tcl
-# formerly did this itself for its four names; hir/sourcetypes.tcl now does
-# the same for a source declaration -- see item 66's "do not add a separate
-# constructor implementation per declared type").
+# else raises {CORE SEMANTIC RANGE} -- never masks or truncates. Formerly
+# also registered as every named refined-int type's own callable
+# constructor native (a bare "Byte(x)"); EXPLICIT-ERROR-COMPLETIONS.md
+# removes that source-level callable-type surface entirely (spec items 19-
+# 20, 43-45: a type name is not a magical value-level function; a runtime-
+# fallible conversion must be an ordinary, explicitly-fallible function, so
+# library code now calls this generic domain check only through its own
+# error-declaring wrapper -- byte::from_int, lib/byte.bot -- never as a
+# bare NAME(x) call). Kept, unmodified and still generic over any declared
+# integer-domain type, as the shared runtime/domain-check implementation
+# such a wrapper's own `fail` branches are built on: item 44's own
+# "separate the semantic source API from the runtime/domain-check
+# implementation" -- only the *registration* as a root callable native is
+# removed (declareIntConstructor below), never this generic primitive
+# itself. {CORE SEMANTIC RANGE} remains this proc's own *internal*
+# (compiler-trusted-Tcl-code) failure signal, never exposed to Botlish
+# source as an application error (item 43): a caller that wants a source-
+# visible declared error translates this into one explicitly (see
+# byte::from_int's own body, which does not even call this -- it
+# reimplements the same two-sided bounds check directly in Botlish so its
+# `fail BelowRange`/`fail AboveRange` are ordinary source statements, not a
+# native's internal signal).
 proc core::type::CheckedConstruct {typeName v} {
     core::value::expect int $v $typeName
     if {![validate $typeName $v]} {
@@ -267,14 +282,12 @@ proc core::type::CheckedConstruct {typeName v} {
     return $v
 }
 
-# Registers NAME's checked constructor (a root native NAME(x), CheckedConstruct
-# above) and membership predicate (NAME?, definePredicate) -- the two
-# ordinary things every named refined int type gets, generically, whether
-# NAME came from compiler registration or a source declaration.
+# Registers NAME's membership predicate (NAME?, definePredicate) -- the one
+# thing every named refined int type still gets automatically, whether NAME
+# came from compiler registration or a source declaration. No longer also
+# registers a callable constructor native (a bare "Byte(x)"): see
+# CheckedConstruct's own comment just above for why, and spec items 19-20.
 proc core::type::declareIntConstructor {name} {
-    core::native::register $name -arity 1 \
-        -impl [list core::type::CheckedConstruct $name] \
-        -param-types int -result-type $name -context-free 1
     definePredicate $name
 }
 

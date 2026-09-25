@@ -39,7 +39,8 @@
 #   function   name, nameSpan, params ({NAME SPAN TYPE TYPESPAN} tuples --
 #              TYPE is "" and TYPESPAN is "" for an untyped parameter),
 #              paramsSpan (from "(" to the end of the body: the function
-#              literal), body (suite)
+#              literal), errors ({NAME SPAN} pairs, from the function's own
+#              "errors E1, E2" clause, empty if none), body (suite)
 #   if         condition, then (suite), else (suite or "")
 #   loop       elementName, elementNameSpan, iterable (an expression, or ""
 #              for the plain form), body (suite) -- "loop x in EXPR:"
@@ -56,6 +57,16 @@
 #              is {kind interval lo LO loSpan .. hi HI hiSpan .. span ..} or
 #              {kind exact values {V...} spans {SPAN...} span ..}, LO/HI/V
 #              decimal text (a leading "-" allowed).
+#   errordecl  name, nameSpan -- a top-level named-error declaration
+#              ("error NAME", surface/parser.tcl's ErrorDecl; see
+#              hir/errordecls.tcl for what it means). No runtime meaning,
+#              exactly like typedecl.
+#   fail       name, nameSpan -- "fail NAME": produces the named error's
+#              completion (EXPLICIT-ERROR-COMPLETIONS.md).
+#   handledcall  call (a `call` node), handlers (a list of {name nameSpan
+#              body} dicts, one per "on NAME:" clause in written order;
+#              body a suite) -- "CALL: on NAME: ... on NAME: ...". Only a
+#              bare call expression may be handled this way (item 9).
 #   error      a statement that could not be parsed (recovering parses only)
 #
 # Node ids
@@ -216,6 +227,17 @@ proc surface::ast::Ids {node id} {
             }
             dict set node body [Suite [dict get $node body] $id]
         }
+        handledcall {
+            dict set node call [Ids [dict get $node call] $id/call]
+            set handlers {}
+            set index 1
+            foreach handler [dict get $node handlers] {
+                dict set handler body [Suite [dict get $handler body] $id/on$index]
+                lappend handlers $handler
+                incr index
+            }
+            dict set node handlers $handlers
+        }
     }
     return $node
 }
@@ -255,6 +277,13 @@ proc surface::ast::Children {node} {
             set children [list [dict get $node condition] [dict get $node then]]
             if {[dict get $node else] ne ""} {
                 lappend children [dict get $node else]
+            }
+            return $children
+        }
+        handledcall {
+            set children [list [dict get $node call]]
+            foreach handler [dict get $node handlers] {
+                lappend children [dict get $handler body]
             }
             return $children
         }
@@ -418,6 +447,14 @@ proc surface::ast::Statement {node indent show linesVar} {
             lappend lines "${pad}type [dict get $node name] = [dict get $node parent] in [DomainText [dict get $node domain]]$at"
             return
         }
+        errordecl {
+            lappend lines "${pad}error [dict get $node name]$at"
+            return
+        }
+        fail {
+            lappend lines "${pad}fail [dict get $node name]$at"
+            return
+        }
         function {
             set params [lmap pair [dict get $node params] {
                 lassign $pair name _ type
@@ -429,8 +466,16 @@ proc surface::ast::Statement {node indent show linesVar} {
             # would brace-quote such an element for eval-safety, which
             # "(x:List[Small] y)" does not need (join, unlike bare
             # interpolation of a list value, never adds that quoting).
-            lappend lines "${pad}fn [dict get $node name] ([join $params { }])$at"
+            set line "${pad}fn [dict get $node name] ([join $params { }])"
+            if {[dict get $node errors] ne {}} {
+                append line " errors [join [lmap pair [dict get $node errors] {lindex $pair 0}] {, }]"
+            }
+            lappend lines "$line$at"
             Body [dict get $node body] [expr {$indent + 1}] $show lines
+            return
+        }
+        handledcall {
+            HandledCall $node $indent $show lines
             return
         }
         if {
@@ -454,7 +499,25 @@ proc surface::ast::Statement {node indent show linesVar} {
                 If $value $prefix $indent $show lines
                 return
             }
+            if {$value ne "" && [dict get $value kind] eq "handledcall"} {
+                set prefix [expr {[dict get $node kind] eq "bind"
+                    ? "bind [dict get $node name]$at = " : "[dict get $node kind]$at "}]
+                HandledCall $value $indent $show lines $prefix
+                return
+            }
         }
     }
     lappend lines "$pad[Expr $node $show]"
+}
+
+# Lines of the handled-call NODE ("CALL: on NAME: ... on NAME: ..."), its
+# first line starting with PREFIX (mirrors If's own PREFIX convention).
+proc surface::ast::HandledCall {node indent show linesVar {prefix ""}} {
+    upvar 1 $linesVar lines
+    set pad [string repeat {    } $indent]
+    lappend lines "$pad${prefix}[Expr [dict get $node call] $show]:[At $node $show]"
+    foreach handler [dict get $node handlers] {
+        lappend lines "[string repeat {    } [expr {$indent + 1}]]on [dict get $handler name]:"
+        Body [dict get $handler body] [expr {$indent + 2}] $show lines
+    }
 }

@@ -226,19 +226,31 @@ proc hir::build {exprs args} {
 #                   by default: every caller but the surface frontend
 #                   (surface/lower.tcl, surface/modules.tcl) and hir::read.
 #
+#   -error-decls D  surface/lower.tcl's ErrorDeclOf dicts (one per "error
+#                   NAME" declaration the caller found, across every module
+#                   section plus its own top level) -- validated and
+#                   registered by hir::errordecls::apply before resolution,
+#                   so a function's `errors` clause, a `fail` statement and
+#                   an `on` handler all resolve their error names against
+#                   it (EXPLICIT-ERROR-COMPLETIONS.md). Kept as HIR's own
+#                   `errorDecls` field (hir/format.tcl, hir/read.tcl's
+#                   round-trip). Empty by default, like -type-decls.
+#
 # This is how frontends construct HIR: they state what was written and where;
 # resolution, hygiene (hygiene.tcl), types and refinements happen here.
 proc hir::buildSyntax {nodes args} {
     set options [Options hir::buildSyntax \
         {-mode program -strict 1 -origin "" -files {} -modules {} -native-result-overrides {} \
-            -module-native-targets {} -type-decls {}} $args]
+            -module-native-targets {} -type-decls {} -error-decls {}} $args]
     set mode [dict get $options -mode]
     if {$mode ni {program sequence}} {
         error "hir::build: -mode must be program or sequence"
     }
     set sourceTypes [hir::sourcetypes::apply [dict get $options -type-decls]]
+    set errorDecls [hir::errordecls::apply [dict get $options -error-decls]]
     set hir [hir::resolve::program $nodes $mode [dict get $options -origin] [dict get $options -modules]]
     dict set hir sourceTypes $sourceTypes
+    dict set hir errorDecls $errorDecls
     hir::hygiene::apply hir
     dict for {f path} [dict get $options -files] {
         dict set hir files $f [dict create id $f path $path]
@@ -249,6 +261,7 @@ proc hir::buildSyntax {nodes args} {
     hir::range::verifyDeclaredResults hir
     hir::range::verifyDeclaredParams hir
     hir::callables::verify hir
+    hir::errorsets::verify hir
     hir::modulebinding::validate hir
     if {[dict get $options -strict]} {
         foreach diagnostic [dict get $hir diagnostics] {
@@ -320,6 +333,13 @@ proc hir::diagnostics {hir} { return [dict get $hir diagnostics] }
 # domain ..}, in dependency order. Empty for a program that declared none.
 proc hir::sourceTypes {hir} {
     return [expr {[dict exists $hir sourceTypes] ? [dict get $hir sourceTypes] : {}}]
+}
+
+# The source-defined error declarations this HIR's own build registered
+# (hir::errordecls::apply's return value): an ordered list of names. Empty
+# for a program that declared none.
+proc hir::errorDecls {hir} {
+    return [expr {[dict exists $hir errorDecls] ? [dict get $hir errorDecls] : {}}]
 }
 
 proc hir::node {hir e} {
@@ -408,6 +428,14 @@ proc hir::children {hir e} {
         loop  { return [dict get $node body] }
         listloop {
             return [concat [list [dict get $node iterable]] [dict get $node body]]
+        }
+        fail  { return {} }
+        handle {
+            set result [list [dict get $node call]]
+            foreach body [dict get $node handlerBodies] {
+                lappend result {*}$body
+            }
+            return $result
         }
     }
 }
@@ -532,7 +560,7 @@ proc hir::ApplyNativeResultOverrides {hirVar overrides} {
 }
 
 apply {{dir} {
-    foreach file {syntax resolve hygiene sourcetypes types modulebinding refine lower format read aot specialize range callables induction escape blockescape stringregion traversal} {
+    foreach file {syntax resolve hygiene sourcetypes errordecls types modulebinding refine lower format read aot specialize range callables errorsets induction escape blockescape stringregion traversal} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

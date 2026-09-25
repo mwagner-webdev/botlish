@@ -815,6 +815,13 @@ proc core::compiler::CompileForm {ctxVar e} {
             Emit ctx "set $t \[list result [Kind $e] [BoxWord $value]\]"
             return [Op box "\$$t" result]
         }
+        fail {
+            Emit ctx "return -code 5 [Word [core::value::errorId [N $e name]]]"
+            return [Never]
+        }
+        handle {
+            return [CompileHandle ctx $e]
+        }
     }
 }
 
@@ -1347,6 +1354,90 @@ proc core::compiler::CompileListLoop {ctxVar e} {
     # in which case it becomes the List built from every iteration's own
     # contributed value.
     Emit ctx "if \{!\[info exists $result\]\} \{ set $result \[core::value::listOf \$$acc\] \}"
+    return [Op box "\$$result" any]
+}
+
+# (handle CALL-EXPR NAME1 HANDLER-BLOCK1 ...) -- EXPLICIT-ERROR-COMPLETIONS.md.
+# The call's own generated code is isolated into a nested Tcl `catch`,
+# mirroring the interpreter's own op-handle: status 0 is the call's ordinary
+# value; status 5 (this project's own propagate-error completion code,
+# core/completion.tcl's fromTclCode, exactly parallel to how 2/3/4 already
+# carry return/break/continue through compiled code) whose errorId matches a
+# handler runs that handler's body instead (a fresh, possibly-materialized
+# scope, exactly like an `if` branch: no callable boundary, so a
+# `return`/`break`/`continue` inside it affects the enclosing callable/
+# loop); anything else (a genuine Tcl error, a stray return/break/continue,
+# or a propagate-error matching no handler) re-raises unchanged with
+# `return -options`, the same technique core/completion.tcl's own
+# fromTclCode case 1 already uses for an ordinary Tcl error.
+proc core::compiler::CompileHandle {ctxVar e} {
+    upvar 1 $ctxVar ctx
+    set callExpr [N $e call]
+    set names [N $e handlerNames]
+    set scopes [N $e handlerScopes]
+    set bodies [N $e handlerBodies]
+    set parentFrame [CurrentFrameExpr $ctx]
+
+    set stVar [NewTemp]
+    set resVar [NewTemp]
+    set optsVar [NewTemp]
+    set result [NewTemp]
+
+    # Isolate the call's own emitted lines so they can be wrapped in `catch`.
+    set savedLines [dict get $ctx lines]
+    dict set ctx lines {}
+    Indent ctx 1
+    set callValue [CompileExpr ctx $callExpr]
+    if {[OpType $callValue] ne "never"} {
+        Emit ctx "set $resVar [BoxWord $callValue]"
+    }
+    Indent ctx -1
+    set callLines [dict get $ctx lines]
+    dict set ctx lines $savedLines
+
+    Emit ctx "set $stVar \[catch \{"
+    foreach line $callLines { dict lappend ctx lines $line }
+    Emit ctx "\} $resVar $optsVar\]"
+
+    set live 0
+    Emit ctx "if {\$$stVar == 0} \{"
+    if {[OpType $callValue] ne "never"} {
+        Indent ctx 1
+        Emit ctx "set $result \$$resVar"
+        Indent ctx -1
+        set live 1
+    }
+    Emit ctx "\} elseif {\$$stVar == 5} \{"
+    Indent ctx 1
+    Emit ctx "switch -exact -- \[lindex \$$resVar 1\] \{"
+    Indent ctx 1
+    foreach name $names scopeId $scopes body $bodies {
+        Emit ctx "[Word $name] \{"
+        Indent ctx 1
+        OpenScope ctx $scopeId $parentFrame
+        DeclareScope ctx $scopeId
+        set hValue [CompileSequence ctx $body]
+        PopScope ctx
+        if {[OpType $hValue] ne "never"} {
+            Emit ctx "set $result [BoxWord $hValue]"
+            set live 1
+        }
+        Indent ctx -1
+        Emit ctx "\}"
+    }
+    Emit ctx "default \{ return -options \$$optsVar \$$resVar \}"
+    Indent ctx -1
+    Emit ctx "\}"
+    Indent ctx -1
+    Emit ctx "\} else \{"
+    Indent ctx 1
+    Emit ctx "return -options \$$optsVar \$$resVar"
+    Indent ctx -1
+    Emit ctx "\}"
+
+    if {!$live} {
+        return [Never]
+    }
     return [Op box "\$$result" any]
 }
 

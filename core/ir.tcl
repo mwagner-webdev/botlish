@@ -16,9 +16,30 @@
 #   (continue)
 #   (ok EXPR)
 #   (error-value EXPR)
+#   (fail NAME)
+#   (handle CALL-EXPR NAME1 HANDLER-BLOCK1 NAME2 HANDLER-BLOCK2 ...)
 #
 # THEN-BLOCK, ELSE-BLOCK and BODY-BLOCK must be syntactic (block {} ...) nodes:
 # their bodies are lexically part of the enclosing code.
+#
+# (fail NAME): completes with `propagate-error(errorId(NAME))` (core/
+# completion.tcl) -- an alternate, named completion edge of the enclosing
+# function, never an ordinary value (EXPLICIT-ERROR-COMPLETIONS.md). Whether
+# NAME is a declared error the enclosing function may actually produce is a
+# HIR-level static obligation (hir/errorsets.tcl), not something this file
+# checks: exactly like `return`/`break`/`continue`, this file only checks
+# shape, never target legality.
+#
+# (handle CALL-EXPR NAME1 HANDLER-BLOCK1 ...): CALL-EXPR must be a syntactic
+# (call ...) node. Evaluates CALL-EXPR; if it completes normally, `handle`
+# completes the same way. If it completes with `propagate-error(errorId(N))`
+# and N is one of NAME1, NAME2, ..., the matching HANDLER-BLOCK (a syntactic
+# (block {} ...) node, lexically part of the enclosing code exactly like an
+# `if` branch or a loop body -- so a `return`/`break`/`continue` inside it
+# affects the surrounding callable/loop, not a new one) runs instead, and
+# `handle` completes however that block's body does. Any other completion
+# (including a propagate-error whose name matches none of NAME1, NAME2, ...)
+# passes through unchanged.
 #
 # (listloop LIST-EXPR ELEMENT-BLOCK): the surface `loop x in EXPR:` form
 # (see surface/parser.tcl). LIST-EXPR is evaluated once, in the enclosing
@@ -176,6 +197,31 @@ proc core::ir::CheckShape {node} {
         error-value {
             ExpectLength $node 2 2 "(error-value EXPR)"
         }
+        fail {
+            ExpectLength $node 2 2 "(fail NAME)"
+            CheckName [lindex $node 1] $node
+        }
+        handle {
+            ExpectLength $node 3 * "(handle CALL-EXPR NAME HANDLER-BLOCK ...)"
+            if {[llength $node] % 2 != 0} {
+                core::malformed "(handle CALL-EXPR NAME HANDLER-BLOCK ...) needs a HANDLER-BLOCK for every NAME" $node
+            }
+            set call [lindex $node 1]
+            if {[catch {llength $call} n] || $n == 0 || [lindex $call 0] ne "call"} {
+                core::malformed "the first argument of (handle ...) must be a (call ...) node" $node
+            }
+            CheckShape $call
+            set seen {}
+            foreach {name handlerBlock} [lrange $node 2 end] {
+                CheckName $name $node
+                if {$name in $seen} {
+                    core::semanticError DUPLICATE \
+                        "duplicate \"on $name\" handler in the same handled call"
+                }
+                lappend seen $name
+                CheckInlineBlock $handlerBlock $node "handler body for \"$name\""
+            }
+        }
         default {
             core::malformed "unknown operation \"$op\"" $node
         }
@@ -265,6 +311,9 @@ proc core::ir::CollectBindNames {node namesVar} {
                 CollectBindNames [lindex $node 1] names
             }
         }
+        handle {
+            CollectBindNames [lindex $node 1] names
+        }
     }
 }
 
@@ -297,6 +346,17 @@ proc core::ir::containsBlock {exprs} {
             bind {
                 if {[containsBlock [list [lindex $expr 2]]]} {
                     return 1
+                }
+            }
+            fail {}
+            handle {
+                if {[containsBlock [list [lindex $expr 1]]]} {
+                    return 1
+                }
+                foreach {name handlerBlock} [lrange $expr 2 end] {
+                    if {[containsBlock [blockBody $handlerBlock]]} {
+                        return 1
+                    }
                 }
             }
             default {
@@ -375,6 +435,15 @@ proc core::ir::check {node {context {callable 0 loop 0}}} {
             set inner [dict replace $context loop 1]
             foreach expr [blockBody [lindex $node 2]] {
                 check $expr $inner
+            }
+        }
+        fail {}
+        handle {
+            check [lindex $node 1] $context
+            foreach {name handlerBlock} [lrange $node 2 end] {
+                foreach expr [blockBody $handlerBlock] {
+                    check $expr $context
+                }
             }
         }
     }

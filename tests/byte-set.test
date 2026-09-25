@@ -112,6 +112,16 @@ test byte-set-boundary-255 {byte::set(['ÿ']) (U+00FF, scalar 255) succeeds at B
     }
 } -result {same {{255}}}
 
+# These three programs call byte::set(...) unhandled, at top level (which
+# itself declares no errors) -- surface::readProgramFile -strict 0 still
+# lowers and runs them despite the resulting static UNHANDLED-ERROR
+# diagnostics (see byte-set-mixed-failure's own note), so moduleErrorKinds
+# still observes a real runtime outcome: an uncaught `fail BelowRange`/`fail
+# AboveRange` propagates to the program boundary, which every backend
+# reports as CORE SEMANTIC UNCAUGHT-ERROR (core/completion.tcl's
+# atProgramBoundary; core/errors.tcl) -- not CORE SEMANTIC RANGE, the old
+# callable-Byte(x) native constructor's own kind, which no longer exists.
+
 test byte-set-boundary-256-fails {byte::set(['Ā']) (U+0100, scalar 256) fails the checked Byte construction just past the boundary} -body {
     set path [makeFile {byte::set(['Ā'])} byte-set-256.bot]
     try {
@@ -119,7 +129,7 @@ test byte-set-boundary-256-fails {byte::set(['Ā']) (U+0100, scalar 256) fails t
     } finally {
         removeFile byte-set-256.bot
     }
-} -result {{error {CORE SEMANTIC RANGE}} {error {CORE SEMANTIC RANGE}} {error {CORE SEMANTIC RANGE}} {error {CORE SEMANTIC RANGE}}}
+} -result {{error {CORE SEMANTIC UNCAUGHT-ERROR}} {error {CORE SEMANTIC UNCAUGHT-ERROR}} {error {CORE SEMANTIC UNCAUGHT-ERROR}} {error {CORE SEMANTIC UNCAUGHT-ERROR}}}
 
 test byte-set-astral-fails {byte::set(['😀']) (U+1F600, scalar 128512) fails -- never UTF-8 encoded into four bytes} -body {
     set path [makeFile {byte::set(['😀'])} byte-set-astral.bot]
@@ -128,16 +138,16 @@ test byte-set-astral-fails {byte::set(['😀']) (U+1F600, scalar 128512) fails -
     } finally {
         removeFile byte-set-astral.bot
     }
-} -result {{error {CORE SEMANTIC RANGE}} {error {CORE SEMANTIC RANGE}} {error {CORE SEMANTIC RANGE}} {error {CORE SEMANTIC RANGE}}}
+} -result {{error {CORE SEMANTIC UNCAUGHT-ERROR}} {error {CORE SEMANTIC UNCAUGHT-ERROR}} {error {CORE SEMANTIC UNCAUGHT-ERROR}} {error {CORE SEMANTIC UNCAUGHT-ERROR}}}
 
-test byte-set-mixed-failure {byte::set(['A', 'Ā', 'B']) fails at the first invalid element, left to right, with no partial successful result} -body {
+test byte-set-mixed-failure {byte::set(['A', 'Ā', 'B']) fails at the first invalid element, left to right, with no partial successful result -- and, unhandled at top level, is a static UNHANDLED-ERROR diagnostic too (moduleErrorKinds's own -strict 0 read runs it anyway, to observe the runtime outcome)} -body {
     set path [makeFile {byte::set(['A', 'Ā', 'B'])} byte-set-mixed.bot]
     try {
         moduleErrorKinds $path
     } finally {
         removeFile byte-set-mixed.bot
     }
-} -result {{error {CORE SEMANTIC RANGE}} {error {CORE SEMANTIC RANGE}} {error {CORE SEMANTIC RANGE}} {error {CORE SEMANTIC RANGE}}}
+} -result {{error {CORE SEMANTIC UNCAUGHT-ERROR}} {error {CORE SEMANTIC UNCAUGHT-ERROR}} {error {CORE SEMANTIC UNCAUGHT-ERROR}} {error {CORE SEMANTIC UNCAUGHT-ERROR}}}
 
 test byte-set-canonical-payload {byte::set(['-', '.', '_', '~']) -- the motivating four-character URI-unreserved payload} -body {
     set path [makeFile {byte::set(['-', '.', '_', '~'])} byte-set-canonical.bot]
@@ -168,9 +178,9 @@ test byte-set-not-utf8 {byte::set(['é']) contains the one Byte 233 (its Unicode
 
 test byte-set-membership {every canonical-payload byte is a member, and an unrelated byte is not} -body {
     set path [makeFile {s = byte::set(['-', '.', '_', '~'])
-[immutable_set_contains(s, Byte(45)), immutable_set_contains(s, Byte(46)),
- immutable_set_contains(s, Byte(95)), immutable_set_contains(s, Byte(126)),
- immutable_set_contains(s, Byte(65))]} byte-set-membership.bot]
+[immutable_set_contains(s, 45), immutable_set_contains(s, 46),
+ immutable_set_contains(s, 95), immutable_set_contains(s, 126),
+ immutable_set_contains(s, 65)]} byte-set-membership.bot]
     try {
         list [moduleParity $path] [moduleValue $path]
     } finally {
@@ -194,7 +204,7 @@ test byte-set-result-type {byte::set(...) has static type ImmutableSet[Byte]} -b
 } -result {ImmutableSet[int[Byte]]}
 
 test byte-set-char-not-equal-byte {byte::set's conversion is explicit: the source UnicodeChar and the resulting Byte/Int remain distinct values elsewhere (ordinary equality, unaffected by byte::set)} -body {
-    set path [makeFile {['-' == 45, Byte(45) == 45]} byte-set-equality.bot]
+    set path [makeFile {['-' == 45, 45 == 45]} byte-set-equality.bot]
     try {
         moduleValue $path
     } finally {
@@ -226,8 +236,22 @@ test byte-set-rejects-int-list {byte::set([65]) (List[int]) is a static compile 
     }
 } -result {CORE SEMANTIC TYPE}
 
-test byte-set-accepts-char-list {byte::set(['A']) (List[UnicodeChar]) has no static diagnostic} -body {
-    set path [makeFile {byte::set(['A'])} byte-set-charlist.bot]
+test byte-set-accepts-char-list {byte::set(['A']) (List[UnicodeChar]), with its declared BelowRange/AboveRange handled, has no static diagnostic} -body {
+    set path [makeFile {byte::set(['A']):
+    on BelowRange:
+        placeholder = byte::from_int(0):
+            on BelowRange:
+                0
+            on AboveRange:
+                0
+        immutable_set_from_list([placeholder])
+    on AboveRange:
+        placeholder = byte::from_int(0):
+            on BelowRange:
+                0
+            on AboveRange:
+                0
+        immutable_set_from_list([placeholder])} byte-set-charlist.bot]
     try {
         llength [hir::diagnostics [surface::readProgramFile $path -strict 0]]
     } finally {
@@ -247,10 +271,24 @@ test byte-set-module-retained-value {additional_unreserved_chars = byte::set([..
     set ch [open $libPath w]
     fconfigure $ch -encoding utf-8
     puts -nonewline $ch {namespace bytesetretentionlib
-additional_unreserved_chars = byte::set(['-', '.', '_', '~'])
+additional_unreserved_chars = byte::set(['-', '.', '_', '~']):
+    on BelowRange:
+        placeholder = byte::from_int(0):
+            on BelowRange:
+                0
+            on AboveRange:
+                0
+        immutable_set_from_list([placeholder])
+    on AboveRange:
+        placeholder = byte::from_int(0):
+            on BelowRange:
+                0
+            on AboveRange:
+                0
+        immutable_set_from_list([placeholder])
 
 fn has_dash() -> bool:
-    immutable_set_contains(additional_unreserved_chars, Byte(45))
+    immutable_set_contains(additional_unreserved_chars, 45)
 }
     close $ch
     set mainPath [makeFile {[bytesetretentionlib::has_dash(), bytesetretentionlib::has_dash()]} byte-set-retention-main.bot]
@@ -274,16 +312,47 @@ fn has_dash() -> bool:
 } -result {0 {[true, true]} 1}
 
 # ---------------------------------------------------------------------------
-# Generic checked-constructor regression (spec item 47): native support for
-# checked interval-domain construction is generic, not Byte-specific --
-# pinned here too (fully covered on cranelift/cranelift-generic in
-# native-byte.test's own native-byte-constructors-cranelift-* tests).
+# Generic checked-domain construction regression (spec item 47, superseded
+# by EXPLICIT-ERROR-COMPLETIONS.md): the callable Small(n)/Byte(n) checked-
+# constructor syntax this pair of tests originally exercised no longer
+# exists in the language (source-defined refinement types have no callable
+# form at all now -- see EXPLICIT-ERROR-COMPLETIONS.md). The generic,
+# not-Byte-specific property it pinned -- a source-declared interval domain
+# gets a real dynamic runtime check, identically on every backend -- is now
+# expressed through an explicit `errors`/`fail`/`handle` function exactly
+# like byte::from_int, so these two tests are rewritten around that
+# mechanism rather than removed. tests/errors.test has this milestone's own
+# dedicated, exhaustive coverage of `errors`/`fail`/`handle` itself; these
+# two stay here to keep this file's own "generic, not Byte-specific" pin.
 
-test byte-set-generic-constructor-regression {a source-declared Small = Int in 0..10 gets the identical generic checked-constructor treatment byte::set's own Byte(...) calls use, dynamic value included} -body {
+test byte-set-generic-domain-check {a source-declared Small = Int in 0..10, guarded by an explicit fn ... errors ... / fail, gets the identical generic dynamic-range-check treatment byte::from_int's own Byte checks use, dynamic value included} -body {
     set path [makeFile {type Small = Int in 0..10
-fn check(n):
-    Small(n)
-[check(mod(500, 11)), check(0), check(10)]} byte-set-small.bot]
+error TooSmall
+error TooBig
+fn check(n) -> Small errors TooSmall, TooBig:
+    if n < 0:
+        fail TooSmall
+    else:
+        if n > 10:
+            fail TooBig
+        else:
+            n
+a = check(mod(500, 11)):
+    on TooSmall:
+        -1
+    on TooBig:
+        -1
+b = check(0):
+    on TooSmall:
+        -1
+    on TooBig:
+        -1
+c = check(10):
+    on TooSmall:
+        -1
+    on TooBig:
+        -1
+[a, b, c]} byte-set-small.bot]
     try {
         list [moduleParity $path] [moduleValue $path]
     } finally {
@@ -291,16 +360,29 @@ fn check(n):
     }
 } -result {same {[5, 0, 10]}}
 
-test byte-set-generic-constructor-regression-failure {Small(n) for a dynamic out-of-domain n fails the same way on every backend (kind only: see moduleErrorKinds)} -body {
+test byte-set-generic-domain-check-out-of-range {check(n) for a dynamic out-of-domain n reaches its `fail TooBig` production, and the caller's `on TooBig` handler runs, the same way on every backend} -body {
     set path [makeFile {type Small = Int in 0..10
-fn check(n):
-    Small(n)
-check(mod(500, 11) + 10)} byte-set-small-bad.bot]
+error TooSmall
+error TooBig
+fn check(n) -> Small errors TooSmall, TooBig:
+    if n < 0:
+        fail TooSmall
+    else:
+        if n > 10:
+            fail TooBig
+        else:
+            n
+r = check(mod(500, 11) + 10):
+    on TooSmall:
+        -1
+    on TooBig:
+        -2
+r} byte-set-small-bad.bot]
     try {
-        moduleErrorKinds $path
+        list [moduleParity $path] [moduleValue $path]
     } finally {
         removeFile byte-set-small-bad.bot
     }
-} -result {{error {CORE SEMANTIC RANGE}} {error {CORE SEMANTIC RANGE}} {error {CORE SEMANTIC RANGE}} {error {CORE SEMANTIC RANGE}}}
+} -result {same -2}
 
 cleanupTests

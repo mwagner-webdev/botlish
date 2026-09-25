@@ -19,6 +19,8 @@
 #   continue   (continue)
 #   ok         (ok VALUE)
 #   error      (error-value VALUE)
+#   fail       (fail NAME)
+#   handle     (handle CALL NAME1 (block {} HANDLER1...) ...)
 #
 # Static errors recorded as diagnostics (unbound names, duplicates, ...) are
 # lowered as the operations that raise them at run time, so a program built
@@ -84,6 +86,16 @@ proc hir::lower::expr {hir e} {
         }
         error {
             return [list error-value [expr $hir [dict get $node value]]]
+        }
+        fail {
+            return [list fail [dict get $node name]]
+        }
+        handle {
+            set handlers {}
+            foreach name [dict get $node handlerNames] body [dict get $node handlerBodies] {
+                lappend handlers $name [list block {} {*}[Exprs $hir $body]]
+            }
+            return [list handle [expr $hir [dict get $node call]] {*}$handlers]
         }
     }
 }

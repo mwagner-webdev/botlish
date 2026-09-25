@@ -14,7 +14,7 @@
 #             scalar's canonical decimal codepoint (like an INT token's
 #             digits) -- see UNICODE-CHAR-LITERALS.md
 #   keywords  fn if else loop return break continue true false unit and or not
-#             namespace type (kind is the word itself)
+#             namespace type error errors fail on (kind is the word itself)
 #   operators ( ) [ ] { } , : :: = == != < <= > >= + - * -> ..
 #             (kind is the text itself)
 #   NEWLINE   end of a logical line
@@ -50,7 +50,8 @@
 #                              statement (see UnclosedBefore)
 
 namespace eval surface::lexer {
-    variable keywords {fn if else loop return break continue true false unit and or not namespace type}
+    variable keywords {fn if else loop return break continue true false unit and or not namespace type \
+        error errors fail on}
     # Longest operators first ("::" before ":", so a module-qualified name
     # like web::uri_escape does not lex as ":" ":"). "{" and "}" are not
     # ordinary block syntax (Botlish blocks are ":" + indentation): they
@@ -293,7 +294,7 @@ proc surface::lexer::UnclosedBefore {source start indent} {
         return 0
     }
     return [expr {[string length $spaces] <= $indent
-        && [regexp {^(?:(?:fn|if|else|loop|return|break|continue)\M|[A-Za-z_][A-Za-z0-9_]*[ \t]*=(?!=))} $rest]}]
+        && [regexp {^(?:(?:fn|if|else|loop|return|break|continue|fail)\M|[A-Za-z_][A-Za-z0-9_]*[ \t]*=(?!=))} $rest]}]
 }
 
 proc surface::lexer::Token {kind text value span} {

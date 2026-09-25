@@ -56,14 +56,14 @@ proc referenceUnreserved {b} {
 
 test web-unreserved-acceptance-table {web::is_unreserved's item-78/20 acceptance table} -body {
     set path [makeFile {[
-    web::is_unreserved(Byte(45)), web::is_unreserved(Byte(46)),
-    web::is_unreserved(Byte(95)), web::is_unreserved(Byte(126)),
-    web::is_unreserved(Byte(44)), web::is_unreserved(Byte(47)),
-    web::is_unreserved(Byte(58)), web::is_unreserved(Byte(64)),
-    web::is_unreserved(Byte(91)), web::is_unreserved(Byte(96)),
-    web::is_unreserved(Byte(123)), web::is_unreserved(Byte(127)),
-    web::is_unreserved(Byte(128)), web::is_unreserved(Byte(255)),
-    web::is_unreserved(Byte(65)), web::is_unreserved(Byte(97)), web::is_unreserved(Byte(48))
+    web::is_unreserved(45), web::is_unreserved(46),
+    web::is_unreserved(95), web::is_unreserved(126),
+    web::is_unreserved(44), web::is_unreserved(47),
+    web::is_unreserved(58), web::is_unreserved(64),
+    web::is_unreserved(91), web::is_unreserved(96),
+    web::is_unreserved(123), web::is_unreserved(127),
+    web::is_unreserved(128), web::is_unreserved(255),
+    web::is_unreserved(65), web::is_unreserved(97), web::is_unreserved(48)
 ]} web-unreserved-table.bot]
     try {
         list [moduleParity $path] [moduleValue $path]
@@ -97,7 +97,7 @@ test web-unreserved-rejects-unproven-int {web::is_unreserved(char::codepoint('-'
 } -result {CORE SEMANTIC TYPE}
 
 test web-unreserved-result-type {web::is_unreserved(...) has static result type bool} -body {
-    set path [makeFile {web::is_unreserved(Byte(65))} web-unreserved-restype.bot]
+    set path [makeFile {web::is_unreserved(65)} web-unreserved-restype.bot]
     try {
         set hir [surface::readProgramFile $path -strict 0]
         set e [lindex [dict get $hir roots] end]
@@ -115,7 +115,7 @@ test web-unreserved-result-type {web::is_unreserved(...) has static result type 
 
 test web-unreserved-exhaustive {web::is_unreserved matches the reference definition over all 256 Byte values; cardinality exactly 66; equals ascii::is_alphanumeric(b) or membership in the punctuation set, everywhere} -body {
     set nums [lseq 0 255]
-    set src "ns = \[[join $nums {, }]\]\nloop n in ns:\n    b = Byte(n)\n    \[web::is_unreserved(b), ascii::is_alphanumeric(b), immutable_set_contains(web::additional_unreserved_chars, b)\]"
+    set src "ns = \[[join $nums {, }]\]\nloop n in ns:\n    b = byte::from_int(n):\n        on BelowRange:\n            0\n        on AboveRange:\n            0\n    \[web::is_unreserved(b), ascii::is_alphanumeric(b), immutable_set_contains(web::additional_unreserved_chars, b)\]"
     set path [makeFile $src web-unreserved-exhaustive.bot]
     try {
         set hir [surface::readProgramFile $path -strict 0]
@@ -147,7 +147,7 @@ test web-unreserved-exhaustive {web::is_unreserved matches the reference definit
 
 test web-unreserved-backend-parity-256 {web::is_unreserved agrees across interp/compile/cranelift-generic/cranelift over the entire 0..255 domain} -body {
     set nums [lseq 0 255]
-    set src "ns = \[[join $nums {, }]\]\nloop n in ns:\n    web::is_unreserved(Byte(n))"
+    set src "ns = \[[join $nums {, }]\]\nloop n in ns:\n    b = byte::from_int(n):\n        on BelowRange:\n            0\n        on AboveRange:\n            0\n    web::is_unreserved(b)"
     set path [makeFile $src web-unreserved-parity256.bot]
     try {
         moduleParity $path
@@ -164,8 +164,8 @@ test web-unreserved-backend-parity-256 {web::is_unreserved agrees across interp/
 # order, spec item 56).
 
 test web-unreserved-set-built-once {additional_unreserved_chars is constructed exactly once (one setfromlist site), regardless of how many web::is_unreserved calls follow} -body {
-    set path [makeFile {[web::is_unreserved(Byte(45)), web::is_unreserved(Byte(46)), web::is_unreserved(Byte(95)),
-web::is_unreserved(Byte(126)), web::is_unreserved(Byte(65)), web::is_unreserved(Byte(128))]} web-unreserved-once.bot]
+    set path [makeFile {[web::is_unreserved(45), web::is_unreserved(46), web::is_unreserved(95),
+web::is_unreserved(126), web::is_unreserved(65), web::is_unreserved(128)]} web-unreserved-once.bot]
     try {
         set hir [surface::readProgramFile $path -strict 0]
         native::lower::program $hir -repr-opt 0
@@ -186,15 +186,15 @@ web::is_unreserved(Byte(126)), web::is_unreserved(Byte(65)), web::is_unreserved(
 
 test web-unreserved-set-exact-members {additional_unreserved_chars contains exactly the four bytes 45/46/95/126, and no others among nearby candidates} -body {
     set path [makeFile {[
-    immutable_set_contains(web::additional_unreserved_chars, Byte(45)),
-    immutable_set_contains(web::additional_unreserved_chars, Byte(46)),
-    immutable_set_contains(web::additional_unreserved_chars, Byte(95)),
-    immutable_set_contains(web::additional_unreserved_chars, Byte(126)),
-    immutable_set_contains(web::additional_unreserved_chars, Byte(44)),
-    immutable_set_contains(web::additional_unreserved_chars, Byte(47)),
-    immutable_set_contains(web::additional_unreserved_chars, Byte(94)),
-    immutable_set_contains(web::additional_unreserved_chars, Byte(96)),
-    immutable_set_contains(web::additional_unreserved_chars, Byte(65))
+    immutable_set_contains(web::additional_unreserved_chars, 45),
+    immutable_set_contains(web::additional_unreserved_chars, 46),
+    immutable_set_contains(web::additional_unreserved_chars, 95),
+    immutable_set_contains(web::additional_unreserved_chars, 126),
+    immutable_set_contains(web::additional_unreserved_chars, 44),
+    immutable_set_contains(web::additional_unreserved_chars, 47),
+    immutable_set_contains(web::additional_unreserved_chars, 94),
+    immutable_set_contains(web::additional_unreserved_chars, 96),
+    immutable_set_contains(web::additional_unreserved_chars, 65)
 ]} web-unreserved-members.bot]
     try {
         list [moduleParity $path] [moduleValue $path]
@@ -211,8 +211,8 @@ test web-unreserved-set-exact-members {additional_unreserved_chars contains exac
 # code baseline for module set"; they do not grow with call count).
 
 test web-unreserved-allocations-dont-grow-with-call-count {total allocations are the same one-time module-init cost whether web::is_unreserved is called once or four times} -body {
-    set path1 [makeFile {web::is_unreserved(Byte(55))} web-unreserved-alloc1.bot]
-    set path4 [makeFile {[web::is_unreserved(Byte(55)), web::is_unreserved(Byte(56)), web::is_unreserved(Byte(57)), web::is_unreserved(Byte(58))]} web-unreserved-alloc4.bot]
+    set path1 [makeFile {web::is_unreserved(55)} web-unreserved-alloc1.bot]
+    set path4 [makeFile {[web::is_unreserved(55), web::is_unreserved(56), web::is_unreserved(57), web::is_unreserved(58)]} web-unreserved-alloc4.bot]
     try {
         set hir1 [surface::readProgramFile $path1 -strict 0]
         native::lower::program $hir1 -repr-opt 0
@@ -242,7 +242,7 @@ test web-unreserved-allocations-dont-grow-with-call-count {total allocations are
 # directly to "if" (surface/lower.tcl) -- `ascii::is_alphanumeric(b) or
 # immutable_set_contains(...)` is exactly `if ascii::is_alphanumeric(b)
 # {true} else {immutable_set_contains(...)}`, confirmed below by lowering
-# `ascii::is_alphanumeric(Byte(65))` itself and inspecting its own body's
+# `ascii::is_alphanumeric(65)` itself and inspecting its own body's
 # IR shape. Laziness is therefore inherited from "if"'s own evaluator
 # (core::forms::op-if: it only ever descends into the taken branch),
 # never a property "or" could accidentally lose on its own -- the same
@@ -254,7 +254,7 @@ test web-unreserved-allocations-dont-grow-with-call-count {total allocations are
 # spell its hyphen) in is_unreserved's own right-operand position, spliced
 # onto the real compiled ascii:: bindings hir::lower already produced.
 test web-unreserved-is-alphanumeric-lowers-to-if {ascii::is_alphanumeric(b) or SIDE-EFFECT lowers to an "if" whose else-branch (only) is SIDE-EFFECT} -body {
-    set path [makeFile {ascii::is_alphanumeric(Byte(65))} web-unreserved-ir-shape.bot]
+    set path [makeFile {ascii::is_alphanumeric(65)} web-unreserved-ir-shape.bot]
     try {
         set hir [surface::readProgramFile $path -strict 0]
         set exprs [hir::lower $hir]
@@ -269,12 +269,12 @@ test web-unreserved-is-alphanumeric-lowers-to-if {ascii::is_alphanumeric(b) or S
 
 test web-unreserved-or-short-circuits {an "or" shaped exactly like is_unreserved's own never evaluates its right operand once the left is already true} -body {
     resetEffects
-    set path [makeFile {ascii::is_alphanumeric(Byte(65))} web-unreserved-shortcircuit.bot]
+    set path [makeFile {ascii::is_alphanumeric(65)} web-unreserved-shortcircuit.bot]
     try {
         set hir [surface::readProgramFile $path -strict 0]
         set binds [lrange [hir::lower $hir] 0 end-1]
-        set trueByte {call {ref Byte} {const 65}}
-        set nonMemberByte {call {ref Byte} {const 45}}
+        set trueByte {const 65}
+        set nonMemberByte {const 45}
         set probe {block {} {call {ref test-log} {const 999}}}
         set trueProgram [concat $binds [list [list if [list call {ref ascii::is_alphanumeric} $trueByte] {block {} {ref true}} $probe]]]
         set nonMemberProgram [concat $binds [list [list if [list call {ref ascii::is_alphanumeric} $nonMemberByte] {block {} {ref true}} $probe]]]

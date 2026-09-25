@@ -167,101 +167,30 @@ check_all(0, true)
 } -result true
 
 # ---------------------------------------------------------------------------
-# Byte/Nibble/LowNibble/HighNibble checked construction and predicates
-# (lib/byte.bot's own source declarations -- see
-# SOURCE-DEFINED-INTEGER-DOMAINS.md): equivalent, source-based coverage of
-# what used to be tested directly against the raw-IR root natives
-# core/scalarbits.tcl registered (tests/scalarbits.test, before the
-# migration). Referencing byte::high_nibble is what loads byte.bot (and so
-# registers Byte/Nibble/LowNibble/HighNibble) through the ordinary module
-# system -- see moduleValue/moduleParity above.
-
-test native-byte-constructors-valid {Byte/Nibble/LowNibble/HighNibble constructors succeed at their boundaries, on interp/compile (checked constructors are still native-unsupported -- see native-byte-constructors-cranelift-unsupported below)} -body {
-    set path [makeFile {byte::high_nibble(0)
-[Byte(0), Byte(255), Nibble(0), Nibble(15), LowNibble(0), LowNibble(15), HighNibble(0), HighNibble(240)]} native-byte-ctor-ok.bot]
-    try {
-        set exprs [hir::lower [surface::readProgramFile $path -strict 0]]
-        list [lindex [outcomeUnder interp $exprs] 1] [lindex [outcomeUnder compile $exprs] 1]
-    } finally {
-        removeFile native-byte-ctor-ok.bot
-    }
-} -result {{[0, 255, 0, 15, 0, 15, 0, 240]} {[0, 255, 0, 15, 0, 15, 0, 240]}}
-
-# BYTE-SET.md: generic native (Cranelift) support for a checked *interval*-
-# domain constructor over a genuinely dynamic Int (composed entirely from
-# existing NIR forms in native/lower.tcl -- no Byte-specific native path).
-# Byte(200) now succeeds on cranelift/cranelift-generic exactly as it
-# already did on interp/compile, replacing this test's own former pin of
-# the pre-existing NATIVE UNSUPPORTED limitation.
-test native-byte-constructors-cranelift-supported {a checked constructor over an interval domain (Byte) is natively supported for a genuinely dynamic value} -body {
-    set path [makeFile {byte::high_nibble(0)
-fn check(n):
-    Byte(n)
-check(mod(50000, 201))} native-byte-ctor-cranelift.bot]
-    try {
-        set exprs [hir::lower [surface::readProgramFile $path -strict 0]]
-        set outcome [outcomeUnder cranelift $exprs]
-        list [lindex $outcome 0] [lindex $outcome 1]
-    } finally {
-        removeFile native-byte-ctor-cranelift.bot
-    }
-} -result {value 152}
-
-test native-byte-constructors-cranelift-range-error {a checked constructor over an interval domain (Byte) raises the same RANGE error natively, for a genuinely dynamic out-of-domain value} -body {
-    set path [makeFile {byte::high_nibble(0)
-fn check(n):
-    Byte(n)
-check(mod(50000, 201) + 200)} native-byte-ctor-cranelift-bad.bot]
-    try {
-        set exprs [hir::lower [surface::readProgramFile $path -strict 0]]
-        set outcome [outcomeUnder cranelift $exprs]
-        list [lindex $outcome 0] [lindex $outcome 1]
-    } finally {
-        removeFile native-byte-ctor-cranelift-bad.bot
-    }
-} -result {error {CORE SEMANTIC RANGE}}
-
-test native-byte-constructors-cranelift-exact-domain-still-unsupported {a checked constructor over an *exact* (non-interval) domain (HighNibble) remains native-unsupported, unaffected by the interval-domain support above} -body {
-    set path [makeFile {byte::high_nibble(0)
-fn check(n):
-    HighNibble(n)
-check(mod(500, 241))} native-byte-ctor-cranelift-exact.bot]
-    try {
-        set exprs [hir::lower [surface::readProgramFile $path -strict 0]]
-        set outcome [outcomeUnder cranelift $exprs]
-        list [lindex $outcome 0] [lindex $outcome 1]
-    } finally {
-        removeFile native-byte-ctor-cranelift-exact.bot
-    }
-} -result {error {NATIVE UNSUPPORTED {native HighNibble}}}
-
-test native-byte-constructors-boundary {Byte/Nibble/LowNibble/HighNibble constructors fail just outside their domains} -body {
-    set path [makeFile {byte::high_nibble(0)
-Byte(256)} native-byte-ctor-bad1.bot]
-    set path2 [makeFile {byte::high_nibble(0)
-Nibble(16)} native-byte-ctor-bad2.bot]
-    set path3 [makeFile {byte::high_nibble(0)
-HighNibble(17)} native-byte-ctor-bad3.bot]
-    try {
-        list [lindex [outcomeUnder interp [hir::lower [surface::readProgramFile $path -strict 0]]] 1] \
-             [lindex [outcomeUnder interp [hir::lower [surface::readProgramFile $path2 -strict 0]]] 1] \
-             [lindex [outcomeUnder interp [hir::lower [surface::readProgramFile $path3 -strict 0]]] 1]
-    } finally {
-        removeFile native-byte-ctor-bad1.bot
-        removeFile native-byte-ctor-bad2.bot
-        removeFile native-byte-ctor-bad3.bot
-    }
-} -result {{CORE SEMANTIC RANGE} {CORE SEMANTIC RANGE} {CORE SEMANTIC RANGE}}
-
-test native-byte-highnibble-exact-not-interval {HighNibble distinguishes "in [0,240]" from "in its own 16-value exact set"} -body {
-    set path [makeFile {byte::high_nibble(0)
-HighNibble(17)} native-byte-highnibble-not-mult.bot]
-    try {
-        lindex [outcomeUnder interp [hir::lower [surface::readProgramFile $path -strict 0]]] 1
-    } finally {
-        removeFile native-byte-highnibble-not-mult.bot
-    }
-} -result {CORE SEMANTIC RANGE}
+# Byte/Nibble/LowNibble/HighNibble checked construction (lib/byte.bot's own
+# source declarations -- see SOURCE-DEFINED-INTEGER-DOMAINS.md): this
+# section used to test the callable Byte(n)/Nibble(n)/LowNibble(n)/
+# HighNibble(n) checked-constructor syntax directly (both its interp/compile
+# behavior and its native/Cranelift lowering, including the generic
+# checked-interval-domain NIR support and the exact-domain NATIVE
+# UNSUPPORTED case). EXPLICIT-ERROR-COMPLETIONS.md removes that callable
+# syntax entirely: source-defined refinement types have no callable form
+# any more, so those tests (and the native checked-constructor lowering
+# they exercised, core/type.tcl's CheckedConstruct/native/lower.tcl's own
+# {core::type::CheckedConstruct NAME} path, both now unreachable dead code
+# left in place per that milestone's own item 44) are removed rather than
+# rewritten. The property they pinned -- a source-declared interval domain
+# gets a real, dynamic, cross-backend-identical runtime check for a
+# genuinely dynamic value -- is now demonstrated through an explicit
+# `errors`/`fail`/`handle` function instead (byte::from_int is the Byte
+# vertical's own instance; tests/errors.test has the general, exhaustive,
+# all-four-backend coverage of the mechanism itself).
+#
+# Referencing byte::high_nibble is what loads byte.bot (and so registers
+# Byte/Nibble/LowNibble/HighNibble) through the ordinary module system --
+# see moduleValue/moduleParity above; the remaining tests below still need
+# it for native-byte-nibble-lownibble-distinct's own nominal-distinctness
+# check.
 
 # Nibble and LowNibble are nominally distinct despite an identical (0..15)
 # numeric domain -- generic nominal-distinctness coverage (items 6, 74-76)

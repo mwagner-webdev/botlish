@@ -69,33 +69,36 @@ proc surface::lowerToHir {ast args} {
             surface::raise $diagnostic
         }
     }
-    lassign [surface::lower::SplitTypeDecls [dict get $ast body]] executable decls
+    lassign [surface::lower::SplitTypeDecls [dict get $ast body]] executable decls errorDecls
     set nodes [surface::lower::Sequence $executable]
     set hir [hir::buildSyntax $nodes -strict 0 \
         -origin [surface::lower::Origin [dict get $ast span] ""] \
         -files [dict create f1 [dict get $ast span file]] \
-        -type-decls $decls]
+        -type-decls $decls -error-decls $errorDecls]
     return [surface::lower::Finish $hir [dict get $options -strict]]
 }
 
-# STATEMENTS split into {EXECUTABLE DECLS}: EXECUTABLE keeps every statement
-# with runtime meaning, in order (ready for Sequence); DECLS is the type
-# declarations among them (surface/parser.tcl's `typedecl` nodes), converted
-# to the plain dicts hir::buildSyntax's -type-decls option takes (see
-# hir/sourcetypes.tcl) -- a type declaration is compile-time-only metadata,
-# never lowered to an hir/syntax.tcl node (spec items 21-22: no bind, no
-# runtime value, no NIR).
+# STATEMENTS split into {EXECUTABLE DECLS ERRORDECLS}: EXECUTABLE keeps
+# every statement with runtime meaning, in order (ready for Sequence);
+# DECLS is the type declarations among them (surface/parser.tcl's
+# `typedecl` nodes), converted to the plain dicts hir::buildSyntax's
+# -type-decls option takes (see hir/sourcetypes.tcl); ERRORDECLS likewise
+# for named-error declarations (`errordecl` nodes, hir/errordecls.tcl's
+# -error-decls). Neither kind of declaration is compile-time-only metadata,
+# never lowered to an hir/syntax.tcl node (spec items 21-22/109: no bind,
+# no runtime value, no NIR).
 proc surface::lower::SplitTypeDecls {statements} {
     set executable {}
     set decls {}
+    set errorDecls {}
     foreach statement $statements {
-        if {[dict get $statement kind] eq "typedecl"} {
-            lappend decls [TypeDeclOf $statement]
-        } else {
-            lappend executable $statement
+        switch -- [dict get $statement kind] {
+            typedecl  { lappend decls [TypeDeclOf $statement] }
+            errordecl { lappend errorDecls [ErrorDeclOf $statement] }
+            default   { lappend executable $statement }
         }
     }
-    return [list $executable $decls]
+    return [list $executable $decls $errorDecls]
 }
 
 proc surface::lower::TypeDeclOf {node} {
@@ -103,6 +106,10 @@ proc surface::lower::TypeDeclOf {node} {
         name [dict get $node name] nameSpan [dict get $node nameSpan] \
         parent [dict get $node parent] parentSpan [dict get $node parentSpan] \
         domain [dict get $node domain] domainSpan [dict get $node domain span]]
+}
+
+proc surface::lower::ErrorDeclOf {node} {
+    return [dict create name [dict get $node name] nameSpan [dict get $node nameSpan]]
 }
 
 # The tail both surface::lowerToHir and surface::modules::compileProgramFile
@@ -261,9 +268,13 @@ proc surface::lower::Node {node} {
                 list $name [Origin $span "[dict get $node id]/($name)"]
             }]
             set paramTypes [lmap param [dict get $node params] {lindex $param 2}]
+            set errors [lmap pair [dict get $node errors] {
+                lassign $pair errName errSpan
+                list $errName [Origin $errSpan "[dict get $node id]/errors($errName)"]
+            }]
             set block [hir::syntax::blockNode \
                 [Origin [dict get $node paramsSpan] [dict get $node id]/block] \
-                $params [Sequence [dict get $node body body]] [dict get $node resultType] $paramTypes]
+                $params [Sequence [dict get $node body body]] [dict get $node resultType] $paramTypes $errors]
             return [hir::syntax::bindNode $origin [dict get $node name] $block]
         }
         if {
@@ -307,6 +318,17 @@ proc surface::lower::Node {node} {
         }
         continue {
             return [hir::syntax::continueNode $origin]
+        }
+        fail {
+            return [hir::syntax::failNode $origin [dict get $node name]]
+        }
+        handledcall {
+            set handlers [lmap handler [dict get $node handlers] {
+                dict create name [dict get $handler name] nameSpan [dict get $handler nameSpan] \
+                    origin [OriginOf [dict get $handler body]] \
+                    body [Sequence [dict get [dict get $handler body] body]]
+            }]
+            return [hir::syntax::handleNode $origin [Node [dict get $node call]] $handlers]
         }
     }
     error "surface::lowerToHir: cannot lower a \"[dict get $node kind]\" node"

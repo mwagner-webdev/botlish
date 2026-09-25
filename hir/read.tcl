@@ -24,6 +24,9 @@ namespace eval hir::read {
     # TypeDecls' own result from the current Program call, for Program to
     # store as the returned HIR's `sourceTypes` field.
     variable lastTypeDecls {}
+    # ErrorDecls' own result from the current Program call, for Program to
+    # store as the returned HIR's `errorDecls` field.
+    variable lastErrorDecls {}
 }
 
 # The HIR program described by TEXT.
@@ -110,12 +113,38 @@ proc hir::read::TypeDeclLine {content number} {
         domain $domain domainSpan $span]
 }
 
+# Consumes LINES' own leading "error NAME" lines (hir::format's own text),
+# re-registering each through hir::errordecls::apply exactly as TypeDecls
+# does for "type ..." lines, so a serialized HIR's own "errors E1, E2" /
+# "fail E1" / "on E1" text resolves identically whether it came straight
+# from surface source or was read back from text with no source in sight.
+proc hir::read::ErrorDecls {lines} {
+    set decls {}
+    set rest $lines
+    foreach entry $lines {
+        lassign $entry indent content number
+        if {$indent != 0} { break }
+        if {![regexp {^error (\S+)$} $content -> name]} { break }
+        lappend decls [dict create name $name \
+            nameSpan [dict create file <hir-text> line $number column 1]]
+        set rest [lrange $rest 1 end]
+    }
+    set registered {}
+    if {$decls ne ""} {
+        set registered [hir::errordecls::apply $decls]
+    }
+    variable lastErrorDecls
+    set lastErrorDecls $registered
+    return $rest
+}
+
 proc hir::read::Program {text} {
     set lines [Lines $text]
     if {$lines eq ""} {
         Fail 0 "empty HIR text"
     }
     set lines [TypeDecls $lines]
+    set lines [ErrorDecls $lines]
     if {$lines eq ""} {
         Fail 0 "empty HIR text"
     }
@@ -148,6 +177,8 @@ proc hir::read::Program {text} {
     dict unset hir pos
     variable lastTypeDecls
     dict set hir sourceTypes $lastTypeDecls
+    variable lastErrorDecls
+    dict set hir errorDecls $lastErrorDecls
     Finish hir
     return $hir
 }
@@ -362,6 +393,24 @@ proc hir::read::TakeBranchLine {hirVar level role} {
     return [list $s $binds $facts $number]
 }
 
+# A handler header "on NAME SCOPE ?binds ...?" at LEVEL (hir::format::Expr's
+# own "handle" text, EXPLICIT-ERROR-COMPLETIONS.md) -- mirrors TakeBranchLine,
+# without the "refines" part a handler body has no equivalent of.
+proc hir::read::TakeHandlerLine {hirVar level} {
+    upvar 1 $hirVar hir
+    set line [Peek $hir]
+    lassign $line indent content number
+    if {$line eq "" || $indent != $level
+            || ![regexp {^on (\S+) (s[0-9]+)(?: binds (.*))?$} $content -> name s binds]} {
+        Fail [expr {$line eq "" ? "end" : $number}] "expected \"on NAME SCOPE ...\" at indentation level $level"
+    }
+    dict incr hir pos
+    if {![hir::errordecls::isDeclared $name]} {
+        Fail $number "unknown error \"$name\": no \"error $name\" declaration is visible"
+    }
+    return [list $name $s $binds $number]
+}
+
 # True if the next line is at indentation LEVEL.
 proc hir::read::AtLevel {hir level} {
     set line [Peek $hir]
@@ -440,9 +489,9 @@ proc hir::read::Expr {hirVar level s path block} {
             }
         }
         block {
-            if {![regexp {^(s[0-9]+) \((.*?)\) captures \((.*?)\)(?: declares (\S+))?(?: binds (.*))?$} \
-                    $head -> body params captures declared binds]} {
-                Fail $number "expected \"block SCOPE (PARAMS) captures (BINDINGS) ?binds ...?\""
+            if {![regexp {^(s[0-9]+) \((.*?)\) captures \((.*?)\)(?: declares (\S+))?(?: errors (\S.*?))?(?: binds (.*))?$} \
+                    $head -> body params captures declared errorsText binds]} {
+                Fail $number "expected \"block SCOPE (PARAMS) captures (BINDINGS) ?declares ...? ?errors ...? ?binds ...?\""
             }
             NewScope hir $body block $s $e $e [list ir $path] $number
             set paramIds {}
@@ -468,6 +517,18 @@ proc hir::read::Expr {hirVar level s path block} {
             set declaredType {}
             if {$declared ne {}} { set declaredType [ParseType $declared $number] }
             SetField hir $e declaredResult $declaredType
+            set declaredErrors {}
+            if {$errorsText ne {}} {
+                foreach name [split [string map {", " \x01} $errorsText] \x01] {
+                    if {$name eq ""} { continue }
+                    if {![hir::errordecls::isDeclared $name]} {
+                        Fail $number "unknown error \"$name\": no \"error $name\" declaration is visible"
+                    }
+                    lappend declaredErrors $name
+                }
+                set declaredErrors [lsort -unique $declaredErrors]
+            }
+            SetField hir $e declaredErrors $declaredErrors
             SetField hir $e inferredResultType [hir::types::intern hir [lindex $type 3]]
             set ids {}
             set index 2
@@ -489,6 +550,13 @@ proc hir::read::Expr {hirVar level s path block} {
                 SetField hir $e target ""
             }
             SetField hir $e known [expr {$known eq "" ? "" : $known eq "true"}]
+            # Not re-derived from the text (this file's own header: parsing
+            # trusts what analysis already concluded, it does not repeat
+            # the analysis) -- hir::errorsets::verify is never run directly
+            # on a hir::read-built HIR (only hir::build's own fresh
+            # re-inference, after hir::lower, does that); empty is always a
+            # safe, if conservative, placeholder.
+            SetField hir $e calleeErrors {}
             SetField hir $e callee [Expr hir $inner $s [concat $path 1] $block]
             set args {}
             set index 2
@@ -588,6 +656,43 @@ proc hir::read::Expr {hirVar level s path block} {
                 Fail $number "expected \"$kind : TYPE\""
             }
             SetField hir $e value [Expr hir $inner $s [concat $path 1] $block]
+        }
+        fail {
+            if {$head eq "" || ![hir::errordecls::isDeclared $head]} {
+                Fail $number "unknown error \"$head\": no \"error $head\" declaration is visible"
+            }
+            SetField hir $e name $head
+        }
+        handle {
+            if {$head ne ""} {
+                Fail $number "expected \"handle : TYPE\""
+            }
+            SetField hir $e call [Expr hir $inner $s [concat $path 1] $block]
+            set names {}
+            set scopes {}
+            set bodies {}
+            set index 2
+            while {[AtLevel $hir $inner]} {
+                lassign [TakeHandlerLine hir $inner] name branch binds headerNumber
+                NewScope hir $branch branch $s [dict get $hir scopes $s invocation] $e \
+                    [list ir [concat $path $index]] $headerNumber
+                Declare hir $branch $binds local $headerNumber
+                lappend names $name
+                lappend scopes $branch
+                set ids {}
+                set bodyIndex 2
+                while {[AtLevel $hir [expr {$inner + 1}]]} {
+                    lappend ids [Expr hir [expr {$inner + 1}] $branch [concat $path $index $bodyIndex] $block]
+                    incr bodyIndex
+                }
+                lappend bodies $ids
+                incr index
+            }
+            SetField hir $e handlerNames $names
+            SetField hir $e handlerScopes $scopes
+            SetField hir $e handlerBodies $bodies
+            # Not re-derived either (see the `calleeErrors` comment above).
+            SetField hir $e handlerTypes [lrepeat [llength $names] any]
         }
         default {
             Fail $number "unknown expression kind \"$kind\""

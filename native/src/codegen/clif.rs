@@ -375,6 +375,13 @@ struct Translator<'a, 'b, M: Module> {
     stack_maps: bool,
     body: ir::Block,
     error_exit: ir::Block,
+    /// Where `check`/`fail_with` currently branch on a NO_VALUE/failing
+    /// result: this function's own `error_exit` outside any handled call,
+    /// or (innermost last) a `handle`'s own dispatch label while lowering
+    /// its wrapped call -- see Inst::PushErrorExit/PopErrorExit and
+    /// EXPLICIT-ERROR-COMPLETIONS.md. Always non-empty: seeded with
+    /// `error_exit` itself in `new`, never popped below that.
+    error_exit_stack: Vec<ir::Block>,
     refs: HashMap<ModuleFuncId, ir::FuncRef>,
     terminated: bool,
     /// The hidden trailing pointer parameter of a `results > 2` function
@@ -454,6 +461,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             stack_maps,
             body,
             error_exit,
+            error_exit_stack: vec![error_exit],
             refs: HashMap::new(),
             terminated: false,
             plan,
@@ -866,15 +874,23 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
     }
 
     /// Branches to the error exit if V is 0; continues in a new block.
+    /// Where `check`/`fail_with` currently send a failing result: see
+    /// `error_exit_stack`'s own doc.
+    fn current_error_exit(&self) -> ir::Block {
+        *self.error_exit_stack.last().expect("error_exit_stack is never empty")
+    }
+
     fn check(&mut self, v: ir::Value) {
         let ok = self.b.create_block();
-        self.b.ins().brif(v, ok, &[], self.error_exit, &[]);
+        let target = self.current_error_exit();
+        self.b.ins().brif(v, ok, &[], target, &[]);
         self.b.switch_to_block(ok);
     }
 
     fn fail_with(&mut self, name: &str, args: &[ir::Value]) {
         self.call_helper(name, args);
-        self.b.ins().jump(self.error_exit, &[]);
+        let target = self.current_error_exit();
+        self.b.ins().jump(target, &[]);
     }
 
     fn constant(&mut self, c: Const) -> ir::Value {
@@ -1273,6 +1289,35 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                     self.f.name
                 ));
                 self.fail_with("rt_raise", &[self.vm, kind, message]);
+                self.terminated = true;
+            }
+            Inst::Fail { id, name } => {
+                let id_val = self.iconst(*id as u64);
+                let name_val = self.string(name);
+                self.fail_with("rt_fail_declared", &[self.vm, id_val, name_val]);
+                self.terminated = true;
+            }
+            Inst::DeclaredErrorEq { dst, id } => {
+                let raw = self.call_helper("rt_declared_error", &[self.vm]);
+                let flag = self.b.ins().icmp_imm_s(IntCC::Equal, raw, *id as i64);
+                let v = self.bool_of(flag);
+                self.def(*dst, v);
+            }
+            Inst::ClearDeclaredError => {
+                self.call_helper("rt_clear_declared_error", &[self.vm]);
+            }
+            Inst::PushErrorExit(l) => {
+                let target = self.label(*l);
+                self.error_exit_stack.push(target);
+            }
+            Inst::PopErrorExit => {
+                if self.error_exit_stack.len() > 1 {
+                    self.error_exit_stack.pop();
+                }
+            }
+            Inst::Reraise => {
+                let target = self.current_error_exit();
+                self.b.ins().jump(target, &[]);
                 self.terminated = true;
             }
         }

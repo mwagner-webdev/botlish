@@ -319,6 +319,48 @@ pub enum Inst {
     RetMulti(Vec<Reg>),
     Raise { kind: String, message: String },
     Unreachable,
+    /// `fail NAME` (EXPLICIT-ERROR-COMPLETIONS.md): sets the pending
+    /// declared-error id ID (native/lower.tcl's own per-program
+    /// assignment, never 0) and returns NO_VALUE exactly like Raise --
+    /// every ordinary call site's own `may_error` check already propagates
+    /// that with no change of its own. NAME is kept only for the fallback
+    /// RtError message if this ever reaches the program boundary uncaught.
+    Fail { id: u32, name: String },
+    /// True iff the pending declared-error id (runtime/vm.rs's
+    /// `Vm::declared_error`) equals ID: a `handle`'s own per-handler
+    /// dispatch test, evaluated only inside a PushErrorExit/PopErrorExit
+    /// span, right after the wrapped call's own `may_error` check has
+    /// already jumped there with NO_VALUE pending.
+    DeclaredErrorEq { dst: Reg, id: u32 },
+    /// Clears the pending declared-error id and its fallback RtError:
+    /// emitted once a `handle`'s dispatch has matched, immediately before
+    /// lowering that handler's own body.
+    ClearDeclaredError,
+    /// Redirects every `may_error` check's own error-exit target (Call/
+    /// CallEnv/CallMulti/CallEnvMulti's own automatic check, an allocating
+    /// Op, Raise, Unreachable, Fail -- codegen::clif's own `check`/
+    /// `fail_with`) to LABEL instead of this function's ordinary
+    /// error_exit, for every instruction up to the matching
+    /// PopErrorExit: a `handle`'s own wrapped call needs no *lowering*
+    /// change at all (still an ordinary Call/CallEnv/... instruction,
+    /// still may_error=true) -- only where its own NO_VALUE check lands
+    /// changes, to LABEL's own dispatch code instead of propagating
+    /// straight out of the function. Nests (codegen::clif keeps a stack):
+    /// a handled call whose own callee or arguments themselves contain
+    /// another `handle` restores the outer target correctly once the
+    /// inner PopErrorExit runs.
+    PushErrorExit(Label),
+    /// Ends the most recently pushed PushErrorExit's span, restoring
+    /// whatever error-exit target was active before it (this function's
+    /// own error_exit, or an outer PushErrorExit still pending).
+    PopErrorExit,
+    /// Propagates whatever failure (a raw RtError or a declared one) is
+    /// already pending, unchanged, to the current error-exit target: a
+    /// `handle` whose own dispatch matched none of its handlers emits this
+    /// once PopErrorExit has already restored the *outer* target, so the
+    /// failure continues exactly as if this `handle` were not there --
+    /// never constructing a new error the way Raise/Fail do.
+    Reraise,
 }
 
 impl Inst {
@@ -333,6 +375,8 @@ impl Inst {
                 | Inst::RetMulti(_)
                 | Inst::Raise { .. }
                 | Inst::Unreachable
+                | Inst::Fail { .. }
+                | Inst::Reraise
         )
     }
 }
@@ -585,7 +629,7 @@ fn summarize_call_effects(program: &mut Program, enabled: bool) {
         for inst in &f.body {
             match inst {
                 Inst::Guard { .. } | Inst::GuardBool { .. } | Inst::CellCheck { .. }
-                    | Inst::Raise { .. } => local[i].0 = true,
+                    | Inst::Raise { .. } | Inst::Fail { .. } | Inst::Reraise => local[i].0 = true,
                 Inst::Op { op, .. } => {
                     local[i].0 |= op_may_error(*op);
                     local[i].1 |= op_may_allocate(*op);
@@ -805,6 +849,7 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
             "callenvmulti" => {
                 Inst::CallEnvMulti { dsts, func: num(i)?, closure: reg(i + 1)?, args: regs_from(i + 2)?, may_error: true, may_gc: true }
             }
+            "declarederroreq" => Inst::DeclaredErrorEq { dst, id: num(3)? },
             other => return p.err(format!("unknown instruction {other}")),
         });
     }
@@ -829,6 +874,11 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
             message: quoted(2)?,
         },
         "unreachable" => Inst::Unreachable,
+        "faildeclared" => Inst::Fail { id: num(1)?, name: quoted(2)? },
+        "cleardeclarederror" => Inst::ClearDeclaredError,
+        "pusherrorexit" => Inst::PushErrorExit(label(1)?),
+        "poperrorexit" => Inst::PopErrorExit,
+        "reraise" => Inst::Reraise,
         other => return p.err(format!("unknown instruction {other}")),
     })
 }
@@ -871,7 +921,11 @@ fn validate(program: &Program) -> Result<(), NirError> {
             let mut used: Vec<Reg> = Vec::new();
             let mut targets: Vec<Label> = Vec::new();
             match inst {
-                Inst::Label(_) | Inst::Unreachable | Inst::Raise { .. } => {}
+                Inst::Label(_) | Inst::Unreachable | Inst::Raise { .. }
+                | Inst::Fail { .. } | Inst::ClearDeclaredError | Inst::PopErrorExit
+                | Inst::Reraise => {}
+                Inst::DeclaredErrorEq { dst, .. } => used.push(*dst),
+                Inst::PushErrorExit(l) => targets.push(*l),
                 Inst::Int { dst, .. }
                 | Inst::RawInt { dst, .. }
                 | Inst::Str { dst, .. }

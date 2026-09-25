@@ -33,11 +33,24 @@
 #   continue
 #   ok        value
 #   error     value
+#   fail      name (a declared error's name)
+#   handle    call (a `call` node), handlers (a list of {name nameSpan
+#             origin body} dicts, one per "on NAME:" clause, in written
+#             order -- name/nameSpan for diagnostics, origin for the
+#             handler body's own branch scope, body a list of nodes,
+#             exactly like an `if` branch's body)
+#
+# `block`'s own node also takes an optional `declaredErrors` field: a list
+# of {name nameSpan} pairs, one per name of a function's own "errors E1,
+# E2:" clause (surface/parser.tcl), unresolved until hir/resolve.tcl
+# validates each name against the program's own declared errors
+# (hir::errordecls) -- exactly parallel to `declaredResult`/paramTypes'
+# own deferred-resolution treatment (EXPLICIT-ERROR-COMPLETIONS.md).
 #
 # Constructors (constNode, refNode, rootRef, bindNode, blockNode, callNode,
-# ifNode, loopNode, returnNode, breakNode, continueNode, okNode, errorNode)
-# take the origin first and check shapes, raising {CORE MALFORMED} as core
-# IR does.
+# ifNode, loopNode, returnNode, breakNode, continueNode, okNode, errorNode,
+# failNode, handleNode) take the origin first and check shapes, raising
+# {CORE MALFORMED} as core IR does.
 
 namespace eval hir::syntax {}
 
@@ -74,7 +87,7 @@ proc hir::syntax::bindNode {origin name value} {
 # type-name string per param ("" for untyped); defaults to all-"" (every
 # param untyped) when omitted, so every existing caller (fromIR, and any
 # hand-built syntax that predates parameter typing) is unaffected.
-proc hir::syntax::blockNode {origin params body {declaredResult {}} {paramTypes {}}} {
+proc hir::syntax::blockNode {origin params body {declaredResult {}} {paramTypes {}} {declaredErrors {}}} {
     foreach param $params {
         if {[llength $param] != 2 || [lindex $param 0] eq ""} {
             core::malformed "block parameters must be {NAME ORIGIN} pairs" [list block $params]
@@ -85,7 +98,8 @@ proc hir::syntax::blockNode {origin params body {declaredResult {}} {paramTypes 
     } elseif {[llength $paramTypes] != [llength $params]} {
         core::malformed "block paramTypes must have one entry per parameter" [list block $params $paramTypes]
     }
-    return [Node block $origin params $params body $body declaredResult $declaredResult paramTypes $paramTypes]
+    return [Node block $origin params $params body $body declaredResult $declaredResult \
+        paramTypes $paramTypes declaredErrors $declaredErrors]
 }
 
 proc hir::syntax::callNode {origin callee args} {
@@ -124,6 +138,23 @@ proc hir::syntax::okNode {origin value} {
 
 proc hir::syntax::errorNode {origin value} {
     return [Node error $origin value $value]
+}
+
+proc hir::syntax::failNode {origin name} {
+    core::ir::checkShape [list fail $name]
+    return [Node fail $origin name $name]
+}
+
+# HANDLERS: a list of {name nameSpan origin body} dicts, as this file's own
+# header describes. CALL must itself be a `call` node (checked by
+# hir::resolve::Expr, which needs the resolved ExprId to check the kind of
+# -- this constructor only checks the unresolved syntax shape, mirroring
+# core::ir::checkShape's own (call ...) requirement for core IR's `handle`).
+proc hir::syntax::handleNode {origin call handlers} {
+    if {[dict get $call kind] ne "call"} {
+        core::malformed "the handled expression of \"handle\" must be a call" [list handle $call]
+    }
+    return [Node handle $origin call $call handlers $handlers]
 }
 
 # The syntax of the core IR NODE at IR PATH (a list of indices). Checks
@@ -192,6 +223,20 @@ proc hir::syntax::fromIR {node path} {
         continue {
             return [Node continue $origin]
         }
+        fail {
+            return [Node fail $origin name [lindex $node 1]]
+        }
+        handle {
+            set handlers {}
+            set index 2
+            foreach {name handlerBlock} [lrange $node 2 end] {
+                lappend handlers [dict create name $name nameSpan "" \
+                    origin [list ir [concat $path $index]] \
+                    body [Sequence [core::ir::blockBody $handlerBlock] [concat $path $index] 2]]
+                incr index 2
+            }
+            return [Node handle $origin call [fromIR [lindex $node 1] [concat $path 1]] handlers $handlers]
+        }
     }
 }
 
@@ -244,6 +289,9 @@ proc hir::syntax::CollectBindNames {node namesVar} {
             if {[dict get $node value] ne ""} {
                 CollectBindNames [dict get $node value] names
             }
+        }
+        handle {
+            CollectBindNames [dict get $node call] names
         }
     }
 }

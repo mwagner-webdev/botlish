@@ -37,6 +37,15 @@
 #                             operation. Immutable: there is no in-place
 #                             insertion/removal operation.
 #   {result ok|error VALUE}   Result
+#   {errorId NAME}            identity of a declared application error
+#                             completion (EXPLICIT-ERROR-COMPLETIONS.md): the
+#                             payload of a `propagate-error` completion
+#                             (core/completion.tcl), never an ordinary
+#                             Botlish value a program can bind, pass or
+#                             inspect -- it exists only to let `handle`
+#                             (core/ir.tcl) tell declared errors apart by
+#                             identity, never by message text. NAME is the
+#                             error's own declared (program-unique) name.
 #   {block PARAMS BODY ENV CODE}
 #                             Block: parameters, body expressions (IR),
 #                             captured env, and the compiled code for the
@@ -53,7 +62,7 @@
 # file should construct and inspect values only through these procedures.
 
 namespace eval core::value {
-    variable kinds {int str bool unit list result block native mutarray UnicodeChar immutableSet}
+    variable kinds {int str bool unit list result block native mutarray UnicodeChar immutableSet errorId}
 }
 
 proc core::value::isCanonicalInt {text} {
@@ -167,6 +176,19 @@ proc core::value::immutableSet {items} {
 proc core::value::ok {payload} {
     return [list result ok [check $payload]]
 }
+
+# The identity of declared error NAME (a program-unique name -- see
+# hir/errordecls.tcl): the payload `core::completion::propagatingError`
+# carries. NAME must not be empty: it always comes from a validated `error`
+# declaration, never from unchecked input.
+proc core::value::errorId {name} {
+    if {$name eq ""} {
+        error "core::value::errorId: name must not be empty"
+    }
+    return [list errorId $name]
+}
+
+proc core::value::errorIdName {v} { Require errorId $v; return [lindex $v 1] }
 
 proc core::value::err {payload} {
     return [list result error [check $payload]]
@@ -370,6 +392,7 @@ proc core::value::show {v {withEvidence 0}} {
         }
         block  { return "<block ([join [lindex $v 1] { }])>" }
         native { return "<native [lindex $v 1]>" }
+        errorId { return "<error [lindex $v 1]>" }
         mutarray { return "<mutable-array capacity=[core::value::intOf [core::mutarray::capacity $v]]>" }
     }
 }

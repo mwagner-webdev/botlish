@@ -7,11 +7,16 @@
 #
 #   program      = [ namespaceDecl ] { NEWLINE | topStatement } EOF
 #   namespaceDecl = "namespace" IDENT NEWLINE
-#   topStatement = typeDecl | statement
+#   topStatement = typeDecl | errorDecl | statement
 #   statement    = simple NEWLINE | valued | function | if | loop
-#   simple       = binding | return | break | continue | expression
-#   valued       = IDENT "=" (if|loop) | "return" (if|loop) | "break" (if|loop)
-#   function     = "fn" IDENT "(" [ param { "," param } [ "," ] ] ")" [ "->" IDENT ] ":" suite
+#   simple       = binding | return | break | continue | fail | expression
+#   valued       = IDENT "=" (if|loop|handledExpr)
+#                | "return" (if|loop|handledExpr) | "break" (if|loop|handledExpr)
+#   handledExpr  = expression [ handlers ]     -- handlers only after a bare
+#                                                  call expression (item 9)
+#   handlers     = ":" NEWLINE INDENT { "on" IDENT ":" suite } DEDENT
+#   function     = "fn" IDENT "(" [ param { "," param } [ "," ] ] ")"
+#                  [ "->" IDENT ] [ "errors" IDENT { "," IDENT } ] ":" suite
 #   param        = IDENT [ ":" IDENT ]
 #   if           = "if" expression ":" suite [ "else" ":" suite ]
 #   loop         = "loop" [ IDENT "in" expression ] ":" suite
@@ -20,11 +25,25 @@
 #   return       = "return" [ expression ]
 #   break        = "break" [ expression ]
 #   continue     = "continue"
+#   fail         = "fail" IDENT
 #
 #   typeDecl     = "type" IDENT "=" IDENT "in" domain NEWLINE
 #   domain       = signedInt ".." signedInt
 #                | "{" signedInt { "," signedInt } [ "," ] "}"
 #   signedInt    = [ "-" ] INT
+#
+#   errorDecl    = "error" IDENT NEWLINE
+#
+# A handled call (EXPLICIT-ERROR-COMPLETIONS.md) is a bare call expression
+# immediately followed by ":" and an indented block of "on NAME:" handlers,
+# in exactly the same "statement value" position an if/loop value is (the
+# right side of "=", or the value of "return"/"break") -- ValueOrHandled
+# (surface/parser.tcl) parses an ordinary expression first and only then
+# checks for a trailing ":", so no new expression-grammar ambiguity is
+# introduced (a `:` after any other expression shape remains a plain syntax
+# error, exactly as before this feature). An error declaration is a
+# declaration, not a statement with runtime meaning, exactly like typeDecl
+# above -- legal only at a program's or module's own top level.
 #
 # A typeDecl is a declaration, not a statement with runtime meaning (see
 # surface/ast.tcl's `typedecl` node and hir/sourcetypes.tcl): it is only
@@ -299,15 +318,26 @@ proc surface::parser::Statement {pVar} {
             }
             return [TypeDecl p]
         }
+        error {
+            if {![dict get $p topLevel]} {
+                Fail $token "an error declaration is only allowed at the top level of a module, not nested in a function/if/loop"
+            }
+            return [ErrorDecl p]
+        }
         INDENT { Fail $token "unexpected indentation" }
         else   { Fail $token "\"else\" without a matching \"if\"" }
         namespace { Fail $token "a \"namespace\" declaration must be the first statement in the file" }
     }
     set statement [Simple p]
+    if {[dict get $statement kind] eq "handledcall"} {
+        # The handler suite(s) already ended the line.
+        return $statement
+    }
     if {[dict get $statement kind] in {bind return break}
             && [dict get $statement value] ne ""
-            && [dict get $statement value kind] in {if loop}} {
-        # The if's (or loop's) suite(s) already ended the line.
+            && [dict get $statement value kind] in {if loop handledcall}} {
+        # The if's (or loop's, or the handler suite's) suite(s) already
+        # ended the line.
         return $statement
     }
     set next [Peek p]
@@ -330,7 +360,7 @@ proc surface::parser::Simple {pVar} {
             if {[Kind p 1] eq "="} {
                 Advance p
                 Advance p
-                set value [Value p]
+                set value [ValueOrHandled p]
                 return [surface::ast::node bind [SpanFrom p $start] \
                     name [dict get $token value] nameSpan $start value $value]
             }
@@ -339,7 +369,7 @@ proc surface::parser::Simple {pVar} {
             Advance p
             set value ""
             if {[Kind p] ni {NEWLINE DEDENT EOF}} {
-                set value [Value p]
+                set value [ValueOrHandled p]
             }
             return [surface::ast::node [dict get $token kind] [SpanFrom p $start] value $value]
         }
@@ -347,8 +377,69 @@ proc surface::parser::Simple {pVar} {
             Advance p
             return [surface::ast::node continue $start]
         }
+        fail {
+            Advance p
+            set name [Expect p IDENT "an error name after \"fail\""]
+            return [surface::ast::node fail [SpanFrom p $start] \
+                name [dict get $name value] nameSpan [dict get $name span]]
+        }
     }
-    return [Expression p]
+    return [ValueOrHandled p]
+}
+
+# A statement's value: an if, a loop, a handled call, or a plain expression
+# (EXPLICIT-ERROR-COMPLETIONS.md item 34: a bare handled-call expression-
+# statement falls out of this same shared path with no extra grammar).
+proc surface::parser::ValueOrHandled {pVar} {
+    upvar 1 $pVar p
+    if {[Kind p] in {if loop}} {
+        return [Value p]
+    }
+    set expr [Expression p]
+    if {[Kind p] eq ":" && [dict get $expr kind] eq "call"} {
+        return [HandledCall p $expr]
+    }
+    return $expr
+}
+
+# The handler suite(s) of CALL: ":" NEWLINE INDENT { "on" IDENT ":" suite }
+# DEDENT (EXPLICIT-ERROR-COMPLETIONS.md items 9/13). Handlers are restricted
+# to a direct call expression (CALL), per item 9's first-implementation
+# scope.
+proc surface::parser::HandledCall {pVar call} {
+    upvar 1 $pVar p
+    set start [dict get $call span]
+    Advance p
+    set token [Peek p]
+    if {[dict get $token kind] ne "NEWLINE"} {
+        Fail $token "expected a new line and an indented block of \"on\" handlers after \":\", found [Describe $token]"
+    }
+    Advance p
+    set indentToken [Peek p]
+    if {[dict get $indentToken kind] ne "INDENT"} {
+        Fail $indentToken "expected an indented block of \"on\" handlers, found [Describe $indentToken]"
+    }
+    Advance p
+    set handlers {}
+    while {[Kind p] ne "DEDENT"} {
+        if {[Kind p] eq "NEWLINE"} {
+            Advance p
+            continue
+        }
+        set onToken [Peek p]
+        if {[dict get $onToken kind] ne "on"} {
+            Fail $onToken "expected \"on\" (a handler for a declared error), found [Describe $onToken]"
+        }
+        Advance p
+        set name [Expect p IDENT "an error name after \"on\""]
+        set body [Suite p "the error name"]
+        lappend handlers [dict create name [dict get $name value] nameSpan [dict get $name span] body $body]
+    }
+    Advance p
+    if {$handlers eq {}} {
+        Fail [Peek p] "a handled call needs at least one \"on\" handler"
+    }
+    return [surface::ast::node handledcall [SpanFrom p $start] call $call handlers $handlers]
 }
 
 # A statement's value: an if, a loop, or an expression.
@@ -419,7 +510,26 @@ proc surface::parser::Function {pVar} {
     return [surface::ast::node function [SpanFrom p $start] \
         name [dict get $name value] nameSpan [dict get $name span] \
         params $params paramsSpan [SpanFrom p [dict get $open span]] \
-        resultType [dict get $body resultType] resultTypeSpan [dict get $body resultTypeSpan] body $body]
+        resultType [dict get $body resultType] resultTypeSpan [dict get $body resultTypeSpan] \
+        errors [dict get $body errors] body $body]
+}
+
+# "error" IDENT NEWLINE -- a top-level named-error declaration (see this
+# file's own header, and hir/errordecls.tcl for what it means). Only legal
+# directly at a program's or module's own top level, exactly like a
+# typeDecl (Statement rejects it elsewhere, using the same `topLevel` flag).
+proc surface::parser::ErrorDecl {pVar} {
+    upvar 1 $pVar p
+    set start [dict get [Advance p] span]
+    set name [Expect p IDENT "an error name after \"error\""]
+    set node [surface::ast::node errordecl [SpanFrom p $start] \
+        name [dict get $name value] nameSpan [dict get $name span]]
+    set next [Peek p]
+    if {[dict get $next kind] ne "NEWLINE"} {
+        Fail $next "expected end of line, found [Describe $next]"
+    }
+    Advance p
+    return $node
 }
 
 # "type" IDENT "=" IDENT "in" domain NEWLINE -- a top-level type declaration
@@ -563,6 +673,23 @@ proc surface::parser::Suite {pVar after} {
         set resultType [TypeExpr p {a result type after ->}]
         set resultTypeSpan [SpanFrom p $typeStart]
     }
+    # A function's own "errors E1, E2" declaration (EXPLICIT-ERROR-
+    # COMPLETIONS.md items 3/109): the single-line canonical spelling,
+    # gated by the identical ALLOWRESULT flag as "->" just above -- it is
+    # legal in exactly the same one position, right after an optional
+    # result type and before the final ":".
+    set errors {}
+    if {$allowResult && [Kind p] eq {errors}} {
+        Advance p
+        while 1 {
+            set nameToken [Expect p IDENT "an error name after \"errors\""]
+            lappend errors [list [dict get $nameToken value] [dict get $nameToken span]]
+            if {[Kind p] ne ","} {
+                break
+            }
+            Advance p
+        }
+    }
     Expect p : "\":\" after $after"
     set token [Peek p]
     if {[dict get $token kind] ne "NEWLINE"} {
@@ -584,9 +711,11 @@ proc surface::parser::Suite {pVar after} {
     }
     if {$body eq ""} {
         # Every statement of the block was skipped by recovery.
-        return [surface::ast::node suite $start body {} resultType $resultType resultTypeSpan $resultTypeSpan]
+        return [surface::ast::node suite $start body {} resultType $resultType resultTypeSpan $resultTypeSpan \
+            errors $errors]
     }
-    return [surface::ast::node suite [SpanFrom p $start] body $body resultType $resultType resultTypeSpan $resultTypeSpan]
+    return [surface::ast::node suite [SpanFrom p $start] body $body resultType $resultType \
+        resultTypeSpan $resultTypeSpan errors $errors]
 }
 
 # ---------------------------------------------------------------------------

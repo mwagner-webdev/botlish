@@ -809,6 +809,17 @@ proc hir::range::Expr {hirVar ctxVar e} {
         continue {
             return never
         }
+        fail {
+            # A propagate-error completion, exactly like return/break: never
+            # completes normally, so JoinBindings correctly treats this
+            # branch as dead and keeps only the surviving branch's own
+            # narrowing facts (EXPLICIT-ERROR-COMPLETIONS.md's own
+            # byte::from_int is exactly this shape: "if value < 0: fail ...
+            # else: ... value" must narrow `value` to Byte's domain in the
+            # surviving path the same way an ordinary early-return guard
+            # already does).
+            return never
+        }
         ok - error {
             set value [Expr hir ctx [dict get $node value]]
             return [expr {$value eq "never" ? "never" : [unknown]}]
@@ -1406,6 +1417,22 @@ proc hir::range::PointEqualityNarrow {self other outcome} {
 #           self tail calls, ordinary same-instance recursion, and calls of
 #           other instances alike); hir::range::analyze separates self from
 #           cross-instance when it folds these into entry facts
+# The Range of BODY's own trailing value (a plain list of ExprIds -- a
+# handler body, EXPLICIT-ERROR-COMPLETIONS.md's own "on NAME: ..." clause):
+# analyzed locally and non-interprocedurally, exactly like
+# verifyDeclaredResults's own per-function AnalyzeInstance call below (same
+# "verify"/no-instance-calls/no-monotone/no-callee-results arguments).
+# Every outer binding BODY references (its enclosing function's parameters,
+# an earlier local) is simply unseeded, so a `ref` of one is `unknown`
+# (Expr's own fallback, line ~740 above) -- sound, if less precise than a
+# full interprocedural analysis would be, exactly the same tradeoff
+# verifyDeclaredResults already accepts for an ordinary function body.
+proc hir::range::analyzeSequence {hir body} {
+    set ctx [dict create bindings [dict create] returnRange never breakRanges {} \
+        exprs [dict create] calls {} id verify instanceCalls {} monotone {} calleeResults {}]
+    return [Sequence hir ctx $body]
+}
+
 proc hir::range::AnalyzeInstance {hir id instanceCalls block params assumed monotone calleeResults} {
     set ctx [dict create bindings [dict create] returnRange never breakRanges {} exprs [dict create] \
         calls {} id $id instanceCalls $instanceCalls monotone $monotone calleeResults $calleeResults]

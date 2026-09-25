@@ -53,7 +53,9 @@ proc withByte {expr} {
 # proof obligation. A plain Int -- even a literal that happens to be in
 # range, even one that came from char::codepoint -- is rejected statically,
 # never scanned at runtime; a UnicodeChar or str literal is rejected the
-# same way. Only an explicit Byte(...) satisfies the contract.
+# same way. Only a provably in-range literal or an explicitly established
+# Byte (byte::from_int, EXPLICIT-ERROR-COMPLETIONS.md) satisfies the
+# contract.
 
 test ascii-rejects-out-of-range-int {ascii::is_digit(999) is a static type error (Byte proof missing), not a runtime range check} -body {
     set path [makeFile [withByte {ascii::is_digit(999)}] ascii-reject-oor.bot]
@@ -120,8 +122,8 @@ test ascii-rejects-string {ascii::is_digit("7") (str) is a static type error} -b
     }
 } -result {CORE SEMANTIC TYPE}
 
-test ascii-accepts-byte {ascii::is_digit(Byte(55)) -- an explicitly established Byte -- has no static diagnostic} -body {
-    set path [makeFile [withByte {ascii::is_digit(Byte(55))}] ascii-accept-byte.bot]
+test ascii-accepts-byte {ascii::is_digit(b) where b came from byte::from_int(...): on ... -- an explicitly established Byte, via the checked fallible conversion -- has no static diagnostic} -body {
+    set path [makeFile [withByte "b = byte::from_int(55):\n    on BelowRange:\n        0\n    on AboveRange:\n        0\nascii::is_digit(b)"] ascii-accept-byte.bot]
     try {
         llength [hir::diagnostics [surface::readProgramFile $path -strict 0]]
     } finally {
@@ -131,7 +133,7 @@ test ascii-accepts-byte {ascii::is_digit(Byte(55)) -- an explicitly established 
 
 foreach name {is_digit is_upper is_lower is_alphabetic is_alphanumeric} {
     test ascii-result-type-$name "ascii::${name}(...) has static result type bool" -body {
-        set path [makeFile [withByte "ascii::${name}(Byte(65))"] ascii-restype-$name.bot]
+        set path [makeFile [withByte "ascii::${name}(65)"] ascii-restype-$name.bot]
         try {
             set hir [surface::readProgramFile $path -strict 0]
             set e [lindex [dict get $hir roots] end]
@@ -164,7 +166,7 @@ foreach {label n} {
     set refAn [expr {$refA || $refD}]
     set expected "same {\[[boolWord $refD], [boolWord $refU], [boolWord $refL], [boolWord $refA], [boolWord $refAn]\]}"
     test ascii-boundary-$label "ascii predicates at boundary byte $n ('$label')" -body {
-        set path [makeFile [withByte "\[ascii::is_digit(Byte($n)), ascii::is_upper(Byte($n)), ascii::is_lower(Byte($n)), ascii::is_alphabetic(Byte($n)), ascii::is_alphanumeric(Byte($n))\]"] ascii-boundary-$label.bot]
+        set path [makeFile [withByte "\[ascii::is_digit($n), ascii::is_upper($n), ascii::is_lower($n), ascii::is_alphabetic($n), ascii::is_alphanumeric($n)\]"] ascii-boundary-$label.bot]
         try {
             list [moduleParity $path] [moduleValue $path]
         } finally {
@@ -178,10 +180,10 @@ foreach {label n} {
 
 test ascii-acceptance-table {the item-78 acceptance table, evaluated directly} -body {
     set path [makeFile [withByte {[
-    ascii::is_digit(Byte(48)), ascii::is_digit(Byte(57)), ascii::is_digit(Byte(47)), ascii::is_digit(Byte(58)),
-    ascii::is_upper(Byte(65)), ascii::is_upper(Byte(90)), ascii::is_upper(Byte(64)), ascii::is_upper(Byte(91)),
-    ascii::is_lower(Byte(97)), ascii::is_lower(Byte(122)), ascii::is_lower(Byte(96)), ascii::is_lower(Byte(123)),
-    ascii::is_alphabetic(Byte(55)), ascii::is_alphanumeric(Byte(55))
+    ascii::is_digit(48), ascii::is_digit(57), ascii::is_digit(47), ascii::is_digit(58),
+    ascii::is_upper(65), ascii::is_upper(90), ascii::is_upper(64), ascii::is_upper(91),
+    ascii::is_lower(97), ascii::is_lower(122), ascii::is_lower(96), ascii::is_lower(123),
+    ascii::is_alphabetic(55), ascii::is_alphanumeric(55)
 ]}] ascii-acceptance.bot]
     try {
         list [moduleParity $path] [moduleValue $path]
@@ -196,7 +198,7 @@ test ascii-acceptance-table {the item-78 acceptance table, evaluated directly} -
 
 test ascii-high-bit-bytes-all-false {every predicate is false for every byte in 128..255} -body {
     set nums [lseq 128 255]
-    set src [withByte "ns = \[[join $nums {, }]\]\nloop n in ns:\n    b = Byte(n)\n    \[ascii::is_digit(b), ascii::is_upper(b), ascii::is_lower(b), ascii::is_alphabetic(b), ascii::is_alphanumeric(b)\]"]
+    set src [withByte "ns = \[[join $nums {, }]\]\nloop n in ns:\n    b = byte::from_int(n):\n        on BelowRange:\n            0\n        on AboveRange:\n            0\n    \[ascii::is_digit(b), ascii::is_upper(b), ascii::is_lower(b), ascii::is_alphabetic(b), ascii::is_alphanumeric(b)\]"]
     set path [makeFile $src ascii-highbit.bot]
     try {
         set hir [surface::readProgramFile $path -strict 0]
@@ -214,7 +216,7 @@ test ascii-high-bit-bytes-all-false {every predicate is false for every byte in 
 
 test ascii-exhaustive-truth-table {every predicate matches an obviously-correct reference over 0..255; cardinalities 10/26/26/52/62; composition and disjointness identities hold everywhere} -body {
     set nums [lseq 0 255]
-    set src [withByte "ns = \[[join $nums {, }]\]\nloop n in ns:\n    b = Byte(n)\n    \[ascii::is_digit(b), ascii::is_upper(b), ascii::is_lower(b), ascii::is_alphabetic(b), ascii::is_alphanumeric(b)\]"]
+    set src [withByte "ns = \[[join $nums {, }]\]\nloop n in ns:\n    b = byte::from_int(n):\n        on BelowRange:\n            0\n        on AboveRange:\n            0\n    \[ascii::is_digit(b), ascii::is_upper(b), ascii::is_lower(b), ascii::is_alphabetic(b), ascii::is_alphanumeric(b)\]"]
     set path [makeFile $src ascii-exhaustive.bot]
     try {
         set hir [surface::readProgramFile $path -strict 0]
@@ -260,7 +262,7 @@ test ascii-exhaustive-truth-table {every predicate matches an obviously-correct 
 
 test ascii-backend-parity-256 {ascii predicates agree across interp/compile/cranelift-generic/cranelift over the entire 0..255 domain} -body {
     set nums [lseq 0 255]
-    set src [withByte "ns = \[[join $nums {, }]\]\nloop n in ns:\n    b = Byte(n)\n    \[ascii::is_digit(b), ascii::is_upper(b), ascii::is_lower(b), ascii::is_alphabetic(b), ascii::is_alphanumeric(b)\]"]
+    set src [withByte "ns = \[[join $nums {, }]\]\nloop n in ns:\n    b = byte::from_int(n):\n        on BelowRange:\n            0\n        on AboveRange:\n            0\n    \[ascii::is_digit(b), ascii::is_upper(b), ascii::is_lower(b), ascii::is_alphabetic(b), ascii::is_alphanumeric(b)\]"]
     set path [makeFile $src ascii-parity256.bot]
     try {
         moduleParity $path
@@ -272,8 +274,8 @@ test ascii-backend-parity-256 {ascii predicates agree across interp/compile/cran
 # ---------------------------------------------------------------------------
 # Allocation (spec item 58): an ascii:: predicate call allocates nothing.
 
-test ascii-predicate-call-allocates-nothing {ascii::is_alphanumeric(Byte(...)) allocates zero objects} -body {
-    set path [makeFile [withByte {ascii::is_alphanumeric(Byte(55))}] ascii-zeroalloc.bot]
+test ascii-predicate-call-allocates-nothing {ascii::is_alphanumeric(...) allocates zero objects} -body {
+    set path [makeFile [withByte {ascii::is_alphanumeric(55)}] ascii-zeroalloc.bot]
     try {
         set hir [surface::readProgramFile $path -strict 0]
         native::lower::program $hir -repr-opt 0
@@ -291,7 +293,7 @@ test ascii-predicate-call-allocates-nothing {ascii::is_alphanumeric(Byte(...)) a
 # check.
 
 test ascii-alphabetic-calls-siblings {ascii::is_alphabetic's body is exactly two sibling calls, not duplicated range comparisons} -body {
-    set path [makeFile [withByte {ascii::is_alphabetic(Byte(65))}] ascii-siblings.bot]
+    set path [makeFile [withByte {ascii::is_alphabetic(65)}] ascii-siblings.bot]
     try {
         set hir [surface::readProgramFile $path -strict 0]
         set calls [hirFind $hir call]

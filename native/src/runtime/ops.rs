@@ -142,6 +142,50 @@ pub extern "C" fn rt_stack_overflow(p: *mut Vm) -> Value {
 }
 
 // ---------------------------------------------------------------------------
+// Declared error completions (EXPLICIT-ERROR-COMPLETIONS.md)
+//
+// `fail NAME` (native/lower.tcl's Inst::Fail) sets the pending declared-
+// error id ID (a small compile-time constant native/lower.tcl assigns each
+// declared error name, never 0) and a fallback RtError in case this
+// propagates all the way to the program boundary uncaught, then returns
+// NO_VALUE exactly like `raise` -- every ordinary call site's existing
+// `may_error` check (codegen::clif) already propagates that NO_VALUE with
+// no change of its own. A `handle` (codegen::clif's PushErrorExit/
+// PopErrorExit) that catches the matching id calls rt_clear_declared_error
+// to resume normally.
+
+pub extern "C" fn rt_fail_declared(p: *mut Vm, id: u64, name: Value) -> Value {
+    let name_text = str_of(name).text.to_string();
+    let vm = vm(p);
+    vm.declared_error = id as u32;
+    vm.fail(RtError::Semantic { kind: "UNCAUGHT-ERROR", message: format!("uncaught propagated error: <error {name_text}>") })
+}
+
+/// The pending declared-error id (0 = none), for a `handle`'s own dispatch
+/// (codegen::clif's DeclaredErrorEq): a plain small integer widened to a
+/// full 64-bit word (every runtime helper's Cranelift signature declares
+/// one I64 return -- see `helpers()` -- so this must never leave the upper
+/// bits undefined the way a bare `-> u32` extern "C" fn could), never a GC
+/// root and never an ordinary Botlish `Value`.
+pub extern "C" fn rt_declared_error(p: *mut Vm) -> u64 {
+    vm(p).declared_error as u64
+}
+
+/// Resumes normal execution after a `handle` has matched and is about to
+/// run its handler body: clears both the declared-error id and the
+/// fallback RtError it arrived with (item 53: no hidden handler, but also
+/// no stale pending error surviving a successful catch). Returns an
+/// unused word (every helper's declared signature returns one I64; the
+/// generated caller simply discards it -- see codegen::clif's
+/// ClearDeclaredError).
+pub extern "C" fn rt_clear_declared_error(p: *mut Vm) -> u64 {
+    let vm = vm(p);
+    vm.declared_error = 0;
+    vm.error = None;
+    0
+}
+
+// ---------------------------------------------------------------------------
 // Ints
 
 fn int_binary(p: *mut Vm, a: Value, b: Value, small: fn(i64, i64) -> Option<i64>, big: fn(BigInt, BigInt) -> BigInt) -> Value {
@@ -1175,6 +1219,9 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_unbound, 2),
         h!(rt_raise, 3),
         h!(rt_stack_overflow, 1),
+        h!(rt_fail_declared, 3),
+        h!(rt_declared_error, 1),
+        h!(rt_clear_declared_error, 1),
         h!(rt_int_add, 3),
         h!(rt_int_sub, 3),
         h!(rt_int_mul, 3),

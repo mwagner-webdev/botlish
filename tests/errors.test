@@ -1,0 +1,615 @@
+# errors.test -- explicit error completions: `error NAME` declarations,
+# `fn f(...) -> T errors E1, E2:` signatures, `fail NAME` productions, and
+# call-site `result = f(x): on E1: ... on E2: ...` handling. See
+# EXPLICIT-ERROR-COMPLETIONS.md.
+#
+# An error is a completion (core/completion.tcl's `propagate-error`),
+# exactly like return/break/continue -- never a Result[T,E]-wrapped value.
+# The static legality rule (hir/errorsets.tcl), checked before any backend
+# runs: calleeErrors(call) - handledErrors(call) must be a subset of the
+# enclosing function's own declared errors (empty at the top level).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 100000
+
+set parityBackends {interp compile cranelift-generic cranelift}
+
+proc sourceHir {text} {
+    return [surface::compile $text t.bot -strict 0]
+}
+
+proc sourceIR {text} {
+    return [hir::lower [sourceHir $text]]
+}
+
+proc diagKinds {hir} {
+    return [lsort [lmap d [hir::diagnostics $hir] {dict get $d kind}]]
+}
+
+proc parity {text} {
+    set exprs [sourceIR $text]
+    set outcomes [lmap backend $::parityBackends {outcomeUnder $backend $exprs}]
+    if {[llength [lsort -unique $outcomes]] == 1} { return same }
+    return [join [lmap backend $::parityBackends outcome $outcomes {list $backend $outcome}] " / "]
+}
+
+proc value {text} {
+    lindex [outcomeUnder interp [sourceIR $text]] 1
+}
+
+# "same"/interp-value helpers matching byte-set.test's own moduleParity, for
+# the cross-module and byte::from_int tests below (which go through real
+# .bot files on disk, not inline source text).
+proc moduleParity {path} {
+    set hir [surface::readProgramFile $path -strict 0]
+    set exprs [hir::lower $hir]
+    set outcomes [lmap backend $::parityBackends {outcomeUnder $backend $exprs}]
+    if {[llength [lsort -unique $outcomes]] == 1} {
+        return same
+    }
+    return [join [lmap backend $::parityBackends outcome $outcomes {list $backend $outcome}] " / "]
+}
+proc moduleValue {path} {
+    set hir [surface::readProgramFile $path -strict 0]
+    lindex [outcomeUnder interp [hir::lower $hir]] 1
+}
+
+# ---------------------------------------------------------------------------
+# Parsing (spec items 1-4): `error NAME`, `fn ... -> T errors E1, E2:`,
+# `fail NAME`, and the handled-call `EXPR: on NAME: SUITE ...` all parse
+# with no diagnostics.
+
+test errors-parse-decl-and-fn {error decl + errors clause + fail + handled call all parse cleanly} -body {
+    hir::diagnostics [sourceHir {error TooSmall
+error TooBig
+fn check(n) -> int errors TooSmall, TooBig:
+    if n < 0:
+        fail TooSmall
+    else:
+        if n > 10:
+            fail TooBig
+        else:
+            n
+r = check(5):
+    on TooSmall:
+        0
+    on TooBig:
+        10
+r}]
+} -result {}
+
+test errors-parse-multiple-errors-clause {a 3-name errors clause parses} -body {
+    hir::diagnostics [sourceHir {error A
+error B
+error C
+fn f(n) -> int errors A, B, C:
+    fail A
+0}]
+} -result {}
+
+# ---------------------------------------------------------------------------
+# Propagation (spec items 6-7): an intermediate function that itself
+# declares the same error may call a fallible function without handling it
+# -- the error simply propagates.
+
+test errors-propagation-through-declaring-caller {an intermediate function declaring the same errors need not handle them itself} -body {
+    value {error TooSmall
+error TooBig
+fn check(n) -> int errors TooSmall, TooBig:
+    if n < 0:
+        fail TooSmall
+    else:
+        if n > 10:
+            fail TooBig
+        else:
+            n
+fn middle(n) -> int errors TooSmall, TooBig:
+    check(n)
+r = middle(20):
+    on TooSmall:
+        -1
+    on TooBig:
+        -2
+r}
+} -result -2
+
+test errors-propagation-parity {propagation through a declaring intermediate agrees on every backend} -body {
+    parity {error TooSmall
+error TooBig
+fn check(n) -> int errors TooSmall, TooBig:
+    if n < 0:
+        fail TooSmall
+    else:
+        if n > 10:
+            fail TooBig
+        else:
+            n
+fn middle(n) -> int errors TooSmall, TooBig:
+    check(n)
+r = middle(20):
+    on TooSmall:
+        -1
+    on TooBig:
+        -2
+r}
+} -result same
+
+# ---------------------------------------------------------------------------
+# Undeclared-propagation rejection (spec items 8-9, the core static rule):
+# calleeErrors(call) - handledErrors(call) not a subset of the enclosing
+# function's own declared errors is a compile-time UNHANDLED-ERROR, never a
+# runtime completion.
+
+test errors-rejects-unhandled-in-declaring-function {a function that omits one declared error from its own "errors" clause cannot let a call raise it} -body {
+    diagKinds [sourceHir {error TooSmall
+error TooBig
+fn check(n) -> int errors TooSmall, TooBig:
+    if n < 0:
+        fail TooSmall
+    else:
+        if n > 10:
+            fail TooBig
+        else:
+            n
+fn middle(n) -> int errors TooSmall:
+    check(n)
+0}]
+} -result {UNHANDLED-ERROR}
+
+test errors-rejects-unhandled-at-top-level {top level declares no errors: an unhandled fallible call is a static UNHANDLED-ERROR, not a runtime completion} -body {
+    diagKinds [sourceHir {error TooSmall
+error TooBig
+fn check(n) -> int errors TooSmall, TooBig:
+    if n < 0:
+        fail TooSmall
+    else:
+        if n > 10:
+            fail TooBig
+        else:
+            n
+check(5)}]
+} -result {UNHANDLED-ERROR UNHANDLED-ERROR}
+
+test errors-rejects-fail-of-undeclared-name {"fail" of a name with no "error" declaration is a static UNDECLARED-ERROR -- once for the signature's own "errors Whatever" reference, once for the "fail Whatever" production} -body {
+    diagKinds [sourceHir {fn f() -> int errors Whatever:
+    fail Whatever
+0}]
+} -result {UNDECLARED-ERROR UNDECLARED-ERROR}
+
+test errors-rejects-fail-not-in-own-errors-clause {"fail" of a properly declared error the enclosing function does not itself declare is a static UNHANDLED-ERROR} -body {
+    diagKinds [sourceHir {error E
+fn f() -> int:
+    fail E
+0}]
+} -result {UNHANDLED-ERROR}
+
+# ---------------------------------------------------------------------------
+# Handler semantics (spec items 11-12, 59): fallback value, early return,
+# and rejection of a handler whose completion type does not admit into the
+# call's own normal result type.
+
+test errors-handler-fallback {an "on" handler supplies an ordinary fallback value} -body {
+    value {error E
+fn f(n) -> int errors E:
+    if n < 0:
+        fail E
+    else:
+        n
+r = f(-5):
+    on E:
+        999
+r}
+} -result 999
+
+test errors-handler-not-taken-on-success {the handler branch does not run when the call succeeds normally} -body {
+    value {error E
+fn f(n) -> int errors E:
+    if n < 0:
+        fail E
+    else:
+        n
+r = f(7):
+    on E:
+        999
+r}
+} -result 7
+
+test errors-handler-early-return {a handler body may "return" -- it is lexically part of the enclosing function, not a new one} -body {
+    value {error E
+fn f(n) -> int errors E:
+    if n < 0:
+        fail E
+    else:
+        n
+fn caller(n):
+    r = f(n):
+        on E:
+            return -1
+    r + 100
+caller(-3)}
+} -result -1
+
+test errors-handler-early-return-not-taken {the same handler's early return does not fire when the call succeeds} -body {
+    value {error E
+fn f(n) -> int errors E:
+    if n < 0:
+        fail E
+    else:
+        n
+fn caller(n):
+    r = f(n):
+        on E:
+            return -1
+    r + 100
+caller(3)}
+} -result 103
+
+test errors-rejects-wrong-handler-type {a handler whose completion type is not admissible as the call's own declared result type is a static TYPE diagnostic} -body {
+    diagKinds [sourceHir {error E
+fn f(n) -> int errors E:
+    if n < 0:
+        fail E
+    else:
+        n
+r = f(-5):
+    on E:
+        "not an int"
+0}]
+} -result {TYPE}
+
+# ---------------------------------------------------------------------------
+# Duplicate handling (spec item 10): two "on" clauses for the same name in
+# one handled call is a static DUPLICATE diagnostic.
+
+test errors-rejects-duplicate-handler {two "on E" clauses on the same handled call is a static DUPLICATE diagnostic} -body {
+    diagKinds [sourceHir {error E
+fn f(n) -> int errors E:
+    if n < 0:
+        fail E
+    else:
+        n
+r = f(-5):
+    on E:
+        1
+    on E:
+        2
+r}]
+} -result {DUPLICATE}
+
+test errors-rejects-duplicate-in-errors-clause {"errors E, E" on one function signature is a static DUPLICATE diagnostic} -body {
+    diagKinds [sourceHir {error E
+fn f() -> int errors E, E:
+    fail E}]
+} -result {DUPLICATE}
+
+# ---------------------------------------------------------------------------
+# Partial handling (spec items 13-14): a handled call may name only some of
+# the callee's declared errors, so long as the rest are admitted by the
+# enclosing function's own "errors" declaration.
+
+test errors-partial-handling {handling only one of two declared errors is legal when the enclosing function re-declares the other} -body {
+    value {error TooSmall
+error TooBig
+fn check(n) -> int errors TooSmall, TooBig:
+    if n < 0:
+        fail TooSmall
+    else:
+        if n > 10:
+            fail TooBig
+        else:
+            n
+fn middle(n) -> int errors TooBig:
+    r = check(n):
+        on TooSmall:
+            0
+    r
+r = middle(-5):
+    on TooBig:
+        -1
+r}
+} -result 0
+
+test errors-partial-handling-propagates-other {the un-handled error still propagates through the re-declaring caller} -body {
+    value {error TooSmall
+error TooBig
+fn check(n) -> int errors TooSmall, TooBig:
+    if n < 0:
+        fail TooSmall
+    else:
+        if n > 10:
+            fail TooBig
+        else:
+            n
+fn middle(n) -> int errors TooBig:
+    r = check(n):
+        on TooSmall:
+            0
+    r
+r = middle(20):
+    on TooBig:
+        -1
+r}
+} -result -1
+
+test errors-partial-handling-without-redeclaration-rejected {handling only one of two declared errors without re-declaring the other is still a static UNHANDLED-ERROR} -body {
+    diagKinds [sourceHir {error TooSmall
+error TooBig
+fn check(n) -> int errors TooSmall, TooBig:
+    if n < 0:
+        fail TooSmall
+    else:
+        if n > 10:
+            fail TooBig
+        else:
+            n
+fn middle(n) -> int:
+    r = check(n):
+        on TooSmall:
+            0
+    r
+0}]
+} -result {UNHANDLED-ERROR}
+
+# ---------------------------------------------------------------------------
+# Top-level closure (spec item 15): the top level itself declares no
+# errors, so a fallible call reaching it must be fully handled right there.
+
+test errors-top-level-handled-directly {a fallible call handled directly at top level, which itself declares no errors, is legal and runs} -body {
+    value {error E
+fn f(n) -> int errors E:
+    if n < 0:
+        fail E
+    else:
+        n
+r = f(-1):
+    on E:
+        42
+r}
+} -result 42
+
+# ---------------------------------------------------------------------------
+# Cross-module signatures (spec item 16): a library module's own error
+# declarations and errors-bearing function signature are visible, and
+# enforced the same way, from a separate main program that references it
+# by namespace.
+
+test errors-cross-module-signature {a library's own error decl + errors-bearing function is enforced identically from a separate calling file} -body {
+    set libPath [file join $::core::libraryDir errorscrossmodulelib.bot]
+    set ch [open $libPath w]
+    fconfigure $ch -encoding utf-8
+    puts -nonewline $ch {namespace errorscrossmodulelib
+error OutOfRange
+
+fn clamp(n) -> int errors OutOfRange:
+    if n < 0:
+        fail OutOfRange
+    else:
+        if n > 100:
+            fail OutOfRange
+        else:
+            n
+}
+    close $ch
+    set mainPath [makeFile {r = errorscrossmodulelib::clamp(500):
+    on OutOfRange:
+        -1
+r} errors-cross-module-main.bot]
+    try {
+        list [moduleParity $mainPath] [moduleValue $mainPath]
+    } finally {
+        removeFile errors-cross-module-main.bot
+        file delete $libPath
+    }
+} -result {same -1}
+
+test errors-cross-module-unhandled-rejected {an unhandled cross-module fallible call is a static UNHANDLED-ERROR at the calling file too} -body {
+    set libPath [file join $::core::libraryDir errorscrossmodulelib2.bot]
+    set ch [open $libPath w]
+    fconfigure $ch -encoding utf-8
+    puts -nonewline $ch {namespace errorscrossmodulelib2
+error OutOfRange
+
+fn clamp(n) -> int errors OutOfRange:
+    if n < 0:
+        fail OutOfRange
+    else:
+        n
+}
+    close $ch
+    set mainPath [makeFile {errorscrossmodulelib2::clamp(-5)} errors-cross-module-main2.bot]
+    try {
+        diagKinds [surface::readProgramFile $mainPath -strict 0]
+    } finally {
+        removeFile errors-cross-module-main2.bot
+        file delete $libPath
+    }
+} -result {UNHANDLED-ERROR}
+
+# ---------------------------------------------------------------------------
+# HIR round trip (spec item 17): hir::format's own text notation for error
+# decls, "errors" suffixes, "fail", and "handle"/"on" round-trips through
+# hir::parse unchanged.
+
+test errors-hir-format-roundtrip {error decl + errors clause + fail + handle all round-trip through hir::format/hir::parse unchanged} -body {
+    set h [sourceHir {error TooSmall
+error TooBig
+fn check(n) -> int errors TooSmall, TooBig:
+    if n < 0:
+        fail TooSmall
+    else:
+        if n > 10:
+            fail TooBig
+        else:
+            n
+r = check(5):
+    on TooSmall:
+        0
+    on TooBig:
+        10
+r}]
+    set text1 [hir::format $h]
+    set text2 [hir::format [hir::parse $text1]]
+    expr {$text1 eq $text2}
+} -result 1
+
+# ---------------------------------------------------------------------------
+# Callable escape (spec item 13's own removal): the old callable
+# refinement-type constructor syntax (Byte(x), or any other source-defined
+# type used as a call) no longer exists at all -- a bare reference to the
+# type name is simply unbound as a callee.
+
+test errors-callable-syntax-removed {a source-defined type used as a callable constructor is UNBOUND, not a checked construction} -body {
+    diagKinds [sourceHir {type Small = Int in 0..10
+Small(5)}]
+} -result {UNBOUND}
+
+# ---------------------------------------------------------------------------
+# All four backends (spec item 90): interp, compile, cranelift-generic and
+# cranelift must agree, including the module-init-style ("Outcome B")
+# handled call byte::from_int-style code already exercises in
+# tests/byte-set.test/web-unreserved.test. This file's own dedicated,
+# minimal exhaustive-over-all-branches version:
+
+test errors-all-backends-success-path {every backend agrees on the success (no fail reached) path} -body {
+    parity {error TooSmall
+error TooBig
+fn check(n) -> int errors TooSmall, TooBig:
+    if n < 0:
+        fail TooSmall
+    else:
+        if n > 10:
+            fail TooBig
+        else:
+            n
+r = check(5):
+    on TooSmall:
+        -1
+    on TooBig:
+        -2
+r}
+} -result same
+
+test errors-all-backends-first-branch {every backend agrees on the "fail TooSmall" -> handled path} -body {
+    parity {error TooSmall
+error TooBig
+fn check(n) -> int errors TooSmall, TooBig:
+    if n < 0:
+        fail TooSmall
+    else:
+        if n > 10:
+            fail TooBig
+        else:
+            n
+r = check(-5):
+    on TooSmall:
+        -1
+    on TooBig:
+        -2
+r}
+} -result same
+
+test errors-all-backends-second-branch {every backend agrees on the "fail TooBig" -> handled path} -body {
+    parity {error TooSmall
+error TooBig
+fn check(n) -> int errors TooSmall, TooBig:
+    if n < 0:
+        fail TooSmall
+    else:
+        if n > 10:
+            fail TooBig
+        else:
+            n
+r = check(20):
+    on TooSmall:
+        -1
+    on TooBig:
+        -2
+r}
+} -result same
+
+test errors-all-backends-values {every backend computes the identical value on all three paths, in one pass} -body {
+    set exprs [sourceIR {error TooSmall
+error TooBig
+fn check(n) -> int errors TooSmall, TooBig:
+    if n < 0:
+        fail TooSmall
+    else:
+        if n > 10:
+            fail TooBig
+        else:
+            n
+fn convert(n) -> int:
+    r = check(n):
+        on TooSmall:
+            -1
+        on TooBig:
+            -2
+    r
+[convert(5), convert(-5), convert(20)]}]
+    lmap backend $::parityBackends {lindex [outcomeUnder $backend $exprs] 1}
+} -result {{[5, -1, -2]} {[5, -1, -2]} {[5, -1, -2]} {[5, -1, -2]}}
+
+# ---------------------------------------------------------------------------
+# byte::from_int itself (spec items 28-31): the real migration this
+# milestone drove, exercised directly and exhaustively (not only through
+# byte::set/web::is_unreserved's own indirect coverage in
+# tests/byte-set.test and tests/web-unreserved.test).
+
+test errors-byte-from-int-in-range {byte::from_int succeeds for an in-range value, no handler branch taken} -body {
+    set path [makeFile {byte::high_nibble(0)
+r = byte::from_int(200):
+    on BelowRange:
+        -1
+    on AboveRange:
+        -2
+r} errors-byte-from-int-ok.bot]
+    try {
+        list [moduleParity $path] [moduleValue $path]
+    } finally {
+        removeFile errors-byte-from-int-ok.bot
+    }
+} -result {same 200}
+
+test errors-byte-from-int-below-range {byte::from_int reaches its BelowRange handler for a negative value} -body {
+    set path [makeFile {byte::high_nibble(0)
+r = byte::from_int(0 - 1):
+    on BelowRange:
+        -1
+    on AboveRange:
+        -2
+r} errors-byte-from-int-below.bot]
+    try {
+        list [moduleParity $path] [moduleValue $path]
+    } finally {
+        removeFile errors-byte-from-int-below.bot
+    }
+} -result {same -1}
+
+test errors-byte-from-int-above-range {byte::from_int reaches its AboveRange handler for a value past 255} -body {
+    set path [makeFile {byte::high_nibble(0)
+r = byte::from_int(256):
+    on BelowRange:
+        -1
+    on AboveRange:
+        -2
+r} errors-byte-from-int-above.bot]
+    try {
+        list [moduleParity $path] [moduleValue $path]
+    } finally {
+        removeFile errors-byte-from-int-above.bot
+    }
+} -result {same -2}
+
+test errors-byte-from-int-unhandled-rejected {an unhandled byte::from_int call at top level is a static UNHANDLED-ERROR} -body {
+    set path [makeFile {byte::high_nibble(0)
+byte::from_int(5)} errors-byte-from-int-unhandled.bot]
+    try {
+        diagKinds [surface::readProgramFile $path -strict 0]
+    } finally {
+        removeFile errors-byte-from-int-unhandled.bot
+    }
+} -result {UNHANDLED-ERROR UNHANDLED-ERROR}
+
+::tcltest::cleanupTests

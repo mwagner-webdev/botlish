@@ -730,7 +730,57 @@ proc hir::types::Expr {hirVar ctxVar e} {
             set value [Expr hir ctx [dict get $node value]]
             return [SetType hir $e [expr {$value eq "never" ? "never" : "result"}]]
         }
+        fail {
+            return [SetType hir $e never]
+        }
+        handle {
+            return [SetType hir $e [Handle hir ctx $e]]
+        }
     }
+}
+
+# Types a `handle CALL NAME1 HANDLER1 ...` expression E
+# (EXPLICIT-ERROR-COMPLETIONS.md). The call's own normal-completion type T
+# is the whole construct's type when live (item 11: no implicit union
+# widening of a handled-result binding), so every handler that completes
+# normally must itself prove a value admissible as T -- exactly the
+# STRICT-TYPED-PARAMETERS.md-style admissibility hir/range.tcl's own
+# verifyDeclaredResults already applies to a declared function result, not
+# a fresh algorithm (checked by hir/errorsets.tcl, after inference, once T
+# and every handler's inferred type are known; not here, since that check
+# also needs the call's resolved target/declared error set, computed by
+# Call below in this very pass). Reachability of each handler body is
+# conservative (entry-reachable, like an `if` whose outcome isn't known):
+# nothing here claims to know which error, if any, a call actually
+# produces at run time (spec items 27/82 defer that proof).
+proc hir::types::Handle {hirVar ctxVar e} {
+    upvar 1 $hirVar hir $ctxVar ctx
+    set node [dict get $hir exprs $e]
+    set entry [dict get $ctx reachable]
+    set callType [Expr hir ctx [dict get $node call]]
+    dict set ctx reachable $entry
+
+    set handlerTypes {}
+    foreach body [dict get $node handlerBodies] {
+        dict set ctx reachable $entry
+        set saved [dict get $ctx facts]
+        lappend handlerTypes [Sequence hir ctx $body]
+        dict set ctx facts $saved
+    }
+    dict set ctx reachable $entry
+    # Recorded for hir/errorsets.tcl, which (after this whole inference
+    # pass) rejects any live handler whose type is not admissible as
+    # CALLTYPE -- item 11: no implicit union widening of a handled-result
+    # binding, so CALLTYPE alone is T, never a lub of the handlers' types.
+    dict set hir exprs $e handlerTypes $handlerTypes
+    if {$callType ne "never"} {
+        return $callType
+    }
+    set result never
+    foreach t $handlerTypes {
+        set result [lub $result $t]
+    }
+    return $result
 }
 
 proc hir::types::Bind {hirVar ctxVar e} {
@@ -918,6 +968,21 @@ proc hir::types::Call {hirVar ctxVar e} {
     }
     dict set hir exprs $e target $target
     dict set hir exprs $e known $known
+    # The declared errors this call may propagate (EXPLICIT-ERROR-
+    # COMPLETIONS.md), for hir/errorsets.tcl. Only an exact, directly-known
+    # callee (target {block ExprId}) can ever be charged with a nonempty
+    # set here: a native never declares one, and any other callee (an
+    # unresolved dynamic dispatch) is sound to treat as producing none,
+    # because hir/callables.tcl's escape audit (widened to cover an error-
+    # bearing block exactly like a typed-parameter-bearing one) already
+    # rejects every position that would let an error-bearing block reach
+    # such a call erased of its exact identity -- so a callee that reaches
+    # here *without* an exact block target can never actually be one.
+    set calleeErrors {}
+    if {[lindex $target 0] eq "block"} {
+        set calleeErrors [dict get $hir exprs [lindex $target 1] declaredErrors]
+    }
+    dict set hir exprs $e calleeErrors $calleeErrors
     return [expr {$dead ? "never" : $result}]
 }
 

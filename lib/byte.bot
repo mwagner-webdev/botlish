@@ -33,21 +33,36 @@
 #                          (never Int's own arbitrary-precision complement).
 #   byte::position_low(n)  Nibble -> LowNibble: representation-preserving.
 #   byte::position_high(n) Nibble -> HighNibble: n<<4, positioned.
-#   byte::set(chars)       List[UnicodeChar] -> ImmutableSet[Byte]: each
-#                          char's own Unicode scalar value (char::codepoint),
-#                          checked into Byte's domain (0..255) -- never UTF-8
-#                          encoding, so 'é' (U+00E9) becomes the one Byte 233,
-#                          not the two UTF-8 bytes 0xC3 0xA9 -- see
-#                          BYTE-SET.md. Fails (the ordinary checked-Byte-
-#                          construction RANGE error) for any char outside
-#                          Byte's domain (e.g. 'Ā', U+0100, or any astral
-#                          character).
+#   byte::from_int(value)  Int -> Byte, errors BelowRange, AboveRange: the
+#                          ordinary explicitly-fallible Int -> Byte
+#                          conversion (EXPLICIT-ERROR-COMPLETIONS.md;
+#                          replaces the old callable-type-syntax Byte(x),
+#                          removed from source -- see that report for why).
+#   byte::set(chars)       List[UnicodeChar] -> ImmutableSet[Byte], errors
+#                          BelowRange, AboveRange: each char's own Unicode
+#                          scalar value (char::codepoint), converted via
+#                          from_int above -- never UTF-8 encoding, so 'é'
+#                          (U+00E9) becomes the one Byte 233, not the two
+#                          UTF-8 bytes 0xC3 0xA9 -- see BYTE-SET.md.
+#                          Propagates from_int's own declared error for any
+#                          char outside Byte's domain (e.g. 'Ā', U+0100, or
+#                          any astral character): no partial set.
 #
 # ASCII/encoding interpretation, `is_unreserved`, and URI grammar are
 # deliberately absent: `byte::` holds only operations intrinsic to byte/bit
 # representation (core/scalarbits.tcl's header, and the milestone's own
 # namespace discipline -- see BYTE-NIBBLE-BIT-ARITHMETIC.md).
 namespace byte
+
+# The two declared errors byte::from_int's Int -> Byte conversion may
+# produce (EXPLICIT-ERROR-COMPLETIONS.md item 23): application code
+# meaningfully benefits from distinguishing "too small" from "too large"
+# (a caller can clamp each direction differently, or report which bound was
+# violated), so this chooses the two-error granularity over a single
+# generic OutOfRange -- the smallest useful distinction, not the smallest
+# possible one.
+error BelowRange
+error AboveRange
 
 # The four scalar domains this milestone's own byte/bit-domain operations
 # are typed over. These used to be compiler-side Tcl registrations
@@ -103,14 +118,43 @@ fn position_low(n) -> LowNibble:
 fn position_high(n) -> HighNibble:
     bit_and(shift_left(n, 4), 240)
 
+# Int -> Byte: the ordinary explicitly-fallible conversion (EXPLICIT-ERROR-
+# COMPLETIONS.md items 22/26-27). VALUE is deliberately left untyped rather
+# than declared "value: int": a declared parameter type demands *static*
+# proof at every call site (STRICT-TYPED-PARAMETERS.md), which would make
+# this ordinary conversion uncallable on an Int the compiler cannot
+# statically prove is one (e.g. list_get's own untyped List[int] element,
+# lib/web.bot's esc_char) even though it always *is* one at run time --
+# exactly the over-strict regression item 32 warns against reintroducing
+# through a different door. `<`/`>` below already give VALUE the ordinary
+# dynamic Int check every untyped Botlish parameter gets (CORE SEMANTIC
+# TYPE if it is ever called with a non-Int), the same contract the old
+# callable Byte(x) native's own runtime parameter check gave it.
+#
+# A statically provable in-range value (byte::from_int(48)) remains legal
+# with its declared error set still attached -- this milestone does not
+# eliminate a provably-safe error edge (item 27); a statically provable
+# out-of-range *literal* is not given any special compile-time rejection
+# here either (item 82's explicit fallback: correctness first, no new
+# solver), so every call -- proven-safe or not -- must be declared or
+# handled alike. A genuinely dynamic out-of-range Int produces the matching
+# declared error, never truncation or masking.
+fn from_int(value) -> Byte errors BelowRange, AboveRange:
+    if value < 0:
+        fail BelowRange
+    else:
+        if value > 255:
+            fail AboveRange
+        else:
+            value
+
 # List[UnicodeChar] -> ImmutableSet[Byte]: each char's own Unicode scalar
-# value (char::codepoint), explicitly checked into Byte's domain (the
-# generic source-defined-type checked constructor every Byte(...) call
-# already uses -- see SOURCE-DEFINED-INTEGER-DOMAINS.md). Never UTF-8:
-# a scalar value outside 0..255 fails through that same checked
-# construction (the ordinary RANGE error), not truncation, masking, or
-# encoding into more than one Byte -- see BYTE-SET.md.
-fn set(chars: List[UnicodeChar]) -> ImmutableSet[Byte]:
+# value (char::codepoint), converted via from_int above. Never UTF-8: a
+# scalar value outside 0..255 propagates from_int's own declared error (no
+# handler needed here -- it simply propagates, item 28), not truncation,
+# masking, or encoding into more than one Byte -- see BYTE-SET.md. No
+# partial set: the first invalid element's error ends the loop immediately.
+fn set(chars: List[UnicodeChar]) -> ImmutableSet[Byte] errors BelowRange, AboveRange:
     bytes = loop c in chars:
-        Byte(char::codepoint(c))
+        from_int(char::codepoint(c))
     immutable_set_from_list(bytes)

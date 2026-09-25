@@ -489,7 +489,7 @@ proc native::buildProgramHir {exprs args} {
         -files [dict get $bridge files] -modules [dict get $bridge sections] \
         -native-result-overrides $nativeResultOverrides \
         -module-native-targets [dict get $bridge targets] \
-        -type-decls [dict get $bridge typeDecls] {*}$args]
+        -type-decls [dict get $bridge typeDecls] -error-decls [dict get $bridge errorDecls] {*}$args]
 }
 
 # The module-native bridge: loads (surface/modules.tcl), once per program
@@ -527,11 +527,11 @@ proc native::ModuleNativeBridge {} {
         lappend targets $name $ns $fn
     }
     if {$namespaces eq ""} {
-        return [dict create sections {} files {} targets {} typeDecls {}]
+        return [dict create sections {} files {} targets {} typeDecls {} errorDecls {}]
     }
     set loaded [surface::modules::LoadNamespaces $namespaces]
     return [dict create sections [dict get $loaded sections] files [dict get $loaded files] \
-        targets $targets typeDecls [dict get $loaded typeDecls]]
+        targets $targets typeDecls [dict get $loaded typeDecls] errorDecls [dict get $loaded errorDecls]]
 }
 
 proc native::runProgram {exprs env {specialize ""}} {
@@ -657,6 +657,24 @@ proc native::ExpandNativeBodiesIn {node path} {
                 return [list break [ExpandNativeBodiesIn [lindex $node 1] [concat $path 1]]]
             }
             return $node
+        }
+        fail {
+            return $node
+        }
+        handle {
+            set out [list handle [ExpandNativeBodiesIn [lindex $node 1] [concat $path 1]]]
+            set index 2
+            foreach {name handlerBlock} [lrange $node 2 end] {
+                set body {}
+                set bindex 2
+                foreach expr [core::ir::blockBody $handlerBlock] {
+                    lappend body [ExpandNativeBodiesIn $expr [concat $path $index $bindex]]
+                    incr bindex
+                }
+                lappend out $name [list block [lindex $handlerBlock 1] {*}$body]
+                incr index 2
+            }
+            return $out
         }
     }
 }

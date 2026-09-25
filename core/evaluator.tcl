@@ -40,7 +40,9 @@ namespace eval core::interp {
         break       core::forms::op-break \
         continue    core::forms::op-continue \
         ok          core::forms::op-ok \
-        error-value core::forms::op-error-value]
+        error-value core::forms::op-error-value \
+        fail        core::forms::op-fail \
+        handle      core::forms::op-handle]
 }
 
 namespace eval core::forms {}
@@ -236,6 +238,41 @@ proc core::forms::op-ok {node env} {
 proc core::forms::op-error-value {node env} {
     set value [core::interp::valueOf [core::interp::evalIn [lindex $node 1] $env]]
     return [core::completion::normal [core::value::err $value]]
+}
+
+# (fail NAME): the named-error production primitive
+# (EXPLICIT-ERROR-COMPLETIONS.md). Always produces propagate-error; whether
+# NAME is admissible here (declared/handled) is a HIR-level static
+# obligation (hir/errorsets.tcl), not something the evaluator enforces.
+proc core::forms::op-fail {node env} {
+    return [core::completion::propagatingError [core::value::errorId [lindex $node 1]]]
+}
+
+# (handle CALL-EXPR NAME1 HANDLER-BLOCK1 ...): evaluates CALL-EXPR (always a
+# (call ...) node). A normal completion, or any abrupt completion other than
+# a propagate-error matching one of NAME1, NAME2, ..., passes through
+# unchanged. A matching propagate-error instead runs that handler's body
+# inline (a fresh child scope, exactly like an `if` branch -- no callable
+# boundary, so `return`/`break`/`continue` inside it affect the enclosing
+# callable/loop), and `handle` completes however that body does.
+proc core::forms::op-handle {node env} {
+    set callCompletion [core::interp::evalIn [lindex $node 1] $env]
+    if {[core::completion::kind $callCompletion] ne "propagate-error"} {
+        return $callCompletion
+    }
+    set errorName [core::value::errorIdName [core::completion::payload $callCompletion]]
+    foreach {name handlerBlock} [lrange $node 2 end] {
+        if {$name eq $errorName} {
+            set body [core::ir::blockBody $handlerBlock]
+            set branchEnv [core::interp::enterScope $env $body]
+            try {
+                return [core::interp::evalSequence $body $branchEnv]
+            } finally {
+                core::env::release $branchEnv
+            }
+        }
+    }
+    return $callCompletion
 }
 
 # ---------------------------------------------------------------------------

@@ -34,7 +34,15 @@ namespace eval hir::callables {}
 # block B declares at least one typed parameter (STRICT-TYPED-PARAMETERS.
 # md's own "typed callable" -- TYPED-CALLABLE-ESCAPE-SOUNDNESS.md item 10:
 # an untyped-parameter function, or one with only a declared *result*
-# type, is not precondition-bearing and gains no new restriction here).
+# type, is not precondition-bearing and gains no new restriction here) OR
+# declares a non-empty error set (EXPLICIT-ERROR-COMPLETIONS.md item 73):
+# a declared error is exactly as much a caller-side obligation as a typed
+# parameter -- the caller (or an enclosing function's own `errors` clause)
+# must account for it -- so erasing B's exact identity here would make that
+# obligation just as permanently unenforceable at whatever later, now-
+# untyped call site the erased value reaches (hir::types::Call's own
+# `calleeErrors` is only ever nonempty for an exact `{block ExprId}`
+# target, so this is the one and only place that fact needs proving).
 proc hir::callables::Bearing {hir type} {
     if {[lindex $type 0] ne "block" || [llength $type] != 4} {
         return 0
@@ -42,6 +50,9 @@ proc hir::callables::Bearing {hir type} {
     set block [lindex $type 1]
     if {![dict exists $hir exprs $block]} {
         return 0
+    }
+    if {[dict get $hir exprs $block declaredErrors] ne {}} {
+        return 1
     }
     foreach declared [dict get $hir exprs $block declaredParamTypes] {
         if {$declared ne {}} {
@@ -181,6 +192,16 @@ proc hir::callables::WalkExpr {hirVar e} {
         ok - error {
             CheckPreserved hir [dict get $node value] {} {wrapped as a Result value}
             WalkExpr hir [dict get $node value]
+        }
+        fail {
+        }
+        handle {
+            WalkExpr hir [dict get $node call]
+            foreach body [dict get $node handlerBodies] {
+                foreach child $body {
+                    WalkExpr hir $child
+                }
+            }
         }
     }
 }
