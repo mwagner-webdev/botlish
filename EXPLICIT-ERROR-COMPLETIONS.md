@@ -508,7 +508,57 @@ untaken branch).
 
 ## Full regression / GC stress
 
-<!-- FILLED IN BELOW ONCE THE BACKGROUND RUNS COMPLETE -->
+`tclsh9.0 tests/all.tcl` (interp backend): **Total 2085, Passed 2085,
+Skipped 0, Failed 0**. Same run's own second pass (`#### backend: compile`,
+`tests/all.tcl`'s own built-in second invocation over the compile Tcl-
+codegen backend): **Total 2085, Passed 2085, Skipped 0, Failed 0**.
+
+`BOTLISH_NATIVE_GC_STRESS=1 tclsh9.0 tests/all.tcl`: interp pass **Total
+2085, Passed 2085, Skipped 0, Failed 0**; compile pass **Total 2085, Passed
+2085, Skipped 0, Failed 0**.
+
+`cargo test --release --manifest-path native/Cargo.toml`: **60 passed; 0
+failed; 0 ignored**.
+
+Getting a clean `tests/all.tcl` run (as opposed to each individual test
+file passing on its own, which this milestone's own earlier development
+had already confirmed) surfaced two further, real fixes not caught by
+targeted single-file runs, both described in their own sections above and
+both fixed before these final counts:
+
+- `native/native.tcl`'s `ExpandNativeBodiesIn` had no `fail`/`handle` arms
+  (silently erasing those nodes before native lowering).
+- `native/lower.tcl`'s own temporary `UnsupportedStub`/catch-wrapping
+  stopgap (added during this milestone's own native-lowering work, before
+  `fail`/`handle` had *real* native codegen) was catching every `NATIVE
+  UNSUPPORTED` diagnostic during lowering, not just `fail`/`handle`'s own,
+  breaking the pre-existing, correct compile-time `NATIVE UNSUPPORTED`
+  diagnostic for an unrelated, already-unsupported native
+  (`UriQueryValue?`). Removed now that `fail`/`handle` lower for real and
+  no longer need it.
+- A handful of pre-existing test files (`tests/hir-range.test`,
+  `tests/loop-in.test`, `tests/source-types.test`) used the removed
+  callable `Byte(x)`/`Small(x)`/`Tags(x)`/`Big(x)` constructor syntax, or
+  (`hir-range.test`) an ordinary unbound `error(...)` call as a generic
+  "not a plain value" placeholder that this milestone's own new `error`
+  keyword now shadows -- not caught by this milestone's own earlier,
+  narrower test-migration pass, which covered only the files the original
+  brief named directly (`tests/ascii.test`, `tests/byte-set.test`,
+  `tests/native-byte.test`, `tests/web-unreserved.test`,
+  `tests/surface-modules.test`). All migrated the same way: a literal,
+  statically-provable argument becomes a bare literal; a genuinely dynamic
+  one becomes an explicit `errors`/`fail`/`handle` function.
+
+One further, unrelated, pre-existing bug was found (not fixed, out of this
+milestone's scope) while migrating `tests/source-types.test`: a function
+declared with the broadest possible result type, plain `-> int`, is
+incorrectly rejected when its body's inferred value is a *multi-value*
+exact-set fact (e.g. an `if`/`else` that can only ever return `0` or `78`)
+-- confirmed present before this milestone (commit `09f7f4c`, `hir/
+range.tcl`'s `verifyDeclaredResults`/`ProvesValueAcceptedBy`), unrelated to
+`error`/`fail`/`handle`. Reported separately as a follow-up task; the one
+affected test here was reshaped to declare the specific source-defined
+result type instead of plain `int`, which is unaffected by it.
 
 ## Semantic source fence
 
