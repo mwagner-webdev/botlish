@@ -691,4 +691,68 @@ fn bounded(x: int) -> int errors TooSmall, TooLarge:
     list $safe $tooSmall $tooLarge $dynamic
 } -result {{} KNOWN-ERROR KNOWN-ERROR {UNHANDLED-ERROR UNHANDLED-ERROR}}
 
+# ---------------------------------------------------------------------------
+# Handled calls and the native range analysis (COMPREHENSIVE-GENERATED-CODE-
+# AUDIT.md, correctness finding C1). hir/range.tcl's interprocedural range
+# fixpoint must see a handled call and its handler bodies: a handled call's
+# argument facts join into its callee's entry Range like any other exact
+# call's, and a `return` inside a handler body is part of the function's
+# result Range. Before the fix, native lowering trusted the narrower facts
+# of the visible callers alone (raw small-Int overflow, a BigInt compared as
+# a raw word, a wrong constant substituted for a call result).
+
+test errors-handled-call-joins-callee-entry-range {a handled call's unbounded argument widens the shared instance's entry range; the unhandled f(5) alone must not make x + 1 raw} -body {
+    set src {error Neg
+fn f(x: int) -> int errors Neg:
+    if x < 0:
+        fail Neg
+    else:
+        x + 1
+a = f(5)
+ns = [4611686018427387903]
+bs = loop n in ns:
+    r = f(n):
+        on Neg:
+            0
+    r
+[a, bs]}
+    list [parity $src] [value $src]
+} -result {same {[6, [4611686018427387904]]}}
+
+test errors-handler-return-joins-result-range {a return inside a handler body is part of the function's result range, so the caller's call result is not a proven constant} -body {
+    set src {error Neg
+fn f(x: int) -> int errors Neg:
+    if x < 0:
+        fail Neg
+    else:
+        x
+fn g(x: int) -> int:
+    r = f(x):
+        on Neg:
+            return 4611686018427387903
+    5
+fn h(x: int) -> int:
+    g(x) + 1
+[h(0 - 1), h(3)]}
+    list [parity $src] [value $src]
+} -result {same {[4611686018427387904, 6]}}
+
+test errors-handled-byte-from-int-bigint {byte::from_int(45) alone does not narrow from_int's shared instance: a BigInt reaching it through a handled call is still range-checked as a BigInt} -body {
+    set path [makeFile {a = byte::from_int(45)
+ns = [0 - 100000000000000000000000, 100000000000000000000000]
+bs = loop n in ns:
+    b = byte::from_int(n):
+        on BelowRange:
+            1
+        on AboveRange:
+            2
+    b
+[a, bs]} errors-handled-byte-from-int-bigint.bot]
+    try {
+        list [moduleParity $path] [moduleValue $path]
+    } finally {
+        removeFile errors-handled-byte-from-int-bigint.bot
+    }
+} -result {same {[45, [1, 2]]}}
+
 ::tcltest::cleanupTests

@@ -824,6 +824,30 @@ proc hir::range::Expr {hirVar ctxVar e} {
             set value [Expr hir ctx [dict get $node value]]
             return [expr {$value eq "never" ? "never" : [unknown]}]
         }
+        handle {
+            # A handled call (EXPLICIT-ERROR-COMPLETIONS.md): the wrapped
+            # call and every handler body are ordinary reachable code of
+            # this region, so both must be walked. analyze's caller-
+            # propagation fold joins only the exact calls this walk
+            # records, so an unvisited call would silently drop its own
+            # argument facts from its callee's entry Range (an unsoundly
+            # narrow entry fact whenever another caller of the same
+            # instance is visited), and an unvisited handler body would
+            # drop its `return`/`break` values from returnRange/breakRanges
+            # (an unsoundly narrow function result, which ClosedResult may
+            # turn into a constant). Each handler starts from the facts in
+            # force after the call, like an `if` branch, and none of its
+            # own bindings outlive it. The handle's own value stays
+            # unknown, exactly what this node kind returned before.
+            Expr hir ctx [dict get $node call]
+            set saved [dict get $ctx bindings]
+            foreach body [dict get $node handlerBodies] {
+                dict set ctx bindings $saved
+                Sequence hir ctx $body
+            }
+            dict set ctx bindings $saved
+            return [unknown]
+        }
         default {
             return [unknown]
         }
