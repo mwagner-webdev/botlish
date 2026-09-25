@@ -33,20 +33,29 @@
 #                          (never Int's own arbitrary-precision complement).
 #   byte::position_low(n)  Nibble -> LowNibble: representation-preserving.
 #   byte::position_high(n) Nibble -> HighNibble: n<<4, positioned.
-#   byte::from_int(value)  Int -> Byte, errors BelowRange, AboveRange: the
-#                          ordinary explicitly-fallible Int -> Byte
+#   byte::from_int(value: int)  Int -> Byte, errors BelowRange, AboveRange:
+#                          the ordinary explicitly-fallible Int -> Byte
 #                          conversion (EXPLICIT-ERROR-COMPLETIONS.md;
 #                          replaces the old callable-type-syntax Byte(x),
 #                          removed from source -- see that report for why).
+#                          A statically provable in-range/out-of-range
+#                          argument needs no handler, or is a compile-time
+#                          KNOWN-ERROR, respectively -- see
+#                          STATIC-COMPLETION-PROOFS.md.
 #   byte::set(chars)       List[UnicodeChar] -> ImmutableSet[Byte], errors
-#                          BelowRange, AboveRange: each char's own Unicode
-#                          scalar value (char::codepoint), converted via
-#                          from_int above -- never UTF-8 encoding, so 'é'
-#                          (U+00E9) becomes the one Byte 233, not the two
-#                          UTF-8 bytes 0xC3 0xA9 -- see BYTE-SET.md.
-#                          Propagates from_int's own declared error for any
-#                          char outside Byte's domain (e.g. 'Ā', U+0100, or
-#                          any astral character): no partial set.
+#                          AboveRange: each char's own Unicode scalar value
+#                          (char::codepoint), converted via from_int above
+#                          -- never UTF-8 encoding, so 'é' (U+00E9) becomes
+#                          the one Byte 233, not the two UTF-8 bytes 0xC3
+#                          0xA9 -- see BYTE-SET.md. Propagates from_int's
+#                          own declared error for any char outside Byte's
+#                          domain (e.g. 'Ā', U+0100, or any astral
+#                          character): no partial set. BelowRange is not
+#                          declared: char::codepoint's own result is always
+#                          nonnegative, so from_int's BelowRange branch is
+#                          statically proven unreachable from here, generically
+#                          (STATIC-COMPLETION-PROOFS.md), not by a Byte-
+#                          specific rule.
 #
 # ASCII/encoding interpretation, `is_unreserved`, and URI grammar are
 # deliberately absent: `byte::` holds only operations intrinsic to byte/bit
@@ -118,28 +127,27 @@ fn position_low(n) -> LowNibble:
 fn position_high(n) -> HighNibble:
     bit_and(shift_left(n, 4), 240)
 
-# Int -> Byte: the ordinary explicitly-fallible conversion (EXPLICIT-ERROR-
-# COMPLETIONS.md items 22/26-27). VALUE is deliberately left untyped rather
-# than declared "value: int": a declared parameter type demands *static*
-# proof at every call site (STRICT-TYPED-PARAMETERS.md), which would make
-# this ordinary conversion uncallable on an Int the compiler cannot
-# statically prove is one (e.g. list_get's own untyped List[int] element,
-# lib/web.bot's esc_char) even though it always *is* one at run time --
-# exactly the over-strict regression item 32 warns against reintroducing
-# through a different door. `<`/`>` below already give VALUE the ordinary
-# dynamic Int check every untyped Botlish parameter gets (CORE SEMANTIC
-# TYPE if it is ever called with a non-Int), the same contract the old
-# callable Byte(x) native's own runtime parameter check gave it.
+# Int -> Byte: the ordinary explicitly-fallible conversion. VALUE is
+# declared "value: int" (STATIC-COMPLETION-PROOFS.md item 3): a declared
+# parameter type demands *static* proof at every call site
+# (STRICT-TYPED-PARAMETERS.md) -- sound here because every actual call
+# site in this codebase now has a statically provable Int (or Byte, itself
+# a subtype) in hand, thanks to this same milestone's own producer-side
+# fixes (encode_utf8's truthful List[Byte] result, char::codepoint's own
+# int result), rather than weakening this conversion back to an untyped
+# escape hatch to accommodate an under-typed caller.
 #
-# A statically provable in-range value (byte::from_int(48)) remains legal
-# with its declared error set still attached -- this milestone does not
-# eliminate a provably-safe error edge (item 27); a statically provable
-# out-of-range *literal* is not given any special compile-time rejection
-# here either (item 82's explicit fallback: correctness first, no new
-# solver), so every call -- proven-safe or not -- must be declared or
-# handled alike. A genuinely dynamic out-of-range Int produces the matching
-# declared error, never truncation or masking.
-fn from_int(value) -> Byte errors BelowRange, AboveRange:
+# The call-specific completion proof (hir/completions.tcl) computes each
+# exact call site's own *effective* error set from its own argument facts:
+# a statically provable in-range value (byte::from_int(48)) needs no
+# handler and no enclosing "errors" declaration at all (its own declared
+# BelowRange/AboveRange are both proven impossible for that one call); a
+# statically provable out-of-range literal (byte::from_int(999)) is a
+# compile-time KNOWN-ERROR, not a call a handler can make legal. A
+# genuinely dynamic value keeps its full runtime error-completion
+# obligation, produces the matching declared error when actually out of
+# range, and never truncates or masks.
+fn from_int(value: int) -> Byte errors BelowRange, AboveRange:
     if value < 0:
         fail BelowRange
     else:
@@ -154,7 +162,16 @@ fn from_int(value) -> Byte errors BelowRange, AboveRange:
 # handler needed here -- it simply propagates, item 28), not truncation,
 # masking, or encoding into more than one Byte -- see BYTE-SET.md. No
 # partial set: the first invalid element's error ends the loop immediately.
-fn set(chars: List[UnicodeChar]) -> ImmutableSet[Byte] errors BelowRange, AboveRange:
+#
+# Declares only AboveRange, not BelowRange (STATIC-COMPLETION-PROOFS.md
+# item 23): char::codepoint's own result is a Unicode scalar value, always
+# nonnegative, so from_int's BelowRange branch can never actually be
+# reached from here -- the call-specific completion proof
+# (hir/completions.tcl) verifies this generically from char::codepoint's
+# own static facts and from_int's own body, not from any Byte-specific
+# rule, every time this function's own body is checked against its
+# declaration.
+fn set(chars: List[UnicodeChar]) -> ImmutableSet[Byte] errors AboveRange:
     bytes = loop c in chars:
         from_int(char::codepoint(c))
     immutable_set_from_list(bytes)

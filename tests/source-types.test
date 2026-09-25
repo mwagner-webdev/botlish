@@ -601,4 +601,45 @@ type HighNibble
     domain: exact {0, 16, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176, 192, 208, 224, 240}
     hull: [0, 240]}
 
+# ---------------------------------------------------------------------------
+# Exact-set -> broad scalar admissibility (STATIC-COMPLETION-PROOFS.md item
+# 11): a function declared with the broadest possible result type, plain
+# `-> int`, must not be rejected merely because its inferred result is a
+# non-dense exact finite set derived from branch-sensitive equality
+# narrowing (hir/range.tcl's own ComparisonNarrowing/ExactEqualityNarrowing)
+# rather than a nominally-refined type -- every member of such a set is
+# still, trivially, an Int. Before this milestone's own hir::range::
+# ProvesType fix, this was rejected: TYPE facts for a bare, unrestricted
+# `int` were treated as "nothing provable" (facts eq {}) rather than "any
+# Range fact proves membership", conflating "no domain restriction" with
+# "not int-based at all".
+
+test source-type-exact-set-accepted-by-broad-int {an inferred exact set {0,78,999}, reached via equality branch narrowing of an otherwise-untyped parameter, is admitted by a plain declared -> int} -body {
+    hir::diagnostics [surface::compile {fn check(n) -> int:
+    if n == 0:
+        n
+    else:
+        if n == 78:
+            n
+        else:
+            999
+[check(0), check(78)]
+} t.bot -strict 0]
+} -result {}
+
+test source-type-exact-set-member-rejected-by-narrow-type {the identical exact-set shape is still correctly rejected when the declared result type's own domain excludes one member} -body {
+    set diags [hir::diagnostics [surface::compile {type Byte = Int in 0..255
+fn check(n) -> Byte:
+    if n == 0:
+        n
+    else:
+        if n == 78:
+            n
+        else:
+            999
+[check(0), check(78)]
+} t.bot -strict 0]]
+    lsort [lmap d $diags {dict get $d kind}]
+} -result {TYPE}
+
 cleanupTests

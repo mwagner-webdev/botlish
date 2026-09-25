@@ -158,7 +158,7 @@ fn middle(n) -> int errors TooSmall:
 0}]
 } -result {UNHANDLED-ERROR}
 
-test errors-rejects-unhandled-at-top-level {top level declares no errors: an unhandled fallible call is a static UNHANDLED-ERROR, not a runtime completion} -body {
+test errors-rejects-unhandled-at-top-level {top level declares no errors: an unhandled fallible call of a genuinely dynamic value is a static UNHANDLED-ERROR, not a runtime completion} -body {
     diagKinds [sourceHir {error TooSmall
 error TooBig
 fn check(n) -> int errors TooSmall, TooBig:
@@ -169,7 +169,8 @@ fn check(n) -> int errors TooSmall, TooBig:
             fail TooBig
         else:
             n
-check(5)}]
+fn g(m: int):
+    check(m)}]
 } -result {UNHANDLED-ERROR UNHANDLED-ERROR}
 
 test errors-rejects-fail-of-undeclared-name {"fail" of a name with no "error" declaration is a static UNDECLARED-ERROR -- once for the signature's own "errors Whatever" reference, once for the "fail Whatever" production} -body {
@@ -253,10 +254,11 @@ fn f(n) -> int errors E:
         fail E
     else:
         n
-r = f(-5):
-    on E:
-        "not an int"
-0}]
+fn g(m):
+    r = f(m):
+        on E:
+            "not an int"
+    r}]
 } -result {TYPE}
 
 # ---------------------------------------------------------------------------
@@ -270,12 +272,13 @@ fn f(n) -> int errors E:
         fail E
     else:
         n
-r = f(-5):
-    on E:
-        1
-    on E:
-        2
-r}]
+fn g(m):
+    r = f(m):
+        on E:
+            1
+        on E:
+            2
+    r}]
 } -result {DUPLICATE}
 
 test errors-rejects-duplicate-in-errors-clause {"errors E, E" on one function signature is a static DUPLICATE diagnostic} -body {
@@ -418,7 +421,8 @@ fn clamp(n) -> int errors OutOfRange:
         n
 }
     close $ch
-    set mainPath [makeFile {errorscrossmodulelib2::clamp(-5)} errors-cross-module-main2.bot]
+    set mainPath [makeFile {fn g(m):
+    errorscrossmodulelib2::clamp(m)} errors-cross-module-main2.bot]
     try {
         diagKinds [surface::readProgramFile $mainPath -strict 0]
     } finally {
@@ -602,14 +606,89 @@ r} errors-byte-from-int-above.bot]
     }
 } -result {same -2}
 
-test errors-byte-from-int-unhandled-rejected {an unhandled byte::from_int call at top level is a static UNHANDLED-ERROR} -body {
+test errors-byte-from-int-unhandled-rejected {an unhandled byte::from_int call of a genuinely dynamic (unconstrained) value at top level is a static UNHANDLED-ERROR for both of its declared errors} -body {
     set path [makeFile {byte::high_nibble(0)
-byte::from_int(5)} errors-byte-from-int-unhandled.bot]
+fn g(m: int):
+    byte::from_int(m)} errors-byte-from-int-unhandled.bot]
     try {
         diagKinds [surface::readProgramFile $path -strict 0]
     } finally {
         removeFile errors-byte-from-int-unhandled.bot
     }
 } -result {UNHANDLED-ERROR UNHANDLED-ERROR}
+
+test errors-byte-from-int-known-safe-literal-no-handler {byte::from_int(5) at top level, a statically provable in-range literal, needs no handler at all -- STATIC-COMPLETION-PROOFS.md item 20} -body {
+    set path [makeFile {byte::high_nibble(0)
+byte::from_int(5)} errors-byte-from-int-known-safe.bot]
+    try {
+        diagKinds [surface::readProgramFile $path -strict 0]
+    } finally {
+        removeFile errors-byte-from-int-known-safe.bot
+    }
+} -result {}
+
+test errors-byte-from-int-known-failure-literal {byte::from_int(999) at top level, a statically provable out-of-range literal, is a compile-time KNOWN-ERROR, not an UNHANDLED-ERROR} -body {
+    set path [makeFile {byte::high_nibble(0)
+byte::from_int(999)} errors-byte-from-int-known-failure.bot]
+    try {
+        diagKinds [surface::readProgramFile $path -strict 0]
+    } finally {
+        removeFile errors-byte-from-int-known-failure.bot
+    }
+} -result {KNOWN-ERROR}
+
+test errors-byte-from-int-known-failure-with-handler-still-rejected {a handler does not make a statically known failure legal -- STATIC-COMPLETION-PROOFS.md item 50} -body {
+    set path [makeFile {byte::high_nibble(0)
+x = byte::from_int(999):
+    on AboveRange:
+        255
+x} errors-byte-from-int-known-failure-handled.bot]
+    try {
+        diagKinds [surface::readProgramFile $path -strict 0]
+    } finally {
+        removeFile errors-byte-from-int-known-failure-handled.bot
+    }
+} -result {KNOWN-ERROR}
+
+test errors-byte-from-int-partial-range-elimination {a value statically known nonnegative but not upper-bounded needs only an AboveRange handler/declaration -- STATIC-COMPLETION-PROOFS.md item 21} -body {
+    set path [makeFile {byte::high_nibble(0)
+fn nonneg(m) -> int:
+    if m < 0:
+        0 - m
+    else:
+        m
+fn g(m) -> int errors AboveRange:
+    byte::from_int(nonneg(m))} errors-byte-from-int-partial.bot]
+    try {
+        diagKinds [surface::readProgramFile $path -strict 0]
+    } finally {
+        removeFile errors-byte-from-int-partial.bot
+    }
+} -result {}
+
+test errors-byte-from-int-branch-refinement-result {byte::from_int's own body proves its final else-branch value is a Byte through ordinary branch-sensitive range facts, no builtin escape hatch -- STATIC-COMPLETION-PROOFS.md items 6-10} -body {
+    hir::diagnostics [surface::readProgramFile [file join $::projectRoot lib byte.bot] -strict 0]
+} -result {}
+
+test errors-generic-bounded-fixture {a test-defined, non-Byte bounded function demonstrates the same call-specific completion proof generically -- STATIC-COMPLETION-PROOFS.md item 15/67} -body {
+    proc boundedSrc {} {
+        return {error TooSmall
+error TooLarge
+fn bounded(x: int) -> int errors TooSmall, TooLarge:
+    if x < 10:
+        fail TooSmall
+    else:
+        if x > 20:
+            fail TooLarge
+        else:
+            x
+}
+    }
+    set safe [diagKinds [sourceHir "[boundedSrc]bounded(15)"]]
+    set tooSmall [diagKinds [sourceHir "[boundedSrc]bounded(5)"]]
+    set tooLarge [diagKinds [sourceHir "[boundedSrc]bounded(25)"]]
+    set dynamic [diagKinds [sourceHir "[boundedSrc]fn g(m: int):\n    bounded(m)"]]
+    list $safe $tooSmall $tooLarge $dynamic
+} -result {{} KNOWN-ERROR KNOWN-ERROR {UNHANDLED-ERROR UNHANDLED-ERROR}}
 
 ::tcltest::cleanupTests

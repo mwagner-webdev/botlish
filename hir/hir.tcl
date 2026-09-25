@@ -560,7 +560,7 @@ proc hir::ApplyNativeResultOverrides {hirVar overrides} {
 }
 
 apply {{dir} {
-    foreach file {syntax resolve hygiene sourcetypes errordecls types modulebinding refine lower format read aot specialize range callables errorsets induction escape blockescape stringregion traversal} {
+    foreach file {syntax resolve hygiene sourcetypes errordecls types modulebinding refine lower format read aot specialize range callables completions errorsets induction escape blockescape stringregion traversal} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

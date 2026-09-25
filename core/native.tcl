@@ -251,6 +251,18 @@ proc core::native::ValidShape {shape count} {
     if {[catch {llength $shape} length]} {
         return 0
     }
+    if {[lindex $shape 0] eq {typed}} {
+        # {typed NAME}: every element of the result List is of the
+        # source-defined type NAME, resolved lazily by hir::types::
+        # ShapeResult at type-inference time (never here at registration
+        # time, since a native like encode_utf8 is registered once at core
+        # bootstrap, long before a compiling program's own `type NAME = ...`
+        # declaration -- e.g. lib/byte.bot's Byte -- has been parsed; NAME
+        # is just a symbolic reference until then). Its own argument is a
+        # type name, not an argument index, so it is exempt from the
+        # digit-index check below.
+        return [expr {$length == 2}]
+    }
     set indices [lrange $shape 1 end]
     foreach index $indices {
         if {![string is digit -strict $index] || ($count ne "" && $index >= $count)} {

@@ -951,8 +951,24 @@ proc hir::range::Call {hirVar ctxVar e node} {
 }
 
 proc hir::range::ProvesType {range type} {
+    if {$range eq {never}} { return 0 }
     set facts [core::type::integerFacts $type]
-    if {$facts eq {} || $range eq {never}} { return 0 }
+    if {$facts eq {}} {
+        # TYPE places no domain restriction beyond "is an Int" (either it is
+        # the bare primitive int, or core::type::integerFacts's own base
+        # check ruled it out as not int-based at all -- the two cases
+        # integerFacts itself cannot tell apart, since both return {}). Only
+        # the first is provable from a Range fact: every Range this file
+        # ever produces is itself a fact about an Int value (this file's own
+        # header), so a non-unknown Range already proves membership in an
+        # unrestricted int -- the general rule "ExactSet{v1...vn} accepted
+        # by T iff every member vi is accepted by T" applied to the trivial
+        # case where T accepts every int. A non-int TYPE could reach here
+        # too (e.g. str); RANGE is then always [unknown] anyway (nothing in
+        # this file computes a real Range for a non-Int-typed expression),
+        # so this is never unsound -- it just correctly proves nothing.
+        return [expr {[core::type::base $type] eq {int} && ![isUnknown $range]}]
+    }
     if {[dict exists $facts exact]} {
         set actual [ExactOf $range]
         if {$actual eq {}} { return 0 }

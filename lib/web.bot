@@ -7,9 +7,10 @@
 # Botlish module definition, so it is resolved and compiled once, like any
 # other function, instead of copied. It is the same algorithm as
 # core::web::uriEscape's Tcl implementation, over the general
-# core/strings.tcl native encode_utf8 (str -> list of Int, one UTF-8 byte
-# per element): percent-encode every UTF-8 byte of s except the RFC 3986
-# unreserved characters (A-Za-z0-9._~-), as uppercase %XX.
+# core/strings.tcl native encode_utf8 (str -> List[Byte], one UTF-8 byte per
+# element, STATIC-COMPLETION-PROOFS.md item 25): percent-encode every UTF-8
+# byte of s except the RFC 3986 unreserved characters (A-Za-z0-9._~-), as
+# uppercase %XX.
 #
 # high_nibble extracts the high half of a byte and normalizes it to a
 # logical nibble via the Byte/Nibble/HighNibble scalar domains and typed bit
@@ -28,34 +29,21 @@
 # once, from byte::set(['-', '.', '_', '~']) (lib/byte.bot,
 # BYTE-SET.md/MINIMAL-IMMUTABLE-SET.md's retained-module-value machinery),
 # and reused by every is_unreserved call -- never reconstructed per call.
-# byte::set now honestly declares its own possible conversion error
-# (EXPLICIT-ERROR-COMPLETIONS.md items 28/30); this module initializer
-# handles it explicitly (Outcome B of item 30 -- this milestone does not
-# implement the static "these four literals are always in Byte's domain"
-# elimination item 26/82 leaves for later), with an unreachable-in-practice
-# single-element ({0}) fallback set, since '-' '.' '_' '~' are of course
-# always in range. The fallback can't just be immutable_set_from_list([]):
-# ImmutableSet[T] is invariant (MINIMAL-IMMUTABLE-SET.md), so an empty list
-# literal's own inferred element type (never) is never admissible as this
-# binding's declared ImmutableSet[Byte] -- the fallback element has to be a
-# genuine Byte, established with its own (equally unreachable-in-practice)
-# byte::from_int(0): on ... on ... conversion, the same as everywhere else
-# in this file.
+# This is now the clean, handler-free initializer STATIC-COMPLETION-PROOFS.md
+# restores: the call-specific completion proof (hir/completions.tcl) proves
+# every element of this literal list is statically in Byte's own domain, so
+# byte::set's own declared AboveRange error is proven impossible for this
+# exact call -- no handler, no placeholder fallback set, no `on` clause.
 #
-# esc_char, is_unreserved's one call site, still receives each UTF-8 byte
-# of a single-byte-encoded char as a plain Int from encode_utf8
-# (core/strings.tcl's -result-type list, never Byte-typed); it establishes
-# is_unreserved's own Byte proof explicitly, with one byte::from_int(...)
-# conversion per byte (item 31's smaller correction: an ordinary fallible
-# conversion, handled right there, rather than strengthening encode_utf8's
-# own static result type) -- exactly the strict-typed-parameter contract
-# ascii::'s own predicates already enforce (never an implicit Int->Byte
-# conversion). This conversion never actually fails here (list_get(bytes,
-# 0) is always one ordinary 0..255 UTF-8 byte value when encode_utf8
-# produced exactly one byte), so its handler fallback (0) is unreachable in
-# practice, exactly like the module initializer's own handler above --
-# but, per item 82, this milestone does not try to statically discharge
-# that fact, so the handler stays.
+# esc_char, is_unreserved's one call site, now receives each UTF-8 byte of a
+# single-byte-encoded char directly as a Byte from encode_utf8's own
+# truthful List[Byte] result type (item 25-27, 74-76) -- list_get's already-
+# generic List[T] element typing gives `list_get(bytes, 0) : Byte` with no
+# web-specific code here at all, so the old per-byte byte::from_int(...)
+# conversion (and its always-unreachable-in-practice handler fallback) is
+# gone: it was working around an under-typed encode_utf8, not a genuine
+# runtime possibility, and item 26/54 says not to keep a redundant
+# conversion once the producer's own static contract is honest.
 #
 # esc_bytes/esc_char/esc_from accumulate their result by repeated concat,
 # the same recursive idiom examples/stdlib/string_reverse.bot's
@@ -74,21 +62,7 @@ namespace web
 
 hex_digits = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F"]
 
-additional_unreserved_chars = byte::set(['-', '.', '_', '~']):
-    on BelowRange:
-        placeholder = byte::from_int(0):
-            on BelowRange:
-                0
-            on AboveRange:
-                0
-        immutable_set_from_list([placeholder])
-    on AboveRange:
-        placeholder = byte::from_int(0):
-            on BelowRange:
-                0
-            on AboveRange:
-                0
-        immutable_set_from_list([placeholder])
+additional_unreserved_chars = byte::set(['-', '.', '_', '~'])
 
 fn is_unreserved(b: Byte) -> bool:
     ascii::is_alphanumeric(b) or immutable_set_contains(additional_unreserved_chars, b)
@@ -110,11 +84,7 @@ fn uri_escape_text(s):
     fn esc_char(c):
         bytes = encode_utf8(c)
         if list_length(bytes) == 1:
-            b = byte::from_int(list_get(bytes, 0)):
-                on BelowRange:
-                    0
-                on AboveRange:
-                    0
+            b = list_get(bytes, 0)
             if is_unreserved(b):
                 c
             else:

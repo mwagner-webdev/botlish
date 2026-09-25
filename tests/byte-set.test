@@ -236,22 +236,8 @@ test byte-set-rejects-int-list {byte::set([65]) (List[int]) is a static compile 
     }
 } -result {CORE SEMANTIC TYPE}
 
-test byte-set-accepts-char-list {byte::set(['A']) (List[UnicodeChar]), with its declared BelowRange/AboveRange handled, has no static diagnostic} -body {
-    set path [makeFile {byte::set(['A']):
-    on BelowRange:
-        placeholder = byte::from_int(0):
-            on BelowRange:
-                0
-            on AboveRange:
-                0
-        immutable_set_from_list([placeholder])
-    on AboveRange:
-        placeholder = byte::from_int(0):
-            on BelowRange:
-                0
-            on AboveRange:
-                0
-        immutable_set_from_list([placeholder])} byte-set-charlist.bot]
+test byte-set-accepts-char-list {byte::set(['A']) (List[UnicodeChar]) has no static diagnostic and needs no handler: the call-specific completion proof (STATIC-COMPLETION-PROOFS.md) proves 'A' (65) is statically in Byte's own domain, so byte::set's own declared AboveRange is proven impossible for this exact call} -body {
+    set path [makeFile {byte::set(['A'])} byte-set-charlist.bot]
     try {
         llength [hir::diagnostics [surface::readProgramFile $path -strict 0]]
     } finally {
@@ -271,21 +257,7 @@ test byte-set-module-retained-value {additional_unreserved_chars = byte::set([..
     set ch [open $libPath w]
     fconfigure $ch -encoding utf-8
     puts -nonewline $ch {namespace bytesetretentionlib
-additional_unreserved_chars = byte::set(['-', '.', '_', '~']):
-    on BelowRange:
-        placeholder = byte::from_int(0):
-            on BelowRange:
-                0
-            on AboveRange:
-                0
-        immutable_set_from_list([placeholder])
-    on AboveRange:
-        placeholder = byte::from_int(0):
-            on BelowRange:
-                0
-            on AboveRange:
-                0
-        immutable_set_from_list([placeholder])
+additional_unreserved_chars = byte::set(['-', '.', '_', '~'])
 
 fn has_dash() -> bool:
     immutable_set_contains(additional_unreserved_chars, 45)
