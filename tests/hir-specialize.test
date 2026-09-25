@@ -232,4 +232,84 @@ test hir-specialize-explain {the explanation shows the semantic report and every
          [string match "*guards: generic 4, specialized 0; instances: 0 generic, 2 specialized*" $text]
 } -result {1 1 1}
 
+# ---------------------------------------------------------------------------
+# M1: declared parameter fact transport into every instance, generic
+# included (M1-DECLARED-PARAMETER-FACT-TRANSPORT.md). Before M1, Analyze's
+# own per-instance region re-inference seeded a block's own parameters from
+# nothing but the instance's key type (any for a generic instance), so its
+# overlay recorded a *worse* type for a declared parameter's refs than the
+# semantic (whole-program) pass had already proven for them, discarding
+# the declared contract inside that instance specifically. These tests
+# inspect the instance's own view (the same technique audit/comprehensive-
+# generated-code/tools/probe.tcl's params.txt uses), not just its result.
+
+# The view type of instance LABEL's parameter index I, as seen by the first
+# reachable ref to it within the block's own body.
+proc paramViewType {hir analysis label i} {
+    set instance [specInstance $analysis $label]
+    set block [dict get $instance block]
+    set view [hir::specialize::view $hir $analysis [dict get $instance id]]
+    set b [lindex [hir::get $hir $block params] $i]
+    foreach e [dict get [dict get $analysis context] exprs $block] {
+        if {[hir::kind $view $e] eq "ref" && [hir::get $view $e binding] eq $b} {
+            return [hir::types::show [hir::typeOf $view $e]]
+        }
+    }
+    return "-"
+}
+
+test hir-specialize-m1-closure-capture {a typed function forced into a generic instance by a non-Int capture still retains its declared parameter type (M1 closure fixture, spec items 35-36)} -body {
+    lassign [specOf "type Small = Int in 0..10\n\nfn outer(xs):\n    fn cls(b: Small) -> bool:\n        b >= 0 and list_length(xs) > 0\n    cls(1)\n\nouter(\[1, 2, 3\])"] hir analysis
+    list [specLabels $analysis cls] [paramViewType $hir $analysis cls<generic> 0]
+} -result {cls<generic> {int[Small]}}
+
+test hir-specialize-m1-explosion-generic {a typed function forced generic by explosion control retains its declared parameter type, while an untyped sibling parameter is unaffected (M1 generic fixture + untyped-parameter control, spec items 3, 28, 35)} -body {
+    set saved $hir::specialize::limit
+    set hir::specialize::limit 1
+    try {
+        lassign [specOf "type Small = Int in 0..10\n\nfn classify(b: Small, tag) -> bool:\n    b >= 0 and tag == tag\n\n\[classify(1, 1), classify(2, \"a\")\]"] hir analysis
+        list [specLabels $analysis classify] [paramViewType $hir $analysis classify<generic> 0] \
+             [paramViewType $hir $analysis classify<generic> 1]
+    } finally {
+        set hir::specialize::limit $saved
+    }
+} -result {{{classify<int, int>} classify<generic>} {int[Small]} any}
+
+test hir-specialize-m1-broad-int {a declared broad int parameter is preserved as int in a generic instance, never narrowed to a small raw-eligible range (M1, spec item 29)} -body {
+    set saved $hir::specialize::limit
+    set hir::specialize::limit 1
+    try {
+        lassign [specOf "fn f(x: int, tag) -> int:\n    x + 1\n\n\[f(1, 1), f(2, \"a\")\]"] hir analysis
+        list [specLabels $analysis f] [paramViewType $hir $analysis f<generic> 0]
+    } finally {
+        set hir::specialize::limit $saved
+    }
+} -result {{{f<int, int>} f<generic>} int}
+
+test hir-specialize-m1-container {a declared List[T] parameter forced generic by a non-Int capture still retains its declared element type (M1, spec item 32)} -body {
+    set saved $hir::specialize::limit
+    set hir::specialize::limit 1
+    try {
+        lassign [specOf "type Small = Int in 0..10\n\nfn outer(xs):\n    fn cls(ys: List\[Small\]) -> bool:\n        list_length(ys) > 0 and list_length(xs) > 0\n    cls(\[1, 2\])\n\nouter(\[1, 2, 3\])"] hir analysis
+        list [specLabels $analysis cls] [paramViewType $hir $analysis cls<generic> 0]
+    } finally {
+        set hir::specialize::limit $saved
+    }
+} -result {cls<generic> {List[int[Small]]}}
+
+test hir-specialize-m1-module-closure {the real web::is_unreserved module-closure instance retains its declared Byte parameter (M1 module fixture, spec item 37)} -body {
+    set hir [surface::readProgramFile [file join $::projectRoot bench uri-steady.bot]]
+    set analysis [hir::specialize::analyze $hir]
+    list [specLabels $analysis web::is_unreserved] \
+         [paramViewType $hir $analysis {web::is_unreserved<generic>} 0]
+} -result {web::is_unreserved<generic> {int[Byte]}}
+
+test hir-specialize-m1-exact-call-propagation {a generic caller's own restored declared-parameter fact transports through its exact calls, letting a callee specialize instead of also falling back to generic (M1, spec item 21 "A" -- the generic caller no longer forgets its own declared type, so KeyType, unmodified, sees a real kind instead of any)} -body {
+    set hir [surface::readProgramFile \
+        [file join $::projectRoot audit comprehensive-generated-code probes steady-ascii-capture.bot]]
+    set analysis [hir::specialize::analyze $hir]
+    list [specLabels $analysis cls] [specLabels $analysis ascii::is_alphanumeric] \
+         [specLabels $analysis ascii::is_digit]
+} -result {cls<generic> ascii::is_alphanumeric<int> ascii::is_digit<int>}
+
 cleanupTests

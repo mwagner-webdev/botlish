@@ -350,7 +350,13 @@ proc hir::specialize::RefineParams {block typesVar} {
             # argument its own key would reflect): nothing sound to widen.
             continue
         }
-        dict set types $b [core::type::Make $base [dict get $blockFacts $b]]
+        # Union, never replace (M1 spec #25-26): KEYTYPE may already carry
+        # the function's own declared-parameter evidence (the caller of
+        # this proc seeds that first); widening by named-refinement
+        # evidence proven at every exact call must only add to that, never
+        # drop it merely because this particular evidence set does not
+        # happen to repeat it.
+        dict set types $b [hir::types::narrow $keyType [core::type::Make $base [dict get $blockFacts $b]]]
     }
 }
 
@@ -476,7 +482,31 @@ proc hir::specialize::Analyze {id} {
             dict for {b type} $seeds {
                 dict set types $b $type
             }
-            foreach b [dict get $state hir exprs $block params] type [dict get $instance args] {
+            foreach b [dict get $state hir exprs $block params] type [dict get $instance args] \
+                    declaredType [dict get $state hir exprs $block declaredParamTypes] {
+                if {$declaredType ne {} && ![hir::types::IsSpecific $type]} {
+                    # M1: the function's own declared parameter contract is
+                    # valid for every instance, generic included -- every
+                    # legal call already proved it (hir::range::
+                    # verifyDeclaredParams for a direct call; hir/callables.
+                    # tcl rejects every escape path that would let a typed
+                    # callable, and so this contract, reach a call erased
+                    # of its exact identity -- see M1-DECLARED-PARAMETER-
+                    # FACT-TRANSPORT.md). Adding it can only add a
+                    # fact, never lose one: TYPE is not itself specific
+                    # (never a shaped/callable key already carrying its own
+                    # structural facts, which this leaves untouched -- item
+                    # 32's container/callable case), so it is either any
+                    # (a generic instance, adopting the declared type
+                    # outright -- hir::types::narrow's own "a core type"
+                    # contract does not cover an aggregate/callable FACT,
+                    # so a declared List[T]/ImmutableSet[T] etc. is adopted
+                    # directly rather than routed through narrow) or an
+                    # already-specialized scalar key sharing the declared
+                    # type's base, unioned with its evidence via narrow.
+                    set type [expr {[hir::types::IsSpecific $declaredType]
+                        ? $declaredType : [hir::types::narrow $type $declaredType]}]
+                }
                 dict set types $b $type
             }
             RefineParams $block types
