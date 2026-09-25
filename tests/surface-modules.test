@@ -29,6 +29,14 @@ proc moduleParity {path} {
     return [join [lmap backend $::parityBackends outcome $outcomes {list $backend $outcome}] " / "]
 }
 
+# The interp value of .bot program file PATH, formatted (evidence stripped
+# by outcomeUnder's own caller convention: this returns just the "value V"
+# element's V, not the whole {value V LOG} outcome).
+proc moduleValue {path} {
+    set hir [surface::readProgramFile $path -strict 0]
+    lindex [outcomeUnder interp [hir::lower $hir]] 1
+}
+
 # Runs SCRIPT with $::core::libraryDir pointed at a fresh scratch directory
 # (for throwaway module fixtures), passing that directory as its own
 # argument; restores the real library directory afterward regardless of
@@ -454,5 +462,118 @@ test surface-modules-refined-checks-still-400-0 {refined-checks.ir is unchanged 
     set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
     core::value::show [native::evalHir $hir] 1
 } -result {[400, 0]}
+
+# ---------------------------------------------------------------------------
+# C2: a user function calling a module-scope function that is itself a
+# closure (retains state) (COMPREHENSIVE-GENERATED-CODE-AUDIT.md sec. C2;
+# M0-MODULE-CLOSURE-AND-URI-BASELINE.md). Before the fix, a qualified
+# reference (mod::name) never added the referenced binding to any
+# enclosing user function's own HIR `captures` (hir/resolve.tcl's
+# ResolveQualifiedRef, by design, for interp: a module binding lives in
+# the same top-level frame as everything else, so interp never needs a
+# capture to reach it). Native lowering, though, only ever reaches a
+# binding outside a function's own params through a capture -- so a user
+# function whose only reference to a closure-valued module function was
+# qualified had an empty captures list, was misclassified envless/static
+# (hir::aot::context's StaticBlocks), and native::lower::Access had no
+# path to the module closure's value: "NATIVE BUG: binding ... is not
+# reachable". This fixture is independent of web:: (web::is_unreserved is
+# covered directly by tests/web-unreserved.test and
+# audit/comprehensive-generated-code/bugs/module-closure-from-user-fn.bot);
+# `retained` (a List) forces `module_fn` to need an environment exactly as
+# `additional_unreserved_chars` forces one on web::is_unreserved.
+proc writeC2Fixture {dir} {
+    writeModule $dir counter {namespace counter
+
+retained = [1, 2, 3]
+
+fn no_captures(x):
+    x + 1
+
+fn module_fn(x):
+    x + list_length(retained)
+}
+    return [writeMain $dir {fn wrapper(x):
+    counter::module_fn(x)
+
+fn wrapper2(x):
+    wrapper(x)
+
+fn control_wrapper(x):
+    counter::no_captures(x)
+
+[wrapper(5), wrapper2(5), control_wrapper(5), counter::module_fn(10)]
+}]
+}
+
+# The hir::aot region named NAME ("wrapper", "wrapper2", ...) of ANALYSIS.
+proc c2AotRegion {analysis name} {
+    dict for {id region} [dict get $analysis regions] {
+        if {[dict get $region name] eq $name} {
+            return $region
+        }
+    }
+    error "no region named $name"
+}
+
+test surface-modules-c2-user-fn-to-module-closure {a user function (wrapper), a transitively calling user function (wrapper2), and a module function (module_fn itself, called from program root) all reach a module closure -- on every backend} -body {
+    withScratchLibrary {
+        set main [writeC2Fixture $dir]
+        moduleParity $main
+    }
+} -result same
+
+test surface-modules-c2-values {wrapper(5)=8 (5 + list_length(retained)), wrapper2(5)=8 transitively, control_wrapper(5)=6 (envless counter::no_captures), counter::module_fn(10)=13 from program root} -body {
+    withScratchLibrary {
+        set main [writeC2Fixture $dir]
+        moduleValue $main
+    }
+} -result {[8, 8, 6, 13]}
+
+test surface-modules-c2-capture-set {capture-set inspection, not just the absence of a crash: wrapper's own HIR captures now include counter::module_fn (a "value" capture -- it needs the closure's actual environment -- with the closure-env runtime requirement), wrapper2 reaches the same module closure transitively by capturing wrapper (itself now non-envless) the very same way, and control_wrapper's capture of the envless counter::no_captures stays a "block" capture with no environment requirement at all (no over-capture: calling an environment-free module function does not suddenly force one)} -body {
+    withScratchLibrary {
+        set main [writeC2Fixture $dir]
+        set hir [surface::readProgramFile $main -strict 0]
+        set analysis [hir::aot::analyze $hir]
+        set wrapper [c2AotRegion $analysis wrapper]
+        set wrapper2 [c2AotRegion $analysis wrapper2]
+        set control [c2AotRegion $analysis control_wrapper]
+        list [lmap c [dict get $wrapper captures] {dict filter $c key name class}] \
+            [dict get $wrapper requirements] \
+            [lmap c [dict get $wrapper2 captures] {dict filter $c key name class}] \
+            [dict get $wrapper2 requirements] \
+            [lmap c [dict get $control captures] {dict filter $c key name class}] \
+            [dict get $control requirements]
+    }
+} -result {{{name counter::module_fn class value}} closure-env {{name wrapper class value}} closure-env {{name counter::no_captures class block}} {}}
+
+test surface-modules-c2-native-env {the structural counterpart of the capture-set check above, read from what native/lower.tcl actually emits. hir::aot's own (pre-lowering) classification calls this "runtime: closure-env" (previous test) -- an honest upper bound -- but native lowering's own pre-existing, unmodified hir::blockescape pass (de-closure conversion, this file's header) then optimizes the heap closure away entirely: module_fn/wrapper/wrapper2 are all bound in the SAME "program" region (module-scope and program-top-level function binds are ordinary flat statements of one shared region -- this file's own header comment, and hir/resolve.tcl's), every reference among them is an exact direct call, so blockescape is free to pass counter::retained on as an ordinary trailing parameter at each call site instead (env=0, captures=0, an extra "counter::retained" pname) -- item 8's "or otherwise gain an environment". control_wrapper needs no such parameter at all: counter::no_captures is envless, so its capture contributes nothing (native/lower.tcl's CaptureList/BindingAccess, the same "fnvalue" filtering exercised below for web::is_unreserved)} -body {
+    withScratchLibrary {
+        set main [writeC2Fixture $dir]
+        set hir [surface::readProgramFile $main -strict 0]
+        set nir [native::nir $hir]
+        list [regexp {func [0-9]+ "wrapper" params=2 env=0 [^\n]*pnames="x counter::retained" captures=0} $nir] \
+            [regexp {func [0-9]+ "wrapper2" params=2 env=0 [^\n]*pnames="x counter::retained" captures=0} $nir] \
+            [regexp {func [0-9]+ "control_wrapper" params=1 env=0 [^\n]*pnames="x" captures=0} $nir]
+    }
+} -result {1 1 1}
+
+test surface-modules-c2-existing-corpus-unaffected {the C2 fix changes web::is_unreserved's own raw HIR captures (it now also names ascii::is_alphanumeric, a qualified reference from inside its body) but not what native lowering actually emits for it: ascii::is_alphanumeric is itself envless, so it is filtered to a no-value "fnvalue" access (native/lower.tcl's CaptureList/BindingAccess) exactly as an ordinary same-module call to an envless function already was before this fix (hir-aot-22-style, and this file's own uri-escape test above) -- is_unreserved's own NIR keeps exactly its one real (List-valued) capture, byte-identical to before the fix (see M0-MODULE-CLOSURE-AND-URI-BASELINE.md's before/after corpus diff)} -body {
+    set path [makeFile {web::is_unreserved(45)} c2-corpus-unaffected.bot]
+    try {
+        set hir [surface::readProgramFile $path -strict 0]
+        set nir [native::lower::program $hir]
+        set captureNames {}
+        dict for {id r} [dict get [hir::aot::analyze $hir] regions] {
+            if {[dict get $r name] eq "web::is_unreserved"} {
+                set captureNames [lmap c [dict get $r captures] {dict get $c name}]
+            }
+        }
+        list [lsort $captureNames] \
+            [regexp {func [0-9]+ "web::is_unreserved" params=1 env=1[^\n]*captures=1} [dict get $nir text]]
+    } finally {
+        removeFile c2-corpus-unaffected.bot
+    }
+} -result {{ascii::is_alphanumeric web::additional_unreserved_chars} 1}
 
 cleanupTests

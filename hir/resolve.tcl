@@ -20,8 +20,16 @@
 #   ordinary name: it is resolved directly against NAMESPACE's own module
 #   section scope (ResolveQualifiedRef), always "yes" (a module's
 #   definitions are all bound, unconditionally, before any code that can
-#   reference them runs -- surface/modules.tcl), and captured by nothing
-#   (like a root reference).
+#   reference them runs -- surface/modules.tcl). Its binding is never itself
+#   *within* any enclosing block's body scope (a module section scope is
+#   always a sibling of the program's own top scope), so it captures exactly
+#   like a distant lexical reference: every enclosing block between the
+#   reference and the program root captures it (Capture, shared with
+#   ResolveRef) -- interp never needs this (module bindings live in the same
+#   top-level frame as everything else, reachable by binding id alone), but
+#   native lowering represents a function's reach into anything outside its
+#   own params as a capture, and a module binding that is itself a closure
+#   (retains state) is exactly such a reach.
 # * Whether the binding has its value when the reference is evaluated:
 #     yes       it is bound earlier in the same invocation, or is a
 #               parameter or root binding
@@ -277,7 +285,7 @@ proc hir::resolve::Expr {hirVar node ctx} {
         }
         ref {
             if {[dict exists $node qualified]} {
-                ResolveQualifiedRef hir $e [dict get $node qualified]
+                ResolveQualifiedRef hir $e [dict get $node qualified] $ctx
             } else {
                 ResolveRef hir $e [dict get $node name] [dict get $node root] $ctx
             }
@@ -535,7 +543,7 @@ proc hir::resolve::Sequence {hirVar nodes ctx} {
 # failure here is an internal invariant violation (a caller that built
 # syntax nodes without going through surface/modules.tcl), not a
 # user-facing diagnostic.
-proc hir::resolve::ResolveQualifiedRef {hirVar e pair} {
+proc hir::resolve::ResolveQualifiedRef {hirVar e pair ctx} {
     upvar 1 $hirVar hir
     lassign $pair ns name
     SetField hir $e name "${ns}::${name}"
@@ -546,8 +554,20 @@ proc hir::resolve::ResolveQualifiedRef {hirVar e pair} {
     if {![dict exists $hir scopes $bodyScope names $name]} {
         core::malformed "unresolved module reference ${ns}::${name}: namespace \"$ns\" has no definition \"$name\"" [list ref "${ns}::${name}"]
     }
-    SetField hir $e binding [dict get $hir scopes $bodyScope names $name]
+    set b [dict get $hir scopes $bodyScope names $name]
+    SetField hir $e binding $b
     SetField hir $e init yes
+    # The module section scope is never within any enclosing block's own
+    # body scope (it is always a sibling of the program's top scope), so
+    # this always captures through every enclosing block, exactly like an
+    # ordinary reference to a binding declared outside all of them
+    # (Capture; see this proc's own header and the file header's module-
+    # qualified-reference bullet). Interp does not need this -- a module
+    # binding is reachable by binding id alone, in the shared top-level
+    # frame -- but native lowering does: a function's only way to reach
+    # anything beyond its own params is a capture, and a module binding
+    # that is itself a closure (retains state) is such a reach.
+    Capture hir $ctx [dict get $hir bindings $b scope] $b
 }
 
 # Resolves reference E to NAME; ROOT 1: to the root binding NAME, whatever
@@ -595,17 +615,26 @@ proc hir::resolve::ResolveRef {hirVar e name root ctx} {
     }
     SetField hir $e init $init
 
-    # Every enclosing block that does not contain the binding captures it.
     if {[dict get $binding kind] ne "root"} {
-        foreach entry [lreverse [dict get $ctx blocks]] {
-            lassign $entry block bodyScope
-            if {[hir::scopeWithin $hir $bindingScope $bodyScope]} {
-                break
-            }
-            set captures [dict get $hir exprs $block captures]
-            if {$b ni $captures} {
-                SetField hir $block captures [concat $captures [list $b]]
-            }
+        Capture hir $ctx $bindingScope $b
+    }
+}
+
+# Every enclosing block of CTX (innermost first) that does not itself
+# contain BINDINGSCOPE captures binding B -- shared by ResolveRef's own
+# lexical walk and ResolveQualifiedRef's direct resolution against a module
+# section scope (a module section scope is never within any user block, so
+# there this always captures through every enclosing block).
+proc hir::resolve::Capture {hirVar ctx bindingScope b} {
+    upvar 1 $hirVar hir
+    foreach entry [lreverse [dict get $ctx blocks]] {
+        lassign $entry block bodyScope
+        if {[hir::scopeWithin $hir $bindingScope $bodyScope]} {
+            break
+        }
+        set captures [dict get $hir exprs $block captures]
+        if {$b ni $captures} {
+            SetField hir $block captures [concat $captures [list $b]]
         }
     }
 }

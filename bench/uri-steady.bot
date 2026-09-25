@@ -1,0 +1,39 @@
+# uri-steady.bot -- steady-state URI/Byte/ASCII benchmark.
+#
+# M0 (M0-MODULE-CLOSURE-AND-URI-BASELINE.md): repeatedly calls the frozen
+# web::uri_escape_text (lib/web.bot) from an ordinary user function --
+# exactly the "user function -> module-scope closure" shape C2
+# (COMPREHENSIVE-GENERATED-CODE-AUDIT.md) blocked natively before its fix.
+# bench/refined-checks.ir's own URI path runs once, at startup, on a tiny
+# input ("a b"), and its measured steady state is mostly Emailish? (see the
+# audit's C2 section); this instead exercises UTF-8 encoding, Byte/ASCII
+# classification (ascii::is_alphanumeric, web::is_unreserved) and percent-
+# escaping repeatedly, in steady state, on a small fixed corpus (spec item
+# 18): plain unreserved ASCII, ASCII that needs percent-escaping, multi-byte
+# UTF-8, and a short mixed string.
+#
+# repeat_uri is the ordinary "outer recursion drives N repeats" idiom this
+# repository's own benchmarks already use (bench/loop-count.ir's `drive`,
+# bench/hashtable.tcl's `build`) -- before the C2 fix this specific shape
+# (repeat_uri, an ordinary user function, calling web::uri_escape_text, a
+# module-scope closure) could not be lowered natively at all, so the
+# repeated calls could not be placed inside a function the way ordinary
+# application code would (spec item 16): only at program top level, or
+# inside another module function.
+#
+# acc sums each result's own length (an Int, spec items 19-20: no
+# persistent list/String accumulation in the harness itself -- only
+# web::uri_escape_text's own frozen implementation ever concatenates
+# Strings -- and every call's result observably contributes to the final
+# value, so nothing here can be dropped as dead work).
+
+corpus = ["abcXYZ012", "a b+c?", "café", "hello 世界?"]
+
+fn repeat_uri(i, total, acc):
+    if i >= total:
+        return acc
+    text = list_get(corpus, mod(i, list_length(corpus)))
+    escaped = web::uri_escape_text(text)
+    repeat_uri(i + 1, total, acc + length(escaped))
+
+repeat_uri(0, 2000, 0)

@@ -157,6 +157,29 @@ test web-unreserved-backend-parity-256 {web::is_unreserved agrees across interp/
 } -result same
 
 # ---------------------------------------------------------------------------
+# C2 (COMPREHENSIVE-GENERATED-CODE-AUDIT.md sec. C2;
+# M0-MODULE-CLOSURE-AND-URI-BASELINE.md): the exact real-world reproduction.
+# Every web::is_unreserved call above is either at program top level or
+# inside a top-level `loop` body -- neither creates a new hir::aot region
+# (a loop body shares its enclosing invocation's region), so none of them
+# ever exercised the bug: an ordinary *user function* referencing
+# web::is_unreserved, which is itself a closure over the retained
+# additional_unreserved_chars. Before the fix, native lowering raised
+# "NATIVE BUG: binding ... is not reachable" here; interp was always
+# correct. tests/surface-modules.test has the generic (web-independent)
+# fixture and the capture-set/structural inspection; this is the one
+# concrete case the milestone names.
+
+test web-unreserved-user-fn-wraps-module-closure {fn f(b: Byte) -> bool: web::is_unreserved(b) -- f(45) -- agrees on every backend (was a native-only crash)} -body {
+    set path [makeFile "fn f(b: Byte) -> bool:\n    web::is_unreserved(b)\n\nf(45)\n" web-unreserved-user-fn-wrap.bot]
+    try {
+        list [moduleParity $path] [moduleValue $path]
+    } finally {
+        removeFile web-unreserved-user-fn-wrap.bot
+    }
+} -result {same true}
+
+# ---------------------------------------------------------------------------
 # Module retention (spec items 22-23, 39-42, 56-57): the four-byte
 # punctuation set is built exactly once, at module initialization, and
 # reused by every later web::is_unreserved call -- never reconstructed,
