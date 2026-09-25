@@ -237,8 +237,15 @@ test range-induction-nested-2 {two harmless wrappers stacked, each with its own 
     paramRanges $analysis [rangeInstance $spec f]
 } -result {{[0, 5]} {[-∞, +∞]} {[-∞, +∞]}}
 
+# Its dead branch used to be an unbound call ("error(\"bad\")": before
+# EXPLICIT-ERROR-COMPLETIONS.md, "error" was an ordinary, unbound
+# identifier, used only as a stand-in for "something that is not a plain
+# value" -- see hir/range.tcl's own `fail { return never }` case), a
+# placeholder now more precisely expressed with the real language feature
+# this test's own point is about: a genuine abrupt completion, neither a
+# plain value nor return/break/continue.
 test range-induction-nested-3 {a wrapper whose dead branch raises an error rather than returning a plain value: Botlish's own semantic-completion classification (#15), not "return/break/continue" alone, decides what a branch may safely do without being on the recursive path} -body {
-    lassign [rangeOf "fn f(n, ok):\n    if ok:\n        if n == 0:\n            0\n        else:\n            f(n - 1, ok)\n    else:\n        error(\"bad\")\n\nf(5, true)"] hir spec analysis
+    lassign [rangeOf "error Bad\nfn f(n, ok) errors Bad:\n    if ok:\n        if n == 0:\n            0\n        else:\n            f(n - 1, ok)\n    else:\n        fail Bad\n\nf(5, true)"] hir spec analysis
     paramRanges $analysis [rangeInstance $spec f]
 } -result {{[0, 5]} {[-∞, +∞]}}
 

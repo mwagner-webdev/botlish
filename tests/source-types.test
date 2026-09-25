@@ -218,46 +218,127 @@ fn h(x) -> Sparse:
 } -result {3:5 function result does not prove declared type int[Sparse] (facts: [0, 12])}
 
 # ---------------------------------------------------------------------------
-# Constructors (items 66-72)
+# Constructors (items 66-72). These used to exercise the callable Small(x)/
+# Tags(x) checked-constructor syntax directly; EXPLICIT-ERROR-COMPLETIONS.md
+# removes that syntax entirely (no source-defined refinement type has a
+# callable form any more). The generic, not-type-specific property these
+# tests pin -- a runtime range check for a source-declared domain, success
+# and failure alike, dense and sparse, agreeing between backends -- is now
+# demonstrated through an explicit `errors`/`fail`/`handle` function
+# instead, the same shape byte::from_int itself uses.
 
-test source-type-constructor-success {Small(0)/Small(10) succeed} -body {
+test source-type-constructor-success {check(0)/check(10), a source-declared type's own explicit fallible conversion, succeed at both ends of the domain} -body {
     set h [surface::compile {type Small = Int in 0..10
-
-[Small(0), Small(10)]
+error OutOfRange
+fn check(n) -> Small errors OutOfRange:
+    if n < 0:
+        fail OutOfRange
+    else:
+        if n > 10:
+            fail OutOfRange
+        else:
+            n
+a = check(0):
+    on OutOfRange:
+        0
+b = check(10):
+    on OutOfRange:
+        0
+[a, b]
 } t.bot]
     set exprs [hir::lower $h]
     core::useBackend interp
     core::formatValue [core::evalProgram $exprs]
 } -result {[0, 10]}
 
-test source-type-constructor-failure {Small(-1)/Small(11) fail with the same RANGE error class as a compiler-registered refined type} -body {
+test source-type-constructor-failure {check(-1)/check(11) each raise the declared OutOfRange error, uncaught at the top level (which declares none)} -body {
     set h1 [surface::compile {type Small = Int in 0..10
-Small(-1)
-} t.bot]
+error OutOfRange
+fn check(n) -> Small errors OutOfRange:
+    if n < 0:
+        fail OutOfRange
+    else:
+        if n > 10:
+            fail OutOfRange
+        else:
+            n
+check(-1)
+} t.bot -strict 0]
     set h2 [surface::compile {type Small = Int in 0..10
-Small(11)
-} t.bot]
+error OutOfRange
+fn check(n) -> Small errors OutOfRange:
+    if n < 0:
+        fail OutOfRange
+    else:
+        if n > 10:
+            fail OutOfRange
+        else:
+            n
+check(11)
+} t.bot -strict 0]
     list [errorCodeOf {*}[hir::lower $h1]] [errorCodeOf {*}[hir::lower $h2]]
-} -result {{CORE SEMANTIC RANGE} {CORE SEMANTIC RANGE}}
+} -result {{CORE SEMANTIC UNCAUGHT-ERROR} {CORE SEMANTIC UNCAUGHT-ERROR}}
 
-test source-type-sparse-constructor {Tags(4) succeeds, Tags(5) fails, for a sparse source-declared domain} -body {
+test source-type-sparse-constructor {check(4) succeeds, check(5) fails, for a sparse source-declared domain} -body {
     set h1 [surface::compile {type Tags = Int in {1, 4, 7}
-Tags(4)
-} t.bot]
+error NotATag
+fn check(n) -> Tags errors NotATag:
+    if n == 1:
+        n
+    else:
+        if n == 4:
+            n
+        else:
+            if n == 7:
+                n
+            else:
+                fail NotATag
+check(4)
+} t.bot -strict 0]
     set h2 [surface::compile {type Tags = Int in {1, 4, 7}
-Tags(5)
-} t.bot]
+error NotATag
+fn check(n) -> Tags errors NotATag:
+    if n == 1:
+        n
+    else:
+        if n == 4:
+            n
+        else:
+            if n == 7:
+                n
+            else:
+                fail NotATag
+check(5)
+} t.bot -strict 0]
     list [core::formatValue [core::evalProgram [hir::lower $h1]]] [errorCodeOf {*}[hir::lower $h2]]
-} -result {4 {CORE SEMANTIC RANGE}}
+} -result {4 {CORE SEMANTIC UNCAUGHT-ERROR}}
 
 test source-type-constructors-interp-compile-parity {constructors agree between interp and compile, success and failure alike} -body {
     set h [surface::compile {type Small = Int in 0..10
-Small(7)
-} t.bot]
+error OutOfRange
+fn check(n) -> Small errors OutOfRange:
+    if n < 0:
+        fail OutOfRange
+    else:
+        if n > 10:
+            fail OutOfRange
+        else:
+            n
+check(7)
+} t.bot -strict 0]
     set exprsOk [hir::lower $h]
     set h2 [surface::compile {type Small = Int in 0..10
-Small(20)
-} t.bot]
+error OutOfRange
+fn check(n) -> Small errors OutOfRange:
+    if n < 0:
+        fail OutOfRange
+    else:
+        if n > 10:
+            fail OutOfRange
+        else:
+            n
+check(20)
+} t.bot -strict 0]
     set exprsBad [hir::lower $h2]
     list [differential $exprsOk] [differential $exprsBad]
 } -result {same same}
@@ -321,23 +402,39 @@ test source-type-dense-canonicalization {a dense finite domain's semantic identi
 test source-type-over-budget-exact-set-stays-semantically-exact {a >32-value source domain remains a sound, exact semantic type even though hir/range.tcl's own 32-value analysis budget cannot materialize it as an exact fact} -body {
     set values {}
     for {set i 0} {$i < 40} {incr i} { lappend values [expr {$i * 2}] }
-    set src "type Big = Int in \{[join $values {, }]\}\n\n\[Big(0), Big(78)\]\n"
+    # check(n) only actually needs to distinguish these three probe values
+    # (0/78 in Big's own 40-value domain, 1 not) from each other -- it does
+    # not need to reprove Big's own full membership (see this section's own
+    # header note above).
+    set src "type Big = Int in \{[join $values {, }]\}\nerror NotBig\nfn check(n) -> Big errors NotBig:\n    if n == 0:\n        n\n    else:\n        if n == 78:\n            n\n        else:\n            fail NotBig\na = check(0):\n    on NotBig:\n        0\nb = check(78):\n    on NotBig:\n        0\n\[a, b\]\n"
     set h [surface::compile $src t.bot]
     set exprs [hir::lower $h]
     core::useBackend interp
     set ok [core::formatValue [core::evalProgram $exprs]]
-    set badSrc "type Big = Int in \{[join $values {, }]\}\nBig(1)\n"
-    set errCode [errorCodeOf {*}[hir::lower [surface::compile $badSrc t.bot]]]
+    set badSrc "type Big = Int in \{[join $values {, }]\}\nerror NotBig\nfn check(n) -> Big errors NotBig:\n    if n == 0:\n        n\n    else:\n        if n == 78:\n            n\n        else:\n            fail NotBig\ncheck(1)\n"
+    set errCode [errorCodeOf {*}[hir::lower [surface::compile $badSrc t.bot -strict 0]]]
     set fact [hir::range::show [hir::range::TypeFact Big]]
     list $ok $errCode $fact
-} -result {{[0, 78]} {CORE SEMANTIC RANGE} {[0, 78]}}
+} -result {{[0, 78]} {CORE SEMANTIC UNCAUGHT-ERROR} {[0, 78]}}
 
 # ---------------------------------------------------------------------------
 # Compilation isolation (items 109-111)
 
 test source-type-repeated-compilation {compiling the same source-defined-type program twice in one process succeeds both times, with equivalent metadata} -body {
     set src {type Small = Int in 0..10
-Small(7)
+error OutOfRange
+fn check(n) -> Small errors OutOfRange:
+    if n < 0:
+        fail OutOfRange
+    else:
+        if n > 10:
+            fail OutOfRange
+        else:
+            n
+r = check(7):
+    on OutOfRange:
+        0
+r
 }
     set h1 [surface::compile $src t.bot]
     set h2 [surface::compile $src t.bot]
@@ -348,19 +445,52 @@ Small(7)
 
 test source-type-sequential-non-leaking-compilation {two sequential programs declaring the same spelling with different domains do not leak into each other} -body {
     set h1 [surface::compile {type Small = Int in 0..10
-Small(10)
+error OutOfRange
+fn check(n) -> Small errors OutOfRange:
+    if n < 0:
+        fail OutOfRange
+    else:
+        if n > 10:
+            fail OutOfRange
+        else:
+            n
+r = check(10):
+    on OutOfRange:
+        0
+r
 } t.bot]
     set v1 [core::formatValue [core::evalProgram [hir::lower $h1]]]
     set h2 [surface::compile {type Small = Int in 100..110
-Small(10)
-} t.bot]
+error OutOfRange
+fn check(n) -> Small errors OutOfRange:
+    if n < 100:
+        fail OutOfRange
+    else:
+        if n > 110:
+            fail OutOfRange
+        else:
+            n
+check(10)
+} t.bot -strict 0]
     set e2 [errorCodeOf {*}[hir::lower $h2]]
     set h3 [surface::compile {type Small = Int in 100..110
-Small(105)
+error OutOfRange
+fn check(n) -> Small errors OutOfRange:
+    if n < 100:
+        fail OutOfRange
+    else:
+        if n > 110:
+            fail OutOfRange
+        else:
+            n
+r = check(105):
+    on OutOfRange:
+        100
+r
 } t.bot]
     set v3 [core::formatValue [core::evalProgram [hir::lower $h3]]]
     list $v1 $e2 $v3
-} -result {10 {CORE SEMANTIC RANGE} 105}
+} -result {10 {CORE SEMANTIC UNCAUGHT-ERROR} 105}
 
 # ---------------------------------------------------------------------------
 # Module tests (items 108, 89-90)

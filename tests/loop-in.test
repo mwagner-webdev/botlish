@@ -165,23 +165,48 @@ test loop-in-return-parity {return-from-inside-loop agrees on every backend} -bo
 f()}
 } -result same
 
+# These two tests used to construct a source-defined refined type via the
+# callable Small(x) constructor syntax, now removed entirely
+# (EXPLICIT-ERROR-COMPLETIONS.md): a genuinely dynamic out-of-domain value
+# is now an explicit `fail`, admitted here by `check`'s own `errors`
+# declaration and left unhandled at the loop's own call site, so it
+# propagates out of the whole listloop -- the same "no partial result"
+# property, through the new mechanism. Left unhandled at the top level too
+# (compiled with -strict 0, matching tests/byte-set.test's own
+# moduleErrorKinds idiom) so both tests can still observe a real runtime
+# outcome: every backend agrees on CORE SEMANTIC UNCAUGHT-ERROR
+# (core/completion.tcl's atProgramBoundary), not CORE SEMANTIC RANGE, the
+# old callable constructor's own kind, which no longer exists.
+
 test loop-in-error-propagates {a failing checked construction inside the body propagates the ordinary error, with no partial result} -body {
     outcomeUnder interp [hir::lower [loopSourceHir {type Small = Int in 0..10
+error TooBig
+fn check(n) -> Small errors TooBig:
+    if n > 10:
+        fail TooBig
+    else:
+        n
 loop x in [1, 20, 2]:
-    Small(x)
+    check(x)
 }]]
-} -result {error {CORE SEMANTIC RANGE} {Small: 20 is not a valid Small} {}}
+} -result {error {CORE SEMANTIC UNCAUGHT-ERROR} {uncaught propagated error: <error TooBig>} {}}
 
-test loop-in-error-parity {the error case agrees on every backend (error kind -- native's own message cannot show the dynamic value, exactly like an ordinary checked constructor's own cranelift message: see BYTE-SET.md)} -body {
+test loop-in-error-parity {the error case agrees on every backend} -body {
     set exprs [hir::lower [loopSourceHir {type Small = Int in 0..10
+error TooBig
+fn check(n) -> Small errors TooBig:
+    if n > 10:
+        fail TooBig
+    else:
+        n
 loop x in [1, 20, 2]:
-    Small(x)
+    check(x)
 }]]
     lmap backend $::parityBackends {
         set outcome [outcomeUnder $backend $exprs]
         list [lindex $outcome 0] [lindex $outcome 1]
     }
-} -result {{error {CORE SEMANTIC RANGE}} {error {CORE SEMANTIC RANGE}} {error {CORE SEMANTIC RANGE}} {error {CORE SEMANTIC RANGE}}}
+} -result {{error {CORE SEMANTIC UNCAUGHT-ERROR}} {error {CORE SEMANTIC UNCAUGHT-ERROR}} {error {CORE SEMANTIC UNCAUGHT-ERROR}} {error {CORE SEMANTIC UNCAUGHT-ERROR}}}
 
 # ---------------------------------------------------------------------------
 # Nested loops

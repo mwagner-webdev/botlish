@@ -1062,37 +1062,14 @@ proc native::lower::program {hirProgram args} {
         if {[dict exists $functions $key]} {
             continue
         }
-        if {[catch {
-            switch -- $mode {
-                canonical       { Function $id }
-                companion       { CompanionFunction $id }
-                region          { RegionCompanionFunction $id }
-                internal        { InternalFunction $id }
-                internalregion  { InternalRegionCompanionFunction $id }
-                fields          { FieldsFunction $id }
-                fieldscompanion { FieldsCompanionFunction $id }
-            }
-        } lowered options]} {
-            set code [dict get $options -errorcode]
-            if {[lrange $code 0 1] ne {NATIVE UNSUPPORTED}} {
-                return -options $options $lowered
-            }
-            # A function that itself uses an unsupported construct
-            # (currently: EXPLICIT-ERROR-COMPLETIONS.md's `fail`/`handle`,
-            # not yet lowered to native code -- see native::lower::Expr's
-            # own comment) must not poison the whole program's lowering:
-            # every top-level function of a loaded module is reachable
-            # from `program` regardless of whether the entry expression
-            # actually calls it (its Block value could always escape), so
-            # one such function elsewhere in a shared module (e.g.
-            # lib/web.bot's esc_char, reachable only through
-            # uri_escape_text) would otherwise break native lowering of
-            # every unrelated program that merely loads that module. A
-            # function that is never actually called keeps working
-            # everywhere else; only actually calling this one specific
-            # function fails, cleanly, with the same NATIVE UNSUPPORTED
-            # diagnostic Unsupported would have raised directly.
-            set lowered [UnsupportedStub $id $mode $lowered]
+        switch -- $mode {
+            canonical       { set lowered [Function $id] }
+            companion       { set lowered [CompanionFunction $id] }
+            region          { set lowered [RegionCompanionFunction $id] }
+            internal        { set lowered [InternalFunction $id] }
+            internalregion  { set lowered [InternalRegionCompanionFunction $id] }
+            fields          { set lowered [FieldsFunction $id] }
+            fieldscompanion { set lowered [FieldsCompanionFunction $id] }
         }
         dict set functions $key $lowered
     }
@@ -1394,53 +1371,6 @@ proc native::lower::RawParams {id instance params} {
 
 # Lowers the function of instance ID (hir/specialize.tcl). Returns
 # {TEXT INFO}.
-# A minimal stand-in for instance ID's own function, used only when the
-# real lowering (Function or one of its specialized-mode siblings) raised
-# {NATIVE UNSUPPORTED ...}: same params/arity/name as the real function
-# would have had (so every caller's own call site, already lowered against
-# that signature, still links correctly), but its body is exactly the one
-# `raise` MESSAGE describes -- calling this specific function is the only
-# thing that ever actually fails; every other function is unaffected. See
-# program's own pending-loop comment for why this must not simply abort
-# the whole program's lowering.
-proc native::lower::UnsupportedStub {id mode message} {
-    variable hir
-    variable baseHir
-    variable spec
-    set hir [hir::specialize::view $baseHir $spec $id]
-    set instance [hir::specialize::instance $spec $id]
-    set region [dict get $instance block]
-    if {$region eq "program"} {
-        set name <program>
-        set pnames {}
-        set arity 0
-    } else {
-        set name [hir::aot::BlockName $hir $region]
-        set params [hir::get $hir $region params]
-        set pnames [lmap b $params {dict get [hir::binding $hir $b] name}]
-        set arity [llength $params]
-    }
-    set key [expr {[dict get $instance generic] ? "generic"
-        : [join [lmap t [dict get $instance args] {hir::types::show $t}] {, }]}]
-    set head "func [Placeholder $id $mode] [Quote $name] params=$arity env=0 regs=0 pnames=[Quote [join $pnames { }]] captures=0 instance=[Quote $key]"
-    if {$region ne "program"} {
-        append head " @$region"
-    }
-    # "raise" only ever signals core/errors.tcl's own SEMANTIC_KINDS or BUG
-    # (runtime/error.rs's rt_raise); NATIVE UNSUPPORTED is a *compile-time*
-    # classification (native lowering's own Unsupported, above), not one of
-    # those, so BUG is the closest honest runtime kind if this stub is ever
-    # actually reached -- MESSAGE (this same NATIVE UNSUPPORTED diagnostic's
-    # own text) still says exactly what is unsupported and why.
-    set text "$head\n    raise BUG [Quote $message]\nend"
-    set info [dict create id [Placeholder $id] name $name block $region instance $id \
-        label [hir::specialize::label $spec $id] generic [dict get $instance generic] \
-        envless 1 selfTailCalls 0 calls {} \
-        blockers 0 guards 0 knownErrorGuards 0 \
-        rawUnboxes 0 rawBoxes 0 rawArith 0 rawCompare 0]
-    return [list $text $info]
-}
-
 proc native::lower::Function {id} {
     variable hir
     variable baseHir
