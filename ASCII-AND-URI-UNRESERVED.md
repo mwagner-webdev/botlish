@@ -546,8 +546,8 @@ similarly-updated test): **`Total 28 Passed 28 Failed 0`**;
 `tests/ascii.test`: **`Total 33 Passed 33 Failed 0`**;
 `tests/web-unreserved.test`: **`Total 11 Passed 11 Failed 0`**;
 `tests/native-uri-escape.test` (unmodified): **`Total 18 Passed 18 Failed
-0`**. A second full `tests/all.tcl` run (with both fixes applied) is
-recorded below once it completes.
+0`**. A second, full run with both fixes applied (71 test files):
+**`Total 2060 Passed 2060 Skipped 0 Failed 0`**.
 
 ```
 cargo test --release --manifest-path native/Cargo.toml
@@ -558,8 +558,15 @@ filtered out`.**
 ```
 BOTLISH_NATIVE_GC_STRESS=1 tclsh9.0 tests/all.tcl
 ```
-Recorded below once it completes (run in isolation, per spec item 71, to
-avoid resource-contention noise with the ordinary run above).
+Run in isolation (per spec item 71, to avoid resource-contention noise
+with the ordinary run above): **`Total 2060 Passed 2060 Skipped 0 Failed
+0`** (71 test files).
+
+No placeholders: every count above is from an actual run in this session
+(Tcl 9.0.1, installed per AGENTS.md; native backend rebuilt with rustc
+1.98.1 via `rustup toolchain install stable`, since the sandbox's
+preinstalled 1.94.1 does not satisfy the pinned `cranelift-*`/
+`wasmtime-internal-*` crates' 1.95 floor).
 
 ## Architecture questions
 
