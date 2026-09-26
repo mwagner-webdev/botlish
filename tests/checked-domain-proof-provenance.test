@@ -1,0 +1,398 @@
+# checked-domain-proof-provenance.test -- M5
+# (M5-CHECKED-DOMAIN-FACT-PROVENANCE.md): does the exact/finite caller fact
+# behind
+#
+#   additional_unreserved_chars = byte::set(['-', '.', '_', '~'])
+#
+# survive through byte::set's own `loop c in chars: from_int(char::
+# codepoint(c))` far enough to reach a *codegen-visible* proof that the
+# inner checked Byte construction cannot fail? Answer, measured directly
+# below and in the report: no -- Outcome B. `hir/completions.tcl` (the
+# call-specific completion proof STATIC-COMPLETION-PROOFS.md added) proves
+# the module-init call's own `effectiveErrors = {}` correctly (a genuine,
+# already-shipped static-legality result), entirely through a private,
+# non-materializing recursive re-walk (`analyzeBlock`) that never touches
+# the HIR node fields of the inner `from_int`/`char::codepoint` calls
+# inside `byte::set`'s own single, generically-checked function body.
+# Those inner nodes -- and every downstream pass that could act on them
+# for *code generation* (`hir/range.tcl`, `hir/specialize.tcl`,
+# `native/lower.tcl`) -- only ever see the generic, unseeded fact
+# (`char::codepoint(c)` in `[0, 0x10FFFF]`, `from_int`'s own
+# `effectiveErrors = {AboveRange}`), because `hir/completions.tcl` is a
+# separate, deliberately siloed lattice (STATIC-COMPLETION-PROOFS.md's own
+# "Path-sensitive range facts" section) that no backend or lowering pass
+# ever reads. Confirmed directly (not by analogy) that `native::lower::If`
+# decides branch reachability only from `hir::types::KnownOutcome` (a
+# purely type-level, syntactic check) -- never from `hir::range`'s own
+# interval/exact-set facts, which is itself already retained at the
+# instance level in some cases (e.g. a literal-only caller narrows an
+# instance's own entry range to an exact singleton) but is *still* not
+# consulted for branch elimination. This is the pre-existing, already-
+# catalogued residual `RC2`/`RC5`/`F02`/`F03` from
+# COMPREHENSIVE-GENERATED-CODE-AUDIT.md, re-confirmed here against the
+# current (post-EXPLICIT-ERROR-COMPLETIONS/STATIC-COMPLETION-PROOFS)
+# source, not fixed by this milestone: repairing it means teaching
+# `native::lower::If` -- the shared, golden-file-assembly-audited branch
+# lowerer for *every* `if` in the language, not something scoped to
+# checked domain construction -- to consult range facts for dead-branch
+# elimination, which is a general optimizer feature, not "the narrowest
+# existing mechanism" this milestone's own scope permits.
+#
+# Byte(x)/NAME(x) callable-constructor syntax no longer exists in the
+# language (EXPLICIT-ERROR-COMPLETIONS.md removed it): every fixture below
+# uses the real, current shape -- an ordinary typed function with an
+# explicit `if`/`fail` body, exactly `byte::from_int`'s own shape, real or
+# reproduced generically for a second, non-Byte domain per item 53.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 100000
+
+set parityBackends {interp compile cranelift-generic cranelift}
+
+proc sourceHir {text} {
+    return [surface::compile $text t.bot -strict 0]
+}
+
+proc diagKinds {hir} {
+    return [lsort [lmap d [hir::diagnostics $hir] {dict get $d kind}]]
+}
+
+# The NIR text for TEXT, with tiny-exact-leaf inlining disabled (so a
+# one-op-shaped callee is not folded into its caller and hidden --
+# TINY-EXACT-LEAF-INLINING.md, orthogonal to this milestone, matching
+# tests/setfromlist-equality-total.test's own established technique).
+proc nirOf {text} {
+    return [dict get [native::lower::program [sourceHir $text] -tiny-leaf-inline-opt 0] text]
+}
+
+proc nirOfFile {path} {
+    return [dict get [native::lower::program [surface::readProgramFile $path -strict 0] -tiny-leaf-inline-opt 0] text]
+}
+
+# The NIR text of exactly one "func ... "NAME" ... instance="..."" block
+# (up to the matching "end"), from a whole program's NIR text.
+proc nirFuncBody {nirText name} {
+    set start [string first "\"$name\"" $nirText]
+    if {$start < 0} {
+        error "no NIR func named \"$name\" found"
+    }
+    set lineStart [string last "\n" $nirText $start]
+    set endIdx [string first "\nend" $nirText $start]
+    return [string range $nirText $lineStart $endIdx]
+}
+
+# How many distinct NIR "func ... "NAME" ..." headers TEXT contains for the
+# function NAME -- the shared-instance question (spec items 8-9, 21-22): if
+# a caller with an all-safe literal argument and a caller with a
+# genuinely-dynamic argument produce exactly one func header each (not two),
+# they share one specialized instance, so no per-instance optimization
+# could soundly mark that shared instance's own inner checked construction
+# unconditionally safe without becoming unsound for the dynamic caller.
+proc funcHeaderCount {nirText name} {
+    return [llength [regexp -all -line "^func \\d+ \"$name\"" $nirText]]
+}
+
+# Every call-kind HIR expr whose own origin line is LINE, as
+# {effectiveErrors resultRangeFact}, from a real program file PATH (already
+# built via surface::readProgramFile).
+proc callFactsAtLine {hir line} {
+    set out {}
+    foreach {id node} [dict get $hir exprs] {
+        if {[dict get $node kind] ne "call" || ![dict exists $node effectiveErrors]} {
+            continue
+        }
+        if {[dict get $node origin line] != $line} {
+            continue
+        }
+        lappend out [list $id [dict get $node effectiveErrors] \
+                [hir::range::show [dict get $node resultRangeFact]]]
+    }
+    return $out
+}
+
+# ---------------------------------------------------------------------------
+# Architecture control: `native::lower::If` decides branch reachability
+# from HIR-level `reachable` (hir::types::KnownOutcome), never from
+# `hir::range`. This is RC2 (COMPREHENSIVE-GENERATED-CODE-AUDIT.md): the
+# generic reason a checked construction's runtime guard never disappears
+# even under a strong local literal fact.
+
+test checked-domain-if-never-consults-range-for-branch-death {native::lower::If's own reachability decision is HIR "reachable" (hir::types::KnownOutcome-derived), never hir::range -- a structural, one-time architecture pin, not per-fixture} -body {
+    set src [core::ReadFile [file join $::projectRoot native lower.tcl]]
+    set ifStart [string first "proc native::lower::If " $src]
+    set ifEnd [string first "\nproc " $src [expr {$ifStart + 1}]]
+    set ifBody [string range $src $ifStart $ifEnd]
+    list [string match "*reachable*" $ifBody] [string match "*hir::range*" $ifBody]
+} -result {1 0}
+
+# ---------------------------------------------------------------------------
+# Q1 (decision-tree item 46): a local, statically obvious in-range literal.
+# Real production source: byte::set's own byte::from_int(45) motivating
+# call (BYTE-SET.md/STATIC-COMPLETION-PROOFS.md's own worked example).
+
+test checked-domain-q1-real-byte-from-int-45-effective-errors-empty {byte::from_int(45) at top level: effectiveErrors={} and resultRangeFact=[45,45]{45} -- the HIR-level proof exists} -body {
+    set path [makeFile {byte::from_int(45)} q1-byte-from-int-45.bot]
+    try {
+        set hir [surface::readProgramFile $path -strict 0]
+        set facts [lindex [callFactsAtLine $hir 1] 0]
+        list [lindex $facts 1] [lindex $facts 2]
+    } finally {
+        removeFile q1-byte-from-int-45.bot
+    }
+} -result {{} {[45, 45] {45}}}
+
+test checked-domain-q1-real-byte-from-int-still-emits-both-checks {despite that proof, byte::from_int<int>'s own generated NIR still contains both range compares and both fail paths -- Q1 = no, RC2/F02 unfixed (this milestone leaves it unfixed: see report)} -body {
+    set path [makeFile {byte::from_int(45)} q1-byte-from-int-45-nir.bot]
+    try {
+        set body [nirFuncBody [nirOfFile $path] "byte::from_int"]
+        list [regexp -all {op rilt} $body] [regexp -all {op rigt} $body] \
+                [regexp -all {faildeclared 1 "BelowRange"} $body] \
+                [regexp -all {faildeclared 2 "AboveRange"} $body]
+    } finally {
+        removeFile q1-byte-from-int-45-nir.bot
+    }
+} -result {1 1 1 1}
+
+test checked-domain-q1-out-of-range-literal-still-known-error {byte::from_int(999) remains a compile-time KNOWN-ERROR, not silently accepted -- the other half of the three-way rule is unaffected} -body {
+    set path [makeFile {byte::from_int(999)} q1-byte-from-int-999.bot]
+    try {
+        diagKinds [surface::readProgramFile $path -strict 0]
+    } finally {
+        removeFile q1-byte-from-int-999.bot
+    }
+} -result {KNOWN-ERROR}
+
+# Generic, non-Byte control (spec item 53): the same shape, a second
+# source-defined interval domain, proves Q1's answer is not Byte-specific.
+
+set ::smallCheckedSrc {error TooSmall
+error TooLarge
+type Small = Int in 10..20
+fn checkedSmall(value: int) -> Small errors TooSmall, TooLarge:
+    if value < 10:
+        fail TooSmall
+    else:
+        if value > 20:
+            fail TooLarge
+        else:
+            value
+}
+
+test checked-domain-q1-generic-domain-literal-still-emits-both-checks {a second, non-Byte bounded domain's own checked constructor, called with a statically safe literal, still emits both range compares and both fail paths -- Q1's answer is generic, not Byte-special-cased} -body {
+    set body [nirFuncBody [nirOf "${::smallCheckedSrc}checkedSmall(15)"] "checkedSmall"]
+    list [regexp -all {op rilt} $body] [regexp -all {op rigt} $body] \
+            [regexp -all {faildeclared 1 "TooSmall"} $body] \
+            [regexp -all {faildeclared 2 "TooLarge"} $body]
+} -result {1 1 1 1}
+
+# ---------------------------------------------------------------------------
+# Q2 (decision-tree item 46): a nonliteral value with an existing, weaker
+# (one-sided) proven range -- STATIC-COMPLETION-PROOFS.md's own
+# `nonneg`/partial-range-elimination shape, generalized to the non-Byte
+# domain above so this is not read as Byte-specific either.
+
+test checked-domain-q2-partial-range-elimination-effective-errors {a value statically known >= 10 (but not upper-bounded) needs only a TooLarge obligation -- the HIR-level proof narrows} -body {
+    set path [makeFile "${::smallCheckedSrc}fn nonneg(m) -> int:
+    if m < 10:
+        10
+    else:
+        m
+fn g(m) -> int errors TooLarge:
+    checkedSmall(nonneg(m))" q2-nonneg.bot]
+    try {
+        diagKinds [surface::readProgramFile $path -strict 0]
+    } finally {
+        removeFile q2-nonneg.bot
+    }
+} -result {}
+
+test checked-domain-q2-still-emits-both-checks {even with that narrower HIR-level proof, checkedSmall<int>'s own generated NIR still contains both compares and both fail paths -- Q2 = no, the same RC2 gap (no per-instance branch elimination from a one-sided hir::range fact either)} -body {
+    set body [nirFuncBody [nirOf "${::smallCheckedSrc}fn nonneg(m) -> int:
+    if m < 10:
+        10
+    else:
+        m
+fn g(m) -> int errors TooLarge:
+    checkedSmall(nonneg(m))
+g(5)"] "checkedSmall"]
+    list [regexp -all {faildeclared 1 "TooSmall"} $body] \
+            [regexp -all {faildeclared 2 "TooLarge"} $body]
+} -result {1 1}
+
+# ---------------------------------------------------------------------------
+# Q3 (decision-tree item 46): the real byte::set path, the actual question
+# this milestone was asked to answer.
+
+test checked-domain-q3-module-init-effective-errors-empty {the real production shape, additional_unreserved_chars = byte::set(['-', '.', '_', '~']), proves effectiveErrors={} for the outer call -- the HIR-level proof this milestone traces genuinely exists, at the outer call} -body {
+    set path [makeFile {additional_unreserved_chars = byte::set(['-', '.', '_', '~'])} q3-module-init.bot]
+    try {
+        set hir [surface::readProgramFile $path -strict 0]
+        lindex [lindex [callFactsAtLine $hir 1] 0] 1
+    } finally {
+        removeFile q3-module-init.bot
+    }
+} -result {}
+
+test checked-domain-q3-inner-call-keeps-only-the-generic-fact {byte::set's own inner from_int(char::codepoint(c)) call -- inside the SAME program above -- still carries only the generic, unseeded facts (from_int's own effectiveErrors=AboveRange; char::codepoint's own result range the full Unicode scalar domain [0, 0x10FFFF]), never the module-init call's own narrower literal-derived proof: the exact first-loss location. Both calls share lib/byte.bot:176 (from_int(char::codepoint(c)) -- one nested inside the other), so both facts are read together and matched by their own distinct resultRangeFact shape} -body {
+    set path [makeFile {additional_unreserved_chars = byte::set(['-', '.', '_', '~'])} q3-inner-call.bot]
+    try {
+        set hir [surface::readProgramFile $path -strict 0]
+        # lib/byte.bot:176 is `from_int(char::codepoint(c))` inside `set`'s
+        # own body: from_int's own resultRangeFact is [0,255] (a
+        # successful Byte value); char::codepoint's is the full Unicode
+        # scalar domain [0, 0x10FFFF] -- distinct calls, same source line.
+        set fromIntErrs {}
+        set codepointRange {}
+        foreach entry [callFactsAtLine $hir 176] {
+            lassign $entry id effErrs resultRange
+            if {$resultRange eq {[0, 255]}} {
+                set fromIntErrs $effErrs
+            } else {
+                set codepointRange $resultRange
+            }
+        }
+        list $fromIntErrs $codepointRange
+    } finally {
+        removeFile q3-inner-call.bot
+    }
+} -result {AboveRange {[0, 1114111]}}
+
+test checked-domain-q3-real-nir-retains-both-checks {byte::set's real generated NIR for its inner byte::from_int<int> instance still contains both range compares and both fail paths, for the actual real production module initializer -- confirming Outcome B's "no codegen change" at the real call site, not merely at a synthetic fixture} -body {
+    set path [makeFile {additional_unreserved_chars = byte::set(['-', '.', '_', '~'])} q3-nir.bot]
+    try {
+        set body [nirFuncBody [nirOfFile $path] "byte::from_int"]
+        list [regexp -all {op rilt|op ilt} $body] [regexp -all {op rigt|op igt} $body] \
+                [regexp -all {faildeclared 1 "BelowRange"} $body] \
+                [regexp -all {faildeclared 2 "AboveRange"} $body]
+    } finally {
+        removeFile q3-nir.bot
+    }
+} -result {1 1 1 1}
+
+# ---------------------------------------------------------------------------
+# Shared-instance adversarial control (spec items 8-9, 21-22): the same
+# byte::set<List[UnicodeChar]> instance, and the same byte::from_int<int>
+# instance, serve both an all-safe caller and a caller that can dynamically
+# fail -- so no per-instance optimization could soundly mark either
+# instance's own inner construction unconditionally safe without becoming
+# unsound for the other caller.
+
+test checked-domain-shared-instance-byte-set {byte::set(['-', '.', '_', '~']) and a dynamic, handled byte::set(chars) call share one NIR instance (one "byte::set" func header), not two} -body {
+    set path [makeFile {additional_unreserved_chars = byte::set(['-', '.', '_', '~'])
+fn dyn(chars) -> ImmutableSet[Byte]:
+    result = byte::set(chars):
+        on AboveRange:
+            additional_unreserved_chars
+    result
+dyn(['A'])} q-shared-byteset.bot]
+    try {
+        funcHeaderCount [nirOfFile $path] {byte::set}
+    } finally {
+        removeFile q-shared-byteset.bot
+    }
+} -result {1}
+
+test checked-domain-shared-instance-from-int {byte::from_int(45) (a literal) and byte::from_int(m) (a genuinely dynamic parameter) share one NIR instance (one "byte::from_int" func header), not two} -body {
+    set path [makeFile {byte::from_int(45)
+fn dyn(m: int) -> Byte errors BelowRange, AboveRange:
+    byte::from_int(m)
+dyn(45)} q-shared-fromint.bot]
+    try {
+        funcHeaderCount [nirOfFile $path] {byte::from_int}
+    } finally {
+        removeFile q-shared-fromint.bot
+    }
+} -result {1}
+
+# ---------------------------------------------------------------------------
+# HighNibble / non-contiguous-domain soundness control (spec items 58-60):
+# no interval-only shortcut could soundly treat a HighNibble-domain value as
+# accepted merely because it lies within [0, 240] -- 17 does, but is not one
+# of the 16 exact members. Nothing in this milestone adds a new proof
+# consumer (Outcome B), so this pins that the *existing* exact-domain
+# membership machinery (core::type::validate, via the generated `NAME?`
+# predicate every source-defined integer-domain type gets) is already sound
+# today, confirming there is no latent unsoundness for a future milestone
+# to inherit if Outcome A ever becomes available for an exact domain.
+
+test checked-domain-highnibble-membership-exact-not-interval {HighNibble's own membership check: 17 is inside HighNibble's [0,240] interval hull but is not one of its 16 exact members -- core::type::validate (the generic runtime membership check every NAME? predicate and every future checked-construction proof would have to share) correctly rejects it, using the real, unmodified lib/byte.bot registration. NAME? predicates have no Botlish source spelling at all (surface/lexer.tcl rejects a trailing "?" as reserved), so this is exercised at the Tcl/core::type layer directly -- spec item 58's "test at the appropriate analysis layer"} -body {
+    # Loading any program that references byte:: registers HighNibble in
+    # core::type's own registry (SOURCE-DEFINED-INTEGER-DOMAINS.md).
+    set path [makeFile {byte::high_nibble(0)} q-highnibble-load.bot]
+    try {
+        surface::readProgramFile $path -strict 0
+    } finally {
+        removeFile q-highnibble-load.bot
+    }
+    list [core::type::validate HighNibble [core::value::int 17]] \
+            [core::type::validate HighNibble [core::value::int 16]] \
+            [core::type::validate HighNibble [core::value::int 240]] \
+            [core::type::validate HighNibble [core::value::int 0]]
+} -result {0 1 1 1}
+
+# ---------------------------------------------------------------------------
+# Runtime-failure preservation controls (M1-M4 style regression pins,
+# spec items 19-20, 28-29): Outcome B changes no runtime semantics.
+
+test checked-domain-byte-set-astral-still-fails {byte::set(['Ā']) (U+0100) still fails at runtime on every backend when its own compile-time KNOWN-ERROR is bypassed (-strict 0, matching tests/byte-set.test's own moduleErrorKinds technique) -- Outcome B changes no runtime semantics} -body {
+    set path [makeFile {byte::set(['Ā'])} q-astral.bot]
+    try {
+        set hir [surface::readProgramFile $path -strict 0]
+        set exprs [hir::lower $hir]
+        lsort -unique [lmap backend $::parityBackends {lindex [outcomeUnder $backend $exprs] 0}]
+    } finally {
+        removeFile q-astral.bot
+    }
+} -result {error}
+
+test checked-domain-byte-set-astral-known-error-at-compile-time {byte::set(['Ā']) is rejected at compile time as a KNOWN-ERROR under ordinary compilation, unaffected by this milestone} -body {
+    set path [makeFile {byte::set(['Ā'])} q-astral-known-error.bot]
+    try {
+        diagKinds [surface::readProgramFile $path -strict 0]
+    } finally {
+        removeFile q-astral-known-error.bot
+    }
+} -result {KNOWN-ERROR}
+
+# ---------------------------------------------------------------------------
+# Corpus census (spec item 38-39): the checked construction this milestone
+# traces executes at module-initialization time only, in the whole frozen
+# corpus.
+
+test checked-domain-corpus-census-single-real-call-site {byte::from_int is called from exactly one place in the whole frozen corpus (lib/*.bot): byte::set's own loop body -- module-init-only cost, confirming any future proof-consumption work here would only ever pay rent at startup} -body {
+    set count 0
+    foreach f [glob -directory [file join $::projectRoot lib] *.bot] {
+        foreach line [split [core::ReadFile $f] \n] {
+            if {[string match {#*} [string trimleft $line]]} {
+                continue
+            }
+            if {[string match {*fn from_int(*} $line]} {
+                continue
+            }
+            incr count [regexp -all {from_int\(} $line]
+        }
+    }
+    set count
+} -result {1}
+
+# ---------------------------------------------------------------------------
+# M4 regression control (spec item 69, section 2 preflight): the
+# SetFromList/SetFromListTotal allocation-site label split
+# (M4-EQUALITY-TOTAL-SETFROMLIST-EFFECT.md) is unaffected -- this milestone
+# makes no production change, so both labels remain exactly as M4 left
+# them, and byte::set's own SetFromList call remains proven equality-total.
+
+test checked-domain-m4-control-byte-set-still-setfromlisttotal {byte::set's own immutable_set_from_list(bytes) call still lowers to the equality-total opcode -- M4 unaffected by this milestone} -body {
+    set path [makeFile {additional_unreserved_chars = byte::set(['-', '.', '_', '~'])} q-m4-control.bot]
+    try {
+        set nirText [nirOfFile $path]
+        list [expr {[string first {op setfromlisttotal} $nirText] >= 0}] \
+                [expr {[string first {op setfromlist } $nirText] >= 0}]
+    } finally {
+        removeFile q-m4-control.bot
+    }
+} -result {1 0}
+
+::tcltest::cleanupTests
