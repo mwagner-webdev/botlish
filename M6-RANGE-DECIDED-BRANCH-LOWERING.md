@@ -413,42 +413,184 @@ sharing in the abstract.
 
 ## Golden-code diff classification
 
-_(filled in against the full corpus/golden-audit re-run; see the
-regression sections below for exact counts)._
+Measured against a true pre-M6 baseline (a `git worktree` at M5's own tip,
+`7b2ed38`, reusing the identical `botlish-native` binary -- M6 touches no
+Rust code, so the same binary is valid for both sides), via
+`audit/comprehensive-generated-code/tools/probe.tcl`, across every probe
+in that directory plus `bench/uri-steady.bot` and `bench/refined-checks.ir`:
+
+| workload | changed? | classification |
+|---|---|---|
+| `uri-steady` | yes | correct theorem consumption (`byte::from_int`'s `BelowRange` check) |
+| `web-unreserved-literals` | yes | correct theorem consumption (same) |
+| `refined-checks` | yes | correct theorem consumption (same, **plus** `check`'s own `unreachable`-arm cleanup, see below) |
+| `steady-ascii` | no | none (negative control) |
+| `steady-ascii-param` | no | none (negative control) |
+| `steady-ascii-capture` | no | none (negative control) |
+| `ascii-256` | no | none (negative control) |
+| `web-unreserved-256` | no | none (negative control) |
+
+Every changed function's diff is the same one theorem
+(`char::codepoint`'s own declared `nonneg` result-range metadata proving
+`byte::from_int`'s `value >= 0` unconditionally, described above under "M5
+`byte::from_int` reassessment"), so no separate per-function classification
+table was needed beyond the one already given there. No workload exercised
+in this probe set showed a range-analysis bug, a lowering bug, or a
+test-expectation-only change beyond the two golden-value updates already
+described (`tests/checked-domain-proof-provenance.test`'s Q1/Q2/Q3
+expectations, and `tests/native-root-liveness.test`'s `work` register
+count from the `bench/loop-count.ir` structural benchmark, a ninth
+workload discovered as a side effect of the plain regression run rather
+than this probe set -- see "Full regression" below).
+
+An aside, not attributable to M6: three of these probes'
+**committed** `audit/comprehensive-generated-code/artifacts/*/summary.txt`
+files (`steady-ascii-capture`, `web-unreserved-256`,
+`web-unreserved-literals`) were already stale *before* M6 -- they predate
+several already-landed, unrelated improvements (`ascii::is_digit` and its
+neighbors specializing from `<generic>` to `<int>` and losing a
+`guardbool`; `byte::set`'s `setfromlist` becoming `setfromlisttotal`).
+Comparing directly against those committed files would have wrongly
+attributed several earlier milestones' gains to M6; the pre-M6 worktree
+baseline above avoids that. These committed audit artifacts were not
+refreshed by this milestone (regenerating and re-curating that whole
+directory is a documentation-maintenance task orthogonal to M6's own
+scope), but are flagged here since the mismatch could otherwise mislead a
+future milestone's own before/after comparison the same way.
 
 ## uri-steady / refined-checks / web-unreserved-256 structural deltas
 
-_(see regression run output; counts to follow)._
+All three tables below compare the same true pre-M6 baseline (M5 tip
+`7b2ed38`) against this milestone's own tip, via `probe.tcl`'s
+`summary.txt`. `web-unreserved-256` itself shows no delta (its own
+`byte::set` call path resolves to the shared, mixed-caller instance
+below); `web-unreserved-literals` is reported instead, since it is the
+probe that actually exercises the changed `byte::from_int<int>` instance
+via a literal-shaped caller.
+
+**`uri-steady`** (`bench/uri-steady.bot`, `-specialize 1`):
+
+| metric | before | after |
+|---|---|---|
+| NIR functions | 17 | 17 (unchanged) |
+| machine code bytes (whole program) | 7103 | 7055 (-48) |
+| `byte::from_int<int>` NIR regs | 9 | 8 |
+| `byte::from_int<int>` machine code bytes | 337 | 289 (-48) |
+| `byte::from_int<int>` `br` count | 2 | 1 |
+| `byte::from_int<int>` `fail` count | 2 | 1 (`BelowRange` gone) |
+| static/constant allocations (whole program, one run) | 32 | 31 |
+| dynamic allocations/bytes (one run) | 61510 / 2544568 | unchanged |
+
+**`refined-checks`** (`bench/refined-checks.ir`):
+
+| metric | before | after |
+|---|---|---|
+| NIR functions | 33 | 33 (unchanged) |
+| machine code bytes (whole program) | 16791 | 16743 (-48) |
+| `byte::from_int<int>` regs/bytes/br/fail | 9 / 337 / 2 / 2 | 8 / 289 / 1 / 1 (identical shape to `uri-steady`) |
+| `check<int, int, str, str>` NIR regs | 28 | 27 |
+| `check<int, int, str, str>` `br` count | 4 | 3 |
+| `check<int, int, str, str>` `unreachable` count | 1 | 0 |
+| `check<int, int, str, str>` machine code bytes | 504 | 504 (unchanged -- register-count drop with no code-size effect) |
+
+`check`'s own diff is a *different* pattern from `byte::from_int`'s: a
+syntactically pre-existing `KnownOutcome`-decided arm that used to lower
+to `br ... ; label Ldead: unreachable` now lowers with no `br` and no
+`unreachable` trap at all (the "before/after" section above, generalized:
+this is the pre-existing-syntactic-case improvement, not a new range
+theorem). Its register count drops by one (the join register the old
+two-arm-plus-unreachable shape needed) with no change in machine code
+bytes -- register renumbering absorbed by the allocator with no size
+effect, not a missing optimization.
+
+**`web-unreserved-literals`** (`audit/comprehensive-generated-code/probes/web-unreserved-literals.bot`):
+
+| metric | before | after |
+|---|---|---|
+| NIR functions | 16 | 16 (unchanged) |
+| machine code bytes (whole program) | 6020 | 5972 (-48) |
+| `byte::from_int<int>` regs/bytes/br/fail | 9 / 337 / 2 / 2 | 8 / 289 / 1 / 1 (identical shape) |
+| static allocations (one run) | 27 | 26 |
+
+All three corpora show the exact same 48-byte-per-instance
+`byte::from_int` delta (it is the same shared instance, reached from
+different call graphs in each probe) plus, in `refined-checks` only, the
+independent `check` cleanup. No other function in any of the eight probed
+workloads changed at all -- the negative controls (`steady-ascii` and its
+param/capture variants, `ascii-256`, `web-unreserved-256`) are
+byte-for-byte identical before and after, confirming the mechanism does
+not move code it has no theorem for.
 
 ## Effect-summary fallout
 
-`may_error`/NIR structural fallibility is recomputed structurally from the
-now-smaller CFG (native/src's own existing per-function recomputation,
-unchanged); no manual edit to any effect summary was made, per spec #56.
-Where an eliminated branch was the only site of a `faildeclared`, the
-function's own may-error status narrows automatically as a consequence of
-the smaller CFG, not because this milestone special-cased it.
+`byte::from_int<int>`'s own `may_error` status in every probed workload
+remains `true` after M6 (confirmed directly in each `roots.txt`/
+`summary.txt`): eliminating `BelowRange` alone does not make the function
+non-fallible, since `AboveRange` remains a live, structurally reachable
+`fail`. This is exactly the expected, proportionate result -- `may_error`
+is recomputed structurally from the smaller CFG (native/src's own
+pre-existing per-function recomputation, untouched by this milestone; no
+effect summary was hand-edited anywhere), and it only ever changes when
+*every* fallible path out of a function is eliminated. The `work`
+function in `bench/loop-count.ir` (the one case where a whole branch,
+not just one comparison of two, was eliminated) shows this the other way:
+it had no `fail`/error path to begin with (`may_error=false` before and
+after), so its own register-count drop is a pure register-pressure/CFG
+effect with no effect-summary consequence to observe. No probed workload
+in this corpus had a function whose *entire* fallibility was proven
+impossible by M6 alone.
 
 ## Allocation / GC / roots fallout
 
-No allocation-affecting branch was eliminated in the corpus fixtures
-directly measured above (the eliminated branches are exactly the
-comparison/fail-declaration shapes the checked-domain-construction pattern
-uses; no allocating call sat exclusively inside an eliminated arm in any
-fixture measured). GC-stress run below.
+Measured directly (`native::roots`/`allocationReport`, before vs. the true
+pre-M6 baseline, same probes as above): dynamic allocation counts and
+byte totals are unchanged in every probed workload (`uri-steady`:
+61510 allocations / 2544568 bytes, identical). Only **static** (module-
+init-time constant) allocation counts drop by exactly one in each workload
+that lost `byte::from_int`'s `BelowRange` arm (`uri-steady` 32->31,
+`web-unreserved-literals` 27->26, `refined-checks` 40->37 -- the larger
+drop there reflects `check`'s own additional cleanup) -- each is the
+`BelowRange`/dead-arm's own no-longer-constructed error-kind constant, not
+a semantic allocation-behavior change (M6 spec #60 explicitly permits
+this: "allocation invariance is not an M6 requirement... any allocation
+movement must be attributable to a proven-dead branch," which this is).
+`work`'s own root/safepoint shape (`bench/loop-count.ir`, see "Full
+regression" below) is unaffected beyond its register count: `safepoints:
+0` and `shadow slots: 0` both before and after, since it made no
+allocating call either way. No root candidate, safepoint, or shadow slot
+disappeared anywhere in the probed corpus as a result of this milestone --
+every eliminated branch in every measured case was allocation-free at
+runtime (the `fail`/`unreachable` control-flow shapes themselves, and the
+one constant each `fail` used to construct, not a runtime allocation
+site).
 
 ## Compile-time cost
 
 `hir::range::ConditionOutcome` is a handful of dict lookups and arithmetic
 comparisons per `if`; it triggers no re-analysis (`hir::range::analyze`
-itself is unchanged, called exactly once as before). No measurable compile
-time regression is expected structurally; see the regression run's own
-timing for confirmation.
+itself is unchanged, called exactly once as before, same call site).
+Consistent with that, the full two-backend Tcl regression suite's own
+wall-clock time (`time tclsh9.0 tests/all.tcl`, ~2185 tests x 2 backends,
+dominated by `stdlib.test`'s own program execution, not by compilation)
+showed no attributable regression: successive runs on this shared,
+otherwise-idle host measured within their own run-to-run noise band (both
+in the 10-11 minute range), and no individual probe's `probe.tcl`
+invocation (each a single compile-and-lower pass) took perceptibly longer
+after this milestone than before.
 
 ## Timing
 
-Secondary to structural correctness per spec #78; reported after the
-structural sections above, not instead of them.
+Structural correctness (above) is the primary evidence per spec #78;
+per-workload native execution timing was not separately re-run beyond the
+structural probes above, since none of the changed functions
+(`byte::from_int`, `check`, `work`) sit on any hot per-call path measured
+by this repository's own `bench/*.tcl`/`tools/bench-baseline.sh`
+methodology in a way this milestone's own scope calls for re-measuring
+(`byte::from_int`/`check` are called once each per probed program; `work`
+is `loop-count.ir`'s own hot loop body, but its change is a register-count
+reduction with no correctness or algorithmic change, not expected to move
+wall-clock time outside host noise). No regression is claimed or expected
+beyond the structural deltas already reported.
 
 ## M1-M5 regression controls
 
@@ -467,7 +609,41 @@ other M1-M5 test file is unmodified.
 
 ## Full regression
 
-_(filled in below once the full suite/cargo/GC-stress run completes)._
+```
+tclsh9.0 tests/all.tcl                          -> interp: 2185/2185, compile: 2185/2185, 0 failed
+cargo test --release --manifest-path native/Cargo.toml
+                                                 -> 60/60 passed (unchanged from M5: no Rust code changed)
+BOTLISH_NATIVE_GC_STRESS=1 tclsh9.0 tests/all.tcl -> (running; see below)
+```
+
+The plain run found exactly one real, expected diff on first pass:
+`tests/native-root-liveness.test`'s `root-structural-2` (`bench/loop-
+count.ir`'s own `work` function, register count 17 -> 16 -- see the golden
+update and its explanatory comment in that test file, and the structural
+delta table above). After that one golden-value update, both backends
+pass at 2185/2185 with **zero** other diffs anywhere in the suite --
+`tests/hir-range.test`'s own 12 new `ConditionOutcome` unit tests, and
+`tests/checked-domain-proof-provenance.test`'s updated Q1/Q2/Q3/
+architecture-pin expectations, are included in that 2185 total. The
+GC-stress run (mandatory per this repository's own native stack-map/root
+validation discipline) is reported in full once it completes -- see
+`GC-STRESS-RESULT` below, filled in from the actual run, not assumed.
+
+GC-STRESS-RESULT: _(pending -- filled in from the actual completed run)._
+
+Focused suites (all re-run individually, exact counts):
+
+```
+checked-domain-proof-provenance.test    17/17
+byte-set.test                           21/21
+source-types.test                       46/46
+errors.test                             40/40
+hir-specialize.test                     27/27
+typed-parameters.test                   50/50
+setcontains-equality-total.test         17/17
+setfromlist-equality-total.test         14/14
+hir-callable-target.test                 8/8
+```
 
 ## Source-fence confirmation
 
