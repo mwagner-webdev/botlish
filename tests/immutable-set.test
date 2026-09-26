@@ -595,12 +595,17 @@ fn contains_one():
         set report [native::allocationReport $hir sites]
         set moduleSets 0
         foreach site [dict get $report sites] {
-            if {[dict get $site operation] eq "setfromlist"
+            # M4-EQUALITY-TOTAL-SETFROMLIST-EFFECT.md: Small is equality-
+            # total (a source-defined bounded Int domain), so this site now
+            # carries "setfromlisttotal"'s own operation label -- same
+            # rt_set_from_list helper, same allocation, only the site name
+            # differs.
+            if {[dict get $site operation] in {setfromlist setfromlisttotal}
                     && [dict get [dict get $site location] file] eq $mpath} {
                 incr moduleSets [dict get $site allocations]
             }
         }
-        list [regexp -all {op setfromlist} $nir] $moduleSets \
+        list [regexp -all {op setfromlist(?:total)?} $nir] $moduleSets \
             [core::value::show [core::evalProgram [hir::lower $hir]]]
     } finally {
         set ::core::libraryDir $saved
@@ -708,12 +713,16 @@ fn has_dash() -> bool:
         set report [native::allocationReport $hir sites]
         set moduleSets 0
         foreach site [dict get $report sites] {
-            if {[dict get $site operation] eq "setfromlist"
+            # M4-EQUALITY-TOTAL-SETFROMLIST-EFFECT.md: UnicodeChar is
+            # equality-total, so this site now carries "setfromlisttotal"'s
+            # own operation label -- same rt_set_from_list helper, same
+            # allocation, only the site name differs.
+            if {[dict get $site operation] in {setfromlist setfromlisttotal}
                     && [dict get [dict get $site location] file] eq $mpath} {
                 incr moduleSets [dict get $site allocations]
             }
         }
-        list [regexp -all {op setfromlist} $nir] $moduleSets \
+        list [regexp -all {op setfromlist(?:total)?} $nir] $moduleSets \
             [core::value::show [core::evalProgram [hir::lower $hir]]]
     } finally {
         set ::core::libraryDir $saved

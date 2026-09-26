@@ -123,7 +123,7 @@ namespace eval native::lower {
         list_length  {op listlen} \
         list_get     {op listget} \
         list_append  {op listappend} \
-        immutable_set_from_list {op setfromlist} \
+        immutable_set_from_list {equality-list} \
         immutable_set_contains  {equality-set} \
         mutable_array_allocate {op mutarrayallocate} \
         mutable_array_capacity {op mutarraycapacity} \
@@ -4018,7 +4018,11 @@ proc native::lower::InlineLeafCall {fnVar e node calleeId callerArgRegs} {
 # setcontainstotal over the generic setcontains the identical way, from the
 # set's own element type and the needle's own type, both already available
 # as ordinary HIR types at this call node, no different from =='s own two
-# argument expressions: see M3-EQUALITY-TOTAL-SETCONTAINS-EFFECT.md) --
+# argument expressions: see M3-EQUALITY-TOTAL-SETCONTAINS-EFFECT.md; an
+# "equality-list" implementation -- immutable_set_from_list -- picks
+# setfromlisttotal over the generic setfromlist the same way, from the
+# source list's own static element type: see
+# M4-EQUALITY-TOTAL-SETFROMLIST-EFFECT.md) --
 # purely static, so eligibility (RawEligibleCall) can be decided before any
 # argument is lowered. OP is "" for a name native/lower.tcl does not
 # implement (NativeCall's own existence check reports that properly; this
@@ -4076,6 +4080,35 @@ proc native::lower::NativeCallOp {e node} {
                         && [hir::types::IsEqualityTotal [lindex $setType 1]]
                         && [hir::types::IsEqualityTotal $needleType]} {
                     set op setcontainstotal
+                }
+            }
+            return [list $name $op]
+        }
+        equality-list {
+            # SetFromList's generic form (rt_set_from_list) dedups its
+            # source List by ordinary equality, which can raise EQUALITY
+            # comparing two candidate elements whose runtime kind lacks
+            # structural equality (Block/Native/MutArray) -- unconditionally
+            # true of the *native's own* signature (-param-types {list}).
+            # At one particular call node, though, the source list's own
+            # static element type may already be proven equality-total
+            # (hir::types::IsEqualityTotal), in which case every comparison
+            # this invocation's own dedup pass can ever perform is
+            # necessarily T x T for an equality-total T -- so it lowers to
+            # setfromlisttotal, a non-erroring sibling NIR op of the
+            # identical runtime operation (op_may_error is opcode-keyed, not
+            # native-keyed: see native/src/runtime/ops.rs). Generic
+            # SetFromList itself is untouched: any call whose source list's
+            # element type is not proven total -- including a broad/
+            # unresolved List, or one over a genuinely unsupported-equality
+            # kind -- still resolves to plain setfromlist here, exactly as
+            # before this milestone (M4-EQUALITY-TOTAL-SETFROMLIST-EFFECT.md).
+            set op setfromlist
+            if {[llength $argExprs] == 1} {
+                set listType [hir::typeOf $hir [lindex $argExprs 0]]
+                if {[hir::types::IsList $listType]
+                        && [hir::types::IsEqualityTotal [lindex $listType 1]]} {
+                    set op setfromlisttotal
                 }
             }
             return [list $name $op]
@@ -4602,9 +4635,10 @@ proc native::lower::NativeImpl {name} {
     variable natives
     set impl [dict get $natives $name]
     switch -- [lindex $impl 0] {
-        equality     { return veq }
-        equality-set { return setcontains }
-        default      { return [lindex $impl 1] }
+        equality      { return veq }
+        equality-set  { return setcontains }
+        equality-list { return setfromlist }
+        default       { return [lindex $impl 1] }
     }
 }
 

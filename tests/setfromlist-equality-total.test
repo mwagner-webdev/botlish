@@ -1,0 +1,279 @@
+# setfromlist-equality-total.test -- M4
+# (M4-EQUALITY-TOTAL-SETFROMLIST-EFFECT.md): SetFromList's generic form
+# (immutable_set_from_list -> op setfromlist -> rt_set_from_list) is
+# unconditionally may_error, because its O(n^2) dedup pass compares
+# candidate elements with ordinary Botlish equality, which is undefined for
+# Block/Native/MutableArray operands (MINIMAL-IMMUTABLE-SET.md's own
+# "Deduplication semantics"). At a particular call site, though, the source
+# List's own static element type may already be proven equality-total
+# (hir::types::IsEqualityTotal, hir/types.tcl -- the identical, unmodified
+# predicate M3 introduced for SetContains) -- in which case
+# native/lower.tcl's NativeCallOp lowers that one invocation to a distinct,
+# non-erroring sibling NIR opcode, setfromlisttotal, instead of the generic
+# setfromlist. Same runtime helper (rt_set_from_list, unmodified) either
+# way, and the same allocation behavior (op_may_allocate lists both): this
+# is purely an op_may_error classification split (native/src/runtime/
+# ops.rs), not a new runtime operation, and may_error/may_gc remain
+# independent effect dimensions. Generic SetFromList itself remains
+# unconditionally may_error.
+#
+# These tests pin the NIR opcode native lowering chooses and the resulting
+# function/call-edge may_error/may_gc facts -- the same technique
+# tests/setcontains-equality-total.test (M3) already uses.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+proc sourceHir {text} {
+    return [surface::compile $text t.bot -strict 0]
+}
+
+proc sourceIR {text} {
+    return [hir::lower [sourceHir $text]]
+}
+
+# The NIR text for TEXT, with tiny-exact-leaf inlining disabled (it would
+# otherwise fold a one-op callee's body into its caller and remove the call
+# instruction/local op these tests want to inspect entirely -- TINY-EXACT-
+# LEAF-INLINING.md, orthogonal to this milestone).
+proc nirOf {text} {
+    return [dict get [native::lower::program [sourceHir $text] -tiny-leaf-inline-opt 0] text]
+}
+
+# The call-effects report line for a call whose callee is CALLEENAME, in
+# TEXT's own NIR (native::Driver's "calls" subcommand).
+proc calleeEffectLine {text calleeName} {
+    set effects [native::Driver calls [nirOf $text]]
+    foreach line $effects {
+        if {[string match "*callee_name=\"$calleeName\"*" $line]} {
+            return $line
+        }
+    }
+    return ""
+}
+
+# Two specialized instances of the same function print the *identical*
+# NIR "name" -- only the func header's own separate instance="..."
+# attribute distinguishes them. For a fixture with more than one instance
+# of CALLEENAME, this finds the one NIR function id whose own func header
+# carries INSTANCEATTR and returns the call-effects report line for a call
+# into exactly that id (never a same-named sibling instance).
+proc effectLineForInstance {text calleeName instanceAttr} {
+    set nirText [nirOf $text]
+    set id ""
+    foreach {- fid} [regexp -all -inline \
+            "func (\\d+) \"$calleeName\"\[^\\n\]*instance=\"$instanceAttr\"" \
+            $nirText] {
+        set id $fid
+    }
+    if {$id eq ""} {
+        error "no instance of $calleeName with instance=\"$instanceAttr\" found"
+    }
+    foreach line [native::Driver calls $nirText] {
+        if {[string match "*callee=$id *" $line]} {
+            return $line
+        }
+    }
+    return ""
+}
+
+set ::smallDecl "type Small = Int in 0..10\n\nfn one() -> Small:\n    1\n\n"
+set ::byteDecl "type Byte = Int in 0..255\n\nfn byteA() -> Byte:\n    97\n\nfn byteB() -> Byte:\n    122\n\n"
+
+# The call-effects report line for a call whose callee is CALLEENAME, given
+# NIRTEXT directly (for fixtures already loaded from a frozen .bot file,
+# where re-lowering via nirOf would be wrong/wasteful).
+proc calleeEffectLineIn {nirText calleeName} {
+    foreach line [native::Driver calls $nirText] {
+        if {[string match "*callee_name=\"$calleeName\"*" $line]} {
+            return $line
+        }
+    }
+    return ""
+}
+
+# ---------------------------------------------------------------------------
+# Positive fixtures: source list element type proven equality-total ->
+# setfromlisttotal, non-erroring (spec items 14-16, 24).
+
+test setfromlist-total-int {List[int] -> ImmutableSet[int]: the simplest non-Byte control -- setfromlisttotal, mk_int becomes may_error=false} -body {
+    set text {fn mk_int(xs: List[int]) -> ImmutableSet[int]:
+    immutable_set_from_list(xs)
+
+mk_int([1, 2, 3])}
+    set nirText [nirOf $text]
+    list [regexp {op setfromlisttotal} $nirText] [regexp {op setfromlist } $nirText] \
+        [string match {*may_error=false*} [calleeEffectLine $text mk_int]] \
+        [string match {*may_gc=true*} [calleeEffectLine $text mk_int]]
+} -result {1 0 1 1}
+
+test setfromlist-total-source-defined-domain {a source-defined bounded Int domain (Small = Int in 0..10) qualifies too -- the proof derives from kindOf collapsing any refined int domain to plain int, never a hard-coded "Byte" name, proving Byte is not special-cased (spec items 15, 22-23)} -body {
+    set text [format {%sfn mk_small(xs: List[Small]) -> ImmutableSet[Small]:
+    immutable_set_from_list(xs)
+
+mk_small([one()])} $::smallDecl]
+    set nirText [nirOf $text]
+    list [regexp {op setfromlisttotal} $nirText] \
+        [string match {*may_error=false*} [calleeEffectLine $text mk_small]]
+} -result {1 1}
+
+test setfromlist-total-bool {List[Bool] -> ImmutableSet[Bool] qualifies (spec item 16, another audited-total scalar kind)} -body {
+    set text {fn mk_bool(xs: List[bool]) -> ImmutableSet[bool]:
+    immutable_set_from_list(xs)
+
+mk_bool([true, false])}
+    regexp {op setfromlisttotal} [nirOf $text]
+} -result 1
+
+test setfromlist-total-byte {List[Byte] -> ImmutableSet[Byte]: the real byte::set shape, in miniature -- setfromlisttotal (spec item 14/positive fixture 6)} -body {
+    set text [format {%sfn mk_byte(xs: List[Byte]) -> ImmutableSet[Byte]:
+    immutable_set_from_list(xs)
+
+mk_byte([byteA(), byteB()])} $::byteDecl]
+    regexp {op setfromlisttotal} [nirOf $text]
+} -result 1
+
+test setfromlist-total-runtime-parity {a real setfromlisttotal construction agrees with the generic construction and with plain membership, across all four backends -- confirming this milestone changes no runtime semantics (spec item 25)} -body {
+    set text {fn mk_int(xs: List[int]) -> ImmutableSet[int]:
+    immutable_set_from_list(xs)
+
+[immutable_set_contains(mk_int([1, 1, 2, 3]), 2), immutable_set_contains(mk_int([1, 1, 2, 3]), 4)]}
+    set exprs [sourceIR $text]
+    lmap backend {interp compile cranelift-generic cranelift} {
+        outcomeUnder $backend $exprs
+    }
+} -result {{value {[true, false]} {}} {value {[true, false]} {}} {value {[true, false]} {}} {value {[true, false]} {}}}
+
+test setfromlist-empty-list-stays-generic {an empty-list-literal call site (mk_int([])) conservatively stays plain setfromlist/may_error=true, even though mk_int's own declared parameter type is List[int] -- confirmed directly (not assumed by analogy with M3's own "empty set stays total" fixture): unlike M1's own scalar declared-parameter-fact transport, hir::specialize::KeyType keys a List[T] parameter's instance from the actual call sites' own inferred element type, not the declared annotation, so a genuinely empty literal argument narrows this specific instance to "List[never]" (IsEqualityTotal(never) = false) -- sound but conservative, exactly what spec item 20 anticipates ("a conservative generic result for broad/never cases is fine"), not a defect for M4 to fix} -body {
+    set text {fn mk_int(xs: List[int]) -> ImmutableSet[int]:
+    immutable_set_from_list(xs)
+
+mk_int([])}
+    set nirText [nirOf $text]
+    list [regexp {op setfromlist } $nirText] [regexp {op setfromlisttotal} $nirText] \
+        [string match {*may_error=true*} [calleeEffectLine $text mk_int]]
+} -result {1 0 1}
+
+# ---------------------------------------------------------------------------
+# Negative fixtures: sound-but-incomplete -- generic SetFromList remains
+# may_error=true whenever the proof cannot be made (spec items 17-19, 24).
+
+# NOTE: an untyped parameter is NOT automatically "broad" merely for lack of
+# a declared type (hir::specialize::KeyType still keys a per-call-site
+# instance off the caller's own concrete argument kind); limit exhaustion
+# (mirroring tests/setcontains-equality-total.test's own broad-needle
+# fixture) forces genuine genericity -- both call sites' own list kinds
+# (int and str elements) share one generic instance, so xs's own view is
+# genuinely broad inside it, independent of which kind any particular
+# caller passes.
+test setfromlist-broad-element-stays-erroring {a genuinely broad/statically-unresolved source list: stays plain setfromlist, may_error=true, may_gc=true (spec item 17)} -body {
+    set saved $hir::specialize::limit
+    set hir::specialize::limit 1
+    try {
+        set text {fn mk_unknown(xs):
+    immutable_set_from_list(xs)
+
+[mk_unknown([1, 2, 3]), mk_unknown(["a", "b"])]}
+        set nirText [nirOf $text]
+        regexp {func \d+ "mk_unknown"[^\n]*instance="generic"[^\n]*\n(?:.*\n)*?end} $nirText genericBody
+        list [regexp {op setfromlist } $genericBody] [regexp {op setfromlisttotal} $genericBody] \
+            [string match {*may_error=true*} [effectLineForInstance $text mk_unknown generic]] \
+            [string match {*may_gc=true*} [effectLineForInstance $text mk_unknown generic]]
+    } finally {
+        set hir::specialize::limit $saved
+    }
+} -result {1 0 1 1}
+
+test setfromlist-unsupported-kind-runtime-equality {a List of two distinct untyped-closure (Block-kind) members: stays plain setfromlist/may_error=true, and genuinely raises the pre-existing EQUALITY error at runtime when the second element is actually compared against the first -- confirming this milestone never weakens the real failure mode it is refining around (spec items 18-19, 26)} -body {
+    set text {fn g(x):
+    x
+
+fn h(x):
+    x + 1
+
+fn mk_block(xs):
+    immutable_set_from_list(xs)
+
+mk_block([g, h])}
+    set nirText [nirOf $text]
+    list [regexp {op setfromlist } $nirText] [regexp {op setfromlisttotal} $nirText] \
+        [errorCodeOf {*}[sourceIR $text]]
+} -result {1 0 {CORE SEMANTIC EQUALITY}}
+
+test setfromlist-error-propagation-control {a caller of a genuinely equality-fallible (broad-element, forced generic) SetFromList keeps its own completion retest -- confirming the refinement is invocation-specific, not a global opcode reclassification (spec item 27)} -body {
+    set saved $hir::specialize::limit
+    set hir::specialize::limit 1
+    try {
+        set text {fn mk_unknown(xs):
+    immutable_set_from_list(xs)
+
+fn caller(xs):
+    mk_unknown(xs)
+
+[caller([1, 2, 3]), caller(["a", "b"])]}
+        set nirText [nirOf $text]
+        string match {*may_error=true*} [effectLineForInstance $text mk_unknown generic]
+    } finally {
+        set hir::specialize::limit $saved
+    }
+} -result 1
+
+test setfromlist-list-of-never {List[never] -> ImmutableSet[never]: an empty list literal with no other use narrows its element type to never; lowering must not crash or misclassify this as equality-total -- documented current behavior only, no dedicated optimization (spec item 21)} -body {
+    set text {immutable_set_from_list([])}
+    set nirText [nirOf $text]
+    list [regexp {op setfromlisttotal} $nirText] [regexp {op setfromlist } $nirText]
+} -result {0 1}
+
+# ---------------------------------------------------------------------------
+# The real byte::set path, through the frozen bench/uri-steady.bot itself,
+# not a synthetic stand-in (spec items 6, 29-33).
+
+test setfromlist-uri-byte-set-local-op-total {byte::set's own body: the immutable_set_from_list(bytes) call lowers to setfromlisttotal, not setfromlist -- bytes : List[Byte], statically proven equality-total (spec items 1-3)} -body {
+    set hir [surface::readProgramFile [file join $::projectRoot bench uri-steady.bot]]
+    set nirText [dict get [native::lower::program $hir -tiny-leaf-inline-opt 0] text]
+    regexp {func \d+ "byte::set[^\n]*\n(?:.*\n)*?end} $nirText body
+    list [regexp {op setfromlisttotal} $body] [regexp {op setfromlist } $body]
+} -result {1 0}
+
+test setfromlist-uri-byte-set-stays-erroring-via-from-int {byte::set as a whole remains may_error=true -- not because of SetFromList (now proven non-erroring) but because of its own checked Byte(char::codepoint(c)) construction (from_int, genuinely fallible with AboveRange): confirms M4 does not erase that error and does not assume the function-level effect outcome (spec items 14-16, 29-31)} -body {
+    set hir [surface::readProgramFile [file join $::projectRoot bench uri-steady.bot]]
+    set nirText [dict get [native::lower::program $hir -tiny-leaf-inline-opt 0] text]
+    set effects [native::Driver calls $nirText]
+    set found 0
+    set allTrue 1
+    foreach line $effects {
+        if {[string match {*callee_name="byte::set*} $line]} {
+            set found 1
+            if {![string match {*may_error=true*} $line]} { set allTrue 0 }
+        }
+    }
+    list $found $allTrue
+} -result {1 1}
+
+test setfromlist-byte-set-real-range-error-preserved {byte::set(['Ā']) (U+0100, scalar 256) still fails the checked Byte construction just past the boundary -- M4 must not erase checked UnicodeChar -> Byte construction failures, even though SetFromList itself becomes non-erroring (spec item 16, 30)} -body {
+    set path [makeFile {byte::set(['Ā'])} setfromlist-m4-byte-set-256.bot]
+    try {
+        set hir [surface::readProgramFile $path -strict 0]
+        set exprs [hir::lower $hir]
+        lmap backend {interp compile cranelift-generic cranelift} {
+            set outcome [outcomeUnder $backend $exprs]
+            list [lindex $outcome 0] [lindex $outcome 1]
+        }
+    } finally {
+        removeFile setfromlist-m4-byte-set-256.bot
+    }
+} -result {{error {CORE SEMANTIC UNCAUGHT-ERROR}} {error {CORE SEMANTIC UNCAUGHT-ERROR}} {error {CORE SEMANTIC UNCAUGHT-ERROR}} {error {CORE SEMANTIC UNCAUGHT-ERROR}}}
+
+# ---------------------------------------------------------------------------
+# M3 regression control (spec item 39): this milestone must not move
+# SetContains's own equality-total classification.
+
+test setfromlist-m3-control-web-is-unreserved-still-total {web::is_unreserved's own SetContains call is unaffected by this milestone -- still setcontainstotal, still may_error=false} -body {
+    set hir [surface::readProgramFile [file join $::projectRoot bench uri-steady.bot]]
+    set nirText [dict get [native::lower::program $hir -tiny-leaf-inline-opt 0] text]
+    regexp {func \d+ "web::is_unreserved[^\n]*\n(?:.*\n)*?end} $nirText body
+    list [regexp {op setcontainstotal} $body] \
+        [string match {*may_error=false*} [calleeEffectLineIn $nirText web::is_unreserved]]
+} -result {1 1}
+
+cleanupTests

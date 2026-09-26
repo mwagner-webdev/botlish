@@ -84,6 +84,13 @@ pub fn op_may_allocate(op: OpCode) -> bool {
         IAdd | ISub | IMul | IAnd | IOr | IXor | IShl | IShr | Substr | DecodeCharAt | StrLower | StrCat
             | StrUtf8Bytes | ListNew | ListAppend | MutArrayAllocate | MutArrayFreeze | MkOk | MkError
             | SetFromList
+            // Same allocation behavior as SetFromList (same runtime helper,
+            // same `new_set` construction) -- only its own `op_may_error`
+            // classification differs. See SetFromListTotal's own doc
+            // comment (nir.rs) and M4-EQUALITY-TOTAL-SETFROMLIST-EFFECT.md:
+            // may_error and may_gc are independent effect dimensions, and
+            // this milestone changes only the former.
+            | SetFromListTotal
     )
 }
 
@@ -101,15 +108,17 @@ pub fn op_may_error(op: OpCode) -> bool {
         // comments, and MINIMAL-IMMUTABLE-SET.md's "Deduplication
         // semantics"/"Membership semantics".
         //
-        // SetContainsTotal is deliberately *not* listed here: it is
-        // SetContains at a call site native/lower.tcl's own static
-        // equality-totality proof (hir::types::IsEqualityTotal) already
-        // showed can never reach rt_set_contains's EQUALITY branch --
+        // SetContainsTotal and SetFromListTotal are deliberately *not*
+        // listed here: each is SetContains/SetFromList at a call site
+        // native/lower.tcl's own static equality-totality proof
+        // (hir::types::IsEqualityTotal) already showed can never reach
+        // rt_set_contains's/rt_set_from_list's own EQUALITY branch --
         // op_may_error is keyed by opcode, not by which runtime helper an
         // opcode happens to share, so giving the proven-safe invocation its
         // own opcode is what lets it (and only it) fall out of this list
-        // (M3-EQUALITY-TOTAL-SETCONTAINS-EFFECT.md). Generic SetContains
-        // keeps its unconditional classification.
+        // (M3-EQUALITY-TOTAL-SETCONTAINS-EFFECT.md,
+        // M4-EQUALITY-TOTAL-SETFROMLIST-EFFECT.md). Generic SetFromList/
+        // SetContains keep their unconditional classification.
         | SetFromList | SetContains)
 }
 
@@ -1185,6 +1194,13 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         ListGet => rt_list_get(p, a[0], a[1]),
         ListAppend => rt_list_append(p, a[0], a[1]),
         SetFromList => rt_set_from_list(p, a[0]),
+        // Same runtime helper as SetFromList: the distinction is purely an
+        // op_may_error classification (see OpCode::SetFromListTotal's own
+        // doc comment). Unreachable via a Native value's own generic entry
+        // (native/lower.tcl's NativeImpl never selects this opcode for a
+        // native declaration's `impl=`), kept here only for apply_op's own
+        // match exhaustiveness.
+        SetFromListTotal => rt_set_from_list(p, a[0]),
         SetContains => rt_set_contains(p, a[0], a[1]),
         // Same runtime helper as SetContains: the distinction is purely an
         // op_may_error classification (see OpCode::SetContainsTotal's own

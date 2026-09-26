@@ -1476,6 +1476,26 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                             self.check(v);
                             return v;
                         }
+                        // Same helper and allocation site kind as
+                        // SetFromList; no `self.check` after the call
+                        // (matches this opcode's own `op_may_error = false`
+                        // classification, ops.rs) because native/lower.tcl
+                        // only ever emits this opcode where it has already
+                        // statically proven rt_set_from_list's own EQUALITY
+                        // branch is unreachable for this call's own source
+                        // list element type -- still allocates
+                        // (op_may_allocate lists it, ops.rs), so still goes
+                        // through call_allocating for GC accounting/site
+                        // attribution (M4-EQUALITY-TOTAL-SETFROMLIST-EFFECT.md).
+                        SetFromListTotal => {
+                            let v = self.call_allocating(
+                                "rt_set_from_list",
+                                &[self.vm, a[0]],
+                                "setfromlisttotal",
+                                KIND_SET,
+                            );
+                            return v;
+                        }
                         // Never allocates, but may fail (EQUALITY: see
                         // ops.rs's rt_set_contains), so it takes the plain
                         // (non-allocating) helper path below with `fallible`

@@ -48,6 +48,24 @@ pub enum OpCode {
     /// deliberately simple first representation -- no inline fast path
     /// (item 64), always a helper call (ops.rs's `rt_set_from_list`).
     SetFromList,
+    /// SetFromList, at a call site native/lower.tcl's `NativeCallOp`
+    /// (`equality-list`) has statically proven equality-total: the source
+    /// List's own static element type is one of
+    /// `hir::types::IsEqualityTotal`'s kinds (Int and every source-defined
+    /// bounded-integer domain over it, Str, Bool, Unit, UnicodeChar), so
+    /// every comparison this invocation's own dedup pass can ever perform
+    /// is necessarily T x T for an equality-total T -- the runtime operands
+    /// can never include a Block/Native/MutArray value, the only way
+    /// `rt_set_from_list`'s own equality can raise EQUALITY (see ops.rs's
+    /// `equal`). Same runtime helper (`rt_set_from_list`, unmodified) and
+    /// same allocation behavior as `SetFromList`: this is purely an
+    /// `op_may_error` classification split, not a new runtime operation
+    /// (M4-EQUALITY-TOTAL-SETFROMLIST-EFFECT.md). Generic `SetFromList`
+    /// itself remains unconditionally `may_error` -- this sibling opcode is
+    /// only ever emitted for one particular, statically-proven call site,
+    /// never for `immutable_set_from_list`'s own generic/dynamically-
+    /// dispatched entry (native/lower.tcl's `NativeImpl`).
+    SetFromListTotal,
     /// Total membership on an ImmutableSet operand (`immutable_set_contains`):
     /// false for an absent value, never an Error completion. Always a
     /// helper call (`rt_set_contains`), like SetFromList.
@@ -210,6 +228,7 @@ impl OpCode {
             "listget" => ListGet,
             "listappend" => ListAppend,
             "setfromlist" => SetFromList,
+            "setfromlisttotal" => SetFromListTotal,
             "setcontains" => SetContains,
             "setcontainstotal" => SetContainsTotal,
             "mutarrayallocate" => MutArrayAllocate,
@@ -261,7 +280,8 @@ impl OpCode {
             ListNew => None,
             StrLen | StrLower | ListLen | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList
             | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | Hash | RBox | RUnbox
-            | StrByteLen | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum | CharCodepoint | SetFromList => Some(1),
+            | StrByteLen | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum | CharCodepoint | SetFromList
+            | SetFromListTotal => Some(1),
             Substr | MutArraySet | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum => Some(3),
             RegionEq => Some(4),
             MutArrayCopy => Some(5),

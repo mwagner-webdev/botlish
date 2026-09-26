@@ -196,7 +196,13 @@ web::is_unreserved(126), web::is_unreserved(65), web::is_unreserved(128)]} web-u
         set setfromlistSites 0
         set setfromlistAllocations 0
         foreach site [dict get $report sites] {
-            if {[dict get $site operation] eq "setfromlist"} {
+            # M4-EQUALITY-TOTAL-SETFROMLIST-EFFECT.md:
+            # additional_unreserved_chars's own List[Byte] source is
+            # statically proven equality-total, so this site now carries
+            # the refined opcode's own operation label -- same
+            # rt_set_from_list helper, same allocation, only the site name
+            # differs.
+            if {[dict get $site operation] in {setfromlist setfromlisttotal}} {
                 incr setfromlistSites
                 incr setfromlistAllocations [dict get $site allocations]
             }
