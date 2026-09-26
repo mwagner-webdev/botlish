@@ -381,4 +381,204 @@ test range-propagate-6 {a self-recursive chain of caller-propagated facts (drive
         [paramRanges $analysis1 [rangeInstance $spec work]] [paramRanges $analysis2 [rangeInstance $spec2 work]]
 } -result {{i0 i2 i1} {i0 i2 i1} {{[1, 500]}} {{[1, 500]}}}
 
+# ---------------------------------------------------------------------------
+# Canonical branch-outcome theorem (M6-RANGE-DECIDED-BRANCH-LOWERING.md):
+# hir::range::ConditionOutcome, tested directly and independently of native
+# lowering (spec #66) -- 1 (always true), 0 (always false), or "" (unknown),
+# composed from hir::types::KnownOutcome and this file's own already-settled
+# per-instance Ranges. No lowering/NIR machinery is touched by this section.
+
+# The ConditionExprId of every `if` node in HIR, in HIR-dictionary key order
+# (source order for a freshly built small fixture -- the same technique
+# refRanges above already relies on).
+proc ifConditions {hir} {
+    set result {}
+    foreach e [lsort -dictionary [dict keys [dict get $hir exprs]]] {
+        set node [dict get $hir exprs $e]
+        if {[dict get $node kind] eq "if"} {
+            lappend result [dict get $node condition]
+        }
+    }
+    return $result
+}
+
+# The canonical theorem's own answer for the IDXth `if` (source order) of
+# instance NAME/KEY's own body, for TEXT.
+proc outcomeOf {text idx name {key ""}} {
+    lassign [rangeOf $text] hir spec analysis
+    set id [rangeInstance $spec $name $key]
+    set condition [lindex [ifConditions $hir] $idx]
+    return [hir::range::ConditionOutcome $hir $analysis $id $condition]
+}
+
+test condition-outcome-1 {a Byte parameter: b < 0 is AlwaysFalse from the declared domain alone, no caller narrowing needed} -body {
+    outcomeOf {fn f(b: Byte) -> int:
+    if b < 0:
+        1
+    else:
+        2
+f(10)} 0 f
+} -result {0}
+
+test condition-outcome-2 {a Byte parameter: b > 255 is likewise AlwaysFalse} -body {
+    outcomeOf {fn f(b: Byte) -> int:
+    if b > 255:
+        1
+    else:
+        2
+f(10)} 0 f
+} -result {0}
+
+test condition-outcome-3 {a Byte parameter: b >= 0 is AlwaysTrue (the mirror control, spec #16)} -body {
+    outcomeOf {fn f(b: Byte) -> int:
+    if b >= 0:
+        1
+    else:
+        2
+f(10)} 0 f
+} -result {1}
+
+test condition-outcome-4 {a Byte parameter: b < 100 is genuinely Unknown -- two callers spanning the threshold join the entry range to [0 or wider, 255], so neither outcome is impossible (spec #17's own non-overoptimization control)} -body {
+    outcomeOf {fn f(b: Byte) -> int:
+    if b < 100:
+        1
+    else:
+        2
+f(10)
+f(200)} 0 f
+} -result {}
+
+test condition-outcome-5 {a single-literal-caller instance collapses the parameter to a point, which is a legitimate (if narrow) instance-level theorem, not a call-specific leak: an ordinary (non-stdlib) checked-domain-shaped function's two comparisons are both decided instance-wide} -body {
+    set src {fn checkedSmall(value: int) -> int:
+    if value < 10:
+        -1
+    else:
+        if value > 20:
+            -2
+        else:
+            value
+checkedSmall(15)}
+    lassign [rangeOf $src] hir spec analysis
+    set id [rangeInstance $spec checkedSmall]
+    set conditions [ifConditions $hir]
+    list [hir::range::ConditionOutcome $hir $analysis $id [lindex $conditions 0]] \
+            [hir::range::ConditionOutcome $hir $analysis $id [lindex $conditions 1]]
+} -result {0 0}
+
+test condition-outcome-6 {broad, genuinely open/dynamic Int stays Unknown: arbitrary-precision Int is never assumed small merely because it is a Botlish Int (spec #18, #37)} -body {
+    outcomeOf {fn f(x: int) -> int:
+    if x < 0:
+        1
+    else:
+        2
+fn caller(g, v) -> int:
+    g(v)
+caller(f, 10)} 0 f
+} -result {}
+
+test condition-outcome-7 {path-sensitive narrowing: inside x >= 0's own true branch, the existing branch-narrowing facts (hir::range::ComparisonNarrowing, built for a different purpose -- representation/unboxing) already prove the nested x < 0 impossible, with x itself left genuinely open/dynamic (no literal-collapse shortcut)} -body {
+    set src {fn f(x: int) -> int:
+    if x >= 0:
+        if x < 0:
+            1
+        else:
+            2
+    else:
+        3
+fn caller(g, v) -> int:
+    g(v)
+caller(f, 10)}
+    lassign [rangeOf $src] hir spec analysis
+    set id [rangeInstance $spec f]
+    set conditions [ifConditions $hir]
+    list [hir::range::ConditionOutcome $hir $analysis $id [lindex $conditions 0]] \
+            [hir::range::ConditionOutcome $hir $analysis $id [lindex $conditions 1]]
+} -result {{} 0}
+
+test condition-outcome-8 {join fixture: two callee-result branches both stay under the threshold (5 and 90 versus <100), so the joined range makes the comparison AlwaysTrue -- a real join, not a single-point collapse} -body {
+    outcomeOf {fn pick(flag: bool) -> int:
+    if flag:
+        5
+    else:
+        90
+fn f(flag: bool) -> int:
+    y = pick(flag)
+    if y < 100:
+        1
+    else:
+        2
+f(true)} 1 f} -result {1}
+
+test condition-outcome-9 {a Bool condition unrelated to any numeric comparison stays Unknown: range reasoning need not (and does not) decide every Bool (spec #25)} -body {
+    outcomeOf {fn f(flag: bool) -> int:
+    if flag:
+        1
+    else:
+        2
+fn caller(g, v) -> int:
+    g(v)
+caller(f, true)} 0 f
+} -result {}
+
+test condition-outcome-10 {existing syntactic KnownOutcome cases (if true / if false) are preserved exactly -- composed, not duplicated: hir::types::KnownOutcome answers first and ConditionOutcome returns it unchanged} -body {
+    list [outcomeOf {fn f() -> int:
+    if true:
+        1
+    else:
+        2
+f()} 0 f] [outcomeOf {fn f() -> int:
+    if false:
+        1
+    else:
+        2
+f()} 0 f]
+} -result {1 0}
+
+test condition-outcome-11 {HighNibble (a non-contiguous exact domain): x < 0 and x > 255 are AlwaysFalse from the interval hull alone; x == 17 is AlwaysFalse only because the exact-set facts survive (17 is inside [0,240] but not one of the 16 exact members) -- spec #22-23's own exact-domain-correctness control} -body {
+    set src {type HighNibble = Int in {0, 16, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176, 192, 208, 224, 240}
+fn f(x: HighNibble) -> int:
+    if x < 0:
+        1
+    else:
+        2
+fn g(x: HighNibble) -> int:
+    if x > 255:
+        1
+    else:
+        2
+fn h(x: HighNibble) -> int:
+    if x == 17:
+        1
+    else:
+        2
+f(16)
+g(16)
+h(16)}
+    lassign [rangeOf $src] hir spec analysis
+    set conditions [ifConditions $hir]
+    list [hir::range::ConditionOutcome $hir $analysis [rangeInstance $spec f] [lindex $conditions 0]] \
+            [hir::range::ConditionOutcome $hir $analysis [rangeInstance $spec g] [lindex $conditions 1]] \
+            [hir::range::ConditionOutcome $hir $analysis [rangeInstance $spec h] [lindex $conditions 2]]
+} -result {0 0 0}
+
+test condition-outcome-12 {shared-instance adversarial control: byte::from_int(45) (safe) and a genuinely open/dynamic caller sharing the same byte::from_int<int> instance -- the joined entry range is unknown, so neither comparison is decided, even though one caller alone would decide both} -body {
+    set src {byte::from_int(45)
+fn dyn(m: int) -> Byte errors BelowRange, AboveRange:
+    byte::from_int(m)
+fn caller(g, v) -> Byte errors BelowRange, AboveRange:
+    g(v)
+caller(dyn, 45)}
+    set hir [surface::readProgramFile [makeFile $src q-m6-shared-adversarial.bot] -strict 0]
+    removeFile q-m6-shared-adversarial.bot
+    set spec [hir::specialize::analyze $hir]
+    set analysis [hir::range::analyze $hir $spec]
+    set id [rangeInstance $spec {byte::from_int}]
+    set conditions [ifConditions $hir]
+    # byte::from_int's own two conditions are lib/byte.bot's (value < 0)
+    # and (value > 255); this program adds none of its own `if` nodes with
+    # a numeric comparison, so both entries belong to it.
+    list [hir::range::ConditionOutcome $hir $analysis $id [lindex $conditions 0]] \
+            [hir::range::ConditionOutcome $hir $analysis $id [lindex $conditions 1]]
+} -result {{} {}}
+
 cleanupTests

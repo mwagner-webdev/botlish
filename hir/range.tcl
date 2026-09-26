@@ -1,8 +1,11 @@
 # range.tcl -- conservative integer range analysis and the representation
-# facts it proves, for native/lower.tcl's local unboxing.
+# facts it proves, for native/lower.tcl's local unboxing and (M6-RANGE-
+# DECIDED-BRANCH-LOWERING.md) dead-branch elimination.
 #
 #   set analysis [hir::range::analyze $hir $spec]
 #   hir::range::of $analysis $instanceId $exprId     -> a Range
+#   hir::range::ConditionOutcome $hir $analysis $instanceId $conditionExprId
+#                                                     -> 1 | 0 | "" (unknown)
 #
 # This is a *representation* analysis, strictly below the semantic layer:
 # nothing here changes what a Botlish `Int` means (still arbitrary
@@ -1446,6 +1449,131 @@ proc hir::range::PointEqualityNarrow {self other outcome} {
         return ""
     }
     return [Normalize $self $remaining]
+}
+
+# ---------------------------------------------------------------------------
+# Canonical branch-outcome theorem (M6-RANGE-DECIDED-BRANCH-LOWERING.md): the
+# sole codegen-facing answer to "at this program point, is this Bool-valued
+# HIR condition always true, always false, or unknown?" -- composed from
+# hir::types::KnownOutcome (delegated to first, never duplicated: spec #7-8)
+# and this file's own already-settled per-instance operand Ranges (spec #6).
+# Pure: reads ANALYSIS's already-computed facts (hir::range::of), computes
+# nothing new about the program, and mutates neither HIR nor ANALYSIS.
+# Returns 1 (always true), 0 (always false), or "" (unknown) -- exactly
+# hir::types::KnownOutcome's own three-way convention, so every existing
+# consumer of that convention composes with this one unchanged.
+#
+# Scope (spec #11, #61-65): ANALYSIS's own per-instance Ranges are already
+# joined across every call site that reaches instance ID (hir::range::
+# analyze's own interprocedural fold, above) -- so a condition this proc
+# proves true/false here is an INSTANCE-level theorem, sound for every
+# caller of that instance, never a call-specific one smuggled in from a
+# single literal caller: a shared instance with one safe and one dynamic
+# caller keeps whatever its joined entry facts actually prove, which is
+# typically nothing more than before (see the report's shared-instance
+# adversarial control).
+#
+# Only a direct two-argument native comparison (< <= > >= ==) is
+# understood; anything else (an arbitrary Bool expression, a call to a
+# non-native/block target, `!=`'s own desugared `not(a == b)` wrapper)
+# answers "" here exactly as hir::types::KnownOutcome alone already would --
+# no comparison/range reasoning is duplicated into any other consumer, and
+# no second range engine is introduced: this proc only ever reads Ranges
+# hir::range::analyze already computed, via the existing Narrowed/of
+# primitives above.
+proc hir::range::ConditionOutcome {hir analysis id condition} {
+    set known [hir::types::KnownOutcome $hir $condition]
+    if {$known ne ""} {
+        return $known
+    }
+    set node [hir::node $hir $condition]
+    if {[dict get $node kind] ne "call"} {
+        return ""
+    }
+    lassign [dict get $node target] targetKind target
+    if {$targetKind ne "native"} {
+        return ""
+    }
+    set name [dict get [hir::symbol $hir $target] name]
+    set args [dict get $node args]
+    if {[llength $args] != 2} {
+        return ""
+    }
+    lassign $args ea eb
+    set ra [of $analysis $id $ea]
+    set rb [of $analysis $id $eb]
+    if {$name eq "=="} {
+        if {![CouldBeEqual $ra $rb]} {
+            return 0
+        }
+        if {[MustBeEqual $ra $rb]} {
+            return 1
+        }
+        return ""
+    }
+    if {$name ni {< <= > >=}} {
+        return ""
+    }
+    if {[IsEmpty [Narrowed $name $ra $rb]]} {
+        # The true outcome's own narrowing (ComparisonNarrowing's identical
+        # rule, reused read-only here) would force an operand to an empty
+        # range: the condition can never actually evaluate true.
+        return 0
+    }
+    set negated [dict get {< >= <= > > <= >= <} $name]
+    if {[IsEmpty [Narrowed $negated $ra $rb]]} {
+        # Symmetric: the false outcome's own narrowing is the empty range.
+        return 1
+    }
+    return ""
+}
+
+# Whether R denotes the empty set: min > max, both finite. Every other
+# producer in this file deliberately never returns such a Range (see this
+# file's "Exact value sets" header) -- Narrowed is the sole exception,
+# precisely because its caller (ComparisonNarrowing) only ever stores its
+# result as a branch-local binding fact, never re-inspects it, so the
+# emptiness this proc detects has sat unread in the existing lattice since
+# before this milestone (the canonical M6 "ignored theorem", not a new
+# fact). "" (Narrowed's own "no new information" answer, not a Range at
+# all -- e.g. an unbounded other operand) is not empty; it is unknown.
+proc hir::range::IsEmpty {r} {
+    if {$r eq ""} {
+        return 0
+    }
+    set mn [dict get $r min]
+    set mx [dict get $r max]
+    return [expr {$mn ne "-inf" && $mx ne "+inf" && $mn > $mx}]
+}
+
+# Whether RA and RB could possibly be equal: their intervals overlap, and
+# (spec #36's own exact-domain-correctness rule) if one side is a single
+# proven point and the other tracks an exact set, that point must actually
+# be a member -- so a non-contiguous domain (HighNibble's {0,16,...,240})
+# is never accepted merely because the point lies within the interval
+# hull.
+proc hir::range::CouldBeEqual {ra rb} {
+    set amn [dict get $ra min]; set amx [dict get $ra max]
+    set bmn [dict get $rb min]; set bmx [dict get $rb max]
+    if {$amx ne "+inf" && $bmn ne "-inf" && $amx < $bmn} { return 0 }
+    if {$bmx ne "+inf" && $amn ne "-inf" && $bmx < $amn} { return 0 }
+    if {$amn eq $amx && $amn ne "-inf"} {
+        set other [ExactOf $rb]
+        if {$other ne "" && $amn ni $other} { return 0 }
+    }
+    if {$bmn eq $bmx && $bmn ne "-inf"} {
+        set other [ExactOf $ra]
+        if {$other ne "" && $bmn ni $other} { return 0 }
+    }
+    return 1
+}
+
+# Whether RA and RB must be equal: both are already the same single proven
+# point.
+proc hir::range::MustBeEqual {ra rb} {
+    set amn [dict get $ra min]; set amx [dict get $ra max]
+    set bmn [dict get $rb min]; set bmx [dict get $rb max]
+    return [expr {$amn eq $amx && $amn ne "-inf" && $bmn eq $bmx && $amn eq $bmn}]
 }
 
 # The region of instance ID's view HIR (already specialize::view'd): a dict

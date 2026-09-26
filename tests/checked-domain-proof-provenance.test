@@ -113,19 +113,29 @@ proc callFactsAtLine {hir line} {
 }
 
 # ---------------------------------------------------------------------------
-# Architecture control: `native::lower::If` decides branch reachability
-# from HIR-level `reachable` (hir::types::KnownOutcome), never from
-# `hir::range`. This is RC2 (COMPREHENSIVE-GENERATED-CODE-AUDIT.md): the
-# generic reason a checked construction's runtime guard never disappears
-# even under a strong local literal fact.
+# Architecture control (SUPERSEDED BY M6): at the time this milestone (M5)
+# was written, `native::lower::If` decided branch reachability only from
+# HIR-level `reachable` (hir::types::KnownOutcome), never from `hir::range`.
+# This was RC2 (COMPREHENSIVE-GENERATED-CODE-AUDIT.md): the generic reason a
+# checked construction's runtime guard never disappeared even under a
+# strong local literal fact. M6-RANGE-DECIDED-BRANCH-LOWERING.md closed
+# this gap: `native::lower::If` now also consults
+# `hir::range::ConditionOutcome`, a canonical theorem query that itself
+# composes `hir::types::KnownOutcome` with `hir::range`'s own already-
+# settled per-instance operand facts (no second range engine, no
+# comparison logic inside the lowerer itself -- see that report). This pin
+# is kept, inverted, as a structural regression control: it must keep
+# consulting `hir::range::ConditionOutcome` by name, not reproduce range
+# reasoning inline.
 
-test checked-domain-if-never-consults-range-for-branch-death {native::lower::If's own reachability decision is HIR "reachable" (hir::types::KnownOutcome-derived), never hir::range -- a structural, one-time architecture pin, not per-fixture} -body {
+test checked-domain-if-now-consults-range-for-branch-death {M6: native::lower::If's own reachability decision now also consults hir::range::ConditionOutcome (still "reachable"-aware for the syntactic fallback), and does not reproduce comparison/range logic inline -- a structural, one-time architecture pin, not per-fixture} -body {
     set src [core::ReadFile [file join $::projectRoot native lower.tcl]]
     set ifStart [string first "proc native::lower::If " $src]
     set ifEnd [string first "\nproc " $src [expr {$ifStart + 1}]]
     set ifBody [string range $src $ifStart $ifEnd]
-    list [string match "*reachable*" $ifBody] [string match "*hir::range*" $ifBody]
-} -result {1 0}
+    list [string match "*reachable*" $ifBody] [string match "*hir::range::ConditionOutcome*" $ifBody] \
+            [string match "*op rilt*" $ifBody] [string match "*ExactOf*" $ifBody]
+} -result {1 1 0 0}
 
 # ---------------------------------------------------------------------------
 # Q1 (decision-tree item 46): a local, statically obvious in-range literal.
@@ -143,7 +153,7 @@ test checked-domain-q1-real-byte-from-int-45-effective-errors-empty {byte::from_
     }
 } -result {{} {[45, 45] {45}}}
 
-test checked-domain-q1-real-byte-from-int-still-emits-both-checks {despite that proof, byte::from_int<int>'s own generated NIR still contains both range compares and both fail paths -- Q1 = no, RC2/F02 unfixed (this milestone leaves it unfixed: see report)} -body {
+test checked-domain-q1-real-byte-from-int-still-emits-both-checks {UPDATED BY M6: byte::from_int<int>'s own generated NIR, with this its ONLY (single, all-safe-literal) caller, now emits neither fail path -- both comparisons are still computed (condition-evaluation soundness, M6 spec #40-42: no purity theorem was added, so the two now-dead `rilt`/`rigt` registers remain, unused) but the runtime branch and both `faildeclared` blocks are gone, because the instance's own joined entry range for `value` (point 45, this call being its only caller) now reaches `native::lower::If` as a consumed theorem. Q1 = yes, under M6, for a safe-only-caller instance -- see the report's byte::from_int reassessment} -body {
     set path [makeFile {byte::from_int(45)} q1-byte-from-int-45-nir.bot]
     try {
         set body [nirFuncBody [nirOfFile $path] "byte::from_int"]
@@ -153,7 +163,7 @@ test checked-domain-q1-real-byte-from-int-still-emits-both-checks {despite that 
     } finally {
         removeFile q1-byte-from-int-45-nir.bot
     }
-} -result {1 1 1 1}
+} -result {1 1 0 0}
 
 test checked-domain-q1-out-of-range-literal-still-known-error {byte::from_int(999) remains a compile-time KNOWN-ERROR, not silently accepted -- the other half of the three-way rule is unaffected} -body {
     set path [makeFile {byte::from_int(999)} q1-byte-from-int-999.bot]
@@ -180,12 +190,12 @@ fn checkedSmall(value: int) -> Small errors TooSmall, TooLarge:
             value
 }
 
-test checked-domain-q1-generic-domain-literal-still-emits-both-checks {a second, non-Byte bounded domain's own checked constructor, called with a statically safe literal, still emits both range compares and both fail paths -- Q1's answer is generic, not Byte-special-cased} -body {
+test checked-domain-q1-generic-domain-literal-still-emits-both-checks {UPDATED BY M6: a second, non-Byte bounded domain's own checked constructor, called with a statically safe literal as its only caller, now loses both fail paths exactly like byte::from_int(45) does -- confirming the M6 mechanism is generic (hir::range::ConditionOutcome has no Byte- or type-specific code), not a Byte special case} -body {
     set body [nirFuncBody [nirOf "${::smallCheckedSrc}checkedSmall(15)"] "checkedSmall"]
     list [regexp -all {op rilt} $body] [regexp -all {op rigt} $body] \
             [regexp -all {faildeclared 1 "TooSmall"} $body] \
             [regexp -all {faildeclared 2 "TooLarge"} $body]
-} -result {1 1 1 1}
+} -result {1 1 0 0}
 
 # ---------------------------------------------------------------------------
 # Q2 (decision-tree item 46): a nonliteral value with an existing, weaker
@@ -208,7 +218,7 @@ fn g(m) -> int errors TooLarge:
     }
 } -result {}
 
-test checked-domain-q2-still-emits-both-checks {even with that narrower HIR-level proof, checkedSmall<int>'s own generated NIR still contains both compares and both fail paths -- Q2 = no, the same RC2 gap (no per-instance branch elimination from a one-sided hir::range fact either)} -body {
+test checked-domain-q2-still-emits-both-checks {UPDATED BY M6: with that narrower one-sided HIR-level-*and-now-codegen-visible* proof (nonneg's own result range settles to [10,+inf) -- both its branches return a value already >=10), checkedSmall<int>'s TooSmall check is eliminated (value<10 is AlwaysFalse against [10,+inf)), but TooLarge remains: nonneg's result is only bounded below, never above, so value>20 is genuinely Unknown -- Q2 = one check, not two; a real partial-range elimination, exactly proportional to what hir::range actually proves (no invented upper bound)} -body {
     set body [nirFuncBody [nirOf "${::smallCheckedSrc}fn nonneg(m) -> int:
     if m < 10:
         10
@@ -219,7 +229,7 @@ fn g(m) -> int errors TooLarge:
 g(5)"] "checkedSmall"]
     list [regexp -all {faildeclared 1 "TooSmall"} $body] \
             [regexp -all {faildeclared 2 "TooLarge"} $body]
-} -result {1 1}
+} -result {0 1}
 
 # ---------------------------------------------------------------------------
 # Q3 (decision-tree item 46): the real byte::set path, the actual question
@@ -259,7 +269,7 @@ test checked-domain-q3-inner-call-keeps-only-the-generic-fact {byte::set's own i
     }
 } -result {AboveRange {[0, 1114111]}}
 
-test checked-domain-q3-real-nir-retains-both-checks {byte::set's real generated NIR for its inner byte::from_int<int> instance still contains both range compares and both fail paths, for the actual real production module initializer -- confirming Outcome B's "no codegen change" at the real call site, not merely at a synthetic fixture} -body {
+test checked-domain-q3-real-nir-retains-above-range-check {UPDATED BY M6: byte::set's real generated NIR for its inner byte::from_int<int> instance loses its BelowRange check -- generically, because char::codepoint's own declared result range floor (core/native.tcl's "-result-range nonneg" metadata for a Unicode scalar value, [0, 1114111]) already proves value>=0 for EVERY caller of this shared instance, independent of the punctuation literal's own four values and independent of hir/completions.tcl's call-specific silo entirely -- but AboveRange remains: char::codepoint's upper bound (1114111) is nowhere near 255, so value>255 stays genuinely Unknown for this shared instance. This is the real production improvement M6 actually delivers here; it is not M5's own Q3 question (whether the outer call's *literal* facts reach the inner construction) -- that remains Outcome B, confirmed unchanged: no container-content propagation, no completions-proof import, was added} -body {
     set path [makeFile {additional_unreserved_chars = byte::set(['-', '.', '_', '~'])} q3-nir.bot]
     try {
         set body [nirFuncBody [nirOfFile $path] "byte::from_int"]
@@ -269,7 +279,7 @@ test checked-domain-q3-real-nir-retains-both-checks {byte::set's real generated 
     } finally {
         removeFile q3-nir.bot
     }
-} -result {1 1 1 1}
+} -result {1 1 0 1}
 
 # ---------------------------------------------------------------------------
 # Shared-instance adversarial control (spec items 8-9, 21-22): the same

@@ -4650,6 +4650,8 @@ proc native::lower::If {fnVar e node} {
     variable hir
     variable guards
     variable knownErrors
+    variable ranges
+    variable currentInstance
     set condition [dict get $node condition]
     set test [Expr fn $condition]
     if {$test eq "never"} {
@@ -4661,6 +4663,24 @@ proc native::lower::If {fnVar e node} {
         dict incr fn [expr {[dict exists $guards $key] ? "guards" : "knownErrorGuards"}]
     } elseif {[hir::types::kindOf [hir::typeOf $hir $condition]] ne "bool"} {
         throw {NATIVE BUG} "native lowering: hir::aot reports no Boolean check for $condition ($e)"
+    }
+    # M6-RANGE-DECIDED-BRANCH-LOWERING.md: the canonical branch-outcome
+    # theorem (hir::types::KnownOutcome's own syntactic proof, composed
+    # with hir::range's already-settled per-instance operand facts -- never
+    # reproved here). $test above is still evaluated unconditionally for
+    # its own effects (M6 spec #40-41: a known Bool *result* is not the
+    # same fact as a removable condition *expression*); only the runtime
+    # branch this decided outcome would make redundant is skipped.
+    set outcome [hir::range::ConditionOutcome $hir $ranges $currentInstance $condition]
+    if {$outcome ne ""} {
+        set role [expr {$outcome ? "then" : "else"}]
+        set saved [dict get $fn locals]
+        set savedRaw [dict get $fn rawCache]
+        EnterScope fn [dict get $node ${role}Scope]
+        set value [Sequence fn [dict get $node ${role}Body]]
+        dict set fn locals $saved
+        dict set fn rawCache $savedRaw
+        return $value
     }
     set then [NewLabel fn]
     set else [NewLabel fn]
