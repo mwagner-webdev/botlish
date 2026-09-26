@@ -1,0 +1,26 @@
+peek<str, int>             csv.bot:30:5               str  substring            materialized return from an instance with a companion variant
+scan_unquoted<str, int, int> csv.bot:37:17              str  substring            materialized storage into an aggregate (List element)
+scan_quoted<str, int, str> csv.bot:47:49              str  concat               virtual      
+scan_quoted<str, int, str> csv.bot:47:56              str  ref                  virtual      
+scan_quoted<str, int, str> csv.bot:49:17              str  ref                  materialized storage into an aggregate (List element)
+scan_quoted<str, int, str> csv.bot:51:34              str  concat               virtual      
+scan_quoted<str, int, str> csv.bot:51:41              str  ref                  virtual      
+scan_record<str, int, List[never]> csv.bot:64:12              list list_append          virtual      
+scan_record<str, int, List[never]> csv.bot:68:44              list ref                  virtual      
+scan_record<str, int, List[never]> csv.bot:71:17              list ref                  materialized storage into an aggregate (List element)
+scan_record<str, int, List[never]> csv.bot:73:6               list ref                  materialized storage into an aggregate (List element)
+scan_record<str, int, List[str]> csv.bot:64:12              list list_append          virtual      
+scan_record<str, int, List[str]> csv.bot:64:24              list ref                  virtual      
+scan_record<str, int, List[str]> csv.bot:68:44              list ref                  virtual      
+scan_record<str, int, List[str]> csv.bot:71:17              list ref                  materialized storage into an aggregate (List element)
+scan_record<str, int, List[str]> csv.bot:73:6               list ref                  materialized storage into an aggregate (List element)
+scan_records<str, int, List[never]> csv.bot:81:46              list list_append          virtual      
+scan_records<str, int, List[List[str]]> csv.bot:78:16              list ref                  materialized return to exact callers that never extend the result
+scan_records<str, int, List[List[str]]> csv.bot:81:46              list list_append          virtual      
+scan_records<str, int, List[List[str]]> csv.bot:81:58              list ref                  virtual      
+
+totals by disposition / barrier reason:
+     1  return from an instance with a companion variant
+     6  storage into an aggregate (List element)
+    12  (virtual)
+     1  return to exact callers that never extend the result

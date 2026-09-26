@@ -36,14 +36,15 @@
 
 use super::show::tcl_list;
 use super::value::{
-    KIND_BIGINT, KIND_CELL, KIND_CLOSURE, KIND_LIST, KIND_MUTARRAY, KIND_NATIVE, KIND_RESULT, KIND_SET, KIND_STR,
+    KIND_BIGINT, KIND_CELL, KIND_CLOSURE, KIND_LIST, KIND_LISTPLAN, KIND_MUTARRAY, KIND_NATIVE, KIND_RESULT, KIND_SET,
+    KIND_STR, KIND_STRPLAN,
 };
 use std::collections::HashMap;
 use std::time::Duration;
 
 /// One more than the largest `Header::kind` value: `by_kind`/`static_by_kind`
 /// are indexed directly by kind byte (index 0 unused).
-pub const KIND_COUNT: usize = 10;
+pub const KIND_COUNT: usize = 12;
 
 pub fn kind_name(kind: u8) -> &'static str {
     match kind {
@@ -56,13 +57,54 @@ pub fn kind_name(kind: u8) -> &'static str {
         KIND_CELL => "Cell",
         KIND_MUTARRAY => "MutableArray",
         KIND_SET => "ImmutableSet",
+        KIND_STRPLAN => "StringPlan",
+        KIND_LISTPLAN => "ListPlan",
         _ => "?",
     }
 }
 
-/// Every kind this milestone's object set uses, in report order.
-pub const KINDS: [u8; 9] =
-    [KIND_STR, KIND_LIST, KIND_SET, KIND_MUTARRAY, KIND_BIGINT, KIND_RESULT, KIND_CLOSURE, KIND_CELL, KIND_NATIVE];
+/// Every kind this milestone's object set uses, in report order. The two
+/// private virtual-construction plan kinds (M8.a) come last: they are
+/// implementation objects, never program values, reported separately so a
+/// String/List allocation count always means semantic flat objects only.
+pub const KINDS: [u8; 11] = [
+    KIND_STR, KIND_LIST, KIND_SET, KIND_MUTARRAY, KIND_BIGINT, KIND_RESULT, KIND_CLOSURE, KIND_CELL, KIND_NATIVE,
+    KIND_STRPLAN, KIND_LISTPLAN,
+];
+
+/// Virtual-construction counters (runtime/construct.rs, M8.a): what every
+/// `construct` instruction did. Observational only, like every counter
+/// here; all zero when native/lower.tcl's -virtual-construction-opt is off
+/// (no `construct` instruction is ever emitted then).
+#[derive(Clone, Copy, Default)]
+pub struct ConstructionStats {
+    /// Flat constructs that built a new flat String/List (the one
+    /// materialization a virtual construction ends in, or an n-ary flat
+    /// concatenation of several pieces).
+    pub materializations: u64,
+    /// Flat constructs whose one piece was already flat: no allocation.
+    pub passthrough: u64,
+    /// Plan constructs that allocated a fresh plan object.
+    pub plans_created: u64,
+    /// Plan constructs that extended an existing plan in place.
+    pub extensions: u64,
+    /// Plan pieces absorbed (consumed) into another plan or a flat result,
+    /// other than an extension's own anchor.
+    pub merges: u64,
+    /// Plan buffer reallocations, and what they moved.
+    pub growths: u64,
+    pub growth_str_bytes: u64,
+    pub growth_list_elements: u64,
+    /// Pieces processed, and how many of them were StringRegions.
+    pub pieces: u64,
+    pub region_pieces: u64,
+    /// Payload written into plan buffers (subsets of the copies counters).
+    pub str_bytes_into_plans: u64,
+    pub list_elements_into_plans: u64,
+    /// Payload of the flat objects materializations built.
+    pub materialized_str_bytes: u64,
+    pub materialized_list_elements: u64,
+}
 
 #[derive(Clone, Copy, Default)]
 pub struct KindStats {
@@ -200,6 +242,7 @@ pub struct Metrics {
     /// and so never seek at all. See hir/traversal.tcl and native/lower.tcl's
     /// "String traversal" section for the optimization this measures.
     pub utf8_seek_bytes: u64,
+    pub construction: ConstructionStats,
 }
 
 impl Metrics {
@@ -222,6 +265,7 @@ impl Metrics {
             mutarray_reads: 0,
             mutarray_writes: 0,
             utf8_seek_bytes: 0,
+            construction: ConstructionStats::default(),
         }
     }
 
@@ -395,6 +439,23 @@ impl Metrics {
         ]);
         let mutations = dict(&[("reads", n(self.mutarray_reads)), ("writes", n(self.mutarray_writes))]);
         let traversal = dict(&[("utf8SeekBytes", n(self.utf8_seek_bytes))]);
+        let c = &self.construction;
+        let construction = dict(&[
+            ("materializations", n(c.materializations)),
+            ("passthrough", n(c.passthrough)),
+            ("plansCreated", n(c.plans_created)),
+            ("extensions", n(c.extensions)),
+            ("merges", n(c.merges)),
+            ("growths", n(c.growths)),
+            ("growthStringBytes", n(c.growth_str_bytes)),
+            ("growthListElements", n(c.growth_list_elements)),
+            ("pieces", n(c.pieces)),
+            ("regionPieces", n(c.region_pieces)),
+            ("stringBytesIntoPlans", n(c.str_bytes_into_plans)),
+            ("listElementsIntoPlans", n(c.list_elements_into_plans)),
+            ("materializedStringBytes", n(c.materialized_str_bytes)),
+            ("materializedListElements", n(c.materialized_list_elements)),
+        ]);
         dict(&[
             ("total", total),
             ("byKind", by_kind),
@@ -403,6 +464,7 @@ impl Metrics {
             ("copies", copies),
             ("mutableArray", mutations),
             ("traversal", traversal),
+            ("construction", construction),
             ("sites", sites_tcl.to_string()),
         ])
     }

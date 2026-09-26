@@ -1,0 +1,9 @@
+virtual-construction-opt 0: 798 machine-code bytes, 3 NIR functions
+0 <program>                  <generic>                 418 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+1 reverse_from               <str, int, str>           290 bytes  guards=0  strcat=1  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+2 reverse_chars              <str>                      90 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+
+virtual-construction-opt 1: 990 machine-code bytes, 3 NIR functions
+0 <program>                  <generic>                 418 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+1 reverse_from               <str, int, str>           482 bytes  guards=0  strcat=0  listappend=0  construct(plan)=1  construct(flat)=1  planregs=2  planresult=0
+2 reverse_chars              <str>                      90 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0

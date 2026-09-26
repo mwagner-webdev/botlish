@@ -1,0 +1,6 @@
+program: corpus:csv_geometric
+value (on):  [["name", "age"], ["Alice", "30"], ["Bob", "40"]]
+value (off): [["name", "age"], ["Alice", "30"], ["Bob", "40"]]
+used instances: 14
+plan results: 0, instances with plan parameters: 1, instances with plan locals: 0
+construction sites/plan sources: 7 (4 virtual)

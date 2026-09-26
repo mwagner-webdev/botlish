@@ -1,0 +1,474 @@
+# virtual-construction.test -- M8.a virtual immutable construction
+# (M8A-VIRTUAL-IMMUTABLE-CONSTRUCTION.md; hir/construction.tcl, native/
+# lower.tcl's "Virtual construction" section, runtime/construct.rs, nir.rs's
+# validate_plans).
+#
+# Every value test is differential: the reference interpreter, the Tcl
+# compiler, cranelift-generic, and cranelift with -virtual-construction-opt 0
+# and 1 must all agree exactly (parity). Structural tests pin *where*
+# materialization happens (NIR `construct` instructions, plan registers,
+# the runtime's construction counters) and that nothing else moved: types,
+# specialization keys, instance counts.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot examples stdlib corpus.tcl]
+
+interp recursionlimit {} 1000000
+
+proc sourceHir {text} {
+    return [surface::compile $text t.bot -strict 0]
+}
+
+# {value SHOWN} or {error ERRORCODE} of HIR under LABEL: interp, compile,
+# cranelift-generic (virtual construction on, its default), or cranelift
+# with virtual construction off/on.
+proc vcOutcome {hir label} {
+    switch -- $label {
+        interp - compile - cranelift-generic {
+            return [lrange [corpus::outcome $label $hir] 0 1]
+        }
+        off { set opt 0 }
+        on  { set opt 1 }
+    }
+    if {[catch {native::evalHir $hir -specialize 1 -virtual-construction-opt $opt} value options]} {
+        return [list error [dict get $options -errorcode]]
+    }
+    return [list value [core::value::show $value 1]]
+}
+
+# TEXT's outcome, asserting every backend and setting agrees with interp.
+proc parity {text} {
+    set hir [sourceHir $text]
+    set reference [vcOutcome $hir interp]
+    foreach label {compile cranelift-generic off on} {
+        set outcome [vcOutcome $hir $label]
+        if {$outcome ne $reference} {
+            error "$label: $outcome, interp: $reference"
+        }
+    }
+    return $reference
+}
+
+proc vcReport {text opt} {
+    return [native::allocationReport [sourceHir $text] summary 1 -virtual-construction-opt $opt]
+}
+
+proc allocs {report kind} {
+    return [dict get $report byKind $kind allocations]
+}
+
+proc nirOf {text {opt 1}} {
+    return [native::nir [sourceHir $text] -virtual-construction-opt $opt]
+}
+
+# Number of NIR lines of TEXT matching `construct PATTERN`.
+proc constructs {nir pattern} {
+    return [regexp -all -line "= construct $pattern" $nir]
+}
+
+# The body of NIR function NAME (first match) in NIR text NIR.
+proc funcBody {nir name} {
+    regexp "func \\d+ \"$name\"\[^\\n\]*\\n(.*?)\\nend" $nir -> body
+    return $body
+}
+
+# The hir::construction analysis (and specialization) of TEXT.
+proc analysisOf {text} {
+    set lowered [native::lower::program [sourceHir $text]]
+    return [list [dict get $lowered specialization] [dict get $lowered construction]]
+}
+
+# Sorted {LABEL family} of every plan-result instance of TEXT.
+proc planResults {text} {
+    lassign [analysisOf $text] spec analysis
+    set result {}
+    dict for {id family} [dict get $analysis results] {
+        lappend result [list [hir::specialize::label $spec $id] $family]
+    }
+    return [lsort $result]
+}
+
+# Sorted {LABEL k family} of every plan parameter of TEXT.
+proc planParams {text} {
+    lassign [analysisOf $text] spec analysis
+    set result {}
+    dict for {id params} [dict get $analysis params] {
+        dict for {k family} $params {
+            lappend result [list [hir::specialize::label $spec $id] $k $family]
+        }
+    }
+    return [lsort $result]
+}
+
+set digits {digits = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]}
+
+# ---------------------------------------------------------------------------
+# String: correctness and where materialization happens
+
+test vc-str-two-flat-1 {two flat strings: value parity, and exactly the eager strcat op (nothing virtual)} -body {
+    set text "fn f(a, b):\n    concat(a, b)\n\nf(\"ab\", \"cd\")"
+    list [parity $text] [constructs [nirOf $text] .*] [regexp -all {op strcat} [nirOf $text]]
+} -result {{value {"abcd"}} 0 1}
+
+test vc-str-tree-1 {a nested concat tree is one n-ary flat construction: one String instead of three} -body {
+    set text "fn f(a, b, c, d):\n    concat(concat(concat(a, b), c), d)\n\nf(\"a\", \"bc\", \"\", \"déf\")"
+    set on [vcReport $text 1]
+    set off [vcReport $text 0]
+    list [parity $text] [allocs $on String] [allocs $off String] [allocs $on StringPlan] \
+        [constructs [nirOf $text] {str flat %\d+ %\d+ %\d+ %\d+}]
+} -result {{value {"abcdéf"}} 1 3 0 1}
+
+test vc-str-region-1 {a substring operand is a StringRegion piece: never allocated as its own String} -body {
+    set text "fn f(t):\n    concat(substring(t, 1, 3), \"x\")\n\nf(\"héllo\")"
+    set on [vcReport $text 1]
+    list [parity $text] [allocs $on String] [allocs [vcReport $text 0] String] \
+        [dict get $on construction regionPieces] [regexp {construct str flat region %\d+ %\d+ %\d+ %\d+} [nirOf $text]]
+} -result {{value {"élx"}} 1 2 1 1}
+
+test vc-str-region-2 {a region piece's bounds error is the eager substring's own error, raised at the same point} -body {
+    parity "fn f(t):\n    concat(\"a\", substring(t, 2, 9))\n\nf(\"hello\")"
+} -result {error {CORE SEMANTIC RANGE}}
+
+test vc-str-region-bind-1 {a substring bound to a local and then concatenated stays a StringRegion piece (reverse_from's shape)} -body {
+    set text "fn build(t, i, acc):\n    if i >= length(t):\n        return acc\n    c = substring(t, i, i + 1)\n    build(t, i + 1, concat(c, acc))\n\nbuild(\"héllo🙂\", 0, \"\")"
+    set on [vcReport $text 1]
+    list [parity $text] [allocs $on String] [allocs [vcReport $text 0] String] [allocs $on StringPlan] \
+        [dict get $on construction regionPieces]
+} -result {{value {"🙂olléh"}} 1 12 1 6}
+
+test vc-str-bind-1 {a binding across concat stays virtual: x is a plan local, one final String} -body {
+    set text "fn f(a, b, c):\n    x = concat(a, b)\n    y = concat(x, c)\n    length(y)\n\nf(\"a\", \"b\", \"c\")"
+    set on [vcReport $text 1]
+    list [parity $text] [allocs $on String] [allocs [vcReport $text 0] String] [allocs $on StringPlan]
+} -result {{value 3} 1 2 0}
+
+test vc-str-fork-1 {a fork (two live uses) materializes: x is not a plan local, and the reason is recorded} -body {
+    set text "fn f(a, b):\n    x = concat(a, b)\n    \[concat(x, \"c\"), concat(x, \"d\")\]\n\nf(\"a\", \"b\")"
+    lassign [analysisOf $text] spec analysis
+    set why [lsort -unique [concat {*}[lmap {id reasons} [dict get $analysis localWhy] {dict values $reasons}]]]
+    list [parity $text] [dict get $analysis locals] $why
+} -result {{value {["abc", "abd"]}} {} {{fork: referenced more than once on some path}}}
+
+test vc-str-branch-1 {a branch join stays virtual: both arms extend the same recurrence plan} -body {
+    set text "fn build(i, n, acc):\n    if i >= n:\n        return acc\n    next = if mod(i, 2) == 0:\n        concat(acc, \"ab\")\n    else:\n        concat(concat(acc, \"c\"), \"d\")\n    build(i + 1, n, next)\n\nbuild(0, 7, \"\")"
+    set on [vcReport $text 1]
+    list [parity $text] [allocs $on String] [allocs $on StringPlan] [dict get $on construction materializations]
+} -result {{value {"abcdabcdabcdab"}} 1 1 1}
+
+test vc-str-loop-1 {a runtime-variable recurrence copies linearly, not quadratically (N and 4N)} -body {
+    set template "fn build(i, n, acc):\n    if i >= n:\n        return acc\n    build(i + 1, n, concat(acc, \"ab\"))\n\nlength(build(0, %N%, \"\"))"
+    set rows {}
+    foreach n {500 2000} {
+        set text [string map [list %N% $n] $template]
+        set on [vcReport $text 1]
+        set off [vcReport $text 0]
+        lappend rows [list [parity $text] [dict get $on copies stringBytes] [dict get $off copies stringBytes] \
+            [allocs $on String] [allocs $on StringPlan] [allocs $off String]]
+    }
+    lassign $rows small large
+    list [lindex $small 0] [lindex $large 0] \
+        [expr {[lindex $large 1] <= 5 * [lindex $small 1]}] \
+        [expr {[lindex $large 2] >= 15 * [lindex $small 2]}] \
+        [lrange $large 3 5]
+} -result {{value 1000} {value 4000} 1 1 {1 1 2000}}
+
+test vc-str-prepend-1 {a prepending recurrence (reverse_from's shape) is linear too} -body {
+    set text "fn build(i, n, acc):\n    if i >= n:\n        return acc\n    build(i + 1, n, concat(substring(\"xyz\", mod(i, 3), mod(i, 3) + 1), acc))\n\nbuild(0, 7, \"!\")"
+    set on [vcReport $text 1]
+    list [parity $text] [allocs $on String] [allocs $on StringPlan] [dict get $on construction regionPieces]
+} -result {{value {"xzyxzyx!"}} 1 1 7}
+
+test vc-str-helper-1 {an exact helper's result is a construction summary: its plan crosses the call, its caller extends it} -body {
+    set text "$digits\nfn piece(i):\n    concat(\"<\", concat(list_get(digits, mod(i, 10)), \">\"))\n\nfn build(i, n, acc):\n    if i >= n:\n        return acc\n    build(i + 1, n, concat(acc, piece(i)))\n\nbuild(0, 12, \"\")"
+    set on [vcReport $text 1]
+    list [parity $text] [planResults $text] [planParams $text] [allocs $on String] [allocs [vcReport $text 0] String]
+} -result {{value {"<0><1><2><3><4><5><6><7><8><9><0><1>"}} {{piece<generic> str}} {{build<generic> 2 str}} 1 36}
+
+test vc-str-chain-1 {a three-level helper chain materializes once, not once per level} -body {
+    set text "$digits\nfn a(i):\n    concat(\"a\", list_get(digits, mod(i, 10)))\n\nfn b(i):\n    concat(a(i), \"b\")\n\nfn c(i):\n    concat(b(i), \"c\")\n\nc(7)"
+    set on [vcReport $text 1]
+    set off [vcReport $text 0]
+    list [parity $text] [planResults $text] [allocs $on String] [allocs $on StringPlan] \
+        [dict get $on construction materializations] [allocs $off String]
+} -result {{value {"a7bc"}} {{a<generic> str} {b<generic> str}} 1 1 1 3}
+
+test vc-str-open-1 {an open/dynamic call is a barrier: the argument is materialized before the dynamic call, and only the exact-call instance of a helper used as a value returns a plan} -body {
+    # wrap is used both as a Block value (its generic instance: open,
+    # reached through the generic entry) and by an exact direct call (the
+    # specialized wrap<str>, reachable only that way: closed). apply's x is
+    # never a plan parameter: its one use is a dynamic call's argument, so
+    # the caller passes an ordinary flat String (the eager strcat) and
+    # apply's body has no plan register at all.
+    set text "fn wrap(s):\n    concat(s, \"!\")\n\nfn apply(g, x):\n    g(x)\n\n\[apply(wrap, concat(\"a\", \"b\")), concat(wrap(\"c\"), \"?\")\]"
+    set nir [nirOf $text]
+    lassign [analysisOf $text] spec analysis
+    set why [lsort -unique [concat {*}[lmap {id reasons} [dict get $analysis paramWhy] {dict values $reasons}]]]
+    list [parity $text] [planResults $text] [planParams $text] \
+        [regexp {planregs} [lindex [regexp -inline {func \d+ "apply"[^\n]*} $nir] 0]] \
+        [expr {"every use needs a flat value" in $why}]
+} -result {{value {["ab!", "c!?"]}} {{wrap<str> str}} {} 0 1}
+
+test vc-str-empty-1 {empty pieces, empty accumulators and an empty result} -body {
+    set text "fn build(i, n, acc):\n    if i >= n:\n        return acc\n    build(i + 1, n, concat(concat(acc, \"\"), \"\"))\n\n\[build(0, 5, \"\"), concat(\"\", \"\"), length(build(0, 0, \"\"))\]"
+    parity $text
+} -result {value {["", "", 0]}}
+
+test vc-str-large-1 {large strings: a 1 MB result built from 64 KB pieces} -body {
+    set text "fn big(i, n, acc):\n    if i >= n:\n        return acc\n    big(i + 1, n, concat(acc, acc))\n\nfn build(i, n, acc, piece):\n    if i >= n:\n        return acc\n    build(i + 1, n, concat(acc, piece), piece)\n\ns = build(0, 16, \"\", big(0, 16, \"a\"))\n\[length(s), substring(s, 1048570, 1048576)\]"
+    parity $text
+} -result {value {[1048576, "aaaaaa"]}}
+
+test vc-str-unicode-1 {String semantics are unchanged: scalar counts and indexing across ASCII, BMP and astral pieces} -body {
+    set text "fn build(i, n, acc):\n    if i >= n:\n        return acc\n    build(i + 1, n, concat(concat(acc, \"é\"), concat(\"🙂\", \"x\")))\n\ns = build(0, 3, \"\")\n\[s, length(s), substring(s, 4, 6)\]"
+    parity $text
+} -result {value {["é🙂xé🙂xé🙂x", 9, "🙂x"]}}
+
+# ---------------------------------------------------------------------------
+# String: strict evaluation, errors and completion
+
+test vc-str-error-order-1 {piece 1 succeeds, piece 2 errors, piece 3 never runs: the error is piece 2's} -body {
+    # Piece 3 would raise a *different* RANGE error (list_get's) if it ran.
+    parity "fn f(t):\n    concat(concat(substring(t, 0, 1), substring(t, 4, 9)), list_get(\[\], 0))\n\nf(\"hello\")"
+} -result {error {CORE SEMANTIC RANGE}}
+
+test vc-str-error-order-2 {the error of the first failing piece is reported, identically everywhere} -body {
+    set text "fn f(t):\n    concat(concat(substring(t, 0, 1), substring(t, 4, 9)), list_get(\[\], 0))\n\nf(\"hello\")"
+    set hir [sourceHir $text]
+    set messages {}
+    foreach opt {0 1} {
+        catch {native::evalHir $hir -virtual-construction-opt $opt} message
+        lappend messages $message
+    }
+    catch {core::evalProgram [hir::lower $hir]} reference
+    list [expr {[lindex $messages 0] eq [lindex $messages 1]}] [string match *substring* [lindex $messages 1]] \
+        [string match *substring* $reference]
+} -result {1 1 1}
+
+test vc-str-error-midway-1 {an error midway through a runtime recurrence never exposes the partial plan} -body {
+    parity "fn build(i, n, acc):\n    if i >= n:\n        return acc\n    piece = if i == 5:\n        substring(\"ab\", 1, 7)\n    else:\n        \"ab\"\n    build(i + 1, n, concat(acc, piece))\n\nbuild(0, 9, \"\")"
+} -result {error {CORE SEMANTIC RANGE}}
+
+test vc-str-error-handled-1 {a handled failure after a plan argument was consumed recovers with the handler's own value} -body {
+    parity "error Bad\nfn g(s, fail_now) -> str errors Bad:\n    if fail_now:\n        fail Bad\n    else:\n        concat(s, \"!\")\n\nfn f(x, now):\n    r = g(concat(x, \"-\"), now):\n        on Bad:\n            \"handled\"\n    concat(r, \".\")\n\n\[f(\"a\", true), f(\"b\", false)\]"
+} -result {value {["handled.", "b-!."]}}
+
+# ---------------------------------------------------------------------------
+# Lists
+
+test vc-list-append-1 {List + element: value parity; a lone append is exactly the eager listappend op} -body {
+    set text "fn f(l, x):\n    list_append(l, x)\n\nf(\[1, 2\], 3)"
+    list [parity $text] [constructs [nirOf $text] .*] [regexp -all {op listappend} [nirOf $text]]
+} -result {{value {[1, 2, 3]}} 0 1}
+
+test vc-list-nested-1 {nested list_append is one flat construction: one List instead of three} -body {
+    set text "fn f(l):\n    list_append(list_append(list_append(l, 1), 2), 3)\n\nf(\[0\])"
+    set on [vcReport $text 1]
+    list [parity $text] [allocs $on List] [allocs [vcReport $text 0] List] [constructs [nirOf $text] {list flat}]
+} -result {{value {[0, 1, 2, 3]}} 2 4 1}
+
+test vc-list-bind-1 {a List binding across list_append stays virtual} -body {
+    set text "fn f(l):\n    a = list_append(l, \"x\")\n    b = list_append(a, \"y\")\n    list_length(b)\n\nf(\[\"w\"\])"
+    set on [vcReport $text 1]
+    list [parity $text] [allocs $on List] [allocs [vcReport $text 0] List]
+} -result {{value 3} 2 3}
+
+test vc-list-fork-1 {a List fork materializes and both continuations see the same prefix} -body {
+    parity "fn f(l):\n    a = list_append(l, 1)\n    \[list_append(a, 2), list_append(a, 3)\]\n\nf(\[\])"
+} -result {value {[[1, 2], [1, 3]]}}
+
+test vc-list-loop-1 {a runtime List recurrence copies linearly (N and 4N)} -body {
+    set template "fn build(i, n, acc):\n    if i >= n:\n        return acc\n    build(i + 1, n, list_append(acc, i))\n\nlist_length(build(0, %N%, \[\]))"
+    set rows {}
+    foreach n {500 2000} {
+        set text [string map [list %N% $n] $template]
+        set on [vcReport $text 1]
+        lappend rows [list [parity $text] [dict get $on copies listElements] \
+            [dict get [vcReport $text 0] copies listElements] [allocs $on ListPlan]]
+    }
+    lassign $rows small large
+    list [lindex $small 0] [lindex $large 0] \
+        [expr {[lindex $large 1] <= 5 * [lindex $small 1]}] \
+        [expr {[lindex $large 2] >= 15 * [lindex $small 2]}] [lindex $large 3]
+} -result {{value 500} {value 2000} 1 1 1}
+
+test vc-list-helper-1 {an exact List helper returns a plan its recursive caller extends (non-tail recursion)} -body {
+    set text "fn build(n):\n    if n == 0:\n        return \[\]\n    list_append(build(n - 1), n)\n\nbuild(6)"
+    list [parity $text] [planResults $text]
+} -result {{value {[1, 2, 3, 4, 5, 6]}} {{build<int> list}}}
+
+test vc-list-empty-1 {List[never] (an empty literal) as a plan's starting piece: value and emptiness unchanged} -body {
+    parity "fn build(i, n, acc):\n    if i >= n:\n        return acc\n    build(i + 1, n, list_append(acc, i * 2))\n\n\[build(0, 0, \[\]), build(0, 3, \[\]), list_length(build(0, 0, \[\]))\]"
+} -result {value {[[], [0, 2, 4], 0]}}
+
+test vc-list-gc-elements-1 {GC-bearing elements survive in a List plan under GC stress} -body {
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        parity "fn build(i, n, acc):\n    if i >= n:\n        return acc\n    build(i + 1, n, list_append(acc, concat(\"s\", substring(\"0123456789\", mod(i, 10), mod(i, 10) + 1))))\n\nl = build(0, 25, \[\])\n\[list_length(l), list_get(l, 0), list_get(l, 24)\]"
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+} -result {value {[25, "s0", "s4"]}}
+
+# ---------------------------------------------------------------------------
+# Types, theorems and identity are untouched
+
+# Every used instance's label (name and key) and HIR type of every
+# expression under TEXT's specialization, for comparing ON vs OFF.
+proc typeCensus {text opt} {
+    set hir [sourceHir $text]
+    set lowered [native::lower::program $hir -virtual-construction-opt $opt]
+    set spec [dict get $lowered specialization]
+    set labels [lsort [lmap id [dict get $spec used] {hir::specialize::label $spec $id}]]
+    set types {}
+    foreach id [dict get $spec used] {
+        set view [hir::specialize::view $hir $spec $id]
+        foreach e [dict get $spec context exprs [dict get $spec instances $id block]] {
+            lappend types [list $id $e [hir::types::show [hir::typeOf $view $e]]]
+        }
+    }
+    return [list $labels $types [llength [dict get $lowered functions]]]
+}
+
+test vc-types-1 {[Int, Int] keeps an ordinary List[Int] theorem; [Int, String] stays broad; M8.a adds no arity/positional type} -body {
+    # Instance result theorems (hir::specialize's own, unchanged by M8.a):
+    # pair's list_append of [x, x + 1] is List[int]; mixed's [x, "foo"] is
+    # the broad `list` -- no tuple, no per-index element theorem. (The
+    # specialization-only positional aggregate fact {list ELEM {P0 ...}}
+    # that hir/types.tcl already had before M8.a, visible here on the
+    # program's own two-element result, is untouched: identical on and off.)
+    set text "fn pair(x):\n    list_append(\[x, x + 1\], x + 2)\n\nfn mixed(x):\n    list_append(\[x, \"foo\"\], x)\n\n\[pair(1), mixed(2)\]"
+    set results {}
+    foreach opt {1 0} {
+        set spec [dict get [native::lower::program [sourceHir $text] -virtual-construction-opt $opt] specialization]
+        lappend results [lsort [lmap id [dict get $spec used] {
+            list [hir::specialize::label $spec $id] [hir::types::show [dict get $spec instances $id result]]
+        }]]
+    }
+    list [parity $text] [lindex $results 0] [expr {[lindex $results 0] eq [lindex $results 1]}] \
+        [expr {[typeCensus $text 1] eq [typeCensus $text 0]}]
+} -result {{value {[[1, 2, 3], [2, "foo", 2]]}} {{<program> {list[List[int], list]}} {mixed<int> list} {pair<int> {List[int]}}} 1 1}
+
+test vc-types-2 {types, instance keys and function counts are identical with virtual construction on and off} -body {
+    set text "$digits\nfn piece(i):\n    concat(\"<\", list_get(digits, mod(i, 10)))\n\nfn build(i, n, acc, l):\n    if i >= n:\n        return \[acc, l\]\n    build(i + 1, n, concat(acc, piece(i)), list_append(l, i))\n\nbuild(0, 4, \"\", \[\])"
+    list [parity $text] [expr {[typeCensus $text 1] eq [typeCensus $text 0]}]
+} -result {{value {["<0<1<2<3", [0, 1, 2, 3]]}} 1}
+
+test vc-identity-uri-1 {uri-steady: the four URI helpers stay <generic>, instance count unchanged, while their String materializations collapse} -body {
+    set hir [surface::readProgramFile [file join $::projectRoot bench uri-steady.bot]]
+    set rows {}
+    foreach opt {0 1} {
+        set lowered [native::lower::program $hir -virtual-construction-opt $opt]
+        set spec [dict get $lowered specialization]
+        set labels [lsort [lmap id [dict get $spec used] {hir::specialize::label $spec $id}]]
+        set report [native::allocationReport $hir summary 1 -virtual-construction-opt $opt]
+        lappend rows [list $labels [llength [dict get $lowered functions]] [allocs $report String] \
+            [native::Outcome [native::Driver run [dict get $lowered text]]]]
+    }
+    lassign $rows off on
+    set helpers [lmap name {hex_pair esc_bytes esc_char esc_from} {
+        expr {"$name<generic>" in [lindex $on 0]}
+    }]
+    list [expr {[lindex $off 0] eq [lindex $on 0]}] [expr {[lindex $off 1] == [lindex $on 1]}] $helpers \
+        [lindex $off 3] [lindex $on 3] [lindex $off 2] [lindex $on 2]
+} -result {1 1 {1 1 1 1} {int 29500} {int 29500} 47500 16000}
+
+test vc-identity-uri-2 {the URI helpers expose their construction to exact callers without a new identity} -body {
+    set hir [surface::readProgramFile [file join $::projectRoot bench uri-steady.bot]]
+    set lowered [native::lower::program $hir]
+    set spec [dict get $lowered specialization]
+    set analysis [dict get $lowered construction]
+    set results [lsort [lmap id [dict keys [dict get $analysis results]] {hir::specialize::label $spec $id}]]
+    set params [lsort [lmap id [dict keys [dict get $analysis params]] {hir::specialize::label $spec $id}]]
+    list $results $params
+} -result {{esc_bytes<generic> esc_char<generic> hex_pair<generic>} {esc_bytes<generic> esc_from<generic>}}
+
+# ---------------------------------------------------------------------------
+# The NIR plan discipline (nir.rs's validate_plans) rejects every misuse
+
+proc nirRun {body {header ""}} {
+    set text "nir 1\n\nfunc 0 \"<program>\" params=0 env=0 regs=12 pnames=\"\" captures=0$header\n$body\nend\n"
+    if {[catch {native::Outcome [native::Driver run $text]} message options]} {
+        return [list error [lrange [dict get $options -errorcode] 0 1] $message]
+    }
+    return [list value $message]
+}
+
+test vc-nir-1 {a well-formed plan program runs: plan, extend, region piece, materialize} -body {
+    nirRun "    %0 = str \"héllo\"\n    %1 = str \"ab\"\n    %3 = construct str plan %1 %1\n    %4 = int 1\n    %6 = int 3\n    %5 = construct str plan %0 %3 region %0 %4 %6\n    %8 = construct str flat %5\n    ret %8" { planregs="3 5"}
+} -result {value {str hélloababél}}
+
+test vc-nir-2 {a plan register may not reach an ordinary operation} -body {
+    lrange [nirRun "    %1 = str \"ab\"\n    %3 = construct str plan %1 %1\n    %4 = op strlen %3\n    ret %4" { planregs="3"}] 0 1
+} -result {error {NATIVE INVALID-NIR}}
+
+test vc-nir-3 {a plan register may be consumed at most once along any path} -body {
+    set r [nirRun "    %1 = str \"ab\"\n    %3 = construct str plan %1 %1\n    %5 = construct str plan %3 %1\n    %8 = construct str flat %3\n    ret %8" { planregs="3 5"}]
+    list [lrange $r 0 1] [string match {*consumed twice*} [lindex $r 2]]
+} -result {{error {NATIVE INVALID-NIR}} 1}
+
+test vc-nir-4 {a plan may not be returned from a function without planresult, nor be the program's result} -body {
+    lrange [nirRun "    %1 = str \"ab\"\n    %3 = construct str plan %1 %1\n    ret %3" { planregs="3"}] 0 1
+} -result {error {NATIVE INVALID-NIR}}
+
+test vc-nir-5 {a flat construct must define an ordinary register, a plan construct a plan register} -body {
+    list [lrange [nirRun "    %1 = str \"ab\"\n    %3 = construct str flat %1 %1\n    ret %3" { planregs="3"}] 0 1] \
+        [lrange [nirRun "    %1 = str \"ab\"\n    %3 = construct str plan %1 %1\n    %4 = construct str flat %3\n    ret %4"] 0 1]
+} -result {{error {NATIVE INVALID-NIR}} {error {NATIVE INVALID-NIR}}}
+
+test vc-nir-6 {branches may each consume a plan once; a join may not reuse it} -body {
+    set ok [nirRun "    %1 = str \"ab\"\n    %2 = bool true\n    %3 = construct str plan %1 %1\n    br %2 L0 L1\n  label L0\n    %4 = construct str flat %3\n    ret %4\n  label L1\n    %5 = construct str flat %3 %1\n    ret %5" { planregs="3"}]
+    set bad [nirRun "    %1 = str \"ab\"\n    %2 = bool true\n    %3 = construct str plan %1 %1\n    br %2 L0 L1\n  label L0\n    %4 = construct str flat %3\n    jump L2\n  label L1\n    jump L2\n  label L2\n    %5 = construct str flat %3\n    ret %5" { planregs="3"}]
+    list $ok [lrange $bad 0 1]
+} -result {{value {str abab}} {error {NATIVE INVALID-NIR}}}
+
+test vc-nir-7 {a plan-result function reached through its generic entry (a Block value) returns a materialized flat value} -body {
+    # Never produced by native/lower.tcl (a plan result is only ever given
+    # to a closed instance), so exercised directly: the generic entry is the
+    # one ABI boundary that must never hand a plan to ordinary code.
+    set text "nir 1\n\nfunc 0 \"<program>\" params=0 env=0 regs=2 pnames=\"\" captures=0\n    %0 = fnvalue 1\n    %1 = callvalue %0\n    ret %1\nend\n\nfunc 1 \"mk\" params=0 env=0 regs=2 pnames=\"\" captures=0 planregs=\"1\" planresult=1\n    %0 = str \"ab\"\n    %1 = construct str plan %0 %0\n    ret %1\nend\n"
+    native::Outcome [native::Driver run $text]
+} -result {str abab}
+
+test vc-str-guarded-1 {an untyped concat operand keeps the eager call's own kind guard, at the same point} -body {
+    set text "fn f(x):\n    concat(concat(x, \"a\"), \"b\")\n\n\[f(\"s\"), f(1)\]"
+    list [parity $text] [regexp {guard str} [nirOf $text]]
+} -result {{error {CORE SEMANTIC TYPE}} 1}
+
+test vc-str-many-pieces-1 {a construction of more than eight pieces (the runtime's spill path) is exact} -body {
+    set text "fn f(a):\n    concat(concat(concat(concat(concat(concat(concat(concat(concat(concat(a, \"1\"), \"2\"), \"3\"), \"4\"), \"5\"), \"6\"), \"7\"), \"8\"), \"9\"), a)\n\nf(\"é\")"
+    list [parity $text] [constructs [nirOf $text] {str flat( %\d+){11}}]
+} -result {{value {"é123456789é"}} 1}
+
+test vc-str-toplevel-1 {plan locals at program top level} -body {
+    set text "x = concat(\"a\", \"b\")\ny = concat(x, \"c\")\nz = concat(y, y)\nz"
+    parity $text
+} -result {value {"abcabc"}}
+
+# ---------------------------------------------------------------------------
+# GC stress: plans, their pieces and their materializations stay rooted
+
+test vc-gc-str-1 {String plans (append, prepend, regions, merges, plan results) under GC stress} -body {
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        set text "$digits\nfn piece(i):\n    concat(\"<\", concat(list_get(digits, mod(i, 10)), \">\"))\n\nfn build(i, n, acc, back):\n    if i >= n:\n        return concat(acc, back)\n    build(i + 1, n, concat(acc, piece(i)), concat(substring(\"xyz\", mod(i, 3), mod(i, 3) + 1), back))\n\ns = build(0, 30, \"\", \"!\")\n\[length(s), substring(s, 0, 9), substring(s, 115, 121)\]"
+        parity $text
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+} -result {value {[121, "<0><1><2>", "yxzyx!"]}}
+
+test vc-gc-uri-1 {the URI escape chain under GC stress, virtual construction on} -body {
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        set text "corpus = \[\"a b\", \"café 世\", \"~ok-\"\]\nfn go(i, acc):\n    if i >= 3:\n        return acc\n    go(i + 1, concat(acc, web::uri_escape_text(list_get(corpus, i))))\n\ngo(0, \"\")"
+        set path [makeFile $text vc-gc-uri.bot]
+        set hir [surface::readProgramFile $path]
+        list [core::value::show [native::evalHir $hir -virtual-construction-opt 1] 1] \
+            [core::value::show [native::evalHir $hir -virtual-construction-opt 0] 1]
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+} -result {{"a%20bcaf%C3%A9%20%E4%B8%96~ok-"} {"a%20bcaf%C3%A9%20%E4%B8%96~ok-"}}
+
+cleanupTests

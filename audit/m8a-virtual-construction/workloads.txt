@@ -1,0 +1,29 @@
+M8.a frozen workloads: median of 5 sessions x best of 5 runs (JIT excluded), cranelift specialized
+uri-steady               0 29500                  5.18 ms             61510     2544568    47500   14008      0       176000      16534   5746   17   0
+uri-steady               1 29500                  4.44 ms   1.17x     38510     1970568    16000   14008   8500       108500      16534   6145   17   0
+refined-checks           0 [400, 0]              333.4 us                23        1085        9      11      0           21         35  14898   33   3
+refined-checks           1 [400, 0]              327.9 us   1.02x        20        1064        4      11      2           16         35  15289   33   3
+ai_text_clean/ascii-100K 0 "The model generated ... (100002 chars, equal)   157.02 ms            200111  5008154855   200110       1      0   5000150383          6   3035    5   0
+ai_text_clean/ascii-100K 1 "The model generated ... (100002 chars, equal)    25.06 ms   6.27x    100070     4203350   100062       1      7       406628          6   3241    5   0
+ai_text_clean/emoji-100K 0 " \"Here's the 東京 rep... (103392 chars, equal)   174.49 ms            200111  5601389600   200110       1      0   5593385128          6   3035    5   0
+ai_text_clean/emoji-100K 1 " \"Here's the 東京 rep... (103392 chars, equal)    24.36 ms   7.16x    100070     4257590   100062       1      7       579604          6   3241    5   0
+ai_text_clean/ascii-10K  0 "The model generated ... (10002 chars, equal)     5.88 ms             20111    50819855    20110       1      0     50015383          6   3035    5   0
+ai_text_clean/ascii-10K  1 "The model generated ... (10002 chars, equal)     2.22 ms   2.65x     10070      423350    10062       1      7        43450          6   3241    5   0
+string_reverse/10K       0 "10zyxwvutsrqponmlkji... (10002 chars, equal)     4.30 ms             20023    50815987    20022       1      0     50015043          5    827    3   0
+string_reverse/10K       1 "10zyxwvutsrqponmlkji... (10002 chars, equal)    381.3 us  11.26x        11       10758        5       1      5        31261          5   1019    3   0
+string_replace/100KB     0 "the quick brown red ... (113334 chars, equal)    21.37 ms              6694   252253734     6693       1      0    251985950          5   2377    4   0
+string_replace/100KB     1 "the quick brown red ... (113334 chars, equal)     1.76 ms  12.13x        11      114054        6       1      4       434587          5   2673    4   0
+csv/10000                0 [["id", "name", "note... (545616 chars, equal)   133.93 ms            497818   422306223   437798   60020      0      2433615   50065012   4778   11   0
+csv/10000                1 [["id", "name", "note... (545616 chars, equal)    53.63 ms   2.50x    288922    13071503   248904   20012  20006       753405      56390   5770   11   0
+csv_geometric/10000      0 [["id", "name", "note... (545616 chars, equal)    70.80 ms            487837    22368903   437798   10006      0      2433615          0   5380   15   0
+csv_geometric/10000      1 [["id", "name", "note... (545616 chars, equal)    52.01 ms   1.36x    308943    13894039   248904   10006  10000       753405          0   5673   15   0
+csv_chunked/10000        0 [["id", "name", "note... (545616 chars, equal)    82.80 ms            478134    27014735   437798   20168      0      2433615      12090  10150   20   1
+csv_chunked/10000        1 [["id", "name", "note... (545616 chars, equal)    52.38 ms   1.58x    299240    18539871   248904   20168  10000       753405      12090  10411   20   1
+matmul/32x32             0 [[-149, -243, 252, 15... (5230 chars, equal)    168.4 us              1171      184600        0    1171      0            0      18500  58042    7   0
+matmul/32x32             1 [[-149, -243, 252, 15... (5230 chars, equal)    150.4 us   1.12x       181       31600        0     145     36            0       4115  58616    7   0
+fib                      0 17711                 132.0 us                 0           0        0       0      0            0          0    394    2   0
+fib                      1 17711                 136.9 us   0.96x         0           0        0       0      0            0          0    394    2   0
+loop-count               0 3500                    1.0 us                 0           0        0       0      0            0          0    395    3   0
+loop-count               1 3500                    1.0 us   1.00x         0           0        0       0      0            0          0    395    3   0
+sum-refined              0 80200                   0.6 us                 0           0        0       0      0            0          0    286    3   0
+sum-refined              1 80200                   0.6 us   1.00x         0           0        0       0      0            0          0    286    3   0

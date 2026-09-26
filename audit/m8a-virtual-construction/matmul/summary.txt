@@ -1,0 +1,6 @@
+program: corpus:matmul
+value (on):  [[58, 64], [139, 154]]
+value (off): [[58, 64], [139, 154]]
+used instances: 7
+plan results: 0, instances with plan parameters: 2, instances with plan locals: 0
+construction sites/plan sources: 8 (6 virtual)

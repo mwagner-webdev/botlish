@@ -59,6 +59,7 @@
 //! | rt_raise               | kind Str, msg Str   | records a semantic error     | no        |
 //! | rt_stack_overflow      |                     | records NATIVE LIMIT STACK   | no        |
 
+use super::construct::{rt_construct, rt_plan_materialize};
 use super::error::{semantic_kind, RtError};
 use super::value::*;
 use super::vm::{Vm, NativeInfo};
@@ -1285,6 +1286,8 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_list_len, 2),
         h!(rt_list_get, 3),
         h!(rt_list_append, 3),
+        h!(rt_construct, 4),
+        h!(rt_plan_materialize, 2),
         h!(rt_set_from_list, 2),
         h!(rt_set_contains, 3),
         h!(rt_mutarray_allocate, 2),

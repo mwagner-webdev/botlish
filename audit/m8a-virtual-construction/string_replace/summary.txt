@@ -1,0 +1,6 @@
+program: corpus:string_replace
+value (on):  ["abc", "aXc", "bb", "", ""]
+value (off): ["abc", "aXc", "bb", "", ""]
+used instances: 4
+plan results: 0, instances with plan parameters: 1, instances with plan locals: 1
+construction sites/plan sources: 10 (8 virtual)

@@ -1,0 +1,143 @@
+chunked_new<generic>  csv_chunked.bot:25:5
+    construction:       [_, _, _] (3 elements)
+    instance result:    list[List[never], mutarray, int]
+    positional shape:   [List[never], mutarray, int] (pre-existing specialization-only aggregate fact, hir/types.tcl)
+    element types:      List[never], mutarray, int
+    broadens:           yes: element theorem any (the lub of distinct field types)
+    scalar-replaced:    no
+    caller access:      csv_parse<str>: consumed by call (not bound)
+    caller access:      scan_records<str, int, list[List[mutarray], mutarray, int]>: consumed by call (not bound)
+    caller access:      scan_records<str, int, list[List[never], mutarray, int]>: consumed by call (not bound)
+    verdict:            unclear
+chunked_append<list[List[never], mutarray, int], str>  csv_chunked.bot:40:16
+    construction:       [_, _, _] (3 elements)
+    instance result:    list[List[mutarray], mutarray, int]
+    positional shape:   [List[mutarray], mutarray, int] (pre-existing specialization-only aggregate fact, hir/types.tcl)
+    element types:      List[mutarray], mutarray, int
+    broadens:           yes: element theorem any (the lub of distinct field types)
+    scalar-replaced:    yes (escape.tcl scalar-replacement companion: no List is allocated for exact callers)
+    caller access:      scan_record<str, int, list[List[never], mutarray, int]>: bound as more, read as other use
+    verdict:            unclear
+chunked_append<list[List[never], mutarray, int], str>  csv_chunked.bot:43:5
+    construction:       [_, _, _] (3 elements)
+    instance result:    list[List[mutarray], mutarray, int]
+    positional shape:   [List[mutarray], mutarray, int] (pre-existing specialization-only aggregate fact, hir/types.tcl)
+    element types:      List[never], mutarray, int
+    broadens:           yes: element theorem any (the lub of distinct field types)
+    scalar-replaced:    yes (escape.tcl scalar-replacement companion: no List is allocated for exact callers)
+    caller access:      scan_record<str, int, list[List[never], mutarray, int]>: bound as more, read as other use
+    verdict:            unclear
+chunked_append<list[List[mutarray], mutarray, int], str>  csv_chunked.bot:40:16
+    construction:       [_, _, _] (3 elements)
+    instance result:    list[List[mutarray], mutarray, int]
+    positional shape:   [List[mutarray], mutarray, int] (pre-existing specialization-only aggregate fact, hir/types.tcl)
+    element types:      List[mutarray], mutarray, int
+    broadens:           yes: element theorem any (the lub of distinct field types)
+    scalar-replaced:    yes (escape.tcl scalar-replacement companion: no List is allocated for exact callers)
+    caller access:      scan_record<str, int, list[List[mutarray], mutarray, int]>: bound as more, read as other use
+    verdict:            unclear
+chunked_append<list[List[mutarray], mutarray, int], str>  csv_chunked.bot:43:5
+    construction:       [_, _, _] (3 elements)
+    instance result:    list[List[mutarray], mutarray, int]
+    positional shape:   [List[mutarray], mutarray, int] (pre-existing specialization-only aggregate fact, hir/types.tcl)
+    element types:      List[mutarray], mutarray, int
+    broadens:           yes: element theorem any (the lub of distinct field types)
+    scalar-replaced:    yes (escape.tcl scalar-replacement companion: no List is allocated for exact callers)
+    caller access:      scan_record<str, int, list[List[mutarray], mutarray, int]>: bound as more, read as other use
+    verdict:            unclear
+chunked_append<list[List[never], mutarray, int], list>  csv_chunked.bot:40:16
+    construction:       [_, _, _] (3 elements)
+    instance result:    list[List[mutarray], mutarray, int]
+    positional shape:   [List[mutarray], mutarray, int] (pre-existing specialization-only aggregate fact, hir/types.tcl)
+    element types:      List[mutarray], mutarray, int
+    broadens:           yes: element theorem any (the lub of distinct field types)
+    scalar-replaced:    no
+    caller access:      scan_records<str, int, list[List[never], mutarray, int]>: consumed by call (not bound)
+    verdict:            unclear
+chunked_append<list[List[never], mutarray, int], list>  csv_chunked.bot:43:5
+    construction:       [_, _, _] (3 elements)
+    instance result:    list[List[mutarray], mutarray, int]
+    positional shape:   [List[mutarray], mutarray, int] (pre-existing specialization-only aggregate fact, hir/types.tcl)
+    element types:      List[never], mutarray, int
+    broadens:           yes: element theorem any (the lub of distinct field types)
+    scalar-replaced:    no
+    caller access:      scan_records<str, int, list[List[never], mutarray, int]>: consumed by call (not bound)
+    verdict:            unclear
+chunked_append<list[List[mutarray], mutarray, int], list>  csv_chunked.bot:40:16
+    construction:       [_, _, _] (3 elements)
+    instance result:    list[List[mutarray], mutarray, int]
+    positional shape:   [List[mutarray], mutarray, int] (pre-existing specialization-only aggregate fact, hir/types.tcl)
+    element types:      List[mutarray], mutarray, int
+    broadens:           yes: element theorem any (the lub of distinct field types)
+    scalar-replaced:    no
+    caller access:      scan_records<str, int, list[List[mutarray], mutarray, int]>: consumed by call (not bound)
+    verdict:            unclear
+chunked_append<list[List[mutarray], mutarray, int], list>  csv_chunked.bot:43:5
+    construction:       [_, _, _] (3 elements)
+    instance result:    list[List[mutarray], mutarray, int]
+    positional shape:   [List[mutarray], mutarray, int] (pre-existing specialization-only aggregate fact, hir/types.tcl)
+    element types:      List[mutarray], mutarray, int
+    broadens:           yes: element theorem any (the lub of distinct field types)
+    scalar-replaced:    no
+    caller access:      scan_records<str, int, list[List[mutarray], mutarray, int]>: consumed by call (not bound)
+    verdict:            unclear
+scan_unquoted<str, int, int>  csv_chunked.bot:82:16
+    construction:       [_, _] (2 elements)
+    instance result:    list[str, int]
+    positional shape:   [str, int] (pre-existing specialization-only aggregate fact, hir/types.tcl)
+    element types:      str, int
+    broadens:           yes: element theorem any (the lub of distinct field types)
+    scalar-replaced:    yes (escape.tcl scalar-replacement companion: no List is allocated for exact callers)
+    caller access:      scan_field<str, int>: forwards it as its own result -> scan_record<str, int, list[List[mutarray], mutarray, int]>: bound as scanned, read as list_get(_, 0), list_get(_, 1)
+    caller access:      scan_field<str, int>: forwards it as its own result -> scan_record<str, int, list[List[never], mutarray, int]>: bound as scanned, read as list_get(_, 0), list_get(_, 1)
+    verdict:            likely future struct (every exact caller reads fixed positions)
+scan_quoted<str, int, str>  csv_chunked.bot:92:16
+    construction:       [_, _] (2 elements)
+    instance result:    list[str, int]
+    positional shape:   [str, int] (pre-existing specialization-only aggregate fact, hir/types.tcl)
+    element types:      str, int
+    broadens:           yes: element theorem any (the lub of distinct field types)
+    scalar-replaced:    yes (escape.tcl scalar-replacement companion: no List is allocated for exact callers)
+    caller access:      scan_field<str, int>: forwards it as its own result -> scan_record<str, int, list[List[mutarray], mutarray, int]>: bound as scanned, read as list_get(_, 0), list_get(_, 1)
+    caller access:      scan_field<str, int>: forwards it as its own result -> scan_record<str, int, list[List[never], mutarray, int]>: bound as scanned, read as list_get(_, 0), list_get(_, 1)
+    verdict:            likely future struct (every exact caller reads fixed positions)
+scan_record<str, int, list[List[never], mutarray, int]>  csv_chunked.bot:111:16
+    construction:       [_, _] (2 elements)
+    instance result:    list[list, int]
+    positional shape:   [list, int] (pre-existing specialization-only aggregate fact, hir/types.tcl)
+    element types:      list, int
+    broadens:           yes: element theorem any (the lub of distinct field types)
+    scalar-replaced:    yes (escape.tcl scalar-replacement companion: no List is allocated for exact callers)
+    caller access:      scan_records<str, int, list[List[mutarray], mutarray, int]>: bound as scanned, read as list_get(_, 0), list_get(_, 1)
+    caller access:      scan_records<str, int, list[List[never], mutarray, int]>: bound as scanned, read as list_get(_, 0), list_get(_, 1)
+    verdict:            likely future struct (every exact caller reads fixed positions)
+scan_record<str, int, list[List[never], mutarray, int]>  csv_chunked.bot:113:5
+    construction:       [_, _] (2 elements)
+    instance result:    list[list, int]
+    positional shape:   [list, int] (pre-existing specialization-only aggregate fact, hir/types.tcl)
+    element types:      list, int
+    broadens:           yes: element theorem any (the lub of distinct field types)
+    scalar-replaced:    yes (escape.tcl scalar-replacement companion: no List is allocated for exact callers)
+    caller access:      scan_records<str, int, list[List[mutarray], mutarray, int]>: bound as scanned, read as list_get(_, 0), list_get(_, 1)
+    caller access:      scan_records<str, int, list[List[never], mutarray, int]>: bound as scanned, read as list_get(_, 0), list_get(_, 1)
+    verdict:            likely future struct (every exact caller reads fixed positions)
+scan_record<str, int, list[List[mutarray], mutarray, int]>  csv_chunked.bot:111:16
+    construction:       [_, _] (2 elements)
+    instance result:    list[list, int]
+    positional shape:   [list, int] (pre-existing specialization-only aggregate fact, hir/types.tcl)
+    element types:      list, int
+    broadens:           yes: element theorem any (the lub of distinct field types)
+    scalar-replaced:    yes (escape.tcl scalar-replacement companion: no List is allocated for exact callers)
+    caller access:      scan_record<str, int, list[List[never], mutarray, int]>: forwards it as its own result -> scan_records<str, int, list[List[mutarray], mutarray, int]>: bound as scanned, read as list_get(_, 0), list_get(_, 1)
+    caller access:      scan_record<str, int, list[List[never], mutarray, int]>: forwards it as its own result -> scan_records<str, int, list[List[never], mutarray, int]>: bound as scanned, read as list_get(_, 0), list_get(_, 1)
+    verdict:            likely future struct (every exact caller reads fixed positions)
+scan_record<str, int, list[List[mutarray], mutarray, int]>  csv_chunked.bot:113:5
+    construction:       [_, _] (2 elements)
+    instance result:    list[list, int]
+    positional shape:   [list, int] (pre-existing specialization-only aggregate fact, hir/types.tcl)
+    element types:      list, int
+    broadens:           yes: element theorem any (the lub of distinct field types)
+    scalar-replaced:    yes (escape.tcl scalar-replacement companion: no List is allocated for exact callers)
+    caller access:      scan_record<str, int, list[List[never], mutarray, int]>: forwards it as its own result -> scan_records<str, int, list[List[mutarray], mutarray, int]>: bound as scanned, read as list_get(_, 0), list_get(_, 1)
+    caller access:      scan_record<str, int, list[List[never], mutarray, int]>: forwards it as its own result -> scan_records<str, int, list[List[never], mutarray, int]>: bound as scanned, read as list_get(_, 0), list_get(_, 1)
+    verdict:            likely future struct (every exact caller reads fixed positions)

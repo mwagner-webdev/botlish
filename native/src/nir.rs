@@ -392,6 +392,16 @@ pub enum Inst {
     /// whatever error-exit target was active before it (this function's
     /// own error_exit, or an outer PushErrorExit still pending).
     PopErrorExit,
+    /// Virtual immutable construction (M8A-VIRTUAL-IMMUTABLE-CONSTRUCTION.md,
+    /// runtime/construct.rs): `%d = construct str|list plan|flat PIECE...`.
+    /// One instruction for every String/List construction the virtual-
+    /// construction lowering emits, whatever its number of pieces: FLAT
+    /// builds (or passes through) an ordinary flat String/List, PLAN builds
+    /// or extends a private plan object held by a plan register (see
+    /// Function::plan_regs and `validate_plans`). Always a possible
+    /// allocation (GC safepoint) and possible failure (the collection-length
+    /// ceiling eager concat/list_append also enforce).
+    Construct { dst: Reg, list: bool, plan: bool, pieces: Vec<Piece> },
     /// Propagates whatever failure (a raw RtError or a declared one) is
     /// already pending, unchanged, to the current error-exit target: a
     /// `handle` whose own dispatch matched none of its handlers emits this
@@ -399,6 +409,27 @@ pub enum Inst {
     /// failure continues exactly as if this `handle` were not there --
     /// never constructing a new error the way Raise/Fail do.
     Reraise,
+}
+
+/// One piece of an `Inst::Construct`, in source order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Piece {
+    /// A flat String/List, or an owned plan register of the same family
+    /// (consumed by this instruction).
+    Span(Reg),
+    /// String only: a validated StringRegion (base, start, end).
+    Region(Reg, Reg, Reg),
+    /// List only: one already-evaluated element.
+    Elem(Reg),
+}
+
+impl Piece {
+    pub fn regs(&self) -> Vec<Reg> {
+        match self {
+            Piece::Span(r) | Piece::Elem(r) => vec![*r],
+            Piece::Region(b, s, e) => vec![*b, *s, *e],
+        }
+    }
 }
 
 impl Inst {
@@ -463,6 +494,18 @@ pub struct Function {
     /// parameter register (index < params) declared raw is unboxed once, in
     /// the prologue (codegen::clif), from the tagged incoming argument.
     pub raw_regs: Vec<bool>,
+    /// Registers native/lower.tcl declares may hold a private virtual-
+    /// construction plan (`planregs=`, M8.a) -- "maybe-plan": such a
+    /// register may equally hold an ordinary flat String/List, but nothing
+    /// may read it as one. A parameter register (index < params) so
+    /// declared accepts a plan argument from a direct call or self tail
+    /// call. See `validate_plans` for the full discipline.
+    pub plan_regs: Vec<bool>,
+    /// Whether this function's result may be a plan (`planresult=1`): only
+    /// ever a closed instance's, whose every caller is a direct call that
+    /// knows it (native/lower.tcl); its generic entry materializes
+    /// defensively (codegen::clif's `define`).
+    pub plan_result: bool,
 }
 
 pub struct NativeDecl {
@@ -673,6 +716,7 @@ fn summarize_call_effects(program: &mut Program, enabled: bool) {
                     local[i].1 |= op_may_allocate(*op);
                 }
                 Inst::Cell { .. } | Inst::Closure { .. } => local[i].1 = true,
+                Inst::Construct { .. } => local[i] = (true, true),
                 Inst::CallValue { .. } => local[i] = (true, true),
                 _ => {}
             }
@@ -763,6 +807,16 @@ fn parse_func_header(p: &Parser, tokens: &[Token]) -> Result<Function, NirError>
             raw_regs[r] = true;
         }
     }
+    let mut plan_regs = vec![false; regs as usize];
+    if let Some(list) = kv.get("planregs") {
+        for tok in list.split_whitespace() {
+            let r: usize = tok.parse().map_err(|_| ())
+                .and_then(|r: usize| if r < regs as usize { Ok(r) } else { Err(()) })
+                .or_else(|_| p.err::<usize>(format!("bad planregs register {tok}")))?;
+            plan_regs[r] = true;
+        }
+    }
+    let plan_result = kv.get("planresult").is_some_and(|v| v == "1");
     Ok(Function {
         id,
         name: name.clone(),
@@ -777,6 +831,8 @@ fn parse_func_header(p: &Parser, tokens: &[Token]) -> Result<Function, NirError>
         body: Vec::new(),
         origins: Vec::new(),
         raw_regs,
+        plan_regs,
+        plan_result,
     })
 }
 
@@ -888,6 +944,41 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
                 Inst::CallEnvMulti { dsts, func: num(i)?, closure: reg(i + 1)?, args: regs_from(i + 2)?, may_error: true, may_gc: true }
             }
             "declarederroreq" => Inst::DeclaredErrorEq { dst, id: num(3)? },
+            "construct" => {
+                let list = match tokens.get(3).and_then(word) {
+                    Some("str") => false,
+                    Some("list") => true,
+                    _ => return p.err("construct needs str or list"),
+                };
+                let plan = match tokens.get(4).and_then(word) {
+                    Some("flat") => false,
+                    Some("plan") => true,
+                    _ => return p.err("construct needs flat or plan"),
+                };
+                let mut pieces = Vec::new();
+                let mut k = 5;
+                while k < tokens.len() {
+                    match &tokens[k] {
+                        Token::Reg(r) => {
+                            pieces.push(Piece::Span(*r));
+                            k += 1;
+                        }
+                        Token::Word(w) if w == "region" && !list => {
+                            pieces.push(Piece::Region(reg(k + 1)?, reg(k + 2)?, reg(k + 3)?));
+                            k += 4;
+                        }
+                        Token::Word(w) if w == "elem" && list => {
+                            pieces.push(Piece::Elem(reg(k + 1)?));
+                            k += 2;
+                        }
+                        other => return p.err(format!("bad construct piece {other:?}")),
+                    }
+                }
+                if pieces.is_empty() {
+                    return p.err("construct needs at least one piece");
+                }
+                Inst::Construct { dst, list, plan, pieces }
+            }
             other => return p.err(format!("unknown instruction {other}")),
         });
     }
@@ -1003,6 +1094,12 @@ fn validate(program: &Program) -> Result<(), NirError> {
                     used.extend(captures);
                 }
                 Inst::Guard { value, .. } | Inst::GuardBool { value } => used.push(*value),
+                Inst::Construct { dst, pieces, .. } => {
+                    used.push(*dst);
+                    for piece in pieces {
+                        used.extend(piece.regs());
+                    }
+                }
                 Inst::Op { dst, op, args } => {
                     if op.arity().is_some_and(|n| n != args.len()) {
                         return fail(ctx(format!("op {op:?} takes {:?} operands", op.arity())));
@@ -1155,7 +1252,311 @@ fn validate(program: &Program) -> Result<(), NirError> {
             || program.functions[0].results != 1 {
         return fail("function 0 must be the program: no parameters, no environment, one result".into());
     }
+    validate_plans(program)
+}
+
+/// The virtual-construction plan discipline (M8.a), checked structurally so
+/// codegen and the runtime can rely on it: a plan object never reaches any
+/// operation that expects an ordinary String/List, and each plan is
+/// consumed at most once along every path (so the runtime's in-place
+/// extension is never observable).
+///
+/// A register declared in `planregs=` ("maybe-plan") may be *used* only as:
+///   * a `span` piece of a `construct` (never a `region`/`elem` operand);
+///   * the source of a `move` into another plan register;
+///   * argument i of a `tail`/`tailenv` whose parameter register i is a
+///     plan register, or of a `call`/`callenv` whose callee's parameter
+///     register i is;
+///   * the operand of `ret` in a `planresult=1` function.
+/// Every other use -- a guard, an op, a native call, a Block/dynamic call,
+/// a closure capture, a cell, `retmulti`, a branch condition -- is
+/// rejected. Definitions: `construct ... plan` must define a plan register
+/// and `construct ... flat` an ordinary one; a `call`/`callenv` of a
+/// `planresult=1` function must define a plan register; a `move` from a
+/// plan register must define one. (Any other definition of a plan register
+/// stores an ordinary value, which a maybe-plan register may always hold.)
+/// A plan register is never raw, and function 0 (the program) never has a
+/// plan result.
+///
+/// Linearity: a forward "may have been consumed" dataflow over the CFG
+/// (labels, branches, jumps, self-tail back edges to the entry, and a
+/// handler's `pusherrorexit` label reachable from any instruction in its
+/// span): every allowed use above consumes its register; a use of a
+/// register that may already have been consumed on some path reaching it
+/// is rejected; a (re)definition makes a register unconsumed again.
+fn validate_plans(program: &Program) -> Result<(), NirError> {
+    let fail = |message: String| Err(NirError { line: 0, message });
+    for f in &program.functions {
+        let ctx = |m: String| format!("function {} ({}): {m}", f.id, f.name);
+        let plan = &f.plan_regs;
+        if f.id == 0 && f.plan_result {
+            return fail(ctx("the program function cannot have a plan result".into()));
+        }
+        if f.plan_result && f.results != 1 {
+            return fail(ctx("planresult requires results=1".into()));
+        }
+        if let Some(r) = (0..f.regs as usize).find(|r| plan[*r] && f.raw_regs[*r]) {
+            return fail(ctx(format!("register %{r} is declared both raw and plan")));
+        }
+        // Per instruction: the plan registers it consumes, or an error.
+        let mut consumes: Vec<Vec<Reg>> = Vec::with_capacity(f.body.len());
+        for inst in &f.body {
+            let mut used: Vec<Reg> = Vec::new();
+            let mut consumed: Vec<Reg> = Vec::new();
+            let callee = |g: FuncId| &program.functions[g as usize];
+            match inst {
+                Inst::Construct { dst, plan: plan_mode, pieces, .. } => {
+                    if plan[*dst as usize] != *plan_mode {
+                        return fail(ctx(format!(
+                            "construct %{dst}: a {} construct must define a {} register",
+                            if *plan_mode { "plan" } else { "flat" },
+                            if *plan_mode { "plan" } else { "non-plan" }
+                        )));
+                    }
+                    for piece in pieces {
+                        match piece {
+                            Piece::Span(r) => {
+                                if plan[*r as usize] {
+                                    consumed.push(*r);
+                                }
+                                if f.raw_regs[*r as usize] {
+                                    return fail(ctx(format!("construct piece %{r} is raw")));
+                                }
+                            }
+                            Piece::Region(..) | Piece::Elem(_) => used.extend(piece.regs()),
+                        }
+                    }
+                }
+                Inst::Move { dst, src } => {
+                    if plan[*src as usize] {
+                        if !plan[*dst as usize] {
+                            return fail(ctx(format!("move %{dst} = %{src}: plan register moved into a non-plan register")));
+                        }
+                        consumed.push(*src);
+                    }
+                }
+                Inst::Tail { args } | Inst::TailEnv { args, .. } => {
+                    for (i, a) in args.iter().enumerate() {
+                        if plan[*a as usize] {
+                            if !plan[i] {
+                                return fail(ctx(format!("tail argument {i} (%{a}) is a plan, parameter %{i} is not")));
+                            }
+                            consumed.push(*a);
+                        }
+                    }
+                    if let Inst::TailEnv { closure, .. } = inst {
+                        used.push(*closure);
+                    }
+                }
+                Inst::Call { dst, func: g, args, .. } | Inst::CallEnv { dst, func: g, args, .. } => {
+                    let g = callee(*g);
+                    for (i, a) in args.iter().enumerate() {
+                        if plan[*a as usize] {
+                            if !g.plan_regs[i] {
+                                return fail(ctx(format!(
+                                    "call of {}: argument {i} (%{a}) is a plan, the callee's parameter is not", g.id
+                                )));
+                            }
+                            consumed.push(*a);
+                        }
+                    }
+                    if g.plan_result && !plan[*dst as usize] {
+                        return fail(ctx(format!("call of {}: its plan result %{dst} is not a plan register", g.id)));
+                    }
+                    if let Inst::CallEnv { closure, .. } = inst {
+                        used.push(*closure);
+                    }
+                }
+                Inst::Ret(r) => {
+                    if plan[*r as usize] {
+                        if !f.plan_result {
+                            return fail(ctx(format!("ret %{r}: a plan returned from a function without planresult")));
+                        }
+                        consumed.push(*r);
+                    }
+                }
+                Inst::Label(_) | Inst::Unreachable | Inst::Raise { .. } | Inst::Fail { .. }
+                | Inst::ClearDeclaredError | Inst::PushErrorExit(_) | Inst::PopErrorExit | Inst::Reraise
+                | Inst::Jump(_) | Inst::DeclaredErrorEq { .. } | Inst::Int { .. } | Inst::RawInt { .. }
+                | Inst::Str { .. } | Inst::Char { .. } | Inst::Bool { .. } | Inst::Unit { .. }
+                | Inst::Native { .. } | Inst::FnValue { .. } | Inst::SelfClosure { .. } | Inst::Capture { .. }
+                | Inst::Cell { .. } => {}
+                Inst::CellSet { cell, value } => used.extend([*cell, *value]),
+                Inst::CellGet { cell, .. } | Inst::CellCheck { cell, .. } => used.push(*cell),
+                Inst::Closure { captures, .. } => used.extend(captures),
+                Inst::Guard { value, .. } | Inst::GuardBool { value } => used.push(*value),
+                Inst::Op { args, .. } => used.extend(args),
+                Inst::CallValue { callee, args, .. } => {
+                    used.push(*callee);
+                    used.extend(args);
+                }
+                Inst::CallMulti { dsts, func: g, args, .. } | Inst::CallEnvMulti { dsts, func: g, args, .. } => {
+                    // A companion's own fields are never plans; its
+                    // parameters may be (the same plan parameters as every
+                    // other lowering variant of its instance).
+                    let g = callee(*g);
+                    for (i, a) in args.iter().enumerate() {
+                        if plan[*a as usize] {
+                            if !g.plan_regs[i] {
+                                return fail(ctx(format!(
+                                    "callmulti of {}: argument {i} (%{a}) is a plan, the callee's parameter is not", g.id
+                                )));
+                            }
+                            consumed.push(*a);
+                        }
+                    }
+                    if let Some(d) = dsts.iter().find(|d| plan[**d as usize]) {
+                        return fail(ctx(format!("callmulti result %{d} declared plan")));
+                    }
+                    if let Inst::CallEnvMulti { closure, .. } = inst {
+                        used.push(*closure);
+                    }
+                }
+                Inst::Br { cond, .. } => used.push(*cond),
+                Inst::RetMulti(rs) => used.extend(rs),
+            }
+            if let Some(r) = used.iter().find(|r| plan[**r as usize]) {
+                return fail(ctx(format!("plan register %{r} used where an ordinary value is required")));
+            }
+            consumes.push(consumed);
+        }
+        check_plan_linearity(f, &consumes).or_else(|m| fail(ctx(m)))?;
+    }
     Ok(())
+}
+
+/// The linearity half of `validate_plans` (see its doc). CONSUMES holds,
+/// per instruction of F, the plan registers it consumes.
+fn check_plan_linearity(f: &Function, consumes: &[Vec<Reg>]) -> Result<(), String> {
+    if consumes.iter().all(|c| c.is_empty()) {
+        return Ok(());
+    }
+    let n = f.body.len();
+    let regs = f.regs as usize;
+    // Blocks: a label starts one; a terminator ends one.
+    let mut label_index = std::collections::HashMap::new();
+    let mut starts = vec![0usize];
+    for (i, inst) in f.body.iter().enumerate() {
+        if let Inst::Label(l) = inst {
+            label_index.insert(*l, i);
+            if i != 0 && !starts.contains(&i) {
+                starts.push(i);
+            }
+        }
+        if inst.is_terminator() && i + 1 < n && !starts.contains(&(i + 1)) {
+            starts.push(i + 1);
+        }
+    }
+    starts.sort_unstable();
+    let block_of = |i: usize| starts.partition_point(|s| *s <= i) - 1;
+    // The error-exit handler label active at each instruction (pusherrorexit/
+    // poperrorexit are emitted lexically nested, codegen::clif's own stack).
+    let mut handler: Vec<Option<Label>> = vec![None; n];
+    let mut stack: Vec<Label> = Vec::new();
+    for (i, inst) in f.body.iter().enumerate() {
+        match inst {
+            Inst::PushErrorExit(l) => stack.push(*l),
+            Inst::PopErrorExit => {
+                stack.pop();
+            }
+            _ => {}
+        }
+        handler[i] = stack.last().copied();
+    }
+    let nblocks = starts.len();
+    let mut state_in: Vec<Option<Vec<bool>>> = vec![None; nblocks];
+    state_in[0] = Some(vec![false; regs]);
+    let mut work = vec![0usize];
+    let merge = |slot: &mut Option<Vec<bool>>, s: &[bool]| -> bool {
+        match slot {
+            None => {
+                *slot = Some(s.to_vec());
+                true
+            }
+            Some(old) => {
+                let mut changed = false;
+                for (o, x) in old.iter_mut().zip(s) {
+                    if *x && !*o {
+                        *o = true;
+                        changed = true;
+                    }
+                }
+                changed
+            }
+        }
+    };
+    while let Some(b) = work.pop() {
+        let mut state = state_in[b].clone().unwrap();
+        let start = starts[b];
+        let end = if b + 1 < nblocks { starts[b + 1] } else { n };
+        let mut fallthrough = true;
+        for i in start..end {
+            let inst = &f.body[i];
+            for r in &consumes[i] {
+                if state[*r as usize] {
+                    return Err(format!(
+                        "plan register %{r} may be consumed twice (instruction {i}: {inst:?})"
+                    ));
+                }
+                state[*r as usize] = true;
+            }
+            // A failing instruction inside a handler span reaches the
+            // handler with whatever it has consumed so far.
+            if let Some(l) = handler[i] {
+                if let Some(&t) = label_index.get(&l) {
+                    let tb = block_of(t);
+                    if merge(&mut state_in[tb], &state) {
+                        work.push(tb);
+                    }
+                }
+            }
+            let defs: Vec<Reg> = match inst {
+                Inst::Tail { .. } | Inst::TailEnv { .. } => (0..f.params).collect(),
+                Inst::CallMulti { dsts, .. } | Inst::CallEnvMulti { dsts, .. } => dsts.clone(),
+                other => def_of(other).into_iter().collect(),
+            };
+            for d in defs {
+                state[d as usize] = false;
+            }
+            let mut succs: Vec<usize> = Vec::new();
+            match inst {
+                Inst::Br { then, otherwise, .. } => {
+                    for l in [then, otherwise] {
+                        succs.push(block_of(label_index[l]));
+                    }
+                }
+                Inst::Jump(l) => succs.push(block_of(label_index[l])),
+                Inst::Tail { .. } | Inst::TailEnv { .. } => succs.push(0),
+                _ => {}
+            }
+            if inst.is_terminator() {
+                fallthrough = false;
+            }
+            for s in succs {
+                if merge(&mut state_in[s], &state) {
+                    work.push(s);
+                }
+            }
+        }
+        if fallthrough && b + 1 < nblocks && merge(&mut state_in[b + 1], &state) {
+            work.push(b + 1);
+        }
+    }
+    Ok(())
+}
+
+/// The one register INST defines, if any (Tail/CallMulti handled by the
+/// caller).
+fn def_of(inst: &Inst) -> Option<Reg> {
+    match inst {
+        Inst::Int { dst, .. } | Inst::RawInt { dst, .. } | Inst::Str { dst, .. } | Inst::Char { dst, .. }
+        | Inst::Bool { dst, .. } | Inst::Unit { dst } | Inst::Native { dst, .. } | Inst::FnValue { dst, .. }
+        | Inst::SelfClosure { dst } | Inst::Capture { dst, .. } | Inst::Move { dst, .. } | Inst::Cell { dst }
+        | Inst::CellGet { dst, .. } | Inst::CellCheck { dst, .. } | Inst::Closure { dst, .. }
+        | Inst::Op { dst, .. } | Inst::Call { dst, .. } | Inst::CallEnv { dst, .. } | Inst::CallValue { dst, .. }
+        | Inst::DeclaredErrorEq { dst, .. } | Inst::Construct { dst, .. } => Some(*dst),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -1217,5 +1618,87 @@ mod effect_tests {
             Inst::Call { may_error, may_gc, .. } => assert!(*may_error && *may_gc),
             _ => panic!("expected call"),
         }
+    }
+}
+#[cfg(test)]
+mod plan_tests {
+    use super::*;
+
+    fn message(r: Result<Program, NirError>) -> String {
+        match r {
+            Ok(_) => panic!("expected invalid NIR"),
+            Err(e) => e.message,
+        }
+    }
+
+    fn program(header: &str, body: &str) -> Result<Program, NirError> {
+        parse(&format!(
+            "nir 1\n\nfunc 0 \"<program>\" params=0 env=0 regs=8 pnames=\"\" captures=0{header}\n{body}\nend\n"
+        ))
+    }
+
+    #[test]
+    fn construct_parses_every_piece_kind() {
+        let p = program(
+            " planregs=\"2\"",
+            "    %0 = str \"ab\"\n    %1 = int 0\n    %2 = construct str plan %0 region %0 %1 %1\n    %3 = construct str flat %2\n    ret %3",
+        )
+        .unwrap();
+        match &p.functions[0].body[2] {
+            Inst::Construct { list, plan, pieces, .. } => {
+                assert!(!list && *plan);
+                assert_eq!(pieces, &vec![Piece::Span(0), Piece::Region(0, 1, 1)]);
+            }
+            other => panic!("expected construct, got {other:?}"),
+        }
+        let l = program("", "    %0 = op listnew\n    %1 = int 1\n    %2 = construct list flat %0 elem %1\n    ret %2").unwrap();
+        assert!(matches!(&l.functions[0].body[2], Inst::Construct { list: true, plan: false, .. }));
+    }
+
+    #[test]
+    fn region_and_elem_pieces_are_family_specific() {
+        assert!(program("", "    %0 = op listnew\n    %1 = int 0\n    %2 = construct list flat region %0 %1 %1\n    ret %2").is_err());
+        assert!(program("", "    %0 = str \"a\"\n    %2 = construct str flat elem %0\n    ret %2").is_err());
+    }
+
+    #[test]
+    fn plan_registers_only_reach_plan_positions() {
+        let bad_op = program(" planregs=\"1\"", "    %0 = str \"a\"\n    %1 = construct str plan %0 %0\n    %2 = op strlen %1\n    ret %2");
+        assert!(message(bad_op).contains("ordinary value"));
+        let bad_ret = program(" planregs=\"1\"", "    %0 = str \"a\"\n    %1 = construct str plan %0 %0\n    ret %1");
+        assert!(bad_ret.is_err());
+        let bad_region = program(" planregs=\"1\"", "    %0 = str \"a\"\n    %1 = construct str plan %0 %0\n    %2 = int 0\n    %3 = construct str flat region %1 %2 %2\n    ret %3");
+        assert!(bad_region.is_err());
+    }
+
+    #[test]
+    fn a_plan_is_consumed_at_most_once_per_path() {
+        let twice = program(
+            " planregs=\"1\"",
+            "    %0 = str \"a\"\n    %1 = construct str plan %0 %0\n    %2 = construct str flat %1\n    %3 = construct str flat %1\n    ret %3",
+        );
+        assert!(message(twice).contains("consumed twice"));
+        let branches = program(
+            " planregs=\"1\"",
+            "    %0 = str \"a\"\n    %4 = bool true\n    %1 = construct str plan %0 %0\n    br %4 L0 L1\n  label L0\n    %2 = construct str flat %1\n    ret %2\n  label L1\n    %3 = construct str flat %1\n    ret %3",
+        );
+        assert!(branches.is_ok(), "one consumption on each of two exclusive paths");
+    }
+
+    #[test]
+    fn a_plan_parameter_is_redefined_by_a_self_tail_call() {
+        let text = concat!(
+            "nir 1\n\n",
+            "func 0 \"<program>\" params=0 env=0 regs=2 pnames=\"\" captures=0\n",
+            "    %0 = str \"\"\n    %1 = call 1 %0\n    ret %1\nend\n",
+            "func 1 \"f\" params=1 env=0 regs=4 pnames=\"acc\" captures=0 planregs=\"0 2\"\n",
+            "    %1 = bool false\n    br %1 L0 L1\n  label L0\n    %3 = construct str flat %0\n    ret %3\n",
+            "  label L1\n    %2 = construct str plan %0 %0\n    tail %2\nend\n"
+        );
+        // %0 is consumed twice by `construct str plan %0 %0` itself.
+        assert!(parse(text).is_err());
+        let ok = text.replace("construct str plan %0 %0", "construct str plan %0 %3").replace("regs=4", "regs=5");
+        let ok = ok.replace("  label L1\n", "  label L1\n    %3 = str \"x\"\n");
+        assert!(parse(&ok).is_ok(), "{:?}", parse(&ok).err().map(|e| e.message));
     }
 }

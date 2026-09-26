@@ -1,0 +1,17 @@
+virtual-construction-opt 0: 4160 machine-code bytes, 7 NIR functions
+0 <program>                  <generic>                 750 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+1 dot                        <List[int], List[List[int]], int, int, int, int>    703 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+2 product_row                <List[int], List[List[int]], int, int, List[never]>    483 bytes  guards=0  strcat=0  listappend=1  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+3 product_row                <List[int], List[List[int]], int, int, List[int]>    596 bytes  guards=0  strcat=0  listappend=1  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+4 product_rows               <List[List[int]], List[List[int]], int, int, List[never]>    536 bytes  guards=0  strcat=0  listappend=1  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+5 product_rows               <List[List[int]], List[List[int]], int, int, List[List[int]]>    684 bytes  guards=0  strcat=0  listappend=1  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+6 matmul                     <List[List[int]], List[List[int]]>    408 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+
+virtual-construction-opt 1: 4734 machine-code bytes, 7 NIR functions
+0 <program>                  <generic>                 750 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+1 dot                        <List[int], List[List[int]], int, int, int, int>    703 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+2 product_row                <List[int], List[List[int]], int, int, List[never]>    556 bytes  guards=0  strcat=0  listappend=0  construct(plan)=1  construct(flat)=0  planregs=1  planresult=0
+3 product_row                <List[int], List[List[int]], int, int, List[int]>    812 bytes  guards=0  strcat=0  listappend=0  construct(plan)=1  construct(flat)=1  planregs=2  planresult=0
+4 product_rows               <List[List[int]], List[List[int]], int, int, List[never]>    613 bytes  guards=0  strcat=0  listappend=0  construct(plan)=1  construct(flat)=0  planregs=1  planresult=0
+5 product_rows               <List[List[int]], List[List[int]], int, int, List[List[int]]>    892 bytes  guards=0  strcat=0  listappend=0  construct(plan)=1  construct(flat)=1  planregs=2  planresult=0
+6 matmul                     <List[List[int]], List[List[int]]>    408 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0

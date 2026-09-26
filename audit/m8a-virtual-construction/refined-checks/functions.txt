@@ -1,0 +1,69 @@
+virtual-construction-opt 0: 14898 machine-code bytes, 33 NIR functions
+0 <program>                  <generic>                1172 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+1 char::codepoint            <UnicodeChar>              39 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+2 byte::from_int             <int>                     289 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+3 byte::set                  <List[UnicodeChar]>       617 bytes  guards=0  strcat=0  listappend=1  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+4 ascii::is_digit            <int>                      74 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+5 ascii::is_upper            <int>                      74 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+6 ascii::is_lower            <int>                      74 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+7 ascii::is_alphabetic       <int>                     125 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+8 ascii::is_alphanumeric     <int>                     125 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+9 web::is_unreserved         <generic>                 155 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+10 web::uri_escape_text      <generic>                 125 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+11 high_nibble               <generic>                 103 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+12 hex_pair                  <generic>                 378 bytes  guards=0  strcat=1  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+13 esc_bytes                 <generic>                 624 bytes  guards=0  strcat=2  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+14 esc_char                  <generic>                 448 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+15 esc_from                  <generic>                 684 bytes  guards=1  strcat=1  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+16 check                     <int, int, str, str>      504 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+17                           <str>                     681 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+18                           <generic>                 769 bytes  guards=1  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+19 char_at                   <generic>                 262 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+20 scan_local                <generic>                 804 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+21 scan_label                <generic>                 564 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+22 scan_alpha                <generic>                 468 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+23 tld_ok                    <generic>                 452 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+24 domain_loop               <generic>                 644 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+25                           <str>                     681 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+26                           <generic>                 769 bytes  guards=1  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+27 char_at                   <generic>                 262 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+28 scan_local                <generic>                 804 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+29 scan_label                <generic>                 564 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+30 scan_alpha                <generic>                 468 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+31 tld_ok                    <generic>                 452 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+32 domain_loop               <generic>                 644 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+
+virtual-construction-opt 1: 15289 machine-code bytes, 33 NIR functions
+0 <program>                  <generic>                1172 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+1 char::codepoint            <UnicodeChar>              39 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+2 byte::from_int             <int>                     289 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+3 byte::set                  <List[UnicodeChar]>       617 bytes  guards=0  strcat=0  listappend=1  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+4 ascii::is_digit            <int>                      74 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+5 ascii::is_upper            <int>                      74 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+6 ascii::is_lower            <int>                      74 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+7 ascii::is_alphabetic       <int>                     125 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+8 ascii::is_alphanumeric     <int>                     125 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+9 web::is_unreserved         <generic>                 155 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+10 web::uri_escape_text      <generic>                 125 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+11 high_nibble               <generic>                 103 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+12 hex_pair                  <generic>                 453 bytes  guards=0  strcat=0  listappend=0  construct(plan)=1  construct(flat)=0  planregs=1  planresult=1
+13 esc_bytes                 <generic>                 758 bytes  guards=0  strcat=0  listappend=0  construct(plan)=1  construct(flat)=0  planregs=4  planresult=1
+14 esc_char                  <generic>                 486 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=4  planresult=1
+15 esc_from                  <generic>                 828 bytes  guards=1  strcat=0  listappend=0  construct(plan)=1  construct(flat)=1  planregs=3  planresult=0
+16 check                     <int, int, str, str>      504 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+17                           <str>                     681 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+18                           <generic>                 769 bytes  guards=1  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+19 char_at                   <generic>                 262 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+20 scan_local                <generic>                 804 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+21 scan_label                <generic>                 564 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+22 scan_alpha                <generic>                 468 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+23 tld_ok                    <generic>                 452 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+24 domain_loop               <generic>                 644 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+25                           <str>                     681 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+26                           <generic>                 769 bytes  guards=1  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+27 char_at                   <generic>                 262 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+28 scan_local                <generic>                 804 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+29 scan_label                <generic>                 564 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+30 scan_alpha                <generic>                 468 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+31 tld_ok                    <generic>                 452 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+32 domain_loop               <generic>                 644 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0

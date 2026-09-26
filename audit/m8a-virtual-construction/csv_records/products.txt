@@ -1,0 +1,93 @@
+geo_new<generic>  csv_records.bot:104:5
+    construction:       [_, _] (2 elements)
+    instance result:    list[mutarray, int]
+    positional shape:   [mutarray, int] (pre-existing specialization-only aggregate fact, hir/types.tcl)
+    element types:      mutarray, int
+    broadens:           yes: element theorem any (the lub of distinct field types)
+    scalar-replaced:    no
+    caller access:      csv_parse<str>: consumed by call (not bound)
+    caller access:      csv_records_generic<str, bool>: consumed by call (not bound)
+    caller access:      scan_records<str, int, list[mutarray, int]>: consumed by call (not bound)
+    verdict:            unclear
+geo_append<list[mutarray, int], str>  csv_records.bot:128:5
+    construction:       [_, _] (2 elements)
+    instance result:    list[mutarray, int]
+    positional shape:   [mutarray, int] (pre-existing specialization-only aggregate fact, hir/types.tcl)
+    element types:      mutarray, int
+    broadens:           yes: element theorem any (the lub of distinct field types)
+    scalar-replaced:    yes (escape.tcl scalar-replacement companion: no List is allocated for exact callers)
+    caller access:      scan_record<str, int, list[mutarray, int]>: bound as more, read as other use
+    verdict:            unclear
+geo_append<list[mutarray, int], list>  csv_records.bot:128:5
+    construction:       [_, _] (2 elements)
+    instance result:    list[mutarray, int]
+    positional shape:   [mutarray, int] (pre-existing specialization-only aggregate fact, hir/types.tcl)
+    element types:      mutarray, int
+    broadens:           yes: element theorem any (the lub of distinct field types)
+    scalar-replaced:    no
+    caller access:      scan_records<str, int, list[mutarray, int]>: consumed by call (not bound)
+    verdict:            unclear
+geo_append<list[mutarray, int], mutarray>  csv_records.bot:128:5
+    construction:       [_, _] (2 elements)
+    instance result:    list[mutarray, int]
+    positional shape:   [mutarray, int] (pre-existing specialization-only aggregate fact, hir/types.tcl)
+    element types:      mutarray, int
+    broadens:           yes: element theorem any (the lub of distinct field types)
+    scalar-replaced:    no
+    caller access:      build_rows<list, int, any, int, list[mutarray, int], bool>: consumed by call (not bound)
+    verdict:            unclear
+scan_unquoted<str, int, int>  csv_records.bot:148:16
+    construction:       [_, _] (2 elements)
+    instance result:    list[str, int]
+    positional shape:   [str, int] (pre-existing specialization-only aggregate fact, hir/types.tcl)
+    element types:      str, int
+    broadens:           yes: element theorem any (the lub of distinct field types)
+    scalar-replaced:    yes (escape.tcl scalar-replacement companion: no List is allocated for exact callers)
+    caller access:      scan_field<str, int>: forwards it as its own result -> scan_record<str, int, list[mutarray, int]>: bound as scanned, read as list_get(_, 0), list_get(_, 1)
+    verdict:            likely future struct (every exact caller reads fixed positions)
+scan_quoted<str, int, str>  csv_records.bot:158:16
+    construction:       [_, _] (2 elements)
+    instance result:    list[str, int]
+    positional shape:   [str, int] (pre-existing specialization-only aggregate fact, hir/types.tcl)
+    element types:      str, int
+    broadens:           yes: element theorem any (the lub of distinct field types)
+    scalar-replaced:    yes (escape.tcl scalar-replacement companion: no List is allocated for exact callers)
+    caller access:      scan_field<str, int>: forwards it as its own result -> scan_record<str, int, list[mutarray, int]>: bound as scanned, read as list_get(_, 0), list_get(_, 1)
+    verdict:            likely future struct (every exact caller reads fixed positions)
+scan_record<str, int, list[mutarray, int]>  csv_records.bot:177:16
+    construction:       [_, _] (2 elements)
+    instance result:    list[list, int]
+    positional shape:   [list, int] (pre-existing specialization-only aggregate fact, hir/types.tcl)
+    element types:      list, int
+    broadens:           yes: element theorem any (the lub of distinct field types)
+    scalar-replaced:    yes (escape.tcl scalar-replacement companion: no List is allocated for exact callers)
+    caller access:      scan_records<str, int, list[mutarray, int]>: bound as scanned, read as list_get(_, 0), list_get(_, 1)
+    verdict:            likely future struct (every exact caller reads fixed positions)
+scan_record<str, int, list[mutarray, int]>  csv_records.bot:179:5
+    construction:       [_, _] (2 elements)
+    instance result:    list[list, int]
+    positional shape:   [list, int] (pre-existing specialization-only aggregate fact, hir/types.tcl)
+    element types:      list, int
+    broadens:           yes: element theorem any (the lub of distinct field types)
+    scalar-replaced:    yes (escape.tcl scalar-replacement companion: no List is allocated for exact callers)
+    caller access:      scan_records<str, int, list[mutarray, int]>: bound as scanned, read as list_get(_, 0), list_get(_, 1)
+    verdict:            likely future struct (every exact caller reads fixed positions)
+csv_records_generic<str, bool>  csv_records.bot:426:16
+    construction:       [] (0 elements)
+    instance result:    list
+    positional shape:   none (pre-existing specialization-only aggregate fact, hir/types.tcl)
+    element types:      
+    broadens:           no: element theorem ?
+    scalar-replaced:    no
+    caller access:      csv_records<str>: forwards it as its own result -> sample<generic>: bound as rows, read as list_get(_, 0), list_get(_, 1), other use
+    caller access:      csv_records_presized<str>: forwards it as its own result -> sample<generic>: bound as presized_rows, read as list_get(_, 0)
+    verdict:            unclear
+sample<generic>  csv_records.bot:453:5
+    construction:       [_, _, _, _, _, _, _] (7 elements)
+    instance result:    list[int, any, any, any, any, any, bool]
+    positional shape:   [int, any, any, any, any, any, bool] (pre-existing specialization-only aggregate fact, hir/types.tcl)
+    element types:      int, any, any, any, any, any, bool
+    broadens:           yes: element theorem any (the lub of distinct field types)
+    scalar-replaced:    no
+    caller access:      <program>: forwards it as its own result
+    verdict:            unclear

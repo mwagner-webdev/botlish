@@ -1,0 +1,6 @@
+program: corpus:hashtable
+value (on):  [true, true, false, false, true, 1]
+value (off): [true, true, false, false, true, 1]
+used instances: 30
+plan results: 0, instances with plan parameters: 0, instances with plan locals: 0
+construction sites/plan sources: 0 (0 virtual)

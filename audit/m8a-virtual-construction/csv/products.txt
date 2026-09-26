@@ -1,0 +1,60 @@
+scan_unquoted<str, int, int>  csv.bot:37:16
+    construction:       [_, _] (2 elements)
+    instance result:    list[str, int]
+    positional shape:   [str, int] (pre-existing specialization-only aggregate fact, hir/types.tcl)
+    element types:      str, int
+    broadens:           yes: element theorem any (the lub of distinct field types)
+    scalar-replaced:    yes (escape.tcl scalar-replacement companion: no List is allocated for exact callers)
+    caller access:      scan_field<str, int>: forwards it as its own result -> scan_record<str, int, List[never]>: bound as scanned, read as list_get(_, 0), list_get(_, 1)
+    caller access:      scan_field<str, int>: forwards it as its own result -> scan_record<str, int, List[str]>: bound as scanned, read as list_get(_, 0), list_get(_, 1)
+    verdict:            likely future struct (every exact caller reads fixed positions)
+scan_quoted<str, int, str>  csv.bot:49:16
+    construction:       [_, _] (2 elements)
+    instance result:    list[str, int]
+    positional shape:   [str, int] (pre-existing specialization-only aggregate fact, hir/types.tcl)
+    element types:      str, int
+    broadens:           yes: element theorem any (the lub of distinct field types)
+    scalar-replaced:    yes (escape.tcl scalar-replacement companion: no List is allocated for exact callers)
+    caller access:      scan_field<str, int>: forwards it as its own result -> scan_record<str, int, List[never]>: bound as scanned, read as list_get(_, 0), list_get(_, 1)
+    caller access:      scan_field<str, int>: forwards it as its own result -> scan_record<str, int, List[str]>: bound as scanned, read as list_get(_, 0), list_get(_, 1)
+    verdict:            likely future struct (every exact caller reads fixed positions)
+scan_record<str, int, List[never]>  csv.bot:71:16
+    construction:       [_, _] (2 elements)
+    instance result:    list[List[str], int]
+    positional shape:   [List[str], int] (pre-existing specialization-only aggregate fact, hir/types.tcl)
+    element types:      List[str], int
+    broadens:           yes: element theorem any (the lub of distinct field types)
+    scalar-replaced:    yes (escape.tcl scalar-replacement companion: no List is allocated for exact callers)
+    caller access:      scan_records<str, int, List[List[str]]>: bound as scanned, read as list_get(_, 0), list_get(_, 1)
+    caller access:      scan_records<str, int, List[never]>: bound as scanned, read as list_get(_, 0), list_get(_, 1)
+    verdict:            likely future struct (every exact caller reads fixed positions)
+scan_record<str, int, List[never]>  csv.bot:73:5
+    construction:       [_, _] (2 elements)
+    instance result:    list[List[str], int]
+    positional shape:   [List[str], int] (pre-existing specialization-only aggregate fact, hir/types.tcl)
+    element types:      List[str], int
+    broadens:           yes: element theorem any (the lub of distinct field types)
+    scalar-replaced:    yes (escape.tcl scalar-replacement companion: no List is allocated for exact callers)
+    caller access:      scan_records<str, int, List[List[str]]>: bound as scanned, read as list_get(_, 0), list_get(_, 1)
+    caller access:      scan_records<str, int, List[never]>: bound as scanned, read as list_get(_, 0), list_get(_, 1)
+    verdict:            likely future struct (every exact caller reads fixed positions)
+scan_record<str, int, List[str]>  csv.bot:71:16
+    construction:       [_, _] (2 elements)
+    instance result:    list[List[str], int]
+    positional shape:   [List[str], int] (pre-existing specialization-only aggregate fact, hir/types.tcl)
+    element types:      List[str], int
+    broadens:           yes: element theorem any (the lub of distinct field types)
+    scalar-replaced:    yes (escape.tcl scalar-replacement companion: no List is allocated for exact callers)
+    caller access:      scan_record<str, int, List[never]>: forwards it as its own result -> scan_records<str, int, List[List[str]]>: bound as scanned, read as list_get(_, 0), list_get(_, 1)
+    caller access:      scan_record<str, int, List[never]>: forwards it as its own result -> scan_records<str, int, List[never]>: bound as scanned, read as list_get(_, 0), list_get(_, 1)
+    verdict:            likely future struct (every exact caller reads fixed positions)
+scan_record<str, int, List[str]>  csv.bot:73:5
+    construction:       [_, _] (2 elements)
+    instance result:    list[List[str], int]
+    positional shape:   [List[str], int] (pre-existing specialization-only aggregate fact, hir/types.tcl)
+    element types:      List[str], int
+    broadens:           yes: element theorem any (the lub of distinct field types)
+    scalar-replaced:    yes (escape.tcl scalar-replacement companion: no List is allocated for exact callers)
+    caller access:      scan_record<str, int, List[never]>: forwards it as its own result -> scan_records<str, int, List[List[str]]>: bound as scanned, read as list_get(_, 0), list_get(_, 1)
+    caller access:      scan_record<str, int, List[never]>: forwards it as its own result -> scan_records<str, int, List[never]>: bound as scanned, read as list_get(_, 0), list_get(_, 1)
+    verdict:            likely future struct (every exact caller reads fixed positions)

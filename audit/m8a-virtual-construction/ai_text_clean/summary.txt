@@ -1,0 +1,6 @@
+program: corpus:ai_text_clean
+value (on):  ["hello", "hello  world", "AI-generated", "\"hello\"", "'hello'", "wait... what?"]
+value (off): ["hello", "hello  world", "AI-generated", "\"hello\"", "'hello'", "wait... what?"]
+used instances: 6
+plan results: 1, instances with plan parameters: 1, instances with plan locals: 0
+construction sites/plan sources: 5 (3 virtual)

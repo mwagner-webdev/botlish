@@ -1,0 +1,43 @@
+virtual-construction-opt 0: 10103 machine-code bytes, 20 NIR functions
+0 <program>                  <generic>                  68 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+1 chunked_new                <generic>                 195 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+2 chunked_append             <list[List[never], mutarray, int], str>    542 bytes  guards=0  strcat=0  listappend=1  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+3 chunked_append             <list[List[mutarray], mutarray, int], str>    542 bytes  guards=0  strcat=0  listappend=1  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+4 chunked_append             <list[List[never], mutarray, int], list>    542 bytes  guards=0  strcat=0  listappend=1  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+5 chunked_append             <list[List[mutarray], mutarray, int], list>    542 bytes  guards=0  strcat=0  listappend=1  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+6 chunked_copy_chunks        <List[never], int, mutarray, int>    592 bytes  guards=1  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+7 chunked_copy_chunks        <List[mutarray], int, mutarray, int>    520 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+8 chunked_finish             <list[List[never], mutarray, int]>    540 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+9 chunked_finish             <list[List[mutarray], mutarray, int]>    540 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+10 peek                      <str, int>                365 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+11 peek                      <str, int>                430 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+12 scan_unquoted             <str, int, int>           585 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+13 scan_quoted               <str, int, str>           770 bytes  guards=0  strcat=2  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+14 scan_field                <str, int>                352 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+15 scan_record               <str, int, list[List[never], mutarray, int]>    799 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+16 scan_record               <str, int, list[List[mutarray], mutarray, int]>    833 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+17 scan_records              <str, int, list[List[never], mutarray, int]>    537 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+18 scan_records              <str, int, list[List[mutarray], mutarray, int]>    612 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+19 csv_parse                 <str>                     197 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+
+virtual-construction-opt 1: 10364 machine-code bytes, 20 NIR functions
+0 <program>                  <generic>                  68 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+1 chunked_new                <generic>                 195 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+2 chunked_append             <list[List[never], mutarray, int], str>    534 bytes  guards=0  strcat=0  listappend=1  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+3 chunked_append             <list[List[mutarray], mutarray, int], str>    534 bytes  guards=0  strcat=0  listappend=1  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+4 chunked_append             <list[List[never], mutarray, int], list>    534 bytes  guards=0  strcat=0  listappend=1  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+5 chunked_append             <list[List[mutarray], mutarray, int], list>    534 bytes  guards=0  strcat=0  listappend=1  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+6 chunked_copy_chunks        <List[never], int, mutarray, int>    592 bytes  guards=1  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+7 chunked_copy_chunks        <List[mutarray], int, mutarray, int>    520 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+8 chunked_finish             <list[List[never], mutarray, int]>    540 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+9 chunked_finish             <list[List[mutarray], mutarray, int]>    540 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+10 peek                      <str, int>                365 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+11 peek                      <str, int>                430 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+12 scan_unquoted             <str, int, int>           585 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+13 scan_quoted               <str, int, str>          1063 bytes  guards=0  strcat=0  listappend=0  construct(plan)=2  construct(flat)=1  planregs=3  planresult=0
+14 scan_field                <str, int>                352 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+15 scan_record               <str, int, list[List[never], mutarray, int]>    799 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+16 scan_record               <str, int, list[List[mutarray], mutarray, int]>    833 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+17 scan_records              <str, int, list[List[never], mutarray, int]>    537 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+18 scan_records              <str, int, list[List[mutarray], mutarray, int]>    612 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+19 csv_parse                 <str>                     197 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0

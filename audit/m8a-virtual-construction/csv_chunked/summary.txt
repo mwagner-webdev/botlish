@@ -1,0 +1,6 @@
+program: corpus:csv_chunked
+value (on):  [["name", "age"], ["Alice", "30"], ["Bob", "40"]]
+value (off): [["name", "age"], ["Alice", "30"], ["Bob", "40"]]
+used instances: 20
+plan results: 0, instances with plan parameters: 1, instances with plan locals: 4
+construction sites/plan sources: 15 (8 virtual)

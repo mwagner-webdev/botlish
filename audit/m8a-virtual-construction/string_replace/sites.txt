@@ -1,0 +1,15 @@
+matches_at<str, str, int>  string_replace.bot:23:5    str  substring            materialized flat-only native operation (==)
+replace_from<str, str, str, int, int, str> string_replace.bot:29:16   str  concat               materialized return to exact callers that never extend the result
+replace_from<str, str, str, int, int, str> string_replace.bot:29:23   str  ref                  virtual      
+replace_from<str, str, str, int, int, str> string_replace.bot:29:29   str  substring            virtual      
+replace_from<str, str, str, int, int, str> string_replace.bot:32:18   str  concat               virtual      
+replace_from<str, str, str, int, int, str> string_replace.bot:32:25   str  ref                  virtual      
+replace_from<str, str, str, int, int, str> string_replace.bot:32:31   str  substring            virtual      
+replace_from<str, str, str, int, int, str> string_replace.bot:34:74   str  concat               virtual      
+replace_from<str, str, str, int, int, str> string_replace.bot:34:81   str  ref                  virtual      
+replace_from<str, str, str, int, int, str> string_replace.bot:36:71   str  ref                  virtual      
+
+totals by disposition / barrier reason:
+     1  flat-only native operation (==)
+     1  return to exact callers that never extend the result
+     8  (virtual)

@@ -1,0 +1,9 @@
+hex_pair<generic> (i15):
+  result: may be a str plan (closed; exact callers extend it)
+esc_bytes<generic> (i14):
+  result: may be a str plan (closed; exact callers extend it)
+  parameter 2 (acc): accepts a str plan
+esc_char<generic> (i7):
+  result: may be a str plan (closed; exact callers extend it)
+esc_from<generic> (i6):
+  parameter 2 (acc): accepts a str plan

@@ -1,0 +1,12 @@
+peek<str, int>             csv_geometric.bot:72:5     str  substring            materialized return from an instance with a companion variant
+scan_unquoted<str, int, int> csv_geometric.bot:77:17    str  substring            materialized storage into an aggregate (List element)
+scan_quoted<str, int, str> csv_geometric.bot:85:49    str  concat               virtual      
+scan_quoted<str, int, str> csv_geometric.bot:85:56    str  ref                  virtual      
+scan_quoted<str, int, str> csv_geometric.bot:87:17    str  ref                  materialized storage into an aggregate (List element)
+scan_quoted<str, int, str> csv_geometric.bot:89:34    str  concat               virtual      
+scan_quoted<str, int, str> csv_geometric.bot:89:41    str  ref                  virtual      
+
+totals by disposition / barrier reason:
+     1  return from an instance with a companion variant
+     2  storage into an aggregate (List element)
+     4  (virtual)

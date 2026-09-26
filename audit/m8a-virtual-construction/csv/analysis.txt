@@ -1,0 +1,9 @@
+scan_quoted<str, int, str> (i6):
+  parameter 2 (field): accepts a str plan
+scan_record<str, int, List[never]> (i3):
+  local more (b33): a list plan, one continuation
+scan_record<str, int, List[str]> (i8):
+  parameter 2 (fields): accepts a list plan
+  local more (b33): a list plan, one continuation
+scan_records<str, int, List[List[str]]> (i9):
+  parameter 2 (records): accepts a list plan

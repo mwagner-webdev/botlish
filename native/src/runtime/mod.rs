@@ -1,6 +1,7 @@
 //! The Botlish native runtime: value representation, heap, errors and the
 //! helper ABI generated code calls. Independent of Cranelift.
 
+pub mod construct;
 pub mod error;
 pub mod framemap;
 pub mod framewalk;

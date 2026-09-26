@@ -1,0 +1,6 @@
+program: bench/refined-checks.ir
+value (on):  [400, 0]
+value (off): [400, 0]
+used instances: 39
+plan results: 3, instances with plan parameters: 2, instances with plan locals: 0
+construction sites/plan sources: 20 (15 virtual)

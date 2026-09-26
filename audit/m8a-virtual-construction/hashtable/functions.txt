@@ -1,0 +1,55 @@
+virtual-construction-opt 0: 12868 machine-code bytes, 26 NIR functions
+0 <program>                  <generic>                  45 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+1 ht_fill_empty              <mutarray, int, int>      388 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+2 ht_alloc                   <int>                     524 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+3 ht_new                     <generic>                  70 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+4 ht_controls                <mutarray>                 61 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+5 ht_keys                    <mutarray>                 61 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+6 ht_values                  <mutarray>                 61 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+7 ht_size                    <mutarray>                 61 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+8 ht_tombstones              <mutarray>                 61 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+9 ht_capacity                <mutarray>                167 bytes  guards=1  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+10 ht_probe_start            <mutarray, str>           179 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+11 ht_probe_next             <mutarray, int>           245 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+12 ht_find_get               <mutarray, str, int>      804 bytes  guards=2  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+13 ht_find_insert            <mutarray, str, int, int>   1248 bytes  guards=2  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+14 ht_get                    <mutarray, str>           429 bytes  guards=1  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+15 ht_contains               <mutarray, str>           253 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+16 ht_rehash_probe           <mutarray, int, int>      380 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+17 ht_rehash_insert          <List[mutarray], int, any, any>    439 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+18 ht_rehash_scan            <list, int, int, List[mutarray], int>   1113 bytes  guards=3  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+19 ht_rehash                 <mutarray, int>           766 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+20 ht_should_grow            <mutarray>                817 bytes  guards=2  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+21 ht_grow_or_clean          <mutarray>                665 bytes  guards=2  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+22 ht_place                  <mutarray, int, str, str>   1168 bytes  guards=5  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+23 ht_set                    <mutarray, str, str>      836 bytes  guards=2  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+24 ht_delete                 <mutarray, str>          1189 bytes  guards=5  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+25 sample                    <generic>                 838 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+
+virtual-construction-opt 1: 12868 machine-code bytes, 26 NIR functions
+0 <program>                  <generic>                  45 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+1 ht_fill_empty              <mutarray, int, int>      388 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+2 ht_alloc                   <int>                     524 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+3 ht_new                     <generic>                  70 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+4 ht_controls                <mutarray>                 61 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+5 ht_keys                    <mutarray>                 61 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+6 ht_values                  <mutarray>                 61 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+7 ht_size                    <mutarray>                 61 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+8 ht_tombstones              <mutarray>                 61 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+9 ht_capacity                <mutarray>                167 bytes  guards=1  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+10 ht_probe_start            <mutarray, str>           179 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+11 ht_probe_next             <mutarray, int>           245 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+12 ht_find_get               <mutarray, str, int>      804 bytes  guards=2  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+13 ht_find_insert            <mutarray, str, int, int>   1248 bytes  guards=2  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+14 ht_get                    <mutarray, str>           429 bytes  guards=1  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+15 ht_contains               <mutarray, str>           253 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+16 ht_rehash_probe           <mutarray, int, int>      380 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+17 ht_rehash_insert          <List[mutarray], int, any, any>    439 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+18 ht_rehash_scan            <list, int, int, List[mutarray], int>   1113 bytes  guards=3  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+19 ht_rehash                 <mutarray, int>           766 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+20 ht_should_grow            <mutarray>                817 bytes  guards=2  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+21 ht_grow_or_clean          <mutarray>                665 bytes  guards=2  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+22 ht_place                  <mutarray, int, str, str>   1168 bytes  guards=5  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+23 ht_set                    <mutarray, str, str>      836 bytes  guards=2  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+24 ht_delete                 <mutarray, str>          1189 bytes  guards=5  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+25 sample                    <generic>                 838 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0

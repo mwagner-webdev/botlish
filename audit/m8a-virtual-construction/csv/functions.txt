@@ -1,0 +1,25 @@
+virtual-construction-opt 0: 4731 machine-code bytes, 11 NIR functions
+0 <program>                  <generic>                  68 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+1 peek                       <str, int>                365 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+2 peek                       <str, int>                430 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+3 scan_unquoted              <str, int, int>           585 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+4 scan_quoted                <str, int, str>           770 bytes  guards=0  strcat=2  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+5 scan_field                 <str, int>                352 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+6 scan_record                <str, int, List[never]>    618 bytes  guards=0  strcat=0  listappend=1  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+7 scan_record                <str, int, List[str]>     611 bytes  guards=0  strcat=0  listappend=1  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+8 scan_records               <str, int, List[never]>    361 bytes  guards=0  strcat=0  listappend=1  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+9 scan_records               <str, int, List[List[str]]>    404 bytes  guards=0  strcat=0  listappend=1  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+10 csv_parse                 <str>                     167 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+
+virtual-construction-opt 1: 5723 machine-code bytes, 11 NIR functions
+0 <program>                  <generic>                  68 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+1 peek                       <str, int>                365 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+2 peek                       <str, int>                430 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+3 scan_unquoted              <str, int, int>           585 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+4 scan_quoted                <str, int, str>          1063 bytes  guards=0  strcat=0  listappend=0  construct(plan)=2  construct(flat)=1  planregs=3  planresult=0
+5 scan_field                 <str, int>                352 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+6 scan_record                <str, int, List[never]>    795 bytes  guards=0  strcat=0  listappend=2  construct(plan)=1  construct(flat)=0  planregs=1  planresult=0
+7 scan_record                <str, int, List[str]>     976 bytes  guards=0  strcat=0  listappend=0  construct(plan)=1  construct(flat)=2  planregs=2  planresult=0
+8 scan_records               <str, int, List[never]>    398 bytes  guards=0  strcat=0  listappend=0  construct(plan)=1  construct(flat)=0  planregs=1  planresult=0
+9 scan_records               <str, int, List[List[str]]>    524 bytes  guards=0  strcat=0  listappend=0  construct(plan)=1  construct(flat)=1  planregs=2  planresult=0
+10 csv_parse                 <str>                     167 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0

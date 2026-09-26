@@ -1,0 +1,6 @@
+program: corpus:csv
+value (on):  [["name", "age"], ["Alice", "30"], ["Bob", "40"]]
+value (off): [["name", "age"], ["Alice", "30"], ["Bob", "40"]]
+used instances: 10
+plan results: 0, instances with plan parameters: 3, instances with plan locals: 2
+construction sites/plan sources: 20 (12 virtual)

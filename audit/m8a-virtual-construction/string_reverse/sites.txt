@@ -1,0 +1,9 @@
+reverse_from<str, int, str> string_reverse.bot:18:16   str  ref                  materialized return to exact callers that never extend the result
+reverse_from<str, int, str> string_reverse.bot:20:17   str  substring            virtual      
+reverse_from<str, int, str> string_reverse.bot:21:35   str  concat               virtual      
+reverse_from<str, int, str> string_reverse.bot:21:42   str  ref                  virtual      
+reverse_from<str, int, str> string_reverse.bot:21:53   str  ref                  virtual      
+
+totals by disposition / barrier reason:
+     1  return to exact callers that never extend the result
+     4  (virtual)

@@ -1,0 +1,12 @@
+virtual-construction-opt 0
+  total allocations 16, allocated bytes 592
+  List               16 objects        592 bytes
+  copies: stringBytes 0, listElements 20
+  construction: materializations 0 passthrough 0 plansCreated 0 extensions 0 merges 0 growths 0 growthStringBytes 0 growthListElements 0 pieces 0 regionPieces 0 stringBytesIntoPlans 0 listElementsIntoPlans 0 materializedStringBytes 0 materializedListElements 0
+
+virtual-construction-opt 1
+  total allocations 16, allocated bytes 712
+  List               13 objects        496 bytes
+  ListPlan            3 objects        216 bytes
+  copies: stringBytes 0, listElements 23
+  construction: materializations 3 passthrough 0 plansCreated 3 extensions 3 merges 3 growths 0 growthStringBytes 0 growthListElements 0 pieces 15 regionPieces 0 stringBytesIntoPlans 0 listElementsIntoPlans 6 materializedStringBytes 0 materializedListElements 6

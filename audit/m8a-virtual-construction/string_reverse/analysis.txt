@@ -1,0 +1,3 @@
+reverse_from<str, int, str> (i2):
+  parameter 2 (reversed): accepts a str plan
+  local character (b6): a str plan, one continuation

@@ -1,0 +1,18 @@
+virtual-construction-opt 0
+  total allocations 61510, allocated bytes 2544568
+  String          47500 objects    2076000 bytes
+  List            14008 objects     468464 bytes
+  Block               1 objects         48 bytes
+  ImmutableSet        1 objects         56 bytes
+  copies: stringBytes 176000, listElements 16534
+  construction: materializations 0 passthrough 0 plansCreated 0 extensions 0 merges 0 growths 0 growthStringBytes 0 growthListElements 0 pieces 0 regionPieces 0 stringBytesIntoPlans 0 listElementsIntoPlans 0 materializedStringBytes 0 materializedListElements 0
+
+virtual-construction-opt 1
+  total allocations 38510, allocated bytes 1970568
+  String          16000 objects     686000 bytes
+  List            14008 objects     468464 bytes
+  StringPlan       8500 objects     816000 bytes
+  Block               1 objects         48 bytes
+  ImmutableSet        1 objects         56 bytes
+  copies: stringBytes 108500, listElements 16534
+  construction: materializations 2000 passthrough 0 plansCreated 8500 extensions 18500 merges 8500 growths 500 growthStringBytes 8500 growthListElements 0 pieces 62500 regionPieces 0 stringBytesIntoPlans 54000 listElementsIntoPlans 0 materializedStringBytes 29500 materializedListElements 0

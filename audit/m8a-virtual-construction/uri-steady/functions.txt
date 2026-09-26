@@ -1,0 +1,37 @@
+virtual-construction-opt 0: 5746 machine-code bytes, 17 NIR functions
+0 <program>                  <generic>                1100 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+1 char::codepoint            <UnicodeChar>              39 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+2 byte::from_int             <int>                     289 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+3 byte::set                  <List[UnicodeChar]>       617 bytes  guards=0  strcat=0  listappend=1  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+4 ascii::is_digit            <int>                      74 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+5 ascii::is_upper            <int>                      74 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+6 ascii::is_lower            <int>                      74 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+7 ascii::is_alphabetic       <int>                     125 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+8 ascii::is_alphanumeric     <int>                     125 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+9 web::is_unreserved         <generic>                 155 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+10 web::uri_escape_text      <generic>                 121 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+11 high_nibble               <generic>                 103 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+12 hex_pair                  <generic>                 378 bytes  guards=0  strcat=1  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+13 esc_bytes                 <generic>                 624 bytes  guards=0  strcat=2  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+14 esc_char                  <generic>                 448 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+15 esc_from                  <generic>                 620 bytes  guards=0  strcat=1  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+16 repeat_uri                <generic>                 780 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+
+virtual-construction-opt 1: 6145 machine-code bytes, 17 NIR functions
+0 <program>                  <generic>                1100 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+1 char::codepoint            <UnicodeChar>              39 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+2 byte::from_int             <int>                     289 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+3 byte::set                  <List[UnicodeChar]>       617 bytes  guards=0  strcat=0  listappend=1  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+4 ascii::is_digit            <int>                      74 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+5 ascii::is_upper            <int>                      74 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+6 ascii::is_lower            <int>                      74 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+7 ascii::is_alphabetic       <int>                     125 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+8 ascii::is_alphanumeric     <int>                     125 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+9 web::is_unreserved         <generic>                 155 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+10 web::uri_escape_text      <generic>                 121 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+11 high_nibble               <generic>                 103 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+12 hex_pair                  <generic>                 453 bytes  guards=0  strcat=0  listappend=0  construct(plan)=1  construct(flat)=0  planregs=1  planresult=1
+13 esc_bytes                 <generic>                 758 bytes  guards=0  strcat=0  listappend=0  construct(plan)=1  construct(flat)=0  planregs=4  planresult=1
+14 esc_char                  <generic>                 486 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=4  planresult=1
+15 esc_from                  <generic>                 772 bytes  guards=0  strcat=0  listappend=0  construct(plan)=1  construct(flat)=1  planregs=3  planresult=0
+16 repeat_uri                <generic>                 780 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0

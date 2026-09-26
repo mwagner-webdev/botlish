@@ -1,0 +1,12 @@
+peek<str, int>             csv_records.bot:143:5      str  substring            materialized return from an instance with a companion variant
+scan_unquoted<str, int, int> csv_records.bot:148:17     str  substring            materialized storage into an aggregate (List element)
+scan_quoted<str, int, str> csv_records.bot:156:49     str  concat               virtual      
+scan_quoted<str, int, str> csv_records.bot:156:56     str  ref                  virtual      
+scan_quoted<str, int, str> csv_records.bot:158:17     str  ref                  materialized storage into an aggregate (List element)
+scan_quoted<str, int, str> csv_records.bot:160:34     str  concat               virtual      
+scan_quoted<str, int, str> csv_records.bot:160:41     str  ref                  virtual      
+
+totals by disposition / barrier reason:
+     1  return from an instance with a companion variant
+     2  storage into an aggregate (List element)
+     4  (virtual)

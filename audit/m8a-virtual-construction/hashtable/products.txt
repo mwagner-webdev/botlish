@@ -1,0 +1,9 @@
+sample<generic>  hashtable.bot:374:5
+    construction:       [_, _, _, _, _, _] (6 elements)
+    instance result:    list[bool, bool, bool, bool, bool, any]
+    positional shape:   [bool, bool, bool, bool, bool, any] (pre-existing specialization-only aggregate fact, hir/types.tcl)
+    element types:      bool, bool, bool, bool, bool, any
+    broadens:           yes: element theorem any (the lub of distinct field types)
+    scalar-replaced:    no
+    caller access:      <program>: forwards it as its own result
+    verdict:            unclear

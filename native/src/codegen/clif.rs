@@ -317,7 +317,19 @@ pub fn define<M: Module>(
         }
         let callee = module.declare_func_in_func(symbols.direct[f.id as usize], b.func);
         let call = b.ins().call(callee, &args);
-        let result = b.inst_results(call)[0];
+        let mut result = b.inst_results(call)[0];
+        if f.plan_result {
+            // A plan-result function (M8.a, nir::Function::plan_result) is
+            // only ever given one when it is closed -- its every caller is
+            // a direct call that knows the result may be a plan -- so this
+            // generic entry is never expected to run. Defense in depth
+            // anyway: the ordinary Value ABI must never see a plan, so the
+            // result is materialized (rt_plan_materialize passes a flat
+            // value, or the 0 error sentinel, through unchanged).
+            let helper = module.declare_func_in_func(symbols.helpers["rt_plan_materialize"], b.func);
+            let call = b.ins().call(helper, &[params[0], result]);
+            result = b.inst_results(call)[0];
+        }
         b.ins().return_(&[result]);
         b.seal_all_blocks();
         b.finalize(config);
@@ -1173,6 +1185,47 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 self.b.switch_to_block(fail);
                 self.fail_with("rt_not_boolean", &[self.vm, v]);
                 self.b.switch_to_block(ok);
+            }
+            Inst::Construct { dst, list, plan, pieces } => {
+                // runtime/construct.rs's word encoding: each piece's tag,
+                // then its operand Values, in one stack array (the same
+                // pass-by-pointer shape `array` gives listnew/closure/
+                // callvalue: the operands stay rooted in their own
+                // registers, live at this safepoint, for the whole call).
+                use crate::runtime::construct::{MODE_LIST, MODE_PLAN, TAG_ELEM, TAG_REGION, TAG_SPAN};
+                let mut words: Vec<ir::Value> = Vec::new();
+                for piece in pieces {
+                    let tag = match piece {
+                        nir::Piece::Span(_) => TAG_SPAN,
+                        nir::Piece::Region(..) => TAG_REGION,
+                        nir::Piece::Elem(_) => TAG_ELEM,
+                    };
+                    words.push(self.iconst(tag));
+                    for r in piece.regs() {
+                        words.push(self.get(r));
+                    }
+                }
+                let slot = self.b.create_sized_stack_slot(StackSlotData::new(
+                    StackSlotKind::ExplicitSlot,
+                    (words.len() * 8) as u32,
+                    3,
+                ));
+                for (i, w) in words.iter().enumerate() {
+                    let addr = self.b.ins().stack_addr(I64, slot, (i * 8) as i32);
+                    self.b.ins().store(MemFlagsData::trusted(), *w, addr, 0);
+                }
+                let ptr = self.b.ins().stack_addr(I64, slot, 0);
+                let n = self.iconst(words.len() as u64);
+                let mode = self.iconst((if *list { MODE_LIST } else { 0 }) | (if *plan { MODE_PLAN } else { 0 }));
+                let kind = match (*list, *plan) {
+                    (false, false) => KIND_STR,
+                    (true, false) => KIND_LIST,
+                    (false, true) => KIND_STRPLAN,
+                    (true, true) => KIND_LISTPLAN,
+                };
+                let v = self.call_allocating("rt_construct", &[self.vm, mode, n, ptr], "construct", kind);
+                self.check(v);
+                self.def(*dst, v);
             }
             Inst::Op { dst, op, args } => {
                 let v = self.op(*op, args);

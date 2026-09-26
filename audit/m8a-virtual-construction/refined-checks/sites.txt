@@ -1,0 +1,26 @@
+hex_pair<generic>          web.bot:76:9               str  concat               virtual      
+esc_bytes<generic>         web.bot:79:9               str  if                   virtual      
+esc_bytes<generic>         web.bot:80:13              str  ref                  virtual      
+esc_bytes<generic>         web.bot:82:13              str  call (plan result)   virtual      
+esc_bytes<generic>         web.bot:82:37              str  concat               virtual      
+esc_bytes<generic>         web.bot:82:44              str  ref                  virtual      
+esc_bytes<generic>         web.bot:82:49              str  concat               virtual      
+esc_bytes<generic>         web.bot:82:61              str  call (plan result)   virtual      
+esc_char<generic>          web.bot:86:9               str  if                   virtual      
+esc_char<generic>          web.bot:88:13              str  if                   virtual      
+esc_char<generic>          web.bot:91:17              str  call (plan result)   virtual      
+esc_char<generic>          web.bot:93:13              str  call (plan result)   virtual      
+esc_from<generic>          web.bot:96:9               str  if                   materialized return to exact callers that never extend the result
+esc_from<generic>          web.bot:97:13              str  ref                  materialized return to exact callers that never extend the result
+esc_from<generic>          web.bot:99:35              str  concat               virtual      
+esc_from<generic>          web.bot:99:42              str  ref                  virtual      
+esc_from<generic>          web.bot:99:47              str  call (plan result)   virtual      
+esc_from<generic>          web.bot:99:56              str  substring            materialized exact call to a parameter that is not a plan parameter (fork: referenced more than once on some path)
+char_at<generic>           ir {0 2 2 3 2 2 1 1 3 2 2} str  substring            materialized return from an instance with a companion variant
+char_at<generic>           ir {0 2 2 3 2 2 2 2 1 1 3 2 2} str  substring            materialized return from an instance with a companion variant
+
+totals by disposition / barrier reason:
+    15  (virtual)
+     2  return to exact callers that never extend the result
+     1  exact call to a parameter that is not a plan parameter (fork: referenced more than once on some path)
+     2  return from an instance with a companion variant

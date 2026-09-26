@@ -1,0 +1,11 @@
+virtual-construction-opt 0: 2322 machine-code bytes, 4 NIR functions
+0 <program>                  <generic>                 561 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+1 matches_at                 <str, str, int>           476 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+2 replace_from               <str, str, str, int, int, str>   1012 bytes  guards=0  strcat=3  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+3 replace                    <str, str, str>           273 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+
+virtual-construction-opt 1: 2618 machine-code bytes, 4 NIR functions
+0 <program>                  <generic>                 561 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+1 matches_at                 <str, str, int>           476 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+2 replace_from               <str, str, str, int, int, str>   1308 bytes  guards=0  strcat=0  listappend=0  construct(plan)=1  construct(flat)=1  planregs=2  planresult=0
+3 replace                    <str, str, str>           273 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0

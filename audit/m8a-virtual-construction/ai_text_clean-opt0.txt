@@ -1,0 +1,27 @@
+Tcl 9.0.1, cranelift, best of 5 runs, wall time; allocation counts from a separate run (native::allocationReport summary mode, same settings).
+
+family       size     in-bytes   in-chars  out-bytes  out-chars       time     allocs str-allocs  allocated str-bytes-copied     gc
+ascii        1K           1000       1000       1000       1000 253.492 us       2111       2110   586.4 KB       501.9 KB      1
+ascii        10K         10000      10000      10000      10000    6.05 ms      20111      20110   50.82 MB       50.02 MB     49
+ascii        100K       100000     100000     100000     100000  156.91 ms     200111     200110 5008.15 MB     5000.15 MB   4635
+punctuation  1K           1200       1000       1032       1032 264.859 us       2111       2110   602.6 KB       518.1 KB      1
+punctuation  10K         11966      10000      10328      10328    6.36 ms      20111      20110   52.46 MB       51.65 MB     50
+punctuation  100K       119674     100000     103278     103278  169.56 ms     200111     200110 5172.07 MB     5164.07 MB   4776
+emoji        1K           1425       1000       1119       1000 262.733 us       2111       2110   645.8 KB       561.3 KB      1
+emoji        10K         14240      10000      11186       9999    5.65 ms      20111      20110   56.75 MB       55.95 MB     54
+emoji        100K       142375     100000     111865     100000  169.90 ms     200111     200110 5601.39 MB     5593.39 MB   5165
+
+Scaling ratios (string-region-opt 1), consecutive sizes, string-region-opt 1:
+family       sizes              time-x    bytes-x
+ascii        1K->10K             23.8x      86.7x
+ascii        10K->100K           26.0x      98.5x
+punctuation  1K->10K             24.0x      87.1x
+punctuation  10K->100K           26.7x      98.6x
+emoji        1K->10K             21.5x      87.9x
+emoji        10K->100K           30.0x      98.7x
+
+String-region-opt 1 vs 0, 10K case (allocations; identical numbers here are expected -- see the file header):
+family        allocs-on allocs-off   bytes-on  bytes-off
+ascii             20111      20111   50.82 MB   50.82 MB
+punctuation       20111      20111   52.46 MB   52.46 MB
+emoji             20111      20111   56.75 MB   56.75 MB

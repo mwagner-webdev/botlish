@@ -1,0 +1,9 @@
+matmul<List[List[int]], List[List[int]]>  matmul.bot:43:16
+    construction:       [] (0 elements)
+    instance result:    List[List[int]]
+    positional shape:   none (pre-existing specialization-only aggregate fact, hir/types.tcl)
+    element types:      
+    broadens:           no: element theorem List[int]
+    scalar-replaced:    no
+    caller access:      <program>: forwards it as its own result
+    verdict:            unclear

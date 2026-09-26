@@ -1,0 +1,6 @@
+program: bench/uri-steady.bot
+value (on):  29500
+value (off): 29500
+used instances: 19
+plan results: 3, instances with plan parameters: 2, instances with plan locals: 0
+construction sites/plan sources: 18 (15 virtual)

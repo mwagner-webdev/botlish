@@ -81,6 +81,13 @@ pub const KIND_MUTARRAY: u8 = 8;
 /// KIND_LIST so a set and a List, even one with identical elements, are
 /// never the same runtime kind.
 pub const KIND_SET: u8 = 9;
+/// Private virtual-construction plans (runtime/construct.rs,
+/// M8A-VIRTUAL-IMMUTABLE-CONSTRUCTION.md): compiler/runtime implementation
+/// state, never a program value -- `kind_of` deliberately has no case for
+/// them (it panics), so a plan that ever leaked into ordinary Value ABI
+/// would fail loudly rather than be misread as a String/List.
+pub const KIND_STRPLAN: u8 = 10;
+pub const KIND_LISTPLAN: u8 = 11;
 
 #[repr(C)]
 pub struct Header {

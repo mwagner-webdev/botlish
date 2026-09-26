@@ -285,7 +285,11 @@ fn f():
     scan_collect([corpus::literal {the quick brown fox jumps}], 0, \"\")
 f()
 "
-    set report [native::allocationReport [sourceHir $text] summary 1]
+    # Eager lowering (-virtual-construction-opt 0): the reconciliation
+    # below is about the per-step accumulator copies; with virtual
+    # construction the accumulator is a private plan whose bytes are not
+    # String payload (tests/virtual-construction.test).
+    set report [native::allocationReport [sourceHir $text] summary 1 -virtual-construction-opt 0]
     list [dict get $report copies stringBytes] \
         [expr {[dict get $report copies stringBytes] == [dict get $report byKind String payloadBytes]}]
 } -result {350 1}

@@ -1,0 +1,20 @@
+chunked_append<list[List[never], mutarray, int], str> csv_chunked.bot:37:16      list list_append          virtual      
+chunked_append<list[List[never], mutarray, int], str> csv_chunked.bot:40:17      list ref                  materialized storage into an aggregate (List element)
+chunked_append<list[List[mutarray], mutarray, int], str> csv_chunked.bot:37:16      list list_append          virtual      
+chunked_append<list[List[mutarray], mutarray, int], str> csv_chunked.bot:40:17      list ref                  materialized storage into an aggregate (List element)
+chunked_append<list[List[never], mutarray, int], list> csv_chunked.bot:37:16      list list_append          virtual      
+chunked_append<list[List[never], mutarray, int], list> csv_chunked.bot:40:17      list ref                  materialized storage into an aggregate (List element)
+chunked_append<list[List[mutarray], mutarray, int], list> csv_chunked.bot:37:16      list list_append          virtual      
+chunked_append<list[List[mutarray], mutarray, int], list> csv_chunked.bot:40:17      list ref                  materialized storage into an aggregate (List element)
+peek<str, int>             csv_chunked.bot:77:5       str  substring            materialized return from an instance with a companion variant
+scan_unquoted<str, int, int> csv_chunked.bot:82:17      str  substring            materialized storage into an aggregate (List element)
+scan_quoted<str, int, str> csv_chunked.bot:90:49      str  concat               virtual      
+scan_quoted<str, int, str> csv_chunked.bot:90:56      str  ref                  virtual      
+scan_quoted<str, int, str> csv_chunked.bot:92:17      str  ref                  materialized storage into an aggregate (List element)
+scan_quoted<str, int, str> csv_chunked.bot:94:34      str  concat               virtual      
+scan_quoted<str, int, str> csv_chunked.bot:94:41      str  ref                  virtual      
+
+totals by disposition / barrier reason:
+     8  (virtual)
+     6  storage into an aggregate (List element)
+     1  return from an instance with a companion variant

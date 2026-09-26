@@ -33,6 +33,7 @@
 //! Objects never move, so a register's machine copy stays valid across a
 //! collection. Between program runs the whole heap is released.
 
+use super::construct::{ListPlanObj, StrPlanObj};
 use super::metrics::{GcCycle, GcReason, Metrics, KIND_COUNT};
 use super::value::*;
 use std::mem::size_of;
@@ -78,6 +79,14 @@ impl Heap {
         if self.stress { GcReason::Stress } else { GcReason::Threshold }
     }
 
+    /// Counts BYTES of storage a live object acquired after its allocation
+    /// (a virtual-construction plan's buffer growth, runtime/construct.rs)
+    /// toward the next collection's threshold, exactly as if they had been
+    /// allocated with it: nothing else about collection pacing changes.
+    pub fn note_growth(&mut self, bytes: usize) {
+        self.allocated += bytes;
+    }
+
     /// Registers a new object of about BYTES bytes.
     pub fn register(&mut self, object: *mut Header, bytes: usize) {
         self.objects.push(object);
@@ -115,6 +124,9 @@ impl Heap {
                     stack.extend_from_slice(unsafe { std::slice::from_raw_parts(c.caps, c.ncaps) });
                 }
                 KIND_CELL => stack.push(unsafe { as_ref::<CellObj>(v) }.value),
+                // A List plan's elements are ordinary program values held
+                // until materialization; a String plan holds only bytes.
+                KIND_LISTPLAN => stack.extend_from_slice(&super::construct::listplan_of(v).items),
                 _ => {}
             }
         }
@@ -209,6 +221,8 @@ pub unsafe fn object_size(object: *mut Header) -> usize {
             KIND_CLOSURE => size_of::<ClosureObj>() + closure_of(v).ncaps * 8,
             KIND_NATIVE => size_of::<NativeObj>(),
             KIND_CELL => size_of::<CellObj>(),
+            KIND_STRPLAN => size_of::<StrPlanObj>() + super::construct::strplan_of(v).buf.len(),
+            KIND_LISTPLAN => size_of::<ListPlanObj>() + super::construct::listplan_of(v).items.capacity() * 8,
             kind => panic!("bad heap object kind {kind}"),
         }
     }
@@ -236,6 +250,8 @@ pub unsafe fn free_object(object: *mut Header) {
             KIND_NATIVE => drop(Box::from_raw(object as *mut NativeObj)),
             KIND_CELL => drop(Box::from_raw(object as *mut CellObj)),
             KIND_MUTARRAY => drop(Box::from_raw(object as *mut MutArrayObj)),
+            KIND_STRPLAN => drop(Box::from_raw(object as *mut StrPlanObj)),
+            KIND_LISTPLAN => drop(Box::from_raw(object as *mut ListPlanObj)),
             kind => panic!("bad heap object kind {kind}"),
         }
     }

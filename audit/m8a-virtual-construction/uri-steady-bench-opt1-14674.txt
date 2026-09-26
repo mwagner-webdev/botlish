@@ -1,0 +1,34 @@
+Correctness (fixed corpus, spec item 18): abcXYZ012 / a b+c? / café / hello 世界?, 2000 calls
+  interp             29500
+  compile            29500
+  cranelift-generic  29500
+  cranelift          29500
+  -> all four backends agree: 29500
+
+Timing (native/Cranelift, best of 7 runs, 5 independent sessions, JIT compile excluded)
+  session 0: best=4133.42 us (lower=96691.00 us compile=7726.00 us collections=13)
+  session 1: best=3978.48 us (lower=99662.00 us compile=6741.00 us collections=13)
+  session 2: best=4124.73 us (lower=94998.00 us compile=6941.00 us collections=13)
+  session 3: best=3958.42 us (lower=98818.00 us compile=7114.00 us collections=13)
+  session 4: best=3971.96 us (lower=102041.00 us compile=6660.00 us collections=13)
+  -> median=3978.48 us min=3958.42 us max=4133.42 us spread=4.2%
+
+Structural baseline (spec items 27-28; whole-program, includes module init/startup)
+  NIR functions:        17
+  machine code bytes:   6145
+  generic instances:    9
+  int/raw instances:    6
+  other instances:      2
+  guard int ops:        0
+  call/callenv ops:     17
+  tagged i-arith ops:   6
+  rt_set_contains refs (NIR text; 0 expected -- ImmutableSet membership lowers to a direct native call, not this literal token): 0
+  total allocations:    38510
+  total allocated bytes: 1970568
+
+For per-instance (which is_unreserved/ascii instance executes, may_error
+cascade, capture loads per byte) and the module-init-vs-steady-state
+allocation split, see M0-MODULE-CLOSURE-AND-URI-BASELINE.md, gathered with
+audit/comprehensive-generated-code/tools/probe.tcl and census.tcl on this
+same program (non-production inspection tooling this milestone reuses
+rather than duplicating).

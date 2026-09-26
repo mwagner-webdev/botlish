@@ -195,6 +195,11 @@ namespace eval native::lower {
     # analysis of the program, and whether it is enabled at all.
     variable traversal {}
     variable traversalOpt 1
+    # Virtual construction (see "Virtual construction" below): the
+    # hir::construction analysis of the program, and whether it is enabled
+    # at all.
+    variable construction {}
+    variable constructionOpt 1
     # Tiny exact-leaf inlining (see "Tiny exact-leaf inlining" below):
     # whether it is enabled at all, and a memo cache InstanceId -> 0|1 (reset
     # at the start of every native::lower::program call), since
@@ -867,6 +872,66 @@ namespace eval native::lower {
 # against the unoptimized baseline.
 
 # ---------------------------------------------------------------------------
+# Virtual construction
+#
+# M8A-VIRTUAL-IMMUTABLE-CONSTRUCTION.md. An immutable String/List built by
+# ordinary `concat`/`list_append` need not be materialized as a flat object
+# at every construction step: until some consumer actually observes it as a
+# flat value, it may stay a *construction plan* -- the ordered pieces it is
+# made of, every one of them an already-evaluated value. hir/
+# construction.tcl decides where (plan locals, plan parameters, plan
+# results; see its header); this lowering represents a plan in two forms:
+#
+#   pieces   compile-time: a list of {span REG} (a flat value or a plan
+#            register), {region BASE START END} (a validated StringRegion --
+#            a `substring` operand of a concat is never copied into a String
+#            of its own) and {elem REG} (one List element). A plan local's
+#            `fn locals` entry is `{pieces PIECES FAMILY}`; a nested concat
+#            tree, a plan local and a plan parameter all just contribute
+#            their pieces to the enclosing construction (PlanPieces).
+#   plan     runtime: a register declared in the func header's `planregs=`
+#            that may hold a private plan object (runtime/construct.rs:
+#            KIND_STRPLAN/KIND_LISTPLAN) *or* an ordinary flat value -- a
+#            "maybe-plan" register. Needed only where a construction must
+#            cross a point pieces cannot: a self-tail back edge or direct
+#            call at a plan parameter (`{plan REG FAMILY}` in `fn locals`),
+#            a plan result's `ret` (`planresult=1`), an `if` join.
+#
+# One NIR instruction does all construction, whatever the number of pieces
+# (no strcat2/strcat3/... zoo): `%d = construct str|list plan|flat PIECE...`
+# (nir.rs's Inst::Construct). `plan` builds or extends (in place: the first
+# plan piece is its "anchor") a plan object; `flat` is the one
+# materialization -- one allocation, each piece copied once, byte-for-byte
+# the object eager concat/list_append would have built. Where nothing is
+# virtual, PiecesToFlat still emits exactly the eager `op strcat`/`op
+# listappend` the baseline does, and `-virtual-construction-opt 0` (or
+# BOTLISH_NATIVE_VIRTUAL_CONSTRUCTION_OPT=0) emits no `construct` at all:
+# the untouched eager lowering, for differential testing and measurement.
+#
+# Strict evaluation, delayed materialization: every piece is evaluated
+# exactly where, and in the order, the eager lowering evaluates it (operands
+# left to right, the eager call's own argument guards after both operands --
+# ConstructPieces); only copying moves, to the consumer that materializes.
+# The one failure mode eager concat/list_append have -- the collection-
+# length ceiling (MAX_COLLECTION_LENGTH, 2^62-1 characters/elements, far
+# beyond any allocatable object) -- is checked by `construct` itself.
+#
+# Materialization barriers are simply every consumer that asks for an
+# ordinary value: Ref of a plan local/parameter wanted tagged, a direct call
+# whose callee's parameter is not a plan parameter, a plan result consumed
+# by an ordinary use (PlanCallResult), a return from a non-plan-result
+# function, List elements, native operations, dynamic calls, captures -- all
+# of them go through the ordinary Expr path, which only ever sees flat
+# registers. nir.rs's `validate_plans` re-checks this structurally (a plan
+# register may reach only construct/move/plan-parameter/plan-result
+# positions, and is consumed at most once along every path), so a lowering
+# mistake is a loud INVALID-NIR, never a plan misread as a String/List.
+#
+# Nothing here is a loop rewrite: a self-tail recurrence carrying
+# `concat(acc, piece)` stays virtual only because its `acc` parameter is a
+# plan parameter by the same general rule as any other binding.
+
+# ---------------------------------------------------------------------------
 # Entry point
 
 # The NIR of the program-mode HIR program HIR. Options:
@@ -953,6 +1018,8 @@ proc native::lower::program {hirProgram args} {
     variable traversalOpt
     variable tinyLeafInlineOpt
     variable leafEligible
+    variable construction
+    variable constructionOpt
 
     set default [expr {[info exists ::env(BOTLISH_NATIVE_SPECIALIZE)]
         && $::env(BOTLISH_NATIVE_SPECIALIZE) eq "0" ? 0 : 1}]
@@ -994,13 +1061,16 @@ proc native::lower::program {hirProgram args} {
     # differential comparison, and debugging.
     set tinyLeafInlineDefault [expr {[info exists ::env(BOTLISH_NATIVE_TINY_LEAF_INLINE_OPT)]
         && $::env(BOTLISH_NATIVE_TINY_LEAF_INLINE_OPT) eq "0" ? 0 : 1}]
+    set constructionDefault [expr {[info exists ::env(BOTLISH_NATIVE_VIRTUAL_CONSTRUCTION_OPT)]
+        && $::env(BOTLISH_NATIVE_VIRTUAL_CONSTRUCTION_OPT) eq "0" ? 0 : 1}]
     set options [hir::Options native::lower::program \
         [list -specialize $default -repr-opt $reprDefault -escape-opt $escapeDefault \
             -param-aggregate-opt $paramAggregateDefault -block-escape-opt $blockEscapeDefault \
             -string-region-opt $stringRegionDefault -string-traversal-opt $traversalDefault \
             -call-facts-opt $callFactsDefault -call-effects-opt $callEffectsDefault \
             -closed-caller-facts-opt $closedCallerFactsDefault \
-            -tiny-leaf-inline-opt $tinyLeafInlineDefault] $args]
+            -tiny-leaf-inline-opt $tinyLeafInlineDefault \
+            -virtual-construction-opt $constructionDefault] $args]
     if {[hir::mode $hirProgram] ne "program"} {
         throw {NATIVE UNSUPPORTED sequence-mode} \
             "native lowering: only program-mode HIR can be compiled (sequence mode runs in an unknown environment)"
@@ -1023,6 +1093,7 @@ proc native::lower::program {hirProgram args} {
     set stringRegionOpt [dict get $options -string-region-opt]
     set traversalOpt [dict get $options -string-traversal-opt]
     set tinyLeafInlineOpt [dict get $options -tiny-leaf-inline-opt]
+    set constructionOpt [dict get $options -virtual-construction-opt]
     set leafEligible [dict create]
     set spec [hir::specialize::analyze $hirProgram -specialize [dict get $options -specialize] \
         -call-facts-opt [dict get $options -call-facts-opt] \
@@ -1046,6 +1117,12 @@ proc native::lower::program {hirProgram args} {
         : [dict create virtual {} wants {} flatCaptures {}]}]
     set traversal [expr {$traversalOpt ? [hir::traversal::analyze $hirProgram $spec $stringregion $escape]
         : [dict create plans {}]}]
+    # Virtual construction (see "Virtual construction" below) runs last: it
+    # leaves every binding/variant the analyses above claim to them, and
+    # decides plan results from M7.c's closedness proof over blockescape.
+    set construction [expr {$constructionOpt
+        ? [hir::construction::analyze $hirProgram $spec $escape $stringregion $blockescape]
+        : [dict create params {} bindings {} locals {} results {} closed {} regions {}]}]
     set context [dict get $spec context]
     set selfTail [dict get $context selfTails]
     set unproven [dict get $context unproven]
@@ -1132,7 +1209,7 @@ proc native::lower::program {hirProgram args} {
     }
     set text "[join $header \n]\n\n[join $texts \n\n]\n"
     return [dict create text $text functions $infos statistics [Statistics $infos] \
-        specialization $spec]
+        specialization $spec construction $construction]
 }
 
 # Code-size and guard statistics of the lowered functions INFOS.
@@ -1391,6 +1468,7 @@ proc native::lower::RawParams {id instance params} {
 # {TEXT INFO}.
 proc native::lower::Function {id} {
     variable hir
+    variable construction
     variable baseHir
     variable spec
     variable context
@@ -1429,14 +1507,16 @@ proc native::lower::Function {id} {
         set body [hir::get $hir $region body]
     }
     set rawParams [RawParams $id $instance $params]
+    set k 0
     foreach b $params raw $rawParams {
         set r [NewReg fn]
         if {$raw} {
             MarkRaw fn $r
             dict set fn locals $b [list rawreg $r]
         } else {
-            dict set fn locals $b [list reg $r]
+            ParamLocal fn $id $k $b $r
         }
+        incr k
     }
     set extraParams 0
     if {$region ne "program"} {
@@ -1455,7 +1535,10 @@ proc native::lower::Function {id} {
         }
     }
     EnterScope fn $scope
-    set result [Sequence fn $body]
+    if {$region ne "program"} {
+        dict set fn planResult [hir::construction::resultFamily $construction $id]
+    }
+    set result [SequenceTo fn $body [PlanResultFamily fn]]
     if {$result ne "never"} {
         Emit fn "ret $result"
     }
@@ -1472,6 +1555,7 @@ proc native::lower::Function {id} {
     if {$rawRegs ne ""} {
         append head " rawregs=[Quote [join $rawRegs { }]]"
     }
+    append head [PlanHeader fn]
     if {$region ne "program"} {
         append head " @$region"
     }
@@ -1530,14 +1614,16 @@ proc native::lower::CompanionFunction {id} {
     set scope [hir::get $hir $region bodyScope]
     set body [hir::get $hir $region body]
     set rawParams [RawParams $id $instance $params]
+    set k 0
     foreach b $params raw $rawParams {
         set r [NewReg fn]
         if {$raw} {
             MarkRaw fn $r
             dict set fn locals $b [list rawreg $r]
         } else {
-            dict set fn locals $b [list reg $r]
+            ParamLocal fn $id $k $b $r
         }
+        incr k
     }
     EnterScope fn $scope
     if {$body eq ""} {
@@ -1568,6 +1654,7 @@ proc native::lower::CompanionFunction {id} {
     if {$rawRegs ne ""} {
         append head " rawregs=[Quote [join $rawRegs { }]]"
     }
+    append head [PlanHeader fn]
     append head " @$region"
     set text "$head\n[join [dict get $fn lines] \n]\nend"
     set tails [llength [lmap line [dict get $fn lines] {
@@ -1623,14 +1710,16 @@ proc native::lower::RegionCompanionFunction {id} {
     set scope [hir::get $hir $region bodyScope]
     set body [hir::get $hir $region body]
     set rawParams [RawParams $id $instance $params]
+    set k 0
     foreach b $params raw $rawParams {
         set r [NewReg fn]
         if {$raw} {
             MarkRaw fn $r
             dict set fn locals $b [list rawreg $r]
         } else {
-            dict set fn locals $b [list reg $r]
+            ParamLocal fn $id $k $b $r
         }
+        incr k
     }
     EnterScope fn $scope
     if {$body eq ""} {
@@ -1661,6 +1750,7 @@ proc native::lower::RegionCompanionFunction {id} {
     if {$rawRegs ne ""} {
         append head " rawregs=[Quote [join $rawRegs { }]]"
     }
+    append head [PlanHeader fn]
     append head " @$region"
     set text "$head\n[join [dict get $fn lines] \n]\nend"
     set tails [llength [lmap line [dict get $fn lines] {
@@ -1694,6 +1784,7 @@ proc native::lower::RegionCompanionFunction {id} {
 # {TEXT INFO}, in the same shape as Function.
 proc native::lower::InternalFunction {id} {
     variable hir
+    variable construction
     variable baseHir
     variable spec
     variable context
@@ -1725,21 +1816,24 @@ proc native::lower::InternalFunction {id} {
     set scope [hir::get $hir $region bodyScope]
     set body [hir::get $hir $region body]
     set rawParams [RawParams $id $instance $params]
+    set k 0
     foreach b $params raw $rawParams {
         set r [NewReg fn]
         if {$raw} {
             MarkRaw fn $r
             dict set fn locals $b [list rawreg $r]
         } else {
-            dict set fn locals $b [list reg $r]
+            ParamLocal fn $id $k $b $r
         }
+        incr k
     }
     set captureBindings [dict get $captureLists $region]
     foreach b $captureBindings {
         dict set fn locals $b [list reg [NewReg fn]]
     }
     EnterScope fn $scope
-    set result [Sequence fn $body]
+    dict set fn planResult [hir::construction::resultFamily $construction $id]
+    set result [SequenceTo fn $body [PlanResultFamily fn]]
     if {$result ne "never"} {
         Emit fn "ret $result"
     }
@@ -1752,6 +1846,7 @@ proc native::lower::InternalFunction {id} {
     if {$rawRegs ne ""} {
         append head " rawregs=[Quote [join $rawRegs { }]]"
     }
+    append head [PlanHeader fn]
     append head " @$region"
     set text "$head\n[join [dict get $fn lines] \n]\nend"
     set tails [llength [lmap line [dict get $fn lines] {
@@ -1819,14 +1914,16 @@ proc native::lower::InternalRegionCompanionFunction {id} {
     set scope [hir::get $hir $region bodyScope]
     set body [hir::get $hir $region body]
     set rawParams [RawParams $id $instance $params]
+    set k 0
     foreach b $params raw $rawParams {
         set r [NewReg fn]
         if {$raw} {
             MarkRaw fn $r
             dict set fn locals $b [list rawreg $r]
         } else {
-            dict set fn locals $b [list reg $r]
+            ParamLocal fn $id $k $b $r
         }
+        incr k
     }
     set captureBindings [dict get $captureLists $region]
     foreach b $captureBindings {
@@ -1858,6 +1955,7 @@ proc native::lower::InternalRegionCompanionFunction {id} {
     if {$rawRegs ne ""} {
         append head " rawregs=[Quote [join $rawRegs { }]]"
     }
+    append head [PlanHeader fn]
     append head " @$region"
     set text "$head\n[join [dict get $fn lines] \n]\nend"
     set tails [llength [lmap line [dict get $fn lines] {
@@ -1970,6 +2068,7 @@ proc native::lower::FieldsFunction {id} {
     if {$rawRegs ne ""} {
         append head " rawregs=[Quote [join $rawRegs { }]]"
     }
+    append head [PlanHeader fn]
     append head " @$region"
     set text "$head\n[join [dict get $fn lines] \n]\nend"
     set tails [llength [lmap line [dict get $fn lines] {
@@ -2055,6 +2154,7 @@ proc native::lower::FieldsCompanionFunction {id} {
     if {$rawRegs ne ""} {
         append head " rawregs=[Quote [join $rawRegs { }]]"
     }
+    append head [PlanHeader fn]
     append head " @$region"
     set text "$head\n[join [dict get $fn lines] \n]\nend"
     set tails [llength [lmap line [dict get $fn lines] {
@@ -2208,6 +2308,14 @@ proc native::lower::Expr {fnVar e {want tagged}} {
                 set fields [Expr fn [dict get $node value] region]
                 if {$fields ne "never"} {
                     Emit fn "retmulti [join $fields { }]" $e
+                }
+            } elseif {[PlanResultFamily fn] ne ""} {
+                # A plan-result instance (hir::construction, "Virtual
+                # construction" below): its exact callers accept a plan, so
+                # the returned construction stays virtual.
+                set value [SequenceTo fn [list [dict get $node value]] [PlanResultFamily fn]]
+                if {$value ne "never"} {
+                    Emit fn "ret $value" $e
                 }
             } else {
                 set value [Expr fn [dict get $node value]]
@@ -2379,6 +2487,17 @@ proc native::lower::Ref {fnVar e node want} {
         }
         fnvalue { return [list [Assign fn "fnvalue $where" $e] tagged] }
         self    { return [list [Assign fn self $e] tagged] }
+        pieces  {
+            # A plan local (virtual construction) referenced where a flat
+            # value is needed: its one materialization (it is linear, so no
+            # path reaches a second reference).
+            return [list [PiecesToFlat fn $where [lindex $access 2] $e] tagged]
+        }
+        plan    {
+            # A plan parameter read where a flat value is needed: `construct
+            # ... flat` of a flat argument passes it through unchanged.
+            return [list [Assign fn "construct [lindex $access 2] flat $where" $e] tagged]
+        }
         cell {
             if {[dict exists $unproven $e]} {
                 return [list [Assign fn "cellcheck $where [Quote [dict get $binding name]]" $e] tagged]
@@ -2451,6 +2570,7 @@ proc native::lower::RootValue {fnVar e binding} {
 
 proc native::lower::Bind {fnVar e node} {
     upvar 1 $fnVar fn
+    variable construction
     variable hir
     variable context
     variable escape
@@ -2502,6 +2622,19 @@ proc native::lower::Bind {fnVar e node} {
                 return never
             }
             dict set fn locals $b [list virtual $fields]
+            return ""
+        }
+        set family [hir::construction::localFamily $construction $currentInstance $b]
+        if {$family ne ""} {
+            # A plan local (hir::construction; "Virtual construction"
+            # below): its value's pieces, every one already evaluated here,
+            # in order -- nothing is copied until its single continuation
+            # extends or materializes it.
+            set pieces [PlanPieces fn $valueExpr $family]
+            if {$pieces eq "never"} {
+                return never
+            }
+            dict set fn locals $b [list pieces $pieces $family]
             return ""
         }
         if {[hir::stringregion::virtual $stringregion $currentInstance $b]} {
@@ -2561,6 +2694,9 @@ proc native::lower::CaptureRegsOf {fnVar bindings} {
             rawreg     { lappend values [TaggedOf fn $where] }
             fnvalue    { lappend values [Assign fn "fnvalue $where"] }
             self       { lappend values [Assign fn self] }
+            default {
+                throw {NATIVE BUG} "native lowering: binding $b ($how) cannot be captured"
+            }
         }
     }
     return $values
@@ -2758,13 +2894,23 @@ proc native::lower::TryFields {fnVar e n} {
 # unless this is a self-tail call: see Call's own `self` case) says which
 # of the *remaining*, non-virtualized positions want Expr's `raw` form
 # instead of `tagged`. "never" if any argument cannot complete normally.
-proc native::lower::CallArgs {fnVar argExprs fieldWidths rawSlots} {
+proc native::lower::CallArgs {fnVar argExprs fieldWidths rawSlots {planSlots {}}} {
     upvar 1 $fnVar fn
     set regs {}
     set i 0
     foreach arg $argExprs {
         set width [expr {$i < [llength $fieldWidths] ? [lindex $fieldWidths $i] : ""}]
-        if {$width ne ""} {
+        set family [expr {$i < [llength $planSlots] ? [lindex $planSlots $i] : ""}]
+        if {$family ne ""} {
+            # A plan parameter of the target (virtual construction): the
+            # argument's construction is handed over as a plan, not
+            # materialized at the call boundary.
+            set pieces [PlanPieces fn $arg $family]
+            if {$pieces eq "never"} {
+                return never
+            }
+            lappend regs [PiecesToPlan fn $pieces $family $arg]
+        } elseif {$width ne ""} {
             set fields [TryFields fn $arg $width]
             if {$fields eq "never"} {
                 return never
@@ -2821,11 +2967,12 @@ proc native::lower::CallArgs {fnVar argExprs fieldWidths rawSlots} {
 # other (non-tail) recursive or sibling call is an ordinary `call` to the
 # callee's own internal variant (the milestone's #22: non-tail recursion
 # needs no special support of its own).
-proc native::lower::FlattenedVirtualCall {fnVar e node target targetInstance captureBindings} {
+proc native::lower::FlattenedVirtualCall {fnVar e node target targetInstance captureBindings {want tagged}} {
     upvar 1 $fnVar fn
     variable hir
     variable selfTail
     variable currentInstance
+    variable construction
     set params [hir::get $hir $target params]
     set argExprs [dict get $node args]
     # A recursive self-tail call (target is the instance currently being
@@ -2842,7 +2989,7 @@ proc native::lower::FlattenedVirtualCall {fnVar e node target targetInstance cap
             expr {[dict exists $fn locals $p] && [lindex [dict get $fn locals $p] 0] eq "rawreg"}
         }]
     }
-    set argRegs [CallArgs fn $argExprs {} $rawSlots]
+    set argRegs [CallArgs fn $argExprs {} $rawSlots [PlanSlots $targetInstance [llength $argExprs]]]
     if {$argRegs eq "never"} {
         return {never tagged}
     }
@@ -2859,7 +3006,12 @@ proc native::lower::FlattenedVirtualCall {fnVar e node target targetInstance cap
     }
     set id [InternalRef $targetInstance]
     dict lappend fn calls [list direct $id 0]
-    return [list [Assign fn [string trimright "call $id [join [concat $argRegs $captureRegs] { }]"] $e] tagged]
+    set result [Assign fn [string trimright "call $id [join [concat $argRegs $captureRegs] { }]"] $e]
+    set resultFamily [hir::construction::resultFamily $construction $targetInstance]
+    if {$resultFamily ne ""} {
+        return [PlanCallResult fn $e $result $resultFamily $want]
+    }
+    return [list $result tagged]
 }
 
 # Like FlattenedVirtualCall, but for a call E whose result is wanted as a
@@ -2985,9 +3137,29 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
     variable traversal
     variable stringRegionOpt
     variable tinyLeafInlineOpt
+    variable construction
+    variable constructionOpt
     lassign [dict get $node target] targetKind target
     set calleeExpr [dict get $node callee]
     set argExprs [dict get $node args]
+
+    if {$constructionOpt && $wantVirtual eq "" && !$wantRegion && $targetKind eq "native"
+            && [dict get $node known] eq "" && [PlainNativeCallee $calleeExpr]} {
+        # A `concat`/`list_append` (virtual construction; see that section
+        # below) whose own value is wanted flat here: its operands' pieces
+        # (a nested construction, a plan local/parameter/result) are
+        # gathered first and copied once, by the eager op itself when
+        # nothing was virtual (PiecesToFlat).
+        set name [dict get [hir::symbol $hir $target] name]
+        set family [ConstructNative $e $name $argExprs]
+        if {$family ne ""} {
+            set pieces [ConstructPieces fn $e $node $name $family]
+            if {$pieces eq "never"} {
+                return {never tagged}
+            }
+            return [list [PiecesToFlat fn $pieces $family $e] tagged]
+        }
+    }
 
     if {$wantVirtual eq "" && $targetKind eq "block"
             && [hir::kind $hir $calleeExpr] eq "ref"} {
@@ -3023,7 +3195,7 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
                 }
                 return [FlattenedVirtualRegionCall fn $e $node $target $flattenedTarget $captureBindings]
             }
-            return [FlattenedVirtualCall fn $e $node $target $flattenedTarget $captureBindings]
+            return [FlattenedVirtualCall fn $e $node $target $flattenedTarget $captureBindings $want]
         }
     }
 
@@ -3247,7 +3419,16 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
                 expr {[dict exists $fn locals $p] && [lindex [dict get $fn locals $p] 0] eq "rawreg"}
             }]
         }
-        set argRegs [CallArgs fn $argExprs $fieldWidths $rawSlots]
+        # Plan parameters of the target (virtual construction): never for a
+        # region-result call or a tiny leaf this call will inline (both
+        # bind the callee's parameters to ordinary flat registers).
+        set leafInline [expr {!$self && $wantVirtual eq "" && !$wantRegion && $tinyLeafInlineOpt
+            && $fieldWidths eq "" && $instance ne "" && [LeafInlineEligible $instance]}]
+        set planSlots {}
+        if {$instance ne "" && !$wantRegion && !$leafInline} {
+            set planSlots [PlanSlots $instance [llength $argExprs]]
+        }
+        set argRegs [CallArgs fn $argExprs $fieldWidths $rawSlots $planSlots]
         if {$argRegs eq "never"} {
             return {never tagged}
         }
@@ -3350,6 +3531,10 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
             set result [Assign fn [string trimright "call $id [join $argRegs { }]"] $e]
         } else {
             set result [Assign fn [string trimright "callenv $id $callee [join $argRegs { }]"] $e]
+        }
+        set resultFamily [hir::construction::resultFamily $construction $instance]
+        if {$resultFamily ne ""} {
+            return [PlanCallResult fn $e $result $resultFamily $want]
         }
         return [ClosedResult fn $e $result]
     }
@@ -4663,7 +4848,7 @@ proc native::lower::NativeImpl {name} {
 # ---------------------------------------------------------------------------
 # Control flow
 
-proc native::lower::If {fnVar e node} {
+proc native::lower::If {fnVar e node {family ""}} {
     upvar 1 $fnVar fn
     variable hir
     variable guards
@@ -4695,7 +4880,7 @@ proc native::lower::If {fnVar e node} {
         set saved [dict get $fn locals]
         set savedRaw [dict get $fn rawCache]
         EnterScope fn [dict get $node ${role}Scope]
-        set value [Sequence fn [dict get $node ${role}Body]]
+        set value [SequenceTo fn [dict get $node ${role}Body] $family]
         dict set fn locals $saved
         dict set fn rawCache $savedRaw
         return $value
@@ -4704,6 +4889,11 @@ proc native::lower::If {fnVar e node} {
     set else [NewLabel fn]
     set join [NewLabel fn]
     set result [NewReg fn]
+    if {$family ne ""} {
+        # A join wanted in a plan position (virtual construction): each
+        # branch's value is moved in as a plan or flat value alike.
+        MarkPlan fn $result
+    }
     Emit fn "br $test $then $else" $e
     set joined 0
     foreach {label role} [list $then then $else else] {
@@ -4717,7 +4907,7 @@ proc native::lower::If {fnVar e node} {
             Emit fn unreachable $e
             set value never
         } else {
-            set value [Sequence fn $body]
+            set value [SequenceTo fn $body $family]
         }
         dict set fn locals $saved
         dict set fn rawCache $savedRaw
@@ -4903,6 +5093,328 @@ proc native::lower::Loop {fnVar e node} {
     }
     EmitLabel fn $exit
     return $result
+}
+
+# ---------------------------------------------------------------------------
+# Virtual construction (procedures; see the "Virtual construction" section
+# at the top of this file)
+
+# 1 if REG is a plan ("maybe-plan") register of the function being lowered.
+proc native::lower::IsPlanReg {fnVar reg} {
+    upvar 1 $fnVar fn
+    return [dict exists $fn planRegs $reg]
+}
+
+# Declares REG a plan register (the func header's `planregs=`).
+proc native::lower::MarkPlan {fnVar reg} {
+    upvar 1 $fnVar fn
+    dict set fn planRegs $reg 1
+}
+
+# The construction family ("" | str | list) of the current function's own
+# result: only for a plan-result instance's canonical/internal function,
+# never for a companion (whose exits have their own multi-value contract).
+proc native::lower::PlanResultFamily {fnVar} {
+    upvar 1 $fnVar fn
+    if {![dict exists $fn planResult] || [dict get $fn companion] ne "" || [dict get $fn regionCompanion]} {
+        return ""
+    }
+    return [dict get $fn planResult]
+}
+
+# The ` planregs="..."`/` planresult=1` suffix of the current function's
+# header ("" when it has neither).
+proc native::lower::PlanHeader {fnVar} {
+    upvar 1 $fnVar fn
+    set text ""
+    if {[dict exists $fn planRegs]} {
+        set regs [lsort -integer [lmap r [dict keys [dict get $fn planRegs]] {string range $r 1 end}]]
+        if {$regs ne ""} {
+            append text " planregs=[Quote [join $regs { }]]"
+        }
+    }
+    if {[PlanResultFamily fn] ne ""} {
+        append text " planresult=1"
+    }
+    return $text
+}
+
+# Registers ordinary (non-raw) parameter K of instance ID, binding B, as
+# register R: a plan parameter (hir::construction) is a plan register every
+# lowering variant of the instance declares alike, since a caller's plan
+# argument does not depend on which variant it calls.
+proc native::lower::ParamLocal {fnVar id k b r} {
+    upvar 1 $fnVar fn
+    variable construction
+    set family [hir::construction::paramFamily $construction $id $k]
+    if {$family ne ""} {
+        MarkPlan fn $r
+        dict set fn locals $b [list plan $r $family]
+    } else {
+        dict set fn locals $b [list reg $r]
+    }
+}
+
+# The construction family of native NAME called with ARGS at E, when it is a
+# construction this lowering may keep virtual: `concat` (String) or a
+# `list_append` whose List operand is statically List-typed ("" otherwise:
+# an untyped List operand keeps its eager, guarded `listappend`).
+proc native::lower::ConstructNative {e name argExprs} {
+    variable hir
+    if {$name eq "concat" && [llength $argExprs] == 2} {
+        return str
+    }
+    if {$name eq "list_append" && [llength $argExprs] == 2
+            && [hir::construction::Family [hir::typeOf $hir [lindex $argExprs 0]]] eq "list"} {
+        return list
+    }
+    return ""
+}
+
+# 1 if CALLEEEXPR is a plain reference to a root native (what Call's own
+# skipCallee already treats as needing no code): the only callee shape the
+# construction lowering bypasses Call's callee evaluation for.
+proc native::lower::PlainNativeCallee {calleeExpr} {
+    variable hir
+    variable unproven
+    if {[hir::kind $hir $calleeExpr] ne "ref" || [dict exists $unproven $calleeExpr]} {
+        return 0
+    }
+    set b [hir::get $hir $calleeExpr binding]
+    if {$b eq "" || [dict get [hir::binding $hir $b] kind] ne "root"} {
+        return 0
+    }
+    return [expr {[ModuleBridgeBinding $calleeExpr native] eq ""}]
+}
+
+# The NIR operand text of construction PIECES.
+proc native::lower::PiecesText {pieces} {
+    set words {}
+    foreach piece $pieces {
+        switch -- [lindex $piece 0] {
+            span   { lappend words [lindex $piece 1] }
+            region { lappend words region {*}[lrange $piece 1 3] }
+            elem   { lappend words elem [lindex $piece 1] }
+        }
+    }
+    return [join $words { }]
+}
+
+# PIECES (of FAMILY) as one ordinary flat register: the one materialization
+# of a virtual construction at a barrier. A lone flat piece is itself the
+# value; two flat pieces lower to exactly the eager op the baseline emits
+# (`strcat`/`listappend`), so nothing changes where nothing is virtual;
+# anything else is one n-ary `construct ... flat`.
+proc native::lower::PiecesToFlat {fnVar pieces family e} {
+    upvar 1 $fnVar fn
+    if {[llength $pieces] == 1} {
+        lassign [lindex $pieces 0] tag r
+        if {$tag eq "span" && ![IsPlanReg fn $r]} {
+            return $r
+        }
+    }
+    if {[llength $pieces] == 2} {
+        lassign [lindex $pieces 0] t0 r0
+        lassign [lindex $pieces 1] t1 r1
+        if {$family eq "str" && $t0 eq "span" && $t1 eq "span" && ![IsPlanReg fn $r0] && ![IsPlanReg fn $r1]} {
+            return [Assign fn "op strcat $r0 $r1" $e]
+        }
+        if {$family eq "list" && $t0 eq "span" && $t1 eq "elem" && ![IsPlanReg fn $r0]} {
+            return [Assign fn "op listappend $r0 $r1" $e]
+        }
+    }
+    return [Assign fn "construct $family flat [PiecesText $pieces]" $e]
+}
+
+# PIECES (of FAMILY) as one plan register, for a plan position that needs a
+# single register (a plan parameter's argument, a plan result, a join): a
+# lone span is passed on unchanged (flat or plan, a maybe-plan position
+# accepts either); anything else is one `construct ... plan`.
+proc native::lower::PiecesToPlan {fnVar pieces family e} {
+    upvar 1 $fnVar fn
+    if {[llength $pieces] == 1 && [lindex $pieces 0 0] eq "span"} {
+        return [lindex $pieces 0 1]
+    }
+    set r [Assign fn "construct $family plan [PiecesText $pieces]" $e]
+    MarkPlan fn $r
+    return $r
+}
+
+# "never" if E cannot complete normally past its own evaluation (Expr's own
+# tail check, for the expression kinds PlanPieces lowers itself).
+proc native::lower::PlanNever {fnVar e} {
+    upvar 1 $fnVar fn
+    variable hir
+    if {[hir::typeOf $hir $e] eq "never"} {
+        Emit fn unreachable $e
+        return 1
+    }
+    return 0
+}
+
+# Expression E, wanted in a plan position of FAMILY: its construction
+# PIECES (a list of {span REG} | {region BASE START END} | {elem REG}), or
+# "never". Every piece is an already-evaluated value, evaluated exactly
+# where and in the order ordinary lowering evaluates it; only the copying
+# into one flat object is left to whichever consumer materializes. An
+# expression with nothing to keep virtual is simply one ordinary span.
+proc native::lower::PlanPieces {fnVar e family} {
+    upvar 1 $fnVar fn
+    variable hir
+    variable construction
+    variable currentInstance
+    set node [hir::node $hir $e]
+    switch -- [dict get $node kind] {
+        call {
+            lassign [dict get $node target] targetKind target
+            if {$targetKind eq "native" && [dict get $node known] eq ""
+                    && [PlainNativeCallee [dict get $node callee]]} {
+                set name [dict get [hir::symbol $hir $target] name]
+                set args [dict get $node args]
+                if {[ConstructNative $e $name $args] eq $family} {
+                    set pieces [ConstructPieces fn $e $node $name $family]
+                    if {$pieces eq "never" || [PlanNever fn $e]} {
+                        return never
+                    }
+                    return $pieces
+                }
+                if {$family eq "str" && $name eq "substring" && [llength $args] == 3} {
+                    # A StringRegion piece: the substring's three operands,
+                    # evaluated and bounds-checked exactly where the eager
+                    # `substr` would run (Call's own wantRegion path), but
+                    # never copied into a String of its own.
+                    lassign [Call fn $e $node tagged "" 1] fields repr
+                    if {$fields eq "never" || [PlanNever fn $e]} {
+                        return never
+                    }
+                    return [list [list region {*}$fields]]
+                }
+            }
+            if {$targetKind eq "block"} {
+                lassign [Call fn $e $node plan] r repr
+                if {$r eq "never" || [PlanNever fn $e]} {
+                    return never
+                }
+                return [list [list span $r]]
+            }
+        }
+        ref {
+            set b [dict get $node binding]
+            if {$b ne "" && [dict exists $fn locals $b]} {
+                set local [dict get $fn locals $b]
+                switch -- [lindex $local 0] {
+                    pieces { return [lindex $local 1] }
+                    plan   { return [list [list span [lindex $local 1]]] }
+                }
+            }
+        }
+        if {
+            if {[hir::construction::Source $construction $currentInstance $e] eq $family} {
+                set r [If fn $e $node $family]
+                if {$r eq "never" || [PlanNever fn $e]} {
+                    return never
+                }
+                return [list [list span $r]]
+            }
+        }
+    }
+    set r [Expr fn $e]
+    if {$r eq "never"} {
+        return never
+    }
+    return [list [list span $r]]
+}
+
+# The pieces of construction call E (native NAME: `concat` or `list_append`,
+# FAMILY): its operands' own pieces, in order -- a nested construction, a
+# plan local, a plan parameter or a plan result contributes its pieces or
+# plan instead of a materialized value. The operands' kind checks are
+# exactly the eager call's (EmitArgGuards, after both operands, on the same
+# flat registers); an operand that stayed virtual is statically String/
+# List-typed by construction, so it never needs one.
+proc native::lower::ConstructPieces {fnVar e node name family} {
+    upvar 1 $fnVar fn
+    variable guards
+    variable knownErrors
+    lassign [dict get $node args] a b
+    set pa [PlanPieces fn $a $family]
+    if {$pa eq "never"} {
+        return never
+    }
+    if {$family eq "str"} {
+        set pb [PlanPieces fn $b str]
+        if {$pb eq "never"} {
+            return never
+        }
+    } else {
+        set r [Expr fn $b]
+        if {$r eq "never"} {
+            return never
+        }
+        set pb [list [list elem $r]]
+    }
+    set meta [core::native::metadata $name]
+    set checkExprs {}
+    set checkRegs {}
+    set checkTypes {}
+    foreach arg [list $a $b] pieces [list $pa $pb] type [dict get $meta paramTypes] {
+        lassign [lindex $pieces 0] tag reg
+        if {[llength $pieces] == 1 && $tag in {span elem} && ![IsPlanReg fn $reg]} {
+            lappend checkExprs $arg
+            lappend checkRegs $reg
+            lappend checkTypes $type
+        } elseif {[dict exists $guards [list $e $arg]] || [dict exists $knownErrors [list $e $arg]]} {
+            throw {NATIVE BUG} "native lowering: virtual construction operand $arg of $name needs a kind check ($e)"
+        }
+    }
+    EmitArgGuards fn $e $checkExprs $checkRegs $checkTypes $name
+    dict lappend fn calls [list native $name]
+    return [concat $pa $pb]
+}
+
+# One family ("" = ordinary) per argument position of a direct call to
+# instance TARGET with N arguments: which positions are plan parameters.
+proc native::lower::PlanSlots {target n} {
+    variable construction
+    set slots {}
+    for {set k 0} {$k < $n} {incr k} {
+        lappend slots [hir::construction::paramFamily $construction $target $k]
+    }
+    return $slots
+}
+
+# {REG REPR} for RESULT, a direct call's result register whose callee is a
+# plan-result instance of FAMILY: RESULT is a plan register; a caller that
+# wants a plan (PlanPieces) gets it as is, any other caller its one
+# materialization right here, at the call.
+proc native::lower::PlanCallResult {fnVar e result family want} {
+    upvar 1 $fnVar fn
+    MarkPlan fn $result
+    if {$want eq "plan"} {
+        return [list $result plan]
+    }
+    return [list [Assign fn "construct $family flat $result" $e] tagged]
+}
+
+# Like Sequence, but its trailing value is wanted in a plan position of
+# FAMILY ("" for an ordinary Sequence): returns one register (flat or plan)
+# or "never".
+proc native::lower::SequenceTo {fnVar exprs family} {
+    upvar 1 $fnVar fn
+    if {$family eq "" || $exprs eq ""} {
+        return [Sequence fn $exprs]
+    }
+    foreach e [lrange $exprs 0 end-1] {
+        if {[Expr fn $e] eq "never"} {
+            return never
+        }
+    }
+    set last [lindex $exprs end]
+    set pieces [PlanPieces fn $last $family]
+    if {$pieces eq "never"} {
+        return never
+    }
+    return [PiecesToPlan fn $pieces $family $last]
 }
 
 # ---------------------------------------------------------------------------

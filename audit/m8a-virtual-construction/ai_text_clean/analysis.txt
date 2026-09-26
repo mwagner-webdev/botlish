@@ -1,0 +1,4 @@
+clean_char<str> (i4):
+  result: may be a str plan (closed; exact callers extend it)
+clean_from<str, int, str> (i2):
+  parameter 2 (done): accepts a str plan

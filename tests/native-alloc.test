@@ -63,8 +63,13 @@ test alloc-copies-2 {list_append copies the existing elements, not the new one} 
     # list_append(list_append([1], 2), 3): [1] copies 1 element in
     # (listnew), the first append copies 1 (the old [1]), the second
     # copies 2 (the old [1, 2]) -- 4 total, never counting the freshly
-    # appended value itself.
-    set report [native::allocationReport [sourceHir {list_append(list_append([1], 2), 3)}] summary]
+    # appended value itself. Pinned to the eager lowering
+    # (-virtual-construction-opt 0): with virtual construction the nested
+    # appends are one flat construction that copies [1] once (see
+    # tests/virtual-construction.test) -- this test is about rt_list_append's
+    # own accounting.
+    set report [native::allocationReport [sourceHir {list_append(list_append([1], 2), 3)}] summary 1 \
+        -virtual-construction-opt 0]
     dict get $report copies listElements
 } -result 4
 
@@ -86,7 +91,10 @@ test alloc-zero-2 {native::assertAllocations/assertKindAllocations helpers} -bod
 
 test alloc-sites-1 {two source expressions of the same kind are distinct sites} -body {
     set text "fn f():\n    a = concat(\"a\", \"b\")\n    b = concat(\"c\", \"d\")\n    \[a, b\]\n\nf()"
-    set report [native::allocationReport [sourceHir $text] sites]
+    # Eager lowering (-virtual-construction-opt 0): with virtual
+    # construction both concats are plan locals materialized at their one
+    # use, the list on line 4, so they would share that line.
+    set report [native::allocationReport [sourceHir $text] sites 1 -virtual-construction-opt 0]
     set lines [lsort -unique [lmap s [dict get $report sites] {
         if {[dict get $s operation] ne "strcat"} continue
         dict get [dict get $s location] line
@@ -143,7 +151,10 @@ test alloc-off-1 {instrumentation off changes no semantics} -body {
 test alloc-stress-1 {reports stay internally consistent under BOTLISH_NATIVE_GC_STRESS=1} -body {
     set ::env(BOTLISH_NATIVE_GC_STRESS) 1
     set text "fn build(n):\n    if n == 0:\n        return \[\]\n    list_append(build(n - 1), n)\n\nlist_length(build(80))"
-    set report [native::allocationReport [sourceHir $text] summary]
+    # Eager lowering (-virtual-construction-opt 0), so that every allocation
+    # is a List; the same program's private ListPlans under stress are
+    # tests/virtual-construction.test's.
+    set report [native::allocationReport [sourceHir $text] summary 1 -virtual-construction-opt 0]
     unset ::env(BOTLISH_NATIVE_GC_STRESS)
     set total [dict get $report total]
     list [expr {[dict get $total peakLiveObjects] >= [dict get $total currentLiveObjects]}] \

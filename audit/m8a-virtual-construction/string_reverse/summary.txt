@@ -1,0 +1,6 @@
+program: corpus:string_reverse
+value (on):  ["", "a", "cba", "dcba", "üöä"]
+value (off): ["", "a", "cba", "dcba", "üöä"]
+used instances: 3
+plan results: 0, instances with plan parameters: 1, instances with plan locals: 1
+construction sites/plan sources: 5 (4 virtual)

@@ -573,13 +573,18 @@ test blockescape-region-companion-flags-both-off {both off: the fully unoptimize
 # list byte::set consumes and its own accumulator/appends); ImmutableSet
 # 0 -> 1 (additional_unreserved_chars itself, byte::set's terminal
 # setfromlist); String unaffected (9); total 15 -> 23.
+# M8.a (virtual construction, default on): String 9 -> 4 -- uri_escape_text
+# ("a b")'s five intermediate strcats become two private StringPlans
+# (hex_pair's result, esc_from's accumulator) plus one final
+# materialization; the 3 substrings are unchanged -- so total 23 -> 20.
+# Block allocations (this test's subject) are unchanged.
 test blockescape-region-companion-refined-checks-1 {refined-checks.ir: Block allocations collapse from 1201 to 2 (module-startup uri_escape_text and is_unreserved closures only)} -body {
     core::loadLibrary web
     set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
     set on [native::allocationReport $hir summary 1]
     list [native::evalHir $hir] [dict get $on total allocations] [dict get $on byKind Block allocations] \
         [dict get $on byKind String allocations] [dict get $on byKind List allocations]
-} -result {{list {{int 400} {int 0}}} 23 2 9 11}
+} -result {{list {{int 400} {int 0}}} 20 2 4 11}
 
 test blockescape-region-companion-refined-checks-2 {refined-checks.ir: char_at's NIR has no closure/callenvmulti, and env=0/results=3} -body {
     core::loadLibrary web

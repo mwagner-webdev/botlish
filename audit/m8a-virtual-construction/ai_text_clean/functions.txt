@@ -1,0 +1,13 @@
+virtual-construction-opt 0: 3003 machine-code bytes, 5 NIR functions
+0 <program>                  <generic>                 505 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+1 cleaner_emoji              <str>                     994 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+2 clean_char                 <str>                     685 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+3 clean_from                 <str, int, str>           712 bytes  guards=0  strcat=1  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+4 clean_ai_text              <str>                     107 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+
+virtual-construction-opt 1: 3209 machine-code bytes, 5 NIR functions
+0 <program>                  <generic>                 505 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+1 cleaner_emoji              <str>                     994 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+2 clean_char                 <str>                     723 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=1
+3 clean_from                 <str, int, str>           880 bytes  guards=0  strcat=0  listappend=0  construct(plan)=1  construct(flat)=1  planregs=3  planresult=0
+4 clean_ai_text              <str>                     107 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0

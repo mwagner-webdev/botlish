@@ -1,0 +1,9 @@
+peek<str, int>             ai_text_clean.bot:38:5     str  substring            materialized return to exact callers that never extend the result
+clean_from<str, int, str>  ai_text_clean.bot:72:16    str  ref                  materialized return to exact callers that never extend the result
+clean_from<str, int, str>  ai_text_clean.bot:74:33    str  concat               virtual      
+clean_from<str, int, str>  ai_text_clean.bot:74:40    str  ref                  virtual      
+clean_from<str, int, str>  ai_text_clean.bot:74:46    str  call (plan result)   virtual      
+
+totals by disposition / barrier reason:
+     2  return to exact callers that never extend the result
+     3  (virtual)

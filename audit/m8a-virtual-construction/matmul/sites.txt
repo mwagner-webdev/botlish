@@ -1,0 +1,12 @@
+product_row<List[int], List[List[int]], int, int, List[never]> matmul.bot:31:48           list list_append          virtual      
+product_row<List[int], List[List[int]], int, int, List[int]> matmul.bot:28:16           list ref                  materialized return to exact callers that never extend the result
+product_row<List[int], List[List[int]], int, int, List[int]> matmul.bot:31:48           list list_append          virtual      
+product_row<List[int], List[List[int]], int, int, List[int]> matmul.bot:31:60           list ref                  virtual      
+product_rows<List[List[int]], List[List[int]], int, int, List[never]> matmul.bot:39:40           list list_append          virtual      
+product_rows<List[List[int]], List[List[int]], int, int, List[List[int]]> matmul.bot:36:16           list ref                  materialized return to exact callers that never extend the result
+product_rows<List[List[int]], List[List[int]], int, int, List[List[int]]> matmul.bot:39:40           list list_append          virtual      
+product_rows<List[List[int]], List[List[int]], int, int, List[List[int]]> matmul.bot:39:52           list ref                  virtual      
+
+totals by disposition / barrier reason:
+     6  (virtual)
+     2  return to exact callers that never extend the result
