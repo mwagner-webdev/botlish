@@ -1,0 +1,177 @@
+i0 <program>  generic=1 open=0 key={} result=List[int] resultRange=[-∞, +∞]
+    call e176 web.bot:65 -> byte::set<List[UnicodeChar]>
+    call e791 ? -> web::uri_escape_text<generic>
+    call e796 ? -> check<int, int, str, str>
+    call e802 ? -> check<int, int, str, str>
+    materializes: web::is_unreserved, web::uri_escape_text
+i2 char::codepoint<UnicodeChar>  generic=0 open=0 key={UnicodeChar} result=int resultRange=[0, +∞]
+    param c: declared=UnicodeChar view=UnicodeChar entry=[-∞, +∞]
+i16 byte::high_nibble<generic>  generic=1 open=0 key={any} result=int[HighNibble] resultRange=[0, 240] {0,16,32,48,64,80,96,112,128,144,160,176,192,208,224,240}
+    param b: declared=- view=any entry=[-∞, +∞]
+i17 byte::nibble<int>  generic=0 open=0 key={int} result=int[Nibble] resultRange=[0, 15]
+    param x: declared=- view=int[HighNibble] entry=[0, 240] {0,16,32,48,64,80,96,112,128,144,160,176,192,208,224,240} refineEvidence={HighNibble}
+i3 byte::from_int<int>  generic=0 open=0 key={int} result=int[Byte] resultRange=[0, 255]
+    param value: declared=int view=int entry=[0, +∞]
+i1 byte::set<List[UnicodeChar]>  generic=0 open=0 key={{List[UnicodeChar]}} result=ImmutableSet[int[Byte]] resultRange=[-∞, +∞]
+    param chars: declared=List[UnicodeChar] view=List[UnicodeChar] entry=[-∞, +∞]
+    captures: byte::from_int:block(e58)/1 -> any, char::codepoint:block(e2)/1 -> any
+    call e79 web.bot:176 -> char::codepoint<UnicodeChar>
+    call e77 web.bot:176 -> byte::from_int<int>
+i12 ascii::is_digit<int>  generic=0 open=0 key={int} result=bool resultRange=[-∞, +∞]
+    param b: declared=int[Byte] view=int[Byte] entry=[0, 255] refineEvidence={Byte}
+i10 ascii::is_upper<int>  generic=0 open=0 key={int} result=bool resultRange=[-∞, +∞]
+    param b: declared=int[Byte] view=int[Byte] entry=[0, 255] refineEvidence={Byte}
+i11 ascii::is_lower<int>  generic=0 open=0 key={int} result=bool resultRange=[-∞, +∞]
+    param b: declared=int[Byte] view=int[Byte] entry=[0, 255] refineEvidence={Byte}
+i9 ascii::is_alphabetic<int>  generic=0 open=0 key={int} result=bool resultRange=[-∞, +∞]
+    param b: declared=int[Byte] view=int[Byte] entry=[0, 255] refineEvidence={Byte}
+    captures: ascii::is_upper:block(e101)/1 -> any, ascii::is_lower:block(e116)/1 -> any
+    call e133 ascii.bot:63 -> ascii::is_upper<int>
+    call e138 ascii.bot:63 -> ascii::is_lower<int>
+i8 ascii::is_alphanumeric<int>  generic=0 open=0 key={int} result=bool resultRange=[-∞, +∞]
+    param b: declared=int[Byte] view=int[Byte] entry=[0, 255] refineEvidence={Byte}
+    captures: ascii::is_alphabetic:block(e131)/1 -> any, ascii::is_digit:block(e86)/1 -> any
+    call e146 ascii.bot:66 -> ascii::is_alphabetic<int>
+    call e151 ascii.bot:66 -> ascii::is_digit<int>
+i7 web::is_unreserved<generic>  generic=1 open=1 key={any} result=bool resultRange=[-∞, +∞]
+    param b: declared=int[Byte] view=int[Byte] entry=[-∞, +∞] refineEvidence={Byte}
+    captures: ascii::is_alphanumeric:block(e144)/1 -> any, web::additional_unreserved_chars:ImmutableSet[int[Byte]]
+    call e187 web.bot:68 -> ascii::is_alphanumeric<int>
+i4 web::uri_escape_text<generic>  generic=1 open=1 key={any} result=any resultRange=[-∞, +∞]
+    param s: declared=- view=any entry=[-∞, +∞]
+    captures: byte::nibble:block(e19)/1 -> any, byte::high_nibble:block(e7)/1 -> any, web::hex_digits:List[str], web::is_unreserved:block(e185)/1 -> any
+    call e316 web.bot:101 -> esc_from<generic>
+    materializes: hex_pair, esc_bytes, esc_char, esc_from
+i15 high_nibble<generic>  generic=1 open=0 key={any} result=int[Nibble] resultRange=[0, 15]
+    param b: declared=- view=any entry=[-∞, +∞]
+    captures: byte::nibble:block(e19)/1 -> any, byte::high_nibble:block(e7)/1 -> any
+    call e204 web.bot:73 -> byte::high_nibble<generic>
+    call e202 web.bot:73 -> byte::nibble<int>
+i14 hex_pair<generic>  generic=1 open=1 key={any} result=str resultRange=[-∞, +∞]
+    param b: declared=- view=any entry=[-∞, +∞]
+    captures: web::hex_digits:List[str], high_nibble:block(e201)/1 -> any
+    call e214 web.bot:76 -> high_nibble<generic>
+i13 esc_bytes<generic>  generic=1 open=1 key={any any any} result=any resultRange=[-∞, +∞]
+    param bytes: declared=- view=any entry=[-∞, +∞]
+    param i: declared=- view=any entry=[-∞, +∞]
+    param acc: declared=- view=any entry=[-∞, +∞]
+    captures: esc_bytes:block(e225)/3 -> any, hex_pair:block(e208)/1 -> any
+    call e247 web.bot:82 -> hex_pair<generic>
+    call e234 web.bot:82 -> esc_bytes<generic>
+i6 esc_char<generic>  generic=1 open=1 key={any} result=any resultRange=[-∞, +∞]
+    param c: declared=- view=any entry=[-∞, +∞]
+    captures: web::is_unreserved:block(e185)/1 -> any, esc_bytes:block(e225)/3 -> any
+    call e272 web.bot:88 -> web::is_unreserved<generic>
+    call e276 web.bot:91 -> esc_bytes<generic>
+    call e281 web.bot:93 -> esc_bytes<generic>
+i5 esc_from<generic>  generic=1 open=1 key={any any any} result=any resultRange=[-∞, +∞]
+    param text: declared=- view=any entry=[-∞, +∞]
+    param i: declared=- view=any entry=[-∞, +∞]
+    param acc: declared=- view=any entry=[-∞, +∞]
+    captures: esc_from:block(e287)/3 -> any, esc_char:block(e254)/1 -> any
+    call e306 web.bot:99 -> esc_char<generic>
+    call e296 web.bot:99 -> esc_from<generic>
+i18 check<int, int, str, str>  generic=0 open=0 key={int int str str} result=int resultRange=[-∞, +∞]
+    param n: declared=- view=int entry=[-∞, 400]
+    param acc: declared=- view=int entry=[0, +∞]
+    param s: declared=- view=str entry=[-∞, +∞]
+    param q: declared=- view=str[UriQueryValue] entry=[-∞, +∞] refineEvidence={UriQueryValue}
+    captures: check:block(e322)/4 -> any
+    call e331 ? -> block e332<str>
+    call e551 ? -> block e552<str>
+    call e778 ? -> check<int, int, str, str>
+    materializes: block e332, block e552
+i19 block e332<str>  generic=0 open=0 key={str} result=bool resultRange=[-∞, +∞]
+    param v: declared=- view=str entry=[-∞, +∞]
+    call e515 ? -> scan_local<generic>
+    call e533 ? -> char_at<generic>
+    call e544 ? -> domain_loop<generic>
+    materializes: char_at, scan_local, scan_label, scan_alpha, tld_ok, domain_loop
+i37 block e332<generic>  generic=1 open=1 key={any} result=bool resultRange=[-∞, +∞]
+    param v: declared=- view=any entry=[-∞, +∞]
+    call e515 ? -> scan_local<generic>
+    call e533 ? -> char_at<generic>
+    call e544 ? -> domain_loop<generic>
+    materializes: char_at, scan_local, scan_label, scan_alpha, tld_ok, domain_loop
+i21 char_at<generic>  generic=1 open=1 key={any} result=str resultRange=[-∞, +∞]
+    param i: declared=- view=any entry=[-∞, +∞]
+    captures: v:str
+i22 is_local_char<str>  generic=0 open=0 key={str} result=bool resultRange=[-∞, +∞]
+    param c: declared=- view=str entry=[-∞, +∞]
+i25 is_label_char<str>  generic=0 open=0 key={str} result=bool resultRange=[-∞, +∞]
+    param c: declared=- view=str entry=[-∞, +∞]
+i20 scan_local<generic>  generic=1 open=1 key={any} result=int resultRange=[-∞, +∞]
+    param i: declared=- view=any entry=[-∞, +∞]
+    captures: n:int, is_local_char:block(e348)/1 -> any, char_at:block(e338)/1 -> any, scan_local:block(e394)/1 -> any
+    call e404 ? -> char_at<generic>
+    call e402 ? -> is_local_char<str>
+    call e407 ? -> scan_local<generic>
+i24 scan_label<generic>  generic=1 open=1 key={any} result=int resultRange=[-∞, +∞]
+    param i: declared=- view=any entry=[-∞, +∞]
+    captures: n:int, is_label_char:block(e383)/1 -> any, char_at:block(e338)/1 -> any, scan_label:block(e415)/1 -> any
+    call e425 ? -> char_at<generic>
+    call e423 ? -> is_label_char<str>
+    call e428 ? -> scan_label<generic>
+i27 scan_alpha<generic>  generic=1 open=1 key={any} result=int resultRange=[-∞, +∞]
+    param i: declared=- view=any entry=[-∞, +∞]
+    captures: n:int, char_at:block(e338)/1 -> any, scan_alpha:block(e436)/1 -> any
+    call e446 ? -> char_at<generic>
+    call e449 ? -> scan_alpha<generic>
+i26 tld_ok<generic>  generic=1 open=1 key={any} result=bool resultRange=[-∞, +∞]
+    param i: declared=- view=any entry=[-∞, +∞]
+    captures: scan_alpha:block(e436)/1 -> any, n:int
+    call e459 ? -> scan_alpha<generic>
+i23 domain_loop<generic>  generic=1 open=1 key={any} result=int resultRange=[-∞, +∞]
+    param i: declared=- view=any entry=[-∞, +∞]
+    captures: scan_label:block(e415)/1 -> any, n:int, char_at:block(e338)/1 -> any, tld_ok:block(e457)/1 -> any, domain_loop:block(e476)/1 -> any
+    call e478 ? -> scan_label<generic>
+    call e496 ? -> char_at<generic>
+    call e506 ? -> tld_ok<generic>
+    call e510 ? -> domain_loop<generic>
+i28 block e552<str>  generic=0 open=0 key={str} result=bool resultRange=[-∞, +∞]
+    param v: declared=- view=str entry=[-∞, +∞]
+    call e735 ? -> scan_local<generic>
+    call e753 ? -> char_at<generic>
+    call e764 ? -> domain_loop<generic>
+    materializes: char_at, scan_local, scan_label, scan_alpha, tld_ok, domain_loop
+i38 block e552<generic>  generic=1 open=1 key={any} result=bool resultRange=[-∞, +∞]
+    param v: declared=- view=any entry=[-∞, +∞]
+    call e735 ? -> scan_local<generic>
+    call e753 ? -> char_at<generic>
+    call e764 ? -> domain_loop<generic>
+    materializes: char_at, scan_local, scan_label, scan_alpha, tld_ok, domain_loop
+i30 char_at<generic>  generic=1 open=1 key={any} result=str resultRange=[-∞, +∞]
+    param i: declared=- view=any entry=[-∞, +∞]
+    captures: v:str
+i31 is_local_char<str>  generic=0 open=0 key={str} result=bool resultRange=[-∞, +∞]
+    param c: declared=- view=str entry=[-∞, +∞]
+i34 is_label_char<str>  generic=0 open=0 key={str} result=bool resultRange=[-∞, +∞]
+    param c: declared=- view=str entry=[-∞, +∞]
+i29 scan_local<generic>  generic=1 open=1 key={any} result=int resultRange=[-∞, +∞]
+    param i: declared=- view=any entry=[-∞, +∞]
+    captures: n:int, is_local_char:block(e568)/1 -> any, char_at:block(e558)/1 -> any, scan_local:block(e614)/1 -> any
+    call e624 ? -> char_at<generic>
+    call e622 ? -> is_local_char<str>
+    call e627 ? -> scan_local<generic>
+i33 scan_label<generic>  generic=1 open=1 key={any} result=int resultRange=[-∞, +∞]
+    param i: declared=- view=any entry=[-∞, +∞]
+    captures: n:int, is_label_char:block(e603)/1 -> any, char_at:block(e558)/1 -> any, scan_label:block(e635)/1 -> any
+    call e645 ? -> char_at<generic>
+    call e643 ? -> is_label_char<str>
+    call e648 ? -> scan_label<generic>
+i36 scan_alpha<generic>  generic=1 open=1 key={any} result=int resultRange=[-∞, +∞]
+    param i: declared=- view=any entry=[-∞, +∞]
+    captures: n:int, char_at:block(e558)/1 -> any, scan_alpha:block(e656)/1 -> any
+    call e666 ? -> char_at<generic>
+    call e669 ? -> scan_alpha<generic>
+i35 tld_ok<generic>  generic=1 open=1 key={any} result=bool resultRange=[-∞, +∞]
+    param i: declared=- view=any entry=[-∞, +∞]
+    captures: scan_alpha:block(e656)/1 -> any, n:int
+    call e679 ? -> scan_alpha<generic>
+i32 domain_loop<generic>  generic=1 open=1 key={any} result=int resultRange=[-∞, +∞]
+    param i: declared=- view=any entry=[-∞, +∞]
+    captures: scan_label:block(e635)/1 -> any, n:int, char_at:block(e558)/1 -> any, tld_ok:block(e677)/1 -> any, domain_loop:block(e696)/1 -> any
+    call e698 ? -> scan_label<generic>
+    call e716 ? -> char_at<generic>
+    call e726 ? -> tld_ok<generic>
+    call e730 ? -> domain_loop<generic>

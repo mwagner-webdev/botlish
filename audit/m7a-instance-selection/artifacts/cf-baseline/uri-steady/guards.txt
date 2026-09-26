@@ -1,0 +1,26 @@
+i17   byte::high_nibble<generic>             byte.bot:113 UnknownParameterKind   cause=parameter        binding=b(param) requires=int key=any declared=- view=any entry=[-∞, +∞] open=0
+        call-site arg types: high_nibble<generic>:any  => join any (kind none)
+i15   hex_pair<generic>                      web.bot:76 UnknownParameterKind   cause=parameter        binding=b(param) requires=int key=any declared=- view=any entry=[-∞, +∞] open=1
+        call-site arg types: esc_bytes<generic>:any  => join any (kind none)
+i14   esc_bytes<generic>                     web.bot:79 UnknownParameterKind   cause=parameter        binding=i(param) requires=int key=any declared=- view=any entry=[-∞, +∞] open=1
+        call-site arg types: esc_bytes<generic>:int; esc_char<generic>:int; esc_char<generic>:int  => join int (kind int)
+i14   esc_bytes<generic>                     web.bot:79 UnknownParameterKind   cause=parameter        binding=bytes(param) requires=list key=any declared=- view=any entry=[-∞, +∞] open=1
+        call-site arg types: esc_bytes<generic>:(forward); esc_char<generic>:List[int[Byte]]; esc_char<generic>:List[int[Byte]]  => join List[int[Byte]] (kind list)
+i14   esc_bytes<generic>                     web.bot:82 UnknownParameterKind   cause=parameter        binding=acc(param) requires=str key=any declared=- view=any entry=[-∞, +∞] open=1
+        call-site arg types: esc_bytes<generic>:str; esc_char<generic>:str; esc_char<generic>:str  => join str (kind str)
+i7    esc_char<generic>                      web.bot:85 UnknownParameterKind   cause=parameter        binding=c(param) requires=str key=any declared=- view=any entry=[-∞, +∞] open=1
+        call-site arg types: esc_from<generic>:str  => join str (kind str)
+i6    esc_from<generic>                      web.bot:96 UnknownParameterKind   cause=parameter        binding=i(param) requires=int key=any declared=- view=any entry=[-∞, +∞] open=1
+        call-site arg types: web::uri_escape_text<generic>:int; esc_from<generic>:int  => join int (kind int)
+i6    esc_from<generic>                      web.bot:96 UnknownParameterKind   cause=parameter        binding=text(param) requires=str key=any declared=- view=any entry=[-∞, +∞] open=1
+        call-site arg types: web::uri_escape_text<generic>:any; esc_from<generic>:(forward)  => join any (kind none)
+i6    esc_from<generic>                      web.bot:99 UnknownParameterKind   cause=parameter        binding=acc(param) requires=str key=any declared=- view=any entry=[-∞, +∞] open=1
+        call-site arg types: web::uri_escape_text<generic>:str; esc_from<generic>:str  => join str (kind str)
+i6    esc_from<generic>                      web.bot:99 UnknownCallResultKind  cause=block-result     binding=() requires=str key= declared= view= entry= open=1
+i4    repeat_uri<generic>                    uri-steady.bot:33 UnknownParameterKind   cause=parameter        binding=i(param) requires=int key=any declared=- view=any entry=[-∞, +∞] open=1
+        call-site arg types: <program>:int; repeat_uri<generic>:int  => join int (kind int)
+i4    repeat_uri<generic>                    uri-steady.bot:33 UnknownParameterKind   cause=parameter        binding=total(param) requires=int key=any declared=- view=any entry=[-∞, +∞] open=1
+        call-site arg types: <program>:int; repeat_uri<generic>:(forward)  => join int (kind int)
+i4    repeat_uri<generic>                    uri-steady.bot:37 UnknownParameterKind   cause=parameter        binding=acc(param) requires=int key=any declared=- view=any entry=[-∞, +∞] open=1
+        call-site arg types: <program>:int; repeat_uri<generic>:int  => join int (kind int)
+i4    repeat_uri<generic>                    uri-steady.bot:37 UnknownCallResultKind  cause=block-result     binding=() requires=str key= declared= view= entry= open=1

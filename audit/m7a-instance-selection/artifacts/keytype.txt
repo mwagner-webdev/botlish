@@ -1,0 +1,27 @@
+static type                                      form                         KeyType                M1 seed with declared T=same type
+int                                              int                          int                    int
+Byte (int refinement)                            int[Byte]                    int                    int[Byte]
+Small (source Int in 10..20)                     int[Small]                   int                    int[Small]
+HighNibble (exact set)                           int[HighNibble]              int                    int[HighNibble]
+bool                                             bool                         bool                   bool
+str                                              str                          str                    str
+Emailish-like str refinement (UriQueryValue)     str[UriQueryValue]           str                    str[UriQueryValue]
+UnicodeChar                                      UnicodeChar                  UnicodeChar            UnicodeChar
+unit                                             unit                         unit                   unit
+result                                           result                       result                 result
+mutarray                                         mutarray                     mutarray               mutarray
+List (broad kind)                                list                         list                   list
+List[int]                                        List[int]                    List[int]              List[int]
+List[Byte]                                       List[int[Byte]]              List[int]              List[int]
+List[never] (empty)                              List[never]                  List[never]            List[never]
+List shaped [int, str]                           list[int, str]               list[int, str]         list[int, str]
+List[List[Byte]]                                 List[List[int[Byte]]]        List[List[int]]        List[List[int]]
+ImmutableSet (broad kind)                        immutableSet                 immutableSet           immutableSet
+ImmutableSet[Byte]                               ImmutableSet[int[Byte]]      immutableSet           ImmutableSet[int[Byte]]
+ImmutableSet[never]                              ImmutableSet[never]          immutableSet           ImmutableSet[never]
+exact block {block e7 1 int}                     block(e7)/1 -> int           block                  block(e7)/1 -> int
+exact native {native +}                          native +                     native                 native +
+block (kind only)                                block                        block                  block
+native (kind only)                               native                       native                 native
+any                                              any                          any                    any
+never                                            never                        never                  never

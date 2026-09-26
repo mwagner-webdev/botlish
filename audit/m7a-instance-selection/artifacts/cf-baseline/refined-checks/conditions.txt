@@ -1,0 +1,68 @@
+i3    byte::from_int<int>                byte.bot:151 if <(value, 0)                              -> AlwaysFalse via entry  operands={param {[0, +∞]} const {[0, 0] {0}}}
+i3    byte::from_int<int>                byte.bot:154 if >(value, 255)                            -> Unknown     via undecided  operands={param {[0, +∞]} const {[255, 255] {255}}}
+i12   ascii::is_digit<int>               ascii.bot:54 if >=(b, 48)                                -> Unknown     via undecided  operands={param {[0, 255]} const {[48, 48] {48}}}
+i12   ascii::is_digit<int>               ascii.bot:54 if <=(b, 57)                                -> Unknown     via undecided  operands={param {[48, 255]} const {[57, 57] {57}}}
+i10   ascii::is_upper<int>               ascii.bot:57 if >=(b, 65)                                -> Unknown     via undecided  operands={param {[0, 255]} const {[65, 65] {65}}}
+i10   ascii::is_upper<int>               ascii.bot:57 if <=(b, 90)                                -> Unknown     via undecided  operands={param {[65, 255]} const {[90, 90] {90}}}
+i11   ascii::is_lower<int>               ascii.bot:60 if >=(b, 97)                                -> Unknown     via undecided  operands={param {[0, 255]} const {[97, 97] {97}}}
+i11   ascii::is_lower<int>               ascii.bot:60 if <=(b, 122)                               -> Unknown     via undecided  operands={param {[97, 255]} const {[122, 122] {122}}}
+i9    ascii::is_alphabetic<int>          ascii.bot:63 if ascii::is_upper(b)                       -> Unknown     via not-a-comparison  
+i9    ascii::is_alphabetic<int>          ascii.bot:63 if ascii::is_lower(b)                       -> Unknown     via not-a-comparison  
+i8    ascii::is_alphanumeric<int>        ascii.bot:66 if ascii::is_alphabetic(b)                  -> Unknown     via not-a-comparison  
+i8    ascii::is_alphanumeric<int>        ascii.bot:66 if ascii::is_digit(b)                       -> Unknown     via not-a-comparison  
+i7    web::is_unreserved<generic>        web.bot:68 if ascii::is_alphanumeric(b)                -> Unknown     via not-a-comparison  
+i7    web::is_unreserved<generic>        web.bot:68 if immutable_set_contains(web::additional_unreserved_chars, b) -> Unknown     via not-a-comparison(immutable_set_contains)  operands={capture {[-∞, +∞]} param {[0, 255]}}
+i13   esc_bytes<generic>                 web.bot:79 if >=(i, list_length(bytes))                -> Unknown     via undecided  operands={param {[-∞, +∞]} expression {[0, 4611686018427387903]}}
+i6    esc_char<generic>                  web.bot:86 if ==(list_length(bytes), 1)                -> Unknown     via undecided  operands={expression {[0, 4611686018427387903]} const {[1, 1] {1}}}
+i6    esc_char<generic>                  web.bot:88 if web::is_unreserved(b)                    -> Unknown     via not-a-comparison  
+i5    esc_from<generic>                  web.bot:96 if >=(i, length(text))                      -> Unknown     via undecided  operands={param {[-∞, +∞]} expression {[0, 4611686018427387903]}}
+i18   check<int, int, str, str>          ?          if <=(n, 0)                                 -> Unknown     via undecided  operands={param {[-∞, 400]} const {[0, 0] {0}}}
+i18   check<int, int, str, str>          ?          if (s)                                      -> Unknown     via not-a-comparison  
+i18   check<int, int, str, str>          ?          if (s)                                      -> Unknown     via not-a-comparison  
+i18   check<int, int, str, str>          ?          if UriQueryValue?(q)                        -> AlwaysTrue  via syntactic  
+i19   block e332<str>                    ?          if ==(localEnd, 0)                          -> Unknown     via undecided  operands={local {[-∞, +∞]} const {[0, 0] {0}}}
+i19   block e332<str>                    ?          if >=(localEnd, n)                          -> Unknown     via undecided  operands={local {[-∞, +∞]} local {[0, 4611686018427387903]}}
+i19   block e332<str>                    ?          if ==(char_at(localEnd), "@")               -> Unknown     via undecided  operands={expression {[-∞, +∞]} const {[-∞, +∞]}}
+i37   block e332<generic>                ?          if ==(localEnd, 0)                          -> Unknown     via undecided  operands={local {[-∞, +∞]} const {[0, 0] {0}}}
+i37   block e332<generic>                ?          if >=(localEnd, n)                          -> Unknown     via undecided  operands={local {[-∞, +∞]} local {[0, 4611686018427387903]}}
+i37   block e332<generic>                ?          if ==(char_at(localEnd), "@")               -> Unknown     via undecided  operands={expression {[-∞, +∞]} const {[-∞, +∞]}}
+i22   is_local_char<str>                 ?          if is_tcl_alnum(c)                          -> Unknown     via not-a-comparison  
+i22   is_local_char<str>                 ?          if ==(c, ".")                               -> Unknown     via undecided  operands={param {[-∞, +∞]} const {[-∞, +∞]}}
+i22   is_local_char<str>                 ?          if ==(c, "_")                               -> Unknown     via undecided  operands={param {[-∞, +∞]} const {[-∞, +∞]}}
+i22   is_local_char<str>                 ?          if ==(c, "%")                               -> Unknown     via undecided  operands={param {[-∞, +∞]} const {[-∞, +∞]}}
+i22   is_local_char<str>                 ?          if ==(c, "+")                               -> Unknown     via undecided  operands={param {[-∞, +∞]} const {[-∞, +∞]}}
+i25   is_label_char<str>                 ?          if is_tcl_alnum(c)                          -> Unknown     via not-a-comparison  
+i20   scan_local<generic>                ?          if >=(i, n)                                 -> Unknown     via undecided  operands={param {[-∞, +∞]} capture {[-∞, +∞]}}
+i20   scan_local<generic>                ?          if is_local_char(char_at(i))                -> Unknown     via not-a-comparison  
+i24   scan_label<generic>                ?          if >=(i, n)                                 -> Unknown     via undecided  operands={param {[-∞, +∞]} capture {[-∞, +∞]}}
+i24   scan_label<generic>                ?          if is_label_char(char_at(i))                -> Unknown     via not-a-comparison  
+i27   scan_alpha<generic>                ?          if >=(i, n)                                 -> Unknown     via undecided  operands={param {[-∞, +∞]} capture {[-∞, +∞]}}
+i27   scan_alpha<generic>                ?          if is_tcl_alpha(char_at(i))                 -> Unknown     via not-a-comparison  
+i26   tld_ok<generic>                    ?          if ==(e, n)                                 -> Unknown     via undecided  operands={local {[-∞, +∞]} capture {[-∞, +∞]}}
+i23   domain_loop<generic>               ?          if ==(labelEnd, i)                          -> Unknown     via undecided  operands={local {[-∞, +∞]} param {[-∞, +∞]}}
+i23   domain_loop<generic>               ?          if >=(labelEnd, n)                          -> Unknown     via undecided  operands={local {[-∞, +∞]} capture {[-∞, +∞]}}
+i23   domain_loop<generic>               ?          if ==(char_at(labelEnd), ".")               -> Unknown     via undecided  operands={expression {[-∞, +∞]} const {[-∞, +∞]}}
+i23   domain_loop<generic>               ?          if tld_ok(i2)                               -> Unknown     via not-a-comparison  
+i28   block e552<str>                    ?          if ==(localEnd, 0)                          -> Unknown     via undecided  operands={local {[-∞, +∞]} const {[0, 0] {0}}}
+i28   block e552<str>                    ?          if >=(localEnd, n)                          -> Unknown     via undecided  operands={local {[-∞, +∞]} local {[0, 4611686018427387903]}}
+i28   block e552<str>                    ?          if ==(char_at(localEnd), "@")               -> Unknown     via undecided  operands={expression {[-∞, +∞]} const {[-∞, +∞]}}
+i38   block e552<generic>                ?          if ==(localEnd, 0)                          -> Unknown     via undecided  operands={local {[-∞, +∞]} const {[0, 0] {0}}}
+i38   block e552<generic>                ?          if >=(localEnd, n)                          -> Unknown     via undecided  operands={local {[-∞, +∞]} local {[0, 4611686018427387903]}}
+i38   block e552<generic>                ?          if ==(char_at(localEnd), "@")               -> Unknown     via undecided  operands={expression {[-∞, +∞]} const {[-∞, +∞]}}
+i31   is_local_char<str>                 ?          if is_tcl_alnum(c)                          -> Unknown     via not-a-comparison  
+i31   is_local_char<str>                 ?          if ==(c, ".")                               -> Unknown     via undecided  operands={param {[-∞, +∞]} const {[-∞, +∞]}}
+i31   is_local_char<str>                 ?          if ==(c, "_")                               -> Unknown     via undecided  operands={param {[-∞, +∞]} const {[-∞, +∞]}}
+i31   is_local_char<str>                 ?          if ==(c, "%")                               -> Unknown     via undecided  operands={param {[-∞, +∞]} const {[-∞, +∞]}}
+i31   is_local_char<str>                 ?          if ==(c, "+")                               -> Unknown     via undecided  operands={param {[-∞, +∞]} const {[-∞, +∞]}}
+i34   is_label_char<str>                 ?          if is_tcl_alnum(c)                          -> Unknown     via not-a-comparison  
+i29   scan_local<generic>                ?          if >=(i, n)                                 -> Unknown     via undecided  operands={param {[-∞, +∞]} capture {[-∞, +∞]}}
+i29   scan_local<generic>                ?          if is_local_char(char_at(i))                -> Unknown     via not-a-comparison  
+i33   scan_label<generic>                ?          if >=(i, n)                                 -> Unknown     via undecided  operands={param {[-∞, +∞]} capture {[-∞, +∞]}}
+i33   scan_label<generic>                ?          if is_label_char(char_at(i))                -> Unknown     via not-a-comparison  
+i36   scan_alpha<generic>                ?          if >=(i, n)                                 -> Unknown     via undecided  operands={param {[-∞, +∞]} capture {[-∞, +∞]}}
+i36   scan_alpha<generic>                ?          if is_tcl_alpha(char_at(i))                 -> Unknown     via not-a-comparison  
+i35   tld_ok<generic>                    ?          if ==(e, n)                                 -> Unknown     via undecided  operands={local {[-∞, +∞]} capture {[-∞, +∞]}}
+i32   domain_loop<generic>               ?          if ==(labelEnd, i)                          -> Unknown     via undecided  operands={local {[-∞, +∞]} param {[-∞, +∞]}}
+i32   domain_loop<generic>               ?          if >=(labelEnd, n)                          -> Unknown     via undecided  operands={local {[-∞, +∞]} capture {[-∞, +∞]}}
+i32   domain_loop<generic>               ?          if ==(char_at(labelEnd), ".")               -> Unknown     via undecided  operands={expression {[-∞, +∞]} const {[-∞, +∞]}}
+i32   domain_loop<generic>               ?          if tld_ok(i2)                               -> Unknown     via not-a-comparison  

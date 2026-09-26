@@ -1,0 +1,14 @@
+1. identical re-run: same instance table
+   {f<int> {{[5, 500] {5,500}}}} {f<str> {{[-∞, +∞]}}} {g<int> {{[500, 500] {500}}}}
+2. reordered calls: labels+entries identical
+   forward ids: i1=f<int> i3=f<str> i2=g<int>  {f<int> {{[5, 500] {5,500}}}} {f<str> {{[-∞, +∞]}}} {g<int> {{[500, 500] {500}}}}
+   reverse ids: i1=f<str> i3=f<int> i2=g<int>  {f<int> {{[5, 500] {5,500}}}} {f<str> {{[-∞, +∞]}}} {g<int> {{[500, 500] {500}}}}
+3. per-block limit (8 specialized instances), 10 distinct argument kinds:
+   forward order instances: {f<List[bool]>} {f<List[int]>} {f<List[str]>} f<UnicodeChar> f<bool> f<generic> f<int> f<str> f<unit>
+   reverse order instances: {f<List[List[int]]>} {f<List[bool]>} {f<List[int]>} {f<List[str]>} {f<List[unit]>} f<UnicodeChar> f<bool> f<generic> f<unit>
+   forward: call -> instance: f<int> f<str> f<bool> f<unit> f<UnicodeChar> {f<List[int]>} {f<List[str]>} {f<List[bool]>} f<generic> f<generic>
+   reverse: call -> instance: {f<List[unit]>} {f<List[List[int]]>} {f<List[bool]>} {f<List[str]>} {f<List[int]>} f<UnicodeChar> f<unit> f<bool> f<generic> f<generic>
+4. f(5)                                     entry {[5, 5] {5}}                 x < 100 -> AlwaysTrue
+4. f(5) + f(9)                              entry {[5, 9] {5,9}}               x < 100 -> AlwaysTrue
+4. f(5) + f(9) + f(500)                     entry {[5, 500] {5,9,500}}         x < 100 -> Unknown
+4. f(5) + f(9) + f(500) + g(length(s))      entry {[0, 4611686018427387903]}   x < 100 -> Unknown

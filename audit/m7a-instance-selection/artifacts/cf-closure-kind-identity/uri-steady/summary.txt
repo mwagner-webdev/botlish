@@ -1,0 +1,15 @@
+program: bench/uri-steady.bot
+used instances: 29 (program + 9 generic + 19 specialized); open: 7
+emitted NIR functions: 23; machine code bytes: 8986
+NIR totals: call=13 closure=5 br=25 faildeclared=1 capture=16 callenv=11 guard=9 tailenv=4 tail=1
+representation blockers (guards): 13
+    generic/param/UnknownParameterKind: 12
+    specialized/param/UnknownParameterKind: 1
+reachable ifs in used instances: 27
+    AlwaysFalse via entry: 1
+    Unknown via undecided: 16
+    Unknown via not-a-comparison: 8
+    Unknown via not-a-comparison(immutable_set_contains): 2
+static diagnostics: 0
+native run value: int 29500
+allocations (one run): 69510 objects / 2944568 bytes String=47500 List=14008 Block=8001 static=30

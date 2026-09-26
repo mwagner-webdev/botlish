@@ -1,0 +1,16 @@
+program: bench/refined-checks.ir
+used instances: 60 (program + 22 generic + 37 specialized); open: 20
+emitted NIR functions: 41; machine code bytes: 19173
+NIR totals: call=29 callenv=14 closure=10 br=74 faildeclared=1 capture=21 guard=12 tailenv=5 tail=9 callmulti=12
+representation blockers (guards): 24
+    generic/param/UnknownParameterKind: 23
+    specialized/param/UnknownParameterKind: 1
+reachable ifs in used instances: 97
+    AlwaysFalse via entry: 1
+    Unknown via undecided: 63
+    Unknown via not-a-comparison: 30
+    Unknown via not-a-comparison(immutable_set_contains): 2
+    AlwaysTrue via syntactic: 1
+static diagnostics: 0
+native run value: list {{int 400} {int 0}}
+allocations (one run): 27 objects / 1285 bytes String=9 List=11 Block=6 static=36

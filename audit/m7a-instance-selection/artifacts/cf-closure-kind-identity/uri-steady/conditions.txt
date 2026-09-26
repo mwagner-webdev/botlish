@@ -1,0 +1,27 @@
+i3    byte::from_int<int>                byte.bot:151 if <(value, 0)                              -> AlwaysFalse via entry  operands={param {[0, +∞]} const {[0, 0] {0}}}
+i3    byte::from_int<int>                byte.bot:154 if >(value, 255)                            -> Unknown     via undecided  operands={param {[0, +∞]} const {[255, 255] {255}}}
+i13   ascii::is_digit<int>               ascii.bot:54 if >=(b, 48)                                -> Unknown     via undecided  operands={param {[0, 255]} const {[48, 48] {48}}}
+i13   ascii::is_digit<int>               ascii.bot:54 if <=(b, 57)                                -> Unknown     via undecided  operands={param {[48, 255]} const {[57, 57] {57}}}
+i11   ascii::is_upper<int>               ascii.bot:57 if >=(b, 65)                                -> Unknown     via undecided  operands={param {[0, 255]} const {[65, 65] {65}}}
+i11   ascii::is_upper<int>               ascii.bot:57 if <=(b, 90)                                -> Unknown     via undecided  operands={param {[65, 255]} const {[90, 90] {90}}}
+i12   ascii::is_lower<int>               ascii.bot:60 if >=(b, 97)                                -> Unknown     via undecided  operands={param {[0, 255]} const {[97, 97] {97}}}
+i12   ascii::is_lower<int>               ascii.bot:60 if <=(b, 122)                               -> Unknown     via undecided  operands={param {[97, 255]} const {[122, 122] {122}}}
+i10   ascii::is_alphabetic<int>          ascii.bot:63 if ascii::is_upper(b)                       -> Unknown     via not-a-comparison  
+i10   ascii::is_alphabetic<int>          ascii.bot:63 if ascii::is_lower(b)                       -> Unknown     via not-a-comparison  
+i9    ascii::is_alphanumeric<int>        ascii.bot:66 if ascii::is_alphabetic(b)                  -> Unknown     via not-a-comparison  
+i9    ascii::is_alphanumeric<int>        ascii.bot:66 if ascii::is_digit(b)                       -> Unknown     via not-a-comparison  
+i8    web::is_unreserved<int>            web.bot:68 if ascii::is_alphanumeric(b)                -> Unknown     via not-a-comparison  
+i8    web::is_unreserved<int>            web.bot:68 if immutable_set_contains(web::additional_unreserved_chars, b) -> Unknown     via not-a-comparison(immutable_set_contains)  operands={capture {[-∞, +∞]} param {[0, 255]}}
+i23   web::is_unreserved<generic>        web.bot:68 if ascii::is_alphanumeric(b)                -> Unknown     via not-a-comparison  
+i23   web::is_unreserved<generic>        web.bot:68 if immutable_set_contains(web::additional_unreserved_chars, b) -> Unknown     via not-a-comparison(immutable_set_contains)  operands={capture {[-∞, +∞]} param {[0, 255]}}
+i14   esc_bytes<List[int], int, str>     web.bot:79 if >=(i, list_length(bytes))                -> Unknown     via undecided  operands={param {[0, +∞]} expression {[0, 4611686018427387903]}}
+i20   esc_bytes<generic>                 web.bot:79 if >=(i, list_length(bytes))                -> Unknown     via undecided  operands={param {[-∞, +∞]} expression {[0, 4611686018427387903]}}
+i7    esc_char<str>                      web.bot:86 if ==(list_length(bytes), 1)                -> Unknown     via undecided  operands={expression {[0, 4611686018427387903]} const {[1, 1] {1}}}
+i7    esc_char<str>                      web.bot:88 if web::is_unreserved(b)                    -> Unknown     via not-a-comparison  
+i21   esc_char<generic>                  web.bot:86 if ==(list_length(bytes), 1)                -> Unknown     via undecided  operands={expression {[0, 4611686018427387903]} const {[1, 1] {1}}}
+i21   esc_char<generic>                  web.bot:88 if web::is_unreserved(b)                    -> Unknown     via not-a-comparison  
+i6    esc_from<str, int, str>            web.bot:96 if >=(i, length(text))                      -> Unknown     via undecided  operands={param {[0, +∞]} expression {[0, 4611686018427387903]}}
+i22   esc_from<generic>                  web.bot:96 if >=(i, length(text))                      -> Unknown     via undecided  operands={param {[-∞, +∞]} expression {[0, 4611686018427387903]}}
+i26   esc_from<any, int, str>            web.bot:96 if >=(i, length(text))                      -> Unknown     via undecided  operands={param {[0, +∞]} expression {[0, 4611686018427387903]}}
+i4    repeat_uri<int, int, int>          uri-steady.bot:33 if >=(i, total)                             -> Unknown     via undecided  operands={param {[0, +∞]} param {[2000, 2000] {2000}}}
+i25   repeat_uri<generic>                uri-steady.bot:33 if >=(i, total)                             -> Unknown     via undecided  operands={param {[-∞, +∞]} param {[-∞, +∞]}}

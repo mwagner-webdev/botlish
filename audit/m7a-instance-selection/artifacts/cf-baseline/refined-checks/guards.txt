@@ -1,0 +1,47 @@
+i16   byte::high_nibble<generic>             byte.bot:113 UnknownParameterKind   cause=parameter        binding=b(param) requires=int key=any declared=- view=any entry=[-∞, +∞] open=0
+        call-site arg types: high_nibble<generic>:any  => join any (kind none)
+i14   hex_pair<generic>                      web.bot:76 UnknownParameterKind   cause=parameter        binding=b(param) requires=int key=any declared=- view=any entry=[-∞, +∞] open=1
+        call-site arg types: esc_bytes<generic>:any  => join any (kind none)
+i13   esc_bytes<generic>                     web.bot:79 UnknownParameterKind   cause=parameter        binding=i(param) requires=int key=any declared=- view=any entry=[-∞, +∞] open=1
+        call-site arg types: esc_bytes<generic>:int; esc_char<generic>:int; esc_char<generic>:int  => join int (kind int)
+i13   esc_bytes<generic>                     web.bot:79 UnknownParameterKind   cause=parameter        binding=bytes(param) requires=list key=any declared=- view=any entry=[-∞, +∞] open=1
+        call-site arg types: esc_bytes<generic>:(forward); esc_char<generic>:List[int[Byte]]; esc_char<generic>:List[int[Byte]]  => join List[int[Byte]] (kind list)
+i13   esc_bytes<generic>                     web.bot:82 UnknownParameterKind   cause=parameter        binding=acc(param) requires=str key=any declared=- view=any entry=[-∞, +∞] open=1
+        call-site arg types: esc_bytes<generic>:str; esc_char<generic>:str; esc_char<generic>:str  => join str (kind str)
+i6    esc_char<generic>                      web.bot:85 UnknownParameterKind   cause=parameter        binding=c(param) requires=str key=any declared=- view=any entry=[-∞, +∞] open=1
+        call-site arg types: esc_from<generic>:str  => join str (kind str)
+i5    esc_from<generic>                      web.bot:96 UnknownParameterKind   cause=parameter        binding=i(param) requires=int key=any declared=- view=any entry=[-∞, +∞] open=1
+        call-site arg types: web::uri_escape_text<generic>:int; esc_from<generic>:int  => join int (kind int)
+i5    esc_from<generic>                      web.bot:96 UnknownParameterKind   cause=parameter        binding=text(param) requires=str key=any declared=- view=any entry=[-∞, +∞] open=1
+        call-site arg types: web::uri_escape_text<generic>:any; esc_from<generic>:(forward)  => join any (kind none)
+i5    esc_from<generic>                      web.bot:99 UnknownParameterKind   cause=parameter        binding=acc(param) requires=str key=any declared=- view=any entry=[-∞, +∞] open=1
+        call-site arg types: web::uri_escape_text<generic>:str; esc_from<generic>:str  => join str (kind str)
+i5    esc_from<generic>                      web.bot:99 UnknownCallResultKind  cause=block-result     binding=() requires=str key= declared= view= entry= open=1
+i37   block e332<generic>                    ?          UnknownParameterKind   cause=parameter        binding=v(param) requires=str key=any declared=- view=any entry=[-∞, +∞] open=1
+        call-site arg types: (no exact caller)  => join never (kind none)
+i21   char_at<generic>                       ?          UnknownParameterKind   cause=parameter        binding=i(param) requires=int key=any declared=- view=any entry=[-∞, +∞] open=1
+        call-site arg types: block e332<str>:int; block e332<generic>:int; scan_local<generic>:int; scan_label<generic>:int; scan_alpha<generic>:int; domain_loop<generic>:int  => join int (kind int)
+i21   char_at<generic>                       ?          UnknownParameterKind   cause=parameter        binding=i(param) requires=int key=any declared=- view=any entry=[-∞, +∞] open=1
+        call-site arg types: block e332<str>:int; block e332<generic>:int; scan_local<generic>:int; scan_label<generic>:int; scan_alpha<generic>:int; domain_loop<generic>:int  => join int (kind int)
+i20   scan_local<generic>                    ?          UnknownParameterKind   cause=parameter        binding=i(param) requires=int key=any declared=- view=any entry=[-∞, +∞] open=1
+        call-site arg types: block e332<str>:int; block e332<generic>:int; scan_local<generic>:int  => join int (kind int)
+i24   scan_label<generic>                    ?          UnknownParameterKind   cause=parameter        binding=i(param) requires=int key=any declared=- view=any entry=[-∞, +∞] open=1
+        call-site arg types: scan_label<generic>:int; domain_loop<generic>:any  => join any (kind none)
+i27   scan_alpha<generic>                    ?          UnknownParameterKind   cause=parameter        binding=i(param) requires=int key=any declared=- view=any entry=[-∞, +∞] open=1
+        call-site arg types: scan_alpha<generic>:int; tld_ok<generic>:any  => join any (kind none)
+i26   tld_ok<generic>                        ?          UnknownParameterKind   cause=parameter        binding=i(param) requires=int key=any declared=- view=any entry=[-∞, +∞] open=1
+        call-site arg types: domain_loop<generic>:int  => join int (kind int)
+i38   block e552<generic>                    ?          UnknownParameterKind   cause=parameter        binding=v(param) requires=str key=any declared=- view=any entry=[-∞, +∞] open=1
+        call-site arg types: (no exact caller)  => join never (kind none)
+i30   char_at<generic>                       ?          UnknownParameterKind   cause=parameter        binding=i(param) requires=int key=any declared=- view=any entry=[-∞, +∞] open=1
+        call-site arg types: block e552<str>:int; block e552<generic>:int; scan_local<generic>:int; scan_label<generic>:int; scan_alpha<generic>:int; domain_loop<generic>:int  => join int (kind int)
+i30   char_at<generic>                       ?          UnknownParameterKind   cause=parameter        binding=i(param) requires=int key=any declared=- view=any entry=[-∞, +∞] open=1
+        call-site arg types: block e552<str>:int; block e552<generic>:int; scan_local<generic>:int; scan_label<generic>:int; scan_alpha<generic>:int; domain_loop<generic>:int  => join int (kind int)
+i29   scan_local<generic>                    ?          UnknownParameterKind   cause=parameter        binding=i(param) requires=int key=any declared=- view=any entry=[-∞, +∞] open=1
+        call-site arg types: block e552<str>:int; block e552<generic>:int; scan_local<generic>:int  => join int (kind int)
+i33   scan_label<generic>                    ?          UnknownParameterKind   cause=parameter        binding=i(param) requires=int key=any declared=- view=any entry=[-∞, +∞] open=1
+        call-site arg types: scan_label<generic>:int; domain_loop<generic>:any  => join any (kind none)
+i36   scan_alpha<generic>                    ?          UnknownParameterKind   cause=parameter        binding=i(param) requires=int key=any declared=- view=any entry=[-∞, +∞] open=1
+        call-site arg types: scan_alpha<generic>:int; tld_ok<generic>:any  => join any (kind none)
+i35   tld_ok<generic>                        ?          UnknownParameterKind   cause=parameter        binding=i(param) requires=int key=any declared=- view=any entry=[-∞, +∞] open=1
+        call-site arg types: domain_loop<generic>:int  => join int (kind int)
