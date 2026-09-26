@@ -1,0 +1,78 @@
+i0 <program>  generic=1 open=0 key={} result=any resultRange=[-∞, +∞]
+    call e176 web.bot:65 -> byte::set<List[UnicodeChar]>
+    call e364 uri-steady.bot:39 -> repeat_uri<generic>
+    materializes: web::is_unreserved, web::uri_escape_text, repeat_uri
+i2 char::codepoint<UnicodeChar>  generic=0 open=0 key={UnicodeChar} result=int resultRange=[0, +∞]
+    param c: declared=UnicodeChar view=UnicodeChar entry=[-∞, +∞]
+i17 byte::high_nibble<generic>  generic=1 open=0 key={any} result=int[HighNibble] resultRange=[0, 240] {0,16,32,48,64,80,96,112,128,144,160,176,192,208,224,240}
+    param b: declared=- view=int entry=[-∞, +∞]
+i18 byte::nibble<int>  generic=0 open=0 key={int} result=int[Nibble] resultRange=[0, 15]
+    param x: declared=- view=int[HighNibble] entry=[0, 240] {0,16,32,48,64,80,96,112,128,144,160,176,192,208,224,240} refineEvidence={HighNibble}
+i3 byte::from_int<int>  generic=0 open=0 key={int} result=int[Byte] resultRange=[0, 255]
+    param value: declared=int view=int entry=[0, +∞]
+i1 byte::set<List[UnicodeChar]>  generic=0 open=0 key={{List[UnicodeChar]}} result=ImmutableSet[int[Byte]] resultRange=[-∞, +∞]
+    param chars: declared=List[UnicodeChar] view=List[UnicodeChar] entry=[-∞, +∞]
+    captures: byte::from_int:block(e58)/1 -> any, char::codepoint:block(e2)/1 -> any
+    call e79 uri-steady.bot:176 -> char::codepoint<UnicodeChar>
+    call e77 uri-steady.bot:176 -> byte::from_int<int>
+i13 ascii::is_digit<int>  generic=0 open=0 key={int} result=bool resultRange=[-∞, +∞]
+    param b: declared=int[Byte] view=int[Byte] entry=[0, 255] refineEvidence={Byte}
+i11 ascii::is_upper<int>  generic=0 open=0 key={int} result=bool resultRange=[-∞, +∞]
+    param b: declared=int[Byte] view=int[Byte] entry=[0, 255] refineEvidence={Byte}
+i12 ascii::is_lower<int>  generic=0 open=0 key={int} result=bool resultRange=[-∞, +∞]
+    param b: declared=int[Byte] view=int[Byte] entry=[0, 255] refineEvidence={Byte}
+i10 ascii::is_alphabetic<int>  generic=0 open=0 key={int} result=bool resultRange=[-∞, +∞]
+    param b: declared=int[Byte] view=int[Byte] entry=[0, 255] refineEvidence={Byte}
+    captures: ascii::is_upper:block(e101)/1 -> any, ascii::is_lower:block(e116)/1 -> any
+    call e133 ascii.bot:63 -> ascii::is_upper<int>
+    call e138 ascii.bot:63 -> ascii::is_lower<int>
+i9 ascii::is_alphanumeric<int>  generic=0 open=0 key={int} result=bool resultRange=[-∞, +∞]
+    param b: declared=int[Byte] view=int[Byte] entry=[0, 255] refineEvidence={Byte}
+    captures: ascii::is_alphabetic:block(e131)/1 -> any, ascii::is_digit:block(e86)/1 -> any
+    call e146 ascii.bot:66 -> ascii::is_alphabetic<int>
+    call e151 ascii.bot:66 -> ascii::is_digit<int>
+i8 web::is_unreserved<generic>  generic=1 open=1 key={any} result=bool resultRange=[-∞, +∞]
+    param b: declared=int[Byte] view=int[Byte] entry=[-∞, +∞] refineEvidence={Byte}
+    captures: ascii::is_alphanumeric:block(e144)/1 -> any, web::additional_unreserved_chars:ImmutableSet[int[Byte]]
+    call e187 web.bot:68 -> ascii::is_alphanumeric<int>
+i5 web::uri_escape_text<generic>  generic=1 open=1 key={any} result=str resultRange=[-∞, +∞]
+    param s: declared=- view=str entry=[-∞, +∞]
+    captures: byte::nibble:block(e19)/1 -> any, byte::high_nibble:block(e7)/1 -> any, web::hex_digits:List[str], web::is_unreserved:block(e185)/1 -> any
+    call e316 web.bot:101 -> esc_from<generic>
+    materializes: hex_pair, esc_bytes, esc_char, esc_from
+i16 high_nibble<generic>  generic=1 open=0 key={any} result=int[Nibble] resultRange=[0, 15]
+    param b: declared=- view=int entry=[-∞, +∞]
+    captures: byte::nibble:block(e19)/1 -> any, byte::high_nibble:block(e7)/1 -> any
+    call e204 web.bot:73 -> byte::high_nibble<generic>
+    call e202 web.bot:73 -> byte::nibble<int>
+i15 hex_pair<generic>  generic=1 open=1 key={any} result=str resultRange=[-∞, +∞]
+    param b: declared=- view=int entry=[-∞, +∞]
+    captures: web::hex_digits:List[str], high_nibble:block(e201)/1 -> any
+    call e214 web.bot:76 -> high_nibble<generic>
+i14 esc_bytes<generic>  generic=1 open=1 key={any any any} result=str resultRange=[-∞, +∞]
+    param bytes: declared=- view=List[int] entry=[-∞, +∞]
+    param i: declared=- view=int entry=[-∞, +∞]
+    param acc: declared=- view=str entry=[-∞, +∞]
+    captures: esc_bytes:block(e225)/3 -> any, hex_pair:block(e208)/1 -> any
+    call e247 web.bot:82 -> hex_pair<generic>
+    call e234 web.bot:82 -> esc_bytes<generic>
+i7 esc_char<generic>  generic=1 open=1 key={any} result=str resultRange=[-∞, +∞]
+    param c: declared=- view=str entry=[-∞, +∞]
+    captures: web::is_unreserved:block(e185)/1 -> any, esc_bytes:block(e225)/3 -> any
+    call e272 web.bot:88 -> web::is_unreserved<generic>
+    call e276 web.bot:91 -> esc_bytes<generic>
+    call e281 web.bot:93 -> esc_bytes<generic>
+i6 esc_from<generic>  generic=1 open=1 key={any any any} result=str resultRange=[-∞, +∞]
+    param text: declared=- view=str entry=[-∞, +∞]
+    param i: declared=- view=int entry=[-∞, +∞]
+    param acc: declared=- view=str entry=[-∞, +∞]
+    captures: esc_from:block(e287)/3 -> any, esc_char:block(e254)/1 -> any
+    call e306 web.bot:99 -> esc_char<generic>
+    call e296 web.bot:99 -> esc_from<generic>
+i4 repeat_uri<generic>  generic=1 open=1 key={any any any} result=int resultRange=[-∞, +∞]
+    param i: declared=- view=int entry=[-∞, +∞]
+    param total: declared=- view=int entry=[-∞, +∞]
+    param acc: declared=- view=int entry=[-∞, +∞]
+    captures: corpus:List[str], web::uri_escape_text:block(e199)/1 -> any, repeat_uri:block(e329)/3 -> any
+    call e348 uri-steady.bot:36 -> web::uri_escape_text<generic>
+    call e351 uri-steady.bot:37 -> repeat_uri<generic>

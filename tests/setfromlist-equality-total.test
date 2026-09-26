@@ -205,10 +205,19 @@ test setfromlist-broad-element-stays-erroring {a genuinely broad/statically-unre
     set saved $hir::specialize::limit
     set hir::specialize::limit 1
     try {
+        # Three differently-kinded calls, not two (see setfromlist-error-
+        # propagation-control's own comment, M7C-CLOSED-CLOSURE-ENTRY-
+        # FACTS.md): with only two calls, mk_unknown<generic>'s explosion-
+        # control fallback would have exactly one actual caller left once
+        # the first call takes the specific List[int] slot, and M7.c's own
+        # closed-caller theorem would soundly (not incorrectly) resolve xs
+        # from that one caller alone. A third, differently-kinded call keeps
+        # the fallback's own caller set genuinely disagreeing, so xs stays
+        # the true "any" this test's own name requires.
         set text {fn mk_unknown(xs):
     immutable_set_from_list(xs)
 
-[mk_unknown([1, 2, 3]), mk_unknown(["a", "b"])]}
+[mk_unknown([1, 2, 3]), mk_unknown(["a", "b"]), mk_unknown([true, false])]}
         set nirText [nirOf $text]
         regexp {func \d+ "mk_unknown"[^\n]*instance="generic"[^\n]*\n(?:.*\n)*?end} $nirText genericBody
         list [regexp {op setfromlist } $genericBody] [regexp {op setfromlisttotal} $genericBody] \
@@ -239,13 +248,28 @@ test setfromlist-error-propagation-control {a caller of a genuinely equality-fal
     set saved $hir::specialize::limit
     set hir::specialize::limit 1
     try {
+        # Three callers of a limit-1 caller<generic> fallback, not two: with
+        # only caller([1,2,3])/caller(["a","b"]), M7C-CLOSED-CLOSURE-ENTRY-
+        # FACTS.md's own closed-caller theorem (caller<generic>'s explosion-
+        # control fallback is a closed instance -- hir::specialize::
+        # InstanceClosed does not distinguish "generic via value-capture"
+        # from "generic via explosion control" -- with exactly one actual
+        # caller, the str list) would soundly resolve xs to List[str], and
+        # mk_unknown<generic>'s own SetFromList would then correctly (not
+        # incorrectly) lower equality-total for str -- a different, and
+        # itself sound, milestone entirely. A third, differently-kinded
+        # caller keeps caller<generic>'s own callers genuinely disagreeing
+        # (List[int]/List[str]/List[bool] all forced past the limit-1
+        # specific slot List[int] already took), so its own xs -- and
+        # therefore mk_unknown<generic>'s own forwarded xs -- stays the
+        # true "any" this test's own name requires, regardless of M7.c.
         set text {fn mk_unknown(xs):
     immutable_set_from_list(xs)
 
 fn caller(xs):
     mk_unknown(xs)
 
-[caller([1, 2, 3]), caller(["a", "b"])]}
+[caller([1, 2, 3]), caller(["a", "b"]), caller([true, false])]}
         set nirText [nirOf $text]
         string match {*may_error=true*} [effectLineForInstance $text mk_unknown generic]
     } finally {

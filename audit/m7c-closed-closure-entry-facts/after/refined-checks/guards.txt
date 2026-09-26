@@ -1,0 +1,6 @@
+i5    esc_from<generic>                      web.bot:96 UnknownParameterKind   cause=parameter        binding=text(param) requires=str key=any declared=- view=any entry=[-∞, +∞] open=1
+        call-site arg types: web::uri_escape_text<generic>:any; esc_from<generic>:(forward)  => join any (kind none)
+i37   block e332<generic>                    ?          UnknownParameterKind   cause=parameter        binding=v(param) requires=str key=any declared=- view=any entry=[-∞, +∞] open=1
+        call-site arg types: (no exact caller)  => join never (kind none)
+i38   block e552<generic>                    ?          UnknownParameterKind   cause=parameter        binding=v(param) requires=str key=any declared=- view=any entry=[-∞, +∞] open=1
+        call-site arg types: (no exact caller)  => join never (kind none)

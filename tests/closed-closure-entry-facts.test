@@ -1,0 +1,424 @@
+# closed-closure-entry-facts.test -- M7.c: closed-closure caller-derived
+# entry-kind theorems (M7C-CLOSED-CLOSURE-ENTRY-FACTS.md).
+#
+# Family 1b (M7A-INSTANCE-SELECTION-THEOREM-AUDIT.md): a value-capturing
+# closure's specialization key is always forced generic (hir/specialize.tcl
+# ::Handle's own GenericKey collapse, "Bound code growth for value-capturing
+# closures"), so its instance's parameters seed "any" even where every
+# actual runtime caller passes one consistent kind. This milestone derives
+# a second, independently sound entry theorem -- from the instance's own
+# *closed* set of callers -- and feeds it into the exact same seeding
+# mechanism M1/M7.b already use (hir/specialize.tcl's Analyze/Reanalyze),
+# so existing downstream guard/type machinery removes the resulting guards
+# with no change of its own.
+#
+# Two new named queries (spec items 60-61), both pure functions of an
+# ordinary hir::specialize::analyze return value:
+#   hir::specialize::closed {hir analysis id}                -> 0 | 1
+#   hir::specialize::closedCallerTheorem {hir analysis id}    -> {KeyType...} | ""
+# "" (not a list of "any"s) distinguishes "id is not closed at all" from
+# "closed, but every parameter position stayed any" -- item 62's own
+# requirement that closedness/theorem be independently inspectable, not
+# only inferred from a disappeared guard.
+#
+# hir::specialize::analyze gained one new option, `-closed-caller-facts-opt`
+# (default 1): passing 0 reproduces the exact pre-M7.c instance set/facts,
+# used throughout this file to pin that instance identity never depends on
+# this milestone (spec items 22, 54, 89: the hard "closure identity is
+# unchanged" invariant).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+proc sourceHir {text} {
+    return [surface::compile $text t.bot -strict 0]
+}
+
+proc nirOf {text} {
+    return [dict get [native::lower::program [sourceHir $text] -tiny-leaf-inline-opt 0] text]
+}
+
+proc specOf {text args} {
+    set hir [surface::compile $text t.bot -strict 0]
+    return [list $hir [hir::specialize::analyze $hir {*}$args]]
+}
+
+proc specLabels {analysis name} {
+    lmap id [dict get $analysis used] {
+        if {[dict get $analysis instances $id name] ne $name} continue
+        hir::specialize::label $analysis $id
+    }
+}
+
+proc specId {analysis name} {
+    foreach id [dict get $analysis used] {
+        if {[dict get $analysis instances $id name] eq $name} {
+            return $id
+        }
+    }
+    error "no used instance named $name"
+}
+
+# The view type of the first reachable ref of instance ID's parameter index
+# I (same technique as tests/conjunctive-entry-facts.test's paramViewType).
+proc paramViewType {hir analysis id i} {
+    set instance [dict get $analysis instances $id]
+    set block [dict get $instance block]
+    set view [hir::specialize::view $hir $analysis $id]
+    set b [lindex [hir::get $hir $block params] $i]
+    foreach e [dict get [dict get $analysis context] exprs $block] {
+        if {[hir::kind $view $e] eq "ref" && [hir::get $view $e binding] eq $b} {
+            return [hir::types::show [hir::typeOf $view $e]]
+        }
+    }
+    return "-"
+}
+
+# Every representation ("UnknownParameterKind" et al) blocker's message text
+# for instance ID's own region, for a direct guard-presence assertion
+# independent of counting NIR ops.
+proc paramGuards {hir analysis id} {
+    set region [hir::aot::analyzeRegion [hir::specialize::view $hir $analysis $id] \
+        [dict get $analysis instances $id block] [dict get $analysis context]]
+    return [lmap b [dict get $region blockers] {
+        if {[dict get $b class] ne "representation"} continue
+        dict get $b kind
+    }]
+}
+
+# ---------------------------------------------------------------------------
+# Primary positive fixture (spec item 25): one value-capturing closure, all
+# callers exact, all passing the same kind. Before this milestone the guard
+# is present (entry kind broad/unknown); after, closed=1, theorem=Int, and
+# the guard is gone -- through the existing guard machinery, unmodified.
+
+set ::positiveFixture {
+fn outer(tag):
+    fn inner(x):
+        x + length(tag)
+    inner(1) + inner(2)
+outer("v")
+}
+
+test closed-single-kind-closure-is-closed {inner captures tag (str, not Int -- so Handle's own GenericKey collapse forces it generic), and both of its exact callers pass Int: hir::specialize::closed proves it closed} -body {
+    lassign [specOf $::positiveFixture] hir analysis
+    hir::specialize::closed $hir $analysis [specId $analysis inner]
+} -result 1
+
+test closed-single-kind-closure-theorem-is-int {the closed-caller theorem for inner's own (single) parameter is exactly Int -- the join of both exact callers, not merely the first} -body {
+    lassign [specOf $::positiveFixture] hir analysis
+    hir::specialize::closedCallerTheorem $hir $analysis [specId $analysis inner]
+} -result {int}
+
+test closed-single-kind-closure-guard-eliminated {before this milestone (-closed-caller-facts-opt 0) inner's own "x + length(tag)" has an UnknownParameterKind guard; with the theorem applied, the guard is gone} -body {
+    lassign [specOf $::positiveFixture] hir analysis
+    lassign [specOf $::positiveFixture -closed-caller-facts-opt 0] hir0 before
+    list [paramGuards $hir0 $before [specId $before inner]] \
+         [paramGuards $hir $analysis [specId $analysis inner]]
+} -result {UnknownParameterKind {}}
+
+test closed-single-kind-closure-identity-unchanged {inner's own instance label (block + key) is byte-for-byte identical whether or not the closed-caller pass runs -- the theorem is seeding metadata, never an identity input (spec items 22, 84)} -body {
+    lassign [specOf $::positiveFixture] hir analysis
+    lassign [specOf $::positiveFixture -closed-caller-facts-opt 0] hir0 before
+    list [specLabels $before inner] [specLabels $analysis inner]
+} -result {inner<generic> inner<generic>}
+
+test closed-single-kind-closure-instance-count-unchanged {used-instance count (program + outer + inner) is identical with the option on and off} -body {
+    lassign [specOf $::positiveFixture] hir analysis
+    lassign [specOf $::positiveFixture -closed-caller-facts-opt 0] hir0 before
+    list [llength [dict get $before used]] [llength [dict get $analysis used]]
+} -result {3 3}
+
+# ---------------------------------------------------------------------------
+# Multi-caller positive fixture (spec item 26): the positive fixture above
+# already has two distinct exact call sites (inner(1), inner(2)); pin
+# explicitly that the theorem is a real join, not merely copied from
+# whichever caller Handle discovers first (a third caller of a different
+# but compatible shape must not perturb it -- reusing the primary fixture's
+# own two-caller shape directly, and adding a third homogeneous call site).
+
+test closed-multi-caller-theorem-not-copied-from-first {a third exact Int caller keeps the theorem exactly Int, not the first caller's own possibly-narrower fact by coincidence} -body {
+    lassign [specOf {
+fn outer(tag):
+    fn inner(x):
+        x + length(tag)
+    inner(1) + inner(2) + inner(3)
+outer("v")
+}] hir analysis
+    hir::specialize::closedCallerTheorem $hir $analysis [specId $analysis inner]
+} -result {int}
+
+# ---------------------------------------------------------------------------
+# Mixed-kind closed fixture (spec items 27, 64): a proven-closed instance
+# whose exact callers disagree. Closedness by itself does not imply
+# homogeneity: the theorem must widen to "any" (no fact), never fabricate a
+# single kind, and a guard that is genuinely necessary must stay necessary.
+
+set ::mixedFixture {
+fn outer(tag):
+    fn inner(x):
+        concat(tag, "")
+        x
+    identity_a = inner(tag)
+    identity_b = inner(1)
+    length(tag)
+outer("v")
+}
+
+test closed-mixed-kind-closure-is-closed {inner is still closed (both callers are exact) even though they disagree} -body {
+    lassign [specOf $::mixedFixture] hir analysis
+    hir::specialize::closed $hir $analysis [specId $analysis inner]
+} -result 1
+
+test closed-mixed-kind-closure-theorem-widens-to-any {the theorem for inner's own parameter is "any": Str and Int callers join to the top of the lattice, never a fabricated single kind (spec item 30's own "Required: yes" that disagreement widens)} -body {
+    lassign [specOf $::mixedFixture] hir analysis
+    hir::specialize::closedCallerTheorem $hir $analysis [specId $analysis inner]
+} -result {any}
+
+test closed-mixed-kind-closure-guard-retained-when-necessary {a genuinely kind-requiring parameter with disagreeing exact callers keeps its guard: closedness never manufactures an unsound narrowing (spec items 27, 64)} -body {
+    lassign [specOf {
+fn outer(tag):
+    fn inner(x):
+        x + length(tag)
+    inner(1) + inner(tag)
+outer("v")
+}] hir analysis
+    set id [specId $analysis inner]
+    list [hir::specialize::closed $hir $analysis $id] \
+         [hir::specialize::closedCallerTheorem $hir $analysis $id] \
+         [paramGuards $hir $analysis $id]
+} -result {1 any UnknownParameterKind}
+
+# ---------------------------------------------------------------------------
+# Open/dynamic caller negative fixture (spec items 28, 65, 77): a closure
+# reachable through an ordinary dynamic callvalue site (apply(f, y): f(y))
+# in addition to its exact callers must not be proven closed, and must not
+# receive an Int-only theorem merely because its known exact caller happens
+# to pass Int.
+
+set ::openFixture {
+fn outer(tag):
+    fn inner(x):
+        x + length(tag)
+    fn apply(f, y):
+        f(y)
+    inner(1) + apply(inner, 2)
+outer("v")
+}
+
+test open-instance-not-closed {inner, passed as an ordinary value into apply's own dynamic callvalue site, is not closed -- an exact Int caller (inner(1)) existing alongside does not change that (spec item 45: allocation locality/one caller does not imply closedness)} -body {
+    lassign [specOf $::openFixture] hir analysis
+    hir::specialize::closed $hir $analysis [specId $analysis inner]
+} -result 0
+
+test open-instance-no-unsound-theorem {an open instance's closedCallerTheorem is "" -- no theorem is even attempted, not merely a broad one (spec item 41's own "Caller-derived entry facts are sound only for a closed instance")} -body {
+    lassign [specOf $::openFixture] hir analysis
+    hir::specialize::closedCallerTheorem $hir $analysis [specId $analysis inner]
+} -result {}
+
+test open-instance-guard-retained {inner's own guard remains present -- the open caller is never silently dropped from consideration} -body {
+    lassign [specOf $::openFixture] hir analysis
+    paramGuards $hir $analysis [specId $analysis inner]
+} -result {UnknownParameterKind}
+
+test open-instance-callvalue-stays-dynamic {apply's own f(y) stays a generic/dynamic call -- M7.c never turns an ordinary callvalue into a direct call merely because a small program has few observed targets (spec item 77)} -body {
+    lassign [specOf $::openFixture] hir analysis
+    set id [specId $analysis apply]
+    dict get [dict get $analysis instances $id] calls
+} -result {}
+
+# ---------------------------------------------------------------------------
+# Exact-alias control (spec items 19, 30, 66): reuses M2's exact-alias type
+# identity (an ordinary immutable "g = f" preserves f's own exact callable
+# type, TYPED-CALLABLE-ESCAPE-SOUNDNESS.md), but hir::blockescape's own
+# eligibility proof -- reused here as-is, not extended, per this milestone's
+# "prefer reusing an existing proof" scope -- only ever recognizes a
+# reference that is itself the direct callee of a call; a plain alias's own
+# bind-value reference is not that, so it is NOT currently vouched for.
+# Pinned as the actual, current, conservative answer (a real architectural
+# finding, not a defect this milestone introduces or is required to fix):
+# an alias reference makes the instance open, exactly like any other
+# reference blockescape cannot reduce to a call.
+
+test exact-alias-reference-is-not-currently-vouched-for {"alias = inner" is a plain value reference to inner: blockescape's own single-level RefsAsCalls check (a reference must itself be a call's callee) does not recognize it, so inner is conservatively NOT closed -- pinning the actual current answer to spec item 19, not assuming one} -body {
+    lassign [specOf {
+fn outer(tag):
+    fn inner(x):
+        x + length(tag)
+    alias = inner
+    inner(1) + alias(2)
+outer("v")
+}] hir analysis
+    hir::specialize::closed $hir $analysis [specId $analysis inner]
+} -result 0
+
+# ---------------------------------------------------------------------------
+# Escape control (spec items 29, 67): the openFixture above already is the
+# escape control (inner escapes into apply's own untyped parameter, from
+# which an arbitrary future call could occur); pinned again here under its
+# own name for direct traceability to spec item 67.
+
+test escaping-closure-prevents-closedness {a closure passed into an ordinary untyped higher-order parameter is not closed, confirming spec item 67 using the same construction validated above under "open instance"} -body {
+    lassign [specOf $::openFixture] hir analysis
+    hir::specialize::closed $hir $analysis [specId $analysis inner]
+} -result 0
+
+# ---------------------------------------------------------------------------
+# Captured-through-parent control (spec items 32, 68): inner is captured by
+# a sibling closure (middle) in the same region and invoked only there --
+# hir::blockescape's own "sibling reference" fixpoint (Bindings' 2c) proves
+# this transitively, so inner is still closed and still receives a theorem,
+# through middle's own (equally closed) caller facts.
+
+set ::capturedThroughParentFixture {
+fn outer(tag):
+    fn inner(x):
+        x + length(tag)
+    fn middle(y):
+        inner(y)
+    middle(1) + middle(2)
+outer("v")
+}
+
+test captured-through-parent-both-closed {both inner (captured+called only by its sibling middle) and middle (called only by outer) are closed} -body {
+    lassign [specOf $::capturedThroughParentFixture] hir analysis
+    list [hir::specialize::closed $hir $analysis [specId $analysis inner]] \
+         [hir::specialize::closed $hir $analysis [specId $analysis middle]]
+} -result {1 1}
+
+test captured-through-parent-theorem-flows-transitively {inner's own theorem (Int) is derived from middle's own calls, which are themselves derived from outer's Int calls to middle -- transitive exact-callable transport (spec item 32)} -body {
+    lassign [specOf $::capturedThroughParentFixture] hir analysis
+    list [hir::specialize::closedCallerTheorem $hir $analysis [specId $analysis inner]] \
+         [hir::specialize::closedCallerTheorem $hir $analysis [specId $analysis middle]]
+} -result {int int}
+
+test captured-through-parent-guard-eliminated {inner's own guard is gone under the transitively-derived theorem} -body {
+    lassign [specOf $::capturedThroughParentFixture] hir analysis
+    paramGuards $hir $analysis [specId $analysis inner]
+} -result {}
+
+# ---------------------------------------------------------------------------
+# Zero-caller instance (spec items 16, 32, 106 Q32): a value-capturing
+# closure that is declared but never called at all. blockescape's own
+# eligibility fixpoint already declines a candidate with no observed
+# reference whatsoever ("A candidate this analysis never observes any
+# genuine... call reference to at all... must not be virtualized") --
+# pinning the current architecture's actual, conservative answer: not
+# closed, no theorem, rather than a vacuously-true "all zero callers agree".
+
+test zero-caller-instance-not-closed {a value-capturing closure with no exact caller at all is not closed: zero callers never produce an arbitrary theorem (spec item 32's own "Required: no")} -body {
+    lassign [specOf {
+fn outer(tag):
+    fn inner(x):
+        x + length(tag)
+    length(tag)
+outer("v")
+}] hir analysis
+    hir::specialize::closed $hir $analysis [specId $analysis inner]
+} -result 0
+
+# ---------------------------------------------------------------------------
+# Recursive self edge (spec items 17, 69): the self edge participates in the
+# closed caller set (an unchanged-forward self-argument contributes no fact
+# for its own position -- see hir/specialize.tcl's own ClosedCallerFacts
+# comment -- but a *changed* self-argument, and every non-self caller, still
+# does).
+
+set ::recursiveFixture {
+fn outer(tag):
+    fn inner(x, n):
+        if n <= 0:
+            x + length(tag)
+        else:
+            inner(x, n - 1)
+    inner(1, 3) + inner(2, 1)
+outer("v")
+}
+
+test recursive-self-edge-closed-with-theorem {inner, self-recursive on its own second parameter, is closed and both parameters resolve to Int -- x via its two non-self (outer) callers, n via outer's own literals joined with the self-call's own derived (n - 1, not an unchanged forward) argument} -body {
+    lassign [specOf $::recursiveFixture] hir analysis
+    list [hir::specialize::closed $hir $analysis [specId $analysis inner]] \
+         [hir::specialize::closedCallerTheorem $hir $analysis [specId $analysis inner]]
+} -result {1 {int int}}
+
+test recursive-self-edge-guard-eliminated {both of inner's own guards (x's use, n's use) are gone} -body {
+    lassign [specOf $::recursiveFixture] hir analysis
+    paramGuards $hir $analysis [specId $analysis inner]
+} -result {}
+
+# ---------------------------------------------------------------------------
+# Declared theorem + caller theorem coexist (spec items 37-38, 74): a
+# closure parameter that already has a declared aggregate type (M7.b's own
+# domain) combines soundly with this milestone's own closed-caller channel:
+# neither erases the other, and instance identity is still untouched.
+
+set ::declaredPlusCallerFixture {
+type Byte = Int in 0..255
+fn byteA() -> Byte:
+    97
+
+fn outer(tag):
+    fn inner(xs: List[Byte]):
+        list_length(xs)
+        length(tag)
+    inner([byteA(), byteA()])
+    inner([byteA()])
+outer("v")
+}
+
+test declared-and-caller-theorem-coexist-declared-survives {the declared List[Byte] theorem still reaches inner's own view (M1/M7.b's own pre-existing transport, unaffected by this milestone running alongside it)} -body {
+    lassign [specOf $::declaredPlusCallerFixture] hir analysis
+    paramViewType $hir $analysis [specId $analysis inner] 0
+} -result {List[int[Byte]]}
+
+test declared-and-caller-theorem-coexist-identity-unchanged {inner's own instance label is identical with the closed-caller pass on or off, even though a declared aggregate theorem is also in play} -body {
+    lassign [specOf $::declaredPlusCallerFixture] hir analysis
+    lassign [specOf $::declaredPlusCallerFixture -closed-caller-facts-opt 0] hir0 before
+    list [specLabels $before inner] [specLabels $analysis inner]
+} -result {inner<generic> inner<generic>}
+
+test declared-and-caller-theorem-coexist-closed {inner is proven closed with a declared aggregate parameter present, exactly as without one} -body {
+    lassign [specOf $::declaredPlusCallerFixture] hir analysis
+    hir::specialize::closed $hir $analysis [specId $analysis inner]
+} -result 1
+
+# ---------------------------------------------------------------------------
+# Untyped parameter gets an optimization fact, never a source contract
+# (spec items 33-34): the positive fixture's own "inner(x)" has no source-
+# level type annotation at all; the theorem is metadata for this instance's
+# own re-analysis, not a change to inner's own declared/semantic signature.
+
+test untyped-parameter-declared-signature-unaffected {inner's own declaredParamTypes stays empty (unannotated) -- the closed-caller theorem is never written back as a source-level contract (spec item 34's own "Required: no")} -body {
+    lassign [specOf $::positiveFixture] hir analysis
+    set block [dict get [dict get $analysis instances [specId $analysis inner]] block]
+    dict get $hir exprs $block declaredParamTypes
+} -result {{}}
+
+test untyped-parameter-still-legal-with-a-new-untyped-caller {a new caller that cannot prove Int (an open/generic one, per the openFixture's own apply) remains legal to add -- source legality is never retroactively restricted by a caller theorem (spec item 35)} -body {
+    # openFixture already adds exactly such a caller (apply's own dynamic
+    # f(y)) to positiveFixture's own inner/outer shape; it compiles and
+    # analyzes without any new static rejection.
+    lassign [specOf $::openFixture] hir analysis
+    expr {[specId $analysis inner] ne ""}
+} -result 1
+
+# ---------------------------------------------------------------------------
+# Runtime parity (spec item 93): the primary positive/mixed/open/recursive
+# fixtures above all still evaluate to the same result on every backend as
+# they do with the closed-caller pass disabled -- theorem transport must
+# never change observable behavior.
+
+foreach {label text} [list positive $::positiveFixture mixed $::mixedFixture \
+        open $::openFixture recursive $::recursiveFixture \
+        capturedThroughParent $::capturedThroughParentFixture \
+        declaredPlusCaller $::declaredPlusCallerFixture] {
+    test runtime-parity-$label {the same source evaluates identically on interp/compile/cranelift-generic/cranelift: theorem transport changes representation, never behavior} -body {
+        set exprs [hir::lower [sourceHir $text]]
+        set outcomes [lmap backend {interp compile cranelift-generic cranelift} {
+            outcomeUnder $backend $exprs
+        }]
+        llength [lsort -unique $outcomes]
+    } -result 1
+}
+
+cleanupTests

@@ -26,9 +26,17 @@ proc callResults {analysis spec caller} {
 }
 
 test call-facts-sum-1 {exact captured closure call specializes and keeps its generic entry} -body {
+    # -closed-caller-facts-opt 0 alongside -call-facts-opt 0 in the "off"
+    # comparison: M7C-CLOSED-CLOSURE-ENTRY-FACTS.md's own closed-caller
+    # theorem is an independent mechanism that reaches the exact same
+    # closure once -call-facts-opt's own specific-key specialization is
+    # disabled (a closure -call-facts-opt would otherwise specialize stays
+    # generic, which is exactly this milestone's own target population) --
+    # disabling both isolates -call-facts-opt's own individual contribution,
+    # which is what this test's own name is about.
     set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench sum-refined.ir]]]
     set on [native::nir $hir]
-    set off [native::nir $hir -call-facts-opt 0]
+    set off [native::nir $hir -call-facts-opt 0 -closed-caller-facts-opt 0]
     list [expr {[string first {instance="int"} $on] >= 0}] \
          [expr {[string first {guard int %0} $on] < 0}] \
          [expr {[string first {guard int %0} $off] >= 0}]

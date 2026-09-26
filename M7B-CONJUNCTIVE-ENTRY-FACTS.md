@@ -46,6 +46,39 @@ by this milestone; `hir::range::ProvesValueAcceptedBy`/`AggregateAdmits`
 (M7.a.a's own admissibility rule) are unchanged; no `.bot`/`.ir` frozen
 source changed; no Rust file changed.
 
+**Precise characterization (M7.c drive-by correction).** M7.b preserves
+two *persistent* facts, each in its own pre-existing channel, and derives
+one *transient, per-instance* view from them:
+
+- persistent observed identity/fact: the specialization key (`instance
+  args`) -- e.g. `List[never]` for a statically proven empty caller
+  (M7.a.a), or a coarser observed element kind such as `List[int]` for a
+  declared `List[Byte]` parameter;
+- persistent declared theorem: `block.declaredParamTypes` -- the
+  function's own verified source contract, instance-independent;
+- derived per-instance semantic view: `narrow(observed, declared)` --
+  recomputed fresh every time `Analyze` seeds an instance's local
+  re-inference, never stored back onto the key or onto
+  `declaredParamTypes`.
+
+For the empty case this reads as: observed `List[never]`, declared
+`List[Byte]`, derived consumer view `List[never]` (`narrow`'s own bottom
+rule at the element position, "Scalar never vs List[never]" below).
+
+**M7.b preserves the two source facts in separate existing channels and
+derives the strongest currently representable consumer view from their
+conjunction. It does not introduce a first-class arbitrary fact-product
+representation.** There is no new stored type form, no tuple/pair of
+facts kept anywhere, and no third representation a future consumer would
+need to learn to read: `narrow`'s output is an ordinary `hir::types` value,
+indistinguishable in shape from any other type this compiler already
+produces.
+
+**The specific-key invariant, stated generally:** a specific specialization
+key must not suppress independently proven declared entry facts merely
+because the key itself carries structure. (M7.c extends this to a second,
+independently proven entry channel -- see M7C-CLOSED-CLOSURE-ENTRY-FACTS.md.)
+
 ```
 git diff --stat (production files only):
  hir/range.tcl      | 81 +++++++++++++++++++++++++++++++++++++++++
@@ -158,6 +191,29 @@ answers "could a value with OBSERVED's own fact(s) also satisfy DECLARED"
 or "a sound combined fact" (`narrow`, this milestone's own seeding
 mechanism, which *assumes* its two arguments are already known-satisfiable
 by construction -- see "Why subtype/lub/narrow are or are not sufficient").
+
+**`FactsSatisfiable` does not gate `Analyze`'s `narrow` combination.**
+`Analyze` never calls it, and no production code path calls it before (or
+instead of) `narrow`. The actual architecture is:
+
+```
+legal-program construction proves compatibility upstream
+    (hir::range::verifyDeclaredParams / hir::callables::verify, before
+    hir::specialize ever runs -- see Required satisfiability question 31)
+    v
+specialization combines already-compatible facts with narrow
+    (hir::specialize::Analyze's seeding step: production, unconditional)
+    v
+FactsSatisfiable names/tests the corresponding abstract relation, for
+analyses (and this milestone's own test suite) that independently need a
+satisfiability query -- not for Analyze's own seeding, which never asks it
+```
+
+`FactsSatisfiable` is a named, tested primitive that makes the relation
+`narrow`'s soundness argument already depends on independently checkable;
+it is not a runtime precondition of `narrow`, and no redundant production
+satisfiability check was added merely because this query now exists (spec
+item 39 of M7.c re-confirms this: see M7C-CLOSED-CLOSURE-ENTRY-FACTS.md).
 
 Two dimensions:
 

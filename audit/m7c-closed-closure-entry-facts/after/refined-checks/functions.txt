@@ -1,0 +1,33 @@
+0 <program><generic>                                 bytes=1172  regs=40 env=0 op:listnew=3 call=3 closure=2 callenv=1
+1 char::codepoint<UnicodeChar>                       bytes=39    regs=2 env=0 op:charcodepoint=1
+2 byte::from_int<int>                                bytes=289   regs=8 env=0 op:ilt=1 op:igt=1 br=1 faildeclared=1
+3 byte::set<List[UnicodeChar]>                       bytes=617   regs=17 env=0 op:listlen=1 op:listnew=1 op:ilt=1 br=1 op:listget=1 call=2 op:listappend=1 op:iadd=1 op:setfromlisttotal=1
+4 ascii::is_digit<int>                               bytes=74    regs=13 env=0 op:runbox=1 op:rige=1 br=2 op:rile=1
+5 ascii::is_upper<int>                               bytes=74    regs=13 env=0 op:runbox=1 op:rige=1 br=2 op:rile=1
+6 ascii::is_lower<int>                               bytes=74    regs=13 env=0 op:runbox=1 op:rige=1 br=2 op:rile=1
+7 ascii::is_alphabetic<int>                          bytes=125   regs=8 env=0 call=2 br=2
+8 ascii::is_alphanumeric<int>                        bytes=125   regs=8 env=0 call=2 br=2
+9 web::is_unreserved<generic>                        bytes=155   regs=9 env=1 call=1 br=2 capture=1 op:setcontainstotal=1
+10 web::uri_escape_text<generic>                     bytes=125   regs=7 env=1 capture=2 call=1
+11 high_nibble<generic>                              bytes=103   regs=15 env=0 op:iand=1 op:runbox=1 op:rishr=1 op:rbox=1
+12 hex_pair<generic>                                 bytes=378   regs=9 env=0 call=1 op:listget=2 op:imod=1 op:strcat=1
+13 esc_bytes<generic>                                bytes=624   regs=15 env=0 op:listlen=1 op:ige=1 br=1 op:iadd=1 op:listget=1 call=1 op:strcat=2 tail=1
+14 esc_char<generic>                                 bytes=448   regs=23 env=0 op:strutf8bytes=1 op:listlen=1 op:runbox=1 op:rieq=1 br=2 op:listget=1 callenv=1 call=2
+15 esc_from<generic>                                 bytes=684   regs=17 env=0 guard=1 op:strlen=1 op:ige=1 br=1 op:iadd=2 op:substr=1 call=1 op:strcat=1 tail=1
+16 check<int, int, str, str>                         bytes=504   regs=27 env=0 op:ile=1 br=3 fnvalue=2 call=2 op:runbox=1 op:risub=1 op:rbox=1 op:iadd=1 tail=1
+17 <str>                                             bytes=681   regs=25 env=0 op:strlen=1 call=2 op:ieq=2 br=3 op:ige=1 callmulti=1 op:regioneq=1 op:iadd=1
+18 <generic>                                         bytes=769   regs=25 env=0 guard=1 op:strlen=1 call=2 op:ieq=2 br=3 op:ige=1 callmulti=1 op:regioneq=1 op:iadd=1
+19 char_at<generic>                                  bytes=262   regs=6 env=0 op:iadd=1 op:regioncheck=1
+20 scan_local<generic>                               bytes=804   regs=33 env=0 op:ige=1 br=7 callmulti=1 op:strregiontclalnum=1 op:regioneq=5 op:iadd=1 tail=1
+21 scan_label<generic>                               bytes=564   regs=17 env=0 op:ige=1 br=3 callmulti=1 op:strregiontclalnum=1 op:regioneq=1 op:iadd=1 tail=1
+22 scan_alpha<generic>                               bytes=468   regs=13 env=0 op:ige=1 br=2 callmulti=1 op:strregiontclalpha=1 op:iadd=1 tail=1
+23 tld_ok<generic>                                   bytes=452   regs=11 env=0 call=1 op:ieq=1 br=1 op:isub=1 op:ige=1
+24 domain_loop<generic>                              bytes=644   regs=25 env=0 call=2 op:ieq=1 br=4 op:ige=1 callmulti=1 op:regioneq=1 op:iadd=1 tail=1
+25 <str>                                             bytes=681   regs=25 env=0 op:strlen=1 call=2 op:ieq=2 br=3 op:ige=1 callmulti=1 op:regioneq=1 op:iadd=1
+26 <generic>                                         bytes=769   regs=25 env=0 guard=1 op:strlen=1 call=2 op:ieq=2 br=3 op:ige=1 callmulti=1 op:regioneq=1 op:iadd=1
+27 char_at<generic>                                  bytes=262   regs=6 env=0 op:iadd=1 op:regioncheck=1
+28 scan_local<generic>                               bytes=804   regs=33 env=0 op:ige=1 br=7 callmulti=1 op:strregiontclalnum=1 op:regioneq=5 op:iadd=1 tail=1
+29 scan_label<generic>                               bytes=564   regs=17 env=0 op:ige=1 br=3 callmulti=1 op:strregiontclalnum=1 op:regioneq=1 op:iadd=1 tail=1
+30 scan_alpha<generic>                               bytes=468   regs=13 env=0 op:ige=1 br=2 callmulti=1 op:strregiontclalpha=1 op:iadd=1 tail=1
+31 tld_ok<generic>                                   bytes=452   regs=11 env=0 call=1 op:ieq=1 br=1 op:isub=1 op:ige=1
+32 domain_loop<generic>                              bytes=644   regs=25 env=0 call=2 op:ieq=1 br=4 op:ige=1 callmulti=1 op:regioneq=1 op:iadd=1 tail=1

@@ -133,7 +133,8 @@ namespace eval hir::specialize {
 
 proc hir::specialize::analyze {hir args} {
     variable state
-    set options [hir::Options hir::specialize::analyze {-specialize 1 -call-facts-opt 1} $args]
+    set options [hir::Options hir::specialize::analyze \
+        {-specialize 1 -call-facts-opt 1 -closed-caller-facts-opt 1} $args]
     set context [hir::aot::context $hir]
     set state [dict create hir $hir context $context \
         specialize [dict get $options -specialize] callFactsOpt [dict get $options -call-facts-opt] \
@@ -145,6 +146,15 @@ proc hir::specialize::analyze {hir args} {
         Instance program {}
         if {[dict get $state specialize]} {
             Fixpoint
+            if {[dict get $options -closed-caller-facts-opt]} {
+                # M7.c (M7C-CLOSED-CLOSURE-ENTRY-FACTS.md): once the ordinary
+                # fixpoint above has converged, the complete call graph for
+                # every used instance is known. Only then can closedness (an
+                # instance's complete runtime ingress) and a closed-caller
+                # entry-kind theorem be soundly derived -- see CloseCallers'
+                # own header for why this cannot run any earlier.
+                CloseCallers
+            }
         } else {
             SemanticInstances
         }
@@ -528,6 +538,16 @@ proc hir::specialize::Analyze {id} {
                     # The instance's own KEY (this proc's caller, `args`)
                     # and therefore its identity are untouched: only this
                     # local per-instance region re-inference seed changes.
+                    #
+                    # The declared parameter theorem and the instance
+                    # observation are already known compatible because
+                    # declared-parameter verification precedes
+                    # specialization (hir::range::verifyDeclaredParams runs,
+                    # and hir::callables::verify closes every escape path
+                    # that could reach a call erased of this guarantee,
+                    # before hir::specialize ever runs). narrow combines
+                    # already-compatible facts here; it is not itself an
+                    # admissibility check.
                     set type [hir::types::narrow $type $declaredType]
                 }
                 dict set types $b $type
@@ -686,6 +706,442 @@ proc hir::specialize::Handle {op args} {
         }
     }
     error "hir::specialize: unknown handler operation \"$op\""
+}
+
+# ---------------------------------------------------------------------------
+# M7.c: closed-closure caller-derived entry-kind theorems
+# (M7C-CLOSED-CLOSURE-ENTRY-FACTS.md)
+#
+# Family 1b (M7A-INSTANCE-SELECTION-THEOREM-AUDIT.md): a value-capturing
+# closure's KeyType is always forced generic (Handle's own GenericKey
+# collapse above, "Bound code growth for value-capturing closures"), so its
+# instance's parameters seed "any" even where every actual runtime caller
+# passes one consistent kind. M1/M7.b already transport a *declared*
+# parameter theorem into a generic instance's own seed; this milestone adds
+# a second, independently sound theorem -- derived from the instance's own
+# *closed* set of callers -- through the exact same seeding mechanism
+# (Analyze's own parameter loop, mirrored below by Reanalyze), so existing
+# downstream guard/type machinery removes the resulting guards with no
+# change of its own (spec item 49).
+#
+# Closedness: hir::range::OpenInstances' own "materialized" test (a block's
+# generic instance is open iff some reachable code anywhere in the used
+# instance set materializes a Block value of it) is already the right,
+# audited answer for an ordinary (static/envless) block -- and stays that
+# way here (ClosedSet's "static" branch below is exactly that test,
+# duplicated rather than imported to avoid reversing hir::range's own
+# dependency on hir::specialize). It is NOT the right test for a family-1b
+# *closure*: hir::aot::materializedBlocks' own "bind" case counts *every*
+# bind of a non-envless (capturing) closure as materializing, unconditionally
+# (`$value ni $envless` alone, no reference-level check) -- correct for its
+# own conservative purpose, but it makes OpenInstances say "open" for
+# essentially every value-capturing closure regardless of how it is actually
+# referenced (confirmed empirically against both frozen benchmarks: every
+# family-1b guard site except plain-static cascades reads open=1 there).
+# The finer, already-existing proof that most of these closures' *every*
+# reference actually is an exact, statically resolved call is
+# hir::blockescape's own eligibility fixpoint (RefsAsCalls): reused directly
+# below (ClosedSet's "closure" branch) rather than building a second escape
+# analysis, per spec item 10's own explicit preference. hir::blockescape
+# already needs this exact proof for a stronger consequence (skipping heap
+# allocation entirely), so this milestone's own closedness proof is no less
+# audited than that existing, shipped guarantee.
+#
+# Why this cannot run any earlier than a whole extra pass, after Fixpoint
+# has converged: blockescape's own analysis (like hir::range::analyze's)
+# takes the *finished* `used`/`calls` graph as input -- a closure's
+# reference set is only completely known once specialization itself is
+# done discovering instances and edges. Analyze's own M1/M7.b seeding, by
+# contrast, needs no such wait, because a function's declared-parameter
+# theorem is available before any instance exists at all.
+#
+# Never creating a new instance or edge (spec items 22, 41, 43, 50, 54, 89):
+# Reanalyze below re-runs hir::types::inferRegion for exactly one already-
+# used instance, with FrozenHandle in place of the ordinary Handle -- it
+# never calls Instance, so it can only ever resolve a "call" op to the
+# *same* target hir::specialize's own ordinary Fixpoint already recorded in
+# that instance's own `calls` map. A narrower seed can only prune
+# reachability (decide more branches, never fewer -- soundness of the
+# existing type-inference lattice), so every call FrozenHandle is ever asked
+# about is guaranteed to already have an entry there; if that invariant is
+# ever wrong, FrozenHandle degrades safely (returns "any"/no target) rather
+# than fail loudly, since this whole pass is optimization-only (spec #85).
+#
+# Cascades and fixpoint (spec items 17-20, 27, 30-32, 43-44): one closed
+# instance's own theorem can depend on *another* closed instance's theorem
+# (a caller passes a value whose own precision only improves once *its*
+# entry theorem is applied -- M7.a's own "cascade" mechanism, reproduced
+# directly in the frozen corpus: hex_pair depends on esc_bytes.bytes,
+# scan_label/scan_alpha depend on domain_loop/tld_ok). CloseCallers below
+# runs a small, bounded, monotone round loop over exactly the closed subset
+# -- the same shape as hir::range::analyze's own already-existing
+# caller-propagation fixpoint, applied to Kind facts instead of Range facts
+# -- rather than reusing hir::specialize's own live Instance/Requeue
+# machinery (which would risk exactly the new-instance/new-edge outcome the
+# invariants above forbid). A zero-caller closed instance is simply never
+# reanalyzed (Reanalyze is only ever called for instances ClosedCallerFacts
+# found a fact for), so it never receives an arbitrary theorem (spec #32).
+
+# 1 if every runtime route by which instance ID could be invoked is
+# accounted for in SNAPSHOT's own call graph (a `hir::specialize::analyze`
+# return value) and BLOCKESCAPE's own eligibility analysis
+# (`hir::blockescape::analyze $hir SNAPSHOT`) -- see this section's own
+# header for what makes each branch below sound. Only ever true for a
+# *generic* instance of a real block (the program is never open; a
+# specialized instance's only possible callers are exactly the direct calls
+# that selected it, per hir::range::OpenInstances' own comment, reproduced
+# here).
+proc hir::specialize::InstanceClosed {snapshot blockescape id} {
+    set instance [dict get $snapshot instances $id]
+    if {[dict get $instance block] eq "program" || ![dict get $instance generic]} {
+        return 1
+    }
+    set block [dict get $instance block]
+    if {$block in [dict get [dict get $snapshot context] statics]} {
+        return [expr {![dict exists [MaterializedBlocks $snapshot] $block]}]
+    }
+    return [hir::blockescape::wants $blockescape $id]
+}
+
+# BlockExprId -> 1, for every block whose Block value some used instance's
+# reachable code materializes (hir::aot::materializedBlocks): the identical
+# computation hir::range::OpenInstances makes, duplicated here rather than
+# imported (see this section's own header).
+proc hir::specialize::MaterializedBlocks {snapshot} {
+    set materialized [dict create]
+    foreach id [dict get $snapshot used] {
+        foreach block [dict get [dict get $snapshot instances $id] values] {
+            dict set materialized $block 1
+        }
+    }
+    return $materialized
+}
+
+# InstanceId -> 1, for every used generic instance InstanceClosed proves
+# closed.
+proc hir::specialize::ClosedSet {snapshot blockescape} {
+    set closed [dict create]
+    foreach id [dict get $snapshot used] {
+        if {[dict get [dict get $snapshot instances $id] block] ne "program"
+                && [dict get [dict get $snapshot instances $id] generic]
+                && [InstanceClosed $snapshot $blockescape $id]} {
+            dict set closed $id 1
+        }
+    }
+    return $closed
+}
+
+# InstanceId -> one KeyType per parameter (the join of every exact caller's
+# own argument kind, "any" where no closed instance in CLOSED is a call
+# target, or where the callers themselves disagree): the closed-caller
+# entry-kind theorem, collected fresh from SNAPSHOT's *current* overlays --
+# so a caller that is itself a reanalyzed closed instance (a cascade)
+# contributes its own, already-improved argument facts once CloseCallers'
+# own round loop reaches it again. Only reachable calls count (spec #16/32:
+# dead code proves nothing); only calls targeting a CLOSED instance are
+# examined at all, so nothing here ever reads or joins a fact from an open/
+# dynamic edge, because an open/dynamic edge is never routed through
+# hir::specialize's own Handle in the first place (hir::types::Call only
+# invokes the spec handler for an exact `{block B arity result}` callee --
+# see hir/types.tcl's own Call).
+#
+# An argument that is nothing but an unchanged forward of the callee's own
+# parameter to itself (a self or otherwise recursive call passing a
+# parameter straight through, e.g. esc_bytes's own `esc_bytes(bytes, i + 1,
+# ...)`) contributes no fact for that position -- exactly RefinementFacts'
+# own exclusion (see its comment), and for the identical reason: such a
+# reference's own type is circularly the very theorem this proc is
+# computing, so joining its *current*, not-yet-improved type in would only
+# ever poison the join down to "any" and never converge (confirmed directly
+# against the frozen corpus: `bytes` never left "any" across every round
+# without this exclusion, while `i`/`acc`, forwarded only via a native op
+# with its own fixed result kind, were unaffected either way). Such a
+# position is marked with the empty string, a "no contribution from this
+# call" placeholder distinct from the real type atom "any" (a genuinely
+# unknown-typed argument, e.g. a cascade still waiting on its own caller's
+# theorem, which must still join as "any" -- CombineCallerTheorem treats
+# both alike as "nothing to narrow with" only once every contributing call
+# has been folded in).
+proc hir::specialize::ClosedCallerFacts {hir snapshot closed} {
+    set facts [dict create]
+    foreach callerId [dict get $snapshot used] {
+        set callerInstance [dict get $snapshot instances $callerId]
+        set calls [dict get $callerInstance calls]
+        if {![dict size $calls]} {
+            continue
+        }
+        set reachable [dict get $callerInstance reachable]
+        set view ""
+        dict for {e target} $calls {
+            if {![dict exists $closed $target] || $e ni $reachable} {
+                continue
+            }
+            if {$view eq ""} {
+                set view [view $hir $snapshot $callerId]
+            }
+            set params [dict get $view exprs [dict get $snapshot instances $target block] params]
+            set contribution {}
+            foreach a [dict get $view exprs $e args] p $params {
+                set argNode [dict get $view exprs $a]
+                if {[dict get $argNode kind] eq "ref" && [dict get $argNode binding] eq $p} {
+                    lappend contribution ""
+                } else {
+                    lappend contribution [KeyType [hir::typeOf $view $a]]
+                }
+            }
+            if {![dict exists $facts $target]} {
+                dict set facts $target $contribution
+            } else {
+                set merged {}
+                foreach prev [dict get $facts $target] cur $contribution {
+                    if {$prev eq ""} {
+                        lappend merged $cur
+                    } elseif {$cur eq ""} {
+                        lappend merged $prev
+                    } else {
+                        lappend merged [hir::types::lub $prev $cur]
+                    }
+                }
+                dict set facts $target $merged
+            }
+        }
+    }
+    return $facts
+}
+
+# Combines TYPE (the observed key, already possibly narrowed by the
+# declared-parameter theorem -- see Reanalyze's own seeding order, which
+# mirrors Analyze's) with FACT, one parameter's closed-caller join ("any" if
+# no useful fact applies): conjunctively, exactly mirroring the M1/M7.b
+# declared-theorem combination (M7B-CONJUNCTIVE-ENTRY-FACTS.md) a second
+# time for a second, independently proven channel (M7C's own generalization
+# of that milestone's specific-key invariant). Never erases TYPE; only ever
+# narrows it further.
+proc hir::specialize::CombineCallerTheorem {type fact} {
+    if {$fact eq "any" || $fact eq ""} {
+        return $type
+    }
+    if {![hir::types::IsSpecific $type]} {
+        return [expr {[hir::types::IsSpecific $fact] ? $fact : [hir::types::narrow $type $fact]}]
+    }
+    if {([hir::types::IsList $type] && [hir::types::IsList $fact])
+            || ([hir::types::IsSet $type] && [hir::types::IsSet $fact])} {
+        return [hir::types::narrow $type $fact]
+    }
+    # TYPE is already a specific (aggregate/callable) fact whose constructor
+    # does not match FACT's. Every legal caller of a sound program already
+    # agrees on a parameter's own static kind (hir::range::
+    # verifyDeclaredParams's admissibility proof, upstream of specialization
+    # -- see this section's own header), so this is not expected to happen;
+    # if it ever does, keep TYPE rather than risk combining incompatible
+    # facts.
+    return $type
+}
+
+# The handler Reanalyze's own hir::types::inferRegion pass uses in place of
+# the ordinary Handle: identical for "create" (nothing here needs a fresh
+# captured-binding seed -- Reanalyze never changes what a nested closure
+# captures), but a call always resolves to CALLS' own pre-recorded target
+# instead of calling Instance -- so this pass can only ever narrow facts
+# inside instance ID's own region, never create a new instance or select a
+# different one for a call it already made (see this section's own header,
+# "Never creating a new instance or edge").
+proc hir::specialize::FrozenHandle {calls op args} {
+    variable state
+    switch -- $op {
+        call {
+            lassign $args e block argTypes
+            if {![dict exists $calls $e]} {
+                return any
+            }
+            return [dict get $state instances [dict get $calls $e] result]
+        }
+        create {
+            return
+        }
+    }
+    error "hir::specialize: unknown handler operation \"$op\""
+}
+
+# Re-infers instance ID's region with its parameters additionally narrowed
+# by the closed-caller entry-kind theorem ARGTYPES (one KeyType per
+# parameter, positionally, "any" where no fact applies): a fresh overlay and
+# result, with `calls`/`edges`/`values`/`creates` left exactly as the
+# ordinary fixpoint already computed them. Mirrors Analyze's own seeding
+# loop (M1/M7.b's declared-theorem combination, then CombineCallerTheorem,
+# then RefineParams) so every existing downstream consumer of the overlay
+# needs no change of its own. Returns 1 if the overlay or result actually
+# changed.
+proc hir::specialize::Reanalyze {id argTypes} {
+    variable state
+    set hir [dict get $state hir]
+    set instance [dict get $state instances $id]
+    set block [dict get $instance block]
+    if {$block eq "program"} {
+        return 0
+    }
+
+    set types [dict create]
+    dict for {b type} [dict get $instance seeds] {
+        dict set types $b $type
+    }
+    foreach b [dict get $hir exprs $block params] keyType [dict get $instance args] \
+            declaredType [dict get $hir exprs $block declaredParamTypes] \
+            callerFact $argTypes {
+        set type $keyType
+        if {$declaredType ne {}} {
+            if {![hir::types::IsSpecific $type]} {
+                set type [expr {[hir::types::IsSpecific $declaredType]
+                    ? $declaredType : [hir::types::narrow $type $declaredType]}]
+            } elseif {([hir::types::IsList $type] && [hir::types::IsList $declaredType])
+                    || ([hir::types::IsSet $type] && [hir::types::IsSet $declaredType])} {
+                set type [hir::types::narrow $type $declaredType]
+            }
+        }
+        set type [CombineCallerTheorem $type $callerFact]
+        dict set types $b $type
+    }
+    RefineParams $block types
+
+    set scratch $hir
+    set inferred [hir::types::inferRegion scratch $block $types \
+        [list hir::specialize::FrozenHandle [dict get $instance calls]]]
+    if {[dict get $hir exprs $block declaredResult] ne {}} {
+        set inferred [dict get $hir exprs $block declaredResult]
+    }
+    # Widen, never overwrite (mirrors Analyze's own "result = lub(old,
+    # inferred)"): a self-referential result (esc_from's own recursive
+    # call) can only be as precise as the *previous* round's already-
+    # published result, read back through FrozenHandle -- exactly the same
+    # round-over-round settling the ordinary Fixpoint does for any self-
+    # recursive instance. Overwriting instead of widening would let one
+    # round's still-imprecise self-read regress a later round's already-
+    # better result, and could defeat this proc's own "changed" check by
+    # oscillating instead of converging.
+    set oldResult [dict get $instance result]
+    set inferred [hir::types::lub $oldResult $inferred]
+
+    set overlay [dict create]
+    set reachable {}
+    foreach e [dict get $state context exprs $block] {
+        set node [dict get $scratch exprs $e]
+        set base [dict get $hir exprs $e]
+        set known [expr {[dict exists $node known] ? [dict get $node known] : ""}]
+        if {[dict get $node type] ne [dict get $base type]
+                || [dict get $node reachable] != [dict get $base reachable]
+                || $known ne [expr {[dict exists $base known] ? [dict get $base known] : ""}]} {
+            dict set overlay $e [list [hir::typeOf $scratch $e] $known [dict get $node reachable]]
+        }
+        if {[dict get $node reachable]} {
+            lappend reachable $e
+        }
+    }
+
+    set changed [expr {$overlay ne [dict get $instance overlay] || $inferred ne $oldResult}]
+    if {$changed} {
+        dict set instance overlay $overlay
+        dict set instance reachable $reachable
+        dict set instance result $inferred
+        dict set state instances $id $instance
+    }
+    return $changed
+}
+
+# Computes closedness and closed-caller entry-kind theorems for the current
+# `state instances`/`used` set (post-Fixpoint: see this section's own header
+# for why not earlier), and applies them via Reanalyze -- a small, bounded,
+# monotone round loop exactly like hir::range::analyze's own caller-
+# propagation fixpoint, needed because one closed instance's own theorem can
+# depend on another's (cascades; see the header). Never touches `calls`,
+# `edges`, `values`, `creates`, instance identity, or the `used` set itself.
+proc hir::specialize::CloseCallers {} {
+    variable state
+    variable passLimit
+    set hir [dict get $state hir]
+    set snapshot [dict create specialize 1 instances [dict get $state instances] \
+        keys [dict get $state keys] used [Used] context [dict get $state context]]
+    set be [hir::blockescape::analyze $hir $snapshot]
+    set closed [ClosedSet $snapshot $be]
+    if {![dict size $closed]} {
+        return
+    }
+    # Only an instance ClosedCallerFacts will actually reanalyze at all
+    # (i.e. some used instance's `calls` targets it) is safe to reset below:
+    # `calls`/edges are frozen by this whole pass (see the file header), so
+    # this set of targets is identical in every round -- computing it once,
+    # ahead of the round loop, is exactly the round-1 computation, not a
+    # separate query.
+    set facts [ClosedCallerFacts $hir $snapshot $closed]
+    # A closed instance may already carry a `result` the ordinary Fixpoint
+    # pinned to "any" only because it exhausted its own passLimit while
+    # every entry fact was still "any" (Analyze's own non-convergence
+    # safety valve, hir/specialize.tcl's own Fixpoint header) -- e.g.
+    # esc_from's self-recursive result, unrecoverable there because lub's
+    # own top absorbs ("any" joined with anything stays "any" forever), but
+    # perfectly recoverable here now that entry facts are far better.
+    # Resetting to `never` (the same bottom Instance itself starts every
+    # instance at) and re-settling through this proc's own bounded,
+    # monotone round loop reaches the identical least fixpoint a correctly-
+    # converged Fixpoint would have, never a smaller (unsound) one, by the
+    # same monotone-lattice argument the ordinary Fixpoint itself relies on.
+    # An instance with no entry here (no exact caller at all, e.g. the dead-
+    # `fnvalue` residuals -- spec item 106's own "other" category) is never
+    # reanalyzed by this pass at all, so its `result` must not be reset:
+    # doing so would leave it wrongly pinned at `never` forever.
+    dict for {id argTypes} $facts {
+        dict set state instances $id result never
+    }
+    dict set snapshot instances [dict get $state instances]
+    for {set round 1} {$round <= $passLimit} {incr round} {
+        if {$round > 1} {
+            set facts [ClosedCallerFacts $hir $snapshot $closed]
+        }
+        set changed 0
+        dict for {id argTypes} $facts {
+            if {[Reanalyze $id $argTypes]} {
+                set changed 1
+                dict set snapshot instances $id [dict get $state instances $id]
+            }
+        }
+        if {!$changed} {
+            break
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# M7.c: public closedness/theorem queries (spec items 60-62), for tests and
+# audit tooling that need to assert `closed`/the theorem directly rather
+# than only infer success from a disappeared guard. Both recompute
+# hir::blockescape::analyze (cheap, deterministic, a pure function of HIR
+# and ANALYSIS) rather than requiring every caller of hir::specialize::
+# analyze to also thread a blockescape analysis through -- the same
+# analysis CloseCallers already ran internally, exposed here for inspection
+# rather than cached, so a caller can ask about ANALYSIS's own instances
+# (specialize 1) at any time after analyze returns, not only during
+# CloseCallers' own internal pass.
+
+# 1 if ANALYSIS (a hir::specialize::analyze return value) proves instance ID
+# closed -- see InstanceClosed's own header for the exact proof per branch.
+proc hir::specialize::closed {hir analysis id} {
+    return [InstanceClosed $analysis [hir::blockescape::analyze $hir $analysis] $id]
+}
+
+# The closed-caller entry-kind theorem (one KeyType per parameter, "any"
+# where no useful fact applies) ANALYSIS's own closed-caller pass would
+# derive for instance ID -- "" (not a list) if ID is not closed at all, so a
+# test can distinguish "closed but every caller position was any/absent"
+# from "not closed, no theorem is even attempted".
+proc hir::specialize::closedCallerTheorem {hir analysis id} {
+    set closed [ClosedSet $analysis [hir::blockescape::analyze $hir $analysis]]
+    if {![dict exists $closed $id]} {
+        return ""
+    }
+    set facts [ClosedCallerFacts $hir $analysis $closed]
+    if {![dict exists $facts $id]} {
+        return [lrepeat [llength [dict get $analysis instances $id args]] any]
+    }
+    return [lmap t [dict get $facts $id] {expr {$t eq "" ? "any" : $t}}]
 }
 
 # specialize 0: one generic instance per block, with the semantic types and

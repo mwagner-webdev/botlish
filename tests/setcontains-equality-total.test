@@ -200,17 +200,25 @@ test setcontains-broad-needle-stays-erroring {ImmutableSet[Byte] x any (a genuin
     immutable_set_contains(s, x)
 
 [contains_unknown(immutable_set_from_list([byteA()]), byteA()),
- contains_unknown(immutable_set_from_list([byteA()]), "z")]} $::byteDecl]
+ contains_unknown(immutable_set_from_list([byteA()]), "z"),
+ contains_unknown(immutable_set_from_list([byteA()]), true)]} $::byteDecl]
         set nirText [nirOf $text]
         # limit=1 gives the *first* call's own key its own precise instance
         # (instance="immutableSet, int", setcontainstotal -- correctly, its
-        # own x really is int[Byte] there) and spills the second, divergent
-        # key over to a shared instance="generic" fallback, whose own x
-        # view is genuinely "any": this test's own subject. Both instances
-        # print the identical NIR function name "contains_unknown" (only
-        # the func header's own instance="..." attribute distinguishes
-        # them), so effectLineForInstance disambiguates by NIR function id,
-        # not by name.
+        # own x really is int[Byte] there) and spills the second and third,
+        # divergent keys over to a shared instance="generic" fallback,
+        # whose own x view is genuinely "any": this test's own subject.
+        # Three divergent calls, not two (M7C-CLOSED-CLOSURE-ENTRY-
+        # FACTS.md): with only two, the generic fallback would have exactly
+        # one actual caller left once the first call takes the specific
+        # slot, and M7.c's own closed-caller theorem would soundly (not
+        # incorrectly) resolve x from that one caller alone -- a third,
+        # differently-kinded caller keeps the fallback's own callers
+        # genuinely disagreeing. Both instances print the identical NIR
+        # function name "contains_unknown" (only the func header's own
+        # instance="..." attribute distinguishes them), so
+        # effectLineForInstance disambiguates by NIR function id, not by
+        # name.
         regexp {func \d+ "contains_unknown"[^\n]*instance="generic"[^\n]*\n(?:.*\n)*?end} $nirText genericBody
         list [regexp {op setcontains } $genericBody] [regexp {op setcontainstotal} $genericBody] \
             [string match {*may_error=true*} [effectLineForInstance $text contains_unknown generic]]
@@ -251,6 +259,11 @@ test setcontains-error-propagation-control {a caller of a genuinely equality-fal
     set saved $hir::specialize::limit
     set hir::specialize::limit 1
     try {
+        # Three divergent calls, not two -- see setcontains-broad-needle-
+        # stays-erroring's own comment (M7C-CLOSED-CLOSURE-ENTRY-FACTS.md):
+        # otherwise the generic fallback's own single remaining caller
+        # would give M7.c's own closed-caller theorem exactly one (sound)
+        # fact to resolve x from.
         set text [format {%sfn contains_unknown(s: ImmutableSet[Byte], x):
     immutable_set_contains(s, x)
 
@@ -258,7 +271,8 @@ fn caller(s, x):
     contains_unknown(s, x)
 
 [caller(immutable_set_from_list([byteA()]), byteA()),
- caller(immutable_set_from_list([byteA()]), "z")]} $::byteDecl]
+ caller(immutable_set_from_list([byteA()]), "z"),
+ caller(immutable_set_from_list([byteA()]), true)]} $::byteDecl]
         set nirText [nirOf $text]
         string match {*may_error=true*} [effectLineForInstance $text contains_unknown generic]
     } finally {

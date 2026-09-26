@@ -263,7 +263,7 @@ test hir-specialize-m1-closure-capture {a typed function forced into a generic i
     list [specLabels $analysis cls] [paramViewType $hir $analysis cls<generic> 0]
 } -result {cls<generic> {int[Small]}}
 
-test hir-specialize-m1-explosion-generic {a typed function forced generic by explosion control retains its declared parameter type, while an untyped sibling parameter is unaffected (M1 generic fixture + untyped-parameter control, spec items 3, 28, 35)} -body {
+test hir-specialize-m1-explosion-generic {a typed function forced generic by explosion control retains its declared parameter type; its untyped sibling parameter, "any" before M7C-CLOSED-CLOSURE-ENTRY-FACTS.md, now resolves to str -- classify<generic>'s only actual caller (the one call() forced past the limit) passes "a" literally, and hir::specialize's own explosion-control fallback routes it there through the identical Instance/Handle call graph the closed-caller pass reads, so this is exactly a closed instance with one known exact caller, no different from an ordinary value-capturing closure's own (M1 generic fixture + M7.c closed-caller control, spec items 3, 28, 35)} -body {
     set saved $hir::specialize::limit
     set hir::specialize::limit 1
     try {
@@ -273,7 +273,7 @@ test hir-specialize-m1-explosion-generic {a typed function forced generic by exp
     } finally {
         set hir::specialize::limit $saved
     }
-} -result {{{classify<int, int>} classify<generic>} {int[Small]} any}
+} -result {{{classify<int, int>} classify<generic>} {int[Small]} str}
 
 test hir-specialize-m1-broad-int {a declared broad int parameter is preserved as int in a generic instance, never narrowed to a small raw-eligible range (M1, spec item 29)} -body {
     set saved $hir::specialize::limit

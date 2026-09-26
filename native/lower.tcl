@@ -895,6 +895,20 @@ namespace eval native::lower {
 #                      propagate value facts through exact closed calls
 #                      (default 1; BOTLISH_NATIVE_CALL_FACTS_OPT=0 disables
 #                      the new propagation for differential testing)
+#   -closed-caller-facts-opt 1|0
+#                      derive a closed generic instance's own entry-kind
+#                      theorem from its exact callers (M7C-CLOSED-CLOSURE-
+#                      ENTRY-FACTS.md; default 1;
+#                      BOTLISH_NATIVE_CLOSED_CALLER_FACTS_OPT=0 disables it
+#                      for differential testing -- independent of
+#                      -call-facts-opt, which only ever controls whether a
+#                      value-capturing closure's own scalar-Int captures let
+#                      Handle select a *specific* key at all: with it
+#                      disabled a closure that would otherwise specialize
+#                      stays generic, which is exactly the population this
+#                      option's own mechanism also reaches, so isolating
+#                      -call-facts-opt's own contribution alone requires
+#                      disabling this one too)
 #   -string-traversal-opt 1|0
 #                      carry a provably forward, +1-per-iteration character
 #                      scan's physical UTF-8 byte position across its self-
@@ -954,6 +968,8 @@ proc native::lower::program {hirProgram args} {
         && $::env(BOTLISH_NATIVE_STRING_REGION_OPT) eq "0" ? 0 : 1}]
     set callFactsDefault [expr {[info exists ::env(BOTLISH_NATIVE_CALL_FACTS_OPT)]
         && $::env(BOTLISH_NATIVE_CALL_FACTS_OPT) eq "0" ? 0 : 1}]
+    set closedCallerFactsDefault [expr {[info exists ::env(BOTLISH_NATIVE_CLOSED_CALLER_FACTS_OPT)]
+        && $::env(BOTLISH_NATIVE_CLOSED_CALLER_FACTS_OPT) eq "0" ? 0 : 1}]
     set callEffectsDefault [expr {[info exists ::env(BOTLISH_NATIVE_CALL_EFFECTS_OPT)]
         && $::env(BOTLISH_NATIVE_CALL_EFFECTS_OPT) eq "0" ? 0 : 1}]
     set traversalDefault [expr {[info exists ::env(BOTLISH_NATIVE_STRING_TRAVERSAL_OPT)]
@@ -983,6 +999,7 @@ proc native::lower::program {hirProgram args} {
             -param-aggregate-opt $paramAggregateDefault -block-escape-opt $blockEscapeDefault \
             -string-region-opt $stringRegionDefault -string-traversal-opt $traversalDefault \
             -call-facts-opt $callFactsDefault -call-effects-opt $callEffectsDefault \
+            -closed-caller-facts-opt $closedCallerFactsDefault \
             -tiny-leaf-inline-opt $tinyLeafInlineDefault] $args]
     if {[hir::mode $hirProgram] ne "program"} {
         throw {NATIVE UNSUPPORTED sequence-mode} \
@@ -1008,7 +1025,8 @@ proc native::lower::program {hirProgram args} {
     set tinyLeafInlineOpt [dict get $options -tiny-leaf-inline-opt]
     set leafEligible [dict create]
     set spec [hir::specialize::analyze $hirProgram -specialize [dict get $options -specialize] \
-        -call-facts-opt [dict get $options -call-facts-opt]]
+        -call-facts-opt [dict get $options -call-facts-opt] \
+        -closed-caller-facts-opt [dict get $options -closed-caller-facts-opt]]
     set ranges [hir::range::analyze $hirProgram $spec [dict get $options -call-facts-opt]]
     set escape [expr {$escapeOpt ? [hir::escape::analyze $hirProgram $spec $paramAggregateOpt]
         : [dict create arity {} wants {} virtual {} paramVirtual {}]}]
