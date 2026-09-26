@@ -1581,6 +1581,37 @@ CI GC-stress status: **success**. Workflow `tests`, run 109 on `main`
 at `993c96a` (the commit M7.a builds on), job "tests (native
 GC-stress)": completed, conclusion *success*.
 
+## Tests run for M7.a
+
+What was run, on this tree (`cb7f3a7` + this section; no production
+file differs from `993c96a`):
+
+```
+LANG=C.utf8 LC_ALL=C.utf8 tclsh9.0 tests/all.tcl
+    backend interp:  Total 2185  Passed 2185  Skipped 0  Failed 0
+    backend compile: Total 2185  Passed 2185  Skipped 0  Failed 0
+    (13m46s wall; 77 test files; the native backend was built with
+    `cargo build --release`, so native-* tests exercised it)
+```
+
+The audit tools were run end to end (see "Audit tooling and
+artifacts"). The census `baseline` variant reproduces M6's post-M6
+figures exactly (7055 B / 17 functions and 16743 B / 33 functions), and
+the natively-run program values (29500; `[400, 0]`) match
+`bench/uri-steady.tcl`'s and `bench/bench.tcl`'s expectations.
+
+Not run, deliberately:
+
+- `cargo test`: no Rust file changed.
+- Local `BOTLISH_NATIVE_GC_STRESS=1`: not required; see the GC-stress
+  note.
+- `tests/native-coverage.tcl` and the benchmark timing harnesses: no
+  production behavior changed, so there is nothing to compare.
+
+No test file was added or modified. Per spec #59/#60, this milestone
+adds no contract tests; in particular there is no `Narrowed` invariant
+test.
+
 ## Source-fence confirmation
 
 - No `.bot`, `.ir` or `.hir` file changed; the frozen workloads
