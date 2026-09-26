@@ -1082,6 +1082,87 @@ proc hir::range::AggregateAdmits {arg declared} {
     return 0
 }
 
+# ---------------------------------------------------------------------------
+# M7.b (M7B-CONJUNCTIVE-ENTRY-FACTS.md): satisfiability of an OBSERVED entry
+# fact against a DECLARED entry theorem about the very same value -- "could
+# a value with OBSERVED's own type (ARGTYPE/OBSERVEDRANGE) also satisfy
+# DECLARED", never "does OBSERVED prove DECLARED" (ProvesValueAcceptedBy),
+# "what type contains both" (lub) or "a sound combined fact" (hir::types::
+# narrow, which this file's own specialization seeding now uses on the
+# assumption its two arguments are already known-satisfiable, per
+# hir::specialize::verifyDeclaredParams's own soundness argument -- see the
+# milestone report's "why subtype/lub/narrow are or are not sufficient").
+# This is deliberately its own named operation (spec items 12-13): reusing
+# `narrow`'s own success would conflate "there is a sound combined fact"
+# with "the two facts could jointly hold", which happen to coincide for
+# every case this compiler can currently construct (a legally verified
+# caller can only ever produce a satisfiable pair -- see FactsSatisfiable's
+# own callers, all diagnostic/test-only), but are not the same question.
+#
+# Two dimensions this compiler tracks are checked:
+#   * aggregate (List[T]/ImmutableSet[T]): the only facts this compiler
+#     ever forms about an aggregate VALUE are "exactly this applied type"
+#     or (M7.a.a) "provably empty" (`never`-elemented) -- AggregateAdmits
+#     already decides exactly this question for that vocabulary (a
+#     never-elemented aggregate vacuously satisfies any element contract;
+#     anything else must match exactly), so it is reused here, not
+#     reimplemented -- with the explicit caveat (spec item 77) that this is
+#     *not* a re-endorsement of List/Set covariance at the source-language
+#     level: AggregateAdmits' own admissibility meaning and this file's
+#     satisfiability meaning simply coincide given today's fact vocabulary.
+#   * scalar Int: OBSERVEDRANGE (a Range, [unknown] if none proven) and
+#     DECLARED's own integer-domain facts (TypeFact) must have a nonempty
+#     intersection -- exactly the same Range/type intersection every ref
+#     already computes (ConstrainType), named as its own query instead of
+#     read back out of an intersected Range after the fact.
+# A non-Int, non-aggregate DECLARED (str, bool, ...) has no Range dimension
+# this file tracks at all, so nothing here can contradict it: satisfiable
+# by construction, unless OBSERVEDTYPE is itself the bottom `never` (an
+# unreachable expression proves no value at all, so it cannot jointly
+# satisfy anything -- spec item 88's "scalar never is not an entry value
+# fact", made an explicit unsatisfiable case here rather than left to
+# whatever a caller happens to do with a `never` argument type).
+proc hir::range::FactsSatisfiable {observedType observedRange declared} {
+    if {$observedType eq "never"} {
+        return 0
+    }
+    if {[hir::types::IsList $declared] || [hir::types::IsSet $declared]} {
+        return [AggregateAdmits [hir::types::Unshaped $observedType] $declared]
+    }
+    if {[core::type::base $declared] ne "int"} {
+        return 1
+    }
+    if {$observedRange eq "never"} {
+        return 0
+    }
+    # Deliberately not `intersect` (this file's own general-purpose Range
+    # combinator): intersect's own contract is conservative-on-empty (its
+    # header: "Empty intersections remain conservative because this
+    # lattice deliberately has no binding-level bottom" -- it returns its
+    # first argument unchanged rather than an empty Range), exactly because
+    # every one of its *other* callers wants a still-usable Range back, even
+    # from a path that turns out unreachable. A satisfiability query is the
+    # one caller that must see the emptiness itself, not a conservative
+    # stand-in for it, so this recomputes the same min/max meet directly.
+    set declaredRange [TypeFact $declared]
+    set mn [Max [dict get $observedRange min] [dict get $declaredRange min]]
+    set mx [Min [dict get $observedRange max] [dict get $declaredRange max]]
+    if {$mn ne "-inf" && $mx ne "+inf" && $mn > $mx} {
+        return 0
+    }
+    set observedExact [ExactOf $observedRange]
+    set declaredExact [ExactOf $declaredRange]
+    if {$observedExact ne "" && $declaredExact ne ""} {
+        foreach v $observedExact {
+            if {$v in $declaredExact} {
+                return 1
+            }
+        }
+        return 0
+    }
+    return 1
+}
+
 proc hir::range::verifyDeclaredResults {hirVar} {
     upvar 1 $hirVar hir
     dict for {e node} [dict get $hir exprs] {

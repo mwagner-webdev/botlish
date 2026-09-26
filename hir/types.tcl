@@ -281,10 +281,40 @@ proc hir::types::lub {a b} {
     return [core::type::lub $a $b]
 }
 
-# Narrows CURRENT by a proven FACT (a core type).
+# Narrows CURRENT by a proven FACT (a core type, or -- M7B-CONJUNCTIVE-
+# ENTRY-FACTS.md -- a declared List[T]/ImmutableSet[T] aggregate theorem
+# whose own constructor matches CURRENT's). CURRENT's own bottom case
+# ("never" narrows to itself, unconditionally) is what makes this sound for
+# an aggregate's *element* position too, not just its own top level: a
+# List/ImmutableSet whose element is the scalar atom `never` (M7.a.a: a
+# statically proven *empty* aggregate, never "element type unknown")
+# recurses into that element with the very same rule and keeps it `never`,
+# so combining a provably-empty aggregate's own observed fact with a
+# declared element theorem never fabricates an element the value cannot
+# have (spec item 63: emptiness must never manufacture existence) --
+# while a *non-empty* (or shape-only) aggregate's element position is
+# narrowed exactly as a bare scalar parameter already was (M1), letting the
+# declared element contract survive specialization for it too (spec item
+# 22 of M7A-INSTANCE-SELECTION-THEOREM-AUDIT.md's own "S05d" gap). Two
+# List/ImmutableSet forms narrow only when they share a constructor (both
+# List, or both ImmutableSet); anything else (a callable key, a positional
+# shape against a non-list declared type, or a mismatched constructor) has
+# nothing sound to combine and falls through to the callable/kind rule
+# below, unchanged from before this milestone.
 proc hir::types::narrow {current fact} {
     if {$fact eq "any" || $current eq "never"} {
         return $current
+    }
+    if {[IsList $current] && [IsList $fact]} {
+        set elem [narrow [lindex $current 1] [lindex $fact 1]]
+        set positions [shapeOf $current]
+        if {$positions ne ""} {
+            return [MakeList $elem [lmap p $positions {narrow $p [lindex $fact 1]}] 1]
+        }
+        return [MakeList $elem]
+    }
+    if {[IsSet $current] && [IsSet $fact]} {
+        return [MakeSet [narrow [lindex $current 1] [lindex $fact 1]] 0]
     }
     if {[IsSpecific $current]} {
         # A precise callable type already implies a bare kind fact.

@@ -1,0 +1,429 @@
+# conjunctive-entry-facts.test -- M7.b: a specialized instance's aggregate
+# parameter carries its OBSERVED entry fact (the specialization key: an
+# empty/`never`-elemented aggregate, or a coarser/broader element kind) AND
+# the function's own DECLARED entry theorem (every legal caller's argument
+# satisfies the declared element type), combined conjunctively rather than
+# one replacing the other (M7B-CONJUNCTIVE-ENTRY-FACTS.md).
+#
+# Two production changes, both additive (a Tcl branch/case unreachable
+# before this milestone, per the report's own trace):
+#   * hir/types.tcl: hir::types::narrow now recurses into a matching
+#     List/ImmutableSet's own element position instead of only handling
+#     core (scalar) types -- narrow(never, X) already returned `never`
+#     unconditionally (its own pre-existing base case), so recursing into
+#     a `never`-elemented aggregate's element preserves emptiness for free.
+#   * hir/specialize.tcl: Analyze's declared-parameter seeding step, which
+#     used to skip a "specific" (aggregate) key entirely (M1's own
+#     "S05d" gap, M7A-INSTANCE-SELECTION-THEOREM-AUDIT.md), now calls the
+#     extended narrow for a matching List/List or ImmutableSet/ImmutableSet
+#     pair instead of leaving the declared theorem unseeded.
+# Plus one new named primitive, hir::range::FactsSatisfiable, formalizing
+# "could this OBSERVED fact and this DECLARED theorem jointly describe the
+# same legal entry value" as its own query (spec items 9-13), distinct from
+# admissibility/narrow/lub, even though it reuses AggregateAdmits' own
+# truth table for the aggregate case (see that primitive's own comment for
+# why the two coincide today without being the same question).
+#
+# hir::specialize::KeyType is untouched (confirmed throughout by asserting
+# instance labels before and after every scenario): this milestone is
+# entry-fact transport, never an identity change.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+set ::byteDecl "type Byte = Int in 0..255\nfn byteA() -> Byte:\n    97\n\n"
+
+proc sourceHir {text} {
+    return [surface::compile $text t.bot -strict 0]
+}
+
+proc nirOf {text} {
+    return [dict get [native::lower::program [sourceHir $text] -tiny-leaf-inline-opt 0] text]
+}
+
+proc accepts {source} {
+    surface::compile $source accept.bot
+    return ok
+}
+
+proc specOf {text args} {
+    set hir [surface::compile $text t.bot -strict 0]
+    return [list $hir [hir::specialize::analyze $hir {*}$args]]
+}
+
+proc specLabels {analysis name} {
+    lmap id [dict get $analysis used] {
+        if {[dict get $analysis instances $id name] ne $name} continue
+        hir::specialize::label $analysis $id
+    }
+}
+
+proc specInstance {analysis label} {
+    foreach id [dict get $analysis used] {
+        if {[hir::specialize::label $analysis $id] eq $label} {
+            return [dict get $analysis instances $id]
+        }
+    }
+    error "no used instance $label"
+}
+
+proc specResult {analysis label} {
+    hir::types::show [dict get [specInstance $analysis $label] result]
+}
+
+# The view type of instance LABEL's parameter index I, as seen by the first
+# reachable ref to it within the block's own body -- the same technique
+# tests/hir-specialize.test's own M1 fixtures use (paramViewType there),
+# reused here (not shared across files: each test file is a standalone
+# tcltest run) for the aggregate case M1 itself could not yet exercise.
+proc paramViewType {hir analysis label i} {
+    set instance [specInstance $analysis $label]
+    set block [dict get $instance block]
+    set view [hir::specialize::view $hir $analysis [dict get $instance id]]
+    set b [lindex [hir::get $hir $block params] $i]
+    foreach e [dict get [dict get $analysis context] exprs $block] {
+        if {[hir::kind $view $e] eq "ref" && [hir::get $view $e binding] eq $b} {
+            return [hir::types::show [hir::typeOf $view $e]]
+        }
+    }
+    return "-"
+}
+
+# The declared parameter type of function NAME's block (index I), read
+# directly off the semantic HIR -- a block-level fact, independent of any
+# specific instance (spec item 43: "the declaration remains one block-level
+# theorem"), used here to pin that the theorem is retrievable regardless of
+# which instance's own observed key is being inspected in the same test.
+proc declaredParamType {hir name i} {
+    foreach e [dict keys [dict get $hir exprs]] {
+        set node [dict get $hir exprs $e]
+        if {[dict get $node kind] eq "bind" && [dict get $hir bindings [dict get $node binding] name] eq $name} {
+            set value [dict get $node value]
+            if {[dict get $hir exprs $value kind] eq "block"} {
+                return [hir::types::show [lindex [dict get $hir exprs $value declaredParamTypes] $i]]
+            }
+        }
+    }
+    return "-"
+}
+
+# ---------------------------------------------------------------------------
+# Stable instance identity (spec items 17-19, 36-40): the primary hard
+# requirement this milestone must not regress. Every assertion below is
+# re-checked after the theorem-transport tests too, so no test in this file
+# is a one-off pin divorced from the scenarios that exercise the new code.
+
+test empty-caller-keeps-list-never-instance {consume([]) for a declared consume(xs: List[int]) still keys List[never] -- unchanged from M7.a.a (spec item 36)} -body {
+    lassign [specOf {fn consume(xs: List[int]) -> int:
+    1
+[consume([]), consume([1, 2, 3])]}] hir analysis
+    lsort [specLabels $analysis consume]
+} -result {{consume<List[int]>} {consume<List[never]>}}
+
+test mixed-callers-third-caller-does-not-perturb-identities {a third, different non-empty caller still reuses the existing List[int] instance -- no new instance, no merge (spec items 18, 39 of M7A-INSTANCE-SELECTION-THEOREM-AUDIT.md, re-pinned as a M7.b regression)} -body {
+    lassign [specOf {fn consume(xs: List[int]) -> int:
+    1
+[consume([]), consume([1, 2, 3]), consume([4, 5])]}] hir analysis
+    lsort [specLabels $analysis consume]
+} -result {{consume<List[int]>} {consume<List[never]>}}
+
+# ---------------------------------------------------------------------------
+# Empty instance: observed emptiness AND declared theorem coexist (spec
+# items 20-21, 37-39, "Theorem combination test").
+
+test empty-instance-observed-theorem-unchanged {the empty-caller instance's own view of xs stays List[never] -- the observed emptiness theorem is not overwritten by the declared theorem transport (spec item 38)} -body {
+    lassign [specOf {fn consume(xs: List[int]) -> int:
+    list_length(xs)
+[consume([]), consume([1, 2, 3])]}] hir analysis
+    paramViewType $hir $analysis {consume<List[never]>} 0
+} -result {List[never]}
+
+test empty-instance-key-and-declared-theorem-coexist {instance key = List[never] (observed), and the block's own declared parameter type = List[int] (declared), simultaneously true of the very same instance -- the M7.b "theorem combination test" (spec item 39), using the two existing structures (instance key; declaredParamTypes) rather than a new combined-fact object (spec item 26's own preference)} -body {
+    lassign [specOf {fn consume(xs: List[int]) -> int:
+    1
+consume([])}] hir analysis
+    list [specLabels $analysis consume] [declaredParamType $hir consume 0]
+} -result {{{consume<List[never]>}} {List[int]}}
+
+test empty-listloop-stays-dead-with-declared-theorem {a declared List[Byte] parameter's empty-caller instance still lowers its listloop body as statically unreachable NIR -- the primary regression this milestone must not cause (spec items 20, 66), even though the declared Byte theorem is now transported for OTHER (non-empty) instances of the very same function} -body {
+    set text [format {%sfn consume(xs: List[Byte]) -> int:
+    mapped = loop b in xs:
+        b
+    list_length(mapped)
+[consume([]), consume([byteA(), byteA()])]} $::byteDecl]
+    set nirText [nirOf $text]
+    set emptyStart [string first {instance="List[never]"} $nirText]
+    set nonEmptyStart [string first {instance="List[int]"} $nirText]
+    set emptyEnd [string first "\nend" $nirText $emptyStart]
+    set nonEmptyEnd [string first "\nend" $nirText $nonEmptyStart]
+    list [expr {[string first unreachable [string range $nirText $emptyStart $emptyEnd]] >= 0}] \
+         [expr {[string first unreachable [string range $nirText $nonEmptyStart $nonEmptyEnd]] >= 0}]
+} -result {1 0}
+
+test empty-caller-does-not-imply-element-existence {the empty instance's own declared-Byte theorem never manufactures an element to read: list_get(xs, 0) for xs=[] still fails at runtime (bounds), on every backend -- emptiness is never eroded by a declared element contract (spec item 63)} -body {
+    set text [format {%sfn first(xs: List[Byte]) -> Byte:
+    list_get(xs, 0)
+first([])} $::byteDecl]
+    set exprs [hir::lower [sourceHir $text]]
+    lmap backend {interp compile cranelift-generic cranelift} {
+        core::useBackend $backend
+        lindex [catch {core::evalProgram $exprs} message options] 0
+    }
+} -result {1 1 1 1}
+
+# ---------------------------------------------------------------------------
+# Non-empty/coarsened aggregate theorem transport (spec items 22-24, 40,
+# 65-67): the primary positive regression -- S05d of
+# M7A-INSTANCE-SELECTION-THEOREM-AUDIT.md, repaired.
+
+test non-empty-coarsened-instance-regains-declared-byte-theorem {a declared List[Byte] parameter's specialization key is the coarser List[int] (KeyType strips named evidence, even from a List's own element) -- the declared Byte theorem now survives inside that instance's own view, where before this milestone it was simply absent (M7A's S05d)} -body {
+    set text [format {%sfn consume(xs: List[Byte]) -> int:
+    list_length(xs)
+consume([byteA(), byteA()])} $::byteDecl]
+    lassign [specOf $text] hir analysis
+    list [specLabels $analysis consume] [paramViewType $hir $analysis {consume<List[int]>} 0]
+} -result {{{consume<List[int]>}} {List[int[Byte]]}}
+
+test reachable-listloop-variable-regains-declared-byte-theorem {inside the same List[int]-keyed (declared List[Byte]) instance, a reachable listloop's own element binding is typed Byte, not merely int -- the declared element theorem reaches a real consumer, not just the parameter's own top-level view (spec items 65, 67)} -body {
+    set text [format {%sfn sumIt(xs: List[Byte]) -> int:
+    loop b in xs:
+        b
+    1
+sumIt([byteA(), byteA()])} $::byteDecl]
+    set hir [sourceHir $text]
+    set spec [hir::specialize::analyze $hir]
+    set view [hir::specialize::view $hir $spec [lindex [dict get $spec used] end]]
+    set found ""
+    foreach id [dict get $spec used] {
+        if {[dict get $spec instances $id name] ne "sumIt"} continue
+        set view [hir::specialize::view $hir $spec $id]
+        set block [dict get $spec instances $id block]
+        foreach e [dict get [dict get $spec context] exprs $block] {
+            if {[hir::kind $view $e] eq "listloop"} {
+                set loopBinding [hir::get $view $e elementBinding]
+            }
+        }
+        foreach e [dict get [dict get $spec context] exprs $block] {
+            if {[hir::kind $view $e] eq "ref" && [hir::get $view $e binding] eq $loopBinding} {
+                set found [hir::types::show [hir::typeOf $view $e]]
+                break
+            }
+        }
+    }
+    set found
+} -result {int[Byte]}
+
+test list-get-result-regains-declared-byte-theorem {list_get(xs, 0)'s own inferred result type, inside the List[int]-keyed instance of a declared List[Byte] parameter, is Byte -- a downstream consumer besides listloop also benefits, with no consumer-specific code (spec item 62)} -body {
+    set text [format {%sfn first(xs: List[Byte]) -> Byte:
+    list_get(xs, 0)
+first([byteA(), byteA()])} $::byteDecl]
+    lassign [specOf $text] hir analysis
+    list [specLabels $analysis first] [specResult $analysis {first<List[int]>}]
+} -result {{{first<List[int]>}} {int[Byte]}}
+
+test instance-identity-unchanged-by-theorem-transport {the coarsened instance's own key stays List[int] (never List[Byte], never split) -- theorem transport is metadata, not an identity change (spec items 26, 59)} -body {
+    set text [format {%sfn consume(xs: List[Byte]) -> int:
+    list_length(xs)
+[consume([byteA(), byteA()]), consume([byteA()])]} $::byteDecl]
+    lassign [specOf $text] hir analysis
+    lsort [specLabels $analysis consume]
+} -result {{consume<List[int]>}}
+
+test mixed-empty-and-coarsened-callers-remain-two-instances {a declared List[Byte] parameter called both empty and non-empty keeps exactly the same two-instance partition (List[never], List[int]) that an undeclared/List[int]-declared parameter already had -- declared theorem transport does not merge or split instances (spec items 18-19)} -body {
+    set text [format {%sfn consume(xs: List[Byte]) -> int:
+    list_length(xs)
+[consume([]), consume([byteA(), byteA()])]} $::byteDecl]
+    lassign [specOf $text] hir analysis
+    lsort [specLabels $analysis consume]
+} -result {{consume<List[int]>} {consume<List[never]>}}
+
+# ---------------------------------------------------------------------------
+# Nested applied types (spec items 47-48, 92-93): the same recursive narrow
+# reaches an inner List's own element position too.
+
+test nested-declared-theorem-survives-coarsened-outer-and-inner-shape {declared List[List[Byte]], called with a non-empty outer/inner shape that keys List[List[int]] -- the inner Byte theorem survives two levels of recursion through the extended narrow, with the same List[List[int]] instance key} -body {
+    set text [format {%sfn consume(xs: List[List[Byte]]) -> int:
+    list_length(xs)
+consume([[byteA(), byteA()]])} $::byteDecl]
+    lassign [specOf $text] hir analysis
+    list [specLabels $analysis consume] \
+         [paramViewType $hir $analysis {consume<List[List[int]]>} 0]
+} -result {{{consume<List[List[int]]>}} {List[List[int[Byte]]]}}
+
+# ---------------------------------------------------------------------------
+# ImmutableSet symmetry (spec items 15, 49-50). ImmutableSet's own KeyType
+# is always the bare "immutableSet" kind (M7A-INSTANCE-SELECTION-THEOREM-
+# AUDIT.md: a Set's element type is never part of its key, unlike List's),
+# so a declared ImmutableSet[T] parameter's key is never "specific" and
+# already went through M1's own (pre-M7.b) declared-type adoption branch --
+# confirmed unaffected here, not a new code path this milestone added.
+
+test set-declared-theorem-already-transported-by-m1 {a declared ImmutableSet[Byte] parameter's (always-generic-shaped) key already carries the declared element type via M1's pre-existing branch -- unaffected by, and not requiring, this milestone's own new List/Set-specific-key branch} -body {
+    set text [format {%sfn consume(xs: ImmutableSet[Byte]) -> int:
+    setcontains(xs, byteA())
+consume(immutable_set_from_list([byteA()]))} $::byteDecl]
+    lassign [specOf $text] hir analysis
+    list [specLabels $analysis consume] \
+         [paramViewType $hir $analysis [lindex [specLabels $analysis consume] 0] 0]
+} -result {consume<immutableSet> {ImmutableSet[int[Byte]]}}
+
+test empty-immutable-set-instance-not-formed-by-key {ImmutableSet's key never tracks emptiness (unlike List[never]): an empty-set caller and a non-empty-set caller of the same declared ImmutableSet[T] parameter share the one "immutableSet"-keyed instance -- documented architectural coverage for spec item 50, not a gap this milestone needed to close (no Set-specific empty-instance mechanism exists to combine a theorem with)} -body {
+    set text [format {%sfn consume(xs: ImmutableSet[Byte]) -> int:
+    1
+[consume(immutable_set_from_list([])), consume(immutable_set_from_list([byteA()]))]} $::byteDecl]
+    lassign [specOf $text] hir analysis
+    specLabels $analysis consume
+} -result {consume<immutableSet>}
+
+# ---------------------------------------------------------------------------
+# Satisfiability primitive (spec items 9-13, 76-77): hir::range::
+# FactsSatisfiable, tested directly, independent of specialization/codegen.
+
+test satisfiable-scalar-exact-value-in-declared-range {an exact observed value (45) is satisfiable with a declared Byte theorem} -body {
+    surface::compile [format {%s1} $::byteDecl] t.bot -strict 0
+    hir::range::FactsSatisfiable int [hir::range::point 45] [core::type::normalize Byte]
+} -result 1
+
+test unsatisfiable-scalar-exact-value-contradicts-declared-range {an exact observed value (300) is not satisfiable with a declared Byte theorem -- spec item 30's own scalar contradiction, as a direct primitive test rather than only through ConditionOutcome} -body {
+    surface::compile [format {%s1} $::byteDecl] t.bot -strict 0
+    hir::range::FactsSatisfiable int [hir::range::point 300] [core::type::normalize Byte]
+} -result 0
+
+test satisfiable-broad-observed-scalar-plus-declared-refinement {an unknown/broad observed Range is always satisfiable with a declared refinement -- an open caller's own widened entry fact never contradicts the declaration (spec items 56-57, 81-82)} -body {
+    surface::compile [format {%s1} $::byteDecl] t.bot -strict 0
+    hir::range::FactsSatisfiable int [hir::range::unknown] [core::type::normalize Byte]
+} -result 1
+
+test satisfiable-empty-list-and-declared-int {List[never] and a declared List[int] are satisfiable (spec item 76)} -body {
+    hir::range::FactsSatisfiable {list never} [hir::range::unknown] {list int}
+} -result 1
+
+test satisfiable-empty-list-and-declared-byte {List[never] and a declared List[Byte] are satisfiable -- emptiness is compatible with any element contract (spec item 76)} -body {
+    surface::compile [format {%s1} $::byteDecl] t.bot -strict 0
+    hir::range::FactsSatisfiable {list never} [hir::range::unknown] [list list [core::type::normalize Byte]]
+} -result 1
+
+test satisfiable-empty-set-and-declared-type {an empty ImmutableSet and a declared ImmutableSet[T] are satisfiable (spec item 76)} -body {
+    surface::compile [format {%s1} $::byteDecl] t.bot -strict 0
+    hir::range::FactsSatisfiable {immutableSet never} [hir::range::unknown] \
+        [list immutableSet [core::type::normalize Byte]]
+} -result 1
+
+test satisfiable-canonical-same-applied-type {two structurally identical applied List[T] facts are trivially satisfiable (spec item 76)} -body {
+    hir::range::FactsSatisfiable {list int} [hir::range::unknown] {list int}
+} -result 1
+
+test unsatisfiable-scalar-never-observed {an unreachable (scalar `never`) observed fact is never satisfiable with anything -- an expression that never completes normally proves no value at all, so it cannot jointly hold with a declared theorem (spec item 88's "scalar never is not an entry value fact")} -body {
+    hir::range::FactsSatisfiable never [hir::range::unknown] int
+} -result 0
+
+test satisfiable-exact-domain-point-still-checked-against-membership {a scalar exact-set declared domain (not merely an interval): an observed point within the domain's own interval hull but not itself a member is correctly unsatisfiable -- FactsSatisfiable does not merely check interval overlap (spec item 13's own caution about aggregate/domain combinations)} -body {
+    set hir [sourceHir {type HighNibble = Int in {0, 16, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176, 192, 208, 224, 240}
+1}]
+    set highNibble [core::type::normalize HighNibble]
+    list [hir::range::FactsSatisfiable int [hir::range::point 17] $highNibble] \
+         [hir::range::FactsSatisfiable int [hir::range::point 16] $highNibble]
+} -result {0 1}
+
+# ---------------------------------------------------------------------------
+# ConditionOutcome / satisfiability connection (spec items 29-31): an
+# impossible branch hypothesis over a declared entry theorem must not
+# fabricate a theorem of its own. hir::range::ConditionOutcome already
+# decides this correctly today, via its own pre-existing Narrowed+IsEmpty
+# pair (M6-RANGE-DECIDED-BRANCH-LOWERING.md) -- itself exactly a *branch-
+# hypothesis* satisfiability query (spec item 31: "if no evidence supports
+# a change, defer it"), distinct from FactsSatisfiable's own *entry-fact*
+# question (an already-settled Range against a declared/hypothesis TYPE,
+# not two Ranges); this milestone's job is confirming and naming that
+# distinction, not rewiring already-correct machinery (spec item 116).
+
+proc rangeOf {text} {
+    set hir [surface::compile $text t.bot -strict 0]
+    set spec [hir::specialize::analyze $hir]
+    return [list $hir $spec [hir::range::analyze $hir $spec]]
+}
+
+proc rangeInstance {spec name} {
+    foreach id [dict get $spec used] {
+        if {[dict get $spec instances $id name] eq $name} {
+            return $id
+        }
+    }
+    error "no instance of $name"
+}
+
+proc ifConditions {hir} {
+    set result {}
+    foreach e [lsort -dictionary [dict keys [dict get $hir exprs]]] {
+        set node [dict get $hir exprs $e]
+        if {[dict get $node kind] eq "if"} {
+            lappend result [dict get $node condition]
+        }
+    }
+    return $result
+}
+
+test impossible-scalar-hypothesis-does-not-fabricate-a-theorem {a declared Byte parameter's own entry theorem ([0,255]) makes "b > 1000" an impossible hypothesis: ConditionOutcome correctly decides it AlwaysFalse (not Unknown, and never AlwaysTrue), so no contradictory fact can leak into the reachable (false) branch (spec item 30)} -body {
+    set text [format {%sfn f(b: Byte) -> int:
+    if b > 1000:
+        1
+    else:
+        2
+f(byteA())} $::byteDecl]
+    lassign [rangeOf $text] hir spec analysis
+    set id [rangeInstance $spec f]
+    hir::range::ConditionOutcome $hir $analysis $id [lindex [ifConditions $hir] 0]
+} -result 0
+
+# ---------------------------------------------------------------------------
+# Open/shared-instance behavior (spec items 56-57, 82, 111): a genuinely
+# open caller widens the OBSERVED entry fact, but the DECLARED theorem is a
+# block-level, per-legal-call-site-verified fact that a widened observed
+# fact cannot erase.
+
+test open-instance-keeps-declared-theorem-despite-broad-observed-range {a Byte parameter shared by one literal caller and one legal, genuinely open caller (through an untyped higher-order parameter) still has its declared Byte theorem available at every ref, even though its own joined entry Range widens to unknown -- the declaration survives caller-fact widening (spec items 56-57, 82)} -body {
+    set text [format {%sfn from_byte(b: Byte) -> int:
+    if b > 255:
+        1
+    else:
+        2
+fn caller(g, v):
+    g(v)
+[from_byte(byteA()), caller(from_byte, byteA())]} $::byteDecl]
+    lassign [rangeOf $text] hir spec analysis
+    set id [rangeInstance $spec from_byte]
+    hir::range::ConditionOutcome $hir $analysis $id [lindex [ifConditions $hir] 0]
+} -result 0
+
+# ---------------------------------------------------------------------------
+# Untyped-parameter control (spec items 78-79): a specialization key alone
+# (e.g. List[int] from an undeclared parameter's own caller) must never be
+# treated as though it were a declared contract.
+
+test untyped-parameter-gains-no-declared-style-theorem {fn f(xs): (no declared type) called with a List[int]-shaped argument does not acquire any declared-theorem view beyond the plain observed key -- specialization facts are optimization facts, never a retroactive source-level contract (spec item 79)} -body {
+    lassign [specOf {fn f(xs):
+    list_length(xs)
+f([1, 2, 3])}] hir analysis
+    list [specLabels $analysis f] [paramViewType $hir $analysis {f<List[int]>} 0]
+} -result {{{f<List[int]>}} {List[int]}}
+
+# ---------------------------------------------------------------------------
+# Ordinary invariance controls (spec items 45-46): unaffected by this
+# milestone -- re-pinned here as a direct M7.b regression, not merely
+# inherited from tests/empty-collection-admissibility.test.
+
+test nonempty-list-invariance-unaffected-by-theorem-transport {a real, non-empty List[int] value is still rejected for a declared List[Byte] parameter -- conjunctive entry-fact transport inside a legal specialized instance never becomes a source-level covariance rule (spec item 45, 77)} -body {
+    catch {surface::compile [format {%sfn consume(xs: List[Byte]) -> int:
+    1
+consume([1, 2])} $::byteDecl] reject.bot} message options
+    list [dict get $options -errorcode] \
+        [string match {*cannot be proven to satisfy*} $message]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test empty-list-admissibility-unaffected {[] still satisfies a declared List[Byte] parameter -- M7.a.a's own rule, unchanged by this milestone (spec item 46)} -body {
+    accepts [format {%sfn consume(xs: List[Byte]) -> int:
+    1
+consume([])} $::byteDecl]
+} -result ok
+
+::tcltest::cleanupTests

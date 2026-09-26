@@ -484,7 +484,11 @@ proc hir::specialize::Analyze {id} {
             }
             foreach b [dict get $state hir exprs $block params] type [dict get $instance args] \
                     declaredType [dict get $state hir exprs $block declaredParamTypes] {
-                if {$declaredType ne {} && ![hir::types::IsSpecific $type]} {
+                if {$declaredType eq {}} {
+                    dict set types $b $type
+                    continue
+                }
+                if {![hir::types::IsSpecific $type]} {
                     # M1: the function's own declared parameter contract is
                     # valid for every instance, generic included -- every
                     # legal call already proved it (hir::range::
@@ -506,6 +510,25 @@ proc hir::specialize::Analyze {id} {
                     # type's base, unioned with its evidence via narrow.
                     set type [expr {[hir::types::IsSpecific $declaredType]
                         ? $declaredType : [hir::types::narrow $type $declaredType]}]
+                } elseif {([hir::types::IsList $type] && [hir::types::IsList $declaredType])
+                        || ([hir::types::IsSet $type] && [hir::types::IsSet $declaredType])} {
+                    # M7.b (M7B-CONJUNCTIVE-ENTRY-FACTS.md): TYPE is already
+                    # "specific" here -- an aggregate KEY, the *observed*
+                    # instance fact (a caller's shape, or M7.a.a's provably
+                    # empty `never` element) -- which is exactly the case M1
+                    # above declined to touch, because a bare hir::types::
+                    # narrow cannot combine two aggregate forms. It can now
+                    # (hir/types.tcl's own narrow was extended to recurse
+                    # into a matching List/ImmutableSet's element position),
+                    # so combine conjunctively instead of either keeping TYPE
+                    # alone (M7.a's own "S05d": the declared element theorem
+                    # stays lost) or replacing it with DECLAREDTYPE outright
+                    # (would silently erase a proven-empty `never` element,
+                    # the M7.a.a regression this milestone must not cause).
+                    # The instance's own KEY (this proc's caller, `args`)
+                    # and therefore its identity are untouched: only this
+                    # local per-instance region re-inference seed changes.
+                    set type [hir::types::narrow $type $declaredType]
                 }
                 dict set types $b $type
             }
