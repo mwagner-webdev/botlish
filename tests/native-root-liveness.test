@@ -114,11 +114,27 @@ test root-structural-1 {fib<int>: far fewer shadow slots than its 17 NIR registe
 # no recursion-depth floor applies, so its shadow-slot count is a true zero,
 # not the RuntimeStack floor of 1 a call-containing function like drive
 # still gets.
+#
+# UPDATED BY M6-RANGE-DECIDED-BRANCH-LOWERING.md: work's own register count
+# drops from 17 to 16. drive's own self-recursive induction (hir/
+# induction.tcl, pre-existing) already proved i's entry range at work's
+# call site is [1, 500] (see tests/hir-range.test's own range-propagate-6,
+# same fixture, pinning that fact directly); work's own `a = i*3`,
+# `b = a+7` therefore settle to [3,1500]/[10,1507], so its own loop-body
+# guard `if b >= 0: break(b - a) else: continue` is AlwaysTrue --
+# `native::lower::If` now eliminates the `continue` arm and the join
+# register that used to multiplex both arms' values into (that
+# comparison itself, `op rige`, is still computed and left dead: spec
+# #40-42, no purity theorem was added). safepoints/slots are unaffected
+# (work still makes no call and needs no shadow slot either way). This is
+# not `bench/loop-count.ir` being modified -- the frozen `.ir` fixture is
+# untouched -- only this test's own golden register count, which a real,
+# already-existing arithmetic range fact now justifies.
 test root-structural-2 {loop-count: work (no safepoint, no calls) needs zero slots; drive needs far fewer than 13} -body {
     set report [native::roots [sourceIrHir [file join $::projectRoot bench loop-count.ir]]]
     list [regsOf $report work] [safepointsOf $report work] [slotsOf $report work] \
         [regsOf $report drive] [expr {[slotsOf $report drive] < 13}]
-} -result {17 0 0 15 1}
+} -result {16 0 0 15 1}
 
 test root-structural-3 {sum-refined: sum and step both need far fewer slots than their register counts} -body {
     set report [native::roots [sourceIrHir [file join $::projectRoot bench sum-refined.ir]]]
