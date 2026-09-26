@@ -83,3 +83,27 @@ jobs:
             cat coverage.txt 2>/dev/null || echo "No results."
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  gc-stress:
+    name: tests (native GC-stress)
+    # GC-stress forces a GC attempt at every allocation site, which is the
+    # standard way to surface native stack-walking/root-tracking bugs (see
+    # AGENTS.md). It's slower than a plain run, so it's push-only rather
+    # than running on every PR too.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    env:
+      LANG: C.utf8
+      LC_ALL: C.utf8
+      BOTLISH_NATIVE_GC_STRESS: "1"
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install project prerequisites
+        run: bash .devcontainer/setup.sh
+
+      - name: Build native (Cranelift) backend
+        uses: ./.github/actions/build-native
+
+      - name: Run test suite under GC stress
+        run: tclsh9.0 tests/all.tcl

@@ -120,12 +120,37 @@ The WSL checkout is the same working tree as the Windows checkout, not a
 separate clone. Check `git status` before running tests and do not stash or
 discard changes merely to switch environments.
 
-For mandatory native GC-stress validation, build the release backend and run
-the suite with stress enabled inside WSL:
+## Native GC-stress validation
+
+`BOTLISH_NATIVE_GC_STRESS=1` forces a GC attempt at every allocation site,
+which is how native stack-walking/root-tracking bugs get caught. This used
+to be a manual step agents were required to run locally on every relevant
+change; it is no longer mandatory by hand. It now runs automatically in CI
+on every push to `main`, as the `gc-stress` job in
+`.github/workflows/tests.yml`.
+
+Before touching anything in `native/` that affects stack walking, roots, or
+allocation (GC, stack maps, escape analysis, block/root storage), check
+whether the most recent `gc-stress` run on `main` passed. A prior failure
+there is a standing signal worth reproducing and fixing, not something to
+work around.
+
+Agents are not restricted from running GC-stress locally as well, on top of
+what CI covers — do so whenever it's diagnostically useful (e.g. to
+reproduce a CI failure, or to validate a stack-walking change before
+pushing). To run it locally on Linux, build the release backend and run the
+suite with stress enabled:
+
+```sh
+export LANG=C.utf8 LC_ALL=C.utf8 BOTLISH_NATIVE_GC_STRESS=1
+cargo build --release --manifest-path native/Cargo.toml
+tclsh9.0 tests/all.tcl
+```
+
+From Windows, run the same thing inside WSL for Linux GC-stress results
+when validating native stack walking (Windows-native execution exercises a
+different stack/guard implementation):
 
 ```powershell
 wsl.exe -d Ubuntu-24.04 -- bash -lc 'cd /mnt/c/Users/MarkusWagner/dev/botlish && export LANG=C.utf8 LC_ALL=C.utf8 BOTLISH_NATIVE_GC_STRESS=1 && cargo build --release --manifest-path native/Cargo.toml && tclsh9.0 tests/all.tcl'
 ```
-
-Use WSL for Linux GC-stress results when validating native stack walking;
-Windows-native execution exercises a different stack/guard implementation.
