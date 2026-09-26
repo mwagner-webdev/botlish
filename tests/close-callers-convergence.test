@@ -1,0 +1,366 @@
+# close-callers-convergence.test -- M7.c.1: CloseCallers convergence fence
+# (M7C1-CLOSECALLERS-CONVERGENCE-FENCE.md).
+#
+# M7.c's own CloseCallers (hir/specialize.tcl, M7C-CLOSED-CLOSURE-ENTRY-
+# FACTS.md) runs a small, bounded, monotone round loop over closed generic
+# instances: a caller-derived entry-kind theorem for one closed instance can
+# depend on another's (a cascade), so a round that still changed state when
+# the round budget runs out has no sound way to know which, if any, of its
+# already-applied per-instance changes are individually safe to keep. This
+# milestone gives CloseCallers an explicit, transactional convergence rule:
+#
+#   candidate = ordinary pre-CloseCallers snapshot, then CloseCallers' own
+#               round loop applied to it
+#   converged (a complete round changed nothing, within the round budget)
+#       -> commit the candidate
+#   not converged (the round budget was exhausted while state was still
+#               changing)
+#       -> discard the WHOLE candidate, return the ordinary pre-CloseCallers
+#          snapshot unchanged (identical to -closed-caller-facts-opt 0)
+#
+# Two test-only namespace variables in hir/specialize.tcl (never read by the
+# ordinary Fixpoint's own unrelated passLimit, and no new user-facing flag):
+#   hir::specialize::closeCallersRoundLimit    "" (default, production 16)
+#                                               or a forced round budget
+#   hir::specialize::closeCallersConverged     1 (committed) | 0 (rolled
+#                                               back), set by the most
+#                                               recent CloseCallers run
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+# Runs hir::specialize::analyze with CloseCallers' own round budget forced to
+# LIMIT, restoring the test-only override afterward even if TEXT's analysis
+# throws (it does not, for any fixture below, but this mirrors the "leave no
+# override behind" discipline of a namespace variable meant to be read only
+# during one call).
+proc specWithRoundLimit {limit text args} {
+    set hir::specialize::closeCallersRoundLimit $limit
+    try {
+        set hir [surface::compile $text t.bot -strict 0]
+        return [list $hir [hir::specialize::analyze $hir {*}$args] \
+            $hir::specialize::closeCallersConverged]
+    } finally {
+        set hir::specialize::closeCallersRoundLimit ""
+    }
+}
+
+proc specOf {text args} {
+    set hir [surface::compile $text t.bot -strict 0]
+    return [list $hir [hir::specialize::analyze $hir {*}$args]]
+}
+
+proc specId {analysis name} {
+    foreach id [dict get $analysis used] {
+        if {[dict get $analysis instances $id name] eq $name} {
+            return $id
+        }
+    }
+    error "no used instance named $name"
+}
+
+proc specLabels {analysis name} {
+    lmap id [dict get $analysis used] {
+        if {[dict get $analysis instances $id name] ne $name} continue
+        hir::specialize::label $analysis $id
+    }
+}
+
+proc paramGuards {hir analysis id} {
+    set region [hir::aot::analyzeRegion [hir::specialize::view $hir $analysis $id] \
+        [dict get $analysis instances $id block] [dict get $analysis context]]
+    return [lmap b [dict get $region blockers] {
+        if {[dict get $b class] ne "representation"} continue
+        dict get $b kind
+    }]
+}
+
+# The full per-instance state CloseCallers can ever touch (overlay, result --
+# see hir/specialize.tcl's own mutation-surface audit) plus everything a
+# rollback must leave provably untouched (identity: name/args/generic; the
+# call graph: calls/edges), for every used instance, in `used` order: a
+# structural fingerprint of the whole analysis, not just one instance's own
+# guard or theorem.
+proc instanceDump {analysis} {
+    set out {}
+    foreach id [dict get $analysis used] {
+        set inst [dict get $analysis instances $id]
+        lappend out [list $id [dict get $inst name] [dict get $inst args] \
+            [dict get $inst generic] [dict get $inst overlay] [dict get $inst result] \
+            [dict get $inst calls] [dict get $inst edges]]
+    }
+    return $out
+}
+
+# ---------------------------------------------------------------------------
+# Fixtures
+#
+# primaryFixture (identical to closed-closure-entry-facts.test's own
+# positiveFixture, spec item 17's own "reuse a real... fixture" preference
+# applied to this milestone's simplest case): one closed closure, two exact
+# Int callers. Empirically (not assumed), CloseCallers' own round-1 reset of
+# a reanalyzed instance's result to `never` (needed for the recursive-result
+# case below; see hir/specialize.tcl's own CloseCallers comment) means round
+# 1 always looks like a change for any closed+called instance whose true
+# result is not itself `never` -- so even this non-cascading fixture needs
+# round 2 to *confirm* the round-1 theorem was already stable. Round budget
+# 1 is therefore already the correct boundary fixture for spec items 21-22,
+# with no separate construction needed.
+
+set ::primaryFixture {
+fn outer(tag):
+    fn inner(x):
+        x + length(tag)
+    inner(1) + inner(2)
+outer("v")
+}
+
+# cascadeFixture (identical to closed-closure-entry-facts.test's own
+# capturedThroughParentFixture): inner is called only from middle, which is
+# itself closed and called only from outer. middle's own theorem (Int) is
+# available from round 1 (outer's literal calls need no iteration), but
+# inner's own theorem is derived from *middle's own, already-reanalyzed*
+# view of its call to inner -- so inner only receives its correct fact
+# starting in round 2's freshly-recomputed ClosedCallerFacts, and a further
+# round is needed to confirm both are stable. Empirically: round budget 2 is
+# insufficient (inner's fact still changes in round 2), round budget 3
+# converges -- this is the real, cascading, multi-round fixture spec item 17
+# asks for, not merely the round-1-reset artifact primaryFixture exercises.
+
+set ::cascadeFixture {
+fn outer(tag):
+    fn inner(x):
+        x + length(tag)
+    fn middle(y):
+        inner(y)
+    middle(1) + middle(2)
+outer("v")
+}
+
+# recursiveResultFixture (spec item 26): inner's own *result* -- not merely a
+# representation guard -- is genuinely imprecise pre-theorem: the recursive
+# branch's own list literal has to join with inner's own (self-referential,
+# only known once inner's own theorem seeds x precisely) result, so the
+# result itself narrows from list[any, int] (x's own contribution unresolved)
+# to List[int] only once the closed-caller theorem (Int, from the one
+# non-self caller) reaches x. Forcing premature exhaustion must not commit
+# any narrower-than-baseline result.
+
+set ::recursiveResultFixture {
+fn outer(tag):
+    fn inner(x, n):
+        if n <= 0:
+            [x, length(tag)]
+        else:
+            concat([x], inner(x, n - 1))
+    inner(1, 3)
+outer("v")
+}
+
+# noOptimizableClosureFixture (spec item 24): inner captures nothing (no
+# reference to tag at all), so it is an ordinary static function, not a
+# family-1b generic closure -- its one call specializes directly
+# (inner<int>), and hir::specialize::ClosedSet (generic instances only) has
+# nothing in it at all. CloseCallers' own early return ("no closed instance
+# at all") fires before the round loop is ever entered, so even a round
+# budget of 0 must not roll back anything -- there is nothing to roll back.
+
+set ::noOptimizableClosureFixture {
+fn outer(tag):
+    fn inner(x):
+        x + 1
+    inner(1) + length(tag)
+outer("v")
+}
+
+# ---------------------------------------------------------------------------
+# Forced one-round non-convergence rolls back; rollback equals the
+# -closed-caller-facts-opt 0 baseline exactly (spec items 18-19, 22).
+
+test forced-insufficient-round-does-not-converge {primaryFixture, forced to a round budget of 1, reports non-convergence (round 1's own theorem is never confirmed stable)} -body {
+    lassign [specWithRoundLimit 1 $::primaryFixture] hir analysis converged
+    set converged
+} -result 0
+
+test forced-insufficient-round-guard-retained {with round budget 1, inner's own guard is retained exactly as with the optimization off -- the round-1 theorem is never committed on its own} -body {
+    lassign [specWithRoundLimit 1 $::primaryFixture] hir analysis converged
+    paramGuards $hir $analysis [specId $analysis inner]
+} -result {UnknownParameterKind}
+
+test forced-insufficient-round-matches-opt-off-baseline {round budget 1's candidate, once rolled back, is structurally identical (every used instance's identity, overlay, result, and call graph) to the optimization-disabled baseline, not merely equal in its final guard count} -body {
+    lassign [specWithRoundLimit 1 $::primaryFixture] hir insufficient converged
+    lassign [specOf $::primaryFixture -closed-caller-facts-opt 0] hir0 off
+    expr {[instanceDump $insufficient] eq [instanceDump $off]}
+} -result 1
+
+# ---------------------------------------------------------------------------
+# The same fixture converges with a sufficient round budget, and with the
+# production default (spec item 20's own "successful-control" requirement,
+# plus item 28's "convergence on the final allowed stable round is success").
+
+test sufficient-round-budget-converges {primaryFixture with round budget 2 (the round that confirms round 1's own theorem was stable) reports convergence} -body {
+    lassign [specWithRoundLimit 2 $::primaryFixture] hir analysis converged
+    set converged
+} -result 1
+
+test sufficient-round-budget-guard-eliminated {with round budget 2, inner's own guard is gone and its theorem is Int -- confirming this fixture's rollback control above is genuinely testing the rollback of a useful optimization, not a no-op} -body {
+    lassign [specWithRoundLimit 2 $::primaryFixture] hir analysis converged
+    list [paramGuards $hir $analysis [specId $analysis inner]] \
+         [hir::specialize::closedCallerTheorem $hir $analysis [specId $analysis inner]]
+} -result {{} int}
+
+test production-default-converges-and-matches-forced-sufficient {the production round budget (16, no override) converges and produces results structurally identical to the forced-sufficient (2) case} -body {
+    lassign [specOf $::primaryFixture] hir default
+    lassign [specWithRoundLimit 2 $::primaryFixture] hir2 sufficient converged
+    expr {[instanceDump $default] eq [instanceDump $sufficient]}
+} -result 1
+
+# ---------------------------------------------------------------------------
+# Boundary (off-by-one) semantics, pinned directly (spec items 21-22): a
+# round that is stable *on* the last permitted round is success; a round
+# that is still changing *on* the last permitted round is not, even though
+# both loops ran the same number of rounds.
+
+test boundary-stable-on-final-round-commits {round budget 2: round 1 changes (the round-1 reset artifact), round 2 is stable -- exactly at the budget -- and commits} -body {
+    lassign [specWithRoundLimit 2 $::primaryFixture] hir analysis converged
+    set converged
+} -result 1
+
+test boundary-changing-on-final-round-rolls-back {round budget 1: round 1 still changes and no further round is permitted to confirm it -- rolls back, even though the same theorem would have been correct} -body {
+    lassign [specWithRoundLimit 1 $::primaryFixture] hir analysis converged
+    set converged
+} -result 0
+
+# ---------------------------------------------------------------------------
+# Primary (cascading) non-convergence fixture, and whole-pass rollback (spec
+# items 11, 17-19): a round budget that lets the *first* closed instance's
+# theorem stabilize but not the *second* (cascading) one must discard both,
+# not salvage the one that individually looks converged.
+
+test cascade-needs-more-than-two-rounds {cascadeFixture, forced to round budget 2, does not converge: inner's own theorem only starts improving in round 2's freshly-recomputed facts, so round 2 itself still changes state} -body {
+    lassign [specWithRoundLimit 2 $::cascadeFixture] hir analysis converged
+    set converged
+} -result 0
+
+test cascade-insufficient-budget-rolls-back-both-instances {with round budget 2, BOTH inner and middle are exactly the optimization-disabled baseline -- middle's own theorem was already individually stable after round 1, but whole-pass rollback discards it anyway rather than salvaging it (spec item 11's own "prefer complete pass rollback")} -body {
+    lassign [specWithRoundLimit 2 $::cascadeFixture] hir insufficient converged
+    lassign [specOf $::cascadeFixture -closed-caller-facts-opt 0] hir0 off
+    expr {[instanceDump $insufficient] eq [instanceDump $off]}
+} -result 1
+
+test cascade-sufficient-budget-converges {cascadeFixture converges at round budget 3 (round 1: middle's own theorem settles; round 2: inner's own theorem, derived from middle's now-improved view, settles; round 3: confirmed stable)} -body {
+    lassign [specWithRoundLimit 3 $::cascadeFixture] hir analysis converged
+    set converged
+} -result 1
+
+test cascade-sufficient-budget-theorem-and-guard {with round budget 3, inner's own guard is gone and both inner's and middle's theorems are Int -- the cascade this fixture exists to exercise genuinely resolves} -body {
+    lassign [specWithRoundLimit 3 $::cascadeFixture] hir analysis converged
+    list [paramGuards $hir $analysis [specId $analysis inner]] \
+         [hir::specialize::closedCallerTheorem $hir $analysis [specId $analysis inner]] \
+         [hir::specialize::closedCallerTheorem $hir $analysis [specId $analysis middle]]
+} -result {{} int int}
+
+test cascade-production-default-matches-forced-sufficient {the production round budget (16) reaches the identical structural result as the forced-sufficient (3) case} -body {
+    lassign [specOf $::cascadeFixture] hir default
+    lassign [specWithRoundLimit 3 $::cascadeFixture] hir3 sufficient converged
+    expr {[instanceDump $default] eq [instanceDump $sufficient]}
+} -result 1
+
+test cascade-instance-identity-and-call-graph-unchanged {inner's and middle's own instance labels, and the full used-instance set, are identical whether the pass rolls back (budget 2) or commits (budget 3) -- the theorem/rollback never touches identity or the call graph} -body {
+    lassign [specWithRoundLimit 2 $::cascadeFixture] hir2 insufficient c2
+    lassign [specWithRoundLimit 3 $::cascadeFixture] hir3 sufficient c3
+    list [specLabels $insufficient inner] [specLabels $sufficient inner] \
+         [specLabels $insufficient middle] [specLabels $sufficient middle] \
+         [expr {[dict get $insufficient used] eq [dict get $sufficient used]}]
+} -result {inner<generic> inner<generic> middle<generic> middle<generic> 1}
+
+# ---------------------------------------------------------------------------
+# Recursive-result fixture (spec item 26): forcing premature exhaustion must
+# not commit any partially-narrowed result -- the exact class of issue
+# M7.c's own result-reset (never overwrite; only ever widen via lub) was
+# designed to make safe once CloseCallers itself converges, which this
+# milestone's own fence must not undermine when it does not.
+
+test recursive-result-insufficient-budget-does-not-converge {recursiveResultFixture, forced to round budget 2, does not converge (inner's own result depends on its own theorem-seeded self-reference, settling only in round 3)} -body {
+    lassign [specWithRoundLimit 2 $::recursiveResultFixture] hir analysis converged
+    set converged
+} -result 0
+
+test recursive-result-partial-result-not-committed {with round budget 2, inner's own result is exactly the optimization-disabled baseline's (list[any, int]) -- never a partially-narrowed intermediate value such as List[int] with only some call sites accounted for} -body {
+    lassign [specWithRoundLimit 2 $::recursiveResultFixture] hir insufficient converged
+    lassign [specOf $::recursiveResultFixture -closed-caller-facts-opt 0] hir0 off
+    list [hir::types::show [dict get [dict get $insufficient instances [specId $insufficient inner]] result]] \
+         [hir::types::show [dict get [dict get $off instances [specId $off inner]] result]]
+} -result {{list[any, int]} {list[any, int]}}
+
+test recursive-result-partial-overlay-not-committed {with round budget 2, inner's own guard (present pre-theorem) is retained exactly as in the optimization-disabled baseline -- no partial overlay improvement leaks through} -body {
+    lassign [specWithRoundLimit 2 $::recursiveResultFixture] hir insufficient converged
+    lassign [specOf $::recursiveResultFixture -closed-caller-facts-opt 0] hir0 off
+    list [paramGuards $hir $insufficient [specId $insufficient inner]] \
+         [paramGuards $hir0 $off [specId $off inner]]
+} -result {UnknownParameterKind UnknownParameterKind}
+
+test recursive-result-sufficient-budget-converges-and-narrows {recursiveResultFixture converges at round budget 3, narrowing inner's own result from list[any, int] to List[int] and eliminating its guard -- confirming the rollback controls above test a real optimization, not a no-op} -body {
+    lassign [specWithRoundLimit 3 $::recursiveResultFixture] hir analysis converged
+    list $converged [hir::types::show [dict get [dict get $analysis instances [specId $analysis inner]] result]] \
+         [paramGuards $hir $analysis [specId $analysis inner]]
+} -result [list 1 {List[int]} {}]
+
+test recursive-result-full-structural-rollback {round budget 2's candidate, once rolled back, is structurally identical to the optimization-disabled baseline across every used instance, not only inner's own} -body {
+    lassign [specWithRoundLimit 2 $::recursiveResultFixture] hir insufficient converged
+    lassign [specOf $::recursiveResultFixture -closed-caller-facts-opt 0] hir0 off
+    expr {[instanceDump $insufficient] eq [instanceDump $off]}
+} -result 1
+
+# ---------------------------------------------------------------------------
+# Already-stable case (spec item 24): a program with no generic closed
+# instance at all has nothing for CloseCallers' own round loop to change, so
+# even a round budget of 0 must report convergence, not a spurious rollback.
+
+test no-optimizable-closure-converges-with-zero-round-budget {noOptimizableClosureFixture has no generic closed instance at all (inner specializes directly, never forced generic) -- CloseCallers' own early return fires before the round loop runs, so even round budget 0 converges trivially} -body {
+    lassign [specWithRoundLimit 0 $::noOptimizableClosureFixture] hir analysis converged
+    set converged
+} -result 1
+
+test no-optimizable-closure-round-budget-one-also-converges {the same fixture also converges at round budget 1, for the same reason} -body {
+    lassign [specWithRoundLimit 1 $::noOptimizableClosureFixture] hir analysis converged
+    set converged
+} -result 1
+
+test no-optimizable-closure-matches-default {round budget 0's result is structurally identical to the production default (16) -- there was never anything to optimize, on or off} -body {
+    lassign [specWithRoundLimit 0 $::noOptimizableClosureFixture] hir0 forced converged
+    lassign [specOf $::noOptimizableClosureFixture] hir default
+    expr {[instanceDump $forced] eq [instanceDump $default]}
+} -result 1
+
+# ---------------------------------------------------------------------------
+# Instance identity and call graph are never touched by convergence or
+# rollback (spec items 17-18 of the required safety questions): compare
+# primaryFixture across off / insufficient / sufficient.
+
+test identity-unchanged-across-off-insufficient-sufficient {inner's own instance label and the used-instance count are identical across the optimization-disabled baseline, a forced-insufficient (rolled back) run, and a forced-sufficient (committed) run} -body {
+    lassign [specOf $::primaryFixture -closed-caller-facts-opt 0] hir0 off
+    lassign [specWithRoundLimit 1 $::primaryFixture] hir1 insufficient c1
+    lassign [specWithRoundLimit 2 $::primaryFixture] hir2 sufficient c2
+    list [specLabels $off inner] [specLabels $insufficient inner] [specLabels $sufficient inner] \
+         [llength [dict get $off used]] [llength [dict get $insufficient used]] [llength [dict get $sufficient used]]
+} -result {inner<generic> inner<generic> inner<generic> 3 3 3}
+
+test call-graph-unchanged-across-off-insufficient-sufficient {every used instance's own calls/edges are identical across the optimization-disabled baseline, a rolled-back run, and a committed run -- CloseCallers, converged or not, never creates or removes a call/edge (spec items 17-18 of the required architecture questions)} -body {
+    lassign [specOf $::cascadeFixture -closed-caller-facts-opt 0] hir0 off
+    lassign [specWithRoundLimit 2 $::cascadeFixture] hir1 insufficient c1
+    lassign [specWithRoundLimit 3 $::cascadeFixture] hir2 sufficient c2
+    set callsOf {}
+    foreach analysis [list $off $insufficient $sufficient] {
+        set perId {}
+        foreach id [dict get $analysis used] {
+            lappend perId [dict get [dict get $analysis instances $id] calls] \
+                [dict get [dict get $analysis instances $id] edges]
+        }
+        lappend callsOf $perId
+    }
+    lassign $callsOf callsOff callsInsufficient callsSufficient
+    expr {$callsOff eq $callsInsufficient && $callsOff eq $callsSufficient}
+} -result 1
+
+cleanupTests

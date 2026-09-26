@@ -439,6 +439,30 @@ existing bounded, monotone round budget already subsumes it (confirmed:
 both cascades fully resolve, well inside the 16-round budget, for both
 frozen benchmarks).
 
+## M7.c.1 drive-by: CloseCallers' own convergence fence
+
+(M7C1-CLOSECALLERS-CONVERGENCE-FENCE.md has the full milestone; this is the
+short correction spec item 33 of that milestone asks for, on this report's
+own description of the round loop above.)
+
+The round loop described above ("Cascades and fixpoint") did not originally
+say what happens if `passLimit` rounds are not enough -- it simply exited
+the `for` loop either way, and every previously-applied per-instance change
+was kept regardless. That is corrected as of M7.c.1: `CloseCallers` is a
+**transactional** post-Fixpoint precision pass. Its candidate analysis --
+starting from the already-sound ordinary-Fixpoint snapshot -- is committed
+only after a complete round changes nothing (a proven fixpoint, not merely
+"the budget ran out"). If the round budget is exhausted while a complete
+round is still changing state, the candidate is discarded in full and the
+ordinary pre-CloseCallers specialization snapshot is returned unchanged --
+identical to running with `-closed-caller-facts-opt 0`. This is a pure
+addition of failure semantics: every "successful convergence" measurement
+already in this report (frozen-corpus guard/byte counts, instance counts,
+the 32-test suite) is reconfirmed unchanged by M7.c.1's own regression run
+(see that milestone's own report for the exact figures), because the
+production round budget (16) already converges in every case this report
+measures.
+
 ## Result monotonicity (a fix discovered empirically)
 
 The first working version of `Reanalyze` **overwrote** `instance result`

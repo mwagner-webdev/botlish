@@ -129,6 +129,20 @@ namespace eval hir::specialize {
     variable nestLimit 32
     # State of the running analysis (Handle needs it during inference).
     variable state {}
+    # M7.c.1 (M7C1-CLOSECALLERS-CONVERGENCE-FENCE.md): test-only override of
+    # CloseCallers' own round budget, read only by CloseCallers -- "" means
+    # "use the production passLimit (16)". Never read by the ordinary
+    # Fixpoint above, so a test that sets this cannot perturb Fixpoint's own
+    # unrelated non-convergence safety valve. Not a user-facing flag:
+    # -closed-caller-facts-opt alone still controls whether the M7.c pass is
+    # attempted at all.
+    variable closeCallersRoundLimit ""
+    # Whether the most recent CloseCallers pass committed its candidate (1)
+    # or rolled back to the pre-pass snapshot because its round budget was
+    # exhausted while state was still changing (0). A debug/audit signal for
+    # tests and tooling, not a compiler diagnostic: non-convergence is never
+    # a source-program error (see CloseCallers' own comment).
+    variable closeCallersConverged 1
 }
 
 proc hir::specialize::analyze {hir args} {
@@ -1054,15 +1068,43 @@ proc hir::specialize::Reanalyze {id argTypes} {
 # propagation fixpoint, needed because one closed instance's own theorem can
 # depend on another's (cascades; see the header). Never touches `calls`,
 # `edges`, `values`, `creates`, instance identity, or the `used` set itself.
+#
+# M7.c.1 (M7C1-CLOSECALLERS-CONVERGENCE-FENCE.md): this whole pass is
+# transactional. A caller-derived fact one round settles can feed a *later*
+# round's own facts (a cascade reads a still-earlier round's overlay), so a
+# round loop stopped by exhausting its budget rather than by a complete
+# stable round has no sound way to know which, if any, of its already-
+# applied per-instance changes are individually safe to keep -- some may
+# depend on a sibling's change the budget never let settle. The only
+# obviously safe rule is to commit nothing at all in that case: BASELINE
+# below is `state instances` exactly as the already-sound ordinary Fixpoint
+# left it (this pass's every mutation -- confirmed by inspection, see the
+# section header's own audit -- lands only in that one field, never in
+# `queue`/`deps`/`refs`/`byBlock`/`seeds`/`current`/`building`/`analyses`,
+# so restoring it alone is a complete rollback of the whole pass); Tcl's
+# ordinary dict/value semantics mean capturing it with a plain assignment is
+# already enough isolation -- later `dict set state instances ...` calls
+# rebind `state`, they never mutate the value BASELINE still holds. On
+# non-convergence CloseCallers restores exactly that value, discarding every
+# overlay/result change this pass made, rather than keeping the current
+# (possibly partially-ascended) state, poisoning only `result`, or trying to
+# salvage whichever instances "look" converged: a partial round's cross-
+# instance dependencies make any of those unsound in general (see the
+# report's own "Why result = any alone is insufficient").
 proc hir::specialize::CloseCallers {} {
     variable state
     variable passLimit
+    variable closeCallersRoundLimit
+    variable closeCallersConverged
+    set roundLimit [expr {$closeCallersRoundLimit ne "" ? $closeCallersRoundLimit : $passLimit}]
     set hir [dict get $state hir]
-    set snapshot [dict create specialize 1 instances [dict get $state instances] \
+    set baseline [dict get $state instances]
+    set snapshot [dict create specialize 1 instances $baseline \
         keys [dict get $state keys] used [Used] context [dict get $state context]]
     set be [hir::blockescape::analyze $hir $snapshot]
     set closed [ClosedSet $snapshot $be]
     if {![dict size $closed]} {
+        set closeCallersConverged 1
         return
     }
     # Only an instance ClosedCallerFacts will actually reanalyze at all
@@ -1087,12 +1129,16 @@ proc hir::specialize::CloseCallers {} {
     # An instance with no entry here (no exact caller at all, e.g. the dead-
     # `fnvalue` residuals -- spec item 106's own "other" category) is never
     # reanalyzed by this pass at all, so its `result` must not be reset:
-    # doing so would leave it wrongly pinned at `never` forever.
+    # doing so would leave it wrongly pinned at `never` forever. This reset
+    # is itself part of the transaction (a mutation of `state`, made after
+    # BASELINE was already captured above), so a rollback below undoes it
+    # exactly as it undoes every later round's own change.
     dict for {id argTypes} $facts {
         dict set state instances $id result never
     }
     dict set snapshot instances [dict get $state instances]
-    for {set round 1} {$round <= $passLimit} {incr round} {
+    set converged 0
+    for {set round 1} {$round <= $roundLimit} {incr round} {
         if {$round > 1} {
             set facts [ClosedCallerFacts $hir $snapshot $closed]
         }
@@ -1104,8 +1150,28 @@ proc hir::specialize::CloseCallers {} {
             }
         }
         if {!$changed} {
+            # A complete round changed nothing: every relevant piece of
+            # state (Reanalyze's own "changed" test already covers overlay
+            # and result -- the only two fields this pass ever writes, see
+            # the section header) is stable, so the candidate is a genuine
+            # fixpoint under the current entry facts, not merely a pass
+            # that ran out of rounds. Convergence, per this milestone's own
+            # off-by-one rule, does not require using every permitted round.
+            set converged 1
             break
         }
+    }
+    set closeCallersConverged $converged
+    if {!$converged} {
+        # The round budget was exhausted while a complete round still
+        # changed state: no fixpoint was proven, so the whole candidate --
+        # not just `result`, not just the instances that individually
+        # stopped changing -- is discarded. Restoring BASELINE returns
+        # exactly the already-sound pre-CloseCallers snapshot: legal
+        # programs still compile and run correctly under it, identically to
+        # -closed-caller-facts-opt 0, because that snapshot is exactly what
+        # this optimization is optional on top of.
+        dict set state instances $baseline
     }
 }
 
