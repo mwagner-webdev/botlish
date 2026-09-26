@@ -2,12 +2,12 @@ source:  bench/refined-checks.ir
 backend: Cranelift (specialize=1)
 asm:     refined-checks.asm
 vcode:   refined-checks.vcode
-machine-code bytes: 16791 (per function: 1172 39 337 617 74 74 74 125 125 155 125 214 484 864 516 1004 504 681 769 450 884 644 540 540 636 681 769 450 884 644 540 540 636)
+machine-code bytes: 16743 (per function: 1172 39 289 617 74 74 74 125 125 155 125 214 484 864 516 1004 504 681 769 450 884 644 540 540 636 681 769 450 884 644 540 540 636)
 
 functions:
   0 <program entry>: nir-regs=40
   1 char::codepoint<UnicodeChar>: nir-regs=2
-  2 byte::from_int<int>: nir-regs=9
+  2 byte::from_int<int>: nir-regs=8
   3 byte::set<List[UnicodeChar]>: nir-regs=17
   4 ascii::is_digit<int>: nir-regs=13
   5 ascii::is_upper<int>: nir-regs=13
@@ -21,7 +21,7 @@ functions:
   13 esc_bytes<generic>: nir-regs=15
   14 esc_char<generic>: nir-regs=23
   15 esc_from<generic>: nir-regs=17
-  16 check<int, int, str, str>: nir-regs=28
+  16 check<int, int, str, str>: nir-regs=27
   17 <str>: nir-regs=25
   18 <generic>: nir-regs=25
   19 char_at<generic>: nir-regs=6
@@ -67,9 +67,9 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 2 "byte::from_int"
-    NIR regs: 9
+    NIR regs: 8
     raw regs: 2
-    managed-capable regs: 7
+    managed-capable regs: 6
     effects: may_error=true may_gc=false
     safepoints: 0
     root candidates: 0
@@ -249,9 +249,9 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 16 "check"
-    NIR regs: 28
+    NIR regs: 27
     raw regs: 7
-    managed-capable regs: 21
+    managed-capable regs: 20
     effects: may_error=true may_gc=true
     safepoints: 3
     root candidates: 6
@@ -474,5 +474,5 @@ mechanical pattern counts (triage only; see report for interpretation):
   19 x calls to rt_int_add
   2 x calls to rt_int_sub
   30 x calls to rt_int_cmp
-  83 x calls to other rt_* helpers
+  82 x calls to other rt_* helpers
   24 x guard/guardbool instructions
