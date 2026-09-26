@@ -2,7 +2,7 @@ source:  bench/refined-checks.ir
 backend: Cranelift (specialize=1)
 asm:     refined-checks.asm
 vcode:   refined-checks.vcode
-machine-code bytes: 16743 (per function: 1172 39 289 617 74 74 74 125 125 155 125 214 484 864 516 1004 504 681 769 450 884 644 540 540 636 681 769 450 884 644 540 540 636)
+machine-code bytes: 14898 (per function: 1172 39 289 617 74 74 74 125 125 155 125 103 378 624 448 684 504 681 769 262 804 564 468 452 644 681 769 262 804 564 468 452 644)
 
 functions:
   0 <program entry>: nir-regs=40
@@ -187,7 +187,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     NIR regs: 15
     raw regs: 7
     managed-capable regs: 8
-    effects: may_error=true may_gc=true
+    effects: may_error=false may_gc=true
     safepoints: 1
     root candidates: 2
     max live roots: 2
@@ -473,6 +473,6 @@ mechanical pattern counts (triage only; see report for interpretation):
   2 x calls to rt_closure_new
   19 x calls to rt_int_add
   2 x calls to rt_int_sub
-  30 x calls to rt_int_cmp
-  82 x calls to other rt_* helpers
-  24 x guard/guardbool instructions
+  32 x calls to rt_int_cmp
+  59 x calls to other rt_* helpers
+  3 x guard/guardbool instructions
