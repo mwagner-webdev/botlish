@@ -144,15 +144,50 @@ test setfromlist-total-runtime-parity {a real setfromlisttotal construction agre
     }
 } -result {{value {[true, false]} {}} {value {[true, false]} {}} {value {[true, false]} {}} {value {[true, false]} {}}}
 
-test setfromlist-empty-list-stays-generic {an empty-list-literal call site (mk_int([])) conservatively stays plain setfromlist/may_error=true, even though mk_int's own declared parameter type is List[int] -- confirmed directly (not assumed by analogy with M3's own "empty set stays total" fixture): unlike M1's own scalar declared-parameter-fact transport, hir::specialize::KeyType keys a List[T] parameter's instance from the actual call sites' own inferred element type, not the declared annotation, so a genuinely empty literal argument narrows this specific instance to "List[never]" (IsEqualityTotal(never) = false) -- sound but conservative, exactly what spec item 20 anticipates ("a conservative generic result for broad/never cases is fine"), not a defect for M4 to fix} -body {
+# M7.a.a repair (EMPTY-COLLECTION-AND-APPLIED-TYPE-SEMANTICS.md): under the
+# old language rule, `mk_int([])` was itself an ILLEGAL program (List[never]
+# does not satisfy a declared List[int] parameter), and this fixture only
+# ever compiled because `sourceHir`/`nirOf` (this file's own helpers, top of
+# file) always pass `-strict 0` -- M7A-INSTANCE-SELECTION-THEOREM-AUDIT.md's
+# audit flagged this as exactly that: a test presented as a runtime/
+# soundness control that was actually non-strict analysis of a rejected
+# program. M7.a.a changes the language rule: a statically provably empty
+# List literal now satisfies any declared List[T] (EMPTY-COLLECTION-AND-
+# APPLIED-TYPE-SEMANTICS.md), so `mk_int([])` is now a LEGAL strict program.
+# This replacement asserts that acceptance directly (a plain -strict 1
+# compile, not merely non-strict tolerance), plus the specialization
+# behavior M7.a.a deliberately chose (Model A, see the report): admissibility
+# alone proves the call legal; hir::specialize::KeyType/Analyze are
+# unchanged, so this call's own specific instance still keys off the
+# literal's own List[never] shape, not off mk_int's declared List[int]
+# annotation, and so still conservatively lowers to plain setfromlist
+# (IsEqualityTotal(never) = false) rather than setfromlisttotal. This
+# remains sound and harmless, not merely "conservative": the instance is
+# reached only by empty-list callers, so SetFromList's own O(n^2) dedup body
+# never actually executes over any element in it.
+test setfromlist-empty-list-strict-legal-conservative-instance {mk_int([]) is now a LEGAL strict program (M7A.A); its own specific instance still conservatively lowers to plain setfromlist/may_error=true rather than setfromlisttotal, because specialization identity/seeding is deliberately unchanged (Model A)} -body {
     set text {fn mk_int(xs: List[int]) -> ImmutableSet[int]:
     immutable_set_from_list(xs)
 
 mk_int([])}
-    set nirText [nirOf $text]
-    list [regexp {op setfromlist } $nirText] [regexp {op setfromlisttotal} $nirText] \
-        [string match {*may_error=true*} [calleeEffectLine $text mk_int]]
-} -result {1 0 1}
+    set hir [surface::compile $text t.bot]
+    set strictDiagnostics [llength [hir::diagnostics $hir]]
+    set nirText [dict get [native::lower::program $hir -tiny-leaf-inline-opt 0] text]
+    list $strictDiagnostics \
+        [regexp {op setfromlist } $nirText] [regexp {op setfromlisttotal} $nirText] \
+        [string match {*may_error=true*} [calleeEffectLineIn $nirText mk_int]]
+} -result {0 1 0 1}
+
+test setfromlist-empty-list-runtime-empty-result {mk_int([]) actually runs, on every backend, producing the empty set -- the instance's own conservative may_error=true classification never observably fires} -body {
+    set text {fn mk_int(xs: List[int]) -> ImmutableSet[int]:
+    immutable_set_from_list(xs)
+
+immutable_set_contains(mk_int([]), 1)}
+    set exprs [sourceIR $text]
+    lmap backend {interp compile cranelift-generic cranelift} {
+        outcomeUnder $backend $exprs
+    }
+} -result {{value false {}} {value false {}} {value false {}} {value false {}}}
 
 # ---------------------------------------------------------------------------
 # Negative fixtures: sound-but-incomplete -- generic SetFromList remains

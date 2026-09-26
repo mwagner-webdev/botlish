@@ -246,11 +246,18 @@ test set-construct-empty {immutable_set_from_list([]) infers ImmutableSet[never]
     hir::types::show [hir::typeOf $h $sExpr]
 } -result {ImmutableSet[never]}
 
-test set-construct-empty-satisfies-nothing {an empty-constructed set does not satisfy a declared ImmutableSet[Small] parameter} -body {
-    setTypeRejects [format {%sfn consume(s: ImmutableSet[Small]) -> int:
+# M7.a.a (EMPTY-COLLECTION-AND-APPLIED-TYPE-SEMANTICS.md): immutable_set_
+# from_list([]) is the ImmutableSet family's sole producer of
+# ImmutableSet[never] (audited directly: no other native or construction
+# path yields a Set value at all), so ImmutableSet[never] is as sound a
+# proxy for "provably empty" as List[never] is -- the same empty-collection
+# admissibility rule now applies here too, symmetrically with List[T].
+test set-construct-empty-satisfies-declared {an empty-constructed set satisfies a declared ImmutableSet[Small] parameter -- provably empty, so no member can violate Small's contract (M7.a.a)} -body {
+    surface::compile [format {%sfn consume(s: ImmutableSet[Small]) -> int:
     1
-consume(immutable_set_from_list([]))} $::smallDecl]
-} -result {{CORE SEMANTIC TYPE} 1}
+consume(immutable_set_from_list([]))} $::smallDecl] emptysetok.bot
+    list ok
+} -result ok
 
 # ---------------------------------------------------------------------------
 # Membership (spec 19-21, 52, 61-63)

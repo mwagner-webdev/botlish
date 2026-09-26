@@ -90,8 +90,15 @@ proc nirFuncBody {nirText name} {
 # they share one specialized instance, so no per-instance optimization
 # could soundly mark that shared instance's own inner checked construction
 # unconditionally safe without becoming unsound for the dynamic caller.
+#
+# M7.a.a fix (EMPTY-COLLECTION-AND-APPLIED-TYPE-SEMANTICS.md): `regexp -all`
+# with no `-inline` already returns the match COUNT directly (Tcl's own
+# documented behavior), not a list of matches -- wrapping that integer in
+# `llength` always returned 1, regardless of how many headers actually
+# existed, silently making every "exactly one shared instance" assertion in
+# this file vacuous.
 proc funcHeaderCount {nirText name} {
-    return [llength [regexp -all -line "^func \\d+ \"$name\"" $nirText]]
+    return [regexp -all -line "^func \\d+ \"$name\"" $nirText]
 }
 
 # Every call-kind HIR expr whose own origin line is LINE, as
@@ -289,9 +296,26 @@ test checked-domain-q3-real-nir-retains-above-range-check {UPDATED BY M6: byte::
 # instance's own inner construction unconditionally safe without becoming
 # unsound for the other caller.
 
-test checked-domain-shared-instance-byte-set {byte::set(['-', '.', '_', '~']) and a dynamic, handled byte::set(chars) call share one NIR instance (one "byte::set" func header), not two} -body {
+# M7.a.a repair (EMPTY-COLLECTION-AND-APPLIED-TYPE-SEMANTICS.md): the
+# original fixture's `dyn(chars)` left `chars` UNDECLARED, so `byte::set
+# (chars)` passed a broad/untyped (`any`) argument where byte::set's own
+# declared `List[UnicodeChar]` parameter is required -- illegal under
+# STRICT-TYPED-PARAMETERS.md, and only ever compiled here because this
+# file's own `nirOfFile` reads with `-strict 0` (M7A-INSTANCE-SELECTION-
+# THEOREM-AUDIT.md's audit: this fixture "compiles an illegal program with
+# -strict 0", and once funcHeaderCount actually counts (see above) it reads
+# 2 headers, not 1 -- the assertion below was vacuously true only because
+# of the funcHeaderCount bug, never because the two callers genuinely
+# shared an instance). Declaring `chars: List[UnicodeChar]` makes the
+# argument legal (an ordinary parameter reference, statically exactly
+# List[UnicodeChar], satisfies the identical declared type by invariant
+# equality) while keeping the call *dynamically supplied*: `dyn`'s caller
+# passes a value only known through its own declared type, not a literal,
+# so this is the legal caller M7.a's audit asked for -- collection contents
+# genuinely unknown to byte::set's own body, still respecting its contract.
+test checked-domain-shared-instance-byte-set {byte::set(['-', '.', '_', '~']) and a dynamic, handled byte::set(chars) call (chars: List[UnicodeChar], a legal declared-but-dynamic argument) share one NIR instance (one "byte::set" func header), not two} -body {
     set path [makeFile {additional_unreserved_chars = byte::set(['-', '.', '_', '~'])
-fn dyn(chars) -> ImmutableSet[Byte]:
+fn dyn(chars: List[UnicodeChar]) -> ImmutableSet[Byte]:
     result = byte::set(chars):
         on AboveRange:
             additional_unreserved_chars

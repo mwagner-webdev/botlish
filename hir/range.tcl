@@ -1039,18 +1039,47 @@ proc hir::range::ProvesType {range type} {
 # start, even though the set itself is immutable, because immutability
 # alone does not license covariance without a variance system this
 # milestone deliberately does not build.
+#
+# M7.a.a exception (EMPTY-COLLECTION-AND-APPLIED-TYPE-SEMANTICS.md): a
+# statically *provably empty* List/ImmutableSet is admissible for any
+# element type, at any nesting depth. This is not covariance -- a non-empty
+# aggregate, or one whose emptiness cannot be proven, is still held to
+# exact invariant equality, unchanged from above -- it is the observation
+# that an aggregate with zero elements contains no value that could ever
+# violate a declared element contract, so there is nothing for invariance
+# to protect there. "Provably empty" means exactly hir::types::MakeList/
+# MakeSet's own `never`-element fold result (the type a `[]`/an
+# `immutable_set_from_list([])` literal, and nothing else, ever produces --
+# see the M7A.A report's producer census): AggregateAdmits below recurses
+# structurally so a *nested* empty aggregate (e.g. the sole element of
+# `[[]]`, statically `List[List[never]]`) is checked the same way one level
+# down, without making the enclosing non-empty List/Set itself covariant.
 proc hir::range::ProvesValueAcceptedBy {argType argRange declared} {
     if {[hir::types::IsList $declared] || [hir::types::IsSet $declared]} {
-        # ImmutableSet[T] (MINIMAL-IMMUTABLE-SET.md) is exactly as invariant
-        # as List[T], for the identical reason: a set's own mutability/
-        # aliasing semantics (here, immutable -- but no variance system
-        # exists to make that fact usable) have not been audited for
-        # anything more permissive than exact structural equality of the
-        # already-Unshaped (a no-op for a set, which never has a shape)
-        # applied type.
-        return [expr {[hir::types::Unshaped $argType] eq $declared}]
+        return [AggregateAdmits [hir::types::Unshaped $argType] $declared]
     }
     return [expr {[hir::types::subtype $argType $declared] || [ProvesType $argRange $declared]}]
+}
+
+# 1 if aggregate value type ARG (already Unshaped) is admissible for
+# applied aggregate type DECLARED (List[T] or ImmutableSet[T]): exact
+# structural equality, or -- the M7.a.a addition -- ARG is the identical
+# aggregate constructor with a statically proven-empty (`never`) element,
+# which is admissible for any DECLARED element, checked the same way one
+# level deeper for a nested aggregate element (spec item 14's `[[]]` case).
+proc hir::range::AggregateAdmits {arg declared} {
+    if {$arg eq $declared} {
+        return 1
+    }
+    if {[hir::types::IsList $declared] && [hir::types::IsList $arg]} {
+        set elem [lindex $arg 1]
+        return [expr {$elem eq "never" || [AggregateAdmits $elem [lindex $declared 1]]}]
+    }
+    if {[hir::types::IsSet $declared] && [hir::types::IsSet $arg]} {
+        set elem [lindex $arg 1]
+        return [expr {$elem eq "never" || [AggregateAdmits $elem [lindex $declared 1]]}]
+    }
+    return 0
 }
 
 proc hir::range::verifyDeclaredResults {hirVar} {

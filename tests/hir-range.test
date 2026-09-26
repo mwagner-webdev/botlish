@@ -561,14 +561,35 @@ h(16)}
             [hir::range::ConditionOutcome $hir $analysis [rangeInstance $spec h] [lindex $conditions 2]]
 } -result {0 0 0}
 
-test condition-outcome-12 {shared-instance adversarial control: byte::from_int(45) (safe) and a genuinely open/dynamic caller sharing the same byte::from_int<int> instance -- the joined entry range is unknown, so neither comparison is decided, even though one caller alone would decide both} -body {
+# M7.a.a repair (EMPTY-COLLECTION-AND-APPLIED-TYPE-SEMANTICS.md): the
+# original fixture below was itself an illegal program (M7A-INSTANCE-
+# SELECTION-THEOREM-AUDIT.md's audit, scenario S03c): `dyn` is a Bearing
+# callable (a declared parameter type and declared errors), so passing it
+# as `caller`'s untyped higher-order argument is rejected by hir/callables.
+# tcl's typed-callable escape check (TYPED-CALLABLE-ESCAPE-SOUNDNESS.md) --
+# and separately, `caller`'s own declared `-> Byte` result is never proven,
+# since its body is a dynamic `g(v)` call. This replaces it with the audit's
+# own legal twin (S03b): `dyn` is left undeclared (not Bearing) and locally
+# handles byte::from_int's own BelowRange/AboveRange errors itself, so it
+# legally erases through caller's untyped `g` -- reached only through
+# callvalue, exactly like the original intended to exercise, but a real,
+# diagnostic-free program (confirmed directly: 0 diagnostics, asserted
+# below alongside the original two ConditionOutcome assertions).
+test condition-outcome-12 {shared-instance adversarial control (legal twin, S03b): byte::from_int(45) (safe) and a genuinely open/dynamic caller sharing the same byte::from_int<int> instance -- the joined entry range is unknown, so neither comparison is decided, even though one caller alone would decide both} -body {
     set src {byte::from_int(45)
-fn dyn(m: int) -> Byte errors BelowRange, AboveRange:
-    byte::from_int(m)
-fn caller(g, v) -> Byte errors BelowRange, AboveRange:
+fn dyn(m):
+    r = byte::from_int(m + 0):
+        on BelowRange:
+            0
+        on AboveRange:
+            255
+    r
+fn caller(g, v):
     g(v)
 caller(dyn, 45)}
-    set hir [surface::readProgramFile [makeFile $src q-m6-shared-adversarial.bot] -strict 0]
+    set path [makeFile $src q-m6-shared-adversarial.bot]
+    set hir [surface::readProgramFile $path -strict 0]
+    set diagnosticCount [llength [hir::diagnostics $hir]]
     removeFile q-m6-shared-adversarial.bot
     set spec [hir::specialize::analyze $hir]
     set analysis [hir::range::analyze $hir $spec]
@@ -577,8 +598,9 @@ caller(dyn, 45)}
     # byte::from_int's own two conditions are lib/byte.bot's (value < 0)
     # and (value > 255); this program adds none of its own `if` nodes with
     # a numeric comparison, so both entries belong to it.
-    list [hir::range::ConditionOutcome $hir $analysis $id [lindex $conditions 0]] \
+    list $diagnosticCount \
+            [hir::range::ConditionOutcome $hir $analysis $id [lindex $conditions 0]] \
             [hir::range::ConditionOutcome $hir $analysis $id [lindex $conditions 1]]
-} -result {{} {}}
+} -result {0 {} {}}
 
 cleanupTests

@@ -602,7 +602,22 @@ proc hir::types::ShapeResult {hir shape argExprs argTypes result} {
             if {![hir::range::ProvesType [dict create min $lo max $hi] $resolved]} {
                 return $result
             }
-            return [MakeList $name]
+            # MakeList must fold in the *resolved* semantic type, not the
+            # bare symbolic NAME: MakeList/Bound/Unshaped treat their ELEM
+            # argument as already-canonical (exactly what every other
+            # ShapeResult case, and hir::types::resolveApplication's own
+            # List case, always pass them), so storing the raw name here
+            # left this case as the one place in the whole applied-type
+            # vertical that produced a non-canonical {list NAME} -- distinct
+            # from the canonical {list {refined int {NAME}}} a declared
+            # List[NAME] annotation resolves to, even though both render
+            # identically via hir::types::show (which normalizes on
+            # display). Invariant List admissibility compares the stored
+            # values directly (never display text), so the mismatch
+            # silently rejected every call passing this native's result to a
+            # declared List[NAME] parameter (M7A-INSTANCE-SELECTION-THEOREM-
+            # AUDIT.md's encode_utf8/List[Byte] finding).
+            return [MakeList $resolved]
         }
     }
     return $result

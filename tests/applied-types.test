@@ -255,11 +255,20 @@ test applied-type-construct-heterogeneous {[1, "x"] does not become a false prec
 f([1, "x"])}
 } -result {{CORE SEMANTIC TYPE} 1}
 
-test applied-type-construct-empty {[] does not satisfy any List[T] parameter (no contextual typing)} -body {
-    appliedTypeRejects [format {%sfn consume(xs: List[Small]) -> int:
+# M7.a.a (EMPTY-COLLECTION-AND-APPLIED-TYPE-SEMANTICS.md) changed this: a
+# statically provably empty List literal now satisfies any declared
+# List[T] -- it contains no element that could violate T's contract. This
+# is admissibility/contextual typing for the *empty* case only, never
+# ordinary List covariance (see the non-empty invariance controls below,
+# unchanged): List[Small] is not accepted where List[OtherSmall] is
+# declared merely because both are same-domain siblings, and a real,
+# non-empty List[Byte] is still not accepted as List[int] or vice versa.
+test applied-type-construct-empty {[] satisfies any declared List[T] -- a provably empty List has no element that could violate T (M7.a.a)} -body {
+    surface::compile [format {%sfn consume(xs: List[Small]) -> int:
     1
-consume([])} $::smallDecl]
-} -result {{CORE SEMANTIC TYPE} 1}
+consume([])} $::smallDecl] emptyok.bot
+    list ok
+} -result ok
 
 # ---------------------------------------------------------------------------
 # Parameter and result contracts (spec 23, 27-28)

@@ -124,4 +124,67 @@ test symbolic-type-identity-web-regression-clean-compile {a program that loads l
     }
 } -result {{} {"aA1%20%C3%A9%F0%9F%98%80"}}
 
+# ---------------------------------------------------------------------------
+# M7.a.a canonicalization fix (EMPTY-COLLECTION-AND-APPLIED-TYPE-SEMANTICS.md):
+# ShapeResult's `typed` case narrowed to `MakeList NAME` (the bare symbolic
+# name), not `MakeList RESOLVED` -- storing a non-canonical `{list Byte}`
+# distinct from the canonical `{list {refined int {Byte}}}` a declared
+# List[Byte] annotation resolves to, even though hir::types::show's own
+# normalizing display printed both identically as "List[int[Byte]]". List
+# admissibility compares stored values, never display text, so passing
+# encode_utf8's result to a declared List[Byte] parameter was rejected with
+# a self-contradictory "cannot be proven to satisfy List[int[Byte]]
+# (argument type: List[int[Byte]])" diagnostic (M7A-INSTANCE-SELECTION-
+# THEOREM-AUDIT.md's own audit finding). These tests exercise the aggregate/
+# parameter-boundary case this file's own earlier tests (element-read via
+# list_get, a scalar type) never reached.
+
+test symbolic-type-identity-satisfies-declared-list-byte-parameter {encode_utf8's result now satisfies a declared List[Byte] parameter directly, with the canonical standard-library Byte -- the actual admissibility defect this milestone fixes (spec item 44)} -body {
+    surface::compile {type Byte = Int in 0..255
+
+fn consume(bytes: List[Byte]) -> int:
+    1
+
+consume(encode_utf8("A"))
+} consumeutf8.bot
+    list ok
+} -result ok
+
+test symbolic-type-identity-structural-equality-not-display-text {encode_utf8's inferred type is structurally (Tcl-value) identical to a declared List[Byte] annotation's own resolved type, not merely identical hir::types::show text -- the stronger proof that the fix is a real representation fix, not a display-formatting coincidence (spec items 19-20)} -body {
+    set h1 [surface::compile {type Byte = Int in 0..255
+encode_utf8("A")
+} enc1.bot]
+    set encType [hir::typeOf $h1 [lindex [hir::roots $h1] end]]
+    set h2 [surface::compile {type Byte = Int in 0..255
+
+fn f(xs: List[Byte]) -> int:
+    1
+} enc2.bot]
+    set block [lindex [hirFind $h2 block] end]
+    set declType [lindex [hir::get $h2 $block declaredParamTypes] 0]
+    list [expr {$encType eq $declType}] [hir::types::show $encType]
+} -result {1 {List[int[Byte]]}}
+
+test symbolic-type-identity-negative-control-list-int-still-rejected {encode_utf8's List[Byte] result does NOT satisfy a declared List[int] parameter -- named-domain evidence still matters; canonicalization narrows to the resolved *named* type, never collapses distinct named/unnamed domains merely because both have runtime int kind (spec item 46)} -body {
+    catch {surface::compile {type Byte = Int in 0..255
+
+fn consume(xs: List[int]) -> int:
+    1
+
+consume(encode_utf8("A"))
+} rejectlistint.bot} message options
+    list [dict get $options -errorcode] [string match {*cannot be proven to satisfy*} $message]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test symbolic-type-identity-narrow-byte-param-still-rejected {with a same-spelled but narrower local Byte (0..15), encode_utf8 still falls back to the broad list kind (symbolic-type-identity-narrow-byte-rejected above), so it still does NOT satisfy a declared List[Byte] parameter -- the aggregate/parameter-boundary case inherits the identical domain-admissibility proof, not a Byte-name shortcut} -body {
+    catch {surface::compile {type Byte = Int in 0..15
+
+fn consume(xs: List[Byte]) -> int:
+    1
+
+consume(encode_utf8("A"))
+} rejectnarrowbyte.bot} message options
+    list [dict get $options -errorcode] [string match {*cannot be proven to satisfy*} $message]
+} -result {{CORE SEMANTIC TYPE} 1}
+
 ::tcltest::cleanupTests

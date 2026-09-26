@@ -1,0 +1,288 @@
+# empty-collection-admissibility.test -- M7.a.a: a statically provably empty
+# immutable List/ImmutableSet satisfies any declared element type
+# (EMPTY-COLLECTION-AND-APPLIED-TYPE-SEMANTICS.md).
+#
+# The rule (hir::range::ProvesValueAcceptedBy/AggregateAdmits, hir/range.tcl):
+# an aggregate whose stored type is the `never`-element form MakeList/MakeSet
+# themselves only ever produce for zero elements ({list never}/
+# {immutableSet never}) is admissible for any declared List[T]/
+# ImmutableSet[T], because it contains no value that could violate T.
+# Non-empty aggregates, or ones whose emptiness cannot be proven, remain
+# exactly as invariant as before this milestone -- these tests pair every
+# acceptance with the non-empty control that must still be rejected.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+set ::smallDecl "type Small = Int in 0..10\n\nfn one() -> Small:\n    1\n\n"
+set ::byteDecl "type Byte = Int in 0..255\n\nfn byteA() -> Byte:\n    97\n\n"
+
+proc sourceHir {text} {
+    return [surface::compile $text t.bot -strict 0]
+}
+
+proc sourceIR {text} {
+    return [hir::lower [sourceHir $text]]
+}
+
+proc nirOf {text} {
+    return [dict get [native::lower::program [sourceHir $text] -tiny-leaf-inline-opt 0] text]
+}
+
+# {ERRORCODE 1} if SOURCE is rejected with a parameter- or result-boundary
+# admissibility TYPE diagnostic under ordinary strict compilation.
+proc rejects {source} {
+    catch {surface::compile $source reject.bot} message options
+    list [dict get $options -errorcode] \
+        [expr {[string match {*cannot be proven to satisfy*} $message]
+            || [string match {*does not prove declared type*} $message]}]
+}
+
+# Compiles SOURCE strictly (raises on any diagnostic) and returns "ok" --
+# used as the acceptance-side counterpart to rejects above.
+proc accepts {source} {
+    surface::compile $source accept.bot
+    return ok
+}
+
+proc specOf {text args} {
+    set hir [surface::compile $text t.bot -strict 0]
+    return [list $hir [hir::specialize::analyze $hir {*}$args]]
+}
+
+proc specLabels {analysis name} {
+    lmap id [dict get $analysis used] {
+        if {[dict get $analysis instances $id name] ne $name} continue
+        hir::specialize::label $analysis $id
+    }
+}
+
+# ---------------------------------------------------------------------------
+# List[T]: basic acceptance (spec items 1, 35-36), paired with the non-empty
+# control that must remain rejected.
+
+test empty-list-satisfies-source-defined-domain {[] satisfies List[Small], a source-defined domain -- not Byte-specific (spec item 35)} -body {
+    accepts [format {%sfn consume(xs: List[Small]) -> int:
+    1
+consume([])} $::smallDecl]
+} -result ok
+
+test empty-list-satisfies-string {[] satisfies List[str] -- a non-integer element kind, proving the rule is about emptiness, not integer domains (spec item 36)} -body {
+    accepts {fn consume(xs: List[str]) -> int:
+    1
+consume([])}
+} -result ok
+
+test nonempty-list-still-invariant-small-domain {a non-empty List[Small] literal with a real value still does not satisfy List[Byte] merely because both are int-kinded -- proves the empty rule did not silently introduce base-kind covariance (spec item 15, using Byte as the source-defined bounded domain)} -body {
+    rejects [format {%sfn consume(xs: List[Byte]) -> int:
+    1
+consume([one()])} $::smallDecl$::byteDecl]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test nonempty-list-byte-to-int-still-rejected {List[Byte] -> List[int] remains invalid for a real, non-empty value (spec item 15)} -body {
+    rejects [format {%sfn consume(xs: List[int]) -> int:
+    1
+consume([byteA()])} $::byteDecl]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test nonempty-list-int-to-byte-still-rejected {List[int] -> List[Byte] remains invalid for a real, non-empty value (spec item 15)} -body {
+    rejects [format {%sfn consume(xs: List[Byte]) -> int:
+    1
+consume([1, 2, 3])} $::byteDecl]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test checked-domain-negative-control-still-checked {a checked-domain violation inside a non-empty List literal is still rejected -- the empty rule never means "element constraints ignored for List[T]" (spec item 16)} -body {
+    rejects [format {%sfn takes_bytes(xs: List[Byte]) -> int:
+    1
+takes_bytes([256])} $::byteDecl]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+# ---------------------------------------------------------------------------
+# ImmutableSet[T]: the identical rule (spec item 37) -- immutable_set_from_
+# list is the sole producer of any Set value, and its own -result-shape only
+# ever yields ImmutableSet[never] from a source List statically proven
+# empty, so ImmutableSet[never] is as sound a proof of emptiness as
+# List[never].
+
+test empty-set-satisfies-byte {an empty-constructed set satisfies a declared ImmutableSet[Byte] parameter (spec item 37)} -body {
+    accepts [format {%sfn consume(s: ImmutableSet[Byte]) -> int:
+    1
+consume(immutable_set_from_list([]))} $::byteDecl]
+} -result ok
+
+test empty-set-satisfies-string {an empty-constructed set satisfies a declared ImmutableSet[str] parameter -- non-integer element kind (spec item 37)} -body {
+    accepts {fn consume(s: ImmutableSet[str]) -> int:
+    1
+consume(immutable_set_from_list([]))}
+} -result ok
+
+test nonempty-set-still-invariant {a non-empty ImmutableSet[Byte] does not satisfy ImmutableSet[int] -- the set-side non-empty invariance control (spec item 37)} -body {
+    rejects [format {%sfn consume(s: ImmutableSet[int]) -> int:
+    1
+consume(immutable_set_from_list([byteA()]))} $::byteDecl]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+# ---------------------------------------------------------------------------
+# Result position (spec items 11, 38): the same admissibility relation
+# governs a declared function result, symmetrically with parameters.
+
+test empty-list-satisfies-declared-result {a function declaring -> List[int] and returning [] is accepted -- result-position symmetry with parameters (spec items 11, 38)} -body {
+    accepts {fn empty() -> List[int]:
+    []
+1}
+} -result ok
+
+test empty-set-satisfies-declared-result {a function declaring -> ImmutableSet[Small] and returning an empty-constructed set is accepted (spec items 11, 38)} -body {
+    accepts [format {%sfn emptySet() -> ImmutableSet[Small]:
+    immutable_set_from_list([])
+1} $::smallDecl]
+} -result ok
+
+test nonempty-list-result-still-invariant {a function declaring -> List[Byte] whose body actually returns List[int] is still rejected at the result boundary (spec item 38 negative control)} -body {
+    rejects [format {%sfn wrong() -> List[Byte]:
+    [1, 2, 3]
+1} $::byteDecl]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+# ---------------------------------------------------------------------------
+# Nested empty collections (spec items 14, 43): the outer List is non-empty
+# (one element), so admissibility must recurse into that element rather
+# than treating the whole value as trivially empty -- an adversarial check
+# that the rule composes structurally instead of making the outer List
+# covariant.
+
+test nested-empty-inner-list-satisfies-nested-declared-type {[[]] (List[List[never]]) satisfies a declared List[List[int]] parameter -- the outer list is non-empty, so its one element (an empty list) is itself checked against the inner List[int] via the identical rule, one level down (spec item 14)} -body {
+    accepts {fn consume(xs: List[List[int]]) -> int:
+    1
+consume([[]])}
+} -result ok
+
+test nested-outer-empty-satisfies-nested-declared-type {[] itself (not merely a list containing an empty list) also satisfies a declared List[List[int]] parameter -- the outer aggregate is directly List[never] (spec item 43)} -body {
+    accepts {fn consume(xs: List[List[int]]) -> int:
+    1
+consume([])}
+} -result ok
+
+test nested-nonempty-inner-list-still-invariant {[[1]] does NOT satisfy List[List[Byte]] -- the inner list is non-empty with a plain-int element, so nesting composition never becomes covariant merely because the outer or inner shape momentarily looks empty (spec item 14 adversarial control)} -body {
+    rejects [format {%sfn consume(xs: List[List[Byte]]) -> int:
+    1
+consume([[1]])} $::byteDecl]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+# ---------------------------------------------------------------------------
+# Generic function body usability (spec items 8, 39): the single most
+# important adversarial test for the specialization interaction. Calling
+# f([]) must not create a specialization in which the callee's own body
+# loses capabilities its declared List[Int] parameter promises.
+
+test generic-body-usability-empty-caller {consume(xs: List[int]) -> int, whose body itself calls helper(xs) requiring List[int], must still compile when called with []: the callee's declared List[int] contract is checked once, globally, against the declaration -- independent of any particular caller -- so an empty caller can never make the body itself invalid (spec items 8, 39, the mandatory regression)} -body {
+    accepts {fn helper(xs: List[int]) -> int:
+    1
+fn consume(xs: List[int]) -> int:
+    helper(xs)
+consume([])}
+} -result ok
+
+test generic-body-usability-mixed-callers-both-compile {the same consume(List[int]) body remains valid for both an empty and a non-empty caller in the same program (spec item 41)} -body {
+    accepts {fn helper(xs: List[int]) -> int:
+    1
+fn consume(xs: List[int]) -> int:
+    helper(xs)
+[consume([]), consume([1, 2, 3])]}
+} -result ok
+
+# ---------------------------------------------------------------------------
+# Empty listloop semantics (spec item 40): runtime must reflect zero
+# iterations for the empty caller, on every backend, whether or not
+# specialization gives the empty caller its own instance.
+
+test empty-listloop-runtime-zero-iterations {count(xs: List[int]), which listloop-maps over xs and takes the result's length, called with [] returns 0 on every backend -- bindings are immutable, so listloop maps each element to a value rather than accumulating through reassignment (spec item 40)} -body {
+    set text {fn count(xs: List[int]) -> int:
+    mapped = loop x in xs:
+        x
+    list_length(mapped)
+count([])}
+    set exprs [sourceIR $text]
+    lmap backend {interp compile cranelift-generic cranelift} {
+        outcomeUnder $backend $exprs
+    }
+} -result {{value 0 {}} {value 0 {}} {value 0 {}} {value 0 {}}}
+
+test empty-listloop-nonempty-caller-still-correct {the same count(List[int]) function still counts correctly for a real, non-empty caller in the same program -- mixed callers do not corrupt each other's runtime behavior (spec items 40-42)} -body {
+    set text {fn count(xs: List[int]) -> int:
+    mapped = loop x in xs:
+        x
+    list_length(mapped)
+[count([]), count([1, 2, 3])]}
+    set exprs [sourceIR $text]
+    lmap backend {interp compile cranelift-generic cranelift} {
+        outcomeUnder $backend $exprs
+    }
+} -result {{value {[0, 3]} {}} {value {[0, 3]} {}} {value {[0, 3]} {}} {value {[0, 3]} {}}}
+
+# ---------------------------------------------------------------------------
+# Mixed-caller specialization policy (spec items 41-43): record the
+# deliberate choice (Model A, EMPTY-COLLECTION-AND-APPLIED-TYPE-SEMANTICS.md)
+# -- admissibility alone proves the call legal; hir::specialize's own
+# identity/seeding is untouched, so an empty and a non-empty caller of the
+# same declared List[T] parameter get two separate instances, exactly as an
+# undeclared parameter already did before this milestone (S05c).
+
+test mixed-callers-two-separate-instances {consume([]) and consume([1,2,3]) for a declared consume(xs: List[int]) produce two distinct specialized instances, keyed List[never] and List[int] respectively -- unchanged specialization identity policy (spec items 41-42)} -body {
+    lassign [specOf {fn consume(xs: List[int]) -> int:
+    1
+[consume([]), consume([1, 2, 3])]}] hir analysis
+    lsort [specLabels $analysis consume]
+} -result {{consume<List[int]>} {consume<List[never]>}}
+
+test mixed-callers-adding-third-caller-stays-sound {adding a third, non-empty caller does not merge with or corrupt the empty-caller instance -- no unsound theorem from emptiness leaks into a shared instance (spec item 42, required: no)} -body {
+    lassign [specOf {fn consume(xs: List[int]) -> int:
+    1
+[consume([]), consume([1, 2, 3]), consume([4, 5])]}] hir analysis
+    lsort [specLabels $analysis consume]
+} -result {{consume<List[int]>} {consume<List[never]>}}
+
+test empty-caller-instance-loop-body-statically-dead {the empty-caller instance's own listloop body is proven statically unreachable in its generated code (an "unreachable" NIR marker), while the non-empty caller's instance keeps a live loop body -- consistent with the pre-existing undeclared-empty-caller behavior (S05c), now also true for a declared List[T] parameter (spec items 10, 40)} -body {
+    set text {fn count(xs: List[int]) -> int:
+    mapped = loop x in xs:
+        x
+    list_length(mapped)
+[count([]), count([1, 2, 3])]}
+    set nirText [nirOf $text]
+    set emptyStart [string first {instance="List[never]"} $nirText]
+    set nonEmptyStart [string first {instance="List[int]"} $nirText]
+    set emptyEnd [string first "\nend" $nirText $emptyStart]
+    set nonEmptyEnd [string first "\nend" $nirText $nonEmptyStart]
+    list [expr {[string first unreachable [string range $nirText $emptyStart $emptyEnd]] >= 0}] \
+         [expr {[string first unreachable [string range $nirText $nonEmptyStart $nonEmptyEnd]] >= 0}]
+} -result {1 0}
+
+# ---------------------------------------------------------------------------
+# Joins (spec item 12): an if/else joining an empty arm with a non-empty
+# List[int] arm already infers List[int] through hir::types::lub's own
+# pre-existing (join-based, not admissibility-based) List case -- unrelated
+# to and unchanged by this milestone's admissibility fix, but pinned here as
+# the coherent behavior spec item 12 asks to document.
+
+test join-empty-and-nonempty-arms-infers-element-type {if flag: [] else: [1, 2] infers List[int], because the empty arm's List[never] joins (lub), not admissibility-checks, against the non-empty arm's List[int] -- pre-existing join behavior, documented as coherent with the new admissibility rule (spec item 12)} -body {
+    set h [sourceHir {fn pick(flag: bool) -> int:
+    xs = if flag:
+        []
+    else:
+        [1, 2]
+    1
+1}]
+    set bindExprs [hirFind $h bind xs]
+    hir::types::show [hir::typeOf $h [lindex $bindExprs 0]]
+} -result {List[int]}
+
+test join-empty-and-nonempty-arms-satisfies-declared-result {a function joining [] and [1,2] across an if/else, declared -> List[int], compiles -- the join's own List[int] inference satisfies the declared result directly (spec item 12)} -body {
+    accepts {fn pick(flag: bool) -> List[int]:
+    if flag:
+        []
+    else:
+        [1, 2]
+1}
+} -result ok
+
+::tcltest::cleanupTests
