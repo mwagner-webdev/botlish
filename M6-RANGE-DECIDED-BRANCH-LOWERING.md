@@ -610,10 +610,10 @@ other M1-M5 test file is unmodified.
 ## Full regression
 
 ```
-tclsh9.0 tests/all.tcl                          -> interp: 2185/2185, compile: 2185/2185, 0 failed
+tclsh9.0 tests/all.tcl                            -> interp: 2185/2185, compile: 2185/2185, 0 failed
 cargo test --release --manifest-path native/Cargo.toml
-                                                 -> 60/60 passed (unchanged from M5: no Rust code changed)
-BOTLISH_NATIVE_GC_STRESS=1 tclsh9.0 tests/all.tcl -> (running; see below)
+                                                   -> 60/60 passed (unchanged from M5: no Rust code changed)
+BOTLISH_NATIVE_GC_STRESS=1 tclsh9.0 tests/all.tcl -> interp: 2185/2185, compile: 2185/2185, 0 failed
 ```
 
 The plain run found exactly one real, expected diff on first pass:
@@ -626,10 +626,11 @@ pass at 2185/2185 with **zero** other diffs anywhere in the suite --
 `tests/checked-domain-proof-provenance.test`'s updated Q1/Q2/Q3/
 architecture-pin expectations, are included in that 2185 total. The
 GC-stress run (mandatory per this repository's own native stack-map/root
-validation discipline) is reported in full once it completes -- see
-`GC-STRESS-RESULT` below, filled in from the actual run, not assumed.
-
-GC-STRESS-RESULT: _(pending -- filled in from the actual completed run)._
+validation discipline) reproduces the identical 2185/2185 result on both
+backends with no additional failures, confirming the smaller root
+maps/CFGs the eliminated branches leave behind remain sound under an
+aggressively colliding allocator, not merely under the default GC
+cadence.
 
 Focused suites (all re-run individually, exact counts):
 
@@ -694,3 +695,156 @@ this milestone already knows how to fully exploit, without this milestone
 needing any further change of its own. Container-content propagation
 (missing-theorem #1 above) is the next-best candidate specifically for
 closing the real `byte::set` production case M5 first raised.
+
+## Required architecture questions
+
+1. **Canonical prover for branch outcome?** `hir::range::ConditionOutcome`
+   (hir/range.tcl), composing `hir::types::KnownOutcome` with
+   `hir::range::analyze`'s already-settled per-instance operand facts.
+2. **Does `native::lower::If` perform semantic range reasoning itself?**
+   No -- it calls the one query and switches on `1`/`0`/`""`.
+3. **Exact values the query returns?** `1` (always true), `0` (always
+   false), `""` (unknown) -- `hir::types::KnownOutcome`'s own convention.
+4. **Consumes already-computed facts rather than rerunning analysis?**
+   Yes -- `hir::range::analyze` is called exactly once, at the same call
+   site as before this milestone; the query only reads `hir::range::of`.
+5. **Existing `KnownOutcome` cases preserved?** Yes, and improved: they no
+   longer emit a redundant `br`/`unreachable` pair either (see `check`'s
+   own delta above).
+6. **Is theorem scope represented correctly?** Yes -- every fact consumed
+   is an instance-level joined fact (`hir::range::analyze`'s own
+   interprocedural fold), never a call-specific one.
+7. **Can call-specific facts accidentally prune a shared function
+   instance?** No -- confirmed by the shared-instance adversarial control
+   (both checks retained when even one caller is genuinely unconstrained).
+8. **Any Byte-specific branch logic?** No -- confirmed by the identical
+   `Small = Int in 10..20` reproduction of every Byte fixture.
+
+## Required proof-provenance questions
+
+For the primary fixture (a Byte/domain-typed parameter's own comparison):
+9. **Theorem needed:** the parameter's value lies within its declared
+   domain at this program point. 10. **Canonical prover:**
+   `hir::range::ConstrainType`/`TypeFact`, feeding `hir::range::analyze`'s
+   per-instance fixpoint (both pre-existing). 11. **Currently proved?**
+   Yes, and was already computed before this milestone. 12. **Scope:**
+   instance-level (every `ref` of the parameter within that specialization
+   instance). 13. **Materialized where?** `hir::range::of $analysis $id
+   $exprId`'s per-instance `exprs` table. 14. **Transport to lowering?**
+   Direct -- `native::lower.tcl` already held `$ranges`/`$currentInstance`
+   for representation decisions; the new query reads the same table. 15.
+   **First loss:** ignored (Outcome A) -- the fact reached the table;
+   nothing asked `hir::range::Narrowed`'s own already-computed
+   hypothetical-empty-range question about it. 16. **If missing, was it
+   deliberately left unimplemented?** N/A here (it was not missing); see
+   the container-content-propagation and condition-purity theorems in the
+   backlog, both deliberately left unimplemented.
+
+## Required byte::from_int questions
+
+17. **Does `byte::from_int(45)`'s call-specific completion proof now
+    directly prune the shared callee body?** No -- the elimination in the
+    safe-only-caller case comes entirely from `hir::range`'s own
+    instance-level joined fact (this call being the instance's only
+    caller), never from `hir/completions.tcl`'s call-specific silo.
+18. **Does an instance whose entry range is provably within Byte
+    eliminate its two failure branches?** Yes, confirmed directly
+    (`checked-domain-q1-real-byte-from-int-still-emits-both-checks`,
+    updated result `{1 1 0 0}`).
+19. **Does a mixed dynamic instance retain needed branches?** Yes,
+    confirmed (shared-instance adversarial control, both checks retained).
+20. **Does `byte::set(['Ā'])` remain a known/runtime error as
+    appropriate?** Yes, unchanged
+    (`checked-domain-byte-set-astral-still-fails`/
+    `-known-error-at-compile-time`, both still passing verbatim).
+21. **Does the frozen URI punctuation initializer improve at all?** Yes,
+    partially and generically: `BelowRange` is eliminated (`char::
+    codepoint`'s own declared floor), `AboveRange` is not (still genuinely
+    `Unknown` for this shared instance) -- see "M5 `byte::from_int`
+    reassessment" above.
+
+## Required range questions
+
+22. **Does a Byte parameter prove `b < 0` false?** Yes.
+23. **`b > 255` false?** Yes.
+24. **`b < 100`?** Unknown, confirmed with a two-literal-caller control
+    spanning the threshold.
+25. **Does a `Small` (`10..20`) parameter prove `x < 10` false?** Yes
+    (`condition-outcome-5`, reproduced generically).
+26. **Does HighNibble prove impossible exact values where exact-set facts
+    survive?** Yes (`x == 17` -> `AlwaysFalse`, `condition-outcome-11`).
+27. **Exact-set budget boundary behavior?** Not separately re-verified
+    beyond HighNibble's own 16-member set (well inside the 32-value
+    budget); the query adds no exact-set logic of its own; degradation
+    beyond budget is `hir/range.tcl`'s own pre-existing, unchanged
+    behavior (`tests/hir-range-exact.test`).
+28. **Arbitrary-precision Int semantics preserved?** Yes -- confirmed by
+    the open/dynamic broad-Int control staying `Unknown`; no bound ever
+    assumes a machine-word width.
+
+## Required lowering questions
+
+29. **AlwaysTrue lowers to?** The `then` body only, straight-line, no
+    `br`, no `else` label, no join.
+30. **AlwaysFalse?** Symmetric, the `else` body only.
+31. **Unknown?** The pre-existing `br`/two-labels/join form, unchanged.
+32. **Condition evaluation preserved where it may have effects?** Yes,
+    unconditionally, for every outcome -- confirmed directly (`op
+    rilt`/`op rigt` remain as dead computations under a decided outcome).
+33. **Did M6 add a semantic evaluator to lowering?** No.
+34. **Did M6 add a general CFG optimizer?** No -- only the minimal
+    dead-arm/branch omission described above; no block-merging pass.
+
+## Required generated-code questions
+
+35. **Conditional branches eliminated in `uri-steady`?** One
+    (`byte::from_int`'s `BelowRange` check; `br` count 2 -> 1).
+36. **In `refined-checks`?** Two (`byte::from_int`'s, plus `check`'s own
+    pre-existing-syntactic-case cleanup; `br` counts 2->1 and 4->3
+    respectively).
+37. **How many were existing `byte::from_int` checks?** One per probe
+    (`BelowRange`), consistently, everywhere the shared instance appears.
+38. **Unrelated user-code `if`s changed?** Yes -- `check` in
+    `refined-checks.ir`, and `work` in `bench/loop-count.ir` (a
+    hand-written IR benchmark, not user Botlish source, but not a
+    `byte::from_int`-family function either).
+39. **Were all changes backed by explicit canonical theorems?** Yes --
+    each is traced to a specific pre-existing fact (`char::codepoint`'s
+    `nonneg` metadata; `drive`'s induction-derived `i` range; a
+    syntactic `KnownOutcome`) in the sections above.
+40. **Did any previously-fallible function naturally become
+    non-erroring?** No -- `byte::from_int` keeps `may_error=true`
+    (`AboveRange` remains); no probed function's fallibility fully
+    cleared.
+41. **Did any root/safepoint disappear because its only use was dead?**
+    No -- every probed elimination was allocation/safepoint-free either
+    side.
+42. **Did allocations change?** Only static (module-init-time) constant
+    counts, by exactly one per eliminated `fail`'s own no-longer-built
+    error-kind constant; dynamic allocation counts/bytes are identical.
+
+## Required missing-theorem questions
+
+43. **Every important branch that remains emitted despite seeming
+    decidable, with theorem/owner/reason/scope/consumers:** see "Missing-
+    theorem findings" and the "Post-M6 first-loss matrix" above
+    (container-content propagation; condition-expression purity;
+    `!=`/`not`-of-comparison composition).
+44. **Highest-value candidate (not implemented here)?**
+    Container-content propagation -- it is the one that would close the
+    actual real-production `byte::set` case M5 first raised, and per
+    "Recommended next milestone" above, RC1/instance-selection sharpening
+    is judged even higher-value corpus-wide, since it would let more
+    existing instances reach the shape this milestone already exploits.
+
+## Required scope questions
+
+45. **Was `hir/completions.tcl` merged into range analysis?** No.
+46. **Were completion-call-specific facts imported into native
+    lowering?** No.
+47. **Was `KeyType` changed?** No.
+48. **Was closure specialization/family 1b changed?** No.
+49. **Was inlining changed?** No.
+50. **Was loop unrolling added?** No.
+51. **Was source syntax changed?** No.
+52. **Was any frozen `.bot`/`.ir` workload modified?** No.
