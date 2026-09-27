@@ -1,0 +1,15 @@
+date: 2026-09-27T19:50Z
+tree: 6dbcfdb3d62e7870363d2af4fe0dfab7e58ad80c (branch claude/botlish-r2a-dynamic-census-mehusy)
+cpu: Intel(R) Xeon(R) Processor @ 2.10GHz, 4 vCPU (shared cloud container)
+kernel: 6.18.44-fc-v37
+glibc: ldd (Ubuntu GLIBC 2.39-0ubuntu8.7) 2.39
+tcl: 9.0.1
+rustc: rustc 1.98.1 (48a229cea 2026-09-01)
+cargo: cargo 1.98.1 (797e8a9bc 2026-08-05)
+valgrind: valgrind-3.22.0
+python: Python 3.11.15
+objdump: GNU objdump (GNU Binutils for Ubuntu) 2.42
+addr2line: GNU addr2line (GNU Binutils for Ubuntu) 2.42
+native build: cargo build --release (native/Cargo.toml [profile.release] debug = 1), production binary native/target/release/botlish-native
+audit build: audit/post-r2a-dynamic-census/tools/build-audit-native.sh (post-M8.a audit-native.patch + env-gated BOTLISH_AUDIT_SKIP_FIRST), same toolchain, separate target dir
+locale: LANG=C.utf8 LC_ALL=C.utf8

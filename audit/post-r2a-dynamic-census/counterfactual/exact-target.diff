@@ -1,0 +1,43 @@
+# COUNTERFACTUAL (POST-R2A-DYNAMIC-CENSUS.md) -- audit-only, NEVER applied to
+# the tree's own lib/web.bot and never a proposed source change: the frozen
+# source's scan_while(start, predicate) hand-split into the two per-target
+# loops an exact-target specialization of scan_while would produce, applied
+# only inside a scratch worktree by tools/counterfactual.sh to measure what
+# the UNMODIFIED compiler does once the predicate target is statically exact.
+--- a/lib/web.bot
++++ b/lib/web.bot
+@@ -123,15 +123,22 @@
+     # are an untyped-parameter Botlish function and a native, neither of
+     # which is a "typed callable" that rule would block from flowing
+     # through an ordinary parameter).
+-    fn scan_while(start, predicate):
++    fn scan_local(start):
+         loop i from start to n:
+-            if predicate(char_at(i)):
++            if local_char?(char_at(i)):
++                continue
++            return i
++        n
++
++    fn scan_alpha(start):
++        loop i from start to n:
++            if is_tcl_alpha(char_at(i)):
+                 continue
+             return i
+         n
+ 
+     fn tld?(i):
+-        e = scan_while(i, is_tcl_alpha)
++        e = scan_alpha(i)
+         if e == n:
+             e - i >= 2
+         else:
+@@ -170,7 +177,7 @@
+                     return false
+         false
+ 
+-    local_end = scan_while(0, local_char?)
++    local_end = scan_local(0)
+     if local_end == 0:
+         false
+     else:

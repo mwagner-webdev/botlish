@@ -1,0 +1,168 @@
+program: bench/refined-checks.ir
+tree: 63b2199708b7135ec0668ee830d49d78188b3375
+
+== used instances: 26
+  i0 <program> generic; materializes e364 e378
+  i2 char::codepoint<UnicodeChar> 
+  i16 byte::high_nibble<generic> generic
+  i17 byte::nibble<int> 
+  i3 byte::from_int<int> 
+  i1 byte::set<List[UnicodeChar]> 
+  i12 ascii::is_digit<int> 
+  i10 ascii::is_upper<int> 
+  i11 ascii::is_lower<int> 
+  i9 ascii::is_alphabetic<int> 
+  i8 ascii::is_alphanumeric<int> 
+  i19 web::is_emailish<str> ; materializes e173 e183 e211 e233 e253
+  i21 char_at<generic> generic; OPEN; blockescape-flattened captures=[v]
+  i25 is_local_char<generic> generic; OPEN
+  i24 is_label_char<generic> generic; OPEN
+  i20 scan_while<generic> generic; OPEN; blockescape-flattened captures=[n, v]
+  i23 tld_ok<generic> generic; OPEN; blockescape-flattened captures=[n, v]
+  i22 domain_loop<generic> generic; OPEN; blockescape-flattened captures=[n, v]; materializes e197
+  i7 web::is_unreserved<generic> generic; OPEN
+  i4 web::uri_escape_text<generic> generic; OPEN; materializes e387 e404 e433 e466
+  i15 high_nibble<generic> generic
+  i14 hex_pair<generic> generic; OPEN; blockescape-flattened captures=[web::hex_digits]
+  i13 esc_bytes<generic> generic; OPEN; blockescape-flattened captures=[web::hex_digits]
+  i6 esc_char<generic> generic; OPEN; blockescape-flattened captures=[web::is_unreserved, web::hex_digits]
+  i5 esc_from<generic> generic; OPEN; blockescape-flattened captures=[web::is_unreserved, web::hex_digits]
+  i18 check<int, int, str, str> 
+
+== OpenInstances: 12 (char_at<generic>, is_local_char<generic>, is_label_char<generic>, scan_while<generic>, tld_ok<generic>, domain_loop<generic>, web::is_unreserved<generic>, web::uri_escape_text<generic>, hex_pair<generic>, esc_bytes<generic>, esc_char<generic>, esc_from<generic>)
+== blockescape virtual bindings: 8
+  char_at<generic>
+  (i21):
+  internal
+  variant,
+  captures
+  [v]
+  scan_while<generic>
+  (i20):
+  internal
+  variant,
+  captures
+  [n,
+  v]
+  tld_ok<generic>
+  (i23):
+  internal
+  variant,
+  captures
+  [n,
+  v]
+  domain_loop<generic>
+  (i22):
+  internal
+  variant,
+  captures
+  [n,
+  v]
+  hex_pair<generic>
+  (i14):
+  internal
+  variant,
+  captures
+  [web::hex_digits]
+  esc_bytes<generic>
+  (i13):
+  internal
+  variant,
+  captures
+  [web::hex_digits]
+  esc_char<generic>
+  (i6):
+  internal
+  variant,
+  captures
+  [web::is_unreserved,
+  web::hex_digits]
+  esc_from<generic>
+  (i5):
+  internal
+  variant,
+  captures
+  [web::is_unreserved,
+  web::hex_digits]
+
+== NIR: functions 25, lines 660, machine bytes 9490
+  call           23
+  callenv        2
+  callvalue      1
+  callmulti      2
+  callenvmulti   0
+  tail           5
+  tailenv        0
+  guard          4
+  closure        3
+  fnvalue        1
+  capture        4
+  op:charcodepoint       1
+  op:iadd                10
+  op:iand                1
+  op:ieq                 4
+  op:ige                 6
+  op:igt                 1
+  op:ilt                 2
+  op:imod                1
+  op:isub                1
+  op:listappend          1
+  op:listget             5
+  op:listlen             3
+  op:listnew             5
+  op:rbox                4
+  op:regioncheck         1
+  op:regioneq            3
+  op:rieq                1
+  op:rige                3
+  op:rile                4
+  op:rishr               1
+  op:risub               4
+  op:runbox              5
+  op:setcontainstotal    2
+  op:setfromlisttotal    2
+  op:strlen              2
+  op:strtclalnum         2
+  op:strutf8bytes        1
+  op:substr              2
+  per-function machine bytes: 1172 39 289 617 74 74 74 125 125 961 262 222 272 252 552 468 660 155 125 103 453 758 486 828 344
+
+== parameter entry Ranges (hir::range::analyze)
+  char::codepoint<UnicodeChar>: c=[-∞, +∞]
+  byte::high_nibble<generic>: b=[-∞, +∞]
+  byte::nibble<int>: x=[0, 240] {0,16,32,48,64,80,96,112,128,144,160,176,192,208,224,240}
+  byte::from_int<int>: value=[0, +∞]
+  byte::set<List[UnicodeChar]>: chars=[-∞, +∞]
+  ascii::is_digit<int>: b=[0, 255]
+  ascii::is_upper<int>: b=[0, 255]
+  ascii::is_lower<int>: b=[0, 255]
+  ascii::is_alphabetic<int>: b=[0, 255]
+  ascii::is_alphanumeric<int>: b=[0, 255]
+  web::is_emailish<str>: v=[-∞, +∞]
+  char_at<generic>: i=[-∞, +∞]
+  is_local_char<generic>: c=[-∞, +∞]
+  is_label_char<generic>: c=[-∞, +∞]
+  scan_while<generic>: i=[-∞, +∞]  predicate=[-∞, +∞]
+  tld_ok<generic>: i=[-∞, +∞]
+  domain_loop<generic>: i=[-∞, +∞]
+  web::is_unreserved<generic>: b=[-∞, +∞]
+  web::uri_escape_text<generic>: s=[-∞, +∞]
+  high_nibble<generic>: b=[-∞, +∞]
+  hex_pair<generic>: b=[-∞, +∞]
+  esc_bytes<generic>: bytes=[-∞, +∞]  i=[-∞, +∞]  acc=[-∞, +∞]
+  esc_char<generic>: c=[-∞, +∞]
+  esc_from<generic>: text=[-∞, +∞]  i=[-∞, +∞]  acc=[-∞, +∞]
+  check<int, int, str, str>: n=[0, 400]  acc=[0, +∞]  s=[-∞, +∞]  q=[-∞, +∞]
+
+== countloop induction bindings (Range of the first in-body ref)
+
+== allocationReport (summary, one run)
+  total allocations 11620, allocatedBytes 523464
+  String          9204 objects   381768 bytes
+  List             811 objects    51744 bytes
+  ImmutableSet     801 objects    51256 bytes
+  Block            802 objects    38504 bytes
+  StringPlan         2 objects      192 bytes
+  gc: cycles 0 reclaimedObjects 0 reclaimedBytes 0 totalTimeUs 0 maxPauseUs 0 cyclesDetail {}
+  traversal: utf8SeekBytes 41200
+  static: allocations 31 bytes 1299 byKind {String {allocations 29 bytes 1247} List {allocations 0 bytes 0} ImmutableSet {allocations 0 bytes 0} MutableArray {allocations 0 bytes 0} BigInt {allocations 0 bytes 0} Result {allocations 0 bytes 0} Block {allocations 1 bytes 40} Cell {allocations 0 bytes 0} Native {allocations 1 bytes 12} StringPlan {allocations 0 bytes 0} ListPlan {allocations 0 bytes 0}}

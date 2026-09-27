@@ -1,0 +1,30 @@
+# PROBE (POST-R2A-DYNAMIC-CENSUS.md, diagnostic control only): the benchmark's own invalid half alone: 400 x "not-an-email" (ASCII; the local-part scan runs to the end of the string, 12 predicate calls, then fails local_end >= n).
+# bench/refined-checks.ir's own check/q definitions, byte-for-byte; only the
+# final program list differs (one check call instead of two). Never a
+# benchmark: bench/refined-checks.ir itself is not modified.
+# requires: web
+
+{bind check
+    {block {n acc s q}
+        {if {call {ref <=} {ref n} {const 0}}
+            {block {} {ref acc}}
+            {block {}
+                {bind hit
+                    {if {call {ref Emailish?} {ref s}}
+                        {block {}
+                            {if {call {ref Emailish?} {ref s}}
+                                {block {} {if {call {ref UriQueryValue?} {ref q}}
+                                              {block {} {const 1}}
+                                              {block {} {const 0}}}}
+                                {block {} {const 0}}}}
+                        {block {} {const 0}}}}
+                {call {ref check}
+                    {call {ref -} {ref n} {const 1}}
+                    {call {ref +} {ref acc} {ref hit}}
+                    {ref s}
+                    {ref q}}}}}}
+
+{bind q {call {ref uriEscape} {const str {a b}}}}
+
+{call {ref list}
+    {call {ref check} {const 400} {const 0} {const str not-an-email} {ref q}}}

@@ -1,0 +1,46 @@
+== first-run (runs=1, report = last run)
+  total: allocations 8823, allocatedBytes 370440 (header 352744, payload 17696), peakLiveObjects 8823, peakLiveBytes 370440
+  String            8004 objects     330968 bytes (header 320160, payload 10808)
+  List                12 objects        608 bytes (header 288, payload 320)
+  ImmutableSet         2 objects        120 bytes (header 48, payload 72)
+  Block              803 objects      38552 bytes (header 32120, payload 6432)
+  StringPlan           2 objects        192 bytes (header 128, payload 64)
+  semantic allocations 8821, private optimization (plan) allocations 2
+  static constant table: 30 objects, 1259 bytes
+  gc: cycles 0, reclaimedObjects 0, totalTimeUs 0
+  copies: stringBytes 10816 listElements 45 mutableArrayElements 0
+  traversal: utf8SeekBytes 46000
+  construction: materializations 1 passthrough 0 plansCreated 2 extensions 3 merges 2 growths 0 growthStringBytes 0 growthListElements 0 pieces 12 regionPieces 0 stringBytesIntoPlans 8 listElementsIntoPlans 0 materializedStringBytes 5 materializedListElements 0
+  sites (func | location | operation | kind | allocations | bytes):
+    <program>                    web.bot:90     listnew            List              1       64
+    <program>                    web.bot:90     setfromlisttotal   ImmutableSet      1       64
+    <program>                    web.bot:92     closure            Block             1       48
+    <program>                    web.bot:185    listnew            List              1      152
+    <program>                    web.bot:187    listnew            List              1       56
+    <program>                    web.bot:189    closure            Block             1       48
+    <program>                    web.bot:192    closure            Block             1       56
+    <program>                    -              listnew            List              1       40
+    byte::set                    byte.bot:175   listnew            List              1       24
+    byte::set                    byte.bot:175   listappend         List              4      176
+    byte::set                    byte.bot:177   setfromlisttotal   ImmutableSet      1       56
+    web::emailish?               web.bot:99     closure            Block           800    38400
+    char_at                      web.bot:97     substr             String         8000   330800
+    hex_pair                     web.bot:198    construct          StringPlan        1       96
+    esc_char                     web.bot:207    strutf8bytes       List              3       96
+    esc_from                     web.bot:219    construct          String            1       45
+    esc_from                     web.bot:221    substr             String            3      123
+    esc_from                     web.bot:221    construct          StringPlan        1       96
+
+== steady-state (runs=3, report = last run)
+  total: allocations 8823, allocatedBytes 370440 (header 352744, payload 17696), peakLiveObjects 8823, peakLiveBytes 370440
+  String            8004 objects     330968 bytes (header 320160, payload 10808)
+  List                12 objects        608 bytes (header 288, payload 320)
+  ImmutableSet         2 objects        120 bytes (header 48, payload 72)
+  Block              803 objects      38552 bytes (header 32120, payload 6432)
+  StringPlan           2 objects        192 bytes (header 128, payload 64)
+  semantic allocations 8821, private optimization (plan) allocations 2
+  static constant table: 30 objects, 1259 bytes
+  gc: cycles 1, reclaimedObjects 8823, totalTimeUs 219
+  copies: stringBytes 10816 listElements 45 mutableArrayElements 0
+  traversal: utf8SeekBytes 46000
+  construction: materializations 1 passthrough 0 plansCreated 2 extensions 3 merges 2 growths 0 growthStringBytes 0 growthListElements 0 pieces 12 regionPieces 0 stringBytesIntoPlans 8 listElementsIntoPlans 0 materializedStringBytes 5 materializedListElements 0

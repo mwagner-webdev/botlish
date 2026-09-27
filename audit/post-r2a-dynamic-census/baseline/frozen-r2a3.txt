@@ -1,0 +1,177 @@
+program: bench/refined-checks.ir
+tree: 6dbcfdb3d62e7870363d2af4fe0dfab7e58ad80c
+
+== used instances: 26
+  i0 <program> generic; materializes e167 e357 e371 e494
+  i2 char::codepoint<UnicodeChar> 
+  i16 byte::high_nibble<generic> generic
+  i17 byte::nibble<int> 
+  i3 byte::from_int<int> 
+  i1 byte::set<List[UnicodeChar]> 
+  i12 ascii::is_digit<int> 
+  i10 ascii::is_upper<int> 
+  i11 ascii::is_lower<int> 
+  i9 ascii::is_alphabetic<int> 
+  i8 ascii::is_alphanumeric<int> 
+  i19 web::emailish?<generic> generic; OPEN; materializes e173 e183 e211 e226 e246
+  i21 char_at<generic> generic; OPEN; blockescape-flattened captures=[v]
+  i25 local_char?<generic> generic; OPEN
+  i24 label_char?<str> 
+  i20 scan_while<generic> generic; OPEN; blockescape-flattened captures=[n, v]
+  i23 tld?<generic> generic; OPEN; blockescape-flattened captures=[n, v]
+  i22 domain?<generic> generic; OPEN; blockescape-flattened captures=[n, v]
+  i7 web::is_unreserved<generic> generic; OPEN
+  i4 web::uri_escape_text<generic> generic; OPEN; materializes e380 e397 e426 e459
+  i15 high_nibble<generic> generic
+  i14 hex_pair<generic> generic; OPEN; blockescape-flattened captures=[web::hex_digits]
+  i13 esc_bytes<generic> generic; OPEN; blockescape-flattened captures=[web::hex_digits]
+  i6 esc_char<generic> generic; OPEN; blockescape-flattened captures=[web::is_unreserved, web::hex_digits]
+  i5 esc_from<generic> generic; OPEN; blockescape-flattened captures=[web::is_unreserved, web::hex_digits]
+  i18 check<generic> generic; OPEN; blockescape-flattened captures=[web::emailish?]
+
+== OpenInstances: 13 (web::emailish?<generic>, char_at<generic>, local_char?<generic>, scan_while<generic>, tld?<generic>, domain?<generic>, web::is_unreserved<generic>, web::uri_escape_text<generic>, hex_pair<generic>, esc_bytes<generic>, esc_char<generic>, esc_from<generic>, check<generic>)
+== blockescape virtual bindings: 9
+  char_at<generic>
+  (i21):
+  internal
+  variant,
+  captures
+  [v]
+  scan_while<generic>
+  (i20):
+  internal
+  variant,
+  captures
+  [n,
+  v]
+  tld?<generic>
+  (i23):
+  internal
+  variant,
+  captures
+  [n,
+  v]
+  domain?<generic>
+  (i22):
+  internal
+  variant,
+  captures
+  [n,
+  v]
+  hex_pair<generic>
+  (i14):
+  internal
+  variant,
+  captures
+  [web::hex_digits]
+  esc_bytes<generic>
+  (i13):
+  internal
+  variant,
+  captures
+  [web::hex_digits]
+  esc_char<generic>
+  (i6):
+  internal
+  variant,
+  captures
+  [web::is_unreserved,
+  web::hex_digits]
+  esc_from<generic>
+  (i5):
+  internal
+  variant,
+  captures
+  [web::is_unreserved,
+  web::hex_digits]
+  check<generic>
+  (i18):
+  internal
+  variant,
+  captures
+  [web::emailish?]
+
+== NIR: functions 24, lines 688, machine bytes 10258
+  call           21
+  callenv        3
+  callvalue      1
+  callmulti      4
+  callenvmulti   0
+  tail           3
+  tailenv        0
+  guard          4
+  closure        4
+  fnvalue        0
+  capture        5
+  op:charcodepoint       1
+  op:iadd                11
+  op:iand                1
+  op:ieq                 3
+  op:ige                 4
+  op:igt                 1
+  op:ile                 1
+  op:ilt                 4
+  op:imod                1
+  op:isub                3
+  op:listappend          1
+  op:listget             5
+  op:listlen             3
+  op:listnew             5
+  op:rbox                1
+  op:regioncheck         1
+  op:regioneq            4
+  op:rieq                1
+  op:rige                3
+  op:rile                3
+  op:rishr               1
+  op:runbox              5
+  op:setcontainstotal    2
+  op:setfromlisttotal    2
+  op:strlen              2
+  op:strregiontclalnum   1
+  op:strtclalnum         1
+  op:strutf8bytes        1
+  op:substr              2
+  per-function machine bytes: 1588 39 289 617 74 74 74 125 125 753 262 222 272 528 468 1244 155 125 103 453 750 486 828 604
+
+== parameter entry Ranges (hir::range::analyze)
+  char::codepoint<UnicodeChar>: c=[-∞, +∞]
+  byte::high_nibble<generic>: b=[-∞, +∞]
+  byte::nibble<int>: x=[0, 240] {0,16,32,48,64,80,96,112,128,144,160,176,192,208,224,240}
+  byte::from_int<int>: value=[0, +∞]
+  byte::set<List[UnicodeChar]>: chars=[-∞, +∞]
+  ascii::is_digit<int>: b=[0, 255]
+  ascii::is_upper<int>: b=[0, 255]
+  ascii::is_lower<int>: b=[0, 255]
+  ascii::is_alphabetic<int>: b=[0, 255]
+  ascii::is_alphanumeric<int>: b=[0, 255]
+  web::emailish?<generic>: v=[-∞, +∞]
+  char_at<generic>: i=[-∞, +∞]
+  local_char?<generic>: c=[-∞, +∞]
+  label_char?<str>: c=[-∞, +∞]
+  scan_while<generic>: start=[-∞, +∞]  predicate=[-∞, +∞]
+  tld?<generic>: i=[-∞, +∞]
+  domain?<generic>: start=[-∞, +∞]
+  web::is_unreserved<generic>: b=[-∞, +∞]
+  web::uri_escape_text<generic>: s=[-∞, +∞]
+  high_nibble<generic>: b=[-∞, +∞]
+  hex_pair<generic>: b=[-∞, +∞]
+  esc_bytes<generic>: bytes=[-∞, +∞]  i=[-∞, +∞]  acc=[-∞, +∞]
+  esc_char<generic>: c=[-∞, +∞]
+  esc_from<generic>: text=[-∞, +∞]  i=[-∞, +∞]  acc=[-∞, +∞]
+  check<generic>: n=[-∞, +∞]  acc=[-∞, +∞]  s=[-∞, +∞]  q=[-∞, +∞]
+
+== countloop induction bindings (Range of the first in-body ref)
+  scan_while<generic>: i = [-∞, 4611686018427387902]
+  domain?<generic>: j = [-∞, 4611686018427387902]
+
+== allocationReport (summary, one run)
+  total allocations 8823, allocatedBytes 370440
+  String          8004 objects   330968 bytes
+  List              12 objects      608 bytes
+  ImmutableSet       2 objects      120 bytes
+  Block            803 objects    38552 bytes
+  StringPlan         2 objects      192 bytes
+  gc: cycles 0 reclaimedObjects 0 reclaimedBytes 0 totalTimeUs 0 maxPauseUs 0 cyclesDetail {}
+  traversal: utf8SeekBytes 46000
+  static: allocations 30 bytes 1259 byKind {String {allocations 29 bytes 1247} List {allocations 0 bytes 0} ImmutableSet {allocations 0 bytes 0} MutableArray {allocations 0 bytes 0} BigInt {allocations 0 bytes 0} Result {allocations 0 bytes 0} Block {allocations 0 bytes 0} Cell {allocations 0 bytes 0} Native {allocations 1 bytes 12} StringPlan {allocations 0 bytes 0} ListPlan {allocations 0 bytes 0}}

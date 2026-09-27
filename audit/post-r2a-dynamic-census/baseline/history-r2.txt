@@ -1,0 +1,187 @@
+program: bench/refined-checks.ir
+tree: e7d53b691af7363d9a3556ff0ca78be62b003e0f
+
+== used instances: 28
+  i0 <program> generic; materializes e428 e442
+  i2 char::codepoint<UnicodeChar> 
+  i16 byte::high_nibble<generic> generic
+  i17 byte::nibble<int> 
+  i3 byte::from_int<int> 
+  i1 byte::set<List[UnicodeChar]> 
+  i12 ascii::is_digit<int> 
+  i10 ascii::is_upper<int> 
+  i11 ascii::is_lower<int> 
+  i9 ascii::is_alphabetic<int> 
+  i8 ascii::is_alphanumeric<int> 
+  i19 web::is_emailish<str> ; materializes e163 e237 e258 e279 e300 e319
+  i21 char_at<generic> generic; OPEN; blockescape-flattened captures=[v]
+  i22 is_local_char<str> 
+  i25 is_label_char<str> 
+  i20 scan_local<generic> generic; OPEN; blockescape-flattened captures=[n, v]
+  i24 scan_label<generic> generic; OPEN; blockescape-flattened captures=[n, v]
+  i27 scan_alpha<generic> generic; OPEN; blockescape-flattened captures=[n, v]
+  i26 tld_ok<generic> generic; OPEN; blockescape-flattened captures=[n, v]
+  i23 domain_loop<generic> generic; OPEN; blockescape-flattened captures=[n, v]
+  i7 web::is_unreserved<generic> generic; OPEN
+  i4 web::uri_escape_text<generic> generic; OPEN; materializes e451 e468 e497 e530
+  i15 high_nibble<generic> generic
+  i14 hex_pair<generic> generic; OPEN; blockescape-flattened captures=[web::hex_digits]
+  i13 esc_bytes<generic> generic; OPEN; blockescape-flattened captures=[web::hex_digits]
+  i6 esc_char<generic> generic; OPEN; blockescape-flattened captures=[web::is_unreserved, web::hex_digits]
+  i5 esc_from<generic> generic; OPEN; blockescape-flattened captures=[web::is_unreserved, web::hex_digits]
+  i18 check<int, int, str, str> 
+
+== OpenInstances: 12 (char_at<generic>, scan_local<generic>, scan_label<generic>, scan_alpha<generic>, tld_ok<generic>, domain_loop<generic>, web::is_unreserved<generic>, web::uri_escape_text<generic>, hex_pair<generic>, esc_bytes<generic>, esc_char<generic>, esc_from<generic>)
+== blockescape virtual bindings: 10
+  char_at<generic>
+  (i21):
+  internal
+  variant,
+  captures
+  [v]
+  scan_local<generic>
+  (i20):
+  internal
+  variant,
+  captures
+  [n,
+  v]
+  scan_label<generic>
+  (i24):
+  internal
+  variant,
+  captures
+  [n,
+  v]
+  scan_alpha<generic>
+  (i27):
+  internal
+  variant,
+  captures
+  [n,
+  v]
+  tld_ok<generic>
+  (i26):
+  internal
+  variant,
+  captures
+  [n,
+  v]
+  domain_loop<generic>
+  (i23):
+  internal
+  variant,
+  captures
+  [n,
+  v]
+  hex_pair<generic>
+  (i14):
+  internal
+  variant,
+  captures
+  [web::hex_digits]
+  esc_bytes<generic>
+  (i13):
+  internal
+  variant,
+  captures
+  [web::hex_digits]
+  esc_char<generic>
+  (i6):
+  internal
+  variant,
+  captures
+  [web::is_unreserved,
+  web::hex_digits]
+  esc_from<generic>
+  (i5):
+  internal
+  variant,
+  captures
+  [web::is_unreserved,
+  web::hex_digits]
+
+== NIR: functions 24, lines 758, machine bytes 9868
+  call           22
+  callenv        2
+  callvalue      0
+  callmulti      5
+  callenvmulti   0
+  tail           7
+  tailenv        0
+  guard          1
+  closure        2
+  fnvalue        0
+  capture        3
+  op:charcodepoint       1
+  op:iadd                11
+  op:iand                1
+  op:ieq                 4
+  op:ige                 8
+  op:igt                 1
+  op:ilt                 2
+  op:imod                1
+  op:isub                1
+  op:listappend          1
+  op:listget             5
+  op:listlen             3
+  op:listnew             4
+  op:rbox                4
+  op:regioncheck         1
+  op:regioneq            8
+  op:rieq                1
+  op:rige                3
+  op:rile                4
+  op:rishr               1
+  op:risub               4
+  op:runbox              5
+  op:setcontainstotal    1
+  op:setfromlisttotal    1
+  op:strlen              2
+  op:strregiontclalnum   2
+  op:strregiontclalpha   1
+  op:strutf8bytes        1
+  op:substr              1
+  per-function machine bytes: 1172 39 289 617 74 74 74 125 125 681 262 932 588 468 452 644 155 125 103 453 758 486 828 344
+
+== parameter entry Ranges (hir::range::analyze)
+  char::codepoint<UnicodeChar>: c=[-∞, +∞]
+  byte::high_nibble<generic>: b=[-∞, +∞]
+  byte::nibble<int>: x=[0, 240] {0,16,32,48,64,80,96,112,128,144,160,176,192,208,224,240}
+  byte::from_int<int>: value=[0, +∞]
+  byte::set<List[UnicodeChar]>: chars=[-∞, +∞]
+  ascii::is_digit<int>: b=[0, 255]
+  ascii::is_upper<int>: b=[0, 255]
+  ascii::is_lower<int>: b=[0, 255]
+  ascii::is_alphabetic<int>: b=[0, 255]
+  ascii::is_alphanumeric<int>: b=[0, 255]
+  web::is_emailish<str>: v=[-∞, +∞]
+  char_at<generic>: i=[-∞, +∞]
+  is_local_char<str>: c=[-∞, +∞]
+  is_label_char<str>: c=[-∞, +∞]
+  scan_local<generic>: i=[-∞, +∞]
+  scan_label<generic>: i=[-∞, +∞]
+  scan_alpha<generic>: i=[-∞, +∞]
+  tld_ok<generic>: i=[-∞, +∞]
+  domain_loop<generic>: i=[-∞, +∞]
+  web::is_unreserved<generic>: b=[-∞, +∞]
+  web::uri_escape_text<generic>: s=[-∞, +∞]
+  high_nibble<generic>: b=[-∞, +∞]
+  hex_pair<generic>: b=[-∞, +∞]
+  esc_bytes<generic>: bytes=[-∞, +∞]  i=[-∞, +∞]  acc=[-∞, +∞]
+  esc_char<generic>: c=[-∞, +∞]
+  esc_from<generic>: text=[-∞, +∞]  i=[-∞, +∞]  acc=[-∞, +∞]
+  check<int, int, str, str>: n=[0, 400]  acc=[0, +∞]  s=[-∞, +∞]  q=[-∞, +∞]
+
+== countloop induction bindings (Range of the first in-body ref)
+
+== allocationReport (summary, one run)
+  total allocations 20, allocatedBytes 1064
+  String             4 objects      168 bytes
+  List              11 objects      544 bytes
+  ImmutableSet       1 objects       56 bytes
+  Block              2 objects      104 bytes
+  StringPlan         2 objects      192 bytes
+  gc: cycles 0 reclaimedObjects 0 reclaimedBytes 0 totalTimeUs 0 maxPauseUs 0 cyclesDetail {}
+  traversal: utf8SeekBytes 56000
+  static: allocations 28 bytes 1195 byKind {String {allocations 28 bytes 1195} List {allocations 0 bytes 0} ImmutableSet {allocations 0 bytes 0} MutableArray {allocations 0 bytes 0} BigInt {allocations 0 bytes 0} Result {allocations 0 bytes 0} Block {allocations 0 bytes 0} Cell {allocations 0 bytes 0} Native {allocations 0 bytes 0} StringPlan {allocations 0 bytes 0} ListPlan {allocations 0 bytes 0}}

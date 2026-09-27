@@ -1,0 +1,28 @@
+# static machine code per JIT function (direct entry); totals include generic entries' bytes
+TOTAL bytes=10258 direct-entry instructions=2110 frame=495 tagged-int=114 bool word=107 stack traffic=291 completion=70 calls=107 moves=403
+
+id name                       bytes entry  insns         frame    tagged-int     bool word stack traffic    completion         calls         moves
+0 <program>                    1574    14    258            38             0             0           108            14            12            10
+1 char::codepoint                22    17      7             5             0             0             0             0             2             0
+2 byte::from_int                272    17     63            17             3            10             0             0             4            10
+3 byte::set                     600    17    141            26            10             5            12             8             9            39
+4 ascii::is_digit                57    17     15             5             1             0             0             0             0             0
+5 ascii::is_upper                57    17     15             5             1             0             0             0             0             0
+6 ascii::is_lower                57    17     15             5             1             0             0             0             0             0
+7 ascii::is_alphabetic          108    17     28            11             0             4             0             0             2             6
+8 ascii::is_alphanumeric        108    17     28            11             0             4             0             0             2             6
+9 web::emailish?                736    17    167            26            10            14            14             2            11            38
+10 char_at                      256     6     64            26             5             0             3             2             2            17
+11 char_at                      201    21     50            20             5             0             4             2             2            11
+12 local_char?                  255    17     62            20             0             4             0             2             3             9
+13 scan_while                   496    32    119            35             8             9            10             4             5            30
+14 tld?                         440    28    108            23             9             8             5             0             4            28
+15 domain?                     1216    28    262            63            18            24            26             4            13            55
+16 web::is_unreserved           138    17     35            13             0             4             0             0             2             8
+17 web::uri_escape_text         108    17     29            11             0             0             5             2             1             2
+18 high_nibble                   86    17     20             7             4             0             2             0             2             1
+19 hex_pair                     394    59     93            23             6             0             9             8             5            21
+20 esc_bytes                    680    70    140            27            10             6            29             6             6            28
+21 esc_char                     420    66    100            26             1             2             9             6             6            28
+22 esc_from                     792    36    163            26            12             6            32             8            10            29
+23 check                        568    36    128            26            10             7            23             2             4            27

@@ -1,0 +1,1520 @@
+# addr  executions/run  other events/run  [function +offset]  class  instruction
+0x4847000         1.0  Dw=1.0 I1mr=0.1  [0 <program> +0x0]  frame: prologue    push   rbp
+0x4847001         1.0    [0 <program> +0x1]  frame: prologue    mov    rbp,rsp
+0x4847004         1.0    [0 <program> +0x4]  frame: prologue    sub    rsp,0x1a0
+0x484700b         1.0  Dw=1.0  [0 <program> +0xb]  frame: prologue    mov    QWORD PTR [rsp+0x170],rbx
+0x4847013         1.0  Dw=1.0  [0 <program> +0x13]  frame: prologue    mov    QWORD PTR [rsp+0x178],r12
+0x484701b         1.0  Dw=1.0  [0 <program> +0x1b]  frame: prologue    mov    QWORD PTR [rsp+0x180],r13
+0x4847023         1.0  Dw=1.0  [0 <program> +0x23]  frame: prologue    mov    QWORD PTR [rsp+0x188],r14
+0x484702b         1.0  Dw=1.0  [0 <program> +0x2b]  frame: prologue    mov    QWORD PTR [rsp+0x190],r15
+0x4847033         1.0  Dr=1.0  [0 <program> +0x33]  heap/vm load       mov    r11,QWORD PTR [rdi+0x10]
+0x4847037         1.0  Dr=1.0  [0 <program> +0x37]  heap/vm load       mov    rax,QWORD PTR [r11]
+0x484703a         1.0  Dw=1.0  [0 <program> +0x3a]  stack store        mov    QWORD PTR [rsp],rax
+0x484703e         1.0  Dw=1.0  [0 <program> +0x3e]  stack store        mov    QWORD PTR [rsp+0x168],rax
+0x4847046         1.0  Dr=1.0  [0 <program> +0x46]  heap/vm load       mov    rax,QWORD PTR [rdi+0x10]
+0x484704a         1.0  Dr=1.0  [0 <program> +0x4a]  heap/vm load       mov    rcx,QWORD PTR [rax+0x8]
+0x484704e         1.0  Dw=1.0  [0 <program> +0x4e]  stack store        mov    QWORD PTR [rsp+0x8],rcx
+0x4847053         1.0  Dw=1.0  [0 <program> +0x53]  stack store        mov    QWORD PTR [rsp+0x160],rcx
+0x484705b         1.0  Dr=1.0  [0 <program> +0x5b]  heap/vm load       mov    rax,QWORD PTR [rdi+0x10]
+0x484705f         1.0  Dr=1.0  [0 <program> +0x5f]  heap/vm load       mov    rcx,QWORD PTR [rax+0x10]
+0x4847063         1.0  Dw=1.0  [0 <program> +0x63]  stack store        mov    QWORD PTR [rsp+0x10],rcx
+0x4847068         1.0  Dw=1.0  [0 <program> +0x68]  stack store        mov    QWORD PTR [rsp+0x158],rcx
+0x4847070         1.0  Dr=1.0  [0 <program> +0x70]  heap/vm load       mov    rax,QWORD PTR [rdi+0x10]
+0x4847074         1.0  Dr=1.0  [0 <program> +0x74]  heap/vm load       mov    rsi,QWORD PTR [rax+0x18]
+0x4847078         1.0  Dw=1.0  [0 <program> +0x78]  stack store        mov    QWORD PTR [rsp+0x18],rsi
+0x484707d         1.0  Dw=1.0  [0 <program> +0x7d]  stack store        mov    QWORD PTR [rsp+0x150],rsi
+0x4847085         1.0  Dr=1.0  [0 <program> +0x85]  heap/vm load       mov    rax,QWORD PTR [rdi+0x10]
+0x4847089         1.0  Dr=1.0  [0 <program> +0x89]  heap/vm load       mov    rsi,QWORD PTR [rax+0x20]
+0x484708d         1.0  Dw=1.0  [0 <program> +0x8d]  stack store        mov    QWORD PTR [rsp+0x20],rsi
+0x4847092         1.0  Dr=1.0  [0 <program> +0x92]  heap/vm load       mov    rax,QWORD PTR [rdi+0x10]
+0x4847096         1.0  Dr=1.0  [0 <program> +0x96]  heap/vm load       mov    r8,QWORD PTR [rax+0x28]
+0x484709a         1.0  Dw=1.0  [0 <program> +0x9a]  stack store        mov    QWORD PTR [rsp+0x28],r8
+0x484709f         1.0  Dr=1.0  [0 <program> +0x9f]  heap/vm load       mov    rax,QWORD PTR [rdi+0x10]
+0x48470a3         1.0  Dr=1.0  [0 <program> +0xa3]  heap/vm load       mov    r9,QWORD PTR [rax+0x30]
+0x48470a7         1.0  Dw=1.0  [0 <program> +0xa7]  stack store        mov    QWORD PTR [rsp+0x30],r9
+0x48470ac         1.0  Dr=1.0  [0 <program> +0xac]  heap/vm load       mov    rax,QWORD PTR [rdi+0x10]
+0x48470b0         1.0  Dr=1.0  [0 <program> +0xb0]  heap/vm load       mov    r10,QWORD PTR [rax+0x38]
+0x48470b4         1.0  Dw=1.0  [0 <program> +0xb4]  stack store        mov    QWORD PTR [rsp+0x38],r10
+0x48470b9         1.0  Dr=1.0  [0 <program> +0xb9]  heap/vm load       mov    rax,QWORD PTR [rdi+0x10]
+0x48470bd         1.0  Dr=1.0  [0 <program> +0xbd]  heap/vm load       mov    rbx,QWORD PTR [rax+0x40]
+0x48470c1         1.0  Dw=1.0  [0 <program> +0xc1]  stack store        mov    QWORD PTR [rsp+0x40],rbx
+0x48470c6         1.0  Dr=1.0  [0 <program> +0xc6]  heap/vm load       mov    rax,QWORD PTR [rdi+0x10]
+0x48470ca         1.0  Dr=1.0  [0 <program> +0xca]  heap/vm load       mov    r12,QWORD PTR [rax+0x48]
+0x48470ce         1.0  Dw=1.0  [0 <program> +0xce]  stack store        mov    QWORD PTR [rsp+0x48],r12
+0x48470d3         1.0  Dr=1.0  [0 <program> +0xd3]  heap/vm load       mov    rax,QWORD PTR [rdi+0x10]
+0x48470d7         1.0  Dr=1.0  [0 <program> +0xd7]  heap/vm load       mov    r13,QWORD PTR [rax+0x50]
+0x48470db         1.0  Dw=1.0  [0 <program> +0xdb]  stack store        mov    QWORD PTR [rsp+0x50],r13
+0x48470e0         1.0  Dr=1.0  [0 <program> +0xe0]  heap/vm load       mov    rax,QWORD PTR [rdi+0x10]
+0x48470e4         1.0  Dr=1.0  [0 <program> +0xe4]  heap/vm load       mov    r14,QWORD PTR [rax+0x58]
+0x48470e8         1.0  Dw=1.0  [0 <program> +0xe8]  stack store        mov    QWORD PTR [rsp+0x58],r14
+0x48470ed         1.0  Dr=1.0  [0 <program> +0xed]  heap/vm load       mov    rax,QWORD PTR [rdi+0x10]
+0x48470f1         1.0  Dr=1.0  [0 <program> +0xf1]  heap/vm load       mov    r15,QWORD PTR [rax+0x60]
+0x48470f5         1.0  Dw=1.0  [0 <program> +0xf5]  stack store        mov    QWORD PTR [rsp+0x60],r15
+0x48470fa         1.0  Dr=1.0  [0 <program> +0xfa]  heap/vm load       mov    rax,QWORD PTR [rdi+0x10]
+0x48470fe         1.0  Dr=1.0  [0 <program> +0xfe]  heap/vm load       mov    r11,QWORD PTR [rax+0x68]
+0x4847102         1.0  Dw=1.0  [0 <program> +0x102]  stack store        mov    QWORD PTR [rsp+0x68],r11
+0x4847107         1.0  Dr=1.0  [0 <program> +0x107]  heap/vm load       mov    rax,QWORD PTR [rdi+0x10]
+0x484710b         1.0  Dr=1.0  [0 <program> +0x10b]  heap/vm load       mov    rax,QWORD PTR [rax+0x70]
+0x484710f         1.0  Dw=1.0  [0 <program> +0x10f]  stack store        mov    QWORD PTR [rsp+0x70],rax
+0x4847114         1.0  Dr=1.0  [0 <program> +0x114]  heap/vm load       mov    rdx,QWORD PTR [rdi+0x10]
+0x4847118         1.0  Dw=1.0  [0 <program> +0x118]  stack store        mov    QWORD PTR [rsp+0x148],rdi
+0x4847120         1.0  Dr=1.0  [0 <program> +0x120]  heap/vm load       mov    rdi,QWORD PTR [rdx+0x78]
+0x4847124         1.0  Dw=1.0  [0 <program> +0x124]  stack store        mov    QWORD PTR [rsp+0x78],rdi
+0x4847129         1.0    [0 <program> +0x129]  lea (stack addr)   lea    rdx,[rsp+0x80]
+0x4847131         1.0  Dr=1.0  [0 <program> +0x131]  stack load         mov    rcx,QWORD PTR [rsp+0x168]
+0x4847139         1.0  Dw=1.0  [0 <program> +0x139]  stack store        mov    QWORD PTR [rsp+0x80],rcx
+0x4847141         1.0  Dr=1.0  [0 <program> +0x141]  stack load         mov    rcx,QWORD PTR [rsp+0x160]
+0x4847149         1.0  Dw=1.0  [0 <program> +0x149]  stack store        mov    QWORD PTR [rsp+0x88],rcx
+0x4847151         1.0  Dr=1.0  [0 <program> +0x151]  stack load         mov    rcx,QWORD PTR [rsp+0x158]
+0x4847159         1.0  Dw=1.0  [0 <program> +0x159]  stack store        mov    QWORD PTR [rsp+0x90],rcx
+0x4847161         1.0  Dr=1.0  [0 <program> +0x161]  stack load         mov    rcx,QWORD PTR [rsp+0x150]
+0x4847169         1.0  Dw=1.0  [0 <program> +0x169]  stack store        mov    QWORD PTR [rsp+0x98],rcx
+0x4847171         1.0  Dw=1.0  [0 <program> +0x171]  stack store        mov    QWORD PTR [rsp+0xa0],rsi
+0x4847179         1.0  Dw=1.0 I1mr=0.1  [0 <program> +0x179]  stack store        mov    QWORD PTR [rsp+0xa8],r8
+0x4847181         1.0  Dw=1.0  [0 <program> +0x181]  stack store        mov    QWORD PTR [rsp+0xb0],r9
+0x4847189         1.0  Dw=1.0  [0 <program> +0x189]  stack store        mov    QWORD PTR [rsp+0xb8],r10
+0x4847191         1.0  Dw=1.0  [0 <program> +0x191]  stack store        mov    QWORD PTR [rsp+0xc0],rbx
+0x4847199         1.0  Dw=1.0  [0 <program> +0x199]  stack store        mov    QWORD PTR [rsp+0xc8],r12
+0x48471a1         1.0  Dw=1.0  [0 <program> +0x1a1]  stack store        mov    QWORD PTR [rsp+0xd0],r13
+0x48471a9         1.0  Dw=1.0  [0 <program> +0x1a9]  stack store        mov    QWORD PTR [rsp+0xd8],r14
+0x48471b1         1.0  Dw=1.0  [0 <program> +0x1b1]  stack store        mov    QWORD PTR [rsp+0xe0],r15
+0x48471b9         1.0  Dw=1.0 I1mr=0.1  [0 <program> +0x1b9]  stack store        mov    QWORD PTR [rsp+0xe8],r11
+0x48471c1         1.0  Dw=1.0  [0 <program> +0x1c1]  stack store        mov    QWORD PTR [rsp+0xf0],rax
+0x48471c9         1.0  Dw=1.0  [0 <program> +0x1c9]  stack store        mov    QWORD PTR [rsp+0xf8],rdi
+0x48471d1         1.0    [0 <program> +0x1d1]  mov imm            mov    esi,0x10
+0x48471d6         1.0    [0 <program> +0x1d6]  mov imm            movabs rax,0x294aa0
+0x48471e0         1.0  Dr=1.0  [0 <program> +0x1e0]  stack load         mov    rdi,QWORD PTR [rsp+0x148]
+0x48471e8         1.0  Dw=1.0  [0 <program> +0x1e8]  call helper        call   rax
+0x48471ea         1.0    [0 <program> +0x1ea]  completion check   test   rax,rax
+0x48471ed         1.0  Bc=1.0 Bcm=0.1  [0 <program> +0x1ed]  completion check   je     0x484741b
+0x48471f3         1.0  Dw=1.0  [0 <program> +0x1f3]  stack store        mov    QWORD PTR [rsp],rax
+0x48471f7         1.0    [0 <program> +0x1f7]  mov reg-reg        mov    rbx,rax
+0x48471fa         1.0  Dw=1.0 I1mr=0.1  [0 <program> +0x1fa]  stack store        mov    QWORD PTR [rsp+0x8],0x16c
+0x4847203         1.0  Dw=1.0  [0 <program> +0x203]  stack store        mov    QWORD PTR [rsp+0x10],0x174
+0x484720c         1.0  Dw=1.0  [0 <program> +0x20c]  stack store        mov    QWORD PTR [rsp+0x18],0x2fc
+0x4847215         1.0  Dw=1.0  [0 <program> +0x215]  stack store        mov    QWORD PTR [rsp+0x20],0x3f4
+0x484721e         1.0    [0 <program> +0x21e]  lea (stack addr)   lea    rdx,[rsp+0x100]
+0x4847226         1.0  Dw=1.0  [0 <program> +0x226]  stack store        mov    QWORD PTR [rsp+0x100],0x16c
+0x4847232         1.0  Dw=1.0  [0 <program> +0x232]  stack store        mov    QWORD PTR [rsp+0x108],0x174
+0x484723e         1.0  Dw=1.0  [0 <program> +0x23e]  stack store        mov    QWORD PTR [rsp+0x110],0x2fc
+0x484724a         1.0  Dw=1.0  [0 <program> +0x24a]  stack store        mov    QWORD PTR [rsp+0x118],0x3f4
+0x4847256         1.0    [0 <program> +0x256]  mov imm            mov    esi,0x4
+0x484725b         1.0    [0 <program> +0x25b]  mov imm            movabs rax,0x294aa0
+0x4847265         1.0  Dr=1.0  [0 <program> +0x265]  stack load         mov    rdi,QWORD PTR [rsp+0x148]
+0x484726d         1.0  Dw=1.0  [0 <program> +0x26d]  call helper        call   rax
+0x484726f         1.0    [0 <program> +0x26f]  completion check   test   rax,rax
+0x4847272         1.0  Bc=1.0  [0 <program> +0x272]  completion check   je     0x484741b
+0x4847278         1.0  Dw=1.0  [0 <program> +0x278]  stack store        mov    QWORD PTR [rsp+0x8],rax
+0x484727d         1.0    [0 <program> +0x27d]  mov reg-reg        mov    rsi,rax
+0x4847280         1.0  Dr=1.0  [0 <program> +0x280]  stack load         mov    rdi,QWORD PTR [rsp+0x148]
+0x4847288         1.0  Dw=1.0  [0 <program> +0x288]  call botlish       call   0x48475e8
+0x484728d         1.0    [0 <program> +0x28d]  completion check   test   rax,rax
+0x4847290         1.0  Bc=1.0  [0 <program> +0x290]  completion check   je     0x484741b
+0x4847296         1.0  Dw=1.0  [0 <program> +0x296]  stack store        mov    QWORD PTR [rsp+0x8],rax
+0x484729b         1.0    [0 <program> +0x29b]  lea (stack addr)   lea    r8,[rsp+0x120]
+0x48472a3         1.0  Dw=1.0  [0 <program> +0x2a3]  stack store        mov    QWORD PTR [rsp+0x120],rax
+0x48472ab         1.0    [0 <program> +0x2ab]  mov imm            mov    esi,0x10
+0x48472b0         1.0    [0 <program> +0x2b0]  lea                lea    rdx,[rip+0x19ef]        # 0x4848ca6
+0x48472b7         1.0    [0 <program> +0x2b7]  mov imm            mov    ecx,0x1
+0x48472bc         1.0    [0 <program> +0x2bc]  mov imm            movabs r9,0x2961e0
+0x48472c6         1.0  Dr=1.0  [0 <program> +0x2c6]  stack load         mov    rdi,QWORD PTR [rsp+0x148]
+0x48472ce         1.0  Dw=1.0  [0 <program> +0x2ce]  call helper        call   r9
+0x48472d1         1.0  Dw=1.0  [0 <program> +0x2d1]  stack store        mov    QWORD PTR [rsp+0x8],rax
+0x48472d6         1.0    [0 <program> +0x2d6]  lea (stack addr)   lea    r8,[rsp+0x128]
+0x48472de         1.0    [0 <program> +0x2de]  mov reg-reg        mov    rsi,rbx
+0x48472e1         1.0  Dw=1.0  [0 <program> +0x2e1]  stack store        mov    QWORD PTR [rsp+0x128],rsi
+0x48472e9         1.0  Dw=1.0  [0 <program> +0x2e9]  stack store        mov    QWORD PTR [rsp+0x130],rax
+0x48472f1         1.0    [0 <program> +0x2f1]  mov imm            mov    esi,0x11
+0x48472f6         1.0    [0 <program> +0x2f6]  lea                lea    rdx,[rip+0x1a26]        # 0x4848d23
+0x48472fd         1.0    [0 <program> +0x2fd]  mov imm            mov    ecx,0x2
+0x4847302         1.0    [0 <program> +0x302]  mov imm            movabs r9,0x2961e0
+0x484730c         1.0  Dr=1.0  [0 <program> +0x30c]  stack load         mov    rdi,QWORD PTR [rsp+0x148]
+0x4847314         1.0  Dw=1.0  [0 <program> +0x314]  call helper        call   r9
+0x4847317         1.0  Dw=1.0  [0 <program> +0x317]  stack store        mov    QWORD PTR [rsp],rax
+0x484731b         1.0  Dr=1.0  [0 <program> +0x31b]  stack load         mov    rdi,QWORD PTR [rsp+0x148]
+0x4847323         1.0  Dr=1.0  [0 <program> +0x323]  heap/vm load       mov    rsi,QWORD PTR [rdi+0x10]
+0x4847327         1.0  Dr=1.0  [0 <program> +0x327]  heap/vm load       mov    rdx,QWORD PTR [rsi+0x80]
+0x484732e         1.0  Dw=1.0  [0 <program> +0x32e]  stack store        mov    QWORD PTR [rsp+0x8],rdx
+0x4847333         1.0    [0 <program> +0x333]  mov reg-reg        mov    rsi,rax
+0x4847336         1.0  Dw=1.0  [0 <program> +0x336]  call botlish       call   0x4848cb7
+0x484733b         1.0    [0 <program> +0x33b]  completion check   test   rax,rax
+0x484733e         1.0  Bc=1.0  [0 <program> +0x33e]  completion check   je     0x484741b
+0x4847344         1.0  Dw=1.0  [0 <program> +0x344]  stack store        mov    QWORD PTR [rsp],rax
+0x4847348         1.0    [0 <program> +0x348]  mov reg-reg        mov    r12,rax
+0x484734b         1.0    [0 <program> +0x34b]  mov imm            mov    esi,0x321
+0x4847350         1.0  Dw=1.0  [0 <program> +0x350]  stack store        mov    QWORD PTR [rsp+0x8],0x321
+0x4847359         1.0    [0 <program> +0x359]  mov imm            mov    edx,0x1
+0x484735e         1.0  Dw=1.0  [0 <program> +0x35e]  stack store        mov    QWORD PTR [rsp+0x10],0x1
+0x4847367         1.0  Dr=1.0  [0 <program> +0x367]  stack load         mov    rdi,QWORD PTR [rsp+0x148]
+0x484736f         1.0  Dr=1.0  [0 <program> +0x36f]  heap/vm load       mov    rcx,QWORD PTR [rdi+0x10]
+0x4847373         1.0  Dr=1.0  [0 <program> +0x373]  heap/vm load       mov    rcx,QWORD PTR [rcx+0x88]
+0x484737a         1.0  Dw=1.0  [0 <program> +0x37a]  stack store        mov    QWORD PTR [rsp+0x18],rcx
+0x484737f         1.0    [0 <program> +0x37f]  mov reg-reg        mov    r8,r12
+0x4847382         1.0  Dw=1.0  [0 <program> +0x382]  call botlish       call   0x484981c
+0x4847387         1.0    [0 <program> +0x387]  mov reg-reg        mov    rbx,rax
+0x484738a         1.0    [0 <program> +0x38a]  cmp/test (other)   test   rbx,rbx
+0x484738d         1.0  Bc=1.0 Bcm=0.1  [0 <program> +0x38d]  jcc (other)        je     0x484741b
+0x4847393         1.0  Dw=1.0  [0 <program> +0x393]  stack store        mov    QWORD PTR [rsp+0x8],rbx
+0x4847398         1.0    [0 <program> +0x398]  mov imm            mov    esi,0x321
+0x484739d         1.0  Dw=1.0  [0 <program> +0x39d]  stack store        mov    QWORD PTR [rsp+0x10],0x321
+0x48473a6         1.0    [0 <program> +0x3a6]  mov imm            mov    edx,0x1
+0x48473ab         1.0  Dw=1.0  [0 <program> +0x3ab]  stack store        mov    QWORD PTR [rsp+0x18],0x1
+0x48473b4         1.0  Dr=1.0  [0 <program> +0x3b4]  stack load         mov    rdi,QWORD PTR [rsp+0x148]
+0x48473bc         1.0  Dr=1.0  [0 <program> +0x3bc]  heap/vm load       mov    rax,QWORD PTR [rdi+0x10]
+0x48473c0         1.0  Dr=1.0  [0 <program> +0x3c0]  heap/vm load       mov    rcx,QWORD PTR [rax+0x90]
+0x48473c7         1.0  Dw=1.0  [0 <program> +0x3c7]  stack store        mov    QWORD PTR [rsp+0x20],rcx
+0x48473cc         1.0    [0 <program> +0x3cc]  mov reg-reg        mov    r8,r12
+0x48473cf         1.0  Dw=1.0  [0 <program> +0x3cf]  call botlish       call   0x484981c
+0x48473d4         1.0    [0 <program> +0x3d4]  completion check   test   rax,rax
+0x48473d7         1.0  Bc=1.0 Bcm=0.1  [0 <program> +0x3d7]  completion check   je     0x484741b
+0x48473dd         1.0  Dw=1.0  [0 <program> +0x3dd]  stack store        mov    QWORD PTR [rsp],rax
+0x48473e1         1.0    [0 <program> +0x3e1]  lea (stack addr)   lea    rdx,[rsp+0x138]
+0x48473e9         1.0  Dw=1.0  [0 <program> +0x3e9]  stack store        mov    QWORD PTR [rsp+0x138],rbx
+0x48473f1         1.0  Dw=1.0  [0 <program> +0x3f1]  stack store        mov    QWORD PTR [rsp+0x140],rax
+0x48473f9         1.0    [0 <program> +0x3f9]  mov imm            mov    esi,0x2
+0x48473fe         1.0  I1mr=1.0  [0 <program> +0x3fe]  mov imm            movabs rax,0x294aa0
+0x4847408         1.0  Dr=1.0  [0 <program> +0x408]  stack load         mov    rdi,QWORD PTR [rsp+0x148]
+0x4847410         1.0  Dw=1.0  [0 <program> +0x410]  call helper        call   rax
+0x4847412         1.0    [0 <program> +0x412]  completion check   test   rax,rax
+0x4847415         1.0  Bc=1.0 Bcm=0.1  [0 <program> +0x415]  completion check   jne    0x4847452
+0x4847452         1.0  Dr=1.0 I1mr=0.1  [0 <program> +0x452]  frame: epilogue    mov    rbx,QWORD PTR [rsp+0x170]
+0x484745a         1.0  Dr=1.0  [0 <program> +0x45a]  frame: epilogue    mov    r12,QWORD PTR [rsp+0x178]
+0x4847462         1.0  Dr=1.0  [0 <program> +0x462]  frame: epilogue    mov    r13,QWORD PTR [rsp+0x180]
+0x484746a         1.0  Dr=1.0  [0 <program> +0x46a]  frame: epilogue    mov    r14,QWORD PTR [rsp+0x188]
+0x4847472         1.0  Dr=1.0  [0 <program> +0x472]  frame: epilogue    mov    r15,QWORD PTR [rsp+0x190]
+0x484747a         1.0    [0 <program> +0x47a]  frame: epilogue    add    rsp,0x1a0
+0x4847481         1.0    [0 <program> +0x481]  frame: epilogue    mov    rsp,rbp
+0x4847484         1.0  Dr=1.0  [0 <program> +0x484]  frame: epilogue    pop    rbp
+0x4847485         1.0  Dr=1.0  [0 <program> +0x485]  frame: epilogue    ret
+0x4847494         4.0  Dw=4.0  [1 char::codepoint +0x0]  frame: prologue    push   rbp
+0x4847495         4.0    [1 char::codepoint +0x1]  frame: prologue    mov    rbp,rsp
+0x4847498         4.0    [1 char::codepoint +0x4]  call helper        movabs r8,0x297490
+0x48474a2         4.0  Dw=4.0  [1 char::codepoint +0xe]  call helper        call   r8
+0x48474a5         4.0    [1 char::codepoint +0x11]  frame: epilogue    mov    rsp,rbp
+0x48474a8         4.0  Dr=4.0  [1 char::codepoint +0x14]  frame: epilogue    pop    rbp
+0x48474a9         4.0  Dr=4.0  [1 char::codepoint +0x15]  frame: epilogue    ret
+0x48474c0         4.0  Dw=4.0 I1mr=0.1  [2 byte::from_int +0x0]  frame: prologue    push   rbp
+0x48474c1         4.0    [2 byte::from_int +0x1]  frame: prologue    mov    rbp,rsp
+0x48474c4         4.0    [2 byte::from_int +0x4]  frame: prologue    sub    rsp,0x10
+0x48474c8         4.0  Dw=4.0  [2 byte::from_int +0x8]  frame: prologue    mov    QWORD PTR [rsp],rbx
+0x48474cc         4.0  Dw=4.0  [2 byte::from_int +0xc]  frame: prologue    mov    QWORD PTR [rsp+0x8],r12
+0x48474d1         4.0    [2 byte::from_int +0x11]  mov reg-reg        mov    r12,rdi
+0x48474d4         4.0    [2 byte::from_int +0x14]  tag test           test   rsi,0x1
+0x48474db         4.0    [2 byte::from_int +0x1b]  mov reg-reg        mov    rcx,rsi
+0x48474de         4.0  Bc=4.0 Bcm=0.1  [2 byte::from_int +0x1e]  jcc (other)        jne    0x4847514
+0x4847514         4.0  I1mr=0.1  [2 byte::from_int +0x54]  mov reg-reg        mov    rbx,rcx
+0x4847517         4.0    [2 byte::from_int +0x57]  bool materialize   mov    r9d,0x2
+0x484751d         4.0    [2 byte::from_int +0x5d]  cmp/test (other)   test   rbx,rbx
+0x4847520         4.0  Dr=4.0  [2 byte::from_int +0x60]  bool materialize   cmovle r9,QWORD PTR [rip+0xa0]        # 0x48475c8
+0x4847528         4.0    [2 byte::from_int +0x68]  tag test           test   rbx,0x1
+0x484752f         4.0  Bc=4.0 Bcm=0.1  [2 byte::from_int +0x6f]  tag test           jne    0x4847561
+0x4847561         4.0  I1mr=0.1  [2 byte::from_int +0xa1]  bool materialize   mov    ecx,0x2
+0x4847566         4.0    [2 byte::from_int +0xa6]  cmp/test (other)   cmp    rbx,0x1ff
+0x484756d         4.0  Dr=4.0  [2 byte::from_int +0xad]  bool materialize   cmovg  rcx,QWORD PTR [rip+0x53]        # 0x48475c8
+0x4847575         4.0    [2 byte::from_int +0xb5]  bool test          cmp    rcx,0x6
+0x4847579         4.0  Bc=4.0  [2 byte::from_int +0xb9]  bool test          je     0x4847594
+0x484757f         4.0    [2 byte::from_int +0xbf]  mov reg-reg        mov    rax,rbx
+0x4847582         4.0  Dr=4.0  [2 byte::from_int +0xc2]  frame: epilogue    mov    rbx,QWORD PTR [rsp]
+0x4847586         4.0  Dr=4.0  [2 byte::from_int +0xc6]  frame: epilogue    mov    r12,QWORD PTR [rsp+0x8]
+0x484758b         4.0    [2 byte::from_int +0xcb]  frame: epilogue    add    rsp,0x10
+0x484758f         4.0    [2 byte::from_int +0xcf]  frame: epilogue    mov    rsp,rbp
+0x4847592         4.0  Dr=4.0  [2 byte::from_int +0xd2]  frame: epilogue    pop    rbp
+0x4847593         4.0  Dr=4.0  [2 byte::from_int +0xd3]  frame: epilogue    ret
+0x48475e8         1.0  Dw=1.0  [3 byte::set +0x0]  frame: prologue    push   rbp
+0x48475e9         1.0    [3 byte::set +0x1]  frame: prologue    mov    rbp,rsp
+0x48475ec         1.0    [3 byte::set +0x4]  frame: prologue    sub    rsp,0x60
+0x48475f0         1.0  Dw=1.0  [3 byte::set +0x8]  frame: prologue    mov    QWORD PTR [rsp+0x30],rbx
+0x48475f5         1.0  Dw=1.0  [3 byte::set +0xd]  frame: prologue    mov    QWORD PTR [rsp+0x38],r12
+0x48475fa         1.0  Dw=1.0  [3 byte::set +0x12]  frame: prologue    mov    QWORD PTR [rsp+0x40],r13
+0x48475ff         1.0  Dw=1.0 I1mr=1.0  [3 byte::set +0x17]  frame: prologue    mov    QWORD PTR [rsp+0x48],r14
+0x4847604         1.0  Dw=1.0  [3 byte::set +0x1c]  frame: prologue    mov    QWORD PTR [rsp+0x50],r15
+0x4847609         1.0    [3 byte::set +0x21]  mov reg-reg        mov    r13,rdi
+0x484760c         1.0  Dw=1.0  [3 byte::set +0x24]  stack store        mov    QWORD PTR [rsp+0x18],0x0
+0x4847615         1.0  Dw=1.0  [3 byte::set +0x2d]  stack store        mov    QWORD PTR [rsp+0x20],0x0
+0x484761e         1.0  Dw=1.0  [3 byte::set +0x36]  stack store        mov    QWORD PTR [rsp],rsi
+0x4847622         1.0    [3 byte::set +0x3a]  mov imm            movabs rax,0x2941a0
+0x484762c         1.0    [3 byte::set +0x44]  mov reg-reg        mov    rbx,rsi
+0x484762f         1.0    [3 byte::set +0x47]  mov reg-reg        mov    rdi,r13
+0x4847632         1.0  Dw=1.0  [3 byte::set +0x4a]  call helper        call   rax
+0x4847634         1.0  Dw=1.0  [3 byte::set +0x4c]  stack store        mov    QWORD PTR [rsp+0x8],rax
+0x4847639         1.0    [3 byte::set +0x51]  mov reg-reg        mov    r12,rax
+0x484763c         1.0  Dw=1.0 I1mr=1.0  [3 byte::set +0x54]  stack store        mov    QWORD PTR [rsp+0x10],0x1
+0x4847645         1.0    [3 byte::set +0x5d]  mov imm            xor    rdx,rdx
+0x4847648         1.0    [3 byte::set +0x60]  mov imm            movabs rax,0x294aa0
+0x4847652         1.0    [3 byte::set +0x6a]  mov reg-reg        mov    rdi,r13
+0x4847655         1.0    [3 byte::set +0x6d]  mov reg-reg        mov    rsi,rdx
+0x4847658         1.0  Dw=1.0  [3 byte::set +0x70]  call helper        call   rax
+0x484765a         1.0    [3 byte::set +0x72]  completion check   test   rax,rax
+0x484765d         1.0  Bc=1.0 Bcm=0.1  [3 byte::set +0x75]  completion check   je     0x48477a1
+0x4847663         1.0    [3 byte::set +0x7b]  mov imm            mov    esi,0x1
+0x4847668         1.0    [3 byte::set +0x80]  mov reg-reg        mov    r14,rsi
+0x484766b         1.0  Dw=1.0  [3 byte::set +0x83]  stack store        mov    QWORD PTR [rsp+0x10],0x1
+0x4847674         1.0  Dw=1.0  [3 byte::set +0x8c]  stack store        mov    QWORD PTR [rsp+0x18],rax
+0x4847679         1.0    [3 byte::set +0x91]  mov reg-reg        mov    r15,rax
+0x484767c         5.0    [3 byte::set +0x94]  mov reg-reg        mov    rax,rsi
+0x484767f         5.0  I1mr=1.0  [3 byte::set +0x97]  logic              and    rax,r12
+0x4847682         5.0    [3 byte::set +0x9a]  mov reg-reg        mov    r14,rsi
+0x4847685         5.0    [3 byte::set +0x9d]  tag test           test   rax,0x1
+0x484768b         5.0  Bc=5.0 Bcm=0.1  [3 byte::set +0xa3]  tag test           jne    0x48476bb
+0x48476bb         5.0    [3 byte::set +0xd3]  mov imm            mov    ecx,0x2
+0x48476c0         5.0  I1mr=1.0  [3 byte::set +0xd8]  mov reg-reg        mov    rsi,r14
+0x48476c3         5.0    [3 byte::set +0xdb]  cmp/test (other)   cmp    rsi,r12
+0x48476c6         5.0  Dr=5.0  [3 byte::set +0xde]  bool materialize   cmovl  rcx,QWORD PTR [rip+0x16a]        # 0x4847838
+0x48476ce         5.0    [3 byte::set +0xe6]  bool test          cmp    rcx,0x6
+0x48476d2         5.0  Bc=5.0 Bcm=1.1  [3 byte::set +0xea]  bool test          je     0x4847710
+0x48476d8         1.0    [3 byte::set +0xf0]  mov reg-reg        mov    rsi,r15
+0x48476db         1.0  Dw=1.0  [3 byte::set +0xf3]  stack store        mov    QWORD PTR [rsp],rsi
+0x48476df         1.0    [3 byte::set +0xf7]  mov imm            movabs rax,0x296df0
+0x48476e9         1.0    [3 byte::set +0x101]  mov reg-reg        mov    rdi,r13
+0x48476ec         1.0  Dw=1.0  [3 byte::set +0x104]  call helper        call   rax
+0x48476ee         1.0  Dr=1.0  [3 byte::set +0x106]  frame: epilogue    mov    rbx,QWORD PTR [rsp+0x30]
+0x48476f3         1.0  Dr=1.0  [3 byte::set +0x10b]  frame: epilogue    mov    r12,QWORD PTR [rsp+0x38]
+0x48476f8         1.0  Dr=1.0  [3 byte::set +0x110]  frame: epilogue    mov    r13,QWORD PTR [rsp+0x40]
+0x48476fd         1.0  Dr=1.0  [3 byte::set +0x115]  frame: epilogue    mov    r14,QWORD PTR [rsp+0x48]
+0x4847702         1.0  Dr=1.0  [3 byte::set +0x11a]  frame: epilogue    mov    r15,QWORD PTR [rsp+0x50]
+0x4847707         1.0    [3 byte::set +0x11f]  frame: epilogue    add    rsp,0x60
+0x484770b         1.0    [3 byte::set +0x123]  frame: epilogue    mov    rsp,rbp
+0x484770e         1.0  Dr=1.0  [3 byte::set +0x126]  frame: epilogue    pop    rbp
+0x484770f         1.0  Dr=1.0  [3 byte::set +0x127]  frame: epilogue    ret
+0x4847710         4.0  I1mr=0.9  [3 byte::set +0x128]  mov reg-reg        mov    rsi,r14
+0x4847713         4.0    [3 byte::set +0x12b]  tag test           test   rsi,0x1
+0x484771a         4.0  Bc=4.0  [3 byte::set +0x132]  tag test           je     0x4847733
+0x4847720         4.0  Dr=4.0  [3 byte::set +0x138]  heap/vm load       mov    rdi,QWORD PTR [rbx+0x8]
+0x4847724         4.0    [3 byte::set +0x13c]  mov reg-reg        mov    rsi,r14
+0x4847727         4.0    [3 byte::set +0x13f]  untag              sar    rsi,1
+0x484772a         4.0    [3 byte::set +0x142]  cmp/test (other)   cmp    rsi,rdi
+0x484772d         4.0  Bc=4.0 Bcm=0.1  [3 byte::set +0x145]  jcc (other)        jb     0x484775a
+0x484775a         4.0  Dr=4.0 I1mr=1.0  [3 byte::set +0x172]  heap/vm load       mov    r10,QWORD PTR [rbx+0x10]
+0x484775e         4.0  Dr=4.0  [3 byte::set +0x176]  heap/vm load       mov    rsi,QWORD PTR [r10+rsi*8]
+0x4847762         4.0    [3 byte::set +0x17a]  mov reg-reg        mov    rdi,r13
+0x4847765         4.0  Dw=4.0  [3 byte::set +0x17d]  call botlish       call   0x4847494
+0x484776a         4.0    [3 byte::set +0x182]  mov reg-reg        mov    rsi,rax
+0x484776d         4.0    [3 byte::set +0x185]  mov reg-reg        mov    rdi,r13
+0x4847770         4.0  Dw=4.0  [3 byte::set +0x188]  call botlish       call   0x48474c0
+0x4847775         4.0    [3 byte::set +0x18d]  completion check   test   rax,rax
+0x4847778         4.0  Bc=4.0  [3 byte::set +0x190]  completion check   je     0x48477a1
+0x484777e         4.0  Dw=4.0  [3 byte::set +0x196]  stack store        mov    QWORD PTR [rsp+0x20],rax
+0x4847783         4.0    [3 byte::set +0x19b]  mov reg-reg        mov    rdx,rax
+0x4847786         4.0    [3 byte::set +0x19e]  mov imm            movabs rax,0x296300
+0x4847790         4.0    [3 byte::set +0x1a8]  mov reg-reg        mov    rsi,r15
+0x4847793         4.0    [3 byte::set +0x1ab]  mov reg-reg        mov    rdi,r13
+0x4847796         4.0  Dw=4.0  [3 byte::set +0x1ae]  call helper        call   rax
+0x4847798         4.0    [3 byte::set +0x1b0]  completion check   test   rax,rax
+0x484779b         4.0  Bc=4.0  [3 byte::set +0x1b3]  completion check   jne    0x48477c6
+0x48477c6         4.0  Dw=4.0  [3 byte::set +0x1de]  stack store        mov    QWORD PTR [rsp+0x18],rax
+0x48477cb         4.0    [3 byte::set +0x1e3]  mov reg-reg        mov    r15,rax
+0x48477ce         4.0    [3 byte::set +0x1e6]  mov imm            mov    edx,0x3
+0x48477d3         4.0  Dw=4.0  [3 byte::set +0x1eb]  stack store        mov    QWORD PTR [rsp+0x20],0x3
+0x48477dc         4.0    [3 byte::set +0x1f4]  mov reg-reg        mov    rsi,r14
+0x48477df         4.0    [3 byte::set +0x1f7]  tag test           test   rsi,0x1
+0x48477e6         4.0  Bc=4.0  [3 byte::set +0x1fe]  tag test           je     0x484780c
+0x48477ec         4.0    [3 byte::set +0x204]  mov reg-reg        mov    rsi,r14
+0x48477ef         4.0    [3 byte::set +0x207]  mov reg-reg        mov    rcx,rsi
+0x48477f2         4.0    [3 byte::set +0x20a]  arith              add    rcx,0x2
+0x48477f6         4.0    [3 byte::set +0x20e]  overflow check     seto   al
+0x48477f9         4.0    [3 byte::set +0x211]  overflow check     test   al,al
+0x48477fb         4.0  Bc=4.0  [3 byte::set +0x213]  overflow check     jne    0x484780c
+0x4847801         4.0    [3 byte::set +0x219]  mov reg-reg        mov    rsi,rcx
+0x4847804         4.0    [3 byte::set +0x21c]  mov reg-reg        mov    r14,rcx
+0x4847807         4.0    [3 byte::set +0x21f]  jmp                jmp    0x4847824
+0x4847824         4.0  Dw=4.0  [3 byte::set +0x23c]  stack store        mov    QWORD PTR [rsp+0x10],rsi
+0x4847829         4.0    [3 byte::set +0x241]  mov reg-reg        mov    rsi,r14
+0x484782c         4.0    [3 byte::set +0x244]  jmp                jmp    0x484767c
+0x4847851         1.0  Dw=1.0 I1mr=0.1  [4 ascii::is_digit +0x0]  frame: prologue    push   rbp
+0x4847852         1.0    [4 ascii::is_digit +0x1]  frame: prologue    mov    rbp,rsp
+0x4847855         1.0    [4 ascii::is_digit +0x4]  untag              sar    rsi,1
+0x4847858         1.0    [4 ascii::is_digit +0x7]  cmp/test (other)   cmp    rsi,0x30
+0x484785c         1.0  Bc=1.0  [4 ascii::is_digit +0xb]  jcc (other)        jge    0x484786c
+0x4847862         1.0    [4 ascii::is_digit +0x11]  mov imm            mov    eax,0x2
+0x4847867         1.0    [4 ascii::is_digit +0x16]  jmp                jmp    0x4847885
+0x4847885         1.0    [4 ascii::is_digit +0x34]  frame: epilogue    mov    rsp,rbp
+0x4847888         1.0  Dr=1.0  [4 ascii::is_digit +0x37]  frame: epilogue    pop    rbp
+0x4847889         1.0  Dr=1.0  [4 ascii::is_digit +0x38]  frame: epilogue    ret
+0x484789b         3.0  Dw=3.0 I1mr=1.0  [5 ascii::is_upper +0x0]  frame: prologue    push   rbp
+0x484789c         3.0    [5 ascii::is_upper +0x1]  frame: prologue    mov    rbp,rsp
+0x484789f         3.0    [5 ascii::is_upper +0x4]  untag              sar    rsi,1
+0x48478a2         3.0    [5 ascii::is_upper +0x7]  cmp/test (other)   cmp    rsi,0x41
+0x48478a6         3.0  Bc=3.0 Bcm=1.1  [5 ascii::is_upper +0xb]  jcc (other)        jge    0x48478b6
+0x48478ac         1.0    [5 ascii::is_upper +0x11]  mov imm            mov    eax,0x2
+0x48478b1         1.0    [5 ascii::is_upper +0x16]  jmp                jmp    0x48478cf
+0x48478b6         2.0    [5 ascii::is_upper +0x1b]  cmp/test (other)   cmp    rsi,0x5a
+0x48478ba         2.0  Bc=2.0  [5 ascii::is_upper +0x1f]  jcc (other)        jle    0x48478ca
+0x48478c0         2.0  I1mr=1.0  [5 ascii::is_upper +0x25]  mov imm            mov    eax,0x2
+0x48478c5         2.0    [5 ascii::is_upper +0x2a]  jmp                jmp    0x48478cf
+0x48478cf         3.0    [5 ascii::is_upper +0x34]  frame: epilogue    mov    rsp,rbp
+0x48478d2         3.0  Dr=3.0  [5 ascii::is_upper +0x37]  frame: epilogue    pop    rbp
+0x48478d3         3.0  Dr=3.0  [5 ascii::is_upper +0x38]  frame: epilogue    ret
+0x48478e5         3.0  Dw=3.0  [6 ascii::is_lower +0x0]  frame: prologue    push   rbp
+0x48478e6         3.0    [6 ascii::is_lower +0x1]  frame: prologue    mov    rbp,rsp
+0x48478e9         3.0    [6 ascii::is_lower +0x4]  untag              sar    rsi,1
+0x48478ec         3.0    [6 ascii::is_lower +0x7]  cmp/test (other)   cmp    rsi,0x61
+0x48478f0         3.0  Bc=3.0  [6 ascii::is_lower +0xb]  jcc (other)        jge    0x4847900
+0x48478f6         1.0    [6 ascii::is_lower +0x11]  mov imm            mov    eax,0x2
+0x48478fb         1.0    [6 ascii::is_lower +0x16]  jmp                jmp    0x4847919
+0x4847900         2.0    [6 ascii::is_lower +0x1b]  cmp/test (other)   cmp    rsi,0x7a
+0x4847904         2.0  Bc=2.0  [6 ascii::is_lower +0x1f]  jcc (other)        jle    0x4847914
+0x4847914         2.0    [6 ascii::is_lower +0x2f]  mov imm            mov    eax,0x6
+0x4847919         3.0    [6 ascii::is_lower +0x34]  frame: epilogue    mov    rsp,rbp
+0x484791c         3.0  Dr=3.0  [6 ascii::is_lower +0x37]  frame: epilogue    pop    rbp
+0x484791d         3.0  Dr=3.0  [6 ascii::is_lower +0x38]  frame: epilogue    ret
+0x484792f         3.0  Dw=3.0 I1mr=1.0  [7 ascii::is_alphabetic +0x0]  frame: prologue    push   rbp
+0x4847930         3.0    [7 ascii::is_alphabetic +0x1]  frame: prologue    mov    rbp,rsp
+0x4847933         3.0    [7 ascii::is_alphabetic +0x4]  frame: prologue    sub    rsp,0x10
+0x4847937         3.0  Dw=3.0  [7 ascii::is_alphabetic +0x8]  frame: prologue    mov    QWORD PTR [rsp],r12
+0x484793b         3.0  Dw=3.0  [7 ascii::is_alphabetic +0xc]  frame: prologue    mov    QWORD PTR [rsp+0x8],r14
+0x4847940         3.0  I1mr=1.0  [7 ascii::is_alphabetic +0x11]  mov reg-reg        mov    r12,rsi
+0x4847943         3.0    [7 ascii::is_alphabetic +0x14]  mov reg-reg        mov    r14,rdi
+0x4847946         3.0    [7 ascii::is_alphabetic +0x17]  mov reg-reg        mov    rsi,r12
+0x4847949         3.0    [7 ascii::is_alphabetic +0x1a]  mov reg-reg        mov    rdi,r14
+0x484794c         3.0  Dw=3.0  [7 ascii::is_alphabetic +0x1d]  call botlish       call   0x484789b
+0x4847951         3.0    [7 ascii::is_alphabetic +0x22]  bool test          cmp    rax,0x6
+0x4847955         3.0  Bc=3.0  [7 ascii::is_alphabetic +0x26]  bool test          je     0x4847984
+0x484795b         3.0    [7 ascii::is_alphabetic +0x2c]  mov reg-reg        mov    rsi,r12
+0x484795e         3.0    [7 ascii::is_alphabetic +0x2f]  mov reg-reg        mov    rdi,r14
+0x4847961         3.0  Dw=3.0  [7 ascii::is_alphabetic +0x32]  call botlish       call   0x48478e5
+0x4847966         3.0    [7 ascii::is_alphabetic +0x37]  bool test          cmp    rax,0x6
+0x484796a         3.0  Bc=3.0  [7 ascii::is_alphabetic +0x3b]  bool test          je     0x484797a
+0x4847970         1.0    [7 ascii::is_alphabetic +0x41]  mov imm            mov    eax,0x2
+0x4847975         1.0    [7 ascii::is_alphabetic +0x46]  jmp                jmp    0x4847989
+0x484797a         2.0    [7 ascii::is_alphabetic +0x4b]  mov imm            mov    eax,0x6
+0x484797f         2.0    [7 ascii::is_alphabetic +0x50]  jmp                jmp    0x4847989
+0x4847989         3.0  Dr=3.0  [7 ascii::is_alphabetic +0x5a]  frame: epilogue    mov    r12,QWORD PTR [rsp]
+0x484798d         3.0  Dr=3.0  [7 ascii::is_alphabetic +0x5e]  frame: epilogue    mov    r14,QWORD PTR [rsp+0x8]
+0x4847992         3.0    [7 ascii::is_alphabetic +0x63]  frame: epilogue    add    rsp,0x10
+0x4847996         3.0    [7 ascii::is_alphabetic +0x67]  frame: epilogue    mov    rsp,rbp
+0x4847999         3.0  Dr=3.0  [7 ascii::is_alphabetic +0x6a]  frame: epilogue    pop    rbp
+0x484799a         3.0  Dr=3.0  [7 ascii::is_alphabetic +0x6b]  frame: epilogue    ret
+0x48479ac         3.0  Dw=3.0  [8 ascii::is_alphanumeric +0x0]  frame: prologue    push   rbp
+0x48479ad         3.0    [8 ascii::is_alphanumeric +0x1]  frame: prologue    mov    rbp,rsp
+0x48479b0         3.0    [8 ascii::is_alphanumeric +0x4]  frame: prologue    sub    rsp,0x10
+0x48479b4         3.0  Dw=3.0  [8 ascii::is_alphanumeric +0x8]  frame: prologue    mov    QWORD PTR [rsp],r12
+0x48479b8         3.0  Dw=3.0  [8 ascii::is_alphanumeric +0xc]  frame: prologue    mov    QWORD PTR [rsp+0x8],r14
+0x48479bd         3.0    [8 ascii::is_alphanumeric +0x11]  mov reg-reg        mov    r12,rsi
+0x48479c0         3.0    [8 ascii::is_alphanumeric +0x14]  mov reg-reg        mov    r14,rdi
+0x48479c3         3.0    [8 ascii::is_alphanumeric +0x17]  mov reg-reg        mov    rsi,r12
+0x48479c6         3.0    [8 ascii::is_alphanumeric +0x1a]  mov reg-reg        mov    rdi,r14
+0x48479c9         3.0  Dw=3.0  [8 ascii::is_alphanumeric +0x1d]  call botlish       call   0x484792f
+0x48479ce         3.0    [8 ascii::is_alphanumeric +0x22]  bool test          cmp    rax,0x6
+0x48479d2         3.0  Bc=3.0  [8 ascii::is_alphanumeric +0x26]  bool test          je     0x4847a01
+0x48479d8         1.0    [8 ascii::is_alphanumeric +0x2c]  mov reg-reg        mov    rsi,r12
+0x48479db         1.0    [8 ascii::is_alphanumeric +0x2f]  mov reg-reg        mov    rdi,r14
+0x48479de         1.0  Dw=1.0  [8 ascii::is_alphanumeric +0x32]  call botlish       call   0x4847851
+0x48479e3         1.0    [8 ascii::is_alphanumeric +0x37]  bool test          cmp    rax,0x6
+0x48479e7         1.0  Bc=1.0 Bcm=0.1  [8 ascii::is_alphanumeric +0x3b]  bool test          je     0x48479f7
+0x48479ed         1.0    [8 ascii::is_alphanumeric +0x41]  mov imm            mov    eax,0x2
+0x48479f2         1.0    [8 ascii::is_alphanumeric +0x46]  jmp                jmp    0x4847a06
+0x4847a01         2.0    [8 ascii::is_alphanumeric +0x55]  mov imm            mov    eax,0x6
+0x4847a06         3.0  Dr=3.0  [8 ascii::is_alphanumeric +0x5a]  frame: epilogue    mov    r12,QWORD PTR [rsp]
+0x4847a0a         3.0  Dr=3.0  [8 ascii::is_alphanumeric +0x5e]  frame: epilogue    mov    r14,QWORD PTR [rsp+0x8]
+0x4847a0f         3.0    [8 ascii::is_alphanumeric +0x63]  frame: epilogue    add    rsp,0x10
+0x4847a13         3.0    [8 ascii::is_alphanumeric +0x67]  frame: epilogue    mov    rsp,rbp
+0x4847a16         3.0  Dr=3.0  [8 ascii::is_alphanumeric +0x6a]  frame: epilogue    pop    rbp
+0x4847a17         3.0  Dr=3.0  [8 ascii::is_alphanumeric +0x6b]  frame: epilogue    ret
+0x4847a30       800.0  Dw=800.0  [9 web::is_emailish +0x0]  frame: prologue    push   rbp
+0x4847a31       800.0    [9 web::is_emailish +0x1]  frame: prologue    mov    rbp,rsp
+0x4847a34       800.0    [9 web::is_emailish +0x4]  frame: prologue    sub    rsp,0x50
+0x4847a38       800.0  Dw=800.0  [9 web::is_emailish +0x8]  frame: prologue    mov    QWORD PTR [rsp+0x30],rbx
+0x4847a3d       800.0  Dw=800.0  [9 web::is_emailish +0xd]  frame: prologue    mov    QWORD PTR [rsp+0x38],r12
+0x4847a42       800.0  Dw=800.0  [9 web::is_emailish +0x12]  frame: prologue    mov    QWORD PTR [rsp+0x40],r13
+0x4847a47       800.0  Dw=800.0  [9 web::is_emailish +0x17]  frame: prologue    mov    QWORD PTR [rsp+0x48],r14
+0x4847a4c       800.0    [9 web::is_emailish +0x1c]  mov reg-reg        mov    r13,rdi
+0x4847a4f       800.0  Dw=800.0  [9 web::is_emailish +0x1f]  stack store        mov    QWORD PTR [rsp+0x18],0x0
+0x4847a58       800.0  Dw=800.0  [9 web::is_emailish +0x28]  stack store        mov    QWORD PTR [rsp],rsi
+0x4847a5c       800.0    [9 web::is_emailish +0x2c]  mov reg-reg        mov    r14,rsi
+0x4847a5f       800.0    [9 web::is_emailish +0x2f]  mov imm            movabs rax,0x2941a0
+0x4847a69       800.0    [9 web::is_emailish +0x39]  mov reg-reg        mov    rsi,r14
+0x4847a6c       800.0    [9 web::is_emailish +0x3c]  mov reg-reg        mov    rdi,r13
+0x4847a6f       800.0  Dw=800.0  [9 web::is_emailish +0x3f]  call helper        call   rax
+0x4847a71       800.0    [9 web::is_emailish +0x41]  mov reg-reg        mov    rbx,rax
+0x4847a74       800.0  Dw=800.0  [9 web::is_emailish +0x44]  stack store        mov    QWORD PTR [rsp+0x8],rax
+0x4847a79       800.0    [9 web::is_emailish +0x49]  mov imm            mov    esi,0x1
+0x4847a7e       800.0  Dw=800.0  [9 web::is_emailish +0x4e]  stack store        mov    QWORD PTR [rsp+0x10],0x1
+0x4847a87       800.0    [9 web::is_emailish +0x57]  mov reg-reg        mov    rcx,r14
+0x4847a8a       800.0    [9 web::is_emailish +0x5a]  mov reg-reg        mov    rdx,rbx
+0x4847a8d       800.0    [9 web::is_emailish +0x5d]  mov reg-reg        mov    rdi,r13
+0x4847a90       800.0  Dw=800.0  [9 web::is_emailish +0x60]  call botlish       call   0x4848000
+0x4847a95       800.0    [9 web::is_emailish +0x65]  mov reg-reg        mov    r12,rax
+0x4847a98       800.0    [9 web::is_emailish +0x68]  cmp/test (other)   test   r12,r12
+0x4847a9b       800.0  Bc=800.0  [9 web::is_emailish +0x6b]  jcc (other)        je     0x4847c15
+0x4847aa1       800.0  Dw=800.0  [9 web::is_emailish +0x71]  stack store        mov    QWORD PTR [rsp+0x10],r12
+0x4847aa6       800.0    [9 web::is_emailish +0x76]  tag test           test   r12,0x1
+0x4847aad       800.0  Bc=800.0  [9 web::is_emailish +0x7d]  tag test           jne    0x4847adf
+0x4847adf       800.0  I1mr=1.0  [9 web::is_emailish +0xaf]  bool materialize   mov    ecx,0x2
+0x4847ae4       800.0    [9 web::is_emailish +0xb4]  cmp/test (other)   cmp    r12,0x1
+0x4847ae8       800.0  Dr=800.0  [9 web::is_emailish +0xb8]  bool materialize   cmove  rcx,QWORD PTR [rip+0x1d0]        # 0x4847cc0
+0x4847af0       800.0    [9 web::is_emailish +0xc0]  bool test          cmp    rcx,0x6
+0x4847af4       800.0  Bc=800.0 Bcm=2.0  [9 web::is_emailish +0xc4]  bool test          je     0x4847c97
+0x4847afa       800.0    [9 web::is_emailish +0xca]  mov reg-reg        mov    rdi,r12
+0x4847afd       800.0    [9 web::is_emailish +0xcd]  tag test           and    rdi,rbx
+0x4847b00       800.0  I1mr=1.0  [9 web::is_emailish +0xd0]  tag test           test   rdi,0x1
+0x4847b07       800.0  Bc=800.0  [9 web::is_emailish +0xd7]  tag test           jne    0x4847b38
+0x4847b38       800.0    [9 web::is_emailish +0x108]  bool materialize   mov    ecx,0x2
+0x4847b3d       800.0    [9 web::is_emailish +0x10d]  cmp/test (other)   cmp    r12,rbx
+0x4847b40       800.0  Dr=800.0 I1mr=0.1  [9 web::is_emailish +0x110]  bool materialize   cmovge rcx,QWORD PTR [rip+0x178]        # 0x4847cc0
+0x4847b48       800.0    [9 web::is_emailish +0x118]  bool test          cmp    rcx,0x6
+0x4847b4c       800.0  Bc=800.0  [9 web::is_emailish +0x11c]  bool test          je     0x4847c8d
+0x4847b52       400.0    [9 web::is_emailish +0x122]  lea (stack addr)   lea    rcx,[rsp+0x20]
+0x4847b57       400.0    [9 web::is_emailish +0x127]  mov reg-reg        mov    rdx,r14
+0x4847b5a       400.0    [9 web::is_emailish +0x12a]  mov reg-reg        mov    rsi,r12
+0x4847b5d       400.0    [9 web::is_emailish +0x12d]  mov reg-reg        mov    rdi,r13
+0x4847b60       400.0  Dw=400.0  [9 web::is_emailish +0x130]  call botlish       call   0x4847cd9
+0x4847b65       400.0    [9 web::is_emailish +0x135]  cmp/test (other)   test   rax,rax
+0x4847b68       400.0    [9 web::is_emailish +0x138]  mov reg-reg        mov    rsi,rax
+0x4847b6b       400.0  Bc=400.0  [9 web::is_emailish +0x13b]  jcc (other)        je     0x4847c15
+0x4847b71       400.0  Dr=400.0  [9 web::is_emailish +0x141]  stack load         mov    rdx,QWORD PTR [rsp+0x20]
+0x4847b76       400.0  Dr=400.0  [9 web::is_emailish +0x146]  stack load         mov    rcx,QWORD PTR [rsp+0x28]
+0x4847b7b       400.0    [9 web::is_emailish +0x14b]  mov reg-reg        mov    rdi,r13
+0x4847b7e       400.0  Dr=400.0  [9 web::is_emailish +0x14e]  heap/vm load       mov    rax,QWORD PTR [rdi+0x10]
+0x4847b82       400.0  Dr=400.0  [9 web::is_emailish +0x152]  heap/vm load       mov    r8,QWORD PTR [rax+0xa0]
+0x4847b89       400.0    [9 web::is_emailish +0x159]  call helper        movabs rax,0x296fc0
+0x4847b93       400.0  Dw=400.0  [9 web::is_emailish +0x163]  call helper        call   rax
+0x4847b95       400.0    [9 web::is_emailish +0x165]  bool test          cmp    rax,0x6
+0x4847b99       400.0  Bc=400.0  [9 web::is_emailish +0x169]  bool test          je     0x4847bac
+0x4847bac       400.0  Dw=400.0  [9 web::is_emailish +0x17c]  stack store        mov    QWORD PTR [rsp+0x18],0x3
+0x4847bb5       400.0    [9 web::is_emailish +0x185]  tag test           test   r12,0x1
+0x4847bbc       400.0  I1mr=1.0 Bc=400.0  [9 web::is_emailish +0x18c]  tag test           jne    0x4847bca
+0x4847bca       400.0    [9 web::is_emailish +0x19a]  mov reg-reg        mov    rsi,r12
+0x4847bcd       400.0    [9 web::is_emailish +0x19d]  arith              add    rsi,0x2
+0x4847bd1       400.0    [9 web::is_emailish +0x1a1]  mov reg-reg        mov    rcx,r12
+0x4847bd4       400.0    [9 web::is_emailish +0x1a4]  overflow check     seto   al
+0x4847bd7       400.0    [9 web::is_emailish +0x1a7]  overflow check     test   al,al
+0x4847bd9       400.0  Bc=400.0  [9 web::is_emailish +0x1a9]  overflow check     je     0x4847bf9
+0x4847bf9       400.0  Dw=400.0  [9 web::is_emailish +0x1c9]  stack store        mov    QWORD PTR [rsp+0x10],rsi
+0x4847bfe       400.0  I1mr=0.1  [9 web::is_emailish +0x1ce]  mov reg-reg        mov    rcx,r14
+0x4847c01       400.0    [9 web::is_emailish +0x1d1]  mov reg-reg        mov    rdx,rbx
+0x4847c04       400.0    [9 web::is_emailish +0x1d4]  mov reg-reg        mov    rdi,r13
+0x4847c07       400.0  Dw=400.0  [9 web::is_emailish +0x1d7]  call botlish       call   0x4848998
+0x4847c0c       400.0    [9 web::is_emailish +0x1dc]  completion check   test   rax,rax
+0x4847c0f       400.0  Bc=400.0  [9 web::is_emailish +0x1df]  completion check   jne    0x4847c35
+0x4847c35       400.0    [9 web::is_emailish +0x205]  mov reg-reg        mov    rcx,rax
+0x4847c38       400.0    [9 web::is_emailish +0x208]  logic              and    rcx,rbx
+0x4847c3b       400.0    [9 web::is_emailish +0x20b]  mov reg-reg        mov    rsi,rax
+0x4847c3e       400.0    [9 web::is_emailish +0x20e]  tag test           test   rcx,0x1
+0x4847c45       400.0  Bc=400.0  [9 web::is_emailish +0x215]  tag test           jne    0x4847c75
+0x4847c75       400.0    [9 web::is_emailish +0x245]  mov reg-reg        mov    rdx,rbx
+0x4847c78       400.0    [9 web::is_emailish +0x248]  bool materialize   mov    eax,0x2
+0x4847c7d       400.0    [9 web::is_emailish +0x24d]  cmp/test (other)   cmp    rsi,rdx
+0x4847c80       400.0  Dr=400.0  [9 web::is_emailish +0x250]  bool materialize   cmove  rax,QWORD PTR [rip+0x38]        # 0x4847cc0
+0x4847c88       400.0    [9 web::is_emailish +0x258]  jmp                jmp    0x4847c9c
+0x4847c8d       400.0    [9 web::is_emailish +0x25d]  mov imm            mov    eax,0x2
+0x4847c92       400.0    [9 web::is_emailish +0x262]  jmp                jmp    0x4847c9c
+0x4847c9c       800.0  Dr=800.0  [9 web::is_emailish +0x26c]  frame: epilogue    mov    rbx,QWORD PTR [rsp+0x30]
+0x4847ca1       800.0  Dr=800.0  [9 web::is_emailish +0x271]  frame: epilogue    mov    r12,QWORD PTR [rsp+0x38]
+0x4847ca6       800.0  Dr=800.0  [9 web::is_emailish +0x276]  frame: epilogue    mov    r13,QWORD PTR [rsp+0x40]
+0x4847cab       800.0  Dr=800.0  [9 web::is_emailish +0x27b]  frame: epilogue    mov    r14,QWORD PTR [rsp+0x48]
+0x4847cb0       800.0    [9 web::is_emailish +0x280]  frame: epilogue    add    rsp,0x50
+0x4847cb4       800.0    [9 web::is_emailish +0x284]  frame: epilogue    mov    rsp,rbp
+0x4847cb7       800.0  Dr=800.0  [9 web::is_emailish +0x287]  frame: epilogue    pop    rbp
+0x4847cb8       800.0  Dr=800.0  [9 web::is_emailish +0x288]  frame: epilogue    ret
+0x4847cd9    10,000.0  Dw=10,000.0  [10 char_at +0x0]  frame: prologue    push   rbp
+0x4847cda    10,000.0    [10 char_at +0x1]  frame: prologue    mov    rbp,rsp
+0x4847cdd    10,000.0    [10 char_at +0x4]  frame: prologue    sub    rsp,0x50
+0x4847ce1    10,000.0  Dw=10,000.0  [10 char_at +0x8]  frame: prologue    mov    QWORD PTR [rsp+0x20],rbx
+0x4847ce6    10,000.0  Dw=10,000.0  [10 char_at +0xd]  frame: prologue    mov    QWORD PTR [rsp+0x28],r12
+0x4847ceb    10,000.0  Dw=10,000.0  [10 char_at +0x12]  frame: prologue    mov    QWORD PTR [rsp+0x30],r13
+0x4847cf0    10,000.0  Dw=10,000.0  [10 char_at +0x17]  frame: prologue    mov    QWORD PTR [rsp+0x38],r14
+0x4847cf5    10,000.0  Dw=10,000.0  [10 char_at +0x1c]  frame: prologue    mov    QWORD PTR [rsp+0x40],r15
+0x4847cfa    10,000.0    [10 char_at +0x21]  mov reg-reg        mov    r12,rcx
+0x4847cfd    10,000.0    [10 char_at +0x24]  mov reg-reg        mov    r13,rdi
+0x4847d00    10,000.0  Dw=10,000.0  [10 char_at +0x27]  stack store        mov    QWORD PTR [rsp],rsi
+0x4847d04    10,000.0  Dw=10,000.0  [10 char_at +0x2b]  stack store        mov    QWORD PTR [rsp+0x8],rdx
+0x4847d09    10,000.0    [10 char_at +0x30]  mov reg-reg        mov    r15,rdx
+0x4847d0c    10,000.0  Dw=10,000.0  [10 char_at +0x33]  stack store        mov    QWORD PTR [rsp+0x10],0x3
+0x4847d15    10,000.0    [10 char_at +0x3c]  tag test           test   rsi,0x1
+0x4847d1c    10,000.0  Bc=10,000.0  [10 char_at +0x43]  tag test           jne    0x4847d2a
+0x4847d2a    10,000.0    [10 char_at +0x51]  mov reg-reg        mov    rax,rsi
+0x4847d2d    10,000.0    [10 char_at +0x54]  arith              add    rax,0x2
+0x4847d31    10,000.0    [10 char_at +0x58]  mov reg-reg        mov    rbx,rsi
+0x4847d34    10,000.0    [10 char_at +0x5b]  overflow check     seto   cl
+0x4847d37    10,000.0    [10 char_at +0x5e]  overflow check     test   cl,cl
+0x4847d39    10,000.0  Bc=10,000.0  [10 char_at +0x60]  overflow check     jne    0x4847d47
+0x4847d3f    10,000.0    [10 char_at +0x66]  mov reg-reg        mov    r14,rax
+0x4847d42    10,000.0    [10 char_at +0x69]  jmp                jmp    0x4847d61
+0x4847d61    10,000.0    [10 char_at +0x88]  mov imm            movabs rax,0x298090
+0x4847d6b    10,000.0    [10 char_at +0x92]  mov reg-reg        mov    rdi,r13
+0x4847d6e    10,000.0    [10 char_at +0x95]  mov reg-reg        mov    rcx,r14
+0x4847d71    10,000.0    [10 char_at +0x98]  mov reg-reg        mov    rdx,rbx
+0x4847d74    10,000.0    [10 char_at +0x9b]  mov reg-reg        mov    rsi,r15
+0x4847d77    10,000.0  Dw=10,000.0  [10 char_at +0x9e]  call helper        call   rax
+0x4847d79    10,000.0    [10 char_at +0xa0]  completion check   test   rax,rax
+0x4847d7c    10,000.0  Bc=10,000.0  [10 char_at +0xa3]  completion check   jne    0x4847da7
+0x4847da7    10,000.0    [10 char_at +0xce]  mov reg-reg        mov    rcx,r12
+0x4847daa    10,000.0  Dw=10,000.0  [10 char_at +0xd1]  heap/vm store      mov    QWORD PTR [rcx],rbx
+0x4847dad    10,000.0    [10 char_at +0xd4]  mov reg-reg        mov    rax,r14
+0x4847db0    10,000.0  Dw=10,000.0  [10 char_at +0xd7]  heap/vm store      mov    QWORD PTR [rcx+0x8],rax
+0x4847db4    10,000.0    [10 char_at +0xdb]  mov reg-reg        mov    rax,r15
+0x4847db7    10,000.0  Dr=10,000.0  [10 char_at +0xde]  frame: epilogue    mov    rbx,QWORD PTR [rsp+0x20]
+0x4847dbc    10,000.0  Dr=10,000.0  [10 char_at +0xe3]  frame: epilogue    mov    r12,QWORD PTR [rsp+0x28]
+0x4847dc1    10,000.0  Dr=10,000.0  [10 char_at +0xe8]  frame: epilogue    mov    r13,QWORD PTR [rsp+0x30]
+0x4847dc6    10,000.0  Dr=10,000.0  [10 char_at +0xed]  frame: epilogue    mov    r14,QWORD PTR [rsp+0x38]
+0x4847dcb    10,000.0  Dr=10,000.0  [10 char_at +0xf2]  frame: epilogue    mov    r15,QWORD PTR [rsp+0x40]
+0x4847dd0    10,000.0    [10 char_at +0xf7]  frame: epilogue    add    rsp,0x50
+0x4847dd4    10,000.0    [10 char_at +0xfb]  frame: epilogue    mov    rsp,rbp
+0x4847dd7    10,000.0  Dr=10,000.0  [10 char_at +0xfe]  frame: epilogue    pop    rbp
+0x4847dd8    10,000.0  Dr=10,000.0  [10 char_at +0xff]  frame: epilogue    ret
+0x4848000       800.0  Dw=800.0  [11 scan_local +0x0]  frame: prologue    push   rbp
+0x4848001       800.0    [11 scan_local +0x1]  frame: prologue    mov    rbp,rsp
+0x4848004       800.0    [11 scan_local +0x4]  frame: prologue    sub    rsp,0x80
+0x484800b       800.0  Dw=800.0  [11 scan_local +0xb]  frame: prologue    mov    QWORD PTR [rsp+0x50],rbx
+0x4848010       800.0  Dw=800.0  [11 scan_local +0x10]  frame: prologue    mov    QWORD PTR [rsp+0x58],r12
+0x4848015       800.0  Dw=800.0  [11 scan_local +0x15]  frame: prologue    mov    QWORD PTR [rsp+0x60],r13
+0x484801a       800.0  Dw=800.0  [11 scan_local +0x1a]  frame: prologue    mov    QWORD PTR [rsp+0x68],r14
+0x484801f       800.0  Dw=800.0  [11 scan_local +0x1f]  frame: prologue    mov    QWORD PTR [rsp+0x70],r15
+0x4848024       800.0  Dw=800.0  [11 scan_local +0x24]  frame: root-slot zero mov    QWORD PTR [rsp+0x18],0x0
+0x484802d       800.0  Dw=800.0  [11 scan_local +0x2d]  stack store        mov    QWORD PTR [rsp],rsi
+0x4848031       800.0    [11 scan_local +0x31]  mov reg-reg        mov    r15,rsi
+0x4848034       800.0  Dw=800.0  [11 scan_local +0x34]  stack store        mov    QWORD PTR [rsp+0x8],rdx
+0x4848039       800.0  Dw=800.0  [11 scan_local +0x39]  stack store        mov    QWORD PTR [rsp+0x10],rcx
+0x484803e       800.0    [11 scan_local +0x3e]  mov reg-reg        mov    r13,rcx
+0x4848041       800.0    [11 scan_local +0x41]  lea (stack addr)   lea    r14,[rsp+0x20]
+0x4848046       800.0    [11 scan_local +0x46]  mov reg-reg        mov    rbx,rdx
+0x4848049     7,200.0    [11 scan_local +0x49]  mov reg-reg        mov    rax,rsi
+0x484804c     7,200.0    [11 scan_local +0x4c]  logic              and    rax,rbx
+0x484804f     7,200.0    [11 scan_local +0x4f]  mov reg-reg        mov    r15,rsi
+0x4848052     7,200.0    [11 scan_local +0x52]  tag test           test   rax,0x1
+0x4848058     7,200.0  Bc=7,200.0  [11 scan_local +0x58]  tag test           jne    0x4848088
+0x4848088     7,200.0    [11 scan_local +0x88]  mov reg-reg        mov    r12,rdi
+0x484808b     7,200.0    [11 scan_local +0x8b]  mov imm            mov    ecx,0x2
+0x4848090     7,200.0    [11 scan_local +0x90]  mov reg-reg        mov    rsi,r15
+0x4848093     7,200.0    [11 scan_local +0x93]  cmp/test (other)   cmp    rsi,rbx
+0x4848096     7,200.0  Dr=7,200.0  [11 scan_local +0x96]  bool materialize   cmovge rcx,QWORD PTR [rip+0x2e2]        # 0x4848380
+0x484809e     7,200.0    [11 scan_local +0x9e]  bool test          cmp    rcx,0x6
+0x48480a2     7,200.0  Bc=7,200.0 Bcm=400.0  [11 scan_local +0xa2]  bool test          je     0x4848358
+0x48480a8     6,800.0    [11 scan_local +0xa8]  mov reg-reg        mov    rcx,r14
+0x48480ab     6,800.0    [11 scan_local +0xab]  mov reg-reg        mov    rdx,r13
+0x48480ae     6,800.0    [11 scan_local +0xae]  mov reg-reg        mov    rsi,r15
+0x48480b1     6,800.0    [11 scan_local +0xb1]  mov reg-reg        mov    rdi,r12
+0x48480b4     6,800.0  Dw=6,800.0  [11 scan_local +0xb4]  call botlish       call   0x4847cd9
+0x48480b9     6,800.0    [11 scan_local +0xb9]  mov reg-reg        mov    rcx,rax
+0x48480bc     6,800.0  Dw=6,800.0  [11 scan_local +0xbc]  stack store        mov    QWORD PTR [rsp+0x40],rax
+0x48480c1     6,800.0    [11 scan_local +0xc1]  cmp/test (other)   test   rax,rcx
+0x48480c4     6,800.0  Bc=6,800.0  [11 scan_local +0xc4]  jcc (other)        je     0x48480fb
+0x48480ca     6,800.0  Dr=6,800.0  [11 scan_local +0xca]  stack load         mov    rdx,QWORD PTR [rsp+0x20]
+0x48480cf     6,800.0  Dw=6,800.0  [11 scan_local +0xcf]  stack store        mov    QWORD PTR [rsp+0x38],rdx
+0x48480d4     6,800.0  Dr=6,800.0  [11 scan_local +0xd4]  stack load         mov    rcx,QWORD PTR [rsp+0x28]
+0x48480d9     6,800.0  Dw=6,800.0  [11 scan_local +0xd9]  stack store        mov    QWORD PTR [rsp+0x30],rcx
+0x48480de     6,800.0    [11 scan_local +0xde]  mov imm            movabs rax,0x298ab0
+0x48480e8     6,800.0  Dr=6,800.0  [11 scan_local +0xe8]  stack load         mov    rsi,QWORD PTR [rsp+0x40]
+0x48480ed     6,800.0    [11 scan_local +0xed]  mov reg-reg        mov    rdi,r12
+0x48480f0     6,800.0  Dw=6,800.0  [11 scan_local +0xf0]  call helper        call   rax
+0x48480f2     6,800.0    [11 scan_local +0xf2]  completion check   test   rax,rax
+0x48480f5     6,800.0  Bc=6,800.0  [11 scan_local +0xf5]  completion check   jne    0x4848123
+0x4848123     6,800.0    [11 scan_local +0x123]  bool test          cmp    rax,0x6
+0x4848127     6,800.0  Bc=6,800.0 Bcm=800.0  [11 scan_local +0x127]  bool test          je     0x4848175
+0x484812d     1,200.0  Dr=1,200.0  [11 scan_local +0x12d]  heap/vm load       mov    rax,QWORD PTR [r12+0x10]
+0x4848132     1,200.0  Dr=1,200.0  [11 scan_local +0x132]  heap/vm load       mov    r8,QWORD PTR [rax+0xa8]
+0x4848139     1,200.0    [11 scan_local +0x139]  mov imm            movabs rax,0x296fc0
+0x4848143     1,200.0  Dr=1,200.0  [11 scan_local +0x143]  stack load         mov    rcx,QWORD PTR [rsp+0x30]
+0x4848148     1,200.0  Dr=1,200.0  [11 scan_local +0x148]  stack load         mov    rdx,QWORD PTR [rsp+0x38]
+0x484814d     1,200.0  Dr=1,200.0  [11 scan_local +0x14d]  stack load         mov    rsi,QWORD PTR [rsp+0x40]
+0x4848152     1,200.0    [11 scan_local +0x152]  mov reg-reg        mov    rdi,r12
+0x4848155     1,200.0  Dw=1,200.0  [11 scan_local +0x155]  call helper        call   rax
+0x4848157     1,200.0    [11 scan_local +0x157]  bool test          cmp    rax,0x6
+0x484815b     1,200.0  Bc=1,200.0  [11 scan_local +0x15b]  bool test          je     0x484816b
+0x4848161     1,200.0    [11 scan_local +0x161]  mov imm            mov    ecx,0x2
+0x4848166     1,200.0    [11 scan_local +0x166]  jmp                jmp    0x484817a
+0x4848175     5,600.0    [11 scan_local +0x175]  mov imm            mov    ecx,0x6
+0x484817a     6,800.0    [11 scan_local +0x17a]  bool test          cmp    rcx,0x6
+0x484817e     6,800.0  I1mr=0.1 Bc=6,800.0  [11 scan_local +0x17e]  bool test          je     0x48481cc
+0x4848184     1,200.0  Dr=1,200.0  [11 scan_local +0x184]  heap/vm load       mov    rax,QWORD PTR [r12+0x10]
+0x4848189     1,200.0  Dr=1,200.0  [11 scan_local +0x189]  heap/vm load       mov    r8,QWORD PTR [rax+0xb0]
+0x4848190     1,200.0    [11 scan_local +0x190]  mov imm            movabs rax,0x296fc0
+0x484819a     1,200.0  Dr=1,200.0  [11 scan_local +0x19a]  stack load         mov    rcx,QWORD PTR [rsp+0x30]
+0x484819f     1,200.0  Dr=1,200.0  [11 scan_local +0x19f]  stack load         mov    rdx,QWORD PTR [rsp+0x38]
+0x48481a4     1,200.0  Dr=1,200.0  [11 scan_local +0x1a4]  stack load         mov    rsi,QWORD PTR [rsp+0x40]
+0x48481a9     1,200.0    [11 scan_local +0x1a9]  mov reg-reg        mov    rdi,r12
+0x48481ac     1,200.0  Dw=1,200.0  [11 scan_local +0x1ac]  call helper        call   rax
+0x48481ae     1,200.0    [11 scan_local +0x1ae]  bool test          cmp    rax,0x6
+0x48481b2     1,200.0  Bc=1,200.0 Bcm=2.0  [11 scan_local +0x1b2]  bool test          je     0x48481c2
+0x48481b8     1,200.0    [11 scan_local +0x1b8]  mov imm            mov    esi,0x2
+0x48481bd     1,200.0    [11 scan_local +0x1bd]  jmp                jmp    0x48481d1
+0x48481cc     5,600.0  I1mr=0.1  [11 scan_local +0x1cc]  mov imm            mov    esi,0x6
+0x48481d1     6,800.0    [11 scan_local +0x1d1]  bool test          cmp    rsi,0x6
+0x48481d5     6,800.0  Bc=6,800.0 Bcm=1.0  [11 scan_local +0x1d5]  bool test          je     0x4848223
+0x48481db     1,200.0  Dr=1,200.0  [11 scan_local +0x1db]  heap/vm load       mov    rax,QWORD PTR [r12+0x10]
+0x48481e0     1,200.0  Dr=1,200.0  [11 scan_local +0x1e0]  heap/vm load       mov    r8,QWORD PTR [rax+0xb8]
+0x48481e7     1,200.0    [11 scan_local +0x1e7]  mov imm            movabs rax,0x296fc0
+0x48481f1     1,200.0  Dr=1,200.0  [11 scan_local +0x1f1]  stack load         mov    rcx,QWORD PTR [rsp+0x30]
+0x48481f6     1,200.0  Dr=1,200.0  [11 scan_local +0x1f6]  stack load         mov    rdx,QWORD PTR [rsp+0x38]
+0x48481fb     1,200.0  Dr=1,200.0  [11 scan_local +0x1fb]  stack load         mov    rsi,QWORD PTR [rsp+0x40]
+0x4848200     1,200.0    [11 scan_local +0x200]  mov reg-reg        mov    rdi,r12
+0x4848203     1,200.0  Dw=1,200.0  [11 scan_local +0x203]  call helper        call   rax
+0x4848205     1,200.0    [11 scan_local +0x205]  bool test          cmp    rax,0x6
+0x4848209     1,200.0  Bc=1,200.0  [11 scan_local +0x209]  bool test          je     0x4848219
+0x484820f     1,200.0    [11 scan_local +0x20f]  mov imm            mov    ecx,0x2
+0x4848214     1,200.0    [11 scan_local +0x214]  jmp                jmp    0x4848228
+0x4848223     5,600.0    [11 scan_local +0x223]  mov imm            mov    ecx,0x6
+0x4848228     6,800.0    [11 scan_local +0x228]  bool test          cmp    rcx,0x6
+0x484822c     6,800.0  Bc=6,800.0  [11 scan_local +0x22c]  bool test          je     0x484827a
+0x4848232     1,200.0  Dr=1,200.0  [11 scan_local +0x232]  heap/vm load       mov    rax,QWORD PTR [r12+0x10]
+0x4848237     1,200.0  Dr=1,200.0  [11 scan_local +0x237]  heap/vm load       mov    r8,QWORD PTR [rax+0xc0]
+0x484823e     1,200.0    [11 scan_local +0x23e]  mov imm            movabs rax,0x296fc0
+0x4848248     1,200.0  Dr=1,200.0  [11 scan_local +0x248]  stack load         mov    rcx,QWORD PTR [rsp+0x30]
+0x484824d     1,200.0  Dr=1,200.0  [11 scan_local +0x24d]  stack load         mov    rdx,QWORD PTR [rsp+0x38]
+0x4848252     1,200.0  Dr=1,200.0  [11 scan_local +0x252]  stack load         mov    rsi,QWORD PTR [rsp+0x40]
+0x4848257     1,200.0    [11 scan_local +0x257]  mov reg-reg        mov    rdi,r12
+0x484825a     1,200.0  Dw=1,200.0  [11 scan_local +0x25a]  call helper        call   rax
+0x484825c     1,200.0    [11 scan_local +0x25c]  bool test          cmp    rax,0x6
+0x4848260     1,200.0  Bc=1,200.0  [11 scan_local +0x260]  bool test          je     0x4848270
+0x4848266     1,200.0    [11 scan_local +0x266]  mov imm            mov    eax,0x2
+0x484826b     1,200.0    [11 scan_local +0x26b]  jmp                jmp    0x484827f
+0x484827a     5,600.0    [11 scan_local +0x27a]  mov imm            mov    eax,0x6
+0x484827f     6,800.0    [11 scan_local +0x27f]  bool test          cmp    rax,0x6
+0x4848283     6,800.0  Bc=6,800.0  [11 scan_local +0x283]  bool test          je     0x48482d2
+0x4848289     1,200.0  Dr=1,200.0  [11 scan_local +0x289]  heap/vm load       mov    rcx,QWORD PTR [r12+0x10]
+0x484828e     1,200.0  Dr=1,200.0  [11 scan_local +0x28e]  heap/vm load       mov    r8,QWORD PTR [rcx+0xc8]
+0x4848295     1,200.0    [11 scan_local +0x295]  mov imm            movabs r9,0x296fc0
+0x484829f     1,200.0  Dr=1,200.0  [11 scan_local +0x29f]  stack load         mov    rcx,QWORD PTR [rsp+0x30]
+0x48482a4     1,200.0  Dr=1,200.0  [11 scan_local +0x2a4]  stack load         mov    rdx,QWORD PTR [rsp+0x38]
+0x48482a9     1,200.0  Dr=1,200.0  [11 scan_local +0x2a9]  stack load         mov    rsi,QWORD PTR [rsp+0x40]
+0x48482ae     1,200.0    [11 scan_local +0x2ae]  mov reg-reg        mov    rdi,r12
+0x48482b1     1,200.0  Dw=1,200.0  [11 scan_local +0x2b1]  call helper        call   r9
+0x48482b4     1,200.0    [11 scan_local +0x2b4]  bool test          cmp    rax,0x6
+0x48482b8     1,200.0  Bc=1,200.0  [11 scan_local +0x2b8]  bool test          je     0x48482c8
+0x48482be       400.0    [11 scan_local +0x2be]  mov imm            mov    eax,0x2
+0x48482c3       400.0    [11 scan_local +0x2c3]  jmp                jmp    0x48482d7
+0x48482c8       800.0    [11 scan_local +0x2c8]  mov imm            mov    eax,0x6
+0x48482cd       800.0    [11 scan_local +0x2cd]  jmp                jmp    0x48482d7
+0x48482d2     5,600.0    [11 scan_local +0x2d2]  mov imm            mov    eax,0x6
+0x48482d7     6,800.0    [11 scan_local +0x2d7]  bool test          cmp    rax,0x6
+0x48482db     6,800.0  Bc=6,800.0  [11 scan_local +0x2db]  bool test          je     0x48482e9
+0x48482e1       400.0    [11 scan_local +0x2e1]  mov reg-reg        mov    rax,r15
+0x48482e4       400.0    [11 scan_local +0x2e4]  jmp                jmp    0x484835b
+0x48482e9     6,400.0  Dw=6,400.0  [11 scan_local +0x2e9]  stack store        mov    QWORD PTR [rsp+0x18],0x3
+0x48482f2     6,400.0    [11 scan_local +0x2f2]  mov reg-reg        mov    rsi,r15
+0x48482f5     6,400.0    [11 scan_local +0x2f5]  tag test           test   rsi,0x1
+0x48482fc     6,400.0  Bc=6,400.0  [11 scan_local +0x2fc]  tag test           je     0x4848322
+0x4848302     6,400.0    [11 scan_local +0x302]  mov reg-reg        mov    rsi,r15
+0x4848305     6,400.0    [11 scan_local +0x305]  mov reg-reg        mov    rax,rsi
+0x4848308     6,400.0    [11 scan_local +0x308]  arith              add    rax,0x2
+0x484830c     6,400.0    [11 scan_local +0x30c]  overflow check     seto   cl
+0x484830f     6,400.0    [11 scan_local +0x30f]  overflow check     test   cl,cl
+0x4848311     6,400.0  Bc=6,400.0  [11 scan_local +0x311]  overflow check     jne    0x4848322
+0x4848317     6,400.0    [11 scan_local +0x317]  mov reg-reg        mov    rsi,rax
+0x484831a     6,400.0    [11 scan_local +0x31a]  mov reg-reg        mov    r15,rax
+0x484831d     6,400.0    [11 scan_local +0x31d]  jmp                jmp    0x484833f
+0x484833f     6,400.0  Dw=6,400.0  [11 scan_local +0x33f]  stack store        mov    QWORD PTR [rsp],rsi
+0x4848343     6,400.0  Dw=6,400.0  [11 scan_local +0x343]  stack store        mov    QWORD PTR [rsp+0x8],rbx
+0x4848348     6,400.0  Dw=6,400.0  [11 scan_local +0x348]  stack store        mov    QWORD PTR [rsp+0x10],r13
+0x484834d     6,400.0    [11 scan_local +0x34d]  mov reg-reg        mov    rsi,r15
+0x4848350     6,400.0    [11 scan_local +0x350]  mov reg-reg        mov    rdi,r12
+0x4848353     6,400.0    [11 scan_local +0x353]  jmp                jmp    0x4848049
+0x4848358       400.0    [11 scan_local +0x358]  mov reg-reg        mov    rax,r15
+0x484835b       800.0  Dr=800.0  [11 scan_local +0x35b]  frame: epilogue    mov    rbx,QWORD PTR [rsp+0x50]
+0x4848360       800.0  Dr=800.0  [11 scan_local +0x360]  frame: epilogue    mov    r12,QWORD PTR [rsp+0x58]
+0x4848365       800.0  Dr=800.0  [11 scan_local +0x365]  frame: epilogue    mov    r13,QWORD PTR [rsp+0x60]
+0x484836a       800.0  Dr=800.0  [11 scan_local +0x36a]  frame: epilogue    mov    r14,QWORD PTR [rsp+0x68]
+0x484836f       800.0  Dr=800.0  [11 scan_local +0x36f]  frame: epilogue    mov    r15,QWORD PTR [rsp+0x70]
+0x4848374       800.0    [11 scan_local +0x374]  frame: epilogue    add    rsp,0x80
+0x484837b       800.0    [11 scan_local +0x37b]  frame: epilogue    mov    rsp,rbp
+0x484837e       800.0  Dr=800.0  [11 scan_local +0x37e]  frame: epilogue    pop    rbp
+0x484837f       800.0  Dr=800.0  [11 scan_local +0x37f]  frame: epilogue    ret
+0x48483a8       400.0  Dw=400.0  [12 scan_label +0x0]  frame: prologue    push   rbp
+0x48483a9       400.0    [12 scan_label +0x1]  frame: prologue    mov    rbp,rsp
+0x48483ac       400.0    [12 scan_label +0x4]  frame: prologue    sub    rsp,0x80
+0x48483b3       400.0  Dw=400.0  [12 scan_label +0xb]  frame: prologue    mov    QWORD PTR [rsp+0x50],rbx
+0x48483b8       400.0  Dw=400.0  [12 scan_label +0x10]  frame: prologue    mov    QWORD PTR [rsp+0x58],r12
+0x48483bd       400.0  Dw=400.0  [12 scan_label +0x15]  frame: prologue    mov    QWORD PTR [rsp+0x60],r13
+0x48483c2       400.0  Dw=400.0  [12 scan_label +0x1a]  frame: prologue    mov    QWORD PTR [rsp+0x68],r14
+0x48483c7       400.0  Dw=400.0  [12 scan_label +0x1f]  frame: prologue    mov    QWORD PTR [rsp+0x70],r15
+0x48483cc       400.0  Dw=400.0  [12 scan_label +0x24]  frame: root-slot zero mov    QWORD PTR [rsp+0x18],0x0
+0x48483d5       400.0  Dw=400.0  [12 scan_label +0x2d]  stack store        mov    QWORD PTR [rsp],rsi
+0x48483d9       400.0    [12 scan_label +0x31]  mov reg-reg        mov    r15,rsi
+0x48483dc       400.0  Dw=400.0  [12 scan_label +0x34]  stack store        mov    QWORD PTR [rsp+0x8],rdx
+0x48483e1       400.0  Dw=400.0  [12 scan_label +0x39]  stack store        mov    QWORD PTR [rsp+0x10],rcx
+0x48483e6       400.0    [12 scan_label +0x3e]  mov reg-reg        mov    r13,rcx
+0x48483e9       400.0    [12 scan_label +0x41]  lea (stack addr)   lea    r14,[rsp+0x20]
+0x48483ee       400.0    [12 scan_label +0x46]  mov reg-reg        mov    rbx,rdx
+0x48483f1     1,200.0    [12 scan_label +0x49]  mov reg-reg        mov    rax,rsi
+0x48483f4     1,200.0    [12 scan_label +0x4c]  logic              and    rax,rbx
+0x48483f7     1,200.0    [12 scan_label +0x4f]  mov reg-reg        mov    r15,rsi
+0x48483fa     1,200.0    [12 scan_label +0x52]  tag test           test   rax,0x1
+0x4848400     1,200.0  I1mr=1.0 Bc=1,200.0  [12 scan_label +0x58]  tag test           jne    0x4848430
+0x4848430     1,200.0    [12 scan_label +0x88]  mov reg-reg        mov    r12,rdi
+0x4848433     1,200.0    [12 scan_label +0x8b]  mov imm            mov    ecx,0x2
+0x4848438     1,200.0    [12 scan_label +0x90]  mov reg-reg        mov    rsi,r15
+0x484843b     1,200.0    [12 scan_label +0x93]  cmp/test (other)   cmp    rsi,rbx
+0x484843e     1,200.0  Dr=1,200.0 I1mr=0.1  [12 scan_label +0x96]  bool materialize   cmovge rcx,QWORD PTR [rip+0x18a]        # 0x48485d0
+0x4848446     1,200.0    [12 scan_label +0x9e]  bool test          cmp    rcx,0x6
+0x484844a     1,200.0  Bc=1,200.0  [12 scan_label +0xa2]  bool test          je     0x48485a2
+0x4848450     1,200.0    [12 scan_label +0xa8]  mov reg-reg        mov    rcx,r14
+0x4848453     1,200.0    [12 scan_label +0xab]  mov reg-reg        mov    rdx,r13
+0x4848456     1,200.0    [12 scan_label +0xae]  mov reg-reg        mov    rsi,r15
+0x4848459     1,200.0    [12 scan_label +0xb1]  mov reg-reg        mov    rdi,r12
+0x484845c     1,200.0  Dw=1,200.0  [12 scan_label +0xb4]  call botlish       call   0x4847cd9
+0x4848461     1,200.0    [12 scan_label +0xb9]  cmp/test (other)   test   rax,rax
+0x4848464     1,200.0  Dw=1,200.0  [12 scan_label +0xbc]  stack store        mov    QWORD PTR [rsp+0x40],rax
+0x4848469     1,200.0  Bc=1,200.0  [12 scan_label +0xc1]  jcc (other)        je     0x48484a0
+0x484846f     1,200.0  Dr=1,200.0  [12 scan_label +0xc7]  stack load         mov    rdx,QWORD PTR [rsp+0x20]
+0x4848474     1,200.0  Dw=1,200.0  [12 scan_label +0xcc]  stack store        mov    QWORD PTR [rsp+0x38],rdx
+0x4848479     1,200.0  Dr=1,200.0  [12 scan_label +0xd1]  stack load         mov    rcx,QWORD PTR [rsp+0x28]
+0x484847e     1,200.0  Dw=1,200.0 I1mr=1.0  [12 scan_label +0xd6]  stack store        mov    QWORD PTR [rsp+0x30],rcx
+0x4848483     1,200.0    [12 scan_label +0xdb]  mov imm            movabs rax,0x298ab0
+0x484848d     1,200.0  Dr=1,200.0  [12 scan_label +0xe5]  stack load         mov    rsi,QWORD PTR [rsp+0x40]
+0x4848492     1,200.0    [12 scan_label +0xea]  mov reg-reg        mov    rdi,r12
+0x4848495     1,200.0  Dw=1,200.0  [12 scan_label +0xed]  call helper        call   rax
+0x4848497     1,200.0    [12 scan_label +0xef]  completion check   test   rax,rax
+0x484849a     1,200.0  Bc=1,200.0  [12 scan_label +0xf2]  completion check   jne    0x48484c8
+0x48484c8     1,200.0  I1mr=0.1  [12 scan_label +0x120]  bool test          cmp    rax,0x6
+0x48484cc     1,200.0  Bc=1,200.0  [12 scan_label +0x124]  bool test          je     0x484851a
+0x48484d2       400.0  Dr=400.0  [12 scan_label +0x12a]  heap/vm load       mov    rax,QWORD PTR [r12+0x10]
+0x48484d7       400.0  Dr=400.0  [12 scan_label +0x12f]  heap/vm load       mov    r8,QWORD PTR [rax+0xc8]
+0x48484de       400.0    [12 scan_label +0x136]  mov imm            movabs rax,0x296fc0
+0x48484e8       400.0  Dr=400.0  [12 scan_label +0x140]  stack load         mov    rcx,QWORD PTR [rsp+0x30]
+0x48484ed       400.0  Dr=400.0  [12 scan_label +0x145]  stack load         mov    rdx,QWORD PTR [rsp+0x38]
+0x48484f2       400.0  Dr=400.0  [12 scan_label +0x14a]  stack load         mov    rsi,QWORD PTR [rsp+0x40]
+0x48484f7       400.0    [12 scan_label +0x14f]  mov reg-reg        mov    rdi,r12
+0x48484fa       400.0  Dw=400.0  [12 scan_label +0x152]  call helper        call   rax
+0x48484fc       400.0    [12 scan_label +0x154]  bool test          cmp    rax,0x6
+0x4848500       400.0  Bc=400.0  [12 scan_label +0x158]  bool test          je     0x4848510
+0x4848506       400.0    [12 scan_label +0x15e]  mov imm            mov    eax,0x2
+0x484850b       400.0    [12 scan_label +0x163]  jmp                jmp    0x484851f
+0x484851a       800.0  I1mr=0.1  [12 scan_label +0x172]  mov imm            mov    eax,0x6
+0x484851f     1,200.0    [12 scan_label +0x177]  bool test          cmp    rax,0x6
+0x4848523     1,200.0  Bc=1,200.0  [12 scan_label +0x17b]  bool test          je     0x4848531
+0x4848529       400.0    [12 scan_label +0x181]  mov reg-reg        mov    rax,r15
+0x484852c       400.0    [12 scan_label +0x184]  jmp                jmp    0x48485a5
+0x4848531       800.0  Dw=800.0  [12 scan_label +0x189]  stack store        mov    QWORD PTR [rsp+0x18],0x3
+0x484853a       800.0    [12 scan_label +0x192]  mov reg-reg        mov    rsi,r15
+0x484853d       800.0    [12 scan_label +0x195]  tag test           test   rsi,0x1
+0x4848544       800.0  Bc=800.0  [12 scan_label +0x19c]  tag test           je     0x484856c
+0x484854a       800.0    [12 scan_label +0x1a2]  mov reg-reg        mov    rsi,r15
+0x484854d       800.0    [12 scan_label +0x1a5]  mov reg-reg        mov    r9,rsi
+0x4848550       800.0    [12 scan_label +0x1a8]  arith              add    r9,0x2
+0x4848554       800.0    [12 scan_label +0x1ac]  overflow check     seto   r11b
+0x4848558       800.0    [12 scan_label +0x1b0]  overflow check     test   r11b,r11b
+0x484855b       800.0  Bc=800.0  [12 scan_label +0x1b3]  overflow check     jne    0x484856c
+0x4848561       800.0    [12 scan_label +0x1b9]  mov reg-reg        mov    rsi,r9
+0x4848564       800.0    [12 scan_label +0x1bc]  mov reg-reg        mov    r15,r9
+0x4848567       800.0    [12 scan_label +0x1bf]  jmp                jmp    0x4848589
+0x4848589       800.0  Dw=800.0  [12 scan_label +0x1e1]  stack store        mov    QWORD PTR [rsp],rsi
+0x484858d       800.0  Dw=800.0  [12 scan_label +0x1e5]  stack store        mov    QWORD PTR [rsp+0x8],rbx
+0x4848592       800.0  Dw=800.0  [12 scan_label +0x1ea]  stack store        mov    QWORD PTR [rsp+0x10],r13
+0x4848597       800.0    [12 scan_label +0x1ef]  mov reg-reg        mov    rsi,r15
+0x484859a       800.0    [12 scan_label +0x1f2]  mov reg-reg        mov    rdi,r12
+0x484859d       800.0    [12 scan_label +0x1f5]  jmp                jmp    0x48483f1
+0x48485a5       400.0  Dr=400.0  [12 scan_label +0x1fd]  frame: epilogue    mov    rbx,QWORD PTR [rsp+0x50]
+0x48485aa       400.0  Dr=400.0  [12 scan_label +0x202]  frame: epilogue    mov    r12,QWORD PTR [rsp+0x58]
+0x48485af       400.0  Dr=400.0  [12 scan_label +0x207]  frame: epilogue    mov    r13,QWORD PTR [rsp+0x60]
+0x48485b4       400.0  Dr=400.0  [12 scan_label +0x20c]  frame: epilogue    mov    r14,QWORD PTR [rsp+0x68]
+0x48485b9       400.0  Dr=400.0  [12 scan_label +0x211]  frame: epilogue    mov    r15,QWORD PTR [rsp+0x70]
+0x48485be       400.0    [12 scan_label +0x216]  frame: epilogue    add    rsp,0x80
+0x48485c5       400.0    [12 scan_label +0x21d]  frame: epilogue    mov    rsp,rbp
+0x48485c8       400.0  Dr=400.0  [12 scan_label +0x220]  frame: epilogue    pop    rbp
+0x48485c9       400.0  Dr=400.0  [12 scan_label +0x221]  frame: epilogue    ret
+0x48485f8       400.0  Dw=400.0  [13 scan_alpha +0x0]  frame: prologue    push   rbp
+0x48485f9       400.0    [13 scan_alpha +0x1]  frame: prologue    mov    rbp,rsp
+0x48485fc       400.0    [13 scan_alpha +0x4]  frame: prologue    sub    rsp,0x60
+0x4848600       400.0  Dw=400.0 I1mr=1.0  [13 scan_alpha +0x8]  frame: prologue    mov    QWORD PTR [rsp+0x30],rbx
+0x4848605       400.0  Dw=400.0  [13 scan_alpha +0xd]  frame: prologue    mov    QWORD PTR [rsp+0x38],r12
+0x484860a       400.0  Dw=400.0  [13 scan_alpha +0x12]  frame: prologue    mov    QWORD PTR [rsp+0x40],r13
+0x484860f       400.0  Dw=400.0  [13 scan_alpha +0x17]  frame: prologue    mov    QWORD PTR [rsp+0x48],r14
+0x4848614       400.0  Dw=400.0  [13 scan_alpha +0x1c]  frame: prologue    mov    QWORD PTR [rsp+0x50],r15
+0x4848619       400.0    [13 scan_alpha +0x21]  mov reg-reg        mov    r15,rdi
+0x484861c       400.0  Dw=400.0  [13 scan_alpha +0x24]  stack store        mov    QWORD PTR [rsp+0x18],0x0
+0x4848625       400.0  Dw=400.0  [13 scan_alpha +0x2d]  stack store        mov    QWORD PTR [rsp],rsi
+0x4848629       400.0    [13 scan_alpha +0x31]  mov reg-reg        mov    r14,rsi
+0x484862c       400.0  Dw=400.0  [13 scan_alpha +0x34]  stack store        mov    QWORD PTR [rsp+0x8],rdx
+0x4848631       400.0  Dw=400.0  [13 scan_alpha +0x39]  stack store        mov    QWORD PTR [rsp+0x10],rcx
+0x4848636       400.0    [13 scan_alpha +0x3e]  mov reg-reg        mov    r12,rcx
+0x4848639       400.0    [13 scan_alpha +0x41]  lea (stack addr)   lea    r13,[rsp+0x20]
+0x484863e       400.0  I1mr=1.0  [13 scan_alpha +0x46]  mov reg-reg        mov    rbx,rdx
+0x4848641     1,600.0    [13 scan_alpha +0x49]  mov reg-reg        mov    rax,rsi
+0x4848644     1,600.0    [13 scan_alpha +0x4c]  logic              and    rax,rbx
+0x4848647     1,600.0    [13 scan_alpha +0x4f]  mov reg-reg        mov    r14,rsi
+0x484864a     1,600.0    [13 scan_alpha +0x52]  tag test           test   rax,0x1
+0x4848650     1,600.0  Bc=1,600.0  [13 scan_alpha +0x58]  tag test           jne    0x4848680
+0x4848680     1,600.0  I1mr=1.0  [13 scan_alpha +0x88]  mov imm            mov    ecx,0x2
+0x4848685     1,600.0    [13 scan_alpha +0x8d]  mov reg-reg        mov    rsi,r14
+0x4848688     1,600.0    [13 scan_alpha +0x90]  cmp/test (other)   cmp    rsi,rbx
+0x484868b     1,600.0  Dr=1,600.0  [13 scan_alpha +0x93]  bool materialize   cmovge rcx,QWORD PTR [rip+0x115]        # 0x48487a8
+0x4848693     1,600.0    [13 scan_alpha +0x9b]  bool test          cmp    rcx,0x6
+0x4848697     1,600.0  Bc=1,600.0 Bcm=400.0  [13 scan_alpha +0x9f]  bool test          je     0x484877f
+0x484869d     1,200.0    [13 scan_alpha +0xa5]  mov reg-reg        mov    rcx,r13
+0x48486a0     1,200.0    [13 scan_alpha +0xa8]  mov reg-reg        mov    rdx,r12
+0x48486a3     1,200.0    [13 scan_alpha +0xab]  mov reg-reg        mov    rsi,r14
+0x48486a6     1,200.0    [13 scan_alpha +0xae]  mov reg-reg        mov    rdi,r15
+0x48486a9     1,200.0  Dw=1,200.0  [13 scan_alpha +0xb1]  call botlish       call   0x4847cd9
+0x48486ae     1,200.0    [13 scan_alpha +0xb6]  cmp/test (other)   test   rax,rax
+0x48486b1     1,200.0    [13 scan_alpha +0xb9]  mov reg-reg        mov    rsi,rax
+0x48486b4     1,200.0  Bc=1,200.0  [13 scan_alpha +0xbc]  jcc (other)        je     0x48486dc
+0x48486ba     1,200.0  Dr=1,200.0  [13 scan_alpha +0xc2]  stack load         mov    rdx,QWORD PTR [rsp+0x20]
+0x48486bf     1,200.0  Dr=1,200.0 I1mr=1.0  [13 scan_alpha +0xc7]  stack load         mov    rcx,QWORD PTR [rsp+0x28]
+0x48486c4     1,200.0    [13 scan_alpha +0xcc]  mov imm            movabs rax,0x298b50
+0x48486ce     1,200.0    [13 scan_alpha +0xd6]  mov reg-reg        mov    rdi,r15
+0x48486d1     1,200.0  Dw=1,200.0  [13 scan_alpha +0xd9]  call helper        call   rax
+0x48486d3     1,200.0    [13 scan_alpha +0xdb]  completion check   test   rax,rax
+0x48486d6     1,200.0  Bc=1,200.0  [13 scan_alpha +0xde]  completion check   jne    0x4848701
+0x4848701     1,200.0  I1mr=0.9  [13 scan_alpha +0x109]  bool test          cmp    rax,0x6
+0x4848705     1,200.0  Bc=1,200.0  [13 scan_alpha +0x10d]  bool test          je     0x4848713
+0x4848713     1,200.0  Dw=1,200.0  [13 scan_alpha +0x11b]  stack store        mov    QWORD PTR [rsp+0x18],0x3
+0x484871c     1,200.0    [13 scan_alpha +0x124]  mov reg-reg        mov    rsi,r14
+0x484871f     1,200.0    [13 scan_alpha +0x127]  tag test           test   rsi,0x1
+0x4848726     1,200.0  Bc=1,200.0  [13 scan_alpha +0x12e]  tag test           je     0x484874c
+0x484872c     1,200.0    [13 scan_alpha +0x134]  mov reg-reg        mov    rsi,r14
+0x484872f     1,200.0    [13 scan_alpha +0x137]  mov reg-reg        mov    rcx,rsi
+0x4848732     1,200.0    [13 scan_alpha +0x13a]  arith              add    rcx,0x2
+0x4848736     1,200.0    [13 scan_alpha +0x13e]  overflow check     seto   al
+0x4848739     1,200.0    [13 scan_alpha +0x141]  overflow check     test   al,al
+0x484873b     1,200.0  I1mr=1.0 Bc=1,200.0  [13 scan_alpha +0x143]  overflow check     jne    0x484874c
+0x4848741     1,200.0    [13 scan_alpha +0x149]  mov reg-reg        mov    rsi,rcx
+0x4848744     1,200.0    [13 scan_alpha +0x14c]  mov reg-reg        mov    r14,rcx
+0x4848747     1,200.0    [13 scan_alpha +0x14f]  jmp                jmp    0x4848769
+0x4848769     1,200.0  Dw=1,200.0  [13 scan_alpha +0x171]  stack store        mov    QWORD PTR [rsp],rsi
+0x484876d     1,200.0  Dw=1,200.0  [13 scan_alpha +0x175]  stack store        mov    QWORD PTR [rsp+0x8],rbx
+0x4848772     1,200.0  Dw=1,200.0  [13 scan_alpha +0x17a]  stack store        mov    QWORD PTR [rsp+0x10],r12
+0x4848777     1,200.0    [13 scan_alpha +0x17f]  mov reg-reg        mov    rsi,r14
+0x484877a     1,200.0    [13 scan_alpha +0x182]  jmp                jmp    0x4848641
+0x484877f       400.0    [13 scan_alpha +0x187]  mov reg-reg        mov    rax,r14
+0x4848782       400.0  Dr=400.0  [13 scan_alpha +0x18a]  frame: epilogue    mov    rbx,QWORD PTR [rsp+0x30]
+0x4848787       400.0  Dr=400.0  [13 scan_alpha +0x18f]  frame: epilogue    mov    r12,QWORD PTR [rsp+0x38]
+0x484878c       400.0  Dr=400.0  [13 scan_alpha +0x194]  frame: epilogue    mov    r13,QWORD PTR [rsp+0x40]
+0x4848791       400.0  Dr=400.0  [13 scan_alpha +0x199]  frame: epilogue    mov    r14,QWORD PTR [rsp+0x48]
+0x4848796       400.0  Dr=400.0  [13 scan_alpha +0x19e]  frame: epilogue    mov    r15,QWORD PTR [rsp+0x50]
+0x484879b       400.0    [13 scan_alpha +0x1a3]  frame: epilogue    add    rsp,0x60
+0x484879f       400.0    [13 scan_alpha +0x1a7]  frame: epilogue    mov    rsp,rbp
+0x48487a2       400.0  Dr=400.0  [13 scan_alpha +0x1aa]  frame: epilogue    pop    rbp
+0x48487a3       400.0  Dr=400.0  [13 scan_alpha +0x1ab]  frame: epilogue    ret
+0x48487d0       400.0  Dw=400.0  [14 tld_ok +0x0]  frame: prologue    push   rbp
+0x48487d1       400.0    [14 tld_ok +0x1]  frame: prologue    mov    rbp,rsp
+0x48487d4       400.0    [14 tld_ok +0x4]  frame: prologue    sub    rsp,0x40
+0x48487d8       400.0  Dw=400.0  [14 tld_ok +0x8]  frame: prologue    mov    QWORD PTR [rsp+0x20],rbx
+0x48487dd       400.0  Dw=400.0  [14 tld_ok +0xd]  frame: prologue    mov    QWORD PTR [rsp+0x28],r12
+0x48487e2       400.0  Dw=400.0  [14 tld_ok +0x12]  frame: prologue    mov    QWORD PTR [rsp+0x30],r13
+0x48487e7       400.0  Dw=400.0  [14 tld_ok +0x17]  frame: prologue    mov    QWORD PTR [rsp+0x38],r14
+0x48487ec       400.0    [14 tld_ok +0x1c]  mov reg-reg        mov    r12,rdi
+0x48487ef       400.0  Dw=400.0  [14 tld_ok +0x1f]  stack store        mov    QWORD PTR [rsp],rsi
+0x48487f3       400.0    [14 tld_ok +0x23]  mov reg-reg        mov    rdi,rsi
+0x48487f6       400.0  Dw=400.0  [14 tld_ok +0x26]  stack store        mov    QWORD PTR [rsp+0x8],rdx
+0x48487fb       400.0    [14 tld_ok +0x2b]  mov reg-reg        mov    r14,rdx
+0x48487fe       400.0  Dw=400.0  [14 tld_ok +0x2e]  stack store        mov    QWORD PTR [rsp+0x10],rcx
+0x4848803       400.0    [14 tld_ok +0x33]  mov reg-reg        mov    rbx,rdi
+0x4848806       400.0    [14 tld_ok +0x36]  mov reg-reg        mov    rdx,r14
+0x4848809       400.0    [14 tld_ok +0x39]  mov reg-reg        mov    rsi,rbx
+0x484880c       400.0    [14 tld_ok +0x3c]  mov reg-reg        mov    rdi,r12
+0x484880f       400.0  Dw=400.0  [14 tld_ok +0x3f]  call botlish       call   0x48485f8
+0x4848814       400.0    [14 tld_ok +0x44]  mov reg-reg        mov    rcx,rax
+0x4848817       400.0    [14 tld_ok +0x47]  mov reg-reg        mov    r13,rax
+0x484881a       400.0    [14 tld_ok +0x4a]  cmp/test (other)   test   rax,rcx
+0x484881d       400.0  Bc=400.0  [14 tld_ok +0x4d]  jcc (other)        jne    0x4848843
+0x4848843       400.0  I1mr=0.1  [14 tld_ok +0x73]  mov reg-reg        mov    rax,r13
+0x4848846       400.0  Dw=400.0  [14 tld_ok +0x76]  stack store        mov    QWORD PTR [rsp+0x8],rax
+0x484884b       400.0    [14 tld_ok +0x7b]  mov reg-reg        mov    rdx,r14
+0x484884e       400.0    [14 tld_ok +0x7e]  tag test           and    rax,rdx
+0x4848851       400.0    [14 tld_ok +0x81]  tag test           test   rax,0x1
+0x4848857       400.0  Bc=400.0  [14 tld_ok +0x87]  tag test           jne    0x4848887
+0x4848887       400.0  I1mr=1.0  [14 tld_ok +0xb7]  mov imm            mov    ecx,0x2
+0x484888c       400.0    [14 tld_ok +0xbc]  mov reg-reg        mov    rax,r13
+0x484888f       400.0    [14 tld_ok +0xbf]  cmp/test (other)   cmp    rax,rdx
+0x4848892       400.0  Dr=400.0  [14 tld_ok +0xc2]  bool materialize   cmove  rcx,QWORD PTR [rip+0xd6]        # 0x4848970
+0x484889a       400.0    [14 tld_ok +0xca]  bool test          cmp    rcx,0x6
+0x484889e       400.0  Bc=400.0  [14 tld_ok +0xce]  bool test          je     0x48488b1
+0x48488b1       400.0    [14 tld_ok +0xe1]  mov reg-reg        mov    rcx,rax
+0x48488b4       400.0    [14 tld_ok +0xe4]  tag test           and    rcx,rbx
+0x48488b7       400.0    [14 tld_ok +0xe7]  tag test           test   rcx,0x1
+0x48488be       400.0  I1mr=1.0 Bc=400.0  [14 tld_ok +0xee]  tag test           jne    0x48488cf
+0x48488cf       400.0    [14 tld_ok +0xff]  mov reg-reg        mov    rcx,rax
+0x48488d2       400.0    [14 tld_ok +0x102]  arith              sub    rcx,rbx
+0x48488d5       400.0    [14 tld_ok +0x105]  mov reg-reg        mov    rdi,rbx
+0x48488d8       400.0    [14 tld_ok +0x108]  mov reg-reg        mov    r13,rax
+0x48488db       400.0    [14 tld_ok +0x10b]  overflow check     seto   al
+0x48488de       400.0    [14 tld_ok +0x10e]  lea                lea    rsi,[rcx+0x1]
+0x48488e2       400.0    [14 tld_ok +0x112]  cmp/test (other)   test   al,al
+0x48488e4       400.0  Bc=400.0  [14 tld_ok +0x114]  jcc (other)        je     0x4848902
+0x4848902       400.0  I1mr=1.0  [14 tld_ok +0x132]  tag test           test   rsi,0x1
+0x4848909       400.0  Bc=400.0  [14 tld_ok +0x139]  tag test           jne    0x484893b
+0x484893b       400.0    [14 tld_ok +0x16b]  bool materialize   mov    eax,0x2
+0x4848940       400.0  I1mr=1.0  [14 tld_ok +0x170]  cmp/test (other)   cmp    rsi,0x5
+0x4848944       400.0  Dr=400.0  [14 tld_ok +0x174]  bool materialize   cmovge rax,QWORD PTR [rip+0x24]        # 0x4848970
+0x484894c       400.0  Dr=400.0  [14 tld_ok +0x17c]  frame: epilogue    mov    rbx,QWORD PTR [rsp+0x20]
+0x4848951       400.0  Dr=400.0  [14 tld_ok +0x181]  frame: epilogue    mov    r12,QWORD PTR [rsp+0x28]
+0x4848956       400.0  Dr=400.0  [14 tld_ok +0x186]  frame: epilogue    mov    r13,QWORD PTR [rsp+0x30]
+0x484895b       400.0  Dr=400.0  [14 tld_ok +0x18b]  frame: epilogue    mov    r14,QWORD PTR [rsp+0x38]
+0x4848960       400.0    [14 tld_ok +0x190]  frame: epilogue    add    rsp,0x40
+0x4848964       400.0    [14 tld_ok +0x194]  frame: epilogue    mov    rsp,rbp
+0x4848967       400.0  Dr=400.0  [14 tld_ok +0x197]  frame: epilogue    pop    rbp
+0x4848968       400.0  Dr=400.0  [14 tld_ok +0x198]  frame: epilogue    ret
+0x4848998       400.0  Dw=400.0  [15 domain_loop +0x0]  frame: prologue    push   rbp
+0x4848999       400.0    [15 domain_loop +0x1]  frame: prologue    mov    rbp,rsp
+0x484899c       400.0    [15 domain_loop +0x4]  frame: prologue    sub    rsp,0x70
+0x48489a0       400.0  Dw=400.0  [15 domain_loop +0x8]  frame: prologue    mov    QWORD PTR [rsp+0x40],rbx
+0x48489a5       400.0  Dw=400.0  [15 domain_loop +0xd]  frame: prologue    mov    QWORD PTR [rsp+0x48],r12
+0x48489aa       400.0  Dw=400.0  [15 domain_loop +0x12]  frame: prologue    mov    QWORD PTR [rsp+0x50],r13
+0x48489af       400.0  Dw=400.0  [15 domain_loop +0x17]  frame: prologue    mov    QWORD PTR [rsp+0x58],r14
+0x48489b4       400.0  Dw=400.0  [15 domain_loop +0x1c]  frame: prologue    mov    QWORD PTR [rsp+0x60],r15
+0x48489b9       400.0  Dw=400.0 I1mr=1.0  [15 domain_loop +0x21]  frame: root-slot zero mov    QWORD PTR [rsp+0x18],0x0
+0x48489c2       400.0  Dw=400.0  [15 domain_loop +0x2a]  stack store        mov    QWORD PTR [rsp],rsi
+0x48489c6       400.0  Dw=400.0  [15 domain_loop +0x2e]  stack store        mov    QWORD PTR [rsp+0x8],rdx
+0x48489cb       400.0  Dw=400.0  [15 domain_loop +0x33]  stack store        mov    QWORD PTR [rsp+0x10],rcx
+0x48489d0       400.0    [15 domain_loop +0x38]  lea (stack addr)   lea    rbx,[rsp+0x20]
+0x48489d5       400.0    [15 domain_loop +0x3d]  mov reg-reg        mov    r12,rdi
+0x48489d8       400.0    [15 domain_loop +0x40]  mov reg-reg        mov    r13,rcx
+0x48489db       400.0    [15 domain_loop +0x43]  mov reg-reg        mov    r14,rdx
+0x48489de       400.0  Dw=400.0  [15 domain_loop +0x46]  stack store        mov    QWORD PTR [rsp+0x30],rsi
+0x48489e3       400.0    [15 domain_loop +0x4b]  mov reg-reg        mov    rcx,r13
+0x48489e6       400.0    [15 domain_loop +0x4e]  mov reg-reg        mov    rdx,r14
+0x48489e9       400.0  Dr=400.0  [15 domain_loop +0x51]  stack load         mov    rsi,QWORD PTR [rsp+0x30]
+0x48489ee       400.0    [15 domain_loop +0x56]  mov reg-reg        mov    rdi,r12
+0x48489f1       400.0  Dw=400.0  [15 domain_loop +0x59]  call botlish       call   0x48483a8
+0x48489f6       400.0    [15 domain_loop +0x5e]  mov reg-reg        mov    rsi,rax
+0x48489f9       400.0    [15 domain_loop +0x61]  mov reg-reg        mov    r15,rax
+0x48489fc       400.0    [15 domain_loop +0x64]  cmp/test (other)   test   rax,rsi
+0x48489ff       400.0  Bc=400.0  [15 domain_loop +0x67]  jcc (other)        je     0x4848b73
+0x4848a05       400.0    [15 domain_loop +0x6d]  mov reg-reg        mov    rax,r15
+0x4848a08       400.0  Dw=400.0  [15 domain_loop +0x70]  stack store        mov    QWORD PTR [rsp],rax
+0x4848a0c       400.0  Dr=400.0  [15 domain_loop +0x74]  stack load         mov    rdx,QWORD PTR [rsp+0x30]
+0x4848a11       400.0    [15 domain_loop +0x79]  tag test           and    rax,rdx
+0x4848a14       400.0    [15 domain_loop +0x7c]  tag test           test   rax,0x1
+0x4848a1a       400.0  Bc=400.0  [15 domain_loop +0x82]  tag test           jne    0x4848a47
+0x4848a47       400.0    [15 domain_loop +0xaf]  bool materialize   mov    ecx,0x2
+0x4848a4c       400.0    [15 domain_loop +0xb4]  cmp/test (other)   cmp    r15,rdx
+0x4848a4f       400.0  Dr=400.0  [15 domain_loop +0xb7]  bool materialize   cmove  rcx,QWORD PTR [rip+0x1a1]        # 0x4848bf8
+0x4848a57       400.0    [15 domain_loop +0xbf]  bool test          cmp    rcx,0x6
+0x4848a5b       400.0  Bc=400.0  [15 domain_loop +0xc3]  bool test          je     0x4848bc9
+0x4848a61       400.0    [15 domain_loop +0xc9]  mov reg-reg        mov    rax,r15
+0x4848a64       400.0    [15 domain_loop +0xcc]  tag test           and    rax,r14
+0x4848a67       400.0    [15 domain_loop +0xcf]  tag test           test   rax,0x1
+0x4848a6d       400.0  Bc=400.0  [15 domain_loop +0xd5]  tag test           jne    0x4848a9d
+0x4848a9d       400.0  I1mr=1.0  [15 domain_loop +0x105]  bool materialize   mov    ecx,0x2
+0x4848aa2       400.0    [15 domain_loop +0x10a]  cmp/test (other)   cmp    r15,r14
+0x4848aa5       400.0  Dr=400.0  [15 domain_loop +0x10d]  bool materialize   cmovge rcx,QWORD PTR [rip+0x14b]        # 0x4848bf8
+0x4848aad       400.0    [15 domain_loop +0x115]  bool test          cmp    rcx,0x6
+0x4848ab1       400.0  Bc=400.0  [15 domain_loop +0x119]  bool test          je     0x4848bba
+0x4848ab7       400.0    [15 domain_loop +0x11f]  mov reg-reg        mov    rcx,rbx
+0x4848aba       400.0    [15 domain_loop +0x122]  mov reg-reg        mov    rdx,r13
+0x4848abd       400.0    [15 domain_loop +0x125]  mov reg-reg        mov    rsi,r15
+0x4848ac0       400.0  I1mr=1.0  [15 domain_loop +0x128]  mov reg-reg        mov    rdi,r12
+0x4848ac3       400.0  Dw=400.0  [15 domain_loop +0x12b]  call botlish       call   0x4847cd9
+0x4848ac8       400.0    [15 domain_loop +0x130]  cmp/test (other)   test   rax,rax
+0x4848acb       400.0    [15 domain_loop +0x133]  mov reg-reg        mov    rsi,rax
+0x4848ace       400.0  Bc=400.0  [15 domain_loop +0x136]  jcc (other)        je     0x4848b73
+0x4848ad4       400.0  Dr=400.0  [15 domain_loop +0x13c]  stack load         mov    rdx,QWORD PTR [rsp+0x20]
+0x4848ad9       400.0  Dr=400.0  [15 domain_loop +0x141]  stack load         mov    rcx,QWORD PTR [rsp+0x28]
+0x4848ade       400.0  Dr=400.0  [15 domain_loop +0x146]  heap/vm load       mov    r10,QWORD PTR [r12+0x10]
+0x4848ae3       400.0  Dr=400.0  [15 domain_loop +0x14b]  heap/vm load       mov    r8,QWORD PTR [r10+0xa8]
+0x4848aea       400.0    [15 domain_loop +0x152]  mov imm            movabs r10,0x296fc0
+0x4848af4       400.0    [15 domain_loop +0x15c]  mov reg-reg        mov    rdi,r12
+0x4848af7       400.0  Dw=400.0  [15 domain_loop +0x15f]  call helper        call   r10
+0x4848afa       400.0    [15 domain_loop +0x162]  bool test          cmp    rax,0x6
+0x4848afe       400.0  I1mr=1.0 Bc=400.0  [15 domain_loop +0x166]  bool test          je     0x4848b10
+0x4848b10       400.0  Dw=400.0  [15 domain_loop +0x178]  stack store        mov    QWORD PTR [rsp+0x18],0x3
+0x4848b19       400.0    [15 domain_loop +0x181]  tag test           test   r15,0x1
+0x4848b20       400.0  Bc=400.0  [15 domain_loop +0x188]  tag test           je     0x4848b38
+0x4848b26       400.0    [15 domain_loop +0x18e]  mov reg-reg        mov    rdx,r15
+0x4848b29       400.0    [15 domain_loop +0x191]  arith              add    rdx,0x2
+0x4848b2d       400.0    [15 domain_loop +0x195]  overflow check     seto   al
+0x4848b30       400.0    [15 domain_loop +0x198]  overflow check     test   al,al
+0x4848b32       400.0  Bc=400.0 Bcm=2.0  [15 domain_loop +0x19a]  overflow check     je     0x4848b52
+0x4848b52       400.0  Dw=400.0 I1mr=1.0  [15 domain_loop +0x1ba]  stack store        mov    QWORD PTR [rsp],rdx
+0x4848b56       400.0    [15 domain_loop +0x1be]  mov reg-reg        mov    r15,rdx
+0x4848b59       400.0    [15 domain_loop +0x1c1]  mov reg-reg        mov    rcx,r13
+0x4848b5c       400.0    [15 domain_loop +0x1c4]  mov reg-reg        mov    rdx,r14
+0x4848b5f       400.0    [15 domain_loop +0x1c7]  mov reg-reg        mov    rsi,r15
+0x4848b62       400.0    [15 domain_loop +0x1ca]  mov reg-reg        mov    rdi,r12
+0x4848b65       400.0  Dw=400.0  [15 domain_loop +0x1cd]  call botlish       call   0x48487d0
+0x4848b6a       400.0    [15 domain_loop +0x1d2]  completion check   test   rax,rax
+0x4848b6d       400.0  Bc=400.0  [15 domain_loop +0x1d5]  completion check   jne    0x4848b98
+0x4848b98       400.0    [15 domain_loop +0x200]  bool test          cmp    rax,0x6
+0x4848b9c       400.0  Bc=400.0  [15 domain_loop +0x204]  bool test          je     0x4848bc1
+0x4848bc1       400.0  I1mr=1.0  [15 domain_loop +0x229]  mov reg-reg        mov    rax,r14
+0x4848bc4       400.0    [15 domain_loop +0x22c]  jmp                jmp    0x4848bd0
+0x4848bd0       400.0  Dr=400.0  [15 domain_loop +0x238]  frame: epilogue    mov    rbx,QWORD PTR [rsp+0x40]
+0x4848bd5       400.0  Dr=400.0  [15 domain_loop +0x23d]  frame: epilogue    mov    r12,QWORD PTR [rsp+0x48]
+0x4848bda       400.0  Dr=400.0  [15 domain_loop +0x242]  frame: epilogue    mov    r13,QWORD PTR [rsp+0x50]
+0x4848bdf       400.0  Dr=400.0  [15 domain_loop +0x247]  frame: epilogue    mov    r14,QWORD PTR [rsp+0x58]
+0x4848be4       400.0  Dr=400.0  [15 domain_loop +0x24c]  frame: epilogue    mov    r15,QWORD PTR [rsp+0x60]
+0x4848be9       400.0    [15 domain_loop +0x251]  frame: epilogue    add    rsp,0x70
+0x4848bed       400.0    [15 domain_loop +0x255]  frame: epilogue    mov    rsp,rbp
+0x4848bf0       400.0  Dr=400.0  [15 domain_loop +0x258]  frame: epilogue    pop    rbp
+0x4848bf1       400.0  Dr=400.0  [15 domain_loop +0x259]  frame: epilogue    ret
+0x4848c1c         3.0  Dw=3.0 I1mr=0.1  [16 web::is_unreserved +0x0]  frame: prologue    push   rbp
+0x4848c1d         3.0    [16 web::is_unreserved +0x1]  frame: prologue    mov    rbp,rsp
+0x4848c20         3.0    [16 web::is_unreserved +0x4]  frame: prologue    sub    rsp,0x20
+0x4848c24         3.0  Dw=3.0  [16 web::is_unreserved +0x8]  frame: prologue    mov    QWORD PTR [rsp],rbx
+0x4848c28         3.0  Dw=3.0  [16 web::is_unreserved +0xc]  frame: prologue    mov    QWORD PTR [rsp+0x8],r12
+0x4848c2d         3.0  Dw=3.0  [16 web::is_unreserved +0x11]  frame: prologue    mov    QWORD PTR [rsp+0x10],r15
+0x4848c32         3.0    [16 web::is_unreserved +0x16]  mov reg-reg        mov    rbx,rdi
+0x4848c35         3.0    [16 web::is_unreserved +0x19]  mov reg-reg        mov    r12,rsi
+0x4848c38         3.0    [16 web::is_unreserved +0x1c]  mov reg-reg        mov    r15,rdx
+0x4848c3b         3.0    [16 web::is_unreserved +0x1f]  mov reg-reg        mov    rsi,r15
+0x4848c3e         3.0    [16 web::is_unreserved +0x22]  mov reg-reg        mov    rdi,rbx
+0x4848c41         3.0  Dw=3.0  [16 web::is_unreserved +0x25]  call botlish       call   0x48479ac
+0x4848c46         3.0    [16 web::is_unreserved +0x2a]  bool test          cmp    rax,0x6
+0x4848c4a         3.0  Bc=3.0 Bcm=0.1  [16 web::is_unreserved +0x2e]  bool test          je     0x4848c8a
+0x4848c50         1.0    [16 web::is_unreserved +0x34]  mov reg-reg        mov    rsi,r12
+0x4848c53         1.0  Dr=1.0  [16 web::is_unreserved +0x37]  heap/vm load       mov    rax,QWORD PTR [rsi+0x20]
+0x4848c57         1.0  Dr=1.0  [16 web::is_unreserved +0x3b]  heap/vm load       mov    rsi,QWORD PTR [rax]
+0x4848c5a         1.0    [16 web::is_unreserved +0x3e]  mov imm            movabs rax,0x296ae0
+0x4848c64         1.0    [16 web::is_unreserved +0x48]  mov reg-reg        mov    rdx,r15
+0x4848c67         1.0    [16 web::is_unreserved +0x4b]  mov reg-reg        mov    rdi,rbx
+0x4848c6a         1.0  Dw=1.0  [16 web::is_unreserved +0x4e]  call helper        call   rax
+0x4848c6c         1.0    [16 web::is_unreserved +0x50]  bool test          cmp    rax,0x6
+0x4848c70         1.0  Bc=1.0 Bcm=1.0  [16 web::is_unreserved +0x54]  bool test          je     0x4848c80
+0x4848c76         1.0    [16 web::is_unreserved +0x5a]  mov imm            mov    eax,0x2
+0x4848c7b         1.0    [16 web::is_unreserved +0x5f]  jmp                jmp    0x4848c8f
+0x4848c8a         2.0    [16 web::is_unreserved +0x6e]  mov imm            mov    eax,0x6
+0x4848c8f         3.0  Dr=3.0  [16 web::is_unreserved +0x73]  frame: epilogue    mov    rbx,QWORD PTR [rsp]
+0x4848c93         3.0  Dr=3.0  [16 web::is_unreserved +0x77]  frame: epilogue    mov    r12,QWORD PTR [rsp+0x8]
+0x4848c98         3.0  Dr=3.0  [16 web::is_unreserved +0x7c]  frame: epilogue    mov    r15,QWORD PTR [rsp+0x10]
+0x4848c9d         3.0    [16 web::is_unreserved +0x81]  frame: epilogue    add    rsp,0x20
+0x4848ca1         3.0    [16 web::is_unreserved +0x85]  frame: epilogue    mov    rsp,rbp
+0x4848ca4         3.0  Dr=3.0  [16 web::is_unreserved +0x88]  frame: epilogue    pop    rbp
+0x4848ca5         3.0  Dr=3.0  [16 web::is_unreserved +0x89]  frame: epilogue    ret
+0x4848cb7         1.0  Dw=1.0  [17 web::uri_escape_text +0x0]  frame: prologue    push   rbp
+0x4848cb8         1.0    [17 web::uri_escape_text +0x1]  frame: prologue    mov    rbp,rsp
+0x4848cbb         1.0    [17 web::uri_escape_text +0x4]  frame: prologue    sub    rsp,0x30
+0x4848cbf         1.0  Dw=1.0  [17 web::uri_escape_text +0x8]  stack store        mov    QWORD PTR [rsp],rdx
+0x4848cc3         1.0    [17 web::uri_escape_text +0xc]  mov reg-reg        mov    r10,rdx
+0x4848cc6         1.0    [17 web::uri_escape_text +0xf]  mov imm            mov    edx,0x1
+0x4848ccb         1.0  Dw=1.0  [17 web::uri_escape_text +0x14]  stack store        mov    QWORD PTR [rsp+0x8],0x1
+0x4848cd4         1.0  Dr=1.0  [17 web::uri_escape_text +0x1d]  heap/vm load       mov    rax,QWORD PTR [rdi+0x10]
+0x4848cd8         1.0  Dr=1.0  [17 web::uri_escape_text +0x21]  heap/vm load       mov    rcx,QWORD PTR [rax+0xd0]
+0x4848cdf         1.0  Dw=1.0  [17 web::uri_escape_text +0x28]  stack store        mov    QWORD PTR [rsp+0x10],rcx
+0x4848ce4         1.0  Dr=1.0  [17 web::uri_escape_text +0x2d]  heap/vm load       mov    rax,QWORD PTR [rsi+0x20]
+0x4848ce8         1.0  Dr=1.0  [17 web::uri_escape_text +0x31]  heap/vm load       mov    r8,QWORD PTR [rax+0x8]
+0x4848cec         1.0  Dw=1.0  [17 web::uri_escape_text +0x35]  stack store        mov    QWORD PTR [rsp+0x18],r8
+0x4848cf1         1.0  Dr=1.0  [17 web::uri_escape_text +0x3a]  heap/vm load       mov    rax,QWORD PTR [rsi+0x20]
+0x4848cf5         1.0  Dr=1.0  [17 web::uri_escape_text +0x3e]  heap/vm load       mov    r9,QWORD PTR [rax]
+0x4848cf8         1.0  Dw=1.0  [17 web::uri_escape_text +0x41]  stack store        mov    QWORD PTR [rsp+0x20],r9
+0x4848cfd         1.0    [17 web::uri_escape_text +0x46]  mov reg-reg        mov    rsi,r10
+0x4848d00         1.0  Dw=1.0  [17 web::uri_escape_text +0x49]  call botlish       call   0x48494e0
+0x4848d05         1.0    [17 web::uri_escape_text +0x4e]  completion check   test   rax,rax
+0x4848d08         1.0  Bc=1.0 Bcm=0.1  [17 web::uri_escape_text +0x51]  completion check   jne    0x4848d1a
+0x4848d1a         1.0    [17 web::uri_escape_text +0x63]  frame: epilogue    add    rsp,0x30
+0x4848d1e         1.0    [17 web::uri_escape_text +0x67]  frame: epilogue    mov    rsp,rbp
+0x4848d21         1.0  Dr=1.0  [17 web::uri_escape_text +0x6a]  frame: epilogue    pop    rbp
+0x4848d22         1.0  Dr=1.0  [17 web::uri_escape_text +0x6b]  frame: epilogue    ret
+0x4848d34         1.0  Dw=1.0  [18 high_nibble +0x0]  frame: prologue    push   rbp
+0x4848d35         1.0    [18 high_nibble +0x1]  frame: prologue    mov    rbp,rsp
+0x4848d38         1.0    [18 high_nibble +0x4]  frame: prologue    sub    rsp,0x10
+0x4848d3c         1.0  Dw=1.0  [18 high_nibble +0x8]  stack store        mov    QWORD PTR [rsp],rsi
+0x4848d40         1.0  Dw=1.0  [18 high_nibble +0xc]  stack store        mov    QWORD PTR [rsp+0x8],0x1e1
+0x4848d49         1.0    [18 high_nibble +0x15]  tag test           test   rsi,0x1
+0x4848d50         1.0  Bc=1.0  [18 high_nibble +0x1c]  tag test           jne    0x4848d6c
+0x4848d6c         1.0    [18 high_nibble +0x38]  logic              and    rsi,0x1e1
+0x4848d73         1.0    [18 high_nibble +0x3f]  mov reg-reg        mov    rax,rsi
+0x4848d76         1.0    [18 high_nibble +0x42]  arith              sar    rax,0x5
+0x4848d7a         1.0    [18 high_nibble +0x46]  retag              shl    rax,1
+0x4848d7d         1.0    [18 high_nibble +0x49]  retag              or     rax,0x1
+0x4848d81         1.0    [18 high_nibble +0x4d]  frame: epilogue    add    rsp,0x10
+0x4848d85         1.0    [18 high_nibble +0x51]  frame: epilogue    mov    rsp,rbp
+0x4848d88         1.0  Dr=1.0  [18 high_nibble +0x54]  frame: epilogue    pop    rbp
+0x4848d89         1.0  Dr=1.0  [18 high_nibble +0x55]  frame: epilogue    ret
+0x4848d9b         1.0  Dw=1.0  [19 hex_pair +0x0]  frame: prologue    push   rbp
+0x4848d9c         1.0    [19 hex_pair +0x1]  frame: prologue    mov    rbp,rsp
+0x4848d9f         1.0    [19 hex_pair +0x4]  frame: prologue    sub    rsp,0x50
+0x4848da3         1.0  Dw=1.0  [19 hex_pair +0x8]  frame: prologue    mov    QWORD PTR [rsp+0x30],rbx
+0x4848da8         1.0  Dw=1.0  [19 hex_pair +0xd]  frame: prologue    mov    QWORD PTR [rsp+0x38],r12
+0x4848dad         1.0  Dw=1.0  [19 hex_pair +0x12]  frame: prologue    mov    QWORD PTR [rsp+0x40],r13
+0x4848db2         1.0  Dw=1.0  [19 hex_pair +0x17]  frame: prologue    mov    QWORD PTR [rsp+0x48],r14
+0x4848db7         1.0    [19 hex_pair +0x1c]  mov reg-reg        mov    r12,rdi
+0x4848dba         1.0  Dw=1.0  [19 hex_pair +0x1f]  stack store        mov    QWORD PTR [rsp],rsi
+0x4848dbe         1.0    [19 hex_pair +0x23]  mov reg-reg        mov    r13,rsi
+0x4848dc1         1.0  Dw=1.0  [19 hex_pair +0x26]  stack store        mov    QWORD PTR [rsp+0x8],rdx
+0x4848dc6         1.0    [19 hex_pair +0x2b]  mov reg-reg        mov    rbx,rdx
+0x4848dc9         1.0    [19 hex_pair +0x2e]  mov reg-reg        mov    rsi,r13
+0x4848dcc         1.0    [19 hex_pair +0x31]  mov reg-reg        mov    rdi,r12
+0x4848dcf         1.0  Dw=1.0  [19 hex_pair +0x34]  call botlish       call   0x4848d34
+0x4848dd4         1.0    [19 hex_pair +0x39]  tag test           test   rax,0x1
+0x4848dda         1.0  Bc=1.0  [19 hex_pair +0x3f]  tag test           je     0x4848df3
+0x4848de0         1.0  Dr=1.0  [19 hex_pair +0x45]  heap/vm load       mov    rdx,QWORD PTR [rbx+0x8]
+0x4848de4         1.0    [19 hex_pair +0x49]  mov reg-reg        mov    rcx,rax
+0x4848de7         1.0    [19 hex_pair +0x4c]  untag              sar    rcx,1
+0x4848dea         1.0    [19 hex_pair +0x4f]  cmp/test (other)   cmp    rcx,rdx
+0x4848ded         1.0  Bc=1.0 Bcm=0.1  [19 hex_pair +0x52]  jcc (other)        jb     0x4848e16
+0x4848e16         1.0  Dr=1.0  [19 hex_pair +0x7b]  heap/vm load       mov    rax,QWORD PTR [rbx+0x10]
+0x4848e1a         1.0  Dr=1.0  [19 hex_pair +0x7f]  heap/vm load       mov    rax,QWORD PTR [rax+rcx*8]
+0x4848e1e         1.0  Dw=1.0  [19 hex_pair +0x83]  stack store        mov    QWORD PTR [rsp],rax
+0x4848e22         1.0    [19 hex_pair +0x87]  mov reg-reg        mov    r14,rax
+0x4848e25         1.0    [19 hex_pair +0x8a]  mov imm            mov    edx,0x21
+0x4848e2a         1.0    [19 hex_pair +0x8f]  mov imm            movabs rax,0x2913f0
+0x4848e34         1.0    [19 hex_pair +0x99]  mov reg-reg        mov    rsi,r13
+0x4848e37         1.0    [19 hex_pair +0x9c]  mov reg-reg        mov    rdi,r12
+0x4848e3a         1.0  Dw=1.0  [19 hex_pair +0x9f]  call helper        call   rax
+0x4848e3c         1.0    [19 hex_pair +0xa1]  completion check   test   rax,rax
+0x4848e3f         1.0  Bc=1.0  [19 hex_pair +0xa4]  completion check   je     0x4848ee8
+0x4848e45         1.0    [19 hex_pair +0xaa]  tag test           test   rax,0x1
+0x4848e4b         1.0  Bc=1.0 Bcm=0.1  [19 hex_pair +0xb0]  tag test           jne    0x4848e59
+0x4848e59         1.0  Dr=1.0  [19 hex_pair +0xbe]  heap/vm load       mov    rdx,QWORD PTR [rbx+0x8]
+0x4848e5d         1.0    [19 hex_pair +0xc2]  mov reg-reg        mov    rcx,rax
+0x4848e60         1.0    [19 hex_pair +0xc5]  untag              sar    rcx,1
+0x4848e63         1.0    [19 hex_pair +0xc8]  mov reg-reg        mov    rsi,rax
+0x4848e66         1.0    [19 hex_pair +0xcb]  cmp/test (other)   cmp    rcx,rdx
+0x4848e69         1.0  Bc=1.0  [19 hex_pair +0xce]  jcc (other)        jb     0x4848e92
+0x4848e92         1.0    [19 hex_pair +0xf7]  mov reg-reg        mov    rsi,rbx
+0x4848e95         1.0  Dr=1.0  [19 hex_pair +0xfa]  heap/vm load       mov    rax,QWORD PTR [rsi+0x10]
+0x4848e99         1.0  Dr=1.0  [19 hex_pair +0xfe]  heap/vm load       mov    rax,QWORD PTR [rax+rcx*8]
+0x4848e9d         1.0  Dw=1.0  [19 hex_pair +0x102]  stack store        mov    QWORD PTR [rsp+0x8],rax
+0x4848ea2         1.0    [19 hex_pair +0x107]  lea (stack addr)   lea    rcx,[rsp+0x10]
+0x4848ea7         1.0  Dw=1.0  [19 hex_pair +0x10c]  stack store        mov    QWORD PTR [rsp+0x10],0x0
+0x4848eb0         1.0    [19 hex_pair +0x115]  mov reg-reg        mov    rdx,r14
+0x4848eb3         1.0  Dw=1.0  [19 hex_pair +0x118]  stack store        mov    QWORD PTR [rsp+0x18],rdx
+0x4848eb8         1.0  Dw=1.0  [19 hex_pair +0x11d]  stack store        mov    QWORD PTR [rsp+0x20],0x0
+0x4848ec1         1.0  Dw=1.0  [19 hex_pair +0x126]  stack store        mov    QWORD PTR [rsp+0x28],rax
+0x4848ec6         1.0    [19 hex_pair +0x12b]  mov imm            mov    esi,0x2
+0x4848ecb         1.0    [19 hex_pair +0x130]  mov imm            mov    edx,0x4
+0x4848ed0         1.0    [19 hex_pair +0x135]  mov imm            movabs rax,0x2d3460
+0x4848eda         1.0    [19 hex_pair +0x13f]  mov reg-reg        mov    rdi,r12
+0x4848edd         1.0  Dw=1.0  [19 hex_pair +0x142]  call helper        call   rax
+0x4848edf         1.0    [19 hex_pair +0x144]  completion check   test   rax,rax
+0x4848ee2         1.0  Bc=1.0 Bcm=0.1  [19 hex_pair +0x147]  completion check   jne    0x4848f08
+0x4848f08         1.0  Dr=1.0  [19 hex_pair +0x16d]  frame: epilogue    mov    rbx,QWORD PTR [rsp+0x30]
+0x4848f0d         1.0  Dr=1.0  [19 hex_pair +0x172]  frame: epilogue    mov    r12,QWORD PTR [rsp+0x38]
+0x4848f12         1.0  Dr=1.0  [19 hex_pair +0x177]  frame: epilogue    mov    r13,QWORD PTR [rsp+0x40]
+0x4848f17         1.0  Dr=1.0  [19 hex_pair +0x17c]  frame: epilogue    mov    r14,QWORD PTR [rsp+0x48]
+0x4848f1c         1.0    [19 hex_pair +0x181]  frame: epilogue    add    rsp,0x50
+0x4848f20         1.0    [19 hex_pair +0x185]  frame: epilogue    mov    rsp,rbp
+0x4848f23         1.0  Dr=1.0  [19 hex_pair +0x188]  frame: epilogue    pop    rbp
+0x4848f24         1.0  Dr=1.0  [19 hex_pair +0x189]  frame: epilogue    ret
+0x4849000         1.0  Dw=1.0 I1mr=0.1  [20 esc_bytes +0x0]  frame: prologue    push   rbp
+0x4849001         1.0    [20 esc_bytes +0x1]  frame: prologue    mov    rbp,rsp
+0x4849004         1.0    [20 esc_bytes +0x4]  frame: prologue    sub    rsp,0xb0
+0x484900b         1.0  Dw=1.0  [20 esc_bytes +0xb]  frame: prologue    mov    QWORD PTR [rsp+0x80],rbx
+0x4849013         1.0  Dw=1.0  [20 esc_bytes +0x13]  frame: prologue    mov    QWORD PTR [rsp+0x88],r12
+0x484901b         1.0  Dw=1.0  [20 esc_bytes +0x1b]  frame: prologue    mov    QWORD PTR [rsp+0x90],r13
+0x4849023         1.0  Dw=1.0  [20 esc_bytes +0x23]  frame: prologue    mov    QWORD PTR [rsp+0x98],r14
+0x484902b         1.0  Dw=1.0  [20 esc_bytes +0x2b]  frame: prologue    mov    QWORD PTR [rsp+0xa0],r15
+0x4849033         1.0  Dw=1.0  [20 esc_bytes +0x33]  frame: root-slot zero mov    QWORD PTR [rsp+0x28],0x0
+0x484903c         1.0  Dw=1.0  [20 esc_bytes +0x3c]  stack store        mov    QWORD PTR [rsp],rsi
+0x4849040         1.0  Dw=1.0  [20 esc_bytes +0x40]  stack store        mov    QWORD PTR [rsp+0x8],rdx
+0x4849045         1.0    [20 esc_bytes +0x45]  mov reg-reg        mov    r13,rdx
+0x4849048         1.0  Dw=1.0  [20 esc_bytes +0x48]  stack store        mov    QWORD PTR [rsp+0x10],rcx
+0x484904d         1.0  Dw=1.0  [20 esc_bytes +0x4d]  stack store        mov    QWORD PTR [rsp+0x18],r8
+0x4849052         1.0  Dw=1.0  [20 esc_bytes +0x52]  stack store        mov    QWORD PTR [rsp+0x60],r8
+0x4849057         1.0    [20 esc_bytes +0x57]  lea (stack addr)   lea    rax,[rsp+0x30]
+0x484905c         1.0  Dw=1.0  [20 esc_bytes +0x5c]  stack store        mov    QWORD PTR [rsp+0x70],rax
+0x4849061         1.0  Dw=1.0  [20 esc_bytes +0x61]  stack store        mov    QWORD PTR [rsp+0x68],rcx
+0x4849066         2.0    [20 esc_bytes +0x66]  mov imm            movabs rax,0x2941a0
+0x4849070         2.0    [20 esc_bytes +0x70]  mov reg-reg        mov    rbx,rdi
+0x4849073         2.0    [20 esc_bytes +0x73]  mov reg-reg        mov    r12,rsi
+0x4849076         2.0  Dw=2.0  [20 esc_bytes +0x76]  call helper        call   rax
+0x4849078         2.0    [20 esc_bytes +0x78]  mov reg-reg        mov    r15,r13
+0x484907b         2.0    [20 esc_bytes +0x7b]  mov reg-reg        mov    rcx,r15
+0x484907e         2.0    [20 esc_bytes +0x7e]  logic              and    rcx,rax
+0x4849081         2.0    [20 esc_bytes +0x81]  mov reg-reg        mov    rdx,rax
+0x4849084         2.0    [20 esc_bytes +0x84]  tag test           test   rcx,0x1
+0x484908b         2.0  Bc=2.0 Bcm=2.0  [20 esc_bytes +0x8b]  tag test           jne    0x48490b8
+0x48490b8         2.0    [20 esc_bytes +0xb8]  bool materialize   mov    ecx,0x2
+0x48490bd         2.0    [20 esc_bytes +0xbd]  cmp/test (other)   cmp    r15,rdx
+0x48490c0         2.0  Dr=2.0  [20 esc_bytes +0xc0]  bool materialize   cmovge rcx,QWORD PTR [rip+0x1e0]        # 0x48492a8
+0x48490c8         2.0    [20 esc_bytes +0xc8]  bool test          cmp    rcx,0x6
+0x48490cc         2.0  Bc=2.0 Bcm=0.1  [20 esc_bytes +0xcc]  bool test          je     0x4849269
+0x48490d2         1.0  Dw=1.0  [20 esc_bytes +0xd2]  stack store        mov    QWORD PTR [rsp+0x20],0x3
+0x48490db         1.0    [20 esc_bytes +0xdb]  tag test           test   r15,0x1
+0x48490e2         1.0  Bc=1.0  [20 esc_bytes +0xe2]  tag test           je     0x4849105
+0x48490e8         1.0    [20 esc_bytes +0xe8]  mov reg-reg        mov    rax,r15
+0x48490eb         1.0    [20 esc_bytes +0xeb]  arith              add    rax,0x2
+0x48490ef         1.0    [20 esc_bytes +0xef]  mov reg-reg        mov    rcx,rax
+0x48490f2         1.0    [20 esc_bytes +0xf2]  overflow check     seto   al
+0x48490f5         1.0    [20 esc_bytes +0xf5]  overflow check     test   al,al
+0x48490f7         1.0  Bc=1.0 Bcm=0.1  [20 esc_bytes +0xf7]  overflow check     jne    0x4849105
+0x48490fd         1.0    [20 esc_bytes +0xfd]  mov reg-reg        mov    r14,rcx
+0x4849100         1.0    [20 esc_bytes +0x100]  jmp                jmp    0x4849122
+0x4849122         1.0  Dw=1.0  [20 esc_bytes +0x122]  stack store        mov    QWORD PTR [rsp+0x8],r14
+0x4849127         1.0  Dr=1.0  [20 esc_bytes +0x127]  heap/vm load       mov    rcx,QWORD PTR [rbx+0x10]
+0x484912b         1.0  Dr=1.0  [20 esc_bytes +0x12b]  heap/vm load       mov    r13,QWORD PTR [rcx+0xb8]
+0x4849132         1.0  Dw=1.0  [20 esc_bytes +0x132]  stack store        mov    QWORD PTR [rsp+0x20],r13
+0x4849137         1.0    [20 esc_bytes +0x137]  tag test           test   r15,0x1
+0x484913e         1.0  Bc=1.0  [20 esc_bytes +0x13e]  tag test           je     0x4849158
+0x4849144         1.0  Dr=1.0  [20 esc_bytes +0x144]  heap/vm load       mov    rdi,QWORD PTR [r12+0x8]
+0x4849149         1.0    [20 esc_bytes +0x149]  mov reg-reg        mov    rsi,r15
+0x484914c         1.0    [20 esc_bytes +0x14c]  untag              sar    rsi,1
+0x484914f         1.0    [20 esc_bytes +0x14f]  cmp/test (other)   cmp    rsi,rdi
+0x4849152         1.0  Bc=1.0  [20 esc_bytes +0x152]  jcc (other)        jb     0x484917f
+0x484917f         1.0  Dr=1.0 I1mr=0.1  [20 esc_bytes +0x17f]  heap/vm load       mov    rax,QWORD PTR [r12+0x10]
+0x4849184         1.0  Dr=1.0  [20 esc_bytes +0x184]  heap/vm load       mov    rsi,QWORD PTR [rax+rsi*8]
+0x4849188         1.0  Dw=1.0  [20 esc_bytes +0x188]  stack store        mov    QWORD PTR [rsp+0x28],rsi
+0x484918d         1.0  Dr=1.0  [20 esc_bytes +0x18d]  stack load         mov    r15,QWORD PTR [rsp+0x60]
+0x4849192         1.0    [20 esc_bytes +0x192]  mov reg-reg        mov    rdx,r15
+0x4849195         1.0    [20 esc_bytes +0x195]  mov reg-reg        mov    rdi,rbx
+0x4849198         1.0  Dw=1.0  [20 esc_bytes +0x198]  call botlish       call   0x4848d9b
+0x484919d         1.0    [20 esc_bytes +0x19d]  completion check   test   rax,rax
+0x48491a0         1.0  Bc=1.0  [20 esc_bytes +0x1a0]  completion check   je     0x4849207
+0x48491a6         1.0  Dw=1.0  [20 esc_bytes +0x1a6]  stack store        mov    QWORD PTR [rsp+0x28],rax
+0x48491ab         1.0    [20 esc_bytes +0x1ab]  mov reg-reg        mov    rcx,rax
+0x48491ae         1.0  Dw=1.0  [20 esc_bytes +0x1ae]  stack store        mov    QWORD PTR [rsp+0x30],0x0
+0x48491b7         1.0  Dr=1.0  [20 esc_bytes +0x1b7]  stack load         mov    rax,QWORD PTR [rsp+0x68]
+0x48491bc         1.0  Dw=1.0 I1mr=0.1  [20 esc_bytes +0x1bc]  stack store        mov    QWORD PTR [rsp+0x38],rax
+0x48491c1         1.0  Dw=1.0  [20 esc_bytes +0x1c1]  stack store        mov    QWORD PTR [rsp+0x40],0x0
+0x48491ca         1.0  Dw=1.0  [20 esc_bytes +0x1ca]  stack store        mov    QWORD PTR [rsp+0x48],r13
+0x48491cf         1.0  Dw=1.0  [20 esc_bytes +0x1cf]  stack store        mov    QWORD PTR [rsp+0x50],0x0
+0x48491d8         1.0    [20 esc_bytes +0x1d8]  mov reg-reg        mov    rax,rcx
+0x48491db         1.0  Dw=1.0  [20 esc_bytes +0x1db]  stack store        mov    QWORD PTR [rsp+0x58],rax
+0x48491e0         1.0    [20 esc_bytes +0x1e0]  mov imm            mov    esi,0x2
+0x48491e5         1.0    [20 esc_bytes +0x1e5]  mov imm            mov    edx,0x6
+0x48491ea         1.0    [20 esc_bytes +0x1ea]  mov imm            movabs rax,0x2d3460
+0x48491f4         1.0  Dr=1.0  [20 esc_bytes +0x1f4]  stack load         mov    rcx,QWORD PTR [rsp+0x70]
+0x48491f9         1.0    [20 esc_bytes +0x1f9]  mov reg-reg        mov    rdi,rbx
+0x48491fc         1.0  Dw=1.0  [20 esc_bytes +0x1fc]  call helper        call   rax
+0x48491fe         1.0  I1mr=0.1  [20 esc_bytes +0x1fe]  completion check   test   rax,rax
+0x4849201         1.0  Bc=1.0 Bcm=0.1  [20 esc_bytes +0x201]  completion check   jne    0x484923e
+0x484923e         1.0  Dw=1.0  [20 esc_bytes +0x23e]  stack store        mov    QWORD PTR [rsp],r12
+0x4849242         1.0  Dw=1.0  [20 esc_bytes +0x242]  stack store        mov    QWORD PTR [rsp+0x8],r14
+0x4849247         1.0  Dw=1.0  [20 esc_bytes +0x247]  stack store        mov    QWORD PTR [rsp+0x10],rax
+0x484924c         1.0  Dw=1.0  [20 esc_bytes +0x24c]  stack store        mov    QWORD PTR [rsp+0x18],r15
+0x4849251         1.0    [20 esc_bytes +0x251]  mov reg-reg        mov    rsi,r12
+0x4849254         1.0    [20 esc_bytes +0x254]  mov reg-reg        mov    rdi,rbx
+0x4849257         1.0    [20 esc_bytes +0x257]  mov reg-reg        mov    r13,r14
+0x484925a         1.0  Dw=1.0  [20 esc_bytes +0x25a]  stack store        mov    QWORD PTR [rsp+0x60],r15
+0x484925f         1.0  Dw=1.0  [20 esc_bytes +0x25f]  stack store        mov    QWORD PTR [rsp+0x68],rax
+0x4849264         1.0    [20 esc_bytes +0x264]  jmp                jmp    0x4849066
+0x4849269         1.0  Dr=1.0  [20 esc_bytes +0x269]  stack load         mov    rax,QWORD PTR [rsp+0x68]
+0x484926e         1.0  Dr=1.0  [20 esc_bytes +0x26e]  frame: epilogue    mov    rbx,QWORD PTR [rsp+0x80]
+0x4849276         1.0  Dr=1.0  [20 esc_bytes +0x276]  frame: epilogue    mov    r12,QWORD PTR [rsp+0x88]
+0x484927e         1.0  Dr=1.0  [20 esc_bytes +0x27e]  frame: epilogue    mov    r13,QWORD PTR [rsp+0x90]
+0x4849286         1.0  Dr=1.0  [20 esc_bytes +0x286]  frame: epilogue    mov    r14,QWORD PTR [rsp+0x98]
+0x484928e         1.0  Dr=1.0  [20 esc_bytes +0x28e]  frame: epilogue    mov    r15,QWORD PTR [rsp+0xa0]
+0x4849296         1.0    [20 esc_bytes +0x296]  frame: epilogue    add    rsp,0xb0
+0x484929d         1.0    [20 esc_bytes +0x29d]  frame: epilogue    mov    rsp,rbp
+0x48492a0         1.0  Dr=1.0  [20 esc_bytes +0x2a0]  frame: epilogue    pop    rbp
+0x48492a1         1.0  Dr=1.0  [20 esc_bytes +0x2a1]  frame: epilogue    ret
+0x48492f6         3.0  Dw=3.0  [21 esc_char +0x0]  frame: prologue    push   rbp
+0x48492f7         3.0    [21 esc_char +0x1]  frame: prologue    mov    rbp,rsp
+0x48492fa         3.0    [21 esc_char +0x4]  frame: prologue    sub    rsp,0x50
+0x48492fe         3.0  Dw=3.0  [21 esc_char +0x8]  frame: prologue    mov    QWORD PTR [rsp+0x20],rbx
+0x4849303         3.0  Dw=3.0  [21 esc_char +0xd]  frame: prologue    mov    QWORD PTR [rsp+0x28],r12
+0x4849308         3.0  Dw=3.0  [21 esc_char +0x12]  frame: prologue    mov    QWORD PTR [rsp+0x30],r13
+0x484930d         3.0  Dw=3.0  [21 esc_char +0x17]  frame: prologue    mov    QWORD PTR [rsp+0x38],r14
+0x4849312         3.0  Dw=3.0  [21 esc_char +0x1c]  frame: prologue    mov    QWORD PTR [rsp+0x40],r15
+0x4849317         3.0    [21 esc_char +0x21]  mov reg-reg        mov    r12,rdi
+0x484931a         3.0  Dw=3.0  [21 esc_char +0x24]  stack store        mov    QWORD PTR [rsp+0x18],0x0
+0x4849323         3.0  Dw=3.0  [21 esc_char +0x2d]  stack store        mov    QWORD PTR [rsp],rsi
+0x4849327         3.0    [21 esc_char +0x31]  mov reg-reg        mov    r14,rsi
+0x484932a         3.0  Dw=3.0  [21 esc_char +0x34]  stack store        mov    QWORD PTR [rsp+0x8],rdx
+0x484932f         3.0    [21 esc_char +0x39]  mov reg-reg        mov    r15,rdx
+0x4849332         3.0  Dw=3.0  [21 esc_char +0x3c]  stack store        mov    QWORD PTR [rsp+0x10],rcx
+0x4849337         3.0    [21 esc_char +0x41]  mov reg-reg        mov    rbx,rcx
+0x484933a         3.0    [21 esc_char +0x44]  mov imm            movabs rax,0x297550
+0x4849344         3.0    [21 esc_char +0x4e]  mov reg-reg        mov    rsi,r14
+0x4849347         3.0    [21 esc_char +0x51]  mov reg-reg        mov    rdi,r12
+0x484934a         3.0  Dw=3.0  [21 esc_char +0x54]  call helper        call   rax
+0x484934c         3.0    [21 esc_char +0x56]  mov reg-reg        mov    rcx,rax
+0x484934f         3.0    [21 esc_char +0x59]  mov reg-reg        mov    r13,rax
+0x4849352         3.0    [21 esc_char +0x5c]  cmp/test (other)   test   rax,rcx
+0x4849355         3.0  Bc=3.0 Bcm=2.0  [21 esc_char +0x5f]  jcc (other)        je     0x484944d
+0x484935b         3.0    [21 esc_char +0x65]  mov reg-reg        mov    rax,r13
+0x484935e         3.0  Dw=3.0  [21 esc_char +0x68]  stack store        mov    QWORD PTR [rsp],rax
+0x4849362         3.0    [21 esc_char +0x6c]  mov imm            movabs rax,0x2941a0
+0x484936c         3.0    [21 esc_char +0x76]  mov reg-reg        mov    rsi,r13
+0x484936f         3.0    [21 esc_char +0x79]  mov reg-reg        mov    rdi,r12
+0x4849372         3.0  Dw=3.0  [21 esc_char +0x7c]  call helper        call   rax
+0x4849374         3.0    [21 esc_char +0x7e]  untag              sar    rax,1
+0x4849377         3.0    [21 esc_char +0x81]  cmp/test (other)   cmp    rax,0x1
+0x484937b         3.0  Bc=3.0  [21 esc_char +0x85]  jcc (other)        je     0x48493bb
+0x48493bb         3.0    [21 esc_char +0xc5]  mov reg-reg        mov    rsi,r13
+0x48493be         3.0  Dr=3.0  [21 esc_char +0xc8]  heap/vm load       mov    rax,QWORD PTR [rsi+0x8]
+0x48493c2         3.0    [21 esc_char +0xcc]  mov reg-reg        mov    r13,rsi
+0x48493c5         3.0    [21 esc_char +0xcf]  cmp/test (other)   test   rax,rax
+0x48493c8         3.0  Bc=3.0  [21 esc_char +0xd2]  jcc (other)        jne    0x48493f9
+0x48493f9         3.0    [21 esc_char +0x103]  mov reg-reg        mov    rsi,r13
+0x48493fc         3.0  Dr=3.0  [21 esc_char +0x106]  heap/vm load       mov    rax,QWORD PTR [rsi+0x10]
+0x4849400         3.0  Dr=3.0 I1mr=0.1  [21 esc_char +0x10a]  heap/vm load       mov    rdx,QWORD PTR [rax]
+0x4849403         3.0    [21 esc_char +0x10d]  mov reg-reg        mov    rsi,r15
+0x4849406         3.0    [21 esc_char +0x110]  mov reg-reg        mov    rdi,r12
+0x4849409         3.0  Dw=3.0  [21 esc_char +0x113]  call botlish       call   0x4848c1c
+0x484940e         3.0    [21 esc_char +0x118]  bool test          cmp    rax,0x6
+0x4849412         3.0  Bc=3.0  [21 esc_char +0x11c]  bool test          je     0x4849475
+0x4849418         1.0    [21 esc_char +0x122]  mov imm            mov    edx,0x1
+0x484941d         1.0  Dw=1.0  [21 esc_char +0x127]  stack store        mov    QWORD PTR [rsp+0x8],0x1
+0x4849426         1.0    [21 esc_char +0x130]  mov reg-reg        mov    rdi,r12
+0x4849429         1.0  Dr=1.0  [21 esc_char +0x133]  heap/vm load       mov    rax,QWORD PTR [rdi+0x10]
+0x484942d         1.0  Dr=1.0  [21 esc_char +0x137]  heap/vm load       mov    rcx,QWORD PTR [rax+0xd0]
+0x4849434         1.0  Dw=1.0  [21 esc_char +0x13e]  stack store        mov    QWORD PTR [rsp+0x18],rcx
+0x4849439         1.0    [21 esc_char +0x143]  mov reg-reg        mov    rsi,r13
+0x484943c         1.0    [21 esc_char +0x146]  mov reg-reg        mov    r8,rbx
+0x484943f         1.0  Dw=1.0  [21 esc_char +0x149]  call botlish       call   0x4849000
+0x4849444         1.0    [21 esc_char +0x14e]  completion check   test   rax,rax
+0x4849447         1.0  Bc=1.0  [21 esc_char +0x151]  completion check   jne    0x4849472
+0x4849472         1.0    [21 esc_char +0x17c]  mov reg-reg        mov    r14,rax
+0x4849475         3.0  I1mr=0.1  [21 esc_char +0x17f]  mov reg-reg        mov    rax,r14
+0x4849478         3.0  Dr=3.0  [21 esc_char +0x182]  frame: epilogue    mov    rbx,QWORD PTR [rsp+0x20]
+0x484947d         3.0  Dr=3.0 I1mr=1.0  [21 esc_char +0x187]  frame: epilogue    mov    r12,QWORD PTR [rsp+0x28]
+0x4849482         3.0  Dr=3.0  [21 esc_char +0x18c]  frame: epilogue    mov    r13,QWORD PTR [rsp+0x30]
+0x4849487         3.0  Dr=3.0  [21 esc_char +0x191]  frame: epilogue    mov    r14,QWORD PTR [rsp+0x38]
+0x484948c         3.0  Dr=3.0  [21 esc_char +0x196]  frame: epilogue    mov    r15,QWORD PTR [rsp+0x40]
+0x4849491         3.0    [21 esc_char +0x19b]  frame: epilogue    add    rsp,0x50
+0x4849495         3.0    [21 esc_char +0x19f]  frame: epilogue    mov    rsp,rbp
+0x4849498         3.0  Dr=3.0  [21 esc_char +0x1a2]  frame: epilogue    pop    rbp
+0x4849499         3.0  Dr=3.0  [21 esc_char +0x1a3]  frame: epilogue    ret
+0x48494e0         1.0  Dw=1.0 I1mr=0.1  [22 esc_from +0x0]  frame: prologue    push   rbp
+0x48494e1         1.0    [22 esc_from +0x1]  frame: prologue    mov    rbp,rsp
+0x48494e4         1.0    [22 esc_from +0x4]  frame: prologue    sub    rsp,0xb0
+0x48494eb         1.0  Dw=1.0  [22 esc_from +0xb]  frame: prologue    mov    QWORD PTR [rsp+0x80],rbx
+0x48494f3         1.0  Dw=1.0  [22 esc_from +0x13]  frame: prologue    mov    QWORD PTR [rsp+0x88],r12
+0x48494fb         1.0  Dw=1.0 I1mr=0.1  [22 esc_from +0x1b]  frame: prologue    mov    QWORD PTR [rsp+0x90],r13
+0x4849503         1.0  Dw=1.0  [22 esc_from +0x23]  frame: prologue    mov    QWORD PTR [rsp+0x98],r14
+0x484950b         1.0  Dw=1.0  [22 esc_from +0x2b]  frame: prologue    mov    QWORD PTR [rsp+0xa0],r15
+0x4849513         1.0    [22 esc_from +0x33]  mov reg-reg        mov    r14,rdi
+0x4849516         1.0  Dw=1.0  [22 esc_from +0x36]  stack store        mov    QWORD PTR [rsp+0x28],0x0
+0x484951f         1.0  Dw=1.0  [22 esc_from +0x3f]  stack store        mov    QWORD PTR [rsp+0x30],0x0
+0x4849528         1.0  Dw=1.0  [22 esc_from +0x48]  stack store        mov    QWORD PTR [rsp],rsi
+0x484952c         1.0  Dw=1.0  [22 esc_from +0x4c]  stack store        mov    QWORD PTR [rsp+0x8],rdx
+0x4849531         1.0    [22 esc_from +0x51]  mov reg-reg        mov    r12,rdx
+0x4849534         1.0  Dw=1.0  [22 esc_from +0x54]  stack store        mov    QWORD PTR [rsp+0x10],rcx
+0x4849539         1.0  Dw=1.0  [22 esc_from +0x59]  stack store        mov    QWORD PTR [rsp+0x68],rcx
+0x484953e         1.0  Dw=1.0  [22 esc_from +0x5e]  stack store        mov    QWORD PTR [rsp+0x18],r8
+0x4849543         1.0    [22 esc_from +0x63]  mov reg-reg        mov    r15,r8
+0x4849546         1.0  Dw=1.0  [22 esc_from +0x66]  stack store        mov    QWORD PTR [rsp+0x20],r9
+0x484954b         1.0    [22 esc_from +0x6b]  mov reg-reg        mov    r13,r9
+0x484954e         4.0    [22 esc_from +0x6e]  mov imm            xor    eax,eax
+0x4849550         4.0    [22 esc_from +0x70]  cmp/test (other)   test   rsi,0x7
+0x4849557         4.0  Bc=4.0  [22 esc_from +0x77]  jcc (other)        jne    0x4849568
+0x484955d         4.0  Dr=4.0  [22 esc_from +0x7d]  heap/vm load       movzx  rdi,BYTE PTR [rsi]
+0x4849561         4.0    [22 esc_from +0x81]  cmp/test (other)   cmp    dil,0x2
+0x4849565         4.0    [22 esc_from +0x85]  setcc/cmov (other) sete   al
+0x4849568         4.0    [22 esc_from +0x88]  cmp/test (other)   test   al,al
+0x484956a         4.0  Bc=4.0 Bcm=0.1  [22 esc_from +0x8a]  jcc (other)        jne    0x4849595
+0x4849595         4.0    [22 esc_from +0xb5]  mov imm            movabs r9,0x2941a0
+0x484959f         4.0    [22 esc_from +0xbf]  mov reg-reg        mov    rbx,rsi
+0x48495a2         4.0    [22 esc_from +0xc2]  mov reg-reg        mov    rdi,r14
+0x48495a5         4.0  Dw=4.0  [22 esc_from +0xc5]  call helper        call   r9
+0x48495a8         4.0    [22 esc_from +0xc8]  mov reg-reg        mov    r9,r12
+0x48495ab         4.0    [22 esc_from +0xcb]  logic              and    r9,rax
+0x48495ae         4.0    [22 esc_from +0xce]  mov reg-reg        mov    rdx,rax
+0x48495b1         4.0    [22 esc_from +0xd1]  tag test           test   r9,0x1
+0x48495b8         4.0  Bc=4.0 Bcm=0.1  [22 esc_from +0xd8]  tag test           jne    0x48495e6
+0x48495e6         4.0    [22 esc_from +0x106]  bool materialize   mov    ecx,0x2
+0x48495eb         4.0    [22 esc_from +0x10b]  cmp/test (other)   cmp    r12,rdx
+0x48495ee         4.0  Dr=4.0  [22 esc_from +0x10e]  bool materialize   cmovge rcx,QWORD PTR [rip+0x1fa]        # 0x48497f0
+0x48495f6         4.0    [22 esc_from +0x116]  bool test          cmp    rcx,0x6
+0x48495fa         4.0  Bc=4.0 Bcm=2.0  [22 esc_from +0x11a]  bool test          je     0x4849747
+0x4849600         3.0  Dw=3.0 I1mr=1.0  [22 esc_from +0x120]  stack store        mov    QWORD PTR [rsp+0x28],0x3
+0x4849609         3.0    [22 esc_from +0x129]  tag test           test   r12,0x1
+0x4849610         3.0  Bc=3.0  [22 esc_from +0x130]  tag test           je     0x4849628
+0x4849616         3.0    [22 esc_from +0x136]  mov reg-reg        mov    rax,r12
+0x4849619         3.0    [22 esc_from +0x139]  arith              add    rax,0x2
+0x484961d         3.0    [22 esc_from +0x13d]  overflow check     seto   cl
+0x4849620         3.0    [22 esc_from +0x140]  overflow check     test   cl,cl
+0x4849622         3.0  Bc=3.0  [22 esc_from +0x142]  overflow check     je     0x484963f
+0x484963f         3.0  Dw=3.0 I1mr=1.0  [22 esc_from +0x15f]  stack store        mov    QWORD PTR [rsp+0x28],rax
+0x4849644         3.0  Dw=3.0  [22 esc_from +0x164]  stack store        mov    QWORD PTR [rsp+0x70],rax
+0x4849649         3.0  Dw=3.0  [22 esc_from +0x169]  stack store        mov    QWORD PTR [rsp+0x30],0x3
+0x4849652         3.0    [22 esc_from +0x172]  tag test           test   r12,0x1
+0x4849659         3.0  Bc=3.0  [22 esc_from +0x179]  tag test           je     0x4849671
+0x484965f         3.0    [22 esc_from +0x17f]  mov reg-reg        mov    rcx,r12
+0x4849662         3.0    [22 esc_from +0x182]  arith              add    rcx,0x2
+0x4849666         3.0    [22 esc_from +0x186]  overflow check     seto   al
+0x4849669         3.0    [22 esc_from +0x189]  overflow check     test   al,al
+0x484966b         3.0  Bc=3.0  [22 esc_from +0x18b]  overflow check     je     0x484968b
+0x484968b         3.0  Dw=3.0 I1mr=1.0  [22 esc_from +0x1ab]  stack store        mov    QWORD PTR [rsp+0x30],rcx
+0x4849690         3.0    [22 esc_from +0x1b0]  mov imm            movabs rax,0x29a8b0
+0x484969a         3.0    [22 esc_from +0x1ba]  mov reg-reg        mov    rdx,r12
+0x484969d         3.0    [22 esc_from +0x1bd]  mov reg-reg        mov    rsi,rbx
+0x48496a0         3.0    [22 esc_from +0x1c0]  mov reg-reg        mov    rdi,r14
+0x48496a3         3.0  Dw=3.0  [22 esc_from +0x1c3]  call helper        call   rax
+0x48496a5         3.0    [22 esc_from +0x1c5]  completion check   test   rax,rax
+0x48496a8         3.0  Bc=3.0  [22 esc_from +0x1c8]  completion check   je     0x484977f
+0x48496ae         3.0  Dw=3.0  [22 esc_from +0x1ce]  stack store        mov    QWORD PTR [rsp+0x8],rax
+0x48496b3         3.0    [22 esc_from +0x1d3]  mov reg-reg        mov    rsi,rax
+0x48496b6         3.0    [22 esc_from +0x1d6]  mov reg-reg        mov    rcx,r13
+0x48496b9         3.0    [22 esc_from +0x1d9]  mov reg-reg        mov    rdx,r15
+0x48496bc         3.0    [22 esc_from +0x1dc]  mov reg-reg        mov    rdi,r14
+0x48496bf         3.0  Dw=3.0 I1mr=0.9  [22 esc_from +0x1df]  call botlish       call   0x48492f6
+0x48496c4         3.0    [22 esc_from +0x1e4]  completion check   test   rax,rax
+0x48496c7         3.0  Bc=3.0  [22 esc_from +0x1e7]  completion check   je     0x484977f
+0x48496cd         3.0  Dw=3.0  [22 esc_from +0x1ed]  stack store        mov    QWORD PTR [rsp+0x8],rax
+0x48496d2         3.0    [22 esc_from +0x1f2]  lea (stack addr)   lea    rcx,[rsp+0x48]
+0x48496d7         3.0  Dw=3.0  [22 esc_from +0x1f7]  stack store        mov    QWORD PTR [rsp+0x48],0x0
+0x48496e0         3.0  Dr=3.0  [22 esc_from +0x200]  stack load         mov    rdx,QWORD PTR [rsp+0x68]
+0x48496e5         3.0  Dw=3.0  [22 esc_from +0x205]  stack store        mov    QWORD PTR [rsp+0x50],rdx
+0x48496ea         3.0  Dw=3.0  [22 esc_from +0x20a]  stack store        mov    QWORD PTR [rsp+0x58],0x0
+0x48496f3         3.0  Dw=3.0  [22 esc_from +0x213]  stack store        mov    QWORD PTR [rsp+0x60],rax
+0x48496f8         3.0    [22 esc_from +0x218]  mov imm            mov    esi,0x2
+0x48496fd         3.0    [22 esc_from +0x21d]  mov imm            mov    edx,0x4
+0x4849702         3.0    [22 esc_from +0x222]  mov imm            movabs rax,0x2d3460
+0x484970c         3.0    [22 esc_from +0x22c]  mov reg-reg        mov    rdi,r14
+0x484970f         3.0  Dw=3.0  [22 esc_from +0x22f]  call helper        call   rax
+0x4849711         3.0    [22 esc_from +0x231]  completion check   test   rax,rax
+0x4849714         3.0  Bc=3.0  [22 esc_from +0x234]  completion check   je     0x484977f
+0x484971a         3.0  Dw=3.0  [22 esc_from +0x23a]  stack store        mov    QWORD PTR [rsp],rbx
+0x484971e         3.0  Dr=3.0  [22 esc_from +0x23e]  stack load         mov    rcx,QWORD PTR [rsp+0x70]
+0x4849723         3.0  Dw=3.0  [22 esc_from +0x243]  stack store        mov    QWORD PTR [rsp+0x8],rcx
+0x4849728         3.0  Dw=3.0  [22 esc_from +0x248]  stack store        mov    QWORD PTR [rsp+0x10],rax
+0x484972d         3.0  Dw=3.0  [22 esc_from +0x24d]  stack store        mov    QWORD PTR [rsp+0x18],r15
+0x4849732         3.0  Dw=3.0  [22 esc_from +0x252]  stack store        mov    QWORD PTR [rsp+0x20],r13
+0x4849737         3.0    [22 esc_from +0x257]  mov reg-reg        mov    rsi,rbx
+0x484973a         3.0    [22 esc_from +0x25a]  mov reg-reg        mov    r12,rcx
+0x484973d         3.0  Dw=3.0  [22 esc_from +0x25d]  stack store        mov    QWORD PTR [rsp+0x68],rax
+0x4849742         3.0    [22 esc_from +0x262]  jmp                jmp    0x484954e
+0x4849747         1.0  Dr=1.0  [22 esc_from +0x267]  stack load         mov    rdx,QWORD PTR [rsp+0x68]
+0x484974c         1.0    [22 esc_from +0x26c]  mov imm            xor    rsi,rsi
+0x484974f         1.0    [22 esc_from +0x26f]  lea (stack addr)   lea    rcx,[rsp+0x38]
+0x4849754         1.0  Dw=1.0  [22 esc_from +0x274]  stack store        mov    QWORD PTR [rsp+0x38],0x0
+0x484975d         1.0  Dw=1.0  [22 esc_from +0x27d]  stack store        mov    QWORD PTR [rsp+0x40],rdx
+0x4849762         1.0    [22 esc_from +0x282]  mov imm            mov    edx,0x2
+0x4849767         1.0    [22 esc_from +0x287]  mov imm            movabs rax,0x2d3460
+0x4849771         1.0    [22 esc_from +0x291]  mov reg-reg        mov    rdi,r14
+0x4849774         1.0  Dw=1.0  [22 esc_from +0x294]  call helper        call   rax
+0x4849776         1.0    [22 esc_from +0x296]  completion check   test   rax,rax
+0x4849779         1.0  Bc=1.0  [22 esc_from +0x299]  completion check   jne    0x48497b6
+0x48497b6         1.0  Dr=1.0  [22 esc_from +0x2d6]  frame: epilogue    mov    rbx,QWORD PTR [rsp+0x80]
+0x48497be         1.0  Dr=1.0  [22 esc_from +0x2de]  frame: epilogue    mov    r12,QWORD PTR [rsp+0x88]
+0x48497c6         1.0  Dr=1.0  [22 esc_from +0x2e6]  frame: epilogue    mov    r13,QWORD PTR [rsp+0x90]
+0x48497ce         1.0  Dr=1.0  [22 esc_from +0x2ee]  frame: epilogue    mov    r14,QWORD PTR [rsp+0x98]
+0x48497d6         1.0  Dr=1.0  [22 esc_from +0x2f6]  frame: epilogue    mov    r15,QWORD PTR [rsp+0xa0]
+0x48497de         1.0    [22 esc_from +0x2fe]  frame: epilogue    add    rsp,0xb0
+0x48497e5         1.0    [22 esc_from +0x305]  frame: epilogue    mov    rsp,rbp
+0x48497e8         1.0  Dr=1.0  [22 esc_from +0x308]  frame: epilogue    pop    rbp
+0x48497e9         1.0  Dr=1.0  [22 esc_from +0x309]  frame: epilogue    ret
+0x484981c         2.0  Dw=2.0  [23 check +0x0]  frame: prologue    push   rbp
+0x484981d         2.0    [23 check +0x1]  frame: prologue    mov    rbp,rsp
+0x4849820         2.0    [23 check +0x4]  frame: prologue    sub    rsp,0x50
+0x4849824         2.0  Dw=2.0  [23 check +0x8]  frame: prologue    mov    QWORD PTR [rsp+0x20],rbx
+0x4849829         2.0  Dw=2.0  [23 check +0xd]  frame: prologue    mov    QWORD PTR [rsp+0x28],r12
+0x484982e         2.0  Dw=2.0  [23 check +0x12]  frame: prologue    mov    QWORD PTR [rsp+0x30],r13
+0x4849833         2.0  Dw=2.0  [23 check +0x17]  frame: prologue    mov    QWORD PTR [rsp+0x38],r14
+0x4849838         2.0  Dw=2.0  [23 check +0x1c]  frame: prologue    mov    QWORD PTR [rsp+0x40],r15
+0x484983d         2.0    [23 check +0x21]  mov reg-reg        mov    r14,rdi
+0x4849840         2.0  Dw=2.0  [23 check +0x24]  stack store        mov    QWORD PTR [rsp+0x18],0x0
+0x4849849         2.0  Dw=2.0  [23 check +0x2d]  stack store        mov    QWORD PTR [rsp],rdx
+0x484984d         2.0  Dw=2.0  [23 check +0x31]  stack store        mov    QWORD PTR [rsp+0x8],rcx
+0x4849852         2.0  Dw=2.0  [23 check +0x36]  stack store        mov    QWORD PTR [rsp+0x10],r8
+0x4849857         2.0    [23 check +0x3b]  mov reg-reg        mov    r13,r8
+0x484985a         2.0    [23 check +0x3e]  untag              sar    rsi,1
+0x484985d         2.0    [23 check +0x41]  mov reg-reg        mov    r12,rsi
+0x4849860         2.0    [23 check +0x44]  mov reg-reg        mov    r15,rdx
+0x4849863       802.0    [23 check +0x47]  cmp/test (other)   test   r12,r12
+0x4849866       802.0  Bc=802.0 Bcm=2.0  [23 check +0x4a]  jcc (other)        jle    0x484992f
+0x484986c       800.0    [23 check +0x50]  mov reg-reg        mov    rbx,rcx
+0x484986f       800.0    [23 check +0x53]  mov reg-reg        mov    rsi,rbx
+0x4849872       800.0    [23 check +0x56]  mov reg-reg        mov    rdi,r14
+0x4849875       800.0  Dw=800.0  [23 check +0x59]  call botlish       call   0x4847a30
+0x484987a       800.0    [23 check +0x5e]  completion check   test   rax,rax
+0x484987d       800.0  I1mr=1.0 Bc=800.0  [23 check +0x61]  completion check   jne    0x48498a8
+0x48498a8       800.0    [23 check +0x8c]  bool test          cmp    rax,0x6
+0x48498ac       800.0  Bc=800.0  [23 check +0x90]  bool test          je     0x48498c8
+0x48498b2       400.0    [23 check +0x96]  mov imm            mov    edx,0x1
+0x48498b7       400.0  Dw=400.0  [23 check +0x9b]  stack store        mov    QWORD PTR [rsp+0x18],0x1
+0x48498c0       400.0    [23 check +0xa4]  mov reg-reg        mov    rsi,r15
+0x48498c3       400.0    [23 check +0xa7]  jmp                jmp    0x48498d9
+0x48498c8       400.0  I1mr=1.0  [23 check +0xac]  mov imm            mov    edx,0x3
+0x48498cd       400.0  Dw=400.0  [23 check +0xb1]  stack store        mov    QWORD PTR [rsp+0x18],0x3
+0x48498d6       400.0    [23 check +0xba]  mov reg-reg        mov    rsi,r15
+0x48498d9       800.0    [23 check +0xbd]  mov reg-reg        mov    rax,rsi
+0x48498dc       800.0    [23 check +0xc0]  tag test           and    rax,rdx
+0x48498df       800.0    [23 check +0xc3]  tag test           test   rax,0x1
+0x48498e5       800.0  Bc=800.0  [23 check +0xc9]  tag test           je     0x4849900
+0x48498eb       800.0    [23 check +0xcf]  lea                lea    rcx,[rdx-0x1]
+0x48498ef       800.0    [23 check +0xd3]  mov reg-reg        mov    rax,rsi
+0x48498f2       800.0    [23 check +0xd6]  arith              add    rax,rcx
+0x48498f5       800.0    [23 check +0xd9]  overflow check     seto   cl
+0x48498f8       800.0    [23 check +0xdc]  overflow check     test   cl,cl
+0x48498fa       800.0  Bc=800.0  [23 check +0xde]  overflow check     je     0x484990f
+0x484990f       800.0  Dw=800.0 I1mr=1.0  [23 check +0xf3]  stack store        mov    QWORD PTR [rsp],rax
+0x4849913       800.0  Dw=800.0  [23 check +0xf7]  stack store        mov    QWORD PTR [rsp+0x8],rbx
+0x4849918       800.0    [23 check +0xfc]  mov reg-reg        mov    r8,r13
+0x484991b       800.0  Dw=800.0  [23 check +0xff]  stack store        mov    QWORD PTR [rsp+0x10],r8
+0x4849920       800.0    [23 check +0x104]  arith              sub    r12,0x1
+0x4849924       800.0    [23 check +0x108]  mov reg-reg        mov    rcx,rbx
+0x4849927       800.0    [23 check +0x10b]  mov reg-reg        mov    r15,rax
+0x484992a       800.0    [23 check +0x10e]  jmp                jmp    0x4849863
+0x484992f         2.0    [23 check +0x113]  mov reg-reg        mov    rax,r15
+0x4849932         2.0  Dr=2.0  [23 check +0x116]  frame: epilogue    mov    rbx,QWORD PTR [rsp+0x20]
+0x4849937         2.0  Dr=2.0  [23 check +0x11b]  frame: epilogue    mov    r12,QWORD PTR [rsp+0x28]
+0x484993c         2.0  Dr=2.0 I1mr=1.0  [23 check +0x120]  frame: epilogue    mov    r13,QWORD PTR [rsp+0x30]
+0x4849941         2.0  Dr=2.0  [23 check +0x125]  frame: epilogue    mov    r14,QWORD PTR [rsp+0x38]
+0x4849946         2.0  Dr=2.0  [23 check +0x12a]  frame: epilogue    mov    r15,QWORD PTR [rsp+0x40]
+0x484994b         2.0    [23 check +0x12f]  frame: epilogue    add    rsp,0x50
+0x484994f         2.0    [23 check +0x133]  frame: epilogue    mov    rsp,rbp
+0x4849952         2.0  Dr=2.0  [23 check +0x136]  frame: epilogue    pop    rbp
+0x4849953         2.0  Dr=2.0  [23 check +0x137]  frame: epilogue    ret
