@@ -2,10 +2,10 @@ source:  bench/refined-checks.ir
 backend: Cranelift (specialize=1)
 asm:     refined-checks.asm
 vcode:   refined-checks.vcode
-machine-code bytes: 9490 (per function: 1172 39 289 617 74 74 74 125 125 961 262 222 272 252 552 468 660 155 125 103 453 758 486 828 344)
+machine-code bytes: 10027 (per function: 1588 39 289 617 74 74 74 125 125 833 262 222 272 249 552 468 660 155 125 103 453 750 486 828 604)
 
 functions:
-  0 <program entry>: nir-regs=40
+  0 <program entry>: nir-regs=48
   1 char::codepoint<UnicodeChar>: nir-regs=2
   2 byte::from_int<int>: nir-regs=8
   3 byte::set<List[UnicodeChar]>: nir-regs=17
@@ -14,7 +14,7 @@ functions:
   6 ascii::is_lower<int>: nir-regs=13
   7 ascii::is_alphabetic<int>: nir-regs=8
   8 ascii::is_alphanumeric<int>: nir-regs=8
-  9 web::is_emailish<str>: nir-regs=33
+  9 web::is_emailish<generic>: nir-regs=27
   10 char_at<generic>: nir-regs=6
   11 char_at<generic>: nir-regs=6
   12 is_local_char<generic>: nir-regs=9
@@ -29,19 +29,19 @@ functions:
   21 esc_bytes<generic>: nir-regs=14
   22 esc_char<generic>: nir-regs=23
   23 esc_from<generic>: nir-regs=18
-  24 check<int, int, str, str>: nir-regs=20
+  24 check<generic>: nir-regs=21
 
 GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
   function 0 "<program>"
-    NIR regs: 40
+    NIR regs: 48
     raw regs: 4
-    managed-capable regs: 36
+    managed-capable regs: 44
     effects: may_error=true may_gc=true
-    safepoints: 9
-    root candidates: 35
-    max live roots: 16
-    shadow slots: 16
-    entry zero slots: 0
+    safepoints: 12
+    root candidates: 43
+    max live roots: 17
+    shadow slots: 17
+    entry zero slots: 12
     depth reservation: no
     storage: native frame
   
@@ -150,15 +150,15 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 9 "web::is_emailish"
-    NIR regs: 33
+    NIR regs: 27
     raw regs: 3
-    managed-capable regs: 30
+    managed-capable regs: 24
     effects: may_error=true may_gc=true
-    safepoints: 7
-    root candidates: 14
-    max live roots: 7
-    shadow slots: 7
-    entry zero slots: 0
+    safepoints: 5
+    root candidates: 8
+    max live roots: 4
+    shadow slots: 4
+    entry zero slots: 1
     depth reservation: no
     storage: native frame
   
@@ -345,22 +345,22 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 24 "check"
-    NIR regs: 20
-    raw regs: 6
-    managed-capable regs: 14
+    NIR regs: 21
+    raw regs: 4
+    managed-capable regs: 17
     effects: may_error=true may_gc=true
-    safepoints: 2
-    root candidates: 4
-    max live roots: 4
-    shadow slots: 4
-    entry zero slots: 1
+    safepoints: 3
+    root candidates: 8
+    max live roots: 7
+    shadow slots: 7
+    entry zero slots: 2
     depth reservation: no
     storage: native frame
 
 mechanical pattern counts (triage only; see report for interpretation):
-  3 x calls to rt_closure_new
+  4 x calls to rt_closure_new
   10 x calls to rt_int_add
-  1 x calls to rt_int_sub
-  13 x calls to rt_int_cmp
-  45 x calls to other rt_* helpers
-  4 x guard/guardbool instructions
+  2 x calls to rt_int_sub
+  14 x calls to rt_int_cmp
+  46 x calls to other rt_* helpers
+  5 x guard/guardbool instructions
