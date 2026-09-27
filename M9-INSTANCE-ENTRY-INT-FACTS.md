@@ -57,10 +57,11 @@ Full regression: **all required suites pass** (exact counts in "Focused
 tests" and "Full regression" below), including `tests/all.tcl` and its own
 `BOTLISH_NATIVE_GC_STRESS=1` run. Three existing regression suites had
 hard-coded pre-M9 expected values that this milestone legitimately improves
-(`tests/hir-range.test`, `tests/hir-closed-call-params.test`); each is
-updated in place with a comment explaining the new, verified value -- never
-forced, always re-derived from the actual (fresh) analysis, per the
-milestone's own "audit-only success" escape hatch.
+(`tests/hir-range.test`, `tests/hir-closed-call-params.test`,
+`tests/native-root-liveness.test`); each is updated in place with a comment
+explaining the new, verified value -- never forced, always re-derived from
+the actual (fresh) analysis, per the milestone's own "audit-only success"
+escape hatch.
 
 Production diff: **one file** (`hir/range.tcl`, +331/-12 lines) plus two
 existing test files' updated expectations (10 lines each direction) and one
@@ -736,9 +737,17 @@ otherwise use).
 | `tests/native-coverage.tcl` | native 141, independent 410, partial 0, unsupported 4 (pre-existing, unrelated to M9), **failed 0** |
 | `tests/hir-range-bitop.test` (discovered, range-adjacent) | 29/29 |
 | `tests/hir-range-exact.test` (discovered, range-adjacent) | 18/18 |
+| full `tests/all.tcl` (all 83 suites) | 2370/2370 |
 
-Two of these suites had pre-M9 hard-coded expectations that legitimately
-changed (both updated in place with an explanatory comment, never forced):
+Three of these suites had pre-M9 hard-coded expectations that legitimately
+changed (all updated in place with an explanatory comment, never forced).
+The first full `tests/all.tcl` run caught one of the three
+(`native-root-liveness.test`) that the individually-required suite list
+above did not name -- worth recording as a methodology note: the
+individually-required list is necessary but was not sufficient by itself
+to catch every downstream-consumer-visible change, which is exactly why
+§71's own full-suite run is required, not optional, before this report's
+own regression claims can be trusted:
 
 - `tests/hir-range.test`: `range-propagate-1` (`drive`/`work`: `drive.i`
   `[-∞, 500] -> [0, 500]`), `range-propagate-2` (`fib(18)`: entry
@@ -761,6 +770,14 @@ changed (both updated in place with an explanatory comment, never forced):
   `[-∞, 500] -> [0, 500]`; the test's own name and its documented mechanism
   -- widen-first -- are otherwise unaffected, since narrowing is a strictly
   separate second pass).
+- `tests/native-root-liveness.test`: `root-structural-2` hard-coded
+  `loop-count`'s `drive` function's own register count as `15`; it is now
+  `14` -- the direct, predicted consequence (§64) of `drive.i`'s own
+  parameter being raw from entry (one fewer register than the pre-M9
+  unbox/rebox round-trip needed inside the function body, matching the NIR
+  diff in "Canonical generated-code..." above exactly). Updated with a
+  comment; the test's own qualitative assertion (`work` needs zero slots,
+  `drive` needs far fewer than 13) is unaffected.
 
 ## Full regression (§71)
 
