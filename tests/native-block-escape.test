@@ -578,13 +578,34 @@ test blockescape-region-companion-flags-both-off {both off: the fully unoptimize
 # (hex_pair's result, esc_from's accumulator) plus one final
 # materialization; the 3 substrings are unchanged -- so total 23 -> 20.
 # Block allocations (this test's subject) are unchanged.
-test blockescape-region-companion-refined-checks-1 {refined-checks.ir: Block allocations collapse from 1201 to 2 (module-startup uri_escape_text and is_unreserved closures only)} -body {
+# R2.a (R2A-IDIOMATIC-EMAILISH-SOURCE.md) raises this test's own pinned
+# counts sharply: is_emailish's local-punctuation ImmutableSet
+# (local_extra_chars) is built once per is_emailish call rather than once
+# at module scope (unlike additional_unreserved_chars above it in the same
+# file), so each of the 800 real is_emailish calls this benchmark's own two
+# check(400, ...) invocations make (R2's own report already established
+# the redundant *second* check per iteration compiles to a bare constant,
+# never a real call -- only the 800 real, distinct calls allocate) builds
+# and discards its own List + ImmutableSet + is_local_char closure. This is
+# not a source-tuning regression to chase away (spec items 28/48): true
+# module-scope retention of this set -- either as a module-level constant
+# referenced by a nested closure, or even hoisted to a plain top-level
+# module function exactly mirroring is_unreserved's own shape -- reproduces
+# a genuine, newly-exposed native-lowering defect ("native lowering:
+# binding bNN is not reachable from eNN", NATIVE BUG, on cranelift and
+# cranelift-generic) whenever web::is_emailish's own call graph references
+# any other root/module binding and Emailish?/emailish? is itself called
+# from inside a user-defined block -- exactly this benchmark's own "check"
+# shape. Per-call construction is the semantics-preserving choice until
+# that -module-fn-bridging defect (a generalization of R2's own disclosed,
+# not-fixed uriEscape/result-branch finding) is fixed; see the report.
+test blockescape-region-companion-refined-checks-1 {refined-checks.ir: Block allocations rise from 2 to 802 (800 real is_emailish calls each build their own local_extra_chars set/closure, plus the 2 module-startup uri_escape_text/is_unreserved closures) -- R2.a's disclosed per-call-construction cost, not module-scope retention (see comment above)} -body {
     core::loadLibrary web
     set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
     set on [native::allocationReport $hir summary 1]
     list [native::evalHir $hir] [dict get $on total allocations] [dict get $on byKind Block allocations] \
         [dict get $on byKind String allocations] [dict get $on byKind List allocations]
-} -result {{list {{int 400} {int 0}}} 20 2 4 11}
+} -result {{list {{int 400} {int 0}}} 11620 802 9204 811}
 
 test blockescape-region-companion-refined-checks-2 {refined-checks.ir: char_at's NIR has no closure/callenvmulti, and env=0/results=3 -- R2 (R2-ORDINARY-EMAILISH-PREDICATE.md) collapses this to one shared instance, not two per-call-site copies} -body {
     core::loadLibrary web
@@ -595,14 +616,29 @@ test blockescape-region-companion-refined-checks-2 {refined-checks.ir: char_at's
         [regexp {callenvmulti} $nirText]
 } -result {0 1 0}
 
-test blockescape-region-companion-refined-checks-3 {refined-checks.ir: scanner helpers flatten captures from [n, char_at] to [n, v] -- R2 collapses each scanner helper to one shared instance, not two per-call-site copies} -body {
+# R2.a (R2A-IDIOMATIC-EMAILISH-SOURCE.md) unifies scan_local/scan_label/
+# scan_alpha into one predicate-parameterized scan_while, so this test's
+# own name list shrinks from the five old scanner-family names to the
+# three that remain self-recursive/loop-shaped over [i n v]: scan_while
+# itself (whose own params gain "predicate" between "i" and "n", since it
+# is now the reusable operation the old triplet was three copies of --
+# still flattened, still one shared instance), tld_ok, and domain_loop.
+# is_local_char/is_label_char are new leaf predicates, not scanners, and
+# are checked by their own OpenInstances/blockescape shape in the report
+# instead.
+test blockescape-region-companion-refined-checks-3 {refined-checks.ir: scan_while/tld_ok/domain_loop flatten captures from [n, char_at] to [n, v] -- R2.a's single predicate-parameterized scanner remains one shared instance per name, not two per-call-site copies} -body {
     core::loadLibrary web
     set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
     set nirText [dict get [native::lower::program $hir] text]
-    set names {scan_local scan_label scan_alpha tld_ok domain_loop}
     set stale 0
     set flattened 0
-    foreach name $names {
+    if {[regexp {"scan_while" params=4 env=0 [^\n]*pnames="i predicate char_at"} $nirText]} {
+        incr stale
+    }
+    if {[llength [regexp -all -inline {"scan_while" params=4 env=0 [^\n]*pnames="i predicate n v"} $nirText]] == 1} {
+        incr flattened
+    }
+    foreach name {tld_ok domain_loop} {
         if {[regexp "\"$name\" params=3 env=0 \[^\\n\]*pnames=\"i n char_at\"" $nirText]} {
             incr stale
         }
@@ -610,8 +646,8 @@ test blockescape-region-companion-refined-checks-3 {refined-checks.ir: scanner h
             incr flattened
         }
     }
-    list $stale $flattened [llength $names]
-} -result {0 5 5}
+    list $stale $flattened 3
+} -result {0 3 3}
 
 test blockescape-region-companion-refined-checks-4 {refined-checks.ir under GC stress: unchanged value, on the composed representation} -body {
     core::loadLibrary web
@@ -622,11 +658,19 @@ test blockescape-region-companion-refined-checks-4 {refined-checks.ir under GC s
     list $result $value
 } -result {0 {list {{int 400} {int 0}}}}
 
-test blockescape-region-companion-refined-checks-5 {refined-checks.ir: self-tail scanner lowering is still a loop backedge (tail, never tailenv/a recursive call) -- R2 (R2-ORDINARY-EMAILISH-PREDICATE.md) drops the backedge count from 11 to 7: the redundant inner Emailish?/emailish? check no longer compiles its own duplicate copy of every scanner loop} -body {
+# R2.a drops this test's own pinned backedge count from 7 to 5: unifying
+# scan_local/scan_label/scan_alpha into one scan_while removes two of the
+# five self-tail-recursive scanner-family functions R2 left behind (three
+# scanners -> one), each of whose own tail backedge is otherwise identical
+# in kind (still a plain "tail", never "tailenv"/a real recursive call) --
+# domain_loop's own self-tail-call and scan_while's own self-tail-call
+# each count once per compiled instance, and neither is duplicated per
+# call site (§ blockescape-region-companion-refined-checks-3 above).
+test blockescape-region-companion-refined-checks-5 {refined-checks.ir: self-tail scanner lowering is still a loop backedge (tail, never tailenv/a recursive call) -- R2.a's unified scan_while drops the backedge count from 7 to 5: one shared scan_while backedge plus domain_loop's, tld_ok/is_local_char/is_label_char/char_at have none} -body {
     core::loadLibrary web
     set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
     set nirText [dict get [native::lower::program $hir] text]
     list [regexp {tailenv} $nirText] [llength [regexp -all -inline -line {^\s+tail .*$} $nirText]]
-} -result {0 7}
+} -result {0 5}
 
 cleanupTests

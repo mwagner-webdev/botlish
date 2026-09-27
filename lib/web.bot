@@ -64,68 +64,107 @@ namespace web
 # implementation (R2-ORDINARY-EMAILISH-PREDICATE.md): the same left-to-right
 # scan emailRegex's grammar always described -- local part: 1+ of
 # [alnum . _ % + -]; "@"; domain: 1+ of (1+ of [alnum -] then "."); TLD: 2+
-# alpha -- over is_tcl_alnum/is_tcl_alpha (core/tclcompat.tcl), now written
-# as real Botlish source instead of a hand-written core-IR -native-body.
+# alpha -- over is_tcl_alnum/is_tcl_alpha (core/tclcompat.tcl). R2.a
+# (R2A-IDIOMATIC-EMAILISH-SOURCE.md) normalized this from R2's own almost-
+# structural port of the old hand-written core-IR validator into the
+# idiomatic Botlish shape below; see that report for the full source-
+# normalization/census rationale, and for why this function is still named
+# is_emailish rather than emailish? (surface/lexer.tcl reserves "?" out of
+# every ordinary identifier -- a lexer-level restriction, not a naming
+# choice -- see the report's naming-audit section).
 #
-# scan_local/scan_label/scan_alpha(i) each return the index one past the
-# longest run of their character class starting at i (i itself, if the
-# class matches nothing there): an ordinary maximal-munch scan, sound
-# because none of the three classes contains "." or "@" and the grammar has
-# no ambiguity to backtrack over (NATIVE-TCL-UNICODE.md's §6 argument).
-# domain_loop(i) consumes one "label ." group and then either recognizes
-# the immediately following alpha run as the final TLD (returning n) or
-# continues from just after the "." -- self-tail-recursive, the same idiom
-# uri_escape_text's esc_bytes/esc_from and examples/stdlib/string_reverse.bot's
-# reverse_from already use.
+# local_extra_chars is the established immutable-set membership idiom
+# (MINIMAL-IMMUTABLE-SET.md) for the local part's punctuation class
+# (". _ % +" plus "-"), over ordinary one-scalar str values (char_at's own
+# result type) -- never UTF-8 bytes, unlike additional_unreserved_chars's
+# byte::set above. Built once per is_emailish call (not once per character
+# scanned), deliberately *not* hoisted to true module scope the way
+# additional_unreserved_chars is: doing so (either as a module-level
+# constant referenced by a nested closure, or even as a top-level module
+# function exactly mirroring is_unreserved's own shape) reproduces a real,
+# previously-latent native-lowering defect -- confirmed by direct,
+# minimized repro, isolated by bisection to module-scope retention
+# specifically (not to predicate-passing, which is unaffected) -- whenever
+# web::is_emailish, or anything it calls, references *any* other root/
+# module binding and Emailish?/emailish? is itself called from inside a
+# user-defined block (exactly this benchmark's own "check" function): `native
+# lowering: binding bNN is not reachable from eNN` (NATIVE BUG), on
+# cranelift and cranelift-generic. See the report's set-membership section
+# for the full trace; per spec items 25/47/55/72 this is recorded as a
+# newly-exposed compiler weakness, not fixed here, and per-call
+# construction (still zero allocation per character scanned) is the
+# semantics-preserving choice until it is.
 fn is_emailish(v):
 
     n = length(v)
+    local_extra_chars = immutable_set_from_list([".", "_", "%", "+", "-"])
 
     fn char_at(i):
         substring(v, i, i + 1)
 
     fn is_local_char(c):
-        is_tcl_alnum(c) or c == "." or c == "_" or c == "%" or c == "+" or c == "-"
+        is_tcl_alnum(c) or immutable_set_contains(local_extra_chars, c)
 
+    # is_label_char's own extra character is a single "-": a one-element
+    # set would be less idiomatic than the direct equality already used
+    # throughout this codebase for singleton comparisons (e.g. esc_char's
+    # own char-count check), so it stays a plain "==" rather than a second
+    # membership set.
     fn is_label_char(c):
         is_tcl_alnum(c) or c == "-"
 
-    fn scan_local(i):
+    # scan_while(i, predicate) is the one reusable operation the old
+    # scan_local/scan_label/scan_alpha triplet was really three copies of:
+    # return the index one past the longest run of characters starting at i
+    # for which PREDICATE holds (i itself, if it matches nothing there).
+    # Sound as a maximal-munch scan for every class this predicate is
+    # called with (none of them ever matches "." or "@", so there is no
+    # ambiguity to backtrack over -- NATIVE-TCL-UNICODE.md's §6 argument,
+    # unchanged by unifying the three scanners). PREDICATE is passed as an
+    # ordinary first-class value (an untyped-parameter callable, TYPED-
+    # CALLABLE-ESCAPE-SOUNDNESS.md item 10 -- is_local_char/is_label_char/
+    # is_tcl_alpha are all either untyped-parameter Botlish functions or
+    # natives, neither of which is a "typed callable" that rule would block
+    # from flowing through an ordinary parameter); see the report for the
+    # exact call-form/instance-count census this produces.
+    fn scan_while(i, predicate):
         if i >= n:
             i
         else:
-            if is_local_char(char_at(i)):
-                scan_local(i + 1)
-            else:
-                i
-
-    fn scan_label(i):
-        if i >= n:
-            i
-        else:
-            if is_label_char(char_at(i)):
-                scan_label(i + 1)
-            else:
-                i
-
-    fn scan_alpha(i):
-        if i >= n:
-            i
-        else:
-            if is_tcl_alpha(char_at(i)):
-                scan_alpha(i + 1)
+            if predicate(char_at(i)):
+                scan_while(i + 1, predicate)
             else:
                 i
 
     fn tld_ok(i):
-        e = scan_alpha(i)
+        e = scan_while(i, is_tcl_alpha)
         if e == n:
             e - i >= 2
         else:
             false
 
+    # domain_loop(i) consumes one "label ." group and then either
+    # recognizes the immediately following alpha run as the final TLD
+    # (returning n) or continues from just after the ".". This stays
+    # self-tail-recursive, not the "loop"/"break"/"continue" keyword form
+    # (LISTLOOP-BREAK-TYPE-SOUNDNESS.md): that form's bare "loop:" body
+    # re-runs in a fresh scope with no way to carry an advanced position
+    # from one iteration to the next except through mutation (core/
+    # evaluator.tcl's op-loop: "next iteration" simply re-evaluates the
+    # same body in the same enclosing env), and its "loop x in EXPR:" form
+    # needs an already-materialized collection to iterate (there is no
+    # range()/similar numeric-sequence primitive to drive one over
+    # character positions here) -- so expressing this position-threading
+    # scan without either inventing loop-carried-accumulator syntax or a
+    # mutable variable (both out of scope, spec items 13/39) is not
+    # currently possible; self-tail recursion remains this codebase's own
+    # idiom for exactly this shape (uri_escape_text's esc_bytes/esc_from,
+    # examples/stdlib/string_reverse.bot's reverse_from). See the report's
+    # domain-loop section for the full before/after census this still
+    # produces at the NIR level (tail-call backedges), even though the
+    # source keeps its recursive spelling.
     fn domain_loop(i):
-        label_end = scan_label(i)
+        label_end = scan_while(i, is_label_char)
         if label_end == i:
             -1
         else:
@@ -141,7 +180,7 @@ fn is_emailish(v):
                 else:
                     -1
 
-    local_end = scan_local(0)
+    local_end = scan_while(0, is_local_char)
     if local_end == 0:
         false
     else:
