@@ -119,10 +119,10 @@ fn emailish?(v):
     # value is N itself, exactly the old recursion's own "i >= n" base
     # case. PREDICATE is passed as an ordinary first-class value (an
     # untyped-parameter callable, TYPED-CALLABLE-ESCAPE-SOUNDNESS.md item
-    # 10 -- local_char?/label_char?/is_tcl_alpha are all either
-    # untyped-parameter Botlish functions or natives, neither of which is
-    # a "typed callable" that rule would block from flowing through an
-    # ordinary parameter).
+    # 10 -- local_char? and is_tcl_alpha, the two predicates passed here,
+    # are an untyped-parameter Botlish function and a native, neither of
+    # which is a "typed callable" that rule would block from flowing
+    # through an ordinary parameter).
     fn scan_while(start, predicate):
         loop i from start to n:
             if predicate(char_at(i)):

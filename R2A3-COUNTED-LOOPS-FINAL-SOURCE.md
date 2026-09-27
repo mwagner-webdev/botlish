@@ -494,10 +494,11 @@ verified equivalent because every actual call site in this module already
 guarantees `start <= n` (so on natural exhaustion `start == n`, and old
 and new both return `n` in that case) — not a silent behavior change for
 any call this program makes. Predicate-passing is unchanged: `predicate`
-remains an ordinary first-class parameter (`local_char?`/`label_char?`/
-`is_tcl_alpha` all flow through it exactly as before), the deliberately
-preserved compiler finding this milestone does not try to specialize
-away.
+remains an ordinary first-class parameter (`local_char?` and
+`is_tcl_alpha` flow through it exactly as before; `label_char?` no longer
+does — `domain?` now calls it directly, see "Post-freeze compiler
+findings"), the deliberately preserved compiler finding this milestone
+does not try to specialize away.
 
 ## `scan_while` must stop being recursive — confirmed
 
@@ -613,8 +614,9 @@ renamed and one — `domain_loop`/`domain?` — behaviorally simplified).
 `check.n`: unchanged, still unbounded (`[-∞, +∞]`) — `check<generic>`
 still captures the `web::emailish?` closure, R2.a.1's own finding, not
 revisited (`emailish-predicate-check-n-control`, unmodified, still
-passes). New: `scan_while.start`'s and `domain?.start`'s own induction
-variables (`i`/`j`) now get a real, non-trivial `max` bound —
+passes). New: `scan_while`'s `i` and `domain?`'s `j` induction bindings
+(countloop-local bindings, distinct from the functions' own `start`
+parameters) now get a real, non-trivial `max` bound —
 `length(v)`'s own `collectionLength` fact (`smallMax`, i.e.
 `[…, 4611686018427387902]`) — that the old recursive `scan_while`/
 `domain_loop` had no binding to seed at all (a self-tail-recursive
@@ -782,8 +784,8 @@ optimization easier, absent a new explicit source-design reason.
   R2.a.2 (`callvalue: 1` in the machine/NIR census above) —
   `scan_while(i, predicate)`'s own `predicate(char_at(i))` call remains
   the one genuinely dynamic higher-order call site in this module.
-  `local_char?`/`label_char?`/`is_tcl_alpha` still flow through it as
-  ordinary first-class values.
+  `local_char?` and `is_tcl_alpha` still flow through it as ordinary
+  first-class values (`label_char?` no longer does — see the next item).
 - `label_char?` (renamed from `is_label_char`) stopped being passed
   through `scan_while` as a value at all in the *new* `domain?` — it is
   now called directly, `label_char?(char_at(j))`, an ordinary ("known")
@@ -882,8 +884,9 @@ structure). 37. `callvalue` unchanged at 1 (`scan_while`'s own
 `scan_while`'s own `predicate` parameter). 39/40. Unchanged from R2.a.1:
 `web::emailish?<generic>` remains the one closure-capturing instance in
 this region; no new `OpenInstances`/`blockescape` entry was created or
-removed. 41. See "Range facts before/after": `scan_while.start`/
-`domain?.start` (the induction bindings `i`/`j`) now get `max` bounded by
+removed. 41. See "Range facts before/after": `scan_while`'s `i` and
+`domain?`'s `j` induction bindings (not the `start` parameters) now get
+`max` bounded by
 `length(v)`'s `collectionLength` fact; `min` stays unbounded (multi-call-
 site join). 42. Unchanged, still `[-∞, +∞]` (`check<generic>`, still
 capturing the `web::emailish?` closure). 43. Unchanged from R2.a.1/2:
