@@ -2,7 +2,7 @@ source:  bench/fib.ir
 backend: Cranelift (specialize=1)
 asm:     fib.asm
 vcode:   fib.vcode
-machine-code bytes: 394 (per function: 49 345)
+machine-code bytes: 292 (per function: 49 243)
 
 functions:
   0 <program entry>: nir-regs=3
@@ -37,4 +37,3 @@ GC roots (fib.asm's NIR ids match roots.txt's "function N"):
 
 mechanical pattern counts (triage only; see report for interpretation):
   1 x calls to rt_int_add
-  1 x calls to rt_int_cmp

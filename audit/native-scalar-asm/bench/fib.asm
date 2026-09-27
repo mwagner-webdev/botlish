@@ -3,7 +3,7 @@
 ; object:  ELF64 x86-64, unlinked (Botlish-generated code only; runtime
 ;          helpers are unresolved imports, so their bodies are not present)
 ; format:  objdump -dr --no-show-raw-insn -M intel
-; total machine code bytes: 394  (per function: 49 345)
+; total machine code bytes: 292  (per function: 49 243)
 ;
 ; function symbol -> Botlish label:
 ;   botlish_fn_0 / botlish_entry_0 -> <program entry>
@@ -36,107 +36,77 @@ Disassembly of section .text:
   2c:	mov    rsp,rbp
   2f:	pop    rbp
   30:	ret
-  31:	add    BYTE PTR [rax],al
-  33:	add    BYTE PTR [rax],al
-  35:	add    BYTE PTR [rax],al
-	...
 
-0000000000000038 <botlish_fn_1: fib<int>>:
-  38:	push   rbp
-  39:	mov    rbp,rsp
-  3c:	sub    rsp,0x30
-  40:	mov    QWORD PTR [rsp+0x10],rbx
-  45:	mov    QWORD PTR [rsp+0x18],r12
-  4a:	mov    QWORD PTR [rsp+0x20],r13
-  4f:	mov    rbx,rdi
-  52:	mov    QWORD PTR [rsp+0x8],0x0
-  5b:	test   rsi,0x1
-  62:	mov    r12,rsi
-  65:	jne    91 <botlish_fn_1+0x59>
-  6b:	mov    edx,0x5
-  70:	mov    rsi,r12
-  73:	mov    rdi,rbx
-  76:	call   7b <botlish_fn_1+0x43>
-			77: R_X86_64_PLT32	rt_int_cmp-0x4
-  7b:	mov    r9d,0x2
-  81:	test   rax,rax
-  84:	cmovl  r9,QWORD PTR [rip+0xe4]        # 170 <botlish_fn_1+0x138>
-  8c:	jmp    a6 <botlish_fn_1+0x6e>
-  91:	mov    r9d,0x2
-  97:	mov    rsi,r12
-  9a:	cmp    rsi,0x5
-  9e:	cmovl  r9,QWORD PTR [rip+0xca]        # 170 <botlish_fn_1+0x138>
-  a6:	cmp    r9,0x6
-  aa:	je     14f <botlish_fn_1+0x117>
-  b0:	mov    rsi,r12
-  b3:	sar    rsi,1
-  b6:	mov    r12,rsi
-  b9:	sub    rsi,0x1
-  bd:	shl    rsi,1
-  c0:	or     rsi,0x1
-  c4:	mov    QWORD PTR [rsp],rsi
-  c8:	mov    rdi,rbx
-  cb:	call   d0 <botlish_fn_1+0x98>
-			cc: R_X86_64_PLT32	botlish_fn_1-0x4 ; fib<int>
-  d0:	mov    r13,rax
-  d3:	mov    QWORD PTR [rsp],rax
-  d7:	mov    rsi,r12
-  da:	sub    rsi,0x2
-  de:	mov    r12,rsi
-  e1:	shl    rsi,1
-  e4:	mov    r12,rsi
-  e7:	or     rsi,0x1
-  eb:	mov    r12,rsi
-  ee:	mov    QWORD PTR [rsp+0x8],rsi
-  f3:	mov    rdi,rbx
-  f6:	call   fb <botlish_fn_1+0xc3>
-			f7: R_X86_64_PLT32	botlish_fn_1-0x4 ; fib<int>
-  fb:	mov    QWORD PTR [rsp+0x8],rax
- 100:	mov    rcx,r13
- 103:	and    rcx,rax
- 106:	test   rcx,0x1
- 10d:	jne    121 <botlish_fn_1+0xe9>
- 113:	mov    rdx,rax
- 116:	mov    rsi,r13
- 119:	mov    rdi,rbx
- 11c:	jmp    145 <botlish_fn_1+0x10d>
- 121:	lea    rcx,[rax-0x1]
- 125:	mov    rdx,r13
- 128:	mov    rsi,rax
- 12b:	mov    rax,rdx
- 12e:	add    rax,rcx
- 131:	seto   cl
- 134:	test   cl,cl
- 136:	je     152 <botlish_fn_1+0x11a>
- 13c:	mov    rdi,rbx
- 13f:	mov    rdx,rsi
- 142:	mov    rsi,r13
- 145:	call   14a <botlish_fn_1+0x112>
-			146: R_X86_64_PLT32	rt_int_add-0x4
- 14a:	jmp    152 <botlish_fn_1+0x11a>
- 14f:	mov    rax,r12
- 152:	mov    rbx,QWORD PTR [rsp+0x10]
- 157:	mov    r12,QWORD PTR [rsp+0x18]
- 15c:	mov    r13,QWORD PTR [rsp+0x20]
- 161:	add    rsp,0x30
- 165:	mov    rsp,rbp
- 168:	pop    rbp
- 169:	ret
- 16a:	add    BYTE PTR [rax],al
- 16c:	add    BYTE PTR [rax],al
- 16e:	add    BYTE PTR [rax],al
- 170:	(bad)
- 171:	add    BYTE PTR [rax],al
- 173:	add    BYTE PTR [rax],al
- 175:	add    BYTE PTR [rax],al
-	...
+0000000000000031 <botlish_fn_1: fib<int>>:
+  31:	push   rbp
+  32:	mov    rbp,rsp
+  35:	sub    rsp,0x30
+  39:	mov    QWORD PTR [rsp+0x10],rbx
+  3e:	mov    QWORD PTR [rsp+0x18],r12
+  43:	mov    QWORD PTR [rsp+0x20],r13
+  48:	mov    rbx,rdi
+  4b:	mov    QWORD PTR [rsp+0x8],0x0
+  54:	mov    rax,rsi
+  57:	sar    rax,1
+  5a:	cmp    rax,0x2
+  5e:	jl     f7 <botlish_fn_1+0xc6>
+  64:	mov    rsi,rax
+  67:	sub    rsi,0x1
+  6b:	mov    r13,rax
+  6e:	shl    rsi,1
+  71:	or     rsi,0x1
+  75:	mov    QWORD PTR [rsp],rsi
+  79:	mov    rdi,rbx
+  7c:	call   81 <botlish_fn_1+0x50>
+			7d: R_X86_64_PLT32	botlish_fn_1-0x4 ; fib<int>
+  81:	mov    r12,rax
+  84:	mov    QWORD PTR [rsp],rax
+  88:	mov    rsi,r13
+  8b:	sub    rsi,0x2
+  8f:	shl    rsi,1
+  92:	or     rsi,0x1
+  96:	mov    QWORD PTR [rsp+0x8],rsi
+  9b:	mov    rdi,rbx
+  9e:	call   a3 <botlish_fn_1+0x72>
+			9f: R_X86_64_PLT32	botlish_fn_1-0x4 ; fib<int>
+  a3:	mov    QWORD PTR [rsp+0x8],rax
+  a8:	mov    rcx,r12
+  ab:	and    rcx,rax
+  ae:	test   rcx,0x1
+  b5:	jne    c9 <botlish_fn_1+0x98>
+  bb:	mov    rdx,rax
+  be:	mov    rsi,r12
+  c1:	mov    rdi,rbx
+  c4:	jmp    ed <botlish_fn_1+0xbc>
+  c9:	lea    rcx,[rax-0x1]
+  cd:	mov    rdx,r12
+  d0:	mov    rsi,rax
+  d3:	mov    rax,rdx
+  d6:	add    rax,rcx
+  d9:	seto   cl
+  dc:	test   cl,cl
+  de:	je     fa <botlish_fn_1+0xc9>
+  e4:	mov    rdi,rbx
+  e7:	mov    rdx,rsi
+  ea:	mov    rsi,r12
+  ed:	call   f2 <botlish_fn_1+0xc1>
+			ee: R_X86_64_PLT32	rt_int_add-0x4
+  f2:	jmp    fa <botlish_fn_1+0xc9>
+  f7:	mov    rax,rsi
+  fa:	mov    rbx,QWORD PTR [rsp+0x10]
+  ff:	mov    r12,QWORD PTR [rsp+0x18]
+ 104:	mov    r13,QWORD PTR [rsp+0x20]
+ 109:	add    rsp,0x30
+ 10d:	mov    rsp,rbp
+ 110:	pop    rbp
+ 111:	ret
 
-0000000000000178 <botlish_entry_1: fib<int>>:
- 178:	push   rbp
- 179:	mov    rbp,rsp
- 17c:	mov    rsi,QWORD PTR [rdx]
- 17f:	call   184 <botlish_entry_1+0xc>
-			180: R_X86_64_PLT32	botlish_fn_1-0x4 ; fib<int>
- 184:	mov    rsp,rbp
- 187:	pop    rbp
- 188:	ret
+0000000000000112 <botlish_entry_1: fib<int>>:
+ 112:	push   rbp
+ 113:	mov    rbp,rsp
+ 116:	mov    rsi,QWORD PTR [rdx]
+ 119:	call   11e <botlish_entry_1+0xc>
+			11a: R_X86_64_PLT32	botlish_fn_1-0x4 ; fib<int>
+ 11e:	mov    rsp,rbp
+ 121:	pop    rbp
+ 122:	ret

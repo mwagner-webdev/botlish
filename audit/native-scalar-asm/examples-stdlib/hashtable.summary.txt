@@ -2,7 +2,7 @@ source:  examples/stdlib/hashtable.bot
 backend: Cranelift (specialize=1)
 asm:     hashtable.asm
 vcode:   hashtable.vcode
-machine-code bytes: 12868 (per function: 45 388 524 70 61 61 61 61 61 167 179 245 804 1248 429 253 380 439 1113 766 817 665 1168 836 1189 838)
+machine-code bytes: 12732 (per function: 45 388 524 70 61 61 61 61 61 167 179 245 804 1248 429 253 380 439 977 766 817 665 1168 836 1189 838)
 
 functions:
   0 <program entry>: nir-regs=1
@@ -23,7 +23,7 @@ functions:
   15 ht_contains<mutarray, str>: nir-regs=7
   16 ht_rehash_probe<mutarray, int, int>: nir-regs=13
   17 ht_rehash_insert<List[mutarray], int, any, any>: nir-regs=15
-  18 ht_rehash_scan<list, int, int, List[mutarray], int>: nir-regs=28
+  18 ht_rehash_scan<list, int, int, List[mutarray], int>: nir-regs=26
   19 ht_rehash<mutarray, int>: nir-regs=30
   20 ht_should_grow<mutarray>: nir-regs=15
   21 ht_grow_or_clean<mutarray>: nir-regs=12
@@ -268,14 +268,14 @@ GC roots (hashtable.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 18 "ht_rehash_scan"
-    NIR regs: 28
+    NIR regs: 26
     raw regs: 5
-    managed-capable regs: 23
+    managed-capable regs: 21
     effects: may_error=true may_gc=true
     safepoints: 1
-    root candidates: 10
-    max live roots: 10
-    shadow slots: 10
+    root candidates: 9
+    max live roots: 9
+    shadow slots: 9
     entry zero slots: 0
     depth reservation: no
     storage: native frame
@@ -375,6 +375,6 @@ mechanical pattern counts (triage only; see report for interpretation):
   7 x calls to rt_int_add
   2 x calls to rt_int_sub
   3 x calls to rt_int_mul
-  9 x calls to rt_int_cmp
+  8 x calls to rt_int_cmp
   93 x calls to other rt_* helpers
   25 x guard/guardbool instructions

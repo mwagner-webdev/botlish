@@ -2,7 +2,7 @@ source:  examples/stdlib/csv_chunked.bot
 backend: Cranelift (specialize=1)
 asm:     csv_chunked.asm
 vcode:   csv_chunked.vcode
-machine-code bytes: 10364 (per function: 68 195 534 534 534 534 592 520 540 540 365 430 585 1063 352 799 833 537 612 197)
+machine-code bytes: 10168 (per function: 68 195 534 534 534 534 498 418 540 540 365 430 585 1063 352 799 833 537 612 197)
 
 functions:
   0 <program entry>: nir-regs=2
@@ -107,26 +107,26 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
   
   function 6 "chunked_copy_chunks"
     NIR regs: 22
-    raw regs: 6
-    managed-capable regs: 16
+    raw regs: 7
+    managed-capable regs: 15
     effects: may_error=true may_gc=true
     safepoints: 1
-    root candidates: 5
-    max live roots: 5
-    shadow slots: 5
+    root candidates: 4
+    max live roots: 4
+    shadow slots: 4
     entry zero slots: 0
     depth reservation: no
     storage: native frame
   
   function 7 "chunked_copy_chunks"
     NIR regs: 22
-    raw regs: 6
-    managed-capable regs: 16
+    raw regs: 7
+    managed-capable regs: 15
     effects: may_error=true may_gc=true
     safepoints: 1
-    root candidates: 5
-    max live roots: 5
-    shadow slots: 5
+    root candidates: 4
+    max live roots: 4
+    shadow slots: 4
     entry zero slots: 0
     depth reservation: no
     storage: native frame
@@ -290,6 +290,6 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
 mechanical pattern counts (triage only; see report for interpretation):
   20 x calls to rt_int_add
   2 x calls to rt_int_mul
-  9 x calls to rt_int_cmp
+  7 x calls to rt_int_cmp
   53 x calls to other rt_* helpers
   1 x guard/guardbool instructions

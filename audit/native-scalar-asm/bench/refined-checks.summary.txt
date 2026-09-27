@@ -2,7 +2,7 @@ source:  bench/refined-checks.ir
 backend: Cranelift (specialize=1)
 asm:     refined-checks.asm
 vcode:   refined-checks.vcode
-machine-code bytes: 15289 (per function: 1172 39 289 617 74 74 74 125 125 155 125 103 453 758 486 828 504 681 769 262 804 564 468 452 644 681 769 262 804 564 468 452 644)
+machine-code bytes: 15187 (per function: 1172 39 289 617 74 74 74 125 125 155 125 103 453 758 486 828 402 681 769 262 804 564 468 452 644 681 769 262 804 564 468 452 644)
 
 functions:
   0 <program entry>: nir-regs=40
@@ -21,7 +21,7 @@ functions:
   13 esc_bytes<generic>: nir-regs=14
   14 esc_char<generic>: nir-regs=23
   15 esc_from<generic>: nir-regs=18
-  16 check<int, int, str, str>: nir-regs=27
+  16 check<int, int, str, str>: nir-regs=25
   17 <str>: nir-regs=25
   18 <generic>: nir-regs=25
   19 char_at<generic>: nir-regs=6
@@ -249,14 +249,14 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 16 "check"
-    NIR regs: 27
+    NIR regs: 25
     raw regs: 7
-    managed-capable regs: 20
+    managed-capable regs: 18
     effects: may_error=true may_gc=true
     safepoints: 3
-    root candidates: 6
-    max live roots: 5
-    shadow slots: 5
+    root candidates: 4
+    max live roots: 4
+    shadow slots: 4
     entry zero slots: 1
     depth reservation: no
     storage: native frame
@@ -473,6 +473,6 @@ mechanical pattern counts (triage only; see report for interpretation):
   2 x calls to rt_closure_new
   19 x calls to rt_int_add
   2 x calls to rt_int_sub
-  32 x calls to rt_int_cmp
+  31 x calls to rt_int_cmp
   62 x calls to other rt_* helpers
   3 x guard/guardbool instructions
