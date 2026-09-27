@@ -1,0 +1,322 @@
+# instance-entry-range-facts.test -- M9: instance-entry Int facts
+# (M9-INSTANCE-ENTRY-INT-FACTS.md): post-widen recursive-entry narrowing and
+# capture-site Int Range transport, both in hir/range.tcl.
+#
+# hir::range::analyze gained two test/audit-only isolation knobs (spec #35,
+# #60), both default 1 (production behavior unchanged for every pre-M9
+# caller): `hir::range::analyze hir spec ?callFactsOpt? ?narrowOpt?
+# ?captureOpt?`. narrowOpt 0 skips the post-widen narrowing phase outright
+# (committing the ascending phase's own widened baseline); captureOpt 0
+# computes capture facts exactly as usual but never seeds them into a
+# closure's own entry -- so a test can isolate "narrowing only", "capture
+# transport only" and "both" (the default), and so ordinary provenance
+# ("did this Range come from narrowing, from a capture, or neither") is
+# directly queryable rather than inferred from final NIR.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+proc rangeOf {text args} {
+    set hir [surface::compile $text t.bot -strict 0]
+    set spec [hir::specialize::analyze $hir]
+    return [list $hir $spec [hir::range::analyze $hir $spec 1 {*}$args]]
+}
+
+proc rangeInstance {spec name {key ""}} {
+    foreach id [dict get $spec used] {
+        set instance [dict get $spec instances $id]
+        if {[dict get $instance name] ne $name} {
+            continue
+        }
+        if {$key eq "" || [join [lmap t [dict get $instance args] {hir::types::show $t}] {, }] eq $key} {
+            return $id
+        }
+    }
+    error "no used instance of \"$name\" matching \"$key\""
+}
+
+proc paramRanges {analysis id} {
+    return [lmap p [dict get [dict get $analysis instances $id] params] {hir::range::show $p}]
+}
+
+# The Range of every reachable `ref` of BINDING inside instance ID's own
+# region (a captured binding's own references, typically -- see refRanges
+# in tests/hir-range.test for the analogous parameter-focused query).
+proc capturedRefRanges {hir analysis id binding} {
+    set exprs [dict get [dict get $analysis instances $id] exprs]
+    set result {}
+    foreach e [lsort -dictionary [dict keys $exprs]] {
+        if {[hir::kind $hir $e] eq "ref" && [hir::get $hir $e binding] eq $binding} {
+            lappend result [hir::range::show [dict get $exprs $e]]
+        }
+    }
+    return $result
+}
+
+# The BindingId a child block (found by its function NAME) captures whose
+# source name is CAPNAME.
+proc captureBinding {hir spec name capName} {
+    set id [rangeInstance $spec $name]
+    set block [dict get [dict get $spec instances $id] block]
+    foreach b [hir::get $hir $block captures] {
+        if {[dict get [hir::binding $hir $b] name] eq $capName} {
+            return $b
+        }
+    }
+    error "no capture named \"$capName\" on \"$name\""
+}
+
+# ---------------------------------------------------------------------------
+# Post-widen recursive-entry narrowing
+
+test m9-narrow-fib-shape {a two-way self-recursive decreasing parameter (fib's own shape): pre-M9 this widens to [-∞, 22] (both recursive feedback (n - 1, n - 2) and the external seed disagree with the entry's own history, on the min side); M9 recovers [0, 22] -- the external seed and both recursive feedback edges join and stabilize there (spec #12, #18)} -body {
+    lassign [rangeOf "fn fib(n):\n    if n < 2:\n        n\n    else:\n        fib(n - 1) + fib(n - 2)\n\nfib(22)"] hir spec analysis
+    lassign [rangeOf "fn fib(n):\n    if n < 2:\n        n\n    else:\n        fib(n - 1) + fib(n - 2)\n\nfib(22)" 0] hir0 spec0 baseline
+    list [paramRanges $baseline [rangeInstance $spec0 fib]] [paramRanges $analysis [rangeInstance $spec fib]]
+} -result {{{[-∞, 22]}} {{[0, 22]}}}
+
+test m9-narrow-loop-count-shape {loop-count's own drive(i, total) shape: i is [-∞, 500] pre-M9, [0, 500] after -- the external seed 500 and the "i <= 0" else branch's own i - 1 >= 0 feedback stabilize; total (a genuinely unbounded accumulator) stays [0, +∞] both before and after (spec #19: narrowing must not invent a trip-count bound)} -body {
+    set src "fn drive(i, total):\n    if i <= 0:\n        total\n    else:\n        drive(i - 1, total + 1)\n\ndrive(500, 0)"
+    lassign [rangeOf $src] hir spec analysis
+    lassign [rangeOf $src 0] hir0 spec0 baseline
+    list [paramRanges $baseline [rangeInstance $spec0 drive]] [paramRanges $analysis [rangeInstance $spec drive]]
+} -result {{{[-∞, 500]} {[0, +∞]}} {{[0, 500]} {[0, +∞]}}}
+
+test m9-narrow-recursive-call-under-branch {the recursive call reached only under a branch (an outer, unrelated guard) narrows exactly the same way -- narrowing re-runs the *existing* path-sensitive transfer, never a new branch special case (spec #9)} -body {
+    set src "fn f(flag, n):\n    if flag:\n        if n <= 0:\n            n\n        else:\n            f(flag, n - 1)\n    else:\n        n\n\nf(true, 50)"
+    lassign [rangeOf $src] hir spec analysis
+    lassign [rangeOf $src 0] hir0 spec0 baseline
+    list [paramRanges $baseline [rangeInstance $spec0 f]] [paramRanges $analysis [rangeInstance $spec f]]
+} -result {{{[-∞, +∞]} {[-∞, 50]}} {{[-∞, +∞]} {[0, 50]}}}
+
+test m9-narrow-external-and-recursive-both-participate {spec #12: fib(22) must not derive n <= 21 from the recursive edges alone, forgetting the external seed -- the entry's own upper bound (22) is exactly the external caller's value, never one less} -body {
+    lassign [rangeOf "fn fib(n):\n    if n < 2:\n        n\n    else:\n        fib(n - 1) + fib(n - 2)\n\nfib(22)"] hir spec analysis
+    paramRanges $analysis [rangeInstance $spec fib]
+} -result {{[0, 22]}}
+
+test m9-narrow-multiple-external-callers-join {two external callers of the same self-recursive instance join to a safe hull (spec #12's "multiple external callers must join correctly"), not either one alone} -body {
+    set src "fn count(n):\n    if n <= 0:\n        0\n    else:\n        count(n - 1)\n\n\[count(10), count(200)\]"
+    lassign [rangeOf $src] hir spec analysis
+    paramRanges $analysis [rangeInstance $spec count]
+} -result {{[0, 200]}}
+
+test m9-narrow-unchanged-self-forward-not-improved {an unchanged self-forward (f(x) -> f(x), spec #14) must not magically improve: x stays exactly its external seed both before and after M9 -- there was nothing for narrowing to recover (never widened to begin with)} -body {
+    set src "fn f(x, n):\n    if n <= 0:\n        x\n    else:\n        f(x, n - 1)\n\nf(7, 5)"
+    lassign [rangeOf $src] hir spec analysis
+    lassign [paramRanges $analysis [rangeInstance $spec f]] xR nR
+    list $xR $nR
+} -result {{[7, 7] {7}} {[0, 5]}}
+
+test m9-narrow-genuinely-unbounded-stays-unbounded {a step of 2 against an == guard is not a step hir/induction.tcl recognizes (it could skip the terminator): pre- and post-M9 the parameter stays [-∞, ...] on that side -- M9 must not invent a bound the sound transfer itself cannot prove (spec #19, negative control)} -body {
+    set src "fn count2(n):\n    if n == 0:\n        0\n    else:\n        count2(n - 2)\n\ncount2(100000)"
+    lassign [rangeOf $src] hir spec analysis
+    paramRanges $analysis [rangeInstance $spec count2]
+} -result {{[-∞, 100000]}}
+
+test m9-narrow-open-instance-not-fabricated {an instance with unknown/open runtime ingress (a materialized/escaping callee) never receives a caller-propagated fact, narrowing included -- spec #13} -body {
+    set src "fn f(x):\n    x + 0\n\nfn call_it(cb):\n    cb(1)\n\n\[f(5), call_it(f)\]"
+    set hir [surface::compile $src t.bot -strict 0]
+    set spec [hir::specialize::analyze $hir -specialize 0]
+    set analysis [hir::range::analyze $hir $spec]
+    paramRanges $analysis [rangeInstance $spec f]
+} -result {{[-∞, +∞]}}
+
+test m9-narrow-mutual-recursion {mutual recursion between two distinct instances (spec #15, #52): the whole-graph round mechanism already handles the cross-instance cycle without a new SCC framework, and M9's narrowing runs over exactly the same instance graph -- no crash, no non-convergence throw, and (this particular cross-calling shape, a pre-existing hir/specialize.tcl instance-selection characteristic unrelated to M9: isEven/isOdd's own mutual calls do not resolve to a single reused instance each) identical, unimproved facts before and after, which is itself the soundness pin: M9 must never fabricate a fact an unrelated architectural limitation already left broad} -body {
+    set src "fn isEven(n):\n    if n <= 0:\n        1\n    else:\n        isOdd(n - 1)\n\nfn isOdd(n):\n    if n <= 0:\n        0\n    else:\n        isEven(n - 1)\n\nisEven(37)"
+    lassign [rangeOf $src] hir spec analysis
+    lassign [rangeOf $src 0] hir0 spec0 baseline
+    set before {}
+    set after {}
+    foreach id [dict get $spec0 used] {
+        if {[dict get [dict get $spec0 instances $id] block] eq "program"} continue
+        lappend before [paramRanges $baseline $id]
+    }
+    foreach id [dict get $spec used] {
+        if {[dict get [dict get $spec instances $id] block] eq "program"} continue
+        lappend after [paramRanges $analysis $id]
+    }
+    list [lsort $before] [lsort $after] [expr {$before eq $after}]
+} -result {{{{[-∞, +∞]}} {{[-∞, +∞]}} {{[0, +∞]}} {{[0, +∞]}}} {{{[-∞, +∞]}} {{[-∞, +∞]}} {{[0, +∞]}} {{[0, +∞]}}} 1}
+
+# spec #37 ("never broaden an existing stronger fact") and spec #50
+# (checked domains vs. observed Range facts) are exercised directly by
+# m9-rangenarrow-finite-preserved below (RangeNarrow itself, the one place
+# in hir/range.tcl capable of broadening anything) and end to end by the
+# required, unmodified regression suite tests/checked-domain-proof-
+# provenance.test (17/17 passing against this tree, run as part of this
+# milestone's full regression per its own report).
+
+test m9-narrow-provenance-isolation-knob {the narrowOpt isolation knob: with narrowing off, fib.n is exactly the pre-M9 widened baseline; with it on (default), the narrowed fact -- a direct, queryable provenance distinction rather than inference from final NIR (spec #35)} -body {
+    set src "fn fib(n):\n    if n < 2:\n        n\n    else:\n        fib(n - 1) + fib(n - 2)\n\nfib(22)"
+    lassign [rangeOf $src 0] hir0 spec0 withoutNarrow
+    lassign [rangeOf $src 1] hir1 spec1 withNarrow
+    list [paramRanges $withoutNarrow [rangeInstance $spec0 fib]] [paramRanges $withNarrow [rangeInstance $spec1 fib]]
+} -result {{{[-∞, 22]}} {{[0, 22]}}}
+
+# ---------------------------------------------------------------------------
+# Capture-site Int Range transport
+
+test m9-capture-sum-refined-shape {the canonical positive control (bench/sum-refined.ir, minimized): step's captured n is [-∞, +∞] with M9's capture transport off, and exactly [1, 400] with it on -- the creation-site fact the "n == 0 else" branch already proves (spec #21, #29)} -body {
+    set src "fn sum(n, acc):\n    if n == 0:\n        acc\n    else:\n        fn step(x):\n            x + n\n        sum(n - 1, step(acc))\n\nsum(400, 0)"
+    lassign [rangeOf $src 1 0] hir0 spec0 withoutCapture
+    lassign [rangeOf $src 1 1] hir1 spec1 withCapture
+    set n0 [captureBinding $hir0 $spec0 step n]
+    set n1 [captureBinding $hir1 $spec1 step n]
+    list [capturedRefRanges $hir0 $withoutCapture [rangeInstance $spec0 step] $n0] \
+         [capturedRefRanges $hir1 $withCapture [rangeInstance $spec1 step] $n1]
+} -result {{{[-∞, +∞]}} {{[1, 400]}}}
+
+test m9-capture-multiple-slots-are-independent {two independently-ranged captured Ints in the same closure are tracked per slot, never joined together (spec #30): a and b keep their own distinct, exact external-caller values, neither one's fact leaking into the other's} -body {
+    set src "fn outer(a, b):\n    if a >= 0:\n        if b >= 100:\n            fn combine(x):\n                x + a + b\n            combine(1)\n        else:\n            0\n    else:\n        0\n\nouter(5, 200)"
+    lassign [rangeOf $src] hir spec analysis
+    set id [rangeInstance $spec combine]
+    set aB [captureBinding $hir $spec combine a]
+    set bB [captureBinding $hir $spec combine b]
+    list [capturedRefRanges $hir $analysis $id $aB] [capturedRefRanges $hir $analysis $id $bB]
+} -result {{{[5, 5] {5}}} {{[200, 200] {200}}}}
+
+test m9-capture-multiple-creation-sites-join {the same (single, shared) closure instance, its one creation site reached through two different external callers of its enclosing function -- n in [1, 10] from one call, [100, 200] from the other, per spec #26's own example -- joins to the safe hull [1, 200], never split by Range (still one instance -- see the identity control below)} -body {
+    set src "fn make(n):\n    fn step(x):\n        x + n\n    step(1)\n\n\[make(1), make(10), make(100), make(200)\]"
+    lassign [rangeOf $src] hir spec analysis
+    set id [rangeInstance $spec step]
+    set nB [captureBinding $hir $spec step n]
+    capturedRefRanges $hir $analysis $id $nB
+} -result {{[1, 200] {1,10,100,200}}}
+
+test m9-capture-broad-capture-stays-broad {a closure capturing an actually unbounded Int (an accumulator that only ever grows, like sum-refined's own acc -- spec #19's own negative control, restated for a capture) must stay broad -- M9 must not infer boundedness merely because every observed call is exact or the closure itself is closed (spec #31); the closure's creation precedes the "n <= 0" guard textually, so it captures acc at outer's own entry, unnarrowed by that guard} -body {
+    set src "fn outer(n, acc):\n    fn step(x):\n        x + acc\n    if n <= 0:\n        step(0)\n    else:\n        outer(n - 1, acc + 1)\n\nouter(500, 0)"
+    lassign [rangeOf $src] hir spec analysis
+    set id [rangeInstance $spec step]
+    set accB [captureBinding $hir $spec step acc]
+    capturedRefRanges $hir $analysis $id $accB
+} -result {{[0, +∞]}}
+
+test m9-capture-open-dynamic-callable-still-sound {call closedness is not capture provenance (spec #24): a closure passed to an open/dynamic caller (unknown call ingress) still has a completely enumerable set of *creation* sites, so its capture fact stays exactly as precise as the closed case -- proving creation-site enumeration, not caller-closedness, is what this compiler's capture theorem actually rests on} -body {
+    set closed "fn outer(n):\n    fn step(x):\n        x + n\n    step(1)\n\nouter(42)"
+    set open "fn outer(n):\n    fn step(x):\n        x + n\n    fn call_it(cb):\n        cb(1)\n    call_it(step)\n\nouter(42)"
+    lassign [rangeOf $closed] hirC specC analysisC
+    lassign [rangeOf $open] hirO specO analysisO
+    set idC [rangeInstance $specC step]
+    set idO [rangeInstance $specO step]
+    set nC [captureBinding $hirC $specC step n]
+    set nO [captureBinding $hirO $specO step n]
+    list [capturedRefRanges $hirC $analysisC $idC $nC] [capturedRefRanges $hirO $analysisO $idO $nO]
+} -result {{{[42, 42] {42}}} {{[42, 42] {42}}}}
+
+test m9-capture-nested-closures-propagate-through-provenance {outer proves/captures n; middle captures n from outer; inner captures n from middle -- the fact propagates through actual creation provenance at each level (the exact same [50, 50] outer itself proves, threaded through two further nested creation sites), never a fabricated call-site fact (spec #32)} -body {
+    set src "fn outer(n):\n    if n >= 10:\n        fn middle(y):\n            fn inner(z):\n                z + n\n            inner(y)\n        middle(1)\n    else:\n        0\n\nouter(50)"
+    lassign [rangeOf $src] hir spec analysis
+    set id [rangeInstance $spec inner]
+    set nB [captureBinding $hir $spec inner n]
+    capturedRefRanges $hir $analysis $id $nB
+} -result {{[50, 50] {50}}}
+
+test m9-capture-does-not-alter-identity {a capture Range is an entry theorem, never an instance key: specialization used-instance count and every instance's own key are identical with capture transport on or off (spec #33)} -body {
+    set src "fn sum(n, acc):\n    if n == 0:\n        acc\n    else:\n        fn step(x):\n            x + n\n        sum(n - 1, step(acc))\n\nsum(400, 0)"
+    set hir [surface::compile $src t.bot -strict 0]
+    set spec [hir::specialize::analyze $hir]
+    set before [list [dict get $spec used] [lmap id [dict get $spec used] {dict get $spec instances $id args}]]
+    hir::range::analyze $hir $spec 1 0 0
+    hir::range::analyze $hir $spec 1 1 1
+    set after [list [dict get $spec used] [lmap id [dict get $spec used] {dict get $spec instances $id args}]]
+    # Re-specializing does not depend on hir::range::analyze at all (M9
+    # touches only hir/range.tcl); this simply pins that calling analyze
+    # with different M9 knobs, any number of times, cannot itself be
+    # observed to change hir::specialize's own instance set.
+    list $before [expr {$before eq $after}]
+} -result {{{i0 i1 i2 i3} {{} {int int} int any}} 1}
+
+test m9-capture-provenance-isolation-knob {the captureOpt isolation knob: with capture transport off, step's captured n is exactly the pre-M9 unknown fact; with it on (default), the transported fact -- direct, queryable provenance (spec #35)} -body {
+    set src "fn sum(n, acc):\n    if n == 0:\n        acc\n    else:\n        fn step(x):\n            x + n\n        sum(n - 1, step(acc))\n\nsum(400, 0)"
+    lassign [rangeOf $src 1 0] hir0 spec0 withoutCapture
+    lassign [rangeOf $src 1 1] hir1 spec1 withCapture
+    set n0 [captureBinding $hir0 $spec0 step n]
+    set n1 [captureBinding $hir1 $spec1 step n]
+    list [capturedRefRanges $hir0 $withoutCapture [rangeInstance $spec0 step] $n0] \
+         [capturedRefRanges $hir1 $withCapture [rangeInstance $spec1 step] $n1]
+} -result {{{[-∞, +∞]}} {{[1, 400]}}}
+
+# ---------------------------------------------------------------------------
+# Interaction with M6 (M6-RANGE-DECIDED-BRANCH-LOWERING.md): a Range
+# recovered only by M9's narrowing can make an existing impossible branch
+# decide through the *existing* ConditionOutcome machinery, with no branch
+# special case of its own (spec #49).
+
+test m9-narrow-decides-existing-branch-via-m6 {fib's own n, once narrowed to [0, 22], makes "n < 0" provably always false through hir::range::ConditionOutcome -- unreachable before narrowing (entry was [-∞, 22], so nothing decided), decided after, with zero changes to hir::range::ConditionOutcome or native/lower.tcl itself} -body {
+    set src "fn fib(n):\n    if n < 0:\n        0\n    else:\n        if n < 2:\n            n\n        else:\n            fib(n - 1) + fib(n - 2)\n\nfib(22)"
+    lassign [rangeOf $src 0] hir0 spec0 baseline
+    lassign [rangeOf $src 1] hir1 spec1 narrowed
+    set id0 [rangeInstance $spec0 fib]
+    set id1 [rangeInstance $spec1 fib]
+    # The outermost `if`'s own condition expression (n < 0), same ExprId in
+    # both HIRs (compiled from the identical source text).
+    set node [dict get $hir1 exprs]
+    set condition ""
+    dict for {e n} $node {
+        if {[dict get $n kind] eq "call"} {
+            lassign [dict get $n target] tk t
+            if {$tk eq "native" && [dict get [hir::symbol $hir1 $t] name] eq "<"} {
+                set args [dict get $n args]
+                if {[hir::kind $hir1 [lindex $args 1]] eq "const"
+                        && [core::value::intOf [hir::get $hir1 [lindex $args 1] value]] == 0} {
+                    set condition $e
+                    break
+                }
+            }
+        }
+    }
+    list [hir::range::ConditionOutcome $hir0 $baseline $id0 $condition] \
+         [hir::range::ConditionOutcome $hir1 $narrowed $id1 $condition]
+} -result {{} 0}
+
+# ---------------------------------------------------------------------------
+# Range lattice corner cases (spec #51), through RangeNarrow specifically --
+# never conflated with hir::types::narrow (M7.b's own combinator, spec #10).
+
+test m9-rangenarrow-bottom {never (unreachable) on either side declines outright, returning OLDWIDENED unchanged} -body {
+    list [hir::range::RangeNarrow never [hir::range::point 5]] \
+         [hir::range::RangeNarrow [hir::range::point 5] never]
+} -result {never {min 5 max 5}}
+
+test m9-rangenarrow-top {top/fully unknown narrowed by top stays top (no information anywhere to recover)} -body {
+    hir::range::RangeNarrow [hir::range::unknown] [hir::range::unknown]
+} -result {min -inf max +inf}
+
+test m9-rangenarrow-finite-preserved {an already-finite widened interval is never touched, whatever the candidate says (spec #11) -- even a candidate that looks tighter is ignored on that already-finite side} -body {
+    hir::range::RangeNarrow [dict create min 0 max 10] [dict create min 3 max 3]
+} -result {min 0 max 10}
+
+test m9-rangenarrow-one-sided-lower {[-∞, b]: only the lower (infinite) side may be recovered} -body {
+    hir::range::RangeNarrow [dict create min -inf max 10] [dict create min 2 max 8]
+} -result {min 2 max 10}
+
+test m9-rangenarrow-one-sided-upper {[a, +∞]: only the upper (infinite) side may be recovered} -body {
+    hir::range::RangeNarrow [dict create min 0 max +inf] [dict create min -3 max 40]
+} -result {min 0 max 40}
+
+test m9-rangenarrow-exact-value-preserved-on-noop {a no-op narrowing (candidate proves nothing new on either infinite side) must not silently drop an already-tracked exact value set (an earlier draft of this proc got exactly this wrong)} -body {
+    hir::range::RangeNarrow [hir::range::join [hir::range::point 5] [hir::range::point 150]] [hir::range::unknown]
+} -result {min 5 max 150 exact {5 150}}
+
+test m9-rangenarrow-negative-and-zero-crossing {a negative, zero-crossing candidate recovers correctly on both sides independently} -body {
+    list [hir::range::RangeNarrow [dict create min -inf max 10] [dict create min -7 max 3]] \
+         [hir::range::RangeNarrow [dict create min -inf max +inf] [dict create min -7 max 3]]
+} -result {{min -7 max 10} {min -7 max 3}}
+
+test m9-rangenarrow-would-be-empty-declines {a candidate that would make the result empty (disagreeing with an already-finite opposite bound) declines outright rather than propagate an empty Range (this lattice has no binding-level bottom for a live entry fact)} -body {
+    hir::range::RangeNarrow [dict create min 0 max 5] [dict create min -inf max -1]
+} -result {min 0 max 5}
+
+test m9-rangenarrow-sentinel-strings-not-numified {regression: RangeNarrow must never route a bare "-inf"/"+inf" sentinel through an `expr` ternary (Tcl's ternary numifies its chosen branch, silently reformatting "-inf" to "-Inf" and breaking every later `eq "-inf"` check) -- isUnknown must still see the lowercase sentinel after a real narrowing step} -body {
+    set r [hir::range::RangeNarrow [hir::range::unknown] [dict create min 3 max 9]]
+    list [dict get $r min] [hir::range::isUnknown [hir::range::RangeNarrow [hir::range::unknown] [hir::range::unknown]]]
+} -result {3 1}
+
+# Checked-domain corner case (spec #50): M9 narrowing must not confuse a
+# nominal/domain proof (Byte and friends) with an ordinary observed Range
+# fact. Exercised end to end by the required, unmodified regression suite
+# tests/checked-domain-proof-provenance.test (17/17 passing against this
+# tree) -- not reproduced here (the domain fixtures there already need the
+# real library-loading path this focused file does not otherwise use).
+
+cleanupTests

@@ -214,12 +214,12 @@ test range-induction-3 {a step of +-2 against an == guard is not proven (it coul
     paramRanges $analysis [rangeInstance $spec count2]
 } -result {{[-∞, 100000]} {[0, +∞]}}
 
-test range-induction-4 {an opaque, call-derived next value (csv's scan_records shape: no i + c pattern at all) is not a step candidate, so an otherwise-provable >= guard's own branch-narrowing still applies to the *comparison*, but the parameter's own range across the backedge is not tightened by hir/induction.tcl} -body {
+test range-induction-4 {an opaque, call-derived next value (csv's scan_records shape: no i + c pattern at all) is not a step candidate, so hir/induction.tcl itself proves nothing here -- but M9's post-widen narrowing (M9-INSTANCE-ENTRY-INT-FACTS.md), an entirely different, general mechanism, now legitimately recovers a (very loose) upper bound: the branch guard "index >= length(text)" already proved next_index's own incoming argument <= smallMax-1 (length()'s own collection-length fact), so next_index's body (i + 1) is itself provably <= smallMax, and scan's self-recursive feedback (index <- next_index(index)) carries that back to scan's own entry once narrowing folds self-edges in with external ones -- sound (every reachable index is, trivially, some String's length or less), just far looser than a real trip-count bound; still not fitsSmall (the lower side stays unbounded), so this changes no codegen decision} -body {
     lassign [rangeOf "fn next_index(i):\n    i + 1\n\nfn scan(text, index, count):\n    if index >= length(text):\n        return count\n    scan(text, next_index(index), count + 1)\n\nscan(\"abcde\", 0, 0)"] hir spec analysis
     set id [rangeInstance $spec scan]
     lassign [paramRanges $analysis $id] textR indexR countR
     list $indexR [hir::range::fitsSmall [lindex [dict get [dict get $analysis instances $id] params] 1]]
-} -result {{[-∞, +∞]} 0}
+} -result [list "\[-∞, $hir::range::smallMax\]" 0]
 
 # ---------------------------------------------------------------------------
 # hir/induction.tcl: nested guard recognition (the milestone that lifted
@@ -335,12 +335,12 @@ test range-narrow-param-4 {a local binding narrows exactly as it did before this
 # call's argument Range -- however it was proven, not only a literal --
 # seeds the callee parameter it targets.
 
-test range-propagate-1 {an exact call's Ref argument, whose own Range the caller already proved, seeds the callee -- not only a syntactic literal (spec #8, #13, #15)} -body {
+test range-propagate-1 {an exact call's Ref argument, whose own Range the caller already proved, seeds the callee -- not only a syntactic literal (spec #8, #13, #15); drive's own entry was [-∞, 500] before M9 (self-tail widening discarded the lower bound the same way fib's does) -- M9's post-widen narrowing now recovers [0, 500]: the external seed (500) and the recursive feedback (i - 1 under the "i <= 0 else" branch's own i > 0, i.e. i >= 1) join to exactly that, a stable narrowing fixed point (spec #12, #18)} -body {
     lassign [rangeOf "fn work(i):\n    i + 1\n\nfn drive(i, total):\n    if i <= 0:\n        total\n    else:\n        work(i)\n        drive(i - 1, total + 1)\n\ndrive(500, 0)"] hir spec analysis
     list [paramRanges $analysis [rangeInstance $spec drive]] [paramRanges $analysis [rangeInstance $spec work]]
-} -result {{{[-∞, 500]} {[0, +∞]}} {{[1, 500]}}}
+} -result {{{[0, 500]} {[0, +∞]}} {{[1, 500]}}}
 
-test range-propagate-2 {fib's else branch proves n >= 2, and n-1/n-2 there inherit the tighter bound (spec #14, acceptance case)} -body {
+test range-propagate-2 {fib's else branch proves n >= 2, and n-1/n-2 there inherit the tighter bound (spec #14, acceptance case); fib's own entry was [-∞, 18] before M9 (n's self-recursive feedback widens the lower bound to infinity even though the recursive calls only ever produce n - 1 >= 1 and n - 2 >= 0) -- M9's post-widen narrowing now recovers [0, 18] (the external seed 18, joined with the recursive feedback's own [0, 21] under the widened invariant, stabilizes there), and the condition ref / then-branch ref (which read the entry range directly/narrow it on the "<" side) improve with it; the else-branch refs and the n-1/n-2 subtraction results were already [2, 18]/[1, 17]/[0, 16] before M9 (their lower bound comes from the ">=" branch narrowing itself, independent of the entry's own lower bound) and stay exactly as before -- M9 is a precision pass, never a reason for an already-sound fact to move (spec #37)} -body {
     lassign [rangeOf "fn fib(n):\n    if n < 2:\n        n\n    else:\n        fib(n - 1) + fib(n - 2)\n\nfib(18)"] hir spec analysis
     set id [rangeInstance $spec fib]
     set b [paramBinding $hir $spec $id n]
@@ -357,7 +357,7 @@ test range-propagate-2 {fib's else branch proves n >= 2, and n-1/n-2 there inher
         }
     }
     list $entry $branchRefs $subExprRanges
-} -result {{{[-∞, 18]}} {{[-∞, 18]} {[-∞, 1]} {[2, 18]} {[2, 18]}} {{[1, 17]} {[0, 16]}}}
+} -result {{{[0, 18]}} {{[0, 18]} {[0, 1]} {[2, 18]} {[2, 18]}} {{[1, 17]} {[0, 16]}}}
 
 test range-propagate-3 {multiple exact callers of the same instance join to a safe hull, not an intersection or whichever call site ran first (spec #11, #35)} -body {
     lassign [rangeOf "fn f(x):\n    x + 0\n\nfn caller_a():\n    f(5)\n\nfn caller_b():\n    f(150)\n\n\[caller_a(), caller_b()\]"] hir spec analysis

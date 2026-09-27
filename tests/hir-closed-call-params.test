@@ -315,7 +315,7 @@ f(10)
 # fact; a parameter *transformed* on the backedge (n - 1 each call) widens
 # soundly instead of incorrectly keeping only its entry value.
 
-test closed-call-self-tail-forwarding {a parameter passed through a self-tail call unchanged keeps its exact caller fact across the backedge} -body {
+test closed-call-self-tail-forwarding {a parameter passed through a self-tail call unchanged keeps its exact caller fact across the backedge; n itself was [-∞, 3] before M9 (self-tail widening discarded its lower bound) -- M9's post-widen narrowing now recovers [0, 3] the same way fib/loop-count do (the external seed 3, joined with the "n <= 0 else" branch's own n - 1 >= 0 feedback, is a stable narrowing fixed point)} -body {
     lassign [closedCallFacts {
 fn walk(x, n):
     if n <= 0:
@@ -326,9 +326,9 @@ fn walk(x, n):
 walk(7, 3)
 }] hir spec analysis
     paramRanges $analysis [instanceNamed $spec walk]
-} -result {{[7, 7] {7}} {[-∞, 3]}}
+} -result {{[7, 7] {7}} {[0, 3]}}
 
-test closed-call-recursive-transformation-widens {a parameter transformed on the self-tail backedge (n - 1) widens rather than retaining only its entry value} -body {
+test closed-call-recursive-transformation-widens {a parameter transformed on the self-tail backedge (n - 1) widens rather than retaining only its entry value -- pre-M9: [-∞, 500]; M9's post-widen narrowing then recovers the lower bound the widen step discarded ([0, 500]: the external seed 500, joined with the "n <= 0 else" branch's own n - 1 >= 0 feedback, stabilizes there), still by widening first (this test's own name, and the mechanism it names, is otherwise unchanged: narrowing is a strictly separate second pass, never a reason not to widen)} -body {
     lassign [closedCallFacts {
 fn count(n):
     if n <= 0:
@@ -339,7 +339,7 @@ fn count(n):
 count(500)
 }] hir spec analysis
     paramRanges $analysis [instanceNamed $spec count]
-} -result {{[-∞, 500]}}
+} -result {{[0, 500]}}
 
 # ---------------------------------------------------------------------------
 # Plain interval facts (spec #76): a caller-side value the analysis cannot

@@ -361,6 +361,92 @@ proc hir::range::widen {old new} {
     return [dict create min $mn max $mx]
 }
 
+# M9 (M9-INSTANCE-ENTRY-INT-FACTS.md): the named post-widen narrowing
+# primitive, distinct from hir::types::narrow (M7.b's own type-fact
+# combinator -- an unrelated lattice, never conflated with this one).
+#
+# RangeNarrow(oldWidened, candidate): OLDWIDENED with each side that widen()
+# (above) pushed to infinity replaced by CANDIDATE's corresponding bound, if
+# CANDIDATE actually has one -- an already-finite side of OLDWIDENED is never
+# touched, whatever CANDIDATE says (spec #11: preserve finite widened
+# bounds; this domain gains no stronger rule for narrowing an already-finite
+# bound in this milestone). CANDIDATE is always a bound this same interval
+# transfer just proved, recomputed under OLDWIDENED itself as the entry
+# assumption (never an unrelated/arbitrary Range) -- so filling in an
+# infinite side with it can only ever remove information the *widen* step
+# discarded, never assert something the ordinary sound transfer did not
+# itself derive. Never carries an `exact` key forward, exactly like widen
+# (see its own comment): narrowing an interval bound is not this milestone's
+# license to also mint a new exact-value-set fact.
+#
+# Soundness (the report's own argument, restated where the code lives): if
+# OLDWIDENED is already a sound over-approximation of every value the real
+# program can produce at this entry (the ascending fixpoint's own invariant,
+# unchanged by this file), and CANDIDATE is what the same sound transfer
+# proves when OLDWIDENED itself is assumed at every relevant incoming edge,
+# then CANDIDATE is itself sound *relative to that assumption* -- so
+# replacing only OLDWIDENED's own uninformative (infinite) side with
+# CANDIDATE's corresponding bound can only shrink the set of admitted
+# values, never exclude a real one, on that side alone (the finite side is
+# never touched, so nothing there can regress). Iterating this to a
+# genuine fixed point (RangeNarrow(X, F(X)) == X) is the standard widen/
+# narrow discipline (Cousot & Cousot): each step is still a sound invariant
+# of the same program, just a tighter one, and the process may stop at any
+# point (or fall back to OLDWIDENED outright) without ever being unsound --
+# unlike widen(), which needs no such argument (it only ever adds
+# information, i.e. relaxes the bound), RangeNarrow is safe specifically
+# because it only removes information *conditioned on OLDWIDENED already
+# being provably sound at the sides it touches*, which every caller below
+# guarantees by construction (see analyze's own narrowing phase).
+#
+# A would-be-empty result (CANDIDATE's own bound disagrees with OLDWIDENED's
+# already-finite opposite bound) declines outright rather than propagate an
+# empty Range through a lattice with no binding-level bottom (see
+# `intersect`'s own identical discipline, above) -- this should never
+# actually happen for a candidate honestly derived from OLDWIDENED itself,
+# but the fallback is the conservative side regardless.
+proc hir::range::RangeNarrow {oldWidened candidate} {
+    if {$oldWidened eq "never" || $candidate eq "never"} {
+        return $oldWidened
+    }
+    set omn [dict get $oldWidened min]
+    set omx [dict get $oldWidened max]
+    set cmn [dict get $candidate min]
+    set cmx [dict get $candidate max]
+    # Not a `expr {cond ? a : b}` ternary (unlike every other bound
+    # combinator in this file, e.g. Min/Max/AddBound/SubBound, all written
+    # as plain `if`, precisely to avoid this): `expr`'s own ternary forces
+    # its *chosen* branch through Tcl's numeric parser even when the value
+    # is one of this file's own "-inf"/"+inf" string sentinels (both parse
+    # as valid Tcl doubles), silently reformatting it to Tcl's own
+    # canonical "-Inf"/"Inf" spelling -- breaking every later `eq "-inf"`/
+    # `eq "+inf"` check on that value throughout this file. Confirmed
+    # directly (`expr {1 ? "-inf" : "-inf"}` returns "-Inf", not "-inf").
+    if {$omn eq "-inf"} {
+        set mn $cmn
+    } else {
+        set mn $omn
+    }
+    if {$omx eq "+inf"} {
+        set mx $cmx
+    } else {
+        set mx $omx
+    }
+    if {$mn eq $omn && $mx eq $omx} {
+        # Nothing this call actually touched: OLDWIDENED unchanged, exact
+        # set and all -- a no-op narrowing step must never silently drop a
+        # fact it did not itself refine (this is what an earlier draft of
+        # this proc got wrong: reconstructing a plain min/max dict even
+        # when neither bound moved wiped a still-valid `exact` set, e.g.
+        # range-propagate-3's join of two literal callers).
+        return $oldWidened
+    }
+    if {$mn ne "-inf" && $mx ne "+inf" && $mn > $mx} {
+        return $oldWidened
+    }
+    return [dict create min $mn max $mx]
+}
+
 proc hir::range::AddBound {a b} {
     if {$a eq "-inf" || $b eq "-inf"} {
         return -inf
@@ -755,7 +841,32 @@ proc hir::range::Expr {hirVar ctxVar e} {
             return $r
         }
         block {
-            # A nested block's body is its own region; nothing to compute here.
+            # A nested block's body is its own region; nothing to compute
+            # here directly -- but this expression node is also HIR's sole
+            # representation of a closure *creation* site (hir/hir.tcl: a
+            # `block` node's own `captures`, evaluated wherever it lexically
+            # appears, whether bound, passed, returned or aliased -- none of
+            # those add a further creation, since they only copy the one
+            # value this evaluation already produced). M9's capture-Range
+            # transport (M9-INSTANCE-ENTRY-INT-FACTS.md) records, for every
+            # binding this literal captures, exactly the Range CTX already
+            # proves for it at this reachable point -- the same
+            # branch-narrowed fact an ordinary `ref` of the same binding
+            # would see here (spec #57: reading the specialized/range view
+            # at the creation expression, not the binding's global source
+            # type). analyze's own round loop folds this across every used
+            # instance's reachable creation of the same child block.
+            set captures [dict get $node captures]
+            if {$captures ne {}} {
+                set bindings [dict get $ctx bindings]
+                set capRanges [dict create]
+                foreach b $captures {
+                    dict set capRanges $b [expr {[dict exists $bindings $b] ? [dict get $bindings $b] : [unknown]}]
+                }
+                set creates [dict get $ctx creates]
+                lappend creates [list $e $capRanges]
+                dict set ctx creates $creates
+            }
             return [unknown]
         }
         call {
@@ -1707,20 +1818,31 @@ proc hir::range::MustBeEqual {ra rb} {
 # verifyDeclaredResults already accepts for an ordinary function body.
 proc hir::range::analyzeSequence {hir body} {
     set ctx [dict create bindings [dict create] returnRange never breakRanges {} \
-        exprs [dict create] calls {} id verify instanceCalls {} monotone {} calleeResults {}]
+        exprs [dict create] calls {} id verify instanceCalls {} monotone {} calleeResults {} creates {}]
     return [Sequence hir ctx $body]
 }
 
-proc hir::range::AnalyzeInstance {hir id instanceCalls block params assumed monotone calleeResults} {
+# CAPTURESEED (M9, default {}, every pre-M9 caller omitting it unaffected):
+# BindingId -> Range, the region's own captured bindings' entry facts (analyze
+# below folds these the same way it folds parameter entry facts -- see its
+# own header on the M9 capture-Range theorem). Seeded into ctx bindings
+# exactly like a parameter, so an ordinary `ref` of a captured binding inside
+# this region is already ConstrainType'd/narrowed by the existing machinery
+# with no special-casing (spec #38: existing consumers stay unchanged).
+proc hir::range::AnalyzeInstance {hir id instanceCalls block params assumed monotone calleeResults {captureSeed {}}} {
     set ctx [dict create bindings [dict create] returnRange never breakRanges {} exprs [dict create] \
-        calls {} id $id instanceCalls $instanceCalls monotone $monotone calleeResults $calleeResults]
+        calls {} id $id instanceCalls $instanceCalls monotone $monotone calleeResults $calleeResults creates {}]
     foreach b $params r $assumed {
+        dict set ctx bindings $b $r
+    }
+    dict for {b r} $captureSeed {
         dict set ctx bindings $b $r
     }
     set body [expr {$block eq "program" ? [hir::roots $hir] : [hir::get $hir $block body]}]
     set final [Sequence hir ctx $body]
     set result [join $final [dict get $ctx returnRange]]
-    return [dict create exprs [dict get $ctx exprs] result $result calls [dict get $ctx calls]]
+    return [dict create exprs [dict get $ctx exprs] result $result calls [dict get $ctx calls] \
+        creates [dict get $ctx creates]]
 }
 
 # The block ExprIds that materialize (hir/aot.tcl::materializedBlocks) as an
@@ -1758,12 +1880,12 @@ proc hir::range::OpenInstances {spec} {
 # already proved (never touched -- see analyze's own comment on this).
 # Returns {outcome ASSUMED'}: the last pass's AnalyzeInstance result and the
 # (possibly narrower-information, widened) settled entry Ranges.
-proc hir::range::SettleInstance {hir id instanceCalls block params assumed locked monotone calleeResults} {
+proc hir::range::SettleInstance {hir id instanceCalls block params assumed locked monotone calleeResults {captureSeed {}}} {
     variable maxPasses
     set n [llength $params]
     set outcome {}
     for {set pass 1} {$pass <= $maxPasses} {incr pass} {
-        set outcome [AnalyzeInstance $hir $id $instanceCalls $block $params $assumed $monotone $calleeResults]
+        set outcome [AnalyzeInstance $hir $id $instanceCalls $block $params $assumed $monotone $calleeResults $captureSeed]
         set selfArgs {}
         foreach pair [dict get $outcome calls] {
             lassign $pair target argRanges
@@ -1844,7 +1966,18 @@ proc hir::range::SettleInstance {hir id instanceCalls block params assumed locke
 # unsound over-narrowing; it keeps whatever hir/induction.tcl proved and is
 # otherwise unknown, exactly as an instance with no known callers at all
 # already was before this milestone.
-proc hir::range::analyze {hir spec {callFactsOpt 1}} {
+# NARROWOPT/CAPTUREOPT (M9, both default 1: production behavior unchanged
+# for every existing caller): test/audit-only isolation knobs (spec #35,
+# #60), never a user-facing flag -- they let a test or the audit tooling
+# measure "post-widen narrowing only" (captureOpt 0), "capture-Range
+# transport only" (narrowOpt 0) and "both" (defaults) separately, the same
+# way M7.c.1's own closeCallersRoundLimit is a debug/audit-only knob, not a
+# CLI option. CAPTUREOPT 0 computes captureSeeds exactly as usual (spec
+# #38: no separate code path) but never seeds it into ctx bindings, so a
+# captured binding reads as unknown exactly as before this milestone.
+# NARROWOPT 0 skips the narrowing phase outright, committing the ascending
+# phase's own widened ASSUMED/CAPTURESEEDS as final.
+proc hir::range::analyze {hir spec {callFactsOpt 1} {narrowOpt 1} {captureOpt 1}} {
     # hir/induction.tcl is fed only the old, purely syntactic external seeds
     # (a literal argument, or a direct call to a native with context-free
     # -result-range metadata) -- unchanged by, and entirely independent of,
@@ -1877,6 +2010,19 @@ proc hir::range::analyze {hir spec {callFactsOpt 1}} {
     # unknown (never just started unknown with nothing yet to say -- see
     # the caller-propagation fold below, which must tell the two apart).
     set poisonedOf [dict create]
+    # M9 (M9-INSTANCE-ENTRY-INT-FACTS.md): child block ExprId (a closure
+    # literal's own HIR node -- hir/hir.tcl's `block` kind, the sole
+    # representation of a closure-creation site, spec #21-22) -> BindingId
+    # -> Range, the join of every reachable creation's own captured-binding
+    # fact (Expr's own `block` case, above), across every used instance's
+    # region and, within this ascending phase, across every round so far
+    # (spec #26: multiple creation sites join, never split by Range; spec
+    # #55-56: a binding/block missing here is "no evidence yet", never a
+    # fabricated bottom). Seeded into a captured instance's own ctx bindings
+    # exactly like a parameter (AnalyzeInstance's own captureSeed argument),
+    # so the existing per-`ref` ConstrainType/narrowing machinery consumes it
+    # with no special-casing (spec #38).
+    set captureSeeds [dict create]
 
     foreach id $ids {
         set instance [dict get $spec instances $id]
@@ -1935,12 +2081,24 @@ proc hir::range::analyze {hir spec {callFactsOpt 1}} {
     for {set round 1} {$round <= $roundBudget} {incr round} {
         set changed 0
         set contributions [dict create]
+        set roundCaptures [dict create]
         foreach id $ids {
             set before [dict get $assumed $id]
+            set block [dict get $blockOf $id]
+            set captureSeed [expr {$captureOpt && [dict exists $captureSeeds $block] ? [dict get $captureSeeds $block] : {}}]
             lassign [SettleInstance [dict get $viewOf $id] $id [dict get $instanceCallsOf $id] \
-                [dict get $blockOf $id] [dict get $paramsOf $id] $before \
-                [dict get $lockedOf $id] [dict get $monotoneOf $id] $calleeResults] outcome settled
+                $block [dict get $paramsOf $id] $before \
+                [dict get $lockedOf $id] [dict get $monotoneOf $id] $calleeResults $captureSeed] outcome settled
             dict set outcomes $id $outcome
+            foreach pair [dict get $outcome creates] {
+                lassign $pair childBlock capRanges
+                set current [expr {[dict exists $roundCaptures $childBlock] ? [dict get $roundCaptures $childBlock] : {}}]
+                dict for {b r} $capRanges {
+                    set prior [expr {[dict exists $current $b] ? [dict get $current $b] : "never"}]
+                    dict set current $b [join $prior $r]
+                }
+                dict set roundCaptures $childBlock $current
+            }
             if {$settled ne $before} {
                 set locked [dict get $lockedOf $id]
                 set poisoned [dict get $poisonedOf $id]
@@ -2029,6 +2187,33 @@ proc hir::range::analyze {hir spec {callFactsOpt 1}} {
             }
             dict set assumed $target $next
         }
+        # M9: replace captureSeeds with this round's own fresh creation-site
+        # facts (ROUNDCAPTURES already joins every creation site of the same
+        # child block reached *this* round, spec #26) -- never accumulated
+        # by union across rounds. Reachability of a creation site is a
+        # semantic/type-level fact (KnownOutcome), never Range-dependent, so
+        # the same set of creation sites is reached every round regardless
+        # of how far the ascending fixpoint has settled; only their Range
+        # VALUES improve round to round, exactly like a non-self-recursive
+        # parameter's own "recomputes fresh from this round's calls instead
+        # of folding onto a rougher fact an earlier round produced" (the
+        # branch just above this one). Accumulating by union instead (an
+        # earlier draft of this proc did) is unsound-in-effect: an early
+        # round can see a creating instance's own parameters still
+        # unseeded/unknown, producing an artificially wide capture Range
+        # that a later round's *correct*, narrower fact can then only ever
+        # join with, never fully replace -- permanently polluting the
+        # result (confirmed directly: a two-branch-guarded capture whose
+        # true fact is exactly its external caller's point values was stuck
+        # at the guard's own bare lower bound instead).
+        dict for {childBlock capRanges} $roundCaptures {
+            set current [expr {[dict exists $captureSeeds $childBlock] ? [dict get $captureSeeds $childBlock] : {}}]
+            set next $capRanges
+            if {$next ne $current} {
+                set changed 1
+            }
+            dict set captureSeeds $childBlock $next
+        }
         # Successful value ranges are per instance; no effect fact follows.
         # An initial unknown is provisional while caller entry ranges settle.
         # Once a concrete summary appears it can only widen. If later caller
@@ -2065,10 +2250,144 @@ proc hir::range::analyze {hir spec {callFactsOpt 1}} {
         }
     }
 
+    # ---------------------------------------------------------------------
+    # M9 post-widen narrowing (M9-INSTANCE-ENTRY-INT-FACTS.md).
+    #
+    # ASSUMED/CAPTURESEEDS above are already a sound, safe *widened*
+    # post-fixpoint (unchanged: everything above this comment is exactly
+    # the pre-M9 ascending analysis). This second, separate bounded pass
+    # recomputes the same transfer once per round -- a single AnalyzeInstance
+    # call per instance, deliberately never SettleInstance's own internal
+    # self-call sub-loop, which re-applies `widen` and would immediately
+    # push any bound this phase just recovered straight back to infinity --
+    # and folds every incoming edge (self-recursive and external caller
+    # alike: spec #12, #14 -- an ordinary call target is no longer excluded
+    # by "target eq id" the way the ascending phase's SettleInstance/
+    # contributions split needed, since there is no separate self-call
+    # sub-fixpoint here to double-count against) into RangeNarrow(old,
+    # candidate) instead of join+widen. RangeNarrow only ever fills a side
+    # ASSUMED's own widen already pushed to infinity (see its own comment):
+    # every committed value here is provably no broader than the ascending
+    # phase's own baseline, so this phase can only ever refine, never
+    # regress, whatever the ascending phase already proved (spec #37).
+    #
+    # An OPEN instance (unknown/open ingress, spec #13) is treated exactly
+    # as the ascending phase treats it: never a target of a folded
+    # contribution, so its own entry stays exactly what the ascending phase
+    # already gave it. An induction-locked index (LOCKEDOF) is likewise
+    # never touched -- induction's own conclusion, not a candidate to
+    # narrow.
+    #
+    # Convergence discipline (spec #16-17, reusing M7.c.1's own rule: "an
+    # unfinished proof pass must not leak partial precision"): NARROWED/
+    # NARROWEDCAPTURES only ever get *committed* back into ASSUMED/
+    # CAPTURESEEDS if this loop reaches a genuine fixed point (no change) at
+    # or before ROUNDBUDGET (the same bound the ascending phase already
+    # uses -- a chain of N instances can need up to N rounds here too, for
+    # exactly the same reason). If the final allowed round still changed
+    # something, every candidate from this phase is discarded outright and
+    # the widened baseline is used as-is: no user-facing error, and no
+    # partially-narrowed instance is ever committed merely because the
+    # round budget expired.
+    set narrowed $assumed
+    set narrowedCaptures $captureSeeds
+    set narrowConverged 0
+    if {$narrowOpt} {
+    for {set round 1} {$round <= $roundBudget} {incr round} {
+        set changed 0
+        set contributions [dict create]
+        set roundCaptures [dict create]
+        set freshOutcomes [dict create]
+        foreach id $ids {
+            set block [dict get $blockOf $id]
+            set captureSeed [expr {$captureOpt && [dict exists $narrowedCaptures $block] ? [dict get $narrowedCaptures $block] : {}}]
+            set outcome [AnalyzeInstance [dict get $viewOf $id] $id [dict get $instanceCallsOf $id] \
+                $block [dict get $paramsOf $id] [dict get $narrowed $id] \
+                [dict get $monotoneOf $id] $calleeResults $captureSeed]
+            dict set freshOutcomes $id $outcome
+            foreach pair [dict get $outcome calls] {
+                lassign $pair target argRanges
+                if {[dict exists $open $target]} {
+                    continue
+                }
+                set current [expr {[dict exists $contributions $target]
+                    ? [dict get $contributions $target] : [lrepeat [llength $argRanges] never]}]
+                set next {}
+                foreach c $current r $argRanges {
+                    lappend next [join $c $r]
+                }
+                dict set contributions $target $next
+            }
+            foreach pair [dict get $outcome creates] {
+                lassign $pair childBlock capRanges
+                set current [expr {[dict exists $roundCaptures $childBlock] ? [dict get $roundCaptures $childBlock] : {}}]
+                dict for {b r} $capRanges {
+                    set prior [expr {[dict exists $current $b] ? [dict get $current $b] : "never"}]
+                    dict set current $b [join $prior $r]
+                }
+                dict set roundCaptures $childBlock $current
+            }
+        }
+        dict for {target contribution} $contributions {
+            set locked [dict get $lockedOf $target]
+            set current [dict get $narrowed $target]
+            set next {}
+            set i 0
+            foreach o $current c $contribution {
+                if {[dict exists $locked $i]} {
+                    lappend next $o
+                } else {
+                    lappend next [RangeNarrow $o [expr {$c eq "never" ? [unknown] : $c}]]
+                }
+                incr i
+            }
+            if {$next ne $current} {
+                set changed 1
+            }
+            dict set narrowed $target $next
+        }
+        dict for {childBlock capRanges} $roundCaptures {
+            set current [expr {[dict exists $narrowedCaptures $childBlock] ? [dict get $narrowedCaptures $childBlock] : {}}]
+            set next $current
+            dict for {b r} $capRanges {
+                set old [expr {[dict exists $current $b] ? [dict get $current $b] : [unknown]}]
+                dict set next $b [RangeNarrow $old $r]
+            }
+            if {$next ne $current} {
+                set changed 1
+            }
+            dict set narrowedCaptures $childBlock $next
+        }
+        if {!$changed} {
+            set narrowConverged 1
+            break
+        }
+    }
+    }
+    if {!$narrowConverged} {
+        # Did not stabilize within budget: leak nothing (spec #16-17) --
+        # fall back to the ascending phase's own widened baseline outright.
+        set narrowed $assumed
+        set narrowedCaptures $captureSeeds
+    }
+
+    # One final recompute under whichever facts were actually committed
+    # (the narrowed candidate, or the widened baseline on fallback), so
+    # every instance's own recorded exprs/result reflects exactly that
+    # committed entry fact -- never a still-converging intermediate round's.
+    set finalOutcomes [dict create]
+    foreach id $ids {
+        set block [dict get $blockOf $id]
+        set captureSeed [expr {$captureOpt && [dict exists $narrowedCaptures $block] ? [dict get $narrowedCaptures $block] : {}}]
+        dict set finalOutcomes $id [AnalyzeInstance [dict get $viewOf $id] $id [dict get $instanceCallsOf $id] \
+            $block [dict get $paramsOf $id] [dict get $narrowed $id] \
+            [dict get $monotoneOf $id] $calleeResults $captureSeed]
+    }
+
     set instances [dict create]
     foreach id $ids {
-        set outcome [dict get $outcomes $id]
-        dict set instances $id [dict create params [dict get $assumed $id] \
+        set outcome [dict get $finalOutcomes $id]
+        dict set instances $id [dict create params [dict get $narrowed $id] \
             exprs [dict get $outcome exprs] result [dict get $outcome result]]
     }
     return [dict create instances $instances induction $induction]
