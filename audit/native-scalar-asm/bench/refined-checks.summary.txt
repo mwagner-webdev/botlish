@@ -2,7 +2,7 @@ source:  bench/refined-checks.ir
 backend: Cranelift (specialize=1)
 asm:     refined-checks.asm
 vcode:   refined-checks.vcode
-machine-code bytes: 9868 (per function: 1172 39 289 617 74 74 74 125 125 681 262 932 588 468 452 644 155 125 103 453 758 486 828 344)
+machine-code bytes: 9490 (per function: 1172 39 289 617 74 74 74 125 125 961 262 222 272 252 552 468 660 155 125 103 453 758 486 828 344)
 
 functions:
   0 <program entry>: nir-regs=40
@@ -14,21 +14,22 @@ functions:
   6 ascii::is_lower<int>: nir-regs=13
   7 ascii::is_alphabetic<int>: nir-regs=8
   8 ascii::is_alphanumeric<int>: nir-regs=8
-  9 web::is_emailish<str>: nir-regs=25
+  9 web::is_emailish<str>: nir-regs=33
   10 char_at<generic>: nir-regs=6
-  11 scan_local<generic>: nir-regs=48
-  12 scan_label<generic>: nir-regs=20
-  13 scan_alpha<generic>: nir-regs=13
-  14 tld_ok<generic>: nir-regs=11
-  15 domain_loop<generic>: nir-regs=37
-  16 web::is_unreserved<generic>: nir-regs=9
-  17 web::uri_escape_text<generic>: nir-regs=7
-  18 high_nibble<generic>: nir-regs=15
-  19 hex_pair<generic>: nir-regs=9
-  20 esc_bytes<generic>: nir-regs=14
-  21 esc_char<generic>: nir-regs=23
-  22 esc_from<generic>: nir-regs=18
-  23 check<int, int, str, str>: nir-regs=20
+  11 char_at<generic>: nir-regs=6
+  12 is_local_char<generic>: nir-regs=9
+  13 is_label_char<generic>: nir-regs=13
+  14 scan_while<generic>: nir-regs=12
+  15 tld_ok<generic>: nir-regs=12
+  16 domain_loop<generic>: nir-regs=38
+  17 web::is_unreserved<generic>: nir-regs=9
+  18 web::uri_escape_text<generic>: nir-regs=7
+  19 high_nibble<generic>: nir-regs=15
+  20 hex_pair<generic>: nir-regs=9
+  21 esc_bytes<generic>: nir-regs=14
+  22 esc_char<generic>: nir-regs=23
+  23 esc_from<generic>: nir-regs=18
+  24 check<int, int, str, str>: nir-regs=20
 
 GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
   function 0 "<program>"
@@ -149,15 +150,15 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 9 "web::is_emailish"
-    NIR regs: 25
+    NIR regs: 33
     raw regs: 3
-    managed-capable regs: 22
+    managed-capable regs: 30
     effects: may_error=true may_gc=true
-    safepoints: 4
-    root candidates: 6
-    max live roots: 4
-    shadow slots: 4
-    entry zero slots: 1
+    safepoints: 7
+    root candidates: 14
+    max live roots: 7
+    shadow slots: 7
+    entry zero slots: 0
     depth reservation: no
     storage: native frame
   
@@ -174,49 +175,10 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 11 "scan_local"
-    NIR regs: 48
+  function 11 "char_at"
+    NIR regs: 6
     raw regs: 1
-    managed-capable regs: 47
-    effects: may_error=true may_gc=true
-    safepoints: 2
-    root candidates: 4
-    max live roots: 4
-    shadow slots: 4
-    entry zero slots: 1
-    depth reservation: no
-    storage: native frame
-  
-  function 12 "scan_label"
-    NIR regs: 20
-    raw regs: 1
-    managed-capable regs: 19
-    effects: may_error=true may_gc=true
-    safepoints: 2
-    root candidates: 4
-    max live roots: 4
-    shadow slots: 4
-    entry zero slots: 1
-    depth reservation: no
-    storage: native frame
-  
-  function 13 "scan_alpha"
-    NIR regs: 13
-    raw regs: 1
-    managed-capable regs: 12
-    effects: may_error=true may_gc=true
-    safepoints: 2
-    root candidates: 4
-    max live roots: 4
-    shadow slots: 4
-    entry zero slots: 1
-    depth reservation: no
-    storage: native frame
-  
-  function 14 "tld_ok"
-    NIR regs: 11
-    raw regs: 1
-    managed-capable regs: 10
+    managed-capable regs: 5
     effects: may_error=true may_gc=true
     safepoints: 2
     root candidates: 4
@@ -226,20 +188,72 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 15 "domain_loop"
-    NIR regs: 37
-    raw regs: 10
-    managed-capable regs: 27
+  function 12 "is_local_char"
+    NIR regs: 9
+    raw regs: 0
+    managed-capable regs: 9
+    effects: may_error=true may_gc=false
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 0
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+  
+  function 13 "is_label_char"
+    NIR regs: 13
+    raw regs: 2
+    managed-capable regs: 11
+    effects: may_error=true may_gc=false
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 0
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+  
+  function 14 "scan_while"
+    NIR regs: 12
+    raw regs: 1
+    managed-capable regs: 11
     effects: may_error=true may_gc=true
-    safepoints: 4
+    safepoints: 3
     root candidates: 6
-    max live roots: 4
-    shadow slots: 4
+    max live roots: 5
+    shadow slots: 5
     entry zero slots: 1
     depth reservation: no
     storage: native frame
   
-  function 16 "web::is_unreserved"
+  function 15 "tld_ok"
+    NIR regs: 12
+    raw regs: 1
+    managed-capable regs: 11
+    effects: may_error=true may_gc=true
+    safepoints: 2
+    root candidates: 5
+    max live roots: 4
+    shadow slots: 4
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+  
+  function 16 "domain_loop"
+    NIR regs: 38
+    raw regs: 10
+    managed-capable regs: 28
+    effects: may_error=true may_gc=true
+    safepoints: 4
+    root candidates: 7
+    max live roots: 4
+    shadow slots: 4
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+  
+  function 17 "web::is_unreserved"
     NIR regs: 9
     raw regs: 0
     managed-capable regs: 9
@@ -252,7 +266,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 17 "web::uri_escape_text"
+  function 18 "web::uri_escape_text"
     NIR regs: 7
     raw regs: 1
     managed-capable regs: 6
@@ -265,7 +279,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 18 "high_nibble"
+  function 19 "high_nibble"
     NIR regs: 15
     raw regs: 7
     managed-capable regs: 8
@@ -278,7 +292,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 19 "hex_pair"
+  function 20 "hex_pair"
     NIR regs: 9
     raw regs: 1
     managed-capable regs: 8
@@ -291,7 +305,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 20 "esc_bytes"
+  function 21 "esc_bytes"
     NIR regs: 14
     raw regs: 1
     managed-capable regs: 13
@@ -304,7 +318,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 21 "esc_char"
+  function 22 "esc_char"
     NIR regs: 23
     raw regs: 5
     managed-capable regs: 18
@@ -317,7 +331,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 22 "esc_from"
+  function 23 "esc_from"
     NIR regs: 18
     raw regs: 2
     managed-capable regs: 16
@@ -330,7 +344,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 23 "check"
+  function 24 "check"
     NIR regs: 20
     raw regs: 6
     managed-capable regs: 14
@@ -344,9 +358,9 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
 
 mechanical pattern counts (triage only; see report for interpretation):
-  2 x calls to rt_closure_new
-  11 x calls to rt_int_add
+  3 x calls to rt_closure_new
+  10 x calls to rt_int_add
   1 x calls to rt_int_sub
-  15 x calls to rt_int_cmp
-  43 x calls to other rt_* helpers
-  1 x guard/guardbool instructions
+  13 x calls to rt_int_cmp
+  45 x calls to other rt_* helpers
+  4 x guard/guardbool instructions

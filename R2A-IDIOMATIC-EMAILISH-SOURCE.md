@@ -1017,25 +1017,33 @@ diff --stat` against the pre-R2.a tree.
 
 ## Full regression
 
-`LANG=C.utf8 LC_ALL=C.utf8 tclsh9.0 tests/all.tcl` (all four backends):
-**PASS**. `interp`: `Total 2399 Passed 2399 Skipped 0 Failed 0`. `compile`:
-`Total 2399 Passed 2399 Skipped 0 Failed 0`. The full run initially
-surfaced two more pinned-count failures outside the spec's own listed
-test-file set (`tests/native-string-view.test`'s `view-emailish-corpus-1`/
-`-2`, a `-string-region-opt` allocation-count assertion -- see "New
-compiler weaknesses exposed by idiomatic source", finding 5, for the full
+`LANG=C.utf8 LC_ALL=C.utf8 tclsh9.0 tests/all.tcl`: **PASS**, run twice to
+completion. `tests/all.tcl`'s own outer loop only varies `CORE_BACKEND`
+over `{interp compile}` (its own header comment: "runs the whole test
+suite against the Tcl backends"; `cranelift`/`cranelift-generic` coverage
+comes from individual test bodies that set `-backend cranelift[-generic]`
+explicitly, e.g. every focused suite this report already ran directly
+above) -- both outer-loop backends: `Total 2399 Passed 2399 Skipped 0
+Failed 0`, identically on both runs. The first full run surfaced two more
+pinned-count failures outside the spec's own listed test-file set
+(`tests/native-string-view.test`'s `view-emailish-corpus-1`/`-2`, a
+`-string-region-opt` allocation-count assertion -- see "New compiler
+weaknesses exposed by idiomatic source", finding 5, for the full
 explanation and the updated counts); both were fixed the same way as the
 three `native-block-escape.test` assertions, by updating the pinned
 numbers with an explanatory comment, never by changing production
-behavior. No other test, in this file or any other, needed any change.
+behavior. The second, clean run (after that fix) is the one reported
+above. No other test, in this file or any other, needed any change.
 
 `BOTLISH_NATIVE_GC_STRESS=1 LANG=C.utf8 LC_ALL=C.utf8 tclsh9.0
-tests/all.tcl`: **PASS** on the focused `tests/emailish-predicate.test`
-suite (29/29), matching the ordinary run (GC-stress forces a
-collection attempt at every allocation site; the closure/root structure
-changed by this milestone -- new per-call closures for `is_local_char`,
-new argument-value materializations for `is_local_char`/`is_label_char` --
-survives it without incident).
+tests/all.tcl`: **PASS**, both `interp` and `compile`: `Total 2399 Passed
+2399 Skipped 0 Failed 0` each, identical to the ordinary run -- GC-stress
+forces a collection attempt at every allocation site; the closure/root
+structure changed by this milestone -- new per-call closures for
+`is_local_char`, new argument-value materializations for `is_local_char`/
+`is_label_char` -- survives it without incident, both on the frozen
+benchmark directly (`[400, 0]`, unchanged, §"Allocation/module-init
+census") and across the full suite.
 
 ## Stop condition
 
