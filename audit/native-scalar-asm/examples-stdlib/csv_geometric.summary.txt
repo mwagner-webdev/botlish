@@ -2,7 +2,7 @@ source:  examples/stdlib/csv_geometric.bot
 backend: Cranelift (specialize=1)
 asm:     csv_geometric.asm
 vcode:   csv_geometric.vcode
-machine-code bytes: 5333 (per function: 68 78 357 381 272 272 81 365 430 585 770 352 695 456 171)
+machine-code bytes: 5626 (per function: 68 78 357 381 272 272 81 365 430 585 1063 352 695 456 171)
 
 functions:
   0 <program entry>: nir-regs=2
@@ -15,7 +15,7 @@ functions:
   7 peek<str, int>: nir-regs=11
   8 peek<str, int>: nir-regs=15
   9 scan_unquoted<str, int, int>: nir-regs=28
-  10 scan_quoted<str, int, str>: nir-regs=34
+  10 scan_quoted<str, int, str>: nir-regs=35
   11 scan_field<str, int>: nir-regs=17
   12 scan_record<str, int, list[mutarray, int]>: nir-regs=27
   13 scan_records<str, int, list[mutarray, int]>: nir-regs=15
@@ -153,12 +153,12 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 10 "scan_quoted"
-    NIR regs: 34
+    NIR regs: 35
     raw regs: 6
-    managed-capable regs: 28
+    managed-capable regs: 29
     effects: may_error=true may_gc=true
-    safepoints: 8
-    root candidates: 12
+    safepoints: 9
+    root candidates: 13
     max live roots: 5
     shadow slots: 5
     entry zero slots: 2
@@ -221,4 +221,4 @@ mechanical pattern counts (triage only; see report for interpretation):
   13 x calls to rt_int_add
   1 x calls to rt_int_mul
   5 x calls to rt_int_cmp
-  23 x calls to other rt_* helpers
+  24 x calls to other rt_* helpers

@@ -2,7 +2,7 @@ source:  examples/stdlib/csv_records.bot
 backend: Cranelift (specialize=1)
 asm:     csv_records.asm
 vcode:   csv_records.vcode
-machine-code bytes: 21624 (per function: 45 78 357 381 272 272 272 81 365 430 584 770 351 695 456 171 388 524 70 493 114 61 125 61 125 61 125 61 125 61 168 168 179 179 245 245 804 1248 429 380 439 1113 766 817 665 1168 836 107 756 335 645 580 78 78 1222)
+machine-code bytes: 21917 (per function: 45 78 357 381 272 272 272 81 365 430 584 1063 351 695 456 171 388 524 70 493 114 61 125 61 125 61 125 61 125 61 168 168 179 179 245 245 804 1248 429 380 439 1113 766 817 665 1168 836 107 756 335 645 580 78 78 1222)
 
 functions:
   0 <program entry>: nir-regs=1
@@ -16,7 +16,7 @@ functions:
   8 peek<str, int>: nir-regs=11
   9 peek<str, int>: nir-regs=15
   10 scan_unquoted<str, int, int>: nir-regs=28
-  11 scan_quoted<str, int, str>: nir-regs=34
+  11 scan_quoted<str, int, str>: nir-regs=35
   12 scan_field<str, int>: nir-regs=17
   13 scan_record<str, int, list[mutarray, int]>: nir-regs=27
   14 scan_records<str, int, list[mutarray, int]>: nir-regs=15
@@ -206,12 +206,12 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 11 "scan_quoted"
-    NIR regs: 34
+    NIR regs: 35
     raw regs: 6
-    managed-capable regs: 28
+    managed-capable regs: 29
     effects: may_error=true may_gc=true
-    safepoints: 8
-    root candidates: 12
+    safepoints: 9
+    root candidates: 13
     max live roots: 5
     shadow slots: 5
     entry zero slots: 2
@@ -782,5 +782,5 @@ mechanical pattern counts (triage only; see report for interpretation):
   1 x calls to rt_int_sub
   7 x calls to rt_int_mul
   15 x calls to rt_int_cmp
-  137 x calls to other rt_* helpers
+  138 x calls to other rt_* helpers
   29 x guard/guardbool instructions

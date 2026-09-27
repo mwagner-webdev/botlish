@@ -2,7 +2,7 @@ source:  examples/stdlib/csv_chunked.bot
 backend: Cranelift (specialize=1)
 asm:     csv_chunked.asm
 vcode:   csv_chunked.vcode
-machine-code bytes: 10103 (per function: 68 195 542 542 542 542 592 520 540 540 365 430 585 770 352 799 833 537 612 197)
+machine-code bytes: 10364 (per function: 68 195 534 534 534 534 592 520 540 540 365 430 585 1063 352 799 833 537 612 197)
 
 functions:
   0 <program entry>: nir-regs=2
@@ -18,7 +18,7 @@ functions:
   10 peek<str, int>: nir-regs=11
   11 peek<str, int>: nir-regs=15
   12 scan_unquoted<str, int, int>: nir-regs=28
-  13 scan_quoted<str, int, str>: nir-regs=34
+  13 scan_quoted<str, int, str>: nir-regs=35
   14 scan_field<str, int>: nir-regs=17
   15 scan_record<str, int, list[List[never], mutarray, int]>: nir-regs=31
   16 scan_record<str, int, list[List[mutarray], mutarray, int]>: nir-regs=29
@@ -62,7 +62,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     root candidates: 7
     max live roots: 4
     shadow slots: 4
-    entry zero slots: 1
+    entry zero slots: 0
     depth reservation: no
     storage: native frame
   
@@ -75,7 +75,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     root candidates: 7
     max live roots: 4
     shadow slots: 4
-    entry zero slots: 1
+    entry zero slots: 0
     depth reservation: no
     storage: native frame
   
@@ -88,7 +88,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     root candidates: 7
     max live roots: 4
     shadow slots: 4
-    entry zero slots: 1
+    entry zero slots: 0
     depth reservation: no
     storage: native frame
   
@@ -101,7 +101,7 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     root candidates: 7
     max live roots: 4
     shadow slots: 4
-    entry zero slots: 1
+    entry zero slots: 0
     depth reservation: no
     storage: native frame
   
@@ -197,12 +197,12 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 13 "scan_quoted"
-    NIR regs: 34
+    NIR regs: 35
     raw regs: 6
-    managed-capable regs: 28
+    managed-capable regs: 29
     effects: may_error=true may_gc=true
-    safepoints: 8
-    root candidates: 12
+    safepoints: 9
+    root candidates: 13
     max live roots: 5
     shadow slots: 5
     entry zero slots: 2
@@ -291,5 +291,5 @@ mechanical pattern counts (triage only; see report for interpretation):
   20 x calls to rt_int_add
   2 x calls to rt_int_mul
   9 x calls to rt_int_cmp
-  52 x calls to other rt_* helpers
+  53 x calls to other rt_* helpers
   1 x guard/guardbool instructions
