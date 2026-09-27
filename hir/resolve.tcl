@@ -125,7 +125,7 @@ proc hir::resolve::ProgramSection {hirVar root namespaceName nodes origin} {
 }
 
 proc hir::resolve::RootNames {} {
-    return [concat [core::native::names] {true false unit}]
+    return [concat [core::native::names] [core::native::aliasNames] {true false unit}]
 }
 
 proc hir::resolve::NewScope {hirVar kind parent invocation owner origin} {
@@ -161,6 +161,18 @@ proc hir::resolve::RootBinding {hirVar root name} {
     upvar 1 $hirVar hir
     if {[dict exists $hir scopes $root names $name]} {
         return [dict get $hir scopes $root names $name]
+    }
+    # A native alias (core::native::alias, e.g. Emailish? -> emailish?)
+    # denotes the exact same predicate identity as its canonical spelling,
+    # never a second binding: this reference reuses the canonical name's own
+    # root Binding/Symbol (creating it first if this is the first reference
+    # to either spelling), and is memoized under its own alias spelling too,
+    # so a later reference to it finds the shared binding directly. No new
+    # Binding, Symbol, or runtime value is ever created for the alias name.
+    if {$name ni {true false unit} && [core::native::isAlias $name]} {
+        set b [RootBinding hir $root [core::native::canonicalName $name]]
+        dict set hir scopes $root names $name $b
+        return $b
     }
     set b [NewBinding hir $name root $root {builtin root}]
     set y [hir::NewId hir symbol]

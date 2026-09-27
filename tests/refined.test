@@ -54,9 +54,13 @@ test refined-4 {a failing validator takes the else branch} -body {
 } -result {{"no"} same}
 
 test refined-5 {Emailish? requires a string} -body {
+    # The error message names emailish? (the canonical resolved target,
+    # core::native::alias), not the Emailish? spelling this call site used
+    # -- same resolved target regardless of spelling, per R2-ORDINARY-
+    # EMAILISH-PREDICATE.md.
     list [differential {{call {ref Emailish?} {const 5}}}] \
          [catch {core::eval {call {ref Emailish?} {const 5}}} m opts] $m [dict get $opts -errorcode]
-} -result {same 1 {Emailish?: expected str, got 5} {CORE SEMANTIC TYPE}}
+} -result {same 1 {emailish?: expected str, got 5} {CORE SEMANTIC TYPE}}
 
 test refined-6 {independent refinements accumulate} -body {
     set p {
@@ -146,13 +150,17 @@ test refined-15 {refinement from a flow fact: a refined parameter proves its arg
 } -result {{"a@b.io"} same {refined str Emailish}}
 
 test refined-library-1 {the web library is opt-in} -body {
+    # Emailish? is a compatibility alias (core::native::alias), never a
+    # `core::native::names` registry entry itself (R2-ORDINARY-EMAILISH-
+    # PREDICATE.md), so "opt-in" is checked through core::native::isAlias
+    # rather than registry membership.
     set child [interp create]
     try {
         $child eval [list source [file join $::projectRoot compiler compiler.tcl]]
-        set before [$child eval {expr {"Emailish?" in [core::native::names]
+        set before [$child eval {expr {[core::native::isAlias Emailish?]
                                        || [core::type::isNamed Emailish]}}]
         $child eval {core::loadLibrary web; core::loadLibrary web}
-        set after [$child eval {expr {"Emailish?" in [core::native::names]
+        set after [$child eval {expr {[core::native::isAlias Emailish?]
                                       && [core::type::isNamed UriQueryValue]}}]
         set value [$child eval {core::formatValue [core::eval {call {ref Emailish?} {const str a@b.io}}]}]
         list $before $after $value
@@ -233,11 +241,14 @@ test refined-type-test-fold-2 {a test proven by an enclosing refinement is not r
 } -result {1 0}
 
 test refined-type-test-fold-3 {an undecided test is inline, not a native call} -body {
+    # Generated code names emailish? (the canonical resolved target), not
+    # the Emailish? spelling this call site used -- same resolved target
+    # regardless of spelling, per R2-ORDINARY-EMAILISH-PREDICATE.md.
     set code [core::compiler::generatedCode {
         {bind f {block {s} {call {ref Emailish?} {ref s}}}}
         {call {ref f} {const str a@b.io}}
     }]
-    list [regexp {callValue} $code] [regexp {core::value::expect str \$v[0-9]+ Emailish\?} $code] \
+    list [regexp {callValue} $code] [regexp {core::value::expect str \$v[0-9]+ emailish\?} $code] \
          [regexp {acceptsCanonical \{refined str Emailish\}} $code]
 } -result {0 1 1}
 

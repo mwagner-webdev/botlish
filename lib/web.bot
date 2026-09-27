@@ -60,6 +60,99 @@
 # UriQueryValue -- this module never has to forge that itself.
 namespace web
 
+# is_emailish(v) is emailish?'s (lib/web.tcl) ordinary Botlish
+# implementation (R2-ORDINARY-EMAILISH-PREDICATE.md): the same left-to-right
+# scan emailRegex's grammar always described -- local part: 1+ of
+# [alnum . _ % + -]; "@"; domain: 1+ of (1+ of [alnum -] then "."); TLD: 2+
+# alpha -- over is_tcl_alnum/is_tcl_alpha (core/tclcompat.tcl), now written
+# as real Botlish source instead of a hand-written core-IR -native-body.
+#
+# scan_local/scan_label/scan_alpha(i) each return the index one past the
+# longest run of their character class starting at i (i itself, if the
+# class matches nothing there): an ordinary maximal-munch scan, sound
+# because none of the three classes contains "." or "@" and the grammar has
+# no ambiguity to backtrack over (NATIVE-TCL-UNICODE.md's §6 argument).
+# domain_loop(i) consumes one "label ." group and then either recognizes
+# the immediately following alpha run as the final TLD (returning n) or
+# continues from just after the "." -- self-tail-recursive, the same idiom
+# uri_escape_text's esc_bytes/esc_from and examples/stdlib/string_reverse.bot's
+# reverse_from already use.
+fn is_emailish(v):
+
+    n = length(v)
+
+    fn char_at(i):
+        substring(v, i, i + 1)
+
+    fn is_local_char(c):
+        is_tcl_alnum(c) or c == "." or c == "_" or c == "%" or c == "+" or c == "-"
+
+    fn is_label_char(c):
+        is_tcl_alnum(c) or c == "-"
+
+    fn scan_local(i):
+        if i >= n:
+            i
+        else:
+            if is_local_char(char_at(i)):
+                scan_local(i + 1)
+            else:
+                i
+
+    fn scan_label(i):
+        if i >= n:
+            i
+        else:
+            if is_label_char(char_at(i)):
+                scan_label(i + 1)
+            else:
+                i
+
+    fn scan_alpha(i):
+        if i >= n:
+            i
+        else:
+            if is_tcl_alpha(char_at(i)):
+                scan_alpha(i + 1)
+            else:
+                i
+
+    fn tld_ok(i):
+        e = scan_alpha(i)
+        if e == n:
+            e - i >= 2
+        else:
+            false
+
+    fn domain_loop(i):
+        label_end = scan_label(i)
+        if label_end == i:
+            -1
+        else:
+            if label_end >= n:
+                -1
+            else:
+                if char_at(label_end) == ".":
+                    i2 = label_end + 1
+                    if tld_ok(i2):
+                        n
+                    else:
+                        domain_loop(i2)
+                else:
+                    -1
+
+    local_end = scan_local(0)
+    if local_end == 0:
+        false
+    else:
+        if local_end >= n:
+            false
+        else:
+            if char_at(local_end) == "@":
+                domain_loop(local_end + 1) == n
+            else:
+                false
+
 hex_digits = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F"]
 
 additional_unreserved_chars = byte::set(['-', '.', '_', '~'])

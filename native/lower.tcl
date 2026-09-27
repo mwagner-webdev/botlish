@@ -3437,6 +3437,15 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
             Emit fn "raise ARITY [Quote "block ([join $pnames { }]) expects [llength $params] argument(s), got [llength $argExprs]"]" $e
             return {never tagged}
         }
+        if {[dict get $node known] ne ""} {
+            # A module-bridged type-test predicate HIR already decided
+            # statically (hir/types.tcl's BridgedNative extension to Call):
+            # the arguments were just evaluated above for effect, but the
+            # call itself needs no code at all -- not even a call to its
+            # bridged module function -- exactly like NativeCall's own
+            # identical fold for an unbridged type test (see there).
+            return [list [Assign fn "bool [expr {[dict get $node known] ? "true" : "false"}]" $e] tagged]
+        }
         if {![dict exists $fn targets $e]} {
             throw {NATIVE BUG} "native lowering: hir::specialize chose no instance for call $e"
         }

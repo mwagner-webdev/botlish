@@ -321,6 +321,14 @@ proc core::rootEnv {} {
     foreach name [core::native::names] {
         core::env::define $env $name [core::value::native $name]
     }
+    foreach {alias canonical} [core::native::aliasPairs] {
+        # Same semantic predicate identity as canonical, not a second
+        # native: the environment binding for the alias spelling holds
+        # exactly the value canonical's own binding holds (core::native::
+        # alias's own contract; see hir/resolve.tcl's RootBinding for the
+        # matching HIR-side binding-sharing).
+        core::env::define $env $alias [core::value::native $canonical]
+    }
     core::env::define $env true  [core::value::true]
     core::env::define $env false [core::value::false]
     core::env::define $env unit  [core::value::unit]

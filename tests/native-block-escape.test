@@ -586,16 +586,16 @@ test blockescape-region-companion-refined-checks-1 {refined-checks.ir: Block all
         [dict get $on byKind String allocations] [dict get $on byKind List allocations]
 } -result {{list {{int 400} {int 0}}} 20 2 4 11}
 
-test blockescape-region-companion-refined-checks-2 {refined-checks.ir: char_at's NIR has no closure/callenvmulti, and env=0/results=3} -body {
+test blockescape-region-companion-refined-checks-2 {refined-checks.ir: char_at's NIR has no closure/callenvmulti, and env=0/results=3 -- R2 (R2-ORDINARY-EMAILISH-PREDICATE.md) collapses this to one shared instance, not two per-call-site copies} -body {
     core::loadLibrary web
     set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
     set nirText [dict get [native::lower::program $hir] text]
     list [regexp {"char_at" params=1} $nirText] \
         [llength [regexp -all -inline {"char_at" params=2 env=0 regs=\d+ pnames="i v" captures=0 instance="generic" results=3} $nirText]] \
         [regexp {callenvmulti} $nirText]
-} -result {0 2 0}
+} -result {0 1 0}
 
-test blockescape-region-companion-refined-checks-3 {refined-checks.ir: scanner helpers flatten captures from [n, char_at] to [n, v]} -body {
+test blockescape-region-companion-refined-checks-3 {refined-checks.ir: scanner helpers flatten captures from [n, char_at] to [n, v] -- R2 collapses each scanner helper to one shared instance, not two per-call-site copies} -body {
     core::loadLibrary web
     set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
     set nirText [dict get [native::lower::program $hir] text]
@@ -606,7 +606,7 @@ test blockescape-region-companion-refined-checks-3 {refined-checks.ir: scanner h
         if {[regexp "\"$name\" params=3 env=0 \[^\\n\]*pnames=\"i n char_at\"" $nirText]} {
             incr stale
         }
-        if {[llength [regexp -all -inline "\"$name\" params=3 env=0 \[^\\n\]*pnames=\"i n v\"" $nirText]] == 2} {
+        if {[llength [regexp -all -inline "\"$name\" params=3 env=0 \[^\\n\]*pnames=\"i n v\"" $nirText]] == 1} {
             incr flattened
         }
     }
@@ -622,11 +622,11 @@ test blockescape-region-companion-refined-checks-4 {refined-checks.ir under GC s
     list $result $value
 } -result {0 {list {{int 400} {int 0}}}}
 
-test blockescape-region-companion-refined-checks-5 {refined-checks.ir: self-tail scanner lowering is still a loop backedge (tail, never tailenv/a recursive call), and the loop-backedge count is unchanged from before this milestone} -body {
+test blockescape-region-companion-refined-checks-5 {refined-checks.ir: self-tail scanner lowering is still a loop backedge (tail, never tailenv/a recursive call) -- R2 (R2-ORDINARY-EMAILISH-PREDICATE.md) drops the backedge count from 11 to 7: the redundant inner Emailish?/emailish? check no longer compiles its own duplicate copy of every scanner loop} -body {
     core::loadLibrary web
     set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
     set nirText [dict get [native::lower::program $hir] text]
     list [regexp {tailenv} $nirText] [llength [regexp -all -inline -line {^\s+tail .*$} $nirText]]
-} -result {0 11}
+} -result {0 7}
 
 cleanupTests

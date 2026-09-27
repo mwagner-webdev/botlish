@@ -367,7 +367,20 @@ proc core::type::IntersectIntegerFacts {a b} {
 # substitution native/native.tcl's ExpandNativeBodies already gives any
 # native (see NATIVE-EMAILISH.md): native/lower.tcl needs no named-type
 # awareness at all.
-proc core::type::definePredicate {name {predicateName ""} {nativeBody ""}} {
+#
+# MODULEFN, if given, is a {NAMESPACE NAME} pair forwarded verbatim to
+# -module-fn (core/native.tcl): an ordinary cross-file Botlish function the
+# native (Cranelift) backend calls directly for a call this type test's own
+# `known` folding (hir/types.tcl's Call, via decideTypeTest) does not already
+# decide statically -- see R2-ORDINARY-EMAILISH-PREDICATE.md. Unlike
+# NATIVEBODY, this keeps the predicate's own {native NAME} identity intact
+# for every reference (hir/types.tcl's BridgedNative), so its known-folding
+# and branch refinement (hir/refine.tcl) survive on every backend, and its
+# call target is one ordinary, shared, resolved function rather than a
+# literal pasted into every call site. A caller should give a predicate at
+# most one of NATIVEBODY or MODULEFN (both are accepted by core::native::
+# register, but no current predicate needs both).
+proc core::type::definePredicate {name {predicateName ""} {nativeBody ""} {moduleFn ""}} {
     if {$predicateName eq ""} {
         set predicateName $name?
     }
@@ -377,7 +390,8 @@ proc core::type::definePredicate {name {predicateName ""} {nativeBody ""}} {
         -param-types [list $base] \
         -tests-type [list refined $base [list $name]] \
         -runtime evidence \
-        -native-body $nativeBody]
+        -native-body $nativeBody \
+        -module-fn $moduleFn]
 }
 
 # The runtime has already checked the base kind (a -tests-type contract).

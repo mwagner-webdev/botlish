@@ -141,16 +141,18 @@ test native-validator-predicate-validator-backed-has-native-body {NonEmpty?'s re
 } -result 1
 
 # ---------------------------------------------------------------------------
-# Emailish: UPDATED by the Tcl-Unicode-character-classification milestone
-# (NATIVE-TCL-UNICODE.md). Emailish? now DOES carry a -native-body -- the
-# regex's exact grammar as ordinary core IR over the new is_tcl_alpha/
-# is_tcl_alnum primitives (lib/web.tcl) -- so it is no longer rejected on
-# cranelift. See tests/native-tcl-unicode.test for the full parity/edge-case
-# regression coverage this unlocked; the two assertions kept here are only
-# the ones this file already made about the opaque/validator distinction,
-# updated to their new, correct answers.
+# Emailish: UPDATED twice since this file's own milestone. First by the
+# Tcl-Unicode-character-classification milestone (NATIVE-TCL-UNICODE.md),
+# which gave Emailish? a -native-body so it ran on cranelift; then by R2
+# (R2-ORDINARY-EMAILISH-PREDICATE.md), which replaced that -native-body with
+# an ordinary Botlish module function (web::is_emailish, lib/web.bot) under
+# the canonical name emailish?, with Emailish? kept only as a compatibility
+# alias (core::native::alias) -- see tests/emailish-predicate.test for that
+# alias's own focused regressions. The two assertions kept here are only the
+# ones this file already made about the opaque/validator distinction,
+# updated to their current, correct answers.
 
-test native-validator-predicate-emailish-now-supported {Emailish? (validator-backed, now with a -native-body) runs on cranelift, agreeing with interp} -body {
+test native-validator-predicate-emailish-now-supported {emailish?/Emailish? (validator-backed, via an ordinary Botlish module function) runs on cranelift, agreeing with interp} -body {
     set p {
         {bind f {block {s} {call {ref Emailish?} {ref s}}}}
         {call {ref f} {const str someone@example.com}}
@@ -158,9 +160,11 @@ test native-validator-predicate-emailish-now-supported {Emailish? (validator-bac
     list [lindex [outcomeUnder interp $p] 1] [lindex [outcomeUnder cranelift $p] 1]
 } -result {true true}
 
-test native-validator-predicate-emailish-has-native-body {Emailish?'s registration now carries a -native-body (NATIVE-TCL-UNICODE.md)} -body {
-    expr {[dict get [core::native::metadata Emailish?] nativeBody] ne ""}
-} -result 1
+test native-validator-predicate-emailish-has-no-native-body {emailish?/Emailish? no longer carries a -native-body (R2-ORDINARY-EMAILISH-PREDICATE.md): its executable form is the ordinary Botlish module function web::is_emailish, reached through -module-fn} -body {
+    list [dict get [core::native::metadata emailish?] nativeBody] \
+         [dict get [core::native::metadata Emailish?] nativeBody] \
+         [dict get [core::native::metadata emailish?] moduleFn]
+} -result {{} {} {web is_emailish}}
 
 test native-validator-predicate-refined-checks-blocker {refined-checks.ir's native blocker moved past Emailish?, to the opaque UriQueryValue? (NATIVE-TCL-UNICODE.md) -- UPDATED: the opaque-refinement-native-preservation milestone (tests/native-refinement-propagation.test) eliminates that call statically, so refined-checks.ir now runs to completion instead} -body {
     set exprs [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]

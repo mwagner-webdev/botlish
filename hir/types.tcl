@@ -977,6 +977,32 @@ proc hir::types::Block {hirVar outerVar e self} {
     return [list block $e $arity $result]
 }
 
+# The native NAME a reference to a *module-bridged* type-test predicate
+# denotes, when CALLEEEXPR's own reported type was redirected from
+# {native NAME} to {block ...} by the module-native bridge (BindingType's
+# moduleNativeTargets case, above) -- so a bridged predicate's known-folding
+# (this proc, below) and branch refinement (hir/refine.tcl) still key off its
+# real semantic identity, the same way an unbridged native predicate's always
+# have, even though its call *target* for lowering purposes is the ordinary
+# resolved module function BindingType redirected it to. "" if CALLEEEXPR is
+# not such a reference (an ordinary block call, or a native the bridge never
+# retyped). Never consulted for a plain {native NAME} callee: that case
+# already has its own name directly, with no redirection to see through.
+proc hir::types::BridgedNative {hir calleeExpr} {
+    if {[hir::kind $hir $calleeExpr] ne "ref"} {
+        return ""
+    }
+    set b [hir::get $hir $calleeExpr binding]
+    if {$b eq "" || [dict get [hir::binding $hir $b] kind] ne "root"} {
+        return ""
+    }
+    set value [dict get [hir::binding $hir $b] value]
+    if {[core::value::kind $value] ne "native"} {
+        return ""
+    }
+    return [core::value::nativeName $value]
+}
+
 proc hir::types::Call {hirVar ctxVar e} {
     upvar 1 $hirVar hir $ctxVar ctx
     set node [dict get $hir exprs $e]
@@ -1060,6 +1086,18 @@ proc hir::types::Call {hirVar ctxVar e} {
     } elseif {[lindex $calleeType 0] eq "block" && [llength $calleeType] == 4} {
         lassign $calleeType _ block arity blockResult
         set target [list block $block]
+        if {[llength $argTypes] == 1} {
+            # A module-bridged type-test predicate (BridgedNative, above):
+            # its call target is the ordinary resolved module function, but
+            # its known-folding still uses its real native identity, exactly
+            # as an unbridged native predicate's always has -- both spellings
+            # of a compatibility-aliased predicate share this identity
+            # (core::native::alias), so this is spelling-independent.
+            set bridged [BridgedNative $hir [dict get $node callee]]
+            if {$bridged ne "" && [dict get [core::native::metadata $bridged] testsType] ne ""} {
+                set known [hir::refine::decideTypeTest $bridged [lindex $argTypes 0]]
+            }
+        }
         if {$arity == [llength $argExprs]} {
             set result $blockResult
             if {$spec && !$dead && [dict get $ctx reachable]} {

@@ -32,12 +32,24 @@ proc hir::refine::branchFacts {hir condition} {
         return $facts
     }
     set calleeType [hir::typeOf $hir [dict get $node callee]]
-    if {[lindex $calleeType 0] ne "native" || [llength $calleeType] != 2} {
+    set name ""
+    if {[lindex $calleeType 0] eq "native" && [llength $calleeType] == 2} {
+        set name [lindex $calleeType 1]
+    } elseif {[lindex $calleeType 0] eq "block"} {
+        # A module-bridged type-test predicate (hir/types.tcl's
+        # BridgedNative): its callee is typed as the ordinary resolved
+        # module function, but its refinement facts are still keyed by its
+        # real native identity -- the semantic predicate, not the call
+        # target lowering actually uses, and not its source spelling
+        # (core::native::alias unifies both spellings' identity already).
+        set name [hir::types::BridgedNative $hir [dict get $node callee]]
+    }
+    if {$name eq ""} {
         return $facts
     }
     set args [dict get $node args]
     foreach outcome {1 0} {
-        foreach {index fact} [core::native::refinementRules [lindex $calleeType 1] $outcome] {
+        foreach {index fact} [core::native::refinementRules $name $outcome] {
             if {$index >= [llength $args]} {
                 continue
             }

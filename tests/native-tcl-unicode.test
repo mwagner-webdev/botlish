@@ -1,8 +1,10 @@
 # native-tcl-unicode.test -- core/tclcompat.tcl's is_tcl_alpha/is_tcl_alnum
 # (the temporary Tcl-compatibility Unicode character-class primitives) and
-# lib/web.tcl's Emailish?, which now uses them through a -native-body
-# expressing emailRegex's exact grammar as ordinary core IR. See
-# NATIVE-TCL-UNICODE.md.
+# lib/web.tcl's emailish?/Emailish?, which use them through the ordinary
+# Botlish module function web::is_emailish (lib/web.bot) expressing
+# emailRegex's exact grammar. See NATIVE-TCL-UNICODE.md for the primitives
+# and this milestone's own corpus, and R2-ORDINARY-EMAILISH-PREDICATE.md for
+# why emailish? is no longer a -native-body.
 #
 # Direct primitive coverage (spec: "prove the new primitives independently
 # of Emailish?") comes first, exercising the exact edge-case corpus
@@ -173,30 +175,38 @@ test native-tcl-unicode-emailish-gc-stress {Emailish? survives a collection forc
 } -result true
 
 # ---------------------------------------------------------------------------
-# Disclosed optimization gap (spec §41-42, mirroring
-# native-validator-predicate-known-result-nir-shape for NonEmpty?): now
-# that Emailish? has a -native-body, ExpandNativeBodies substitutes it
-# *before* HIR is built, so the HIR-provably-redundant inner Emailish?
-# re-check in a pattern like refined-checks.ir's own -- an outer
-# `if Emailish?(s)` whose then-branch re-checks `Emailish?(s)` -- no longer
-# folds via native/lower.tcl's `known` short-circuit on cranelift: each
-# call site gets its own independently-compiled copy of the whole validator.
-# Never a correctness bug (both checks still evaluate the same value); pinned
-# here so a future fix to this is a deliberate, visible change, not silent.
-test native-tcl-unicode-emailish-known-result-nir-shape {a redundant Emailish? check inside its own true branch compiles to two independent copies of the validator (documented optimization gap, not a correctness bug)} -body {
+# R2 (R2-ORDINARY-EMAILISH-PREDICATE.md) closes the gap the test above this
+# comment used to pin: Emailish?/emailish? no longer has a -native-body at
+# all (lib/web.tcl), so ExpandNativeBodies never substitutes a per-call-site
+# copy of it, and its own semantic predicate identity ({native emailish?})
+# survives into HIR on every backend, including cranelift. The HIR-provably-
+# redundant inner Emailish?/emailish? re-check in a pattern like
+# refined-checks.ir's own -- an outer `if Emailish?(s)` whose then-branch
+# re-checks `emailish?(s)` -- now folds via native/lower.tcl's `known`
+# short-circuit exactly as any other type-test predicate's does: zero calls,
+# not a second independently-compiled copy of the validator. See
+# tests/emailish-predicate.test for the focused alias/refinement regressions;
+# this one is kept here, next to its own now-obsolete predecessor, as the
+# direct before/after NIR-shape pin for this file's own milestone.
+test native-tcl-unicode-emailish-known-result-nir-shape {a redundant Emailish?/emailish? check inside its own true branch compiles to exactly one call to the shared validator, not two independent copies} -body {
     set p {
         {bind f {block {s}
             {if {call {ref Emailish?} {ref s}}
-                {block {} {if {call {ref Emailish?} {ref s}} {block {} {const yes}} {block {} {const no}}}}
+                {block {} {if {call {ref emailish?} {ref s}} {block {} {const yes}} {block {} {const no}}}}
                 {block {} {const no}}}}}
         {call {ref f} {const str someone@example.com}}
     }
-    set hir [hir::build [native::ExpandNativeBodies $p] -strict 0]
+    set hir [native::buildProgramHir $p]
     set text [native::nir $hir]
-    # Both independent validator calls still scan the string.
-    list [regexp -all {\"domain_loop\"} $text] \
-         [expr {[regexp -all {op strlen} $text] > 0}] \
-         [fourWay $p]
-} -result {2 1 {"yes"}}
+    # Exactly one compiled copy of the validator and its scanner helpers
+    # (never two, one per call site).
+    set isEmailishDefs [regexp -all {func \d+ "web::is_emailish"} $text]
+    set domainLoopDefs [regexp -all {func \d+ "domain_loop"} $text]
+    # Exactly one real call to it: the outer, genuinely dynamic check. The
+    # inner, statically redundant re-check needs no call at all.
+    regexp {func (\d+) "web::is_emailish"} $text -> isEmailishId
+    set calls [regexp -all "call $isEmailishId %" $text]
+    list $isEmailishDefs $domainLoopDefs $calls [fourWay $p]
+} -result {1 1 1 {"yes"}}
 
 ::tcltest::cleanupTests

@@ -4,13 +4,23 @@
 # is no type declaration IR. Two kinds of refined type are shown:
 #
 #   Emailish       structural: a regex validator decides membership, and the
-#                  generated predicate Emailish? refines its argument
+#                  generated predicate emailish? refines its argument
 #   UriQueryValue  opaque: no validator can manufacture it; only the trusted
 #                  transform uriEscape produces values carrying its evidence
 #
-#   (if (call (ref Emailish?) (ref x))
+#   (if (call (ref emailish?) (ref x))
 #       (block {} ... x is {refined str {Emailish}} here ...)
 #       (block {} ...))
+#
+# emailish? is the canonical predicate (R2-ORDINARY-EMAILISH-PREDICATE.md):
+# an ordinary Botlish function, web::is_emailish (lib/web.bot), reached
+# through -module-fn exactly like uriEscape's own web::uri_escape_text
+# (NATIVE-MODULES.md) -- never a -native-body literal pasted into every call
+# site. Emailish? is a temporary compatibility alias (core::native::alias):
+# the exact same registered predicate, same SymbolId/refinement theorem/HIR
+# target/specialization instances as emailish?, not a second registration,
+# a runtime callable value, or a wrapper function -- see the report for the
+# full architecture and why (spec items 1-84 of the R2 milestone).
 
 namespace eval core::web {
     # Local part and domain labels of letters, digits and a few symbols,
@@ -27,115 +37,31 @@ namespace eval core::web {
 core::type::register Emailish \
     -base str \
     -validator [list core::regex::matches $core::web::emailRegex]
-# Emailish?'s native-body: emailRegex's exact grammar (local: 1+ of
+# emailish? is the canonical predicate: an ordinary Botlish function,
+# web::is_emailish (lib/web.bot), reached on the native (Cranelift) backend
+# through -module-fn -- exactly emailRegex's grammar (local: 1+ of
 # [alnum . _ % + -]; "@"; domain: 1+ of (1+ of [alnum -] then "."); tld: 2+
-# alpha; end) as ordinary left-to-right scanning over core/tclcompat.tcl's
-# is_tcl_alpha/is_tcl_alnum -- no regex engine, no DFA syntax, structurally
-# the same two-pointer scan bench/equivalents/rust/refined_checks.rs's own
-# `emailish` already uses (that scan's *shape* was always a faithful
-# encoding of the regex; only its character classes were ASCII-only -- see
-# NATIVE-TCL-UNICODE.md's §6-equivalence argument and this milestone's
-# report). Three dedicated recursive scanners (scan_local/scan_label/
-# scan_alpha), not one parameterized by a predicate value, so every
-# is_tcl_alpha/is_tcl_alnum call site is a direct, syntactically literal
-# native call -- never through a first-class function value -- exactly like
-# uriEscape's own esc_bytes/esc_char/esc_from (NATIVE-URI-ESCAPE.md),
-# deliberately not the more "reusable" higher-order alternative.
-#
-# scan_local/scan_label/scan_alpha(i) each return the index one past the
-# longest run of their character class starting at i (i itself, if the
-# class matches nothing there) -- an ordinary maximal-munch scan, since
-# none of the three classes contains "." or "@" and the grammar has no
-# ambiguity to backtrack over (NATIVE-TCL-UNICODE.md's §6 argument).
-# domain_loop(i) consumes one "label ." group and then either recognizes
-# the immediately following alpha run as the final TLD (returning n) or
-# continues from just after the "." -- self-tail-recursive, matching
-# refined-checks.ir's own `check` and uriEscape's esc_bytes/esc_from idiom.
-core::type::definePredicate Emailish "" \
-    {block {v}
-        {bind n {call {ref length} {ref v}}}
-        {bind char_at
-            {block {i} {call {ref substring} {ref v} {ref i} {call {ref +} {ref i} {const 1}}}}}
-        {bind is_local_char
-            {block {c}
-                {if {call {ref is_tcl_alnum} {ref c}}
-                    {block {} {ref true}}
-                    {block {}
-                        {if {call {ref ==} {ref c} {const str .}}
-                            {block {} {ref true}}
-                            {block {}
-                                {if {call {ref ==} {ref c} {const str _}}
-                                    {block {} {ref true}}
-                                    {block {}
-                                        {if {call {ref ==} {ref c} {const str %}}
-                                            {block {} {ref true}}
-                                            {block {}
-                                                {if {call {ref ==} {ref c} {const str +}}
-                                                    {block {} {ref true}}
-                                                    {block {} {call {ref ==} {ref c} {const str -}}}}}}}}}}}}}}
-        {bind is_label_char
-            {block {c}
-                {if {call {ref is_tcl_alnum} {ref c}}
-                    {block {} {ref true}}
-                    {block {} {call {ref ==} {ref c} {const str -}}}}}}
-        {bind scan_local
-            {block {i}
-                {if {call {ref >=} {ref i} {ref n}}
-                    {block {} {ref i}}
-                    {block {}
-                        {if {call {ref is_local_char} {call {ref char_at} {ref i}}}
-                            {block {} {call {ref scan_local} {call {ref +} {ref i} {const 1}}}}
-                            {block {} {ref i}}}}}}}
-        {bind scan_label
-            {block {i}
-                {if {call {ref >=} {ref i} {ref n}}
-                    {block {} {ref i}}
-                    {block {}
-                        {if {call {ref is_label_char} {call {ref char_at} {ref i}}}
-                            {block {} {call {ref scan_label} {call {ref +} {ref i} {const 1}}}}
-                            {block {} {ref i}}}}}}}
-        {bind scan_alpha
-            {block {i}
-                {if {call {ref >=} {ref i} {ref n}}
-                    {block {} {ref i}}
-                    {block {}
-                        {if {call {ref is_tcl_alpha} {call {ref char_at} {ref i}}}
-                            {block {} {call {ref scan_alpha} {call {ref +} {ref i} {const 1}}}}
-                            {block {} {ref i}}}}}}}
-        {bind tld_ok
-            {block {i}
-                {bind e {call {ref scan_alpha} {ref i}}}
-                {if {call {ref ==} {ref e} {ref n}}
-                    {block {} {call {ref >=} {call {ref -} {ref e} {ref i}} {const 2}}}
-                    {block {} {ref false}}}}}
-        {bind domain_loop
-            {block {i}
-                {bind labelEnd {call {ref scan_label} {ref i}}}
-                {if {call {ref ==} {ref labelEnd} {ref i}}
-                    {block {} {const -1}}
-                    {block {}
-                        {if {call {ref >=} {ref labelEnd} {ref n}}
-                            {block {} {const -1}}
-                            {block {}
-                                {if {call {ref ==} {call {ref char_at} {ref labelEnd}} {const str .}}
-                                    {block {}
-                                        {bind i2 {call {ref +} {ref labelEnd} {const 1}}}
-                                        {if {call {ref tld_ok} {ref i2}}
-                                            {block {} {ref n}}
-                                            {block {} {call {ref domain_loop} {ref i2}}}}}
-                                    {block {} {const -1}}}}}}}}}
-        {bind localEnd {call {ref scan_local} {const 0}}}
-        {if {call {ref ==} {ref localEnd} {const 0}}
-            {block {} {ref false}}
-            {block {}
-                {if {call {ref >=} {ref localEnd} {ref n}}
-                    {block {} {ref false}}
-                    {block {}
-                        {if {call {ref ==} {call {ref char_at} {ref localEnd}} {const str @}}
-                            {block {}
-                                {bind afterAt {call {ref +} {ref localEnd} {const 1}}}
-                                {call {ref ==} {call {ref domain_loop} {ref afterAt}} {ref n}}}
-                            {block {} {ref false}}}}}}}}
+# alpha; end), the same left-to-right scan over core/tclcompat.tcl's
+# is_tcl_alpha/is_tcl_alnum this predicate always used (see
+# NATIVE-TCL-UNICODE.md's §6-equivalence argument for why that scan is a
+# faithful, not approximated, encoding of the regex), but now compiled once
+# as a real, shared, top-level function instead of pasted into every call
+# site (R2-ORDINARY-EMAILISH-PREDICATE.md, mirroring NATIVE-MODULES.md's
+# uriEscape/web::uri_escape_text). No -native-body: this predicate no longer
+# passes through native::ExpandNativeBodies's pre-HIR body substitution at
+# all, on any backend.
+core::type::definePredicate Emailish emailish? "" {web is_emailish}
+# Emailish? is a temporary compatibility alias for emailish?, not a second
+# registration: core::native::alias makes both spellings resolve (hir/
+# resolve.tcl's RootBinding, core::rootEnv) to the exact same root Binding/
+# Symbol/registry entry, so they share one SymbolId, one refinement theorem,
+# one HIR call target, and one specialization instance family -- never a
+# runtime Block value, a wrapper function, or a second predicate. The
+# callable-type surface syntax (uppercase NAME? as a type's predicate) is
+# unchanged and still spellable as Emailish? -- only its canonical
+# implementation moved. Scheduled for removal, along with the callable-type
+# surface form generally, in the source/refactor milestone that follows R2.
+core::native::alias Emailish? emailish?
 
 core::type::register UriQueryValue \
     -base str \

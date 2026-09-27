@@ -612,15 +612,31 @@ proc native::ExpandNativeBodiesIn {node path} {
         call {
             set callee [lindex $node 1]
             set nativeBody ""
-            if {[core::ir::op $callee] eq "ref" && [lindex $callee 1] in [core::native::names]} {
-                set meta [core::native::metadata [lindex $callee 1]]
-                set nativeBody [dict get $meta nativeBody]
-                if {$nativeBody ne ""} {
-                    dict set nativeResultOverrides $path [dict get $meta resultType]
-                }
-                if {[dict get $meta moduleFn] ne ""} {
-                    dict set moduleNativeCalls $path [lindex $callee 1]
-                    dict set nativeResultOverrides $path [dict get $meta resultType]
+            if {[core::ir::op $callee] eq "ref"} {
+                # A bare ref's text may be a compatibility alias
+                # (core::native::alias, e.g. Emailish?) rather than the
+                # native's own registered name: this traversal is purely
+                # syntactic and pre-resolution, so it must canonicalize the
+                # same way hir/resolve.tcl's RootBinding and core::rootEnv
+                # already do, or a call spelled with the alias (as the
+                # frozen bench/refined-checks.ir spells Emailish?) would
+                # never reach the native's own -module-fn bridge below --
+                # never because of anything specific to Emailish? itself,
+                # and never by teaching this traversal's own -native-body
+                # substitution (still exactly as name-blind to shadowing as
+                # before) anything new about refinement, provenance, or
+                # closedness.
+                set calleeName [core::native::canonicalName [lindex $callee 1]]
+                if {$calleeName in [core::native::names]} {
+                    set meta [core::native::metadata $calleeName]
+                    set nativeBody [dict get $meta nativeBody]
+                    if {$nativeBody ne ""} {
+                        dict set nativeResultOverrides $path [dict get $meta resultType]
+                    }
+                    if {[dict get $meta moduleFn] ne ""} {
+                        dict set moduleNativeCalls $path $calleeName
+                        dict set nativeResultOverrides $path [dict get $meta resultType]
+                    }
                 }
             }
             if {$nativeBody ne ""} {

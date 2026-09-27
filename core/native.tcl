@@ -112,6 +112,10 @@
 
 namespace eval core::native {
     variable registry [dict create]
+    # ALIAS -> CANONICAL: a second source-level spelling for an already-
+    # registered native, denoting the exact same registry entry (semantic
+    # predicate identity), not a second registration. See `alias` below.
+    variable aliases [dict create]
     # Runtime requirement tags (-runtime):
     #   bigint               arbitrary-precision integer arithmetic or
     #                        comparison (a small-integer fast path still needs
@@ -314,6 +318,57 @@ proc core::native::names {} {
     return [dict keys $registry]
 }
 
+# Declares ALIASNAME a second, purely compile-time spelling of the already-
+# registered native CANONICALNAME: every root reference to ALIASNAME (surface
+# source, raw core IR, or the Tcl interpreter's own root environment) resolves
+# to the identical BindingId/SymbolId/runtime value CANONICALNAME's own
+# references do (hir/resolve.tcl's RootBinding, core::rootEnv below) -- never
+# a second registry entry, a runtime Block/wrapper value, or a second
+# specialization instance. ALIASNAME is never itself a key of `registry`;
+# `metadata`/`invoke`/etc. only ever look up CANONICALNAME.
+proc core::native::alias {aliasName canonicalName} {
+    variable registry
+    variable aliases
+    if {![dict exists $registry $canonicalName]} {
+        error "core::native::alias: unknown native \"$canonicalName\""
+    }
+    if {[dict exists $registry $aliasName] || [dict exists $aliases $aliasName]} {
+        error "core::native::alias: \"$aliasName\" is already registered"
+    }
+    dict set aliases $aliasName $canonicalName
+}
+
+proc core::native::isAlias {name} {
+    variable aliases
+    return [dict exists $aliases $name]
+}
+
+# NAME's own registered identity: NAME itself if it is a registered native,
+# the native it aliases if NAME is an alias, or NAME unchanged otherwise (an
+# unknown name -- callers that care already check `names`/`isAlias`/`aliasNames`).
+proc core::native::canonicalName {name} {
+    variable aliases
+    if {[dict exists $aliases $name]} {
+        return [dict get $aliases $name]
+    }
+    return $name
+}
+
+proc core::native::aliasNames {} {
+    variable aliases
+    return [dict keys $aliases]
+}
+
+# Flat ALIAS CANONICAL ALIAS CANONICAL ... pairs, for core::rootEnv.
+proc core::native::aliasPairs {} {
+    variable aliases
+    set pairs {}
+    dict for {alias canonical} $aliases {
+        lappend pairs $alias $canonical
+    }
+    return $pairs
+}
+
 # Removes a previously registered native NAME. Only hir/sourcetypes.tcl uses
 # this, to undo the root constructor/predicate natives it registers for a
 # source-declared type at the start of the next compilation (see
@@ -326,6 +381,10 @@ proc core::native::unregister {name} {
 
 proc core::native::metadata {name} {
     variable registry
+    variable aliases
+    if {[dict exists $aliases $name]} {
+        set name [dict get $aliases $name]
+    }
     if {![dict exists $registry $name]} {
         error "core::native: no native named \"$name\""
     }
