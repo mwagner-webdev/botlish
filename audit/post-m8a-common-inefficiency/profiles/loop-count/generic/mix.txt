@@ -1,0 +1,47 @@
+executed Botlish-code instructions per run: 29,549 (100.0% of all Ir)
+
+== total executed JIT instruction mix (per run)
+  mov reg-reg               5,007.0   16.9%
+  tag test                  4,503.0   15.2%  I1mr=0.0  Bc=2,001.0  Bcm=0.0
+  frame: epilogue           2,512.0    8.5%  Dr=1,508.0  I1mr=0.0
+  mov imm                   2,504.0    8.5%  I1mr=0.0
+  frame: prologue           2,010.0    6.8%  Dw=1,006.0  I1mr=0.0
+  cmp/test (other)          2,002.0    6.8%  I1mr=0.0
+  jcc (other)               2,002.0    6.8%  Bc=2,002.0  Bcm=0.0
+  stack store               1,503.0    5.1%  Dw=1,503.0
+  overflow check            1,500.0    5.1%  I1mr=0.0  Bc=500.0  Bcm=0.0
+  completion check          1,002.0    3.4%  Bc=501.0  Bcm=0.0
+  bool test                 1,002.0    3.4%  I1mr=0.0  Bc=501.0  Bcm=1.0
+  arith                     1,000.0    3.4%
+  retag                     1,000.0    3.4%
+  call botlish                501.0    1.7%  Dw=501.0
+  bool materialize            501.0    1.7%  Dr=501.0
+  untag                       500.0    1.7%
+  jmp                         500.0    1.7%
+
+== 2 drive: 22,035.0 executed instructions per run (74.6% of JIT)
+  mov reg-reg               5,007.0   22.7%
+  tag test                  3,503.0   15.9%
+  mov imm                   1,502.0    6.8%
+  cmp/test (other)          1,502.0    6.8%
+  jcc (other)               1,502.0    6.8%
+  stack store               1,501.0    6.8%
+  overflow check            1,500.0    6.8%
+  bool test                 1,002.0    4.5%
+  arith                     1,000.0    4.5%
+  retag                     1,000.0    4.5%
+  completion check          1,000.0    4.5%
+  bool materialize            501.0    2.3%
+  untag                       500.0    2.3%
+  call botlish                500.0    2.3%
+  jmp                         500.0    2.3%
+  frame: epilogue               8.0    0.0%
+  frame: prologue               7.0    0.0%
+
+== 1 work: 7,500.0 executed instructions per run (25.4% of JIT)
+  frame: epilogue           2,500.0   33.3%
+  frame: prologue           2,000.0   26.7%
+  mov imm                   1,000.0   13.3%
+  tag test                  1,000.0   13.3%
+  cmp/test (other)            500.0    6.7%
+  jcc (other)                 500.0    6.7%

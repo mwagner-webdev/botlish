@@ -1,0 +1,70 @@
+# addr  executions/run  other events/run  [function +offset]  class  instruction
+0x4847000         1.0  Dw=1.0 I1mr=0.1  [0 <program> +0x0]  frame: prologue    push   rbp
+0x4847001         1.0    [0 <program> +0x1]  frame: prologue    mov    rbp,rsp
+0x4847004         1.0    [0 <program> +0x4]  frame: prologue    sub    rsp,0x10
+0x4847008         1.0    [0 <program> +0x8]  mov imm            mov    esi,0x2d
+0x484700d         1.0  Dw=1.0  [0 <program> +0xd]  stack store        mov    QWORD PTR [rsp],0x2d
+0x4847015         1.0  Dw=1.0  [0 <program> +0x15]  call botlish       call   0x4847038
+0x484701a         1.0    [0 <program> +0x1a]  frame: epilogue    add    rsp,0x10
+0x484701e         1.0    [0 <program> +0x1e]  frame: epilogue    mov    rsp,rbp
+0x4847021         1.0  Dr=1.0  [0 <program> +0x21]  frame: epilogue    pop    rbp
+0x4847022         1.0  Dr=1.0  [0 <program> +0x22]  frame: epilogue    ret
+0x4847038    57,313.0  Dw=57,313.0  [1 fib +0x0]  frame: prologue    push   rbp
+0x4847039    57,313.0    [1 fib +0x1]  frame: prologue    mov    rbp,rsp
+0x484703c    57,313.0    [1 fib +0x4]  frame: prologue    sub    rsp,0x30
+0x4847040    57,313.0  Dw=57,313.0 I1mr=0.1  [1 fib +0x8]  frame: prologue    mov    QWORD PTR [rsp+0x10],rbx
+0x4847045    57,313.0  Dw=57,313.0  [1 fib +0xd]  frame: prologue    mov    QWORD PTR [rsp+0x18],r12
+0x484704a    57,313.0  Dw=57,313.0  [1 fib +0x12]  frame: prologue    mov    QWORD PTR [rsp+0x20],r13
+0x484704f    57,313.0    [1 fib +0x17]  mov reg-reg        mov    rbx,rdi
+0x4847052    57,313.0  Dw=57,313.0  [1 fib +0x1a]  stack store        mov    QWORD PTR [rsp+0x8],0x0
+0x484705b    57,313.0    [1 fib +0x23]  tag test           test   rsi,0x1
+0x4847062    57,313.0    [1 fib +0x2a]  mov reg-reg        mov    r12,rsi
+0x4847065    57,313.0  Bc=57,313.0 Bcm=0.5  [1 fib +0x2d]  jcc (other)        jne    0x4847098
+0x4847098    57,313.0  I1mr=0.1  [1 fib +0x60]  mov imm            mov    r10d,0x2
+0x484709e    57,313.0    [1 fib +0x66]  mov reg-reg        mov    rsi,r12
+0x48470a1    57,313.0    [1 fib +0x69]  cmp/test (other)   cmp    rsi,0x5
+0x48470a5    57,313.0  Dr=57,313.0 D1mr=0.1  [1 fib +0x6d]  bool materialize   cmovl  r10,QWORD PTR [rip+0xcb]        # 0x4847178
+0x48470ad    57,313.0    [1 fib +0x75]  bool test          cmp    r10,0x6
+0x48470b1    57,313.0  Bc=57,313.0 Bcm=20,296.5  [1 fib +0x79]  bool test          je     0x4847157
+0x48470b7    28,656.0    [1 fib +0x7f]  mov reg-reg        mov    rsi,r12
+0x48470ba    28,656.0    [1 fib +0x82]  untag              sar    rsi,1
+0x48470bd    28,656.0    [1 fib +0x85]  mov reg-reg        mov    r12,rsi
+0x48470c0    28,656.0  I1mr=0.1  [1 fib +0x88]  arith              sub    rsi,0x1
+0x48470c4    28,656.0    [1 fib +0x8c]  retag              shl    rsi,1
+0x48470c7    28,656.0    [1 fib +0x8f]  retag              or     rsi,0x1
+0x48470cb    28,656.0  Dw=28,656.0  [1 fib +0x93]  stack store        mov    QWORD PTR [rsp],rsi
+0x48470cf    28,656.0    [1 fib +0x97]  mov reg-reg        mov    rdi,rbx
+0x48470d2    28,656.0  Dw=28,656.0  [1 fib +0x9a]  call botlish       call   0x4847038
+0x48470d7    28,656.0    [1 fib +0x9f]  mov reg-reg        mov    r13,rax
+0x48470da    28,656.0  Dw=28,656.0  [1 fib +0xa2]  stack store        mov    QWORD PTR [rsp],rax
+0x48470de    28,656.0    [1 fib +0xa6]  mov reg-reg        mov    rsi,r12
+0x48470e1    28,656.0    [1 fib +0xa9]  arith              sub    rsi,0x2
+0x48470e5    28,656.0    [1 fib +0xad]  mov reg-reg        mov    r12,rsi
+0x48470e8    28,656.0    [1 fib +0xb0]  retag              shl    rsi,1
+0x48470eb    28,656.0    [1 fib +0xb3]  mov reg-reg        mov    r12,rsi
+0x48470ee    28,656.0    [1 fib +0xb6]  retag              or     rsi,0x1
+0x48470f2    28,656.0    [1 fib +0xba]  mov reg-reg        mov    r12,rsi
+0x48470f5    28,656.0  Dw=28,656.0  [1 fib +0xbd]  stack store        mov    QWORD PTR [rsp+0x8],rsi
+0x48470fa    28,656.0    [1 fib +0xc2]  mov reg-reg        mov    rdi,rbx
+0x48470fd    28,656.0  Dw=28,656.0 I1mr=0.1  [1 fib +0xc5]  call botlish       call   0x4847038
+0x4847102    28,656.0  Dw=28,656.0  [1 fib +0xca]  stack store        mov    QWORD PTR [rsp+0x8],rax
+0x4847107    28,656.0    [1 fib +0xcf]  mov reg-reg        mov    rcx,r13
+0x484710a    28,656.0    [1 fib +0xd2]  tag test           and    rcx,rax
+0x484710d    28,656.0    [1 fib +0xd5]  tag test           test   rcx,0x1
+0x4847114    28,656.0  Bc=28,656.0 Bcm=0.2  [1 fib +0xdc]  tag test           jne    0x4847122
+0x4847122    28,656.0    [1 fib +0xea]  lea                lea    rcx,[rax-0x1]
+0x4847126    28,656.0    [1 fib +0xee]  mov reg-reg        mov    rdx,r13
+0x4847129    28,656.0    [1 fib +0xf1]  mov reg-reg        mov    rsi,rax
+0x484712c    28,656.0    [1 fib +0xf4]  mov reg-reg        mov    rax,rdx
+0x484712f    28,656.0    [1 fib +0xf7]  arith              add    rax,rcx
+0x4847132    28,656.0    [1 fib +0xfa]  overflow check     seto   cl
+0x4847135    28,656.0    [1 fib +0xfd]  overflow check     test   cl,cl
+0x4847137    28,656.0  Bc=28,656.0 Bcm=0.1  [1 fib +0xff]  overflow check     je     0x484715a
+0x4847157    28,657.0  I1mr=0.1  [1 fib +0x11f]  mov reg-reg        mov    rax,r12
+0x484715a    57,313.0  Dr=57,313.0  [1 fib +0x122]  frame: epilogue    mov    rbx,QWORD PTR [rsp+0x10]
+0x484715f    57,313.0  Dr=57,313.0  [1 fib +0x127]  frame: epilogue    mov    r12,QWORD PTR [rsp+0x18]
+0x4847164    57,313.0  Dr=57,313.0  [1 fib +0x12c]  frame: epilogue    mov    r13,QWORD PTR [rsp+0x20]
+0x4847169    57,313.0    [1 fib +0x131]  frame: epilogue    add    rsp,0x30
+0x484716d    57,313.0    [1 fib +0x135]  frame: epilogue    mov    rsp,rbp
+0x4847170    57,313.0  Dr=57,313.0  [1 fib +0x138]  frame: epilogue    pop    rbp
+0x4847171    57,313.0  Dr=57,313.0  [1 fib +0x139]  frame: epilogue    ret

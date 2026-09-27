@@ -1,0 +1,7 @@
+# static machine code per JIT function (direct entry); totals include generic entries' bytes
+TOTAL bytes=395 direct-entry instructions=86 frame=27 tagged-int=10 bool word=6 stack traffic=6 completion=0 calls=4 moves=14
+
+id name                       bytes entry  insns         frame    tagged-int     bool word stack traffic    completion         calls         moves
+0 <program>                      49    14     12             7             0             0             2             0             1             0
+1 work                           14    17      6             5             0             0             0             0             0             0
+2 drive                         280    21     68            15            10             6             4             0             3            14

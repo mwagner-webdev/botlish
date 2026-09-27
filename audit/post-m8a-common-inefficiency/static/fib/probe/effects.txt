@@ -1,0 +1,4 @@
+exact_calls=3 false_false=0 false_true=3 true_false=0 true_true=0 completion_checks_removed=3 call_safepoints_removed=0
+call caller=0 caller_name="<program>" callee=1 callee_name="fib" may_error=false may_gc=true
+call caller=1 caller_name="fib" callee=1 callee_name="fib" may_error=false may_gc=true
+call caller=1 caller_name="fib" callee=1 callee_name="fib" may_error=false may_gc=true

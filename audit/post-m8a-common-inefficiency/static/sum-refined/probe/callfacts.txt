@@ -1,0 +1,11 @@
+<program> e30 ? -> sum<int, int>
+    arg0: type int, range [400, 400] {400}
+    arg1: type int, range [0, 0] {0}
+    result: type int, range [-∞, +∞]; semantic effectiveErrors {}
+sum<int, int> e25 ? -> step<int>
+    arg0: type int, range [-∞, +∞]
+    result: type int, range [-∞, +∞]; semantic effectiveErrors {}
+sum<int, int> e19 ? -> sum<int, int>
+    arg0: type int, range [0, 399]
+    arg1: type int, range [-∞, +∞]
+    result: type int, range [-∞, +∞]; semantic effectiveErrors {}

@@ -1,0 +1,18 @@
+== first-run (runs=1, report = last run)
+  total: allocations 0, allocatedBytes 0 (header 0, payload 0), peakLiveObjects 0, peakLiveBytes 0
+  semantic allocations 0, private optimization (plan) allocations 0
+  static constant table: 0 objects, 0 bytes
+  gc: cycles 0, reclaimedObjects 0, totalTimeUs 0
+  copies: stringBytes 0 listElements 0 mutableArrayElements 0
+  traversal: utf8SeekBytes 0
+  construction: materializations 0 passthrough 0 plansCreated 0 extensions 0 merges 0 growths 0 growthStringBytes 0 growthListElements 0 pieces 0 regionPieces 0 stringBytesIntoPlans 0 listElementsIntoPlans 0 materializedStringBytes 0 materializedListElements 0
+  sites (func | location | operation | kind | allocations | bytes):
+
+== steady-state (runs=3, report = last run)
+  total: allocations 0, allocatedBytes 0 (header 0, payload 0), peakLiveObjects 0, peakLiveBytes 0
+  semantic allocations 0, private optimization (plan) allocations 0
+  static constant table: 0 objects, 0 bytes
+  gc: cycles 1, reclaimedObjects 0, totalTimeUs 0
+  copies: stringBytes 0 listElements 0 mutableArrayElements 0
+  traversal: utf8SeekBytes 0
+  construction: materializations 0 passthrough 0 plansCreated 0 extensions 0 merges 0 growths 0 growthStringBytes 0 growthListElements 0 pieces 0 regionPieces 0 stringBytesIntoPlans 0 listElementsIntoPlans 0 materializedStringBytes 0 materializedListElements 0

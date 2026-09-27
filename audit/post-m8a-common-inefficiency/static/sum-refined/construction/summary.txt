@@ -1,0 +1,6 @@
+program: bench/sum-refined.ir
+value (on):  80200
+value (off): 80200
+used instances: 4
+plan results: 0, instances with plan parameters: 0, instances with plan locals: 0
+construction sites/plan sources: 0 (0 virtual)

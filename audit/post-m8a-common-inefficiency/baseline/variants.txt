@@ -1,0 +1,23 @@
+fib.ir             cranelift          runs=5    value=17711      median=    208.23 us  min=    152.72  max=    210.25  jit_compile=1246 us  sessions={152.72 209.88 208.23 210.25 208.03}
+fib.ir             cranelift          runs=200  value=17711      median=    135.37 us  min=    130.71  max=    140.48  jit_compile=1138 us  sessions={140.48 132.24 130.71 136.10 135.37}
+fib.ir             cranelift/vc-off   runs=5    value=17711      median=    136.53 us  min=    135.19  max=    138.69  jit_compile=1073 us  sessions={137.04 138.69 135.19 136.53 135.64}
+fib.ir             cranelift/vc-off   runs=200  value=17711      median=    112.85 us  min=    106.68  max=    136.62  jit_compile=1428 us  sessions={136.20 112.85 112.42 136.62 106.68}
+fib.ir             cranelift-generic  runs=5    value=17711      median=    196.49 us  min=    163.66  max=    206.87  jit_compile=1376 us  sessions={163.66 180.69 196.49 206.87 201.66}
+fib.ir             cranelift-generic  runs=200  value=17711      median=    176.06 us  min=    138.62  max=    198.29  jit_compile=1422 us  sessions={176.06 166.47 138.62 198.29 190.95}
+loop-count.ir      cranelift          runs=5    value=3500       median=      1.67 us  min=      1.57  max=      1.76  jit_compile=1511 us  sessions={1.59 1.76 1.67 1.57 1.67}
+loop-count.ir      cranelift          runs=200  value=3500       median=      1.01 us  min=      0.90  max=      1.09  jit_compile=1229 us  sessions={0.90 1.04 1.01 0.98 1.09}
+loop-count.ir      cranelift/vc-off   runs=5    value=3500       median=      1.13 us  min=      1.05  max=      2.28  jit_compile=1379 us  sessions={1.10 1.05 1.13 1.62 2.28}
+loop-count.ir      cranelift/vc-off   runs=200  value=3500       median=      1.06 us  min=      1.01  max=      1.45  jit_compile=1494 us  sessions={1.06 1.21 1.45 1.01 1.05}
+loop-count.ir      cranelift-generic  runs=5    value=3500       median=      2.49 us  min=      1.29  max=      2.71  jit_compile=5668 us  sessions={1.29 2.71 2.49 1.29 2.59}
+loop-count.ir      cranelift-generic  runs=200  value=3500       median=      1.32 us  min=      1.25  max=      1.32  jit_compile=1611 us  sessions={1.32 1.32 1.25 1.32 1.32}
+refined-checks.ir  cranelift          runs=5    value=[400, 0]   median=    334.93 us  min=    323.43  max=    477.27  jit_compile=19811 us  sessions={334.93 325.02 338.51 323.43 477.27}
+refined-checks.ir  cranelift          runs=200  value=[400, 0]   median=    316.93 us  min=    284.03  max=    319.63  jit_compile=15511 us  sessions={284.11 284.03 319.63 316.93 317.07}
+refined-checks.ir  cranelift/vc-off   runs=5    value=[400, 0]   median=    331.02 us  min=    272.63  max=    512.56  jit_compile=15018 us  sessions={272.63 329.79 337.02 512.56 331.02}
+refined-checks.ir  cranelift/vc-off   runs=200  value=[400, 0]   median=    328.26 us  min=    267.45  max=    356.40  jit_compile=13129 us  sessions={356.40 339.07 328.26 322.06 267.45}
+refined-checks.ir  cranelift-generic  runs=5    not measurable: NATIVE UNSUPPORTED {native UriQueryValue?}
+sum-refined.ir     cranelift          runs=5    value=80200      median=      0.47 us  min=      0.46  max=      0.56  jit_compile=954 us  sessions={0.47 0.46 0.56 0.47 0.47}
+sum-refined.ir     cranelift          runs=200  value=80200      median=      0.56 us  min=      0.56  max=      0.56  jit_compile=1507 us  sessions={0.56 0.56 0.56 0.56 0.56}
+sum-refined.ir     cranelift/vc-off   runs=5    value=80200      median=      0.56 us  min=      0.44  max=      0.58  jit_compile=916 us  sessions={0.56 0.58 0.44 0.56 0.44}
+sum-refined.ir     cranelift/vc-off   runs=200  value=80200      median=      0.56 us  min=      0.46  max=      0.64  jit_compile=929 us  sessions={0.56 0.56 0.50 0.64 0.46}
+sum-refined.ir     cranelift-generic  runs=5    value=80200      median=      2.05 us  min=      1.45  max=      2.50  jit_compile=1983 us  sessions={2.50 2.05 2.50 1.45 1.96}
+sum-refined.ir     cranelift-generic  runs=200  value=80200      median=      1.58 us  min=      1.48  max=      2.10  jit_compile=2645 us  sessions={1.49 1.48 1.73 1.58 2.10}

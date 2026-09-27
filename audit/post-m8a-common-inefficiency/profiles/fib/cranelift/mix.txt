@@ -1,0 +1,37 @@
+executed Botlish-code instructions per run: 2,378,483 (100.0% of all Ir)
+
+== total executed JIT instruction mix (per run)
+  mov reg-reg             573,124.0   24.1%  I1mr=0.1
+  frame: epilogue         401,195.0   16.9%  Dr=286,567.0
+  frame: prologue         343,881.0   14.5%  Dw=229,253.0  I1mr=0.1
+  stack store             171,938.0    7.2%  Dw=171,938.0
+  tag test                143,281.0    6.0%  Bc=28,656.0  Bcm=0.2
+  bool test               114,626.0    4.8%  Bc=57,313.0  Bcm=20,296.5
+  retag                   114,624.0    4.8%
+  arith                    85,968.0    3.6%  I1mr=0.1
+  overflow check           85,968.0    3.6%  Bc=28,656.0  Bcm=0.1
+  mov imm                  57,314.0    2.4%  I1mr=0.1
+  call botlish             57,313.0    2.4%  Dw=57,313.0  I1mr=0.1
+  jcc (other)              57,313.0    2.4%  Bc=57,313.0  Bcm=0.5
+  cmp/test (other)         57,313.0    2.4%
+  bool materialize         57,313.0    2.4%  Dr=57,313.0  D1mr=0.1
+  untag                    28,656.0    1.2%
+  lea                      28,656.0    1.2%
+
+== 1 fib: 2,378,473.0 executed instructions per run (100.0% of JIT)
+  mov reg-reg             573,124.0   24.1%
+  frame: epilogue         401,191.0   16.9%
+  frame: prologue         343,878.0   14.5%
+  stack store             171,937.0    7.2%
+  tag test                143,281.0    6.0%
+  bool test               114,626.0    4.8%
+  retag                   114,624.0    4.8%
+  arith                    85,968.0    3.6%
+  overflow check           85,968.0    3.6%
+  jcc (other)              57,313.0    2.4%
+  mov imm                  57,313.0    2.4%
+  cmp/test (other)         57,313.0    2.4%
+  bool materialize         57,313.0    2.4%
+  call botlish             57,312.0    2.4%
+  untag                    28,656.0    1.2%
+  lea                      28,656.0    1.2%

@@ -1,0 +1,53 @@
+executed Botlish-code instructions per run: 28,052 (100.0% of all Ir)
+
+== total executed JIT instruction mix (per run)
+  mov reg-reg               7,610.0   27.1%  I1mr=0.0
+  tag test                  3,602.0   12.8%  Bc=1,601.0  Bcm=0.0
+  cmp/test (other)          2,002.0    7.1%  I1mr=0.0
+  frame: epilogue           1,610.0    5.7%  Dr=806.0
+  stack store               1,605.0    5.7%  Dw=1,605.0
+  mov imm                   1,603.0    5.7%
+  jcc (other)               1,601.0    5.7%  Bc=1,601.0  Bcm=0.0
+  frame: prologue           1,208.0    4.3%  Dw=404.0  I1mr=0.0
+  jmp                       1,201.0    4.3%  I1mr=0.0
+  overflow check            1,200.0    4.3%  Bc=400.0  Bcm=0.0
+  completion check            802.0    2.9%  Bc=401.0  Bcm=0.0
+  retag                       802.0    2.9%  I1mr=0.0
+  bool materialize            802.0    2.9%  Dr=401.0  D1mr=0.0
+  bool test                   802.0    2.9%  Bc=401.0  Bcm=1.0
+  arith                       800.0    2.9%  I1mr=0.0
+  call botlish                401.0    1.4%  Dw=401.0
+  lea                         400.0    1.4%
+  untag                         1.0    0.0%
+
+== 2 step: 14,400.0 executed instructions per run (51.3% of JIT)
+  mov reg-reg               3,200.0   22.2%
+  tag test                  2,800.0   19.4%
+  frame: epilogue           1,600.0   11.1%
+  frame: prologue           1,200.0    8.3%
+  overflow check            1,200.0    8.3%
+  stack store                 800.0    5.6%
+  mov imm                     800.0    5.6%
+  cmp/test (other)            800.0    5.6%
+  jcc (other)                 800.0    5.6%
+  jmp                         400.0    2.8%
+  lea                         400.0    2.8%
+  arith                       400.0    2.8%
+
+== 1 sum: 13,638.0 executed instructions per run (48.6% of JIT)
+  mov reg-reg               4,410.0   32.3%
+  cmp/test (other)          1,202.0    8.8%
+  stack store                 803.0    5.9%
+  tag test                    802.0    5.9%
+  retag                       802.0    5.9%
+  bool materialize            802.0    5.9%
+  bool test                   802.0    5.9%
+  mov imm                     801.0    5.9%
+  jmp                         801.0    5.9%
+  jcc (other)                 801.0    5.9%
+  completion check            800.0    5.9%
+  call botlish                400.0    2.9%
+  arith                       400.0    2.9%
+  frame: epilogue               6.0    0.0%
+  frame: prologue               5.0    0.0%
+  untag                         1.0    0.0%

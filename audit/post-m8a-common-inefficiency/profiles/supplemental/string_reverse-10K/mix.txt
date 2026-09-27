@@ -1,0 +1,38 @@
+executed Botlish-code instructions per run: 440,932 (7.8% of all Ir)
+
+== total executed JIT instruction mix (per run)
+  stack store             110,203.0   25.0%  Dw=110,203.0  I1mr=0.4
+  mov reg-reg              80,115.0   18.2%
+  mov imm                  50,087.0   11.4%
+  completion check         40,082.0    9.1%  I1mr=0.6  Bc=20,041.0  Bcm=3.2
+  stack load               40,062.0    9.1%  Dr=40,062.0  I1mr=0.2
+  retag                    40,044.0    9.1%  I1mr=0.2
+  call helper              30,046.0    6.8%  Dw=30,046.0
+  untag                    10,023.0    2.3%
+  cmp/test (other)         10,017.0    2.3%
+  jcc (other)              10,017.0    2.3%  Bc=10,017.0  Bcm=6.8
+  arith                    10,011.0    2.3%
+  jmp                      10,011.0    2.3%
+  frame: epilogue              87.0    0.0%  Dr=61.0  I1mr=0.2  D1mr=4.0
+  frame: prologue              74.0    0.0%  Dw=48.0  I1mr=1.6
+  heap/vm load                 24.0    0.0%  Dr=24.0  I1mr=0.4  D1mr=1.6
+  lea (stack addr)             13.0    0.0%  I1mr=0.2
+  call botlish                 12.0    0.0%  Dw=12.0
+  frame: root-slot zero          4.0    0.0%  Dw=4.0  I1mr=0.2
+
+== 1 reverse_from: 440,748.0 executed instructions per run (100.0% of JIT)
+  stack store             110,169.0   25.0%
+  mov reg-reg              80,100.0   18.2%
+  mov imm                  50,079.0   11.4%
+  stack load               40,062.0    9.1%
+  completion check         40,056.0    9.1%
+  retag                    40,044.0    9.1%
+  call helper              30,045.0    6.8%
+  untag                    10,023.0    2.3%
+  cmp/test (other)         10,017.0    2.3%
+  jcc (other)              10,017.0    2.3%
+  arith                    10,011.0    2.3%
+  jmp                      10,011.0    2.3%
+  frame: epilogue              54.0    0.0%
+  frame: prologue              48.0    0.0%
+  lea (stack addr)             12.0    0.0%

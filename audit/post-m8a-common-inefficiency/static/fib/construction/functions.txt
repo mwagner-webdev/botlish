@@ -1,0 +1,7 @@
+virtual-construction-opt 0: 394 machine-code bytes, 2 NIR functions
+0 <program>                  <generic>                  49 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+1 fib                        <int>                     345 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+
+virtual-construction-opt 1: 394 machine-code bytes, 2 NIR functions
+0 <program>                  <generic>                  49 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0
+1 fib                        <int>                     345 bytes  guards=0  strcat=0  listappend=0  construct(plan)=0  construct(flat)=0  planregs=0  planresult=0

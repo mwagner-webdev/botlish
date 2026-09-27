@@ -1,0 +1,9 @@
+source: bench/fib.ir
+lower options: 
+static diagnostics: 0
+NIR functions: 2; machine code bytes: 394
+allocation (one run): allocations=0 bytes=0 static=0
+  sites:
+
+  0 <program><generic>                       regs=3   params=0 env=0 bytes=49    call=1
+  1 fib<int>                                 regs=17  params=1 env=0 bytes=345   op:ilt=1 br=1 op:runbox=1 op:risub=2 op:rbox=2 call=2 op:iadd=1

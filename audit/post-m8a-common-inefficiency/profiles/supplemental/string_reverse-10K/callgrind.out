@@ -1,0 +1,3761 @@
+# callgrind format
+version: 1
+creator: callgrind-3.22.0
+pid: 6881
+cmd:  /tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/target/release/botlish-native bench 5 audit/post-m8a-common-inefficiency/profiles/supplemental/string_reverse-10K/program.nir
+part: 1
+
+
+desc: I1 cache: 32768 B, 64 B, 8-way associative
+desc: D1 cache: 49152 B, 64 B, 12-way associative
+desc: LL cache: 276824064 B, 64 B, 33-way associative
+
+desc: Timerange: Basic block 0 - 7111240
+desc: Trigger: Program termination
+
+positions: instr
+events: Ir Dr Dw I1mr D1mr D1mw ILmr DLmr DLmw Bc Bcm Bi Bim
+summary: 28257703 6276085 5168887 146 809 1738 97 0 141 4264761 51749 100929 118
+
+
+ob=???
+fl=???
+fn=0x00000000049896b0
+0x49896b0 2
+0x49896b4 2 2 0 0 0 0 0 0 0 0 0 2
+cob=/usr/lib/x86_64-linux-gnu/libc.so.6
+cfi=./string/../sysdeps/x86_64/multiarch/memmove-vec-unaligned-erms.S
+cfn=__memcpy_avx_unaligned_erms
+calls=420 0x188a80 
+0x49896b4 34 9 6 1 0 1 0 0 0 7 5
+
+fn=0x00000000048471bf
+0x48471bf 30 0 30 1
+0x48471c0 30 0 0 1
+0x48471c3 30
+0x48471ca 30 0 30
+0x48471cf 30 0 30
+0x48471d4 30 0 30
+0x48471dc 30 0 30
+0x48471e4 30 0 30
+0x48471ec 30 0 30
+0x48471f1 30 0 30
+0x48471fa 30 0 30 1
+0x4847203 30 0 30
+0x4847207 30 0 30
+0x484720c 30 0 30
+0x4847211 30
+0x4847214 30
+0x4847217 30
+0x484721c 30
+0x4847226 30
+0x4847229 30 30
+0x484722e 30 0 30
+cob=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/target/release/botlish-native
+cfi=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/ops.rs
+cfn=botlish_native::runtime::ops::rt_str_len
+calls=30 0x18c2d0 
+0x484722e 330 90 30 1 15 0 1 0 0 30 4
+0x484721c 50055
+0x4847226 50055
+0x4847229 50055 50055
+0x484722e 50055 0 50055
+cob=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/target/release/botlish-native
+cfi=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/ops.rs
+cfn=botlish_native::runtime::ops::rt_str_len
+calls=50055 0x18c2d0 
+0x484722e 550605 150165 50055 0 0 0 0 0 0 50055 4
+0x4847230 50085
+0x4847233 50085
+0x4847236 50085 0 0 0 0 0 0 0 0 50085 34
+0x484723c 50055
+0x484723f 50055 0 0 1
+0x4847242 50055
+0x4847246 50055 0 50055
+0x484724b 50055
+0x4847252 50055
+0x4847255 50055
+0x4847258 50055
+0x484725c 50055 0 50055
+0x4847261 50055
+0x484726b 50055
+0x484726e 50055
+0x4847271 50055
+0x4847274 50055 50055
+0x4847279 50055 0 50055
+cob=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/target/release/botlish-native
+cfi=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/ops.rs
+cfn=botlish_native::runtime::ops::rt_str_region_check
+calls=50055 0x1901c0 
+0x4847279 1902090 400440 350385 4 0 0 4 0 0 150165 2
+0x484727b 50055
+0x484727e 50055 0 0 1 0 0 0 0 0 50055 2
+0x4847284 50055 0 50055
+0x484728d 50055 0 50055
+0x4847292 50055 0 50055
+0x4847297 50055 0 50055
+0x484729c 50055 0 50055
+0x48472a5 50055 50055
+0x48472aa 50055 0 50055
+0x48472af 50055
+0x48472b4 50055
+0x48472b9 50055
+0x48472c3 50055
+0x48472c6 50055 50055
+0x48472cb 50055 0 50055
+cob=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/target/release/botlish-native
+cfi=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+cfn=botlish_native::runtime::construct::rt_construct
+calls=50055 0x1b4bb0 
+0x48472cb 23527827 5468892 4012302 66 741 1101 43 0 111 3861204 51399 100631 106
+0x48472cd 50055
+0x48472d0 50055 0 0 0 0 0 0 0 0 50055 2
+0x48472d6 50055 0 50055
+0x48472da 50055 0 50055
+0x48472df 50055
+0x48472e2 50055 0 50055
+0x48472e7 50055
+0x48472ec 30 30 0 1
+0x48472f1 30
+0x48472f4 30
+0x48472f9 30 0 30 1
+0x4847302 30 0 30
+0x4847307 30
+0x484730c 30
+0x4847316 30 30
+0x484731b 30 0 30
+cob=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/target/release/botlish-native
+cfi=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+cfn=botlish_native::runtime::construct::rt_construct
+calls=30 0x1b4bb0 
+0x484731b 70500 55334 54225 39 19 634 39 0 30 52810 250 255 6
+0x484731d 30
+0x4847320 30 0 0 0 0 0 0 0 0 30 2
+0x4847357 30 30 0 1
+0x484735c 30 30
+0x4847361 30 30
+0x4847369 30 30
+0x4847371 30 30 0 0 5
+0x4847379 30
+0x4847380 30
+0x4847383 30 30
+0x4847384 30 30
+
+fn=0x00000000048473a1
+0x48473a1 30 0 30 1
+0x48473a2 30
+0x48473a5 30
+0x48473a9 30 0 30
+0x48473ad 30
+0x48473b2 30 0 30
+0x48473bb 30 30
+0x48473bf 30 30 0 1
+0x48473c2 30 0 30
+0x48473c7 30 0 30
+cfn=0x00000000048471bf
+calls=30 0x48471bf 
+0x48473c7 28255092 6275441 5168247 118 780 1735 87 0 141 4264489 51699 100886 112
+0x48473cc 30
+0x48473cf 30 0 0 0 0 0 0 0 0 30 6
+0x48473e1 30
+0x48473e5 30
+0x48473e8 30 30 0 0 5
+0x48473e9 30 30
+
+fn=0x0000000004847000
+0x4847000 5 0 5 5
+0x4847001 5
+0x4847004 5
+0x484700b 5 0 5
+0x4847010 5 0 5
+0x4847015 5 0 5
+0x484701a 5 0 5
+0x484701f 5 0 5
+0x4847024 5 0 5
+0x484702d 5 0 5
+0x4847036 5 0 5
+0x484703f 5 0 5 1
+0x4847048 5 5
+0x484704c 5
+0x484704f 5 5 0 0 4
+0x4847052 5 0 5
+0x4847056 5 0 5
+cfn=0x00000000048473a1
+calls=5 0x48473a1 
+0x4847056 1540 365 360 26 5 11 18 0 0 165 32 5 1
+0x484705b 5
+0x484705e 5 0 0 0 0 0 0 0 0 5
+0x4847064 5 0 5
+0x4847068 5
+0x484706b 5
+0x484706e 5 5
+0x4847072 5 5
+0x4847076 5 0 5
+0x484707b 5 0 5
+cfn=0x00000000048473a1
+calls=5 0x48473a1 
+0x484707b 8247 2066 1659 50 18 5 48 0 0 1104 141 98 14
+0x4847080 5 0 0 1
+0x4847083 5 0 0 0 0 0 0 0 0 5
+0x4847089 5 0 5
+0x484708e 5
+0x4847091 5
+0x4847094 5 5
+0x4847098 5 5 0 0 4
+0x484709c 5 0 5
+0x48470a1 5 0 5
+cfn=0x00000000048473a1
+calls=5 0x48473a1 
+0x48470a1 14051 3337 2721 9 8 12 9 0 0 1964 152 115
+0x48470a6 5
+0x48470a9 5 0 0 0 0 0 0 0 0 5
+0x48470af 5 0 5
+0x48470b4 5
+0x48470b7 5
+0x48470ba 5 5
+0x48470be 5 5 0 1
+0x48470c2 5 0 5
+0x48470c7 5 0 5
+cfn=0x00000000048473a1
+calls=5 0x48473a1 
+0x48470c7 17092 4024 3234 4 15 7 0 0 0 2396 81 128
+0x48470cc 5
+0x48470cf 5 0 0 0 0 0 0 0 0 5
+0x48470d5 5 0 5
+0x48470da 5
+0x48470dd 5
+0x48470e0 5 5
+0x48470e4 5 5
+0x48470e8 5 0 5
+0x48470ed 5 0 5
+cfn=0x00000000048473a1
+calls=5 0x48473a1 
+0x48470ed 15638 3578 2764 16 22 2 9 0 0 2340 211 115
+0x48470f2 5
+0x48470f5 5 0 0 0 0 0 0 0 0 5 2
+0x48470fb 5 0 5
+0x4847100 5 0 0 1
+0x4847105 5
+0x4847108 5 0 5
+0x484710d 5
+0x4847110 5 0 5
+0x4847115 5
+0x4847118 5 0 5
+0x484711d 5
+0x4847120 5 0 5
+0x4847125 5 0 5
+0x484712a 5
+0x484712f 5
+0x4847139 5
+0x484713c 5 0 5
+cob=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/target/release/botlish-native
+cfi=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/ops.rs
+cfn=botlish_native::runtime::ops::rt_list_new
+calls=5 0x18cbd0 
+0x484713c 1661 424 320 15 6 3 10 0 0 207 40 38 5
+0x484713e 5 0 0 1
+0x4847141 5 0 0 0 0 0 0 0 0 5
+0x4847147 5
+0x484714a 5 5
+0x484714e 5 5
+0x4847152 5 0 5
+0x4847156 5 0 5
+cfn=0x00000000048473a1
+calls=5 0x48473a1 
+0x4847156 28199004 6262191 5157659 15 717 1698 3 0 141 4256550 51088 100425 97
+0x484715b 5
+0x484715e 5 0 0 0 0 0 0 0 0 5 2
+0x484718c 5 5 0 0 5
+0x4847191 5 5
+0x4847196 5 5
+0x484719b 5 5
+0x48471a0 5 5 0 0 5
+0x48471a5 5
+0x48471ac 5
+0x48471af 5 5
+0x48471b0 5 5
+
+fn=0x0000000004989740
+0x4989740 40
+0x4989744 40 40 0 0 0 0 0 0 0 0 0 40
+cob=/usr/lib/x86_64-linux-gnu/libc.so.6
+cfi=./string/../sysdeps/x86_64/multiarch/memset-vec-unaligned-erms.S
+cfn=__memset_avx2_unaligned_erms
+calls=57 0x189480 
+0x4989744 100120 80 99160 0 0 1022 0 0 108 98935 120
+
+ob=/usr/lib/x86_64-linux-gnu/libc.so.6
+fl=./string/../sysdeps/x86_64/multiarch/memset-vec-unaligned-erms.S
+fn=__memset_avx2_unaligned_erms
+0x189480 40
+0x189484 40
+0x189488 40
+0x18948b 40
+0x18948f 40 0 0 0 0 0 0 0 0 40 10
+0x189495 40
+0x18949a 40
+0x18949e 40 0 0 0 0 0 0 0 0 40 40
+0x1894b0 5 0 5
+0x1894b5 5 0 5
+0x1894ba 5
+0x1894bd 5 5
+0x1894c0 40 40
+0x1894c7 40 0 0 0 0 0 0 0 0 40 18
+0x1894c9 25 0 25
+0x1894cd 25 0 25 0 0 13
+0x1894d2 25
+0x1894d5 25
+0x1894dc 25 0 0 0 0 0 0 0 0 25 6
+0x1894de 20 0 20 0 0 7
+0x1894e3 20 0 20 0 0 13
+0x1894e8 20
+0x1894ec 20
+0x1894f3 20 0 0 0 0 0 0 0 0 20 6
+0x1894f5 15
+0x1894fc 15
+0x189500 15 0 15 0 0 5
+0x189504 15 0 15 0 0 3
+0x189509 15 0 15 0 0 10
+0x18950e 15 0 15 0 0 4
+0x189513 15
+0x189517 15
+0x18951a 15 0 0 0 0 0 0 0 0 15 7
+0x189500 60 0 60 0 0 30
+0x189504 60 0 60 0 0 24
+0x189509 60 0 60 0 0 27
+0x18950e 60 0 60 0 0 20
+0x189513 60
+0x189517 60
+0x18951a 60 0 0 0 0 0 0 0 0 60 17
+0x18951c 15
+0x189520 15 0 15 0 0 4
+0x189524 15 0 15 0 0 4
+0x189529 15 0 15
+0x18952e 15 0 15
+0x189533 15
+0x189536 15 15
+0x189520 5 0 5
+0x189524 5 0 5
+0x189529 5 0 5
+0x18952e 5 0 5
+0x189533 5
+0x189536 5 5
+0x189540 15
+0x189544 15
+0x189547 15
+0x18954a 15 0 15 0 0 0 0 0 0 15
+0x18954a 98680 0 98665 0 0 858 0 0 108 98680 16
+0x18954c 15
+0x18954f 15
+0x189552 15 15
+
+fl=./string/../sysdeps/x86_64/multiarch/memmove-vec-unaligned-erms.S
+fn=__memcpy_avx_unaligned_erms
+0x188a80 100247
+0x188a84 100247
+0x188a87 100247
+0x188a8b 100247 0 0 0 0 0 0 0 0 100247 37
+0x188a8d 50137 50137
+0x188a91 50137
+0x188a95 50137 0 0 0 0 0 0 0 0 50137 44
+0x188a9b 11 11
+0x188aa1 11 0 11
+0x188aa5 11 0 11
+0x188aab 11
+0x188aae 11 11
+0x188ab0 50110
+0x188ab3 50110 0 0 0 0 0 0 0 0 50110 6
+0x188ab5 50105
+0x188ab8 50105 0 0 0 0 0 0 0 0 50105 9
+0x188aba 50100
+0x188abd 50100 0 0 0 0 0 0 0 0 50100 15
+0x188abf 50090
+0x188ac2 50090 0 0 0 0 0 0 0 0 50090 4
+0x188ac4 50065 50065 0 0 560
+0x188ac6 50065 0 0 0 0 0 0 0 0 50065 25
+0x188ac8 20 20
+0x188acd 20 0 20
+0x188ad2 20 0 20
+0x188ad4 20 20
+0x188ad2 50045 0 50045
+0x188ad4 50045 50045
+0x188ad4 25 25
+0x188ad5 10 10
+0x188ad9 10 10
+0x188adb 10 0 10
+0x188adf 10 0 10
+0x188ae1 10 10
+0x188ae2 5 5
+0x188ae6 5 5
+0x188aec 5 0 5
+0x188af0 5 0 5
+0x188af6 5 5
+0x188b00 5 5
+0x188b05 5 5
+0x188b08 5 0 5
+0x188b0b 5 0 5
+0x188b10 5 5
+0x188b11 6 6 0 1
+0x188b17 6 6
+0x188b1d 6 0 6 0 0 1
+0x188b21 6 0 6
+0x188b26 6 0 6
+0x188b2c 6 0 6
+0x188b32 6
+0x188b35 6 6
+0x188b40 50126 50126
+0x188b47 50126 0 0 0 0 0 0 0 0 50126 2
+0x188b4d 50121
+0x188b54 50121 0 0 0 0 0 0 0 0 50121 16
+0x188b56 11 11
+0x188b5b 11
+0x188b62 11 0 0 0 0 0 0 0 0 11 11
+0x188b64 5 5
+0x188b69 5 5
+0x188b6e 5 5
+0x188b74 5 5
+0x188b7a 5 5
+0x188b80 5 5
+0x188b86 5 0 5
+0x188b8a 5 0 5
+0x188b8f 5 0 5
+0x188b94 5 0 5
+0x188b99 5 0 5
+0x188b9f 5 0 5
+0x188ba5 5 0 5
+0x188bab 5 0 5
+0x188bb1 5
+0x188bb4 5 5
+0x188bb5 50110
+0x188bb8 50110
+0x188bbb 50110
+0x188bbe 50110 0 0 0 0 0 0 0 0 50110
+0x188bc4 50110 50110
+0x188bcb 50110 0 0 0 0 0 0 0 0 50110
+0x188bd1 50110
+0x188bd5 50110
+0x188bd8 50110
+0x188bdc 50110
+0x188be2 50110
+0x188be5 50110 0 0 0 0 0 0 0 0 50110
+0x188beb 50110 50110
+0x188bf1 50110 50110
+0x188bf7 50110
+0x188bfa 50110
+0x188bfe 50110 50110
+0x188c04 50110 50110
+0x188c0a 50110
+0x188c0d 50110
+0x188c10 50110
+0x188c13 50110
+0x188c18 50110
+0x188c20 50110 50110
+0x188c24 50110 50110
+0x188c29 50110 50110
+0x188c2e 50110 50110 0 0 1
+0x188c33 50110
+0x188c37 50110 0 50110 0 0 1
+0x188c3b 50110 0 50110
+0x188c40 50110 0 50110
+0x188c45 50110 0 50110
+0x188c4a 50110
+0x188c4e 50110
+0x188c51 50110 0 0 0 0 0 0 0 0 50110
+0x188c20 150635 150635
+0x188c24 150635 150635
+0x188c29 150635 150635
+0x188c2e 150635 150635
+0x188c33 150635
+0x188c37 150635 0 150635
+0x188c3b 150635 0 150635 0 0 2
+0x188c40 150635 0 150635
+0x188c45 150635 0 150635 0 0 2
+0x188c4a 150635
+0x188c4e 150635
+0x188c51 150635 0 0 0 0 0 0 0 0 150635 47
+0x188c53 50110 0 50110
+0x188c58 50110 0 50110
+0x188c5d 50110 0 50110
+0x188c62 50110 0 50110
+0x188c66 50110 0 50110
+0x188c6a 50110
+0x188c6d 50110 50110
+0x188d00 5 5
+0x188d05 5
+0x188d0b 5 0 0 0 0 0 0 0 0 5 2
+0x188d40 5
+0x188d43 5
+0x188d46 5
+0x188d49 5 0 0 0 0 0 0 0 0 5 2
+0x188d4f 5
+0x188d52 5 5
+0x188d59 5 0 0 0 0 0 0 0 0 5
+0x188d5b 5 5
+0x188d62 5 0 0 0 0 0 0 0 0 5
+0x188d72 5
+0x188d75 5
+0x188d79 5
+0x188d7d 5
+0x188d81 5
+0x188d84 5
+0x188d87 5 5 5 0 0 0 0 0 0 5 1
+0x188d87 50000 49995 49995 0 0 602 0 0 30 50000 7
+0x188d89 5 0 5
+0x188d8e 5 0 5
+0x188d94 5
+0x188d97 5 5
+
+fl=./malloc/./malloc/malloc.c
+fn=calloc
+0xae7c0 75
+0xae7c4 75 0 75
+0xae7c5 75
+0xae7c8 75
+0xae7cb 75 0 75
+0xae7cd 75 0 75
+0xae7cf 75 0 75
+0xae7d1 75 0 75
+0xae7d3 75 0 75
+0xae7d4 75
+0xae7d8 75
+0xae7db 75
+0xae7de 75
+0xae7e1 75
+0xae7e4 75 0 0 0 0 0 0 0 0 75
+0xae7ea 75
+0xae7ed 75
+0xae7f0 75 0 0 0 0 0 0 0 0 75
+0xae7f6 75 75
+0xae7fd 75 0 0 0 0 0 0 0 0 75 2
+0xae803 75 75
+0xae80a 75 75
+0xae80f 75 0 0 0 0 0 0 0 0 75
+0xae815 75 75
+0xae81c 75 0 0 0 0 0 0 0 0 75 19
+0xae822 75 75
+0xae829 75 75
+0xae82d 75
+0xae830 75 0 0 0 0 0 0 0 0 75
+0xae836 75
+0xae838 75
+0xae83d 75 0 75
+0xae843 75 0 0 0 0 0 0 0 0 75 2
+0xae849 75 75
+0xae84e 75
+0xae855 75 75
+0xae859 75
+0xae85d 75
+0xae860 75 0 0 0 0 0 0 0 0 75
+fi=./malloc/./malloc/arena.c
+0xae862 75 75
+0xae869 75
+0xae871 75
+0xae874 75
+0xae877 75
+0xae87e 75
+0xae882 75
+fe=./malloc/./malloc/malloc.c
+0xae885 75 75
+0xae889 75
+0xae88c 75
+0xae88f 75
+0xae893 75
+0xae896 75
+0xae899 75 0 75 0 0 1
+cfn=_int_malloc
+calls=155 0xab570 
+0xae899 18046 3525 2318 16 145 61 0 0 3 3588 556
+0xae89e 75
+0xae8a1 75 0 0 0 0 0 0 0 0 75 6
+0xae8a7 75 75
+0xae8ab 75
+0xae8ae 75
+0xae8b1 75 0 0 0 0 0 0 0 0 75 7
+0xae8b7 75
+fi=./malloc/./malloc/arena.c
+0xae8bb 75
+0xae8be 75 0 0 0 0 0 0 0 0 75 5
+0xae8c4 75 75
+0xae8cb 75
+0xae8d3 75
+0xae8d6 75
+0xae8d9 75
+0xae8e0 75
+0xae8e4 75
+fe=./malloc/./malloc/malloc.c
+0xae8e7 75 75
+0xae8ea 75 0 0 0 0 0 0 0 0 75
+0xae8f0 75 75
+0xae8f7 75 0 0 0 0 0 0 0 0 75
+0xae8fd 75
+0xae900 75 0 0 0 0 0 0 0 0 75 5
+0xae906 75 75 75 0 0 0 0 0 0 75
+0xae90a 75
+0xae90d 75 0 0 0 0 0 0 0 0 75
+0xae9c1 35
+0xae9c5 35 35
+0xae9c6 35 35
+0xae9c8 35 35
+0xae9ca 35 35
+0xae9cc 35 35
+0xae9ce 35 35
+0xae9cf 35 35
+0xae9f1 75 75
+0xae9f5 75
+0xae9f8 75
+0xae9fb 75
+0xae9fe 75 0 0 0 0 0 0 0 0 75
+0xaea00 75 75
+0xaea06 75
+0xaea0a 75
+0xaea0c 75 0 0 0 0 0 0 0 0 75
+0xaea0e 75
+0xaea11 75
+0xaea14 75
+0xaea18 75
+0xaea1b 75
+0xaea1f 75
+0xaea23 75
+0xaea27 75 0 0 0 0 0 0 0 0 75
+0xaea2d 75
+0xaea31 75 0 0 0 0 0 0 0 0 75 20
+0xaea37 35
+0xaea3b 35 0 35
+0xaea43 35 0 35
+0xaea46 35
+0xaea4a 35 0 0 0 0 0 0 0 0 35 6
+0xaea50 30 0 30
+0xaea54 30
+0xaea58 30 0 0 0 0 0 0 0 0 30 20
+0xaea5e 15 0 15
+0xaea62 15
+0xaea66 15 0 0 0 0 0 0 0 0 15
+0xaeb08 40
+fi=./malloc/../string/bits/string_fortified.h
+0xaeb0c 40
+0xaeb0e 40
+fe=./malloc/./malloc/malloc.c
+0xaeb11 40 40
+0xaeb12 40 40
+0xaeb14 40 40
+0xaeb16 40 40
+0xaeb18 40 40
+0xaeb1a 40 40
+fi=./malloc/../string/bits/string_fortified.h
+0xaeb1b 40
+cob=???
+cfi=???
+cfn=0x0000000004989740
+calls=53 0x4989740 
+0xaeb1b 100200 120 99160 0 0 1022 0 0 108 98935 120 40
+fe=./malloc/./malloc/malloc.c
+
+fn=_int_free_maybe_consolidate
+0xaab00 23 0 23
+0xaab01 23
+0xaab04 23 0 23
+0xaab06 23 0 23
+0xaab08 23 0 23
+0xaab0a 23 0 23
+0xaab0c 23 0 23
+0xaab0d 23
+0xaab11 23 23
+0xaab1a 23 0 23
+0xaab1e 23
+0xaab20 23
+0xaab27 23 0 0 0 0 0 0 0 0 23
+0xaab29 23 23
+0xaab2d 23 23
+0xaab36 23 0 0 0 0 0 0 0 0 23
+0xaab3c 23
+0xaab40 23 23
+0xaab41 23 23
+0xaab43 23 23
+0xaab45 23 23
+0xaab47 23 23
+0xaab49 23 23
+0xaab4a 23 23
+
+fn=malloc
+0xad670 86
+0xad674 86 0 86
+0xad675 86
+0xad678 86 0 86 0 0 1
+0xad67a 86 0 86
+0xad67c 86 0 86 0 0 1
+0xad67d 86
+0xad680 86
+0xad684 86 86
+0xad68b 86 0 0 0 0 0 0 0 0 86 6
+0xad691 86
+0xad694 86 0 0 0 0 0 0 0 0 86
+0xad69a 86
+0xad69e 86
+0xad6a1 86
+0xad6a5 86 0 0 0 0 0 0 0 0 86 9
+0xad6a7 66
+0xad6ab 66
+0xad6af 66
+0xad6b3 66 66
+0xad6ba 66 66
+0xad6bf 66
+0xad6c2 66 0 0 0 0 0 0 0 0 66
+0xad6b3 20 20
+0xad6ba 20 20
+0xad6bf 20
+0xad6c2 20 0 0 0 0 0 0 0 0 20
+0xad6c8 86 86
+0xad6cf 86 0 0 0 0 0 0 0 0 86 5
+0xad6d5 6 6
+0xad6dc 6 0 0 0 0 0 0 0 0 6 1
+0xad6e2 6 6
+0xad6e9 6 6
+0xad6ed 6
+0xad6f0 6 0 0 0 0 0 0 0 0 6
+0xad6f6 6
+0xad6f8 6
+0xad6fd 6 0 6
+0xad703 6 0 0 0 0 0 0 0 0 6
+0xad709 6
+0xad70c 6
+0xad70f 6 0 6
+cfn=_int_malloc
+calls=830 0xab570 
+0xad70f 2003 379 314 0 2 15 0 0 0 381 52
+0xad714 6
+0xad717 6 0 0 0 0 0 0 0 0 6
+0xad71d 6
+0xad71f 6 6 6 0 0 0 0 0 0 6
+0xad723 6
+0xad726 6 0 0 0 0 0 0 0 0 6
+0xad72c 6 6
+0xad730 6
+0xad733 6 0 0 0 0 0 0 0 0 6
+fi=./malloc/./malloc/arena.c
+0xad735 6
+0xad738 6
+0xad73f 6 0 0 0 0 0 0 0 0 6
+0xad741 6 6
+0xad748 6
+0xad750 6
+0xad753 6
+0xad756 6
+0xad75d 6
+fe=./malloc/./malloc/malloc.c
+0xad761 6
+fi=./malloc/./malloc/arena.c
+0xad765 6
+0xad768 6 6
+fe=./malloc/./malloc/malloc.c
+0xad76b 6
+0xad76e 6 0 0 0 0 0 0 0 0 6
+0xad774 6
+0xad778 6 6
+0xad779 6 6
+0xad77b 6 6
+0xad77d 6 6
+0xad77e 6 6
+0xad7b8 81 81
+0xad7bd 81
+0xad7c0 81 0 0 0 0 0 0 0 0 81 1
+0xad7c6 80
+0xad7cb 80 80
+0xad7cf 80
+0xad7d1 80 0 0 0 0 0 0 0 0 80
+0xad7d7 80
+0xad7da 80
+0xad7dd 80
+0xad7e1 80 80 0 0 26
+0xad7e4 80 0 80
+0xad7e8 80 0 80
+0xad7ed 80 0 80
+0xad7f5 80
+0xad7f9 80 80
+0xad7fa 80 80
+0xad7fc 80 80
+0xad7fe 80 80
+0xad7ff 80 80
+
+fn=_int_free
+0xab170 77 0 77
+0xab171 77
+0xab174 77 0 77
+0xab176 77 0 77
+0xab178 77
+0xab17b 77 0 77
+0xab17c 77
+0xab180 77 77
+0xab184 77
+0xab187 77
+0xab18b 77
+0xab18e 77
+0xab191 77
+0xab194 77 0 0 0 0 0 0 0 0 77
+0xab19a 77
+0xab19e 77 0 0 0 0 0 0 0 0 77 4
+0xab1a4 77
+0xab1a8 77 0 0 0 0 0 0 0 0 77
+0xab1ae 77
+0xab1b1 77 0 0 0 0 0 0 0 0 77
+0xab1b7 77
+0xab1ba 77 77
+0xab1c1 77 77
+0xab1c5 77
+0xab1c8 77 0 0 0 0 0 0 0 0 77
+0xab1ca 77
+0xab1ce 77
+0xab1d2 77 77
+0xab1d9 77 0 0 0 0 0 0 0 0 77 10
+0xab1db 57 57
+0xab1e2 57 57
+0xab1e9 57
+0xab1ed 57 57
+0xab1f1 57 0 0 0 0 0 0 0 0 57
+0xab1f7 57 57 0 0 5
+0xab1fc 57
+0xab1ff 57
+0xab202 57 0 0 0 0 0 0 0 0 57 42
+0xab208 44 44
+0xab20f 44
+0xab212 44 0 0 0 0 0 0 0 0 44 3
+0xab218 21
+0xab21c 21 21
+0xab220 21
+0xab224 21 0 0 0 0 0 0 0 0 21
+0xab22a 21
+0xab22e 21 21
+0xab235 21 0 0 0 0 0 0 0 0 21
+0xab23b 21 21
+0xab241 21
+0xab245 21
+0xab247 21 0 0 0 0 0 0 0 0 21
+0xab24d 21 0 21
+0xab254 21
+0xab257 21
+0xab25a 21
+0xab25e 21 21
+0xab265 21 21
+0xab269 21 0 0 0 0 0 0 0 0 21
+0xab283 21
+0xab286 21 0 0 0 0 0 0 0 0 21 10
+0xab288 8
+0xab28c 8 0 0 0 0 0 0 0 0 8
+0xab29d 77
+0xab2a1 77 77
+0xab2a2 77 77
+0xab2a4 77 77
+0xab2a6 77 77
+0xab2a7 77 77
+0xab2b0 23 23
+0xab2b4 23 0 0 0 0 0 0 0 0 23
+0xab2b6 23 23
+0xab2bd 23 0 0 0 0 0 0 0 0 23
+0xab2bf 23
+0xab2c2 23 0 0 0 0 0 0 0 0 23
+0xab2e0 21
+0xab2e2 21
+0xab2e6 21
+0xab2ea 21
+0xab2f0 21
+0xab2f3 21
+0xab2f6 21 0 21
+0xab2fa 21
+0xab2fd 21 21
+0xab306 21 0 0 0 0 0 0 0 0 21
+0xab308 21 0 21
+0xab30d 21
+0xab310 21 0 0 0 0 0 0 0 0 21
+0xab319 21
+0xab31c 21 0 0 0 0 0 0 0 0 21
+0xab348 33 33
+0xab34f 33
+0xab352 33 0 33
+0xab356 33
+0xab359 33
+0xab35d 33 33 0 0 9
+0xab365 33 0 33
+0xab369 33 0 33
+0xab371 33 0 33
+0xab376 33
+0xab420 23
+0xab425 23
+0xab428 23 0 23
+0xab42c 23 0 0 0 0 0 0 0 0 23
+0xab432 23
+0xab435 23 0 23
+cfn=_int_free_merge_chunk
+calls=502 0xaaf90 
+0xab435 2602 815 533 1 4 0 0 0 0 415 33
+0xab43a 23
+0xab43c 23 23 23 0 0 0 0 0 0 23
+0xab43e 23
+0xab441 23 0 0 0 0 0 0 0 0 23
+
+fn=_int_realloc
+0xacf50 2 0 2
+0xacf51 2
+0xacf54 2 0 2
+0xacf56 2 0 2
+0xacf58 2 0 2 0 0 1
+0xacf5a 2 0 2
+0xacf5c 2 0 2
+0xacf5d 2
+0xacf61 2 2
+0xacf65 2
+0xacf69 2 0 0 0 0 0 0 0 0 2
+0xacf6f 2
+0xacf72 2 2
+0xacf79 2
+0xacf7c 2
+0xacf7f 2
+0xacf82 2 0 0 0 0 0 0 0 0 2 2
+0xacf88 2
+0xacf8b 2
+0xacf8f 2
+0xacf92 2 0 0 0 0 0 0 0 0 2
+0xacf98 2
+0xacf9c 2 0 0 0 0 0 0 0 0 2 1
+0xacfa2 2
+0xacfa6 2
+0xacfa9 2 2
+0xacfad 2
+0xacfb0 2
+0xacfb4 2
+0xacfb7 2 0 0 0 0 0 0 0 0 2
+0xacfbd 2
+0xacfc1 2 0 0 0 0 0 0 0 0 2
+0xacfc7 2
+0xacfca 2 0 0 0 0 0 0 0 0 2
+0xad007 2
+0xad00b 2
+0xad00e 2 2
+0xad00f 2 2
+0xad011 2 2
+0xad013 2 2
+0xad015 2 2
+0xad017 2 2
+0xad018 2 2
+0xad020 2 2
+0xad024 2 0 0 0 0 0 0 0 0 2
+0xad02a 2 2 0 0 2
+0xad02f 2 0 0 0 0 0 0 0 0 2
+0xad035 2
+0xad039 2
+0xad03c 2 0 2
+0xad040 2 0 2
+cfn=_int_malloc
+calls=359 0xab570 
+0xad040 241 53 49 0 3 6 0 0 0 38 3
+0xad045 2
+0xad048 2
+0xad04b 2 0 0 0 0 0 0 0 0 2
+0xad04d 2 2
+0xad051 2
+0xad055 2 2
+0xad059 2
+0xad05c 2 0 0 0 0 0 0 0 0 2
+0xad062 2 2
+0xad066 2
+fi=./malloc/../string/bits/string_fortified.h
+0xad06a 2
+fe=./malloc/./malloc/malloc.c
+0xad06d 2
+0xad070 2
+0xad074 2
+0xad077 2
+0xad07b 2
+0xad07e 2
+fi=./malloc/../string/bits/string_fortified.h
+0xad083 2 0 2
+cob=???
+cfi=???
+cfn=0x00000000049896b0
+calls=357 0x49896b0 
+0xad083 38 11 6 1 0 1 0 0 0 7 5 2
+fe=./malloc/./malloc/malloc.c
+0xad088 2
+0xad08d 2
+0xad090 2
+0xad093 2 0 2
+cfn=_int_free
+calls=357 0xab170 
+0xad093 136 35 15 0 0 0 0 0 0 25 2
+0xad098 2
+
+fn=malloc_consolidate
+0xa9bb0 5 0 5
+0xa9bb1 5
+0xa9bb5 5
+0xa9bb8 5 0 5
+0xa9bba 5 0 5
+0xa9bbc 5
+0xa9bbf 5 0 5 4 0 4
+0xa9bc1 5
+0xa9bc5 5 0 5
+0xa9bc7 5 0 5
+0xa9bc8 5
+0xa9bcc 5 0 5
+0xa9bd3 5 0 5
+0xa9bd7 5
+0xa9bd9 5 5 5 0 0 0 0 0 0 5
+0xa9bdd 5
+0xa9be0 5 0 0 0 0 0 0 0 0 5 2
+0xa9bd7 45
+0xa9bd9 45 45 45 0 0 0 0 0 0 45
+0xa9bdd 45
+0xa9be0 45 0 0 0 0 0 0 0 0 45 13
+0xa9be2 50
+0xa9be6 50 50
+0xa9bea 50 0 0 0 0 0 0 0 0 50 5
+0xa9bec 5
+0xa9bf0 5 5
+0xa9bf1 5 5
+0xa9bf3 5 5
+0xa9bf5 5 5
+0xa9bf7 5 5
+0xa9bf9 5 5
+0xa9bfa 5 5
+0xa9c00 19 19 0 0 15
+0xa9c06 19 0 0 0 0 0 0 0 0 19 2
+0xa9c0c 17
+0xa9c10 17 0 17
+0xa9c14 17 17
+0xa9c18 17 0 17
+0xa9c1c 17
+0xa9c21 17 0 17
+0xa9c25 17 17
+0xa9c29 17
+0xa9c30 17 0 0 0 0 0 0 0 0 17
+0xa9c14 2 2
+0xa9c18 2 0 2
+0xa9c1c 2
+0xa9c21 2 0 2
+0xa9c25 2 2
+0xa9c29 2
+0xa9c30 2 0 0 0 0 0 0 0 0 2
+0xa9c3a 19
+0xa9c3d 19 0 19
+0xa9c41 19
+0xa9c45 19 0 19
+0xa9c49 19 0 19
+0xa9c4c 19
+0xa9c4f 19 0 0 0 0 0 0 0 0 19 13
+0xa9c51 7
+0xa9c54 7
+0xa9c57 7 0 0 0 0 0 0 0 0 7
+0xa9c54 12
+0xa9c57 12 0 0 0 0 0 0 0 0 12
+0xa9c5d 19 19
+0xa9c61 19
+0xa9c63 19
+0xa9c66 19
+0xa9c69 19
+0xa9c6e 19
+0xa9c71 19 0 0 0 0 0 0 0 0 19
+0xa9c77 19
+0xa9c7a 19
+0xa9c7e 19 19
+0xa9c82 19
+0xa9c86 19
+0xa9c8a 19
+0xa9c8e 19
+0xa9c91 19 19
+0xa9c95 19
+0xa9c98 19
+0xa9c9b 19
+0xa9c9f 19
+0xa9ca2 19 0 0 0 0 0 0 0 0 19
+0xa9cee 19 19
+0xa9cf2 19 0 0 0 0 0 0 0 0 19
+0xa9d10 2
+0xa9d13 2
+0xa9d16 2 0 2
+0xa9d1a 2 0 2
+0xa9d1e 2
+0xa9d22 2 0 2
+0xa9d26 2 0 2 0 0 1
+cfn=unlink_chunk.isra.0
+calls=371 0xa9ad0 
+0xa9d26 42 18 6 0 2 0 0 0 0 8
+0xa9d2b 2 2
+0xa9d2f 2 2
+0xa9d33 2 2
+0xa9d37 2
+
+fn=unlink_chunk.isra.0
+0xa9ad0 69 0 69
+0xa9ad1 69 69
+0xa9ad5 69
+0xa9ad8 69
+0xa9adc 69
+0xa9adf 69 69 0 0 23
+0xa9ae3 69 0 0 0 0 0 0 0 0 69 1
+0xa9ae9 69 69 0 0 8
+0xa9aee 69 69
+0xa9af2 69
+0xa9af7 69 69 0 0 2
+0xa9afb 69 0 0 0 0 0 0 0 0 69 2
+0xa9afd 69 69 0 0 10
+0xa9b01 69 0 0 0 0 0 0 0 0 69
+0xa9b03 69 69
+0xa9b07 69 0 69
+0xa9b0b 69 0 69
+0xa9b10 69
+0xa9b17 69 0 0 0 0 0 0 0 0 69 29
+0xa9b19 41 41 0 0 7
+0xa9b1d 41
+0xa9b20 41 0 0 0 0 0 0 0 0 41
+0xa9b22 41 41
+0xa9b26 41 0 0 0 0 0 0 0 0 41
+0xa9b28 41 41
+0xa9b2c 41 41
+0xa9b30 41 0 0 0 0 0 0 0 0 41
+0xa9b32 41 41 0 0 5
+0xa9b37 41 0 0 0 0 0 0 0 0 41
+0xa9b39 41 0 41
+0xa9b3d 41 0 41
+0xa9b41 41 41
+0xa9b42 41 41
+0xa9b41 28 28
+0xa9b42 28 28
+
+fn=_int_malloc
+0xab570 83 0 83
+0xab571 83
+0xab574 83 0 83 0 0 1
+0xab576 83 0 83
+0xab578 83 0 83
+0xab57a 83 0 83
+0xab57c 83 0 83 0 0 1
+0xab57d 83
+0xab581 83 83
+0xab58a 83 0 83
+0xab58e 83
+0xab590 83
+0xab593 83 0 0 0 0 0 0 0 0 83
+0xab599 83
+0xab59d 83
+0xab5a0 83
+0xab5a3 83
+0xab5a7 83 0 0 0 0 0 0 0 0 83 1
+0xab5ad 82
+0xab5b1 82
+0xab5b4 82 0 0 0 0 0 0 0 0 82
+0xab5ba 82 82
+0xab5c1 82
+0xab5c4 82 0 0 0 0 0 0 0 0 82 21
+0xab5ca 41
+0xab5cd 41
+0xab5d1 41
+0xab5d5 41
+0xab5d8 41
+0xab5dc 41
+0xab5e0 41 41
+0xab5e4 41
+0xab5e7 41 0 0 0 0 0 0 0 0 41 21
+0xab5ed 22
+0xab5f0 22 0 0 0 0 0 0 0 0 22
+0xab5f6 22
+0xab5f9 22 22
+0xab600 22 0 0 0 0 0 0 0 0 22 22
+0xab619 22 22
+0xab61d 22
+0xab620 22
+0xab623 22 0 0 0 0 0 0 0 0 22
+0xab629 22 22
+0xab630 22
+0xab634 22
+0xab638 22 22
+0xab63c 22
+0xab63f 22 0 0 1 0 0 0 0 0 22
+0xab645 22 22
+0xab64c 22 0 0 0 0 0 0 0 0 22
+0xab652 22 22
+0xab657 22 22
+0xab65e 22
+0xab662 22
+0xab665 22
+0xab668 22 0 0 0 0 0 0 0 0 22 5
+0xab66a 17
+0xab686 16 16
+0xab68a 16 16
+0xab691 16
+0xab694 16 0 16
+0xab698 16
+0xab69b 16 0 16
+0xab69f 16 0 16
+0xab6a3 16 0 16
+0xab6a8 16
+0xab6ab 16 0 0 0 0 0 0 0 0 16 2
+0xab6b1 21 21 0 1
+0xab6b5 21
+0xab6b8 21 0 0 0 0 0 0 0 0 21
+0xab6be 16
+0xab6c1 16 0 0 0 0 0 0 0 0 16
+0xab6c7 16 16
+0xab6ce 16 0 0 0 0 0 0 0 0 16
+0xab6d0 16
+0xab6d8 41
+0xab6df 41 0 0 0 0 0 0 0 0 41 18
+0xab6e5 25
+0xab6e8 25
+0xab6ec 25
+0xab6f0 25
+0xab6f7 25 0 0 0 0 0 0 0 0 25 15
+0xab6f9 15
+0xab6fc 15
+0xab700 15
+0xab704 15
+0xab70b 15 0 0 0 0 0 0 0 0 15 10
+0xab70d 5
+0xab710 5
+0xab714 5
+0xab718 5
+0xab71f 5 0 0 0 0 0 0 0 0 5 2
+0xab750 25 25
+0xab755 25
+0xab757 25 0 0 0 0 0 0 0 0 25 5
+0xab75d 49 49
+0xab764 49
+0xab768 49
+0xab76b 49
+0xab76f 49 0 49
+0xab773 49 49
+0xab778 49 0 0 0 0 0 0 0 0 49
+0xab77a 49 49
+0xab781 49
+0xab785 49 49
+0xab78a 49
+0xab78f 49 0 49
+0xab797 49
+0xab79a 49 0 0 0 0 0 0 0 0 49 10
+0xab7a0 38 0 38
+0xab7a7 38
+0xab7aa 38 38
+0xab7ae 38
+0xab7b2 38
+0xab7b6 38
+0xab7ba 38 0 0 0 0 0 0 0 0 38
+0xab7aa 36 36
+0xab7ae 36
+0xab7b2 36
+0xab7b6 36
+0xab7ba 36 0 0 0 0 0 0 0 0 36
+0xab7c0 74 74
+0xab7c8 74
+0xab7cb 74 0 0 0 0 0 0 0 0 74 1
+0xab7d1 74 74
+0xab7d5 74
+0xab7d8 74 0 0 0 0 0 0 0 0 74 5
+0xab7de 74
+0xab7e2 74 0 0 0 0 0 0 0 0 74
+0xab7e8 74 74
+0xab7eb 74
+0xab7ef 74
+0xab7f2 74 0 0 0 0 0 0 0 0 74
+0xab7f8 74 74
+0xab7fc 74 74
+0xab800 74 0 0 0 0 0 0 0 0 74
+0xab806 74 74
+0xab80a 74 0 0 0 0 0 0 0 0 74
+0xab810 74
+0xab813 74 0 0 0 0 0 0 0 0 74
+0xab819 74
+0xab81c 74 0 0 0 0 0 0 0 0 74 51
+0xab81e 38
+0xab825 38 0 0 0 0 0 0 0 0 38 17
+0xab82b 68 0 68
+0xab830 68 0 68
+0xab834 68
+0xab837 68 0 0 0 0 0 0 0 0 68
+0xab83d 68
+0xab843 68 0 0 0 0 0 0 0 0 68 29
+0xab849 38
+0xab84c 38
+0xab850 38
+0xab856 38 0 0 0 0 0 0 0 0 38 19
+0xab85c 21
+0xab85f 21
+0xab863 21
+0xab869 21 0 0 0 0 0 0 0 0 21 15
+0xab86f 17
+0xab872 17
+0xab87a 17 0 17
+0xab87d 17
+0xab880 17
+0xab884 17
+0xab887 17 17
+0xab88a 17
+0xab88e 17
+0xab891 17 0 0 0 0 0 0 0 0 17 4
+0xab884 21
+0xab887 21 21 0 0 2
+0xab88a 21
+0xab88e 21
+0xab891 21 0 0 0 0 0 0 0 0 21 3
+0xab897 5 5
+0xab89b 5
+0xab89f 5 5
+0xab8a3 5
+0xab8a7 5 0 0 0 0 0 0 0 0 5 1
+0xab8ad 5
+0xab8b0 5 0 0 0 0 0 0 0 0 5
+0xab8b6 5 5 0 0 1
+0xab8ba 5
+0xab8bf 5
+0xab8c4 5
+0xab8c8 5 0 5
+0xab8cc 5 0 5
+0xab8d0 5 0 5
+0xab8d4 5
+0xab8e0 16
+0xab8e4 16 0 0 0 0 0 0 0 0 16
+0xab8ea 16
+0xab8f0 16
+0xab8f3 16 16
+0xab8fc 16 0 0 0 0 0 0 0 0 16
+0xab8f0 6
+0xab8f3 6 6
+0xab8fc 6 0 0 0 0 0 0 0 0 6
+0xab8fe 22 0 22
+0xab903 22
+0xab906 22 0 0 0 0 0 0 0 0 22
+0xab918 22
+0xab91c 22 22
+0xab920 22
+0xab923 22
+0xab927 22
+0xab92a 22
+0xab92d 22
+0xab930 22 0 0 0 0 0 0 0 0 22 7
+0xab932 16
+0xab938 1
+0xab93b 1 0 0 0 0 0 0 0 0 1
+0xab941 1 1
+0xab948 1 0 0 0 0 0 0 0 0 1
+0xab95e 36
+0xab961 36 36 0 0 19
+0xab965 36
+0xab969 36
+0xab96c 36 0 0 0 0 0 0 0 0 36 13
+0xab972 12 12 0 0 9
+0xab976 12 12 0 0 7
+0xab97a 12 0 0 0 0 0 0 0 0 12
+0xab980 12
+0xab987 12 0 12 0 0 8
+0xab98d 12 0 12
+0xab991 12 0 12
+0xab995 12
+0xab998 12 0 0 0 0 0 0 0 0 12
+0xab99a 12 0 12 0 0 4
+0xab99f 12 12
+0xab9a6 12 12
+0xab9aa 12
+0xab9ad 12 0 0 0 0 0 0 0 0 12
+0xab9b3 12
+0xab9b7 12
+0xab9bb 12 12
+0xab9c2 12 0 0 0 0 0 0 0 0 12
+0xab9c8 12 12
+0xab9cf 12 12
+0xab9d4 12
+0xab9d8 12
+0xab9db 12 0 0 0 0 0 0 0 0 12 4
+0xab9d4 16
+0xab9d8 16
+0xab9db 16 0 0 0 0 0 0 0 0 16 5
+0xab9e1 17
+0xab9e4 17 0 0 0 0 0 0 0 0 17 1
+0xab9ea 16
+0xab9ed 16 0 0 0 0 0 0 0 0 16
+0xab9f8 12
+0xab9fc 12 0 0 0 0 0 0 0 0 12
+0xaba02 12
+0xaba08 12
+0xaba0b 12 12
+0xaba14 12 0 0 0 0 0 0 0 0 12
+0xaba08 4
+0xaba0b 4 4
+0xaba14 4 0 0 0 0 0 0 0 0 4
+0xaba16 16 0 16
+0xaba1b 16
+0xaba1e 16 0 0 0 0 0 0 0 0 16 14
+0xaba30 16 0 0 1
+0xaba34 16 16
+0xaba38 16
+0xaba3b 16
+0xaba3f 16
+0xaba42 16
+0xaba45 16
+0xaba48 16 0 0 0 0 0 0 0 0 16 4
+0xaba4a 12
+0xaba50 1
+0xaba52 1
+0xaba57 1
+0xaba5d 1
+0xaba62 1
+0xaba66 1 1
+0xaba6a 1
+0xaba6d 1 0 0 0 0 0 0 0 0 1 1
+0xaba73 20
+0xaba78 20
+0xaba7c 20
+0xaba88 5
+0xaba8b 5 0 5
+cfn=malloc_consolidate
+calls=37 0xa9bb0 
+0xaba8b 1320 292 216 4 17 5 0 0 0 291 35
+0xaba90 5
+0xabae0 22 22
+0xabae6 22
+0xabae8 22 0 0 0 0 0 0 0 0 22
+0xabaea 83 83
+0xabaee 83 83
+0xabaf7 83 0 0 0 0 0 0 0 0 83
+0xabafd 83
+0xabb01 83
+0xabb04 83 83
+0xabb05 83 83
+0xabb07 83 83
+0xabb09 83 83
+0xabb0b 83 83
+0xabb0d 83 83
+0xabb0e 83 83
+0xabb10 12 12
+0xabb16 12
+0xabb1a 12
+0xabb1c 12 0 0 0 0 0 0 0 0 12
+0xabb30 16 16
+0xabb34 16
+0xabb37 16
+0xabb3b 16 16
+0xabb40 16 0 0 1
+0xabbc8 36
+0xabbcb 36 0 36
+0xabbce 36
+0xabbd2 36
+0xabbd4 36
+0xabbd8 36 36 0 0 3
+0xabbdb 36
+0xabbdf 36 36
+0xabbe2 36
+0xabbe8 36 0 36
+0xabbed 36
+0xabbef 36
+0xabbf2 36 36
+0xabbf6 36
+0xabbf9 36
+0xabbfb 36 0 36
+0xabc03 36 0 36
+0xabc07 36 0 36
+0xabc0b 36 0 36 0 0 8
+0xabc0f 36 0 36
+0xabc13 36
+0xabc16 36 0 0 0 0 0 0 0 0 36 3
+0xabbdf 38 38
+0xabbe2 38
+0xabbe8 38 0 38
+0xabbed 38
+0xabbef 38
+0xabbf2 38 38
+0xabbf6 38
+0xabbf9 38
+0xabbfb 38 0 38
+0xabc03 38 0 38
+0xabc07 38 0 38
+0xabc0b 38 0 38
+0xabc0f 38 0 38
+0xabc13 38
+0xabc16 38 0 0 0 0 0 0 0 0 38 9
+0xabc82 74 74
+0xabc87 74
+0xabc8a 74 0 0 0 0 0 0 0 0 74 8
+0xabc90 38
+0xabc93 38 0 0 0 0 0 0 0 0 38
+0xabc99 49
+0xabc9d 49
+0xabca4 49 0 0 0 0 0 0 0 0 49 9
+0xabca6 25
+0xabcaa 25
+0xabcad 25
+0xabcb1 25 25 0 0 2
+0xabcb4 25
+0xabcb8 25
+0xabcbb 25 0 0 0 0 0 0 0 0 25
+0xabcc7 49
+0xabcca 49
+0xabcd0 49
+0xabcd3 49
+0xabcd6 49
+0xabcd9 49
+0xabcdc 49
+0xabcdf 49
+0xabce4 49
+0xabce8 49
+0xabceb 49 49
+0xabcf3 49
+0xabcf6 49
+0xabcf8 49
+0xabd00 49
+0xabd03 49
+0xabd05 49 0 0 0 0 0 0 0 0 49 8
+0xabd00 25
+0xabd03 25
+0xabd05 25 0 0 0 0 0 0 0 0 25 12
+0xabd07 13
+0xabd10 180
+0xabd14 180
+0xabd16 180 0 0 0 0 0 0 0 0 180 13
+0xabd1c 254
+0xabd1e 254 0 0 0 0 0 0 0 0 254 82
+0xabd20 74 74 0 0 13
+0xabd24 74
+0xabd27 74 0 0 0 0 0 0 0 0 74 25
+0xabd2d 25
+0xabd2f 25
+0xabd33 25
+0xabd35 25
+0xabd37 25
+0xabd39 25
+0xabd3c 25 0 25
+0xabd44 25
+0xabd50 74 0 74
+0xabd54 74 74
+0xabd57 74
+0xabd5c 74 0 0 0 0 0 0 0 0 74
+0xabde8 13 13 0 1
+0xabded 13 0 0 0 0 0 0 0 0 13 8
+0xabdf3 6
+0xabdf7 6
+0xabdfa 6 0 0 0 0 0 0 0 0 6
+0xabe00 6 0 6
+0xabe05 6 0 6
+0xabe09 6
+0xabe0c 6 0 0 0 0 0 0 0 0 6 2
+0xabe12 6
+0xabe18 6 0 0 0 0 0 0 0 0 6
+0xabe30 17
+0xabe35 17
+0xabe38 17
+0xabe3b 17 0 17
+0xabe3e 17
+0xabe42 17
+0xabe6c 16 16
+0xabe70 16 0 16 0 0 6
+0xabe76 16
+0xabe79 16 0 0 0 0 0 0 0 0 16
+0xabe7b 16 0 16 0 0 4
+0xabe80 16
+0xabe84 16 0 16
+0xabe88 16
+0xabe8c 16 0 16 0 0 1
+0xabe90 16 16
+0xabe97 16 0 16 0 0 11
+0xabe9b 16 0 16
+0xabe9f 16
+0xabea3 16
+0xabea7 16 16
+0xabeaf 16 0 16
+0xabeb3 16 16
+0xabeb7 16
+0xabeba 16 0 16
+0xabec2 16 0 16
+0xabec7 16
+0xabf00 33
+0xabf05 33
+0xabf08 33
+0xabf0c 33 0 33
+0xabf10 33
+0xabf18 13
+0xabf1c 13
+0xabf1f 13 0 0 0 0 0 0 0 0 13 1
+0xabf21 13
+0xabf23 13 13
+0xabf2b 13
+0xabf2d 13 0 0 0 0 0 0 0 0 13 2
+0xac000 16 0 0 4
+0xac002 16
+0xac005 16
+0xac008 16
+0xac00c 16
+0xac00f 16
+0xac013 16
+0xac050 4 0 0 1
+0xac053 4
+0xac057 4
+0xac05d 4 0 0 0 0 0 0 0 0 4
+0xac063 4
+0xac06b 4
+0xac06e 4
+0xac071 4 0 4
+0xac074 4
+0xac078 4
+0xac18d 13
+0xac190 13
+0xac193 13
+0xac196 13
+0xac199 13
+0xac19e 13
+0xac1a3 13
+0xac1a8 49 49 0 0 28
+0xac1ac 49
+0xac1af 49
+0xac1b2 49
+0xac1b6 49
+0xac1b9 49 0 0 0 0 0 0 0 0 49
+0xac1bf 49
+0xac1c2 49
+0xac1c5 49 0 49
+0xac1c9 49
+0xac1cc 49 0 49
+0xac1d0 49 0 49
+cfn=unlink_chunk.isra.0
+calls=349 0xa9ad0 
+0xac1d0 1389 591 207 0 49 0 0 0 0 316 24
+0xac1d5 49 49
+0xac1d9 49 49
+0xac1dd 49
+0xac1e1 49 0 0 0 0 0 0 0 0 49 14
+0xac1e7 38 38
+0xac1ec 38
+0xac1f1 38
+0xac1f5 38
+0xac1fa 38
+0xac1fe 38 38
+0xac202 38 0 0 0 0 0 0 0 0 38
+0xac208 38 0 38 0 0 22 0 0 1
+0xac20c 38 0 38
+0xac211 38 0 38
+0xac215 38
+0xac21c 38 0 0 0 0 0 0 0 0 38 15
+0xac21e 13 0 13
+0xac223 13
+0xac22a 13 0 0 0 0 0 0 0 0 13 2
+0xac223 25
+0xac22a 25 0 0 0 0 0 0 0 0 25 10
+0xac22c 19
+0xac230 19 0 19 0 0 4 0 0 1
+0xac234 19
+0xac23b 19
+0xac23e 19
+0xac241 19
+0xac244 19
+0xac248 19
+0xac24b 19
+0xac24f 19 0 19
+0xac253 19
+0xac256 19
+0xac25a 19 0 19 0 0 2 0 0 1
+0xac25e 19 0 19
+0xac262 19 19
+0xac268 19
+0xac26c 19
+0xac26e 19 0 0 0 0 0 0 0 0 19 1
+0xac234 19
+0xac23b 19
+0xac23e 19
+0xac241 19
+0xac244 19
+0xac248 19
+0xac24b 19
+0xac24f 19 0 19
+0xac253 19
+0xac256 19
+0xac25a 19 0 19 0 0 5
+0xac25e 19 0 19
+0xac262 19 19
+0xac268 19
+0xac26c 19
+0xac26e 19 0 0 0 0 0 0 0 0 19 2
+0xac262 11 11 0 1
+0xac268 11
+0xac26c 11
+0xac26e 11 0 0 0 0 0 0 0 0 11
+0xac308 11 0 0 1
+0xac30f 11 0 11
+0xac315 11
+0xac318 11 0 0 0 0 0 0 0 0 11
+0xac31e 11 0 11
+0xac323 11
+
+fn=realloc
+0xae0c0 2
+0xae0c4 2 0 2
+0xae0c5 2
+0xae0c8 2 0 2
+0xae0ca 2 0 2
+0xae0cc 2 0 2
+0xae0ce 2 0 2
+0xae0d0 2
+0xae0d3 2 0 2
+0xae0d4 2
+0xae0d7 2
+0xae0db 2 2
+0xae0e2 2 0 0 0 0 0 0 0 0 2
+0xae0e8 2
+0xae0eb 2 0 0 0 0 0 0 0 0 2 1
+0xae110 2
+0xae113 2 0 0 0 0 0 0 0 0 2
+0xae115 2 2
+0xae119 2
+0xae11d 2
+0xae120 2
+0xae124 2
+0xae128 2
+0xae12c 2 0 0 0 0 0 0 0 0 2
+0xae132 2 2
+0xae138 2 0 0 0 0 0 0 0 0 2
+0xae142 2
+0xae146 2
+0xae149 2 2
+0xae14a 2 2
+0xae14c 2 2
+0xae14e 2 2
+0xae150 2 2
+0xae152 2 2
+0xae153 2 2
+0xae158 2
+0xae15c 2
+0xae15f 2 0 0 0 0 0 0 0 0 2
+0xae16a 2 2
+0xae171 2 2
+0xae176 2 0 0 0 0 0 0 0 0 2
+fi=./malloc/./malloc/arena.c
+0xae17c 2
+0xae183 2
+0xae187 2 0 0 0 0 0 0 0 0 2
+fe=./malloc/./malloc/malloc.c
+0xae18d 2
+0xae190 2
+0xae193 2
+0xae196 2 0 0 0 0 0 0 0 0 2
+0xae19c 2
+0xae1a0 2 0 0 0 0 0 0 0 0 2
+0xae1a6 2
+0xae1a9 2 0 0 0 0 0 0 0 0 2
+0xae1af 2
+0xae1b4 2
+0xae1b7 2
+0xae1bb 2
+0xae1bf 2 0 0 1
+0xae1c4 2
+0xae1c8 2
+0xae1cc 2 0 0 0 0 0 0 0 0 2
+0xae1d2 2 2
+0xae1d9 2 0 0 0 0 0 0 0 0 2 1
+0xae1df 2
+0xae1e1 2
+0xae1e6 2 0 2
+0xae1eb 2 0 0 0 0 0 0 0 0 2
+0xae1f1 2
+0xae1f4 2
+0xae1f7 2
+0xae1fa 2
+0xae1fd 2 0 2
+0xae201 2 0 2
+cfn=_int_realloc
+calls=431 0xacf50 
+0xae201 563 129 90 1 5 8 0 0 0 92 13 2
+0xae206 2 2
+0xae20a 2
+0xae20d 2
+0xae20f 2 2 2 0 0 0 0 0 0 2
+0xae212 2
+0xae215 2 0 0 0 0 0 0 0 0 2 1
+0xae21b 2
+0xae21e 2 0 0 0 0 0 0 0 0 2
+0xae224 2 2
+0xae228 2
+0xae22a 2 0 0 0 0 0 0 0 0 2 1
+fi=./malloc/./malloc/arena.c
+0xae230 2
+0xae237 2
+0xae239 2 0 0 0 0 0 0 0 0 2
+0xae23b 2 2 0 1
+0xae242 2
+0xae24a 2
+0xae24d 2
+0xae250 2
+0xae257 2
+fe=./malloc/./malloc/malloc.c
+0xae25b 2
+fi=./malloc/./malloc/arena.c
+0xae25f 2
+0xae262 2 2
+fe=./malloc/./malloc/malloc.c
+0xae265 2
+0xae268 2 0 0 0 0 0 0 0 0 2
+fi=./malloc/./malloc/arena.c
+0xae2d0 2 2
+0xae2d7 2
+0xae2df 2
+0xae2e2 2
+0xae2e5 2
+0xae2ec 2
+0xae2f0 2
+0xae2f3 2 2
+0xae2f6 2
+fe=./malloc/./malloc/malloc.c
+
+fn=free
+0xadd50 75
+0xadd54 75
+0xadd57 75 0 0 0 0 0 0 0 0 75 1
+0xadd5d 75 0 75
+0xadd5e 75
+0xadd61 75 0 75
+0xadd63 75
+0xadd67 75 0 75
+0xadd69 75 0 75
+0xadd6a 75
+0xadd6e 75 75
+0xadd75 75 75
+0xadd79 75 75
+0xadd7d 75
+0xadd7f 75 0 0 0 0 0 0 0 0 75 1
+0xadd81 75 75
+0xadd88 75 75
+0xadd8d 75 0 0 0 0 0 0 0 0 75 5
+fi=./malloc/./malloc/arena.c
+0xadd93 75
+0xadd9a 75
+0xadd9c 75 0 0 0 0 0 0 0 0 75
+0xadd9e 75 75
+0xadda5 75
+0xaddad 75
+0xaddb0 75
+0xaddb3 75
+0xaddba 75
+0xaddbe 75
+0xaddc1 75 75
+fe=./malloc/./malloc/malloc.c
+0xaddc4 75
+0xaddc7 75
+0xaddc9 75 0 75
+cfn=_int_free
+calls=4739 0xab170 
+0xaddc9 7255 2006 1090 1 18 0 0 0 0 1324 100
+0xaddce 75 0 75
+0xaddd2 75
+0xaddd6 75 75
+0xaddd7 75 75
+0xaddd9 75 75
+0xadddb 75 75
+0xadddc 75 75
+
+fn=_int_free_merge_chunk
+0xaaf90 23 0 23
+0xaaf91 23
+0xaaf94 23 0 23
+0xaaf96 23 0 23
+0xaaf98 23 0 23
+0xaaf9a 23
+0xaaf9e 23 0 23
+0xaafa0 23 0 23
+0xaafa1 23
+0xaafa5 23 23
+0xaafa9 23
+0xaafac 23 0 0 0 0 0 0 0 0 23
+0xaafb2 23
+0xaafb5 23
+0xaafb8 23
+0xaafbb 23 23
+0xaafbf 23 0 0 0 0 0 0 0 0 23
+0xaafc5 23 23
+0xaafc9 23
+0xaafcb 23 0 0 0 0 0 0 0 0 23
+0xaafd1 23
+0xaafd4 23
+0xaafd8 23
+0xaafdc 23 0 0 0 0 0 0 0 0 23 10
+0xaafe2 23 23
+0xaafe9 23 0 0 0 0 0 0 0 0 23
+0xaafef 23 23
+0xaaff5 23
+0xaaff7 23 0 0 0 0 0 0 0 0 23
+0xaaffd 23 23
+0xab001 23 0 0 0 0 0 0 0 0 23 5
+0xab025 23 23
+0xab029 23 0 0 0 0 0 0 0 0 23
+0xab02f 23 23
+0xab035 23 0 0 0 0 0 0 0 0 23 7
+0xab03b 5 0 5
+0xab040 5 5
+0xab044 5
+0xab048 5
+0xab04d 5
+0xab052 5
+0xab056 5 5
+0xab05a 5 0 0 0 0 0 0 0 0 5
+0xab040 18 18
+0xab044 18
+0xab048 18
+0xab04d 18
+0xab052 18
+0xab056 18 18
+0xab05a 18 0 0 0 0 0 0 0 0 18
+0xab060 23 0 23
+0xab064 23
+0xab06b 23 0 0 0 0 0 0 0 0 23 3
+0xab06d 23 0 23
+0xab071 23 0 23
+0xab075 23
+0xab078 23
+0xab07c 23 0 23
+0xab080 23 0 23
+0xab084 23
+0xab088 23
+0xab08b 23
+0xab08e 23 23
+0xab08f 23 23
+0xab091 23 23
+0xab093 23 23
+0xab095 23 23
+0xab097 23 23
+0xab098 23
+cfn=_int_free_maybe_consolidate
+calls=563 0xaab00 
+0xab098 552 230 161 0 0 0 0 0 0 46
+0xab0a0 20
+0xab0a4 20 0 20
+0xab0a8 20
+0xab0d8 18 0 0 1
+0xab0db 18
+0xab0de 18 0 18
+cfn=unlink_chunk.isra.0
+calls=177 0xa9ad0 
+0xab0de 510 217 76 0 4 0 0 0 0 116 8
+0xab0e3 18
+
+fl=./nptl/./nptl/pthread_create.c
+fn=start_thread
+cob=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/target/release/botlish-native
+cfi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sys/thread/unix.rs
+cfn=<std::sys::thread::unix::Thread>::new::thread_start
+calls=1 0x6da8e0 
+0x9ca9e 28257703 6276085 5168887 146 809 1738 97 0 141 4264761 51749 100929 118
+
+fl=./misc/../sysdeps/unix/sysv/linux/x86_64/clone.S
+fn=clone
+cfi=./nptl/./nptl/pthread_create.c
+cfn=start_thread
+calls=1 0x9c720 
+0x129a62 28257703 6276085 5168887 146 809 1738 97 0 141 4264761 51749 100929 118
+
+ob=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/target/release/botlish-native
+fl=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/main.rs
+fn=botlish_audit_run
+0x1d3960 5 0 5 1
+0x1d3961 5
+0x1d3964 5
+0x1d3967 5
+0x1d396a 5 5
+0x1d396b 5 0 0 0 0 0 0 0 0 0 0 5 1
+cob=???
+cfi=???
+cfn=0x0000000004847000
+calls=5 0x4847000 
+0x1d396b 28257673 6276080 5168882 145 809 1738 97 0 141 4264761 51749 100924 117
+
+fn=botlish_native::cli
+cfn=botlish_audit_run
+calls=1 0x1d3960 
+0x1cfe83 5652127 1255360 1033950 123 154 553 97 0 126 852987 10553 20193 38
+cfn=botlish_audit_run
+calls=4 0x1d3960 
+0x1d004d 22605576 5020725 4134937 23 655 1185 0 0 15 3411774 41196 80736 80
+
+fl=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/vm.rs
+fn=<botlish_native::runtime::vm::Vm>::alloc::<botlish_native::runtime::value::StrObj>
+0x1bd130 25 0 25 1 0 0 1
+0x1bd131 25
+0x1bd134 25 0 25
+0x1bd136 25 0 25
+0x1bd138 25 0 25
+0x1bd13a 25 0 25
+0x1bd13c 25 0 25
+0x1bd13d 25 0 25
+0x1bd13e 25 0 25 1 0 0 1
+0x1bd142 25
+0x1bd145 25
+fi=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/heap.rs
+0x1bd148 25 25
+0x1bd14f 25
+0x1bd151 25 0 0 0 0 0 0 0 0 25 9
+0x1bd153 25 25
+0x1bd157 25 25
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/vm.rs
+0x1bd15b 25 0 0 0 0 0 0 0 0 25 4
+0x1bd168 25 25
+0x1bd16d 25 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/alloc.rs
+0x1bd172 25 25 25 0 0 0 0 0 0 0 0 25 1
+cfi=???
+cfn=__rustc::__rust_no_alloc_shim_is_unstable_v2
+calls=25 0x1d39f0 
+0x1bd172 100 50 25
+0x1bd178 25
+0x1bd17d 25 0 0 1 0 0 1
+0x1bd182 25 25 25 0 0 0 0 0 0 0 0 25 1
+cfi=???
+cfn=__rustc::__rust_alloc
+calls=25 0x1d39b0 
+0x1bd182 1450 350 200 0 4 1 0 0 0 200 3 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/boxed.rs
+0x1bd188 25
+0x1bd18b 25 0 0 0 0 0 0 0 0 25
+0x1bd191 25
+0x1bd194 25 25
+0x1bd199 25 0 25
+0x1bd19d 25 25
+0x1bd1a2 25 0 25
+0x1bd1a6 25 0 25
+0x1bd1aa 25 0 25
+0x1bd1ae 25 25
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/vm.rs
+0x1bd1b2 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/vec/mod.rs
+0x1bd1b6 25 25
+0x1bd1ba 25 25
+0x1bd1be 25 0 0 0 0 0 0 0 0 25 1
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/raw_vec/mod.rs
+0x1bd1c9 25 25 0 1 0 0 1
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ptr/mod.rs
+0x1bd1cd 25 0 25 0 0 5
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/vec/mod.rs
+0x1bd1d1 25
+0x1bd1d4 25 0 25
+fi=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/heap.rs
+0x1bd1d8 25 0 25
+fi=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/metrics.rs
+0x1bd1dc 25 25
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/vm.rs
+0x1bd1e4 25 0 0 0 0 0 0 0 0 25 2
+0x1bd209 25 0 0 1 0 0 1
+0x1bd20c 25
+0x1bd210 25 25
+0x1bd211 25 25
+0x1bd213 25 25
+0x1bd215 25 25
+0x1bd217 25 25
+0x1bd219 25 25
+0x1bd21a 25 25
+
+fn=<botlish_native::runtime::vm::Vm>::alloc::<botlish_native::runtime::construct::StrPlanObj>
+0x1bd350 25 0 25 1 0 0 1
+0x1bd351 25
+0x1bd354 25 0 25
+0x1bd356 25 0 25
+0x1bd358 25 0 25
+0x1bd35a 25 0 25
+0x1bd35c 25 0 25
+0x1bd35d 25 0 25
+0x1bd35e 25
+0x1bd361 25
+0x1bd364 25
+fi=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/heap.rs
+0x1bd367 25 25
+0x1bd36e 25
+0x1bd370 25 0 0 0 0 0 0 0 0 25
+0x1bd372 25 25
+0x1bd376 25 25
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/vm.rs
+0x1bd37a 25 0 0 0 0 0 0 0 0 25
+0x1bd387 25 25 0 1 0 0 1
+0x1bd38c 25 0 25
+0x1bd390 25 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/alloc.rs
+0x1bd395 25 25 25 0 0 0 0 0 0 0 0 25 1
+cfi=???
+cfn=__rustc::__rust_no_alloc_shim_is_unstable_v2
+calls=25 0x1d39f0 
+0x1bd395 100 50 25
+0x1bd39b 25
+0x1bd3a0 25
+0x1bd3a5 25 25 25 0 0 0 0 0 0 0 0 25 1
+cfi=???
+cfn=__rustc::__rust_alloc
+calls=25 0x1d39b0 
+0x1bd3a5 1450 350 200 0 6 0 0 0 0 200 0 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/boxed.rs
+0x1bd3ab 25
+0x1bd3ae 25 0 0 0 0 0 0 0 0 25
+0x1bd3b4 25
+0x1bd3b7 25 25
+0x1bd3bc 25 25 0 1 0 0 1
+0x1bd3c2 25 25
+0x1bd3c8 25 25
+0x1bd3ce 25 0 25 0 0 10
+0x1bd3d2 25 0 25
+0x1bd3d6 25 0 25
+0x1bd3da 25 0 25
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/vm.rs
+0x1bd3dd 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/vec/mod.rs
+0x1bd3e1 25 25
+0x1bd3e5 25 25
+0x1bd3e9 25 0 0 0 0 0 0 0 0 25 4
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/vm.rs
+0x1bd3eb 2
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/vec/mod.rs
+0x1bd3ef 2 0 2
+cfi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/raw_vec/mod.rs
+cfn=<alloc::raw_vec::RawVec<*mut botlish_native::runtime::value::Header>>::grow_one
+calls=2 0x196690 
+0x1bd3ef 664 146 113 2 3 7 0 0 0 93 12 6
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/raw_vec/mod.rs
+0x1bd3f4 25 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ptr/mod.rs
+0x1bd3f8 25 0 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/vec/mod.rs
+0x1bd3fc 25
+0x1bd3ff 25 0 25 1 0 0 1
+fi=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/heap.rs
+0x1bd403 25 0 25
+fi=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/metrics.rs
+0x1bd407 25 25
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/vm.rs
+0x1bd40f 25 0 0 0 0 0 0 0 0 25 11
+0x1bd434 25
+0x1bd437 25
+0x1bd43b 25 25
+0x1bd43c 25 25
+0x1bd43e 25 25
+0x1bd440 25 25 0 1 0 0 1
+0x1bd442 25 25
+0x1bd444 25 25
+0x1bd445 25 25
+
+fn=<botlish_native::runtime::vm::Vm>::new_str_known
+0x1bfbb0 25 0 25 1 0 0 1
+0x1bfbb1 25
+0x1bfbb4 25 0 25
+0x1bfbb6 25 0 25
+0x1bfbb8 25 0 25
+0x1bfbba 25 0 25
+0x1bfbbc 25 0 25
+0x1bfbbd 25 0 0 1 0 0 1
+0x1bfbc1 25
+0x1bfbc4 25
+0x1bfbc7 25 0 25
+0x1bfbcb 25
+0x1bfbce 25
+0x1bfbd2 25 0 0 0 0 0 0 0 0 25 2
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/vec/mod.rs
+0x1bfbd4 25 25
+fi=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/value.rs
+0x1bfbd8 25 0 25
+0x1bfbdc 25 0 25
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/vm.rs
+0x1bfbe3 25 25
+0x1bfbe6 25 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/vec/mod.rs
+0x1bfbea 25
+0x1bfbed 25 0 0 0 0 0 0 0 0 25 5
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/alloc.rs
+0x1bfcd0 25 0 0 1 0 0 1
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/vec/mod.rs
+0x1bfcd3 25
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/vm.rs
+0x1bfd42 25 0 25 1 0 0 1
+0x1bfd48 25 0 25
+0x1bfd4c 25 0 25
+0x1bfd50 25 0 25
+0x1bfd53 25 0 25
+0x1bfd57 25 0 25
+0x1bfd5b 25
+0x1bfd5f 25
+0x1bfd62 25
+0x1bfd65 25 0 25
+cfn=<botlish_native::runtime::vm::Vm>::alloc::<botlish_native::runtime::value::StrObj>
+calls=25 0x1bd130 
+0x1bfd65 2875 925 650 5 4 6 5 0 0 325 19 75 2
+0x1bfd6a 25
+0x1bfd6e 25 25
+0x1bfd6f 25 25
+0x1bfd71 25 25
+0x1bfd73 25 25
+0x1bfd75 25 25
+0x1bfd77 25 25
+0x1bfd78 25 25
+
+fn=<botlish_native::runtime::vm::Vm>::new_list
+0x1c0c30 5 0 5 1 0 0 1
+0x1c0c31 5
+0x1c0c34 5 0 5
+0x1c0c36 5 0 5
+0x1c0c38 5 0 5
+0x1c0c3a 5 0 5
+0x1c0c3c 5 0 5
+0x1c0c3d 5 0 5
+0x1c0c3e 5 0 0 1 0 0 1
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/vec/mod.rs
+0x1c0c41 5 5
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/vm.rs
+0x1c0c45 5 5
+0x1c0c48 5 5
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/vec/mod.rs
+0x1c0c4c 5
+0x1c0c4f 5 0 0 0 0 0 0 0 0 5
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/raw_vec/mod.rs
+0x1c0c90 5 0 0 1 0 0 1
+fi=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/heap.rs
+0x1c0c93 5 5
+0x1c0c9b 5
+0x1c0c9d 5 0 0 0 0 0 0 0 0 5 2
+0x1c0c9f 5 5
+0x1c0ca3 5 5
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/vm.rs
+0x1c0ca7 5 0 0 0 0 0 0 0 0 5
+0x1c0ca9 5
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/alloc.rs
+0x1c0cd9 5 5 5 1 0 0 1 0 0 0 0 5 1
+cfi=???
+cfn=__rustc::__rust_no_alloc_shim_is_unstable_v2
+calls=5 0x1d39f0 
+0x1c0cd9 20 10 5
+0x1c0cdf 5
+0x1c0ce4 5
+0x1c0ce9 5 5 5 0 0 0 0 0 0 0 0 5 1
+cfi=???
+cfn=__rustc::__rust_alloc
+calls=5 0x1d39b0 
+0x1c0ce9 290 70 40 0 4 0 0 0 0 40 12 5
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/boxed.rs
+0x1c0cef 5
+0x1c0cf2 5 0 0 0 0 0 0 0 0 5
+0x1c0cf8 5
+0x1c0cfb 5 0 5
+0x1c0cfe 5 0 5 1 0 0 1
+0x1c0d05 5 0 5
+0x1c0d0c 5 0 5
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/vm.rs
+0x1c0d10 5
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/boxed.rs
+0x1c0d14 5 0 5 0 0 1
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/vm.rs
+0x1c0d18 5
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/vec/mod.rs
+0x1c0d1c 5 5
+0x1c0d20 5 5
+0x1c0d24 5 0 0 0 0 0 0 0 0 5 2
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/vm.rs
+0x1c0d26 1
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/vec/mod.rs
+0x1c0d2a 1 0 1
+cfi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/raw_vec/mod.rs
+cfn=<alloc::raw_vec::RawVec<*mut botlish_native::runtime::value::Header>>::grow_one
+calls=1 0x196690 
+0x1c0d2a 429 99 64 1 2 2 0 0 0 62 9 3
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/raw_vec/mod.rs
+0x1c0d2f 5 5
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ptr/mod.rs
+0x1c0d33 5 0 5
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/vec/mod.rs
+0x1c0d37 5
+0x1c0d3a 5 0 5
+fi=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/heap.rs
+0x1c0d3e 5 0 5 1 0 0 1
+fi=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/metrics.rs
+0x1c0d42 5 5
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/vm.rs
+0x1c0d4a 5 0 0 0 0 0 0 0 0 5 1
+0x1c0d71 5
+0x1c0d74 5
+0x1c0d78 5 5
+0x1c0d79 5 5
+0x1c0d7b 5 5
+0x1c0d7d 5 5
+0x1c0d7f 5 5
+0x1c0d81 5 5
+0x1c0d82 5 5
+
+fl=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sys/backtrace.rs
+fn=std::sys::backtrace::__rust_begin_short_backtrace::<botlish_native::main::{closure#2}, i32>
+fi=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/main.rs
+cfi=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/main.rs
+cfn=botlish_native::cli
+calls=1 0x1cf060 
+0x1ce88f 28257703 6276085 5168887 146 809 1738 97 0 141 4264761 51749 100929 118
+fe=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sys/backtrace.rs
+
+fl=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ops/function.rs
+fn=<std::thread::lifecycle::spawn_unchecked<botlish_native::main::{closure#2}, i32>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0}
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/lifecycle.rs
+cfi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sys/backtrace.rs
+cfn=std::sys::backtrace::__rust_begin_short_backtrace::<botlish_native::main::{closure#2}, i32>
+calls=1 0x1ce870 
+0x1959c8 28257703 6276085 5168887 146 809 1738 97 0 141 4264761 51749 100929 118
+fe=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ops/function.rs
+
+fl=???
+fn=__rustc::__rust_dealloc
+0x1d39c0 75 0 75
+0x1d39c1 75
+0x1d39c4 75 75
+0x1d39c5 75
+cfi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sys/alloc/unix.rs
+cfn=__rustc::__rdl_dealloc
+calls=4738 0x6c4e20 
+0x1d39c5 10255 2981 1540 1 18 0 0 0 0 1624 107 75
+
+fn=__rustc::__rust_alloc_zeroed
+0x1d39e0 75 0 75
+0x1d39e1 75
+0x1d39e4 75 75
+0x1d39e5 75
+cfi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/alloc.rs
+cfn=__rustc::__rdl_alloc_zeroed
+calls=149 0x6c4f60 
+0x1d39e5 127936 5705 102493 16 145 1084 0 0 111 104178 771 115 49
+
+fn=__rustc::__rust_alloc
+0x1d39b0 86 0 86
+0x1d39b1 86
+0x1d39b4 86 86
+0x1d39b5 86
+cfi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/alloc.rs
+cfn=__rustc::__rdl_alloc
+calls=4590 0x6c4dc0 
+0x1d39b5 6722 1522 916 0 28 17 0 0 0 1112 81 86
+
+fn=__rustc::__rust_no_alloc_shim_is_unstable_v2
+0x1d39f0 161 0 161
+0x1d39f1 161
+0x1d39f4 161 161
+0x1d39f5 161 161
+
+fn=__rustc::__rust_realloc
+0x1d39d0 2 0 2
+0x1d39d1 2
+0x1d39d4 2 2
+0x1d39d5 2
+cfi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/alloc.rs
+cfn=__rustc::__rdl_realloc
+calls=476 0x6c4e30 
+0x1d39d5 819 181 120 3 5 8 0 0 0 134 17 4
+
+fl=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+fn=botlish_native::runtime::construct::rt_construct
+0x1b4bb0 50085 0 50085 1 0 0 1
+0x1b4bb1 50085
+0x1b4bb4 50085 0 50085
+0x1b4bb6 50085 0 50085
+0x1b4bb8 50085 0 50085
+0x1b4bba 50085 0 50085
+0x1b4bbc 50085 0 50085
+0x1b4bbd 50085 0 0 1 0 0 1
+0x1b4bc4 50085
+0x1b4bc7 50085 0 50085
+0x1b4bcb 50085
+0x1b4bcf 50085 0 50085
+0x1b4bd3 50085 0 50085
+0x1b4bd7 50085 0 50085
+0x1b4bdb 50085 0 0 0 0 0 0 0 0 50085
+0x1b4bdd 50085 0 50085
+0x1b4be8 50085 0 50085 0 0 1
+0x1b4bf3 50085 0 50085
+0x1b4bfe 50085 0 50085 1 0 1 1
+0x1b4c09 50085
+0x1b4c0c 50085 0 0 0 0 0 0 0 0 50085
+0x1b4c12 50085
+0x1b4c19 50085 0 50085
+0x1b4c20 50085
+0x1b4c23 50085
+0x1b4c26 50085
+0x1b4c28 50085
+0x1b4c2b 50085
+0x1b4c2e 50085
+0x1b4c30 50085
+0x1b4c33 50085
+0x1b51e5 30 0 0 1 0 0 1
+0x1b51e9 30
+0x1b51f0 30 0 30
+0x1b51f8 30 0 30
+0x1b51fd 30 0 30 1 0 0 1
+0x1b5206 30 0 30
+0x1b520b 30 0 30
+0x1b5210 30 0 30
+0x1b5215 30 0 30 0 0 1
+0x1b521a 30 0 30
+0x1b5221 30
+0x1b5226 30
+0x1b5229 30
+0x1b522b 30
+0x1b522e 30
+0x1b5231 30
+0x1b5233 30 30
+0x1b5237 30 30
+0x1b523b 30 30
+0x1b523f 30
+0x1b5242 30
+0x1b5245 30 0 0 0 0 0 0 0 0 30 1
+0x1b523f 100110
+0x1b5242 100110
+0x1b5245 100110 0 0 0 0 0 0 0 0 100110 2
+0x1b524b 100140 100140 0 1 0 0 1
+0x1b524f 100140
+0x1b5252 100140 0 0 0 0 0 0 0 0 100140 14
+0x1b5258 50055
+0x1b525c 50055 0 0 0 0 0 0 0 0 50055
+0x1b5262 50055
+0x1b5265 50055
+0x1b5269 50055
+0x1b526c 50055 0 0 0 0 0 0 0 0 50055
+0x1b5272 50055
+0x1b5276 50055
+0x1b5279 50055 0 0 0 0 0 0 0 0 50055
+0x1b527f 50055 50055 0 1 0 0 1
+fi=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/value.rs
+0x1b5284 50055
+0x1b5288 50055 0 0 0 0 0 0 0 0 50055
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b528e 50055
+0x1b5292 50055
+0x1b5295 50055 0 0 0 0 0 0 0 0 50055
+0x1b529b 50055 50055
+fi=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/value.rs
+0x1b52a0 50055
+0x1b52a4 50055 0 0 0 0 0 0 0 0 50055
+0x1b52aa 50055 0 50055
+0x1b52ae 50055 0 50055
+0x1b52b2 50055 50055
+0x1b52b6 50055
+0x1b52b9 50055
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b52bc 50055 50055 0 1 4 0 1
+0x1b52c1 50055 0 50055
+0x1b52c5 50055 0 0 0 0 0 0 0 0 50055 55
+0x1b52cb 50040 50040 0 0 4
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/num/uint_macros.rs
+0x1b52cf 50040
+0x1b52d2 50040
+0x1b52d5 50040 0 0 0 0 0 0 0 0 50040
+0x1b52db 50040
+0x1b52de 50040 0 0 0 0 0 0 0 0 50040 1
+0x1b52e4 50040 50040
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/slice/index.rs
+0x1b52e8 50040
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b52eb 50040 50040
+0x1b52f0 50040 0 50040
+0x1b52f4 50040 0 0 0 0 0 0 0 0 50040 2
+0x1b5300 50085 0 0 1 0 0 1
+0x1b5303 50085
+0x1b5307 50085
+0x1b530a 50085 0 0 0 0 0 0 0 0 50085 2
+0x1b5310 50085 50085
+0x1b5314 50085
+fi=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/value.rs
+0x1b5316 50085
+0x1b5319 50085 0 0 0 0 0 0 0 0 50085 2
+0x1b531f 50085
+0x1b5322 50085
+0x1b5325 50085 0 0 0 0 0 0 0 0 50085 1
+0x1b532b 50085 50085
+0x1b5330 50085
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b5333 50085 0 0 0 0 0 0 0 0 50085 38
+0x1b5335 30 30
+0x1b5339 30 30
+0x1b533d 30 30 0 1 0 0 1
+0x1b5341 30 30
+0x1b5346 30
+0x1b5349 30
+0x1b534c 30 30
+0x1b5353 30
+0x1b5357 30
+0x1b535a 30
+0x1b535c 30 0 0 0 0 0 0 0 0 30 10
+0x1b5390 50055 0 0 1 0 0 1
+0x1b5393 50055 0 0 0 0 0 0 0 0 50055
+0x1b5399 50055 50055
+0x1b539e 50055 0 0 0 0 0 0 0 0 50055 2
+0x1b53a4 50055
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/vec/mod.rs
+0x1b53a7 50055 50055
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b53ab 50055 50055
+0x1b53af 50055 50055
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/num/uint_macros.rs
+0x1b53b3 50055
+0x1b53b6 50055
+0x1b53b9 50055 0 0 0 0 0 0 0 0 50055 1
+0x1b53bf 50055 0 0 1 0 0 1
+0x1b53c2 50055 0 0 0 0 0 0 0 0 50055
+0x1b53c8 50055 0 50055
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/slice/index.rs
+0x1b53cc 50055 50055
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b53d0 50055 50055
+0x1b53d4 50055 50055
+0x1b53d9 50055
+0x1b53dc 50055
+0x1b53df 50055 50055
+0x1b53e6 50055
+0x1b53ea 50055
+0x1b53ed 50055
+0x1b53ef 50055 0 0 0 0 0 0 0 0 50055
+0x1b53f5 50055
+0x1b53f9 50055
+0x1b5400 50055 0 50055 1 0 0 1
+0x1b5408 50055 0 50055
+0x1b5411 50055 0 50055
+0x1b5416 50055 0 50055
+0x1b541b 50055 0 50055
+0x1b5420 50055 0 50055
+0x1b5425 50055 0 50055
+0x1b542a 50055 0 50055
+0x1b5431 50055
+0x1b5436 50055
+0x1b5439 50055
+0x1b543b 50055 50055
+0x1b543f 50055 0 0 1 0 0 1
+0x1b5442 50055 50055
+0x1b5446 50055
+0x1b5449 50055
+0x1b5450 15 0 15
+0x1b5454 15 0 15
+0x1b5458 15 15
+0x1b545c 15 15
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ptr/mut_ptr.rs
+0x1b5460 15
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/iter/traits/iterator.rs
+0x1b5464 15
+0x1b5467 15 0 0 0 0 0 0 0 0 15 9
+0x1b546d 10
+0x1b5470 10
+0x1b5472 10
+0x1b5475 10
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/str/iter.rs
+0x1b5485 15
+0x1b5488 15
+0x1b548b 15
+0x1b548e 15
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/iter/traits/iterator.rs
+0x1b5491 15
+0x1b5494 15 0 0 0 0 0 0 0 0 15 8
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ptr/non_null.rs
+0x1b5496 15 0 0 1 0 0 1
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/slice/iter/macros.rs
+0x1b5499 15 0 0 0 0 0 0 0 0 15 4
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/str/validations.rs
+0x1b549f 15 15
+0x1b54a4 15
+0x1b54a6 15 0 0 0 0 0 0 0 0 15 1
+0x1b54a8 15
+0x1b54aa 15 0 0 0 0 0 0 0 0 15 2
+0x1b54bb 15
+0x1b54c0 15
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/vec/mod.rs
+0x1b54eb 5 0 0 1 0 0 1
+0x1b54ee 5
+0x1b54f0 5
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ptr/non_null.rs
+0x1b54f3 5
+0x1b54f6 5 5
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/slice/iter/macros.rs
+0x1b54fa 5 0 0 0 0 0 0 0 0 5
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/vec/mod.rs
+0x1b54f0 10
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ptr/non_null.rs
+0x1b54f3 10
+0x1b54f6 10 10
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/slice/iter/macros.rs
+0x1b54fa 10 0 0 0 0 0 0 0 0 10 2
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/str/validations.rs
+0x1b54fc 15 15 0 0 1
+0x1b54ff 15 0 0 1 0 0 1
+0x1b5501 15 0 0 0 0 0 0 0 0 15
+0x1b5503 15
+0x1b5505 15
+fi=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/metrics.rs
+0x1b5508 15 15
+0x1b550f 15 0 0 0 0 0 0 0 0 15
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/str/mod.rs
+0x1b5520 15
+0x1b5523 15 0 0 0 0 0 0 0 0 15 7
+0x1b5525 10
+0x1b5528 10 0 0 0 0 0 0 0 0 10
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/num/mod.rs
+0x1b552a 10 10
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/str/traits.rs
+0x1b552f 10 0 0 0 0 0 0 0 0 10 2
+0x1b554e 15 0 0 1 0 0 1
+0x1b5551 15
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ptr/const_ptr.rs
+0x1b5554 15
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ptr/mut_ptr.rs
+0x1b5557 15
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/iter/traits/iterator.rs
+0x1b555a 15
+0x1b555d 15 0 0 0 0 0 0 0 0 15 4
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ptr/non_null.rs
+0x1b5567 15
+0x1b556a 15 0 0 0 0 0 0 0 0 15 6
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/str/validations.rs
+0x1b5570 10 10
+0x1b5575 10
+0x1b5577 10 10
+0x1b557b 10 0 0 0 0 0 0 0 0 10
+0x1b557d 10
+0x1b557f 10
+0x1b5582 10 10
+0x1b5586 10 10
+0x1b558a 10 10
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/num/uint_macros.rs
+0x1b558e 10 0 0 0 0 0 0 0 0 10 2
+0x1b5594 10
+0x1b5597 10
+0x1b559a 10
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b559d 10 10
+0x1b55a2 10 0 10
+0x1b55a6 10 0 0 0 0 0 0 0 0 10 2
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/iter/traits/iterator.rs
+0x1b55ae 15 0 0 1 0 0 1
+0x1b55b1 15
+0x1b55b4 15
+0x1b55b7 15
+0x1b55b9 15
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/str/iter.rs
+0x1b55c4 15
+0x1b55c7 15
+0x1b55ca 15
+0x1b55cd 15
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/iter/traits/iterator.rs
+0x1b55d0 15
+0x1b55d3 15 0 0 0 0 0 0 0 0 15 4
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ptr/non_null.rs
+0x1b55d5 15 0 0 1 0 0 1
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/slice/iter/macros.rs
+0x1b55d8 15 0 0 0 0 0 0 0 0 15 2
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/str/validations.rs
+0x1b55da 15 15
+0x1b55de 15
+0x1b55e0 15 0 0 0 0 0 0 0 0 15 1
+0x1b55e2 15
+0x1b55e4 15 0 0 0 0 0 0 0 0 15 2
+0x1b55f5 15
+0x1b55f9 15
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/iter/traits/iterator.rs
+0x1b5607 5 5
+0x1b560b 5 5
+0x1b560f 5 5
+0x1b5613 5 5
+0x1b5617 5
+0x1b561a 5
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b561d 5 5
+0x1b5622 5 0 5
+0x1b5626 5 0 0 0 0 0 0 0 0 5 1
+0x1b5628 50040 0 0 1 0 0 1
+0x1b562a 50040 0 50040
+0x1b562d 50040 50040
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/slice/ascii.rs
+0x1b5631 50040
+0x1b5640 15 0 0 5 0 0 1
+0x1b5644 15 0 0 0 0 0 0 0 0 15 2
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/slice/mod.rs
+0x1b564a 15
+0x1b564d 15
+0x1b5651 15 15
+0x1b5655 15 0 0 0 0 0 0 0 0 15 2
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/intrinsics/mod.rs
+0x1b5674 15
+0x1b5676 15
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/slice/iter/macros.rs
+0x1b5679 15 0 0 0 0 0 0 0 0 15
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/num/mod.rs
+0x1b567b 15 15
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/slice/iter/macros.rs
+0x1b5680 15 0 0 1 0 0 1 0 0 15 3
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/slice/ascii.rs
+0x1b59f4 15 0 15 1 0 0 1
+0x1b59fb 15
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b5a00 15
+0x1b5a03 15
+0x1b5a06 15
+0x1b5a09 15 15
+0x1b5a10 15
+0x1b5a14 15
+0x1b5a18 15
+0x1b5a1b 15 0 0 0 0 0 0 0 0 15
+0x1b5a00 50040 0 0 1 0 0 1
+0x1b5a03 50040
+0x1b5a06 50040
+0x1b5a09 50040 50040
+0x1b5a10 50040
+0x1b5a14 50040
+0x1b5a18 50040
+0x1b5a1b 50040 0 0 0 0 0 0 0 0 50040
+0x1b5a1d 50055
+0x1b5a21 50055
+0x1b5a28 50055 0 50055
+0x1b5a30 50055 0 50055
+0x1b5a39 50055 50055
+0x1b5a3d 50055 0 50055 1 0 0 1
+0x1b5a42 50055 0 50055
+0x1b5a47 50055 0 50055
+0x1b5a4c 50055 50055
+0x1b5a4f 50055 0 50055
+0x1b5a54 50055 0 50055
+0x1b5a5b 50055
+0x1b5a5e 50055 50055
+0x1b5a62 50055 50055
+0x1b5a66 50055
+0x1b5bbc 50055 0 50055 1 0 0 1
+0x1b5bc3 50055
+0x1b5bc8 50055
+0x1b5bcb 50055 50055
+0x1b5bcf 50055
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/alloc.rs
+0x1b5eef 50085 0 0 1 0 0 1
+0x1b5ef6 50085
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b5efd 50085 0 0 1 0 0 1
+0x1b5f02 50085 50085 50085 0 0 1 0 0 0 0 0 50085 1
+cob=/usr/lib/x86_64-linux-gnu/libc.so.6
+cfi=./string/../sysdeps/x86_64/multiarch/memmove-vec-unaligned-erms.S
+cfn=__memcpy_avx_unaligned_erms
+calls=50085 0x188a80 
+0x1b5f02 4457565 1202040 1051785 0 1 5 0 0 0 550935 5
+0x1b5f08 50085 50085
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/vec/mod.rs
+0x1b5f0f 50085 50085
+0x1b5f16 50085
+0x1b5f19 50085
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b5f1c 50085
+0x1b5f1f 50085 0 0 0 0 0 0 0 0 50085 2
+0x1b5f21 50085
+0x1b5f28 50085 50085
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ptr/mut_ptr.rs
+0x1b5f2f 50085
+0x1b5f32 50085
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ptr/non_null.rs
+0x1b5f36 50085
+0x1b5f39 50085 0 50085
+0x1b5f3d 50085 0 50085 1 0 0 1
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/slice/iter/macros.rs
+0x1b5f41 50085 0 0 0 0 0 0 0 0 50085 2
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b5f47 50085
+0x1b5f4b 50085 0 50085
+0x1b5f4f 50085 0 0 0 0 0 0 0 0 50085 38
+0x1b5f55 50055
+0x1b5f58 50055
+0x1b5f5c 50055
+0x1b5f5f 50055
+0x1b5f69 50055
+0x1b5f6c 50055
+0x1b5f6f 50055
+0x1b5f72 50055
+0x1b5f75 50055
+0x1b5f78 50055
+0x1b5f7a 50055
+0x1b5f7c 50055
+0x1b5f80 50055
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/option.rs
+0x1b5f84 50055 50055
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b5f88 50055
+0x1b5f8b 50055
+0x1b5f8f 50055 50055
+0x1b5f93 50055 50055
+0x1b5f97 50055 50055
+0x1b5f9c 50055
+0x1b5fa3 50055 50055
+0x1b5fa7 50055 50055
+0x1b5fab 50055 50055
+0x1b5faf 50055
+0x1b5fb3 50055
+0x1b5fb6 50055
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/slice/iter/macros.rs
+0x1b5fb9 50055
+0x1b5fbc 50055 0 0 0 0 0 0 0 0 50055 2
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/macros/mod.rs
+0x1b5fbe 50055 0 0 1 0 0 1
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b5fc2 50055 0 0 0 0 0 0 0 0 50055 2
+0x1b5fe0 50055 50055
+0x1b5fe5 50055
+0x1b5fe9 50055
+0x1b5fed 50055
+0x1b5ff2 50055
+0x1b5ff5 50055 0 0 0 0 0 0 0 0 50055
+0x1b5ff7 50055
+0x1b6012 50055 0 0 1 0 0 1
+0x1b6016 50055 50055
+0x1b601a 50055 0 0 0 0 0 0 0 0 50055
+0x1b6020 50055
+0x1b6063 25 25 0 1 0 0 1
+0x1b6067 25 0 25
+0x1b606e 25 25
+0x1b6075 25 0 25
+0x1b607c 25 25 0 1 0 0 1
+0x1b6083 25 0 25
+0x1b608a 25
+0x1b608d 25
+0x1b6094 25 25
+0x1b6098 25
+0x1b609b 25 0 25
+cfi=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/vm.rs
+cfn=<botlish_native::runtime::vm::Vm>::new_str_known
+calls=25 0x1bfbb0 
+0x1b609b 3900 1175 1050 9 4 6 9 0 0 375 26 75 2
+0x1b60a0 25 0 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ptr/non_null.rs
+0x1b60a4 25
+0x1b60a7 25 25
+0x1b60ab 25 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/slice/iter/macros.rs
+0x1b60af 25 0 0 0 0 0 0 0 0 25
+0x1b60b5 25
+0x1b60b7 25 25
+0x1b60be 25
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b60c0 25 0 25
+0x1b60c8 25 0 25
+0x1b60d0 25
+0x1b60d4 25 0 25
+0x1b60da 25 0 25
+0x1b60e2 25 25
+0x1b60e6 25 0 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ptr/non_null.rs
+0x1b60ed 25
+0x1b60f1 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/slice/iter/macros.rs
+0x1b60f4 25 0 0 0 0 0 0 0 0 25 4
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b60fa 25 25 0 1 0 0 1
+0x1b60ff 25 0 0 1 0 0 1 0 0 25
+0x1b6101 25 25
+0x1b6106 25 0 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/raw_vec/mod.rs
+0x1b610b 25 25
+0x1b610f 25
+0x1b6112 25 0 0 0 0 0 0 0 0 25
+0x1b6114 25 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/alloc.rs
+0x1b6118 25
+0x1b611d 25 0 25 0 0 0 0 0 0 0 0 25 1
+cfi=???
+cfn=__rustc::__rust_dealloc
+calls=25 0x1d39c0 
+0x1b611d 3007 865 466 0 0 0 0 0 0 426 25 25
+0x1b6120 25 25
+0x1b6124 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/raw_vec/mod.rs
+0x1b639d 30 0 0 1 0 0 1
+0x1b63a0 30
+0x1b63a3 30
+0x1b63a6 30
+0x1b63a8 30
+0x1b63ab 30
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b63ad 30 30
+0x1b63b1 30 30
+0x1b63b5 30 30
+0x1b63b9 30
+0x1b63bc 30 0 0 1 0 0 1
+0x1b63c1 30 0 0 0 0 0 0 0 0 30
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/option.rs
+0x1b63c3 30 30
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b63c7 30
+0x1b63ca 30
+0x1b63ce 30
+0x1b63d1 30
+0x1b63d5 30 0 0 0 0 0 0 0 0 30
+0x1b63ce 50055
+0x1b63d1 50055
+0x1b63d5 50055 0 0 0 0 0 0 0 0 50055 2
+0x1b6484 50085 50085 0 1 0 0 1
+0x1b6488 50085 0 50085 0 0 1
+0x1b648f 50085 50085
+0x1b6493 50085 0 0 0 0 0 0 0 0 50085 2
+0x1b6499 30
+0x1b649d 30 0 0 0 0 0 0 0 0 30
+0x1b64a3 30 30
+0x1b64a7 30 0 0 0 0 0 0 0 0 30 5
+0x1b64ad 5
+0x1b64b1 5
+0x1b64b4 5
+0x1b64bb 5
+0x1b64bf 5 5 0 1 0 0 1
+0x1b64c2 5 5
+0x1b64c6 5 0 5 0 0 1
+0x1b64cd 5
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/raw_vec/mod.rs
+0x1b6515 25 25
+fi=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/metrics.rs
+0x1b6519 25 25
+0x1b6520 25 0 0 0 0 0 0 0 0 25 4
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b6529 25 0 25
+0x1b6530 25 0 25
+0x1b6537 25
+0x1b653c 50055 0 0 1 0 0 1
+0x1b653e 50055 0 0 0 0 0 0 0 0 50055 30
+0x1b6540 50030
+0x1b6543 50030 0 0 0 0 0 0 0 0 50030
+0x1b6549 50030
+0x1b654c 50030
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/option.rs
+0x1b6550 50030 50030
+0x1b6556 50030 0 0 0 0 0 0 0 0 50030
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ptr/non_null.rs
+0x1b655c 50030
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/slice/iter/macros.rs
+0x1b655f 50030 0 0 0 0 0 0 0 0 50030 1
+0x1b6565 50030
+0x1b6567 50030
+0x1b656a 50030
+0x1b656e 50030 0 0 0 0 0 0 0 0 50030
+0x1b6574 50030
+0x1b6576 50030
+0x1b6579 50030
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b657e 25 0 0 1 0 0 1
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/cmp.rs
+0x1b6586 25
+0x1b658a 25
+0x1b658f 25
+0x1b6593 25
+0x1b6596 25 0 0 0 0 0 0 0 0 25
+0x1b659c 25 0 25
+0x1b65a0 25 25 25 0 0 0 0 0 0 0 0 25 1
+cfi=???
+cfn=__rustc::__rust_no_alloc_shim_is_unstable_v2
+calls=25 0x1d39f0 
+0x1b65a0 100 50 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/alloc.rs
+0x1b65a6 25
+0x1b65ab 25 0 25
+0x1b65af 25
+0x1b65b2 25 25 25 0 0 0 0 0 0 0 0 25 1
+cfi=???
+cfn=__rustc::__rust_alloc_zeroed
+calls=25 0x1d39e0 
+0x1b65b2 6520 1430 763 5 22 2 0 0 0 1126 137 25 4
+0x1b65b8 25 0 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/raw_vec/mod.rs
+0x1b65bc 25
+0x1b65bf 25 0 0 1 0 0 1 0 0 25
+0x1b65c5 25 0 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ptr/non_null.rs
+0x1b65c9 25
+0x1b65cc 25 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/slice/iter/macros.rs
+0x1b65d0 25 0 0 0 0 0 0 0 0 25 2
+0x1b65d2 25
+0x1b65d7 25
+0x1b65d9 25
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b65e0 25 25
+0x1b65e5 25
+0x1b65e8 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/num/uint_macros.rs
+0x1b65eb 25 0 0 0 0 0 0 0 0 25 2
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b65e0 25 25
+0x1b65e5 25
+0x1b65e8 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/num/uint_macros.rs
+0x1b65eb 25 0 0 0 0 0 0 0 0 25
+0x1b65f1 50 50
+0x1b65f5 50 0 0 0 0 0 0 0 0 50 5
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/slice/index.rs
+0x1b65fb 50 50
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b65ff 50 50 0 1 0 0 1
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ptr/mod.rs
+0x1b6604 50 50 50 0 0 0 0 0 0 0 0 50 1
+cob=/usr/lib/x86_64-linux-gnu/libc.so.6
+cfi=./string/../sysdeps/x86_64/multiarch/memmove-vec-unaligned-erms.S
+cfn=__memcpy_avx_unaligned_erms
+calls=50 0x188a80 
+0x1b6604 735 80 30 0 9 0 0 0 0 275 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ptr/non_null.rs
+0x1b660a 50
+0x1b660e 50
+0x1b6611 50 50
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/slice/iter/macros.rs
+0x1b6615 50 0 0 0 0 0 0 0 0 50 4
+fi=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/value.rs
+0x1b6617 25 0 25
+0x1b661e 25 0 25
+0x1b6628 25 25
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b662c 25 0 25
+0x1b6633 25 25
+0x1b6637 25 0 25
+0x1b663e 25 0 25 1 0 0 1
+0x1b6645 25
+0x1b664a 25 0 25
+0x1b6653 25 0 25
+0x1b665a 25 0 25
+0x1b6665 25 0 25
+0x1b666c 25 0 25
+0x1b6673 25 25
+0x1b6677 25 0 25
+0x1b667d 25 0 25 1 0 0 1
+0x1b6684 25
+0x1b668b 25 25
+0x1b668f 25
+0x1b6692 25 0 25
+cfi=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/vm.rs
+cfn=<botlish_native::runtime::vm::Vm>::alloc::<botlish_native::runtime::construct::StrPlanObj>
+calls=25 0x1bd350 
+0x1b6692 3593 1096 765 7 9 17 5 0 0 418 27 81 2
+0x1b6697 25 0 25
+0x1b669b 25 25
+0x1b669f 25 0 25
+0x1b66a6 25 0 25
+0x1b66ae 25 25
+0x1b66b2 25 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ptr/non_null.rs
+0x1b66b6 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/slice/iter/macros.rs
+0x1b66b9 25 0 0 0 0 0 0 0 0 25 2
+fi=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/vm.rs
+0x1b6845 25 0 0 1 0 0 1
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/intrinsics/mod.rs
+0x1b6848 25 0 0 0 0 0 0 0 0 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/slice/iter/macros.rs
+0x1b6bd7 50030 0 0 1 0 0 1
+0x1b6bdb 50030
+0x1b6bde 50030
+0x1b6be2 50030
+0x1b6be5 50030
+0x1b6be7 50030
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/iter/traits/accum.rs
+0x1b6bf0 50030 50030
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/slice/iter/macros.rs
+0x1b6bf4 50030
+0x1b6bf8 50030
+0x1b6bfb 50030 0 0 0 0 0 0 0 0 50030
+0x1b6bfd 50030 0 50030 1 0 0 1
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b6c04 50030
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ptr/non_null.rs
+0x1b6c08 50030
+0x1b6c0b 50030 0 50030
+0x1b6c12 50030
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/slice/iter/macros.rs
+0x1b6c15 50030 0 0 0 0 0 0 0 0 50030 2
+0x1b6c17 50030
+0x1b6c1a 50030
+0x1b6c9d 50030 50030 0 1 0 0 1
+0x1b6ca2 50030 50030
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b6ca9 50030
+0x1b6cac 50030 0 50030
+0x1b6cb0 50030 0 50030
+0x1b6cb4 50030 0 50030
+0x1b6cb8 50030 0 0 0 0 0 0 0 0 50030
+0x1b6cbe 50030 50030 0 1 0 0 1
+0x1b6cc2 50030
+0x1b6cc5 50030 0 0 0 0 0 0 0 0 50030 49970
+0x1b6ccb 50 50
+0x1b6ccf 50 0 50
+0x1b6cd6 50 0 50
+0x1b6cdd 50
+0x1b6ce0 50 0 50
+0x1b6ce4 50
+0x1b6ce7 50
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/cmp.rs
+0x1b6cea 50
+0x1b6cee 50
+0x1b6cf4 50
+0x1b6cf8 50
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/raw_vec/mod.rs
+0x1b6cff 50 0 0 1 0 0 1
+0x1b6d04 50
+0x1b6d0a 50
+0x1b6d0d 50
+0x1b6d12 50 0 50
+cfn=<alloc::raw_vec::RawVecInner>::try_allocate_in
+calls=50 0x196820 
+0x1b6d12 124216 4900 102455 11 123 1082 0 0 111 103252 645 190 46
+0x1b6d17 50 50
+0x1b6d1e 50 0 50
+0x1b6d22 50 50
+0x1b6d29 50 0 0 0 0 0 0 0 0 50 10
+0x1b6d2f 50 50
+0x1b6d36 50 0 50
+0x1b6d3d 50 0 50 1 0 0 1
+0x1b6d44 50 50
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b6d48 50
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/slice/index.rs
+0x1b6d4b 50 0 0 0 0 0 0 0 0 50
+0x1b6d51 50 50
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/vec/mod.rs
+0x1b6d55 50 50
+0x1b6d59 50 50
+0x1b6d60 50 50
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/num/uint_macros.rs
+0x1b6d67 50
+0x1b6d6a 50 0 0 0 0 0 0 0 0 50
+0x1b6d70 50
+0x1b6d73 50 0 0 0 0 0 0 0 0 50
+0x1b6d79 50 50
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/slice/index.rs
+0x1b6d7d 50 50 0 1 0 0 1
+0x1b6d81 50 50
+0x1b6d88 50
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ptr/mod.rs
+0x1b6d8c 50
+0x1b6d8f 50 50 50 0 0 0 0 0 0 0 0 50 50
+cob=/usr/lib/x86_64-linux-gnu/libc.so.6
+cfi=./string/../sysdeps/x86_64/multiarch/memmove-vec-unaligned-erms.S
+cfn=__memcpy_avx_unaligned_erms
+calls=50 0x188a80 
+0x1b6d8f 6325 1945 1835 0 0 0 0 0 0 665 129
+0x1b6d95 50 50
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/raw_vec/mod.rs
+0x1b6d99 50 50
+0x1b6d9d 50
+0x1b6da0 50 0 0 0 0 0 0 0 0 50 14
+0x1b6da2 50 50
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/alloc.rs
+0x1b6da6 50
+0x1b6dab 50 50 50 0 0 0 0 0 0 0 0 50 1
+cfi=???
+cfn=__rustc::__rust_dealloc
+calls=50 0x1d39c0 
+0x1b6dab 7548 2191 1149 1 18 0 0 0 0 1198 82 50
+0x1b6db1 50 50
+0x1b6db5 50 50
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b6db9 50 0 50
+0x1b6dbd 50 50
+0x1b6dc4 50 0 50
+0x1b6dc8 50 50
+0x1b6dcf 50 0 50
+0x1b6dd3 50 0 50
+0x1b6dd7 50 50
+0x1b6ddb 50 50
+0x1b6ddf 50
+0x1b6dee 49980 0 49980 1 0 0 1
+0x1b6df6 49980
+0x1b6df9 49980 49980
+0x1b6e00 49980 0 49980 1 0 0 1
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ptr/non_null.rs
+0x1b6e04 49980
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/slice/iter/macros.rs
+0x1b6e07 49980 0 0 0 0 0 0 0 0 49980
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b6df9 50 50
+0x1b6e00 50 0 50
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ptr/non_null.rs
+0x1b6e04 50
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/slice/iter/macros.rs
+0x1b6e07 50 0 0 0 0 0 0 0 0 50 3
+0x1b6e09 50030 0 50030
+0x1b6e0d 50030
+0x1b6e0f 50030 50030
+0x1b6e13 50030
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b6e20 50030 50030
+0x1b6e25 50030
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/vec/mod.rs
+0x1b6e28 50030 50030
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b6e2c 50030
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/num/uint_macros.rs
+0x1b6e2f 50030 0 0 0 0 0 0 0 0 50030
+0x1b6e35 50030
+0x1b6e38 50030 0 0 0 0 0 0 0 0 50030 4
+0x1b6e3e 50030 50030 0 1 0 0 1
+0x1b6e42 50030 50030
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/slice/index.rs
+0x1b6e46 50030
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b6e49 50030 50030
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ptr/mod.rs
+0x1b6e4e 50030
+0x1b6e51 50030 50030 50030 0 0 0 0 0 0 0 0 50030
+cob=/usr/lib/x86_64-linux-gnu/libc.so.6
+cfi=./string/../sysdeps/x86_64/multiarch/memmove-vec-unaligned-erms.S
+cfn=__memcpy_avx_unaligned_erms
+calls=50030 0x188a80 
+0x1b6e51 800500 100070 50040 0 551 0 0 0 0 300180 14
+0x1b6e57 50030 50030
+0x1b6e5b 50030 50030
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b6e5f 50030 50030
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ptr/non_null.rs
+0x1b6e64 50030
+0x1b6e68 50030
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/slice/iter/macros.rs
+0x1b6e6b 50030 0 0 0 0 0 0 0 0 50030
+0x1b6e6d 50030 50030
+0x1b6e72 50030 50030
+0x1b6e76 50030
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b6e7d 50030
+0x1b6e80 50030 0 0 1 0 0 1 0 0 50030 12
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/slice/iter/macros.rs
+0x1b703c 50030 50030 0 1 0 0 1
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b7040 50030 0 50030
+0x1b7044 50030 0 50030
+0x1b7048 50030 50030
+0x1b704d 50030 50030
+0x1b7051 50030 0 0 0 0 0 0 0 0 50030 55
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/vec/mod.rs
+0x1b7053 50 50
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b7057 50 0 50
+fi=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/heap.rs
+0x1b705e 50 0 50
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b7062 50 0 50
+0x1b7069 50 50
+0x1b7070 50 50
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ptr/non_null.rs
+0x1b7074 50
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/slice/iter/macros.rs
+0x1b7077 50 0 0 0 0 0 0 0 0 50 2
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b7062 49980 0 49980
+0x1b7069 49980 49980
+0x1b7070 49980 49980
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ptr/non_null.rs
+0x1b7074 49980
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/slice/iter/macros.rs
+0x1b7077 49980 0 0 0 0 0 0 0 0 49980
+0x1b707d 50055 0 0 1 0 0 1
+0x1b707f 50055 50055 0 1 0 0 1
+0x1b7086 50055
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ptr/non_null.rs
+0x1b70bd 100110
+0x1b70c1 100110
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/slice/iter/macros.rs
+0x1b70c4 100110 0 0 0 0 0 0 0 0 100110 7
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b70c6 100110 100110 0 1 0 0 1
+0x1b70cc 100110 0 0 0 0 0 0 0 0 100110 13
+0x1b70ce 50030 50030
+0x1b70d3 50030 50030
+0x1b70d7 50030 0 0 0 0 0 0 0 0 50030 2
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/alloc.rs
+0x1b70f9 50055 50055
+fi=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/metrics.rs
+0x1b70fd 50055 50055
+0x1b7104 50055 50055
+0x1b7108 50055 0 0 0 0 0 0 0 0 50055 5
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b7115 50055 0 50055
+0x1b711c 50055 0 50055
+0x1b7123 50055 50055
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/raw_vec/mod.rs
+0x1b7127 50055 50055
+0x1b712e 50055
+0x1b7131 50055 0 0 0 0 0 0 0 0 50055 2
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b7123 25 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/raw_vec/mod.rs
+0x1b7127 25 25
+0x1b712e 25
+0x1b7131 25 0 0 0 0 0 0 0 0 25 6
+0x1b7127 5 5 0 1 0 0 1
+0x1b712e 5
+0x1b7131 5 0 0 0 0 0 0 0 0 5
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b725e 50085 0 0 1 0 0 1
+0x1b7261 50085
+0x1b7268 50085 50085
+0x1b7269 50085 50085
+0x1b726b 50085 50085
+0x1b726d 50085 50085
+0x1b726f 50085 50085
+0x1b7271 50085 50085
+0x1b7272 50085 50085
+0x1b7596 25 0 25 1 0 0 1
+0x1b759a 25 0 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/raw_vec/mod.rs
+0x1b759e 25 0 0 0 0 0 0 0 0 25
+0x1b75a0 25 25 25 0 0 0 0 0 0 0 0 25
+cfi=???
+cfn=__rustc::__rust_no_alloc_shim_is_unstable_v2
+calls=25 0x1d39f0 
+0x1b75a0 100 50 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/alloc.rs
+0x1b75a6 25
+0x1b75ab 25
+0x1b75ae 25 25 25 0 0 0 0 0 0 0 0 25 1
+cfi=???
+cfn=__rustc::__rust_alloc
+calls=25 0x1d39b0 
+0x1b75ae 3528 754 514 0 14 15 0 0 0 624 66 25
+0x1b75b4 25 0 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/raw_vec/mod.rs
+0x1b75b8 25
+0x1b75bb 25 0 0 0 0 0 0 0 0 25 8
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/vec/mod.rs
+0x1b75d0 25 0 25 1 0 0 1
+0x1b75d7 25 25
+0x1b75db 25 0 25
+0x1b75e2 25 0 25
+0x1b75ea 25
+0x1b75ed 25
+0x1b75ef 25
+0x1b761d 25 25 0 1 0 0 1
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ptr/mut_ptr.rs
+0x1b7621 25
+0x1b7625 25 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ptr/mod.rs
+0x1b7629 25
+0x1b762c 25 25 25 0 0 0 0 0 0 0 0 25 1
+cob=/usr/lib/x86_64-linux-gnu/libc.so.6
+cfi=./string/../sysdeps/x86_64/multiarch/memmove-vec-unaligned-erms.S
+cfn=__memcpy_avx_unaligned_erms
+calls=25 0x188a80 
+0x1b762c 50480 50085 50045 0 0 602 0 0 30 50140 40
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/vec/mod.rs
+0x1b7632 25
+0x1b7635 25 0 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ptr/non_null.rs
+0x1b7639 25
+0x1b763d 25 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/slice/iter/macros.rs
+0x1b7641 25 0 0 0 0 0 0 0 0 25 4
+0x1b7643 25 25 0 1 0 0 1
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+0x1b7647 25 25
+0x1b764c 25 0 25
+0x1b7650 25 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/raw_vec/mod.rs
+0x1b7655 25 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/num/uint_macros.rs
+0x1b765c 25
+0x1b765f 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/raw_vec/mod.rs
+0x1b7662 25
+0x1b7665 25 0 0 0 0 0 0 0 0 25 2
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/vec/mod.rs
+0x1b7667 25
+0x1b766a 25 0 0 0 0 0 0 0 0 25 1
+0x1b766e 25 25
+0x1b7672 25 25
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/slice/iter/macros.rs
+0x1b7676 25
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/construct.rs
+
+fl=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/raw_vec/mod.rs
+fn=<alloc::raw_vec::RawVecInner>::try_allocate_in
+0x196820 50 0 50
+0x196821 50
+0x196824 50 0 50
+0x196826 50 0 50
+0x196828 50 0 50
+0x19682a 50 0 50
+0x19682c 50 0 50
+0x19682d 50 0 50
+0x19682e 50
+0x196831 50
+0x196834 50
+0x196837 50
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/num/uint_macros.rs
+0x19683a 50
+0x19683d 50
+0x196840 50
+0x196843 50
+0x19684d 50
+0x196850 50
+0x196853 50
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/intrinsics/mod.rs
+0x196856 50
+0x196858 50 0 0 0 0 0 0 0 0 50 2
+fe=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/raw_vec/mod.rs
+0x196869 50
+0x19686c 50 0 0 0 0 0 0 0 0 50 4
+0x19686e 50
+0x196871 50 50 50 0 0 0 0 0 0 0 0 50
+cfi=???
+cfn=__rustc::__rust_no_alloc_shim_is_unstable_v2
+calls=57 0x1d39f0 
+0x196871 200 100 50
+0x196877 50
+0x19687a 50
+0x19687d 50
+0x196880 50 0 0 0 0 0 0 0 0 50
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/alloc.rs
+0x196882 50 50 50 0 0 0 0 0 0 0 0 50 1
+cfi=???
+cfn=__rustc::__rust_alloc_zeroed
+calls=50 0x1d39e0 
+0x196882 121716 4350 101805 11 123 1082 0 0 111 103052 634 90 45
+fe=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/raw_vec/mod.rs
+0x196888 50
+0x19688b 50 0 0 0 0 0 0 0 0 50 5
+0x19688d 50 0 50
+0x196891 50 0 50
+0x196895 50
+0x1968a3 50
+0x1968a5 50 0 50
+0x1968a8 50
+0x1968ab 50
+0x1968af 50 50
+0x1968b0 50 50
+0x1968b2 50 50
+0x1968b4 50 50
+0x1968b6 50 50
+0x1968b8 50 50
+0x1968b9 50 50
+
+fn=<alloc::raw_vec::RawVecInner>::finish_grow
+0x196770 3 0 3
+0x196771 3
+0x196774 3 0 3
+0x196776 3 0 3
+0x196778 3 0 3
+0x19677a 3 0 3
+0x19677b 3
+0x19677e 3
+0x196781 3
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/num/uint_macros.rs
+0x196784 3
+0x196787 3
+0x19678a 3
+0x19678d 3
+0x196790 3
+0x19679a 3
+0x19679d 3
+0x1967a0 3
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/intrinsics/mod.rs
+0x1967a3 3
+0x1967a5 3
+0x1967ab 3 0 0 0 0 0 0 0 0 3
+0x1967b7 3
+fe=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/raw_vec/mod.rs
+0x1967ba 3 0 0 0 0 0 0 0 0 3 2
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/num/uint_macros.rs
+0x1967bc 2
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/alloc.rs
+0x1967c0 2
+0x1967c3 2
+0x1967c6 2
+0x1967c9 2
+0x1967cc 2 2 2 0 0 0 0 0 0 0 0 2
+cfi=???
+cfn=__rustc::__rust_realloc
+calls=118 0x1d39d0 
+0x1967cc 827 183 122 3 5 8 0 0 0 134 17 4
+fe=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/raw_vec/mod.rs
+0x1967d2 2
+0x1967d5 2 0 0 0 0 0 0 0 0 2
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/alloc.rs
+0x1967d9 1
+0x1967dc 1 0 0 0 0 0 0 0 0 1 1
+0x1967de 1 1 1 0 0 0 0 0 0 0 0 1
+cfi=???
+cfn=__rustc::__rust_no_alloc_shim_is_unstable_v2
+calls=353 0x1d39f0 
+0x1967de 4 2 1
+0x1967e4 1
+0x1967e7 1
+0x1967ea 1 1 1 0 0 0 0 0 0 0 0 1
+cfi=???
+cfn=__rustc::__rust_alloc
+calls=353 0x1d39b0 
+0x1967ea 58 14 8 0 0 1 0 0 0 8 0 1
+fe=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/raw_vec/mod.rs
+0x1967f0 1
+0x1967f3 1 0 0 0 0 0 0 0 0 1 1
+0x196803 3 0 3
+0x196807 3
+0x19680c 3
+0x19680f 3 0 3
+0x196813 3 0 3
+0x196816 3 3
+0x196817 3 3
+0x196819 3 3
+0x19681b 3 3
+0x19681d 3 3
+0x19681e 3 3
+
+fn=<alloc::raw_vec::RawVec<*mut botlish_native::runtime::value::Header>>::grow_one
+0x196690 3 0 3
+0x196691 3
+0x196694 3 0 3
+0x196696 3 0 3
+0x196697 3
+0x19669b 3
+0x19669e 3 3
+0x1966a1 3
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/cmp.rs
+0x1966a5 3
+0x1966a9 3
+0x1966af 3
+fe=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/raw_vec/mod.rs
+0x1966b3 3 3
+0x1966b7 3
+0x1966bb 3
+0x1966c1 3
+0x1966c7 3
+0x1966ca 3 0 3
+cfn=<alloc::raw_vec::RawVecInner>::finish_grow
+calls=5 0x196770 
+0x1966ca 1012 221 159 3 5 9 0 0 0 152 21 9
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/result.rs
+0x1966cf 3 3
+0x1966d3 3 0 0 0 0 0 0 0 0 3
+0x1966d5 3 3
+fe=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/raw_vec/mod.rs
+0x1966d9 3 0 3
+0x1966dd 3 0 3
+0x1966e0 3
+0x1966e4 3 3
+0x1966e5 3 3
+0x1966e7 3 3
+0x1966e8 3 3
+
+fl=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sys/thread/unix.rs
+fn=<std::sys::thread::unix::Thread>::new::thread_start
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/boxed.rs
+cfi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ops/function.rs
+cfn=<std::thread::lifecycle::spawn_unchecked<botlish_native::main::{closure#2}, i32>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0}
+calls=1 0x195940 
+0x6daa2b 28257703 6276085 5168887 146 809 1738 97 0 141 4264761 51749 100929 118
+fe=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sys/thread/unix.rs
+
+fl=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/alloc.rs
+fn=__rustc::__rdl_alloc_zeroed
+0x6c4f60 75 0 75
+0x6c4f61 75
+0x6c4f64 75 0 75
+0x6c4f66 75 0 75
+0x6c4f67 75
+0x6c4f6b 75
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sys/alloc/unix.rs
+0x6c4f6e 75
+0x6c4f72 75
+0x6c4f75 75
+0x6c4f78 75
+0x6c4f7b 75
+0x6c4f7d 75 0 0 0 0 0 0 0 0 75 3
+0x6c4f7f 75
+0x6c4f84 75
+0x6c4f87 75
+0x6c4f8b 75 75
+0x6c4f8c 75 75
+0x6c4f8e 75 75
+0x6c4f8f 75 75 0 0 0 0 0 0 0 0 0 75 49
+cob=/usr/lib/x86_64-linux-gnu/libc.so.6
+cfi=./malloc/./malloc/malloc.c
+cfn=calloc
+calls=149 0xae7c0 
+0x6c4f8f 126511 5405 102268 16 145 1084 0 0 111 104103 768 40
+fe=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/alloc.rs
+
+fn=__rustc::__rdl_alloc
+0x6c4dc0 86
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sys/alloc/unix.rs
+0x6c4dc3 86
+0x6c4dc7 86
+0x6c4dca 86
+0x6c4dcd 86
+0x6c4dd0 86
+0x6c4dd2 86 0 0 0 0 0 0 0 0 86 7
+0x6c4dd4 86
+0x6c4dd7 86 86 0 0 0 0 0 0 0 0 0 86
+cob=/usr/lib/x86_64-linux-gnu/libc.so.6
+cfi=./malloc/./malloc/malloc.c
+cfn=malloc
+calls=4590 0xad670 
+0x6c4dd7 5948 1436 916 0 28 17 0 0 0 1026 74
+fe=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/alloc.rs
+
+fn=__rustc::__rdl_realloc
+0x6c4e30 2 0 2
+0x6c4e31 2
+0x6c4e34 2 0 2
+0x6c4e36 2 0 2
+0x6c4e38 2 0 2
+0x6c4e3a 2 0 2
+0x6c4e3b 2
+0x6c4e3f 2
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sys/alloc/unix.rs
+0x6c4e42 2
+0x6c4e46 2
+0x6c4e49 2
+0x6c4e4c 2
+0x6c4e4f 2
+0x6c4e51 2 0 0 0 0 0 0 0 0 2
+0x6c4e53 2
+0x6c4e56 2
+0x6c4e5a 2 2
+0x6c4e5b 2 2
+0x6c4e5d 2 2
+0x6c4e5f 2 2
+0x6c4e61 2 2
+0x6c4e62 2 2 0 0 0 0 0 0 0 0 0 2
+cob=/usr/lib/x86_64-linux-gnu/libc.so.6
+cfi=./malloc/./malloc/malloc.c
+cfn=realloc
+calls=476 0xae0c0 
+0x6c4e62 775 169 110 3 5 8 0 0 0 132 17 2
+fe=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/alloc.rs
+
+fl=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/ops.rs
+fn=botlish_native::runtime::ops::rt_str_len
+0x18c2d0 50085 0 50085 1 0 0 1
+0x18c2d1 50085
+0x18c2d4 50085
+0x18c2d8 50085 50085 0 0 15
+0x18c2dc 50085
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ops/range.rs
+0x18c2e6 50085
+fi=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/vm.rs
+0x18c2e9 50085 0 0 0 0 0 0 0 0 50085 8
+fi=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/value.rs
+0x18c2eb 50085
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/ops.rs
+0x18c2f3 50085
+0x18c2f7 50085 50085
+0x18c2f8 50085 50085
+
+fn=botlish_native::runtime::ops::rt_str_region_check
+0x1901c0 50055 0 50055 1 0 0 1
+0x1901c1 50055
+0x1901c4 50055 0 50055
+0x1901c6 50055 0 50055
+0x1901c8 50055 0 50055
+0x1901ca 50055 0 50055
+0x1901cc 50055 0 50055
+0x1901cd 50055
+0x1901d4 50055
+0x1901d7 50055 50055
+0x1901db 50055 0 50055
+fi=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/value.rs
+0x1901e2 50055
+0x1901e5 50055 0 0 0 0 0 0 0 0 50055
+0x19023a 50055 0 0 1 0 0 1
+0x19023d 50055
+0x190240 50055 0 0 1 0 0 1
+0x190244 50055
+0x190247 50055
+0x19024b 50055
+0x19024e 50055 0 0 0 0 0 0 0 0 50055 2
+0x190250 50055
+0x190253 50055
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/ops.rs
+0x190256 50055
+0x190259 50055
+0x19025d 50055
+0x190260 50055
+0x190264 50055
+0x190269 50055
+0x19026c 50055 0 0 0 0 0 0 0 0 50055
+0x19026e 50055
+0x190640 50055 0 0 1 0 0 1
+0x190647 50055 50055
+0x190648 50055 50055
+0x19064a 50055 50055
+0x19064c 50055 50055
+0x19064e 50055 50055
+0x190650 50055 50055
+0x190651 50055 50055
+
+fn=botlish_native::runtime::ops::rt_list_new
+0x18cbd0 5 0 5 5 0 0 1
+0x18cbd1 5
+0x18cbd4 5 0 5
+0x18cbd6 5 0 5
+0x18cbd8 5 0 5
+0x18cbda 5 0 5
+0x18cbdc 5 0 5
+0x18cbdd 5
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/num/uint_macros.rs
+0x18cbe1 5
+0x18cbe9 5
+0x18cbec 5
+0x18cbf0 5
+0x18cbf3 5
+0x18cbfd 5
+0x18cc00 5 0 0 1 0 0 1
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/intrinsics/mod.rs
+0x18cc03 5
+0x18cc05 5 0 0 0 0 0 0 0 0 5
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/raw_vec/mod.rs
+0x18cc18 5
+0x18cc1b 5
+0x18cc1e 5
+0x18cc21 5 0 0 0 0 0 0 0 0 5
+0x18cc23 5
+0x18cc26 5 5 5 0 0 0 0 0 0 0 0 5 1
+cfi=???
+cfn=__rustc::__rust_no_alloc_shim_is_unstable_v2
+calls=5 0x1d39f0 
+0x18cc26 20 10 5
+0x18cc2c 5
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/alloc.rs
+0x18cc32 5
+0x18cc37 5
+0x18cc3a 5 5 5 0 0 0 0 0 0 0 0 5 1
+cfi=???
+cfn=__rustc::__rust_alloc
+calls=5 0x1d39b0 
+0x18cc3a 290 70 40 0 0 0 0 0 0 40 0 5
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/raw_vec/mod.rs
+0x18cc40 5 0 0 1 0 0 1
+0x18cc43 5 0 0 0 0 0 0 0 0 5 1
+0x18cc45 5
+0x18cc48 5
+0x18cc4b 5
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/vec/mod.rs
+0x18cc54 5 0 5
+0x18cc58 5 0 5
+0x18cc5c 5 0 5
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/slice.rs
+0x18cc64 5
+0x18cc67 5 0 0 0 0 0 0 0 0 5 2
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ptr/mod.rs
+0x18cc69 5
+0x18cc6c 5
+0x18cc6f 5
+0x18cc72 5 5 5 0 0 0 0 0 0 0 0 5 1
+cob=/usr/lib/x86_64-linux-gnu/libc.so.6
+cfi=./string/../sysdeps/x86_64/multiarch/memmove-vec-unaligned-erms.S
+cfn=__memcpy_avx_unaligned_erms
+calls=5 0x188a80 
+0x18cc72 60 15 10 0 0 0 0 0 0 10 10
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/vec/mod.rs
+0x18cc78 5 0 5
+0x18cc7c 5
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/ops.rs
+0x18cc80 5 0 0 1 0 0 1
+0x18cc83 5 0 5
+cfi=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/vm.rs
+cfn=<botlish_native::runtime::vm::Vm>::new_list
+calls=5 0x1c0c30 
+0x18cc83 1016 274 195 7 6 3 6 0 0 132 26 18 2
+fi=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/metrics.rs
+0x18cc88 5 5
+0x18cc90 5 0 0 0 0 0 0 0 0 5 1
+fe=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/runtime/ops.rs
+0x18cc99 5
+0x18cc9d 5 5
+0x18cc9e 5 5
+0x18cca0 5 5
+0x18cca2 5 5
+0x18cca4 5 5
+0x18cca6 5 5
+0x18cca7 5 5
+
+fl=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sys/alloc/unix.rs
+fn=__rustc::__rdl_dealloc
+0x6c4e20 75 75 0 0 0 0 0 0 0 0 0 75
+cob=/usr/lib/x86_64-linux-gnu/libc.so.6
+cfi=./malloc/./malloc/malloc.c
+cfn=free
+calls=4738 0xadd50 
+0x6c4e20 10180 2906 1540 1 18 0 0 0 0 1624 107
+
+totals: 28257703 6276085 5168887 146 809 1738 97 0 141 4264761 51749 100929 118

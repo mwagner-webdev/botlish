@@ -1,0 +1,6 @@
+program: bench/fib.ir
+value (on):  17711
+value (off): 17711
+used instances: 2
+plan results: 0, instances with plan parameters: 0, instances with plan locals: 0
+construction sites/plan sources: 0 (0 virtual)

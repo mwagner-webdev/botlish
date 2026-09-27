@@ -1,0 +1,61 @@
+# addr  executions/run  other events/run  [function +offset]  class  instruction
+0x4847000         1.0  Dw=1.0 I1mr=0.0  [0 <program> +0x0]  frame: prologue    push   rbp
+0x4847001         1.0    [0 <program> +0x1]  frame: prologue    mov    rbp,rsp
+0x4847004         1.0    [0 <program> +0x4]  frame: prologue    sub    rsp,0x10
+0x4847008         1.0    [0 <program> +0x8]  mov imm            mov    esi,0x321
+0x484700d         1.0  Dw=1.0  [0 <program> +0xd]  stack store        mov    QWORD PTR [rsp],0x321
+0x4847015         1.0    [0 <program> +0x15]  mov imm            mov    edx,0x1
+0x484701a         1.0  Dw=1.0  [0 <program> +0x1a]  stack store        mov    QWORD PTR [rsp+0x8],0x1
+0x4847023         1.0  Dw=1.0  [0 <program> +0x23]  call botlish       call   0x484703f
+0x4847028         1.0    [0 <program> +0x28]  frame: epilogue    add    rsp,0x10
+0x484702c         1.0    [0 <program> +0x2c]  frame: epilogue    mov    rsp,rbp
+0x484702f         1.0  Dr=1.0  [0 <program> +0x2f]  frame: epilogue    pop    rbp
+0x4847030         1.0  Dr=1.0  [0 <program> +0x30]  frame: epilogue    ret
+0x484703f         1.0  Dw=1.0  [1 sum +0x0]  frame: prologue    push   rbp
+0x4847040         1.0  I1mr=0.0  [1 sum +0x1]  frame: prologue    mov    rbp,rsp
+0x4847043         1.0    [1 sum +0x4]  frame: prologue    sub    rsp,0x20
+0x4847047         1.0  Dw=1.0  [1 sum +0x8]  frame: prologue    mov    QWORD PTR [rsp+0x10],r13
+0x484704c         1.0  Dw=1.0  [1 sum +0xd]  frame: prologue    mov    QWORD PTR [rsp+0x18],r14
+0x4847051         1.0    [1 sum +0x12]  mov reg-reg        mov    r13,rdi
+0x4847054         1.0  Dw=1.0  [1 sum +0x15]  stack store        mov    QWORD PTR [rsp],rdx
+0x4847058         1.0    [1 sum +0x19]  untag              sar    rsi,1
+0x484705b         1.0    [1 sum +0x1c]  mov reg-reg        mov    r14,rsi
+0x484705e         1.0    [1 sum +0x1f]  mov reg-reg        mov    rsi,rdx
+0x4847061       401.0    [1 sum +0x22]  cmp/test (other)   test   r14,r14
+0x4847064       401.0  Bc=401.0 Bcm=1.0  [1 sum +0x25]  jcc (other)        je     0x4847091
+0x484706a       400.0    [1 sum +0x2b]  mov reg-reg        mov    rdx,r14
+0x484706d       400.0    [1 sum +0x2e]  retag              shl    rdx,1
+0x4847070       400.0    [1 sum +0x31]  retag              or     rdx,0x1
+0x4847074       400.0  Dw=400.0  [1 sum +0x35]  stack store        mov    QWORD PTR [rsp+0x8],rdx
+0x4847079       400.0    [1 sum +0x3a]  mov reg-reg        mov    rdi,r13
+0x484707c       400.0  Dw=400.0 I1mr=0.0  [1 sum +0x3d]  call botlish       call   0x48470bc
+0x4847081       400.0  Dw=400.0  [1 sum +0x42]  stack store        mov    QWORD PTR [rsp],rax
+0x4847085       400.0    [1 sum +0x46]  arith              sub    r14,0x1
+0x4847089       400.0    [1 sum +0x4a]  mov reg-reg        mov    rsi,rax
+0x484708c       400.0    [1 sum +0x4d]  jmp                jmp    0x4847061
+0x4847091         1.0    [1 sum +0x52]  mov reg-reg        mov    rax,rsi
+0x4847094         1.0  Dr=1.0  [1 sum +0x55]  frame: epilogue    mov    r13,QWORD PTR [rsp+0x10]
+0x4847099         1.0  Dr=1.0  [1 sum +0x5a]  frame: epilogue    mov    r14,QWORD PTR [rsp+0x18]
+0x484709e         1.0    [1 sum +0x5f]  frame: epilogue    add    rsp,0x20
+0x48470a2         1.0    [1 sum +0x63]  frame: epilogue    mov    rsp,rbp
+0x48470a5         1.0  Dr=1.0  [1 sum +0x66]  frame: epilogue    pop    rbp
+0x48470a6         1.0  Dr=1.0  [1 sum +0x67]  frame: epilogue    ret
+0x48470bc       400.0  Dw=400.0  [2 step +0x0]  frame: prologue    push   rbp
+0x48470bd       400.0    [2 step +0x1]  frame: prologue    mov    rbp,rsp
+0x48470c0       400.0  I1mr=0.0  [2 step +0x4]  frame: prologue    sub    rsp,0x10
+0x48470c4       400.0  Dw=400.0  [2 step +0x8]  stack store        mov    QWORD PTR [rsp],rsi
+0x48470c8       400.0  Dw=400.0  [2 step +0xc]  stack store        mov    QWORD PTR [rsp+0x8],rdx
+0x48470cd       400.0    [2 step +0x11]  mov reg-reg        mov    rax,rsi
+0x48470d0       400.0    [2 step +0x14]  tag test           and    rax,rdx
+0x48470d3       400.0    [2 step +0x17]  tag test           test   rax,0x1
+0x48470d9       400.0  Bc=400.0 Bcm=0.0  [2 step +0x1d]  tag test           je     0x48470f4
+0x48470df       400.0    [2 step +0x23]  lea                lea    rcx,[rdx-0x1]
+0x48470e3       400.0    [2 step +0x27]  mov reg-reg        mov    rax,rsi
+0x48470e6       400.0    [2 step +0x2a]  arith              add    rax,rcx
+0x48470e9       400.0    [2 step +0x2d]  overflow check     seto   cl
+0x48470ec       400.0    [2 step +0x30]  overflow check     test   cl,cl
+0x48470ee       400.0  Bc=400.0 Bcm=0.0  [2 step +0x32]  overflow check     je     0x4847100
+0x4847100       400.0  I1mr=0.0  [2 step +0x44]  frame: epilogue    add    rsp,0x10
+0x4847104       400.0    [2 step +0x48]  frame: epilogue    mov    rsp,rbp
+0x4847107       400.0  Dr=400.0  [2 step +0x4b]  frame: epilogue    pop    rbp
+0x4847108       400.0  Dr=400.0  [2 step +0x4c]  frame: epilogue    ret

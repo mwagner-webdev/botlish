@@ -1,0 +1,11 @@
+i0 <program>
+i1 sum<int, int>
+    param n: declared=- first-ref-view-type=int entry-range=[0, 400]
+    param acc: declared=- first-ref-view-type=int entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i2 step<int>
+    param x: declared=- first-ref-view-type=int entry-range=[-∞, +∞]
+    result range: [-∞, +∞]
+i3 step<generic>
+    param x: declared=- first-ref-view-type=any entry-range=[-∞, +∞]
+    result range: [-∞, +∞]

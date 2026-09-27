@@ -1,0 +1,32 @@
+==6811== Callgrind, a call-graph generating cache profiler
+==6811== Copyright (C) 2002-2017, and GNU GPL'd, by Josef Weidendorfer et al.
+==6811== Using Valgrind-3.22.0 and LibVEX; rerun with -h for copyright info
+==6811== Command: /tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/target/release/botlish-native bench 5 audit/post-m8a-common-inefficiency/profiles/supplemental/ai_text_clean-ascii-10K/program.nir
+==6811== 
+--6811-- warning: L3 cache found, using its data for the LL simulation.
+--6811-- warning: specified LL cache: line_size 64  assoc 20  total_size 272,629,760
+--6811-- warning: simulated LL cache: line_size 64  assoc 33  total_size 276,824,064
+==6811== For interactive control, run 'callgrind_control -h'.
+==6811== 
+==6811== Events    : Ir Dr Dw I1mr D1mr D1mw ILmr DLmr DLmw Bc Bcm Bi Bim
+==6811== Collected : 184240573 40118036 22078947 307 101719 68337 108 0 11254 29763562 574560 453454 21
+==6811== 
+==6811== I   refs:      184,240,573
+==6811== I1  misses:            307
+==6811== LLi misses:            108
+==6811== I1  miss rate:        0.00%
+==6811== LLi miss rate:        0.00%
+==6811== 
+==6811== D   refs:       62,196,983  (40,118,036 rd + 22,078,947 wr)
+==6811== D1  misses:        170,056  (   101,719 rd +     68,337 wr)
+==6811== LLd misses:         11,254  (         0 rd +     11,254 wr)
+==6811== D1  miss rate:         0.3% (       0.3%   +        0.3%  )
+==6811== LLd miss rate:         0.0% (       0.0%   +        0.1%  )
+==6811== 
+==6811== LL refs:           170,363  (   102,026 rd +     68,337 wr)
+==6811== LL misses:          11,362  (       108 rd +     11,254 wr)
+==6811== LL miss rate:          0.0% (       0.0%   +        0.1%  )
+==6811== 
+==6811== Branches:       30,217,016  (29,763,562 cond +    453,454 ind)
+==6811== Mispredicts:       574,581  (   574,560 cond +         21 ind)
+==6811== Mispred rate:          1.9% (       1.9%     +        0.0%   )

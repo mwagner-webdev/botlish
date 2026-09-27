@@ -1,0 +1,4 @@
+i0 <program>
+i1 fib<int>
+    param n: declared=- first-ref-view-type=int entry-range=[-∞, 22]
+    result range: [-∞, +∞]

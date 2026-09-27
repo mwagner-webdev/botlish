@@ -1,0 +1,163 @@
+# callgrind format
+version: 1
+creator: callgrind-3.22.0
+pid: 5486
+cmd:  /tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/target/release/botlish-native bench 2000 audit/post-m8a-common-inefficiency/profiles/sum-refined/vc-off/program.nir
+part: 1
+
+
+desc: I1 cache: 32768 B, 64 B, 8-way associative
+desc: D1 cache: 49152 B, 64 B, 12-way associative
+desc: LL cache: 276824064 B, 64 B, 33-way associative
+
+desc: Timerange: Basic block 0 - 6242169
+desc: Trigger: Program termination
+
+positions: instr
+events: Ir Dr Dw I1mr D1mr D1mw ILmr DLmr DLmw Bc Bcm Bi Bim
+summary: 24874000 1614000 4818000 6 0 0 0 0 0 2402000 2008 2000 1
+
+
+ob=???
+fl=???
+fn=0x0000000004847000
+0x4847000 2000 0 2000 1
+0x4847001 2000
+0x4847004 2000
+0x4847008 2000
+0x484700d 2000 0 2000
+0x4847015 2000
+0x484701a 2000 0 2000
+0x4847023 2000 0 2000
+cfn=0x000000000484703f
+calls=2000 0x484703f 
+0x4847023 24838000 1608000 4808000 4 0 0 0 0 0 2402000 2008
+0x4847028 2000
+0x484702c 2000
+0x484702f 2000 2000
+0x4847030 2000 2000
+
+fn=0x000000000484703f
+0x484703f 2000 0 2000
+0x4847040 2000 0 0 1
+0x4847043 2000
+0x4847047 2000 0 2000
+0x484704c 2000 0 2000
+0x4847051 2000
+0x4847054 2000 0 2000
+0x4847058 2000
+0x484705b 2000
+0x484705e 2000
+0x4847061 2000
+0x4847064 2000 0 0 0 0 0 0 0 0 2000
+0x4847061 800000
+0x4847064 800000 0 0 0 0 0 0 0 0 800000 2000
+0x484706a 800000
+0x484706d 800000
+0x4847070 800000
+0x4847074 800000 0 800000
+0x4847079 800000
+0x484707c 800000 0 800000 1
+cfn=0x00000000048470bc
+calls=800000 0x48470bc 
+0x484707c 15200000 1600000 2400000 2 0 0 0 0 0 1600000 8
+0x4847081 800000 0 800000
+0x4847085 800000
+0x4847089 800000
+0x484708c 800000
+0x4847091 2000
+0x4847094 2000 2000
+0x4847099 2000 2000
+0x484709e 2000
+0x48470a2 2000
+0x48470a5 2000 2000
+0x48470a6 2000 2000
+
+fn=0x00000000048470bc
+0x48470bc 800000 0 800000
+0x48470bd 800000
+0x48470c0 800000 0 0 1
+0x48470c4 800000 0 800000
+0x48470c8 800000 0 800000
+0x48470cd 800000
+0x48470d0 800000
+0x48470d3 800000
+0x48470d9 800000 0 0 0 0 0 0 0 0 800000 1
+0x48470df 800000
+0x48470e3 800000
+0x48470e6 800000
+0x48470e9 800000
+0x48470ec 800000
+0x48470ee 800000 0 0 0 0 0 0 0 0 800000 7
+0x4847100 800000 0 0 1
+0x4847104 800000
+0x4847107 800000 800000
+0x4847108 800000 800000
+
+ob=/usr/lib/x86_64-linux-gnu/libc.so.6
+fl=./nptl/./nptl/pthread_create.c
+fn=start_thread
+cob=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/target/release/botlish-native
+cfi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sys/thread/unix.rs
+cfn=<std::sys::thread::unix::Thread>::new::thread_start
+calls=1 0x6da8e0 
+0x9ca9e 24874000 1614000 4818000 6 0 0 0 0 0 2402000 2008 2000 1
+
+fl=./misc/../sysdeps/unix/sysv/linux/x86_64/clone.S
+fn=clone
+cfi=./nptl/./nptl/pthread_create.c
+cfn=start_thread
+calls=1 0x9c720 
+0x129a62 24874000 1614000 4818000 6 0 0 0 0 0 2402000 2008 2000 1
+
+ob=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/target/release/botlish-native
+fl=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sys/thread/unix.rs
+fn=<std::sys::thread::unix::Thread>::new::thread_start
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/alloc/src/boxed.rs
+cfi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ops/function.rs
+cfn=<std::thread::lifecycle::spawn_unchecked<botlish_native::main::{closure#2}, i32>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0}
+calls=1 0x195940 
+0x6daa2b 24874000 1614000 4818000 6 0 0 0 0 0 2402000 2008 2000 1
+fe=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sys/thread/unix.rs
+
+fl=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/main.rs
+fn=botlish_audit_run
+0x1d3960 2000 0 2000 1
+0x1d3961 2000
+0x1d3964 2000
+0x1d3967 2000
+0x1d396a 2000 2000
+0x1d396b 2000 0 0 0 0 0 0 0 0 0 0 2000 1
+cob=???
+cfi=???
+cfn=0x0000000004847000
+calls=2000 0x4847000 
+0x1d396b 24862000 1612000 4816000 5 0 0 0 0 0 2402000 2008
+
+fn=botlish_native::cli
+cfn=botlish_audit_run
+calls=1 0x1d3960 
+0x1cfe83 12437 807 2409 6 0 0 0 0 0 1201 6 1 1
+cfn=botlish_audit_run
+calls=1999 0x1d3960 
+0x1d004d 24861563 1613193 4815591 0 0 0 0 0 0 2400799 2002 1999
+
+fl=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sys/backtrace.rs
+fn=std::sys::backtrace::__rust_begin_short_backtrace::<botlish_native::main::{closure#2}, i32>
+fi=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/main.rs
+cfi=/tmp/claude-0/-home-user-botlish/108fefd8-ee45-571c-99df-2e7e6c6e32b5/scratchpad/auditbuild/native-audit/src/main.rs
+cfn=botlish_native::cli
+calls=1 0x1cf060 
+0x1ce88f 24874000 1614000 4818000 6 0 0 0 0 0 2402000 2008 2000 1
+fe=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sys/backtrace.rs
+
+fl=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ops/function.rs
+fn=<std::thread::lifecycle::spawn_unchecked<botlish_native::main::{closure#2}, i32>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0}
+fi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/thread/lifecycle.rs
+cfi=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/std/src/sys/backtrace.rs
+cfn=std::sys::backtrace::__rust_begin_short_backtrace::<botlish_native::main::{closure#2}, i32>
+calls=1 0x1ce870 
+0x1959c8 24874000 1614000 4818000 6 0 0 0 0 0 2402000 2008 2000 1
+fe=/rustc/48a229ceaefd4985c50990b14116b6d856af0985/library/core/src/ops/function.rs
+
+totals: 24874000 1614000 4818000 6 0 0 0 0 0 2402000 2008 2000 1

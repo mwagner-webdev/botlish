@@ -1,0 +1,14 @@
+# per run; generic entries excluded (cold trampolines)
+TOTAL executed=17,539  reg-reg moves=3,504 (20.0%)  dead=0  redundant=0  dead+redundant=0.0% of executed JIT instructions (0.0% of moves)
+
+register-to-register moves by purpose (heuristic, see moves.py), per run:
+  join/loop-carried copy before jmp                           1,000   28.5% of moves    5.7% of executed
+  other                                                       1,000   28.5% of moves    5.7% of executed
+  result into rax (return / op result)                          501   14.3% of moves    2.9% of executed
+  call argument setup                                           500   14.3% of moves    2.9% of executed
+  vm pointer into rdi for a call                                500   14.3% of moves    2.9% of executed
+  incoming argument into callee-saved register                    3    0.1% of moves    0.0% of executed
+
+2 drive                          executed=      14,527  reg-reg moves=     3,504  dead=        0  redundant=        0  (dead+redundant = 0.0% of executed)
+1 work                           executed=       3,000  reg-reg moves=         0  dead=        0  redundant=        0  (dead+redundant = 0.0% of executed)
+0 <program>                      executed=          12  reg-reg moves=         0  dead=        0  redundant=        0  (dead+redundant = 0.0% of executed)

@@ -1,0 +1,9 @@
+<program> e23 ? -> fib<int>
+    arg0: type int, range [22, 22] {22}
+    result: type int, range [-∞, +∞]; semantic effectiveErrors {}
+fib<int> e11 ? -> fib<int>
+    arg0: type int, range [1, 21]
+    result: type int, range [-∞, +∞]; semantic effectiveErrors {}
+fib<int> e17 ? -> fib<int>
+    arg0: type int, range [0, 20]
+    result: type int, range [-∞, +∞]; semantic effectiveErrors {}

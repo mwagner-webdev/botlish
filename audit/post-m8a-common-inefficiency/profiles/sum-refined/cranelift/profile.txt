@@ -1,0 +1,34 @@
+events: Ir Dr Dw I1mr D1mr D1mw ILmr DLmr DLmw Bc Bcm Bi Bim
+runs collected: 2000 (per-run figures below = total / runs)
+totals per run: Ir=12,437  Dr=807  Dw=2,409  I1mr=0  D1mr=0  D1mw=0  ILmr=0  DLmr=0  DLmw=0  Bc=1,201  Bcm=1  Bi=1  Bim=0
+(Ir = executed instructions; Dr/Dw = data reads/writes; Bc/Bcm = conditional branches / mispredicted; Bi = indirect branches; D1mr/D1mw = L1 data misses -- callgrind simulated)
+
+== exclusive cost by code kind (per run)
+  botlish      100.0% of Ir  Ir=    12,431.0  Dr=       806.0  Dw=     2,408.0  Bc=     1,201.0  Bcm=         1.0  Bi=         0.0  D1mr=         0.0  D1mw=         0.0
+  rust-other     0.0% of Ir  Ir=         6.0  Dr=         1.0  Dw=         1.0  Bc=         0.0  Bcm=         0.0  Bi=         1.0  D1mr=         0.0  D1mw=         0.0
+
+== exclusive cost per function (per run, sorted by Ir; >= 0.1% of Ir)
+   61.11%  [botlish] 2 step                                                       Ir=    7,600.0  Dr=      800.0  Dw=    1,200.0  Bc=      800.0  Bcm=        0.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+   38.75%  [botlish] 1 sum                                                        Ir=    4,819.0  Dr=        4.0  Dw=    1,204.0  Bc=      401.0  Bcm=        1.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+
+== Botlish -> Botlish calls, per callee (per run): count; INCLUSIVE cost of the non-self calls
+         400.0  2 step                                   incl  61.11% of Ir  Ir=    7,600.0  Dr=      800.0  Dw=    1,200.0  Bc=      800.0  Bcm=        0.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+           1.0  1 sum                                    incl  99.86% of Ir  Ir=   12,419.0  Dr=      804.0  Dw=    2,404.0  Bc=    1,201.0  Bcm=        1.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+           1.0  0 <program>                              incl  99.95% of Ir  Ir=   12,431.0  Dr=      806.0  Dw=    2,408.0  Bc=    1,201.0  Bcm=        1.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+
+== Botlish -> Botlish calls, per caller -> callee (per run)
+         400.0  1 sum  ->  2 step
+           1.0  0 <program>  ->  1 sum
+           1.0  botlish_audit_run  ->  0 <program>
+
+== Botlish -> runtime/libc calls, per helper: count and INCLUSIVE cost (per run)
+
+== Botlish -> helper calls, per calling Botlish function (per run)
+
+== calls made outside Botlish code, caller -> callee (per run; top 60)
+           1.0  botlish_native::cli  ->  botlish_audit_run
+           0.0  <std::sys::thread::unix::Thread>::new::thread_start  ->  <std::thread::lifecycle::spawn_unchecked<botlish_native::main::{closure#2}, i32>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0}
+           0.0  std::sys::backtrace::__rust_begin_short_backtrace::<botlish_native::main::{closure#2}, i32>  ->  botlish_native::cli
+           0.0  <std::thread::lifecycle::spawn_unchecked<botlish_native::main::{closure#2}, i32>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0}  ->  std::sys::backtrace::__rust_begin_short_backtrace::<botlish_native::main::{closure#2}, i32>
+           0.0  start_thread  ->  <std::sys::thread::unix::Thread>::new::thread_start
+           0.0  clone  ->  start_thread

@@ -1,0 +1,37 @@
+# static machine code per JIT function (direct entry); totals include generic entries' bytes
+TOTAL bytes=15289 direct-entry instructions=3268 frame=683 tagged-int=200 bool word=233 stack traffic=390 completion=82 calls=172 moves=689
+
+id name                       bytes entry  insns         frame    tagged-int     bool word stack traffic    completion         calls         moves
+0 <program>                    1158    14    197            26             0             0            83            12             9             8
+1 char::codepoint                22    17      7             5             0             0             0             0             2             0
+2 byte::from_int                272    17     63            17             3            10             0             0             4            10
+3 byte::set                     600    17    141            26            10             5            12             8             9            39
+4 ascii::is_digit                57    17     15             5             1             0             0             0             0             0
+5 ascii::is_upper                57    17     15             5             1             0             0             0             0             0
+6 ascii::is_lower                57    17     15             5             1             0             0             0             0             0
+7 ascii::is_alphabetic          108    17     28            11             0             4             0             0             2             6
+8 ascii::is_alphanumeric        108    17     28            11             0             4             0             0             2             6
+9 web::is_unreserved            138    17     35            13             0             4             0             0             2             8
+10 web::uri_escape_text         108    17     29            11             0             0             5             2             1             2
+11 high_nibble                   86    17     20             7             4             0             2             0             2             1
+12 hex_pair                     394    59     93            23             6             0             9             8             5            21
+13 esc_bytes                    688    70    143            27            10             6            29             6             6            28
+14 esc_char                     420    66    100            26             1             2             9             6             6            28
+15 esc_from                     792    36    163            26            12             6            32             8            10            29
+16 check                        472    32    110            27            11            10            11             4             4            19
+17                              664    17    151            23            12            17            10             2            10            36
+18                              752    17    170            27            12            17             9             2            13            39
+19 char_at                      256     6     64            26             5             0             3             2             2            17
+20 scan_local                   776    28    170            27             7            17            29             2             9            34
+21 scan_label                   536    28    124            27             7             9            17             2             5            29
+22 scan_alpha                   440    28    107            26             7             7            11             2             4            28
+23 tld_ok                       424    28    105            23             9             8             4             0             4            28
+24 domain_loop                  616    28    142            27            11            16            16             2             7            31
+25                              664    17    151            23            12            17            10             2            10            36
+26                              752    17    170            27            12            17             9             2            13            39
+27 char_at                      256     6     64            26             5             0             3             2             2            17
+28 scan_local                   776    28    170            27             7            17            29             2             9            34
+29 scan_label                   536    28    124            27             7             9            17             2             5            29
+30 scan_alpha                   440    28    107            26             7             7            11             2             4            28
+31 tld_ok                       424    28    105            23             9             8             4             0             4            28
+32 domain_loop                  616    28    142            27            11            16            16             2             7            31

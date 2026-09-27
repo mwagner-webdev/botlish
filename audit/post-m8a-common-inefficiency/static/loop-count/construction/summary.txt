@@ -1,0 +1,6 @@
+program: bench/loop-count.ir
+value (on):  3500
+value (off): 3500
+used instances: 3
+plan results: 0, instances with plan parameters: 0, instances with plan locals: 0
+construction sites/plan sources: 0 (0 virtual)

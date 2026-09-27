@@ -1,0 +1,6 @@
+i0 <program>: generic=1 key={} result=int
+    call e45 ? -> i1 drive<int, int>
+i2 work<int>: generic=0 key={int} result=int
+i1 drive<int, int>: generic=0 key={int int} result=int
+    call e42 ? -> i2 work<int>
+    call e33 ? -> i1 drive<int, int>

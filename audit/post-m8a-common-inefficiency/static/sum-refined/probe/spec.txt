@@ -1,0 +1,8 @@
+i0 <program>: generic=1 key={} result=int
+    call e30 ? -> i1 sum<int, int>
+i1 sum<int, int>: generic=0 key={int int} result=int
+    call e25 ? -> i2 step<int>
+    call e19 ? -> i1 sum<int, int>
+    materializes Block values: e14
+i2 step<int>: generic=0 key={int} result=int
+i3 step<generic>: generic=1 key={any} result=int

@@ -1,0 +1,11 @@
+<program> e45 ? -> drive<int, int>
+    arg0: type int, range [500, 500] {500}
+    arg1: type int, range [0, 0] {0}
+    result: type int, range [-∞, +∞]; semantic effectiveErrors {}
+drive<int, int> e42 ? -> work<int>
+    arg0: type int, range [1, 500]
+    result: type int, range [7, 7] {7}; semantic effectiveErrors {}
+drive<int, int> e33 ? -> drive<int, int>
+    arg0: type int, range [0, 499]
+    arg1: type int, range [7, +∞]
+    result: type int, range [-∞, +∞]; semantic effectiveErrors {}
