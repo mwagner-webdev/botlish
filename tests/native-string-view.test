@@ -295,12 +295,29 @@ f()
 # region-testable value once that value's only consumer is an opaque call:
 # -string-region-opt 1 used to eliminate every one of emailish?'s own
 # one-character String allocations for both corpus strings below (0, both
-# cases); now it eliminates only the ones reached through a *direct* char_at
-# call (emailish?/domain_loop's own "@"/"." checks), not the ones reached
-# through scan_while's predicate dispatch. This is a compiler weakness this
-# milestone's own idiomatic predicate-passing source exposes, not a
-# regression to fix here -- hir/stringregion.tcl stays unmodified, and the
-# result value is unaffected either way (still fully equivalent on/off).
+# cases); it now eliminates only the ones reached through a *direct*
+# char_at call, not the ones reached through scan_while's predicate
+# dispatch. This is a compiler weakness this milestone's own idiomatic
+# predicate-passing source exposes, not a regression to fix here --
+# hir/stringregion.tcl stays unmodified, and the result value is
+# unaffected either way (still fully equivalent on/off).
+#
+# R2.a.3 (R2A3-COUNTED-LOOPS-FINAL-SOURCE.md) shifts this further, in
+# StringRegion's own favor: domain_loop's replacement, domain?, now reads
+# char_at(j)/char_at(j - 1) *directly* at every character position it
+# visits (not just at each label boundary the way domain_loop's own single
+# post-scan_while check did), so a much larger share of this corpus
+# string's own char_at calls are direct rather than routed through
+# scan_while's opaque predicate callvalue -- "café@例え.テスト" (whose
+# domain is almost entirely inspected by domain? once past the local part)
+# goes from 13 raw / 11 surviving (2 eliminated) to 15 raw / 8 surviving
+# (7 eliminated): both raw and surviving counts change, because domain?'s
+# own new character-at-a-time shape makes more char_at call *sites* in
+# this string's own domain (a genuine source-shape difference, not an
+# optimizer change), and StringRegion sees through more of them now that
+# they are direct. "not-an-email" (no "@" at all, so local_char?'s own
+# scan_while rejects before domain? is ever reached) is unaffected: still
+# 12 raw / 12 surviving, none of them touching domain? at all.
 
 proc emailishHir {text} {
     core::loadLibrary web
@@ -316,9 +333,9 @@ proc assertEmailishParity {text} {
     return [list $on [expr {$off > 0}] [expr {$onValue eq $offValue}] $onValue]
 }
 
-test view-emailish-corpus-1 {lib/web.tcl's Emailish? validator: string-region-opt still eliminates emailish?'s own direct char_at allocations (down from 13 to 11 -- not to 0, since scan_while's char_at now feeds an opaque predicate callvalue string-region-opt cannot see through), same value either way} -body {
+test view-emailish-corpus-1 {lib/web.tcl's Emailish? validator: string-region-opt eliminates emailish?'s own direct char_at allocations (15 raw down to 8 surviving, R2.a.3's domain? touching many more characters directly than domain_loop's own single post-scan check did -- not to 0, since scan_while's char_at still feeds an opaque predicate callvalue string-region-opt cannot see through), same value either way} -body {
     assertEmailishParity "café@例え.テスト"
-} -result {11 1 1 {bool true}}
+} -result {8 1 1 {bool true}}
 
 test view-emailish-corpus-2 {lib/web.tcl's Emailish? validator on a non-matching String (scan_while's own family, reached only through the predicate callvalue): string-region-opt eliminates none of them, same value either way} -body {
     assertEmailishParity "not-an-email"

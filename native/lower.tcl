@@ -2283,8 +2283,9 @@ proc native::lower::Expr {fnVar e {want tagged}} {
         block    { set result [Closure fn $e] }
         call     { lassign [Call fn $e $node $want "" [expr {$want eq "region"}]] result repr }
         if       { set result [If fn $e $node] }
-        loop     { set result [Loop fn $e $node] }
-        listloop { set result [ListLoop fn $e $node] }
+        loop      { set result [Loop fn $e $node] }
+        listloop  { set result [ListLoop fn $e $node] }
+        countloop { set result [CountLoop fn $e $node] }
         return {
             set companion [dict get $fn companion]
             if {$companion ne ""} {
@@ -4993,6 +4994,87 @@ proc native::lower::ListLoop {fnVar e node} {
     }
     EmitLabel fn $normalExit
     Emit fn "$resultReg = move $accReg" $e
+    Emit fn "jump $exit" $e
+    EmitLabel fn $exit
+    return $resultReg
+}
+
+# (countloop START-EXPR END-EXPR (block (I) BODY...)): the ascending,
+# exclusive-end counted loop (R2A3-COUNTED-LOOPS-FINAL-SOURCE.md). Lowers
+# to exactly the same real CFG backedge shape as ListLoop above -- a
+# loop-carried register rebound at the loop's own back edge (the identical
+# multi-definition-site register pattern), `break`/`continue`/`return`/an
+# error inside the body composing completely unchanged through the same
+# `dict set fn loops $e [list $continueLabel $exit $resultReg]` mechanism
+# -- but simpler than ListLoop in two ways: there is no list to index
+# (START/END are ordinary Int expressions, so `op ilt`/`op iadd` -- the
+# same general NIR ops an ordinary `<`/`+` call already lowers to, not a
+# list-length-specific operation -- drive the comparison/advance directly,
+# at whatever precision hir/range.tcl's induction-variable seed and
+# RawEligibleCall's own eligibility check decide, raw or BigInt-capable,
+# exactly like any other Int arithmetic), and there is no accumulator: I
+# itself *is* the one loop-carried register (no extra per-iteration
+# `listget`-style indirection is needed the way ListLoop derives elemReg
+# from idxReg), and an ordinary (non-break) body completion is discarded,
+# never accumulated -- a countloop is procedural, not collecting. Reaching
+# END without a `break` produces `unit` (spec item 9), never the
+# body's own last value and never a materialized collection of I's values:
+# EmitArgGuards' own int-kind check on START/END (hir/aot.tcl's own
+# Require call for this node feeds it, exactly like ListLoop's iterable
+# check) is the only guard; no Range/List/iterator allocation exists here
+# at all.
+proc native::lower::CountLoop {fnVar e node} {
+    upvar 1 $fnVar fn
+    set startExpr [dict get $node start]
+    set endExpr [dict get $node end]
+    set startReg [Expr fn $startExpr]
+    if {$startReg eq "never"} {
+        return never
+    }
+    set endReg [Expr fn $endExpr]
+    if {$endReg eq "never"} {
+        return never
+    }
+    EmitArgGuards fn $e [list $startExpr $endExpr] [list $startReg $endReg] {int int} "loop"
+    set idxReg [NewReg fn]
+    set resultReg [NewReg fn]
+    Emit fn "$idxReg = move $startReg" $e
+    set head [NewLabel fn]
+    set bodyLabel [NewLabel fn]
+    # `continue`'s own target (registered below): only advances I and loops
+    # back -- exactly ListLoop's own continueLabel discipline, see its
+    # comment above for why this must be distinct from $head.
+    set continueLabel [NewLabel fn]
+    set normalExit [NewLabel fn]
+    set exit [NewLabel fn]
+    Emit fn "jump $head" $e
+    EmitLabel fn $head
+    set cmp [Assign fn "op ilt $idxReg $endReg" $e]
+    Emit fn "br $cmp $bodyLabel $normalExit" $e
+    EmitLabel fn $bodyLabel
+    set saved [dict get $fn locals]
+    set savedRaw [dict get $fn rawCache]
+    dict set fn loops $e [list $continueLabel $exit $resultReg]
+    EnterScope fn [dict get $node bodyScope]
+    dict set fn locals [dict get $node countBinding] [list reg $idxReg]
+    set bodyValue [Sequence fn [dict get $node body]]
+    set usedContinue [dict exists $fn continued $e]
+    if {$bodyValue ne "never"} {
+        Emit fn "jump $continueLabel" $e
+    }
+    dict unset fn continued $e
+    dict set fn locals $saved
+    dict set fn rawCache $savedRaw
+    dict unset fn loops $e
+    if {$bodyValue ne "never" || $usedContinue} {
+        EmitLabel fn $continueLabel
+        set idxNext [Assign fn "op iadd $idxReg [IntConst fn 1 $e]" $e]
+        Emit fn "$idxReg = move $idxNext" $e
+        Emit fn "jump $head" $e
+    }
+    EmitLabel fn $normalExit
+    set unitConst [Assign fn unit $e]
+    Emit fn "$resultReg = move $unitConst" $e
     Emit fn "jump $exit" $e
     EmitLabel fn $exit
     return $resultReg

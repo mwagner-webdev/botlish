@@ -248,6 +248,12 @@ proc hir::aot::context {hir} {
                 # contributes to the accumulated result): not discarded.
                 set bodies [list [hir::get $hir $e body]]
             }
+            countloop {
+                # A countloop is procedural, exactly like a bare `loop`
+                # (never a collecting loop like listloop): every iteration's
+                # body value is discarded, including the last one.
+                set bodies [list [concat [hir::get $hir $e body] [list ""]]]
+            }
         }
         foreach body $bodies {
             foreach child [lrange $body 0 end-1] {
@@ -663,6 +669,10 @@ proc hir::aot::Visit {hir stateVar region e tails statics} {
             set iterable [dict get $node iterable]
             Require $hir state $region $e $iterable list TYPE
         }
+        countloop {
+            Require $hir state $region $e [dict get $node start] int TYPE "the loop start value"
+            Require $hir state $region $e [dict get $node end] int TYPE "the loop end value"
+        }
         return - break - continue {
             if {[dict get $node target] eq ""} {
                 Block state $region [Blocker $hir UnresolvedControl $e "" "" {} \
@@ -848,7 +858,7 @@ proc hir::aot::Cause {hir e {depth 0}} {
                 }
             }
         }
-        if - loop - listloop {
+        if - loop - listloop - countloop {
             return [dict merge $cause [dict create cause merge]]
         }
     }

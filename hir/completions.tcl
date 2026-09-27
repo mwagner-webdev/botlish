@@ -227,6 +227,9 @@ proc hir::completions::Eval {hirVar ctxVar diagnose enclosing guard e} {
         listloop {
             return [EvalListloop hir ctx $diagnose $enclosing $guard $e $node]
         }
+        countloop {
+            return [EvalCountloop hir ctx $diagnose $enclosing $guard $e $node]
+        }
         return {
             # Unlike `fail`, an explicit `return` is an ordinary, successful
             # completion of the enclosing function -- just via early exit
@@ -352,6 +355,31 @@ proc hir::completions::EvalIf {hirVar ctxVar diagnose enclosing guard e node} {
 # or every iteration's own error path not taken).
 proc hir::completions::EvalLoop {hirVar ctxVar diagnose enclosing guard e node} {
     upvar 1 $hirVar hir $ctxVar ctx
+    set saved [dict get $ctx bindings]
+    Seq hir ctx $diagnose $enclosing $guard [dict get $node body]
+    dict set ctx bindings $saved
+    return [hir::range::unknown]
+}
+
+# A countloop's start/end are evaluated once, in the enclosing scope,
+# exactly like EvalListloop's own iterable -- walked here purely to record
+# whatever errors/diagnostics/facts they themselves contribute (they are
+# ordinary expressions, not loop-body ones). The body is then walked once,
+# EvalLoop's own conservative treatment: no per-iteration concrete facts
+# (item 91's "no general loop theorem proving" applies to a countloop
+# exactly as it already does to loop/listloop -- hir/range.tcl's own
+# induction-variable seed is a different, representation-only analysis,
+# not this file's error-completion proof), under the induction binding
+# left unseeded (hir::range::unknown, the same fallback an ordinary
+# untracked ref already gets). A countloop's own completion is
+# conservatively "may complete normally": unlike a bare loop, natural
+# exhaustion (unit) is always a *genuinely* reachable completion here, not
+# merely a conservative assumption, so this is at least as sound as
+# EvalLoop's own case.
+proc hir::completions::EvalCountloop {hirVar ctxVar diagnose enclosing guard e node} {
+    upvar 1 $hirVar hir $ctxVar ctx
+    Eval hir ctx $diagnose $enclosing $guard [dict get $node start]
+    Eval hir ctx $diagnose $enclosing $guard [dict get $node end]
     set saved [dict get $ctx bindings]
     Seq hir ctx $diagnose $enclosing $guard [dict get $node body]
     dict set ctx bindings $saved

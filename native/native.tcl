@@ -664,6 +664,12 @@ proc native::ExpandNativeBodiesIn {node path} {
                 [ExpandNativeBodiesIn [lindex $node 1] [concat $path 1]] \
                 [ExpandNativeBodiesIn [lindex $node 2] [concat $path 2]]]
         }
+        countloop {
+            return [list countloop \
+                [ExpandNativeBodiesIn [lindex $node 1] [concat $path 1]] \
+                [ExpandNativeBodiesIn [lindex $node 2] [concat $path 2]] \
+                [ExpandNativeBodiesIn [lindex $node 3] [concat $path 3]]]
+        }
         return - ok - error-value {
             return [list [core::ir::op $node] \
                 [ExpandNativeBodiesIn [lindex $node 1] [concat $path 1]]]

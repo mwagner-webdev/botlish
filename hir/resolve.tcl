@@ -445,6 +445,24 @@ proc hir::resolve::Expr {hirVar node ctx} {
             SetField hir $e elementBinding $elementBinding
             SetField hir $e body [Sequence hir $body [dict replace $ctx scope $iteration loop $e]]
         }
+        countloop {
+            # START/END are resolved in the *enclosing* scope, exactly like
+            # listloop's own iterable -- the induction binding is not in
+            # scope in either of them (spec item 30): it enters scope only
+            # in the body, exactly like listloop's own element binding.
+            SetField hir $e start [Expr hir [dict get $node start] $ctx]
+            SetField hir $e end [Expr hir [dict get $node end] $ctx]
+            set body [dict get $node body]
+            set iteration [NewScope hir loop $scope \
+                [dict get $hir scopes $scope invocation] $e [dict get $node bodyOrigin]]
+            set countBinding [NewBinding hir [dict get $node countName] param \
+                $iteration [dict get $node countOrigin]]
+            dict set hir bound $countBinding 1
+            Declare hir $iteration [hir::syntax::scopeBindNames $body]
+            SetField hir $e bodyScope $iteration
+            SetField hir $e countBinding $countBinding
+            SetField hir $e body [Sequence hir $body [dict replace $ctx scope $iteration loop $e]]
+        }
         return {
             SetField hir $e value [Expr hir [dict get $node value] $ctx]
             SetField hir $e target [dict get $ctx callable]

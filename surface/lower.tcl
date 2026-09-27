@@ -300,6 +300,15 @@ proc surface::lower::Node {node} {
                     [Origin [dict get $body span] [dict get $body id]/body] \
                     [Sequence [dict get $body body]]]
             }
+            if {[dict get $node countStart] ne ""} {
+                return [hir::syntax::countLoopNode $origin \
+                    [Node [dict get $node countStart]] \
+                    [Node [dict get $node countEnd]] \
+                    [dict get $node countName] \
+                    [Origin [dict get $node countNameSpan] "[dict get $node id]/([dict get $node countName])"] \
+                    [Origin [dict get $body span] [dict get $body id]/body] \
+                    [Sequence [dict get $body body]]]
+            }
             return [hir::syntax::loopNode $origin \
                 [Origin [dict get $body span] [dict get $body id]/body] \
                 [Sequence [dict get $body body]]]

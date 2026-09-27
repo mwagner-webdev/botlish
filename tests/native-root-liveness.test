@@ -235,6 +235,29 @@ test root-loop-carried-1 {a value carried across many loop iterations, each allo
     underGcStress {runNir $text}
 } -result {value {str xxxxxxxxxxxxxxxxxxxx}}
 
+# R2A3-COUNTED-LOOPS-FINAL-SOURCE.md: the counted loop's own native backedge
+# (native/lower.tcl's CountLoop, a real CFG loop -- not a `tail` self-call
+# like root-loop-carried-1 above) reuses the same generic safepoint-live-
+# range liveness this whole file already exercises, so this is a *coverage*
+# pin (a genuinely new backedge shape gets its own adversarial case) rather
+# than a new liveness mechanism: a managed String bound outside the loop is
+# read every iteration (so it must stay live/rooted across the backedge)
+# while each iteration also allocates fresh, immediately-garbage String
+# values (concat's own junk), under GC stress collecting before every one
+# of those allocations. Real Botlish surface source, not hand NIR (unlike
+# root-loop-carried-1): the counted-loop construct itself has no hand-NIR
+# equivalent worth hand-writing here, since CountLoop's own real interest is
+# whether the ordinary HIR/lower.tcl -> native pipeline roots it correctly.
+test root-loop-carried-counted-1 {a value carried across a counted loop's iterations, each allocating garbage, survives GC stress} -body {
+    set text {fn f(s):
+    loop i from 0 to 20:
+        junk = concat(s, "pad")
+    s
+
+f("the managed base string")}
+    underGcStress {native::evalHir [sourceHir $text]}
+} -result {str {the managed base string}}
+
 # ---------------------------------------------------------------------------
 # #34: a value live only on the success path is not affected by, and does
 # not affect, an unrelated error-terminating path, under stress.

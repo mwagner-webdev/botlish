@@ -238,6 +238,24 @@ proc hir::construction::Uses {view b loops e} {
             set total [Add $pn [Max $per 0]]
             return [list $total [Max $pa $total]]
         }
+        countloop {
+            # START/END are a two-element prefix, evaluated once each, left
+            # to right, in the enclosing scope -- exactly like listloop's
+            # own single-expression iterable prefix above, just over two
+            # expressions (SeqUses already composes a sequence correctly).
+            set prefix [SeqUses $view $b $loops [list [hir::get $view $e start] [hir::get $view $e end]]]
+            lassign [SeqUses $view $b $loops [hir::get $view $e body]] bn ba
+            set per [Max $bn $ba]
+            if {$per > 0 && ![dict exists $loops $e]} {
+                set per 2
+            }
+            lassign $prefix pn pa
+            if {$pn < 0} {
+                return $prefix
+            }
+            set total [Add $pn [Max $per 0]]
+            return [list $total [Max $pa $total]]
+        }
         handle {
             lassign [Uses $view $b $loops [hir::get $view $e call]] cn ca
             set worst [Max $cn $ca 0]
@@ -266,8 +284,20 @@ proc hir::construction::Linear {info b} {
     set declaredBy [dict get [hir::binding $view $b] declaredBy]
     for {set e $declaredBy} {$e ne "" && [dict exists $parent $e]} {set e [dict get $parent $e]} {
         set p [dict get $parent $e]
-        if {[hir::kind $view $p] in {loop listloop} && $e ne [hir::get $view $p iterable]} {
-            dict set loops $p 1
+        switch -- [hir::kind $view $p] {
+            loop {
+                dict set loops $p 1
+            }
+            listloop {
+                if {$e ne [hir::get $view $p iterable]} {
+                    dict set loops $p 1
+                }
+            }
+            countloop {
+                if {$e ne [hir::get $view $p start] && $e ne [hir::get $view $p end]} {
+                    dict set loops $p 1
+                }
+            }
         }
     }
     lassign [SeqUses $view $b $loops [dict get $info topBody]] n a
@@ -457,6 +487,12 @@ proc hir::construction::Context {s id e} {
                 return {0 "flat-only operation (listloop iterable)"}
             }
             return {0 "loop body value (collected or discarded)"}
+        }
+        countloop {
+            if {$e eq [hir::get $view $p start] || $e eq [hir::get $view $p end]} {
+                return {0 "flat-only operation (countloop bound)"}
+            }
+            return {0 "loop body value (discarded)"}
         }
         handle {
             return {0 "handled call result"}

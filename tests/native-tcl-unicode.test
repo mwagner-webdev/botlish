@@ -201,7 +201,7 @@ test native-tcl-unicode-emailish-known-result-nir-shape {a redundant Emailish?/e
     # Exactly one compiled copy of the validator and its scanner helpers
     # (never two, one per call site).
     set isEmailishDefs [regexp -all {func \d+ "web::emailish\?"} $text]
-    set domainLoopDefs [regexp -all {func \d+ "domain_loop"} $text]
+    set domainLoopDefs [regexp -all {func \d+ "domain\?"} $text]
     # Exactly one real call to it: the outer, genuinely dynamic check. The
     # inner, statically redundant re-check needs no call at all. Since
     # R2.a.1 (R2A1-MODULE-FN-BRIDGE-REACHABILITY.md) web::emailish?

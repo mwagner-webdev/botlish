@@ -630,6 +630,26 @@ proc hir::read::Expr {hirVar level s path block} {
             }
             SetField hir $e body $ids
         }
+        countloop {
+            if {![regexp {^(s[0-9]+) \((b[0-9]+) (\S+)\)(?: binds (.*))?$} \
+                    $head -> body countId countName binds]} {
+                Fail $number "expected \"countloop SCOPE (COUNTBINDING NAME) ?binds ...?\""
+            }
+            NewScope hir $body loop $s [dict get $hir scopes $s invocation] $e [list ir [concat $path 3]] $number
+            NewBinding hir $countId $countName param $body [list ir [concat $path 3 1 0]] $number
+            Declare hir $body $binds local $number
+            SetField hir $e bodyScope $body
+            SetField hir $e countBinding $countId
+            SetField hir $e start [Expr hir $inner $s [concat $path 1] $block]
+            SetField hir $e end [Expr hir $inner $s [concat $path 2] $block]
+            set ids {}
+            set index 2
+            while {[AtLevel $hir $inner]} {
+                lappend ids [Expr hir $inner $body [concat $path 3 $index] $block]
+                incr index
+            }
+            SetField hir $e body $ids
+        }
         return - break - continue {
             if {![regexp {^-> (e[0-9]+|\?)$} $head -> target]} {
                 Fail $number "expected \"$kind -> EXPR\""

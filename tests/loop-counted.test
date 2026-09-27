@@ -1,0 +1,628 @@
+# loop-counted.test -- "loop i from START to END:" (core IR: countloop),
+# R2A3-COUNTED-LOOPS-FINAL-SOURCE.md's ascending, exclusive-end, unit-step
+# counted loop.
+#
+# Covers the construct on its own (not only through web::emailish?'s
+# scan_while/domain? rewrite): parsing (including the reserved future
+# forms and malformed-header diagnostics), semantics (zero/one/several
+# iterations, negative bounds, dynamic bounds, once-evaluated left-to-right
+# bounds), Int/error semantics (a dynamically non-Int bound is an ordinary
+# TYPE error, not a new loop-only error kind), binding/scope (the induction
+# variable is not visible in START/END or after the loop, and may be
+# shadowed), break/continue/return/error composition, natural exhaustion
+# (unit, never a collected List), nested-loop combinations, the
+# arbitrary-precision small-Int-tag boundary, and four-way backend parity.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+set parityBackends {interp compile cranelift-generic cranelift}
+
+proc loopSourceHir {text} {
+    return [surface::compile $text t.bot -strict 0]
+}
+
+proc loopParity {text} {
+    set exprs [hir::lower [loopSourceHir $text]]
+    set outcomes [lmap backend $::parityBackends {outcomeUnder $backend $exprs}]
+    if {[llength [lsort -unique $outcomes]] == 1} { return same }
+    return [join [lmap backend $::parityBackends outcome $outcomes {list $backend $outcome}] " / "]
+}
+
+proc loopInterpValue {text} {
+    lindex [outcomeUnder interp [hir::lower [loopSourceHir $text]]] 1
+}
+
+proc parseErrorOf {src} {
+    if {[catch {surface::parse $src t.bot} result options]} {
+        set errCode [dict get $options -errorcode]
+        if {[lindex $errCode 0] eq "SURFACE" && [lindex $errCode 1] eq "SYNTAX"} {
+            set d [lindex $errCode 2]
+            return "[dict get $d line]:[dict get $d column] [dict get $d message]"
+        }
+        error "not a SURFACE SYNTAX error: $result"
+    }
+    error "no syntax error, unexpectedly parsed"
+}
+
+# ---------------------------------------------------------------------------
+# Basic shape, ascending/exclusive-end, zero iterations
+
+test loop-counted-ascending {loop i from a to b: visits a, a+1, ..., b-1, never b} -body {
+    loopInterpValue {fn f():
+    fn go(i, acc):
+        loop j from i to 5:
+            return go(j + 1, list_append(acc, j))
+        acc
+    go(2, [])
+f()}
+} -result {[2, 3, 4]}
+
+test loop-counted-ascending-parity {ascending visitation agrees on every backend} -body {
+    loopParity {fn f():
+    fn go(i, acc):
+        loop j from i to 5:
+            return go(j + 1, list_append(acc, j))
+        acc
+    go(2, [])
+f()}
+} -result same
+
+test loop-counted-zero-iterations-equal {start == end runs the body zero times} -body {
+    loopInterpValue {loop i from 3 to 3:
+    -1
+}
+} -result unit
+
+test loop-counted-zero-iterations-reversed {start > end runs the body zero times} -body {
+    loopInterpValue {loop i from 5 to 2:
+    -1
+}
+} -result unit
+
+test loop-counted-zero-iterations-parity {both zero-iteration shapes agree on every backend} -body {
+    list [loopParity {loop i from 3 to 3:
+    -1
+}] [loopParity {loop i from 5 to 2:
+    -1
+}]
+} -result {same same}
+
+test loop-counted-one-iteration {start, start+1 == end runs the body exactly once} -body {
+    loopInterpValue {fn f():
+    fn go(i, acc):
+        loop j from i to 8:
+            return go(j + 1, list_append(acc, j))
+        acc
+    go(7, [])
+f()}
+} -result {[7]}
+
+test loop-counted-negative-start {a negative start is an ordinary Int} -body {
+    loopInterpValue {fn f():
+    fn go(i, acc):
+        loop j from i to 0:
+            return go(j + 1, list_append(acc, j))
+        acc
+    go(-3, [])
+f()}
+} -result {[-3, -2, -1]}
+
+test loop-counted-negative-to-positive {a range spanning zero visits every integer in between} -body {
+    loopInterpValue {fn f():
+    fn go(i, acc):
+        loop j from i to 3:
+            return go(j + 1, list_append(acc, j))
+        acc
+    go(-2, [])
+f()}
+} -result {[-2, -1, 0, 1, 2]}
+
+test loop-counted-dynamic-start {a non-literal start is ordinary Int arithmetic} -body {
+    loopInterpValue {fn f(n):
+    fn go(i, acc):
+        loop j from i to 4:
+            return go(j + 1, list_append(acc, j))
+        acc
+    go(n + 1, [])
+f(0)}
+} -result {[1, 2, 3]}
+
+test loop-counted-dynamic-end {a non-literal end is ordinary Int arithmetic} -body {
+    loopInterpValue {fn f(n):
+    fn go(i, acc):
+        loop j from i to n:
+            return go(j + 1, list_append(acc, j))
+        acc
+    go(0, [])
+f(3)}
+} -result {[0, 1, 2]}
+
+test loop-counted-dynamic-parity {dynamic bounds agree on every backend} -body {
+    loopParity {fn f(n):
+    fn go(i, acc):
+        loop j from i to n:
+            return go(j + 1, list_append(acc, j))
+        acc
+    go(0, [])
+f(3)}
+} -result same
+
+# ---------------------------------------------------------------------------
+# Natural exhaustion is unit, never a collected List (spec item 9)
+
+test loop-counted-natural-exhaustion-is-unit {reaching END without a break evaluates to unit} -body {
+    loopInterpValue {loop i from 0 to 3:
+    i
+}
+} -result unit
+
+test loop-counted-natural-exhaustion-not-collected {the body's own values are never silently collected into a List} -body {
+    set hir [loopSourceHir {v = loop i from 0 to 3:
+    i
+v}]
+    set e [lindex [dict get $hir roots] end]
+    hir::types::show [hir::typeOf $hir $e]
+} -result unit
+
+test loop-counted-natural-exhaustion-parity {natural exhaustion agrees on every backend} -body {
+    loopParity {loop i from 0 to 3:
+    i
+}
+} -result same
+
+# ---------------------------------------------------------------------------
+# START/END evaluated exactly once, left to right (raw core IR + test-tick,
+# matching loop-in.test's own identical idiom for the same pin)
+
+test loop-counted-bounds-evaluated-once {START and END are each evaluated exactly once, not once per iteration} -setup resetEffects -body {
+    list [run {countloop {call {ref test-tick}} {call {ref test-tick}} {block {i} {ref i}}}] \
+         $::testTicks
+} -result {unit 2}
+
+test loop-counted-bounds-left-to-right {START is evaluated before END} -setup resetEffects -body {
+    run {countloop {call {ref test-log} {const 1}} {call {ref test-log} {const 2}} {block {i} {ref i}}}
+    set ::testLog
+} -result {1 2}
+
+# ---------------------------------------------------------------------------
+# Int/error semantics: dynamically non-Int bounds are an ordinary TYPE
+# error (core::value::expect), not a new loop-only error kind (spec item 6)
+
+test loop-counted-non-int-start-errors {a non-Int start is an ordinary dynamic TYPE error} -body {
+    errorCodeOf {countloop {const str x} {const int 3} {block {i} {ref i}}}
+} -result {CORE SEMANTIC TYPE}
+
+test loop-counted-non-int-end-errors {a non-Int end is an ordinary dynamic TYPE error} -body {
+    errorCodeOf {countloop {const int 0} {const str x} {block {i} {ref i}}}
+} -result {CORE SEMANTIC TYPE}
+
+# Message text is not required to match word-for-word across backends: the
+# native backend's own guard instruction reports a shared coarser context
+# ("loop") for whichever bound failed, exactly the same established
+# asymmetry ListLoop's own iterable check already has (interp: "loop
+# iterable: expected list, ..."; native EmitArgGuards: name "loop") --
+# only the error *kind* is a cross-backend contract.
+test loop-counted-non-int-parity-kind {a non-Int bound errors with the same kind on every backend} -body {
+    set exprs [hir::lower [loopSourceHir {loop i from "x" to 3:
+    i
+}]]
+    lmap backend $::parityBackends {
+        lrange [outcomeUnder $backend $exprs] 0 1
+    }
+} -result {{error {CORE SEMANTIC TYPE}} {error {CORE SEMANTIC TYPE}} {error {CORE SEMANTIC TYPE}} {error {CORE SEMANTIC TYPE}}}
+
+# ---------------------------------------------------------------------------
+# Binding/scope (spec items 30-31)
+
+test loop-counted-i-not-in-bounds-hir {the induction variable is not bound while resolving START/END} -body {
+    set hir [loopSourceHir {loop i from i to 3:
+    i
+}]
+    llength [hir::diagnostics $hir]
+} -result 1
+
+test loop-counted-i-not-after-loop {the induction variable does not escape into the surrounding scope} -body {
+    set hir [loopSourceHir {loop i from 0 to 3:
+    i
+i
+}]
+    llength [hir::diagnostics $hir]
+} -result 1
+
+test loop-counted-shadowing {an inner scope may shadow the induction variable, ordinary rules} -body {
+    loopInterpValue {fn f():
+    loop i from 0 to 1:
+        fn inner(i):
+            i + 100
+        if inner(5) == 105:
+            return "shadow-ok"
+    "no-shadow"
+f()}
+} -result {"shadow-ok"}
+
+test loop-counted-closure-captures-per-iteration {a closure capturing i captures that iteration's own immutable value} -body {
+    loopInterpValue {fn f():
+    fn go(i, acc):
+        loop j from i to 3:
+            fn grab():
+                j
+            return go(j + 1, list_append(acc, grab()))
+        acc
+    go(0, [])
+f()}
+} -result {[0, 1, 2]}
+
+test loop-counted-closure-captures-parity {per-iteration closure capture agrees on every backend} -body {
+    loopParity {fn f():
+    fn go(i, acc):
+        loop j from i to 3:
+            fn grab():
+                j
+            return go(j + 1, list_append(acc, grab()))
+        acc
+    go(0, [])
+f()}
+} -result same
+
+# ---------------------------------------------------------------------------
+# break / continue / return / error composition
+
+test loop-counted-break-value {break VALUE ends the loop immediately with VALUE as the whole loop's result} -body {
+    loopInterpValue {loop i from 0 to 10:
+    if i == 4:
+        break i * 100
+}
+} -result 400
+
+test loop-counted-break-parity {break agrees on every backend} -body {
+    loopParity {loop i from 0 to 10:
+    if i == 4:
+        break i * 100
+}
+} -result same
+
+test loop-counted-break-bare {a plain break (no value) ends the loop with unit} -body {
+    loopInterpValue {loop i from 0 to 10:
+    if i == 2:
+        break
+}
+} -result unit
+
+test loop-counted-continue-sequence {continue advances to i+1: the induction sequence stays 0 1 2 3, no skip/duplicate} -body {
+    loopInterpValue {fn f():
+    fn go(i, acc):
+        loop j from i to 4:
+            if j == 1:
+                return go(j + 1, list_append(acc, -1))
+            return go(j + 1, list_append(acc, j))
+        acc
+    go(0, [])
+f()}
+} -result {[0, -1, 2, 3]}
+
+test loop-counted-continue-real {continue itself (not just a manual "skip" value) advances i correctly} -body {
+    loopInterpValue {v = 0
+loop i from 0 to 5:
+    if i == 2:
+        continue
+    else:
+        i
+}
+} -result unit
+
+test loop-counted-continue-count {continue runs every iteration's own body (side effect via test-log), skipping only its own contribution} -setup resetEffects -body {
+    run {countloop {const int 0} {const int 4} \
+        {block {i} \
+            {if {call {ref ==} {ref i} {const int 1}} \
+                {block {} {continue}} \
+                {block {} {call {ref test-log} {ref i}}}}}}
+    set ::testLog
+} -result {0 2 3}
+
+test loop-counted-continue-parity {continue agrees on every backend} -body {
+    loopParity {fn f():
+    fn go(i, acc):
+        loop j from i to 4:
+            if j == 1:
+                return go(j + 1, list_append(acc, -1))
+            return go(j + 1, list_append(acc, j))
+        acc
+    go(0, [])
+f()}
+} -result same
+
+test loop-counted-return-propagates {return inside the body returns from the enclosing function, not merely the loop} -body {
+    loopInterpValue {fn find(n):
+    loop i from 0 to n:
+        if i == 3:
+            return i
+    -1
+find(10)}
+} -result 3
+
+test loop-counted-return-parity {return-from-inside-loop agrees on every backend} -body {
+    loopParity {fn find(n):
+    loop i from 0 to n:
+        if i == 3:
+            return i
+    -1
+find(10)}
+} -result same
+
+test loop-counted-error-propagates {a failing checked construction inside the body propagates the ordinary error, with no partial result} -body {
+    outcomeUnder interp [hir::lower [loopSourceHir {type Small = Int in 0..10
+error TooBig
+fn check(n) -> Small errors TooBig:
+    if n > 10:
+        fail TooBig
+    else:
+        n
+loop i from 0 to 3:
+    check(20)
+}]]
+} -result {error {CORE SEMANTIC UNCAUGHT-ERROR} {uncaught propagated error: <error TooBig>} {}}
+
+test loop-counted-error-parity {the error case agrees on every backend} -body {
+    set exprs [hir::lower [loopSourceHir {type Small = Int in 0..10
+error TooBig
+fn check(n) -> Small errors TooBig:
+    if n > 10:
+        fail TooBig
+    else:
+        n
+loop i from 0 to 3:
+    check(20)
+}]]
+    lmap backend $::parityBackends {
+        set outcome [outcomeUnder $backend $exprs]
+        list [lindex $outcome 0] [lindex $outcome 1]
+    }
+} -result {{error {CORE SEMANTIC UNCAUGHT-ERROR}} {error {CORE SEMANTIC UNCAUGHT-ERROR}} {error {CORE SEMANTIC UNCAUGHT-ERROR}} {error {CORE SEMANTIC UNCAUGHT-ERROR}}}
+
+# ---------------------------------------------------------------------------
+# End is exclusive even under continue/break (spec items 44-45): the body
+# must never observe i == end.
+
+test loop-counted-end-exclusive-observed {the body never observes i == end, even at the last iteration} -body {
+    loopInterpValue {fn f():
+    fn go(i, acc):
+        loop j from i to 3:
+            return go(j + 1, list_append(acc, j == 3))
+        acc
+    go(0, [])
+f()}
+} -result {[false, false, false]}
+
+test loop-counted-end-exclusive-under-continue {end exclusivity holds even when every iteration continues} -body {
+    loopInterpValue {v = 0
+loop i from 0 to 3:
+    continue
+}
+} -result unit
+
+# ---------------------------------------------------------------------------
+# Nested loop combinations (spec item 14): break/continue target the
+# nearest lexical loop, whatever kind it is.
+
+test loop-counted-nested-counted-in-counted {break in an inner counted loop exits only the inner one} -body {
+    loopInterpValue {fn f():
+    fn outer(i, total):
+        loop oi from i to 2:
+            fn inner(j, acc):
+                loop ij from j to 5:
+                    if ij == 2:
+                        return acc
+                    return inner(ij + 1, acc + 1)
+                acc
+            return outer(oi + 1, total + inner(0, 0))
+        total
+    outer(0, 0)
+f()}
+} -result 4
+
+test loop-counted-nested-counted-in-bare {a counted loop inside a bare loop: bare loop's own break still works} -body {
+    loopInterpValue {n = 0
+loop:
+    fn go(i, acc):
+        loop j from i to 3:
+            return go(j + 1, acc + 1)
+        acc
+    break go(0, 0)
+}
+} -result 3
+
+test loop-counted-bare-in-counted {a bare loop inside a counted loop: bare loop's own break stays local} -body {
+    loopInterpValue {fn f():
+    fn go(i, acc):
+        loop j from i to 3:
+            fn once():
+                loop:
+                    break 1
+            return go(j + 1, acc + once())
+        acc
+    go(0, 0)
+f()}
+} -result 3
+
+test loop-counted-counted-in-listloop {a counted loop inside a listloop: listloop's own accumulation is unaffected} -body {
+    loopInterpValue {fn countUpTo(n):
+    fn go(i, acc):
+        loop j from i to n:
+            return go(j + 1, acc + 1)
+        acc
+    go(0, 0)
+loop x in [2, 3, 4]:
+    countUpTo(x)
+}
+} -result {[2, 3, 4]}
+
+test loop-counted-listloop-in-counted {a listloop inside a counted loop: outer counted loop discards listloop's own List value} -body {
+    loopInterpValue {fn f():
+    fn go(i, acc):
+        loop j from i to 3:
+            v = loop x in [1, 2]:
+                x
+            return go(j + 1, acc + list_length(v))
+        acc
+    go(0, 0)
+f()}
+} -result 6
+
+test loop-counted-nested-parity {a representative nested-loop combination agrees on every backend} -body {
+    loopParity {fn f():
+    fn go(i, acc):
+        loop j from i to 3:
+            fn once():
+                loop:
+                    break 1
+            return go(j + 1, acc + once())
+        acc
+    go(0, 0)
+f()}
+} -result same
+
+# ---------------------------------------------------------------------------
+# Arbitrary-precision Int: crossing the tagged-small-Int boundary (spec
+# item 7; native/src/runtime/value.rs SMALL_MAX = 2^62 - 1)
+
+test loop-counted-large-int-boundary {a two-iteration loop crossing the small-Int tag boundary executes both iterations correctly} -body {
+    loopInterpValue {fn f():
+    fn go(i, n, acc):
+        loop j from i to n:
+            return go(j + 1, n, list_append(acc, j))
+        acc
+    go(4611686018427387903, 4611686018427387905, [])
+f()}
+} -result {[4611686018427387903, 4611686018427387904]}
+
+test loop-counted-large-int-boundary-parity {the boundary-crossing case agrees on every backend (native included: no raw-i64 overflow)} -body {
+    loopParity {fn f():
+    fn go(i, n, acc):
+        loop j from i to n:
+            return go(j + 1, n, list_append(acc, j))
+        acc
+    go(4611686018427387903, 4611686018427387905, [])
+f()}
+} -result same
+
+test loop-counted-large-int-sum {a loop whose bound is far beyond the tagged range still sums correctly (no native i64 wraparound)} -body {
+    loopInterpValue {fn f():
+    fn go(i, n, acc):
+        loop j from i to n:
+            return go(j + 1, n, acc + j)
+        acc
+    go(9223372036854775806, 9223372036854775810, 0)
+f()}
+} -result 36893488147419103230
+
+test loop-counted-large-int-sum-parity {the beyond-i64 sum agrees on every backend} -body {
+    loopParity {fn f():
+    fn go(i, n, acc):
+        loop j from i to n:
+            return go(j + 1, n, acc + j)
+        acc
+    go(9223372036854775806, 9223372036854775810, 0)
+f()}
+} -result same
+
+# ---------------------------------------------------------------------------
+# Existing loop-form regression: bare loop/listloop are unaffected
+
+test loop-counted-existing-loop-in-still-parses {loop x in EXPR: is unaffected by the new grammar alternative} -body {
+    loopInterpValue {loop x in [1, 2, 3]:
+    x + x
+}
+} -result {[2, 4, 6]}
+
+test loop-counted-existing-bare-loop-still-parses {bare loop: is unaffected} -body {
+    loopInterpValue {loop:
+    break 42
+}
+} -result 42
+
+test loop-counted-from-usable-as-identifier {"from"/"down"/"to"/"through"/"by" remain ordinary identifiers outside a loop header} -body {
+    loopInterpValue {loop from in [1, 2]:
+    from
+}
+} -result {[1, 2]}
+
+test loop-counted-from-as-plain-name {"from" as an ordinary bound name (not a loop header) still works} -body {
+    loopInterpValue {from = 5
+down = 2
+to = 3
+through = 1
+by = 4
+from + down + to + through + by}
+} -result 15
+
+# ---------------------------------------------------------------------------
+# Parser: grammar and diagnostics
+
+test loop-counted-parse-basic {loop i from a to b: parses to a countloop-shaped AST} -body {
+    surface::formatAst [surface::parse {loop i from 0 to 5:
+    i
+}]
+} -result {loop i from (int 0) to (int 5)
+    (name i)}
+
+test loop-counted-parse-error-missing-binding {loop from 0 to 10: -- missing binding (from's own contextual-keyword ambiguity: reported at the point the header actually stops parsing)} -body {
+    parseErrorOf "loop from 0 to 10:\n    1\n"
+} -result {1:11 expected "in" or "from" after the loop variable, found integer 0}
+
+test loop-counted-parse-error-missing-from {loop i 0 to 10: -- missing "from"} -body {
+    parseErrorOf "loop i 0 to 10:\n    1\n"
+} -match glob -result {1:8 expected "in" or "from" after the loop variable, found integer 0}
+
+test loop-counted-parse-error-missing-to {loop i from 0 10: -- missing "to"} -body {
+    parseErrorOf "loop i from 0 10:\n    1\n"
+} -result {1:15 expected "to" after the loop start value, found integer 10}
+
+test loop-counted-parse-error-missing-end {loop i from 0 to: -- missing end} -body {
+    parseErrorOf "loop i from 0 to:\n    1\n"
+} -result {1:17 expected an expression, found ":"}
+
+test loop-counted-parse-error-missing-start {loop i from to 10: -- missing start} -body {
+    parseErrorOf "loop i from to 10:\n    1\n"
+} -match glob -result {1:13 expected an expression*after "from"*}
+
+test loop-counted-parse-error-down-reserved {loop i down from ...: is reserved, not implemented} -body {
+    parseErrorOf "loop i down from 10 to 0:\n    1\n"
+} -match glob -result {1:8 *down from*reserved*}
+
+test loop-counted-parse-error-through-reserved {loop i from a through b: is reserved, not implemented} -body {
+    parseErrorOf "loop i from 0 through 10:\n    1\n"
+} -match glob -result {1:15 *through*reserved*}
+
+test loop-counted-parse-error-by-reserved {loop i from a to b by s: is reserved, not implemented} -body {
+    parseErrorOf "loop i from 0 to 10 by 2:\n    1\n"
+} -match glob -result {1:21 *by*reserved*}
+
+# ---------------------------------------------------------------------------
+# Specialization/closure invariants (spec items 36-37): the loop construct
+# itself creates no callable instance and is not a Block value.
+
+test loop-counted-no-extra-instance {a countloop inside a function adds no synthetic callable instance: f is used, and nothing loop-shaped is} -body {
+    set hir [loopSourceHir {fn f(n):
+    loop i from 0 to n:
+        i
+f(3)}]
+    set spec [hir::specialize::analyze $hir]
+    set names {}
+    dict for {id instance} [dict get $spec instances] {
+        if {$id ni [dict get $spec used]} continue
+        lappend names [dict get $instance name]
+    }
+    list [expr {"f" in $names}] [llength [lsearch -all -glob $names *loop*]]
+} -result {1 0}
+
+test loop-counted-no-materialized-block {a countloop is not itself a materialized Block/closure value} -body {
+    set hir [loopSourceHir {fn f(n):
+    loop i from 0 to n:
+        i
+f(3)}]
+    set countloops [hirFind $hir countloop]
+    expr {[llength $countloops] == 1}
+} -result 1
+
+cleanupTests

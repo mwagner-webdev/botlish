@@ -304,7 +304,8 @@ test emailish-predicate-check-scanner-instance-count {each scanner helper (and w
     dict for {id instance} [dict get $spec instances] {
         if {$id ni [dict get $spec used]} continue
         set name [dict get $instance name]
-        if {$name in {web::emailish? char_at scan_local scan_label scan_alpha tld_ok domain_loop}} {
+        if {$name in {web::emailish? char_at scan_while local_char? label_char? tld? domain?
+                scan_local scan_label scan_alpha tld_ok domain_loop is_local_char is_label_char}} {
             dict incr counts $name
         }
     }

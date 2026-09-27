@@ -591,19 +591,28 @@ test blockescape-region-companion-flags-both-off {both off: the fully unoptimize
 # ImmutableSet 801 -> 2 (additional_unreserved_chars and local_extra_chars,
 # once each), total 11620 -> 10023. Block is 803: the 2 startup closures as
 # before, web::emailish?'s own startup closure (it now captures the
-# module set), and 800 is_local_char closures -- one per emailish? call,
-# because is_local_char is nested in emailish? and captures the module
+# module set), and 800 local_char? closures -- one per emailish? call,
+# because local_char? is nested in emailish? and captures the module
 # binding web::local_extra_chars (module bindings are reached by capture;
-# see the report). The 9200 char_at Strings are untouched (predicate
-# passing, not set retention).
-test blockescape-region-companion-refined-checks-1 {refined-checks.ir: local_extra_chars' List/ImmutableSet are module-init only (R2.a.1); Block 803 = 3 startup closures + 800 per-call is_local_char closures capturing the module set; the 9200 predicate-passing char_at Strings are unchanged} -body {
+# see the report).
+#
+# R2.a.3 (R2A3-COUNTED-LOOPS-FINAL-SOURCE.md) drops String 9204 -> 8004 (a
+# genuine, measured source-induced payoff, not an optimizer change): the
+# rewritten domain? reads char_at(j)/char_at(j-1) directly at each
+# character position instead of the old domain_loop's own extra explicit
+# char_at(label_end) re-check after each scan_while, so the domain scan
+# now performs exactly one char_at call per domain character instead of
+# (in the label case) two. total allocations falls by the same 1200 (10023
+# -> 8823); Block/List/ImmutableSet are unchanged (the module-retained set
+# and its own capturing closures are untouched by the loop rewrite).
+test blockescape-region-companion-refined-checks-1 {refined-checks.ir: local_extra_chars' List/ImmutableSet are module-init only (R2.a.1); Block 803 = 3 startup closures + 800 per-call local_char? closures capturing the module set; R2.a.3's char-at-a-time domain? drops String 9204 -> 8004} -body {
     core::loadLibrary web
     set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
     set on [native::allocationReport $hir summary 1]
     list [native::evalHir $hir] [dict get $on total allocations] [dict get $on byKind Block allocations] \
         [dict get $on byKind String allocations] [dict get $on byKind List allocations] \
         [dict get $on byKind ImmutableSet allocations]
-} -result {{list {{int 400} {int 0}}} 10023 803 9204 12 2}
+} -result {{list {{int 400} {int 0}}} 8823 803 8004 12 2}
 
 test blockescape-region-companion-refined-checks-2 {refined-checks.ir: char_at's NIR has no closure/callenvmulti, and env=0/results=3 -- R2 (R2-ORDINARY-EMAILISH-PREDICATE.md) collapses this to one shared instance, not two per-call-site copies} -body {
     core::loadLibrary web
@@ -614,38 +623,35 @@ test blockescape-region-companion-refined-checks-2 {refined-checks.ir: char_at's
         [regexp {callenvmulti} $nirText]
 } -result {0 1 0}
 
-# R2.a (R2A-IDIOMATIC-EMAILISH-SOURCE.md) unifies scan_local/scan_label/
-# scan_alpha into one predicate-parameterized scan_while, so this test's
-# own name list shrinks from the five old scanner-family names to the
-# three that remain self-recursive/loop-shaped over [i n v]: scan_while
-# itself (whose own params gain "predicate" between "i" and "n", since it
-# is now the reusable operation the old triplet was three copies of --
-# still flattened, still one shared instance), tld_ok, and domain_loop.
-# is_local_char/is_label_char are new leaf predicates, not scanners, and
-# are checked by their own OpenInstances/blockescape shape in the report
-# instead.
-test blockescape-region-companion-refined-checks-3 {refined-checks.ir: scan_while/tld_ok/domain_loop flatten captures from [n, char_at] to [n, v] -- R2.a's single predicate-parameterized scanner remains one shared instance per name, not two per-call-site copies} -body {
+# R2.a (R2A-IDIOMATIC-EMAILISH-SOURCE.md) unified scan_local/scan_label/
+# scan_alpha into one predicate-parameterized scan_while, flattened to
+# capture [n, char_at] directly rather than through a closure. R2.a.3
+# (R2A3-COUNTED-LOOPS-FINAL-SOURCE.md) goes further: scan_while's own
+# induction parameter is renamed i -> start (i is now purely the counted
+# loop's own internal induction binding, never a function parameter at
+# all), and domain_loop is gone entirely -- replaced by the non-recursive
+# domain? (counted-loop-only body, tld?'s own rename carried over
+# unchanged in shape). Both scan_while and domain? remain flattened:
+# still exactly one used generic instance each, still capturing n/v
+# directly (never char_at) as ordinary flattened parameters, not a
+# per-call-site copy.
+test blockescape-region-companion-refined-checks-3 {refined-checks.ir: scan_while/tld?/domain? flatten captures to [n, v] (domain_loop is gone; scan_while's own induction param is renamed i -> start) -- each remains one shared instance, not two per-call-site copies} -body {
     core::loadLibrary web
     set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
     set nirText [dict get [native::lower::program $hir] text]
-    set stale 0
+    set noDomainLoop [expr {![regexp {"domain_loop"} $nirText]}]
     set flattened 0
-    if {[regexp {"scan_while" params=4 env=0 [^\n]*pnames="i predicate char_at"} $nirText]} {
-        incr stale
-    }
-    if {[llength [regexp -all -inline {"scan_while" params=4 env=0 [^\n]*pnames="i predicate n v"} $nirText]] == 1} {
+    if {[llength [regexp -all -inline {"scan_while" params=4 env=0 [^\n]*pnames="start predicate n v"} $nirText]] == 1} {
         incr flattened
     }
-    foreach name {tld_ok domain_loop} {
-        if {[regexp "\"$name\" params=3 env=0 \[^\\n\]*pnames=\"i n char_at\"" $nirText]} {
-            incr stale
-        }
-        if {[llength [regexp -all -inline "\"$name\" params=3 env=0 \[^\\n\]*pnames=\"i n v\"" $nirText]] == 1} {
-            incr flattened
-        }
+    if {[llength [regexp -all -inline {"tld\?" params=3 env=0 [^\n]*pnames="i n v"} $nirText]] == 1} {
+        incr flattened
     }
-    list $stale $flattened 3
-} -result {0 3 3}
+    if {[llength [regexp -all -inline {"domain\?" params=3 env=0 [^\n]*pnames="start n v"} $nirText]] == 1} {
+        incr flattened
+    }
+    list $noDomainLoop $flattened 3
+} -result {1 3 3}
 
 test blockescape-region-companion-refined-checks-4 {refined-checks.ir under GC stress: unchanged value, on the composed representation} -body {
     core::loadLibrary web
@@ -656,19 +662,29 @@ test blockescape-region-companion-refined-checks-4 {refined-checks.ir under GC s
     list $result $value
 } -result {0 {list {{int 400} {int 0}}}}
 
-# R2.a drops this test's own pinned backedge count from 7 to 5: unifying
-# scan_local/scan_label/scan_alpha into one scan_while removes two of the
+# R2.a dropped this test's own pinned backedge count from 7 to 5: unifying
+# scan_local/scan_label/scan_alpha into one scan_while removed two of the
 # five self-tail-recursive scanner-family functions R2 left behind (three
-# scanners -> one), each of whose own tail backedge is otherwise identical
+# scanners -> one), each of whose own tail backedge was otherwise identical
 # in kind (still a plain "tail", never "tailenv"/a real recursive call) --
 # domain_loop's own self-tail-call and scan_while's own self-tail-call
-# each count once per compiled instance, and neither is duplicated per
-# call site (§ blockescape-region-companion-refined-checks-3 above).
-test blockescape-region-companion-refined-checks-5 {refined-checks.ir: self-tail scanner lowering is still a loop backedge (tail, never tailenv/a recursive call) -- R2.a's unified scan_while drops the backedge count from 7 to 5: one shared scan_while backedge plus domain_loop's, tld_ok/is_local_char/is_label_char/char_at have none} -body {
+# each counted once per compiled instance, and neither was duplicated per
+# call site.
+#
+# R2.a.3 (R2A3-COUNTED-LOOPS-FINAL-SOURCE.md) drops it again, from 5 to 3:
+# scan_while's own self-tail recursion is gone (native/lower.tcl's
+# CountLoop lowers "loop i from start to n:" to a genuine `jump`/`label`
+# CFG backedge, never `tail`), and domain_loop -- self-tail-recursive by
+# construction -- no longer exists at all, replaced by the non-recursive
+# domain?. The 3 `tail` sites left in this whole benchmark file are none
+# of emailish?'s own helpers any more: they belong to uri_escape_text's
+# esc_bytes/esc_from (unrelated, untouched by this milestone) and check's
+# own self-tail recursion (the benchmark's own driver loop).
+test blockescape-region-companion-refined-checks-5 {refined-checks.ir: R2.a.3 drops the backedge count from 5 to 3 -- scan_while/domain? no longer self-tail-recurse at all (their own counted-loop bodies are plain jump/label CFG backedges); the 3 remaining `tail` sites are esc_bytes/esc_from/check, none of them emailish?'s own} -body {
     core::loadLibrary web
     set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
     set nirText [dict get [native::lower::program $hir] text]
     list [regexp {tailenv} $nirText] [llength [regexp -all -inline -line {^\s+tail .*$} $nirText]]
-} -result {0 5}
+} -result {0 3}
 
 cleanupTests

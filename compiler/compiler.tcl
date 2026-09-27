@@ -768,6 +768,9 @@ proc core::compiler::CompileForm {ctxVar e} {
         listloop {
             return [CompileListLoop ctx $e]
         }
+        countloop {
+            return [CompileCountLoop ctx $e]
+        }
         return {
             set value [CompileExpr ctx [N $e value]]
             if {[OpType $value] eq "never"} {
@@ -1354,6 +1357,95 @@ proc core::compiler::CompileListLoop {ctxVar e} {
     # in which case it becomes the List built from every iteration's own
     # contributed value.
     Emit ctx "if \{!\[info exists $result\]\} \{ set $result \[core::value::listOf \$$acc\] \}"
+    return [Op box "\$$result" any]
+}
+
+# A word for OP as a bare canonical integer (IntWord's own representation),
+# emitting the runtime core::value::expect check under NAME when OP is not
+# already statically int-kind -- exactly RequireKind's own per-argument
+# check, but without RequireKind's "return \"\" to let a generic call raise
+# the error" escape hatch: a countloop's start/end have no such generic
+# call to fall back to, so a statically-known-wrong kind (not just an
+# unknown one) still gets an ordinary runtime check here, correctly raising
+# the same TYPE error at the same point the interpreter would, just without
+# the constant-fold a native intrinsic call gets to skip it entirely.
+proc core::compiler::CountBoundWord {ctxVar op name} {
+    upvar 1 $ctxVar ctx
+    set kind [hir::types::kindOf [OpType $op]]
+    if {$kind ne "int"} {
+        Emit ctx "core::value::expect int [BoxWord $op] [Word $name]"
+        if {$kind ne ""} {
+            set op [lreplace $op 2 2 int]
+        }
+    }
+    return [IntWord $op]
+}
+
+# (countloop START-EXPR END-EXPR (block (I) BODY...)): evaluates START-EXPR
+# then END-EXPR once each, left to right (CountBoundWord's own runtime
+# check, mirroring core/evaluator.tcl's op-countloop exactly, including its
+# "loop start"/"loop end" context text), then iterates with Tcl's own
+# `for` -- not `while`: a Tcl `continue` inside `for`'s body runs the
+# `for`'s own NEXT script (I's advance) before re-testing, exactly the
+# induction-advancing "skip the rest of this body, advance to i+1"
+# semantics `continue` must have here (a bare `while`'s `continue` would
+# skip a body-trailing increment statement entirely, since Tcl `continue`
+# always jumps straight to the enclosing loop's own condition re-test).
+# `set $i [expr {$i + 1}]`, never Tcl `incr`: AGENTS.md documents a
+# confirmed Tcl-core bug where `incr` inside a compiled proc silently wraps
+# at the i64 boundary instead of promoting to a bignum -- exactly
+# IntrinsicArith's own arbitrary-precision `expr`-only idiom. Unlike
+# CompileListLoop, an ordinary body value is *discarded*, never collected
+# (a countloop is procedural, not a collecting loop); the finalization
+# mirrors CompileListLoop's own "no break happened" case, with `unit`
+# (natural exhaustion, spec item 9) instead of an accumulated List.
+proc core::compiler::CompileCountLoop {ctxVar e} {
+    upvar 1 $ctxVar ctx
+    set startOp [CompileExpr ctx [N $e start]]
+    if {[OpType $startOp] eq "never"} {
+        return $startOp
+    }
+    set endOp [CompileExpr ctx [N $e end]]
+    if {[OpType $endOp] eq "never"} {
+        return $endOp
+    }
+    set startWord [CountBoundWord ctx $startOp {loop start}]
+    set endWord [CountBoundWord ctx $endOp {loop end}]
+    set result [NewTemp]
+    set i [NewTemp]
+    set endVar [NewTemp]
+    set parentFrame [CurrentFrameExpr $ctx]
+    Emit ctx "set $i $startWord"
+    Emit ctx "set $endVar $endWord"
+    # $result must start unset on every logical execution of this
+    # countloop, not merely once per compiled proc -- see CompileListLoop's
+    # own identical comment (nesting inside another loop re-executes this
+    # same code within one Tcl proc activation).
+    Emit ctx "unset -nocomplain $result"
+    Emit ctx "for \{\} \{\$$i < \$$endVar\} \{set $i \[expr \{\$$i + 1\}\]\} \{"
+    Indent ctx 1
+    set scopeId [N $e bodyScope]
+    OpenScope ctx $scopeId $parentFrame
+    set b [N $e countBinding]
+    if {[dict get $ctx scopes $scopeId materialized]} {
+        set frame [dict get $ctx scopes $scopeId frame]
+        Emit ctx "core::env::define \$$frame [Word [B $b name]] \[list int \$$i\]"
+    } else {
+        dict set ctx scopes $scopeId locals $b [list box "\[list int \$$i\]"]
+    }
+    DeclareScope ctx $scopeId
+    dict set ctx loops $e $result
+    CompileSequence ctx [N $e body]
+    dict unset ctx loops $e
+    PopScope ctx
+    Indent ctx -1
+    Emit ctx "\}"
+    # A `break` inside the body already set $result (and left the Tcl
+    # `for` via a real Tcl `break`) before this point ever runs; only
+    # reaching END without a break leaves $result unset here, in which
+    # case natural exhaustion's own value (unit, never the discarded body
+    # value) is what this countloop completes with.
+    Emit ctx "if \{!\[info exists $result\]\} \{ set $result unit \}"
     return [Op box "\$$result" any]
 }
 

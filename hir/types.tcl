@@ -820,6 +820,35 @@ proc hir::types::Expr {hirVar ctxVar e} {
             dict set ctx facts $saved
             return [SetType hir $e $type]
         }
+        countloop {
+            Expr hir ctx [dict get $node start]
+            Expr hir ctx [dict get $node end]
+            set saved [dict get $ctx facts]
+            # Unlike listloop's element binding (typed from the iterable's
+            # own, possibly-unknown element type), a countloop's induction
+            # binding is always exactly Int: successfully entering any
+            # iteration at all already requires an Int-domain induction
+            # state (spec item 32), so this exposes that fact directly
+            # rather than making a later analysis rediscover it from `i`'s
+            # own uses (e.g. `i + 1`). Whether START/END are *themselves*
+            # statically known Int is a separate, ordinary dynamic-Int-
+            # operation question (core::value::expect at the interpreter/
+            # compiler boundary, spec item 6) -- not something this static
+            # type pass needs to decide or reject.
+            dict set ctx facts [dict get $node countBinding] int
+            dict set ctx breakTypes $e never
+            # Like listloop, unlike a plain `loop`: natural (non-break)
+            # completion also contributes to the result, but a countloop's
+            # own natural-completion value is always unit (item 9), never
+            # the body's own last value -- this is a *procedural* loop, so
+            # the body's own Sequence type is computed (for its own
+            # sub-expressions' facts) but not folded into the loop's result.
+            Sequence hir ctx [dict get $node body]
+            set type [lub [dict get $ctx breakTypes $e] unit]
+            dict unset ctx breakTypes $e
+            dict set ctx facts $saved
+            return [SetType hir $e $type]
+        }
         return {
             set value [Expr hir ctx [dict get $node value]]
             if {$value ne "never" && [dict get $node target] ne "" && [dict get $ctx reachable]} {

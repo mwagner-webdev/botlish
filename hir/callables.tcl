@@ -168,6 +168,13 @@ proc hir::callables::WalkExpr {hirVar e} {
                 WalkExpr hir $child
             }
         }
+        countloop {
+            WalkExpr hir [dict get $node start]
+            WalkExpr hir [dict get $node end]
+            foreach child [dict get $node body] {
+                WalkExpr hir $child
+            }
+        }
         return {
             set value [dict get $node value]
             if {$value ne ""} {

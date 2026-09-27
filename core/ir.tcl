@@ -11,6 +11,7 @@
 #   (if CONDITION THEN-BLOCK ELSE-BLOCK)
 #   (loop BODY-BLOCK)
 #   (listloop LIST-EXPR ELEMENT-BLOCK)
+#   (countloop START-EXPR END-EXPR ELEMENT-BLOCK)
 #   (return EXPR)
 #   (break)                     (break EXPR)
 #   (continue)
@@ -56,6 +57,26 @@
 # accumulated so far -- exactly `loop`'s own break semantics. If the list is
 # exhausted without a `break`, the result is the List of every iteration's
 # contributed value, in that order (empty for an empty LIST-EXPR).
+#
+# (countloop START-EXPR END-EXPR ELEMENT-BLOCK): the surface "loop i from
+# START to END:" form (see surface/parser.tcl, R2A3-COUNTED-LOOPS-FINAL-
+# SOURCE.md). START-EXPR and END-EXPR are each evaluated exactly once, in
+# the enclosing scope, left to right, before any iteration -- exactly like
+# listloop's own LIST-EXPR. ELEMENT-BLOCK must be a syntactic (block (I)
+# BODY...) node with exactly one parameter, exactly like listloop's own
+# (not a callable boundary: `return` inside it still returns from the
+# enclosing function; a valid target for `break`/`continue`). Ascending,
+# unit step, END-EXPR exclusive: I is bound fresh (immutable) to START,
+# START+1, START+2, ..., stopping (without running the body) the first time
+# I would equal or exceed END. `start >= end` (as ordinary Int values, per
+# core::value::compare) runs the body zero times. Unlike listloop, this is
+# a *procedural* loop, not a collecting one: an iteration whose body
+# completes with an ordinary value simply discards it and advances to the
+# next I; `continue` likewise just advances. `break` (with or without a
+# value) ends the loop immediately, its own value (or unit) becoming the
+# countloop's result -- exactly `loop`/`listloop`'s own break semantics.
+# Reaching END without a `break` completes normally with unit, never a
+# List: there is no hidden collection of I's visited values.
 #
 # This file knows syntax only; it does not evaluate anything.
 
@@ -182,6 +203,10 @@ proc core::ir::CheckShape {node} {
             ExpectLength $node 3 3 "(listloop LIST-EXPR ELEMENT-BLOCK)"
             CheckElementBlock [lindex $node 2] $node "body"
         }
+        countloop {
+            ExpectLength $node 4 4 "(countloop START-EXPR END-EXPR ELEMENT-BLOCK)"
+            CheckElementBlock [lindex $node 3] $node "body"
+        }
         return {
             ExpectLength $node 2 2 "(return EXPR)"
         }
@@ -303,6 +328,10 @@ proc core::ir::CollectBindNames {node namesVar} {
         listloop {
             CollectBindNames [lindex $node 1] names
         }
+        countloop {
+            CollectBindNames [lindex $node 1] names
+            CollectBindNames [lindex $node 2] names
+        }
         return - ok - error-value {
             CollectBindNames [lindex $node 1] names
         }
@@ -340,6 +369,12 @@ proc core::ir::containsBlock {exprs} {
             listloop {
                 if {[containsBlock [list [lindex $expr 1]]]
                     || [containsBlock [blockBody [lindex $expr 2]]]} {
+                    return 1
+                }
+            }
+            countloop {
+                if {[containsBlock [list [lindex $expr 1] [lindex $expr 2]]]
+                    || [containsBlock [blockBody [lindex $expr 3]]]} {
                     return 1
                 }
             }
@@ -434,6 +469,14 @@ proc core::ir::check {node {context {callable 0 loop 0}}} {
             check [lindex $node 1] $context
             set inner [dict replace $context loop 1]
             foreach expr [blockBody [lindex $node 2]] {
+                check $expr $inner
+            }
+        }
+        countloop {
+            check [lindex $node 1] $context
+            check [lindex $node 2] $context
+            set inner [dict replace $context loop 1]
+            foreach expr [blockBody [lindex $node 3]] {
                 check $expr $inner
             }
         }

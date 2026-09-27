@@ -67,15 +67,17 @@ namespace web
 # 2+ alpha -- over is_tcl_alnum/is_tcl_alpha (core/tclcompat.tcl). R2.a
 # (R2A-IDIOMATIC-EMAILISH-SOURCE.md) normalized this from R2's own almost-
 # structural port of the old hand-written core-IR validator into the
-# idiomatic Botlish shape below. R2.a.2 (R2A2-TRAILING-QUESTION-
-# IDENTIFIERS.md) then renamed it from is_emailish to emailish? once a
-# trailing "?" became ordinary identifier spelling (surface/lexer.tcl no
-# longer reserves "?" out of every identifier -- that was a lexer
-# restriction, not a naming choice). This module binding (web::emailish?)
-# and the root predicate binding (emailish?, lib/web.tcl) are distinct
-# bindings that merely share a basename: the root's -module-fn bridge is
-# what connects them, not name equality -- see that report's binding-
-# identity section.
+# idiomatic Botlish shape; R2.a.2 (R2A2-TRAILING-QUESTION-IDENTIFIERS.md)
+# renamed it from is_emailish to emailish? once a trailing "?" became
+# ordinary identifier spelling; R2.a.3 (R2A3-COUNTED-LOOPS-FINAL-SOURCE.md)
+# is this source's final normalization pass, rewriting scan_while and the
+# domain scan around the new "loop i from START to END:" counted-loop
+# construct and renaming every local predicate helper to the trailing-"?"
+# idiom below -- the frozen R2.a source. This module binding
+# (web::emailish?) and the root predicate binding (emailish?, lib/web.tcl)
+# are distinct bindings that merely share a basename: the root's
+# -module-fn bridge is what connects them, not name equality -- see
+# R2A1-MODULE-FN-BRIDGE-REACHABILITY.md's binding-identity section.
 #
 # local_extra_chars is the established immutable-set membership idiom
 # (MINIMAL-IMMUTABLE-SET.md) for the local part's punctuation class
@@ -83,11 +85,8 @@ namespace web
 # result type) -- never UTF-8 bytes, unlike additional_unreserved_chars's
 # byte::set below. Retained once at module scope, exactly like
 # additional_unreserved_chars: constructed once at module initialization,
-# never per emailish? call. (R2.a built it per call, inside emailish? (then
-# still named is_emailish), only to avoid a -module-fn bridge reachability
-# defect that R2A1-MODULE-FN-BRIDGE-REACHABILITY.md fixed: a bridged module
-# function that referenced any other module binding could not be reached
-# from a caller inside a user-defined block.)
+# never per emailish? call (R2A1-MODULE-FN-BRIDGE-REACHABILITY.md fixed the
+# bridge-reachability defect that once forced building this per call).
 local_extra_chars = immutable_set_from_list([".", "_", "%", "+", "-"])
 
 fn emailish?(v):
@@ -97,85 +96,81 @@ fn emailish?(v):
     fn char_at(i):
         substring(v, i, i + 1)
 
-    fn is_local_char(c):
+    fn local_char?(c):
         is_tcl_alnum(c) or immutable_set_contains(local_extra_chars, c)
 
-    # is_label_char's own extra character is a single "-": a one-element
-    # set would be less idiomatic than the direct equality already used
+    # label_char?'s own extra character is a single "-": a one-element set
+    # would be less idiomatic than the direct equality already used
     # throughout this codebase for singleton comparisons (e.g. esc_char's
     # own char-count check), so it stays a plain "==" rather than a second
     # membership set.
-    fn is_label_char(c):
+    fn label_char?(c):
         is_tcl_alnum(c) or c == "-"
 
-    # scan_while(i, predicate) is the one reusable operation the old
+    # scan_while(start, predicate) is the one reusable operation the old
     # scan_local/scan_label/scan_alpha triplet was really three copies of:
-    # return the index one past the longest run of characters starting at i
-    # for which PREDICATE holds (i itself, if it matches nothing there).
-    # Sound as a maximal-munch scan for every class this predicate is
-    # called with (none of them ever matches "." or "@", so there is no
-    # ambiguity to backtrack over -- NATIVE-TCL-UNICODE.md's §6 argument,
-    # unchanged by unifying the three scanners). PREDICATE is passed as an
-    # ordinary first-class value (an untyped-parameter callable, TYPED-
-    # CALLABLE-ESCAPE-SOUNDNESS.md item 10 -- is_local_char/is_label_char/
-    # is_tcl_alpha are all either untyped-parameter Botlish functions or
-    # natives, neither of which is a "typed callable" that rule would block
-    # from flowing through an ordinary parameter); see the report for the
-    # exact call-form/instance-count census this produces.
-    fn scan_while(i, predicate):
-        if i >= n:
-            i
-        else:
+    # the index one past the longest run of characters starting at START
+    # for which PREDICATE holds (START itself, if it matches nothing
+    # there). A direct counted traversal, not the self-tail recursion
+    # earlier milestones used before "loop i from START to END:" existed:
+    # advance I one character at a time, returning the first position
+    # where PREDICATE fails; reaching END with every character matching
+    # means the whole remaining domain matched, so the natural-exhaustion
+    # value is N itself, exactly the old recursion's own "i >= n" base
+    # case. PREDICATE is passed as an ordinary first-class value (an
+    # untyped-parameter callable, TYPED-CALLABLE-ESCAPE-SOUNDNESS.md item
+    # 10 -- local_char?/label_char?/is_tcl_alpha are all either
+    # untyped-parameter Botlish functions or natives, neither of which is
+    # a "typed callable" that rule would block from flowing through an
+    # ordinary parameter).
+    fn scan_while(start, predicate):
+        loop i from start to n:
             if predicate(char_at(i)):
-                scan_while(i + 1, predicate)
-            else:
-                i
+                continue
+            return i
+        n
 
-    fn tld_ok(i):
+    fn tld?(i):
         e = scan_while(i, is_tcl_alpha)
         if e == n:
             e - i >= 2
         else:
             false
 
-    # domain_loop(i) consumes one "label ." group and then either
-    # recognizes the immediately following alpha run as the final TLD
-    # (returning n) or continues from just after the ".". This stays
-    # self-tail-recursive, not the "loop"/"break"/"continue" keyword form
-    # (LISTLOOP-BREAK-TYPE-SOUNDNESS.md): that form's bare "loop:" body
-    # re-runs in a fresh scope with no way to carry an advanced position
-    # from one iteration to the next except through mutation (core/
-    # evaluator.tcl's op-loop: "next iteration" simply re-evaluates the
-    # same body in the same enclosing env), and its "loop x in EXPR:" form
-    # needs an already-materialized collection to iterate (there is no
-    # range()/similar numeric-sequence primitive to drive one over
-    # character positions here) -- so expressing this position-threading
-    # scan without either inventing loop-carried-accumulator syntax or a
-    # mutable variable (both out of scope, spec items 13/39) is not
-    # currently possible; self-tail recursion remains this codebase's own
-    # idiom for exactly this shape (uri_escape_text's esc_bytes/esc_from,
-    # examples/stdlib/string_reverse.bot's reverse_from). See the report's
-    # domain-loop section for the full before/after census this still
-    # produces at the NIR level (tail-call backedges), even though the
-    # source keeps its recursive spelling.
-    fn domain_loop(i):
-        label_end = scan_while(i, is_label_char)
-        if label_end == i:
-            -1
-        else:
-            if label_end >= n:
-                -1
+    # domain?(start) validates the domain grammar (one or more non-empty
+    # label segments separated by ".", followed by a final alphabetic TLD
+    # of length >= 2) directly from character positions, replacing the old
+    # domain_loop's self-tail recursion over label boundaries. The key
+    # observation driving this shape: at every ".", the text after it is a
+    # candidate TLD -- but the text after any "." other than the *last* one
+    # necessarily contains a further ".", so tld?'s own all-alphabetic
+    # check can only ever succeed at the last "." in the domain. A single
+    # forward counted loop over character positions can therefore find the
+    # correct split with no loop-carried state (no "remembered last dot"):
+    # at each ".", check tld? on what follows -- true means this dot is the
+    # (necessarily last) TLD separator, so accept immediately; false means
+    # try the next dot, exactly the greedy left-to-right behavior
+    # domain_loop's own recursion had. A "." is additionally rejected on
+    # sight if it starts the domain or immediately follows another "."
+    # (an empty label); every non-"." position must be an ordinary
+    # label_char?. Reaching END with no accepting "." ever found (no ".",
+    # a trailing ".", or a TLD too short) is the one remaining rejection,
+    # via natural loop exhaustion.
+    fn domain?(start):
+        loop j from start to n:
+            if char_at(j) == ".":
+                if j == start:
+                    return false
+                if char_at(j - 1) == ".":
+                    return false
+                if tld?(j + 1):
+                    return true
             else:
-                if char_at(label_end) == ".":
-                    i2 = label_end + 1
-                    if tld_ok(i2):
-                        n
-                    else:
-                        domain_loop(i2)
-                else:
-                    -1
+                if not label_char?(char_at(j)):
+                    return false
+        false
 
-    local_end = scan_while(0, is_local_char)
+    local_end = scan_while(0, local_char?)
     if local_end == 0:
         false
     else:
@@ -183,7 +178,7 @@ fn emailish?(v):
             false
         else:
             if char_at(local_end) == "@":
-                domain_loop(local_end + 1) == n
+                domain?(local_end + 1)
             else:
                 false
 

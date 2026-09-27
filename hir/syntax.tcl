@@ -28,6 +28,14 @@
 #             condition; elementName/elementOrigin/bodyOrigin/body describe
 #             the per-iteration element binding and body, exactly like a
 #             one-parameter block's own params/body (see hir/resolve.tcl)
+#   countloop start, end, countName, countOrigin, bodyOrigin, body -- the
+#             surface "loop i from START to END:" ascending counted-loop
+#             form (core IR's `countloop`, R2A3-COUNTED-LOOPS-FINAL-SOURCE.
+#             md): start/end are evaluated once, in the *enclosing* scope,
+#             left to right, exactly like listloop's iterable;
+#             countName/countOrigin/bodyOrigin/body describe the
+#             per-iteration immutable induction binding and body, exactly
+#             like listloop's own elementName/elementOrigin/bodyOrigin/body
 #   return    value
 #   break     value (node or "")
 #   continue
@@ -120,6 +128,11 @@ proc hir::syntax::listLoopNode {origin iterable elementName elementOrigin bodyOr
         elementOrigin $elementOrigin bodyOrigin $bodyOrigin body $body]
 }
 
+proc hir::syntax::countLoopNode {origin start end countName countOrigin bodyOrigin body} {
+    return [Node countloop $origin start $start end $end countName $countName \
+        countOrigin $countOrigin bodyOrigin $bodyOrigin body $body]
+}
+
 proc hir::syntax::returnNode {origin value} {
     return [Node return $origin value $value]
 }
@@ -207,6 +220,15 @@ proc hir::syntax::fromIR {node path} {
                 bodyOrigin [list ir [concat $path 2]] \
                 body [Sequence [core::ir::blockBody [lindex $node 2]] [concat $path 2] 2]]
         }
+        countloop {
+            return [Node countloop $origin \
+                start [fromIR [lindex $node 1] [concat $path 1]] \
+                end [fromIR [lindex $node 2] [concat $path 2]] \
+                countName [lindex [core::ir::blockParams [lindex $node 3]] 0] \
+                countOrigin [list ir [concat $path 3 1 0]] \
+                bodyOrigin [list ir [concat $path 3]] \
+                body [Sequence [core::ir::blockBody [lindex $node 3]] [concat $path 3] 2]]
+        }
         return - ok {
             return [Node [core::ir::op $node] $origin value [fromIR [lindex $node 1] [concat $path 1]]]
         }
@@ -281,6 +303,10 @@ proc hir::syntax::CollectBindNames {node namesVar} {
         }
         listloop {
             CollectBindNames [dict get $node iterable] names
+        }
+        countloop {
+            CollectBindNames [dict get $node start] names
+            CollectBindNames [dict get $node end] names
         }
         return - ok - error {
             CollectBindNames [dict get $node value] names

@@ -72,6 +72,13 @@
 #   if        condition, thenScope, thenBody, elseScope, elseBody,
 #             refinements (dict OUTCOME -> BindingId FACT pairs)
 #   loop      bodyScope, body
+#   listloop  iterable, elementBinding, bodyScope, body
+#   countloop start, end, countBinding, bodyScope, body -- the ascending,
+#             exclusive-end counted loop (R2A3-COUNTED-LOOPS-FINAL-SOURCE.
+#             md); start/end are ExprIds evaluated once in the *enclosing*
+#             scope, countBinding is the per-iteration immutable induction
+#             BindingId (in scope only in body, exactly like listloop's own
+#             elementBinding)
 #   return    value, target (the block ExprId it leaves, "" if none)
 #   break     value ("" if none), target (the loop ExprId, "" if none)
 #   continue  target
@@ -483,6 +490,9 @@ proc hir::children {hir e} {
         loop  { return [dict get $node body] }
         listloop {
             return [concat [list [dict get $node iterable]] [dict get $node body]]
+        }
+        countloop {
+            return [concat [list [dict get $node start] [dict get $node end]] [dict get $node body]]
         }
         fail  { return {} }
         handle {

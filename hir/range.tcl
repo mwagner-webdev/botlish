@@ -903,6 +903,42 @@ proc hir::range::Expr {hirVar ctxVar e} {
             dict set ctx bindings $saved
             return [unknown]
         }
+        countloop {
+            # Unlike listloop's element binding, the induction binding gets
+            # a real seed: the syntax itself supplies the theorem
+            # start <= i < end whenever the body runs at all (spec item
+            # 33). This is ordinary interval arithmetic over START's/END's
+            # own already-computed Ranges (ExternalSeeds/branch narrowing
+            # etc. have already run by the time this reads them) -- ranges
+            # min = START's own min (conservatively -inf if unknown), max =
+            # END's own max minus one (conservatively +inf if unknown, and
+            # never computed for END's exact bound minus one when END's max
+            # is itself infinite) -- never a new relational solver, and
+            # never fabricated when START/END's own Range is "never" (dead
+            # code reaching this loop at all).
+            set saved [dict get $ctx bindings]
+            set startR [Expr hir ctx [dict get $node start]]
+            set endR [Expr hir ctx [dict get $node end]]
+            set seed [unknown]
+            if {$startR ne "never" && $endR ne "never"} {
+                set endMax [dict get $endR max]
+                if {$endMax ne "+inf"} {
+                    set endMax [expr {$endMax - 1}]
+                }
+                set seed [dict create min [dict get $startR min] max $endMax]
+            }
+            set bindings [dict get $ctx bindings]
+            dict set bindings [dict get $node countBinding] [intersect [TypeFact int] $seed]
+            dict set ctx bindings $bindings
+            dict set ctx breakRanges $e never
+            foreach child [dict get $node body] {
+                Expr hir ctx $child
+            }
+            set result [dict get $ctx breakRanges $e]
+            dict unset ctx breakRanges $e
+            dict set ctx bindings $saved
+            return $result
+        }
         return {
             set value [dict get $node value]
             set r [expr {$value eq "" ? [unknown] : [Expr hir ctx $value]}]

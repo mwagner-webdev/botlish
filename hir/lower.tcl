@@ -14,6 +14,7 @@
 #   if         (if COND (block {} THEN...) (block {} ELSE...))
 #   loop       (loop (block {} BODY...))
 #   listloop   (listloop ITERABLE (block (ELEM) BODY...))
+#   countloop  (countloop START END (block (I) BODY...))
 #   return     (return VALUE)
 #   break      (break) / (break VALUE)
 #   continue   (continue)
@@ -68,6 +69,11 @@ proc hir::lower::expr {hir e} {
             set elemName [dict get $hir bindings [dict get $node elementBinding] name]
             return [list listloop [expr $hir [dict get $node iterable]] \
                 [list block [list $elemName] {*}[Exprs $hir [dict get $node body]]]]
+        }
+        countloop {
+            set countName [dict get $hir bindings [dict get $node countBinding] name]
+            return [list countloop [expr $hir [dict get $node start]] [expr $hir [dict get $node end]] \
+                [list block [list $countName] {*}[Exprs $hir [dict get $node body]]]]
         }
         return {
             return [list return [expr $hir [dict get $node value]]]

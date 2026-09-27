@@ -43,11 +43,18 @@
 #              "errors E1, E2" clause, empty if none), body (suite)
 #   if         condition, then (suite), else (suite or "")
 #   loop       elementName, elementNameSpan, iterable (an expression, or ""
-#              for the plain form), body (suite) -- "loop x in EXPR:"
-#              (elementName/iterable both set) is a List traversal binding
-#              x fresh each iteration; plain "loop:" (both "") repeats until
-#              break, as before this feature (see core/ir.tcl's `listloop`
-#              and this file's own Statement/Children/Ids below)
+#              for the plain form), countName, countNameSpan, countStart,
+#              countEnd (an expression, or "" unless this is the counted
+#              form), body (suite) -- exactly one of {iterable, countStart}
+#              is ever set. "loop x in EXPR:" (elementName/iterable both
+#              set) is a List traversal binding x fresh each iteration;
+#              "loop i from START to END:" (countName/countStart/countEnd
+#              all set) is an ascending, exclusive-end counted traversal
+#              binding i fresh each iteration (core/ir.tcl's `countloop`,
+#              R2A3-COUNTED-LOOPS-FINAL-SOURCE.md); plain "loop:" (neither
+#              set) repeats until break, as before this feature (see
+#              core/ir.tcl's `listloop`/`countloop` and this file's own
+#              Statement/Children/Ids below)
 #   return     value (an expression, an if, or "")
 #   break      value (an expression, an if, or "")
 #   continue
@@ -225,6 +232,10 @@ proc surface::ast::Ids {node id} {
             if {[dict get $node iterable] ne ""} {
                 dict set node iterable [Ids [dict get $node iterable] $id/iterable]
             }
+            if {[dict get $node countStart] ne ""} {
+                dict set node countStart [Ids [dict get $node countStart] $id/start]
+                dict set node countEnd [Ids [dict get $node countEnd] $id/end]
+            }
             dict set node body [Suite [dict get $node body] $id]
         }
         handledcall {
@@ -270,6 +281,9 @@ proc surface::ast::Children {node} {
         loop {
             if {[dict get $node iterable] ne ""} {
                 return [list [dict get $node iterable] [dict get $node body]]
+            }
+            if {[dict get $node countStart] ne ""} {
+                return [list [dict get $node countStart] [dict get $node countEnd] [dict get $node body]]
             }
             return [list [dict get $node body]]
         }
@@ -485,6 +499,9 @@ proc surface::ast::Statement {node indent show linesVar} {
         loop {
             if {[dict get $node iterable] ne ""} {
                 lappend lines "${pad}loop [dict get $node elementName] in [Expr [dict get $node iterable] $show]$at"
+            } elseif {[dict get $node countStart] ne ""} {
+                lappend lines "${pad}loop [dict get $node countName] from\
+                    [Expr [dict get $node countStart] $show] to [Expr [dict get $node countEnd] $show]$at"
             } else {
                 lappend lines "${pad}loop$at"
             }

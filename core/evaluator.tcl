@@ -36,6 +36,7 @@ namespace eval core::interp {
         if          core::forms::op-if \
         loop        core::forms::op-loop \
         listloop    core::forms::op-listloop \
+        countloop   core::forms::op-countloop \
         return      core::forms::op-return \
         break       core::forms::op-break \
         continue    core::forms::op-continue \
@@ -211,6 +212,61 @@ proc core::forms::op-listloop {node env} {
         }
     }
     return [core::completion::normal [core::value::listOf $results]]
+}
+
+# (countloop START-EXPR END-EXPR (block (I) BODY...)): evaluates START-EXPR
+# then END-EXPR once each, left to right, in the enclosing scope -- exactly
+# like op-listloop's own LIST-EXPR. Iterates the Int induction value I from
+# START (inclusive) to END (exclusive), unit step, in a fresh scope each
+# iteration (exactly like op-loop's own body) that binds I to the current
+# value. `return`/an error propagate directly out of the loop, exactly as
+# they already do in op-loop/op-listloop; `break` ends the loop with its
+# own payload (or unit) as the countloop's result. Unlike op-listloop, an
+# ordinary (`value`) completion is *discarded*, not collected: this is a
+# procedural loop, not a collecting one. Reaching END without a `break`
+# completes normally with unit -- never a List: there is no hidden
+# collection of I's visited values. START/END must be Int, checked
+# dynamically (core::value::expect), exactly like every other Int
+# operation's own runtime discipline (core/primitives.tcl) -- not a new
+# loop-only error kind. Advances I with plain `expr {$i + 1}`, never Tcl's
+# `incr`: AGENTS.md documents a confirmed Tcl-core bug where `incr` inside a
+# compiled proc silently wraps at the i64 boundary instead of promoting to
+# a bignum, so this loop -- which must remain correct for a Botlish Int of
+# any magnitude -- follows core/primitives.tcl's own arbitrary-precision
+# `expr`-only idiom throughout.
+proc core::forms::op-countloop {node env} {
+    set startExpr [lindex $node 1]
+    set endExpr [lindex $node 2]
+    set elementBlock [lindex $node 3]
+    set param [lindex [core::ir::blockParams $elementBlock] 0]
+    set body [core::ir::blockBody $elementBlock]
+    set startValue [core::interp::valueOf [core::interp::evalIn $startExpr $env]]
+    set endValue [core::interp::valueOf [core::interp::evalIn $endExpr $env]]
+    set i [core::value::intOf [core::value::expect int $startValue "loop start"]]
+    set end [core::value::intOf [core::value::expect int $endValue "loop end"]]
+    while {$i < $end} {
+        set iterationEnv [core::env::child $env]
+        core::env::define $iterationEnv $param [core::value::int $i]
+        core::env::declare $iterationEnv [core::ir::scopeBindNames $body]
+        try {
+            set completion [core::interp::evalSequence $body $iterationEnv]
+        } finally {
+            core::env::release $iterationEnv
+        }
+        switch -- [core::completion::kind $completion] {
+            value - continue {
+                # discard the body's value; advance to the next iteration
+            }
+            break {
+                return [core::completion::normal [core::completion::payload $completion]]
+            }
+            return - propagate-error {
+                return $completion
+            }
+        }
+        set i [expr {$i + 1}]
+    }
+    return [core::completion::normal [core::value::unit]]
 }
 
 proc core::forms::op-return {node env} {
