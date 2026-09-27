@@ -645,8 +645,8 @@ replaced with an assertion of the module-retained form, not loosened:
 
 ## Full regression
 
-`LANG=C.utf8 LC_ALL=C.utf8 tclsh9.0 tests/all.tcl`: see the final section
-for the exact counts. The first three canonical benchmarks were run fresh
+`LANG=C.utf8 LC_ALL=C.utf8 tclsh9.0 tests/all.tcl`: **interp 2473/2473,
+compile 2473/2473, 0 failed, 0 skipped** (exit 0). The first three canonical benchmarks were run fresh
 on R2, R2.a and R2.a.1:
 
 | bench | cranelift NIR / bytes | cranelift-generic NIR / bytes | value |
@@ -671,7 +671,10 @@ allocations throughout.
 ## GC stress
 
 `BOTLISH_NATIVE_GC_STRESS=1 LANG=C.utf8 LC_ALL=C.utf8 tclsh9.0
-tests/all.tcl`: see the final section for the exact counts.
+tests/all.tcl`: **interp 2473/2473, compile 2473/2473, 0 failed, 0
+skipped** (exit 0). Native tests run a GC attempt at every allocation site
+throughout, including the new module-closure captures and the flattened
+`check` -> `web::is_emailish` trailing parameter.
 
 Rust sources are **unchanged**. `native/src`, `Cargo.*` and the runtime are
 not in the diff, so no Rust suite rerun is required. The release binary was
