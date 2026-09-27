@@ -60,18 +60,22 @@
 # UriQueryValue -- this module never has to forge that itself.
 namespace web
 
-# is_emailish(v) is emailish?'s (lib/web.tcl) ordinary Botlish
-# implementation (R2-ORDINARY-EMAILISH-PREDICATE.md): the same left-to-right
-# scan emailRegex's grammar always described -- local part: 1+ of
-# [alnum . _ % + -]; "@"; domain: 1+ of (1+ of [alnum -] then "."); TLD: 2+
-# alpha -- over is_tcl_alnum/is_tcl_alpha (core/tclcompat.tcl). R2.a
+# emailish?(v) is the root predicate emailish?'s (lib/web.tcl) ordinary
+# Botlish implementation (R2-ORDINARY-EMAILISH-PREDICATE.md): the same
+# left-to-right scan emailRegex's grammar always described -- local part: 1+
+# of [alnum . _ % + -]; "@"; domain: 1+ of (1+ of [alnum -] then "."); TLD:
+# 2+ alpha -- over is_tcl_alnum/is_tcl_alpha (core/tclcompat.tcl). R2.a
 # (R2A-IDIOMATIC-EMAILISH-SOURCE.md) normalized this from R2's own almost-
 # structural port of the old hand-written core-IR validator into the
-# idiomatic Botlish shape below; see that report for the full source-
-# normalization/census rationale, and for why this function is still named
-# is_emailish rather than emailish? (surface/lexer.tcl reserves "?" out of
-# every ordinary identifier -- a lexer-level restriction, not a naming
-# choice -- see the report's naming-audit section).
+# idiomatic Botlish shape below. R2.a.2 (R2A2-TRAILING-QUESTION-
+# IDENTIFIERS.md) then renamed it from is_emailish to emailish? once a
+# trailing "?" became ordinary identifier spelling (surface/lexer.tcl no
+# longer reserves "?" out of every identifier -- that was a lexer
+# restriction, not a naming choice). This module binding (web::emailish?)
+# and the root predicate binding (emailish?, lib/web.tcl) are distinct
+# bindings that merely share a basename: the root's -module-fn bridge is
+# what connects them, not name equality -- see that report's binding-
+# identity section.
 #
 # local_extra_chars is the established immutable-set membership idiom
 # (MINIMAL-IMMUTABLE-SET.md) for the local part's punctuation class
@@ -79,14 +83,14 @@ namespace web
 # result type) -- never UTF-8 bytes, unlike additional_unreserved_chars's
 # byte::set below. Retained once at module scope, exactly like
 # additional_unreserved_chars: constructed once at module initialization,
-# never per is_emailish call. (R2.a built it per call, inside is_emailish,
-# only to avoid a -module-fn bridge reachability defect that
-# R2A1-MODULE-FN-BRIDGE-REACHABILITY.md fixed: a bridged module function
-# that referenced any other module binding could not be reached from a
-# caller inside a user-defined block.)
+# never per emailish? call. (R2.a built it per call, inside emailish? (then
+# still named is_emailish), only to avoid a -module-fn bridge reachability
+# defect that R2A1-MODULE-FN-BRIDGE-REACHABILITY.md fixed: a bridged module
+# function that referenced any other module binding could not be reached
+# from a caller inside a user-defined block.)
 local_extra_chars = immutable_set_from_list([".", "_", "%", "+", "-"])
 
-fn is_emailish(v):
+fn emailish?(v):
 
     n = length(v)
 

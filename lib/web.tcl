@@ -13,8 +13,10 @@
 #       (block {} ...))
 #
 # emailish? is the canonical predicate (R2-ORDINARY-EMAILISH-PREDICATE.md):
-# an ordinary Botlish function, web::is_emailish (lib/web.bot), reached
-# through -module-fn exactly like uriEscape's own web::uri_escape_text
+# an ordinary Botlish function, web::emailish? (lib/web.bot; renamed from
+# web::is_emailish by R2.a.2, R2A2-TRAILING-QUESTION-IDENTIFIERS.md, once a
+# trailing "?" became ordinary identifier spelling), reached through
+# -module-fn exactly like uriEscape's own web::uri_escape_text
 # (NATIVE-MODULES.md) -- never a -native-body literal pasted into every call
 # site. Emailish? is a temporary compatibility alias (core::native::alias):
 # the exact same registered predicate, same SymbolId/refinement theorem/HIR
@@ -38,7 +40,7 @@ core::type::register Emailish \
     -base str \
     -validator [list core::regex::matches $core::web::emailRegex]
 # emailish? is the canonical predicate: an ordinary Botlish function,
-# web::is_emailish (lib/web.bot), reached on the native (Cranelift) backend
+# web::emailish? (lib/web.bot), reached on the native (Cranelift) backend
 # through -module-fn -- exactly emailRegex's grammar (local: 1+ of
 # [alnum . _ % + -]; "@"; domain: 1+ of (1+ of [alnum -] then "."); tld: 2+
 # alpha; end), the same left-to-right scan over core/tclcompat.tcl's
@@ -50,17 +52,23 @@ core::type::register Emailish \
 # uriEscape/web::uri_escape_text). No -native-body: this predicate no longer
 # passes through native::ExpandNativeBodies's pre-HIR body substitution at
 # all, on any backend.
-core::type::definePredicate Emailish emailish? "" {web is_emailish}
+core::type::definePredicate Emailish emailish? "" {web emailish?}
 # Emailish? is a temporary compatibility alias for emailish?, not a second
 # registration: core::native::alias makes both spellings resolve (hir/
 # resolve.tcl's RootBinding, core::rootEnv) to the exact same root Binding/
 # Symbol/registry entry, so they share one SymbolId, one refinement theorem,
 # one HIR call target, and one specialization instance family -- never a
 # runtime Block value, a wrapper function, or a second predicate. The
-# callable-type surface syntax (uppercase NAME? as a type's predicate) is
-# unchanged and still spellable as Emailish? -- only its canonical
-# implementation moved. Scheduled for removal, along with the callable-type
-# surface form generally, in the source/refactor milestone that follows R2.
+# callable-type surface syntax (uppercase NAME? as a type's predicate,
+# core::type::definePredicate's own "$name?" default above) is unchanged and
+# still spellable as Emailish? -- only its canonical implementation moved,
+# and, as of R2.a.2, is spelled web::emailish? too (R2A2-TRAILING-QUESTION-
+# IDENTIFIERS.md): the root predicate binding (Emailish?/emailish?, this
+# alias) and the module implementation binding (web::emailish?) remain
+# distinct bindings that merely share a basename -- the -module-fn bridge
+# below is what connects them, not name equality. Scheduled for removal,
+# along with the callable-type surface form generally, in the
+# source/refactor milestone that follows R2.a.
 core::native::alias Emailish? emailish?
 
 core::type::register UriQueryValue \

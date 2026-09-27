@@ -283,7 +283,7 @@ f()
 # exactly as bench/refined-checks.ir itself does -- not a surface-language
 # ".bot" test like the rest of this file.
 #
-# R2.a (R2A-IDIOMATIC-EMAILISH-SOURCE.md) unified is_emailish's three old
+# R2.a (R2A-IDIOMATIC-EMAILISH-SOURCE.md) unified emailish?'s three old
 # scanners (scan_local/scan_label/scan_alpha, each calling its own character
 # predicate directly) into one scan_while(i, predicate), whose own
 # char_at(i) call feeds into an opaque, dynamically-dispatched
@@ -293,10 +293,10 @@ f()
 # (hir/stringregion.tcl, untouched by this milestone, per spec item 34) can
 # no longer prove *every* char_at result is a purely transient,
 # region-testable value once that value's only consumer is an opaque call:
-# -string-region-opt 1 used to eliminate every one of is_emailish's own
+# -string-region-opt 1 used to eliminate every one of emailish?'s own
 # one-character String allocations for both corpus strings below (0, both
 # cases); now it eliminates only the ones reached through a *direct* char_at
-# call (is_emailish/domain_loop's own "@"/"." checks), not the ones reached
+# call (emailish?/domain_loop's own "@"/"." checks), not the ones reached
 # through scan_while's predicate dispatch. This is a compiler weakness this
 # milestone's own idiomatic predicate-passing source exposes, not a
 # regression to fix here -- hir/stringregion.tcl stays unmodified, and the
@@ -316,7 +316,7 @@ proc assertEmailishParity {text} {
     return [list $on [expr {$off > 0}] [expr {$onValue eq $offValue}] $onValue]
 }
 
-test view-emailish-corpus-1 {lib/web.tcl's Emailish? validator: string-region-opt still eliminates is_emailish's own direct char_at allocations (down from 13 to 11 -- not to 0, since scan_while's char_at now feeds an opaque predicate callvalue string-region-opt cannot see through), same value either way} -body {
+test view-emailish-corpus-1 {lib/web.tcl's Emailish? validator: string-region-opt still eliminates emailish?'s own direct char_at allocations (down from 13 to 11 -- not to 0, since scan_while's char_at now feeds an opaque predicate callvalue string-region-opt cannot see through), same value either way} -body {
     assertEmailishParity "café@例え.テスト"
 } -result {11 1 1 {bool true}}
 

@@ -6,7 +6,12 @@
 #
 # A token is a dict {kind text value span}:
 #
-#   IDENT     [A-Za-z_][A-Za-z0-9_]*, not a keyword        value: the name
+#   IDENT     [A-Za-z_][A-Za-z0-9_]*\??, not a keyword      value: the name
+#             (a single terminal "?" is ordinary identifier spelling, e.g.
+#             "emailish?" -- ?, if present, is always the name's very last
+#             character, and is part of its semantic text like any other;
+#             case does not affect this in any way -- see
+#             R2A2-TRAILING-QUESTION-IDENTIFIERS.md)
 #   INT       decimal digits, no leading zeros              value: the digits
 #   STRING    "..." on one line; escapes \\ \" \n \r \t     value: decoded text
 #   CHAR      '...' on one line, exactly one decoded Unicode scalar value;
@@ -39,7 +44,13 @@
 #   tab in indentation         the tab counts as one column
 #   inconsistent dedent        the line joins the enclosing level it passed
 #   unexpected character       skipped
-#   "?" after a name           skipped
+#   "?" not part of a name     the bare "?" is skipped ("x ? y"'s "?", not
+#                              attached to any identifier)
+#   more name text after "?"   an identifier's trailing "?" cannot itself be
+#                              followed by another "?" or by more name
+#                              characters ("foo??", "foo?bar"): the whole
+#                              extra run is skipped as one diagnostic, never
+#                              split into further adjacent tokens
 #   invalid integer            an INT of its digits (leading zeros dropped)
 #   unterminated string        the string ends at the end of line
 #   invalid escape             the escaped character is kept
@@ -220,13 +231,41 @@ proc surface::lexer::tokenize {source file} {
                 while {$j < $n && [regexp {[A-Za-z0-9_]} [string index $source $j]]} {
                     incr j
                 }
-                set text [string range $source $i $j-1]
+                # A single terminal "?" is ordinary identifier spelling (an
+                # identifier's semantic text includes it, e.g. "emailish?" --
+                # R2A2-TRAILING-QUESTION-IDENTIFIERS.md): a name never
+                # contains "?" anywhere but its very end, and never more than
+                # one. Keywords never end in "?", so this can never turn a
+                # keyword into a different keyword; it can only ever produce
+                # an IDENT (a bare keyword spelling followed by "?", e.g.
+                # "true?", is simply an IDENT of that full text, not the
+                # keyword "true" plus a trailing "?").
+                set end $j
+                if {[string index $source $j] eq "?"} {
+                    set end [expr {$j + 1}]
+                }
+                set text [string range $source $i $end-1]
                 set kind [expr {$text in $keywords ? $text : "IDENT"}]
-                lappend tokens [Token $kind $text $text [Span $file $i $j $line $lineStart]]
-                set i $j
-                if {[string index $source $i] eq "?"} {
-                    Report diagnostics $file $i $line $lineStart 1 "\"?\" is reserved and cannot be part of a name"
-                    incr i
+                lappend tokens [Token $kind $text $text [Span $file $i $end $line $lineStart]]
+                set i $end
+                if {$end > $j} {
+                    # Reject (with a diagnostic, not a silent adjacent token)
+                    # a second "?" right after the first, or any identifier
+                    # character continuing straight after the "?" with no
+                    # separator -- "foo??"/"foo???" and "foo?bar" alike:
+                    # "?" is terminal, so nothing may immediately follow it
+                    # that would otherwise extend the same name.
+                    set extraStart $i
+                    set k $i
+                    while {$k < $n && ([string index $source $k] eq "?"
+                            || [regexp {[A-Za-z0-9_]} [string index $source $k]])} {
+                        incr k
+                    }
+                    if {$k > $extraStart} {
+                        Report diagnostics $file $extraStart $line $lineStart [expr {$k - $extraStart}] \
+                            "\"$text\" already ends in \"?\": an identifier can end in at most one \"?\", with nothing directly after it"
+                        set i $k
+                    }
                 }
             }
             default {

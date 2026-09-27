@@ -582,17 +582,17 @@ test blockescape-region-companion-flags-both-off {both off: the fully unoptimize
 # 11620/802/9204/811 (total/Block/String/List): its predicate-passing
 # scan_while materializes each char_at result as a String (9200 substr),
 # and, as a temporary workaround for a -module-fn bridge reachability
-# defect, it built is_emailish's local-punctuation ImmutableSet
-# (local_extra_chars) once per is_emailish call -- 800 List + 800
-# ImmutableSet per run of this benchmark's 800 real is_emailish calls.
+# defect, it built emailish?'s local-punctuation ImmutableSet
+# (local_extra_chars) once per emailish? call -- 800 List + 800
+# ImmutableSet per run of this benchmark's 800 real emailish? calls.
 # R2.a.1 (R2A1-MODULE-FN-BRIDGE-REACHABILITY.md) fixes the bridge and
 # retains local_extra_chars once at module scope again: List 811 -> 12 (11
 # startup lists as before plus local_extra_chars' own literal list, once),
 # ImmutableSet 801 -> 2 (additional_unreserved_chars and local_extra_chars,
 # once each), total 11620 -> 10023. Block is 803: the 2 startup closures as
-# before, web::is_emailish's own startup closure (it now captures the
-# module set), and 800 is_local_char closures -- one per is_emailish call,
-# because is_local_char is nested in is_emailish and captures the module
+# before, web::emailish?'s own startup closure (it now captures the
+# module set), and 800 is_local_char closures -- one per emailish? call,
+# because is_local_char is nested in emailish? and captures the module
 # binding web::local_extra_chars (module bindings are reached by capture;
 # see the report). The 9200 char_at Strings are untouched (predicate
 # passing, not set retention).

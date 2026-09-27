@@ -15,7 +15,7 @@
 ;   botlish_fn_6 / botlish_entry_6 -> ascii::is_lower<int>
 ;   botlish_fn_7 / botlish_entry_7 -> ascii::is_alphabetic<int>
 ;   botlish_fn_8 / botlish_entry_8 -> ascii::is_alphanumeric<int>
-;   botlish_fn_9 / botlish_entry_9 -> web::is_emailish<generic>
+;   botlish_fn_9 / botlish_entry_9 -> web::emailish?<generic>
 ;   botlish_fn_10 / botlish_entry_10 -> char_at<generic>
 ;   botlish_fn_11 / botlish_entry_11 -> char_at<generic>
 ;   botlish_fn_12 / botlish_entry_12 -> is_local_char<generic>
@@ -97,7 +97,7 @@ Disassembly of section .text:
      154:	mov    QWORD PTR [rsp+0xb0],rax
      15c:	mov    esi,0x9
      161:	mov    rdx,QWORD PTR [rip+0x0]        # 168 <botlish_fn_0+0x168>
-			164: R_X86_64_GOTPCREL	botlish_entry_9-0x4 ; web::is_emailish<generic>
+			164: R_X86_64_GOTPCREL	botlish_entry_9-0x4 ; web::emailish?<generic>
      168:	mov    ecx,0x1
      16d:	mov    rdi,QWORD PTR [rsp+0x180]
      175:	call   17a <botlish_fn_0+0x17a>
@@ -743,7 +743,7 @@ Disassembly of section .text:
      b4d:	add    BYTE PTR [rax],al
 	...
 
-0000000000000b50 <botlish_fn_9: web::is_emailish<generic>>:
+0000000000000b50 <botlish_fn_9: web::emailish?<generic>>:
      b50:	push   rbp
      b51:	mov    rbp,rsp
      b54:	sub    rsp,0x70
@@ -935,12 +935,12 @@ Disassembly of section .text:
      e45:	add    BYTE PTR [rax],al
 	...
 
-0000000000000e48 <botlish_entry_9: web::is_emailish<generic>>:
+0000000000000e48 <botlish_entry_9: web::emailish?<generic>>:
      e48:	push   rbp
      e49:	mov    rbp,rsp
      e4c:	mov    rdx,QWORD PTR [rdx]
      e4f:	call   e54 <botlish_entry_9+0xc>
-			e50: R_X86_64_PLT32	botlish_fn_9-0x4 ; web::is_emailish<generic>
+			e50: R_X86_64_PLT32	botlish_fn_9-0x4 ; web::emailish?<generic>
      e54:	mov    rsp,rbp
      e57:	pop    rbp
      e58:	ret
@@ -2430,7 +2430,7 @@ Disassembly of section .text:
     23c8:	mov    rsi,rbx
     23cb:	mov    rdi,r14
     23ce:	call   23d3 <botlish_fn_24+0xc3>
-			23cf: R_X86_64_PLT32	botlish_fn_9-0x4 ; web::is_emailish<generic>
+			23cf: R_X86_64_PLT32	botlish_fn_9-0x4 ; web::emailish?<generic>
     23d3:	test   rax,rax
     23d6:	jne    2404 <botlish_fn_24+0xf4>
     23dc:	xor    rax,rax

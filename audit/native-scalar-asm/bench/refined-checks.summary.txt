@@ -14,7 +14,7 @@ functions:
   6 ascii::is_lower<int>: nir-regs=13
   7 ascii::is_alphabetic<int>: nir-regs=8
   8 ascii::is_alphanumeric<int>: nir-regs=8
-  9 web::is_emailish<generic>: nir-regs=27
+  9 web::emailish?<generic>: nir-regs=27
   10 char_at<generic>: nir-regs=6
   11 char_at<generic>: nir-regs=6
   12 is_local_char<generic>: nir-regs=9
@@ -149,7 +149,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     depth reservation: no
     storage: native frame
   
-  function 9 "web::is_emailish"
+  function 9 "web::emailish?"
     NIR regs: 27
     raw regs: 3
     managed-capable regs: 24

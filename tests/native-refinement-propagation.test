@@ -101,8 +101,8 @@ test native-refinement-propagation-refined-checks-parity {refined-checks.ir's va
 
 # R2.a.1 (R2A1-MODULE-FN-BRIDGE-REACHABILITY.md): "check" is still exactly
 # one instance, but now its generic one rather than one Int/str-keyed
-# specialization: web::is_emailish captures its module-retained
-# local_extra_chars (a closure), check captures web::is_emailish's binding
+# specialization: web::emailish? captures its module-retained
+# local_extra_chars (a closure), check captures web::emailish?'s binding
 # to reach it through the emailish? bridge (as a qualified call would), and
 # hir::specialize keys every closure with a non-Int capture generically.
 # What this test guards -- refinement propagation never forks "check" into

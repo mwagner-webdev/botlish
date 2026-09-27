@@ -375,7 +375,7 @@ test module-fn-bridge-uriescape-result-branch {R2's recorded uriEscape shape: a 
     lmap b $::parityBackends {string map {#{UriQueryValue} {}} [lrange [outcomeUnder $b $p] 0 1]}
 } -result [lrepeat 4 {value {[ok("a%40b.cd"), error("bad")]}}]
 
-# emailish? (-module-fn {web is_emailish}: is_emailish captures its module-
+# emailish? (-module-fn {web emailish?}: emailish? captures its module-
 # retained local_extra_chars set) through a user block, both spellings,
 # over the whole R2 semantic corpus.
 foreach {label address expect} {
@@ -418,13 +418,13 @@ test module-fn-bridge-emailish-refinement-in-user-block {a user-block caller of 
     }] {}]
     set refined [lindex [hirRefTypes $hir s] end]
     set text [native::nir $hir]
-    regexp {func (\d+) "web::is_emailish"} $text -> id
-    list $calls $refined [regexp -all {func \d+ "web::is_emailish"} $text] \
+    regexp {func (\d+) "web::emailish\?"} $text -> id
+    list $calls $refined [regexp -all {func \d+ "web::emailish\?"} $text] \
         [regexp -all "= call(?:env)?(?:multi)? $id " $text] [lindex [fourWay $p] 1]
 } -result {{{emailish? {}} {Emailish? 1}} {str[Emailish]} 1 1 {"someone@example.com"}}
 
 # local_extra_chars is module-retained again: built once at module
-# initialization (the program function), never inside web::is_emailish.
+# initialization (the program function), never inside web::emailish?.
 test module-fn-bridge-emailish-set-retained-once {refined-checks.ir: local_extra_chars' List and ImmutableSet are each constructed exactly once (module init), none per emailish? call} -body {
     set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
     set webPath [file normalize [file join $::projectRoot lib web.bot]]
@@ -439,7 +439,7 @@ test module-fn-bridge-emailish-set-retained-once {refined-checks.ir: local_extra
         }
     }
     set text [native::nir $hir]
-    set body [lindex [regexp -inline {func \d+ "web::is_emailish"[^\n]*\n(.*?)\nend} $text] 1]
+    set body [lindex [regexp -inline {func \d+ "web::emailish\?"[^\n]*\n(.*?)\nend} $text] 1]
     list [lsort $sites] [regexp -all {op setfromlist} $body] [regexp -all {op listnew} $body]
 } -result {{{listnew 1} {setfromlisttotal 1}} 0 0}
 
