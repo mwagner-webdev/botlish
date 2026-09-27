@@ -1030,13 +1030,14 @@ behavior. The second, clean run (after that fix) is the one reported
 above. No other test, in this file or any other, needed any change.
 
 `BOTLISH_NATIVE_GC_STRESS=1 LANG=C.utf8 LC_ALL=C.utf8 tclsh9.0
-tests/all.tcl`: **PASS** (exact counts below, once this run completes) --
-GC-stress forces a collection attempt at every allocation site; the
-closure/root structure changed by this milestone -- new per-call closures
-for `is_local_char`, new argument-value materializations for
-`is_local_char`/`is_label_char` -- survives it without incident, both on
-the frozen benchmark directly (`[400, 0]`, unchanged, §"Allocation/module-
-init census") and across the full suite.
+tests/all.tcl`: **PASS**, both `interp` and `compile`: `Total 2399 Passed
+2399 Skipped 0 Failed 0` each, identical to the ordinary run -- GC-stress
+forces a collection attempt at every allocation site; the closure/root
+structure changed by this milestone -- new per-call closures for
+`is_local_char`, new argument-value materializations for `is_local_char`/
+`is_label_char` -- survives it without incident, both on the frozen
+benchmark directly (`[400, 0]`, unchanged, §"Allocation/module-init
+census") and across the full suite.
 
 ## Stop condition
 
