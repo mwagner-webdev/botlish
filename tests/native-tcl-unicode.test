@@ -203,9 +203,13 @@ test native-tcl-unicode-emailish-known-result-nir-shape {a redundant Emailish?/e
     set isEmailishDefs [regexp -all {func \d+ "web::is_emailish"} $text]
     set domainLoopDefs [regexp -all {func \d+ "domain_loop"} $text]
     # Exactly one real call to it: the outer, genuinely dynamic check. The
-    # inner, statically redundant re-check needs no call at all.
+    # inner, statically redundant re-check needs no call at all. Since
+    # R2.a.1 (R2A1-MODULE-FN-BRIDGE-REACHABILITY.md) web::is_emailish
+    # captures its module-retained local_extra_chars, so it is a closure
+    # and that one call is a `callenv` (through the closure f reaches via
+    # the bridge), not a plain `call`.
     regexp {func (\d+) "web::is_emailish"} $text -> isEmailishId
-    set calls [regexp -all "call $isEmailishId %" $text]
+    set calls [regexp -all "= call(?:env)? $isEmailishId %" $text]
     list $isEmailishDefs $domainLoopDefs $calls [fourWay $p]
 } -result {1 1 1 {"yes"}}
 

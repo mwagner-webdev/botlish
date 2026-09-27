@@ -238,6 +238,12 @@ finding, not a target.
 
 ## Set-membership refactor
 
+> **Superseded by R2.a.1** (`R2A1-MODULE-FN-BRIDGE-REACHABILITY.md`): the
+> `-module-fn` bridge defect described below is fixed, `local_extra_chars` is
+> module-retained again, and the per-call workaround is gone. That report
+> also corrects this one's allocation attribution: the +9200 `char_at`
+> Strings come from predicate passing, not from per-call set construction.
+
 `local_extra_chars = immutable_set_from_list([".", "_", "%", "+", "-"])`
 replaces `c == "." or c == "_" or c == "%" or c == "+" or c == "-"` inside
 `is_local_char`, over ordinary one-scalar `str` values -- `char_at`'s own

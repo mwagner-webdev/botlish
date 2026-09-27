@@ -3073,36 +3073,22 @@ proc native::lower::FlattenedVirtualRegionCall {fnVar e node target targetInstan
 
 # The native-to-module bridge changes a root native call's resolved target to
 # a module Block. When that Block has captures, the root native value is not
-# its closure; fetch the already-resolved module binding instead. This uses
-# only HIR BindingIds, never a run-time namespace/name lookup.
+# its closure; fetch the module function's own binding instead -- the one
+# hir::BridgeProvenance (hir/hir.tcl) recorded on this reference as its
+# `bridge`, and made every enclosing block capture, so it is reachable (by
+# Access) from any caller region exactly as a module-qualified reference to
+# it would be. This uses only HIR BindingIds, never a run-time
+# namespace/name lookup.
 proc native::lower::ModuleBridgeBinding {calleeExpr targetKind} {
     variable hir
     if {$targetKind ne "block" || [hir::kind $hir $calleeExpr] ne "ref"} {
         return ""
     }
-    set rootBinding [hir::get $hir $calleeExpr binding]
-    if {$rootBinding eq "" || [dict get [hir::binding $hir $rootBinding] kind] ne "root"} {
+    set node [hir::node $hir $calleeExpr]
+    if {![dict exists $node bridge]} {
         return ""
     }
-    set rootValue [dict get [hir::binding $hir $rootBinding] value]
-    if {[core::value::kind $rootValue] ne "native"} {
-        return ""
-    }
-    set nativeName [core::value::nativeName $rootValue]
-    set moduleFn [dict get [core::native::metadata $nativeName] moduleFn]
-    if {$moduleFn eq ""} {
-        return ""
-    }
-    lassign $moduleFn namespace symbol
-    if {![dict exists $hir modules $namespace]} {
-        return ""
-    }
-    set scope [dict get $hir modules $namespace]
-    set qualified [format {%s::%s} $namespace $symbol]
-    if {![dict exists $hir scopes $scope names $qualified]} {
-        return ""
-    }
-    return [dict get $hir scopes $scope names $qualified]
+    return [dict get $node bridge]
 }
 
 # Preserve the exact call and its completion handling, then substitute a

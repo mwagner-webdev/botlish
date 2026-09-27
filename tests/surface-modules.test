@@ -413,6 +413,11 @@ proc outcomeUnderValue {backend exprs} {
 # hexLists, uriStartupBlocks (one closure for uri_escape_text ITSELF,
 # regardless of what it captures), envless, and the closure/callenv
 # existence checks are all unaffected.
+# R2.a.1 (R2A1-MODULE-FN-BRIDGE-REACHABILITY.md): 4 "op listnew", not 3 --
+# web.bot's own local_extra_chars = immutable_set_from_list([".", "_", "%",
+# "+", "-"]) is module-retained again, so its five-string literal list is
+# one more module-init List (built once, in the program function, like the
+# three above). Nothing about uriEscape's own startup shape changes.
 test surface-modules-uri-hex-digits-startup {web::hex_digits is one startup List; uri_escape_text has one startup closure, now over two captures (hex_digits and is_unreserved), and static callenv access} -body {
     core::loadLibrary web
     set hir [native::buildProgramHir {
@@ -445,7 +450,7 @@ test surface-modules-uri-hex-digits-startup {web::hex_digits is one startup List
         [regexp {func [0-9]+ "web::uri_escape_text" params=1 env=1 .*captures=2} $nir] \
         [dict get $uriInfo envless] $uriStartupBlocks \
         [expr {[regexp -all {closure [0-9]+ } $nir] > 0}] [expr {[regexp -all {callenv [0-9]+ } $nir] > 0}]
-} -result {3 1 1 0 1 1 1}
+} -result {4 1 1 0 1 1 1}
 test surface-modules-uri-escape-native-parity {uriEscape's escaped text agrees interp vs. cranelift; only cranelift drops evidence} -body {
     core::loadLibrary web
     set exprs {

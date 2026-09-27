@@ -186,15 +186,19 @@ test web-unreserved-user-fn-wraps-module-closure {fn f(b: Byte) -> bool: web::is
 # never iterated, checked only by membership/cardinality (never display
 # order, spec item 56).
 
-test web-unreserved-set-built-once {additional_unreserved_chars is constructed exactly once (one setfromlist site), regardless of how many web::is_unreserved calls follow} -body {
+# R2.a.1 (R2A1-MODULE-FN-BRIDGE-REACHABILITY.md) retains web.bot's second
+# module set, local_extra_chars (web.bot's own immutable_set_from_list), at
+# module scope again, so loading web now initializes two retained sets --
+# each exactly once: additional_unreserved_chars through byte::set's own
+# terminal setfromlist (byte.bot), local_extra_chars directly (web.bot).
+test web-unreserved-set-built-once {additional_unreserved_chars (byte.bot's byte::set site) and web.bot's own local_extra_chars are each constructed exactly once, regardless of how many web::is_unreserved calls follow} -body {
     set path [makeFile {[web::is_unreserved(45), web::is_unreserved(46), web::is_unreserved(95),
 web::is_unreserved(126), web::is_unreserved(65), web::is_unreserved(128)]} web-unreserved-once.bot]
     try {
         set hir [surface::readProgramFile $path -strict 0]
         native::lower::program $hir -repr-opt 0
         set report [native::allocationReport $hir sites]
-        set setfromlistSites 0
-        set setfromlistAllocations 0
+        set setfromlistSites {}
         foreach site [dict get $report sites] {
             # M4-EQUALITY-TOTAL-SETFROMLIST-EFFECT.md:
             # additional_unreserved_chars's own List[Byte] source is
@@ -203,15 +207,15 @@ web::is_unreserved(126), web::is_unreserved(65), web::is_unreserved(128)]} web-u
             # rt_set_from_list helper, same allocation, only the site name
             # differs.
             if {[dict get $site operation] in {setfromlist setfromlisttotal}} {
-                incr setfromlistSites
-                incr setfromlistAllocations [dict get $site allocations]
+                lappend setfromlistSites [list [file tail [dict get $site location file]] \
+                    [dict get $site allocations]]
             }
         }
-        list $setfromlistSites $setfromlistAllocations
+        lsort $setfromlistSites
     } finally {
         removeFile web-unreserved-once.bot
     }
-} -result {1 1}
+} -result {{byte.bot 1} {web.bot 1}}
 
 test web-unreserved-set-exact-members {additional_unreserved_chars contains exactly the four bytes 45/46/95/126, and no others among nearby candidates} -body {
     set path [makeFile {[

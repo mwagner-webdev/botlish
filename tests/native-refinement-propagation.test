@@ -99,12 +99,21 @@ test native-refinement-propagation-refined-checks-parity {refined-checks.ir's va
     list [lindex [outcomeUnder compile $exprs] 1] [lindex [outcomeUnder cranelift $exprs] 1]
 } -result {{[400, 0]} {[400, 0]}}
 
-test native-refinement-propagation-refined-checks-no-explosion {"check" gets exactly one specialized instance (no generic instance in use): named-refinement propagation widens that one instance's parameter analysis, it does not fork new instances (spec's own §14/§18)} -body {
+# R2.a.1 (R2A1-MODULE-FN-BRIDGE-REACHABILITY.md): "check" is still exactly
+# one instance, but now its generic one rather than one Int/str-keyed
+# specialization: web::is_emailish captures its module-retained
+# local_extra_chars (a closure), check captures web::is_emailish's binding
+# to reach it through the emailish? bridge (as a qualified call would), and
+# hir::specialize keys every closure with a non-Int capture generically.
+# What this test guards -- refinement propagation never forks "check" into
+# several instances -- is unchanged; UriQueryValue?(q) is still eliminated
+# statically (native-refinement-propagation-refined-checks-runs-natively).
+test native-refinement-propagation-refined-checks-no-explosion {"check" gets exactly one instance: named-refinement propagation widens that one instance's parameter analysis, it does not fork new instances (spec's own §14/§18) -- generic since R2.a.1, see comment above} -body {
     set exprs [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]
     set hir [nativeHirOf $exprs]
     set summary [hir::specialize::summary $hir [hir::specialize::analyze $hir]]
     dict get $summary perFunction check
-} -result {generic 0 specializations 1}
+} -result {generic 1 specializations 0}
 
 # ---------------------------------------------------------------------------
 # §3: the safety model. A single trusted caller lets the fact through; a

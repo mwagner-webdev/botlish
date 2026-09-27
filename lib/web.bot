@@ -77,27 +77,18 @@ namespace web
 # (MINIMAL-IMMUTABLE-SET.md) for the local part's punctuation class
 # (". _ % +" plus "-"), over ordinary one-scalar str values (char_at's own
 # result type) -- never UTF-8 bytes, unlike additional_unreserved_chars's
-# byte::set above. Built once per is_emailish call (not once per character
-# scanned), deliberately *not* hoisted to true module scope the way
-# additional_unreserved_chars is: doing so (either as a module-level
-# constant referenced by a nested closure, or even as a top-level module
-# function exactly mirroring is_unreserved's own shape) reproduces a real,
-# previously-latent native-lowering defect -- confirmed by direct,
-# minimized repro, isolated by bisection to module-scope retention
-# specifically (not to predicate-passing, which is unaffected) -- whenever
-# web::is_emailish, or anything it calls, references *any* other root/
-# module binding and Emailish?/emailish? is itself called from inside a
-# user-defined block (exactly this benchmark's own "check" function): `native
-# lowering: binding bNN is not reachable from eNN` (NATIVE BUG), on
-# cranelift and cranelift-generic. See the report's set-membership section
-# for the full trace; per spec items 25/47/55/72 this is recorded as a
-# newly-exposed compiler weakness, not fixed here, and per-call
-# construction (still zero allocation per character scanned) is the
-# semantics-preserving choice until it is.
+# byte::set below. Retained once at module scope, exactly like
+# additional_unreserved_chars: constructed once at module initialization,
+# never per is_emailish call. (R2.a built it per call, inside is_emailish,
+# only to avoid a -module-fn bridge reachability defect that
+# R2A1-MODULE-FN-BRIDGE-REACHABILITY.md fixed: a bridged module function
+# that referenced any other module binding could not be reached from a
+# caller inside a user-defined block.)
+local_extra_chars = immutable_set_from_list([".", "_", "%", "+", "-"])
+
 fn is_emailish(v):
 
     n = length(v)
-    local_extra_chars = immutable_set_from_list([".", "_", "%", "+", "-"])
 
     fn char_at(i):
         substring(v, i, i + 1)

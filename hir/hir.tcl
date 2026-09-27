@@ -285,6 +285,7 @@ proc hir::ResolveModuleNativeTargets {hirVar targets} {
         return
     }
     set resolved [dict create]
+    set bridged [dict create]
     foreach {nativeName ns name} $targets {
         if {![dict exists $hir modules $ns]} {
             error "hir::buildSyntax: -module-native-targets: module \"$ns\" was not loaded into this program"
@@ -305,8 +306,62 @@ proc hir::ResolveModuleNativeTargets {hirVar targets} {
             error "hir::buildSyntax: -module-native-targets: \"${ns}::${name}\" is not bound to a function"
         }
         dict set resolved $nativeName [list $value [llength [dict get $hir exprs $value params]]]
+        set root [dict get $hir scopes [dict get $hir top] parent]
+        dict set bridged [dict get $hir scopes $root names $nativeName] $b
     }
     dict set hir moduleNativeTargets $resolved
+    BridgeProvenance hir $bridged
+}
+
+# Records, for every reference to a bridged native's root binding (BRIDGED:
+# root BindingId -> the target module function's own BindingId; an alias
+# spelling shares its canonical name's root binding, so both are covered),
+# what that reference now denotes on this backend: the module function's
+# Block value, which lives in the module function's own binding -- not the
+# native's root binding, which every region reaches for free.
+#
+#   * `bridge` (on the ref) is that module BindingId: the one place native
+#     lowering (native/lower.tcl's ModuleBridgeBinding) reads the bridged
+#     function's value from.
+#   * Every block enclosing the reference captures that module binding,
+#     exactly as a module-qualified reference to it
+#     (hir::resolve::ResolveQualifiedRef) already makes them -- so a caller
+#     reaches the bridged function the same way an ordinary
+#     `NAMESPACE::NAME` call from the same place would.
+#
+# Only the function's own binding is captured, never anything *it*
+# references: the function's module dependencies were captured into its
+# own closure by ordinary resolution of its own body, where it is defined
+# (its module section), and stay there. hir::resolve cannot do this itself:
+# the bridge's targets are only resolved here, after resolution and hygiene
+# (a bridged reference may also precede the target's own module section).
+proc hir::BridgeProvenance {hirVar bridged} {
+    upvar 1 $hirVar hir
+    if {[dict size $bridged] == 0} {
+        return
+    }
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] ne "ref" || ![dict exists $node binding]
+                || ![dict exists $bridged [dict get $node binding]]} {
+            continue
+        }
+        set b [dict get $bridged [dict get $node binding]]
+        dict set hir exprs $e bridge $b
+        set bindingScope [dict get $hir bindings $b scope]
+        for {set s [dict get $node scope]} {$s ne ""} {set s [dict get $hir scopes $s parent]} {
+            if {[dict get $hir scopes $s kind] ne "block"} {
+                continue
+            }
+            if {[scopeWithin $hir $bindingScope $s]} {
+                break
+            }
+            set block [dict get $hir scopes $s owner]
+            set captures [dict get $hir exprs $block captures]
+            if {$b ni $captures} {
+                dict set hir exprs $block captures [concat $captures [list $b]]
+            }
+        }
+    }
 }
 
 proc hir::Options {command defaults given} {

@@ -154,8 +154,10 @@ test emailish-predicate-redundant-check-nir-shape {the redundant check compiles 
     set hir [native::buildProgramHir $p]
     set text [native::nir $hir]
     regexp {func (\d+) "web::is_emailish"} $text -> isEmailishId
+    # R2.a.1: web::is_emailish is a closure (it captures its module-
+    # retained local_extra_chars), so the one real call is a `callenv`.
     list [regexp -all {func \d+ "web::is_emailish"} $text] \
-         [regexp -all "call $isEmailishId %" $text] \
+         [regexp -all "= call(?:env)? $isEmailishId %" $text] \
          [fourWay $p]
 } -result {1 1 {"yes"}}
 
@@ -303,11 +305,23 @@ test emailish-predicate-check-scanner-instance-count {each scanner helper (and w
 } -result 1
 
 # ---------------------------------------------------------------------------
-# check.n control: R2 must not disturb M9's own pre-existing improvement of
-# check's own `n` parameter, which has nothing to do with the predicate/
-# scanner graph.
+# check.n control: R2 did not disturb M9's own pre-existing improvement of
+# check's own `n` parameter ([0, 400], from check's Int-keyed instance).
+#
+# R2.a.1 (R2A1-MODULE-FN-BRIDGE-REACHABILITY.md) does lose it, and this pins
+# that honestly rather than hiding it: local_extra_chars is module-retained
+# again, so web::is_emailish captures it and is a closure; check reaches
+# that closure the way any caller of a module closure does -- by capturing
+# web::is_emailish's binding (exactly what an ordinary qualified
+# web::is_emailish(s) call from check would capture) -- so check itself is
+# now a closure with a non-Int capture, which hir::specialize's existing
+# code-growth bound for value-capturing closures keys generically
+# (check<generic>, parameters `any`), and M9's instance-entry Int fact has
+# no Int-keyed instance left to attach to. Recovering it is a specializer
+# policy question (a capture of a once-bound module binding is creation-
+# invariant), reported as R2.a.1's residual finding, not changed here.
 
-test emailish-predicate-check-n-control {check's own n parameter range is [0,400], unchanged by R2 (M9's own, unrelated improvement)} -body {
+test emailish-predicate-check-n-control {check's own n parameter range: [0,400] through R2/R2.a; unbounded since R2.a.1, because check<generic> (it captures the web::is_emailish closure) -- see comment above} -body {
     set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
     set spec [hir::specialize::analyze $hir]
     set analysis [hir::range::analyze $hir $spec]
@@ -317,7 +331,8 @@ test emailish-predicate-check-n-control {check's own n parameter range is [0,400
             set id $candidate
         }
     }
-    lindex [lmap p [dict get [dict get $analysis instances $id] params] {hir::range::show $p}] 0
-} -result {[0, 400]}
+    list [hir::specialize::label $spec $id] \
+        [lindex [lmap p [dict get [dict get $analysis instances $id] params] {hir::range::show $p}] 0]
+} -result [list check<generic> "\[-\u221E, +\u221E\]"]
 
 ::tcltest::cleanupTests

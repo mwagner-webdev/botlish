@@ -578,34 +578,32 @@ test blockescape-region-companion-flags-both-off {both off: the fully unoptimize
 # (hex_pair's result, esc_from's accumulator) plus one final
 # materialization; the 3 substrings are unchanged -- so total 23 -> 20.
 # Block allocations (this test's subject) are unchanged.
-# R2.a (R2A-IDIOMATIC-EMAILISH-SOURCE.md) raises this test's own pinned
-# counts sharply: is_emailish's local-punctuation ImmutableSet
-# (local_extra_chars) is built once per is_emailish call rather than once
-# at module scope (unlike additional_unreserved_chars above it in the same
-# file), so each of the 800 real is_emailish calls this benchmark's own two
-# check(400, ...) invocations make (R2's own report already established
-# the redundant *second* check per iteration compiles to a bare constant,
-# never a real call -- only the 800 real, distinct calls allocate) builds
-# and discards its own List + ImmutableSet + is_local_char closure. This is
-# not a source-tuning regression to chase away (spec items 28/48): true
-# module-scope retention of this set -- either as a module-level constant
-# referenced by a nested closure, or even hoisted to a plain top-level
-# module function exactly mirroring is_unreserved's own shape -- reproduces
-# a genuine, newly-exposed native-lowering defect ("native lowering:
-# binding bNN is not reachable from eNN", NATIVE BUG, on cranelift and
-# cranelift-generic) whenever web::is_emailish's own call graph references
-# any other root/module binding and Emailish?/emailish? is itself called
-# from inside a user-defined block -- exactly this benchmark's own "check"
-# shape. Per-call construction is the semantics-preserving choice until
-# that -module-fn-bridging defect (a generalization of R2's own disclosed,
-# not-fixed uriEscape/result-branch finding) is fixed; see the report.
-test blockescape-region-companion-refined-checks-1 {refined-checks.ir: Block allocations rise from 2 to 802 (800 real is_emailish calls each build their own local_extra_chars set/closure, plus the 2 module-startup uri_escape_text/is_unreserved closures) -- R2.a's disclosed per-call-construction cost, not module-scope retention (see comment above)} -body {
+# R2.a (R2A-IDIOMATIC-EMAILISH-SOURCE.md) raised these counts to
+# 11620/802/9204/811 (total/Block/String/List): its predicate-passing
+# scan_while materializes each char_at result as a String (9200 substr),
+# and, as a temporary workaround for a -module-fn bridge reachability
+# defect, it built is_emailish's local-punctuation ImmutableSet
+# (local_extra_chars) once per is_emailish call -- 800 List + 800
+# ImmutableSet per run of this benchmark's 800 real is_emailish calls.
+# R2.a.1 (R2A1-MODULE-FN-BRIDGE-REACHABILITY.md) fixes the bridge and
+# retains local_extra_chars once at module scope again: List 811 -> 12 (11
+# startup lists as before plus local_extra_chars' own literal list, once),
+# ImmutableSet 801 -> 2 (additional_unreserved_chars and local_extra_chars,
+# once each), total 11620 -> 10023. Block is 803: the 2 startup closures as
+# before, web::is_emailish's own startup closure (it now captures the
+# module set), and 800 is_local_char closures -- one per is_emailish call,
+# because is_local_char is nested in is_emailish and captures the module
+# binding web::local_extra_chars (module bindings are reached by capture;
+# see the report). The 9200 char_at Strings are untouched (predicate
+# passing, not set retention).
+test blockescape-region-companion-refined-checks-1 {refined-checks.ir: local_extra_chars' List/ImmutableSet are module-init only (R2.a.1); Block 803 = 3 startup closures + 800 per-call is_local_char closures capturing the module set; the 9200 predicate-passing char_at Strings are unchanged} -body {
     core::loadLibrary web
     set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
     set on [native::allocationReport $hir summary 1]
     list [native::evalHir $hir] [dict get $on total allocations] [dict get $on byKind Block allocations] \
-        [dict get $on byKind String allocations] [dict get $on byKind List allocations]
-} -result {{list {{int 400} {int 0}}} 11620 802 9204 811}
+        [dict get $on byKind String allocations] [dict get $on byKind List allocations] \
+        [dict get $on byKind ImmutableSet allocations]
+} -result {{list {{int 400} {int 0}}} 10023 803 9204 12 2}
 
 test blockescape-region-companion-refined-checks-2 {refined-checks.ir: char_at's NIR has no closure/callenvmulti, and env=0/results=3 -- R2 (R2-ORDINARY-EMAILISH-PREDICATE.md) collapses this to one shared instance, not two per-call-site copies} -body {
     core::loadLibrary web

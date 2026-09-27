@@ -1,0 +1,446 @@
+# module-fn-bridge-reachability.test -- R2.a.1
+# (R2A1-MODULE-FN-BRIDGE-REACHABILITY.md): a -module-fn-bridged Botlish
+# function keeps its own module dependencies wherever its caller is.
+#
+# The native (Cranelift) backend runs a native registered with
+# -module-fn {NAMESPACE NAME} as the ordinary module function
+# NAMESPACE::NAME (native/native.tcl's module-native bridge): hir::types
+# types every reference to the native's root binding as that function's
+# Block. A module function M that references another module binding D
+# captures D (ordinary resolution of M's own body, in M's own module
+# section) and so is a closure, whose value lives in M's own module
+# binding. Before R2.a.1 nothing recorded that a caller of the bridged
+# native needs M's binding: a root native reference captures nothing, so
+# from inside any user-defined block native lowering could not reach M's
+# closure -- `native lowering: binding bNN is not reachable from eNN`
+# (NATIVE BUG), on cranelift and cranelift-generic. At program top level
+# (where every module binding is a local of the program function) and for
+# an M with no module dependency (an environment-free function, reached as
+# a static fnvalue from anywhere) it always worked.
+#
+# The fix (hir/hir.tcl's hir::BridgeProvenance) records the bridge's own
+# provenance on each bridged reference (`bridge`: M's BindingId) and makes
+# every enclosing block capture M's binding -- exactly what a module-
+# qualified reference NAMESPACE::NAME from the same place already does.
+# Only M itself: M's dependencies stay in M's own closure, where M is
+# defined, never copied into or made visible to the caller.
+#
+# These fixtures are deliberately independent of lib/web.bot (a scratch
+# module plus throwaway test natives), so a future rewrite of emailish?'s
+# own source cannot stop exercising the bug. The web.bot-specific
+# consequences (emailish?/uriEscape) are pinned at the end.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+
+set parityBackends {interp compile cranelift-generic cranelift}
+
+proc fourWay {exprs} {
+    set shown [lmap b $::parityBackends {lrange [outcomeUnder $b $exprs] 0 1}]
+    if {[llength [lsort -unique $shown]] != 1} {
+        error "mismatch across $::parityBackends: $shown"
+    }
+    return [lindex $shown 0]
+}
+
+# ---------------------------------------------------------------------------
+# The scratch module and its bridged test natives.
+
+set ::bridgeLibrary [tcltest::makeDirectory module-fn-bridge-scratch-[pid]]
+set ::savedLibraryDir $::core::libraryDir
+set ::core::libraryDir $::bridgeLibrary
+set channel [open [file join $::bridgeLibrary bridgefix.bot] w]
+fconfigure $channel -encoding utf-8
+puts -nonewline $channel {namespace bridgefix
+
+offset = 10
+scale = 3
+greeting = "hello"
+weights = [1, 2, 3]
+marks = immutable_set_from_list([1, 2, 3])
+
+fn plain(v):
+    v + 1
+
+fn local_dep(v):
+    off = 10
+    v + off
+
+fn one_dep(v):
+    v + offset
+
+fn two_deps(v):
+    v * scale + offset
+
+fn string_dep(v):
+    v + length(greeting)
+
+fn list_dep(v):
+    v + list_length(weights)
+
+fn is_marked(x):
+    immutable_set_contains(marks, x)
+
+fn transitive(v):
+    is_marked(v)
+
+fn inc(x):
+    x + 1
+
+fn fn_dep(v):
+    inc(v)
+}
+close $channel
+
+# NATIVE -> {MODULE-FUNCTION TCL-EXPR-OF-v RESULT-TYPE}: the Tcl -impl
+# interp/compile run computes exactly what the module function computes.
+set ::bridgeNatives {
+    probe_plain      {plain      {$v + 1}               int}
+    probe_local      {local_dep  {$v + 10}              int}
+    probe_one        {one_dep    {$v + 10}              int}
+    probe_two        {two_deps   {$v * 3 + 10}          int}
+    probe_string     {string_dep {$v + 5}               int}
+    probe_list       {list_dep   {$v + 3}               int}
+    probe_transitive {transitive {$v in {1 2 3}}        bool}
+    probe_fn         {fn_dep     {$v + 1}               int}
+}
+dict for {name spec} $::bridgeNatives {
+    lassign $spec fn body result
+    if {$name in [core::native::names]} {
+        continue
+    }
+    set wrap [expr {$result eq "bool" ? "core::value::bool" : "core::value::int"}]
+    proc ::bridgeImpl_$name {value} [format {
+        set v [core::value::intOf [core::value::expect int $value %s]]
+        return [%s [expr {%s}]]
+    } $name $wrap $body]
+    core::native::register $name -arity 1 -impl ::bridgeImpl_$name \
+        -param-types {int} -result-type $result -module-fn [list bridgefix $fn]
+}
+
+# Caller shapes: each a program calling native P on 2 from a different
+# lexical place.
+proc callerShape {shape p} {
+    switch -- $shape {
+        root {
+            return [list [list call [list ref $p] {const int 2}]]
+        }
+        toplevel-fn {
+            return [list [list bind check [list block {s} [list call [list ref $p] {ref s}]]] \
+                {call {ref check} {const int 2}}]
+        }
+        nested-noncapturing {
+            return [list [list bind outer [list block {s} \
+                    [list bind inner [list block {t} [list call [list ref $p] {ref t}]]] \
+                    {call {ref inner} {ref s}}]] \
+                {call {ref outer} {const int 2}}]
+        }
+        nested-capturing {
+            return [list [list bind outer [list block {s} \
+                    [list bind inner [list block {} [list call [list ref $p] {ref s}]]] \
+                    {call {ref inner}}]] \
+                {call {ref outer} {const int 2}}]
+        }
+        branch {
+            return [list [list bind check [list block {s} \
+                    [list if {call {ref <} {ref s} {const int 100}} \
+                        [list block {} [list call [list ref $p] {ref s}]] \
+                        [list block {} [list call [list ref $p] {const int 0}]]]]] \
+                {call {ref check} {const int 2}}]
+        }
+        returned-closure {
+            return [list [list bind mk [list block {k} \
+                    [list block {s} [list call [list ref $p] [list call {ref +} {ref s} {ref k}]]]]] \
+                {call {call {ref mk} {const int 0}} {const int 2}}]
+        }
+    }
+}
+set ::callerShapes {root toplevel-fn nested-noncapturing nested-capturing branch returned-closure}
+
+# The captures (binding names) of the block bound to NAME in HIR.
+proc capturesOf {hir name} {
+    foreach e [hirFind $hir bind] {
+        if {[hir::get $hir $e name] eq $name} {
+            set block [hir::get $hir $e value]
+            return [lmap b [hir::get $hir $block captures] {dict get [hir::binding $hir $b] name}]
+        }
+    }
+    error "no binding $name"
+}
+
+# ---------------------------------------------------------------------------
+# The reachability matrix: every dependency kind x every caller shape, on
+# all four backends. Before R2.a.1 every combination of a *dependent*
+# module function (one_dep, two_deps, string_dep, list_dep, transitive)
+# with a non-root caller failed on both native backends; plain, local_dep
+# and fn_dep (environment-free functions) and every root caller passed.
+
+foreach {name expect} {
+    probe_plain 3  probe_local 12  probe_one 12  probe_two 16
+    probe_string 7  probe_list 5  probe_transitive true  probe_fn 3
+} {
+    foreach shape $::callerShapes {
+        test module-fn-bridge-$name-$shape "$name ([lindex [dict get $::bridgeNatives $name] 0]) called from a $shape caller agrees on every backend" -body {
+            fourWay [callerShape $shape $name]
+        } -result [list value $expect]
+    }
+}
+
+# The minimal pre-R2.a.1 failure, spelled out: bridged function with one
+# module dependency, called through a user-defined block. The same
+# implementation with its dependency made local, and the same call at
+# program root, are the passing controls (pinned in the matrix above too).
+test module-fn-bridge-minimal-reproducer {module-fn bridge + module dependency + nested caller: no NATIVE BUG on either native backend} -body {
+    set p {
+        {bind check {block {s} {call {ref probe_one} {ref s}}}}
+        {call {ref check} {const int 2}}
+    }
+    lmap b {cranelift-generic cranelift} {lrange [outcomeUnder $b $p] 0 1}
+} -result {{value 12} {value 12}}
+
+# ---------------------------------------------------------------------------
+# Provenance: the caller captures the module function binding, never the
+# module function's own dependencies; the dependencies stay in the module
+# function's closure; the bridged reference still denotes the native's own
+# root binding (predicate identity) and records the module binding as its
+# `bridge`.
+
+test module-fn-bridge-caller-captures-only-module-function {a caller captures bridgefix::one_dep (the bridged function) and never bridgefix::offset (its dependency); one_dep captures offset itself} -body {
+    set hir [native::buildProgramHir [callerShape toplevel-fn probe_one]]
+    list [capturesOf $hir check] [capturesOf $hir bridgefix::one_dep]
+} -result {bridgefix::one_dep bridgefix::offset}
+
+test module-fn-bridge-transitive-dependencies-stay-in-module {a transitive chain (transitive -> is_marked -> marks) keeps each dependency in its own definer's closure; the caller captures only the bridged function} -body {
+    set hir [native::buildProgramHir [callerShape nested-capturing probe_transitive]]
+    list [capturesOf $hir outer] [capturesOf $hir inner] \
+        [capturesOf $hir bridgefix::transitive] [capturesOf $hir bridgefix::is_marked]
+} -result {bridgefix::transitive {s bridgefix::transitive} bridgefix::is_marked bridgefix::marks}
+
+test module-fn-bridge-two-dependencies-not-copied {two module dependencies are captured by the module function only, in its own order, never by the caller} -body {
+    set hir [native::buildProgramHir [callerShape toplevel-fn probe_two]]
+    list [capturesOf $hir check] [capturesOf $hir bridgefix::two_deps]
+} -result {bridgefix::two_deps {bridgefix::scale bridgefix::offset}}
+
+test module-fn-bridge-reference-keeps-root-identity {the bridged reference's own binding is still the native's root binding; its bridge is the module function's binding} -body {
+    set hir [native::buildProgramHir [callerShape toplevel-fn probe_one]]
+    set refs [hirFind $hir ref probe_one]
+    set e [lindex $refs 0]
+    set b [hir::get $hir $e binding]
+    list [llength $refs] [dict get [hir::binding $hir $b] kind] [dict get [hir::binding $hir $b] name] \
+        [dict get [hir::binding $hir [hir::get $hir $e bridge]] name]
+} -result {1 root probe_one bridgefix::one_dep}
+
+test module-fn-bridge-interp-hir-unbridged {without the native backend's bridge (plain hir::build, interp/compile), the same reference captures nothing and carries no bridge} -body {
+    set hir [hirOf {*}[callerShape toplevel-fn probe_one]]
+    set e [lindex [hirFind $hir ref probe_one] 0]
+    list [capturesOf $hir check] [dict exists [hir::node $hir $e] bridge]
+} -result {{} 0}
+
+# An environment-free bridged function needs nothing from its caller: the
+# caller's structural capture of it is dropped by native lowering's own
+# CaptureList (a static fnvalue), so the caller stays environment-free.
+test module-fn-bridge-envless-target-caller-stays-envless {a caller of an environment-free bridged function (fn_dep -> inc) stays environment-free in NIR} -body {
+    set text [native::nir [native::buildProgramHir [callerShape toplevel-fn probe_fn]]]
+    regexp {func \d+ "check" params=(\d+) env=(\d+)[^\n]*captures=(\d+)} $text -> nparams nenv ncaptures
+    list $nparams $nenv $ncaptures
+} -result {1 0 0}
+
+# ---------------------------------------------------------------------------
+# Call-site independence and one shared implementation: moving the call
+# into another lexical block never clones or re-identifies the module
+# function.
+
+test module-fn-bridge-three-callers-one-implementation {three unrelated block callers (a top-level function, a nested non-capturing function, a nested capturing closure) share one compiled bridgefix::two_deps instance} -body {
+    set p {
+        {bind a {block {s} {call {ref probe_two} {ref s}}}}
+        {bind b {block {s} {bind inner {block {t} {call {ref probe_two} {ref t}}}} {call {ref inner} {ref s}}}}
+        {bind c {block {s} {bind inner {block {} {call {ref probe_two} {ref s}}}} {call {ref inner}}}}
+        {call {ref list} {call {ref a} {const int 1}} {call {ref b} {const int 2}} {call {ref c} {const int 3}}}
+    }
+    set hir [native::buildProgramHir $p]
+    set spec [hir::specialize::analyze $hir]
+    set labels [lsearch -all -inline [lmap id [dict get $spec used] {hir::specialize::label $spec $id}] bridgefix::two_deps*]
+    list [regexp -all {func \d+ "bridgefix::two_deps"} [native::nir $hir]] $labels [fourWay $p]
+} -result {1 bridgefix::two_deps<generic> {value {[13, 16, 19]}}}
+
+# The bridged function's instance family depends only on argument facts,
+# never on where the call sits: every shape has the one shared generic
+# instance (the module closure itself is materialized at module init), with
+# an identical compiled header everywhere, and an Int instance exactly when
+# some call passes a statically Int argument (the root and branch shapes'
+# literals, the returned closure's s + k). Block callers pass a parameter of
+# a generic-keyed closure (it captures the module function's closure, and
+# hir::specialize keys every closure with a non-Int capture generically) --
+# exactly the split an ordinary qualified call bridgefix::two_deps(s) makes
+# from the same places (module-fn-bridge-matches-qualified-call-instances).
+test module-fn-bridge-identity-independent-of-caller-shape {the bridged function's instances follow argument facts only; its generic instance's compiled header is identical from every caller shape} -body {
+    set result {}
+    set genericHeaders {}
+    foreach shape $::callerShapes {
+        set hir [native::buildProgramHir [callerShape $shape probe_two]]
+        set spec [hir::specialize::analyze $hir]
+        dict set result $shape [lsort [lsearch -all -inline \
+            [lmap id [dict get $spec used] {hir::specialize::label $spec $id}] bridgefix::two_deps*]]
+        foreach h [regexp -all -inline {func \d+ "bridgefix::two_deps"[^@]*} [native::nir $hir]] {
+            if {[string match {*instance="generic"*} $h]} {
+                lappend genericHeaders [regsub {^func \d+ } [regsub { regs=\d+} $h {}] {}]
+            }
+        }
+    }
+    list $result [lsort -unique $genericHeaders]
+} -result {{root {bridgefix::two_deps<generic> bridgefix::two_deps<int>} toplevel-fn bridgefix::two_deps<generic> nested-noncapturing bridgefix::two_deps<generic> nested-capturing bridgefix::two_deps<generic> branch {bridgefix::two_deps<generic> bridgefix::two_deps<int>} returned-closure {bridgefix::two_deps<generic> bridgefix::two_deps<int>}} {{"bridgefix::two_deps" params=1 env=1 pnames="v" captures=2 instance="generic" }}}
+
+# ---------------------------------------------------------------------------
+# Ordinary module-call control: the bridged spelling sees exactly the
+# lexical environment an ordinary qualified call from the same place sees.
+
+test module-fn-bridge-matches-qualified-call {check(s) calling bridgefix::one_dep(s) directly (surface module call) and through probe_one (bridge) capture the same binding and agree} -body {
+    set main [file join $::bridgeLibrary main.bot]
+    set ch [open $main w]
+    puts -nonewline $ch "fn check(s):\n    bridgefix::one_dep(s)\ncheck(2)\n"
+    close $ch
+    set direct [surface::readProgramFile $main]
+    set bridged [native::buildProgramHir [callerShape toplevel-fn probe_one]]
+    list [capturesOf $direct check] [capturesOf $bridged check] \
+        [lindex [outcomeUnder cranelift [hir::lower $direct]] 1] \
+        [lindex [outcomeUnder cranelift [callerShape toplevel-fn probe_one]] 1]
+} -result {bridgefix::one_dep bridgefix::one_dep 12 12}
+
+test module-fn-bridge-matches-qualified-call-instances {the bridged spelling and an ordinary qualified call, from the same program root and function caller, produce the identical instance family} -body {
+    set main [file join $::bridgeLibrary main2.bot]
+    set ch [open $main w]
+    puts -nonewline $ch "fn check(s):\n    bridgefix::two_deps(s)\n\[check(1), bridgefix::two_deps(3)\]\n"
+    close $ch
+    set direct [surface::readProgramFile $main]
+    set bridged [native::buildProgramHir {
+        {bind check {block {s} {call {ref probe_two} {ref s}}}}
+        {call {ref list} {call {ref check} {const int 1}} {call {ref probe_two} {const int 3}}}
+    }]
+    lmap hir [list $direct $bridged] {
+        set spec [hir::specialize::analyze $hir]
+        lsearch -all -inline -regexp [lmap id [dict get $spec used] {hir::specialize::label $spec $id}] \
+            {^(bridgefix::two_deps|check)<}
+    }
+} -result {{bridgefix::two_deps<generic> bridgefix::two_deps<int> check<generic>} {bridgefix::two_deps<generic> bridgefix::two_deps<int> check<generic>}}
+
+# ---------------------------------------------------------------------------
+# Negative controls: the fix does not make module bindings lexically
+# visible to callers, and does not weaken ordinary scope rules.
+
+test module-fn-bridge-dependency-not-visible-to-caller {a caller of probe_one still cannot name one_dep's dependency (offset) unqualified: unbound on every backend} -body {
+    set p {
+        {bind check {block {s} {call {ref +} {call {ref probe_one} {ref s}} {ref offset}}}}
+        {call {ref check} {const int 2}}
+    }
+    lmap b $::parityBackends {lindex [outcomeUnder $b $p] 1}
+} -result {{CORE SEMANTIC UNBOUND} {CORE SEMANTIC UNBOUND} {CORE SEMANTIC UNBOUND} {CORE SEMANTIC UNBOUND}}
+
+test module-fn-bridge-out-of-scope-local-still-rejected {an ordinary out-of-scope local reference beside a bridged call is still a static UNBOUND diagnostic} -body {
+    set p {
+        {bind f {block {s} {bind hidden {const int 1}} {call {ref probe_one} {ref s}}}}
+        {call {ref +} {call {ref f} {const int 2}} {ref hidden}}
+    }
+    set hir [native::buildProgramHir $p]
+    list [lmap d [hir::diagnostics $hir] {dict get $d kind}] \
+        [lmap b $::parityBackends {lindex [outcomeUnder $b $p] 1}]
+} -result {UNBOUND {{CORE SEMANTIC UNBOUND} {CORE SEMANTIC UNBOUND} {CORE SEMANTIC UNBOUND} {CORE SEMANTIC UNBOUND}}}
+
+# ---------------------------------------------------------------------------
+# lib/web.bot's own bridged natives, through user-defined blocks.
+
+set ::core::libraryDir $::savedLibraryDir
+tcltest::removeDirectory [file tail $::bridgeLibrary]
+core::loadLibrary web
+
+# uriEscape (-module-fn {web uri_escape_text}: uri_escape_text captures
+# hex_digits and web::is_unreserved) had the same failure from any user
+# block. R2 recorded it as "uriEscape + result-typed if/ok/error-value
+# branch lowering"; the result-typed branch is incidental (the same branch
+# at program root always worked) -- the user-defined block is the trigger.
+test module-fn-bridge-uriescape-user-block {uriEscape called inside a user-defined block: same text on every backend} -body {
+    set p {
+        {bind f {block {s} {call {ref uriEscape} {ref s}}}}
+        {call {ref f} {const str {a b}}}
+    }
+    lmap b $::parityBackends {string map {#{UriQueryValue} {}} [lrange [outcomeUnder $b $p] 0 1]}
+} -result {{value {"a%20b"}} {value {"a%20b"}} {value {"a%20b"}} {value {"a%20b"}}}
+
+test module-fn-bridge-uriescape-result-branch {R2's recorded uriEscape shape: a result-typed if/ok/error-value branch inside a user block} -body {
+    set p {
+        {bind f {block {s}
+            {if {call {ref emailish?} {ref s}}
+                {block {} {ok {call {ref uriEscape} {ref s}}}}
+                {block {} {error-value {const str bad}}}}}}
+        {call {ref list} {call {ref f} {const str a@b.cd}} {call {ref f} {const str nope}}}
+    }
+    lmap b $::parityBackends {string map {#{UriQueryValue} {}} [lrange [outcomeUnder $b $p] 0 1]}
+} -result [lrepeat 4 {value {[ok("a%40b.cd"), error("bad")]}}]
+
+# emailish? (-module-fn {web is_emailish}: is_emailish captures its module-
+# retained local_extra_chars set) through a user block, both spellings,
+# over the whole R2 semantic corpus.
+foreach {label address expect} {
+    ascii-valid                    someone@example.com          1
+    unicode-valid                  café@例え.テスト                1
+    no-at                          not-an-email                 0
+    empty-local-part               @example.com                 0
+    invalid-local-char             {"a b"@example.com}           0
+    invalid-domain-label           foo@bad_domain.com            0
+    tld-too-short                  foo@example.c                 0
+    empty-string                   ""                            0
+    at-only                        @                             0
+} {
+    test module-fn-bridge-emailish-user-block-$label "emailish?/Emailish? inside a user block agree on \"$address\" on every backend" -body {
+        lmap p {emailish? Emailish?} {
+            fourWay [list \
+                [list bind check [list block {s} [list if [list call [list ref $p] {ref s}] \
+                    {block {} {const int 1}} {block {} {const int 0}}]]] \
+                [list call {ref check} [list const str $address]]]
+        }
+    } -result [list [list value $expect] [list value $expect]]
+}
+
+# Module dependency + user-block caller + refinement + known-folding, the
+# real R2/R2.a architecture in one fixture: the outer check refines s, the
+# redundant inner check (other spelling) is HIR-known and never called.
+test module-fn-bridge-emailish-refinement-in-user-block {a user-block caller of the module-set-retaining emailish? still refines s, folds the redundant re-check, and makes exactly one real call} -body {
+    set p {
+        {bind check {block {s}
+            {if {call {ref emailish?} {ref s}}
+                {block {} {if {call {ref Emailish?} {ref s}} {block {} {ref s}} {block {} {const str no}}}}
+                {block {} {const str no}}}}}
+        {call {ref check} {const str someone@example.com}}
+    }
+    set hir [native::buildProgramHir $p]
+    set calls [lsearch -all -inline -not [lmap e [hirFind $hir call] {
+        set callee [hir::get $hir $e callee]
+        expr {[hir::kind $hir $callee] eq "ref" && [hir::get $hir $callee name] in {emailish? Emailish?}
+            ? [list [hir::get $hir $callee name] [hir::get $hir $e known]] : ""}
+    }] {}]
+    set refined [lindex [hirRefTypes $hir s] end]
+    set text [native::nir $hir]
+    regexp {func (\d+) "web::is_emailish"} $text -> id
+    list $calls $refined [regexp -all {func \d+ "web::is_emailish"} $text] \
+        [regexp -all "= call(?:env)?(?:multi)? $id " $text] [lindex [fourWay $p] 1]
+} -result {{{emailish? {}} {Emailish? 1}} {str[Emailish]} 1 1 {"someone@example.com"}}
+
+# local_extra_chars is module-retained again: built once at module
+# initialization (the program function), never inside web::is_emailish.
+test module-fn-bridge-emailish-set-retained-once {refined-checks.ir: local_extra_chars' List and ImmutableSet are each constructed exactly once (module init), none per emailish? call} -body {
+    set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
+    set webPath [file normalize [file join $::projectRoot lib web.bot]]
+    set line [lsearch -regexp [split [core::ReadFile $webPath] \n] {^local_extra_chars = }]
+    incr line
+    set sites {}
+    foreach site [dict get [native::allocationReport $hir sites] sites] {
+        set loc [dict get $site location]
+        if {[dict exists $loc file] && [file normalize [dict get $loc file]] eq $webPath
+                && [dict get $loc line] == $line} {
+            lappend sites [list [dict get $site operation] [dict get $site allocations]]
+        }
+    }
+    set text [native::nir $hir]
+    set body [lindex [regexp -inline {func \d+ "web::is_emailish"[^\n]*\n(.*?)\nend} $text] 1]
+    list [lsort $sites] [regexp -all {op setfromlist} $body] [regexp -all {op listnew} $body]
+} -result {{{listnew 1} {setfromlisttotal 1}} 0 0}
+
+cleanupTests
