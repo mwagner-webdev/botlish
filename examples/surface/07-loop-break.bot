@@ -1,6 +1,8 @@
-# break carries the loop's value.
+# break never carries a value (PAYLOAD-FREE-BREAK.md): a bare loop's break
+# always ends it with the loop's own intrinsic procedural result, unit --
+# never a value supplied at the break site.
 #
-# expect: 42
+# expect: unit
 
 loop:
-    break 42
+    break

@@ -135,17 +135,41 @@ else
         (int 3)}
 
 test parse-loop {loop with break, continue and return} -body {
-    ast "fn f(n):\n    loop:\n        if n:\n            continue\n        break\n    return\n\nloop:\n    break 42\nfn g():\n    return 1 + 2"
+    ast "fn f(n):\n    loop:\n        if n:\n            continue\n        break\n    return\n\nfn g():\n    return 1 + 2"
 } -result {fn f (n)
     loop
         if (name n)
             (continue)
         (break)
     (return)
-loop
-    (break (int 42))
 fn g ()
     (return (binary + (int 1) (int 2)))}
+
+# PAYLOAD-FREE-BREAK.md: break never takes a value, in any loop kind --
+# unlike parse-loop above (a bare break), "break 42" is now a syntax error,
+# not a valid AST node, with no exception for any loop kind (item 49).
+foreach {name source expected} {
+    bare-loop      "loop:\n    break 42"
+        {2:11 "break" does not take a value, found integer 42}
+    counted-loop   "loop i from 0 to 10:\n    break 1"
+        {2:11 "break" does not take a value, found integer 1}
+    list-loop      "loop x in xs:\n    break \"nope\""
+        {2:11 "break" does not take a value, found string "nope"}
+    nested         "loop:\n    loop i from 0 to 10:\n        break 1"
+        {3:15 "break" does not take a value, found integer 1}
+    conditional    "loop:\n    if true:\n        break 1"
+        {3:15 "break" does not take a value, found integer 1}
+    call           "loop:\n    break f()"
+        {2:11 "break" does not take a value, found name "f"}
+} {
+    test parse-error-break-value-$name "syntax error: break VALUE ($name)" -body {
+        parseError $source
+    } -result $expected
+}
+
+test parse-break-value-not-evaluated {a break payload expression is never even parsed as an expression, so an unterminated string in it is still just the ordinary "found" description, not a deeper parse into it} -body {
+    parseError "loop:\n    break f(g(h()))"
+} -result {2:11 "break" does not take a value, found name "f"}
 
 test parse-blank-lines-in-suites {blank and comment lines inside suites} -body {
     ast "fn f():\n    x = 1\n\n    # comment\n\n    x\n"
@@ -236,8 +260,8 @@ test parse-boolean-errors {not is not an operand of arithmetic; != does not chai
 # ---------------------------------------------------------------------------
 # if as a value
 
-test parse-if-values {an if as the value of a binding, return or break} -body {
-    ast "x = if a:\n    1\nelse:\n    2\nfn f():\n    return if b:\n        3\nloop:\n    break if c:\n        4\n    else:\n        5\ny = x"
+test parse-if-values {an if as the value of a binding or return -- not break, which is never valued (PAYLOAD-FREE-BREAK.md)} -body {
+    ast "x = if a:\n    1\nelse:\n    2\nfn f():\n    return if b:\n        3\ny = x"
 } -result {bind x = if (name a)
     (int 1)
 else
@@ -245,16 +269,15 @@ else
 fn f ()
     return if (name b)
         (int 3)
-loop
-    break if (name c)
-        (int 4)
-    else
-        (int 5)
 (bind y (name x))}
+
+test parse-break-if-value-error {"break if c: ...:" is a break-with-a-value error, not an if-value} -body {
+    parseError "loop:\n    break if c:\n        4\n    else:\n        5"
+} -result {2:11 "break" does not take a value, found "if"}
 
 test parse-if-value-errors {an if is not an operand} -body {
     list [parseError "x = 1 + if a:\n    1"] [parseError "f(if a:\n    1)"] [parseError "x = if a: 1 else: 2"]
-} -result {{1:9 an "if" value must be the whole right side of "=", "return" or "break"} {1:3 an "if" value must be the whole right side of "=", "return" or "break"} {1:11 expected a new line and an indented block after ":", found integer 1}}
+} -result {{1:9 an "if" value must be the whole right side of "=" or "return"} {1:3 an "if" value must be the whole right side of "=" or "return"} {1:11 expected a new line and an indented block after ":", found integer 1}}
 
 # ---------------------------------------------------------------------------
 # Recovery

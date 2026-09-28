@@ -14,6 +14,24 @@
 #   (countloop START-EXPR END-EXPR ELEMENT-BLOCK)
 #   (return EXPR)
 #   (break)                     (break EXPR)
+#                               PAYLOAD-FREE-BREAK.md: no valid Botlish
+#                               source program can ever lower to "(break
+#                               EXPR)" (surface/parser.tcl rejects any
+#                               break payload at parse time, in every loop
+#                               kind) -- but this core-IR shape itself is
+#                               deliberately kept: raw core-IR text below
+#                               the surface parser (e.g. bench/loop-
+#                               count.ir, lifted to HIR by hir::build's
+#                               fromIR) still legitimately uses it, with
+#                               its full pre-milestone "overrides a plain
+#                               loop/countloop's own result, discarding
+#                               whatever was in flight" semantics, both to
+#                               keep that canonical benchmark's behavior
+#                               and generated code stable and as the
+#                               substrate the future `leave VALUE`
+#                               construct is expected to lower to. See
+#                               hir/resolve.tcl's own break case for the
+#                               full "two-tier" design this implements.
 #   (continue)
 #   (ok EXPR)
 #   (error-value EXPR)

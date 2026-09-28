@@ -268,19 +268,19 @@ f()}
 # ---------------------------------------------------------------------------
 # break / continue / return / error composition
 
-test loop-counted-break-value {break VALUE ends the loop immediately with VALUE as the whole loop's result} -body {
-    loopInterpValue {loop i from 0 to 10:
+# PAYLOAD-FREE-BREAK.md: break never carries a value, in any loop kind, at
+# the surface level -- a countloop no longer has override-and-discard
+# break-VALUE semantics (this deliberately removes what used to be
+# loop-counted-break-value/loop-counted-break-parity's own subject: break
+# VALUE overriding the loop's whole result). It is now a syntax error,
+# rejected before any backend runs, so there is nothing left to parity-
+# check across backends for this case.
+test loop-counted-break-value-rejected {break VALUE is a syntax error, not an override of the loop's result} -body {
+    parseErrorOf {loop i from 0 to 10:
     if i == 4:
         break i * 100
 }
-} -result 400
-
-test loop-counted-break-parity {break agrees on every backend} -body {
-    loopParity {loop i from 0 to 10:
-    if i == 4:
-        break i * 100
-}
-} -result same
+} -result {3:15 "break" does not take a value, found name "i"}
 
 test loop-counted-break-bare {a plain break (no value) ends the loop with unit} -body {
     loopInterpValue {loop i from 0 to 10:
@@ -422,14 +422,21 @@ f()}
 } -result 4
 
 test loop-counted-nested-counted-in-bare {a counted loop inside a bare loop: bare loop's own break still works} -body {
-    loopInterpValue {n = 0
-loop:
+    # PAYLOAD-FREE-BREAK.md: break never carries a value, so the bare
+    # loop's own break can no longer hand go(0, 0)'s value out directly --
+    # it is computed first, the bare loop then breaks (its own Unit result
+    # discarded), and the function falls through to the already-computed
+    # result, still genuinely exercising the outer bare loop's own break.
+    loopInterpValue {fn f():
     fn go(i, acc):
         loop j from i to 3:
             return go(j + 1, acc + 1)
         acc
-    break go(0, 0)
-}
+    result = go(0, 0)
+    loop:
+        break
+    result
+f()}
 } -result 3
 
 test loop-counted-bare-in-counted {a bare loop inside a counted loop: bare loop's own break stays local} -body {
@@ -438,7 +445,8 @@ test loop-counted-bare-in-counted {a bare loop inside a counted loop: bare loop'
         loop j from i to 3:
             fn once():
                 loop:
-                    break 1
+                    break
+                1
             return go(j + 1, acc + once())
         acc
     go(0, 0)
@@ -475,7 +483,8 @@ test loop-counted-nested-parity {a representative nested-loop combination agrees
         loop j from i to 3:
             fn once():
                 loop:
-                    break 1
+                    break
+                1
             return go(j + 1, acc + once())
         acc
     go(0, 0)
@@ -537,9 +546,9 @@ test loop-counted-existing-loop-in-still-parses {loop x in EXPR: is unaffected b
 
 test loop-counted-existing-bare-loop-still-parses {bare loop: is unaffected} -body {
     loopInterpValue {loop:
-    break 42
+    break
 }
-} -result 42
+} -result unit
 
 test loop-counted-from-usable-as-identifier {"from"/"down"/"to"/"through"/"by" remain ordinary identifiers outside a loop header} -body {
     loopInterpValue {loop from in [1, 2]:

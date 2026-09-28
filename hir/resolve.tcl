@@ -512,14 +512,39 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 # SOUNDNESS.md once had to reason about for the old
                 # override semantics; disallowing it outright here removes
                 # the hazard at the source instead of re-deriving it in
-                # hir/types.tcl on every listloop. Bare `break` and
-                # `continue` remain fully valid; a plain `loop:`/countloop
-                # target keeps its own established `break VALUE` semantics
-                # unchanged (RETURNING-ITERABLE-LOOPS.md's own "why counted
-                # loops remain unchanged").
+                # hir/types.tcl on every listloop. This check stays
+                # listloop-specific (not a universal "no HIR break may ever
+                # carry a value" rule) -- PAYLOAD-FREE-BREAK.md's own "two-
+                # tier" design, below, explains why a plain `loop:`/countloop
+                # target does not need the same defense here.
                 hir::Diagnose hir LISTLOOP-BREAK-VALUE \
                     "break with a value is not valid inside a returning iterable loop (loop x in ...): use a bare break to end the loop with the collected prefix" $e
             }
+            # PAYLOAD-FREE-BREAK.md: at the *surface language* level, break
+            # never carries a value in any loop kind -- but that rule is
+            # enforced entirely in the parser (surface/parser.tcl's own
+            # `break` case in Simple), not here. No valid parse can ever
+            # reach this proc with a nonempty break value, so this proc adds
+            # no defensive check of its own for a plain `loop:`/countloop
+            # target, deliberately (a change from that milestone's own
+            # default "add a resolver-defense check for any internal
+            # construction path below the parser" guidance -- see that
+            # report's own "Two-tier design" section for why: this HIR/core-
+            # IR level is also reachable from *below* the surface parser,
+            # via `hir::syntax::breakNode`'s own optional value and, more
+            # importantly, `hir::build`'s `fromIR` (raw core-IR text lifted
+            # straight to HIR, e.g. for the native backend's own
+            # `bench/loop-count.ir`) -- and a plain `loop:`/countloop target
+            # there deliberately keeps its full pre-milestone override-and-
+            # discard `break VALUE` semantics, unchanged end to end
+            # (resolve/types/interpreter/Tcl-compile/native-lowering alike),
+            # both to keep that already-canonical, historically-compared
+            # benchmark's exact behavior and generated code stable, and as
+            # the substrate the future `leave VALUE` construct (this
+            # milestone's own ADR, deliberately not implemented here) is
+            # expected to lower to. It is "payload-free" in the sense that
+            # matters for the *language*: no Botlish program, compiled
+            # through the surface frontend, can ever produce it.
         }
         continue {
             SetField hir $e target [dict get $ctx loop]

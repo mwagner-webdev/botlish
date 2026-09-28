@@ -39,7 +39,6 @@ foreach {name source ir} {
     function    "fn add(a, b):\n    a + b" {{bind add {block {a b} {call {ref +} {ref a} {ref b}}}}}
     if-else     "if true:\n    1\nelse:\n    2" {{if {ref true} {block {} {const 1}} {block {} {const 2}}}}
     if-no-else  "if true:\n    1"         {{if {ref true} {block {} {const 1}} {block {}}}}
-    loop        "loop:\n    break 42"     {{loop {block {} {break {const 42}}}}}
     break-unit  "loop:\n    break"        {{loop {block {} break}}}
     continue    "loop:\n    continue"     {{loop {block {} continue}}}
     return      "fn f():\n    return\nfn g():\n    return 1" {{bind f {block {} {return {ref unit}}}} {bind g {block {} {return {const 1}}}}}
@@ -85,7 +84,7 @@ e10 call block(e4) : int
     e14 const 32 : int}
 
 test lower-hir-branch-scopes {branches are inline scopes of the enclosing invocation, not blocks} -body {
-    set h [surface::compile "fn f(flag):\n    if flag:\n        x = 1\n        x\n    else:\n        loop:\n            break 2" t.bot]
+    set h [surface::compile "fn f(flag):\n    if flag:\n        x = 1\n        x\n    else:\n        loop:\n            break" t.bot]
     set if [hirFind $h if]
     set loop [hirFind $h loop]
     set block [hirFind $h block]
@@ -143,7 +142,7 @@ test lower-origins {expressions, scopes and bindings originate in the source} -b
 } -result {{file f1 node add()/binary/op start 20 end 21 line 2 column 7 endLine 2 endColumn 8} 2:5 1:7 1:1 1:11 1:7 1:1 {id f1 path demo.bot}}
 
 test lower-origins-branches {branch and loop scopes originate at their suites} -body {
-    set h [surface::compile "if true:\n    1\nelse:\n    loop:\n        break 2" t.bot]
+    set h [surface::compile "if true:\n    1\nelse:\n    loop:\n        break" t.bot]
     set if [hirFind $h if]
     list [at [dict get [hir::scope $h [hir::get $h $if thenScope]] origin]] \
          [at [dict get [hir::scope $h [hir::get $h $if elseScope]] origin]] \
@@ -213,12 +212,20 @@ foreach {name source ir} {
     or          "true or false"  {{if {ref true} {block {} {ref true}} {block {} {if {ref false} {block {} {ref true}} {block {} {ref false}}}}}}
     if-value    "x = if true:\n    1\nelse:\n    2" {{bind x {if {ref true} {block {} {const 1}} {block {} {const 2}}}}}
     return-if   "fn f():\n    return if true:\n        1" {{bind f {block {} {return {if {ref true} {block {} {const 1}} {block {}}}}}}}
-    break-if    "loop:\n    break if true:\n        1" {{loop {block {} {break {if {ref true} {block {} {const 1}} {block {}}}}}}}
 } {
     test lower-rule-$name "lowering rule: $name" -body {
         loweredIR $source
     } -result [canonicalProgram $ir]
 }
+
+# PAYLOAD-FREE-BREAK.md: unlike return-if above, "break if ...:" is not a
+# lowering rule at all -- it is a syntax error (break never has a value, not
+# even an if-valued one), raised by surface::compile itself, not merely by
+# surface::parse.
+test lower-break-if-value-error {break's own if-value is a syntax error through the whole compile pipeline} -body {
+    catch {surface::compile "loop:\n    break if true:\n        1" t.bot} result options
+    list [lrange [dict get $options -errorcode] 0 1] $result
+} -result {{SURFACE SYNTAX} {t.bot:2:11: "break" does not take a value, found "if"}}
 
 test lower-boolean-values {truth tables and short-circuiting} -body {
     set h [surface::compile "fn t(a, b):\n    \[a and b, a or b, not a, a != b\]\n\[t(true, true), t(true, false), t(false, true), t(false, false)\]" t.bot]

@@ -137,8 +137,15 @@ test native-basic-3 {branches: statement and value forms} -body {
     parity "fn sign(n):\n    s = if n < 0:\n        \"negative\"\n    else:\n        if n == 0:\n            \"zero\"\n        else:\n            \"positive\"\n    s\n\n\[sign(-5), sign(0), sign(9)\]"
 } -result same
 
-test native-basic-4 {loops with break values and continue} -body {
-    parity "fn f():\n    loop:\n        break 42\n\nfn g(n):\n    loop:\n        if n > 0:\n            break n\n        continue\n\n\[f(), g(3)\]"
+# PAYLOAD-FREE-BREAK.md: break never carries a value, so getting a value
+# out of a bare loop uses return (from the enclosing function) instead of
+# the old break VALUE -- continue's own behavior under test is unaffected.
+test native-basic-4 {return from inside a loop, and continue} -body {
+    parity "fn f():\n    loop:\n        return 42\n\nfn g(n):\n    loop:\n        if n > 0:\n            return n\n        continue\n\n\[f(), g(3)\]"
+} -result same
+
+test native-basic-4-bare-break {a bare break's own Unit result agrees across every backend} -body {
+    parity "fn h():\n    loop:\n        break\n\nh()"
 } -result same
 
 test native-basic-5 {return from inside a loop and branches} -body {
@@ -648,7 +655,7 @@ test native-closure-2 {separate closure instances keep separate environments} -b
 test native-closure-3 {closures in loops, nested closures, and captured cells} -body {
     list [parity "fn outer(k):\n    fn even(n):\n        if n == 0:\n            return k\n        odd(n - 1)\n    fn odd(n):\n        if n == 0:\n            return 0 - k\n        even(n - 1)\n    \[even(6), even(3)\]\n\nouter(5)"] \
          [parity "fn a(x):\n    fn b(y):\n        fn c(z):\n            x + y + z\n        c\n    b\n\na(1)(2)(3)"] \
-         [parity "fn make():\n    loop:\n        k = 7\n        fn get():\n            k\n        break get\n\nmake()()"] \
+         [parity "fn make():\n    loop:\n        k = 7\n        fn get():\n            k\n        return get\n\nmake()()"] \
          [parity "fn make(n):\n    fn get():\n        n\n    get\n\nfn collect(i, acc):\n    if i == 4:\n        return acc\n    collect(i + 1, list_append(acc, make(i)))\n\nfs = collect(0, \[\])\n\[list_get(fs, 0)(), list_get(fs, 3)()\]"]
 } -result {same same same same}
 

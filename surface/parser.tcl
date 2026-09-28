@@ -11,7 +11,7 @@
 #   statement    = simple NEWLINE | valued | function | if | loop
 #   simple       = binding | return | break | continue | fail | expression
 #   valued       = IDENT "=" (if|loop|handledExpr)
-#                | "return" (if|loop|handledExpr) | "break" (if|loop|handledExpr)
+#                | "return" (if|loop|handledExpr)
 #   handledExpr  = expression [ handlers ]     -- handlers only after a bare
 #                                                  call expression (item 9)
 #   handlers     = ":" NEWLINE INDENT { "on" IDENT ":" suite } DEDENT
@@ -23,7 +23,10 @@
 #   suite        = NEWLINE INDENT { NEWLINE | statement } DEDENT
 #   binding      = IDENT "=" expression
 #   return       = "return" [ expression ]
-#   break        = "break" [ expression ]
+#   break        = "break"          -- PAYLOAD-FREE-BREAK.md: never a value,
+#                                       in any loop kind, at the surface
+#                                       level ("break EXPR" is a syntax
+#                                       error, not merely rejected later)
 #   continue     = "continue"
 #   fail         = "fail" IDENT
 #
@@ -37,7 +40,8 @@
 # A handled call (EXPLICIT-ERROR-COMPLETIONS.md) is a bare call expression
 # immediately followed by ":" and an indented block of "on NAME:" handlers,
 # in exactly the same "statement value" position an if/loop value is (the
-# right side of "=", or the value of "return"/"break") -- ValueOrHandled
+# right side of "=", or the value of "return"; not "break", which is never
+# valued -- PAYLOAD-FREE-BREAK.md) -- ValueOrHandled
 # (surface/parser.tcl) parses an ordinary expression first and only then
 # checks for a trailing ":", so no new expression-grammar ambiguity is
 # introduced (a `:` after any other expression shape remains a plain syntax
@@ -82,10 +86,11 @@
 #
 # An if (or a loop, including "loop x in EXPR:") is a value where a
 # statement's value ends the statement: the right side of a binding, or the
-# value of return or break (`x = if c:` or `x = loop c in EXPR:`, each
-# followed by its suite(s)) -- never a nested expression (e.g. a call
-# argument). Binary arithmetic, and and or are left-associative;
-# comparisons do not chain.
+# value of return (`x = if c:` or `x = loop c in EXPR:`, each followed by
+# its suite(s)) -- never a nested expression (e.g. a call argument), and
+# never break's own value, since break has none (PAYLOAD-FREE-BREAK.md).
+# Binary arithmetic, and and or are left-associative; comparisons do not
+# chain.
 #
 # Without -recover, the first syntax error (lexical or grammatical) is raised
 # ({SURFACE SYNTAX DIAGNOSTIC}). With -recover 1 parsing always returns a
@@ -338,11 +343,14 @@ proc surface::parser::Statement {pVar} {
         # The handler suite(s) already ended the line.
         return $statement
     }
-    if {[dict get $statement kind] in {bind return break}
+    if {[dict get $statement kind] in {bind return}
             && [dict get $statement value] ne ""
             && [dict get $statement value kind] in {if loop handledcall}} {
         # The if's (or loop's, or the handler suite's) suite(s) already
-        # ended the line.
+        # ended the line. break is deliberately excluded here (unlike
+        # bind/return): PAYLOAD-FREE-BREAK.md -- break never has a value, so
+        # its own Simple case above already ends the statement, before this
+        # check ever runs.
         return $statement
     }
     set next [Peek p]
@@ -370,13 +378,29 @@ proc surface::parser::Simple {pVar} {
                     name [dict get $token value] nameSpan $start value $value]
             }
         }
-        return - break {
+        return {
             Advance p
             set value ""
             if {[Kind p] ni {NEWLINE DEDENT EOF}} {
                 set value [ValueOrHandled p]
             }
-            return [surface::ast::node [dict get $token kind] [SpanFrom p $start] value $value]
+            return [surface::ast::node return [SpanFrom p $start] value $value]
+        }
+        break {
+            # PAYLOAD-FREE-BREAK.md: break never carries a value, in any
+            # loop kind, at the surface level -- unlike return, nothing
+            # after "break" is ever parsed as an expression (so a would-be
+            # payload's side effects, including a call, are never even
+            # attempted; see that report's "payload expression must never
+            # execute"). This is the sole enforcement point for the
+            # language-level rule; nothing below the parser (HIR, core IR)
+            # needs its own copy of it for ordinary Botlish programs, since
+            # no valid parse can ever produce a break AST node with a value.
+            Advance p
+            if {[Kind p] ni {NEWLINE DEDENT EOF}} {
+                Fail [Peek p] "\"break\" does not take a value, found [Describe [Peek p]]"
+            }
+            return [surface::ast::node break [SpanFrom p $start] value ""]
         }
         continue {
             Advance p
@@ -952,7 +976,7 @@ proc surface::parser::Primary {pVar} {
             return $expr
         }
         if {
-            Fail $token "an \"if\" value must be the whole right side of \"=\", \"return\" or \"break\""
+            Fail $token "an \"if\" value must be the whole right side of \"=\" or \"return\""
         }
     }
     Fail $token "expected an expression, found [Describe $token]"

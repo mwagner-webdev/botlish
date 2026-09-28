@@ -120,7 +120,11 @@ test surface-run-lexical-scope {closures see lexical, not dynamic, bindings} -bo
 
 test surface-run-continue {continue starts the next iteration; each iteration is a fresh scope} -body {
     resetEffects
-    list [runSource "loop:\n    t = test_tick()\n    if t < 3:\n        continue\n    break t"] $::testTicks
+    # PAYLOAD-FREE-BREAK.md: break never carries a value, so getting t's
+    # final value out of the loop uses return (from an enclosing function)
+    # instead of the old break t -- continue's own behavior under test is
+    # unaffected by that change.
+    list [runSource "fn f():\n    loop:\n        t = test_tick()\n        if t < 3:\n            continue\n        return t\nf()"] $::testTicks
 } -result {3 3}
 
 test surface-run-evaluation-order {arguments evaluate left to right} -body {

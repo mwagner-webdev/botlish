@@ -141,20 +141,40 @@ test loop-in-break-immediately {a break on the very first element returns an emp
 }
 } -result {[]}
 
-test loop-in-break-value-rejected {break with a value is rejected at compile time inside a returning iterable loop} -body {
+# PAYLOAD-FREE-BREAK.md: break with a value is now a syntax error, in every
+# loop kind, so a listloop-targeted "break 99" is rejected by the parser
+# itself -- even before hir::resolve's own LISTLOOP-BREAK-VALUE diagnostic
+# (which the previous milestone's own report documented as the rejection
+# mechanism) ever gets a chance to run. -strict 0 makes no difference here:
+# unlike a semantic diagnostic, a syntax error is never deferred.
+test loop-in-break-value-rejected {break with a value is a syntax error inside a returning iterable loop, exactly like every other loop kind} -body {
     catch {surface::compile {loop x in [1, 2, 3]:
     if x == 2:
         break 99
     x} break-value-rejected.bot} message options
-    list [dict get $options -errorcode] \
-        [string match {*not valid inside a returning iterable loop*} $message]
-} -result {{CORE SEMANTIC LISTLOOP-BREAK-VALUE} 1}
+    list [lrange [dict get $options -errorcode] 0 1] $message
+} -result {{SURFACE SYNTAX} {break-value-rejected.bot:3:15: "break" does not take a value, found integer 99}}
 
-test loop-in-break-value-rejected-diagnostic {the same rejection, inspected as a kept (non-strict) diagnostic, confirming it comes from ordinary HIR resolution (hir/resolve.tcl), not a thrown error or a later type-checking pass} -body {
-    set hir [loopSourceHir {loop x in [1, 2, 3]:
+test loop-in-break-value-rejected-strict0-still-errors {unlike a semantic diagnostic, this is never deferred by -strict 0: it is a syntax error, raised while parsing, before hir::build (and any -strict option) is ever reached} -body {
+    catch {surface::compile {loop x in [1, 2, 3]:
     if x == 2:
         break 99
-    x}]
+    x} t.bot -strict 0} message options
+    lrange [dict get $options -errorcode] 0 1
+} -result {SURFACE SYNTAX}
+
+# The pre-milestone rejection mechanism (hir/resolve.tcl's own
+# LISTLOOP-BREAK-VALUE diagnostic) is unreachable from any surface program
+# now (the parser rejects a valued break universally, before HIR exists),
+# but it still defends the lower, deliberately-preserved layer: raw core-IR
+# text lifted straight to HIR by hir::build's own fromIR (e.g. the native
+# backend's own bench/loop-count.ir), which does not go through the surface
+# parser at all. See PAYLOAD-FREE-BREAK.md's "two-tier design".
+test loop-in-break-value-rejected-below-parser {LISTLOOP-BREAK-VALUE still defends a listloop-targeted valued break built directly at the HIR/core-IR level, below the surface parser} -body {
+    set hir [hir::build {
+        {listloop {call {ref list} {const 1} {const 2} {const 3}}
+            {block {x} {break {ref x}}}}
+    } -strict 0]
     set diags [hir::diagnostics $hir]
     list [llength $diags] [dict get [lindex $diags 0] kind]
 } -result {1 LISTLOOP-BREAK-VALUE}
@@ -170,17 +190,22 @@ f([1, 2])}]
     llength [hir::diagnostics $hir]
 } -result 0
 
-test loop-in-break-value-nested-still-invalid {a break targeting an outer listloop from inside a nested block is still rejected for a value payload} -body {
-    set hir [loopSourceHir {loop x in [1, 2]:
+test loop-in-break-value-nested-still-invalid {a break targeting an outer listloop from inside a nested block is still rejected for a value payload -- the same universal syntax rule, no per-loop-kind distinction visible at the surface level} -body {
+    catch {surface::compile {loop x in [1, 2]:
     loop y in [10, 20]:
         if y == 20:
             break 1
-        y}]
-    set diags [hir::diagnostics $hir]
-    list [llength $diags] [dict get [lindex $diags 0] kind]
-} -result {1 LISTLOOP-BREAK-VALUE}
+        y} nested-break-value.bot} message options
+    list [lrange [dict get $options -errorcode] 0 1] $message
+} -result {{SURFACE SYNTAX} {nested-break-value.bot:4:19: "break" does not take a value, found integer 1}}
 
-test loop-in-break-value-plain-loop-unaffected {break VALUE is still fully valid inside a plain (non-listloop) loop: only a listloop target is restricted -- countloop/loop keep their own established override semantics unchanged} -body {
+# PAYLOAD-FREE-BREAK.md: at the surface level, break VALUE is now rejected
+# universally, so this raw core-IR case is no longer reachable from any
+# Botlish program -- but this level (below the surface parser) is
+# deliberately preserved end to end (see that report's "two-tier design"),
+# so a plain (non-listloop) loop's own pre-existing override semantics stay
+# exactly as they were here.
+test loop-in-break-value-plain-loop-unaffected {break VALUE is still valid, at the raw core-IR level, inside a plain (non-listloop) loop: only a listloop target is restricted -- countloop/loop keep their own established override semantics unchanged} -body {
     run {loop {block {} {break {const 42}}}}
 } -result 42
 

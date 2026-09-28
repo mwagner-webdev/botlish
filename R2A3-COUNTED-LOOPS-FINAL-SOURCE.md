@@ -1,5 +1,23 @@
 # R2.a.3: counted loops + final `emailish?` source normalization
 
+**Partially superseded by PAYLOAD-FREE-BREAK.md.** This report documents
+`break VALUE` as part of a counted loop's "final" design, overriding the
+loop's own result exactly like a bare `loop:`'s own established semantics.
+PAYLOAD-FREE-BREAK.md later removes that surface-language capability
+outright: `break` never takes a value, in any loop kind, including a
+counted loop -- rejected at the surface parser itself, a plain syntax
+error, not merely re-derived as unsound. Everything else this report
+documents about counted loops (ascending, exclusive-end, unit-step,
+arbitrary-precision Int, natural exhaustion producing `unit`, nested-loop
+targeting, per-iteration closure capture, backend parity) is unaffected
+and remains current. Read every mention of `break VALUE`/`break i * 100`-
+shaped examples below as the historical record of a design later replaced;
+see PAYLOAD-FREE-BREAK.md for the current rule and for why the raw core-IR
+level (below the surface parser) deliberately keeps the old override
+semantics alive as a "two-tier" design, preserving this report's own
+`bench/loop-count.ir` example and the `NATIVE-AUDIT.md`/asm-comparison
+trail unchanged.
+
 ## Outcome
 
 **Achieved.** `loop i from START to END:` — ascending, unit-step,

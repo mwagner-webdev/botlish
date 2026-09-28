@@ -196,7 +196,7 @@ test tiny-leaf-ineligible-loop {a leaf with a loop declines} -body {
     i = 0
     loop:
         if i >= n:
-            break total
+            break
         total = total + i
         i = i + 1
 

@@ -320,10 +320,11 @@ proc surface::lower::Node {node} {
             return [hir::syntax::returnNode $origin [Node [dict get $node value]]]
         }
         break {
-            if {[dict get $node value] eq ""} {
-                return [hir::syntax::breakNode $origin]
-            }
-            return [hir::syntax::breakNode $origin [Node [dict get $node value]]]
+            # PAYLOAD-FREE-BREAK.md: the parser guarantees value is always
+            # "" here -- break's own Simple case (surface/parser.tcl)
+            # rejects any value at parse time, in every loop kind, so this
+            # never has anything else to lower.
+            return [hir::syntax::breakNode $origin]
         }
         continue {
             return [hir::syntax::continueNode $origin]

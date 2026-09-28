@@ -289,11 +289,22 @@ outer()} $::byteDecl]
 } -result {{CORE SEMANTIC TYPE} 0}
 
 # ---------------------------------------------------------------------------
-# Loop break (spec #58's "at least one branch/join" -- loop break is the
+# Loop break (spec #58's "at least one branch/join" -- loop break was the
 # same joining mechanism as an "if")
+#
+# PAYLOAD-FREE-BREAK.md: break can no longer carry a value at all, at the
+# surface level, so this scenario's own premise -- two differently-typed
+# callables joined through a loop's own break -- is no longer expressible:
+# "break take_byte" is a syntax error (break never has a value), not a
+# semantic callable-type-join rejection. The program is still rejected, as
+# callable-escape-loop-break-different-rejected originally pinned, but for
+# an entirely different, earlier reason that has nothing to do with typed
+# callables -- this can no longer even reach hir/types.tcl's callable-
+# escape check. "if"/"else" remain the only loop-adjacent join mechanism
+# this file's own concern applies to.
 
-test callable-escape-loop-break-different-rejected {a loop breaking with two different typed/untyped callables is rejected at the break} -body {
-    rejects [format {%sfn take_byte(x: Byte) -> int:
+test callable-escape-loop-break-different-rejected {break with a value is now a syntax error, so it can no longer reach hir/types.tcl's callable-type-join check at all} -body {
+    catch {surface::compile [format {%sfn take_byte(x: Byte) -> int:
     x
 fn other(x):
     x
@@ -303,8 +314,9 @@ fn pick(cond):
             break take_byte
         break other
     unit
-pick(true)} $::byteDecl]
-} -result {{CORE SEMANTIC TYPE} 1}
+pick(true)} $::byteDecl] t.bot} message options
+    lrange [dict get $options -errorcode] 0 1
+} -result {SURFACE SYNTAX}
 
 # ---------------------------------------------------------------------------
 # Typed result alone remains unrestricted (spec #15, #52)
