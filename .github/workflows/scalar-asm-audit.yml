@@ -9,7 +9,7 @@ name: scalar-asm-audit
 #
 # Paths are scoped to what native/generate-scalar-audit.tcl's own output
 # actually depends on (the compiler pipeline down to Cranelift, the
-# bench/*.ir and examples/stdlib/*.bot corpus it audits, and the script
+# bench/*.bot and examples/stdlib/*.bot corpus it audits, and the script
 # itself) -- not on audit/native-scalar-asm/** or *.md, so this workflow's
 # own commit back to main never re-triggers itself.
 
@@ -28,7 +28,7 @@ on:
       - "native/src/**"
       - "native/Cargo.toml"
       - "native/Cargo.lock"
-      - "bench/*.ir"
+      - "bench/*.bot"
       - "examples/stdlib/*.bot"
       - "examples/stdlib/corpus.tcl"
   workflow_dispatch:

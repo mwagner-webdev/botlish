@@ -1,4 +1,4 @@
-source:  bench/refined-checks.ir
+source:  bench/refined-checks.bot
 backend: Cranelift (specialize=1)
 asm:     refined-checks.asm
 vcode:   refined-checks.vcode
@@ -28,7 +28,7 @@ functions:
   20 esc_bytes<List[int], int, str>: nir-regs=15
   21 esc_char<str>: nir-regs=21
   22 esc_from<str, int, str>: nir-regs=19
-  23 check<int, int, str, str>: nir-regs=20
+  23 check<int, int, str, str>: nir-regs=21
 
 GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
   function 0 "<program>"
@@ -331,9 +331,9 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 23 "check"
-    NIR regs: 20
+    NIR regs: 21
     raw regs: 6
-    managed-capable regs: 14
+    managed-capable regs: 15
     effects: may_error=true may_gc=true
     safepoints: 2
     root candidates: 4

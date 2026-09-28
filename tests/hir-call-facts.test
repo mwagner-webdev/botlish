@@ -34,7 +34,7 @@ test call-facts-sum-1 {exact captured closure call specializes and keeps its gen
     # generic, which is exactly this milestone's own target population) --
     # disabling both isolates -call-facts-opt's own individual contribution,
     # which is what this test's own name is about.
-    set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench sum-refined.ir]]]
+    set hir [native::buildProgramHir [hir::lower [surface::readProgramFile [file join $::projectRoot bench sum-refined.bot]]]]
     set on [native::nir $hir]
     set off [native::nir $hir -call-facts-opt 0 -closed-caller-facts-opt 0]
     list [expr {[string first {instance="int"} $on] >= 0}] \
@@ -65,7 +65,7 @@ test call-facts-result-3 {an error-only branch does not pollute successful resul
 } -result {{[7, 7] {7}} {{[7, 7] {7}}}}
 
 test call-facts-work-1 {work exposes seven; drive still calls it} -body {
-    set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench loop-count.ir]]]
+    set hir [native::buildProgramHir [hir::lower [surface::readProgramFile [file join $::projectRoot bench loop-count.bot]]]]
     set spec [hir::specialize::analyze $hir]
     set analysis [hir::range::analyze $hir $spec]
     set nir [native::nir $hir]

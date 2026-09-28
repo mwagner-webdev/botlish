@@ -1,0 +1,20 @@
+# fib.bot -- naive recursive Fibonacci: calls, integer comparison and
+# arithmetic.
+#
+# Canonical surface-Botlish source (CANONICAL-SURFACE-BENCHMARKS.md);
+# migrated from the historical raw-core-IR fixture bench/fib.ir, which
+# remains in bench/ only as a frozen input for historical audit-
+# reproduction tooling (see that report) -- it is no longer canonical
+# benchmark source. This is a direct, unremarkable transliteration: fib.ir
+# never used any construct (like break VALUE) the surface language cannot
+# express, so no workload/semantic decisions were needed here.
+#
+# expect: 17711
+
+fn fib(n):
+    if n < 2:
+        n
+    else:
+        fib(n - 1) + fib(n - 2)
+
+fib(22)

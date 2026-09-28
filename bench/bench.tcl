@@ -1,6 +1,13 @@
-# bench.tcl -- compares backends on the programs in bench/*.ir.
+# bench.tcl -- compares backends on the canonical programs in bench/*.bot
+# (CANONICAL-SURFACE-BENCHMARKS.md): every canonical benchmark is ordinary
+# Botlish source, compiled through the normal surface frontend
+# (surface::readProgramFile + hir::lower) exactly like any other .bot
+# program, never checked-in raw core IR/HIR/NIR. The historical bench/*.ir
+# fixtures these programs were migrated from remain in bench/ only as
+# frozen inputs for a handful of historical audit-reproduction scripts (see
+# that report); they are not discovered or run here.
 #
-#   tclsh9.0 bench/bench.tcl [-runs N] [-markdown] [FILE.ir ...]
+#   tclsh9.0 bench/bench.tcl [-runs N] [-markdown] [FILE.bot ...]
 #
 # Each program runs once untimed per backend (so compilation is excluded
 # from the measurement), then N timed runs; the best run is reported.
@@ -8,7 +15,7 @@
 # below), hand-translated Python, Rust, and Go programs from
 # bench/equivalents/{python,rust,go}/BASE.{py,rs,go} run the same way (one
 # untimed warmup, then N timed runs, self-reporting its best time) when one
-# exists for a given BASE.ir, for a same-container reference comparison.
+# exists for a given BASE.bot, for a same-container reference comparison.
 # -markdown prints a Markdown table (e.g. for a CI job summary).
 # Exits with status 1 if the Botlish backends disagree on any program's
 # value (native included, whenever it produces one at all -- see below).
@@ -45,6 +52,7 @@
 
 set root [file dirname [file dirname [file normalize [info script]]]]
 source [file join $root compiler compiler.tcl]
+source [file join $root surface surface.tcl]
 source [file join $root native native.tcl]
 source [file join $root bench backends.tcl]
 
@@ -59,7 +67,7 @@ for {set i 0} {$i < [llength $argv]} {incr i} {
     }
 }
 if {$files eq ""} {
-    set files [lsort [glob -directory [file join $root bench] *.ir]]
+    set files [lsort [glob -directory [file join $root bench] *.bot]]
 }
 
 # Recursion depth in the benchmarks exceeds Tcl's default nesting limit.
@@ -200,7 +208,7 @@ if {$markdown} {
 
 set disagreements 0
 foreach path $files {
-    set program [core::loadProgramFile $path]
+    set program [hir::lower [surface::readProgramFile $path]]
     set base [string map {- _} [file rootname [file tail $path]]]
 
     set backendTimes {}

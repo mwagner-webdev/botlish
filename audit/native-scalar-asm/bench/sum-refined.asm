@@ -1,4 +1,4 @@
-; source:  bench/sum-refined.ir
+; source:  bench/sum-refined.bot
 ; backend: Cranelift (specialize=1), native::object
 ; object:  ELF64 x86-64, unlinked (Botlish-generated code only; runtime
 ;          helpers are unresolved imports, so their bodies are not present)
@@ -7,7 +7,7 @@
 ;
 ; function symbol -> Botlish label:
 ;   botlish_fn_0 / botlish_entry_0 -> <program entry>
-;   botlish_fn_1 / botlish_entry_1 -> sum<int, int>
+;   botlish_fn_1 / botlish_entry_1 -> refined_sum<int, int>
 ;   botlish_fn_2 / botlish_entry_2 -> step<int>
 
 
@@ -25,7 +25,7 @@ Disassembly of section .text:
   15:	mov    edx,0x1
   1a:	mov    QWORD PTR [rsp+0x8],0x1
   23:	call   28 <botlish_fn_0+0x28>
-			24: R_X86_64_PLT32	botlish_fn_1-0x4 ; sum<int, int>
+			24: R_X86_64_PLT32	botlish_fn_1-0x4 ; refined_sum<int, int>
   28:	add    rsp,0x10
   2c:	mov    rsp,rbp
   2f:	pop    rbp
@@ -40,7 +40,7 @@ Disassembly of section .text:
   3d:	pop    rbp
   3e:	ret
 
-000000000000003f <botlish_fn_1: sum<int, int>>:
+000000000000003f <botlish_fn_1: refined_sum<int, int>>:
   3f:	push   rbp
   40:	mov    rbp,rsp
   43:	sub    rsp,0x20
@@ -72,13 +72,13 @@ Disassembly of section .text:
   a5:	pop    rbp
   a6:	ret
 
-00000000000000a7 <botlish_entry_1: sum<int, int>>:
+00000000000000a7 <botlish_entry_1: refined_sum<int, int>>:
   a7:	push   rbp
   a8:	mov    rbp,rsp
   ab:	mov    rsi,QWORD PTR [rdx]
   ae:	mov    rdx,QWORD PTR [rdx+0x8]
   b2:	call   b7 <botlish_entry_1+0x10>
-			b3: R_X86_64_PLT32	botlish_fn_1-0x4 ; sum<int, int>
+			b3: R_X86_64_PLT32	botlish_fn_1-0x4 ; refined_sum<int, int>
   b7:	mov    rsp,rbp
   ba:	pop    rbp
   bb:	ret

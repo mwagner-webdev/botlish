@@ -1,0 +1,35 @@
+# sum-refined.bot -- tail-style recursion over an accumulator whose type is
+# only known through an integer? refinement, plus a closure created per
+# step.
+#
+# Canonical surface-Botlish source (CANONICAL-SURFACE-BENCHMARKS.md);
+# migrated from the historical raw-core-IR fixture bench/sum-refined.ir,
+# which remains in bench/ only as a frozen input for historical audit-
+# reproduction tooling (see that report) -- it is no longer canonical
+# benchmark source.
+#
+# The old raw IR's "else" branch used a bare `error-value` core-IR op to
+# assert unreachability (acc is always an Int on every real call in this
+# benchmark's own domain -- it starts at 0 and every step adds an Int).
+# Surface Botlish has no way to construct an error/Result value from source
+# at all (examples/stdlib/hashtable.bot's own header note: "Botlish has no
+# way to construct a Result value from surface syntax today"), so that
+# exact op cannot be transliterated. This keeps the same provably-dead
+# refinement-check structure (the compiler still has to analyze both
+# branches, which is the point) and returns a sentinel Int in the
+# unreachable branch instead of inventing new error-raising syntax to
+# rescue the original shape (forbidden by this migration's own rules).
+#
+# expect: 80200
+
+fn refined_sum(n, acc):
+    if integer?(acc):
+        if n == 0:
+            return acc
+        fn step(x):
+            x + n
+        refined_sum(n - 1, step(acc))
+    else:
+        -1
+
+refined_sum(400, 0)

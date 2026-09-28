@@ -1,4 +1,4 @@
-; source:  bench/fib.ir
+; source:  bench/fib.bot
 ; backend: Cranelift (specialize=1), native::vcode
 ; format:  Cranelift Debug for VCode, pre-regalloc machine-level lowering
 ; total machine code bytes: 292  (per function: 49 243)

@@ -1,4 +1,4 @@
-; source:  bench/refined-checks.ir
+; source:  bench/refined-checks.bot
 ; backend: Cranelift (specialize=1), native::object
 ; object:  ELF64 x86-64, unlinked (Botlish-generated code only; runtime
 ;          helpers are unresolved imports, so their bodies are not present)

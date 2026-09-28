@@ -1,0 +1,44 @@
+# loop-count.bot -- a loop whose body does integer work on bindings local to
+# the iteration. The loop is driven by an outer recursion, since the
+# language has no mutation.
+#
+# Canonical surface-Botlish source (CANONICAL-SURFACE-BENCHMARKS.md);
+# migrated from the historical raw-core-IR fixture bench/loop-count.ir,
+# which remains in bench/ only as a frozen input for historical audit-
+# reproduction tooling (see that report) -- it is no longer canonical
+# benchmark source.
+#
+# work's loop body recomputes a = i*3, b = a+7 every iteration and exits
+# with b - a the first time b >= 0. Since drive only ever calls work(i) for
+# i in [1, 500], b is always >= 10 there, so the loop's condition is always
+# true on its very first iteration -- work never actually continues to a
+# second one for any input this benchmark exercises (confirmed: HIR range
+# analysis proves this exact fact independently, see hir-call-facts.test's
+# call-facts-work-1 / M6-RANGE-DECIDED-BRANCH-LOWERING.md). That means a
+# bare `loop:` immediately followed by `return` on its only reachable
+# iteration is *exactly* equivalent to the old `break VALUE`, which is no
+# longer expressible in surface Botlish (PAYLOAD-FREE-BREAK.md): the same
+# migration 08-return.bot already established for an identical shape
+# ("the original loop never actually iterated more than once ... break b
+# and return b were already observationally identical there"). This is not
+# a workaround invented to dodge the missing break payload -- it is the
+# same construct a Botlish programmer would reach for today to express
+# "compute this loop-local value, then leave with it".
+#
+# expect: 3500
+
+fn work(i):
+    loop:
+        a = i * 3
+        b = a + 7
+        if b >= 0:
+            return b - a
+        else:
+            continue
+
+fn drive(i, total):
+    if i <= 0:
+        return total
+    drive(i - 1, total + work(i))
+
+drive(500, 0)

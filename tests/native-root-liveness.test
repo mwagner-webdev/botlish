@@ -4,8 +4,9 @@
 # roots.rs's module doc). Two kinds of coverage:
 #
 #   * structural: the four native-audit programs' (fib, work/drive,
-#     sum/step) real shadow-slot counts, via `native::roots`, well below the
-#     old one-slot-per-register policy
+#     refined_sum/step -- canonical bench/*.bot source,
+#     CANONICAL-SURFACE-BENCHMARKS.md) real shadow-slot counts, via
+#     `native::roots`, well below the old one-slot-per-register policy
 #   * adversarial: hand-written NIR text (bypassing HIR/lower.tcl entirely,
 #     for exact control over register/safepoint shape) exercising each
 #     acceptance scenario directly, run under BOTLISH_NATIVE_GC_STRESS=1 so
@@ -20,11 +21,11 @@ proc sourceHir {text} {
     return [surface::compile $text t.bot -strict 0]
 }
 
-# The HIR of a bench/*.ir file (core IR s-expression text, not Botlish
-# surface syntax -- see native/explain-native.tcl, which loads bench
-# files the same way).
-proc sourceIrHir {path} {
-    return [hir::build [core::loadProgramFile $path] -strict 0]
+# The HIR of a canonical bench/*.bot file (CANONICAL-SURFACE-
+# BENCHMARKS.md: canonical benchmarks are ordinary Botlish source, compiled
+# through the normal surface frontend -- never raw core IR/HIR).
+proc sourceBotHir {path} {
+    return [surface::readProgramFile $path]
 }
 
 # Runs raw NIR text TEXT directly (bypassing HIR/lower.tcl): {value V} or
@@ -105,7 +106,7 @@ set nirHeader "nir 1\n\n"
 # per NIR register -- 17, 17, 13, 12/3 respectively; see NATIVE-AUDIT.md).
 
 test root-structural-1 {fib<int>: far fewer shadow slots than its 17 NIR registers} -body {
-    set report [native::roots [sourceIrHir [file join $::projectRoot bench fib.ir]]]
+    set report [native::roots [sourceBotHir [file join $::projectRoot bench fib.bot]]]
     list [regsOf $report fib] [expr {[slotsOf $report fib] < 17}] [expr {[slotsOf $report fib] <= 4}]
 } -result {17 1 1}
 
@@ -115,34 +116,31 @@ test root-structural-1 {fib<int>: far fewer shadow slots than its 17 NIR registe
 # not the RuntimeStack floor of 1 a call-containing function like drive
 # still gets.
 #
-# UPDATED BY M6-RANGE-DECIDED-BRANCH-LOWERING.md: work's own register count
-# drops from 17 to 16. drive's own self-recursive induction (hir/
-# induction.tcl, pre-existing) already proved i's entry range at work's
-# call site is [1, 500] (see tests/hir-range.test's own range-propagate-6,
-# same fixture, pinning that fact directly); work's own `a = i*3`,
-# `b = a+7` therefore settle to [3,1500]/[10,1507], so its own loop-body
-# guard `if b >= 0: break(b - a) else: continue` is AlwaysTrue --
-# `native::lower::If` now eliminates the `continue` arm and the join
-# register that used to multiplex both arms' values into (that
-# comparison itself, `op rige`, is still computed and left dead: spec
-# #40-42, no purity theorem was added). safepoints/slots are unaffected
-# (work still makes no call and needs no shadow slot either way). This is
-# not `bench/loop-count.ir` being modified -- the frozen `.ir` fixture is
-# untouched -- only this test's own golden register count, which a real,
-# already-existing arithmetic range fact now justifies.
-test root-structural-2 {loop-count: work (no safepoint, no calls) needs zero slots; drive needs far fewer than 13; drive's own register count is 15 pre-M9, 14 after (M9-INSTANCE-ENTRY-INT-FACTS.md: drive.i's entry Range narrows to [0, 500], so its own parameter is raw from entry -- one fewer register than the pre-M9 unbox/rebox round-trip needed)} -body {
-    set report [native::roots [sourceIrHir [file join $::projectRoot bench loop-count.ir]]]
+# CANONICAL-SURFACE-BENCHMARKS.md: bench/loop-count.ir (raw core IR, with a
+# value-bearing `break`) was replaced by bench/loop-count.bot (ordinary
+# Botlish source, using `return` instead -- surface `break` is payload-free,
+# PAYLOAD-FREE-BREAK.md). This is a fresh source-level baseline, not a
+# continuation of the old .ir fixture's register-count history: work's own
+# register count (16) happens to be unchanged by the migration (its loop
+# body compiles the same way either way), but drive's is not (15, not the
+# old fixture's 14 -- one more register from the surface-compiled shape).
+# The old counts (17/13/1 slot floor discussion under the pre-migration
+# fixture) are historical; see CANONICAL-SURFACE-BENCHMARKS.md's bridge
+# census for the full old-vs-new comparison.
+test root-structural-2 {loop-count: work (no safepoint, no calls) needs zero slots; drive needs far fewer than 13} -body {
+    set report [native::roots [sourceBotHir [file join $::projectRoot bench loop-count.bot]]]
     list [regsOf $report work] [safepointsOf $report work] [slotsOf $report work] \
         [regsOf $report drive] [expr {[slotsOf $report drive] < 13}]
-} -result {16 0 0 14 1}
+} -result {16 0 0 15 1}
 
-test root-structural-3 {sum-refined: sum and step both need far fewer slots than their register counts} -body {
-    set report [native::roots [sourceIrHir [file join $::projectRoot bench sum-refined.ir]]]
-    list [expr {[slotsOf $report sum] < [regsOf $report sum]}] [expr {[slotsOf $report step] < [regsOf $report step]}]
+test root-structural-3 {sum-refined: refined_sum and step both need far fewer slots than their register counts} -body {
+    set report [native::roots [sourceBotHir [file join $::projectRoot bench sum-refined.bot]]]
+    list [expr {[slotsOf $report refined_sum] < [regsOf $report refined_sum]}] \
+        [expr {[slotsOf $report step] < [regsOf $report step]}]
 } -result {1 1}
 
 test root-structural-4 {F1 (closure virtualization) remains intact: sum-refined still has zero closures} -body {
-    set hir [sourceIrHir [file join $::projectRoot bench sum-refined.ir]]
+    set hir [sourceBotHir [file join $::projectRoot bench sum-refined.bot]]
     dict get [native::allocationReport $hir summary 1] byKind Block allocations
 } -result 0
 
@@ -277,7 +275,7 @@ test root-error-path-2 {a real error path (raise) still runs correctly, and repo
 # agree exactly (same text in, same report out).
 
 test root-deterministic-1 {native::roots is deterministic across repeated calls} -body {
-    set hir [sourceIrHir [file join $::projectRoot bench fib.ir]]
+    set hir [sourceBotHir [file join $::projectRoot bench fib.bot]]
     expr {[native::roots $hir] eq [native::roots $hir]}
 } -result 1
 

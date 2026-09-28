@@ -80,7 +80,7 @@ tclsh9.0 main.tcl -hir FILE.ir                 # show the program's HIR, run
 tclsh9.0 main.tcl -backend compile FILE.hir    # read HIR text, compile it, run
 tclsh9.0 main.tcl examples/surface/03-closure.bot            # run source (interp)
 tclsh9.0 main.tcl -backend compile -hir -ast FILE.bot   # show AST and HIR, compile, run
-tclsh9.0 bench/bench.tcl                       # compare backends on bench/*.ir
+tclsh9.0 bench/bench.tcl                       # compare backends on bench/*.bot
 tclsh9.0 bench/corpus.tcl                      # baseline timings of the algorithm corpus (§18)
 tclsh9.0 main.tcl -aot examples/stdlib/matmul.bot   # closed-AOT readiness report (§19)
 tclsh9.0 main.tcl -aot-spec examples/stdlib/matmul.bot   # the same per specialized instance (§21)
@@ -503,7 +503,7 @@ refinement unless its contract explicitly establishes one. So
 | `surface/ast.tcl` | spans, syntax errors, AST formatting |
 | `surface/lower.tcl` | surface AST → HIR |
 | `surface/surface.tcl` | loader and `surface::compile` / `readProgramFile` |
-| `bench/` | benchmark programs and runners (`bench.tcl` for `*.ir`, `corpus.tcl` for §18) |
+| `bench/` | benchmark programs and runners (`bench.tcl` for the canonical `*.bot` corpus, `corpus.tcl` for §18) |
 | `examples/stdlib/corpus.tcl` | loading and running the algorithm corpus on each backend |
 
 Implementation notes (not part of the semantics):

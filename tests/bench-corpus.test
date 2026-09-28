@@ -1,0 +1,34 @@
+# bench-corpus.test -- benchmark-infrastructure invariants
+# (CANONICAL-SURFACE-BENCHMARKS.md): every canonical benchmark is ordinary
+# Botlish source under bench/*.bot, with a pinned expected result, and
+# compiles/runs through the normal surface frontend (surface::
+# readProgramFile + hir::lower, exactly like bench/bench.tcl and
+# native/generate-scalar-audit.tcl use) -- never checked-in raw core
+# IR/HIR/NIR treated as benchmark source. Runs under whichever Tcl backend
+# helpers.tcl already selected (CORE_BACKEND), like the rest of the suite.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+# Several of these recurse a few hundred levels deep on the interp backend
+# (bench/bench.tcl's own header raises this identically).
+interp recursionlimit {} 20000
+
+# name -> `core::value::show ... 1` of running the program to completion;
+# the same numbers each file's own "# expect:" header comment documents,
+# and (for fib/loop-count/sum-refined/refined-checks) the same values the
+# historical bench/*.ir fixtures these were migrated from produced.
+set benchCorpusExpected [dict create \
+    fib.bot            17711 \
+    loop-count.bot      3500 \
+    sum-refined.bot    80200 \
+    refined-checks.bot {[400, 0]}]
+
+foreach {name expected} $benchCorpusExpected {
+    test "bench-corpus-$name" "$name compiles through the ordinary surface pipeline and produces its documented result" -body {
+        set program [hir::lower [surface::readProgramFile [file join $::projectRoot bench $name]]]
+        core::value::show [core::evalProgram $program] 1
+    } -result $expected
+}
+
+cleanupTests

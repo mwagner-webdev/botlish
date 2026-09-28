@@ -5,20 +5,22 @@
 #
 #   tclsh9.0 native/generate-scalar-audit.tcl [-outdir DIR]
 #
-# For every program in the audit corpus (the bench/*.ir programs and every
-# examples/stdlib/*.bot program), this:
+# For every program in the audit corpus (the canonical bench/*.bot programs
+# and every examples/stdlib/*.bot program -- CANONICAL-SURFACE-
+# BENCHMARKS.md: no canonical benchmark is loaded from raw core IR/HIR
+# here), this:
 #
 #   1. Loads/lowers the program to HIR the same way main.tcl and
-#      bench/corpus.tcl do (core::loadProgramFile for .ir, surface::
-#      readProgramFile for .bot), routing a .ir program through
-#      native::buildProgramHir -- the same ExpandNativeBodies/module-native-
-#      bridge-then-hir::buildSyntax sequence native::runProgram itself uses
-#      before compiling, so a native registered with a -native-body or a
-#      -module-fn (core/native.tcl; currently only uriEscape, -module-fn
-#      {web uri_escape_text}, lib/web.tcl/lib/web.bot -- see
-#      NATIVE-MODULES.md) is audited as the native backend actually runs
-#      it, not reported unsupported merely because this script bypassed
-#      that step.
+#      bench/corpus.tcl do (surface::readProgramFile, then hir::lower to
+#      get back the core-IR-shaped form native::buildProgramHir expects),
+#      routing it through native::buildProgramHir -- the same
+#      ExpandNativeBodies/module-native-bridge-then-hir::buildSyntax
+#      sequence native::runProgram itself uses before compiling, so a
+#      native registered with a -native-body or a -module-fn (core/
+#      native.tcl; currently only uriEscape, -module-fn {web
+#      uri_escape_text}, lib/web.tcl/lib/web.bot -- see NATIVE-MODULES.md)
+#      is audited as the native backend actually runs it, not reported
+#      unsupported merely because this script bypassed that step.
 #   2. Attempts native::object (specialize 1, the default "cranelift"
 #      backend) to an object file in a scratch temp directory.
 #   3. On success: disassembles the object with `objdump -dr
@@ -255,7 +257,7 @@ proc ProcessProgram {label sourcePath hir asmPath vcodePath summaryPath statusVa
 # Corpus enumeration
 
 set benchDir [file join $root bench]
-set benchFiles {fib.ir loop-count.ir sum-refined.ir refined-checks.ir}
+set benchFiles {fib.bot loop-count.bot sum-refined.bot refined-checks.bot}
 
 set results {}
 
@@ -268,7 +270,7 @@ foreach name $benchFiles {
     set summaryPath [file join $outdir bench "$base.summary.txt"]
     set status [dict create source "bench/$name" kind unknown]
     if {[catch {
-        set hir [native::buildProgramHir [core::loadProgramFile $path]]
+        set hir [native::buildProgramHir [hir::lower [surface::readProgramFile $path]]]
     } err]} {
         dict set status kind failed
         dict set status detail "could not load/build HIR: $err"

@@ -1,4 +1,4 @@
-; source:  bench/fib.ir
+; source:  bench/fib.bot
 ; backend: Cranelift (specialize=1), native::object
 ; object:  ELF64 x86-64, unlinked (Botlish-generated code only; runtime
 ;          helpers are unresolved imports, so their bodies are not present)

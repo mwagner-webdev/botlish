@@ -1,0 +1,42 @@
+# refined-checks.bot -- repeated refined-type predicates: an outer
+# Emailish? check whose result is re-checked in the then branch
+# (statically redundant), and UriQueryValue? on a value whose type proves
+# the answer.
+#
+# Canonical surface-Botlish source (CANONICAL-SURFACE-BENCHMARKS.md);
+# migrated from the historical raw-core-IR fixture bench/refined-checks.ir,
+# which remains in bench/ only as a frozen input for historical audit-
+# reproduction tooling (see that report) -- it is no longer canonical
+# benchmark source. Spelled with the canonical predicate name emailish?
+# (lib/web.tcl, R2-ORDINARY-EMAILISH-PREDICATE.md) rather than the
+# deprecated Emailish? compatibility alias that the old .ir fixture used
+# (that alias exists specifically to keep the frozen .ir spelling working,
+# and is untouched by this migration -- see native/native.tcl).
+#
+# The first check's string is a Unicode-forcing case, not ASCII-only: "é"
+# (local part), "例え" (a domain label) and "テスト" (the TLD) are all
+# non-ASCII letters that emailish?'s Tcl-compatible [:alpha:]/[:alnum:]
+# classes accept -- see NATIVE-TCL-UNICODE.md.
+#
+# requires: web
+#
+# expect: [400, 0]
+
+q = uriEscape("a b")
+
+fn check(n, acc, s, q):
+    if n <= 0:
+        return acc
+    hit = if emailish?(s):
+        if emailish?(s):
+            if UriQueryValue?(q):
+                1
+            else:
+                0
+        else:
+            0
+    else:
+        0
+    check(n - 1, acc + hit, s, q)
+
+[check(400, 0, "café@例え.テスト", q), check(400, 0, "not-an-email", q)]

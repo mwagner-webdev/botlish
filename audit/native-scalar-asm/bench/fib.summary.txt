@@ -1,4 +1,4 @@
-source:  bench/fib.ir
+source:  bench/fib.bot
 backend: Cranelift (specialize=1)
 asm:     fib.asm
 vcode:   fib.vcode
