@@ -2357,20 +2357,37 @@ proc native::lower::Expr {fnVar e {want tagged}} {
             set result never
         }
         break {
-            set value ""
-            if {[dict get $node value] ne ""} {
-                set value [Expr fn [dict get $node value]]
-            }
-            if {$value ne "never"} {
-                lassign [dict get $fn loops [dict get $node target]] head exit resultReg
-                if {$value eq ""} {
-                    set value [Assign fn unit]
-                }
-                Emit fn "$resultReg = move $value" $e
+            lassign [dict get $fn loops [dict get $node target]] head exit resultReg accReg
+            if {$accReg ne ""} {
+                # A returning iterable loop (listloop, RETURNING-ITERABLE-
+                # LOOPS.md): a bare break ends the loop and returns the
+                # List collected so far. break VALUE is rejected earlier,
+                # at HIR resolve, for a listloop target, so node's own
+                # value is always "" here -- nothing to evaluate. A
+                # provably-discarded listloop (ListLoop's own "retained"
+                # check below) has no real accumulator to move; accReg is
+                # then the sentinel "discard", and the placeholder result
+                # nothing downstream reads is filled with unit instead.
+                set prefix [expr {$accReg eq "discard" ? [Assign fn unit] : $accReg}]
+                Emit fn "$resultReg = move $prefix" $e
                 Emit fn "jump $exit" $e
                 dict set fn broken [dict get $node target] 1
+                set result never
+            } else {
+                set value ""
+                if {[dict get $node value] ne ""} {
+                    set value [Expr fn [dict get $node value]]
+                }
+                if {$value ne "never"} {
+                    if {$value eq ""} {
+                        set value [Assign fn unit]
+                    }
+                    Emit fn "$resultReg = move $value" $e
+                    Emit fn "jump $exit" $e
+                    dict set fn broken [dict get $node target] 1
+                }
+                set result never
             }
-            set result never
         }
         continue {
             lassign [dict get $fn loops [dict get $node target]] head
@@ -4995,23 +5012,47 @@ proc native::lower::If {fnVar e node {family ""}} {
     return $result
 }
 
-# (listloop LIST-EXPR (block (ELEM) BODY...)): lowers directly to the shape
-# item 50 of BYTE-SET.md describes -- evaluate the list once, an index/
-# accumulator pair rebound at the loop's own back edge (exactly the
-# multi-definition-site register pattern `If`'s own join register already
-# uses, just fed back to the loop head instead of a forward join), a
-# `listget` at the proven-in-bounds index each iteration (no spurious user-
-# visible bounds Error: the generated index is always < the list's own
-# length by construction), and `listappend` to grow the result. `break`/
-# `continue`/`return`/an error inside the body compose completely unchanged
-# -- `dict set fn loops $e [list $head $exit $resultReg]` is the *same*
-# mechanism a bare `loop` already registers, so the existing Break/Continue
-# lowering (native::lower::Expr's own `break`/`continue` cases) needs no
-# change at all to make a `break` here overwrite $resultReg and jump
-# straight to $exit, or a `continue` jump straight back to $head.
+# (listloop LIST-EXPR (block (ELEM) BODY...)): the returning iterable loop
+# (RETURNING-ITERABLE-LOOPS.md). Lowers directly to the shape item 50 of
+# BYTE-SET.md describes -- evaluate the list once, an index/accumulator
+# pair rebound at the loop's own back edge (exactly the multi-definition-
+# site register pattern `If`'s own join register already uses, just fed
+# back to the loop head instead of a forward join), a `listget` at the
+# proven-in-bounds index each iteration (no spurious user-visible bounds
+# Error: the generated index is always < the list's own length by
+# construction), and `listappend` to grow the result. `continue`/`return`/
+# an error inside the body compose completely unchanged. `break` shares
+# the same `dict set fn loops $e [list $continueLabel $exit $resultReg
+# accReg]` registration mechanism a bare `loop`/countloop already uses,
+# extended with one more element -- this listloop's own accumulator
+# register -- so the shared Break lowering (native::lower::Expr's own
+# `break` case) can tell a collecting listloop apart from a plain
+# loop/countloop (whose registration's 4th element is simply absent, i.e.
+# "") and move the *collected prefix*, not a break payload, into
+# $resultReg: a listloop has exactly one stable result type (List[R]), so
+# `break VALUE` is rejected outright at hir/resolve.tcl and never reaches
+# here.
+#
+# RETAINED is whether anything actually uses this listloop's own result
+# (`![dict exists $context discarded $e]`, the same statement-position
+# discard fact hir/aot.tcl already computes and native/lower.tcl already
+# uses elsewhere, e.g. Bind's envless-function check) -- the discarded-
+# result optimization (RETURNING-ITERABLE-LOOPS.md items 20-22, 28-29): a
+# listloop whose List nothing reads (list::any?/all?/none?/find's own
+# short-circuiting bodies, or any `loop x in xs: side_effect(x)` used
+# purely for traversal) never emits `listnew`/`listappend` at all -- direct
+# eager traversal only, zero output-List allocations -- while still
+# running the body (and any of *its* side effects) exactly once per
+# element, left to right, exactly as the retained case does. A discarded
+# listloop's own $resultReg is a placeholder nothing downstream reads
+# (filled with `unit`, matching a discarded countloop's own natural-
+# exhaustion value); accReg's sentinel "discard" (not "", to stay
+# distinguishable from a plain loop/countloop's own registration) tells
+# the shared Break case there is no accumulator to move on break either.
 proc native::lower::ListLoop {fnVar e node} {
     upvar 1 $fnVar fn
     variable hir
+    variable context
     set iterExpr [dict get $node iterable]
     set iterReg [Expr fn $iterExpr]
     if {$iterReg eq "never"} {
@@ -5020,12 +5061,17 @@ proc native::lower::ListLoop {fnVar e node} {
     EmitArgGuards fn $e [list $iterExpr] [list $iterReg] {list} "loop"
     set lenReg [Assign fn "op listlen $iterReg" $e]
     set idx0 [IntConst fn 0 $e]
-    set acc0 [Assign fn "op listnew" $e]
     set idxReg [NewReg fn]
-    set accReg [NewReg fn]
     set resultReg [NewReg fn]
     Emit fn "$idxReg = move $idx0" $e
-    Emit fn "$accReg = move $acc0" $e
+    set retained [expr {![dict exists $context discarded $e]}]
+    if {$retained} {
+        set acc0 [Assign fn "op listnew" $e]
+        set accReg [NewReg fn]
+        Emit fn "$accReg = move $acc0" $e
+    } else {
+        set accReg ""
+    }
     set head [NewLabel fn]
     set bodyLabel [NewLabel fn]
     # `continue`'s own target (registered below): only advances the index
@@ -5046,15 +5092,18 @@ proc native::lower::ListLoop {fnVar e node} {
     EmitLabel fn $bodyLabel
     set saved [dict get $fn locals]
     set savedRaw [dict get $fn rawCache]
-    dict set fn loops $e [list $continueLabel $exit $resultReg]
+    dict set fn loops $e [list $continueLabel $exit $resultReg \
+        [expr {$retained ? $accReg : "discard"}]]
     EnterScope fn [dict get $node bodyScope]
     set elemReg [Assign fn "op listget $iterReg $idxReg" $e]
     dict set fn locals [dict get $node elementBinding] [list reg $elemReg]
     set bodyValue [Sequence fn [dict get $node body]]
     set usedContinue [dict exists $fn continued $e]
     if {$bodyValue ne "never"} {
-        set accNext [Assign fn "op listappend $accReg $bodyValue" $e]
-        Emit fn "$accReg = move $accNext" $e
+        if {$retained} {
+            set accNext [Assign fn "op listappend $accReg $bodyValue" $e]
+            Emit fn "$accReg = move $accNext" $e
+        }
         Emit fn "jump $continueLabel" $e
     }
     dict unset fn continued $e
@@ -5068,7 +5117,12 @@ proc native::lower::ListLoop {fnVar e node} {
         Emit fn "jump $head" $e
     }
     EmitLabel fn $normalExit
-    Emit fn "$resultReg = move $accReg" $e
+    if {$retained} {
+        Emit fn "$resultReg = move $accReg" $e
+    } else {
+        set unitConst [Assign fn unit $e]
+        Emit fn "$resultReg = move $unitConst" $e
+    }
     Emit fn "jump $exit" $e
     EmitLabel fn $exit
     return $resultReg

@@ -1,0 +1,88 @@
+# hir-cardinality.test -- hir/cardinality.tcl: the returning-iterable-loop
+# output-length facts (RETURNING-ITERABLE-LOOPS.md items 15-19, 51-52).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+proc cardinalityOfSoleListloop {text} {
+    set hir [surface::compile $text t.bot -strict 0]
+    set target ""
+    dict for {id node} [dict get $hir exprs] {
+        if {[dict get $node kind] eq "listloop"} {
+            set target $id
+        }
+    }
+    if {$target eq ""} {
+        error "cardinalityOfSoleListloop: no listloop found"
+    }
+    return [hir::cardinality::of $hir $target]
+}
+
+test cardinality-no-break-continue-exact {a listloop with neither break nor continue reachable is exact: output length == input length on every normal completion} -body {
+    cardinalityOfSoleListloop {loop x in [1, 2, 3]:
+    x + 1}
+} -result exact
+
+test cardinality-continue-is-max {a listloop with a reachable continue is max: output length <= input length} -body {
+    cardinalityOfSoleListloop {loop x in [1, 2, 3]:
+    if x == 2:
+        continue
+    x}
+} -result max
+
+test cardinality-bare-break-is-max {a listloop with a reachable bare break is max: output length <= input length} -body {
+    cardinalityOfSoleListloop {loop x in [1, 2, 3]:
+    if x == 2:
+        break
+    x}
+} -result max
+
+test cardinality-both-still-max {both continue and break reachable is still just max, not some third category} -body {
+    cardinalityOfSoleListloop {loop x in [1, 2, 3, 4]:
+    if x == 2:
+        continue
+    if x == 3:
+        break
+    x}
+} -result max
+
+test cardinality-nested-inner-break-does-not-affect-outer {a break inside a nested (inner) loop targets the inner loop only: the outer listloop, with no break/continue of its own, stays exact} -body {
+    set hir [surface::compile {loop x in [1, 2]:
+    loop y in [10, 20]:
+        if y == 20:
+            break
+        y} t.bot -strict 0]
+    set outer ""
+    set inner ""
+    dict for {id node} [dict get $hir exprs] {
+        if {[dict get $node kind] eq "listloop"} {
+            if {$outer eq ""} { set outer $id } else { set inner $id }
+        }
+    }
+    # Walk order visits the outer listloop first (pre-order).
+    list [hir::cardinality::of $hir $outer] [hir::cardinality::of $hir $inner]
+} -result {exact max}
+
+test cardinality-return-does-not-weaken-exact {a listloop reachable only via return from inside it (no break/continue of its own) stays exact: return/Error are nonlocal completions, not part of this fact} -body {
+    cardinalityOfSoleListloop {fn f(xs):
+    loop x in xs:
+        if x == 2:
+            return "escaped"
+        x + 1
+    "unreachable"
+
+f([1, 2, 3])}
+} -result exact
+
+test cardinality-analyze-covers-every-listloop {analyze returns a fact for every listloop in the program, not just one} -body {
+    set hir [surface::compile {loop x in [1, 2]:
+    x
+loop y in [3, 4]:
+    if y == 3:
+        break
+    y} t.bot -strict 0]
+    set facts [hir::cardinality::analyze $hir]
+    lsort [dict values $facts]
+} -result {exact max}
+
+cleanupTests

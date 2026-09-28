@@ -169,16 +169,22 @@ proc core::forms::op-loop {node env} {
     }
 }
 
-# (listloop LIST-EXPR (block (ELEM) BODY...)): evaluates LIST-EXPR once,
-# then iterates its items left to right, each iteration in a fresh scope
-# (exactly like op-loop's own body) that binds ELEM to the current item.
-# `return`/an error propagate directly out of the loop, exactly as they
-# already do in op-loop; `break` ends the loop with its own payload (or
-# unit) as the *whole* listloop's result; an ordinary (`value`) completion
-# contributes its value to the result being built, while `continue`
-# contributes nothing -- both simply move on to the next item. Exhausting
-# the list without a `break` completes normally with the List of every
-# contributed value, in order.
+# (listloop LIST-EXPR (block (ELEM) BODY...)): the returning iterable loop
+# (RETURNING-ITERABLE-LOOPS.md). Evaluates LIST-EXPR once, then iterates its
+# items left to right, each iteration in a fresh scope (exactly like
+# op-loop's own body) that binds ELEM to the current item. `return`/an
+# error propagate directly out of the loop, exactly as they already do in
+# op-loop; an ordinary (`value`) completion contributes its value to the
+# result being built, `continue` contributes nothing, and `break` ends the
+# loop immediately, its result becoming the List collected so far (the
+# accumulated prefix) -- never the break's own payload: a listloop has
+# exactly one stable result type, List[R], and a `break VALUE` reaching
+# here is not something any HIR-checked program can produce (hir/resolve.
+# tcl's LISTLOOP-BREAK-VALUE diagnostic rejects it at compile time), so its
+# payload, if present at the raw core-IR level, is simply not consulted --
+# a bare `break` and a `break VALUE` behave identically here, both ending
+# the loop with the prefix. Exhausting the list without a `break` completes
+# normally with the List of every contributed value, in order.
 proc core::forms::op-listloop {node env} {
     set listExpr [lindex $node 1]
     set elementBlock [lindex $node 2]
@@ -204,7 +210,7 @@ proc core::forms::op-listloop {node env} {
                 # contributes nothing; next iteration
             }
             break {
-                return [core::completion::normal [core::completion::payload $completion]]
+                return [core::completion::normal [core::value::listOf $results]]
             }
             return - propagate-error {
                 return $completion

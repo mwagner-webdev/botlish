@@ -817,23 +817,27 @@ proc hir::types::Expr {hirVar ctxVar e} {
             }
             set saved [dict get $ctx facts]
             dict set ctx facts [dict get $node elementBinding] $elemType
+            # breakTypes is seeded (and later unset) only so the shared
+            # `break` case in this same switch (below) always has a
+            # dict entry to lub into, exactly as a plain `loop`/countloop
+            # needs -- but a listloop's own result type never reads it
+            # back: RETURNING-ITERABLE-LOOPS.md redefines listloop to have
+            # exactly one stable result type, List[R], for every successful
+            # exit (normal exhaustion *and* a bare break, which now returns
+            # the collected prefix -- still a List[R], not a separate
+            # payload type). `break VALUE` inside a listloop is rejected
+            # outright at hir/resolve.tcl (LISTLOOP-BREAK-VALUE), so no
+            # valid program ever reaches here with a break payload type to
+            # reconcile. Always contributed, even when bodyType is itself
+            # never (a body that always diverges whenever it runs): the
+            # loop can still complete normally with an empty result for an
+            # empty iterable, exactly as a bare `[]` literal is List[never],
+            # not never itself.
             dict set ctx breakTypes $e never
-            # Unlike a plain `loop`, a listloop's own natural (non-break)
-            # completion contributes too: every iteration's ordinary body
-            # value is collected into the result List, so the body's own
-            # Sequence type (when reachable) seeds the result as List[R],
-            # unified (lub) with whatever break payload types are also
-            # reachable -- exactly the pre-existing breakTypes lub, just
-            # seeded with one extra contribution. Always contributed, even
-            # when bodyType is itself never (a body that always diverges
-            # whenever it runs): the loop can still complete normally with
-            # an empty result for an empty iterable, exactly as a bare `[]`
-            # literal is List[never], not never itself.
             set bodyType [Sequence hir ctx [dict get $node body]]
-            set type [lub [dict get $ctx breakTypes $e] [MakeList $bodyType]]
             dict unset ctx breakTypes $e
             dict set ctx facts $saved
-            return [SetType hir $e $type]
+            return [SetType hir $e [MakeList $bodyType]]
         }
         countloop {
             Expr hir ctx [dict get $node start]

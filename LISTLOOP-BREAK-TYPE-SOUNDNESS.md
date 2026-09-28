@@ -1,5 +1,23 @@
 # LISTLOOP-BREAK-TYPE-SOUNDNESS.md
 
+**Superseded by RETURNING-ITERABLE-LOOPS.md.** This audit's own subject —
+`break VALUE` overriding a listloop's whole result, discarding the
+accumulator — was a deliberate, sound design at the time this was written,
+and everything below remains an accurate historical record of that design
+and why it was safe. RETURNING-ITERABLE-LOOPS.md later redefines
+listloop's `break` semantics outright (a bare `break` now returns the
+collected prefix instead of `unit`; `break VALUE` is now rejected at
+compile time, LISTLOOP-BREAK-VALUE, rather than given override semantics),
+specifically *because* of the hazard this audit had to reason its way
+around: a listloop with exactly one stable result type (always List[R])
+removes the need for the breakTypes-join machinery this document describes
+entirely, rather than re-verifying it stays sound on every future change.
+`tests/loop-in.test`'s own adversarial cases were rewritten for the new
+rule (see RETURNING-ITERABLE-LOOPS.md's own "break-value decision" and
+that test file's header comment for the full story). Read this document
+only for the pre-RETURNING-ITERABLE-LOOPS.md design it audited, never as
+current behavior.
+
 Adversarial soundness audit of `loop x in EXPR:` (`listloop`)'s interaction
 between `break VALUE`, ordinary List-collecting completion, declared
 function results, and static result inference — requested before proceeding

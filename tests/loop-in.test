@@ -1,10 +1,22 @@
-# loop-in.test -- "loop x in EXPR:" (core IR: listloop), the minimal
-# element-binding List-traversal extension added for BYTE-SET.md.
+# loop-in.test -- "loop x in EXPR:" (core IR: listloop), the returning
+# iterable loop (RETURNING-ITERABLE-LOOPS.md; originally the minimal
+# element-binding List-traversal extension added for BYTE-SET.md).
 #
 # Covers the construct on its own (not only through byte::set): typing,
 # left-to-right order, evaluating the iterable exactly once, an empty
 # List, break/continue/return/error composition, nested loops, and
 # four-way backend parity.
+#
+# break semantics (RETURNING-ITERABLE-LOOPS.md): a bare `break` ends a
+# listloop immediately, returning the List collected so far (the
+# "prefix") -- never `unit`, and never overriding the accumulator the way
+# a plain `loop`'s own break still does (tests/loops.test, unchanged). A
+# `break` carrying a value is rejected outright at compile time
+# (LISTLOOP-BREAK-VALUE), since a listloop has exactly one stable result
+# type. This supersedes the override-and-discard semantics
+# LISTLOOP-BREAK-TYPE-SOUNDNESS.md audited for the original design; see
+# RETURNING-ITERABLE-LOOPS.md's own "break-value decision" for the full
+# rationale.
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
@@ -105,23 +117,82 @@ test loop-in-iterable-evaluated-once {the iterable expression is evaluated exact
 # ---------------------------------------------------------------------------
 # break / continue / return / error composition
 
-test loop-in-break-overrides {break VALUE ends the loop immediately with VALUE as the whole loop's result, discarding the accumulator} -body {
-    loopInterpValue {loop x in [1, 2, 3]:
-    if x == 2:
-        break "stopped"
-    else:
-        x
+test loop-in-break-returns-prefix {a bare break ends the loop immediately, returning the List collected so far (the accumulated prefix) -- never unit, never a payload} -body {
+    loopInterpValue {loop x in [1, 2, 3, 4]:
+    if x == 3:
+        break
+    x
 }
-} -result {"stopped"}
+} -result {[1, 2]}
 
-test loop-in-break-parity {break override agrees on every backend} -body {
-    loopParity {loop x in [1, 2, 3]:
-    if x == 2:
-        break "stopped"
-    else:
-        x
+test loop-in-break-prefix-parity {break-returns-prefix agrees on every backend} -body {
+    loopParity {loop x in [1, 2, 3, 4]:
+    if x == 3:
+        break
+    x
 }
 } -result same
+
+test loop-in-break-immediately {a break on the very first element returns an empty List, not an error} -body {
+    loopInterpValue {loop x in [1, 2, 3]:
+    if x == 1:
+        break
+    x
+}
+} -result {[]}
+
+test loop-in-break-value-rejected {break with a value is rejected at compile time inside a returning iterable loop} -body {
+    catch {surface::compile {loop x in [1, 2, 3]:
+    if x == 2:
+        break 99
+    x} break-value-rejected.bot} message options
+    list [dict get $options -errorcode] \
+        [string match {*not valid inside a returning iterable loop*} $message]
+} -result {{CORE SEMANTIC LISTLOOP-BREAK-VALUE} 1}
+
+test loop-in-break-value-rejected-diagnostic {the same rejection, inspected as a kept (non-strict) diagnostic, confirming it comes from ordinary HIR resolution (hir/resolve.tcl), not a thrown error or a later type-checking pass} -body {
+    set hir [loopSourceHir {loop x in [1, 2, 3]:
+    if x == 2:
+        break 99
+    x}]
+    set diags [hir::diagnostics $hir]
+    list [llength $diags] [dict get [lindex $diags 0] kind]
+} -result {1 LISTLOOP-BREAK-VALUE}
+
+test loop-in-break-bare-value-declared-result-ok {a valueless break stays fully compatible with any declared List[int] result: only a VALUE-carrying break is rejected, not break itself} -body {
+    set hir [loopSourceHir {fn f(xs: List[int]) -> List[int]:
+    loop x in xs:
+        if x == 0:
+            break
+        x
+
+f([1, 2])}]
+    llength [hir::diagnostics $hir]
+} -result 0
+
+test loop-in-break-value-nested-still-invalid {a break targeting an outer listloop from inside a nested block is still rejected for a value payload} -body {
+    set hir [loopSourceHir {loop x in [1, 2]:
+    loop y in [10, 20]:
+        if y == 20:
+            break 1
+        y}]
+    set diags [hir::diagnostics $hir]
+    list [llength $diags] [dict get [lindex $diags 0] kind]
+} -result {1 LISTLOOP-BREAK-VALUE}
+
+test loop-in-break-value-plain-loop-unaffected {break VALUE is still fully valid inside a plain (non-listloop) loop: only a listloop target is restricted -- countloop/loop keep their own established override semantics unchanged} -body {
+    run {loop {block {} {break {const 42}}}}
+} -result 42
+
+test loop-in-break-still-precise-type {a listloop's own static type stays exactly List[R] even where a bare break is reachable: its result is still List[R] (the collected prefix), not a separate payload type} -body {
+    set hir [loopSourceHir {v = loop x in [1, 2, 3]:
+    if x == 2:
+        break
+    x + 1
+v}]
+    set e [lindex [dict get $hir roots] end]
+    hir::types::show [hir::typeOf $hir $e]
+} -result {List[int]}
 
 test loop-in-continue-skips {continue contributes nothing for that iteration and moves on} -body {
     loopInterpValue {loop x in [1, 2, 3]:
@@ -226,6 +297,33 @@ test loop-in-nested-parity {nested loops agree on every backend (interp/compile/
 } -result same
 
 # ---------------------------------------------------------------------------
+# Closure-per-iteration (item 33 of RETURNING-ITERABLE-LOOPS.md): the
+# element binding is a fresh, immutable binding each iteration (item 10),
+# so a closure created in different iterations must capture that
+# iteration's own value, never one shared mutable slot -- calling the
+# resulting functions must yield 1, 2, 3, not 3, 3, 3.
+
+test loop-in-closure-per-iteration {closures created in different iterations of a returning loop capture that iteration's own binding value} -body {
+    loopInterpValue {fs = loop x in [1, 2, 3]:
+    fn f():
+        x
+    f
+results = loop g in fs:
+    g()
+results}
+} -result {[1, 2, 3]}
+
+test loop-in-closure-per-iteration-parity {closure-per-iteration agrees on every backend} -body {
+    loopParity {fs = loop x in [1, 2, 3]:
+    fn f():
+        x
+    f
+results = loop g in fs:
+    g()
+results}
+} -result same
+
+# ---------------------------------------------------------------------------
 # break/continue lexical-boundary rules are unchanged (shared with the
 # pre-existing bare `loop:`, pinned in loops.test): a `loop x in ...:` is an
 # ordinary loop scope for this purpose, verified directly here too (raw
@@ -244,92 +342,16 @@ test loop-in-continue-outside-loop {continue outside any loop is still rejected}
 } -returnCodes error -errorCode {CORE SEMANTIC CONTINUE-OUTSIDE-LOOP} -match glob -result *
 
 # ---------------------------------------------------------------------------
-# Adversarial soundness: break VALUE overrides the whole listloop's result
-# (discarding the accumulated List), so a listloop's static result type must
-# account for every reachable break payload's type, not merely the List[R]
-# of its own per-iteration (non-break) completion. The dangerous case: an
-# incompatible scalar break reachable from a broad List[int] parameter, with
-# a declared -> List[int] result -- if this verified, f([0]) would return
-# 123 (an int), not a List[int], at runtime.
+# Adversarial soundness, redone for RETURNING-ITERABLE-LOOPS.md's redefined
+# break semantics: since a listloop now has exactly one stable result type
+# (List[R], for both normal exhaustion and a bare break's collected prefix),
+# the dangerous case the original design audited -- an incompatible break
+# payload type reaching a declared List[int] result at runtime -- cannot
+# arise at all: `break VALUE` is rejected outright at compile time
+# (hir/resolve.tcl's LISTLOOP-BREAK-VALUE, exercised above), never merely
+# widened to `any` or left for a later declared-result check to catch.
 
-test loop-in-break-scalar-declared-result-rejected {a reachable break of a scalar incompatible with the declared List[int] result must not verify: at runtime, an input containing 0 would make the whole function's value 123, not a List[int]} -body {
-    catch {surface::compile {fn f(xs: List[int]) -> List[int]:
-    loop x in xs:
-        if x == 0:
-            break 123
-        x
-
-f([1, 2])} scalar-break-rejected.bot} message options
-    list [dict get $options -errorcode] [string match {*does not prove declared type*} $message]
-} -result {{CORE SEMANTIC TYPE} 1}
-
-test loop-in-break-scalar-declared-result-rejected-diagnostic {the same rejection, inspected as a kept (non-strict) TYPE diagnostic rather than a thrown error, confirming it is produced during ordinary semantic verification} -body {
-    set hir [loopSourceHir {fn f(xs: List[int]) -> List[int]:
-    loop x in xs:
-        if x == 0:
-            break 123
-        x
-
-f([1, 2])}]
-    set diags [hir::diagnostics $hir]
-    list [llength $diags] [dict get [lindex $diags 0] kind] \
-        [string match {*does not prove declared type*} [dict get [lindex $diags 0] message]]
-} -result {1 TYPE 1}
-
-test loop-in-break-list-declared-result-accepted {a reachable break whose payload is itself a compatible List[int] verifies against the declared List[int] result -- contrasting the incompatible-scalar-break rejection above} -body {
-    set hir [loopSourceHir {fn f(xs: List[int]) -> List[int]:
-    loop x in xs:
-        if x == 0:
-            break [1, 2]
-        x
-
-f([5, 0, 9])}]
-    llength [hir::diagnostics $hir]
-} -result 0
-
-test loop-in-break-list-runtime-returns-payload {with the compatible break above, an input that actually reaches the break returns the explicit break payload, not the accumulated prefix ([5] would have been collected before the break)} -body {
-    loopInterpValue {fn f(xs: List[int]) -> List[int]:
-    loop x in xs:
-        if x == 0:
-            break [1, 2]
-        x
-
-f([5, 0, 9])}
-} -result {[1, 2]}
-
-test loop-in-break-list-runtime-parity {the compatible-List-break-payload-overrides-the-loop runtime rule agrees on every backend} -body {
-    loopParity {loop x in [5, 0, 9]:
-    if x == 0:
-        break [1, 2]
-    else:
-        x
-}
-} -result same
-
-test loop-in-break-bare-declared-result-rejected {a reachable bare break (loop value unit) is likewise incompatible with a declared List[int] result} -body {
-    set hir [loopSourceHir {fn f(xs: List[int]) -> List[int]:
-    loop x in xs:
-        if x == 0:
-            break
-        x
-
-f([1, 2])}]
-    set diags [hir::diagnostics $hir]
-    list [llength $diags] [expr {[llength $diags] > 0
-        && [string match {*does not prove declared type*} [dict get [lindex $diags 0] message]]}]
-} -result {1 1}
-
-test loop-in-break-scalar-undeclared-inferred-type {with no declared result, a listloop whose only reachable completions are an incompatible scalar break and a List[int] exhaustion must not be inferred as the falsely-precise List[int]: some conservative type both completions actually satisfy is required instead} -body {
-    set hir [loopSourceHir {fn f(xs: List[int]):
-    loop x in xs:
-        if x == 0:
-            break 123
-        x}]
-    set ll [hirFind $hir listloop]
-    list [llength $ll] [hir::types::show [hir::typeOf $hir [lindex $ll 0]]]
-} -result {1 any}
-
-test loop-in-no-break-still-precise {a listloop with no break at all keeps its precise List[R] typing (byte::set's own no-break shape), unaffected by the break-payload join added above} -body {
+test loop-in-no-break-still-precise {a listloop with no break at all keeps its precise List[R] typing (byte::set's own no-break shape)} -body {
     set hir [loopSourceHir {v = loop x in [1, 2, 3]:
     x + 1
 v}]

@@ -43,18 +43,23 @@
 # passes through unchanged.
 #
 # (listloop LIST-EXPR ELEMENT-BLOCK): the surface `loop x in EXPR:` form
-# (see surface/parser.tcl). LIST-EXPR is evaluated once, in the enclosing
-# scope. ELEMENT-BLOCK must be a syntactic (block (ELEM) BODY...) node with
-# exactly one parameter -- otherwise exactly like BODY-BLOCK above, lexically
-# part of the enclosing code (not a callable boundary: `return` inside it
-# still returns from the enclosing function), and, like a loop body, a valid
-# target for `break`/`continue`. Iterates LIST-EXPR's elements left to right,
-# binding ELEM fresh (immutable) each iteration. An iteration whose body
-# completes with an ordinary value contributes that value to the result,
-# built in order; `continue` contributes nothing for that iteration; `break`
-# (with or without a value) ends the loop immediately, its own value (or
-# unit) becoming the *whole* listloop's result, overriding whatever was
-# accumulated so far -- exactly `loop`'s own break semantics. If the list is
+# (see surface/parser.tcl) -- the *returning* iterable loop (RETURNING-
+# ITERABLE-LOOPS.md), Botlish's fundamental collection-transformation
+# primitive (it replaces map/filter/filter_map). LIST-EXPR is evaluated
+# once, in the enclosing scope. ELEMENT-BLOCK must be a syntactic (block
+# (ELEM) BODY...) node with exactly one parameter -- otherwise exactly like
+# BODY-BLOCK above, lexically part of the enclosing code (not a callable
+# boundary: `return` inside it still returns from the enclosing function),
+# and, like a loop body, a valid target for `break`/`continue`. Iterates
+# LIST-EXPR's elements left to right, binding ELEM fresh (immutable) each
+# iteration. An iteration whose body completes with an ordinary value
+# contributes that value to the result, built in order; `continue`
+# contributes nothing for that iteration; a valueless `break` ends the loop
+# immediately, the List collected so far (the accumulated prefix) becoming
+# the *whole* listloop's result -- unlike a plain `loop`, a listloop has
+# exactly one stable result type (List[R]), so `break` with a value is
+# rejected at the HIR level (hir/resolve.tcl's LISTLOOP-BREAK-VALUE
+# diagnostic) rather than given override semantics. If the list is
 # exhausted without a `break`, the result is the List of every iteration's
 # contributed value, in that order (empty for an empty LIST-EXPR).
 #
@@ -74,7 +79,10 @@
 # completes with an ordinary value simply discards it and advances to the
 # next I; `continue` likewise just advances. `break` (with or without a
 # value) ends the loop immediately, its own value (or unit) becoming the
-# countloop's result -- exactly `loop`/`listloop`'s own break semantics.
+# countloop's result -- exactly a plain `loop`'s own break semantics
+# (unlike listloop's, unchanged by RETURNING-ITERABLE-LOOPS.md: a countloop
+# is not a returning/collecting loop, so it keeps override-and-discard
+# break semantics; see that report's "why counted loops remain unchanged").
 # Reaching END without a `break` completes normally with unit, never a
 # List: there is no hidden collection of I's visited values.
 #

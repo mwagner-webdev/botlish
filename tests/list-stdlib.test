@@ -1,0 +1,183 @@
+# list-stdlib.test -- list::any?/all?/none?/find (lib/list.bot),
+# RETURNING-ITERABLE-LOOPS.md's own higher-order search/reduction idioms
+# built directly on the returning iterable loop. Covers correctness
+# (including empty-List edge cases and the checked NotFound convention),
+# left-to-right short-circuiting (proved by a "poison" trailing element
+# whose predicate application would itself error if ever reached), a
+# native predicate (is_tcl_alpha) alongside an ordinary Botlish one, and
+# four-way backend parity.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+set parityBackends {interp compile cranelift-generic cranelift}
+
+proc listlibParity {path} {
+    set hir [surface::readProgramFile $path -strict 0]
+    set exprs [hir::lower $hir]
+    set outcomes [lmap backend $::parityBackends {outcomeUnder $backend $exprs}]
+    if {[llength [lsort -unique $outcomes]] == 1} {
+        return same
+    }
+    return [join [lmap backend $::parityBackends outcome $outcomes {list $backend $outcome}] " / "]
+}
+
+proc listlibValue {path} {
+    set hir [surface::readProgramFile $path -strict 0]
+    lindex [outcomeUnder interp [hir::lower $hir]] 1
+}
+
+proc listlibErrorKind {path} {
+    set hir [surface::readProgramFile $path -strict 0]
+    lindex [outcomeUnder interp [hir::lower $hir]] 1
+}
+
+set isEven {
+fn is_even(x):
+    mod(x, 2) == 0
+}
+
+# ---------------------------------------------------------------------------
+# any?
+
+test list-any-empty {any?([], predicate) -> false} -body {
+    set path [makeFile "$isEven\nlist::any?(\[\], is_even)" list-any-empty.bot]
+    try { listlibValue $path } finally { removeFile list-any-empty.bot }
+} -result false
+
+test list-any-no-match {any?([1, 3, 5], is_even) -> false (no element matches)} -body {
+    set path [makeFile "$isEven\nlist::any?(\[1, 3, 5\], is_even)" list-any-no-match.bot]
+    try { listlibValue $path } finally { removeFile list-any-no-match.bot }
+} -result false
+
+test list-any-match {any?([1, 3, 4], is_even) -> true} -body {
+    set path [makeFile "$isEven\nlist::any?(\[1, 3, 4\], is_even)" list-any-match.bot]
+    try { listlibValue $path } finally { removeFile list-any-match.bot }
+} -result true
+
+test list-any-short-circuits {any? stops at the first match: a poison trailing element whose predicate application would itself error (mod of a non-Int) is never reached} -body {
+    set path [makeFile "$isEven\nlist::any?(\[2, \"poison\"\], is_even)" list-any-short-circuits.bot]
+    try { listlibValue $path } finally { removeFile list-any-short-circuits.bot }
+} -result true
+
+test list-any-parity {any? agrees on every backend} -body {
+    set path [makeFile "$isEven\nlist::any?(\[1, 3, 4\], is_even)" list-any-parity.bot]
+    try { listlibParity $path } finally { removeFile list-any-parity.bot }
+} -result same
+
+# ---------------------------------------------------------------------------
+# all?
+
+test list-all-empty {all?([], predicate) -> true} -body {
+    set path [makeFile "$isEven\nlist::all?(\[\], is_even)" list-all-empty.bot]
+    try { listlibValue $path } finally { removeFile list-all-empty.bot }
+} -result true
+
+test list-all-match {all?([2, 4, 6], is_even) -> true} -body {
+    set path [makeFile "$isEven\nlist::all?(\[2, 4, 6\], is_even)" list-all-match.bot]
+    try { listlibValue $path } finally { removeFile list-all-match.bot }
+} -result true
+
+test list-all-no-match {all?([1, 4, 6], is_even) -> false (first element already fails)} -body {
+    set path [makeFile "$isEven\nlist::all?(\[1, 4, 6\], is_even)" list-all-no-match.bot]
+    try { listlibValue $path } finally { removeFile list-all-no-match.bot }
+} -result false
+
+test list-all-short-circuits {all? stops at the first non-match: a poison trailing element is never reached once 3 already fails} -body {
+    set path [makeFile "$isEven\nlist::all?(\[2, 3, \"poison\"\], is_even)" list-all-short-circuits.bot]
+    try { listlibValue $path } finally { removeFile list-all-short-circuits.bot }
+} -result false
+
+test list-all-parity {all? agrees on every backend} -body {
+    set path [makeFile "$isEven\nlist::all?(\[2, 3, 4\], is_even)" list-all-parity.bot]
+    try { listlibParity $path } finally { removeFile list-all-parity.bot }
+} -result same
+
+# ---------------------------------------------------------------------------
+# none?
+
+test list-none-empty {none?([], predicate) -> true} -body {
+    set path [makeFile "$isEven\nlist::none?(\[\], is_even)" list-none-empty.bot]
+    try { listlibValue $path } finally { removeFile list-none-empty.bot }
+} -result true
+
+test list-none-no-match {none?([1, 3, 5], is_even) -> true} -body {
+    set path [makeFile "$isEven\nlist::none?(\[1, 3, 5\], is_even)" list-none-no-match.bot]
+    try { listlibValue $path } finally { removeFile list-none-no-match.bot }
+} -result true
+
+test list-none-match {none?([1, 4, 5], is_even) -> false} -body {
+    set path [makeFile "$isEven\nlist::none?(\[1, 4, 5\], is_even)" list-none-match.bot]
+    try { listlibValue $path } finally { removeFile list-none-match.bot }
+} -result false
+
+test list-none-short-circuits {none? stops at the first match: a poison trailing element is never reached once 2 already matches} -body {
+    set path [makeFile "$isEven\nlist::none?(\[2, \"poison\"\], is_even)" list-none-short-circuits.bot]
+    try { listlibValue $path } finally { removeFile list-none-short-circuits.bot }
+} -result false
+
+test list-none-parity {none? agrees on every backend} -body {
+    set path [makeFile "$isEven\nlist::none?(\[1, 3, 5\], is_even)" list-none-parity.bot]
+    try { listlibParity $path } finally { removeFile list-none-parity.bot }
+} -result same
+
+# ---------------------------------------------------------------------------
+# find
+
+test list-find-match {find([5, 6, 7], is_even) -> 6, the first match} -body {
+    set path [makeFile "$isEven\nlist::find(\[5, 6, 7\], is_even)" list-find-match.bot]
+    try { listlibValue $path } finally { removeFile list-find-match.bot }
+} -result 6
+
+test list-find-short-circuits {find stops at the first match: a poison trailing element is never reached once 6 already matches} -body {
+    set path [makeFile "$isEven\nlist::find(\[6, \"poison\"\], is_even)" list-find-short-circuits.bot]
+    try { listlibValue $path } finally { removeFile list-find-short-circuits.bot }
+} -result 6
+
+test list-find-no-match-fails {find([1, 3, 5], is_even) -> checked NotFound failure, no null/sentinel} -body {
+    set path [makeFile "$isEven\nlist::find(\[1, 3, 5\], is_even)" list-find-no-match-fails.bot]
+    try { listlibErrorKind $path } finally { removeFile list-find-no-match-fails.bot }
+} -result {CORE SEMANTIC UNCAUGHT-ERROR}
+
+test list-find-empty-fails {find([], predicate) -> the same checked NotFound failure as a nonempty List with no match} -body {
+    set path [makeFile "$isEven\nlist::find(\[\], is_even)" list-find-empty-fails.bot]
+    try { listlibErrorKind $path } finally { removeFile list-find-empty-fails.bot }
+} -result {CORE SEMANTIC UNCAUGHT-ERROR}
+
+test list-find-parity {find agrees on every backend, both the successful and the failing case} -body {
+    set matchPath [makeFile "$isEven\nlist::find(\[5, 6, 7\], is_even)" list-find-parity-match.bot]
+    set failPath [makeFile "$isEven\nlist::find(\[1, 3, 5\], is_even)" list-find-parity-fail.bot]
+    try {
+        list [listlibParity $matchPath] [listlibParity $failPath]
+    } finally {
+        removeFile list-find-parity-match.bot
+        removeFile list-find-parity-fail.bot
+    }
+} -result {same same}
+
+# ---------------------------------------------------------------------------
+# A native predicate (is_tcl_alpha, core/tclcompat.tcl), alongside the
+# ordinary-Botlish-function predicate every test above already exercises --
+# the milestone's own minimal predicate matrix (item 49).
+
+test list-any-native-predicate {any? with a native predicate (is_tcl_alpha)} -body {
+    set path [makeFile {list::any?(["1", "a", "2"], is_tcl_alpha)} list-any-native.bot]
+    try { listlibValue $path } finally { removeFile list-any-native.bot }
+} -result true
+
+test list-all-native-predicate {all? with a native predicate (is_tcl_alpha)} -body {
+    set path [makeFile {list::all?(["a", "b", "c"], is_tcl_alpha)} list-all-native.bot]
+    try { listlibValue $path } finally { removeFile list-all-native.bot }
+} -result true
+
+test list-find-native-predicate {find with a native predicate (is_tcl_alpha)} -body {
+    set path [makeFile {list::find(["1", "2", "a"], is_tcl_alpha)} list-find-native.bot]
+    try { listlibValue $path } finally { removeFile list-find-native.bot }
+} -result {"a"}
+
+test list-none-native-predicate {none? with a native predicate (is_tcl_alpha)} -body {
+    set path [makeFile {list::none?(["1", "2", "3"], is_tcl_alpha)} list-none-native.bot]
+    try { listlibValue $path } finally { removeFile list-none-native.bot }
+} -result true
+
+cleanupTests

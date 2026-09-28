@@ -1,0 +1,81 @@
+# list.bot -- the "list" namespace: search/reduction idioms built directly
+# on the returning iterable loop (`loop x in xs:`, RETURNING-ITERABLE-
+# LOOPS.md), Botlish's fundamental collection-transformation primitive.
+# Deliberately no map/filter/filter_map: the returning loop already
+# subsumes them (`loop x in xs: if not predicate(x): continue \n x` is the
+# filtering idiom; the search/reduction helpers below are exactly the case
+# where a genuine callback still pays rent).
+#
+#   list::any?(xs, predicate)   true iff some element satisfies predicate,
+#                                left to right, short-circuiting at the
+#                                first true. any?([], predicate) -> false.
+#   list::all?(xs, predicate)   true iff every element satisfies predicate,
+#                                left to right, short-circuiting at the
+#                                first false. all?([], predicate) -> true.
+#   list::none?(xs, predicate)  true iff no element satisfies predicate,
+#                                left to right, short-circuiting at the
+#                                first true. none?([], predicate) -> true.
+#                                Written directly (not merely "not any?(...)
+#                                "): a genuinely independent higher-order
+#                                idiom, and another honest predicate call
+#                                site for the next milestone's callvalue
+#                                corpus -- not special-cased against any?.
+#   list::find(xs, predicate)   the first element satisfying predicate,
+#                                left to right, short-circuiting at the
+#                                first match. No match (including an empty
+#                                xs) fails the checked NotFound error below
+#                                -- never null, undefined, or a sentinel.
+#
+# Each function's own returning-loop result is deliberately unused: every
+# body short-circuits via `return` (or, for find, `fail`) before the loop
+# would ever exhaust normally with a meaningful collected List. The native
+# backend's discarded-result lowering (RETURNING-ITERABLE-LOOPS.md items
+# 20-22, 28-29) applies at every one of these call sites, so none of these
+# four helpers causes an output-List allocation the caller never asked
+# for -- see that report's allocation census.
+#
+# No `continue` appears below, deliberately: it would only ever change what
+# a *discarded* iteration contributes to a List none of these four
+# functions ever reads (a skipped iteration's own `if`, with no `else` and
+# nothing after it, already completes normally with `unit` -- ordinary
+# Botlish `if`-without-`else` typing, ASCII-AND-URI-UNRESERVED.md's own
+# `if not label_char?(...): return false` shape among many others -- so
+# omitting `continue` here costs nothing observable and keeps the shape of
+# each function to its one real decision). A `continue` remains load-
+# bearing wherever a returning loop's own collected List *is* read -- see
+# item 4's own filtering idiom, `loop x in xs: if not predicate(x):
+# continue \n x`, in RETURNING-ITERABLE-LOOPS.md.
+#
+# `predicate(x)` is an ordinary dynamic call through an untyped parameter
+# (`callvalue` at the interpreter/native level, exactly like lib/web.bot's
+# own `scan_while`'s `predicate(char_at(i))`): this milestone intentionally
+# does not add finite callable-target provenance, devirtualization, or any
+# other optimization of that call -- see the report's higher-order
+# callvalue census, and RETURNING-ITERABLE-LOOPS.md items 47/81.
+namespace list
+
+error NotFound
+
+fn any?(xs, predicate) -> bool:
+    loop x in xs:
+        if predicate(x):
+            return true
+    false
+
+fn all?(xs, predicate) -> bool:
+    loop x in xs:
+        if not predicate(x):
+            return false
+    true
+
+fn none?(xs, predicate) -> bool:
+    loop x in xs:
+        if predicate(x):
+            return false
+    true
+
+fn find(xs, predicate) errors NotFound:
+    loop x in xs:
+        if predicate(x):
+            return x
+    fail NotFound

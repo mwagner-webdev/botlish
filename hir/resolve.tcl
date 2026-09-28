@@ -497,9 +497,28 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 set value [Expr hir [dict get $node value] $ctx]
             }
             SetField hir $e value $value
-            SetField hir $e target [dict get $ctx loop]
-            if {[dict get $ctx loop] eq ""} {
+            set loop [dict get $ctx loop]
+            SetField hir $e target $loop
+            if {$loop eq ""} {
                 hir::Diagnose hir BREAK-OUTSIDE-LOOP "break outside lexical loop" $e
+            } elseif {$value ne "" && [dict get $hir exprs $loop kind] eq "listloop"} {
+                # RETURNING-ITERABLE-LOOPS.md: a returning iterable loop
+                # (`loop x in xs:`) has exactly one stable result type, the
+                # collected List -- a bare `break` ends it with the prefix
+                # collected so far (this same case's own `value` stays "",
+                # never a payload). `break VALUE` would let one reachable
+                # exit override that List with an arbitrary, unrelated
+                # type, exactly the soundness hazard LISTLOOP-BREAK-TYPE-
+                # SOUNDNESS.md once had to reason about for the old
+                # override semantics; disallowing it outright here removes
+                # the hazard at the source instead of re-deriving it in
+                # hir/types.tcl on every listloop. Bare `break` and
+                # `continue` remain fully valid; a plain `loop:`/countloop
+                # target keeps its own established `break VALUE` semantics
+                # unchanged (RETURNING-ITERABLE-LOOPS.md's own "why counted
+                # loops remain unchanged").
+                hir::Diagnose hir LISTLOOP-BREAK-VALUE \
+                    "break with a value is not valid inside a returning iterable loop (loop x in ...): use a bare break to end the loop with the collected prefix" $e
             }
         }
         continue {

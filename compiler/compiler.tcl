@@ -819,6 +819,21 @@ proc core::compiler::CompileForm {ctxVar e} {
             return [Never]
         }
         break {
+            set loop [N $e target]
+            set var "" ; set acc ""
+            if {[dict exists $ctx loops $loop]} {
+                lassign [dict get $ctx loops $loop] var acc
+            }
+            if {$acc ne ""} {
+                # A returning iterable loop (listloop, RETURNING-ITERABLE-
+                # LOOPS.md): a bare break ends the loop and returns the
+                # List collected so far -- break VALUE is rejected earlier,
+                # at HIR resolve, for a listloop target, so N $e value is
+                # always "" here; nothing to evaluate.
+                Emit ctx "set $var \[core::value::listOf \$$acc\]"
+                Emit ctx "break"
+                return [Never]
+            }
             set value [Op box unit unit]
             if {[N $e value] ne ""} {
                 set value [CompileExpr ctx [N $e value]]
@@ -826,9 +841,7 @@ proc core::compiler::CompileForm {ctxVar e} {
                     return $value
                 }
             }
-            set loop [N $e target]
-            if {[dict exists $ctx loops $loop]} {
-                set var [dict get $ctx loops $loop]
+            if {$var ne ""} {
                 Emit ctx "set $var [BoxWord $value]"
                 Emit ctx "break"
             } else {
@@ -1343,7 +1356,7 @@ proc core::compiler::CompileLoop {ctxVar e} {
     set id [N $e bodyScope]
     OpenScope ctx $id $parentFrame
     DeclareScope ctx $id
-    dict set ctx loops $e $result
+    dict set ctx loops $e [list $result ""]
     CompileSequence ctx [N $e body]
     dict unset ctx loops $e
     PopScope ctx
@@ -1352,13 +1365,19 @@ proc core::compiler::CompileLoop {ctxVar e} {
     return [Op box "\$$result" any]
 }
 
-# (listloop ITERABLE-EXPR (block (ELEM) BODY...)): evaluates the iterable
-# once, then a Tcl `foreach` over its items -- mirroring CompileLoop's own
-# `while 1`/Tcl-`break`/Tcl-`continue` reuse exactly (dict set ctx loops $e
-# $result makes the existing, unmodified `break`/`continue` compiled forms
-# already do the right thing here: a `break` sets $result and Tcl-breaks out
-# of this same `foreach`; a `continue` is a plain Tcl `continue`, skipping
+# (listloop ITERABLE-EXPR (block (ELEM) BODY...)): the returning iterable
+# loop (RETURNING-ITERABLE-LOOPS.md). Evaluates the iterable once, then a
+# Tcl `foreach` over its items -- mirroring CompileLoop's own `while 1`/
+# Tcl-`continue` reuse (a `continue` is a plain Tcl `continue`, skipping
 # straight to the next item without running the accumulation line below).
+# `dict set ctx loops $e [list $result $acc]` registers both this
+# listloop's own result variable *and* its accumulator: the compiled
+# `break` case (above) checks for a non-empty accumulator to tell a
+# collecting listloop apart from a plain `loop`/countloop's own bare
+# $result-only registration, and when present sets $result to the List
+# already collected in $acc (the prefix), not the break's own payload --
+# RETURNING-ITERABLE-LOOPS.md's redefinition, replacing the old "break sets
+# $result directly" override reuse this comment used to describe.
 # Exhausting the items normally (no break) sets $result to the List built
 # from every iteration's own (non-`never`) body value, in order.
 proc core::compiler::CompileListLoop {ctxVar e} {
@@ -1392,7 +1411,7 @@ proc core::compiler::CompileListLoop {ctxVar e} {
         dict set ctx scopes $scopeId locals $b [list box "\$$item"]
     }
     DeclareScope ctx $scopeId
-    dict set ctx loops $e $result
+    dict set ctx loops $e [list $result $acc]
     set bodyValue [CompileSequence ctx [N $e body]]
     dict unset ctx loops $e
     if {[OpType $bodyValue] ne "never"} {
@@ -1484,7 +1503,7 @@ proc core::compiler::CompileCountLoop {ctxVar e} {
         dict set ctx scopes $scopeId locals $b [list box "\[list int \$$i\]"]
     }
     DeclareScope ctx $scopeId
-    dict set ctx loops $e $result
+    dict set ctx loops $e [list $result ""]
     CompileSequence ctx [N $e body]
     dict unset ctx loops $e
     PopScope ctx
