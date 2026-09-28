@@ -432,18 +432,26 @@ LANG=C.utf8 LC_ALL=C.utf8 tclsh9.0 tests/all.tcl
 run with the native (Cranelift) backend built (`cargo build --release
 --manifest-path native/Cargo.toml`, rustc 1.98.1 via `rustup toolchain
 install stable`, per AGENTS.md), across both `interp` and `compile`
-backends. This full two-backend run was still in progress when this
-report was first committed; the directly-relevant tests were run
-individually first and all passed:
+backends:
+
+```
+all.tcl:  Total 2619  Passed 2619  Skipped 0  Failed 0
+Sourced 91 Test Files.
+```
+
+**2619/2619 passing, 0 failed**, exit code 0 for the whole two-backend run,
+91 test files (90 pre-milestone + the new `tests/bench-corpus.test`), 0
+skipped. Net +4 over the pre-milestone baseline (2615,
+`PAYLOAD-FREE-BREAK.md`'s own final count) -- exactly the 4 new
+`bench-corpus.test` cases (one per canonical benchmark), no other test
+count changed. The directly-relevant migrated/added tests, also confirmed
+individually before the full run:
 
 ```
 tests/native-root-liveness.test:  Total 18  Passed 18  Skipped 0  Failed 0
 tests/hir-call-facts.test:        Total  8  Passed  8  Skipped 0  Failed 0
 tests/bench-corpus.test:          Total  4  Passed  4  Skipped 0  Failed 0  (interp and compile backends)
 ```
-
-The full-suite totals are appended in a follow-up commit once
-`tests/all.tcl` finishes.
 
 ## Benchmark smoke suite
 
