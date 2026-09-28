@@ -1,0 +1,356 @@
+nir 1 call-effects=1 statics=0
+native "is_tcl_alnum" arity=1 params="str" impl=strtclalnum
+
+func 0 "<program>" params=0 env=0 regs=45 pnames="" captures=0 instance="generic" rawregs="11 13 17 19 23 38 42"
+    %0 = str "emailish?" @e176
+    %1 = str "scan_while" @e177
+    %2 = str "local-part" @e178
+    %3 = str "tld-check" @e179
+    %4 = str "x_1" @e180
+    %5 = str "9bad-name" @e181
+    %6 = str "café" @e182
+    %7 = str "is_tcl_alpha" @e183
+    %8 = op listnew %0 %1 %2 %3 %4 %5 %6 %7 @e174
+    %9 = bool true @e217
+    %10 = int 0 @e218
+    %11 = rawint 0
+    %12 = int 0 @e219
+    %13 = rawint 0
+    %14 = call 10 %8 %9 %10 %12 @e214
+    %15 = bool false @e224
+    %16 = int 0 @e225
+    %17 = rawint 0
+    %18 = int 0 @e226
+    %19 = rawint 0
+    %20 = call 10 %8 %15 %16 %18 @e221
+    %21 = op listlen %8 @e228
+    %22 = int 0 @e228
+    %23 = rawint 0
+    %24 = move %22 @e228
+    %26 = op listnew @e228
+    %27 = move %26 @e228
+    jump L0 @e228
+  label L0
+    %28 = op ilt %24 %21 @e228
+    br %28 L1 L3 @e228
+  label L1
+    %29 = op listget %8 %24 @e228
+    %30 = call 9 %29 @e232
+    br %30 L5 L6 @e231
+  label L5
+    %32 = bool false @e235
+    %31 = move %32
+    jump L7
+  label L6
+    %33 = bool true @e236
+    %31 = move %33
+    jump L7
+  label L7
+    br %31 L8 L9 @e230
+  label L8
+    jump L2 @e237
+  label L9
+    %35 = unit
+    %34 = move %35
+    jump L10
+  label L10
+    %36 = op listappend %27 %29 @e228
+    %27 = move %36 @e228
+    jump L2 @e228
+  label L2
+    %37 = int 1 @e228
+    %38 = rawint 1
+    %39 = op iadd %24 %37 @e228
+    %24 = move %39 @e228
+    jump L0 @e228
+  label L3
+    %25 = move %27 @e228
+    jump L4 @e228
+  label L4
+    %40 = op listlen %25 @e243
+    %41 = int 0 @e249
+    %42 = rawint 0
+    %43 = op listget %25 %41 @e246
+    %44 = op listnew %14 %20 %40 %43 @e239
+    ret %44
+end
+
+func 1 "list::all?" params=2 env=0 regs=21 pnames="xs predicate" captures=0 instance="List[str], native" rawregs="4 17" @e13
+    %2 = op listlen %0 @e14
+    %3 = int 0 @e14
+    %4 = rawint 0
+    %5 = move %3 @e14
+    jump L0 @e14
+  label L0
+    %7 = op ilt %5 %2 @e14
+    br %7 L1 L3 @e14
+  label L1
+    %8 = op listget %0 %5 @e14
+    %9 = callvalue %1 %8 @e18
+    guardbool %9 @e17
+    br %9 L5 L6 @e17
+  label L5
+    %11 = bool false @e21
+    %10 = move %11
+    jump L7
+  label L6
+    %12 = bool true @e22
+    %10 = move %12
+    jump L7
+  label L7
+    br %10 L8 L9 @e16
+  label L8
+    %14 = bool false @e24
+    ret %14 @e23
+  label L9
+    %15 = unit
+    %13 = move %15
+    jump L10
+  label L10
+    jump L2 @e14
+  label L2
+    %16 = int 1 @e14
+    %17 = rawint 1
+    %18 = op iadd %5 %16 @e14
+    %5 = move %18 @e14
+    jump L0 @e14
+  label L3
+    %19 = unit @e14
+    %6 = move %19 @e14
+    jump L4 @e14
+  label L4
+    %20 = bool true @e25
+    ret %20
+end
+
+func 2 "lenient_ident_char?" params=1 env=0 regs=24 pnames="c" captures=0 instance="generic" rawregs="6 8 17 19" @e49
+    guard str %0 "is_tcl_alnum" @e52
+    %1 = op strtclalnum %0 @e52
+    br %1 L0 L1 @e51
+  label L0
+    %3 = bool true @e55
+    %2 = move %3
+    jump L2
+  label L1
+    %4 = str "_" @e60
+    %5 = int 0 @e60
+    %6 = rawint 0
+    %7 = int 1 @e60
+    %8 = rawint 1
+    %9 = op regioneq %4 %5 %7 %0 @e57
+    br %9 L3 L4 @e56
+  label L3
+    %11 = bool true @e61
+    %10 = move %11
+    jump L5
+  label L4
+    %12 = bool false @e62
+    %10 = move %12
+    jump L5
+  label L5
+    %2 = move %10
+    jump L2
+  label L2
+    br %2 L6 L7 @e50
+  label L6
+    %14 = bool true @e63
+    %13 = move %14
+    jump L8
+  label L7
+    %15 = str "-" @e68
+    %16 = int 0 @e68
+    %17 = rawint 0
+    %18 = int 1 @e68
+    %19 = rawint 1
+    %20 = op regioneq %15 %16 %18 %0 @e65
+    br %20 L9 L10 @e64
+  label L9
+    %22 = bool true @e69
+    %21 = move %22
+    jump L11
+  label L10
+    %23 = bool false @e70
+    %21 = move %23
+    jump L11
+  label L11
+    %13 = move %21
+    jump L8
+  label L8
+    ret %13
+end
+
+func 3 "choose_classifier" params=1 env=0 regs=4 pnames="strict_mode" captures=0 instance="bool" @e72
+    br %0 L0 L1 @e73
+  label L0
+    %2 = native "is_tcl_alnum" @e75
+    %1 = move %2
+    jump L2
+  label L1
+    %3 = fnvalue 2 @e76
+    %1 = move %3
+    jump L2
+  label L2
+    ret %1
+end
+
+func 4 "chars_of" params=3 env=0 regs=20 pnames="s i acc" captures=0 instance="str, int, List[never]" rawregs="3 5 10 11 14 15" planregs="18" @e78
+    %3 = op runbox %1
+    %4 = op strlen %0 @e83
+    %5 = op runbox %4
+    %6 = op rige %3 %5 @e80
+    br %6 L0 L1 @e79
+  label L0
+    ret %2 @e86
+  label L1
+    %8 = unit
+    %7 = move %8
+    jump L2
+  label L2
+    %9 = int 1 @e94
+    %10 = rawint 1
+    %11 = op riadd %3 %10 @e91
+    %12 = op rbox %11
+    %13 = int 1 @e105
+    %14 = rawint 1
+    %15 = op riadd %3 %14 @e102
+    %16 = op rbox %15
+    %17 = op substr %0 %1 %16 @e98
+    %18 = construct list plan %2 elem %17 @e95
+    %19 = call 5 %0 %12 %18 @e88
+    ret %19
+end
+
+func 5 "chars_of" params=3 env=0 regs=16 pnames="s i acc" captures=0 instance="str, int, List[str]" rawregs="9 12" planregs="2 15" @e78
+    %3 = op strlen %0 @e83
+    %4 = op ige %1 %3 @e80
+    br %4 L0 L1 @e79
+  label L0
+    %6 = construct list flat %2 @e87
+    ret %6 @e86
+  label L1
+    %7 = unit
+    %5 = move %7
+    jump L2
+  label L2
+    %8 = int 1 @e94
+    %9 = rawint 1
+    %10 = op iadd %1 %8 @e91
+    %11 = int 1 @e105
+    %12 = rawint 1
+    %13 = op iadd %1 %11 @e102
+    %14 = op substr %0 %1 %13 @e98
+    %15 = construct list plan %2 elem %14 @e95
+    tail %0 %10 %15 @e88
+end
+
+func 6 "classify" params=2 env=0 regs=21 pnames="token strict_mode" captures=0 instance="str, bool" rawregs="4 9 19" @e107
+    %2 = call 3 %1 @e109
+    %3 = int 0 @e116
+    %4 = rawint 0
+    %5 = op listnew @e117
+    %6 = call 4 %0 %3 %5 @e113
+    %7 = op listlen %6 @e112
+    %8 = int 0 @e112
+    %9 = rawint 0
+    %10 = move %8 @e112
+    %12 = op listnew @e112
+    %13 = move %12 @e112
+    jump L0 @e112
+  label L0
+    %14 = op ilt %10 %7 @e112
+    br %14 L1 L3 @e112
+  label L1
+    %15 = op listget %6 %10 @e112
+    %16 = callvalue %2 %15 @e119
+    %17 = op listappend %13 %16 @e112
+    %13 = move %17 @e112
+    jump L2 @e112
+  label L2
+    %18 = int 1 @e112
+    %19 = rawint 1
+    %20 = op iadd %10 %18 @e112
+    %10 = move %20 @e112
+    jump L0 @e112
+  label L3
+    %11 = move %13 @e112
+    jump L4 @e112
+  label L4
+    ret %11
+end
+
+func 7 "count_true" params=3 env=0 regs=19 pnames="flags i acc" captures=0 instance="list, int, int" rawregs="1 4 12 14 16 17" @e123
+    %3 = op listlen %0 @e128
+    %4 = op runbox %3
+    %5 = op rige %1 %4 @e125
+    br %5 L0 L1 @e124
+  label L0
+    ret %2 @e131
+  label L1
+    %7 = unit
+    %6 = move %7
+    jump L2
+  label L2
+    %8 = op rbox %1
+    %9 = op listget %0 %8 @e135
+    guardbool %9 @e134
+    br %9 L3 L4 @e134
+  label L3
+    %11 = int 1 @e139
+    %12 = rawint 1
+    %10 = move %11
+    jump L5
+  label L4
+    %13 = int 0 @e140
+    %14 = rawint 0
+    %10 = move %13
+    jump L5
+  label L5
+    %15 = int 1 @e147
+    %16 = rawint 1
+    %17 = op riadd %1 %16 @e144
+    %18 = op iadd %2 %10 @e148
+    tail %0 %17 %18 @e141
+end
+
+func 8 "valid_chars" params=2 env=0 regs=8 pnames="token strict_mode" captures=0 instance="str, bool" rawregs="4 6" @e153
+    %2 = call 6 %0 %1 @e156
+    %3 = int 0 @e160
+    %4 = rawint 0
+    %5 = int 0 @e161
+    %6 = rawint 0
+    %7 = call 7 %2 %3 %5 @e154
+    ret %7
+end
+
+func 9 "fully_alnum?" params=1 env=0 regs=7 pnames="token" captures=0 instance="str" rawregs="2" @e163
+    %1 = int 0 @e169
+    %2 = rawint 0
+    %3 = op listnew @e170
+    %4 = call 4 %0 %1 %3 @e166
+    %5 = native "is_tcl_alnum" @e172
+    %6 = call 1 %4 %5 @e164
+    ret %6
+end
+
+func 10 "total_valid" params=4 env=0 regs=16 pnames="tokens strict_mode i acc" captures=0 instance="List[str], bool, int, int" rawregs="2 5 10 11" @e185
+    %4 = op listlen %0 @e190
+    %5 = op runbox %4
+    %6 = op rige %2 %5 @e187
+    br %6 L0 L1 @e186
+  label L0
+    ret %3 @e193
+  label L1
+    %8 = unit
+    %7 = move %8
+    jump L2
+  label L2
+    %9 = int 1 @e202
+    %10 = rawint 1
+    %11 = op riadd %2 %10 @e199
+    %12 = op rbox %2
+    %13 = op listget %0 %12 @e208
+    %14 = call 8 %13 %1 @e206
+    %15 = op iadd %3 %14 @e203
+    tail %0 %1 %11 %15 @e195
+end
+

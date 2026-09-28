@@ -1,0 +1,18 @@
+fid	expr	kind	target	captures	calls	objects
+0	e214	1	Block 10	0	1	0
+0	e221	1	Block 10	0	1	0
+0	e232	1	Block 9	0	8	0
+1	e18	3	Native is_tcl_alnum	0	38	1
+4	e88	1	Block 5	0	24	0
+5	e88	6	Block 5	0	174	0
+6	e109	1	Block 3	0	16	0
+6	e113	1	Block 4	0	16	0
+6	e119	3	Block 2	0	66	1
+6	e119	3	Native is_tcl_alnum	0	66	1
+7	e141	6	Block 7	0	132	0
+8	e154	1	Block 7	0	16	0
+8	e156	1	Block 6	0	16	0
+9	e164	1	Block 1	0	8	0
+9	e166	1	Block 4	0	8	0
+10	e195	6	Block 10	0	16	0
+10	e206	1	Block 8	0	16	0

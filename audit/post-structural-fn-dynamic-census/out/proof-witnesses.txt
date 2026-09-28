@@ -1,0 +1,42 @@
+
+bench/lex-strategy.bot list::all?<List[str], native>/i10 @e18
+  ingress i10/predicate <- i9@e164 argument e172 : native is_tcl_alnum => {native is_tcl_alnum}
+  UNION {native is_tcl_alnum}
+
+bench/lex-strategy.bot classify<str, bool>/i3 @e119
+  UNION {block e49} {native is_tcl_alnum}
+
+bench/refined-checks.bot scan_while<generic>/i20 @e216
+  ingress i20/predicate <- i19@e298 argument e301 : block(e183)/1 -> any => {block e183}
+  ingress i20/predicate <- i23@e228 argument e231 : native is_tcl_alpha => {native is_tcl_alpha}
+  UNION {block e183} {native is_tcl_alpha}
+
+bench/source-checks.bot list::find<List[str], block>/i3 @e42
+  ingress i3/predicate <- i0@e151 argument e154 : block(e114)/1 -> any => {block e114}
+  UNION {block e114}
+
+bench/source-checks.bot classify_leading<generic>/i2 @e91
+  UNION {block e49} {block e55} {native is_tcl_alnum} {native is_tcl_alpha}
+
+bench/test-selection.bot list::any?<any, block>/i6 @e6
+  ingress i3/changed? <- i0@e236 argument e239 : block(e55)/1 -> any => {block e55}
+  ingress i3/changed? <- i0@e241 argument e244 : block(e55)/1 -> any => {block e55}
+  ingress i4/changed? <- i3@e87 argument e90 : block => {block e55}
+  ingress i6/predicate <- i4@e75 argument e80 : block => {block e55}
+  ingress i8/changed? <- i0@e263 argument e266 : block(e55)/1 -> any => {block e55}
+  ingress i12/changed? <- i11@e99 argument e102 : block => {block e55}
+  ingress i6/predicate <- i12@e75 argument e80 : block => {block e55}
+  UNION {block e55}
+
+bench/test-selection.bot list::none?<List[str], block>/i7 @e31
+  ingress i7/predicate <- i0@e251 argument e254 : block(e55)/1 -> any => {block e55}
+  UNION {block e55}
+
+bench/test-selection.bot list::find<List[list], block>/i9 @e42
+  ingress i9/predicate <- i8@e105 argument e108 : block(e98)/1 -> any => {block e98}
+  UNION {block e98}
+
+bench/uri-steady.bot scan_while<generic>/i20 @e216
+  ingress i20/predicate <- i19@e298 argument e301 : block(e183)/1 -> any => {block e183}
+  ingress i20/predicate <- i23@e228 argument e231 : native is_tcl_alpha => {native is_tcl_alpha}
+  UNION {block e183} {native is_tcl_alpha}

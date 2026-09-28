@@ -1,0 +1,351 @@
+source:  bench/refined-checks.bot
+backend: Cranelift (specialize=1)
+asm:     refined-checks.asm
+vcode:   refined-checks.vcode
+machine-code bytes: 8935 (per function: 1443 39 289 609 74 74 74 125 125 601 262 222 238 528 468 1244 137 94 103 474 491 426 451 344)
+
+functions:
+  0 <program entry>: nir-regs=45
+  1 char::codepoint<UnicodeChar>: nir-regs=2
+  2 byte::from_int<int>: nir-regs=8
+  3 byte::set<List[UnicodeChar]>: nir-regs=17
+  4 ascii::is_digit<int>: nir-regs=13
+  5 ascii::is_upper<int>: nir-regs=13
+  6 ascii::is_lower<int>: nir-regs=13
+  7 ascii::is_alphabetic<int>: nir-regs=8
+  8 ascii::is_alphanumeric<int>: nir-regs=8
+  9 web::emailish?<str>: nir-regs=25
+  10 char_at<generic>: nir-regs=6
+  11 char_at<generic>: nir-regs=6
+  12 local_char?<generic>: nir-regs=9
+  13 scan_while<generic>: nir-regs=15
+  14 tld?<generic>: nir-regs=12
+  15 domain?<generic>: nir-regs=56
+  16 web::is_unreserved<int>: nir-regs=9
+  17 web::uri_escape_text<str>: nir-regs=5
+  18 high_nibble<int>: nir-regs=15
+  19 hex_pair<int>: nir-regs=10
+  20 esc_bytes<List[int], int, str>: nir-regs=15
+  21 esc_char<str>: nir-regs=21
+  22 esc_from<str, int, str>: nir-regs=19
+  23 check<int, int, str, str>: nir-regs=21
+
+GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
+  function 0 "<program>"
+    NIR regs: 45
+    raw regs: 4
+    managed-capable regs: 41
+    effects: may_error=true may_gc=true
+    safepoints: 9
+    root candidates: 37
+    max live roots: 16
+    shadow slots: 16
+    entry zero slots: 11
+    depth reservation: no
+    storage: native frame
+  
+  function 1 "char::codepoint"
+    NIR regs: 2
+    raw regs: 0
+    managed-capable regs: 2
+    effects: may_error=false may_gc=false
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 0
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+  
+  function 2 "byte::from_int"
+    NIR regs: 8
+    raw regs: 2
+    managed-capable regs: 6
+    effects: may_error=true may_gc=false
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 0
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+  
+  function 3 "byte::set"
+    NIR regs: 17
+    raw regs: 2
+    managed-capable regs: 15
+    effects: may_error=true may_gc=true
+    safepoints: 4
+    root candidates: 7
+    max live roots: 5
+    shadow slots: 5
+    entry zero slots: 2
+    depth reservation: no
+    storage: native frame
+  
+  function 4 "ascii::is_digit"
+    NIR regs: 13
+    raw regs: 3
+    managed-capable regs: 10
+    effects: may_error=false may_gc=false
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 0
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+  
+  function 5 "ascii::is_upper"
+    NIR regs: 13
+    raw regs: 3
+    managed-capable regs: 10
+    effects: may_error=false may_gc=false
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 0
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+  
+  function 6 "ascii::is_lower"
+    NIR regs: 13
+    raw regs: 3
+    managed-capable regs: 10
+    effects: may_error=false may_gc=false
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 0
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+  
+  function 7 "ascii::is_alphabetic"
+    NIR regs: 8
+    raw regs: 0
+    managed-capable regs: 8
+    effects: may_error=false may_gc=false
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 0
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+  
+  function 8 "ascii::is_alphanumeric"
+    NIR regs: 8
+    raw regs: 0
+    managed-capable regs: 8
+    effects: may_error=false may_gc=false
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 0
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+  
+  function 9 "web::emailish?"
+    NIR regs: 25
+    raw regs: 3
+    managed-capable regs: 22
+    effects: may_error=true may_gc=true
+    safepoints: 4
+    root candidates: 7
+    max live roots: 4
+    shadow slots: 4
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+  
+  function 10 "char_at"
+    NIR regs: 6
+    raw regs: 1
+    managed-capable regs: 5
+    effects: may_error=true may_gc=true
+    safepoints: 1
+    root candidates: 3
+    max live roots: 3
+    shadow slots: 3
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+  
+  function 11 "char_at"
+    NIR regs: 6
+    raw regs: 1
+    managed-capable regs: 5
+    effects: may_error=true may_gc=true
+    safepoints: 2
+    root candidates: 4
+    max live roots: 3
+    shadow slots: 3
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+  
+  function 12 "local_char?"
+    NIR regs: 9
+    raw regs: 0
+    managed-capable regs: 9
+    effects: may_error=true may_gc=false
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 0
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+  
+  function 13 "scan_while"
+    NIR regs: 15
+    raw regs: 1
+    managed-capable regs: 14
+    effects: may_error=true may_gc=true
+    safepoints: 3
+    root candidates: 6
+    max live roots: 5
+    shadow slots: 5
+    entry zero slots: 1
+    depth reservation: no
+    storage: native frame
+  
+  function 14 "tld?"
+    NIR regs: 12
+    raw regs: 1
+    managed-capable regs: 11
+    effects: may_error=true may_gc=true
+    safepoints: 2
+    root candidates: 5
+    max live roots: 4
+    shadow slots: 4
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+  
+  function 15 "domain?"
+    NIR regs: 56
+    raw regs: 3
+    managed-capable regs: 53
+    effects: may_error=true may_gc=true
+    safepoints: 7
+    root candidates: 9
+    max live roots: 5
+    shadow slots: 5
+    entry zero slots: 1
+    depth reservation: no
+    storage: native frame
+  
+  function 16 "web::is_unreserved"
+    NIR regs: 9
+    raw regs: 0
+    managed-capable regs: 9
+    effects: may_error=false may_gc=false
+    safepoints: 0
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 0
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+  
+  function 17 "web::uri_escape_text"
+    NIR regs: 5
+    raw regs: 1
+    managed-capable regs: 4
+    effects: may_error=true may_gc=true
+    safepoints: 1
+    root candidates: 3
+    max live roots: 3
+    shadow slots: 3
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+  
+  function 18 "high_nibble"
+    NIR regs: 15
+    raw regs: 7
+    managed-capable regs: 8
+    effects: may_error=false may_gc=true
+    safepoints: 1
+    root candidates: 2
+    max live roots: 2
+    shadow slots: 2
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+  
+  function 19 "hex_pair"
+    NIR regs: 10
+    raw regs: 1
+    managed-capable regs: 9
+    effects: may_error=true may_gc=true
+    safepoints: 2
+    root candidates: 4
+    max live roots: 2
+    shadow slots: 2
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+  
+  function 20 "esc_bytes"
+    NIR regs: 15
+    raw regs: 4
+    managed-capable regs: 11
+    effects: may_error=true may_gc=true
+    safepoints: 2
+    root candidates: 5
+    max live roots: 4
+    shadow slots: 4
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+  
+  function 21 "esc_char"
+    NIR regs: 21
+    raw regs: 5
+    managed-capable regs: 16
+    effects: may_error=true may_gc=true
+    safepoints: 3
+    root candidates: 6
+    max live roots: 3
+    shadow slots: 3
+    entry zero slots: 2
+    depth reservation: no
+    storage: native frame
+  
+  function 22 "esc_from"
+    NIR regs: 19
+    raw regs: 6
+    managed-capable regs: 13
+    effects: may_error=true may_gc=true
+    safepoints: 4
+    root candidates: 6
+    max live roots: 4
+    shadow slots: 4
+    entry zero slots: 2
+    depth reservation: no
+    storage: native frame
+  
+  function 23 "check"
+    NIR regs: 21
+    raw regs: 6
+    managed-capable regs: 15
+    effects: may_error=true may_gc=true
+    safepoints: 2
+    root candidates: 4
+    max live roots: 4
+    shadow slots: 4
+    entry zero slots: 1
+    depth reservation: no
+    storage: native frame
+
+mechanical pattern counts (triage only; see report for interpretation):
+  8 x calls to rt_int_add
+  2 x calls to rt_int_sub
+  10 x calls to rt_int_cmp
+  44 x calls to other rt_* helpers
+  2 x guard/guardbool instructions

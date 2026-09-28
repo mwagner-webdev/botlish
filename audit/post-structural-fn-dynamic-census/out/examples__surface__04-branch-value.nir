@@ -1,0 +1,24 @@
+nir 1 call-effects=1 statics=3
+
+func 0 "<program>" params=0 env=0 regs=2 pnames="" captures=0 instance="generic"
+    %0 = bool false @e9
+    %1 = call 1 %0 @e7
+    ret %1
+end
+
+func 1 "choose" params=1 env=0 regs=6 pnames="flag" captures=0 instance="bool" rawregs="3 5" @e2
+    br %0 L0 L1 @e3
+  label L0
+    %2 = int 10 @e5
+    %3 = rawint 10
+    %1 = move %2
+    jump L2
+  label L1
+    %4 = int 20 @e6
+    %5 = rawint 20
+    %1 = move %4
+    jump L2
+  label L2
+    ret %1
+end
+

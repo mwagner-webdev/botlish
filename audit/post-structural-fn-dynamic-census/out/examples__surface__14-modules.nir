@@ -1,0 +1,19 @@
+nir 1 call-effects=1 statics=3
+
+func 0 "<program>" params=0 env=0 regs=13 pnames="" captures=0 instance="generic" rawregs="1 3 4 7 9 10"
+    %0 = int 41 @e11
+    %1 = rawint 41
+    %2 = int 1 @e6
+    %3 = rawint 1
+    %4 = op riadd %1 %3 @e3
+    %5 = op rbox %4
+    %6 = int 1 @e14
+    %7 = rawint 1
+    %8 = int 1 @e6
+    %9 = rawint 1
+    %10 = op riadd %7 %9 @e3
+    %11 = op rbox %10
+    %12 = op listnew %5 %11 @e7
+    ret %12
+end
+

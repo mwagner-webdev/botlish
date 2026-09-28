@@ -1,0 +1,10 @@
+fid	expr	kind	target	captures	calls	objects
+0	e118	1	Block 3	0	1	0
+0	e123	1	Block 3	0	1	0
+0	e128	1	Block 3	0	1	0
+0	e133	1	Block 3	0	1	0
+0	e138	1	Block 3	0	1	0
+2	e53	1	Block 1	0	10	0
+2	e75	6	Block 2	0	5	0
+2	e86	6	Block 2	0	5	0
+3	e108	1	Block 2	0	5	0

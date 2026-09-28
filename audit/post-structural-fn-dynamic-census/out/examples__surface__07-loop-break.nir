@@ -1,0 +1,12 @@
+nir 1 call-effects=1 statics=3
+
+func 0 "<program>" params=0 env=0 regs=2 pnames="" captures=0 instance="generic"
+    jump L0 @e1
+  label L0
+    %1 = unit
+    %0 = move %1 @e2
+    jump L1 @e2
+  label L1
+    ret %0
+end
+

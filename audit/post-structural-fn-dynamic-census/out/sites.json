@@ -1,0 +1,394 @@
+[
+  {
+    "kind": "site",
+    "program": "bench/lex-strategy.bot",
+    "fid": "1",
+    "name": "list::all?",
+    "key": "List[str], native",
+    "expr": "e18",
+    "instruction": "%9 = callvalue %1 %8 @e18",
+    "instance": "i10",
+    "label": "list::all?<List[str], native>",
+    "type": "native",
+    "targets": "{native is_tcl_alnum}",
+    "environments": "",
+    "sid": "S1",
+    "source": "lib/list.bot:67 predicate(x)",
+    "category": "HOF parameter",
+    "observed": [
+      {
+        "fid": "1",
+        "expr": "e18",
+        "kind": "3",
+        "target": "Native is_tcl_alnum",
+        "captures": "0",
+        "calls": "38",
+        "objects": "1"
+      }
+    ],
+    "calls": 38,
+    "static_targets": [
+      [
+        "native",
+        "is_tcl_alnum"
+      ]
+    ],
+    "k": 1,
+    "machinery": 4446
+  },
+  {
+    "kind": "site",
+    "program": "bench/lex-strategy.bot",
+    "fid": "6",
+    "name": "classify",
+    "key": "str, bool",
+    "expr": "e119",
+    "instruction": "%16 = callvalue %2 %15 @e119",
+    "instance": "i3",
+    "label": "classify<str, bool>",
+    "type": "Fn{args: [any], return: any, errors: []}",
+    "targets": "{block e49} {native is_tcl_alnum}",
+    "environments": "{block e49 captures=}",
+    "sid": "S2",
+    "source": "bench/lex-strategy.bot:57 classifier(c)",
+    "category": "if/control-flow join",
+    "observed": [
+      {
+        "fid": "6",
+        "expr": "e119",
+        "kind": "3",
+        "target": "Block 2",
+        "captures": "0",
+        "calls": "66",
+        "objects": "1"
+      },
+      {
+        "fid": "6",
+        "expr": "e119",
+        "kind": "3",
+        "target": "Native is_tcl_alnum",
+        "captures": "0",
+        "calls": "66",
+        "objects": "1"
+      }
+    ],
+    "calls": 132,
+    "static_targets": [
+      [
+        "block",
+        "e49"
+      ],
+      [
+        "native",
+        "is_tcl_alnum"
+      ]
+    ],
+    "k": 2,
+    "machinery": 10032
+  },
+  {
+    "kind": "site",
+    "program": "bench/refined-checks.bot",
+    "fid": "13",
+    "name": "scan_while",
+    "key": "generic",
+    "expr": "e216",
+    "instruction": "%8 = callvalue %1 %7 @e216",
+    "instance": "i20",
+    "label": "scan_while<generic>",
+    "type": "any",
+    "targets": "{block e183} {native is_tcl_alpha}",
+    "environments": "{block e183 captures=}",
+    "sid": "S3",
+    "source": "lib/web.bot:128 predicate(char_at(i))",
+    "category": "HOF parameter",
+    "observed": [
+      {
+        "fid": "13",
+        "expr": "e216",
+        "kind": "3",
+        "target": "Block 12",
+        "captures": "0",
+        "calls": "6800",
+        "objects": "1"
+      },
+      {
+        "fid": "13",
+        "expr": "e216",
+        "kind": "3",
+        "target": "Native is_tcl_alpha",
+        "captures": "0",
+        "calls": "1200",
+        "objects": "1"
+      }
+    ],
+    "calls": 8000,
+    "static_targets": [
+      [
+        "block",
+        "e183"
+      ],
+      [
+        "native",
+        "is_tcl_alpha"
+      ]
+    ],
+    "k": 2,
+    "machinery": 378400
+  },
+  {
+    "kind": "site",
+    "program": "bench/source-checks.bot",
+    "fid": "1",
+    "name": "list::find",
+    "key": "List[str], block",
+    "expr": "e42",
+    "instruction": "%9 = callvalue %1 %8 @e42",
+    "instance": "i3",
+    "label": "list::find<List[str], block>",
+    "type": "block",
+    "targets": "{block e114}",
+    "environments": "{block e114 captures=b9}",
+    "sid": "S4",
+    "source": "lib/list.bot:79 predicate(x)",
+    "category": "HOF parameter",
+    "observed": [
+      {
+        "fid": "1",
+        "expr": "e42",
+        "kind": "3",
+        "target": "Block 6",
+        "captures": "1",
+        "calls": "6",
+        "objects": "1"
+      }
+    ],
+    "calls": 6,
+    "static_targets": [
+      [
+        "block",
+        "e114"
+      ]
+    ],
+    "k": 1,
+    "machinery": 210
+  },
+  {
+    "kind": "site",
+    "program": "bench/source-checks.bot",
+    "fid": "4",
+    "name": "classify_leading",
+    "key": "generic",
+    "expr": "e91",
+    "instruction": "%28 = callvalue %27 %17 @e91",
+    "instance": "i2",
+    "label": "classify_leading<generic>",
+    "type": "Fn{args: [any], return: any, errors: []}",
+    "targets": "{block e49} {block e55} {native is_tcl_alnum} {native is_tcl_alpha}",
+    "environments": "{block e49 captures=} {block e55 captures=}",
+    "sid": "S5",
+    "source": "bench/source-checks.bot:56 check(c)",
+    "category": "List element",
+    "observed": [
+      {
+        "fid": "4",
+        "expr": "e91",
+        "kind": "3",
+        "target": "Block 2",
+        "captures": "0",
+        "calls": "21",
+        "objects": "1"
+      },
+      {
+        "fid": "4",
+        "expr": "e91",
+        "kind": "3",
+        "target": "Block 3",
+        "captures": "0",
+        "calls": "21",
+        "objects": "1"
+      },
+      {
+        "fid": "4",
+        "expr": "e91",
+        "kind": "3",
+        "target": "Native is_tcl_alnum",
+        "captures": "0",
+        "calls": "21",
+        "objects": "1"
+      },
+      {
+        "fid": "4",
+        "expr": "e91",
+        "kind": "3",
+        "target": "Native is_tcl_alpha",
+        "captures": "0",
+        "calls": "21",
+        "objects": "1"
+      }
+    ],
+    "calls": 84,
+    "static_targets": [
+      [
+        "block",
+        "e49"
+      ],
+      [
+        "block",
+        "e55"
+      ],
+      [
+        "native",
+        "is_tcl_alnum"
+      ],
+      [
+        "native",
+        "is_tcl_alpha"
+      ]
+    ],
+    "k": 4,
+    "machinery": 6384
+  },
+  {
+    "kind": "site",
+    "program": "bench/test-selection.bot",
+    "fid": "1",
+    "name": "list::any?",
+    "key": "any, block",
+    "expr": "e6",
+    "instruction": "%9 = callvalue %1 %8 @e6",
+    "instance": "i6",
+    "label": "list::any?<any, block>",
+    "type": "block",
+    "targets": "{block e55}",
+    "environments": "{block e55 captures=b36}",
+    "sid": "S6",
+    "source": "lib/list.bot:61 predicate(x)",
+    "category": "HOF parameter",
+    "observed": [
+      {
+        "fid": "1",
+        "expr": "e6",
+        "kind": "3",
+        "target": "Block 5",
+        "captures": "1",
+        "calls": "52",
+        "objects": "2"
+      }
+    ],
+    "calls": 52,
+    "static_targets": [
+      [
+        "block",
+        "e55"
+      ]
+    ],
+    "k": 1,
+    "machinery": 1820
+  },
+  {
+    "kind": "site",
+    "program": "bench/test-selection.bot",
+    "fid": "2",
+    "name": "list::none?",
+    "key": "List[str], block",
+    "expr": "e31",
+    "instruction": "%9 = callvalue %1 %8 @e31",
+    "instance": "i7",
+    "label": "list::none?<List[str], block>",
+    "type": "block",
+    "targets": "{block e55}",
+    "environments": "{block e55 captures=b36}",
+    "sid": "S7",
+    "source": "lib/list.bot:73 predicate(x)",
+    "category": "HOF parameter",
+    "observed": [
+      {
+        "fid": "2",
+        "expr": "e31",
+        "kind": "3",
+        "target": "Block 5",
+        "captures": "1",
+        "calls": "2",
+        "objects": "1"
+      }
+    ],
+    "calls": 2,
+    "static_targets": [
+      [
+        "block",
+        "e55"
+      ]
+    ],
+    "k": 1,
+    "machinery": 70
+  },
+  {
+    "kind": "site",
+    "program": "bench/test-selection.bot",
+    "fid": "3",
+    "name": "list::find",
+    "key": "List[list], block",
+    "expr": "e42",
+    "instruction": "%9 = callvalue %1 %8 @e42",
+    "instance": "i9",
+    "label": "list::find<List[list], block>",
+    "type": "block",
+    "targets": "{block e98}",
+    "environments": "{block e98 captures=b8 b50}",
+    "sid": "S8",
+    "source": "lib/list.bot:79 predicate(x)",
+    "category": "HOF parameter",
+    "observed": [
+      {
+        "fid": "3",
+        "expr": "e42",
+        "kind": "3",
+        "target": "Block 13",
+        "captures": "1",
+        "calls": "3",
+        "objects": "1"
+      }
+    ],
+    "calls": 3,
+    "static_targets": [
+      [
+        "block",
+        "e98"
+      ]
+    ],
+    "k": 1,
+    "machinery": 105
+  },
+  {
+    "kind": "site",
+    "program": "bench/uri-steady.bot",
+    "fid": "13",
+    "name": "scan_while",
+    "key": "generic",
+    "expr": "e216",
+    "instruction": "%8 = callvalue %1 %7 @e216",
+    "instance": "i20",
+    "label": "scan_while<generic>",
+    "type": "any",
+    "targets": "{block e183} {native is_tcl_alpha}",
+    "environments": "{block e183 captures=b15}",
+    "sid": "S9",
+    "source": "lib/web.bot:128 predicate(char_at(i))",
+    "category": "HOF parameter",
+    "observed": [],
+    "calls": 0,
+    "static_targets": [
+      [
+        "block",
+        "e183"
+      ],
+      [
+        "native",
+        "is_tcl_alpha"
+      ]
+    ],
+    "k": 2,
+    "machinery": 0
+  }
+]

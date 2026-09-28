@@ -1,0 +1,48 @@
+cf-exact: 6808550 / 6808556 Ir; difference 6
+  _int_malloc: 639443 -> 639449 (delta 6)
+  callvalue subtrees: []
+cf-exact-noregion: 9680415 / 9681858 Ir; difference 1443
+  _int_malloc: 1013941 -> 1014701 (delta 760)
+  alloc_perturb: 68 -> 60 (delta -8)
+  malloc_consolidate: 0 -> 649 (delta 649)
+  unlink_chunk.isra.0: 0 -> 42 (delta 42)
+  callvalue subtrees: []
+cf-production-noregion: 10210914 / 10209898 Ir; difference -1016
+  _int_malloc: 1014518 -> 1014133 (delta -385)
+  alloc_perturb: 20 -> 84 (delta 64)
+  malloc: 1009166 -> 1009266 (delta 100)
+  malloc_consolidate: 606 -> 0 (delta -606)
+  unlink_chunk.isra.0: 189 -> 0 (delta -189)
+  callvalue subtrees: [{'fid': 13, 'name': 'scan_while', 'calls': 8000, 'inclusive_ir': 1814800}]
+bench__lex-strategy: 322384 / 321726 Ir; difference -658
+  _int_malloc: 44863 -> 44296 (delta -567)
+  alloc_perturb: 80 -> 64 (delta -16)
+  malloc: 38240 -> 38165 (delta -75)
+  callvalue subtrees: [{'fid': 1, 'name': 'list::all?', 'calls': 38, 'inclusive_ir': 7292}, {'fid': 6, 'name': 'classify', 'calls': 132, 'inclusive_ir': 21356}]
+bench__refined-checks: 8248625 / 8248407 Ir; difference -218
+  _int_malloc: 751651 -> 751487 (delta -164)
+  alloc_perturb: 68 -> 64 (delta -4)
+  malloc: 748091 -> 748041 (delta -50)
+  callvalue subtrees: [{'fid': 13, 'name': 'scan_while', 'calls': 8000, 'inclusive_ir': 1814800}]
+bench__source-checks: 75435 / 76278 Ir; difference 843
+  _int_malloc: 12873 -> 13533 (delta 660)
+  alloc_perturb: 32 -> 48 (delta 16)
+  malloc: 12407 -> 12532 (delta 125)
+  unlink_chunk.isra.0: 63 -> 105 (delta 42)
+  callvalue subtrees: [{'fid': 4, 'name': 'classify_leading', 'calls': 84, 'inclusive_ir': 15319}, {'fid': 1, 'name': 'list::find', 'calls': 6, 'inclusive_ir': 21367}]
+bench__test-selection: 37778 / 37878 Ir; difference 100
+  _int_malloc: 4619 -> 4706 (delta 87)
+  alloc_perturb: 16 -> 8 (delta -8)
+  unlink_chunk.isra.0: 84 -> 105 (delta 21)
+  callvalue subtrees: [{'fid': 2, 'name': 'list::none?', 'calls': 2, 'inclusive_ir': 558}, {'fid': 3, 'name': 'list::find', 'calls': 3, 'inclusive_ir': 2561}, {'fid': 1, 'name': 'list::any?', 'calls': 52, 'inclusive_ir': 12381}]
+bench__uri-steady: 44165203 / 44193373 Ir; difference 28170
+  __memcpy_avx_unaligned_erms: 3392302 -> 3392320 (delta 18)
+  _int_free: 3733308 -> 3733542 (delta 234)
+  _int_malloc: 3892661 -> 3908570 (delta 15909)
+  _int_realloc: 377287 -> 377305 (delta 18)
+  alloc_perturb: 132 -> 136 (delta 4)
+  calloc: 1018536 -> 1018572 (delta 36)
+  malloc: 3180956 -> 3183331 (delta 2375)
+  malloc_consolidate: 5893 -> 12382 (delta 6489)
+  unlink_chunk.isra.0: 1344 -> 4431 (delta 3087)
+  callvalue subtrees: []

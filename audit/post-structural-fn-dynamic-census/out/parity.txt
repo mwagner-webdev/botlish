@@ -1,0 +1,17 @@
+Backends:
+  Tcl interp  semantic interpreter -- in-process execution
+  Tcl compile Tcl source/codegen backend (not Cranelift) -- in-process execution
+  Cranelift   Cranelift native machine-code backend -- in-process execution, JIT compile time excluded
+  Python      reference implementation -- in-process execution
+  Rust        reference implementation -- in-process execution
+  Go          reference implementation -- in-process execution
+
+program                  Tcl interp   Tcl compile     Cranelift        Python          Rust            Go     
+fib.bot                  10074.9 ms       64.5 ms     140.85 us        2.3 ms      43.05 us      73.38 us    🫩
+lex-strategy.bot           141.0 ms        7.1 ms     211.52 us           n/a           n/a           n/a     
+loop-count.bot             243.3 ms        1.6 ms       1.40 us     157.12 us       0.70 us       0.90 us    🫩
+refined-checks.bot         329.4 ms        8.4 ms        1.5 ms        3.1 ms     305.29 us     143.93 us    🫩
+source-checks.bot           16.9 ms        2.0 ms     194.35 us           n/a           n/a           n/a     
+sum-refined.bot            158.7 ms       24.4 ms       1.00 us     174.81 us       0.90 us       0.70 us    🫩
+test-selection.bot          20.3 ms        2.6 ms       8.10 us           n/a           n/a           n/a     
+uri-steady.bot           26567.1 ms     1076.2 ms        5.7 ms           n/a           n/a           n/a     

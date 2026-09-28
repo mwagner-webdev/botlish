@@ -1,0 +1,2 @@
+   Compiling botlish-native v0.1.0 (/mnt/c/Users/MarkusWagner/dev/botlish/native)
+    Finished `release` profile [optimized + debuginfo] target(s) in 13.59s

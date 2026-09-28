@@ -1,0 +1,11 @@
+==128152== Callgrind, a call-graph generating cache profiler
+==128152== Copyright (C) 2002-2017, and GNU GPL'd, by Josef Weidendorfer et al.
+==128152== Using Valgrind-3.22.0 and LibVEX; rerun with -h for copyright info
+==128152== Command: /tmp/botlish-post-structural-fn-1/target/release/botlish-native bench 2 /mnt/c/Users/MarkusWagner/dev/botlish/audit/post-structural-fn-dynamic-census/out/bench__lex-strategy.nir
+==128152== 
+==128152== For interactive control, run 'callgrind_control -h'.
+==128152== 
+==128152== Events    : Ir
+==128152== Collected : 322384
+==128152== 
+==128152== I   refs:      322,384

@@ -1,0 +1,11 @@
+nir 1 call-effects=1 statics=3
+
+func 0 "<program>" params=0 env=0 regs=5 pnames="" captures=0 instance="generic" rawregs="1 4"
+    %0 = int 1 @e2
+    %1 = rawint 1
+    %2 = bool true @e4
+    %3 = int 2 @e6
+    %4 = rawint 2
+    ret %0
+end
+

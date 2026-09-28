@@ -1,0 +1,2 @@
+wrote /mnt/c/Users/MarkusWagner/dev/botlish/audit/post-structural-fn-dynamic-census/out/type-boundaries.txt
+Static census/NIR deterministic; production sources frozen; scalar baseline identical.

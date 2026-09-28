@@ -1,0 +1,3 @@
+times 19413300 4139697
+timing 1241665 4139 2 1
+value {list {{int 58} {int 65} {int 1} {str café}}}

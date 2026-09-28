@@ -1,0 +1,8 @@
+patching file src/codegen/mod.rs
+Hunk #1 succeeded at 224 (offset -31 lines).
+patching file src/main.rs
+Hunk #1 succeeded at 288 (offset 11 lines).
+Hunk #2 succeeded at 364 (offset 11 lines).
+   Compiling botlish-native v0.1.0 (/tmp/botlish-post-structural-fn-1/native-audit)
+    Finished `release` profile [optimized + debuginfo] target(s) in 7.97s
+/tmp/botlish-post-structural-fn-1/target/release/botlish-native

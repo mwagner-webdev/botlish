@@ -1,0 +1,214 @@
+######## backend: interp
+Tests running in interp:  /usr/bin/tclsh9.0
+Tests located in:  /mnt/c/Users/MarkusWagner/dev/botlish/tests
+Tests running in:  /mnt/c/Users/MarkusWagner/dev/botlish
+Temporary files stored in /mnt/c/Users/MarkusWagner/dev/botlish
+Test files run in separate interpreters
+Running tests that match:  *
+Skipping test files that match:  l.*.test
+Only running test files that match:  *.test
+Tests began at Mon Sep 28 22:21:54 CEST 2026
+acceptance.test
+applied-types.test
+ascii.test
+backends.test
+bench-backends.test
+bench-corpus.test
+bindings.test
+blocks.test
+byte-set.test
+calls.test
+checked-domain-proof-provenance.test
+close-callers-convergence.test
+closed-closure-entry-facts.test
+compiler-opt.test
+conjunctive-entry-facts.test
+control.test
+emailish-predicate.test
+empty-collection-admissibility.test
+errors.test
+hir-aot.test
+hir-call-facts.test
+hir-callable-target.test
+hir-cardinality.test
+hir-closed-call-params.test
+hir-lowering.test
+hir-range-bitop.test
+hir-range-exact.test
+hir-range.test
+hir-refinement.test
+hir-resolution.test
+hir-samples.test
+hir-specialize.test
+hir-syntax.test
+hir-types.test
+immutable-set.test
+inference.test
+instance-entry-range-facts.test
+list-stdlib.test
+lists.test
+loop-counted.test
+loop-in.test
+loops.test
+module-fn-bridge-reachability.test
+module-static-values.test
+native-alloc.test
+native-bitshift.test
+native-block-escape.test
+native-byte.test
+native-csv-records.test
+native-escape.test
+native-executable.test
+native-hashing.test
+native-hashtable.test
+native-listloop.test
+native-mutarray.test
+native-param-aggregate.test
+native-refinement-propagation.test
+native-root-liveness.test
+native-root-storage.test
+native-stack-map.test
+native-stack-overflow.test
+native-string-region.test
+native-string-traversal.test
+native-string-view.test
+native-tcl-unicode.test
+native-tiny-leaf-inline.test
+native-tiny-leaf-pressure.test
+native-uri-escape.test
+native-validator-predicate.test
+native.test
+refined-signatures.test
+refined.test
+refinements.test
+regex.test
+results.test
+scalarbits.test
+setcontains-equality-total.test
+setfromlist-equality-total.test
+source-types.test
+stdlib.test
+structural-fn-types.test
+surface-lexer.test
+surface-lowering.test
+surface-modules.test
+surface-parser.test
+surface-samples.test
+symbolic-type-identity.test
+typed-callable-escape.test
+typed-parameters.test
+types.test
+unicode-char.test
+virtual-construction.test
+web-unreserved.test
+
+Tests ended at Mon Sep 28 22:32:37 CEST 2026
+all.tcl:	Total	2718	Passed	2718	Skipped	0	Failed	0
+Sourced 93 Test Files.
+######## backend: compile
+Tests running in interp:  /usr/bin/tclsh9.0
+Tests located in:  /mnt/c/Users/MarkusWagner/dev/botlish/tests
+Tests running in:  /mnt/c/Users/MarkusWagner/dev/botlish
+Temporary files stored in /mnt/c/Users/MarkusWagner/dev/botlish
+Test files run in separate interpreters
+Running tests that match:  *
+Skipping test files that match:  l.*.test
+Only running test files that match:  *.test
+Tests began at Mon Sep 28 22:32:37 CEST 2026
+acceptance.test
+applied-types.test
+ascii.test
+backends.test
+bench-backends.test
+bench-corpus.test
+bindings.test
+blocks.test
+byte-set.test
+calls.test
+checked-domain-proof-provenance.test
+close-callers-convergence.test
+closed-closure-entry-facts.test
+compiler-opt.test
+conjunctive-entry-facts.test
+control.test
+emailish-predicate.test
+empty-collection-admissibility.test
+errors.test
+hir-aot.test
+hir-call-facts.test
+hir-callable-target.test
+hir-cardinality.test
+hir-closed-call-params.test
+hir-lowering.test
+hir-range-bitop.test
+hir-range-exact.test
+hir-range.test
+hir-refinement.test
+hir-resolution.test
+hir-samples.test
+hir-specialize.test
+hir-syntax.test
+hir-types.test
+immutable-set.test
+inference.test
+instance-entry-range-facts.test
+list-stdlib.test
+lists.test
+loop-counted.test
+loop-in.test
+loops.test
+module-fn-bridge-reachability.test
+module-static-values.test
+native-alloc.test
+native-bitshift.test
+native-block-escape.test
+native-byte.test
+native-csv-records.test
+native-escape.test
+native-executable.test
+native-hashing.test
+native-hashtable.test
+native-listloop.test
+native-mutarray.test
+native-param-aggregate.test
+native-refinement-propagation.test
+native-root-liveness.test
+native-root-storage.test
+native-stack-map.test
+native-stack-overflow.test
+native-string-region.test
+native-string-traversal.test
+native-string-view.test
+native-tcl-unicode.test
+native-tiny-leaf-inline.test
+native-tiny-leaf-pressure.test
+native-uri-escape.test
+native-validator-predicate.test
+native.test
+refined-signatures.test
+refined.test
+refinements.test
+regex.test
+results.test
+scalarbits.test
+setcontains-equality-total.test
+setfromlist-equality-total.test
+source-types.test
+stdlib.test
+structural-fn-types.test
+surface-lexer.test
+surface-lowering.test
+surface-modules.test
+surface-parser.test
+surface-samples.test
+symbolic-type-identity.test
+typed-callable-escape.test
+typed-parameters.test
+types.test
+unicode-char.test
+virtual-construction.test
+web-unreserved.test
+
+Tests ended at Mon Sep 28 22:42:08 CEST 2026
+all.tcl:	Total	2718	Passed	2718	Skipped	0	Failed	0
+Sourced 93 Test Files.

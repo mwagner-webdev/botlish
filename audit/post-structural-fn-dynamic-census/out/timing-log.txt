@@ -1,0 +1,16 @@
+bench__lex-strategy production 30464.0
+bench__lex-strategy audit-hooks-off 30514.0
+bench__lex-strategy target-tracking 79207.0
+bench__refined-checks production 755840.5
+bench__refined-checks audit-hooks-off 744354.0
+bench__refined-checks target-tracking 2520467.0
+bench__source-checks production 7491.0
+bench__source-checks audit-hooks-off 7391.0
+bench__source-checks target-tracking 19576.0
+bench__test-selection production 3296.0
+bench__test-selection audit-hooks-off 3345.5
+bench__test-selection target-tracking 14382.0
+bench__uri-steady production 4675375.5
+bench__uri-steady audit-hooks-off 4966663.0
+bench__uri-steady target-tracking 14423472.0
+counterfactual/exact production 631184.5

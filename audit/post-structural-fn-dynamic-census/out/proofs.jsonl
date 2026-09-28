@@ -1,0 +1,27 @@
+{"program":"bench/lex-strategy.bot","fid":"1","expr":"e18","instance":"i10","label":"list::all?<List[str], native>","type":"native","targets":"{native is_tcl_alnum}","environments":""}
+{"program":"bench/lex-strategy.bot","fid":"6","expr":"e119","instance":"i3","label":"classify<str, bool>","type":"Fn{args: [any], return: any, errors: []}","targets":"{block e49} {native is_tcl_alnum}","environments":"{block e49 captures=}"}
+{"kind":"sourceSite","program":"bench/lex-strategy.bot","expr":"e6","callee":"predicate","type":"any","location":"file bench/lex-strategy.bot line 61 column 12 node any?()/loop/if/cond"}
+{"kind":"sourceSite","program":"bench/lex-strategy.bot","expr":"e18","callee":"predicate","type":"any","location":"file bench/lex-strategy.bot line 67 column 16 node all?()/loop/if/cond/operand"}
+{"kind":"sourceSite","program":"bench/lex-strategy.bot","expr":"e31","callee":"predicate","type":"any","location":"file bench/lex-strategy.bot line 73 column 12 node none?()/loop/if/cond"}
+{"kind":"sourceSite","program":"bench/lex-strategy.bot","expr":"e42","callee":"predicate","type":"any","location":"file bench/lex-strategy.bot line 79 column 12 node find()/loop/if/cond"}
+{"kind":"sourceSite","program":"bench/lex-strategy.bot","expr":"e119","callee":"classifier","type":"Fn{args: [any], return: bool, errors: []}","location":"file bench/lex-strategy.bot line 57 column 9 node classify()/loop/call"}
+{"program":"bench/refined-checks.bot","fid":"13","expr":"e216","instance":"i20","label":"scan_while<generic>","type":"any","targets":"{block e183} {native is_tcl_alpha}","environments":"{block e183 captures=}"}
+{"kind":"sourceSite","program":"bench/refined-checks.bot","expr":"e31","callee":"check","type":"block(e6)/4 -> any","location":"file bench/refined-checks.bot line 40 column 5 node check()/call"}
+{"kind":"sourceSite","program":"bench/refined-checks.bot","expr":"e45","callee":"check","type":"block(e6)/4 -> any","location":"file bench/refined-checks.bot line 42 column 2 node list/item1"}
+{"kind":"sourceSite","program":"bench/refined-checks.bot","expr":"e51","callee":"check","type":"block(e6)/4 -> any","location":"file bench/refined-checks.bot line 42 column 35 node list/item2"}
+{"program":"bench/source-checks.bot","fid":"1","expr":"e42","instance":"i3","label":"list::find<List[str], block>","type":"block","targets":"{block e114}","environments":"{block e114 captures=b9}"}
+{"program":"bench/source-checks.bot","fid":"4","expr":"e91","instance":"i2","label":"classify_leading<generic>","type":"Fn{args: [any], return: any, errors: []}","targets":"{block e49} {block e55} {native is_tcl_alnum} {native is_tcl_alpha}","environments":"{block e49 captures=} {block e55 captures=}"}
+{"kind":"sourceSite","program":"bench/source-checks.bot","expr":"e6","callee":"predicate","type":"any","location":"file bench/source-checks.bot line 61 column 12 node any?()/loop/if/cond"}
+{"kind":"sourceSite","program":"bench/source-checks.bot","expr":"e18","callee":"predicate","type":"any","location":"file bench/source-checks.bot line 67 column 16 node all?()/loop/if/cond/operand"}
+{"kind":"sourceSite","program":"bench/source-checks.bot","expr":"e31","callee":"predicate","type":"any","location":"file bench/source-checks.bot line 73 column 12 node none?()/loop/if/cond"}
+{"kind":"sourceSite","program":"bench/source-checks.bot","expr":"e42","callee":"predicate","type":"any","location":"file bench/source-checks.bot line 79 column 12 node find()/loop/if/cond"}
+{"kind":"sourceSite","program":"bench/source-checks.bot","expr":"e91","callee":"check","type":"Fn{args: [any], return: bool, errors: []}","location":"file bench/source-checks.bot line 56 column 9 node classify_leading()/loop/call"}
+{"program":"bench/test-selection.bot","fid":"1","expr":"e6","instance":"i6","label":"list::any?<any, block>","type":"block","targets":"{block e55}","environments":"{block e55 captures=b36}"}
+{"program":"bench/test-selection.bot","fid":"2","expr":"e31","instance":"i7","label":"list::none?<List[str], block>","type":"block","targets":"{block e55}","environments":"{block e55 captures=b36}"}
+{"program":"bench/test-selection.bot","fid":"3","expr":"e42","instance":"i9","label":"list::find<List[list], block>","type":"block","targets":"{block e98}","environments":"{block e98 captures=b8 b50}"}
+{"kind":"sourceSite","program":"bench/test-selection.bot","expr":"e6","callee":"predicate","type":"any","location":"file bench/test-selection.bot line 61 column 12 node any?()/loop/if/cond"}
+{"kind":"sourceSite","program":"bench/test-selection.bot","expr":"e18","callee":"predicate","type":"any","location":"file bench/test-selection.bot line 67 column 16 node all?()/loop/if/cond/operand"}
+{"kind":"sourceSite","program":"bench/test-selection.bot","expr":"e31","callee":"predicate","type":"any","location":"file bench/test-selection.bot line 73 column 12 node none?()/loop/if/cond"}
+{"kind":"sourceSite","program":"bench/test-selection.bot","expr":"e42","callee":"predicate","type":"any","location":"file bench/test-selection.bot line 79 column 12 node find()/loop/if/cond"}
+{"program":"bench/uri-steady.bot","fid":"13","expr":"e216","instance":"i20","label":"scan_while<generic>","type":"any","targets":"{block e183} {native is_tcl_alpha}","environments":"{block e183 captures=b15}"}
+{"kind":"sourceSite","program":"bench/uri-steady.bot","expr":"e216","callee":"predicate","type":"any","location":"file bench/uri-steady.bot line 128 column 16 node emailish?()/scan_while()/loop/if/cond"}

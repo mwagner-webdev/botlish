@@ -1,0 +1,14 @@
+patching file lib/web.bot
+/mnt/c/Users/MarkusWagner/dev/botlish/audit/post-structural-fn-dynamic-census/out/counterfactual/exact-0: Ir/run=6,808,550; JIT share 16.6%
+/mnt/c/Users/MarkusWagner/dev/botlish/audit/post-structural-fn-dynamic-census/out/counterfactual/exact-0/census.txt: Ir/run=6,808,550
+/mnt/c/Users/MarkusWagner/dev/botlish/audit/post-structural-fn-dynamic-census/out/counterfactual/exact-1: Ir/run=6,808,556; JIT share 16.6%
+/mnt/c/Users/MarkusWagner/dev/botlish/audit/post-structural-fn-dynamic-census/out/counterfactual/exact-1/census.txt: Ir/run=6,808,556
+/mnt/c/Users/MarkusWagner/dev/botlish/audit/post-structural-fn-dynamic-census/out/counterfactual/exact-noregion-0: Ir/run=9,680,415; JIT share 11.2%
+/mnt/c/Users/MarkusWagner/dev/botlish/audit/post-structural-fn-dynamic-census/out/counterfactual/exact-noregion-0/census.txt: Ir/run=9,680,415
+/mnt/c/Users/MarkusWagner/dev/botlish/audit/post-structural-fn-dynamic-census/out/counterfactual/exact-noregion-1: Ir/run=9,681,858; JIT share 11.2%
+/mnt/c/Users/MarkusWagner/dev/botlish/audit/post-structural-fn-dynamic-census/out/counterfactual/exact-noregion-1/census.txt: Ir/run=9,681,858
+/mnt/c/Users/MarkusWagner/dev/botlish/audit/post-structural-fn-dynamic-census/out/counterfactual/production-noregion-0: Ir/run=10,210,914; JIT share 12.3%
+/mnt/c/Users/MarkusWagner/dev/botlish/audit/post-structural-fn-dynamic-census/out/counterfactual/production-noregion-0/census.txt: Ir/run=10,210,914
+/mnt/c/Users/MarkusWagner/dev/botlish/audit/post-structural-fn-dynamic-census/out/counterfactual/production-noregion-1: Ir/run=10,209,898; JIT share 12.3%
+/mnt/c/Users/MarkusWagner/dev/botlish/audit/post-structural-fn-dynamic-census/out/counterfactual/production-noregion-1/census.txt: Ir/run=10,209,898
+Exact-target controls complete; no source files in the working tree changed.

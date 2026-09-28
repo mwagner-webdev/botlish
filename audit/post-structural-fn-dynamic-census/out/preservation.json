@@ -1,0 +1,182 @@
+[
+  {
+    "program": "bench__fib",
+    "value_and_allocations_equal": true,
+    "counts_repeat": true,
+    "machine_code_equal": true
+  },
+  {
+    "program": "bench__lex-strategy",
+    "value_and_allocations_equal": true,
+    "counts_repeat": true,
+    "machine_code_equal": true
+  },
+  {
+    "program": "bench__loop-count",
+    "value_and_allocations_equal": true,
+    "counts_repeat": true,
+    "machine_code_equal": true
+  },
+  {
+    "program": "bench__refined-checks",
+    "value_and_allocations_equal": true,
+    "counts_repeat": true,
+    "machine_code_equal": true
+  },
+  {
+    "program": "bench__source-checks",
+    "value_and_allocations_equal": true,
+    "counts_repeat": true,
+    "machine_code_equal": true
+  },
+  {
+    "program": "bench__sum-refined",
+    "value_and_allocations_equal": true,
+    "counts_repeat": true,
+    "machine_code_equal": true
+  },
+  {
+    "program": "bench__test-selection",
+    "value_and_allocations_equal": true,
+    "counts_repeat": true,
+    "machine_code_equal": true
+  },
+  {
+    "program": "bench__uri-steady",
+    "value_and_allocations_equal": true,
+    "counts_repeat": true,
+    "machine_code_equal": true
+  },
+  {
+    "program": "examples__stdlib__ai_text_clean",
+    "value_and_allocations_equal": true,
+    "counts_repeat": true,
+    "machine_code_equal": true
+  },
+  {
+    "program": "examples__stdlib__csv",
+    "value_and_allocations_equal": true,
+    "counts_repeat": true,
+    "machine_code_equal": true
+  },
+  {
+    "program": "examples__stdlib__csv_chunked",
+    "value_and_allocations_equal": true,
+    "counts_repeat": true,
+    "machine_code_equal": true
+  },
+  {
+    "program": "examples__stdlib__csv_geometric",
+    "value_and_allocations_equal": true,
+    "counts_repeat": true,
+    "machine_code_equal": true
+  },
+  {
+    "program": "examples__stdlib__csv_records",
+    "value_and_allocations_equal": true,
+    "counts_repeat": true,
+    "machine_code_equal": true
+  },
+  {
+    "program": "examples__stdlib__hashtable",
+    "value_and_allocations_equal": true,
+    "counts_repeat": true,
+    "machine_code_equal": true
+  },
+  {
+    "program": "examples__stdlib__matmul",
+    "value_and_allocations_equal": true,
+    "counts_repeat": true,
+    "machine_code_equal": true
+  },
+  {
+    "program": "examples__stdlib__string_replace",
+    "value_and_allocations_equal": true,
+    "counts_repeat": true,
+    "machine_code_equal": true
+  },
+  {
+    "program": "examples__stdlib__string_reverse",
+    "value_and_allocations_equal": true,
+    "counts_repeat": true,
+    "machine_code_equal": true
+  },
+  {
+    "program": "examples__surface__01-arithmetic",
+    "value_and_allocations_equal": true,
+    "counts_repeat": true,
+    "machine_code_equal": true
+  },
+  {
+    "program": "examples__surface__02-recursion",
+    "value_and_allocations_equal": true,
+    "counts_repeat": true,
+    "machine_code_equal": true
+  },
+  {
+    "program": "examples__surface__03-closure",
+    "value_and_allocations_equal": true,
+    "counts_repeat": true,
+    "machine_code_equal": true
+  },
+  {
+    "program": "examples__surface__04-branch-value",
+    "value_and_allocations_equal": true,
+    "counts_repeat": true,
+    "machine_code_equal": true
+  },
+  {
+    "program": "examples__surface__05-shadowing",
+    "value_and_allocations_equal": true,
+    "counts_repeat": true,
+    "machine_code_equal": true
+  },
+  {
+    "program": "examples__surface__06-list",
+    "value_and_allocations_equal": true,
+    "counts_repeat": true,
+    "machine_code_equal": true
+  },
+  {
+    "program": "examples__surface__07-loop-break",
+    "value_and_allocations_equal": true,
+    "counts_repeat": true,
+    "machine_code_equal": true
+  },
+  {
+    "program": "examples__surface__08-return",
+    "value_and_allocations_equal": true,
+    "counts_repeat": true,
+    "machine_code_equal": true
+  },
+  {
+    "program": "examples__surface__09-mutual-recursion",
+    "value_and_allocations_equal": true,
+    "counts_repeat": true,
+    "machine_code_equal": true
+  },
+  {
+    "program": "examples__surface__11-boolean-operators",
+    "value_and_allocations_equal": true,
+    "counts_repeat": true,
+    "machine_code_equal": true
+  },
+  {
+    "program": "examples__surface__12-if-value",
+    "value_and_allocations_equal": true,
+    "counts_repeat": true,
+    "machine_code_equal": true
+  },
+  {
+    "program": "examples__surface__13-hygiene",
+    "value_and_allocations_equal": true,
+    "counts_repeat": true,
+    "machine_code_equal": true
+  },
+  {
+    "program": "examples__surface__14-modules",
+    "value_and_allocations_equal": true,
+    "counts_repeat": true,
+    "machine_code_equal": true
+  }
+]

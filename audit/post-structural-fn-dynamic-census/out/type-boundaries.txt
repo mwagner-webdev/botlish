@@ -1,0 +1,88 @@
+tree: a8a306f986809c0a8b54f4763013070f209c248c (plus any uncommitted working-tree changes)
+
+== bench/source-checks.bot
+  -- surface HIR
+    List literal [is_tcl_alpha, is_tcl_alnum, is_underscore?, is_hyphen?] (e61): List[Fn{args: [any], return: bool, errors: []}]
+        in <program>: list[native is_tcl_alpha, native is_tcl_alnum, block(e49)/1 -> any, block(e55)/1 -> any]
+    checks binding: List[Fn{args: [any], return: bool, errors: []}]
+    check loop binding (as the callee ref of check(c)) (e92): Fn{args: [any], return: bool, errors: []}
+        in classify_leading<generic>: Fn{args: [any], return: any, errors: []}
+    check(c) call result (e91): bool
+        in classify_leading<generic>: any
+    check(c) HIR target: ""   NIR form: callvalue
+    NIR totals: call 1, callenv 3, callvalue 2
+  -- relifted HIR
+    List literal [is_tcl_alpha, is_tcl_alnum, is_underscore?, is_hyphen?] (e61): List[Fn{args: [any], return: bool, errors: []}]
+        in <program>: list[native is_tcl_alpha, native is_tcl_alnum, block(e49)/1 -> any, block(e55)/1 -> any]
+    checks binding: List[Fn{args: [any], return: bool, errors: []}]
+    check loop binding (as the callee ref of check(c)) (e92): Fn{args: [any], return: bool, errors: []}
+        in classify_leading<generic>: Fn{args: [any], return: any, errors: []}
+    check(c) call result (e91): bool
+        in classify_leading<generic>: any
+    check(c) HIR target: ""   NIR form: callvalue
+    NIR totals: call 1, callenv 3, callvalue 2
+
+== bench/lex-strategy.bot
+  -- surface HIR
+    strict branch (is_tcl_alnum) (e75): native is_tcl_alnum
+        in choose_classifier<bool>: native is_tcl_alnum
+    relaxed branch (lenient_ident_char?) (e76): block(e49)/1 -> bool
+        in choose_classifier<bool>: block(e49)/1 -> any
+    if expression (e73): Fn{args: [any], return: bool, errors: []}
+        in choose_classifier<bool>: Fn{args: [any], return: any, errors: []}
+    choose_classifier result type: Fn{args: [any], return: bool, errors: []}
+    choose_classifier binding: block(e72)/1 -> Fn{args: [any], return: bool, errors: []}
+    classifier binding: Fn{args: [any], return: bool, errors: []}
+    classifier (callee ref of classifier(c)) (e120): Fn{args: [any], return: bool, errors: []}
+        in classify<str, bool>: Fn{args: [any], return: any, errors: []}
+    classifier(c) call result (e119): bool
+        in classify<str, bool>: any
+    classifier(c) HIR target: ""   NIR form: callvalue
+    NIR totals: call 11, callenv 0, callvalue 2
+  -- relifted HIR
+    strict branch (is_tcl_alnum) (e75): native is_tcl_alnum
+        in choose_classifier<bool>: native is_tcl_alnum
+    relaxed branch (lenient_ident_char?) (e76): block(e49)/1 -> bool
+        in choose_classifier<bool>: block(e49)/1 -> any
+    if expression (e73): Fn{args: [any], return: bool, errors: []}
+        in choose_classifier<bool>: Fn{args: [any], return: any, errors: []}
+    choose_classifier result type: Fn{args: [any], return: bool, errors: []}
+    choose_classifier binding: block(e72)/1 -> Fn{args: [any], return: bool, errors: []}
+    classifier binding: Fn{args: [any], return: bool, errors: []}
+    classifier (callee ref of classifier(c)) (e120): Fn{args: [any], return: bool, errors: []}
+        in classify<str, bool>: Fn{args: [any], return: any, errors: []}
+    classifier(c) call result (e119): bool
+        in classify<str, bool>: any
+    classifier(c) HIR target: ""   NIR form: callvalue
+    NIR totals: call 11, callenv 0, callvalue 2
+
+== bench/test-selection.bot
+  -- surface HIR
+    make_changed? result type: block(e55)/1 -> bool
+    make_changed? binding: block(e49)/1 -> block(e55)/1 -> bool
+    changed_a? binding: block(e55)/1 -> bool
+    changed_b? binding: block(e55)/1 -> bool
+    changed_a?(...) direct call result (e232): bool
+        in <program>: bool
+    changed_a?(...) HIR target: "block e55"   NIR form: callenv
+    NIR totals: call 14, callenv 1, callvalue 3
+  -- relifted HIR
+    make_changed? result type: block(e55)/1 -> bool
+    make_changed? binding: block(e49)/1 -> block(e55)/1 -> bool
+    changed_a? binding: block(e55)/1 -> bool
+    changed_b? binding: block(e55)/1 -> bool
+    changed_a?(...) direct call result (e232): bool
+        in <program>: bool
+    changed_a?(...) HIR target: "block e55"   NIR form: callenv
+    NIR totals: call 14, callenv 1, callvalue 3
+
+== static callvalue census (relifted pipeline, as bench/bench.tcl compiles)
+  fib.bot                0  
+  lex-strategy.bot       2  list::all?@e18, classify@e119
+  loop-count.bot         0  
+  refined-checks.bot     1  scan_while@e216
+  source-checks.bot      2  list::find@e42, classify_leading@e91
+  sum-refined.bot        0  
+  test-selection.bot     3  list::any?@e6, list::none?@e31, list::find@e42
+  uri-steady.bot         1  scan_while@e216
+  total                  9

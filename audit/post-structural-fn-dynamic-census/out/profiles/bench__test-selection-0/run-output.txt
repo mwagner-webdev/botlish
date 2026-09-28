@@ -1,0 +1,3 @@
+times 11371800 372760
+timing 1169986 372 2 1
+value {list {{int 3} {int 1} {str resolve-tests} {bool true} {bool true}}}

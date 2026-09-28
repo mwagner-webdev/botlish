@@ -1,0 +1,112 @@
+source:  examples/stdlib/matmul.bot
+backend: Cranelift (specialize=1)
+asm:     matmul.asm
+vcode:   matmul.vcode
+machine-code bytes: 4734 (per function: 750 703 556 812 613 892 408)
+
+functions:
+  0 <program entry>: nir-regs=32
+  1 dot<List[int], List[List[int]], int, int, int, int>: nir-regs=18
+  2 product_row<List[int], List[List[int]], int, int, List[never]>: nir-regs=22
+  3 product_row<List[int], List[List[int]], int, int, List[int]>: nir-regs=20
+  4 product_rows<List[List[int]], List[List[int]], int, int, List[never]>: nir-regs=22
+  5 product_rows<List[List[int]], List[List[int]], int, int, List[List[int]]>: nir-regs=20
+  6 matmul<List[List[int]], List[List[int]]>: nir-regs=18
+
+GC roots (matmul.asm's NIR ids match roots.txt's "function N"):
+  function 0 "<program>"
+    NIR regs: 32
+    raw regs: 12
+    managed-capable regs: 20
+    effects: may_error=true may_gc=true
+    safepoints: 8
+    root candidates: 19
+    max live roots: 5
+    shadow slots: 5
+    entry zero slots: 2
+    depth reservation: no
+    storage: native frame
+  
+  function 1 "dot"
+    NIR regs: 18
+    raw regs: 4
+    managed-capable regs: 14
+    effects: may_error=true may_gc=true
+    safepoints: 2
+    root candidates: 7
+    max live roots: 6
+    shadow slots: 6
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+  
+  function 2 "product_row"
+    NIR regs: 22
+    raw regs: 6
+    managed-capable regs: 16
+    effects: may_error=true may_gc=true
+    safepoints: 3
+    root candidates: 11
+    max live roots: 8
+    shadow slots: 8
+    entry zero slots: 0
+    depth reservation: no
+    storage: native frame
+  
+  function 3 "product_row"
+    NIR regs: 20
+    raw regs: 4
+    managed-capable regs: 16
+    effects: may_error=true may_gc=true
+    safepoints: 4
+    root candidates: 10
+    max live roots: 7
+    shadow slots: 7
+    entry zero slots: 3
+    depth reservation: no
+    storage: native frame
+  
+  function 4 "product_rows"
+    NIR regs: 22
+    raw regs: 5
+    managed-capable regs: 17
+    effects: may_error=true may_gc=true
+    safepoints: 4
+    root candidates: 10
+    max live roots: 7
+    shadow slots: 7
+    entry zero slots: 1
+    depth reservation: no
+    storage: native frame
+  
+  function 5 "product_rows"
+    NIR regs: 20
+    raw regs: 3
+    managed-capable regs: 17
+    effects: may_error=true may_gc=true
+    safepoints: 5
+    root candidates: 11
+    max live roots: 8
+    shadow slots: 8
+    entry zero slots: 4
+    depth reservation: no
+    storage: native frame
+  
+  function 6 "matmul"
+    NIR regs: 18
+    raw regs: 4
+    managed-capable regs: 14
+    effects: may_error=true may_gc=true
+    safepoints: 3
+    root candidates: 5
+    max live roots: 5
+    shadow slots: 5
+    entry zero slots: 3
+    depth reservation: no
+    storage: native frame
+
+mechanical pattern counts (triage only; see report for interpretation):
+  3 x calls to rt_int_add
+  1 x calls to rt_int_mul
+  2 x calls to rt_int_cmp
+  29 x calls to other rt_* helpers

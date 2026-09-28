@@ -1,0 +1,59 @@
+nir 1 call-effects=1 statics=3
+
+func 0 "<program>" params=0 env=0 regs=28 pnames="" captures=0 instance="generic" rawregs="1 3 5 8 10 12 15 17 22 24"
+    %0 = int 5 @e30
+    %1 = rawint 5
+    %2 = int 1 @e31
+    %3 = rawint 1
+    %4 = int 10 @e32
+    %5 = rawint 10
+    %6 = call 1 %0 %2 %4 @e28
+    %7 = int 5 @e35
+    %8 = rawint 5
+    %9 = int 1 @e36
+    %10 = rawint 1
+    %11 = int 10 @e37
+    %12 = rawint 10
+    %13 = call 2 %7 %9 %11 @e33
+    %14 = int 3 @e41
+    %15 = rawint 3
+    %16 = int 4 @e42
+    %17 = rawint 4
+    %18 = op rieq %15 %17 @e39
+    %19 = bool true @e44
+    %20 = bool false @e46
+    %21 = int 1 @e51
+    %22 = rawint 1
+    %23 = int 1 @e52
+    %24 = rawint 1
+    %25 = op rieq %22 %24 @e49
+    %26 = bool true @e53
+    %27 = op listnew %6 %13 %19 %26 @e26
+    ret %27
+end
+
+func 1 "between" params=3 env=0 regs=9 pnames="x low high" captures=0 instance="int, int, int" rawregs="3 4 6" @e2
+    %3 = op runbox %1
+    %4 = op runbox %0
+    %5 = op rile %3 %4 @e4
+    %6 = op runbox %2
+    %7 = op rile %4 %6 @e9
+    %8 = bool true @e13
+    ret %8
+end
+
+func 2 "outside" params=3 env=0 regs=7 pnames="x low high" captures=0 instance="int, int, int" @e17
+    %3 = call 1 %0 %1 %2 @e19
+    br %3 L0 L1 @e18
+  label L0
+    %5 = bool false @e24
+    %4 = move %5
+    jump L2
+  label L1
+    %6 = bool true @e25
+    %4 = move %6
+    jump L2
+  label L2
+    ret %4
+end
+

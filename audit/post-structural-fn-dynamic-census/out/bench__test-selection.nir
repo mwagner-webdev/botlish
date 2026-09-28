@@ -1,0 +1,329 @@
+nir 1 call-effects=1 statics=3
+
+func 0 "<program>" params=0 env=0 regs=86 pnames="" captures=0 instance="generic"
+    %0 = str "parser-tests" @e122
+    %1 = str "src/parser.bot" @e125
+    %2 = str "src/ast.bot" @e126
+    %3 = op listnew %1 %2 @e123
+    %4 = op listnew %0 %3 @e120
+    %5 = str "lexer-tests" @e129
+    %6 = str "src/lexer.bot" @e132
+    %7 = str "src/token.bot" @e133
+    %8 = op listnew %6 %7 @e130
+    %9 = op listnew %5 %8 @e127
+    %10 = str "resolve-tests" @e136
+    %11 = str "hir/resolve.tcl" @e139
+    %12 = str "hir/hir.tcl" @e140
+    %13 = op listnew %11 %12 @e137
+    %14 = op listnew %10 %13 @e134
+    %15 = str "types-tests" @e143
+    %16 = str "hir/types.tcl" @e146
+    %17 = str "hir/hir.tcl" @e147
+    %18 = op listnew %16 %17 @e144
+    %19 = op listnew %15 %18 @e141
+    %20 = str "specialize-tests" @e150
+    %21 = str "hir/specialize.tcl" @e153
+    %22 = str "hir/range.tcl" @e154
+    %23 = op listnew %21 %22 @e151
+    %24 = op listnew %20 %23 @e148
+    %25 = str "native-lower-tests" @e157
+    %26 = str "native/lower.tcl" @e160
+    %27 = str "native/native.tcl" @e161
+    %28 = op listnew %26 %27 @e158
+    %29 = op listnew %25 %28 @e155
+    %30 = str "compile-tests" @e164
+    %31 = str "compiler/compiler.tcl" @e167
+    %32 = op listnew %31 @e165
+    %33 = op listnew %30 %32 @e162
+    %34 = str "web-tests" @e170
+    %35 = str "lib/web.bot" @e173
+    %36 = str "lib/byte.bot" @e174
+    %37 = op listnew %35 %36 @e171
+    %38 = op listnew %34 %37 @e168
+    %39 = str "ascii-tests" @e177
+    %40 = str "lib/ascii.bot" @e180
+    %41 = op listnew %40 @e178
+    %42 = op listnew %39 %41 @e175
+    %43 = str "list-tests" @e183
+    %44 = str "lib/list.bot" @e186
+    %45 = op listnew %44 @e184
+    %46 = op listnew %43 %45 @e181
+    %47 = str "byte-tests" @e189
+    %48 = str "lib/byte.bot" @e192
+    %49 = str "core/scalarbits.tcl" @e193
+    %50 = op listnew %48 %49 @e190
+    %51 = op listnew %47 %50 @e187
+    %52 = str "char-tests" @e196
+    %53 = str "lib/char.bot" @e199
+    %54 = str "core/unicodechar.tcl" @e200
+    %55 = op listnew %53 %54 @e197
+    %56 = op listnew %52 %55 @e194
+    %57 = str "docs-tests" @e203
+    %58 = str "README.md" @e206
+    %59 = str "AGENTS.md" @e207
+    %60 = op listnew %58 %59 @e204
+    %61 = op listnew %57 %60 @e201
+    %62 = str "bench-tests" @e210
+    %63 = str "bench/bench.tcl" @e213
+    %64 = op listnew %63 @e211
+    %65 = op listnew %62 %64 @e208
+    %66 = op listnew %4 %9 %14 %19 %24 %29 %33 %38 %42 %46 %51 %56 %61 %65 @e118
+    %67 = str "lib/web.bot" @e217
+    %68 = str "hir/hir.tcl" @e218
+    %69 = op listnew %67 %68 @e215
+    %70 = str "README.md" @e222
+    %71 = op listnew %70 @e220
+    %72 = call 4 %69 @e224
+    %73 = call 4 %71 @e228
+    %74 = str "lib/web.bot" @e234
+    %75 = callenv 5 %72 %74 @e232
+    %76 = call 11 %66 %72 @e236
+    %77 = call 11 %66 %73 @e241
+    %78 = str "README.md" @e248
+    %79 = str "AGENTS.md" @e249
+    %80 = op listnew %78 %79 @e246
+    %81 = call 2 %80 %72 @e251
+    %82 = op listlen %76 @e257
+    %83 = op listlen %77 @e260
+    %84 = call 12 %66 %72 @e263
+    %85 = op listnew %82 %83 %84 %75 %81 @e255
+    ret %85
+end
+
+func 1 "list::any?" params=2 env=0 regs=18 pnames="xs predicate" captures=0 instance="any, block" rawregs="4 14" @e2
+    guard list %0 "loop" @e3
+    %2 = op listlen %0 @e3
+    %3 = int 0 @e3
+    %4 = rawint 0
+    %5 = move %3 @e3
+    jump L0 @e3
+  label L0
+    %7 = op ilt %5 %2 @e3
+    br %7 L1 L3 @e3
+  label L1
+    %8 = op listget %0 %5 @e3
+    %9 = callvalue %1 %8 @e6
+    guardbool %9 @e5
+    br %9 L5 L6 @e5
+  label L5
+    %11 = bool true @e10
+    ret %11 @e9
+  label L6
+    %12 = unit
+    %10 = move %12
+    jump L7
+  label L7
+    jump L2 @e3
+  label L2
+    %13 = int 1 @e3
+    %14 = rawint 1
+    %15 = op iadd %5 %13 @e3
+    %5 = move %15 @e3
+    jump L0 @e3
+  label L3
+    %16 = unit @e3
+    %6 = move %16 @e3
+    jump L4 @e3
+  label L4
+    %17 = bool false @e11
+    ret %17
+end
+
+func 2 "list::none?" params=2 env=0 regs=18 pnames="xs predicate" captures=0 instance="List[str], block" rawregs="4 14" @e27
+    %2 = op listlen %0 @e28
+    %3 = int 0 @e28
+    %4 = rawint 0
+    %5 = move %3 @e28
+    jump L0 @e28
+  label L0
+    %7 = op ilt %5 %2 @e28
+    br %7 L1 L3 @e28
+  label L1
+    %8 = op listget %0 %5 @e28
+    %9 = callvalue %1 %8 @e31
+    guardbool %9 @e30
+    br %9 L5 L6 @e30
+  label L5
+    %11 = bool false @e35
+    ret %11 @e34
+  label L6
+    %12 = unit
+    %10 = move %12
+    jump L7
+  label L7
+    jump L2 @e28
+  label L2
+    %13 = int 1 @e28
+    %14 = rawint 1
+    %15 = op iadd %5 %13 @e28
+    %5 = move %15 @e28
+    jump L0 @e28
+  label L3
+    %16 = unit @e28
+    %6 = move %16 @e28
+    jump L4 @e28
+  label L4
+    %17 = bool true @e36
+    ret %17
+end
+
+func 3 "list::find" params=2 env=0 regs=16 pnames="xs predicate" captures=0 instance="List[list], block" rawregs="4 13" @e38
+    %2 = op listlen %0 @e39
+    %3 = int 0 @e39
+    %4 = rawint 0
+    %5 = move %3 @e39
+    jump L0 @e39
+  label L0
+    %7 = op ilt %5 %2 @e39
+    br %7 L1 L3 @e39
+  label L1
+    %8 = op listget %0 %5 @e39
+    %9 = callvalue %1 %8 @e42
+    guardbool %9 @e41
+    br %9 L5 L6 @e41
+  label L5
+    ret %8 @e45
+  label L6
+    %11 = unit
+    %10 = move %11
+    jump L7
+  label L7
+    jump L2 @e39
+  label L2
+    %12 = int 1 @e39
+    %13 = rawint 1
+    %14 = op iadd %5 %12 @e39
+    %5 = move %14 @e39
+    jump L0 @e39
+  label L3
+    %15 = unit @e39
+    %6 = move %15 @e39
+    jump L4 @e39
+  label L4
+    faildeclared 1 "NotFound" @e47
+end
+
+func 4 "make_changed?" params=1 env=0 regs=3 pnames="changed" captures=0 instance="List[str]" @e49
+    %1 = op setfromlisttotal %0 @e51
+    %2 = closure 5 %1 @e55
+    ret %2
+end
+
+func 5 "changed?" params=1 env=1 regs=3 pnames="path" captures=1 instance="generic" @e55
+    %1 = capture 0
+    %2 = op setcontains %1 %0 @e56
+    ret %2
+end
+
+func 6 "test_name" params=1 env=0 regs=4 pnames="test" captures=0 instance="list" rawregs="2" @e62
+    %1 = int 0 @e66
+    %2 = rawint 0
+    %3 = op listget %0 %1 @e63
+    ret %3
+end
+
+func 7 "test_deps" params=1 env=0 regs=4 pnames="test" captures=0 instance="list" rawregs="2" @e68
+    %1 = int 1 @e72
+    %2 = rawint 1
+    %3 = op listget %0 %1 @e69
+    ret %3
+end
+
+func 8 "test_deps" params=1 env=0 regs=4 pnames="test" captures=0 instance="generic" rawregs="2" @e68
+    %1 = int 1 @e72
+    %2 = rawint 1
+    guard list %0 "list_get" @e69
+    %3 = op listget %0 %1 @e69
+    ret %3
+end
+
+func 9 "affected?" params=2 env=0 regs=4 pnames="test changed?" captures=0 instance="list, block" @e74
+    %2 = call 7 %0 @e77
+    %3 = call 1 %2 %1 @e75
+    ret %3
+end
+
+func 10 "affected?" params=2 env=0 regs=4 pnames="test changed?" captures=0 instance="any, block" @e74
+    %2 = call 8 %0 @e77
+    %3 = call 1 %2 %1 @e75
+    ret %3
+end
+
+func 11 "select_affected" params=2 env=0 regs=21 pnames="tests changed?" captures=0 instance="List[list], block" rawregs="4 19" @e82
+    %2 = op listlen %0 @e83
+    %3 = int 0 @e83
+    %4 = rawint 0
+    %5 = move %3 @e83
+    %7 = op listnew @e83
+    %8 = move %7 @e83
+    jump L0 @e83
+  label L0
+    %9 = op ilt %5 %2 @e83
+    br %9 L1 L3 @e83
+  label L1
+    %10 = op listget %0 %5 @e83
+    %11 = call 9 %10 %1 @e87
+    br %11 L5 L6 @e86
+  label L5
+    %13 = bool false @e91
+    %12 = move %13
+    jump L7
+  label L6
+    %14 = bool true @e92
+    %12 = move %14
+    jump L7
+  label L7
+    br %12 L8 L9 @e85
+  label L8
+    jump L2 @e93
+  label L9
+    %16 = unit
+    %15 = move %16
+    jump L10
+  label L10
+    %17 = op listappend %8 %10 @e83
+    %8 = move %17 @e83
+    jump L2 @e83
+  label L2
+    %18 = int 1 @e83
+    %19 = rawint 1
+    %20 = op iadd %5 %18 @e83
+    %5 = move %20 @e83
+    jump L0 @e83
+  label L3
+    %6 = move %8 @e83
+    jump L4 @e83
+  label L4
+    ret %6
+end
+
+func 12 "first_affected" params=2 env=0 regs=10 pnames="tests changed?" captures=0 instance="List[list], block" @e96
+    %2 = closure 13 %1 @e98
+    pusherrorexit L0 @e104
+    %4 = call 3 %0 %2 @e105
+    poperrorexit @e104
+    %3 = move %4 @e104
+    jump L1 @e104
+  label L0
+    %5 = declarederroreq 1 @e104
+    br %5 L2 L3 @e104
+  label L2
+    cleardeclarederror @e104
+    %6 = str "<none>" @e111
+    %7 = op listnew @e112
+    %8 = op listnew %6 %7 @e109
+    %3 = move %8 @e104
+    jump L1 @e104
+  label L3
+    reraise @e104
+  label L1
+    %9 = call 6 %3 @e114
+    ret %9
+end
+
+func 13 "is_affected?" params=1 env=1 regs=3 pnames="test" captures=1 instance="generic" @e98
+    %1 = capture 0
+    %2 = call 10 %0 %1 @e99
+    ret %2
+end
+

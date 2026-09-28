@@ -1,0 +1,16 @@
+== bench/ ==
+  fib.bot: ok
+  loop-count.bot: ok
+  sum-refined.bot: ok
+  refined-checks.bot: ok
+== examples/stdlib/ ==
+  ai_text_clean: ok
+  csv: ok
+  csv_chunked: ok
+  csv_geometric: ok
+  csv_records: ok
+  hashtable: ok
+  matmul: ok
+  string_replace: ok
+  string_reverse: ok
+wrote audit/post-structural-fn-dynamic-census/out/scalar/README.md
