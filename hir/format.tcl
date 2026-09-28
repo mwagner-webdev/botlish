@@ -18,7 +18,9 @@
 #   eN const LITERAL
 #   eN ref BINDING NAME                  ref ? NAME when unresolved
 #   eN bind BINDING NAME
-#   eN block SCOPE (PARAMS) captures (BINDINGS)
+#   eN block SCOPE (PARAMS) captures (BINDINGS) ?staticRefs (BINDINGS)?
+#                                        staticRefs (hir::isModuleBinding)
+#                                        omitted when empty
 #   eN call TARGET                       native(NAME), block(eN) or generic;
 #                                        "= true"/"= false" when decided
 #   eN if                                followed by "then SCOPE ..." and
@@ -184,6 +186,9 @@ proc hir::format::Expr {hir e indent origins linesVar} {
         block {
             set text "block [dict get $node bodyScope] ([ParamList $hir [dict get $node params] [dict get $node declaredParamTypes]])"
             append text " captures ([BindingList $hir [dict get $node captures]])"
+            if {[dict get $node staticRefs] ne {}} {
+                append text " staticRefs ([BindingList $hir [dict get $node staticRefs]])"
+            }
             if {[dict get $node declaredResult] ne {}} {
                 append text [format { declares %s} [hir::types::show [dict get $node declaredResult]]]
             }

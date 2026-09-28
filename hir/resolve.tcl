@@ -120,8 +120,28 @@ proc hir::resolve::ProgramSection {hirVar root namespaceName nodes origin} {
     set scope [NewScope hir program $root "" "" $origin]
     Declare hir $scope [hir::syntax::scopeBindNames $nodes]
     dict set hir modules $namespaceName $scope
+    # Reverse index of `modules`, checked by IsModuleScope/hir::isModuleScope:
+    # every binding this scope declares has module/program lifetime and
+    # stable storage identity (MODULE-STATIC-RETAINED-VALUES.md), never a
+    # lexical activation of its own -- unlike hir::top's own identically-
+    # "program"-kind scope, which is the entry program's ordinary top level,
+    # out of this milestone's scope (see that file's eligibility discussion).
+    dict set hir moduleScopeIds $scope 1
     set ctx [dict create scope $scope callable "" loop "" blocks {} errors {}]
     return [Sequence hir $nodes $ctx]
+}
+
+# 1 if SCOPE is a module section's own scope (hir::resolve::ProgramSection):
+# every binding it declares has module/program lifetime, one initialized
+# value and no lexical-activation identity of its own -- see
+# MODULE-STATIC-RETAINED-VALUES.md. Never hir::top's own scope, even though
+# both share scope kind "program": that is the entry program's ordinary top
+# level, not a namespace's module section, and is out of this milestone's
+# scope (MODULE-BINDINGS.md's existing eligibility contract governs only
+# namespace module sections, hir/modulebinding.tcl's own moduleScopes).
+proc hir::resolve::IsModuleScope {hirVar s} {
+    upvar 1 $hirVar hir
+    return [dict exists $hir moduleScopeIds $s]
 }
 
 proc hir::resolve::RootNames {} {
@@ -370,6 +390,7 @@ proc hir::resolve::Expr {hirVar node ctx} {
             SetField hir $e params $params
             SetField hir $e declaredParamTypes $declaredParamTypes
             SetField hir $e captures {}
+            SetField hir $e staticRefs {}
             set declared [expr {[dict exists $node declaredResult] ? [dict get $node declaredResult] : {}}]
             if {$declared ne {}} {
                 if {[catch {ResolveTypeExpr $declared} normalized]} {
@@ -653,10 +674,30 @@ proc hir::resolve::ResolveRef {hirVar e name root ctx} {
 # Every enclosing block of CTX (innermost first) that does not itself
 # contain BINDINGSCOPE captures binding B -- shared by ResolveRef's own
 # lexical walk and ResolveQualifiedRef's direct resolution against a module
-# section scope (a module section scope is never within any user block, so
-# there this always captures through every enclosing block).
+# section scope.
+#
+# A module-static binding (BINDINGSCOPE is a namespace's own module section
+# scope, hir::isModuleScope) is the one exception: MODULE-STATIC-RETAINED-
+# VALUES.md's primary invariant is exactly that such a binding never enters
+# a function's lexical capture set, however deep the reference is nested --
+# it has module/program lifetime and stable storage identity, not one
+# particular enclosing activation's. Every enclosing block instead records it
+# in its own `staticRefs` (hir::staticRefs), a disjoint list downstream
+# passes (native lowering, the Tcl compiler, blockescape/specialize) consult
+# to recognize a static storage reference, never inferred later by
+# string/module-name lookup.
 proc hir::resolve::Capture {hirVar ctx bindingScope b} {
     upvar 1 $hirVar hir
+    if {[IsModuleScope hir $bindingScope]} {
+        foreach entry [dict get $ctx blocks] {
+            lassign $entry block bodyScope
+            set staticRefs [dict get $hir exprs $block staticRefs]
+            if {$b ni $staticRefs} {
+                SetField hir $block staticRefs [concat $staticRefs [list $b]]
+            }
+        }
+        return
+    }
     foreach entry [lreverse [dict get $ctx blocks]] {
         lassign $entry block bodyScope
         if {[hir::scopeWithin $hir $bindingScope $bodyScope]} {

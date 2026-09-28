@@ -92,6 +92,17 @@ namespace eval core::compiler {
     variable bindLog {}
     # Block ExprId -> proc name.
     variable blockProcs [dict create]
+    # The currently executing unit's own program/module frame (its own
+    # "base" parameter): a module-static reference (hir::isModuleBinding)
+    # reads through this instead of through any closure-captured frame
+    # chain, so referencing a module-static value never requires a
+    # function to be closure-valued -- MODULE-STATIC-RETAINED-VALUES.md.
+    # GenerateUnit's own top-level proc saves/restores this (in an
+    # ordinary Tcl proc-local variable, so nested/re-entrant unit
+    # invocations nest correctly) around its own body, exactly once per
+    # unit invocation; every nested block proc reads it directly, never
+    # receiving or restoring it itself.
+    variable ModuleBase {}
     # Program mode: block ExprIds whose procs never touch their captured
     # environment (EnvlessBlocks), and calls compiled as loops
     # (SelfTailCalls).
@@ -309,7 +320,14 @@ proc core::compiler::EnvlessBlocks {} {
             if {$b eq ""} {
                 # An unbound name is looked up (and fails) at run time.
                 lappend disqualified $invocation
-            } elseif {[B $b kind] ne "root" && [S [B $b scope] invocation] ne $invocation} {
+            } elseif {[B $b kind] ne "root" && ![hir::isModuleBinding $hir $b]
+                    && [S [B $b scope] invocation] ne $invocation} {
+                # A module-static reference (MODULE-STATIC-RETAINED-VALUES.md)
+                # never disqualifies envless-ness: like a root reference, it
+                # is reachable from any invocation alike (CompileRef reads it
+                # through core::compiler::ModuleBase, never a captured frame
+                # chain), so it is never a reason this invocation needs its
+                # own environment.
                 dict lappend regionRefs $invocation $e
             }
         }
@@ -588,6 +606,7 @@ proc core::compiler::GenerateUnit {mode exprs {unitHir ""}} {
     set bindLog {}
     set blockProcs [dict create]
     set ctx [NewContext 0 [expr {$mode eq "program"}]]
+    dict set ctx indent 2
     PushScope ctx [hir::top $hir] [dict create materialized 1 frame base locals {}]
     if {[dict exists $hir modules]} {
         # Every module's own section (surface/modules.tcl, hir/resolve.tcl's
@@ -606,7 +625,7 @@ proc core::compiler::GenerateUnit {mode exprs {unitHir ""}} {
     set result [CompileSequence ctx [hir::roots $hir]]
     Emit ctx "return [BoxWord $result]"
     set name unit[NewId]
-    lappend pending [ProcSource $name {base} $ctx]
+    lappend pending [UnitProcSource $name $ctx]
 
     set types [dict create]
     if {$mode eq "program"} {
@@ -623,6 +642,22 @@ proc core::compiler::GenerateUnit {mode exprs {unitHir ""}} {
 
 proc core::compiler::ProcSource {name params ctx} {
     return "proc $name [list $params] {\n[join [dict get $ctx lines] \n]\n}"
+}
+
+# Like ProcSource, for a unit's own top-level proc {base}: wraps CTX's body
+# so that, for its whole dynamic extent (any exit: normal, return, break,
+# continue, error alike -- an ordinary Tcl `try`/`finally` propagates every
+# Tcl completion code through unchanged), core::compiler::ModuleBase reads
+# BASE -- this unit's own program/module frame -- and every module-static
+# reference (CompileRef) reads through it directly, never through a
+# closure-captured frame chain. Saved and restored in an ordinary Tcl
+# proc-local variable (never a second global): a unit invocation nested
+# inside another (this compiler has no such caller today, but nothing rules
+# it out) restores its own caller's ModuleBase correctly on return, however
+# deep the nesting.
+proc core::compiler::UnitProcSource {name ctx} {
+    set body [join [dict get $ctx lines] \n]
+    return "proc $name {base} {\n    set __moduleBasePrev \$::core::compiler::ModuleBase\n    set ::core::compiler::ModuleBase \$base\n    try {\n$body\n    } finally {\n        set ::core::compiler::ModuleBase \$__moduleBasePrev\n    }\n}"
 }
 
 proc core::compiler::CompileBlock {ctxVar e} {
@@ -850,6 +885,21 @@ proc core::compiler::CompileRef {ctxVar e} {
     if {[N $e init] eq "no"} {
         Emit ctx "core::env::usedBeforeBinding [Word $name]"
         return [Never]
+    }
+    variable hir
+    if {[hir::isModuleBinding $hir $b]} {
+        # A module-static binding (MODULE-STATIC-RETAINED-VALUES.md): read
+        # through core::compiler::ModuleBase directly, never through this
+        # function's own closure-captured frame chain (dict get $ctx scopes
+        # ...), so referencing it never forces this function to be
+        # closure-valued. The module/program frame it names is the same
+        # "base" env every module section and hir::top itself already share
+        # at run time (core/env.tcl), so this is the identical value the
+        # ordinary scope-based path below would have found from the unit's
+        # own top level -- just reached without threading a captured
+        # environment down to it.
+        Emit ctx "set $t \[core::env::lookupLocal \$::core::compiler::ModuleBase [Word $name]\]"
+        return [Op box "\$$t" any]
     }
     set scope [dict get $ctx scopes [B $b scope]]
     if {[dict get $scope materialized]} {

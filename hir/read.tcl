@@ -489,9 +489,9 @@ proc hir::read::Expr {hirVar level s path block} {
             }
         }
         block {
-            if {![regexp {^(s[0-9]+) \((.*?)\) captures \((.*?)\)(?: declares (\S+))?(?: errors (\S.*?))?(?: binds (.*))?$} \
-                    $head -> body params captures declared errorsText binds]} {
-                Fail $number "expected \"block SCOPE (PARAMS) captures (BINDINGS) ?declares ...? ?errors ...? ?binds ...?\""
+            if {![regexp {^(s[0-9]+) \((.*?)\) captures \((.*?)\)(?: staticRefs \((.*?)\))?(?: declares (\S+))?(?: errors (\S.*?))?(?: binds (.*))?$} \
+                    $head -> body params captures staticRefs declared errorsText binds]} {
+                Fail $number "expected \"block SCOPE (PARAMS) captures (BINDINGS) ?staticRefs (BINDINGS)? ?declares ...? ?errors ...? ?binds ...?\""
             }
             NewScope hir $body block $s $e $e [list ir $path] $number
             set paramIds {}
@@ -513,6 +513,7 @@ proc hir::read::Expr {hirVar level s path block} {
             SetField hir $e params $paramIds
             SetField hir $e declaredParamTypes $declaredParamTypes
             SetField hir $e captures [dict keys [BindingList $captures $number]]
+            SetField hir $e staticRefs [dict keys [BindingList $staticRefs $number]]
             SetField hir $e resultType [hir::types::intern hir [lindex $type 3]]
             set declaredType {}
             if {$declared ne {}} { set declaredType [ParseType $declared $number] }

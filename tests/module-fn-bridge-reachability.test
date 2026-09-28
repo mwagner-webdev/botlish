@@ -6,24 +6,38 @@
 # -module-fn {NAMESPACE NAME} as the ordinary module function
 # NAMESPACE::NAME (native/native.tcl's module-native bridge): hir::types
 # types every reference to the native's root binding as that function's
-# Block. A module function M that references another module binding D
-# captures D (ordinary resolution of M's own body, in M's own module
-# section) and so is a closure, whose value lives in M's own module
-# binding. Before R2.a.1 nothing recorded that a caller of the bridged
+# Block. Before R2.a.1 nothing recorded that a caller of the bridged
 # native needs M's binding: a root native reference captures nothing, so
 # from inside any user-defined block native lowering could not reach M's
-# closure -- `native lowering: binding bNN is not reachable from eNN`
+# value at all -- `native lowering: binding bNN is not reachable from eNN`
 # (NATIVE BUG), on cranelift and cranelift-generic. At program top level
 # (where every module binding is a local of the program function) and for
 # an M with no module dependency (an environment-free function, reached as
 # a static fnvalue from anywhere) it always worked.
 #
-# The fix (hir/hir.tcl's hir::BridgeProvenance) records the bridge's own
-# provenance on each bridged reference (`bridge`: M's BindingId) and makes
-# every enclosing block capture M's binding -- exactly what a module-
-# qualified reference NAMESPACE::NAME from the same place already does.
-# Only M itself: M's dependencies stay in M's own closure, where M is
-# defined, never copied into or made visible to the caller.
+# R2.a.1's own fix (hir/hir.tcl's hir::BridgeProvenance) records the
+# bridge's own provenance on each bridged reference (`bridge`: M's
+# BindingId) and made every enclosing block *capture* M's binding -- at the
+# time, exactly what an ordinary module-qualified reference NAMESPACE::NAME
+# from the same place already did. When M itself referenced another module
+# binding D (ordinary resolution of M's own body, in M's own module
+# section), that reference was *also* a capture back then, making M
+# closure-valued -- so a caller reaching M through the bridge reached a
+# genuine closure, and D's own dependency stayed inside M's own closure,
+# never copied into or made visible to the caller.
+#
+# MODULE-STATIC-RETAINED-VALUES.md changes the storage class on both ends,
+# not the provenance: `bridge` is unchanged (module-fn-bridge-reference-
+# keeps-root-identity below still holds exactly), but hir::resolve::Capture
+# and hir::BridgeProvenance alike now route a reference to a module-scope
+# binding to hir::staticRefs, never hir::captures -- so M's own reference to
+# D is a module-static reference (M is envless outright, whatever D is),
+# and a bridged reference to M is, symmetrically, also a module-static
+# reference (M's own envless-ness, or lack of it, decides nothing about
+# whether *reaching* it is a capture). The captures this file's own tests
+# used to observe are gone; the reachability and identity guarantees they
+# were really pinning (no NATIVE BUG, same binding either way, one shared
+# compiled instance, identical result on every backend) all still hold.
 #
 # These fixtures are deliberately independent of lib/web.bot (a scratch
 # module plus throwaway test natives), so a future rewrite of emailish?'s
@@ -198,27 +212,41 @@ test module-fn-bridge-minimal-reproducer {module-fn bridge + module dependency +
 } -result {{value 12} {value 12}}
 
 # ---------------------------------------------------------------------------
-# Provenance: the caller captures the module function binding, never the
-# module function's own dependencies; the dependencies stay in the module
-# function's closure; the bridged reference still denotes the native's own
-# root binding (predicate identity) and records the module binding as its
-# `bridge`.
+# Provenance: MODULE-STATIC-RETAINED-VALUES.md changes what this section's
+# own title once meant. Before that milestone, a module function's own
+# module dependency was itself a lexical capture (the module function was
+# closure-valued), so hir::BridgeProvenance had to make every enclosing
+# block of a bridged reference capture the module function's own binding
+# too, exactly like an ordinary qualified reference already did -- "the
+# dependencies stay in the module function's closure" described a real
+# capture chain two levels deep (caller captures the module function,
+# which itself captures its own dependency).
+#
+# Now neither level is a capture. bridgefix::offset/scale/marks are module-
+# static references from inside one_dep/two_deps/is_marked's own bodies,
+# never captures, so one_dep/two_deps/is_marked are envless outright; and
+# a bridged reference to an envless module function is, symmetrically,
+# also a module-static reference (hir::BridgeProvenance's own `static`
+# routing, mirroring hir::resolve::Capture), never a capture either. So
+# every capture set below is empty -- the bridge's own provenance recording
+# (`bridge` on the reference, checked by module-fn-bridge-reference-keeps-
+# root-identity below) is unchanged; only the storage class it feeds is.
 
-test module-fn-bridge-caller-captures-only-module-function {a caller captures bridgefix::one_dep (the bridged function) and never bridgefix::offset (its dependency); one_dep captures offset itself} -body {
+test module-fn-bridge-caller-captures-only-module-function {a caller of bridgefix::one_dep captures nothing: neither the bridged function nor its own module dependency (offset) is ever a lexical capture any more} -body {
     set hir [native::buildProgramHir [callerShape toplevel-fn probe_one]]
     list [capturesOf $hir check] [capturesOf $hir bridgefix::one_dep]
-} -result {bridgefix::one_dep bridgefix::offset}
+} -result {{} {}}
 
-test module-fn-bridge-transitive-dependencies-stay-in-module {a transitive chain (transitive -> is_marked -> marks) keeps each dependency in its own definer's closure; the caller captures only the bridged function} -body {
+test module-fn-bridge-transitive-dependencies-stay-in-module {a transitive chain (transitive -> is_marked -> marks) captures nothing at the module level any more; inner still captures its own genuine activation-local value (s), coexisting with its (now static, not captured) reference to bridgefix::transitive} -body {
     set hir [native::buildProgramHir [callerShape nested-capturing probe_transitive]]
     list [capturesOf $hir outer] [capturesOf $hir inner] \
         [capturesOf $hir bridgefix::transitive] [capturesOf $hir bridgefix::is_marked]
-} -result {bridgefix::transitive {s bridgefix::transitive} bridgefix::is_marked bridgefix::marks}
+} -result {{} s {} {}}
 
-test module-fn-bridge-two-dependencies-not-copied {two module dependencies are captured by the module function only, in its own order, never by the caller} -body {
+test module-fn-bridge-two-dependencies-not-copied {two module dependencies (scale, offset) are module-static references from inside two_deps' own body, never captures -- and neither is the bridged reference to two_deps itself, from its caller} -body {
     set hir [native::buildProgramHir [callerShape toplevel-fn probe_two]]
     list [capturesOf $hir check] [capturesOf $hir bridgefix::two_deps]
-} -result {bridgefix::two_deps {bridgefix::scale bridgefix::offset}}
+} -result {{} {}}
 
 test module-fn-bridge-reference-keeps-root-identity {the bridged reference's own binding is still the native's root binding; its bridge is the module function's binding} -body {
     set hir [native::buildProgramHir [callerShape toplevel-fn probe_one]]
@@ -249,7 +277,7 @@ test module-fn-bridge-envless-target-caller-stays-envless {a caller of an enviro
 # into another lexical block never clones or re-identifies the module
 # function.
 
-test module-fn-bridge-three-callers-one-implementation {three unrelated block callers (a top-level function, a nested non-capturing function, a nested capturing closure) share one compiled bridgefix::two_deps instance} -body {
+test module-fn-bridge-three-callers-one-implementation {three unrelated block callers (a top-level function, a nested non-capturing function, a nested capturing closure) share one compiled bridgefix::two_deps instance (-tiny-leaf-inline-opt 0: every call site here passes a statically Int argument, so the default-on tiny-leaf inliner would otherwise absorb this single-instance function entirely -- an orthogonal, lower-level concern than the cross-call-site sharing this test itself inspects). two_deps is now envless (spec item 49: a module function is not automatically a closure merely because it lives in a module), so its own single used instance is bridgefix::two_deps<int>, not <generic>: nothing here ever needed dynamic dispatch through a closure value in the first place -- that was an architectural artifact of the old capture representation, not a fact about these three call sites' own arguments} -body {
     set p {
         {bind a {block {s} {call {ref probe_two} {ref s}}}}
         {bind b {block {s} {bind inner {block {t} {call {ref probe_two} {ref t}}}} {call {ref inner} {ref s}}}}
@@ -259,20 +287,28 @@ test module-fn-bridge-three-callers-one-implementation {three unrelated block ca
     set hir [native::buildProgramHir $p]
     set spec [hir::specialize::analyze $hir]
     set labels [lsearch -all -inline [lmap id [dict get $spec used] {hir::specialize::label $spec $id}] bridgefix::two_deps*]
-    list [regexp -all {func \d+ "bridgefix::two_deps"} [native::nir $hir]] $labels [fourWay $p]
-} -result {1 bridgefix::two_deps<generic> {value {[13, 16, 19]}}}
+    list [regexp -all {func \d+ "bridgefix::two_deps"} [native::nir $hir -tiny-leaf-inline-opt 0]] $labels [fourWay $p]
+} -result {1 bridgefix::two_deps<int> {value {[13, 16, 19]}}}
 
 # The bridged function's instance family depends only on argument facts,
-# never on where the call sits: every shape has the one shared generic
-# instance (the module closure itself is materialized at module init), with
-# an identical compiled header everywhere, and an Int instance exactly when
-# some call passes a statically Int argument (the root and branch shapes'
-# literals, the returned closure's s + k). Block callers pass a parameter of
-# a generic-keyed closure (it captures the module function's closure, and
-# hir::specialize keys every closure with a non-Int capture generically) --
-# exactly the split an ordinary qualified call bridgefix::two_deps(s) makes
-# from the same places (module-fn-bridge-matches-qualified-call-instances).
-test module-fn-bridge-identity-independent-of-caller-shape {the bridged function's instances follow argument facts only; its generic instance's compiled header is identical from every caller shape} -body {
+# never on where the call sits.
+#
+# Before MODULE-STATIC-RETAINED-VALUES.md, every shape *also* carried a
+# shared generic instance, whether or not any call site there actually
+# needed dynamic dispatch: two_deps was closure-valued, so hir::specialize
+# conservatively kept its generic entry point reachable as a value from
+# everywhere. Now two_deps is envless (its own module dependencies,
+# scale/offset, are static references, never captures), so there is no
+# closure value to keep a generic fallback reachable for in the first
+# place -- every one of these six caller shapes passes a provably Int
+# argument at every call site (root/branch's own literals, the nested
+# shapes' plain parameter forwarding, the returned closure's s + k), so
+# each has exactly one used instance, bridgefix::two_deps<int>, and no
+# generic instance exists anywhere at all. This is the argument-facts-only
+# property the test's own title describes, now true without qualification
+# -- the old generic instance was an artifact of the closure representation,
+# never a fact about these calls' own arguments.
+test module-fn-bridge-identity-independent-of-caller-shape {the bridged function's instances follow argument facts only: every caller shape here proves an Int argument, so every shape has exactly one used instance (bridgefix::two_deps<int>) and no generic instance exists at all -- unlike before this milestone, when the closure representation forced a generic fallback everywhere regardless of argument facts} -body {
     set result {}
     set genericHeaders {}
     foreach shape $::callerShapes {
@@ -287,13 +323,13 @@ test module-fn-bridge-identity-independent-of-caller-shape {the bridged function
         }
     }
     list $result [lsort -unique $genericHeaders]
-} -result {{root {bridgefix::two_deps<generic> bridgefix::two_deps<int>} toplevel-fn bridgefix::two_deps<generic> nested-noncapturing bridgefix::two_deps<generic> nested-capturing bridgefix::two_deps<generic> branch {bridgefix::two_deps<generic> bridgefix::two_deps<int>} returned-closure {bridgefix::two_deps<generic> bridgefix::two_deps<int>}} {{"bridgefix::two_deps" params=1 env=1 pnames="v" captures=2 instance="generic" }}}
+} -result {{root bridgefix::two_deps<int> toplevel-fn bridgefix::two_deps<int> nested-noncapturing bridgefix::two_deps<int> nested-capturing bridgefix::two_deps<int> branch bridgefix::two_deps<int> returned-closure bridgefix::two_deps<int>} {}}
 
 # ---------------------------------------------------------------------------
 # Ordinary module-call control: the bridged spelling sees exactly the
 # lexical environment an ordinary qualified call from the same place sees.
 
-test module-fn-bridge-matches-qualified-call {check(s) calling bridgefix::one_dep(s) directly (surface module call) and through probe_one (bridge) capture the same binding and agree} -body {
+test module-fn-bridge-matches-qualified-call {check(s) calling bridgefix::one_dep(s) directly (surface module call) and through probe_one (bridge) agree: neither captures anything (one_dep is envless -- its own module dependency, offset, is a static reference), and both compute the identical result} -body {
     set main [file join $::bridgeLibrary main.bot]
     set ch [open $main w]
     puts -nonewline $ch "fn check(s):\n    bridgefix::one_dep(s)\ncheck(2)\n"
@@ -303,9 +339,9 @@ test module-fn-bridge-matches-qualified-call {check(s) calling bridgefix::one_de
     list [capturesOf $direct check] [capturesOf $bridged check] \
         [lindex [outcomeUnder cranelift [hir::lower $direct]] 1] \
         [lindex [outcomeUnder cranelift [callerShape toplevel-fn probe_one]] 1]
-} -result {bridgefix::one_dep bridgefix::one_dep 12 12}
+} -result {{} {} 12 12}
 
-test module-fn-bridge-matches-qualified-call-instances {the bridged spelling and an ordinary qualified call, from the same program root and function caller, produce the identical instance family} -body {
+test module-fn-bridge-matches-qualified-call-instances {the bridged spelling and an ordinary qualified call, from the same program root and function caller, produce the identical instance family: two_deps is envless now (no forced generic fallback -- see module-fn-bridge-identity-independent-of-caller-shape above), so check itself, calling it with a plain parameter forward, is a provably-Int instance too, not generic} -body {
     set main [file join $::bridgeLibrary main2.bot]
     set ch [open $main w]
     puts -nonewline $ch "fn check(s):\n    bridgefix::two_deps(s)\n\[check(1), bridgefix::two_deps(3)\]\n"
@@ -320,7 +356,7 @@ test module-fn-bridge-matches-qualified-call-instances {the bridged spelling and
         lsearch -all -inline -regexp [lmap id [dict get $spec used] {hir::specialize::label $spec $id}] \
             {^(bridgefix::two_deps|check)<}
     }
-} -result {{bridgefix::two_deps<generic> bridgefix::two_deps<int> check<generic>} {bridgefix::two_deps<generic> bridgefix::two_deps<int> check<generic>}}
+} -result {{bridgefix::two_deps<int> check<int>} {bridgefix::two_deps<int> check<int>}}
 
 # ---------------------------------------------------------------------------
 # Negative controls: the fix does not make module bindings lexically

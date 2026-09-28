@@ -121,7 +121,7 @@ proc hir::construction::RegionInfo {hir spec id} {
     foreach e $exprs {
         switch -- [hir::kind $view $e] {
             block {
-                foreach b [hir::get $view $e captures] {
+                foreach b [hir::externalRefs $view $e] {
                     dict set captured $b 1
                 }
                 # A nested block's body is its own region.
@@ -203,7 +203,7 @@ proc hir::construction::Uses {view b loops e} {
             return [list -1 [Max $n $a]]
         }
         block {
-            return [list [expr {$b in [hir::get $view $e captures] ? 2 : 0}] -1]
+            return [list [expr {$b in [hir::externalRefs $view $e] ? 2 : 0}] -1]
         }
         call {
             return [SeqUses $view $b $loops [hir::children $view $e]]

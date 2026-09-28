@@ -7,6 +7,14 @@
 //!   ss_limit  end of the shadow stack
 //!   consts    the program's constant table (strings, big Ints, natives,
 //!             closures of environment-free functions)
+//!
+//! Generated code also reads/writes `statics_ptr` at VM_STATICS_OFFSET (a
+//! fixed offset, not one of the first three, but a raw pointer read/written
+//! the same way): module-static storage, MODULE-STATIC-RETAINED-VALUES.md.
+//! Unlike `consts` (read-only, compile-time-derived data), a static slot is
+//! written once by generated code itself (module initialization) and read
+//! any number of times afterward -- see `install_statics` and `statics_ptr`'s
+//! own doc.
 
 use super::error::RtError;
 use super::framemap::ProgramMap;
@@ -75,6 +83,28 @@ pub struct Vm {
     /// the same I64 op it already uses for `native_roots_ptr`, without a
     /// second width.
     pub native_roots_len: u64,
+    /// Module-static storage (MODULE-STATIC-RETAINED-VALUES.md): the base
+    /// address of `statics_table` below, read by generated code
+    /// (codegen::clif's StaticGet/StaticSet, at VM_STATICS_OFFSET) exactly
+    /// like `consts` above, except mutable -- a module-static slot is
+    /// written once, by the program function's own module-initialization
+    /// code, then only ever read afterward. Recomputed whenever
+    /// `install_statics` (re)allocates `statics_table`; never written by
+    /// anything else, so it always agrees with `statics_table.as_mut_ptr()`.
+    pub statics_ptr: *mut Value,
+    /// The module-static slots themselves: one per module-static binding
+    /// this program declares (nir::Program's own `statics` count), each a
+    /// plain Value, pre-filled with UNIT until generated code overwrites it.
+    /// A GC root for as long as this Vm exists: scanned unconditionally by
+    /// `collect_with` below, exactly like `temp_roots` -- module/program
+    /// lifetime, never cleared by `reset` (see that method's own doc: each
+    /// run's own module-initialization code overwrites every slot it can
+    /// possibly read from before anything reads it, in the same left-to-
+    /// right order the interpreter and Tcl compiler already use, so a
+    /// slot's previous run's value is retained a little longer than
+    /// strictly necessary -- safe, never a use-after-free -- rather than
+    /// ever observed stale).
+    statics_table: Vec<Value>,
     ss_base: *mut Value,
     shadow: Vec<Value>,
     pub heap: Heap,
@@ -115,6 +145,7 @@ pub const VM_CONSTS_OFFSET: i32 = offset_of!(Vm, consts) as i32;
 pub const VM_ALLOC_SITE_OFFSET: i32 = offset_of!(Vm, alloc_site) as i32;
 pub const VM_NATIVE_ROOTS_PTR_OFFSET: i32 = offset_of!(Vm, native_roots_ptr) as i32;
 pub const VM_NATIVE_ROOTS_LEN_OFFSET: i32 = offset_of!(Vm, native_roots_len) as i32;
+pub const VM_STATICS_OFFSET: i32 = offset_of!(Vm, statics_ptr) as i32;
 
 impl Vm {
     pub fn new(info: Rc<ProgramInfo>, alloc_mode: AllocMode) -> Box<Vm> {
@@ -133,6 +164,8 @@ impl Vm {
             alloc_site: 0,
             native_roots_ptr: std::ptr::null_mut(),
             native_roots_len: 0,
+            statics_ptr: std::ptr::null_mut(),
+            statics_table: Vec::new(),
             ss_base: base,
             shadow,
             heap: Heap::new(),
@@ -163,6 +196,19 @@ impl Vm {
     /// Installs this program's stack-map table (see `framemap`'s own doc).
     pub fn set_framemap(&mut self, framemap: Rc<ProgramMap>) {
         self.framemap = framemap;
+    }
+
+    /// Sizes module-static storage to COUNT slots (nir::Program's own
+    /// `statics`), called once per compiled program, before any generated
+    /// code can run (mirrors `set_constants`). Every slot starts UNIT: a
+    /// harmless, non-pointer placeholder no reference can observe before
+    /// generated code overwrites it (module initialization always runs, in
+    /// source order, before any code that could read a given slot -- MODULE-
+    /// STATIC-RETAINED-VALUES.md). `statics_table` is never resized again
+    /// after this, so `statics_ptr` stays valid for the Vm's whole lifetime.
+    pub fn install_statics(&mut self, count: usize) {
+        self.statics_table = vec![UNIT; count];
+        self.statics_ptr = self.statics_table.as_mut_ptr();
     }
 
     pub fn fail(&mut self, error: RtError) -> Value {
@@ -247,7 +293,8 @@ impl Vm {
             .chain(native.iter().copied())
             .chain(native_frame_roots)
             .chain(error_values)
-            .chain(self.temp_roots.iter().copied());
+            .chain(self.temp_roots.iter().copied())
+            .chain(self.statics_table.iter().copied());
         self.heap.collect(roots.collect::<Vec<_>>().into_iter(), &mut self.metrics, reason);
     }
 
@@ -257,6 +304,14 @@ impl Vm {
     /// collection below runs, so that collection's own effect (releasing
     /// the previous run's objects) is visible in the new run's report as
     /// its first GC cycle, not folded into stale totals.
+    ///
+    /// `statics_table` is deliberately left untouched: it is module/program-
+    /// lifetime storage, not per-run storage (`statics_ptr`'s own doc). The
+    /// next run's own module-initialization code overwrites every slot it
+    /// can possibly read from, in the same order it always has, before
+    /// anything in that run reads it -- so a stale previous-run value is
+    /// simply retained as an ordinary (harmless) GC root a little longer,
+    /// exactly like this same collection call's other roots.
     pub fn reset(&mut self) {
         self.ss_top = self.ss_base;
         self.native_roots_ptr = std::ptr::null_mut();

@@ -412,7 +412,7 @@ proc hir::stringregion::Bindings {hir spec regionOf consumingParams} {
         foreach e $exprs {
             switch -- [hir::kind $view $e] {
                 block {
-                    foreach b [hir::get $view $e captures] {
+                    foreach b [hir::externalRefs $view $e] {
                         dict set captured $b 1
                     }
                 }

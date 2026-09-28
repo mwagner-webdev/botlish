@@ -688,6 +688,21 @@ proc hir::types::BindingType {hir ctx b} {
         }
         return [ofValue $value]
     }
+    if {[hir::isModuleBinding $hir $b]} {
+        # A module-static reference (MODULE-STATIC-RETAINED-VALUES.md) is
+        # never itself instance-varying -- unlike a genuine capture, whose
+        # type can differ per creation and is therefore seeded per instance
+        # into `ctx types` above, a module-static binding has exactly one
+        # program-lifetime value, typed once by the ordinary semantic pass
+        # (hir::types::infer), the same in every instance's own per-region
+        # re-inference (hir/specialize.tcl's Reanalyze/inferRegion). Without
+        # this, a module binding that is not itself a Block (ForwardType
+        # only ever recovers a *callable*'s forward type, "any" otherwise)
+        # would silently widen to `any` here merely because it is no longer
+        # captured -- exactly the kind of correctness bug spec item 24
+        # permits fixing, never a specialization-policy change of its own.
+        return [hir::bindingType $hir $b]
+    }
     return [ForwardType $hir $b]
 }
 

@@ -117,12 +117,20 @@ pub struct CompiledProgram {
     /// addresses available, the only point they exist. `Vm::set_framemap`
     /// gives the collector (runtime/framewalk.rs) its own `Rc` clone.
     pub framemap: std::rc::Rc<framemap::ProgramMap>,
+    /// This program's module-static slot count (nir::Program's own
+    /// `statics`, MODULE-STATIC-RETAINED-VALUES.md): `install_constants`
+    /// sizes the Vm's static storage to this, once, alongside the ordinary
+    /// constant table.
+    statics: u32,
     /// Keeps the machine code alive.
     _module: JITModule,
 }
 
 impl CompiledProgram {
-    /// Builds the VM's constant table: static objects for this program.
+    /// Builds the VM's constant table (static objects for this program) and
+    /// sizes its module-static slot table (MODULE-STATIC-RETAINED-VALUES.md)
+    /// to match -- both program-lifetime storage, installed together, once,
+    /// before any generated code can run.
     pub fn install_constants(&self, vm: &mut Vm) {
         let mut table = Vec::with_capacity(self.pool.entries.len());
         let mut statics = Vec::new();
@@ -157,6 +165,7 @@ impl CompiledProgram {
             statics.push(raw);
         }
         vm.set_constants(table, statics);
+        vm.install_statics(self.statics as usize);
     }
 }
 
@@ -264,6 +273,7 @@ impl CraneliftJit {
             code_sizes,
             sites,
             framemap: std::rc::Rc::new(framemap),
+            statics: program.statics,
             _module: module,
         })
     }

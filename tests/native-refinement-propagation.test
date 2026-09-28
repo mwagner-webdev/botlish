@@ -99,21 +99,29 @@ test native-refinement-propagation-refined-checks-parity {refined-checks.ir's va
     list [lindex [outcomeUnder compile $exprs] 1] [lindex [outcomeUnder cranelift $exprs] 1]
 } -result {{[400, 0]} {[400, 0]}}
 
-# R2.a.1 (R2A1-MODULE-FN-BRIDGE-REACHABILITY.md): "check" is still exactly
-# one instance, but now its generic one rather than one Int/str-keyed
-# specialization: web::emailish? captures its module-retained
-# local_extra_chars (a closure), check captures web::emailish?'s binding
+# R2.a.1 (R2A1-MODULE-FN-BRIDGE-REACHABILITY.md) made "check" exactly one
+# instance, but its generic one rather than one Int/str-keyed
+# specialization: web::emailish? captured its module-retained
+# local_extra_chars (a closure), check captured web::emailish?'s binding
 # to reach it through the emailish? bridge (as a qualified call would), and
 # hir::specialize keys every closure with a non-Int capture generically.
-# What this test guards -- refinement propagation never forks "check" into
-# several instances -- is unchanged; UriQueryValue?(q) is still eliminated
-# statically (native-refinement-propagation-refined-checks-runs-natively).
-test native-refinement-propagation-refined-checks-no-explosion {"check" gets exactly one instance: named-refinement propagation widens that one instance's parameter analysis, it does not fork new instances (spec's own §14/§18) -- generic since R2.a.1, see comment above} -body {
+#
+# MODULE-STATIC-RETAINED-VALUES.md recovers the specialization: local_extra
+# _chars is a module-static reference now, never a capture, so
+# web::emailish? no longer captures it (envless outright) and check no
+# longer captures web::emailish? either -- check<int, int, str, str>
+# specializes normally (emailish-predicate-check-n-control pins the
+# recovered entry-range fact this restores, [0, 400]). What this test
+# guards -- refinement propagation never forks "check" into several
+# instances -- is unchanged either way: one instance, specialized instead
+# of generic; UriQueryValue?(q) is still eliminated statically (native-
+# refinement-propagation-refined-checks-runs-natively).
+test native-refinement-propagation-refined-checks-no-explosion {"check" gets exactly one instance: named-refinement propagation widens that one instance's parameter analysis, it does not fork new instances (spec's own §14/§18) -- specialized (not generic) since MODULE-STATIC-RETAINED-VALUES.md recovered check<int, int, str, str>, see comment above} -body {
     set exprs [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]
     set hir [nativeHirOf $exprs]
     set summary [hir::specialize::summary $hir [hir::specialize::analyze $hir]]
     dict get $summary perFunction check
-} -result {generic 1 specializations 0}
+} -result {generic 0 specializations 1}
 
 # ---------------------------------------------------------------------------
 # §3: the safety model. A single trusted caller lets the fact through; a

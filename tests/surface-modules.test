@@ -224,7 +224,7 @@ fn word(n):
     }
 } -result {{value {[42, "ok", [1, 2], [["a"], ["b"]], [3, 4], ["b"]]} {}} 1 2 1}
 
-test surface-modules-immutable-value-once-native {a retained List is built once at startup and passed directly to two calls} -body {
+test surface-modules-immutable-value-once-native {a retained List is built once at startup and passed directly to two calls; MODULE-STATIC-RETAINED-VALUES.md: constants::digits is a module-static slot, read through "staticget", never a flattened trailing parameter (blockescape's own de-closure conversion never applies: constants::digit is envless outright, since a module-static reference is never a capture in the first place)} -body {
     withScratchLibrary {
         set module [writeModule $dir constants {namespace constants
 digits = ["0", "1"]
@@ -244,11 +244,12 @@ fn digit(n):
             }
         }
         list [regexp -all {op listnew} $nir] \
-            [regexp {func [0-9]+ "constants::digit" params=2 env=0 .*pnames="n constants::digits"} $nir] \
+            [regexp {func [0-9]+ "constants::digit" params=1 env=0 [^\n]*pnames="n" captures=0} $nir] \
+            [regexp -all {staticget} $nir] \
             [regexp {closure|callenv} $nir] [regexp -all {call [0-9]+ } $nir] \
             $moduleLists [dict get $report byKind List allocations]
     }
-} -result {2 1 0 2 1 2}
+} -result {2 1 1 0 2 1 2}
 
 test surface-modules-value-dependencies-initialize-first {a dependency module value initializes before a dependent module initializer reads it} -body {
     withScratchLibrary {
@@ -390,35 +391,24 @@ proc outcomeUnderValue {backend exprs} {
 # ASCII-AND-URI-UNRESERVED.md: is_unreserved moved out of uri_escape_text
 # (it is now the top-level web::is_unreserved) and web.bot gained its own
 # retained additional_unreserved_chars = byte::set(['-', '.', '_', '~']).
-# That changes three of this test's own startup-shape numbers, all for
-# the same underlying reason -- is_unreserved is no longer a value nested
-# inside uri_escape_text's own closure, but a sibling module value
-# uri_escape_text now captures separately:
-#   - 3 "op listnew", not 1: hex_digits' own list (unchanged); the
-#     four-char ['-', '.', '_', '~'] list byte::set consumes; and byte::set's
-#     own internal accumulator list (lib/byte.bot's `loop c in chars:
-#     from_int(char::codepoint(c))`, unrelated to hex_digits/is_unreserved
-#     but part of the same module-init sequence now that `byte::set` is
-#     loaded). STATIC-COMPLETION-PROOFS.md's call-specific completion proof
-#     restored the clean, handler-free module initializer
-#     (`additional_unreserved_chars = byte::set(['-', '.', '_', '~'])`, no
-#     `on` clauses -- EXPLICIT-ERROR-COMPLETIONS.md's own two placeholder-
-#     fallback handler bodies, each with its own one-element `[placeholder]`
-#     list, are gone: they were never reachable, and are no longer even
-#     present in the source to lower), so this count is 2 lower than that
-#     milestone's own count, not higher than the pre-error-milestone
-#     baseline of 3.
-#   - uri_escape_text's own closure captures=2, not 1: hex_digits (as
-#     before) AND the is_unreserved closure (esc_char's one call site).
-# hexLists, uriStartupBlocks (one closure for uri_escape_text ITSELF,
-# regardless of what it captures), envless, and the closure/callenv
-# existence checks are all unaffected.
-# R2.a.1 (R2A1-MODULE-FN-BRIDGE-REACHABILITY.md): 4 "op listnew", not 3 --
-# web.bot's own local_extra_chars = immutable_set_from_list([".", "_", "%",
-# "+", "-"]) is module-retained again, so its five-string literal list is
-# one more module-init List (built once, in the program function, like the
-# three above). Nothing about uriEscape's own startup shape changes.
-test surface-modules-uri-hex-digits-startup {web::hex_digits is one startup List; uri_escape_text has one startup closure, now over two captures (hex_digits and is_unreserved), and static callenv access} -body {
+# R2.a.1 (R2A1-MODULE-FN-BRIDGE-REACHABILITY.md): 4 "op listnew" --
+# hex_digits' own list; the four-char ['-', '.', '_', '~'] list byte::set
+# consumes; byte::set's own internal accumulator list; and web.bot's own
+# local_extra_chars = immutable_set_from_list([".", "_", "%", "+", "-"])'s
+# five-string literal list -- all built once, in the program function's own
+# module-initialization sequence.
+#
+# MODULE-STATIC-RETAINED-VALUES.md changes this test's own startup-shape
+# expectation completely: hex_digits, additional_unreserved_chars and
+# is_unreserved (itself a module binding, referenced from uri_escape_text
+# exactly like a module *data* value) are module-static references, never
+# lexical captures, so uri_escape_text no longer acquires a closure
+# environment merely to reach them -- it is now fully envless (env=0,
+# captures=0), and there is no closure/callenv instruction anywhere in its
+# own startup or call path at all: is_unreserved (itself now envless, for
+# the identical reason) resolves as a plain constant-pool fnvalue, and
+# hex_digits/additional_unreserved_chars resolve as "staticget" reads.
+test surface-modules-uri-hex-digits-startup {web::hex_digits is one startup List; uri_escape_text is fully envless (module-static references are never captures), with no closure/callenv anywhere in its own startup or call path} -body {
     core::loadLibrary web
     set hir [native::buildProgramHir {
         {bind s {const str "a b"}}
@@ -428,16 +418,11 @@ test surface-modules-uri-hex-digits-startup {web::hex_digits is one startup List
     set nir [dict get $lowered text]
     set report [native::allocationReport $hir sites]
     set hexLists 0
-    set uriStartupBlocks 0
     foreach site [dict get $report sites] {
         set location [dict get $site location]
         if {[dict get $site operation] eq "listnew"
                 && [string match {*hex_digits=/value} [dict get $location node]]} {
             incr hexLists [dict get $site allocations]
-        }
-        if {[dict get $site operation] eq "closure"
-                && [dict get $location node] eq "uri_escape_text()/block"} {
-            incr uriStartupBlocks [dict get $site allocations]
         }
     }
     set uriInfo {}
@@ -447,10 +432,11 @@ test surface-modules-uri-hex-digits-startup {web::hex_digits is one startup List
         }
     }
     list [regexp -all {op listnew} $nir] $hexLists \
-        [regexp {func [0-9]+ "web::uri_escape_text" params=1 env=1 .*captures=2} $nir] \
-        [dict get $uriInfo envless] $uriStartupBlocks \
+        [regexp {func [0-9]+ "web::uri_escape_text" params=1 env=0 [^\n]*captures=0} $nir] \
+        [dict get $uriInfo envless] \
+        [regexp -all {staticget} $nir] \
         [expr {[regexp -all {closure [0-9]+ } $nir] > 0}] [expr {[regexp -all {callenv [0-9]+ } $nir] > 0}]
-} -result {4 1 1 0 1 1 1}
+} -result {4 1 1 1 3 0 0}
 test surface-modules-uri-escape-native-parity {uriEscape's escaped text agrees interp vs. cranelift; only cranelift drops evidence} -body {
     core::loadLibrary web
     set exprs {
@@ -535,7 +521,7 @@ test surface-modules-c2-values {wrapper(5)=8 (5 + list_length(retained)), wrappe
     }
 } -result {[8, 8, 6, 13]}
 
-test surface-modules-c2-capture-set {capture-set inspection, not just the absence of a crash: wrapper's own HIR captures now include counter::module_fn (a "value" capture -- it needs the closure's actual environment -- with the closure-env runtime requirement), wrapper2 reaches the same module closure transitively by capturing wrapper (itself now non-envless) the very same way, and control_wrapper's capture of the envless counter::no_captures stays a "block" capture with no environment requirement at all (no over-capture: calling an environment-free module function does not suddenly force one)} -body {
+test surface-modules-c2-capture-set {capture-set inspection, not just the absence of a crash: MODULE-STATIC-RETAINED-VALUES.md changes this completely from the old C2 fix's own expectation. counter::module_fn no longer captures counter::retained (a module-static reference, never a capture) so module_fn is now envless outright, and wrapper's own qualified reference to it (counter::module_fn(x)) is, symmetrically, ALSO a module-static reference, never a capture -- wrapper's own capture set and requirements are both empty. wrapper2's plain (unqualified, non-module) reference to wrapper is an ordinary lexical capture as before, but now of an envless target: "block" class, no environment requirement. control_wrapper's qualified reference to counter::no_captures is, for the identical reason as wrapper's own, a module-static reference too -- its capture set is also empty (no over-capture either way: referencing a module function, envless or not, never forces an environment)} -body {
     withScratchLibrary {
         set main [writeC2Fixture $dir]
         set hir [surface::readProgramFile $main -strict 0]
@@ -550,20 +536,21 @@ test surface-modules-c2-capture-set {capture-set inspection, not just the absenc
             [lmap c [dict get $control captures] {dict filter $c key name class}] \
             [dict get $control requirements]
     }
-} -result {{{name counter::module_fn class value}} closure-env {{name wrapper class value}} closure-env {{name counter::no_captures class block}} {}}
+} -result {{} {} {{name wrapper class block}} {} {} {}}
 
-test surface-modules-c2-native-env {the structural counterpart of the capture-set check above, read from what native/lower.tcl actually emits. hir::aot's own (pre-lowering) classification calls this "runtime: closure-env" (previous test) -- an honest upper bound -- but native lowering's own pre-existing, unmodified hir::blockescape pass (de-closure conversion, this file's header) then optimizes the heap closure away entirely: module_fn/wrapper/wrapper2 are all bound in the SAME "program" region (module-scope and program-top-level function binds are ordinary flat statements of one shared region -- this file's own header comment, and hir/resolve.tcl's), every reference among them is an exact direct call, so blockescape is free to pass counter::retained on as an ordinary trailing parameter at each call site instead (env=0, captures=0, an extra "counter::retained" pname) -- item 8's "or otherwise gain an environment". control_wrapper needs no such parameter at all: counter::no_captures is envless, so its capture contributes nothing (native/lower.tcl's CaptureList/BindingAccess, the same "fnvalue" filtering exercised below for web::is_unreserved)} -body {
+test surface-modules-c2-native-env {the structural counterpart of the capture-set check above, read from what native/lower.tcl actually emits: wrapper, wrapper2 and control_wrapper are all fully envless now (env=0, captures=0, no flattened trailing parameter either -- there is nothing left to flatten: a module-static reference was never a capture in the first place, so hir::blockescape's own de-closure conversion has nothing to do here). module_fn itself reads counter::retained through a module-static slot (native/lower.tcl's Access/StaticSlot), never a captured/flattened value} -body {
     withScratchLibrary {
         set main [writeC2Fixture $dir]
         set hir [surface::readProgramFile $main -strict 0]
         set nir [native::nir $hir]
-        list [regexp {func [0-9]+ "wrapper" params=2 env=0 [^\n]*pnames="x counter::retained" captures=0} $nir] \
-            [regexp {func [0-9]+ "wrapper2" params=2 env=0 [^\n]*pnames="x counter::retained" captures=0} $nir] \
-            [regexp {func [0-9]+ "control_wrapper" params=1 env=0 [^\n]*pnames="x" captures=0} $nir]
+        list [regexp {func [0-9]+ "wrapper" params=1 env=0 [^\n]*pnames="x" captures=0} $nir] \
+            [regexp {func [0-9]+ "wrapper2" params=1 env=0 [^\n]*pnames="x" captures=0} $nir] \
+            [regexp {func [0-9]+ "control_wrapper" params=1 env=0 [^\n]*pnames="x" captures=0} $nir] \
+            [regexp {func [0-9]+ "counter::module_fn" params=1 env=0 [^\n]*captures=0} $nir]
     }
-} -result {1 1 1}
+} -result {1 1 1 1}
 
-test surface-modules-c2-existing-corpus-unaffected {the C2 fix changes web::is_unreserved's own raw HIR captures (it now also names ascii::is_alphanumeric, a qualified reference from inside its body) but not what native lowering actually emits for it: ascii::is_alphanumeric is itself envless, so it is filtered to a no-value "fnvalue" access (native/lower.tcl's CaptureList/BindingAccess) exactly as an ordinary same-module call to an envless function already was before this fix (hir-aot-22-style, and this file's own uri-escape test above) -- is_unreserved's own NIR keeps exactly its one real (List-valued) capture, byte-identical to before the fix (see M0-MODULE-CLOSURE-AND-URI-BASELINE.md's before/after corpus diff)} -body {
+test surface-modules-c2-existing-corpus-unaffected {the C2 fix changed web::is_unreserved's own raw HIR captures to also name ascii::is_alphanumeric (a qualified reference from inside its body); MODULE-STATIC-RETAINED-VALUES.md changes this further still: both ascii::is_alphanumeric and web::additional_unreserved_chars are module-scope bindings, so neither is a capture any more (module-static references instead) -- is_unreserved's own raw HIR capture set is now empty, and it is fully envless in the emitted NIR (env=0, captures=0), not merely "one real List-valued capture" as before this milestone} -body {
     set path [makeFile {web::is_unreserved(45)} c2-corpus-unaffected.bot]
     try {
         set hir [surface::readProgramFile $path -strict 0]
@@ -575,10 +562,10 @@ test surface-modules-c2-existing-corpus-unaffected {the C2 fix changes web::is_u
             }
         }
         list [lsort $captureNames] \
-            [regexp {func [0-9]+ "web::is_unreserved" params=1 env=1[^\n]*captures=1} [dict get $nir text]]
+            [regexp {func [0-9]+ "web::is_unreserved" params=1 env=0[^\n]*captures=0} [dict get $nir text]]
     } finally {
         removeFile c2-corpus-unaffected.bot
     }
-} -result {{ascii::is_alphanumeric web::additional_unreserved_chars} 1}
+} -result {{} 1}
 
 cleanupTests

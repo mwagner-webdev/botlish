@@ -155,6 +155,15 @@ namespace eval native::lower {
     variable captureLists {}
     variable pending {}
     variable usedNatives {}
+    # Module-static storage (MODULE-STATIC-RETAINED-VALUES.md): BindingId ->
+    # its slot index in the Vm's own `statics` table (runtime::vm::Vm),
+    # assigned once per program, in first-reference order (StaticSlot),
+    # mirroring how ConstPool assigns constant-table indices. Every module-
+    # scope top-level binding (hir::isModuleBinding) that this program's own
+    # `bind`/`Ref` lowering ever actually touches gets exactly one slot,
+    # never duplicated across functions or across a binding's several
+    # references.
+    variable staticSlots {}
     # NAME -> small 1-indexed id (EXPLICIT-ERROR-COMPLETIONS.md), assigned
     # once per program in `program` below, in `hir::errorDecls`'s own
     # (already-sorted, program-unique) order: `fail`'s own Inst::Fail
@@ -1130,6 +1139,7 @@ proc native::lower::program {hirProgram args} {
     set envless [dict get $context envless]
     set captureLists [dict create]
     set usedNatives {}
+    set staticSlots [dict create]
     foreach e [dict keys [dict get $context exprs]] {
         if {$e ne "program" && $e ni $envless} {
             dict set captureLists $e [CaptureList $e]
@@ -1199,7 +1209,7 @@ proc native::lower::program {hirProgram args} {
         lappend infos [string map $map $info]
     }
 
-    set header [list "nir 1 call-effects=$callEffectsOpt"]
+    set header [list "nir 1 call-effects=$callEffectsOpt statics=[StaticCount]"]
     foreach name [lsort $usedNatives] {
         set meta [core::native::metadata $name]
         set kinds [lmap type [dict get $meta paramTypes] {
@@ -1289,6 +1299,26 @@ proc native::lower::CollectChecks {region} {
                 [dict get $fact error]
         }
     }
+}
+
+# The module-static slot index for binding B (hir::isModuleBinding),
+# assigning the next one on first reference: BindingId identity, never
+# name/namespace text, decides slot identity (hir::isModuleBinding's own
+# doc), so two spellings of the same binding (a qualified NAMESPACE::NAME
+# reference and a same-module unqualified one alike) always share one slot.
+proc native::lower::StaticSlot {b} {
+    variable staticSlots
+    if {![dict exists $staticSlots $b]} {
+        dict set staticSlots $b [dict size $staticSlots]
+    }
+    return [dict get $staticSlots $b]
+}
+
+# The number of module-static slots this program uses so far: the NIR
+# header's own `statics=N` (native::lower::program's final assembly).
+proc native::lower::StaticCount {} {
+    variable staticSlots
+    return [dict size $staticSlots]
 }
 
 # The bindings closure E stores, in order: its captures, except bindings
@@ -2505,13 +2535,26 @@ proc native::lower::Ref {fnVar e node want} {
             }
             return [list [Assign fn "cellget $where" $e] tagged]
         }
+        static {
+            # Module-static storage (MODULE-STATIC-RETAINED-VALUES.md): read
+            # through the Vm's own static slot table, never through this
+            # function's own closure environment -- reachable identically
+            # from any function, so there is no "unproven"/deferred-init
+            # check to make here: hir::modulebinding.tcl already proved this
+            # binding's initializer runs, exactly once, before any code that
+            # could reference it (the same guarantee a root binding already
+            # has, and the reason Ref's own "used before its binding" check
+            # above never applies to a module-static reference either).
+            return [list [Assign fn "staticget $where" $e] tagged]
+        }
     }
     throw {NATIVE BUG} "native lowering: bad access $access for $b ($e)"
 }
 
 # {reg %r} (a register holding the binding's value), {cell %c} (a register
-# holding its cell), {fnvalue F} or {self}: how the current function reaches
-# binding B, emitting a capture load if needed.
+# holding its cell), {static N} (module-static slot N), {fnvalue F} or
+# {self}: how the current function reaches binding B, emitting a capture
+# load if needed.
 proc native::lower::Access {fnVar b} {
     upvar 1 $fnVar fn
     variable hir
@@ -2533,6 +2576,21 @@ proc native::lower::Access {fnVar b} {
         self {
             return [list self]
         }
+    }
+    if {[hir::isModuleBinding $hir $b]} {
+        # Reachable from any function alike -- never a capture, whatever
+        # function or nesting depth this reference sits in (MODULE-STATIC-
+        # RETAINED-VALUES.md). Checked after the fnvalue/self cases above:
+        # an envless module *function* binding (every top-level module
+        # function, since its only possible external references are now
+        # root natives and other module statics, never a real lexical
+        # capture) already resolves for free through the ordinary constant-
+        # pool fnvalue mechanism above, wherever it is referenced -- this
+        # static-slot path is for a module *data* binding's actual retained
+        # value (a List/ImmutableSet/scalar/... -- never itself a Block
+        # constant), or the rare case BindingAccess does not otherwise
+        # resolve.
+        return [list static [StaticSlot $b]]
     }
     if {$region eq "program" || ![dict exists $captureLists $region]} {
         throw {NATIVE BUG} "native lowering: binding $b is not reachable from $region"
@@ -2670,6 +2728,22 @@ proc native::lower::Bind {fnVar e node} {
         Emit fn "cellset [lindex [dict get $fn locals $b] 1] $value" $e
     } else {
         dict set fn locals $b [list reg $value]
+    }
+    if {[hir::isModuleBinding $hir $b]} {
+        # Module initialization (MODULE-STATIC-RETAINED-VALUES.md): written
+        # once, here, at the exact point this binding's own initializer
+        # finishes evaluating -- exactly where module initialization already
+        # happens (this `bind` is always part of the program function's own
+        # body, in source/dependency order, whatever this program's own
+        # `hir::modules`; MODULE-BINDINGS.md's initialization-order
+        # guarantee is unchanged). Every other function reads it back
+        # through Access's own `static` case, never through a capture. A
+        # module *function* binding taking the "bound in statement
+        # position" fast path above returns before reaching here and needs
+        # no slot at all: every reference to an envless function resolves
+        # through the constant-pool fnvalue mechanism instead (Access's own
+        # fnvalue/self cases, checked first).
+        Emit fn "staticset [StaticSlot $b] $value" $e
     }
     return $value
 }
@@ -3343,6 +3417,7 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
             rawreg { set callee [TaggedOf fn $where] }
             fnvalue { set callee [Assign fn "fnvalue $where" $e] }
             self { set callee [Assign fn self $e] }
+            static { set callee [Assign fn "staticget $where" $e] }
             default {
                 throw {NATIVE BUG} "native lowering: module bridge binding $bridgeBinding has inaccessible storage $how"
             }

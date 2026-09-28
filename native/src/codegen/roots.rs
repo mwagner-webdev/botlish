@@ -218,8 +218,10 @@ fn def_use(inst: &Inst, params: u32) -> (Vec<Reg>, Vec<Reg>) {
         | Inst::SelfClosure { dst }
         | Inst::Capture { dst, .. }
         | Inst::Cell { dst } => (vec![*dst], vec![]),
+        Inst::StaticGet { dst, .. } => (vec![*dst], vec![]),
         Inst::Move { dst, src } => (vec![*dst], vec![*src]),
         Inst::CellSet { cell, value } => (vec![], vec![*cell, *value]),
+        Inst::StaticSet { value, .. } => (vec![], vec![*value]),
         Inst::CellGet { dst, cell } => (vec![*dst], vec![*cell]),
         Inst::CellCheck { dst, cell, .. } => (vec![*dst], vec![*cell]),
         Inst::Closure { dst, captures, .. } => (vec![*dst], captures.clone()),

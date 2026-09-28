@@ -357,17 +357,17 @@ proc paramViewTypeOf {hir analysis label i} {
     return [hir::types::show [dict get $instance args] $i]
 }
 
-test setcontains-m1-control-is-unreserved-param-view-unchanged {web::is_unreserved<generic>'s own declared-Byte parameter view (M1's own subject) is unaffected by M3} -body {
+test setcontains-m1-control-is-unreserved-param-view-unchanged {web::is_unreserved's own declared-Byte parameter view (M1's own subject) is unaffected by M3; MODULE-STATIC-RETAINED-VALUES.md changes only which instance carries it -- is_unreserved is envless now (additional_unreserved_chars is a module-static reference, never a capture), so its one used instance is web::is_unreserved<int>, not <generic>} -body {
     set hir [surface::readProgramFile [file join $::projectRoot bench uri-steady.bot]]
     set analysis [hir::specialize::analyze $hir]
-    paramViewTypeOf $hir $analysis {web::is_unreserved<generic>} 0
+    paramViewTypeOf $hir $analysis {web::is_unreserved<int>} 0
 } -result {int[Byte]}
 
-test setcontains-m2-control-esc-char-edge-still-direct-callenv {esc_char -> web::is_unreserved is still a direct callenv (M2's own subject), never callvalue, after M3} -body {
+test setcontains-m2-control-esc-char-edge-still-direct-callenv {esc_char -> web::is_unreserved is still a direct call (M2's own subject), never callvalue, after M3; MODULE-STATIC-RETAINED-VALUES.md: is_unreserved is envless now, so the call carries no environment (a plain "call", not "callenv") -- still a direct call of a statically known target, never a callvalue, which is the property M2 actually established} -body {
     set hir [surface::readProgramFile [file join $::projectRoot bench uri-steady.bot]]
     set nirText [dict get [native::lower::program $hir -tiny-leaf-inline-opt 0] text]
     regexp {func \d+ "esc_char[^\n]*\n(?:.*\n)*?end} $nirText body
-    list [regexp {= callenv \d+ } $body] [regexp {callvalue} $body]
+    list [regexp {= call \d+ } $body] [regexp {callvalue} $body]
 } -result {1 0}
 
 cleanupTests

@@ -316,20 +316,24 @@ test emailish-predicate-check-scanner-instance-count {each scanner helper (and w
 # check.n control: R2 did not disturb M9's own pre-existing improvement of
 # check's own `n` parameter ([0, 400], from check's Int-keyed instance).
 #
-# R2.a.1 (R2A1-MODULE-FN-BRIDGE-REACHABILITY.md) does lose it, and this pins
-# that honestly rather than hiding it: local_extra_chars is module-retained
-# again, so web::emailish? captures it and is a closure; check reaches
-# that closure the way any caller of a module closure does -- by capturing
-# web::emailish?'s binding (exactly what an ordinary qualified
-# web::emailish?(s) call from check would capture) -- so check itself is
-# now a closure with a non-Int capture, which hir::specialize's existing
-# code-growth bound for value-capturing closures keys generically
-# (check<generic>, parameters `any`), and M9's instance-entry Int fact has
-# no Int-keyed instance left to attach to. Recovering it is a specializer
-# policy question (a capture of a once-bound module binding is creation-
-# invariant), reported as R2.a.1's residual finding, not changed here.
+# R2.a.1 (R2A1-MODULE-FN-BRIDGE-REACHABILITY.md) lost it: local_extra_chars
+# was module-retained again, so web::emailish? captured it and was a
+# closure; check reached that closure the way any caller of a module
+# closure did -- by capturing web::emailish?'s binding -- so check itself
+# became a closure with a non-Int capture, forcing hir::specialize's
+# code-growth bound for value-capturing closures to key it generically
+# (check<generic>, parameters `any`), with no Int-keyed instance left for
+# M9's own instance-entry Int fact to attach to.
+#
+# MODULE-STATIC-RETAINED-VALUES.md fixes the actual defect R2.a.1 could only
+# report: local_extra_chars is a module-static reference, never a capture,
+# so web::emailish? (and, transitively, check) no longer captures anything
+# merely to reach it. check recovers its own non-generic, Int-keyed instance
+# naturally, with no specialization-policy change of any kind (spec item 23
+# -- this is exactly the fall-out the milestone predicted, not a change made
+# to get here): check<int, int, str, str>, and check.n recovers [0, 400].
 
-test emailish-predicate-check-n-control {check's own n parameter range: [0,400] through R2/R2.a; unbounded since R2.a.1, because check<generic> (it captures the web::emailish? closure) -- see comment above} -body {
+test emailish-predicate-check-n-control {check's own n parameter range recovers to [0,400]: check is check<int, int, str, str> again, not check<generic> -- web::emailish? no longer captures local_extra_chars, so check no longer captures web::emailish? either} -body {
     set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
     set spec [hir::specialize::analyze $hir]
     set analysis [hir::range::analyze $hir $spec]
@@ -341,6 +345,6 @@ test emailish-predicate-check-n-control {check's own n parameter range: [0,400] 
     }
     list [hir::specialize::label $spec $id] \
         [lindex [lmap p [dict get [dict get $analysis instances $id] params] {hir::range::show $p}] 0]
-} -result [list check<generic> "\[-\u221E, +\u221E\]"]
+} -result [list check<int,\ int,\ str,\ str> "\[0, 400\]"]
 
 ::tcltest::cleanupTests

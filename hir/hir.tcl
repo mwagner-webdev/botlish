@@ -66,7 +66,9 @@
 #             init (yes | no | deferred: bound when evaluated? see resolve.tcl)
 #   bind      name, binding, value (ExprId), duplicate (0|1)
 #   block     bodyScope, params (BindingIds), body (ExprIds),
-#             captures (BindingIds), resultType (TypeId)
+#             captures (BindingIds), staticRefs (BindingIds: module-static
+#             references, disjoint from captures -- hir::isModuleBinding,
+#             MODULE-STATIC-RETAINED-VALUES.md), resultType (TypeId)
 #   call      callee, args (ExprIds), target ("" | {native SymbolId} |
 #             {block ExprId}), known ("" | 1 | 0: result decided statically)
 #   if        condition, thenScope, thenBody, elseScope, elseBody,
@@ -330,15 +332,21 @@ proc hir::ResolveModuleNativeTargets {hirVar targets} {
 #   * `bridge` (on the ref) is that module BindingId: the one place native
 #     lowering (native/lower.tcl's ModuleBridgeBinding) reads the bridged
 #     function's value from.
-#   * Every block enclosing the reference captures that module binding,
+#   * Every block enclosing the reference reaches that module binding
 #     exactly as a module-qualified reference to it
-#     (hir::resolve::ResolveQualifiedRef) already makes them -- so a caller
-#     reaches the bridged function the same way an ordinary
-#     `NAMESPACE::NAME` call from the same place would.
+#     (hir::resolve::ResolveQualifiedRef) already makes them reach it -- so a
+#     caller reaches the bridged function the same way an ordinary
+#     `NAMESPACE::NAME` call from the same place would. The bridged target is
+#     always itself a module function (a module section's own binding, MODULE
+#     -STATIC-RETAINED-VALUES.md's `staticRefs`), so this records module-
+#     static provenance the same way hir::resolve::Capture does, never an
+#     ordinary lexical capture -- the bridge's target no longer forces every
+#     caller's enclosing function to become closure-valued merely to reach
+#     it.
 #
-# Only the function's own binding is captured, never anything *it*
-# references: the function's module dependencies were captured into its
-# own closure by ordinary resolution of its own body, where it is defined
+# Only the function's own binding is recorded, never anything *it*
+# references: the function's module dependencies were resolved into its own
+# body's own staticRefs/captures by ordinary resolution, where it is defined
 # (its module section), and stay there. hir::resolve cannot do this itself:
 # the bridge's targets are only resolved here, after resolution and hygiene
 # (a bridged reference may also precede the target's own module section).
@@ -355,17 +363,19 @@ proc hir::BridgeProvenance {hirVar bridged} {
         set b [dict get $bridged [dict get $node binding]]
         dict set hir exprs $e bridge $b
         set bindingScope [dict get $hir bindings $b scope]
+        set static [isModuleScope $hir $bindingScope]
         for {set s [dict get $node scope]} {$s ne ""} {set s [dict get $hir scopes $s parent]} {
             if {[dict get $hir scopes $s kind] ne "block"} {
                 continue
             }
-            if {[scopeWithin $hir $bindingScope $s]} {
+            if {!$static && [scopeWithin $hir $bindingScope $s]} {
                 break
             }
             set block [dict get $hir scopes $s owner]
-            set captures [dict get $hir exprs $block captures]
-            if {$b ni $captures} {
-                dict set hir exprs $block captures [concat $captures [list $b]]
+            set field [expr {$static ? "staticRefs" : "captures"}]
+            set list [dict get $hir exprs $block $field]
+            if {$b ni $list} {
+                dict set hir exprs $block $field [concat $list [list $b]]
             }
         }
     }
@@ -573,6 +583,50 @@ proc hir::refinementsAt {hir s} {
 # Bindings captured by block expression E.
 proc hir::captures {hir e} {
     return [dict get $hir exprs $e captures]
+}
+
+# Module-static bindings block expression E references (transitively, at any
+# nesting depth), disjoint from hir::captures E -- see
+# MODULE-STATIC-RETAINED-VALUES.md. Populated by hir::resolve::Capture
+# exactly where an ordinary lexical capture would otherwise have been
+# recorded, for a reference whose binding lives in a module section scope.
+proc hir::staticRefs {hir e} {
+    return [dict get $hir exprs $e staticRefs]
+}
+
+# hir::captures E, plus hir::staticRefs E: every binding block expression E
+# reaches from outside its own body, whether by ordinary lexical capture or
+# by a module-static reference. A binding's value is realized as a single
+# addressable Value seen through the OTHER function's own storage (an
+# ordinary closure environment, or a module-static slot) either way -- so
+# hir::escape.tcl/hir::construction.tcl/hir::stringregion.tcl's own
+# virtualization-eligibility analyses use this, never hir::captures alone,
+# wherever the question is "does creating (or holding a reference to) this
+# literal make some binding's identity observable outside its own defining
+# invocation" (MODULE-STATIC-RETAINED-VALUES.md's escape/construction/
+# region audit). A closure/environment-construction site (hir/blockescape
+# .tcl, hir/aot.tcl, native/lower.tcl's CaptureList, compiler.tcl) asks a
+# different question -- "what does this Block value's own runtime
+# environment hold" -- and correctly keeps using hir::captures alone, since
+# a module-static reference is exactly the kind of reference that must NOT
+# end up in that environment.
+proc hir::externalRefs {hir e} {
+    return [concat [dict get $hir exprs $e captures] [dict get $hir exprs $e staticRefs]]
+}
+
+# 1 if BindingId B is a module-static binding: declared directly in some
+# namespace's own module section scope (hir::resolve::ProgramSection), with
+# module/program lifetime and no lexical-activation identity of its own.
+# Never true of a root binding, a hir::top-level (non-module) binding, or an
+# ordinary lexical local/param/ambient binding. See
+# MODULE-STATIC-RETAINED-VALUES.md's storage-class discussion.
+proc hir::isModuleBinding {hir b} {
+    return [dict exists $hir moduleScopeIds [dict get $hir bindings $b scope]]
+}
+
+# 1 if ScopeId S is a module section's own scope (see hir::isModuleBinding).
+proc hir::isModuleScope {hir s} {
+    return [dict exists $hir moduleScopeIds $s]
 }
 
 # The expression ids whose origin is ORIGIN.

@@ -176,16 +176,24 @@ f(5)}
 # The real motivating path: esc_char -> web::is_unreserved (a typed,
 # declared-Byte-parameter callable, forwarded to a nested function through
 # a captured immutable module binding, exactly the capture-to-parameter
-# shape above) is already a direct callenv to a statically known target
+# shape above) is already a direct call to a statically known target
 # before M2 -- confirmed directly against the frozen benchmark, not a
 # synthetic stand-in (M2 spec item 3).
+#
+# MODULE-STATIC-RETAINED-VALUES.md changes exactly one detail of this: is
+# _unreserved's own additional_unreserved_chars dependency is a module-
+# static reference now, never a capture, so is_unreserved itself is envless
+# and esc_char's call to it is a plain (environment-free) "call", not a
+# "callenv" -- still a direct call of a statically known target, never a
+# callvalue, which is the actual property M2 established and this milestone
+# leaves untouched.
 
-test callable-target-uri-esc-char-is-unreserved-already-direct {esc_char's call to web::is_unreserved, in the real frozen uri-steady.bot, is already a direct callenv to a statically-known target, not a callvalue (M2's own real-path finding: no first loss found here)} -body {
+test callable-target-uri-esc-char-is-unreserved-already-direct {esc_char's call to web::is_unreserved, in the real frozen uri-steady.bot, is already a direct call to a statically-known target, not a callvalue (M2's own real-path finding: no first loss found here)} -body {
     set hir [surface::readProgramFile [file join $::projectRoot bench uri-steady.bot]]
     set nirText [dict get [native::lower::program $hir] text]
     # esc_char<generic>'s own body: find its "func N ... pnames=... " header
     # and confirm the function contains no callvalue, and does contain a
-    # callenv to web::is_unreserved's own function number.
+    # direct call of web::is_unreserved's own function number.
     set escCharFunc ""
     set uriFunc ""
     foreach {whole id name} [regexp -all -inline {func (\d+) "([^"]*)"} $nirText] {
@@ -197,7 +205,7 @@ test callable-target-uri-esc-char-is-unreserved-already-direct {esc_char's call 
     }
     # Extract esc_char's own function body text.
     regexp "func $escCharFunc \[^\n\]*\n(.*?)\nend" $nirText -> body
-    list [regexp {callvalue} $body] [regexp "callenv $uriFunc " $body]
+    list [regexp {callvalue} $body] [regexp "call $uriFunc " $body]
 } -result {0 1}
 
 cleanupTests

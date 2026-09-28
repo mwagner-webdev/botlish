@@ -1,0 +1,333 @@
+# module-static-values.test -- MODULE-STATIC-RETAINED-VALUES.md: a
+# module-retained immutable binding is a stable, module/program-lifetime
+# storage reference, never a lexical closure capture. Covers the resolver
+# invariant (hir::resolve::Capture/hir::isModuleBinding), capture-analysis
+# separation (hir::captures vs. hir::staticRefs), the Tcl compiler backend
+# (core::compiler::ModuleBase), the native backend's static slot table
+# (runtime::vm::Vm's own `statics`, NIR's staticget/staticset), GC rooting
+# across repeated runs, and negative controls proving genuine lexical
+# closures are unaffected.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 200000
+
+set parityBackends {interp compile cranelift-generic cranelift}
+
+proc sourceHir {text} {
+    return [surface::compile $text t.bot -strict 0]
+}
+
+# Runs BODY under BOTLISH_NATIVE_GC_STRESS=1 (collect before every
+# allocation), restoring the environment afterward regardless of outcome.
+proc underGcStress {body} {
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        uplevel 1 $body
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+}
+
+# Runs SCRIPT with $::core::libraryDir pointed at a fresh scratch directory
+# (for throwaway module fixtures), passing that directory as its own
+# argument; restores the real library directory afterward regardless of
+# outcome. (Mirrors tests/surface-modules.test's own helper.)
+proc withScratchLibrary {script} {
+    set saved $::core::libraryDir
+    set dir [tcltest::makeDirectory modstatic-scratch-[pid]-[incr ::scratchLibraryCounter]]
+    set ::core::libraryDir $dir
+    try {
+        uplevel 1 [list apply [list {dir} $script] $dir]
+    } finally {
+        set ::core::libraryDir $saved
+        tcltest::removeDirectory [file tail $dir]
+    }
+}
+set ::scratchLibraryCounter 0
+
+proc writeModule {dir name content} {
+    set path [file join $dir $name.bot]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8
+    puts -nonewline $channel $content
+    close $channel
+    return $path
+}
+
+proc writeMain {dir content} {
+    return [writeModule $dir main $content]
+}
+
+# The BindingId that HIR's own module section NS declares for (unqualified)
+# NAME -- robust against hir::hygiene::qualifyModules's own renaming, unlike
+# searching `ref` nodes by their displayed spelling.
+proc moduleBinding {hir ns name} {
+    return [dict get $hir scopes [dict get $hir modules $ns] names "${ns}::${name}"]
+}
+
+# The block ExprId module section NS's own function NAME is bound to.
+proc moduleBlockOf {hir ns name} {
+    set b [moduleBinding $hir $ns $name]
+    return [hir::get $hir [dict get [hir::binding $hir $b] declaredBy] value]
+}
+
+# The raw value core::evalProgram returns under BACKEND (core::value::show,
+# without outcomeUnder's own evidence-string wrapping) for a direct-value
+# comparison.
+proc outcomeUnderValue {backend exprs} {
+    set saved [core::useBackend]
+    core::useBackend $backend
+    try {
+        return [core::formatValue [core::evalProgram $exprs]]
+    } finally {
+        core::useBackend $saved
+    }
+}
+
+# ---------------------------------------------------------------------------
+# The primary motivating source (namespace web, lib/web.bot): local_char?
+# and web::emailish? itself.
+
+test module-static-local-char-envless {web::local_char? (nested inside web::emailish?) is envless: its only external reference, local_extra_chars, is a module-static reference, never a lexical capture} -body {
+    core::loadLibrary web
+    set hir [native::buildProgramHir {
+        {bind s {const str "a"}}
+        {call {ref Emailish?} {ref s}}
+    }]
+    set lowered [native::lower::program $hir]
+    set nir [dict get $lowered text]
+    set localCharInfo {}
+    foreach info [dict get $lowered functions] {
+        if {[string match {local_char?*} [dict get $info name]]} {
+            set localCharInfo $info
+        }
+    }
+    list [dict get $localCharInfo envless] \
+        [regexp {func [0-9]+ "local_char\?[^"]*" params=1 env=0 [^\n]*captures=0} $nir]
+} -result {1 1}
+
+test module-static-emailish-envless {web::emailish? itself is envless: its own module-static dependency (local_extra_chars, through local_char?) never makes it closure-valued} -body {
+    core::loadLibrary web
+    set hir [native::buildProgramHir {
+        {bind s {const str "a"}}
+        {call {ref Emailish?} {ref s}}
+    }]
+    set lowered [native::lower::program $hir]
+    set emailishInfo {}
+    foreach info [dict get $lowered functions] {
+        if {[dict get $info name] eq "web::emailish?"} {
+            set emailishInfo $info
+        }
+    }
+    dict get $emailishInfo envless
+} -result 1
+
+test module-static-no-block-allocation {emailish?, called many times, allocates zero Block values (the frozen baseline's own ~800/run local_char? closure allocation is gone)} -body {
+    core::loadLibrary web
+    set hir [native::buildProgramHir {
+        {bind s {const str "example.test@café.example"}}
+        {call {ref Emailish?} {ref s}}
+    }]
+    dict get [native::allocationReport $hir summary 1] byKind Block allocations
+} -result 0
+
+test module-static-refined-checks-block-allocations {bench/refined-checks.ir's own steady-state Block allocation count drops from the frozen baseline's ~803/run to 0} -body {
+    core::loadLibrary web
+    set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
+    dict get [native::allocationReport $hir summary 1] byKind Block allocations
+} -result 0
+
+test module-static-check-still-callvalue {scan_while's own predicate parameter is still a dynamic call (spec #26: no finite-target work in this milestone) -- callvalue remains present} -body {
+    core::loadLibrary web
+    set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
+    set nir [native::nir $hir]
+    expr {[regexp -all {callvalue} $nir] >= 1}
+} -result 1
+
+test module-static-emailish-parity {web::emailish? agrees on every backend, module-static representation or not} -body {
+    set path [makeFile {web::emailish?("a@b.co")} module-static-emailish-parity.bot]
+    try {
+        set hir [surface::readProgramFile $path -strict 0]
+        set exprs [hir::lower $hir]
+        set outcomes [lmap backend $::parityBackends {outcomeUnder $backend $exprs}]
+        llength [lsort -unique $outcomes]
+    } finally {
+        removeFile module-static-emailish-parity.bot
+    }
+} -result 1
+
+# ---------------------------------------------------------------------------
+# Capture-analysis invariants (items 17-19, 71-74): direct HIR inspection.
+
+test module-static-captures-empty-for-static-only {a function that references only a module static has an empty capture set (hir::captures), the reference itself recorded as staticRefs instead} -body {
+    withScratchLibrary {
+        writeModule $dir m "namespace m\n\nv = \[1, 2, 3\]\n\nfn f(x):\n    x + list_length(v)\n"
+        set main [writeMain $dir "m::f(1)\n"]
+        set hir [surface::readProgramFile $main -strict 0]
+        set fExpr [moduleBlockOf $hir m f]
+        set vBinding [moduleBinding $hir m v]
+        list [hir::captures $hir $fExpr] [expr {$vBinding in [hir::staticRefs $hir $fExpr]}] \
+            [hir::isModuleBinding $hir $vBinding]
+    }
+} -result {{} 1 1}
+
+test module-static-real-capture-plus-static-coexist {a nested function referencing both an activation-local value and a module static: captures = {the local}, staticRefs = {the module value}, never merged} -body {
+    withScratchLibrary {
+        writeModule $dir m "namespace m\n\nv = 10\n\nfn combine(a, b):\n    a + b\n"
+        set main [writeMain $dir "fn outer(x):\n    fn inner():\n        m::combine(m::v, x)\n    inner()\n\nouter(5)\n"]
+        set hir [surface::readProgramFile $main -strict 0]
+        set innerExpr ""
+        foreach e [hirFind $hir block] {
+            if {[hir::get $hir $e params] eq {} && [hir::get $hir $e captures] ne {}} {
+                set innerExpr $e
+            }
+        }
+        set xBinding [lindex [hirRefBindings $hir x] 0]
+        set vBinding [moduleBinding $hir m v]
+        set combineBinding [moduleBinding $hir m combine]
+        list [expr {[hir::captures $hir $innerExpr] eq [list $xBinding]}] \
+            [expr {[lsort [hir::staticRefs $hir $innerExpr]] eq [lsort [list $vBinding $combineBinding]]}] \
+            [outcomeUnderValue interp [hir::lower $hir]]
+    }
+} -result {1 1 15}
+
+test module-static-two-functions-share-slot {two functions each referencing the same module value never duplicate its storage: one List allocation total (v's own), shared by both} -body {
+    withScratchLibrary {
+        writeModule $dir m "namespace m\n\nv = \[1, 2, 3\]\n\nfn f():\n    list_length(v)\n\nfn g():\n    list_length(v)\n"
+        set main [writeMain $dir "m::f() + m::g()\n"]
+        set hir [surface::readProgramFile $main -strict 0]
+        set report [native::allocationReport $hir summary 1]
+        list [outcomeUnderValue interp [hir::lower $hir]] [dict get $report byKind List allocations] \
+            [regexp -all {staticset} [native::nir $hir]]
+    }
+} -result {6 1 1}
+
+# ---------------------------------------------------------------------------
+# Cross-module references (item 37): module B's function references module
+# A's own retained value directly (never a closure capture either).
+
+test module-static-cross-module-reference {module B's function reaches module A's own retained value as a direct static reference, on every backend} -body {
+    withScratchLibrary {
+        writeModule $dir a "namespace a\n\nshared = \[10, 20, 30\]\n"
+        writeModule $dir b "namespace b\n\nfn total():\n    list_length(a::shared)\n"
+        set main [writeMain $dir "b::total()\n"]
+        set hir [surface::readProgramFile $main -strict 0]
+        set exprs [hir::lower $hir]
+        set outcomes [lmap backend $::parityBackends {outcomeUnder $backend $exprs}]
+        set totalExpr ""
+        foreach e [hirFind $hir block] {
+            if {[hir::get $hir $e params] eq {} && [hir::get $hir $e body] ne {}} {
+                set totalExpr $e
+            }
+        }
+        list [llength [lsort -unique $outcomes]] [lindex $outcomes 0] \
+            [hir::captures $hir $totalExpr]
+    }
+} -result {1 {value 3 {}} {}}
+
+# ---------------------------------------------------------------------------
+# Scalar module statics (item 45): representation may store the value
+# directly rather than as a heap object; semantics must agree everywhere.
+
+test module-static-scalar-int {an Int module static, on every backend} -body {
+    withScratchLibrary {
+        writeModule $dir m "namespace m\n\nlimit = 400\n\nfn over(n):\n    n > limit\n"
+        set main [writeMain $dir "\[m::over(399), m::over(401)\]\n"]
+        set exprs [hir::lower [surface::readProgramFile $main -strict 0]]
+        set outcomes [lmap backend $::parityBackends {outcomeUnder $backend $exprs}]
+        list [llength [lsort -unique $outcomes]] [lindex $outcomes 0]
+    }
+} -result {1 {value {[false, true]} {}}}
+
+test module-static-scalar-bool {a Bool module static, on every backend} -body {
+    withScratchLibrary {
+        writeModule $dir m "namespace m\n\nenabled = true\n\nfn check():\n    enabled\n"
+        set main [writeMain $dir "m::check()\n"]
+        set exprs [hir::lower [surface::readProgramFile $main -strict 0]]
+        set outcomes [lmap backend $::parityBackends {outcomeUnder $backend $exprs}]
+        list [llength [lsort -unique $outcomes]] [lindex $outcomes 0]
+    }
+} -result {1 {value true {}}}
+
+# ---------------------------------------------------------------------------
+# Function-valued module bindings (item 46): an ordinary "fn NAME(...): ..."
+# module definition is itself exactly this case (a module binding whose
+# value is a Block) -- audited directly, not conflated with a module
+# *function definition* as some separate concept.
+
+test module-static-function-valued-binding {an ordinary module function definition is itself a module binding whose value is a Block -- envless, reached as a constant fnvalue, never a static-slot data read} -body {
+    withScratchLibrary {
+        writeModule $dir m "namespace m\n\nfn inc(x):\n    x + 1\n"
+        set main [writeMain $dir "m::inc(41)\n"]
+        set hir [surface::readProgramFile $main -strict 0]
+        set nir [native::nir $hir -tiny-leaf-inline-opt 0]
+        list [native::evalHir $hir] \
+            [regexp {func [0-9]+ "m::inc" params=1 env=0 [^\n]*captures=0} $nir] \
+            [regexp {staticget} $nir]
+    }
+} -result {{int 42} 1 0}
+
+# ---------------------------------------------------------------------------
+# Negative controls (item 71): genuine lexical closures are unaffected.
+
+test module-static-negative-control-real-closure {a genuine activation-dependent closure still captures and allocates exactly as before} -body {
+    set text "fn make(x):\n    fn f():\n        x\n    f\n\nmake(7)()"
+    set hir [sourceHir $text]
+    set nir [dict get [native::lower::program $hir] text]
+    list [runValue {call {ref +} {const int 0} {const int 0}}] \
+        [regexp {func [0-9]+ "f" params=0 env=1 [^\n]*captures=1} $nir] \
+        [dict get [native::allocationReport $hir summary 1] byKind Block allocations]
+} -result {{int 0} 1 1}
+
+test module-static-entry-toplevel-binding-still-captures {an ordinary (non-module) entry-program top-level binding is out of this milestone's scope: it still becomes a genuine lexical capture, exactly as before} -body {
+    set text "v = \[1, 2, 3\]\n\nfn f():\n    list_length(v)\n\nf()"
+    set hir [sourceHir $text]
+    set fExpr ""
+    foreach e [hirFind $hir block] {
+        if {[hir::get $hir $e params] eq {}} {
+            set fExpr $e
+        }
+    }
+    set vBinding [lindex [hirRefBindings $hir v] 0]
+    list [expr {[hir::captures $hir $fExpr] eq [list $vBinding]}] [hir::isModuleBinding $hir $vBinding]
+} -result {1 0}
+
+# ---------------------------------------------------------------------------
+# GC rooting and lifetime (items 43, 86-87): a module-static managed object
+# stays live and correct under stress, whether read from an envless
+# function or from a genuine closure that also captures an activation-local
+# managed value, and across repeated in-process runs (Vm::reset).
+
+test module-static-gc-stress-envless-reader {a module-static managed value (List) is read correctly, many times, from an envless function, under GC stress (many intervening allocations)} -body {
+    withScratchLibrary {
+        writeModule $dir m "namespace m\n\nv = \[1, 2, 3, 4, 5\]\n\nfn touch(x):\n    x + list_length(v)\n"
+        set main [writeMain $dir "fn drive(i, total, acc):\n    if i >= total:\n        return acc\n    drive(i + 1, total, acc + m::touch(i))\n\ndrive(0, 500, 0)\n"]
+        set hir [surface::readProgramFile $main -strict 0]
+        underGcStress {native::evalHir $hir}
+    }
+} -result {int 127250}
+
+test module-static-gc-stress-mixed-closure {a static reference and a real activation-local capture coexisting inside one closure both stay correct under GC stress} -body {
+    withScratchLibrary {
+        writeModule $dir m "namespace m\n\nv = \[1, 2, 3\]\n\nfn combine(a, b):\n    a + b\n"
+        set main [writeMain $dir "fn outer(x):\n    fn inner():\n        m::combine(list_length(\[1,2,3,4,5,6,7,8\]), x)\n    inner()\n\nfn drive(i, total, acc):\n    if i >= total:\n        return acc\n    drive(i + 1, total, acc + outer(i))\n\ndrive(0, 300, 0)\n"]
+        set hir [surface::readProgramFile $main -strict 0]
+        underGcStress {native::evalHir $hir}
+    }
+} -result {int 47250}
+
+test module-static-repeated-runs-reset {the same compiled program, run repeatedly in one process (Vm::reset between runs, matching the benchmark harness), re-initializes and correctly re-reads its module statics every run, under GC stress} -body {
+    core::loadLibrary web
+    set hir [native::buildProgramHir {
+        {bind s {const str "a b/c%d~e_f.g@h"}}
+        {call {ref uriEscape} {ref s}}
+    }]
+    underGcStress {
+        set report [native::allocationReport $hir summary 8]
+        expr {[dict get $report byKind String currentLiveObjects] > 0}
+    }
+} -result 1
+
+cleanupTests

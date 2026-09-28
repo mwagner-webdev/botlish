@@ -323,6 +323,20 @@ pub enum Inst {
     FnValue { dst: Reg, func: FuncId },
     SelfClosure { dst: Reg },
     Capture { dst: Reg, index: u32 },
+    /// Reads module-static slot INDEX (runtime::vm::Vm's own `statics`
+    /// table, MODULE-STATIC-RETAINED-VALUES.md): a module-retained
+    /// immutable binding's stable, program-lifetime storage, disjoint from
+    /// any function's own closure environment -- reachable from any
+    /// function alike, never routed through Capture/CellGet. Emitted for
+    /// every reference to a module-static binding, never only the function
+    /// that first computes its value.
+    StaticGet { dst: Reg, index: u32 },
+    /// Writes VALUE into module-static slot INDEX: emitted once, at the
+    /// exact point the binding's own initializer expression finishes
+    /// evaluating (module initialization order, MODULE-STATIC-RETAINED-
+    /// VALUES.md) -- never by any other instruction, and never read back by
+    /// the same function through anything but a later StaticGet.
+    StaticSet { index: u32, value: Reg },
     Move { dst: Reg, src: Reg },
     Cell { dst: Reg },
     CellSet { cell: Reg, value: Reg },
@@ -518,6 +532,14 @@ pub struct NativeDecl {
 pub struct Program {
     pub natives: Vec<NativeDecl>,
     pub functions: Vec<Function>,
+    /// The number of module-static slots this program uses (the header's
+    /// own `statics=N`, MODULE-STATIC-RETAINED-VALUES.md): runtime::vm::Vm's
+    /// own `statics` table is sized to this once, at program-install time,
+    /// and every StaticGet/StaticSet's own `index` is checked against it
+    /// (`validate`/`parse_inst`), exactly like a function's own `captures`
+    /// bounds its Capture indices. Zero for a program with no module-static
+    /// bindings.
+    pub statics: u32,
 }
 
 #[derive(Debug)]
@@ -659,7 +681,7 @@ fn word(t: &Token) -> Option<&str> {
 
 pub fn parse(text: &str) -> Result<Program, NirError> {
     let mut p = Parser { line: 0 };
-    let mut program = Program { natives: Vec::new(), functions: Vec::new() };
+    let mut program = Program { natives: Vec::new(), functions: Vec::new(), statics: 0 };
     let mut current: Option<Function> = None;
     let mut seen_header = false;
     let mut call_effects = true;
@@ -673,7 +695,12 @@ pub fn parse(text: &str) -> Result<Program, NirError> {
             if tokens.len() < 2 || tokens[0] != Token::Word("nir".into()) || tokens[1] != Token::Word("1".into()) {
                 return p.err("expected \"nir 1\"");
             }
-            call_effects = !matches!(tokens.get(2), Some(Token::Pair(k, v)) if k == "call-effects" && v == "0");
+            let kv = pairs(&tokens);
+            call_effects = kv.get("call-effects").map(|v| v != "0").unwrap_or(true);
+            program.statics = match kv.get("statics") {
+                Some(v) => v.parse().or_else(|_| p.err("bad statics count"))?,
+                None => 0,
+            };
             seen_header = true;
             continue;
         }
@@ -926,6 +953,13 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
             "fnvalue" => Inst::FnValue { dst, func: num(3)? },
             "self" => Inst::SelfClosure { dst },
             "capture" => Inst::Capture { dst, index: num(3)? },
+            "staticget" => {
+                let index = num(3)?;
+                if index >= program.statics {
+                    return p.err(format!("bad static slot {index}"));
+                }
+                Inst::StaticGet { dst, index }
+            }
             "move" => Inst::Move { dst, src: reg(3)? },
             "cell" => Inst::Cell { dst },
             "cellget" => Inst::CellGet { dst, cell: reg(3)? },
@@ -986,6 +1020,13 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
     Ok(match head {
         "label" => Inst::Label(label(1)?),
         "cellset" => Inst::CellSet { cell: reg(1)?, value: reg(2)? },
+        "staticset" => {
+            let index = num(1)?;
+            if index >= program.statics {
+                return p.err(format!("bad static slot {index}"));
+            }
+            Inst::StaticSet { index, value: reg(2)? }
+        }
         "guard" => {
             let kind = tokens.get(1).and_then(word).and_then(Kind::parse);
             let Some(kind) = kind else { return p.err("bad guard kind") };
@@ -1075,6 +1116,11 @@ fn validate(program: &Program) -> Result<(), NirError> {
                     }
                     used.push(*dst);
                 }
+                // Slot bounds already checked at parse time (parse_inst),
+                // against the program-level `statics` count -- there is no
+                // per-function count to cross-check here, unlike Capture's
+                // own `f.captures`.
+                Inst::StaticGet { dst, .. } => used.push(*dst),
                 Inst::FnValue { dst, func: g } => {
                     match func(*g) {
                         Some(g) if !g.env => {}
@@ -1084,6 +1130,7 @@ fn validate(program: &Program) -> Result<(), NirError> {
                 }
                 Inst::Move { dst, src } => used.extend([*dst, *src]),
                 Inst::CellSet { cell, value } => used.extend([*cell, *value]),
+                Inst::StaticSet { value, .. } => used.push(*value),
                 Inst::CellGet { dst, cell } | Inst::CellCheck { dst, cell, .. } => used.extend([*dst, *cell]),
                 Inst::Closure { dst, func: g, captures } => {
                     match func(*g) {
@@ -1380,8 +1427,9 @@ fn validate_plans(program: &Program) -> Result<(), NirError> {
                 | Inst::Jump(_) | Inst::DeclaredErrorEq { .. } | Inst::Int { .. } | Inst::RawInt { .. }
                 | Inst::Str { .. } | Inst::Char { .. } | Inst::Bool { .. } | Inst::Unit { .. }
                 | Inst::Native { .. } | Inst::FnValue { .. } | Inst::SelfClosure { .. } | Inst::Capture { .. }
-                | Inst::Cell { .. } => {}
+                | Inst::Cell { .. } | Inst::StaticGet { .. } => {}
                 Inst::CellSet { cell, value } => used.extend([*cell, *value]),
+                Inst::StaticSet { value, .. } => used.push(*value),
                 Inst::CellGet { cell, .. } | Inst::CellCheck { cell, .. } => used.push(*cell),
                 Inst::Closure { captures, .. } => used.extend(captures),
                 Inst::Guard { value, .. } | Inst::GuardBool { value } => used.push(*value),

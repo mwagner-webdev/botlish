@@ -64,7 +64,7 @@ use crate::runtime::ops::helpers;
 use crate::runtime::value::*;
 use crate::runtime::vm::{
     VM_ALLOC_SITE_OFFSET, VM_CONSTS_OFFSET, VM_NATIVE_ROOTS_LEN_OFFSET, VM_NATIVE_ROOTS_PTR_OFFSET,
-    VM_SS_LIMIT_OFFSET, VM_SS_TOP_OFFSET,
+    VM_SS_LIMIT_OFFSET, VM_SS_TOP_OFFSET, VM_STATICS_OFFSET,
 };
 use cranelift_codegen::ir::condcodes::IntCC;
 use cranelift_codegen::ir::{
@@ -1124,6 +1124,27 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 let caps = self.b.ins().load(I64, MemFlagsData::trusted(), closure, CLOSURE_CAPS_OFFSET);
                 let v = self.b.ins().load(I64, MemFlagsData::trusted(), caps, (*index * 8) as i32);
                 self.def(*dst, v);
+            }
+            Inst::StaticGet { dst, index } => {
+                // Module-static storage (MODULE-STATIC-RETAINED-VALUES.md):
+                // vm->statics_ptr, exactly like vm->consts (`constant`
+                // above), except mutable and read through here from any
+                // function alike -- never through this function's own
+                // closure environment (Capture, above), whatever functions
+                // are nested between the reference and the module section
+                // that owns the binding.
+                let table = self.b.ins().load(I64, MemFlagsData::trusted(), self.vm, VM_STATICS_OFFSET);
+                let v = self.b.ins().load(I64, MemFlagsData::trusted(), table, (*index * 8) as i32);
+                self.def(*dst, v);
+            }
+            Inst::StaticSet { index, value } => {
+                // Written once, at the exact point the binding's own
+                // initializer finishes evaluating (native/lower.tcl's
+                // module-initialization lowering) -- see StaticSet's own
+                // doc in nir.rs.
+                let table = self.b.ins().load(I64, MemFlagsData::trusted(), self.vm, VM_STATICS_OFFSET);
+                let v = self.get(*value);
+                self.b.ins().store(MemFlagsData::trusted(), v, table, (*index * 8) as i32);
             }
             Inst::Move { dst, src } => {
                 let v = self.get(*src);
