@@ -1,0 +1,15 @@
+== from-int-literal.bot (interp)
+<program>: closed   [i0, line 4:1]
+  calls:    byte::from_int<int>
+  guards:   0
+  runtime:  none
+
+byte::from_int (semantic): closed   [no blockers]
+byte::from_int<int>: closed   [i1, line 150:12]
+  params:   value : int
+  result:   int[Byte]
+  guards:   0
+  runtime:  bigint
+
+guards: generic 6, specialized 0; instances: 0 generic, 1 specialized
+   value: 45

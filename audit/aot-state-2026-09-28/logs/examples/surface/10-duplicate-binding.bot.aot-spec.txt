@@ -1,0 +1,2 @@
+== 10-duplicate-binding.bot (interp)
+   error: examples/surface/10-duplicate-binding.bot:7:1: duplicate binding "x" in the same lexical scope (CORE SEMANTIC DUPLICATE)

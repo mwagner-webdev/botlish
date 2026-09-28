@@ -1,0 +1,167 @@
+== uri-steady.bot (compile)
+<program>: closed   [i0, line 30:1]
+  calls:    byte::set<List[UnicodeChar]>, repeat_uri<generic>
+  guards:   0
+  runtime:  closure-env, list-alloc, set-alloc, structural-equality
+
+char::codepoint (semantic): closed   [no blockers]
+char::codepoint<UnicodeChar>: closed   [i2, line 21:13]
+  params:   c : UnicodeChar
+  result:   int
+  guards:   0
+  runtime:  none
+
+byte::high_nibble (semantic): guarded   [UnknownParameterKind 1]
+byte::high_nibble<int>: closed   [i17, line 112:15]
+  params:   b : int
+  result:   int[HighNibble]
+  guards:   0
+  runtime:  bigint
+
+byte::nibble (semantic): guarded   [UnknownParameterKind 1]
+byte::nibble<int>: closed   [i18, line 118:10]
+  params:   x : int
+  result:   int[Nibble]
+  guards:   0
+  runtime:  bigint
+
+byte::from_int (semantic): closed   [no blockers]
+byte::from_int<int>: closed   [i3, line 150:12]
+  params:   value : int
+  result:   int[Byte]
+  guards:   0
+  runtime:  bigint
+
+byte::set (semantic): closed   [no blockers]
+byte::set<List[UnicodeChar]>: closed   [i1, line 174:7]
+  params:   chars : List[UnicodeChar]
+  result:   ImmutableSet[int[Byte]]
+  calls:    byte::from_int<int>, char::codepoint<UnicodeChar>
+  guards:   0
+  runtime:  set-alloc, structural-equality
+
+ascii::is_digit (semantic): closed   [no blockers]
+ascii::is_digit<int>: closed   [i13, line 53:12]
+  params:   b : int
+  result:   bool
+  guards:   0
+  runtime:  bigint
+
+ascii::is_upper (semantic): closed   [no blockers]
+ascii::is_upper<int>: closed   [i11, line 56:12]
+  params:   b : int
+  result:   bool
+  guards:   0
+  runtime:  bigint
+
+ascii::is_lower (semantic): closed   [no blockers]
+ascii::is_lower<int>: closed   [i12, line 59:12]
+  params:   b : int
+  result:   bool
+  guards:   0
+  runtime:  bigint
+
+ascii::is_alphabetic (semantic): closed   [no blockers]
+ascii::is_alphabetic<int>: closed   [i10, line 62:17]
+  params:   b : int
+  result:   bool
+  calls:    ascii::is_lower<int>, ascii::is_upper<int>
+  guards:   0
+  runtime:  none
+
+ascii::is_alphanumeric (semantic): closed   [no blockers]
+ascii::is_alphanumeric<int>: closed   [i9, line 65:19]
+  params:   b : int
+  result:   bool
+  calls:    ascii::is_alphabetic<int>, ascii::is_digit<int>
+  guards:   0
+  runtime:  none
+
+web::is_unreserved (semantic): closed   [no blockers]
+web::is_unreserved<int>: closed   [i8, line 189:17]
+  params:   b : int
+  result:   bool
+  calls:    ascii::is_alphanumeric<int>
+  guards:   0
+  runtime:  structural-equality
+
+web::uri_escape_text (semantic): closed   [no blockers]
+web::uri_escape_text<str>: closed   [i5, line 192:19]
+  params:   s : str
+  result:   str
+  calls:    esc_from<str, int, str>
+  guards:   0
+  runtime:  none
+
+high_nibble (semantic): closed   [no blockers]
+high_nibble<int>: closed   [i16, line 194:19]
+  params:   b : int
+  result:   int[Nibble]
+  calls:    byte::high_nibble<int>, byte::nibble<int>
+  guards:   0
+  runtime:  none
+
+hex_pair (semantic): guarded   [UnknownParameterKind 1]
+hex_pair<int>: closed   [i15, line 197:16]
+  params:   b : int
+  result:   str
+  calls:    high_nibble<int>
+  guards:   0
+  runtime:  bigint, range-check, string-alloc
+
+esc_bytes (semantic): guarded   [UnknownParameterKind 3]
+esc_bytes<List[int], int, str>: closed   [i14, line 200:17]
+  params:   bytes : List[int], i : int, acc : str
+  result:   str
+  calls:    esc_bytes<List[int], int, str>, hex_pair<int>
+  guards:   0
+  runtime:  bigint, range-check, string-alloc
+
+esc_char (semantic): guarded   [UnknownParameterKind 1]
+esc_char<str>: closed   [i7, line 206:16]
+  params:   c : str
+  result:   str
+  calls:    esc_bytes<List[int], int, str>, web::is_unreserved<int>
+  guards:   0
+  runtime:  bigint, list-alloc, range-check
+
+esc_from (semantic): guarded   [UnknownParameterKind 3, UnknownCallResultKind 1]
+esc_from<str, int, str>: closed   [i6, line 217:16]
+  params:   text : str, i : int, acc : str
+  result:   str
+  calls:    esc_char<str>, esc_from<str, int, str>
+  guards:   0
+  runtime:  bigint, char-index, range-check, string-alloc
+
+repeat_uri (semantic): guarded   [UnknownParameterKind 3, UnknownCallResultKind 1]
+repeat_uri<generic>: closed   [i4, line 32:14]
+  params:   i : any, total : any, acc : any
+  result:   int
+  calls:    repeat_uri<generic>, web::uri_escape_text<str>
+  guards:   0
+  runtime:  bigint, char-index, closure-env, range-check
+
+guards: generic 28, specialized 0; instances: 1 generic, 17 specialized
+   value: 29500
+   type:  char::codepoint : block(e2)/1 -> int
+   type:  byte::high_nibble : block(e7)/1 -> int
+   type:  byte::low_nibble : block(e13)/1 -> int
+   type:  byte::nibble : block(e19)/1 -> int
+   type:  byte::complement : block(e34)/1 -> int
+   type:  byte::position_low : block(e43)/1 -> int
+   type:  byte::position_high : block(e49)/1 -> int
+   type:  byte::from_int : block(e58)/1 -> int
+   type:  byte::set : block(e73)/1 -> ImmutableSet[int]
+   type:  ascii::is_digit : block(e86)/1 -> bool
+   type:  ascii::is_upper : block(e101)/1 -> bool
+   type:  ascii::is_lower : block(e116)/1 -> bool
+   type:  ascii::is_alphabetic : block(e131)/1 -> bool
+   type:  ascii::is_alphanumeric : block(e144)/1 -> bool
+   type:  web::local_extra_chars : ImmutableSet[str]
+   type:  web::emailish? : block(e167)/1 -> bool
+   type:  web::hex_digits : List[str]
+   type:  web::additional_unreserved_chars : ImmutableSet[int]
+   type:  web::is_unreserved : block(e357)/1 -> bool
+   type:  web::uri_escape_text : block(e371)/1 -> any
+   type:  corpus : List[str]
+   type:  repeat_uri : block(e501)/3 -> any

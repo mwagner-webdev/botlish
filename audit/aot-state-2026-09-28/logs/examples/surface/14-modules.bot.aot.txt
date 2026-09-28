@@ -1,0 +1,13 @@
+== 14-modules.bot (interp)
+<program>: closed (transitively guarded)   [program, line 7:1]
+  dispatch: closed -- natives: list; functions: mathish::inc (non-tail)
+  blockers: none
+  runtime:  list-alloc
+
+mathish::inc: guarded   [e2, line 8:7]
+  params:   x : any   result: int
+  dispatch: closed -- natives: +
+  blockers:
+    line 9:5  e5  UnknownParameterKind: + needs int; parameter x (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+   value: [42, 2]

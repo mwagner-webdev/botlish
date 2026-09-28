@@ -1,0 +1,40 @@
+== 09-mutual-recursion.bot (interp)
+<program>: closed   [i0, line 6:1]
+  calls:    is_even<int>
+  guards:   0
+  runtime:  list-alloc
+
+is_even (semantic): guarded   [UnknownParameterKind 1]
+is_even<int>: closed   [i1, line 6:11]
+  params:   n : int
+  result:   bool
+  calls:    is_odd<int>
+  guards:   0
+  runtime:  bigint, init-check
+
+is_even<generic>: guarded   [i4, line 6:11]
+  params:   n : any
+  result:   bool
+  calls:    is_odd<int>
+  guards:   1
+    line 9:12  e14  UnknownParameterKind: - needs int; parameter n (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, init-check, structural-equality, tagged-values
+
+is_odd (semantic): guarded   [UnknownParameterKind 1]
+is_odd<int>: closed   [i2, line 11:10]
+  params:   n : int
+  result:   bool
+  calls:    is_even<int>
+  guards:   0
+  runtime:  bigint
+
+is_odd<generic>: guarded   [i3, line 11:10]
+  params:   n : any
+  result:   bool
+  calls:    is_even<int>
+  guards:   1
+    line 14:13  e29  UnknownParameterKind: - needs int; parameter n (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, structural-equality, tagged-values
+
+guards: generic 2, specialized 2; instances: 2 generic, 2 specialized
+   value: [true, false]

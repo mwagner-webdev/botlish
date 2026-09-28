@@ -1,0 +1,22 @@
+== 03-closure.bot (interp)
+<program>: closed (transitively guarded)   [program, line 5:1]
+  dispatch: closed -- functions: add (non-tail), make_adder (non-tail)
+  blockers: none
+  runtime:  closure-env
+
+make_adder: closed   [e2, line 5:14]
+  params:   x : any   result: block(e4)/1 -> int
+  dispatch: closed -- no calls
+  blockers: none
+  note:     line 6:11  e4  creates a closure capturing values
+  runtime:  closure-env
+
+add: guarded   [e4, line 6:11]
+  params:   y : any   result: int
+  captures: x (value)
+  dispatch: closed -- natives: +
+  blockers:
+    line 7:9  e7  UnknownParameterKind: + needs int; parameter x (no annotation, no call-site inference) has no static kind
+    line 7:13  e8  UnknownParameterKind: + needs int; parameter y (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+   value: 42

@@ -1,0 +1,77 @@
+== csv.bot (interp)
+<program>: closed   [i0, line 26:1]
+  calls:    csv_parse<str>
+  guards:   0
+  runtime:  none
+
+peek (semantic): guarded   [UnknownParameterKind 2]
+peek<str, int>: closed   [i5, line 26:8]
+  params:   text : str, index : int
+  result:   str
+  guards:   0
+  runtime:  bigint, char-index, range-check, string-alloc
+
+scan_unquoted (semantic): guarded   [UnknownParameterKind 4]
+scan_unquoted<str, int, int>: closed   [i7, line 34:17]
+  params:   text : str, start : int, index : int
+  result:   list[str, int]
+  calls:    peek<str, int>, scan_unquoted<str, int, int>
+  guards:   0
+  runtime:  bigint, char-index, list-alloc, range-check, string-alloc
+
+scan_quoted (semantic): guarded   [UnknownParameterKind 4]
+scan_quoted<str, int, str>: closed   [i6, line 43:15]
+  params:   text : str, index : int, field : str
+  result:   list[str, int]
+  calls:    peek<str, int>, scan_quoted<str, int, str>
+  guards:   0
+  runtime:  bigint, list-alloc, string-alloc
+
+scan_field (semantic): guarded   [UnknownParameterKind 1]
+scan_field<str, int>: closed   [i4, line 54:14]
+  params:   text : str, index : int
+  result:   list[str, int]
+  calls:    peek<str, int>, scan_quoted<str, int, str>, scan_unquoted<str, int, int>
+  guards:   0
+  runtime:  bigint
+
+scan_record (semantic): guarded   [UnknownParameterKind 1, UnknownAggregateElementType 2]
+scan_record<str, int, List[never]>: closed   [i3, line 62:15]
+  params:   text : str, index : int, fields : List[never]
+  result:   list[List[str], int]
+  calls:    peek<str, int>, scan_field<str, int>, scan_record<str, int, List[str]>
+  guards:   0
+  runtime:  bigint, list-alloc, range-check
+
+scan_record<str, int, List[str]>: closed   [i8, line 62:15]
+  params:   text : str, index : int, fields : List[str]
+  result:   list[List[str], int]
+  calls:    peek<str, int>, scan_field<str, int>, scan_record<str, int, List[str]>
+  guards:   0
+  runtime:  bigint, list-alloc, range-check
+
+scan_records (semantic): guarded   [UnknownParameterKind 3]
+scan_records<str, int, List[never]>: closed   [i2, line 76:16]
+  params:   text : str, index : int, records : List[never]
+  result:   List[List[str]]
+  calls:    scan_record<str, int, List[never]>, scan_records<str, int, List[List[str]]>
+  guards:   0
+  runtime:  bigint, char-index, list-alloc, range-check
+
+scan_records<str, int, List[List[str]]>: closed   [i9, line 76:16]
+  params:   text : str, index : int, records : List[List[str]]
+  result:   List[List[str]]
+  calls:    scan_record<str, int, List[never]>, scan_records<str, int, List[List[str]]>
+  guards:   0
+  runtime:  bigint, char-index, list-alloc, range-check
+
+csv_parse (semantic): closed   [no blockers]
+csv_parse<str>: closed   [i1, line 83:13]
+  params:   text : str
+  result:   List[List[str]]
+  calls:    scan_records<str, int, List[never]>
+  guards:   0
+  runtime:  list-alloc
+
+guards: generic 17, specialized 0; instances: 0 generic, 9 specialized
+   value: [["name", "age"], ["Alice", "30"], ["Bob", "40"]]

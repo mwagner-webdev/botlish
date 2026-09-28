@@ -1,0 +1,256 @@
+== hashtable.bot (interp)
+<program>: closed (transitively guarded)   [i0, line 79:1]
+  calls:    sample<generic>
+  guards:   0
+  runtime:  none
+
+ht_min_capacity (semantic): closed   [no blockers]
+ht_min_capacity<generic>: closed   [i3, line 79:19]
+  params:   (none)
+  result:   int
+  guards:   0
+  runtime:  none
+
+ht_empty_state (semantic): closed   [no blockers]
+ht_empty_state<generic>: closed   [i6, line 82:18]
+  params:   (none)
+  result:   int
+  guards:   0
+  runtime:  none
+
+ht_occupied_state (semantic): closed   [no blockers]
+ht_occupied_state<generic>: closed   [i12, line 85:21]
+  params:   (none)
+  result:   int
+  guards:   0
+  runtime:  none
+
+ht_tombstone_state (semantic): closed   [no blockers]
+ht_tombstone_state<generic>: closed   [i14, line 88:22]
+  params:   (none)
+  result:   int
+  guards:   0
+  runtime:  none
+
+ht_fill_empty (semantic): guarded   [UnknownParameterKind 3]
+ht_fill_empty<mutarray, int, int>: closed   [i5, line 94:17]
+  params:   controls : mutarray, i : int, capacity : int
+  result:   unit
+  calls:    ht_empty_state<generic>, ht_fill_empty<mutarray, int, int>
+  guards:   0
+  runtime:  bigint, mutarray-mutate, range-check
+
+ht_alloc (semantic): guarded   [UnknownParameterKind 1]
+ht_alloc<int>: closed   [i4, line 101:12]
+  params:   capacity : int
+  result:   mutarray
+  calls:    ht_fill_empty<mutarray, int, int>
+  guards:   0
+  runtime:  mutarray-alloc, mutarray-mutate, range-check
+
+ht_new (semantic): closed   [no blockers]
+ht_new<generic>: closed   [i2, line 114:10]
+  params:   (none)
+  result:   mutarray
+  calls:    ht_alloc<int>, ht_min_capacity<generic>
+  guards:   0
+  runtime:  none
+
+ht_controls (semantic): guarded   [UnknownParameterKind 1]
+ht_controls<mutarray>: closed   [i10, line 133:15]
+  params:   table : mutarray
+  result:   any
+  guards:   0
+  runtime:  range-check
+
+ht_keys (semantic): guarded   [UnknownParameterKind 1]
+ht_keys<mutarray>: closed   [i13, line 136:11]
+  params:   table : mutarray
+  result:   any
+  guards:   0
+  runtime:  range-check
+
+ht_values (semantic): guarded   [UnknownParameterKind 1]
+ht_values<mutarray>: closed   [i16, line 139:13]
+  params:   table : mutarray
+  result:   any
+  guards:   0
+  runtime:  range-check
+
+ht_size (semantic): guarded   [UnknownParameterKind 1]
+ht_size<mutarray>: closed   [i18, line 142:11]
+  params:   table : mutarray
+  result:   any
+  guards:   0
+  runtime:  range-check
+
+ht_tombstones (semantic): guarded   [UnknownParameterKind 1]
+ht_tombstones<mutarray>: closed   [i19, line 145:17]
+  params:   table : mutarray
+  result:   any
+  guards:   0
+  runtime:  range-check
+
+ht_capacity (semantic): guarded   [UnknownCallResultKind 1]
+ht_capacity<mutarray>: guarded   [i9, line 148:15]
+  params:   table : mutarray
+  result:   int
+  calls:    ht_controls<mutarray>
+  guards:   1
+    line 149:28  e156  UnknownCallResultKind: mutable_array_capacity needs mutarray; the result of ht_controls at line 149:28 has no static kind
+  runtime:  tagged-values
+
+ht_probe_start (semantic): closed   [no blockers]
+ht_probe_start<mutarray, str>: closed (transitively guarded)   [i8, line 154:18]
+  params:   table : mutarray, key : str
+  result:   int
+  calls:    ht_capacity<mutarray>
+  guards:   0
+  runtime:  bigint, hash
+
+ht_probe_next (semantic): guarded   [UnknownParameterKind 1]
+ht_probe_next<mutarray, int>: closed (transitively guarded)   [i15, line 157:17]
+  params:   table : mutarray, index : int
+  result:   int
+  calls:    ht_capacity<mutarray>
+  guards:   0
+  runtime:  bigint
+
+ht_find_get (semantic): guarded   [UnknownCallResultKind 2, UnknownParameterKind 1]
+ht_find_get<mutarray, str, int>: guarded   [i27, line 163:15]
+  params:   table : mutarray, key : str, index : int
+  result:   int
+  calls:    ht_controls<mutarray>, ht_empty_state<generic>, ht_find_get<mutarray, str, int>, ht_keys<mutarray>, ht_occupied_state<generic>, ht_probe_next<mutarray, int>
+  guards:   2
+    line 165:31  e189  UnknownCallResultKind: mutable_array_get needs mutarray; the result of ht_controls at line 164:16 has no static kind
+    line 169:59  e214  UnknownCallResultKind: mutable_array_get needs mutarray; the result of ht_keys at line 169:59 has no static kind
+  runtime:  bigint, range-check, structural-equality, tagged-values
+
+ht_find_insert (semantic): guarded   [UnknownCallResultKind 2, UnknownParameterKind 3]
+ht_find_insert<mutarray, str, int, int>: guarded   [i11, line 178:18]
+  params:   table : mutarray, key : str, index : int, first_tombstone : int
+  result:   int
+  calls:    ht_controls<mutarray>, ht_empty_state<generic>, ht_find_insert<mutarray, str, int, int>, ht_keys<mutarray>, ht_occupied_state<generic>, ht_probe_next<mutarray, int>, ht_tombstone_state<generic>
+  guards:   2
+    line 180:31  e241  UnknownCallResultKind: mutable_array_get needs mutarray; the result of ht_controls at line 179:16 has no static kind
+    line 187:59  e270  UnknownCallResultKind: mutable_array_get needs mutarray; the result of ht_keys at line 187:59 has no static kind
+  runtime:  bigint, range-check, structural-equality, tagged-values
+
+ht_get (semantic): guarded   [UnknownCallResultKind 1]
+ht_get<mutarray, str>: guarded   [i29, line 199:10]
+  params:   table : mutarray, key : str
+  result:   any
+  calls:    ht_find_get<mutarray, str, int>, ht_probe_start<mutarray, str>, ht_values<mutarray>
+  guards:   1
+    line 204:23  e334  UnknownCallResultKind: mutable_array_get needs mutarray; the result of ht_values at line 204:23 has no static kind
+  runtime:  bigint, range-check, tagged-values
+
+ht_contains (semantic): closed   [no blockers]
+ht_contains<mutarray, str>: closed (transitively guarded)   [i26, line 206:15]
+  params:   table : mutarray, key : str
+  result:   bool
+  calls:    ht_find_get<mutarray, str, int>, ht_probe_start<mutarray, str>
+  guards:   0
+  runtime:  bigint
+
+ht_rehash_probe (semantic): guarded   [UnknownParameterKind 3]
+ht_rehash_probe<mutarray, int, int>: closed   [i24, line 214:19]
+  params:   newControls : mutarray, index : int, capacity : int
+  result:   int
+  calls:    ht_empty_state<generic>, ht_rehash_probe<mutarray, int, int>
+  guards:   0
+  runtime:  bigint, range-check, structural-equality
+
+ht_rehash_insert (semantic): guarded   [UnknownParameterKind 2, UnknownAggregateElementType 3]
+ht_rehash_insert<List[mutarray], int, any, any>: closed   [i23, line 224:20]
+  params:   dest : List[mutarray], capacity : int, key : any, value : any
+  result:   unit
+  calls:    ht_occupied_state<generic>, ht_rehash_probe<mutarray, int, int>
+  guards:   0
+  runtime:  bigint, hash, mutarray-mutate, range-check
+
+ht_rehash_scan (semantic): guarded   [UnknownParameterKind 3, UnknownAggregateElementType 3]
+ht_rehash_scan<list, int, int, List[mutarray], int>: guarded   [i22, line 235:18]
+  params:   src : list, i : int, oldCapacity : int, dest : List[mutarray], newCapacity : int
+  result:   unit
+  calls:    ht_occupied_state<generic>, ht_rehash_insert<List[mutarray], int, any, any>, ht_rehash_scan<list, int, int, List[mutarray], int>
+  guards:   3
+    line 240:26  e437  UnknownAggregateElementType: mutable_array_get needs mutarray; the element read by list_get at line 239:19 has no static kind
+    line 241:33  e444  UnknownAggregateElementType: mutable_array_get needs mutarray; the element read by list_get at line 241:33 has no static kind
+    line 242:35  e452  UnknownAggregateElementType: mutable_array_get needs mutarray; the element read by list_get at line 242:35 has no static kind
+  runtime:  bigint, range-check, structural-equality, tagged-values
+
+ht_rehash (semantic): guarded   [UnknownParameterKind 2]
+ht_rehash<mutarray, int>: closed (transitively guarded)   [i21, line 250:13]
+  params:   table : mutarray, newCapacity : int
+  result:   unit
+  calls:    ht_capacity<mutarray>, ht_controls<mutarray>, ht_fill_empty<mutarray, int, int>, ht_keys<mutarray>, ht_rehash_scan<list, int, int, List[mutarray], int>, ht_values<mutarray>
+  guards:   0
+  runtime:  list-alloc, mutarray-alloc, mutarray-mutate, range-check
+
+ht_should_grow (semantic): guarded   [UnknownCallResultKind 2]
+ht_should_grow<mutarray>: guarded   [i17, line 265:18]
+  params:   table : mutarray
+  result:   bool
+  calls:    ht_capacity<mutarray>, ht_size<mutarray>, ht_tombstones<mutarray>
+  guards:   2
+    line 266:16  e552  UnknownCallResultKind: + needs int; the result of ht_size at line 266:16 has no static kind
+    line 266:33  e555  UnknownCallResultKind: + needs int; the result of ht_tombstones at line 266:33 has no static kind
+  runtime:  bigint, tagged-values
+
+ht_grow_or_clean (semantic): guarded   [UnknownCallResultKind 2]
+ht_grow_or_clean<mutarray>: guarded   [i20, line 269:20]
+  params:   table : mutarray
+  result:   unit
+  calls:    ht_capacity<mutarray>, ht_rehash<mutarray, int>, ht_size<mutarray>, ht_tombstones<mutarray>
+  guards:   2
+    line 270:8  e578  UnknownCallResultKind: > needs int; the result of ht_tombstones at line 270:8 has no static kind
+    line 270:31  e581  UnknownCallResultKind: > needs int; the result of ht_size at line 270:31 has no static kind
+  runtime:  bigint, tagged-values
+
+ht_place (semantic): guarded   [UnknownCallResultKind 5, UnknownParameterKind 2]
+ht_place<mutarray, int, str, str>: guarded   [i25, line 299:12]
+  params:   table : mutarray, index : int, key : str, value : str
+  result:   unit
+  calls:    ht_controls<mutarray>, ht_keys<mutarray>, ht_occupied_state<generic>, ht_size<mutarray>, ht_tombstone_state<generic>, ht_tombstones<mutarray>, ht_values<mutarray>
+  guards:   5
+    line 301:31  e608  UnknownCallResultKind: mutable_array_get needs mutarray; the result of ht_controls at line 300:16 has no static kind
+    line 303:23  e618  UnknownCallResultKind: mutable_array_set needs mutarray; the result of ht_keys at line 303:23 has no static kind
+    line 304:23  e625  UnknownCallResultKind: mutable_array_set needs mutarray; the result of ht_values at line 304:23 has no static kind
+    line 305:33  e636  UnknownCallResultKind: + needs int; the result of ht_size at line 305:33 has no static kind
+    line 307:37  e652  UnknownCallResultKind: - needs int; the result of ht_tombstones at line 307:37 has no static kind
+  runtime:  bigint, mutarray-mutate, range-check, structural-equality, tagged-values
+
+ht_set (semantic): guarded   [UnknownCallResultKind 2]
+ht_set<mutarray, str, str>: guarded   [i7, line 311:10]
+  params:   table : mutarray, key : str, value : str
+  result:   unit
+  calls:    ht_controls<mutarray>, ht_find_insert<mutarray, str, int, int>, ht_grow_or_clean<mutarray>, ht_occupied_state<generic>, ht_place<mutarray, int, str, str>, ht_probe_start<mutarray, str>, ht_should_grow<mutarray>, ht_values<mutarray>
+  guards:   2
+    line 314:31  e679  UnknownCallResultKind: mutable_array_get needs mutarray; the result of ht_controls at line 313:16 has no static kind
+    line 316:27  e689  UnknownCallResultKind: mutable_array_set needs mutarray; the result of ht_values at line 316:27 has no static kind
+  runtime:  bigint, mutarray-mutate, range-check, structural-equality, tagged-values
+
+ht_delete (semantic): guarded   [UnknownCallResultKind 5, UnknownParameterKind 1]
+ht_delete<mutarray, str>: guarded   [i28, line 331:13]
+  params:   table : mutarray, key : str
+  result:   unit
+  calls:    ht_controls<mutarray>, ht_find_get<mutarray, str, int>, ht_keys<mutarray>, ht_probe_start<mutarray, str>, ht_size<mutarray>, ht_tombstone_state<generic>, ht_tombstones<mutarray>, ht_values<mutarray>
+  guards:   5
+    line 336:23  e747  UnknownCallResultKind: mutable_array_set needs mutarray; the result of ht_controls at line 336:23 has no static kind
+    line 337:23  e755  UnknownCallResultKind: mutable_array_set needs mutarray; the result of ht_keys at line 337:23 has no static kind
+    line 338:23  e762  UnknownCallResultKind: mutable_array_set needs mutarray; the result of ht_values at line 338:23 has no static kind
+    line 339:33  e773  UnknownCallResultKind: - needs int; the result of ht_size at line 339:33 has no static kind
+    line 340:33  e783  UnknownCallResultKind: + needs int; the result of ht_tombstones at line 340:33 has no static kind
+  runtime:  bigint, mutarray-mutate, range-check, tagged-values
+
+sample (semantic): closed   [no blockers]
+sample<generic>: closed (transitively guarded)   [i1, line 367:10]
+  params:   (none)
+  result:   list[bool, bool, bool, bool, bool, any]
+  calls:    ht_contains<mutarray, str>, ht_delete<mutarray, str>, ht_get<mutarray, str>, ht_new<generic>, ht_set<mutarray, str, str>, ht_size<mutarray>
+  guards:   0
+  runtime:  list-alloc, structural-equality
+
+guards: generic 63, specialized 25; instances: 6 generic, 23 specialized
+   value: [true, true, false, false, true, 1]

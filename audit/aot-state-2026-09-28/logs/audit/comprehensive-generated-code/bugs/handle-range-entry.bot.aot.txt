@@ -1,0 +1,12 @@
+== handle-range-entry.bot (interp)
+<program>: closed   [program, line 4:1]
+  dispatch: closed -- natives: list x2; functions: f (non-tail)
+  blockers: none
+  runtime:  list-alloc
+
+f: closed   [e2, line 5:5]
+  params:   x : any   result: int
+  dispatch: closed -- natives: <, +
+  blockers: none
+  runtime:  bigint
+   value: [6, [4611686018427387904]]

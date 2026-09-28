@@ -1,0 +1,38 @@
+== string_replace.bot (interp)
+<program>: closed (transitively guarded)   [program, line 18:1]
+  dispatch: closed -- natives: list; functions: replace (non-tail)
+  blockers: none
+  runtime:  list-alloc
+
+matches_at: guarded   [e2, line 18:14]
+  params:   haystack : any, needle : any, index : any   result: bool
+  dispatch: closed -- natives: +, length x2, >, ==, substring
+  blockers:
+    line 19:11  e6  UnknownParameterKind: + needs int; parameter index (no annotation, no call-site inference) has no static kind
+    line 19:26  e9  UnknownParameterKind: length needs str; parameter needle (no annotation, no call-site inference) has no static kind
+    line 20:21  e16  UnknownParameterKind: length needs str; parameter haystack (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, char-index, range-check, string-alloc, tagged-values
+
+replace_from: guarded   [e28, line 27:16]
+  params:   haystack : any, needle : any, replacement : any, index : any, run_start : any, done : any   result: str
+  captures: matches_at (block), replace_from (block)
+  dispatch: closed -- natives: >, + x3, length x4, concat x3, substring x2; functions: matches_at (non-tail), replace_from (self, tail)
+  blockers:
+    line 28:8  e34  UnknownParameterKind: + needs int; parameter index (no annotation, no call-site inference) has no static kind
+    line 28:23  e37  UnknownParameterKind: length needs str; parameter needle (no annotation, no call-site inference) has no static kind
+    line 28:40  e40  UnknownParameterKind: length needs str; parameter haystack (no annotation, no call-site inference) has no static kind
+    line 29:23  e44  UnknownParameterKind: concat needs str; parameter done (no annotation, no call-site inference) has no static kind
+    line 29:49  e48  UnknownParameterKind: substring needs int; parameter run_start (no annotation, no call-site inference) has no static kind
+    line 32:25  e61  UnknownParameterKind: concat needs str; parameter done (no annotation, no call-site inference) has no static kind
+    line 32:51  e65  UnknownParameterKind: substring needs int; parameter run_start (no annotation, no call-site inference) has no static kind
+    line 34:89  e85  UnknownParameterKind: concat needs str; parameter replacement (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, char-index, range-check, string-alloc, tagged-values
+
+replace: guarded   [e98, line 38:11]
+  params:   haystack : any, needle : any, replacement : any   result: any
+  captures: replace_from (block)
+  dispatch: closed -- natives: ==, length; functions: replace_from (tail)
+  blockers:
+    line 39:15  e104  UnknownParameterKind: length needs str; parameter needle (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, char-index, tagged-values
+   value: ["abc", "aXc", "bb", "", ""]

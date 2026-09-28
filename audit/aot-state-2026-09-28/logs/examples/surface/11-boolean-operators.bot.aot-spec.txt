@@ -1,0 +1,23 @@
+== 11-boolean-operators.bot (interp)
+<program>: closed   [i0, line 6:1]
+  calls:    between<int, int, int>, outside<int, int, int>
+  guards:   0
+  runtime:  bigint, list-alloc
+
+between (semantic): guarded   [UnknownParameterKind 3]
+between<int, int, int>: closed   [i1, line 6:11]
+  params:   x : int, low : int, high : int
+  result:   bool
+  guards:   0
+  runtime:  bigint
+
+outside (semantic): closed   [no blockers]
+outside<int, int, int>: closed   [i2, line 9:11]
+  params:   x : int, low : int, high : int
+  result:   bool
+  calls:    between<int, int, int>
+  guards:   0
+  runtime:  none
+
+guards: generic 3, specialized 0; instances: 0 generic, 2 specialized
+   value: [true, false, true, true]

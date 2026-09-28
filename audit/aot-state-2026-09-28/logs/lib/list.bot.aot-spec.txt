@@ -1,0 +1,18 @@
+== list.bot (interp)
+<program>: closed   [i0, line 55:1]
+  guards:   0
+  runtime:  none
+
+find (semantic): open   [UnknownParameterKind 1, UnknownCallResultKind 1, DynamicCall 1]
+find<generic>: open   [i1, line 77:8]
+  params:   xs : any, predicate : any
+  result:   any
+  guards:   2
+    line 78:15  e40  UnknownParameterKind: the condition needs list; parameter xs (no annotation, no call-site inference) has no static kind
+    line 79:12  e42  UnknownCallResultKind: the condition needs bool; the result of the dynamic call at line 79:12 has no static kind
+    line 79:12  e43  DynamicCall: the callee has no static kind: native, block or not callable is decided at run time
+  runtime:  dynamic-call, tagged-values
+
+guards: generic 8, specialized 2; instances: 1 generic, 0 specialized
+   value: <block (xs predicate)>
+   block #0 refinements: (none)

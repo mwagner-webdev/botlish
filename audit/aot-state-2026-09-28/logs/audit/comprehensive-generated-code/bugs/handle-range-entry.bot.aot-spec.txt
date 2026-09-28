@@ -1,0 +1,15 @@
+== handle-range-entry.bot (interp)
+<program>: closed   [i0, line 4:1]
+  calls:    f<int>
+  guards:   0
+  runtime:  list-alloc
+
+f (semantic): closed   [no blockers]
+f<int>: closed   [i1, line 5:5]
+  params:   x : int
+  result:   int
+  guards:   0
+  runtime:  bigint
+
+guards: generic 0, specialized 0; instances: 0 generic, 1 specialized
+   value: [6, [4611686018427387904]]

@@ -1,0 +1,16 @@
+== refined-checks.bot (interp)
+<program>: closed   [i0, line 25:1]
+  calls:    check<int, int, str, str>
+  guards:   0
+  runtime:  evidence, list-alloc, string-alloc
+
+check (semantic): guarded   [UnknownParameterKind 4]
+check<int, int, str, str>: closed   [i1, line 27:9]
+  params:   n : int, acc : int, s : str, q : str
+  result:   int
+  calls:    check<int, int, str, str>
+  guards:   0
+  runtime:  bigint, evidence
+
+guards: generic 4, specialized 0; instances: 0 generic, 1 specialized
+   error: too many nested evaluations (infinite loop?) (TCL LIMIT STACK)

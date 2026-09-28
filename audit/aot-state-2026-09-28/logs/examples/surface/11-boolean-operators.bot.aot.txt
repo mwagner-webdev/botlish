@@ -1,0 +1,23 @@
+== 11-boolean-operators.bot (interp)
+<program>: closed (transitively guarded)   [program, line 6:1]
+  dispatch: closed -- natives: list, == x2; functions: between (non-tail), outside (non-tail)
+  blockers: none
+  runtime:  bigint, list-alloc
+  unreachable expressions skipped: 1
+
+between: guarded   [e2, line 6:11]
+  params:   x : any, low : any, high : any   result: bool
+  dispatch: closed -- natives: <= x2
+  blockers:
+    line 7:5  e6  UnknownParameterKind: <= needs int; parameter low (no annotation, no call-site inference) has no static kind
+    line 7:12  e7  UnknownParameterKind: <= needs int; parameter x (no annotation, no call-site inference) has no static kind
+    line 7:23  e12  UnknownParameterKind: <= needs int; parameter high (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+outside: closed (transitively guarded)   [e17, line 9:11]
+  params:   x : any, low : any, high : any   result: bool
+  captures: between (block)
+  dispatch: closed -- functions: between (non-tail)
+  blockers: none
+  runtime:  none
+   value: [true, false, true, true]

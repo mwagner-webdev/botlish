@@ -1,0 +1,14 @@
+== fib.bot (interp)
+<program>: closed (transitively guarded)   [program, line 14:1]
+  dispatch: closed -- functions: fib (non-tail)
+  blockers: none
+  runtime:  none
+
+fib: guarded   [e2, line 14:7]
+  params:   n : any   result: int
+  captures: fib (block)
+  dispatch: closed -- natives: <, +, - x2; functions: fib (self, non-tail)
+  blockers:
+    line 15:8  e6  UnknownParameterKind: < needs int; parameter n (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+   value: 17711

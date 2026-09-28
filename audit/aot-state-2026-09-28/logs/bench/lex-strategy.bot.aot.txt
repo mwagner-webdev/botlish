@@ -1,0 +1,112 @@
+== lex-strategy.bot (interp)
+<program>: closed (transitively open)   [program, line 40:1]
+  dispatch: closed -- natives: list x2, list_length, list_get; functions: fully_alnum? (non-tail), total_valid (non-tail)
+  blockers: none
+  runtime:  list-alloc, range-check
+
+list::any?: open   [e2, line 59:8]
+  params:   xs : any, predicate : any   result: bool
+  dispatch: open -- dynamic calls: 1
+  blockers:
+    line 60:15  e4  UnknownParameterKind: the condition needs list; parameter xs (no annotation, no call-site inference) has no static kind
+    line 61:12  e6  UnknownCallResultKind: the condition needs bool; the result of the dynamic call at line 61:12 has no static kind
+    line 61:12  e7  DynamicCall: the callee has no static kind: native, block or not callable is decided at run time
+  runtime:  dynamic-call, tagged-values
+
+list::all?: open   [e13, line 65:8]
+  params:   xs : any, predicate : any   result: bool
+  dispatch: open -- dynamic calls: 1
+  blockers:
+    line 66:15  e15  UnknownParameterKind: the condition needs list; parameter xs (no annotation, no call-site inference) has no static kind
+    line 67:16  e18  UnknownCallResultKind: the condition needs bool; the result of the dynamic call at line 67:16 has no static kind
+    line 67:16  e19  DynamicCall: the callee has no static kind: native, block or not callable is decided at run time
+  runtime:  dynamic-call, tagged-values
+
+list::none?: open   [e27, line 71:9]
+  params:   xs : any, predicate : any   result: bool
+  dispatch: open -- dynamic calls: 1
+  blockers:
+    line 72:15  e29  UnknownParameterKind: the condition needs list; parameter xs (no annotation, no call-site inference) has no static kind
+    line 73:12  e31  UnknownCallResultKind: the condition needs bool; the result of the dynamic call at line 73:12 has no static kind
+    line 73:12  e32  DynamicCall: the callee has no static kind: native, block or not callable is decided at run time
+  runtime:  dynamic-call, tagged-values
+
+list::find: open   [e38, line 77:8]
+  params:   xs : any, predicate : any   result: any
+  dispatch: open -- dynamic calls: 1
+  blockers:
+    line 78:15  e40  UnknownParameterKind: the condition needs list; parameter xs (no annotation, no call-site inference) has no static kind
+    line 79:12  e42  UnknownCallResultKind: the condition needs bool; the result of the dynamic call at line 79:12 has no static kind
+    line 79:12  e43  DynamicCall: the callee has no static kind: native, block or not callable is decided at run time
+  runtime:  dynamic-call, tagged-values
+
+lenient_ident_char?: guarded   [e49, line 40:23]
+  params:   c : any   result: bool
+  dispatch: closed -- natives: is_tcl_alnum, == x2
+  blockers:
+    line 41:18  e54  UnknownParameterKind: is_tcl_alnum needs str; parameter c (no annotation, no call-site inference) has no static kind
+  runtime:  char-index, range-check, tagged-values
+
+choose_classifier: guarded   [e72, line 43:21]
+  params:   strict_mode : any   result: any
+  captures: lenient_ident_char? (block)
+  dispatch: closed -- no calls
+  blockers:
+    line 44:8  e74  UnknownParameterKind: the condition needs bool; parameter strict_mode (no annotation, no call-site inference) has no static kind
+  runtime:  tagged-values
+
+chars_of: guarded   [e78, line 49:12]
+  params:   s : any, i : any, acc : any   result: any
+  captures: chars_of (block)
+  dispatch: closed -- natives: >=, length, + x2, list_append, substring; functions: chars_of (self, tail)
+  blockers:
+    line 50:8  e82  UnknownParameterKind: >= needs int; parameter i (no annotation, no call-site inference) has no static kind
+    line 50:20  e85  UnknownParameterKind: length needs str; parameter s (no annotation, no call-site inference) has no static kind
+    line 52:36  e97  UnknownParameterKind: list_append needs list; parameter acc (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, char-index, list-alloc, range-check, string-alloc, tagged-values
+
+classify: open   [e107, line 54:12]
+  params:   token : any, strict_mode : any   result: list
+  captures: choose_classifier (block), chars_of (block)
+  dispatch: open -- natives: list; functions: chars_of (non-tail), choose_classifier (non-tail); dynamic calls: 1
+  blockers:
+    line 56:15  e113  UnknownCallResultKind: the condition needs list; the result of chars_of at line 56:15 has no static kind
+    line 57:9  e120  DynamicCall: the callee has no static kind: native, block or not callable is decided at run time
+  runtime:  dynamic-call, list-alloc, tagged-values
+
+count_true: guarded   [e123, line 59:14]
+  params:   flags : any, i : any, acc : any   result: any
+  captures: count_true (block)
+  dispatch: closed -- natives: >=, list_length, list_get, + x2; functions: count_true (self, tail)
+  blockers:
+    line 60:8  e127  UnknownParameterKind: >= needs int; parameter i (no annotation, no call-site inference) has no static kind
+    line 60:25  e130  UnknownParameterKind: list_length needs list; parameter flags (no annotation, no call-site inference) has no static kind
+    line 62:15  e135  UnknownAggregateElementType: the condition needs bool; the element read by list_get at line 62:15 has no static kind
+    line 66:30  e150  UnknownParameterKind: + needs int; parameter acc (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, range-check, tagged-values
+
+valid_chars: closed (transitively open)   [e153, line 68:15]
+  params:   token : any, strict_mode : any   result: any
+  captures: count_true (block), classify (block)
+  dispatch: closed -- functions: classify (non-tail), count_true (tail)
+  blockers: none
+  runtime:  none
+
+fully_alnum?: closed (transitively open)   [e163, line 71:16]
+  params:   token : any   result: bool
+  captures: chars_of (block)
+  dispatch: closed -- natives: list; functions: chars_of (non-tail), list::all? (tail)
+  blockers: none
+  runtime:  list-alloc
+
+total_valid: guarded (transitively open)   [e185, line 76:15]
+  params:   tokens : any, strict_mode : any, i : any, acc : any   result: any
+  captures: total_valid (block), valid_chars (block)
+  dispatch: closed -- natives: >=, list_length, + x2, list_get; functions: total_valid (self, tail), valid_chars (non-tail)
+  blockers:
+    line 77:8  e189  UnknownParameterKind: >= needs int; parameter i (no annotation, no call-site inference) has no static kind
+    line 77:25  e192  UnknownParameterKind: list_length needs list; parameter tokens (no annotation, no call-site inference) has no static kind
+    line 79:45  e205  UnknownParameterKind: + needs int; parameter acc (no annotation, no call-site inference) has no static kind
+    line 79:51  e206  UnknownCallResultKind: + needs int; the result of valid_chars at line 79:51 has no static kind
+  runtime:  bigint, range-check, tagged-values
+   value: [58, 65, 1, "café"]

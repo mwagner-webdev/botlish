@@ -1,0 +1,88 @@
+== lex-strategy.bot (interp)
+<program>: closed (transitively open)   [i0, line 40:1]
+  calls:    fully_alnum?<str>, total_valid<List[str], bool, int, int>
+  guards:   0
+  runtime:  list-alloc, range-check
+
+list::all? (semantic): open   [UnknownParameterKind 1, UnknownCallResultKind 1, DynamicCall 1]
+list::all?<List[str], native>: guarded   [i10, line 65:8]
+  params:   xs : List[str], predicate : native
+  result:   bool
+  guards:   1
+    line 67:16  e18  UnknownCallResultKind: the condition needs bool; the result of the dynamic call at line 67:16 has no static kind
+  runtime:  indirect-call, tagged-values
+
+lenient_ident_char? (semantic): guarded   [UnknownParameterKind 1]
+lenient_ident_char?<generic>: guarded   [i5, line 40:23]
+  params:   c : any
+  result:   bool
+  guards:   1
+    line 41:18  e54  UnknownParameterKind: is_tcl_alnum needs str; parameter c (no annotation, no call-site inference) has no static kind
+  runtime:  char-index, range-check, tagged-values
+
+choose_classifier (semantic): guarded   [UnknownParameterKind 1]
+choose_classifier<bool>: closed   [i4, line 43:21]
+  params:   strict_mode : bool
+  result:   any
+  guards:   0
+  runtime:  none
+
+chars_of (semantic): guarded   [UnknownParameterKind 3]
+chars_of<str, int, List[never]>: closed   [i6, line 49:12]
+  params:   s : str, i : int, acc : List[never]
+  result:   List[str]
+  calls:    chars_of<str, int, List[str]>
+  guards:   0
+  runtime:  bigint, char-index, list-alloc, range-check, string-alloc
+
+chars_of<str, int, List[str]>: closed   [i7, line 49:12]
+  params:   s : str, i : int, acc : List[str]
+  result:   List[str]
+  calls:    chars_of<str, int, List[str]>
+  guards:   0
+  runtime:  bigint, char-index, list-alloc, range-check, string-alloc
+
+classify (semantic): open   [UnknownCallResultKind 1, DynamicCall 1]
+classify<str, bool>: open   [i3, line 54:12]
+  params:   token : str, strict_mode : bool
+  result:   list
+  calls:    chars_of<str, int, List[never]>, choose_classifier<bool>
+  guards:   0
+    line 57:9  e120  DynamicCall: the callee has no static kind: native, block or not callable is decided at run time
+  runtime:  dynamic-call, list-alloc, tagged-values
+
+count_true (semantic): guarded   [UnknownParameterKind 3, UnknownAggregateElementType 1]
+count_true<list, int, int>: guarded   [i8, line 59:14]
+  params:   flags : list, i : int, acc : int
+  result:   int
+  calls:    count_true<list, int, int>
+  guards:   1
+    line 62:15  e135  UnknownAggregateElementType: the condition needs bool; the element read by list_get at line 62:15 has no static kind
+  runtime:  bigint, range-check, tagged-values
+
+valid_chars (semantic): closed   [no blockers]
+valid_chars<str, bool>: closed (transitively open)   [i2, line 68:15]
+  params:   token : str, strict_mode : bool
+  result:   int
+  calls:    classify<str, bool>, count_true<list, int, int>
+  guards:   0
+  runtime:  none
+
+fully_alnum? (semantic): closed   [no blockers]
+fully_alnum?<str>: closed (transitively guarded)   [i9, line 71:16]
+  params:   token : str
+  result:   bool
+  calls:    chars_of<str, int, List[never]>, list::all?<List[str], native>
+  guards:   0
+  runtime:  list-alloc
+
+total_valid (semantic): guarded   [UnknownParameterKind 3, UnknownCallResultKind 1]
+total_valid<List[str], bool, int, int>: closed (transitively open)   [i1, line 76:15]
+  params:   tokens : List[str], strict_mode : bool, i : int, acc : int
+  result:   int
+  calls:    total_valid<List[str], bool, int, int>, valid_chars<str, bool>
+  guards:   0
+  runtime:  bigint, range-check
+
+guards: generic 22, specialized 3; instances: 1 generic, 9 specialized
+   value: [58, 65, 1, "café"]

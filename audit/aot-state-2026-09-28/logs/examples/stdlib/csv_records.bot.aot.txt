@@ -1,0 +1,420 @@
+== csv_records.bot (interp)
+<program>: closed (transitively guarded)   [program, line 103:1]
+  dispatch: closed -- functions: sample (non-tail)
+  blockers: none
+  runtime:  none
+
+geo_new: closed   [e2, line 103:11]
+  params:   (none)   result: list
+  dispatch: closed -- natives: list, mutable_array_allocate
+  blockers: none
+  runtime:  list-alloc, mutarray-alloc
+
+geo_new_capacity: guarded   [e10, line 106:20]
+  params:   capacity : any, length : any   result: int
+  dispatch: closed -- natives: *, <=, +
+  blockers:
+    line 107:15  e14  UnknownParameterKind: * needs int; parameter capacity (no annotation, no call-site inference) has no static kind
+    line 108:19  e20  UnknownParameterKind: <= needs int; parameter length (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+geo_grow: guarded   [e28, line 113:12]
+  params:   storage : any, length : any   result: mutarray
+  captures: geo_new_capacity (block)
+  dispatch: closed -- natives: mutable_array_capacity, <, mutable_array_allocate, mutable_array_copy; functions: geo_new_capacity (non-tail)
+  blockers:
+    line 114:39  e32  UnknownParameterKind: mutable_array_capacity needs mutarray; parameter storage (no annotation, no call-site inference) has no static kind
+    line 115:8  e36  UnknownParameterKind: < needs int; parameter length (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, mutarray-alloc, mutarray-mutate, range-check, tagged-values
+
+geo_append: guarded   [e58, line 123:14]
+  params:   builder : any, value : any   result: list
+  captures: geo_grow (block)
+  dispatch: closed -- natives: list_get x2, mutable_array_set, list, +; functions: geo_grow (non-tail)
+  blockers:
+    line 124:24  e62  UnknownParameterKind: list_get needs list; parameter builder (no annotation, no call-site inference) has no static kind
+    line 127:30  e77  UnknownAggregateElementType: mutable_array_set needs int; the element read by list_get at line 125:14 has no static kind
+  runtime:  bigint, list-alloc, mutarray-mutate, range-check, tagged-values
+
+geo_finish: guarded   [e87, line 130:14]
+  params:   builder : any   result: list
+  dispatch: closed -- natives: list_get x2, mutable_array_freeze
+  blockers:
+    line 131:24  e91  UnknownParameterKind: list_get needs list; parameter builder (no annotation, no call-site inference) has no static kind
+    line 133:26  e100  UnknownAggregateElementType: mutable_array_freeze needs mutarray; the element read by list_get at line 131:15 has no static kind
+    line 133:35  e101  UnknownAggregateElementType: mutable_array_freeze needs int; the element read by list_get at line 132:14 has no static kind
+  runtime:  mutarray-alloc, range-check, tagged-values
+
+peek: guarded   [e103, line 139:8]
+  params:   text : any, index : any   result: str
+  dispatch: closed -- natives: >=, length, substring, +
+  blockers:
+    line 140:8  e107  UnknownParameterKind: >= needs int; parameter index (no annotation, no call-site inference) has no static kind
+    line 140:24  e110  UnknownParameterKind: length needs str; parameter text (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, char-index, range-check, string-alloc, tagged-values
+
+scan_unquoted: guarded   [e122, line 145:17]
+  params:   text : any, start : any, index : any   result: list
+  captures: peek (block), scan_unquoted (block)
+  dispatch: closed -- natives: == x3, list, substring, +; functions: peek (non-tail), scan_unquoted (self, tail)
+  blockers:
+    line 148:27  e156  UnknownParameterKind: substring needs str; parameter text (no annotation, no call-site inference) has no static kind
+    line 148:33  e157  UnknownParameterKind: substring needs int; parameter start (no annotation, no call-site inference) has no static kind
+    line 148:40  e158  UnknownParameterKind: substring needs int; parameter index (no annotation, no call-site inference) has no static kind
+    line 150:32  e166  UnknownParameterKind: + needs int; parameter index (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, char-index, list-alloc, range-check, string-alloc, tagged-values
+
+scan_quoted: guarded   [e169, line 152:15]
+  params:   text : any, index : any, field : any   result: list
+  captures: peek (block), scan_quoted (block)
+  dispatch: closed -- natives: == x2, + x4, concat x2, list; functions: peek (non-tail), scan_quoted (self, tail)
+  blockers:
+    line 155:23  e188  UnknownParameterKind: + needs int; parameter index (no annotation, no call-site inference) has no static kind
+    line 156:56  e201  UnknownParameterKind: concat needs str; parameter field (no annotation, no call-site inference) has no static kind
+    line 160:23  e216  UnknownParameterKind: + needs int; parameter index (no annotation, no call-site inference) has no static kind
+    line 160:41  e220  UnknownParameterKind: concat needs str; parameter field (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, list-alloc, string-alloc, tagged-values
+
+scan_field: guarded   [e223, line 162:14]
+  params:   text : any, index : any   result: list
+  captures: peek (block), scan_quoted (block), scan_unquoted (block)
+  dispatch: closed -- natives: ==, +; functions: peek (non-tail), scan_quoted (tail), scan_unquoted (tail)
+  blockers:
+    line 164:34  e238  UnknownParameterKind: + needs int; parameter index (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+scan_record: guarded   [e247, line 168:15]
+  params:   text : any, index : any, fields : any   result: list
+  captures: scan_field (block), geo_append (block), peek (block), scan_record (block), geo_finish (block)
+  dispatch: closed -- natives: list_get x2, == x2, + x2, list x2; functions: geo_append (non-tail), geo_finish (non-tail), peek (non-tail), scan_field (non-tail), scan_record (self, tail)
+  blockers:
+    line 174:34  e282  UnknownAggregateElementType: + needs int; the element read by list_get at line 171:12 has no static kind
+    line 177:35  e298  UnknownAggregateElementType: + needs int; the element read by list_get at line 171:12 has no static kind
+  runtime:  bigint, list-alloc, range-check, tagged-values
+
+scan_records: guarded   [e307, line 181:16]
+  params:   text : any, index : any, records : any   result: list
+  captures: geo_finish (block), scan_record (block), geo_new (block), scan_records (block), geo_append (block)
+  dispatch: closed -- natives: >=, length, list_get x2; functions: geo_append (non-tail), geo_finish (tail), geo_new (non-tail), scan_record (non-tail), scan_records (self, tail)
+  blockers:
+    line 182:8  e311  UnknownParameterKind: >= needs int; parameter index (no annotation, no call-site inference) has no static kind
+    line 182:24  e314  UnknownParameterKind: length needs str; parameter text (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, char-index, range-check, tagged-values
+
+csv_parse: closed (transitively guarded)   [e341, line 188:13]
+  params:   text : any   result: list
+  captures: scan_records (block), geo_new (block)
+  dispatch: closed -- functions: geo_new (non-tail), scan_records (tail)
+  blockers: none
+  runtime:  none
+
+ht_min_capacity: closed   [e349, line 196:19]
+  params:   (none)   result: int
+  dispatch: closed -- no calls
+  blockers: none
+  runtime:  none
+
+ht_empty_state: closed   [e352, line 199:18]
+  params:   (none)   result: int
+  dispatch: closed -- no calls
+  blockers: none
+  runtime:  none
+
+ht_occupied_state: closed   [e355, line 202:21]
+  params:   (none)   result: int
+  dispatch: closed -- no calls
+  blockers: none
+  runtime:  none
+
+ht_tombstone_state: closed   [e358, line 205:22]
+  params:   (none)   result: int
+  dispatch: closed -- no calls
+  blockers: none
+  runtime:  none
+
+ht_fill_empty: guarded   [e361, line 208:17]
+  params:   controls : any, i : any, capacity : any   result: unit
+  captures: ht_empty_state (block), ht_fill_empty (block)
+  dispatch: closed -- natives: >=, mutable_array_set, +; functions: ht_empty_state (non-tail), ht_fill_empty (self, tail)
+  blockers:
+    line 209:8  e365  UnknownParameterKind: >= needs int; parameter i (no annotation, no call-site inference) has no static kind
+    line 209:13  e366  UnknownParameterKind: >= needs int; parameter capacity (no annotation, no call-site inference) has no static kind
+    line 212:23  e371  UnknownParameterKind: mutable_array_set needs mutarray; parameter controls (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, mutarray-mutate, range-check, tagged-values
+
+ht_alloc: guarded   [e384, line 215:12]
+  params:   capacity : any   result: mutarray
+  captures: ht_fill_empty (block)
+  dispatch: closed -- natives: mutable_array_allocate x4, mutable_array_set x5; functions: ht_fill_empty (non-tail)
+  blockers:
+    line 216:39  e388  UnknownParameterKind: mutable_array_allocate needs int; parameter capacity (no annotation, no call-site inference) has no static kind
+  runtime:  mutarray-alloc, mutarray-mutate, range-check, tagged-values
+
+ht_new: closed (transitively guarded)   [e433, line 228:10]
+  params:   (none)   result: mutarray
+  captures: ht_alloc (block), ht_min_capacity (block)
+  dispatch: closed -- functions: ht_alloc (tail), ht_min_capacity (non-tail)
+  blockers: none
+  runtime:  none
+
+ht_capacity_for: guarded   [e439, line 231:19]
+  params:   expected : any, capacity : any   result: int
+  captures: ht_capacity_for (block)
+  dispatch: closed -- natives: <=, * x3; functions: ht_capacity_for (self, tail)
+  blockers:
+    line 232:8  e445  UnknownParameterKind: * needs int; parameter expected (no annotation, no call-site inference) has no static kind
+    line 232:24  e449  UnknownParameterKind: * needs int; parameter capacity (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+ht_new_sized: closed (transitively guarded)   [e461, line 237:16]
+  params:   expected : any   result: mutarray
+  captures: ht_alloc (block), ht_capacity_for (block), ht_min_capacity (block)
+  dispatch: closed -- functions: ht_alloc (tail), ht_capacity_for (non-tail), ht_min_capacity (non-tail)
+  blockers: none
+  runtime:  none
+
+ht_controls: guarded   [e470, line 240:15]
+  params:   table : any   result: any
+  dispatch: closed -- natives: mutable_array_get
+  blockers:
+    line 241:23  e473  UnknownParameterKind: mutable_array_get needs mutarray; parameter table (no annotation, no call-site inference) has no static kind
+  runtime:  range-check, tagged-values
+
+ht_keys: guarded   [e476, line 243:11]
+  params:   table : any   result: any
+  dispatch: closed -- natives: mutable_array_get
+  blockers:
+    line 244:23  e479  UnknownParameterKind: mutable_array_get needs mutarray; parameter table (no annotation, no call-site inference) has no static kind
+  runtime:  range-check, tagged-values
+
+ht_values: guarded   [e482, line 246:13]
+  params:   table : any   result: any
+  dispatch: closed -- natives: mutable_array_get
+  blockers:
+    line 247:23  e485  UnknownParameterKind: mutable_array_get needs mutarray; parameter table (no annotation, no call-site inference) has no static kind
+  runtime:  range-check, tagged-values
+
+ht_size: guarded   [e488, line 249:11]
+  params:   table : any   result: any
+  dispatch: closed -- natives: mutable_array_get
+  blockers:
+    line 250:23  e491  UnknownParameterKind: mutable_array_get needs mutarray; parameter table (no annotation, no call-site inference) has no static kind
+  runtime:  range-check, tagged-values
+
+ht_tombstones: guarded   [e494, line 252:17]
+  params:   table : any   result: any
+  dispatch: closed -- natives: mutable_array_get
+  blockers:
+    line 253:23  e497  UnknownParameterKind: mutable_array_get needs mutarray; parameter table (no annotation, no call-site inference) has no static kind
+  runtime:  range-check, tagged-values
+
+ht_capacity: guarded   [e500, line 255:15]
+  params:   table : any   result: int
+  captures: ht_controls (block)
+  dispatch: closed -- natives: mutable_array_capacity; functions: ht_controls (non-tail)
+  blockers:
+    line 256:28  e503  UnknownCallResultKind: mutable_array_capacity needs mutarray; the result of ht_controls at line 256:28 has no static kind
+  runtime:  tagged-values
+
+ht_probe_start: closed (transitively guarded)   [e507, line 258:18]
+  params:   table : any, key : any   result: int
+  captures: ht_capacity (block)
+  dispatch: closed -- natives: mod, hash; functions: ht_capacity (non-tail)
+  blockers: none
+  runtime:  bigint, hash
+
+ht_probe_next: guarded   [e517, line 261:17]
+  params:   table : any, index : any   result: int
+  captures: ht_capacity (block)
+  dispatch: closed -- natives: mod, +; functions: ht_capacity (non-tail)
+  blockers:
+    line 262:9  e522  UnknownParameterKind: + needs int; parameter index (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+ht_find_get: guarded   [e528, line 264:15]
+  params:   table : any, key : any, index : any   result: int
+  captures: ht_controls (block), ht_empty_state (block), ht_occupied_state (block), ht_keys (block), ht_find_get (block), ht_probe_next (block)
+  dispatch: closed -- natives: mutable_array_get x2, == x3, -; functions: ht_controls (non-tail), ht_empty_state (non-tail), ht_find_get (self, tail), ht_keys (non-tail), ht_occupied_state (non-tail), ht_probe_next (non-tail)
+  blockers:
+    line 266:31  e536  UnknownCallResultKind: mutable_array_get needs mutarray; the result of ht_controls at line 265:16 has no static kind
+    line 266:41  e537  UnknownParameterKind: mutable_array_get needs int; parameter index (no annotation, no call-site inference) has no static kind
+    line 270:59  e561  UnknownCallResultKind: mutable_array_get needs mutarray; the result of ht_keys at line 270:59 has no static kind
+  runtime:  bigint, range-check, structural-equality, tagged-values
+
+ht_find_insert: guarded   [e580, line 275:18]
+  params:   table : any, key : any, index : any, first_tombstone : any   result: int
+  captures: ht_controls (block), ht_empty_state (block), ht_occupied_state (block), ht_keys (block), ht_tombstone_state (block), ht_find_insert (block), ht_probe_next (block)
+  dispatch: closed -- natives: mutable_array_get x2, == x4, >=, <; functions: ht_controls (non-tail), ht_empty_state (non-tail), ht_find_insert (self, tail), ht_keys (non-tail), ht_occupied_state (non-tail), ht_probe_next (non-tail), ht_tombstone_state (non-tail)
+  blockers:
+    line 277:31  e588  UnknownCallResultKind: mutable_array_get needs mutarray; the result of ht_controls at line 276:16 has no static kind
+    line 277:41  e589  UnknownParameterKind: mutable_array_get needs int; parameter index (no annotation, no call-site inference) has no static kind
+    line 279:12  e599  UnknownParameterKind: >= needs int; parameter first_tombstone (no annotation, no call-site inference) has no static kind
+    line 284:59  e617  UnknownCallResultKind: mutable_array_get needs mutarray; the result of ht_keys at line 284:59 has no static kind
+    line 287:42  e637  UnknownParameterKind: < needs int; parameter first_tombstone (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, range-check, structural-equality, tagged-values
+
+ht_get: guarded   [e662, line 292:10]
+  params:   table : any, key : any   result: any
+  captures: ht_find_get (block), ht_probe_start (block), ht_values (block)
+  dispatch: closed -- natives: <, mutable_array_get; functions: ht_find_get (non-tail), ht_probe_start (non-tail), ht_values (non-tail)
+  blockers:
+    line 297:23  e681  UnknownCallResultKind: mutable_array_get needs mutarray; the result of ht_values at line 297:23 has no static kind
+  runtime:  bigint, range-check, tagged-values
+
+ht_contains: closed (transitively guarded)   [e686, line 299:15]
+  params:   table : any, key : any   result: bool
+  captures: ht_find_get (block), ht_probe_start (block)
+  dispatch: closed -- natives: >=; functions: ht_find_get (non-tail), ht_probe_start (non-tail)
+  blockers: none
+  runtime:  bigint
+
+ht_rehash_probe: guarded   [e699, line 302:19]
+  params:   newControls : any, index : any, capacity : any   result: int
+  captures: ht_empty_state (block), ht_rehash_probe (block)
+  dispatch: closed -- natives: mutable_array_get, ==, mod, +; functions: ht_empty_state (non-tail), ht_rehash_probe (self, tail)
+  blockers:
+    line 303:31  e703  UnknownParameterKind: mutable_array_get needs mutarray; parameter newControls (no annotation, no call-site inference) has no static kind
+    line 303:44  e704  UnknownParameterKind: mutable_array_get needs int; parameter index (no annotation, no call-site inference) has no static kind
+    line 307:49  e722  UnknownParameterKind: mod needs int; parameter capacity (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, range-check, structural-equality, tagged-values
+
+ht_rehash_insert: guarded   [e725, line 309:20]
+  params:   dest : any, capacity : any, key : any, value : any   result: unit
+  captures: ht_rehash_probe (block), ht_occupied_state (block)
+  dispatch: closed -- natives: list_get x3, mod, hash, mutable_array_set x3; functions: ht_occupied_state (non-tail), ht_rehash_probe (non-tail)
+  blockers:
+    line 310:28  e729  UnknownParameterKind: list_get needs list; parameter dest (no annotation, no call-site inference) has no static kind
+    line 311:57  e740  UnknownParameterKind: mod needs int; parameter capacity (no annotation, no call-site inference) has no static kind
+    line 312:23  e744  UnknownAggregateElementType: mutable_array_set needs mutarray; the element read by list_get at line 310:19 has no static kind
+    line 313:23  e750  UnknownAggregateElementType: mutable_array_set needs mutarray; the element read by list_get at line 313:23 has no static kind
+    line 314:23  e758  UnknownAggregateElementType: mutable_array_set needs mutarray; the element read by list_get at line 314:23 has no static kind
+  runtime:  bigint, hash, mutarray-mutate, range-check, tagged-values
+
+ht_rehash_scan: guarded   [e766, line 317:18]
+  params:   src : any, i : any, oldCapacity : any, dest : any, newCapacity : any   result: unit
+  captures: ht_occupied_state (block), ht_rehash_insert (block), ht_rehash_scan (block)
+  dispatch: closed -- natives: >=, list_get x3, ==, mutable_array_get x3, +; functions: ht_occupied_state (non-tail), ht_rehash_insert (non-tail), ht_rehash_scan (self, tail)
+  blockers:
+    line 318:8  e770  UnknownParameterKind: >= needs int; parameter i (no annotation, no call-site inference) has no static kind
+    line 318:13  e771  UnknownParameterKind: >= needs int; parameter oldCapacity (no annotation, no call-site inference) has no static kind
+    line 321:28  e777  UnknownParameterKind: list_get needs list; parameter src (no annotation, no call-site inference) has no static kind
+    line 322:26  e784  UnknownAggregateElementType: mutable_array_get needs mutarray; the element read by list_get at line 321:19 has no static kind
+    line 323:33  e791  UnknownAggregateElementType: mutable_array_get needs mutarray; the element read by list_get at line 323:33 has no static kind
+    line 324:35  e799  UnknownAggregateElementType: mutable_array_get needs mutarray; the element read by list_get at line 324:35 has no static kind
+  runtime:  bigint, range-check, structural-equality, tagged-values
+
+ht_rehash: guarded   [e821, line 329:13]
+  params:   table : any, newCapacity : any   result: unit
+  captures: ht_controls (block), ht_keys (block), ht_values (block), ht_capacity (block), ht_fill_empty (block), ht_rehash_scan (block)
+  dispatch: closed -- natives: list x2, mutable_array_allocate x3, mutable_array_set x4, list_get x3; functions: ht_capacity (non-tail), ht_controls (non-tail), ht_fill_empty (non-tail), ht_keys (non-tail), ht_rehash_scan (non-tail), ht_values (non-tail)
+  blockers:
+    line 332:42  e841  UnknownParameterKind: mutable_array_allocate needs int; parameter newCapacity (no annotation, no call-site inference) has no static kind
+    line 336:23  e866  UnknownParameterKind: mutable_array_set needs mutarray; parameter table (no annotation, no call-site inference) has no static kind
+  runtime:  list-alloc, mutarray-alloc, mutarray-mutate, range-check, tagged-values
+
+ht_should_grow: guarded   [e895, line 342:18]
+  params:   table : any   result: bool
+  captures: ht_size (block), ht_tombstones (block), ht_capacity (block)
+  dispatch: closed -- natives: + x2, >, * x2; functions: ht_capacity (non-tail), ht_size (non-tail), ht_tombstones (non-tail)
+  blockers:
+    line 343:16  e899  UnknownCallResultKind: + needs int; the result of ht_size at line 343:16 has no static kind
+    line 343:33  e902  UnknownCallResultKind: + needs int; the result of ht_tombstones at line 343:33 has no static kind
+  runtime:  bigint, tagged-values
+
+ht_grow_or_clean: guarded   [e921, line 346:20]
+  params:   table : any   result: unit
+  captures: ht_tombstones (block), ht_size (block), ht_rehash (block), ht_capacity (block)
+  dispatch: closed -- natives: >, *; functions: ht_capacity (non-tail), ht_rehash (tail), ht_size (non-tail), ht_tombstones (non-tail)
+  blockers:
+    line 347:8  e925  UnknownCallResultKind: > needs int; the result of ht_tombstones at line 347:8 has no static kind
+    line 347:31  e928  UnknownCallResultKind: > needs int; the result of ht_size at line 347:31 has no static kind
+  runtime:  bigint, tagged-values
+
+ht_place: guarded   [e947, line 352:12]
+  params:   table : any, index : any, key : any, value : any   result: unit
+  captures: ht_controls (block), ht_occupied_state (block), ht_keys (block), ht_values (block), ht_size (block), ht_tombstone_state (block), ht_tombstones (block)
+  dispatch: closed -- natives: mutable_array_get, mutable_array_set x5, +, ==, -; functions: ht_controls (non-tail), ht_keys (non-tail), ht_occupied_state (non-tail), ht_size (non-tail), ht_tombstone_state (non-tail), ht_tombstones (non-tail), ht_values (non-tail)
+  blockers:
+    line 354:31  e955  UnknownCallResultKind: mutable_array_get needs mutarray; the result of ht_controls at line 353:16 has no static kind
+    line 354:41  e956  UnknownParameterKind: mutable_array_get needs int; parameter index (no annotation, no call-site inference) has no static kind
+    line 356:23  e965  UnknownCallResultKind: mutable_array_set needs mutarray; the result of ht_keys at line 356:23 has no static kind
+    line 357:23  e972  UnknownCallResultKind: mutable_array_set needs mutarray; the result of ht_values at line 357:23 has no static kind
+    line 358:23  e979  UnknownParameterKind: mutable_array_set needs mutarray; parameter table (no annotation, no call-site inference) has no static kind
+    line 358:33  e983  UnknownCallResultKind: + needs int; the result of ht_size at line 358:33 has no static kind
+    line 360:37  e999  UnknownCallResultKind: - needs int; the result of ht_tombstones at line 360:37 has no static kind
+  runtime:  bigint, mutarray-mutate, range-check, structural-equality, tagged-values
+
+ht_set: guarded   [e1005, line 364:10]
+  params:   table : any, key : any, value : any   result: unit
+  captures: ht_find_insert (block), ht_probe_start (block), ht_controls (block), ht_occupied_state (block), ht_values (block), ht_should_grow (block), ht_grow_or_clean (block), ht_place (block)
+  dispatch: closed -- natives: - x2, mutable_array_get, ==, mutable_array_set; functions: ht_controls (non-tail), ht_find_insert (non-tail), ht_grow_or_clean (non-tail), ht_occupied_state (non-tail), ht_place (tail), ht_probe_start (non-tail), ht_should_grow (non-tail), ht_values (non-tail)
+  blockers:
+    line 367:31  e1026  UnknownCallResultKind: mutable_array_get needs mutarray; the result of ht_controls at line 366:16 has no static kind
+    line 369:27  e1036  UnknownCallResultKind: mutable_array_set needs mutarray; the result of ht_values at line 369:27 has no static kind
+  runtime:  bigint, mutarray-mutate, range-check, structural-equality, tagged-values
+
+row_new: guarded   [e1075, line 384:11]
+  params:   presize : any, header_count : any   result: mutarray
+  captures: ht_new_sized (block), ht_new (block)
+  dispatch: closed -- functions: ht_new (tail), ht_new_sized (tail)
+  blockers:
+    line 385:8  e1077  UnknownParameterKind: the condition needs bool; parameter presize (no annotation, no call-site inference) has no static kind
+  runtime:  tagged-values
+
+row_fill: guarded   [e1085, line 395:12]
+  params:   table : any, headers : any, fields : any, i : any, field_count : any   result: any
+  captures: ht_set (block), row_fill (block)
+  dispatch: closed -- natives: >=, list_get x2, +; functions: ht_set (non-tail), row_fill (self, tail)
+  blockers:
+    line 396:8  e1089  UnknownParameterKind: >= needs int; parameter i (no annotation, no call-site inference) has no static kind
+    line 396:13  e1090  UnknownParameterKind: >= needs int; parameter field_count (no annotation, no call-site inference) has no static kind
+    line 399:28  e1098  UnknownParameterKind: list_get needs list; parameter headers (no annotation, no call-site inference) has no static kind
+    line 399:50  e1102  UnknownParameterKind: list_get needs list; parameter fields (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, range-check, tagged-values
+
+row_table: guarded   [e1115, line 404:13]
+  params:   headers : any, header_count : any, fields : any, presize : any   result: any
+  captures: row_new (block), row_fill (block)
+  dispatch: closed -- natives: list_length; functions: row_fill (tail), row_new (non-tail)
+  blockers:
+    line 406:53  e1129  UnknownParameterKind: list_length needs list; parameter fields (no annotation, no call-site inference) has no static kind
+  runtime:  tagged-values
+
+build_rows: guarded   [e1131, line 412:14]
+  params:   records : any, i : any, headers : any, header_count : any, outer : any, presize : any   result: list
+  captures: geo_finish (block), row_table (block), build_rows (block), geo_append (block)
+  dispatch: closed -- natives: >=, list_length, list_get, +; functions: build_rows (self, tail), geo_append (non-tail), geo_finish (tail), row_table (non-tail)
+  blockers:
+    line 413:8  e1135  UnknownParameterKind: >= needs int; parameter i (no annotation, no call-site inference) has no static kind
+    line 413:25  e1138  UnknownParameterKind: list_length needs list; parameter records (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, range-check, tagged-values
+
+csv_records_generic: guarded   [e1168, line 423:23]
+  params:   text : any, presize : any   result: list
+  captures: csv_parse (block), build_rows (block), geo_new (block)
+  dispatch: closed -- natives: ==, list_length x2, list, list_get; functions: build_rows (tail), csv_parse (non-tail), geo_new (non-tail)
+  blockers:
+    line 429:49  e1195  UnknownAggregateElementType: list_length needs list; the element read by list_get at line 428:15 has no static kind
+  runtime:  bigint, list-alloc, range-check, tagged-values
+
+csv_records: closed (transitively guarded)   [e1200, line 433:15]
+  params:   text : any   result: list
+  captures: csv_records_generic (block)
+  dispatch: closed -- functions: csv_records_generic (tail)
+  blockers: none
+  runtime:  none
+
+csv_records_presized: closed (transitively guarded)   [e1206, line 438:24]
+  params:   text : any   result: list
+  captures: csv_records_generic (block)
+  dispatch: closed -- functions: csv_records_generic (tail)
+  blockers: none
+  runtime:  none
+
+sample: closed (transitively guarded)   [e1212, line 446:10]
+  params:   (none)   result: list
+  captures: csv_records (block), csv_records_presized (block), ht_get (block), ht_size (block)
+  dispatch: closed -- natives: list_get x3, == x2, list, list_length; functions: csv_records (non-tail), csv_records_presized (non-tail), ht_get (non-tail), ht_size (non-tail)
+  blockers: none
+  runtime:  list-alloc, range-check, structural-equality
+   value: [2, "Alice", "31", "Berlin", "Bob", "Hamburg", true]

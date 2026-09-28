@@ -1,0 +1,39 @@
+== ascii.bot (interp)
+<program>: closed   [program, line 51:1]
+  dispatch: closed -- no calls
+  blockers: none
+  runtime:  none
+
+is_digit: closed   [e2, line 53:12]
+  params:   b : any   result: bool
+  dispatch: closed -- natives: >=, <=
+  blockers: none
+  runtime:  bigint
+
+is_upper: closed   [e17, line 56:12]
+  params:   b : any   result: bool
+  dispatch: closed -- natives: >=, <=
+  blockers: none
+  runtime:  bigint
+
+is_lower: closed   [e32, line 59:12]
+  params:   b : any   result: bool
+  dispatch: closed -- natives: >=, <=
+  blockers: none
+  runtime:  bigint
+
+is_alphabetic: closed   [e47, line 62:17]
+  params:   b : any   result: bool
+  captures: is_upper (block), is_lower (block)
+  dispatch: closed -- functions: is_lower (non-tail), is_upper (non-tail)
+  blockers: none
+  runtime:  none
+
+is_alphanumeric: closed   [e60, line 65:19]
+  params:   b : any   result: bool
+  captures: is_alphabetic (block), is_digit (block)
+  dispatch: closed -- functions: is_alphabetic (non-tail), is_digit (non-tail)
+  blockers: none
+  runtime:  none
+   value: <block (b)>
+   block #0 refinements: (none)

@@ -1,0 +1,43 @@
+== list.bot (interp)
+<program>: closed   [program, line 55:1]
+  dispatch: closed -- no calls
+  blockers: none
+  runtime:  none
+
+any?: open   [e2, line 59:8]
+  params:   xs : any, predicate : any   result: bool
+  dispatch: open -- dynamic calls: 1
+  blockers:
+    line 60:15  e4  UnknownParameterKind: the condition needs list; parameter xs (no annotation, no call-site inference) has no static kind
+    line 61:12  e6  UnknownCallResultKind: the condition needs bool; the result of the dynamic call at line 61:12 has no static kind
+    line 61:12  e7  DynamicCall: the callee has no static kind: native, block or not callable is decided at run time
+  runtime:  dynamic-call, tagged-values
+
+all?: open   [e13, line 65:8]
+  params:   xs : any, predicate : any   result: bool
+  dispatch: open -- dynamic calls: 1
+  blockers:
+    line 66:15  e15  UnknownParameterKind: the condition needs list; parameter xs (no annotation, no call-site inference) has no static kind
+    line 67:16  e18  UnknownCallResultKind: the condition needs bool; the result of the dynamic call at line 67:16 has no static kind
+    line 67:16  e19  DynamicCall: the callee has no static kind: native, block or not callable is decided at run time
+  runtime:  dynamic-call, tagged-values
+
+none?: open   [e27, line 71:9]
+  params:   xs : any, predicate : any   result: bool
+  dispatch: open -- dynamic calls: 1
+  blockers:
+    line 72:15  e29  UnknownParameterKind: the condition needs list; parameter xs (no annotation, no call-site inference) has no static kind
+    line 73:12  e31  UnknownCallResultKind: the condition needs bool; the result of the dynamic call at line 73:12 has no static kind
+    line 73:12  e32  DynamicCall: the callee has no static kind: native, block or not callable is decided at run time
+  runtime:  dynamic-call, tagged-values
+
+find: open   [e38, line 77:8]
+  params:   xs : any, predicate : any   result: any
+  dispatch: open -- dynamic calls: 1
+  blockers:
+    line 78:15  e40  UnknownParameterKind: the condition needs list; parameter xs (no annotation, no call-site inference) has no static kind
+    line 79:12  e42  UnknownCallResultKind: the condition needs bool; the result of the dynamic call at line 79:12 has no static kind
+    line 79:12  e43  DynamicCall: the callee has no static kind: native, block or not callable is decided at run time
+  runtime:  dynamic-call, tagged-values
+   value: <block (xs predicate)>
+   block #0 refinements: (none)

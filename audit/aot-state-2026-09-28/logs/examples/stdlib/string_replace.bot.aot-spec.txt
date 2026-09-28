@@ -1,0 +1,31 @@
+== string_replace.bot (interp)
+<program>: closed   [i0, line 18:1]
+  calls:    replace<str, str, str>
+  guards:   0
+  runtime:  list-alloc
+
+matches_at (semantic): guarded   [UnknownParameterKind 3]
+matches_at<str, str, int>: closed   [i3, line 18:14]
+  params:   haystack : str, needle : str, index : int
+  result:   bool
+  guards:   0
+  runtime:  bigint, char-index, range-check, string-alloc
+
+replace_from (semantic): guarded   [UnknownParameterKind 8]
+replace_from<str, str, str, int, int, str>: closed   [i2, line 27:16]
+  params:   haystack : str, needle : str, replacement : str, index : int, run_start : int, done : str
+  result:   str
+  calls:    matches_at<str, str, int>, replace_from<str, str, str, int, int, str>
+  guards:   0
+  runtime:  bigint, char-index, range-check, string-alloc
+
+replace (semantic): guarded   [UnknownParameterKind 1]
+replace<str, str, str>: closed   [i1, line 38:11]
+  params:   haystack : str, needle : str, replacement : str
+  result:   str
+  calls:    replace_from<str, str, str, int, int, str>
+  guards:   0
+  runtime:  bigint, char-index
+
+guards: generic 12, specialized 0; instances: 0 generic, 3 specialized
+   value: ["abc", "aXc", "bb", "", ""]

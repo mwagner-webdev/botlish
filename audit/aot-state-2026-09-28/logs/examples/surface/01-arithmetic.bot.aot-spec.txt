@@ -1,0 +1,7 @@
+== 01-arithmetic.bot (interp)
+<program>: closed   [i0, line 6:1]
+  guards:   0
+  runtime:  bigint
+
+guards: generic 0, specialized 0; instances: 0 generic, 0 specialized
+   value: 50

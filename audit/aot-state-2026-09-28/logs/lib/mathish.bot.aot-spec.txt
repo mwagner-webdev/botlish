@@ -1,0 +1,16 @@
+== mathish.bot (interp)
+<program>: closed   [i0, line 6:1]
+  guards:   0
+  runtime:  none
+
+inc (semantic): guarded   [UnknownParameterKind 1]
+inc<generic>: guarded   [i1, line 8:7]
+  params:   x : any
+  result:   int
+  guards:   1
+    line 9:5  e5  UnknownParameterKind: + needs int; parameter x (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+guards: generic 1, specialized 1; instances: 1 generic, 0 specialized
+   value: <block (x)>
+   block #0 refinements: (none)

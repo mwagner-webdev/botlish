@@ -1,0 +1,196 @@
+== web.bot (interp)
+<program>: closed   [i0, line 61:1]
+  calls:    byte::set<List[UnicodeChar]>
+  guards:   0
+  runtime:  closure-env, list-alloc, set-alloc, structural-equality
+
+char::codepoint (semantic): closed   [no blockers]
+char::codepoint<UnicodeChar>: closed   [i2, line 21:13]
+  params:   c : UnicodeChar
+  result:   int
+  guards:   0
+  runtime:  none
+
+byte::high_nibble (semantic): guarded   [UnknownParameterKind 1]
+byte::high_nibble<generic>: closed   [i17, line 112:15]
+  params:   b : any
+  result:   int[HighNibble]
+  guards:   0
+  runtime:  bigint
+
+byte::nibble (semantic): guarded   [UnknownParameterKind 1]
+byte::nibble<int>: closed   [i18, line 118:10]
+  params:   x : int
+  result:   int[Nibble]
+  guards:   0
+  runtime:  bigint
+
+byte::from_int (semantic): closed   [no blockers]
+byte::from_int<int>: closed   [i3, line 150:12]
+  params:   value : int
+  result:   int[Byte]
+  guards:   0
+  runtime:  bigint
+
+byte::set (semantic): closed   [no blockers]
+byte::set<List[UnicodeChar]>: closed   [i1, line 174:7]
+  params:   chars : List[UnicodeChar]
+  result:   ImmutableSet[int[Byte]]
+  calls:    byte::from_int<int>, char::codepoint<UnicodeChar>
+  guards:   0
+  runtime:  set-alloc, structural-equality
+
+ascii::is_digit (semantic): closed   [no blockers]
+ascii::is_digit<int>: closed   [i13, line 53:12]
+  params:   b : int
+  result:   bool
+  guards:   0
+  runtime:  bigint
+
+ascii::is_upper (semantic): closed   [no blockers]
+ascii::is_upper<int>: closed   [i11, line 56:12]
+  params:   b : int
+  result:   bool
+  guards:   0
+  runtime:  bigint
+
+ascii::is_lower (semantic): closed   [no blockers]
+ascii::is_lower<int>: closed   [i12, line 59:12]
+  params:   b : int
+  result:   bool
+  guards:   0
+  runtime:  bigint
+
+ascii::is_alphabetic (semantic): closed   [no blockers]
+ascii::is_alphabetic<int>: closed   [i10, line 62:17]
+  params:   b : int
+  result:   bool
+  calls:    ascii::is_lower<int>, ascii::is_upper<int>
+  guards:   0
+  runtime:  none
+
+ascii::is_alphanumeric (semantic): closed   [no blockers]
+ascii::is_alphanumeric<int>: closed   [i9, line 65:19]
+  params:   b : int
+  result:   bool
+  calls:    ascii::is_alphabetic<int>, ascii::is_digit<int>
+  guards:   0
+  runtime:  none
+
+emailish? (semantic): guarded   [UnknownParameterKind 1]
+emailish?<generic>: guarded (transitively open)   [i4, line 92:13]
+  params:   v : any
+  result:   bool
+  calls:    char_at<generic>, domain?<generic>, scan_while<generic>
+  guards:   1
+    line 94:16  e171  UnknownParameterKind: length needs str; parameter v (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, char-index, closure-env, tagged-values
+
+char_at (semantic): guarded   [UnknownParameterKind 2]
+char_at<generic>: closed   [i20, line 96:15]
+  params:   i : any
+  result:   str
+  guards:   0
+  runtime:  bigint, char-index, range-check, string-alloc
+
+local_char? (semantic): guarded   [UnknownParameterKind 1]
+local_char?<generic>: guarded   [i24, line 99:19]
+  params:   c : any
+  result:   bool
+  guards:   1
+    line 100:22  e187  UnknownParameterKind: is_tcl_alnum needs str; parameter c (no annotation, no call-site inference) has no static kind
+  runtime:  char-index, range-check, structural-equality, tagged-values
+
+label_char? (semantic): guarded   [UnknownParameterKind 1]
+label_char?<str>: closed   [i23, line 107:19]
+  params:   c : str
+  result:   bool
+  guards:   0
+  runtime:  char-index, range-check
+
+scan_while (semantic): open   [UnknownParameterKind 1, UnknownCallResultKind 1, DynamicCall 1]
+scan_while<generic>: open   [i19, line 126:18]
+  params:   start : any, predicate : any
+  result:   int
+  calls:    char_at<generic>
+  guards:   1
+    line 128:16  e216  UnknownCallResultKind: the condition needs bool; the result of the dynamic call at line 128:16 has no static kind
+    line 128:16  e217  DynamicCall: the callee has no static kind: native, block or not callable is decided at run time
+  runtime:  closure-env, dynamic-call, tagged-values
+
+tld? (semantic): guarded   [UnknownParameterKind 1]
+tld?<generic>: closed (transitively open)   [i22, line 133:12]
+  params:   i : any
+  result:   bool
+  calls:    scan_while<generic>
+  guards:   0
+  runtime:  bigint, closure-env
+
+domain? (semantic): guarded   [UnknownParameterKind 1]
+domain?<generic>: closed (transitively open)   [i21, line 159:15]
+  params:   start : any
+  result:   bool
+  calls:    char_at<generic>, label_char?<str>, tld?<generic>
+  guards:   0
+  runtime:  bigint, closure-env
+
+is_unreserved (semantic): closed   [no blockers]
+is_unreserved<generic>: closed   [i5, line 189:17]
+  params:   b : any
+  result:   bool
+  calls:    ascii::is_alphanumeric<int>
+  guards:   0
+  runtime:  structural-equality
+
+uri_escape_text (semantic): closed   [no blockers]
+uri_escape_text<generic>: closed (transitively guarded)   [i6, line 192:19]
+  params:   s : any
+  result:   any
+  calls:    esc_from<generic>
+  guards:   0
+  runtime:  closure-env
+
+high_nibble (semantic): closed   [no blockers]
+high_nibble<generic>: closed   [i16, line 194:19]
+  params:   b : any
+  result:   int[Nibble]
+  calls:    byte::high_nibble<generic>, byte::nibble<int>
+  guards:   0
+  runtime:  none
+
+hex_pair (semantic): guarded   [UnknownParameterKind 1]
+hex_pair<generic>: closed   [i15, line 197:16]
+  params:   b : any
+  result:   str
+  calls:    high_nibble<generic>
+  guards:   0
+  runtime:  bigint, range-check, string-alloc
+
+esc_bytes (semantic): guarded   [UnknownParameterKind 3]
+esc_bytes<generic>: closed   [i14, line 200:17]
+  params:   bytes : any, i : any, acc : any
+  result:   str
+  calls:    esc_bytes<generic>, hex_pair<generic>
+  guards:   0
+  runtime:  bigint, closure-env, range-check, string-alloc
+
+esc_char (semantic): guarded   [UnknownParameterKind 1]
+esc_char<generic>: closed   [i8, line 206:16]
+  params:   c : any
+  result:   str
+  calls:    esc_bytes<generic>, is_unreserved<generic>
+  guards:   0
+  runtime:  bigint, closure-env, list-alloc, range-check
+
+esc_from (semantic): guarded   [UnknownParameterKind 3, UnknownCallResultKind 1]
+esc_from<generic>: guarded   [i7, line 217:16]
+  params:   text : any, i : any, acc : any
+  result:   str
+  calls:    esc_char<generic>, esc_from<generic>
+  guards:   1
+    line 218:24  e466  UnknownParameterKind: length needs str; parameter text (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, char-index, closure-env, range-check, string-alloc, tagged-values
+
+guards: generic 24, specialized 4; instances: 14 generic, 10 specialized
+   value: <block (s)>
+   block #0 refinements: (none)

@@ -1,0 +1,51 @@
+== matmul.bot (interp)
+<program>: closed (transitively guarded)   [program, line 18:1]
+  dispatch: closed -- natives: list x7; functions: matmul (non-tail)
+  blockers: none
+  runtime:  list-alloc
+
+dot: guarded   [e2, line 18:7]
+  params:   a_row : any, b : any, column : any, k : any, count : any, total : any   result: any
+  captures: dot (block)
+  dispatch: closed -- natives: ==, *, list_get x3, + x2; functions: dot (self, tail)
+  blockers:
+    line 22:12  e13  UnknownAggregateElementType: * needs int; the element read by list_get at line 22:12 has no static kind
+    line 22:33  e17  UnknownAggregateElementType: * needs int; the element read by list_get at line 22:33 has no static kind
+    line 22:21  e15  UnknownParameterKind: list_get needs list; parameter a_row (no annotation, no call-site inference) has no static kind
+    line 22:28  e16  UnknownParameterKind: list_get needs int; parameter k (no annotation, no call-site inference) has no static kind
+    line 22:42  e19  UnknownAggregateElementType: list_get needs list; the element read by list_get at line 22:42 has no static kind
+    line 22:58  e23  UnknownParameterKind: list_get needs int; parameter column (no annotation, no call-site inference) has no static kind
+    line 22:51  e21  UnknownParameterKind: list_get needs list; parameter b (no annotation, no call-site inference) has no static kind
+    line 23:41  e36  UnknownParameterKind: + needs int; parameter total (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, range-check, structural-equality, tagged-values
+
+product_row: guarded   [e39, line 26:15]
+  params:   a_row : any, b : any, column : any, columns : any, row : any   result: any
+  captures: dot (block), product_row (block)
+  dispatch: closed -- natives: ==, list_length, +, list_append; functions: dot (non-tail), product_row (self, tail)
+  blockers:
+    line 30:50  e56  UnknownParameterKind: list_length needs list; parameter a_row (no annotation, no call-site inference) has no static kind
+    line 31:27  e64  UnknownParameterKind: + needs int; parameter column (no annotation, no call-site inference) has no static kind
+    line 31:60  e69  UnknownParameterKind: list_append needs list; parameter row (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, list-alloc, structural-equality, tagged-values
+
+product_rows: guarded   [e72, line 34:16]
+  params:   a : any, b : any, i : any, columns : any, rows : any   result: any
+  captures: product_row (block), product_rows (block)
+  dispatch: closed -- natives: ==, list_length, list_get, list, +, list_append; functions: product_row (non-tail), product_rows (self, tail)
+  blockers:
+    line 35:25  e79  UnknownParameterKind: list_length needs list; parameter a (no annotation, no call-site inference) has no static kind
+    line 38:35  e88  UnknownParameterKind: list_get needs int; parameter i (no annotation, no call-site inference) has no static kind
+    line 39:52  e105  UnknownParameterKind: list_append needs list; parameter rows (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, list-alloc, range-check, structural-equality, tagged-values
+
+matmul: guarded   [e108, line 41:10]
+  params:   a : any, b : any   result: any
+  captures: product_rows (block)
+  dispatch: closed -- natives: ==, list_length x2, list x2, list_get; functions: product_rows (tail)
+  blockers:
+    line 42:20  e114  UnknownParameterKind: list_length needs list; parameter a (no annotation, no call-site inference) has no static kind
+    line 45:39  e126  UnknownAggregateElementType: list_length needs list; the element read by list_get at line 45:39 has no static kind
+    line 45:48  e128  UnknownParameterKind: list_get needs list; parameter b (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, list-alloc, range-check, tagged-values
+   value: [[58, 64], [139, 154]]

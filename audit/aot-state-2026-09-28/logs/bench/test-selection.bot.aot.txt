@@ -1,0 +1,101 @@
+== test-selection.bot (interp)
+<program>: closed (transitively open)   [program, line 44:1]
+  dispatch: closed -- natives: list x33, list_length x2; functions: changed? (non-tail), first_affected (non-tail), list::none? (non-tail), make_changed? (non-tail), select_affected (non-tail)
+  blockers: none
+  runtime:  closure-env, list-alloc
+
+list::any?: open   [e2, line 59:8]
+  params:   xs : any, predicate : any   result: bool
+  dispatch: open -- dynamic calls: 1
+  blockers:
+    line 60:15  e4  UnknownParameterKind: the condition needs list; parameter xs (no annotation, no call-site inference) has no static kind
+    line 61:12  e6  UnknownCallResultKind: the condition needs bool; the result of the dynamic call at line 61:12 has no static kind
+    line 61:12  e7  DynamicCall: the callee has no static kind: native, block or not callable is decided at run time
+  runtime:  dynamic-call, tagged-values
+
+list::all?: open   [e13, line 65:8]
+  params:   xs : any, predicate : any   result: bool
+  dispatch: open -- dynamic calls: 1
+  blockers:
+    line 66:15  e15  UnknownParameterKind: the condition needs list; parameter xs (no annotation, no call-site inference) has no static kind
+    line 67:16  e18  UnknownCallResultKind: the condition needs bool; the result of the dynamic call at line 67:16 has no static kind
+    line 67:16  e19  DynamicCall: the callee has no static kind: native, block or not callable is decided at run time
+  runtime:  dynamic-call, tagged-values
+
+list::none?: open   [e27, line 71:9]
+  params:   xs : any, predicate : any   result: bool
+  dispatch: open -- dynamic calls: 1
+  blockers:
+    line 72:15  e29  UnknownParameterKind: the condition needs list; parameter xs (no annotation, no call-site inference) has no static kind
+    line 73:12  e31  UnknownCallResultKind: the condition needs bool; the result of the dynamic call at line 73:12 has no static kind
+    line 73:12  e32  DynamicCall: the callee has no static kind: native, block or not callable is decided at run time
+  runtime:  dynamic-call, tagged-values
+
+list::find: open   [e38, line 77:8]
+  params:   xs : any, predicate : any   result: any
+  dispatch: open -- dynamic calls: 1
+  blockers:
+    line 78:15  e40  UnknownParameterKind: the condition needs list; parameter xs (no annotation, no call-site inference) has no static kind
+    line 79:12  e42  UnknownCallResultKind: the condition needs bool; the result of the dynamic call at line 79:12 has no static kind
+    line 79:12  e43  DynamicCall: the callee has no static kind: native, block or not callable is decided at run time
+  runtime:  dynamic-call, tagged-values
+
+make_changed?: guarded   [e49, line 44:17]
+  params:   changed : any   result: block(e55)/1 -> bool
+  dispatch: closed -- natives: immutable_set_from_list
+  blockers:
+    line 45:43  e53  UnknownParameterKind: immutable_set_from_list needs list; parameter changed (no annotation, no call-site inference) has no static kind
+  note:     line 46:16  e55  creates a closure capturing values
+  runtime:  closure-env, set-alloc, structural-equality, tagged-values
+
+changed?: closed   [e55, line 46:16]
+  params:   path : any   result: bool
+  captures: changed_set (value)
+  dispatch: closed -- natives: immutable_set_contains
+  blockers: none
+  runtime:  structural-equality
+
+test_name: guarded   [e62, line 50:13]
+  params:   test : any   result: any
+  dispatch: closed -- natives: list_get
+  blockers:
+    line 51:14  e65  UnknownParameterKind: list_get needs list; parameter test (no annotation, no call-site inference) has no static kind
+  runtime:  range-check, tagged-values
+
+test_deps: guarded   [e68, line 53:13]
+  params:   test : any   result: any
+  dispatch: closed -- natives: list_get
+  blockers:
+    line 54:14  e71  UnknownParameterKind: list_get needs list; parameter test (no annotation, no call-site inference) has no static kind
+  runtime:  range-check, tagged-values
+
+affected?: closed (transitively open)   [e74, line 56:13]
+  params:   test : any, changed? : any   result: bool
+  captures: test_deps (block)
+  dispatch: closed -- functions: list::any? (tail), test_deps (non-tail)
+  blockers: none
+  runtime:  none
+
+select_affected: guarded (transitively open)   [e82, line 59:19]
+  params:   tests : any, changed? : any   result: list
+  captures: affected? (block)
+  dispatch: closed -- functions: affected? (non-tail)
+  blockers:
+    line 60:18  e84  UnknownParameterKind: the condition needs list; parameter tests (no annotation, no call-site inference) has no static kind
+  runtime:  tagged-values
+
+first_affected: closed (transitively open)   [e96, line 65:18]
+  params:   tests : any, changed? : any   result: any
+  captures: affected? (block), test_name (block)
+  dispatch: closed -- natives: list x2; functions: list::find (non-tail), test_name (tail)
+  blockers: none
+  note:     line 66:20  e98  creates a closure capturing values
+  runtime:  closure-env, list-alloc
+
+is_affected?: closed (transitively open)   [e98, line 66:20]
+  params:   test : any   result: bool
+  captures: affected? (block), changed? (value)
+  dispatch: closed -- functions: affected? (tail)
+  blockers: none
+  runtime:  none
+   value: [3, 1, "resolve-tests", true, true]

@@ -1,0 +1,22 @@
+== 09-mutual-recursion.bot (interp)
+<program>: closed (transitively guarded)   [program, line 6:1]
+  dispatch: closed -- natives: list; functions: is_even (non-tail)
+  blockers: none
+  runtime:  list-alloc
+
+is_even: guarded   [e2, line 6:11]
+  params:   n : any   result: any
+  captures: is_odd (block)
+  dispatch: closed -- natives: ==, -; functions: is_odd (tail)
+  blockers:
+    line 9:12  e14  UnknownParameterKind: - needs int; parameter n (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, init-check, structural-equality, tagged-values
+
+is_odd: guarded   [e17, line 11:10]
+  params:   n : any   result: any
+  captures: is_even (block)
+  dispatch: closed -- natives: ==, -; functions: is_even (tail)
+  blockers:
+    line 14:13  e29  UnknownParameterKind: - needs int; parameter n (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, structural-equality, tagged-values
+   value: [true, false]

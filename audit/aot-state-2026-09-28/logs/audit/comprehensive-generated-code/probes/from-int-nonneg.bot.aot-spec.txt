@@ -1,0 +1,30 @@
+== from-int-nonneg.bot (interp)
+<program>: closed   [i0, line 4:1]
+  calls:    g<int>
+  guards:   0
+  runtime:  bigint, list-alloc
+
+byte::from_int (semantic): closed   [no blockers]
+byte::from_int<int>: closed   [i3, line 150:12]
+  params:   value : int
+  result:   int[Byte]
+  guards:   0
+  runtime:  bigint
+
+nonneg (semantic): guarded   [UnknownParameterKind 1]
+nonneg<int>: closed   [i2, line 4:10]
+  params:   m : int
+  result:   int
+  guards:   0
+  runtime:  bigint
+
+g (semantic): closed   [no blockers]
+g<int>: closed   [i1, line 9:5]
+  params:   m : int
+  result:   int
+  calls:    byte::from_int<int>, nonneg<int>
+  guards:   0
+  runtime:  none
+
+guards: generic 7, specialized 0; instances: 0 generic, 3 specialized
+   value: [7, 45, 0]

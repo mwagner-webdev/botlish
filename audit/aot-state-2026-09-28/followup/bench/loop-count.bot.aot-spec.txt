@@ -1,0 +1,25 @@
+== loop-count.bot (compile)
+<program>: closed   [i0, line 30:1]
+  calls:    drive<int, int>
+  guards:   0
+  runtime:  none
+
+work (semantic): guarded   [UnknownParameterKind 1]
+work<int>: closed   [i2, line 30:8]
+  params:   i : int
+  result:   int
+  guards:   0
+  runtime:  bigint
+
+drive (semantic): guarded   [UnknownParameterKind 2]
+drive<int, int>: closed   [i1, line 39:9]
+  params:   i : int, total : int
+  result:   int
+  calls:    drive<int, int>, work<int>
+  guards:   0
+  runtime:  bigint
+
+guards: generic 3, specialized 0; instances: 0 generic, 2 specialized
+   value: 3500
+   type:  work : block(e2)/1 -> int
+   type:  drive : block(e26)/2 -> any

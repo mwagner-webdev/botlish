@@ -1,0 +1,2 @@
+== ascii.bot (interp)
+   error: lib/ascii.bot:53:12: unknown or invalid type Byte for parameter "b" (CORE SEMANTIC TYPE)

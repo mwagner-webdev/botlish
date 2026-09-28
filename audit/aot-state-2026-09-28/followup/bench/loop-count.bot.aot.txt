@@ -1,0 +1,24 @@
+== loop-count.bot (compile)
+<program>: closed (transitively guarded)   [program, line 30:1]
+  dispatch: closed -- functions: drive (non-tail)
+  blockers: none
+  runtime:  none
+
+work: guarded   [e2, line 30:8]
+  params:   i : any   result: int
+  dispatch: closed -- natives: *, +, >=, -
+  blockers:
+    line 32:13  e7  UnknownParameterKind: * needs int; parameter i (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+drive: guarded   [e26, line 39:9]
+  params:   i : any, total : any   result: any
+  captures: drive (block), work (block)
+  dispatch: closed -- natives: <=, -, +; functions: drive (self, tail), work (non-tail)
+  blockers:
+    line 40:8  e30  UnknownParameterKind: <= needs int; parameter i (no annotation, no call-site inference) has no static kind
+    line 42:18  e42  UnknownParameterKind: + needs int; parameter total (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+   value: 3500
+   type:  work : block(e2)/1 -> int
+   type:  drive : block(e26)/2 -> any

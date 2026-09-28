@@ -1,0 +1,16 @@
+== scalar.bot (interp)
+<program>: closed   [program, line 1:1]
+  dispatch: closed -- no calls
+  blockers: none
+  note:     line 3:7  e4  creates a closure capturing values
+  runtime:  closure-env
+
+add: guarded   [e4, line 3:7]
+  params:   x : any   result: int
+  captures: base (value)
+  dispatch: closed -- natives: +
+  blockers:
+    line 4:5  e7  UnknownParameterKind: + needs int; parameter x (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+   value: <block (x)>
+   block #0 refinements: (none)

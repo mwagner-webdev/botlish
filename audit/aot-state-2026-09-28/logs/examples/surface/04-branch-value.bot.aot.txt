@@ -1,0 +1,13 @@
+== 04-branch-value.bot (interp)
+<program>: closed (transitively guarded)   [program, line 5:1]
+  dispatch: closed -- functions: choose (non-tail)
+  blockers: none
+  runtime:  none
+
+choose: guarded   [e2, line 5:10]
+  params:   flag : any   result: int
+  dispatch: closed -- no calls
+  blockers:
+    line 6:8  e4  UnknownParameterKind: the condition needs bool; parameter flag (no annotation, no call-site inference) has no static kind
+  runtime:  tagged-values
+   value: 20

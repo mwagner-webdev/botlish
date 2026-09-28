@@ -1,0 +1,26 @@
+== handle-return-result.bot (interp)
+<program>: closed   [program, line 4:1]
+  dispatch: closed -- natives: list, -; functions: h (non-tail)
+  blockers: none
+  runtime:  bigint, list-alloc
+
+f: closed   [e2, line 5:5]
+  params:   x : any   result: int
+  dispatch: closed -- natives: <
+  blockers: none
+  runtime:  bigint
+
+g: closed   [e11, line 10:5]
+  params:   x : any   result: int
+  captures: f (block)
+  dispatch: closed -- functions: f (non-tail)
+  blockers: none
+  runtime:  none
+
+h: closed   [e21, line 15:5]
+  params:   x : any   result: int
+  captures: g (block)
+  dispatch: closed -- natives: +; functions: g (non-tail)
+  blockers: none
+  runtime:  bigint
+   value: [4611686018427387904, 6]

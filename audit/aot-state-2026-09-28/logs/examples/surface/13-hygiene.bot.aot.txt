@@ -1,0 +1,12 @@
+== 13-hygiene.bot (interp)
+<program>: closed   [program, line 6:1]
+  dispatch: closed -- natives: list; functions: pair (non-tail)
+  blockers: none
+  runtime:  list-alloc
+
+pair: closed   [e2, line 6:8]
+  params:   list : any, x : any   result: list
+  dispatch: closed -- natives: list
+  blockers: none
+  runtime:  list-alloc
+   value: [[1, 2], 3]

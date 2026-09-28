@@ -1,0 +1,15 @@
+== char.bot (interp)
+<program>: closed   [i0, line 19:1]
+  guards:   0
+  runtime:  none
+
+codepoint (semantic): closed   [no blockers]
+codepoint<generic>: closed   [i1, line 21:13]
+  params:   c : any
+  result:   int
+  guards:   0
+  runtime:  none
+
+guards: generic 0, specialized 0; instances: 1 generic, 0 specialized
+   value: <block (c)>
+   block #0 refinements: (none)

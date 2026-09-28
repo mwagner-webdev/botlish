@@ -1,0 +1,24 @@
+== string_reverse.bot (interp)
+<program>: closed   [i0, line 16:1]
+  calls:    reverse_chars<str>
+  guards:   0
+  runtime:  list-alloc
+
+reverse_from (semantic): guarded   [UnknownParameterKind 4]
+reverse_from<str, int, str>: closed   [i2, line 16:16]
+  params:   text : str, index : int, reversed : str
+  result:   str
+  calls:    reverse_from<str, int, str>
+  guards:   0
+  runtime:  bigint, char-index, range-check, string-alloc
+
+reverse_chars (semantic): closed   [no blockers]
+reverse_chars<str>: closed   [i1, line 23:17]
+  params:   text : str
+  result:   str
+  calls:    reverse_from<str, int, str>
+  guards:   0
+  runtime:  none
+
+guards: generic 4, specialized 0; instances: 0 generic, 2 specialized
+   value: ["", "a", "cba", "dcba", "üöä"]

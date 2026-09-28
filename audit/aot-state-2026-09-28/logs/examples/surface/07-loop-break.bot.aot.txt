@@ -1,0 +1,6 @@
+== 07-loop-break.bot (interp)
+<program>: closed   [program, line 7:1]
+  dispatch: closed -- no calls
+  blockers: none
+  runtime:  none
+   value: unit

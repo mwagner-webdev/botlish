@@ -1,0 +1,54 @@
+== matmul.bot (interp)
+<program>: closed   [i0, line 18:1]
+  calls:    matmul<List[List[int]], List[List[int]]>
+  guards:   0
+  runtime:  list-alloc
+
+dot (semantic): guarded   [UnknownAggregateElementType 3, UnknownParameterKind 5]
+dot<List[int], List[List[int]], int, int, int, int>: closed   [i4, line 18:7]
+  params:   a_row : List[int], b : List[List[int]], column : int, k : int, count : int, total : int
+  result:   int
+  calls:    dot<List[int], List[List[int]], int, int, int, int>
+  guards:   0
+  runtime:  bigint, range-check
+
+product_row (semantic): guarded   [UnknownParameterKind 3]
+product_row<List[int], List[List[int]], int, int, List[never]>: closed   [i3, line 26:15]
+  params:   a_row : List[int], b : List[List[int]], column : int, columns : int, row : List[never]
+  result:   List[int]
+  calls:    dot<List[int], List[List[int]], int, int, int, int>, product_row<List[int], List[List[int]], int, int, List[int]>
+  guards:   0
+  runtime:  bigint, list-alloc
+
+product_row<List[int], List[List[int]], int, int, List[int]>: closed   [i5, line 26:15]
+  params:   a_row : List[int], b : List[List[int]], column : int, columns : int, row : List[int]
+  result:   List[int]
+  calls:    dot<List[int], List[List[int]], int, int, int, int>, product_row<List[int], List[List[int]], int, int, List[int]>
+  guards:   0
+  runtime:  bigint, list-alloc
+
+product_rows (semantic): guarded   [UnknownParameterKind 3]
+product_rows<List[List[int]], List[List[int]], int, int, List[never]>: closed   [i2, line 34:16]
+  params:   a : List[List[int]], b : List[List[int]], i : int, columns : int, rows : List[never]
+  result:   List[List[int]]
+  calls:    product_row<List[int], List[List[int]], int, int, List[never]>, product_rows<List[List[int]], List[List[int]], int, int, List[List[int]]>
+  guards:   0
+  runtime:  bigint, list-alloc, range-check
+
+product_rows<List[List[int]], List[List[int]], int, int, List[List[int]]>: closed   [i6, line 34:16]
+  params:   a : List[List[int]], b : List[List[int]], i : int, columns : int, rows : List[List[int]]
+  result:   List[List[int]]
+  calls:    product_row<List[int], List[List[int]], int, int, List[never]>, product_rows<List[List[int]], List[List[int]], int, int, List[List[int]]>
+  guards:   0
+  runtime:  bigint, list-alloc, range-check
+
+matmul (semantic): guarded   [UnknownParameterKind 2, UnknownAggregateElementType 1]
+matmul<List[List[int]], List[List[int]]>: closed   [i1, line 41:10]
+  params:   a : List[List[int]], b : List[List[int]]
+  result:   List[List[int]]
+  calls:    product_rows<List[List[int]], List[List[int]], int, int, List[never]>
+  guards:   0
+  runtime:  bigint, list-alloc, range-check
+
+guards: generic 17, specialized 0; instances: 0 generic, 6 specialized
+   value: [[58, 64], [139, 154]]

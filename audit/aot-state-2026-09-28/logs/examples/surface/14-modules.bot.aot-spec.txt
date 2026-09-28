@@ -1,0 +1,15 @@
+== 14-modules.bot (interp)
+<program>: closed   [i0, line 7:1]
+  calls:    mathish::inc<int>
+  guards:   0
+  runtime:  list-alloc
+
+mathish::inc (semantic): guarded   [UnknownParameterKind 1]
+mathish::inc<int>: closed   [i1, line 8:7]
+  params:   x : int
+  result:   int
+  guards:   0
+  runtime:  bigint
+
+guards: generic 1, specialized 0; instances: 0 generic, 1 specialized
+   value: [42, 2]

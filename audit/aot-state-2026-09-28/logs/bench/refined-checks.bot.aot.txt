@@ -1,0 +1,18 @@
+== refined-checks.bot (interp)
+<program>: closed (transitively guarded)   [program, line 25:1]
+  dispatch: closed -- natives: uriEscape, list; functions: check (non-tail)
+  blockers: none
+  runtime:  evidence, list-alloc, string-alloc
+
+check: guarded   [e6, line 27:9]
+  params:   n : any, acc : any, s : any, q : any   result: any
+  captures: check (block)
+  dispatch: closed -- natives: <=, emailish? x2, UriQueryValue?, -, +; functions: check (self, tail)
+  blockers:
+    line 28:8  e10  UnknownParameterKind: <= needs int; parameter n (no annotation, no call-site inference) has no static kind
+    line 30:24  e18  UnknownParameterKind: emailish? needs str; parameter s (no annotation, no call-site inference) has no static kind
+    line 32:31  e26  UnknownParameterKind: UriQueryValue? needs str; parameter q (no annotation, no call-site inference) has no static kind
+    line 40:18  e39  UnknownParameterKind: + needs int; parameter acc (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, evidence, tagged-values
+  unreachable expressions skipped: 1
+   error: too many nested evaluations (infinite loop?) (TCL LIMIT STACK)

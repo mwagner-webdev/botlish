@@ -1,0 +1,110 @@
+== csv_geometric.bot (interp)
+<program>: closed (transitively guarded)   [program, line 18:1]
+  dispatch: closed -- functions: csv_parse (non-tail)
+  blockers: none
+  runtime:  none
+
+geo_new: closed   [e2, line 18:11]
+  params:   (none)   result: list
+  dispatch: closed -- natives: list, mutable_array_allocate
+  blockers: none
+  runtime:  list-alloc, mutarray-alloc
+
+geo_new_capacity: guarded   [e10, line 25:20]
+  params:   capacity : any, length : any   result: int
+  dispatch: closed -- natives: *, <=, +
+  blockers:
+    line 26:15  e14  UnknownParameterKind: * needs int; parameter capacity (no annotation, no call-site inference) has no static kind
+    line 27:19  e20  UnknownParameterKind: <= needs int; parameter length (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+geo_grow: guarded   [e28, line 35:12]
+  params:   storage : any, length : any   result: mutarray
+  captures: geo_new_capacity (block)
+  dispatch: closed -- natives: mutable_array_capacity, <, mutable_array_allocate, mutable_array_copy; functions: geo_new_capacity (non-tail)
+  blockers:
+    line 36:39  e32  UnknownParameterKind: mutable_array_capacity needs mutarray; parameter storage (no annotation, no call-site inference) has no static kind
+    line 37:8  e36  UnknownParameterKind: < needs int; parameter length (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, mutarray-alloc, mutarray-mutate, range-check, tagged-values
+
+geo_append: guarded   [e58, line 49:14]
+  params:   builder : any, value : any   result: list
+  captures: geo_grow (block)
+  dispatch: closed -- natives: list_get x2, mutable_array_set, list, +; functions: geo_grow (non-tail)
+  blockers:
+    line 50:24  e62  UnknownParameterKind: list_get needs list; parameter builder (no annotation, no call-site inference) has no static kind
+    line 53:30  e77  UnknownAggregateElementType: mutable_array_set needs int; the element read by list_get at line 51:14 has no static kind
+  runtime:  bigint, list-alloc, mutarray-mutate, range-check, tagged-values
+
+geo_finish: guarded   [e87, line 58:14]
+  params:   builder : any   result: list
+  dispatch: closed -- natives: list_get x2, mutable_array_freeze
+  blockers:
+    line 59:24  e91  UnknownParameterKind: list_get needs list; parameter builder (no annotation, no call-site inference) has no static kind
+    line 61:26  e100  UnknownAggregateElementType: mutable_array_freeze needs mutarray; the element read by list_get at line 59:15 has no static kind
+    line 61:35  e101  UnknownAggregateElementType: mutable_array_freeze needs int; the element read by list_get at line 60:14 has no static kind
+  runtime:  mutarray-alloc, range-check, tagged-values
+
+peek: guarded   [e103, line 68:8]
+  params:   text : any, index : any   result: str
+  dispatch: closed -- natives: >=, length, substring, +
+  blockers:
+    line 69:8  e107  UnknownParameterKind: >= needs int; parameter index (no annotation, no call-site inference) has no static kind
+    line 69:24  e110  UnknownParameterKind: length needs str; parameter text (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, char-index, range-check, string-alloc, tagged-values
+
+scan_unquoted: guarded   [e122, line 74:17]
+  params:   text : any, start : any, index : any   result: list
+  captures: peek (block), scan_unquoted (block)
+  dispatch: closed -- natives: == x3, list, substring, +; functions: peek (non-tail), scan_unquoted (self, tail)
+  blockers:
+    line 77:27  e156  UnknownParameterKind: substring needs str; parameter text (no annotation, no call-site inference) has no static kind
+    line 77:33  e157  UnknownParameterKind: substring needs int; parameter start (no annotation, no call-site inference) has no static kind
+    line 77:40  e158  UnknownParameterKind: substring needs int; parameter index (no annotation, no call-site inference) has no static kind
+    line 79:32  e166  UnknownParameterKind: + needs int; parameter index (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, char-index, list-alloc, range-check, string-alloc, tagged-values
+
+scan_quoted: guarded   [e169, line 81:15]
+  params:   text : any, index : any, field : any   result: list
+  captures: peek (block), scan_quoted (block)
+  dispatch: closed -- natives: == x2, + x4, concat x2, list; functions: peek (non-tail), scan_quoted (self, tail)
+  blockers:
+    line 84:23  e188  UnknownParameterKind: + needs int; parameter index (no annotation, no call-site inference) has no static kind
+    line 85:56  e201  UnknownParameterKind: concat needs str; parameter field (no annotation, no call-site inference) has no static kind
+    line 89:23  e216  UnknownParameterKind: + needs int; parameter index (no annotation, no call-site inference) has no static kind
+    line 89:41  e220  UnknownParameterKind: concat needs str; parameter field (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, list-alloc, string-alloc, tagged-values
+
+scan_field: guarded   [e223, line 91:14]
+  params:   text : any, index : any   result: list
+  captures: peek (block), scan_quoted (block), scan_unquoted (block)
+  dispatch: closed -- natives: ==, +; functions: peek (non-tail), scan_quoted (tail), scan_unquoted (tail)
+  blockers:
+    line 93:34  e238  UnknownParameterKind: + needs int; parameter index (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+scan_record: guarded   [e247, line 97:15]
+  params:   text : any, index : any, fields : any   result: list
+  captures: scan_field (block), geo_append (block), peek (block), scan_record (block), geo_finish (block)
+  dispatch: closed -- natives: list_get x2, == x2, + x2, list x2; functions: geo_append (non-tail), geo_finish (non-tail), peek (non-tail), scan_field (non-tail), scan_record (self, tail)
+  blockers:
+    line 103:34  e282  UnknownAggregateElementType: + needs int; the element read by list_get at line 100:12 has no static kind
+    line 106:35  e298  UnknownAggregateElementType: + needs int; the element read by list_get at line 100:12 has no static kind
+  runtime:  bigint, list-alloc, range-check, tagged-values
+
+scan_records: guarded   [e307, line 110:16]
+  params:   text : any, index : any, records : any   result: list
+  captures: geo_finish (block), scan_record (block), geo_new (block), scan_records (block), geo_append (block)
+  dispatch: closed -- natives: >=, length, list_get x2; functions: geo_append (non-tail), geo_finish (tail), geo_new (non-tail), scan_record (non-tail), scan_records (self, tail)
+  blockers:
+    line 111:8  e311  UnknownParameterKind: >= needs int; parameter index (no annotation, no call-site inference) has no static kind
+    line 111:24  e314  UnknownParameterKind: length needs str; parameter text (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, char-index, range-check, tagged-values
+
+csv_parse: closed (transitively guarded)   [e341, line 117:13]
+  params:   text : any   result: list
+  captures: scan_records (block), geo_new (block)
+  dispatch: closed -- functions: geo_new (non-tail), scan_records (tail)
+  blockers: none
+  runtime:  none
+   value: [["name", "age"], ["Alice", "30"], ["Bob", "40"]]

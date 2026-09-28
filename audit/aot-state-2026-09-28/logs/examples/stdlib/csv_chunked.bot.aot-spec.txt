@@ -1,0 +1,152 @@
+== csv_chunked.bot (interp)
+<program>: closed (transitively guarded)   [i0, line 21:1]
+  calls:    csv_parse<str>
+  guards:   0
+  runtime:  none
+
+chunk_size (semantic): closed   [no blockers]
+chunk_size<generic>: closed   [i3, line 21:14]
+  params:   (none)
+  result:   int
+  guards:   0
+  runtime:  none
+
+chunked_new (semantic): closed   [no blockers]
+chunked_new<generic>: closed   [i2, line 24:15]
+  params:   (none)
+  result:   list[List[never], mutarray, int]
+  calls:    chunk_size<generic>
+  guards:   0
+  runtime:  list-alloc, mutarray-alloc
+
+chunked_append (semantic): guarded   [UnknownParameterKind 1, UnknownAggregateElementType 3]
+chunked_append<list[List[never], mutarray, int], str>: closed   [i12, line 32:18]
+  params:   builder : list[List[never], mutarray, int], value : str
+  result:   list[List[mutarray], mutarray, int]
+  calls:    chunk_size<generic>
+  guards:   0
+  runtime:  bigint, list-alloc, mutarray-alloc, mutarray-mutate, range-check
+
+chunked_append<list[List[mutarray], mutarray, int], str>: closed   [i14, line 32:18]
+  params:   builder : list[List[mutarray], mutarray, int], value : str
+  result:   list[List[mutarray], mutarray, int]
+  calls:    chunk_size<generic>
+  guards:   0
+  runtime:  bigint, list-alloc, mutarray-alloc, mutarray-mutate, range-check
+
+chunked_append<list[List[never], mutarray, int], list>: closed   [i17, line 32:18]
+  params:   builder : list[List[never], mutarray, int], value : list
+  result:   list[List[mutarray], mutarray, int]
+  calls:    chunk_size<generic>
+  guards:   0
+  runtime:  bigint, list-alloc, mutarray-alloc, mutarray-mutate, range-check
+
+chunked_append<list[List[mutarray], mutarray, int], list>: closed   [i19, line 32:18]
+  params:   builder : list[List[mutarray], mutarray, int], value : list
+  result:   list[List[mutarray], mutarray, int]
+  calls:    chunk_size<generic>
+  guards:   0
+  runtime:  bigint, list-alloc, mutarray-alloc, mutarray-mutate, range-check
+
+chunked_copy_chunks (semantic): guarded   [UnknownParameterKind 4, UnknownAggregateElementType 1]
+chunked_copy_chunks<List[never], int, mutarray, int>: guarded   [i6, line 47:23]
+  params:   chunks : List[never], index : int, final : mutarray, offset : int
+  result:   int
+  calls:    chunk_size<generic>, chunked_copy_chunks<List[never], int, mutarray, int>
+  guards:   1
+    line 52:39  e92  UnknownAggregateElementType: mutable_array_copy needs mutarray; the element read by list_get at line 51:13 has no static kind
+  runtime:  bigint, mutarray-mutate, range-check, tagged-values
+
+chunked_copy_chunks<List[mutarray], int, mutarray, int>: closed   [i16, line 47:23]
+  params:   chunks : List[mutarray], index : int, final : mutarray, offset : int
+  result:   int
+  calls:    chunk_size<generic>, chunked_copy_chunks<List[mutarray], int, mutarray, int>
+  guards:   0
+  runtime:  bigint, mutarray-mutate, range-check
+
+chunked_finish (semantic): guarded   [UnknownParameterKind 1, UnknownAggregateElementType 3, UnknownCallResultKind 1]
+chunked_finish<list[List[never], mutarray, int]>: closed (transitively guarded)   [i5, line 58:18]
+  params:   builder : list[List[never], mutarray, int]
+  result:   list
+  calls:    chunk_size<generic>, chunked_copy_chunks<List[never], int, mutarray, int>
+  guards:   0
+  runtime:  bigint, mutarray-alloc, mutarray-mutate, range-check
+
+chunked_finish<list[List[mutarray], mutarray, int]>: closed   [i15, line 58:18]
+  params:   builder : list[List[mutarray], mutarray, int]
+  result:   list
+  calls:    chunk_size<generic>, chunked_copy_chunks<List[mutarray], int, mutarray, int>
+  guards:   0
+  runtime:  bigint, mutarray-alloc, mutarray-mutate, range-check
+
+peek (semantic): guarded   [UnknownParameterKind 2]
+peek<str, int>: closed   [i9, line 73:8]
+  params:   text : str, index : int
+  result:   str
+  guards:   0
+  runtime:  bigint, char-index, range-check, string-alloc
+
+scan_unquoted (semantic): guarded   [UnknownParameterKind 4]
+scan_unquoted<str, int, int>: closed   [i11, line 79:17]
+  params:   text : str, start : int, index : int
+  result:   list[str, int]
+  calls:    peek<str, int>, scan_unquoted<str, int, int>
+  guards:   0
+  runtime:  bigint, char-index, list-alloc, range-check, string-alloc
+
+scan_quoted (semantic): guarded   [UnknownParameterKind 4]
+scan_quoted<str, int, str>: closed   [i10, line 86:15]
+  params:   text : str, index : int, field : str
+  result:   list[str, int]
+  calls:    peek<str, int>, scan_quoted<str, int, str>
+  guards:   0
+  runtime:  bigint, list-alloc, string-alloc
+
+scan_field (semantic): guarded   [UnknownParameterKind 1]
+scan_field<str, int>: closed   [i8, line 96:14]
+  params:   text : str, index : int
+  result:   list[str, int]
+  calls:    peek<str, int>, scan_quoted<str, int, str>, scan_unquoted<str, int, int>
+  guards:   0
+  runtime:  bigint
+
+scan_record (semantic): guarded   [UnknownAggregateElementType 2]
+scan_record<str, int, list[List[never], mutarray, int]>: closed   [i7, line 102:15]
+  params:   text : str, index : int, fields : list[List[never], mutarray, int]
+  result:   list[list, int]
+  calls:    chunked_append<list[List[never], mutarray, int], str>, chunked_finish<list[List[mutarray], mutarray, int]>, peek<str, int>, scan_field<str, int>, scan_record<str, int, list[List[mutarray], mutarray, int]>
+  guards:   0
+  runtime:  bigint, list-alloc, range-check
+
+scan_record<str, int, list[List[mutarray], mutarray, int]>: closed   [i13, line 102:15]
+  params:   text : str, index : int, fields : list[List[mutarray], mutarray, int]
+  result:   list[list, int]
+  calls:    chunked_append<list[List[mutarray], mutarray, int], str>, chunked_finish<list[List[mutarray], mutarray, int]>, peek<str, int>, scan_field<str, int>, scan_record<str, int, list[List[mutarray], mutarray, int]>
+  guards:   0
+  runtime:  bigint, list-alloc, range-check
+
+scan_records (semantic): guarded   [UnknownParameterKind 2]
+scan_records<str, int, list[List[never], mutarray, int]>: closed (transitively guarded)   [i4, line 115:16]
+  params:   text : str, index : int, records : list[List[never], mutarray, int]
+  result:   list
+  calls:    chunked_append<list[List[never], mutarray, int], list>, chunked_finish<list[List[never], mutarray, int]>, chunked_new<generic>, scan_record<str, int, list[List[never], mutarray, int]>, scan_records<str, int, list[List[mutarray], mutarray, int]>
+  guards:   0
+  runtime:  bigint, char-index, range-check
+
+scan_records<str, int, list[List[mutarray], mutarray, int]>: closed   [i18, line 115:16]
+  params:   text : str, index : int, records : list[List[mutarray], mutarray, int]
+  result:   list
+  calls:    chunked_append<list[List[mutarray], mutarray, int], list>, chunked_finish<list[List[mutarray], mutarray, int]>, chunked_new<generic>, scan_record<str, int, list[List[never], mutarray, int]>, scan_records<str, int, list[List[mutarray], mutarray, int]>
+  guards:   0
+  runtime:  bigint, char-index, range-check
+
+csv_parse (semantic): closed   [no blockers]
+csv_parse<str>: closed (transitively guarded)   [i1, line 122:13]
+  params:   text : str
+  result:   list
+  calls:    chunked_new<generic>, scan_records<str, int, list[List[never], mutarray, int]>
+  guards:   0
+  runtime:  none
+
+guards: generic 29, specialized 1; instances: 2 generic, 17 specialized
+   value: [["name", "age"], ["Alice", "30"], ["Bob", "40"]]

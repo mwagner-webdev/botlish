@@ -1,0 +1,467 @@
+== csv_records.bot (interp)
+<program>: closed (transitively guarded)   [i0, line 103:1]
+  calls:    sample<generic>
+  guards:   0
+  runtime:  none
+
+geo_new (semantic): closed   [no blockers]
+geo_new<generic>: closed   [i5, line 103:11]
+  params:   (none)
+  result:   list[mutarray, int]
+  guards:   0
+  runtime:  list-alloc, mutarray-alloc
+
+geo_new_capacity (semantic): guarded   [UnknownParameterKind 2]
+geo_new_capacity<int, int>: closed   [i15, line 106:20]
+  params:   capacity : int, length : int
+  result:   int
+  guards:   0
+  runtime:  bigint
+
+geo_grow (semantic): guarded   [UnknownParameterKind 2]
+geo_grow<mutarray, int>: closed   [i14, line 113:12]
+  params:   storage : mutarray, length : int
+  result:   mutarray
+  calls:    geo_new_capacity<int, int>
+  guards:   0
+  runtime:  bigint, mutarray-alloc, mutarray-mutate, range-check
+
+geo_append (semantic): guarded   [UnknownParameterKind 1, UnknownAggregateElementType 1]
+geo_append<list[mutarray, int], str>: closed   [i13, line 123:14]
+  params:   builder : list[mutarray, int], value : str
+  result:   list[mutarray, int]
+  calls:    geo_grow<mutarray, int>
+  guards:   0
+  runtime:  bigint, list-alloc, mutarray-mutate, range-check
+
+geo_append<list[mutarray, int], list>: closed   [i16, line 123:14]
+  params:   builder : list[mutarray, int], value : list
+  result:   list[mutarray, int]
+  calls:    geo_grow<mutarray, int>
+  guards:   0
+  runtime:  bigint, list-alloc, mutarray-mutate, range-check
+
+geo_append<list[mutarray, int], mutarray>: closed   [i47, line 123:14]
+  params:   builder : list[mutarray, int], value : mutarray
+  result:   list[mutarray, int]
+  calls:    geo_grow<mutarray, int>
+  guards:   0
+  runtime:  bigint, list-alloc, mutarray-mutate, range-check
+
+geo_finish (semantic): guarded   [UnknownParameterKind 1, UnknownAggregateElementType 2]
+geo_finish<list[mutarray, int]>: closed   [i7, line 130:14]
+  params:   builder : list[mutarray, int]
+  result:   list
+  guards:   0
+  runtime:  mutarray-alloc, range-check
+
+peek (semantic): guarded   [UnknownParameterKind 2]
+peek<str, int>: closed   [i10, line 139:8]
+  params:   text : str, index : int
+  result:   str
+  guards:   0
+  runtime:  bigint, char-index, range-check, string-alloc
+
+scan_unquoted (semantic): guarded   [UnknownParameterKind 4]
+scan_unquoted<str, int, int>: closed   [i12, line 145:17]
+  params:   text : str, start : int, index : int
+  result:   list[str, int]
+  calls:    peek<str, int>, scan_unquoted<str, int, int>
+  guards:   0
+  runtime:  bigint, char-index, list-alloc, range-check, string-alloc
+
+scan_quoted (semantic): guarded   [UnknownParameterKind 4]
+scan_quoted<str, int, str>: closed   [i11, line 152:15]
+  params:   text : str, index : int, field : str
+  result:   list[str, int]
+  calls:    peek<str, int>, scan_quoted<str, int, str>
+  guards:   0
+  runtime:  bigint, list-alloc, string-alloc
+
+scan_field (semantic): guarded   [UnknownParameterKind 1]
+scan_field<str, int>: closed   [i9, line 162:14]
+  params:   text : str, index : int
+  result:   list[str, int]
+  calls:    peek<str, int>, scan_quoted<str, int, str>, scan_unquoted<str, int, int>
+  guards:   0
+  runtime:  bigint
+
+scan_record (semantic): guarded   [UnknownAggregateElementType 2]
+scan_record<str, int, list[mutarray, int]>: closed   [i8, line 168:15]
+  params:   text : str, index : int, fields : list[mutarray, int]
+  result:   list[list, int]
+  calls:    geo_append<list[mutarray, int], str>, geo_finish<list[mutarray, int]>, peek<str, int>, scan_field<str, int>, scan_record<str, int, list[mutarray, int]>
+  guards:   0
+  runtime:  bigint, list-alloc, range-check
+
+scan_records (semantic): guarded   [UnknownParameterKind 2]
+scan_records<str, int, list[mutarray, int]>: closed   [i6, line 181:16]
+  params:   text : str, index : int, records : list[mutarray, int]
+  result:   list
+  calls:    geo_append<list[mutarray, int], list>, geo_finish<list[mutarray, int]>, geo_new<generic>, scan_record<str, int, list[mutarray, int]>, scan_records<str, int, list[mutarray, int]>
+  guards:   0
+  runtime:  bigint, char-index, range-check
+
+csv_parse (semantic): closed   [no blockers]
+csv_parse<str>: closed   [i4, line 188:13]
+  params:   text : str
+  result:   list
+  calls:    geo_new<generic>, scan_records<str, int, list[mutarray, int]>
+  guards:   0
+  runtime:  none
+
+ht_min_capacity (semantic): closed   [no blockers]
+ht_min_capacity<generic>: closed   [i21, line 196:19]
+  params:   (none)
+  result:   int
+  guards:   0
+  runtime:  none
+
+ht_empty_state (semantic): closed   [no blockers]
+ht_empty_state<generic>: closed   [i25, line 199:18]
+  params:   (none)
+  result:   int
+  guards:   0
+  runtime:  none
+
+ht_occupied_state (semantic): closed   [no blockers]
+ht_occupied_state<generic>: closed   [i33, line 202:21]
+  params:   (none)
+  result:   int
+  guards:   0
+  runtime:  none
+
+ht_tombstone_state (semantic): closed   [no blockers]
+ht_tombstone_state<generic>: closed   [i35, line 205:22]
+  params:   (none)
+  result:   int
+  guards:   0
+  runtime:  none
+
+ht_fill_empty (semantic): guarded   [UnknownParameterKind 3]
+ht_fill_empty<mutarray, int, int>: closed   [i24, line 208:17]
+  params:   controls : mutarray, i : int, capacity : int
+  result:   unit
+  calls:    ht_empty_state<generic>, ht_fill_empty<mutarray, int, int>
+  guards:   0
+  runtime:  bigint, mutarray-mutate, range-check
+
+ht_alloc (semantic): guarded   [UnknownParameterKind 1]
+ht_alloc<int>: closed   [i23, line 215:12]
+  params:   capacity : int
+  result:   mutarray
+  calls:    ht_fill_empty<mutarray, int, int>
+  guards:   0
+  runtime:  mutarray-alloc, mutarray-mutate, range-check
+
+ht_new (semantic): closed   [no blockers]
+ht_new<generic>: closed   [i26, line 228:10]
+  params:   (none)
+  result:   mutarray
+  calls:    ht_alloc<int>, ht_min_capacity<generic>
+  guards:   0
+  runtime:  none
+
+ht_capacity_for (semantic): guarded   [UnknownParameterKind 2]
+ht_capacity_for<int, int>: closed   [i22, line 231:19]
+  params:   expected : int, capacity : int
+  result:   int
+  calls:    ht_capacity_for<int, int>
+  guards:   0
+  runtime:  bigint
+
+ht_new_sized (semantic): closed   [no blockers]
+ht_new_sized<int>: closed   [i20, line 237:16]
+  params:   expected : int
+  result:   mutarray
+  calls:    ht_alloc<int>, ht_capacity_for<int, int>, ht_min_capacity<generic>
+  guards:   0
+  runtime:  none
+
+ht_controls (semantic): guarded   [UnknownParameterKind 1]
+ht_controls<mutarray>: closed   [i31, line 240:15]
+  params:   table : mutarray
+  result:   any
+  guards:   0
+  runtime:  range-check
+
+ht_controls<generic>: guarded   [i52, line 240:15]
+  params:   table : any
+  result:   any
+  guards:   1
+    line 241:23  e473  UnknownParameterKind: mutable_array_get needs mutarray; parameter table (no annotation, no call-site inference) has no static kind
+  runtime:  range-check, tagged-values
+
+ht_keys (semantic): guarded   [UnknownParameterKind 1]
+ht_keys<mutarray>: closed   [i34, line 243:11]
+  params:   table : mutarray
+  result:   any
+  guards:   0
+  runtime:  range-check
+
+ht_keys<generic>: guarded   [i54, line 243:11]
+  params:   table : any
+  result:   any
+  guards:   1
+    line 244:23  e479  UnknownParameterKind: mutable_array_get needs mutarray; parameter table (no annotation, no call-site inference) has no static kind
+  runtime:  range-check, tagged-values
+
+ht_values (semantic): guarded   [UnknownParameterKind 1]
+ht_values<mutarray>: closed   [i37, line 246:13]
+  params:   table : mutarray
+  result:   any
+  guards:   0
+  runtime:  range-check
+
+ht_values<generic>: guarded   [i56, line 246:13]
+  params:   table : any
+  result:   any
+  guards:   1
+    line 247:23  e485  UnknownParameterKind: mutable_array_get needs mutarray; parameter table (no annotation, no call-site inference) has no static kind
+  runtime:  range-check, tagged-values
+
+ht_size (semantic): guarded   [UnknownParameterKind 1]
+ht_size<mutarray>: closed   [i39, line 249:11]
+  params:   table : mutarray
+  result:   any
+  guards:   0
+  runtime:  range-check
+
+ht_size<generic>: guarded   [i57, line 249:11]
+  params:   table : any
+  result:   any
+  guards:   1
+    line 250:23  e491  UnknownParameterKind: mutable_array_get needs mutarray; parameter table (no annotation, no call-site inference) has no static kind
+  runtime:  range-check, tagged-values
+
+ht_tombstones (semantic): guarded   [UnknownParameterKind 1]
+ht_tombstones<mutarray>: closed   [i40, line 252:17]
+  params:   table : mutarray
+  result:   any
+  guards:   0
+  runtime:  range-check
+
+ht_capacity (semantic): guarded   [UnknownCallResultKind 1]
+ht_capacity<mutarray>: guarded   [i30, line 255:15]
+  params:   table : mutarray
+  result:   int
+  calls:    ht_controls<mutarray>
+  guards:   1
+    line 256:28  e503  UnknownCallResultKind: mutable_array_capacity needs mutarray; the result of ht_controls at line 256:28 has no static kind
+  runtime:  tagged-values
+
+ht_capacity<generic>: guarded   [i51, line 255:15]
+  params:   table : any
+  result:   int
+  calls:    ht_controls<generic>
+  guards:   1
+    line 256:28  e503  UnknownCallResultKind: mutable_array_capacity needs mutarray; the result of ht_controls at line 256:28 has no static kind
+  runtime:  tagged-values
+
+ht_probe_start (semantic): closed   [no blockers]
+ht_probe_start<mutarray, any>: closed (transitively guarded)   [i29, line 258:18]
+  params:   table : mutarray, key : any
+  result:   int
+  calls:    ht_capacity<mutarray>
+  guards:   0
+  runtime:  bigint, hash
+
+ht_probe_start<any, str>: closed (transitively guarded)   [i50, line 258:18]
+  params:   table : any, key : str
+  result:   int
+  calls:    ht_capacity<generic>
+  guards:   0
+  runtime:  bigint, hash
+
+ht_probe_next (semantic): guarded   [UnknownParameterKind 1]
+ht_probe_next<mutarray, int>: closed (transitively guarded)   [i36, line 261:17]
+  params:   table : mutarray, index : int
+  result:   int
+  calls:    ht_capacity<mutarray>
+  guards:   0
+  runtime:  bigint
+
+ht_probe_next<any, int>: closed (transitively guarded)   [i55, line 261:17]
+  params:   table : any, index : int
+  result:   int
+  calls:    ht_capacity<generic>
+  guards:   0
+  runtime:  bigint
+
+ht_find_get (semantic): guarded   [UnknownCallResultKind 2, UnknownParameterKind 1]
+ht_find_get<any, str, int>: guarded   [i53, line 264:15]
+  params:   table : any, key : str, index : int
+  result:   int
+  calls:    ht_controls<generic>, ht_empty_state<generic>, ht_find_get<any, str, int>, ht_keys<generic>, ht_occupied_state<generic>, ht_probe_next<any, int>
+  guards:   2
+    line 266:31  e536  UnknownCallResultKind: mutable_array_get needs mutarray; the result of ht_controls at line 265:16 has no static kind
+    line 270:59  e561  UnknownCallResultKind: mutable_array_get needs mutarray; the result of ht_keys at line 270:59 has no static kind
+  runtime:  bigint, range-check, structural-equality, tagged-values
+
+ht_find_insert (semantic): guarded   [UnknownCallResultKind 2, UnknownParameterKind 3]
+ht_find_insert<mutarray, any, int, int>: guarded   [i32, line 275:18]
+  params:   table : mutarray, key : any, index : int, first_tombstone : int
+  result:   int
+  calls:    ht_controls<mutarray>, ht_empty_state<generic>, ht_find_insert<mutarray, any, int, int>, ht_keys<mutarray>, ht_occupied_state<generic>, ht_probe_next<mutarray, int>, ht_tombstone_state<generic>
+  guards:   2
+    line 277:31  e588  UnknownCallResultKind: mutable_array_get needs mutarray; the result of ht_controls at line 276:16 has no static kind
+    line 284:59  e617  UnknownCallResultKind: mutable_array_get needs mutarray; the result of ht_keys at line 284:59 has no static kind
+  runtime:  bigint, range-check, structural-equality, tagged-values
+
+ht_get (semantic): guarded   [UnknownCallResultKind 1]
+ht_get<any, str>: guarded   [i49, line 292:10]
+  params:   table : any, key : str
+  result:   any
+  calls:    ht_find_get<any, str, int>, ht_probe_start<any, str>, ht_values<generic>
+  guards:   1
+    line 297:23  e681  UnknownCallResultKind: mutable_array_get needs mutarray; the result of ht_values at line 297:23 has no static kind
+  runtime:  bigint, range-check, tagged-values
+
+ht_rehash_probe (semantic): guarded   [UnknownParameterKind 3]
+ht_rehash_probe<mutarray, int, int>: closed   [i45, line 302:19]
+  params:   newControls : mutarray, index : int, capacity : int
+  result:   int
+  calls:    ht_empty_state<generic>, ht_rehash_probe<mutarray, int, int>
+  guards:   0
+  runtime:  bigint, range-check, structural-equality
+
+ht_rehash_insert (semantic): guarded   [UnknownParameterKind 2, UnknownAggregateElementType 3]
+ht_rehash_insert<List[mutarray], int, any, any>: closed   [i44, line 309:20]
+  params:   dest : List[mutarray], capacity : int, key : any, value : any
+  result:   unit
+  calls:    ht_occupied_state<generic>, ht_rehash_probe<mutarray, int, int>
+  guards:   0
+  runtime:  bigint, hash, mutarray-mutate, range-check
+
+ht_rehash_scan (semantic): guarded   [UnknownParameterKind 3, UnknownAggregateElementType 3]
+ht_rehash_scan<list, int, int, List[mutarray], int>: guarded   [i43, line 317:18]
+  params:   src : list, i : int, oldCapacity : int, dest : List[mutarray], newCapacity : int
+  result:   unit
+  calls:    ht_occupied_state<generic>, ht_rehash_insert<List[mutarray], int, any, any>, ht_rehash_scan<list, int, int, List[mutarray], int>
+  guards:   3
+    line 322:26  e784  UnknownAggregateElementType: mutable_array_get needs mutarray; the element read by list_get at line 321:19 has no static kind
+    line 323:33  e791  UnknownAggregateElementType: mutable_array_get needs mutarray; the element read by list_get at line 323:33 has no static kind
+    line 324:35  e799  UnknownAggregateElementType: mutable_array_get needs mutarray; the element read by list_get at line 324:35 has no static kind
+  runtime:  bigint, range-check, structural-equality, tagged-values
+
+ht_rehash (semantic): guarded   [UnknownParameterKind 2]
+ht_rehash<mutarray, int>: closed (transitively guarded)   [i42, line 329:13]
+  params:   table : mutarray, newCapacity : int
+  result:   unit
+  calls:    ht_capacity<mutarray>, ht_controls<mutarray>, ht_fill_empty<mutarray, int, int>, ht_keys<mutarray>, ht_rehash_scan<list, int, int, List[mutarray], int>, ht_values<mutarray>
+  guards:   0
+  runtime:  list-alloc, mutarray-alloc, mutarray-mutate, range-check
+
+ht_should_grow (semantic): guarded   [UnknownCallResultKind 2]
+ht_should_grow<mutarray>: guarded   [i38, line 342:18]
+  params:   table : mutarray
+  result:   bool
+  calls:    ht_capacity<mutarray>, ht_size<mutarray>, ht_tombstones<mutarray>
+  guards:   2
+    line 343:16  e899  UnknownCallResultKind: + needs int; the result of ht_size at line 343:16 has no static kind
+    line 343:33  e902  UnknownCallResultKind: + needs int; the result of ht_tombstones at line 343:33 has no static kind
+  runtime:  bigint, tagged-values
+
+ht_grow_or_clean (semantic): guarded   [UnknownCallResultKind 2]
+ht_grow_or_clean<mutarray>: guarded   [i41, line 346:20]
+  params:   table : mutarray
+  result:   unit
+  calls:    ht_capacity<mutarray>, ht_rehash<mutarray, int>, ht_size<mutarray>, ht_tombstones<mutarray>
+  guards:   2
+    line 347:8  e925  UnknownCallResultKind: > needs int; the result of ht_tombstones at line 347:8 has no static kind
+    line 347:31  e928  UnknownCallResultKind: > needs int; the result of ht_size at line 347:31 has no static kind
+  runtime:  bigint, tagged-values
+
+ht_place (semantic): guarded   [UnknownCallResultKind 5, UnknownParameterKind 2]
+ht_place<mutarray, int, any, any>: guarded   [i46, line 352:12]
+  params:   table : mutarray, index : int, key : any, value : any
+  result:   unit
+  calls:    ht_controls<mutarray>, ht_keys<mutarray>, ht_occupied_state<generic>, ht_size<mutarray>, ht_tombstone_state<generic>, ht_tombstones<mutarray>, ht_values<mutarray>
+  guards:   5
+    line 354:31  e955  UnknownCallResultKind: mutable_array_get needs mutarray; the result of ht_controls at line 353:16 has no static kind
+    line 356:23  e965  UnknownCallResultKind: mutable_array_set needs mutarray; the result of ht_keys at line 356:23 has no static kind
+    line 357:23  e972  UnknownCallResultKind: mutable_array_set needs mutarray; the result of ht_values at line 357:23 has no static kind
+    line 358:33  e983  UnknownCallResultKind: + needs int; the result of ht_size at line 358:33 has no static kind
+    line 360:37  e999  UnknownCallResultKind: - needs int; the result of ht_tombstones at line 360:37 has no static kind
+  runtime:  bigint, mutarray-mutate, range-check, structural-equality, tagged-values
+
+ht_set (semantic): guarded   [UnknownCallResultKind 2]
+ht_set<mutarray, any, any>: guarded   [i28, line 364:10]
+  params:   table : mutarray, key : any, value : any
+  result:   unit
+  calls:    ht_controls<mutarray>, ht_find_insert<mutarray, any, int, int>, ht_grow_or_clean<mutarray>, ht_occupied_state<generic>, ht_place<mutarray, int, any, any>, ht_probe_start<mutarray, any>, ht_should_grow<mutarray>, ht_values<mutarray>
+  guards:   2
+    line 367:31  e1026  UnknownCallResultKind: mutable_array_get needs mutarray; the result of ht_controls at line 366:16 has no static kind
+    line 369:27  e1036  UnknownCallResultKind: mutable_array_set needs mutarray; the result of ht_values at line 369:27 has no static kind
+  runtime:  bigint, mutarray-mutate, range-check, structural-equality, tagged-values
+
+row_new (semantic): guarded   [UnknownParameterKind 1]
+row_new<bool, int>: closed   [i19, line 384:11]
+  params:   presize : bool, header_count : int
+  result:   mutarray
+  calls:    ht_new<generic>, ht_new_sized<int>
+  guards:   0
+  runtime:  none
+
+row_fill (semantic): guarded   [UnknownParameterKind 4]
+row_fill<mutarray, any, any, int, int>: guarded   [i27, line 395:12]
+  params:   table : mutarray, headers : any, fields : any, i : int, field_count : int
+  result:   mutarray
+  calls:    ht_set<mutarray, any, any>, row_fill<mutarray, any, any, int, int>
+  guards:   2
+    line 399:28  e1098  UnknownParameterKind: list_get needs list; parameter headers (no annotation, no call-site inference) has no static kind
+    line 399:50  e1102  UnknownParameterKind: list_get needs list; parameter fields (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, range-check, tagged-values
+
+row_table (semantic): guarded   [UnknownParameterKind 1]
+row_table<any, int, any, bool>: guarded   [i18, line 404:13]
+  params:   headers : any, header_count : int, fields : any, presize : bool
+  result:   mutarray
+  calls:    row_fill<mutarray, any, any, int, int>, row_new<bool, int>
+  guards:   1
+    line 406:53  e1129  UnknownParameterKind: list_length needs list; parameter fields (no annotation, no call-site inference) has no static kind
+  runtime:  tagged-values
+
+build_rows (semantic): guarded   [UnknownParameterKind 2]
+build_rows<list, int, any, int, list[mutarray, int], bool>: closed (transitively guarded)   [i17, line 412:14]
+  params:   records : list, i : int, headers : any, header_count : int, outer : list[mutarray, int], presize : bool
+  result:   list
+  calls:    build_rows<list, int, any, int, list[mutarray, int], bool>, geo_append<list[mutarray, int], mutarray>, geo_finish<list[mutarray, int]>, row_table<any, int, any, bool>
+  guards:   0
+  runtime:  bigint, range-check
+
+csv_records_generic (semantic): guarded   [UnknownAggregateElementType 1]
+csv_records_generic<str, bool>: guarded   [i3, line 423:23]
+  params:   text : str, presize : bool
+  result:   list
+  calls:    build_rows<list, int, any, int, list[mutarray, int], bool>, csv_parse<str>, geo_new<generic>
+  guards:   1
+    line 429:49  e1195  UnknownAggregateElementType: list_length needs list; the element read by list_get at line 428:15 has no static kind
+  runtime:  bigint, list-alloc, range-check, tagged-values
+
+csv_records (semantic): closed   [no blockers]
+csv_records<str>: closed (transitively guarded)   [i2, line 433:15]
+  params:   text : str
+  result:   list
+  calls:    csv_records_generic<str, bool>
+  guards:   0
+  runtime:  none
+
+csv_records_presized (semantic): closed   [no blockers]
+csv_records_presized<str>: closed (transitively guarded)   [i48, line 438:24]
+  params:   text : str
+  result:   list
+  calls:    csv_records_generic<str, bool>
+  guards:   0
+  runtime:  none
+
+sample (semantic): closed   [no blockers]
+sample<generic>: closed (transitively guarded)   [i1, line 446:10]
+  params:   (none)
+  result:   list[int, any, any, any, any, any, bool]
+  calls:    csv_records<str>, csv_records_presized<str>, ht_get<any, str>, ht_size<generic>
+  guards:   0
+  runtime:  list-alloc, range-check, structural-equality
+
+guards: generic 84, specialized 29; instances: 12 generic, 45 specialized
+   value: [2, "Alice", "31", "Berlin", "Bob", "Hamburg", true]

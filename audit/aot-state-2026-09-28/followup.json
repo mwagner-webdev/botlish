@@ -1,0 +1,212 @@
+[
+  {
+    "path": "audit/comprehensive-generated-code/probes/steady-ascii-capture.bot",
+    "mode": "aot",
+    "command": [
+      "tclsh9.0",
+      "main.tcl",
+      "-backend",
+      "compile",
+      "-aot",
+      "audit/comprehensive-generated-code/probes/steady-ascii-capture.bot"
+    ],
+    "exit_code": 0,
+    "seconds": 16.736,
+    "log": "followup/audit/comprehensive-generated-code/probes/steady-ascii-capture.bot.aot.txt"
+  },
+  {
+    "path": "audit/comprehensive-generated-code/probes/steady-ascii-capture.bot",
+    "mode": "aot-spec",
+    "command": [
+      "tclsh9.0",
+      "main.tcl",
+      "-backend",
+      "compile",
+      "-aot-spec",
+      "audit/comprehensive-generated-code/probes/steady-ascii-capture.bot"
+    ],
+    "exit_code": 0,
+    "seconds": 16.634,
+    "log": "followup/audit/comprehensive-generated-code/probes/steady-ascii-capture.bot.aot-spec.txt"
+  },
+  {
+    "path": "audit/comprehensive-generated-code/probes/steady-ascii-param.bot",
+    "mode": "aot",
+    "command": [
+      "tclsh9.0",
+      "main.tcl",
+      "-backend",
+      "compile",
+      "-aot",
+      "audit/comprehensive-generated-code/probes/steady-ascii-param.bot"
+    ],
+    "exit_code": 0,
+    "seconds": 3.979,
+    "log": "followup/audit/comprehensive-generated-code/probes/steady-ascii-param.bot.aot.txt"
+  },
+  {
+    "path": "audit/comprehensive-generated-code/probes/steady-ascii-param.bot",
+    "mode": "aot-spec",
+    "command": [
+      "tclsh9.0",
+      "main.tcl",
+      "-backend",
+      "compile",
+      "-aot-spec",
+      "audit/comprehensive-generated-code/probes/steady-ascii-param.bot"
+    ],
+    "exit_code": 0,
+    "seconds": 4.129,
+    "log": "followup/audit/comprehensive-generated-code/probes/steady-ascii-param.bot.aot-spec.txt"
+  },
+  {
+    "path": "audit/comprehensive-generated-code/probes/steady-ascii.bot",
+    "mode": "aot",
+    "command": [
+      "tclsh9.0",
+      "main.tcl",
+      "-backend",
+      "compile",
+      "-aot",
+      "audit/comprehensive-generated-code/probes/steady-ascii.bot"
+    ],
+    "exit_code": 0,
+    "seconds": 3.977,
+    "log": "followup/audit/comprehensive-generated-code/probes/steady-ascii.bot.aot.txt"
+  },
+  {
+    "path": "audit/comprehensive-generated-code/probes/steady-ascii.bot",
+    "mode": "aot-spec",
+    "command": [
+      "tclsh9.0",
+      "main.tcl",
+      "-backend",
+      "compile",
+      "-aot-spec",
+      "audit/comprehensive-generated-code/probes/steady-ascii.bot"
+    ],
+    "exit_code": 0,
+    "seconds": 4.027,
+    "log": "followup/audit/comprehensive-generated-code/probes/steady-ascii.bot.aot-spec.txt"
+  },
+  {
+    "path": "bench/loop-count.bot",
+    "mode": "aot",
+    "command": [
+      "tclsh9.0",
+      "main.tcl",
+      "-backend",
+      "compile",
+      "-aot",
+      "bench/loop-count.bot"
+    ],
+    "exit_code": 0,
+    "seconds": 0.419,
+    "log": "followup/bench/loop-count.bot.aot.txt"
+  },
+  {
+    "path": "bench/loop-count.bot",
+    "mode": "aot-spec",
+    "command": [
+      "tclsh9.0",
+      "main.tcl",
+      "-backend",
+      "compile",
+      "-aot-spec",
+      "bench/loop-count.bot"
+    ],
+    "exit_code": 0,
+    "seconds": 0.418,
+    "log": "followup/bench/loop-count.bot.aot-spec.txt"
+  },
+  {
+    "path": "bench/refined-checks.bot",
+    "mode": "aot",
+    "command": [
+      "tclsh9.0",
+      "main.tcl",
+      "-backend",
+      "compile",
+      "-aot",
+      "bench/refined-checks.bot"
+    ],
+    "exit_code": 0,
+    "seconds": 0.468,
+    "log": "followup/bench/refined-checks.bot.aot.txt"
+  },
+  {
+    "path": "bench/refined-checks.bot",
+    "mode": "aot-spec",
+    "command": [
+      "tclsh9.0",
+      "main.tcl",
+      "-backend",
+      "compile",
+      "-aot-spec",
+      "bench/refined-checks.bot"
+    ],
+    "exit_code": 0,
+    "seconds": 0.468,
+    "log": "followup/bench/refined-checks.bot.aot-spec.txt"
+  },
+  {
+    "path": "bench/sum-refined.bot",
+    "mode": "aot",
+    "command": [
+      "tclsh9.0",
+      "main.tcl",
+      "-backend",
+      "compile",
+      "-aot",
+      "bench/sum-refined.bot"
+    ],
+    "exit_code": 0,
+    "seconds": 0.467,
+    "log": "followup/bench/sum-refined.bot.aot.txt"
+  },
+  {
+    "path": "bench/sum-refined.bot",
+    "mode": "aot-spec",
+    "command": [
+      "tclsh9.0",
+      "main.tcl",
+      "-backend",
+      "compile",
+      "-aot-spec",
+      "bench/sum-refined.bot"
+    ],
+    "exit_code": 0,
+    "seconds": 0.417,
+    "log": "followup/bench/sum-refined.bot.aot-spec.txt"
+  },
+  {
+    "path": "bench/uri-steady.bot",
+    "mode": "aot",
+    "command": [
+      "tclsh9.0",
+      "main.tcl",
+      "-backend",
+      "compile",
+      "-aot",
+      "bench/uri-steady.bot"
+    ],
+    "exit_code": 0,
+    "seconds": 2.024,
+    "log": "followup/bench/uri-steady.bot.aot.txt"
+  },
+  {
+    "path": "bench/uri-steady.bot",
+    "mode": "aot-spec",
+    "command": [
+      "tclsh9.0",
+      "main.tcl",
+      "-backend",
+      "compile",
+      "-aot-spec",
+      "bench/uri-steady.bot"
+    ],
+    "exit_code": 0,
+    "seconds": 2.078,
+    "log": "followup/bench/uri-steady.bot.aot-spec.txt"
+  }
+]

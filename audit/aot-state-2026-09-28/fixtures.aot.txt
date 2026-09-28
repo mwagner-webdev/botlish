@@ -1,0 +1,27 @@
+== main.bot (interp)
+<program>: closed (transitively guarded)   [program, line 1:1]
+  dispatch: closed -- natives: list x2; functions: managed::get (non-tail), plain::inc (non-tail), scalar::add (non-tail)
+  blockers: none
+  runtime:  list-alloc
+
+plain::inc: guarded   [e2, line 2:7]
+  params:   x : any   result: int
+  dispatch: closed -- natives: +
+  blockers:
+    line 3:5  e5  UnknownParameterKind: + needs int; parameter x (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+scalar::add: guarded   [e10, line 3:7]
+  params:   x : any   result: int
+  dispatch: closed -- natives: +
+  blockers:
+    line 4:5  e13  UnknownParameterKind: + needs int; parameter x (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+managed::get: guarded   [e21, line 3:7]
+  params:   i : any   result: int
+  dispatch: closed -- natives: list_get
+  blockers:
+    line 4:22  e25  UnknownParameterKind: list_get needs int; parameter i (no annotation, no call-site inference) has no static kind
+  runtime:  range-check, tagged-values
+   value: [2, 8, 20]

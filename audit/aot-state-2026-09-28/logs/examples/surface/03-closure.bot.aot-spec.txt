@@ -1,0 +1,29 @@
+== 03-closure.bot (interp)
+<program>: closed   [i0, line 5:1]
+  calls:    add<int>, make_adder<int>
+  guards:   0
+  runtime:  closure-env
+
+make_adder (semantic): closed   [no blockers]
+make_adder<int>: closed   [i1, line 5:14]
+  params:   x : int
+  result:   block(e4)/1 -> any
+  guards:   0
+  runtime:  closure-env
+
+add (semantic): guarded   [UnknownParameterKind 2]
+add<generic>: guarded   [i2, line 6:11]
+  params:   y : any
+  result:   int
+  guards:   1
+    line 7:13  e8  UnknownParameterKind: + needs int; parameter y (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+add<int>: closed   [i3, line 6:11]
+  params:   y : int
+  result:   int
+  guards:   0
+  runtime:  bigint
+
+guards: generic 2, specialized 1; instances: 1 generic, 2 specialized
+   value: 42

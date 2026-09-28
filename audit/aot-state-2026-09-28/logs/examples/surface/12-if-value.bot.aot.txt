@@ -1,0 +1,13 @@
+== 12-if-value.bot (interp)
+<program>: closed (transitively guarded)   [program, line 5:1]
+  dispatch: closed -- natives: list, -; functions: describe (non-tail)
+  blockers: none
+  runtime:  bigint, list-alloc
+
+describe: guarded   [e2, line 5:12]
+  params:   n : any   result: str
+  dispatch: closed -- natives: <, ==
+  blockers:
+    line 6:15  e7  UnknownParameterKind: < needs int; parameter n (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+   value: ["negative", "zero", "positive"]

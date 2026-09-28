@@ -1,0 +1,16 @@
+== fib.bot (interp)
+<program>: closed   [i0, line 14:1]
+  calls:    fib<int>
+  guards:   0
+  runtime:  none
+
+fib (semantic): guarded   [UnknownParameterKind 1]
+fib<int>: closed   [i1, line 14:7]
+  params:   n : int
+  result:   int
+  calls:    fib<int>
+  guards:   0
+  runtime:  bigint
+
+guards: generic 1, specialized 0; instances: 0 generic, 1 specialized
+   value: 17711

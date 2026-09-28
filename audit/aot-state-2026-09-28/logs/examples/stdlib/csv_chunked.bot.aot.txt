@@ -1,0 +1,117 @@
+== csv_chunked.bot (interp)
+<program>: closed (transitively guarded)   [program, line 21:1]
+  dispatch: closed -- functions: csv_parse (non-tail)
+  blockers: none
+  runtime:  none
+
+chunk_size: closed   [e2, line 21:14]
+  params:   (none)   result: int
+  dispatch: closed -- no calls
+  blockers: none
+  runtime:  none
+
+chunked_new: closed   [e5, line 24:15]
+  params:   (none)   result: list
+  captures: chunk_size (block)
+  dispatch: closed -- natives: list x2, mutable_array_allocate; functions: chunk_size (non-tail)
+  blockers: none
+  runtime:  list-alloc, mutarray-alloc
+
+chunked_append: guarded   [e16, line 32:18]
+  params:   builder : any, value : any   result: list
+  captures: chunk_size (block)
+  dispatch: closed -- natives: list_get x3, ==, list_append, mutable_array_allocate, mutable_array_set x2, list x2, +; functions: chunk_size (non-tail)
+  blockers:
+    line 33:26  e20  UnknownParameterKind: list_get needs list; parameter builder (no annotation, no call-site inference) has no static kind
+    line 37:28  e41  UnknownAggregateElementType: list_append needs list; the element read by list_get at line 33:17 has no static kind
+    line 42:23  e61  UnknownAggregateElementType: mutable_array_set needs mutarray; the element read by list_get at line 34:15 has no static kind
+    line 42:32  e62  UnknownAggregateElementType: mutable_array_set needs int; the element read by list_get at line 35:14 has no static kind
+  runtime:  bigint, list-alloc, mutarray-alloc, mutarray-mutate, range-check, structural-equality, tagged-values
+
+chunked_copy_chunks: guarded   [e73, line 47:23]
+  params:   chunks : any, index : any, final : any, offset : any   result: any
+  captures: chunk_size (block), chunked_copy_chunks (block)
+  dispatch: closed -- natives: >=, list_length, list_get, mutable_array_copy, + x2; functions: chunk_size (non-tail), chunked_copy_chunks (self, tail)
+  blockers:
+    line 48:8  e77  UnknownParameterKind: >= needs int; parameter index (no annotation, no call-site inference) has no static kind
+    line 48:29  e80  UnknownParameterKind: list_length needs list; parameter chunks (no annotation, no call-site inference) has no static kind
+    line 52:24  e90  UnknownParameterKind: mutable_array_copy needs mutarray; parameter final (no annotation, no call-site inference) has no static kind
+    line 52:31  e91  UnknownParameterKind: mutable_array_copy needs int; parameter offset (no annotation, no call-site inference) has no static kind
+    line 52:39  e92  UnknownAggregateElementType: mutable_array_copy needs mutarray; the element read by list_get at line 51:13 has no static kind
+  runtime:  bigint, mutarray-mutate, range-check, tagged-values
+
+chunked_finish: guarded   [e110, line 58:18]
+  params:   builder : any   result: list
+  captures: chunk_size (block), chunked_copy_chunks (block)
+  dispatch: closed -- natives: list_get x3, +, *, list_length, mutable_array_allocate, mutable_array_copy, mutable_array_freeze; functions: chunk_size (non-tail), chunked_copy_chunks (non-tail)
+  blockers:
+    line 59:26  e114  UnknownParameterKind: list_get needs list; parameter builder (no annotation, no call-site inference) has no static kind
+    line 62:53  e136  UnknownAggregateElementType: + needs int; the element read by list_get at line 61:14 has no static kind
+    line 62:25  e133  UnknownAggregateElementType: list_length needs list; the element read by list_get at line 59:17 has no static kind
+    line 65:31  e151  UnknownCallResultKind: mutable_array_copy needs int; the result of chunked_copy_chunks at line 64:14 has no static kind
+    line 65:39  e152  UnknownAggregateElementType: mutable_array_copy needs mutarray; the element read by list_get at line 60:15 has no static kind
+  runtime:  bigint, mutarray-alloc, mutarray-mutate, range-check, tagged-values
+
+peek: guarded   [e160, line 73:8]
+  params:   text : any, index : any   result: str
+  dispatch: closed -- natives: >=, length, substring, +
+  blockers:
+    line 74:8  e164  UnknownParameterKind: >= needs int; parameter index (no annotation, no call-site inference) has no static kind
+    line 74:24  e167  UnknownParameterKind: length needs str; parameter text (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, char-index, range-check, string-alloc, tagged-values
+
+scan_unquoted: guarded   [e179, line 79:17]
+  params:   text : any, start : any, index : any   result: list
+  captures: peek (block), scan_unquoted (block)
+  dispatch: closed -- natives: == x3, list, substring, +; functions: peek (non-tail), scan_unquoted (self, tail)
+  blockers:
+    line 82:27  e213  UnknownParameterKind: substring needs str; parameter text (no annotation, no call-site inference) has no static kind
+    line 82:33  e214  UnknownParameterKind: substring needs int; parameter start (no annotation, no call-site inference) has no static kind
+    line 82:40  e215  UnknownParameterKind: substring needs int; parameter index (no annotation, no call-site inference) has no static kind
+    line 84:32  e223  UnknownParameterKind: + needs int; parameter index (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, char-index, list-alloc, range-check, string-alloc, tagged-values
+
+scan_quoted: guarded   [e226, line 86:15]
+  params:   text : any, index : any, field : any   result: list
+  captures: peek (block), scan_quoted (block)
+  dispatch: closed -- natives: == x2, + x4, concat x2, list; functions: peek (non-tail), scan_quoted (self, tail)
+  blockers:
+    line 89:23  e245  UnknownParameterKind: + needs int; parameter index (no annotation, no call-site inference) has no static kind
+    line 90:56  e258  UnknownParameterKind: concat needs str; parameter field (no annotation, no call-site inference) has no static kind
+    line 94:23  e273  UnknownParameterKind: + needs int; parameter index (no annotation, no call-site inference) has no static kind
+    line 94:41  e277  UnknownParameterKind: concat needs str; parameter field (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, list-alloc, string-alloc, tagged-values
+
+scan_field: guarded   [e280, line 96:14]
+  params:   text : any, index : any   result: list
+  captures: peek (block), scan_quoted (block), scan_unquoted (block)
+  dispatch: closed -- natives: ==, +; functions: peek (non-tail), scan_quoted (tail), scan_unquoted (tail)
+  blockers:
+    line 98:34  e295  UnknownParameterKind: + needs int; parameter index (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+scan_record: guarded   [e304, line 102:15]
+  params:   text : any, index : any, fields : any   result: list
+  captures: scan_field (block), chunked_append (block), peek (block), scan_record (block), chunked_finish (block)
+  dispatch: closed -- natives: list_get x2, == x2, + x2, list x2; functions: chunked_append (non-tail), chunked_finish (non-tail), peek (non-tail), scan_field (non-tail), scan_record (self, tail)
+  blockers:
+    line 108:34  e339  UnknownAggregateElementType: + needs int; the element read by list_get at line 105:12 has no static kind
+    line 111:39  e355  UnknownAggregateElementType: + needs int; the element read by list_get at line 105:12 has no static kind
+  runtime:  bigint, list-alloc, range-check, tagged-values
+
+scan_records: guarded   [e364, line 115:16]
+  params:   text : any, index : any, records : any   result: list
+  captures: chunked_finish (block), scan_record (block), chunked_new (block), scan_records (block), chunked_append (block)
+  dispatch: closed -- natives: >=, length, list_get x2; functions: chunked_append (non-tail), chunked_finish (tail), chunked_new (non-tail), scan_record (non-tail), scan_records (self, tail)
+  blockers:
+    line 116:8  e368  UnknownParameterKind: >= needs int; parameter index (no annotation, no call-site inference) has no static kind
+    line 116:24  e371  UnknownParameterKind: length needs str; parameter text (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, char-index, range-check, tagged-values
+
+csv_parse: closed (transitively guarded)   [e398, line 122:13]
+  params:   text : any   result: list
+  captures: scan_records (block), chunked_new (block)
+  dispatch: closed -- functions: chunked_new (non-tail), scan_records (tail)
+  blockers: none
+  runtime:  none
+   value: [["name", "age"], ["Alice", "30"], ["Bob", "40"]]

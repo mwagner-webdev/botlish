@@ -1,0 +1,16 @@
+== managed.bot (interp)
+<program>: closed   [i0, line 1:1]
+  guards:   0
+  runtime:  closure-env, list-alloc
+
+get (semantic): guarded   [UnknownParameterKind 1]
+get<generic>: guarded   [i1, line 3:7]
+  params:   i : any
+  result:   int
+  guards:   1
+    line 4:22  e11  UnknownParameterKind: list_get needs int; parameter i (no annotation, no call-site inference) has no static kind
+  runtime:  range-check, tagged-values
+
+guards: generic 1, specialized 1; instances: 1 generic, 0 specialized
+   value: <block (i)>
+   block #0 refinements: (none)

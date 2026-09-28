@@ -1,0 +1,2 @@
+== main.bot (interp)
+   error: audit/post-native-stack/module-cases/main.bot:1:2: unknown namespace "plain": no such module file /mnt/c/Users/MarkusWagner/dev/botlish/lib/plain.bot (SURFACE MODULE UNKNOWN-NAMESPACE)

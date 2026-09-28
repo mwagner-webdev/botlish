@@ -1,0 +1,45 @@
+== ai_text_clean.bot (interp)
+<program>: closed (transitively guarded)   [program, line 34:1]
+  dispatch: closed -- natives: list; functions: clean_ai_text (non-tail)
+  blockers: none
+  runtime:  list-alloc
+
+peek: guarded   [e2, line 34:8]
+  params:   text : any, index : any   result: str
+  dispatch: closed -- natives: >=, length, substring, +
+  blockers:
+    line 35:8  e6  UnknownParameterKind: >= needs int; parameter index (no annotation, no call-site inference) has no static kind
+    line 35:24  e9  UnknownParameterKind: length needs str; parameter text (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, char-index, range-check, string-alloc, tagged-values
+
+cleaner_emoji: closed   [e21, line 43:17]
+  params:   character : any   result: bool
+  dispatch: closed -- natives: == x12
+  blockers: none
+  runtime:  structural-equality
+
+clean_char: closed   [e126, line 51:14]
+  params:   character : any   result: any
+  captures: cleaner_emoji (block)
+  dispatch: closed -- natives: == x7; functions: cleaner_emoji (non-tail)
+  blockers: none
+  runtime:  structural-equality
+
+clean_from: guarded   [e190, line 70:14]
+  params:   text : any, index : any, done : any   result: any
+  captures: clean_from (block), clean_char (block), peek (block)
+  dispatch: closed -- natives: >=, length, +, concat; functions: clean_char (non-tail), clean_from (self, tail), peek (non-tail)
+  blockers:
+    line 71:8  e194  UnknownParameterKind: >= needs int; parameter index (no annotation, no call-site inference) has no static kind
+    line 71:24  e197  UnknownParameterKind: length needs str; parameter text (no annotation, no call-site inference) has no static kind
+    line 74:40  e209  UnknownParameterKind: concat needs str; parameter done (no annotation, no call-site inference) has no static kind
+    line 74:46  e210  UnknownCallResultKind: concat needs str; the result of clean_char at line 74:46 has no static kind
+  runtime:  bigint, char-index, string-alloc, tagged-values
+
+clean_ai_text: closed (transitively guarded)   [e217, line 76:17]
+  params:   text : any   result: any
+  captures: clean_from (block)
+  dispatch: closed -- functions: clean_from (tail)
+  blockers: none
+  runtime:  none
+   value: ["hello", "hello  world", "AI-generated", "\"hello\"", "'hello'", "wait... what?"]

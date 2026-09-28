@@ -1,0 +1,107 @@
+== test-selection.bot (interp)
+<program>: closed (transitively guarded)   [i0, line 44:1]
+  calls:    changed?<generic>, first_affected<List[list], block>, list::none?<List[str], block>, make_changed?<List[str]>, select_affected<List[list], block>
+  guards:   0
+  runtime:  closure-env, list-alloc
+
+list::any? (semantic): open   [UnknownParameterKind 1, UnknownCallResultKind 1, DynamicCall 1]
+list::any?<any, block>: guarded   [i6, line 59:8]
+  params:   xs : any, predicate : block
+  result:   bool
+  guards:   2
+    line 60:15  e4  UnknownParameterKind: the condition needs list; parameter xs (no annotation, no call-site inference) has no static kind
+    line 61:12  e6  UnknownCallResultKind: the condition needs bool; the result of the dynamic call at line 61:12 has no static kind
+  runtime:  indirect-call, tagged-values
+
+list::none? (semantic): open   [UnknownParameterKind 1, UnknownCallResultKind 1, DynamicCall 1]
+list::none?<List[str], block>: guarded   [i7, line 71:9]
+  params:   xs : List[str], predicate : block
+  result:   bool
+  guards:   1
+    line 73:12  e31  UnknownCallResultKind: the condition needs bool; the result of the dynamic call at line 73:12 has no static kind
+  runtime:  indirect-call, tagged-values
+
+list::find (semantic): open   [UnknownParameterKind 1, UnknownCallResultKind 1, DynamicCall 1]
+list::find<List[list], block>: guarded   [i9, line 77:8]
+  params:   xs : List[list], predicate : block
+  result:   list
+  guards:   1
+    line 79:12  e42  UnknownCallResultKind: the condition needs bool; the result of the dynamic call at line 79:12 has no static kind
+  runtime:  indirect-call, tagged-values
+
+make_changed? (semantic): guarded   [UnknownParameterKind 1]
+make_changed?<List[str]>: closed   [i1, line 44:17]
+  params:   changed : List[str]
+  result:   block(e55)/1 -> any
+  guards:   0
+  runtime:  closure-env, set-alloc, structural-equality
+
+changed? (semantic): closed   [no blockers]
+changed?<generic>: closed   [i2, line 46:16]
+  params:   path : any
+  result:   bool
+  guards:   0
+  runtime:  structural-equality
+
+test_name (semantic): guarded   [UnknownParameterKind 1]
+test_name<list>: closed   [i10, line 50:13]
+  params:   test : list
+  result:   any
+  guards:   0
+  runtime:  range-check
+
+test_deps (semantic): guarded   [UnknownParameterKind 1]
+test_deps<list>: closed   [i5, line 53:13]
+  params:   test : list
+  result:   any
+  guards:   0
+  runtime:  range-check
+
+test_deps<generic>: guarded   [i13, line 53:13]
+  params:   test : any
+  result:   any
+  guards:   1
+    line 54:14  e71  UnknownParameterKind: list_get needs list; parameter test (no annotation, no call-site inference) has no static kind
+  runtime:  range-check, tagged-values
+
+affected? (semantic): closed   [no blockers]
+affected?<list, block>: closed (transitively guarded)   [i4, line 56:13]
+  params:   test : list, changed? : block
+  result:   bool
+  calls:    list::any?<any, block>, test_deps<list>
+  guards:   0
+  runtime:  none
+
+affected?<any, block>: closed (transitively guarded)   [i12, line 56:13]
+  params:   test : any, changed? : block
+  result:   bool
+  calls:    list::any?<any, block>, test_deps<generic>
+  guards:   0
+  runtime:  none
+
+select_affected (semantic): guarded   [UnknownParameterKind 1]
+select_affected<List[list], block>: closed (transitively guarded)   [i3, line 59:19]
+  params:   tests : List[list], changed? : block
+  result:   List[list]
+  calls:    affected?<list, block>
+  guards:   0
+  runtime:  none
+
+first_affected (semantic): closed   [no blockers]
+first_affected<List[list], block>: closed (transitively guarded)   [i8, line 65:18]
+  params:   tests : List[list], changed? : block
+  result:   any
+  calls:    list::find<List[list], block>, test_name<list>
+  guards:   0
+  runtime:  closure-env, list-alloc
+
+is_affected? (semantic): closed   [no blockers]
+is_affected?<generic>: closed (transitively guarded)   [i11, line 66:20]
+  params:   test : any
+  result:   bool
+  calls:    affected?<any, block>
+  guards:   0
+  runtime:  none
+
+guards: generic 12, specialized 5; instances: 3 generic, 10 specialized
+   value: [3, 1, "resolve-tests", true, true]

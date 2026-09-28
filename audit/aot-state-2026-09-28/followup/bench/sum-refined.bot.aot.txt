@@ -1,0 +1,25 @@
+== sum-refined.bot (compile)
+<program>: closed (transitively guarded)   [program, line 25:1]
+  dispatch: closed -- functions: refined_sum (non-tail)
+  blockers: none
+  runtime:  none
+
+refined_sum: guarded   [e2, line 25:15]
+  params:   n : any, acc : any   result: int
+  captures: refined_sum (block)
+  dispatch: closed -- natives: integer?, ==, - x2; functions: refined_sum (self, tail), step (non-tail)
+  blockers:
+    line 31:21  e24  UnknownParameterKind: - needs int; parameter n (no annotation, no call-site inference) has no static kind
+  note:     line 29:16  e15  creates a closure capturing values
+  runtime:  bigint, closure-env, structural-equality, tagged-values
+
+step: guarded   [e15, line 29:16]
+  params:   x : any   result: int
+  captures: n (value)
+  dispatch: closed -- natives: +
+  blockers:
+    line 30:13  e18  UnknownParameterKind: + needs int; parameter x (no annotation, no call-site inference) has no static kind
+    line 30:17  e19  UnknownParameterKind: + needs int; parameter n (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+   value: 80200
+   type:  refined_sum : block(e2)/2 -> int

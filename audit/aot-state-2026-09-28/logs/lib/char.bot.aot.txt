@@ -1,0 +1,13 @@
+== char.bot (interp)
+<program>: closed   [program, line 19:1]
+  dispatch: closed -- no calls
+  blockers: none
+  runtime:  none
+
+codepoint: closed   [e2, line 21:13]
+  params:   c : any   result: int
+  dispatch: closed -- natives: char_codepoint
+  blockers: none
+  runtime:  none
+   value: <block (c)>
+   block #0 refinements: (none)

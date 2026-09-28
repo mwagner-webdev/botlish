@@ -1,0 +1,15 @@
+== 04-branch-value.bot (interp)
+<program>: closed   [i0, line 5:1]
+  calls:    choose<bool>
+  guards:   0
+  runtime:  none
+
+choose (semantic): guarded   [UnknownParameterKind 1]
+choose<bool>: closed   [i1, line 5:10]
+  params:   flag : bool
+  result:   int
+  guards:   0
+  runtime:  none
+
+guards: generic 1, specialized 0; instances: 0 generic, 1 specialized
+   value: 20

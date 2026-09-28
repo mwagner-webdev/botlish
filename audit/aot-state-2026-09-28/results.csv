@@ -1,0 +1,117 @@
+path,mode,exit_code,seconds,analysis_complete,file_status,closed,guarded,open,generic_guards,specialized_guards,errors
+audit/comprehensive-generated-code/bugs/handle-range-bigint.bot,aot,0,0.338,True,guarded,4,6,0,,,
+audit/comprehensive-generated-code/bugs/handle-range-bigint.bot,aot-spec,0,0.34,True,closed,2,0,0,6,0,
+audit/comprehensive-generated-code/bugs/handle-range-entry.bot,aot,0,0.292,True,closed,2,0,0,,,
+audit/comprehensive-generated-code/bugs/handle-range-entry.bot,aot-spec,0,0.294,True,closed,2,0,0,0,0,
+audit/comprehensive-generated-code/bugs/handle-return-result.bot,aot,0,0.276,True,closed,4,0,0,,,
+audit/comprehensive-generated-code/bugs/handle-return-result.bot,aot-spec,0,0.326,True,closed,4,0,0,0,0,
+audit/comprehensive-generated-code/bugs/module-closure-from-user-fn.bot,aot,0,0.485,True,open,13,16,1,,,
+audit/comprehensive-generated-code/bugs/module-closure-from-user-fn.bot,aot-spec,0,0.479,True,closed,11,0,0,24,0,
+audit/comprehensive-generated-code/probes/ascii-256.bot,aot,0,1.182,True,guarded,9,6,0,,,
+audit/comprehensive-generated-code/probes/ascii-256.bot,aot-spec,0,1.233,True,closed,8,0,0,6,0,
+audit/comprehensive-generated-code/probes/byte-set-canonical.bot,aot,0,0.332,True,guarded,4,6,0,,,
+audit/comprehensive-generated-code/probes/byte-set-canonical.bot,aot-spec,0,0.328,True,closed,4,0,0,6,0,
+audit/comprehensive-generated-code/probes/byte-set-dynamic.bot,aot,0,0.334,True,guarded,4,6,0,,,
+audit/comprehensive-generated-code/probes/byte-set-dynamic.bot,aot-spec,0,0.33,True,closed,4,0,0,6,0,
+audit/comprehensive-generated-code/probes/from-int-byte.bot,aot,0,0.332,True,guarded,4,6,0,,,
+audit/comprehensive-generated-code/probes/from-int-byte.bot,aot-spec,0,0.325,True,closed,3,0,0,6,0,
+audit/comprehensive-generated-code/probes/from-int-dynamic.bot,aot,0,0.588,True,guarded,4,6,0,,,
+audit/comprehensive-generated-code/probes/from-int-dynamic.bot,aot-spec,0,0.587,True,closed,2,0,0,6,0,
+audit/comprehensive-generated-code/probes/from-int-invalid.bot,aot,1,0.485,False,frontend error,0,0,0,,,audit/comprehensive-generated-code/probes/from-int-invalid.bot:4:1: this call can never complete normally under the facts proven for its arguments here -- it always produces the declared error(s) AboveRange; a handler does not make a statically known failure legal (CORE SEMANTIC KNOWN-ERROR)
+audit/comprehensive-generated-code/probes/from-int-invalid.bot,aot-spec,1,0.783,False,frontend error,0,0,0,,,audit/comprehensive-generated-code/probes/from-int-invalid.bot:4:1: this call can never complete normally under the facts proven for its arguments here -- it always produces the declared error(s) AboveRange; a handler does not make a statically known failure legal (CORE SEMANTIC KNOWN-ERROR)
+audit/comprehensive-generated-code/probes/from-int-literal.bot,aot,0,1.157,True,guarded,4,6,0,,,
+audit/comprehensive-generated-code/probes/from-int-literal.bot,aot-spec,0,1.092,True,closed,2,0,0,6,0,
+audit/comprehensive-generated-code/probes/from-int-nonneg.bot,aot,0,1.199,True,guarded,5,7,0,,,
+audit/comprehensive-generated-code/probes/from-int-nonneg.bot,aot-spec,0,1.25,True,closed,4,0,0,7,0,
+audit/comprehensive-generated-code/probes/steady-ascii-capture.bot,aot,1,1.242,True,guarded,12,6,0,,,too many nested evaluations (infinite loop?) (TCL LIMIT STACK)
+audit/comprehensive-generated-code/probes/steady-ascii-capture.bot,aot-spec,1,1.297,True,closed,10,0,0,6,0,too many nested evaluations (infinite loop?) (TCL LIMIT STACK)
+audit/comprehensive-generated-code/probes/steady-ascii-param.bot,aot,1,1.288,True,guarded,12,6,0,,,too many nested evaluations (infinite loop?) (TCL LIMIT STACK)
+audit/comprehensive-generated-code/probes/steady-ascii-param.bot,aot-spec,1,1.088,True,closed,10,0,0,6,0,too many nested evaluations (infinite loop?) (TCL LIMIT STACK)
+audit/comprehensive-generated-code/probes/steady-ascii.bot,aot,1,0.732,True,guarded,11,6,0,,,too many nested evaluations (infinite loop?) (TCL LIMIT STACK)
+audit/comprehensive-generated-code/probes/steady-ascii.bot,aot-spec,1,0.777,True,closed,9,0,0,6,0,too many nested evaluations (infinite loop?) (TCL LIMIT STACK)
+audit/comprehensive-generated-code/probes/web-unreserved-256.bot,aot,0,1.032,True,open,12,16,1,,,
+audit/comprehensive-generated-code/probes/web-unreserved-256.bot,aot-spec,0,1.189,True,closed,10,0,0,24,0,
+audit/comprehensive-generated-code/probes/web-unreserved-literals.bot,aot,0,0.638,True,open,12,16,1,,,
+audit/comprehensive-generated-code/probes/web-unreserved-literals.bot,aot-spec,0,0.841,True,closed,10,0,0,24,0,
+audit/post-native-stack/module-cases/main.bot,aot,1,0.588,False,frontend error,0,0,0,,,"audit/post-native-stack/module-cases/main.bot:1:2: unknown namespace ""plain"": no such module file /mnt/c/Users/MarkusWagner/dev/botlish/lib/plain.bot (SURFACE MODULE UNKNOWN-NAMESPACE)"
+audit/post-native-stack/module-cases/main.bot,aot-spec,1,0.531,False,frontend error,0,0,0,,,"audit/post-native-stack/module-cases/main.bot:1:2: unknown namespace ""plain"": no such module file /mnt/c/Users/MarkusWagner/dev/botlish/lib/plain.bot (SURFACE MODULE UNKNOWN-NAMESPACE)"
+audit/post-native-stack/module-cases/managed.bot,aot,0,0.59,True,guarded,1,1,0,,,
+audit/post-native-stack/module-cases/managed.bot,aot-spec,0,0.537,True,guarded,1,1,0,1,1,
+audit/post-native-stack/module-cases/plain.bot,aot,0,0.432,True,guarded,1,1,0,,,
+audit/post-native-stack/module-cases/plain.bot,aot-spec,0,0.482,True,guarded,1,1,0,1,1,
+audit/post-native-stack/module-cases/scalar.bot,aot,0,0.429,True,guarded,1,1,0,,,
+audit/post-native-stack/module-cases/scalar.bot,aot-spec,0,0.378,True,guarded,1,1,0,1,1,
+bench/fib.bot,aot,0,13.733,True,guarded,1,1,0,,,
+bench/fib.bot,aot-spec,0,13.877,True,closed,2,0,0,1,0,
+bench/lex-strategy.bot,aot,0,0.684,True,open,3,5,5,,,
+bench/lex-strategy.bot,aot-spec,0,0.68,True,open,7,3,1,22,3,
+bench/loop-count.bot,aot,1,0.484,True,guarded,1,2,0,,,too many nested evaluations (infinite loop?) (TCL LIMIT STACK)
+bench/loop-count.bot,aot-spec,1,0.527,True,closed,3,0,0,3,0,too many nested evaluations (infinite loop?) (TCL LIMIT STACK)
+bench/refined-checks.bot,aot,1,0.581,True,guarded,1,1,0,,,too many nested evaluations (infinite loop?) (TCL LIMIT STACK)
+bench/refined-checks.bot,aot-spec,1,0.582,True,closed,2,0,0,4,0,too many nested evaluations (infinite loop?) (TCL LIMIT STACK)
+bench/source-checks.bot,aot,0,0.434,True,open,4,1,5,,,
+bench/source-checks.bot,aot-spec,0,0.479,True,open,4,2,1,11,4,
+bench/sum-refined.bot,aot,1,0.43,True,guarded,1,2,0,,,too many nested evaluations (infinite loop?) (TCL LIMIT STACK)
+bench/sum-refined.bot,aot-spec,1,0.43,True,guarded,3,1,0,3,1,too many nested evaluations (infinite loop?) (TCL LIMIT STACK)
+bench/test-selection.bot,aot,0,0.487,True,open,5,4,4,,,
+bench/test-selection.bot,aot-spec,0,0.582,True,guarded,10,4,0,12,5,
+bench/uri-steady.bot,aot,1,3.542,True,open,12,17,1,,,too many nested evaluations (infinite loop?) (TCL LIMIT STACK)
+bench/uri-steady.bot,aot-spec,1,3.536,True,closed,19,0,0,28,0,too many nested evaluations (infinite loop?) (TCL LIMIT STACK)
+examples/stdlib/ai_text_clean.bot,aot,0,0.742,True,guarded,4,2,0,,,
+examples/stdlib/ai_text_clean.bot,aot-spec,0,0.733,True,closed,6,0,0,6,0,
+examples/stdlib/csv.bot,aot,0,0.433,True,guarded,2,6,0,,,
+examples/stdlib/csv.bot,aot-spec,0,0.484,True,closed,10,0,0,17,0,
+examples/stdlib/csv_chunked.bot,aot,0,0.533,True,guarded,4,9,0,,,
+examples/stdlib/csv_chunked.bot,aot-spec,0,0.593,True,guarded,19,1,0,29,1,
+examples/stdlib/csv_geometric.bot,aot,0,0.534,True,guarded,3,10,0,,,
+examples/stdlib/csv_geometric.bot,aot-spec,0,0.597,True,closed,14,0,0,24,0,
+examples/stdlib/csv_records.bot,aot,0,0.991,True,guarded,14,36,0,,,
+examples/stdlib/csv_records.bot,aot-spec,0,1.243,True,guarded,41,17,0,84,29,
+examples/stdlib/hashtable.bot,aot,0,0.69,True,open,11,23,1,,,
+examples/stdlib/hashtable.bot,aot-spec,0,0.737,True,guarded,20,10,0,63,25,
+examples/stdlib/matmul.bot,aot,0,0.333,True,guarded,1,4,0,,,
+examples/stdlib/matmul.bot,aot-spec,0,0.433,True,closed,7,0,0,17,0,
+examples/stdlib/string_replace.bot,aot,0,0.436,True,guarded,1,3,0,,,
+examples/stdlib/string_replace.bot,aot-spec,0,0.434,True,closed,4,0,0,12,0,
+examples/stdlib/string_reverse.bot,aot,0,0.385,True,guarded,2,1,0,,,
+examples/stdlib/string_reverse.bot,aot-spec,0,0.429,True,closed,3,0,0,4,0,
+examples/surface/01-arithmetic.bot,aot,0,0.33,True,closed,1,0,0,,,
+examples/surface/01-arithmetic.bot,aot-spec,0,0.331,True,closed,1,0,0,0,0,
+examples/surface/02-recursion.bot,aot,0,0.382,True,guarded,1,1,0,,,
+examples/surface/02-recursion.bot,aot-spec,0,0.382,True,closed,2,0,0,1,0,
+examples/surface/03-closure.bot,aot,0,0.481,True,guarded,2,1,0,,,
+examples/surface/03-closure.bot,aot-spec,0,0.485,True,guarded,3,1,0,2,1,
+examples/surface/04-branch-value.bot,aot,0,0.334,True,guarded,1,1,0,,,
+examples/surface/04-branch-value.bot,aot-spec,0,0.33,True,closed,2,0,0,1,0,
+examples/surface/05-shadowing.bot,aot,0,0.382,True,closed,1,0,0,,,
+examples/surface/05-shadowing.bot,aot-spec,0,0.38,True,closed,1,0,0,0,0,
+examples/surface/06-list.bot,aot,0,0.334,True,closed,1,0,0,,,
+examples/surface/06-list.bot,aot-spec,0,0.334,True,closed,1,0,0,0,0,
+examples/surface/07-loop-break.bot,aot,0,0.382,True,closed,1,0,0,,,
+examples/surface/07-loop-break.bot,aot-spec,0,0.335,True,closed,1,0,0,0,0,
+examples/surface/08-return.bot,aot,0,0.33,True,guarded,1,2,0,,,
+examples/surface/08-return.bot,aot-spec,0,0.332,True,closed,3,0,0,2,0,
+examples/surface/09-mutual-recursion.bot,aot,0,0.383,True,guarded,1,2,0,,,
+examples/surface/09-mutual-recursion.bot,aot-spec,0,0.331,True,guarded,3,2,0,2,2,
+examples/surface/10-duplicate-binding.bot,aot,1,0.331,False,frontend error,0,0,0,,,"examples/surface/10-duplicate-binding.bot:7:1: duplicate binding ""x"" in the same lexical scope (CORE SEMANTIC DUPLICATE)"
+examples/surface/10-duplicate-binding.bot,aot-spec,1,0.326,False,frontend error,0,0,0,,,"examples/surface/10-duplicate-binding.bot:7:1: duplicate binding ""x"" in the same lexical scope (CORE SEMANTIC DUPLICATE)"
+examples/surface/11-boolean-operators.bot,aot,0,0.382,True,guarded,2,1,0,,,
+examples/surface/11-boolean-operators.bot,aot-spec,0,0.385,True,closed,3,0,0,3,0,
+examples/surface/12-if-value.bot,aot,0,0.334,True,guarded,1,1,0,,,
+examples/surface/12-if-value.bot,aot-spec,0,0.387,True,closed,2,0,0,1,0,
+examples/surface/13-hygiene.bot,aot,0,0.334,True,closed,2,0,0,,,
+examples/surface/13-hygiene.bot,aot-spec,0,0.331,True,closed,2,0,0,0,0,
+examples/surface/14-modules.bot,aot,0,0.331,True,guarded,1,1,0,,,
+examples/surface/14-modules.bot,aot-spec,0,0.382,True,closed,2,0,0,1,0,
+lib/ascii.bot,aot,1,0.381,False,frontend error,0,0,0,,,"lib/ascii.bot:53:12: unknown or invalid type Byte for parameter ""b"" (CORE SEMANTIC TYPE)"
+lib/ascii.bot,aot-spec,1,0.334,False,frontend error,0,0,0,,,"lib/ascii.bot:53:12: unknown or invalid type Byte for parameter ""b"" (CORE SEMANTIC TYPE)"
+lib/byte.bot,aot,0,0.384,True,guarded,4,6,0,,,
+lib/byte.bot,aot-spec,0,0.434,True,closed,4,0,0,6,0,
+lib/char.bot,aot,0,0.287,True,closed,2,0,0,,,
+lib/char.bot,aot-spec,0,0.287,True,closed,2,0,0,0,0,
+lib/list.bot,aot,0,0.437,True,open,1,0,4,,,
+lib/list.bot,aot-spec,0,0.388,True,open,1,0,1,8,2,
+lib/mathish.bot,aot,0,0.287,True,guarded,1,1,0,,,
+lib/mathish.bot,aot-spec,0,0.286,True,guarded,1,1,0,1,1,
+lib/web.bot,aot,0,0.489,True,open,12,16,1,,,
+lib/web.bot,aot-spec,0,0.539,True,open,21,3,1,24,4,

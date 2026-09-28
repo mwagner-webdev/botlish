@@ -1,0 +1,107 @@
+== csv_geometric.bot (interp)
+<program>: closed   [i0, line 18:1]
+  calls:    csv_parse<str>
+  guards:   0
+  runtime:  none
+
+geo_new (semantic): closed   [no blockers]
+geo_new<generic>: closed   [i2, line 18:11]
+  params:   (none)
+  result:   list[mutarray, int]
+  guards:   0
+  runtime:  list-alloc, mutarray-alloc
+
+geo_new_capacity (semantic): guarded   [UnknownParameterKind 2]
+geo_new_capacity<int, int>: closed   [i12, line 25:20]
+  params:   capacity : int, length : int
+  result:   int
+  guards:   0
+  runtime:  bigint
+
+geo_grow (semantic): guarded   [UnknownParameterKind 2]
+geo_grow<mutarray, int>: closed   [i11, line 35:12]
+  params:   storage : mutarray, length : int
+  result:   mutarray
+  calls:    geo_new_capacity<int, int>
+  guards:   0
+  runtime:  bigint, mutarray-alloc, mutarray-mutate, range-check
+
+geo_append (semantic): guarded   [UnknownParameterKind 1, UnknownAggregateElementType 1]
+geo_append<list[mutarray, int], str>: closed   [i10, line 49:14]
+  params:   builder : list[mutarray, int], value : str
+  result:   list[mutarray, int]
+  calls:    geo_grow<mutarray, int>
+  guards:   0
+  runtime:  bigint, list-alloc, mutarray-mutate, range-check
+
+geo_append<list[mutarray, int], list>: closed   [i13, line 49:14]
+  params:   builder : list[mutarray, int], value : list
+  result:   list[mutarray, int]
+  calls:    geo_grow<mutarray, int>
+  guards:   0
+  runtime:  bigint, list-alloc, mutarray-mutate, range-check
+
+geo_finish (semantic): guarded   [UnknownParameterKind 1, UnknownAggregateElementType 2]
+geo_finish<list[mutarray, int]>: closed   [i4, line 58:14]
+  params:   builder : list[mutarray, int]
+  result:   list
+  guards:   0
+  runtime:  mutarray-alloc, range-check
+
+peek (semantic): guarded   [UnknownParameterKind 2]
+peek<str, int>: closed   [i7, line 68:8]
+  params:   text : str, index : int
+  result:   str
+  guards:   0
+  runtime:  bigint, char-index, range-check, string-alloc
+
+scan_unquoted (semantic): guarded   [UnknownParameterKind 4]
+scan_unquoted<str, int, int>: closed   [i9, line 74:17]
+  params:   text : str, start : int, index : int
+  result:   list[str, int]
+  calls:    peek<str, int>, scan_unquoted<str, int, int>
+  guards:   0
+  runtime:  bigint, char-index, list-alloc, range-check, string-alloc
+
+scan_quoted (semantic): guarded   [UnknownParameterKind 4]
+scan_quoted<str, int, str>: closed   [i8, line 81:15]
+  params:   text : str, index : int, field : str
+  result:   list[str, int]
+  calls:    peek<str, int>, scan_quoted<str, int, str>
+  guards:   0
+  runtime:  bigint, list-alloc, string-alloc
+
+scan_field (semantic): guarded   [UnknownParameterKind 1]
+scan_field<str, int>: closed   [i6, line 91:14]
+  params:   text : str, index : int
+  result:   list[str, int]
+  calls:    peek<str, int>, scan_quoted<str, int, str>, scan_unquoted<str, int, int>
+  guards:   0
+  runtime:  bigint
+
+scan_record (semantic): guarded   [UnknownAggregateElementType 2]
+scan_record<str, int, list[mutarray, int]>: closed   [i5, line 97:15]
+  params:   text : str, index : int, fields : list[mutarray, int]
+  result:   list[list, int]
+  calls:    geo_append<list[mutarray, int], str>, geo_finish<list[mutarray, int]>, peek<str, int>, scan_field<str, int>, scan_record<str, int, list[mutarray, int]>
+  guards:   0
+  runtime:  bigint, list-alloc, range-check
+
+scan_records (semantic): guarded   [UnknownParameterKind 2]
+scan_records<str, int, list[mutarray, int]>: closed   [i3, line 110:16]
+  params:   text : str, index : int, records : list[mutarray, int]
+  result:   list
+  calls:    geo_append<list[mutarray, int], list>, geo_finish<list[mutarray, int]>, geo_new<generic>, scan_record<str, int, list[mutarray, int]>, scan_records<str, int, list[mutarray, int]>
+  guards:   0
+  runtime:  bigint, char-index, range-check
+
+csv_parse (semantic): closed   [no blockers]
+csv_parse<str>: closed   [i1, line 117:13]
+  params:   text : str
+  result:   list
+  calls:    geo_new<generic>, scan_records<str, int, list[mutarray, int]>
+  guards:   0
+  runtime:  none
+
+guards: generic 24, specialized 0; instances: 1 generic, 12 specialized
+   value: [["name", "age"], ["Alice", "30"], ["Bob", "40"]]

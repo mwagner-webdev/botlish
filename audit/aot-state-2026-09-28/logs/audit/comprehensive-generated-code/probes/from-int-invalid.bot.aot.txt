@@ -1,0 +1,2 @@
+== from-int-invalid.bot (interp)
+   error: audit/comprehensive-generated-code/probes/from-int-invalid.bot:4:1: this call can never complete normally under the facts proven for its arguments here -- it always produces the declared error(s) AboveRange; a handler does not make a statically known failure legal (CORE SEMANTIC KNOWN-ERROR)

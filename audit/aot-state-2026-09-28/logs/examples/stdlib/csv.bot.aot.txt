@@ -1,0 +1,71 @@
+== csv.bot (interp)
+<program>: closed (transitively guarded)   [program, line 26:1]
+  dispatch: closed -- functions: csv_parse (non-tail)
+  blockers: none
+  runtime:  none
+
+peek: guarded   [e2, line 26:8]
+  params:   text : any, index : any   result: str
+  dispatch: closed -- natives: >=, length, substring, +
+  blockers:
+    line 27:8  e6  UnknownParameterKind: >= needs int; parameter index (no annotation, no call-site inference) has no static kind
+    line 27:24  e9  UnknownParameterKind: length needs str; parameter text (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, char-index, range-check, string-alloc, tagged-values
+
+scan_unquoted: guarded   [e21, line 34:17]
+  params:   text : any, start : any, index : any   result: list
+  captures: peek (block), scan_unquoted (block)
+  dispatch: closed -- natives: == x3, list, substring, +; functions: peek (non-tail), scan_unquoted (self, tail)
+  blockers:
+    line 37:27  e55  UnknownParameterKind: substring needs str; parameter text (no annotation, no call-site inference) has no static kind
+    line 37:33  e56  UnknownParameterKind: substring needs int; parameter start (no annotation, no call-site inference) has no static kind
+    line 37:40  e57  UnknownParameterKind: substring needs int; parameter index (no annotation, no call-site inference) has no static kind
+    line 39:32  e65  UnknownParameterKind: + needs int; parameter index (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, char-index, list-alloc, range-check, string-alloc, tagged-values
+
+scan_quoted: guarded   [e68, line 43:15]
+  params:   text : any, index : any, field : any   result: list
+  captures: peek (block), scan_quoted (block)
+  dispatch: closed -- natives: == x2, + x4, concat x2, list; functions: peek (non-tail), scan_quoted (self, tail)
+  blockers:
+    line 46:23  e87  UnknownParameterKind: + needs int; parameter index (no annotation, no call-site inference) has no static kind
+    line 47:56  e100  UnknownParameterKind: concat needs str; parameter field (no annotation, no call-site inference) has no static kind
+    line 51:23  e115  UnknownParameterKind: + needs int; parameter index (no annotation, no call-site inference) has no static kind
+    line 51:41  e119  UnknownParameterKind: concat needs str; parameter field (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, list-alloc, string-alloc, tagged-values
+
+scan_field: guarded   [e122, line 54:14]
+  params:   text : any, index : any   result: list
+  captures: peek (block), scan_quoted (block), scan_unquoted (block)
+  dispatch: closed -- natives: ==, +; functions: peek (non-tail), scan_quoted (tail), scan_unquoted (tail)
+  blockers:
+    line 56:34  e137  UnknownParameterKind: + needs int; parameter index (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+scan_record: guarded   [e146, line 62:15]
+  params:   text : any, index : any, fields : any   result: list
+  captures: scan_field (block), peek (block), scan_record (block)
+  dispatch: closed -- natives: list_append, list_get x2, == x2, + x2, list x2; functions: peek (non-tail), scan_field (non-tail), scan_record (self, tail)
+  blockers:
+    line 64:24  e155  UnknownParameterKind: list_append needs list; parameter fields (no annotation, no call-site inference) has no static kind
+    line 68:34  e181  UnknownAggregateElementType: + needs int; the element read by list_get at line 65:12 has no static kind
+    line 71:23  e195  UnknownAggregateElementType: + needs int; the element read by list_get at line 65:12 has no static kind
+  runtime:  bigint, list-alloc, range-check, tagged-values
+
+scan_records: guarded   [e202, line 76:16]
+  params:   text : any, index : any, records : any   result: any
+  captures: scan_record (block), scan_records (block)
+  dispatch: closed -- natives: >=, length, list, list_get x2, list_append; functions: scan_record (non-tail), scan_records (self, tail)
+  blockers:
+    line 77:8  e206  UnknownParameterKind: >= needs int; parameter index (no annotation, no call-site inference) has no static kind
+    line 77:24  e209  UnknownParameterKind: length needs str; parameter text (no annotation, no call-site inference) has no static kind
+    line 81:58  e228  UnknownParameterKind: list_append needs list; parameter records (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, char-index, list-alloc, range-check, tagged-values
+
+csv_parse: closed (transitively guarded)   [e234, line 83:13]
+  params:   text : any   result: any
+  captures: scan_records (block)
+  dispatch: closed -- natives: list; functions: scan_records (tail)
+  blockers: none
+  runtime:  list-alloc
+   value: [["name", "age"], ["Alice", "30"], ["Bob", "40"]]

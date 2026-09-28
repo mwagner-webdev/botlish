@@ -1,0 +1,6 @@
+== 05-shadowing.bot (interp)
+<program>: closed   [program, line 5:1]
+  dispatch: closed -- no calls
+  blockers: none
+  runtime:  none
+   value: 1

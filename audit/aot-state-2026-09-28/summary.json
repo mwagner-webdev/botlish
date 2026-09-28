@@ -1,0 +1,268 @@
+{
+  "aot": {
+    "files": {
+      "guarded": 36,
+      "closed": 8,
+      "open": 10,
+      "frontend error": 4
+    },
+    "regions": {
+      "closed": 225,
+      "guarded": 278,
+      "open": 24
+    },
+    "blockers": {
+      "UnknownParameterKind": 420,
+      "UnknownCallResultKind": 73,
+      "DynamicCall": 24,
+      "UnknownAggregateElementType": 41
+    },
+    "runtime_files": {
+      "bigint": 46,
+      "list-alloc": 38,
+      "set-alloc": 18,
+      "structural-equality": 27,
+      "tagged-values": 46,
+      "char-index": 14,
+      "closure-env": 12,
+      "dynamic-call": 10,
+      "range-check": 21,
+      "string-alloc": 15,
+      "evidence": 1,
+      "mutarray-alloc": 4,
+      "mutarray-mutate": 4,
+      "hash": 2,
+      "init-check": 1
+    }
+  },
+  "aot-spec": {
+    "files": {
+      "closed": 39,
+      "frontend error": 4,
+      "guarded": 11,
+      "open": 4
+    },
+    "regions": {
+      "closed": 327,
+      "guarded": 48,
+      "open": 4
+    },
+    "blockers": {
+      "UnknownParameterKind": 23,
+      "UnknownCallResultKind": 47,
+      "DynamicCall": 4,
+      "UnknownAggregateElementType": 11
+    },
+    "runtime_files": {
+      "bigint": 46,
+      "list-alloc": 38,
+      "set-alloc": 9,
+      "structural-equality": 13,
+      "closure-env": 9,
+      "range-check": 18,
+      "tagged-values": 15,
+      "char-index": 11,
+      "dynamic-call": 4,
+      "indirect-call": 3,
+      "string-alloc": 12,
+      "evidence": 1,
+      "mutarray-alloc": 4,
+      "mutarray-mutate": 4,
+      "hash": 2,
+      "init-check": 1
+    }
+  },
+  "guards": {
+    "generic": 534,
+    "specialized": 81,
+    "generic_instances": 57,
+    "specialized_instances": 268
+  },
+  "zero_guard_files": 39,
+  "remaining_guards": [
+    {
+      "path": "examples/stdlib/csv_records.bot",
+      "generic": 84,
+      "specialized": 29,
+      "blockers": {
+        "UnknownParameterKind": 7,
+        "UnknownCallResultKind": 18,
+        "UnknownAggregateElementType": 4
+      }
+    },
+    {
+      "path": "examples/stdlib/hashtable.bot",
+      "generic": 63,
+      "specialized": 25,
+      "blockers": {
+        "UnknownCallResultKind": 22,
+        "UnknownAggregateElementType": 3
+      }
+    },
+    {
+      "path": "bench/test-selection.bot",
+      "generic": 12,
+      "specialized": 5,
+      "blockers": {
+        "UnknownParameterKind": 2,
+        "UnknownCallResultKind": 3
+      }
+    },
+    {
+      "path": "bench/source-checks.bot",
+      "generic": 11,
+      "specialized": 4,
+      "blockers": {
+        "UnknownCallResultKind": 1,
+        "UnknownParameterKind": 1,
+        "DynamicCall": 1,
+        "UnknownAggregateElementType": 2
+      }
+    },
+    {
+      "path": "lib/web.bot",
+      "generic": 24,
+      "specialized": 4,
+      "blockers": {
+        "UnknownParameterKind": 3,
+        "UnknownCallResultKind": 1,
+        "DynamicCall": 1
+      }
+    },
+    {
+      "path": "bench/lex-strategy.bot",
+      "generic": 22,
+      "specialized": 3,
+      "blockers": {
+        "UnknownCallResultKind": 1,
+        "UnknownParameterKind": 1,
+        "DynamicCall": 1,
+        "UnknownAggregateElementType": 1
+      }
+    },
+    {
+      "path": "examples/surface/09-mutual-recursion.bot",
+      "generic": 2,
+      "specialized": 2,
+      "blockers": {
+        "UnknownParameterKind": 2
+      }
+    },
+    {
+      "path": "lib/list.bot",
+      "generic": 8,
+      "specialized": 2,
+      "blockers": {
+        "UnknownParameterKind": 1,
+        "UnknownCallResultKind": 1,
+        "DynamicCall": 1
+      }
+    },
+    {
+      "path": "audit/post-native-stack/module-cases/managed.bot",
+      "generic": 1,
+      "specialized": 1,
+      "blockers": {
+        "UnknownParameterKind": 1
+      }
+    },
+    {
+      "path": "audit/post-native-stack/module-cases/plain.bot",
+      "generic": 1,
+      "specialized": 1,
+      "blockers": {
+        "UnknownParameterKind": 1
+      }
+    },
+    {
+      "path": "audit/post-native-stack/module-cases/scalar.bot",
+      "generic": 1,
+      "specialized": 1,
+      "blockers": {
+        "UnknownParameterKind": 1
+      }
+    },
+    {
+      "path": "bench/sum-refined.bot",
+      "generic": 3,
+      "specialized": 1,
+      "blockers": {
+        "UnknownParameterKind": 1
+      }
+    },
+    {
+      "path": "examples/stdlib/csv_chunked.bot",
+      "generic": 29,
+      "specialized": 1,
+      "blockers": {
+        "UnknownAggregateElementType": 1
+      }
+    },
+    {
+      "path": "examples/surface/03-closure.bot",
+      "generic": 2,
+      "specialized": 1,
+      "blockers": {
+        "UnknownParameterKind": 1
+      }
+    },
+    {
+      "path": "lib/mathish.bot",
+      "generic": 1,
+      "specialized": 1,
+      "blockers": {
+        "UnknownParameterKind": 1
+      }
+    }
+  ],
+  "open_instances": [
+    {
+      "path": "bench/lex-strategy.bot",
+      "instances": [
+        {
+          "name": "classify<str, bool>",
+          "status": "open",
+          "transitive": "open",
+          "region": "i3",
+          "location": "line 54:12"
+        }
+      ]
+    },
+    {
+      "path": "bench/source-checks.bot",
+      "instances": [
+        {
+          "name": "classify_leading<generic>",
+          "status": "open",
+          "transitive": "open",
+          "region": "i2",
+          "location": "line 51:20"
+        }
+      ]
+    },
+    {
+      "path": "lib/list.bot",
+      "instances": [
+        {
+          "name": "find<generic>",
+          "status": "open",
+          "transitive": "open",
+          "region": "i1",
+          "location": "line 77:8"
+        }
+      ]
+    },
+    {
+      "path": "lib/web.bot",
+      "instances": [
+        {
+          "name": "scan_while<generic>",
+          "status": "open",
+          "transitive": "open",
+          "region": "i19",
+          "location": "line 126:18"
+        }
+      ]
+    }
+  ]
+}

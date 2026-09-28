@@ -1,0 +1,14 @@
+{
+  "commit": "3da80a4ad1cbd434cff0fa0cfc771c3bdd4827b9",
+  "branch": "aot-linux-compile",
+  "git_status": "M NATIVE-STACK-OVERFLOW.md\n M examples/hir/01-scopes.hir\n M examples/hir/02-closures.hir\n M examples/hir/03-recursion.hir\n M examples/hir/05-control.hir\n M examples/hir/07-use-before-binding.hir\n M native/Cargo.toml\n M native/src/runtime/platform/mod.rs\n M native/tests/fixtures/bench_phaseb.py\n M native/tests/fixtures/build400.nir\n M native/tests/fixtures/fib.nir\n M native/tests/fixtures/generate_benchmark_nir.tcl\n M native/tests/fixtures/large_frame_overflow.nir\n M native/tests/fixtures/loop-count.nir\n M native/tests/fixtures/stack_overflow.ir\n M native/tests/fixtures/sum-refined.nir\n M tests/native-root-storage.test\n M tests/native-stack-map.test\n M tests/native-stack-overflow.test",
+  "os": "PRETTY_NAME=\"Ubuntu 24.04.3 LTS\"\nNAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"\nVERSION=\"24.04.3 LTS (Noble Numbat)\"\nVERSION_CODENAME=noble\nID=ubuntu\nID_LIKE=debian\nHOME_URL=\"https://www.ubuntu.com/\"\nSUPPORT_URL=\"https://help.ubuntu.com/\"\nBUG_REPORT_URL=\"https://bugs.launchpad.net/ubuntu/\"\nPRIVACY_POLICY_URL=\"https://www.ubuntu.com/legal/terms-and-policies/privacy-policy\"\nUBUNTU_CODENAME=noble\nLOGO=ubuntu-logo\n",
+  "uname": "Linux CompName 6.6.87.2-microsoft-standard-WSL2 #1 SMP PREEMPT_DYNAMIC Thu Jun  5 18:30:46 UTC 2025 x86_64 x86_64 x86_64 GNU/Linux",
+  "locale": {
+    "LANG": "C.utf8",
+    "LC_ALL": "C.utf8"
+  },
+  "tcl": "9.0.1\n2.5.9\n",
+  "file_count": 58,
+  "timeout_seconds": 180
+}

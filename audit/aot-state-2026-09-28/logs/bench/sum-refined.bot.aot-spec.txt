@@ -1,0 +1,30 @@
+== sum-refined.bot (interp)
+<program>: closed   [i0, line 25:1]
+  calls:    refined_sum<int, int>
+  guards:   0
+  runtime:  none
+
+refined_sum (semantic): guarded   [UnknownParameterKind 1]
+refined_sum<int, int>: closed   [i1, line 25:15]
+  params:   n : int, acc : int
+  result:   int
+  calls:    refined_sum<int, int>, step<int>
+  guards:   0
+  runtime:  bigint, closure-env
+
+step (semantic): guarded   [UnknownParameterKind 2]
+step<int>: closed   [i2, line 29:16]
+  params:   x : int
+  result:   int
+  guards:   0
+  runtime:  bigint
+
+step<generic>: guarded   [i3, line 29:16]
+  params:   x : any
+  result:   int
+  guards:   1
+    line 30:13  e18  UnknownParameterKind: + needs int; parameter x (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+guards: generic 3, specialized 1; instances: 1 generic, 2 specialized
+   error: too many nested evaluations (infinite loop?) (TCL LIMIT STACK)

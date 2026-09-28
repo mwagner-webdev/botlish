@@ -1,0 +1,14 @@
+== mathish.bot (interp)
+<program>: closed   [program, line 6:1]
+  dispatch: closed -- no calls
+  blockers: none
+  runtime:  none
+
+inc: guarded   [e2, line 8:7]
+  params:   x : any   result: int
+  dispatch: closed -- natives: +
+  blockers:
+    line 9:5  e5  UnknownParameterKind: + needs int; parameter x (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+   value: <block (x)>
+   block #0 refinements: (none)

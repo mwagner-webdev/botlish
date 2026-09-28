@@ -1,0 +1,29 @@
+== main.bot (interp)
+<program>: closed   [i0, line 1:1]
+  calls:    managed::get<int>, plain::inc<int>, scalar::add<int>
+  guards:   0
+  runtime:  list-alloc
+
+plain::inc (semantic): guarded   [UnknownParameterKind 1]
+plain::inc<int>: closed   [i1, line 2:7]
+  params:   x : int
+  result:   int
+  guards:   0
+  runtime:  bigint
+
+scalar::add (semantic): guarded   [UnknownParameterKind 1]
+scalar::add<int>: closed   [i2, line 3:7]
+  params:   x : int
+  result:   int
+  guards:   0
+  runtime:  bigint
+
+managed::get (semantic): guarded   [UnknownParameterKind 1]
+managed::get<int>: closed   [i3, line 3:7]
+  params:   i : int
+  result:   int
+  guards:   0
+  runtime:  range-check
+
+guards: generic 3, specialized 0; instances: 0 generic, 3 specialized
+   value: [2, 8, 20]

@@ -1,0 +1,46 @@
+== ai_text_clean.bot (interp)
+<program>: closed   [i0, line 34:1]
+  calls:    clean_ai_text<str>
+  guards:   0
+  runtime:  list-alloc
+
+peek (semantic): guarded   [UnknownParameterKind 2]
+peek<str, int>: closed   [i3, line 34:8]
+  params:   text : str, index : int
+  result:   str
+  guards:   0
+  runtime:  bigint, char-index, range-check, string-alloc
+
+cleaner_emoji (semantic): closed   [no blockers]
+cleaner_emoji<str>: closed   [i5, line 43:17]
+  params:   character : str
+  result:   bool
+  guards:   0
+  runtime:  none
+
+clean_char (semantic): closed   [no blockers]
+clean_char<str>: closed   [i4, line 51:14]
+  params:   character : str
+  result:   str
+  calls:    cleaner_emoji<str>
+  guards:   0
+  runtime:  none
+
+clean_from (semantic): guarded   [UnknownParameterKind 3, UnknownCallResultKind 1]
+clean_from<str, int, str>: closed   [i2, line 70:14]
+  params:   text : str, index : int, done : str
+  result:   str
+  calls:    clean_char<str>, clean_from<str, int, str>, peek<str, int>
+  guards:   0
+  runtime:  bigint, char-index, string-alloc
+
+clean_ai_text (semantic): closed   [no blockers]
+clean_ai_text<str>: closed   [i1, line 76:17]
+  params:   text : str
+  result:   str
+  calls:    clean_from<str, int, str>
+  guards:   0
+  runtime:  none
+
+guards: generic 6, specialized 0; instances: 0 generic, 5 specialized
+   value: ["hello", "hello  world", "AI-generated", "\"hello\"", "'hello'", "wait... what?"]

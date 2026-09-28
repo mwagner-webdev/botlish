@@ -1,0 +1,59 @@
+== ascii-256.bot (interp)
+<program>: closed   [i0, line 3:1]
+  calls:    ascii::is_alphabetic<int>, ascii::is_alphanumeric<int>, ascii::is_digit<int>, ascii::is_lower<int>, ascii::is_upper<int>, byte::from_int<int>, byte::high_nibble<int>
+  guards:   0
+  runtime:  list-alloc
+
+byte::high_nibble (semantic): guarded   [UnknownParameterKind 1]
+byte::high_nibble<int>: closed   [i1, line 112:15]
+  params:   b : int
+  result:   int[HighNibble]
+  guards:   0
+  runtime:  bigint
+
+byte::from_int (semantic): closed   [no blockers]
+byte::from_int<int>: closed   [i2, line 150:12]
+  params:   value : int
+  result:   int[Byte]
+  guards:   0
+  runtime:  bigint
+
+ascii::is_digit (semantic): closed   [no blockers]
+ascii::is_digit<int>: closed   [i3, line 53:12]
+  params:   b : int
+  result:   bool
+  guards:   0
+  runtime:  bigint
+
+ascii::is_upper (semantic): closed   [no blockers]
+ascii::is_upper<int>: closed   [i4, line 56:12]
+  params:   b : int
+  result:   bool
+  guards:   0
+  runtime:  bigint
+
+ascii::is_lower (semantic): closed   [no blockers]
+ascii::is_lower<int>: closed   [i5, line 59:12]
+  params:   b : int
+  result:   bool
+  guards:   0
+  runtime:  bigint
+
+ascii::is_alphabetic (semantic): closed   [no blockers]
+ascii::is_alphabetic<int>: closed   [i6, line 62:17]
+  params:   b : int
+  result:   bool
+  calls:    ascii::is_lower<int>, ascii::is_upper<int>
+  guards:   0
+  runtime:  none
+
+ascii::is_alphanumeric (semantic): closed   [no blockers]
+ascii::is_alphanumeric<int>: closed   [i7, line 65:19]
+  params:   b : int
+  result:   bool
+  calls:    ascii::is_alphabetic<int>, ascii::is_digit<int>
+  guards:   0
+  runtime:  none
+
+guards: generic 6, specialized 0; instances: 0 generic, 7 specialized
+   value: [[false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [true, false, false, false, true], [true, false, false, false, true], [true, false, false, false, true], [true, false, false, false, true], [true, false, false, false, true], [true, false, false, false, true], [true, false, false, false, true], [true, false, false, false, true], [true, false, false, false, true], [true, false, false, false, true], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, true, false, true, true], [false, true, false, true, true], [false, true, false, true, true], [false, true, false, true, true], [false, true, false, true, true], [false, true, false, true, true], [false, true, false, true, true], [false, true, false, true, true], [false, true, false, true, true], [false, true, false, true, true], [false, true, false, true, true], [false, true, false, true, true], [false, true, false, true, true], [false, true, false, true, true], [false, true, false, true, true], [false, true, false, true, true], [false, true, false, true, true], [false, true, false, true, true], [false, true, false, true, true], [false, true, false, true, true], [false, true, false, true, true], [false, true, false, true, true], [false, true, false, true, true], [false, true, false, true, true], [false, true, false, true, true], [false, true, false, true, true], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, true, true, true], [false, false, true, true, true], [false, false, true, true, true], [false, false, true, true, true], [false, false, true, true, true], [false, false, true, true, true], [false, false, true, true, true], [false, false, true, true, true], [false, false, true, true, true], [false, false, true, true, true], [false, false, true, true, true], [false, false, true, true, true], [false, false, true, true, true], [false, false, true, true, true], [false, false, true, true, true], [false, false, true, true, true], [false, false, true, true, true], [false, false, true, true, true], [false, false, true, true, true], [false, false, true, true, true], [false, false, true, true, true], [false, false, true, true, true], [false, false, true, true, true], [false, false, true, true, true], [false, false, true, true, true], [false, false, true, true, true], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false]]

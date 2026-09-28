@@ -1,0 +1,16 @@
+== managed.bot (interp)
+<program>: closed   [program, line 1:1]
+  dispatch: closed -- natives: list
+  blockers: none
+  note:     line 3:7  e7  creates a closure capturing values
+  runtime:  closure-env, list-alloc
+
+get: guarded   [e7, line 3:7]
+  params:   i : any   result: int
+  captures: digits (value)
+  dispatch: closed -- natives: list_get
+  blockers:
+    line 4:22  e11  UnknownParameterKind: list_get needs int; parameter i (no annotation, no call-site inference) has no static kind
+  runtime:  range-check, tagged-values
+   value: <block (i)>
+   block #0 refinements: (none)

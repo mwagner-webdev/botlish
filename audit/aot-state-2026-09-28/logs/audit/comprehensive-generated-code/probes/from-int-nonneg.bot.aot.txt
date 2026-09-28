@@ -1,0 +1,80 @@
+== from-int-nonneg.bot (interp)
+<program>: closed (transitively guarded)   [program, line 4:1]
+  dispatch: closed -- natives: list, -; functions: g (non-tail)
+  blockers: none
+  runtime:  bigint, list-alloc
+
+char::codepoint: closed   [e2, line 21:13]
+  params:   c : any   result: int
+  dispatch: closed -- natives: char_codepoint
+  blockers: none
+  runtime:  none
+
+byte::high_nibble: guarded   [e7, line 112:15]
+  params:   b : any   result: int[HighNibble]
+  dispatch: closed -- natives: bit_and
+  blockers:
+    line 113:13  e10  UnknownParameterKind: bit_and needs int; parameter b (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+byte::low_nibble: guarded   [e13, line 115:14]
+  params:   b : any   result: int[LowNibble]
+  dispatch: closed -- natives: bit_and
+  blockers:
+    line 116:13  e16  UnknownParameterKind: bit_and needs int; parameter b (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+byte::nibble: guarded   [e19, line 118:10]
+  params:   x : any   result: int[Nibble]
+  dispatch: closed -- natives: bit_and x2, bit_or, shift_right
+  blockers:
+    line 119:28  e26  UnknownParameterKind: bit_and needs int; parameter x (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+byte::complement: guarded   [e34, line 121:14]
+  params:   b : any   result: int[Byte]
+  dispatch: closed -- natives: bit_and, bit_xor
+  blockers:
+    line 122:21  e39  UnknownParameterKind: bit_xor needs int; parameter b (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+byte::position_low: guarded   [e43, line 124:16]
+  params:   n : any   result: int[LowNibble]
+  dispatch: closed -- natives: bit_and
+  blockers:
+    line 125:13  e46  UnknownParameterKind: bit_and needs int; parameter n (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+byte::position_high: guarded   [e49, line 127:17]
+  params:   n : any   result: int[HighNibble]
+  dispatch: closed -- natives: bit_and, shift_left
+  blockers:
+    line 128:24  e54  UnknownParameterKind: shift_left needs int; parameter n (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+byte::from_int: closed   [e58, line 150:12]
+  params:   value : any   result: int[Byte]
+  dispatch: closed -- natives: <, >
+  blockers: none
+  runtime:  bigint
+
+byte::set: closed   [e73, line 174:7]
+  params:   chars : any   result: ImmutableSet[int[Byte]]
+  dispatch: closed -- natives: immutable_set_from_list; functions: byte::from_int (non-tail), char::codepoint (non-tail)
+  blockers: none
+  runtime:  set-alloc, structural-equality
+
+nonneg: guarded   [e86, line 4:10]
+  params:   m : any   result: int
+  dispatch: closed -- natives: <, -
+  blockers:
+    line 5:8  e90  UnknownParameterKind: < needs int; parameter m (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+g: closed (transitively guarded)   [e98, line 9:5]
+  params:   m : any   result: int
+  captures: nonneg (block)
+  dispatch: closed -- functions: byte::from_int (tail), nonneg (non-tail)
+  blockers: none
+  runtime:  none
+   value: [7, 45, 0]

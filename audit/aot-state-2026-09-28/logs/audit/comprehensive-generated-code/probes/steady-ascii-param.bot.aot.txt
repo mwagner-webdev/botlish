@@ -1,0 +1,116 @@
+== steady-ascii-param.bot (interp)
+<program>: closed   [program, line 5:1]
+  dispatch: closed -- natives: list; functions: byte::from_int (non-tail), rep (non-tail)
+  blockers: none
+  runtime:  list-alloc
+
+char::codepoint: closed   [e2, line 21:13]
+  params:   c : any   result: int
+  dispatch: closed -- natives: char_codepoint
+  blockers: none
+  runtime:  none
+
+byte::high_nibble: guarded   [e7, line 112:15]
+  params:   b : any   result: int[HighNibble]
+  dispatch: closed -- natives: bit_and
+  blockers:
+    line 113:13  e10  UnknownParameterKind: bit_and needs int; parameter b (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+byte::low_nibble: guarded   [e13, line 115:14]
+  params:   b : any   result: int[LowNibble]
+  dispatch: closed -- natives: bit_and
+  blockers:
+    line 116:13  e16  UnknownParameterKind: bit_and needs int; parameter b (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+byte::nibble: guarded   [e19, line 118:10]
+  params:   x : any   result: int[Nibble]
+  dispatch: closed -- natives: bit_and x2, bit_or, shift_right
+  blockers:
+    line 119:28  e26  UnknownParameterKind: bit_and needs int; parameter x (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+byte::complement: guarded   [e34, line 121:14]
+  params:   b : any   result: int[Byte]
+  dispatch: closed -- natives: bit_and, bit_xor
+  blockers:
+    line 122:21  e39  UnknownParameterKind: bit_xor needs int; parameter b (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+byte::position_low: guarded   [e43, line 124:16]
+  params:   n : any   result: int[LowNibble]
+  dispatch: closed -- natives: bit_and
+  blockers:
+    line 125:13  e46  UnknownParameterKind: bit_and needs int; parameter n (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+byte::position_high: guarded   [e49, line 127:17]
+  params:   n : any   result: int[HighNibble]
+  dispatch: closed -- natives: bit_and, shift_left
+  blockers:
+    line 128:24  e54  UnknownParameterKind: shift_left needs int; parameter n (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+byte::from_int: closed   [e58, line 150:12]
+  params:   value : any   result: int[Byte]
+  dispatch: closed -- natives: <, >
+  blockers: none
+  runtime:  bigint
+
+byte::set: closed   [e73, line 174:7]
+  params:   chars : any   result: ImmutableSet[int[Byte]]
+  dispatch: closed -- natives: immutable_set_from_list; functions: byte::from_int (non-tail), char::codepoint (non-tail)
+  blockers: none
+  runtime:  set-alloc, structural-equality
+
+ascii::is_digit: closed   [e86, line 53:12]
+  params:   b : any   result: bool
+  dispatch: closed -- natives: >=, <=
+  blockers: none
+  runtime:  bigint
+
+ascii::is_upper: closed   [e101, line 56:12]
+  params:   b : any   result: bool
+  dispatch: closed -- natives: >=, <=
+  blockers: none
+  runtime:  bigint
+
+ascii::is_lower: closed   [e116, line 59:12]
+  params:   b : any   result: bool
+  dispatch: closed -- natives: >=, <=
+  blockers: none
+  runtime:  bigint
+
+ascii::is_alphabetic: closed   [e131, line 62:17]
+  params:   b : any   result: bool
+  dispatch: closed -- functions: ascii::is_lower (non-tail), ascii::is_upper (non-tail)
+  blockers: none
+  runtime:  none
+
+ascii::is_alphanumeric: closed   [e144, line 65:19]
+  params:   b : any   result: bool
+  dispatch: closed -- functions: ascii::is_alphabetic (non-tail), ascii::is_digit (non-tail)
+  blockers: none
+  runtime:  none
+
+cls: closed   [e427, line 13:7]
+  params:   b : any, xs : any   result: bool
+  dispatch: closed -- natives: >, list_length; functions: ascii::is_alphanumeric (non-tail)
+  blockers: none
+  runtime:  bigint
+
+count: closed   [e443, line 15:9]
+  params:   xs : any, i : any, acc : any   result: int
+  captures: cls (block), count (block)
+  dispatch: closed -- natives: >=, list_length, list_get, + x3; functions: cls (non-tail), count (self, tail)
+  blockers: none
+  runtime:  bigint, range-check
+
+rep: closed   [e480, line 23:7]
+  params:   xs : any, k : any, acc : any   result: int
+  captures: rep (block), count (block)
+  dispatch: closed -- natives: <=, -, +; functions: count (non-tail), rep (self, tail)
+  blockers: none
+  runtime:  bigint
+   error: too many nested evaluations (infinite loop?) (TCL LIMIT STACK)

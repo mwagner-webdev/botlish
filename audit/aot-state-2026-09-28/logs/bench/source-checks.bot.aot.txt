@@ -1,0 +1,82 @@
+== source-checks.bot (interp)
+<program>: closed (transitively open)   [program, line 43:1]
+  dispatch: closed -- natives: list x3, list_length x4, -; functions: list::find (non-tail), valid_start? (non-tail)
+  blockers: none
+  note:     line 51:20  e68  creates a closure capturing values
+  note:     line 58:16  e95  creates a closure capturing values
+  note:     line 62:17  e114  creates a closure capturing values
+  runtime:  bigint, closure-env, list-alloc
+
+list::any?: open   [e2, line 59:8]
+  params:   xs : any, predicate : any   result: bool
+  dispatch: open -- dynamic calls: 1
+  blockers:
+    line 60:15  e4  UnknownParameterKind: the condition needs list; parameter xs (no annotation, no call-site inference) has no static kind
+    line 61:12  e6  UnknownCallResultKind: the condition needs bool; the result of the dynamic call at line 61:12 has no static kind
+    line 61:12  e7  DynamicCall: the callee has no static kind: native, block or not callable is decided at run time
+  runtime:  dynamic-call, tagged-values
+
+list::all?: open   [e13, line 65:8]
+  params:   xs : any, predicate : any   result: bool
+  dispatch: open -- dynamic calls: 1
+  blockers:
+    line 66:15  e15  UnknownParameterKind: the condition needs list; parameter xs (no annotation, no call-site inference) has no static kind
+    line 67:16  e18  UnknownCallResultKind: the condition needs bool; the result of the dynamic call at line 67:16 has no static kind
+    line 67:16  e19  DynamicCall: the callee has no static kind: native, block or not callable is decided at run time
+  runtime:  dynamic-call, tagged-values
+
+list::none?: open   [e27, line 71:9]
+  params:   xs : any, predicate : any   result: bool
+  dispatch: open -- dynamic calls: 1
+  blockers:
+    line 72:15  e29  UnknownParameterKind: the condition needs list; parameter xs (no annotation, no call-site inference) has no static kind
+    line 73:12  e31  UnknownCallResultKind: the condition needs bool; the result of the dynamic call at line 73:12 has no static kind
+    line 73:12  e32  DynamicCall: the callee has no static kind: native, block or not callable is decided at run time
+  runtime:  dynamic-call, tagged-values
+
+list::find: open   [e38, line 77:8]
+  params:   xs : any, predicate : any   result: any
+  dispatch: open -- dynamic calls: 1
+  blockers:
+    line 78:15  e40  UnknownParameterKind: the condition needs list; parameter xs (no annotation, no call-site inference) has no static kind
+    line 79:12  e42  UnknownCallResultKind: the condition needs bool; the result of the dynamic call at line 79:12 has no static kind
+    line 79:12  e43  DynamicCall: the callee has no static kind: native, block or not callable is decided at run time
+  runtime:  dynamic-call, tagged-values
+
+is_underscore?: closed   [e49, line 43:18]
+  params:   c : any   result: bool
+  dispatch: closed -- natives: ==
+  blockers: none
+  runtime:  structural-equality
+
+is_hyphen?: closed   [e55, line 46:14]
+  params:   c : any   result: bool
+  dispatch: closed -- natives: ==
+  blockers: none
+  runtime:  structural-equality
+
+classify_leading: open   [e68, line 51:20]
+  params:   name : any   result: list
+  captures: checks (value)
+  dispatch: open -- natives: ==, length, list, substring; dynamic calls: 1
+  blockers:
+    line 52:15  e74  UnknownParameterKind: length needs str; parameter name (no annotation, no call-site inference) has no static kind
+    line 56:9  e92  DynamicCall: the callee has no static kind: native, block or not callable is decided at run time
+  runtime:  bigint, char-index, dynamic-call, list-alloc, range-check, string-alloc, tagged-values
+
+valid_start?: guarded (transitively open)   [e95, line 58:16]
+  params:   name : any   result: bool
+  captures: classify_leading (value)
+  dispatch: closed -- natives: list_get x2; functions: classify_leading (non-tail)
+  blockers:
+    line 60:5  e101  UnknownAggregateElementType: the condition needs bool; the element read by list_get at line 60:5 has no static kind
+    line 60:27  e107  UnknownAggregateElementType: the condition needs bool; the element read by list_get at line 60:27 has no static kind
+  runtime:  closure-env, range-check, tagged-values
+
+invalid_name?: closed (transitively open)   [e114, line 62:17]
+  params:   name : any   result: bool
+  captures: valid_start? (value)
+  dispatch: closed -- functions: valid_start? (non-tail)
+  blockers: none
+  runtime:  closure-env
+   value: [16, 5, "2fast", 11]

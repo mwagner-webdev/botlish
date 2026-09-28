@@ -1,0 +1,50 @@
+[
+  {
+    "setup": "ascii",
+    "mode": "aot",
+    "exit_code": 0,
+    "command": [
+      "tclsh9.0",
+      "/mnt/c/Users/MarkusWagner/dev/botlish/native/target/aot-audit-2026-09-28/context.tcl",
+      "ascii",
+      "-aot"
+    ],
+    "log": "ascii.aot.txt"
+  },
+  {
+    "setup": "ascii",
+    "mode": "aot-spec",
+    "exit_code": 0,
+    "command": [
+      "tclsh9.0",
+      "/mnt/c/Users/MarkusWagner/dev/botlish/native/target/aot-audit-2026-09-28/context.tcl",
+      "ascii",
+      "-aot-spec"
+    ],
+    "log": "ascii.aot-spec.txt"
+  },
+  {
+    "setup": "fixtures",
+    "mode": "aot",
+    "exit_code": 0,
+    "command": [
+      "tclsh9.0",
+      "/mnt/c/Users/MarkusWagner/dev/botlish/native/target/aot-audit-2026-09-28/context.tcl",
+      "fixtures",
+      "-aot"
+    ],
+    "log": "fixtures.aot.txt"
+  },
+  {
+    "setup": "fixtures",
+    "mode": "aot-spec",
+    "exit_code": 0,
+    "command": [
+      "tclsh9.0",
+      "/mnt/c/Users/MarkusWagner/dev/botlish/native/target/aot-audit-2026-09-28/context.tcl",
+      "fixtures",
+      "-aot-spec"
+    ],
+    "log": "fixtures.aot-spec.txt"
+  }
+]

@@ -1,0 +1,57 @@
+== source-checks.bot (interp)
+<program>: closed (transitively open)   [i0, line 43:1]
+  calls:    list::find<List[str], block>, valid_start?<generic>
+  guards:   0
+  runtime:  bigint, closure-env, list-alloc
+
+list::find (semantic): open   [UnknownParameterKind 1, UnknownCallResultKind 1, DynamicCall 1]
+list::find<List[str], block>: guarded   [i3, line 77:8]
+  params:   xs : List[str], predicate : block
+  result:   str
+  guards:   1
+    line 79:12  e42  UnknownCallResultKind: the condition needs bool; the result of the dynamic call at line 79:12 has no static kind
+  runtime:  indirect-call, tagged-values
+
+is_underscore? (semantic): closed   [no blockers]
+is_underscore?<generic>: closed   [i5, line 43:18]
+  params:   c : any
+  result:   bool
+  guards:   0
+  runtime:  structural-equality
+
+is_hyphen? (semantic): closed   [no blockers]
+is_hyphen?<generic>: closed   [i6, line 46:14]
+  params:   c : any
+  result:   bool
+  guards:   0
+  runtime:  structural-equality
+
+classify_leading (semantic): open   [UnknownParameterKind 1, DynamicCall 1]
+classify_leading<generic>: open   [i2, line 51:20]
+  params:   name : any
+  result:   list
+  guards:   1
+    line 52:15  e74  UnknownParameterKind: length needs str; parameter name (no annotation, no call-site inference) has no static kind
+    line 56:9  e92  DynamicCall: the callee has no static kind: native, block or not callable is decided at run time
+  runtime:  bigint, char-index, dynamic-call, list-alloc, range-check, string-alloc, tagged-values
+
+valid_start? (semantic): guarded   [UnknownAggregateElementType 2]
+valid_start?<generic>: guarded (transitively open)   [i1, line 58:16]
+  params:   name : any
+  result:   bool
+  calls:    classify_leading<generic>
+  guards:   2
+    line 60:5  e101  UnknownAggregateElementType: the condition needs bool; the element read by list_get at line 60:5 has no static kind
+    line 60:27  e107  UnknownAggregateElementType: the condition needs bool; the element read by list_get at line 60:27 has no static kind
+  runtime:  closure-env, range-check, tagged-values
+
+invalid_name? (semantic): closed   [no blockers]
+invalid_name?<generic>: closed (transitively open)   [i4, line 62:17]
+  params:   name : any
+  result:   bool
+  calls:    valid_start?<generic>
+  guards:   0
+  runtime:  closure-env
+
+guards: generic 11, specialized 4; instances: 5 generic, 1 specialized
+   value: [16, 5, "2fast", 11]

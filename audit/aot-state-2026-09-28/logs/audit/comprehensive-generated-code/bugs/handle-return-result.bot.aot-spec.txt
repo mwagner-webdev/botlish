@@ -1,0 +1,31 @@
+== handle-return-result.bot (interp)
+<program>: closed   [i0, line 4:1]
+  calls:    h<int>
+  guards:   0
+  runtime:  bigint, list-alloc
+
+f (semantic): closed   [no blockers]
+f<int>: closed   [i3, line 5:5]
+  params:   x : int
+  result:   int
+  guards:   0
+  runtime:  bigint
+
+g (semantic): closed   [no blockers]
+g<int>: closed   [i2, line 10:5]
+  params:   x : int
+  result:   int
+  calls:    f<int>
+  guards:   0
+  runtime:  none
+
+h (semantic): closed   [no blockers]
+h<int>: closed   [i1, line 15:5]
+  params:   x : int
+  result:   int
+  calls:    g<int>
+  guards:   0
+  runtime:  bigint
+
+guards: generic 0, specialized 0; instances: 0 generic, 3 specialized
+   value: [4611686018427387904, 6]

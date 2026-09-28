@@ -1,0 +1,45 @@
+== ascii.bot (interp)
+<program>: closed   [i0, line 51:1]
+  guards:   0
+  runtime:  none
+
+is_digit (semantic): closed   [no blockers]
+is_digit<int>: closed   [i5, line 53:12]
+  params:   b : int
+  result:   bool
+  guards:   0
+  runtime:  bigint
+
+is_upper (semantic): closed   [no blockers]
+is_upper<int>: closed   [i3, line 56:12]
+  params:   b : int
+  result:   bool
+  guards:   0
+  runtime:  bigint
+
+is_lower (semantic): closed   [no blockers]
+is_lower<int>: closed   [i4, line 59:12]
+  params:   b : int
+  result:   bool
+  guards:   0
+  runtime:  bigint
+
+is_alphabetic (semantic): closed   [no blockers]
+is_alphabetic<int>: closed   [i2, line 62:17]
+  params:   b : int
+  result:   bool
+  calls:    is_lower<int>, is_upper<int>
+  guards:   0
+  runtime:  none
+
+is_alphanumeric (semantic): closed   [no blockers]
+is_alphanumeric<generic>: closed   [i1, line 65:19]
+  params:   b : any
+  result:   bool
+  calls:    is_alphabetic<int>, is_digit<int>
+  guards:   0
+  runtime:  none
+
+guards: generic 0, specialized 0; instances: 1 generic, 4 specialized
+   value: <block (b)>
+   block #0 refinements: (none)

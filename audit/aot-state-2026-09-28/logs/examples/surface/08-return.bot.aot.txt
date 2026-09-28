@@ -1,0 +1,20 @@
+== 08-return.bot (interp)
+<program>: closed (transitively guarded)   [program, line 5:1]
+  dispatch: closed -- natives: list, - x2; functions: abs (non-tail), first_positive (non-tail)
+  blockers: none
+  runtime:  bigint, list-alloc
+
+abs: guarded   [e2, line 5:7]
+  params:   x : any   result: int
+  dispatch: closed -- natives: <, -
+  blockers:
+    line 6:8  e6  UnknownParameterKind: < needs int; parameter x (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+first_positive: guarded   [e15, line 10:18]
+  params:   a : any, b : any   result: any
+  dispatch: closed -- natives: >
+  blockers:
+    line 12:12  e20  UnknownParameterKind: > needs int; parameter a (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+   value: [7, 0, 3]

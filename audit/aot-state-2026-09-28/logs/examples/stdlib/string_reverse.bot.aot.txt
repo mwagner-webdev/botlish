@@ -1,0 +1,24 @@
+== string_reverse.bot (interp)
+<program>: closed (transitively guarded)   [program, line 16:1]
+  dispatch: closed -- natives: list; functions: reverse_chars (non-tail)
+  blockers: none
+  runtime:  list-alloc
+
+reverse_from: guarded   [e2, line 16:16]
+  params:   text : any, index : any, reversed : any   result: any
+  captures: reverse_from (block)
+  dispatch: closed -- natives: ==, length, substring, + x2, concat; functions: reverse_from (self, tail)
+  blockers:
+    line 17:24  e9  UnknownParameterKind: length needs str; parameter text (no annotation, no call-site inference) has no static kind
+    line 20:33  e16  UnknownParameterKind: substring needs int; parameter index (no annotation, no call-site inference) has no static kind
+    line 20:40  e19  UnknownParameterKind: + needs int; parameter index (no annotation, no call-site inference) has no static kind
+    line 21:53  e31  UnknownParameterKind: concat needs str; parameter reversed (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, char-index, range-check, string-alloc, structural-equality, tagged-values
+
+reverse_chars: closed (transitively guarded)   [e33, line 23:17]
+  params:   text : any   result: any
+  captures: reverse_from (block)
+  dispatch: closed -- functions: reverse_from (tail)
+  blockers: none
+  runtime:  none
+   value: ["", "a", "cba", "dcba", "üöä"]

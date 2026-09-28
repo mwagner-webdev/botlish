@@ -1,0 +1,223 @@
+== uri-steady.bot (interp)
+<program>: closed (transitively guarded)   [program, line 30:1]
+  dispatch: closed -- natives: immutable_set_from_list, list x4; functions: byte::set (non-tail), repeat_uri (non-tail)
+  blockers: none
+  note:     line 32:14  e501  creates a closure capturing values
+  runtime:  closure-env, list-alloc, set-alloc, structural-equality
+
+char::codepoint: closed   [e2, line 21:13]
+  params:   c : any   result: int
+  dispatch: closed -- natives: char_codepoint
+  blockers: none
+  runtime:  none
+
+byte::high_nibble: guarded   [e7, line 112:15]
+  params:   b : any   result: int[HighNibble]
+  dispatch: closed -- natives: bit_and
+  blockers:
+    line 113:13  e10  UnknownParameterKind: bit_and needs int; parameter b (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+byte::low_nibble: guarded   [e13, line 115:14]
+  params:   b : any   result: int[LowNibble]
+  dispatch: closed -- natives: bit_and
+  blockers:
+    line 116:13  e16  UnknownParameterKind: bit_and needs int; parameter b (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+byte::nibble: guarded   [e19, line 118:10]
+  params:   x : any   result: int[Nibble]
+  dispatch: closed -- natives: bit_and x2, bit_or, shift_right
+  blockers:
+    line 119:28  e26  UnknownParameterKind: bit_and needs int; parameter x (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+byte::complement: guarded   [e34, line 121:14]
+  params:   b : any   result: int[Byte]
+  dispatch: closed -- natives: bit_and, bit_xor
+  blockers:
+    line 122:21  e39  UnknownParameterKind: bit_xor needs int; parameter b (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+byte::position_low: guarded   [e43, line 124:16]
+  params:   n : any   result: int[LowNibble]
+  dispatch: closed -- natives: bit_and
+  blockers:
+    line 125:13  e46  UnknownParameterKind: bit_and needs int; parameter n (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+byte::position_high: guarded   [e49, line 127:17]
+  params:   n : any   result: int[HighNibble]
+  dispatch: closed -- natives: bit_and, shift_left
+  blockers:
+    line 128:24  e54  UnknownParameterKind: shift_left needs int; parameter n (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, tagged-values
+
+byte::from_int: closed   [e58, line 150:12]
+  params:   value : any   result: int[Byte]
+  dispatch: closed -- natives: <, >
+  blockers: none
+  runtime:  bigint
+
+byte::set: closed   [e73, line 174:7]
+  params:   chars : any   result: ImmutableSet[int[Byte]]
+  dispatch: closed -- natives: immutable_set_from_list; functions: byte::from_int (non-tail), char::codepoint (non-tail)
+  blockers: none
+  runtime:  set-alloc, structural-equality
+
+ascii::is_digit: closed   [e86, line 53:12]
+  params:   b : any   result: bool
+  dispatch: closed -- natives: >=, <=
+  blockers: none
+  runtime:  bigint
+
+ascii::is_upper: closed   [e101, line 56:12]
+  params:   b : any   result: bool
+  dispatch: closed -- natives: >=, <=
+  blockers: none
+  runtime:  bigint
+
+ascii::is_lower: closed   [e116, line 59:12]
+  params:   b : any   result: bool
+  dispatch: closed -- natives: >=, <=
+  blockers: none
+  runtime:  bigint
+
+ascii::is_alphabetic: closed   [e131, line 62:17]
+  params:   b : any   result: bool
+  dispatch: closed -- functions: ascii::is_lower (non-tail), ascii::is_upper (non-tail)
+  blockers: none
+  runtime:  none
+
+ascii::is_alphanumeric: closed   [e144, line 65:19]
+  params:   b : any   result: bool
+  dispatch: closed -- functions: ascii::is_alphabetic (non-tail), ascii::is_digit (non-tail)
+  blockers: none
+  runtime:  none
+
+web::emailish?: guarded (transitively open)   [e167, line 92:13]
+  params:   v : any   result: bool
+  dispatch: closed -- natives: length, == x2, >=, +; functions: char_at (non-tail), domain? (tail), scan_while (non-tail)
+  blockers:
+    line 94:16  e171  UnknownParameterKind: length needs str; parameter v (no annotation, no call-site inference) has no static kind
+  note:     line 96:15  e173  creates a closure capturing values
+  note:     line 126:18  e211  creates a closure capturing values
+  note:     line 133:12  e226  creates a closure capturing values
+  note:     line 159:15  e246  creates a closure capturing values
+  runtime:  bigint, char-index, closure-env, tagged-values
+
+char_at: guarded   [e173, line 96:15]
+  params:   i : any   result: str
+  captures: v (value)
+  dispatch: closed -- natives: substring, +
+  blockers:
+    line 97:22  e177  UnknownParameterKind: substring needs int; parameter i (no annotation, no call-site inference) has no static kind
+    line 97:25  e180  UnknownParameterKind: + needs int; parameter i (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, char-index, range-check, string-alloc, tagged-values
+
+local_char?: guarded   [e183, line 99:19]
+  params:   c : any   result: bool
+  dispatch: closed -- natives: is_tcl_alnum, immutable_set_contains
+  blockers:
+    line 100:22  e187  UnknownParameterKind: is_tcl_alnum needs str; parameter c (no annotation, no call-site inference) has no static kind
+  runtime:  char-index, range-check, structural-equality, tagged-values
+
+label_char?: guarded   [e197, line 107:19]
+  params:   c : any   result: bool
+  dispatch: closed -- natives: is_tcl_alnum, ==
+  blockers:
+    line 108:22  e201  UnknownParameterKind: is_tcl_alnum needs str; parameter c (no annotation, no call-site inference) has no static kind
+  runtime:  char-index, range-check, tagged-values
+
+scan_while: open   [e211, line 126:18]
+  params:   start : any, predicate : any   result: int
+  captures: n (value), char_at (value)
+  dispatch: open -- functions: char_at (non-tail); dynamic calls: 1
+  blockers:
+    line 127:21  e213  UnknownParameterKind: the loop start value needs int; parameter start (no annotation, no call-site inference) has no static kind
+    line 128:16  e216  UnknownCallResultKind: the condition needs bool; the result of the dynamic call at line 128:16 has no static kind
+    line 128:16  e217  DynamicCall: the callee has no static kind: native, block or not callable is decided at run time
+  runtime:  closure-env, dynamic-call, tagged-values
+
+tld?: guarded (transitively open)   [e226, line 133:12]
+  params:   i : any   result: bool
+  captures: scan_while (value), n (value)
+  dispatch: closed -- natives: ==, >=, -; functions: scan_while (non-tail)
+  blockers:
+    line 136:17  e242  UnknownParameterKind: - needs int; parameter i (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, closure-env, tagged-values
+
+domain?: guarded (transitively open)   [e246, line 159:15]
+  params:   start : any   result: bool
+  captures: n (value), char_at (value), tld? (value), label_char? (block)
+  dispatch: closed -- natives: == x3, -, +; functions: char_at (non-tail), label_char? (non-tail), tld? (non-tail)
+  blockers:
+    line 160:21  e248  UnknownParameterKind: the loop start value needs int; parameter start (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, closure-env, structural-equality, tagged-values
+
+web::is_unreserved: closed   [e357, line 189:17]
+  params:   b : any   result: bool
+  dispatch: closed -- natives: immutable_set_contains; functions: ascii::is_alphanumeric (non-tail)
+  blockers: none
+  runtime:  structural-equality
+
+web::uri_escape_text: closed (transitively guarded)   [e371, line 192:19]
+  params:   s : any   result: any
+  dispatch: closed -- functions: esc_from (tail)
+  blockers: none
+  runtime:  none
+
+high_nibble: closed (transitively guarded)   [e373, line 194:19]
+  params:   b : any   result: int[Nibble]
+  dispatch: closed -- functions: byte::high_nibble (non-tail), byte::nibble (tail)
+  blockers: none
+  runtime:  none
+
+hex_pair: guarded   [e380, line 197:16]
+  params:   b : any   result: str
+  captures: high_nibble (block)
+  dispatch: closed -- natives: concat, list_get x2, mod; functions: high_nibble (non-tail)
+  blockers:
+    line 198:79  e394  UnknownParameterKind: mod needs int; parameter b (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, range-check, string-alloc, tagged-values
+
+esc_bytes: guarded   [e397, line 200:17]
+  params:   bytes : any, i : any, acc : any   result: any
+  captures: esc_bytes (block), hex_pair (block)
+  dispatch: closed -- natives: >=, list_length, +, concat x2, list_get; functions: esc_bytes (self, tail), hex_pair (non-tail)
+  blockers:
+    line 201:12  e401  UnknownParameterKind: >= needs int; parameter i (no annotation, no call-site inference) has no static kind
+    line 201:29  e404  UnknownParameterKind: list_length needs list; parameter bytes (no annotation, no call-site inference) has no static kind
+    line 204:44  e415  UnknownParameterKind: concat needs str; parameter acc (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, range-check, string-alloc, tagged-values
+
+esc_char: guarded   [e426, line 206:16]
+  params:   c : any   result: any
+  captures: esc_bytes (block)
+  dispatch: closed -- natives: encode_utf8, ==, list_length, list_get; functions: esc_bytes (tail), web::is_unreserved (non-tail)
+  blockers:
+    line 207:29  e430  UnknownParameterKind: encode_utf8 needs str; parameter c (no annotation, no call-site inference) has no static kind
+  runtime:  bigint, list-alloc, range-check, tagged-values
+
+esc_from: guarded   [e459, line 217:16]
+  params:   text : any, i : any, acc : any   result: any
+  captures: esc_from (block), esc_char (block)
+  dispatch: closed -- natives: >=, length, + x2, concat, substring; functions: esc_char (non-tail), esc_from (self, tail)
+  blockers:
+    line 218:12  e463  UnknownParameterKind: >= needs int; parameter i (no annotation, no call-site inference) has no static kind
+    line 218:24  e466  UnknownParameterKind: length needs str; parameter text (no annotation, no call-site inference) has no static kind
+    line 221:42  e477  UnknownParameterKind: concat needs str; parameter acc (no annotation, no call-site inference) has no static kind
+    line 221:47  e478  UnknownCallResultKind: concat needs str; the result of esc_char at line 221:47 has no static kind
+  runtime:  bigint, char-index, range-check, string-alloc, tagged-values
+
+repeat_uri: guarded   [e501, line 32:14]
+  params:   i : any, total : any, acc : any   result: any
+  captures: corpus (value), repeat_uri (value)
+  dispatch: closed -- natives: >=, list_get, mod, list_length, + x2, length; functions: repeat_uri (self, tail), web::uri_escape_text (non-tail)
+  blockers:
+    line 33:8  e505  UnknownParameterKind: >= needs int; parameter i (no annotation, no call-site inference) has no static kind
+    line 33:13  e506  UnknownParameterKind: >= needs int; parameter total (no annotation, no call-site inference) has no static kind
+    line 37:30  e532  UnknownParameterKind: + needs int; parameter acc (no annotation, no call-site inference) has no static kind
+    line 37:43  e535  UnknownCallResultKind: length needs str; the result of web::uri_escape_text at line 36:15 has no static kind
+  runtime:  bigint, char-index, closure-env, range-check, tagged-values
+   error: too many nested evaluations (infinite loop?) (TCL LIMIT STACK)
