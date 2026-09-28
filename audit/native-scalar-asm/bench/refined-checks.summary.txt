@@ -2,7 +2,7 @@ source:  bench/refined-checks.ir
 backend: Cranelift (specialize=1)
 asm:     refined-checks.asm
 vcode:   refined-checks.vcode
-machine-code bytes: 8943 (per function: 1443 39 289 617 74 74 74 125 125 601 262 222 238 528 468 1244 137 94 103 474 491 426 451 344)
+machine-code bytes: 8935 (per function: 1443 39 289 609 74 74 74 125 125 601 262 222 238 528 468 1244 137 94 103 474 491 426 451 344)
 
 functions:
   0 <program entry>: nir-regs=45
@@ -76,7 +76,7 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     managed-capable regs: 15
     effects: may_error=true may_gc=true
     safepoints: 4
-    root candidates: 8
+    root candidates: 7
     max live roots: 5
     shadow slots: 5
     entry zero slots: 2
