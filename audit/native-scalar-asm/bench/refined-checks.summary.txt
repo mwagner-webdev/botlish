@@ -2,10 +2,10 @@ source:  bench/refined-checks.ir
 backend: Cranelift (specialize=1)
 asm:     refined-checks.asm
 vcode:   refined-checks.vcode
-machine-code bytes: 10258 (per function: 1588 39 289 617 74 74 74 125 125 753 262 222 272 528 468 1244 155 125 103 453 750 486 828 604)
+machine-code bytes: 8943 (per function: 1443 39 289 617 74 74 74 125 125 601 262 222 238 528 468 1244 137 94 103 474 491 426 451 344)
 
 functions:
-  0 <program entry>: nir-regs=48
+  0 <program entry>: nir-regs=45
   1 char::codepoint<UnicodeChar>: nir-regs=2
   2 byte::from_int<int>: nir-regs=8
   3 byte::set<List[UnicodeChar]>: nir-regs=17
@@ -14,33 +14,33 @@ functions:
   6 ascii::is_lower<int>: nir-regs=13
   7 ascii::is_alphabetic<int>: nir-regs=8
   8 ascii::is_alphanumeric<int>: nir-regs=8
-  9 web::emailish?<generic>: nir-regs=26
+  9 web::emailish?<str>: nir-regs=25
   10 char_at<generic>: nir-regs=6
   11 char_at<generic>: nir-regs=6
   12 local_char?<generic>: nir-regs=9
   13 scan_while<generic>: nir-regs=15
   14 tld?<generic>: nir-regs=12
   15 domain?<generic>: nir-regs=56
-  16 web::is_unreserved<generic>: nir-regs=9
-  17 web::uri_escape_text<generic>: nir-regs=7
-  18 high_nibble<generic>: nir-regs=15
-  19 hex_pair<generic>: nir-regs=9
-  20 esc_bytes<generic>: nir-regs=14
-  21 esc_char<generic>: nir-regs=23
-  22 esc_from<generic>: nir-regs=18
-  23 check<generic>: nir-regs=21
+  16 web::is_unreserved<int>: nir-regs=9
+  17 web::uri_escape_text<str>: nir-regs=5
+  18 high_nibble<int>: nir-regs=15
+  19 hex_pair<int>: nir-regs=10
+  20 esc_bytes<List[int], int, str>: nir-regs=15
+  21 esc_char<str>: nir-regs=21
+  22 esc_from<str, int, str>: nir-regs=19
+  23 check<int, int, str, str>: nir-regs=20
 
 GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
   function 0 "<program>"
-    NIR regs: 48
+    NIR regs: 45
     raw regs: 4
-    managed-capable regs: 44
+    managed-capable regs: 41
     effects: may_error=true may_gc=true
-    safepoints: 12
-    root candidates: 43
-    max live roots: 17
-    shadow slots: 17
-    entry zero slots: 12
+    safepoints: 9
+    root candidates: 37
+    max live roots: 16
+    shadow slots: 16
+    entry zero slots: 11
     depth reservation: no
     storage: native frame
   
@@ -149,15 +149,15 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 9 "web::emailish?"
-    NIR regs: 26
+    NIR regs: 25
     raw regs: 3
-    managed-capable regs: 23
+    managed-capable regs: 22
     effects: may_error=true may_gc=true
-    safepoints: 5
-    root candidates: 8
+    safepoints: 4
+    root candidates: 7
     max live roots: 4
     shadow slots: 4
-    entry zero slots: 1
+    entry zero slots: 0
     depth reservation: no
     storage: native frame
   
@@ -253,14 +253,14 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 17 "web::uri_escape_text"
-    NIR regs: 7
+    NIR regs: 5
     raw regs: 1
-    managed-capable regs: 6
+    managed-capable regs: 4
     effects: may_error=true may_gc=true
     safepoints: 1
-    root candidates: 5
-    max live roots: 5
-    shadow slots: 5
+    root candidates: 3
+    max live roots: 3
+    shadow slots: 3
     entry zero slots: 0
     depth reservation: no
     storage: native frame
@@ -279,9 +279,9 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 19 "hex_pair"
-    NIR regs: 9
+    NIR regs: 10
     raw regs: 1
-    managed-capable regs: 8
+    managed-capable regs: 9
     effects: may_error=true may_gc=true
     safepoints: 2
     root candidates: 4
@@ -292,61 +292,60 @@ GC roots (refined-checks.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 20 "esc_bytes"
-    NIR regs: 14
-    raw regs: 1
-    managed-capable regs: 13
+    NIR regs: 15
+    raw regs: 4
+    managed-capable regs: 11
     effects: may_error=true may_gc=true
-    safepoints: 3
-    root candidates: 9
-    max live roots: 6
-    shadow slots: 6
-    entry zero slots: 1
+    safepoints: 2
+    root candidates: 5
+    max live roots: 4
+    shadow slots: 4
+    entry zero slots: 0
     depth reservation: no
     storage: native frame
   
   function 21 "esc_char"
-    NIR regs: 23
+    NIR regs: 21
     raw regs: 5
-    managed-capable regs: 18
+    managed-capable regs: 16
     effects: may_error=true may_gc=true
     safepoints: 3
-    root candidates: 8
-    max live roots: 4
-    shadow slots: 4
-    entry zero slots: 1
+    root candidates: 6
+    max live roots: 3
+    shadow slots: 3
+    entry zero slots: 2
     depth reservation: no
     storage: native frame
   
   function 22 "esc_from"
-    NIR regs: 18
-    raw regs: 2
-    managed-capable regs: 16
+    NIR regs: 19
+    raw regs: 6
+    managed-capable regs: 13
     effects: may_error=true may_gc=true
-    safepoints: 6
-    root candidates: 11
-    max live roots: 7
-    shadow slots: 7
+    safepoints: 4
+    root candidates: 6
+    max live roots: 4
+    shadow slots: 4
     entry zero slots: 2
     depth reservation: no
     storage: native frame
   
   function 23 "check"
-    NIR regs: 21
-    raw regs: 4
-    managed-capable regs: 17
+    NIR regs: 20
+    raw regs: 6
+    managed-capable regs: 14
     effects: may_error=true may_gc=true
-    safepoints: 3
-    root candidates: 8
-    max live roots: 7
-    shadow slots: 7
-    entry zero slots: 2
+    safepoints: 2
+    root candidates: 4
+    max live roots: 4
+    shadow slots: 4
+    entry zero slots: 1
     depth reservation: no
     storage: native frame
 
 mechanical pattern counts (triage only; see report for interpretation):
-  4 x calls to rt_closure_new
-  11 x calls to rt_int_add
-  3 x calls to rt_int_sub
-  13 x calls to rt_int_cmp
-  46 x calls to other rt_* helpers
-  4 x guard/guardbool instructions
+  8 x calls to rt_int_add
+  2 x calls to rt_int_sub
+  10 x calls to rt_int_cmp
+  44 x calls to other rt_* helpers
+  2 x guard/guardbool instructions
