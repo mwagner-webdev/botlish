@@ -598,8 +598,11 @@ calls between compiled and interpreted Blocks. `tests/inference.test` does
 the same for programs built to expose unsound type facts (§13). The
 `tests/hir-*.test` files cover the HIR (§16).
 
-**Known gap:** compiled code cannot yet propagate a `propagate-error`
-completion out of a call. No form produces one yet.
+**Declared errors** (`fail NAME`, EXPLICIT-ERROR-COMPLETIONS.md) travel
+through compiled code as Tcl completion code 5, out of a direct call of a
+compiled block and -- since STRUCTURAL-FUNCTION-TYPES.md, where a callable
+with a declared error set may be called through a structural function type
+-- out of a generic call (`core::runtime::callValue`) alike.
 
 ## 13. Type inference
 
@@ -619,7 +622,27 @@ value `v` for which `core::type::acceptsValue T v` is true.
 | `any` | core | nothing known |
 | `{native NAME}` | hir | exactly the native `NAME` |
 | `{block EXPR ARITY RESULT}` | hir | a Block created by the block expression `EXPR` (an ExprId), whose calls return `RESULT` |
+| `{block EXPR ARITY RESULT {args {T…} errors {E…}}}` | hir | the same, for a block that declares parameter types or an error set (its contract) |
+| `{fn {args {T…} return R errors {E…}}}` | hir | a *structural function type*: some callable (native or Block) whose calls accept arguments admissible for `T…`, return `R`, and let at most `E…` escape |
 | `never` | hir | no value: evaluation does not complete normally |
+
+**Exact and structural callables** (STRUCTURAL-FUNCTION-TYPES.md). An exact
+callable type names the code a call runs (for a Block: its code target,
+whatever environment the value carries -- two closures of one factory share
+it). Each has one structural supertype, `hir::types::structuralOf`: a
+block's declared parameter types (untyped: `any`), result type and
+declared errors; a native's arity and `-result-type` (its arguments are
+run-time checked, so its structural arguments are `any`; natives declare no
+errors). Compatibility is the call contract's: arguments contravariant
+(declared-parameter admissibility), return covariant, errors a subset. The
+`lub` of two different compatible callables is their narrowest common
+structural type (the meet of the arguments, the lub of the returns, the
+union of the errors), not `any`; with no representable argument meet it
+falls back to the shared kind or `any`. A call through a structural type
+is typed from its contract, its arguments are checked against the
+contract, and its declared errors reach static error checking; it still
+lowers as an indirect call. Specialization keys erase both identity (to
+the kind) and contract (to `any`).
 
 `hir::types::lub`, `narrow` and `kindOf` handle the extra forms themselves
 and delegate everything else to `core::type`. For example,
@@ -1185,6 +1208,11 @@ add10(32)          # 42 (add captures x)
 * An `if` can also be the value of a binding, `return` or `break`
   (`sign = if n < 0:` followed by its blocks). It can't be an operand or an
   argument.
+* A parameter or result annotation may be a **structural function type**,
+  `Fn{args: [T1, T2], return: R, errors: [E1, E2]}` (named fields, any
+  order, newlines allowed inside the braces; `errors` may be omitted and
+  then means `errors: []`, exactly like a `fn` without an `errors` clause).
+  See STRUCTURAL-FUNCTION-TYPES.md.
 * Integers (decimal, arbitrary precision, no leading zeros), strings
   (`"..."`, escapes `\\ \" \n \r \t`), `true`, `false`, `unit`, lists
   `[a, b]`, calls `f(x)(y)`.

@@ -215,13 +215,57 @@ proc hir::read::ParamList {text number} {
     if {$text eq ""} {
         return $result
     }
-    foreach item [split [string map {", " \x01} $text] \x01] {
-        if {![regexp {^(b[0-9]+) ([^: ]+)(?::([^: ]+))?$} $item -> b name type]} {
+    # Split at top level only: a structural function type annotation
+    # (Fn{args: [A, B], ...}) contains ", " and ":" of its own.
+    foreach item [SplitTop $text ", "] {
+        if {![regexp {^(b[0-9]+) ([^: ]+)(?::(.+))?$} $item -> b name type]} {
             Fail $number "expected \"BINDING NAME[:TYPE]\", got \"$item\""
         }
         lappend result $b $name $type
     }
     return $result
+}
+
+# TEXT split at every occurrence of SEP outside brackets ( ) [ ] { }.
+proc hir::read::SplitTop {text sep} {
+    set parts {}
+    set depth 0
+    set start 0
+    set n [string length $text]
+    set k [string length $sep]
+    for {set i 0} {$i < $n} {incr i} {
+        set c [string index $text $i]
+        if {$c in {( [ \{}} {
+            incr depth
+        } elseif {$c in {) ] \}}} {
+            incr depth -1
+        } elseif {$depth == 0 && [string range $text $i [expr {$i + $k - 1}]] eq $sep} {
+            lappend parts [string range $text $start [expr {$i - 1}]]
+            set start [expr {$i + $k}]
+            incr i [expr {$k - 1}]
+        }
+    }
+    lappend parts [string range $text $start end]
+    return $parts
+}
+
+# The index of the first occurrence of NEEDLE in TEXT outside brackets, or
+# -1.
+proc hir::read::TopIndex {text needle} {
+    set depth 0
+    set n [string length $text]
+    set k [string length $needle]
+    for {set i 0} {$i < $n} {incr i} {
+        set c [string index $text $i]
+        if {$c in {( [ \{}} {
+            incr depth
+        } elseif {$c in {) ] \}}} {
+            incr depth -1
+        } elseif {$depth == 0 && [string range $text $i [expr {$i + $k - 1}]] eq $needle} {
+            return $i
+        }
+    }
+    return -1
 }
 
 proc hir::read::NewBinding {hirVar b name kind s origin number} {
@@ -295,7 +339,25 @@ proc hir::read::ParseType {text number} {
         return [list native $name]
     }
     if {[regexp {^block\((e[0-9]+)\)/([0-9]+) -> (.+)$} $text -> e arity result]} {
+        # Always the four-element form here: a typed block's contract is
+        # restored from its own node once the whole text is read
+        # (CanonicalBlockTypes), since hir::types::show never prints it.
         return [list block $e $arity [ParseType $result $number]]
+    }
+    if {[regexp {^Fn\{(.*)\}$} $text -> inner]} {
+        # hir::types::show's structural function type notation
+        # (STRUCTURAL-FUNCTION-TYPES.md): exactly the three fields, in
+        # canonical order.
+        set fields [SplitTop $inner ", "]
+        if {[llength $fields] != 3
+                || ![regexp {^args: \[(.*)\]$} [lindex $fields 0] -> argsText]
+                || ![regexp {^return: (.+)$} [lindex $fields 1] -> returnText]
+                || ![regexp {^errors: \[(.*)\]$} [lindex $fields 2] -> errorsText]} {
+            Fail $number "bad structural function type \"$text\": expected \"Fn{args: \[...\], return: ..., errors: \[...\]}\""
+        }
+        set argTypes [expr {$argsText eq "" ? {} : [lmap t [SplitTop $argsText ", "] {ParseType $t $number}]}]
+        set errors [expr {$errorsText eq "" ? {} : [SplitTop $errorsText ", "]}]
+        return [hir::types::MakeFn $argTypes [ParseType $returnText $number] $errors]
     }
     if {[regexp {^List\[(.+)\]$} $text -> inner]} {
         # hir::types::show's own applied-type notation (MINIMAL-APPLIED-
@@ -489,8 +551,7 @@ proc hir::read::Expr {hirVar level s path block} {
             }
         }
         block {
-            if {![regexp {^(s[0-9]+) \((.*?)\) captures \((.*?)\)(?: staticRefs \((.*?)\))?(?: declares (\S+))?(?: errors (\S.*?))?(?: binds (.*))?$} \
-                    $head -> body params captures staticRefs declared errorsText binds]} {
+            if {![BlockHeader $head body params captures staticRefs declared errorsText binds]} {
                 Fail $number "expected \"block SCOPE (PARAMS) captures (BINDINGS) ?staticRefs (BINDINGS)? ?declares ...? ?errors ...? ?binds ...?\""
             }
             NewScope hir $body block $s $e $e [list ir $path] $number
@@ -724,8 +785,89 @@ proc hir::read::Expr {hirVar level s path block} {
 
 # Derives what the text implies: which bind declares each binding, binding
 # types, and id counters past every id in use.
+# Parses a block line's HEAD ("SCOPE (PARAMS) captures (BINDINGS)
+# ?staticRefs (BINDINGS)? ?declares TYPE? ?errors E1, E2? ?binds ...?")
+# into the named variables; 0 if malformed. The optional parts are found
+# outside brackets, so a declared type may itself contain spaces, ", " or
+# the word "errors" (a structural function type's own "errors: [...]").
+proc hir::read::BlockHeader {head bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar} {
+    foreach var {bodyVar paramsVar capturesVar staticRefsVar declaredVar errorsVar bindsVar} {
+        upvar 1 [set $var] [string range $var 0 end-3]
+    }
+    set staticRefs ""
+    set declared ""
+    set errors ""
+    set binds ""
+    if {![regexp {^(s[0-9]+) \((.*?)\) captures \((.*?)\)(.*)$} $head -> body params captures rest]} {
+        return 0
+    }
+    regexp {^ staticRefs \((.*?)\)(.*)$} $rest -> staticRefs rest
+    set i [TopIndex $rest " binds "]
+    if {$i >= 0} {
+        set binds [string range $rest [expr {$i + 7}] end]
+        set rest [string range $rest 0 [expr {$i - 1}]]
+    }
+    set i [TopIndex $rest " errors "]
+    if {$i >= 0} {
+        set errors [string range $rest [expr {$i + 8}] end]
+        set rest [string range $rest 0 [expr {$i - 1}]]
+    }
+    if {[string match " declares ?*" $rest]} {
+        set declared [string range $rest 10 end]
+    } elseif {$rest ne ""} {
+        return 0
+    }
+    return 1
+}
+
+# TYPE with every exact block type in it in canonical form
+# (hir::types::blockType: a typed block's contract restored from its own,
+# already-read node) -- ParseType can only ever produce the four-element
+# form, since the contract is never printed.
+proc hir::read::CanonicalType {hir type} {
+    if {[hir::types::IsExactBlock $type]} {
+        lassign $type _ e arity result
+        set result [CanonicalType $hir $result]
+        if {[dict exists $hir exprs $e] && [dict get $hir exprs $e kind] eq "block"} {
+            return [hir::types::blockType $hir $e $arity $result]
+        }
+        return [lreplace $type 3 3 $result]
+    }
+    if {[hir::types::IsList $type]} {
+        set out [lreplace $type 1 1 [CanonicalType $hir [lindex $type 1]]]
+        if {[llength $type] == 3} {
+            set out [lreplace $out 2 2 [lmap p [lindex $type 2] {CanonicalType $hir $p}]]
+        }
+        return $out
+    }
+    if {[hir::types::IsSet $type]} {
+        return [lreplace $type 1 1 [CanonicalType $hir [lindex $type 1]]]
+    }
+    if {[hir::types::IsFn $type]} {
+        return [hir::types::MakeFn [hir::types::FnArgs $type] \
+            [CanonicalType $hir [hir::types::FnReturn $type]] [hir::types::FnErrors $type]]
+    }
+    return $type
+}
+
+proc hir::read::CanonicalBlockTypes {hirVar} {
+    upvar 1 $hirVar hir
+    set types [dict create]
+    set typeIds [dict create]
+    dict for {t type} [dict get $hir types] {
+        set type [CanonicalType $hir $type]
+        dict set types $t $type
+        if {![dict exists $typeIds $type]} {
+            dict set typeIds $type $t
+        }
+    }
+    dict set hir types $types
+    dict set hir typeIds $typeIds
+}
+
 proc hir::read::Finish {hirVar} {
     upvar 1 $hirVar hir
+    CanonicalBlockTypes hir
     foreach e [hir::walk $hir] {
         set node [dict get $hir exprs $e]
         if {[dict get $node kind] ne "bind" || [dict get $node duplicate]} {

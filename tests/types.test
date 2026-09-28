@@ -60,7 +60,10 @@ test type-7 {HIR static types delegate to core types} -body {
          [hir::types::lub never Emailish] \
          [hir::types::lub {native +} {native -}] \
          [hir::types::narrow {native +} native]
-} -result {str str native {} {refined str Emailish} {refined str Emailish} native {native +}}
+} -result {str str native {} {refined str Emailish} {refined str Emailish} {fn {args {any any} return int errors {}}} {native +}}
+# (Two different natives with one fixed-arity contract join to their common
+# structural function type, not to the bare kind native --
+# STRUCTURAL-FUNCTION-TYPES.md item 22.)
 
 test type-8 {validator types: acceptsValue and validate} -body {
     list [core::type::acceptsValue Emailish [str foo@example.com]] \

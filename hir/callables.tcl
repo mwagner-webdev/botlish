@@ -28,6 +28,23 @@
 # still does the one and only admissibility proof for every argument of
 # every call this pass leaves alone.
 
+# Structural function types (STRUCTURAL-FUNCTION-TYPES.md) change what
+# "erasure" means, not the rule itself. A structural function type is a
+# contract every call through it is statically held to (hir::range::
+# VerifyStructuralCall for its argument types, hir::completions'
+# CheckStructuralCallLegality for its declared errors), so a typed
+# callable flowing into a position whose type is a structural supertype of
+# it (an if/break/return join of compatible callables, a declared Fn
+# parameter or result, a List[Fn] element) keeps its obligations checkable:
+# only its identity is forgotten (Preserves). A structural type that still
+# carries an obligation -- a non-any argument type or a non-empty error
+# set, both of which can only have come from a typed Botlish block or a
+# source annotation, since a native's structural arguments are all any
+# (hir::types::structuralOf) -- is itself precondition-bearing, as is any
+# callable *returning* a bearing value and any List/ImmutableSet of them
+# (Bearing): erasing one of those to a type that forgets the obligation is
+# rejected exactly like erasing a typed block's exact identity always was.
+
 namespace eval hir::callables {}
 
 # 1 if TYPE is an exact callable value -- {block B ARITY RESULT} -- whose
@@ -43,21 +60,89 @@ namespace eval hir::callables {}
 # untyped call site the erased value reaches (hir::types::Call's own
 # `calleeErrors` is only ever nonempty for an exact `{block ExprId}`
 # target, so this is the one and only place that fact needs proving).
+#
+# Recursively (STRUCTURAL-FUNCTION-TYPES.md): a structural function type
+# with a non-any argument type or a declared error; a callable (exact or
+# structural) whose own result is bearing -- calling it yields a value
+# whose obligation its caller must still be able to see, so forgetting the
+# result type forgets that obligation too (before this milestone, `fn
+# chooser(): take_byte` passed to an untyped parameter let take_byte be
+# called unchecked through `f()(9999)`); and a List/ImmutableSet whose
+# elements are.
 proc hir::callables::Bearing {hir type} {
-    if {[lindex $type 0] ne "block" || [llength $type] != 4} {
-        return 0
+    if {[hir::types::IsExactBlock $type]} {
+        set block [lindex $type 1]
+        if {[dict exists $hir exprs $block]} {
+            if {[dict get $hir exprs $block declaredErrors] ne {}} {
+                return 1
+            }
+            foreach declared [dict get $hir exprs $block declaredParamTypes] {
+                if {$declared ne {}} {
+                    return 1
+                }
+            }
+        }
+        return [Bearing $hir [lindex $type 3]]
     }
-    set block [lindex $type 1]
-    if {![dict exists $hir exprs $block]} {
-        return 0
-    }
-    if {[dict get $hir exprs $block declaredErrors] ne {}} {
-        return 1
-    }
-    foreach declared [dict get $hir exprs $block declaredParamTypes] {
-        if {$declared ne {}} {
+    if {[hir::types::IsFn $type]} {
+        if {[hir::types::FnErrors $type] ne {}} {
             return 1
         }
+        foreach arg [hir::types::FnArgs $type] {
+            if {$arg ne "any"} {
+                return 1
+            }
+        }
+        return [Bearing $hir [hir::types::FnReturn $type]]
+    }
+    if {[hir::types::IsList $type]} {
+        foreach t [concat [list [lindex $type 1]] [hir::types::shapeOf $type]] {
+            if {[Bearing $hir $t]} {
+                return 1
+            }
+        }
+        return 0
+    }
+    if {[hir::types::IsSet $type]} {
+        return [Bearing $hir [lindex $type 1]]
+    }
+    return 0
+}
+
+# 1 if a value of static TYPE flowing into a position of static type FINAL
+# keeps every obligation it carries checkable: TYPE carries none, or FINAL
+# is TYPE itself, or FINAL is a structural function type TYPE is a subtype
+# of (so every call through FINAL is checked against a contract implying
+# TYPE's own) whose return type in turn preserves TYPE's, or FINAL is the
+# same exact block / an aggregate of the same constructor whose parts
+# preserve TYPE's. FINAL "" (no typed context at all) preserves nothing.
+proc hir::callables::Preserves {hir type final} {
+    if {$type eq $final || $type eq "never" || ![Bearing $hir $type]} {
+        return 1
+    }
+    if {$final eq ""} {
+        return 0
+    }
+    if {[hir::types::IsExactBlock $type] && [hir::types::IsExactBlock $final]
+            && [lrange $type 1 2] eq [lrange $final 1 2]} {
+        return [Preserves $hir [lindex $type 3] [lindex $final 3]]
+    }
+    if {[hir::types::IsFn $final]} {
+        set s [hir::types::structuralOf $type]
+        return [expr {$s ne "" && [hir::types::subtype $type $final]
+            && [Preserves $hir [hir::types::FnReturn $s] [hir::types::FnReturn $final]]}]
+    }
+    if {[hir::types::IsList $type] && [hir::types::IsList $final]} {
+        set finalElem [lindex $final 1]
+        foreach t [concat [list [lindex $type 1]] [hir::types::shapeOf $type]] {
+            if {![Preserves $hir $t $finalElem]} {
+                return 0
+            }
+        }
+        return 1
+    }
+    if {[hir::types::IsSet $type] && [hir::types::IsSet $final]} {
+        return [Preserves $hir [lindex $type 1] [lindex $final 1]]
     }
     return 0
 }
@@ -89,11 +174,13 @@ proc hir::callables::CheckPreserved {hirVar arg finalType contextText} {
         return
     }
     set type [hir::typeOf $hir $arg]
-    if {![Bearing $hir $type] || ($finalType ne "" && $type eq $finalType)} {
+    if {[Preserves $hir $type $finalType]} {
         return
     }
-    set name [Name $hir [lindex $type 1]]
-    set label [expr {$name eq "" ? {this callable} : "\"$name\""}]
+    set name [expr {[hir::types::IsExactBlock $type] ? [Name $hir [lindex $type 1]] : ""}]
+    set label [expr {$name ne "" ? "\"$name\""
+        : [hir::types::IsExactBlock $type] ? {this callable}
+        : "this value of type [hir::types::show $type]"}]
     hir::Diagnose hir TYPE [format \
         {%s has typed parameter requirements that cannot be preserved %s: its declared parameter contract would be erased and could no longer be checked at every future call} \
         $label $contextText] $arg
@@ -142,8 +229,8 @@ proc hir::callables::WalkExpr {hirVar e} {
             # way to be checked again at whatever call the callee's body
             # makes with it.
             WalkExpr hir [dict get $node callee]
-            foreach arg [dict get $node args] {
-                CheckPreserved hir $arg {} {passed as an ordinary call argument}
+            foreach arg [dict get $node args] context [ArgContexts $hir $e] {
+                CheckPreserved hir $arg $context {passed as an ordinary call argument}
                 WalkExpr hir $arg
             }
         }
@@ -167,6 +254,14 @@ proc hir::callables::WalkExpr {hirVar e} {
             foreach child [dict get $node body] {
                 WalkExpr hir $child
             }
+            # A returning loop collects each iteration's trailing value
+            # into its List result (RETURNING-ITERABLE-LOOPS.md): the
+            # element position of that List is a join like an if branch.
+            # Only reachable with a precondition-bearing value since
+            # STRUCTURAL-FUNCTION-TYPES.md let Lists hold typed callables
+            # (as List[Fn{...}] elements).
+            CheckTrailing hir [dict get $node body] [hir::types::elementOf [hir::typeOf $hir $e]] \
+                {as a returning loop's collected element, whose List element type differs}
         }
         countloop {
             WalkExpr hir [dict get $node start]
@@ -204,13 +299,94 @@ proc hir::callables::WalkExpr {hirVar e} {
         }
         handle {
             WalkExpr hir [dict get $node call]
+            set joined [hir::typeOf $hir $e]
             foreach body [dict get $node handlerBodies] {
                 foreach child $body {
                     WalkExpr hir $child
                 }
+                # A handler's value becomes the handle expression's own
+                # value -- typed as the handled call's result (no widening,
+                # EXPLICIT-ERROR-COMPLETIONS.md item 11), or the handlers'
+                # own join when the call never completes normally
+                # (hir::types::Handle): a join like an if branch.
+                CheckTrailing hir $body $joined \
+                    {as a handler's value, whose handled call's result type differs}
             }
         }
     }
+}
+
+# The static type each argument of call E flows into, one per argument
+# ("" where the callee gives it no typed position -- an untyped parameter,
+# an unresolved dynamic call, or a native that may pass the value on
+# untyped): a direct call's declared parameter type (hir::range::
+# VerifyCall proves the argument admissible for it), a structural callee's
+# contract argument type (VerifyStructuralCall), or -- for a List-building
+# native (-result-shape elements/append, core/native.tcl), a List read
+# (element) or immutable_set_from_list (immutable-set) -- the position the
+# value provably lands in inside the call's own result type.
+proc hir::callables::ArgContexts {hir e} {
+    set node [dict get $hir exprs $e]
+    set args [dict get $node args]
+    set none [lrepeat [llength $args] ""]
+    lassign [dict get $node target] targetKind target
+    if {$targetKind eq "block"} {
+        set declared [dict get $hir exprs $target declaredParamTypes]
+        if {[llength $declared] != [llength $args]} {
+            return $none
+        }
+        return [lmap t $declared {expr {$t eq {} ? "" : $t}}]
+    }
+    if {$targetKind eq ""} {
+        set calleeType [hir::typeOf $hir [dict get $node callee]]
+        if {[hir::types::IsFn $calleeType]
+                && [llength [hir::types::FnArgs $calleeType]] == [llength $args]} {
+            return [lmap t [hir::types::FnArgs $calleeType] {expr {$t eq "any" ? "" : $t}}]
+        }
+        return $none
+    }
+    set name [dict get [hir::symbol $hir $target] name]
+    set shape [dict get [core::native::metadata $name] resultShape]
+    set result [hir::typeOf $hir $e]
+    set elem [hir::types::elementOf $result]
+    switch -- [lindex $shape 0] {
+        elements {
+            if {$elem ne ""} {
+                return [lrepeat [llength $args] $elem]
+            }
+        }
+        append {
+            lassign $shape _ l v
+            if {$elem ne ""} {
+                set contexts $none
+                lset contexts $l $result
+                lset contexts $v $elem
+                return $contexts
+            }
+        }
+        element {
+            # list_get(L, I): L's elements leave the call only as its result,
+            # typed as L's own element type (ShapeResult) -- so L is
+            # preserved exactly when that element is by the result's type.
+            lassign $shape _ l
+            set listType [hir::typeOf $hir [lindex $args $l]]
+            set listElem [hir::types::elementOf $listType]
+            if {$listElem ne "" && [Preserves $hir $listElem $result]} {
+                set contexts $none
+                lset contexts $l $listType
+                return $contexts
+            }
+        }
+        immutable-set {
+            lassign $shape _ l
+            if {[hir::types::IsSet $result]} {
+                set contexts $none
+                lset contexts $l [hir::types::MakeList [lindex $result 1]]
+                return $contexts
+            }
+        }
+    }
+    return $none
 }
 
 # Entry point: every block (and the program root), each an independent
@@ -242,6 +418,16 @@ proc hir::callables::verify {hirVar} {
             set finalType [hir::type $hir [dict get [dict get $hir exprs $block] inferredResultType]]
             CheckTrailing hir $body $finalType \
                 {as a function's own trailing value, whose declared/inferred result type differs}
+            # A declared result type is what every caller sees instead of
+            # the inferred one (hir::types::Block): it must keep whatever
+            # obligation the inferred result carries (hir::range::
+            # verifyDeclaredResults already proved it admissible).
+            set declared [dict get [dict get $hir exprs $block] declaredResult]
+            if {$declared ne {} && ![Preserves $hir $finalType $declared]} {
+                hir::Diagnose hir TYPE [format \
+                    {the declared result type %s would erase the typed parameter requirements or declared errors of the callable this function returns (%s): its contract could no longer be checked at every future call} \
+                    [hir::types::show $declared] [hir::types::showContract $finalType]] $block
+            }
         }
     }
 }

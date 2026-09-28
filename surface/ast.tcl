@@ -449,6 +449,13 @@ proc surface::ast::showType {type} {
         return $type
     }
     lassign $type name arg
+    if {$name eq "fn"} {
+        # A structural function type (surface::parser::FnType): its
+        # canonical source spelling, fields in canonical order.
+        return [format {Fn{args: [%s], return: %s, errors: [%s]}} \
+            [join [lmap t [dict get $arg args] {showType $t}] {, }] \
+            [showType [dict get $arg return]] [join [dict get $arg errors] {, }]]
+    }
     return "$name\[[showType $arg]\]"
 }
 

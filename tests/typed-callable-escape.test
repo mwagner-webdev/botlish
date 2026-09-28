@@ -155,8 +155,17 @@ fn choose(cond):
 choose(true)} $::byteDecl]
 } -result 1
 
-test callable-escape-branch-join-different-callables-rejected {branches with two different typed callables are rejected at the join (real, non-constant condition -- forces an actual join, not a known-branch shortcut)} -body {
-    rejects [format {%sfn take_byte(x: Byte) -> int:
+# STRUCTURAL-FUNCTION-TYPES.md: a join of two *compatible* callables is no
+# longer an erasure -- it is their common structural function type, whose
+# argument types are the meet of both contracts, and every call through it
+# is checked against that contract (hir::range::VerifyStructuralCall). So
+# the join itself is accepted, a call that respects both contracts is
+# accepted, and a call violating the typed side's contract is still
+# rejected -- now at the call, by the ordinary admissibility proof. A join
+# of *incompatible* typed callables (no representable argument meet) still
+# falls back to the bare kind and is still rejected as an erasure.
+test callable-escape-branch-join-different-callables-structural {branches with two different compatible callables join to a structural Fn that keeps the typed contract (real, non-constant condition -- forces an actual join)} -body {
+    list [accepts [format {%sfn take_byte(x: Byte) -> int:
     x
 fn take_other(x):
     x
@@ -166,11 +175,22 @@ fn choose(cond):
     else:
         take_other
     f(7)
-choose(true)}  $::byteDecl]
-} -result {{CORE SEMANTIC TYPE} 1}
+choose(true)}  $::byteDecl]] [catch {surface::compile [format {%sfn take_byte(x: Byte) -> int:
+    x
+fn take_other(x):
+    x
+fn choose(cond):
+    f = if cond:
+        take_byte
+    else:
+        take_other
+    f(9999)
+choose(true)}  $::byteDecl] reject.bot} message options] [dict get $options -errorcode] \
+        [string match {*argument 1 cannot be proven to satisfy int\[Byte\]*function type Fn\{args: \[int\[Byte\]\]*} $message]
+} -result {1 1 {CORE SEMANTIC TYPE} 1}
 
-test callable-escape-branch-join-untyped-vs-typed-rejected {one branch untyped, the other a typed callable: still rejected -- the typed side's contract would be erased} -body {
-    rejects [format {%sfn take_byte(x: Byte) -> int:
+test callable-escape-branch-join-untyped-vs-typed-structural {one branch untyped, the other a typed callable: the join is Fn{args: [Byte], ...}, so the typed side's contract survives} -body {
+    list [accepts [format {%sfn take_byte(x: Byte) -> int:
     x
 fn other(x):
     x
@@ -179,6 +199,30 @@ fn choose(cond):
         take_byte
     else:
         other
+    f(7)
+choose(true)} $::byteDecl]] [catch {surface::compile [format {%sfn take_byte(x: Byte) -> int:
+    x
+fn other(x):
+    x
+fn choose(cond, v):
+    f = if cond:
+        take_byte
+    else:
+        other
+    f(v)
+choose(true, 9999)} $::byteDecl] reject.bot} message options] [dict get $options -errorcode]
+} -result {1 1 {CORE SEMANTIC TYPE}}
+
+test callable-escape-branch-join-incompatible-typed-rejected {two typed callables with no representable argument meet (Byte vs str) still erode to the bare kind and are rejected at the join} -body {
+    rejects [format {%sfn take_byte(x: Byte) -> int:
+    x
+fn take_str(x: str) -> str:
+    x
+fn choose(cond):
+    f = if cond:
+        take_byte
+    else:
+        take_str
     f(7)
 choose(true)} $::byteDecl]
 } -result {{CORE SEMANTIC TYPE} 1}
@@ -233,8 +277,8 @@ f(9999)} $::byteDecl] return-bad.bot} message options
     list [dict get $options -errorcode] [string match {*cannot be proven to satisfy*} $message]
 } -result {{CORE SEMANTIC TYPE} 1}
 
-test callable-escape-return-join-different-rejected {a function whose own return sites join two different typed/untyped callables is rejected at the return} -body {
-    rejects [format {%sfn take_byte(x: Byte) -> int:
+test callable-escape-return-join-different-structural {a function whose own return sites join two different compatible callables returns their structural Fn, which keeps the typed contract checkable at the caller} -body {
+    list [accepts [format {%sfn take_byte(x: Byte) -> int:
     x
 fn take_other(x):
     x
@@ -242,8 +286,16 @@ fn chooser(cond):
     if cond:
         return take_byte
     take_other
-chooser(true)} $::byteDecl]
-} -result {{CORE SEMANTIC TYPE} 1}
+chooser(true)(7)} $::byteDecl]] [catch {surface::compile [format {%sfn take_byte(x: Byte) -> int:
+    x
+fn take_other(x):
+    x
+fn chooser(cond):
+    if cond:
+        return take_byte
+    take_other
+chooser(true)(9999)} $::byteDecl] reject.bot} message options] [dict get $options -errorcode]
+} -result {1 1 {CORE SEMANTIC TYPE}}
 
 # ---------------------------------------------------------------------------
 # Capture (spec #20, #56)
