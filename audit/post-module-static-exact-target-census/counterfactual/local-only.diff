@@ -1,0 +1,30 @@
+# COUNTERFACTUAL (POST-MODULE-STATIC-EXACT-TARGET-CENSUS.md) -- audit-only,
+# per-target decomposition variant, NEVER applied to the tree's own
+# lib/web.bot: only the emailish? call site (scan_local -> local_char?) is made
+# exact; the other call site still passes its predicate through the
+# unchanged generic scan_while and its callvalue.
+--- a/lib/web.bot
++++ b/lib/web.bot
+@@ -130,6 +130,13 @@ fn emailish?(v):
+             return i
+         n
+ 
++    fn scan_local(start):
++        loop i from start to n:
++            if local_char?(char_at(i)):
++                continue
++            return i
++        n
++
+     fn tld?(i):
+         e = scan_while(i, is_tcl_alpha)
+         if e == n:
+@@ -170,7 +177,7 @@ fn emailish?(v):
+                     return false
+         false
+ 
+-    local_end = scan_while(0, local_char?)
++    local_end = scan_local(0)
+     if local_end == 0:
+         false
+     else:

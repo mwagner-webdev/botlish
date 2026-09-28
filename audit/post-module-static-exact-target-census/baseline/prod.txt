@@ -1,0 +1,156 @@
+program: bench/refined-checks.ir
+tree: 924482b9774589a55612ffcec5f394e11b3d6db4 (worktree diff: none)
+
+== used instances: 26
+  i0 <program> generic
+  i2 char::codepoint<UnicodeChar> 
+  i16 byte::high_nibble<int> 
+  i17 byte::nibble<int> 
+  i3 byte::from_int<int> 
+  i1 byte::set<List[UnicodeChar]> 
+  i12 ascii::is_digit<int> 
+  i10 ascii::is_upper<int> 
+  i11 ascii::is_lower<int> 
+  i9 ascii::is_alphabetic<int> 
+  i8 ascii::is_alphanumeric<int> 
+  i19 web::emailish?<str> ; materializes e173 e183 e211 e226 e246
+  i21 char_at<generic> generic; CLOSED; OPEN; blockescape-flattened captures=[v]
+  i25 local_char?<generic> generic; not-closed; OPEN
+  i24 label_char?<str> 
+  i20 scan_while<generic> generic; CLOSED; OPEN; blockescape-flattened captures=[n, v]
+  i23 tld?<generic> generic; CLOSED; OPEN; blockescape-flattened captures=[n, v]
+  i22 domain?<generic> generic; CLOSED; OPEN; blockescape-flattened captures=[n, v]
+  i7 web::is_unreserved<int> 
+  i4 web::uri_escape_text<str> 
+  i15 high_nibble<int> 
+  i14 hex_pair<int> 
+  i13 esc_bytes<List[int], int, str> 
+  i6 esc_char<str> 
+  i5 esc_from<str, int, str> 
+  i18 check<int, int, str, str> 
+
+== block environments (used instances; envless = no lexical captures)
+  char::codepoint<UnicodeChar> (e2): envless captures=[] staticRefs=[]
+  byte::high_nibble<int> (e7): envless captures=[] staticRefs=[]
+  byte::nibble<int> (e19): envless captures=[] staticRefs=[]
+  byte::from_int<int> (e58): envless captures=[] staticRefs=[]
+  byte::set<List[UnicodeChar]> (e73): envless captures=[] staticRefs=[byte::from_int, char::codepoint]
+  ascii::is_digit<int> (e86): envless captures=[] staticRefs=[]
+  ascii::is_upper<int> (e101): envless captures=[] staticRefs=[]
+  ascii::is_lower<int> (e116): envless captures=[] staticRefs=[]
+  ascii::is_alphabetic<int> (e131): envless captures=[] staticRefs=[ascii::is_upper, ascii::is_lower]
+  ascii::is_alphanumeric<int> (e144): envless captures=[] staticRefs=[ascii::is_alphabetic, ascii::is_digit]
+  web::emailish?<str> (e167): envless captures=[] staticRefs=[web::local_extra_chars]
+  char_at<generic> (e173): captures captures=[v] staticRefs=[]
+  local_char?<generic> (e183): envless captures=[] staticRefs=[web::local_extra_chars]
+  label_char?<str> (e197): envless captures=[] staticRefs=[]
+  scan_while<generic> (e211): captures captures=[n, char_at] staticRefs=[]
+  tld?<generic> (e226): captures captures=[scan_while, n] staticRefs=[]
+  domain?<generic> (e246): captures captures=[n, char_at, tld?, label_char?] staticRefs=[]
+  web::is_unreserved<int> (e357): envless captures=[] staticRefs=[ascii::is_alphanumeric, web::additional_unreserved_chars]
+  web::uri_escape_text<str> (e371): envless captures=[] staticRefs=[byte::nibble, byte::high_nibble, web::hex_digits, web::is_unreserved]
+  high_nibble<int> (e373): envless captures=[] staticRefs=[byte::nibble, byte::high_nibble]
+  hex_pair<int> (e380): captures captures=[high_nibble] staticRefs=[web::hex_digits]
+  esc_bytes<List[int], int, str> (e397): captures captures=[esc_bytes, hex_pair] staticRefs=[]
+  esc_char<str> (e426): captures captures=[esc_bytes] staticRefs=[web::is_unreserved]
+  esc_from<str, int, str> (e459): captures captures=[esc_from, esc_char] staticRefs=[]
+  check<int, int, str, str> (e494): captures captures=[check] staticRefs=[web::emailish?]
+
+== OpenInstances: 5 (char_at<generic>, local_char?<generic>, scan_while<generic>, tld?<generic>, domain?<generic>)
+== blockescape virtual bindings: 4
+  char_at<generic> (i21): internal variant, captures [v]
+  scan_while<generic> (i20): internal variant, captures [n, v]
+  tld?<generic> (i23): internal variant, captures [n, v]
+  domain?<generic> (i22): internal variant, captures [n, v]
+
+== NIR: functions 24, lines 690, machine bytes 8943
+  header: nir 1 call-effects=1 statics=3
+  call           24
+  callenv        0
+  callvalue      1
+  callmulti      4
+  callenvmulti   0
+  tail           3
+  tailenv        0
+  guard          1
+  guardbool      1
+  closure        0
+  fnvalue        1
+  native         1
+  capture        0
+  staticget      4
+  staticset      3
+  op:charcodepoint       1
+  op:iadd                8
+  op:iand                1
+  op:ieq                 3
+  op:ige                 2
+  op:igt                 1
+  op:ilt                 4
+  op:imod                1
+  op:isub                2
+  op:listappend          1
+  op:listget             5
+  op:listlen             3
+  op:listnew             5
+  op:rbox                4
+  op:regioncheck         1
+  op:regioneq            4
+  op:riadd               3
+  op:rieq                1
+  op:rige                5
+  op:rile                4
+  op:rishr               1
+  op:risub               1
+  op:runbox              7
+  op:setcontainstotal    2
+  op:setfromlisttotal    2
+  op:strlen              2
+  op:strregiontclalnum   1
+  op:strtclalnum         1
+  op:strutf8bytes        1
+  op:substr              2
+  callvalue sites: 
+    13 scan_while: %8 = callvalue %1 %7 @e216
+  per-function machine bytes: 1443 39 289 617 74 74 74 125 125 601 262 222 238 528 468 1244 137 94 103 474 491 426 451 344
+
+== parameter entry Ranges (hir::range::analyze)
+  char::codepoint<UnicodeChar>: c=[-∞, +∞]
+  byte::high_nibble<int>: b=[-∞, +∞]
+  byte::nibble<int>: x=[0, 240] {0,16,32,48,64,80,96,112,128,144,160,176,192,208,224,240}
+  byte::from_int<int>: value=[0, +∞]
+  byte::set<List[UnicodeChar]>: chars=[-∞, +∞]
+  ascii::is_digit<int>: b=[0, 255]
+  ascii::is_upper<int>: b=[0, 255]
+  ascii::is_lower<int>: b=[0, 255]
+  ascii::is_alphabetic<int>: b=[0, 255]
+  ascii::is_alphanumeric<int>: b=[0, 255]
+  web::emailish?<str>: v=[-∞, +∞]
+  char_at<generic>: i=[-∞, +∞]
+  local_char?<generic>: c=[-∞, +∞]
+  label_char?<str>: c=[-∞, +∞]
+  scan_while<generic>: start=[-∞, +∞]  predicate=[-∞, +∞]
+  tld?<generic>: i=[-∞, +∞]
+  domain?<generic>: start=[-∞, +∞]
+  web::is_unreserved<int>: b=[0, 255]
+  web::uri_escape_text<str>: s=[-∞, +∞]
+  high_nibble<int>: b=[-∞, +∞]
+  hex_pair<int>: b=[-∞, +∞]
+  esc_bytes<List[int], int, str>: bytes=[-∞, +∞]  i=[0, 4611686018427387903]  acc=[-∞, +∞]
+  esc_char<str>: c=[-∞, +∞]
+  esc_from<str, int, str>: text=[-∞, +∞]  i=[0, 4611686018427387903]  acc=[-∞, +∞]
+  check<int, int, str, str>: n=[0, 400]  acc=[0, +∞]  s=[-∞, +∞]  q=[-∞, +∞]
+
+== countloop induction bindings (Range of the first in-body ref)
+  scan_while<generic>: i = [-∞, 4611686018427387902]
+  domain?<generic>: j = [-∞, 4611686018427387902]
+
+== allocationReport (summary, one run)
+  total allocations 8020, allocatedBytes 331888
+  String          8004 objects   330968 bytes
+  List              12 objects      608 bytes
+  ImmutableSet       2 objects      120 bytes
+  StringPlan         2 objects      192 bytes
+  gc: cycles 0 reclaimedObjects 0 reclaimedBytes 0 totalTimeUs 0 maxPauseUs 0 cyclesDetail {}
+  traversal: utf8SeekBytes 46000
+  static: allocations 30 bytes 1253 byKind {String {allocations 28 bytes 1201} List {allocations 0 bytes 0} ImmutableSet {allocations 0 bytes 0} MutableArray {allocations 0 bytes 0} BigInt {allocations 0 bytes 0} Result {allocations 0 bytes 0} Block {allocations 1 bytes 40} Cell {allocations 0 bytes 0} Native {allocations 1 bytes 12} StringPlan {allocations 0 bytes 0} ListPlan {allocations 0 bytes 0}}

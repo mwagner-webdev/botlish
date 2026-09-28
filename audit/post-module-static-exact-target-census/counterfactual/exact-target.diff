@@ -1,0 +1,48 @@
+# COUNTERFACTUAL (POST-MODULE-STATIC-EXACT-TARGET-CENSUS.md) -- audit-only,
+# NEVER applied to the tree's own lib/web.bot and never a proposed source
+# change. The hunks are byte-identical to the post-R2.a census's
+# audit/post-r2a-dynamic-census/counterfactual/exact-target.diff (lib/web.bot
+# is unchanged since that census): scan_while(start, predicate) hand-split
+# into the two per-target loops an exact-target lowering would produce
+# (scan_local -> local_char?, scan_alpha -> is_tcl_alpha), applied only in a
+# scratch git worktree by tools/run-all.sh, so the UNMODIFIED module-static
+# compiler's response to syntactically exact predicate targets can be
+# measured. Nothing else changes: same module statics, same traversal, same
+# domain algorithm, same char_at.
+--- a/lib/web.bot
++++ b/lib/web.bot
+@@ -123,15 +123,22 @@
+     # are an untyped-parameter Botlish function and a native, neither of
+     # which is a "typed callable" that rule would block from flowing
+     # through an ordinary parameter).
+-    fn scan_while(start, predicate):
++    fn scan_local(start):
+         loop i from start to n:
+-            if predicate(char_at(i)):
++            if local_char?(char_at(i)):
++                continue
++            return i
++        n
++
++    fn scan_alpha(start):
++        loop i from start to n:
++            if is_tcl_alpha(char_at(i)):
+                 continue
+             return i
+         n
+ 
+     fn tld?(i):
+-        e = scan_while(i, is_tcl_alpha)
++        e = scan_alpha(i)
+         if e == n:
+             e - i >= 2
+         else:
+@@ -170,7 +177,7 @@
+                     return false
+         false
+ 
+-    local_end = scan_while(0, local_char?)
++    local_end = scan_local(0)
+     if local_end == 0:
+         false
+     else:

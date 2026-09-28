@@ -1,0 +1,160 @@
+== prod
+OK    value
+OK    size
+OK    object
+OK    vcode
+OK    alloc
+OK    sites
+OK    jitmap
+value: value {list {{int 400} {int 0}}}
+size:  size 8943 {1443 39 289 617 74 74 74 125 
+== cf-exact
+OK    value
+OK    size
+OK    object
+OK    vcode
+OK    alloc
+OK    sites
+OK    jitmap
+value: value {list {{int 400} {int 0}}}
+size:  size 9217 {1443 39 289 617 74 74 74 125 
+== cf-local-only
+OK    value
+OK    size
+OK    object
+OK    vcode
+OK    alloc
+OK    sites
+OK    jitmap
+value: value {list {{int 400} {int 0}}}
+size:  size 9309 {1443 39 289 617 74 74 74 125 
+== cf-alpha-only
+OK    value
+OK    size
+OK    object
+OK    vcode
+OK    alloc
+OK    sites
+OK    jitmap
+value: value {list {{int 400} {int 0}}}
+size:  size 9379 {1443 39 289 617 74 74 74 125 
+== prod-noregion
+OK    value
+OK    size
+OK    object
+OK    vcode
+OK    alloc
+OK    sites
+OK    jitmap
+value: value {list {{int 400} {int 0}}}
+size:  size 8618 {1443 39 289 617 74 74 74 125 
+== cf-exact-noregion
+OK    value
+OK    size
+OK    object
+OK    vcode
+OK    alloc
+OK    sites
+OK    jitmap
+value: value {list {{int 400} {int 0}}}
+size:  size 8884 {1443 39 289 617 74 74 74 125 
+== hist-frozen-r2a3
+OK    value
+OK    size
+OK    object
+OK    vcode
+OK    alloc
+OK    sites
+OK    jitmap
+value: value {list {{int 400} {int 0}}}
+size:  size 10258 {1588 39 289 617 74 74 74 125
+== hist-cf-exact-r2a3
+OK    value
+OK    size
+OK    object
+OK    vcode
+OK    alloc
+OK    sites
+OK    jitmap
+value: value {list {{int 400} {int 0}}}
+size:  size 10504 {1588 39 289 617 74 74 74 125
+== probes/cf-exact-ascii-only
+OK    value
+OK    size
+OK    object
+OK    vcode
+OK    alloc
+OK    sites
+OK    jitmap
+value: value {list {{int 400}}}
+size:  size 9130 {1356 39 289 617 74 74 74 125 
+== probes/cf-exact-early-invalid
+OK    value
+OK    size
+OK    object
+OK    vcode
+OK    alloc
+OK    sites
+OK    jitmap
+value: value {list {{int 0}}}
+size:  size 9130 {1356 39 289 617 74 74 74 125 
+== probes/cf-exact-invalid-only
+OK    value
+OK    size
+OK    object
+OK    vcode
+OK    alloc
+OK    sites
+OK    jitmap
+value: value {list {{int 0}}}
+size:  size 9130 {1356 39 289 617 74 74 74 125 
+== probes/cf-exact-unicode-only
+OK    value
+OK    size
+OK    object
+OK    vcode
+OK    alloc
+OK    sites
+OK    jitmap
+value: value {list {{int 400}}}
+size:  size 9130 {1356 39 289 617 74 74 74 125 
+== probes/prod-ascii-only
+OK    value
+OK    size
+OK    object
+OK    vcode
+OK    alloc
+OK    sites
+OK    jitmap
+value: value {list {{int 400}}}
+size:  size 8856 {1356 39 289 617 74 74 74 125 
+== probes/prod-early-invalid
+OK    value
+OK    size
+OK    object
+OK    vcode
+OK    alloc
+OK    sites
+OK    jitmap
+value: value {list {{int 0}}}
+size:  size 8856 {1356 39 289 617 74 74 74 125 
+== probes/prod-invalid-only
+OK    value
+OK    size
+OK    object
+OK    vcode
+OK    alloc
+OK    sites
+OK    jitmap
+value: value {list {{int 0}}}
+size:  size 8856 {1356 39 289 617 74 74 74 125 
+== probes/prod-unicode-only
+OK    value
+OK    size
+OK    object
+OK    vcode
+OK    alloc
+OK    sites
+OK    jitmap
+value: value {list {{int 400}}}
+size:  size 8856 {1356 39 289 617 74 74 74 125 

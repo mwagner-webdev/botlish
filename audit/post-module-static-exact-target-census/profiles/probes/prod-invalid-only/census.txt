@@ -1,0 +1,320 @@
+runs collected: 20; all figures per run
+total Ir/run: 3,506,238
+exclusive Ir by code kind: runtime 1,702,815 (48.6%)  libc 1,018,073 (29.0%)  botlish 621,451 (17.7%)  rust-other 163,899 (4.7%)
+
+== Botlish functions: invocations (exact), SELF Ir (direct / generic entry), INCLUSIVE Ir (direct+entry+all callees)
+  function                               invoc entry-invoc  self direct self entry    inclusive  incl %  self %
+  0 <program>                                1           0          210          0    3,506,232 100.00%   0.01%
+  23 check                                   1           0       12,829          0    3,493,280  99.63%   0.37%
+  9 web::emailish?                         400           0       22,000          0    3,480,451  99.26%   0.63%
+  13 scan_while                            400           0      246,800          0    3,454,051  98.51%   7.04%
+  11 char_at                             4,800           0      163,200          0    2,124,051  60.58%   4.65%
+  12 local_char?                         4,800       4,800      141,600     33,600      939,200  26.79%   5.00%
+  17 web::uri_escape_text                    1           0           16          0        7,348   0.21%   0.00%
+  22 esc_from                                1           0          185          0        7,332   0.21%   0.01%
+  21 esc_char                                3           0          155          0        3,453   0.10%   0.00%
+  3 byte::set                                1           0          276          0        2,701   0.08%   0.01%
+  20 esc_bytes                               1           0           80          0        1,590   0.05%   0.00%
+  19 hex_pair                                1           0           71          0          947   0.03%   0.00%
+  16 web::is_unreserved                      3           0           63          0          536   0.02%   0.00%
+  8 ascii::is_alphanumeric                   3           0           63          0          214   0.01%   0.00%
+  7 ascii::is_alphabetic                     3           0           75          0          141   0.00%   0.00%
+  2 byte::from_int                           4           0          108          0          108   0.00%   0.00%
+  1 char::codepoint                          4           0           28          0           60   0.00%   0.00%
+  5 ascii::is_upper                          3           0           34          0           34   0.00%   0.00%
+  6 ascii::is_lower                          3           0           32          0           32   0.00%   0.00%
+  18 high_nibble                             1           0           16          0           16   0.00%   0.00%
+  4 ascii::is_digit                          1           0           10          0           10   0.00%   0.00%
+
+== calls out of Botlish code (in-region counts): caller -> callee, count/run, inclusive Ir/run, Ir/call, % total
+  0 <program>                    -> 23 check                                                             1     3,493,280  3493280.4   99.63%
+  23 check                       -> 9 web::emailish?                                                   400     3,480,451   8701.1   99.26%
+  9 web::emailish?               -> 13 scan_while                                                      400     3,454,051   8635.1   98.51%
+  13 scan_while                  -> 11 char_at                                                       4,800     2,124,051    442.5   60.58%
+  11 char_at                     -> rt_substr                                                        4,800     1,960,851    408.5   55.92%
+  13 scan_while                  -> rt_call_value                                                    4,800     1,083,200    225.7   30.89%
+  12 local_char? (generic entry) -> 12 local_char?                                                   4,800       905,600    188.7   25.83%
+  12 local_char?                 -> rt_set_contains                                                    800       505,600    632.0   14.42%
+  12 local_char?                 -> rt_is_tcl_alnum                                                  4,800       258,400     53.8    7.37%
+  0 <program>                    -> 17 web::uri_escape_text                                              1         7,348   7348.0    0.21%
+  17 web::uri_escape_text        -> 22 esc_from                                                          1         7,332   7332.0    0.21%
+  9 web::emailish?               -> rt_str_len                                                         400         4,400     11.0    0.13%
+  22 esc_from                    -> 21 esc_char                                                          3         3,453   1151.0    0.10%
+  22 esc_from                    -> runtime::construct::rt_construct                                     4         2,727    681.8    0.08%
+  0 <program>                    -> 3 byte::set                                                          1         2,701   2701.0    0.08%
+  21 esc_char                    -> 20 esc_bytes                                                         1         1,590   1590.0    0.05%
+  0 <program>                    -> rt_set_from_list                                                     1         1,549   1549.0    0.04%
+  3 byte::set                    -> rt_list_append                                                       4         1,424    356.0    0.04%
+  0 <program>                    -> rt_list_new                                                          4         1,144    286.0    0.03%
+  21 esc_char                    -> rt_str_utf8_bytes                                                    3         1,139    379.7    0.03%
+  20 esc_bytes                   -> 19 hex_pair                                                          1           947    947.0    0.03%
+  22 esc_from                    -> rt_substr                                                            3           923    307.7    0.03%
+  19 hex_pair                    -> runtime::construct::rt_construct                                     1           815    815.0    0.02%
+  3 byte::set                    -> rt_set_from_list                                                     1           666    666.0    0.02%
+  20 esc_bytes                   -> runtime::construct::rt_construct                                     1           541    541.0    0.02%
+  21 esc_char                    -> 16 web::is_unreserved                                                3           536    178.7    0.02%
+  16 web::is_unreserved          -> rt_set_contains                                                      1           259    259.0    0.01%
+  16 web::is_unreserved          -> 8 ascii::is_alphanumeric                                             3           214     71.3    0.01%
+  3 byte::set                    -> rt_list_new                                                          1           156    156.0    0.00%
+  8 ascii::is_alphanumeric       -> 7 ascii::is_alphabetic                                               3           141     47.0    0.00%
+  3 byte::set                    -> 2 byte::from_int                                                     4           108     27.0    0.00%
+  3 byte::set                    -> 1 char::codepoint                                                    4            60     15.0    0.00%
+  19 hex_pair                    -> rt_int_mod                                                           1            45     45.0    0.00%
+  22 esc_from                    -> rt_str_len                                                           4            44     11.0    0.00%
+  7 ascii::is_alphabetic         -> 5 ascii::is_upper                                                    3            34     11.3    0.00%
+  21 esc_char                    -> rt_str_len                                                           3            33     11.0    0.00%
+  1 char::codepoint              -> rt_char_codepoint                                                    4            32      8.0    0.00%
+  7 ascii::is_alphabetic         -> 6 ascii::is_lower                                                    3            32     10.7    0.00%
+  20 esc_bytes                   -> rt_str_len                                                           2            22     11.0    0.00%
+  19 hex_pair                    -> 18 high_nibble                                                       1            16     16.0    0.00%
+  3 byte::set                    -> rt_str_len                                                           1            11     11.0    0.00%
+  8 ascii::is_alphanumeric       -> 4 ascii::is_digit                                                    1            10     10.0    0.00%
+
+== runtime/libc functions: exact in-region invocations (entry-instruction count, if resolvable), SELF, INCLUSIVE
+  botlish_audit_run                                                              1  self           6 ( 0.00%)  incl   3,506,238 (100.00%)  3506238.5 Ir/call
+  start_thread                                                                   ?  self           0 ( 0.00%)  incl   3,506,238 (100.00%)
+  clone                                                                          ?  self           0 ( 0.00%)  incl   3,506,238 (100.00%)
+  std::sys::backtrace::__rust_begin_short_backtrace::<main::{closure#2},         ?  self           0 ( 0.00%)  incl   3,506,238 (100.00%)
+  <std::thread::lifecycle::spawn_unchecked<main::{closure#2}, i32>::{clo         ?  self           0 ( 0.00%)  incl   3,506,238 (100.00%)
+  <std::sys::thread::unix::Thread>::new::thread_start                            ?  self           0 ( 0.00%)  incl   3,506,238 (100.00%)
+  cli                                                                            ?  self           0 ( 0.00%)  incl   3,506,238 (100.00%)
+  rt_substr                                                                  4,803  self     387,439 (11.05%)  incl   1,961,774 (55.95%)    408.4 Ir/call
+  rt_call_value                                                              4,800  self     144,000 ( 4.11%)  incl   1,083,200 (30.89%)    225.7 Ir/call
+  __rustc::__rust_alloc                                                      9,637  self      38,548 ( 1.10%)  incl   1,024,732 (29.23%)    106.3 Ir/call
+  __rustc::__rdl_alloc                                                       9,637  self      86,733 ( 2.47%)  incl     986,184 (28.13%)    102.3 Ir/call
+  <runtime::vm::Vm>::new_str_known                                           4,804  self     196,964 ( 5.62%)  incl     975,374 (27.82%)    203.0 Ir/call
+  malloc                                                                         ?  self     449,333 (12.82%)  incl     899,451 (25.65%)
+  <runtime::vm::Vm>::alloc::<runtime::value::StrObj>                         4,804  self     240,200 ( 6.85%)  incl     778,410 (22.20%)    162.0 Ir/call
+  rt_set_contains                                                              801  self      57,663 ( 1.64%)  incl     505,859 (14.43%)    631.5 Ir/call
+  _int_malloc                                                                    ?  self     450,580 (12.85%)  incl     450,583 (12.85%)
+  equal                                                                      4,020  self     409,510 (11.68%)  incl     449,610 (12.82%)    111.8 Ir/call
+  rt_is_tcl_alnum                                                            4,800  self     143,200 ( 4.08%)  incl     258,400 ( 7.37%)     53.8 Ir/call
+  one_scalar                                                                 4,800  self     115,200 ( 3.29%)  incl     115,200 ( 3.29%)     24.0 Ir/call
+  __memcpy_avx_unaligned_erms                                                    ?  self      77,615 ( 2.21%)  incl      77,615 ( 2.21%)
+  __memcmp_avx2_movbe                                                            ?  self      40,100 ( 1.14%)  incl      40,100 ( 1.14%)
+  __rustc::__rust_no_alloc_shim_is_unstable_v2                               9,639  self      38,556 ( 1.10%)  incl      38,556 ( 1.10%)      4.0 Ir/call
+  rt_str_len                                                                   410  self       4,510 ( 0.13%)  incl       4,510 ( 0.13%)     11.0 Ir/call
+  runtime::construct::rt_construct                                               6  self       1,999 ( 0.06%)  incl       4,083 ( 0.12%)    680.5 Ir/call
+  rt_set_from_list                                                               2  self         447 ( 0.01%)  incl       2,215 ( 0.06%)   1107.5 Ir/call
+  <runtime::vm::Vm>::new_list                                                   12  self         636 ( 0.02%)  incl       1,789 ( 0.05%)    149.1 Ir/call
+
+== arcs out of hot runtime functions: in-region call count/run, inclusive Ir/run of the callee subtree
+  rt_substr: self 387,439, inclusive 1,961,774
+      -> <runtime::vm::Vm>::new_str_known                                                               4,803 calls     975,221
+      -> __rustc::__rust_alloc                                                                          4,803 calls     503,054
+      -> __memcpy_avx_unaligned_erms                                                                    4,803 calls      76,848
+      -> __rustc::__rust_no_alloc_shim_is_unstable_v2                                                   4,803 calls      19,212
+  rt_call_value: self 144,000, inclusive 1,083,200
+      -> 12 local_char? (generic entry)                                                                 4,800 calls     939,200
+  rt_is_tcl_alnum: self 143,200, inclusive 258,400
+      -> one_scalar                                                                                     4,800 calls     115,200
+  one_scalar: self 115,200, inclusive 115,200
+  rt_set_contains: self 57,663, inclusive 505,859
+      -> equal                                                                                          4,004 calls     448,196
+  equal: self 409,510, inclusive 449,610
+      -> __memcmp_avx2_movbe                                                                            4,010 calls      40,100
+  rt_str_len: self 4,510, inclusive 4,510
+  <runtime::vm::Vm>::alloc::<runtime::value::StrObj>: self 240,200, inclusive 778,410
+      -> __rustc::__rust_alloc                                                                          4,804 calls     518,994
+      -> __rustc::__rust_no_alloc_shim_is_unstable_v2                                                   4,804 calls      19,216
+  <runtime::vm::Vm>::new_str_known: self 196,964, inclusive 975,374
+      -> <runtime::vm::Vm>::alloc::<runtime::value::StrObj>                                             4,804 calls     778,410
+
+== SELF cost of hot runtime functions by inlined source (addr2line -i: innermost function @ line; outermost line)
+  rt_call_value SELF by role (inline chain):
+      common dispatch (rt_call_value kind test, closure arity, entry call)        144,000
+  equal: self 409,510 Ir/run
+    by runtime source line (innermost botlish-native runtime frame):
+      value.rs:368                                 56,140   13.7%
+      ops.rs:337                                   52,260   12.8%
+      value.rs:360                                 48,120   11.8%
+      ops.rs:351                                   40,100    9.8%
+      ops.rs:375                                   36,180    8.8%
+      value.rs:243                                 32,080    7.8%
+      value.rs:257                                 24,060    5.9%
+      ops.rs:341                                   20,100    4.9%
+      value.rs:357                                 16,080    3.9%
+      ops.rs:348                                   16,080    3.9%
+      value.rs:?                                   16,070    3.9%
+      ops.rs:?                                     16,060    3.9%
+    by innermost inlined function:
+      runtime::value::kind_of @ value.rs:368                                               56,140   13.7%
+      equal @ ops.rs:337                                                                   52,260   12.8%
+      runtime::value::kind_of @ value.rs:360                                               48,120   11.8%
+      equal @ ops.rs:375                                                                   36,180    8.8%
+      runtime::value::is_pointer @ value.rs:243                                            32,080    7.8%
+      runtime::value::is_char @ value.rs:257                                               24,060    5.9%
+      equal @ ops.rs:341                                                                   20,100    4.9%
+      <u8 as core::slice::cmp::SlicePartialEq<u8>>::equal_same_len @ cmp.rs:157            20,050    4.9%
+  rt_substr: self 387,439 Ir/run
+    by runtime source line (innermost botlish-native runtime frame):
+      ops.rs:549                                  171,304   44.2%
+      ops.rs:536                                   43,227   11.2%
+      ops.rs:540                                   43,227   11.2%
+      ops.rs:570                                   38,424    9.9%
+      value.rs:437                                 24,015    6.2%
+      ops.rs:551                                   19,212    5.0%
+      ops.rs:538                                    9,606    2.5%
+      ops.rs:?                                      9,606    2.5%
+      ops.rs:548                                    9,606    2.5%
+      value.rs:227                                  4,803    1.2%
+      mod.rs:?                                      4,803    1.2%
+      metrics.rs:176                                4,803    1.2%
+    by innermost inlined function:
+      rt_substr @ ops.rs:536                                                               43,227   11.2%
+      rt_substr @ ops.rs:540                                                               43,227   11.2%
+      rt_substr @ ops.rs:570                                                               38,424    9.9%
+      rt_substr @ ops.rs:549                                                               28,818    7.4%
+      runtime::value::int_small @ value.rs:437                                             24,015    6.2%
+      core::ptr::copy_nonoverlapping::<u8> @ mod.rs:549                                    24,015    6.2%
+      <alloc::string::String>::from_utf8_unchecked @ string.rs:1019                        19,212    5.0%
+      rt_substr @ ops.rs:551                                                               19,212    5.0%
+  <runtime::vm::Vm>::alloc::<runtime::value::StrObj>: self 240,200 Ir/run
+    by runtime source line (innermost botlish-native runtime frame):
+      vm.rs:228                                    67,256   28.0%
+      vm.rs:224                                    52,844   22.0%
+      vm.rs:238                                    38,432   16.0%
+      heap.rs:92                                   33,628   14.0%
+      heap.rs:72                                   24,020   10.0%
+      vm.rs:225                                     4,804    2.0%
+      vm.rs:230                                     4,804    2.0%
+      heap.rs:93                                    4,804    2.0%
+      metrics.rs:176                                4,804    2.0%
+      vm.rs:231                                     4,804    2.0%
+    by innermost inlined function:
+      <runtime::vm::Vm>::alloc::<runtime::value::StrObj> @ vm.rs:224                       52,844   22.0%
+      <runtime::vm::Vm>::alloc::<runtime::value::StrObj> @ vm.rs:238                       38,432   16.0%
+      <alloc::boxed::Box<runtime::value::StrObj>>::new @ boxed.rs:289                      28,824   12.0%
+      <runtime::heap::Heap>::wants_collection @ heap.rs:72                                 24,020   10.0%
+      alloc::alloc::alloc @ alloc.rs:101                                                   14,412    6.0%
+      <runtime::vm::Vm>::alloc::<runtime::value::StrObj> @ vm.rs:228                        9,608    4.0%
+      alloc::boxed::box_new_uninit @ boxed.rs:248                                           9,608    4.0%
+      <alloc::vec::Vec<*mut runtime::value::Header>>::push_mut @ mod.rs:1038                9,608    4.0%
+  <runtime::vm::Vm>::new_str_known: self 196,964 Ir/run
+    by runtime source line (innermost botlish-native runtime frame):
+      vm.rs:361                                    57,648   29.3%
+      vm.rs:354                                    52,844   26.8%
+      vm.rs:363                                    38,432   19.5%
+      vm.rs:397                                    14,412    7.3%
+      vm.rs:362                                    14,412    7.3%
+      value.rs:104                                  9,608    4.9%
+      vm.rs:360                                     4,804    2.4%
+      alloc.rs:?                                    4,804    2.4%
+    by innermost inlined function:
+      <runtime::vm::Vm>::new_str_known @ vm.rs:354                                         52,844   26.8%
+      <runtime::vm::Vm>::new_str_known @ vm.rs:361                                         43,236   22.0%
+      <runtime::vm::Vm>::new_str_known @ vm.rs:363                                         38,432   19.5%
+      <runtime::vm::Vm>::reject_oversized_collection @ vm.rs:397                           14,412    7.3%
+      <alloc::vec::Vec<u8>>::shrink_to_fit @ mod.rs:1606                                   14,412    7.3%
+      <runtime::vm::Vm>::new_str_known @ vm.rs:362                                         14,412    7.3%
+      <runtime::value::Header>::new @ value.rs:104                                          9,608    4.9%
+      <alloc::vec::Vec<u8>>::len @ mod.rs:3064                                              4,804    2.4%
+  rt_call_value: self 144,000 Ir/run
+    by runtime source line (innermost botlish-native runtime frame):
+      ops.rs:1134                                  43,200   30.0%
+      ops.rs:1122                                  38,400   26.7%
+      value.rs:243                                 28,800   20.0%
+      ops.rs:1127                                  14,400   10.0%
+      value.rs:280                                  9,600    6.7%
+      ops.rs:1124                                   4,800    3.3%
+      ops.rs:1133                                   4,800    3.3%
+    by innermost inlined function:
+      rt_call_value @ ops.rs:1134                                                          43,200   30.0%
+      runtime::value::is_pointer @ ops.rs:1122                                             28,800   20.0%
+      runtime::value::is_pointer @ value.rs:243                                            28,800   20.0%
+      rt_call_value @ ops.rs:1127                                                          14,400   10.0%
+      rt_call_value @ ops.rs:1122                                                           9,600    6.7%
+      runtime::value::heap_kind @ value.rs:280                                              9,600    6.7%
+      rt_call_value @ ops.rs:1124                                                           4,800    3.3%
+      rt_call_value @ ops.rs:1133                                                           4,800    3.3%
+  rt_is_tcl_alnum: self 143,200 Ir/run
+    by runtime source line (innermost botlish-native runtime frame):
+      ops.rs:745                                   52,800   36.9%
+      ops.rs:779                                   24,000   16.8%
+      ops.rs:780                                   24,000   16.8%
+      ops.rs:?                                     18,400   12.8%
+      ops.rs:784                                   14,400   10.1%
+      ops.rs:781                                    4,800    3.4%
+      ops.rs:744                                    4,800    3.4%
+    by innermost inlined function:
+      unicode_general_category::category::get_general_category @ category.rs:19            52,800   36.9%
+      rt_is_tcl_alnum @ ops.rs:779                                                         24,000   16.8%
+      rt_is_tcl_alnum @ ops.rs:780                                                         24,000   16.8%
+      rt_is_tcl_alnum @ ops.rs:?                                                           18,400   12.8%
+      rt_is_tcl_alnum @ ops.rs:784                                                         14,400   10.1%
+      rt_is_tcl_alnum @ ops.rs:781                                                          4,800    3.4%
+      tcl_alpha_char @ ops.rs:744                                                           4,800    3.4%
+  one_scalar: self 115,200 Ir/run
+    by runtime source line (innermost botlish-native runtime frame):
+      ops.rs:763                                   38,400   33.3%
+      ops.rs:769                                   38,400   33.3%
+      ops.rs:770                                   24,000   20.8%
+      ops.rs:765                                    9,600    8.3%
+      ops.rs:?                                      4,800    4.2%
+    by innermost inlined function:
+      one_scalar @ ops.rs:763                                                              38,400   33.3%
+      one_scalar @ ops.rs:770                                                              24,000   20.8%
+      one_scalar @ ops.rs:769                                                              14,400   12.5%
+      one_scalar @ ops.rs:765                                                               9,600    8.3%
+      core::str::validations::next_code_point::<core::slice::iter: @ validations.rs:38      9,600    8.3%
+      <core::ptr::non_null::NonNull<u8> as core::cmp::PartialEq>:: @ non_null.rs:1650       4,800    4.2%
+      <core::slice::iter::Iter<u8> as core::iter::traits::iterator @ macros.rs:180          4,800    4.2%
+      core::str::validations::next_code_point::<core::slice::iter: @ validations.rs:37      4,800    4.2%
+  rt_set_contains: self 57,663 Ir/run
+    by runtime source line (innermost botlish-native runtime frame):
+      ops.rs:930                                   25,624   44.4%
+      ops.rs:929                                   13,617   23.6%
+      ops.rs:928                                    8,010   13.9%
+      ops.rs:937                                    6,408   11.1%
+      value.rs:165                                  1,602    2.8%
+      ops.rs:?                                      1,602    2.8%
+      macros.rs:?                                     800    1.4%
+    by innermost inlined function:
+      rt_set_contains @ ops.rs:930                                                         25,624   44.4%
+      rt_set_contains @ ops.rs:928                                                          8,010   13.9%
+      rt_set_contains @ ops.rs:937                                                          6,408   11.1%
+      rt_set_contains @ ops.rs:929                                                          5,606    9.7%
+      <core::slice::iter::Iter<u64> as core::iter::traits::iterato @ macros.rs:180          4,006    6.9%
+      <core::ptr::non_null::NonNull<u64> as core::cmp::PartialEq>: @ non_null.rs:1650       4,005    6.9%
+      <runtime::value::SetObj>::items @ value.rs:165                                        1,602    2.8%
+      rt_set_contains @ ops.rs:?                                                            1,602    2.8%
+  rt_str_len: self 4,510 Ir/run
+    by runtime source line (innermost botlish-native runtime frame):
+      ops.rs:532                                    1,230   27.3%
+      ops.rs:534                                    1,230   27.3%
+      ops.rs:533                                      820   18.2%
+      value.rs:238                                    410    9.1%
+      vm.rs:341                                       410    9.1%
+      value.rs:233                                    410    9.1%
+    by innermost inlined function:
+      rt_str_len @ ops.rs:532                                                               1,230   27.3%
+      rt_str_len @ ops.rs:534                                                               1,230   27.3%
+      rt_str_len @ ops.rs:533                                                                 820   18.2%
+      <core::ops::range::RangeInclusive<i64> as core::ops::range:: @ range.rs:873             410    9.1%
+      <runtime::vm::Vm>::new_int @ vm.rs:341                                                  410    9.1%
+      runtime::value::make_small @ value.rs:233                                               410    9.1%
+
+== executed JIT instruction classes (per run), per function (direct + generic entry)
+  class-totals: mov reg-reg=129,073; frame: epilogue=83,793; frame: prologue=68,558; stack store=44,170; bool test=43,252; completion check=39,264; tag test=38,044; mov imm=31,682; overflow check=30,012; cmp/test (other)=21,247; call helper=20,444; heap/vm load=12,091; jcc (other)=10,438; call botlish=10,434; arith=10,409; jmp=6,822; bool materialize=6,821; lea (stack addr)=4,808; logic=4,806; setcc/cmov (other)=4,800; lea=400; stack load=27; untag=26; retag=16; frame: root-slot zero=11; heap/vm store=3
+  13 scan_while (246,800): mov reg-reg=76,400; bool test=29,600; tag test=25,200; stack store=21,200; completion check=19,200; mov imm=14,800; overflow check=14,400; cmp/test (other)=5,200; bool materialize=5,200; call botlish=4,800; lea (stack addr)=4,800; call helper=4,800; logic=4,800; arith=4,800; jmp=4,800; frame: epilogue=3,600; frame: prologue=3,200
+  12 local_char? (175,200): frame: epilogue=43,200; frame: prologue=33,600; cmp/test (other)=14,400; heap/vm load=11,200; mov reg-reg=11,200; bool test=11,200; mov imm=10,400; call helper=10,400; jcc (other)=9,600; completion check=9,600; call botlish=4,800; setcc/cmov (other)=4,800; jmp=800
+  11 char_at (163,200): mov reg-reg=33,600; frame: epilogue=33,600; frame: prologue=28,800; stack store=19,200; overflow check=14,400; tag test=9,600; completion check=9,600; arith=4,800; mov imm=4,800; call helper=4,800
+  9 web::emailish? (22,000): mov reg-reg=4,000; frame: epilogue=3,200; frame: prologue=2,800; stack store=2,000; tag test=2,000; bool materialize=1,600; bool test=1,600; mov imm=1,200; cmp/test (other)=1,200; heap/vm load=800; call helper=400; call botlish=400; jcc (other)=400; jmp=400
+  23 check (12,829): mov reg-reg=3,605; stack store=1,604; tag test=1,200; overflow check=1,200; completion check=800; bool test=800; jmp=800; arith=800; cmp/test (other)=401; jcc (other)=401; call botlish=400; mov imm=400; lea=400; frame: epilogue=9; frame: prologue=8; untag=1
+  3 byte::set (276): mov reg-reg=85; tag test=26; stack store=24; mov imm=18; completion check=18; heap/vm load=12; overflow check=12; bool test=10; cmp/test (other)=9; frame: epilogue=9; frame: prologue=8; call botlish=8; jmp=8; call helper=7; logic=5; bool materialize=5; untag=4; jcc (other)=4; arith=4
+  0 <program> (210): stack store=64; heap/vm load=49; stack load=25; completion check=14; frame: root-slot zero=11; mov imm=10; frame: epilogue=9; frame: prologue=8; call helper=6; lea (stack addr)=4; mov reg-reg=4; heap/vm store=3; call botlish=3
+  22 esc_from (185): mov reg-reg=46; stack store=36; completion check=20; mov imm=19; retag=12; call helper=11; frame: epilogue=9; frame: prologue=8; untag=5; cmp/test (other)=4; jcc (other)=4; arith=3; call botlish=3; jmp=3; lea (stack addr)=2
+  21 esc_char (155): mov reg-reg=45; frame: epilogue=21; frame: prologue=18; stack store=14; heap/vm load=11; cmp/test (other)=9; jcc (other)=9; mov imm=7; call helper=6; bool test=6; call botlish=4; untag=3; completion check=2
+  2 byte::from_int (108): frame: epilogue=24; frame: prologue=20; mov reg-reg=16; bool materialize=16; tag test=12; cmp/test (other)=8; bool test=8; jcc (other)=4
+  20 esc_bytes (80): stack store=15; mov reg-reg=13; frame: epilogue=9; frame: prologue=8; mov imm=5; heap/vm load=5; untag=4; completion check=4; call helper=3; cmp/test (other)=3; jcc (other)=3; retag=2; stack load=2; lea (stack addr)=1; call botlish=1; arith=1; jmp=1
+  7 ascii::is_alphabetic (75): mov reg-reg=18; frame: epilogue=18; frame: prologue=15; bool test=12; call botlish=6; mov imm=3; jmp=3
+  19 hex_pair (71): mov reg-reg=15; heap/vm load=10; stack store=8; frame: epilogue=8; frame: prologue=7; mov imm=5; tag test=4; completion check=4; untag=2; cmp/test (other)=2; jcc (other)=2; call helper=2; call botlish=1; lea (stack addr)=1
+  16 web::is_unreserved (63): frame: epilogue=18; frame: prologue=15; mov reg-reg=11; bool test=8; mov imm=4; call botlish=3; heap/vm load=2; call helper=1; jmp=1
+  8 ascii::is_alphanumeric (63): frame: epilogue=18; frame: prologue=15; mov reg-reg=14; bool test=8; call botlish=4; mov imm=3; jmp=1
+  5 ascii::is_upper (34): frame: epilogue=9; frame: prologue=6; cmp/test (other)=5; jcc (other)=5; untag=3; mov imm=3; jmp=3
+  6 ascii::is_lower (32): frame: epilogue=9; frame: prologue=6; cmp/test (other)=5; jcc (other)=5; untag=3; mov imm=3; jmp=1
+  1 char::codepoint (28): frame: epilogue=12; frame: prologue=8; call helper=8
+  17 web::uri_escape_text (16): frame: epilogue=4; frame: prologue=3; stack store=3; heap/vm load=2; completion check=2; mov imm=1; call botlish=1
+  18 high_nibble (16): frame: epilogue=4; frame: prologue=3; stack store=2; tag test=2; retag=2; logic=1; mov reg-reg=1; arith=1
+  4 ascii::is_digit (10): frame: epilogue=3; frame: prologue=2; untag=1; cmp/test (other)=1; jcc (other)=1; mov imm=1; jmp=1
+

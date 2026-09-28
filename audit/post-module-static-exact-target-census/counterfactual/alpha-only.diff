@@ -1,0 +1,24 @@
+# COUNTERFACTUAL (POST-MODULE-STATIC-EXACT-TARGET-CENSUS.md) -- audit-only,
+# per-target decomposition variant, NEVER applied to the tree's own
+# lib/web.bot: only the tld? call site (scan_alpha -> is_tcl_alpha) is made
+# exact; the other call site still passes its predicate through the
+# unchanged generic scan_while and its callvalue.
+--- a/lib/web.bot
++++ b/lib/web.bot
+@@ -130,8 +130,15 @@ fn emailish?(v):
+             return i
+         n
+ 
++    fn scan_alpha(start):
++        loop i from start to n:
++            if is_tcl_alpha(char_at(i)):
++                continue
++            return i
++        n
++
+     fn tld?(i):
+-        e = scan_while(i, is_tcl_alpha)
++        e = scan_alpha(i)
+         if e == n:
+             e - i >= 2
+         else:

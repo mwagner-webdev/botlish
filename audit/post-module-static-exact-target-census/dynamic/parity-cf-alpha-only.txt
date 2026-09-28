@@ -1,0 +1,100 @@
+tree: 924482b9774589a55612ffcec5f394e11b3d6db4 (lib/web.bot diff lines: 21)
+columns: module = web::emailish?(s) via .bot, root = emailish?(s) via .ir; each on interp compile cranelift-generic cranelift
+0   someone@example.com                                        module=true/true/true/true root=true/true/true/true
+1   café@例え.テスト                                                module=true/true/true/true root=true/true/true/true
+2   not-an-email                                               module=false/false/false/false root=false/false/false/false
+3   @example.com                                               module=false/false/false/false root=false/false/false/false
+4   {"a b"@example.com}                                        module=false/false/false/false root=false/false/false/false
+5   foo@bad_domain.com                                         module=false/false/false/false root=false/false/false/false
+6   foo@example.c                                              module=false/false/false/false root=false/false/false/false
+7   {}                                                         module=false/false/false/false root=false/false/false/false
+8   @                                                          module=false/false/false/false root=false/false/false/false
+9   a@                                                         module=false/false/false/false root=false/false/false/false
+10  a@.com                                                     module=false/false/false/false root=false/false/false/false
+11  a@b..com                                                   module=false/false/false/false root=false/false/false/false
+12  a@b.c                                                      module=false/false/false/false root=false/false/false/false
+13  a@b.c1                                                     module=false/false/false/false root=false/false/false/false
+14  a@b.cD                                                     module=true/true/true/true root=true/true/true/true
+15  a@b.co                                                     module=true/true/true/true root=true/true/true/true
+16  a@b.com.                                                   module=false/false/false/false root=false/false/false/false
+17  café@example.com                                           module=true/true/true/true root=true/true/true/true
+18  user@example.co日                                           module=true/true/true/true root=true/true/true/true
+19  user@例え.テスト                                                module=true/true/true/true root=true/true/true/true
+20  a@b.io                                                     module=true/true/true/true root=true/true/true/true
+21  foo@example.com                                            module=true/true/true/true root=true/true/true/true
+22  ab.c_d-e@f                                                 module=false/false/false/false root=false/false/false/false
+23  a.b_c%d+e-f@sub.example.com                                module=true/true/true/true root=true/true/true/true
+24  a@b٠.com                                                   module=true/true/true/true root=true/true/true/true
+25  a@例え.Ⅰ                                                     module=false/false/false/false root=false/false/false/false
+26  é_@                                                        module=false/false/false/false root=false/false/false/false
+27  example.test@café.example                                  module=true/true/true/true root=true/true/true/true
+28  {a b/c%d~e_f.g@h}                                          module=false/false/false/false root=false/false/false/false
+29  .@a.bc                                                     module=true/true/true/true root=true/true/true/true
+30  _@a.bc                                                     module=true/true/true/true root=true/true/true/true
+31  %@a.bc                                                     module=true/true/true/true root=true/true/true/true
+32  +@a.bc                                                     module=true/true/true/true root=true/true/true/true
+33  -@a.bc                                                     module=true/true/true/true root=true/true/true/true
+34  .._%%++--@a.bc                                             module=true/true/true/true root=true/true/true/true
+35  a!@b.co                                                    module=false/false/false/false root=false/false/false/false
+36  a#@b.co                                                    module=false/false/false/false root=false/false/false/false
+37  a~@b.co                                                    module=false/false/false/false root=false/false/false/false
+38  a/@b.co                                                    module=false/false/false/false root=false/false/false/false
+39  a,@b.co                                                    module=false/false/false/false root=false/false/false/false
+40  {a;@b.co}                                                  module=false/false/false/false root=false/false/false/false
+41  a:@b.co                                                    module=false/false/false/false root=false/false/false/false
+42  a*@b.co                                                    module=false/false/false/false root=false/false/false/false
+43  a=@b.co                                                    module=false/false/false/false root=false/false/false/false
+44  a\"@b.co                                                   module=false/false/false/false root=false/false/false/false
+45  {a\@b.co}                                                  module=false/false/false/false root=false/false/false/false
+46  ñ@b.co                                                     module=true/true/true/true root=true/true/true/true
+47  日本@b.co                                                    module=true/true/true/true root=true/true/true/true
+48  ٣@b.co                                                     module=true/true/true/true root=true/true/true/true
+49  Ⅰ@b.co                                                     module=false/false/false/false root=false/false/false/false
+50  😀@b.co                                                     module=false/false/false/false root=false/false/false/false
+51  a😀@b.co                                                    module=false/false/false/false root=false/false/false/false
+52  é@b.co                                                     module=true/true/true/true root=true/true/true/true
+53  a@-b.co                                                    module=true/true/true/true root=true/true/true/true
+54  a@b-.co                                                    module=true/true/true/true root=true/true/true/true
+55  a@b_c.co                                                   module=false/false/false/false root=false/false/false/false
+56  a@b.c-d.ef                                                 module=true/true/true/true root=true/true/true/true
+57  a@.b.co                                                    module=false/false/false/false root=false/false/false/false
+58  a@b.co.                                                    module=false/false/false/false root=false/false/false/false
+59  a@b.co.uk                                                  module=true/true/true/true root=true/true/true/true
+60  a@b.c.d.ef                                                 module=true/true/true/true root=true/true/true/true
+61  a@1.2.3.com                                                module=true/true/true/true root=true/true/true/true
+62  a@b.12                                                     module=false/false/false/false root=false/false/false/false
+63  a@b.c1d                                                    module=false/false/false/false root=false/false/false/false
+64  a@b.ab1                                                    module=false/false/false/false root=false/false/false/false
+65  a@b.テ                                                      module=false/false/false/false root=false/false/false/false
+66  a@b.テス                                                     module=true/true/true/true root=true/true/true/true
+67  a@b.ⅠⅡ                                                     module=false/false/false/false root=false/false/false/false
+68  a@b.日本                                                     module=true/true/true/true root=true/true/true/true
+69  a@b.éé                                                     module=true/true/true/true root=true/true/true/true
+70  a@例.テスト                                                    module=true/true/true/true root=true/true/true/true
+71  a@@b.co                                                    module=false/false/false/false root=false/false/false/false
+72  a@b@c.co                                                   module=false/false/false/false root=false/false/false/false
+73  a@b                                                        module=false/false/false/false root=false/false/false/false
+74  a@b.                                                       module=false/false/false/false root=false/false/false/false
+75  @@                                                         module=false/false/false/false root=false/false/false/false
+76  a                                                          module=false/false/false/false root=false/false/false/false
+77  .                                                          module=false/false/false/false root=false/false/false/false
+78  a.b                                                        module=false/false/false/false root=false/false/false/false
+79  a@b.co@                                                    module=false/false/false/false root=false/false/false/false
+80  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@bbbbbbbbbbbbbbbbbbbb.cccccccccc module=true/true/true/true root=true/true/true/true
+81  a@b.c😀                                                     module=false/false/false/false root=false/false/false/false
+82  a@b😀.co                                                    module=false/false/false/false root=false/false/false/false
+83  a@b.co😀                                                    module=false/false/false/false root=false/false/false/false
+84  { a@b.co}                                                  module=false/false/false/false root=false/false/false/false
+85  {a@b.co }                                                  module=false/false/false/false root=false/false/false/false
+86  {a @b.co}                                                  module=false/false/false/false root=false/false/false/false
+87  {a@b .co}                                                  module=false/false/false/false root=false/false/false/false
+88  {	@b.co}                                                   module=false/false/false/false root=false/false/false/false
+89  a@b.-co                                                    module=false/false/false/false root=false/false/false/false
+90  a@b.c_o                                                    module=false/false/false/false root=false/false/false/false
+91  a@ex-ample.com                                             module=true/true/true/true root=true/true/true/true
+92  a@ex--ample.com                                            module=true/true/true/true root=true/true/true/true
+93  x@y.zz                                                     module=true/true/true/true root=true/true/true/true
+94  x@y.z                                                      module=false/false/false/false root=false/false/false/false
+addresses: 95 (accepted: 36, rejected: 59)
+addresses where any backend/path disagrees: 0
+addresses where the Botlish source disagrees with the Tcl-validator oracle: 0

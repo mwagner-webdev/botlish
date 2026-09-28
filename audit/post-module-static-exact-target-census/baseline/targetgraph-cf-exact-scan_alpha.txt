@@ -1,0 +1,13 @@
+tree: 924482b9774589a55612ffcec5f394e11b3d6db4 (lib/web.bot diff lines: 39)
+scan_alpha: 1 semantic block(s), 1 used instance(s): scan_alpha<generic>
+
+== i25 scan_alpha<generic> (block e226)
+  generic: 1   InstanceClosed: 1   range OPEN: 1
+  closedCallerTheorem (KeyType join per parameter): int
+  parameters: start
+  call site e243 in tld?<generic> (reachable: 1)
+      start <- ref i (binding kind param) : int
+
+== NIR
+  func 14 "scan_alpha" params=3 env=0 regs=16 pnames="start n v" captures=0 instance="generic" rawregs="13" @e226
+  callvalue instructions in the whole program: 0

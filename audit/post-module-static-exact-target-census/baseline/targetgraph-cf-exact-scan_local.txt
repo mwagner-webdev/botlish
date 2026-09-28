@@ -1,0 +1,13 @@
+tree: 924482b9774589a55612ffcec5f394e11b3d6db4 (lib/web.bot diff lines: 39)
+scan_local: 1 semantic block(s), 1 used instance(s): scan_local<generic>
+
+== i20 scan_local<generic> (block e211)
+  generic: 1   InstanceClosed: 1   range OPEN: 1
+  closedCallerTheorem (KeyType join per parameter): int
+  parameters: start
+  call site e312 in web::emailish?<str> (reachable: 1)
+      start <- const : int
+
+== NIR
+  func 13 "scan_local" params=3 env=0 regs=14 pnames="start n v" captures=0 instance="generic" rawregs="11" @e211
+  callvalue instructions in the whole program: 0

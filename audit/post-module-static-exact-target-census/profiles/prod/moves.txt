@@ -1,0 +1,48 @@
+# per run; generic entries excluded (cold trampolines)
+TOTAL executed=1,236,296  reg-reg moves=291,081 (23.5%)  dead=0  redundant=2,825  dead+redundant=0.2% of executed JIT instructions (1.0% of moves)
+
+register-to-register moves by purpose (heuristic, see moves.py), per run:
+  other                                                      66,866   23.0% of moves    5.4% of executed
+  incoming argument into callee-saved register               62,071   21.3% of moves    5.0% of executed
+  call argument setup                                        60,855   20.9% of moves    4.9% of executed
+  result into rax (return / op result)                       39,216   13.5% of moves    3.2% of executed
+  vm pointer into rdi for a call                             36,853   12.7% of moves    3.0% of executed
+  join/loop-carried copy before jmp                          23,216    8.0% of moves    1.9% of executed
+  call result out of rax                                      2,004    0.7% of moves    0.2% of executed
+
+13 scan_while                    executed=     423,200  reg-reg moves=   130,000  dead=        0  redundant=    1,200  (dead+redundant = 0.3% of executed)
+      0x484813c mov rcx,rbx  (redundant, x1,200)
+11 char_at                       executed=     272,000  reg-reg moves=    56,000  dead=        0  redundant=        0  (dead+redundant = 0.0% of executed)
+12 local_char?                   executed=     201,200  reg-reg moves=    16,000  dead=        0  redundant=        0  (dead+redundant = 0.0% of executed)
+10 char_at                       executed=     128,800  reg-reg moves=    36,400  dead=        0  redundant=        0  (dead+redundant = 0.0% of executed)
+15 domain?                       executed=     103,200  reg-reg moves=    26,800  dead=        0  redundant=        0  (dead+redundant = 0.0% of executed)
+9 web::emailish?                 executed=      56,400  reg-reg moves=    12,000  dead=        0  redundant=    1,600  (dead+redundant = 2.8% of executed)
+      0x4847b70 mov rsi,r13  (redundant, x800)
+      0x4847b73 mov rdi,r14  (redundant, x800)
+23 check                         executed=      25,258  reg-reg moves=     7,210  dead=        0  redundant=        0  (dead+redundant = 0.0% of executed)
+14 tld?                          executed=      24,800  reg-reg moves=     6,400  dead=        0  redundant=        0  (dead+redundant = 0.0% of executed)
+3 byte::set                      executed=         276  reg-reg moves=        85  dead=        0  redundant=        1  (dead+redundant = 0.4% of executed)
+      0x484773f mov rdi,r13  (redundant, x1)
+0 <program>                      executed=         226  reg-reg moves=         7  dead=        0  redundant=        0  (dead+redundant = 0.0% of executed)
+22 esc_from                      executed=         185  reg-reg moves=        46  dead=        0  redundant=        0  (dead+redundant = 0.0% of executed)
+21 esc_char                      executed=         155  reg-reg moves=        45  dead=        0  redundant=        9  (dead+redundant = 5.8% of executed)
+      0x484903d mov rsi,r13  (redundant, x3)
+      0x4849040 mov rdi,rbx  (redundant, x3)
+      0x48490b8 mov r12,rsi  (redundant, x3)
+2 byte::from_int                 executed=         108  reg-reg moves=        16  dead=        0  redundant=        0  (dead+redundant = 0.0% of executed)
+20 esc_bytes                     executed=          80  reg-reg moves=        13  dead=        0  redundant=        0  (dead+redundant = 0.0% of executed)
+7 ascii::is_alphabetic           executed=          75  reg-reg moves=        18  dead=        0  redundant=        6  (dead+redundant = 8.0% of executed)
+      0x4847a56 mov rsi,r12  (redundant, x3)
+      0x4847a59 mov rdi,r14  (redundant, x3)
+19 hex_pair                      executed=          71  reg-reg moves=        15  dead=        0  redundant=        0  (dead+redundant = 0.0% of executed)
+8 ascii::is_alphanumeric         executed=          63  reg-reg moves=        14  dead=        0  redundant=        6  (dead+redundant = 9.5% of executed)
+      0x4847ad3 mov rsi,r12  (redundant, x3)
+      0x4847ad6 mov rdi,r14  (redundant, x3)
+16 web::is_unreserved            executed=          63  reg-reg moves=        11  dead=        0  redundant=        3  (dead+redundant = 4.8% of executed)
+      0x48489cb mov rsi,r14  (redundant, x3)
+5 ascii::is_upper                executed=          34  reg-reg moves=         0  dead=        0  redundant=        0  (dead+redundant = 0.0% of executed)
+6 ascii::is_lower                executed=          32  reg-reg moves=         0  dead=        0  redundant=        0  (dead+redundant = 0.0% of executed)
+1 char::codepoint                executed=          28  reg-reg moves=         0  dead=        0  redundant=        0  (dead+redundant = 0.0% of executed)
+17 web::uri_escape_text          executed=          16  reg-reg moves=         0  dead=        0  redundant=        0  (dead+redundant = 0.0% of executed)
+18 high_nibble                   executed=          16  reg-reg moves=         1  dead=        0  redundant=        0  (dead+redundant = 0.0% of executed)
+4 ascii::is_digit                executed=          10  reg-reg moves=         0  dead=        0  redundant=        0  (dead+redundant = 0.0% of executed)

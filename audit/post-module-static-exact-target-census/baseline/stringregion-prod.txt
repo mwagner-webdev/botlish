@@ -1,0 +1,21 @@
+tree: 924482b9774589a55612ffcec5f394e11b3d6db4 (lib/web.bot diff lines: 0)
+
+== predicate / scanner instances: StringRegion's own verdicts
+  char_at<generic>: consumingParams={} regionCompanionWanted=1
+      generic instance: never a ConsumingParams candidate (ConsumingParams skips generic instances)
+  local_char?<generic>: consumingParams={} regionCompanionWanted=0
+      generic instance: never a ConsumingParams candidate (ConsumingParams skips generic instances)
+  label_char?<str>: consumingParams={0} regionCompanionWanted=0
+      ConsumingShape accepts
+  scan_while<generic>: consumingParams={} regionCompanionWanted=0
+      generic instance: never a ConsumingParams candidate (ConsumingParams skips generic instances)
+  tld?<generic>: consumingParams={} regionCompanionWanted=0
+      generic instance: never a ConsumingParams candidate (ConsumingParams skips generic instances)
+  domain?<generic>: consumingParams={} regionCompanionWanted=0
+      generic instance: never a ConsumingParams candidate (ConsumingParams skips generic instances)
+
+== hir::stringregion::explain
+  char_at<generic> (i21):
+    result: a String region (region companion built)
+  label_char?<str> (i24):
+    parameter 0: region-consuming, inlined at a region-eligible call argument

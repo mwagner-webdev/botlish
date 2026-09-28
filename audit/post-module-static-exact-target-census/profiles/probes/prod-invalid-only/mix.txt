@@ -1,0 +1,114 @@
+executed Botlish-code instructions per run: 621,451 (17.7% of all Ir)
+
+== total executed JIT instruction mix (per run)
+  mov reg-reg             129,073.0   20.8%  I1mr=7.0
+  frame: epilogue          83,793.0   13.5%  Dr=58,134.0  I1mr=2.0  D1mr=3.0
+  frame: prologue          68,558.0   11.0%  Dw=42,899.0  I1mr=12.1
+  stack store              44,170.0    7.1%  Dw=44,170.0  I1mr=2.1  D1mw=4.0
+  bool test                43,252.0    7.0%  I1mr=3.0  Bc=21,626.0  Bcm=401.1
+  completion check         39,264.0    6.3%  Bc=19,632.0  Bcm=1.5
+  tag test                 38,044.0    6.1%  I1mr=1.0  Bc=16,020.0  Bcm=0.3
+  mov imm                  31,682.0    5.1%  I1mr=3.0
+  overflow check           30,012.0    4.8%  Bc=10,004.0
+  cmp/test (other)         21,247.0    3.4%
+  call helper              20,444.0    3.3%  Dw=15,639.0  I1mr=1.0
+  heap/vm load             12,091.0    1.9%  Dr=12,091.0  I1mr=3.1  D1mr=7.0
+  jcc (other)              10,438.0    1.7%  I1mr=1.0  Bc=10,438.0  Bcm=4.3
+  call botlish             10,434.0    1.7%  Dw=10,434.0
+  arith                    10,409.0    1.7%
+  jmp                       6,822.0    1.1%
+  bool materialize          6,821.0    1.1%  Dr=6,013.0  I1mr=1.0  D1mr=4.0
+  lea (stack addr)          4,808.0    0.8%
+  logic                     4,806.0    0.8%  I1mr=0.1
+  setcc/cmov (other)        4,800.0    0.8%
+  lea                         400.0    0.1%
+  stack load                   27.0    0.0%  Dr=27.0
+  untag                        26.0    0.0%
+  retag                        16.0    0.0%
+  frame: root-slot zero         11.0    0.0%  Dw=11.0  I1mr=2.0
+  heap/vm store                 3.0    0.0%  Dw=3.0  D1mw=1.0
+
+== 13 scan_while: 246,800.0 executed instructions per run (39.7% of JIT)
+  mov reg-reg              76,400.0   31.0%
+  bool test                29,600.0   12.0%
+  tag test                 25,200.0   10.2%
+  stack store              21,200.0    8.6%
+  completion check         19,200.0    7.8%
+  mov imm                  14,800.0    6.0%
+  overflow check           14,400.0    5.8%
+  cmp/test (other)          5,200.0    2.1%
+  bool materialize          5,200.0    2.1%
+  call botlish              4,800.0    1.9%
+  lea (stack addr)          4,800.0    1.9%
+  call helper               4,800.0    1.9%
+  logic                     4,800.0    1.9%
+  arith                     4,800.0    1.9%
+  jmp                       4,800.0    1.9%
+  frame: epilogue           3,600.0    1.5%
+  frame: prologue           3,200.0    1.3%
+
+== 11 char_at: 163,200.0 executed instructions per run (26.3% of JIT)
+  mov reg-reg              33,600.0   20.6%
+  frame: epilogue          33,600.0   20.6%
+  frame: prologue          28,800.0   17.6%
+  stack store              19,200.0   11.8%
+  overflow check           14,400.0    8.8%
+  tag test                  9,600.0    5.9%
+  completion check          9,600.0    5.9%
+  arith                     4,800.0    2.9%
+  mov imm                   4,800.0    2.9%
+  call helper               4,800.0    2.9%
+
+== 12 local_char?: 141,600.0 executed instructions per run (22.8% of JIT)
+  frame: epilogue          28,800.0   20.3%
+  frame: prologue          24,000.0   16.9%
+  cmp/test (other)         14,400.0   10.2%
+  mov reg-reg              11,200.0    7.9%
+  bool test                11,200.0    7.9%
+  mov imm                  10,400.0    7.3%
+  call helper              10,400.0    7.3%
+  jcc (other)               9,600.0    6.8%
+  completion check          9,600.0    6.8%
+  heap/vm load              6,400.0    4.5%
+  setcc/cmov (other)        4,800.0    3.4%
+  jmp                         800.0    0.6%
+
+== 12 local_char? (generic entry): 33,600.0 executed instructions per run (5.4% of JIT)
+  frame: epilogue          14,400.0   42.9%
+  frame: prologue           9,600.0   28.6%
+  heap/vm load              4,800.0   14.3%
+  call botlish              4,800.0   14.3%
+
+== 9 web::emailish?: 22,000.0 executed instructions per run (3.5% of JIT)
+  mov reg-reg               4,000.0   18.2%
+  frame: epilogue           3,200.0   14.5%
+  frame: prologue           2,800.0   12.7%
+  stack store               2,000.0    9.1%
+  tag test                  2,000.0    9.1%
+  bool materialize          1,600.0    7.3%
+  bool test                 1,600.0    7.3%
+  mov imm                   1,200.0    5.5%
+  cmp/test (other)          1,200.0    5.5%
+  heap/vm load                800.0    3.6%
+  call helper                 400.0    1.8%
+  call botlish                400.0    1.8%
+  jcc (other)                 400.0    1.8%
+  jmp                         400.0    1.8%
+
+== 23 check: 12,829.0 executed instructions per run (2.1% of JIT)
+  mov reg-reg               3,605.0   28.1%
+  stack store               1,604.0   12.5%
+  tag test                  1,200.0    9.4%
+  overflow check            1,200.0    9.4%
+  completion check            800.0    6.2%
+  bool test                   800.0    6.2%
+  jmp                         800.0    6.2%
+  arith                       800.0    6.2%
+  cmp/test (other)            401.0    3.1%
+  jcc (other)                 401.0    3.1%
+  call botlish                400.0    3.1%
+  mov imm                     400.0    3.1%
+  lea                         400.0    3.1%
+  frame: epilogue               9.0    0.1%
+  frame: prologue               8.0    0.1%
+  untag                         1.0    0.0%
