@@ -48,7 +48,12 @@
 # reason (hir/callables.tcl's Bearing check already forbids an error-bearing
 # or typed-parameter-bearing function from escaping to an opaque callable
 # value, so a callee reached through unknown dynamic dispatch never legally
-# carries error obligations here to begin with).
+# carries error obligations here to begin with). A call through a
+# *structural function type* (STRUCTURAL-FUNCTION-TYPES.md) -- a callable
+# whose target is unknown but whose contract is -- is not analyzed that way
+# either (there is no one body to analyze), but is charged its contract's
+# whole declared error set (CheckStructuralCallLegality): the contract is
+# the upper bound every implementation reaching it was proven to fit.
 
 namespace eval hir::completions {
     # Recursive nested-call analysis budget (item 35/108-16): once this many
@@ -554,7 +559,27 @@ proc hir::completions::EvalCall {hirVar ctxVar diagnose enclosing guard e node} 
         return $result
     }
     if {$targetKind ne {block}} {
-        return [hir::range::unknown]
+        set calleeType [hir::typeOf $hir [dict get $node callee]]
+        if {![hir::types::IsFn $calleeType]} {
+            return [hir::range::unknown]
+        }
+        # A call through a structural function type (STRUCTURAL-FUNCTION-
+        # TYPES.md): which implementation runs is unknown, so no narrower
+        # proof exists here -- every error the contract declares may escape,
+        # exactly like an exact callee whose own proof ran out (the
+        # conservative fallback EffectiveFacts itself uses), and the call's
+        # result is what the contract promises.
+        set errors [hir::types::FnErrors $calleeType]
+        if {$diagnose} {
+            CheckStructuralCallLegality hir $e $calleeType $errors {} $enclosing
+        }
+        MergeErrors ctx $errors
+        set result [hir::range::ConstrainType $hir $e [hir::range::unknown]]
+        dict set ctx exprs $e $result
+        if {$diagnose} {
+            dict set hir exprs $e resultRangeFact $result
+        }
+        return $result
     }
     set argExact [ArgExactValues $hir $ctx $argExprs]
     set argExactLists [ArgExactLists $hir $ctx $argExprs]
@@ -690,6 +715,23 @@ proc hir::completions::CheckCallLegality {hirVar e target normal errors handled 
     }
 }
 
+# CheckCallLegality for call E through a structural function type
+# CALLEETYPE: its whole declared error set ERRORS is effective (a structural
+# callee always may complete normally), so the one legality rule is
+# ERRORS - HANDLED subseteq ENCLOSING.
+proc hir::completions::CheckStructuralCallLegality {hirVar e calleeType errors handled enclosing} {
+    upvar 1 $hirVar hir
+    dict set hir exprs $e effectiveErrors [lsort -unique $errors]
+    dict set hir exprs $e mayReturnNormally 1
+    foreach name $errors {
+        if {$name ni $handled && $name ni $enclosing} {
+            hir::Diagnose hir UNHANDLED-ERROR [format \
+                {this call through a callable of function type %s may produce the declared error "%s", which is neither handled here nor admitted by the enclosing function's own "errors" declaration} \
+                [hir::types::show $calleeType] $name] $e
+        }
+    }
+}
+
 proc hir::completions::ErrorsPhrase {names} {
     if {$names eq {}} {
         return {an error}
@@ -714,12 +756,22 @@ proc hir::completions::EvalHandle {hirVar ctxVar diagnose enclosing guard e node
     set handled [dict get $node handlerNames]
     if {!$dead} {
         lassign [dict get $callNode target] targetKind target
+        set calleeType [hir::typeOf $hir [dict get $callNode callee]]
         if {$targetKind eq {block}} {
             set argExact [ArgExactValues $hir $ctx $argExprs]
             set argExactLists [ArgExactLists $hir $ctx $argExprs]
             lassign [EffectiveFacts hir ctx $target $argRanges $argExact $argExactLists $guard] normal errors callResult
             if {$diagnose} {
                 CheckCallLegality hir $e $target $normal $errors $handled $enclosing
+            }
+        } elseif {$targetKind eq {} && [hir::types::IsFn $calleeType]} {
+            # A handled call through a structural function type: its
+            # contract's whole declared error set (EvalCall's own case).
+            set normal 1
+            set errors [hir::types::FnErrors $calleeType]
+            set callResult [hir::range::ConstrainType $hir $call [hir::range::unknown]]
+            if {$diagnose} {
+                CheckStructuralCallLegality hir $e $calleeType $errors $handled $enclosing
             }
         } else {
             set normal 1

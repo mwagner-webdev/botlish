@@ -29,6 +29,15 @@
 #   int str bool unit result any    kinds, evidence (named types) dropped
 #   block native                    a callable of that kind; which one is
 #                                   not part of the key
+#   (a structural function type)    any: a Fn value has no one runtime
+#                                   kind, and its contract never selects
+#                                   an instance (STRUCTURAL-FUNCTION-
+#                                   TYPES.md, "KeyType / specialization
+#                                   projection") -- a declared Fn
+#                                   parameter's contract still reaches the
+#                                   instance's own body through its
+#                                   declared-type seed (Analyze), never
+#                                   through the key
 #   list, {list ELEM}, {list ELEM SHAPE}
 #                                   aggregate facts with key-typed elements
 #
@@ -260,7 +269,13 @@ proc hir::specialize::DropRef {id} {
     }
 }
 
-# The key type of static type TYPE.
+# The key type of static type TYPE. Deliberately coarser than TYPE itself:
+# an exact callable's identity is erased to its kind (so two different
+# code targets share one instance), and a structural function type to any
+# (kindOf has no one kind for it) -- specializing on a contract would
+# multiply instances without changing any operation's lowering, since a
+# call through either is the same indirect callvalue. The full HIR type
+# keeps both the identity and the contract (STRUCTURAL-FUNCTION-TYPES.md).
 proc hir::specialize::KeyType {type} {
     if {[hir::types::IsList $type]} {
         set elem [KeyType [lindex $type 1]]

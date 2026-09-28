@@ -9,6 +9,20 @@
 #   {block EXPR ARITY RESULT}       a Block created by the block expression
 #                                   EXPR (an ExprId), taking ARITY arguments;
 #                                   RESULT types what a call returns
+#   {block EXPR ARITY RESULT CONTRACT}
+#                                   the same, for a block that declares a
+#                                   parameter type or an error set:
+#                                   CONTRACT is {args {T1 ...} errors
+#                                   {E1 ...}} (see blockType, below)
+#   {fn {args {T1 ...} return R errors {E1 ...}}}
+#                                   a *structural function type*
+#                                   (STRUCTURAL-FUNCTION-TYPES.md): some
+#                                   callable -- native, envless Block or
+#                                   capturing Block, which one is not known
+#                                   -- that accepts arguments admissible
+#                                   for T1..Tn, returns R when it completes
+#                                   normally, and may let at most the
+#                                   declared errors E1.. escape
 #   never                           no value: evaluation never completes
 #                                   normally (return, break, error, ...)
 #   {list ELEM}                     a list whose every element has static
@@ -36,6 +50,37 @@
 # it evaluates to satisfies core::type::acceptsValue T v.
 #
 # Types are interned per HIR program: nodes and bindings hold TypeIds.
+#
+# Callable types (STRUCTURAL-FUNCTION-TYPES.md)
+# ---------------------------------------------
+# The exact forms say *which code runs*: {native NAME} one native, {block E
+# ...} the code of block expression E -- with whatever environment the
+# particular Block value carries (two closures made by two activations of
+# one factory share one exact type: exactness is code identity, never
+# closure-object or environment identity). The structural form says only
+# *what calling is allowed to do*: its call contract. Every exact callable
+# type with a fixed arity has one canonical structural supertype,
+# structuralOf, derived from the one authoritative signature source of its
+# kind -- the native registry's -param-types/-result-type (natives never
+# declare errors), or the block's own resolved declaredParamTypes (an
+# untyped parameter is any), its result type (the declared one if any, else
+# the inferred one) and its declaredErrors. A block that declares neither a
+# parameter type nor an error has the trivial contract (every argument any,
+# no errors), which the four-element exact form already says; a block that
+# does carries it as the fifth element, so that structuralOf, subtype and
+# lub stay pure functions of their type arguments (they are called with no
+# HIR in reach) and every exact type of one block has one canonical
+# spelling (blockType is its only constructor).
+#
+# Compatibility (subtype A B, B structural) is the call contract's: equal
+# arity; arguments contravariant under declared-parameter admissibility
+# (Admits: every argument B's callers may prove admissible is admissible for
+# A's own parameter); return covariant; A's errors a subset of B's (a
+# declared error set is an upper bound: an implementation may produce
+# fewer). lub of two different callables is their narrowest representable
+# common structural type (FnLub: glb of the arguments, lub of the returns,
+# union of the errors), never a union of targets; when no argument meet is
+# representable it falls back exactly as before (the shared kind, or any).
 
 namespace eval hir::types {
     # Bounds of aggregate facts: list forms nest at most aggregateDepth deep
@@ -102,7 +147,291 @@ proc hir::types::resolveApplication {ctor argTypes} {
 
 proc hir::types::IsSpecific {type} {
     return [expr {$type eq "never"
-                  || ([llength $type] > 1 && [lindex $type 0] in {native block list immutableSet})}]
+                  || ([llength $type] > 1 && [lindex $type 0] in {native block list immutableSet fn})}]
+}
+
+# ---------------------------------------------------------------------------
+# Callable types (see the header's "Callable types" section)
+
+# The canonical structural function type with argument types ARGTYPES, return
+# type RESULT and declared error set ERRORS (any order, duplicates allowed:
+# canonicalized here). DEPTH bounds the return type like a block result.
+# Its fields are named and always listed in this one order -- args, return,
+# errors -- so two equal contracts are equal strings; the planned `context`
+# field (STRUCTURAL-FUNCTION-TYPES.md, "Future context extension point")
+# is one more named entry here, read by FnSubtype/FnLub like the others,
+# never a new positional form.
+# Argument types are kept verbatim (canonicalized, never bounded): cutting
+# an argument to a wider type would make the contract *narrower*, not an
+# over-approximation, and every argument type is a declared type (or a glb
+# of declared types), so their set is already finite.
+proc hir::types::MakeFn {argTypes result errors {depth 0}} {
+    variable aggregateDepth
+    if {$depth >= $aggregateDepth} {
+        return any
+    }
+    set argTypes [lmap a $argTypes {canonical $a}]
+    set result [Bound [canonical $result] [expr {$depth + 1}]]
+    return [list fn [dict create args $argTypes return $result errors [lsort -unique $errors]]]
+}
+
+# 1 if TYPE is a structural function type.
+proc hir::types::IsFn {type} {
+    return [expr {[lindex $type 0] eq "fn" && [llength $type] == 2}]
+}
+
+proc hir::types::FnArgs {type}   { return [dict get [lindex $type 1] args] }
+proc hir::types::FnReturn {type} { return [dict get [lindex $type 1] return] }
+proc hir::types::FnErrors {type} { return [dict get [lindex $type 1] errors] }
+
+# 1 if TYPE is an exact block type ({block E ARITY RESULT ?CONTRACT?}).
+proc hir::types::IsExactBlock {type} {
+    return [expr {[lindex $type 0] eq "block" && [llength $type] in {4 5}}]
+}
+
+# 1 if TYPE is an exact native type ({native NAME}).
+proc hir::types::IsExactNative {type} {
+    return [expr {[lindex $type 0] eq "native" && [llength $type] == 2}]
+}
+
+# 1 if TYPE is statically known to be callable: an exact callable or a
+# structural function type.
+proc hir::types::IsCallable {type} {
+    return [expr {[IsExactBlock $type] || [IsExactNative $type] || [IsFn $type]}]
+}
+
+# The non-trivial contract of block expression E in HIR -- {args {T1 ...}
+# errors {E1 ...}}, an untyped parameter as any -- or "" when E declares
+# neither a parameter type nor an error (the trivial contract the four-
+# element exact form already implies).
+proc hir::types::BlockContract {hir e} {
+    set node [dict get $hir exprs $e]
+    set declared [expr {[dict exists $node declaredParamTypes] ? [dict get $node declaredParamTypes] : {}}]
+    set errors [expr {[dict exists $node declaredErrors] ? [dict get $node declaredErrors] : {}}]
+    if {[lsearch -exact -not $declared {}] < 0 && $errors eq {}} {
+        return ""
+    }
+    set args [lmap t $declared {expr {$t eq {} ? "any" : [canonical $t]}}]
+    return [dict create args $args errors [lsort -unique $errors]]
+}
+
+# The exact type of a Block created by block expression E of HIR, taking
+# ARITY arguments, whose calls return RESULT: the only constructor of an
+# exact block type, so every exact type of one block carries the same
+# contract (BlockContract).
+proc hir::types::blockType {hir e arity result} {
+    set contract [BlockContract $hir $e]
+    if {$contract eq ""} {
+        return [list block $e $arity $result]
+    }
+    return [list block $e $arity $result $contract]
+}
+
+# The canonical structural function type of callable type TYPE: TYPE itself
+# for a structural type; for an exact block, its contract and result type;
+# for an exact native, its registry signature: its fixed arity, its
+# -result-type, no errors (natives declare none) -- and every argument any.
+# A native's -param-types are *run-time-checked requirements* (the native
+# validates its own arguments on every call, raising TYPE: core/native.tcl's
+# "types the implementation requires"), never static proof obligations a
+# caller must discharge, so its call contract imposes none: exactly how a
+# direct call of a native with an argument of type any is already accepted.
+# A structural argument type is only ever a *static* obligation (a declared
+# parameter type, a Fn annotation) -- which is what lets the typed-callable
+# escape audit (hir/callables.tcl) decide from the type alone whether a
+# structural value may still carry an obligation worth protecting
+# (STRUCTURAL-FUNCTION-TYPES.md, "Native signature derivation"). "" when
+# TYPE is not a callable type, or is a native of variable arity (`list`: no
+# fixed-arity contract exists, and this milestone invents no variadic
+# function typing).
+proc hir::types::structuralOf {type} {
+    if {[IsFn $type]} {
+        return $type
+    }
+    if {[IsExactNative $type]} {
+        if {[catch {core::native::metadata [lindex $type 1]} meta]} {
+            return ""
+        }
+        set arity [dict get $meta arity]
+        if {$arity eq "*"} {
+            return ""
+        }
+        return [MakeFn [lrepeat $arity any] [dict get $meta resultType] {}]
+    }
+    if {[IsExactBlock $type]} {
+        lassign $type _ e arity result contract
+        if {$contract eq ""} {
+            return [MakeFn [lrepeat $arity any] $result {}]
+        }
+        return [MakeFn [dict get $contract args] $result [dict get $contract errors]]
+    }
+    return ""
+}
+
+# 1 if a value of static type T is provably admissible where DECLARED is a
+# declared parameter type: hir::range::ProvesValueAcceptedBy -- the one
+# admissibility proof a call's typed argument is held to -- with the
+# integer-domain facts T's own type implies as its Range. This (not
+# subtype) is what a structural function type's *arguments* are compared
+# with, because they are exactly declared parameter obligations: List[T]
+# and ImmutableSet[T] parameters stay invariant, and an integer domain
+# contained in another is admissible for it even without a nominal parent.
+proc hir::types::Admits {declared t} {
+    return [hir::range::ProvesValueAcceptedBy $t [hir::range::TypeFact $t] $declared]
+}
+
+# 1 if a normal result of static type T is usable where EXPECTED is
+# promised: covariant (subtype, consistent with lub's own joins of values)
+# or admissible (an integer domain contained in another).
+proc hir::types::ReturnFits {t expected} {
+    return [expr {[subtype $t $expected] || [Admits $expected $t]}]
+}
+
+# 1 if structural function type A is usable wherever structural function
+# type B is expected (both {fn ...}): equal arity, each of A's parameters
+# admits B's argument (contravariant), A's return fits B's (covariant),
+# A's declared errors are a subset of B's.
+proc hir::types::FnSubtype {a b} {
+    return [expr {[FnMismatch $a $b] eq ""}]
+}
+
+# Why structural function type A is not usable where B is expected, or ""
+# if it is: {arity N M}, {arg I}, {return}, or {errors NAME...} (the extra
+# errors A may let escape) -- the first incompatible part of the contract,
+# for diagnostics (FnSubtype is exactly "no mismatch").
+proc hir::types::FnMismatch {a b} {
+    set aa [FnArgs $a]
+    set ba [FnArgs $b]
+    if {[llength $aa] != [llength $ba]} {
+        return [list arity [llength $aa] [llength $ba]]
+    }
+    set i 0
+    foreach x $aa y $ba {
+        if {![Admits $x $y]} {
+            return [list arg $i]
+        }
+        incr i
+    }
+    if {![ReturnFits [FnReturn $a] [FnReturn $b]]} {
+        return return
+    }
+    set extra {}
+    foreach e [FnErrors $a] {
+        if {$e ni [FnErrors $b]} {
+            lappend extra $e
+        }
+    }
+    if {$extra ne {}} {
+        return [list errors {*}$extra]
+    }
+    return ""
+}
+
+# The greatest lower bound of argument types A and B in the representable
+# fragment -- a type every value admissible for it is admissible for both
+# A and B -- or "" if none is representable. One side if it is admissible
+# for the other (the narrower one); two core types of one base meet in the
+# union of their evidence (core::type::narrow, the repository's existing
+# "a value of both" operation); anything else (different kinds, two
+# unequal List/ImmutableSet/Fn types) has no representable meet here. A
+# `never` meet of unrelated kinds would be sound but useless, so it is
+# deliberately not produced: the caller falls back instead
+# (STRUCTURAL-FUNCTION-TYPES.md, "Type meet / GLB strategy").
+proc hir::types::glb {a b} {
+    if {$a eq $b} {
+        return $a
+    }
+    set aNarrower [Admits $b $a]
+    set bNarrower [Admits $a $b]
+    set core [expr {![IsSpecific $a] && ![IsSpecific $b] && $a ne "any" && $b ne "any"
+        && [core::type::base $a] eq [core::type::base $b]}]
+    if {$aNarrower && $bNarrower} {
+        # Equivalent under admissibility: a deterministic, operand-order-
+        # independent choice.
+        return [expr {$core ? [core::type::narrow $a $b] : [lindex [lsort [list $a $b]] 0]}]
+    }
+    if {$aNarrower} {
+        return $a
+    }
+    if {$bNarrower} {
+        return $b
+    }
+    if {$core} {
+        return [core::type::narrow $a $b]
+    }
+    return ""
+}
+
+# The narrowest representable structural function type both structural
+# types A and B are subtypes of, or "" (different arity, an argument pair
+# with no representable meet, or either side "").
+proc hir::types::FnLub {a b} {
+    if {$a eq "" || $b eq ""} {
+        return ""
+    }
+    if {$a eq $b} {
+        return $a
+    }
+    set aa [FnArgs $a]
+    set ba [FnArgs $b]
+    if {[llength $aa] != [llength $ba]} {
+        return ""
+    }
+    set args {}
+    foreach x $aa y $ba {
+        set m [glb $x $y]
+        if {$m eq ""} {
+            return ""
+        }
+        lappend args $m
+    }
+    return [MakeFn $args [lub [FnReturn $a] [FnReturn $b]] [concat [FnErrors $a] [FnErrors $b]]]
+}
+
+# Why a value of static type ACTUAL does not satisfy structural function
+# type EXPECTED, as a diagnostic clause naming the incompatible part of the
+# contract (STRUCTURAL-FUNCTION-TYPES.md "Diagnostics"), or "" if it does.
+proc hir::types::explainMismatch {actual expected} {
+    if {[subtype $actual $expected]} {
+        return ""
+    }
+    set s [structuralOf $actual]
+    if {$s eq ""} {
+        if {[IsExactNative $actual]} {
+            return "native [lindex $actual 1] takes a variable number of arguments, so it has no function type"
+        }
+        return "a value of type [show $actual] is not known to be callable"
+    }
+    set why [FnMismatch $s $expected]
+    switch -- [lindex $why 0] {
+        arity {
+            return "arity mismatch: the callable takes [lindex $why 1] argument(s), the function type [lindex $why 2]"
+        }
+        arg {
+            set i [lindex $why 1]
+            return [format {argument %d is incompatible: the callable's parameter requires %s, but callers of the function type may pass any %s} \
+                [expr {$i + 1}] [show [lindex [FnArgs $s] $i]] [show [lindex [FnArgs $expected] $i]]]
+        }
+        return {
+            return [format {return incompatible: the callable returns %s, not usable as %s} \
+                [show [FnReturn $s]] [show [FnReturn $expected]]]
+        }
+        errors {
+            return [format {error set incompatible: the callable may raise %s, but the function type allows only [%s]} \
+                [join [lrange $why 1 end] {, }] [join [FnErrors $expected] {, }]]
+        }
+    }
+    return ""
+}
+
+# TYPE as a structural contract, for diagnostics: its own text if it is
+# structural, else "<exact text> (contract <Fn text>)" when it has one.
+proc hir::types::showContract {type} {
+    set s [structuralOf $type]
+    if {$s eq "" || $s eq $type} {
+        return [show $type]
+    }
+    return "[show $type] (contract [show $s])"
 }
 
 # 1 if TYPE is a list form ({list ELEM} or {list ELEM SHAPE}).
@@ -186,9 +515,15 @@ proc hir::types::Bound {type depth} {
     if {[IsSet $type]} {
         return [MakeSet [lindex $type 1] $depth]
     }
-    if {[lindex $type 0] eq "block" && [llength $type] == 4} {
+    if {[IsExactBlock $type]} {
         set result [expr {$depth >= $aggregateDepth ? "any" : [Bound [lindex $type 3] [expr {$depth + 1}]]}]
         return [lreplace $type 3 3 $result]
+    }
+    if {[IsFn $type]} {
+        # Past the bound a structural function type becomes any -- a sound
+        # over-approximation, unlike cutting one of its (contravariant)
+        # argument types would be (MakeFn).
+        return [MakeFn [FnArgs $type] [FnReturn $type] [FnErrors $type] $depth]
     }
     return $type
 }
@@ -239,6 +574,14 @@ proc hir::types::subtype {a b} {
         }
         return 1
     }
+    if {[IsFn $b]} {
+        # A structural function type: any callable whose own call contract
+        # is compatible with B's (an exact native/block through its
+        # structuralOf supertype). A value merely of kind block/native, or
+        # of type any, is not known to honor any particular contract.
+        set s [structuralOf $a]
+        return [expr {$s ne "" && [FnSubtype $s $b]}]
+    }
     if {[IsSpecific $b]} {
         # A block or native form: only that identical form is known to be one.
         return 0
@@ -251,10 +594,11 @@ proc hir::types::lub {a b} {
     if {$a eq "never"} { return [canonical $b] }
     if {$b eq "never"} { return [canonical $a] }
     if {$a eq $b} { return [canonical $a] }
-    if {[lindex $a 0] eq "block" && [lindex $b 0] eq "block"
-            && [llength $a] == 4 && [llength $b] == 4
-            && [lrange $a 1 2] eq [lrange $b 1 2]} {
-        return [canonical [list block [lindex $a 1] [lindex $a 2] [lub [lindex $a 3] [lindex $b 3]]]]
+    if {[IsExactBlock $a] && [IsExactBlock $b] && [lrange $a 1 2] eq [lrange $b 1 2]} {
+        # The same code target (its contract, if any, is the same too: it
+        # is a property of the block expression -- blockType): keep the
+        # exact identity, join what its calls return.
+        return [canonical [lreplace $a 3 3 [lub [lindex $a 3] [lindex $b 3]]]]
     }
     if {[IsList $a] && [IsList $b]} {
         set elem [lub [lindex $a 1] [lindex $b 1]]
@@ -273,6 +617,16 @@ proc hir::types::lub {a b} {
         # both branches agree, and this milestone deliberately does not
         # invent element-lub for sets merely because List has one.
         return immutableSet
+    }
+    if {[IsCallable $a] && [IsCallable $b]} {
+        # Two different callables (exact or structural): their narrowest
+        # common call contract -- forgetting only which code runs, never
+        # that the value is a callable with that contract. No finite set
+        # of targets is kept (STRUCTURAL-FUNCTION-TYPES.md's non-goal).
+        set joined [FnLub [structuralOf $a] [structuralOf $b]]
+        if {$joined ne ""} {
+            return [canonical $joined]
+        }
     }
     if {[IsSpecific $a] || [IsSpecific $b]} {
         set kind [kindOf $a]
@@ -316,6 +670,16 @@ proc hir::types::narrow {current fact} {
     if {[IsSet $current] && [IsSet $fact]} {
         return [MakeSet [narrow [lindex $current 1] [lindex $fact 1]] 0]
     }
+    if {[IsFn $fact]} {
+        # A structural contract fact: a callable already known to honor it
+        # (an exact one, or a narrower contract) says more.
+        return [expr {[subtype $current $fact] ? $current : $fact}]
+    }
+    if {[IsFn $current] && $fact in {block native}} {
+        # Both facts hold; the contract is the one static checking uses
+        # (no single type represents "this contract, and a Block").
+        return $current
+    }
     if {[IsSpecific $current]} {
         # A precise callable type already implies a bare kind fact.
         if {$fact eq [kindOf $current]} {
@@ -356,7 +720,9 @@ proc hir::types::IsEqualityTotal {type} {
 
 # The runtime value kind every value of TYPE has, or "" if not fixed.
 proc hir::types::kindOf {type} {
-    if {$type eq "never"} {
+    if {$type eq "never" || [IsFn $type]} {
+        # A structural function type's value is a Block or a native: no
+        # one runtime kind.
         return ""
     }
     if {[IsSpecific $type]} {
@@ -367,7 +733,7 @@ proc hir::types::kindOf {type} {
 
 # The core type (core/type.tcl) a static type implies.
 proc hir::types::semantic {type} {
-    if {$type eq "never"} {
+    if {$type eq "never" || [IsFn $type]} {
         return any
     }
     if {[IsSpecific $type]} {
@@ -397,7 +763,21 @@ proc hir::types::show {type} {
     if {[IsSpecific $type]} {
         switch -- [lindex $type 0] {
             native { return "native [lindex $type 1]" }
-            block  { return "block([lindex $type 1])/[lindex $type 2] -> [show [lindex $type 3]]" }
+            block  {
+                # A block's contract (a fifth element) is not shown: it is
+                # a property of block expression E itself, recovered from
+                # its node (hir::read::CanonicalBlockTypes), and showing it
+                # would only repeat that node's own declarations.
+                return "block([lindex $type 1])/[lindex $type 2] -> [show [lindex $type 3]]"
+            }
+            fn {
+                # The canonical structural function type notation, exactly
+                # the source syntax an annotation spells.
+                set fields [lindex $type 1]
+                return [format {Fn{args: [%s], return: %s, errors: [%s]}} \
+                    [join [lmap t [dict get $fields args] {show $t}] {, }] \
+                    [show [dict get $fields return]] [join [dict get $fields errors] {, }]]
+            }
             list {
                 if {[llength $type] == 3} {
                     # A positional (heterogeneous) shape: internal
@@ -683,7 +1063,7 @@ proc hir::types::BindingType {hir ctx b} {
                 # `target` field would). Every other backend leaves
                 # moduleNativeTargets unset, so this is a no-op for them.
                 lassign [dict get $hir moduleNativeTargets $name] block arity
-                return [list block $block $arity any]
+                return [blockType $hir $block $arity any]
             }
         }
         return [ofValue $value]
@@ -722,7 +1102,7 @@ proc hir::types::ForwardType {hir b} {
     if {[dict get $hir exprs $value kind] ne "block"} {
         return any
     }
-    return [list block $value [llength [dict get $hir exprs $value params]] any]
+    return [blockType $hir $value [llength [dict get $hir exprs $value params]] any]
 }
 
 # Records that binding B's value has type FACT on the current path.
@@ -982,7 +1362,7 @@ proc hir::types::Block {hirVar outerVar e self} {
             dict set seeds $b [BindingType $hir $outer $b]
         }
         {*}[dict get $outer spec] create $e $seeds
-        return [list block $e $arity any]
+        return [blockType $hir $e $arity any]
     }
     set declared [dict get $node declaredResult]
     set assumed [expr {$declared eq {} ? {never} : $declared}]
@@ -995,7 +1375,7 @@ proc hir::types::Block {hirVar outerVar e self} {
         dict set ctx types [dict get $outer types]
         dict set ctx facts [dict get $outer facts]
         if {$self ne ""} {
-            dict set ctx types $self [list block $e $arity $assumed]
+            dict set ctx types $self [blockType $hir $e $arity $assumed]
         }
         # A parameter annotation seeds its binding's semantic type directly
         # (never a runtime check, STRICT-TYPED-PARAMETERS.md): from here on
@@ -1022,7 +1402,7 @@ proc hir::types::Block {hirVar outerVar e self} {
     dict set hir exprs $e inferredResultType [intern hir $result]
     if {$declared ne {}} { set result $declared }
     dict set hir exprs $e resultType [intern hir $result]
-    return [list block $e $arity $result]
+    return [blockType $hir $e $arity $result]
 }
 
 # The native NAME a reference to a *module-bridged* type-test predicate
@@ -1131,7 +1511,7 @@ proc hir::types::Call {hirVar ctxVar e} {
         } elseif {$spec} {
             set dead 1
         }
-    } elseif {[lindex $calleeType 0] eq "block" && [llength $calleeType] == 4} {
+    } elseif {[IsExactBlock $calleeType]} {
         lassign $calleeType _ block arity blockResult
         set target [list block $block]
         if {[llength $argTypes] == 1} {
@@ -1163,6 +1543,20 @@ proc hir::types::Call {hirVar ctxVar e} {
         } elseif {$spec} {
             set dead 1
         }
+    } elseif {[IsFn $calleeType]} {
+        # A call through a structural function type (STRUCTURAL-FUNCTION-
+        # TYPES.md): statically known to be callable, target unknown -- no
+        # `target` (lowering stays the indirect callvalue path, and no
+        # instance is chosen), but the call is typed from the contract:
+        # what it returns here, and (calleeErrors below) which declared
+        # errors it may let escape. Its arguments are held to the
+        # contract's argument types by hir::range::verifyDeclaredParams,
+        # exactly as a direct call's are held to its target's parameters.
+        if {[llength [FnArgs $calleeType]] == [llength $argExprs]} {
+            set result [FnReturn $calleeType]
+        } elseif {$spec} {
+            set dead 1
+        }
     } elseif {$spec && [kindOf $calleeType] ni {"" block native}} {
         # Not callable: the call always raises NOT-CALLABLE.
         set dead 1
@@ -1171,17 +1565,24 @@ proc hir::types::Call {hirVar ctxVar e} {
     dict set hir exprs $e known $known
     # The declared errors this call may propagate (EXPLICIT-ERROR-
     # COMPLETIONS.md), for hir/errorsets.tcl. Only an exact, directly-known
-    # callee (target {block ExprId}) can ever be charged with a nonempty
-    # set here: a native never declares one, and any other callee (an
-    # unresolved dynamic dispatch) is sound to treat as producing none,
-    # because hir/callables.tcl's escape audit (widened to cover an error-
-    # bearing block exactly like a typed-parameter-bearing one) already
-    # rejects every position that would let an error-bearing block reach
-    # such a call erased of its exact identity -- so a callee that reaches
-    # here *without* an exact block target can never actually be one.
+    # callee (target {block ExprId}) or a structural one (its contract's
+    # declared errors) can ever be charged with a nonempty set here: a
+    # native never declares one, and any other callee (an unresolved
+    # dynamic dispatch through any/a bare kind) is sound to treat as
+    # producing none, because hir/callables.tcl's escape audit (widened to
+    # cover an error-bearing block exactly like a typed-parameter-bearing
+    # one) already rejects every position that would let an error-bearing
+    # callable reach such a call erased of both its exact identity and its
+    # structural contract -- so a callee that reaches here with neither can
+    # never actually be one.
     set calleeErrors {}
     if {[lindex $target 0] eq "block"} {
         set calleeErrors [dict get $hir exprs [lindex $target 1] declaredErrors]
+    } elseif {[IsFn $calleeType]} {
+        # A structural callee's declared error contract: every error it
+        # permits may escape this call, since which implementation runs
+        # (and so any narrower proof about it) is unknown here.
+        set calleeErrors [FnErrors $calleeType]
     }
     dict set hir exprs $e calleeErrors $calleeErrors
     return [expr {$dead ? "never" : $result}]

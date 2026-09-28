@@ -1205,6 +1205,13 @@ proc hir::range::ProvesValueAcceptedBy {argType argRange declared} {
     if {[hir::types::IsList $declared] || [hir::types::IsSet $declared]} {
         return [AggregateAdmits [hir::types::Unshaped $argType] $declared]
     }
+    if {[hir::types::IsFn $declared]} {
+        # A structural function type (STRUCTURAL-FUNCTION-TYPES.md): the
+        # argument must be a callable whose own call contract is
+        # compatible (hir::types::subtype's contravariant/covariant/subset
+        # rule) -- no Range fact bears on that.
+        return [hir::types::subtype $argType $declared]
+    }
     return [expr {[hir::types::subtype $argType $declared] || [ProvesType $argRange $declared]}]
 }
 
@@ -1276,7 +1283,7 @@ proc hir::range::FactsSatisfiable {observedType observedRange declared} {
     if {[hir::types::IsList $declared] || [hir::types::IsSet $declared]} {
         return [AggregateAdmits [hir::types::Unshaped $observedType] $declared]
     }
-    if {[core::type::base $declared] ne "int"} {
+    if {[hir::types::IsFn $declared] || [core::type::base $declared] ne "int"} {
         return 1
     }
     if {$observedRange eq "never"} {
@@ -1321,8 +1328,8 @@ proc hir::range::verifyDeclaredResults {hirVar} {
         set declared [dict get $node declaredResult]
         set inferred [hir::type $hir [dict get $node inferredResultType]]
         if {![ProvesValueAcceptedBy $inferred $result $declared]} {
-            hir::Diagnose hir TYPE [format {function result does not prove declared type %s (facts: %s)} \
-                [hir::types::show $declared] [show $result]] $e
+            hir::Diagnose hir TYPE [format {function result does not prove declared type %s (facts: %s)%s} \
+                [hir::types::show $declared] [show $result] [MismatchClause $inferred $declared]] $e
         }
     }
 }
@@ -1400,6 +1407,13 @@ proc hir::range::VerifyCallArguments {hirVar ranges e} {
 proc hir::range::VerifyCall {hirVar ranges e node} {
     upvar 1 $hirVar hir
     lassign [dict get $node target] targetKind targetBlock
+    if {$targetKind eq {}} {
+        set calleeType [hir::typeOf $hir [dict get $node callee]]
+        if {[hir::types::IsFn $calleeType]} {
+            VerifyStructuralCall hir $ranges $e $node $calleeType
+        }
+        return
+    }
     if {$targetKind ne {block}} { return }
     set targetNode [dict get $hir exprs $targetBlock]
     set declaredTypes [dict get $targetNode declaredParamTypes]
@@ -1418,9 +1432,53 @@ proc hir::range::VerifyCall {hirVar ranges e node} {
             continue
         }
         hir::Diagnose hir TYPE [format \
-            {argument for parameter "%s" cannot be proven to satisfy %s (argument type: %s, facts: %s)} \
+            {argument for parameter "%s" cannot be proven to satisfy %s (argument type: %s, facts: %s)%s} \
             [dict get $hir bindings $paramBinding name] [hir::types::show $declaredType] \
-            [hir::types::show $argType] [show $argRange]] $arg
+            [hir::types::show $argType] [show $argRange] [MismatchClause $argType $declaredType]] $arg
+    }
+}
+
+# "": DECLARED is not a structural function type; else "; WHY" naming the
+# part of its contract a value of ARGTYPE fails (hir::types::explainMismatch).
+proc hir::range::MismatchClause {argType declared} {
+    if {![hir::types::IsFn $declared]} {
+        return ""
+    }
+    set why [hir::types::explainMismatch $argType $declared]
+    return [expr {$why eq "" ? "" : "; $why"}]
+}
+
+# A call E through a structural function type CALLEETYPE
+# (STRUCTURAL-FUNCTION-TYPES.md) -- no exact target, so no declared
+# parameter of a known block to check against: the contract's own argument
+# types are the declared parameter types instead, held to the identical
+# admissibility proof (ProvesValueAcceptedBy, never a runtime check). The
+# contract also fixes the arity, so a call passing another number of
+# arguments is rejected statically (a direct call of an exact target with
+# the wrong arity remains the run-time ARITY error it always was).
+proc hir::range::VerifyStructuralCall {hirVar ranges e node calleeType} {
+    upvar 1 $hirVar hir
+    set declaredTypes [hir::types::FnArgs $calleeType]
+    set args [dict get $node args]
+    if {[llength $args] != [llength $declaredTypes]} {
+        hir::Diagnose hir TYPE [format \
+            {this call passes %d argument(s) to a callable of function type %s, whose contract takes %d} \
+            [llength $args] [hir::types::show $calleeType] [llength $declaredTypes]] $e
+        return
+    }
+    set index 0
+    foreach arg $args declaredType $declaredTypes {
+        incr index
+        if {$declaredType eq "any"} { continue }
+        set argType [hir::typeOf $hir $arg]
+        set argRange [expr {[dict exists $ranges $arg] ? [dict get $ranges $arg] : [unknown]}]
+        if {[ProvesValueAcceptedBy $argType $argRange $declaredType]} {
+            continue
+        }
+        hir::Diagnose hir TYPE [format \
+            {argument %d cannot be proven to satisfy %s, the parameter type the callee's function type %s requires (argument type: %s, facts: %s)%s} \
+            $index [hir::types::show $declaredType] [hir::types::show $calleeType] \
+            [hir::types::show $argType] [show $argRange] [MismatchClause $argType $declaredType]] $arg
     }
 }
 

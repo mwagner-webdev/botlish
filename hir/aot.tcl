@@ -108,7 +108,8 @@
 #
 #   kind  native-call   expr native NAME runtime TAGS argKinds KINDS
 #         direct-call   expr block ExprId name NAME tail 0|1 self 0|1
-#         indirect-call expr calleeKind block|native (target unknown)
+#         indirect-call expr calleeKind block|native|callable (target unknown;
+#                       callable: a structural function type, either kind)
 #         closure       expr block ExprId captures BindingIds (creation of a
 #                       block value that needs an environment)
 #         known-error   expr error KIND (the operation always raises)
@@ -748,7 +749,14 @@ proc hir::aot::VisitCall {hir stateVar region e node tails statics} {
         return
     }
     set kind [hir::types::kindOf $calleeType]
-    if {$kind in {block native}} {
+    if {[hir::types::IsFn $calleeType]} {
+        # A structural function type (STRUCTURAL-FUNCTION-TYPES.md): a
+        # value statically known to be callable, with a known contract --
+        # only which native/Block runs is decided at run time, never
+        # whether the value is callable at all.
+        set kind callable
+    }
+    if {$kind in {block native callable}} {
         Fact state $region [dict merge [FactOf $hir indirect-call $e] \
             [dict create calleeKind $kind]] indirect-call
     } elseif {$kind eq ""} {

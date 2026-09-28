@@ -497,10 +497,19 @@ proc surface::parser::Value {pVar} {
 # produce (one), so "List[A, B]" is already a syntax error here, and a
 # constructor of higher arity would need no grammar change, only another
 # constructor-side arity number.
+#
+# "Fn" is the one head name the parser does know: it introduces a
+# structural function type (STRUCTURAL-FUNCTION-TYPES.md), whose named
+# fields are dedicated grammar (FnType), never an applied type argument --
+# so "Fn[...]" (a positional function type) and a bare "Fn" are syntax
+# errors here, each with its own message.
 proc surface::parser::TypeExpr {pVar what} {
     upvar 1 $pVar p
     set token [Expect p IDENT $what]
     set name [dict get $token value]
+    if {$name eq "Fn"} {
+        return [FnType p $token]
+    }
     if {[Kind p] ne "\["} {
         return $name
     }
@@ -508,6 +517,131 @@ proc surface::parser::TypeExpr {pVar what} {
     set arg [TypeExpr p "a type argument after \"\["]
     Expect p \] "\"\]\" after the type argument"
     return [list $name $arg]
+}
+
+# "Fn" "{" fnField { "," fnField } [ "," ] "}", after the "Fn" token FN:
+#
+#   fnField = "args" ":" "[" [ TypeExpr { "," TypeExpr } [ "," ] ] "]"
+#           | "return" ":" TypeExpr
+#           | "errors" ":" "[" [ IDENT { "," IDENT } [ "," ] ] "]"
+#
+# A structural function type's call contract (STRUCTURAL-FUNCTION-TYPES.md).
+# Fields are named, so they may come in any order; each at most once.
+# "args" and "return" are required; an omitted "errors" means errors: []
+# -- exactly what an omitted "errors" clause means on a "fn" declaration (no
+# declared error may escape), never "unchecked errors". Newlines inside the
+# braces are free (the lexer treats "{" like "(" and "["). Returns the
+# TypeExpr {fn FIELDS}, FIELDS a dict {args {TYPEEXPR...} return TYPEEXPR
+# errors {NAME...}} in canonical field order: "fn" is a keyword, so this
+# pair can never be mistaken for an applied type {NAME ARG}. Adding a field
+# later (the planned `context`) is one more case below.
+proc surface::parser::FnType {pVar fn} {
+    upvar 1 $pVar p
+    set usage "Fn{args: \[...\], return: ..., errors: \[...\]}"
+    if {[Kind p] eq "\["} {
+        Fail [Peek p] "a function type has named fields, not positional type arguments: write $usage"
+    }
+    if {[Kind p] ne "\{"} {
+        Fail [Peek p] "expected \"\{\" after \"Fn\" (a function type is written $usage), found [Describe [Peek p]]"
+    }
+    set open [Advance p]
+    set fields [dict create]
+    while {[Kind p] ne "\}"} {
+        set token [Peek p]
+        switch -- [dict get $token kind] {
+            IDENT - return - errors {
+                set field [expr {[dict get $token kind] eq "IDENT" ? [dict get $token value] : [dict get $token kind]}]
+            }
+            default {
+                Fail $token "expected a field name (args, return or errors) in the function type, found [Describe $token]"
+            }
+        }
+        if {$field ni {args return errors}} {
+            if {$field in {target targets}} {
+                Fail $token "a function type cannot name its target: \"$field\" is not a field (a function type describes only the call contract: args, return, errors)"
+            }
+            if {$field eq "context"} {
+                Fail $token "the function type field \"context\" is not supported yet (fields: args, return, errors)"
+            }
+            Fail $token "unknown field \"$field\" in the function type (fields: args, return, errors)"
+        }
+        if {[dict exists $fields $field]} {
+            Fail $token "duplicate field \"$field\" in the function type"
+        }
+        Advance p
+        if {[Kind p] ne ":"} {
+            Fail [Peek p] "expected \":\" after the function type field \"$field\", found [Describe [Peek p]]"
+        }
+        Advance p
+        switch -- $field {
+            args {
+                dict set fields args [FnList p args {
+                    TypeExpr p "a parameter type in the \"args\" list"
+                }]
+            }
+            return {
+                dict set fields return [TypeExpr p "a type after \"return:\""]
+            }
+            errors {
+                set names [FnList p errors {
+                    set name [Expect p IDENT "an error name in the \"errors\" list"]
+                    if {[Kind p] eq "\["} {
+                        Fail [Peek p] "the \"errors\" list names declared errors, not types: expected \",\" or \"\]\" after the error name \"[dict get $name value]\""
+                    }
+                    list [dict get $name value] $name
+                }]
+                set seen {}
+                foreach pair $names {
+                    lassign $pair name nameToken
+                    if {$name in $seen} {
+                        Fail $nameToken "duplicate error \"$name\" in the function type's \"errors\" list"
+                    }
+                    lappend seen $name
+                }
+                dict set fields errors $seen
+            }
+        }
+        if {[Kind p] eq ","} {
+            Advance p
+        } elseif {[Kind p] ne "\}"} {
+            Fail [Peek p] "expected \",\" or \"\}\" after the function type field \"$field\", found [Describe [Peek p]]"
+        }
+    }
+    set close [Peek p]
+    foreach required {args return} {
+        if {![dict exists $fields $required]} {
+            Fail $close "the function type is missing its \"$required\" field ($usage)"
+        }
+    }
+    Advance p
+    if {![dict exists $fields errors]} {
+        dict set fields errors {}
+    }
+    return [list fn [dict create args [dict get $fields args] return [dict get $fields return] \
+        errors [dict get $fields errors]]]
+}
+
+# "[" [ ITEM { "," ITEM } [ "," ] ] "]" for function type field FIELD, each
+# ITEM parsed by the script ITEM (in the caller's frame, with p visible).
+# Returns the items' values.
+proc surface::parser::FnList {pVar field item} {
+    upvar 1 $pVar p
+    if {[Kind p] ne "\["} {
+        set what [expr {$field eq "args" ? "a list of parameter types" : "a list of declared error names"}]
+        Fail [Peek p] "the \"$field\" field of a function type must be $what in \"\[...\]\", found [Describe [Peek p]]"
+    }
+    Advance p
+    set items {}
+    while {[Kind p] ne "\]"} {
+        lappend items [eval $item]
+        if {[Kind p] eq ","} {
+            Advance p
+        } elseif {[Kind p] ne "\]"} {
+            Fail [Peek p] "expected \",\" or \"\]\" in the \"$field\" list, found [Describe [Peek p]]"
+        }
+    }
+    Advance p
+    return $items
 }
 
 proc surface::parser::Function {pVar} {

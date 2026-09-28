@@ -277,6 +277,21 @@ proc hir::resolve::ResolveTypeExpr {typeExpr} {
         return [hir::types::resolveNamed $typeExpr]
     }
     lassign $typeExpr name arg
+    if {$name eq "fn"} {
+        # A structural function type (surface::parser::FnType's
+        # {fn FIELDS}; "fn" is a keyword, so never a constructor name):
+        # every argument and the return type resolve like any other type
+        # annotation, and every error name must be a declared error
+        # identity, exactly as in a function's own "errors" clause.
+        set argTypes [lmap t [dict get $arg args] {ResolveTypeExpr $t}]
+        set result [ResolveTypeExpr [dict get $arg return]]
+        foreach errName [dict get $arg errors] {
+            if {![hir::errordecls::isDeclared $errName]} {
+                error "unknown error \"$errName\" in the function type's \"errors\" list: no \"error $errName\" declaration is visible"
+            }
+        }
+        return [hir::types::MakeFn $argTypes $result [dict get $arg errors]]
+    }
     return [hir::types::resolveApplication $name [list [ResolveTypeExpr $arg]]]
 }
 
@@ -291,6 +306,11 @@ proc hir::resolve::ShowTypeExpr {typeExpr} {
         return $typeExpr
     }
     lassign $typeExpr name arg
+    if {$name eq "fn"} {
+        return [format {Fn{args: [%s], return: %s, errors: [%s]}} \
+            [join [lmap t [dict get $arg args] {ShowTypeExpr $t}] {, }] \
+            [ShowTypeExpr [dict get $arg return]] [join [dict get $arg errors] {, }]]
+    }
     return "$name\[[ShowTypeExpr $arg]\]"
 }
 
@@ -377,7 +397,7 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 }
                 if {[catch {ResolveTypeExpr $paramType} normalized]} {
                     hir::Diagnose hir TYPE \
-                        [format {unknown or invalid type %s for parameter "%s"} [ShowTypeExpr $paramType] $name] $e
+                        [format {unknown or invalid type %s for parameter "%s": %s} [ShowTypeExpr $paramType] $name $normalized] $e
                     lappend declaredParamTypes {}
                 } else {
                     lappend declaredParamTypes $normalized
@@ -394,7 +414,7 @@ proc hir::resolve::Expr {hirVar node ctx} {
             set declared [expr {[dict exists $node declaredResult] ? [dict get $node declaredResult] : {}}]
             if {$declared ne {}} {
                 if {[catch {ResolveTypeExpr $declared} normalized]} {
-                    hir::Diagnose hir TYPE [format {unknown or invalid result type %s} [ShowTypeExpr $declared]] $e
+                    hir::Diagnose hir TYPE [format {unknown or invalid result type %s: %s} [ShowTypeExpr $declared] $normalized] $e
                     set declared {}
                 } else {
                     set declared $normalized

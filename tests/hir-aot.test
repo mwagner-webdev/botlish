@@ -66,18 +66,22 @@ test hir-aot-3 {a closure call with a known target is direct; the closure needs 
          [aotStatus $a <program>]
 } -result {{make_adder add} closure {{binding b3 name x class value}} closure-env {closed closed}}
 
+# (Two different blocks, or two different natives, now join to their common
+# structural function type -- STRUCTURAL-FUNCTION-TYPES.md -- a value known
+# to be callable whose kind is not one of the two, so the indirect call's
+# calleeKind is "callable" rather than the shared bare kind.)
 test hir-aot-4 {a call of a block whose target is not known is an indirect call, not a blocker} -body {
     set a [aotOf [hirOf \
         {bind pick {block {flag} {if {ref flag} {block {} {block {} {const 1}}} {block {} {block {} {const 2}}}}}} \
         {call {call {ref pick} {ref true}}}]]
     list [lmap f [aotFacts $a <program> indirect-call] {dict get $f calleeKind}] \
          [aotStatus $a <program>] [dict get [aotRegion $a <program>] requirements]
-} -result {block {closed closed} indirect-call}
+} -result {callable {closed closed} indirect-call}
 
 test hir-aot-5 {a call of a native whose identity is not known is an indirect call} -body {
     set a [aotOf [hirOf  {bind pick {block {flag} {if {ref flag} {block {} {ref +}} {block {} {ref -}}}}}  {call {call {ref pick} {ref true}} {const 1} {const 2}}]]
     list [lmap f [aotFacts $a <program> indirect-call] {dict get $f calleeKind}]  [aotStatus $a <program>]
-} -result {native {closed closed}}
+} -result {callable {closed closed}}
 
 test hir-aot-6 {an unknown callable is a semantic blocker: dispatch is open} -body {
     set a [aotSource "fn apply(f, x):\n    f(x)\n\nfn inc(n):\n    n + 1\n\napply(inc, 1)"]

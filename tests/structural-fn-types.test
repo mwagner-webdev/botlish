@@ -1,0 +1,868 @@
+# structural-fn-types.test -- structural function types and exact callable
+# refinement (STRUCTURAL-FUNCTION-TYPES.md).
+#
+#   Fn{args: [T1, ...], return: R, errors: [E1, ...]}
+#
+# is a call contract: some callable -- a native, an envless Block or a
+# capturing Block, which one is not known -- that accepts arguments
+# admissible for T1.., returns R when it completes normally, and lets at
+# most E1.. escape. Exact native/Block types are refinements of their own
+# structural contract (hir::types::structuralOf), so a join of different
+# compatible callables is their common Fn, never `any`, and an exact
+# callable is a real subtype of any compatible Fn.
+#
+# Sections: lattice laws (pure hir::types), surface syntax and its
+# diagnostics, surface acceptance and rejection, error contracts, the
+# typed-callable escape audit's interplay with Fn, specialization keys,
+# HIR text round trip, and the three higher-order dogfooding benchmarks'
+# callable boundaries.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+set ::fnDecls "type Byte = Int in 0..255\ntype Nibble = Int in 0..15\nerror NotFound\nerror PermissionDenied\n"
+
+proc fnT {argTypes result {errors {}}} {
+    return [hir::types::MakeFn $argTypes $result $errors]
+}
+
+# Registers this file's source-defined types/errors (Byte, Nibble,
+# NotFound, PermissionDenied) by compiling an otherwise empty program.
+proc fnDeclare {} {
+    surface::compile "$::fnDecls\n1" decls.bot
+}
+
+proc fnCompile {src {decls ""}} {
+    if {$decls eq ""} { set decls $::fnDecls }
+    set path [makeFile "$decls$src" fn-program.bot]
+    try {
+        return [surface::readProgramFile $path]
+    } finally {
+        removeFile fn-program.bot
+    }
+}
+
+proc fnAccepts {src} {
+    fnCompile $src
+    return 1
+}
+
+# {ERRORCODE MATCHED}: the program is rejected at compile time, and the
+# message matches PATTERN.
+proc fnRejects {src pattern} {
+    if {![catch {fnCompile $src} message options]} {
+        return "accepted"
+    }
+    set code [dict get $options -errorcode]
+    set code [expr {[lindex $code 0] eq "SURFACE" ? [lrange $code 0 1] : [lrange $code 0 2]}]
+    list $code [string match $pattern $message]
+}
+
+# The declared type of parameter NAME (of whichever block declares it).
+proc fnParamType {hir name} {
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] ne "block"} continue
+        foreach b [dict get $node params] t [dict get $node declaredParamTypes] {
+            if {[dict get $hir bindings $b name] eq $name} {
+                return [expr {$t eq {} ? "" : [hir::types::show $t]}]
+            }
+        }
+    }
+    return "?"
+}
+
+# The program's value if every backend agrees -- interp, compile,
+# cranelift-generic and cranelift through the lowered core IR, plus the
+# compile and cranelift backends straight from the surface HIR (where
+# declared Fn annotations are kept) -- else every outcome.
+proc fnRun {src {decls ""}} {
+    set hir [fnCompile $src $decls]
+    set exprs [hir::lower $hir]
+    set outcomes [lmap backend {interp compile cranelift-generic cranelift} {outcomeUnder $backend $exprs}]
+    lappend outcomes [list value [core::value::show [core::compiler::evalHir $hir] 1] {}]
+    lappend outcomes [list value [core::value::show [native::evalHir $hir] 1] {}]
+    if {[llength [lsort -unique $outcomes]] == 1} {
+        return [lindex $outcomes 0 1]
+    }
+    return "DIFFER: $outcomes"
+}
+
+# The first `if` in the body of the function bound to NAME (not an `or`/
+# `and`, which also lower to `if`, elsewhere in the program).
+proc fnIfIn {hir name} {
+    dict for {b binding} [dict get $hir bindings] {
+        if {[dict get $binding name] ne $name || [dict get $binding declaredBy] eq ""} continue
+        set block [hir::get $hir [dict get $binding declaredBy] value]
+        set work [hir::get $hir $block body]
+        while {$work ne {}} {
+            set work [lassign $work e]
+            if {[hir::kind $hir $e] eq "if"} { return $e }
+            if {[hir::kind $hir $e] ne "block"} { lappend work {*}[hir::children $hir $e] }
+        }
+    }
+    return ""
+}
+
+# The type of NAME's own binding in HIR.
+proc fnBindingType {hir name} {
+    dict for {b binding} [dict get $hir bindings] {
+        if {[dict get $binding name] eq $name && [dict get $binding kind] ne "root"} {
+            return [hir::types::show [hir::bindingType $hir $b]]
+        }
+    }
+    return "?"
+}
+
+# ---------------------------------------------------------------------------
+# Lattice laws (spec items 86-88)
+
+test fn-law-reflexive {T <: T for structural, exact native and exact block types} -body {
+    set f [fnT {str} bool {NotFound}]
+    list [hir::types::subtype $f $f] \
+         [hir::types::subtype {native is_tcl_alpha} {native is_tcl_alpha}] \
+         [hir::types::subtype {block e1 1 bool} {block e1 1 bool}]
+} -result {1 1 1}
+
+test fn-law-exact-refines-structural {an exact callable is a subtype of its own structural contract (structuralOf)} -body {
+    set blocks {{block e1 1 bool} {block e2 2 int {args {int any} errors {NotFound}}}}
+    concat [lmap t $blocks {hir::types::subtype $t [hir::types::structuralOf $t]}] \
+        [hir::types::subtype {native is_tcl_alnum} [hir::types::structuralOf {native is_tcl_alnum}]] \
+        [list [hir::types::show [hir::types::structuralOf {block e2 2 int {args {int any} errors {NotFound}}}]]]
+} -result {1 1 1 {Fn{args: [int, any], return: int, errors: [NotFound]}}}
+
+test fn-law-native-structural-signature {a native's structural contract comes from the registry: fixed arity, -result-type, no errors, and every argument any (its -param-types are run-time-checked requirements, not static obligations)} -body {
+    list [hir::types::show [hir::types::structuralOf {native is_tcl_alnum}]] \
+         [hir::types::show [hir::types::structuralOf {native substring}]] \
+         [hir::types::structuralOf {native list}]
+} -result {{Fn{args: [any], return: bool, errors: []}} {Fn{args: [any, any, any], return: str, errors: []}} {}}
+
+test fn-law-lub-idempotent {lub(T, T) == T, exactness kept for the same target} -body {
+    set f [fnT {str} bool]
+    list [expr {[hir::types::lub $f $f] eq $f}] \
+         [hir::types::lub {native is_tcl_alpha} {native is_tcl_alpha}] \
+         [hir::types::lub {block e1 1 bool} {block e1 1 bool}] \
+         [hir::types::lub {block e1 1 bool} {block e1 1 int}]
+} -result {1 {native is_tcl_alpha} {block e1 1 bool} {block e1 1 any}}
+
+test fn-law-lub-different-exact {lub of two different compatible exact callables is their common structural Fn -- native/native, block/block and native/block alike -- never any, and never a set of targets} -body {
+    lmap pair {
+        {{native is_tcl_alpha} {native is_tcl_alnum}}
+        {{block e1 1 bool} {block e2 1 bool}}
+        {{native is_tcl_alnum} {block e2 1 bool}}
+    } {hir::types::show [hir::types::lub {*}$pair]}
+} -result {{Fn{args: [any], return: bool, errors: []}} {Fn{args: [any], return: bool, errors: []}} {Fn{args: [any], return: bool, errors: []}}}
+
+test fn-law-lub-with-supertype {lub(Exact, FnSuper) == FnSuper when the exact callable already satisfies it} -body {
+    set super [fnT {str} bool {NotFound}]
+    list [expr {[hir::types::lub {native is_tcl_alnum} $super] eq $super}] \
+         [expr {[hir::types::lub $super {block e2 1 bool}] eq $super}] \
+         [expr {[hir::types::lub {block e3 1 bool {args {str} errors {NotFound}}} $super] eq $super}]
+} -result {1 1 1}
+
+test fn-law-errors-subset {fewer declared errors is a narrower function type; the reverse is not} -body {
+    set narrow [fnT {str} int {NotFound}]
+    set wide [fnT {str} int {PermissionDenied NotFound}]
+    list [hir::types::subtype $narrow $wide] [hir::types::subtype $wide $narrow] \
+         [hir::types::subtype [fnT {str} int] $narrow]
+} -result {1 0 1}
+
+test fn-law-argument-contravariance {a callable accepting a wider argument satisfies a contract for a narrower one; the reverse is not} -body {
+    list [hir::types::subtype [fnT {any} bool] [fnT {str} bool]] \
+         [hir::types::subtype [fnT {str} bool] [fnT {any} bool]]
+} -result {1 0}
+
+test fn-law-argument-contravariance-domains {integer domains: Fn{args: [int]} <: Fn{args: [Byte]} <: Fn{args: [Nibble]}, never the reverse (admissibility, not only nominal subtype)} -body {
+    fnDeclare
+    set byte [core::type::normalize Byte]
+    set nibble [core::type::normalize Nibble]
+    list [hir::types::subtype [fnT {int} int] [fnT [list $byte] int]] \
+         [hir::types::subtype [fnT [list $byte] int] [fnT [list $nibble] int]] \
+         [hir::types::subtype [fnT [list $nibble] int] [fnT [list $byte] int]] \
+         [hir::types::subtype [fnT [list $byte] int] [fnT {int} int]]
+} -result {1 1 0 0}
+
+test fn-law-return-covariance {a callable returning a narrower type satisfies a contract for a wider one; the reverse is not} -body {
+    fnDeclare
+    set byte [core::type::normalize Byte]
+    list [hir::types::subtype [fnT {str} $byte] [fnT {str} int]] \
+         [hir::types::subtype [fnT {str} int] [fnT {str} $byte]] \
+         [hir::types::subtype [fnT {str} bool] [fnT {str} any]]
+} -result {1 0 1}
+
+test fn-law-arity {different fixed arities are incompatible: no subtype, and the join falls back instead of inventing an Fn} -body {
+    list [hir::types::subtype [fnT {any} bool] [fnT {any any} bool]] \
+         [hir::types::lub {block e1 1 bool} {block e2 2 bool}] \
+         [hir::types::lub {native is_tcl_alpha} {block e2 2 bool}]
+} -result {0 block any}
+
+test fn-law-lub-meet-of-arguments {the join's argument types are the meet (glb) of both contracts' -- never a covariant lub -- its return the lub, its errors the union} -body {
+    fnDeclare
+    set byte [core::type::normalize Byte]
+    set nibble [core::type::normalize Nibble]
+    list [hir::types::show [hir::types::lub [fnT [list $byte] int {NotFound}] [fnT [list $nibble] $byte {PermissionDenied}]]] \
+         [hir::types::show [hir::types::lub [fnT {any str} bool] [fnT {int any} bool]]]
+} -result {{Fn{args: [int[Nibble]], return: int, errors: [NotFound, PermissionDenied]}} {Fn{args: [int, str], return: bool, errors: []}}}
+
+test fn-law-no-representable-meet {two contracts whose argument types have no representable meet (str vs int) do not join to an unsound Fn} -body {
+    list [hir::types::lub [fnT {str} bool] [fnT {int} bool]] \
+         [hir::types::lub {block e1 1 bool {args {str} errors {}}} {block e2 1 bool {args {int} errors {}}}]
+} -result {any block}
+
+test fn-law-lub-is-upper-bound {both operands are subtypes of their join} -body {
+    fnDeclare
+    set byte [core::type::normalize Byte]
+    set pairs [list \
+        [list {native is_tcl_alnum} {block e2 1 bool}] \
+        [list [fnT [list $byte] int {NotFound}] [fnT {int} $byte {PermissionDenied}]] \
+        [list {block e1 1 bool {args {str} errors {NotFound}}} [fnT {any} bool]]]
+    lmap pair $pairs {
+        lassign $pair a b
+        set j [hir::types::lub $a $b]
+        expr {[hir::types::subtype $a $j] && [hir::types::subtype $b $j]}
+    }
+} -result {1 1 1}
+
+test fn-law-symmetry {lub(A, B) == lub(B, A), whatever order the error sets were written in} -body {
+    fnDeclare
+    set byte [core::type::normalize Byte]
+    set pairs [list \
+        [list {native is_tcl_alnum} {block e2 1 bool}] \
+        [list [fnT {str} int {PermissionDenied NotFound}] [fnT {any} int {NotFound}]] \
+        [list [fnT [list $byte] int] [fnT {int} $byte]] \
+        [list {block e1 1 bool} {block e2 2 bool}]]
+    lmap pair $pairs {
+        lassign $pair a b
+        expr {[hir::types::lub $a $b] eq [hir::types::lub $b $a]}
+    }
+} -result {1 1 1 1}
+
+test fn-law-associativity {representative compatible triples join the same way in either grouping} -body {
+    fnDeclare
+    set byte [core::type::normalize Byte]
+    set nibble [core::type::normalize Nibble]
+    set triples [list \
+        [list {native is_tcl_alpha} {block e2 1 bool} {native is_tcl_alnum}] \
+        [list [fnT [list $byte] int {NotFound}] [fnT [list $nibble] int] [fnT {int} int {PermissionDenied}]] \
+        [list {block e1 1 bool} {block e2 1 bool} [fnT {str} bool]]]
+    lmap triple $triples {
+        lassign $triple a b c
+        expr {[hir::types::lub [hir::types::lub $a $b] $c] eq [hir::types::lub $a [hir::types::lub $b $c]]}
+    }
+} -result {1 1 1}
+
+test fn-law-canonical-errors {an error set is canonical: sorted, duplicate-free, independent of written order -- so equal contracts are equal strings and render identically} -body {
+    set a [fnT {str} int {PermissionDenied NotFound NotFound}]
+    set b [fnT {str} int {NotFound PermissionDenied}]
+    list [expr {$a eq $b}] [hir::types::show $a]
+} -result {1 {Fn{args: [str], return: int, errors: [NotFound, PermissionDenied]}}}
+
+test fn-law-any-is-not-fn {any, the bare kinds block/native, and non-callables are not structural function types} -body {
+    set f [fnT {str} bool]
+    list [hir::types::subtype any $f] [hir::types::subtype block $f] [hir::types::subtype native $f] \
+         [hir::types::subtype int $f] [hir::types::subtype $f any] [hir::types::subtype $f block] \
+         [hir::types::kindOf $f]
+} -result {0 0 0 0 1 0 {}}
+
+test fn-law-nested-return-bounded {a closure factory's contract names a function-returning function; rendering and equality stay finite (aggregate depth bound)} -body {
+    set inner [fnT {int} int]
+    set outer [fnT {int} $inner]
+    list [hir::types::show $outer] [hir::types::show [fnT {} [fnT {} [fnT {} [fnT {} int]]]]]
+} -result {{Fn{args: [int], return: Fn{args: [int], return: int, errors: []}, errors: []}} {Fn{args: [], return: Fn{args: [], return: Fn{args: [], return: any, errors: []}, errors: []}, errors: []}}}
+
+test fn-keytype-projection {specialization keys erase exact identity to the kind and a structural function type to any: neither a code target nor a contract selects an instance} -body {
+    list [hir::specialize::KeyType {native is_tcl_alpha}] [hir::specialize::KeyType {block e1 1 bool}] \
+         [hir::specialize::KeyType {block e1 1 bool {args {str} errors {}}}] \
+         [hir::specialize::KeyType [fnT {str} bool]]
+} -result {native block block any}
+
+# ---------------------------------------------------------------------------
+# Surface syntax (spec items 2, 9, 37-39, 59, 97)
+
+test fn-syntax-canonical {Fn{args: [...], return: ..., errors: [...]} resolves to the canonical structural type, rendered in the same notation} -body {
+    set hir [fnCompile {fn apply(f: Fn{args: [str, Byte], return: bool, errors: [PermissionDenied, NotFound]}):
+    1
+1}]
+    fnParamType $hir f
+} -result {Fn{args: [str, int[Byte]], return: bool, errors: [NotFound, PermissionDenied]}}
+
+test fn-syntax-multiline-any-order-omitted-errors {fields may span lines and come in any order; an omitted errors field means errors: [] (no error may escape), exactly like a fn declaration without an errors clause} -body {
+    set hir [fnCompile {fn apply(
+    f: Fn{
+        return: bool,
+        args: [str],
+    },
+    g: Fn{args: [str], return: bool, errors: []}
+):
+    1
+1}]
+    list [fnParamType $hir f] [expr {[fnParamType $hir f] eq [fnParamType $hir g]}]
+} -result {{Fn{args: [str], return: bool, errors: []}} 1}
+
+test fn-syntax-return-annotation {Fn is usable as a function's declared result type} -body {
+    set hir [fnCompile {fn pick() -> Fn{args: [str], return: bool}:
+    is_tcl_alpha
+pick()}]
+    hir::types::show [hir::typeOf $hir [lindex [dict get $hir roots] end]]
+} -result {Fn{args: [str], return: bool, errors: []}}
+
+test fn-syntax-nested {Fn types nest in argument, return and List positions} -body {
+    set hir [fnCompile {fn run(fs: List[Fn{args: [int], return: Fn{args: [], return: int}}]):
+    1
+1}]
+    fnParamType $hir fs
+} -result {List[Fn{args: [int], return: Fn{args: [], return: int, errors: []}, errors: []}]}
+
+foreach {name source pattern} {
+    missing-args {fn f(g: Fn{return: bool}):} {*function type is missing its "args" field*}
+    missing-return {fn f(g: Fn{args: [str]}):} {*function type is missing its "return" field*}
+    duplicate-field {fn f(g: Fn{args: [str], return: bool, args: [int]}):} {*duplicate field "args" in the function type*}
+    unknown-field {fn f(g: Fn{args: [str], return: bool, arity: 1}):} {*unknown field "arity" in the function type*}
+    context-not-yet {fn f(g: Fn{args: [str], return: bool, context: []}):} {*"context" is not supported yet*}
+    no-target-field {fn f(g: Fn{args: [str], return: bool, target: foo}):} {*cannot name its target*}
+    no-targets-field {fn f(g: Fn{args: [str], return: bool, targets: [foo, bar]}):} {*cannot name its target*}
+    args-not-list {fn f(g: Fn{args: str, return: bool}):} {*"args" field of a function type must be a list of parameter types*}
+    errors-not-list {fn f(g: Fn{args: [str], return: bool, errors: NotFound}):} {*"errors" field of a function type must be a list of declared error names*}
+    errors-not-names {fn f(g: Fn{args: [str], return: bool, errors: [List[int]]}):} {*"errors" list names declared errors, not types*}
+    errors-not-ident {fn f(g: Fn{args: [str], return: bool, errors: [1]}):} {*expected an error name in the "errors" list*}
+    duplicate-error {fn f(g: Fn{args: [str], return: bool, errors: [NotFound, NotFound]}):} {*duplicate error "NotFound"*}
+    missing-colon {fn f(g: Fn{args [str], return: bool}):} {*expected ":" after the function type field "args"*}
+    missing-separator {fn f(g: Fn{args: [str] return: bool}):} {*expected "," or "\}" after the function type field "args"*}
+    args-separator {fn f(g: Fn{args: [str int], return: bool}):} {*expected "," or "\]" in the "args" list*}
+    positional {fn f(g: Fn[str, bool]):} {*named fields, not positional type arguments*}
+    bare-fn {fn f(g: Fn):} {*expected "\{" after "Fn"*}
+} {
+    test fn-syntax-diagnostic-$name "malformed Fn type: $name has its own syntax diagnostic" -body {
+        fnRejects "$source\n    1\n1" $pattern
+    } -result {{SURFACE SYNTAX} 1}
+}
+
+test fn-syntax-unknown-error {an error name in an Fn type must be a declared error identity} -body {
+    fnRejects "fn f(g: Fn{args: \[str\], return: bool, errors: \[Nope\]}):\n    1\n1" \
+        {*unknown error "Nope" in the function type's "errors" list*}
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test fn-syntax-unknown-type {an unknown argument type in an Fn type is the ordinary unknown-type diagnostic} -body {
+    fnRejects "fn f(g: Fn{args: \[Nope\], return: bool}):\n    1\n1" {*unknown or invalid type Fn*unknown type "Nope"*}
+} -result {{CORE SEMANTIC TYPE} 1}
+
+# ---------------------------------------------------------------------------
+# Surface acceptance (spec items 41-43, 45, 49-50, 52, 66, 77)
+
+set ::applyStr {
+fn apply(
+    predicate: Fn{
+        args: [str],
+        return: bool,
+        errors: []
+    },
+    value: str
+) -> bool:
+    predicate(value)
+}
+
+test fn-accept-exact-envless-block {an exact envless Botlish function passes a structural Fn parameter} -body {
+    fnRun "$::applyStr
+fn is_x?(c):
+    c == \"x\"
+\[apply(is_x?, \"x\"), apply(is_x?, \"y\")\]"
+} -result {[true, false]}
+
+test fn-accept-exact-native {an exact native passes the same structural Fn parameter: real ExactNative <: Fn compatibility, not a join trick} -body {
+    fnRun "$::applyStr
+\[apply(is_tcl_alpha, \"a\"), apply(is_tcl_alnum, \"-\")\]"
+} -result {[true, false]}
+
+test fn-accept-exact-capturing-block {a capturing closure passes too: compatibility is its call contract, not whether it needs an environment} -body {
+    fnRun "$::applyStr
+fn make(target):
+    fn eq?(c):
+        c == target
+    eq?
+q? = make(\"q\")
+r? = make(\"r\")
+\[apply(q?, \"q\"), apply(r?, \"q\"), q?(\"q\")\]"
+} -result {[true, false, true]}
+
+test fn-accept-call-typed-from-contract {inside the HOF the call through the Fn parameter is typed from the contract (bool), has no exact target (it stays an indirect call), and nothing about the argument's own identity leaks in} -body {
+    set hir [fnCompile "$::applyStr\n1"]
+    set call [lindex [hirFind $hir call] 0]
+    list [hir::types::show [hir::typeOf $hir $call]] [hir::get $hir $call target]
+} -result {bool {}}
+
+test fn-accept-returned-fn {a function may return a structural Fn (declared result), joining a native and a nested Block} -body {
+    fnRun {fn pick(strict) -> Fn{args: [str], return: bool}:
+    if strict:
+        is_tcl_alnum
+    else:
+        fn lenient?(c):
+            is_tcl_alnum(c) or c == "_"
+        lenient?
+[pick(true)("_"), pick(false)("_")]}
+} -result {[false, true]}
+
+test fn-accept-list-inference {a List of mixed compatible callables (natives and Blocks) is List[Fn...], and its loop element is that Fn -- not List[any], not the bare kind block} -body {
+    set src {fn under?(c):
+    c == "_"
+fn dash?(c):
+    c == "-"
+checks = [is_tcl_alpha, is_tcl_alnum, under?, dash?]
+loop check in checks:
+    check("_")}
+    set hir [fnCompile $src]
+    set loop [lindex [hirFind $hir listloop] 0]
+    set checkRef [lindex [hirFind $hir ref check] 0]
+    list [fnBindingType $hir checks] [hir::types::show [hir::typeOf $hir $checkRef]] \
+         [hir::types::show [hir::typeOf $hir $loop]] [fnRun $src]
+} -result {{List[Fn{args: [any], return: bool, errors: []}]} {Fn{args: [any], return: bool, errors: []}} {List[bool]} {[false, false, true, false]}}
+
+test fn-accept-if-join {an if choosing between a native and a Block has their common Fn type -- not any -- and the binding keeps it} -body {
+    set src {fn lenient?(c):
+    is_tcl_alnum(c) or c == "_"
+fn choose(strict):
+    if strict:
+        is_tcl_alnum
+    else:
+        lenient?
+classifier = choose(false)
+[choose(true)("_"), classifier("_")]}
+    set hir [fnCompile $src]
+    set if [fnIfIn $hir choose]
+    list [hir::types::show [hir::typeOf $hir $if]] [fnBindingType $hir classifier] [fnRun $src]
+} -result {{Fn{args: [any], return: bool, errors: []}} {Fn{args: [any], return: bool, errors: []}} {[false, true]}}
+
+test fn-accept-typed-callable {a typed (Byte-parameter) function satisfies Fn{args: [Byte]}; a call through that Fn is checked against Byte and runs on every backend} -body {
+    fnRun {fn take_byte(x: Byte) -> int:
+    x + 1
+fn apply(f: Fn{args: [Byte], return: int}, v: Byte) -> int:
+    f(v)
+apply(take_byte, 7)}
+} -result 8
+
+test fn-accept-narrower-domain-arg {a callable accepting all of Byte satisfies a contract whose callers only pass Nibble} -body {
+    fnRun {fn take_byte(x: Byte) -> int:
+    x
+fn apply(f: Fn{args: [Nibble], return: int}, v: Nibble) -> int:
+    f(v)
+apply(take_byte, 9)}
+} -result 9
+
+test fn-accept-closure-factory {a factory whose own contract returns a function type (Fn{..., return: Fn{...}}); the exact returned Block stays exact inside} -body {
+    set src {fn make(k):
+    fn add(x):
+        x + k
+    add
+fn apply(f: Fn{args: [int], return: Fn{args: [int], return: any}}) -> any:
+    f(1)(2)
+add5 = make(5)
+[apply(make), add5(1)]}
+    set hir [fnCompile $src]
+    list [string match {block(e*)/1 -> *} [fnBindingType $hir add5]] [fnRun $src]
+} -result {1 {[3, 6]}}
+
+test fn-accept-recursive {deriving a recursive function's structural signature terminates and refers to its parameter/return types, not to its own exact type} -body {
+    set src {fn count(n) -> int:
+    if n == 0:
+        return 0
+    1 + count(n - 1)
+fn apply(f: Fn{args: [int], return: int}) -> int:
+    f(3)
+apply(count)}
+    set hir [fnCompile $src]
+    list [hir::types::show [hir::types::structuralOf [hir::bindingType $hir [lindex [hirRefBindings $hir count] 0]]]] [fnRun $src]
+} -result {{Fn{args: [any], return: int, errors: []}} 3}
+
+test fn-accept-untyped-hof-unaffected {a structural value with no obligation (args any, no errors) still passes an untyped higher-order parameter, exactly as the any it used to be did} -body {
+    fnRun {fn lenient?(c):
+    is_tcl_alnum(c) or c == "_"
+fn choose(strict):
+    if strict:
+        is_tcl_alnum
+    else:
+        lenient?
+[list::all?(["a", "_"], choose(true)), list::all?(["a", "_"], choose(false))]} "# lib/list.bot declares its own NotFound\n"
+} -result {[false, true]}
+
+test fn-accept-cross-module {a module function may declare an Fn parameter; another file passes it a local Block and a native, and the module's own call through it is checked and runs on every backend} -body {
+    set libPath [file join $::core::libraryDir fntypeslib.bot]
+    set ch [open $libPath w]
+    fconfigure $ch -encoding utf-8
+    puts $ch {namespace fntypeslib
+
+fn count_where(xs: List[str], keep: Fn{args: [str], return: bool}) -> int:
+    kept = loop x in xs:
+        if not keep(x):
+            continue
+        x
+    list_length(kept)
+}
+    close $ch
+    try {
+        fnRun {fn vowel?(c):
+    c == "a" or c == "e"
+[fntypeslib::count_where(["a", "b", "e"], vowel?), fntypeslib::count_where(["a", "1", "-"], is_tcl_alnum)]} "\n"
+    } finally {
+        file delete $libPath
+    }
+} -result {[2, 2]}
+
+# ---------------------------------------------------------------------------
+# Surface rejection (spec items 44, 78, 81)
+
+test fn-reject-arity {a callable of the wrong arity does not satisfy an Fn parameter, and the diagnostic says so} -body {
+    fnRejects "$::applyStr
+fn two(a, b):
+    true
+apply(two, \"a\")" {*cannot be proven to satisfy Fn\{args: \[str\]*arity mismatch: the callable takes 2 argument(s), the function type 1*}
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test fn-reject-argument-too-narrow {a callable whose parameter is narrower than the contract's argument type is rejected at the argument position} -body {
+    fnRejects {fn apply(f: Fn{args: [int], return: int}):
+    f(1000)
+fn take_byte(x: Byte) -> int:
+    x
+apply(take_byte)} {*argument 1 is incompatible: the callable's parameter requires int\[Byte\], but callers of the function type may pass any int*}
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test fn-reject-return-too-broad {a callable returning a wider type than the contract promises is rejected as a return incompatibility} -body {
+    fnRejects "$::applyStr
+fn ident(x):
+    x
+apply(ident, \"a\")" {*return incompatible: the callable returns any, not usable as bool*}
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test fn-reject-extra-error {a callable that may raise an error the contract does not allow is rejected, naming the extra error} -body {
+    fnRejects {fn apply(f: Fn{args: [str], return: int, errors: [NotFound]}) -> int:
+    f("a"):
+        on NotFound:
+            0
+fn find(x) -> int errors NotFound, PermissionDenied:
+    if x == "a":
+        fail PermissionDenied
+    1
+apply(find)} {*error set incompatible: the callable may raise PermissionDenied, but the function type allows only \[NotFound\]*}
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test fn-reject-non-callable {a non-callable value does not satisfy an Fn parameter} -body {
+    fnRejects "$::applyStr
+apply(5, \"a\")" {*a value of type int is not known to be callable*}
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test fn-reject-any-is-not-fn {an unknown (any) value is not a known callable: passing it where an Fn is required is rejected, never checked at run time} -body {
+    fnRejects "$::applyStr
+fn pass(g):
+    apply(g, \"a\")
+pass(is_tcl_alpha)" {*a value of type any is not known to be callable*}
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test fn-reject-call-argument {a call through an Fn is held to the contract's argument types (no runtime check)} -body {
+    fnRejects {fn apply(f: Fn{args: [Byte], return: int}) -> int:
+    f(9999)
+1} {*argument 1 cannot be proven to satisfy int\[Byte\], the parameter type the callee's function type Fn\{args: \[int\[Byte\]\]*}
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test fn-reject-call-arity {a call through an Fn with the wrong number of arguments is rejected statically} -body {
+    fnRejects "$::applyStr
+fn bad(f: Fn{args: \[str\], return: bool}):
+    f(\"a\", \"b\")
+1" {*passes 2 argument(s) to a callable of function type Fn\{args: \[str\]*whose contract takes 1*}
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test fn-reject-incompatible-join-falls-back {joining callables with no common contract never produces an unsound Fn: different arity falls back to the bare kind (untyped: still callable dynamically), and incompatible typed contracts are rejected at the join as an erasure} -body {
+    set hir [fnCompile {fn one(a):
+    1
+fn two(a, b):
+    2
+fn choose(c):
+    if c:
+        one
+    else:
+        two
+choose(true)(5)}]
+    list [hir::types::show [hir::typeOf $hir [fnIfIn $hir choose]]] \
+        [fnRejects {fn take_byte(x: Byte) -> int:
+    x
+fn take_str(x: str) -> str:
+    x
+fn choose(c):
+    if c:
+        take_byte
+    else:
+        take_str
+choose(true)} {*typed parameter requirements that cannot be preserved*}]
+} -result {block {{CORE SEMANTIC TYPE} 1}}
+
+# ---------------------------------------------------------------------------
+# Error contracts (spec items 6-8, 35-36, 67, 79-80, 102)
+#
+# No registered native declares an error set (hir::types::structuralOf:
+# natives never do), so native error-set coverage below uses empty-error
+# natives only (spec item 80).
+
+test fn-errors-impl-none-declared-a {an implementation that emits no error may declare [A]: a declared set is an upper bound} -body {
+    fnRun {fn f(x) -> int errors NotFound:
+    1
+f(1):
+    on NotFound:
+        0}
+} -result 1
+
+test fn-errors-impl-a-declared-ab {an implementation that emits [A] may declare [A, B]} -body {
+    fnRun {fn f(x) -> int errors NotFound, PermissionDenied:
+    if x == 1:
+        fail NotFound
+    2
+fn g(x) -> int:
+    r = f(x):
+        on NotFound:
+            0
+        on PermissionDenied:
+            -1
+    r
+[g(1), g(2)]}
+} -result {[0, 2]}
+
+test fn-errors-impl-ab-declared-a {an implementation that may emit [A, B] declaring only [A] is a compile-time error} -body {
+    fnRejects {fn f(x) -> int errors NotFound:
+    if x == 1:
+        fail NotFound
+    if x == 2:
+        fail PermissionDenied
+    2
+f(3):
+    on NotFound:
+        0} {*"fail PermissionDenied" is not admitted here*}
+} -result {{CORE SEMANTIC UNHANDLED-ERROR} 1}
+
+test fn-errors-narrower-satisfies-wider {a callable declaring fewer errors satisfies a contract allowing more, and the error propagates through the structural call on every backend} -body {
+    fnRun {fn apply(f: Fn{args: [str], return: int, errors: [NotFound, PermissionDenied]}, v: str) -> int:
+    f(v):
+        on NotFound:
+            0
+        on PermissionDenied:
+            -1
+fn find(x) -> int errors NotFound:
+    if x == "a":
+        fail NotFound
+    1
+[apply(find, "a"), apply(find, "b")]}
+} -result {[0, 1]}
+
+test fn-errors-wider-rejected {a callable declaring more errors than the contract allows is rejected} -body {
+    fnRejects {fn apply(f: Fn{args: [str], return: int}) -> int:
+    f("a")
+fn find(x) -> int errors NotFound:
+    1
+apply(find)} {*error set incompatible: the callable may raise NotFound, but the function type allows only \[\]*}
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test fn-errors-structural-call-propagates {a call through an Fn exposes its declared errors to static error analysis: unhandled and undeclared is rejected} -body {
+    fnRejects {fn apply(f: Fn{args: [str], return: int, errors: [NotFound]}) -> int:
+    f("a")
+1} {*through a callable of function type Fn{args: \[str\], return: int, errors: \[NotFound\]} may produce the declared error "NotFound"*}
+} -result {{CORE SEMANTIC UNHANDLED-ERROR} 1}
+
+test fn-errors-structural-call-declared {an enclosing errors declaration admits a structural call's errors, which then propagate to an exact caller's handler at run time on every backend} -body {
+    fnRun {fn apply(f: Fn{args: [str], return: int, errors: [NotFound]}) -> int errors NotFound:
+    f("a")
+fn find(x) -> int errors NotFound:
+    if x == "a":
+        fail NotFound
+    1
+apply(find):
+    on NotFound:
+        42}
+} -result 42
+
+test fn-errors-join-union {joining two compatible callables unions their declared errors; the joined call must account for both} -body {
+    set src {fn a(x) -> int errors NotFound:
+    1
+fn b(x) -> int errors PermissionDenied:
+    2
+fn choose(c):
+    if c:
+        a
+    else:
+        b
+choose(true)(0):
+    on NotFound:
+        -1
+    on PermissionDenied:
+        -2}
+    set hir [fnCompile $src]
+    list [hir::types::show [hir::typeOf $hir [fnIfIn $hir choose]]] [fnRun $src] \
+        [fnRejects {fn a(x) -> int errors NotFound:
+    1
+fn b(x) -> int errors PermissionDenied:
+    2
+fn choose(c):
+    if c:
+        a
+    else:
+        b
+choose(true)(0):
+    on NotFound:
+        -1} {*may produce the declared error "PermissionDenied"*}]
+} -result {{Fn{args: [any], return: int, errors: [NotFound, PermissionDenied]}} 1 {{CORE SEMANTIC UNHANDLED-ERROR} 1}}
+
+test fn-errors-exact-call-keeps-narrower-set {an exact callable keeps its own narrower declared error set wherever it is still exact, even though it also crosses a boundary expecting a wider contract: its direct call needs to handle only NotFound, never PermissionDenied} -body {
+    fnRun {fn find(x) -> int errors NotFound:
+    if x == "a":
+        fail NotFound
+    1
+fn apply(f: Fn{args: [str], return: int, errors: [NotFound, PermissionDenied]}) -> int:
+    f("b"):
+        on NotFound:
+            0
+        on PermissionDenied:
+            -1
+direct = find("a"):
+    on NotFound:
+        0
+[apply(find), direct]}
+} -result {[1, 0]}
+
+# ---------------------------------------------------------------------------
+# Typed-callable escape audit (TYPED-CALLABLE-ESCAPE-SOUNDNESS.md) with Fn
+
+test fn-escape-declared-param-erased {a declared Fn parameter carrying a typed contract may not itself be erased into an untyped parameter} -body {
+    fnRejects {fn take_byte(x: Byte) -> int:
+    x
+fn apply(f: Fn{args: [Byte], return: int}):
+    fn inner(g, v):
+        g(v)
+    inner(f, 9999)
+apply(take_byte)} {*this value of type Fn\{args: \[int\[Byte\]\]*typed parameter requirements that cannot be preserved*}
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test fn-escape-typed-list {a List of typed callables is List[Fn{args: [Byte], ...}]: callable through its elements with checked arguments, but not erasable into an untyped parameter} -body {
+    list [fnRun {fn a(x: Byte) -> int:
+    x
+fn b(x: Byte) -> int:
+    x + 1
+fs = [a, b]
+loop f in fs:
+    f(3)}] [fnRejects {fn a(x: Byte) -> int:
+    x
+fn b(x: Byte) -> int:
+    x + 1
+fn sneak(xs):
+    loop f in xs:
+        f(9999)
+sneak([a, b])} {*this value of type List\[Fn\{args: \[int\[Byte\]\]*cannot be preserved*}]
+} -result {{[3, 4]} {{CORE SEMANTIC TYPE} 1}}
+
+test fn-escape-returning-loop-element {a returning loop's collected element is a join too: collecting typed callables keeps their contract, but collecting them into a List whose element type the aggregate depth bound cuts is rejected as an erasure} -body {
+    list [fnRun {fn tb(x: Byte) -> int:
+    x
+ys = loop x in [1, 2]:
+    tb
+loop f in ys:
+    f(7)}] [fnRejects {fn tb(x: Byte) -> int:
+    x
+nested = [[[tb]]]
+ys = loop x in [1]:
+    nested
+list_get(list_get(list_get(list_get(ys, 0), 0), 0), 0)(9999)} {*cannot be preserved as a returning loop's collected element*}]
+} -result {{[7, 7]} {{CORE SEMANTIC TYPE} 1}}
+
+test fn-escape-returned-typed-callable {a callable that returns a typed callable is itself precondition-bearing: erasing it would let the returned callable be called unchecked (previously accepted, then ran take_byte(9999))} -body {
+    fnRejects {fn take_byte(x: Byte) -> int:
+    x
+fn chooser():
+    take_byte
+fn apply(f):
+    g = f()
+    g(9999)
+apply(chooser)} {*"chooser" has typed parameter requirements that cannot be preserved*}
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test fn-escape-declared-result-must-preserve {a declared Fn result type must keep the returned callable's own obligations} -body {
+    fnRejects {fn take_byte(x: Byte) -> int:
+    x
+fn chooser():
+    take_byte
+fn wrap() -> Fn{args: [], return: any}:
+    chooser
+1} {*declared result type Fn{args: \[\], return: any, errors: \[\]} would erase*}
+} -result {{CORE SEMANTIC TYPE} 1}
+
+# ---------------------------------------------------------------------------
+# Specialization keys (spec items 60-62, 101)
+
+test fn-specialization-shared-instance {two different code targets with the same kind share one specialization of an Fn-taking function: identity never enters the key, and neither does the contract} -body {
+    set hir [fnCompile "$::applyStr
+fn a?(c):
+    c == \"a\"
+fn b?(c):
+    c == \"b\"
+\[apply(a?, \"a\"), apply(b?, \"a\")\]"]
+    set spec [hir::specialize::analyze $hir]
+    lsort -unique [lmap id [dict get $spec used] {
+        set label [hir::specialize::label $spec $id]
+        if {![string match apply<* $label]} continue
+        set label
+    }]
+} -result {{apply<block, str>}}
+
+# ---------------------------------------------------------------------------
+# HIR text round trip (spec item 89)
+
+test fn-hir-text-roundtrip {HIR text with Fn parameter/result types and typed blocks reads back to the same text and the same canonical types} -body {
+    set hir [fnCompile {fn apply(f: Fn{args: [Byte, str], return: int, errors: [NotFound]}, b: Byte) -> int errors NotFound:
+    f(b, "x")
+fn g(x: Byte, s) -> int errors NotFound:
+    if x == 0:
+        fail NotFound
+    x
+fn pick(c) -> Fn{args: [Byte, str], return: int, errors: [NotFound]}:
+    g
+apply(g, 3):
+    on NotFound:
+        0}]
+    set text [hir::format $hir]
+    set back [hir::parse $text]
+    set same 1
+    foreach b [dict keys [dict get $hir bindings]] {
+        if {![dict exists $back bindings $b] || [dict get $hir bindings $b kind] ne "local"} continue
+        if {[hir::bindingType $hir $b] ne [hir::bindingType $back $b]} { set same 0 }
+    }
+    list [expr {[hir::format $back] eq $text}] $same [core::formatValue [core::compiler::evalHir $back]]
+} -result {1 1 3}
+
+# ---------------------------------------------------------------------------
+# Higher-order dogfooding benchmarks (spec items 51-54, 74-76)
+
+proc fnBench {name} {
+    return [surface::readProgramFile [file join $::projectRoot bench $name.bot]]
+}
+
+test fn-dogfood-source-checks {source-checks.bot: the checks List is List[Fn...] and its loop element is that Fn; check(c) is still an indirect call} -body {
+    set hir [fnBench source-checks]
+    set call [lindex [hirFind $hir call] [lsearch -exact [lmap e [hirFind $hir call] {
+        expr {[hir::kind $hir [hir::get $hir $e callee]] eq "ref" && [hir::get $hir [hir::get $hir $e callee] name] eq "check"}
+    }] 1]]
+    list [fnBindingType $hir checks] [hir::types::show [hir::typeOf $hir [hir::get $hir $call callee]]] \
+         [hir::get $hir $call target]
+} -result {{List[Fn{args: [any], return: bool, errors: []}]} {Fn{args: [any], return: bool, errors: []}} {}}
+
+test fn-dogfood-lex-strategy {lex-strategy.bot: choose_classifier's if is a structural Fn, not any; classifier keeps it; classifier(c) is still an indirect call} -body {
+    set hir [fnBench lex-strategy]
+    set if [fnIfIn $hir choose_classifier]
+    set call [lindex [hirFind $hir call] [lsearch -exact [lmap e [hirFind $hir call] {
+        expr {[hir::kind $hir [hir::get $hir $e callee]] eq "ref" && [hir::get $hir [hir::get $hir $e callee] name] eq "classifier"}
+    }] 1]]
+    list [hir::types::show [hir::typeOf $hir $if]] [fnBindingType $hir classifier] [hir::get $hir $call target]
+} -result {{Fn{args: [any], return: bool, errors: []}} {Fn{args: [any], return: bool, errors: []}} {}}
+
+test fn-dogfood-test-selection {test-selection.bot: the factory-returned changed? stays an exact Block through binding and direct call (callenv), never widened to Fn} -body {
+    set hir [fnBench test-selection]
+    set exact [fnBindingType $hir changed_a?]
+    set call [lindex [hirFind $hir call] [lsearch -exact [lmap e [hirFind $hir call] {
+        expr {[hir::kind $hir [hir::get $hir $e callee]] eq "ref" && [hir::get $hir [hir::get $hir $e callee] name] eq "changed_a?"}
+    }] 1]]
+    set nir [native::nir $hir]
+    list [string match {block(e*)/1 -> bool} $exact] [lindex [hir::get $hir $call target] 0] \
+         [regexp "= callenv \[^\n\]*@$call\n" $nir]
+} -result {1 block 1}
+
+cleanupTests
