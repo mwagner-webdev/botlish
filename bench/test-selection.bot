@@ -1,0 +1,104 @@
+# test-selection.bot -- dependency/test-group selection: "which test groups
+# are affected by this set of changed files?", the kind of selective-test-
+# run tooling this repository's own CI might eventually use. In-memory,
+# deterministic: no filesystem/Git/clock/host state.
+#
+# Canonical surface-Botlish source (CANONICAL-SURFACE-BENCHMARKS.md,
+# HIGHER-ORDER-DOGFOODING.md). A "test group" is the plain 2-element
+# positional List [name, dependencies] this codebase already uses for ad
+# hoc records elsewhere (e.g. examples/stdlib/csv_records.bot's
+# [storage, length] builder pairs) -- there is no Struct/Map in Botlish
+# yet, so this is the cleanest existing representation, not a new one. A
+# "path" is an ordinary String; the changed-file set is a genuine
+# ImmutableSet[str] (immutable_set_from_list/immutable_set_contains,
+# MINIMAL-IMMUTABLE-SET.md), not a List scanned linearly by hand.
+#
+# make_changed? is an activation-dependent closure factory: changed?
+# genuinely captures changed_set, built fresh from whatever changed-file
+# List its own call received. affected? threads that closure into
+# list::any? as an ordinary predicate parameter: "does any of this test
+# group's own dependencies belong to the changed set?" is a genuine
+# existential query, not a hand-duplicated traversal. select_affected is
+# the returning-loop + continue selection idiom -- no list::filter exists
+# or is introduced.
+#
+# changed_a?/changed_b? are two closures made from the very same
+# make_changed? Block, over two different changed-file sets -- a genuine
+# same-code/different-environment pair, both actually exercised below (via
+# select_affected and, for changed_a?, also via first_affected and a direct
+# call, probe).
+#
+# first_affected genuinely needs "the first affected test group in
+# declared order" and uses list::find for it, handling its checked
+# NotFound error honestly: none of this corpus's own fixed data ever
+# raises it (changed_a always matches at least one test group), but the
+# handler is real, not decorative -- a changed-file set touching nothing
+# would raise it here, and this call site is where that would surface.
+#
+# untouched_by_a? is a genuine list::none? exclusion query: "none of
+# docs-tests' own dependencies are in changed_a's changed set" -- a real
+# universal-absence question, not "not any?" spelled out for its own sake.
+#
+# expect: [3, 1, "resolve-tests", true, true]
+
+fn make_changed?(changed):
+    changed_set = immutable_set_from_list(changed)
+    fn changed?(path):
+        immutable_set_contains(changed_set, path)
+    changed?
+
+fn test_name(test):
+    list_get(test, 0)
+
+fn test_deps(test):
+    list_get(test, 1)
+
+fn affected?(test, changed?):
+    list::any?(test_deps(test), changed?)
+
+fn select_affected(tests, changed?):
+    loop test in tests:
+        if not affected?(test, changed?):
+            continue
+        test
+
+fn first_affected(tests, changed?):
+    fn is_affected?(test):
+        affected?(test, changed?)
+    found = list::find(tests, is_affected?):
+        on NotFound:
+            ["<none>", []]
+    test_name(found)
+
+tests = [
+    ["parser-tests", ["src/parser.bot", "src/ast.bot"]],
+    ["lexer-tests", ["src/lexer.bot", "src/token.bot"]],
+    ["resolve-tests", ["hir/resolve.tcl", "hir/hir.tcl"]],
+    ["types-tests", ["hir/types.tcl", "hir/hir.tcl"]],
+    ["specialize-tests", ["hir/specialize.tcl", "hir/range.tcl"]],
+    ["native-lower-tests", ["native/lower.tcl", "native/native.tcl"]],
+    ["compile-tests", ["compiler/compiler.tcl"]],
+    ["web-tests", ["lib/web.bot", "lib/byte.bot"]],
+    ["ascii-tests", ["lib/ascii.bot"]],
+    ["list-tests", ["lib/list.bot"]],
+    ["byte-tests", ["lib/byte.bot", "core/scalarbits.tcl"]],
+    ["char-tests", ["lib/char.bot", "core/unicodechar.tcl"]],
+    ["docs-tests", ["README.md", "AGENTS.md"]],
+    ["bench-tests", ["bench/bench.tcl"]],
+]
+
+changed_a = ["lib/web.bot", "hir/hir.tcl"]
+changed_b = ["README.md"]
+
+changed_a? = make_changed?(changed_a)
+changed_b? = make_changed?(changed_b)
+
+probe = changed_a?("lib/web.bot")
+
+selected_a = select_affected(tests, changed_a?)
+selected_b = select_affected(tests, changed_b?)
+
+docs_deps = ["README.md", "AGENTS.md"]
+untouched_by_a? = list::none?(docs_deps, changed_a?)
+
+[list_length(selected_a), list_length(selected_b), first_affected(tests, changed_a?), probe, untouched_by_a?]

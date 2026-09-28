@@ -1,0 +1,49 @@
+program: bench/source-checks.bot
+tree: b24671af9e00900ef860a3edb02d0ba3859ea934
+
+== used instances: 7
+  i0 <program> generic
+  i3 list::find<List[str], block> 
+  i5 is_underscore?<generic> generic; not-closed; OPEN
+  i6 is_hyphen?<generic> generic; not-closed; OPEN
+  i2 classify_leading<generic> generic; not-closed; OPEN
+  i1 valid_start?<generic> generic; not-closed; OPEN
+  i4 invalid_name?<generic> generic; not-closed; OPEN
+
+== block environments (used instances; envless = no lexical captures)
+  list::find<List[str], block> (block e38): envless captures=[] staticRefs=[]
+  is_underscore?<generic> (block e49): envless captures=[] staticRefs=[]
+  is_hyphen?<generic> (block e55): envless captures=[] staticRefs=[]
+  classify_leading<generic> (block e68): captures captures=[checks] staticRefs=[]
+  valid_start?<generic> (block e95): captures captures=[classify_leading] staticRefs=[]
+  invalid_name?<generic> (block e114): captures captures=[valid_start?] staticRefs=[]
+
+== blockescape virtual bindings: 0
+  no nonescaping Block binding was recognized
+
+== call sites (every used instance's own call expressions)
+  call e144 in <program>: callee ref valid_start? (binding kind local) : block e95 1 any   -> Block e95: captures captures=[classify_leading] staticRefs=[] (-> valid_start?<generic>)
+      arg: ref name (binding kind param) : str
+  call e151 in <program>: callee ref list::find (binding kind local) : block e38 2 any   -> Block e38: ENVLESS captures=[] staticRefs=[] (-> list::find<List[str], block>)
+      arg: ref candidates (binding kind local) : list str
+      arg: ref invalid_name? (binding kind local) : block e114 1 any  -> Block e114: captures captures=[valid_start?] staticRefs=[]
+  call e97 in valid_start?<generic>: callee ref classify_leading (binding kind local) : block e68 1 any   -> Block e68: captures captures=[checks] staticRefs=[] (-> classify_leading<generic>)
+      arg: ref name (binding kind param) : any
+  call e116 in invalid_name?<generic>: callee ref valid_start? (binding kind local) : block e95 1 any   -> Block e95: captures captures=[classify_leading] staticRefs=[] (-> valid_start?<generic>)
+      arg: ref name (binding kind param) : any
+
+== NIR: functions 7, lines 244
+  call           1
+  callenv        3
+  callvalue      2
+  callmulti      0
+  callenvmulti   0
+  closure        3
+  fnvalue        2
+  native         2
+  capture        3
+  staticget      0
+  callvalue sites:
+    1 list::find: %9 = callvalue %1 %8 @e42
+    4 classify_leading: %28 = callvalue %27 %17 @e91
+

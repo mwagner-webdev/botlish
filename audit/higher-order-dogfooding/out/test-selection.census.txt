@@ -1,0 +1,94 @@
+program: bench/test-selection.bot
+tree: b24671af9e00900ef860a3edb02d0ba3859ea934
+
+== used instances: 14
+  i0 <program> generic
+  i6 list::any?<any, block> 
+  i7 list::none?<List[str], block> 
+  i9 list::find<List[list], block> 
+  i1 make_changed?<List[str]> 
+  i2 changed?<generic> generic; not-closed; OPEN
+  i10 test_name<list> 
+  i5 test_deps<list> 
+  i13 test_deps<generic> generic; CLOSED
+  i4 affected?<list, block> 
+  i12 affected?<any, block> 
+  i3 select_affected<List[list], block> 
+  i8 first_affected<List[list], block> 
+  i11 is_affected?<generic> generic; not-closed; OPEN
+
+== block environments (used instances; envless = no lexical captures)
+  list::any?<any, block> (block e2): envless captures=[] staticRefs=[]
+  list::none?<List[str], block> (block e27): envless captures=[] staticRefs=[]
+  list::find<List[list], block> (block e38): envless captures=[] staticRefs=[]
+  make_changed?<List[str]> (block e49): envless captures=[] staticRefs=[]
+  changed?<generic> (block e55): captures captures=[changed_set] staticRefs=[]
+  test_name<list> (block e62): envless captures=[] staticRefs=[]
+  test_deps<list> (block e68): envless captures=[] staticRefs=[]
+  test_deps<generic> (block e68): envless captures=[] staticRefs=[]
+  affected?<list, block> (block e74): captures captures=[list::any?, test_deps] staticRefs=[]
+  affected?<any, block> (block e74): captures captures=[list::any?, test_deps] staticRefs=[]
+  select_affected<List[list], block> (block e82): captures captures=[affected?] staticRefs=[]
+  first_affected<List[list], block> (block e96): captures captures=[affected?, list::find, test_name] staticRefs=[]
+  is_affected?<generic> (block e98): captures captures=[affected?, changed?] staticRefs=[]
+
+== blockescape virtual bindings: 0
+  no nonescaping Block binding was recognized
+
+== call sites (every used instance's own call expressions)
+  call e224 in <program>: callee ref make_changed? (binding kind local) : block e49 1 any   -> Block e49: ENVLESS captures=[] staticRefs=[] (-> make_changed?<List[str]>)
+      arg: ref changed_a (binding kind local) : list str
+  call e228 in <program>: callee ref make_changed? (binding kind local) : block e49 1 any   -> Block e49: ENVLESS captures=[] staticRefs=[] (-> make_changed?<List[str]>)
+      arg: ref changed_b (binding kind local) : list str
+  call e232 in <program>: callee ref changed_a? (binding kind local) : block e55 1 any   -> Block e55: captures captures=[changed_set] staticRefs=[] (-> changed?<generic>)
+      arg: const : str
+  call e236 in <program>: callee ref select_affected (binding kind local) : block e82 2 any   -> Block e82: captures captures=[affected?] staticRefs=[] (-> select_affected<List[list], block>)
+      arg: ref tests (binding kind local) : list list
+      arg: ref changed_a? (binding kind local) : block e55 1 any  -> Block e55: captures captures=[changed_set] staticRefs=[]
+  call e241 in <program>: callee ref select_affected (binding kind local) : block e82 2 any   -> Block e82: captures captures=[affected?] staticRefs=[] (-> select_affected<List[list], block>)
+      arg: ref tests (binding kind local) : list list
+      arg: ref changed_b? (binding kind local) : block e55 1 any  -> Block e55: captures captures=[changed_set] staticRefs=[]
+  call e251 in <program>: callee ref list::none? (binding kind local) : block e27 2 any   -> Block e27: ENVLESS captures=[] staticRefs=[] (-> list::none?<List[str], block>)
+      arg: ref docs_deps (binding kind local) : list str
+      arg: ref changed_a? (binding kind local) : block e55 1 any  -> Block e55: captures captures=[changed_set] staticRefs=[]
+  call e263 in <program>: callee ref first_affected (binding kind local) : block e96 2 any   -> Block e96: captures captures=[affected?, list::find, test_name] staticRefs=[] (-> first_affected<List[list], block>)
+      arg: ref tests (binding kind local) : list list
+      arg: ref changed_a? (binding kind local) : block e55 1 any  -> Block e55: captures captures=[changed_set] staticRefs=[]
+  call e77 in affected?<list, block>: callee ref test_deps (binding kind local) : block e68 1 any   -> Block e68: ENVLESS captures=[] staticRefs=[] (-> test_deps<list>)
+      arg: ref test (binding kind param) : list
+  call e75 in affected?<list, block>: callee ref list::any? (binding kind local) : block e2 2 any   -> Block e2: ENVLESS captures=[] staticRefs=[] (-> list::any?<any, block>)
+      arg: call : any
+      arg: ref changed? (binding kind param) : block
+  call e77 in affected?<any, block>: callee ref test_deps (binding kind local) : block e68 1 any   -> Block e68: ENVLESS captures=[] staticRefs=[] (-> test_deps<generic>)
+      arg: ref test (binding kind param) : any
+  call e75 in affected?<any, block>: callee ref list::any? (binding kind local) : block e2 2 any   -> Block e2: ENVLESS captures=[] staticRefs=[] (-> list::any?<any, block>)
+      arg: call : any
+      arg: ref changed? (binding kind param) : block
+  call e87 in select_affected<List[list], block>: callee ref affected? (binding kind local) : block e74 2 any   -> Block e74: captures captures=[list::any?, test_deps] staticRefs=[] (-> affected?<list, block>)
+      arg: ref test (binding kind param) : list
+      arg: ref changed? (binding kind param) : block
+  call e105 in first_affected<List[list], block>: callee ref list::find (binding kind local) : block e38 2 any   -> Block e38: ENVLESS captures=[] staticRefs=[] (-> list::find<List[list], block>)
+      arg: ref tests (binding kind param) : list list
+      arg: ref is_affected? (binding kind local) : block e98 1 any  -> Block e98: captures captures=[affected?, changed?] staticRefs=[]
+  call e114 in first_affected<List[list], block>: callee ref test_name (binding kind local) : block e62 1 any   -> Block e62: ENVLESS captures=[] staticRefs=[] (-> test_name<list>)
+      arg: ref found (binding kind local) : list
+  call e99 in is_affected?<generic>: callee ref affected? (binding kind local) : block e74 2 any   -> Block e74: captures captures=[list::any?, test_deps] staticRefs=[] (-> affected?<any, block>)
+      arg: ref test (binding kind param) : any
+      arg: ref changed? (binding kind param) : block
+
+== NIR: functions 14, lines 329
+  call           14
+  callenv        1
+  callvalue      3
+  callmulti      0
+  callenvmulti   0
+  closure        2
+  fnvalue        0
+  native         0
+  capture        2
+  staticget      0
+  callvalue sites:
+    1 list::any?: %9 = callvalue %1 %8 @e6
+    2 list::none?: %9 = callvalue %1 %8 @e31
+    3 list::find: %9 = callvalue %1 %8 @e42
+

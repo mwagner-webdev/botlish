@@ -1,0 +1,100 @@
+program: bench/lex-strategy.bot
+tree: b24671af9e00900ef860a3edb02d0ba3859ea934
+
+== used instances: 11
+  i0 <program> generic
+  i10 list::all?<List[str], native> 
+  i5 lenient_ident_char?<generic> generic; not-closed; OPEN
+  i4 choose_classifier<bool> 
+  i6 chars_of<str, int, List[never]> 
+  i7 chars_of<str, int, List[str]> 
+  i3 classify<str, bool> 
+  i8 count_true<list, int, int> 
+  i2 valid_chars<str, bool> 
+  i9 fully_alnum?<str> 
+  i1 total_valid<List[str], bool, int, int> 
+
+== block environments (used instances; envless = no lexical captures)
+  list::all?<List[str], native> (block e13): envless captures=[] staticRefs=[]
+  lenient_ident_char?<generic> (block e49): envless captures=[] staticRefs=[]
+  choose_classifier<bool> (block e72): captures captures=[lenient_ident_char?] staticRefs=[]
+  chars_of<str, int, List[never]> (block e78): captures captures=[chars_of] staticRefs=[]
+  chars_of<str, int, List[str]> (block e78): captures captures=[chars_of] staticRefs=[]
+  classify<str, bool> (block e107): captures captures=[choose_classifier, chars_of] staticRefs=[]
+  count_true<list, int, int> (block e123): captures captures=[count_true] staticRefs=[]
+  valid_chars<str, bool> (block e153): captures captures=[count_true, classify] staticRefs=[]
+  fully_alnum?<str> (block e163): captures captures=[list::all?, chars_of] staticRefs=[]
+  total_valid<List[str], bool, int, int> (block e185): captures captures=[total_valid, valid_chars] staticRefs=[]
+
+== blockescape virtual bindings: 0
+  no nonescaping Block binding was recognized
+
+== call sites (every used instance's own call expressions)
+  call e214 in <program>: callee ref total_valid (binding kind local) : block e185 4 any   -> Block e185: captures captures=[total_valid, valid_chars] staticRefs=[] (-> total_valid<List[str], bool, int, int>)
+      arg: ref tokens (binding kind local) : list str
+      arg: ref true (binding kind root) : bool
+      arg: const : int
+      arg: const : int
+  call e221 in <program>: callee ref total_valid (binding kind local) : block e185 4 any   -> Block e185: captures captures=[total_valid, valid_chars] staticRefs=[] (-> total_valid<List[str], bool, int, int>)
+      arg: ref tokens (binding kind local) : list str
+      arg: ref false (binding kind root) : bool
+      arg: const : int
+      arg: const : int
+  call e232 in <program>: callee ref fully_alnum? (binding kind local) : block e163 1 any   -> Block e163: captures captures=[list::all?, chars_of] staticRefs=[] (-> fully_alnum?<str>)
+      arg: ref token (binding kind param) : str
+  call e88 in chars_of<str, int, List[never]>: callee ref chars_of (binding kind local) : block e78 3 any   -> Block e78: captures captures=[chars_of] staticRefs=[] (-> chars_of<str, int, List[str]>)
+      arg: ref s (binding kind param) : str
+      arg: call : int
+      arg: call : list str
+  call e88 in chars_of<str, int, List[str]>: callee ref chars_of (binding kind local) : block e78 3 any   -> Block e78: captures captures=[chars_of] staticRefs=[] (-> chars_of<str, int, List[str]>)
+      arg: ref s (binding kind param) : str
+      arg: call : int
+      arg: call : list str
+  call e109 in classify<str, bool>: callee ref choose_classifier (binding kind local) : block e72 1 any   -> Block e72: captures captures=[lenient_ident_char?] staticRefs=[] (-> choose_classifier<bool>)
+      arg: ref strict_mode (binding kind param) : bool
+  call e113 in classify<str, bool>: callee ref chars_of (binding kind local) : block e78 3 any   -> Block e78: captures captures=[chars_of] staticRefs=[] (-> chars_of<str, int, List[never]>)
+      arg: ref token (binding kind param) : str
+      arg: const : int
+      arg: call : list never
+  call e141 in count_true<list, int, int>: callee ref count_true (binding kind local) : block e123 3 any   -> Block e123: captures captures=[count_true] staticRefs=[] (-> count_true<list, int, int>)
+      arg: ref flags (binding kind param) : list
+      arg: call : int
+      arg: call : int
+  call e156 in valid_chars<str, bool>: callee ref classify (binding kind local) : block e107 2 any   -> Block e107: captures captures=[choose_classifier, chars_of] staticRefs=[] (-> classify<str, bool>)
+      arg: ref token (binding kind param) : str
+      arg: ref strict_mode (binding kind param) : bool
+  call e154 in valid_chars<str, bool>: callee ref count_true (binding kind local) : block e123 3 any   -> Block e123: captures captures=[count_true] staticRefs=[] (-> count_true<list, int, int>)
+      arg: call : list
+      arg: const : int
+      arg: const : int
+  call e166 in fully_alnum?<str>: callee ref chars_of (binding kind local) : block e78 3 any   -> Block e78: captures captures=[chars_of] staticRefs=[] (-> chars_of<str, int, List[never]>)
+      arg: ref token (binding kind param) : str
+      arg: const : int
+      arg: call : list never
+  call e164 in fully_alnum?<str>: callee ref list::all? (binding kind local) : block e13 2 any   -> Block e13: ENVLESS captures=[] staticRefs=[] (-> list::all?<List[str], native>)
+      arg: call : list str
+      arg: ref is_tcl_alnum (binding kind root) : native is_tcl_alnum  -> Native is_tcl_alnum
+  call e206 in total_valid<List[str], bool, int, int>: callee ref valid_chars (binding kind local) : block e153 2 any   -> Block e153: captures captures=[count_true, classify] staticRefs=[] (-> valid_chars<str, bool>)
+      arg: call : str
+      arg: ref strict_mode (binding kind param) : bool
+  call e195 in total_valid<List[str], bool, int, int>: callee ref total_valid (binding kind local) : block e185 4 any   -> Block e185: captures captures=[total_valid, valid_chars] staticRefs=[] (-> total_valid<List[str], bool, int, int>)
+      arg: ref tokens (binding kind param) : list str
+      arg: ref strict_mode (binding kind param) : bool
+      arg: call : int
+      arg: call : int
+
+== NIR: functions 11, lines 356
+  call           11
+  callenv        0
+  callvalue      2
+  callmulti      0
+  callenvmulti   0
+  closure        0
+  fnvalue        1
+  native         2
+  capture        0
+  staticget      0
+  callvalue sites:
+    1 list::all?: %9 = callvalue %1 %8 @e18
+    6 classify: %16 = callvalue %2 %15 @e119
+
