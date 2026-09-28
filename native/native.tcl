@@ -22,6 +22,8 @@
 #                                       derived) microseconds, not truncated
 #                                       to a whole number
 #   native::object HIR PATH ?OPTIONS?   writes an object file (AOT smoke test)
+#   native::executable HIR PATH ?OPTIONS?  links a standalone Linux x86_64/glibc
+#                                         executable; rejects non-closed HIR
 #   native::report HIR                  guard accounting and instance counts
 #   native::codeSize HIR ?OPTIONS?      {TOTAL-BYTES {FUNCTION-BYTES ...}} of
 #                                       the machine code
@@ -59,6 +61,7 @@ if {[info commands ::surface::modules::LoadNamespaces] eq ""} {
     source [file join [file dirname [file dirname [file normalize [info script]]]] surface surface.tcl]
 }
 source [file join [file dirname [file normalize [info script]]] lower.tcl]
+source [file join [file dirname [file normalize [info script]]] prepare.tcl]
 
 namespace eval native {
     variable home [file dirname [file normalize [info script]]]
@@ -104,7 +107,7 @@ proc native::nir {hir args} {
 proc native::lowered {hir args} {
     variable unsupported
     try {
-        return [native::lower::program $hir {*}$args]
+        return [native::lower::program [prepareHir $hir] {*}$args]
     } trap {NATIVE UNSUPPORTED} {message options} {
         lappend unsupported [list [dict get $options -errorcode] $message]
         return -options $options $message
@@ -167,6 +170,44 @@ proc native::evalHir {hir args} {
         core::ir::check $expr
     }
     return [Outcome [Driver run [nir $hir {*}$args]]]
+}
+
+# Compile closed, specialized HIR to a standalone Linux x86_64/glibc ELF.
+# Readiness is the public -aot-spec contract, checked before expanding native
+# implementations (which are runtime support, like the Rust helpers). Never
+# run the program while compiling it, and never fall back to another backend.
+proc native::executable {hir path args} {
+    set analysisOptions [dict create -specialize 1]
+    foreach {option variable} {
+        -call-facts-opt BOTLISH_NATIVE_CALL_FACTS_OPT
+        -closed-caller-facts-opt BOTLISH_NATIVE_CLOSED_CALLER_FACTS_OPT
+    } {
+        dict set analysisOptions $option [expr {![info exists ::env($variable)] || $::env($variable) ne "0"}]
+    }
+    foreach {option value} $args {
+        if {[dict exists $analysisOptions $option]} { dict set analysisOptions $option $value }
+    }
+    set analysis [hir::specialize::analyze $hir {*}$analysisOptions]
+    set failures {}
+    dict for {id region} [hir::specialize::regions $hir $analysis] {
+        if {[dict get $region status] eq "closed"} continue
+        lappend failures "[dict get $region label]: [dict get $region status]"
+        foreach blocker [dict get $region blockers] {
+            lappend failures "  [hir::aot::LocationText [dict get $blocker location]]: [dict get $blocker message]"
+        }
+    }
+    if {$failures ne ""} {
+        throw {NATIVE AOT NOT-READY} "program is not AOT-ready:\n[join $failures \n]"
+    }
+    set text [nir $hir {*}$args {*}$analysisOptions]
+    set lines [Driver executable $text [file normalize $path]]
+    foreach line $lines {
+        if {[lindex $line 0] eq "error"} { Outcome $lines }
+    }
+    if {[llength $lines] != 1 || [lindex [lindex $lines 0] 0] ne "executable"} {
+        throw {NATIVE BUG} "native backend produced no executable result:\n[join $lines \n]"
+    }
+    return [lindex [lindex $lines 0] 1]
 }
 
 proc native::clif {hir args} {

@@ -15,7 +15,8 @@
 //!                                        analyzes only -- never compiles.
 //!   botlish-native calls FILE.nir        print settled exact-call effects
 //!                                        without compiling
-//!   botlish-native object OUT FILE.nir   write an object file (AOT smoke test)
+//!   botlish-native object OUT FILE.nir   write a relocatable program object
+//!   botlish-native executable OUT FILE.nir  link a standalone Linux executable
 //!   botlish-native check FILE.nir        parse and validate only
 //! ```
 //!
@@ -40,8 +41,7 @@
 //! x86-64/Linux its guard supplies overflow protection.
 
 mod codegen;
-mod nir;
-mod runtime;
+use botlish_native::{nir, runtime};
 
 use codegen::{Backend, CompileOptions, CraneliftJit, Site};
 use runtime::metrics::{kind_name, AllocMode, SiteStats};
@@ -116,7 +116,7 @@ fn extract_alloc_mode(args: &[String]) -> Option<(Vec<String>, AllocMode)> {
 
 fn cli(args: &[String]) -> i32 {
     let usage = || {
-        eprintln!("usage: botlish-native run|clif|vcode|size|roots|calls|check FILE.nir [--alloc off|summary|sites] | bench RUNS FILE.nir [--alloc ...] | batch CALLS FILE.nir | object OUT FILE.nir");
+        eprintln!("usage: botlish-native run|clif|vcode|size|roots|calls|check FILE.nir [--alloc off|summary|sites] | bench RUNS FILE.nir [--alloc ...] | batch CALLS FILE.nir | object|executable OUT FILE.nir");
         2
     };
     let Some((args, alloc_mode)) = extract_alloc_mode(args) else { return usage() };
@@ -134,7 +134,7 @@ fn cli(args: &[String]) -> i32 {
             Ok(n) if n > 0 => (n, file),
             _ => return usage(),
         },
-        ("object", [_, file, ..]) => (1, file),
+        ("object" | "executable", [_, file, ..]) => (1, file),
         ("run" | "clif" | "vcode" | "size" | "roots" | "calls" | "check", [file, ..]) => (1, file),
         _ => return usage(),
     };
@@ -165,10 +165,21 @@ fn cli(args: &[String]) -> i32 {
             emit(&call_effect_report(&program));
             0
         }
+        "executable" => {
+            match codegen::aot::emit_executable(&program, std::path::Path::new(&rest[0])) {
+                Ok(()) => emit(&tcl_list(&["executable".to_string(), rest[0].clone()])),
+                Err(e) => {
+                    emit_error(&["NATIVE", "AOT"], &e);
+                    return 1;
+                }
+            }
+            0
+        }
         "object" => {
             let out = &rest[0];
             match codegen::emit_object(&program) {
-                Ok((bytes, pool)) => {
+                Ok(object) => {
+                    let bytes = object.bytes;
                     if let Err(e) = std::fs::write(out, &bytes) {
                         emit_error(&["NATIVE", "IO"], &e.to_string());
                         return 2;
@@ -177,7 +188,7 @@ fn cli(args: &[String]) -> i32 {
                         "object".to_string(),
                         out.clone(),
                         bytes.len().to_string(),
-                        pool.entries.len().to_string(),
+                        object.pool.entries.len().to_string(),
                     ]));
                     0
                 }

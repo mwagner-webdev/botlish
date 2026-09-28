@@ -24,15 +24,14 @@
 //! `CompiledProgram`'s `JITModule` is kept alive (see codegen/mod.rs).
 //! `Vm` holds an `Rc` clone of the same table so `runtime::heap`'s
 //! collector can consult it without borrowing back through
-//! `CompiledProgram`. Not used for the AOT object-file path (`emit_object`
-//! is a link/codegen smoke test only -- see codegen/mod.rs's module doc --
-//! it never runs, so it has no `Vm` to register metadata with).
+//! `CompiledProgram`. AOT startup builds the same table from linked function
+//! addresses and the object compiler's function sizes and safepoint offsets,
+//! and installs it before executing any Botlish code.
 
 /// One compiled Botlish function's code range and safepoint table:
 /// `CompiledFunction` in the milestone brief's own sketch.
 pub struct FunctionMap {
-    /// Absolute start address of this function's machine code (JIT-only:
-    /// see this module's doc).
+    /// Absolute start address of this function's machine code.
     pub code_start: usize,
     pub code_end: usize,
     /// (pc_offset, live_roots), sorted by `pc_offset` (a function-relative

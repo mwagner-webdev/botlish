@@ -28,6 +28,7 @@ use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
 static ACTIVE_TID: AtomicI32 = AtomicI32::new(0);
 static GUARD_LOW: AtomicUsize = AtomicUsize::new(0);
 static USABLE_LOW: AtomicUsize = AtomicUsize::new(0);
+static EXECUTABLE: AtomicI32 = AtomicI32::new(0);
 const OVERFLOW_LINE: &[u8] = b"error {NATIVE LIMIT STACK} {native stack exhausted: too many nested calls}\n";
 
 extern "C" fn fault_handler(signal: libc::c_int, info: *mut libc::siginfo_t, _: *mut libc::c_void) {
@@ -39,8 +40,10 @@ extern "C" fn fault_handler(signal: libc::c_int, info: *mut libc::siginfo_t, _: 
         && address < USABLE_LOW.load(Ordering::Relaxed)
     {
         unsafe {
-            libc::write(libc::STDOUT_FILENO, OVERFLOW_LINE.as_ptr().cast(), OVERFLOW_LINE.len());
-            libc::_exit(0);
+            let executable = EXECUTABLE.load(Ordering::Relaxed) != 0;
+            let fd = if executable { libc::STDERR_FILENO } else { libc::STDOUT_FILENO };
+            libc::write(fd, OVERFLOW_LINE.as_ptr().cast(), OVERFLOW_LINE.len());
+            libc::_exit(if executable { 1 } else { 0 });
         }
     }
     // Re-execute the fault with its ordinary disposition. Never relabel an
@@ -60,6 +63,14 @@ pub struct OverflowGuard {
 
 impl OverflowGuard {
     pub fn install(stack: &NativeStack) -> io::Result<Self> {
+        Self::install_mode(stack, false)
+    }
+
+    pub fn install_executable(stack: &NativeStack) -> io::Result<Self> {
+        Self::install_mode(stack, true)
+    }
+
+    fn install_mode(stack: &NativeStack, executable: bool) -> io::Result<Self> {
         if stack.guard_low == stack.low_bound {
             return Err(io::Error::new(io::ErrorKind::Unsupported, "pthread has no guard"));
         }
@@ -89,6 +100,7 @@ impl OverflowGuard {
             }
             GUARD_LOW.store(stack.guard_low, Ordering::Relaxed);
             USABLE_LOW.store(stack.low_bound, Ordering::Relaxed);
+            EXECUTABLE.store(i32::from(executable), Ordering::Relaxed);
             ACTIVE_TID.store(libc::syscall(libc::SYS_gettid) as i32, Ordering::Release);
             Ok(Self { _alt_stack: alt_stack, old_stack, old_segv, old_bus })
         }

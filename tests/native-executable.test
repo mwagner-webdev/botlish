@@ -1,0 +1,215 @@
+# Standalone AOT executables: CLI, parity, relocation, runtime roots and errors.
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+testConstraint executableAot [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64}}]
+
+proc aotParity {text {options {}}} {
+    regsub -all -line {^        } $text {} text
+    set text [string map [list @NUL@ \x00] $text]
+    set dir [makeDirectory {aot executable test}]
+    set path [file join $dir {program with spaces.bot}]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts $channel $text
+    close $channel
+    try {
+        set hir [surface::readProgramFile $path]
+        set expected {}
+        foreach backend {interp compile cranelift-generic cranelift} {
+            set outcome [outcomeUnder $backend [hir::lower $hir]]
+            if {[lindex $outcome 0] ne "value"} { error "$backend: $outcome" }
+            lappend expected [lindex $outcome 1]
+        }
+        if {$options eq ""} {
+            exec [info nameofexecutable] [file join $::projectRoot main.tcl] -emit-native-executable $path
+        } else {
+            native::executable $hir [file rootname $path] {*}$options
+        }
+        set file [open [file rootname $path] rb]
+        set magic [read $file 4]
+        close $file
+        if {$magic ne "\x7fELF"} { error "output is not ELF" }
+        # Moving the executable and removing the input leaves a runnable
+        # binary. Empty PATH also excludes compiler/interpreter launchers.
+        set relocated [file join $dir relocated]
+        file rename [file rootname $path] $relocated
+        file delete $path
+        lappend expected [exec env PATH= $relocated]
+        lappend expected [exec env PATH= BOTLISH_NATIVE_GC_STRESS=1 $relocated]
+        if {[llength [lsort -unique $expected]] != 1} { error "values disagree: $expected" }
+        return [lindex $expected 0]
+    } finally {
+        removeDirectory {aot executable test}
+    }
+}
+
+test native-executable-values {constants, Unicode, native values, nested aggregates and big integers match every mode} -constraints executableAot -body {
+    aotParity {
+        big = 9223372036854775808
+        [big * big, "a@NUL@é🙂\n\t\\\"", '🙂', true, unit, [1, [2, 3]],
+         immutable_set_from_list([3, 2, 3]), length]
+    }
+} -match glob -result {\[85070591730234615865843651857942052864, *\]}
+
+test native-executable-roots {relocated stack maps keep allocating ancestor frames alive under GC stress} -constraints executableAot -body {
+    aotParity {
+        fn build(n):
+            if n < 1:
+                return ""
+            prefix = concat("x", "y")
+            concat(prefix, build(n - 1))
+        build(100)
+    }
+} -result "\"[string repeat xy 100]\""
+
+test native-executable-closure {escaping closures initialize generic function addresses and capture values} -constraints executableAot -body {
+    aotParity {
+        fn make_adder(x: int):
+            fn add(y: int):
+                x + y
+            add
+        add10 = make_adder(10)
+        add10(32)
+    }
+} -result 42
+
+test native-executable-modules {module statics, sets, strings and specialized companion entries survive GC} -constraints executableAot -body {
+    aotParity {
+        fn check(b: Byte) -> bool:
+            web::is_unreserved(b)
+        [check(45), check(32), web::uri_escape_text("a b/é🙂")]
+    }
+} -result {[true, false, "a%20b%2F%C3%A9%F0%9F%99%82"]}
+
+test native-executable-generic-entry {known callable kinds can call through generic trampolines under GC} -constraints executableAot -body {
+    aotParity {
+        fn build():
+            concat("x", "y")
+        fn apply(f):
+            prefix = concat("a", "b")
+            [prefix, f()]
+        apply(build)
+    } {-block-escape-opt 0 -tiny-leaf-inline-opt 0}
+} -result {["ab", "xy"]}
+
+test native-executable-native-bridge {source native implementations share existing modules and preserve declared contracts} -constraints executableAot -body {
+    aotParity {
+        # requires: web
+        q = uriEscape("a b")
+        fn check(s: str) -> bool:
+            emailish?(s)
+        [UriQueryValue?(q), length(q), check("a@b.co"), byte::high_nibble(171)]
+    }
+} -result {[true, 5, true, 160]}
+
+test native-executable-native-shadow {native preparation respects local binding identity} -constraints executableAot -body {
+    set dir [makeDirectory {aot shadow test}]
+    try {
+        core::loadLibrary web
+        set hir [surface::compile "fn uriEscape(s):\n    length(s)\nuriEscape(\"abc\")" shadow.bot]
+        set prepared [native::prepareHir $hir]
+        set binary [native::executable $hir [file join $dir program]]
+        list [expr {$hir eq $prepared}] [exec $binary]
+    } finally {
+        removeDirectory {aot shadow test}
+    }
+} -result {1 3}
+
+test native-executable-native-body {registered validator bodies compile from resolved HIR} -constraints executableAot -body {
+    set dir [makeDirectory {aot native body test}]
+    try {
+        set hir [surface::compile "fn check(s):\n    NonEmpty?(s)\ncheck(\"hello\")" body.bot]
+        set binary [native::executable $hir [file join $dir program]]
+        exec env BOTLISH_NATIVE_GC_STRESS=1 $binary
+    } finally {
+        removeDirectory {aot native body test}
+    }
+} -result true
+
+test native-executable-output-kinds {standalone rendering supports blocks, mutable arrays and Result values without a Tcl host} -constraints executableAot -body {
+    set dir [makeDirectory {aot output test}]
+    try {
+        set hir [hir::build {
+            {call {ref list} {ok {const 5}} {error-value {const str bad}}
+                {block {x} {ref x}} {call {ref mutable_array_allocate} {const 2}}}
+        }]
+        set binary [native::executable $hir [file join $dir program]]
+        exec env BOTLISH_NATIVE_GC_STRESS=1 $binary
+    } finally {
+        removeDirectory {aot output test}
+    }
+} -result {[ok(5), error("bad"), <block (x)>, <mutable-array capacity=2>]}
+
+test native-executable-link-failure {a failed linker invocation preserves the old file and removes temporary artifacts} -constraints executableAot -body {
+    set dir [makeDirectory {aot link failure test}]
+    set saved [expr {[info exists ::env(RUSTC)] ? [list $::env(RUSTC)] : {}}]
+    set channel [open [file join $dir program] w]; puts -nonewline $channel previous; close $channel
+    try {
+        set ::env(RUSTC) /no/such/rustc
+        set failed [catch {native::executable [surface::compile 42 t.bot] [file join $dir program]} message options]
+        set channel [open [file join $dir program] r]; set old [read $channel]; close $channel
+        list $failed [dict get $options -errorcode] $old [glob -nocomplain -directory $dir .botlish-aot-*]
+    } finally {
+        unset ::env(RUSTC)
+        if {$saved ne {}} { set ::env(RUSTC) [lindex $saved 0] }
+        removeDirectory {aot link failure test}
+    }
+} -result {1 {NATIVE AOT} previous {}}
+
+test native-executable-reject {guarded and open workloads fail before writing an executable} -constraints executableAot -body {
+    set dir [makeDirectory {aot reject test}]
+    set output [file join $dir program]
+    set ch [open $output w]; puts -nonewline $ch previous; close $ch
+    try {
+        set results {}
+        foreach input {examples/surface/03-closure.bot lib/list.bot} {
+            set hir [surface::readProgramFile [file join $::projectRoot $input]]
+            lappend results [catch {native::executable $hir $output} message options]
+            lappend results [dict get $options -errorcode]
+        }
+        set ch [open $output r]; lappend results [read $ch]; close $ch
+        set results
+    } finally {
+        removeDirectory {aot reject test}
+    }
+} -result {1 {NATIVE AOT NOT-READY} 1 {NATIVE AOT NOT-READY} previous}
+
+test native-executable-no-evaluation {compilation terminates even when running the program would loop forever} -constraints executableAot -body {
+    set dir [makeDirectory {aot loop test}]
+    try {
+        set hir [surface::compile "loop:\n    continue" loop.bot]
+        native::executable $hir [file join $dir program]
+        file executable [file join $dir program]
+    } finally {
+        removeDirectory {aot loop test}
+    }
+} -result 1
+
+test native-executable-runtime-error {runtime errors exit unsuccessfully and go to stderr} -constraints executableAot -body {
+    set dir [makeDirectory {aot error test}]
+    try {
+        set hir [surface::compile {list_get([1], 5)} error.bot]
+        set binary [native::executable $hir [file join $dir program]]
+        set failed [catch {exec $binary 2> [file join $dir stderr]} stdout options]
+        set ch [open [file join $dir stderr] r]; set stderr [read $ch]; close $ch
+        list $failed [lindex [dict get $options -errorcode] 2] [string match {*CORE SEMANTIC RANGE*} $stderr]
+    } finally {
+        removeDirectory {aot error test}
+    }
+} -result {1 1 1}
+
+test native-executable-stack-overflow {standalone stack exhaustion has a failing exit status} -constraints executableAot -body {
+    set dir [makeDirectory {aot stack test}]
+    try {
+        set binary [file join $dir program]
+        native::Driver executable [core::ReadFile [file join $::projectRoot native tests fixtures stack_overflow.ir]] $binary
+        set failed [catch {exec env BOTLISH_NATIVE_STACK_BYTES=4194304 $binary 2>@1} message options]
+        list $failed [lindex [dict get $options -errorcode] 2] [string match {*NATIVE LIMIT STACK*} $message]
+    } finally {
+        removeDirectory {aot stack test}
+    }
+} -result {1 1 1}
+
+cleanupTests

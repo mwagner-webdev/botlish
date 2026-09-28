@@ -5,22 +5,21 @@
 //! translation:
 //!
 //!   * JIT (`CraneliftJit`): compile in memory and run in this process
-//!   * object (`emit_object`): an object file for AOT linking (smoke test
-//!     only: a runnable executable would also need the runtime as a static
-//!     library and a constant-table initializer)
+//!   * object (`emit_object`): position-independent code and relative GC maps
+//!     for AOT linking; `aot::emit_executable` adds startup and the runtime
 //!
 //! Semantics live in NIR and the runtime; nothing here may change what a
 //! program means.
 
+pub mod aot;
 pub mod clif;
 pub mod roots;
 
 use crate::nir::{FuncId, Program};
 use crate::runtime::framemap;
-use crate::runtime::heap::object_size;
 use crate::runtime::ops::helpers;
 use crate::runtime::value::*;
-use crate::runtime::vm::{str_object, Vm};
+use crate::runtime::vm::Vm;
 use cranelift_codegen::isa::OwnedTargetIsa;
 use cranelift_codegen::settings::{self, Configurable};
 use cranelift_jit::{JITBuilder, JITModule};
@@ -49,15 +48,7 @@ impl BackendError {
     }
 }
 
-/// A constant generated code loads from the VM's constant table.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum Const {
-    Str(String),
-    BigInt(String),
-    Native(u32),
-    /// The closure of an environment-free function.
-    FnValue(FuncId),
-}
+pub use crate::runtime::constants::Const;
 
 #[derive(Default)]
 pub struct ConstPool {
@@ -132,40 +123,7 @@ impl CompiledProgram {
     /// to match -- both program-lifetime storage, installed together, once,
     /// before any generated code can run.
     pub fn install_constants(&self, vm: &mut Vm) {
-        let mut table = Vec::with_capacity(self.pool.entries.len());
-        let mut statics = Vec::new();
-        for c in &self.pool.entries {
-            let raw: *mut Header = match c {
-                Const::Str(text) => Box::into_raw(Box::new(str_object(text.clone(), true))) as *mut Header,
-                Const::BigInt(digits) => Box::into_raw(Box::new(BigIntObj {
-                    hdr: Header::new(KIND_BIGINT, true),
-                    n: digits.parse().expect("validated big Int literal"),
-                })) as *mut Header,
-                Const::Native(index) => Box::into_raw(Box::new(NativeObj {
-                    hdr: Header::new(KIND_NATIVE, true),
-                    native: *index,
-                })) as *mut Header,
-                Const::FnValue(func) => {
-                    let caps: Box<[Value]> = Box::new([]);
-                    Box::into_raw(Box::new(ClosureObj {
-                        hdr: Header::new(KIND_CLOSURE, true),
-                        func: *func,
-                        arity: vm.info.functions[*func as usize].arity as u32,
-                        code: self.generic_entries[*func as usize],
-                        ncaps: 0,
-                        caps: Box::into_raw(caps) as *mut Value,
-                    })) as *mut Header
-                }
-            };
-            if vm.metrics.enabled() {
-                let bytes = unsafe { object_size(raw) } as u64;
-                vm.record_static_alloc(unsafe { (*raw).kind }, bytes);
-            }
-            table.push(raw as Value);
-            statics.push(raw);
-        }
-        vm.set_constants(table, statics);
-        vm.install_statics(self.statics as usize);
+        crate::runtime::constants::install(vm, &self.pool.entries, &self.generic_entries, self.statics);
     }
 }
 
@@ -200,7 +158,9 @@ fn isa(pic: bool) -> Result<OwnedTargetIsa, BackendError> {
         set(&mut flags, "enable_probestack", "true")?;
         set(&mut flags, "probestack_strategy", "inline")?;
     }
-    let isa = cranelift_native::builder().map_err(|e| BackendError::Codegen(e.to_string()))?;
+    // Linked executables use the target's baseline ISA; only JIT code may
+    // assume CPU features detected on the compiler's own machine.
+    let isa = cranelift_native::builder_with_options(!pic).map_err(|e| BackendError::Codegen(e.to_string()))?;
     isa.finish(settings::Flags::new(flags)).map_err(|e| BackendError::Codegen(e.to_string()))
 }
 
@@ -358,16 +318,23 @@ impl VCodeCapture {
 
 /// The program as an object file (AOT). Functions are exported as
 /// botlish_fn_N / botlish_entry_N; runtime helpers are undefined imports.
-pub fn emit_object(program: &Program) -> Result<(Vec<u8>, ConstPool), BackendError> {
+pub struct ObjectProgram {
+    pub bytes: Vec<u8>,
+    pub pool: ConstPool,
+    pub functions: Vec<clif::DefineResult>,
+}
+
+pub fn emit_object(program: &Program) -> Result<ObjectProgram, BackendError> {
     let builder = cranelift_object::ObjectBuilder::new(isa(true)?, "botlish", cranelift_module::default_libcall_names())
         .map_err(|e| BackendError::Codegen(format!("{e:?}")))?;
     let mut module = cranelift_object::ObjectModule::new(builder);
     let symbols = clif::declare(&mut module, program, true)?;
     let mut pool = ConstPool::default();
     let mut sites = Vec::new();
+    let mut functions = Vec::new();
     for f in &program.functions {
-        clif::define(&mut module, &symbols, f, &mut pool, &mut sites, false, false)?;
+        functions.push(clif::define(&mut module, &symbols, f, &mut pool, &mut sites, false, false)?);
     }
     let bytes = module.finish().emit().map_err(|e| BackendError::Codegen(e.to_string()))?;
-    Ok((bytes, pool))
+    Ok(ObjectProgram { bytes, pool, functions })
 }

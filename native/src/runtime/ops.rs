@@ -132,20 +132,24 @@ fn vm<'a>(p: *mut Vm) -> &'a mut Vm {
 // ---------------------------------------------------------------------------
 // Errors
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_type_error(p: *mut Vm, v: Value, kind: u64, context: Value) -> Value {
     let context = str_of(context).text.to_string();
     vm(p).fail(RtError::Type { context, expected: Kind::from_code(kind as u8), got: v })
 }
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_not_boolean(p: *mut Vm, v: Value) -> Value {
     vm(p).fail(RtError::NotBoolean { got: v })
 }
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_unbound(p: *mut Vm, name: Value) -> Value {
     let message = format!("name \"{}\" used before its binding", str_of(name).text);
     vm(p).fail(RtError::Semantic { kind: "UNBOUND", message })
 }
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_raise(p: *mut Vm, kind: Value, message: Value) -> Value {
     let kind_text = &str_of(kind).text;
     let message = str_of(message).text.to_string();
@@ -157,6 +161,7 @@ pub extern "C" fn rt_raise(p: *mut Vm, kind: Value, message: Value) -> Value {
     vm(p).fail(error)
 }
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_stack_overflow(p: *mut Vm) -> Value {
     vm(p).fail(RtError::StackOverflow)
 }
@@ -174,6 +179,7 @@ pub extern "C" fn rt_stack_overflow(p: *mut Vm) -> Value {
 // PopErrorExit) that catches the matching id calls rt_clear_declared_error
 // to resume normally.
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_fail_declared(p: *mut Vm, id: u64, name: Value) -> Value {
     let name_text = str_of(name).text.to_string();
     let vm = vm(p);
@@ -187,6 +193,7 @@ pub extern "C" fn rt_fail_declared(p: *mut Vm, id: u64, name: Value) -> Value {
 /// one I64 return -- see `helpers()` -- so this must never leave the upper
 /// bits undefined the way a bare `-> u32` extern "C" fn could), never a GC
 /// root and never an ordinary Botlish `Value`.
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_declared_error(p: *mut Vm) -> u64 {
     vm(p).declared_error as u64
 }
@@ -198,6 +205,7 @@ pub extern "C" fn rt_declared_error(p: *mut Vm) -> u64 {
 /// unused word (every helper's declared signature returns one I64; the
 /// generated caller simply discards it -- see codegen::clif's
 /// ClearDeclaredError).
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_clear_declared_error(p: *mut Vm) -> u64 {
     let vm = vm(p);
     vm.declared_error = 0;
@@ -218,14 +226,17 @@ fn int_binary(p: *mut Vm, a: Value, b: Value, small: fn(i64, i64) -> Option<i64>
     vm(p).new_big(r)
 }
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_int_add(p: *mut Vm, a: Value, b: Value) -> Value {
     int_binary(p, a, b, i64::checked_add, |x, y| x + y)
 }
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_int_sub(p: *mut Vm, a: Value, b: Value) -> Value {
     int_binary(p, a, b, i64::checked_sub, |x, y| x - y)
 }
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_int_mul(p: *mut Vm, a: Value, b: Value) -> Value {
     int_binary(p, a, b, i64::checked_mul, |x, y| x * y)
 }
@@ -236,6 +247,7 @@ pub extern "C" fn rt_int_mul(p: *mut Vm, a: Value, b: Value) -> Value {
 /// negative, add |b|" always lands on the unique representative in [0, |b|)
 /// congruent to a mod b, so both paths agree with each other and with the
 /// reference interpreter's identical fixup (core::primitives::modulo).
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_int_mod(p: *mut Vm, a: Value, b: Value) -> Value {
     if let (Some(x), Some(y)) = (int_small(a), int_small(b)) {
         if y == 0 {
@@ -281,19 +293,23 @@ fn shift_amount(p: *mut Vm, b: Value) -> Option<u32> {
 /// `num_bigint::BigInt`'s BitAnd/BitOr/BitXor): total over every Int, never
 /// fails. core/primitives.tcl documents these as the reference semantics;
 /// this is the same computation over the runtime's own Int representation.
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_int_and(p: *mut Vm, a: Value, b: Value) -> Value {
     int_binary(p, a, b, |x, y| Some(x & y), |x, y| x & y)
 }
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_int_or(p: *mut Vm, a: Value, b: Value) -> Value {
     int_binary(p, a, b, |x, y| Some(x | y), |x, y| x | y)
 }
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_int_xor(p: *mut Vm, a: Value, b: Value) -> Value {
     int_binary(p, a, b, |x, y| Some(x ^ y), |x, y| x ^ y)
 }
 
 /// A << K (exact: A * 2^K), K a nonnegative Int (see shift_amount).
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_int_shl(p: *mut Vm, a: Value, b: Value) -> Value {
     let Some(k) = shift_amount(p, b) else { return NO_VALUE };
     if let Some(x) = int_small(a) {
@@ -310,6 +326,7 @@ pub extern "C" fn rt_int_shl(p: *mut Vm, a: Value, b: Value) -> Value {
 /// two's-complement convention `num_bigint::BigInt`'s `Shr` also follows, so
 /// the small-Int and BigInt paths agree exactly. Never fails once K itself is
 /// valid: a right shift only ever shrinks magnitude.
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_int_shr(p: *mut Vm, a: Value, b: Value) -> Value {
     let Some(k) = shift_amount(p, b) else { return NO_VALUE };
     if let Some(x) = int_small(a) {
@@ -327,6 +344,7 @@ fn int_compare(a: Value, b: Value) -> Ordering {
     }
 }
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_int_cmp(_p: *mut Vm, a: Value, b: Value) -> i64 {
     int_compare(a, b) as i64
 }
@@ -401,6 +419,7 @@ fn set_equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
     Ok(true)
 }
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_value_eq(p: *mut Vm, a: Value, b: Value) -> Value {
     match equal(p, a, b) {
         Ok(r) => bool_value(r),
@@ -408,6 +427,7 @@ pub extern "C" fn rt_value_eq(p: *mut Vm, a: Value, b: Value) -> Value {
     }
 }
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_str_eq(_p: *mut Vm, a: Value, b: Value) -> Value {
     bool_value(str_of(a).text == str_of(b).text)
 }
@@ -519,6 +539,7 @@ fn hash_mix(p: *mut Vm, h: u64, v: Value) -> Result<u64, ()> {
     })
 }
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_hash(p: *mut Vm, v: Value) -> Value {
     match hash_mix(p, FNV_OFFSET, v) {
         Ok(h) => vm(p).new_int((h & HASH_MASK) as i64),
@@ -529,10 +550,12 @@ pub extern "C" fn rt_hash(p: *mut Vm, v: Value) -> Value {
 // ---------------------------------------------------------------------------
 // Strings (indices count characters: Unicode scalar values)
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_str_len(p: *mut Vm, s: Value) -> Value {
     vm(p).new_int(str_of(s).chars as i64)
 }
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_substr(p: *mut Vm, s: Value, start: Value, end: Value) -> Value {
     let obj = str_of(s);
     let len = obj.chars as i64;
@@ -582,6 +605,7 @@ pub extern "C" fn rt_substr(p: *mut Vm, s: Value, start: Value, end: Value) -> V
 /// on failure. Strings are immutable, so a region proven valid here stays
 /// valid for as long as its registers are live -- no re-check is ever needed
 /// at a consumer.
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_str_region_check(p: *mut Vm, s: Value, start: Value, end: Value) -> Value {
     let obj = str_of(s);
     let len = obj.chars as i64;
@@ -598,6 +622,7 @@ pub extern "C" fn rt_str_region_check(p: *mut Vm, s: Value, start: Value, end: V
 /// BASE\[START..END) (a region `rt_str_region_check` already validated)
 /// compared character-for-character against OTHER, with no allocation.
 /// Never fallible.
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_str_region_eq(p: *mut Vm, base: Value, start: Value, end: Value, other: Value) -> Value {
     let b = str_of(base);
     let o = str_of(other);
@@ -637,6 +662,7 @@ pub extern "C" fn rt_str_region_eq(p: *mut Vm, base: Value, start: Value, end: V
 /// fallible: callers (native/lower.tcl) only ever emit this at a byte
 /// offset already proven in range by the traversal's own bounds check, and
 /// a one-character String can never exceed MAX_COLLECTION_LENGTH.
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_str_decode_char_at(p: *mut Vm, s: Value, byte_offset: Value) -> Value {
     let obj = str_of(s);
     let off = int_small(byte_offset).expect("decode_char_at: byte_offset must be a small Int") as usize;
@@ -662,10 +688,12 @@ pub extern "C" fn rt_str_decode_char_at(p: *mut Vm, s: Value, byte_offset: Value
 /// scan: applied to `rt_str_decode_char_at`'s own result, this gives the
 /// encoded width of the scalar just decoded, letting a traversal advance its
 /// carried byte offset by exactly that many bytes.
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_str_byte_len(p: *mut Vm, s: Value) -> Value {
     vm(p).new_int(str_of(s).text.len() as i64)
 }
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_str_lower(p: *mut Vm, s: Value) -> Value {
     // Simple (one-to-one) case mapping, like Tcl's string tolower.
     let text: String = str_of(s)
@@ -693,6 +721,7 @@ pub extern "C" fn rt_str_lower(p: *mut Vm, s: Value) -> Value {
 /// `Vm::new_list`'s own MAX_COLLECTION_LENGTH check (same limit any other
 /// List/String construction enforces), so an oversized result fails RANGE
 /// exactly like `rt_list_new`'s would, not a special case here.
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_str_utf8_bytes(p: *mut Vm, s: Value) -> Value {
     let items: Vec<Value> = str_of(s).text.bytes().map(|b| vm(p).new_int(b as i64)).collect();
     let n = items.len();
@@ -701,6 +730,7 @@ pub extern "C" fn rt_str_utf8_bytes(p: *mut Vm, s: Value) -> Value {
     r
 }
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_str_cat(p: *mut Vm, a: Value, b: Value) -> Value {
     let (x, y) = (str_of(a), str_of(b));
     let mut text = String::with_capacity(x.text.len() + y.text.len());
@@ -769,6 +799,7 @@ fn one_scalar(p: *mut Vm, s: Value, native: &str) -> Result<char, Value> {
     Ok(obj.text.chars().next().expect("StrObj.chars == 1 but text has no scalar"))
 }
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_is_tcl_alpha(p: *mut Vm, s: Value) -> Value {
     match one_scalar(p, s, "is_tcl_alpha") {
         Ok(c) => bool_value(tcl_alpha_char(c)),
@@ -776,6 +807,7 @@ pub extern "C" fn rt_is_tcl_alpha(p: *mut Vm, s: Value) -> Value {
     }
 }
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_is_tcl_alnum(p: *mut Vm, s: Value) -> Value {
     match one_scalar(p, s, "is_tcl_alnum") {
         Ok(c) => bool_value(tcl_alnum_char(c)),
@@ -816,6 +848,7 @@ fn region_one_scalar(p: *mut Vm, base: Value, start: Value, end: Value, native: 
     }
 }
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_str_region_is_tcl_alpha(p: *mut Vm, base: Value, start: Value, end: Value) -> Value {
     match region_one_scalar(p, base, start, end, "is_tcl_alpha") {
         Ok(c) => bool_value(tcl_alpha_char(c)),
@@ -823,6 +856,7 @@ pub extern "C" fn rt_str_region_is_tcl_alpha(p: *mut Vm, base: Value, start: Val
     }
 }
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_str_region_is_tcl_alnum(p: *mut Vm, base: Value, start: Value, end: Value) -> Value {
     match region_one_scalar(p, base, start, end, "is_tcl_alnum") {
         Ok(c) => bool_value(tcl_alnum_char(c)),
@@ -833,6 +867,7 @@ pub extern "C" fn rt_str_region_is_tcl_alnum(p: *mut Vm, base: Value, start: Val
 // ---------------------------------------------------------------------------
 // Lists
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_list_new(p: *mut Vm, n: u64, items: *const Value) -> Value {
     let items = unsafe { std::slice::from_raw_parts(items, n as usize) }.to_vec();
     let elements = items.len();
@@ -841,10 +876,12 @@ pub extern "C" fn rt_list_new(p: *mut Vm, n: u64, items: *const Value) -> Value 
     r
 }
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_list_len(p: *mut Vm, l: Value) -> Value {
     vm(p).new_int(list_of(l).len as i64)
 }
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_list_get(p: *mut Vm, l: Value, index: Value) -> Value {
     let items = list_of(l).items();
     match int_small(index) {
@@ -857,6 +894,7 @@ pub extern "C" fn rt_list_get(p: *mut Vm, l: Value, index: Value) -> Value {
     }
 }
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_list_append(p: *mut Vm, l: Value, v: Value) -> Value {
     let old = list_of(l).items();
     // Elements copied: the existing list's backing store, memmoved whole.
@@ -886,6 +924,7 @@ pub extern "C" fn rt_list_append(p: *mut Vm, l: Value, v: Value) -> Value {
 /// hash-consed table) may replace this without changing dedup/membership/
 /// equality semantics at all -- this is the semantic reference behavior,
 /// not a performance baseline to preserve.
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_set_from_list(p: *mut Vm, l: Value) -> Value {
     let source = list_of(l).items();
     let mut items: Vec<Value> = Vec::with_capacity(source.len());
@@ -925,6 +964,7 @@ pub extern "C" fn rt_set_from_list(p: *mut Vm, l: Value) -> Value {
 /// already has for those kinds -- see MINIMAL-IMMUTABLE-SET.md's
 /// "Membership semantics" for why this is a documented consequence, not a
 /// new failure mode.
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_set_contains(p: *mut Vm, s: Value, v: Value) -> Value {
     for &item in set_of(s).items() {
         match equal(p, item, v) {
@@ -953,6 +993,7 @@ pub extern "C" fn rt_set_contains(p: *mut Vm, s: Value, v: Value) -> Value {
 // caller-supplied value into unused capacity (that is charged, optionally,
 // as a mutarray write via record_mutarray_write instead).
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_mutarray_allocate(p: *mut Vm, capacity: Value) -> Value {
     match int_small(capacity) {
         Some(n) if n >= 0 => vm(p).new_mutarray(n as usize),
@@ -966,10 +1007,12 @@ pub extern "C" fn rt_mutarray_allocate(p: *mut Vm, capacity: Value) -> Value {
     }
 }
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_mutarray_capacity(p: *mut Vm, arr: Value) -> Value {
     vm(p).new_int(mutarray_of(arr).slots.len() as i64)
 }
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_mutarray_get(p: *mut Vm, arr: Value, index: Value) -> Value {
     let slots = &mutarray_of(arr).slots;
     match int_small(index) {
@@ -986,6 +1029,7 @@ pub extern "C" fn rt_mutarray_get(p: *mut Vm, arr: Value, index: Value) -> Value
     }
 }
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_mutarray_set(p: *mut Vm, arr: Value, index: Value, value: Value) -> Value {
     let obj = mutarray_of_mut(arr);
     match int_small(index) {
@@ -1016,6 +1060,7 @@ fn invalid_copy_range(p: *mut Vm, dst: Value, dst_start: Value, src: Value, src_
 /// at DST_START. Uses `ptr::copy` (memmove semantics), so DST and SRC may be
 /// the same MutableArray with overlapping ranges: the result is always as if
 /// SRC's elements were read before any of DST's were written.
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_mutarray_copy(p: *mut Vm, dst: Value, dst_start: Value, src: Value, src_start: Value, count: Value) -> Value {
     let (ds, ss, n) = match (int_small(dst_start), int_small(src_start), int_small(count)) {
         (Some(ds), Some(ss), Some(n)) if ds >= 0 && ss >= 0 && n >= 0 => (ds, ss, n),
@@ -1042,6 +1087,7 @@ pub extern "C" fn rt_mutarray_copy(p: *mut Vm, dst: Value, dst_start: Value, src
 /// List; growth/chunking policy is entirely the caller's (ordinary Botlish).
 /// Always copies (req #18): a future zero-copy freeze (req #19), proving ARR
 /// is uniquely owned and never mutated again, is left open, not implemented.
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_mutarray_freeze(p: *mut Vm, arr: Value, count: Value) -> Value {
     let slots = &mutarray_of(arr).slots;
     match int_small(count) {
@@ -1067,6 +1113,7 @@ pub extern "C" fn rt_mutarray_freeze(p: *mut Vm, arr: Value, count: Value) -> Va
 // allocation, matching the operand it reads from (see runtime/value.rs's
 // own header).
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_char_codepoint(_p: *mut Vm, v: Value) -> Value {
     make_small(char_of(v) as i64)
 }
@@ -1074,14 +1121,17 @@ pub extern "C" fn rt_char_codepoint(_p: *mut Vm, v: Value) -> Value {
 // ---------------------------------------------------------------------------
 // Kinds and Results
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_is_kind(_p: *mut Vm, v: Value, kind: u64) -> Value {
     bool_value(kind_of(v).code() as u64 == kind)
 }
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_is_result(_p: *mut Vm, v: Value, ok: u64) -> Value {
     bool_value(heap_kind(v) == KIND_RESULT && result_of(v).ok == (ok != 0))
 }
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_result_payload(p: *mut Vm, v: Value, ok: u64) -> Value {
     let r = result_of(v);
     if r.ok != (ok != 0) {
@@ -1091,6 +1141,7 @@ pub extern "C" fn rt_result_payload(p: *mut Vm, v: Value, ok: u64) -> Value {
     r.payload
 }
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_result_new(p: *mut Vm, ok: u64, v: Value) -> Value {
     vm(p).new_result(ok != 0, v)
 }
@@ -1098,10 +1149,12 @@ pub extern "C" fn rt_result_new(p: *mut Vm, ok: u64, v: Value) -> Value {
 // ---------------------------------------------------------------------------
 // Cells and closures
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_cell_new(p: *mut Vm) -> Value {
     vm(p).alloc(CellObj { hdr: Header::new(KIND_CELL, false), value: UNBOUND }, 0)
 }
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_closure_new(p: *mut Vm, func: u64, code: u64, n: u64, caps: *const Value) -> Value {
     let caps: Box<[Value]> = unsafe { std::slice::from_raw_parts(caps, n as usize) }.into();
     let arity = vm(p).info.functions[func as usize].arity as u32;
@@ -1119,6 +1172,7 @@ pub extern "C" fn rt_closure_new(p: *mut Vm, func: u64, code: u64, n: u64, caps:
 // ---------------------------------------------------------------------------
 // Calls chosen at run time (core::callable::invoke)
 
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_call_value(p: *mut Vm, callee: Value, n: u64, args: *const Value) -> Value {
     let args = unsafe { std::slice::from_raw_parts(args, n as usize) };
     match heap_kind(callee) {

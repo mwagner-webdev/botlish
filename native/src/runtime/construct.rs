@@ -331,6 +331,7 @@ fn decode_list_pieces(words: &[u64]) -> Small<ListPiece<'_>> {
 /// the result, or NO_VALUE with a pending RANGE error when the result would
 /// exceed MAX_COLLECTION_LENGTH (the one failure mode eager concat and
 /// list_append also have).
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_construct(p: *mut Vm, mode: u64, n: u64, words: *const u64) -> Value {
     let words = unsafe { std::slice::from_raw_parts(words, n as usize) };
     let plan_mode = mode & MODE_PLAN != 0;
@@ -573,6 +574,7 @@ fn construct_list(p: *mut Vm, plan_mode: bool, words: &[u64]) -> Value {
 /// instance, which that ABI never reaches, so this is defense in depth, not
 /// a path any analyzed program takes. Roots V across the allocation with
 /// `temp_roots` (this wrapper has no stack map of its own).
+#[unsafe(no_mangle)]
 pub extern "C" fn rt_plan_materialize(p: *mut Vm, v: Value) -> Value {
     let mode = match heap_kind(v) {
         KIND_STRPLAN => 0,

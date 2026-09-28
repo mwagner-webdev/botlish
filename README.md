@@ -72,6 +72,7 @@ tclsh9.0 tests/all.tcl                         # test suite, interp and compile
 cargo build --release --manifest-path native/Cargo.toml   # build the native backend (§20)
 tclsh9.0 tests/native-coverage.tcl             # test suite on cranelift, classified (§20)
 tclsh9.0 main.tcl -backend cranelift FILE.bot  # run natively
+tclsh9.0 main.tcl -emit-native-executable FILE.bot  # compile to ./FILE (Linux x86_64 glibc)
 tclsh9.0 main.tcl -emit-nir -emit-clif FILE.bot   # show NIR, then Cranelift IR, of every function
 CORE_BACKEND=compile tclsh9.0 tests/all.tcl    # test suite, one backend
 tclsh9.0 main.tcl                              # run all examples (interp)
@@ -1660,10 +1661,46 @@ HIR ──native::lower (Tcl)──▶ NIR text ──botlish-native (Rust)─�
   process per program: the NIR goes in as a file, and the value comes back
   in the host's runtime value representation (core/value.tcl), or the error
   with its error code.
-* The same translation also writes object files
-  (`botlish-native object OUT FILE.nir`). That is a smoke test only:
-  running one would also need the runtime as a static library and an
-  initializer for the constant table.
+* The same translation writes position-independent object files
+  (`botlish-native object OUT FILE.nir`). Executable emission links that code
+  with the runtime and an initializer for constants, module statics, callable
+  metadata and relocated GC stack maps.
+
+### Standalone executables (Linux x86_64 glibc)
+
+```sh
+export LANG=C.utf8 LC_ALL=C.utf8
+cargo build --release --manifest-path native/Cargo.toml
+tclsh9.0 main.tcl -emit-native-executable examples/stdlib/csv.bot
+./examples/stdlib/csv
+```
+
+The output is a native ELF executable beside the source, named by removing
+its extension. It prints the program's final value followed by a newline
+(for example, `42`, `"text"`, or `[1, 2]`). Compilation never executes the
+program. Runtime errors go to stderr and return a nonzero exit status.
+
+Every used specialized instance must be **closed**, as reported by
+`-aot-spec`; guarded and open workloads fail with `NATIVE AOT NOT-READY`
+and source locations. This check uses the shared specialization analysis,
+including retained generic entries, before expanding registered native
+implementations into runtime support. Range checks, arbitrary-precision Ints,
+closures and allocation remain supported runtime operations in closed code.
+
+Compilation needs the built native backend, its adjacent
+`libbotlish_native.rlib` and `deps/`, the matching `rustc` (or `RUSTC`
+executable), and the system C linker. Cranelift compiles the program; rustc
+compiles only its generated startup metadata and statically links the shared
+Botlish runtime. The executable uses baseline x86-64 instructions and system
+glibc/libm/libgcc; it needs no Tcl, Rust installation, source files, checkout,
+or JIT at execution time. The build host determines the minimum glibc version.
+`BOTLISH_NATIVE_GC_STRESS` and `BOTLISH_NATIVE_STACK_BYTES` also work for
+standalone executables. Failed compilation leaves an existing output intact.
+
+The Tcl API is `native::executable $hir $outputPath ?OPTIONS?`. It also
+accepts the native lowering options; specialization is enabled by default
+regardless of `BOTLISH_NATIVE_SPECIALIZE`. The CLI also accepts `.hir` and
+`.ir` inputs and multiple input paths.
 
 ### Values
 
@@ -2213,9 +2250,9 @@ evidence:
    dominate reverse and replace at large sizes.
 4. Specialization in the Tcl compiler, and of closures with per-creation
    capture facts.
-5. Replace the shadow stack with Cranelift stack maps, and make the object
-   path runnable (runtime as a static library, constant-table initializer)
-   for real closed AOT.
+5. Native stack maps and standalone closed AOT are now implemented (see
+   §20): executable startup registers the linked functions' GC maps and
+   initializes their constants before entering native code.
 
 ## 22. Allocation instrumentation
 

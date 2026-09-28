@@ -1,7 +1,8 @@
 # main.tcl -- example runner.
 #
 #   tclsh9.0 main.tcl [-backend interp|compile|cranelift|cranelift-generic] [-code] [-hir] [-ast]
-#                    [-aot] [-aot-data] [-aot-spec] [-emit-nir] [-emit-clif] [FILE.ir|FILE.hir|FILE.bot ...]
+#                    [-aot] [-aot-data] [-aot-spec] [-emit-nir] [-emit-clif]
+#                    [-emit-native-executable] [FILE.ir|FILE.hir|FILE.bot ...]
 #
 # Runs the given program files (default: every examples/*.ir) and prints
 # each program's value, with runtime evidence shown as "text"#{Type}. With
@@ -17,6 +18,9 @@
 # (native/lower.tcl), and -emit-clif the Cranelift IR of every function (both
 # need no -backend cranelift; with -backend cranelift-generic, or
 # BOTLISH_NATIVE_SPECIALIZE=0, they show the unspecialized code).
+# -emit-native-executable compiles closed specialized workloads to standalone
+# Linux x86_64/glibc executables beside the inputs, removing the extension.
+# It does not evaluate the program. Running the executable prints its value.
 #
 # A .hir file (HIR text, e.g. examples/hir/*.hir) is read with hir::readFile;
 # a .bot file (Botlish source, e.g. examples/surface/*.bot) is parsed and
@@ -124,6 +128,23 @@ proc runFile {path showCode showHir showAst showAot showNative} {
     return 0
 }
 
+proc emitExecutable {path} {
+    if {[catch {
+        switch -- [file extension $path] {
+            .bot { set hir [surface::readProgramFile $path] }
+            .hir { set hir [hir::readFile $path] }
+            .ir  { set hir [native::buildProgramHir [core::loadProgramFile $path]] }
+            default { throw {NATIVE AOT INPUT} "expected a .bot, .hir or .ir input file: $path" }
+        }
+        native::executable $hir [file rootname $path]
+    } message options]} {
+        puts stderr "$path: $message ([dict get $options -errorcode])"
+        return 1
+    }
+    puts "executable: [file rootname $path]"
+    return 0
+}
+
 set files {}
 set showCode 0
 set showHir 0
@@ -142,14 +163,23 @@ for {set i 0} {$i < [llength $argv]} {incr i} {
         -aot-spec { set showAot spec }
         -emit-nir { set showNative nir }
         -emit-clif { set showNative clif }
+        -emit-native-executable { set showNative executable }
         default  { lappend files $arg }
     }
 }
 if {$files eq ""} {
+    if {$showNative eq "executable"} {
+        puts stderr "usage: tclsh9.0 main.tcl -emit-native-executable FILE.bot"
+        exit 1
+    }
     set files [lsort [glob -directory [file join $root examples] *.ir]]
 }
 set failures 0
 foreach path $files {
-    incr failures [runFile $path $showCode $showHir $showAst $showAot $showNative]
+    if {$showNative eq "executable"} {
+        incr failures [emitExecutable $path]
+    } else {
+        incr failures [runFile $path $showCode $showHir $showAst $showAot $showNative]
+    }
 }
 exit [expr {$failures > 0}]
