@@ -48,6 +48,11 @@
 # reasoning intervals cannot express, so it is not attempted; see #19 of the
 # milestone this module was written for).
 #
+# Exact List facts: `list_length` of a List the compiler knows exactly, and
+# `list_get` of one at an exact/ranged index, get the exact length / the join
+# of the selected elements' Ranges from hir/exactvalue.tcl (a value fact
+# derived from the HIR, not a Range key: a Range describes an integer).
+#
 # Parameters: interprocedural seeding
 # ------------------------------------
 # ExternalSeeds supplies syntactically evident initial arguments: Int
@@ -1093,6 +1098,14 @@ proc hir::range::Call {hirVar ctxVar e node} {
             switch -- [dict get $meta resultRange] {
                 nonneg            { set result [nonneg] }
                 collection-length { set result [collectionLength] }
+            }
+            # Exact value facts about a known immutable List
+            # (EXACT-VALUE-FACTS.md, hir/exactvalue.tcl): its exact length,
+            # and the Range of the element(s) an exact/ranged index can
+            # select. Only ever narrows what the native's own metadata says.
+            set exact [hir::exact::NativeRange $hir $name [dict get $node args] $argRanges [dict get $ctx exprs]]
+            if {$exact ne ""} {
+                set result $exact
             }
         }
         set result [ConstrainType $hir $e $result]

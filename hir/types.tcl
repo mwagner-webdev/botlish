@@ -41,6 +41,15 @@
 # hir/specialize.tcl) tracks a List's positional shape. Both forms are
 # bounded (see MakeList/MakeSet), so analyses over them terminate.
 #
+# Exact value facts (EXACT-VALUE-FACTS.md, hir/exactvalue.tcl) are a
+# separate, ephemeral channel and never a type: `list_get` of a List the
+# compiler knows exactly (a literal, an immutable alias of one, list_append
+# of one, bounded by shapeLength/aggregateDepth) at an exactly known index
+# gets the selected element's own type in *ordinary* inference too, and a
+# comparison of two exactly known operands is decided (`known`). The List's
+# own type stays {list ELEM}; a parameter never acquires an element type
+# from how its body indexes it.
+
 # These are semantic facts, not representation: nothing here says how a
 # backend stores a value. The procedures handle the extra forms and delegate
 # everything else to core::type, so a refinement or named type means the same
@@ -973,6 +982,17 @@ proc hir::types::ShapeResult {hir shape argExprs argTypes result} {
         }
         element {
             lassign $shape _ l i
+            # An exactly known immutable List read at an exactly known
+            # index (EXACT-VALUE-FACTS.md): the selected element's own
+            # static type, whatever the List's ordinary type says. This is
+            # a value fact about this particular List (hir/exactvalue.tcl:
+            # a literal, or an immutable alias of one), never a property of
+            # Lists in general -- an arbitrary List's element stays the
+            # element type below.
+            set exact [hir::exact::ProjectType $hir [lindex $argExprs $l] [lindex $argExprs $i]]
+            if {$exact ne ""} {
+                return $exact
+            }
             set list [lindex $argTypes $l]
             set elem [elementOf $list]
             if {$elem eq "" || $elem eq "never"} {
@@ -980,11 +1000,13 @@ proc hir::types::ShapeResult {hir shape argExprs argTypes result} {
                 return $result
             }
             set positions [shapeOf $list]
-            set index [dict get $hir exprs [lindex $argExprs $i]]
-            if {$positions ne "" && [dict get $index kind] eq "const"
-                    && [core::value::kind [dict get $index value]] eq "int"} {
-                set n [core::value::intOf [dict get $index value]]
-                if {$n >= 0 && $n < [llength $positions]} {
+            if {$positions ne ""} {
+                # A positional shape (specialization only: an instance
+                # entered with a List of known element types) read at an
+                # exactly known index, a constant or an immutable alias of
+                # one.
+                set n [hir::exact::IntOf $hir [lindex $argExprs $i]]
+                if {$n ne "" && $n >= 0 && $n < [llength $positions]} {
                     return [lindex $positions $n]
                 }
             }
@@ -1527,6 +1549,11 @@ proc hir::types::Call {hirVar ctxVar e} {
             set result [dict get $meta resultType]
             if {[dict get $meta testsType] ne ""} {
                 set known [hir::refine::decideTypeTest $name [lindex $argTypes 0]]
+            } elseif {$name in {== < <= > >=} && [llength $argExprs] == 2 && !$dead} {
+                # Two exactly known operands decide the comparison:
+                # Botlish == is structural value equality, never identity
+                # (EXACT-VALUE-FACTS.md, hir/exactvalue.tcl).
+                set known [hir::exact::DecideCompare $name $hir [lindex $argExprs 0] [lindex $argExprs 1]]
             }
             if {$spec && !$dead} {
                 foreach argType $argTypes paramType [dict get $meta paramTypes] {
@@ -1658,13 +1685,29 @@ proc hir::types::KnownOutcome {hir condition} {
     set node [dict get $hir exprs $condition]
     switch -- [dict get $node kind] {
         call {
-            return [dict get $node known]
+            if {[dict get $node known] ne ""} {
+                return [dict get $node known]
+            }
+            # E.g. a Boolean element read out of a known List
+            # (EXACT-VALUE-FACTS.md).
+            set fact [hir::exact::Of $hir $condition]
+            if {[lindex $fact 0] eq "val" && [core::value::kind [lindex $fact 1]] eq "bool"} {
+                return [core::value::isTrue [lindex $fact 1]]
+            }
+            return ""
         }
         ref {
             set b [dict get $node binding]
             if {$b ne "" && [dict get $hir bindings $b kind] eq "root"
                     && [core::value::kind [dict get $hir bindings $b value]] eq "bool"} {
                 return [core::value::isTrue [dict get $hir bindings $b value]]
+            }
+            # An immutable alias of an exactly known Boolean (`ok = 3 < 4`,
+            # `if ok:`): the same decided outcome its value has
+            # (EXACT-VALUE-FACTS.md).
+            set fact [hir::exact::Of $hir $condition]
+            if {[lindex $fact 0] eq "val" && [core::value::kind [lindex $fact 1]] eq "bool"} {
+                return [core::value::isTrue [lindex $fact 1]]
             }
         }
     }

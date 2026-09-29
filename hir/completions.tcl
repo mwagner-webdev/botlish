@@ -513,6 +513,10 @@ proc hir::completions::NativeResultRange {hir ctx name argExprs argRanges} {
         }
         return [dict create min 0 max 0x10FFFF]
     }
+    set exact [hir::exact::NativeRange $hir $name $argExprs $argRanges [dict get $ctx exprs]]
+    if {$exact ne {}} {
+        return $exact
+    }
     switch -- [dict get [core::native::metadata $name] resultRange] {
         nonneg            { return [hir::range::nonneg] }
         collection-length { return [hir::range::collectionLength] }

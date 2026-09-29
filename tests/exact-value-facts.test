@@ -1,0 +1,535 @@
+# exact-value-facts.test -- exact constants and value-fact propagation
+# (EXACT-VALUE-FACTS.md, hir/exactvalue.tcl).
+#
+# If the compiler already knows a value, it keeps that knowledge through
+# immutable bindings and projections instead of collapsing to a broad type:
+# an exact Int selector, a known immutable List literal (bounded exact
+# elements, an *analysis fact*, never a tuple type), `list_get` of such a
+# List at such an index, `list_length` of it, nested projections.
+#
+# What must NOT happen is pinned just as hard: a List parameter never
+# acquires a positional schema from how its body indexes it or from what its
+# callers pass; an exact index alone says which slot is read, never what an
+# arbitrary List stores there; no fact survives a join with unknown data;
+# the fact vector is bounded and forgotten, never truncated.
+#
+# Sections: exact scalars and aliases, exact selectors, list_get from a
+# known aggregate, unknown/ranged indexes, list_length, list_append, nested
+# projections, bounds, joins and fact loss, fact bounds, the function
+# parameter boundary (test_name), the caller-pattern boundary, intrinsic
+# contract interaction, determinism/canonical form, generated-code parity.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+set ::evDecls "type Byte = Int in 0..255\n"
+
+proc evCompile {src {strict 1}} {
+    return [surface::compile "$::evDecls$src" t.bot -strict $strict]
+}
+
+# {SEMANTIC-TYPE PROGRAM-INSTANCE-TYPE PROGRAM-INSTANCE-RANGE} of the last
+# top-level expression of SRC.
+proc evLast {src} {
+    set hir [evCompile $src]
+    set spec [hir::specialize::analyze $hir]
+    set an [hir::range::analyze $hir $spec]
+    set e [lindex [hir::roots $hir] end]
+    set view [hir::specialize::view $hir $spec i0]
+    list [hir::types::show [hir::typeOf $hir $e]] [hir::types::show [hir::typeOf $view $e]] \
+        [hir::range::show [hir::range::of $an i0 $e]]
+}
+
+proc evSem {src} { lindex [evLast $src] 0 }
+proc evInst {src} { lindex [evLast $src] 1 }
+proc evRange {src} { lindex [evLast $src] 2 }
+
+# The exact fact (rendered as a fact) of the last top-level expression.
+proc evFact {src} {
+    set hir [evCompile $src]
+    set f [hir::exact::Of $hir [lindex [hir::roots $hir] end]]
+    expr {$f eq "" ? "none" : [hir::exact::describe $hir $f]}
+}
+
+# The block expression bound to NAME.
+proc evBlock {hir name} {
+    dict for {b binding} [dict get $hir bindings] {
+        if {[dict get $binding name] ne $name || [dict get $binding declaredBy] eq ""} continue
+        set value [hir::get $hir [dict get $binding declaredBy] value]
+        if {[hir::kind $hir $value] eq "block"} { return $value }
+    }
+    error "no function named $name"
+}
+
+# The block expression of a (module) function NAME anywhere in HIR.
+proc evModuleBlock {hir name} {
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] ne "block"} continue
+        if {[hir::signatures::Name $hir $e] eq $name} { return $e }
+    }
+    error "no function named $name"
+}
+
+# Semantic result type of function NAME in SRC.
+proc evResult {src name} {
+    set hir [evCompile $src]
+    hir::types::show [hir::type $hir [hir::get $hir [evBlock $hir $name] resultType]]
+}
+
+# "PARAM: TYPE (SOURCE)" for each parameter of function NAME.
+proc evSig {src name} {
+    set hir [evCompile $src]
+    lmap p [dict get [hir::signatures::of $hir [evBlock $hir $name]] params] {
+        format {%s: %s (%s)} [dict get $p name] [hir::types::show [hir::signatures::paramType $p]] [dict get $p source]
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Exact scalars and immutable aliases
+
+test ev-const-int {an Int literal is exactly itself} -body {
+    list [evRange "7"] [evFact "7"]
+} -result {{[7, 7] {7}} int(7)}
+
+test ev-const-str-bool {exact strings and booleans are exact facts (value facts, not types)} -body {
+    list [evFact "\"field\""] [evFact "true"] [evFact "false"] [evSem "\"field\""]
+} -result {str(\"field\") bool(true) bool(false) str}
+
+test ev-alias-chain {exactness survives immutable aliases: i = 0, j = i, k = j} -body {
+    list [evRange "i = 0\nj = i\nk = j\nk"] [evFact "i = 0\nj = i\nk = j\nk"]
+} -result {{[0, 0] {0}} int(0)}
+
+test ev-alias-str {an exact string survives an alias} -body {
+    evFact "s = \"abc\"\nt = s\nt"
+} -result {str("abc")}
+
+test ev-simple-arithmetic {0 + 1 is exactly 1, through aliases too (the existing add/sub/mul transfer functions)} -body {
+    list [evRange "0 + 1"] [evFact "0 + 1"] [evFact "a = 3\nb = a * 4 - 2\nb"]
+} -result {{[1, 1] {1}} int(1) int(10)}
+
+test ev-arithmetic-bounded {exact folding stops at a magnitude bound: no fact, no huge number} -body {
+    evFact "a = 9223372036854775807\nb = a * a\nb"
+} -result none
+
+test ev-not-exact-when-unknown {a parameter, a loop element and a user call are never exact} -body {
+    list [evFact "fn f(x):\n    x\nf(3)"] [evFact "fn g():\n    3\ng()"]
+} -result {none none}
+
+# ---------------------------------------------------------------------------
+# Known immutable Lists are facts, not types
+
+test ev-list-fact-not-a-type {a known List keeps its ordinary homogeneous/heterogeneous static type; the exact vector is a separate fact} -body {
+    list [evSem "xs = \[1, 2, 3\]\nxs"] [evSem "ys = \[\"x\", 3\]\nys"] \
+        [evFact "xs = \[1, 2, 3\]\nxs"] [evFact "ys = \[\"x\", 3\]\nys"]
+} -result {{List[int]} list {exact-list[int(1), int(2), int(3)]} {exact-list[str("x"), int(3)]}}
+
+test ev-list-fact-render {a fact renders as a fact, never as a tuple/record type} -body {
+    set out [evFact "\[\"x\", 3, \[1, \"y\"\]\]"]
+    list $out [string match "*Tuple*" $out] [string match "List\{*" $out]
+} -result {{exact-list[str("x"), int(3), exact-list[int(1), str("y")]]} 0 0}
+
+test ev-list-elements-unknown-render {an element that is not itself exact renders with its type and a ?} -body {
+    evFact "fn f(a):\n    \[a, 7\]\nf(1)\nfn g(a):\n    \[a, 7\]"
+} -result none
+
+# ---------------------------------------------------------------------------
+# list_get from a known aggregate at an exact index
+
+test ev-get-index0-str {x = ["a", 7]; list_get(x, 0) is str} -body {
+    list [evSem "x = \[\"a\", 7\]\nlist_get(x, 0)"] [evInst "x = \[\"a\", 7\]\nlist_get(x, 0)"]
+} -result {str str}
+
+test ev-get-index1-int {x = ["a", 7]; list_get(x, 1) is int, exactly 7} -body {
+    list [evSem "x = \[\"a\", 7\]\nlist_get(x, 1)"] [evRange "x = \[\"a\", 7\]\nlist_get(x, 1)"]
+} -result {int {[7, 7] {7}}}
+
+test ev-get-alias-index {i = 1; list_get(x, i) is int, exactly 7} -body {
+    set src "x = \[\"a\", 7\]\ni = 1\nlist_get(x, i)"
+    list [evSem $src] [evInst $src] [evRange $src] [evFact $src]
+} -result {int int {[7, 7] {7}} int(7)}
+
+test ev-get-exact-str {the selected element's exact string fact survives} -body {
+    evFact "x = \[\"field\", 7\]\nlist_get(x, 0)"
+} -result {str("field")}
+
+test ev-get-alias-of-list {an immutable alias of the List keeps the fact} -body {
+    set src "x = \[\"a\", 7\]\ny = x\nz = y\nlist_get(z, 0)"
+    list [evSem $src] [evFact $src]
+} -result {str str(\"a\")}
+
+test ev-get-computed-index {an index computed from exact operands is exact} -body {
+    set src "x = \[\"a\", 7\]\nlist_get(x, 0 + 1)"
+    list [evSem $src] [evRange $src]
+} -result {int {[7, 7] {7}}}
+
+test ev-get-index-from-length {an index computed from a known length is exact} -body {
+    set src "x = \[\"a\", 7\]\nlist_get(x, list_length(x) - 1)"
+    list [evSem $src] [evRange $src]
+} -result {int {[7, 7] {7}}}
+
+test ev-get-homogeneous {a homogeneous known List still gives exact element values} -body {
+    list [evSem "x = \[10, 20, 30\]\nlist_get(x, 2)"] [evRange "x = \[10, 20, 30\]\nlist_get(x, 2)"]
+} -result {int {[30, 30] {30}}}
+
+test ev-fn-return-str {fn f(): xs = ["x", 7]; list_get(xs, 0) returns str, not any} -body {
+    evResult "fn f():\n    xs = \[\"x\", 7\]\n    list_get(xs, 0)\nf()" f
+} -result str
+
+test ev-fn-return-int {fn g(): xs = ["x", 7]; list_get(xs, 1) returns int} -body {
+    evResult "fn g():\n    xs = \[\"x\", 7\]\n    list_get(xs, 1)\ng()" g
+} -result int
+
+test ev-fn-return-exact-internal {the exact scalar reaches the call in the program's own instance analysis, but the public structural signature stays int} -body {
+    set src "fn g():\n    xs = \[\"x\", 7\]\n    list_get(xs, 1)\ng()"
+    list [evResult $src g] [evRange $src]
+} -result {int {[7, 7] {7}}}
+
+test ev-used-in-declared-param {an exact element proves a declared domain: list_get(["a", 7], 1) is a Byte} -body {
+    set src "fn take(b: Byte):\n    b\ntake(list_get(\[\"a\", 7\], 1))"
+    evCompile $src
+    set bad "fn take(b: Byte):\n    b\ntake(list_get(\[\"a\", 700\], 1))"
+    catch {evCompile $bad} msg
+    list ok [string match "*Byte*" $msg]
+} -result {ok 1}
+
+test ev-type-test-decided {an exactly known element decides a type test} -body {
+    set src "x = \[\"a\", 7\]\nif string?(list_get(x, 0)):\n    1\nelse:\n    \"no\""
+    list [evSem $src]
+} -result int
+
+# ---------------------------------------------------------------------------
+# Unknown and ranged indexes
+
+test ev-unknown-index-falls-back {an unrestricted index of a heterogeneous known List gives the ordinary element type} -body {
+    set src "fn f(i):\n    x = \[\"a\", 7\]\n    list_get(x, i)\nf(0)"
+    evResult $src f
+} -result any
+
+# The Range of the last native-call expression of function NAME's own
+# generic instance (specialization off: one instance per block, seeded by
+# every caller's argument facts).
+proc evFnRange {src name} {
+    set hir [evCompile $src 0]
+    set spec [hir::specialize::analyze $hir -specialize 0]
+    set an [hir::range::analyze $hir $spec]
+    foreach id [dict get $spec used] {
+        if {[dict get $spec instances $id name] eq $name} { break }
+    }
+    set out {}
+    dict for {e r} [dict get $an instances $id exprs] {
+        if {[hir::kind $hir $e] eq "call"} { lappend out [hir::range::show $r] }
+    }
+    lindex $out end
+}
+
+test ev-unknown-index-range-join {a valid index the Range domain knows nothing about yields the join of every element's Range} -body {
+    set src "fn f(i):\n    x = \[10, 20, 30\]\n    list_get(x, i)\nf(length(\"ab\"))"
+    evFnRange $src f
+} -result {[10, 30] {10,20,30}}
+
+test ev-ranged-index-join {an index the analysis knows to be 0 or 2 selects exactly the join of elements 0 and 2} -body {
+    set src "fn f(i):\n    x = \[10, 20, 30\]\n    list_get(x, i)\nf(0)\nf(2)"
+    evFnRange $src f
+} -result {[10, 30] {10,30}}
+
+test ev-ranged-index-clipped {indexes past the end are dropped: they raise, they return nothing} -body {
+    set src "fn f(i):\n    x = \[10, 20, 30\]\n    list_get(x, i)\nf(1)\nf(7)"
+    evFnRange $src f
+} -result {[20, 20] {20}}
+
+# ---------------------------------------------------------------------------
+# list_length of a known aggregate
+
+test ev-length-exact {x = [1, 2, 3]; list_length(x) is exactly 3} -body {
+    list [evSem "x = \[1, 2, 3\]\nlist_length(x)"] [evRange "x = \[1, 2, 3\]\nlist_length(x)"] \
+        [evFact "x = \[1, 2, 3\]\nlist_length(x)"]
+} -result {int {[3, 3] {3}} int(3)}
+
+test ev-length-empty {the empty literal has exactly length 0} -body {
+    evRange "list_length(\[\])"
+} -result {[0, 0] {0}}
+
+test ev-length-unknown {the length of a List that is not exactly known stays the collection-length range} -body {
+    evRange "fn f(xs):\n    list_length(xs)\nf(\[1, 2\])"
+} -result {[0, 4611686018427387903]}
+
+# ---------------------------------------------------------------------------
+# list_append
+
+test ev-append-exact {list_append of an exactly known List keeps a bounded exact List} -body {
+    set src "x = list_append(\[\"a\"\], 7)\nlist_get(x, 1)"
+    list [evSem $src] [evRange $src] [evFact "list_append(\[\"a\"\], 7)"] [evRange "list_length(list_append(\[1, 2\], 3))"]
+} -result {int {[7, 7] {7}} {exact-list[str("a"), int(7)]} {[3, 3] {3}}}
+
+test ev-append-bounded {an append past the element bound forgets the vector, never truncates it} -body {
+    set eight "\[1, 2, 3, 4, 5, 6, 7, 8\]"
+    list [evFact "list_append(\[1, 2, 3, 4, 5, 6, 7\], 8)"] [evFact "list_append($eight, 9)"]
+} -result {{exact-list[int(1), int(2), int(3), int(4), int(5), int(6), int(7), int(8)]} none}
+
+# ---------------------------------------------------------------------------
+# Nested projections
+
+test ev-nested {x = [["a",1],["b",2]]; list_get(list_get(x, 1), 0) is str within the bound} -body {
+    set src "x = \[\[\"a\", 1\], \[\"b\", 2\]\]\nlist_get(list_get(x, 1), 0)"
+    list [evSem $src] [evInst $src] [evFact $src]
+} -result {str str str(\"b\")}
+
+test ev-nested-exact-scalar {nested exact scalar} -body {
+    evRange "x = \[\[\"a\", 1\], \[\"b\", 2\]\]\nlist_get(list_get(x, 1), 1)"
+} -result {[2, 2] {2}}
+
+test ev-nested-via-alias {a projection bound to a name is itself a known List} -body {
+    set src "x = \[\[\"a\", 1\], \[\"b\", 2\]\]\ny = list_get(x, 0)\nlist_get(y, 0)"
+    list [evSem $src] [evFact $src]
+} -result {str str(\"a\")}
+
+test ev-nested-depth-bound {facts nest at most aggregateDepth deep: a fourth level is forgotten, the third kept} -body {
+    set three "x = \[\[\[7\]\]\]\nlist_get(list_get(list_get(x, 0), 0), 0)"
+    set four "x = \[\[\[\[7\]\]\]\]\nlist_get(list_get(list_get(list_get(x, 0), 0), 0), 0)"
+    list [evFact $three] [evFact $four] [evSem $four]
+} -result {int(7) none int}
+
+# ---------------------------------------------------------------------------
+# Bounds
+
+test ev-oob-keeps-runtime-error {a provably out-of-bounds read keeps the existing run-time RANGE error; no fact is claimed, the type is the ordinary element type} -body {
+    set src "x = \[\"a\"\]\nlist_get(x, 3)"
+    catch {core::evalProgram [hir::lower [surface::compile $src t.bot -strict 0]]} message options
+    list [evSem $src] [evFact $src] [dict get $options -errorcode]
+} -result {str none {CORE SEMANTIC RANGE}}
+
+test ev-oob-negative {a negative exact index makes no claim either} -body {
+    evSem "x = \[\"a\", 7\]\nlist_get(x, 0 - 1)"
+} -result any
+
+test ev-bounds-classification {known length + exact/ranged index classify as in/out/unknown} -body {
+    set hir [evCompile "x = \[1, 2, 3\]\nlist_get(x, 1)\nlist_get(x, 5)\nlist_get(x, 0 - 1)"]
+    set out {}
+    foreach e [lrange [hir::roots $hir] 1 end] {
+        set args [hir::get $hir $e args]
+        set n [hir::exact::IntOf $hir [lindex $args 1]]
+        lappend out [hir::exact::BoundsOf $hir [lindex $args 0] [hir::range::point $n]]
+    }
+    lappend out [hir::exact::BoundsOf $hir [lindex [hir::get $hir [lindex [hir::roots $hir] 1] args] 0] {min 0 max 1}]
+    lappend out [hir::exact::BoundsOf $hir [lindex [hir::get $hir [lindex [hir::roots $hir] 1] args] 0] {min 0 max 5}]
+    set out
+} -result {in out out in {}}
+
+# ---------------------------------------------------------------------------
+# Joins and fact loss
+
+test ev-join-unknown-loses-fact {a join with an unknown List forgets the exact vector; no stale element fact survives} -body {
+    set defs "fn flag():\n    true\nfn other():\n    \[\"b\"\]\n"
+    set join "x = if flag():\n    \[\"a\", 1\]\nelse:\n    other()\n"
+    list [evFact "$defs${join}x"] [evSem "$defs${join}list_get(x, 0)"] [evFact "$defs${join}list_get(x, 0)"] \
+        [evRange "$defs${join}list_get(x, 1)"]
+} -result {none any none {[-∞, +∞]}}
+
+test ev-join-different-lists-no-fact {two different exact Lists do not join into a per-position product} -body {
+    set src "fn f(c):\n    x = if c:\n        \[\"a\", 1\]\n    else:\n        \[\"b\", 2\]\n    list_get(x, 0)\nf(true)"
+    evResult $src f
+} -result any
+
+test ev-join-same-value-keeps-fact {both branches provably the same exact value: the fact is kept} -body {
+    set src "fn f(c):\n    x = if c:\n        \[\"a\", 1\]\n    else:\n        \[\"a\", 1\]\n    list_get(x, 0)\nf(true)"
+    evResult $src f
+} -result str
+
+test ev-decided-if-keeps-branch-fact {an if with a statically decided condition is exactly its taken branch} -body {
+    set src "x = if true:\n    \[\"a\", 1\]\nelse:\n    \[\"b\", 2\]\nlist_get(x, 0)"
+    list [evSem $src] [evFact $src]
+} -result {str str(\"a\")}
+
+test ev-opaque-call-loses-fact {a List returned by a user function is not exactly known at the source level} -body {
+    set src "fn pair():\n    \[\"x\", 3\]\np = pair()\nlist_get(p, 0)"
+    list [evSem $src] [evFact "fn pair():\n    \[\"x\", 3\]\npair()"]
+} -result {any none}
+
+test ev-opaque-call-instance-value-fact {the pre-existing instance-level result shape (a specialization value fact) still reaches the instance analysis} -body {
+    set src "fn pair():\n    \[\"x\", 3\]\np = pair()\nlist_get(p, 0)"
+    evInst $src
+} -result str
+
+# ---------------------------------------------------------------------------
+# Fact bounds
+
+test ev-bound-eight-kept {a List of exactly maxElements keeps its exact vector} -body {
+    set src "x = \[1, 2, 3, 4, 5, 6, 7, 8\]\nlist_get(x, 7)"
+    list $hir::exact::maxElements [evRange $src]
+} -result {8 {[8, 8] {8}}}
+
+test ev-bound-nine-forgotten {a List of maxElements + 1 keeps its ordinary type and loses the exact vector} -body {
+    set src "x = \[1, 2, 3, 4, 5, 6, 7, 8, 9\]\nlist_get(x, 8)"
+    list [evSem "x = \[1, 2, 3, 4, 5, 6, 7, 8, 9\]\nx"] [evFact "\[1, 2, 3, 4, 5, 6, 7, 8, 9\]"] [evSem $src] [evRange $src]
+} -result {{List[int]} none int {[-∞, +∞]}}
+
+test ev-bound-heterogeneous-forgotten {past the bound a heterogeneous List keeps its ordinary type and reads fall back to it} -body {
+    set src "x = \[\"a\", 2, 3, 4, 5, 6, 7, 8, 9\]\nlist_get(x, 0)"
+    list [evFact "\[\"a\", 2, 3, 4, 5, 6, 7, 8, 9\]"] [evSem $src]
+} -result {none any}
+
+test ev-bound-deterministic {the same source gives the same facts twice} -body {
+    set src "x = \[\[1, \"a\"\], \[2, \"b\"\]\]\nlist_get(x, 1)"
+    string equal [evFact $src] [evFact $src]
+} -result 1
+
+# ---------------------------------------------------------------------------
+# The function parameter boundary: test_name stays legal and untyped
+
+test ev-test-name-legal {fn test_name(test): list_get(test, 0) is valid and its result is any} -body {
+    set src "fn test_name(test):\n    list_get(test, 0)\ntest_name(\[\"a\", 1\])"
+    list [evResult $src test_name] [evSem $src]
+} -result {any any}
+
+test ev-test-name-contract-is-list-only {its intrinsic parameter contract is list: no positional schema, no tuple-like type} -body {
+    set src "fn test_name(test):\n    list_get(test, 0)\ntest_name(\[\"a\", 1\])"
+    set sig [evSig $src test_name]
+    list $sig [string match "*str*" $sig] [string match "*\\\[*,*\\\]*" [lindex $sig 0]]
+} -result {{{test: list (inferred)}} 0 0}
+
+test ev-test-deps-legal {test_deps(test): list_get(test, 1) likewise} -body {
+    set src "fn test_deps(test):\n    list_get(test, 1)\ntest_deps(\[\"a\", \[\"b\"\]\])"
+    list [evResult $src test_deps] [evSig $src test_deps]
+} -result {any {{test: list (inferred)}}}
+
+test ev-exact-index-alone-implies-nothing {an exact selector identifies the slot, not its type} -body {
+    set src "fn f(xs):\n    i = 0\n    list_get(xs, i)\nf(\[\"a\"\])"
+    list [evResult $src f] [evSig $src f]
+} -result {any {{xs: list (inferred)}}}
+
+test ev-param-fact-not-from-body {an untyped List parameter gets no element facts} -body {
+    set src "fn f(xs):\n    list_length(xs)\nf(\[1, 2, 3\])"
+    set hir [evCompile $src]
+    set e [hir::get $hir [evBlock $hir f] body]
+    set out {}
+    foreach b $e {
+        set f [hir::exact::Of $hir $b]
+        lappend out [expr {$f eq "" ? "none" : $f}]
+    }
+    set out
+} -result none
+
+# ---------------------------------------------------------------------------
+# The caller-pattern boundary
+
+test ev-callers-do-not-infer-slots {first(x) called only with ["a",1], ["b",2] stays merely List-compatible} -body {
+    set src "fn first(x):\n    list_get(x, 0)\nfirst(\[\"a\", 1\])\nfirst(\[\"b\", 2\])"
+    list [evSig $src first] [evResult $src first] [evSem $src]
+} -result {{{x: list (inferred)}} any any}
+
+test ev-callers-instance-fact-reported-separately {a specialized instance may know its argument's shape (existing instance mechanism); the intrinsic contract does not} -body {
+    set src "fn first(x):\n    list_get(x, 0)\nfirst(\[\"a\", 1\])\nfirst(\[\"b\", 2\])"
+    set hir [evCompile $src]
+    set spec [hir::specialize::analyze $hir]
+    set labels [lmap id [dict get $spec used] {hir::specialize::label $spec $id}]
+    list [lsearch -inline $labels first*] [evSig $src first]
+} -result {{first<list[str, int]>} {{x: list (inferred)}}}
+
+test ev-callers-mixed-shape-instances {different caller shapes get different instances, none changes the contract} -body {
+    set src "fn first(x):\n    list_get(x, 0)\nfirst(\[\"a\", 1\])\nfirst(\[2, \"b\"\])"
+    list [evSig $src first] [evResult $src first]
+} -result {{{x: list (inferred)}} any}
+
+# ---------------------------------------------------------------------------
+# Intrinsic contract interaction
+
+test ev-contract-exact-index-requires-list-only {fn f(xs): list_get(xs, 0) requires only list of xs} -body {
+    evSig "fn f(xs):\n    list_get(xs, 0)\nf(\[1\])" f
+} -result {{xs: list (inferred)}}
+
+test ev-contract-alias-index {an aliased exact index changes nothing about the requirement} -body {
+    evSig "fn f(xs):\n    i = 1\n    j = i\n    list_get(xs, j)\nf(\[1, 2\])" f
+} -result {{xs: list (inferred)}}
+
+test ev-contract-scan-while-unchanged {scan_while's predicate contract and local_char? str requirement are unchanged by value facts} -body {
+    set path [makeFile "web::emailish?(\"a@b.cd\")" ev-web.bot]
+    try {
+        set hir [surface::readProgramFile $path -strict 1]
+    } finally {
+        removeFile ev-web.bot
+    }
+    set sig [hir::signatures::of $hir [evBlock $hir scan_while]]
+    lmap p [dict get $sig params] { hir::types::show [hir::signatures::paramType $p] }
+} -result {int {Fn{args: [str], return: bool, errors: []}}}
+
+# ---------------------------------------------------------------------------
+# Determinism and canonical form
+
+test ev-equal-canonical {two independently built identical Lists have equal canonical facts} -body {
+    set hir [evCompile "a = \[\"x\", \[1, 2\]\]\nb = \[\"x\", \[1, 2\]\]\nc = \[\"x\", \[1, 3\]\]\n1"]
+    set roots [hir::roots $hir]
+    lassign [lmap r [lrange $roots 0 2] { hir::exact::Of $hir $r }] fa fb fc
+    list [hir::exact::Equal $hir $fa $fb] [hir::exact::Equal $hir $fa $fc]
+} -result {1 0}
+
+test ev-order-independent {defining the same helpers in either order gives the same facts} -body {
+    set a "fn f():\n    x = \[\"x\", 7\]\n    list_get(x, 1)\nfn g():\n    y = \[\"y\", 8\]\n    list_get(y, 1)\nf() + g()"
+    set b "fn g():\n    y = \[\"y\", 8\]\n    list_get(y, 1)\nfn f():\n    x = \[\"x\", 7\]\n    list_get(x, 1)\nf() + g()"
+    list [evRange $a] [evRange $b]
+} -result {{[15, 15] {15}} {[15, 15] {15}}}
+
+# ---------------------------------------------------------------------------
+# Exact booleans, equality and branch reasoning
+
+proc evKnown {src} {
+    set hir [evCompile $src]
+    set e [lindex [hir::roots $hir] end]
+    hir::get $hir $e known
+}
+
+test ev-equality-decided {Botlish == is value equality: exact operands of one kind decide it, by value, never identity} -body {
+    list [evKnown "3 == 3"] [evKnown "3 == 4"] [evKnown "\"a\" == \"b\""] [evKnown "\"a\" == \"a\""] \
+        [evKnown "x = \"q\"\ny = x\ny == \"q\""]
+} -result {1 0 0 1 1}
+
+test ev-equality-undecided {different kinds, Lists and non-exact operands decide nothing} -body {
+    list [evKnown "1 == \"a\""] [evKnown "\[1\] == \[1\]"] [evKnown "fn f(x):\n    x == 1\nf(1)"] \
+        [evKnown "fn f():\n    1\nf() == 1"]
+} -result {{} {} {} {}}
+
+test ev-ordering-decided {orderings of two exact Ints are decided} -body {
+    list [evKnown "3 < 4"] [evKnown "4 < 3"] [evKnown "3 <= 3"] [evKnown "5 > 6"] [evKnown "a = 2\nb = a + 1\nb >= 3"]
+} -result {1 0 1 0 1}
+
+test ev-not-exact-bool {`not false` is exactly true} -body {
+    list [evFact "not false"] [evFact "not true"] [evFact "true and false"]
+} -result {bool(true) bool(false) bool(false)}
+
+test ev-if-alias-bool-decided {an alias of an exact Boolean decides an if: only the taken branch is reachable} -body {
+    set src "ok = 3 < 4\nif ok:\n    1\nelse:\n    \"no\""
+    list [evSem $src] [evSem "ok = 4 < 3\nif ok:\n    1\nelse:\n    \"no\""]
+} -result {int str}
+
+test ev-branch-decided-on-exact-element {an element read out of a known List can decide a branch} -body {
+    set src "x = \[true, 1\]\nif list_get(x, 0):\n    1\nelse:\n    \"no\""
+    evSem $src
+} -result int
+
+# ---------------------------------------------------------------------------
+# Same value through another canonical constructor
+
+test ev-const-list-value {a constant List value (not a literal expression) carries the same facts} -body {
+    set hir [hir::build {{bind xs {const list {1 a}}} {call {ref list_get} {ref xs} {const 0}}}]
+    set e [lindex [hir::roots $hir] end]
+    list [hir::exact::describe $hir [hir::exact::Of $hir [lindex [hir::roots $hir] 0]]] [hir::exact::describe $hir [hir::exact::Of $hir $e]]
+} -result {{exact-list[int(1), str("a")]} int(1)}
+
+# ---------------------------------------------------------------------------
+# Backend parity (semantics never change)
+
+test ev-parity-projections {the projections compute the same values on every backend} -body {
+    differential {
+        {bind x {call {ref list} {const "a"} {const 7}}}
+        {bind i {const 1}}
+        {call {ref list} {call {ref list_get} {ref x} {const 0}} {call {ref list_get} {ref x} {ref i}} {call {ref list_length} {ref x}}}
+    }
+} -result same
+
+test ev-parity-oob {an out-of-bounds read on a known List still raises the same RANGE error everywhere} -body {
+    differential {
+        {bind x {call {ref list} {const "a"}}}
+        {call {ref list_get} {ref x} {const 3}}
+    }
+} -result same
+
+cleanupTests

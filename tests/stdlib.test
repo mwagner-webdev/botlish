@@ -175,8 +175,10 @@ corpusTests string_reverse [list \
     involution   {reversing twice gives the original, 500 characters} \
         "text = [$lit [string repeat abcdefghij 50]]\n\[reverse_chars(reverse_chars(text)) == text, length(reverse_chars(text))\]" \
         [value {[true, 500]}] \
-    not-a-string {a non-string argument of unknown static type reaches the native's own run-time TYPE error} \
-        {reverse_chars(list_get([12, "a"], 0))} \
+    not-a-string {a non-string argument of unknown static type reaches the native's own run-time TYPE error (the element comes out of a helper, so no exact value fact reaches it: list_get of a *literal* List is statically known since EXACT-VALUE-FACTS.md)} \
+        {fn first_of(xs):
+    list_get(xs, 0)
+reverse_chars(first_of([12, "a"]))} \
         {error {CORE SEMANTIC TYPE}} \
 ]
 

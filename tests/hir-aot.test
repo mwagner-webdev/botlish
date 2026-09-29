@@ -160,12 +160,12 @@ test hir-aot-15 {a refinement proven by a type test removes the blocker inside t
          [lmap x [aotFacts $refined f native-call] {list [dict get $x native] [dict get $x argKinds]}]
 } -result {{guarded closed} UnknownParameterKind {closed closed} {} {{integer? {{}}} {+ {int int}}}}
 
-test hir-aot-16 {== on two known scalars needs no structural comparison} -body {
+test hir-aot-16 {== on two known scalars needs no structural comparison; two exactly known Ints decide it statically (EXACT-VALUE-FACTS.md), so `1 == 2` needs no runtime support at all} -body {
     set a [aotOf [hirOf {call {ref ==} {const 1} {const 2}} {call {ref ==} {const str a} {const 1}} \
         {bind f {block {x} {call {ref ==} {ref x} {const 1}}}}]]
     list [lmap x [aotFacts $a <program> native-call] {dict get $x runtime}] \
          [lmap x [aotFacts $a f native-call] {dict get $x runtime}]
-} -result {{bigint structural-equality} structural-equality}
+} -result {{{} structural-equality} structural-equality}
 
 # ---------------------------------------------------------------------------
 # Provenance, init checks, other facts

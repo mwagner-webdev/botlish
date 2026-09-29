@@ -376,11 +376,19 @@ test ic-native-wrapper-any-argument {checked boundary: an argument whose static 
 
 test ic-trusted-any-argument-rejected {trusted boundary: forwarding to a declared-typed callee makes the requirement trusted (the body is typed with it), so an argument not proven to satisfy it -- including one of static type any -- is a compile-time error, exactly as for a declared parameter (spec item 71)} -body {
     set src "fn take_byte(b: Byte) -> int:\n    b\nfn fwd(x):\n    take_byte(x)\n"
-    list [icRejects "${src}xs = \[1, \"ab\"\]\nfwd(list_get(xs, 0))" \
+    # The argument comes out of a helper: statically any. (Read straight out of
+    # the literal it is exactly the Byte 1: EXACT-VALUE-FACTS.md, next test.)
+    list [icRejects "${src}fn first_of(xs):\n    list_get(xs, 0)\nfwd(first_of(\[1, \"ab\"\]))" \
             {*argument for parameter "x" cannot be proven to satisfy int\[Byte\], the parameter type inferred from the function body (argument type: any*}] \
          [icRejects "${src}fwd(9999)" {*cannot be proven to satisfy int\[Byte\], the parameter type inferred*}] \
          [icRun "${src}fwd(7)"]
 } -result {{{CORE SEMANTIC TYPE} 1} {{CORE SEMANTIC TYPE} 1} 7}
+
+test ic-trusted-exact-element-proves-contract {an argument read out of a known literal List at an exact index is exactly known (EXACT-VALUE-FACTS.md), so it proves a trusted contract its value satisfies -- and is still rejected when the exact value violates it} -body {
+    set src "fn take_byte(b: Byte) -> int:\n    b\nfn fwd(x):\n    take_byte(x)\n"
+    list [icRejects "${src}xs = \[1, \"ab\"\]\nfwd(list_get(xs, 0))" {*}] \
+         [icRejects "${src}xs = \[1000, \"ab\"\]\nfwd(list_get(xs, 0))" {*cannot be proven to satisfy int\[Byte\]*}]
+} -result {accepted {{CORE SEMANTIC TYPE} 1}}
 
 test ic-trusted-forwarder-now-valid {fn fwd(x): take_byte(x) used to be a static error in fwd's own body (x : any); its body now proves the contract instead, and callers are held to it} -body {
     set h [icCompile "fn take_byte(b: Byte) -> int:\n    b\nfn fwd(x):\n    take_byte(x)\nfwd(200)"]
@@ -421,7 +429,7 @@ test ic-callable-return {the result consumed as an if condition requires return 
 } -result {{CORE SEMANTIC TYPE} 1}
 
 test ic-callable-unknown-rejected {a trusted callable contract is a static obligation: an argument of type any is rejected (never checked at run time)} -body {
-    icRejects "${::icPredUse}xs = \[is_tcl_alpha, 1\]\npred_use(list_get(xs, 0))" \
+    icRejects "${::icPredUse}fn first_of(xs):\n    list_get(xs, 0)\npred_use(first_of(\[is_tcl_alpha, 1\]))" \
         {*argument for parameter "p" cannot be proven to satisfy Fn\{args: \[str\], return: bool, errors: \[\]\}, the parameter type inferred from the function body*}
 } -result {{CORE SEMANTIC TYPE} 1}
 
