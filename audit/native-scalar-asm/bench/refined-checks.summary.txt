@@ -2,7 +2,7 @@ source:  bench/refined-checks.bot
 backend: Cranelift (specialize=1)
 asm:     refined-checks.asm
 vcode:   refined-checks.vcode
-machine-code bytes: 8935 (per function: 1443 39 289 609 74 74 74 125 125 601 262 222 238 528 468 1244 137 94 103 474 491 426 451 344)
+machine-code bytes: 8903 (per function: 1443 39 289 609 74 74 74 125 125 601 262 222 238 496 468 1244 137 94 103 474 491 426 451 344)
 
 functions:
   0 <program entry>: nir-regs=45
@@ -347,5 +347,5 @@ mechanical pattern counts (triage only; see report for interpretation):
   8 x calls to rt_int_add
   2 x calls to rt_int_sub
   10 x calls to rt_int_cmp
-  44 x calls to other rt_* helpers
-  2 x guard/guardbool instructions
+  43 x calls to other rt_* helpers
+  1 x guard/guardbool instructions

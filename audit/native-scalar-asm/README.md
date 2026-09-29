@@ -12,7 +12,7 @@ are complete.
 
 ## Compiler revision
 
-- git commit: da4503426140326009888d767074d80024efa980
+- git commit: 7a2dd452ed6d68776fc9c3b8db75dc18301318e0
 - Tcl: 9.0.1
 - rustc 1.98.1 (48a229cea 2026-09-01)
 - cranelift-codegen: 0.135.2
@@ -29,7 +29,7 @@ are complete.
 - native-compilable programs: 13
 - unsupported/failed programs: 0
 - total native functions inspected: 178
-- total committed disassembly bytes of machine code: 76998
+- total committed disassembly bytes of machine code: 76966
 
 ## Status
 
@@ -38,7 +38,7 @@ are complete.
 | bench/fib.bot | compiled / inspected | [bench/fib.asm](bench/fib.asm) / [bench/fib.vcode](bench/fib.vcode) | 2 functions, 292 bytes |
 | bench/loop-count.bot | compiled / inspected | [bench/loop-count.asm](bench/loop-count.asm) / [bench/loop-count.vcode](bench/loop-count.vcode) | 3 functions, 287 bytes |
 | bench/sum-refined.bot | compiled / inspected | [bench/sum-refined.asm](bench/sum-refined.asm) / [bench/sum-refined.vcode](bench/sum-refined.vcode) | 3 functions, 286 bytes |
-| bench/refined-checks.bot | compiled / inspected | [bench/refined-checks.asm](bench/refined-checks.asm) / [bench/refined-checks.vcode](bench/refined-checks.vcode) | 24 functions, 8935 bytes |
+| bench/refined-checks.bot | compiled / inspected | [bench/refined-checks.asm](bench/refined-checks.asm) / [bench/refined-checks.vcode](bench/refined-checks.vcode) | 24 functions, 8903 bytes |
 | examples/stdlib/ai_text_clean.bot | compiled / inspected | [examples-stdlib/ai_text_clean.asm](examples-stdlib/ai_text_clean.asm) / [examples-stdlib/ai_text_clean.vcode](examples-stdlib/ai_text_clean.vcode) | 5 functions, 3081 bytes |
 | examples/stdlib/csv.bot | compiled / inspected | [examples-stdlib/csv.asm](examples-stdlib/csv.asm) / [examples-stdlib/csv.vcode](examples-stdlib/csv.vcode) | 11 functions, 5723 bytes |
 | examples/stdlib/csv_chunked.bot | compiled / inspected | [examples-stdlib/csv_chunked.asm](examples-stdlib/csv_chunked.asm) / [examples-stdlib/csv_chunked.vcode](examples-stdlib/csv_chunked.vcode) | 20 functions, 10168 bytes |
