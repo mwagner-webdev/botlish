@@ -134,6 +134,7 @@ namespace eval native::lower {
         integer?     {op isint} \
         string?      {op isstr} \
         list?        {op islist} \
+        mutarray?    {op ismutarray} \
         ok?          {op isok} \
         error?       {op iserror} \
         result-value {op resultvalue} \

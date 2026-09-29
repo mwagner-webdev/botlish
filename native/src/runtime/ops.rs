@@ -1273,6 +1273,7 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         IsInt => rt_is_kind(p, a[0], Kind::Int.code() as u64),
         IsStr => rt_is_kind(p, a[0], Kind::Str.code() as u64),
         IsList => rt_is_kind(p, a[0], Kind::List.code() as u64),
+        IsMutArray => rt_is_kind(p, a[0], Kind::MutArray.code() as u64),
         IsOk => rt_is_result(p, a[0], 1),
         IsError => rt_is_result(p, a[0], 0),
         ResultValue => rt_result_payload(p, a[0], 1),

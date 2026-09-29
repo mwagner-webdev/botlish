@@ -1,0 +1,20 @@
+--- semantic
+program s2 binds b1 f
+e1 bind b1 f : block(e2)/1 -> int
+    e2 block s3 (b2 x) captures () : block(e2)/1 -> int
+        e3 if : int
+            e4 call native(mutarray?) : bool
+                e5 ref b3 mutarray? : native mutarray?
+                e6 ref b2 x : any
+            then s4 refines b2 x : mutarray
+                e7 call native(mutable_array_capacity) : int
+                    e8 ref b4 mutable_array_capacity : native mutable_array_capacity
+                    e9 ref b2 x : mutarray
+            else s5
+                e10 const 0 : int
+e11 call block(e2) : int
+    e12 ref b1 f : block(e2)/1 -> int
+    e13 call native(mutable_array_allocate) : mutarray
+        e14 ref b5 mutable_array_allocate : native mutable_array_allocate
+        e15 const 4 : int
+--- exact facts (semantic)

@@ -1,0 +1,39 @@
+# mutarray.bot -- the "mutarray" namespace: construction of MutableArray
+# (core/mutarray.tcl) from ordinary Botlish values.
+#
+#   mutarray::from_list(xs)   a fresh MutableArray whose capacity is
+#                              list_length(xs) and whose slot i holds
+#                              list_get(xs, i), for every i in order.
+#
+# No new runtime operation backs this: it is an ordinary function over the
+# existing substrate (mutable_array_allocate, mutable_array_set), exactly
+# the allocate-then-fill sequence the stdlib builders (examples/stdlib) write
+# by hand, so the runtime construction path (allocation, rooting, bounds
+# checks) is the existing one, unchanged.
+#
+# Semantics, all inherited from that substrate rather than defined here:
+#   * the result is a new, distinct MutableArray (mutable_array_allocate's
+#     own fresh identity); XS is only read, so it stays the same immutable
+#     List and later mutation of the result never reaches it;
+#   * slots hold XS's elements as-is (the same immutable values, and the
+#     same handle for a nested MutableArray element -- elements are not
+#     copied deeply); XS may be heterogeneous, a MutableArray's slots being
+#     untyped;
+#   * element order is preserved; the empty List gives a capacity-0 array;
+#   * a non-List argument is rejected by the declared parameter contract
+#     (`xs: list`) under Botlish's ordinary typed-parameter rule, never
+#     coerced.
+#
+# The result type is `mutarray`, the one canonical static kind of a
+# MutableArray. It is the declared result of from_list, and it is also what
+# the body infers unaided (mutable_array_allocate's registered result type).
+# It carries no element type and no capacity: a MutableArray is mutable, so
+# neither is a stable compile-time fact.
+namespace mutarray
+
+fn from_list(xs: list) -> mutarray:
+    count = list_length(xs)
+    storage = mutable_array_allocate(count)
+    loop i from 0 to count:
+        mutable_array_set(storage, i, list_get(xs, i))
+    storage

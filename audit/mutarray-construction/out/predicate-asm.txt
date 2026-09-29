@@ -1,0 +1,74 @@
+# mutarray? vs list? on an unfolded (dynamic any) argument: NIR and machine code (objdump -dr, unlinked object).
+# Both are the same inline shape: pointer-tag test, one byte load of the heap-object kind, one compare (list=0x3, mutarray=0x8); no rt_* call, no allocation.
+func 2 "f" params=1 env=0 regs=7 pnames="x" captures=0 instance="generic" rawregs="4 6" @e11
+    %1 = op ismutarray %0 @e13
+    br %1 L0 L1 @e12
+  label L0
+    %3 = int 1 @e16
+    %4 = rawint 1
+    %2 = move %3
+    jump L2
+  label L1
+    %5 = int 0 @e17
+    %6 = rawint 0
+    %2 = move %5
+    jump L2
+  label L2
+    ret %2
+end
+func 3 "g" params=1 env=0 regs=7 pnames="y" captures=0 instance="generic" rawregs="4 6" @e19
+    %1 = op islist %0 @e21
+    br %1 L0 L1 @e20
+  label L0
+    %3 = int 1 @e24
+    %4 = rawint 1
+    %2 = move %3
+    jump L2
+  label L1
+    %5 = int 0 @e25
+    %6 = rawint 0
+    %2 = move %5
+    jump L2
+  label L2
+    ret %2
+end
+0000000000000128 <botlish_fn_2>:
+ 128:	push   rbp
+ 129:	mov    rbp,rsp
+ 12c:	mov    r10,rsi
+ 12f:	xor    esi,esi
+ 131:	mov    rax,r10
+ 134:	test   rax,0x7
+ 13a:	jne    14a <botlish_fn_2+0x22>
+ 140:	movzx  rax,BYTE PTR [rax]
+ 144:	cmp    al,0x8
+ 146:	sete   sil
+ 14a:	test   sil,sil
+ 14d:	jne    15d <botlish_fn_2+0x35>
+ 153:	mov    eax,0x1
+ 158:	jmp    162 <botlish_fn_2+0x3a>
+ 15d:	mov    eax,0x3
+ 162:	mov    rsp,rbp
+ 165:	pop    rbp
+ 166:	ret
+
+0000000000000178 <botlish_fn_3>:
+ 178:	push   rbp
+ 179:	mov    rbp,rsp
+ 17c:	mov    r10,rsi
+ 17f:	xor    esi,esi
+ 181:	mov    rax,r10
+ 184:	test   rax,0x7
+ 18a:	jne    19a <botlish_fn_3+0x22>
+ 190:	movzx  rax,BYTE PTR [rax]
+ 194:	cmp    al,0x3
+ 196:	sete   sil
+ 19a:	test   sil,sil
+ 19d:	jne    1ad <botlish_fn_3+0x35>
+ 1a3:	mov    eax,0x1
+ 1a8:	jmp    1b2 <botlish_fn_3+0x3a>
+ 1ad:	mov    eax,0x3
+ 1b2:	mov    rsp,rbp
+ 1b5:	pop    rbp
+ 1b6:	ret
+

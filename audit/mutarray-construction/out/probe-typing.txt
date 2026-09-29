@@ -1,0 +1,78 @@
+== A
+mutarray
+== B
+mutarray
+== C
+mutarray
+== D
+any
+== E
+mutarray
+== F
+mutarray
+== G
+REJECT: probe-typing.bot:1:21: argument for parameter "xs" cannot be proven to satisfy list (argument type: int, facts: [123, 123] {123})
+== H
+REJECT: probe-typing.bot:3:3: argument for parameter "x" cannot be proven to satisfy list, the parameter type inferred from the function body (argument type: int, facts: [1, 1] {1}); inferred from the function body: argument 1 of mutarray::from_list (declared list) requires list (at 2:25)
+=========== runtime
+== order
+interp: value {[3, 10, 20, 30]}
+compile: value {[3, 10, 20, 30]}
+cranelift-generic: value {[3, 10, 20, 30]}
+cranelift: value {[3, 10, 20, 30]}
+== mutate
+interp: value {[[1, 2, 3], 99]}
+compile: value {[[1, 2, 3], 99]}
+cranelift-generic: value {[[1, 2, 3], 99]}
+cranelift: value {[[1, 2, 3], 99]}
+== empty
+interp: value {[0, true]}
+compile: value {[0, true]}
+cranelift-generic: value {[0, true]}
+cranelift: value {[0, true]}
+== hetero
+interp: value {["x", 1, true]}
+compile: value {["x", 1, true]}
+cranelift-generic: value {["x", 1, true]}
+cranelift: value {["x", 1, true]}
+== pred
+interp: value {[true, false, false, false, false, true]}
+compile: value {[true, false, false, false, false, true]}
+cranelift-generic: value {[true, false, false, false, false, true]}
+cranelift: value {[true, false, false, false, false, true]}
+=========== typing/inference
+== maybe_capacity sig
+{x: any (none)}
+== capacity sig
+{x: mutarray (inferred)}
+== after-branch
+{x: mutarray (inferred)}
+== nested alias
+int
+== mixed fnType
+block(e2)/1 -> any
+== record ctrl
+block(e34)/0 -> any
+== record ctrl2
+any
+== local record
+mutarray
+== append
+List[mutarray]
+== pred type
+native mutarray?
+== int pred type
+native integer?
+== pred call
+block(e2)/1 -> bool
+== unused pass
+any
+=========== callable
+== list of preds
+List[Fn{args: [any], return: bool, errors: []}]
+== accept
+bool
+== accept int
+bool
+== used view
+{<program> bool} {p<int> bool}

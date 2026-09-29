@@ -96,6 +96,7 @@ pub enum OpCode {
     IsInt,
     IsStr,
     IsList,
+    IsMutArray,
     IsOk,
     IsError,
     ResultValue,
@@ -240,6 +241,7 @@ impl OpCode {
             "isint" => IsInt,
             "isstr" => IsStr,
             "islist" => IsList,
+            "ismutarray" => IsMutArray,
             "isok" => IsOk,
             "iserror" => IsError,
             "resultvalue" => ResultValue,
@@ -278,7 +280,7 @@ impl OpCode {
         use OpCode::*;
         match self {
             ListNew => None,
-            StrLen | StrLower | ListLen | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList
+            StrLen | StrLower | ListLen | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList | IsMutArray
             | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | Hash | RBox | RUnbox
             | StrByteLen | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum | CharCodepoint | SetFromList
             | SetFromListTotal => Some(1),

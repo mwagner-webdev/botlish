@@ -35,7 +35,10 @@ proc core::predicates::resultError {v} {
 
 # Kind and tag predicates are type tests (-tests-type): each returns exactly
 # whether its argument is a value of the type, and refines it accordingly.
-foreach {name kind} {integer? int string? str list? list} {
+# mutarray? is the type test for MutableArray (core/mutarray.tcl): the same
+# KindIs kind comparison as its siblings, allocating nothing and never
+# raising -- a non-MutableArray argument is simply false.
+foreach {name kind} {integer? int string? str list? list mutarray? mutarray} {
     core::native::register $name -arity 1  -impl [list core::predicates::KindIs $kind] -tests-type $kind
 }
 unset name kind

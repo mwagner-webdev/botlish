@@ -1,0 +1,21 @@
+######## before (variant-all-trusted)
+literal-rows: accepted (0 diagnostic(s))
+appended-rows: accepted (0 diagnostic(s))
+builder-rows: REJECTED (2 diagnostic(s))
+    line 6: argument for parameter "table" cannot be proven to satisfy mutarray, the parameter type inferred from
+    line 6: argument for parameter "table" cannot be proven to satisfy mutarray, the parameter type inferred from
+from-list-rows: NOT COMPILED (/tmp/claude-0/control-from-list-rows.bot:457:13: unknown namespace "mutarray": no such modu)
+from-list-fn-rows: NOT COMPILED (/tmp/claude-0/control-from-list-fn-rows.bot:457:5: unknown namespace "mutarray": no such mo)
+record-pair-boundary: NOT COMPILED (/tmp/claude-0/control-record-pair-boundary.bot:459:6: unknown namespace "mutarray": no such)
+record-pair-local: NOT COMPILED (/tmp/claude-0/control-record-pair-local.bot:459:13: unknown namespace "mutarray": no such m)
+######## after (variant-all-trusted)
+literal-rows: accepted (0 diagnostic(s))
+appended-rows: accepted (0 diagnostic(s))
+builder-rows: REJECTED (2 diagnostic(s))
+    line 6: argument for parameter "table" cannot be proven to satisfy mutarray, the parameter type inferred from
+    line 6: argument for parameter "table" cannot be proven to satisfy mutarray, the parameter type inferred from
+from-list-rows: accepted (0 diagnostic(s))
+from-list-fn-rows: accepted (0 diagnostic(s))
+record-pair-boundary: REJECTED (1 diagnostic(s))
+    line 6: argument for parameter "m" cannot be proven to satisfy mutarray, the parameter type inferred from the
+record-pair-local: accepted (0 diagnostic(s))

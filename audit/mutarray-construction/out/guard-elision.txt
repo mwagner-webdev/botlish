@@ -1,0 +1,16 @@
+# NIR of a MutableArray consumer reached from (a) a List[mutarray] element built by mutarray::from_list, dynamic index (instance "mutarray": no kind guard) and (b) an any-typed value (instance "generic": guard mutarray).
+func 2 "cap" params=1 env=0 regs=2 pnames="x" captures=0 instance="mutarray" @e24
+    %1 = op mutarraycapacity %0 @e25
+    ret %1
+end
+func 3 "cap" params=1 env=0 regs=2 pnames="x" captures=0 instance="generic" @e24
+    guard mutarray %0 "mutable_array_capacity" @e25
+    %1 = op mutarraycapacity %0 @e25
+    ret %1
+end
+func 6 "viaRows" params=1 env=0 regs=4 pnames="i" captures=0 instance="int" @e53
+    %1 = call 5 @e58
+    %2 = op listget %1 %0 @e56
+    %3 = call 2 %2 @e54
+    ret %3
+end

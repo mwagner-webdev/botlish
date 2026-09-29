@@ -1421,10 +1421,11 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 self.b.switch_to_block(done);
                 result
             }
-            IsInt | IsStr | IsList => {
+            IsInt | IsStr | IsList | IsMutArray => {
                 let kind = match op {
                     IsInt => Kind::Int,
                     IsStr => Kind::Str,
+                    IsMutArray => Kind::MutArray,
                     _ => Kind::List,
                 };
                 let flag = self.is_kind(a[0], kind);
