@@ -327,18 +327,21 @@ outer()} $::byteDecl] capture-bad.bot} message options
     list [dict get $options -errorcode] [string match {*cannot be proven to satisfy*} $message]
 } -result {{CORE SEMANTIC TYPE} 1}
 
-test callable-escape-capture-untyped-wrapper-rejected {a closure capturing a typed callable through its own UNTYPED parameter cannot prove that parameter's admissibility either -- rejected regardless of what the wrapper's own caller passes (no way to establish the inner call is safe without a typed wrapper parameter)} -body {
-    rejects [format {%sfn take_byte(x: Byte) -> int:
+test callable-escape-capture-untyped-wrapper-rejected {a closure capturing a typed callable calls it through its own UNTYPED parameter: that parameter now infers the typed callable's contract as its own (INTRINSIC-FUNCTION-CONTRACT-INFERENCE.md -- it used to be rejected regardless of the caller), so the wrapper is valid exactly when its own callers prove Byte: inner(7) is accepted, inner(9999) rejected} -body {
+    set src [format {%sfn take_byte(x: Byte) -> int:
     x
 
-fn outer():
+fn outer(n):
     f = take_byte
     fn inner(v):
         f(v)
-    inner(7)
+    inner(n)
 
-outer()} $::byteDecl]
-} -result {{CORE SEMANTIC TYPE} 0}
+} $::byteDecl]
+    list [accepts "${src}outer(7)"] [catch {surface::compile "${src}fn bad():\n    f = take_byte\n    fn inner(v):\n        f(v)\n    inner(9999)\nbad()" reject.bot} message options] \
+        [dict get $options -errorcode] \
+        [string match {*argument for parameter "v" cannot be proven to satisfy int\[Byte\], the parameter type inferred from the function body*} $message]
+} -result {1 1 {CORE SEMANTIC TYPE} 1}
 
 # ---------------------------------------------------------------------------
 # Loop break (spec #58's "at least one branch/join" -- loop break was the

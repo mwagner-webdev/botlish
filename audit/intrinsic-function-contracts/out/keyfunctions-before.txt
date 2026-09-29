@@ -1,0 +1,88 @@
+tree: 67380f41d56fc62986485999057e3976d4f01273 (plus any uncommitted working-tree changes)
+
+== bench/refined-checks.bot
+  scan_while (e211)
+    signature: (start: any (untyped), predicate: any (untyped)) -> int
+    exact Block type: block(e211)/2 -> int; structuralOf: Fn{args: [any, any], return: int, errors: []}
+    instance scan_while<generic>: open (transitively open); params: start : any, predicate : any; result: int
+        blocker: UnknownCallResultKind the condition needs bool; the result of the dynamic call at line 128:16 has no static kind
+        blocker: DynamicCall the callee has no static kind: native, block or not callable is decided at run time
+  local_char? (e183)
+    signature: (c: any (untyped)) -> bool
+    exact Block type: block(e183)/1 -> bool; structuralOf: Fn{args: [any], return: bool, errors: []}
+    instance local_char?<generic>: guarded (transitively guarded); params: c : any; result: bool
+        blocker: UnknownParameterKind is_tcl_alnum needs str; parameter c (no annotation, no call-site inference) has no static kind
+  label_char? (e197)
+    signature: (c: any (untyped)) -> bool
+    exact Block type: block(e197)/1 -> bool; structuralOf: Fn{args: [any], return: bool, errors: []}
+    instance label_char?<str>: closed (transitively closed); params: c : str; result: bool
+  tld? (e226)
+    signature: (i: any (untyped)) -> bool
+    exact Block type: block(e226)/1 -> bool; structuralOf: Fn{args: [any], return: bool, errors: []}
+    instance tld?<generic>: closed (transitively open); params: i : any; result: bool
+  domain? (e246)
+    signature: (start: any (untyped)) -> bool
+    exact Block type: block(e246)/1 -> bool; structuralOf: Fn{args: [any], return: bool, errors: []}
+    instance domain?<generic>: closed (transitively open); params: start : any; result: bool
+  char_at (e173)
+    signature: (i: any (untyped)) -> str
+    exact Block type: block(e173)/1 -> str; structuralOf: Fn{args: [any], return: str, errors: []}
+    instance char_at<generic>: closed (transitively closed); params: i : any; result: str
+  web::emailish? (e167)
+    signature: (v: any (untyped)) -> bool
+    exact Block type: block(e167)/1 -> bool; structuralOf: Fn{args: [any], return: bool, errors: []}
+    instance web::emailish?<str>: closed (transitively open); params: v : str; result: bool
+
+== bench/uri-steady.bot
+  scan_while (e211)
+    signature: (start: any (untyped), predicate: any (untyped)) -> int
+    exact Block type: block(e211)/2 -> int; structuralOf: Fn{args: [any, any], return: int, errors: []}
+    instance scan_while<generic>: open (transitively open); params: start : any, predicate : any; result: int
+        blocker: UnknownCallResultKind the condition needs bool; the result of the dynamic call at ir {15 2 6 2 2 3 2 1} has no static kind
+        blocker: DynamicCall the callee has no static kind: native, block or not callable is decided at run time
+  local_char? (e183)
+    signature: (c: any (untyped)) -> bool
+    exact Block type: block(e183)/1 -> bool; structuralOf: Fn{args: [any], return: bool, errors: []}
+    instance local_char?<generic>: guarded (transitively guarded); params: c : any; result: bool
+        blocker: UnknownParameterKind is_tcl_alnum needs str; parameter c (no annotation, no call-site inference) has no static kind
+
+== bench/lex-strategy.bot
+  lenient_ident_char? (e49)
+    signature: (c: any (untyped)) -> bool
+    exact Block type: block(e49)/1 -> bool; structuralOf: Fn{args: [any], return: bool, errors: []}
+    instance lenient_ident_char?<generic>: guarded (transitively guarded); params: c : any; result: bool
+        blocker: UnknownParameterKind is_tcl_alnum needs str; parameter c (no annotation, no call-site inference) has no static kind
+  choose_classifier (e72)
+    signature: (strict_mode: any (untyped)) -> Fn{args: [any], return: bool, errors: []}
+    exact Block type: block(e72)/1 -> Fn{args: [any], return: bool, errors: []}; structuralOf: Fn{args: [any], return: Fn{args: [any], return: bool, errors: []}, errors: []}
+    instance choose_classifier<bool>: closed (transitively closed); params: strict_mode : bool; result: Fn{args: [any], return: any, errors: []}
+  classify (e107)
+    signature: (token: any (untyped), strict_mode: any (untyped)) -> List[bool]
+    exact Block type: block(e107)/2 -> List[bool]; structuralOf: Fn{args: [any, any], return: List[bool], errors: []}
+    instance classify<str, bool>: closed (transitively closed); params: token : str, strict_mode : bool; result: list
+
+== bench/source-checks.bot
+  is_underscore? (e49)
+    signature: (c: any (untyped)) -> bool
+    exact Block type: block(e49)/1 -> bool; structuralOf: Fn{args: [any], return: bool, errors: []}
+    instance is_underscore?<generic>: closed (transitively closed); params: c : any; result: bool
+  is_hyphen? (e55)
+    signature: (c: any (untyped)) -> bool
+    exact Block type: block(e55)/1 -> bool; structuralOf: Fn{args: [any], return: bool, errors: []}
+    instance is_hyphen?<generic>: closed (transitively closed); params: c : any; result: bool
+  classify_leading (e68)
+    signature: (name: any (untyped)) -> List[bool]
+    exact Block type: block(e68)/1 -> List[bool]; structuralOf: Fn{args: [any], return: List[bool], errors: []}
+    instance classify_leading<generic>: guarded (transitively guarded); params: name : any; result: list
+        blocker: UnknownParameterKind length needs str; parameter name (no annotation, no call-site inference) has no static kind
+
+== bench/test-selection.bot
+  make_changed? (e49)
+    signature: (changed: any (untyped)) -> block(e55)/1 -> bool
+    exact Block type: block(e49)/1 -> block(e55)/1 -> bool; structuralOf: Fn{args: [any], return: block(e55)/1 -> bool, errors: []}
+    instance make_changed?<List[str]>: closed (transitively closed); params: changed : List[str]; result: block(e55)/1 -> any
+  affected? (e74)
+    signature: (test: any (untyped), changed?: any (untyped)) -> bool
+    exact Block type: block(e74)/2 -> bool; structuralOf: Fn{args: [any, any], return: bool, errors: []}
+    instance affected?<list, block>: closed (transitively guarded); params: test : list, changed? : block; result: bool
+    instance affected?<any, block>: closed (transitively guarded); params: test : any, changed? : block; result: bool

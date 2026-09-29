@@ -1416,7 +1416,12 @@ proc hir::range::VerifyCall {hirVar ranges e node} {
     }
     if {$targetKind ne {block}} { return }
     set targetNode [dict get $hir exprs $targetBlock]
-    set declaredTypes [dict get $targetNode declaredParamTypes]
+    # The target's intrinsic signature (hir::signatures): each parameter's
+    # entry contract -- declared, or trusted-inferred from its own body,
+    # held to the identical proof -- plus any checked-only inferred
+    # requirement (INTRINSIC-FUNCTION-CONTRACT-INFERENCE.md).
+    set declaredTypes [hir::signatures::entryTypes $hir $targetBlock]
+    set checkedTypes [hir::signatures::checkedTypes $hir $targetBlock]
     set params [dict get $targetNode params]
     set args [dict get $node args]
     if {[llength $args] != [llength $params]} {
@@ -1424,17 +1429,41 @@ proc hir::range::VerifyCall {hirVar ranges e node} {
         # completes normally); nothing sound to check argument-by-argument.
         return
     }
-    foreach arg $args paramBinding $params declaredType $declaredTypes {
-        if {$declaredType eq {}} { continue }
+    set index 0
+    foreach arg $args paramBinding $params declaredType $declaredTypes checkedType $checkedTypes {
+        set i $index
+        incr index
         set argType [hir::typeOf $hir $arg]
         set argRange [expr {[dict exists $ranges $arg] ? [dict get $ranges $arg] : [unknown]}]
-        if {[ProvesValueAcceptedBy $argType $argRange $declaredType]} {
+        set inferred [hir::signatures::inferredTrusted $hir $targetBlock $i]
+        if {$declaredType ne {} && ![ProvesValueAcceptedBy $argType $argRange $declaredType]} {
+            if {$inferred} {
+                dict set hir violatedContracts $paramBinding $arg
+            }
+            hir::Diagnose hir TYPE [format \
+                {argument for parameter "%s" cannot be proven to satisfy %s%s (argument type: %s, facts: %s)%s%s} \
+                [dict get $hir bindings $paramBinding name] [hir::types::show $declaredType] \
+                [expr {$inferred ? ", the parameter type inferred from the function body" : ""}] \
+                [hir::types::show $argType] [show $argRange] [MismatchClause $argType $declaredType] \
+                [expr {$inferred ? [hir::signatures::because $hir $targetBlock $i] : ""}]] $arg
+            continue
+        }
+        # A checked-only requirement: the body re-validates it at run time
+        # (a native's -param-types, an if's NOT-BOOLEAN), so only an
+        # argument of statically *known* type is held to it here -- one
+        # that is not admissible is rejected at compile time instead of
+        # reaching the run-time TYPE error; an `any` argument still reaches
+        # that check (hir/signatures.tcl's "Trusted and checked
+        # requirements").
+        if {$checkedType eq {} || $argType in {any never}
+                || [ProvesValueAcceptedBy $argType $argRange $checkedType]} {
             continue
         }
         hir::Diagnose hir TYPE [format \
-            {argument for parameter "%s" cannot be proven to satisfy %s (argument type: %s, facts: %s)%s} \
-            [dict get $hir bindings $paramBinding name] [hir::types::show $declaredType] \
-            [hir::types::show $argType] [show $argRange] [MismatchClause $argType $declaredType]] $arg
+            {argument for parameter "%s" is statically incompatible with %s, the parameter type inferred from the function body (argument type: %s, facts: %s)%s} \
+            [dict get $hir bindings $paramBinding name] [hir::types::show $checkedType] \
+            [hir::types::show $argType] [show $argRange] \
+            [hir::signatures::because $hir $targetBlock $i]] $arg
     }
 }
 

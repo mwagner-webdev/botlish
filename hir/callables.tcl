@@ -76,7 +76,9 @@ proc hir::callables::Bearing {hir type} {
             if {[dict get $hir exprs $block declaredErrors] ne {}} {
                 return 1
             }
-            foreach declared [dict get $hir exprs $block declaredParamTypes] {
+            # Declared, or trusted-inferred from the block's own body
+            # (hir::signatures::entryTypes): the body assumes either one.
+            foreach declared [hir::signatures::entryTypes $hir $block] {
                 if {$declared ne {}} {
                     return 1
                 }
@@ -176,6 +178,18 @@ proc hir::callables::CheckPreserved {hirVar arg finalType contextText} {
     set type [hir::typeOf $hir $arg]
     if {[Preserves $hir $type $finalType]} {
         return
+    }
+    if {[hir::types::IsExactBlock $type] && [dict exists $hir exprs [lindex $type 1]]} {
+        # An erased trusted *inferred* contract (hir::signatures) is a
+        # violation of it like a call's: hir::check demotes it on recovery.
+        set block [lindex $type 1]
+        set i 0
+        foreach b [dict get $hir exprs $block params] {
+            if {[hir::signatures::inferredTrusted $hir $block $i]} {
+                dict set hir violatedContracts $b $arg
+            }
+            incr i
+        }
     }
     set name [expr {[hir::types::IsExactBlock $type] ? [Name $hir [lindex $type 1]] : ""}]
     set label [expr {$name ne "" ? "\"$name\""
@@ -331,7 +345,7 @@ proc hir::callables::ArgContexts {hir e} {
     set none [lrepeat [llength $args] ""]
     lassign [dict get $node target] targetKind target
     if {$targetKind eq "block"} {
-        set declared [dict get $hir exprs $target declaredParamTypes]
+        set declared [hir::signatures::entryTypes $hir $target]
         if {[llength $declared] != [llength $args]} {
             return $none
         }

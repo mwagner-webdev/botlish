@@ -1,0 +1,51 @@
+tree: 67380f41d56fc62986485999057e3976d4f01273 (plus any uncommitted working-tree changes)
+
+lex-strategy.bot list::all?<List[str], native> @e18
+    source callee type:   any
+    instance callee type: native   => bare block/native
+    source call result:   any; instance: any
+    HIR target: ""   calleeErrors: {}
+lex-strategy.bot classify<str, bool> @e119
+    source callee type:   Fn{args: [any], return: bool, errors: []}
+    instance callee type: Fn{args: [any], return: bool, errors: []}   => structural Fn
+    source call result:   bool; instance: bool
+    HIR target: ""   calleeErrors: {}
+refined-checks.bot scan_while<generic> @e216
+    source callee type:   Fn{args: [str], return: bool, errors: []}
+    instance callee type: Fn{args: [str], return: bool, errors: []}   => structural Fn
+    source call result:   bool; instance: bool
+    HIR target: ""   calleeErrors: {}
+source-checks.bot list::find<List[str], block> @e42
+    source callee type:   any
+    instance callee type: block   => bare block/native
+    source call result:   any; instance: any
+    HIR target: ""   calleeErrors: {}
+source-checks.bot classify_leading<generic> @e91
+    source callee type:   Fn{args: [any], return: bool, errors: []}
+    instance callee type: Fn{args: [any], return: bool, errors: []}   => structural Fn
+    source call result:   bool; instance: bool
+    HIR target: ""   calleeErrors: {}
+test-selection.bot list::any?<any, block> @e6
+    source callee type:   any
+    instance callee type: block   => bare block/native
+    source call result:   any; instance: any
+    HIR target: ""   calleeErrors: {}
+test-selection.bot list::none?<List[str], block> @e31
+    source callee type:   any
+    instance callee type: block   => bare block/native
+    source call result:   any; instance: any
+    HIR target: ""   calleeErrors: {}
+test-selection.bot list::find<List[list], block> @e42
+    source callee type:   any
+    instance callee type: block   => bare block/native
+    source call result:   any; instance: any
+    HIR target: ""   calleeErrors: {}
+uri-steady.bot scan_while<generic> @e216
+    source callee type:   Fn{args: [str], return: bool, errors: []}
+    instance callee type: Fn{args: [str], return: bool, errors: []}   => structural Fn
+    source call result:   bool; instance: bool
+    HIR target: ""   calleeErrors: {}
+
+total callvalue sites: 9
+  bare block/native: 5
+  structural Fn: 4

@@ -96,11 +96,6 @@ proc native::prepareHir {hir} {
         dict set hir moduleNativeTargets [dict merge $prior [dict get $hir moduleNativeTargets]]
     }
     dict for {e type} $overrides { dict set hir exprs $e nativeResultOverride $type }
-    hir::types::infer hir
-    hir::range::verifyDeclaredResults hir
-    hir::range::verifyDeclaredParams hir
-    hir::callables::verify hir
-    hir::errorsets::verify hir
-    hir::modulebinding::validate hir
+    hir::check hir
     return $hir
 }

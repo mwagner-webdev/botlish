@@ -206,7 +206,12 @@ proc hir::types::IsCallable {type} {
 # element exact form already implies).
 proc hir::types::BlockContract {hir e} {
     set node [dict get $hir exprs $e]
-    set declared [expr {[dict exists $node declaredParamTypes] ? [dict get $node declaredParamTypes] : {}}]
+    # The block's intrinsic entry contract (hir::signatures::entryTypes):
+    # its declared parameter types, else the trusted contracts its own body
+    # proves (INTRINSIC-FUNCTION-CONTRACT-INFERENCE.md) -- never a checked-
+    # only requirement, which, like a native's own -param-types, is
+    # re-validated at run time rather than assumed.
+    set declared [hir::signatures::entryTypes $hir $e]
     set errors [expr {[dict exists $node declaredErrors] ? [dict get $node declaredErrors] : {}}]
     if {[lsearch -exact -not $declared {}] < 0 && $errors eq {}} {
         return ""
@@ -225,6 +230,45 @@ proc hir::types::blockType {hir e arity result} {
         return [list block $e $arity $result]
     }
     return [list block $e $arity $result $contract]
+}
+
+# The greatest lower bound of structural function types A and B -- a
+# contract whose every implementation satisfies both -- or "" if none is
+# representable: equal arity, arguments joined (an implementation must
+# accept what either contract's callers may pass: contravariant), returns
+# met (glb), errors intersected. The dual of FnLub; used where two uses of
+# one value each require a function contract (hir/signatures.tcl).
+proc hir::types::FnGlb {a b} {
+    if {$a eq $b} {
+        return $a
+    }
+    set aa [FnArgs $a]
+    set ba [FnArgs $b]
+    if {[llength $aa] != [llength $ba]} {
+        return ""
+    }
+    set args [lmap x $aa y $ba {lub $x $y}]
+    set ra [FnReturn $a]
+    set rb [FnReturn $b]
+    if {$ra eq "any"} {
+        set result $rb
+    } elseif {$rb eq "any"} {
+        set result $ra
+    } elseif {[IsFn $ra] && [IsFn $rb]} {
+        set result [FnGlb $ra $rb]
+    } else {
+        set result [glb $ra $rb]
+    }
+    if {$result eq ""} {
+        return ""
+    }
+    set errors {}
+    foreach e [FnErrors $a] {
+        if {$e in [FnErrors $b]} {
+            lappend errors $e
+        }
+    }
+    return [MakeFn $args $result $errors]
 }
 
 # The canonical structural function type of callable type TYPE: TYPE itself
@@ -1362,7 +1406,22 @@ proc hir::types::Block {hirVar outerVar e self} {
             dict set seeds $b [BindingType $hir $outer $b]
         }
         {*}[dict get $outer spec] create $e $seeds
-        return [blockType $hir $e $arity any]
+        # The Block's own intrinsic result contract -- its declared result,
+        # else what semantic inference proved for every invocation of it
+        # (a sound upper bound for every instance: the semantic body was
+        # typed under the creation's source-level facts, which every
+        # instance's are narrower than) -- not "any": calls of an exact
+        # block ask the handler for their instance result regardless, so
+        # this only matters where the exact type is *joined* (FnLub's
+        # return) or called through a structural view, which is exactly
+        # where "any" used to lose a known bool
+        # (INTRINSIC-FUNCTION-CONTRACT-INFERENCE.md, "Result-type
+        # precision").
+        set result any
+        if {[dict exists $node resultType] && [dict get $node resultType] ne ""} {
+            set result [hir::type $hir [dict get $node resultType]]
+        }
+        return [blockType $hir $e $arity $result]
     }
     set declared [dict get $node declaredResult]
     set assumed [expr {$declared eq {} ? {never} : $declared}]
@@ -1387,7 +1446,12 @@ proc hir::types::Block {hirVar outerVar e self} {
         # TypeFact/ConstrainType (already applied to every ref's own
         # semantic type) seed x's declared range/exact-set facts for free,
         # with no separate parameter-fact mechanism.
-        foreach b [dict get $node params] declaredType [dict get $node declaredParamTypes] {
+        #
+        # The same holds for a *trusted inferred* contract
+        # (hir::signatures::entryTypes, INTRINSIC-FUNCTION-CONTRACT-
+        # INFERENCE.md): every call is held to it exactly like a
+        # declaration, so the body may assume it the same way.
+        foreach b [dict get $node params] declaredType [hir::signatures::entryTypes $hir $e] {
             if {$declaredType ne {}} {
                 dict set ctx types $b $declaredType
             }

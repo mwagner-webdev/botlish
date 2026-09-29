@@ -1,0 +1,12 @@
+diff --git a/hir/signatures.tcl b/hir/signatures.tcl
+index c15e171..ed9b043 100644
+--- a/hir/signatures.tcl
++++ b/hir/signatures.tcl
+@@ -906,6 +906,7 @@ proc hir::signatures::Add {stateVar kind type rec} {
+     if {[dict get $state conflict] ne ""} {
+         return
+     }
++    set kind trusted
+     set rec [dict replace $rec kind $kind type $type]
+     set keys {checked}
+     if {$kind eq "trusted"} {

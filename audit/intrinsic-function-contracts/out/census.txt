@@ -1,0 +1,22 @@
+tree: 67380f41d56fc62986485999057e3976d4f01273 (plus any uncommitted working-tree changes)
+programs: 31 (0 not compiled: )
+functions (distinct source definitions): 201
+parameters: 372 (9 declared, 363 untyped and inspected)
+
+untyped parameters by outcome:
+  any: no requirement                                              44
+  any: relational callable constraint (needs a type variable)       5
+  narrowed (checked)                                              313
+  structural Fn                                                     1
+  conflicting requirements (compile-time error)                     0
+
+narrowed parameters by inferred type:
+  Fn{args: [str], return: bool, errors: []}                         1
+  bool                                                              9
+  int                                                             136
+  list                                                             54
+  mutarray                                                         45
+  str                                                              69
+
+conflicts:
+  (none)

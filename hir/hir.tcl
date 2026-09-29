@@ -266,18 +266,52 @@ proc hir::buildSyntax {nodes args} {
     }
     ResolveModuleNativeTargets hir [dict get $options -module-native-targets]
     ApplyNativeResultOverrides hir [dict get $options -native-result-overrides]
-    hir::types::infer hir
-    hir::range::verifyDeclaredResults hir
-    hir::range::verifyDeclaredParams hir
-    hir::callables::verify hir
-    hir::errorsets::verify hir
-    hir::modulebinding::validate hir
+    hir::check hir
     if {[dict get $options -strict]} {
         foreach diagnostic [dict get $hir diagnostics] {
             core::semanticError [dict get $diagnostic kind] [dict get $diagnostic message]
         }
     }
     return $hir
+}
+
+# Types resolved HIR (inferring every block's intrinsic contract,
+# hir/signatures.tcl) and runs every static check over it, collecting
+# diagnostics. hir::buildSyntax's and native::prepareHir's shared tail.
+#
+# A call that violates a *trusted inferred* contract (VerifyCall), or an
+# erasure of a callable whose contract is (hir::callables), is diagnosed
+# like any other; the whole typing is then redone with those parameters'
+# trusted contracts demoted to checked-only, keeping the original
+# diagnostics. With -strict 1 the first diagnostic is raised either way;
+# with -strict 0 (the core-IR compile path, whose diagnostics stay in the
+# HIR and become AOT blockers) this is what keeps every backend from
+# compiling a body that assumes a contract its own program breaks --
+# exactly what such a program meant before its parameter had one.
+proc hir::check {hirVar} {
+    upvar 1 $hirVar hir
+    set pre $hir
+    CheckOnce hir {}
+    if {![dict exists $hir violatedContracts]} {
+        return
+    }
+    set diagnostics [dict get $hir diagnostics]
+    set demote [lsort -unique [dict keys [dict get $hir violatedContracts]]]
+    set hir $pre
+    CheckOnce hir $demote
+    dict unset hir violatedContracts
+    dict set hir diagnostics $diagnostics
+    dict set hir demotedContracts $demote
+}
+
+proc hir::CheckOnce {hirVar demote} {
+    upvar 1 $hirVar hir
+    hir::signatures::infer hir $demote
+    hir::range::verifyDeclaredResults hir
+    hir::range::verifyDeclaredParams hir
+    hir::callables::verify hir
+    hir::errorsets::verify hir
+    hir::modulebinding::validate hir
 }
 
 # Resolves TARGETS (flat NATIVE-NAME NAMESPACE NAME triples,
@@ -457,8 +491,14 @@ proc hir::bindingType {hir b} {
 
 # Public ordinary-function signatures exported by loaded module sections.
 # The block result is the single authoritative semantic signature used by
-# calls and specialization; PARAMS is "any" for an untyped parameter, or its
-# declared type (STRICT-TYPED-PARAMETERS.md) otherwise. This is descriptive
+# calls and specialization; PARAMS is each parameter's intrinsic contract
+# (hir::signatures): its declared type (STRICT-TYPED-PARAMETERS.md) -- the
+# pinned API boundary, never narrowed by the body -- else the contract its
+# own body proves (INTRINSIC-FUNCTION-CONTRACT-INFERENCE.md: trusted, else
+# checked), else "any"; SOURCES says which, per parameter (declared |
+# inferred | none). An unannotated export's contract can therefore change
+# when its implementation does -- the explicit annotation is how a stable
+# public contract is pinned. This is descriptive
 # metadata only: module sections are combined into one HIR before any
 # checking runs (surface/modules.tcl), so a cross-module call is already an
 # ordinary direct call by the time hir::range::verifyDeclaredParams sees it,
@@ -472,11 +512,12 @@ proc hir::moduleSignatures {hir} {
             if {$declaration eq {}} { continue }
             set value [dict get $hir exprs $declaration value]
             if {[dict get $hir exprs $value kind] ne {block}} { continue }
-            set params [lmap t [dict get $hir exprs $value declaredParamTypes] {
-                expr {$t eq {} ? {any} : $t}
-            }]
+            set sig [hir::signatures::of $hir $value]
+            set params [lmap p [dict get $sig params] {hir::signatures::paramType $p}]
+            set sources [lmap p [dict get $sig params] {dict get $p source}]
             set result [hir::type $hir [dict get $hir exprs $value resultType]]
-            dict set signatures [dict get $hir bindings $b name] [dict create params $params result $result block $value]
+            dict set signatures [dict get $hir bindings $b name] [dict create params $params \
+                sources $sources result $result block $value]
         }
     }
     return $signatures
@@ -679,7 +720,7 @@ proc hir::ApplyNativeResultOverrides {hirVar overrides} {
 }
 
 apply {{dir} {
-    foreach file {syntax resolve hygiene sourcetypes errordecls types modulebinding refine lower format read aot specialize range callables completions errorsets induction escape blockescape stringregion traversal construction cardinality} {
+    foreach file {syntax resolve hygiene sourcetypes errordecls types signatures modulebinding refine lower format read aot specialize range callables completions errorsets induction escape blockescape stringregion traversal construction cardinality} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

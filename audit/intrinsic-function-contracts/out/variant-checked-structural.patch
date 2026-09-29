@@ -1,0 +1,50 @@
+diff --git a/hir/signatures.tcl b/hir/signatures.tcl
+index c15e171..e0d7675 100644
+--- a/hir/signatures.tcl
++++ b/hir/signatures.tcl
+@@ -257,6 +257,8 @@ proc hir::signatures::infer {hirVar {demote {}}} {
+             if {$t ne "any" && $p ni $demote} {
+                 dict set next $p $t
+             }
++            set c [dict get $contract checked]
++            if {$c ne "any"} { dict set next [list S $p] $c }
+         }
+         # Monotone across rounds: a trusted contract only ever narrows.
+         dict for {p t} $seeds {
+@@ -287,12 +289,14 @@ proc hir::signatures::Install {hirVar seeds solution A} {
+             continue
+         }
+         set trusted {}
++        set structural {}
+         set checked {}
+         set why {}
+         set notes {}
+         foreach b [dict get $node params] d [dict get $node declaredParamTypes] {
+             set t [expr {$d eq {} && [dict exists $seeds $b] ? [dict get $seeds $b] : {}}]
+             lappend trusted $t
++            lappend structural [expr {$d eq {} && [dict exists $seeds [list S $b]] ? [dict get $seeds [list S $b]] : $t}]
+             if {$d eq {} && [dict exists $solution $b]} {
+                 set c [dict get $solution $b checked]
+                 lappend checked [expr {$c eq "any" || $c eq $t ? {} : $c}]
+@@ -305,6 +309,7 @@ proc hir::signatures::Install {hirVar seeds solution A} {
+             }
+         }
+         dict set hir exprs $e inferredParamTypes $trusted
++        dict set hir exprs $e structuralParamTypes $structural
+         dict set hir exprs $e checkedParamTypes $checked
+         dict set hir exprs $e paramRequirements $why
+         dict set hir exprs $e paramNotes $notes
+diff --git a/hir/types.tcl b/hir/types.tcl
+index 1186729..0f57738 100644
+--- a/hir/types.tcl
++++ b/hir/types.tcl
+@@ -212,6 +212,9 @@ proc hir::types::BlockContract {hir e} {
+     # only requirement, which, like a native's own -param-types, is
+     # re-validated at run time rather than assumed.
+     set declared [hir::signatures::entryTypes $hir $e]
++    if {[dict exists $node structuralParamTypes]} {
++        set declared [lmap d [dict get $node declaredParamTypes] t [dict get $node structuralParamTypes] {expr {$d ne {} ? $d : $t}}]
++    }
+     set errors [expr {[dict exists $node declaredErrors] ? [dict get $node declaredErrors] : {}}]
+     if {[lsearch -exact -not $declared {}] < 0 && $errors eq {}} {
+         return ""

@@ -175,9 +175,16 @@ corpusTests string_reverse [list \
     involution   {reversing twice gives the original, 500 characters} \
         "text = [$lit [string repeat abcdefghij 50]]\n\[reverse_chars(reverse_chars(text)) == text, length(reverse_chars(text))\]" \
         [value {[true, 500]}] \
-    not-a-string {a non-string argument is a TYPE error} {reverse_chars(12)} \
+    not-a-string {a non-string argument of unknown static type reaches the native's own run-time TYPE error} \
+        {reverse_chars(list_get([12, "a"], 0))} \
         {error {CORE SEMANTIC TYPE}} \
 ]
+
+test stdlib-string_reverse-not-a-string-static {string_reverse: an argument statically known not to be a String is rejected at compile time -- reverse_chars' own body infers text : str (INTRINSIC-FUNCTION-CONTRACT-INFERENCE.md); this used to be the run-time TYPE error above} -body {
+    catch {corpus::program string_reverse reverse_chars(12)} message options
+    list [dict get $options -errorcode] \
+        [string match {*argument for parameter "text" is statically incompatible with str, the parameter type inferred from the function body*} $message]
+} -result {{CORE SEMANTIC TYPE} 1}
 
 # ---------------------------------------------------------------------------
 # string_replace

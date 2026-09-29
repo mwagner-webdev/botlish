@@ -67,8 +67,17 @@ test opt-tail-6 {closures calling themselves in tail position keep their own env
 } -result {1 same {[10, 50, 7]}}
 
 test opt-tail-7 {errors inside a looped call are unchanged} -body {
-    differential [sourceIR "fn f(n, acc):\n    if n == 0:\n        return acc\n    f(n - 1, concat(acc, n))\n\nf(3, \"x\")"]
+    # concat's run-time TYPE error, reached through an Int that is not the
+    # parameter itself: `concat(acc, n)` directly would now be a compile-time
+    # conflict (opt-tail-7-static, INTRINSIC-FUNCTION-CONTRACT-INFERENCE.md).
+    differential [sourceIR "fn f(n, acc):\n    if n == 0:\n        return acc\n    f(n - 1, concat(acc, list_get(\[n\], 0)))\n\nf(3, \"x\")"]
 } -result same
+
+test opt-tail-7-static {a parameter used both as an Int and as a String by its own body has no sound contract: a compile-time error naming both uses, before any backend runs (INTRINSIC-FUNCTION-CONTRACT-INFERENCE.md)} -body {
+    catch {sourceIR "fn f(n, acc):\n    if n == 0:\n        return acc\n    f(n - 1, concat(acc, n))\n\nf(3, \"x\")"} message options
+    list [dict get $options -errorcode] \
+        [string match {*cannot infer a sound type for parameter "n" of f: argument 1 of native - requires int*argument 2 of native concat requires str*} $message]
+} -result {{CORE SEMANTIC TYPE} 1}
 
 # ---------------------------------------------------------------------------
 # Environments

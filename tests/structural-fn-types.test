@@ -548,11 +548,23 @@ apply(5, \"a\")" {*a value of type int is not known to be callable*}
 } -result {{CORE SEMANTIC TYPE} 1}
 
 test fn-reject-any-is-not-fn {an unknown (any) value is not a known callable: passing it where an Fn is required is rejected, never checked at run time} -body {
+    # An element of a heterogeneous List: any, and not a parameter whose
+    # own body could infer a contract (fn-accept-untyped-forwarder).
     fnRejects "$::applyStr
+fn pass(gs):
+    apply(list_get(gs, 0), \"a\")
+pass(\[is_tcl_alpha, 1\])" {*a value of type any is not known to be callable*}
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test fn-accept-untyped-forwarder {an untyped parameter passed where an Fn is declared infers that Fn as its own trusted contract (INTRINSIC-FUNCTION-CONTRACT-INFERENCE.md): the forwarder is valid, and its callers are held to the contract -- it used to be rejected as "any is not known to be callable"} -body {
+    list [fnRun "$::applyStr
 fn pass(g):
     apply(g, \"a\")
-pass(is_tcl_alpha)" {*a value of type any is not known to be callable*}
-} -result {{CORE SEMANTIC TYPE} 1}
+pass(is_tcl_alpha)"] [fnRejects "$::applyStr
+fn pass(g):
+    apply(g, \"a\")
+pass(1)" {*argument for parameter "g" cannot be proven to satisfy Fn\{args: \[str\], return: bool, errors: \[\]\}, the parameter type inferred from the function body*}]
+} -result {true {{CORE SEMANTIC TYPE} 1}}
 
 test fn-reject-call-argument {a call through an Fn is held to the contract's argument types (no runtime check)} -body {
     fnRejects {fn apply(f: Fn{args: [Byte], return: int}) -> int:

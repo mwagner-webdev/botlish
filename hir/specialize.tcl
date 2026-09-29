@@ -522,7 +522,7 @@ proc hir::specialize::Analyze {id} {
                 dict set types $b $type
             }
             foreach b [dict get $state hir exprs $block params] type [dict get $instance args] \
-                    declaredType [dict get $state hir exprs $block declaredParamTypes] {
+                    declaredType [hir::signatures::entryTypes [dict get $state hir] $block] {
                 if {$declaredType eq {}} {
                     dict set types $b $type
                     continue
@@ -1015,7 +1015,7 @@ proc hir::specialize::Reanalyze {id argTypes} {
         dict set types $b $type
     }
     foreach b [dict get $hir exprs $block params] keyType [dict get $instance args] \
-            declaredType [dict get $hir exprs $block declaredParamTypes] \
+            declaredType [hir::signatures::entryTypes $hir $block] \
             callerFact $argTypes {
         set type $keyType
         if {$declaredType ne {}} {
