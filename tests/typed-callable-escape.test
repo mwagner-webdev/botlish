@@ -20,6 +20,19 @@ proc rejects {source} {
         [string match {*typed parameter requirements that cannot be preserved*} $message]
 }
 
+# The same program is now rejected by the semantic instance of the untyped
+# helper that receives the typed callable (OPPORTUNISTIC-SEMANTIC-INSTANCES.md):
+# the callable's exact identity is known at the call, so `f(v)` inside the
+# instance is an exact call of the typed function, held to its own declared
+# parameter contract with the argument types that actually reach it. The
+# earlier "cannot be preserved" erasure diagnostic is what a call whose
+# instance is unavailable (budget, dynamic target) still gets.
+proc rejectsInstance {source} {
+    catch {surface::compile $source reject.bot} message options
+    list [dict get $options -errorcode] \
+        [string match {*call to apply* is invalid: argument for parameter*cannot be proven to satisfy*} $message]
+}
+
 proc accepts {source} {
     surface::compile $source accept.bot
     return 1
@@ -28,8 +41,8 @@ proc accepts {source} {
 # ---------------------------------------------------------------------------
 # The concrete bug (spec #2, #67 before/after)
 
-test callable-escape-bug-rejected {the reported unsound program is now a compile-time error, not 9999} -body {
-    rejects [format {%sfn take_byte(x: Byte) -> int:
+test callable-escape-bug-rejected {the reported unsound program is now a compile-time error, not 9999: rejected by the semantic instance of apply, whose exact callee is checked with the argument that reaches it} -body {
+    rejectsInstance [format {%sfn take_byte(x: Byte) -> int:
     x
 
 fn apply(f, v):
@@ -38,7 +51,7 @@ fn apply(f, v):
 apply(take_byte, 9999)} $::byteDecl]
 } -result {{CORE SEMANTIC TYPE} 1}
 
-test callable-escape-bug-not-a-range-error {the rejection is the erasure diagnostic, not a range/admissibility one} -body {
+test callable-escape-bug-is-an-admissibility-error-in-the-instance {the rejection is now the callee's own admissibility diagnostic, reported at the call of apply (the erasure diagnostic is the no-instance fallback)} -body {
     catch {surface::compile [format {%sfn take_byte(x: Byte) -> int:
     x
 
@@ -47,13 +60,13 @@ fn apply(f, v):
 
 apply(take_byte, 9999)} $::byteDecl] reject2.bot} message
     string match {*cannot be proven to satisfy*} $message
-} -result 0
+} -result 1
 
 # ---------------------------------------------------------------------------
 # Escaping through an untyped higher-order parameter (spec #12-13, #50)
 
 test callable-escape-apply-bad-arg-rejected {apply(take_byte, 9999) is rejected} -body {
-    rejects [format {%sfn take_byte(x: Byte) -> int:
+    rejectsInstance [format {%sfn take_byte(x: Byte) -> int:
     x
 
 fn apply(f, v):
@@ -62,8 +75,8 @@ fn apply(f, v):
 apply(take_byte, 9999)} $::byteDecl]
 } -result {{CORE SEMANTIC TYPE} 1}
 
-test callable-escape-apply-good-arg-still-rejected {apply(take_byte, 7) is rejected too: the escape is unsafe regardless of the value (spec #50's "must never be accepted merely by ignoring the contract")} -body {
-    rejects [format {%sfn take_byte(x: Byte) -> int:
+test callable-escape-apply-good-arg-still-rejected {apply(take_byte, 7) is rejected too: an instance is keyed by types, not exact values (`7` is an int, not proven Byte inside the instance), so a valid-looking literal is not accepted by ignoring the contract} -body {
+    rejectsInstance [format {%sfn take_byte(x: Byte) -> int:
     x
 
 fn apply(f, v):
@@ -394,15 +407,25 @@ apply(make_small, 5)}
 # ---------------------------------------------------------------------------
 # Mixed typed/untyped parameters (spec #53)
 
-test callable-escape-mixed-typed-untyped-params-rejected {a callable with one typed and one untyped parameter is precondition-bearing and protected the same way} -body {
-    rejects [format {%sfn f(x: Byte, y):
+test callable-escape-mixed-typed-untyped-params-rejected {a callable with one typed and one untyped parameter is precondition-bearing and protected the same way (through a helper that calls it with both arguments)} -body {
+    rejectsInstance [format {%sfn f(x: Byte, y):
+    x
+
+fn apply(g, v, w):
+    g(v, w)
+
+apply(f, 7, 1)} $::byteDecl]
+} -result {{CORE SEMANTIC TYPE} 1}
+
+test callable-escape-arity-mismatch-is-a-runtime-error {a typed callable called with the wrong number of arguments through a helper never runs its body: the arity error is the unchanged run-time behavior, not an escape} -body {
+    accepts [format {%sfn f(x: Byte, y):
     x
 
 fn apply(g, v):
     g(v)
 
 apply(f, 7)} $::byteDecl]
-} -result {{CORE SEMANTIC TYPE} 1}
+} -result 1
 
 # ---------------------------------------------------------------------------
 # Source-defined types, not just Byte (spec #54-55)
@@ -418,7 +441,7 @@ f(7)}
 } -result 1
 
 test callable-escape-source-defined-type-escape-rejected {...and is protected against the same untyped-parameter escape} -body {
-    rejects {type Small = Int in 0..10
+    rejectsInstance {type Small = Int in 0..10
 
 fn take_small(x: Small) -> int:
     x
@@ -495,7 +518,7 @@ apply(typedcallablelib2::take_small, 3)
         set h [surface::readProgramFile $mainPath -strict 0]
         set diags [hir::diagnostics $h]
         list [llength $diags] \
-            [string match {*typed parameter requirements that cannot be preserved*} [dict get [lindex $diags 0] message]]
+            [string match {*call to apply* is invalid: argument for parameter*cannot be proven to satisfy*} [dict get [lindex $diags 0] message]]
     } finally {
         file delete $libPath
         removeFile typed-callable-cross-module-bad.bot

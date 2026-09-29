@@ -1,0 +1,21 @@
+identity-int: OK int
+identity-str: OK str
+identity-list-int: OK List[int]
+identity-mutarray-str: OK MutableArray[str]
+identity-mutarray-int: OK MutableArray[int]
+identity-two-instances: OK list
+identity-set-ok: OK str
+identity-set-bad: REJECT 5:25: value of type int is not admissible to element type str of MutableArray[str] (facts: [123, 123] {123}): a MutableArray's element type is fixed for its lifetime, a store never widens it and inserts no check
+capacity: OK int
+first-mutarray: OK list
+smash: REJECT 4:1: call to smash with x : MutableArray[str] is invalid: value of type int is not admissible to element type str of MutableArray[str] (facts: [123, 123] {123}): a MutableArray's element type is fixed for its lifetime, a store never widens it and inserts no check (in the body of smash, at 2:29)
+erase: OK MutableArray[str]
+store-in-list: OK List[MutableArray[str]]
+forward-alias: OK MutableArray[str]
+first-list-str: OK str
+first-list-int: OK int
+first-both: OK list
+copy-loop: OK List[str]
+f-plus-int: OK int
+f-plus-str: REJECT 3:3: argument for parameter "x" is statically incompatible with int, the parameter type inferred from the function body (argument type: str, facts: [-∞, +∞]); inferred from the function body: argument 1 of native + requires int (at 2:5)
+any-arg: OK int

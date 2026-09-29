@@ -23,7 +23,7 @@ e11 bind b3 + : block(e12)/2 -> list
             e14 ref b7 list : native list
             e15 ref b5 a : any
             e16 ref b6 b : any
-e17 call block(e12) : list
+e17 call block(e12) : List[int]
     e18 ref b3 + : block(e12)/2 -> list
     e19 ref b2 inner : int
     e20 ref b1 x : int

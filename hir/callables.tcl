@@ -458,6 +458,16 @@ proc hir::callables::ArgContexts {hir e} {
         if {[llength $declared] != [llength $args]} {
             return $none
         }
+        # A parameter with no declared or trusted contract is `any` to the
+        # generic body, so a bearing argument cannot cross it -- unless the
+        # call has a semantic instance (hir/semantic.tcl), whose body is
+        # analyzed (and audited, with this same walk) with the parameter at
+        # the argument's own type: that type is the context.
+        set instance [hir::semantic::InstanceOf $hir $e]
+        if {$instance ne ""} {
+            set entry [hir::semantic::EntryTypes $hir $instance]
+            return [lmap t $declared u $entry {expr {$t eq {} ? $u : $t}}]
+        }
         return [lmap t $declared {expr {$t eq {} ? "" : $t}}]
     }
     if {$targetKind eq ""} {
@@ -551,6 +561,13 @@ proc hir::callables::verify {hirVar} {
             lappend blocks $e
         }
     }
+    verifyBlocks hir $blocks
+}
+
+# verify over the given BLOCKS (also how hir/semantic.tcl audits one semantic
+# instance's body on a view of the HIR).
+proc hir::callables::verifyBlocks {hirVar blocks} {
+    upvar 1 $hirVar hir
     foreach block $blocks {
         if {$block eq {program}} {
             set body [hir::roots $hir]

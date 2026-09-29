@@ -40,6 +40,13 @@
 #                section scope (surface/modules.tcl, hir/resolve.tcl's
 #                ResolveQualifiedRef); absent for a program with no modules
 #   diagnostics  list of {kind KIND message TEXT expr ExprId}
+#   semantic     compiler-internal side table of opportunistic semantic
+#                function instances (semantic.tcl, OPPORTUNISTIC-SEMANTIC-
+#                INSTANCES.md): instances, keys, calls (a call ExprId, in the
+#                program or inside an instance, -> the instance it uses),
+#                census counters. Analysis facts, never part of a function's
+#                contract or of hir::format's text; absent until hir::check
+#                has typed the program.
 #
 # IDs are strings with a kind prefix, allocated monotonically per program in
 # a deterministic walk, so building the same IR twice gives the same ids:
@@ -311,6 +318,7 @@ proc hir::CheckOnce {hirVar demote} {
     hir::range::verifyDeclaredResults hir
     hir::range::verifyDeclaredParams hir
     hir::callables::verify hir
+    hir::semantic::verify hir
     hir::errorsets::verify hir
     hir::modulebinding::validate hir
 }
@@ -721,7 +729,7 @@ proc hir::ApplyNativeResultOverrides {hirVar overrides} {
 }
 
 apply {{dir} {
-    foreach file {syntax resolve hygiene sourcetypes errordecls types exactvalue signatures modulebinding refine lower format read aot specialize range callables containers completions errorsets induction escape blockescape stringregion traversal construction cardinality} {
+    foreach file {syntax resolve hygiene sourcetypes errordecls types exactvalue signatures modulebinding refine lower format read aot specialize range callables containers semantic completions errorsets induction escape blockescape stringregion traversal construction cardinality} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

@@ -255,9 +255,9 @@ test mutarray-list-6 {the element type is homogeneous only: adding a non-mutarra
     mcLast "rows = \[mutable_array_allocate(1), 5\]\nrows"
 } -result list
 
-test mutarray-list-7 {an empty-List accumulator is not List[mutarray] (no accumulator generics here)} -body {
+test mutarray-list-7 {an empty-List accumulator's element type is recovered by the recursive accumulator's semantic instance (no accumulator generics, no annotation)} -body {
     mcResult "fn collect(acc, n):\n    if n == 0:\n        return acc\n    collect(list_append(acc, mutable_array_allocate(n)), n - 1)\nfn go():\n    collect(\[\], 3)\ngo()" go
-} -result any
+} -result {List[mutarray]}
 
 # ---------------------------------------------------------------------------
 # mutarray? : refinement (spec items 13-16, 34, 59-61)

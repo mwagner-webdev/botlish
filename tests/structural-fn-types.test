@@ -736,17 +736,17 @@ direct = find("a"):
 # ---------------------------------------------------------------------------
 # Typed-callable escape audit (TYPED-CALLABLE-ESCAPE-SOUNDNESS.md) with Fn
 
-test fn-escape-declared-param-erased {a declared Fn parameter carrying a typed contract may not itself be erased into an untyped parameter} -body {
+test fn-escape-declared-param-erased {a declared Fn parameter carrying a typed contract passed on to an untyped parameter: the semantic instance of the helper seeds that parameter with the full Fn contract (OPPORTUNISTIC-SEMANTIC-INSTANCES.md), so the unsafe argument is rejected by the contract itself at the call} -body {
     fnRejects {fn take_byte(x: Byte) -> int:
     x
 fn apply(f: Fn{args: [Byte], return: int}):
     fn inner(g, v):
         g(v)
     inner(f, 9999)
-apply(take_byte)} {*this value of type Fn\{args: \[int\[Byte\]\]*typed parameter requirements that cannot be preserved*}
+apply(take_byte)} {*call to inner with g : Fn\{args: \[int\[Byte\]\]*v : int is invalid: argument 1 cannot be proven to satisfy int\[Byte\]*}
 } -result {{CORE SEMANTIC TYPE} 1}
 
-test fn-escape-typed-list {a List of typed callables is List[Fn{args: [Byte], ...}]: callable through its elements with checked arguments, but not erasable into an untyped parameter} -body {
+test fn-escape-typed-list {a List of typed callables is List[Fn{args: [Byte], ...}]: callable through its elements with checked arguments; through an untyped parameter the helper's semantic instance keeps that element contract, so an unsafe call inside it is rejected at the call} -body {
     list [fnRun {fn a(x: Byte) -> int:
     x
 fn b(x: Byte) -> int:
@@ -760,7 +760,7 @@ fn b(x: Byte) -> int:
 fn sneak(xs):
     loop f in xs:
         f(9999)
-sneak([a, b])} {*this value of type List\[Fn\{args: \[int\[Byte\]\]*cannot be preserved*}]
+sneak([a, b])} {*call to sneak with xs : List\[Fn\{args: \[int\[Byte\]\]*is invalid: argument 1 cannot be proven to satisfy int\[Byte\]*}]
 } -result {{[3, 4]} {{CORE SEMANTIC TYPE} 1}}
 
 test fn-escape-returning-loop-element {a returning loop's collected element is a join too: collecting typed callables keeps their contract, but collecting them into a List whose element type the aggregate depth bound cuts is rejected as an erasure} -body {

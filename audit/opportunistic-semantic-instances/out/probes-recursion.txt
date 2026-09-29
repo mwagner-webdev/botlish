@@ -1,0 +1,7 @@
+erase-structural-callback: OK MutableArray[str]
+collect-self: OK List[str]
+collect-self-int: OK List[list]
+mutual-typed: OK List[str]
+mutual-typed-reverse-order: OK List[str]
+type-changing: OK any
+budget-typed-chain: REJECT 6:1: call to wrap with x : MutableArray[str], n : int is invalid: cannot erase element contract MutableArray[str] in an "if" branch whose joined type differs from the other branch: its element type would be lost, permitting writes of values it does not admit through an alias that no longer knows the contract (a MutableArray[T] is invariant and may only flow into a position that keeps MutableArray[T]) (in the body of wrap, at 3:9)

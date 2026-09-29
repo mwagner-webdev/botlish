@@ -1,0 +1,105 @@
+### identity-int
+fn identity(x):
+    x
+identity(5)
+### identity-str
+fn identity(x):
+    x
+identity("a")
+### identity-list-int
+fn identity(x):
+    x
+identity([1, 2])
+### identity-mutarray-str
+fn identity(x):
+    x
+m = mutarray::create(2, "x")
+identity(m)
+### identity-mutarray-int
+fn identity(x):
+    x
+m = mutarray::create(2, 1)
+identity(m)
+### identity-two-instances
+fn identity(x):
+    x
+a = identity(mutarray::create(2, "x"))
+b = identity(mutarray::create(2, 1))
+[mutable_array_get(a, 0), mutable_array_get(b, 0)]
+### identity-set-ok
+fn identity(x):
+    x
+m = mutarray::create(2, "x")
+n = identity(m)
+mutable_array_set(n, 0, "y")
+mutable_array_get(n, 0)
+### identity-set-bad
+fn identity(x):
+    x
+m = mutarray::create(2, "x")
+n = identity(m)
+mutable_array_set(n, 0, 123)
+### capacity
+fn capacity(x):
+    mutable_array_capacity(x)
+m = mutarray::create(3, "x")
+capacity(m)
+### first-mutarray
+fn first(x):
+    mutable_array_get(x, 0)
+[first(mutarray::create(2, "x")), first(mutarray::create(2, 1))]
+### smash
+fn smash(x):
+    mutable_array_set(x, 0, 123)
+m = mutarray::create(2, "x")
+smash(m)
+### erase
+fn erase(x):
+    if mutarray?(x):
+        x
+    else:
+        x
+m = mutarray::create(2, "x")
+erase(m)
+### store-in-list
+fn stash(x):
+    [x]
+stash(mutarray::create(1, "x"))
+### forward-alias
+fn forward(x):
+    y = x
+    y
+forward(mutarray::create(1, "x"))
+### first-list-str
+fn first(xs):
+    list_get(xs, 0)
+first(["x", "y"])
+### first-list-int
+fn first(xs):
+    list_get(xs, 0)
+first([1, 2])
+### first-both
+fn first(xs):
+    list_get(xs, 0)
+a = first(["x", "y"])
+b = first([1, 2])
+[a, b]
+### copy-loop
+fn copy(xs):
+    loop x in xs:
+        x
+copy(["a", "b"])
+### f-plus-int
+fn f(x):
+    x + 1
+f(1)
+### f-plus-str
+fn f(x):
+    x + 1
+f("a")
+### any-arg
+fn identity(x):
+    x
+fn g(y):
+    identity(y)
+g(1)

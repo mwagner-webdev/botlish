@@ -1,0 +1,4 @@
+shared-typed-append-three-kinds: OK List[list]
+shared-typed-append-wrong-value: REJECT 10:1: call to tb_append with storage : MutableArray[str], length : int, value : int is invalid: cannot copy from MutableArray[str] into MutableArray[int]: source element type str is not admissible to destination element type int (in the body of tb_append, at 4:38)
+shared-typed-builder-loop: OK List[list]
+positional-pair-still-blocks: REJECT 4:5: call to tb_pair with storage : MutableArray[str], length : int, value : str is invalid: cannot erase element contract MutableArray[str] passed as an ordinary call argument: its element type would be lost, permitting writes of values it does not admit through an alias that no longer knows the contract (a MutableArray[T] is invariant and may only flow into a position that keeps MutableArray[T]) (in the body of tb_pair, at 3:6)

@@ -1002,8 +1002,33 @@ proc hir::types::intern {hirVar type} {
 
 proc hir::types::infer {hirVar} {
     upvar 1 $hirVar hir
-    set ctx [NewContext]
-    Sequence hir ctx [dict get $hir roots]
+    if {![hir::semantic::Enabled]} {
+        set ctx [NewContext]
+        Sequence hir ctx [dict get $hir roots]
+        return
+    }
+    # Opportunistic semantic instances (hir/semantic.tcl): the walk also
+    # analyzes the ordinary body of an exact-called function under its
+    # call's concrete argument types. A forward call of a function whose
+    # creation environment the walk has not recorded yet is declined; when
+    # a later walk can serve it, the program is walked again (every walk is
+    # sound, later ones more precise).
+    set base $hir
+    set envs {}
+    for {set round 1} {$round <= [set ::hir::semantic::maxRounds]} {incr round} {
+        set typed $base
+        hir::semantic::Begin $envs
+        set ctx [NewContext]
+        Sequence typed ctx [dict get $typed roots]
+        set snapshot [hir::semantic::End]
+        dict set snapshot rounds $round
+        if {$round == [set ::hir::semantic::maxRounds] || ![hir::semantic::WantsRerun $snapshot]} {
+            break
+        }
+        set envs [dict get $snapshot envs]
+    }
+    set hir $typed
+    dict set hir semantic $snapshot
 }
 
 # ---------------------------------------------------------------------------
@@ -1558,6 +1583,7 @@ proc hir::types::Block {hirVar outerVar e self} {
         }
         return [blockType $hir $e $arity $result]
     }
+    hir::semantic::RecordEnv $hir $outer $e
     set declared [dict get $node declaredResult]
     set assumed [expr {$declared eq {} ? {never} : $declared}]
     set attempts [expr {$self eq "" ? 1 : 3}]
@@ -1568,6 +1594,9 @@ proc hir::types::Block {hirVar outerVar e self} {
         set ctx [NewContext]
         dict set ctx types [dict get $outer types]
         dict set ctx facts [dict get $outer facts]
+        if {[dict exists $outer inst]} {
+            dict set ctx inst [dict get $outer inst]
+        }
         if {$self ne ""} {
             dict set ctx types $self [blockType $hir $e $arity $assumed]
         }
@@ -1752,6 +1781,14 @@ proc hir::types::Call {hirVar ctxVar e} {
                 set rule [hir::containers::RuleOf $hir $block]
                 if {$rule ne ""} {
                     set result [hir::containers::CallResult $rule $argTypes $result]
+                } elseif {!$spec && [dict get $ctx reachable]
+                        && ![dict exists $node nativeResultOverride]} {
+                    # An opportunistic semantic instance of the callee
+                    # (hir/semantic.tcl): its ordinary body analyzed under
+                    # this call's concrete argument types. The call is
+                    # typed with what that analysis proves; the callee's own
+                    # contract and generic result are untouched.
+                    set result [hir::semantic::Call $hir $ctx $e $block $argTypes $result]
                 }
             }
         } elseif {$spec} {

@@ -546,10 +546,11 @@ test ic-exact-block-trusted-contract {a trusted inferred contract is part of the
     }
 } -result {{Fn{args: [Fn{args: [str], return: bool, errors: []}], return: int, errors: []}} {Fn{args: [any], return: int, errors: []}} {Fn{args: [int[Byte]], return: int, errors: []}}}
 
-test ic-trusted-bearing {a function with a trusted inferred contract is precondition-bearing like a declared one: erasing it into an untyped parameter is rejected} -body {
-    icRejects "${::icPredUse}fn app(f, v):\n    f(v)\napp(pred_use, is_tcl_alpha)" \
-        {*"pred_use" has typed parameter requirements that cannot be preserved passed as an ordinary call argument*}
-} -result {{CORE SEMANTIC TYPE} 1}
+test ic-trusted-bearing {a function with a trusted inferred contract is precondition-bearing like a declared one: passed to an untyped parameter, its contract is checked by that helper's semantic instance -- a fitting callable is accepted, an unfitting one rejected at the call} -body {
+    list [catch {icCompile "${::icPredUse}fn app(f, v):\n    f(v)\napp(pred_use, is_tcl_alpha)"}] \
+        [icRejects "${::icPredUse}fn len(c):\n    length(c)\nfn app(f, v):\n    f(v)\napp(pred_use, len)" \
+            {*call to app* is invalid: argument*return incompatible: the callable returns int, not usable as bool*}]
+} -result {0 {{CORE SEMANTIC TYPE} 1}}
 
 test ic-checked-not-bearing {a checked-only contract is not precondition-bearing: a str-requiring wrapper still passes through generic helpers (list::all?)} -body {
     set ::icDeclsSaved $::icDecls

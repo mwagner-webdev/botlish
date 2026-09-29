@@ -1,0 +1,60 @@
+### erase-structural-callback
+fn erase(x, f: Fn{args: [any], return: any, errors: []}):
+    f(x)
+fn sink(y):
+    y
+erase(mutarray::create(1, "x"), sink)
+### collect-self
+fn collect(xs, i, acc):
+    if i == list_length(xs):
+        acc
+    else:
+        collect(xs, i + 1, list_append(acc, list_get(xs, i)))
+collect(["a", "b"], 0, [])
+### collect-self-int
+fn collect(xs, i, acc):
+    if i == list_length(xs):
+        acc
+    else:
+        collect(xs, i + 1, list_append(acc, list_get(xs, i)))
+a = collect(["a", "b"], 0, [])
+b = collect([1, 2], 0, [])
+[a, b]
+### mutual-typed
+fn ping(xs, n):
+    if n == 0:
+        xs
+    else:
+        pong(xs, n - 1)
+fn pong(xs, n):
+    if n == 0:
+        xs
+    else:
+        ping(xs, n - 1)
+ping(["a"], 3)
+### mutual-typed-reverse-order
+fn pong(xs, n):
+    if n == 0:
+        xs
+    else:
+        ping(xs, n - 1)
+fn ping(xs, n):
+    if n == 0:
+        xs
+    else:
+        pong(xs, n - 1)
+ping(["a"], 3)
+### type-changing
+fn wrap(x, n):
+    if n == 0:
+        x
+    else:
+        wrap([x], n - 1)
+wrap("a", 5)
+### budget-typed-chain
+fn wrap(x, n):
+    if n == 0:
+        x
+    else:
+        wrap([x], n - 1)
+wrap(mutarray::create(1, "a"), 4)

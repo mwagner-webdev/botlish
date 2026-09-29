@@ -1,0 +1,21 @@
+identity-int: OK any
+identity-str: OK any
+identity-list-int: OK any
+identity-mutarray-str: REJECT 4:10: cannot erase element contract MutableArray[str] passed as an ordinary call argument: its element type would be lost, permitting writes of values it does not admit through an alias that no longer knows the contract (a MutableArray[T] is invariant and may only flow into a position that keeps MutableArray[T])
+identity-mutarray-int: REJECT 4:10: cannot erase element contract MutableArray[int] passed as an ordinary call argument: its element type would be lost, permitting writes of values it does not admit through an alias that no longer knows the contract (a MutableArray[T] is invariant and may only flow into a position that keeps MutableArray[T])
+identity-two-instances: REJECT 3:14: cannot erase element contract MutableArray[str] passed as an ordinary call argument: its element type would be lost, permitting writes of values it does not admit through an alias that no longer knows the contract (a MutableArray[T] is invariant and may only flow into a position that keeps MutableArray[T])
+identity-set-ok: REJECT 4:14: cannot erase element contract MutableArray[str] passed as an ordinary call argument: its element type would be lost, permitting writes of values it does not admit through an alias that no longer knows the contract (a MutableArray[T] is invariant and may only flow into a position that keeps MutableArray[T])
+identity-set-bad: REJECT 4:14: cannot erase element contract MutableArray[str] passed as an ordinary call argument: its element type would be lost, permitting writes of values it does not admit through an alias that no longer knows the contract (a MutableArray[T] is invariant and may only flow into a position that keeps MutableArray[T])
+capacity: REJECT 4:10: argument for parameter "x" is statically incompatible with mutarray, the parameter type inferred from the function body (argument type: MutableArray[str], facts: [-∞, +∞]); inferred from the function body: argument 1 of native mutable_array_capacity requires mutarray (at 2:28)
+first-mutarray: REJECT 3:8: argument for parameter "x" is statically incompatible with mutarray, the parameter type inferred from the function body (argument type: MutableArray[str], facts: [-∞, +∞]); inferred from the function body: argument 1 of native mutable_array_get requires mutarray (at 2:23)
+smash: REJECT 4:7: argument for parameter "x" is statically incompatible with mutarray, the parameter type inferred from the function body (argument type: MutableArray[str], facts: [-∞, +∞]); inferred from the function body: argument 1 of native mutable_array_set requires mutarray (at 2:23)
+erase: REJECT 7:7: cannot erase element contract MutableArray[str] passed as an ordinary call argument: its element type would be lost, permitting writes of values it does not admit through an alias that no longer knows the contract (a MutableArray[T] is invariant and may only flow into a position that keeps MutableArray[T])
+store-in-list: REJECT 3:7: cannot erase element contract MutableArray[str] passed as an ordinary call argument: its element type would be lost, permitting writes of values it does not admit through an alias that no longer knows the contract (a MutableArray[T] is invariant and may only flow into a position that keeps MutableArray[T])
+forward-alias: REJECT 4:9: cannot erase element contract MutableArray[str] passed as an ordinary call argument: its element type would be lost, permitting writes of values it does not admit through an alias that no longer knows the contract (a MutableArray[T] is invariant and may only flow into a position that keeps MutableArray[T])
+first-list-str: OK any
+first-list-int: OK any
+first-both: OK list
+copy-loop: OK list
+f-plus-int: OK int
+f-plus-str: REJECT 3:3: argument for parameter "x" is statically incompatible with int, the parameter type inferred from the function body (argument type: str, facts: [-∞, +∞]); inferred from the function body: argument 1 of native + requires int (at 2:5)
+any-arg: OK any

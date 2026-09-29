@@ -407,15 +407,22 @@ consume(make_smalls())} $::smallDecl] returnprop.bot
     set ok 1
 } -result 1
 
-test applied-type-erasure-vs-consume {passthrough(xs) may lose List[Small] (an untyped parameter erases it), but a later consume() of the erased value is then rejected -- lost proof precision, not a soundness hole} -body {
-    appliedTypeRejects [format {%sfn passthrough(x):
+test applied-type-erasure-vs-consume {a declared broad result may lose List[Small], and a later consume() of the erased value is then rejected -- lost proof precision, not a soundness hole; an untyped passthrough alone no longer loses it (its semantic instance carries List[Small])} -body {
+    list [appliedTypeRejects [format {%sfn passthrough(x) -> list:
     x
 fn make_smalls() -> List[Small]:
     [one(), two()]
 fn consume(xs: List[Small]) -> int:
     1
-consume(passthrough(make_smalls()))} $::smallDecl]
-} -result {{CORE SEMANTIC TYPE} 1}
+consume(passthrough(make_smalls()))} $::smallDecl]] \
+        [catch {surface::compile [format {%sfn passthrough(x):
+    x
+fn make_smalls() -> List[Small]:
+    [one(), two()]
+fn consume(xs: List[Small]) -> int:
+    1
+consume(passthrough(make_smalls()))} $::smallDecl] kept.bot}]
+} -result {{{CORE SEMANTIC TYPE} 1} 0}
 
 test applied-type-erasure-passthrough-alone-is-legal {passthrough(xs) by itself (never re-consumed by a typed List[T] parameter) remains legal: erasure is not itself an error} -body {
     surface::compile [format {%sfn passthrough(x):
@@ -479,17 +486,19 @@ appliedtypeslib3::consume(make_ints())
 # Typed-callable escape soundness stays intact for an applied parameter type
 # (spec 38, 75-76)
 
-test applied-type-callable-escape-still-rejected {a function whose only declared parameter is List[Small] is still a "typed callable" (>=1 declared param type): passing it through an untyped higher-order parameter is still rejected} -body {
-    catch {surface::compile [format {%sfn consume(xs: List[Small]) -> int:
+test applied-type-callable-escape-still-rejected {a function whose only declared parameter is List[Small] is still a "typed callable" (>=1 declared param type): through an untyped higher-order parameter its contract is checked by the helper's semantic instance -- a List[Small] argument is accepted, any other is rejected at the call} -body {
+    set defs {%sfn consume(xs: List[Small]) -> int:
     0
 
 fn apply(f, v):
     f(v)
 
-apply(consume, [one()])} $::smallDecl] escape.bot} message options
-    list [dict get $options -errorcode] \
-        [string match {*typed parameter requirements that cannot be preserved*} $message]
-} -result {{CORE SEMANTIC TYPE} 1}
+}
+    list [catch {surface::compile [format "${defs}apply(consume, \[one()\])" $::smallDecl] ok.bot}] \
+        [catch {surface::compile [format "${defs}apply(consume, \[3\])" $::smallDecl] escape.bot} message options] \
+        [dict get $options -errorcode] \
+        [string match {*call to apply* is invalid: argument for parameter*cannot be proven to satisfy*} $message]
+} -result {0 1 {CORE SEMANTIC TYPE} 1}
 
 test applied-type-callable-escape-exact-alias-still-legal {exact aliasing of the same callable (f = consume) remains fully first-class, unaffected by its parameter being an applied type} -body {
     surface::compile [format {%sfn consume(xs: List[Small]) -> int:

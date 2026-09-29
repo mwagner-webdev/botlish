@@ -1381,6 +1381,14 @@ proc hir::range::verifyDeclaredParams {hirVar} {
     dict for {e node} [dict get $hir exprs] {
         if {[dict get $node kind] eq {block}} { lappend blocks $e }
     }
+    verifyBlocks hir $blocks
+}
+
+# verifyDeclaredParams over the given BLOCKS (block ExprIds, or `program`):
+# also how hir/semantic.tcl verifies the body of one semantic instance, on a
+# view of the HIR carrying that instance's own types.
+proc hir::range::verifyBlocks {hirVar blocks} {
+    upvar 1 $hirVar hir
     foreach block $blocks {
         if {$block eq {program}} {
             set params {}
@@ -1483,6 +1491,15 @@ proc hir::range::VerifyCall {hirVar ranges e node} {
         # requirements").
         if {$checkedType eq {} || $argType in {any never}
                 || [ProvesValueAcceptedBy $argType $argRange $checkedType]} {
+            continue
+        }
+        if {[hir::semantic::InstanceOf $hir $e] ne {} && [hir::callables::Bearing $hir $argType]} {
+            # A contract-bearing argument (a MutableArray[T], a typed
+            # callable) whose call has a semantic instance
+            # (hir/semantic.tcl): the checked requirement describes an
+            # unconstrained caller (a native's raw `mutarray`), which the
+            # body is instead analyzed against with the argument's own
+            # type; an invalid use is that instance's diagnostic.
             continue
         }
         hir::Diagnose hir TYPE [format \

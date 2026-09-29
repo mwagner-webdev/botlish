@@ -1,0 +1,13 @@
+find-str: OK str
+find-str-untyped-pred: OK str
+find-int: OK int
+find-int-untyped-pred: OK int
+find-str-int-pred: REJECT 3:5: call to list::find with xs : List[str], predicate : big/1 -> bool is invalid: argument for parameter "n" cannot be proven to satisfy int (argument type: str, facts: [-∞, +∞]) (in the body of list::find, at 79:22)
+find-str-int-pred-untyped: REJECT 3:5: call to list::find with xs : List[str], predicate : big/1 -> bool is invalid: argument for parameter "n" is statically incompatible with int, the parameter type inferred from the function body (argument type: str, facts: [-∞, +∞]); inferred from the function body: argument 1 of native > requires int (at 2:5) (in the body of list::find, at 79:22)
+find-handler-mismatch: REJECT 3:5: handler "on NotFound" completes with type int, not admissible as str (the call's own normal result type)
+find-declared-errors: REJECT 9:1: this call may produce the declared error "Gone", which is neither handled here nor admitted by the enclosing function's own "errors" declaration
+any-str: OK bool
+all-int: OK bool
+none-str: OK bool
+any-str-int-pred: REJECT 3:1: call to list::any? with xs : List[str], predicate : pos/1 -> bool is invalid: argument for parameter "n" cannot be proven to satisfy int (argument type: str, facts: [-∞, +∞]) (in the body of list::any?, at 61:22)
+find-mutarrays: OK MutableArray[str]

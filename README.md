@@ -675,6 +675,16 @@ representation: the compiler maps a block's `EXPR` to the proc it generates.
   type equals the assumption. If that doesn't happen within 3 passes, the
   result type is `any`. Accepting only a stable assumption is sound by
   induction over calls.
+* **Semantic function instances** (OPPORTUNISTIC-SEMANTIC-INSTANCES.md,
+  `hir/semantic.tcl`): a call of an exact block whose argument types say more
+  than the block's own entry types is typed with the result of analyzing the
+  block's ordinary body under those types (`identity(m : MutableArray[str])` is
+  `MutableArray[str]`, `first(List[int])` is `int`, `list::find(List[str], p)`
+  is `str`), with no generic syntax and no change to the function's own
+  contract. A body that is invalid for one call's types (an untyped writer of an
+  `int` into a `MutableArray[str]`) makes that *call* a compile-time error, not
+  the function. Semantic instances are analysis only: they emit nothing and
+  never change a specialization key.
 
 **Scope of facts.** A fact holds only on the path that proves it:
 

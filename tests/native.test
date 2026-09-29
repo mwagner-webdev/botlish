@@ -606,6 +606,11 @@ test native-spec-13 {-specialize 0 and 1 run the same programs to the same outco
     source [file join $::projectRoot examples stdlib corpus.tcl]
 } -result {1 1}
 
+# ai_text_clean's and csv_chunked's generic blockers/guards each dropped by one
+# (6 -> 5, 29 -> 28) when semantic function instances gave one call the precise
+# result its concrete arguments imply (OPPORTUNISTIC-SEMANTIC-INSTANCES.md): the
+# semantic HIR's call result is consumed by the ordinary guard analysis, so the
+# guard the imprecise `any` result needed is no longer emitted.
 test native-spec-14 {guard accounting: blockers and emitted guards agree} -body {
     source [file join $::projectRoot examples stdlib corpus.tcl]
     lmap name [corpus::names] {
@@ -638,7 +643,7 @@ test native-spec-14 {guard accounting: blockers and emitted guards agree} -body 
 # is List-only), so its own drop is entirely from `ht_rehash`'s `dest`/
 # `src` List grouping (this file's/native-escape.test's own former
 # "documented blocker").
-} -result {{ai_text_clean 6 6 0 0} {csv 17 19 0 0} {csv_chunked 29 29 1 1} {csv_geometric 24 24 0 0} {csv_records 84 82 29 29} {hashtable 63 53 25 25} {matmul 17 17 0 0} {string_replace 12 12 0 0} {string_reverse 4 4 0 0}}
+} -result {{ai_text_clean 5 5 0 0} {csv 17 19 0 0} {csv_chunked 28 28 1 1} {csv_geometric 24 24 0 0} {csv_records 84 82 29 29} {hashtable 63 53 25 25} {matmul 17 17 0 0} {string_replace 12 12 0 0} {string_reverse 4 4 0 0}}
 
 # ---------------------------------------------------------------------------
 # Closures

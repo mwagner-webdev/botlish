@@ -1,0 +1,86 @@
+### erase-declared-raw-result
+fn erase(x) -> mutarray:
+    x
+erase(mutarray::create(1, "x"))
+### erase-declared-any-result
+fn erase(x) -> any:
+    x
+erase(mutarray::create(1, "x"))
+### erase-into-raw-storage
+fn erase(x):
+    raw = mutable_array_allocate(1)
+    mutable_array_set(raw, 0, x)
+    raw
+erase(mutarray::create(1, "x"))
+### erase-join
+fn erase(x, c):
+    if c:
+        x
+    else:
+        mutable_array_allocate(1)
+erase(mutarray::create(1, "x"), true)
+### erase-untyped-callback
+fn erase(x, f):
+    f(x)
+fn sink(y):
+    y
+erase(mutarray::create(1, "x"), sink)
+### erase-kind-test-write
+fn f(x):
+    if mutarray?(x):
+        mutable_array_set(x, 0, 123)
+    else:
+        unit
+m = mutarray::from_list(["a"])
+f(m)
+mutable_array_get(m, 0)
+### writer-ok
+fn writer(x, v):
+    mutable_array_set(x, 0, v)
+writer(mutarray::create(1, "x"), "ok")
+### writer-bad
+fn writer(x, v):
+    mutable_array_set(x, 0, v)
+writer(mutarray::create(1, "x"), 5)
+### writer-both
+fn writer(x, v):
+    mutable_array_set(x, 0, v)
+a = writer(mutarray::create(1, "x"), "ok")
+b = writer(mutarray::create(1, 1), 5)
+unit
+### nested-two-hop
+fn a(x):
+    x
+fn b(x):
+    a(x)
+b(mutarray::create(1, "x"))
+### nested-two-hop-bad
+fn a(x):
+    mutable_array_set(x, 0, 1)
+fn b(x):
+    a(x)
+b(mutarray::create(1, "x"))
+### mutual-even-odd
+fn even?(n):
+    if n == 0:
+        true
+    else:
+        odd?(n - 1)
+fn odd?(n):
+    if n == 0:
+        false
+    else:
+        even?(n - 1)
+even?(4)
+### nested-closure-bad-write
+fn mk(m):
+    fn put(v):
+        mutable_array_set(m, 0, v)
+    put(5)
+mk(mutarray::create(1, "x"))
+### nested-closure-read
+fn mk(m):
+    fn get(i):
+        mutable_array_get(m, i)
+    get(0)
+mk(mutarray::create(1, "x"))

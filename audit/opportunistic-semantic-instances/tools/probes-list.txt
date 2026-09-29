@@ -1,0 +1,82 @@
+### find-str
+fn is_b(s: str):
+    s == "b"
+r = list::find(["a", "b"], is_b):
+    on NotFound:
+        "none"
+r
+### find-str-untyped-pred
+fn is_b(s):
+    s == "b"
+r = list::find(["a", "b"], is_b):
+    on NotFound:
+        "none"
+r
+### find-int
+fn big(n: int):
+    n > 5
+r = list::find([1, 9], big):
+    on NotFound:
+        0
+r
+### find-int-untyped-pred
+fn big(n):
+    n > 5
+r = list::find([1, 9], big):
+    on NotFound:
+        0
+r
+### find-str-int-pred
+fn big(n: int):
+    n > 5
+r = list::find(["a", "b"], big):
+    on NotFound:
+        "x"
+r
+### find-str-int-pred-untyped
+fn big(n):
+    n > 5
+r = list::find(["a", "b"], big):
+    on NotFound:
+        "x"
+r
+### find-handler-mismatch
+fn is_b(s: str):
+    s == "b"
+r = list::find(["a"], is_b):
+    on NotFound:
+        0
+r
+### find-declared-errors
+error Gone
+fn look(xs, p) errors Gone:
+    r = list::find(xs, p):
+        on NotFound:
+            fail Gone
+    r
+fn is_b(s: str):
+    s == "b"
+look(["a"], is_b)
+### any-str
+fn is_b(s):
+    s == "b"
+list::any?(["a", "b"], is_b)
+### all-int
+fn pos(n):
+    n > 0
+list::all?([1, 2], pos)
+### none-str
+fn is_b(s):
+    s == "b"
+list::none?(["a"], is_b)
+### any-str-int-pred
+fn pos(n: int):
+    n > 0
+list::any?(["a"], pos)
+### find-mutarrays
+fn nonempty(m):
+    mutable_array_capacity(m) > 0
+r = list::find([mutarray::create(1, "x")], nonempty):
+    on NotFound:
+        mutarray::create(0, "x")
+r

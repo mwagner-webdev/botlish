@@ -1,0 +1,43 @@
+### shared-typed-append-three-kinds
+# One untyped append serves three element types; the storage is created with
+# the typed constructor (scratch control: nothing in the canonical corpus).
+fn tb_append(storage, length, value):
+    if length == mutable_array_capacity(storage):
+        grown = mutarray::create(length * 2 + 1, value)
+        mutable_array_copy(grown, 0, storage, 0, length)
+        mutable_array_set(grown, length, value)
+        grown
+    else:
+        mutable_array_set(storage, length, value)
+        storage
+a = tb_append(mutarray::create(2, "a"), 1, "b")
+b = tb_append(mutarray::create(2, ["x"]), 1, ["y"])
+c = tb_append(mutarray::create(2, mutable_array_allocate(1)), 1, mutable_array_allocate(1))
+[mutable_array_freeze(a, 2), mutable_array_freeze(b, 2), mutable_array_freeze(c, 2)]
+### shared-typed-append-wrong-value
+fn tb_append(storage, length, value):
+    if length == mutable_array_capacity(storage):
+        grown = mutarray::create(length * 2 + 1, value)
+        mutable_array_copy(grown, 0, storage, 0, length)
+        mutable_array_set(grown, length, value)
+        grown
+    else:
+        mutable_array_set(storage, length, value)
+        storage
+tb_append(mutarray::create(2, "a"), 1, 5)
+### shared-typed-builder-loop
+fn tb_fill(storage, xs, i):
+    if i == list_length(xs):
+        storage
+    else:
+        mutable_array_set(storage, i, list_get(xs, i))
+        tb_fill(storage, xs, i + 1)
+a = tb_fill(mutarray::create(2, "z"), ["p", "q"], 0)
+b = tb_fill(mutarray::create(2, 0), [1, 2], 0)
+[mutable_array_freeze(a, 2), mutable_array_freeze(b, 2)]
+### positional-pair-still-blocks
+fn tb_pair(storage, length, value):
+    mutable_array_set(storage, length, value)
+    [storage, length + 1]
+p = tb_pair(mutarray::create(2, "a"), 0, "b")
+list_get(p, 0)

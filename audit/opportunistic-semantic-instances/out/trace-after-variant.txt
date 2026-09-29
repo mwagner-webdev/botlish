@@ -1,0 +1,60 @@
+== examples/stdlib/csv_records.bot
+-- function results and parameter contracts (constructor -> container -> projection)
+  ht_alloc               (capacity:int) -> mutarray
+  ht_new                 () -> mutarray
+  ht_new_sized           (expected:int) -> mutarray
+  row_new                (presize:bool, header_count:int) -> mutarray
+  row_fill               (table:mutarray, headers:list, fields:list, i:int, field_count:int) -> mutarray
+  row_table              (headers:list, header_count:int, fields:list, presize:bool) -> mutarray
+  geo_new                () -> list
+  geo_grow               (storage:mutarray, length:int) -> mutarray
+  geo_append             (builder:list, value:any) -> list
+  geo_finish             (builder:list) -> list
+  build_rows             (records:list, i:int, headers:list, header_count:int, outer:list, presize:bool) -> list
+  csv_records_generic    (text:str, presize:bool) -> list
+  csv_records            (text:str) -> list
+  csv_records_presized   (text:str) -> list
+  ht_get                 (table:mutarray, key:any) -> any
+  ht_size                (table:mutarray) -> any
+-- sample() bindings (projection -> consumer)
+  rows                   : list
+  presized_rows          : list
+  first                  : any
+  second                 : any
+  presized_first         : any
+-- record-contained: builder pair and rehash destination
+  dest                   : List[mutarray]
+  newControls            : any
+  newControls            : mutarray
+  fresh                  : mutarray
+  grown                  : mutarray
+  storage                : any
+  storage                : any
+-- diagnostics (a non-empty list only under variant-all-trusted.patch)
+  examples/stdlib/csv_records.bot:126:22: argument for parameter "storage" cannot be proven to satisfy mutarray, the parameter type inferred from the fun
+  examples/stdlib/csv_records.bot:126:31: argument for parameter "length" cannot be proven to satisfy int, the parameter type inferred from the function 
+  examples/stdlib/csv_records.bot:172:28: argument for parameter "index" cannot be proven to satisfy int, the parameter type inferred from the function b
+  examples/stdlib/csv_records.bot:186:24: argument for parameter "index" cannot be proven to satisfy int, the parameter type inferred from the function b
+  examples/stdlib/csv_records.bot:311:29: argument for parameter "newControls" cannot be proven to satisfy mutarray, the parameter type inferred from the
+  examples/stdlib/csv_records.bot:416:46: argument for parameter "fields" cannot be proven to satisfy list, the parameter type inferred from the function
+  examples/stdlib/csv_records.bot:429:28: argument for parameter "headers" cannot be proven to satisfy list, the parameter type inferred from the functio
+  examples/stdlib/csv_records.bot:452:20: argument for parameter "table" cannot be proven to satisfy mutarray, the parameter type inferred from the funct
+  examples/stdlib/csv_records.bot:452:45: argument for parameter "table" cannot be proven to satisfy mutarray, the parameter type inferred from the funct
+  examples/stdlib/csv_records.bot:452:81: argument for parameter "table" cannot be proven to satisfy mutarray, the parameter type inferred from the funct
+  examples/stdlib/csv_records.bot:452:99: argument for parameter "table" cannot be proven to satisfy mutarray, the parameter type inferred from the funct
+  examples/stdlib/csv_records.bot:453:32: argument for parameter "table" cannot be proven to satisfy mutarray, the parameter type inferred from the funct
+  examples/stdlib/csv_records.bot:453:55: argument for parameter "table" cannot be proven to satisfy mutarray, the parameter type inferred from the funct
+  examples/stdlib/csv_records.bot:453:77: argument for parameter "table" cannot be proven to satisfy mutarray, the parameter type inferred from the funct
+  examples/stdlib/csv_records.bot:453:100: argument for parameter "table" cannot be proven to satisfy mutarray, the parameter type inferred from the funct
+  examples/stdlib/csv_records.bot:453:124: argument for parameter "table" cannot be proven to satisfy mutarray, the parameter type inferred from the funct
+== examples/stdlib/hashtable.bot
+  ht_alloc               (capacity:int) -> mutarray
+  ht_new                 () -> mutarray
+  ht_new_sized           (expected:int) -> mutarray
+  ht_rehash_insert       (dest:list, capacity:int, key:any, value:any) -> unit
+  ht_rehash_probe        (newControls:mutarray, index:int, capacity:int) -> int
+  ht_get                 (table:mutarray, key:any) -> any
+  dest                   : List[mutarray]
+  newControls            : any
+  newControls            : mutarray
+  examples/stdlib/hashtable.bot:226:29: argument for parameter "newControls" cannot be proven to satisfy mutarray, the parameter type inferred from the

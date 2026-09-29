@@ -1,0 +1,7 @@
+erase-structural-callback: REJECT 5:7: cannot erase element contract MutableArray[str] passed as an ordinary call argument: its element type would be lost, permitting writes of values it does not admit through an alias that no longer knows the contract (a MutableArray[T] is invariant and may only flow into a position that keeps MutableArray[T])
+collect-self: OK any
+collect-self-int: OK list
+mutual-typed: OK any
+mutual-typed-reverse-order: OK any
+type-changing: OK any
+budget-typed-chain: REJECT 6:6: cannot erase element contract MutableArray[str] passed as an ordinary call argument: its element type would be lost, permitting writes of values it does not admit through an alias that no longer knows the contract (a MutableArray[T] is invariant and may only flow into a position that keeps MutableArray[T])

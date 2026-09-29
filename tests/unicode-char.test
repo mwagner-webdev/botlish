@@ -348,16 +348,18 @@ sample()}]
 # ---------------------------------------------------------------------------
 # Typed-callable escape soundness regression (spec items 41, 78, 102-27)
 
-test char-typed-callable-escape-rejected {a function consuming UnicodeChar remains a typed callable: passing it into an untyped erasing higher-order context is rejected} -body {
-    catch {surface::compile {fn consume(c: UnicodeChar) -> UnicodeChar:
+test char-typed-callable-escape-rejected {a function consuming UnicodeChar remains a typed callable: through an untyped higher-order helper its full contract is checked by the helper's semantic instance -- the UnicodeChar argument is accepted, any other argument is rejected} -body {
+    set defs {fn consume(c: UnicodeChar) -> UnicodeChar:
     c
 
 fn apply(f, v):
     f(v)
 
-apply(consume, 'A')} escape.bot} message options
-    list [dict get $options -errorcode] [string match {*typed parameter requirements that cannot be preserved*} $message]
-} -result {{CORE SEMANTIC TYPE} 1}
+}
+    list [catch {surface::compile "${defs}apply(consume, 'A')" escape.bot}] \
+        [catch {surface::compile "${defs}apply(consume, \"A\")" escape.bot} message options] \
+        [dict get $options -errorcode] [string match {*call to apply* is invalid*UnicodeChar*} $message]
+} -result {0 1 {CORE SEMANTIC TYPE} 1}
 
 test char-typed-callable-alias-still-works {an exact alias of a typed callable stays valid, and still rejects a wrongly-typed argument} -body {
     list [catch {surface::compile {fn consume(c: UnicodeChar) -> UnicodeChar:
@@ -372,8 +374,8 @@ f = consume
 f(65)} {*cannot be proven to satisfy*}]
 } -result {0 {{CORE SEMANTIC TYPE} 1}}
 
-test char-container-erasure-ordinary {a List[UnicodeChar] erased through an untyped passthrough loses its precision, exactly like any other container (no runtime reconstruction, no char-specific rule)} -body {
-    rejects {fn passthrough(x):
+test char-container-erasure-ordinary {a List[UnicodeChar] erased by a declared broad result loses its precision, exactly like any other container (no runtime reconstruction, no char-specific rule); an untyped passthrough alone no longer erases it (semantic instance)} -body {
+    list [rejects {fn passthrough(x) -> list:
     x
 
 fn consume(chars: List[UnicodeChar]) -> UnicodeChar:
@@ -381,8 +383,17 @@ fn consume(chars: List[UnicodeChar]) -> UnicodeChar:
 
 chars = ['A']
 lost = passthrough(chars)
-consume(lost)} {*cannot be proven to satisfy*}
-} -result {{CORE SEMANTIC TYPE} 1}
+consume(lost)} {*cannot be proven to satisfy*}] \
+        [catch {surface::compile {fn passthrough(x):
+    x
+
+fn consume(chars: List[UnicodeChar]) -> UnicodeChar:
+    list_get(chars, 0)
+
+chars = ['A']
+lost = passthrough(chars)
+consume(lost)} kept.bot}]
+} -result {{{CORE SEMANTIC TYPE} 1} 0}
 
 # ---------------------------------------------------------------------------
 # Dynamic/untyped soundness (spec items 16-17, 88-89)

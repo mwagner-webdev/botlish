@@ -40,13 +40,13 @@ e19 bind b3 known : str
             e25 const no : str unreachable
 e26 call native(list) : list
     e27 ref b8 list : native list
-    e28 call block(e2) : any
+    e28 call block(e2) : int
         e29 ref b1 describe : block(e2)/1 -> any
         e30 const 41 : int
-    e31 call block(e2) : any
+    e31 call block(e2) : str
         e32 ref b1 describe : block(e2)/1 -> any
         e33 const hi : str
-    e34 call block(e2) : any
+    e34 call block(e2) : str
         e35 ref b1 describe : block(e2)/1 -> any
         e36 call native(list) : List[never]
             e37 ref b8 list : native list

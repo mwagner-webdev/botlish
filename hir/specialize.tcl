@@ -711,7 +711,16 @@ proc hir::specialize::Handle {op args} {
             }
             dict set state instances $current calls $e $target
             dict set state deps $target $current 1
-            return [dict get $state instances $target result]
+            set result [dict get $state instances $target result]
+            # Never less precise than the semantic HIR: a semantic instance
+            # (hir/semantic.tcl) may already prove a more precise result for
+            # this call than a key-type instance can (KeyType(MutableArray[T])
+            # is the raw kind). Both are sound, so the more precise wins.
+            set semantic [hir::semantic::GenericResult [dict get $state hir] $e]
+            if {$semantic ne "" && [hir::types::subtype $semantic $result]} {
+                set result $semantic
+            }
+            return $result
         }
         create {
             lassign $args e seeds

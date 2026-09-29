@@ -230,14 +230,15 @@ s = immutable_set_from_list(xs)
     hir::types::show [hir::typeOf $h $sExpr]
 } -result {immutableSet}
 
-test set-construct-broad-source-also-broad {a List whose element type was lost to erasure (an untyped passthrough) also gives a broad ImmutableSet, not a false precise one} -body {
-    set h [surface::compile {fn passthrough(x):
-    x
-s = immutable_set_from_list(passthrough([1, 2]))
-1} broadsrc.bot -strict 0]
-    set sExpr [lindex [hirFind $h bind s] 0]
-    hir::types::show [hir::typeOf $h $sExpr]
-} -result {immutableSet}
+test set-construct-broad-source-also-broad {a List whose element type was lost to erasure (a declared broad result) also gives a broad ImmutableSet, not a false precise one; an untyped passthrough alone keeps List[int], so its set is ImmutableSet[int] (semantic instance)} -body {
+    set kinds {}
+    foreach def {"fn passthrough(x) -> list:\n    x" "fn passthrough(x):\n    x"} {
+        set h [surface::compile "$def\ns = immutable_set_from_list(passthrough(\[1, 2\]))\n1" broadsrc.bot -strict 0]
+        set sExpr [lindex [hirFind $h bind s] 0]
+        lappend kinds [hir::types::show [hir::typeOf $h $sExpr]]
+    }
+    set kinds
+} -result {immutableSet {ImmutableSet[int]}}
 
 test set-construct-empty {immutable_set_from_list([]) infers ImmutableSet[never], satisfying no ImmutableSet[T] parameter under initial invariance} -body {
     set h [surface::compile {s = immutable_set_from_list([])
@@ -387,27 +388,36 @@ immutable_set_contains(passthrough(make()), one())} $::smallDecl] passok.bot
     set ok 1
 } -result 1
 
-test set-erasure-vs-consume {consume(passthrough(make())) is rejected: the erased value has lost the proof consume's declared parameter needs} -body {
-    setTypeRejects [format {%sfn passthrough(x):
+test set-erasure-vs-consume {consume(passthrough(make())) is rejected when passthrough erases through a declared broad result: the erased value has lost the proof consume's declared parameter needs; an untyped passthrough alone keeps it (semantic instance)} -body {
+    list [setTypeRejects [format {%sfn passthrough(x) -> immutableSet:
     x
 fn make() -> ImmutableSet[Small]:
     immutable_set_from_list([one()])
 fn consume(s: ImmutableSet[Small]) -> int:
     0
-consume(passthrough(make()))} $::smallDecl]
-} -result {{CORE SEMANTIC TYPE} 1}
+consume(passthrough(make()))} $::smallDecl]] \
+        [catch {surface::compile [format {%sfn passthrough(x):
+    x
+fn make() -> ImmutableSet[Small]:
+    immutable_set_from_list([one()])
+fn consume(s: ImmutableSet[Small]) -> int:
+    0
+consume(passthrough(make()))} $::smallDecl] kept.bot}]
+} -result {{{CORE SEMANTIC TYPE} 1} 0}
 
-test set-callable-escape-still-rejected {a function whose only declared parameter is ImmutableSet[Small] is still a "typed callable": passing it through an untyped higher-order parameter is rejected, unaffected by typed-callable escape soundness being unmodified} -body {
-    catch {surface::compile [format {%sfn consume(s: ImmutableSet[Small]) -> int:
+test set-callable-escape-still-rejected {a function whose only declared parameter is ImmutableSet[Small] is still a "typed callable": through an untyped higher-order parameter its contract is checked by the helper's semantic instance -- the right set is accepted, another is rejected at the call} -body {
+    set defs {%sfn consume(s: ImmutableSet[Small]) -> int:
     0
 fn apply(f, x):
     f(x)
 fn make() -> ImmutableSet[Small]:
     immutable_set_from_list([one()])
-apply(consume, make())} $::smallDecl] escape.bot} message options
-    list [dict get $options -errorcode] \
-        [string match {*typed parameter requirements that cannot be preserved*} $message]
-} -result {{CORE SEMANTIC TYPE} 1}
+}
+    list [catch {surface::compile [format "${defs}apply(consume, make())" $::smallDecl] ok.bot}] \
+        [catch {surface::compile [format "${defs}apply(consume, immutable_set_from_list(\[3\]))" $::smallDecl] escape.bot} message options] \
+        [dict get $options -errorcode] \
+        [string match {*call to apply* is invalid: argument for parameter*cannot be proven to satisfy*} $message]
+} -result {0 1 {CORE SEMANTIC TYPE} 1}
 
 test set-callable-escape-exact-alias-still-legal {exact aliasing (f = consume) remains fully first-class} -body {
     surface::compile [format {%sfn consume(s: ImmutableSet[Small]) -> int:

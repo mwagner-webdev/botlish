@@ -72,7 +72,7 @@ test native-refinement-propagation-native-body-preserves-result-type {uriEscape'
     hirRefTypes [nativeHirOf $exprs] q
 } -result {{str[UriQueryValue]}}
 
-test native-refinement-propagation-native-body-without-override-loses-it {control: web::uri_escape_text itself (no native, no override) is not str[UriQueryValue] -- the opaque type is never forged by the module mechanism, only ever supplied by the native's own registered contract (confirms the override, not something else, is what fixes the case above)} -body {
+test native-refinement-propagation-native-body-without-override-loses-it {control: web::uri_escape_text itself (no native, no override) is not str[UriQueryValue] -- the opaque type is never forged by the module mechanism, only ever supplied by the native's own registered contract (confirms the override, not something else, is what fixes the case above). Its semantic instance for a str argument gives plain `str` (was any): never the opaque refinement} -body {
     core::loadLibrary web
     set loaded [surface::modules::LoadNamespaces {web}]
     set qref [hir::syntax::refNode {ir {}} "web::uri_escape_text"]
@@ -83,7 +83,7 @@ test native-refinement-propagation-native-body-without-override-loses-it {contro
         [hir::syntax::refNode {ir {}} q]]
     hirRefTypes [hir::buildSyntax $nodes -strict 0 -files [dict get $loaded files] \
         -modules [dict get $loaded sections]] q
-} -result {any}
+} -result {str}
 
 # ---------------------------------------------------------------------------
 # §2: refined-checks.ir itself -- the acceptance target. UriQueryValue?(q)

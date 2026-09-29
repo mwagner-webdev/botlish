@@ -1,0 +1,13 @@
+find-str: REJECT 3:28: "is_b" has typed parameter requirements that cannot be preserved passed as an ordinary call argument: its declared parameter contract would be erased and could no longer be checked at every future call
+find-str-untyped-pred: OK any
+find-int: REJECT 3:24: "big" has typed parameter requirements that cannot be preserved passed as an ordinary call argument: its declared parameter contract would be erased and could no longer be checked at every future call
+find-int-untyped-pred: OK any
+find-str-int-pred: REJECT 3:28: "big" has typed parameter requirements that cannot be preserved passed as an ordinary call argument: its declared parameter contract would be erased and could no longer be checked at every future call
+find-str-int-pred-untyped: OK any
+find-handler-mismatch: REJECT 3:23: "is_b" has typed parameter requirements that cannot be preserved passed as an ordinary call argument: its declared parameter contract would be erased and could no longer be checked at every future call
+find-declared-errors: REJECT 9:13: "is_b" has typed parameter requirements that cannot be preserved passed as an ordinary call argument: its declared parameter contract would be erased and could no longer be checked at every future call
+any-str: OK bool
+all-int: OK bool
+none-str: OK bool
+any-str-int-pred: REJECT 3:19: "pos" has typed parameter requirements that cannot be preserved passed as an ordinary call argument: its declared parameter contract would be erased and could no longer be checked at every future call
+find-mutarrays: REJECT 3:16: cannot erase element contract List[MutableArray[str]] passed as an ordinary call argument: its element type would be lost, permitting writes of values it does not admit through an alias that no longer knows the contract (a MutableArray[T] is invariant and may only flow into a position that keeps MutableArray[T])
