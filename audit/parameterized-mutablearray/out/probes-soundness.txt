@@ -1,0 +1,102 @@
+append-widen: REJECT 3:13: cannot erase element contract List[MutableArray[str]] passed as an ordinary call argument: its element type would be lost, permitting writes of values it does not admit through an alias that no longer knows the contract (a MutableArray[T] is invariant and may only flow into a position that keeps MutableArray[T])
+append-same: OK List[MutableArray[str]]
+append-diff: REJECT 4:13: cannot erase element contract List[MutableArray[str]] passed as an ordinary call argument: its element type would be lost, permitting writes of values it does not admit through an alias that no longer knows the contract (a MutableArray[T] is invariant and may only flow into a position that keeps MutableArray[T])
+id-untyped: REJECT 3:4: cannot erase element contract MutableArray[str] passed as an ordinary call argument: its element type would be lost, permitting writes of values it does not admit through an alias that no longer knows the contract (a MutableArray[T] is invariant and may only flow into a position that keeps MutableArray[T])
+return-any: REJECT 1:5: the declared result type any would erase the typed parameter requirements or declared errors of the callable this function returns (MutableArray[str]): its contract could no longer be checked at every future call
+set-raw-with-typed: REJECT 2:27: cannot erase element contract MutableArray[str] passed as an ordinary call argument: its element type would be lost, permitting writes of values it does not admit through an alias that no longer knows the contract (a MutableArray[T] is invariant and may only flow into a position that keeps MutableArray[T])
+set-nested-ok: OK MutableArray[str]
+set-nested-bad: REJECT 3:29: value of type MutableArray[int] is not admissible to element type MutableArray[str] of MutableArray[MutableArray[str]] (facts: [-∞, +∞]): a MutableArray's element type is fixed for its lifetime, a store never widens it and inserts no check
+set-nested-raw-bad: REJECT 3:29: value of type mutarray is not admissible to element type MutableArray[str] of MutableArray[MutableArray[str]] (facts: [-∞, +∞]): a MutableArray's element type is fixed for its lifetime, a store never widens it and inserts no check
+copy-same: OK unit
+copy-diff: REJECT 3:26: cannot copy from MutableArray[int] into MutableArray[str]: source element type int is not admissible to destination element type str
+copy-raw-src-typed-dst: REJECT 3:26: cannot copy from a source of type mutarray into MutableArray[str]: the source's element type is unknown, so its slot values are not proven admissible to element type str
+copy-typed-src-raw-dst: OK unit
+copy-nested-src-raw-dst: REJECT 3:26: cannot erase element contract of MutableArray[MutableArray[str]] by copying its elements into mutarray: the copied values would lose their own contracts in untyped mutable storage
+copy-raw-raw: OK unit
+copy-byte-int: OK unit
+copy-int-byte: REJECT 8:26: cannot copy from MutableArray[int] into MutableArray[int[Byte]]: source element type int is not admissible to destination element type int[Byte]
+byte-invariance: REJECT 6:11: argument for parameter "xs" cannot be proven to satisfy MutableArray[int] (argument type: MutableArray[int[Byte]], facts: [-∞, +∞]); MutableArray is invariant in its element type: MutableArray[int[Byte]] cannot be viewed as MutableArray[int], because writes through that view could store values the original element type does not admit
+byte-create: OK MutableArray[int[Byte]]
+byte-set-range: OK unit
+byte-set-range-bad: REJECT 5:25: value of type int is not admissible to element type int[Byte] of MutableArray[int[Byte]] (facts: [300, 300] {300}): a MutableArray's element type is fixed for its lifetime, a store never widens it and inserts no check
+fn-typed-arg: OK int
+fn-typed-arg-mismatch: REJECT 5:5: argument for parameter "f" cannot be proven to satisfy Fn{args: [MutableArray[int]], return: int, errors: []} (argument type: block(e39)/1 -> int, facts: [-∞, +∞]); argument 1 is incompatible: the callable's parameter requires MutableArray[str], but callers of the function type may pass any MutableArray[int]
+fn-typed-arg-any: REJECT 5:5: argument for parameter "f" cannot be proven to satisfy Fn{args: [MutableArray[any]], return: int, errors: []} (argument type: block(e39)/1 -> int, facts: [-∞, +∞]); argument 1 is incompatible: the callable's parameter requires MutableArray[str], but callers of the function type may pass any MutableArray[any]
+fn-raw-param-callable: REJECT 5:5: argument for parameter "f" cannot be proven to satisfy Fn{args: [MutableArray[str]], return: int, errors: []} (argument type: block(e39)/1 -> int, facts: [-∞, +∞]); argument 1 is incompatible: the callable's parameter requires mutarray, but callers of the function type may pass any MutableArray[str]
+fn-reverse: REJECT 4:7: argument 1 cannot be proven to satisfy MutableArray[any], the parameter type the callee's function type Fn{args: [MutableArray[any]], return: int, errors: []} requires (argument type: MutableArray[int], facts: [-∞, +∞]); MutableArray is invariant in its element type: MutableArray[int] cannot be viewed as MutableArray[any], because writes through that view could store values the original element type does not admit
+listtype-annot: OK int
+listtype-annot-bad: REJECT 3:3: argument for parameter "xs" cannot be proven to satisfy List[MutableArray[int]] (argument type: List[MutableArray[str]], facts: [-∞, +∞])
+nested-annot: OK int
+nested-annot-2: OK int
+hof-erase: REJECT 3:3: cannot erase element contract List[MutableArray[int]] passed as an ordinary call argument: its element type would be lost, permitting writes of values it does not admit through an alias that no longer knows the contract (a MutableArray[T] is invariant and may only flow into a position that keeps MutableArray[T])
+freeze-nested: OK List[MutableArray[int]]
+freeze-raw: OK list
+bind-typed-annot: OK MutableArray[str]
+result-decl-bad: REJECT 1:5: function result does not prove declared type MutableArray[int] (facts: [-∞, +∞]); MutableArray is invariant in its element type: MutableArray[str] cannot be viewed as MutableArray[int], because writes through that view could store values the original element type does not admit
+result-decl-raw-bad: REJECT 1:5: function result does not prove declared type mutarray (facts: [-∞, +∞]); MutableArray[str] would lose its element contract as the raw mutarray type, permitting writes of values that are not str
+mutarray?-branch-any: OK int
+raw-fn-param: OK int
+infer-cap: REJECT 3:5: argument for parameter "m" is statically incompatible with mutarray, the parameter type inferred from the function body (argument type: MutableArray[int], facts: [-∞, +∞]); inferred from the function body: argument 1 of native mutable_array_capacity requires mutarray (at 2:28)
+closure-capture-set-bad: REJECT 3:29: value of type int is not admissible to element type str of MutableArray[str] (facts: [5, 5] {5}): a MutableArray's element type is fixed for its lifetime, a store never widens it and inserts no check
+closure-capture-ok: OK unit
+listloop-elem: OK List[str]
+listloop-collect-erase: OK List[MutableArray[str]]
+listloop-elem-set-bad: REJECT 3:29: value of type int is not admissible to element type str of MutableArray[str] (facts: [1, 1] {1}): a MutableArray's element type is fixed for its lifetime, a store never widens it and inserts no check
+any-then-mutarray?: OK unit
+fn-arg-untyped-callee: REJECT 3:31: cannot erase element contract MutableArray[str] passed as an ordinary call argument: its element type would be lost, permitting writes of values it does not admit through an alias that no longer knows the contract (a MutableArray[T] is invariant and may only flow into a position that keeps MutableArray[T])
+unit-of-typed-in-eq: OK bool
+stored-in-typed-outer-then-raw: REJECT 4:27: value of type int is not admissible to element type str of MutableArray[str] (facts: [5, 5] {5}): a MutableArray's element type is fixed for its lifetime, a store never widens it and inserts no check
+stored-in-typed-outer-ok: OK unit
+freeze-then-list-any: OK MutableArray[str]
+freeze-erase: REJECT 4:3: cannot erase element contract List[MutableArray[str]] passed as an ordinary call argument: its element type would be lost, permitting writes of values it does not admit through an alias that no longer knows the contract (a MutableArray[T] is invariant and may only flow into a position that keeps MutableArray[T])
+create-fn-value: OK MutableArray[str]
+create-fn-alias-type: OK MutableArray[int]
+user-named-from-list: OK mutarray
+user-named-create-shadow: OK mutarray
+create-neg-cap-type: OK MutableArray[str]
+create-noninteger-cap: REJECT 1:18: argument for parameter "capacity" cannot be proven to satisfy int (argument type: str, facts: [-∞, +∞])
+create-any-default: OK MutableArray[any]
+create-zero: OK MutableArray[str]
+create-managed: OK MutableArray[List[int]]
+create-nested-list: OK MutableArray[List[List[int]]]
+create-nested-array: OK MutableArray[MutableArray[int]]
+create-callable: OK MutableArray[Fn{args: [any], return: any, errors: []}]
+create-typed-callable-erase: OK MutableArray[Fn{args: [int[Small]], return: int[Small], errors: []}]
+mutarray?-typed-in-list: OK bool
+mutarray?-typed-branch: OK MutableArray[int]
+exact-list: OK MutableArray[int]
+spec-forward-concrete: OK MutableArray[int]
+dyn-index-set: OK int
+fn-return-typed-annot-ok: OK MutableArray[int]
+fn-return-annot-raw-erase: REJECT 1:8: function result does not prove declared type MutableArray[int] (facts: [-∞, +∞]); only a value already known to be a MutableArray[int] satisfies this contract: a kind test proves the kind, never the element type, and no element check is inserted
+deep4: REJECT 4:26: cannot erase element contract MutableArray[MutableArray[MutableArray[int]]] passed as an ordinary call argument: its element type would be lost, permitting writes of values it does not admit through an alias that no longer knows the contract (a MutableArray[T] is invariant and may only flow into a position that keeps MutableArray[T])
+deep3: OK MutableArray[MutableArray[MutableArray[int]]]
+recursive-build: OK MutableArray[int]
+recursive-untyped-result: OK MutableArray[str]
+mutual: REJECT 3:16: cannot erase element contract MutableArray[int] in a "return" whose function-level result type differs: its element type would be lost, permitting writes of values it does not admit through an alias that no longer knows the contract (a MutableArray[T] is invariant and may only flow into a position that keeps MutableArray[T])
+closure-return: OK MutableArray[str]
+listloop-collect-typed: OK List[MutableArray[int]]
+deep-list-nest: REJECT 1:2: cannot erase element contract List[List[MutableArray[int]]] passed as an ordinary call argument: its element type would be lost, permitting writes of values it does not admit through an alias that no longer knows the contract (a MutableArray[T] is invariant and may only flow into a position that keeps MutableArray[T])
+freeze-then-append: OK List[int]
+stringified: OK int
+forward-ref-hole: REJECT 2:5: cannot erase element contract MutableArray[str]: "m" is read here as any, before its binding is initialized (a forward reference from a closure created ahead of it), which would lose the element contract and permit incompatible writes; define the binding before the code that reads it, or pass the array in as a typed parameter
+forward-ref-hole-2: REJECT 2:23: cannot erase element contract MutableArray[str]: "m" is read here as any, before its binding is initialized (a forward reference from a closure created ahead of it), which would lose the element contract and permit incompatible writes; define the binding before the code that reads it, or pass the array in as a typed parameter
+forward-ref-type: REJECT 2:5: cannot erase element contract MutableArray[str]: "m" is read here as any, before its binding is initialized (a forward reference from a closure created ahead of it), which would lose the element contract and permit incompatible writes; define the binding before the code that reads it, or pass the array in as a typed parameter
+apply-untyped-callee: REJECT 5:7: cannot erase element contract block(e39)/0 -> MutableArray[str] passed as an ordinary call argument: its element type would be lost, permitting writes of values it does not admit through an alias that no longer knows the contract (a MutableArray[T] is invariant and may only flow into a position that keeps MutableArray[T])
+forward-ref-ok-typed-param: OK unit
+forward-ref-raw-ok: OK any
+forward-ref-list-of-typed: REJECT 2:5: cannot erase element contract List[MutableArray[str]]: "xs" is read here as any, before its binding is initialized (a forward reference from a closure created ahead of it), which would lose the element contract and permit incompatible writes; define the binding before the code that reads it, or pass the array in as a typed parameter
+backward-ref-ok: OK unit
+fwd-call-hole: REJECT 2:5: cannot erase element contract block(e43)/0 -> MutableArray[str]: "later" is read here as block(e43)/0 -> any, before its binding is initialized (a forward reference from a closure created ahead of it), which would lose the element contract and permit incompatible writes; define the binding before the code that reads it, or pass the array in as a typed parameter
+fwd-callee-value-hole: REJECT 4:11: cannot erase element contract block(e48)/0 -> MutableArray[str]: "later" is read here as block(e48)/0 -> any, before its binding is initialized (a forward reference from a closure created ahead of it), which would lose the element contract and permit incompatible writes; define the binding before the code that reads it, or pass the array in as a typed parameter
+fwd-call-type: REJECT 2:5: cannot erase element contract block(e43)/0 -> MutableArray[str]: "later" is read here as block(e43)/0 -> any, before its binding is initialized (a forward reference from a closure created ahead of it), which would lose the element contract and permit incompatible writes; define the binding before the code that reads it, or pass the array in as a typed parameter
+fwd-call-raw-ok: OK any
+fwd-call-int-ok: OK any
+self-recursion-ok: OK MutableArray[str]
+fn-any-arg-callee: REJECT 2:7: cannot erase element contract MutableArray[str] passed as an ordinary call argument: its element type would be lost, permitting writes of values it does not admit through an alias that no longer knows the contract (a MutableArray[T] is invariant and may only flow into a position that keeps MutableArray[T])
+byte-loop-range-ok: OK unit
+byte-loop-range-bad: REJECT 4:33: value of type int is not admissible to element type int[Byte] of MutableArray[int[Byte]] (facts: [0, 256]): a MutableArray's element type is fixed for its lifetime, a store never widens it and inserts no check
+native-alias-set: REJECT 3:11: cannot erase element contract MutableArray[str] passed as an ordinary call argument: its element type would be lost, permitting writes of values it does not admit through an alias that no longer knows the contract (a MutableArray[T] is invariant and may only flow into a position that keeps MutableArray[T])
+native-alias-set-typed-bad: REJECT 3:9: value of type int is not admissible to element type str of MutableArray[str] (facts: [5, 5] {5}): a MutableArray's element type is fixed for its lifetime, a store never widens it and inserts no check
+list-native-variadic: REJECT 1:6: cannot erase element contract MutableArray[int] passed as an ordinary call argument: its element type would be lost, permitting writes of values it does not admit through an alias that no longer knows the contract (a MutableArray[T] is invariant and may only flow into a position that keeps MutableArray[T])
+callable-elements: OK MutableArray[Fn{args: [any], return: any, errors: []}]

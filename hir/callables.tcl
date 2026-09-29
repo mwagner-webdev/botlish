@@ -45,6 +45,23 @@
 # (Bearing): erasing one of those to a type that forgets the obligation is
 # rejected exactly like erasing a typed block's exact identity always was.
 
+# MutableArray[T] (PARAMETERIZED-MUTABLEARRAY.md) is a second bearing form
+# under the same rule, not a second checker. A MutableArray[T] carries a
+# contract -- every slot value is a T and every store preserves that -- that
+# lives only in its static type (the runtime object knows nothing of T). If
+# such a value were to flow into a position of another type, that contract
+# would become unenforceable exactly as a typed callable's is: through `any`
+# or the raw `mutarray` kind a later kind test recovers a writable
+# handle to the *same object* and stores a value the original alias never
+# expects. So MutableArray[T] (T other than the vacuous `any`) is bearing,
+# transitively through every containing type (List[MutableArray[T]],
+# MutableArray[MutableArray[T]], Fn results), and is preserved only into a
+# position that keeps the equivalent element contract. The natives that
+# merely *use* an array through its typed API (mutable_array_get/set/
+# freeze/capacity/copy, type tests, scalar-returning natives) keep it
+# (hir/containers.tcl's NativeContexts); anything else that would retain it
+# in an untyped position is rejected.
+
 namespace eval hir::callables {}
 
 # 1 if TYPE is an exact callable value -- {block B ARITY RESULT} -- whose
@@ -69,7 +86,16 @@ namespace eval hir::callables {}
 # chooser(): take_byte` passed to an untyped parameter let take_byte be
 # called unchecked through `f()(9999)`); and a List/ImmutableSet whose
 # elements are.
-proc hir::callables::Bearing {hir type} {
+proc hir::callables::Bearing {hir type {mutable 1}} {
+    if {[hir::types::IsMutArray $type]} {
+        # MUTABLE 0 asks only about *callable* obligations (for the
+        # native-argument policy in ArgContexts), so it looks through the
+        # array's own contract to what its elements bear.
+        if {$mutable && [lindex $type 1] ne "any"} {
+            return 1
+        }
+        return [Bearing $hir [lindex $type 1] $mutable]
+    }
     if {[hir::types::IsExactBlock $type]} {
         set block [lindex $type 1]
         if {[dict exists $hir exprs $block]} {
@@ -84,7 +110,7 @@ proc hir::callables::Bearing {hir type} {
                 }
             }
         }
-        return [Bearing $hir [lindex $type 3]]
+        return [Bearing $hir [lindex $type 3] $mutable]
     }
     if {[hir::types::IsFn $type]} {
         if {[hir::types::FnErrors $type] ne {}} {
@@ -95,18 +121,18 @@ proc hir::callables::Bearing {hir type} {
                 return 1
             }
         }
-        return [Bearing $hir [hir::types::FnReturn $type]]
+        return [Bearing $hir [hir::types::FnReturn $type] $mutable]
     }
     if {[hir::types::IsList $type]} {
         foreach t [concat [list [lindex $type 1]] [hir::types::shapeOf $type]] {
-            if {[Bearing $hir $t]} {
+            if {[Bearing $hir $t $mutable]} {
                 return 1
             }
         }
         return 0
     }
     if {[hir::types::IsSet $type]} {
-        return [Bearing $hir [lindex $type 1]]
+        return [Bearing $hir [lindex $type 1] $mutable]
     }
     return 0
 }
@@ -133,6 +159,10 @@ proc hir::callables::Preserves {hir type final} {
         set s [hir::types::structuralOf $type]
         return [expr {$s ne "" && [hir::types::subtype $type $final]
             && [Preserves $hir [hir::types::FnReturn $s] [hir::types::FnReturn $final]]}]
+    }
+    if {[hir::types::IsMutArray $type] && [hir::types::IsMutArray $final]} {
+        # Invariant: the same element contract, nothing narrower or wider.
+        return [hir::types::Equivalent [lindex $type 1] [lindex $final 1]]
     }
     if {[hir::types::IsList $type] && [hir::types::IsList $final]} {
         set finalElem [lindex $final 1]
@@ -191,6 +221,13 @@ proc hir::callables::CheckPreserved {hirVar arg finalType contextText} {
             incr i
         }
     }
+    if {[Bearing $hir $type 1] && ![Bearing $hir $type 0]} {
+        # The obligation lost is a MutableArray element contract.
+        hir::Diagnose hir TYPE [format \
+            {cannot erase element contract %s %s: its element type would be lost, permitting writes of values it does not admit through an alias that no longer knows the contract (a MutableArray[T] is invariant and may only flow into a position that keeps MutableArray[T])} \
+            [hir::types::show $type] $contextText] $arg
+        return
+    }
     set name [expr {[hir::types::IsExactBlock $type] ? [Name $hir [lindex $type 1]] : ""}]
     set label [expr {$name ne "" ? "\"$name\""
         : [hir::types::IsExactBlock $type] ? {this callable}
@@ -198,6 +235,67 @@ proc hir::callables::CheckPreserved {hirVar arg finalType contextText} {
     hir::Diagnose hir TYPE [format \
         {%s has typed parameter requirements that cannot be preserved %s: its declared parameter contract would be erased and could no longer be checked at every future call} \
         $label $contextText] $arg
+}
+
+# 1 if a MutableArray contract occurs anywhere inside TYPE (other than the
+# vacuous MutableArray[any]): the array itself, an element of a List/set, a
+# function's parameter or result, an exact block's result.
+proc hir::callables::HasMutArray {type} {
+    if {[hir::types::IsMutArray $type]} {
+        return [expr {[lindex $type 1] ne "any" || [HasMutArray [lindex $type 1]]}]
+    }
+    if {[hir::types::IsList $type]} {
+        foreach t [concat [list [lindex $type 1]] [hir::types::shapeOf $type]] {
+            if {[HasMutArray $t]} { return 1 }
+        }
+        return 0
+    }
+    if {[hir::types::IsSet $type]} {
+        return [HasMutArray [lindex $type 1]]
+    }
+    if {[hir::types::IsFn $type]} {
+        foreach t [concat [hir::types::FnArgs $type] [list [hir::types::FnReturn $type]]] {
+            if {[HasMutArray $t]} { return 1 }
+        }
+        return 0
+    }
+    if {[hir::types::IsExactBlock $type]} {
+        return [HasMutArray [lindex $type 3]]
+    }
+    return 0
+}
+
+# A reference REF to a binding whose bound value carries a MutableArray
+# contract must see that contract. One place typing gives a reference less
+# than its binding's own type is a *forward reference*: a closure that reads
+# a local bound only after the closure was created is typed before the
+# binding's value is known (hir::types::ForwardType), so the read is `any`.
+# For a MutableArray[T] that would hand out an erased alias of the same
+# object (`x = peek()`, then a kind test and a write of a wrong value), so it
+# is an erasure like any other and is rejected here; passing the array in as a
+# typed parameter is the sound way to give a function access to it.
+proc hir::callables::CheckReference {hirVar e} {
+    upvar 1 $hirVar hir
+    if {![hir::get $hir $e reachable]} {
+        return
+    }
+    set node [dict get $hir exprs $e]
+    set b [dict get $node binding]
+    if {$b eq "" || [dict get $node init] eq "no"
+            || [dict get $hir bindings $b kind] ni {local param}} {
+        return
+    }
+    set actual [hir::bindingType $hir $b]
+    if {![HasMutArray $actual]} {
+        return
+    }
+    set seen [hir::typeOf $hir $e]
+    if {[Preserves $hir $actual $seen]} {
+        return
+    }
+    hir::Diagnose hir TYPE [format \
+        {cannot erase element contract %s: "%s" is read here as %s, before its binding is initialized (a forward reference from a closure created ahead of it), which would lose the element contract and permit incompatible writes; define the binding before the code that reads it, or pass the array in as a typed parameter} \
+        [hir::types::show $actual] [dict get $hir bindings $b name] [hir::types::show $seen]] $e
 }
 
 # The trailing statement of BODY (an "if" branch or a function's own body),
@@ -223,7 +321,10 @@ proc hir::callables::WalkExpr {hirVar e} {
     upvar 1 $hirVar hir
     set node [dict get $hir exprs $e]
     switch -- [dict get $node kind] {
-        const - ref - continue - block {
+        ref {
+            CheckReference hir $e
+        }
+        const - continue - block {
         }
         bind {
             # The bind's own value position is safe: an immutable local
@@ -345,6 +446,14 @@ proc hir::callables::ArgContexts {hir e} {
     set none [lrepeat [llength $args] ""]
     lassign [dict get $node target] targetKind target
     if {$targetKind eq "block"} {
+        set rule [hir::containers::RuleOf $hir $target]
+        if {$rule ne ""} {
+            # A library function with an intrinsic container rule
+            # (the mutarray library's from_list and create, hir/containers.tcl): its
+            # arguments land inside the typed result, which keeps their
+            # contracts.
+            return [hir::containers::BlockContexts $hir $e $rule]
+        }
         set declared [hir::signatures::entryTypes $hir $target]
         if {[llength $declared] != [llength $args]} {
             return $none
@@ -360,6 +469,10 @@ proc hir::callables::ArgContexts {hir e} {
         return $none
     }
     set name [dict get [hir::symbol $hir $target] name]
+    set container [hir::containers::NativeContexts $hir $e $name]
+    if {$container ne ""} {
+        return $container
+    }
     set shape [dict get [core::native::metadata $name] resultShape]
     set result [hir::typeOf $hir $e]
     set elem [hir::types::elementOf $result]
@@ -399,6 +512,29 @@ proc hir::callables::ArgContexts {hir e} {
                 return $contexts
             }
         }
+        mutarray-element - mutarray-freeze {
+            # Reading or freezing a MutableArray[T] hands out only T-typed
+            # values (or a List[T]): the array itself is used through its
+            # typed API, so its contract is kept.
+            lassign $shape _ m
+            set arrayType [hir::typeOf $hir [lindex $args $m]]
+            if {[hir::types::IsMutArray $arrayType]} {
+                set contexts $none
+                lset contexts $m $arrayType
+                return $contexts
+            }
+        }
+    }
+    if {[hir::containers::NonRetaining $name]} {
+        # A native that returns a plain scalar and mutates nothing (list_
+        # length, a type test, ...) only *uses* its arguments. That is the
+        # policy for MutableArray contracts; a typed callable argument keeps
+        # the original stricter treatment (its obligations are about who may
+        # later call it, which this milestone does not revisit).
+        return [lmap arg $args {
+            set t [hir::typeOf $hir $arg]
+            expr {[Bearing $hir $t 0] ? "" : $t}
+        }]
     }
     return $none
 }

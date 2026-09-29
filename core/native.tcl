@@ -74,6 +74,14 @@
 #                                     followed by argument V
 #                     immutable-set L an ImmutableSet of list argument L's
 #                                     element type (MINIMAL-IMMUTABLE-SET.md)
+#                     mutarray-element A  argument A is a MutableArray[T]:
+#                                     the result is a T (PARAMETERIZED-
+#                                     MUTABLEARRAY.md); a raw `mutarray`
+#                                     argument keeps the declared result
+#                     mutarray-freeze A   argument A is a MutableArray[T]:
+#                                     the result is a List[T]; a raw
+#                                     `mutarray` argument keeps the declared
+#                                     result
 #                     typed NAME LO HI  every element is an Int in LO..HI (a
 #                                     fixed fact about the native itself, not
 #                                     derived from this call's own arguments);
@@ -302,6 +310,7 @@ proc core::native::ValidShape {shape count} {
         elements { return [expr {$length == 1}] }
         element - append { return [expr {$length == 3 && $count ne ""}] }
         immutable-set { return [expr {$length == 2}] }
+        mutarray-element - mutarray-freeze { return [expr {$length == 2 && $count ne ""}] }
     }
     return 0
 }

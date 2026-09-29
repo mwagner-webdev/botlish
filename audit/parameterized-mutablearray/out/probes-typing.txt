@@ -1,0 +1,38 @@
+create-str: OK MutableArray[str]
+create-int-get: OK int
+create-set-ok: OK unit
+create-set-bad: REJECT 2:25: value of type int is not admissible to element type str of MutableArray[str] (facts: [123, 123] {123}): a MutableArray's element type is fixed for its lifetime, a store never widens it and inserts no check
+create-set-widen-bad: REJECT 2:25: value of type str is not admissible to element type int of MutableArray[int] (facts: [-∞, +∞]): a MutableArray's element type is fixed for its lifetime, a store never widens it and inserts no check
+freeze-dyn: OK List[int]
+get-dyn: OK int
+broad-list: OK MutableArray[any]
+hetero: OK MutableArray[any]
+empty: OK MutableArray[any]
+nested: OK MutableArray[MutableArray[int]]
+nested-get: OK MutableArray[int]
+list-of-arrays: OK List[MutableArray[int]]
+list-get-dyn: OK MutableArray[int]
+raw-alloc: OK list
+raw-alloc-type: OK mutarray
+capacity: OK int
+alias: OK MutableArray[str]
+alias-bad: REJECT 3:25: value of type int is not admissible to element type str of MutableArray[str] (facts: [1, 1] {1}): a MutableArray's element type is fixed for its lifetime, a store never widens it and inserts no check
+smash: REJECT 4:7: argument for parameter "x" cannot be proven to satisfy mutarray (argument type: MutableArray[str], facts: [-∞, +∞]); MutableArray[str] would lose its element contract as the raw mutarray type, permitting writes of values that are not str
+mutarray?-any: OK any
+mutarray?-typed: OK MutableArray[str]
+param-typed: OK str
+param-wrong: REJECT 3:7: argument for parameter "xs" cannot be proven to satisfy MutableArray[int] (argument type: MutableArray[str], facts: [-∞, +∞]); MutableArray is invariant in its element type: MutableArray[str] cannot be viewed as MutableArray[int], because writes through that view could store values the original element type does not admit
+param-raw-into-typed: REJECT 3:7: argument for parameter "xs" cannot be proven to satisfy MutableArray[str] (argument type: mutarray, facts: [-∞, +∞]); only a value already known to be a MutableArray[str] satisfies this contract: a kind test proves the kind, never the element type, and no element check is inserted
+param-mutarray?-insufficient: REJECT 5:15: argument for parameter "xs" cannot be proven to satisfy MutableArray[str] (argument type: mutarray, facts: [-∞, +∞]); only a value already known to be a MutableArray[str] satisfies this contract: a kind test proves the kind, never the element type, and no element check is inserted
+param-any-widen: REJECT 3:3: argument for parameter "xs" cannot be proven to satisfy MutableArray[any] (argument type: MutableArray[str], facts: [-∞, +∞]); MutableArray is invariant in its element type: MutableArray[str] cannot be viewed as MutableArray[any], because writes through that view could store values the original element type does not admit
+param-any-ok: OK unit
+erase-any: REJECT 7:3: cannot erase element contract MutableArray[str] passed as an ordinary call argument: its element type would be lost, permitting writes of values it does not admit through an alias that no longer knows the contract (a MutableArray[T] is invariant and may only flow into a position that keeps MutableArray[T])
+erase-any-declared: REJECT 4:3: cannot erase element contract MutableArray[str] passed as an ordinary call argument: its element type would be lost, permitting writes of values it does not admit through an alias that no longer knows the contract (a MutableArray[T] is invariant and may only flow into a position that keeps MutableArray[T])
+erase-list: REJECT 4:3: cannot erase element contract List[MutableArray[str]] passed as an ordinary call argument: its element type would be lost, permitting writes of values it does not admit through an alias that no longer knows the contract (a MutableArray[T] is invariant and may only flow into a position that keeps MutableArray[T])
+erase-list-declared: REJECT 4:3: cannot erase element contract List[MutableArray[str]] passed as an ordinary call argument: its element type would be lost, permitting writes of values it does not admit through an alias that no longer knows the contract (a MutableArray[T] is invariant and may only flow into a position that keeps MutableArray[T])
+list-length-ok: OK int
+join-differ: REJECT 3:9: cannot erase element contract MutableArray[int] in an "if" branch whose joined type differs from the other branch: its element type would be lost, permitting writes of values it does not admit through an alias that no longer knows the contract (a MutableArray[T] is invariant and may only flow into a position that keeps MutableArray[T])
+join-same: OK MutableArray[int]
+list-mixed: REJECT 1:2: cannot erase element contract MutableArray[int] passed as an ordinary call argument: its element type would be lost, permitting writes of values it does not admit through an alias that no longer knows the contract (a MutableArray[T] is invariant and may only flow into a position that keeps MutableArray[T])
+make: OK MutableArray[str]
+forward: OK MutableArray[str]

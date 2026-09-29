@@ -1,0 +1,191 @@
+### identity-untyped
+fn s(x):
+    x
+m = mutarray::create(2, "s")
+y = s(m)
+if mutarray?(y):
+    mutable_array_set(y, 0, 5)
+else:
+    unit
+### identity-any-decl
+fn s(x: any):
+    x
+m = mutarray::create(2, "s")
+y = s(m)
+if mutarray?(y):
+    mutable_array_set(y, 0, 5)
+else:
+    unit
+### list-then-untyped-fn
+fn s(x):
+    x
+m = mutarray::create(2, "s")
+y = s([m])
+z = list_get(y, 0)
+if mutarray?(z):
+    mutable_array_set(z, 0, 5)
+else:
+    unit
+### if-join-raw
+fn pick(c: bool, m: MutableArray[str]):
+    if c:
+        m
+    else:
+        mutable_array_allocate(2)
+m = mutarray::create(2, "s")
+y = pick(true, m)
+if mutarray?(y):
+    mutable_array_set(y, 0, 5)
+else:
+    unit
+### closure-return-any
+fn wrap(m: MutableArray[str]) -> any:
+    m
+m = mutarray::create(2, "s")
+y = wrap(m)
+if mutarray?(y):
+    mutable_array_set(y, 0, 5)
+else:
+    unit
+### closure-untyped-callee
+m = mutarray::create(2, "s")
+fn get():
+    m
+fn call(f):
+    f()
+y = call(get)
+if mutarray?(y):
+    mutable_array_set(y, 0, 5)
+else:
+    unit
+### set-into-raw
+m = mutarray::create(2, "s")
+raw = mutable_array_allocate(1)
+mutable_array_set(raw, 0, m)
+y = mutable_array_get(raw, 0)
+if mutarray?(y):
+    mutable_array_set(y, 0, 5)
+else:
+    unit
+### copy-into-raw
+m = mutarray::create(2, "s")
+outer = mutarray::create(1, m)
+raw = mutable_array_allocate(1)
+mutable_array_copy(raw, 0, outer, 0, 1)
+y = mutable_array_get(raw, 0)
+if mutarray?(y):
+    mutable_array_set(y, 0, 5)
+else:
+    unit
+### freeze-into-untyped
+m = mutarray::create(2, "s")
+fn s(x):
+    x
+l = mutable_array_freeze(mutarray::create(1, m), 1)
+y = s(l)
+z = list_get(y, 0)
+if mutarray?(z):
+    mutable_array_set(z, 0, 5)
+else:
+    unit
+### from-list-into-any-array
+m = mutarray::create(2, "s")
+holder = mutarray::from_list([1, "a"])
+mutable_array_set(holder, 0, m)
+y = mutable_array_get(holder, 0)
+if mutarray?(y):
+    mutable_array_set(y, 0, 5)
+else:
+    unit
+### list-append-widen
+m = mutarray::create(2, "s")
+xs = list_append([m], 5)
+y = xs
+z = list_get(y, 0)
+if mutarray?(z):
+    mutable_array_set(z, 0, 5)
+else:
+    unit
+### forward-ref-var
+fn peek():
+    m
+m = mutarray::create(2, "s")
+y = peek()
+if mutarray?(y):
+    mutable_array_set(y, 0, 5)
+else:
+    unit
+### forward-ref-fn
+fn caller():
+    later()
+fn later():
+    mutarray::create(1, "s")
+y = caller()
+if mutarray?(y):
+    mutable_array_set(y, 0, 5)
+else:
+    unit
+### listloop-untyped-collect
+m = mutarray::create(2, "s")
+fn s(x):
+    x
+ys = loop q in [m]:
+    s(q)
+y = list_get(ys, 0)
+if mutarray?(y):
+    mutable_array_set(y, 0, 5)
+else:
+    unit
+### nested-erase-inner
+m = mutarray::create(2, "s")
+outer = mutarray::create(1, m)
+fn s(x):
+    x
+y = s(mutable_array_get(outer, 0))
+if mutarray?(y):
+    mutable_array_set(y, 0, 5)
+else:
+    unit
+### fn-arg-any-structural
+fn apply(f: Fn{args: [any], return: any, errors: []}, m: MutableArray[str]):
+    f(m)
+fn idn(x):
+    x
+m = mutarray::create(2, "s")
+y = apply(idn, m)
+if mutarray?(y):
+    mutable_array_set(y, 0, 5)
+else:
+    unit
+### ternary-lub-any
+fn pick(c: bool, a: MutableArray[str], b):
+    if c:
+        a
+    else:
+        b
+m = mutarray::create(2, "s")
+y = pick(true, m, 1)
+if mutarray?(y):
+    mutable_array_set(y, 0, 5)
+else:
+    unit
+### result-of-recursion
+fn r(n: int, m: MutableArray[str]):
+    if n == 0:
+        return m
+    r(n - 1, m)
+m = mutarray::create(2, "s")
+y = r(2, m)
+if mutarray?(y):
+    mutable_array_set(y, 0, 5)
+else:
+    unit
+### deep-list-erase
+m = mutarray::create(2, "s")
+xs = [[[m]]]
+y = xs
+a = list_get(list_get(list_get(y, 0), 0), 0)
+if mutarray?(a):
+    mutable_array_set(a, 0, 5)
+else:
+    unit

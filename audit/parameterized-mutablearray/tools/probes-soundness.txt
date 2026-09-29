@@ -1,0 +1,490 @@
+### append-widen
+m = mutarray::from_list(["a"])
+xs = [m]
+list_append(xs, 5)
+### append-same
+m = mutarray::from_list(["a"])
+n = mutarray::from_list(["b"])
+xs = [m]
+list_append(xs, n)
+### append-diff
+m = mutarray::from_list(["a"])
+n = mutarray::from_list([1])
+xs = [m]
+list_append(xs, n)
+### id-untyped
+fn id(x):
+    x
+id(mutarray::from_list(["a"]))
+### return-any
+fn f() -> any:
+    mutarray::from_list(["a"])
+f()
+### set-raw-with-typed
+raw = mutable_array_allocate(1)
+mutable_array_set(raw, 0, mutarray::from_list(["a"]))
+### set-nested-ok
+inner = mutarray::from_list(["a"])
+outer = mutarray::create(2, inner)
+mutable_array_set(outer, 1, mutarray::from_list(["b"]))
+mutable_array_get(outer, 0)
+### set-nested-bad
+inner = mutarray::from_list(["a"])
+outer = mutarray::create(2, inner)
+mutable_array_set(outer, 1, mutarray::from_list([1]))
+### set-nested-raw-bad
+inner = mutarray::from_list(["a"])
+outer = mutarray::create(2, inner)
+mutable_array_set(outer, 1, mutable_array_allocate(1))
+### copy-same
+a = mutarray::from_list(["a", "b"])
+b = mutarray::create(2, "z")
+mutable_array_copy(b, 0, a, 0, 2)
+### copy-diff
+a = mutarray::from_list([1, 2])
+b = mutarray::create(2, "z")
+mutable_array_copy(b, 0, a, 0, 2)
+### copy-raw-src-typed-dst
+a = mutable_array_allocate(2)
+b = mutarray::create(2, "z")
+mutable_array_copy(b, 0, a, 0, 2)
+### copy-typed-src-raw-dst
+a = mutarray::from_list(["a"])
+b = mutable_array_allocate(2)
+mutable_array_copy(b, 0, a, 0, 1)
+### copy-nested-src-raw-dst
+a = mutarray::from_list([mutarray::from_list(["a"])])
+b = mutable_array_allocate(2)
+mutable_array_copy(b, 0, a, 0, 1)
+### copy-raw-raw
+a = mutable_array_allocate(2)
+b = mutable_array_allocate(2)
+mutable_array_copy(b, 0, a, 0, 2)
+### copy-byte-int
+type Byte = Int in 0..255
+fn mk(b: Byte):
+    mutarray::create(2, b)
+fn mki(i: int):
+    mutarray::create(2, i)
+x = mk(3)
+y = mki(3)
+mutable_array_copy(y, 0, x, 0, 2)
+### copy-int-byte
+type Byte = Int in 0..255
+fn mk(b: Byte):
+    mutarray::create(2, b)
+fn mki(i: int):
+    mutarray::create(2, i)
+x = mk(3)
+y = mki(3)
+mutable_array_copy(x, 0, y, 0, 2)
+### byte-invariance
+type Byte = Int in 0..255
+fn mk(b: Byte):
+    mutarray::create(2, b)
+fn takes_int(xs: MutableArray[int]) -> int:
+    mutable_array_get(xs, 0)
+takes_int(mk(3))
+### byte-create
+type Byte = Int in 0..255
+fn mk(b: Byte):
+    mutarray::create(2, b)
+mk(3)
+### byte-set-range
+type Byte = Int in 0..255
+fn mk(b: Byte):
+    mutarray::create(2, b)
+m = mk(3)
+mutable_array_set(m, 0, 200)
+### byte-set-range-bad
+type Byte = Int in 0..255
+fn mk(b: Byte):
+    mutarray::create(2, b)
+m = mk(3)
+mutable_array_set(m, 0, 300)
+### fn-typed-arg
+fn cap(m: MutableArray[str]) -> int:
+    mutable_array_capacity(m)
+fn use(f: Fn{args: [MutableArray[str]], return: int, errors: []}, m: MutableArray[str]) -> int:
+    f(m)
+use(cap, mutarray::create(2, "a"))
+### fn-typed-arg-mismatch
+fn cap(m: MutableArray[str]) -> int:
+    mutable_array_capacity(m)
+fn use(f: Fn{args: [MutableArray[int]], return: int, errors: []}, m: MutableArray[int]) -> int:
+    f(m)
+use(cap, mutarray::create(2, 1))
+### fn-typed-arg-any
+fn cap(m: MutableArray[str]) -> int:
+    mutable_array_capacity(m)
+fn use(f: Fn{args: [MutableArray[any]], return: int, errors: []}) -> int:
+    f(mutarray::create(2, 1))
+use(cap)
+### fn-raw-param-callable
+fn cap(m: mutarray) -> int:
+    mutable_array_capacity(m)
+fn use(f: Fn{args: [MutableArray[str]], return: int, errors: []}) -> int:
+    f(mutarray::create(2, "a"))
+use(cap)
+### fn-reverse
+fn cap(m: MutableArray[any]) -> int:
+    mutable_array_capacity(m)
+fn use(f: Fn{args: [MutableArray[any]], return: int, errors: []}) -> int:
+    f(mutarray::create(2, 1))
+use(cap)
+### listtype-annot
+fn f(xs: List[MutableArray[int]]) -> int:
+    list_length(xs)
+f([mutarray::create(2, 0)])
+### listtype-annot-bad
+fn f(xs: List[MutableArray[int]]) -> int:
+    list_length(xs)
+f([mutarray::create(2, "a")])
+### nested-annot
+fn f(xs: MutableArray[List[str]]) -> int:
+    mutable_array_capacity(xs)
+f(mutarray::create(2, ["a"]))
+### nested-annot-2
+fn f(xs: MutableArray[List[MutableArray[int]]]) -> int:
+    mutable_array_capacity(xs)
+f(mutarray::create(2, [mutarray::create(1, 0)]))
+### hof-erase
+fn g(xs: list):
+    list_length(xs)
+g([mutarray::create(2, 0)])
+### freeze-nested
+m = mutarray::from_list([mutarray::from_list([1])])
+mutable_array_freeze(m, 1)
+### freeze-raw
+m = mutable_array_allocate(1)
+mutable_array_freeze(m, 1)
+### bind-typed-annot
+fn f() -> MutableArray[str]:
+    mutarray::create(1, "a")
+f()
+### result-decl-bad
+fn f() -> MutableArray[int]:
+    mutarray::create(1, "a")
+f()
+### result-decl-raw-bad
+fn f() -> mutarray:
+    mutarray::create(1, "a")
+f()
+### mutarray?-branch-any
+fn f(x):
+    if mutarray?(x):
+        mutable_array_capacity(x)
+    else:
+        0
+f(1)
+### raw-fn-param
+fn cap(m: mutarray) -> int:
+    mutable_array_capacity(m)
+cap(mutable_array_allocate(3))
+### infer-cap
+fn cap(m):
+    mutable_array_capacity(m)
+cap(mutarray::create(2, 0))
+### closure-capture-set-bad
+m = mutarray::create(2, "x")
+fn poke():
+    mutable_array_set(m, 0, 5)
+poke()
+### closure-capture-ok
+m = mutarray::create(2, "x")
+fn poke():
+    mutable_array_set(m, 0, "y")
+poke()
+### listloop-elem
+ms = [mutarray::create(1, "a"), mutarray::create(1, "b")]
+loop m in ms:
+    mutable_array_get(m, 0)
+### listloop-collect-erase
+ms = [mutarray::create(1, "a"), mutarray::create(1, "b")]
+loop m in ms:
+    m
+### listloop-elem-set-bad
+ms = [mutarray::create(1, "a"), mutarray::create(1, "b")]
+loop m in ms:
+    mutable_array_set(m, 0, 1)
+### any-then-mutarray?
+fn f(xs: list):
+    m = list_get(xs, 0)
+    if mutarray?(m):
+        mutable_array_set(m, 0, 123)
+    else:
+        unit
+f([1])
+### fn-arg-untyped-callee
+fn apply(f, x):
+    f(x)
+apply(mutable_array_capacity, mutarray::create(1, "a"))
+### unit-of-typed-in-eq
+m = mutarray::create(1, "a")
+m == m
+### stored-in-typed-outer-then-raw
+inner = mutarray::create(1, "a")
+outer = mutarray::create(1, inner)
+raw = mutable_array_get(outer, 0)
+mutable_array_set(raw, 0, 5)
+### stored-in-typed-outer-ok
+inner = mutarray::create(1, "a")
+outer = mutarray::create(1, inner)
+r = mutable_array_get(outer, 0)
+mutable_array_set(r, 0, "q")
+### freeze-then-list-any
+m = mutarray::from_list([mutarray::create(1, "a")])
+xs = mutable_array_freeze(m, 1)
+list_get(xs, 0)
+### freeze-erase
+m = mutarray::from_list([mutarray::create(1, "a")])
+fn f(xs: list):
+    list_length(xs)
+f(mutable_array_freeze(m, 1))
+### create-fn-value
+f = mutarray::create
+f(2, "x")
+### create-fn-alias-type
+f = mutarray::from_list
+f([1,2])
+### user-named-from-list
+fn from_list(xs):
+    mutable_array_allocate(1)
+from_list([1, 2])
+### user-named-create-shadow
+fn create(n: int, d):
+    mutable_array_allocate(n)
+create(2, "x")
+### create-neg-cap-type
+mutarray::create(-1, "x")
+### create-noninteger-cap
+mutarray::create("a", "x")
+### create-any-default
+fn f(d):
+    mutarray::create(2, d)
+f(1)
+### create-zero
+mutarray::create(0, "x")
+### create-managed
+mutarray::create(2, [1, 2])
+### create-nested-list
+mutarray::create(2, [[1], [2]])
+### create-nested-array
+mutarray::create(2, mutarray::create(1, 0))
+### create-callable
+fn g(x):
+    x
+mutarray::create(2, g)
+### create-typed-callable-erase
+type Small = Int in 0..9
+fn g(x: Small):
+    x
+mutarray::create(2, g)
+### mutarray?-typed-in-list
+xs = [mutarray::create(1, 0)]
+mutarray?(list_get(xs, 0))
+### mutarray?-typed-branch
+m = mutarray::create(1, 0)
+if mutarray?(m):
+    m
+else:
+    m
+### exact-list
+xs = [1,2,3]
+m = mutarray::from_list(xs)
+m
+### spec-forward-concrete
+fn fill(xs: MutableArray[int], n: int):
+    loop i from 0 to n:
+        mutable_array_set(xs, i, i)
+    xs
+fn go():
+    m = mutarray::create(3, 0)
+    fill(m, 3)
+go()
+### dyn-index-set
+fn go(i: int):
+    m = mutarray::create(3, 0)
+    mutable_array_set(m, i, 5)
+    mutable_array_get(m, i)
+go(1)
+### fn-return-typed-annot-ok
+fn make(n: int) -> MutableArray[int]:
+    mutarray::create(n, 0)
+make(2)
+### fn-return-annot-raw-erase
+fn make(n: int) -> MutableArray[int]:
+    mutable_array_allocate(n)
+make(2)
+### deep4
+x1 = mutarray::create(1, 0)
+x2 = mutarray::create(1, x1)
+x3 = mutarray::create(1, x2)
+x4 = mutarray::create(1, x3)
+x4
+### deep3
+x1 = mutarray::create(1, 0)
+x2 = mutarray::create(1, x1)
+x3 = mutarray::create(1, x2)
+x3
+### recursive-build
+fn build(n: int, acc: MutableArray[int]) -> MutableArray[int]:
+    if n == 0:
+        return acc
+    mutable_array_set(acc, n - 1, n)
+    build(n - 1, acc)
+build(3, mutarray::create(3, 0))
+### recursive-untyped-result
+fn make(n: int):
+    if n == 0:
+        return mutarray::create(1, "a")
+    make(n - 1)
+make(3)
+### mutual
+fn a(n: int):
+    if n == 0:
+        return mutarray::create(1, 0)
+    b(n - 1)
+fn b(n: int):
+    a(n)
+a(2)
+### closure-return
+fn maker(s: str):
+    fn mk():
+        mutarray::create(1, s)
+    mk
+maker("x")()
+### listloop-collect-typed
+xs = [1, 2, 3]
+loop x in xs:
+    mutarray::create(1, x)
+### deep-list-nest
+[[[mutarray::create(1, 0)]]]
+### freeze-then-append
+m = mutarray::create(2, 0)
+xs = mutable_array_freeze(m, 2)
+list_append(xs, 5)
+### stringified
+m = mutarray::create(1, "a")
+length(mutable_array_get(m, 0))
+### forward-ref-hole
+fn peek():
+    m
+m = mutarray::create(1, "a")
+x = peek()
+if mutarray?(x):
+    mutable_array_set(x, 0, 5)
+else:
+    unit
+### forward-ref-hole-2
+fn poke():
+    mutable_array_set(m, 0, 5)
+m = mutarray::create(1, "a")
+poke()
+### forward-ref-type
+fn peek():
+    m
+m = mutarray::create(1, "a")
+peek()
+### apply-untyped-callee
+fn make():
+    mutarray::create(1, "a")
+fn apply(f):
+    f()
+apply(make)
+### forward-ref-ok-typed-param
+fn poke(m: MutableArray[str]):
+    mutable_array_set(m, 0, "q")
+m = mutarray::create(1, "a")
+poke(m)
+### forward-ref-raw-ok
+fn peek():
+    r
+r = mutable_array_allocate(1)
+peek()
+### forward-ref-list-of-typed
+fn peek():
+    xs
+xs = [mutarray::create(1, "a")]
+peek()
+### backward-ref-ok
+m = mutarray::create(1, "a")
+fn poke():
+    mutable_array_set(m, 0, "q")
+poke()
+### fwd-call-hole
+fn caller():
+    later()
+fn later():
+    mutarray::create(1, "a")
+x = caller()
+if mutarray?(x):
+    mutable_array_set(x, 0, 5)
+else:
+    unit
+### fwd-callee-value-hole
+fn apply(f):
+    f()
+fn go():
+    apply(later)
+fn later():
+    mutarray::create(1, "a")
+go()
+### fwd-call-type
+fn caller():
+    later()
+fn later():
+    mutarray::create(1, "a")
+caller()
+### fwd-call-raw-ok
+fn caller():
+    later()
+fn later():
+    mutable_array_allocate(1)
+caller()
+### fwd-call-int-ok
+fn caller():
+    later()
+fn later():
+    5
+caller()
+### self-recursion-ok
+fn make(n: int):
+    if n == 0:
+        return mutarray::create(1, "a")
+    make(n - 1)
+make(3)
+### fn-any-arg-callee
+fn apply(f: Fn{args: [any], return: bool, errors: []}, m: MutableArray[str]) -> bool:
+    f(m)
+apply(mutarray?, mutarray::create(1, "a"))
+### byte-loop-range-ok
+type Byte = Int in 0..255
+fn fill(m: MutableArray[Byte]):
+    loop i from 0 to 256:
+        mutable_array_set(m, i, i)
+fn mk(b: Byte):
+    mutarray::create(256, b)
+fill(mk(0))
+### byte-loop-range-bad
+type Byte = Int in 0..255
+fn fill(m: MutableArray[Byte]):
+    loop i from 0 to 257:
+        mutable_array_set(m, i, i)
+fn mk(b: Byte):
+    mutarray::create(257, b)
+fill(mk(0))
+### native-alias-set
+s = mutable_array_set
+raw = mutable_array_allocate(1)
+s(raw, 0, mutarray::from_list(["a"]))
+### native-alias-set-typed-bad
+s = mutable_array_set
+m = mutarray::create(1, "a")
+s(m, 0, 5)
+### list-native-variadic
+list(mutarray::create(1, 0), mutarray::create(1, "a"))
+### callable-elements
+fn a(x):
+    x
+mutarray::create(2, a)

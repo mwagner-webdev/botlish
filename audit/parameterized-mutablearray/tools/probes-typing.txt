@@ -1,0 +1,171 @@
+### create-str
+m = mutarray::create(3, "x")
+m
+### create-int-get
+m = mutarray::create(3, 0)
+mutable_array_get(m, 1)
+### create-set-ok
+m = mutarray::create(3, "x")
+mutable_array_set(m, 1, "y")
+### create-set-bad
+m = mutarray::create(3, "x")
+mutable_array_set(m, 1, 123)
+### create-set-widen-bad
+m = mutarray::create(10, 0)
+mutable_array_set(m, 0, "hello")
+### freeze-dyn
+fn f(n: int):
+    m = mutarray::from_list([1,2,3])
+    mutable_array_freeze(m, n)
+f(2)
+### get-dyn
+fn f(i: int):
+    m = mutarray::from_list([1,2,3])
+    mutable_array_get(m, i)
+f(2)
+### broad-list
+fn f(xs: list):
+    mutarray::from_list(xs)
+f([1])
+### hetero
+mutarray::from_list(["x", 1, true])
+### empty
+mutarray::from_list([])
+### nested
+a = mutarray::from_list([1,2])
+b = mutarray::from_list([a])
+b
+### nested-get
+a = mutarray::from_list([1,2])
+b = mutarray::from_list([a])
+mutable_array_get(b, 0)
+### list-of-arrays
+a = mutarray::create(2, 0)
+b = mutarray::create(2, 1)
+xs = [a, b]
+xs
+### list-get-dyn
+fn g(i: int):
+    a = mutarray::create(2, 0)
+    b = mutarray::create(2, 1)
+    xs = [a, b]
+    list_get(xs, i)
+g(0)
+### raw-alloc
+m = mutable_array_allocate(2)
+mutable_array_set(m, 0, "x")
+mutable_array_set(m, 1, 123)
+mutable_array_freeze(m, 2)
+### raw-alloc-type
+mutable_array_allocate(2)
+### capacity
+m = mutarray::create(3, "x")
+mutable_array_capacity(m)
+### alias
+a = mutarray::create(2, "x")
+b = a
+b
+### alias-bad
+a = mutarray::create(2, "x")
+b = a
+mutable_array_set(b, 0, 1)
+### smash
+fn smash(x: mutarray):
+    mutable_array_set(x, 0, 123)
+m = mutarray::from_list(["hello"])
+smash(m)
+### mutarray?-any
+fn f(x):
+    if mutarray?(x):
+        x
+    else:
+        x
+f(1)
+### mutarray?-typed
+fn f(x: MutableArray[str]):
+    if mutarray?(x):
+        x
+    else:
+        x
+f(mutarray::create(1, "a"))
+### param-typed
+fn first(xs: MutableArray[str]) -> str:
+    mutable_array_get(xs, 0)
+first(mutarray::create(2, "a"))
+### param-wrong
+fn first(xs: MutableArray[int]) -> int:
+    mutable_array_get(xs, 0)
+first(mutarray::create(2, "a"))
+### param-raw-into-typed
+fn first(xs: MutableArray[str]) -> str:
+    mutable_array_get(xs, 0)
+first(mutable_array_allocate(2))
+### param-mutarray?-insufficient
+fn first(xs: MutableArray[str]) -> str:
+    mutable_array_get(xs, 0)
+fn g(x):
+    if mutarray?(x):
+        first(x)
+    else:
+        ""
+g(1)
+### param-any-widen
+fn f(xs: MutableArray[any]):
+    mutable_array_set(xs, 0, 1)
+f(mutarray::create(2, "a"))
+### param-any-ok
+fn f(xs: MutableArray[any]):
+    mutable_array_set(xs, 0, 1)
+f(mutarray::from_list([1, "a"]))
+### erase-any
+fn f(x):
+    if mutarray?(x):
+        mutable_array_set(x, 0, 123)
+    else:
+        unit
+m = mutarray::from_list(["a"])
+f(m)
+### erase-any-declared
+fn f(x: any):
+    x
+m = mutarray::from_list(["a"])
+f(m)
+### erase-list
+fn f(x):
+    x
+xs = [mutarray::from_list(["a"])]
+f(xs)
+### erase-list-declared
+fn f(x: list):
+    x
+xs = [mutarray::from_list(["a"])]
+f(xs)
+### list-length-ok
+xs = [mutarray::from_list(["a"])]
+list_length(xs)
+### join-differ
+fn f(c: bool):
+    if c:
+        mutarray::from_list([1])
+    else:
+        mutarray::from_list(["a"])
+f(true)
+### join-same
+fn f(c: bool):
+    if c:
+        mutarray::from_list([1])
+    else:
+        mutarray::from_list([2])
+f(true)
+### list-mixed
+[mutarray::from_list([1]), mutarray::from_list(["a"])]
+### make
+fn make():
+    mutarray::create(3, "x")
+make()
+### forward
+fn make():
+    mutarray::create(3, "x")
+fn fwd():
+    make()
+fwd()

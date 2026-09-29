@@ -34,6 +34,17 @@
 #                                   ELEM; structurally parallel to {list
 #                                   ELEM}, but never has a positional shape
 #                                   (a set is semantically unordered)
+#   {mutarray ELEM}                 a MutableArray[ELEM] (PARAMETERIZED-
+#                                   MUTABLEARRAY.md): a mutable object whose
+#                                   static contract is that every slot value
+#                                   belongs to ELEM and every store preserves
+#                                   that. Static only -- the runtime object
+#                                   carries no element type. Invariant in
+#                                   ELEM, and never silently erasable to the
+#                                   bare `mutarray` kind or to `any`
+#                                   (hir/callables.tcl audits every position
+#                                   that would). The bare atom `mutarray` is
+#                                   the raw, element-untyped substrate type.
 #
 # The list and immutableSet forms are *aggregate facts*. Semantic inference
 # (infer) never produces a *shaped* (positional) one: a program's HIR types
@@ -107,7 +118,7 @@ namespace eval hir::types {
     # resolution-mechanism change -- confirming the List[T] milestone's own
     # claim that a future unary container needs only another entry here
     # (plus a case in resolveApplication/MakeSet below), never new syntax.
-    variable constructors [dict create List 1 ImmutableSet 1]
+    variable constructors [dict create List 1 ImmutableSet 1 MutableArray 1]
 }
 
 # The canonical resolved type for a bare (unapplied) type name NAME -- an
@@ -151,12 +162,13 @@ proc hir::types::resolveApplication {ctor argTypes} {
     switch -- $ctor {
         List { return [MakeList [lindex $argTypes 0] {} 0 0] }
         ImmutableSet { return [MakeSet [lindex $argTypes 0] 0] }
+        MutableArray { return [MakeMutArray [lindex $argTypes 0] 0] }
     }
 }
 
 proc hir::types::IsSpecific {type} {
     return [expr {$type eq "never"
-                  || ([llength $type] > 1 && [lindex $type 0] in {native block list immutableSet fn})}]
+                  || ([llength $type] > 1 && [lindex $type 0] in {native block list immutableSet mutarray fn})}]
 }
 
 # ---------------------------------------------------------------------------
@@ -498,6 +510,44 @@ proc hir::types::IsSet {type} {
     return [expr {[lindex $type 0] eq "immutableSet" && [llength $type] == 2}]
 }
 
+# 1 if TYPE is an applied MutableArray form ({mutarray ELEM}). The bare atom
+# `mutarray` (the raw substrate kind) is deliberately not one.
+proc hir::types::IsMutArray {type} {
+    return [expr {[lindex $type 0] eq "mutarray" && [llength $type] == 2}]
+}
+
+# The canonical MutableArray[ELEM], nested DEPTH aggregate forms deep. Unlike
+# List/ImmutableSet, ELEM = any is *not* folded into the bare kind: a
+# MutableArray[any] is a fully initialized array whose element contract is
+# the whole `any` domain, which the bare (raw) `mutarray` type does not say.
+# Past the aggregate bound the result is the bare kind; that is sound only
+# because hir/callables.tcl compares every value's own type with the
+# position it flows into exactly, so a precise MutableArray flowing into a
+# bound-truncated position is an erasure and is rejected there. A `never`
+# element (List[never], the empty literal) means an array with no slot that
+# can ever be read or written: it is recorded as `any`.
+proc hir::types::MakeMutArray {elem depth} {
+    variable aggregateDepth
+    if {$depth >= $aggregateDepth} {
+        return mutarray
+    }
+    if {$elem eq "never"} {
+        set elem any
+    }
+    return [list mutarray [Unshaped [Bound $elem [expr {$depth + 1}]]]]
+}
+
+# 1 if element contracts A and B are the same contract: identical, or each
+# admissible for the other (two spellings of one value domain). MutableArray
+# is invariant, so this -- not subtype -- relates two MutableArray element
+# types.
+proc hir::types::Equivalent {a b} {
+    if {$a eq $b} {
+        return 1
+    }
+    return [expr {[Admits $a $b] && [Admits $b $a]}]
+}
+
 # TYPE in canonical form (core types are normalized by core::type).
 proc hir::types::canonical {type} {
     if {[IsSpecific $type]} {
@@ -568,6 +618,9 @@ proc hir::types::Bound {type depth} {
     if {[IsSet $type]} {
         return [MakeSet [lindex $type 1] $depth]
     }
+    if {[IsMutArray $type]} {
+        return [MakeMutArray [lindex $type 1] $depth]
+    }
     if {[IsExactBlock $type]} {
         set result [expr {$depth >= $aggregateDepth ? "any" : [Bound [lindex $type 3] [expr {$depth + 1}]]}]
         return [lreplace $type 3 3 $result]
@@ -627,6 +680,20 @@ proc hir::types::subtype {a b} {
         }
         return 1
     }
+    if {[IsMutArray $b]} {
+        # MutableArray[E] is invariant: only a MutableArray with an
+        # equivalent element contract (or the raw kind when E is the whole
+        # `any` domain, which promises nothing) may be viewed as it.
+        if {[IsMutArray $a]} {
+            return [Equivalent [lindex $a 1] [lindex $b 1]]
+        }
+        return [expr {$a eq "mutarray" && [lindex $b 1] eq "any"}]
+    }
+    if {$b eq "mutarray" && [IsMutArray $a]} {
+        # A typed array viewed as the raw kind could be written with
+        # anything: only the vacuous contract MutableArray[any] qualifies.
+        return [expr {[lindex $a 1] eq "any"}]
+    }
     if {[IsFn $b]} {
         # A structural function type: any callable whose own call contract
         # is compatible with B's (an exact native/block through its
@@ -661,6 +728,18 @@ proc hir::types::lub {a b} {
             return [MakeList $elem [lmap pa $sa pb $sb {lub $pa $pb}] 1]
         }
         return [MakeList $elem]
+    }
+    if {[IsMutArray $a] || [IsMutArray $b]} {
+        # Two MutableArrays join only when they are one contract. Otherwise
+        # there is no join that keeps the element contract (MutableArray[int]
+        # and MutableArray[str] have no common typed supertype; the raw kind
+        # would allow writes the original contract forbids): `any`, which
+        # hir/callables.tcl rejects as an erasure wherever a typed array
+        # would flow into it.
+        if {[subtype $a $b] && [subtype $b $a]} {
+            return [expr {$a eq "mutarray" || $b eq "mutarray" ? "mutarray" : [lindex [lsort [list $a $b]] 0]}]
+        }
+        return any
     }
     if {[IsSet $a] && [IsSet $b]} {
         # Unlike List's own (specialization-motivated) covariant element-lub
@@ -722,6 +801,13 @@ proc hir::types::narrow {current fact} {
     }
     if {[IsSet $current] && [IsSet $fact]} {
         return [MakeSet [narrow [lindex $current 1] [lindex $fact 1]] 0]
+    }
+    if {[IsMutArray $fact]} {
+        # A MutableArray[T] contract fact is a static property of the
+        # object, never derivable from a kind test: an already typed value
+        # keeps its contract; a raw/unknown one adopts the declared one
+        # (legal callers already proved it).
+        return [expr {[IsMutArray $current] ? $current : $fact}]
     }
     if {[IsFn $fact]} {
         # A structural contract fact: a callable already known to honor it
@@ -846,6 +932,9 @@ proc hir::types::show {type} {
                 # spells, so a diagnostic quoting this text is directly
                 # source-legible.
                 return "List\[[show [lindex $type 1]]\]"
+            }
+            mutarray {
+                return "MutableArray\[[show [lindex $type 1]]\]"
             }
             immutableSet {
                 # Same convention as List[T] above: the canonical applied-
@@ -1037,6 +1126,30 @@ proc hir::types::ShapeResult {hir shape argExprs argTypes result} {
                 return $result
             }
             return [MakeSet $elem 0]
+        }
+        mutarray-element {
+            # MutableArray[T] -> T (PARAMETERIZED-MUTABLEARRAY.md): reading
+            # a slot of an array whose static contract is T yields a T.
+            # Only an applied MutableArray carries a contract; the raw
+            # kind (or an unproven `any`) keeps the native's declared
+            # result. Slot contents are never exact-value facts.
+            lassign $shape _ m
+            set array [lindex $argTypes $m]
+            if {[IsMutArray $array]} {
+                return [lindex $array 1]
+            }
+            return $result
+        }
+        mutarray-freeze {
+            # MutableArray[T] -> List[T]: a frozen copy of slots that all
+            # satisfy T. The count affects the length only, never the
+            # element type.
+            lassign $shape _ m
+            set array [lindex $argTypes $m]
+            if {[IsMutArray $array]} {
+                return [MakeList [lindex $array 1]]
+            }
+            return $result
         }
         typed {
             # {typed NAME LO HI}: this native's result is a List whose
@@ -1630,6 +1743,16 @@ proc hir::types::Call {hirVar ctxVar e} {
                 # unaffected, but the call's own *type* is the registered
                 # one, not whatever the body block infers.
                 set result [dict get $node nativeResultOverride]
+            }
+            if {!$dead} {
+                # An intrinsic container rule of the resolved callee
+                # (hir/containers.tcl): the mutarray library's from_list and create
+                # relate their result to their argument types, which the
+                # non-generic function type cannot say.
+                set rule [hir::containers::RuleOf $hir $block]
+                if {$rule ne ""} {
+                    set result [hir::containers::CallResult $rule $argTypes $result]
+                }
             }
         } elseif {$spec} {
             set dead 1

@@ -149,10 +149,12 @@ core::native::register mutable_array_allocate -arity 1 -impl core::mutarray::all
 core::native::register mutable_array_capacity -arity 1 -impl core::mutarray::capacity \
     -param-types {mutarray} -result-type int -result-range collection-length
 core::native::register mutable_array_get -arity 2 -impl core::mutarray::get \
-    -param-types {mutarray int} -result-type any -runtime range-check
+    -param-types {mutarray int} -result-type any -runtime range-check \
+    -result-shape {mutarray-element 0}
 core::native::register mutable_array_set -arity 3 -impl core::mutarray::set_ \
     -param-types {mutarray int any} -result-type unit -runtime {range-check mutarray-mutate}
 core::native::register mutable_array_copy -arity 5 -impl core::mutarray::copy \
     -param-types {mutarray int mutarray int int} -result-type unit -runtime {range-check mutarray-mutate}
 core::native::register mutable_array_freeze -arity 2 -impl core::mutarray::freeze \
-    -param-types {mutarray int} -result-type list -runtime {range-check mutarray-alloc}
+    -param-types {mutarray int} -result-type list -runtime {range-check mutarray-alloc} \
+    -result-shape {mutarray-freeze 0}

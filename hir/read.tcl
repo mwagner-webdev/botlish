@@ -374,6 +374,10 @@ proc hir::read::ParseType {text number} {
         # "ImmutableSet" are different constructor names.
         return [list immutableSet [ParseType $inner $number]]
     }
+    if {[regexp {^MutableArray\[(.+)\]$} $text -> inner]} {
+        # PARAMETERIZED-MUTABLEARRAY.md: hir::types::show's own notation.
+        return [list mutarray [ParseType $inner $number]]
+    }
     if {[regexp {^([a-z]+)\[([^\]]*)\]$} $text -> base names]} {
         set text [list refined $base [split $names ,]]
     }
@@ -840,7 +844,7 @@ proc hir::read::CanonicalType {hir type} {
         }
         return $out
     }
-    if {[hir::types::IsSet $type]} {
+    if {[hir::types::IsSet $type] || [hir::types::IsMutArray $type]} {
         return [lreplace $type 1 1 [CanonicalType $hir [lindex $type 1]]]
     }
     if {[hir::types::IsFn $type]} {

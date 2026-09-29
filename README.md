@@ -355,7 +355,7 @@ A native that breaks its declared type contract (§8) raises
 | `integer?` | any → bool, type test of `int` | true: arg 0 : `int` |
 | `string?` | any → bool, type test of `str` | true: arg 0 : `str` |
 | `list?` | any → bool, type test of `list` | true: arg 0 : `list` |
-| `mutarray?` | any → bool, type test of `mutarray` (MUTABLEARRAY-CONSTRUCTION-REFINEMENT.md) | true: arg 0 : `mutarray` |
+| `mutarray?` | any → bool, type test of `mutarray` (MUTABLEARRAY-CONSTRUCTION-REFINEMENT.md); an argument already typed `MutableArray[T]` keeps that type (PARAMETERIZED-MUTABLEARRAY.md) | true: arg 0 : `mutarray` |
 | `ok?` | any → bool, type test of `Result.ok` | true: arg 0 : `Result.ok` |
 | `error?` | any → bool, type test of `Result.error` | true: arg 0 : `Result.error` |
 | `result-value` | ok Result → its value | |

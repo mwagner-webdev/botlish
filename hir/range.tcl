@@ -1218,11 +1218,16 @@ proc hir::range::ProvesValueAcceptedBy {argType argRange declared} {
     if {[hir::types::IsList $declared] || [hir::types::IsSet $declared]} {
         return [AggregateAdmits [hir::types::Unshaped $argType] $declared]
     }
-    if {[hir::types::IsFn $declared]} {
+    if {[hir::types::IsFn $declared] || [hir::types::IsMutArray $declared]} {
         # A structural function type (STRUCTURAL-FUNCTION-TYPES.md): the
         # argument must be a callable whose own call contract is
         # compatible (hir::types::subtype's contravariant/covariant/subset
         # rule) -- no Range fact bears on that.
+        #
+        # A MutableArray[T] (PARAMETERIZED-MUTABLEARRAY.md) is admitted the
+        # same way, by hir::types::subtype's invariant rule: only a
+        # MutableArray with an equivalent element contract (never a raw
+        # `mutarray`, never `any`, never a differently typed array).
         return [hir::types::subtype $argType $declared]
     }
     return [expr {[hir::types::subtype $argType $declared] || [ProvesType $argRange $declared]}]
@@ -1296,7 +1301,8 @@ proc hir::range::FactsSatisfiable {observedType observedRange declared} {
     if {[hir::types::IsList $declared] || [hir::types::IsSet $declared]} {
         return [AggregateAdmits [hir::types::Unshaped $observedType] $declared]
     }
-    if {[hir::types::IsFn $declared] || [core::type::base $declared] ne "int"} {
+    if {[hir::types::IsFn $declared] || [hir::types::IsMutArray $declared]
+            || [core::type::base $declared] ne "int"} {
         return 1
     }
     if {$observedRange eq "never"} {
@@ -1427,6 +1433,13 @@ proc hir::range::VerifyCall {hirVar ranges e node} {
         }
         return
     }
+    if {$targetKind eq {native}} {
+        # A native's parameter types are run-time-checked kind requirements,
+        # but the natives that write a MutableArray also owe its static
+        # element contract (hir/containers.tcl).
+        hir::containers::VerifyNative hir $ranges $e $node [dict get [hir::symbol $hir $targetBlock] name]
+        return
+    }
     if {$targetKind ne {block}} { return }
     set targetNode [dict get $hir exprs $targetBlock]
     # The target's intrinsic signature (hir::signatures): each parameter's
@@ -1483,6 +1496,19 @@ proc hir::range::VerifyCall {hirVar ranges e node} {
 # "": DECLARED is not a structural function type; else "; WHY" naming the
 # part of its contract a value of ARGTYPE fails (hir::types::explainMismatch).
 proc hir::range::MismatchClause {argType declared} {
+    if {[hir::types::IsMutArray $argType]
+            && ([hir::types::IsMutArray $declared] || $declared eq {mutarray})} {
+        if {$declared eq {mutarray}} {
+            return [format {; %s would lose its element contract as the raw mutarray type, permitting writes of values that are not %s} \
+                [hir::types::show $argType] [hir::types::show [lindex $argType 1]]]
+        }
+        return [format {; MutableArray is invariant in its element type: %s cannot be viewed as %s, because writes through that view could store values the original element type does not admit} \
+            [hir::types::show $argType] [hir::types::show $declared]]
+    }
+    if {[hir::types::IsMutArray $declared] && !([hir::types::IsMutArray $argType])} {
+        return [format {; only a value already known to be a %s satisfies this contract: a kind test proves the kind, never the element type, and no element check is inserted} \
+            [hir::types::show $declared]]
+    }
     if {![hir::types::IsFn $declared]} {
         return ""
     }

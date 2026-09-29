@@ -1,0 +1,16 @@
+typed-storage-rows: accepted (0 diagnostic(s))
+typed-storage-freeze-type: accepted (0 diagnostic(s))
+typed-storage-recursive-build: accepted (0 diagnostic(s))
+raw-rows-still-valid: accepted (0 diagnostic(s))
+from-list-rows-into-raw-table-consumer: REJECTED (2 diagnostic(s))
+    line 4: argument for parameter "table" cannot be proven to satisfy mutarray, the parameter type inferred from the function body (argument t
+    line 4: cannot erase element contract MutableArray[int] passed as an ordinary call argument: its element type would be lost, permitting wri
+from-list-rows-typed-consumer: accepted (0 diagnostic(s))
+pair-record-boundary: REJECTED (1 diagnostic(s))
+    line 18: cannot erase element contract MutableArray[mutarray] passed as an ordinary call argument: its element type would be lost, permittin
+untyped-forwarder: accepted (0 diagnostic(s))
+untyped-raw-writer: REJECTED (2 diagnostic(s))
+    line 5: argument for parameter "storage" cannot be proven to satisfy mutarray, the parameter type inferred from the function body (argument
+    line 5: cannot erase element contract MutableArray[mutarray] passed as an ordinary call argument: its element type would be lost, permittin
+raw-storage-of-typed-rows: REJECTED (1 diagnostic(s))
+    line 3: cannot erase element contract MutableArray[int] passed as an ordinary call argument: its element type would be lost, permitting wri

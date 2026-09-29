@@ -743,6 +743,17 @@ proc hir::signatures::Meet {a b} {
     if {[hir::types::IsFn $a] && [hir::types::IsFn $b]} {
         return [hir::types::FnGlb $a $b]
     }
+    if {[hir::types::IsMutArray $a] && $b eq "mutarray"} {
+        # A native's `mutarray` parameter requirement is a kind test, which
+        # any MutableArray[T] satisfies; every use that could write is
+        # verified against the value's real type at its own call
+        # (hir::range::VerifyCall, hir::containers), so the applied contract
+        # is the meet.
+        return $a
+    }
+    if {[hir::types::IsMutArray $b] && $a eq "mutarray"} {
+        return $b
+    }
     return [hir::types::glb $a $b]
 }
 
@@ -751,7 +762,7 @@ proc hir::signatures::Meet {a b} {
 # placeholder -- no `any`, no bare aggregate kind (an element type `any`),
 # no callable (which also keeps inferred Fn types first-order: finite).
 proc hir::signatures::Concrete {type} {
-    if {$type in {any never list immutableSet block native}} {
+    if {$type in {any never list immutableSet mutarray block native}} {
         return 0
     }
     if {[hir::types::IsList $type] || [hir::types::IsSet $type]} {

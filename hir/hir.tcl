@@ -290,6 +290,7 @@ proc hir::buildSyntax {nodes args} {
 # exactly what such a program meant before its parameter had one.
 proc hir::check {hirVar} {
     upvar 1 $hirVar hir
+    hir::containers::index hir
     set pre $hir
     CheckOnce hir {}
     if {![dict exists $hir violatedContracts]} {
@@ -720,7 +721,7 @@ proc hir::ApplyNativeResultOverrides {hirVar overrides} {
 }
 
 apply {{dir} {
-    foreach file {syntax resolve hygiene sourcetypes errordecls types exactvalue signatures modulebinding refine lower format read aot specialize range callables completions errorsets induction escape blockescape stringregion traversal construction cardinality} {
+    foreach file {syntax resolve hygiene sourcetypes errordecls types exactvalue signatures modulebinding refine lower format read aot specialize range callables containers completions errorsets induction escape blockescape stringregion traversal construction cardinality} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

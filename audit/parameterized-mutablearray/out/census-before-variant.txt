@@ -1,0 +1,374 @@
+## constructors (MutableArray constructor call sites and their static result type)
+examples/stdlib/csv_chunked.bot:25:10 | native mutable_array_allocate -> mutarray
+examples/stdlib/csv_chunked.bot:38:17 | native mutable_array_allocate -> mutarray
+examples/stdlib/csv_chunked.bot:63:13 | native mutable_array_allocate -> mutarray
+examples/stdlib/csv_geometric.bot:19:6 | native mutable_array_allocate -> mutarray
+examples/stdlib/csv_geometric.bot:41:13 | native mutable_array_allocate -> mutarray
+examples/stdlib/csv_records.bot:104:6 | native mutable_array_allocate -> mutarray
+examples/stdlib/csv_records.bot:119:13 | native mutable_array_allocate -> mutarray
+examples/stdlib/csv_records.bot:216:16 | native mutable_array_allocate -> mutarray
+examples/stdlib/csv_records.bot:218:12 | native mutable_array_allocate -> mutarray
+examples/stdlib/csv_records.bot:219:14 | native mutable_array_allocate -> mutarray
+examples/stdlib/csv_records.bot:220:13 | native mutable_array_allocate -> mutarray
+examples/stdlib/csv_records.bot:332:19 | native mutable_array_allocate -> mutarray
+examples/stdlib/csv_records.bot:334:26 | native mutable_array_allocate -> mutarray
+examples/stdlib/csv_records.bot:334:63 | native mutable_array_allocate -> mutarray
+examples/stdlib/hashtable.bot:102:16 | native mutable_array_allocate -> mutarray
+examples/stdlib/hashtable.bot:104:12 | native mutable_array_allocate -> mutarray
+examples/stdlib/hashtable.bot:105:14 | native mutable_array_allocate -> mutarray
+examples/stdlib/hashtable.bot:106:13 | native mutable_array_allocate -> mutarray
+examples/stdlib/hashtable.bot:253:19 | native mutable_array_allocate -> mutarray
+examples/stdlib/hashtable.bot:255:26 | native mutable_array_allocate -> mutarray
+examples/stdlib/hashtable.bot:255:63 | native mutable_array_allocate -> mutarray
+# 21
+
+## functions returning a MutableArray (semantic result type)
+examples/stdlib/csv_geometric.bot:35:12 geo_grow | mutarray
+examples/stdlib/csv_records.bot:113:12 geo_grow | mutarray
+examples/stdlib/csv_records.bot:215:12 ht_alloc | mutarray
+examples/stdlib/csv_records.bot:228:10 ht_new | mutarray
+examples/stdlib/csv_records.bot:237:16 ht_new_sized | mutarray
+examples/stdlib/csv_records.bot:384:11 row_new | mutarray
+examples/stdlib/csv_records.bot:395:12 row_fill | mutarray
+examples/stdlib/csv_records.bot:404:13 row_table | mutarray
+examples/stdlib/hashtable.bot:101:12 ht_alloc | mutarray
+examples/stdlib/hashtable.bot:114:10 ht_new | mutarray
+examples/stdlib/hashtable.bot:127:16 ht_new_sized | mutarray
+# 11
+
+## expressions typed List of MutableArray
+examples/stdlib/csv_records.bot:334:5 | bind : List[mutarray]
+examples/stdlib/csv_records.bot:334:12 | call : List[mutarray]
+examples/stdlib/csv_records.bot:335:41 | ref : List[mutarray]
+examples/stdlib/csv_records.bot:336:42 | ref : List[mutarray]
+examples/stdlib/csv_records.bot:337:42 | ref : List[mutarray]
+examples/stdlib/csv_records.bot:338:42 | ref : List[mutarray]
+examples/stdlib/hashtable.bot:255:5 | bind : List[mutarray]
+examples/stdlib/hashtable.bot:255:12 | call : List[mutarray]
+examples/stdlib/hashtable.bot:256:41 | ref : List[mutarray]
+examples/stdlib/hashtable.bot:257:42 | ref : List[mutarray]
+examples/stdlib/hashtable.bot:258:42 | ref : List[mutarray]
+examples/stdlib/hashtable.bot:259:42 | ref : List[mutarray]
+# 12
+
+## list_get call sites (list argument type -> result type)
+bench/lex-strategy.bot:62:15 | list_get(list: list) -> any
+bench/lex-strategy.bot:79:63 | list_get(list: list) -> any
+bench/lex-strategy.bot:89:63 | list_get(list: List[str]) -> str
+bench/source-checks.bot:60:5 | list_get(list: List[bool]) -> bool
+bench/source-checks.bot:60:27 | list_get(list: List[bool]) -> bool
+bench/test-selection.bot:51:5 | list_get(list: any) -> any
+bench/test-selection.bot:54:5 | list_get(list: list) -> any
+bench/uri-steady.bot:35:12 | list_get(list: List[str]) -> str
+examples/stdlib/csv.bot:64:32 | list_get(list: list) -> any
+examples/stdlib/csv.bot:65:12 | list_get(list: list) -> any
+examples/stdlib/csv.bot:81:24 | list_get(list: list) -> any
+examples/stdlib/csv.bot:81:67 | list_get(list: list) -> any
+examples/stdlib/csv_chunked.bot:33:17 | list_get(list: list) -> any
+examples/stdlib/csv_chunked.bot:34:15 | list_get(list: list) -> any
+examples/stdlib/csv_chunked.bot:35:14 | list_get(list: list) -> any
+examples/stdlib/csv_chunked.bot:51:13 | list_get(list: list) -> any
+examples/stdlib/csv_chunked.bot:59:17 | list_get(list: list) -> any
+examples/stdlib/csv_chunked.bot:60:15 | list_get(list: list) -> any
+examples/stdlib/csv_chunked.bot:61:14 | list_get(list: list) -> any
+examples/stdlib/csv_chunked.bot:104:35 | list_get(list: list) -> any
+examples/stdlib/csv_chunked.bot:105:12 | list_get(list: list) -> any
+examples/stdlib/csv_chunked.bot:120:24 | list_get(list: list) -> any
+examples/stdlib/csv_chunked.bot:120:70 | list_get(list: list) -> any
+examples/stdlib/csv_geometric.bot:50:15 | list_get(list: list) -> any
+examples/stdlib/csv_geometric.bot:51:14 | list_get(list: list) -> any
+examples/stdlib/csv_geometric.bot:59:15 | list_get(list: list) -> any
+examples/stdlib/csv_geometric.bot:60:14 | list_get(list: list) -> any
+examples/stdlib/csv_geometric.bot:99:31 | list_get(list: list) -> any
+examples/stdlib/csv_geometric.bot:100:12 | list_get(list: list) -> any
+examples/stdlib/csv_geometric.bot:115:24 | list_get(list: list) -> any
+examples/stdlib/csv_geometric.bot:115:66 | list_get(list: list) -> any
+examples/stdlib/csv_records.bot:124:15 | list_get(list: list) -> any
+examples/stdlib/csv_records.bot:125:14 | list_get(list: list) -> any
+examples/stdlib/csv_records.bot:131:15 | list_get(list: list) -> any
+examples/stdlib/csv_records.bot:132:14 | list_get(list: list) -> any
+examples/stdlib/csv_records.bot:170:31 | list_get(list: list) -> any
+examples/stdlib/csv_records.bot:171:12 | list_get(list: list) -> any
+examples/stdlib/csv_records.bot:186:24 | list_get(list: list) -> any
+examples/stdlib/csv_records.bot:186:66 | list_get(list: list) -> any
+examples/stdlib/csv_records.bot:310:19 | list_get(list: list) -> any
+examples/stdlib/csv_records.bot:313:23 | list_get(list: list) -> any
+examples/stdlib/csv_records.bot:314:23 | list_get(list: list) -> any
+examples/stdlib/csv_records.bot:321:19 | list_get(list: list) -> any
+examples/stdlib/csv_records.bot:323:33 | list_get(list: list) -> any
+examples/stdlib/csv_records.bot:324:35 | list_get(list: list) -> any
+examples/stdlib/csv_records.bot:336:33 | list_get(list: List[mutarray]) -> mutarray
+examples/stdlib/csv_records.bot:337:33 | list_get(list: List[mutarray]) -> mutarray
+examples/stdlib/csv_records.bot:338:33 | list_get(list: List[mutarray]) -> mutarray
+examples/stdlib/csv_records.bot:399:19 | list_get(list: list) -> any
+examples/stdlib/csv_records.bot:399:41 | list_get(list: list) -> any
+examples/stdlib/csv_records.bot:416:46 | list_get(list: list) -> any
+examples/stdlib/csv_records.bot:428:15 | list_get(list: list) -> any
+examples/stdlib/csv_records.bot:449:13 | list_get(list: list) -> any
+examples/stdlib/csv_records.bot:450:14 | list_get(list: list) -> any
+examples/stdlib/csv_records.bot:451:22 | list_get(list: list) -> any
+examples/stdlib/hashtable.bot:225:19 | list_get(list: list) -> any
+examples/stdlib/hashtable.bot:228:23 | list_get(list: list) -> any
+examples/stdlib/hashtable.bot:229:23 | list_get(list: list) -> any
+examples/stdlib/hashtable.bot:239:19 | list_get(list: list) -> any
+examples/stdlib/hashtable.bot:241:33 | list_get(list: list) -> any
+examples/stdlib/hashtable.bot:242:35 | list_get(list: list) -> any
+examples/stdlib/hashtable.bot:257:33 | list_get(list: List[mutarray]) -> mutarray
+examples/stdlib/hashtable.bot:258:33 | list_get(list: List[mutarray]) -> mutarray
+examples/stdlib/hashtable.bot:259:33 | list_get(list: List[mutarray]) -> mutarray
+examples/stdlib/matmul.bot:22:12 | list_get(list: list) -> any
+examples/stdlib/matmul.bot:22:33 | list_get(list: any) -> any
+examples/stdlib/matmul.bot:22:42 | list_get(list: list) -> any
+examples/stdlib/matmul.bot:38:23 | list_get(list: list) -> any
+examples/stdlib/matmul.bot:45:39 | list_get(list: list) -> any
+lib/web.bot:198:16 | list_get(list: List[str]) -> str
+lib/web.bot:198:54 | list_get(list: List[str]) -> str
+lib/web.bot:204:70 | list_get(list: list) -> any
+lib/web.bot:209:17 | list_get(list: List[int[Byte]]) -> int[Byte]
+# 73
+
+## MutableArray requirement sites (argument type vs required mutarray)
+examples/stdlib/csv_chunked.bot:39:9 arg1 | native mutable_array_set requires mutarray: proven
+examples/stdlib/csv_chunked.bot:42:5 arg1 | native mutable_array_set requires mutarray: checked boundary (any)
+examples/stdlib/csv_chunked.bot:52:5 arg1 | native mutable_array_copy requires mutarray: proven
+examples/stdlib/csv_chunked.bot:52:5 arg3 | native mutable_array_copy requires mutarray: checked boundary (any)
+examples/stdlib/csv_chunked.bot:53:5 arg3 | fn chunked_copy_chunks param final requires mutarray: proven
+examples/stdlib/csv_chunked.bot:64:14 arg3 | fn chunked_copy_chunks param final requires mutarray: proven
+examples/stdlib/csv_chunked.bot:65:5 arg1 | native mutable_array_copy requires mutarray: proven
+examples/stdlib/csv_chunked.bot:65:5 arg3 | native mutable_array_copy requires mutarray: checked boundary (any)
+examples/stdlib/csv_chunked.bot:66:5 arg1 | native mutable_array_freeze requires mutarray: proven
+examples/stdlib/csv_geometric.bot:36:16 arg1 | native mutable_array_capacity requires mutarray: checked boundary (any)
+examples/stdlib/csv_geometric.bot:42:5 arg1 | native mutable_array_copy requires mutarray: proven
+examples/stdlib/csv_geometric.bot:42:5 arg3 | native mutable_array_copy requires mutarray: proven
+examples/stdlib/csv_geometric.bot:52:13 arg1 | fn geo_grow param storage requires mutarray: checked boundary (any)
+examples/stdlib/csv_geometric.bot:53:5 arg1 | native mutable_array_set requires mutarray: proven
+examples/stdlib/csv_geometric.bot:61:5 arg1 | native mutable_array_freeze requires mutarray: checked boundary (any)
+examples/stdlib/csv_records.bot:114:16 arg1 | native mutable_array_capacity requires mutarray: checked boundary (any)
+examples/stdlib/csv_records.bot:120:5 arg1 | native mutable_array_copy requires mutarray: proven
+examples/stdlib/csv_records.bot:120:5 arg3 | native mutable_array_copy requires mutarray: proven
+examples/stdlib/csv_records.bot:126:13 arg1 | fn geo_grow param storage requires mutarray: checked boundary (any)
+examples/stdlib/csv_records.bot:127:5 arg1 | native mutable_array_set requires mutarray: proven
+examples/stdlib/csv_records.bot:133:5 arg1 | native mutable_array_freeze requires mutarray: checked boundary (any)
+examples/stdlib/csv_records.bot:212:5 arg1 | native mutable_array_set requires mutarray: proven
+examples/stdlib/csv_records.bot:213:5 arg1 | fn ht_fill_empty param controls requires mutarray: proven
+examples/stdlib/csv_records.bot:217:5 arg1 | fn ht_fill_empty param controls requires mutarray: proven
+examples/stdlib/csv_records.bot:221:5 arg1 | native mutable_array_set requires mutarray: proven
+examples/stdlib/csv_records.bot:222:5 arg1 | native mutable_array_set requires mutarray: proven
+examples/stdlib/csv_records.bot:223:5 arg1 | native mutable_array_set requires mutarray: proven
+examples/stdlib/csv_records.bot:224:5 arg1 | native mutable_array_set requires mutarray: proven
+examples/stdlib/csv_records.bot:225:5 arg1 | native mutable_array_set requires mutarray: proven
+examples/stdlib/csv_records.bot:241:5 arg1 | native mutable_array_get requires mutarray: proven
+examples/stdlib/csv_records.bot:244:5 arg1 | native mutable_array_get requires mutarray: proven
+examples/stdlib/csv_records.bot:247:5 arg1 | native mutable_array_get requires mutarray: proven
+examples/stdlib/csv_records.bot:250:5 arg1 | native mutable_array_get requires mutarray: checked boundary (any)
+examples/stdlib/csv_records.bot:253:5 arg1 | native mutable_array_get requires mutarray: proven
+examples/stdlib/csv_records.bot:256:5 arg1 | native mutable_array_capacity requires mutarray: checked boundary (any)
+examples/stdlib/csv_records.bot:256:28 arg1 | fn ht_controls param table requires mutarray: proven
+examples/stdlib/csv_records.bot:259:20 arg1 | fn ht_capacity param table requires mutarray: proven
+examples/stdlib/csv_records.bot:262:20 arg1 | fn ht_capacity param table requires mutarray: proven
+examples/stdlib/csv_records.bot:265:16 arg1 | fn ht_controls param table requires mutarray: proven
+examples/stdlib/csv_records.bot:266:13 arg1 | native mutable_array_get requires mutarray: checked boundary (any)
+examples/stdlib/csv_records.bot:270:41 arg1 | native mutable_array_get requires mutarray: checked boundary (any)
+examples/stdlib/csv_records.bot:270:59 arg1 | fn ht_keys param table requires mutarray: proven
+examples/stdlib/csv_records.bot:273:5 arg1 | fn ht_find_get param table requires mutarray: proven
+examples/stdlib/csv_records.bot:273:29 arg1 | fn ht_probe_next param table requires mutarray: proven
+examples/stdlib/csv_records.bot:276:16 arg1 | fn ht_controls param table requires mutarray: proven
+examples/stdlib/csv_records.bot:277:13 arg1 | native mutable_array_get requires mutarray: checked boundary (any)
+examples/stdlib/csv_records.bot:284:41 arg1 | native mutable_array_get requires mutarray: checked boundary (any)
+examples/stdlib/csv_records.bot:284:59 arg1 | fn ht_keys param table requires mutarray: proven
+examples/stdlib/csv_records.bot:288:16 arg1 | fn ht_find_insert param table requires mutarray: proven
+examples/stdlib/csv_records.bot:288:43 arg1 | fn ht_probe_next param table requires mutarray: proven
+examples/stdlib/csv_records.bot:290:5 arg1 | fn ht_find_insert param table requires mutarray: proven
+examples/stdlib/csv_records.bot:290:32 arg1 | fn ht_probe_next param table requires mutarray: proven
+examples/stdlib/csv_records.bot:293:13 arg1 | fn ht_find_get param table requires mutarray: checked boundary (any)
+examples/stdlib/csv_records.bot:293:37 arg1 | fn ht_probe_start param table requires mutarray: checked boundary (any)
+examples/stdlib/csv_records.bot:297:5 arg1 | native mutable_array_get requires mutarray: checked boundary (any)
+examples/stdlib/csv_records.bot:297:23 arg1 | fn ht_values param table requires mutarray: checked boundary (any)
+examples/stdlib/csv_records.bot:300:5 arg1 | fn ht_find_get param table requires mutarray: proven
+examples/stdlib/csv_records.bot:300:29 arg1 | fn ht_probe_start param table requires mutarray: proven
+examples/stdlib/csv_records.bot:303:13 arg1 | native mutable_array_get requires mutarray: checked boundary (any)
+examples/stdlib/csv_records.bot:307:5 arg1 | fn ht_rehash_probe param newControls requires mutarray: proven
+examples/stdlib/csv_records.bot:311:13 arg1 | fn ht_rehash_probe param newControls requires mutarray: checked boundary (any)
+examples/stdlib/csv_records.bot:312:5 arg1 | native mutable_array_set requires mutarray: checked boundary (any)
+examples/stdlib/csv_records.bot:313:5 arg1 | native mutable_array_set requires mutarray: checked boundary (any)
+examples/stdlib/csv_records.bot:314:5 arg1 | native mutable_array_set requires mutarray: checked boundary (any)
+examples/stdlib/csv_records.bot:322:8 arg1 | native mutable_array_get requires mutarray: checked boundary (any)
+examples/stdlib/csv_records.bot:323:15 arg1 | native mutable_array_get requires mutarray: checked boundary (any)
+examples/stdlib/csv_records.bot:324:17 arg1 | native mutable_array_get requires mutarray: checked boundary (any)
+examples/stdlib/csv_records.bot:330:12 arg1 | fn ht_controls param table requires mutarray: proven
+examples/stdlib/csv_records.bot:330:32 arg1 | fn ht_keys param table requires mutarray: proven
+examples/stdlib/csv_records.bot:330:48 arg1 | fn ht_values param table requires mutarray: proven
+examples/stdlib/csv_records.bot:331:19 arg1 | fn ht_capacity param table requires mutarray: proven
+examples/stdlib/csv_records.bot:333:5 arg1 | fn ht_fill_empty param controls requires mutarray: proven
+examples/stdlib/csv_records.bot:336:5 arg1 | native mutable_array_set requires mutarray: proven
+examples/stdlib/csv_records.bot:337:5 arg1 | native mutable_array_set requires mutarray: proven
+examples/stdlib/csv_records.bot:338:5 arg1 | native mutable_array_set requires mutarray: proven
+examples/stdlib/csv_records.bot:339:5 arg1 | native mutable_array_set requires mutarray: proven
+examples/stdlib/csv_records.bot:343:16 arg1 | fn ht_size param table requires mutarray: proven
+examples/stdlib/csv_records.bot:343:33 arg1 | fn ht_tombstones param table requires mutarray: proven
+examples/stdlib/csv_records.bot:344:26 arg1 | fn ht_capacity param table requires mutarray: proven
+examples/stdlib/csv_records.bot:347:8 arg1 | fn ht_tombstones param table requires mutarray: proven
+examples/stdlib/csv_records.bot:347:31 arg1 | fn ht_size param table requires mutarray: proven
+examples/stdlib/csv_records.bot:348:9 arg1 | fn ht_rehash param table requires mutarray: proven
+examples/stdlib/csv_records.bot:348:26 arg1 | fn ht_capacity param table requires mutarray: proven
+examples/stdlib/csv_records.bot:350:9 arg1 | fn ht_rehash param table requires mutarray: proven
+examples/stdlib/csv_records.bot:350:26 arg1 | fn ht_capacity param table requires mutarray: proven
+examples/stdlib/csv_records.bot:353:16 arg1 | fn ht_controls param table requires mutarray: proven
+examples/stdlib/csv_records.bot:354:13 arg1 | native mutable_array_get requires mutarray: checked boundary (any)
+examples/stdlib/csv_records.bot:355:5 arg1 | native mutable_array_set requires mutarray: proven
+examples/stdlib/csv_records.bot:356:5 arg1 | native mutable_array_set requires mutarray: checked boundary (any)
+examples/stdlib/csv_records.bot:356:23 arg1 | fn ht_keys param table requires mutarray: proven
+examples/stdlib/csv_records.bot:357:5 arg1 | native mutable_array_set requires mutarray: checked boundary (any)
+examples/stdlib/csv_records.bot:357:23 arg1 | fn ht_values param table requires mutarray: proven
+examples/stdlib/csv_records.bot:358:5 arg1 | native mutable_array_set requires mutarray: proven
+examples/stdlib/csv_records.bot:358:33 arg1 | fn ht_size param table requires mutarray: proven
+examples/stdlib/csv_records.bot:360:9 arg1 | native mutable_array_set requires mutarray: proven
+examples/stdlib/csv_records.bot:360:37 arg1 | fn ht_tombstones param table requires mutarray: proven
+examples/stdlib/csv_records.bot:365:13 arg1 | fn ht_find_insert param table requires mutarray: proven
+examples/stdlib/csv_records.bot:365:40 arg1 | fn ht_probe_start param table requires mutarray: proven
+examples/stdlib/csv_records.bot:366:16 arg1 | fn ht_controls param table requires mutarray: proven
+examples/stdlib/csv_records.bot:367:13 arg1 | native mutable_array_get requires mutarray: checked boundary (any)
+examples/stdlib/csv_records.bot:369:9 arg1 | native mutable_array_set requires mutarray: checked boundary (any)
+examples/stdlib/csv_records.bot:369:27 arg1 | fn ht_values param table requires mutarray: proven
+examples/stdlib/csv_records.bot:372:8 arg1 | fn ht_should_grow param table requires mutarray: proven
+examples/stdlib/csv_records.bot:373:9 arg1 | fn ht_grow_or_clean param table requires mutarray: proven
+examples/stdlib/csv_records.bot:374:16 arg1 | fn ht_place param table requires mutarray: proven
+examples/stdlib/csv_records.bot:374:32 arg1 | fn ht_find_insert param table requires mutarray: proven
+examples/stdlib/csv_records.bot:374:59 arg1 | fn ht_probe_start param table requires mutarray: proven
+examples/stdlib/csv_records.bot:376:5 arg1 | fn ht_place param table requires mutarray: proven
+examples/stdlib/csv_records.bot:399:5 arg1 | fn ht_set param table requires mutarray: proven
+examples/stdlib/csv_records.bot:400:5 arg1 | fn row_fill param table requires mutarray: proven
+examples/stdlib/csv_records.bot:406:5 arg1 | fn row_fill param table requires mutarray: proven
+examples/stdlib/csv_records.bot:452:13 arg1 | fn ht_get param table requires mutarray: checked boundary (any)
+examples/stdlib/csv_records.bot:452:38 arg1 | fn ht_get param table requires mutarray: checked boundary (any)
+examples/stdlib/csv_records.bot:452:73 arg1 | fn ht_size param table requires mutarray: checked boundary (any)
+examples/stdlib/csv_records.bot:452:91 arg1 | fn ht_size param table requires mutarray: checked boundary (any)
+examples/stdlib/csv_records.bot:453:25 arg1 | fn ht_get param table requires mutarray: checked boundary (any)
+examples/stdlib/csv_records.bot:453:48 arg1 | fn ht_get param table requires mutarray: checked boundary (any)
+examples/stdlib/csv_records.bot:453:70 arg1 | fn ht_get param table requires mutarray: checked boundary (any)
+examples/stdlib/csv_records.bot:453:93 arg1 | fn ht_get param table requires mutarray: checked boundary (any)
+examples/stdlib/csv_records.bot:453:117 arg1 | fn ht_get param table requires mutarray: checked boundary (any)
+examples/stdlib/hashtable.bot:98:5 arg1 | native mutable_array_set requires mutarray: proven
+examples/stdlib/hashtable.bot:99:5 arg1 | fn ht_fill_empty param controls requires mutarray: proven
+examples/stdlib/hashtable.bot:103:5 arg1 | fn ht_fill_empty param controls requires mutarray: proven
+examples/stdlib/hashtable.bot:107:5 arg1 | native mutable_array_set requires mutarray: proven
+examples/stdlib/hashtable.bot:108:5 arg1 | native mutable_array_set requires mutarray: proven
+examples/stdlib/hashtable.bot:109:5 arg1 | native mutable_array_set requires mutarray: proven
+examples/stdlib/hashtable.bot:110:5 arg1 | native mutable_array_set requires mutarray: proven
+examples/stdlib/hashtable.bot:111:5 arg1 | native mutable_array_set requires mutarray: proven
+examples/stdlib/hashtable.bot:134:5 arg1 | native mutable_array_get requires mutarray: proven
+examples/stdlib/hashtable.bot:137:5 arg1 | native mutable_array_get requires mutarray: proven
+examples/stdlib/hashtable.bot:140:5 arg1 | native mutable_array_get requires mutarray: proven
+examples/stdlib/hashtable.bot:143:5 arg1 | native mutable_array_get requires mutarray: proven
+examples/stdlib/hashtable.bot:146:5 arg1 | native mutable_array_get requires mutarray: proven
+examples/stdlib/hashtable.bot:149:5 arg1 | native mutable_array_capacity requires mutarray: checked boundary (any)
+examples/stdlib/hashtable.bot:149:28 arg1 | fn ht_controls param table requires mutarray: proven
+examples/stdlib/hashtable.bot:155:20 arg1 | fn ht_capacity param table requires mutarray: proven
+examples/stdlib/hashtable.bot:158:20 arg1 | fn ht_capacity param table requires mutarray: proven
+examples/stdlib/hashtable.bot:164:16 arg1 | fn ht_controls param table requires mutarray: proven
+examples/stdlib/hashtable.bot:165:13 arg1 | native mutable_array_get requires mutarray: checked boundary (any)
+examples/stdlib/hashtable.bot:169:41 arg1 | native mutable_array_get requires mutarray: checked boundary (any)
+examples/stdlib/hashtable.bot:169:59 arg1 | fn ht_keys param table requires mutarray: proven
+examples/stdlib/hashtable.bot:172:5 arg1 | fn ht_find_get param table requires mutarray: proven
+examples/stdlib/hashtable.bot:172:29 arg1 | fn ht_probe_next param table requires mutarray: proven
+examples/stdlib/hashtable.bot:179:16 arg1 | fn ht_controls param table requires mutarray: proven
+examples/stdlib/hashtable.bot:180:13 arg1 | native mutable_array_get requires mutarray: checked boundary (any)
+examples/stdlib/hashtable.bot:187:41 arg1 | native mutable_array_get requires mutarray: checked boundary (any)
+examples/stdlib/hashtable.bot:187:59 arg1 | fn ht_keys param table requires mutarray: proven
+examples/stdlib/hashtable.bot:191:16 arg1 | fn ht_find_insert param table requires mutarray: proven
+examples/stdlib/hashtable.bot:191:43 arg1 | fn ht_probe_next param table requires mutarray: proven
+examples/stdlib/hashtable.bot:193:5 arg1 | fn ht_find_insert param table requires mutarray: proven
+examples/stdlib/hashtable.bot:193:32 arg1 | fn ht_probe_next param table requires mutarray: proven
+examples/stdlib/hashtable.bot:200:13 arg1 | fn ht_find_get param table requires mutarray: proven
+examples/stdlib/hashtable.bot:200:37 arg1 | fn ht_probe_start param table requires mutarray: proven
+examples/stdlib/hashtable.bot:204:5 arg1 | native mutable_array_get requires mutarray: checked boundary (any)
+examples/stdlib/hashtable.bot:204:23 arg1 | fn ht_values param table requires mutarray: proven
+examples/stdlib/hashtable.bot:207:5 arg1 | fn ht_find_get param table requires mutarray: proven
+examples/stdlib/hashtable.bot:207:29 arg1 | fn ht_probe_start param table requires mutarray: proven
+examples/stdlib/hashtable.bot:215:13 arg1 | native mutable_array_get requires mutarray: checked boundary (any)
+examples/stdlib/hashtable.bot:219:5 arg1 | fn ht_rehash_probe param newControls requires mutarray: proven
+examples/stdlib/hashtable.bot:226:13 arg1 | fn ht_rehash_probe param newControls requires mutarray: checked boundary (any)
+examples/stdlib/hashtable.bot:227:5 arg1 | native mutable_array_set requires mutarray: checked boundary (any)
+examples/stdlib/hashtable.bot:228:5 arg1 | native mutable_array_set requires mutarray: checked boundary (any)
+examples/stdlib/hashtable.bot:229:5 arg1 | native mutable_array_set requires mutarray: checked boundary (any)
+examples/stdlib/hashtable.bot:240:8 arg1 | native mutable_array_get requires mutarray: checked boundary (any)
+examples/stdlib/hashtable.bot:241:15 arg1 | native mutable_array_get requires mutarray: checked boundary (any)
+examples/stdlib/hashtable.bot:242:17 arg1 | native mutable_array_get requires mutarray: checked boundary (any)
+examples/stdlib/hashtable.bot:251:12 arg1 | fn ht_controls param table requires mutarray: proven
+examples/stdlib/hashtable.bot:251:32 arg1 | fn ht_keys param table requires mutarray: proven
+examples/stdlib/hashtable.bot:251:48 arg1 | fn ht_values param table requires mutarray: proven
+examples/stdlib/hashtable.bot:252:19 arg1 | fn ht_capacity param table requires mutarray: proven
+examples/stdlib/hashtable.bot:254:5 arg1 | fn ht_fill_empty param controls requires mutarray: proven
+examples/stdlib/hashtable.bot:257:5 arg1 | native mutable_array_set requires mutarray: proven
+examples/stdlib/hashtable.bot:258:5 arg1 | native mutable_array_set requires mutarray: proven
+examples/stdlib/hashtable.bot:259:5 arg1 | native mutable_array_set requires mutarray: proven
+examples/stdlib/hashtable.bot:260:5 arg1 | native mutable_array_set requires mutarray: proven
+examples/stdlib/hashtable.bot:266:16 arg1 | fn ht_size param table requires mutarray: proven
+examples/stdlib/hashtable.bot:266:33 arg1 | fn ht_tombstones param table requires mutarray: proven
+examples/stdlib/hashtable.bot:267:26 arg1 | fn ht_capacity param table requires mutarray: proven
+examples/stdlib/hashtable.bot:270:8 arg1 | fn ht_tombstones param table requires mutarray: proven
+examples/stdlib/hashtable.bot:270:31 arg1 | fn ht_size param table requires mutarray: proven
+examples/stdlib/hashtable.bot:271:9 arg1 | fn ht_rehash param table requires mutarray: proven
+examples/stdlib/hashtable.bot:271:26 arg1 | fn ht_capacity param table requires mutarray: proven
+examples/stdlib/hashtable.bot:273:9 arg1 | fn ht_rehash param table requires mutarray: proven
+examples/stdlib/hashtable.bot:273:26 arg1 | fn ht_capacity param table requires mutarray: proven
+examples/stdlib/hashtable.bot:300:16 arg1 | fn ht_controls param table requires mutarray: proven
+examples/stdlib/hashtable.bot:301:13 arg1 | native mutable_array_get requires mutarray: checked boundary (any)
+examples/stdlib/hashtable.bot:302:5 arg1 | native mutable_array_set requires mutarray: proven
+examples/stdlib/hashtable.bot:303:5 arg1 | native mutable_array_set requires mutarray: checked boundary (any)
+examples/stdlib/hashtable.bot:303:23 arg1 | fn ht_keys param table requires mutarray: proven
+examples/stdlib/hashtable.bot:304:5 arg1 | native mutable_array_set requires mutarray: checked boundary (any)
+examples/stdlib/hashtable.bot:304:23 arg1 | fn ht_values param table requires mutarray: proven
+examples/stdlib/hashtable.bot:305:5 arg1 | native mutable_array_set requires mutarray: proven
+examples/stdlib/hashtable.bot:305:33 arg1 | fn ht_size param table requires mutarray: proven
+examples/stdlib/hashtable.bot:307:9 arg1 | native mutable_array_set requires mutarray: proven
+examples/stdlib/hashtable.bot:307:37 arg1 | fn ht_tombstones param table requires mutarray: proven
+examples/stdlib/hashtable.bot:312:13 arg1 | fn ht_find_insert param table requires mutarray: proven
+examples/stdlib/hashtable.bot:312:40 arg1 | fn ht_probe_start param table requires mutarray: proven
+examples/stdlib/hashtable.bot:313:16 arg1 | fn ht_controls param table requires mutarray: proven
+examples/stdlib/hashtable.bot:314:13 arg1 | native mutable_array_get requires mutarray: checked boundary (any)
+examples/stdlib/hashtable.bot:316:9 arg1 | native mutable_array_set requires mutarray: checked boundary (any)
+examples/stdlib/hashtable.bot:316:27 arg1 | fn ht_values param table requires mutarray: proven
+examples/stdlib/hashtable.bot:319:8 arg1 | fn ht_should_grow param table requires mutarray: proven
+examples/stdlib/hashtable.bot:320:9 arg1 | fn ht_grow_or_clean param table requires mutarray: proven
+examples/stdlib/hashtable.bot:321:16 arg1 | fn ht_place param table requires mutarray: proven
+examples/stdlib/hashtable.bot:321:32 arg1 | fn ht_find_insert param table requires mutarray: proven
+examples/stdlib/hashtable.bot:321:59 arg1 | fn ht_probe_start param table requires mutarray: proven
+examples/stdlib/hashtable.bot:323:5 arg1 | fn ht_place param table requires mutarray: proven
+examples/stdlib/hashtable.bot:332:13 arg1 | fn ht_find_get param table requires mutarray: proven
+examples/stdlib/hashtable.bot:332:37 arg1 | fn ht_probe_start param table requires mutarray: proven
+examples/stdlib/hashtable.bot:336:5 arg1 | native mutable_array_set requires mutarray: checked boundary (any)
+examples/stdlib/hashtable.bot:336:23 arg1 | fn ht_controls param table requires mutarray: proven
+examples/stdlib/hashtable.bot:337:5 arg1 | native mutable_array_set requires mutarray: checked boundary (any)
+examples/stdlib/hashtable.bot:337:23 arg1 | fn ht_keys param table requires mutarray: proven
+examples/stdlib/hashtable.bot:338:5 arg1 | native mutable_array_set requires mutarray: checked boundary (any)
+examples/stdlib/hashtable.bot:338:23 arg1 | fn ht_values param table requires mutarray: proven
+examples/stdlib/hashtable.bot:339:5 arg1 | native mutable_array_set requires mutarray: proven
+examples/stdlib/hashtable.bot:339:33 arg1 | fn ht_size param table requires mutarray: proven
+examples/stdlib/hashtable.bot:340:5 arg1 | native mutable_array_set requires mutarray: proven
+examples/stdlib/hashtable.bot:340:33 arg1 | fn ht_tombstones param table requires mutarray: proven
+examples/stdlib/hashtable.bot:351:8 arg1 | native mutable_array_get requires mutarray: checked boundary (any)
+examples/stdlib/hashtable.bot:351:26 arg1 | fn ht_controls param table requires mutarray: proven
+examples/stdlib/hashtable.bot:352:29 arg1 | native mutable_array_get requires mutarray: checked boundary (any)
+examples/stdlib/hashtable.bot:352:47 arg1 | fn ht_keys param table requires mutarray: proven
+examples/stdlib/hashtable.bot:352:71 arg1 | native mutable_array_get requires mutarray: checked boundary (any)
+examples/stdlib/hashtable.bot:352:89 arg1 | fn ht_values param table requires mutarray: proven
+examples/stdlib/hashtable.bot:353:16 arg1 | fn ht_fold param table requires mutarray: proven
+examples/stdlib/hashtable.bot:355:5 arg1 | fn ht_fold param table requires mutarray: proven
+examples/stdlib/hashtable.bot:362:5 arg1 | fn ht_fold param table requires mutarray: proven
+examples/stdlib/hashtable.bot:362:23 arg1 | fn ht_capacity param table requires mutarray: proven
+examples/stdlib/hashtable.bot:369:5 arg1 | fn ht_set param table requires mutarray: proven
+examples/stdlib/hashtable.bot:370:5 arg1 | fn ht_set param table requires mutarray: proven
+examples/stdlib/hashtable.bot:371:5 arg1 | fn ht_set param table requires mutarray: proven
+examples/stdlib/hashtable.bot:372:15 arg1 | fn ht_contains param table requires mutarray: proven
+examples/stdlib/hashtable.bot:373:5 arg1 | fn ht_delete param table requires mutarray: proven
+examples/stdlib/hashtable.bot:374:6 arg1 | fn ht_get param table requires mutarray: proven
+examples/stdlib/hashtable.bot:374:45 arg1 | fn ht_contains param table requires mutarray: proven
+examples/stdlib/hashtable.bot:374:68 arg1 | fn ht_contains param table requires mutarray: proven
+examples/stdlib/hashtable.bot:374:95 arg1 | fn ht_get param table requires mutarray: proven
+examples/stdlib/hashtable.bot:374:125 arg1 | fn ht_size param table requires mutarray: proven
+# 239
+
+# requirement sites proven statically: 173
+# requirement sites still a checked boundary: 66
+# list_get sites whose result is a MutableArray: 6 of 73
