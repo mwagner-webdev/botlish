@@ -684,7 +684,11 @@ representation: the compiler maps a block's `EXPR` to the proc it generates.
   contract. A body that is invalid for one call's types (an untyped writer of an
   `int` into a `MutableArray[str]`) makes that *call* a compile-time error, not
   the function. Semantic instances are analysis only: they emit nothing and
-  never change a specialization key.
+  never change a specialization key. A *definition* is still analyzed
+  generically, so an untyped function that receives a typed `MutableArray` as a
+  parameter and appends a value whose type it computes itself is rejected at
+  its own definition; it needs a declared `MutableArray[T]` parameter
+  (TYPED-MUTARRAY-BUILDER-REFACTOR.md, "Definition-level obstruction").
 
 **Scope of facts.** A fact holds only on the path that proves it:
 
