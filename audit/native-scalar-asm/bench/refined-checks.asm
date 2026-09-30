@@ -358,7 +358,7 @@ Disassembly of section .text:
      666:	mov    rdi,r12
      669:	mov    rax,QWORD PTR [rdi+0x10]
      66d:	mov    rdx,QWORD PTR [rax+0xc0]
-     674:	mov    esi,0x2
+     674:	mov    esi,0x1
      679:	call   67e <botlish_fn_2+0xde>
 			67a: R_X86_64_PLT32	rt_fail_declared-0x4
      67e:	xor    rax,rax

@@ -361,7 +361,7 @@ Block 10([]):
     (successor: Block 11([]))
   Inst 32: movq 0x10(%v192), %v236
   Inst 33: movq 0xc0(%v236), %v235
-  Inst 34: movl $0x2, %v234
+  Inst 34: movl $0x1, %v234
   Inst 35: load_ext_name userextname1+0, %v233
   Inst 36: call    *%v233
   Inst 37: jmp     label11
