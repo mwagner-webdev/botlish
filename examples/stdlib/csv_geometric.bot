@@ -76,6 +76,18 @@ fn geo_finish(storage, length):
 # record always has a first field, and the empty text is the only input
 # without a first record).
 
+# Scanning hands back anonymous structs, not positional pairs: scan_field
+# returns {field, index} and scan_record(_rest) returns {fields, stop}
+# (STRUCTS.md), so what the scan appends is known to be a str / List[str].
+# That precision is what makes the two declared builder contracts below
+# necessary: scan_record_rest's `fields: MutableArray[str]` and
+# scan_records's `records: MutableArray[List[str]]`. An untyped function
+# that appends a value it computes itself (here scanned.field) to storage it
+# received as a parameter has no definition-level proof that the storage
+# holds that element type (TYPED-MUTARRAY-BUILDER-REFACTOR.md, "Definition-
+# level obstruction"); while the scanned values were `any`, the storage was
+# MutableArray[any] and needed none.
+
 fn peek(text, index):
     if index >= length(text):
         return ""
@@ -85,7 +97,7 @@ fn peek(text, index):
 fn scan_unquoted(text, start, index):
     character = peek(text, index)
     if character == "" or character == "," or character == "\n":
-        return [substring(text, start, index), index]
+        return {field: substring(text, start, index), index: index}
 
     scan_unquoted(text, start, index + 1)
 
@@ -95,7 +107,7 @@ fn scan_quoted(text, index, field):
         if peek(text, index + 1) == "\"":
             return scan_quoted(text, index + 2, concat(field, "\""))
 
-        return [field, index + 1]
+        return {field: field, index: index + 1}
 
     scan_quoted(text, index + 1, concat(field, character))
 
@@ -112,38 +124,38 @@ fn scan_field(text, index):
 # DETERMINISM.md. It used to compile, with generic, guarded copies of the
 # whole call chain -- TYPED-MUTARRAY-BUILDER-REFACTOR.md, "Definition-order
 # sensitivity".)
-fn scan_record_rest(text, stop, fields, count):
+fn scan_record_rest(text, stop, fields: MutableArray[str], count):
     delimiter = peek(text, stop)
     if delimiter == ",":
         scanned = scan_field(text, stop + 1)
-        more = geo_append(fields, count, list_get(scanned, 0))
-        return scan_record_rest(text, list_get(scanned, 1), more, count + 1)
+        more = geo_append(fields, count, scanned.field)
+        return scan_record_rest(text, scanned.index, more, count + 1)
 
     if delimiter == "\n":
-        return [geo_finish(fields, count), stop + 1]
+        return {fields: geo_finish(fields, count), stop: stop + 1}
 
-    [geo_finish(fields, count), stop]
+    {fields: geo_finish(fields, count), stop: stop}
 
 # The record starting at INDEX and the index where it stops: the first field
 # (a record always has one, possibly empty) starts the FIELDS builder.
 fn scan_record(text, index):
     scanned = scan_field(text, index)
-    scan_record_rest(text, list_get(scanned, 1), geo_new(list_get(scanned, 0)), 1)
+    scan_record_rest(text, scanned.index, geo_new(scanned.field), 1)
 
 # The records from INDEX on, the first COUNT records already in RECORDS.
-fn scan_records(text, index, records, count):
+fn scan_records(text, index, records: MutableArray[List[str]], count):
     if index >= length(text):
         return geo_finish(records, count)
 
     scanned = scan_record(text, index)
-    more = geo_append(records, count, list_get(scanned, 0))
-    scan_records(text, list_get(scanned, 1), more, count + 1)
+    more = geo_append(records, count, scanned.fields)
+    scan_records(text, scanned.stop, more, count + 1)
 
 fn csv_parse(text):
     if length(text) == 0:
         return []
 
     scanned = scan_record(text, 0)
-    scan_records(text, list_get(scanned, 1), geo_new(list_get(scanned, 0)), 1)
+    scan_records(text, scanned.stop, geo_new(scanned.fields), 1)
 
 csv_parse("name,age\nAlice,30\nBob,40\n")

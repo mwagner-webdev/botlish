@@ -324,7 +324,9 @@ test csv-records-sites-1 {sites mode reports CSV scanning and MutableArray-alloc
 # Specialization / representation-optimization flags (req #64): correctness
 # is unchanged with either disabled, like native-hashtable.test's own pair.
 
-test csv-records-specialize-off-1 {-specialize 0 gives the same result as the default} -body {
+# csv_records embeds the same struct-grouped rehash as hashtable.bot, so
+# -specialize 0 is unsupported here too (see tests/native-hashtable.test).
+test csv-records-specialize-off-1 {-specialize 0 is unsupported: the embedded rehash's struct projections are proven by instances only} -body {
     set text {
 fn f():
     rows = csv_records("h0,h1\na,b\nc,d\n")
@@ -333,8 +335,9 @@ fn f():
 f()
     }
     set hir [sourceHir $text]
-    list [native::evalHir $hir] [native::evalHir $hir -specialize 0]
-} -result {{list {{int 2} {str c} {str d}}} {list {{int 2} {str c} {str d}}}}
+    catch {native::evalHir $hir -specialize 0} message options
+    list [native::evalHir $hir] [dict get $options -errorcode]
+} -result {{list {{int 2} {str c} {str d}}} {NATIVE UNSUPPORTED struct-shape}}
 
 test csv-records-repr-opt-off-1 {-repr-opt 0 gives the same result as the default, including across a resize} -body {
     set text {

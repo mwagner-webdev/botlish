@@ -4,14 +4,21 @@
 # deterministic: no filesystem/Git/clock/host state.
 #
 # Canonical surface-Botlish source (CANONICAL-SURFACE-BENCHMARKS.md,
-# HIGHER-ORDER-DOGFOODING.md). A "test group" is the plain 2-element
-# positional List [name, dependencies] this codebase already uses for ad
-# hoc records elsewhere (e.g. examples/stdlib/csv_records.bot's
-# [storage, length] builder pairs) -- there is no Struct/Map in Botlish
-# yet, so this is the cleanest existing representation, not a new one. A
-# "path" is an ordinary String; the changed-file set is a genuine
-# ImmutableSet[str] (immutable_set_from_list/immutable_set_contains,
-# MINIMAL-IMMUTABLE-SET.md), not a List scanned linearly by hand.
+# HIGHER-ORDER-DOGFOODING.md). A "test group" is a named struct, Test
+# (STRUCTS.md): it is a domain entity with a nominal identity and declared
+# field contracts, not a positional [name, dependencies] pair that every
+# reader has to remember the layout of. A "path" is an ordinary String; the
+# changed-file set is a genuine ImmutableSet[str]
+# (immutable_set_from_list/immutable_set_contains, MINIMAL-IMMUTABLE-SET.md),
+# not a List scanned linearly by hand.
+#
+# Two declared contracts, is_affected?'s test: Test and first_affected's
+# tests: List[Test], are where a struct's static field projection meets a
+# function value that can be called with anything: is_affected? is passed to
+# list::find as a value, so its body runs generically and `test.dependencies`
+# has to be proven there (STRUCTS.md, "select_affected"). Everything else is
+# untyped: select_affected, affected?, test_name and test_deps are analyzed
+# under the exact Test the calls pass them.
 #
 # make_changed? is an activation-dependent closure factory: changed?
 # genuinely captures changed_set, built fresh from whatever changed-file
@@ -41,6 +48,10 @@
 #
 # expect: [3, 1, "resolve-tests", true, true]
 
+struct Test:
+    name: str
+    dependencies: List[str]
+
 fn make_changed?(changed):
     changed_set = immutable_set_from_list(changed)
     fn changed?(path):
@@ -48,10 +59,10 @@ fn make_changed?(changed):
     changed?
 
 fn test_name(test):
-    list_get(test, 0)
+    test.name
 
 fn test_deps(test):
-    list_get(test, 1)
+    test.dependencies
 
 fn affected?(test, changed?):
     list::any?(test_deps(test), changed?)
@@ -62,29 +73,29 @@ fn select_affected(tests, changed?):
             continue
         test
 
-fn first_affected(tests, changed?):
-    fn is_affected?(test):
+fn first_affected(tests: List[Test], changed?):
+    fn is_affected?(test: Test):
         affected?(test, changed?)
     found = list::find(tests, is_affected?):
         on NotFound:
-            ["<none>", []]
+            Test {name: "<none>", dependencies: []}
     test_name(found)
 
 tests = [
-    ["parser-tests", ["src/parser.bot", "src/ast.bot"]],
-    ["lexer-tests", ["src/lexer.bot", "src/token.bot"]],
-    ["resolve-tests", ["hir/resolve.tcl", "hir/hir.tcl"]],
-    ["types-tests", ["hir/types.tcl", "hir/hir.tcl"]],
-    ["specialize-tests", ["hir/specialize.tcl", "hir/range.tcl"]],
-    ["native-lower-tests", ["native/lower.tcl", "native/native.tcl"]],
-    ["compile-tests", ["compiler/compiler.tcl"]],
-    ["web-tests", ["lib/web.bot", "lib/byte.bot"]],
-    ["ascii-tests", ["lib/ascii.bot"]],
-    ["list-tests", ["lib/list.bot"]],
-    ["byte-tests", ["lib/byte.bot", "core/scalarbits.tcl"]],
-    ["char-tests", ["lib/char.bot", "core/unicodechar.tcl"]],
-    ["docs-tests", ["README.md", "AGENTS.md"]],
-    ["bench-tests", ["bench/bench.tcl"]],
+    Test {name: "parser-tests", dependencies: ["src/parser.bot", "src/ast.bot"]},
+    Test {name: "lexer-tests", dependencies: ["src/lexer.bot", "src/token.bot"]},
+    Test {name: "resolve-tests", dependencies: ["hir/resolve.tcl", "hir/hir.tcl"]},
+    Test {name: "types-tests", dependencies: ["hir/types.tcl", "hir/hir.tcl"]},
+    Test {name: "specialize-tests", dependencies: ["hir/specialize.tcl", "hir/range.tcl"]},
+    Test {name: "native-lower-tests", dependencies: ["native/lower.tcl", "native/native.tcl"]},
+    Test {name: "compile-tests", dependencies: ["compiler/compiler.tcl"]},
+    Test {name: "web-tests", dependencies: ["lib/web.bot", "lib/byte.bot"]},
+    Test {name: "ascii-tests", dependencies: ["lib/ascii.bot"]},
+    Test {name: "list-tests", dependencies: ["lib/list.bot"]},
+    Test {name: "byte-tests", dependencies: ["lib/byte.bot", "core/scalarbits.tcl"]},
+    Test {name: "char-tests", dependencies: ["lib/char.bot", "core/unicodechar.tcl"]},
+    Test {name: "docs-tests", dependencies: ["README.md", "AGENTS.md"]},
+    Test {name: "bench-tests", dependencies: ["bench/bench.tcl"]},
 ]
 
 changed_a = ["lib/web.bot", "hir/hir.tcl"]

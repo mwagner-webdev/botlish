@@ -461,7 +461,12 @@ f()
 # Specialization / representation-optimization flags (req #27, #28):
 # correctness is unchanged with either disabled.
 
-test ht-specialize-off-1 {-specialize 0 gives the same result as the default} -body {
+# The rehash groups its three arrays as an anonymous struct {controls, keys,
+# values} passed to untyped functions, whose projections are proven only by
+# their semantic instances (STRUCTS.md). Without specialization every function
+# is compiled once, with no slot for such a projection, so -specialize 0 is
+# unsupported for any program that reaches ht_rehash (every ht_set does).
+test ht-specialize-off-1 {-specialize 0 is unsupported: the rehash's struct projections are proven by instances only} -body {
     set text {
 fn f():
     t = ht_new()
@@ -472,8 +477,9 @@ fn f():
 f()
     }
     set hir [sourceHir $text]
-    list [native::evalHir $hir] [native::evalHir $hir -specialize 0]
-} -result {{list {{int 2} {bool false} {int 1}}} {list {{int 2} {bool false} {int 1}}}}
+    catch {native::evalHir $hir -specialize 0} message options
+    list [native::evalHir $hir] [dict get $options -errorcode]
+} -result {{list {{int 2} {bool false} {int 1}}} {NATIVE UNSUPPORTED struct-shape}}
 
 test ht-repr-opt-off-1 {-repr-opt 0 gives the same result as the default, including across a resize} -body {
     set text {

@@ -403,6 +403,18 @@ test struct-projection-through-wrapper {instances chain: a wrapper called with a
     structRun "fn first(x):\n    x.value\nfn wrap(y):\n    first(y)\nwrap(\{value: \"deep\"\})" $::structInstanceBackends
 } -result {same: "deep"}
 
+test struct-projection-recursive-struct-parameter {a recursive function threads a struct parameter: its own unrefined self-call is not generically live} -body {
+    structRun "fn walk(s, i):\n    if i >= 3:\n        return s.value\n    walk(s, i + 1)\nwalk(\{value: \"done\", spare: 1\}, 0)" $::structInstanceBackends
+} -result {same: "done"}
+
+test struct-projection-recursive-bad-call-still-rejected {the recursive function's instance for a non-struct argument is still the call's error} -body {
+    structError "fn walk(s, i):\n    if i >= 3:\n        return s.value\n    walk(s, i + 1)\nwalk(5, 0)"
+} -match glob -result {TYPE: struct.bot:5:1: call to walk with s : int, i : int is invalid: *}
+
+test struct-projection-recursive-escape-rejected {a recursive function whose value escapes can run generically, so the unproven projection is an error} -body {
+    structError "fn walk(s, i):\n    if i >= 3:\n        return s.value\n    walk(s, i + 1)\nf = walk\nf(\{value: 1\}, 0)"
+} -match glob -result {*UNPROVEN-FIELD: *}
+
 # ---------------------------------------------------------------------------
 # Type algebra
 

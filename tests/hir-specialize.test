@@ -194,6 +194,11 @@ test hir-specialize-17 {aggregate types are bounded} -body {
 # programs contain the mutarray module's own two functions and the builder's
 # specialization shape differs. The numbers below are measured, not derived;
 # the report attributes them function by function.
+#
+# STRUCTS.md (scan pairs and the rehash grouping became structs; measured):
+# csv 17 -> 15 and csv_chunked 28 -> 26 generic blockers, csv_records 86 -> 89
+# generic / 26 -> 23 specialized blockers and 53 -> 52 specialized instances,
+# hashtable 63 -> 67 generic blockers.
 test hir-specialize-corpus-1 {every used corpus instance is closed; the generic analysis is unchanged} -body {
     lmap name [corpus::names] {
         set hir [surface::readProgramFile [corpus::path $name]]
@@ -203,7 +208,7 @@ test hir-specialize-corpus-1 {every used corpus instance is closed; the generic 
         list $name [dict get $summary generic] [dict get $summary specialized] $statuses \
             [dict get $summary genericInstances] [dict get $summary specializedInstances]
     }
-} -result {{ai_text_clean 5 0 closed 0 5} {csv 17 0 closed 0 9} {csv_chunked 28 1 {closed guarded} 2 17} {csv_geometric 25 2 {closed guarded} 0 18} {csv_records 86 26 {closed guarded} 6 53} {hashtable 63 25 {closed guarded} 6 23} {matmul 17 0 closed 0 6} {string_replace 12 0 closed 0 3} {string_reverse 4 0 closed 0 2}}
+} -result {{ai_text_clean 5 0 closed 0 5} {csv 15 0 closed 0 9} {csv_chunked 26 1 {closed guarded} 2 17} {csv_geometric 25 2 {closed guarded} 0 18} {csv_records 89 23 {closed guarded} 6 52} {hashtable 67 25 {closed guarded} 6 23} {matmul 17 0 closed 0 6} {string_replace 12 0 closed 0 3} {string_reverse 4 0 closed 0 2}}
 
 test hir-specialize-corpus-2 {specialized instances per corpus function} -body {
     set hir [surface::readProgramFile [corpus::path csv]]

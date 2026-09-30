@@ -487,7 +487,16 @@ proc native::report {hir} {
     }
     dict set result genericBlockers $generic
     foreach {mode flag} {generic 0 specialized 1} {
-        set lowered [lowered $hir -specialize $flag]
+        if {[catch {lowered $hir -specialize $flag} lowered options]} {
+            # The unspecialized lowering has no slot for a struct projection
+            # that only a semantic instance proves (STRUCTS.md): such a
+            # program has no generic numbers to report.
+            if {!$flag && [dict get $options -errorcode] eq "NATIVE UNSUPPORTED struct-shape"} {
+                dict set result $mode unsupported
+                continue
+            }
+            return -options $options $lowered
+        }
         set statistics [dict get $lowered statistics]
         if {[dict get $statistics blockers] != [dict get $statistics guards]} {
             throw {NATIVE BUG} "native::report: $mode lowering emitted [dict get $statistics guards] kind guard(s) for [dict get $statistics blockers] blocker(s)"

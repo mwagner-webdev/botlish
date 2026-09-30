@@ -20,10 +20,12 @@
 #   [4] tombstones  Int (deleted, not yet reclaimed slots)
 #
 # using the outer MutableArray itself as an ad hoc mutable record, since
-# Botlish has no struct/class/record type and no way to mutate a field of a
-# persistent List in place (language friction worth recording: this
-# milestone's only mutation mechanism is MutableArray, so a mutable object
-# with several fields becomes a MutableArray of them). set/delete/replace
+# Botlish's structs (STRUCTS.md) are immutable values -- there is no mutable
+# struct -- and there is no way to mutate a field of a persistent List in
+# place (language friction worth recording: the only mutation mechanism is
+# MutableArray, so a mutable object with several fields becomes a
+# MutableArray of them; the rehash's temporary {controls, keys, values}
+# grouping is a struct because nothing about it is mutated). set/delete/replace
 # genuinely mutate this handle and return unit, exactly like
 # mutable_array_set itself, rather than threading a new table value the way
 # the builders thread [storage, length] -- a table's set/delete are mutators,
@@ -218,28 +220,28 @@ fn ht_rehash_probe(newControls, index, capacity):
 
     ht_rehash_probe(newControls, mod(index + 1, capacity), capacity)
 
-# DEST is [newControls, newKeys, newValues]: destination storage for a
+# DEST is {controls, keys, values}, the new storage: destination storage for a
 # resize, grouped only to keep this and ht_rehash_scan below to a readable
 # parameter count (an ordinary temporary aggregate, left visible: req #49).
 fn ht_rehash_insert(dest, capacity, key, value):
-    newControls = list_get(dest, 0)
+    newControls = dest.controls
     index = ht_rehash_probe(newControls, mod(hash(key), capacity), capacity)
     mutable_array_set(newControls, index, ht_occupied_state())
-    mutable_array_set(list_get(dest, 1), index, key)
-    mutable_array_set(list_get(dest, 2), index, value)
+    mutable_array_set(dest.keys, index, key)
+    mutable_array_set(dest.values, index, value)
     unit
 
-# Every OCCUPIED slot of SRC ([oldControls, oldKeys, oldValues]) from I on,
+# Every OCCUPIED slot of SRC ({controls, keys, values}, the old storage) from I on,
 # rehashed into DEST at NEWCAPACITY. Only individual mutable_array_get/_set
 # ever move an entry here -- no mutable_array_copy (req #23).
 fn ht_rehash_scan(src, i, oldCapacity, dest, newCapacity):
     if i >= oldCapacity:
         return unit
 
-    oldControls = list_get(src, 0)
+    oldControls = src.controls
     if mutable_array_get(oldControls, i) == ht_occupied_state():
-        key = mutable_array_get(list_get(src, 1), i)
-        value = mutable_array_get(list_get(src, 2), i)
+        key = mutable_array_get(src.keys, i)
+        value = mutable_array_get(src.values, i)
         ht_rehash_insert(dest, newCapacity, key, value)
 
     ht_rehash_scan(src, i + 1, oldCapacity, dest, newCapacity)
@@ -248,15 +250,15 @@ fn ht_rehash_scan(src, i, oldCapacity, dest, newCapacity):
 # currently OCCUPIED entry and no tombstones. The 3 replacement
 # MutableArrays are this call's only allocations (req #20, #41).
 fn ht_rehash(table, newCapacity):
-    src = [ht_controls(table), ht_keys(table), ht_values(table)]
+    src = {controls: ht_controls(table), keys: ht_keys(table), values: ht_values(table)}
     oldCapacity = ht_capacity(table)
     newControls = mutable_array_allocate(newCapacity)
     ht_fill_empty(newControls, 0, newCapacity)
-    dest = [newControls, mutable_array_allocate(newCapacity), mutable_array_allocate(newCapacity)]
+    dest = {controls: newControls, keys: mutable_array_allocate(newCapacity), values: mutable_array_allocate(newCapacity)}
     ht_rehash_scan(src, 0, oldCapacity, dest, newCapacity)
-    mutable_array_set(table, 0, list_get(dest, 0))
-    mutable_array_set(table, 1, list_get(dest, 1))
-    mutable_array_set(table, 2, list_get(dest, 2))
+    mutable_array_set(table, 0, dest.controls)
+    mutable_array_set(table, 1, dest.keys)
+    mutable_array_set(table, 2, dest.values)
     mutable_array_set(table, 4, 0)
     unit
 

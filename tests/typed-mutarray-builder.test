@@ -140,18 +140,23 @@ geo_finish(geo_append(geo_new(mutable_array_allocate(1)), 1, mutable_array_alloc
 # ---------------------------------------------------------------------------
 # The real CSV programs
 
-test tmb-csv-geometric-1 {csv_geometric: the builders of fields and records are MutableArray[any] -- the positional [field, index] scan pair erases the element type (a struct boundary, not a builder one); the frozen results are broad lists} -body {
+# STRUCTS.md: the scan results are anonymous structs ({field, index},
+# {fields, stop}), so what the builders append is a str / a List[str] and the
+# same untyped geo_* source now yields MutableArray[str] / MutableArray[List[str]]
+# and frozen List[str] / List[List[str]] (with the two declared builder
+# contracts the definition-level obstruction requires).
+test tmb-csv-geometric-1 {csv_geometric: the field builder is MutableArray[str] and the record builder MutableArray[List[str]]; they freeze to List[str] / List[List[str]]} -body {
     set hir [surface::readProgramFile [corpus::path csv_geometric] -strict 0]
     list [instancesOf $hir geo_append] [instancesOf $hir geo_finish] [hir::diagnostics $hir]
-} -result {{{MutableArray[any], int, any -> MutableArray[any] [valid]} {mutarray, int, any -> mutarray [valid]}} {{MutableArray[any], int -> list [valid]} {mutarray, int -> list [valid]}} {}}
+} -result {{{MutableArray[List[str]], any, List[str] -> MutableArray[List[str]] [valid]} {MutableArray[List[str]], int, List[str] -> MutableArray[List[str]] [valid]} {MutableArray[str], any, str -> MutableArray[str] [valid]} {MutableArray[str], int, str -> MutableArray[str] [valid]}} {{MutableArray[List[str]], any -> List[List[str]] [valid]} {MutableArray[List[str]], int -> List[List[str]] [valid]} {MutableArray[str], any -> List[str] [valid]} {MutableArray[str], int -> List[str] [valid]}} {}}
 
-test tmb-csv-records-1 {csv_records: the row-table builder is MutableArray[mutarray] and freezes to List[mutarray]} -body {
+test tmb-csv-records-1 {csv_records: the row-table builder is MutableArray[mutarray] and freezes to List[mutarray]; the field and record builders are typed too} -body {
     set hir [surface::readProgramFile [corpus::path csv_records] -strict 0]
     set instances [instancesOf $hir geo_append]
     list [expr {"MutableArray\[mutarray\], int, mutarray -> MutableArray\[mutarray\] \[valid\]" in $instances}] \
         [expr {"MutableArray\[mutarray\], int -> List\[mutarray\] \[valid\]" in [instancesOf $hir geo_finish]}] \
         [instancesOf $hir geo_new]
-} -result {1 1 {{mutarray -> MutableArray[mutarray] [valid]}}}
+} -result {1 1 {{List[str] -> MutableArray[List[str]] [valid]} {mutarray -> MutableArray[mutarray] [valid]} {str -> MutableArray[str] [valid]}}}
 
 test tmb-csv-records-2 {csv_records: the nine historical row-table consumer sites are statically mutarray: rows/presized_rows are List[mutarray] and every list_get out of them is a mutarray} -body {
     set hir [surface::readProgramFile [corpus::path csv_records] -strict 0]
@@ -231,7 +236,9 @@ proc codeOf {text} {
     }] \n
 }
 
-test tmb-fence-1 {the typed API appears in the corpus only in csv_geometric.bot and csv_records.bot, and only mutarray::create in the builder (plus csv_records' one build_rows contract)} -body {
+# STRUCTS.md adds two declared contracts to each: scan_record_rest's
+# `fields: MutableArray[str]` and scan_records's `records: MutableArray[List[str]]`.
+test tmb-fence-1 {the typed API appears in the corpus only in csv_geometric.bot and csv_records.bot, and only mutarray::create in the builder (plus the scan functions' two contracts and csv_records' one build_rows contract)} -body {
     set out {}
     foreach file [lsort [glob -directory [file join $::projectRoot examples stdlib] *.bot]] {
         set code [codeOf [core::ReadFile $file]]
@@ -240,7 +247,7 @@ test tmb-fence-1 {the typed API appears in the corpus only in csv_geometric.bot 
         if {$creates || $typed} { lappend out [list [file tail $file] $creates $typed] }
     }
     set out
-} -result {{csv_geometric.bot 2 0} {csv_records.bot 2 1}}
+} -result {{csv_geometric.bot 2 2} {csv_records.bot 2 3}}
 
 test tmb-fence-2 {csv_geometric.bot has no raw mutable_array_allocate at all; csv_records.bot keeps it only in the heterogeneous HashTable code} -body {
     set geo [regexp -all {mutable_array_allocate} [codeOf [geoText]]]

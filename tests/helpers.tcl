@@ -111,13 +111,32 @@ proc errorCodeOf {args} {
 # Outcome of EXPRS under BACKEND: {value V LOG} or {error ERRORCODE MESSAGE LOG},
 # where LOG is what test-log recorded. V includes runtime evidence, so the
 # backends must also agree on what values are proven to be.
+#
+# cranelift-generic (native -specialize 0) compiles every function once, so it
+# has no slot for a struct projection that only a semantic instance proves
+# (`fn first(x): x.value`; STRUCTS.md, "Known limitations"): it reports
+# {NATIVE UNSUPPORTED struct-shape}. For such a program the unspecialized
+# baseline is undefined rather than wrong, and the outcome of `cranelift`
+# stands in for it; ::genericBaselineStandIns counts the substitutions, and
+# tests/structs.test pins which corpus programs are in that class.
+set genericBaselineStandIns 0
+proc GenericBaselineUndefined {backend outcome} {
+    return [expr {$backend eq "cranelift-generic" && [lindex $outcome 0] eq "error"
+        && [lindex $outcome 1] eq "NATIVE UNSUPPORTED struct-shape"}]
+}
+
 proc outcomeUnder {backend exprs} {
     set saved [core::useBackend]
     core::useBackend $backend
     resetEffects
     try {
         if {[catch {core::evalProgram $exprs} result options]} {
-            return [list error [dict get $options -errorcode] $result $::testLog]
+            set outcome [list error [dict get $options -errorcode] $result $::testLog]
+            if {[GenericBaselineUndefined $backend $outcome]} {
+                incr ::genericBaselineStandIns
+                return [outcomeUnder cranelift $exprs]
+            }
+            return $outcome
         }
         return [list value [core::value::show $result 1] $::testLog]
     } finally {
@@ -136,7 +155,12 @@ proc outcomeUnderHir {backend hir} {
     set options [expr {$backend eq "cranelift-generic" ? {-specialize 0} : {}}]
     resetEffects
     if {[catch {native::evalHir $hir {*}$options} result options]} {
-        return [list error [dict get $options -errorcode] $result $::testLog]
+        set outcome [list error [dict get $options -errorcode] $result $::testLog]
+        if {[GenericBaselineUndefined $backend $outcome]} {
+            incr ::genericBaselineStandIns
+            return [outcomeUnderHir cranelift $hir]
+        }
+        return $outcome
     }
     return [list value [core::value::show $result 1] $::testLog]
 }

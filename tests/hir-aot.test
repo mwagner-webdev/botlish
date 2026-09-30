@@ -303,11 +303,15 @@ test hir-aot-corpus-3 {string_replace: guarded only by parameter kinds} -body {
          [lsort -unique [concat {*}[lmap n {matches_at replace_from replace} {aotBlockerKinds $a $n}]]]
 } -result {{<program> {closed closed guarded} matches_at {guarded closed guarded} replace_from {guarded closed guarded} replace {guarded closed guarded}} UnknownParameterKind}
 
-test hir-aot-corpus-4 {csv: parameter kinds and list elements} -body {
+# STRUCTS.md: scan_field/scan_record hand back anonymous structs, so the
+# pair's list elements (UnknownAggregateElementType) and the constant-index
+# list_get range checks are gone from scan_record; only its parameter kinds
+# remain.
+test hir-aot-corpus-4 {csv: parameter kinds only (the scan structs have no list elements)} -body {
     set a [corpusAot csv]
     list [corpusStatuses $a] [lsort -unique [aotBlockerKinds $a scan_record]] \
          [dict get [aotRegion $a scan_record] requirements]
-} -result {{<program> {closed closed guarded} peek {guarded closed guarded} scan_unquoted {guarded closed guarded} scan_quoted {guarded closed guarded} scan_field {guarded closed guarded} scan_record {guarded closed guarded} scan_records {guarded closed guarded} csv_parse {closed closed guarded}} {UnknownAggregateElementType UnknownParameterKind} {bigint list-alloc range-check tagged-values}}
+} -result {{<program> {closed closed guarded} peek {guarded closed guarded} scan_unquoted {guarded closed guarded} scan_quoted {guarded closed guarded} scan_field {guarded closed guarded} scan_record {guarded closed guarded} scan_records {guarded closed guarded} csv_parse {closed closed guarded}} UnknownParameterKind {bigint list-alloc tagged-values}}
 
 test hir-aot-corpus-5 {matmul: the operands of * are list elements of unknown kind} -body {
     set a [corpusAot matmul]

@@ -37,6 +37,7 @@ if {[info commands ::native::evalHir] eq ""} {
 }
 
 namespace eval corpus {
+    variable genericStandIns 0
     variable home [file dirname [file normalize [info script]]]
     variable backends {interp compile cranelift-generic cranelift}
 }
@@ -107,6 +108,14 @@ proc corpus::outcome {backend hir} {
     core::useBackend $backend
     try {
         if {[catch {run $backend $hir} value options]} {
+            # cranelift-generic has no slot for a struct projection that only
+            # a semantic instance proves: the baseline is undefined for such
+            # a program and cranelift stands in (tests/helpers.tcl, outcomeUnder).
+            if {$backend eq "cranelift-generic" && [dict get $options -errorcode] eq "NATIVE UNSUPPORTED struct-shape"} {
+                variable genericStandIns
+                incr genericStandIns
+                return [outcome cranelift $hir]
+            }
             return [list error [dict get $options -errorcode]]
         }
         return [list value [core::value::show $value 1]]

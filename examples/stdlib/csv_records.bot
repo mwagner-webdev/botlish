@@ -149,6 +149,18 @@ fn geo_finish(storage, length):
 # CSV parsing (see csv.bot for the algorithm's description; identical to
 # csv_geometric.bot, unchanged).
 
+# Scanning hands back anonymous structs, not positional pairs: scan_field
+# returns {field, index} and scan_record(_rest) returns {fields, stop}
+# (STRUCTS.md), so what the scan appends is known to be a str / List[str].
+# That precision is what makes the two declared builder contracts below
+# necessary: scan_record_rest's `fields: MutableArray[str]` and
+# scan_records's `records: MutableArray[List[str]]`. An untyped function
+# that appends a value it computes itself (here scanned.field) to storage it
+# received as a parameter has no definition-level proof that the storage
+# holds that element type (TYPED-MUTARRAY-BUILDER-REFACTOR.md, "Definition-
+# level obstruction"); while the scanned values were `any`, the storage was
+# MutableArray[any] and needed none.
+
 fn peek(text, index):
     if index >= length(text):
         return ""
@@ -158,7 +170,7 @@ fn peek(text, index):
 fn scan_unquoted(text, start, index):
     character = peek(text, index)
     if character == "" or character == "," or character == "\n":
-        return [substring(text, start, index), index]
+        return {field: substring(text, start, index), index: index}
 
     scan_unquoted(text, start, index + 1)
 
@@ -168,7 +180,7 @@ fn scan_quoted(text, index, field):
         if peek(text, index + 1) == "\"":
             return scan_quoted(text, index + 2, concat(field, "\""))
 
-        return [field, index + 1]
+        return {field: field, index: index + 1}
 
     scan_quoted(text, index + 1, concat(field, character))
 
@@ -185,39 +197,39 @@ fn scan_field(text, index):
 # DETERMINISM.md. It used to compile, with generic, guarded copies of the
 # whole call chain -- TYPED-MUTARRAY-BUILDER-REFACTOR.md, "Definition-order
 # sensitivity".)
-fn scan_record_rest(text, stop, fields, count):
+fn scan_record_rest(text, stop, fields: MutableArray[str], count):
     delimiter = peek(text, stop)
     if delimiter == ",":
         scanned = scan_field(text, stop + 1)
-        more = geo_append(fields, count, list_get(scanned, 0))
-        return scan_record_rest(text, list_get(scanned, 1), more, count + 1)
+        more = geo_append(fields, count, scanned.field)
+        return scan_record_rest(text, scanned.index, more, count + 1)
 
     if delimiter == "\n":
-        return [geo_finish(fields, count), stop + 1]
+        return {fields: geo_finish(fields, count), stop: stop + 1}
 
-    [geo_finish(fields, count), stop]
+    {fields: geo_finish(fields, count), stop: stop}
 
 # The record starting at INDEX and the index where it stops: the first field
 # (a record always has one, possibly empty) starts the FIELDS builder.
 fn scan_record(text, index):
     scanned = scan_field(text, index)
-    scan_record_rest(text, list_get(scanned, 1), geo_new(list_get(scanned, 0)), 1)
+    scan_record_rest(text, scanned.index, geo_new(scanned.field), 1)
 
 # The records from INDEX on, the first COUNT records already in RECORDS.
-fn scan_records(text, index, records, count):
+fn scan_records(text, index, records: MutableArray[List[str]], count):
     if index >= length(text):
         return geo_finish(records, count)
 
     scanned = scan_record(text, index)
-    more = geo_append(records, count, list_get(scanned, 0))
-    scan_records(text, list_get(scanned, 1), more, count + 1)
+    more = geo_append(records, count, scanned.fields)
+    scan_records(text, scanned.stop, more, count + 1)
 
 fn csv_parse(text):
     if length(text) == 0:
         return []
 
     scanned = scan_record(text, 0)
-    scan_records(text, list_get(scanned, 1), geo_new(list_get(scanned, 0)), 1)
+    scan_records(text, scanned.stop, geo_new(scanned.fields), 1)
 
 # ---------------------------------------------------------------------------
 # HashTable (see hashtable.bot for the algorithm's description; identical,
@@ -338,35 +350,35 @@ fn ht_rehash_probe(newControls, index, capacity):
     ht_rehash_probe(newControls, mod(index + 1, capacity), capacity)
 
 fn ht_rehash_insert(dest, capacity, key, value):
-    newControls = list_get(dest, 0)
+    newControls = dest.controls
     index = ht_rehash_probe(newControls, mod(hash(key), capacity), capacity)
     mutable_array_set(newControls, index, ht_occupied_state())
-    mutable_array_set(list_get(dest, 1), index, key)
-    mutable_array_set(list_get(dest, 2), index, value)
+    mutable_array_set(dest.keys, index, key)
+    mutable_array_set(dest.values, index, value)
     unit
 
 fn ht_rehash_scan(src, i, oldCapacity, dest, newCapacity):
     if i >= oldCapacity:
         return unit
 
-    oldControls = list_get(src, 0)
+    oldControls = src.controls
     if mutable_array_get(oldControls, i) == ht_occupied_state():
-        key = mutable_array_get(list_get(src, 1), i)
-        value = mutable_array_get(list_get(src, 2), i)
+        key = mutable_array_get(src.keys, i)
+        value = mutable_array_get(src.values, i)
         ht_rehash_insert(dest, newCapacity, key, value)
 
     ht_rehash_scan(src, i + 1, oldCapacity, dest, newCapacity)
 
 fn ht_rehash(table, newCapacity):
-    src = [ht_controls(table), ht_keys(table), ht_values(table)]
+    src = {controls: ht_controls(table), keys: ht_keys(table), values: ht_values(table)}
     oldCapacity = ht_capacity(table)
     newControls = mutable_array_allocate(newCapacity)
     ht_fill_empty(newControls, 0, newCapacity)
-    dest = [newControls, mutable_array_allocate(newCapacity), mutable_array_allocate(newCapacity)]
+    dest = {controls: newControls, keys: mutable_array_allocate(newCapacity), values: mutable_array_allocate(newCapacity)}
     ht_rehash_scan(src, 0, oldCapacity, dest, newCapacity)
-    mutable_array_set(table, 0, list_get(dest, 0))
-    mutable_array_set(table, 1, list_get(dest, 1))
-    mutable_array_set(table, 2, list_get(dest, 2))
+    mutable_array_set(table, 0, dest.controls)
+    mutable_array_set(table, 1, dest.keys)
+    mutable_array_set(table, 2, dest.values)
     mutable_array_set(table, 4, 0)
     unit
 

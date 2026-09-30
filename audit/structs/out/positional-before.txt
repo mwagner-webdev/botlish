@@ -1,0 +1,157 @@
+## list literals of two or more elements
+bench/lex-strategy.bot:74:10 | 8 elements homogeneous : str | str | str | str | str | str | str | str
+bench/lex-strategy.bot:89:1 | 4 elements HETEROGENEOUS : int | int | int | str
+bench/refined-checks.bot:42:1 | 2 elements homogeneous : int | int
+bench/source-checks.bot:49:10 | 4 elements HETEROGENEOUS : native is_tcl_alpha | native is_tcl_alnum | block(e49)/1 -> bool | block(e55)/1 -> bool
+bench/source-checks.bot:53:16 | 4 elements homogeneous : bool | bool | bool | bool
+bench/source-checks.bot:65:14 | 16 elements homogeneous : str | str | str | str | str | str | str | str | str | str | str | str | str | str | str | str
+bench/source-checks.bot:93:1 | 4 elements HETEROGENEOUS : int | int | str | int
+bench/test-selection.bot:70:13 | 2 elements HETEROGENEOUS : str | List[never]
+bench/test-selection.bot:73:9 | 14 elements homogeneous : list | list | list | list | list | list | list | list | list | list | list | list | list | list
+bench/test-selection.bot:74:5 | 2 elements HETEROGENEOUS : str | List[str]
+bench/test-selection.bot:74:22 | 2 elements homogeneous : str | str
+bench/test-selection.bot:75:5 | 2 elements HETEROGENEOUS : str | List[str]
+bench/test-selection.bot:75:21 | 2 elements homogeneous : str | str
+bench/test-selection.bot:76:5 | 2 elements HETEROGENEOUS : str | List[str]
+bench/test-selection.bot:76:23 | 2 elements homogeneous : str | str
+bench/test-selection.bot:77:5 | 2 elements HETEROGENEOUS : str | List[str]
+bench/test-selection.bot:77:21 | 2 elements homogeneous : str | str
+bench/test-selection.bot:78:5 | 2 elements HETEROGENEOUS : str | List[str]
+bench/test-selection.bot:78:26 | 2 elements homogeneous : str | str
+bench/test-selection.bot:79:5 | 2 elements HETEROGENEOUS : str | List[str]
+bench/test-selection.bot:79:28 | 2 elements homogeneous : str | str
+bench/test-selection.bot:80:5 | 2 elements HETEROGENEOUS : str | List[str]
+bench/test-selection.bot:81:5 | 2 elements HETEROGENEOUS : str | List[str]
+bench/test-selection.bot:81:19 | 2 elements homogeneous : str | str
+bench/test-selection.bot:82:5 | 2 elements HETEROGENEOUS : str | List[str]
+bench/test-selection.bot:83:5 | 2 elements HETEROGENEOUS : str | List[str]
+bench/test-selection.bot:84:5 | 2 elements HETEROGENEOUS : str | List[str]
+bench/test-selection.bot:84:20 | 2 elements homogeneous : str | str
+bench/test-selection.bot:85:5 | 2 elements HETEROGENEOUS : str | List[str]
+bench/test-selection.bot:85:20 | 2 elements homogeneous : str | str
+bench/test-selection.bot:86:5 | 2 elements HETEROGENEOUS : str | List[str]
+bench/test-selection.bot:86:20 | 2 elements homogeneous : str | str
+bench/test-selection.bot:87:5 | 2 elements HETEROGENEOUS : str | List[str]
+bench/test-selection.bot:90:13 | 2 elements homogeneous : str | str
+bench/test-selection.bot:101:13 | 2 elements homogeneous : str | str
+bench/test-selection.bot:104:1 | 5 elements HETEROGENEOUS : int | int | any | bool | bool
+bench/uri-steady.bot:30:10 | 4 elements homogeneous : str | str | str | str
+examples/stdlib/ai_text_clean.bot:79:1 | 6 elements homogeneous : str | str | str | str | str | str
+examples/stdlib/csv.bot:37:16 | 2 elements HETEROGENEOUS : str | int
+examples/stdlib/csv.bot:49:16 | 2 elements HETEROGENEOUS : any | int
+examples/stdlib/csv.bot:71:16 | 2 elements HETEROGENEOUS : list | int
+examples/stdlib/csv.bot:73:5 | 2 elements HETEROGENEOUS : list | any
+examples/stdlib/csv_chunked.bot:25:5 | 3 elements HETEROGENEOUS : List[never] | mutarray | int
+examples/stdlib/csv_chunked.bot:40:16 | 3 elements HETEROGENEOUS : list | mutarray | int
+examples/stdlib/csv_chunked.bot:43:5 | 3 elements HETEROGENEOUS : any | mutarray | int
+examples/stdlib/csv_chunked.bot:82:16 | 2 elements HETEROGENEOUS : str | int
+examples/stdlib/csv_chunked.bot:92:16 | 2 elements HETEROGENEOUS : any | int
+examples/stdlib/csv_chunked.bot:111:16 | 2 elements HETEROGENEOUS : list | int
+examples/stdlib/csv_chunked.bot:113:5 | 2 elements HETEROGENEOUS : list | any
+examples/stdlib/csv_geometric.bot:88:16 | 2 elements HETEROGENEOUS : str | int
+examples/stdlib/csv_geometric.bot:98:16 | 2 elements HETEROGENEOUS : any | int
+examples/stdlib/csv_geometric.bot:123:16 | 2 elements HETEROGENEOUS : list | int
+examples/stdlib/csv_geometric.bot:125:5 | 2 elements HETEROGENEOUS : list | any
+examples/stdlib/csv_records.bot:161:16 | 2 elements HETEROGENEOUS : str | int
+examples/stdlib/csv_records.bot:171:16 | 2 elements HETEROGENEOUS : any | int
+examples/stdlib/csv_records.bot:196:16 | 2 elements HETEROGENEOUS : list | int
+examples/stdlib/csv_records.bot:198:5 | 2 elements HETEROGENEOUS : list | any
+examples/stdlib/csv_records.bot:361:11 | 3 elements homogeneous : any | any | any
+examples/stdlib/csv_records.bot:365:12 | 3 elements homogeneous : mutarray | mutarray | mutarray
+examples/stdlib/csv_records.bot:496:5 | 7 elements HETEROGENEOUS : int | any | any | any | any | any | bool
+examples/stdlib/hashtable.bot:251:11 | 3 elements homogeneous : any | any | any
+examples/stdlib/hashtable.bot:255:12 | 3 elements homogeneous : mutarray | mutarray | mutarray
+examples/stdlib/hashtable.bot:358:22 | 2 elements homogeneous : any | any
+examples/stdlib/hashtable.bot:374:5 | 6 elements HETEROGENEOUS : bool | bool | bool | bool | bool | any
+examples/stdlib/matmul.bot:47:8 | 2 elements homogeneous : List[int] | List[int]
+examples/stdlib/matmul.bot:47:9 | 3 elements homogeneous : int | int | int
+examples/stdlib/matmul.bot:47:20 | 3 elements homogeneous : int | int | int
+examples/stdlib/matmul.bot:47:32 | 3 elements homogeneous : List[int] | List[int] | List[int]
+examples/stdlib/matmul.bot:47:33 | 2 elements homogeneous : int | int
+examples/stdlib/matmul.bot:47:41 | 2 elements homogeneous : int | int
+examples/stdlib/matmul.bot:47:50 | 2 elements homogeneous : int | int
+examples/stdlib/string_replace.bot:44:1 | 5 elements homogeneous : str | str | str | str | str
+examples/stdlib/string_reverse.bot:26:1 | 5 elements homogeneous : str | str | str | str | str
+examples/surface/06-list.bot:6:1 | 3 elements homogeneous : int | int | int
+examples/surface/08-return.bot:16:1 | 3 elements homogeneous : int | int | int
+examples/surface/09-mutual-recursion.bot:20:1 | 2 elements homogeneous : bool | bool
+examples/surface/11-boolean-operators.bot:12:1 | 4 elements homogeneous : bool | bool | bool | bool
+examples/surface/12-if-value.bot:15:1 | 3 elements homogeneous : str | str | str
+examples/surface/13-hygiene.bot:7:5 | 2 elements homogeneous : any | any
+examples/surface/13-hygiene.bot:10:1 | 2 elements HETEROGENEOUS : List[int] | int
+examples/surface/14-modules.bot:7:1 | 2 elements homogeneous : int | int
+lib/web.bot:90:45 | 5 elements homogeneous : str | str | str | str | str
+lib/web.bot:185:14 | 16 elements homogeneous : str | str | str | str | str | str | str | str | str | str | str | str | str | str | str | str
+lib/web.bot:187:41 | 4 elements homogeneous : UnicodeChar | UnicodeChar | UnicodeChar | UnicodeChar
+# 84
+
+# heterogeneous literals: 41 of 84
+
+## list_get with a literal index
+bench/lex-strategy.bot:89:63 | list_get(receiver List[str], index int 0) -> str (kept)
+bench/source-checks.bot:60:5 | list_get(receiver List[bool], index int 0) -> bool (kept)
+bench/source-checks.bot:60:27 | list_get(receiver List[bool], index int 2) -> bool (kept)
+bench/test-selection.bot:51:5 | list_get(receiver any, index int 0) -> any (lost)
+bench/test-selection.bot:54:5 | list_get(receiver any, index int 1) -> any (lost)
+examples/stdlib/csv.bot:64:32 | list_get(receiver list, index int 0) -> any (lost)
+examples/stdlib/csv.bot:65:12 | list_get(receiver list, index int 1) -> any (lost)
+examples/stdlib/csv.bot:81:24 | list_get(receiver list, index int 1) -> any (lost)
+examples/stdlib/csv.bot:81:67 | list_get(receiver list, index int 0) -> any (lost)
+examples/stdlib/csv_chunked.bot:33:17 | list_get(receiver any, index int 0) -> any (lost)
+examples/stdlib/csv_chunked.bot:34:15 | list_get(receiver list, index int 1) -> any (lost)
+examples/stdlib/csv_chunked.bot:35:14 | list_get(receiver list, index int 2) -> any (lost)
+examples/stdlib/csv_chunked.bot:59:17 | list_get(receiver any, index int 0) -> any (lost)
+examples/stdlib/csv_chunked.bot:60:15 | list_get(receiver list, index int 1) -> any (lost)
+examples/stdlib/csv_chunked.bot:61:14 | list_get(receiver list, index int 2) -> any (lost)
+examples/stdlib/csv_chunked.bot:104:35 | list_get(receiver list, index int 0) -> any (lost)
+examples/stdlib/csv_chunked.bot:105:12 | list_get(receiver list, index int 1) -> any (lost)
+examples/stdlib/csv_chunked.bot:120:24 | list_get(receiver list, index int 1) -> any (lost)
+examples/stdlib/csv_chunked.bot:120:70 | list_get(receiver list, index int 0) -> any (lost)
+examples/stdlib/csv_geometric.bot:119:42 | list_get(receiver list, index int 0) -> any (lost)
+examples/stdlib/csv_geometric.bot:120:39 | list_get(receiver list, index int 1) -> any (lost)
+examples/stdlib/csv_geometric.bot:131:28 | list_get(receiver list, index int 1) -> any (lost)
+examples/stdlib/csv_geometric.bot:131:58 | list_get(receiver list, index int 0) -> any (lost)
+examples/stdlib/csv_geometric.bot:139:39 | list_get(receiver list, index int 0) -> any (lost)
+examples/stdlib/csv_geometric.bot:140:24 | list_get(receiver list, index int 1) -> any (lost)
+examples/stdlib/csv_geometric.bot:147:24 | list_get(receiver list, index int 1) -> any (lost)
+examples/stdlib/csv_geometric.bot:147:54 | list_get(receiver list, index int 0) -> any (lost)
+examples/stdlib/csv_records.bot:192:42 | list_get(receiver list, index int 0) -> any (lost)
+examples/stdlib/csv_records.bot:193:39 | list_get(receiver list, index int 1) -> any (lost)
+examples/stdlib/csv_records.bot:204:28 | list_get(receiver list, index int 1) -> any (lost)
+examples/stdlib/csv_records.bot:204:58 | list_get(receiver list, index int 0) -> any (lost)
+examples/stdlib/csv_records.bot:212:39 | list_get(receiver list, index int 0) -> any (lost)
+examples/stdlib/csv_records.bot:213:24 | list_get(receiver list, index int 1) -> any (lost)
+examples/stdlib/csv_records.bot:220:24 | list_get(receiver list, index int 1) -> any (lost)
+examples/stdlib/csv_records.bot:220:54 | list_get(receiver list, index int 0) -> any (lost)
+examples/stdlib/csv_records.bot:341:19 | list_get(receiver any, index int 0) -> any (lost)
+examples/stdlib/csv_records.bot:344:23 | list_get(receiver list, index int 1) -> any (lost)
+examples/stdlib/csv_records.bot:345:23 | list_get(receiver list, index int 2) -> any (lost)
+examples/stdlib/csv_records.bot:352:19 | list_get(receiver any, index int 0) -> any (lost)
+examples/stdlib/csv_records.bot:354:33 | list_get(receiver list, index int 1) -> any (lost)
+examples/stdlib/csv_records.bot:355:35 | list_get(receiver list, index int 2) -> any (lost)
+examples/stdlib/csv_records.bot:367:33 | list_get(receiver List[mutarray], index int 0) -> mutarray (kept)
+examples/stdlib/csv_records.bot:368:33 | list_get(receiver List[mutarray], index int 1) -> mutarray (kept)
+examples/stdlib/csv_records.bot:369:33 | list_get(receiver List[mutarray], index int 2) -> mutarray (kept)
+examples/stdlib/csv_records.bot:469:15 | list_get(receiver list, index int 0) -> any (lost)
+examples/stdlib/csv_records.bot:471:46 | list_get(receiver list, index int 1) -> any (lost)
+examples/stdlib/csv_records.bot:492:13 | list_get(receiver List[mutarray], index int 0) -> mutarray (kept)
+examples/stdlib/csv_records.bot:493:14 | list_get(receiver List[mutarray], index int 1) -> mutarray (kept)
+examples/stdlib/csv_records.bot:494:22 | list_get(receiver List[mutarray], index int 0) -> mutarray (kept)
+examples/stdlib/hashtable.bot:225:19 | list_get(receiver any, index int 0) -> any (lost)
+examples/stdlib/hashtable.bot:228:23 | list_get(receiver list, index int 1) -> any (lost)
+examples/stdlib/hashtable.bot:229:23 | list_get(receiver list, index int 2) -> any (lost)
+examples/stdlib/hashtable.bot:239:19 | list_get(receiver any, index int 0) -> any (lost)
+examples/stdlib/hashtable.bot:241:33 | list_get(receiver list, index int 1) -> any (lost)
+examples/stdlib/hashtable.bot:242:35 | list_get(receiver list, index int 2) -> any (lost)
+examples/stdlib/hashtable.bot:257:33 | list_get(receiver List[mutarray], index int 0) -> mutarray (kept)
+examples/stdlib/hashtable.bot:258:33 | list_get(receiver List[mutarray], index int 1) -> mutarray (kept)
+examples/stdlib/hashtable.bot:259:33 | list_get(receiver List[mutarray], index int 2) -> mutarray (kept)
+examples/stdlib/matmul.bot:45:39 | list_get(receiver any, index int 0) -> any (lost)
+lib/web.bot:209:17 | list_get(receiver List[int[Byte]], index int 0) -> int[Byte] (kept)
+# 60
+
+# literal-index reads whose receiver type lost its element types: 47 of 60
+
+## struct literals and projections
+# 0
+

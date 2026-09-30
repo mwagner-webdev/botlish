@@ -609,12 +609,20 @@ test native-spec-13 {-specialize 0 and 1 run the same programs to the same outco
 # result its concrete arguments imply (OPPORTUNISTIC-SEMANTIC-INSTANCES.md): the
 # semantic HIR's call result is consumed by the ordinary guard analysis, so the
 # guard the imprecise `any` result needed is no longer emitted.
+# STRUCTS.md (scan pairs and the rehash grouping became structs; measured):
+# csv 17/19 -> 15/17 and csv_chunked 28/28 -> 26/26 (the scan pairs' two
+# constant-index-read blockers are gone), csv_geometric unchanged,
+# csv_records blockers 86 -> 89 and specialized/NIR guards 26 -> 23,
+# hashtable blockers 63 -> 67. csv_records and hashtable have no generic
+# numbers: their rehash's struct projections are proven only by semantic
+# instances, which the unspecialized lowering cannot express ("unsupported").
 test native-spec-14 {guard accounting: blockers and emitted guards agree} -body {
     source [file join $::projectRoot examples stdlib corpus.tcl]
     lmap name [corpus::names] {
         set report [native::report [surface::readProgramFile [corpus::path $name]]]
         list $name [dict get $report genericBlockers] \
-            [dict get $report generic guards] [dict get $report specialized guards] \
+            [expr {[dict get $report generic] eq "unsupported" ? "unsupported" : [dict get $report generic guards]}] \
+            [dict get $report specialized guards] \
             [dict get $report nirGuards]
     }
 # csv/csv_chunked/csv_geometric/csv_records's "generic guards" each grew by
@@ -646,7 +654,7 @@ test native-spec-14 {guard accounting: blockers and emitted guards agree} -body 
 # source change): the geometric builder now uses mutarray::create and threads
 # storage and length as separate values, which changes their blocker and
 # guard counts (measured, attributed in that report).
-} -result {{ai_text_clean 5 5 0 0} {csv 17 19 0 0} {csv_chunked 28 28 1 1} {csv_geometric 25 27 2 2} {csv_records 86 86 26 26} {hashtable 63 53 25 25} {matmul 17 17 0 0} {string_replace 12 12 0 0} {string_reverse 4 4 0 0}}
+} -result {{ai_text_clean 5 5 0 0} {csv 15 17 0 0} {csv_chunked 26 26 1 1} {csv_geometric 25 27 2 2} {csv_records 89 unsupported 23 23} {hashtable 67 unsupported 25 25} {matmul 17 17 0 0} {string_replace 12 12 0 0} {string_reverse 4 4 0 0}}
 
 # ---------------------------------------------------------------------------
 # Closures

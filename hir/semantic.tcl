@@ -679,6 +679,7 @@ proc hir::semantic::verify {hirVar} {
         hir::structs::verifyBlocks view $blocks
         dict set own $id [lmap d [dict get $view diagnostics] {
             if {[dict exists $definitional [list [dict get $d expr] [dict get $d message]]]} continue
+            dict set d curable [expr {[dict get $d kind] eq "UNPROVEN-FIELD"}]
             set d
         }]
         if {[dict exists $view violatedContracts]} {
@@ -699,7 +700,8 @@ proc hir::semantic::verify {hirVar} {
             }
             set derived [Derived $hir $callee $e $own]
             if {$derived ni [lmap d [dict get $own $caller] {dict get $d message}]} {
-                dict lappend own $caller [dict create kind TYPE message $derived expr $e]
+                dict lappend own $caller [dict create kind TYPE message $derived expr $e \
+                    curable [Curable $own $callee]]
                 set changed 1
             }
         }
@@ -715,13 +717,38 @@ proc hir::semantic::verify {hirVar} {
             lappend generic [lindex $key 1]
         }
     }
+    set live ""
     foreach e [lsort -dictionary $generic] {
         set callee [dict get $calls [list generic $e]]
         if {[dict get $own $callee] eq {}} {
             continue
         }
+        # An unproven struct projection is the one problem an instance can
+        # cure (hir/structs.tcl): the instance a call of a generic body that
+        # never runs generically asks for (a recursive function's own call,
+        # made with its unrefined parameters) is not reachable, so it reports
+        # nothing. Every other problem is the call's, live or not.
+        if {[Curable $own $callee]} {
+            if {$live eq ""} {
+                set live [hir::structs::GenericLive $hir]
+            }
+            if {[hir::structs::OwnerBlock $hir $e] ni $live} {
+                continue
+            }
+        }
         hir::Diagnose hir TYPE [Derived $hir $callee $e $own] $e
     }
+}
+
+# 1 if every problem instance ID has (in OWN) is an unproven struct field
+# projection, directly or through the instances it calls.
+proc hir::semantic::Curable {own id} {
+    foreach d [dict get $own $id] {
+        if {![dict exists $d curable] || ![dict get $d curable]} {
+            return 0
+        }
+    }
+    return 1
 }
 
 # "call to F with x : T, ... is invalid: WHY": the message for call E of

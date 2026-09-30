@@ -206,12 +206,19 @@ test escape-csv-2 {scan_field's and scan_record's own literal construction sites
     }]
 } -result {}
 
-test escape-csv-3 {the same corpus program allocates fewer Lists with escape-opt on} -body {
+# csv.bot's scan results are anonymous structs, not [field, index] pair Lists
+# (STRUCTS.md). Escape analysis used to scalar-replace those pairs (fewer List
+# allocations with escape-opt on than off); it does not handle structs (no
+# struct scalar replacement was added), so the scan results are real Struct
+# allocations either way and the List count no longer depends on the
+# optimizer. Pinned as {List Struct} allocations per mode (on, off).
+test escape-csv-3 {csv_parse's scan structs are real allocations with escape-opt on and off; its Lists no longer depend on it} -body {
     set hir [csvHir {csv_parse("name,age\nAlice,30\nBob,40\n")}]
-    set on [dict get [native::allocationReport $hir summary 1 -escape-opt 1] byKind List allocations]
-    set off [dict get [native::allocationReport $hir summary 1 -escape-opt 0] byKind List allocations]
-    expr {$on < $off}
-} -result 1
+    lmap mode {1 0} {
+        set report [native::allocationReport $hir summary 1 -escape-opt $mode]
+        list [dict get $report byKind List allocations] [dict get $report byKind Struct allocations]
+    }
+} -result {{8 9} {8 9}}
 
 # ---------------------------------------------------------------------------
 # HashTable rehash grouping (#16): a non-CSV case. This *used* to document

@@ -324,19 +324,21 @@ test paramagg-hashtable-1 {HashTable set/get/delete is unaffected by parameter v
     assertParity [corpus::text hashtable]
 } -result {list {{bool true} {bool true} {bool false} {bool false} {bool true} {int 1}}}
 
-test paramagg-hashtable-2 {rehash's dest/src List grouping (the documented structural blocker) now scalarizes} -body {
-    # ht_rehash constructs `src`/`dest` as local [..] literals and forwards
-    # them, unchanged, through ht_rehash_scan's and ht_rehash_insert's own
-    # parameters -- exactly the closed aggregate-flow-region shape this
-    # milestone adds. Confirms native-escape.test's escape-hashtable-2
-    # "documented blocker" no longer applies to allocation count (that test
-    # is updated alongside this one).
+# STRUCTS.md: the rehash now groups its three arrays as anonymous structs
+# {controls, keys, values}, not [..] List literals. The parameter-aggregate
+# optimization is about Lists; it does not scalarize structs (no struct
+# scalar replacement was added under that milestone), so the two grouping
+# structs of the one resize are real allocations in both modes. This used to
+# assert fewer List allocations with the optimization on.
+test paramagg-hashtable-2 {rehash's dest/src grouping is two real Struct allocations per resize, unchanged by the List parameter-aggregate optimization} -body {
     set src [regsub {\nsample\(\)\n$} [corpus::text hashtable] "\n"]
     set hir [sourceHir "$src\nfn many():\n    t = ht_new()\n    ht_set(t, \"a\", 1)\n    ht_set(t, \"b\", 2)\n    ht_set(t, \"c\", 3)\n    ht_set(t, \"d\", 4)\n    ht_set(t, \"e\", 5)\n    ht_set(t, \"f\", 6)\n    ht_size(t)\n\nmany()\n"]
-    set on [dict get [native::allocationReport $hir summary 1 -param-aggregate-opt 1] byKind List allocations]
-    set off [dict get [native::allocationReport $hir summary 1 -param-aggregate-opt 0] byKind List allocations]
-    list [native::evalHir $hir] [expr {$on < $off}]
-} -result {{int 6} 1}
+    set modes [lmap mode {1 0} {
+        set byKind [dict get [native::allocationReport $hir summary 1 -param-aggregate-opt $mode] byKind]
+        list [dict get $byKind List allocations] [dict get $byKind Struct allocations]
+    }]
+    list [native::evalHir $hir] $modes
+} -result {{int 6} {{0 2} {0 2}}}
 
 test paramagg-geometric-1 {GeometricBuilder's csv_parse value is unaffected} -body {
     assertParity [corpus::text csv_geometric]
