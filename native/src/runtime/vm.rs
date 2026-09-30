@@ -45,9 +45,27 @@ pub struct NativeInfo {
     pub op: OpCode,
 }
 
+/// One struct shape (STRUCTS.md): the static description every struct object
+/// of the shape shares -- static, non-GC data of the program, looked up only
+/// by equality, hashing, printing and handing values back to the host, never
+/// by field access (a projection compiles to a constant slot).
+///
+/// An anonymous shape (`name` None) is a field set: `fields` in canonical
+/// (sorted) slot order, one shape per distinct set however literals spelled
+/// it. A named shape (`name` Some) is one declaration's identity (program-
+/// unique, module-qualified as "namespace::Name") with its declared slot
+/// order: two declarations with equal fields remain two shapes.
+pub struct ShapeInfo {
+    pub name: Option<String>,
+    pub fields: Vec<String>,
+}
+
 pub struct ProgramInfo {
     pub functions: Vec<FunctionInfo>,
     pub natives: Vec<NativeInfo>,
+    /// The program's struct shapes, indexed by the shape number NIR's
+    /// `structnew` carries and `StructObj::shape` stores.
+    pub shapes: Vec<ShapeInfo>,
 }
 
 thread_local! {
@@ -371,6 +389,20 @@ impl Vm {
         let bytes = len * 8;
         let ptr = Box::into_raw(boxed) as *mut Value;
         self.alloc(ListObj { hdr: Header::new(KIND_LIST, false), len, ptr }, bytes)
+    }
+
+    /// A struct value of shape SHAPE whose fields are FIELDS, in slot order.
+    /// Every field value was evaluated before this is called, and the
+    /// object is complete when it first exists: nothing partially
+    /// initialized is ever observable. (Allocation may collect first, which
+    /// is why FIELDS' referents are rooted by the caller, like every
+    /// allocating helper's operands.)
+    pub fn new_struct(&mut self, shape: u32, fields: Vec<Value>) -> Value {
+        let boxed: Box<[Value]> = fields.into_boxed_slice();
+        let len = boxed.len();
+        let bytes = len * 8;
+        let ptr = Box::into_raw(boxed) as *mut Value;
+        self.alloc(StructObj { hdr: Header::new(KIND_STRUCT, false), shape, len, ptr }, bytes)
     }
 
     /// An ImmutableSet of ITEMS, which must already be deduplicated (the one

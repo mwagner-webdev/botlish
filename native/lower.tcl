@@ -147,6 +147,14 @@ namespace eval native::lower {
     variable captureLists {}
     variable pending {}
     variable usedNatives {}
+    # Struct shapes (STRUCTS.md), per program: {ID LAYOUT} -> dense shape
+    # number, assigned on first use in deterministic lowering order, and the
+    # ordered list of the {ID LAYOUT} keys, emitted as the NIR `shape`
+    # declarations. ID is "" for an anonymous shape (LAYOUT its canonical,
+    # sorted field set) or a named struct's declaration identity (LAYOUT its
+    # declared slot order).
+    variable shapeIds [dict create]
+    variable shapeList {}
     # Module-static storage (MODULE-STATIC-RETAINED-VALUES.md): BindingId ->
     # its slot index in the Vm's own `statics` table (runtime::vm::Vm),
     # assigned once per program, in first-reference order (StaticSlot),
@@ -1023,6 +1031,10 @@ proc native::lower::program {hirProgram args} {
     # header's statics=N) leaked from one compilation to the next in the same
     # process.
     variable staticSlots
+    variable shapeIds
+    variable shapeList
+    set shapeIds [dict create]
+    set shapeList {}
 
     set default [expr {[info exists ::env(BOTLISH_NATIVE_SPECIALIZE)]
         && $::env(BOTLISH_NATIVE_SPECIALIZE) eq "0" ? 0 : 1}]
@@ -1208,6 +1220,14 @@ proc native::lower::program {hirProgram args} {
             expr {$type eq "any" ? "any" : [core::type::base $type]}
         }]
         lappend header "native [Quote $name] arity=[dict get $meta arity] params=[Quote $kinds] impl=[NativeImpl $name]"
+    }
+    foreach key $shapeList {
+        lassign $key id layout
+        if {$id eq ""} {
+            lappend header "shape [dict get $shapeIds $key] anon fields=[Quote [join $layout { }]]"
+        } else {
+            lappend header "shape [dict get $shapeIds $key] named [Quote $id] fields=[Quote [join $layout { }]]"
+        }
     }
     set text "[join $header \n]\n\n[join $texts \n\n]\n"
     return [dict create text $text functions $infos statistics [Statistics $infos] \
@@ -2278,6 +2298,8 @@ proc native::lower::Expr {fnVar e {want tagged}} {
         loop      { set result [Loop fn $e $node] }
         listloop  { set result [ListLoop fn $e $node] }
         countloop { set result [CountLoop fn $e $node] }
+        struct    { set result [Struct fn $e $node] }
+        project   { set result [Project fn $e $node] }
         return {
             set companion [dict get $fn companion]
             if {$companion ne ""} {
@@ -2387,6 +2409,73 @@ proc native::lower::Expr {fnVar e {want tagged}} {
         set result [RawOf fn $result]
     }
     return $result
+}
+
+# ---------------------------------------------------------------------------
+# Structs (STRUCTS.md)
+#
+# A struct value is one heap object of a *shape* (a `shape` declaration of the
+# program: an anonymous field set in canonical order, or one named
+# declaration's identity and slot order) holding its field values in slot
+# order; the object carries neither names nor static types. Construction is
+# `structnew SHAPE regs...`: every field expression is lowered first, in
+# WRITTEN order (their evaluation order -- the canonical slot layout never
+# reorders evaluation, and an abrupt completion of a field leaves no struct
+# built), and only then are the field registers handed to structnew in SLOT
+# order. A named construction is one structnew of the declaration's own
+# shape: no anonymous intermediate object exists. Projection is
+# `structget SLOT reg`, the slot a constant resolved from the receiver's
+# statically known struct type; a receiver whose shape is not statically
+# known is refused here -- native code never looks a field up by name.
+
+# The dense shape number of {ID LAYOUT} (see shapeIds), assigned on first use.
+proc native::lower::ShapeIndex {id layout} {
+    variable shapeIds
+    variable shapeList
+    set key [list $id $layout]
+    if {![dict exists $shapeIds $key]} {
+        dict set shapeIds $key [dict size $shapeIds]
+        lappend shapeList $key
+    }
+    return [dict get $shapeIds $key]
+}
+
+proc native::lower::Struct {fnVar e node} {
+    upvar 1 $fnVar fn
+    set regs {}
+    foreach field [dict get $node fields] {
+        set r [Expr fn $field]
+        if {$r eq "never"} {
+            return never
+        }
+        lappend regs $r
+    }
+    set id [expr {[dict get $node named] ? [dict get $node structId] : ""}]
+    set layout [dict get $node layout]
+    set names [dict get $node names]
+    set ordered {}
+    foreach name $layout {
+        lappend ordered [lindex $regs [lsearch -exact $names $name]]
+    }
+    return [Assign fn "structnew [ShapeIndex $id $layout] [join $ordered { }]" $e]
+}
+
+proc native::lower::Project {fnVar e node} {
+    upvar 1 $fnVar fn
+    variable hir
+    set receiver [dict get $node receiver]
+    set type [hir::typeOf $hir $receiver]
+    set name [dict get $node name]
+    set slot [expr {[hir::types::IsStructLike $type] ? [lsearch -exact [hir::types::StructLayout $type] $name] : -1}]
+    if {$slot < 0} {
+        Unsupported $e struct-shape \
+            "the field projection \".$name\" has a receiver of type [hir::types::show $type], so its slot is not statically known (native code compiles a projection to a known slot and never looks fields up by name)"
+    }
+    set r [Expr fn $receiver]
+    if {$r eq "never"} {
+        return never
+    }
+    return [Assign fn "structget $slot $r" $e]
 }
 
 proc native::lower::Const {fnVar e node} {

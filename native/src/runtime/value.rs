@@ -87,6 +87,9 @@ pub const KIND_SET: u8 = 9;
 /// would fail loudly rather than be misread as a String/List.
 pub const KIND_STRPLAN: u8 = 10;
 pub const KIND_LISTPLAN: u8 = 11;
+/// A struct value (STRUCTS.md, StructObj): distinct from KIND_LIST, so a
+/// struct and a List are never the same runtime kind, whatever they hold.
+pub const KIND_STRUCT: u8 = 12;
 
 #[repr(C)]
 pub struct Header {
@@ -139,6 +142,29 @@ pub struct ListObj {
 
 impl ListObj {
     pub fn items(&self) -> &[Value] {
+        unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
+    }
+}
+
+/// A struct value (STRUCTS.md): the index of its static shape (the program's
+/// `ProgramInfo::shapes` table: anonymous field set or named declaration,
+/// with the slot order) plus its field values in slot order, a raw pointer and
+/// a count exactly like ListObj so generated code can load a field directly
+/// at a constant slot (`STRUCT_PTR_OFFSET`). The object holds no field names
+/// and no static types: names live once, in the shape; types are the
+/// compiler's. Never mutated after construction (struct values are
+/// immutable; `Vm::new_struct` fills the slots before the object is
+/// observable).
+#[repr(C)]
+pub struct StructObj {
+    pub hdr: Header,
+    pub shape: u32,
+    pub len: usize,
+    pub ptr: *mut Value,
+}
+
+impl StructObj {
+    pub fn fields(&self) -> &[Value] {
         unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
     }
 }
@@ -207,6 +233,7 @@ pub struct NativeObj {
 pub const CLOSURE_CAPS_OFFSET: i32 = offset_of!(ClosureObj, caps) as i32;
 pub const LIST_LEN_OFFSET: i32 = offset_of!(ListObj, len) as i32;
 pub const LIST_PTR_OFFSET: i32 = offset_of!(ListObj, ptr) as i32;
+pub const STRUCT_PTR_OFFSET: i32 = offset_of!(StructObj, ptr) as i32;
 
 #[inline]
 pub fn is_small(v: Value) -> bool {
@@ -295,6 +322,8 @@ pub enum Kind {
     /// core/type.tcl's broad primitive name) exactly, the same List/"list"
     /// split UnicodeChar's own comment above describes for its own name.
     ImmutableSet,
+    /// A struct value (STRUCTS.md): distinct from List and every other kind.
+    Struct,
 }
 
 impl Kind {
@@ -311,6 +340,7 @@ impl Kind {
             "mutarray" => Kind::MutArray,
             "UnicodeChar" => Kind::UnicodeChar,
             "immutableSet" => Kind::ImmutableSet,
+            "struct" => Kind::Struct,
             _ => return None,
         })
     }
@@ -328,6 +358,7 @@ impl Kind {
             Kind::MutArray => "mutarray",
             Kind::UnicodeChar => "UnicodeChar",
             Kind::ImmutableSet => "immutableSet",
+            Kind::Struct => "struct",
         }
     }
 
@@ -338,7 +369,7 @@ impl Kind {
     pub fn from_code(code: u8) -> Kind {
         [
             Kind::Int, Kind::Str, Kind::Bool, Kind::Unit, Kind::List, Kind::Result, Kind::Block, Kind::Native,
-            Kind::MutArray, Kind::UnicodeChar, Kind::ImmutableSet,
+            Kind::MutArray, Kind::UnicodeChar, Kind::ImmutableSet, Kind::Struct,
         ][code as usize]
     }
 }
@@ -365,6 +396,7 @@ pub fn kind_of(v: Value) -> Kind {
         KIND_NATIVE => Kind::Native,
         KIND_MUTARRAY => Kind::MutArray,
         KIND_SET => Kind::ImmutableSet,
+        KIND_STRUCT => Kind::Struct,
         _ => panic!("not a program value: {v:#x}"),
     }
 }
@@ -380,6 +412,11 @@ pub fn str_of<'a>(v: Value) -> &'a StrObj {
 
 pub fn list_of<'a>(v: Value) -> &'a ListObj {
     debug_assert_eq!(heap_kind(v), KIND_LIST);
+    unsafe { as_ref(v) }
+}
+
+pub fn struct_of<'a>(v: Value) -> &'a StructObj {
+    debug_assert_eq!(heap_kind(v), KIND_STRUCT);
     unsafe { as_ref(v) }
 }
 

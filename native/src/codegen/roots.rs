@@ -189,7 +189,7 @@ impl RootPlan {
 /// (`closure`) whose own runtime helper always allocates.
 fn is_safepoint(inst: &Inst) -> bool {
     match inst {
-        Inst::Closure { .. } | Inst::Construct { .. } => true,
+        Inst::Closure { .. } | Inst::Construct { .. } | Inst::StructNew { .. } => true,
         Inst::Op { op, .. } => op_may_allocate(*op),
         Inst::Call { may_gc, .. } | Inst::CallEnv { may_gc, .. } | Inst::CallMulti { may_gc, .. } | Inst::CallEnvMulti { may_gc, .. } => *may_gc,
         Inst::CallValue { .. } => true,
@@ -223,6 +223,8 @@ fn def_use(inst: &Inst, params: u32) -> (Vec<Reg>, Vec<Reg>) {
         Inst::Closure { dst, captures, .. } => (vec![*dst], captures.clone()),
         Inst::Guard { value, .. } | Inst::GuardBool { value } => (vec![], vec![*value]),
         Inst::Op { dst, args, .. } => (vec![*dst], args.clone()),
+        Inst::StructNew { dst, fields, .. } => (vec![*dst], fields.clone()),
+        Inst::StructGet { dst, value, .. } => (vec![*dst], vec![*value]),
         Inst::Construct { dst, pieces, .. } => (vec![*dst], pieces.iter().flat_map(|p| p.regs()).collect()),
         Inst::Call { dst, args, .. } => (vec![*dst], args.clone()),
         Inst::CallEnv { dst, closure, args, .. } => {

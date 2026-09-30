@@ -1032,6 +1032,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             Kind::Native => KIND_NATIVE,
             Kind::MutArray => KIND_MUTARRAY,
             Kind::ImmutableSet => KIND_SET,
+            Kind::Struct => KIND_STRUCT,
             Kind::Bool | Kind::Unit | Kind::UnicodeChar => unreachable!(),
         };
         let low3 = self.b.ins().band_imm_s(v, 7);
@@ -1219,6 +1220,25 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 };
                 let v = self.call_allocating("rt_construct", &[self.vm, mode, n, ptr], "construct", kind);
                 self.check(v);
+                self.def(*dst, v);
+            }
+            Inst::StructNew { dst, shape, fields } => {
+                // Field values stay rooted in their registers across the
+                // allocating helper, like listnew's operands.
+                let (n, ptr) = self.array(fields);
+                let shape = self.iconst(*shape as u64);
+                let v = self.call_allocating("rt_struct_new", &[self.vm, shape, n, ptr], "structnew", KIND_STRUCT);
+                self.def(*dst, v);
+            }
+            Inst::StructGet { dst, slot, value } => {
+                // A constant-slot load: the struct's field array lives behind
+                // a raw pointer at STRUCT_PTR_OFFSET (value.rs's StructObj);
+                // the slot was resolved from the receiver's known shape at
+                // lowering time, so there is no bounds check and no name
+                // lookup -- a struct's shape is fixed.
+                let s = self.get(*value);
+                let data = self.b.ins().load(I64, MemFlagsData::trusted(), s, STRUCT_PTR_OFFSET);
+                let v = self.b.ins().load(I64, MemFlagsData::trusted(), data, (*slot as i32) * 8);
                 self.def(*dst, v);
             }
             Inst::Op { dst, op, args } => {

@@ -57,6 +57,31 @@ fn show_into(v: Value, out: &mut String) {
             }
             out.push(']');
         }
+        Kind::Struct => {
+            // Matches core::value::show's struct rendering exactly
+            // (core/value.tcl): `{name: "Grace", age: 45}` for an anonymous
+            // struct (fields in canonical order), `Person {name: "Ada",
+            // age: 36}` for a named one (declared slot order).
+            let obj = struct_of(v);
+            let (name, fields) = current_program(|prog| {
+                let shape = &prog.shapes[obj.shape as usize];
+                (shape.name.clone(), shape.fields.clone())
+            });
+            if let Some(name) = name {
+                out.push_str(&name);
+                out.push(' ');
+            }
+            out.push('{');
+            for (i, (field, item)) in fields.iter().zip(obj.fields().iter()).enumerate() {
+                if i > 0 {
+                    out.push_str(", ");
+                }
+                out.push_str(field);
+                out.push_str(": ");
+                show_into(*item, out);
+            }
+            out.push('}');
+        }
         Kind::ImmutableSet => {
             // Matches core::value::show's ImmutableSet rendering exactly
             // (core/value.tcl): braces, punctuation only -- no semantic
@@ -114,6 +139,19 @@ pub fn tcl_value(v: Value) -> Result<String, RtError> {
         Kind::List => {
             let items = list_of(v).items().iter().map(|item| tcl_value(*item)).collect::<Result<Vec<_>, _>>()?;
             tcl_list(&["list".to_string(), tcl_list(&items)])
+        }
+        Kind::Struct => {
+            // Matches core::value::structOf's own representation exactly
+            // ({struct {ID FIELD...} VALUES}, core/value.tcl).
+            let obj = struct_of(v);
+            let (name, fields) = current_program(|prog| {
+                let shape = &prog.shapes[obj.shape as usize];
+                (shape.name.clone().unwrap_or_default(), shape.fields.clone())
+            });
+            let mut shape_words = vec![name];
+            shape_words.extend(fields);
+            let items = obj.fields().iter().map(|item| tcl_value(*item)).collect::<Result<Vec<_>, _>>()?;
+            tcl_list(&["struct".to_string(), tcl_list(&shape_words), tcl_list(&items)])
         }
         Kind::ImmutableSet => {
             // Matches core::value::immutableSet's own representation

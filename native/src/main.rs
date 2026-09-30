@@ -47,7 +47,7 @@ use codegen::{Backend, CompileOptions, CraneliftJit, Site};
 use runtime::metrics::{kind_name, AllocMode, SiteStats};
 use runtime::show::{tcl_list, tcl_value};
 use runtime::value::NO_VALUE;
-use runtime::vm::{FunctionInfo, NativeInfo, ProgramInfo, Vm};
+use runtime::vm::{FunctionInfo, NativeInfo, ProgramInfo, ShapeInfo, Vm};
 use std::io::{Read, Write};
 use std::rc::Rc;
 use std::time::Instant;
@@ -247,6 +247,11 @@ fn program_info(program: &nir::Program) -> ProgramInfo {
             .natives
             .iter()
             .map(|n| NativeInfo { name: n.name.clone(), arity: n.arity, params: n.params.clone(), op: n.op })
+            .collect(),
+        shapes: program
+            .shapes
+            .iter()
+            .map(|s| ShapeInfo { name: s.name.clone(), fields: s.fields.clone() })
             .collect(),
     }
 }

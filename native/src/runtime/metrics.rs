@@ -37,14 +37,14 @@
 use super::show::tcl_list;
 use super::value::{
     KIND_BIGINT, KIND_CLOSURE, KIND_LIST, KIND_LISTPLAN, KIND_MUTARRAY, KIND_NATIVE, KIND_RESULT, KIND_SET,
-    KIND_STR, KIND_STRPLAN,
+    KIND_STR, KIND_STRPLAN, KIND_STRUCT,
 };
 use std::collections::HashMap;
 use std::time::Duration;
 
 /// One more than the largest `Header::kind` value: `by_kind`/`static_by_kind`
 /// are indexed directly by kind byte (index 0 unused).
-pub const KIND_COUNT: usize = 12;
+pub const KIND_COUNT: usize = 13;
 
 pub fn kind_name(kind: u8) -> &'static str {
     match kind {
@@ -56,6 +56,7 @@ pub fn kind_name(kind: u8) -> &'static str {
         KIND_NATIVE => "Native",
         KIND_MUTARRAY => "MutableArray",
         KIND_SET => "ImmutableSet",
+        KIND_STRUCT => "Struct",
         KIND_STRPLAN => "StringPlan",
         KIND_LISTPLAN => "ListPlan",
         _ => "?",
@@ -66,8 +67,8 @@ pub fn kind_name(kind: u8) -> &'static str {
 /// private virtual-construction plan kinds (M8.a) come last: they are
 /// implementation objects, never program values, reported separately so a
 /// String/List allocation count always means semantic flat objects only.
-pub const KINDS: [u8; 10] = [
-    KIND_STR, KIND_LIST, KIND_SET, KIND_MUTARRAY, KIND_BIGINT, KIND_RESULT, KIND_CLOSURE, KIND_NATIVE,
+pub const KINDS: [u8; 11] = [
+    KIND_STR, KIND_LIST, KIND_SET, KIND_STRUCT, KIND_MUTARRAY, KIND_BIGINT, KIND_RESULT, KIND_CLOSURE, KIND_NATIVE,
     KIND_STRPLAN, KIND_LISTPLAN,
 ];
 

@@ -60,7 +60,7 @@
 use super::construct::{rt_construct, rt_plan_materialize};
 use super::error::{semantic_kind, RtError};
 use super::value::*;
-use super::vm::{Vm, NativeInfo};
+use super::vm::{current_program, Vm, NativeInfo};
 use crate::nir::OpCode;
 use num_bigint::BigInt;
 use num_traits::Signed;
@@ -380,6 +380,24 @@ fn equal(p: *mut Vm, a: Value, b: Value) -> Result<bool, ()> {
             let (x, y) = (result_of(a), result_of(b));
             x.ok == y.ok && equal(p, x.payload, y.payload)?
         }
+        Kind::Struct => {
+            // Equal iff the same shape (an anonymous struct's field set, or
+            // one named declaration: shapes are interned, so equal shape
+            // means equal shape index) and every field equal, slot by
+            // slot. A named struct never equals an anonymous one or another
+            // named struct; a shape mismatch is unequal without comparing
+            // contents (core::value::equal's struct case).
+            let (x, y) = (struct_of(a), struct_of(b));
+            if x.shape != y.shape {
+                return Ok(false);
+            }
+            for (u, w) in x.fields().iter().zip(y.fields().iter()) {
+                if !equal(p, *u, *w)? {
+                    return Ok(false);
+                }
+            }
+            true
+        }
         Kind::Block | Kind::Native | Kind::MutArray => unreachable!(),
     })
 }
@@ -475,6 +493,7 @@ fn hash_mix(p: *mut Vm, h: u64, v: Value) -> Result<u64, ()> {
         Kind::Result => 5,
         Kind::UnicodeChar => 6,
         Kind::ImmutableSet => 7,
+        Kind::Struct => 8,
         Kind::Block | Kind::Native | Kind::MutArray => unreachable!(),
     };
     let h = fnv1a(h, &[tag]);
@@ -509,6 +528,24 @@ fn hash_mix(p: *mut Vm, h: u64, v: Value) -> Result<u64, ()> {
             let h = fnv1a(h, &[r.ok as u8]);
             let sub = hash_mix(p, FNV_OFFSET, r.payload)?;
             fnv1a(h, &sub.to_le_bytes())
+        }
+        Kind::Struct => {
+            // core/hashing.tcl's struct case, byte for byte: the declaration
+            // identity text (empty for an anonymous struct), the field
+            // count, then each slot's name text and sub-hash in slot order.
+            let obj = struct_of(v);
+            let (name, fields) = current_program(|prog| {
+                let shape = &prog.shapes[obj.shape as usize];
+                (shape.name.clone().unwrap_or_default(), shape.fields.clone())
+            });
+            let mut h = fnv1a(h, name.as_bytes());
+            h = fnv1a(h, &(fields.len() as u64).to_le_bytes());
+            for (field, item) in fields.iter().zip(obj.fields().iter()) {
+                h = fnv1a(h, field.as_bytes());
+                let sub = hash_mix(p, FNV_OFFSET, *item)?;
+                h = fnv1a(h, &sub.to_le_bytes());
+            }
+            h
         }
         Kind::ImmutableSet => {
             // Order-independent (XOR-combined member sub-hashes), matching
@@ -866,6 +903,15 @@ pub extern "C" fn rt_list_new(p: *mut Vm, n: u64, items: *const Value) -> Value 
     let r = vm(p).new_list(items);
     vm(p).metrics.record_list_copy(elements);
     r
+}
+
+/// `structnew SHAPE FIELD...`: a struct value of the program's shape number
+/// SHAPE (STRUCTS.md). Never fails; allocates (a GC safepoint), the field
+/// Values staying rooted in their registers across the call.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_struct_new(p: *mut Vm, shape: u64, n: u64, fields: *const Value) -> Value {
+    let fields = unsafe { std::slice::from_raw_parts(fields, n as usize) }.to_vec();
+    vm(p).new_struct(shape as u32, fields)
 }
 
 #[unsafe(no_mangle)]
@@ -1324,6 +1370,7 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_str_region_is_tcl_alpha, 4),
         h!(rt_str_region_is_tcl_alnum, 4),
         h!(rt_list_new, 3),
+        h!(rt_struct_new, 4),
         h!(rt_list_len, 2),
         h!(rt_list_get, 3),
         h!(rt_list_append, 3),

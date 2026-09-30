@@ -414,6 +414,20 @@ pub enum Inst {
     /// allocation (GC safepoint) and possible failure (the collection-length
     /// ceiling eager concat/list_append also enforce).
     Construct { dst: Reg, list: bool, plan: bool, pieces: Vec<Piece> },
+    /// `%d = structnew SHAPE %f0 %f1 ...` (STRUCTS.md): a struct value of the
+    /// program's shape number SHAPE (a `shape` declaration) whose fields are
+    /// the registers, exactly one per field of the shape and in the shape's
+    /// SLOT order -- the lowering has already evaluated every field
+    /// expression, in source order, before this instruction, so no partially
+    /// initialized struct is ever observable. A possible allocation (GC
+    /// safepoint); never fails. The struct object stores only its shape number
+    /// and the field values: no names, no static types.
+    StructNew { dst: Reg, shape: u32, fields: Vec<Reg> },
+    /// `%d = structget SLOT %v`: field SLOT of the struct value %v. The slot
+    /// is a constant the lowering resolved from the receiver's statically
+    /// known shape; there is no lookup by name, and no check: %v is proven to
+    /// be a struct whose shape has that slot. Total, never allocates.
+    StructGet { dst: Reg, slot: u32, value: Reg },
     /// Propagates whatever failure (a raw RtError or a declared one) is
     /// already pending, unchanged, to the current error-exit target: a
     /// `handle` whose own dispatch matched none of its handlers emits this
@@ -527,8 +541,19 @@ pub struct NativeDecl {
     pub op: OpCode,
 }
 
+/// A struct shape declaration (`shape N anon fields="a b"` / `shape N named
+/// "Name" fields="a b"`): static program metadata the runtime keeps once
+/// per shape (runtime::vm::ShapeInfo), never per object. An anonymous
+/// shape's fields are its canonical (sorted) field set; a named shape's are
+/// its declaration's slot order. Shape numbers are dense, in order.
+pub struct ShapeDecl {
+    pub name: Option<String>,
+    pub fields: Vec<String>,
+}
+
 pub struct Program {
     pub natives: Vec<NativeDecl>,
+    pub shapes: Vec<ShapeDecl>,
     pub functions: Vec<Function>,
     /// The number of module-static slots this program uses (the header's
     /// own `statics=N`, MODULE-STATIC-RETAINED-VALUES.md): runtime::vm::Vm's
@@ -679,7 +704,7 @@ fn word(t: &Token) -> Option<&str> {
 
 pub fn parse(text: &str) -> Result<Program, NirError> {
     let mut p = Parser { line: 0 };
-    let mut program = Program { natives: Vec::new(), functions: Vec::new(), statics: 0 };
+    let mut program = Program { natives: Vec::new(), shapes: Vec::new(), functions: Vec::new(), statics: 0 };
     let mut current: Option<Function> = None;
     let mut seen_header = false;
     let mut call_effects = true;
@@ -706,6 +731,13 @@ pub fn parse(text: &str) -> Result<Program, NirError> {
         if current.is_none() {
             match head {
                 "native" => program.natives.push(parse_native(&p, &tokens)?),
+                "shape" => {
+                    let shape = parse_shape(&p, &tokens)?;
+                    if shape.0 as usize != program.shapes.len() {
+                        return p.err(format!("shape numbers must be dense and in order, got {}", shape.0));
+                    }
+                    program.shapes.push(shape.1);
+                }
                 "func" => current = Some(parse_func_header(&p, &tokens)?),
                 _ => return p.err(format!("expected native or func, got {raw:?}")),
             }
@@ -741,6 +773,7 @@ fn summarize_call_effects(program: &mut Program, enabled: bool) {
                     local[i].1 |= op_may_allocate(*op);
                 }
                 Inst::Closure { .. } => local[i].1 = true,
+                Inst::StructNew { .. } => local[i].1 = true,
                 Inst::Construct { .. } => local[i] = (true, true),
                 Inst::CallValue { .. } => local[i] = (true, true),
                 _ => {}
@@ -805,6 +838,38 @@ fn parse_native(p: &Parser, tokens: &[Token]) -> Result<NativeDecl, NirError> {
         .or_else(|_| p.err("bad params"))?;
     let op = kv.get("impl").and_then(|s| OpCode::parse(s)).map_or_else(|| p.err("bad impl"), Ok)?;
     Ok(NativeDecl { name: name.clone(), arity, params, op })
+}
+
+/// `shape N anon fields="a b ..."` or `shape N named "Name" fields="a b ..."`.
+fn parse_shape(p: &Parser, tokens: &[Token]) -> Result<(u32, ShapeDecl), NirError> {
+    let Some(index) = tokens.get(1).and_then(word).and_then(|w| w.parse::<u32>().ok()) else {
+        return p.err("shape needs a number");
+    };
+    let (name, _next) = match tokens.get(2).and_then(word) {
+        Some("anon") => (None, 3),
+        Some("named") => match tokens.get(3) {
+            Some(Token::Quoted(name)) if !name.is_empty() => (Some(name.clone()), 4),
+            _ => return p.err("a named shape needs a quoted declaration name"),
+        },
+        _ => return p.err("shape must be anon or named"),
+    };
+    let kv = pairs(tokens);
+    let Some(fields) = kv.get("fields") else { return p.err("shape needs fields=") };
+    let fields: Vec<String> = fields.split_whitespace().map(str::to_string).collect();
+    let mut seen = HashSet::new();
+    for f in &fields {
+        if !seen.insert(f) {
+            return p.err(format!("shape field {f} is declared twice"));
+        }
+    }
+    if name.is_none() {
+        let mut sorted = fields.clone();
+        sorted.sort();
+        if sorted != fields {
+            return p.err("an anonymous shape's fields must be in canonical (sorted) order");
+        }
+    }
+    Ok((index, ShapeDecl { name, fields }))
 }
 
 fn parse_func_header(p: &Parser, tokens: &[Token]) -> Result<Function, NirError> {
@@ -941,6 +1006,22 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
                 _ => return p.err("bad bool"),
             },
             "unit" => Inst::Unit { dst },
+            "structnew" => {
+                let shape = num(3)?;
+                let Some(decl) = program.shapes.get(shape as usize) else {
+                    return p.err(format!("structnew of undeclared shape {shape}"));
+                };
+                let fields = regs_from(4)?;
+                if fields.len() != decl.fields.len() {
+                    return p.err(format!(
+                        "structnew of shape {shape} needs {} field register(s), got {}",
+                        decl.fields.len(),
+                        fields.len()
+                    ));
+                }
+                Inst::StructNew { dst, shape, fields }
+            }
+            "structget" => Inst::StructGet { dst, slot: num(3)?, value: reg(4)? },
             "native" => {
                 let name = quoted(3)?;
                 match program.natives.iter().position(|n| n.name == name) {
@@ -1138,6 +1219,11 @@ fn validate(program: &Program) -> Result<(), NirError> {
                         used.extend(piece.regs());
                     }
                 }
+                Inst::StructNew { dst, fields, .. } => {
+                    used.push(*dst);
+                    used.extend(fields);
+                }
+                Inst::StructGet { dst, value, .. } => used.extend([*dst, *value]),
                 Inst::Op { dst, op, args } => {
                     if op.arity().is_some_and(|n| n != args.len()) {
                         return fail(ctx(format!("op {op:?} takes {:?} operands", op.arity())));
@@ -1423,6 +1509,8 @@ fn validate_plans(program: &Program) -> Result<(), NirError> {
                 Inst::Closure { captures, .. } => used.extend(captures),
                 Inst::Guard { value, .. } | Inst::GuardBool { value } => used.push(*value),
                 Inst::Op { args, .. } => used.extend(args),
+                Inst::StructNew { fields, .. } => used.extend(fields),
+                Inst::StructGet { value, .. } => used.push(*value),
                 Inst::CallValue { callee, args, .. } => {
                     used.push(*callee);
                     used.extend(args);
