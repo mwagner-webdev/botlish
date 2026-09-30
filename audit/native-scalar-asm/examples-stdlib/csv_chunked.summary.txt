@@ -2,7 +2,7 @@ source:  examples/stdlib/csv_chunked.bot
 backend: Cranelift (specialize=1)
 asm:     csv_chunked.asm
 vcode:   csv_chunked.vcode
-machine-code bytes: 10168 (per function: 68 195 534 534 534 534 498 418 540 540 365 430 585 1063 352 799 833 537 612 197)
+machine-code bytes: 10725 (per function: 68 195 534 534 534 534 498 418 540 540 365 430 664 1122 364 985 1034 549 620 197)
 
 functions:
   0 <program entry>: nir-regs=2
@@ -17,13 +17,13 @@ functions:
   9 chunked_finish<list[List[mutarray], mutarray, int]>: nir-regs=18
   10 peek<str, int>: nir-regs=11
   11 peek<str, int>: nir-regs=15
-  12 scan_unquoted<str, int, int>: nir-regs=28
-  13 scan_quoted<str, int, str>: nir-regs=35
-  14 scan_field<str, int>: nir-regs=17
-  15 scan_record<str, int, list[List[never], mutarray, int]>: nir-regs=31
-  16 scan_record<str, int, list[List[mutarray], mutarray, int]>: nir-regs=29
-  17 scan_records<str, int, list[List[never], mutarray, int]>: nir-regs=21
-  18 scan_records<str, int, list[List[mutarray], mutarray, int]>: nir-regs=18
+  12 scan_unquoted<str, int, int>: nir-regs=29
+  13 scan_quoted<str, int, str>: nir-regs=36
+  14 scan_field<str, int>: nir-regs=15
+  15 scan_record<str, int, list[List[never], mutarray, int]>: nir-regs=33
+  16 scan_record<str, int, list[List[mutarray], mutarray, int]>: nir-regs=32
+  17 scan_records<str, int, list[List[never], mutarray, int]>: nir-regs=22
+  18 scan_records<str, int, list[List[mutarray], mutarray, int]>: nir-regs=19
   19 csv_parse<str>: nir-regs=7
 
 GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
@@ -184,12 +184,12 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 12 "scan_unquoted"
-    NIR regs: 28
+    NIR regs: 29
     raw regs: 1
-    managed-capable regs: 27
+    managed-capable regs: 28
     effects: may_error=true may_gc=true
-    safepoints: 3
-    root candidates: 4
+    safepoints: 4
+    root candidates: 5
     max live roots: 4
     shadow slots: 4
     entry zero slots: 1
@@ -197,12 +197,12 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 13 "scan_quoted"
-    NIR regs: 35
+    NIR regs: 36
     raw regs: 6
-    managed-capable regs: 29
+    managed-capable regs: 30
     effects: may_error=true may_gc=true
-    safepoints: 9
-    root candidates: 13
+    safepoints: 10
+    root candidates: 14
     max live roots: 5
     shadow slots: 5
     entry zero slots: 2
@@ -210,9 +210,9 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 14 "scan_field"
-    NIR regs: 17
+    NIR regs: 15
     raw regs: 1
-    managed-capable regs: 16
+    managed-capable regs: 14
     effects: may_error=true may_gc=true
     safepoints: 4
     root candidates: 5
@@ -223,12 +223,12 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 15 "scan_record"
-    NIR regs: 31
+    NIR regs: 33
     raw regs: 2
-    managed-capable regs: 29
+    managed-capable regs: 31
     effects: may_error=true may_gc=true
-    safepoints: 8
-    root candidates: 14
+    safepoints: 10
+    root candidates: 17
     max live roots: 6
     shadow slots: 6
     entry zero slots: 1
@@ -236,12 +236,12 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 16 "scan_record"
-    NIR regs: 29
+    NIR regs: 32
     raw regs: 2
-    managed-capable regs: 27
+    managed-capable regs: 30
     effects: may_error=true may_gc=true
-    safepoints: 7
-    root candidates: 13
+    safepoints: 9
+    root candidates: 16
     max live roots: 6
     shadow slots: 6
     entry zero slots: 1
@@ -249,9 +249,9 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 17 "scan_records"
-    NIR regs: 21
+    NIR regs: 22
     raw regs: 2
-    managed-capable regs: 19
+    managed-capable regs: 20
     effects: may_error=true may_gc=true
     safepoints: 5
     root candidates: 13
@@ -262,9 +262,9 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 18 "scan_records"
-    NIR regs: 18
+    NIR regs: 19
     raw regs: 0
-    managed-capable regs: 18
+    managed-capable regs: 19
     effects: may_error=true may_gc=true
     safepoints: 4
     root candidates: 10
@@ -291,5 +291,5 @@ mechanical pattern counts (triage only; see report for interpretation):
   20 x calls to rt_int_add
   2 x calls to rt_int_mul
   7 x calls to rt_int_cmp
-  53 x calls to other rt_* helpers
+  59 x calls to other rt_* helpers
   1 x guard/guardbool instructions
