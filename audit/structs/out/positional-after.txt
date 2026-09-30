@@ -1,0 +1,157 @@
+## list literals of two or more elements
+bench/lex-strategy.bot:74:10 | 8 elements homogeneous : str | str | str | str | str | str | str | str
+bench/lex-strategy.bot:89:1 | 4 elements HETEROGENEOUS : int | int | int | str
+bench/refined-checks.bot:42:1 | 2 elements homogeneous : int | int
+bench/source-checks.bot:49:10 | 4 elements HETEROGENEOUS : native is_tcl_alpha | native is_tcl_alnum | block(e49)/1 -> bool | block(e55)/1 -> bool
+bench/source-checks.bot:53:16 | 4 elements homogeneous : bool | bool | bool | bool
+bench/source-checks.bot:65:14 | 16 elements homogeneous : str | str | str | str | str | str | str | str | str | str | str | str | str | str | str | str
+bench/source-checks.bot:93:1 | 4 elements HETEROGENEOUS : int | int | str | int
+bench/test-selection.bot:84:9 | 14 elements homogeneous : Test | Test | Test | Test | Test | Test | Test | Test | Test | Test | Test | Test | Test | Test
+bench/test-selection.bot:85:47 | 2 elements homogeneous : str | str
+bench/test-selection.bot:86:46 | 2 elements homogeneous : str | str
+bench/test-selection.bot:87:48 | 2 elements homogeneous : str | str
+bench/test-selection.bot:88:46 | 2 elements homogeneous : str | str
+bench/test-selection.bot:89:51 | 2 elements homogeneous : str | str
+bench/test-selection.bot:90:53 | 2 elements homogeneous : str | str
+bench/test-selection.bot:92:44 | 2 elements homogeneous : str | str
+bench/test-selection.bot:95:45 | 2 elements homogeneous : str | str
+bench/test-selection.bot:96:45 | 2 elements homogeneous : str | str
+bench/test-selection.bot:97:45 | 2 elements homogeneous : str | str
+bench/test-selection.bot:101:13 | 2 elements homogeneous : str | str
+bench/test-selection.bot:112:13 | 2 elements homogeneous : str | str
+bench/test-selection.bot:115:1 | 5 elements HETEROGENEOUS : int | int | str | bool | bool
+bench/uri-steady.bot:30:10 | 4 elements homogeneous : str | str | str | str
+examples/stdlib/ai_text_clean.bot:79:1 | 6 elements homogeneous : str | str | str | str | str | str
+examples/stdlib/csv_chunked.bot:25:5 | 3 elements HETEROGENEOUS : List[never] | mutarray | int
+examples/stdlib/csv_chunked.bot:40:16 | 3 elements HETEROGENEOUS : list | mutarray | int
+examples/stdlib/csv_chunked.bot:43:5 | 3 elements HETEROGENEOUS : any | mutarray | int
+examples/stdlib/csv_records.bot:508:5 | 7 elements HETEROGENEOUS : int | any | any | any | any | any | bool
+examples/stdlib/hashtable.bot:360:22 | 2 elements homogeneous : any | any
+examples/stdlib/hashtable.bot:376:5 | 6 elements HETEROGENEOUS : bool | bool | bool | bool | bool | any
+examples/stdlib/matmul.bot:47:8 | 2 elements homogeneous : List[int] | List[int]
+examples/stdlib/matmul.bot:47:9 | 3 elements homogeneous : int | int | int
+examples/stdlib/matmul.bot:47:20 | 3 elements homogeneous : int | int | int
+examples/stdlib/matmul.bot:47:32 | 3 elements homogeneous : List[int] | List[int] | List[int]
+examples/stdlib/matmul.bot:47:33 | 2 elements homogeneous : int | int
+examples/stdlib/matmul.bot:47:41 | 2 elements homogeneous : int | int
+examples/stdlib/matmul.bot:47:50 | 2 elements homogeneous : int | int
+examples/stdlib/string_replace.bot:44:1 | 5 elements homogeneous : str | str | str | str | str
+examples/stdlib/string_reverse.bot:26:1 | 5 elements homogeneous : str | str | str | str | str
+examples/surface/06-list.bot:6:1 | 3 elements homogeneous : int | int | int
+examples/surface/08-return.bot:16:1 | 3 elements homogeneous : int | int | int
+examples/surface/09-mutual-recursion.bot:20:1 | 2 elements homogeneous : bool | bool
+examples/surface/11-boolean-operators.bot:12:1 | 4 elements homogeneous : bool | bool | bool | bool
+examples/surface/12-if-value.bot:15:1 | 3 elements homogeneous : str | str | str
+examples/surface/13-hygiene.bot:7:5 | 2 elements homogeneous : any | any
+examples/surface/13-hygiene.bot:10:1 | 2 elements HETEROGENEOUS : List[int] | int
+examples/surface/14-modules.bot:7:1 | 2 elements homogeneous : int | int
+lib/web.bot:90:45 | 5 elements homogeneous : str | str | str | str | str
+lib/web.bot:185:14 | 16 elements homogeneous : str | str | str | str | str | str | str | str | str | str | str | str | str | str | str | str
+lib/web.bot:187:41 | 4 elements homogeneous : UnicodeChar | UnicodeChar | UnicodeChar | UnicodeChar
+# 49
+
+# heterogeneous literals: 10 of 49
+
+## list_get with a literal index
+bench/lex-strategy.bot:89:63 | list_get(receiver List[str], index int 0) -> str (kept)
+bench/source-checks.bot:60:5 | list_get(receiver List[bool], index int 0) -> bool (kept)
+bench/source-checks.bot:60:27 | list_get(receiver List[bool], index int 2) -> bool (kept)
+examples/stdlib/csv_chunked.bot:33:17 | list_get(receiver any, index int 0) -> any (lost)
+examples/stdlib/csv_chunked.bot:34:15 | list_get(receiver list, index int 1) -> any (lost)
+examples/stdlib/csv_chunked.bot:35:14 | list_get(receiver list, index int 2) -> any (lost)
+examples/stdlib/csv_chunked.bot:59:17 | list_get(receiver any, index int 0) -> any (lost)
+examples/stdlib/csv_chunked.bot:60:15 | list_get(receiver list, index int 1) -> any (lost)
+examples/stdlib/csv_chunked.bot:61:14 | list_get(receiver list, index int 2) -> any (lost)
+examples/stdlib/csv_records.bot:481:15 | list_get(receiver List[List[str]], index int 0) -> List[str] (kept)
+examples/stdlib/csv_records.bot:483:46 | list_get(receiver List[List[str]], index int 1) -> List[str] (kept)
+examples/stdlib/csv_records.bot:504:13 | list_get(receiver List[mutarray], index int 0) -> mutarray (kept)
+examples/stdlib/csv_records.bot:505:14 | list_get(receiver List[mutarray], index int 1) -> mutarray (kept)
+examples/stdlib/csv_records.bot:506:22 | list_get(receiver List[mutarray], index int 0) -> mutarray (kept)
+examples/stdlib/matmul.bot:45:39 | list_get(receiver any, index int 0) -> any (lost)
+lib/web.bot:209:17 | list_get(receiver List[int[Byte]], index int 0) -> int[Byte] (kept)
+# 16
+
+# literal-index reads whose receiver type lost its element types: 7 of 16
+
+## struct literals and projections
+bench/test-selection.bot:62:5 | projection .name : any
+bench/test-selection.bot:65:5 | projection .dependencies : any
+bench/test-selection.bot:81:13 | struct literal : Test
+bench/test-selection.bot:85:5 | struct literal : Test
+bench/test-selection.bot:86:5 | struct literal : Test
+bench/test-selection.bot:87:5 | struct literal : Test
+bench/test-selection.bot:88:5 | struct literal : Test
+bench/test-selection.bot:89:5 | struct literal : Test
+bench/test-selection.bot:90:5 | struct literal : Test
+bench/test-selection.bot:91:5 | struct literal : Test
+bench/test-selection.bot:92:5 | struct literal : Test
+bench/test-selection.bot:93:5 | struct literal : Test
+bench/test-selection.bot:94:5 | struct literal : Test
+bench/test-selection.bot:95:5 | struct literal : Test
+bench/test-selection.bot:96:5 | struct literal : Test
+bench/test-selection.bot:97:5 | struct literal : Test
+bench/test-selection.bot:98:5 | struct literal : Test
+examples/stdlib/csv.bot:38:16 | struct literal : struct{field: str, index: int}
+examples/stdlib/csv.bot:50:16 | struct literal : struct{field: any, index: int}
+examples/stdlib/csv.bot:65:32 | projection .field : str
+examples/stdlib/csv.bot:66:12 | projection .index : int
+examples/stdlib/csv.bot:72:16 | struct literal : struct{fields: list, stop: int}
+examples/stdlib/csv.bot:74:5 | struct literal : struct{fields: list, stop: int}
+examples/stdlib/csv.bot:82:24 | projection .stop : int
+examples/stdlib/csv.bot:82:59 | projection .fields : List[str]
+examples/stdlib/csv_chunked.bot:82:16 | struct literal : struct{field: str, index: int}
+examples/stdlib/csv_chunked.bot:92:16 | struct literal : struct{field: any, index: int}
+examples/stdlib/csv_chunked.bot:104:35 | projection .field : str
+examples/stdlib/csv_chunked.bot:105:12 | projection .index : int
+examples/stdlib/csv_chunked.bot:111:16 | struct literal : struct{fields: list, stop: int}
+examples/stdlib/csv_chunked.bot:113:5 | struct literal : struct{fields: list, stop: int}
+examples/stdlib/csv_chunked.bot:120:24 | projection .stop : int
+examples/stdlib/csv_chunked.bot:120:62 | projection .fields : list
+examples/stdlib/csv_geometric.bot:100:16 | struct literal : struct{field: str, index: int}
+examples/stdlib/csv_geometric.bot:110:16 | struct literal : struct{field: any, index: int}
+examples/stdlib/csv_geometric.bot:131:42 | projection .field : str
+examples/stdlib/csv_geometric.bot:132:39 | projection .index : int
+examples/stdlib/csv_geometric.bot:135:16 | struct literal : struct{fields: List[str], stop: int}
+examples/stdlib/csv_geometric.bot:137:5 | struct literal : struct{fields: List[str], stop: any}
+examples/stdlib/csv_geometric.bot:143:28 | projection .index : int
+examples/stdlib/csv_geometric.bot:143:51 | projection .field : str
+examples/stdlib/csv_geometric.bot:151:39 | projection .fields : List[str]
+examples/stdlib/csv_geometric.bot:152:24 | projection .stop : int
+examples/stdlib/csv_geometric.bot:159:24 | projection .stop : int
+examples/stdlib/csv_geometric.bot:159:46 | projection .fields : List[str]
+examples/stdlib/csv_records.bot:173:16 | struct literal : struct{field: str, index: int}
+examples/stdlib/csv_records.bot:183:16 | struct literal : struct{field: any, index: int}
+examples/stdlib/csv_records.bot:204:42 | projection .field : str
+examples/stdlib/csv_records.bot:205:39 | projection .index : int
+examples/stdlib/csv_records.bot:208:16 | struct literal : struct{fields: List[str], stop: int}
+examples/stdlib/csv_records.bot:210:5 | struct literal : struct{fields: List[str], stop: any}
+examples/stdlib/csv_records.bot:216:28 | projection .index : int
+examples/stdlib/csv_records.bot:216:51 | projection .field : str
+examples/stdlib/csv_records.bot:224:39 | projection .fields : List[str]
+examples/stdlib/csv_records.bot:225:24 | projection .stop : int
+examples/stdlib/csv_records.bot:232:24 | projection .stop : int
+examples/stdlib/csv_records.bot:232:46 | projection .fields : List[str]
+examples/stdlib/csv_records.bot:353:19 | projection .controls : any
+examples/stdlib/csv_records.bot:356:23 | projection .keys : any
+examples/stdlib/csv_records.bot:357:23 | projection .values : any
+examples/stdlib/csv_records.bot:364:19 | projection .controls : any
+examples/stdlib/csv_records.bot:366:33 | projection .keys : any
+examples/stdlib/csv_records.bot:367:35 | projection .values : any
+examples/stdlib/csv_records.bot:373:11 | struct literal : struct{controls: any, keys: any, values: any}
+examples/stdlib/csv_records.bot:377:12 | struct literal : struct{controls: mutarray, keys: mutarray, values: mutarray}
+examples/stdlib/csv_records.bot:379:33 | projection .controls : mutarray
+examples/stdlib/csv_records.bot:380:33 | projection .keys : mutarray
+examples/stdlib/csv_records.bot:381:33 | projection .values : mutarray
+examples/stdlib/hashtable.bot:227:19 | projection .controls : any
+examples/stdlib/hashtable.bot:230:23 | projection .keys : any
+examples/stdlib/hashtable.bot:231:23 | projection .values : any
+examples/stdlib/hashtable.bot:241:19 | projection .controls : any
+examples/stdlib/hashtable.bot:243:33 | projection .keys : any
+examples/stdlib/hashtable.bot:244:35 | projection .values : any
+examples/stdlib/hashtable.bot:253:11 | struct literal : struct{controls: any, keys: any, values: any}
+examples/stdlib/hashtable.bot:257:12 | struct literal : struct{controls: mutarray, keys: mutarray, values: mutarray}
+examples/stdlib/hashtable.bot:259:33 | projection .controls : mutarray
+examples/stdlib/hashtable.bot:260:33 | projection .keys : mutarray
+examples/stdlib/hashtable.bot:261:33 | projection .values : mutarray
+# 79
+

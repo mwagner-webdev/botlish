@@ -1,0 +1,53 @@
+== fib
+semantic instances: 1; with a struct type: 0; distinct codegen keys of those: 0; sharing: 0
+codegen instances used: 2; emitted functions: 2; struct codegen instances: 0
+== lex-strategy
+semantic instances: 13; with a struct type: 0; distinct codegen keys of those: 0; sharing: 0
+codegen instances used: 11; emitted functions: 11; struct codegen instances: 0
+== loop-count
+semantic instances: 2; with a struct type: 0; distinct codegen keys of those: 0; sharing: 0
+codegen instances used: 3; emitted functions: 3; struct codegen instances: 0
+== refined-checks
+semantic instances: 2; with a struct type: 0; distinct codegen keys of those: 0; sharing: 0
+codegen instances used: 26; emitted functions: 24; struct codegen instances: 0
+== source-checks
+semantic instances: 4; with a struct type: 0; distinct codegen keys of those: 0; sharing: 0
+codegen instances used: 7; emitted functions: 7; struct codegen instances: 0
+== sum-refined
+semantic instances: 2; with a struct type: 0; distinct codegen keys of those: 0; sharing: 0
+codegen instances used: 4; emitted functions: 3; struct codegen instances: 0
+== test-selection
+semantic instances: 14; with a struct type: 0; distinct codegen keys of those: 0; sharing: 0
+codegen instances used: 14; emitted functions: 14; struct codegen instances: 0
+== uri-steady
+semantic instances: 19; with a struct type: 0; distinct codegen keys of those: 0; sharing: 0
+codegen instances used: 19; emitted functions: 17; struct codegen instances: 0
+== ai_text_clean
+semantic instances: 6; with a struct type: 0; distinct codegen keys of those: 0; sharing: 0
+codegen instances used: 6; emitted functions: 5; struct codegen instances: 0
+== csv
+semantic instances: 17; with a struct type: 0; distinct codegen keys of those: 0; sharing: 0
+codegen instances used: 10; emitted functions: 11; struct codegen instances: 0
+== csv_chunked
+semantic instances: 19; with a struct type: 0; distinct codegen keys of those: 0; sharing: 0
+codegen instances used: 20; emitted functions: 20; struct codegen instances: 0
+== csv_geometric
+semantic instances: 24; with a struct type: 0; distinct codegen keys of those: 0; sharing: 0
+codegen instances used: 19; emitted functions: 20; struct codegen instances: 0
+== csv_records
+semantic instances: 79; with a struct type: 0; distinct codegen keys of those: 0; sharing: 0
+codegen instances used: 60; emitted functions: 57; struct codegen instances: 0
+== hashtable
+semantic instances: 38; with a struct type: 0; distinct codegen keys of those: 0; sharing: 0
+codegen instances used: 30; emitted functions: 26; struct codegen instances: 0
+== matmul
+semantic instances: 19; with a struct type: 0; distinct codegen keys of those: 0; sharing: 0
+codegen instances used: 7; emitted functions: 7; struct codegen instances: 0
+== string_replace
+semantic instances: 6; with a struct type: 0; distinct codegen keys of those: 0; sharing: 0
+codegen instances used: 4; emitted functions: 4; struct codegen instances: 0
+== string_reverse
+semantic instances: 3; with a struct type: 0; distinct codegen keys of those: 0; sharing: 0
+codegen instances used: 3; emitted functions: 3; struct codegen instances: 0
+== TOTAL
+semantic 268 structSemantic 0 keys 0 used 245 emitted 234 structCodegen 0

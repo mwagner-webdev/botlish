@@ -1,0 +1,338 @@
+
+== fib.bot
+  <program>: closed (transitively closed)
+  fib<int>: closed (transitively closed)
+
+== lex-strategy.bot
+  <program>: closed (transitively guarded)
+  list::all?<List[str], native>: guarded (transitively guarded)
+      blocker: UnknownCallResultKind the condition needs bool; the result of the dynamic call at line 67:16 has no static kind
+  lenient_ident_char?<generic>: guarded (transitively guarded)
+      blocker: UnknownParameterKind is_tcl_alnum needs str; parameter c (no annotation, no call-site inference) has no static kind
+  choose_classifier<bool>: closed (transitively closed)
+  chars_of<str, int, List[never]>: closed (transitively closed)
+  chars_of<str, int, List[str]>: closed (transitively closed)
+  classify<str, bool>: closed (transitively closed)
+  count_true<List[bool], int, int>: closed (transitively closed)
+  valid_chars<str, bool>: closed (transitively closed)
+  fully_alnum?<str>: closed (transitively guarded)
+  total_valid<List[str], bool, int, int>: closed (transitively closed)
+
+== loop-count.bot
+  <program>: closed (transitively closed)
+  work<int>: closed (transitively closed)
+  drive<int, int>: closed (transitively closed)
+
+== refined-checks.bot
+  <program>: closed (transitively closed)
+  char::codepoint<UnicodeChar>: closed (transitively closed)
+  byte::high_nibble<int>: closed (transitively closed)
+  byte::nibble<int>: closed (transitively closed)
+  byte::from_int<int>: closed (transitively closed)
+  byte::set<List[UnicodeChar]>: closed (transitively closed)
+  ascii::is_digit<int>: closed (transitively closed)
+  ascii::is_upper<int>: closed (transitively closed)
+  ascii::is_lower<int>: closed (transitively closed)
+  ascii::is_alphabetic<int>: closed (transitively closed)
+  ascii::is_alphanumeric<int>: closed (transitively closed)
+  web::emailish?<str>: closed (transitively closed)
+  char_at<generic>: closed (transitively closed)
+  local_char?<generic>: guarded (transitively guarded)
+      blocker: UnknownParameterKind is_tcl_alnum needs str; parameter c (no annotation, no call-site inference) has no static kind
+  label_char?<str>: closed (transitively closed)
+  scan_while<generic>: closed (transitively closed)
+  tld?<generic>: closed (transitively closed)
+  domain?<generic>: closed (transitively closed)
+  web::is_unreserved<int>: closed (transitively closed)
+  web::uri_escape_text<str>: closed (transitively closed)
+  high_nibble<int>: closed (transitively closed)
+  hex_pair<int>: closed (transitively closed)
+  esc_bytes<List[int], int, str>: closed (transitively closed)
+  esc_char<str>: closed (transitively closed)
+  esc_from<str, int, str>: closed (transitively closed)
+  check<int, int, str, str>: closed (transitively closed)
+
+== source-checks.bot
+  <program>: closed (transitively guarded)
+  list::find<List[str], block>: guarded (transitively guarded)
+      blocker: UnknownCallResultKind the condition needs bool; the result of the dynamic call at line 79:12 has no static kind
+  is_underscore?<generic>: closed (transitively closed)
+  is_hyphen?<generic>: closed (transitively closed)
+  classify_leading<generic>: guarded (transitively guarded)
+      blocker: UnknownParameterKind length needs str; parameter name (no annotation, no call-site inference) has no static kind
+  valid_start?<generic>: closed (transitively guarded)
+  invalid_name?<generic>: closed (transitively guarded)
+
+== sum-refined.bot
+  <program>: closed (transitively closed)
+  refined_sum<int, int>: closed (transitively closed)
+  step<int>: closed (transitively closed)
+  step<generic>: guarded (transitively guarded)
+      blocker: UnknownParameterKind + needs int; parameter x (no annotation, no call-site inference) has no static kind
+
+== test-selection.bot
+  <program>: closed (transitively guarded)
+  list::any?<List[str], block>: guarded (transitively guarded)
+      blocker: UnknownCallResultKind the condition needs bool; the result of the dynamic call at line 61:12 has no static kind
+  list::none?<List[str], block>: guarded (transitively guarded)
+      blocker: UnknownCallResultKind the condition needs bool; the result of the dynamic call at line 73:12 has no static kind
+  list::find<List[Test], block>: guarded (transitively guarded)
+      blocker: UnknownCallResultKind the condition needs bool; the result of the dynamic call at line 79:12 has no static kind
+  make_changed?<List[str]>: closed (transitively closed)
+  changed?<generic>: closed (transitively closed)
+  test_name<Test>: closed (transitively closed)
+  test_deps<Test>: closed (transitively closed)
+  affected?<Test, block>: closed (transitively guarded)
+  select_affected<List[Test], block>: closed (transitively guarded)
+  first_affected<List[Test], block>: closed (transitively guarded)
+  is_affected?<generic>: closed (transitively guarded)
+
+== uri-steady.bot
+  <program>: closed (transitively closed)
+  char::codepoint<UnicodeChar>: closed (transitively closed)
+  byte::high_nibble<int>: closed (transitively closed)
+  byte::nibble<int>: closed (transitively closed)
+  byte::from_int<int>: closed (transitively closed)
+  byte::set<List[UnicodeChar]>: closed (transitively closed)
+  ascii::is_digit<int>: closed (transitively closed)
+  ascii::is_upper<int>: closed (transitively closed)
+  ascii::is_lower<int>: closed (transitively closed)
+  ascii::is_alphabetic<int>: closed (transitively closed)
+  ascii::is_alphanumeric<int>: closed (transitively closed)
+  web::is_unreserved<int>: closed (transitively closed)
+  web::uri_escape_text<str>: closed (transitively closed)
+  high_nibble<int>: closed (transitively closed)
+  hex_pair<int>: closed (transitively closed)
+  esc_bytes<List[int], int, str>: closed (transitively closed)
+  esc_char<str>: closed (transitively closed)
+  esc_from<str, int, str>: closed (transitively closed)
+  repeat_uri<generic>: closed (transitively closed)
+
+== ai_text_clean.bot
+  <program>: closed (transitively closed)
+  peek<str, int>: closed (transitively closed)
+  cleaner_emoji<str>: closed (transitively closed)
+  clean_char<str>: closed (transitively closed)
+  clean_from<str, int, str>: closed (transitively closed)
+  clean_ai_text<str>: closed (transitively closed)
+
+== csv.bot
+  <program>: closed (transitively closed)
+  peek<str, int>: closed (transitively closed)
+  scan_unquoted<str, int, int>: closed (transitively closed)
+  scan_quoted<str, int, str>: closed (transitively closed)
+  scan_field<str, int>: closed (transitively closed)
+  scan_record<str, int, List[never]>: closed (transitively closed)
+  scan_record<str, int, List[str]>: closed (transitively closed)
+  scan_records<str, int, List[never]>: closed (transitively closed)
+  scan_records<str, int, List[List[str]]>: closed (transitively closed)
+  csv_parse<str>: closed (transitively closed)
+
+== csv_chunked.bot
+  <program>: closed (transitively guarded)
+  chunk_size<generic>: closed (transitively closed)
+  chunked_new<generic>: closed (transitively closed)
+  chunked_append<list[List[never], mutarray, int], str>: closed (transitively closed)
+  chunked_append<list[List[mutarray], mutarray, int], str>: closed (transitively closed)
+  chunked_append<list[List[never], mutarray, int], list>: closed (transitively closed)
+  chunked_append<list[List[mutarray], mutarray, int], list>: closed (transitively closed)
+  chunked_copy_chunks<List[never], int, mutarray, int>: guarded (transitively guarded)
+      blocker: UnknownAggregateElementType mutable_array_copy needs mutarray; the element read by list_get at line 51:13 has no static kind
+  chunked_copy_chunks<List[mutarray], int, mutarray, int>: closed (transitively closed)
+  chunked_finish<list[List[never], mutarray, int]>: closed (transitively guarded)
+  chunked_finish<list[List[mutarray], mutarray, int]>: closed (transitively closed)
+  peek<str, int>: closed (transitively closed)
+  scan_unquoted<str, int, int>: closed (transitively closed)
+  scan_quoted<str, int, str>: closed (transitively closed)
+  scan_field<str, int>: closed (transitively closed)
+  scan_record<str, int, list[List[never], mutarray, int]>: closed (transitively closed)
+  scan_record<str, int, list[List[mutarray], mutarray, int]>: closed (transitively closed)
+  scan_records<str, int, list[List[never], mutarray, int]>: closed (transitively guarded)
+  scan_records<str, int, list[List[mutarray], mutarray, int]>: closed (transitively closed)
+  csv_parse<str>: closed (transitively guarded)
+
+== csv_geometric.bot
+  <program>: closed (transitively guarded)
+  mutarray::create<int, str>: closed (transitively closed)
+  mutarray::create<int, List[str]>: closed (transitively closed)
+  geo_new<str>: closed (transitively closed)
+  geo_new<List[str]>: closed (transitively closed)
+  geo_new_capacity<int, int>: closed (transitively closed)
+  geo_grow<mutarray, int, str>: closed (transitively closed)
+  geo_grow<mutarray, int, List[str]>: closed (transitively closed)
+  geo_append<mutarray, int, str>: guarded (transitively guarded)
+      blocker: UnknownCallResultKind mutable_array_set needs mutarray; the result of geo_grow at line 62:13 has no static kind
+  geo_append<mutarray, int, List[str]>: guarded (transitively guarded)
+      blocker: UnknownCallResultKind mutable_array_set needs mutarray; the result of geo_grow at line 62:13 has no static kind
+  geo_finish<mutarray, int>: closed (transitively closed)
+  peek<str, int>: closed (transitively closed)
+  scan_unquoted<str, int, int>: closed (transitively closed)
+  scan_quoted<str, int, str>: closed (transitively closed)
+  scan_field<str, int>: closed (transitively closed)
+  scan_record_rest<str, int, mutarray, int>: closed (transitively guarded)
+  scan_record<str, int>: closed (transitively guarded)
+  scan_records<str, int, mutarray, int>: closed (transitively guarded)
+  csv_parse<str>: closed (transitively guarded)
+
+== csv_records.bot
+  <program>: closed (transitively guarded)
+  mutarray::create<int, str>: closed (transitively closed)
+  mutarray::create<int, List[str]>: closed (transitively closed)
+  mutarray::create<int, mutarray>: closed (transitively closed)
+  geo_new<str>: closed (transitively closed)
+  geo_new<List[str]>: closed (transitively closed)
+  geo_new<mutarray>: closed (transitively closed)
+  geo_new_capacity<int, int>: closed (transitively closed)
+  geo_grow<mutarray, int, str>: closed (transitively closed)
+  geo_grow<mutarray, int, List[str]>: closed (transitively closed)
+  geo_grow<mutarray, int, mutarray>: closed (transitively closed)
+  geo_append<mutarray, int, str>: guarded (transitively guarded)
+      blocker: UnknownCallResultKind mutable_array_set needs mutarray; the result of geo_grow at line 139:13 has no static kind
+  geo_append<mutarray, int, List[str]>: guarded (transitively guarded)
+      blocker: UnknownCallResultKind mutable_array_set needs mutarray; the result of geo_grow at line 139:13 has no static kind
+  geo_append<mutarray, int, mutarray>: guarded (transitively guarded)
+      blocker: UnknownCallResultKind mutable_array_set needs mutarray; the result of geo_grow at line 139:13 has no static kind
+  geo_finish<mutarray, int>: closed (transitively closed)
+  peek<str, int>: closed (transitively closed)
+  scan_unquoted<str, int, int>: closed (transitively closed)
+  scan_quoted<str, int, str>: closed (transitively closed)
+  scan_field<str, int>: closed (transitively closed)
+  scan_record_rest<str, int, mutarray, int>: closed (transitively guarded)
+  scan_record<str, int>: closed (transitively guarded)
+  scan_records<str, int, mutarray, int>: closed (transitively guarded)
+  csv_parse<str>: closed (transitively guarded)
+  ht_min_capacity<generic>: closed (transitively closed)
+  ht_empty_state<generic>: closed (transitively closed)
+  ht_occupied_state<generic>: closed (transitively closed)
+  ht_tombstone_state<generic>: closed (transitively closed)
+  ht_fill_empty<mutarray, int, int>: closed (transitively closed)
+  ht_alloc<int>: closed (transitively closed)
+  ht_new<generic>: closed (transitively closed)
+  ht_capacity_for<int, int>: closed (transitively closed)
+  ht_new_sized<int>: closed (transitively closed)
+  ht_controls<mutarray>: closed (transitively closed)
+  ht_keys<mutarray>: closed (transitively closed)
+  ht_values<mutarray>: closed (transitively closed)
+  ht_size<mutarray>: closed (transitively closed)
+  ht_tombstones<mutarray>: closed (transitively closed)
+  ht_capacity<mutarray>: guarded (transitively guarded)
+      blocker: UnknownCallResultKind mutable_array_capacity needs mutarray; the result of ht_controls at line 299:28 has no static kind
+  ht_probe_start<mutarray, str>: closed (transitively guarded)
+  ht_probe_next<mutarray, int>: closed (transitively guarded)
+  ht_find_get<mutarray, str, int>: guarded (transitively guarded)
+      blocker: UnknownCallResultKind mutable_array_get needs mutarray; the result of ht_controls at line 308:16 has no static kind
+      blocker: UnknownCallResultKind mutable_array_get needs mutarray; the result of ht_keys at line 313:59 has no static kind
+  ht_find_insert<mutarray, str, int, int>: guarded (transitively guarded)
+      blocker: UnknownCallResultKind mutable_array_get needs mutarray; the result of ht_controls at line 319:16 has no static kind
+      blocker: UnknownCallResultKind mutable_array_get needs mutarray; the result of ht_keys at line 327:59 has no static kind
+  ht_get<mutarray, str>: guarded (transitively guarded)
+      blocker: UnknownCallResultKind mutable_array_get needs mutarray; the result of ht_values at line 340:23 has no static kind
+  ht_rehash_probe<mutarray, int, int>: closed (transitively closed)
+  ht_rehash_insert<struct{controls: mutarray, keys: mutarray, values: mutarray}, int, any, any>: closed (transitively closed)
+  ht_rehash_scan<struct{controls: any, keys: any, values: any}, int, int, struct{controls: mutarray, keys: mutarray, values: mutarray}, int>: guarded (transitively guarded)
+      blocker: UnknownValueKind mutable_array_get needs mutarray; the operand at line 364:19 has no static kind
+      blocker: UnknownValueKind mutable_array_get needs mutarray; the operand at line 366:33 has no static kind
+      blocker: UnknownValueKind mutable_array_get needs mutarray; the operand at line 367:35 has no static kind
+  ht_rehash<mutarray, int>: closed (transitively guarded)
+  ht_should_grow<mutarray>: guarded (transitively guarded)
+      blocker: UnknownCallResultKind + needs int; the result of ht_size at line 386:16 has no static kind
+      blocker: UnknownCallResultKind + needs int; the result of ht_tombstones at line 386:33 has no static kind
+  ht_grow_or_clean<mutarray>: guarded (transitively guarded)
+      blocker: UnknownCallResultKind > needs int; the result of ht_tombstones at line 390:8 has no static kind
+      blocker: UnknownCallResultKind > needs int; the result of ht_size at line 390:31 has no static kind
+  ht_place<mutarray, int, str, str>: guarded (transitively guarded)
+      blocker: UnknownCallResultKind mutable_array_get needs mutarray; the result of ht_controls at line 396:16 has no static kind
+      blocker: UnknownCallResultKind mutable_array_set needs mutarray; the result of ht_keys at line 399:23 has no static kind
+      blocker: UnknownCallResultKind mutable_array_set needs mutarray; the result of ht_values at line 400:23 has no static kind
+      blocker: UnknownCallResultKind + needs int; the result of ht_size at line 401:33 has no static kind
+      blocker: UnknownCallResultKind - needs int; the result of ht_tombstones at line 403:37 has no static kind
+  ht_set<mutarray, str, str>: guarded (transitively guarded)
+      blocker: UnknownCallResultKind mutable_array_get needs mutarray; the result of ht_controls at line 409:16 has no static kind
+      blocker: UnknownCallResultKind mutable_array_set needs mutarray; the result of ht_values at line 412:27 has no static kind
+  row_new<bool, int>: closed (transitively closed)
+  row_fill<mutarray, List[str], List[str], int, int>: closed (transitively guarded)
+  row_table<List[str], int, List[str], bool>: closed (transitively guarded)
+  build_rows<List[List[str]], int, List[str], int, mutarray, int, bool>: closed (transitively guarded)
+  csv_records_generic<str, bool>: closed (transitively guarded)
+  csv_records<str>: closed (transitively guarded)
+  csv_records_presized<str>: closed (transitively guarded)
+  sample<generic>: closed (transitively guarded)
+
+== hashtable.bot
+  <program>: closed (transitively guarded)
+  ht_min_capacity<generic>: closed (transitively closed)
+  ht_empty_state<generic>: closed (transitively closed)
+  ht_occupied_state<generic>: closed (transitively closed)
+  ht_tombstone_state<generic>: closed (transitively closed)
+  ht_fill_empty<mutarray, int, int>: closed (transitively closed)
+  ht_alloc<int>: closed (transitively closed)
+  ht_new<generic>: closed (transitively closed)
+  ht_controls<mutarray>: closed (transitively closed)
+  ht_keys<mutarray>: closed (transitively closed)
+  ht_values<mutarray>: closed (transitively closed)
+  ht_size<mutarray>: closed (transitively closed)
+  ht_tombstones<mutarray>: closed (transitively closed)
+  ht_capacity<mutarray>: guarded (transitively guarded)
+      blocker: UnknownCallResultKind mutable_array_capacity needs mutarray; the result of ht_controls at line 151:28 has no static kind
+  ht_probe_start<mutarray, str>: closed (transitively guarded)
+  ht_probe_next<mutarray, int>: closed (transitively guarded)
+  ht_find_get<mutarray, str, int>: guarded (transitively guarded)
+      blocker: UnknownCallResultKind mutable_array_get needs mutarray; the result of ht_controls at line 166:16 has no static kind
+      blocker: UnknownCallResultKind mutable_array_get needs mutarray; the result of ht_keys at line 171:59 has no static kind
+  ht_find_insert<mutarray, str, int, int>: guarded (transitively guarded)
+      blocker: UnknownCallResultKind mutable_array_get needs mutarray; the result of ht_controls at line 181:16 has no static kind
+      blocker: UnknownCallResultKind mutable_array_get needs mutarray; the result of ht_keys at line 189:59 has no static kind
+  ht_get<mutarray, str>: guarded (transitively guarded)
+      blocker: UnknownCallResultKind mutable_array_get needs mutarray; the result of ht_values at line 206:23 has no static kind
+  ht_contains<mutarray, str>: closed (transitively guarded)
+  ht_rehash_probe<mutarray, int, int>: closed (transitively closed)
+  ht_rehash_insert<struct{controls: mutarray, keys: mutarray, values: mutarray}, int, any, any>: closed (transitively closed)
+  ht_rehash_scan<struct{controls: any, keys: any, values: any}, int, int, struct{controls: mutarray, keys: mutarray, values: mutarray}, int>: guarded (transitively guarded)
+      blocker: UnknownValueKind mutable_array_get needs mutarray; the operand at line 241:19 has no static kind
+      blocker: UnknownValueKind mutable_array_get needs mutarray; the operand at line 243:33 has no static kind
+      blocker: UnknownValueKind mutable_array_get needs mutarray; the operand at line 244:35 has no static kind
+  ht_rehash<mutarray, int>: closed (transitively guarded)
+  ht_should_grow<mutarray>: guarded (transitively guarded)
+      blocker: UnknownCallResultKind + needs int; the result of ht_size at line 268:16 has no static kind
+      blocker: UnknownCallResultKind + needs int; the result of ht_tombstones at line 268:33 has no static kind
+  ht_grow_or_clean<mutarray>: guarded (transitively guarded)
+      blocker: UnknownCallResultKind > needs int; the result of ht_tombstones at line 272:8 has no static kind
+      blocker: UnknownCallResultKind > needs int; the result of ht_size at line 272:31 has no static kind
+  ht_place<mutarray, int, str, str>: guarded (transitively guarded)
+      blocker: UnknownCallResultKind mutable_array_get needs mutarray; the result of ht_controls at line 302:16 has no static kind
+      blocker: UnknownCallResultKind mutable_array_set needs mutarray; the result of ht_keys at line 305:23 has no static kind
+      blocker: UnknownCallResultKind mutable_array_set needs mutarray; the result of ht_values at line 306:23 has no static kind
+      blocker: UnknownCallResultKind + needs int; the result of ht_size at line 307:33 has no static kind
+      blocker: UnknownCallResultKind - needs int; the result of ht_tombstones at line 309:37 has no static kind
+  ht_set<mutarray, str, str>: guarded (transitively guarded)
+      blocker: UnknownCallResultKind mutable_array_get needs mutarray; the result of ht_controls at line 315:16 has no static kind
+      blocker: UnknownCallResultKind mutable_array_set needs mutarray; the result of ht_values at line 318:27 has no static kind
+  ht_delete<mutarray, str>: guarded (transitively guarded)
+      blocker: UnknownCallResultKind mutable_array_set needs mutarray; the result of ht_controls at line 338:23 has no static kind
+      blocker: UnknownCallResultKind mutable_array_set needs mutarray; the result of ht_keys at line 339:23 has no static kind
+      blocker: UnknownCallResultKind mutable_array_set needs mutarray; the result of ht_values at line 340:23 has no static kind
+      blocker: UnknownCallResultKind - needs int; the result of ht_size at line 341:33 has no static kind
+      blocker: UnknownCallResultKind + needs int; the result of ht_tombstones at line 342:33 has no static kind
+  sample<generic>: closed (transitively guarded)
+
+== matmul.bot
+  <program>: closed (transitively closed)
+  dot<List[int], List[List[int]], int, int, int, int>: closed (transitively closed)
+  product_row<List[int], List[List[int]], int, int, List[never]>: closed (transitively closed)
+  product_row<List[int], List[List[int]], int, int, List[int]>: closed (transitively closed)
+  product_rows<List[List[int]], List[List[int]], int, int, List[never]>: closed (transitively closed)
+  product_rows<List[List[int]], List[List[int]], int, int, List[List[int]]>: closed (transitively closed)
+  matmul<List[List[int]], List[List[int]]>: closed (transitively closed)
+
+== string_replace.bot
+  <program>: closed (transitively closed)
+  matches_at<str, str, int>: closed (transitively closed)
+  replace_from<str, str, str, int, int, str>: closed (transitively closed)
+  replace<str, str, str>: closed (transitively closed)
+
+== string_reverse.bot
+  <program>: closed (transitively closed)
+  reverse_from<str, int, str>: closed (transitively closed)
+  reverse_chars<str>: closed (transitively closed)
+
+# status counts: closed 208 guarded 34

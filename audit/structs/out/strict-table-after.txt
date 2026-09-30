@@ -1,0 +1,56 @@
+lex-strategy.bot:79:63  total_valid          param token needs str (arg any)
+test-selection.bot:68:16  affected?            param xs needs list (arg any)
+web.bot:204:70  uri_escape_text      param b needs int (arg any)
+csv_geometric.bot:131:27  scan_record_rest     param storage needs mutarray (arg MutableArray[str])
+csv_geometric.bot:132:54  scan_record_rest     param fields needs MutableArray[str] (arg mutarray)
+csv_geometric.bot:135:36  scan_record_rest     param storage needs mutarray (arg MutableArray[str])
+csv_geometric.bot:137:25  scan_record_rest     param storage needs mutarray (arg MutableArray[str])
+csv_geometric.bot:148:27  scan_records         param storage needs mutarray (arg MutableArray[List[str]])
+csv_geometric.bot:151:23  scan_records         param storage needs mutarray (arg MutableArray[List[str]])
+csv_geometric.bot:152:38  scan_records         param records needs MutableArray[List[str]] (arg mutarray)
+csv_geometric.bot:159:38  csv_parse            param records needs MutableArray[List[str]] (arg MutableArray[list])
+csv_geometric.bot:131:27  scan_record_rest     erasure of element contract
+csv_geometric.bot:135:36  scan_record_rest     erasure of element contract
+csv_geometric.bot:137:25  scan_record_rest     erasure of element contract
+csv_geometric.bot:148:27  scan_records         erasure of element contract
+csv_geometric.bot:151:23  scan_records         erasure of element contract
+csv_geometric.bot:159:38  csv_parse            erasure of element contract
+csv_geometric.bot:131:16  scan_record_rest     invalid call: call to geo_append with storage : mutarray, length : int, value : str 
+csv_geometric.bot:151:12  scan_records         invalid call: call to geo_append with storage : mutarray, length : int, value : list
+csv_records.bot:204:27  scan_record_rest     param storage needs mutarray (arg MutableArray[str])
+csv_records.bot:205:54  scan_record_rest     param fields needs MutableArray[str] (arg mutarray)
+csv_records.bot:208:36  scan_record_rest     param storage needs mutarray (arg MutableArray[str])
+csv_records.bot:210:25  scan_record_rest     param storage needs mutarray (arg MutableArray[str])
+csv_records.bot:221:27  scan_records         param storage needs mutarray (arg MutableArray[List[str]])
+csv_records.bot:224:23  scan_records         param storage needs mutarray (arg MutableArray[List[str]])
+csv_records.bot:225:38  scan_records         param records needs MutableArray[List[str]] (arg mutarray)
+csv_records.bot:232:38  csv_parse            param records needs MutableArray[List[str]] (arg MutableArray[list])
+csv_records.bot:354:29  ht_rehash_insert     param newControls needs mutarray (arg any)
+csv_records.bot:466:27  build_rows           param storage needs mutarray (arg MutableArray[mutarray])
+csv_records.bot:468:46  build_rows           param fields needs list (arg any)
+csv_records.bot:469:55  build_rows           param outer needs MutableArray[mutarray] (arg mutarray)
+csv_records.bot:469:66  build_rows           param storage needs mutarray (arg MutableArray[mutarray])
+csv_records.bot:483:46  csv_records_generic  param fields needs list (arg any)
+csv_records.bot:507:20  sample               param table needs mutarray (arg any)
+csv_records.bot:507:45  sample               param table needs mutarray (arg any)
+csv_records.bot:507:81  sample               param table needs mutarray (arg any)
+csv_records.bot:507:99  sample               param table needs mutarray (arg any)
+csv_records.bot:508:32  sample               param table needs mutarray (arg any)
+csv_records.bot:508:55  sample               param table needs mutarray (arg any)
+csv_records.bot:508:77  sample               param table needs mutarray (arg any)
+csv_records.bot:508:100  sample               param table needs mutarray (arg any)
+csv_records.bot:508:124  sample               param table needs mutarray (arg any)
+csv_records.bot:204:27  scan_record_rest     erasure of element contract
+csv_records.bot:208:36  scan_record_rest     erasure of element contract
+csv_records.bot:210:25  scan_record_rest     erasure of element contract
+csv_records.bot:221:27  scan_records         erasure of element contract
+csv_records.bot:224:23  scan_records         erasure of element contract
+csv_records.bot:232:38  csv_parse            erasure of element contract
+csv_records.bot:466:27  build_rows           erasure of element contract
+csv_records.bot:469:66  build_rows           erasure of element contract
+csv_records.bot:204:16  scan_record_rest     invalid call: call to geo_append with storage : mutarray, length : int, value : str 
+csv_records.bot:224:12  scan_records         invalid call: call to geo_append with storage : mutarray, length : int, value : list
+csv_records.bot:469:55  build_rows           invalid call: call to geo_append with storage : mutarray, length : int, value : muta
+hashtable.bot:228:29  ht_rehash_insert     param newControls needs mutarray (arg any)
+matmul.bot:38:23  product_rows         param a_row needs list (arg any)
+09-mutual-recursion.bot:13:5  is_even              unbound name "is_odd": "is_odd" is declared later; forward references 

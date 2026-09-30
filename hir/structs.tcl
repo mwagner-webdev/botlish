@@ -276,63 +276,43 @@ proc hir::structs::ProjectionProblem {hir e} {
         $name [hir::types::show $type]]]
 }
 
-# Diagnoses the projection problems of every `project` in BLOCKS' own bodies
-# (BLOCKS: block ExprIds and/or `program`; a nested block is its own entry).
-# MODE generic: an unproven projection is reported only when its function is
-# generically live (above); instance: always (hir/semantic.tcl's view of one
-# instance).
-proc hir::structs::verifyBlocks {hirVar blocks {mode instance}} {
+# Diagnoses the projection problems among the expressions EXPRS (an instance's
+# region, hir/semantic.tcl): an unproven projection is always reported, since
+# that is where an instance's proof has to come from. A flat scan: a struct
+# program's projections are found by kind, never by walking the whole tree.
+proc hir::structs::verifyExprs {hirVar exprs} {
     upvar 1 $hirVar hir
-    set live ""
-    foreach block $blocks {
-        if {$block eq "program"} {
-            set body [hir::roots $hir]
-        } else {
-            set body [dict get $hir exprs $block body]
-        }
-        foreach child $body {
-            VerifyWalk hir $child $block $mode live
-        }
-    }
-}
-
-proc hir::structs::VerifyWalk {hirVar e block mode liveVar} {
-    upvar 1 $hirVar hir $liveVar live
-    set node [dict get $hir exprs $e]
-    if {[dict get $node kind] eq "block"} {
-        return
-    }
-    if {[dict get $node kind] eq "project"} {
+    foreach e $exprs {
+        set node [dict get $hir exprs $e]
+        if {[dict get $node kind] ne "project"} continue
         set problem [ProjectionProblem $hir $e]
         if {$problem ne ""} {
             lassign $problem kind message
-            if {$kind ne "UNPROVEN-FIELD" || $mode ne "generic"} {
-                hir::DiagnoseAt hir $kind $message $e [dict get $node nameOrigin]
-            } else {
-                if {$live eq ""} {
-                    set live [GenericLive $hir]
-                }
-                if {$block eq "program" || $block in $live} {
-                    hir::DiagnoseAt hir $kind $message $e [dict get $node nameOrigin]
-                }
-            }
+            hir::DiagnoseAt hir $kind $message $e [dict get $node nameOrigin]
         }
-    }
-    foreach child [hir::children $hir $e] {
-        VerifyWalk hir $child $block $mode live
     }
 }
 
-# The generic verification of the whole program (hir::CheckOnce).
+# The generic verification of the whole program (hir::CheckOnce): every
+# projection, found by a flat scan of the expression table. An unproven one is
+# reported only when its function is generically live (above).
 proc hir::structs::verify {hirVar} {
     upvar 1 $hirVar hir
-    set blocks [list program]
+    set live ""
     dict for {e node} [dict get $hir exprs] {
-        if {[dict get $node kind] eq "block"} {
-            lappend blocks $e
+        if {[dict get $node kind] ne "project"} continue
+        set problem [ProjectionProblem $hir $e]
+        if {$problem eq ""} continue
+        lassign $problem kind message
+        if {$kind eq "UNPROVEN-FIELD"} {
+            if {$live eq ""} {
+                set live [GenericLive $hir]
+            }
+            set owner [OwnerBlock $hir $e]
+            if {$owner ne "program" && $owner ni $live} continue
         }
+        hir::DiagnoseAt hir $kind $message $e [dict get $node nameOrigin]
     }
-    verifyBlocks hir $blocks generic
 }
 
 # The innermost block whose body CODE of expression E is in ("program" at

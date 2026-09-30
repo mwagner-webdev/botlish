@@ -1,0 +1,431 @@
+== fib.bot
+   20:1   fib                      : int
+   18:9   fib                      : int
+   18:22  fib                      : int
+== lex-strategy.bot
+   52:5   chars_of                 : list
+   66:5   count_true               : int
+   69:5   count_true               : int
+   72:5   list::all?               : bool
+   79:5   total_valid              : int
+   85:12  fully_alnum?             : bool
+   56:15  chars_of                 : List[str]
+   69:16  classify                 : List[bool]
+   72:16  chars_of                 : List[str]
+   81:16  total_valid              : int
+   82:17  total_valid              : int
+   55:18  choose_classifier        : Fn{args: [any], return: bool, errors: []}
+   79:51  valid_chars              : int
+== loop-count.bot
+   44:1   drive                    : int
+   42:5   drive                    : int
+   42:26  work                     : int
+== refined-checks.bot
+   42:2   check                    : int
+   40:5   check                    : int
+   42:35  check                    : int
+== source-checks.bot
+   85:8   valid_start?             : bool
+   63:9   valid_start?             : bool
+   59:13  classify_leading         : List[bool]
+   89:17  list::find               : str
+== sum-refined.bot
+   35:1   refined_sum              : int
+   31:9   refined_sum              : int
+   31:28  step                     : int
+== test-selection.bot
+   68:5   list::any?               : bool
+   82:5   test_name                : str
+   78:9   affected?                : bool
+  107:9   changed?                 : bool
+   79:13  list::find               : Test
+  104:14  make_changed?            : block(e55)/1 -> bool
+  105:14  make_changed?            : block(e55)/1 -> bool
+  109:14  select_affected          : List[Test]
+  110:14  select_affected          : List[Test]
+   68:16  test_deps                : any
+   72:16  affected?                : bool
+  113:19  list::none?              : bool
+  115:52  first_affected           : str
+== uri-steady.bot
+   39:1   repeat_uri               : int
+   37:5   repeat_uri               : int
+   63:5   ascii::is_upper          : bool
+   66:5   ascii::is_alphabetic     : bool
+  190:5   ascii::is_alphanumeric   : bool
+  223:5   esc_from                 : str
+  176:9   byte::from_int           : int[Byte]
+  195:9   byte::nibble             : int[Nibble]
+  134:13  scan_while               : int
+  204:13  esc_bytes                : str
+  215:13  esc_bytes                : str
+  221:13  esc_from                 : str
+   36:15  web::uri_escape_text     : str
+  161:16  char_at                  : str
+  180:16  char_at                  : str
+  210:16  web::is_unreserved       : bool
+  173:17  scan_while               : int
+  181:17  domain?                  : bool
+  213:17  esc_bytes                : str
+  176:18  char::codepoint          : int
+   63:20  ascii::is_lower          : bool
+  164:20  char_at                  : str
+  166:20  tld?                     : bool
+  195:22  byte::high_nibble        : int[HighNibble]
+  169:24  label_char?              : bool
+   66:25  ascii::is_digit          : bool
+  128:26  char_at                  : str
+  187:31  byte::set                : ImmutableSet[int[Byte]]
+  169:36  char_at                  : str
+  198:37  high_nibble              : int[Nibble]
+  221:47  esc_char                 : str
+  204:61  hex_pair                 : str
+== ai_text_clean.bot
+   79:2   clean_ai_text            : str
+   74:5   clean_from               : str
+   77:5   clean_from               : str
+   52:8   cleaner_emoji            : bool
+   79:26  clean_ai_text            : str
+   74:46  clean_char               : str
+   74:57  peek                     : str
+   79:58  clean_ai_text            : str
+   79:89  clean_ai_text            : str
+   79:115 clean_ai_text            : str
+   79:141 clean_ai_text            : str
+== csv.bot
+   87:1   csv_parse                : List[List[str]]
+   40:5   scan_unquoted            : struct{field: str, index: int}
+   52:5   scan_quoted              : struct{field: str, index: int}
+   59:5   scan_unquoted            : struct{field: str, index: int}
+   82:5   scan_records             : list
+   85:5   scan_records             : List[List[str]]
+   56:8   peek                     : str
+   47:12  peek                     : str
+   64:15  scan_field               : struct{field: str, index: int}
+   81:15  scan_record              : struct{fields: List[str], stop: int}
+   57:16  scan_quoted              : struct{field: str, index: int}
+   69:16  scan_record              : struct{fields: list, stop: int}
+   36:17  peek                     : str
+   45:17  peek                     : str
+   67:17  peek                     : str
+   48:20  scan_quoted              : struct{field: str, index: int}
+== csv_chunked.bot
+  125:1   csv_parse                : list
+   53:5   chunked_copy_chunks      : int
+   84:5   scan_unquoted            : struct{field: str, index: int}
+   94:5   scan_quoted              : struct{field: str, index: int}
+  100:5   scan_unquoted            : struct{field: str, index: int}
+  120:5   scan_records             : list
+  123:5   scan_records             : list
+   97:8   peek                     : str
+   89:12  peek                     : str
+  104:12  chunked_append           : list
+   64:14  chunked_copy_chunks      : int
+  113:14  chunked_finish           : list
+  103:15  scan_field               : struct{field: str, index: int}
+  119:15  scan_record              : struct{fields: list, stop: int}
+   98:16  scan_quoted              : struct{field: str, index: int}
+  108:16  scan_record              : struct{fields: list, stop: int}
+  117:16  chunked_finish           : list
+   80:17  peek                     : str
+   87:17  peek                     : str
+  106:17  peek                     : str
+   36:18  chunk_size               : int
+   90:20  scan_quoted              : struct{field: str, index: int}
+  111:25  chunked_finish           : list
+  123:27  chunked_new              : list
+   25:33  chunk_size               : int
+   62:38  chunk_size               : int
+  120:38  chunked_append           : list
+   38:40  chunk_size               : int
+  119:40  chunked_new              : list
+   52:49  chunk_size               : int
+   53:60  chunk_size               : int
+== csv_geometric.bot
+  161:1   csv_parse                : List[List[str]]
+   29:5   mutarray::create         : MutableArray[any]
+  102:5   scan_unquoted            : struct{field: str, index: int}
+  112:5   scan_quoted              : struct{field: str, index: int}
+  118:5   scan_unquoted            : struct{field: str, index: int}
+  143:5   scan_record_rest         : struct{fields: List[str], stop: int}
+  152:5   scan_records             : List[List[str]]
+  159:5   scan_records             : List[List[str]]
+  115:8   peek                     : str
+  107:12  peek                     : str
+  151:12  geo_append               : MutableArray[List[str]]
+   54:13  mutarray::create         : MutableArray[any]
+   62:13  geo_grow                 : mutarray
+  137:14  geo_finish               : List[str]
+  142:15  scan_field               : struct{field: str, index: int}
+  150:15  scan_record              : struct{fields: List[str], stop: int}
+  158:15  scan_record              : struct{fields: List[str], stop: int}
+  116:16  scan_quoted              : struct{field: str, index: int}
+  131:16  geo_append               : MutableArray[str]
+  132:16  scan_record_rest         : struct{fields: List[str], stop: int}
+  148:16  geo_finish               : List[List[str]]
+   98:17  peek                     : str
+  105:17  peek                     : str
+  128:17  peek                     : str
+  130:19  scan_field               : struct{field: str, index: int}
+   53:20  geo_new_capacity         : int
+  108:20  scan_quoted              : struct{field: str, index: int}
+  135:25  geo_finish               : List[str]
+  159:38  geo_new                  : MutableArray[List[str]]
+  143:43  geo_new                  : MutableArray[str]
+== csv_records.bot
+  510:1   sample                   : list
+  106:5   mutarray::create         : MutableArray[any]
+  175:5   scan_unquoted            : struct{field: str, index: int}
+  185:5   scan_quoted              : struct{field: str, index: int}
+  191:5   scan_unquoted            : struct{field: str, index: int}
+  216:5   scan_record_rest         : struct{fields: List[str], stop: int}
+  225:5   scan_records             : List[List[str]]
+  232:5   scan_records             : List[List[str]]
+  256:5   ht_fill_empty            : unit
+  260:5   ht_fill_empty            : unit
+  272:5   ht_alloc                 : mutarray
+  278:5   ht_capacity_for          : int
+  281:5   ht_alloc                 : mutarray
+  316:5   ht_find_get              : int
+  333:5   ht_find_insert           : int
+  343:5   ht_find_get              : int
+  350:5   ht_rehash_probe          : int
+  370:5   ht_rehash_scan           : unit
+  376:5   ht_fill_empty            : unit
+  378:5   ht_rehash_scan           : unit
+  419:5   ht_place                 : unit
+  431:5   ht_new                   : mutarray
+  442:5   ht_set                   : unit
+  443:5   row_fill                 : any
+  449:5   row_fill                 : mutarray
+  469:5   build_rows               : List[mutarray]
+  484:5   build_rows               : List[mutarray]
+  489:5   csv_records_generic      : List[mutarray]
+  494:5   csv_records_generic      : List[mutarray]
+  188:8   peek                     : str
+  390:8   ht_tombstones            : any
+  415:8   ht_should_grow           : bool
+  368:9   ht_rehash_insert         : unit
+  391:9   ht_rehash                : unit
+  393:9   ht_rehash                : unit
+  416:9   ht_grow_or_clean         : unit
+  180:12  peek                     : str
+  224:12  geo_append               : MutableArray[List[str]]
+  502:12  csv_records              : List[mutarray]
+  131:13  mutarray::create         : MutableArray[any]
+  139:13  geo_grow                 : mutarray
+  336:13  ht_find_get              : int
+  354:13  ht_rehash_probe          : int
+  408:13  ht_find_insert           : int
+  448:13  row_new                  : mutarray
+  468:13  row_table                : mutarray
+  483:13  row_table                : mutarray
+  507:13  ht_get                   : any
+  210:14  geo_finish               : List[str]
+  272:14  ht_min_capacity          : int
+  281:14  ht_capacity_for          : int
+  215:15  scan_field               : struct{field: str, index: int}
+  223:15  scan_record              : struct{fields: List[str], stop: int}
+  231:15  scan_record              : struct{fields: List[str], stop: int}
+  477:15  csv_parse                : List[List[str]]
+  189:16  scan_quoted              : struct{field: str, index: int}
+  204:16  geo_append               : MutableArray[str]
+  205:16  scan_record_rest         : struct{fields: List[str], stop: int}
+  221:16  geo_finish               : List[List[str]]
+  308:16  ht_controls              : any
+  319:16  ht_controls              : any
+  331:16  ht_find_insert           : int
+  386:16  ht_size                  : any
+  396:16  ht_controls              : any
+  409:16  ht_controls              : any
+  417:16  ht_place                 : unit
+  429:16  ht_new_sized             : mutarray
+  466:16  geo_finish               : List[mutarray]
+  171:17  peek                     : str
+  178:17  peek                     : str
+  201:17  peek                     : str
+  310:17  ht_empty_state           : int
+  313:17  ht_occupied_state        : int
+  321:17  ht_empty_state           : int
+  327:17  ht_occupied_state        : int
+  330:17  ht_tombstone_state       : int
+  347:17  ht_empty_state           : int
+  402:17  ht_tombstone_state       : int
+  411:17  ht_occupied_state        : int
+  203:19  scan_field               : struct{field: str, index: int}
+  374:19  ht_capacity              : int
+  130:20  geo_new_capacity         : int
+  181:20  scan_quoted              : struct{field: str, index: int}
+  302:20  ht_capacity              : int
+  305:20  ht_capacity              : int
+  503:21  csv_records_presized     : List[mutarray]
+  373:22  ht_controls              : any
+  340:23  ht_values                : any
+  399:23  ht_keys                  : any
+  400:23  ht_values                : any
+  208:25  geo_finish               : List[str]
+  508:25  ht_get                   : any
+  387:26  ht_capacity              : int
+  391:26  ht_capacity              : int
+  393:26  ht_capacity              : int
+  412:27  ht_values                : any
+  299:28  ht_controls              : any
+  316:29  ht_probe_next            : int
+  343:29  ht_probe_start           : int
+  390:31  ht_size                  : any
+  333:32  ht_probe_next            : int
+  417:32  ht_find_insert           : int
+  386:33  ht_tombstones            : any
+  401:33  ht_size                  : any
+  255:36  ht_empty_state           : int
+  336:37  ht_probe_start           : int
+  403:37  ht_tombstones            : any
+  232:38  geo_new                  : MutableArray[List[str]]
+  507:38  ht_get                   : any
+  281:40  ht_min_capacity          : int
+  398:40  ht_occupied_state        : int
+  408:40  ht_probe_start           : int
+  216:43  geo_new                  : MutableArray[str]
+  331:43  ht_probe_next            : int
+  355:43  ht_occupied_state        : int
+  365:45  ht_occupied_state        : int
+  373:48  ht_keys                  : any
+  508:48  ht_get                   : any
+  484:51  geo_new                  : MutableArray[mutarray]
+  469:55  geo_append               : MutableArray[mutarray]
+  313:59  ht_keys                  : any
+  327:59  ht_keys                  : any
+  417:59  ht_probe_start           : int
+  508:70  ht_get                   : any
+  373:72  ht_values                : any
+  507:73  ht_size                  : any
+  507:91  ht_size                  : any
+  508:93  ht_get                   : any
+  508:117 ht_get                   : any
+== hashtable.bot
+  378:1   sample                   : list
+  101:5   ht_fill_empty            : unit
+  105:5   ht_fill_empty            : unit
+  117:5   ht_alloc                 : mutarray
+  127:5   ht_capacity_for          : int
+  130:5   ht_alloc                 : mutarray
+  174:5   ht_find_get              : int
+  195:5   ht_find_insert           : int
+  209:5   ht_find_get              : int
+  221:5   ht_rehash_probe          : int
+  247:5   ht_rehash_scan           : unit
+  256:5   ht_fill_empty            : unit
+  258:5   ht_rehash_scan           : unit
+  325:5   ht_place                 : unit
+  357:5   ht_fold                  : any
+  364:5   ht_fold                  : List[list]
+  371:5   ht_set                   : unit
+  372:5   ht_set                   : unit
+  373:5   ht_set                   : unit
+  375:5   ht_delete                : unit
+  376:6   ht_get                   : any
+  272:8   ht_tombstones            : any
+  321:8   ht_should_grow           : bool
+  245:9   ht_rehash_insert         : unit
+  273:9   ht_rehash                : unit
+  275:9   ht_rehash                : unit
+  322:9   ht_grow_or_clean         : unit
+  370:9   ht_new                   : mutarray
+  202:13  ht_find_get              : int
+  228:13  ht_rehash_probe          : int
+  314:13  ht_find_insert           : int
+  334:13  ht_find_get              : int
+  117:14  ht_min_capacity          : int
+  130:14  ht_capacity_for          : int
+  374:15  ht_contains              : bool
+  166:16  ht_controls              : any
+  181:16  ht_controls              : any
+  193:16  ht_find_insert           : int
+  268:16  ht_size                  : any
+  302:16  ht_controls              : any
+  315:16  ht_controls              : any
+  323:16  ht_place                 : unit
+  355:16  ht_fold                  : any
+  168:17  ht_empty_state           : int
+  171:17  ht_occupied_state        : int
+  183:17  ht_empty_state           : int
+  189:17  ht_occupied_state        : int
+  192:17  ht_tombstone_state       : int
+  218:17  ht_empty_state           : int
+  308:17  ht_tombstone_state       : int
+  317:17  ht_occupied_state        : int
+  254:19  ht_capacity              : int
+  157:20  ht_capacity              : int
+  160:20  ht_capacity              : int
+  253:22  ht_controls              : any
+  206:23  ht_values                : any
+  305:23  ht_keys                  : any
+  306:23  ht_values                : any
+  338:23  ht_controls              : any
+  339:23  ht_keys                  : any
+  340:23  ht_values                : any
+  364:23  ht_capacity              : int
+  269:26  ht_capacity              : int
+  273:26  ht_capacity              : int
+  275:26  ht_capacity              : int
+  353:26  ht_controls              : any
+  318:27  ht_values                : any
+  151:28  ht_controls              : any
+  174:29  ht_probe_next            : int
+  209:29  ht_probe_start           : int
+  272:31  ht_size                  : any
+  195:32  ht_probe_next            : int
+  323:32  ht_find_insert           : int
+  268:33  ht_tombstones            : any
+  307:33  ht_size                  : any
+  341:33  ht_size                  : any
+  342:33  ht_tombstones            : any
+  100:36  ht_empty_state           : int
+  202:37  ht_probe_start           : int
+  309:37  ht_tombstones            : any
+  334:37  ht_probe_start           : int
+  130:40  ht_min_capacity          : int
+  304:40  ht_occupied_state        : int
+  314:40  ht_probe_start           : int
+  193:43  ht_probe_next            : int
+  229:43  ht_occupied_state        : int
+  242:45  ht_occupied_state        : int
+  376:45  ht_contains              : bool
+  354:47  ht_keys                  : any
+  253:48  ht_keys                  : any
+  338:50  ht_tombstone_state       : int
+  353:56  ht_occupied_state        : int
+  171:59  ht_keys                  : any
+  189:59  ht_keys                  : any
+  323:59  ht_probe_start           : int
+  376:68  ht_contains              : bool
+  253:72  ht_values                : any
+  354:89  ht_values                : any
+  376:95  ht_get                   : any
+  376:125 ht_size                  : any
+== matmul.bot
+   47:1   matmul                   : List[List[int]]
+   23:5   dot                      : int
+   31:5   product_row              : list
+   39:5   product_rows             : list
+   45:5   product_rows             : List[List[int]]
+   38:11  product_row              : List[int]
+   30:13  dot                      : int
+== string_replace.bot
+   44:2   replace                  : str
+   36:5   replace_from             : str
+   42:5   replace_from             : str
+   31:8   matches_at               : bool
+   34:16  replace_from             : str
+   44:28  replace                  : str
+   44:54  replace                  : str
+   44:82  replace                  : str
+   44:112 replace                  : str
+== string_reverse.bot
+   26:2   reverse_chars            : str
+   21:5   reverse_from             : str
+   24:5   reverse_from             : str
+   26:21  reverse_chars            : str
+   26:41  reverse_chars            : str
+   26:63  reverse_chars            : str
+   26:86  reverse_chars            : str

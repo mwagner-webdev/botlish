@@ -1,0 +1,231 @@
+== csv_geometric.bot
+  161:1   (top)                  csv_parse              : List[List[str]]
+   29:5   geo_new                mutarray::create       : MutableArray[any]
+   55:5   geo_grow               mutable_array_copy     : unit
+   63:5   geo_append             mutable_array_set      : unit
+   69:5   geo_finish             mutable_array_freeze   : list
+  102:5   scan_unquoted          scan_unquoted          : struct{field: str, index: int}
+  112:5   scan_quoted            scan_quoted            : struct{field: str, index: int}
+  118:5   scan_field             scan_unquoted          : struct{field: str, index: int}
+  143:5   scan_record            scan_record_rest       : struct{fields: List[str], stop: int}
+  152:5   scan_records           scan_records           : List[List[str]]
+  159:5   csv_parse              scan_records           : List[List[str]]
+  115:8   scan_field             peek                   : str
+   52:9   from_list              mutable_array_set      : unit
+   58:9   create                 mutable_array_set      : unit
+  107:12  scan_quoted            peek                   : str
+  151:12  scan_records           geo_append             : MutableArray[List[str]]
+   54:13  geo_grow               mutarray::create       : MutableArray[any]
+   62:13  geo_append             geo_grow               : mutarray
+  137:14  scan_record_rest       geo_finish             : List[str]
+  142:15  scan_record            scan_field             : struct{field: str, index: int}
+  150:15  scan_records           scan_record            : struct{fields: List[str], stop: int}
+  158:15  csv_parse              scan_record            : struct{fields: List[str], stop: int}
+   49:16  geo_grow               mutable_array_capacity : int
+  116:16  scan_field             scan_quoted            : struct{field: str, index: int}
+  131:16  scan_record_rest       geo_append             : MutableArray[str]
+  132:16  scan_record_rest       scan_record_rest       : struct{fields: List[str], stop: int}
+  148:16  scan_records           geo_finish             : List[List[str]]
+   98:17  scan_unquoted          peek                   : str
+  105:17  scan_quoted            peek                   : str
+  128:17  scan_record_rest       peek                   : str
+  130:19  scan_record_rest       scan_field             : struct{field: str, index: int}
+   53:20  geo_grow               geo_new_capacity       : int
+  108:20  scan_quoted            scan_quoted            : struct{field: str, index: int}
+  135:25  scan_record_rest       geo_finish             : List[str]
+  159:38  csv_parse              geo_new                : MutableArray[List[str]]
+   52:39  from_list              list_get               : any
+  143:43  scan_record            geo_new                : MutableArray[str]
+== csv_records.bot
+  510:1   (top)                  sample                 : list
+  106:5   geo_new                mutarray::create       : MutableArray[any]
+  132:5   geo_grow               mutable_array_copy     : unit
+  140:5   geo_append             mutable_array_set      : unit
+  146:5   geo_finish             mutable_array_freeze   : list
+  175:5   scan_unquoted          scan_unquoted          : struct{field: str, index: int}
+  185:5   scan_quoted            scan_quoted            : struct{field: str, index: int}
+  191:5   scan_field             scan_unquoted          : struct{field: str, index: int}
+  216:5   scan_record            scan_record_rest       : struct{fields: List[str], stop: int}
+  225:5   scan_records           scan_records           : List[List[str]]
+  232:5   csv_parse              scan_records           : List[List[str]]
+  255:5   ht_fill_empty          mutable_array_set      : unit
+  256:5   ht_fill_empty          ht_fill_empty          : unit
+  260:5   ht_alloc               ht_fill_empty          : unit
+  264:5   ht_alloc               mutable_array_set      : unit
+  265:5   ht_alloc               mutable_array_set      : unit
+  266:5   ht_alloc               mutable_array_set      : unit
+  267:5   ht_alloc               mutable_array_set      : unit
+  268:5   ht_alloc               mutable_array_set      : unit
+  272:5   ht_new                 ht_alloc               : mutarray
+  278:5   ht_capacity_for        ht_capacity_for        : int
+  281:5   ht_new_sized           ht_alloc               : mutarray
+  284:5   ht_controls            mutable_array_get      : any
+  287:5   ht_keys                mutable_array_get      : any
+  290:5   ht_values              mutable_array_get      : any
+  293:5   ht_size                mutable_array_get      : any
+  296:5   ht_tombstones          mutable_array_get      : any
+  299:5   ht_capacity            mutable_array_capacity : int
+  316:5   ht_find_get            ht_find_get            : int
+  333:5   ht_find_insert         ht_find_insert         : int
+  340:5   ht_get                 mutable_array_get      : any
+  343:5   ht_contains            ht_find_get            : int
+  350:5   ht_rehash_probe        ht_rehash_probe        : int
+  355:5   ht_rehash_insert       mutable_array_set      : unit
+  356:5   ht_rehash_insert       mutable_array_set      : unit
+  357:5   ht_rehash_insert       mutable_array_set      : unit
+  370:5   ht_rehash_scan         ht_rehash_scan         : unit
+  376:5   ht_rehash              ht_fill_empty          : unit
+  378:5   ht_rehash              ht_rehash_scan         : unit
+  379:5   ht_rehash              mutable_array_set      : unit
+  380:5   ht_rehash              mutable_array_set      : unit
+  381:5   ht_rehash              mutable_array_set      : unit
+  382:5   ht_rehash              mutable_array_set      : unit
+  398:5   ht_place               mutable_array_set      : unit
+  399:5   ht_place               mutable_array_set      : unit
+  400:5   ht_place               mutable_array_set      : unit
+  401:5   ht_place               mutable_array_set      : unit
+  419:5   ht_set                 ht_place               : unit
+  431:5   row_new                ht_new                 : mutarray
+  442:5   row_fill               ht_set                 : unit
+  443:5   row_fill               row_fill               : any
+  449:5   row_table              row_fill               : mutarray
+  469:5   build_rows             build_rows             : List[mutarray]
+  484:5   csv_records_generic    build_rows             : List[mutarray]
+  489:5   csv_records            csv_records_generic    : List[mutarray]
+  494:5   csv_records_presized   csv_records_generic    : List[mutarray]
+  508:6   sample                 list_length            : int
+  188:8   scan_field             peek                   : str
+  365:8   ht_rehash_scan         mutable_array_get      : any
+  390:8   ht_grow_or_clean       ht_tombstones          : any
+  415:8   ht_set                 ht_should_grow         : bool
+  478:8   csv_records_generic    list_length            : int
+   52:9   from_list              mutable_array_set      : unit
+   58:9   create                 mutable_array_set      : unit
+  368:9   ht_rehash_scan         ht_rehash_insert       : unit
+  391:9   ht_grow_or_clean       ht_rehash              : unit
+  393:9   ht_grow_or_clean       ht_rehash              : unit
+  403:9   ht_place               mutable_array_set      : unit
+  412:9   ht_set                 mutable_array_set      : unit
+  416:9   ht_set                 ht_grow_or_clean       : unit
+  180:12  scan_quoted            peek                   : str
+  224:12  scan_records           geo_append             : MutableArray[List[str]]
+  261:12  ht_alloc               mutable_array_allocate : mutarray
+  502:12  sample                 csv_records            : List[mutarray]
+  131:13  geo_grow               mutarray::create       : MutableArray[any]
+  139:13  geo_append             geo_grow               : mutarray
+  263:13  ht_alloc               mutable_array_allocate : mutarray
+  309:13  ht_find_get            mutable_array_get      : any
+  320:13  ht_find_insert         mutable_array_get      : any
+  336:13  ht_get                 ht_find_get            : int
+  346:13  ht_rehash_probe        mutable_array_get      : any
+  354:13  ht_rehash_insert       ht_rehash_probe        : int
+  397:13  ht_place               mutable_array_get      : any
+  408:13  ht_set                 ht_find_insert         : int
+  410:13  ht_set                 mutable_array_get      : any
+  448:13  row_table              row_new                : mutarray
+  465:13  build_rows             list_length            : int
+  468:13  build_rows             row_table              : mutarray
+  483:13  csv_records_generic    row_table              : mutarray
+  504:13  sample                 list_get               : mutarray
+  507:13  sample                 ht_get                 : any
+  210:14  scan_record_rest       geo_finish             : List[str]
+  262:14  ht_alloc               mutable_array_allocate : mutarray
+  272:14  ht_new                 ht_min_capacity        : int
+  281:14  ht_new_sized           ht_capacity_for        : int
+  505:14  sample                 list_get               : mutarray
+  215:15  scan_record            scan_field             : struct{field: str, index: int}
+  223:15  scan_records           scan_record            : struct{fields: List[str], stop: int}
+  231:15  csv_parse              scan_record            : struct{fields: List[str], stop: int}
+  366:15  ht_rehash_scan         mutable_array_get      : any
+  477:15  csv_records_generic    csv_parse              : List[List[str]]
+  481:15  csv_records_generic    list_get               : List[str]
+  126:16  geo_grow               mutable_array_capacity : int
+  189:16  scan_field             scan_quoted            : struct{field: str, index: int}
+  204:16  scan_record_rest       geo_append             : MutableArray[str]
+  205:16  scan_record_rest       scan_record_rest       : struct{fields: List[str], stop: int}
+  221:16  scan_records           geo_finish             : List[List[str]]
+  259:16  ht_alloc               mutable_array_allocate : mutarray
+  308:16  ht_find_get            ht_controls            : any
+  319:16  ht_find_insert         ht_controls            : any
+  331:16  ht_find_insert         ht_find_insert         : int
+  386:16  ht_should_grow         ht_size                : any
+  396:16  ht_place               ht_controls            : any
+  409:16  ht_set                 ht_controls            : any
+  417:16  ht_set                 ht_place               : unit
+  429:16  row_new                ht_new_sized           : mutarray
+  466:16  build_rows             geo_finish             : List[mutarray]
+  171:17  scan_unquoted          peek                   : str
+  178:17  scan_quoted            peek                   : str
+  201:17  scan_record_rest       peek                   : str
+  310:17  ht_find_get            ht_empty_state         : int
+  313:17  ht_find_get            ht_occupied_state      : int
+  321:17  ht_find_insert         ht_empty_state         : int
+  327:17  ht_find_insert         ht_occupied_state      : int
+  330:17  ht_find_insert         ht_tombstone_state     : int
+  347:17  ht_rehash_probe        ht_empty_state         : int
+  367:17  ht_rehash_scan         mutable_array_get      : any
+  402:17  ht_place               ht_tombstone_state     : int
+  411:17  ht_set                 ht_occupied_state      : int
+  203:19  scan_record_rest       scan_field             : struct{field: str, index: int}
+  374:19  ht_rehash              ht_capacity            : int
+  375:19  ht_rehash              mutable_array_allocate : mutarray
+  442:19  row_fill               list_get               : any
+  130:20  geo_grow               geo_new_capacity       : int
+  181:20  scan_quoted            scan_quoted            : struct{field: str, index: int}
+  302:20  ht_probe_start         ht_capacity            : int
+  305:20  ht_probe_next          ht_capacity            : int
+  482:20  csv_records_generic    list_length            : int
+  503:21  sample                 csv_records_presized   : List[mutarray]
+  373:22  ht_rehash              ht_controls            : any
+  506:22  sample                 list_get               : mutarray
+  340:23  ht_get                 ht_values              : any
+  399:23  ht_place               ht_keys                : any
+  400:23  ht_place               ht_values              : any
+  208:25  scan_record_rest       geo_finish             : List[str]
+  508:25  sample                 ht_get                 : any
+  387:26  ht_should_grow         ht_capacity            : int
+  391:26  ht_grow_or_clean       ht_capacity            : int
+  393:26  ht_grow_or_clean       ht_capacity            : int
+  412:27  ht_set                 ht_values              : any
+  299:28  ht_capacity            ht_controls            : any
+  316:29  ht_find_get            ht_probe_next          : int
+  343:29  ht_contains            ht_probe_start         : int
+  390:31  ht_grow_or_clean       ht_size                : any
+  333:32  ht_find_insert         ht_probe_next          : int
+  417:32  ht_set                 ht_find_insert         : int
+  386:33  ht_should_grow         ht_tombstones          : any
+  401:33  ht_place               ht_size                : any
+  255:36  ht_fill_empty          ht_empty_state         : int
+  336:37  ht_get                 ht_probe_start         : int
+  403:37  ht_place               ht_tombstones          : any
+  232:38  csv_parse              geo_new                : MutableArray[List[str]]
+  507:38  sample                 ht_get                 : any
+   52:39  from_list              list_get               : any
+  281:40  ht_new_sized           ht_min_capacity        : int
+  398:40  ht_place               ht_occupied_state      : int
+  408:40  ht_set                 ht_probe_start         : int
+  313:41  ht_find_get            mutable_array_get      : any
+  327:41  ht_find_insert         mutable_array_get      : any
+  442:41  row_fill               list_get               : any
+  449:41  row_table              list_length            : int
+  377:42  ht_rehash              mutable_array_allocate : mutarray
+  216:43  scan_record            geo_new                : MutableArray[str]
+  331:43  ht_find_insert         ht_probe_next          : int
+  355:43  ht_rehash_insert       ht_occupied_state      : int
+  365:45  ht_rehash_scan         ht_occupied_state      : int
+  468:46  build_rows             list_get               : any
+  483:46  csv_records_generic    list_get               : List[str]
+  373:48  ht_rehash              ht_keys                : any
+  508:48  sample                 ht_get                 : any
+  484:51  csv_records_generic    geo_new                : MutableArray[mutarray]
+  469:55  build_rows             geo_append             : MutableArray[mutarray]
+  313:59  ht_find_get            ht_keys                : any
+  327:59  ht_find_insert         ht_keys                : any
+  417:59  ht_set                 ht_probe_start         : int
+  508:70  sample                 ht_get                 : any
+  373:72  ht_rehash              ht_values              : any
+  507:73  sample                 ht_size                : any
+  377:87  ht_rehash              mutable_array_allocate : mutarray
+  507:91  sample                 ht_size                : any
+  508:93  sample                 ht_get                 : any
+  508:117 sample                 ht_get                 : any

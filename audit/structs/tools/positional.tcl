@@ -54,7 +54,7 @@ foreach path $programs {
         if {$key eq ""} continue
         set kind [dict get $node kind]
         if {$kind eq "struct"} { dict set structs $key "struct literal : [T $hir $e]" }
-        if {$kind eq "project"} { dict set structs $key "projection .[dict get $node field] : [T $hir $e]" }
+        if {$kind eq "project"} { dict set structs $key "projection .[dict get $node name] : [T $hir $e]" }
         if {$kind ne "call"} continue
         set name [nativeName $hir $e]
         set args [hir::get $hir $e args]
