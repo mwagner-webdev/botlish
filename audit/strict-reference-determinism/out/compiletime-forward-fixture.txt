@@ -1,0 +1,6 @@
+front-end (parse, resolve, infer, checks; non-strict) of the caller-before-callee CSV draft B
+old compiler: 750.7 ms (median of 5)
+new compiler (rejected at resolution, typing skipped only in strict mode; -strict 0 shown): 537.9 ms (median of 5)
+new compiler, strict (the default): 205.9 ms (median of 5)
+callee-first A, old: 638.4 ms (median of 5)
+callee-first A, new: 514.2 ms (median of 5)

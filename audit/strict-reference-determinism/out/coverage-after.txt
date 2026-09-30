@@ -1,0 +1,8 @@
+Cranelift backend coverage of the test suite (3282 tests)
+
+  native           1226
+  independent      1998
+  passed-partial      8
+  unsupported        49
+  failed              1
+

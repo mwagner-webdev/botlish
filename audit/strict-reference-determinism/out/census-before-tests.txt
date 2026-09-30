@@ -1,0 +1,33 @@
+Forward references found by running the whole pre-change test suite (both backends) with a hook in hir::buildSyntax
+(distinct references per test file / origin; HIR built by tests, any -strict setting).
+
+shape                              status before the change           distinct references
+closure-capture-later-binding      accepted (init deferred)           12
+closure-capture-later-binding      already a static error (init no)   4
+forward-local-value                already a static error (init no)   6
+forward-module-binding             already a static error (init no)   1
+later-sibling-function             accepted (init deferred)           16
+mutual-recursion                   accepted (init deferred)           32
+
+total distinct: 71, of which accepted before the change: 60
+
+per test file:
+  backends.test                            {'closure-capture-later-binding': 1}
+  bindings.test                            {'closure-capture-later-binding': 2, 'forward-local-value': 2, 'mutual-recursion': 1}
+  compiler-opt.test                        {'later-sibling-function': 6, 'mutual-recursion': 4}
+  hir-aot.test                             {'mutual-recursion': 3}
+  hir-lowering.test                        {'closure-capture-later-binding': 1, 'forward-local-value': 1}
+  hir-resolution.test                      {'forward-local-value': 1, 'closure-capture-later-binding': 1}
+  hir-samples.test                         {'closure-capture-later-binding': 1, 'forward-local-value': 1}
+  hir-specialize.test                      {'mutual-recursion': 4}
+  hir-types.test                           {'mutual-recursion': 1, 'closure-capture-later-binding': 1}
+  inference.test                           {'closure-capture-later-binding': 1}
+  instance-entry-range-facts.test          {'mutual-recursion': 1}
+  intrinsic-contracts.test                 {'later-sibling-function': 2, 'mutual-recursion': 3}
+  mutable-array-type.test                  {'closure-capture-later-binding': 4, 'later-sibling-function': 2, 'mutual-recursion': 1}
+  native-tiny-leaf-inline.test             {'closure-capture-later-binding': 4, 'mutual-recursion': 1}
+  native.test                              {'later-sibling-function': 2, 'mutual-recursion': 6}
+  semantic-instances.test                  {'mutual-recursion': 3, 'later-sibling-function': 4}
+  surface-lowering.test                    {'mutual-recursion': 1, 'forward-local-value': 1}
+  surface-modules.test                     {'mutual-recursion': 1, 'forward-module-binding': 1}
+  surface-samples.test                     {'mutual-recursion': 2}

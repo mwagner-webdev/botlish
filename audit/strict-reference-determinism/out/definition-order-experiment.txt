@@ -1,0 +1,79 @@
+== old compiler, csv_records A-callee-first
+semantic.requests     556
+semantic.trivial      211
+semantic.hits         266
+semantic.walks        104
+semantic.rounds       1
+semantic.instances    79
+semantic.used         79
+semantic.declinedNoEnv 0
+codegen.used       66
+aot.closed/guarded/open 49/17/0
+nir.functions      63
+nir.guards         28
+nir.digest         000000009e68dff7
+
+== old compiler, csv_records B-caller-first
+semantic.requests     556
+semantic.trivial      211
+semantic.hits         266
+semantic.walks        104
+semantic.rounds       2
+semantic.instances    79
+semantic.used         79
+semantic.declinedNoEnv 0
+codegen.used       90
+aot.closed/guarded/open 56/34/0
+nir.functions      85
+nir.guards         56
+nir.digest         0000000096c16f7f
+
+== old compiler, csv_records C-independent-order
+semantic.requests     556
+semantic.trivial      211
+semantic.hits         266
+semantic.walks        104
+semantic.rounds       1
+semantic.instances    79
+semantic.used         79
+semantic.declinedNoEnv 0
+codegen.used       66
+aot.closed/guarded/open 49/17/0
+nir.functions      63
+nir.guards         28
+nir.digest         000000009e68dff7
+
+== new compiler, csv_records A-callee-first
+semantic.requests     556
+semantic.trivial      211
+semantic.hits         266
+semantic.walks        104
+semantic.rounds       1
+semantic.instances    79
+semantic.used         79
+semantic.declinedNoEnv 0
+codegen.used       66
+aot.closed/guarded/open 49/17/0
+nir.functions      63
+nir.guards         28
+nir.digest         000000009e68dff7
+
+== new compiler, csv_records B-caller-first
+REJECTED: UNBOUND: unbound name "scan_record_rest": "scan_record_rest" is declared later; forward references are not allowed (a binding is visible only after it is established)
+(diagnostics: 1)
+
+== new compiler, csv_records C-independent-order
+semantic.requests     556
+semantic.trivial      211
+semantic.hits         266
+semantic.walks        104
+semantic.rounds       1
+semantic.instances    79
+semantic.used         79
+semantic.declinedNoEnv 0
+codegen.used       66
+aot.closed/guarded/open 49/17/0
+nir.functions      63
+nir.guards         28
+nir.digest         000000009e68dff7
+
