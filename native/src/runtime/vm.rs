@@ -269,6 +269,12 @@ impl Vm {
         self.collect_with(reason);
     }
 
+    /// A collection on demand, for unit tests that drive the Vm directly.
+    #[cfg(test)]
+    pub fn collect_for_test(&mut self, reason: GcReason) {
+        self.collect_with(reason);
+    }
+
     fn collect_with(&mut self, reason: GcReason) {
         let stack = if self.shadow.is_empty() {
             &[][..]

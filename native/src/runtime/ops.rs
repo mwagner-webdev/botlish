@@ -1401,7 +1401,124 @@ mod tests {
     use crate::runtime::vm::{ProgramInfo, Vm};
 
     fn vm() -> Box<Vm> {
-        Vm::new(std::rc::Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new() }), AllocMode::Summary)
+        Vm::new(
+            std::rc::Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new() }),
+            AllocMode::Summary,
+        )
+    }
+
+    /// A VM whose program has these struct shapes (runtime::vm::ShapeInfo).
+    fn vm_with_shapes(shapes: &[(Option<&str>, &[&str])]) -> Box<Vm> {
+        use crate::runtime::vm::ShapeInfo;
+        Vm::new(
+            std::rc::Rc::new(ProgramInfo {
+                functions: Vec::new(),
+                natives: Vec::new(),
+                shapes: shapes
+                    .iter()
+                    .map(|(name, fields)| ShapeInfo {
+                        name: name.map(String::from),
+                        fields: fields.iter().map(|f| f.to_string()).collect(),
+                    })
+                    .collect(),
+            }),
+            AllocMode::Summary,
+        )
+    }
+
+    // -----------------------------------------------------------------------
+    // Structs (STRUCTS.md): equality, hashing and printing by shape.
+
+    #[test]
+    fn struct_equality_is_shape_and_field_wise() {
+        // shape 0: anonymous {a, b}; 1: named Person {a, b} (same fields);
+        // 2: named Account {a, b}; 3: anonymous {a}.
+        let mut vm = vm_with_shapes(&[
+            (None, &["a", "b"]),
+            (Some("Person"), &["a", "b"]),
+            (Some("Account"), &["a", "b"]),
+            (None, &["a"]),
+        ]);
+        let s = str_val(&mut vm, "x");
+        let s2 = str_val(&mut vm, "x");
+        let anon1 = vm.new_struct(0, vec![small(1), s]);
+        let anon2 = vm.new_struct(0, vec![small(1), s2]);
+        let anon3 = vm.new_struct(0, vec![small(2), s]);
+        let person = vm.new_struct(1, vec![small(1), s]);
+        let account = vm.new_struct(2, vec![small(1), s]);
+        let short = vm.new_struct(3, vec![small(1)]);
+        let eq = |vm: &mut Vm, a, b| rt_value_eq(vm, a, b);
+        assert_eq!(eq(&mut vm, anon1, anon2), TRUE);
+        assert_eq!(eq(&mut vm, anon1, anon3), FALSE);
+        // Same field names and values, different declaration or none: unequal.
+        assert_eq!(eq(&mut vm, anon1, person), FALSE);
+        assert_eq!(eq(&mut vm, person, account), FALSE);
+        assert_eq!(eq(&mut vm, person, person), TRUE);
+        assert_eq!(eq(&mut vm, anon1, short), FALSE);
+        // A struct is never a List.
+        let list = vm.new_list(vec![small(1), s]);
+        assert_eq!(eq(&mut vm, anon1, list), FALSE);
+    }
+
+    #[test]
+    fn struct_equality_keeps_the_no_equality_rule_for_arrays() {
+        let mut vm = vm_with_shapes(&[(None, &["a"])]);
+        let array = vm.new_mutarray(1);
+        let x = vm.new_struct(0, vec![array]);
+        let y = vm.new_struct(0, vec![array]);
+        assert_eq!(rt_value_eq(&mut *vm, x, y), NO_VALUE);
+        assert!(vm.error.is_some());
+    }
+
+    #[test]
+    fn struct_hash_agrees_with_equality() {
+        let mut vm = vm_with_shapes(&[(None, &["a", "b"]), (None, &["a"]), (Some("P"), &["a"])]);
+        let s = str_val(&mut vm, "x");
+        let s2 = str_val(&mut vm, "x");
+        let one = vm.new_struct(0, vec![small(1), s]);
+        let two = vm.new_struct(0, vec![small(1), s2]);
+        let other = vm.new_struct(1, vec![small(1)]);
+        let named = vm.new_struct(2, vec![small(1)]);
+        let h = |vm: &mut Vm, v| rt_hash(vm, v);
+        assert_eq!(h(&mut vm, one), h(&mut vm, two));
+        assert_ne!(h(&mut vm, one), h(&mut vm, other));
+        assert_ne!(h(&mut vm, other), h(&mut vm, named));
+    }
+
+    #[test]
+    fn struct_show_names_fields_in_shape_order() {
+        use crate::runtime::show::{show, tcl_value};
+        let mut vm = vm_with_shapes(&[(None, &["age", "name"]), (Some("geo::Point"), &["y", "x"]), (None, &[])]);
+        let name = str_val(&mut vm, "Grace");
+        let anon = vm.new_struct(0, vec![small(45), name]);
+        let named = vm.new_struct(1, vec![small(2), small(1)]);
+        let empty = vm.new_struct(2, vec![]);
+        assert_eq!(show(anon), "{age: 45, name: \"Grace\"}");
+        assert_eq!(show(named), "geo::Point {y: 2, x: 1}");
+        assert_eq!(show(empty), "{}");
+        assert_eq!(tcl_value(anon).unwrap(), "struct {{} age name} {{int 45} {str Grace}}");
+        assert_eq!(tcl_value(named).unwrap(), "struct {geo::Point y x} {{int 2} {int 1}}");
+        assert_eq!(tcl_value(empty).unwrap(), "struct {{}} {}");
+    }
+
+    #[test]
+    fn struct_fields_are_traced_and_reclaimed() {
+        use crate::runtime::metrics::GcReason;
+        let mut vm = vm_with_shapes(&[(None, &["a", "b"])]);
+        let kept = str_val(&mut vm, "kept");
+        let inner = vm.new_struct(0, vec![kept, small(1)]);
+        let outer = vm.new_struct(0, vec![inner, small(2)]);
+        let _garbage = str_val(&mut vm, "garbage");
+        let _garbage_struct = vm.new_struct(0, vec![small(3), small(4)]);
+        vm.temp_roots.push(outer);
+        vm.collect_for_test(GcReason::Explicit);
+        // The struct, its nested struct and the string reachable through both
+        // survive; the unreachable string and struct are reclaimed.
+        assert_eq!(vm.metrics.by_kind[KIND_STRUCT as usize].live_objects, 2);
+        assert_eq!(vm.metrics.by_kind[KIND_STRUCT as usize].reclaimed_objects, 1);
+        assert_eq!(vm.metrics.by_kind[KIND_STR as usize].live_objects, 1);
+        assert_eq!(str_of(struct_of(struct_of(outer).fields()[0]).fields()[0]).text.as_ref(), "kept");
+        vm.temp_roots.clear();
     }
 
     fn str_val(vm: &mut Vm, s: &str) -> Value {

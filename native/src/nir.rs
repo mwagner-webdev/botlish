@@ -1827,3 +1827,64 @@ mod plan_tests {
         assert!(parse(&ok).is_ok(), "{:?}", parse(&ok).err().map(|e| e.message));
     }
 }
+
+#[cfg(test)]
+mod struct_tests {
+    use super::*;
+
+    fn text(shapes: &str, body: &str) -> String {
+        format!(
+            "nir 1\n{shapes}\nfunc 0 \"<program>\" params=0 env=0 regs=6 pnames=\"\" captures=0 rawregs=\"\"\n{body}\nend\n"
+        )
+    }
+
+    fn message(t: String) -> String {
+        match parse(&t) {
+            Ok(_) => panic!("expected invalid NIR"),
+            Err(e) => e.message,
+        }
+    }
+
+    const SHAPES: &str = "shape 0 anon fields=\"x y\"\nshape 1 named \"Point\" fields=\"y x\"\n";
+
+    #[test]
+    fn shapes_and_struct_ops_parse() {
+        let p = parse(&text(
+            SHAPES,
+            "    %0 = int 1\n    %1 = int 2\n    %2 = structnew 0 %0 %1\n    %3 = structget 1 %2\n    ret %3",
+        ))
+        .unwrap();
+        assert_eq!(p.shapes.len(), 2);
+        assert_eq!(p.shapes[0].name, None);
+        assert_eq!(p.shapes[1].name.as_deref(), Some("Point"));
+        assert_eq!(p.shapes[1].fields, vec!["y".to_string(), "x".to_string()]);
+        assert!(matches!(&p.functions[0].body[2], Inst::StructNew { shape: 0, .. }));
+        assert!(matches!(&p.functions[0].body[3], Inst::StructGet { slot: 1, .. }));
+    }
+
+    #[test]
+    fn malformed_shapes_are_rejected() {
+        let body = "    %0 = unit\n    ret %0";
+        assert!(message(text("shape 0 anon fields=\"y x\"\n", body)).contains("canonical"));
+        assert!(message(text("shape 0 anon fields=\"x x\"\n", body)).contains("twice"));
+        assert!(message(text("shape 1 anon fields=\"x\"\n", body)).contains("dense"));
+        assert!(message(text("shape 0 named fields=\"x\"\n", body)).contains("quoted"));
+        assert!(message(text("shape 0 weird fields=\"x\"\n", body)).contains("anon or named"));
+    }
+
+    #[test]
+    fn structnew_checks_shape_and_arity() {
+        assert!(message(text(SHAPES, "    %0 = int 1\n    %1 = structnew 7 %0 %0\n    ret %1")).contains("undeclared"));
+        assert!(message(text(SHAPES, "    %0 = int 1\n    %1 = structnew 0 %0\n    ret %1")).contains("field register"));
+    }
+
+    #[test]
+    fn the_empty_struct_is_a_zero_field_shape() {
+        let p = parse(&text(
+            "shape 0 anon fields=\"\"\n",
+            "    %0 = structnew 0\n    ret %0",
+        ))
+        .unwrap();
+        assert!(p.shapes[0].fields.is_empty());
+    }
+}
