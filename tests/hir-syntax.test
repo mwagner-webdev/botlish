@@ -103,13 +103,13 @@ test hir-rootref-parameter-and-branch {parameters and branch bindings are rename
     set h [hir::buildSyntax [list [hir::syntax::bindNode [o bf] f $block] \
         [hir::syntax::bindNode [o bl] outer [hir::syntax::constNode [o z] 0]] \
         [hir::syntax::callNode [o call] [hir::syntax::refNode [o rf] f] [hir::syntax::rootRef [o arg] false]]]]
-    list [lmap b [dict keys [dict get $h bindings]] {
+    list [lsort [lmap b [dict keys [dict get $h bindings]] {
             set binding [hir::binding $h $b]
             if {[dict get $binding kind] eq "root"} continue
             dict get $binding name
-         }] \
+         }]] \
          [lrange [hirRuns $h] 1 2]
-} -result {{f outer true#1 list#1} {{[true, 1]} {[true, 1]}}}
+} -result {{f list#1 outer true#1} {{[true, 1]} {[true, 1]}}}
 
 test hir-rootref-fresh-names {fresh names avoid names the program uses} -body {
     set nodes [list [hir::syntax::bindNode [o a] list#1 [hir::syntax::constNode [o 7] 7]] \

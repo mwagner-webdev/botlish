@@ -74,7 +74,7 @@ e1 bind b1 make_adder : block(e2)/1 -> block(e4)/1 -> int
             e4 block s4 (b4 y) captures (b2 x) : block(e4)/1 -> int
                 e5 call native(+) : int
                     e6 ref b5 + : native +
-                    e7 ref b2 x : any deferred
+                    e7 ref b2 x : any
                     e8 ref b4 y : any
         e9 ref b3 add : block(e4)/1 -> int
 e10 call block(e4) : int
@@ -110,18 +110,17 @@ test lower-hir-recursion {recursion resolves through the function's own binding}
     list [hir::get $h $ref binding] [hir::get $h $ref init] \
          [hir::types::show [hir::bindingType $h b1]] \
          [hir::get $h [hirFind $h return] target] [lindex [hirFind $h block] 0]
-} -result {b1 deferred {block(e2)/1 -> int} e2 e2}
+} -result {b1 yes {block(e2)/1 -> int} e2 e2}
 
 test lower-hir-operators-are-calls {operators and list literals are ordinary calls with native targets} -body {
     set h [surface::compile "a = 1\n\[a + 2, a * 3, a < 4, a == 5, -a\]" t.bot]
     lsort -unique [lmap e [hirFind $h call] {hir::format::Target $h [hir::get $h $e target]}]
 } -result {native(*) native(+) native(-) native(<) native(==) native(list)}
 
-test lower-hir-mutual-recursion {mutually recursive functions refer to each other's bindings} -body {
-    set h [surface::compile "fn even(n):\n    if n == 0:\n        return true\n    odd(n - 1)\nfn odd(n):\n    if n == 0:\n        return false\n    even(n - 1)\neven(4)" t.bot]
-    list [hirRefBindings $h odd] [hirRefBindings $h even] \
-         [core::formatValue [core::compiler::evalHir $h]]
-} -result {b2 {b1 b1} true}
+test lower-hir-mutual-recursion {mutually recursive functions are rejected: the earlier function's reference to the later one is unresolved, the later one's reference to the earlier resolves} -body {
+    set h [surface::compile "fn even(n):\n    if n == 0:\n        return true\n    odd(n - 1)\nfn odd(n):\n    if n == 0:\n        return false\n    even(n - 1)\neven(4)" t.bot -strict 0]
+    list [hirRefBindings $h odd] [hirRefBindings $h even] [lmap d [hir::diagnostics $h] {dict get $d kind}]
+} -result {{{}} {b1 b1} UNBOUND}
 
 # ---------------------------------------------------------------------------
 # Source origins
@@ -184,7 +183,7 @@ foreach {name source code message} {
     duplicate-fn     "fn f():\n    1\nfn f():\n    2"    DUPLICATE {t.bot:3:1: duplicate binding "f" in the same lexical scope}
     param-rebind     "fn f(a):\n    a = 1"             DUPLICATE {t.bot:2:5: duplicate binding "a" in the same lexical scope}
     unbound          "y = nope"                         UNBOUND   {t.bot:1:5: unbound name "nope"}
-    before-binding   "y = x\nx = 1"                     UNBOUND   {t.bot:1:5: name "x" used before its binding}
+    before-binding   "y = x\nx = 1"                     UNBOUND   {t.bot:1:5: unbound name "x": "x" is declared later; forward references are not allowed (a binding is visible only after it is established)}
     return-outside   "return 1"                         RETURN-OUTSIDE-CALLABLE {t.bot:1:1: return outside callable invocation}
     break-outside    "if true:\n    break"              BREAK-OUTSIDE-LOOP {t.bot:2:5: break outside lexical loop}
     break-in-fn      "loop:\n    fn f():\n        continue\n    break" CONTINUE-OUTSIDE-LOOP {t.bot:3:9: continue outside lexical loop}
@@ -257,7 +256,7 @@ test lower-if-value-scopes {an if value's branches are inline scopes} -body {
     set h [surface::compile "x = 1\ny = if x == 1:\n    x = 2\n    x\nelse:\n    0\n\[x, y\]" t.bot]
     list [core::formatValue [core::compiler::evalHir $h]] \
          [dict get [hir::scope $h [hir::get $h [hirFind $h if] thenScope]] kind] \
-         [hir::types::show [hir::bindingType $h b2]]
+         [hir::types::show [hir::bindingType $h [hir::get $h [lindex [hirFind $h bind y] 0] binding]]]
 } -result {{[1, 2]} branch int}
 
 # ---------------------------------------------------------------------------

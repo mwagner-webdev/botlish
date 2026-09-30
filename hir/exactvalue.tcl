@@ -143,7 +143,7 @@ proc hir::exact::Eval {hir e level stepsVar} {
         }
         ref {
             set b [dict get $node binding]
-            if {$b eq "" || [dict get $node init] eq "no"} {
+            if {$b eq ""} {
                 return ""
             }
             set binding [dict get $hir bindings $b]

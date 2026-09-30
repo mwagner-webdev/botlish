@@ -108,8 +108,6 @@ namespace eval core::compiler {
     # (SelfTailCalls).
     variable envless {}
     variable selfTailCalls {}
-    # References that need a run-time init check (hir::aot::unprovenReferences).
-    variable unproven {}
     # If conditions whose callee value CompileIf needs (InstallsRefinements).
     variable refining {}
     # Native name -> intrinsic generator.
@@ -279,8 +277,7 @@ proc core::compiler::BlockProc {e} {
 # Envless blocks. A call whose HIR target is block T, through a `ref` callee,
 # needs the callee value only for T's captured environment: HIR resolved the
 # target, and a reference whose type names the block is bound whenever it
-# runs, unless it is a forward reference HIR cannot prove bound
-# (hir::aot::unprovenReferences), which must still be looked up. If T's
+# runs. If T's
 # proc never reads its environment, the call can skip the lookup and pass no
 # environment. A block is envless when
 #   * it creates no closures in its own invocation (no materialized scope
@@ -362,10 +359,8 @@ proc core::compiler::SkippableCallee {ref callOf envless} {
 
 # The envless block call E directly calls through a `ref` callee, or "".
 proc core::compiler::DirectEnvlessTarget {e envless} {
-    variable unproven
     lassign [N $e target] kind target
     if {$kind ne "block" || $target ni $envless || [Kind [N $e callee]] ne "ref"
-            || [dict exists $unproven [N $e callee]]
             || [InstallsRefinements $e]
             || [llength [N $target params]] != [llength [N $e args]]} {
         return ""
@@ -593,11 +588,9 @@ proc core::compiler::GenerateUnit {mode exprs {unitHir ""}} {
     variable envless
     variable selfTailCalls
     variable refining
-    variable unproven
     set envless {}
     set selfTailCalls {}
     set refining [RefiningConditions]
-    set unproven [hir::aot::unprovenReferences $hir]
     if {$mode eq "program"} {
         set envless [EnvlessBlocks]
         set selfTailCalls [SelfTailCalls]
@@ -882,8 +875,12 @@ proc core::compiler::CompileRef {ctxVar e} {
     set b [N $e binding]
     set t [NewTemp]
     if {$b eq ""} {
-        # Unbound: the lookup raises the interpreter's error.
-        Emit ctx "set $t \[core::env::lookup \$base [Word $name]\]"
+        # No binding is established before this reference (HIR types it
+        # never): evaluating it raises the unbound-name error, whether or not
+        # the name is bound later -- Core IR's own scoping (which declares a
+        # scope's names on entry) is not the contract of a HIR-compiled
+        # program (STRICT-REFERENCE-DETERMINISM.md).
+        Emit ctx "core::semanticError UNBOUND [Word "unbound name \"$name\""]"
         return [Never]
     }
     switch -- [B $b kind] {
@@ -894,10 +891,6 @@ proc core::compiler::CompileRef {ctxVar e} {
             Emit ctx "set $t \[core::env::lookup \$base [Word $name]\]"
             return [Op box "\$$t" any]
         }
-    }
-    if {[N $e init] eq "no"} {
-        Emit ctx "core::env::usedBeforeBinding [Word $name]"
-        return [Never]
     }
     variable hir
     if {[hir::isModuleBinding $hir $b]} {

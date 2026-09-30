@@ -20,7 +20,7 @@
 # ( ) , or whitespace inside names; ordinary IR names are.
 
 namespace eval hir::read {
-    variable flags {unbound before-binding deferred duplicate unreachable}
+    variable flags {unbound deferred duplicate unreachable}
     # TypeDecls' own result from the current Program call, for Program to
     # store as the returned HIR's `sourceTypes` field.
     variable lastTypeDecls {}
@@ -525,19 +525,12 @@ proc hir::read::Expr {hirVar level s path block} {
             SetField hir $e name $name
             if {$b eq "?"} {
                 SetField hir $e binding ""
-                SetField hir $e init no
+                SetField hir $e init yes
                 hir::Diagnose hir UNBOUND "unbound name \"$name\"" $e
             } else {
                 Referenced hir $b $name $s $number
                 SetField hir $e binding $b
-                set init yes
-                if {"before-binding" in $flags} {
-                    set init no
-                    hir::Diagnose hir UNBOUND "name \"$name\" used before its binding" $e
-                } elseif {"deferred" in $flags} {
-                    set init deferred
-                }
-                SetField hir $e init $init
+                SetField hir $e init [expr {"deferred" in $flags ? "deferred" : "yes"}]
             }
         }
         bind {
@@ -886,6 +879,12 @@ proc hir::read::Finish {hirVar} {
         if {[hir::typeOf $hir $e] ne "never"} {
             dict set hir bindings $b type [dict get $node type]
         }
+    }
+    # Text is a serialized HIR, and a HIR never contains a reference to a
+    # binding established after it (hir/resolve.tcl): a text that does is
+    # not the HIR of any program.
+    foreach f [hir::refcheck::forwardRefs $hir] {
+        throw [list HIR PARSE] "HIR text: expression [dict get $f ref] refers to \"[dict get $f name]\" ([dict get $f binding]), which is not established until [dict get $f bind]: forward references are not allowed"
     }
     foreach {table kind} {exprs expr scopes scope bindings binding symbols symbol types type} {
         set max 0

@@ -7,24 +7,24 @@
 
 program s2 binds b1 pick
 e1 bind b1 pick : block(e2)/1 -> any
-    e2 block s3 (b2 flag) captures () binds b3 found : block(e2)/1 -> any
-        e3 bind b3 found : int
-            e4 loop s4 binds b4 k : int
-                e5 bind b4 k : int
+    e2 block s3 (b2 flag) captures () binds b4 found : block(e2)/1 -> any
+        e3 bind b4 found : int
+            e4 loop s4 binds b3 k : int
+                e5 bind b3 k : int
                     e6 const 7 : int
                 e7 if : never
                     e8 ref b2 flag : any
                     then s5
                         e9 break -> e4 : never
-                            e10 ref b4 k : int
+                            e10 ref b3 k : int
                     else s6
                         e11 return -> e2 : never
                             e12 const none : str
         e13 call native(list) : list
             e14 ref b5 list : native list
-            e15 ref b3 found : int
+            e15 ref b4 found : int
             e16 ok : result
-                e17 ref b3 found : int
+                e17 ref b4 found : int
 e18 call native(list) : list
     e19 ref b5 list : native list
     e20 call block(e2) : any

@@ -265,39 +265,6 @@ proc hir::callables::HasMutArray {type} {
     return 0
 }
 
-# A reference REF to a binding whose bound value carries a MutableArray
-# contract must see that contract. One place typing gives a reference less
-# than its binding's own type is a *forward reference*: a closure that reads
-# a local bound only after the closure was created is typed before the
-# binding's value is known (hir::types::ForwardType), so the read is `any`.
-# For a MutableArray[T] that would hand out an erased alias of the same
-# object (`x = peek()`, then a kind test and a write of a wrong value), so it
-# is an erasure like any other and is rejected here; passing the array in as a
-# typed parameter is the sound way to give a function access to it.
-proc hir::callables::CheckReference {hirVar e} {
-    upvar 1 $hirVar hir
-    if {![hir::get $hir $e reachable]} {
-        return
-    }
-    set node [dict get $hir exprs $e]
-    set b [dict get $node binding]
-    if {$b eq "" || [dict get $node init] eq "no"
-            || [dict get $hir bindings $b kind] ni {local param}} {
-        return
-    }
-    set actual [hir::bindingType $hir $b]
-    if {![HasMutArray $actual]} {
-        return
-    }
-    set seen [hir::typeOf $hir $e]
-    if {[Preserves $hir $actual $seen]} {
-        return
-    }
-    hir::Diagnose hir TYPE [format \
-        {cannot erase element contract %s: "%s" is read here as %s, before its binding is initialized (a forward reference from a closure created ahead of it), which would lose the element contract and permit incompatible writes; define the binding before the code that reads it, or pass the array in as a typed parameter} \
-        [hir::types::show $actual] [dict get $hir bindings $b name] [hir::types::show $seen]] $e
-}
-
 # The trailing statement of BODY (an "if" branch or a function's own body),
 # checked against IFTYPE/RESULTTYPE the way an explicit return/break is.
 proc hir::callables::CheckTrailing {hirVar body finalType contextText} {
@@ -321,10 +288,7 @@ proc hir::callables::WalkExpr {hirVar e} {
     upvar 1 $hirVar hir
     set node [dict get $hir exprs $e]
     switch -- [dict get $node kind] {
-        ref {
-            CheckReference hir $e
-        }
-        const - continue - block {
+        const - ref - continue - block {
         }
         bind {
             # The bind's own value position is safe: an immutable local

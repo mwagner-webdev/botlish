@@ -70,7 +70,9 @@
 #
 #   const     literal (the words after `const`), value (runtime value)
 #   ref       name, binding (BindingId, "" if unresolved),
-#             init (yes | no | deferred: bound when evaluated? see resolve.tcl)
+#             init (yes | deferred: yes for every resolved reference -- its
+#             binding was established before it; deferred only for an ambient
+#             binding, whatever the host holds when a closure runs)
 #   bind      name, binding, value (ExprId), duplicate (0|1)
 #   block     bodyScope, params (BindingIds), body (ExprIds),
 #             captures (BindingIds), staticRefs (BindingIds: module-static
@@ -174,11 +176,21 @@ proc hir::Diagnose {hirVar kind message expr} {
 #   -mode sequence  EXPRS run in an unknown existing environment: names not
 #                   bound by nested scopes resolve to ambient bindings
 #   -strict 1       (default) raise the first diagnostic as the semantic
-#                   error the runtime would raise ({CORE SEMANTIC KIND})
+#                   error the runtime would raise ({CORE SEMANTIC KIND}).
+#                   A resolution diagnostic (an unbound name, which includes
+#                   every reference to a binding established later --
+#                   hir/resolve.tcl) is raised before type inference runs:
+#                   a program that fails to resolve is never typed, analyzed
+#                   or specialized.
 #   -strict 0       keep diagnostics in the HIR; the error stays a run-time
 #                   error of the lowered program (used by the compiler)
 #
 # Malformed IR always raises {CORE MALFORMED}.
+#
+#   -halt-on-resolution-errors 1   (buildSyntax only) return the HIR as soon as
+#                   resolution has recorded a diagnostic, before typing: the
+#                   caller raises. Default 0 (typing and every check run and
+#                   keep collecting diagnostics).
 #
 #   -native-result-overrides D   IR-PATH (a list of indices, as in an
 #                   {ir PATH} origin) -> type form. Before type inference,
@@ -257,7 +269,7 @@ proc hir::build {exprs args} {
 proc hir::buildSyntax {nodes args} {
     set options [Options hir::buildSyntax \
         {-mode program -strict 1 -origin "" -files {} -modules {} -native-result-overrides {} \
-            -module-native-targets {} -type-decls {} -error-decls {}} $args]
+            -module-native-targets {} -type-decls {} -error-decls {} -halt-on-resolution-errors 0} $args]
     set mode [dict get $options -mode]
     if {$mode ni {program sequence}} {
         error "hir::build: -mode must be program or sequence"
@@ -270,6 +282,19 @@ proc hir::buildSyntax {nodes args} {
     hir::hygiene::apply hir
     dict for {f path} [dict get $options -files] {
         dict set hir files $f [dict create id $f path $path]
+    }
+    if {[dict get $hir diagnostics] ne ""} {
+        # Resolution failed: nothing below runs on a HIR whose names are not
+        # all resolved. A caller that raises later (the source frontend adds
+        # source locations to the message) asks to stop here with
+        # -halt-on-resolution-errors and raises the diagnostics itself.
+        if {[dict get $options -strict]} {
+            core::semanticError [dict get [lindex [dict get $hir diagnostics] 0] kind] \
+                [dict get [lindex [dict get $hir diagnostics] 0] message]
+        }
+        if {[dict get $options -halt-on-resolution-errors]} {
+            return $hir
+        }
     }
     ResolveModuleNativeTargets hir [dict get $options -module-native-targets]
     ApplyNativeResultOverrides hir [dict get $options -native-result-overrides]
@@ -729,7 +754,7 @@ proc hir::ApplyNativeResultOverrides {hirVar overrides} {
 }
 
 apply {{dir} {
-    foreach file {syntax resolve hygiene sourcetypes errordecls types exactvalue signatures modulebinding refine lower format read aot specialize range callables containers semantic completions errorsets induction escape blockescape stringregion traversal construction cardinality} {
+    foreach file {syntax resolve refcheck hygiene sourcetypes errordecls types exactvalue signatures modulebinding refine lower format read aot specialize range callables containers semantic completions errorsets induction escape blockescape stringregion traversal construction cardinality} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

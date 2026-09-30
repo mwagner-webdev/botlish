@@ -120,8 +120,8 @@ test hir-samples-wrong-fact {a sample stating a wrong type fails the analysis ch
 test hir-samples-wrong-binding {a sample naming the wrong binding fails the analysis check} -body {
     set text [core::ReadFile [file join $::projectRoot examples hir 01-scopes.hir]]
     # Claim the nested reference denotes the outer x.
-    set wrong [string map {{e9 block s4 () captures (b4 x)} {e9 block s4 () captures (b1 x)}
-                           {e10 ref b4 x : int deferred} {e10 ref b1 x : int deferred}} $text]
+    set wrong [string map {{e9 block s4 () captures (b2 x)} {e9 block s4 () captures (b1 x)}
+                           {e10 ref b2 x : int} {e10 ref b1 x : int}} $text]
     set h [hir::parse $wrong]
     # The IR is the same; only the stated resolution is wrong.
     list [expr {$wrong ne $text}] \

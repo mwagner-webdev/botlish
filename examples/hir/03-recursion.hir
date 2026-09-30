@@ -20,7 +20,7 @@ e1 bind b1 sum : block(e2)/1 -> int
                     e10 ref b4 + : native +
                     e11 ref b2 n : any
                     e12 call block(e2) : int
-                        e13 ref b1 sum : block(e2)/1 -> int deferred
+                        e13 ref b1 sum : block(e2)/1 -> int
                         e14 call native(-) : int
                             e15 ref b5 - : native -
                             e16 ref b2 n : any

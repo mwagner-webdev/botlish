@@ -63,9 +63,11 @@
 # hir::resolve::program gives each section its own "program"-kind scope, a
 # sibling of the referencing code's own top scope (hir::resolve::
 # ProgramSection) -- so two different namespaces can freely define the
-# very same plain name with no collision, same-module code (including
-# same-module mutual recursion, e.g. the existing is_even/is_odd pattern)
-# resolves its own siblings exactly as it would in a single ordinary file,
+# very same plain name with no collision, same-module code
+# resolves its own earlier siblings (and itself, for recursion) exactly as it
+# would in a single ordinary file -- in source order: a module function may
+# not call a later one, and same-module mutual recursion is rejected like any
+# other (STRICT-REFERENCE-DETERMINISM.md) --
 # and hir::resolve::Expr's `block` case is never involved at all. A
 # module-qualified reference elsewhere in the program resolves, not
 # through ordinary lexical lookup but directly against HIR's own `modules`
@@ -91,8 +93,11 @@
 # imports, re-exports, mutable module bindings, lazy initialization,
 # separate/incremental compilation, a search path, package versioning. A
 # namespace's dependency graph must be acyclic (Error CYCLE);
-# ordinary same-module recursion (including mutual recursion) is unaffected
-# -- it was never a *module* dependency to begin with.
+# a function's own recursion inside its module is unaffected -- it was never a
+# *module* dependency to begin with. Within one module, definitions are
+# established in source order (hir/resolve.tcl): the module's own section is
+# resolved completely before any section or program that names it, so a
+# qualified reference always names an established binding of another unit.
 
 namespace eval surface::modules {}
 
@@ -309,6 +314,7 @@ proc surface::modules::compileProgramFile {path args} {
     set decls [concat [dict get $state typeDecls] $ownDecls]
     set errorDecls [concat [dict get $state errorDecls] $ownErrorDecls]
     set hir [hir::buildSyntax [surface::lower::Sequence $executable] -strict 0 \
+        -halt-on-resolution-errors [dict get $options -strict] \
         -origin [surface::lower::Origin [dict get $ast span] ""] \
         -files [dict get $state files] -modules [dict get $state sections] \
         -type-decls $decls -error-decls $errorDecls]

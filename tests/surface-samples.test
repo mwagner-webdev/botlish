@@ -66,9 +66,16 @@ foreach path $samples {
         expr {$outcome eq [sampleExpectation [core::ReadFile $path]] ? "expected" : $outcome}
     } -result expected
 
-    test surface-sample-backends-$name "$name: both backends agree on the lowered IR" -body {
-        differential [hir::lower [surface::readProgramFile $path -strict 0]]
-    } -result same
+    # A sample that fails to resolve (expect-error UNBOUND: an illegal forward
+    # reference) has no lowered program to compare: resolution rejects it
+    # before any backend sees it (STRICT-REFERENCE-DETERMINISM.md), and a
+    # non-strict HIR of it is not a program (its lowered names would be
+    # resolved by core IR's own scoping, which is not the contract).
+    if {[sampleExpectation [core::ReadFile $path]] ne {error {CORE SEMANTIC UNBOUND}}} {
+        test surface-sample-backends-$name "$name: both backends agree on the lowered IR" -body {
+            differential [hir::lower [surface::readProgramFile $path -strict 0]]
+        } -result same
+    }
 
     # A sample using a module (surface/modules.tcl) genuinely doesn't
     # round-trip this way: surface::readProgramFile does more than lower
@@ -82,10 +89,12 @@ foreach path $samples {
     # lowering; the sample's other three checks above (interp/compile
     # outcome, backend agreement) hold for it exactly as for any other.
     if {![string match {*::*} [core::ReadFile $path]]} {
+        if {[sampleExpectation [core::ReadFile $path]] ne {error {CORE SEMANTIC UNBOUND}}} {
         test surface-sample-hir-$name "$name: the HIR is what analysis of its IR derives" -body {
             set h [surface::readProgramFile $path -strict 0]
             expr {[hir::format $h] eq [hir::format [hir::build [hir::lower $h] -strict 0]]}
         } -result 1
+        }
     }
 }
 

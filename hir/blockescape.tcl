@@ -47,14 +47,11 @@
 #
 # The algorithm, per used specialization instance I (I's own region R):
 #
-#   1. Candidates: every local, non-duplicate, non-trailing, non-cell-
-#      capturing `bind` in R whose value is a Block literal that itself
-#      needs an environment (an envless/zero-capture literal is already
-#      free, via the pre-existing fnvalue path -- see below) and does not
-#      itself capture a forward-reference cell (NeedsCell, unchanged from
-#      the original implementation: cells remain out of this analysis'
-#      scope). Exactly the original candidate set, *minus* the automatic
-#      NeedsSelf exclusion.
+#   1. Candidates: every local, non-duplicate, non-trailing `bind` in R
+#      whose value is a Block literal that itself needs an environment (an
+#      envless/zero-capture literal is already free, via the pre-existing
+#      fnvalue path -- see below). Exactly the original candidate set,
+#      *minus* the automatic NeedsSelf exclusion.
 #   2. For each candidate B (literal L, arity N), three kinds of reference
 #      must each be proven to be nothing but an exact, N-argument call to
 #      L's own single used specialize instance (RefsAsCalls below; no
@@ -113,8 +110,8 @@
 # implementation (the milestone's own scope limits, not omissions): a
 # Block passed through another (possibly closed) function and proven not
 # to escape there but not itself locally bound in the same region
-# (interprocedural propagation beyond one region's own sibling graph); a
-# capture that needs a forward-reference cell (NeedsCell); specializing an
+# (interprocedural propagation beyond one region's own sibling graph);
+# specializing an
 # internal variant's own body differently per call site (one internal
 # variant per callee instance, shared by every call site that demands it);
 # mutual recursion between two DIFFERENT candidate bindings that are not
@@ -129,22 +126,6 @@
 # there is nothing for this analysis to add.
 
 namespace eval hir::blockescape {
-}
-
-# 1 if any of block literal L's own captures is a binding CONTEXT (hir::aot
-# ::context) marks as needing a forward-reference cell. Such a capture is
-# the cell's own reference, not an ordinary already-resolved value
-# (native/lower.tcl's Closure captures the cell itself for these): out of
-# scope for this implementation (see the file header), so a candidate
-# capturing one is conservatively declined.
-proc hir::blockescape::NeedsCell {hir context l} {
-    set cells [dict get $context cells]
-    foreach cb [hir::get $hir $l captures] {
-        if {[dict exists $cells $cb]} {
-            return 1
-        }
-    }
-    return 0
 }
 
 # 1 if any of block literal L's own captures is a binding bound (via
@@ -321,15 +302,11 @@ proc hir::blockescape::Bindings {hir spec} {
                 continue
             }
             set b [dict get $node binding]
-            if {[dict get [hir::binding $view $b] kind] ne "local"
-                    || [dict exists [dict get $context cells] $b]} {
+            if {[dict get [hir::binding $view $b] kind] ne "local"} {
                 continue
             }
             set l [dict get $node value]
             if {[hir::kind $view $l] ne "block" || $l in $envless} {
-                continue
-            }
-            if {[NeedsCell $view $context $l]} {
                 continue
             }
             dict set candidates $b $l

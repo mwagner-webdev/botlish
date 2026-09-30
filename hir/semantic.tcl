@@ -84,10 +84,14 @@
 # recorded (generic) environment -- sound, only less precise about captures --
 # and the call keeps whichever result is more precise (Refines: the in-place
 # result is the fallback). A block with captures whose creating walk has not
-# run yet (a forward call) has no recorded environment in this pass: the
-# request is declined ("no-env") and hir::types::infer re-runs the walk once
-# the environments are known (every pass is sound, later ones are more
-# precise).
+# run yet has no recorded environment in this pass: the request is declined
+# ("no-env") and hir::types::infer re-runs the walk once the environments are
+# known (every pass is sound, later ones are more precise). Definition order
+# cannot cause this -- a call always follows the binding, and the binding's
+# own walk, of the function it calls (hir/resolve.tcl) -- but a recursive
+# function can: a call of itself, answerable at once because its result type
+# is declared, requests an instance of the function whose body creates a
+# nested closure that the enclosing generic walk has not reached yet.
 #
 # Demand, caching, recursion
 # --------------------------
@@ -142,7 +146,7 @@ namespace eval hir::semantic {
     variable maxDepth 24
     variable passLimit 6
     # hir::types::infer re-runs the walk (once the creation environments of
-    # forward-called blocks are known) at most this many times in all.
+    # blocks a first pass had to decline are known) at most this many times.
     variable maxRounds 3
     variable levelLimit 700
     # Run state (empty outside hir::types::infer).
@@ -220,14 +224,14 @@ proc hir::semantic::WantsRerun {snapshot} {
 # Records, for the generic walk of block E (created in context OUTER of
 # HIR), the type of each captured binding at creation: the entry
 # environment every instance of E is analyzed under (header, "Captures").
-proc hir::semantic::RecordEnv {hir outer e} {
+proc hir::semantic::RecordEnv {hir outer e self selfType} {
     variable state
     if {$state eq "" || [dict exists $outer inst] || [dict exists $outer spec]} {
         return
     }
     set env [dict create]
     foreach b [dict get $hir exprs $e captures] {
-        dict set env $b [hir::types::BindingType $hir $outer $b]
+        dict set env $b [expr {$b eq $self ? $selfType : [hir::types::BindingType $hir $outer $b]}]
     }
     if {[dict exists $state envs $e] && [dict get $state envs $e] ne $env && [dict exists $state instsOf $e]} {
         # The creation environment changed (a later attempt of an enclosing

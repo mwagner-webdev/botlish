@@ -64,7 +64,7 @@ test hir-aot-3 {a closure call with a known target is direct; the closure needs 
          [dict get [aotRegion $a add] captures] \
          [dict get [aotRegion $a <program>] requirements] \
          [aotStatus $a <program>]
-} -result {{make_adder add} closure {{binding b3 name x class value}} closure-env {closed closed}}
+} -result {{make_adder add} closure {{binding b2 name x class value}} closure-env {closed closed}}
 
 # (Two different blocks, or two different natives, now join to their common
 # structural function type -- STRUCTURAL-FUNCTION-TYPES.md -- a value known
@@ -96,20 +96,22 @@ test hir-aot-7 {a name looked up in an unknown environment is a dynamic binding}
     lsort -unique [aotBlockerKinds $a <program>]
 } -result {DynamicBinding DynamicCall}
 
-test hir-aot-8 {a forward reference to a later function is a direct call with an init check} -body {
-    set a [aotOf [surface::readProgramFile [file join $::projectRoot examples surface 09-mutual-recursion.bot]]]
-    list [aotStatus $a is_even] [aotBlockerKinds $a is_even] [aotStatus $a is_odd] \
-         [lmap f [aotFacts $a is_even init-check] {dict get $f name}] \
-         [lmap f [aotFacts $a is_even direct-call] {dict filter $f key name tail}] \
-         [lmap f [aotFacts $a is_odd direct-call] {dict filter $f key name tail}]
-} -result {{guarded closed} UnknownParameterKind {guarded closed} is_odd {{name is_odd tail 1}} {{name is_even tail 1}}}
+test hir-aot-8 {a named function's reference to itself is a proven direct self tail call (no init check exists any more)} -body {
+    set a [aotSource "fn count(n):\n    if n == 0:\n        return 0\n    count(n - 1)\n\ncount(3)"]
+    list [aotStatus $a count] \
+         [lmap f [aotFacts $a count direct-call] {dict filter $f key name tail self}] \
+         [aotFacts $a count init-check]
+} -result {{guarded closed} {{name count tail 1 self 1}} {}}
 
-test hir-aot-8b {shared call facts: self tail calls and unproven references} -body {
-    set hir [surface::compile "fn even(n):\n    if n == 0:\n        return true\n    odd(n - 1)\n\nfn odd(n):\n    if n == 0:\n        return false\n    even(n - 1)\n\nfn count(n):\n    loop:\n        return count(n)\n    count(n - 1)\n\neven(4)" t.bot]
-    set self [lmap {call block} [hir::aot::selfTailCalls $hir] {hir::aot::BlockName $hir $block}]
-    set refs [lmap {ref b} [hir::aot::unprovenReferences $hir] {hir::get $hir $ref name}]
-    list $self $refs
-} -result {count odd}
+test hir-aot-8a {a caller-before-callee program is rejected before analysis: the surface example of mutual recursion} -body {
+    catch {surface::readProgramFile [file join $::projectRoot examples surface 09-mutual-recursion.bot]} m o
+    list [dict get $o -errorcode] [string match "*unbound name \"is_odd\"*declared later*" $m]
+} -result {{CORE SEMANTIC UNBOUND} 1}
+
+test hir-aot-8b {shared call facts: self tail calls} -body {
+    set hir [surface::compile "fn odd(n):\n    if n == 0:\n        return false\n    true\n\nfn even(n):\n    if n == 0:\n        return true\n    odd(n - 1)\n\nfn count(n):\n    loop:\n        return count(n)\n    count(n - 1)\n\neven(4)" t.bot]
+    lmap {call block} [hir::aot::selfTailCalls $hir] {hir::aot::BlockName $hir $block}
+} -result count
 
 # ---------------------------------------------------------------------------
 # Kinds
@@ -183,11 +185,11 @@ test hir-aot-18 {core IR origins are reported as IR paths} -body {
     list [lmap b [dict get [aotRegion $a f] blockers] {dict get $b location}]  [lmap x [aotFacts $a g known-error] {list [dict get $x error] [dict get $x location]}]  [aotFacts $a g native-call] [dict get [aotRegion $a <program>] location]
 } -result {{{ir {0 2 2 2}}} {{ARITY {ir {2 2 2}}}} {} {ir {}}}
 
-test hir-aot-19 {init checks: only where HIR cannot prove a closure's reference bound} -body {
-    set a [aotSource "fn early():\n    late()\n\nfn late():\n    early()\n\nfn self(n):\n    if n == 0:\n        return 0\n    self(n - 1)\n\nfn outer(p):\n    fn inner():\n        p\n    inner\n\nouter(1)()"]
-    list [lmap x [aotFacts $a early init-check] {dict get $x name}] \
-         [aotFacts $a late init-check] [aotFacts $a self init-check] [aotFacts $a inner init-check]
-} -result {late {} {} {}}
+test hir-aot-19 {no reference needs an init check: every reference is to a binding established before its closure exists} -body {
+    set a [aotSource "fn late():\n    1\n\nfn early():\n    late()\n\nfn self(n):\n    if n == 0:\n        return 0\n    self(n - 1)\n\nfn outer(p):\n    fn inner():\n        p\n    inner\n\nouter(1)()"]
+    list [aotFacts $a early init-check] [aotFacts $a late init-check] [aotFacts $a self init-check] [aotFacts $a inner init-check] \
+         [expr {"init-check" in [dict get [aotRegion $a early] requirements]}]
+} -result {{} {} {} {} 0}
 
 test hir-aot-20 {big literals, Results and unreachable code} -body {
     set a [aotOf [hirOf {call {ref +} {const 100000000000000000000} {const 1}} \

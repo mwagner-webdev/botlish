@@ -193,6 +193,36 @@ both(7)}]
 # ---------------------------------------------------------------------------
 # Fixed point, recursion, definition order (spec items 30-33, 67)
 
+# The canonical (callee-first) order of a call chain, and another legal
+# topological order of the same program that also defines an independent
+# helper: the inferred signatures must not depend on which legal order the
+# source is written in. (The caller-first order is not a program:
+# STRICT-REFERENCE-DETERMINISM.md.)
+set ::icChain {fn h(z):
+    length(z)
+fn g(y):
+    h(y)
+fn f(x):
+    g(x)
+f("abc")}
+set ::icChainReordered {fn k(w):
+    w + 1
+fn h(z):
+    length(z)
+fn g(y):
+    h(y)
+fn f(x):
+    g(x)
+f("abc")}
+set ::icChainAlso {fn h(z):
+    length(z)
+fn g(y):
+    h(y)
+fn k(w):
+    w + 1
+fn f(x):
+    g(x)
+f("abc")}
 set ::icChainForward {fn f(x):
     g(x)
 fn g(y):
@@ -200,33 +230,32 @@ fn g(y):
 fn h(z):
     length(z)
 f("abc")}
-set ::icChainBackward {fn h(z):
-    length(z)
-fn g(y):
-    h(y)
-fn f(x):
-    g(x)
-f("abc")}
 
 test ic-multi-hop {requirements propagate through several ordinary calls without annotations: h(z), g(y), f(x) all str} -body {
-    set h [icCompile $::icChainForward]
+    set h [icCompile $::icChain]
     list [icSig $h f] [icSig $h g] [icSig $h h]
 } -result {{{x: str (inferred checked)}} {{y: str (inferred checked)}} {{z: str (inferred checked)}}}
 
-test ic-order-independent {the inferred signatures do not depend on definition order} -body {
-    set a [icCompile $::icChainForward]
-    set b [icCompile $::icChainBackward]
-    expr {[list [icSig $a f] [icSig $a g] [icSig $a h]] eq [list [icSig $b f] [icSig $b g] [icSig $b h]]}
-} -result 1
+test ic-order-independent {the inferred signatures do not depend on which legal (callee-first) order the definitions are written in} -body {
+    set a [icCompile $::icChainReordered]
+    set b [icCompile $::icChainAlso]
+    list [expr {[list [icSig $a f] [icSig $a g] [icSig $a h] [icSig $a k]] eq [list [icSig $b f] [icSig $b g] [icSig $b h] [icSig $b k]]}] \
+         [expr {[list [icSig $a f] [icSig $a g] [icSig $a h]] eq [list [icSig [icCompile $::icChain] f] [icSig [icCompile $::icChain] g] [icSig [icCompile $::icChain] h]]}]
+} -result {1 1}
+
+test ic-forward-order-rejected {the caller-first order of the same chain is rejected before contract inference} -body {
+    catch {icCompile $::icChainForward} message options
+    list [dict get $options -errorcode] [string match "*unbound name \"g\"*" $message]
+} -result {{CORE SEMANTIC UNBOUND} 1}
 
 test ic-deterministic {compiling the same program twice gives identical signatures and provenance} -body {
-    set a [icCompile $::icChainForward]
-    set b [icCompile $::icChainForward]
+    set a [icCompile $::icChain]
+    set b [icCompile $::icChain]
     expr {[hir::signatures::of $a [icBlock $a f]] eq [hir::signatures::of $b [icBlock $b f]]}
 } -result 1
 
-test ic-mutual-recursion {mutually recursive functions converge: a requirement entering the SCC propagates through it} -body {
-    set h [icCompile {fn even?(n):
+test ic-mutual-recursion-rejected {lexical mutual recursion is not a program: one edge of the pair must point forward} -body {
+    catch {icCompile {fn even?(n):
     if n == 0:
         true
     else:
@@ -236,36 +265,45 @@ fn odd?(n):
         false
     else:
         even?(n - 1)
-even?(10)}]
-    list [icSig $h even?] [icSig $h odd?]
-} -result {{{n: int (inferred checked)}} {{n: int (inferred checked)}}}
+even?(10)}} message options
+    dict get $options -errorcode
+} -result {CORE SEMANTIC UNBOUND}
 
-test ic-recursive-scc-unconstrained {a recursive SCC with no concrete requirement keeps any} -body {
-    set h [icCompile {fn ping(x, k):
+test ic-mutual-recursion {functions that reach each other through arguments still form a recursive group: a requirement entering the cycle propagates through it} -body {
+    set h [icCompile {fn ping(next, n):
+    if n == 0:
+        return 0
+    next(ping, n - 1)
+fn pong(prev, n):
+    if n == 0:
+        return 1
+    prev(pong, n - 1)
+ping(pong, 3)}]
+    list [icSig $h ping] [icSig $h pong]
+} -match glob -result {*n: int (inferred checked)*}
+
+test ic-recursive-scc-unconstrained {a self-recursive function with no concrete requirement keeps any} -body {
+    set h [icCompile {fn spin(x, k):
     if k == 0:
         x
     else:
-        pong(x, k - 1)
-fn pong(x, k):
-    ping(x, k)
-ping("anything", 3)}]
-    list [icSig $h ping] [icSig $h pong]
-} -result {{{x: any (none)} {k: int (inferred checked)}} {{x: any (none)} {k: int (inferred checked)}}}
+        spin(x, k - 1)
+spin("anything", 3)}]
+    icSig $h spin
+} -result {{x: any (none)} {k: int (inferred checked)}}
 
-test ic-mutual-recursion-callable {a callable contract propagates through mutual recursion (trusted Fn in both)} -body {
+test ic-recursion-callable {a callable contract propagates through recursion (trusted Fn)} -body {
     set h [icCompile {fn walk(p, n):
     if n == 0:
         0
     else:
         if p("x"):
-            back(p, n - 1)
+            walk(p, n - 1)
         else:
             0
-fn back(q, n):
-    walk(q, n)
 walk(is_tcl_alpha, 3)}]
-    list [icSig $h walk] [icSig $h back]
-} -result {{{p: Fn{args: [str], return: bool, errors: []} (inferred trusted)} {n: int (inferred checked)}} {{q: Fn{args: [str], return: bool, errors: []} (inferred trusted)} {n: int (inferred checked)}}}
+    icSig $h walk
+} -result {{p: Fn{args: [str], return: bool, errors: []} (inferred trusted)} {n: int (inferred checked)}}
 
 # ---------------------------------------------------------------------------
 # Explicit annotations remain contracts (spec items 4, 68)

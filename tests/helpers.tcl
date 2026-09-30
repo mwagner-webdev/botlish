@@ -12,6 +12,17 @@ if {[info exists ::env(CORE_BACKEND)]} {
     core::useBackend $::env(CORE_BACKEND)
 }
 
+# Core IR scoping. The interpreter's scopes declare every name they bind on
+# entry (core/evaluator.tcl), so a name denotes its scope's binding even
+# before that bind runs, and a closure may read a binding made later in its
+# scope (recursion between later bindings). HIR resolves sequentially (a
+# binding is visible from where it is established, hir/resolve.tcl;
+# STRICT-REFERENCE-DETERMINISM.md), so the backends compiled from HIR do not
+# implement these Core IR behaviors: a reference to a binding not established
+# yet is an unbound-name error there. Tests of the Core IR semantics
+# themselves run on the interpreter only.
+testConstraint coreScoping [expr {[core::useBackend] eq "interp"}]
+
 # Native coverage (tests/native-coverage.tcl): NATIVE_COVERAGE=FILE appends
 # one line per test: {NAME PASSED NATIVE-RUNS UNSUPPORTED-ERRORS}.
 if {[info exists ::env(NATIVE_COVERAGE)] && [info commands ::CoverageTest] eq ""} {

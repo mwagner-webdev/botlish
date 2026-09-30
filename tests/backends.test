@@ -31,10 +31,6 @@ lappend corpus \
                 {break {block {} {ref k}}}}}}}
         {call {call {ref make}}}
     } \
-    tdz {
-        {bind x {const 1}}
-        {call {block {} {bind y {call {block {} {ref x}}}} {bind x {const 2}} {ref y}}}
-    } \
     duplicate {
         {bind a {const 1}}
         {bind a {const 2}}

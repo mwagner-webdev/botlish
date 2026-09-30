@@ -74,7 +74,7 @@ test bind-9 {using a name before its binding exists is unbound} -body {
                 {bind later {const 1}}
 } -result {CORE SEMANTIC UNBOUND}
 
-test scope-1 {a name denotes its scope's binding even before that bind runs} -body {
+test scope-1 {a name denotes its scope's binding even before that bind runs} -constraints coreScoping -body {
     # The closure's x is the inner x; calling it before the inner bind is an
     # error, not a silent read of the outer x.
     core::evalProgram {
@@ -86,14 +86,14 @@ test scope-1 {a name denotes its scope's binding even before that bind runs} -bo
     }
 } -returnCodes error -errorCode {CORE SEMANTIC UNBOUND} -result {name "x" used before its binding}
 
-test scope-2 {use before binding in a scope without closures} -body {
+test scope-2 {use before binding in a scope without closures} -constraints coreScoping -body {
     core::evalProgram {
         {bind x {const 1}}
         {call {block {} {bind y {ref x}} {bind x {const 2}} {ref y}}}
     }
 } -returnCodes error -errorCode {CORE SEMANTIC UNBOUND} -result {name "x" used before its binding}
 
-test scope-3 {a bind's own expression cannot see the name being bound} -body {
+test scope-3 {a bind's own expression cannot see the name being bound} -constraints coreScoping -body {
     core::evalProgram {{bind x {const 1}} {call {block {} {bind x {ref x}}}}}
 } -returnCodes error -errorCode {CORE SEMANTIC UNBOUND} -match glob -result *
 
@@ -112,7 +112,7 @@ test scope-6 {binding a parameter name in a body with closures} -body {
     core::eval {call {block {x} {bind f {block {} {ref x}}} {bind x {const 2}}} {const 1}}
 } -returnCodes error -errorCode {CORE SEMANTIC DUPLICATE} -match glob -result *
 
-test scope-7 {mutual recursion between later bindings} -body {
+test scope-7 {mutual recursion between later bindings} -constraints coreScoping -body {
     run {bind even? {block {n} {if {call {ref ==} {ref n} {const 0}}
                                    {block {} {ref true}}
                                    {block {} {call {ref odd?} {call {ref -} {ref n} {const 1}}}}}}} \
@@ -121,6 +121,37 @@ test scope-7 {mutual recursion between later bindings} -body {
                                   {block {} {call {ref even?} {call {ref -} {ref n} {const 1}}}}}}} \
         {call {ref list} {call {ref even?} {const 10}} {call {ref odd?} {const 7}}}
 } -result {[true, true]}
+
+# The same programs through HIR (the compile backend's and native backend's
+# front end): sequential resolution, whatever the interpreter's scopes do.
+test scope-hir-1 {HIR: a closure's x is the outer x when the inner x is established only later} -body {
+    set program {
+        {bind x {const 1}}
+        {call {block {}
+            {bind y {call {block {} {ref x}}}}
+            {bind x {const 2}}
+            {ref y}}}
+    }
+    list [lrange [outcomeUnder compile $program] 0 1] [hir::diagnostics [hir::build $program -strict 0]]
+} -result {{value 1} {}}
+
+test scope-hir-2 {HIR: a bind's own expression sees the outer binding of its name} -body {
+    set program {{bind x {const 1}} {call {block {} {bind x {call {ref +} {ref x} {const 10}}} {ref x}}}}
+    lrange [outcomeUnder compile $program] 0 1
+} -result {value 11}
+
+test scope-hir-3 {HIR: mutual recursion between later bindings is an unbound-name error, statically, and when compiled with -strict 0 at the reference} -body {
+    set program {
+        {bind even? {block {n} {if {call {ref ==} {ref n} {const 0}}
+                                   {block {} {ref true}}
+                                   {block {} {call {ref odd?} {call {ref -} {ref n} {const 1}}}}}}}
+        {bind odd? {block {n} {if {call {ref ==} {ref n} {const 0}}
+                                  {block {} {ref false}}
+                                  {block {} {call {ref even?} {call {ref -} {ref n} {const 1}}}}}}}
+        {call {ref even?} {const 4}}
+    }
+    list [catch {hir::build $program} message] $message [lrange [outcomeUnder compile $program] 0 2]
+} -match glob -result {1 {unbound name "odd?": "odd?" is declared later*} {error {CORE SEMANTIC UNBOUND} *}}
 
 test malformed-1 {unknown operation} -body {
     core::eval {frobnicate 1}

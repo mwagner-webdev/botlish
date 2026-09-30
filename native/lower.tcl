@@ -19,7 +19,6 @@
 #                                           representation), known errors
 #   self tail calls                         hir::aot::selfTailCalls (the same
 #                                           criterion the Tcl compiler uses)
-#   references needing an init check        hir::aot::unprovenReferences
 #   blocks that need no environment         envless (hir::aot::context)
 #   which Block values code materializes    hir::aot::materializedBlocks
 #
@@ -56,10 +55,6 @@
 #   %d = self                  the running closure (env=1)
 #   %d = capture I             capture I of the running closure (env=1)
 #   %d = move %s
-#   %d = cell                  a fresh binding cell, not yet bound
-#   cellset %c %v              binds the cell
-#   %d = cellget %c            reads a cell proven bound
-#   %d = cellcheck %c "NAME"   reads a cell; UNBOUND if not bound yet
 #   %d = closure F %c...       a closure of F capturing the values %c...
 #   guard KIND %v "CONTEXT"    TYPE error unless %v has kind KIND
 #   guardbool %v               NOT-BOOLEAN error unless %v is a Boolean
@@ -79,12 +74,10 @@
 #
 # Values and bindings
 # -------------------
-# A local binding is a register, unless some reference to it cannot be
-# proven bound when it runs (a forward reference from a closure): then it is
-# a *cell* created when its scope is entered, and closures capture the cell.
-# Closures capture every other binding by value, which is sound because a
-# proven reference's binding is bound before the closure is created. A
-# closure refers to its own function binding through `self`. A binding bound
+# A local binding is a register. Closures capture bindings by value, which is
+# sound because resolution is sequential (hir/resolve.tcl): a reference's
+# binding is always established before the closure that reads it is created.
+# A closure refers to its own function binding through `self`. A binding bound
 # to an environment-free function is not captured at all: its value is the
 # function's constant closure (fnvalue).
 #
@@ -150,8 +143,6 @@ namespace eval native::lower {
     variable guards {}
     variable knownErrors {}
     variable selfTail {}
-    variable unproven {}
-    variable cells {}
     variable envless {}
     variable captureLists {}
     variable pending {}
@@ -458,8 +449,7 @@ namespace eval native::lower {
 #
 # hir::blockescape.tcl is conservative and additive only, and declines
 # outright (never partially materializes) a binding with any use it cannot
-# vouch for as an exact call, or one capturing a forward-reference cell --
-# see its header for the exact criteria and the bounded, single-region
+# vouch for as an exact call -- see its header for the exact criteria and the bounded, single-region
 # transitive fixpoint this now is. -block-escape-opt 0 (or
 # BOTLISH_NATIVE_BLOCK_ESCAPE_OPT=0) disables the analysis outright, for
 # differential testing against the unoptimized (canonical closure)
@@ -1008,8 +998,6 @@ proc native::lower::program {hirProgram args} {
     variable spec
     variable context
     variable selfTail
-    variable unproven
-    variable cells
     variable envless
     variable captureLists
     variable pending
@@ -1135,8 +1123,6 @@ proc native::lower::program {hirProgram args} {
         : [dict create params {} bindings {} locals {} results {} closed {} regions {}]}]
     set context [dict get $spec context]
     set selfTail [dict get $context selfTails]
-    set unproven [dict get $context unproven]
-    set cells [dict get $context cells]
     set envless [dict get $context envless]
     set captureLists [dict create]
     set usedNatives {}
@@ -1338,14 +1324,10 @@ proc native::lower::CaptureList {e} {
 }
 
 # How code in the function of block E (or "program") reaches binding B from
-# an enclosing invocation: fnvalue, cell, self or value.
+# an enclosing invocation: fnvalue, self or value.
 proc native::lower::BindingAccess {b e} {
     variable hir
-    variable cells
     variable envless
-    if {[dict exists $cells $b]} {
-        return cell
-    }
     set bound [hir::aot::BoundBlock $hir $b]
     if {$bound ne "" && $bound in $envless} {
         return fnvalue
@@ -1558,14 +1540,6 @@ proc native::lower::Function {id} {
             set extraParams 1
         }
     }
-    # Module scopes share this one program function. Deferred references from
-    # module functions need their cells before initializers and closures run.
-    if {$region eq "program" && [dict exists $hir modules]} {
-        dict for {moduleName moduleScope} [dict get $hir modules] {
-            EnterScope fn $moduleScope
-        }
-    }
-    EnterScope fn $scope
     if {$region ne "program"} {
         dict set fn planResult [hir::construction::resultFamily $construction $id]
     }
@@ -1656,7 +1630,6 @@ proc native::lower::CompanionFunction {id} {
         }
         incr k
     }
-    EnterScope fn $scope
     if {$body eq ""} {
         throw {NATIVE BUG} "native lowering: companion of instance $id has an empty body"
     }
@@ -1752,7 +1725,6 @@ proc native::lower::RegionCompanionFunction {id} {
         }
         incr k
     }
-    EnterScope fn $scope
     if {$body eq ""} {
         throw {NATIVE BUG} "native lowering: region companion of instance $id has an empty body"
     }
@@ -1807,7 +1779,7 @@ proc native::lower::RegionCompanionFunction {id} {
 # an ordinary parameter, and never emits a `capture I` load). Only ever
 # built for a block instance hir::blockescape::wants is true for; every
 # capture hir::blockescape.tcl let through is a plain already-resolved
-# value (never a forward-reference cell, never "self": see its header), so
+# value (never "self": see its header), so
 # no other part of this function's lowering needs to change at all -- same
 # guards, same known-error checks, same GC rooting (every parameter is
 # rooted from the prologue exactly like any other, "Scalar replacement"'s
@@ -1862,7 +1834,6 @@ proc native::lower::InternalFunction {id} {
     foreach b $captureBindings {
         dict set fn locals $b [list reg [NewReg fn]]
     }
-    EnterScope fn $scope
     dict set fn planResult [hir::construction::resultFamily $construction $id]
     set result [SequenceTo fn $body [PlanResultFamily fn]]
     if {$result ne "never"} {
@@ -1960,7 +1931,6 @@ proc native::lower::InternalRegionCompanionFunction {id} {
     foreach b $captureBindings {
         dict set fn locals $b [list reg [NewReg fn]]
     }
-    EnterScope fn $scope
     if {$body eq ""} {
         throw {NATIVE BUG} "native lowering: internal region companion of instance $id has an empty body"
     }
@@ -2083,7 +2053,6 @@ proc native::lower::FieldsFunction {id} {
     set scope [hir::get $hir $region bodyScope]
     set body [hir::get $hir $region body]
     set pnames [SetupFieldParams fn $id $instance $params]
-    EnterScope fn $scope
     set result [Sequence fn $body]
     if {$result ne "never"} {
         Emit fn "ret $result"
@@ -2157,7 +2126,6 @@ proc native::lower::FieldsCompanionFunction {id} {
     set scope [hir::get $hir $region bodyScope]
     set body [hir::get $hir $region body]
     set pnames [SetupFieldParams fn $id $instance $params]
-    EnterScope fn $scope
     if {$body eq ""} {
         throw {NATIVE BUG} "native lowering: fields+companion of instance $id has an empty body"
     }
@@ -2267,18 +2235,6 @@ proc native::lower::AssignRaw {fnVar rhs {e ""}} {
 proc native::lower::MarkRaw {fnVar reg} {
     upvar 1 $fnVar fn
     dict set fn rawRegs $reg 1
-}
-
-# Enters HIR scope S: creates the cells of its cell bindings.
-proc native::lower::EnterScope {fnVar s} {
-    upvar 1 $fnVar fn
-    variable hir
-    variable cells
-    foreach b [dict get $hir scopes $s bindings] {
-        if {[dict get [hir::binding $hir $b] kind] eq "local" && [dict exists $cells $b]} {
-            dict set fn locals $b [list cell [Assign fn cell]]
-        }
-    }
 }
 
 # ---------------------------------------------------------------------------
@@ -2488,7 +2444,6 @@ proc native::lower::IntConst {fnVar n e} {
 proc native::lower::Ref {fnVar e node want} {
     upvar 1 $fnVar fn
     variable hir
-    variable unproven
     set b [dict get $node binding]
     set name [dict get $node name]
     if {$b eq ""} {
@@ -2503,10 +2458,6 @@ proc native::lower::Ref {fnVar e node want} {
         ambient {
             Unsupported $e "ambient binding" "\"$name\" is looked up in an unknown environment"
         }
-    }
-    if {[dict get $node init] eq "no"} {
-        Emit fn "raise UNBOUND [Quote "name \"$name\" used before its binding"]" $e
-        return {never tagged}
     }
     set access [Access fn $b]
     lassign $access how where
@@ -2547,30 +2498,20 @@ proc native::lower::Ref {fnVar e node want} {
             # ... flat` of a flat argument passes it through unchanged.
             return [list [Assign fn "construct [lindex $access 2] flat $where" $e] tagged]
         }
-        cell {
-            if {[dict exists $unproven $e]} {
-                return [list [Assign fn "cellcheck $where [Quote [dict get $binding name]]" $e] tagged]
-            }
-            return [list [Assign fn "cellget $where" $e] tagged]
-        }
         static {
             # Module-static storage (MODULE-STATIC-RETAINED-VALUES.md): read
             # through the Vm's own static slot table, never through this
             # function's own closure environment -- reachable identically
-            # from any function, so there is no "unproven"/deferred-init
-            # check to make here: hir::modulebinding.tcl already proved this
+            # from any function; hir::modulebinding.tcl already proved this
             # binding's initializer runs, exactly once, before any code that
-            # could reference it (the same guarantee a root binding already
-            # has, and the reason Ref's own "used before its binding" check
-            # above never applies to a module-static reference either).
+            # could reference it (the same guarantee a root binding has).
             return [list [Assign fn "staticget $where" $e] tagged]
         }
     }
     throw {NATIVE BUG} "native lowering: bad access $access for $b ($e)"
 }
 
-# {reg %r} (a register holding the binding's value), {cell %c} (a register
-# holding its cell), {static N} (module-static slot N), {fnvalue F} or
+# {reg %r} (a register holding the binding's value), {static N} (module-static slot N), {fnvalue F} or
 # {self}: how the current function reaches binding B, emitting a capture
 # load if needed.
 proc native::lower::Access {fnVar b} {
@@ -2620,7 +2561,7 @@ proc native::lower::Access {fnVar b} {
     # Loaded at each use: a use may sit in a branch that does not dominate
     # later uses.
     set r [Assign fn "capture $index"]
-    return [list [expr {$access eq "cell" ? "cell" : "reg"}] $r]
+    return [list reg $r]
 }
 
 proc native::lower::RootValue {fnVar e binding} {
@@ -2658,7 +2599,6 @@ proc native::lower::Bind {fnVar e node} {
     set b [dict get $node binding]
     if {[hir::kind $hir $valueExpr] eq "block" && $valueExpr in [dict get $context envless]
             && ![dict get $node duplicate] && [dict exists $context discarded $e]
-            && ![dict exists $context cells $b]
             && [dict get [hir::binding $hir $b] kind] eq "local"} {
         # An environment-free function bound in statement position: nothing
         # to run. References materialize its value
@@ -2742,11 +2682,7 @@ proc native::lower::Bind {fnVar e node} {
         Emit fn "raise DUPLICATE [Quote "duplicate binding \"$name\" in the same lexical scope"]" $e
         return never
     }
-    if {[dict exists $fn locals $b] && [lindex [dict get $fn locals $b] 0] eq "cell"} {
-        Emit fn "cellset [lindex [dict get $fn locals $b] 1] $value" $e
-    } else {
-        dict set fn locals $b [list reg $value]
-    }
+    dict set fn locals $b [list reg $value]
     if {[hir::isModuleBinding $hir $b]} {
         # Module initialization (MODULE-STATIC-RETAINED-VALUES.md): written
         # once, here, at the exact point this binding's own initializer
@@ -2783,7 +2719,7 @@ proc native::lower::CaptureRegsOf {fnVar bindings} {
     foreach b $bindings {
         lassign [Access fn $b] how where
         switch -- $how {
-            reg - cell { lappend values $where }
+            reg        { lappend values $where }
             rawreg     { lappend values [TaggedOf fn $where] }
             fnvalue    { lappend values [Assign fn "fnvalue $where"] }
             self       { lappend values [Assign fn self] }
@@ -3207,7 +3143,6 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
     variable hir
     variable selfTail
     variable envless
-    variable unproven
     variable natives
     variable escape
     variable blockescape
@@ -3423,15 +3358,13 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
     set bridgeBinding [ModuleBridgeBinding $calleeExpr $targetKind]
     set bridgeEnvless [expr {$bridgeBinding ne "" && $target in $envless}]
     set skipCallee [expr {[hir::kind $hir $calleeExpr] eq "ref"
-        && ![dict exists $unproven $calleeExpr]
         && ($bridgeEnvless || ($bridgeBinding eq "" &&
             (($targetKind eq "native" && [dict get [hir::binding $hir [hir::get $hir $calleeExpr binding]] kind] eq "root")
-                || ($targetKind eq "block" && $target in $envless && [hir::get $hir $calleeExpr init] ne "no"))))}]
+                || ($targetKind eq "block" && $target in $envless))))}]
     if {$bridgeBinding ne "" && !$skipCallee} {
         lassign [Access fn $bridgeBinding] how where
         switch -- $how {
             reg { set callee $where }
-            cell { set callee [Assign fn "cellget $where" $e] }
             rawreg { set callee [TaggedOf fn $where] }
             fnvalue { set callee [Assign fn "fnvalue $where" $e] }
             self { set callee [Assign fn self $e] }
@@ -4282,7 +4215,6 @@ proc native::lower::InlineLeafCall {fnVar e node calleeId callerArgRegs} {
     foreach b $params r $callerArgRegs {
         dict set fn locals $b [list reg $r]
     }
-    EnterScope fn [hir::get $hir $block bodyScope]
     set result [Sequence fn $body]
 
     set hir $savedHir
@@ -4968,7 +4900,6 @@ proc native::lower::If {fnVar e node {family ""}} {
         set role [expr {$outcome ? "then" : "else"}]
         set saved [dict get $fn locals]
         set savedRaw [dict get $fn rawCache]
-        EnterScope fn [dict get $node ${role}Scope]
         set value [SequenceTo fn [dict get $node ${role}Body] $family]
         dict set fn locals $saved
         dict set fn rawCache $savedRaw
@@ -4989,7 +4920,6 @@ proc native::lower::If {fnVar e node {family ""}} {
         EmitLabel fn $label
         set saved [dict get $fn locals]
         set savedRaw [dict get $fn rawCache]
-        EnterScope fn [dict get $node ${role}Scope]
         set body [dict get $node ${role}Body]
         if {$body ne "" && ![hir::get $hir [lindex $body 0] reachable]} {
             # HIR decided the condition: this branch never runs.
@@ -5095,7 +5025,6 @@ proc native::lower::ListLoop {fnVar e node} {
     set savedRaw [dict get $fn rawCache]
     dict set fn loops $e [list $continueLabel $exit $resultReg \
         [expr {$retained ? $accReg : "discard"}]]
-    EnterScope fn [dict get $node bodyScope]
     set elemReg [Assign fn "op listget $iterReg $idxReg" $e]
     dict set fn locals [dict get $node elementBinding] [list reg $elemReg]
     set bodyValue [Sequence fn [dict get $node body]]
@@ -5185,7 +5114,6 @@ proc native::lower::CountLoop {fnVar e node} {
     set saved [dict get $fn locals]
     set savedRaw [dict get $fn rawCache]
     dict set fn loops $e [list $continueLabel $exit $resultReg]
-    EnterScope fn [dict get $node bodyScope]
     dict set fn locals [dict get $node countBinding] [list reg $idxReg]
     set bodyValue [Sequence fn [dict get $node body]]
     set usedContinue [dict exists $fn continued $e]
@@ -5220,9 +5148,8 @@ proc native::lower::CountLoop {fnVar e node} {
 # node as a whole) branches to this handle's own dispatch label instead of
 # propagating straight out of the function. The dispatch is an ordinary
 # if-elif chain over `declarederroreq`: the first match clears the pending
-# error and runs that handler's body (a fresh, possibly-cell-backed scope,
-# lexically part of the enclosing function -- EnterScope, exactly like an
-# `if` branch); no match re-raises the still-pending failure unchanged
+# error and runs that handler's body (a fresh scope,
+# lexically part of the enclosing function, exactly like an `if` branch); no match re-raises the still-pending failure unchanged
 # (`reraise`) to whatever the *outer* error-exit target is (PopErrorExit
 # has already restored it by then).
 proc native::lower::Handle {fnVar e node} {
@@ -5256,7 +5183,6 @@ proc native::lower::Handle {fnVar e node} {
         Emit fn "cleardeclarederror" $e
         set saved [dict get $fn locals]
         set savedRaw [dict get $fn rawCache]
-        EnterScope fn $scopeId
         set value [Sequence fn $body]
         dict set fn locals $saved
         dict set fn rawCache $savedRaw
@@ -5286,7 +5212,6 @@ proc native::lower::Loop {fnVar e node} {
     set saved [dict get $fn locals]
     set savedRaw [dict get $fn rawCache]
     dict set fn loops $e [list $head $exit $result]
-    EnterScope fn [dict get $node bodyScope]
     set value [Sequence fn [dict get $node body]]
     if {$value ne "never"} {
         Emit fn "jump $head" $e
@@ -5383,8 +5308,7 @@ proc native::lower::ConstructNative {e name argExprs} {
 # construction lowering bypasses Call's callee evaluation for.
 proc native::lower::PlainNativeCallee {calleeExpr} {
     variable hir
-    variable unproven
-    if {[hir::kind $hir $calleeExpr] ne "ref" || [dict exists $unproven $calleeExpr]} {
+    if {[hir::kind $hir $calleeExpr] ne "ref"} {
         return 0
     }
     set b [hir::get $hir $calleeExpr binding]

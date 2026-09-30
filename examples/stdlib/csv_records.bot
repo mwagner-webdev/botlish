@@ -180,9 +180,11 @@ fn scan_field(text, index):
 
 # The rest of a record whose first COUNT fields are in FIELDS, the last field
 # ending at STOP. (Defined before scan_record, its only caller, like every
-# helper in this file: a caller placed *before* its callee makes the native
-# specialization keep generic, guarded copies of the whole call chain --
-# TYPED-MUTARRAY-BUILDER-REFACTOR.md, "Definition-order sensitivity".)
+# helper in this file: a binding is visible only after it is defined, so a
+# caller placed *before* its callee is rejected -- STRICT-REFERENCE-
+# DETERMINISM.md. It used to compile, with generic, guarded copies of the
+# whole call chain -- TYPED-MUTARRAY-BUILDER-REFACTOR.md, "Definition-order
+# sensitivity".)
 fn scan_record_rest(text, stop, fields, count):
     delimiter = peek(text, stop)
     if delimiter == ",":

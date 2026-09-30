@@ -19,8 +19,8 @@ test hir-type-2 {references preserve the binding's type} -body {
     set h [hirOf {bind n {call {ref +} {const 1} {const 2}}} {bind m {ref n}} {ref m}]
     list [hirRefTypes $h n] [hirRefTypes $h m] \
          [hir::types::show [hir::bindingType $h [hir::get $h [hirFind $h bind m] binding]]] \
-         [dict get [hir::binding $h b1] type] [hir::type $h [dict get [hir::binding $h b1] type]]
-} -result {int int int t2 int}
+         [hir::type $h [dict get [hir::binding $h [hir::get $h [lindex [hirFind $h bind n] 0] binding]] type]]
+} -result {int int int int}
 
 test hir-type-3 {known native calls receive their result types} -body {
     set h [hirOf {call {ref -} {const 3} {const 1}} \
@@ -149,14 +149,15 @@ test hir-call-4 {a known block target} -body {
     list [hir::get $h $call target] [hirFind $h block] [shownTypes $h $call]
 } -result {{block e2} e2 int}
 
-test hir-call-4b {a forward reference to a later function has a known target, result unknown} -body {
+test hir-call-4b {a reference to a later function or value is unresolved: no binding, no call target, type never; a reference to an earlier function is exact} -body {
     set h [hirOf {bind even {block {n} {call {ref odd} {ref n}}}} \
                  {bind odd {block {n} {call {ref even} {ref n}}}} \
                  {bind later {block {} {ref value}}} \
                  {bind value {const 1}}]
     set calls [hirFind $h call]
-    list [lmap e $calls {hir::get $h $e target}] [hirRefTypes $h odd] [hirRefTypes $h value]
-} -result {{{block e7} {block e2}} {{block(e7)/1 -> any}} any}
+    list [lmap e $calls {hir::get $h $e target}] [hirRefBindings $h odd] [hirRefTypes $h odd] [hirRefTypes $h value] \
+         [lmap d [hir::diagnostics $h] {dict get $d kind}]
+} -result {{{} {block e2}} {{}} never never {UNBOUND UNBOUND}}
 
 test hir-call-5 {argument order is preserved} -body {
     set h [hirOf {call {ref list} {const a} {const b} {const c}}]

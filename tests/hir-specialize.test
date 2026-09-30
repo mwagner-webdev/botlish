@@ -107,15 +107,20 @@ test hir-specialize-8 {a self tail call with other kinds widens to the lub of bo
     list [specLabels $analysis swap] [specLabels $analysis grow] [specResult $analysis {grow<List[never], int>}]
 } -result {{{swap<int, str, int>} {swap<any, any, int>}} {{grow<List[never], int>} {grow<List[int], int>}} {List[int]}}
 
-test hir-specialize-9 {mutual recursion reaches a fixpoint with one instance each} -body {
-    lassign [specOf "fn even(n):\n    if n == 0:\n        return true\n    odd(n - 1)\n\nfn odd(n):\n    if n == 0:\n        return false\n    even(n - 1)\n\neven(10)"] hir analysis
-    list [specResult $analysis even<int>] [specResult $analysis odd<int>] \
-         [specStatus $hir $analysis even<int>] [specStatus $hir $analysis odd<int>] \
-         [expr {[dict get [specInstance $analysis even<int>] passes] < 10}]
-} -result {bool bool {closed 0} {closed 0} 1}
+test hir-specialize-9 {self recursion reaches a fixpoint with one instance} -body {
+    lassign [specOf "fn count(n):\n    if n == 0:\n        return true\n    count(n - 1)\n\ncount(10)"] hir analysis
+    list [specResult $analysis count<int>] [specStatus $hir $analysis count<int>] \
+         [expr {[dict get [specInstance $analysis count<int>] passes] < 10}] \
+         [llength [specLabels $analysis count]]
+} -result {bool {closed 0} 1 1}
 
-test hir-specialize-10 {results propagate around a cycle of three functions} -body {
-    lassign [specOf "fn a(n):\n    if n == 0:\n        return \"done\"\n    b(n - 1)\n\nfn b(n):\n    c(n)\n\nfn c(n):\n    a(n)\n\nfn use(n):\n    length(a(n)) + 1\n\nuse(3)"] hir analysis
+test hir-specialize-9b {lexical mutual recursion is rejected before specialization (STRICT-REFERENCE-DETERMINISM.md)} -body {
+    catch {surface::compile "fn even(n):\n    if n == 0:\n        return true\n    odd(n - 1)\n\nfn odd(n):\n    if n == 0:\n        return false\n    even(n - 1)\n\neven(10)" t.bot} m o
+    dict get $o -errorcode
+} -result {CORE SEMANTIC UNBOUND}
+
+test hir-specialize-10 {results propagate up a callee-first chain that ends in a recursive function} -body {
+    lassign [specOf "fn c(n):\n    if n == 0:\n        return \"done\"\n    c(n - 1)\n\nfn b(n):\n    c(n)\n\nfn a(n):\n    b(n)\n\nfn use(n):\n    length(a(n)) + 1\n\nuse(3)"] hir analysis
     list [specResult $analysis a<int>] [specResult $analysis b<int>] [specResult $analysis c<int>] \
          [specStatus $hir $analysis use<int>]
 } -result {str str str {closed 0}}

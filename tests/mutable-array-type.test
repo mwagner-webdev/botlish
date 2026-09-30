@@ -632,13 +632,13 @@ test mat-atk-16 {freeze/get results are safe uses; the typed array is never lost
         [maRejects "xs = \[mutarray::create(1, \"a\")\]\n\[list_length(xs), list?(xs), mutarray?(list_get(xs, 0))\]" *]
 } -result {accepted accepted}
 
-test mat-atk-17 {forward references cannot launder the array: a closure reading a binding bound later would see it as any} -body {
+test mat-atk-17 {forward references cannot launder the array: there is no forward reference (a closure cannot read a binding bound later), so the erased-alias hole cannot be written at all} -body {
     set hole "fn peek():\n    m\nm = mutarray::create(1, \"a\")\nx = peek()\nif mutarray?(x):\n    mutable_array_set(x, 0, 5)\nelse:\n    unit"
     set poke "fn poke():\n    mutable_array_set(m, 0, 5)\nm = mutarray::create(1, \"a\")\npoke()"
-    list [maRejects $hole *] [maRejects $poke *] [maHas $hole "*forward reference*"] \
+    list [maRejects $hole *] [maRejects $poke *] [maHas $hole "*unbound name*declared later*"] \
         [maRejects "fn peek():\n    xs\nxs = \[mutarray::create(1, \"a\")\]\npeek()" *] \
         [maRejects "fn peek():\n    r\nr = mutable_array_allocate(1)\npeek()" *]
-} -result {{{CORE SEMANTIC TYPE} 1} {{CORE SEMANTIC TYPE} 1} 1 {{CORE SEMANTIC TYPE} 1} accepted}
+} -result {{{CORE SEMANTIC UNBOUND} 1} {{CORE SEMANTIC UNBOUND} 1} 1 {{CORE SEMANTIC UNBOUND} 1} {{CORE SEMANTIC UNBOUND} 1}}
 
 test mat-atk-18 {a backward reference (binding first) and a typed parameter keep the contract} -body {
     list \
@@ -647,13 +647,13 @@ test mat-atk-18 {a backward reference (binding first) and a typed parameter keep
         [maRejects "fn poke(m: MutableArray\[str\]):\n    mutable_array_set(m, 0, \"q\")\nm = mutarray::create(1, \"a\")\npoke(m)" *]
 } -result {accepted {{CORE SEMANTIC TYPE} 1} accepted}
 
-test mat-atk-19 {a function returning a typed array, called or passed through a forward reference, cannot erase it} -body {
+test mat-atk-19 {a function returning a typed array cannot be reached through a forward reference at all; called after its definition it keeps its contract} -body {
     list \
         [maRejects "fn caller():\n    later()\nfn later():\n    mutarray::create(1, \"a\")\ncaller()" *] \
         [maRejects "fn apply(f):\n    f()\nfn go():\n    apply(later)\nfn later():\n    mutarray::create(1, \"a\")\ngo()" *] \
         [maRejects "fn later():\n    mutarray::create(1, \"a\")\nfn caller():\n    later()\ncaller()" *] \
         [maRejects "fn caller():\n    later()\nfn later():\n    5\ncaller()" *]
-} -result {{{CORE SEMANTIC TYPE} 1} {{CORE SEMANTIC TYPE} 1} accepted accepted}
+} -result {{{CORE SEMANTIC UNBOUND} 1} {{CORE SEMANTIC UNBOUND} 1} accepted {{CORE SEMANTIC UNBOUND} 1}}
 
 test mat-atk-20 {passing a function that returns a typed array to an untyped parameter is an erasure of its result} -body {
     maRejects "fn make():\n    mutarray::create(1, \"a\")\nfn apply(f):\n    f()\napply(make)" *
@@ -992,10 +992,10 @@ test mat-bd-3 {nesting is bounded by the aggregate depth (3): deeper stacks are 
     list [maLast "${base}x3"] [maRejects "${base}x4 = mutarray::create(1, x3)\nx4" *]
 } -result {{MutableArray[MutableArray[MutableArray[int]]]} {{CORE SEMANTIC TYPE} 1}}
 
-test mat-bd-4 {mutual recursion through a forward reference types the callee's result as any, so a typed result is rejected, not widened} -body {
+test mat-bd-4 {mutual recursion is rejected at resolution; direct recursion keeps the typed result} -body {
     set src "fn a(n: int):\n    if n == 0:\n        return mutarray::create(1, 0)\n    b(n - 1)\nfn b(n: int):\n    a(n)\na(2)"
     list [maRejects $src *] [maLast "fn make(n: int):\n    if n == 0:\n        return mutarray::create(1, \"a\")\n    make(n - 1)\nmake(3)"]
-} -result {{{CORE SEMANTIC TYPE} 1} {MutableArray[str]}}
+} -result {{{CORE SEMANTIC UNBOUND} 1} {MutableArray[str]}}
 
 test mat-bd-5 {an inferred raw-mutarray contract (untyped wrapper that writes or reads) no longer rejects typed arrays outright: the call's semantic instance separates the read-only wrapper (valid) from the writer (rejected only when its write is invalid for the element type)} -body {
     list \

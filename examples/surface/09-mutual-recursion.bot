@@ -1,7 +1,11 @@
-# Mutual recursion: is_even refers to is_odd before is_odd is bound; the
-# reference is resolved lexically and evaluated only when is_even runs.
+# Mutual recursion is not supported: a binding is visible from its definition
+# onward, so is_even cannot refer to is_odd, which is defined after it. One
+# edge of any mutually recursive pair must point forward, and ordinary
+# bindings are never hoisted. (Define the callee first, or restructure the
+# recursion; an explicit construct for mutual recursion is a possible future
+# extension.) A named function may call itself: see 02-recursion.bot.
 #
-# expect: [true, false]
+# expect-error: CORE SEMANTIC UNBOUND
 
 fn is_even(n):
     if n == 0:

@@ -48,8 +48,8 @@ set cases {
     }
     duplicate-bind-does-not-retype {
         {call {block {}
-            {bind g {block {} {ref v}}}
             {bind v {const 1}}
+            {bind g {block {} {ref v}}}
             {bind v {call {ref test-log} {call {ref integer?} {call {ref g}}}}}}}
     }
     recursive-result-type {

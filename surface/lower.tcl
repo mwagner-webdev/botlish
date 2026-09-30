@@ -72,6 +72,7 @@ proc surface::lowerToHir {ast args} {
     lassign [surface::lower::SplitTypeDecls [dict get $ast body]] executable decls errorDecls
     set nodes [surface::lower::Sequence $executable]
     set hir [hir::buildSyntax $nodes -strict 0 \
+        -halt-on-resolution-errors [dict get $options -strict] \
         -origin [surface::lower::Origin [dict get $ast span] ""] \
         -files [dict create f1 [dict get $ast span file]] \
         -type-decls $decls -error-decls $errorDecls]

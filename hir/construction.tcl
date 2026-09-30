@@ -600,8 +600,6 @@ proc hir::construction::analyze {hir spec escape stringregion blockescape} {
                 set why "duplicate binding"
             } elseif {[dict get [hir::binding $view $b] kind] ne "local"} {
                 set why "not a local binding"
-            } elseif {[dict exists [dict get $spec context] cells $b]} {
-                set why "forward-referenced (cell) binding"
             } elseif {[dict exists $captured $b]} {
                 set why "captured by a nested block (fork/alias)"
             } elseif {[dict exists $trailing $e]} {

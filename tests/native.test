@@ -221,11 +221,12 @@ test native-error-1 {ARITY of blocks and natives, NOT-CALLABLE, EQUALITY} -body 
          [native "fn call(g, x):\n    g(x)\n\ncall(5, 1)"]
 } -result {same same same same same {error {CORE SEMANTIC NOT-CALLABLE} {cannot call non-callable value 5}}}
 
-test native-error-2 {UNBOUND and DUPLICATE are raised at run time, in order} -body {
+test native-error-2 {UNBOUND and DUPLICATE are raised at run time, in order; a forward reference is an unbound name, rejected at compile time} -body {
+    catch {surface::compile "fn early():\n    late()\n\nv = early()\n\nfn late():\n    1\n\nv" t.bot} rejected options
     list [parity "x = 1\nx = 2\nx"] [parity "fn f():\n    y\n\nf()"] \
-         [parity "fn early():\n    late()\n\nv = early()\n\nfn late():\n    1\n\nv"] \
-         [native "fn early():\n    late()\n\nv = early()\n\nfn late():\n    1\n\nv"]
-} -result {same same same {error {CORE SEMANTIC UNBOUND} {name "late" used before its binding}}}
+         [dict get $options -errorcode] \
+         [native "fn late():\n    1\n\nfn early():\n    late()\n\nv = early()\n\nv"]
+} -result {same same {CORE SEMANTIC UNBOUND} {value 1}}
 
 test native-error-3 {RANGE errors of list_get and substring, including big indices} -body {
     list [parity "list_get(\[1, 2\], 2)"] [parity "list_get(\[\], 0)"] [parity "list_get(\[1\], -1)"] \
@@ -340,11 +341,12 @@ test native-call-7 {calls chosen at run time: closures and natives as values} -b
          [parity "fn apply2(f, x, y):\n    f(x, y)\n\n\[apply2(list_get, \[1, 2\], 1), apply2(list_get, \[1\], 5)\]"]
 } -result {same 1 same same}
 
-test native-call-8 {mutual recursion through a forward reference} -body {
-    list [parity [core::ReadFile [file join $::projectRoot examples surface 09-mutual-recursion.bot]]] \
-         [native "fn even(n):\n    if n == 0:\n        return true\n    odd(n - 1)\n\nfn odd(n):\n    if n == 0:\n        return false\n    even(n - 1)\n\n\[even(10000), odd(7)\]"] \
-         [regexp {cellcheck} [nirFunction [nirOf "fn even(n):\n    if n == 0:\n        return true\n    odd(n - 1)\n\nfn odd(n):\n    if n == 0:\n        return false\n    even(n - 1)\n\neven(2)"] even]]
-} -result {same {value {[true, true]}} 1}
+test native-call-8 {a forward reference never reaches native lowering (rejected at resolution); direct recursion needs no cell or init check} -body {
+    set rec "fn even(n):\n    if n == 0:\n        return true\n    even(n - 2)\n\n\[even(10000), even(4)\]"
+    catch {surface::readProgramFile [file join $::projectRoot examples surface 09-mutual-recursion.bot]} rejected options
+    list [dict get $options -errorcode] [native $rec] \
+         [regexp {cell} [nirOf "fn even(n):\n    if n == 0:\n        return true\n    even(n - 2)\n\neven(2)"]]
+} -result {{CORE SEMANTIC UNBOUND} {value {[true, true]}} 0}
 
 # ---------------------------------------------------------------------------
 # Function specialization (hir/specialize.tcl): instances whose argument
@@ -432,18 +434,14 @@ test native-spec-5 {a self tail call with other kinds widens to an instance that
          [regexp {= call } [nirFunction $nir swap {int, str, int}]] [parity $text]
 } -result {{{int, str, int} {any, any, int}} 1 1 same}
 
-test native-spec-6 {mutually recursive specializations call each other directly} -body {
-    set text "fn even(n):\n    if n == 0:\n        return true\n    odd(n - 1)\n\nfn odd(n):\n    if n == 0:\n        return false\n    even(n - 1)\n\n\[even(1000), odd(7)\]"
+test native-spec-6 {a caller's specialization calls its callee's specialization directly: no environment, no guards} -body {
+    set text "fn odd(n):\n    if n == 0:\n        return false\n    true\n\nfn even(n):\n    if n == 0:\n        return true\n    odd(n - 1)\n\n\[even(1000), odd(7)\]"
     set nir [nirOf $text]
     set odd [nirFunctionId $nir odd int]
-    set even [nirFunctionId $nir even int]
-    # The forward reference to odd makes both closures over a cell: their
-    # generic instances are the closures' entry points, while the calls run
-    # the specializations.
     list [nirInstances $nir even] [nirInstances $nir odd] \
-         [regexp "callenv $odd " [nirFunction $nir even int]] [regexp "callenv $even " [nirFunction $nir odd int]] \
+         [regexp "call $odd " [nirFunction $nir even int]] [regexp {callenv} [nirFunction $nir even int]] \
          [regexp {guard} [nirFunction $nir even int]] [regexp {guard} [nirFunction $nir odd int]] [parity $text]
-} -result {{int generic} {int generic} 1 1 0 0 same}
+} -result {int int 1 0 0 0 same}
 
 test native-spec-7 {a callee's specialized result kind reaches its caller} -body {
     set text "fn id(x):\n    x\n\nfn next(y):\n    id(y) + 1\n\nnext(41)"
@@ -662,8 +660,8 @@ test native-closure-2 {separate closure instances keep separate environments} -b
     parity "fn make(step):\n    fn walk(n, acc):\n        if n == 0:\n            return acc\n        walk(n - 1, acc + step)\n    walk\n\na = make(2)\nb = make(10)\n\[a(5, 0), b(5, 0), a(3, 1)\]"
 } -result same
 
-test native-closure-3 {closures in loops, nested closures, and captured cells} -body {
-    list [parity "fn outer(k):\n    fn even(n):\n        if n == 0:\n            return k\n        odd(n - 1)\n    fn odd(n):\n        if n == 0:\n            return 0 - k\n        even(n - 1)\n    \[even(6), even(3)\]\n\nouter(5)"] \
+test native-closure-3 {closures in loops, nested closures, and recursive closures over captured values} -body {
+    list [parity "fn outer(k):\n    fn count(n):\n        if n == 0:\n            return k\n        count(n - 1)\n    fn twice(n):\n        count(n) + count(n)\n    \[count(6), twice(3)\]\n\nouter(5)"] \
          [parity "fn a(x):\n    fn b(y):\n        fn c(z):\n            x + y + z\n        c\n    b\n\na(1)(2)(3)"] \
          [parity "fn make():\n    loop:\n        k = 7\n        fn get():\n            k\n        return get\n\nmake()()"] \
          [parity "fn make(n):\n    fn get():\n        n\n    get\n\nfn collect(i, acc):\n    if i == 4:\n        return acc\n    collect(i + 1, list_append(acc, make(i)))\n\nfs = collect(0, \[\])\n\[list_get(fs, 0)(), list_get(fs, 3)()\]"]

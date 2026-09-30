@@ -323,11 +323,28 @@ test si-rec-1 {self recursion reuses the in-progress instance: one instance per 
         [lmap row [hir::semantic::census $hir] {dict get $row name}] [dict get $hir semantic walks]
 } -result {{List[str]} {count count} 4}
 
-test si-rec-2 {mutual recursion terminates and types both, independent of definition order} -body {
-    set ping "fn ping(xs, n):\n    if n == 0:\n        xs\n    else:\n        pong(xs, n - 1)\n"
-    set pong "fn pong(xs, n):\n    if n == 0:\n        xs\n    else:\n        ping(xs, n - 1)\n"
-    list [siLast "${ping}${pong}ping(\[\"a\"\], 3)"] [siLast "${pong}${ping}ping(\[\"a\"\], 3)"]
+test si-rec-2 {mutual recursion between instances (functions that pass each other as arguments; no lexical forward reference) terminates and types both, independent of the definition order} -body {
+    set ping "fn ping(xs, n, next):\n    if n == 0:\n        xs\n    else:\n        next(xs, n - 1, ping)\n"
+    set pong "fn pong(xs, n, prev):\n    if n == 0:\n        xs\n    else:\n        prev(xs, n - 1, pong)\n"
+    list [siLast "${ping}${pong}ping(\[\"a\"\], 3, pong)"] [siLast "${pong}${ping}ping(\[\"a\"\], 3, pong)"]
 } -result {{List[str]} {List[str]}}
+
+test si-rec-2b {the instance cycle above is real: each instance is read by the other} -body {
+    set hir [siCompile "fn ping(xs, n, next):\n    if n == 0:\n        xs\n    else:\n        next(xs, n - 1, ping)\n\nfn pong(xs, n, prev):\n    if n == 0:\n        xs\n    else:\n        prev(xs, n - 1, pong)\n\nping(\[\"a\"\], 3, pong)"]
+    set deps [dict get $hir semantic deps]
+    set cyclic 0
+    dict for {id readers} $deps {
+        foreach reader [dict keys $readers] {
+            if {$reader ne $id && [dict exists $deps $reader $id]} { set cyclic 1 }
+        }
+    }
+    set cyclic
+} -result 1
+
+test si-rec-2c {lexical mutual recursion is rejected before any analysis} -body {
+    catch {siCompile "fn ping(xs, n):\n    if n == 0:\n        xs\n    else:\n        pong(xs, n - 1)\nfn pong(xs, n):\n    if n == 0:\n        xs\n    else:\n        ping(xs, n - 1)\nping(\[\"a\"\], 3)"} m o
+    dict get $o -errorcode
+} -result {CORE SEMANTIC UNBOUND}
 
 test si-rec-3 {type-changing recursion creates further instances and stops at the aggregate bound} -body {
     set hir [siCompile "fn wrap(x, n):\n    if n == 0:\n        x\n    else:\n        wrap(\[x\], n - 1)\nwrap(\"a\", 5)"]
@@ -335,8 +352,8 @@ test si-rec-3 {type-changing recursion creates further instances and stops at th
     list [hir::types::show [hir::typeOf $hir [lindex [hir::roots $hir] end]]] [expr {[llength $rows] <= $hir::semantic::maxPerBlock}]
 } -result {any 1}
 
-test si-rec-4 {even?/odd? mutual recursion over ints} -body {
-    siLast "fn even?(n):\n    if n == 0:\n        true\n    else:\n        odd?(n - 1)\nfn odd?(n):\n    if n == 0:\n        false\n    else:\n        even?(n - 1)\neven?(4)"
+test si-rec-4 {even?/odd? over ints, as functions that pass each other} -body {
+    siLast "fn even?(n, other):\n    if n == 0:\n        true\n    else:\n        other(n - 1, even?)\nfn odd?(n, other):\n    if n == 0:\n        false\n    else:\n        other(n - 1, odd?)\neven?(4, odd?)"
 } -result bool
 
 test si-rec-5 {a per-block budget declines further instances: the generic typing remains, and no bearing argument is accepted by it} -body {
@@ -419,13 +436,19 @@ test si-fn-2 {...and an argument the contract does not admit is rejected at the 
     siRejects "${fnDefs}apply(g, \"s\")" "*call to apply with f : Fn{args: \\\[int\\\], return: int, errors: \\\[\\\]}, x : str is invalid: argument 1 cannot be proven to satisfy int*"
 } -result 1
 
-test si-dyn-2 {a forward call of a function with captures is typed after the environments are known} -body {
+test si-dyn-2 {a call of a nested function with captures is typed under its creation environment} -body {
     siLast "fn outer(x):\n    fn inner(y):\n        y\n    inner(x)\nouter(\"s\")"
 } -result str
 
-test si-dyn-3 {a call before the definition (forward reference between functions) still works} -body {
-    siLast "fn a(x):\n    b(x)\nfn b(y):\n    y\na(\"s\")"
-} -result str
+test si-dyn-3 {a call before the definition is rejected (STRICT-REFERENCE-DETERMINISM.md); the callee-first order is the program} -body {
+    catch {siCompile "fn a(x):\n    b(x)\nfn b(y):\n    y\na(\"s\")"} m o
+    list [dict get $o -errorcode] [siLast "fn b(y):\n    y\nfn a(x):\n    b(x)\na(\"s\")"]
+} -result {{CORE SEMANTIC UNBOUND} str}
+
+test si-dyn-5 {a second whole-program walk is not about definition order: a recursive function with a declared result requests an instance of itself before its own nested closure has been walked once} -body {
+    set hir [siCompile "fn f(n) -> int:\n    if n == 0:\n        return 0\n    r = f(n - 1)\n    fn g(x):\n        x + n\n    g(1) + r\n\nf(3)"]
+    list [dict get $hir semantic rounds] [hir::types::show [hir::typeOf $hir [lindex [hir::roots $hir] end]]]
+} -result {2 int}
 
 test si-dyn-4 {captures: a closure's instance uses the environment its creation recorded} -body {
     siLast "fn mk(x):\n    fn get(i):\n        list_get(x, i)\n    get(0)\nmk(\[\"a\"\])"
@@ -505,16 +528,15 @@ test si-sep-5 {disabling the layer restores the pre-instance behavior exactly} -
 # ---------------------------------------------------------------------------
 # determinism
 
-test si-det-1 {the same canonical instances and results whatever the definition order} -body {
+test si-det-1 {the same canonical instances and results whatever the (legal) definition order: independent helpers may swap, callees stay before callers} -body {
     set a "fn identity(x):\n    x\n"
     set b "fn first(xs):\n    list_get(xs, 0)\n"
     set c "fn both(xs):\n    identity(first(xs))\n"
     set use "both(\[\"a\"\])\nboth(\[1\])\nidentity(mutarray::create(1, \"x\"))"
     set one [siInstances "${a}${b}${c}${use}"]
-    set two [siInstances "${c}${b}${a}${use}"]
-    set three [siInstances "${b}${c}${a}${use}"]
-    list [expr {$one eq $two}] [expr {$two eq $three}] [llength $one]
-} -result {1 1 7}
+    set two [siInstances "${b}${a}${c}${use}"]
+    list [expr {$one eq $two}] [llength $one] [catch {siCompile "${c}${b}${a}${use}"}]
+} -result {1 7 1}
 
 test si-det-2 {compiling twice gives identical tables} -body {
     set src "fn first(xs):\n    list_get(xs, 0)\na = first(\[\"x\"\])\nb = first(\[1\])\nunit"

@@ -115,8 +115,6 @@
 #         known-error   expr error KIND (the operation always raises)
 #         bigint-literal expr (an Int literal outside 64-bit range)
 #         result-alloc  expr
-#         init-check    expr binding BindingId (a reference HIR cannot
-#                       prove bound: deferred, inside a closure)
 #   plus origin and location, like blockers.
 #
 # Requirement tags: the -runtime tags of native calls (core/native.tcl), and
@@ -124,7 +122,6 @@
 #   closure-env    creates or calls blocks that capture values
 #   indirect-call  calls a callable whose target is unknown
 #   dynamic-call   calls a value of unknown kind
-#   init-check     reads a binding HIR cannot prove bound
 #   tagged-values  holds values of statically unknown kind
 #   result-alloc   allocates Results
 #
@@ -155,12 +152,8 @@ proc hir::aot::analyze {hir} {
 #   selfTails   selfTailCalls
 #   names       block ExprId -> BlockName
 #   diagnostics RegionId -> diagnostics located in the region
-#   unproven    unprovenReferences
-#   cells       local BindingId -> 1 for bindings some unproven reference
-#               reads (a backend must hold them in a cell)
-#   envless     static blocks that capture no cell binding, to a greatest
-#               fixpoint: blocks a backend can run as plain functions with
-#               no environment at all
+#   envless     static blocks, to a greatest fixpoint: blocks a backend can
+#               run as plain functions with no environment at all
 #   callees     callee ExprId -> call ExprId
 #   discarded   ExprId -> 1 for expressions whose value nothing uses: all
 #               but the last of a sequence, and the last of a loop body
@@ -199,13 +192,6 @@ proc hir::aot::context {hir} {
         set region [expr {$e ne "" && [dict exists $hir exprs $e] ? [RegionOf $hir $e] : "program"}]
         dict lappend diagnostics $region $diagnostic
     }
-    set unproven [unprovenReferences $hir]
-    set cells [dict create]
-    dict for {ref b} $unproven {
-        if {[dict get [hir::binding $hir $b] kind] eq "local"} {
-            dict set cells $b 1
-        }
-    }
     set statics [StaticBlocks $hir]
     set envless $statics
     set changed 1
@@ -213,7 +199,7 @@ proc hir::aot::context {hir} {
         set changed 0
         foreach e $envless {
             foreach b [hir::get $hir $e captures] {
-                if {[dict exists $cells $b] || [BoundBlock $hir $b] ni $envless} {
+                if {[BoundBlock $hir $b] ni $envless} {
                     set envless [lsearch -all -inline -not -exact $envless $e]
                     set changed 1
                     break
@@ -266,7 +252,7 @@ proc hir::aot::context {hir} {
     }
     return [dict create walk $walk positions $positions exprs $exprs \
         statics $statics tails [TailCalls $hir] selfTails [selfTailCalls $hir] \
-        names $names diagnostics $diagnostics unproven $unproven cells $cells \
+        names $names diagnostics $diagnostics \
         envless $envless callees $callees discarded $discarded bound $bound]
 }
 
@@ -278,7 +264,7 @@ proc hir::aot::context {hir} {
 #   * creating a block that is not envless (a closure), or an envless one
 #     whose value is used (not discarded, not bound to a name)
 #   * binding an envless block to a name in value position, or as a
-#     duplicate bind, or to a cell binding (a binding in statement position
+#     duplicate bind (a binding in statement position
 #     is not materialized: references materialize it)
 #   * a reference to a binding bound to an envless block, except the
 #     callee of a direct call of that block (which needs no value)
@@ -286,7 +272,6 @@ proc hir::aot::context {hir} {
 # Backends must follow the same rule (native/lower.tcl does).
 proc hir::aot::materializedBlocks {hir context region reachable} {
     set envless [dict get $context envless]
-    set cells [dict get $context cells]
     set discarded [dict get $context discarded]
     set result {}
     foreach e $reachable {
@@ -303,8 +288,7 @@ proc hir::aot::materializedBlocks {hir context region reachable} {
                     continue
                 }
                 if {$value ni $envless || [hir::get $hir $e duplicate]
-                        || ![dict exists $discarded $e]
-                        || [dict exists $cells [hir::get $hir $e binding]]} {
+                        || ![dict exists $discarded $e]} {
                     lappend result $value
                 }
             }
@@ -322,16 +306,14 @@ proc hir::aot::materializedBlocks {hir context region reachable} {
 # The envless block reference E materializes the Block value of, or "".
 proc hir::aot::MaterializedByRef {hir context e} {
     set b [hir::get $hir $e binding]
-    if {$b eq "" || [hir::get $hir $e init] eq "no"
-            || [dict get [hir::binding $hir $b] kind] ne "local"
-            || [dict exists $context cells $b]} {
+    if {$b eq "" || [dict get [hir::binding $hir $b] kind] ne "local"} {
         return ""
     }
     set block [BoundBlock $hir $b]
     if {$block eq "" || $block ni [dict get $context envless]} {
         return ""
     }
-    if {[dict exists $context callees $e] && ![dict exists $context unproven $e]} {
+    if {[dict exists $context callees $e]} {
         lassign [hir::get $hir [dict get $context callees $e] target] kind target
         if {$kind eq "block" && $target eq $block} {
             return ""
@@ -365,7 +347,7 @@ proc hir::aot::analyzeRegion {hir region {context ""}} {
                     class [expr {[BoundBlock $hir $b] in $statics ? "block" : "value"}]
             }]]
     }
-    set state [dict create regions [dict create $region $r] reported {} initChecked {} \
+    set state [dict create regions [dict create $region $r] reported {} \
         positions [dict get $context positions]]
     set tails [dict get $context tails]
     foreach e [dict get $context exprs $region] {
@@ -436,7 +418,7 @@ proc hir::aot::BoundBlock {hir b} {
 
 # Blocks that need no environment: every binding they capture is bound to
 # a block that itself needs none. Native code can call such a block as a
-# plain function (after an init check on deferred references). Greatest
+# plain function. Greatest
 # fixpoint: assume every block qualifies, then remove failures.
 proc hir::aot::StaticBlocks {hir} {
     set blocks [lmap e [hir::walk $hir] {
@@ -458,46 +440,6 @@ proc hir::aot::StaticBlocks {hir} {
         }
     }
     return $statics
-}
-
-# 1 if binding B is certainly bound whenever the deferred reference E (inside
-# a closure) runs. HIR marks every reference from inside a closure deferred;
-# a closure body can only run after its block value exists, so B is bound if
-# the block C created in B's invocation, which contains E, is created after
-# B is bound:
-#   * B is a parameter (bound on entry to its invocation)
-#   * C is the value B is bound to (a function referring to itself)
-#   * B's bind comes before C in B's scope (in walk order, which is evaluation
-#     order within one invocation; resolution has already rejected
-#     references to B before its bind as `init no`)
-# Otherwise (e.g. mutual recursion with a later function) native code needs
-# a check, or a whole-program proof HIR does not make.
-proc hir::aot::InitProven {hir e b positions} {
-    set binding [hir::binding $hir $b]
-    set home [dict get $hir scopes [dict get $binding scope] invocation]
-    set c [dict get $hir scopes [hir::get $hir $e scope] invocation]
-    while {$c ne ""} {
-        set outer [dict get $hir scopes [hir::get $hir $c scope] invocation]
-        if {$outer eq $home} {
-            break
-        }
-        set c $outer
-    }
-    if {$c eq ""} {
-        return 0
-    }
-    if {[dict get $binding kind] eq "param"} {
-        return 1
-    }
-    set declaredBy [dict get $binding declaredBy]
-    if {$declaredBy eq ""} {
-        return 0
-    }
-    if {[hir::get $hir $declaredBy value] eq $c} {
-        return 1
-    }
-    return [expr {[dict get $positions $declaredBy] < [dict get $positions $c]
-                  && [hir::scopeWithin $hir [hir::get $hir $c scope] [dict get $binding scope]]}]
 }
 
 # ---------------------------------------------------------------------------
@@ -534,30 +476,6 @@ proc hir::aot::InLoopOf {hir e block} {
         }
     }
     return 0
-}
-
-# References (init deferred, to a local or parameter binding) that HIR cannot
-# prove bound when they run (see InitProven): evaluating one must check that
-# its binding has a value. Returns a dict ref ExprId -> BindingId.
-proc hir::aot::unprovenReferences {hir} {
-    set walk [hir::walk $hir]
-    set positions [dict create]
-    set index 0
-    foreach e $walk {
-        dict set positions $e [incr index]
-    }
-    set result [dict create]
-    foreach e $walk {
-        if {[hir::kind $hir $e] ne "ref" || [hir::get $hir $e init] ne "deferred"} {
-            continue
-        }
-        set b [hir::get $hir $e binding]
-        if {[dict get [hir::binding $hir $b] kind] in {local param}
-                && ![InitProven $hir $e $b $positions]} {
-            dict set result $e $b
-        }
-    }
-    return $result
 }
 
 # The binding whose first bind binds block expression E (the function E
@@ -637,15 +555,6 @@ proc hir::aot::Visit {hir stateVar region e tails statics} {
                     Block state $region [Blocker $hir DynamicBinding $e "" "" \
                         [dict create cause ambient expr $e binding $b] \
                         "\"[dict get $node name]\" is looked up in an unknown environment at run time"]
-                }
-                local - param {
-                    if {[dict get $node init] eq "deferred"
-                            && ![dict exists $state initChecked $region $b]
-                            && ![InitProven $hir $e $b [dict get $state positions]]} {
-                        dict set state initChecked $region $b 1
-                        Fact state $region [dict merge [FactOf $hir init-check $e] \
-                            [dict create binding $b name [BindingName $hir $b]]] init-check
-                    }
                 }
             }
         }

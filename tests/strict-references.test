@@ -1,0 +1,539 @@
+# strict-references.test -- STRICT-REFERENCE-DETERMINISM.md: a lexical binding
+# becomes visible when it is established, so an ordinary forward reference is
+# illegal, and everything that follows from that (resolution before typing,
+# final binding identity, shadowing, closure capture, named self-recursion,
+# module scope, source-order independence).
+#
+# Resolution lives in hir/resolve.tcl; these tests go through the source
+# frontend so the message locations are the ones a programmer sees.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 100000
+
+# {ERRORCODE MESSAGE} of compiling SOURCE, or "accepted".
+proc rejection {source} {
+    if {![catch {surface::compile $source t.bot} message options]} {
+        return accepted
+    }
+    return [list [dict get $options -errorcode] $message]
+}
+
+# The diagnostics (KIND LINE:COLUMN) of SOURCE compiled non-strictly: nothing
+# is raised, so this also shows what else the pipeline reported.
+proc diagnosticsOf {source} {
+    set hir [surface::compile $source t.bot -strict 0]
+    return [lmap d [hir::diagnostics $hir] {
+        set origin [hir::get $hir [dict get $d expr] origin]
+        list [dict get $d kind] [dict get [lrange $origin 2 end] line]:[dict get [lrange $origin 2 end] column]
+    }]
+}
+
+# The value of SOURCE, on the interpreter (lowered core IR), on the compile
+# backend from the original HIR and on the compile backend from the lowered
+# IR (the route the native backend re-lifts through): "V" if all three agree.
+proc valueEverywhere {source} {
+    set hir [surface::compile $source t.bot]
+    set program [hir::lower $hir]
+    set interp [outcomeUnder interp $program]
+    set viaIR [outcomeUnder compile $program]
+    set direct [core::formatValue [core::compiler::evalHir $hir]]
+    if {[lindex $interp 0] ne "value" || [lindex $viaIR 1] ne [lindex $interp 1]
+            || [core::formatValue [core::evalProgram $program]] ne $direct} {
+        return [list DISAGREE $interp $viaIR $direct]
+    }
+    return $direct
+}
+
+# The kind of scope of the binding each reference spelled NAME resolves to,
+# in evaluation order (a binding hygiene renamed to NAME#N still counts as
+# NAME: `spelling` keeps what the programmer wrote).
+proc refScopes {hir name} {
+    set result {}
+    foreach e [hirFind $hir ref] {
+        set b [hir::get $hir $e binding]
+        set binding [hir::binding $hir $b]
+        set spelled [expr {[dict exists $binding spelling] ? [dict get $binding spelling] : [dict get $binding name]}]
+        if {$spelled eq $name} {
+            lappend result [dict get [hir::scope $hir [dict get $binding scope]] kind]
+        }
+    }
+    return $result
+}
+
+set unboundLater {CORE SEMANTIC UNBOUND}
+
+# ---------------------------------------------------------------------------
+# The rule, and its canonical spelling
+
+test sr-callee-first-accepted {a helper defined before its caller is the canonical order} -body {
+    valueEverywhere "fn helper():\n    41\n\nfn caller():\n    helper() + 1\n\ncaller()"
+} -result 42
+
+test sr-later-sibling-function {a call of a function defined later is rejected at the call} -body {
+    rejection "fn caller():\n    helper()\n\nfn helper():\n    1\n"
+} -result [list $unboundLater {t.bot:2:5: unbound name "helper": "helper" is declared later; forward references are not allowed (a binding is visible only after it is established)}]
+
+test sr-mutual-recursion {ordinary mutual recursion is not supported: one edge must point forward} -body {
+    rejection "fn even?(n):\n    if n == 0:\n        return true\n    odd?(n - 1)\n\nfn odd?(n):\n    if n == 0:\n        return false\n    even?(n - 1)\n"
+} -result [list $unboundLater {t.bot:4:5: unbound name "odd?": "odd?" is declared later; forward references are not allowed (a binding is visible only after it is established)}]
+
+test sr-mutual-recursion-either-order {putting the other function first only moves the forward edge} -body {
+    lindex [rejection "fn odd?(n):\n    if n == 0:\n        return false\n    even?(n - 1)\n\nfn even?(n):\n    if n == 0:\n        return true\n    odd?(n - 1)\n"] 0
+} -result $unboundLater
+
+test sr-runtime-order-irrelevant {a forward reference is illegal even if the referencing function only runs after the binding exists} -body {
+    rejection "fn call_later():\n    later()\n\nfn later():\n    1\n\ncall_later()"
+} -match glob -result "{CORE SEMANTIC UNBOUND} {t.bot:2:5: unbound name \"later\"*}"
+
+test sr-unreachable-branch {legality is a resolution rule, not reachability} -body {
+    lindex [rejection "if false:\n    later()\n\nfn later():\n    1\n"] 0
+} -result $unboundLater
+
+test sr-unused-function {a function that is never used must still contain only valid references} -body {
+    lindex [rejection "fn unused():\n    later()\n\nfn later():\n    1\n"] 0
+} -result $unboundLater
+
+test sr-forward-value-alias {an alias of a later function is illegal even if it is only called later} -body {
+    rejection "g = f\n\nfn f():\n    1\n"
+} -match glob -result "{CORE SEMANTIC UNBOUND} {t.bot:1:5: unbound name \"f\"*}"
+
+test sr-forward-higher-order {aggregate construction is no route to a later binding} -body {
+    rejection "callbacks = \[later\]\n\nfn later():\n    1\n"
+} -match glob -result "{CORE SEMANTIC UNBOUND} {t.bot:1:14: unbound name \"later\"*}"
+
+test sr-forward-module-value {module-level values obey the same source order} -body {
+    rejection "a = b\nb = 3\n"
+} -match glob -result "{CORE SEMANTIC UNBOUND} {t.bot:1:5: unbound name \"b\": \"b\" is declared later*}"
+
+test sr-value-dependency-order {values are accepted once their dependencies come first (no reordering by the compiler)} -body {
+    valueEverywhere "c = 1\nb = c + 1\na = b + 1\na"
+} -result 3
+
+test sr-value-order-not-reordered {a dependency chain written backwards is rejected, never sorted} -body {
+    rejection "a = b + 1\nb = c + 1\nc = 1\n"
+} -match glob -result "{CORE SEMANTIC UNBOUND} {t.bot:1:5: unbound name \"b\"*}"
+
+test sr-own-initializer {a value is not visible in its own initializer} -body {
+    lindex [rejection "x = x + 1\n"] 0
+} -result $unboundLater
+
+test sr-own-initializer-outer {an initializer that mentions its own name reads the outer binding} -body {
+    valueEverywhere "x = 1\nif true:\n    x = x + 1\n    x\n"
+} -result 2
+
+# ---------------------------------------------------------------------------
+# Every kind of scope
+
+test sr-scope-function-body {a function body is sequential} -body {
+    lindex [rejection "fn f():\n    a = b\n    b = 1\n    a\n"] 0
+} -result $unboundLater
+
+test sr-scope-nested-function {a nested function may not call a later sibling} -body {
+    lindex [rejection "fn f():\n    fn g():\n        h()\n\n    fn h():\n        1\n\n    g()\n"] 0
+} -result $unboundLater
+
+test sr-scope-if-branch {an if branch is sequential} -body {
+    lindex [rejection "if true:\n    a = b\n    b = 1\n"] 0
+} -result $unboundLater
+
+test sr-scope-else-branch {an else branch is sequential} -body {
+    lindex [rejection "if false:\n    1\nelse:\n    a = b\n    b = 1\n"] 0
+} -result $unboundLater
+
+test sr-scope-loop-body {a loop body is sequential} -body {
+    lindex [rejection "loop:\n    a = b\n    b = 1\n    break\n"] 0
+} -result $unboundLater
+
+test sr-scope-loop-header {a loop's header is resolved in the enclosing scope: a body binding is not visible in it} -body {
+    lindex [rejection "loop x in ys:\n    ys = \[1\]\n    x\n"] 0
+} -result $unboundLater
+
+test sr-scope-count-loop-header {a counted loop's bounds are resolved before its body binds anything} -body {
+    lindex [rejection "loop i from 0 to n:\n    n = 3\n    i\n"] 0
+} -result $unboundLater
+
+test sr-scope-handler-body {a handler body is sequential} -body {
+    lindex [rejection "error Bad\n\nfn f() errors Bad:\n    fail Bad\n\nfn g():\n    r = f():\n        on Bad:\n            a = b\n            b = 1\n            0\n    r\n"] 0
+} -result $unboundLater
+
+test sr-loop-bindings-visible-in-body {the element and induction bindings are established on body entry} -body {
+    valueEverywhere "loop x in \[1, 2, 3\]:\n    x + 1"
+} -result {[2, 3, 4]}
+
+test sr-parameters-visible-in-body {parameters are established at function entry} -body {
+    valueEverywhere "fn f(a, b):\n    a + b\n\nf(20, 22)"
+} -result 42
+
+# ---------------------------------------------------------------------------
+# Named functions see themselves, and nothing else that is later
+
+test sr-self-recursion {a named function calls itself directly} -body {
+    valueEverywhere "fn factorial(n):\n    if n == 0:\n        1\n    else:\n        n * factorial(n - 1)\n\nfactorial(5)"
+} -result 120
+
+test sr-self-recursion-nested {a nested named function calls itself, and the outer function too} -body {
+    valueEverywhere "fn outer(n):\n    fn count(k):\n        if k == 0:\n            0\n        else:\n            1 + count(k - 1)\n\n    count(n)\n\nouter(4)"
+} -result 4
+
+test sr-self-binding-identity {the body's reference is the very binding the declaration establishes, final at once} -body {
+    set hir [surface::compile "fn f(n):\n    if n == 0:\n        0\n    else:\n        f(n - 1)\n\nf(3)" t.bot]
+    set bind [lindex [hirFind $hir bind f] 0]
+    set block [hir::get $hir $bind value]
+    set inner [lindex [hirFind $hir ref f] 0]
+    set outer [lindex [hirFind $hir ref f] 1]
+    set selfCall [lindex [lmap c [hirFind $hir call] {
+        expr {[hir::get $hir [hir::get $hir $c callee] name] eq "f"
+            && [hir::get $hir [hir::get $hir $c callee] scope] ne [hir::get $hir $outer scope] ? $c : [continue]}
+    }] 0]
+    list [expr {[hir::get $hir $inner binding] eq [hir::get $hir $bind binding]}] \
+        [expr {[hir::get $hir $outer binding] eq [hir::get $hir $bind binding]}] \
+        [expr {[hir::get $hir $bind binding] in [hir::captures $hir $block]}] \
+        [hir::get $hir $selfCall target] [expr {$block eq [lindex [hir::get $hir $selfCall target] 1]}]
+} -result [list 1 1 1 [list block e2] 1]
+
+test sr-self-binding-not-a-sibling {a named function sees itself and not a later function} -body {
+    lindex [rejection "fn f():\n    g()\n\nfn g():\n    f()\n"] 0
+} -result $unboundLater
+
+test sr-function-value-alias {an alias of an existing function is legal and exact} -body {
+    valueEverywhere "fn f(x):\n    x + 1\n\ng = f\ng(41)"
+} -result 42
+
+test sr-anonymous-recursion-has-no-form {`f = fn(x): f(x)` is not source: a function value has no self-binding of its own} -body {
+    lassign [rejection "f = fn(x):\n    f(x)\n"] code message
+    list [lrange $code 0 1] $message
+} -result {{SURFACE SYNTAX} {t.bot:1:5: expected an expression, found "fn"}}
+
+test sr-value-does-not-see-itself {a bound value never becomes visible inside a function that initializes it} -body {
+    lindex [rejection "fn make():\n    f = g\n    g = 1\n    f\n"] 0
+} -result $unboundLater
+
+test sr-duplicate-function {two functions of one name in one scope are still a duplicate} -body {
+    diagnosticsOf "fn f():\n    1\nfn f():\n    2\n"
+} -result {{DUPLICATE 3:1}}
+
+test sr-duplicate-value {a second bind of a value name in one scope is still a duplicate} -body {
+    diagnosticsOf "x = 1\nx = 2\n"
+} -result {{DUPLICATE 2:1}}
+
+test sr-duplicate-parameter-bind {binding a parameter's name in the body is still a duplicate} -body {
+    diagnosticsOf "fn f(a):\n    a = 2\n    a\n"
+} -result {{DUPLICATE 2:5}}
+
+test sr-shadowing-in-nested-scope-allowed {a nested scope may shadow an outer name} -body {
+    valueEverywhere "x = 1\nif true:\n    x = 2\n    x\n"
+} -result 2
+
+# ---------------------------------------------------------------------------
+# Closures capture what exists where they are created
+
+test sr-forward-closure-capture {a closure cannot capture a binding introduced after it} -body {
+    rejection "fn make():\n    fn get():\n        x\n\n    x = 5\n    get\n"
+} -match glob -result "{CORE SEMANTIC UNBOUND} {t.bot:3:9: unbound name \"x\": \"x\" is declared later*}"
+
+test sr-backward-closure-capture {a closure captures a binding established before it} -body {
+    valueEverywhere "fn make():\n    x = 5\n    fn get():\n        x\n\n    get\n\nmake()()"
+} -result 5
+
+# ---------------------------------------------------------------------------
+# Later shadowing must not reach back
+
+test sr-shadow-early-reference {an earlier reference stays on the outer binding; a later one takes the new inner binding} -body {
+    set source "x = \"outer\"\nif true:\n    early = x\n    x = \"inner\"\n    \[early, x\]\n"
+    set hir [surface::compile $source t.bot]
+    list [refScopes $hir x] [valueEverywhere $source]
+} -result {{program branch} {["outer", "inner"]}}
+
+test sr-shadow-distinct-bindings {the two references are different bindings} -body {
+    set hir [surface::compile "x = 1\nif true:\n    a = x\n    x = 2\n    \[a, x\]\n" t.bot]
+    lassign [hirRefBindings $hir x] first second
+    expr {$first ne $second}
+} -result 1
+
+test sr-shadow-closure {a closure made before a shadowing binding captures the outer binding; one made after captures the inner} -body {
+    set source "x = \"outer\"\nif true:\n    fn before():\n        x\n\n    x = \"inner\"\n    fn after():\n        x\n\n    \[before(), after()\]\n"
+    set hir [surface::compile $source t.bot]
+    list [refScopes $hir x] [valueEverywhere $source]
+} -result {{program branch} {["outer", "inner"]}}
+
+test sr-shadow-closure-in-function {the same, through a function's own scope} -body {
+    valueEverywhere "x = 10\nfn f():\n    fn before():\n        x\n\n    x = 20\n    \[before(), x\]\n\nf()"
+} -result {[10, 20]}
+
+test sr-shadow-parameter {a later local named like an outer parameter does not capture an earlier closure} -body {
+    valueEverywhere "fn outer(x):\n    fn inner():\n        fn get():\n            x\n\n        x = 99\n        \[get(), x\]\n\n    inner()\n\nouter(1)"
+} -result {[1, 99]}
+
+test sr-shadow-hygiene-renames-the-later-binding {lowered core IR is name-based: the LATER binding is renamed, never the earlier reference} -body {
+    set hir [surface::compile "x = \"outer\"\nif true:\n    fn before():\n        x\n\n    x = \"inner\"\n    before()\n" t.bot]
+    set names [lmap b [dict keys [dict get $hir bindings]] {dict get $hir bindings $b name}]
+    list [expr {"x#1" in $names}] [regexp -all {\(ref x\)|\{ref x\}} [hir::lower $hir]]
+} -result {1 1}
+
+test sr-shadow-hygiene-straight-line {core IR scopes declare every name on entry, so even straight-line code needs the later binding renamed} -body {
+    set hir [surface::compile "x = 1\nif true:\n    a = x\n    x = 2\n    \[a, x\]\n" t.bot]
+    set names [lmap b [dict keys [dict get $hir bindings]] {dict get $hir bindings $b name}]
+    list [expr {"x#1" in $names}] [valueEverywhere "x = 1\nif true:\n    a = x\n    x = 2\n    \[a, x\]\n"]
+} -result {1 {[1, 2]}}
+
+test sr-legal-old-programs-need-no-rename {a program that never mentions a name before a later binding of it is lowered exactly as written} -body {
+    set hir [surface::compile "x = 1\nif true:\n    x = 2\n    x\nx" t.bot]
+    set names [lmap b [dict keys [dict get $hir bindings]] {dict get $hir bindings $b name}]
+    expr {"x#1" in $names}
+} -result 0
+
+# ---------------------------------------------------------------------------
+# Resolution failure: before typing, final identity, no derivative noise
+
+test sr-no-placeholder-binding {an illegal forward reference has no binding at all, not a placeholder} -body {
+    set hir [surface::compile "fn caller():\n    helper()\n\nfn helper():\n    1\n" t.bot -strict 0]
+    set ref [lindex [hirFind $hir ref helper] 0]
+    list [hir::get $hir $ref binding] [hir::typeOf $hir $ref]
+} -result {{} never}
+
+test sr-no-derivative-diagnostics {a forward reference produces one diagnostic and no type noise} -body {
+    diagnosticsOf "fn caller(x):\n    helper(x)\n\nfn helper(y):\n    y + 1\n\ncaller(1)\n"
+} -result {{UNBOUND 2:5}}
+
+test sr-error-locality {the diagnostic is at the illegal reference, not at the declaration} -body {
+    lindex [diagnosticsOf "a = 1\nb = later\nfn f():\n    b\n\nlater = 3\n"] 0
+} -result {UNBOUND 2:5}
+
+test sr-strict-stops-before-typing {a strict build that fails to resolve never runs type inference or semantic analysis} -body {
+    set ::sr_reached {}
+    foreach command {hir::check hir::types::infer hir::semantic::Begin hir::signatures::infer} {
+        trace add execution $command enter {apply {{args} {lappend ::sr_reached [lindex $args 0]}}}
+    }
+    catch {surface::compile "fn caller():\n    helper()\n\nfn helper():\n    1\n" t.bot}
+    foreach command {hir::check hir::types::infer hir::semantic::Begin hir::signatures::infer} {
+        trace remove execution $command enter {apply {{args} {lappend ::sr_reached [lindex $args 0]}}}
+    }
+    set ::sr_reached
+} -result {}
+
+test sr-legal-program-is-typed {control: the same probe sees inference on a legal program} -body {
+    set ::sr_reached {}
+    trace add execution hir::check enter {apply {{args} {lappend ::sr_reached check}}}
+    surface::compile "fn helper():\n    1\n\nfn caller():\n    helper()\n" t.bot
+    trace remove execution hir::check enter {apply {{args} {lappend ::sr_reached check}}}
+    set ::sr_reached
+} -result check
+
+test sr-many-forward-references {a file full of forward references fails in ordinary resolution time} -body {
+    set source ""
+    for {set i 0} {$i < 400} {incr i} {
+        append source "fn caller${i}():\n    callee${i}()\n\n"
+    }
+    for {set i 0} {$i < 400} {incr i} {
+        append source "fn callee${i}():\n    $i\n\n"
+    }
+    set start [clock milliseconds]
+    set found [llength [diagnosticsOf $source]]
+    set elapsed [expr {[clock milliseconds] - $start}]
+    list $found [expr {$elapsed < 20000}]
+} -result {400 1}
+
+test sr-decl-hint-only-in-message {the "declared later" wording is diagnostic-only: an undeclared name gets the plain message} -body {
+    lindex [rejection "fn f():\n    nothing_here()\n"] 1
+} -result {t.bot:2:5: unbound name "nothing_here"}
+
+test sr-decl-hint-is-scope-accurate {a same-named binding in an unrelated scope does not make the message claim "declared later"} -body {
+    lindex [rejection "fn f():\n    helper()\n\nfn g():\n    helper = 1\n    helper\n"] 1
+} -result {t.bot:2:5: unbound name "helper"}
+
+# ---------------------------------------------------------------------------
+# The HIR invariant
+
+test sr-invariant-holds-for-legal-programs {no successful build contains a reference to a later binding} -body {
+    set problems {}
+    foreach source [list \
+            "fn a():\n    1\n\nfn b():\n    a()\n\nb()" \
+            "x = 1\nif true:\n    y = x\n    x = 2\n    \[y, x\]" \
+            "fn f(n):\n    if n == 0:\n        0\n    else:\n        f(n - 1)\n\nf(2)" \
+            "x = 1\nfn f():\n    fn g():\n        x\n\n    x = 2\n    \[g(), x\]\n\nf()"] {
+        set hir [surface::compile $source t.bot]
+        lappend problems [hir::refcheck::forwardRefs $hir]
+    }
+    lsort -unique $problems
+} -result {{}}
+
+test sr-invariant-checker-finds-violations {the checker is not vacuous: HIR text with a reference before its declaration is rejected} -body {
+    catch {hir::parse "program s2 binds b1 w\ne1 call block(e2) : any\n    e2 block s3 () captures (b1 w) : block(e2)/0 -> any\n        e3 ref b1 w : any\ne4 bind b1 w : int\n    e5 const 1 : int"} message options
+    list [dict get $options -errorcode] [string match "*forward references are not allowed*" $message]
+} -result {{HIR PARSE} 1}
+
+# ---------------------------------------------------------------------------
+# Randomized: sequential HIR resolution, name-based core IR and every backend
+# agree. Deterministic (fixed seeds): random legal programs with nested
+# scopes, shadowing of a, b and c, closures created before and after a
+# shadowing binding, and calls of the closures.
+
+set ::srFnCount 0
+proc srPick {list} { lindex $list [expr {int(rand() * [llength $list])}] }
+proc srIndent {text n} {
+    set pad [string repeat "    " $n]
+    join [lmap l [split $text \n] {if {$l eq ""} {set l} else {string cat $pad $l}}] \n
+}
+# ints: names visible with int values; fns: visible zero-arg functions
+proc srExpr {ints} {
+    switch [expr {int(rand() * 3)}] {
+        0 { return [expr {int(rand() * 9)}] }
+        1 { if {$ints ne ""} { return [srPick $ints] } ; return 1 }
+        2 { if {$ints ne ""} { return "[srPick $ints] + [expr {int(rand() * 9)}]" } ; return 2 }
+    }
+}
+proc srGen {ints fns depth} {
+    set lines {}
+    set bound {}
+    set n [expr {2 + int(rand() * 4)}]
+    for {set i 0} {$i < $n} {incr i} {
+        switch [expr {int(rand() * 4)}] {
+            0 {
+                set name [srPick {a b c}]
+                if {$name in $bound} continue
+                lappend lines "$name = [srExpr $ints]"
+                lappend bound $name
+                if {$name ni $ints} { lappend ints $name }
+            }
+            1 {
+                set f f[incr ::srFnCount]
+                set body ""
+                if {rand() < 0.5} {
+                    set name [srPick {a b c}]
+                    append body "$name = [srExpr $ints]\n"
+                    set inner $ints
+                    if {$name ni $inner} { lappend inner $name }
+                    append body [srExpr $inner]
+                } else {
+                    append body [srExpr $ints]
+                }
+                lappend lines "fn ${f}():\n[srIndent $body 1]"
+                lappend bound $f
+                lappend fns $f
+            }
+            2 {
+                if {$depth > 0} {
+                    set r r[incr ::srFnCount]
+                    lassign [srGen $ints $fns [expr {$depth - 1}]] text
+                    lappend lines "$r = if true:\n[srIndent $text 1]"
+                    lappend bound $r
+                }
+            }
+            3 {
+                if {$fns ne ""} { lappend lines "[srPick $fns]()" }
+            }
+        }
+    }
+    set items {}
+    foreach v $ints { lappend items $v }
+    foreach f $fns { lappend items "${f}()" }
+    lappend lines "\[[join $items {, }]\]"
+    return [list [join $lines \n] $ints $fns]
+}
+
+test sr-random-programs-agree {random legal programs with shadowing and closures: the interpreter (lowered IR), the compiler (lowered IR and direct HIR) agree, and no HIR has a forward reference} -body {
+    set problems {}
+    for {set seed 1} {$seed <= 120} {incr seed} {
+        expr {srand($seed)}
+        set ::srFnCount 0
+        lassign [srGen {} {} 2] text
+        set hir [surface::compile $text t.bot]
+        set program [hir::lower $hir]
+        set a [outcomeUnder interp $program]
+        set b [outcomeUnder compile $program]
+        set c [core::formatValue [core::compiler::evalHir $hir]]
+        if {[lindex $a 0] ne "value" || [lindex $b 1] ne [lindex $a 1] || $c ne [lindex $a 1]
+                || [hir::refcheck::forwardRefs $hir] ne ""} {
+            lappend problems $seed
+        }
+    }
+    set problems
+} -result {}
+
+# ---------------------------------------------------------------------------
+# Modules: the external boundary and the current module's own names
+
+proc withScratchLibrary {script} {
+    set saved $::core::libraryDir
+    set dir [tcltest::makeDirectory sr-scratch-[pid]-[incr ::srScratchCounter]]
+    set ::core::libraryDir $dir
+    try {
+        uplevel 1 [list apply [list {dir} $script] $dir]
+    } finally {
+        set ::core::libraryDir $saved
+        tcltest::removeDirectory [file tail $dir]
+    }
+}
+set ::srScratchCounter 0
+
+proc writeFile {dir name content} {
+    set path [file join $dir $name.bot]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8
+    puts -nonewline $channel $content
+    close $channel
+    return $path
+}
+
+test sr-module-forward-reference {inside a module, a function may not call a later function of its own module} -body {
+    withScratchLibrary {
+        writeFile $dir m "namespace m\n\nfn caller():\n    helper()\n\nfn helper():\n    1\n"
+        set main [writeFile $dir main "m::caller()\n"]
+        catch {surface::readProgramFile $main} message options
+        list [dict get $options -errorcode] [string match "*m.bot:4:5: unbound name \"helper\"*declared later*" $message]
+    }
+} -result {{CORE SEMANTIC UNBOUND} 1}
+
+test sr-module-callee-first {a module written callee-first resolves, and is used through its qualified name} -body {
+    withScratchLibrary {
+        writeFile $dir m "namespace m\n\nfn helper():\n    41\n\nfn caller():\n    helper() + 1\n"
+        set main [writeFile $dir main "m::caller()\n"]
+        core::formatValue [core::evalProgram [hir::lower [surface::readProgramFile $main]]]
+    }
+} -result 42
+
+test sr-module-own-qualified-name-is-no-escape {`m::helper` inside module m is not a way to reach a later binding} -body {
+    withScratchLibrary {
+        writeFile $dir m "namespace m\n\nfn caller():\n    m::helper()\n\nfn helper():\n    1\n"
+        set main [writeFile $dir main "m::caller()\n"]
+        catch {surface::readProgramFile $main} message options
+        dict get $options -errorcode
+    }
+} -result {SURFACE MODULE CYCLE}
+
+test sr-module-value-forward {module-level values are sequential too} -body {
+    withScratchLibrary {
+        writeFile $dir m "namespace m\n\na = b\nb = 3\n\nfn get():\n    a\n"
+        set main [writeFile $dir main "m::get()\n"]
+        catch {surface::readProgramFile $main} message options
+        dict get $options -errorcode
+    }
+} -result {CORE SEMANTIC UNBOUND}
+
+test sr-module-order-independent-of-user-order {an entry program may call any established module symbol, whatever order the module's own definitions have} -body {
+    withScratchLibrary {
+        writeFile $dir m "namespace m\n\nfn one():\n    1\n\nfn two():\n    one() + 1\n"
+        set main [writeFile $dir main "\[m::two(), m::one()\]\n"]
+        core::formatValue [core::evalProgram [hir::lower [surface::readProgramFile $main]]]
+    }
+} -result {[2, 1]}
+
+test sr-module-local-shadow-of-namespace-name {a local named like the namespace does not hide the qualified reference} -body {
+    withScratchLibrary {
+        writeFile $dir m "namespace m\n\nfn one():\n    1\n"
+        set main [writeFile $dir main "m = 5\n\[m, m::one()\]\n"]
+        core::formatValue [core::evalProgram [hir::lower [surface::readProgramFile $main]]]
+    }
+} -result {[5, 1]}
+
+# ---------------------------------------------------------------------------
+# Ambient (sequence) mode is unchanged: unknown names are the host's
+
+test sr-ambient-names-are-the-hosts {in sequence mode an unbound name is an ambient binding, resolved when it runs} -body {
+    set hir [hir::build {{call {ref f} {const 1}}} -mode sequence -strict 0]
+    list [hir::diagnostics $hir] [hir::get $hir [lindex [hirFind $hir ref f] 0] init]
+} -result {{} deferred}
+
+cleanupTests

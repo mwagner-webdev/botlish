@@ -30,8 +30,8 @@
 #   eN return -> eN / break -> eN / continue -> eN
 #   eN ok / eN error
 #
-# Flags: unbound, before-binding, deferred (bound when a closure runs),
-# duplicate, unreachable. With -origins 1 each line ends with @ORIGIN.
+# Flags: unbound, deferred (an ambient binding: the host's value when a
+# closure runs), duplicate, unreachable. With -origins 1 each line ends with @ORIGIN.
 
 namespace eval hir::format {}
 
@@ -133,9 +133,8 @@ proc hir::format::Line {hir e text indent origins linesVar {typed 1}} {
             if {[dict get $node binding] eq ""} {
                 lappend flags unbound
             } else {
-                switch -- [dict get $node init] {
-                    no       { lappend flags before-binding }
-                    deferred { lappend flags deferred }
+                if {[dict get $node init] eq "deferred"} {
+                    lappend flags deferred
                 }
             }
         }

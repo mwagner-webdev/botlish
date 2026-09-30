@@ -178,13 +178,22 @@ test surface-modules-cycle {a module dependency cycle is rejected with a clear d
     }
 } -result {{SURFACE MODULE CYCLE} 1}
 
-test surface-modules-same-module-recursion-is-not-a-cycle {ordinary same-module (mutual) recursion is unaffected} -body {
+test surface-modules-same-module-self-recursion-is-not-a-cycle {a named function's own recursion inside a module is not a module cycle} -body {
+    withScratchLibrary {
+        writeModule $dir parity "namespace parity\n\nfn even(n):\n    if n == 0:\n        true\n    else:\n        even(n - 2)\n"
+        set main [writeMain $dir "\[parity::even(10), parity::even(4)\]\n"]
+        outcomeUnder interp [hir::lower [surface::readProgramFile $main]]
+    }
+} -result {value {[true, true]} {}}
+
+test surface-modules-same-module-mutual-recursion-rejected {same-module mutual recursion is rejected like any other: a module's definitions are established in source order} -body {
     withScratchLibrary {
         writeModule $dir parity "namespace parity\n\nfn even(n):\n    if n == 0:\n        true\n    else:\n        odd(n - 1)\n\nfn odd(n):\n    if n == 0:\n        false\n    else:\n        even(n - 1)\n"
         set main [writeMain $dir "\[parity::even(10), parity::even(7)\]\n"]
-        outcomeUnder interp [hir::lower [surface::readProgramFile $main]]
+        catch {surface::readProgramFile $main} message options
+        list [dict get $options -errorcode] [string match {*parity.bot:7:9: unbound name "odd"*declared later*} $message]
     }
-} -result {value {[true, false]} {}}
+} -result {{CORE SEMANTIC UNBOUND} 1}
 
 # ---------------------------------------------------------------------------
 # Module top level: immutable bindings are ordinary bindings, initialized in
@@ -319,7 +328,7 @@ value = a
         set main [writeMain $dir {a::value
 }]
         catch {surface::readProgramFile $main} message options
-        list [dict get $options -errorcode] [string match {*used before its binding*} $message]
+        list [dict get $options -errorcode] [string match {*unbound name "b"*declared later*} $message]
     }
 } -result {{CORE SEMANTIC UNBOUND} 1}
 

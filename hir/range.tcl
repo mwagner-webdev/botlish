@@ -826,7 +826,7 @@ proc hir::range::Expr {hirVar ctxVar e} {
             return $r
         }
         ref {
-            if {[dict get $node binding] eq "" || [dict get $node init] eq "no"} {
+            if {[dict get $node binding] eq ""} {
                 return never
             }
             set b [dict get $node binding]
@@ -1657,7 +1657,7 @@ proc hir::range::RefBinding {hir e} {
         return ""
     }
     set b [hir::get $hir $e binding]
-    if {$b eq "" || [hir::get $hir $e init] eq "no"} {
+    if {$b eq ""} {
         return ""
     }
     if {[dict get [hir::binding $hir $b] kind] ni {local param}} {

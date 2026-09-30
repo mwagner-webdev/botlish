@@ -27,12 +27,30 @@
 # binding to its one qualified spelling, "mod::name", everywhere -- the
 # same fresh-name machinery Rename uses, minus the #N search (a qualified
 # spelling can never collide: no ordinary identifier can spell "::").
+#
+# A third case follows from sequential resolution (STRICT-REFERENCE-
+# DETERMINISM.md). HIR resolves a reference against the bindings established
+# BEFORE it. Core IR is resolved by name against scopes that declare every
+# name they bind on entry (core/evaluator.tcl, core::ir::scopeBindNames), so a
+# later binding of a name would capture an earlier reference to an outer
+# binding of the same name -- straight-line code and closures alike:
+#
+#     x = "outer"
+#     if c:
+#         early = x          # HIR: the outer x
+#         x = "inner"        # core IR: a branch x, declared on entry
+#
+# The later binding is renamed (NAME#N, spelling kept), exactly as for root
+# references, so the lowered program and every backend read the binding HIR
+# resolved.
 
 namespace eval hir::hygiene {}
 
 # Renames bindings that shadow root references (recorded by resolution in
-# HIR's rootRefs); removes rootRefs. Then (qualifyModules) renames every
-# module's own top-level definitions to their qualified spelling.
+# HIR's rootRefs); removes rootRefs. Then (ProtectEarlierRefs) renames later
+# bindings that name-based core IR would let capture an earlier reference, and
+# (qualifyModules) renames every module's own top-level definitions to their
+# qualified spelling.
 proc hir::hygiene::apply {hirVar} {
     upvar 1 $hirVar hir
     if {[dict exists $hir rootRefs]} {
@@ -49,7 +67,37 @@ proc hir::hygiene::apply {hirVar} {
         }
         dict unset hir rootRefs
     }
+    ProtectEarlierRefs hir
     qualifyModules hir
+}
+
+# For every ordinary reference E to binding B, renames every other binding a
+# name-based lookup of E's name from E's scope would find instead of B (the
+# scopes' `names` are the complete, final declarations core IR sees). A
+# later binding of the same name in an inner scope is the case; a binding
+# beyond B's own scope is never found first. Module-qualified references
+# are named by their own qualified spelling (qualifyModules) and ambient
+# bindings belong to the host environment; neither is touched here.
+proc hir::hygiene::ProtectEarlierRefs {hirVar} {
+    upvar 1 $hirVar hir
+    foreach e [dict keys [dict get $hir exprs]] {
+        set node [dict get $hir exprs $e]
+        if {[dict get $node kind] ne "ref" || [dict exists $node qualified]
+                || [dict get $node binding] eq ""} {
+            continue
+        }
+        set b [dict get $node binding]
+        if {[dict get $hir bindings $b kind] eq "ambient"} {
+            continue
+        }
+        while 1 {
+            set found [hir::lookup $hir [dict get $node scope] [dict get $node name]]
+            if {$found eq $b || $found eq ""} {
+                break
+            }
+            Rename hir $found
+        }
+    }
 }
 
 proc hir::hygiene::Rename {hirVar b} {
@@ -78,9 +126,10 @@ proc hir::hygiene::Rename {hirVar b} {
 # bind of it: both the qualified references other files already spell
 # that way (hir::resolve::ResolveQualifiedRef) and the module's own
 # internal, as-written *bare* references to its own sibling definitions
-# (ordinary same-module recursion, including mutual recursion -- entirely
-# unaffected by being loaded as a module: hir::resolve resolved it in the
-# module's own private scope exactly as it would in a single ordinary
+# (ordinary same-module use of earlier definitions, and a function's own
+# recursion -- entirely unaffected by being loaded as a module:
+# hir::resolve resolved it in the module's own private scope, in the
+# module's own source order, exactly as it would in a single ordinary
 # file, before this pass ever renames anything).
 #
 # This exists for the same reason Rename (above) does: hir::lower's core

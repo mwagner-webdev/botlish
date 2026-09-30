@@ -1029,18 +1029,32 @@ run-time rules of §2 statically:
   iteration) and `ambient` (the unknown environment of a sequence-mode unit).
   A scope's `invocation` is the block whose call it belongs to. Code in one
   invocation runs in walk order.
-* A scope declares every name it binds on entry. A reference denotes the
-  binding of the innermost scope that declares its name. Failing that, it
-  denotes a root binding (program mode) or an ambient binding (sequence
-  mode). Otherwise it's unresolved (`UNBOUND`).
-* `init` says whether the binding has its value when the reference runs.
-  `yes`: bound earlier in the same invocation, or a parameter or root binding.
-  `no`: same invocation but not bound yet, so evaluating it raises "used
-  before its binding". `deferred`: the reference is inside a closure, so it's
-  decided when the closure is called.
-* A `bind` of a binding that's already bound is marked `duplicate`. It still
-  denotes the first binding, and raises `DUPLICATE` when evaluated, after its
-  value.
+* Resolution is **sequential**: a scope starts with only its parameters, and
+  a `bind` adds its binding when the walk reaches it (after resolving its
+  value), so a reference denotes the binding of the innermost scope that has
+  established its name *so far*. Failing that, it denotes a root binding
+  (program mode) or an ambient binding (sequence mode). Otherwise it's
+  unresolved (`UNBOUND`) and gets no binding at all. There is no whole-scope
+  symbol table and no hoisting; a named function's `bind` (a block value)
+  establishes its binding before its block is resolved, so the function can
+  call itself and nothing else that is later. Every dependency between
+  bindings of a scope therefore points backward in source order, plus a
+  named function's self-edge (`hir::refcheck::forwardRefs` audits this).
+  When a name is unbound but bound later in an enclosing scope, the message
+  says so; that answer comes from a diagnostic-only index and never
+  resolves anything. See STRICT-REFERENCE-DETERMINISM.md.
+* `init` is `yes` for every reference, except an ambient one (`deferred`:
+  the host environment's value when a closure runs). There is no "not bound
+  yet" state.
+* A `bind` of a name that's already bound in the same scope is marked
+  `duplicate`. It still denotes the first binding, and raises `DUPLICATE`
+  when evaluated, after its value.
+* Core IR's scopes declare every name they bind on entry (§2), so lowered
+  code is name-based where HIR is sequential: hygiene renames a later binding
+  (`x#1`) that would capture an earlier reference to an outer binding of the
+  same name. Raw core IR that relies on the interpreter's declare-on-entry
+  scoping (forward closure references, use before binding) is interpreter-only:
+  HIR-based backends treat such a reference as unbound.
 * A block's `captures` are the non-root bindings its body refers to (at any
   depth) that are defined outside the block. A scope's `closures` are the
   blocks created in it.
@@ -1168,15 +1182,10 @@ name now has result type `never` (it always raises) instead of `any`.
   of NAME". That identity is approximate if the sequence also binds the name.
 * The only symbols are builtins. Parameters are typed `any`: there are no
   type annotations and no function types beyond `{block E A R}`.
-* A reference from a closure to a function bound *later* (mutual recursion,
-  `examples/surface/09-mutual-recursion.bot`) has the forward type
-  `{block E ARITY any}`: its call target is known, its result type is not.
-  Whether the binding is bound when the reference runs stays a run-time
-  check (`hir::aot::unprovenReferences`).
-* `init deferred` covers every reference from inside a closure, including
-  references that are certainly bound when the closure runs (parameters of
-  the enclosing block, the function itself, bindings made before the closure
-  is created). `hir::aot` (§19) separates these cases; HIR does not.
+* A reference to a later binding (including mutual recursion,
+  `examples/surface/09-mutual-recursion.bot`) is unresolved (`UNBOUND`): there
+  is no forward reference to type, check or repair. Mutual recursion needs a
+  future explicit construct.
 * Calling a block proves nothing about its arguments. Flow facts come only
   from native signatures, so after `peek(text, i)` returns, `text` is still
   `any` in the caller.
@@ -1220,6 +1229,19 @@ add10(32)          # 42 (add captures x)
   name in the same scope is `DUPLICATE`; nested scopes may shadow.
 * `fn f(a, b):` declares a function. The body's last expression is its
   value; `return` exits early.
+* **Bindings are visible from their definition onward.** A function or value
+  may not refer to a later binding in the same lexical scope (`UNBOUND`, at
+  the reference), in a module, a function body, a branch, a loop body or a
+  handler alike; nothing is hoisted, and running order never makes a forward
+  reference legal (an unused function, or an unreachable branch, may not
+  contain one). A named function may call itself: `fn f` establishes `f`
+  before its own body. A value is not visible in its own initializer, and
+  there is no anonymous function expression to recurse through. A closure
+  captures what exists where it is created, and a later binding of the same
+  name in a nested scope never changes what an earlier reference meant.
+  Mutually recursive definitions need a future explicit mechanism; ordinary
+  bindings are not hoisted, so write callees before callers. See
+  STRICT-REFERENCE-DETERMINISM.md.
 * `if c:` / `else:` (optional `else`), `loop:`, `break [e]`, `continue`.
 * An `if` can also be the value of a binding, `return` or `break`
   (`sign = if n < 0:` followed by its blocks). It can't be an operand or an
@@ -1561,10 +1583,9 @@ Facts it derives beyond HIR (without changing HIR):
 * **Static blocks:** a block whose captures are all bindings of static
   blocks needs no environment. Top-level functions that only call other
   top-level functions are plain functions.
-* **Init checks:** a deferred reference needs one only when HIR can't prove
-  the binding is bound whenever the closure runs. Parameters, a function's
-  reference to itself, and bindings made before the closure is created are
-  proven. A forward reference, as in mutual recursion, is not.
+* **No init checks:** every reference is to a binding established before it
+  (§16), so no reference needs a run-time "is it bound yet" check. (There
+  used to be a fact for a forward reference, as in mutual recursion.)
 * `==` on two known scalars needs no structural comparison.
 
 **The corpus today.** Every function in §18 has closed dispatch: every call
@@ -1601,11 +1622,11 @@ callers pass, on the same `hir::aot` analysis, and closes all four programs.
 * Fixed: `.bot` and `.ir` files were read in the platform's system encoding
   (cp1252 on Windows), which corrupted non-ASCII source. Program files are
   now read as UTF-8.
-* Fixed in the native milestone (§20): calls of a function bound later
-  (mutual recursion) had no call target, so `is_even` in
-  `examples/surface/09-mutual-recursion.bot` was `open`. It is now
-  `guarded`, with an init check. Still in §16's known limitations:
-  `init deferred` over-approximates, and block calls add no flow facts.
+* Calls of a function bound later (mutual recursion) had no call target, so
+  `is_even` in `examples/surface/09-mutual-recursion.bot` was `open`; the
+  native milestone (§20) gave it one with an init check. Forward references
+  are now illegal (STRICT-REFERENCE-DETERMINISM.md), so the example is a
+  rejected program. Block calls still add no flow facts.
 
 **For the first native (Cranelift) milestone**, in order of evidence (the
 milestone is described in §20, where items 1, 3 and 4 were done; §21 does 2
@@ -1621,7 +1642,8 @@ and the element-type half of 5):
    small-integer fast path), strings and lists, instead of lowering Int to
    bare `i64`. The analysis's requirements list the helpers each function
    needs.
-4. Give HIR call targets for forward references to functions.
+4. Give HIR call targets for forward references to functions (done at the
+   time; forward references were later removed from the language).
 5. Plan list element types and a growable or persistent list
    representation. `list_append` copying is what makes CSV quadratic.
 
@@ -1660,13 +1682,12 @@ HIR ──native::lower (Tcl)──▶ NIR text ──botlish-native (Rust)─�
   its own. Instances and their call targets come from `hir::specialize`,
   guards from `hir::aot`'s representation blockers and known-error facts on
   each instance's typed view, self tail calls from
-  `hir::aot::selfTailCalls` (shared with the Tcl compiler), init checks
-  from `hir::aot::unprovenReferences`, and environment-free functions from
-  `hir::aot`'s static blocks. Lowering cross-checks the guards against the
+  `hir::aot::selfTailCalls` (shared with the Tcl compiler), and
+  environment-free functions from `hir::aot`'s static blocks. Lowering cross-checks the guards against the
   view's types and reports a mismatch as a backend bug.
 * **NIR** is register-based and representation-level: constants, moves,
   `guard KIND`, `op OP` (a known operation on operands of the kinds it
-  requires), `call` / `callenv` / `callvalue`, `tail`, cells and closures,
+  requires), `call` / `callenv` / `callvalue`, `tail`, closures,
   branches, `ret` and `raise`. It has no names to resolve, no types and no
   traits. The format is documented at the top of `native/lower.tcl`.
 * **The driver** `botlish-native` (`native/src/main.rs`) parses and
@@ -1781,15 +1802,16 @@ runs after a failed guard or helper.
   never a dispatcher. Native identity maps to an implementation in
   `native::lower::natives`; everything else (arity, parameter kinds) comes
   from the native registry.
-* **Environment-free functions** are `hir::aot`'s static blocks, minus
-  those that capture a cell. They take no closure argument. Their Block
+* **Environment-free functions** are `hir::aot`'s static blocks. They take
+  no closure argument. Their Block
   value is one constant closure, loaded from the constant table.
 * **Closures.** A Block value is `{code, function id, arity, captures}`.
-  Captures are values, except for bindings that some reference can't be
-  proven bound when it runs (a forward reference, as in mutual recursion).
-  Those are *cells*: allocated when their scope is entered, set by the bind,
-  and read with an `UNBOUND` check where the reference is unproven. A
-  closure reads its own function binding through `self`.
+  Captures are values, which is sound because a reference's binding is
+  established before the closure that reads it is created (§16). A closure
+  reads its own function binding through `self`. (Earlier versions kept a
+  *cell* for a binding read by a forward reference; forward references no
+  longer exist, so lowering never emits cell instructions. The runtime's
+  cell object and NIR ops are unused and left for the native cleanup.)
 * **Self tail calls** (`hir::aot::selfTailCalls`, the Tcl compiler's
   criterion) rebind the parameter variables and jump back to the body block
   after the prologue: a CFG back edge. In the CLIF, the body block is a loop
@@ -1839,7 +1861,7 @@ panic is `NATIVE BUG`.
 
 **Supported:** program-mode HIR with every expression kind (`const`, `ref`,
 `bind`, `block`, `call`, `if`, `loop`, `return`, `break`, `continue`, `ok`,
-`error`), closures with captured values and cells, mutual recursion, run-time
+`error`), closures with captured values, self recursion, run-time
 `UNBOUND` and `DUPLICATE`, calls chosen at run time, natives as values, and
 the builtin natives `+ - * < <= > >= == eq list length substring lowercase
 concat list_length list_get list_append integer? string? list? ok? error?
@@ -2001,8 +2023,7 @@ For a call of a known block `B` in instance `I`:
 1. `B` captures values (it isn't a static block, §19): `B<generic>`.
    Closures over values stay generic, because their captures' kinds would
    depend on which closure is running. Functions whose captures are only
-   other functions are specialized, even when they are reached through a
-   forward reference's cell (mutual recursion).
+   other functions are specialized.
 2. A self tail call whose key types are all subtypes of `I`'s: `I` itself,
    so the call stays a CFG back edge. Otherwise the key is the pointwise lub
    of `I`'s key and the call's (`swap<int, str, int>` tail-calling
@@ -2122,8 +2143,8 @@ analysis chose; `fnvalue` and `closure` use generic instances; a self tail
 call that stays in its instance is `tail`. Only instances the lowered code
 refers to are emitted, so a function that is only called with known kinds
 has no generic code at all, unless its Block value is materialized
-(`hir::aot::materializedBlocks`: a closure, a function passed as a value,
-or a function bound through a cell, whose closure entry must exist).
+(`hir::aot::materializedBlocks`: a closure or a function passed as a value,
+whose closure entry must exist).
 Specializations use the generic ABI (tagged words in and out) and differ
 only in what they don't check. The NIR header says which instance a
 function is (`instance="str, int, str"` or `instance="generic"`).
@@ -2239,9 +2260,7 @@ starting empty) add code. Machine code of the corpus files as written
 
 ### Known limitations
 
-* Closures over values are never specialized, and a function bound through
-  a cell (mutual recursion) also keeps its generic function as its closure's
-  entry, even if all its calls are specialized.
+* Closures over values are never specialized.
 * Positional shapes come only from literals; `list_get` uses a position only
   for a constant index. There are no Result payload facts.
 * The limit counts instances in use at the moment a call is analyzed, so

@@ -2,51 +2,71 @@
 #
 # One walk over syntax nodes (syntax.tcl: core IR converted by
 # hir::syntax::fromIR, or built by a frontend), in evaluation order, creates
-# an expression node per syntax node and resolves every name. The rules are
-# those of the interpreter (README §2, core/env.tcl), decided statically:
+# an expression node per syntax node and resolves every name. The walk is
+# STRICTLY SEQUENTIAL (STRICT-REFERENCE-DETERMINISM.md):
 #
-# * A scope is the program, a block invocation, an if branch or a loop
-#   iteration. On entry it declares every name bound by a `bind` reachable
-#   without entering a nested scope (hir::syntax::scopeBindNames), so a name
-#   denotes one binding throughout its scope. Block parameters are bindings
-#   of the block's scope.
-# * A reference denotes the binding of the innermost enclosing scope that
-#   declares its name; failing that, a root binding (program mode) or an
-#   ambient binding of the host environment (sequence mode). Otherwise it is
-#   unresolved: {UNBOUND "unbound name ..."}. A root reference (a syntax ref
-#   with root 1) denotes the root binding of its name regardless.
+#     a lexical binding becomes visible when it is established
+#
+# * A scope is the program, a module section, a block invocation, an if
+#   branch, a handler branch or a loop iteration. It starts EMPTY: only
+#   parameters (and a loop's element/induction binding) exist on entry. A
+#   `bind` adds its binding to the scope's `names` at the point the walk
+#   reaches it, after its value has been resolved (so `x = x` reads an outer
+#   x, or nothing), and nothing before that point can see it. A later
+#   declaration is semantically indistinguishable from one absent from the
+#   file: there is no whole-scope symbol table, no predeclaration, no hoisting.
+# * The one exception is a named function: a `bind` whose value is a `block`
+#   (surface `fn f(...):`) establishes its binding BEFORE its block is
+#   resolved, so the body reaches the function through its own binding
+#   (direct self-recursion). It never makes a *sibling* visible: mutual
+#   recursion needs one edge to point forward, so it is rejected.
+# * A reference denotes the binding of the innermost enclosing scope whose
+#   `names` (as established so far) has its name; failing that, a root
+#   binding (program mode) or an ambient binding of the host environment
+#   (sequence mode). Otherwise it is unresolved: {UNBOUND "unbound name ..."},
+#   and the reference gets no binding at all -- an illegal forward reference
+#   never becomes a reference with a placeholder identity or type. A root
+#   reference (a syntax ref with root 1) denotes the root binding of its name
+#   regardless.
+# * Later shadowing cannot reach back: a nested scope that establishes `x`
+#   after an earlier reference to an outer `x` leaves that reference on the
+#   outer binding. (Lowered core IR is name-based; hir/hygiene.tcl renames a
+#   later binding that a name-based lookup would otherwise let capture an
+#   earlier closure's reference.)
 # * A module-qualified reference (surface/modules.tcl's "NAMESPACE::NAME", a
 #   syntax ref node carrying a `qualified {NAMESPACE NAME}` field) is not an
 #   ordinary name: it is resolved directly against NAMESPACE's own module
-#   section scope (ResolveQualifiedRef), always "yes" (a module's
-#   definitions are all bound, unconditionally, before any code that can
-#   reference them runs -- surface/modules.tcl). Its binding is never itself
-#   *within* any enclosing block's body scope (a module section scope is
-#   always a sibling of the program's own top scope), so it captures exactly
-#   like a distant lexical reference: every enclosing block between the
-#   reference and the program root captures it (Capture, shared with
-#   ResolveRef) -- interp never needs this (module bindings live in the same
-#   top-level frame as everything else, reachable by binding id alone), but
-#   native lowering represents a function's reach into anything outside its
-#   own params as a capture, and a module binding that is itself a closure
-#   (retains state) is exactly such a reach.
-# * Whether the binding has its value when the reference is evaluated:
-#     yes       it is bound earlier in the same invocation, or is a
-#               parameter or root binding
-#     no        same invocation, not yet bound: evaluating the reference
-#               raises {UNBOUND "used before its binding"}
-#     deferred  the reference is inside a block created in another
-#               invocation (a closure): decided when the block is called
-#   Code within one invocation runs in the order of this walk, and each
-#   branch or iteration binds only its own scope's names, so "bound earlier
-#   in the walk" is exact.
-# * A `bind` of a binding that is already bound at that point (a second bind
-#   of the name, or a bind of a parameter name) raises {DUPLICATE ...} when
-#   evaluated, after its value.
+#   section scope (ResolveQualifiedRef). That scope is complete: a module's
+#   section is resolved, in full and in its own source order, before any
+#   section or code that depends on it (surface/modules.tcl), so a qualified
+#   reference names a binding some *other* unit has already established --
+#   the external module boundary, not a forward reference. Its binding is
+#   never itself *within* any enclosing block's body scope (a module section
+#   scope is always a sibling of the program's own top scope), so it captures
+#   exactly like a distant lexical reference (Capture, shared with
+#   ResolveRef) -- module-static, see MODULE-STATIC-RETAINED-VALUES.md.
+# * Every reference is therefore to a binding established before it: `init`
+#   is `yes`, except for an ambient binding (`deferred`: whatever the host
+#   environment holds when a closure runs). A block never reads a binding
+#   that does not have its value yet, so there is no use-before-binding state
+#   to check or repair later. The dependency graph among bindings of a scope
+#   is a DAG whose edges point backward in source order, plus explicit
+#   self-edges of named functions.
+# * A `bind` of a name that is already bound in the SAME scope (a second bind
+#   of the name, or a bind of a parameter name) is a {DUPLICATE ...} error,
+#   diagnosed after its value.
 # * A block captures every non-root binding that a reference in its body (at
 #   any depth) resolves to outside the block.
 # * return targets the innermost enclosing block; break and continue the
 #   innermost enclosing loop within that block.
+#
+# Diagnostic index. When a name is unbound, the error may add that the same
+# spelling is bound LATER in an enclosing scope's own body ("declared
+# later; forward references are not allowed"). That answer comes from
+# LaterNames, a per-scope index of the syntax nodes' bind names, computed
+# lazily and only for the error message: it is never consulted to resolve a
+# name, cannot supply a binding identity and is dropped before resolution
+# returns.
 #
 # Static errors are recorded as diagnostics; hir::build decides whether to
 # raise them. Types are filled in afterwards by types.tcl.
@@ -75,7 +95,7 @@ namespace eval hir::resolve {}
 # core IR name either.
 proc hir::resolve::program {nodes mode origin {modules {}}} {
     set hir [hir::Empty $mode]
-    dict set hir bound [dict create]
+    dict set hir laterIndex [dict create]
     set roots {}
     if {$mode eq "program"} {
         set root [NewScope hir root "" "" "" {builtin root}]
@@ -90,7 +110,7 @@ proc hir::resolve::program {nodes mode origin {modules {}}} {
             lappend roots {*}[ProgramSection hir $root [dict get $section namespace] \
                 [dict get $section nodes] [dict get $section origin]]
         }
-        Declare hir $top [hir::syntax::scopeBindNames $nodes]
+        NoteBody hir $top $nodes
     } else {
         set top [NewScope hir ambient "" "" "" {host environment}]
         dict set hir top $top
@@ -105,7 +125,7 @@ proc hir::resolve::program {nodes mode origin {modules {}}} {
             RootBinding hir $root $name
         }
     }
-    dict unset hir bound
+    dict unset hir laterIndex
     return $hir
 }
 
@@ -118,7 +138,7 @@ proc hir::resolve::program {nodes mode origin {modules {}}} {
 proc hir::resolve::ProgramSection {hirVar root namespaceName nodes origin} {
     upvar 1 $hirVar hir
     set scope [NewScope hir program $root "" "" $origin]
-    Declare hir $scope [hir::syntax::scopeBindNames $nodes]
+    NoteBody hir $scope $nodes
     dict set hir modules $namespaceName $scope
     # Reverse index of `modules`, checked by IsModuleScope/hir::isModuleScope:
     # every binding this scope declares has module/program lifetime and
@@ -167,14 +187,27 @@ proc hir::resolve::NewBinding {hirVar name kind scope origin} {
     return $b
 }
 
-# Declares NAMES as local bindings of scope S (names already there are kept).
-proc hir::resolve::Declare {hirVar s names} {
+# Records, for the diagnostic index only (LaterNames), the syntax NODES that
+# make up the body of scope S. Resolution never reads it.
+proc hir::resolve::NoteBody {hirVar s nodes} {
     upvar 1 $hirVar hir
-    foreach name $names {
-        if {![dict exists $hir scopes $s names $name]} {
-            NewBinding hir $name local $s [list declared $s]
-        }
+    dict set hir laterIndex $s [dict create nodes $nodes]
+}
+
+# The names scope S's own body binds anywhere (not descending into nested
+# scopes), computed on first use: the answer to "is this spelling bound
+# later in that scope?", asked only to word an UNBOUND diagnostic. It is
+# not a symbol table for resolution and holds no binding identity.
+proc hir::resolve::LaterNames {hirVar s} {
+    upvar 1 $hirVar hir
+    if {![dict exists $hir laterIndex $s]} {
+        return {}
     }
+    if {![dict exists $hir laterIndex $s names]} {
+        dict set hir laterIndex $s names \
+            [hir::syntax::scopeBindNames [dict get $hir laterIndex $s nodes]]
+    }
+    return [dict get $hir laterIndex $s names]
 }
 
 proc hir::resolve::RootBinding {hirVar root name} {
@@ -345,25 +378,17 @@ proc hir::resolve::Expr {hirVar node ctx} {
         bind {
             set name [dict get $node name]
             SetField hir $e name $name
-            set b [Lookup hir $scope $name]
-            SetField hir $e binding $b
-            SetField hir $e value [Expr hir [dict get $node value] $ctx]
-            set duplicate 0
-            switch -- [dict get $hir bindings $b kind] {
-                ambient {}
-                default {
-                    if {[dict exists $hir bound $b]} {
-                        set duplicate 1
-                        hir::Diagnose hir DUPLICATE \
-                            "duplicate binding \"$name\" in the same lexical scope" $e
-                    } else {
-                        dict set hir bound $b 1
-                        dict set hir bindings $b declaredBy $e
-                        dict set hir bindings $b origin $origin
-                    }
-                }
+            # An initializer sees the scope as it is BEFORE this bind, so an
+            # ordinary `x = e` establishes x after resolving e. A named
+            # function (the value is a block literal: `fn f(...):`) is
+            # established first, so its own body can call it.
+            if {[dict get [dict get $node value] kind] eq "block"} {
+                Establish hir $e $scope $name $origin
+                SetField hir $e value [Expr hir [dict get $node value] $ctx]
+            } else {
+                SetField hir $e value [Expr hir [dict get $node value] $ctx]
+                Establish hir $e $scope $name $origin
             }
-            SetField hir $e duplicate $duplicate
         }
         block {
             set bodyScope [NewScope hir block $scope $e $e $origin]
@@ -383,7 +408,6 @@ proc hir::resolve::Expr {hirVar node ctx} {
                     hir::Diagnose hir DUPLICATE \
                         "duplicate binding \"$name\" in the same lexical scope (block parameters)" $e
                 }
-                dict set hir bound $b 1
                 lappend params $b
                 # A parameter annotation is a compile-time proof obligation
                 # (STRICT-TYPED-PARAMETERS.md), resolved with the same
@@ -404,7 +428,7 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 }
             }
             set body [dict get $node body]
-            Declare hir $bodyScope [hir::syntax::scopeBindNames $body]
+            NoteBody hir $bodyScope $body
             AddClosure hir $scope $e
             SetField hir $e bodyScope $bodyScope
             SetField hir $e params $params
@@ -459,7 +483,7 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 set branch [NewScope hir branch $scope \
                     [dict get $hir scopes $scope invocation] $e [dict get $node ${role}Origin]]
                 dict set hir scopes $branch outcome $outcome
-                Declare hir $branch [hir::syntax::scopeBindNames $body]
+                NoteBody hir $branch $body
                 SetField hir $e ${role}Scope $branch
                 SetField hir $e ${role}Body [Sequence hir $body [dict replace $ctx scope $branch]]
             }
@@ -469,7 +493,7 @@ proc hir::resolve::Expr {hirVar node ctx} {
             set body [dict get $node body]
             set iteration [NewScope hir loop $scope \
                 [dict get $hir scopes $scope invocation] $e [dict get $node bodyOrigin]]
-            Declare hir $iteration [hir::syntax::scopeBindNames $body]
+            NoteBody hir $iteration $body
             SetField hir $e bodyScope $iteration
             SetField hir $e body [Sequence hir $body [dict replace $ctx scope $iteration loop $e]]
         }
@@ -480,8 +504,7 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 [dict get $hir scopes $scope invocation] $e [dict get $node bodyOrigin]]
             set elementBinding [NewBinding hir [dict get $node elementName] param \
                 $iteration [dict get $node elementOrigin]]
-            dict set hir bound $elementBinding 1
-            Declare hir $iteration [hir::syntax::scopeBindNames $body]
+            NoteBody hir $iteration $body
             SetField hir $e bodyScope $iteration
             SetField hir $e elementBinding $elementBinding
             SetField hir $e body [Sequence hir $body [dict replace $ctx scope $iteration loop $e]]
@@ -498,8 +521,7 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 [dict get $hir scopes $scope invocation] $e [dict get $node bodyOrigin]]
             set countBinding [NewBinding hir [dict get $node countName] param \
                 $iteration [dict get $node countOrigin]]
-            dict set hir bound $countBinding 1
-            Declare hir $iteration [hir::syntax::scopeBindNames $body]
+            NoteBody hir $iteration $body
             SetField hir $e bodyScope $iteration
             SetField hir $e countBinding $countBinding
             SetField hir $e body [Sequence hir $body [dict replace $ctx scope $iteration loop $e]]
@@ -611,7 +633,7 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 }
                 set branch [NewScope hir branch $scope \
                     [dict get $hir scopes $scope invocation] $e [dict get $handler origin]]
-                Declare hir $branch [hir::syntax::scopeBindNames $body]
+                NoteBody hir $branch $body
                 lappend names $name
                 lappend scopes $branch
                 lappend bodies [Sequence hir $body [dict replace $ctx scope $branch]]
@@ -703,36 +725,64 @@ proc hir::resolve::ResolveRef {hirVar e name root ctx} {
     }
     SetField hir $e binding $b
     if {$b eq ""} {
-        SetField hir $e init no
-        hir::Diagnose hir UNBOUND "unbound name \"$name\"" $e
+        SetField hir $e init yes
+        set message "unbound name \"$name\""
+        if {!$root && [DeclaredLater hir $scope $name]} {
+            append message ": \"$name\" is declared later; forward references are not allowed (a binding is visible only after it is established)"
+        }
+        hir::Diagnose hir UNBOUND $message $e
         return
     }
     set binding [dict get $hir bindings $b]
-    set bindingScope [dict get $binding scope]
-    switch -- [dict get $binding kind] {
-        root {
-            set init yes
-        }
-        ambient {
-            set init deferred
-        }
-        default {
-            if {[dict get $hir scopes $bindingScope invocation]
-                    ne [dict get $hir scopes $scope invocation]} {
-                set init deferred
-            } elseif {[dict exists $hir bound $b]} {
-                set init yes
-            } else {
-                set init no
-                hir::Diagnose hir UNBOUND "name \"$name\" used before its binding" $e
-            }
-        }
-    }
-    SetField hir $e init $init
+    # Every binding a reference can resolve to is already established
+    # (sequential resolution), except an ambient one: whatever the host
+    # environment holds when a closure eventually runs.
+    SetField hir $e init [expr {[dict get $binding kind] eq "ambient" ? "deferred" : "yes"}]
 
     if {[dict get $binding kind] ne "root"} {
-        Capture hir $ctx $bindingScope $b
+        Capture hir $ctx [dict get $binding scope] $b
     }
+}
+
+# Establishes the binding of bind expression E (name NAME, in scope SCOPE):
+# the point at which NAME becomes visible to every later reference of SCOPE
+# (and of the scopes nested in it). Sets E's `binding` and `duplicate`.
+#
+#   * SCOPE already has NAME (a parameter, an element/induction binding, or
+#     an earlier bind): DUPLICATE; E keeps denoting the existing binding.
+#   * otherwise a new local binding, declaredBy E.
+#   * an ambient scope (sequence mode) denotes the host environment's own
+#     binding of NAME; no duplicate check is made there.
+proc hir::resolve::Establish {hirVar e scope name origin} {
+    upvar 1 $hirVar hir
+    if {[dict get $hir scopes $scope kind] eq "ambient"} {
+        SetField hir $e binding [Lookup hir $scope $name]
+        SetField hir $e duplicate 0
+    } elseif {[dict exists $hir scopes $scope names $name]} {
+        SetField hir $e binding [dict get $hir scopes $scope names $name]
+        SetField hir $e duplicate 1
+        hir::Diagnose hir DUPLICATE \
+            "duplicate binding \"$name\" in the same lexical scope" $e
+    } else {
+        set b [NewBinding hir $name local $scope $origin]
+        dict set hir bindings $b declaredBy $e
+        SetField hir $e binding $b
+        SetField hir $e duplicate 0
+    }
+}
+
+# 1 if NAME is bound somewhere in the own body of SCOPE or of an enclosing
+# scope, i.e. by a declaration that has not been reached yet (the name is
+# unresolved, so nothing established binds it). Diagnostic wording only: it
+# never supplies a binding.
+proc hir::resolve::DeclaredLater {hirVar scope name} {
+    upvar 1 $hirVar hir
+    for {set s $scope} {$s ne ""} {set s [dict get $hir scopes $s parent]} {
+        if {$name in [LaterNames hir $s]} {
+            return 1
+        }
+    }
+    return 0
 }
 
 # Every enclosing block of CTX (innermost first) that does not itself

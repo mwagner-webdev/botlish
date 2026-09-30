@@ -18,7 +18,7 @@ test hir-resolve-1 {a reference resolves to the binding its bind creates} -body 
 test hir-resolve-2 {nested lexical lookup reaches the outer binding} -body {
     set h [hirOf {bind x {const 10}} {call {block {} {call {block {} {ref x}}}}}]
     list [hirRefBindings $h x] [hir::get $h [hirFind $h ref x] init]
-} -result {b1 deferred}
+} -result {b1 yes}
 
 test hir-resolve-3 {shadowing creates distinct binding ids} -body {
     set h [hirOf {bind x {const 10}} \
@@ -78,16 +78,34 @@ test hir-resolve-9 {unresolved names fail semantically} -body {
          [dict get [lindex [hir::diagnostics $h] 0] kind]
 } -result {1 {unbound name "nope"} {CORE SEMANTIC UNBOUND} {{}} never UNBOUND}
 
-test hir-resolve-10 {use before binding in the same invocation is static; in a closure it is deferred} -body {
-    set tdz {{bind x {const 1}} {call {block {} {bind y {ref x}} {bind x {const 2}}}}}
-    set closure {{bind x {const 1}} {call {block {} {bind y {call {block {} {ref x}}}} {bind x {const 2}}}}}
-    set h1 [hirOf {*}$tdz]
+test hir-resolve-10 {resolution is sequential: a later binding of a name does not capture an earlier reference} -body {
+    set seq {{bind x {const 1}} {call {block {} {bind y {ref x}} {bind x {const 2}} {call {ref list} {ref y} {ref x}}}}}
+    set closure {{bind x {const 1}} {call {block {} {bind y {call {block {} {ref x}}}} {bind x {const 2}} {ref y}}}}
+    set h1 [hirOf {*}$seq]
     set h2 [hirOf {*}$closure]
-    list [hir::get $h1 [hirFind $h1 ref x] init] \
-         [catch {hir::build $tdz} m] $m [catch {core::evalProgram $tdz} m] $m \
-         [hir::get $h2 [hirFind $h2 ref x] init] \
-         [expr {[hirRefBindings $h2 x] eq [hir::get $h2 [lindex [hirFind $h2 bind x] 1] binding]}]
-} -result {no 1 {name "x" used before its binding} 1 {name "x" used before its binding} deferred 1}
+    set inner1 [lindex [hirFind $h1 bind x#1] 0]
+    list [expr {[lindex [hirRefBindings $h1 x] 0] eq [hir::get $h1 [lindex [hirFind $h1 bind x] 0] binding]}] \
+         [expr {[lindex [hirRefBindings $h1 x#1] 0] eq [hir::get $h1 $inner1 binding]}] \
+         [hir::get $h1 [lindex [hirFind $h1 ref x] 0] init] \
+         [expr {[hirRefBindings $h2 x] eq [hir::get $h2 [lindex [hirFind $h2 bind x] 0] binding]}] \
+         [hir::diagnostics $h1] [hir::diagnostics $h2] \
+         [lindex [outcomeUnder interp [hir::lower $h1]] 1] [lindex [outcomeUnder interp [hir::lower $h2]] 1]
+} -result {1 1 yes 1 {} {} {[1, 2]} 1}
+
+test hir-resolve-10b {core IR scopes declare every name on entry (core/evaluator.tcl); HIR does not, and that difference is reconciled by renaming, never by hoisting} -body {
+    set tdz {{bind x {const 1}} {call {block {} {bind y {ref x}} {bind x {const 2}} {ref y}}}}
+    set h [hirOf {*}$tdz]
+    list [lrange [outcomeUnder interp $tdz] 0 2] \
+         [expr {[hir::lower $h] ne $tdz}] [lrange [outcomeUnder interp [hir::lower $h]] 0 1] \
+         [hir::get $h [lindex [hirFind $h ref x] 0] binding]
+} -result {{error {CORE SEMANTIC UNBOUND} {name "x" used before its binding}} 1 {value 1} b1}
+
+test hir-resolve-10c {a reference to a name bound only later in the same scope, or in an enclosing one, is unresolved} -body {
+    set forward {{bind f {block {} {call {ref g}}}} {bind g {block {} {const 1}}}}
+    set h [hirOf {*}$forward]
+    list [catch {hir::build $forward} m o] $m [hirRefBindings $h g] \
+         [lmap d [hir::diagnostics $h] {dict get $d kind}]
+} -match glob -result {1 {unbound name "g": "g" is declared later*} {{}} UNBOUND}
 
 test hir-resolve-11 {scope kinds and structure} -body {
     set h [hirOf {bind f {block {n}

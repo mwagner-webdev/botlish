@@ -54,10 +54,6 @@ lappend corpus \
                 {block {} {const str {}}}}}}
         {call {ref list} {call {ref f} {const str a@b.io}} {call {ref f} {const str nope}}}
     } \
-    tdz {
-        {bind x {const 1}}
-        {call {block {} {bind y {call {block {} {ref x}}}} {bind x {const 2}} {ref y}}}
-    } \
     duplicate {
         {bind a {const 1}}
         {bind a {call {ref test-log} {const evaluated}}}
@@ -119,12 +115,12 @@ test hir-format-1 {bindings, types and known targets} -body {
         {bind x {const 10}}
         {bind y {call {ref +} {ref x} {const 1}}}
     }]
-} -result {program s2 binds b1 x, b2 y
+} -result {program s2 binds b1 x, b3 y
 e1 bind b1 x : int
     e2 const 10 : int
-e3 bind b2 y : int
+e3 bind b3 y : int
     e4 call native(+) : int
-        e5 ref b3 + : native +
+        e5 ref b2 + : native +
         e6 ref b1 x : int
         e7 const 1 : int}
 
@@ -148,11 +144,11 @@ e3 bind b2 f : block(e4)/1 -> int
                 e8 ref b3 v : any
             then s4 binds b5 w refines b3 v : int
                 e9 bind b5 w : int
-                    e10 ref b1 x : int deferred
+                    e10 ref b1 x : int
                 e11 return -> e4 : never
                     e12 ref b3 v : int
             else s5
-                e13 ref b1 x : int deferred
+                e13 ref b1 x : int
 e14 call block(e4) : int
     e15 ref b2 f : block(e4)/1 -> int
     e16 const one : str}
@@ -172,7 +168,7 @@ e3 bind b1 a : never duplicate @ir 1
 e5 call block(e6) : never unreachable @ir 2
     e6 block s3 () captures () binds b2 c : block(e6)/0 -> never unreachable @ir {2 1}
         e7 bind b2 c : never @ir {2 1 2}
-            e8 ref b2 c : never before-binding @ir {2 1 2 2}
+            e8 ref ? c : never unbound @ir {2 1 2 2}
 e9 call native(integer?) = true : bool unreachable @ir 3
     e10 ref b3 integer? : native integer? unreachable @ir {3 1}
     e11 const 2 : int unreachable @ir {3 2}}

@@ -982,9 +982,11 @@ proc hir::types::intern {hirVar type} {
 #   * branch refinements (refine.tcl), inside the branch they are proven in
 #   * flow facts: once a call of a native requiring a type returned, its
 #     argument had that type, and since bindings are immutable it keeps it
-#   * forward references: a reference from a closure to a binding bound later
-#     to a block expression E has type {block E ARITY any} (ForwardType), so
-#     mutually recursive functions have known call targets
+#   * a named function's reference to itself: the block's own exact type
+#     under an assumed result (Block), so direct recursion has a known call
+#     target. (There are no other references to bindings not yet bound:
+#     resolution is sequential, hir/resolve.tcl -- an ordinary reference
+#     always names a binding some earlier expression on this path bound.)
 #   * block results: lub of the body's value and every return; a block bound
 #     to a binding it calls itself through is analyzed under an assumed
 #     result type (never, then the inferred type) until the assumption is
@@ -1009,10 +1011,15 @@ proc hir::types::infer {hirVar} {
     }
     # Opportunistic semantic instances (hir/semantic.tcl): the walk also
     # analyzes the ordinary body of an exact-called function under its
-    # call's concrete argument types. A forward call of a function whose
-    # creation environment the walk has not recorded yet is declined; when
-    # a later walk can serve it, the program is walked again (every walk is
-    # sound, later ones more precise).
+    # call's concrete argument types. A request for a closure whose creation
+    # environment the walk has not recorded yet is declined; when a later
+    # walk can serve it, the program is walked again (every walk is sound,
+    # later ones more precise). That is not about definition order (a
+    # reference always follows its binding, hir/resolve.tcl): it happens only
+    # when a function's own recursive call (its declared result type makes
+    # the call answerable at once) requests an instance whose body creates a
+    # nested closure the enclosing generic walk has not reached yet
+    # (hir/semantic.tcl, "Captures").
     set base $hir
     set envs {}
     for {set round 1} {$round <= [set ::hir::semantic::maxRounds]} {incr round} {
@@ -1280,33 +1287,16 @@ proc hir::types::BindingType {hir ctx b} {
         # program-lifetime value, typed once by the ordinary semantic pass
         # (hir::types::infer), the same in every instance's own per-region
         # re-inference (hir/specialize.tcl's Reanalyze/inferRegion). Without
-        # this, a module binding that is not itself a Block (ForwardType
-        # only ever recovers a *callable*'s forward type, "any" otherwise)
-        # would silently widen to `any` here merely because it is no longer
-        # captured -- exactly the kind of correctness bug spec item 24
-        # permits fixing, never a specialization-policy change of its own.
+        # this, a module binding would silently widen to `any` here merely
+        # because it is no longer captured -- exactly the kind of correctness
+        # bug spec item 24 permits fixing, never a specialization-policy
+        # change of its own.
         return [hir::bindingType $hir $b]
     }
-    return [ForwardType $hir $b]
-}
-
-# The type of a local binding B read before this path has bound it: only a
-# reference from inside a closure (init deferred) gets here. If B's first
-# bind binds a block expression E, the reference either fails (B not bound
-# yet when it runs) or yields the Block E created: bindings are immutable, and
-# a later duplicate bind raises instead of rebinding. Its result is not known
-# yet: {block E ARITY any}. Otherwise any.
-proc hir::types::ForwardType {hir b} {
-    set binding [dict get $hir bindings $b]
-    set declaredBy [dict get $binding declaredBy]
-    if {[dict get $binding kind] ne "local" || $declaredBy eq ""} {
-        return any
-    }
-    set value [dict get $hir exprs $declaredBy value]
-    if {[dict get $hir exprs $value kind] ne "block"} {
-        return any
-    }
-    return [blockType $hir $value [llength [dict get $hir exprs $value params]] any]
+    # No type is known on this path: an untyped parameter, or a local whose
+    # initializer never completed (so nothing after its bind is reachable).
+    # Never a binding that is merely bound later: resolution is sequential.
+    return any
 }
 
 # Records that binding B's value has type FACT on the current path.
@@ -1322,9 +1312,7 @@ proc hir::types::ValueBinding {hir e} {
     set node [dict get $hir exprs $e]
     switch -- [dict get $node kind] {
         ref {
-            if {[dict get $node init] ne "no"} {
-                return [dict get $node binding]
-            }
+            return [dict get $node binding]
         }
         bind {
             if {![dict get $node duplicate]} {
@@ -1367,7 +1355,7 @@ proc hir::types::Expr {hirVar ctxVar e} {
             return [SetType hir $e [ofValue [dict get $node value]]]
         }
         ref {
-            if {[dict get $node binding] eq "" || [dict get $node init] eq "no"} {
+            if {[dict get $node binding] eq ""} {
                 return [SetType hir $e never]
             }
             return [SetType hir $e [BindingType $hir $ctx [dict get $node binding]]]
@@ -1558,12 +1546,17 @@ proc hir::types::Block {hirVar outerVar e self} {
     upvar 1 $hirVar hir $outerVar outer
     set node [dict get $hir exprs $e]
     set arity [llength [dict get $node params]]
+    # A named function reaches itself through its own binding, which is not
+    # in the creating context yet (a bind establishes it before this block
+    # is typed, but its type is this block's): exact, with an unknown result
+    # here (the body's own analysis assumes one, below).
+    set selfType [expr {$self eq "" ? "" : [blockType $hir $e $arity any]}]
     if {[dict exists $outer spec]} {
         # Region inference: the body is a region of its own. Report what
         # this creation captures; calls of the block ask the handler.
         set seeds [dict create]
         foreach b [dict get $node captures] {
-            dict set seeds $b [BindingType $hir $outer $b]
+            dict set seeds $b [expr {$b eq $self ? $selfType : [BindingType $hir $outer $b]}]
         }
         {*}[dict get $outer spec] create $e $seeds
         # The Block's own intrinsic result contract -- its declared result,
@@ -1583,7 +1576,7 @@ proc hir::types::Block {hirVar outerVar e self} {
         }
         return [blockType $hir $e $arity $result]
     }
-    hir::semantic::RecordEnv $hir $outer $e
+    hir::semantic::RecordEnv $hir $outer $e $self $selfType
     set declared [dict get $node declaredResult]
     set assumed [expr {$declared eq {} ? {never} : $declared}]
     set attempts [expr {$self eq "" ? 1 : 3}]

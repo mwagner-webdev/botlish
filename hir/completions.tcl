@@ -199,7 +199,7 @@ proc hir::completions::Eval {hirVar ctxVar diagnose enclosing guard e} {
         }
         ref {
             set b [dict get $node binding]
-            if {$b eq {} || [dict get $node init] eq {no}} {
+            if {$b eq {}} {
                 return never
             }
             set bindings [dict get $ctx bindings]

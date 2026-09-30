@@ -121,8 +121,8 @@ test m9-narrow-open-instance-not-fabricated {an instance with unknown/open runti
     paramRanges $analysis [rangeInstance $spec f]
 } -result {{[-∞, +∞]}}
 
-test m9-narrow-mutual-recursion {mutual recursion between two distinct instances (spec #15, #52): the whole-graph round mechanism already handles the cross-instance cycle without a new SCC framework, and M9's narrowing runs over exactly the same instance graph -- no crash, no non-convergence throw, and (this particular cross-calling shape, a pre-existing hir/specialize.tcl instance-selection characteristic unrelated to M9: isEven/isOdd's own mutual calls do not resolve to a single reused instance each) identical, unimproved facts before and after, which is itself the soundness pin: M9 must never fabricate a fact an unrelated architectural limitation already left broad} -body {
-    set src "fn isEven(n):\n    if n <= 0:\n        1\n    else:\n        isOdd(n - 1)\n\nfn isOdd(n):\n    if n <= 0:\n        0\n    else:\n        isEven(n - 1)\n\nisEven(37)"
+test m9-narrow-recursion-across-instances {recursion whose recursive call is a DIFFERENT instance of the same function (the argument's type changes: an instance cycle without any lexical forward reference): the whole-graph round mechanism handles the cross-instance cycle without a new SCC framework, and M9's narrowing runs over exactly the same instance graph -- no crash, no non-convergence throw} -body {
+    set src "fn depth(x, n):\n    if n <= 0:\n        return 0\n    depth(\[x\], n - 1)\n\ndepth(1, 37)"
     lassign [rangeOf $src] hir spec analysis
     lassign [rangeOf $src 0] hir0 spec0 baseline
     set before {}
@@ -135,8 +135,13 @@ test m9-narrow-mutual-recursion {mutual recursion between two distinct instances
         if {[dict get [dict get $spec instances $id] block] eq "program"} continue
         lappend after [paramRanges $analysis $id]
     }
-    list [lsort $before] [lsort $after] [expr {$before eq $after}]
-} -result {{{{[-∞, +∞]}} {{[-∞, +∞]}} {{[0, +∞]}} {{[0, +∞]}}} {{{[-∞, +∞]}} {{[-∞, +∞]}} {{[0, +∞]}} {{[0, +∞]}}} 1}
+    list [lsort $before] [lsort $after]
+} -result {{{{[-∞, +∞]} {[0, +∞]}} {{[1, 1] {1}} {[37, 37] {37}}}} {{{[-∞, +∞]} {[0, +∞]}} {{[1, 1] {1}} {[37, 37] {37}}}}}
+
+test m9-narrow-mutual-recursion-rejected {lexical mutual recursion (isEven/isOdd, the shape this test used to pin) is rejected at resolution} -body {
+    catch {surface::compile "fn isEven(n):\n    if n <= 0:\n        1\n    else:\n        isOdd(n - 1)\n\nfn isOdd(n):\n    if n <= 0:\n        0\n    else:\n        isEven(n - 1)\n\nisEven(37)" t.bot} m o
+    dict get $o -errorcode
+} -result {CORE SEMANTIC UNBOUND}
 
 # spec #37 ("never broaden an existing stronger fact") and spec #50
 # (checked domains vs. observed Range facts) are exercised directly by

@@ -361,7 +361,7 @@ proc hir::signatures::Collect {hir} {
                 set vnode [dict get $hir exprs $v]
                 switch -- [dict get $vnode kind] {
                     ref {
-                        if {[dict get $vnode binding] ne "" && [dict get $vnode init] ne "no"} {
+                        if {[dict get $vnode binding] ne ""} {
                             dict set A alias $y [dict get $vnode binding]
                         }
                     }
@@ -545,7 +545,7 @@ proc hir::signatures::Value {hir AVar e sink ctx} {
 proc hir::signatures::Use {hir AVar e sink ctx} {
     upvar 1 $AVar A
     set node [dict get $hir exprs $e]
-    if {![dict get $node reachable] || [dict get $node binding] eq "" || [dict get $node init] eq "no"} {
+    if {![dict get $node reachable] || [dict get $node binding] eq ""} {
         return
     }
     set root [Root A [dict get $node binding]]
@@ -618,8 +618,7 @@ proc hir::signatures::Call {hir AVar e sink ctx} {
     set args [dict get $node args]
     set p ""
     if {[dict get $node target] eq "" && [hir::kind $hir $callee] eq "ref"
-            && [hir::get $hir $callee reachable] && [hir::get $hir $callee binding] ne ""
-            && [hir::get $hir $callee init] ne "no"} {
+            && [hir::get $hir $callee reachable] && [hir::get $hir $callee binding] ne ""} {
         set r [Root A [hir::get $hir $callee binding]]
         if {[lindex $r 0] eq "param" && ![dict exists $ctx tested [lindex $r 1]]} {
             set p [lindex $r 1]
