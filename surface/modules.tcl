@@ -131,13 +131,57 @@ proc surface::modules::QualifiedRefs {ast} {
 
 proc surface::modules::QualifiedRefsWalk {node foundVar} {
     upvar 1 $foundVar found
-    if {[dict get $node kind] eq "qualname"} {
-        lappend found [list [dict get $node namespace] [dict get $node name] [dict get $node span]]
-        return
+    switch -- [dict get $node kind] {
+        qualname {
+            lappend found [list [dict get $node namespace] [dict get $node name] [dict get $node span] value]
+            return
+        }
+        namedstruct {
+            # NAMESPACE::Struct { ... }: a reference to the struct type
+            # (STRUCTS.md); its field values may hold more references.
+            if {[dict get $node namespace] ne ""} {
+                lappend found [list [dict get $node namespace] [dict get $node name] \
+                    [dict get $node nameSpan] struct]
+            }
+        }
+        function {
+            # Qualified struct types in parameter and result annotations.
+            foreach param [dict get $node params] {
+                TypeRefs [lindex $param 2] [lindex $param 3] found
+            }
+            TypeRefs [dict get $node resultType] [dict get $node resultTypeSpan] found
+        }
+        structdecl {
+            foreach field [dict get $node fields] {
+                TypeRefs [dict get $field type] [dict get $field typeSpan] found
+            }
+        }
     }
     foreach child [surface::ast::Children $node] {
         QualifiedRefsWalk $child found
     }
+}
+
+# Appends the qualified struct type names ("ns::Name") TYPE (a surface::
+# parser::TypeExpr result) mentions, each located at SPAN.
+proc surface::modules::TypeRefs {type span foundVar} {
+    upvar 1 $foundVar found
+    if {$type eq ""} {
+        return
+    }
+    if {[llength $type] == 1} {
+        if {[regexp {^([A-Za-z_][A-Za-z0-9_]*)::([A-Za-z_][A-Za-z0-9_]*)$} $type -> namespaceName name]} {
+            lappend found [list $namespaceName $name $span struct]
+        }
+        return
+    }
+    lassign $type head arg
+    if {$head eq "fn"} {
+        foreach t [dict get $arg args] { TypeRefs $t $span found }
+        TypeRefs [dict get $arg return] $span found
+        return
+    }
+    TypeRefs $arg $span found
 }
 
 # ORIGIN (an hir/syntax.tcl node's or block-parameter's origin) repointed at
@@ -185,6 +229,23 @@ proc surface::modules::RemapFile {node fileId} {
             dict set node bodyOrigin [RemapOrigin [dict get $node bodyOrigin] $fileId]
             dict set node body [lmap child [dict get $node body] {RemapFile $child $fileId}]
         }
+        struct {
+            set fields {}
+            foreach field [dict get $node fields] {
+                dict set field origin [RemapOrigin [dict get $field origin] $fileId]
+                dict set field nameOrigin [RemapOrigin [dict get $field nameOrigin] $fileId]
+                dict set field value [RemapFile [dict get $field value] $fileId]
+                lappend fields $field
+            }
+            dict set node fields $fields
+            if {[dict get $node type] ne "" && [dict exists $node type origin]} {
+                dict set node type origin [RemapOrigin [dict get $node type origin] $fileId]
+            }
+        }
+        project {
+            dict set node receiver [RemapFile [dict get $node receiver] $fileId]
+            dict set node nameOrigin [RemapOrigin [dict get $node nameOrigin] $fileId]
+        }
         return - ok - error {
             dict set node value [RemapFile [dict get $node value] $fileId]
         }
@@ -225,9 +286,9 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan} {
             "$path declares \"namespace [dict get $ast namespace]\", but only namespace \"$name\" can load from this path"
     }
     foreach statement [dict get $ast body] {
-        if {[dict get $statement kind] ni {function bind typedecl errordecl}} {
+        if {[dict get $statement kind] ni {function bind typedecl errordecl structdecl}} {
             Error INVALID-TOPLEVEL [dict get $statement span] \
-                "module \"$name\" ($path): only function definitions, immutable bindings, type declarations and error declarations are allowed at module top level, found a \"[dict get $statement kind]\" statement"
+                "module \"$name\" ($path): only function definitions, immutable bindings, type declarations, struct declarations and error declarations are allowed at module top level, found a \"[dict get $statement kind]\" statement"
         }
     }
     dict set state stack [concat [dict get $state stack] [list $name]]
@@ -236,13 +297,20 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan} {
     dict incr state nextFile
     CollectAndLoad state $ast
     set functionNames [lmap statement [dict get $ast body] {
-        if {[dict get $statement kind] in {typedecl errordecl}} continue
+        if {[dict get $statement kind] in {typedecl errordecl structdecl}} continue
         dict get $statement name
     }]
     dict set state loaded $name $functionNames
-    lassign [surface::lower::SplitTypeDecls [dict get $ast body]] executable decls errorDecls
+    # The struct types the module declares (STRUCTS.md): a separate name
+    # space from its definitions, named from other code as `NAME::Struct`.
+    dict set state loadedStructs $name [lmap statement [dict get $ast body] {
+        if {[dict get $statement kind] ne "structdecl"} continue
+        dict get $statement name
+    }]
+    lassign [surface::lower::SplitTypeDecls [dict get $ast body] $name] executable decls errorDecls structDecls
     dict set state typeDecls [concat [dict get $state typeDecls] $decls]
     dict set state errorDecls [concat [dict get $state errorDecls] $errorDecls]
+    dict set state structDecls [concat [dict get $state structDecls] $structDecls]
     set statements [lmap node [surface::lower::Sequence $executable] {RemapFile $node $fileId}]
     set origin [RemapOrigin [surface::lower::Origin [dict get $ast span] "namespace"] $fileId]
     set section [dict create namespace $name nodes $statements origin $origin]
@@ -257,8 +325,16 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan} {
 proc surface::modules::CollectAndLoad {stateVar ast} {
     upvar 1 $stateVar state
     foreach ref [QualifiedRefs $ast] {
-        lassign $ref namespaceName symbolName span
+        lassign $ref namespaceName symbolName span refKind
         LoadNamespace state $namespaceName $span
+        if {$refKind eq "struct"} {
+            set structNames [dict get $state loadedStructs $namespaceName]
+            if {$symbolName ni $structNames} {
+                Error UNKNOWN-SYMBOL $span \
+                    "namespace \"$namespaceName\" has no struct \"$symbolName\" (it declares: [expr {$structNames eq "" ? "no structs" : [join [lsort $structNames] {, }]}])"
+            }
+            continue
+        }
         set functionNames [dict get $state loaded $namespaceName]
         if {$symbolName ni $functionNames} {
             Error UNKNOWN-SYMBOL $span \
@@ -286,13 +362,14 @@ proc surface::modules::LoadNamespaces {namespaces args} {
         dict set options $option $value
     }
     set state [dict create files [dict create] nextFile [dict get $options -start-file] \
-        loaded [dict create] stack {} sections {} typeDecls {} errorDecls {}]
+        loaded [dict create] loadedStructs [dict create] stack {} sections {} typeDecls {} errorDecls {} \
+        structDecls {}]
     foreach name $namespaces {
         LoadNamespace state $name ""
     }
     return [dict create sections [dict get $state sections] files [dict get $state files] \
         functions [dict get $state loaded] typeDecls [dict get $state typeDecls] \
-        errorDecls [dict get $state errorDecls]]
+        errorDecls [dict get $state errorDecls] structDecls [dict get $state structDecls]]
 }
 
 # The HIR of the .bot program file PATH, after loading (and compiling once,
@@ -308,15 +385,17 @@ proc surface::modules::compileProgramFile {path args} {
     }
     set ast [surface::parse [core::ReadFile $path] $path]
     set state [dict create files [dict create f1 [dict get $ast span file]] nextFile 2 \
-        loaded [dict create] stack {} sections {} typeDecls {} errorDecls {}]
+        loaded [dict create] loadedStructs [dict create] stack {} sections {} typeDecls {} errorDecls {} \
+        structDecls {}]
     CollectAndLoad state $ast
-    lassign [surface::lower::SplitTypeDecls [dict get $ast body]] executable ownDecls ownErrorDecls
+    lassign [surface::lower::SplitTypeDecls [dict get $ast body]] executable ownDecls ownErrorDecls ownStructDecls
     set decls [concat [dict get $state typeDecls] $ownDecls]
     set errorDecls [concat [dict get $state errorDecls] $ownErrorDecls]
+    set structDecls [concat [dict get $state structDecls] $ownStructDecls]
     set hir [hir::buildSyntax [surface::lower::Sequence $executable] -strict 0 \
         -halt-on-resolution-errors [dict get $options -strict] \
         -origin [surface::lower::Origin [dict get $ast span] ""] \
         -files [dict get $state files] -modules [dict get $state sections] \
-        -type-decls $decls -error-decls $errorDecls]
+        -type-decls $decls -error-decls $errorDecls -struct-decls $structDecls]
     return [surface::lower::Finish $hir [dict get $options -strict]]
 }

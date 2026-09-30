@@ -29,6 +29,11 @@
 #   eN loop SCOPE
 #   eN return -> eN / break -> eN / continue -> eN
 #   eN ok / eN error
+#   eN struct (anon|ID) (FIELD, ...)     a struct value/construction; one
+#                                        child line per field value, in
+#                                        written order (STRUCTS.md)
+#   eN project FIELD                     a field projection; the child is
+#                                        the receiver
 #
 # Flags: unbound, deferred (an ambient binding: the host's value when a
 # closure runs), duplicate, unreachable. With -origins 1 each line ends with @ORIGIN.
@@ -66,6 +71,16 @@ proc hir::format {hir args} {
 # `declares TYPE`/`: TYPE` text (below) resolves exactly as it did when the
 # HIR was first built, without needing the original Botlish source again.
 proc hir::format::TypeDecl {entry} {
+    if {[dict exists $entry kind] && [dict get $entry kind] eq "struct"} {
+        # A struct declaration (hir/structs.tcl): "struct ID name NAME ns NS
+        # fields F1: T1, F2: T2" (NS "-" for the entry program), the fields
+        # in declared (slot) order with their resolved types.
+        set fields [lmap {name type} [dict get $entry fields] {
+            format {%s: %s} $name [hir::types::show $type]
+        }]
+        set ns [dict get $entry namespace]
+        return "struct [dict get $entry id] name [dict get $entry name] ns [expr {$ns eq "" ? "-" : $ns}] fields [join $fields {, }]"
+    }
     set domain [dict get $entry domain]
     if {[lindex $domain 0] eq {interval}} {
         set domainText "interval [lindex $domain 1] [lindex $domain 2]"
@@ -281,6 +296,22 @@ proc hir::format::Expr {hir e indent origins linesVar} {
         ok - error {
             Line $hir $e [dict get $node kind] $indent $origins lines
             Expr $hir [dict get $node value] $inner $origins lines
+        }
+        struct {
+            # "struct anon (a, b)" / "struct Person (age, name)": the named
+            # struct's declaration identity or `anon`, then the field names
+            # in WRITTEN order (their evaluation order); one child line per
+            # field value, in that order.
+            set id [dict get $node structId]
+            Line $hir $e "struct [expr {[dict get $node named] && $id ne "" ? $id : "anon"}]\
+                ([join [dict get $node names] {, }])" $indent $origins lines
+            foreach field [dict get $node fields] {
+                Expr $hir $field $inner $origins lines
+            }
+        }
+        project {
+            Line $hir $e "project [dict get $node name]" $indent $origins lines
+            Expr $hir [dict get $node receiver] $inner $origins lines
         }
         fail {
             Line $hir $e "fail [dict get $node name]" $indent $origins lines

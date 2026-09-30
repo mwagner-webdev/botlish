@@ -40,6 +40,8 @@ namespace eval core::interp {
         return      core::forms::op-return \
         break       core::forms::op-break \
         continue    core::forms::op-continue \
+        struct      core::forms::op-struct \
+        project     core::forms::op-project \
         ok          core::forms::op-ok \
         error-value core::forms::op-error-value \
         fail        core::forms::op-fail \
@@ -273,6 +275,30 @@ proc core::forms::op-countloop {node env} {
         set i [expr {$i + 1}]
     }
     return [core::completion::normal [core::value::unit]]
+}
+
+# (struct HEAD NAME EXPR ...): evaluates every EXPR strictly in written
+# order (the first abrupt completion propagates, and no struct value has
+# been built by then: nothing partially initialized is ever observable),
+# then builds the struct value. The shape is the anonymous canonical (sorted)
+# field set, or, for a named struct, HEAD's declaration identity and
+# declared slot order -- the written names must be exactly that field set.
+# Field values are placed into their slots only after all are evaluated:
+# canonical layout never reorders evaluation.
+proc core::forms::op-struct {node env} {
+    set names {}
+    set values {}
+    foreach {name expr} [lrange $node 2 end] {
+        lappend values [core::interp::valueOf [core::interp::evalIn $expr $env]]
+        lappend names $name
+    }
+    return [core::completion::normal [core::runtime::structNew [lindex $node 1] $names $values]]
+}
+
+# (project EXPR NAME): field NAME of the struct value of EXPR.
+proc core::forms::op-project {node env} {
+    set receiver [core::interp::valueOf [core::interp::evalIn [lindex $node 1] $env]]
+    return [core::completion::normal [core::runtime::project $receiver [lindex $node 2]]]
 }
 
 proc core::forms::op-return {node env} {

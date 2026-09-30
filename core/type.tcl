@@ -54,7 +54,12 @@ namespace eval core::type {
     # which is what keeps hir::types::narrow's fact-preserving check
     # (`fact eq [kindOf $current]`) correct for a precise ImmutableSet[T]
     # argument the same way it already is for List[T].
-    variable primitives {int str bool unit list result block native mutarray UnicodeChar immutableSet}
+    #
+    # struct is the broad kind of every struct value (STRUCTS.md), spelled
+    # like the runtime kind tag; the precise forms -- an anonymous struct's
+    # field types, a named struct's declaration -- are HIR static types
+    # (hir/types.tcl), exactly as {list ELEM} refines the bare `list` kind.
+    variable primitives {int str bool unit list result block native mutarray UnicodeChar immutableSet struct}
     # Kinds whose runtime representation can carry evidence (see value.tcl).
     variable evidenceKinds {str}
     # NAME -> {name NAME base KIND validator CMD opaque 0|1}

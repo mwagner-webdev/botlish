@@ -530,6 +530,18 @@ proc hir::signatures::Value {hir AVar e sink ctx} {
                 Value $hir A [dict get $node value] flow $ctx
             }
         }
+        struct {
+            # Every field value flows into a position this analysis does not
+            # follow (STRUCTS.md): a struct field never infers a parameter
+            # contract, not even a declared field type -- an unproven value
+            # is that construction's own TYPE error (hir::range::VerifyStruct).
+            foreach field [dict get $node fields] {
+                Value $hir A $field flow $ctx
+            }
+        }
+        project {
+            Value $hir A [dict get $node receiver] flow $ctx
+        }
         handle {
             set inner $ctx
             dict set inner handled [expr {[dict exists $node handlerNames] ? [dict get $node handlerNames] : {}}]

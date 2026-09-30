@@ -30,6 +30,15 @@
 #   name       name
 #   qualname   namespace, name, namespaceSpan, nameSpan  (NAMESPACE::NAME)
 #   list       items (expressions)
+#   anonstruct init (a fieldinits node)   { x: a, y: b }: an anonymous struct
+#              value (STRUCTS.md)
+#   namedstruct namespace ("" or the module namespace), name, nameSpan
+#              (covers "NAMESPACE::NAME"), init (a fieldinits node)
+#              Name { x: a, y: b }: a named struct construction
+#   fieldinits fields ({name nameSpan value} dicts in written order) -- the
+#              one shared field-initializer payload of anonstruct and
+#              namedstruct
+#   project    receiver, name, nameSpan   receiver.name: a field projection
 #   call       callee, args
 #   unary      op (-), opSpan, operand
 #   not        opSpan, operand
@@ -64,6 +73,11 @@
 #              is {kind interval lo LO loSpan .. hi HI hiSpan .. span ..} or
 #              {kind exact values {V...} spans {SPAN...} span ..}, LO/HI/V
 #              decimal text (a leading "-" allowed).
+#   structdecl name, nameSpan, fields ({name nameSpan type typeSpan} dicts in
+#              declared order; TYPE as surface::parser::TypeExpr returns it)
+#              -- a top-level nominal struct declaration ("struct NAME:"
+#              followed by its indented "field: Type" lines; STRUCTS.md).
+#              A declaration like typedecl: no runtime meaning, no binding.
 #   errordecl  name, nameSpan -- a top-level named-error declaration
 #              ("error NAME", surface/parser.tcl's ErrorDecl; see
 #              hir/errordecls.tcl for what it means). No runtime meaning,
@@ -209,6 +223,22 @@ proc surface::ast::Ids {node id} {
         unary - not {
             dict set node operand [Ids [dict get $node operand] $id/operand]
         }
+        anonstruct - namedstruct {
+            set init [dict get $node init]
+            dict set init id $id/init
+            set fields {}
+            set index 1
+            foreach field [dict get $init fields] {
+                dict set field value [Ids [dict get $field value] $id/field$index]
+                lappend fields $field
+                incr index
+            }
+            dict set init fields $fields
+            dict set node init $init
+        }
+        project {
+            dict set node receiver [Ids [dict get $node receiver] $id/receiver]
+        }
         binary - logical {
             dict set node left [Ids [dict get $node left] $id/left]
             dict set node right [Ids [dict get $node right] $id/right]
@@ -273,6 +303,10 @@ proc surface::ast::Children {node} {
         list               { return [dict get $node items] }
         call               { return [concat [list [dict get $node callee]] [dict get $node args]] }
         unary - not        { return [list [dict get $node operand]] }
+        anonstruct - namedstruct {
+            return [lmap field [dict get $node init fields] {dict get $field value}]
+        }
+        project            { return [list [dict get $node receiver]] }
         binary - logical   { return [list [dict get $node left] [dict get $node right]] }
         bind - return - break {
             return [expr {[dict get $node value] eq "" ? {} : [list [dict get $node value]]}]
@@ -388,6 +422,19 @@ proc surface::ast::Expr {node show} {
             }
             return "([::join $parts { }])$at"
         }
+        anonstruct {
+            return "([::join [concat struct [FieldsText $node $show]] { }])$at"
+        }
+        namedstruct {
+            set name [dict get $node name]
+            if {[dict get $node namespace] ne ""} {
+                set name "[dict get $node namespace]::$name"
+            }
+            return "([::join [concat struct $name [FieldsText $node $show]] { }])$at"
+        }
+        project {
+            return "(project [Expr [dict get $node receiver] $show] [dict get $node name])$at"
+        }
         unary {
             return "(unary [dict get $node op] [Expr [dict get $node operand] $show])$at"
         }
@@ -409,6 +456,13 @@ proc surface::ast::Expr {node show} {
         continue { return "(continue)$at" }
     }
     error "surface::ast: not an expression node: [dict get $node kind]"
+}
+
+# The "(NAME EXPR)" pairs of a struct node's field initializers.
+proc surface::ast::FieldsText {node show} {
+    return [lmap field [dict get $node init fields] {
+        format {(%s %s)} [dict get $field name] [Expr [dict get $field value] $show]
+    }]
 }
 
 proc surface::ast::Body {suite indent show linesVar} {
@@ -470,6 +524,13 @@ proc surface::ast::Statement {node indent show linesVar} {
         }
         errordecl {
             lappend lines "${pad}error [dict get $node name]$at"
+            return
+        }
+        structdecl {
+            lappend lines "${pad}struct [dict get $node name]$at"
+            foreach field [dict get $node fields] {
+                lappend lines "${pad}    [dict get $field name]: [showType [dict get $field type]]"
+            }
             return
         }
         fail {

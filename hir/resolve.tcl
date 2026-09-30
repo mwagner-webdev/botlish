@@ -147,7 +147,7 @@ proc hir::resolve::ProgramSection {hirVar root namespaceName nodes origin} {
     # "program"-kind scope, which is the entry program's ordinary top level,
     # out of this milestone's scope (see that file's eligibility discussion).
     dict set hir moduleScopeIds $scope 1
-    set ctx [dict create scope $scope callable "" loop "" blocks {} errors {}]
+    set ctx [dict create scope $scope callable "" loop "" blocks {} errors {} namespace $namespaceName]
     return [Sequence hir $nodes $ctx]
 }
 
@@ -305,9 +305,9 @@ proc hir::resolve::SetField {hirVar e key value} {
 # hir::types::resolveApplication -- the one place that knows which names
 # are registered type constructors, so this proc stays fully generic over
 # constructor identity.
-proc hir::resolve::ResolveTypeExpr {typeExpr} {
+proc hir::resolve::ResolveTypeExpr {typeExpr {ns ""}} {
     if {[llength $typeExpr] == 1} {
-        return [hir::types::resolveNamed $typeExpr]
+        return [hir::types::resolveNamed $typeExpr $ns]
     }
     lassign $typeExpr name arg
     if {$name eq "fn"} {
@@ -316,8 +316,8 @@ proc hir::resolve::ResolveTypeExpr {typeExpr} {
         # every argument and the return type resolve like any other type
         # annotation, and every error name must be a declared error
         # identity, exactly as in a function's own "errors" clause.
-        set argTypes [lmap t [dict get $arg args] {ResolveTypeExpr $t}]
-        set result [ResolveTypeExpr [dict get $arg return]]
+        set argTypes [lmap t [dict get $arg args] {ResolveTypeExpr $t $ns}]
+        set result [ResolveTypeExpr [dict get $arg return] $ns]
         foreach errName [dict get $arg errors] {
             if {![hir::errordecls::isDeclared $errName]} {
                 error "unknown error \"$errName\" in the function type's \"errors\" list: no \"error $errName\" declaration is visible"
@@ -325,7 +325,7 @@ proc hir::resolve::ResolveTypeExpr {typeExpr} {
         }
         return [hir::types::MakeFn $argTypes $result [dict get $arg errors]]
     }
-    return [hir::types::resolveApplication $name [list [ResolveTypeExpr $arg]]]
+    return [hir::types::resolveApplication $name [list [ResolveTypeExpr $arg $ns]]]
 }
 
 # TYPEEXPR as canonical source text ("List[Small]"), for a diagnostic about
@@ -419,7 +419,7 @@ proc hir::resolve::Expr {hirVar node ctx} {
                     lappend declaredParamTypes {}
                     continue
                 }
-                if {[catch {ResolveTypeExpr $paramType} normalized]} {
+                if {[catch {ResolveTypeExpr $paramType [CtxNamespace $ctx]} normalized]} {
                     hir::Diagnose hir TYPE \
                         [format {unknown or invalid type %s for parameter "%s": %s} [ShowTypeExpr $paramType] $name $normalized] $e
                     lappend declaredParamTypes {}
@@ -437,7 +437,7 @@ proc hir::resolve::Expr {hirVar node ctx} {
             SetField hir $e staticRefs {}
             set declared [expr {[dict exists $node declaredResult] ? [dict get $node declaredResult] : {}}]
             if {$declared ne {}} {
-                if {[catch {ResolveTypeExpr $declared} normalized]} {
+                if {[catch {ResolveTypeExpr $declared [CtxNamespace $ctx]} normalized]} {
                     hir::Diagnose hir TYPE [format {unknown or invalid result type %s: %s} [ShowTypeExpr $declared] $normalized] $e
                     set declared {}
                 } else {
@@ -467,7 +467,8 @@ proc hir::resolve::Expr {hirVar node ctx} {
             set errorNames [lsort -unique $errorNames]
             SetField hir $e declaredErrors $errorNames
             set inner [dict create scope $bodyScope callable $e loop "" errors $errorNames \
-                blocks [concat [dict get $ctx blocks] [list [list $e $bodyScope]]]]
+                blocks [concat [dict get $ctx blocks] [list [list $e $bodyScope]]] \
+                namespace [CtxNamespace $ctx]]
             SetField hir $e body [Sequence hir $body $inner]
         }
         call {
@@ -594,6 +595,14 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 hir::Diagnose hir CONTINUE-OUTSIDE-LOOP "continue outside lexical loop" $e
             }
         }
+        struct {
+            ResolveStruct hir $e $node $ctx
+        }
+        project {
+            SetField hir $e receiver [Expr hir [dict get $node receiver] $ctx]
+            SetField hir $e name [dict get $node name]
+            SetField hir $e nameOrigin [dict get $node nameOrigin]
+        }
         ok - error {
             SetField hir $e value [Expr hir [dict get $node value] $ctx]
         }
@@ -647,6 +656,101 @@ proc hir::resolve::Expr {hirVar node ctx} {
         }
     }
     return $e
+}
+
+# The module namespace ("" for the entry program) the code of CTX is in:
+# what an unqualified struct name resolves against.
+proc hir::resolve::CtxNamespace {ctx} {
+    return [expr {[dict exists $ctx namespace] ? [dict get $ctx namespace] : ""}]
+}
+
+# Resolves struct construction E (STRUCTS.md): the field initializers in
+# WRITTEN order (their evaluation order), the named struct's declaration if
+# any, and the canonical slot layout. Every static construction error is a
+# diagnostic located at the field it concerns:
+#   UNKNOWN-STRUCT     `Name { ... }` names no visible struct declaration
+#   DUPLICATE-FIELD    a field given twice
+#   UNKNOWN-FIELD      a named construction gives a field the struct lacks
+#   MISSING-FIELD      a named construction omits a declared field (there are
+#                      no defaults: every field is given exactly once)
+# Whether each value fits its declared field type is hir/range.tcl's
+# VerifyStruct, after inference.
+proc hir::resolve::ResolveStruct {hirVar e node ctx} {
+    upvar 1 $hirVar hir
+    set typeRef [dict get $node type]
+    set ns [CtxNamespace $ctx]
+    set named [expr {$typeRef ne ""}]
+    set id ""
+    set spelling ""
+    if {$named} {
+        if {[dict exists $typeRef id]} {
+            set id [dict get $typeRef id]
+            set spelling $id
+            if {![hir::structs::declared $id]} {
+                hir::Diagnose hir UNKNOWN-STRUCT \
+                    "unknown struct type \"$id\": no such struct declaration is visible" $e
+                set id ""
+            }
+        } else {
+            set tns [dict get $typeRef namespace]
+            set tname [dict get $typeRef name]
+            set spelling [expr {$tns eq "" ? $tname : "${tns}::$tname"}]
+            set id [hir::structs::lookup $spelling $ns]
+            if {$id eq ""} {
+                set why [expr {[hir::structs::IsOtherType $tname] && $tns eq ""
+                    ? "\"$tname\" is not a struct type"
+                    : "unknown struct type \"$spelling\": no \"struct $tname\" declaration is visible"}]
+                hir::DiagnoseAt hir UNKNOWN-STRUCT $why $e [dict get $typeRef origin]
+            }
+        }
+    }
+    set names {}
+    set nameOrigins {}
+    set fieldOrigins {}
+    set values {}
+    foreach field [dict get $node fields] {
+        lappend names [dict get $field name]
+        lappend nameOrigins [dict get $field nameOrigin]
+        lappend fieldOrigins [dict get $field origin]
+        lappend values [Expr hir [dict get $field value] $ctx]
+    }
+    set what [expr {$named ? "the $spelling construction" : "this struct initializer"}]
+    if {!$named} {
+        set layout [lsort -unique $names]
+    } elseif {$id ne ""} {
+        set layout [hir::structs::names $id]
+    } else {
+        set layout [lsort -unique $names]
+    }
+    set seen {}
+    foreach name $names origin $fieldOrigins {
+        if {$name in $seen} {
+            hir::DiagnoseAt hir DUPLICATE-FIELD \
+                "duplicate field \"$name\" in $what: each field may be given only once" $e $origin
+            continue
+        }
+        lappend seen $name
+        if {$named && $id ne "" && $name ni $layout} {
+            hir::DiagnoseAt hir UNKNOWN-FIELD \
+                "struct $spelling has no field \"$name\" (declared fields: [join $layout {, }])" $e $origin
+        }
+    }
+    if {$named && $id ne ""} {
+        foreach declared $layout {
+            if {$declared ni $names} {
+                hir::Diagnose hir MISSING-FIELD \
+                    "$what is missing field \"$declared\" (every declared field must be given exactly once; there are no defaults)" $e
+            }
+        }
+    }
+    SetField hir $e named $named
+    SetField hir $e structId $id
+    SetField hir $e names $names
+    SetField hir $e nameOrigins $nameOrigins
+    SetField hir $e fieldOrigins $fieldOrigins
+    SetField hir $e fields $values
+    SetField hir $e layout $layout
+    SetField hir $e slots [lmap name $names {lsearch -exact $layout $name}]
 }
 
 # Resolves the syntax nodes NODES in order.

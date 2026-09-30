@@ -94,13 +94,13 @@ proc hir::sourcetypes::Fail {span message} {
 # domain CANONICAL-DOMAIN}, PARENT-SPELLING "Int" or another declared name,
 # CANONICAL-DOMAIN core::type::metadata's own {interval LO HI} / {exact
 # {V...}} form (hir/format.tcl prints this; hir/read.tcl re-applies it).
-proc hir::sourcetypes::apply {decls} {
-    if {$decls eq ""} {
+proc hir::sourcetypes::apply {decls {structDecls {}}} {
+    if {$decls eq "" && $structDecls eq ""} {
         # Nothing new to register: leave the registry exactly as is,
         # neither resetting nor adding anything, and report no source types
         # of THIS call's own (a caller building an HIR from these decls
-        # gets an accurate, empty `sourceTypes` field for it -- see
-        # hir::buildSyntax). This matters because hir::build (core IR, no
+        # gets an accurate, empty `sourceTypes` field for it -- see hir::
+        # buildSyntax). This matters because hir::build (core IR, no
         # surface syntax) and every internal re-hir::build of an
         # already-lowered program (the Tcl compiler backend's own
         # GenerateUnit, hir/specialize.tcl) all call through
@@ -113,20 +113,29 @@ proc hir::sourcetypes::apply {decls} {
         # see this file's own header, "Compilation isolation".
         return {}
     }
-    Reset
-    set byName [dict create]
-    foreach decl $decls {
-        set name [dict get $decl name]
-        if {[dict exists $byName $name]} {
-            Fail [dict get $decl nameSpan] "type \"$name\" is already declared"
-        }
-        dict set byName $name $decl
-    }
-    set registered [dict create]
-    set visiting [dict create]
     set order {}
-    foreach decl $decls {
-        Resolve [dict get $decl name] $byName registered visiting order
+    if {$decls ne ""} {
+        Reset
+        set byName [dict create]
+        foreach decl $decls {
+            set name [dict get $decl name]
+            if {[dict exists $byName $name]} {
+                Fail [dict get $decl nameSpan] "type \"$name\" is already declared"
+            }
+            dict set byName $name $decl
+        }
+        set registered [dict create]
+        set visiting [dict create]
+        foreach decl $decls {
+            Resolve [dict get $decl name] $byName registered visiting order
+        }
+    }
+    if {$structDecls ne ""} {
+        # Struct declarations (STRUCTS.md, hir/structs.tcl) are type
+        # declarations of this same pass: registered after the integer-domain
+        # types (whose names they may not reuse, and which their fields may
+        # name), their entries joining the same ordered `sourceTypes` list.
+        lappend order {*}[hir::structs::apply $structDecls]
     }
     return $order
 }

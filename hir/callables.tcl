@@ -134,7 +134,44 @@ proc hir::callables::Bearing {hir type {mutable 1}} {
     if {[hir::types::IsSet $type]} {
         return [Bearing $hir [lindex $type 1] $mutable]
     }
+    if {[hir::types::IsStruct $type]} {
+        # A struct carries whatever any of its fields carries (STRUCTS.md):
+        # a MutableArray[str] stored in a field is still that array, reachable
+        # through the struct, so its contract may not be forgotten just because
+        # it is now a struct's field.
+        foreach {name t} [lindex $type 1] {
+            if {[Bearing $hir $t $mutable]} {
+                return 1
+            }
+        }
+        return 0
+    }
+    if {[hir::types::IsNamedStruct $type]} {
+        return [BearingNamed $hir [lindex $type 1] $mutable]
+    }
     return 0
+}
+
+# Bearing of named struct ID: any declared field type bears. A struct may
+# name itself (directly or through others), so a declaration being examined
+# contributes nothing further (a cycle adds no obligation its first visit did
+# not already count).
+proc hir::callables::BearingNamed {hir id mutable} {
+    variable visiting
+    if {[info exists visiting] && $id in $visiting} {
+        return 0
+    }
+    lappend visiting $id
+    try {
+        foreach {name t} [hir::structs::fieldTypes $id] {
+            if {[Bearing $hir $t $mutable]} {
+                return 1
+            }
+        }
+        return 0
+    } finally {
+        set visiting [lrange $visiting 0 end-1]
+    }
 }
 
 # 1 if a value of static TYPE flowing into a position of static type FINAL
@@ -175,6 +212,20 @@ proc hir::callables::Preserves {hir type final} {
     }
     if {[hir::types::IsSet $type] && [hir::types::IsSet $final]} {
         return [Preserves $hir [lindex $type 1] [lindex $final 1]]
+    }
+    if {[hir::types::IsStruct $type] && [hir::types::IsStruct $final]} {
+        # The same field set (an anonymous struct never widens or narrows its
+        # fields), each field's obligations kept by the position it lands in.
+        set final_ [lindex $final 1]
+        if {[dict keys [lindex $type 1]] ne [dict keys $final_]} {
+            return 0
+        }
+        dict for {name t} [lindex $type 1] {
+            if {![Preserves $hir $t [dict get $final_ $name]]} {
+                return 0
+            }
+        }
+        return 1
     }
     return 0
 }
@@ -261,6 +312,28 @@ proc hir::callables::HasMutArray {type} {
     }
     if {[hir::types::IsExactBlock $type]} {
         return [HasMutArray [lindex $type 3]]
+    }
+    if {[hir::types::IsStruct $type]} {
+        foreach {name t} [lindex $type 1] {
+            if {[HasMutArray $t]} { return 1 }
+        }
+        return 0
+    }
+    if {[hir::types::IsNamedStruct $type]} {
+        variable hasVisiting
+        set id [lindex $type 1]
+        if {[info exists hasVisiting] && $id in $hasVisiting} {
+            return 0
+        }
+        lappend hasVisiting $id
+        try {
+            foreach {name t} [hir::structs::fieldTypes $id] {
+                if {[HasMutArray $t]} { return 1 }
+            }
+            return 0
+        } finally {
+            set hasVisiting [lrange $hasVisiting 0 end-1]
+        }
     }
     return 0
 }
@@ -373,6 +446,24 @@ proc hir::callables::WalkExpr {hirVar e} {
         ok - error {
             CheckPreserved hir [dict get $node value] {} {wrapped as a Result value}
             WalkExpr hir [dict get $node value]
+        }
+        struct {
+            # Each field value lands in its field's type: an anonymous
+            # struct's own (inferred) field type, a named struct's declared
+            # one. A contract-bearing value (a MutableArray[T], a typed
+            # callable) stored where its contract would be forgotten -- a
+            # field declared `any`, a depth-truncated position -- is an
+            # erasure, exactly as it would be as a List element
+            # (STRUCTS.md "Bearing").
+            set structType [hir::typeOf $hir $e]
+            foreach name [dict get $node names] field [dict get $node fields] {
+                set context [hir::types::StructField $structType $name]
+                CheckPreserved hir $field $context [format {stored in field "%s" of a struct} $name]
+                WalkExpr hir $field
+            }
+        }
+        project {
+            WalkExpr hir [dict get $node receiver]
         }
         fail {
         }

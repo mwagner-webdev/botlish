@@ -36,6 +36,18 @@
 #             countName/countOrigin/bodyOrigin/body describe the
 #             per-iteration immutable induction binding and body, exactly
 #             like listloop's own elementName/elementOrigin/bodyOrigin/body
+#   struct    type, fields -- STRUCTS.md. TYPE is "" for an anonymous struct
+#             value { x: a, y: b }, or for a named construction `Name { ... }`
+#             a dict {name NAME namespace NS origin ORIGIN} (an as-written,
+#             unresolved struct type name, NS "" when unqualified:
+#             hir/resolve.tcl resolves it against the struct declarations
+#             visible from the code's own namespace) or {id ID} (an
+#             already-resolved declaration identity, core IR's own spelling).
+#             FIELDS is a list of {name nameOrigin origin value} dicts in
+#             WRITTEN order, which is evaluation order: one shared
+#             field-initializer payload for both forms.
+#   project   receiver, name, nameOrigin -- `receiver.name`: a statically
+#             resolved field projection (STRUCTS.md)
 #   return    value
 #   break     value (node or "")
 #   continue
@@ -108,6 +120,21 @@ proc hir::syntax::blockNode {origin params body {declaredResult {}} {paramTypes 
     }
     return [Node block $origin params $params body $body declaredResult $declaredResult \
         paramTypes $paramTypes declaredErrors $declaredErrors]
+}
+
+# TYPE and FIELDS as this file's header describes `struct`.
+proc hir::syntax::structNode {origin type fields} {
+    foreach field $fields {
+        if {[catch {dict get $field name; dict get $field nameOrigin; dict get $field origin; dict get $field value}]} {
+            core::malformed "struct fields must be {name nameOrigin origin value} dicts" [list struct $fields]
+        }
+    }
+    return [Node struct $origin type $type fields $fields]
+}
+
+proc hir::syntax::projectNode {origin receiver name nameOrigin} {
+    core::ir::checkShape [list project {} $name]
+    return [Node project $origin receiver $receiver name $name nameOrigin $nameOrigin]
 }
 
 proc hir::syntax::callNode {origin callee args} {
@@ -229,6 +256,26 @@ proc hir::syntax::fromIR {node path} {
                 bodyOrigin [list ir [concat $path 3]] \
                 body [Sequence [core::ir::blockBody [lindex $node 3]] [concat $path 3] 2]]
         }
+        struct {
+            # (struct HEAD NAME EXPR ...): HEAD is {} (anonymous) or {ID
+            # FIELD...} (named: declaration identity, then the declared slot
+            # order, which only the evaluator needs).
+            set head [lindex $node 1]
+            set type [expr {$head eq "" ? "" : [dict create id [lindex $head 0]]}]
+            set fields {}
+            set index 2
+            foreach {name value} [lrange $node 2 end] {
+                lappend fields [dict create name $name nameOrigin [list ir [concat $path $index]] \
+                    origin [list ir [concat $path $index]] \
+                    value [fromIR $value [concat $path [expr {$index + 1}]]]]
+                incr index 2
+            }
+            return [Node struct $origin type $type fields $fields]
+        }
+        project {
+            return [Node project $origin receiver [fromIR [lindex $node 1] [concat $path 1]] \
+                name [lindex $node 2] nameOrigin [list ir [concat $path 2]]]
+        }
         return - ok {
             return [Node [core::ir::op $node] $origin value [fromIR [lindex $node 1] [concat $path 1]]]
         }
@@ -297,6 +344,14 @@ proc hir::syntax::CollectBindNames {node namesVar} {
             foreach arg [dict get $node args] {
                 CollectBindNames $arg names
             }
+        }
+        struct {
+            foreach field [dict get $node fields] {
+                CollectBindNames [dict get $field value] names
+            }
+        }
+        project {
+            CollectBindNames [dict get $node receiver] names
         }
         if {
             CollectBindNames [dict get $node condition] names

@@ -24,6 +24,11 @@
 #   mod::x                ref "mod::x"          module-qualified; see
 #                         surface/modules.tcl for how "mod::x" is bound
 #   [a, b]                call ^list a b
+#   {x: a, y: b}          struct {} (x a) (y b)      written order is evaluation
+#                         order; an anonymous struct value (STRUCTS.md)
+#   Name {x: a, y: b}     struct Name (x a) (y b)    the same payload applied
+#                         to the declared struct Name
+#   e.name                project e name             a static field projection
 #   f(a, b)               call f a b
 #   a OP b                call ^OP a b              OP: + - * == < <= > >=
 #   a != b                if (call ^== a b) {^false} {^true}
@@ -69,37 +74,46 @@ proc surface::lowerToHir {ast args} {
             surface::raise $diagnostic
         }
     }
-    lassign [surface::lower::SplitTypeDecls [dict get $ast body]] executable decls errorDecls
+    lassign [surface::lower::SplitTypeDecls [dict get $ast body]] executable decls errorDecls structDecls
     set nodes [surface::lower::Sequence $executable]
     set hir [hir::buildSyntax $nodes -strict 0 \
         -halt-on-resolution-errors [dict get $options -strict] \
         -origin [surface::lower::Origin [dict get $ast span] ""] \
         -files [dict create f1 [dict get $ast span file]] \
-        -type-decls $decls -error-decls $errorDecls]
+        -type-decls $decls -error-decls $errorDecls -struct-decls $structDecls]
     return [surface::lower::Finish $hir [dict get $options -strict]]
 }
 
-# STATEMENTS split into {EXECUTABLE DECLS ERRORDECLS}: EXECUTABLE keeps
+# STATEMENTS split into {EXECUTABLE DECLS ERRORDECLS STRUCTDECLS}: EXECUTABLE keeps
 # every statement with runtime meaning, in order (ready for Sequence);
 # DECLS is the type declarations among them (surface/parser.tcl's
 # `typedecl` nodes), converted to the plain dicts hir::buildSyntax's
 # -type-decls option takes (see hir/sourcetypes.tcl); ERRORDECLS likewise
 # for named-error declarations (`errordecl` nodes, hir/errordecls.tcl's
-# -error-decls). Neither kind of declaration is compile-time-only metadata,
-# never lowered to an hir/syntax.tcl node (spec items 21-22/109: no bind,
-# no runtime value, no NIR).
-proc surface::lower::SplitTypeDecls {statements} {
+# -error-decls); STRUCTDECLS likewise for struct declarations (`structdecl`
+# nodes, hir/structs.tcl's -struct-decls; STRUCTS.md), tagged with NAMESPACE
+# (the declaring module's, "" for the entry program). No kind of declaration
+# is lowered to an hir/syntax.tcl node: compile-time-only metadata (spec
+# items 21-22/109: no bind, no runtime value, no NIR).
+proc surface::lower::SplitTypeDecls {statements {namespace ""}} {
     set executable {}
     set decls {}
     set errorDecls {}
+    set structDecls {}
     foreach statement $statements {
         switch -- [dict get $statement kind] {
-            typedecl  { lappend decls [TypeDeclOf $statement] }
-            errordecl { lappend errorDecls [ErrorDeclOf $statement] }
-            default   { lappend executable $statement }
+            typedecl   { lappend decls [TypeDeclOf $statement] }
+            errordecl  { lappend errorDecls [ErrorDeclOf $statement] }
+            structdecl { lappend structDecls [StructDeclOf $statement $namespace] }
+            default    { lappend executable $statement }
         }
     }
-    return [list $executable $decls $errorDecls]
+    return [list $executable $decls $errorDecls $structDecls]
+}
+
+proc surface::lower::StructDeclOf {node namespace} {
+    return [dict create name [dict get $node name] nameSpan [dict get $node nameSpan] \
+        namespace $namespace fields [dict get $node fields] span [dict get $node span]]
 }
 
 proc surface::lower::TypeDeclOf {node} {
@@ -120,8 +134,10 @@ proc surface::lower::ErrorDeclOf {node} {
 proc surface::lower::Finish {hir strict} {
     if {$strict} {
         foreach diagnostic [hir::diagnostics $hir] {
+            set origin [expr {[dict exists $diagnostic origin] ? [dict get $diagnostic origin]
+                : [hir::get $hir [dict get $diagnostic expr] origin]}]
             core::semanticError [dict get $diagnostic kind] \
-                "[surface::originLocation $hir [hir::get $hir [dict get $diagnostic expr] origin]]: [dict get $diagnostic message]"
+                "[surface::originLocation $hir $origin]: [dict get $diagnostic message]"
         }
     }
     return $hir
@@ -162,6 +178,21 @@ proc surface::lower::OriginOf {node {role ""}} {
         set id $id/$role
     }
     return [Origin [dict get $node span] $id]
+}
+
+# The field-initializer dicts of the struct AST node NODE, in written order:
+# the one payload an anonymous struct value and a named construction share.
+# A field's origin is its whole initializer (name through value).
+proc surface::lower::FieldInits {node} {
+    set index 0
+    return [lmap field [dict get $node init fields] {
+        incr index
+        set fieldSpan [surface::ast::cover [dict get $field nameSpan] [dict get [dict get $field value] span]]
+        dict create name [dict get $field name] \
+            nameOrigin [Origin [dict get $field nameSpan] [dict get $node id]/field$index/name] \
+            origin [Origin $fieldSpan [dict get $node id]/field$index] \
+            value [Node [dict get $field value]]
+    }]
 }
 
 proc surface::lower::Sequence {nodes} {
@@ -223,6 +254,18 @@ proc surface::lower::Node {node} {
         call {
             return [hir::syntax::callNode $origin [Node [dict get $node callee]] \
                 {*}[Sequence [dict get $node args]]]
+        }
+        anonstruct {
+            return [hir::syntax::structNode $origin "" [FieldInits $node]]
+        }
+        namedstruct {
+            set type [dict create name [dict get $node name] namespace [dict get $node namespace] \
+                origin [Origin [dict get $node nameSpan] [dict get $node id]/type]]
+            return [hir::syntax::structNode $origin $type [FieldInits $node]]
+        }
+        project {
+            return [hir::syntax::projectNode $origin [Node [dict get $node receiver]] \
+                [dict get $node name] [Origin [dict get $node nameSpan] [dict get $node id]/field]]
         }
         binary {
             set op [dict get $node op]

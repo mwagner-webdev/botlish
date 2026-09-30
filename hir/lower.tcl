@@ -18,6 +18,8 @@
 #   return     (return VALUE)
 #   break      (break) / (break VALUE)
 #   continue   (continue)
+#   struct     (struct HEAD NAME VALUE ...)   written order; HEAD {} or {ID FIELD...}
+#   project    (project VALUE NAME)
 #   ok         (ok VALUE)
 #   error      (error-value VALUE)
 #   fail       (fail NAME)
@@ -86,6 +88,25 @@ proc hir::lower::expr {hir e} {
         }
         continue {
             return [list continue]
+        }
+        struct {
+            # The written order is the evaluation order; the head carries the
+            # declaration identity and slot order of a named struct (an
+            # anonymous struct's shape is just its field set). A named
+            # construction whose type did not resolve (a diagnostic of a
+            # -strict 0 HIR) lowers like an anonymous one.
+            set head {}
+            if {[dict get $node named] && [dict get $node structId] ne ""} {
+                set head [linsert [dict get $node layout] 0 [dict get $node structId]]
+            }
+            set parts {}
+            foreach name [dict get $node names] field [dict get $node fields] {
+                lappend parts $name [expr $hir $field]
+            }
+            return [list struct $head {*}$parts]
+        }
+        project {
+            return [list project [expr $hir [dict get $node receiver]] [dict get $node name]]
         }
         ok {
             return [list ok [expr $hir [dict get $node value]]]

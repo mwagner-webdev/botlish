@@ -877,6 +877,31 @@ proc hir::range::Expr {hirVar ctxVar e} {
         call {
             return [Call hir ctx $e $node]
         }
+        struct {
+            # A struct value is never itself rangeable (`unknown`); this
+            # still visits every field expression, in written order, so any
+            # Int sub-expression (and any call) inside one gets its own
+            # facts recorded exactly as a call's arguments do. A field that
+            # never completes makes the construction never complete.
+            foreach field [dict get $node fields] {
+                if {[Expr hir ctx $field] eq "never"} {
+                    return never
+                }
+            }
+            return [unknown]
+        }
+        project {
+            # The receiver's own facts are computed (it may contain calls);
+            # the projected field's Range is what its static type implies
+            # (a field declared with an integer domain holds values of that
+            # domain: hir::range::VerifyStruct proved it at construction).
+            if {[Expr hir ctx [dict get $node receiver]] eq "never"} {
+                return never
+            }
+            set r [ConstrainType $hir $e [unknown]]
+            dict set ctx exprs $e $r
+            return $r
+        }
         if {
             return [If hir ctx $e $node]
         }
@@ -1218,7 +1243,12 @@ proc hir::range::ProvesValueAcceptedBy {argType argRange declared} {
     if {[hir::types::IsList $declared] || [hir::types::IsSet $declared]} {
         return [AggregateAdmits [hir::types::Unshaped $argType] $declared]
     }
-    if {[hir::types::IsFn $declared] || [hir::types::IsMutArray $declared]} {
+    if {[hir::types::IsFn $declared] || [hir::types::IsMutArray $declared]
+            || [hir::types::IsStructLike $declared]} {
+        # A struct type (STRUCTS.md) is admitted by hir::types::subtype
+        # alone: a named struct only ever by the same declaration, an
+        # anonymous one by the same field set with admissible field types.
+        #
         # A structural function type (STRUCTURAL-FUNCTION-TYPES.md): the
         # argument must be a callable whose own call contract is
         # compatible (hir::types::subtype's contravariant/covariant/subset
@@ -1302,6 +1332,7 @@ proc hir::range::FactsSatisfiable {observedType observedRange declared} {
         return [AggregateAdmits [hir::types::Unshaped $observedType] $declared]
     }
     if {[hir::types::IsFn $declared] || [hir::types::IsMutArray $declared]
+            || [hir::types::IsStructLike $declared]
             || [core::type::base $declared] ne "int"} {
         return 1
     }
@@ -1419,6 +1450,9 @@ proc hir::range::VerifyCallArguments {hirVar ranges e} {
     if {$kind eq {call}} {
         VerifyCall hir $ranges $e $node
     }
+    if {$kind eq {struct}} {
+        VerifyStruct hir $ranges $e $node
+    }
     if {$kind eq {block}} {
         return
     }
@@ -1512,6 +1546,40 @@ proc hir::range::VerifyCall {hirVar ranges e node} {
             [dict get $hir bindings $paramBinding name] [hir::types::show $checkedType] \
             [hir::types::show $argType] [show $argRange] \
             [hir::signatures::because $hir $targetBlock $i]] $arg
+    }
+}
+
+# Checks the field values of named struct construction E against the
+# declared field types (STRUCTS.md): each value must be *proven* admissible
+# for its field's declared type, by the one admissibility proof every
+# declared type is held to (ProvesValueAcceptedBy: subtype, or the value's
+# Range within the declared integer domain). No runtime guard is ever
+# inserted because a field type is declared: an unproven value is a
+# compile-time TYPE error at that field, exactly as an unproven argument of a
+# declared parameter is. An anonymous struct declares nothing to check.
+proc hir::range::VerifyStruct {hirVar ranges e node} {
+    upvar 1 $hirVar hir
+    if {![dict get $node named] || [dict get $node structId] eq ""} {
+        return
+    }
+    set id [dict get $node structId]
+    foreach name [dict get $node names] field [dict get $node fields] origin [dict get $node fieldOrigins] {
+        set declared [hir::structs::fieldType $id $name]
+        if {$declared eq ""} {
+            continue
+        }
+        set valueType [hir::typeOf $hir $field]
+        if {$valueType eq "never" || ![hir::get $hir $field reachable]} {
+            continue
+        }
+        set valueRange [expr {[dict exists $ranges $field] ? [dict get $ranges $field] : [unknown]}]
+        if {[ProvesValueAcceptedBy $valueType $valueRange $declared]} {
+            continue
+        }
+        hir::DiagnoseAt hir TYPE [format \
+            {field "%s" of struct %s cannot be proven to satisfy its declared type %s (value type: %s, facts: %s)%s} \
+            $name [hir::structs::display $id] [hir::types::show $declared] \
+            [hir::types::show $valueType] [show $valueRange] [MismatchClause $valueType $declared]] $field $origin
     }
 }
 

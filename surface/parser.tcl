@@ -7,7 +7,7 @@
 #
 #   program      = [ namespaceDecl ] { NEWLINE | topStatement } EOF
 #   namespaceDecl = "namespace" IDENT NEWLINE
-#   topStatement = typeDecl | errorDecl | statement
+#   topStatement = typeDecl | structDecl | errorDecl | statement
 #   statement    = simple NEWLINE | valued | function | if | loop
 #   simple       = binding | return | break | continue | fail | expression
 #   valued       = IDENT "=" (if|loop|handledExpr)
@@ -36,6 +36,16 @@
 #   signedInt    = [ "-" ] INT
 #
 #   errorDecl    = "error" IDENT NEWLINE
+#
+#   structDecl   = "struct" IDENT ":" NEWLINE INDENT structField { structField } DEDENT
+#   structField  = IDENT ":" typeExpr NEWLINE
+#
+# A structDecl (STRUCTS.md) declares a nominal struct type: like a typeDecl
+# it is a declaration, never a value binding, legal only at a program's or
+# module's own top level, and its fields always carry an explicit type. A
+# struct needs at least one field: Botlish has no explicit empty-block
+# syntax (every suite is an INDENT of statements), and none is invented for
+# a zero-field struct.
 #
 # A handled call (EXPLICIT-ERROR-COMPLETIONS.md) is a bare call expression
 # immediately followed by ":" and an indented block of "on NAME:" handlers,
@@ -78,11 +88,25 @@
 #   additive     = multiplicative { ( "+" | "-" ) multiplicative }
 #   multiplicative = unary { "*" unary }
 #   unary        = "-" unary | postfix
-#   postfix      = primary { "(" [ arguments ] ")" }
+#   postfix      = primary { "(" [ arguments ] ")" | "." IDENT }
 #   arguments    = expression { "," expression } [ "," ]
 #   primary      = INT | STRING | CHAR | "true" | "false" | "unit"
-#                | IDENT [ "::" IDENT ]
+#                | IDENT [ "::" IDENT ] [ fieldInits ]
+#                | fieldInits
 #                | "[" [ arguments ] "]" | "(" expression ")"
+#   fieldInits   = "{" [ fieldInit { "," fieldInit } [ "," ] ] "}"
+#   fieldInit    = IDENT ":" expression
+#
+# One field-initializer payload (fieldInits) serves two constructs
+# (STRUCTS.md): standing alone, "{ x: a, y: b }" is an anonymous struct
+# value; after a (possibly module-qualified) type name, "Person { x: a, y: b
+# }" applies the same payload to the named struct's declared schema. "{"
+# in expression position can only start fieldInits (it is otherwise only
+# ever a type declaration's domain or a function type's fields, both parsed
+# by dedicated grammar), and "NAME {" can only mean a named construction:
+# no existing expression is ever followed by "{". Field names are ordinary
+# identifiers: no keyword, computed key, string or integer key. "x.name" is
+# a field projection, resolved statically by HIR.
 #
 # An if (or a loop, including "loop x in EXPR:") is a value where a
 # statement's value ends the statement: the right side of a binding, or the
@@ -334,6 +358,12 @@ proc surface::parser::Statement {pVar} {
             }
             return [ErrorDecl p]
         }
+        struct {
+            if {![dict get $p topLevel]} {
+                Fail $token "a struct declaration is only allowed at the top level of a module, not nested in a function/if/loop"
+            }
+            return [StructDecl p]
+        }
         INDENT { Fail $token "unexpected indentation" }
         else   { Fail $token "\"else\" without a matching \"if\"" }
         namespace { Fail $token "a \"namespace\" declaration must be the first statement in the file" }
@@ -509,6 +539,14 @@ proc surface::parser::TypeExpr {pVar what} {
     set name [dict get $token value]
     if {$name eq "Fn"} {
         return [FnType p $token]
+    }
+    if {[Kind p] eq "::"} {
+        # A module-qualified type name (STRUCTS.md): "geo::Point" names the
+        # struct Point declared by module geo. Kept as the one bare-name
+        # string "geo::Point", so every bare-name consumer keeps working.
+        Advance p
+        set member [Expect p IDENT "a type name after \"::\""]
+        set name "$name::[dict get $member value]"
     }
     if {[Kind p] ne "\["} {
         return $name
@@ -1036,13 +1074,31 @@ proc surface::parser::Unary {pVar} {
 proc surface::parser::Postfix {pVar} {
     upvar 1 $pVar p
     set expr [Primary p]
-    while {[Kind p] eq "("} {
-        Advance p
-        set args [Arguments p ) "argument list"]
-        set expr [surface::ast::node call [SpanFrom p [dict get $expr span]] \
-            callee $expr args $args]
+    while 1 {
+        switch -- [Kind p] {
+            ( {
+                Advance p
+                set args [Arguments p ) "argument list"]
+                set expr [surface::ast::node call [SpanFrom p [dict get $expr span]] \
+                    callee $expr args $args]
+            }
+            . {
+                # Field projection (STRUCTS.md): "receiver.name", the name
+                # known syntactically. Never a dynamic lookup.
+                Advance p
+                set token [Peek p]
+                if {[dict get $token kind] ne "IDENT"} {
+                    Fail $token "expected a field name after \".\", found [Describe $token]"
+                }
+                Advance p
+                set expr [surface::ast::node project [SpanFrom p [dict get $expr span]] \
+                    receiver $expr name [dict get $token value] nameSpan [dict get $token span]]
+            }
+            default {
+                return $expr
+            }
+        }
     }
-    return $expr
 }
 
 # Expressions separated by commas up to CLOSE (consumed), trailing comma
@@ -1092,11 +1148,31 @@ proc surface::parser::Primary {pVar} {
             if {[Kind p] eq "::"} {
                 Advance p
                 set member [Expect p IDENT "a name after \"::\""]
+                if {[Kind p] eq "\{"} {
+                    # NAMESPACE::Struct { ... }: a named struct construction
+                    # (STRUCTS.md) through module qualification.
+                    set nameSpan [SpanFrom p $span]
+                    set init [FieldInits p]
+                    return [surface::ast::node namedstruct [SpanFrom p $span] \
+                        namespace [dict get $token value] \
+                        name [dict get $member value] nameSpan $nameSpan init $init]
+                }
                 return [surface::ast::node qualname [SpanFrom p $span] \
                     namespace [dict get $token value] namespaceSpan $span \
                     name [dict get $member value] nameSpan [dict get $member span]]
             }
+            if {[Kind p] eq "\{"} {
+                # Struct { ... }: a named struct construction (STRUCTS.md).
+                set init [FieldInits p]
+                return [surface::ast::node namedstruct [SpanFrom p $span] \
+                    namespace "" name [dict get $token value] nameSpan $span init $init]
+            }
             return [surface::ast::node name $span name [dict get $token value]]
+        }
+        \{ {
+            # { ... }: an anonymous struct value (STRUCTS.md).
+            set init [FieldInits p]
+            return [surface::ast::node anonstruct [SpanFrom p $span] init $init]
         }
         [ {
             Advance p
@@ -1114,4 +1190,106 @@ proc surface::parser::Primary {pVar} {
         }
     }
     Fail $token "expected an expression, found [Describe $token]"
+}
+
+# ---------------------------------------------------------------------------
+# Structs (STRUCTS.md)
+
+# "{" [ fieldInit { "," fieldInit } [ "," ] ] "}" -- the one shared
+# field-initializer payload of an anonymous struct value and of a named
+# struct construction. Returns a `fieldinits` node whose `fields` are
+# {name nameSpan value} dicts in written order (evaluation order). Whether
+# the names are unique, known or complete is semantic (hir::resolve), never
+# a parse concern, so every syntactically well-formed payload parses.
+proc surface::parser::FieldInits {pVar} {
+    upvar 1 $pVar p
+    set open [Expect p \{ "\"\{\""]
+    set start [dict get $open span]
+    set fields {}
+    while {[Kind p] ne "\}"} {
+        set token [Peek p]
+        if {[dict get $token kind] ne "IDENT"} {
+            if {[dict get $token kind] in {NEWLINE DEDENT EOF}} {
+                Fail $token "expected \"\}\" to close the struct initializer, found [Describe $token]"
+            }
+            if {[regexp {^[a-z]+$} [dict get $token text]] && [dict get $token kind] eq [dict get $token text]} {
+                Fail $token "expected a field name, found the keyword \"[dict get $token text]\" (a field name is an ordinary identifier)"
+            }
+            Fail $token "expected a field name (an identifier), found [Describe $token]"
+        }
+        Advance p
+        if {[Kind p] ne ":"} {
+            Fail [Peek p] "expected \":\" after the field name \"[dict get $token value]\", found [Describe [Peek p]]"
+        }
+        Advance p
+        set value [Expression p]
+        lappend fields [dict create name [dict get $token value] nameSpan [dict get $token span] value $value]
+        if {[Kind p] eq ","} {
+            Advance p
+        } elseif {[Kind p] ne "\}"} {
+            Fail [Peek p] "expected \",\" or \"\}\" after the value of field \"[dict get $token value]\", found [Describe [Peek p]]"
+        }
+    }
+    Advance p
+    return [surface::ast::node fieldinits [SpanFrom p $start] fields $fields]
+}
+
+# "struct" IDENT ":" NEWLINE INDENT { IDENT ":" typeExpr NEWLINE } DEDENT --
+# a top-level nominal struct declaration. Every field has an explicit type
+# and there are no defaults. A `structdecl` node carries `fields`, one
+# {name nameSpan type typeSpan} dict per declared field in written (slot)
+# order.
+proc surface::parser::StructDecl {pVar} {
+    upvar 1 $pVar p
+    set start [dict get [Advance p] span]
+    set name [Expect p IDENT "a struct name after \"struct\""]
+    set token [Peek p]
+    if {[dict get $token kind] ne ":"} {
+        Fail $token "expected \":\" after the struct name \"[dict get $name value]\", found [Describe $token]"
+    }
+    Advance p
+    set token [Peek p]
+    if {[dict get $token kind] ne "NEWLINE"} {
+        Fail $token "expected a new line and an indented block of fields after \":\", found [Describe $token]"
+    }
+    Advance p
+    set token [Peek p]
+    if {[dict get $token kind] ne "INDENT"} {
+        Fail $token "a struct declaration needs at least one \"field: Type\" line in an indented block (there is no empty-struct syntax), found [Describe $token]"
+    }
+    Advance p
+    set fields {}
+    while {[Kind p] ne "DEDENT" && [Kind p] ne "EOF"} {
+        if {[Kind p] eq "NEWLINE"} {
+            Advance p
+            continue
+        }
+        set fieldToken [Peek p]
+        if {[dict get $fieldToken kind] ne "IDENT"} {
+            Fail $fieldToken "expected a field declaration \"name: Type\", found [Describe $fieldToken]"
+        }
+        Advance p
+        if {[Kind p] ne ":"} {
+            Fail [Peek p] "expected \":\" and a type after the field name \"[dict get $fieldToken value]\" (a struct field always has an explicit type), found [Describe [Peek p]]"
+        }
+        Advance p
+        set typeStart [dict get [Peek p] span]
+        set type [TypeExpr p "a field type after \":\""]
+        set typeSpan [SpanFrom p $typeStart]
+        if {[Kind p] eq "="} {
+            Fail [Peek p] "a struct field cannot have a default value (every field must be given explicitly when a struct is constructed)"
+        }
+        set next [Peek p]
+        if {[dict get $next kind] ne "NEWLINE"} {
+            Fail $next "expected end of line after the field declaration, found [Describe $next]"
+        }
+        Advance p
+        lappend fields [dict create name [dict get $fieldToken value] nameSpan [dict get $fieldToken span] \
+            type $type typeSpan $typeSpan]
+    }
+    if {[Kind p] eq "DEDENT"} {
+        Advance p
+    }
+    return [surface::ast::node structdecl [SpanFrom p $start] \
+        name [dict get $name value] nameSpan [dict get $name span] fields $fields]
 }

@@ -676,6 +676,7 @@ proc hir::semantic::verify {hirVar} {
         }]
         hir::range::verifyBlocks view $blocks
         hir::callables::verifyBlocks view $blocks
+        hir::structs::verifyBlocks view $blocks
         dict set own $id [lmap d [dict get $view diagnostics] {
             if {[dict exists $definitional [list [dict get $d expr] [dict get $d message]]]} continue
             set d

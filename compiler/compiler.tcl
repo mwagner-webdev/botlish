@@ -850,6 +850,12 @@ proc core::compiler::CompileForm {ctxVar e} {
             }
             return [Never]
         }
+        struct {
+            return [CompileStruct ctx $e]
+        }
+        project {
+            return [CompileProject ctx $e]
+        }
         ok - error {
             set value [CompileExpr ctx [N $e value]]
             if {[OpType $value] eq "never"} {
@@ -867,6 +873,45 @@ proc core::compiler::CompileForm {ctxVar e} {
             return [CompileHandle ctx $e]
         }
     }
+}
+
+# Struct construction (STRUCTS.md): the field values are compiled, and so
+# evaluated, in WRITTEN order (an abrupt completion of one leaves no struct
+# built); only then is the value built, the shape being the anonymous
+# canonical field set or the named declaration's (hir's `layout`).
+proc core::compiler::CompileStruct {ctxVar e} {
+    upvar 1 $ctxVar ctx
+    set ops {}
+    foreach field [N $e fields] {
+        set op [CompileExpr ctx $field]
+        if {[OpType $op] eq "never"} {
+            return $op
+        }
+        lappend ops $op
+    }
+    set head {}
+    if {[N $e named] && [N $e structId] ne ""} {
+        set head [linsert [N $e layout] 0 [N $e structId]]
+    }
+    set t [NewTemp]
+    Emit ctx "set $t \[core::runtime::structNew [Word $head] [Word [N $e names]] \[list [BoxWords $ops]\]\]"
+    return [Op box "\$$t" any]
+}
+
+# Field projection: the receiver's value, then field NAME of it. The
+# reference backends keep a struct's shape with its value, so the name is
+# resolved against it at run time (core::runtime::project) -- HIR proved the
+# receiver a struct with that field; native code lowers the same projection
+# to a known slot.
+proc core::compiler::CompileProject {ctxVar e} {
+    upvar 1 $ctxVar ctx
+    set receiver [CompileExpr ctx [N $e receiver]]
+    if {[OpType $receiver] eq "never"} {
+        return $receiver
+    }
+    set t [NewTemp]
+    Emit ctx "set $t \[core::runtime::project [BoxWord $receiver] [Word [N $e name]]\]"
+    return [Op box "\$$t" any]
 }
 
 proc core::compiler::CompileRef {ctxVar e} {

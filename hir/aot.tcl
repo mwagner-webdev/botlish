@@ -583,6 +583,13 @@ proc hir::aot::Visit {hir stateVar region e tails statics} {
             Require $hir state $region $e [dict get $node start] int TYPE "the loop start value"
             Require $hir state $region $e [dict get $node end] int TYPE "the loop end value"
         }
+        project {
+            # A field projection lowers to a known slot of a known struct
+            # shape (STRUCTS.md): there is no dynamic lookup to fall back
+            # to, so a receiver that is not statically a struct is a
+            # blocker -- not a guard (nothing native could check it with).
+            Require $hir state $region $e [dict get $node receiver] struct TYPE "the receiver of a field projection"
+        }
         return - break - continue {
             if {[dict get $node target] eq ""} {
                 Block state $region [Blocker $hir UnresolvedControl $e "" "" {} \

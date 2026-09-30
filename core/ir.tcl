@@ -33,6 +33,7 @@
 #                               hir/resolve.tcl's own break case for the
 #                               full "two-tier" design this implements.
 #   (continue)
+#   (struct HEAD NAME EXPR ...)   (project EXPR NAME)
 #   (ok EXPR)
 #   (error-value EXPR)
 #   (fail NAME)
@@ -59,6 +60,25 @@
 # `handle` completes however that block's body does. Any other completion
 # (including a propagate-error whose name matches none of NAME1, NAME2, ...)
 # passes through unchanged.
+#
+# (struct HEAD NAME1 EXPR1 NAME2 EXPR2 ...): builds a struct value (STRUCTS.md).
+# The EXPRs are evaluated strictly in WRITTEN order (the order of the NAMEs
+# here, never a canonical layout order); only when every one has completed
+# normally is the struct built, so no partially initialized value is ever
+# observable. HEAD is {} for an anonymous struct value -- its shape is the
+# set of NAMEs (an anonymous struct's identity is its field set, never the
+# order they were written in) -- or {ID FIELD ...} for a named struct
+# construction: ID is the declaration identity (a program-unique
+# "Name" / "namespace::Name") and FIELD... the declared slot order, which
+# the written NAMEs must match exactly (same set, no duplicate, none
+# missing -- a mismatch is a static error in HIR; here it is a semantic
+# error, STRUCT). The runtime value carries its shape, so equality and
+# display never consult a declaration.
+#
+# (project EXPR NAME): the value of field NAME of the struct value of EXPR. A
+# struct's field set is fixed, so a well-typed projection cannot fail; here
+# a receiver that is not a struct, or has no such field, is an invalid
+# program (TYPE).
 #
 # (listloop LIST-EXPR ELEMENT-BLOCK): the surface `loop x in EXPR:` form
 # (see surface/parser.tcl) -- the *returning* iterable loop (RETURNING-
@@ -233,6 +253,39 @@ proc core::ir::CheckShape {node} {
             ExpectLength $node 4 4 "(countloop START-EXPR END-EXPR ELEMENT-BLOCK)"
             CheckElementBlock [lindex $node 3] $node "body"
         }
+        struct {
+            ExpectLength $node 2 * "(struct HEAD NAME EXPR ...)"
+            if {[llength $node] % 2 != 0} {
+                core::malformed "(struct HEAD NAME EXPR ...) needs an EXPR for every NAME" $node
+            }
+            set head [lindex $node 1]
+            if {[catch {llength $head}]} {
+                core::malformed "the HEAD of (struct ...) must be {} or {ID FIELD ...}" $node
+            }
+            if {$head ne ""} {
+                CheckName [lindex $head 0] $node
+                set declared {}
+                foreach field [lrange $head 1 end] {
+                    CheckName $field $node
+                    if {$field in $declared} {
+                        core::semanticError DUPLICATE "duplicate field \"$field\" in struct [lindex $head 0]"
+                    }
+                    lappend declared $field
+                }
+            }
+            set seen {}
+            foreach {name value} [lrange $node 2 end] {
+                CheckName $name $node
+                if {$name in $seen} {
+                    core::semanticError DUPLICATE "duplicate field \"$name\" in a struct initializer"
+                }
+                lappend seen $name
+            }
+        }
+        project {
+            ExpectLength $node 3 3 "(project EXPR NAME)"
+            CheckName [lindex $node 2] $node
+        }
         return {
             ExpectLength $node 2 2 "(return EXPR)"
         }
@@ -348,6 +401,14 @@ proc core::ir::CollectBindNames {node namesVar} {
                 CollectBindNames $expr names
             }
         }
+        struct {
+            foreach {name expr} [lrange $node 2 end] {
+                CollectBindNames $expr names
+            }
+        }
+        project {
+            CollectBindNames [lindex $node 1] names
+        }
         if {
             CollectBindNames [lindex $node 1] names
         }
@@ -410,6 +471,18 @@ proc core::ir::containsBlock {exprs} {
                 }
             }
             fail {}
+            struct {
+                foreach {name value} [lrange $expr 2 end] {
+                    if {[containsBlock [list $value]]} {
+                        return 1
+                    }
+                }
+            }
+            project {
+                if {[containsBlock [list [lindex $expr 1]]]} {
+                    return 1
+                }
+            }
             handle {
                 if {[containsBlock [list [lindex $expr 1]]]} {
                     return 1
@@ -507,6 +580,14 @@ proc core::ir::check {node {context {callable 0 loop 0}}} {
             }
         }
         fail {}
+        struct {
+            foreach {name value} [lrange $node 2 end] {
+                check $value $context
+            }
+        }
+        project {
+            check [lindex $node 1] $context
+        }
         handle {
             check [lindex $node 1] $context
             foreach {name handlerBlock} [lrange $node 2 end] {

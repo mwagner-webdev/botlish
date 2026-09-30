@@ -89,9 +89,61 @@ proc hir::read::TypeDecls {lines} {
     if {$decls ne ""} {
         set registered [hir::sourcetypes::apply $decls]
     }
+    # Struct declarations (hir::format::TypeDecl's "struct ..." lines) come
+    # after the integer-domain types their fields may name.
+    set structEntries {}
+    foreach entry $rest {
+        lassign $entry indent content number
+        if {$indent != 0 || [string range $content 0 6] ne "struct "} { break }
+        lappend structEntries [StructDeclLine $content $number]
+        set rest [lrange $rest 1 end]
+    }
+    if {$structEntries ne ""} {
+        # Skeletons first, then the field types (which may name any struct
+        # of the text, itself included).
+        set skeleton [lmap entry $structEntries {
+            dict set entry fields [concat {*}[lmap {fname ftype} [dict get $entry fields] {list $fname any}]]
+        }]
+        hir::structs::applyEntries $skeleton
+        set final {}
+        foreach entry $structEntries {
+            set number [dict get $entry line]
+            set fields [concat {*}[lmap {fname ftype} [dict get $entry fields] {
+                list $fname [ParseType $ftype $number]
+            }]]
+            dict unset entry names
+            dict unset entry line
+            dict set entry fields $fields
+            lappend final $entry
+        }
+        hir::structs::applyEntries $final
+        lappend registered {*}$final
+    }
     variable lastTypeDecls
     set lastTypeDecls $registered
     return $rest
+}
+
+# The struct sourceTypes entry "struct ID name NAME ns NS fields F: T, ..."
+# (hir::format::TypeDecl) states; field types are read with the structs
+# registered skeleton-first, so a field may name any struct of the text.
+proc hir::read::StructDeclLine {content number} {
+    if {![regexp {^struct (\S+) name (\S+) ns (\S+) fields (.*)$} $content -> id name ns fieldsText]} {
+        Fail $number "expected \"struct ID name NAME ns NS fields FIELD: TYPE, ...\""
+    }
+    set ns [expr {$ns eq "-" ? "" : $ns}]
+    # Skeleton: every struct line of the text must be known before any field
+    # type is parsed, so register the names of all of them first.
+    set names {}
+    set rawFields {}
+    foreach item [SplitTop $fieldsText ", "] {
+        if {![regexp {^(\S+): (.+)$} $item -> fname ftype]} {
+            Fail $number "expected \"FIELD: TYPE\" in a struct declaration, got \"$item\""
+        }
+        lappend names $fname
+        lappend rawFields $fname $ftype
+    }
+    return [dict create kind struct name $name id $id namespace $ns fields $rawFields names $names line $number]
 }
 
 # The surface/lower.tcl-shaped decl dict for one "type ..." HIR text line
@@ -377,6 +429,23 @@ proc hir::read::ParseType {text number} {
     if {[regexp {^MutableArray\[(.+)\]$} $text -> inner]} {
         # PARAMETERIZED-MUTABLEARRAY.md: hir::types::show's own notation.
         return [list mutarray [ParseType $inner $number]]
+    }
+    if {[regexp {^struct\{(.*)\}$} $text -> inner]} {
+        # hir::types::show's anonymous struct notation (STRUCTS.md): the
+        # fields in canonical order.
+        set fields [dict create]
+        if {$inner ne ""} {
+            foreach item [SplitTop $inner ", "] {
+                if {![regexp {^(\S+): (.+)$} $item -> fname ftype]} {
+                    Fail $number "bad struct field \"$item\" in \"$text\": expected \"NAME: TYPE\""
+                }
+                dict set fields $fname [ParseType $ftype $number]
+            }
+        }
+        return [hir::types::MakeStruct $fields 0]
+    }
+    if {[hir::structs::declared $text]} {
+        return [list nstruct $text]
     }
     if {[regexp {^([a-z]+)\[([^\]]*)\]$} $text -> base names]} {
         set text [list refined $base [split $names ,]]
@@ -736,6 +805,49 @@ proc hir::read::Expr {hirVar level s path block} {
             }
             SetField hir $e value [Expr hir $inner $s [concat $path 1] $block]
         }
+        struct {
+            if {![regexp {^(\S+) \((.*)\)$} $head -> who namesText]} {
+                Fail $number "expected \"struct (anon|ID) (FIELD, ...)\""
+            }
+            set names [expr {$namesText eq "" ? {} : [split [string map {", " \x01} $namesText] \x01]}]
+            set named [expr {$who ne "anon"}]
+            set id ""
+            if {$named} {
+                if {![hir::structs::declared $who]} {
+                    Fail $number "unknown struct type \"$who\": no such struct declaration is in this text"
+                }
+                set id $who
+            }
+            set layout [expr {$named ? [hir::structs::names $id] : [lsort -unique $names]}]
+            SetField hir $e named $named
+            SetField hir $e structId $id
+            SetField hir $e names $names
+            SetField hir $e layout $layout
+            SetField hir $e slots [lmap name $names {lsearch -exact $layout $name}]
+            set ids {}
+            set origins {}
+            set index 0
+            while {[AtLevel $hir $inner] && $index < [llength $names]} {
+                set fieldPath [concat $path [expr {3 + 2 * $index}]]
+                lappend ids [Expr hir $inner $s $fieldPath $block]
+                lappend origins [list ir $fieldPath]
+                incr index
+            }
+            if {[llength $ids] != [llength $names]} {
+                Fail $number "a struct with fields ($namesText) needs one child line per field"
+            }
+            SetField hir $e fields $ids
+            SetField hir $e fieldOrigins $origins
+            SetField hir $e nameOrigins $origins
+        }
+        project {
+            if {$head eq ""} {
+                Fail $number "expected \"project FIELD\""
+            }
+            SetField hir $e name $head
+            SetField hir $e nameOrigin [list ir [concat $path 2]]
+            SetField hir $e receiver [Expr hir $inner $s [concat $path 1] $block]
+        }
         fail {
             if {$head eq "" || ![hir::errordecls::isDeclared $head]} {
                 Fail $number "unknown error \"$head\": no \"error $head\" declaration is visible"
@@ -843,6 +955,13 @@ proc hir::read::CanonicalType {hir type} {
     if {[hir::types::IsFn $type]} {
         return [hir::types::MakeFn [hir::types::FnArgs $type] \
             [CanonicalType $hir [hir::types::FnReturn $type]] [hir::types::FnErrors $type]]
+    }
+    if {[hir::types::IsStruct $type]} {
+        set fields [dict create]
+        dict for {name t} [lindex $type 1] {
+            dict set fields $name [CanonicalType $hir $t]
+        }
+        return [hir::types::MakeStruct $fields 0]
     }
     return $type
 }

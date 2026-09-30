@@ -75,7 +75,7 @@ namespace eval core::hashing {
     variable Mask61    0x1FFFFFFFFFFFFFFF
     # Kind tags mixed in before each value's payload, so e.g. int 1 and str
     # "1" never hash the same by coincidence of byte content.
-    variable KindTag [dict create int 0 str 1 bool 2 unit 3 list 4 result 5 UnicodeChar 6 immutableSet 7]
+    variable KindTag [dict create int 0 str 1 bool 2 unit 3 list 4 result 5 UnicodeChar 6 immutableSet 7 struct 8]
 }
 
 # H folded over one more byte (0..255), wrapped to 64 bits.
@@ -162,6 +162,22 @@ proc core::hashing::Mix {h v} {
             variable FnvOffset
             set sub [Mix $FnvOffset [core::value::resultPayload $v]]
             return [Bytes $h [LeBytes $sub]]
+        }
+        struct {
+            # Consistent with core::value::equal's struct equality (same
+            # shape, equal fields slot by slot): the declaration identity
+            # text (empty for an anonymous struct), the field count, then
+            # each slot's name text and sub-hash in slot order. The shape
+            # is folded in so {x: 1} and {y: 1} do not collide by design.
+            variable FnvOffset
+            set fields [core::value::structFields $v]
+            set h [Bytes $h [Utf8Bytes [core::value::structId $v]]]
+            set h [Bytes $h [LeBytes [llength $fields]]]
+            foreach field $fields item [core::value::structValues $v] {
+                set h [Bytes $h [Utf8Bytes $field]]
+                set h [Bytes $h [LeBytes [Mix $FnvOffset $item]]]
+            }
+            return $h
         }
         immutableSet {
             # Order-independent (XOR-combined member sub-hashes), matching

@@ -275,6 +275,21 @@ proc hir::completions::Eval {hirVar ctxVar diagnose enclosing guard e} {
             set r [Eval hir ctx $diagnose $enclosing $guard [dict get $node value]]
             return [expr {$r eq {never} ? {never} : [hir::range::unknown]}]
         }
+        struct {
+            # Field values are evaluated (and may fail or return) in written
+            # order; a field that never completes normally means no struct
+            # value is ever built.
+            foreach field [dict get $node fields] {
+                if {[Eval hir ctx $diagnose $enclosing $guard $field] eq {never}} {
+                    return never
+                }
+            }
+            return [hir::range::unknown]
+        }
+        project {
+            set r [Eval hir ctx $diagnose $enclosing $guard [dict get $node receiver]]
+            return [expr {$r eq {never} ? {never} : [hir::range::unknown]}]
+        }
         handle {
             return [EvalHandle hir ctx $diagnose $enclosing $guard $e $node]
         }

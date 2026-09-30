@@ -51,6 +51,17 @@
 #                             captured env, and the compiled code for the
 #                             body ("" when the body is to be interpreted)
 #   {native NAME}             native callable; metadata lives in the registry
+#   {struct SHAPE VALUES}     a struct value (STRUCTS.md): SHAPE is {ID FIELD...}
+#                             -- ID is "" for an anonymous struct (whose
+#                             identity is its field set, FIELDs in canonical
+#                             sorted order) or the declaration identity
+#                             of a named struct ("Name", "namespace::Name";
+#                             FIELDs in declared slot order) -- and VALUES
+#                             the field values, one per FIELD, in slot
+#                             order. Immutable. Distinct from List: a
+#                             struct's kind is never `list`. The field names
+#                             live in the shape, never in the individual
+#                             value's own payload.
 #   {mutarray ID}             MutableArray handle; ID indexes
 #                             core::mutarray's mutable store (mutarray.tcl).
 #                             The only value kind that is NOT treated as
@@ -62,7 +73,7 @@
 # file should construct and inspect values only through these procedures.
 
 namespace eval core::value {
-    variable kinds {int str bool unit list result block native mutarray UnicodeChar immutableSet errorId}
+    variable kinds {int str bool unit list result block native mutarray UnicodeChar immutableSet errorId struct}
 }
 
 proc core::value::isCanonicalInt {text} {
@@ -173,6 +184,16 @@ proc core::value::immutableSet {items} {
     return [list immutableSet $items]
 }
 
+# The struct value with SHAPE ({ID FIELD...}, see this file's header) and
+# VALUES (one per FIELD, in slot order).
+proc core::value::structOf {shape values} {
+    if {[llength [lindex $shape 0]] > 1 || [llength $values] != [llength $shape] - 1} {
+        error "core::value::structOf: shape \"$shape\" does not fit [llength $values] value(s)"
+    }
+    foreach v $values { check $v }
+    return [list struct $shape $values]
+}
+
 proc core::value::ok {payload} {
     return [list result ok [check $payload]]
 }
@@ -255,6 +276,23 @@ proc core::value::blockBody {v}   { Require block $v; return [lindex $v 2] }
 proc core::value::blockEnv {v}    { Require block $v; return [lindex $v 3] }
 proc core::value::blockCode {v}   { Require block $v; return [lindex $v 4] }
 
+proc core::value::structShape {v}  { Require struct $v; return [lindex $v 1] }
+proc core::value::structId {v}     { Require struct $v; return [lindex $v 1 0] }
+proc core::value::structFields {v} { Require struct $v; return [lrange [lindex $v 1] 1 end] }
+proc core::value::structValues {v} { Require struct $v; return [lindex $v 2] }
+
+# The value of field NAME of struct value V, or an error (a Tcl error: the
+# callers are the evaluator's own `project`, which has already proven the
+# kind, and trusted code).
+proc core::value::structGet {v name} {
+    Require struct $v
+    set slot [lsearch -exact [lrange [lindex $v 1] 1 end] $name]
+    if {$slot < 0} {
+        error "core::value::structGet: no field \"$name\" in [show $v]"
+    }
+    return [lindex $v 2 $slot]
+}
+
 proc core::value::nativeName {v}  { Require native $v; return [lindex $v 1] }
 proc core::value::mutarrayId {v}  { Require mutarray $v; return [lindex $v 1] }
 
@@ -264,6 +302,13 @@ proc core::value::containsBlock {v} {
         block  { return 1 }
         list - immutableSet {
             foreach item [lindex $v 1] {
+                if {[containsBlock $item]} {
+                    return 1
+                }
+            }
+        }
+        struct {
+            foreach item [lindex $v 2] {
                 if {[containsBlock $item]} {
                     return 1
                 }
@@ -324,6 +369,23 @@ proc core::value::equal {a b} {
             return [expr {[lindex $a 1] eq [lindex $b 1]
                           && [equal [lindex $a 2] [lindex $b 2]]}]
         }
+        struct {
+            # Equal iff the same shape (an anonymous struct's field set, or
+            # the same named declaration identity: a named struct is never
+            # equal to an anonymous one or to another named struct, whatever
+            # their fields) and every field equal, slot by slot
+            # (STRUCTS.md). A shape mismatch is unequal without comparing
+            # any contents, exactly as List's length mismatch is.
+            if {[lindex $a 1] ne [lindex $b 1]} {
+                return 0
+            }
+            foreach x [lindex $a 2] y [lindex $b 2] {
+                if {![equal $x $y]} {
+                    return 0
+                }
+            }
+            return 1
+        }
         immutableSet {
             # Set equality, independent of construction/insertion order
             # (MINIMAL-IMMUTABLE-SET.md item 16): both operands are already
@@ -382,6 +444,19 @@ proc core::value::show {v {withEvidence 0}} {
             return "\[[join $parts {, }]\]"
         }
         result { return "[lindex $v 1]([show [lindex $v 2] $withEvidence])" }
+        struct {
+            # {name: "Grace", age: 45} / Person {name: "Ada", age: 36}: field
+            # names in slot order (anonymous: canonical sorted order).
+            set parts {}
+            foreach field [lrange [lindex $v 1] 1 end] item [lindex $v 2] {
+                lappend parts "$field: [show $item $withEvidence]"
+            }
+            set text "{[join $parts {, }]}"
+            if {[lindex $v 1 0] ne ""} {
+                return "[lindex $v 1 0] $text"
+            }
+            return $text
+        }
         immutableSet {
             # Punctuation only; no semantic ordering is implied (item 87).
             set parts {}

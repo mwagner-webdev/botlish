@@ -19,9 +19,11 @@
 #             scalar's canonical decimal codepoint (like an INT token's
 #             digits) -- see UNICODE-CHAR-LITERALS.md
 #   keywords  fn if else loop return break continue true false unit and or not
-#             namespace type error errors fail on (kind is the word itself)
-#   operators ( ) [ ] { } , : :: = == != < <= > >= + - * -> ..
-#             (kind is the text itself)
+#             namespace type struct error errors fail on (kind is the word
+#             itself)
+#   operators ( ) [ ] { } , : :: = == != < <= > >= + - * -> .. .
+#             (kind is the text itself; "." is field projection, STRUCTS.md,
+#             and ".." the integer-domain range of a type declaration)
 #   NEWLINE   end of a logical line
 #   INDENT    the next logical line is indented deeper
 #   DEDENT    one indentation level ends
@@ -62,13 +64,15 @@
 
 namespace eval surface::lexer {
     variable keywords {fn if else loop return break continue true false unit and or not namespace type \
-        error errors fail on}
+        struct error errors fail on}
     # Longest operators first ("::" before ":", so a module-qualified name
     # like web::uri_escape does not lex as ":" ":"). "{" and "}" are not
     # ordinary block syntax (Botlish blocks are ":" + indentation): they
-    # denote only a type declaration's finite integer-set domain
-    # (surface/parser.tcl's Domain), a context-sensitive meaning decided by
-    # the parser, not the lexer -- the lexer just hands back a token.
+    # denote a type declaration's finite integer-set domain
+    # (surface/parser.tcl's Domain), a structural function type's fields
+    # and, in expression position, a struct initializer (STRUCTS.md) -- a
+    # context-sensitive meaning decided by the parser, not the lexer; the
+    # lexer just hands back a token.
     variable operators [list == != <= >= :: -> ( ) \[ \] \{ \} , : = < > + - *]
 }
 
@@ -222,7 +226,9 @@ proc surface::lexer::tokenize {source file} {
                     lappend tokens [Token .. .. "" [Span $file $i [expr {$i + 2}] $line $lineStart]]
                     incr i 2
                 } else {
-                    Report diagnostics $file $i $line $lineStart 1 "unexpected character \".\""
+                    # Field projection (STRUCTS.md): a single "." is always
+                    # one token; whether it is legal is the parser's call.
+                    lappend tokens [Token . . "" [Span $file $i [expr {$i + 1}] $line $lineStart]]
                     incr i
                 }
             }

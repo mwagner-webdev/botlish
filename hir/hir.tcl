@@ -106,6 +106,16 @@
 #   return    value, target (the block ExprId it leaves, "" if none)
 #   break     value ("" if none), target (the loop ExprId, "" if none)
 #   continue  target
+#   struct    named (0 | 1), structId (the named struct's declaration
+#             identity, "" for an anonymous struct -- or a named construction
+#             whose type did not resolve, a diagnostic), names (the field
+#             names in WRITTEN order), nameOrigins, fieldOrigins, fields (the
+#             field value ExprIds in written order: evaluation order),
+#             layout (the field names in slot order: sorted for an
+#             anonymous struct, declared order for a named one), slots (for
+#             each written field its index in layout, -1 if it names no
+#             layout field). STRUCTS.md; hir/structs.tcl.
+#   project   receiver (ExprId), name, nameOrigin -- `receiver.name`
 #   ok        value
 #   error     value                 (core IR error-value)
 #
@@ -181,6 +191,14 @@ proc hir::Diagnose {hirVar kind message expr} {
     dict lappend hir diagnostics [dict create kind $kind message $message expr $expr]
 }
 
+# Diagnose, locating the diagnostic at ORIGIN (an expression origin, e.g. a
+# struct field's own initializer) instead of at EXPR's: EXPR stays the
+# anchor every check that groups or deduplicates diagnostics uses.
+proc hir::DiagnoseAt {hirVar kind message expr origin} {
+    upvar 1 $hirVar hir
+    dict lappend hir diagnostics [dict create kind $kind message $message expr $expr origin $origin]
+}
+
 # Builds the HIR of the core IR program EXPRS (through hir::syntax::fromIR,
 # so origins are {ir PATH}).
 #
@@ -236,6 +254,18 @@ proc hir::build {exprs args} {
 #                   by default: every caller but the surface frontend
 #                   (surface/lower.tcl, surface/modules.tcl) and hir::read.
 #
+#   -struct-decls D surface/lower.tcl's StructDeclOf dicts (one per "struct
+#                   Name:" declaration, across every module section plus the
+#                   program's own top level): validated and registered, in the
+#                   same declaration pass and the same type namespace as
+#                   -type-decls, by hir::sourcetypes::apply (hir/structs.tcl;
+#                   STRUCTS.md), so `Name { ... }` and a `Name` annotation
+#                   resolve through it. A caller that passes this option, even
+#                   empty, starts a fresh struct registry (the surface
+#                   frontends always do); one that omits it (core IR builds,
+#                   internal rebuilds) leaves the registry as it is. Kept as
+#                   `struct` entries of HIR's `sourceTypes`.
+#
 #   -error-decls D  surface/lower.tcl's ErrorDeclOf dicts (one per "error
 #                   NAME" declaration the caller found, across every module
 #                   section plus its own top level) -- validated and
@@ -251,13 +281,18 @@ proc hir::build {exprs args} {
 proc hir::buildSyntax {nodes args} {
     set options [Options hir::buildSyntax \
         {-mode program -strict 1 -origin "" -files {} -modules {} \
-            -type-decls {} -error-decls {} -halt-on-resolution-errors 0} $args]
+            -type-decls {} -error-decls {} -struct-decls {} -halt-on-resolution-errors 0} $args]
     set mode [dict get $options -mode]
     if {$mode ni {program sequence}} {
         error "hir::build: -mode must be program or sequence"
     }
-    set sourceTypes [hir::sourcetypes::apply [dict get $options -type-decls]]
     set errorDecls [hir::errordecls::apply [dict get $options -error-decls]]
+    if {[dict exists [dict create {*}$args] -struct-decls] && [dict get $options -struct-decls] eq ""} {
+        # A frontend that passes -struct-decls (even empty) compiles a program
+        # of its own: no struct of an earlier compilation may stay visible.
+        hir::structs::Reset
+    }
+    set sourceTypes [hir::sourcetypes::apply [dict get $options -type-decls] [dict get $options -struct-decls]]
     set hir [hir::resolve::program $nodes $mode [dict get $options -origin] [dict get $options -modules]]
     dict set hir sourceTypes $sourceTypes
     dict set hir errorDecls $errorDecls
@@ -329,6 +364,7 @@ proc hir::CheckOnce {hirVar demote} {
     hir::range::verifyDeclaredResults hir
     hir::range::verifyDeclaredParams hir
     hir::callables::verify hir
+    hir::structs::verify hir
     hir::semantic::verify hir
     hir::errorsets::verify hir
     hir::modulebinding::validate hir
@@ -565,6 +601,8 @@ proc hir::children {hir e} {
         countloop {
             return [concat [list [dict get $node start] [dict get $node end]] [dict get $node body]]
         }
+        struct  { return [dict get $node fields] }
+        project { return [list [dict get $node receiver]] }
         fail  { return {} }
         handle {
             set result [list [dict get $node call]]
@@ -702,7 +740,7 @@ proc hir::exprsAt {hir origin} {
 }
 
 apply {{dir} {
-    foreach file {syntax resolve refcheck hygiene sourcetypes errordecls types exactvalue signatures modulebinding refine lower format read aot specialize range callables containers semantic completions errorsets induction escape blockescape stringregion traversal construction cardinality} {
+    foreach file {syntax resolve refcheck hygiene sourcetypes structs errordecls types exactvalue signatures modulebinding refine lower format read aot specialize range callables containers semantic completions errorsets induction escape blockescape stringregion traversal construction cardinality} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

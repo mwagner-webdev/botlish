@@ -34,6 +34,24 @@
 #                                   ELEM; structurally parallel to {list
 #                                   ELEM}, but never has a positional shape
 #                                   (a set is semantically unordered)
+#   {struct {F1 T1 F2 T2 ...}}      an *anonymous struct* (STRUCTS.md): a
+#                                   struct value whose fields are exactly
+#                                   F1.. (sorted by name: the canonical
+#                                   order, so source order is never part of
+#                                   type identity), field Fi of static type
+#                                   Ti. Structural: two anonymous structs
+#                                   have one type iff they have the same
+#                                   field names and the same field types.
+#                                   Not spellable in a source annotation.
+#   {nstruct ID}                    a *named struct*: a value of the struct
+#                                   declared as ID (hir/structs.tcl). Nominal:
+#                                   the identity is the declaration, never
+#                                   the fields, and the schema is the
+#                                   declaration's (hir::structs::fieldType).
+#   struct                          the broad kind of every struct value (a
+#                                   depth-truncated struct type, and the
+#                                   runtime kind's own name); no field can
+#                                   be projected from it.
 #   {mutarray ELEM}                 a MutableArray[ELEM] (PARAMETERIZED-
 #                                   MUTABLEARRAY.md): a mutable object whose
 #                                   static contract is that every slot value
@@ -128,11 +146,23 @@ namespace eval hir::types {
 # type": #5/#49 of MINIMAL-APPLIED-LIST-TYPES.md). Called only from
 # hir::resolve::ResolveTypeExpr, which turns the error into a located HIR
 # diagnostic exactly as a plain core::type::normalize failure always has.
-proc hir::types::resolveNamed {name} {
+proc hir::types::resolveNamed {name {ns ""}} {
     variable constructors
     if {[dict exists $constructors $name]} {
         error "type constructor \"$name\" requires [dict get $constructors $name]\
             type argument(s) (e.g. $name\[...\])"
+    }
+    # A declared struct (hir/structs.tcl): `Person` in the code's own
+    # namespace NS, or a module-qualified `geo::Point`. The struct
+    # declarations are a type namespace of their own, consulted before
+    # core::type's registry (and never colliding with it: apply rejects a
+    # struct named like any registered type).
+    set id [hir::structs::lookup $name $ns]
+    if {$id ne ""} {
+        return [list nstruct $id]
+    }
+    if {[string first :: $name] >= 0} {
+        error "unknown struct type \"$name\": no such struct is declared in that module"
     }
     return [core::type::normalize $name]
 }
@@ -168,7 +198,92 @@ proc hir::types::resolveApplication {ctor argTypes} {
 
 proc hir::types::IsSpecific {type} {
     return [expr {$type eq "never"
-                  || ([llength $type] > 1 && [lindex $type 0] in {native block list immutableSet mutarray fn})}]
+                  || ([llength $type] > 1 && [lindex $type 0] in {native block list immutableSet mutarray fn struct nstruct})}]
+}
+
+# ---------------------------------------------------------------------------
+# Struct types (STRUCTS.md; the header's {struct FIELDS} and {nstruct ID})
+
+# 1 if TYPE is an anonymous struct type.
+proc hir::types::IsStruct {type} {
+    return [expr {[lindex $type 0] eq "struct" && [llength $type] == 2}]
+}
+
+# 1 if TYPE is a named struct type.
+proc hir::types::IsNamedStruct {type} {
+    return [expr {[lindex $type 0] eq "nstruct" && [llength $type] == 2}]
+}
+
+# 1 if TYPE is any precise struct type, anonymous or named.
+proc hir::types::IsStructLike {type} {
+    return [expr {[IsStruct $type] || [IsNamedStruct $type]}]
+}
+
+# The canonical anonymous struct type with the fields FIELDS (a dict, field
+# name -> type, in any order), nested DEPTH aggregate forms deep. The field
+# names are sorted (plain code-point order): the one canonical layout, so
+# the order fields are written in is never part of a struct's type. Field
+# types are bounded like every aggregate's, so the lattice stays finite;
+# past the bound the result is the bare `struct` kind -- sound for the same
+# reason a truncated List is (hir/callables.tcl compares a value's own type
+# with the position it flows into exactly, so a bearing struct flowing into a
+# truncated position is an erasure and is rejected there). A `never` field
+# (an expression that never completes makes the whole struct never, see
+# hir::types::Struct) is recorded as `any`.
+proc hir::types::MakeStruct {fields depth} {
+    variable aggregateDepth
+    if {$depth >= $aggregateDepth} {
+        return struct
+    }
+    set inner [expr {$depth + 1}]
+    set canonical {}
+    foreach name [lsort [dict keys $fields]] {
+        set t [dict get $fields $name]
+        if {$t eq "never"} {
+            set t any
+        }
+        lappend canonical $name [Unshaped [Bound $t $inner]]
+    }
+    return [list struct $canonical]
+}
+
+# The field names of struct type TYPE in slot order: sorted for an anonymous
+# struct, declared order for a named one. "" is not a struct type.
+proc hir::types::StructLayout {type} {
+    if {[IsStruct $type]} {
+        return [dict keys [lindex $type 1]]
+    }
+    if {[IsNamedStruct $type]} {
+        return [hir::structs::names [lindex $type 1]]
+    }
+    return ""
+}
+
+# The static type of field NAME of struct type TYPE, or "" if TYPE is not a
+# struct type or has no such field. For a named struct it is the declared
+# type, always: never narrowed by how a particular value was built.
+proc hir::types::StructField {type name} {
+    if {[IsStruct $type]} {
+        set fields [lindex $type 1]
+        return [expr {[dict exists $fields $name] ? [dict get $fields $name] : ""}]
+    }
+    if {[IsNamedStruct $type]} {
+        return [hir::structs::fieldType [lindex $type 1] $name]
+    }
+    return ""
+}
+
+# The runtime *shape key* of struct type TYPE: what the runtime/codegen
+# representation of its values depends on, never the semantic field types --
+# {} for an anonymous struct followed by its canonical field names, or
+# {ID FIELD...} for a named one (declaration identity, then slot order).
+# Two anonymous struct types of one field set share a shape key even when
+# their field types differ ({x: int} and {x: str}).
+proc hir::types::StructShape {type} {
+    if {[IsNamedStruct $type]} {
+        return [linsert [StructLayout $type] 0 [lindex $type 1]]
+    }
+    return [linsert [StructLayout $type] 0 ""]
 }
 
 # ---------------------------------------------------------------------------
@@ -621,6 +736,9 @@ proc hir::types::Bound {type depth} {
     if {[IsMutArray $type]} {
         return [MakeMutArray [lindex $type 1] $depth]
     }
+    if {[IsStruct $type]} {
+        return [MakeStruct [lindex $type 1] $depth]
+    }
     if {[IsExactBlock $type]} {
         set result [expr {$depth >= $aggregateDepth ? "any" : [Bound [lindex $type 3] [expr {$depth + 1}]]}]
         return [lreplace $type 3 3 $result]
@@ -694,6 +812,32 @@ proc hir::types::subtype {a b} {
         # anything: only the vacuous contract MutableArray[any] qualifies.
         return [expr {[lindex $a 1] eq "any"}]
     }
+    if {[IsStruct $b]} {
+        # An anonymous struct is compatible with another only when the field
+        # sets are equal (no width subtyping, no optional fields) and every
+        # field type is compatible -- fields are immutable, so covariant;
+        # a MutableArray field stays invariant through its own rule above.
+        if {![IsStruct $a]} {
+            return 0
+        }
+        set fa [lindex $a 1]
+        set fb [lindex $b 1]
+        if {[dict keys $fa] ne [dict keys $fb]} {
+            return 0
+        }
+        dict for {name t} $fa {
+            if {![subtype $t [dict get $fb $name]]} {
+                return 0
+            }
+        }
+        return 1
+    }
+    if {[IsNamedStruct $b]} {
+        # Nominal: only the same declaration. Identical spelling was
+        # decided above ($a eq $b); a same-shaped anonymous struct or a
+        # differently named struct with the same fields is never one.
+        return 0
+    }
     if {[IsFn $b]} {
         # A structural function type: any callable whose own call contract
         # is compatible with B's (an exact native/block through its
@@ -738,6 +882,26 @@ proc hir::types::lub {a b} {
         # would flow into it.
         if {[subtype $a $b] && [subtype $b $a]} {
             return [expr {$a eq "mutarray" || $b eq "mutarray" ? "mutarray" : [lindex [lsort [list $a $b]] 0]}]
+        }
+        return any
+    }
+    if {[IsStructLike $a] || [IsStructLike $b]} {
+        # Two anonymous structs with the same field names join fieldwise
+        # (STRUCTS.md: {x: lub(A,C), y: lub(B,D)}); every other pair has no
+        # useful join -- different field sets (no width subtyping, no
+        # optional or open fields), two different named structs, a named
+        # struct and an anonymous one (nominal identity never arises from
+        # shape coincidence) -- and falls back to the broad `any`.
+        if {[IsStruct $a] && [IsStruct $b]} {
+            set fa [lindex $a 1]
+            set fb [lindex $b 1]
+            if {[dict keys $fa] eq [dict keys $fb]} {
+                set joined [dict create]
+                dict for {name t} $fa {
+                    dict set joined $name [lub $t [dict get $fb $name]]
+                }
+                return [MakeStruct $joined 0]
+            }
         }
         return any
     }
@@ -809,9 +973,10 @@ proc hir::types::narrow {current fact} {
         # (legal callers already proved it).
         return [expr {[IsMutArray $current] ? $current : $fact}]
     }
-    if {[IsFn $fact]} {
-        # A structural contract fact: a callable already known to honor it
-        # (an exact one, or a narrower contract) says more.
+    if {[IsFn $fact] || [IsStructLike $fact]} {
+        # A structural contract fact (a function contract, a struct type): a
+        # value already known to satisfy it (a narrower contract, the same
+        # struct) says more.
         return [expr {[subtype $current $fact] ? $current : $fact}]
     }
     if {[IsFn $current] && $fact in {block native}} {
@@ -864,6 +1029,9 @@ proc hir::types::kindOf {type} {
         # one runtime kind.
         return ""
     }
+    if {[IsStructLike $type]} {
+        return struct
+    }
     if {[IsSpecific $type]} {
         return [lindex $type 0]
     }
@@ -874,6 +1042,9 @@ proc hir::types::kindOf {type} {
 proc hir::types::semantic {type} {
     if {$type eq "never" || [IsFn $type]} {
         return any
+    }
+    if {[IsStructLike $type]} {
+        return struct
     }
     if {[IsSpecific $type]} {
         return [lindex $type 0]
@@ -935,6 +1106,17 @@ proc hir::types::show {type} {
             }
             mutarray {
                 return "MutableArray\[[show [lindex $type 1]]\]"
+            }
+            struct {
+                # An anonymous struct type, fields in canonical order:
+                # struct{age: int, name: str}. (The leading word keeps a
+                # type text a Tcl-list-safe word sequence in HIR text, like
+                # Fn{...}, and apart from an ImmutableSet's value display.)
+                return "struct{[join [lmap {name t} [lindex $type 1] {format {%s: %s} $name [show $t]}] {, }]}"
+            }
+            nstruct {
+                # A named struct, by its declared name.
+                return [hir::structs::display [lindex $type 1]]
             }
             immutableSet {
                 # Same convention as List[T] above: the canonical applied-
@@ -1462,6 +1644,12 @@ proc hir::types::Expr {hirVar ctxVar e} {
         continue {
             return [SetType hir $e never]
         }
+        struct {
+            return [SetType hir $e [Struct hir ctx $e]]
+        }
+        project {
+            return [SetType hir $e [Project hir ctx $e]]
+        }
         ok - error {
             set value [Expr hir ctx [dict get $node value]]
             return [SetType hir $e [expr {$value eq "never" ? "never" : "result"}]]
@@ -1473,6 +1661,70 @@ proc hir::types::Expr {hirVar ctxVar e} {
             return [SetType hir $e [Handle hir ctx $e]]
         }
     }
+}
+
+# Types struct construction E (STRUCTS.md). The field expressions are typed
+# in WRITTEN order -- the order they evaluate in; the canonical layout never
+# reorders anything -- and, like a call's arguments, an expression that never
+# completes normally makes the whole construction never (no struct value is
+# built). A named construction has its declared type, whatever its values are
+# (the declaration is the contract; hir::range::VerifyStruct proves each value
+# admissible); an anonymous one has the canonical structural type of its
+# fields' own types.
+proc hir::types::Struct {hirVar ctxVar e} {
+    upvar 1 $hirVar hir $ctxVar ctx
+    set node [dict get $hir exprs $e]
+    set entry [dict get $ctx reachable]
+    set dead 0
+    set fieldTypes [dict create]
+    foreach name [dict get $node names] child [dict get $node fields] {
+        set type [Expr hir ctx $child]
+        if {$type eq "never"} {
+            set dead 1
+            dict set ctx reachable 0
+        }
+        if {![dict exists $fieldTypes $name]} {
+            dict set fieldTypes $name $type
+        }
+    }
+    dict set ctx reachable $entry
+    if {$dead} {
+        return never
+    }
+    if {[dict get $node named]} {
+        set id [dict get $node structId]
+        return [expr {$id eq "" ? "any" : [list nstruct $id]}]
+    }
+    return [MakeStruct $fieldTypes 0]
+}
+
+# Types field projection E (STRUCTS.md): the static type of the named field
+# of the receiver's struct type -- for a named struct the declared type,
+# always -- never a runtime lookup. A receiver that is not (yet) a known
+# struct type gives `any` here; hir::structs::verify decides whether that
+# is acceptable (a projection is proven only under a known struct type, or in
+# a semantic instance that knows it). A projection that can never complete
+# (a receiver statically of another kind, or without that field) is `never`
+# in specialization inference, like any operation that always raises.
+proc hir::types::Project {hirVar ctxVar e} {
+    upvar 1 $hirVar hir $ctxVar ctx
+    set node [dict get $hir exprs $e]
+    set receiver [Expr hir ctx [dict get $node receiver]]
+    if {$receiver eq "never"} {
+        return never
+    }
+    set name [dict get $node name]
+    if {[IsStructLike $receiver]} {
+        set t [StructField $receiver $name]
+        if {$t ne ""} {
+            return $t
+        }
+        return [expr {[dict exists $ctx spec] ? "never" : "any"}]
+    }
+    if {[dict exists $ctx spec] && [kindOf $receiver] ni {"" struct}} {
+        return never
+    }
+    return any
 }
 
 # Types a `handle CALL NAME1 HANDLER1 ...` expression E

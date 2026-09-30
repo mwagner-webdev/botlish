@@ -284,6 +284,24 @@ proc hir::specialize::KeyType {type} {
         }
         return [hir::types::MakeList $elem]
     }
+    if {[hir::types::IsStruct $type]} {
+        # A struct (STRUCTS.md) keeps what its code generation depends on: the
+        # field names -- the layout, which every field projection's slot
+        # index comes from -- with each field type reduced to its key type
+        # exactly like a List's element: `{x: MutableArray[int]}` and
+        # `{x: MutableArray[str]}` share a key (both mutarray), `{x: int}` and
+        # `{x: str}` do not (typed field operations differ). The semantic
+        # field types (evidence, applied types) never enter the key.
+        set fields [dict create]
+        dict for {name t} [lindex $type 1] {
+            dict set fields $name [KeyType $t]
+        }
+        return [hir::types::MakeStruct $fields 0]
+    }
+    if {[hir::types::IsNamedStruct $type]} {
+        # A named struct's layout and field types are its declaration's.
+        return $type
+    }
     set kind [hir::types::kindOf $type]
     return [expr {$type eq "never" ? "never" : $kind eq "" ? "any" : $kind}]
 }

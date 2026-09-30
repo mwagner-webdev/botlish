@@ -142,7 +142,15 @@ test lex-question-mark-span {a trailing "?" is included in the identifier token'
 
 test lex-unsupported-characters {characters of deferred syntax} -body {
     list [lexError "a ! b"] [lexError "a / b"] [lexError "a.b"] [lexError "a; b"] [lexError "a::b"]
-} -result {{1:3 unexpected character "!"} {1:3 unexpected character "/"} {1:2 unexpected character "."} {1:2 unexpected character ";"} {no error}}
+} -result {{1:3 unexpected character "!"} {1:3 unexpected character "/"} {no error} {1:2 unexpected character ";"} {no error}}
+
+test lex-dot-is-field-projection {a single "." is the field projection token (STRUCTS.md); ".." stays the range token} -body {
+    list [tokens "a.b"] [tokens "a.b.c"] [tokens "a . b"] [tokens "f(x).y"] [tokens "1..2"] [tokens "a..b.c"]
+} -result {{IDENT:a . IDENT:b NEWLINE EOF} {IDENT:a . IDENT:b . IDENT:c NEWLINE EOF} {IDENT:a . IDENT:b NEWLINE EOF} {IDENT:f ( IDENT:x ) . IDENT:y NEWLINE EOF} {INT:1 .. INT:2 NEWLINE EOF} {IDENT:a .. IDENT:b . IDENT:c NEWLINE EOF}}
+
+test lex-struct-keyword {"struct" is a keyword (STRUCTS.md), and braces are plain tokens} -body {
+    list [tokens "struct Person:"] [tokens "x = \{a: 1, b: 2\}"] [tokens "P \{\}"]
+} -result {{struct IDENT:Person : NEWLINE EOF} {IDENT:x = \{ IDENT:a : INT:1 , IDENT:b : INT:2 \} NEWLINE EOF} {IDENT:P \{ \} NEWLINE EOF}}
 
 test lex-range-token {".." is an ordinary token now (a type declaration's interval syntax -- see #46/#121 of SOURCE-DEFINED-INTEGER-DOMAINS.md), not a reserved/erroring sequence} -body {
     list [tokens "1..10"] [tokens "1 .. 10"] [tokens "foo..bar"] \
@@ -201,9 +209,9 @@ test lex-recover-range-token {".." produces no diagnostic and lexes as an ordina
     recovered "1..10\n1..=10\n1..<10"
 } -result {{INT:1 .. INT:10 NEWLINE INT:1 .. = INT:10 NEWLINE INT:1 .. < INT:10 NEWLINE EOF} {}}
 
-test lex-recover-dot-regression {a single "." is unaffected: still an unexpected character, not reserved} -body {
+test lex-recover-dot-regression {a single "." lexes as the field projection token on every line, with no diagnostic} -body {
     recovered "a.b.c"
-} -result {{IDENT:a IDENT:b IDENT:c NEWLINE EOF} {{1:2 unexpected character "."} {1:4 unexpected character "."}}}
+} -result {{IDENT:a . IDENT:b . IDENT:c NEWLINE EOF} {}}
 
 test lex-recover-layout {tabs and inconsistent dedents keep the layout usable} -body {
     recovered "if a:\n\tb\nif c:\n    d\n  e"
