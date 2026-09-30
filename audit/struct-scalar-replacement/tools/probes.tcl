@@ -163,26 +163,26 @@ if {"distance" in $sections} {
             # return chain: mk -> ret1 -> ... -> retD, the loop projects
             set chain "fn ret0(i):\n    [literal $w i]\n"
             for {set k 1} {$k <= $d} {incr k} {
-                append chain "fn ret$k(i):\n    ret[expr {$k - 1}](i)\n"
+                append chain "fn ret${k}(i):\n    ret[expr {$k - 1}](i)\n"
             }
             run "distance-$d width-$w return" "$chain
 fn drive(i, n, acc):
     if i >= n:
         return acc
-    r = ret$d(i)
+    r = ret${d}(i)
     drive(i + 1, n, acc + $uses)
 drive(0, $ITERS, 0)
 " [lmap k [lrange {0 1 2 3 4 5 6 7 8} 0 $d] {string cat ret $k}]
             # argument chain: loop -> fwdD -> ... -> fwd1 -> use
             set chain "fn fwd0(r, k):\n    $uses + k\n"
             for {set k 1} {$k <= $d} {incr k} {
-                append chain "fn fwd$k(r, k):\n    fwd[expr {$k - 1}](r, k)\n"
+                append chain "fn fwd${k}(r, k):\n    fwd[expr {$k - 1}](r, k)\n"
             }
             run "distance-$d width-$w argument" "$chain
 fn drive(i, n, acc):
     if i >= n:
         return acc
-    drive(i + 1, n, acc + fwd$d([literal $w i], i))
+    drive(i + 1, n, acc + fwd${d}([literal $w i], i))
 drive(0, $ITERS, 0)
 " [lmap k [lrange {0 1 2 3 4 5 6 7 8} 0 $d] {string cat fwd $k}]
         }
@@ -191,9 +191,9 @@ drive(0, $ITERS, 0)
 # -------------------------------------------------------------- nesting
 if {"nesting" in $sections} {
     set shapes [dict create \
-        flat4 {{a: i, b: i + 1, c: i + 2, d: i + 3} {r.a + r.b + r.c + r.d}} \
-        inner1 {{a: i, b: i + 1, inner: {c: i + 2, d: i + 3}} {r.a + r.b + r.inner.c + r.inner.d}} \
-        inner2 {{left: {a: i, b: i + 1}, right: {c: i + 2, d: i + 3}} {r.left.a + r.left.b + r.right.c + r.right.d}}]
+        flat4 [list "\{a: i, b: i + 1, c: i + 2, d: i + 3\}" {r.a + r.b + r.c + r.d}] \
+        inner1 [list "\{a: i, b: i + 1, inner: \{c: i + 2, d: i + 3\}\}" {r.a + r.b + r.inner.c + r.inner.d}] \
+        inner2 [list "\{left: \{a: i, b: i + 1\}, right: \{c: i + 2, d: i + 3\}\}" {r.left.a + r.left.b + r.right.c + r.right.d}]]
     dict for {name spec} $shapes {
         lassign $spec lit uses
         run "nesting-$name return" "

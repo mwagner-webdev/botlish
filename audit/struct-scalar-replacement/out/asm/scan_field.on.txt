@@ -1,0 +1,118 @@
+=== NIR (function 19)
+func 19 "scan_field" params=2 env=0 regs=17 pnames="text index" captures=0 instance="str, int" results=2 rawregs="9" @e232
+    %2 %3 %4 = callmulti 16 %0 %1 @e236
+    %5 = str "\"" @e240
+    %6 = op regioneq %2 %3 %4 %5 @e234
+    br %6 L0 L1 @e233
+  label L0
+    %8 = int 1 @e248
+    %9 = rawint 1
+    %10 = op iadd %1 %8 @e245
+    %11 = str "" @e249
+    %12 %13 = callmulti 18 %0 %10 %11 @e242
+    retmulti %12 %13 @e241
+  label L1
+    %14 = unit
+    %7 = move %14
+    jump L2
+  label L2
+    %15 %16 = callmulti 17 %0 %1 %1 @e250
+    retmulti %15 %16
+end
+=== machine code (function 19)
+0000000000001891 <botlish_fn_19>:
+    1891:	push   rbp
+    1892:	mov    rbp,rsp
+    1895:	sub    rsp,0x50
+    1899:	mov    QWORD PTR [rsp+0x30],rbx
+    189e:	mov    QWORD PTR [rsp+0x38],r12
+    18a3:	mov    QWORD PTR [rsp+0x40],r13
+    18a8:	mov    r12,rdi
+    18ab:	mov    r13,rdx
+    18ae:	mov    QWORD PTR [rsp+0x10],0x0
+    18b7:	mov    QWORD PTR [rsp],rsi
+    18bb:	mov    rbx,rsi
+    18be:	mov    QWORD PTR [rsp+0x8],rdx
+    18c3:	lea    rcx,[rsp+0x18]
+    18c8:	mov    rdx,r13
+    18cb:	mov    rsi,rbx
+    18ce:	mov    rdi,r12
+    18d1:	call   18d6 <botlish_fn_19+0x45>
+			18d2: R_X86_64_PLT32	botlish_fn_16-0x4
+    18d6:	test   rax,rax
+    18d9:	mov    rsi,rax
+    18dc:	je     19a7 <botlish_fn_19+0x116>
+    18e2:	mov    rdx,QWORD PTR [rsp+0x18]
+    18e7:	mov    rcx,QWORD PTR [rsp+0x20]
+    18ec:	mov    rdi,r12
+    18ef:	mov    rax,QWORD PTR [rdi+0x10]
+    18f3:	mov    r8,QWORD PTR [rax+0x20]
+    18f7:	call   18fc <botlish_fn_19+0x6b>
+			18f8: R_X86_64_PLT32	rt_str_region_eq-0x4
+    18fc:	cmp    rax,0x6
+    1900:	je     1938 <botlish_fn_19+0xa7>
+    1906:	mov    rcx,r13
+    1909:	mov    rsi,rbx
+    190c:	mov    rdi,r12
+    190f:	mov    rdx,rcx
+    1912:	call   1917 <botlish_fn_19+0x86>
+			1913: R_X86_64_PLT32	botlish_fn_17-0x4
+    1917:	test   rax,rax
+    191a:	je     19a7 <botlish_fn_19+0x116>
+    1920:	mov    rbx,QWORD PTR [rsp+0x30]
+    1925:	mov    r12,QWORD PTR [rsp+0x38]
+    192a:	mov    r13,QWORD PTR [rsp+0x40]
+    192f:	add    rsp,0x50
+    1933:	mov    rsp,rbp
+    1936:	pop    rbp
+    1937:	ret
+    1938:	mov    rcx,r13
+    193b:	mov    QWORD PTR [rsp+0x10],0x3
+    1944:	test   rcx,0x1
+    194b:	jne    1959 <botlish_fn_19+0xc8>
+    1951:	mov    r13,rcx
+    1954:	jmp    196e <botlish_fn_19+0xdd>
+    1959:	mov    rdx,rcx
+    195c:	add    rdx,0x2
+    1960:	mov    r13,rcx
+    1963:	seto   al
+    1966:	test   al,al
+    1968:	je     1981 <botlish_fn_19+0xf0>
+    196e:	mov    edx,0x3
+    1973:	mov    rsi,r13
+    1976:	mov    rdi,r12
+    1979:	call   197e <botlish_fn_19+0xed>
+			197a: R_X86_64_PLT32	rt_int_add-0x4
+    197e:	mov    rdx,rax
+    1981:	mov    QWORD PTR [rsp+0x8],rdx
+    1986:	mov    rdi,r12
+    1989:	mov    rax,QWORD PTR [rdi+0x10]
+    198d:	mov    rcx,QWORD PTR [rax+0x8]
+    1991:	mov    QWORD PTR [rsp+0x10],rcx
+    1996:	mov    rsi,rbx
+    1999:	call   199e <botlish_fn_19+0x10d>
+			199a: R_X86_64_PLT32	botlish_fn_18-0x4
+    199e:	test   rax,rax
+    19a1:	jne    19c5 <botlish_fn_19+0x134>
+    19a7:	xor    rdx,rdx
+    19aa:	mov    rax,rdx
+    19ad:	mov    rbx,QWORD PTR [rsp+0x30]
+    19b2:	mov    r12,QWORD PTR [rsp+0x38]
+    19b7:	mov    r13,QWORD PTR [rsp+0x40]
+    19bc:	add    rsp,0x50
+    19c0:	mov    rsp,rbp
+    19c3:	pop    rbp
+    19c4:	ret
+    19c5:	mov    rbx,QWORD PTR [rsp+0x30]
+    19ca:	mov    r12,QWORD PTR [rsp+0x38]
+    19cf:	mov    r13,QWORD PTR [rsp+0x40]
+    19d4:	add    rsp,0x50
+    19d8:	mov    rsp,rbp
+    19db:	pop    rbp
+    19dc:	ret
+
+00000000000019dd <botlish_entry_19>:
+    19dd:	push   rbp
+    19de:	mov    rbp,rsp
+    19e1:	ud2
+

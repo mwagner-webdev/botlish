@@ -358,6 +358,11 @@ test sr-argument-self-recursion {a struct argument rebuilt on every step of a se
     list [srValue $tail] [srOps $tail] [srValue $nontail] [srOps $nontail]
 } -result {10 {structnew 0 structget 0 callmulti 0 retmulti 0} 15 {structnew 0 structget 0 callmulti 0 retmulti 0}}
 
+test sr-recursion-higher-order-cycle {an argument-passing cycle through a function value is an open call: the struct is built there, nothing oscillates, the value is unchanged} -body {
+    set source "struct S:\n    a: int\n    b: int\nfn left(f, g, x: S, n: int):\n    if n <= 0:\n        return x.a\n    g(f, g, S \{a: x.a + 1, b: x.b\}, n - 1)\nfn right(f, g, x: S, n: int):\n    if n <= 0:\n        return x.b\n    f(f, g, S \{a: x.a, b: x.b + 2\}, n - 1)\nleft(left, right, S \{a: 0, b: 0\}, 5) + right(left, right, S \{a: 0, b: 0\}, 5)\n"
+    list [srValue $source] [srOps $source] [srOps $source -struct-opt 0]
+} -result {6 {structnew 4 structget 6 callmulti 0 retmulti 0} {structnew 6 structget 10 callmulti 0 retmulti 0}}
+
 test sr-argument-open-call-materializes {a virtual struct handed to an unknown callable is built first} -body {
     set source "fn one(x):\n    1\nfn two(x):\n    2\nfn pick(n):\n    list_get(\[one, two\], n)\nfn run(n):\n    f = pick(n)\n    x = \{k: 1, v: 2\}\n    \[x.k, f(x)\]\n\[run(0), run(1)\]\n"
     list [srValue $source] [srOps $source] [srCensus $source]
@@ -396,10 +401,10 @@ test sr-materialize-escaping-closure {a struct captured by a closure is built} -
     list [srValue $source] [srOps $source] [srCensus $source]
 } -result {{"a"} {structnew 1 structget 1 callmulti 0 retmulti 0} materialized:capture}
 
-test sr-materialize-wide-return {a result wider than the return cap is returned as an object} -body {
-    set source "fn wide(i):\n    \{a: i, b: 2, c: 3, d: 4, e: 5, f: 6, g: 7, h: 8\}\nw = wide(1)\n\[w.a, w.h\]\n"
+test sr-materialize-wide-return {a result wider than the return cap (8) is returned as an object} -body {
+    set source "fn wide(i):\n    \{a: i, b: 2, c: 3, d: 4, e: 5, f: 6, g: 7, h: 8, i: 9\}\nw = wide(1)\n\[w.a, w.i\]\n"
     list [srValue $source] [srOps $source] [srCensus $source]
-} -result {{[1, 8]} {structnew 1 structget 2 callmulti 0 retmulti 0} materialized:width}
+} -result {{[1, 9]} {structnew 1 structget 2 callmulti 0 retmulti 0} materialized:width}
 
 test sr-materialize-loop-use {a struct built once and needed as an object per iteration is not re-allocated per iteration} -body {
     set source "fn go(xs):\n    p = \{a: 1, b: 2\}\n    loop x in xs:\n        list_length(list_append(\[\], p)) + p.a\ngo(\[1, 2, 3\])\n"
@@ -497,10 +502,10 @@ test sr-width-policy-local {locals stay virtual up to the local cap (16) and are
     list [srOps [widthSource 16 local]] [srOps [widthSource 17 local]]
 } -result {{structnew 0 structget 0 callmulti 0 retmulti 0} {structnew 1 structget 17 callmulti 0 retmulti 0}}
 
-test sr-width-policy-return {a result crosses a return as fields up to the return cap (4 fields)} -body {
-    list [srOps [widthSource 2 return]] [srOps [widthSource 4 return]] [srOps [widthSource 8 return]] \
-        [srOps [widthSource 8 return] -struct-return-width 8]
-} -result {{structnew 0 structget 0 callmulti 1 retmulti 1} {structnew 0 structget 0 callmulti 1 retmulti 1} {structnew 1 structget 8 callmulti 0 retmulti 0} {structnew 0 structget 0 callmulti 1 retmulti 1}}
+test sr-width-policy-return {a result crosses a return as fields up to the return cap (8 fields), wider ones as an object} -body {
+    list [srOps [widthSource 2 return]] [srOps [widthSource 4 return]] [srOps [widthSource 8 return]] [srOps [widthSource 16 return]] \
+        [srOps [widthSource 16 return] -struct-return-width 16]
+} -result {{structnew 0 structget 0 callmulti 1 retmulti 1} {structnew 0 structget 0 callmulti 1 retmulti 1} {structnew 0 structget 0 callmulti 1 retmulti 1} {structnew 1 structget 16 callmulti 0 retmulti 0} {structnew 0 structget 0 callmulti 1 retmulti 1}}
 
 test sr-width-policy-argument {an argument crosses a call as fields up to the argument cap (4 fields)} -body {
     list [srOps [widthSource 2 argument]] [srOps [widthSource 4 argument]] [srOps [widthSource 8 argument]] \
@@ -546,6 +551,14 @@ test sr-stdlib-csv-scan-results {every csv scan result is a virtual multi-value 
 test sr-stdlib-csv-geometric {csv_geometric scan results and records are virtual} -body {
     stdlibCensus csv_geometric
 } -result {{on 0 0 11} {off 4 8 4} return}
+
+test sr-stdlib-csv-chunked {csv_chunked's scan results are virtual too} -body {
+    stdlibCensus csv_chunked
+} -result {{on 0 0 19} {off 6 8 12} return}
+
+test sr-stdlib-csv-records {csv_records: scan results cross returns as fields, the rehash groupings cross calls as fields} -body {
+    stdlibCensus csv_records
+} -result {{on 0 0 11} {off 6 17 4} {call return}}
 
 test sr-stdlib-hashtable-rehash {the rehash src and dest groupings cross their calls as fields} -body {
     stdlibCensus hashtable

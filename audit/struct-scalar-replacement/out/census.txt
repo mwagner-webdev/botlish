@@ -1,0 +1,78 @@
+ROW fib off 0 0 0 0 0 3 0 0 0 2 35 292
+ROW fib on 0 0 0 0 0 3 0 0 0 2 35 292
+ROW lex-strategy off 0 0 6 6 2 11 0 2 0 11 354 5207
+ROW lex-strategy on 0 0 6 6 2 11 0 2 0 11 354 5207
+ROW loop-count off 0 0 0 0 0 2 0 0 0 3 53 287
+ROW loop-count on 0 0 0 0 0 2 0 0 0 3 53 287
+ROW refined-checks off 0 0 5 5 1 24 4 1 1 24 689 8903
+ROW refined-checks on 0 0 5 5 1 24 4 1 1 24 689 8903
+ROW source-checks off 0 0 6 5 2 1 0 2 0 7 241 4305
+ROW source-checks on 0 0 6 5 2 1 0 2 0 7 241 4305
+ROW sum-refined off 0 0 0 0 0 2 0 0 0 3 36 286
+ROW sum-refined on 0 0 0 0 0 2 0 0 0 3 36 286
+ROW test-selection off 15 2 21 4 3 12 0 3 0 12 310 6589
+ROW test-selection on 15 2 21 4 3 12 0 3 0 12 310 6589
+SITE test-selection <program> e115 width=2 materialized:storage mats=
+SITE test-selection <program> e121 width=2 materialized:storage mats=
+SITE test-selection <program> e127 width=2 materialized:storage mats=
+SITE test-selection <program> e133 width=2 materialized:storage mats=
+SITE test-selection <program> e139 width=2 materialized:storage mats=
+SITE test-selection <program> e145 width=2 materialized:storage mats=
+SITE test-selection <program> e151 width=2 materialized:storage mats=
+SITE test-selection <program> e156 width=2 materialized:storage mats=
+SITE test-selection <program> e162 width=2 materialized:storage mats=
+SITE test-selection <program> e167 width=2 materialized:storage mats=
+SITE test-selection <program> e172 width=2 materialized:storage mats=
+SITE test-selection <program> e178 width=2 materialized:storage mats=
+SITE test-selection <program> e184 width=2 materialized:storage mats=
+SITE test-selection <program> e190 width=2 materialized:storage mats=
+SITE test-selection first_affected<List[Test], block> e105 width=2 materialized:control mats=
+ROW uri-steady off 0 0 5 6 0 17 0 0 0 17 417 5674
+ROW uri-steady on 0 0 5 6 0 17 0 0 0 17 417 5674
+ROW ai_text_clean off 0 0 1 0 0 9 0 0 0 5 500 3081
+ROW ai_text_clean on 0 0 1 0 0 9 0 0 0 5 500 3081
+ROW csv off 6 8 3 0 0 11 5 0 2 11 310 6218
+ROW csv on 0 0 3 0 0 4 12 0 11 11 294 5723
+SITE csv scan_unquoted<str, int, int> e51 width=2 return mats=
+SITE csv scan_quoted<str, int, str> e102 width=2 return mats=
+SITE csv scan_record<str, int, List[never]> e184 width=2 return mats=
+SITE csv scan_record<str, int, List[never]> e190 width=2 return mats=
+SITE csv scan_record<str, int, List[str]> e184 width=2 return mats=
+SITE csv scan_record<str, int, List[str]> e190 width=2 return mats=
+ROW csv_chunked off 6 8 1 2 1 19 12 0 11 20 528 10725
+ROW csv_chunked on 0 0 1 2 1 12 19 0 20 20 512 10168
+SITE csv_chunked scan_unquoted<str, int, int> e209 width=2 return mats=
+SITE csv_chunked scan_quoted<str, int, str> e260 width=2 return mats=
+SITE csv_chunked scan_record<str, int, list[List[never], mutarray, int]> e342 width=2 return mats=
+SITE csv_chunked scan_record<str, int, list[List[never], mutarray, int]> e350 width=2 return mats=
+SITE csv_chunked scan_record<str, int, list[List[mutarray], mutarray, int]> e342 width=2 return mats=
+SITE csv_chunked scan_record<str, int, list[List[mutarray], mutarray, int]> e350 width=2 return mats=
+ROW csv_geometric off 4 8 1 0 2 25 4 0 2 20 429 7974
+ROW csv_geometric on 0 0 1 0 2 18 11 0 9 20 415 7578
+SITE csv_geometric scan_unquoted<str, int, int> e163 width=2 return mats=
+SITE csv_geometric scan_quoted<str, int, str> e214 width=2 return mats=
+SITE csv_geometric scan_record_rest<str, int, mutarray, int> e299 width=2 return mats=
+SITE csv_geometric scan_record_rest<str, int, mutarray, int> e308 width=2 return mats=
+ROW csv_records off 6 17 3 8 23 103 4 0 2 56 1239 23391
+ROW csv_records on 0 0 3 8 23 96 11 0 9 56 1213 23245
+SITE csv_records scan_unquoted<str, int, int> e163 width=2 return mats=
+SITE csv_records scan_quoted<str, int, str> e214 width=2 return mats=
+SITE csv_records scan_record_rest<str, int, mutarray, int> e299 width=2 return mats=
+SITE csv_records scan_record_rest<str, int, mutarray, int> e308 width=2 return mats=
+SITE csv_records ht_rehash<mutarray, int> e857 width=3 call mats=
+SITE csv_records ht_rehash<mutarray, int> e881 width=3 call mats=
+ROW hashtable off 2 9 1 0 25 68 0 0 0 26 643 12477
+ROW hashtable on 0 0 1 0 25 68 0 0 0 26 631 12732
+SITE hashtable ht_rehash<mutarray, int> e464 width=3 call mats=
+SITE hashtable ht_rehash<mutarray, int> e488 width=3 call mats=
+ROW matmul off 0 0 11 6 0 8 0 0 0 7 189 4734
+ROW matmul on 0 0 11 6 0 8 0 0 0 7 189 4734
+ROW string_replace off 0 0 1 0 0 7 0 0 0 4 103 2618
+ROW string_replace on 0 0 1 0 0 7 0 0 0 4 103 2618
+ROW string_reverse off 0 0 1 0 0 6 0 0 0 3 50 990
+ROW string_reverse on 0 0 1 0 0 6 0 0 0 3 50 990
+COLUMNS structnew structget listnew listget guards call callmulti callvalue retmulti functions lines bytes
+TOTAL off 39 52 66 42 59 328 29 8 18 231 6126 103751
+TOTAL on 15 2 66 42 59 300 57 8 50 231 6042 102412
+CLASSES call 4 materialized 15 return 20
+REASONS control 1 storage 14

@@ -1,13 +1,39 @@
 # escape.tcl -- conservative escape analysis and the facts native/lower.tcl's
-# scalar replacement of fixed-shape immutable List aggregates needs.
+# scalar replacement of fixed-shape immutable aggregates needs: positional
+# `[e0, ..., en-1]` Lists and structs (STRUCT-SCALAR-REPLACEMENT.md).
 #
-#   set analysis [hir::escape::analyze $hir $spec]
+#   set analysis [hir::escape::analyze $hir $spec ?paramOpt? ?structOpts?]
 #   hir::escape::wants $analysis $instanceId          -> 0 | 1
 #   hir::escape::arity $analysis $instanceId          -> N | ""
+#   hir::escape::resultShape $analysis $instanceId    -> {ID LAYOUT} | ""
 #   hir::escape::virtualArity $analysis $instanceId $bindingId  -> N | ""
+#   hir::escape::virtualShape $analysis $instanceId $bindingId  -> {ID LAYOUT} | ""
 #   hir::escape::paramVirtualArity $analysis $instanceId $bindingId  -> N | ""
+#   hir::escape::paramVirtualShape $analysis $instanceId $bindingId  -> {ID LAYOUT} | ""
 #   hir::escape::paramWants $analysis $instanceId     -> 0 | 1
-#   hir::escape::classify $hir $spec $analysis $instanceId $e   -> "" | {local N} | {remote N target}
+#   hir::escape::directProjection $analysis $instanceId $e  -> {N SHAPE} | ""
+#   hir::escape::census $analysis                     -> one record per struct construction
+#   hir::escape::classify $hir $spec $analysis $instanceId $e   -> "" | {local DESC {}} | {remote DESC TARGETS}
+#
+# Aggregate kinds. One analysis serves both: its facts are *descriptors*
+# {N SHAPE}: the field count, and the shape -- "" for a List, {ID LAYOUT}
+# (declaration identity or "" for an anonymous struct, field names in slot
+# order) for a struct, exactly the key native/lower.tcl's ShapeIndex interns
+# runtime shapes by. A struct is easier than a List: its arity, its field
+# slots and its immutability are static, so a projection `x.f` is always a
+# structural use (the slot is fixed by the shape; a List needs a constant
+# in-range index), and a struct that is *also* needed as a physical object at
+# some use need not be given up: it stays virtual until that first use and is
+# materialized there, once (UseVerdict; native/lower.tcl's
+# MaterializeVirtual). A List keeps the original all-or-nothing rule.
+#
+# Semantic struct identity is never lost: the shape travels in the descriptor
+# (named identity and anonymous field set alike), so a virtual struct that
+# materializes is built with exactly the shape it would have had. Width is a
+# policy, not a proof: STRUCTOPTS caps how wide a struct may be as a local
+# value (16), across one exact return (8) and across one exact call (4)
+# (StructOption), and the unspecialized baseline (`-specialize 0`) never
+# carries a struct across a boundary as fields.
 #
 # Parameter virtualization (the closed-call-boundary extension this module
 # was originally written up to, at #24 of its own header, as a "structural
@@ -235,7 +261,7 @@ proc hir::escape::StructOption {structOpts name} {
     if {[dict exists $structOpts $name]} {
         return [dict get $structOpts $name]
     }
-    return [dict get {enabled 1 localWidth 16 returnWidth 4 argWidth 4} $name]
+    return [dict get {enabled 1 localWidth 16 returnWidth 8 argWidth 4} $name]
 }
 
 proc hir::escape::StructEnabled {structOpts} {
@@ -1018,7 +1044,7 @@ proc hir::escape::UseVerdict {candidates regions aliasOf id b desc isParam bindE
     set projByRecv [dict get $info projByRecv]
     set bindValue [dict get $info bindValue]
     set loopOf [dict get $info loopOf]
-    set bindLoop [expr {$bindExpr eq "" ? "" : [dict get $loopOf $bindExpr]}]
+    set bindLoop [expr {$bindExpr eq "" || ![dict exists $loopOf $bindExpr] ? "?" : [dict get $loopOf $bindExpr]}]
     foreach r $refs {
         if {[dict exists $projByRecv $r]} {
             set slot [lsearch -exact $layout [hir::get $view [dict get $projByRecv $r] name]]
@@ -1045,7 +1071,7 @@ proc hir::escape::UseVerdict {candidates regions aliasOf id b desc isParam bindE
         if {$isParam} {
             return [list $tag 0 0 {}]
         }
-        if {[dict get $loopOf $r] ne $bindLoop} {
+        if {![dict exists $loopOf $r] || [dict get $loopOf $r] ne $bindLoop} {
             return [list loop 0 0 {}]
         }
         lappend mats $tag

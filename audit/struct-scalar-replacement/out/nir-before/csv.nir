@@ -1,0 +1,312 @@
+# instances: <program>, peek<str, int>, scan_unquoted<str, int, int>, scan_quoted<str, int, str>, scan_field<str, int>, scan_record<str, int, List[never]>, scan_record<str, int, List[str]>, scan_records<str, int, List[never]>, scan_records<str, int, List[List[str]]>, csv_parse<str>
+nir 1 call-effects=1 statics=0
+shape 0 anon fields="fields stop"
+shape 1 anon fields="field index"
+
+func 0 "<program>" params=0 env=0 regs=2 pnames="" captures=0 instance="generic"
+    %0 = str "name,age\nAlice,30\nBob,40\n" @e231
+    %1 = call 10 %0 @e229
+    ret %1
+end
+
+func 1 "peek" params=2 env=0 regs=11 pnames="text index" captures=0 instance="str, int" rawregs="8" @e2
+    %2 = op strlen %0 @e7
+    %3 = op ige %1 %2 @e4
+    br %3 L0 L1 @e3
+  label L0
+    %5 = str "" @e11
+    ret %5 @e10
+  label L1
+    %6 = unit
+    %4 = move %6
+    jump L2
+  label L2
+    %7 = int 1 @e19
+    %8 = rawint 1
+    %9 = op iadd %1 %7 @e16
+    %10 = op substr %0 %1 %9 @e12
+    ret %10
+end
+
+func 2 "peek" params=2 env=0 regs=15 pnames="text index" captures=0 instance="str, int" results=3 rawregs="7 9 12" @e2
+    %2 = op strlen %0 @e7
+    %3 = op ige %1 %2 @e4
+    br %3 L0 L1 @e3
+  label L0
+    %5 = str "" @e11
+    %6 = int 0 @e11
+    %7 = rawint 0
+    %8 = int 0 @e11
+    %9 = rawint 0
+    retmulti %5 %6 %8 @e10
+  label L1
+    %10 = unit
+    %4 = move %10
+    jump L2
+  label L2
+    %11 = int 1 @e19
+    %12 = rawint 1
+    %13 = op iadd %1 %11 @e16
+    %14 = op regioncheck %0 %1 %13 @e12
+    retmulti %0 %1 %13
+end
+
+func 3 "scan_unquoted" params=3 env=0 regs=29 pnames="text start index" captures=0 instance="str, int, int" rawregs="27" @e21
+    %3 %4 %5 = callmulti 2 %0 %2 @e23
+    %6 = str "" @e33
+    %7 = op regioneq %3 %4 %5 %6 @e30
+    br %7 L0 L1 @e29
+  label L0
+    %9 = bool true @e34
+    %8 = move %9
+    jump L2
+  label L1
+    %10 = str "," @e39
+    %11 = op regioneq %3 %4 %5 %10 @e36
+    br %11 L3 L4 @e35
+  label L3
+    %13 = bool true @e40
+    %12 = move %13
+    jump L5
+  label L4
+    %14 = bool false @e41
+    %12 = move %14
+    jump L5
+  label L5
+    %8 = move %12
+    jump L2
+  label L2
+    br %8 L6 L7 @e28
+  label L6
+    %16 = bool true @e42
+    %15 = move %16
+    jump L8
+  label L7
+    %17 = str "\n" @e47
+    %18 = op regioneq %3 %4 %5 %17 @e44
+    br %18 L9 L10 @e43
+  label L9
+    %20 = bool true @e48
+    %19 = move %20
+    jump L11
+  label L10
+    %21 = bool false @e49
+    %19 = move %21
+    jump L11
+  label L11
+    %15 = move %19
+    jump L8
+  label L8
+    br %15 L12 L13 @e27
+  label L12
+    %23 = op substr %0 %1 %2 @e52
+    %24 = structnew 1 %23 %2 @e51
+    ret %24 @e50
+  label L13
+    %25 = unit
+    %22 = move %25
+    jump L14
+  label L14
+    %26 = int 1 @e65
+    %27 = rawint 1
+    %28 = op iadd %2 %26 @e62
+    tail %0 %1 %28 @e58
+end
+
+func 4 "scan_quoted" params=3 env=0 regs=36 pnames="text index field" captures=0 instance="str, int, str" rawregs="6 8 12 21 28 33" planregs="2 24 35" @e67
+    %3 = call 1 %0 %1 @e69
+    %4 = str "\"" @e77
+    %5 = int 0 @e77
+    %6 = rawint 0
+    %7 = int 1 @e77
+    %8 = rawint 1
+    %9 = op regioneq %4 %5 %7 %3 @e74
+    br %9 L0 L1 @e73
+  label L0
+    %11 = int 1 @e87
+    %12 = rawint 1
+    %13 = op iadd %1 %11 @e84
+    %14 %15 %16 = callmulti 2 %0 %13 @e81
+    %17 = str "\"" @e88
+    %18 = op regioneq %14 %15 %16 %17 @e79
+    br %18 L3 L4 @e78
+  label L3
+    %20 = int 2 @e96
+    %21 = rawint 2
+    %22 = op iadd %1 %20 @e93
+    %23 = str "\"" @e100
+    %24 = construct str plan %2 %23 @e97
+    tail %0 %22 %24 @e90
+  label L4
+    %25 = unit
+    %19 = move %25
+    jump L5
+  label L5
+    %26 = construct str flat %2 @e103
+    %27 = int 1 @e107
+    %28 = rawint 1
+    %29 = op iadd %1 %27 @e104
+    %30 = structnew 1 %26 %29 @e102
+    ret %30 @e101
+  label L1
+    %31 = unit
+    %10 = move %31
+    jump L2
+  label L2
+    %32 = int 1 @e114
+    %33 = rawint 1
+    %34 = op iadd %1 %32 @e111
+    %35 = construct str plan %2 %3 @e115
+    tail %0 %34 %35 @e108
+end
+
+func 5 "scan_field" params=2 env=0 regs=15 pnames="text index" captures=0 instance="str, int" rawregs="9" @e120
+    %2 %3 %4 = callmulti 2 %0 %1 @e124
+    %5 = str "\"" @e128
+    %6 = op regioneq %2 %3 %4 %5 @e122
+    br %6 L0 L1 @e121
+  label L0
+    %8 = int 1 @e136
+    %9 = rawint 1
+    %10 = op iadd %1 %8 @e133
+    %11 = str "" @e137
+    %12 = call 4 %0 %10 %11 @e130
+    ret %12 @e129
+  label L1
+    %13 = unit
+    %7 = move %13
+    jump L2
+  label L2
+    %14 = call 3 %0 %1 %1 @e138
+    ret %14
+end
+
+func 6 "scan_record" params=3 env=0 regs=29 pnames="text index fields" captures=0 instance="str, int, List[never]" rawregs="13 23" planregs="15" @e144
+    %3 = call 5 %0 %1 @e146
+    %4 = structget 0 %3 @e154
+    %5 = structget 1 %3 @e157
+    %6 %7 %8 = callmulti 2 %0 %5 @e160
+    %9 = str "," @e168
+    %10 = op regioneq %6 %7 %8 %9 @e165
+    br %10 L0 L1 @e164
+  label L0
+    %12 = int 1 @e176
+    %13 = rawint 1
+    %14 = op iadd %5 %12 @e173
+    %15 = construct list plan %2 elem %4 @e177
+    %16 = call 7 %0 %14 %15 @e170
+    ret %16 @e169
+  label L1
+    %17 = unit
+    %11 = move %17
+    jump L2
+  label L2
+    %18 = str "\n" @e182
+    %19 = op regioneq %6 %7 %8 %18 @e179
+    br %19 L3 L4 @e178
+  label L3
+    %21 = op listappend %2 %4 @e185
+    %22 = int 1 @e189
+    %23 = rawint 1
+    %24 = op iadd %5 %22 @e186
+    %25 = structnew 0 %21 %24 @e184
+    ret %25 @e183
+  label L4
+    %26 = unit
+    %20 = move %26
+    jump L5
+  label L5
+    %27 = op listappend %2 %4 @e191
+    %28 = structnew 0 %27 %5 @e190
+    ret %28
+end
+
+func 7 "scan_record" params=3 env=0 regs=28 pnames="text index fields" captures=0 instance="str, int, List[str]" rawregs="13 22" planregs="2 15" @e144
+    %3 = call 5 %0 %1 @e146
+    %4 = structget 0 %3 @e154
+    %5 = structget 1 %3 @e157
+    %6 %7 %8 = callmulti 2 %0 %5 @e160
+    %9 = str "," @e168
+    %10 = op regioneq %6 %7 %8 %9 @e165
+    br %10 L0 L1 @e164
+  label L0
+    %12 = int 1 @e176
+    %13 = rawint 1
+    %14 = op iadd %5 %12 @e173
+    %15 = construct list plan %2 elem %4 @e177
+    tail %0 %14 %15 @e170
+  label L1
+    %16 = unit
+    %11 = move %16
+    jump L2
+  label L2
+    %17 = str "\n" @e182
+    %18 = op regioneq %6 %7 %8 %17 @e179
+    br %18 L3 L4 @e178
+  label L3
+    %20 = construct list flat %2 elem %4 @e185
+    %21 = int 1 @e189
+    %22 = rawint 1
+    %23 = op iadd %5 %21 @e186
+    %24 = structnew 0 %20 %23 @e184
+    ret %24 @e183
+  label L4
+    %25 = unit
+    %19 = move %25
+    jump L5
+  label L5
+    %26 = construct list flat %2 elem %4 @e191
+    %27 = structnew 0 %26 %5 @e190
+    ret %27
+end
+
+func 8 "scan_records" params=3 env=0 regs=15 pnames="text index records" captures=0 instance="str, int, List[never]" rawregs="3 5" planregs="13" @e194
+    %3 = op runbox %1
+    %4 = op strlen %0 @e199
+    %5 = op runbox %4
+    %6 = op rige %3 %5 @e196
+    br %6 L0 L1 @e195
+  label L0
+    ret %2 @e202
+  label L1
+    %8 = unit
+    %7 = move %8
+    jump L2
+  label L2
+    %9 = op listnew @e209
+    %10 = call 6 %0 %1 %9 @e205
+    %11 = structget 1 %10 @e214
+    %12 = structget 0 %10 @e219
+    %13 = construct list plan %2 elem %12 @e216
+    %14 = call 9 %0 %11 %13 @e211
+    ret %14
+end
+
+func 9 "scan_records" params=3 env=0 regs=13 pnames="text index records" captures=0 instance="str, int, List[List[str]]" planregs="2 12" @e194
+    %3 = op strlen %0 @e199
+    %4 = op ige %1 %3 @e196
+    br %4 L0 L1 @e195
+  label L0
+    %6 = construct list flat %2 @e203
+    ret %6 @e202
+  label L1
+    %7 = unit
+    %5 = move %7
+    jump L2
+  label L2
+    %8 = op listnew @e209
+    %9 = call 6 %0 %1 %8 @e205
+    %10 = structget 1 %9 @e214
+    %11 = structget 0 %9 @e219
+    %12 = construct list plan %2 elem %11 @e216
+    tail %0 %10 %12 @e211
+end
+
+func 10 "csv_parse" params=1 env=0 regs=5 pnames="text" captures=0 instance="str" rawregs="2" @e222
+    %1 = int 0 @e226
+    %2 = rawint 0
+    %3 = op listnew @e227
+    %4 = call 8 %0 %1 %3 @e223
+    ret %4
+end
+

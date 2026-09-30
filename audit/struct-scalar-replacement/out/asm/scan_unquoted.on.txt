@@ -1,0 +1,196 @@
+=== NIR (function 17)
+func 17 "scan_unquoted" params=3 env=0 regs=28 pnames="text start index" captures=0 instance="str, int, int" results=2 rawregs="26" @e133
+    %3 %4 %5 = callmulti 16 %0 %2 @e135
+    %6 = str "" @e145
+    %7 = op regioneq %3 %4 %5 %6 @e142
+    br %7 L0 L1 @e141
+  label L0
+    %9 = bool true @e146
+    %8 = move %9
+    jump L2
+  label L1
+    %10 = str "," @e151
+    %11 = op regioneq %3 %4 %5 %10 @e148
+    br %11 L3 L4 @e147
+  label L3
+    %13 = bool true @e152
+    %12 = move %13
+    jump L5
+  label L4
+    %14 = bool false @e153
+    %12 = move %14
+    jump L5
+  label L5
+    %8 = move %12
+    jump L2
+  label L2
+    br %8 L6 L7 @e140
+  label L6
+    %16 = bool true @e154
+    %15 = move %16
+    jump L8
+  label L7
+    %17 = str "\n" @e159
+    %18 = op regioneq %3 %4 %5 %17 @e156
+    br %18 L9 L10 @e155
+  label L9
+    %20 = bool true @e160
+    %19 = move %20
+    jump L11
+  label L10
+    %21 = bool false @e161
+    %19 = move %21
+    jump L11
+  label L11
+    %15 = move %19
+    jump L8
+  label L8
+    br %15 L12 L13 @e139
+  label L12
+    %23 = op substr %0 %1 %2 @e164
+    retmulti %23 %2 @e162
+  label L13
+    %24 = unit
+    %22 = move %24
+    jump L14
+  label L14
+    %25 = int 1 @e177
+    %26 = rawint 1
+    %27 = op iadd %2 %25 @e174
+    tail %0 %1 %27 @e170
+end
+=== machine code (function 17)
+0000000000001286 <botlish_fn_17>:
+    1286:	push   rbp
+    1287:	mov    rbp,rsp
+    128a:	sub    rsp,0x80
+    1291:	mov    QWORD PTR [rsp+0x50],rbx
+    1296:	mov    QWORD PTR [rsp+0x58],r12
+    129b:	mov    QWORD PTR [rsp+0x60],r13
+    12a0:	mov    QWORD PTR [rsp+0x68],r14
+    12a5:	mov    QWORD PTR [rsp+0x70],r15
+    12aa:	mov    QWORD PTR [rsp+0x30],rdi
+    12af:	mov    QWORD PTR [rsp+0x18],0x0
+    12b8:	mov    QWORD PTR [rsp],rsi
+    12bc:	mov    r15,rsi
+    12bf:	mov    QWORD PTR [rsp+0x8],rdx
+    12c4:	mov    r14,rdx
+    12c7:	mov    QWORD PTR [rsp+0x10],rcx
+    12cc:	lea    r13,[rsp+0x20]
+    12d1:	mov    QWORD PTR [rsp+0x38],rcx
+    12d6:	mov    rcx,r13
+    12d9:	mov    rdx,QWORD PTR [rsp+0x38]
+    12de:	mov    rsi,r15
+    12e1:	mov    rdi,QWORD PTR [rsp+0x30]
+    12e6:	call   12eb <botlish_fn_17+0x65>
+			12e7: R_X86_64_PLT32	botlish_fn_16-0x4
+    12eb:	mov    rsi,rax
+    12ee:	mov    QWORD PTR [rsp+0x40],rax
+    12f3:	test   rax,rsi
+    12f6:	je     1450 <botlish_fn_17+0x1ca>
+    12fc:	mov    rbx,QWORD PTR [rsp+0x20]
+    1301:	mov    r12,QWORD PTR [rsp+0x28]
+    1306:	mov    rdi,QWORD PTR [rsp+0x30]
+    130b:	mov    rcx,QWORD PTR [rdi+0x10]
+    130f:	mov    r8,QWORD PTR [rcx+0x8]
+    1313:	mov    rcx,r12
+    1316:	mov    rdx,rbx
+    1319:	mov    rsi,QWORD PTR [rsp+0x40]
+    131e:	call   1323 <botlish_fn_17+0x9d>
+			131f: R_X86_64_PLT32	rt_str_region_eq-0x4
+    1323:	cmp    rax,0x6
+    1327:	je     1368 <botlish_fn_17+0xe2>
+    132d:	mov    rdi,QWORD PTR [rsp+0x30]
+    1332:	mov    rax,QWORD PTR [rdi+0x10]
+    1336:	mov    r8,QWORD PTR [rax+0x10]
+    133a:	mov    rcx,r12
+    133d:	mov    rdx,rbx
+    1340:	mov    rsi,QWORD PTR [rsp+0x40]
+    1345:	call   134a <botlish_fn_17+0xc4>
+			1346: R_X86_64_PLT32	rt_str_region_eq-0x4
+    134a:	cmp    rax,0x6
+    134e:	je     135e <botlish_fn_17+0xd8>
+    1354:	mov    eax,0x2
+    1359:	jmp    136d <botlish_fn_17+0xe7>
+    135e:	mov    eax,0x6
+    1363:	jmp    136d <botlish_fn_17+0xe7>
+    1368:	mov    eax,0x6
+    136d:	cmp    rax,0x6
+    1371:	je     13b2 <botlish_fn_17+0x12c>
+    1377:	mov    rdi,QWORD PTR [rsp+0x30]
+    137c:	mov    rax,QWORD PTR [rdi+0x10]
+    1380:	mov    r8,QWORD PTR [rax+0x18]
+    1384:	mov    rcx,r12
+    1387:	mov    rdx,rbx
+    138a:	mov    rsi,QWORD PTR [rsp+0x40]
+    138f:	call   1394 <botlish_fn_17+0x10e>
+			1390: R_X86_64_PLT32	rt_str_region_eq-0x4
+    1394:	cmp    rax,0x6
+    1398:	je     13a8 <botlish_fn_17+0x122>
+    139e:	mov    eax,0x2
+    13a3:	jmp    13b7 <botlish_fn_17+0x131>
+    13a8:	mov    eax,0x6
+    13ad:	jmp    13b7 <botlish_fn_17+0x131>
+    13b2:	mov    eax,0x6
+    13b7:	cmp    rax,0x6
+    13bb:	je     1432 <botlish_fn_17+0x1ac>
+    13c1:	mov    QWORD PTR [rsp+0x18],0x3
+    13ca:	mov    rsi,QWORD PTR [rsp+0x38]
+    13cf:	test   rsi,0x1
+    13d6:	je     13fd <botlish_fn_17+0x177>
+    13dc:	mov    rsi,QWORD PTR [rsp+0x38]
+    13e1:	mov    rax,rsi
+    13e4:	add    rax,0x2
+    13e8:	seto   sil
+    13ec:	test   sil,sil
+    13ef:	jne    13fd <botlish_fn_17+0x177>
+    13f5:	mov    rsi,r15
+    13f8:	jmp    1414 <botlish_fn_17+0x18e>
+    13fd:	mov    edx,0x3
+    1402:	mov    rsi,QWORD PTR [rsp+0x38]
+    1407:	mov    rdi,QWORD PTR [rsp+0x30]
+    140c:	call   1411 <botlish_fn_17+0x18b>
+			140d: R_X86_64_PLT32	rt_int_add-0x4
+    1411:	mov    rsi,r15
+    1414:	mov    QWORD PTR [rsp],rsi
+    1418:	mov    rdx,r14
+    141b:	mov    QWORD PTR [rsp+0x8],rdx
+    1420:	mov    QWORD PTR [rsp+0x10],rax
+    1425:	mov    r15,rsi
+    1428:	mov    QWORD PTR [rsp+0x38],rax
+    142d:	jmp    12d6 <botlish_fn_17+0x50>
+    1432:	mov    rdx,r14
+    1435:	mov    rsi,r15
+    1438:	mov    rdi,QWORD PTR [rsp+0x30]
+    143d:	mov    rcx,QWORD PTR [rsp+0x38]
+    1442:	call   1447 <botlish_fn_17+0x1c1>
+			1443: R_X86_64_PLT32	rt_substr-0x4
+    1447:	test   rax,rax
+    144a:	jne    147b <botlish_fn_17+0x1f5>
+    1450:	xor    rdx,rdx
+    1453:	mov    rax,rdx
+    1456:	mov    rbx,QWORD PTR [rsp+0x50]
+    145b:	mov    r12,QWORD PTR [rsp+0x58]
+    1460:	mov    r13,QWORD PTR [rsp+0x60]
+    1465:	mov    r14,QWORD PTR [rsp+0x68]
+    146a:	mov    r15,QWORD PTR [rsp+0x70]
+    146f:	add    rsp,0x80
+    1476:	mov    rsp,rbp
+    1479:	pop    rbp
+    147a:	ret
+    147b:	mov    rdx,QWORD PTR [rsp+0x38]
+    1480:	mov    rbx,QWORD PTR [rsp+0x50]
+    1485:	mov    r12,QWORD PTR [rsp+0x58]
+    148a:	mov    r13,QWORD PTR [rsp+0x60]
+    148f:	mov    r14,QWORD PTR [rsp+0x68]
+    1494:	mov    r15,QWORD PTR [rsp+0x70]
+    1499:	add    rsp,0x80
+    14a0:	mov    rsp,rbp
+    14a3:	pop    rbp
+    14a4:	ret
+
+00000000000014a5 <botlish_entry_17>:
+    14a5:	push   rbp
+    14a6:	mov    rbp,rsp
+    14a9:	ud2
+

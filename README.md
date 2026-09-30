@@ -1817,6 +1817,16 @@ tolower`, and keeps a character whose lowercase form is several characters.
 reference runtime does, so CSV's quadratic behavior is kept deliberately
 (§18).
 
+**Structs** are immutable heap objects of an interned shape (STRUCTS.md), but a
+struct is a semantic value and a `StructObj` only one representation of it:
+native code keeps a struct as its fields (one ordinary register each) while
+it is built and only projected, handed across one exact call, returned across
+one exact call, or joined by an `if`, and materializes it -- once, lazily,
+with its exact named or anonymous shape -- at the first use that needs the
+object (storage in a List/MutableArray, equality, hashing, an unknown call,
+capture). `structnew` in NIR therefore counts real materializations
+(STRUCT-SCALAR-REPLACEMENT.md; `-struct-opt 0` disables it).
+
 ### Functions, calls and closures
 
 ```

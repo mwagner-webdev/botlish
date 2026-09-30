@@ -635,6 +635,51 @@ namespace eval native::lower {
 # the unoptimized baseline.
 
 # ---------------------------------------------------------------------------
+# Struct scalar replacement (STRUCT-SCALAR-REPLACEMENT.md)
+#
+# The two sections above were written for positional Lists; hir/escape.tcl
+# now recognizes structs as the second fixed-shape aggregate kind, and the
+# same representation carries them -- no second optimizer, no new NIR opcode
+# and no new runtime object:
+#
+#   * a *virtual struct* is bookkeeping over its field registers: a `fn
+#     locals` entry `{virtual FIELDS SHAPE ROOT MAT}` (FIELDS in slot order,
+#     SHAPE the {ID LAYOUT} key of the struct it semantically is, ROOT the
+#     binding whose entry holds the materialization, MAT the register of it
+#     once it exists). Lists use the same entry without a shape.
+#   * a projection from a virtual struct (Project) resolves to the field
+#     register: no `structget`. A literal receiver, or an exact call that
+#     returns fields, is read the same way (hir::escape::directProjection).
+#   * a struct literal in a virtual position (VirtualValue) evaluates its
+#     fields in WRITTEN order and yields them in slot order; no shape is
+#     declared and no `structnew` emitted. A *discarded* literal (statement
+#     position) builds nothing either.
+#   * across one exact return the callee's companion ends in `retmulti` of
+#     the fields and the caller reads them from `callmulti` (Scalar
+#     replacement above); across one exact call the callee's `fields`
+#     variant receives one register per field (Parameter virtualization
+#     above); an `if` whose branches all end in one shape joins field-wise
+#     (If with VIRTUALN: one result register per field).
+#   * materialization (MaterializeVirtual) is *lazy and single*: the first
+#     use that needs the physical object -- a store into a List/MutableArray,
+#     an equality or hash, a capture, an unknown call, a non-virtual
+#     parameter, the program's own value -- emits `structnew SHAPE fields...`
+#     from fields that all already exist, with the exact named or canonical
+#     anonymous shape, and records the register in the root's entry so later
+#     uses this scope dominates reuse it. Branches, loops and protected calls
+#     restore `fn locals` on the way out, so a materialization that does not
+#     dominate what follows is never reused there. `structnew` therefore now
+#     counts real materializations.
+#
+# GC: a virtual struct is not an object and so not a root; each field is an
+# ordinary tagged register, rooted by the same liveness that roots every
+# register, live exactly until its last use (a projection or the
+# materialization). -struct-opt 0 (or BOTLISH_NATIVE_STRUCT_OPT=0) disables
+# all of it, for differential testing against the structs milestone's
+# lowering; -struct-local-width/-struct-return-width/-struct-arg-width set
+# the width caps (hir::escape::StructOption).
+
+# ---------------------------------------------------------------------------
 # String regions
 #
 # A temporary substring (`substring(text, a, b)`) hir/stringregion.tcl proves

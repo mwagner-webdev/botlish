@@ -1,0 +1,97 @@
+## Runtime: best-of-15 per round, min / median over 3 interleaved rounds (us)
+workload                                     parent            structs              after   a/s min   a/s med   a/p min   a/p med
+csv_geometric_100                   298.7 /   302.0    324.8 /   329.5    301.7 /   304.5     -7.1%     -7.6%     +1.0%     +0.8%
+csv_geometric_1000                 4285.2 /  4330.6   4696.2 /  4702.4   4385.9 /  4464.7     -6.6%     -5.1%     +2.3%     +3.1%
+csv_geometric_10000               57963.1 / 62538.6  75185.0 / 77382.9  60129.5 / 65608.4    -20.0%    -15.2%     +3.7%     +4.9%
+csv_records_1000x5                 2863.2 /  2903.8   3875.3 /  3924.0   2938.9 /  3039.2    -24.2%    -22.5%     +2.6%     +4.7%
+csv_records_1000x20               13541.1 / 14335.2  17202.2 / 17211.1  14534.2 / 14936.5    -15.5%    -13.2%     +7.3%     +4.2%
+csv_records_presized_1000x20      12305.6 / 12348.3  13978.4 / 15493.5  11616.7 / 11703.2    -16.9%    -24.5%     -5.6%     -5.2%
+csv_records_10000x5               40436.5 / 41837.9  52511.1 / 56648.6  38131.6 / 38733.4    -27.4%    -31.6%     -5.7%     -7.4%
+csv_records_sample                   19.4 /    19.5     21.8 /    21.9     19.5 /    19.6    -10.8%    -10.5%     +0.3%     +0.3%
+hashtable_build_1000                283.3 /   283.6    281.9 /   286.1    282.6 /   283.1     +0.2%     -1.0%     -0.3%     -0.2%
+hashtable_build_10000              3085.9 /  3145.4   3097.3 /  3105.5   3081.9 /  3083.9     -0.5%     -0.7%     -0.1%     -2.0%
+hashtable_build_50000             24039.4 / 25467.6  23898.2 / 24261.4  23246.9 / 25020.4     -2.7%     +3.1%     -3.3%     -1.8%
+
+## Allocation (deterministic): total allocations / Struct allocations / bytes / GC cycles
+workload                         parent | structs | after
+csv_geometric_100                2828/0/128635/0gc | 3342/514/153307/0gc | 2828/0/128635/0gc
+csv_geometric_1000               28932/0/1312985/1gc | 33946/5014/1553657/1gc | 28932/0/1312985/1gc
+csv_geometric_10000              298937/0/13653895/7gc | 348951/50014/16054567/8gc | 298937/0/13653895/7gc
+csv_records_1000x5               14107/0/891117/0gc | 20137/6030/1180557/1gc | 14107/0/891117/0gc
+csv_records_1000x20              37124/0/3438734/2gc | 62169/25045/4672894/3gc | 37124/0/3438734/2gc
+csv_records_presized_1000x20     31124/0/2718734/2gc | 52169/21045/3728894/2gc | 31124/0/2718734/2gc
+csv_records_10000x5              140115/0/9113829/3gc | 200145/60030/11995269/5gc | 140115/0/9113829/3gc
+csv_records_sample               146/0/7632/0gc | 194/48/9936/0gc | 146/0/7632/0gc
+hashtable_build_1000             28/0/98824/0gc | 44/16/99720/0gc | 28/0/98824/0gc
+hashtable_build_10000            37/0/787168/0gc | 59/22/788400/0gc | 37/0/787168/0gc
+hashtable_build_50000            46/0/6292408/2gc | 74/28/6293976/2gc | 46/0/6292408/2gc
+
+## Allocations by kind (count): List, MutableArray, String, StringPlan, Struct
+csv_geometric_100                parent  List 106 MutableArray 320 String 2302 StringPlan 100 Struct 0
+csv_geometric_100                base    List 106 MutableArray 320 String 2302 StringPlan 100 Struct 514
+csv_geometric_100                after   List 106 MutableArray 320 String 2302 StringPlan 100 Struct 0
+csv_geometric_1000               parent  List 1006 MutableArray 3023 String 23903 StringPlan 1000 Struct 0
+csv_geometric_1000               base    List 1006 MutableArray 3023 String 23903 StringPlan 1000 Struct 5014
+csv_geometric_1000               after   List 1006 MutableArray 3023 String 23903 StringPlan 1000 Struct 0
+csv_geometric_10000              parent  List 10006 MutableArray 30027 String 248904 StringPlan 10000 Struct 0
+csv_geometric_10000              base    List 10006 MutableArray 30027 String 248904 StringPlan 10000 Struct 50014
+csv_geometric_10000              after   List 10006 MutableArray 30027 String 248904 StringPlan 10000 Struct 0
+csv_records_1000x5               parent  List 1014 MutableArray 8070 String 5023 StringPlan 0 Struct 0
+csv_records_1000x5               base    List 1014 MutableArray 8070 String 5023 StringPlan 0 Struct 6030
+csv_records_1000x5               after   List 1014 MutableArray 8070 String 5023 StringPlan 0 Struct 0
+csv_records_1000x20              parent  List 1014 MutableArray 16072 String 20038 StringPlan 0 Struct 0
+csv_records_1000x20              base    List 1014 MutableArray 16072 String 20038 StringPlan 0 Struct 25045
+csv_records_1000x20              after   List 1014 MutableArray 16072 String 20038 StringPlan 0 Struct 0
+csv_records_presized_1000x20     parent  List 1014 MutableArray 10072 String 20038 StringPlan 0 Struct 0
+csv_records_presized_1000x20     base    List 1014 MutableArray 10072 String 20038 StringPlan 0 Struct 21045
+csv_records_presized_1000x20     after   List 1014 MutableArray 10072 String 20038 StringPlan 0 Struct 0
+csv_records_10000x5              parent  List 10014 MutableArray 80078 String 50023 StringPlan 0 Struct 0
+csv_records_10000x5              base    List 10014 MutableArray 80078 String 50023 StringPlan 0 Struct 60030
+csv_records_10000x5              after   List 10014 MutableArray 80078 String 50023 StringPlan 0 Struct 0
+csv_records_sample               parent  List 22 MutableArray 88 String 36 StringPlan 0 Struct 0
+csv_records_sample               base    List 22 MutableArray 88 String 36 StringPlan 0 Struct 48
+csv_records_sample               after   List 22 MutableArray 88 String 36 StringPlan 0 Struct 0
+hashtable_build_1000             parent  List 0 MutableArray 28 String 0 StringPlan 0 Struct 0
+hashtable_build_1000             base    List 0 MutableArray 28 String 0 StringPlan 0 Struct 16
+hashtable_build_1000             after   List 0 MutableArray 28 String 0 StringPlan 0 Struct 0
+hashtable_build_10000            parent  List 0 MutableArray 37 String 0 StringPlan 0 Struct 0
+hashtable_build_10000            base    List 0 MutableArray 37 String 0 StringPlan 0 Struct 22
+hashtable_build_10000            after   List 0 MutableArray 37 String 0 StringPlan 0 Struct 0
+hashtable_build_50000            parent  List 0 MutableArray 46 String 0 StringPlan 0 Struct 0
+hashtable_build_50000            base    List 0 MutableArray 46 String 0 StringPlan 0 Struct 28
+hashtable_build_50000            after   List 0 MutableArray 46 String 0 StringPlan 0 Struct 0
+
+## Code: machine-code bytes / emitted functions / NIR lines / guards / calls / structnew / structget / callmulti / retmulti
+csv_geometric_100                parent    7625 B  20 fn   418 lines   2 guards   19 calls  sn 0 sg 0 cm 11 rm 9
+csv_geometric_100                base      8021 B  20 fn   432 lines   2 guards   26 calls  sn 4 sg 8 cm 4 rm 2
+csv_geometric_100                after     7625 B  20 fn   418 lines   2 guards   19 calls  sn 0 sg 0 cm 11 rm 9
+csv_geometric_1000               parent    7625 B  20 fn   418 lines   2 guards   19 calls  sn 0 sg 0 cm 11 rm 9
+csv_geometric_1000               base      8021 B  20 fn   432 lines   2 guards   26 calls  sn 4 sg 8 cm 4 rm 2
+csv_geometric_1000               after     7625 B  20 fn   418 lines   2 guards   19 calls  sn 0 sg 0 cm 11 rm 9
+csv_geometric_10000              parent    7625 B  20 fn   418 lines   2 guards   19 calls  sn 0 sg 0 cm 11 rm 9
+csv_geometric_10000              base      8021 B  20 fn   432 lines   2 guards   26 calls  sn 4 sg 8 cm 4 rm 2
+csv_geometric_10000              after     7625 B  20 fn   418 lines   2 guards   19 calls  sn 0 sg 0 cm 11 rm 9
+csv_records_1000x5               parent   23748 B  57 fn  1227 lines  26 guards   98 calls  sn 0 sg 0 cm 11 rm 9
+csv_records_1000x5               base     23481 B  56 fn  1243 lines  23 guards  104 calls  sn 6 sg 17 cm 4 rm 2
+csv_records_1000x5               after    23335 B  56 fn  1217 lines  23 guards   97 calls  sn 0 sg 0 cm 11 rm 9
+csv_records_1000x20              parent   23748 B  57 fn  1227 lines  26 guards   98 calls  sn 0 sg 0 cm 11 rm 9
+csv_records_1000x20              base     23481 B  56 fn  1243 lines  23 guards  104 calls  sn 6 sg 17 cm 4 rm 2
+csv_records_1000x20              after    23335 B  56 fn  1217 lines  23 guards   97 calls  sn 0 sg 0 cm 11 rm 9
+csv_records_presized_1000x20     parent   23748 B  57 fn  1227 lines  26 guards   98 calls  sn 0 sg 0 cm 11 rm 9
+csv_records_presized_1000x20     base     23481 B  56 fn  1243 lines  23 guards  104 calls  sn 6 sg 17 cm 4 rm 2
+csv_records_presized_1000x20     after    23335 B  56 fn  1217 lines  23 guards   97 calls  sn 0 sg 0 cm 11 rm 9
+csv_records_10000x5              parent   23748 B  57 fn  1227 lines  26 guards   98 calls  sn 0 sg 0 cm 11 rm 9
+csv_records_10000x5              base     23481 B  56 fn  1243 lines  23 guards  104 calls  sn 6 sg 17 cm 4 rm 2
+csv_records_10000x5              after    23335 B  56 fn  1217 lines  23 guards   97 calls  sn 0 sg 0 cm 11 rm 9
+csv_records_sample               parent   23697 B  57 fn  1225 lines  26 guards   98 calls  sn 0 sg 0 cm 11 rm 9
+csv_records_sample               base     23438 B  56 fn  1241 lines  23 guards  104 calls  sn 6 sg 17 cm 4 rm 2
+csv_records_sample               after    23292 B  56 fn  1215 lines  23 guards   97 calls  sn 0 sg 0 cm 11 rm 9
+hashtable_build_1000             parent    9587 B  23 fn   493 lines  17 guards   46 calls  sn 0 sg 0 cm 0 rm 0
+hashtable_build_1000             base      9332 B  23 fn   505 lines  17 guards   46 calls  sn 2 sg 9 cm 0 rm 0
+hashtable_build_1000             after     9587 B  23 fn   493 lines  17 guards   46 calls  sn 0 sg 0 cm 0 rm 0
+hashtable_build_10000            parent    9587 B  23 fn   493 lines  17 guards   46 calls  sn 0 sg 0 cm 0 rm 0
+hashtable_build_10000            base      9332 B  23 fn   505 lines  17 guards   46 calls  sn 2 sg 9 cm 0 rm 0
+hashtable_build_10000            after     9587 B  23 fn   493 lines  17 guards   46 calls  sn 0 sg 0 cm 0 rm 0
+hashtable_build_50000            parent    9587 B  23 fn   493 lines  17 guards   46 calls  sn 0 sg 0 cm 0 rm 0
+hashtable_build_50000            base      9332 B  23 fn   505 lines  17 guards   46 calls  sn 2 sg 9 cm 0 rm 0
+hashtable_build_50000            after     9587 B  23 fn   493 lines  17 guards   46 calls  sn 0 sg 0 cm 0 rm 0
