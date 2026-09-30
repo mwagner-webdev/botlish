@@ -1,0 +1,6 @@
+# hir::semantic::enabled 0 (semantic instances off), same source, per program
+# (tools/codegen-count.tcl -off; tools/probe.tcl -off for the drivers)
+csv_geometric semantic=1: accepted
+csv_geometric semantic=0: accepted
+csv_records semantic=1: accepted
+csv_records semantic=0: REJECTED: /examples/stdlib/csv_records.bot:449:27: argument for parameter "storage" is statically incompatible with mutarray, the parameter type inferred from the function body (argument type: MutableArray[mutarray], facts: [-∞, +∞]); inferred from the function body: arg

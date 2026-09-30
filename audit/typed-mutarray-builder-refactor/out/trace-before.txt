@@ -1,0 +1,43 @@
+== examples/stdlib/csv_records.bot
+-- function results and parameter contracts (constructor -> container -> projection)
+  ht_alloc               (capacity:int) -> mutarray
+  ht_new                 () -> mutarray
+  ht_new_sized           (expected:int) -> mutarray
+  row_new                (presize:bool, header_count:int) -> mutarray
+  row_fill               (table:mutarray, headers:list, fields:list, i:int, field_count:int) -> any
+  row_table              (headers:list, header_count:int, fields:list, presize:bool) -> mutarray
+  geo_new                () -> list
+  geo_grow               (storage:mutarray, length:int) -> mutarray
+  geo_append             (builder:list, value:any) -> list
+  geo_finish             (builder:list) -> list
+  build_rows             (records:list, i:int, headers:list, header_count:int, outer:list, presize:bool) -> list
+  csv_records_generic    (text:str, presize:bool) -> list
+  csv_records            (text:str) -> list
+  csv_records_presized   (text:str) -> list
+  ht_get                 (table:mutarray, key:any) -> any
+  ht_size                (table:mutarray) -> any
+-- sample() bindings (projection -> consumer)
+  rows                   : list
+  presized_rows          : list
+  first                  : any
+  second                 : any
+  presized_first         : any
+-- record-contained: builder pair and rehash destination
+  dest                   : List[mutarray]
+  newControls            : any
+  newControls            : mutarray
+  fresh                  : mutarray
+  grown                  : mutarray
+  storage                : any
+  storage                : any
+-- diagnostics (a non-empty list only under variant-all-trusted.patch)
+== examples/stdlib/hashtable.bot
+  ht_alloc               (capacity:int) -> mutarray
+  ht_new                 () -> mutarray
+  ht_new_sized           (expected:int) -> mutarray
+  ht_rehash_insert       (dest:list, capacity:int, key:any, value:any) -> unit
+  ht_rehash_probe        (newControls:mutarray, index:int, capacity:int) -> int
+  ht_get                 (table:mutarray, key:any) -> any
+  dest                   : List[mutarray]
+  newControls            : any
+  newControls            : mutarray

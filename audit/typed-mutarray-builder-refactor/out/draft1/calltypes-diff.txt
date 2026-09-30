@@ -1,0 +1,41 @@
+program                 sites  improved
+fib.bot                     3         0
+lex-strategy.bot           13         9
+loop-count.bot              3         2
+refined-checks.bot          3         3
+source-checks.bot           4         1
+sum-refined.bot             3         0
+test-selection.bot         13         2
+uri-steady.bot             32         9
+ai_text_clean.bot          11         9
+csv.bot                    16         3
+csv_chunked.bot            31         2
+csv_geometric.bot          30         3
+csv_records.bot           129        15
+hashtable.bot             100         1
+matmul.bot                  7         7
+string_replace.bot          9         5
+string_reverse.bot          7         7
+TOTAL                     414        78
+
+-- differing sites in csv_geometric.bot
+  112      scan_record_rest         off: any                      on: list
+  133      scan_record              off: any                      on: list
+  141      scan_record              off: any                      on: list
+
+-- differing sites in csv_records.bot
+  185      scan_record_rest         off: any                      on: list
+  432      row_fill                 off: any                      on: mutarray
+  452      build_rows               off: list                     on: List[mutarray]
+  467      build_rows               off: list                     on: List[mutarray]
+  472      csv_records_generic      off: list                     on: List[mutarray]
+  477      csv_records_generic      off: list                     on: List[mutarray]
+  485      csv_records              off: list                     on: List[mutarray]
+  451      row_table                off: any                      on: mutarray
+  466      row_table                off: any                      on: mutarray
+  206      scan_record              off: any                      on: list
+  214      scan_record              off: any                      on: list
+  449      geo_finish               off: list                     on: List[mutarray]
+  486      csv_records_presized     off: list                     on: List[mutarray]
+  467      geo_new                  off: MutableArray[any]        on: MutableArray[mutarray]
+  452      geo_append               off: mutarray                 on: MutableArray[mutarray]

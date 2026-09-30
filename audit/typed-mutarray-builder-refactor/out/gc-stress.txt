@@ -1,0 +1,18 @@
+== typed-mutarray-builder (BOTLISH_NATIVE_GC_STRESS=1)
+typed-mutarray-builder.test:	Total	64	Passed	64	Skipped	0	Failed	0
+   58s
+== native-csv-records (BOTLISH_NATIVE_GC_STRESS=1)
+native-csv-records.test:	Total	21	Passed	21	Skipped	0	Failed	0
+   73s
+== native-mutarray (BOTLISH_NATIVE_GC_STRESS=1)
+native-mutarray.test:	Total	49	Passed	49	Skipped	0	Failed	0
+   5s
+== mutable-array-type (BOTLISH_NATIVE_GC_STRESS=1)
+mutable-array-type.test:	Total	118	Passed	118	Skipped	0	Failed	0
+   5s
+== mutarray-construction (BOTLISH_NATIVE_GC_STRESS=1)
+mutarray-construction.test:	Total	76	Passed	76	Skipped	0	Failed	0
+   5s
+== stdlib (BOTLISH_NATIVE_GC_STRESS=1)
+stdlib.test:	Total	151	Passed	151	Skipped	0	Failed	0
+   93s

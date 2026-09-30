@@ -1,0 +1,4 @@
+######## backend: interp
+all.tcl:	Total	3122	Passed	3122	Skipped	0	Failed	0
+######## backend: compile
+all.tcl:	Total	3122	Passed	3122	Skipped	0	Failed	0

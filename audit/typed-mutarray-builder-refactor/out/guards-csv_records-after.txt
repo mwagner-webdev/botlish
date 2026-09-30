@@ -1,0 +1,15 @@
+      1 csv_records_generic<str, bool>/p2
+      1 geo_append<mutarray, int, list>/p3
+      1 geo_append<mutarray, int, mutarray>/p3
+      1 geo_append<mutarray, int, str>/p3
+      1 ht_capacity<mutarray>/p1
+      2 ht_find_get<mutarray, str, int>/p3
+      2 ht_find_insert<mutarray, any, int, int>/p4
+      1 ht_get<mutarray, str>/p2
+      2 ht_grow_or_clean<mutarray>/p1
+      5 ht_place<mutarray, int, any, any>/p4
+      3 ht_rehash_scan<list, int, int, List[mutarray], int>/p9
+      2 ht_set<mutarray, any, any>/p3
+      2 ht_should_grow<mutarray>/p1
+      1 row_fill<mutarray, list, any, int, int>/p5
+      1 row_table<list, int, any, bool>/p4

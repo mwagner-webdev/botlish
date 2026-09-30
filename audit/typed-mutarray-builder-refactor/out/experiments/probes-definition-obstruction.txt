@@ -1,0 +1,50 @@
+### A-forwarder-precise-value-str
+fn tb_append(storage, length, value):
+    if length == mutable_array_capacity(storage):
+        grown = mutarray::create(length * 2 + 1, value)
+        mutable_array_copy(grown, 0, storage, 0, length)
+        mutable_array_set(grown, length, value)
+        grown
+    else:
+        mutable_array_set(storage, length, value)
+        storage
+fn add_x(storage, n):
+    tb_append(storage, n, "x")
+r = add_x(mutarray::create(2, "a"), 1)
+mutable_array_freeze(r, 2)
+### B-forwarder-any-value
+fn tb_append(storage, length, value):
+    if length == mutable_array_capacity(storage):
+        grown = mutarray::create(length * 2 + 1, value)
+        mutable_array_copy(grown, 0, storage, 0, length)
+        mutable_array_set(grown, length, value)
+        grown
+    else:
+        mutable_array_set(storage, length, value)
+        storage
+fn add_v(storage, n, v):
+    tb_append(storage, n, v)
+r = add_v(mutarray::create(2, "a"), 1, "b")
+mutable_array_freeze(r, 2)
+### C-forwarder-with-annotation
+fn tb_append(storage, length, value):
+    if length == mutable_array_capacity(storage):
+        grown = mutarray::create(length * 2 + 1, value)
+        mutable_array_copy(grown, 0, storage, 0, length)
+        mutable_array_set(grown, length, value)
+        grown
+    else:
+        mutable_array_set(storage, length, value)
+        storage
+fn add_x(storage: MutableArray[str], n):
+    tb_append(storage, n, "x")
+r = add_x(mutarray::create(2, "a"), 1)
+mutable_array_freeze(r, 2)
+### D-forwarder-with-set-only
+fn tb_set(storage, length, value):
+    mutable_array_set(storage, length, value)
+    storage
+fn add_x(storage, n):
+    tb_set(storage, n, "x")
+r = add_x(mutarray::create(2, "a"), 1)
+mutable_array_freeze(r, 2)

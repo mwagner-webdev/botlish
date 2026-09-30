@@ -1,0 +1,53 @@
+--- examples/stdlib/csv_records.bot	2026-09-30 05:41:54.000000000 +0000
++++ examples/stdlib/csv_records.bot	2026-09-30 06:30:35.304794182 +0000
+@@ -145,6 +145,28 @@
+ fn geo_finish(storage, length):
+     mutable_array_freeze(storage, length)
+ 
++
++fn rgeo_new(first):
++    mutarray::create(1, first)
++
++fn rgeo_grow(storage: MutableArray[mutarray], length: int, value: mutarray) -> MutableArray[mutarray]:
++    capacity = mutable_array_capacity(storage)
++    if length < capacity:
++        return storage
++
++    new_capacity = geo_new_capacity(capacity, length)
++    fresh = mutarray::create(new_capacity, value)
++    mutable_array_copy(fresh, 0, storage, 0, length)
++    fresh
++
++fn rgeo_append(storage: MutableArray[mutarray], length: int, value: mutarray) -> MutableArray[mutarray]:
++    grown = rgeo_grow(storage, length, value)
++    mutable_array_set(grown, length, value)
++    grown
++
++fn rgeo_finish(storage: MutableArray[mutarray], length: int) -> List[mutarray]:
++    mutable_array_freeze(storage, length)
++
+ # ---------------------------------------------------------------------------
+ # CSV parsing (see csv.bot for the algorithm's description; identical to
+ # csv_geometric.bot, unchanged).
+@@ -446,10 +468,10 @@
+ # TYPED-MUTARRAY-BUILDER-REFACTOR.md, "Definition-level obstruction".)
+ fn build_rows(records, i, headers, header_count, outer: MutableArray[mutarray], count, presize):
+     if i >= list_length(records):
+-        return geo_finish(outer, count)
++        return rgeo_finish(outer, count)
+ 
+     table = row_table(headers, header_count, list_get(records, i), presize)
+-    build_rows(records, i + 1, headers, header_count, geo_append(outer, count, table), count + 1, presize)
++    build_rows(records, i + 1, headers, header_count, rgeo_append(outer, count, table), count + 1, presize)
+ 
+ # CSV TEXT, with a header row, as an immutable List of mutable HashTables:
+ # one per data row, keyed by the header row's own String objects (shared,
+@@ -464,7 +486,7 @@
+     headers = list_get(records, 0)
+     header_count = list_length(headers)
+     first = row_table(headers, header_count, list_get(records, 1), presize)
+-    build_rows(records, 2, headers, header_count, geo_new(first), 1, presize)
++    build_rows(records, 2, headers, header_count, rgeo_new(first), 1, presize)
+ 
+ # The general baseline: every row table starts at default capacity, not
+ # knowing how many fields it will hold (req #46).

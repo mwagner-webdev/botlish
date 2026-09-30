@@ -1,0 +1,10 @@
+fn g(storage, length, value):
+    if length < mutable_array_capacity(storage):
+        return storage
+
+    fresh = mutarray::create(length * 2 + 1, value)
+    mutable_array_copy(fresh, 0, storage, 0, length)
+    fresh
+
+s = mutarray::create(1, "a")
+list_length(mutable_array_freeze(g(s, 1, "b"), 1))

@@ -1,0 +1,25 @@
+runtime helper relocation counts (rt_*), machine code of the whole program
+== csv_geometric
+  rt_int_add              13 ->  15
+  rt_int_cmp               5 ->   8
+  rt_list_new              0 ->   1
+  rt_mutarray_capacity     1 ->   2
+  rt_mutarray_copy         1 ->   2
+  rt_mutarray_set          2 ->   4
+  rt_str_len               3 ->   4
+  rt_type_error            0 ->   2
+  (unchanged: rt_construct 3, rt_int_mul 1, rt_mutarray_allocate 2, rt_mutarray_freeze 1, rt_str_region_check 1, rt_str_region_eq 8, rt_substr 2)
+== csv_records
+  rt_int_add              21 ->  23
+  rt_int_cmp              12 ->  17
+  rt_int_mod               6 ->   5
+  rt_list_get              7 ->   8
+  rt_list_new              2 ->   3
+  rt_mutarray_allocate     9 ->  10
+  rt_mutarray_capacity     3 ->   4
+  rt_mutarray_copy         1 ->   3
+  rt_mutarray_get         20 ->  16
+  rt_mutarray_set         22 ->  25
+  rt_str_len               3 ->   4
+  rt_type_error           29 ->  26
+  (unchanged: rt_construct 3, rt_hash 3, rt_int_mul 7, rt_int_sub 1, rt_list_len 5, rt_mutarray_freeze 1, rt_str_region_check 1, rt_str_region_eq 8, rt_substr 2, rt_value_eq 13)

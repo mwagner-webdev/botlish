@@ -1,0 +1,39 @@
+workload                            before us (min/med)     after us (min/med)   delta%
+csv_geometric_100                     297.3 /    298.6      298.3 /    301.9    +0.3%
+csv_geometric_1000                   4232.8 /   4263.0     4258.0 /   4281.5    +0.6%
+csv_geometric_10000                 58603.4 /  59417.2    55228.8 /  56377.8    -5.8%
+csv_records_1000x5                   2752.4 /   2765.5     2807.9 /   2842.2    +2.0%
+csv_records_1000x20                 12580.5 /  12721.5    13484.6 /  13559.7    +7.2%
+csv_records_presized_1000x20        11079.1 /  11144.6    11392.5 /  11668.5    +2.8%
+csv_records_10000x5                 36200.8 /  36797.0    36110.2 /  36867.4    -0.3%
+csv_records_sample                     19.4 /     19.6       19.3 /     19.4    -0.7%
+
+workload                          allocs B  allocs A     bytes B     bytes A   gc B   gc A
+csv_geometric_100                     2934      2828      131179      128635      0      0
+csv_geometric_1000                   29938     28932     1337129     1312985      1      1
+csv_geometric_10000                 308943    298937    13894039    13653895      7      7
+csv_records_1000x5                   15120     14107      915429      891117      0      0
+csv_records_1000x20                  38137     37124     3463046     3438734      2      2
+csv_records_presized_1000x20         32137     31124     2743046     2718734      2      2
+csv_records_10000x5                 150128    140115     9354141     9113829      3      3
+csv_records_sample                     166       146        8112        7632      0      0
+
+workload                         per-kind allocations (count/bytes) before -> after: List, MutableArray, String, StringPlan
+csv_geometric_100                List 106/6656 -> 106/6656; MutableArray 426/18048 -> 320/15504; String 2302/96875 -> 2302/96875; StringPlan 100/9600 -> 100/9600
+csv_geometric_1000               List 1006/64256 -> 1006/64256; MutableArray 4029/169256 -> 3023/145112; String 23903/1007617 -> 23903/1007617; StringPlan 1000/96000 -> 1000/96000
+csv_geometric_10000              List 10006/640256 -> 10006/640256; MutableArray 40033/1783112 -> 30027/1542968; String 248904/10510671 -> 248904/10510671; StringPlan 10000/960000 -> 10000/960000
+csv_records_1000x5               List 1014/80664 -> 1014/80664; MutableArray 9083/604288 -> 8070/579976; String 5023/230477 -> 5023/230477; StringPlan 0/0 -> 0/0
+csv_records_1000x20              List 1014/200784 -> 1014/200784; MutableArray 17085/2332720 -> 16072/2308408; String 20038/929542 -> 20038/929542; StringPlan 0/0 -> 0/0
+csv_records_presized_1000x20     List 1014/200784 -> 1014/200784; MutableArray 11085/1612720 -> 10072/1588408; String 20038/929542 -> 20038/929542; StringPlan 0/0 -> 0/0
+csv_records_10000x5              List 10014/800664 -> 10014/800664; MutableArray 90091/6208000 -> 80078/5967688; String 50023/2345477 -> 50023/2345477; StringPlan 0/0 -> 0/0
+csv_records_sample               List 22/1088 -> 22/1088; MutableArray 108/5440 -> 88/4960; String 36/1584 -> 36/1584; StringPlan 0/0 -> 0/0
+
+workload                         code bytes / emitted fns / nir lines / guards before -> after
+csv_geometric_100                5673/15/313/0 -> 7625/20/418/2
+csv_geometric_1000               5673/15/313/0 -> 7625/20/418/2
+csv_geometric_10000              5673/15/313/0 -> 7625/20/418/2
+csv_records_1000x5               21623/55/1110/29 -> 23748/57/1227/26
+csv_records_1000x20              21623/55/1110/29 -> 23748/57/1227/26
+csv_records_presized_1000x20     21623/55/1110/29 -> 23748/57/1227/26
+csv_records_10000x5              21623/55/1110/29 -> 23748/57/1227/26
+csv_records_sample               21573/55/1108/29 -> 23697/57/1225/26

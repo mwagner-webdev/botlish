@@ -1,0 +1,10 @@
+fn g(storage, length, value):
+    if length < mutable_array_capacity(storage):
+        return storage
+
+    fresh = mutable_array_allocate(length * 2 + 1)
+    mutable_array_copy(fresh, 0, storage, 0, length)
+    fresh
+
+s = mutable_array_allocate(1)
+list_length(mutable_array_freeze(g(s, 1, "b"), 1))

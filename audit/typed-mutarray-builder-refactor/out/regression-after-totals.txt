@@ -1,0 +1,5 @@
+######## backend: interp
+all.tcl:	Total	3184	Passed	3184	Skipped	0	Failed	0
+######## backend: compile
+all.tcl:	Total	3184	Passed	3184	Skipped	0	Failed	0
+real	20m1.963s

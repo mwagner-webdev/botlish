@@ -1,0 +1,415 @@
+# instances: <program>, mutarray::create<int, str>, mutarray::create<int, list>, geo_new<str>, geo_new<list>, geo_new_capacity<int, int>, geo_grow<mutarray, int, str>, geo_grow<mutarray, int, list>, geo_append<mutarray, int, str>, geo_append<mutarray, int, list>, geo_finish<mutarray, int>, peek<str, int>, scan_unquoted<str, int, int>, scan_quoted<str, int, str>, scan_field<str, int>, scan_record_rest<str, int, mutarray, int>, scan_record<str, int>, scan_records<str, int, mutarray, int>, csv_parse<str>
+nir 1 call-effects=1 statics=3
+
+func 0 "<program>" params=0 env=0 regs=2 pnames="" captures=0 instance="generic"
+    %0 = str "name,age\nAlice,30\nBob,40\n" @e416
+    %1 = call 19 %0 @e414
+    ret %1
+end
+
+func 1 "mutarray::create" params=2 env=0 regs=13 pnames="capacity default" captures=0 instance="int, str" rawregs="4 10" @e24
+    %2 = op mutarrayallocate %0 @e26
+    %3 = int 0 @e30
+    %4 = rawint 0
+    %5 = move %3 @e29
+    jump L0 @e29
+  label L0
+    %7 = op ilt %5 %0 @e29
+    br %7 L1 L3 @e29
+  label L1
+    %8 = op mutarrayset %2 %5 %1 @e32
+    jump L2 @e29
+  label L2
+    %9 = int 1 @e29
+    %10 = rawint 1
+    %11 = op iadd %5 %9 @e29
+    %5 = move %11 @e29
+    jump L0 @e29
+  label L3
+    %12 = unit @e29
+    %6 = move %12 @e29
+    jump L4 @e29
+  label L4
+    ret %2
+end
+
+func 2 "mutarray::create" params=2 env=0 regs=13 pnames="capacity default" captures=0 instance="int, list" rawregs="4 10" @e24
+    %2 = op mutarrayallocate %0 @e26
+    %3 = int 0 @e30
+    %4 = rawint 0
+    %5 = move %3 @e29
+    jump L0 @e29
+  label L0
+    %7 = op ilt %5 %0 @e29
+    br %7 L1 L3 @e29
+  label L1
+    %8 = op mutarrayset %2 %5 %1 @e32
+    jump L2 @e29
+  label L2
+    %9 = int 1 @e29
+    %10 = rawint 1
+    %11 = op iadd %5 %9 @e29
+    %5 = move %11 @e29
+    jump L0 @e29
+  label L3
+    %12 = unit @e29
+    %6 = move %12 @e29
+    jump L4 @e29
+  label L4
+    ret %2
+end
+
+func 3 "geo_new" params=1 env=0 regs=4 pnames="first" captures=0 instance="str" rawregs="2" @e39
+    %1 = int 1 @e42
+    %2 = rawint 1
+    %3 = call 1 %1 %0 @e40
+    ret %3
+end
+
+func 4 "geo_new" params=1 env=0 regs=4 pnames="first" captures=0 instance="list" rawregs="2" @e39
+    %1 = int 1 @e42
+    %2 = rawint 1
+    %3 = call 2 %1 %0 @e40
+    ret %3
+end
+
+func 5 "geo_new_capacity" params=2 env=0 regs=11 pnames="capacity length" captures=0 instance="int, int" rawregs="3 8" @e45
+    %2 = int 2 @e50
+    %3 = rawint 2
+    %4 = op imul %0 %2 @e47
+    %5 = op ile %4 %1 @e52
+    br %5 L0 L1 @e51
+  label L0
+    %7 = int 1 @e60
+    %8 = rawint 1
+    %9 = op iadd %1 %7 @e57
+    ret %9 @e56
+  label L1
+    %10 = unit
+    %6 = move %10
+    jump L2
+  label L2
+    ret %4
+end
+
+func 6 "geo_grow" params=3 env=0 regs=14 pnames="storage length value" captures=0 instance="mutarray, int, str" rawregs="10 12" @e63
+    %3 = op mutarraycapacity %0 @e65
+    %4 = op ilt %1 %3 @e69
+    br %4 L0 L1 @e68
+  label L0
+    ret %0 @e73
+  label L1
+    %6 = unit
+    %5 = move %6
+    jump L2
+  label L2
+    %7 = call 5 %3 %1 @e76
+    %8 = call 1 %7 %2 @e81
+    %9 = int 0 @e88
+    %10 = rawint 0
+    %11 = int 0 @e90
+    %12 = rawint 0
+    %13 = op mutarraycopy %8 %9 %0 %11 %1 @e85
+    ret %8
+end
+
+func 7 "geo_grow" params=3 env=0 regs=14 pnames="storage length value" captures=0 instance="mutarray, int, list" rawregs="10 12" @e63
+    %3 = op mutarraycapacity %0 @e65
+    %4 = op ilt %1 %3 @e69
+    br %4 L0 L1 @e68
+  label L0
+    ret %0 @e73
+  label L1
+    %6 = unit
+    %5 = move %6
+    jump L2
+  label L2
+    %7 = call 5 %3 %1 @e76
+    %8 = call 2 %7 %2 @e81
+    %9 = int 0 @e88
+    %10 = rawint 0
+    %11 = int 0 @e90
+    %12 = rawint 0
+    %13 = op mutarraycopy %8 %9 %0 %11 %1 @e85
+    ret %8
+end
+
+func 8 "geo_append" params=3 env=0 regs=5 pnames="storage length value" captures=0 instance="mutarray, int, str" @e94
+    %3 = call 6 %0 %1 %2 @e96
+    %4 = op mutarrayset %3 %1 %2 @e101
+    ret %3
+end
+
+func 9 "geo_append" params=3 env=0 regs=5 pnames="storage length value" captures=0 instance="mutarray, int, list" @e94
+    %3 = call 7 %0 %1 %2 @e96
+    %4 = op mutarrayset %3 %1 %2 @e101
+    ret %3
+end
+
+func 10 "geo_finish" params=2 env=0 regs=3 pnames="storage length" captures=0 instance="mutarray, int" @e108
+    %2 = op mutarrayfreeze %0 %1 @e109
+    ret %2
+end
+
+func 11 "peek" params=2 env=0 regs=11 pnames="text index" captures=0 instance="str, int" rawregs="8" @e114
+    %2 = op strlen %0 @e119
+    %3 = op ige %1 %2 @e116
+    br %3 L0 L1 @e115
+  label L0
+    %5 = str "" @e123
+    ret %5 @e122
+  label L1
+    %6 = unit
+    %4 = move %6
+    jump L2
+  label L2
+    %7 = int 1 @e131
+    %8 = rawint 1
+    %9 = op iadd %1 %7 @e128
+    %10 = op substr %0 %1 %9 @e124
+    ret %10
+end
+
+func 12 "peek" params=2 env=0 regs=15 pnames="text index" captures=0 instance="str, int" results=3 rawregs="7 9 12" @e114
+    %2 = op strlen %0 @e119
+    %3 = op ige %1 %2 @e116
+    br %3 L0 L1 @e115
+  label L0
+    %5 = str "" @e123
+    %6 = int 0 @e123
+    %7 = rawint 0
+    %8 = int 0 @e123
+    %9 = rawint 0
+    retmulti %5 %6 %8 @e122
+  label L1
+    %10 = unit
+    %4 = move %10
+    jump L2
+  label L2
+    %11 = int 1 @e131
+    %12 = rawint 1
+    %13 = op iadd %1 %11 @e128
+    %14 = op regioncheck %0 %1 %13 @e124
+    retmulti %0 %1 %13
+end
+
+func 13 "scan_unquoted" params=3 env=0 regs=28 pnames="text start index" captures=0 instance="str, int, int" results=2 rawregs="26" @e133
+    %3 %4 %5 = callmulti 12 %0 %2 @e135
+    %6 = str "" @e145
+    %7 = op regioneq %3 %4 %5 %6 @e142
+    br %7 L0 L1 @e141
+  label L0
+    %9 = bool true @e146
+    %8 = move %9
+    jump L2
+  label L1
+    %10 = str "," @e151
+    %11 = op regioneq %3 %4 %5 %10 @e148
+    br %11 L3 L4 @e147
+  label L3
+    %13 = bool true @e152
+    %12 = move %13
+    jump L5
+  label L4
+    %14 = bool false @e153
+    %12 = move %14
+    jump L5
+  label L5
+    %8 = move %12
+    jump L2
+  label L2
+    br %8 L6 L7 @e140
+  label L6
+    %16 = bool true @e154
+    %15 = move %16
+    jump L8
+  label L7
+    %17 = str "\n" @e159
+    %18 = op regioneq %3 %4 %5 %17 @e156
+    br %18 L9 L10 @e155
+  label L9
+    %20 = bool true @e160
+    %19 = move %20
+    jump L11
+  label L10
+    %21 = bool false @e161
+    %19 = move %21
+    jump L11
+  label L11
+    %15 = move %19
+    jump L8
+  label L8
+    br %15 L12 L13 @e139
+  label L12
+    %23 = op substr %0 %1 %2 @e165
+    retmulti %23 %2 @e162
+  label L13
+    %24 = unit
+    %22 = move %24
+    jump L14
+  label L14
+    %25 = int 1 @e178
+    %26 = rawint 1
+    %27 = op iadd %2 %25 @e175
+    tail %0 %1 %27 @e171
+end
+
+func 14 "scan_quoted" params=3 env=0 regs=35 pnames="text index field" captures=0 instance="str, int, str" results=2 rawregs="6 8 12 21 28 32" planregs="2 24 34" @e180
+    %3 = call 11 %0 %1 @e182
+    %4 = str "\"" @e190
+    %5 = int 0 @e190
+    %6 = rawint 0
+    %7 = int 1 @e190
+    %8 = rawint 1
+    %9 = op regioneq %4 %5 %7 %3 @e187
+    br %9 L0 L1 @e186
+  label L0
+    %11 = int 1 @e200
+    %12 = rawint 1
+    %13 = op iadd %1 %11 @e197
+    %14 %15 %16 = callmulti 12 %0 %13 @e194
+    %17 = str "\"" @e201
+    %18 = op regioneq %14 %15 %16 %17 @e192
+    br %18 L3 L4 @e191
+  label L3
+    %20 = int 2 @e209
+    %21 = rawint 2
+    %22 = op iadd %1 %20 @e206
+    %23 = str "\"" @e213
+    %24 = construct str plan %2 %23 @e210
+    tail %0 %22 %24 @e203
+  label L4
+    %25 = unit
+    %19 = move %25
+    jump L5
+  label L5
+    %26 = construct str flat %2 @e217
+    %27 = int 1 @e221
+    %28 = rawint 1
+    %29 = op iadd %1 %27 @e218
+    retmulti %26 %29 @e214
+  label L1
+    %30 = unit
+    %10 = move %30
+    jump L2
+  label L2
+    %31 = int 1 @e228
+    %32 = rawint 1
+    %33 = op iadd %1 %31 @e225
+    %34 = construct str plan %2 %3 @e229
+    tail %0 %33 %34 @e222
+end
+
+func 15 "scan_field" params=2 env=0 regs=17 pnames="text index" captures=0 instance="str, int" results=2 rawregs="9" @e234
+    %2 %3 %4 = callmulti 12 %0 %1 @e238
+    %5 = str "\"" @e242
+    %6 = op regioneq %2 %3 %4 %5 @e236
+    br %6 L0 L1 @e235
+  label L0
+    %8 = int 1 @e250
+    %9 = rawint 1
+    %10 = op iadd %1 %8 @e247
+    %11 = str "" @e251
+    %12 %13 = callmulti 14 %0 %10 %11 @e244
+    retmulti %12 %13 @e243
+  label L1
+    %14 = unit
+    %7 = move %14
+    jump L2
+  label L2
+    %15 %16 = callmulti 13 %0 %1 %1 @e252
+    retmulti %15 %16
+end
+
+func 16 "scan_record_rest" params=4 env=0 regs=29 pnames="text stop fields count" captures=0 instance="str, int, mutarray, int" results=2 rawregs="11 17 25" @e258
+    %4 %5 %6 = callmulti 12 %0 %1 @e260
+    %7 = str "," @e268
+    %8 = op regioneq %4 %5 %6 %7 @e265
+    br %8 L0 L1 @e264
+  label L0
+    %10 = int 1 @e276
+    %11 = rawint 1
+    %12 = op iadd %1 %10 @e273
+    %13 %14 = callmulti 15 %0 %12 @e270
+    %15 = call 8 %2 %3 %13 @e278
+    %16 = int 1 @e298
+    %17 = rawint 1
+    %18 = op iadd %3 %16 @e295
+    tail %0 %14 %15 %18 @e287
+  label L1
+    %19 = unit
+    %9 = move %19
+    jump L2
+  label L2
+    %20 = str "\n" @e303
+    %21 = op regioneq %4 %5 %6 %20 @e300
+    br %21 L3 L4 @e299
+  label L3
+    %23 = call 10 %2 %3 @e307
+    %24 = int 1 @e314
+    %25 = rawint 1
+    %26 = op iadd %1 %24 @e311
+    retmulti %23 %26 @e304
+  label L4
+    %27 = unit
+    %22 = move %27
+    jump L5
+  label L5
+    %28 = call 10 %2 %3 @e317
+    retmulti %28 %1
+end
+
+func 17 "scan_record" params=2 env=0 regs=9 pnames="text index" captures=0 instance="str, int" results=2 rawregs="6" @e323
+    %2 %3 = callmulti 15 %0 %1 @e325
+    %4 = call 3 %2 @e336
+    %5 = int 1 @e342
+    %6 = rawint 1
+    %7 %8 = callmulti 16 %0 %3 %4 %5 @e329
+    retmulti %7 %8
+end
+
+func 18 "scan_records" params=4 env=0 regs=15 pnames="text index records count" captures=0 instance="str, int, mutarray, int" rawregs="13" @e344
+    %4 = op strlen %0 @e349
+    %5 = op ige %1 %4 @e346
+    br %5 L0 L1 @e345
+  label L0
+    %7 = call 10 %2 %3 @e353
+    ret %7 @e352
+  label L1
+    %8 = unit
+    %6 = move %8
+    jump L2
+  label L2
+    %9 %10 = callmulti 17 %0 %1 @e358
+    %11 = call 9 %2 %3 %9 @e363
+    %12 = int 1 @e382
+    %13 = rawint 1
+    %14 = op iadd %3 %12 @e379
+    tail %0 %10 %11 %14 @e371
+end
+
+func 19 "csv_parse" params=1 env=0 regs=17 pnames="text" captures=0 instance="str" rawregs="2 4 10 15" @e384
+    %1 = op strlen %0 @e388
+    %2 = op runbox %1
+    %3 = int 0 @e391
+    %4 = rawint 0
+    %5 = op rieq %2 %4 @e386
+    br %5 L0 L1 @e385
+  label L0
+    %7 = op listnew @e393
+    ret %7 @e392
+  label L1
+    %8 = unit
+    %6 = move %8
+    jump L2
+  label L2
+    %9 = int 0 @e399
+    %10 = rawint 0
+    %11 %12 = callmulti 17 %0 %9 @e396
+    %13 = call 4 %11 @e407
+    %14 = int 1 @e413
+    %15 = rawint 1
+    %16 = call 18 %0 %12 %13 %14 @e400
+    ret %16
+end
+

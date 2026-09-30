@@ -1,0 +1,62 @@
+
+== fib.bot
+
+== lex-strategy.bot
+
+== loop-count.bot
+
+== refined-checks.bot
+
+== source-checks.bot
+
+== sum-refined.bot
+
+== test-selection.bot
+
+== uri-steady.bot
+
+== ai_text_clean.bot
+
+== csv.bot
+
+== csv_chunked.bot
+
+== csv_geometric.bot
+
+== csv_records.bot
+
+== hashtable.bot
+
+== matmul.bot
+
+== string_replace.bot
+
+== string_reverse.bot
+
+# totals over 17 programs
+#   requests                 0
+#   trivial                  0
+#   hits                     0
+#   walks                    0
+#   rounds                   0
+#   unique                   0
+#   used                     0
+#   valid                    0
+#   invalid                  0
+#   analyzed                 0
+#   declined                 0
+#   declinedNoEnv            0
+#   declinedBudget           0
+#   recursive                0
+#   multi                    0
+#   maxPer                   0
+#   maxPasses                0
+#   instancesWithCodegen     0
+#   shared                   0
+#   sharedCodegen            0
+#   inlined                  0
+#   noSite                   0
+#   codegenUsed              0
+#   codegenEmitted           0
+#   stateBytes               0
+# functions with more than one semantic instance:
