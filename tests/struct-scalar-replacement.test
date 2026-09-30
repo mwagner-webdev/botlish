@@ -1,0 +1,673 @@
+# struct-scalar-replacement.test -- struct scalar replacement
+# (STRUCT-SCALAR-REPLACEMENT.md): an immutable struct value that is built and
+# consumed locally, or that crosses one exact call or return boundary and is
+# immediately decomposed, is carried as its fields instead of as a physical
+# StructObj. `structnew` then means "a materialization really occurs here".
+#
+# Every program below is differential: the Tcl interpreter (HIR -> Core IR),
+# native code with the optimization (HIR -> NIR -> Cranelift) and native code
+# with `-struct-opt 0` (every struct physical) must agree on its value. The
+# allocation behavior is pinned through the NIR: the count of `structnew`
+# (materializations), `structget` (projections from a materialized struct),
+# `callmulti`/`retmulti` (the multi-value calling convention that carries a
+# virtual struct across one exact return), and the `pnames` of a callee that
+# receives a virtual struct argument field by field.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 100000
+
+testConstraint executableAot [expr {$::tcl_platform(os) eq "Linux" && $::tcl_platform(machine) in {x86_64 amd64}}]
+
+set srFiles {}
+proc writeSource {name content} {
+    lappend ::srFiles $name
+    return [tcltest::makeFile $content $name]
+}
+
+# The HIR of SOURCE (a program; modules are read from the library directory).
+proc srHir {source} {
+    return [surface::readProgramFile [writeSource sr-[incr ::srCounter].bot $source]]
+}
+set ::srCounter 0
+
+proc srLowered {hir args} {
+    return [native::lowered $hir {*}$args]
+}
+
+proc srCount {text regexp} {
+    return [regexp -all -line $regexp $text]
+}
+
+# "structnew N structget M callmulti C retmulti R" of SOURCE's NIR under ARGS.
+proc srOps {source args} {
+    set text [dict get [srLowered [srHir $source] {*}$args] text]
+    return [list structnew [srCount $text {= structnew }] structget [srCount $text {= structget }] \
+        callmulti [srCount $text {= callmulti }] retmulti [srCount $text {^\s+retmulti }]]
+}
+
+# The value SOURCE has on all three executions, or the disagreement.
+proc srValue {source} {
+    set hir [srHir $source]
+    set interp [outcomeUnderHir interp $hir]
+    set on [outcomeUnderHir cranelift $hir]
+    set off [native::evalHir $hir -struct-opt 0]
+    set offShown [core::value::show $off 1]
+    if {[lindex $interp 0] ne "value" || [lindex $interp 1] ne [lindex $on 1] || [lindex $on 1] ne $offShown} {
+        return "DISAGREE: interp [lindex $interp 1] / opt [lindex $on 1] / off $offShown"
+    }
+    return [lindex $on 1]
+}
+
+# The census records of SOURCE as "class" / "class:reason" (+mats) words.
+proc srCensus {source} {
+    return [lmap rec [dict get [srLowered [srHir $source]] structCensus] {
+        set word [dict get $rec class]
+        if {$word eq "materialized"} {
+            append word :[string map {{ } _} [dict get $rec reason]]
+        }
+        if {[dict get $rec mats] ne ""} {
+            append word +([string map {{ } _} [join [dict get $rec mats] ,]])
+        }
+        set word
+    }]
+}
+
+# The text of the NIR function called NAME.
+proc srFunc {text name} {
+    set lines {}
+    set collecting 0
+    foreach line [split $text \n] {
+        if {!$collecting} {
+            if {[regexp "^func \\d+ \"$name\"" $line]} {
+                set collecting 1
+                lappend lines $line
+            }
+            continue
+        }
+        lappend lines $line
+        if {$line eq "end"} {
+            break
+        }
+    }
+    return [join $lines \n]
+}
+
+# Runs SOURCE under GC stress (a collection attempted at every allocation
+# site) and plainly; both must agree.
+proc srStressed {source} {
+    set hir [srHir $source]
+    set plain [outcomeUnderHir cranelift $hir]
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        set stressed [outcomeUnderHir cranelift $hir]
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+    if {$plain ne $stressed} {
+        return "DISAGREE: $plain / $stressed"
+    }
+    return [lindex $plain 1]
+}
+
+set physical "structnew 1 structget 0 callmulti 0 retmulti 0"
+
+# ---------------------------------------------------------------------------
+# Local cases: construct, project, never allocate
+
+test sr-local-anonymous {an anonymous struct built and projected locally has no structnew and no structget} -body {
+    set source "x = \{a: 1, b: 2\}\nx.a + x.b\n"
+    list [srValue $source] [srOps $source] [srOps $source -struct-opt 0] [srCensus $source]
+} -result {3 {structnew 0 structget 0 callmulti 0 retmulti 0} {structnew 1 structget 2 callmulti 0 retmulti 0} local}
+
+test sr-local-named {a named struct is equally virtual; its identity is metadata only} -body {
+    set source "struct Person:\n    name: str\n    age: int\np = Person \{name: \"Ada\", age: 36\}\n\[p.name, p.age\]\n"
+    list [srValue $source] [srOps $source] [srCensus $source]
+} -result {{["Ada", 36]} {structnew 0 structget 0 callmulti 0 retmulti 0} local}
+
+test sr-local-multiple-projections {several projections, repeated, read the same field registers} -body {
+    set source "x = \{a: 1, b: 2, c: 3\}\n\[x.a, x.b, x.c, x.a\]\n"
+    list [srValue $source] [srOps $source]
+} -result {{[1, 2, 3, 1]} {structnew 0 structget 0 callmulti 0 retmulti 0}}
+
+test sr-local-alias {an alias of a virtual struct is the same virtual value} -body {
+    set source "x = \{a: 1, b: 2\}\ny = x\nz = y\n\[z.a, y.b, x.a\]\n"
+    list [srValue $source] [srOps $source] [srCensus $source]
+} -result {{[1, 2, 1]} {structnew 0 structget 0 callmulti 0 retmulti 0} local}
+
+test sr-local-direct-projection {projecting a literal directly evaluates every field and keeps one} -body {
+    set source "\{a: 1, b: 2\}.b\n"
+    list [srValue $source] [srOps $source]
+} -result {2 {structnew 0 structget 0 callmulti 0 retmulti 0}}
+
+test sr-local-empty {the empty struct used only locally allocates nothing; materialized it is the normal empty shape} -body {
+    list [srValue "e = \{\}\n1\n"] [srOps "e = \{\}\n1\n"] \
+        [srValue "e = \{\}\n\[e, e == \{\}\]\n"] [srOps "e = \{\}\n\[e, e == \{\}\]\n"]
+} -result {1 {structnew 0 structget 0 callmulti 0 retmulti 0} {[{}, true]} {structnew 2 structget 0 callmulti 0 retmulti 0}}
+
+test sr-local-one-field {a one-field struct is its field locally, and still a struct semantically} -body {
+    set source "o = \{x: 7\}\n\[o.x, o == \{x: 7\}, o == 7\]\n"
+    list [srValue "o = \{x: 7\}\no.x\n"] [srOps "o = \{x: 7\}\no.x\n"] [srValue $source]
+} -result {7 {structnew 0 structget 0 callmulti 0 retmulti 0} {[7, true, false]}}
+
+test sr-local-four-fields {a four-field struct of mixed field types} -body {
+    set source "q = \{a: 1, b: \"s\", c: \[1\], d: 4\}\n\[q.a, q.b, q.c, q.d\]\n"
+    list [srValue $source] [srOps $source]
+} -result {{[1, "s", [1], 4]} {structnew 0 structget 0 callmulti 0 retmulti 0}}
+
+test sr-local-discarded {a struct literal in statement position builds nothing but still evaluates its fields} -body {
+    set source "counter = mutarray::create(1, 0)\nfn tick(m):\n    n = mutable_array_get(m, 0)\n    mutable_array_set(m, 0, n + 1)\n    n\nfn f(m):\n    \{a: tick(m), b: tick(m)\}\n    \{\}\n    mutable_array_get(m, 0)\nf(counter)\n"
+    list [srValue $source] [srOps $source]
+} -result {2 {structnew 0 structget 0 callmulti 0 retmulti 0}}
+
+test sr-local-evaluation-order {fields run in written order, not slot order, exactly as before} -body {
+    set source "counter = mutarray::create(1, 0)
+fn ticket(m):
+    n = mutable_array_get(m, 0)
+    mutable_array_set(m, 0, n + 1)
+    n
+fn build(m):
+    x = \{z: ticket(m), a: ticket(m), m: ticket(m)\}
+    \[x.a, x.m, x.z\]
+build(counter)
+"
+    list [srValue $source] [srOps $source]
+} -result {{[1, 2, 0]} {structnew 0 structget 0 callmulti 0 retmulti 0}}
+
+test sr-local-field-error {an erroring field leaves no struct and reaches the handler} -body {
+    set source "error Boom
+fn mayfail(n) errors Boom:
+    if n > 1:
+        fail Boom
+    n
+fn build(n) errors Boom:
+    x = \{first: 1, second: mayfail(n), third: 3\}
+    x.second + x.third
+fn run(n):
+    build(n):
+        on Boom:
+            0 - 1
+\[run(1), run(2)\]
+"
+    list [srValue $source] [srOps $source]
+} -result {{[4, -1]} {structnew 0 structget 0 callmulti 0 retmulti 0}}
+
+test sr-local-branches {projections in both branches of an if need no object} -body {
+    set source "fn f(c):
+    x = \{a: 1, b: 2\}
+    if c:
+        x.a
+    else:
+        x.b
+\[f(true), f(false)\]
+"
+    list [srValue $source] [srOps $source]
+} -result {{[1, 2]} {structnew 0 structget 0 callmulti 0 retmulti 0}}
+
+test sr-local-loop-body {a struct built and consumed inside one loop iteration stays virtual} -body {
+    set source "fn total(xs):
+    loop x in xs:
+        p = \{a: x, b: x + 1\}
+        p.a + p.b
+total(\[1, 2, 3\])
+"
+    list [srValue $source] [srOps $source]
+} -result {{[3, 5, 7]} {structnew 0 structget 0 callmulti 0 retmulti 0}}
+
+# ---------------------------------------------------------------------------
+# Branch merging: the branches of an if that all end in one struct shape join
+# field-wise (one phi-like move per field) instead of allocating per branch
+
+test sr-branch-join-bound {an if value of one shape is field-wise joined and projected} -body {
+    set source "fn f(c, i):\n    v = if c:\n        \{value: \"a\", n: i\}\n    else:\n        \{n: i + 1, value: \"b\"\}\n    \[v.value, v.n\]\n\[f(true, 1), f(false, 1)\]\n"
+    list [srValue $source] [srOps $source] [srOps $source -struct-opt 0] [srCensus $source]
+} -result {{[["a", 1], ["b", 2]]} {structnew 0 structget 0 callmulti 0 retmulti 0} {structnew 2 structget 2 callmulti 0 retmulti 0} {local local}}
+
+test sr-branch-join-trailing-return {a function whose trailing if yields one shape returns the joined fields} -body {
+    set source "fn pick(c):\n    if c:\n        \{value: \"a\", n: 1\}\n    else:\n        \{value: \"b\", n: 2\}\nr = pick(false)\n\[r.value, r.n\]\n"
+    list [srValue $source] [srOps $source] [srCensus $source]
+} -result {{["b", 2]} {structnew 0 structget 0 callmulti 1 retmulti 1} {return return}}
+
+test sr-branch-join-non-completing-branch {a branch that returns contributes no value to the join} -body {
+    set source "fn f(c, i):\n    v = if c:\n        \{value: \"a\", n: i\}\n    else:\n        return \[0, 0\]\n    \[v.value, v.n\]\n\[f(true, 1), f(false, 1)\]\n"
+    list [srValue $source] [srOps $source]
+} -result {{[["a", 1], [0, 0]]} {structnew 0 structget 0 callmulti 0 retmulti 0}}
+
+test sr-branch-join-nested-ifs {nested ifs of one shape join through both levels} -body {
+    set source "fn f(c, d, i):\n    v = if c:\n        if d:\n            \{a: i, b: 1\}\n        else:\n            \{a: i + 1, b: 2\}\n    else:\n        \{a: 0, b: 3\}\n    \[v.a, v.b\]\n\[f(true, true, 5), f(true, false, 5), f(false, true, 5)\]\n"
+    list [srValue $source] [srOps $source]
+} -result {{[[5, 1], [6, 2], [0, 3]]} {structnew 0 structget 0 callmulti 0 retmulti 0}}
+
+test sr-branch-join-materialized-once {a joined struct that is also stored is built once, after the join} -body {
+    set source "fn f(c):\n    v = if c:\n        \{a: 1, b: 2\}\n    else:\n        \{a: 3, b: 4\}\n    xs = list_append(\[\], v)\n    \[v.a, list_length(xs)\]\n\[f(true), f(false)\]\n"
+    list [srValue $source] [srOps $source] [srOps $source -struct-opt 0]
+} -result {{[[1, 1], [3, 1]]} {structnew 1 structget 0 callmulti 0 retmulti 0} {structnew 2 structget 1 callmulti 0 retmulti 0}}
+
+test sr-branch-join-mixed-shapes {branches of different field sets cannot join: each branch builds its struct} -body {
+    set source "fn f(c):\n    v = if c:\n        \{value: \"a\", n: 1\}\n    else:\n        \{other: 1, n: 2\}\n    v == v\n\[f(true), f(false)\]\n"
+    list [srValue $source] [srOps $source] [srCensus $source]
+} -result {{[true, true]} {structnew 2 structget 0 callmulti 0 retmulti 0} {materialized:control materialized:control}}
+
+test sr-branch-join-argument {an if value bound and handed to an exact callee crosses as fields} -body {
+    set source "fn consume(x):\n    x.value\nfn f(c):\n    v = if c:\n        \{value: \"a\", n: 1\}\n    else:\n        \{value: \"b\", n: 2\}\n    consume(v)\n\[f(true), f(false)\]\n"
+    list [srValue $source] [srOps $source]
+} -result {{["a", "b"]} {structnew 0 structget 0 callmulti 0 retmulti 0}}
+
+# ---------------------------------------------------------------------------
+# Nesting: the outer struct is opened, an inner struct stays one field value
+
+test sr-nested-outer-virtual {the outer struct is virtual, the inner one is a single (materialized) field} -body {
+    set source "inner = \{x: 1, y: 2\}\nouter = \{inner: inner, z: 3\}\n\[outer.z, outer.inner.x, outer.inner.y\]\n"
+    list [srValue $source] [srOps $source] [srOps $source -struct-opt 0] [lsort [srCensus $source]]
+} -result {{[3, 1, 2]} {structnew 1 structget 2 callmulti 0 retmulti 0} {structnew 2 structget 5 callmulti 0 retmulti 0} {local materialized:nested_field}}
+
+test sr-nested-literal-field {a literal nested in a literal is one field value, never flattened} -body {
+    set source "fn mk(i):\n    \{pos: \{line: i, col: 2\}, tok: \"t\"\}\nr = mk(3)\n\[r.pos.line, r.pos.col, r.tok\]\n"
+    list [srValue $source] [srOps $source] [srCensus $source]
+} -result {{[3, 2, "t"]} {structnew 1 structget 2 callmulti 1 retmulti 1} {return materialized:nested_field}}
+
+# ---------------------------------------------------------------------------
+# One-hop return: the fields cross the boundary through retmulti/callmulti
+
+test sr-return-anonymous {a two-field anonymous result returns as two values and is projected directly} -body {
+    set source "fn scan(i):\n    \{field: concat(\"f\", \"x\"), index: i + 1\}\nr = scan(3)\n\[r.field, r.index\]\n"
+    set text [dict get [srLowered [srHir $source]] text]
+    list [srValue $source] [srOps $source] [srCensus $source] \
+        [srCount [srFunc $text scan] {^\s+retmulti }] [regexp {results=2} [srFunc $text scan]]
+} -result {{["fx", 4]} {structnew 0 structget 0 callmulti 1 retmulti 1} return 1 1}
+
+test sr-return-named {a named two-field result returns as fields} -body {
+    set source "struct Hit:\n    at: int\n    len: int\nfn find(i: int):\n    Hit \{at: i, len: i * 2\}\nh = find(4)\n\[h.at, h.len\]\n"
+    list [srValue $source] [srOps $source] [srCensus $source]
+} -result {{[4, 8]} {structnew 0 structget 0 callmulti 1 retmulti 1} return}
+
+test sr-return-alias {a returned struct stays virtual through aliases} -body {
+    set source "fn scan(i):\n    \{field: \"f\", index: i\}\nr = scan(3)\ns = r\n\[s.field, r.index, s.index\]\n"
+    list [srValue $source] [srOps $source]
+} -result {{["f", 3, 3]} {structnew 0 structget 0 callmulti 1 retmulti 1}}
+
+test sr-return-one-projected-field {only one of the two returned fields is read} -body {
+    set source "fn scan(i):\n    \{field: concat(\"f\", \"x\"), index: i + 1\}\nr = scan(3)\nr.index\n"
+    list [srValue $source] [srOps $source]
+} -result {4 {structnew 0 structget 0 callmulti 1 retmulti 1}}
+
+test sr-return-direct-projection {projecting a call result directly reads the returned field} -body {
+    set source "fn scan(i):\n    \{field: concat(\"f\", \"x\"), index: i + 1\}\nscan(3).index\n"
+    list [srValue $source] [srOps $source]
+} -result {4 {structnew 0 structget 0 callmulti 1 retmulti 1}}
+
+test sr-return-multiple-exits {every exit of one shape may be an explicit return or the trailing value} -body {
+    set source "fn scan(i):\n    if i > 2:\n        return \{a: 1, b: 2\}\n    \{b: 3, a: 4\}\nr = scan(3)\n\[r.a, r.b, scan(0).a\]\n"
+    list [srValue $source] [srOps $source]
+} -result {{[1, 2, 4]} {structnew 0 structget 0 callmulti 2 retmulti 2}}
+
+test sr-return-different-shapes {exits of different field sets cannot be one result: the struct is built} -body {
+    set source "fn scan(i):\n    if i > 2:\n        return \{a: 1, b: 2\}\n    \{c: 3, d: 4\}\nx = scan(3)\nx == x\n"
+    list [srValue $source] [srOps $source] [srCensus $source]
+} -result {true {structnew 1 structget 0 callmulti 0 retmulti 0} {materialized:mixed_exits materialized:mixed_exits}}
+
+test sr-return-recursive {a result forwarded through non-tail recursion is virtual at every level} -body {
+    set source "fn count(n):\n    if n <= 0:\n        return \{done: 0, left: 0\}\n    r = count(n - 1)\n    \{done: r.done + 1, left: n\}\nr = count(5)\n\[r.done, r.left\]\n"
+    list [srValue $source] [srOps $source]
+} -result {{[5, 5]} {structnew 0 structget 0 callmulti 2 retmulti 2}}
+
+test sr-return-open-caller {a callee that also has an open caller keeps its canonical struct-returning function} -body {
+    set source "fn one(i):\n    \{a: i, b: i + 1\}\nfn two(i):\n    \{a: i * 2, b: i * 3\}\nfn pick(n):\n    list_get(\[one, two\], n)\nfn run(n):\n    f = pick(n)\n    r = f(5)\n    g = one(7)\n    \[r, g.a, g.b\]\n\[run(0), run(1)\]\n"
+    list [srValue $source] [srOps $source]
+} -result {{[[{a: 5, b: 6}, 7, 8], [{a: 10, b: 15}, 7, 8]]} {structnew 2 structget 0 callmulti 1 retmulti 1}}
+
+# ---------------------------------------------------------------------------
+# One-hop argument: the callee receives the fields
+
+test sr-argument-anonymous {a literal handed to an exact callee that only projects it crosses as fields} -body {
+    set source "fn consume(x):\n    x.a + x.b\nconsume(\{a: 1, b: 2\})\n"
+    set text [dict get [srLowered [srHir $source]] text]
+    list [srValue $source] [srOps $source] [srCensus $source] [regexp {pnames="x.0 x.1"} $text]
+} -result {3 {structnew 0 structget 0 callmulti 0 retmulti 0} call 1}
+
+test sr-argument-named {a named struct argument} -body {
+    set source "struct P:\n    a: int\n    b: int\nfn consume(p):\n    p.a * p.b\nconsume(P \{a: 3, b: 4\})\n"
+    list [srValue $source] [srOps $source] [srCensus $source]
+} -result {12 {structnew 0 structget 0 callmulti 0 retmulti 0} call}
+
+test sr-argument-four-fields {a four-field argument} -body {
+    set source "fn consume(x):\n    x.a + x.b + x.c + x.d\nconsume(\{a: 1, b: 2, c: 3, d: 4\})\n"
+    set text [dict get [srLowered [srHir $source]] text]
+    list [srValue $source] [srOps $source] [regexp {pnames="x.0 x.1 x.2 x.3"} $text]
+} -result {10 {structnew 0 structget 0 callmulti 0 retmulti 0} 1}
+
+test sr-argument-local-forwarded {a virtual local handed on to an exact callee is forwarded field by field} -body {
+    set source "fn consume(x):\n    x.a + x.b\ny = \{a: 10, b: 20\}\nconsume(\{a: 1, b: 2\}) + consume(y) + y.a\n"
+    list [srValue $source] [srOps $source] [srCensus $source]
+} -result {43 {structnew 0 structget 0 callmulti 0 retmulti 0} {call call}}
+
+test sr-argument-chain {a forwarding chain of exact callees keeps the fields} -body {
+    set source "fn h(x):\n    x.a\nfn g(x):\n    h(x)\nfn f(x):\n    g(x)\nf(\{a: 1, b: 2\})\n"
+    list [srValue $source] [srOps $source]
+} -result {1 {structnew 0 structget 0 callmulti 0 retmulti 0}}
+
+test sr-argument-callee-materializes {a callee that needs the object itself keeps receiving it} -body {
+    set source "fn store(x):\n    list_length(list_append(\[\], x))\nstore(\{a: 1, b: 2\})\n"
+    list [srValue $source] [srOps $source] [srCensus $source]
+} -result {1 {structnew 1 structget 0 callmulti 0 retmulti 0} materialized:call_param}
+
+test sr-argument-self-recursion {a struct argument rebuilt on every step of a self-tail loop and of a non-tail recursion} -body {
+    set tail "fn walk(state, i):\n    if i >= 5:\n        return state.total\n    walk(\{total: state.total + i, n: i\}, i + 1)\nwalk(\{total: 0, n: 0\}, 0)\n"
+    set nontail "fn walk(state, i):\n    if i >= 5:\n        return state.total\n    1 + walk(\{total: state.total + i, n: i\}, i + 1)\nwalk(\{total: 0, n: 0\}, 0)\n"
+    list [srValue $tail] [srOps $tail] [srValue $nontail] [srOps $nontail]
+} -result {10 {structnew 0 structget 0 callmulti 0 retmulti 0} 15 {structnew 0 structget 0 callmulti 0 retmulti 0}}
+
+test sr-argument-open-call-materializes {a virtual struct handed to an unknown callable is built first} -body {
+    set source "fn one(x):\n    1\nfn two(x):\n    2\nfn pick(n):\n    list_get(\[one, two\], n)\nfn run(n):\n    f = pick(n)\n    x = \{k: 1, v: 2\}\n    \[x.k, f(x)\]\n\[run(0), run(1)\]\n"
+    list [srValue $source] [srOps $source] [srCensus $source]
+} -result {{[[1, 1], [1, 2]]} {structnew 1 structget 0 callmulti 0 retmulti 0} local+(open_call)}
+
+# ---------------------------------------------------------------------------
+# Materialization: lazily, at the first use that needs an object, once
+
+test sr-materialize-list-storage {storing a struct in a List needs the object} -body {
+    set source "x = \{a: concat(\"p\", \"q\"), b: 2\}\nxs = list_append(\[\], x)\n\[x.a, x.b, list_get(xs, 0).b\]\n"
+    list [srValue $source] [srOps $source] [srCensus $source]
+} -result {{["pq", 2, 2]} {structnew 1 structget 1 callmulti 0 retmulti 0} local+(storage)}
+
+test sr-materialize-mutable-array {storing a struct in a MutableArray needs the object} -body {
+    set source "a = mutarray::create(2, \{k: 0, v: 0\})\nx = \{k: 1, v: 2\}\nmutable_array_set(a, 0, x)\n\[x.k, mutable_array_get(a, 0).v\]\n"
+    list [srValue $source]
+} -result {{[1, 2]}}
+
+test sr-materialize-print {a struct that is the program's value is printed, so it is built} -body {
+    set source "x = \{k: 1, v: 2\}\nx\n"
+    list [srValue $source] [srOps $source] [srCensus $source]
+} -result {{{k: 1, v: 2}} {structnew 1 structget 0 callmulti 0 retmulti 0} materialized:result}
+
+test sr-materialize-hash {hashing a struct needs the object (field-wise hashing is not implemented)} -body {
+    set source "x = \{k: 1, v: 2\}\n\[x.k, hash(x) == hash(\{v: 2, k: 1\})\]\n"
+    list [srValue $source] [srOps $source]
+} -result {{[1, true]} {structnew 2 structget 0 callmulti 0 retmulti 0}}
+
+test sr-materialize-equality {equality of structs needs the objects; the answer is unchanged} -body {
+    set source "x = \{a: 1, b: 2\}\ny = \{b: 2, a: 1\}\nz = \{a: 1, b: 3\}\n\[x == y, x == z, x.a\]\n"
+    list [srValue $source] [srOps $source] [srCensus $source]
+} -result {{[true, false, 1]} {structnew 3 structget 0 callmulti 0 retmulti 0} {local+(equality,equality) materialized:equality materialized:equality}}
+
+test sr-materialize-escaping-closure {a struct captured by a closure is built} -body {
+    set source "fn mk(v):\n    x = \{value: v, other: 1\}\n    fn get():\n        x.value\n    get\ng = mk(\"a\")\ng()\n"
+    list [srValue $source] [srOps $source] [srCensus $source]
+} -result {{"a"} {structnew 1 structget 1 callmulti 0 retmulti 0} materialized:capture}
+
+test sr-materialize-wide-return {a result wider than the return cap is returned as an object} -body {
+    set source "fn wide(i):\n    \{a: i, b: 2, c: 3, d: 4, e: 5, f: 6, g: 7, h: 8\}\nw = wide(1)\n\[w.a, w.h\]\n"
+    list [srValue $source] [srOps $source] [srCensus $source]
+} -result {{[1, 8]} {structnew 1 structget 2 callmulti 0 retmulti 0} materialized:width}
+
+test sr-materialize-loop-use {a struct built once and needed as an object per iteration is not re-allocated per iteration} -body {
+    set source "fn go(xs):\n    p = \{a: 1, b: 2\}\n    loop x in xs:\n        list_length(list_append(\[\], p)) + p.a\ngo(\[1, 2, 3\])\n"
+    list [srValue $source] [srOps $source] [srCensus $source]
+} -result {{[2, 2, 2]} {structnew 1 structget 1 callmulti 0 retmulti 0} materialized:loop}
+
+test sr-materialize-protected-call {an object built inside a protected call is not reused on the handler path} -body {
+    set source "error Boom
+fn mayfail(n, p) errors Boom:
+    if n > 1:
+        fail Boom
+    list_length(list_append(\[\], p))
+fn run(n):
+    p = \{a: 1, b: 2\}
+    r = mayfail(n, p):
+        on Boom:
+            list_length(list_append(\[\], p))
+    \[r, p.b\]
+\[run(1), run(2)\]
+"
+    list [srValue $source]
+} -result {{[[1, 2], [1, 2]]}}
+
+# ---------------------------------------------------------------------------
+# Mixed use: projections stay direct, one materialization serves every later
+# physical use
+
+test sr-mixed-use {projections before and after the one materialization are direct, later physical uses share it} -body {
+    set source "x = \{a: concat(\"p\", \"q\"), b: 2\}
+first = x.a
+xs = list_append(\[\], x)
+second = x.b
+ys = list_append(xs, x)
+\[first, second, list_length(ys), list_get(ys, 1).a\]
+"
+    set text [dict get [srLowered [srHir $source]] text]
+    list [srValue $source] [srOps $source] [srCensus $source] \
+        [expr {[lindex [regexp -inline {structnew 0 (%\d+) } $text] 1] ne ""}]
+} -result {{["pq", 2, 2, "pq"]} {structnew 1 structget 1 callmulti 0 retmulti 0} local+(storage,storage) 1}
+
+test sr-mixed-use-branches {a materialization inside one branch does not serve the other branch or the join} -body {
+    set source "fn f(c):
+    x = \{a: 1, b: 2\}
+    n = if c:
+        list_length(list_append(\[\], x))
+    else:
+        x.a
+    n + x.b + list_length(list_append(\[\], x))
+\[f(true), f(false)\]
+"
+    list [srValue $source] [srOps $source]
+} -result {{[4, 4]} {structnew 2 structget 0 callmulti 0 retmulti 0}}
+
+test sr-mixed-use-alias {an alias and its source share one materialization} -body {
+    set source "x = \{a: 1, b: 2\}\ny = x\nxs = list_append(list_append(\[\], x), y)\n\[x.a, y.b, list_length(xs)\]\n"
+    list [srValue $source] [srOps $source]
+} -result {{[1, 2, 2]} {structnew 1 structget 0 callmulti 0 retmulti 0}}
+
+test sr-mixed-use-returned {a returned struct that is both projected and stored is built once, by the caller} -body {
+    set source "fn scan(i):\n    \{a: i, b: 2\}\nr = scan(3)\nxs = list_append(\[\], r)\n\[r.a, list_length(xs)\]\n"
+    list [srValue $source] [srOps $source]
+} -result {{[3, 1]} {structnew 1 structget 0 callmulti 1 retmulti 1}}
+
+# ---------------------------------------------------------------------------
+# Shape identity survives virtualization
+
+test sr-shape-named-vs-anonymous {materializing a virtual named struct uses the named shape, an anonymous one the canonical field-set shape} -body {
+    set source "struct Person:\n    name: str\n    age: int\nstruct Account:\n    name: str\n    age: int\na = Person \{age: 1, name: \"a\"\}\nb = Account \{name: \"a\", age: 1\}\nc = \{age: 1, name: \"a\"\}\nd = \{name: \"a\", age: 1\}\nxs = \[a, b, c, d\]\n\[a.age, b.age, c.age, d.age, a == b, c == d, xs\]\n"
+    set text [dict get [srLowered [srHir $source]] text]
+    list [srValue $source] [regexp -all -inline {shape \d+ (?:named "\w+"|anon) fields="[a-z ]+"} $text]
+} -result {{[1, 1, 1, 1, false, true, [Person {name: "a", age: 1}, Account {name: "a", age: 1}, {age: 1, name: "a"}, {age: 1, name: "a"}]]} {{shape 0 named "Person" fields="name age"} {shape 1 named "Account" fields="name age"} {shape 2 anon fields="age name"}}}
+
+# ---------------------------------------------------------------------------
+# Width policy
+
+proc widthSource {n form} {
+    set names [lmap i [lrange {0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17} 0 [expr {$n - 1}]] {string cat f $i}]
+    set literal "\{[join [lmap f $names k [lrange {0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17} 0 [expr {$n - 1}]] {string cat "$f: i + $k"}] {, }]\}"
+    set uses [expr {$n == 0 ? "0" : [join [lmap f $names {string cat r. $f}] { + }]}]
+    switch -- $form {
+        local    { return "fn f(i):\n    r = $literal\n    $uses\nf(1)\n" }
+        return   { return "fn mk(i):\n    $literal\nfn f(i):\n    r = mk(i)\n    $uses\nf(1)\n" }
+        argument { return "fn use(r):\n    $uses\nfn f(i):\n    use($literal)\nf(1)\n" }
+    }
+}
+# Replaces "f0: i + 0" ... with lmap over two lists (Tcl's lmap takes both).
+
+foreach width {0 1 2 3 4 8 16} {
+    test sr-width-$width-values {a struct of $width fields is correct in every form on every execution} -body {
+        list [srValue [widthSource $width local]] [srValue [widthSource $width return]] [srValue [widthSource $width argument]]
+    } -match glob -result *
+}
+
+test sr-width-policy-local {locals stay virtual up to the local cap (16) and are materialized beyond it} -body {
+    list [srOps [widthSource 16 local]] [srOps [widthSource 17 local]]
+} -result {{structnew 0 structget 0 callmulti 0 retmulti 0} {structnew 1 structget 17 callmulti 0 retmulti 0}}
+
+test sr-width-policy-return {a result crosses a return as fields up to the return cap (4 fields)} -body {
+    list [srOps [widthSource 2 return]] [srOps [widthSource 4 return]] [srOps [widthSource 8 return]] \
+        [srOps [widthSource 8 return] -struct-return-width 8]
+} -result {{structnew 0 structget 0 callmulti 1 retmulti 1} {structnew 0 structget 0 callmulti 1 retmulti 1} {structnew 1 structget 8 callmulti 0 retmulti 0} {structnew 0 structget 0 callmulti 1 retmulti 1}}
+
+test sr-width-policy-argument {an argument crosses a call as fields up to the argument cap (4 fields)} -body {
+    list [srOps [widthSource 2 argument]] [srOps [widthSource 4 argument]] [srOps [widthSource 8 argument]] \
+        [srOps [widthSource 8 argument] -struct-arg-width 8]
+} -result {{structnew 0 structget 0 callmulti 0 retmulti 0} {structnew 0 structget 0 callmulti 0 retmulti 0} {structnew 1 structget 8 callmulti 0 retmulti 0} {structnew 0 structget 0 callmulti 0 retmulti 0}}
+
+test sr-width-zero-fields-across-boundaries {a zero-field struct is virtual locally but is an object across a boundary (there is nothing to transport)} -body {
+    list [srOps [widthSource 0 local]] [srOps [widthSource 0 return]] [srOps [widthSource 0 argument]]
+} -result {{structnew 0 structget 0 callmulti 0 retmulti 0} {structnew 1 structget 0 callmulti 0 retmulti 0} {structnew 1 structget 0 callmulti 0 retmulti 0}}
+
+# ---------------------------------------------------------------------------
+# Flags, generic baseline
+
+test sr-flag-off-is-the-structs-milestone {-struct-opt 0 lowers exactly as before: one structnew per construction, a structget per projection} -body {
+    set source "fn scan(i):\n    \{field: \"f\", index: i\}\nr = scan(3)\n\[r.field, r.index\]\n"
+    list [srOps $source -struct-opt 0] [srOps $source -escape-opt 0]
+} -result {{structnew 1 structget 2 callmulti 0 retmulti 0} {structnew 1 structget 2 callmulti 0 retmulti 0}}
+
+test sr-generic-baseline-unchanged {the unspecialized baseline keeps its limitation: a projection proven only by an instance is not compiled, and no struct crosses a boundary as fields} -body {
+    set hir [srHir "fn first(x):\n    x.value\nfirst(\{value: 1\})\n"]
+    catch {native::evalHir $hir -specialize 0} message options
+    list [dict get $options -errorcode] [srCount [dict get [srLowered [srHir "fn mk(i):\n    \{a: i, b: 1\}\nr = mk(3)\nr.a\n"] -specialize 0] text] {= callmulti }]
+} -result {{NATIVE UNSUPPORTED struct-shape} 0}
+
+# ---------------------------------------------------------------------------
+# Census and the stdlib (the acceptance cases)
+
+proc stdlibCensus {name} {
+    set hir [native::prepareHir [surface::readProgramFile [file join $::projectRoot examples stdlib $name.bot]]]
+    set text [dict get [srLowered $hir] text]
+    set off [dict get [srLowered $hir -struct-opt 0] text]
+    set census [dict get [srLowered $hir] structCensus]
+    return [list \
+        [list on [srCount $text {= structnew }] [srCount $text {= structget }] [srCount $text {= callmulti }]] \
+        [list off [srCount $off {= structnew }] [srCount $off {= structget }] [srCount $off {= callmulti }]] \
+        [lsort -unique [lmap r $census {dict get $r class}]]]
+}
+
+test sr-stdlib-csv-scan-results {every csv scan result is a virtual multi-value return: no StructObj at all} -body {
+    stdlibCensus csv
+} -result {{on 0 0 12} {off 6 8 5} return}
+
+test sr-stdlib-csv-geometric {csv_geometric scan results and records are virtual} -body {
+    stdlibCensus csv_geometric
+} -result {{on 0 0 11} {off 4 8 4} return}
+
+test sr-stdlib-hashtable-rehash {the rehash src and dest groupings cross their calls as fields} -body {
+    stdlibCensus hashtable
+} -result {{on 0 0 0} {off 2 9 0} call}
+
+test sr-stdlib-rehash-signature {ht_rehash_scan receives src and dest as three fields each} -body {
+    set hir [native::prepareHir [surface::readProgramFile [file join $::projectRoot examples stdlib hashtable.bot]]]
+    set text [dict get [srLowered $hir] text]
+    regexp {func \d+ "ht_rehash_scan" params=(\d+) env=0 regs=\d+ pnames="([^"]*)"} $text -> params pnames
+    list $params $pnames
+} -result {9 {src.0 src.1 src.2 i oldCapacity dest.0 dest.1 dest.2 newCapacity}}
+
+test sr-control-test-selection {genuine stored Test values stay physical: the optimization is use-sensitive} -body {
+    set hir [native::prepareHir [surface::readProgramFile [file join $::projectRoot bench test-selection.bot]]]
+    set text [dict get [srLowered $hir] text]
+    set off [dict get [srLowered $hir -struct-opt 0] text]
+    set census [dict get [srLowered $hir] structCensus]
+    list [srCount $text {= structnew }] [srCount $off {= structnew }] \
+        [lsort -unique [lmap r $census {string cat [dict get $r class] : [dict get $r reason]}]]
+} -match glob -result {15 15 *materialized:storage*}
+
+# ---------------------------------------------------------------------------
+# GC: a virtual struct is not a root, its fields are
+
+set gcSource(strings) "fn build(i):
+    \{s: concat(\"a\", \"b\"), t: concat(\"c\", \"d\"), n: i\}
+r = build(3)
+x = concat(\"x\", \"y\")
+\[r.s, r.t, r.n, x\]
+"
+set gcSource(list-string) "fn build(i):
+    \{items: \[concat(\"a\", \"b\"), concat(\"c\", \"d\")\], label: concat(\"l\", \"x\")\}
+r = build(1)
+junk = \[concat(\"j\", \"k\"), concat(\"m\", \"n\")\]
+\[r.items, r.label, junk\]
+"
+set gcSource(mutarray-string) "fn build(i):
+    m = mutarray::create(2, \"z\")
+    mutable_array_set(m, 0, concat(\"q\", \"r\"))
+    \{arr: m, label: concat(\"l\", \"x\")\}
+r = build(1)
+junk = concat(concat(\"j\", \"k\"), \"m\")
+\[mutable_array_get(r.arr, 0), mutable_array_get(r.arr, 1), r.label, junk\]
+"
+set gcSource(nested) "fn mk(i):
+    inner = \{p: concat(\"p\", \"q\"), q: \[1, 2\]\}
+    \{inner: inner, tag: concat(\"t\", \"g\")\}
+o = mk(1)
+junk = \[concat(\"a\", \"b\"), concat(\"c\", \"d\")\]
+\[o.inner.p, o.inner.q, o.tag, junk\]
+"
+set gcSource(across-call) "fn consume(x, y):
+    junk = \[concat(\"j\", \"k\"), concat(\"m\", \"n\")\]
+    \[x.s, x.l, y, junk\]
+consume(\{s: concat(\"a\", \"b\"), l: \[concat(\"c\", \"d\")\]\}, concat(\"e\", \"f\"))
+"
+set gcSource(across-return) "fn mk(i):
+    a = concat(\"a\", \"b\")
+    \{s: a, l: \[concat(\"c\", \"d\"), a\]\}
+fn run(i):
+    r = mk(i)
+    junk = \[concat(\"j\", \"k\"), concat(\"m\", \"n\"), concat(\"o\", \"p\")\]
+    \[r.s, r.l, junk\]
+run(1)
+"
+set gcSource(materialize-after-safepoint) "fn run(i):
+    x = \{s: concat(\"a\", \"b\"), l: \[concat(\"c\", \"d\")\], n: i\}
+    junk = \[concat(\"j\", \"k\"), concat(\"m\", \"n\"), concat(\"o\", \"p\")\]
+    junk2 = \[concat(\"q\", \"r\"), concat(\"s\", \"t\")\]
+    xs = list_append(\[\], x)
+    \[x.s, x.n, list_get(xs, 0).l, junk, junk2\]
+run(5)
+"
+foreach name [lsort [array names gcSource]] {
+    test sr-gc-$name {pointer-bearing fields of a virtual struct survive collection at every allocation} -body {
+        set source $gcSource($name)
+        list [srStressed $source] [expr {[srValue $source] eq [srStressed $source]}]
+    } -match glob -result {* 1}
+}
+
+test sr-gc-virtual-struct-is-virtual {the GC tests above really run virtually} -body {
+    list [srOps $gcSource(strings)] [srOps $gcSource(across-call)] [srOps $gcSource(across-return)] [srOps $gcSource(list-string)]
+} -result {{structnew 0 structget 0 callmulti 1 retmulti 1} {structnew 0 structget 0 callmulti 0 retmulti 0} {structnew 0 structget 0 callmulti 1 retmulti 1} {structnew 0 structget 0 callmulti 1 retmulti 1}}
+
+# ---------------------------------------------------------------------------
+# Standalone executables: empty PATH, GC stress
+
+test sr-executable-parity {optimized programs run as real executables with an empty PATH, plainly and under GC stress} -constraints executableAot -body {
+    set dir [tcltest::makeDirectory sr-exe]
+    set results {}
+    foreach name {strings across-return across-call materialize-after-safepoint nested} {
+        set path [file join $dir $name.bot]
+        set channel [open $path w]
+        fconfigure $channel -encoding utf-8
+        puts -nonewline $channel $gcSource($name)
+        close $channel
+        set hir [surface::readProgramFile $path]
+        set expected [lindex [outcomeUnderHir interp $hir] 1]
+        native::executable $hir [file rootname $path]
+        set plain [exec env PATH= [file rootname $path]]
+        set stressed [exec env PATH= BOTLISH_NATIVE_GC_STRESS=1 [file rootname $path]]
+        lappend results [expr {$plain eq $stressed && $plain eq $expected}]
+    }
+    tcltest::removeDirectory sr-exe
+    set results
+} -result {1 1 1 1 1}
+
+# ---------------------------------------------------------------------------
+# The CSV acceptance case, end to end
+
+test sr-csv-allocations {csv_geometric allocates no Struct object; List, MutableArray and String allocations are those of the structs-off lowering} -body {
+    set hir [native::prepareHir [surface::readProgramFile [file join $::projectRoot examples stdlib csv_geometric.bot]]]
+    set on [native::allocationReport $hir summary 1]
+    set off [native::allocationReport $hir summary 1 -struct-opt 0]
+    list [dict get $on byKind Struct allocations] [dict get $off byKind Struct allocations] \
+        [expr {[dict get $on byKind List allocations] == [dict get $off byKind List allocations]}] \
+        [expr {[dict get $on byKind MutableArray allocations] == [dict get $off byKind MutableArray allocations]}] \
+        [expr {[dict get $on byKind String allocations] == [dict get $off byKind String allocations]}]
+} -result {0 9 1 1 1}
+
+foreach name $srFiles {
+    tcltest::removeFile $name
+}
+
+cleanupTests

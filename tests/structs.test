@@ -646,19 +646,19 @@ e = \{x: 1, y: 2\}
 
 test struct-native-nir {native code lowers construction to structnew of a shape and projection to a known slot} -body {
     set hir [surface::compile "x = \{left: 1, right: 2\}\nx.right\n" struct.bot]
-    set nir [dict get [native::lowered $hir] text]
+    set nir [dict get [native::lowered $hir -struct-opt 0] text]
     list [regexp {shape 0 anon fields="left right"} $nir] [regexp {structnew 0 %[0-9]+ %[0-9]+} $nir] [regexp {structget 1 %[0-9]+} $nir]
 } -result {1 1 1}
 
 test struct-native-shapes-shared {anonymous literals of one field set share one runtime shape whatever the source order} -body {
     set hir [surface::compile "a = \{x: 1, y: 2\}\nb = \{y: 3, x: 4\}\nc = \{x: \"s\", y: \"t\"\}\n" struct.bot]
-    set nir [dict get [native::lowered $hir] text]
+    set nir [dict get [native::lowered $hir -struct-opt 0] text]
     list [regexp -all {\nshape } $nir] [regexp -all {structnew 0 } $nir]
 } -result {1 3}
 
 test struct-native-named-shape {a named struct has its own nominal shape, distinct from an identical anonymous one} -body {
     set hir [surface::compile "${accounts}a = Person \{name: \"a\", age: 1\}\nb = Account \{name: \"a\", age: 1\}\nc = \{age: 1, name: \"a\"\}\n" struct.bot]
-    set nir [dict get [native::lowered $hir] text]
+    set nir [dict get [native::lowered $hir -struct-opt 0] text]
     regexp -all -inline {shape [0-9]+ [a-z]+ (?:"[A-Za-z:]+" )?fields="[a-z ]+"} $nir
 } -result {{shape 0 named "Person" fields="name age"} {shape 1 named "Account" fields="name age"} {shape 2 anon fields="age name"}}
 

@@ -207,18 +207,19 @@ test escape-csv-2 {scan_field's and scan_record's own literal construction sites
 } -result {}
 
 # csv.bot's scan results are anonymous structs, not [field, index] pair Lists
-# (STRUCTS.md). Escape analysis used to scalar-replace those pairs (fewer List
-# allocations with escape-opt on than off); it does not handle structs (no
-# struct scalar replacement was added), so the scan results are real Struct
-# allocations either way and the List count no longer depends on the
-# optimizer. Pinned as {List Struct} allocations per mode (on, off).
-test escape-csv-3 {csv_parse's scan structs are real allocations with escape-opt on and off; its Lists no longer depend on it} -body {
+# (STRUCTS.md). The structs milestone left them as real Struct allocations
+# (escape analysis did not handle structs); struct scalar replacement
+# (STRUCT-SCALAR-REPLACEMENT.md) carries them across the one exact return as
+# fields again, so with escape-opt on no Struct is allocated, and with it off
+# (-escape-opt 0 disables the analysis) every scan result is a real object.
+# Pinned as {List Struct} allocations per mode (on, off).
+test escape-csv-3 {csv_parse's scan structs are scalar-replaced with escape-opt on and real allocations with it off; its Lists do not depend on it} -body {
     set hir [csvHir {csv_parse("name,age\nAlice,30\nBob,40\n")}]
     lmap mode {1 0} {
         set report [native::allocationReport $hir summary 1 -escape-opt $mode]
         list [dict get $report byKind List allocations] [dict get $report byKind Struct allocations]
     }
-} -result {{8 9} {8 9}}
+} -result {{8 0} {8 9}}
 
 # ---------------------------------------------------------------------------
 # HashTable rehash grouping (#16): a non-CSV case. This *used* to document

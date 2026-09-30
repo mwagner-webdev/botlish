@@ -48,6 +48,12 @@
 #   native::report HIR                  guard accounting and instance counts
 #   native::codeSize HIR ?OPTIONS?      {TOTAL-BYTES {FUNCTION-BYTES ...}} of
 #                                       the machine code
+#   native::structCensus HIR ?OPTIONS? one record per struct construction (a
+#                                       semantic instance x source site): what
+#                                       struct scalar replacement did with it
+#                                       (STRUCT-SCALAR-REPLACEMENT.md); an
+#                                       audit, not a language feature.
+#                                       native::structCensusText renders it.
 #   native::allocationReport HIR MODE ?RUNS? ?OPTIONS?
 #                                       allocation instrumentation report (a
 #                                       dict; runtime/src/runtime/metrics.rs's
@@ -320,6 +326,48 @@ proc native::allocationReport {hir mode {runs 1} args} {
         dict set report sites [ResolveSites $hir [dict get $report sites]]
     }
     return $report
+}
+
+# The struct census of HIR (hir/escape.tcl's Census, carried by
+# native::lower::program): a list of dicts {instance label expr named width
+# class reason mats}. class is local (virtual, never leaves its function),
+# call (virtual across one exact call), return (virtual across one exact
+# return) or materialized (a physical StructObj; reason says why; a virtual
+# one may also list mats: the uses that materialize it later, at the first
+# such use only).
+proc native::structCensus {hir args} {
+    return [dict get [lowered $hir {*}$args] structCensus]
+}
+
+# A human-readable rendering of native::structCensus: one line per
+# construction, then the totals by class, by materialization reason and the
+# fields transported virtually.
+proc native::structCensusText {hir args} {
+    set lines {}
+    set classes [dict create]
+    set reasons [dict create]
+    set fields 0
+    foreach rec [structCensus $hir {*}$args] {
+        dict with rec {
+            set what $class
+            if {$class eq "materialized"} {
+                append what " ($reason)"
+                dict incr reasons $reason
+            } else {
+                incr fields $width
+            }
+            if {$mats ne ""} {
+                append what " [join $mats ,]-materialized-later"
+                foreach m $mats { dict incr reasons +$m }
+            }
+            dict incr classes $class
+            lappend lines [format "%-40s %-7s %s%d-field  %s" $label $expr [expr {$named ? "named " : ""}] $width $what]
+        }
+    }
+    lappend lines "constructions: [llength [structCensus $hir {*}$args]], by class: [lsort -stride 2 $classes]"
+    lappend lines "reasons: [lsort -stride 2 $reasons]"
+    lappend lines "fields transported virtually: $fields"
+    return [join $lines \n]
 }
 
 # SITES (native::allocationReport's "sites" list) with each entry's

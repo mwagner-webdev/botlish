@@ -105,14 +105,42 @@ namespace eval hir::escape {
 # ---------------------------------------------------------------------------
 # Recognizing a construction
 
-# "" | {local N ""} | {remote N target}: how expression E (a call, in
-# INSTANCE's region) builds a recognized fixed-shape List, given ARITY
-# (InstanceId -> N so far proven). INSTANCE is INSTANCE's hir::specialize
-# instance dict (for its `calls` map). Never true of anything but a direct
-# call: a ref, a parameter, a merged/if-typed value, or any other expression
-# shape is conservatively unrecognized, however its static type reads.
-proc hir::escape::Classify {hir instance arity e} {
-    if {[hir::kind $hir $e] ne "call"} {
+# "" | {local DESC {}} | {remote DESC TARGETS}: how expression E (in
+# INSTANCE's region) builds a recognized fixed-shape aggregate, given ARITY
+# (InstanceId -> DESC so far proven). DESC is {N SHAPE}: the field count and
+# the aggregate's *shape* -- "" for a List (a positional `[e0, ..., en-1]`
+# literal), {ID LAYOUT} for a struct (STRUCT-SCALAR-REPLACEMENT.md: the named
+# declaration identity, "" when anonymous, and the slot-order field names --
+# exactly what native/lower.tcl's ShapeIndex keys a runtime shape by). INSTANCE
+# is INSTANCE's hir::specialize instance dict (for its `calls` map). Never
+# true of anything but a direct call or a struct literal: a ref, a parameter,
+# a merged/if-typed value, or any other expression shape is conservatively
+# unrecognized, however its static type reads.
+#
+# A struct literal is recognized whenever STRUCTOPTS enables struct scalar
+# replacement and the node is well formed (every written field occupies
+# exactly one slot of its layout). Width policy is *not* applied here: the
+# caller that binds, returns or passes the value applies the cap of its own
+# boundary (local / return / argument).
+proc hir::escape::Classify {hir instance arity e {structOpts {}}} {
+    set kind [hir::kind $hir $e]
+    if {$kind eq "struct"} {
+        if {![StructEnabled $structOpts]} {
+            return ""
+        }
+        set node [hir::node $hir $e]
+        set n [llength [dict get $node fields]]
+        set layout [dict get $node layout]
+        if {[llength $layout] != $n || [lsort -integer [dict get $node slots]] ne [Iota $n]} {
+            return ""
+        }
+        set id [expr {[dict get $node named] ? [dict get $node structId] : ""}]
+        return [list local [list $n [list $id $layout]] {}]
+    }
+    if {$kind eq "if"} {
+        return [ClassifyIf $hir $instance $arity $e $structOpts]
+    }
+    if {$kind ne "call"} {
         return ""
     }
     set node [hir::node $hir $e]
@@ -125,7 +153,7 @@ proc hir::escape::Classify {hir instance arity e} {
         if {$n < 1} {
             return ""
         }
-        return [list local $n ""]
+        return [list local [list $n {}] {}]
     }
     if {$targetKind eq "block"} {
         set calls [dict get $instance calls]
@@ -136,9 +164,95 @@ proc hir::escape::Classify {hir instance arity e} {
         if {![dict exists $arity $callee]} {
             return ""
         }
-        return [list remote [dict get $arity $callee] $callee]
+        return [list remote [dict get $arity $callee] [list $callee]]
     }
     return ""
+}
+
+# An `if` expression whose every value-producing branch ends in a recognized
+# *struct* construction of one descriptor (STRUCT-SCALAR-REPLACEMENT.md,
+# "Branch merging"): the two branches' fields join field-wise instead of
+# allocating in each branch and merging pointers. A branch that cannot
+# complete (HIR proved it unreachable, or its last expression never
+# completes: a `return`, a `fail`, a `break`) contributes no value. Lists are
+# never recognized through an `if` (that would change their existing
+# behavior). TARGETS lists every instance a branch's forwarding call demands
+# a companion of.
+proc hir::escape::ClassifyIf {hir instance arity e structOpts} {
+    if {![StructEnabled $structOpts]} {
+        return ""
+    }
+    set node [hir::node $hir $e]
+    set desc ""
+    set targets {}
+    foreach body [list [dict get $node thenBody] [dict get $node elseBody]] {
+        if {$body eq ""} {
+            return ""
+        }
+        if {![hir::get $hir [lindex $body 0] reachable]} {
+            continue
+        }
+        set last [lindex $body end]
+        if {[hir::typeOf $hir $last] eq "never"} {
+            continue
+        }
+        set c [Classify $hir $instance $arity $last $structOpts]
+        if {$c eq ""} {
+            return ""
+        }
+        lassign $c kind d t
+        if {[lindex $d 1] eq ""} {
+            return ""
+        }
+        if {$desc eq ""} {
+            set desc $d
+        } elseif {$desc ne $d} {
+            return ""
+        }
+        lappend targets {*}$t
+    }
+    if {$desc eq ""} {
+        return ""
+    }
+    return [list [expr {$targets eq "" ? "local" : "remote"}] $desc [lsort -unique $targets]]
+}
+
+# 0 1 ... N-1, as a list (for checking a struct node's slot permutation).
+proc hir::escape::Iota {n} {
+    set r {}
+    for {set i 0} {$i < $n} {incr i} {
+        lappend r $i
+    }
+    return $r
+}
+
+# The struct scalar-replacement options, with defaults. STRUCTOPTS is a dict
+# with any of: enabled (0|1), localWidth, returnWidth, argWidth (the widest
+# struct, in fields, that may stay virtual as a local value, across one exact
+# return boundary, and across one exact call boundary respectively).
+# STRUCT-SCALAR-REPLACEMENT.md, "Width policy".
+proc hir::escape::StructOption {structOpts name} {
+    if {[dict exists $structOpts $name]} {
+        return [dict get $structOpts $name]
+    }
+    return [dict get {enabled 1 localWidth 16 returnWidth 4 argWidth 4} $name]
+}
+
+proc hir::escape::StructEnabled {structOpts} {
+    return [StructOption $structOpts enabled]
+}
+
+# The width cap (fields) struct descriptor DESC has at BOUNDARY (local |
+# return | arg), or 0 when DESC is not a struct (Lists are never capped here).
+proc hir::escape::WidthOk {structOpts desc boundary} {
+    if {[lindex $desc 1] eq ""} {
+        return 1
+    }
+    set n [lindex $desc 0]
+    if {$boundary ne "local" && $n < 1} {
+        return 0
+    }
+    return [expr {$n <= [StructOption $structOpts ${boundary}Width]}]
 }
 
 # Public wrapper of Classify for native/lower.tcl: HIR is the *view* of
@@ -146,7 +260,7 @@ proc hir::escape::Classify {hir instance arity e} {
 # it.
 proc hir::escape::classify {hir spec analysis id e} {
     set instance [dict get $spec instances $id]
-    return [Classify $hir $instance [dict get $analysis arity] $e]
+    return [Classify $hir $instance [dict get $analysis arity] $e [structOptsOf $analysis]]
 }
 
 # 1 if call expression E is, for INSTANCE ID specifically, a same-instance
@@ -193,11 +307,14 @@ proc hir::escape::Exits {hir context instance id block selfTails} {
     return $exits
 }
 
-# {ARITY FORWARD}: ARITY is InstanceId -> N for every used instance whose
-# result is fully recognized (see the file header); FORWARD is InstanceId ->
-# list of distinct target InstanceIds among its own forwarding exits (used
-# to propagate companion demand in Wants below).
-proc hir::escape::Arities {hir spec} {
+# {ARITY FORWARD WHY}: ARITY is InstanceId -> DESC ({N SHAPE}, see Classify)
+# for every used instance whose result is fully recognized (see the file
+# header) and within the return width cap; FORWARD is InstanceId -> list of
+# distinct target InstanceIds among its own forwarding exits (used to
+# propagate companion demand in Wants below); WHY is InstanceId -> reason
+# tag, for a used instance with struct exits whose result was *not*
+# recognized ("width", "mixed exits"): census bookkeeping only.
+proc hir::escape::Arities {hir spec {structOpts {}}} {
     set context [dict get $spec context]
     set selfTails [dict get $context selfTails]
     set candidates [dict create]
@@ -216,6 +333,7 @@ proc hir::escape::Arities {hir spec} {
     }
     set arity [dict create]
     set forward [dict create]
+    set why [dict create]
     set changed 1
     while {$changed} {
         set changed 0
@@ -224,34 +342,53 @@ proc hir::escape::Arities {hir spec} {
                 continue
             }
             lassign $info view instance exits
-            set n ""
+            set desc ""
             set ok 1
             set targets {}
+            set reason ""
             foreach e $exits {
-                set c [Classify $view $instance $arity $e]
+                set c [Classify $view $instance $arity $e $structOpts]
                 if {$c eq ""} {
                     set ok 0
+                    set reason "mixed exits"
                     break
                 }
-                lassign $c kind cn target
-                if {$n eq ""} {
-                    set n $cn
-                } elseif {$n ne $cn} {
+                lassign $c kind cd target
+                if {$desc eq ""} {
+                    set desc $cd
+                } elseif {$desc ne $cd} {
                     set ok 0
+                    set reason "mixed exits"
                     break
                 }
                 if {$kind eq "remote"} {
-                    lappend targets $target
+                    lappend targets {*}$target
                 }
             }
-            if {$ok && $n ne ""} {
-                dict set arity $id $n
+            if {$ok && $desc ne "" && ![WidthOk $structOpts $desc return]} {
+                set ok 0
+                set reason width
+            }
+            if {$ok && $desc ne "" && [lindex $desc 1] ne "" && [dict get $instance generic]} {
+                # The unspecialized baseline (`-specialize 0`) keeps its
+                # known limitation for structs (STRUCTS.md, "Known
+                # limitations"): a function whose struct operands are proven
+                # only by semantic instances is not compiled generically, so
+                # nothing crosses one of its boundaries as fields either.
+                set ok 0
+                set reason generic
+            }
+            if {$ok && $desc ne ""} {
+                dict set arity $id $desc
                 dict set forward $id [lsort -unique $targets]
+                dict unset why $id
                 set changed 1
+            } elseif {$reason ne "" && [lsearch -exact [lmap x $exits {hir::kind $view $x}] struct] >= 0} {
+                dict set why $id $reason
             }
         }
     }
-    return [list $arity $forward]
+    return [list $arity $forward $why]
 }
 
 # ---------------------------------------------------------------------------
@@ -464,11 +601,22 @@ proc hir::escape::RegionInfo {hir spec id} {
     set refsByBinding [dict create]
     set listGetByArg [dict create]
     set argPos [dict create]
+    set projByRecv [dict create]
+    set bindValue [dict create]
     foreach e $exprs {
         switch -- [hir::kind $view $e] {
             block {
                 foreach b [hir::externalRefs $view $e] {
                     dict set captured $b 1
+                }
+            }
+            project {
+                dict set projByRecv [hir::get $view $e receiver] $e
+            }
+            bind {
+                set v [hir::get $view $e value]
+                if {[hir::kind $view $v] eq "ref"} {
+                    dict set bindValue $v $e
                 }
             }
             ref {
@@ -499,12 +647,64 @@ proc hir::escape::RegionInfo {hir spec id} {
             }
         }
     }
+    lassign [ParentsAndLoops $view $topBody] parent loopOf
     return [dict create view $view instance $instance region $region exprs $exprs \
         trailing $trailing captured $captured refsByBinding $refsByBinding \
-        listGetByArg $listGetByArg argPos $argPos]
+        listGetByArg $listGetByArg argPos $argPos projByRecv $projByRecv \
+        bindValue $bindValue parent $parent loopOf $loopOf]
 }
 
-# The arity a caller's argument expression E (in VIEW/INSTANCE, CALLERID's
+# {PARENT LOOPOF} of the region whose top-level body is TOPBODY (VIEW): PARENT
+# maps every sub-expression to the expression directly containing it, LOOPOF
+# to the innermost loop / listloop / countloop expression it executes inside
+# ("" outside every loop). A countloop's bounds and a listloop's iterable run
+# once, outside the loop; nested blocks are other regions and are not entered.
+# Iterative (an explicit stack): a region can be large.
+proc hir::escape::ParentsAndLoops {view topBody} {
+    set parent [dict create]
+    set loopOf [dict create]
+    set stack {}
+    foreach e $topBody {
+        lappend stack [list $e "" ""]
+    }
+    while {$stack ne ""} {
+        lassign [lindex $stack end] e p loop
+        set stack [lrange $stack 0 end-1]
+        dict set parent $e $p
+        dict set loopOf $e $loop
+        set node [hir::node $view $e]
+        switch -- [dict get $node kind] {
+            block {
+            }
+            loop {
+                foreach c [dict get $node body] {
+                    lappend stack [list $c $e $e]
+                }
+            }
+            listloop {
+                lappend stack [list [dict get $node iterable] $e $loop]
+                foreach c [dict get $node body] {
+                    lappend stack [list $c $e $e]
+                }
+            }
+            countloop {
+                lappend stack [list [dict get $node start] $e $loop]
+                lappend stack [list [dict get $node end] $e $loop]
+                foreach c [dict get $node body] {
+                    lappend stack [list $c $e $e]
+                }
+            }
+            default {
+                foreach c [hir::children $view $e] {
+                    lappend stack [list $c $e $loop]
+                }
+            }
+        }
+    }
+    return [list $parent $loopOf]
+}
+
+# The descriptor a caller's argument expression E (in VIEW/INSTANCE, CALLERID's
 # own region) proves for whatever parameter it is passed to, or "" if not
 # (yet -- this may be asked again in a later RawParamArities round)
 # provable: either a direct recognized construction (Classify -- a literal
@@ -512,8 +712,8 @@ proc hir::escape::RegionInfo {hir spec id} {
 # same caller's own region already knows (RAWLOCAL/RAWPARAM, "so far": a
 # growing set, safe to consult mid-fixpoint since both are monotonic
 # growth-only facts, never revised).
-proc hir::escape::ArgShape {view instance arity rawLocal rawParam callerId e} {
-    set c [Classify $view $instance $arity $e]
+proc hir::escape::ArgShape {view instance arity rawLocal rawParam callerId e {structOpts {}}} {
+    set c [Classify $view $instance $arity $e $structOpts]
     if {$c ne ""} {
         return [lindex $c 1]
     }
@@ -533,9 +733,9 @@ proc hir::escape::ArgShape {view instance arity rawLocal rawParam callerId e} {
     return ""
 }
 
-# {RESULT TARGETS}: RESULT is InstanceId -> BindingId -> N, for every local
-# binding (kind local, non-duplicate, never captured by a nested block, not
-# itself an implicit trailing return of its own scope -- the same
+# {RESULT TARGETS ALIASOF WHY}: RESULT is InstanceId -> BindingId -> DESC, for
+# every local binding (kind local, non-duplicate, never captured by a nested
+# block, not itself an implicit trailing return of its own scope -- the same
 # structural preconditions the original local-only pass already required)
 # whose bound value Classify recognizes, *regardless* of how its references
 # go on to be used (a pure value-shape fact: see the file header above).
@@ -545,51 +745,96 @@ proc hir::escape::ArgShape {view instance arity rawLocal rawParam callerId e} {
 # bookkeeping (analyze, below); native/lower.tcl's own CompanionRef/
 # CompanionFunction path never needs it (it builds a companion purely on
 # demand from `arity`, not from `wants`).
-proc hir::escape::RawLocalArities {hir spec arity regions} {
+#
+# A *struct* binding may also be an alias of another shaped struct local
+# (`b = a`, STRUCT-SCALAR-REPLACEMENT.md): it then carries A's descriptor;
+# ALIASOF is InstanceId -> BindingId -> A. WHY is InstanceId -> BindingId ->
+# reason tag for a struct value bound to a binding this pass could not shape
+# (census bookkeeping only).
+proc hir::escape::RawLocalArities {hir spec arity regions {structOpts {}}} {
     set result [dict create]
     set targets [dict create]
+    set aliasOf [dict create]
+    set why [dict create]
     foreach id [dict get $spec used] {
         set info [dict get $regions $id]
         set view [dict get $info view]
         set instance [dict get $info instance]
         set trailing [dict get $info trailing]
         set captured [dict get $info captured]
+        set aliases {}
         foreach e [dict get $info exprs] {
             if {[hir::kind $view $e] ne "bind"} {
                 continue
             }
             set node [hir::node $view $e]
-            if {[dict get $node duplicate] || [dict exists $trailing $e]} {
+            set valueExpr [dict get $node value]
+            set c [Classify $view $instance $arity $valueExpr $structOpts]
+            set isAlias [expr {$c eq "" && [StructEnabled $structOpts] && [hir::kind $view $valueExpr] eq "ref"}]
+            if {$c eq "" && !$isAlias} {
                 continue
             }
             set b [dict get $node binding]
+            set structValue [expr {$c ne "" && [lindex $c 1 1] ne ""}]
+            if {[dict get $node duplicate] || [dict exists $trailing $e]} {
+                if {$structValue} {
+                    dict set why $id $b control
+                }
+                continue
+            }
             if {[dict get [hir::binding $view $b] kind] ne "local" || [dict exists $captured $b]} {
+                if {$structValue} {
+                    dict set why $id $b capture
+                }
                 continue
             }
-            set c [Classify $view $instance $arity [dict get $node value]]
-            if {$c eq ""} {
+            if {$isAlias} {
+                lappend aliases [list $b [hir::get $view $valueExpr binding]]
                 continue
             }
-            lassign $c kind n target
-            dict set result $id $b $n
+            lassign $c kind desc target
+            if {![WidthOk $structOpts $desc local]} {
+                dict set why $id $b width
+                continue
+            }
+            dict set result $id $b $desc
             if {$kind eq "remote"} {
                 dict set targets $id $b $target
             }
         }
+        # Aliases of shaped struct locals, to a fixed point (chains).
+        set changed 1
+        while {$changed} {
+            set changed 0
+            foreach pair $aliases {
+                lassign $pair b src
+                if {$src eq "" || [dict exists $result $id $b] || ![dict exists $result $id $src]} {
+                    continue
+                }
+                set desc [dict get $result $id $src]
+                if {[lindex $desc 1] eq ""} {
+                    continue
+                }
+                dict set result $id $b $desc
+                dict set aliasOf $id $b $src
+                set changed 1
+            }
+        }
     }
-    return [list $result $targets]
+    return [list $result $targets $aliasOf $why]
 }
 
-# RAWPARAM: InstanceId -> BindingId -> N, for every parameter binding of a
+# RAWPARAM: InstanceId -> BindingId -> DESC, for every parameter binding of a
 # used, non-program instance every one of whose *exact* call sites
-# (CALLSITES) proves, via ArgShape, the identical arity at that position --
-# a pure value-shape fact (see the file header), independent of whether B's
+# (CALLSITES) proves, via ArgShape, the identical descriptor at that position
+# and (for a struct) fits the argument width cap -- a pure value-shape fact
+# (see the file header), independent of whether B's
 # own uses, or any forwarding caller's own uses, are themselves structurally
 # safe (Eligible decides that separately). An instance with no exact call
 # sites at all (CALLSITES has no entry for it: every actual call reaching it
-# is dynamic/indirect) never gets a parameter arity here, soundly (#43): no
-# caller ever proved a shape for it.
-proc hir::escape::RawParamArities {spec arity rawLocal callSites regions} {
+# is dynamic/indirect) never gets a parameter descriptor here, soundly (#43):
+# no caller ever proved a shape for it.
+proc hir::escape::RawParamArities {spec arity rawLocal callSites regions {structOpts {}}} {
     set result [dict create]
     set candidates [dict create]
     foreach id [dict get $spec used] {
@@ -631,25 +876,25 @@ proc hir::escape::RawParamArities {spec arity rawLocal callSites regions} {
                     # A same-instance (self-tail or otherwise recursive)
                     # call forwarding parameter P back to *itself*, at the
                     # *same* position, completely unchanged: this carries
-                    # no new shape information (whatever N this parameter
-                    # ends up with, forwarding its own already-N-shaped
-                    # value back to itself is trivially still N) and, more
-                    # importantly, can never be *the* proof this parameter
-                    # needs -- requiring it to independently classify would
-                    # make a self-threaded builder/state loop (the
-                    # milestone's #25/#55) permanently unable to bootstrap
-                    # its own parameter's arity, since RESULT (this same
-                    # dict, still being computed) is exactly what its
-                    # ref-case would need to already know. Skipped, not
-                    # required to classify; some other, non-self-
-                    # referential call site still must (a parameter with
-                    # *only* self-referential call sites -- no real caller
-                    # at all -- never gets an arity, soundly).
+                    # no new shape information (whatever descriptor this
+                    # parameter ends up with, forwarding its own already-
+                    # shaped value back to itself is trivially still that)
+                    # and, more importantly, can never be *the* proof this
+                    # parameter needs -- requiring it to independently
+                    # classify would make a self-threaded builder/state
+                    # loop (the milestone's #25/#55) permanently unable to
+                    # bootstrap its own parameter's shape, since RESULT
+                    # (this same dict, still being computed) is exactly
+                    # what its ref-case would need to already know.
+                    # Skipped, not required to classify; some other, non-
+                    # self-referential call site still must (a parameter
+                    # with *only* self-referential call sites -- no real
+                    # caller at all -- never gets a descriptor, soundly).
                     continue
                 }
                 set callerInfo [dict get $regions $callerId]
                 set cn [ArgShape [dict get $callerInfo view] [dict get $callerInfo instance] $arity \
-                    $rawLocal $result $callerId $argExpr]
+                    $rawLocal $result $callerId $argExpr $structOpts]
                 if {$cn eq ""} {
                     set ok 0
                     break
@@ -661,7 +906,8 @@ proc hir::escape::RawParamArities {spec arity rawLocal callSites regions} {
                     break
                 }
             }
-            if {$ok && $n ne ""} {
+            if {$ok && $n ne "" && [WidthOk $structOpts $n arg]
+                    && !([lindex $n 1] ne "" && [dict get $spec instances $id generic])} {
                 dict set result $id $p $n
                 set changed 1
             }
@@ -670,140 +916,515 @@ proc hir::escape::RawParamArities {spec arity rawLocal callSites regions} {
     return $result
 }
 
-# The {InstanceId BindingId} -> N slots this milestone actually virtualizes:
-# RAWLOCAL union RAWPARAM's shaped candidates, pruned to those whose every
-# reference is a supported structural use (see the file header's
-# description of this pass). Never partial: a slot with any unsupported use
-# at all is dropped entirely, and every other slot whose only unsafe use was
-# forwarding into a since-dropped slot is dropped too, by iterating to a
-# fixed point.
-proc hir::escape::Eligible {rawLocal rawParam regions} {
+# The census tag of a struct value passed to the native named NAME, from the
+# native's own registered runtime effects (never from its name): storage into
+# a List, Set or MutableArray, equality, hashing, or any other native call.
+proc hir::escape::NativeUseTag {name} {
+    set runtime [dict get [core::native::metadata $name] runtime]
+    foreach flag {list-alloc set-alloc mutarray-mutate} {
+        if {$flag in $runtime} {
+            return storage
+        }
+    }
+    if {"structural-equality" in $runtime} {
+        return equality
+    }
+    if {"hash" in $runtime} {
+        return hash
+    }
+    return "native call"
+}
+
+# A short tag naming why reference R (a use of a struct value) needs the
+# physical object: the kind of its parent expression. Census bookkeeping
+# only -- never consulted by an eligibility decision.
+proc hir::escape::UseTag {info r} {
+    set view [dict get $info view]
+    set parent [dict get $info parent]
+    set pe [expr {[dict exists $parent $r] ? [dict get $parent $r] : ""}]
+    if {$pe eq ""} {
+        return [expr {[dict exists [dict get $info trailing] $r] ? "result" : "other"}]
+    }
+    switch -- [hir::kind $view $pe] {
+        call {
+            set node [hir::node $view $pe]
+            lassign [dict get $node target] targetKind target
+            if {[dict get $node callee] eq $r} {
+                return "call target"
+            }
+            switch -- $targetKind {
+                native { return [NativeUseTag [dict get [hir::symbol $view $target] name]] }
+                block  { return [expr {[dict exists [dict get [dict get $info instance] calls] $pe] ? "call param" : "open call"}] }
+            }
+            return "open call"
+        }
+        return { return return }
+        ok - error { return storage }
+        struct { return "nested field" }
+        bind   { return alias }
+        if - loop - listloop - countloop - handle { return control }
+    }
+    return other
+}
+
+# {REASON STRUCTURAL FORWARDS MATS} for binding B (descriptor DESC) of
+# instance ID against the *current* CANDIDATES set: REASON is "" when every
+# reference is acceptable, otherwise a short tag naming the first one that is
+# not. STRUCTURAL counts the references that cost nothing (a projection, an
+# alias or an argument forwarded into another candidate), FORWARDS the
+# argument forwards among them, MATS the tags of the references that need
+# the physical object (struct locals only).
+#
+# A *List* candidate keeps the original rule exactly: every reference must
+# be a `list_get` at a constant in-range index, or an unchanged forwarding
+# into another candidate of the same descriptor.
+#
+# A *struct* local may also be materialized, lazily, at any reference that
+# needs the object (STRUCT-SCALAR-REPLACEMENT.md, "Materialization model"),
+# provided that reference runs as often as the binding itself (same
+# innermost loop: never a per-iteration allocation of a value built once),
+# and the binding has at least one free use (a value whose every use
+# materializes it would only move the allocation, never remove it). A struct
+# *parameter* never materializes: its callers hand it over as fields, so a
+# use inside the callee that needs the object would re-allocate it once per
+# call.
+proc hir::escape::UseVerdict {candidates regions aliasOf id b desc isParam bindExpr} {
+    set info [dict get $regions $id]
+    set view [dict get $info view]
+    set refsByBinding [dict get $info refsByBinding]
+    set argPos [dict get $info argPos]
+    set refs [expr {[dict exists $refsByBinding $b] ? [dict get $refsByBinding $b] : {}}]
+    lassign $desc n shape
+    set structural 0
+    set forwards 0
+    set mats {}
+    if {$shape eq ""} {
+        set listGetByArg [dict get $info listGetByArg]
+        foreach r $refs {
+            if {[dict exists $listGetByArg $r]} {
+                if {![ScalarUse $view $listGetByArg $r $n]} {
+                    return [list list-use 0 0 {}]
+                }
+                continue
+            }
+            if {[dict exists $argPos $r] && [ForwardTarget $candidates $regions $argPos $r $desc]} {
+                continue
+            }
+            return [list list-use 0 0 {}]
+        }
+        return [list "" 0 0 {}]
+    }
+    set layout [lindex $shape 1]
+    set projByRecv [dict get $info projByRecv]
+    set bindValue [dict get $info bindValue]
+    set loopOf [dict get $info loopOf]
+    set bindLoop [expr {$bindExpr eq "" ? "" : [dict get $loopOf $bindExpr]}]
+    foreach r $refs {
+        if {[dict exists $projByRecv $r]} {
+            set slot [lsearch -exact $layout [hir::get $view [dict get $projByRecv $r] name]]
+            if {$slot < 0} {
+                return [list projection 0 0 {}]
+            }
+            incr structural
+            continue
+        }
+        if {[dict exists $argPos $r] && [ForwardTarget $candidates $regions $argPos $r $desc]} {
+            incr structural
+            incr forwards
+            continue
+        }
+        if {[dict exists $bindValue $r]} {
+            set b2 [hir::get $view [dict get $bindValue $r] binding]
+            if {[dict exists $candidates [list $id $b2]] && [dict get $candidates [list $id $b2]] eq $desc
+                    && [dict exists $aliasOf $id $b2] && [dict get $aliasOf $id $b2] eq $b} {
+                incr structural
+                continue
+            }
+        }
+        set tag [UseTag $info $r]
+        if {$isParam} {
+            return [list $tag 0 0 {}]
+        }
+        if {[dict get $loopOf $r] ne $bindLoop} {
+            return [list loop 0 0 {}]
+        }
+        lappend mats $tag
+    }
+    if {$mats ne "" && $structural == 0} {
+        return [list [lindex $mats 0] 0 0 {}]
+    }
+    return [list "" $structural $forwards $mats]
+}
+
+# 1 if the reference R (a call argument, ARGPOS) is passed, unchanged, to an
+# exact closed callee whose own corresponding parameter is a current
+# candidate of the same descriptor DESC.
+proc hir::escape::ForwardTarget {candidates regions argPos r desc} {
+    lassign [dict get $argPos $r] callee argIndex
+    if {$callee eq "" || ![dict exists $regions $callee]} {
+        return 0
+    }
+    set calleeInfo [dict get $regions $callee]
+    set calleeBlock [dict get [dict get $calleeInfo instance] block]
+    if {$calleeBlock eq "program"} {
+        return 0
+    }
+    set calleeParams [hir::get [dict get $calleeInfo view] $calleeBlock params]
+    if {$argIndex < 0 || $argIndex >= [llength $calleeParams]} {
+        return 0
+    }
+    set targetKey [list $callee [lindex $calleeParams $argIndex]]
+    return [expr {[dict exists $candidates $targetKey] && [dict get $candidates $targetKey] eq $desc}]
+}
+
+# {CANDIDATES WHY USEINFO} -- the {InstanceId BindingId} -> DESC slots this
+# milestone actually virtualizes: RAWLOCAL union RAWPARAM's shaped
+# candidates, pruned to those whose every reference is acceptable
+# (UseVerdict). Never partial: a slot with a use it cannot take is dropped
+# entirely, and every other slot whose only unsafe use was forwarding into a
+# since-dropped slot is dropped too, by iterating to a fixed point. A struct
+# alias is dropped along with its source and vice versa (each is accepted
+# only while the other stands). WHY maps a dropped slot to its reason tag,
+# USEINFO a kept one to {STRUCTURAL FORWARDS MATS}.
+proc hir::escape::Eligible {rawLocal rawParam regions aliasOf} {
     set candidates [dict create]
+    set isParam [dict create]
+    set bindExprs [dict create]
     dict for {id bindings} $rawLocal {
         dict for {b n} $bindings {
             dict set candidates [list $id $b] $n
+        }
+        set info [dict get $regions $id]
+        set view [dict get $info view]
+        foreach e [dict get $info exprs] {
+            if {[hir::kind $view $e] eq "bind"} {
+                dict set bindExprs [list $id [hir::get $view $e binding]] $e
+            }
         }
     }
     dict for {id bindings} $rawParam {
         dict for {b n} $bindings {
             dict set candidates [list $id $b] $n
+            dict set isParam [list $id $b] 1
         }
     }
+    set why [dict create]
+    set useInfo [dict create]
     set changed 1
     while {$changed} {
         set changed 0
-        dict for {key n} $candidates {
+        dict for {key desc} $candidates {
             lassign $key id b
-            if {![EligibleUse $candidates $regions $id $b $n]} {
+            set verdict [UseVerdict $candidates $regions $aliasOf $id $b $desc [dict exists $isParam $key] \
+                [expr {[dict exists $bindExprs $key] ? [dict get $bindExprs $key] : ""}]]
+            lassign $verdict reason structural forwards mats
+            if {$reason eq "" && [dict exists $aliasOf $id $b]
+                    && ![dict exists $candidates [list $id [dict get $aliasOf $id $b]]]} {
+                set reason alias
+            }
+            if {$reason ne ""} {
                 dict unset candidates $key
+                dict set why $key $reason
                 set changed 1
+            } else {
+                dict set useInfo $key [list $structural $forwards $mats]
             }
         }
     }
-    return $candidates
-}
-
-# 1 if every reference to binding B (arity N) in instance ID's own region is
-# a supported structural use, checked against the *current* CANDIDATES set
-# (Eligible's caller re-runs this to a fixed point as CANDIDATES shrinks).
-proc hir::escape::EligibleUse {candidates regions id b n} {
-    set info [dict get $regions $id]
-    set view [dict get $info view]
-    set refsByBinding [dict get $info refsByBinding]
-    set listGetByArg [dict get $info listGetByArg]
-    set argPos [dict get $info argPos]
-    set refs [expr {[dict exists $refsByBinding $b] ? [dict get $refsByBinding $b] : {}}]
-    foreach r $refs {
-        if {[dict exists $listGetByArg $r]} {
-            if {![ScalarUse $view $listGetByArg $r $n]} {
-                return 0
-            }
-            continue
-        }
-        if {[dict exists $argPos $r]} {
-            lassign [dict get $argPos $r] callee argIndex
-            if {$callee eq "" || ![dict exists $regions $callee]} {
-                return 0
-            }
-            set calleeInfo [dict get $regions $callee]
-            set calleeInstance [dict get $calleeInfo instance]
-            set calleeBlock [dict get $calleeInstance block]
-            if {$calleeBlock eq "program"} {
-                return 0
-            }
-            set calleeParams [hir::get [dict get $calleeInfo view] $calleeBlock params]
-            if {$argIndex < 0 || $argIndex >= [llength $calleeParams]} {
-                return 0
-            }
-            set targetKey [list $callee [lindex $calleeParams $argIndex]]
-            if {![dict exists $candidates $targetKey] || [dict get $candidates $targetKey] != $n} {
-                return 0
-            }
-            continue
-        }
-        return 0
-    }
-    return 1
+    return [list $candidates $why $useInfo]
 }
 
 # ---------------------------------------------------------------------------
 # Entry point
 
 # The escape analysis of program HIR under specialization ANALYSIS
-# (hir::specialize::analyze). Returns a dict:
-#   arity         InstanceId -> N (see Arities)
+# (hir::specialize::analyze). STRUCTOPTS (see StructOption) configures struct
+# scalar replacement. Returns a dict:
+#   arity         InstanceId -> DESC ({N SHAPE}, see Classify; the public
+#                 `arity`/`resultShape` accessors split it)
 #   wants         set (InstanceId -> 1) of instances to also emit a
 #                 scalar-replacement companion function for (see Propagate)
-#   virtual       InstanceId -> BindingId -> N, for a virtualized *local*
+#   virtual       InstanceId -> BindingId -> DESC, for a virtualized *local*
 #                 binding (see Eligible)
-#   paramVirtual  InstanceId -> BindingId -> N, for a virtualized
+#   paramVirtual  InstanceId -> BindingId -> DESC, for a virtualized
 #                 *parameter* binding (see Eligible; native/lower.tcl's
 #                 "Parameter virtualization" section builds an instance's
 #                 `fields`/`fieldscompanion` internal variant from this)
-proc hir::escape::analyze {hir spec {paramOpt 1}} {
-    lassign [Arities $hir $spec] arity forward
+#   structOpts    the options the analysis ran under
+#   direct        InstanceId -> ExprId -> DESC, for a field projection whose
+#                 receiver is itself a recognized struct construction (a
+#                 literal or an exact call): read straight from its fields
+#   census        one record per struct construction (see Census)
+proc hir::escape::analyze {hir spec {paramOpt 1} {structOpts {}}} {
+    lassign [Arities $hir $spec $structOpts] arity forward resultWhy
     set regions [dict create]
     foreach id [dict get $spec used] {
         dict set regions $id [RegionInfo $hir $spec $id]
     }
-    lassign [RawLocalArities $hir $spec $arity $regions] rawLocal localTargets
+    lassign [RawLocalArities $hir $spec $arity $regions $structOpts] rawLocal localTargets aliasOf localWhy
     set rawParam [dict create]
+    set callSites {}
     if {$paramOpt} {
         set callSites [CallSites $hir $spec]
-        set rawParam [RawParamArities $spec $arity $rawLocal $callSites $regions]
+        set rawParam [RawParamArities $spec $arity $rawLocal $callSites $regions $structOpts]
     }
-    set eligible [Eligible $rawLocal $rawParam $regions]
+    lassign [Eligible $rawLocal $rawParam $regions $aliasOf] eligible dropWhy useInfo
     set virtual [dict create]
     set paramVirtual [dict create]
     set wants [dict create]
-    dict for {key n} $eligible {
+    dict for {key desc} $eligible {
         lassign $key id b
         if {[dict exists $rawParam $id $b]} {
-            dict set paramVirtual $id $b $n
+            dict set paramVirtual $id $b $desc
         } else {
-            dict set virtual $id $b $n
+            dict set virtual $id $b $desc
             if {[dict exists $localTargets $id $b]} {
-                dict set wants [dict get $localTargets $id $b] 1
+                foreach t [dict get $localTargets $id $b] {
+                    dict set wants $t 1
+                }
+            }
+        }
+    }
+    # A closed call's argument that is itself a recognized remote struct
+    # result demands that callee's companion too.
+    if {[StructEnabled $structOpts]} {
+        dict for {callee sites} $callSites {
+            foreach site $sites {
+                lassign $site callerId callerArgs
+                set callerInfo [dict get $regions $callerId]
+                set calleeBlock [dict get $spec instances $callee block]
+                if {$calleeBlock eq "program" || ![dict exists $paramVirtual $callee]} {
+                    continue
+                }
+                set params [hir::get [dict get $regions $callee view] $calleeBlock params]
+                set i 0
+                foreach a $callerArgs {
+                    if {$i < [llength $params] && [dict exists $paramVirtual $callee [lindex $params $i]]} {
+                        set c [Classify [dict get $callerInfo view] [dict get $callerInfo instance] $arity $a $structOpts]
+                        if {[lindex $c 0] eq "remote"} {
+                            foreach t [lindex $c 2] {
+                                dict set wants $t 1
+                            }
+                        }
+                    }
+                    incr i
+                }
+            }
+        }
+    }
+    set direct [DirectProjections $regions $arity $structOpts]
+    dict for {id byExpr} $direct {
+        dict for {e desc} $byExpr {
+            set view [dict get $regions $id view]
+            set c [Classify $view [dict get $regions $id instance] $arity [hir::get $view $e receiver] $structOpts]
+            if {[lindex $c 0] eq "remote"} {
+                foreach t [lindex $c 2] {
+                    dict set wants $t 1
+                }
             }
         }
     }
     set wants [Propagate $wants $forward]
-    return [dict create arity $arity wants $wants virtual $virtual paramVirtual $paramVirtual]
+    set analysis [dict create arity $arity wants $wants virtual $virtual paramVirtual $paramVirtual \
+        structOpts $structOpts direct $direct]
+    if {[StructEnabled $structOpts]} {
+        dict set analysis census [Census $spec $regions $arity $resultWhy $wants $virtual $paramVirtual \
+            $localWhy $dropWhy $useInfo $structOpts]
+    } else {
+        dict set analysis census {}
+    }
+    return $analysis
+}
+
+# InstanceId -> ExprId -> DESC: every field projection `r.name` (r a struct
+# literal or an exact call classified as a recognized struct result) whose
+# receiver is a recognized construction and whose name is in its layout, at a
+# width the local (literal) or return (call) cap accepts.
+proc hir::escape::DirectProjections {regions arity structOpts} {
+    set direct [dict create]
+    if {![StructEnabled $structOpts]} {
+        return $direct
+    }
+    dict for {id info} $regions {
+        set view [dict get $info view]
+        dict for {recv pe} [dict get $info projByRecv] {
+            set c [Classify $view [dict get $info instance] $arity $recv $structOpts]
+            if {$c eq ""} {
+                continue
+            }
+            lassign $c kind desc target
+            lassign $desc n shape
+            if {$shape eq "" || [lsearch -exact [lindex $shape 1] [hir::get $view $pe name]] < 0} {
+                continue
+            }
+            if {$kind eq "local" && ![WidthOk $structOpts $desc local]} {
+                continue
+            }
+            dict set direct $id $pe $desc
+        }
+    }
+    return $direct
+}
+
+# ---------------------------------------------------------------------------
+# Census (audit only): one record per struct construction (a `struct` node of
+# a used instance), saying what became of it.
+#
+#   class       local     virtual, never leaves its function, never built
+#               call      virtual, handed across one exact call as fields
+#               return    a virtual exit of an instance whose result a caller
+#                         consumes as fields (multi-value return)
+#               materialized   built as a physical StructObj
+#   mats        for a virtual construction, the tags of the uses that
+#               materialize it later ("storage", "equality", ...)
+#   reason      for a materialized one, the tag naming why
+#
+# The record is a dict: instance, label, expr, named (0|1), width N, class,
+# reason, mats. Reason tags: storage (List/MutableArray/Set element),
+# equality, hash, native call, open call (callvalue or unresolved target),
+# call param (exact call, parameter not virtualizable), capture, width,
+# loop (a physical use that would run per iteration), return (returned, no
+# virtual consumer), mixed exits, nested field, control, other.
+proc hir::escape::Census {spec regions arity resultWhy wants virtual paramVirtual localWhy dropWhy useInfo structOpts} {
+    set records {}
+    set context [dict get $spec context]
+    set selfTails [dict get $context selfTails]
+    foreach id [dict get $spec used] {
+        set info [dict get $regions $id]
+        set view [dict get $info view]
+        set instance [dict get $info instance]
+        set exits {}
+        set block [dict get $instance block]
+        if {$block ne "program"} {
+            set exits [Exits $view $context $instance $id $block $selfTails]
+        }
+        foreach e [dict get $info exprs] {
+            if {[hir::kind $view $e] ne "struct"} {
+                continue
+            }
+            set node [hir::node $view $e]
+            set n [llength [dict get $node fields]]
+            set class materialized
+            set reason other
+            set mats {}
+            # The value root: a literal that ends a branch of an `if` that is
+            # itself a value (a bound value, an exit, an argument) shares the
+            # fate of that `if` (branch merging).
+            set v $e
+            set parent [dict get $info parent]
+            while {[dict exists $parent $v] && [dict get $parent $v] ne ""
+                    && [hir::kind $view [dict get $parent $v]] eq "if"} {
+                set up [dict get $parent $v]
+                set upNode [hir::node $view $up]
+                set thenBody [dict get $upNode thenBody]
+                set elseBody [dict get $upNode elseBody]
+                if {$v ne [lindex $thenBody end] && $v ne [lindex $elseBody end]} {
+                    break
+                }
+                set v $up
+            }
+            set pe [expr {[dict exists $parent $v] ? [dict get $parent $v] : ""}]
+            set pkind [expr {$pe eq "" ? "" : [hir::kind $view $pe]}]
+            if {[dict exists $context discarded $e]} {
+                # Statement position, value unused: its fields are evaluated
+                # for their effects and no object is built.
+                set class local
+            } elseif {$v in $exits || ($pkind eq "return")} {
+                if {[dict exists $arity $id]} {
+                    if {[dict exists $wants $id]} {
+                        set class return
+                    } else {
+                        set reason "return"
+                    }
+                } elseif {[dict exists $resultWhy $id]} {
+                    set reason [dict get $resultWhy $id]
+                } else {
+                    set reason "mixed exits"
+                }
+            } elseif {$pkind eq "project"} {
+                set class local
+            } elseif {$pkind eq "bind" && [hir::get $view $pe value] eq $v} {
+                set b [hir::get $view $pe binding]
+                if {[dict exists $virtual $id $b]} {
+                    lassign [dict get $useInfo [list $id $b]] structural forwards mats
+                    set class [expr {$forwards > 0 ? "call" : "local"}]
+                } elseif {[dict exists $dropWhy [list $id $b]]} {
+                    set reason [dict get $dropWhy [list $id $b]]
+                } elseif {[dict exists $localWhy $id $b]} {
+                    set reason [dict get $localWhy $id $b]
+                } else {
+                    set reason [expr {$v eq $e ? "other" : "control"}]
+                }
+            } elseif {$pkind eq "call"} {
+                set argIndex [lsearch -exact [hir::get $view $pe args] $v]
+                set callee [expr {[dict exists [dict get $instance calls] $pe] ? [dict get [dict get $instance calls] $pe] : ""}]
+                set virtualParam 0
+                if {$callee ne "" && $argIndex >= 0 && [dict exists $regions $callee]
+                        && [dict exists $paramVirtual $callee]} {
+                    set cblock [dict get [dict get $regions $callee instance] block]
+                    set params [hir::get [dict get $regions $callee view] $cblock params]
+                    set virtualParam [expr {$argIndex < [llength $params]
+                        && [dict exists $paramVirtual $callee [lindex $params $argIndex]]}]
+                }
+                if {$virtualParam} {
+                    set class call
+                } else {
+                    set reason [UseTag $info $v]
+                }
+            } elseif {$pkind eq "struct"} {
+                set reason "nested field"
+            } else {
+                set reason [expr {$pe eq "" ? "other" : [UseTag $info $v]}]
+            }
+            set desc [list $n [list [expr {[dict get $node named] ? [dict get $node structId] : ""}] [dict get $node layout]]]
+            lappend records [dict create instance $id label [hir::specialize::label $spec $id] expr $e \
+                named [dict get $node named] width $n class $class \
+                reason [expr {$class eq "materialized" ? $reason : ""}] mats $mats]
+        }
+    }
+    return $records
+}
+
+proc hir::escape::structOptsOf {analysis} {
+    return [expr {[dict exists $analysis structOpts] ? [dict get $analysis structOpts] : {}}]
+}
+
+# The census of ANALYSIS: one record per struct construction, see Census.
+proc hir::escape::census {analysis} {
+    return [expr {[dict exists $analysis census] ? [dict get $analysis census] : {}}]
 }
 
 proc hir::escape::wants {analysis id} {
     return [dict exists $analysis wants $id]
 }
 
+# The field count of instance ID's recognized result, or "".
 proc hir::escape::arity {analysis id} {
     set arity [dict get $analysis arity]
-    return [expr {[dict exists $arity $id] ? [dict get $arity $id] : ""}]
+    return [expr {[dict exists $arity $id] ? [lindex [dict get $arity $id] 0] : ""}]
+}
+
+# The shape ({ID LAYOUT}) of instance ID's recognized *struct* result, "" for
+# a List result or no recognized result.
+proc hir::escape::resultShape {analysis id} {
+    set arity [dict get $analysis arity]
+    return [expr {[dict exists $arity $id] ? [lindex [dict get $arity $id] 1] : ""}]
 }
 
 proc hir::escape::virtualArity {analysis id b} {
     set virtual [dict get $analysis virtual]
     if {[dict exists $virtual $id $b]} {
-        return [dict get $virtual $id $b]
+        return [lindex [dict get $virtual $id $b] 0]
+    }
+    return ""
+}
+
+# The struct shape ({ID LAYOUT}) of virtual local B of instance ID, "" for a
+# List (or not virtual).
+proc hir::escape::virtualShape {analysis id b} {
+    set virtual [dict get $analysis virtual]
+    if {[dict exists $virtual $id $b]} {
+        return [lindex [dict get $virtual $id $b] 1]
     }
     return ""
 }
@@ -815,7 +1436,25 @@ proc hir::escape::virtualArity {analysis id b} {
 proc hir::escape::paramVirtualArity {analysis id b} {
     set paramVirtual [dict get $analysis paramVirtual]
     if {[dict exists $paramVirtual $id $b]} {
-        return [dict get $paramVirtual $id $b]
+        return [lindex [dict get $paramVirtual $id $b] 0]
+    }
+    return ""
+}
+
+proc hir::escape::paramVirtualShape {analysis id b} {
+    set paramVirtual [dict get $analysis paramVirtual]
+    if {[dict exists $paramVirtual $id $b]} {
+        return [lindex [dict get $paramVirtual $id $b] 1]
+    }
+    return ""
+}
+
+# The descriptor ({N SHAPE}) of field projection E of instance ID when its
+# receiver is a recognized struct construction read straight from its
+# fields, "" otherwise.
+proc hir::escape::directProjection {analysis id e} {
+    if {[dict exists $analysis direct $id $e]} {
+        return [dict get $analysis direct $id $e]
     }
     return ""
 }
@@ -867,18 +1506,28 @@ proc hir::escape::explain {hir spec analysis} {
         }
         lappend lines "[hir::specialize::label $spec $id] ($id):"
         if {$n ne ""} {
-            lappend lines "  result shape: $n-element list[expr {[wants $analysis $id] ? \
+            lappend lines "  result shape: [DescName [dict get $analysis arity $id]][expr {[wants $analysis $id] ? \
                 " (scalar-replacement companion built)" : " (recognized, but no caller demands a companion)"}]"
         }
-        foreach {b bn} $params {
-            lappend lines "  virtual parameter $b: $bn-element list, closed callers only (fields internal variant)"
+        foreach {b desc} $params {
+            lappend lines "  virtual parameter $b: [DescName $desc], closed callers only (fields internal variant)"
         }
-        foreach {b bn} $bindings {
-            lappend lines "  virtual local $b: $bn-element list, never materialized"
+        foreach {b desc} $bindings {
+            lappend lines "  virtual local $b: [DescName $desc], never materialized eagerly"
         }
     }
     if {$lines eq ""} {
-        return "no fixed-shape List aggregate was recognized"
+        return "no fixed-shape List or struct aggregate was recognized"
     }
     return [join $lines \n]
+}
+
+# "N-element list" or "struct NAME{f, g} (N fields)" for descriptor DESC.
+proc hir::escape::DescName {desc} {
+    lassign $desc n shape
+    if {$shape eq ""} {
+        return "$n-element list"
+    }
+    lassign $shape id layout
+    return "[expr {$id eq "" ? "anonymous struct" : "struct $id"}]{[join $layout {, }]} ($n fields)"
 }

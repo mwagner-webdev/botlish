@@ -326,11 +326,12 @@ test paramagg-hashtable-1 {HashTable set/get/delete is unaffected by parameter v
 
 # STRUCTS.md: the rehash now groups its three arrays as anonymous structs
 # {controls, keys, values}, not [..] List literals. The parameter-aggregate
-# optimization is about Lists; it does not scalarize structs (no struct
-# scalar replacement was added under that milestone), so the two grouping
-# structs of the one resize are real allocations in both modes. This used to
-# assert fewer List allocations with the optimization on.
-test paramagg-hashtable-2 {rehash's dest/src grouping is two real Struct allocations per resize, unchanged by the List parameter-aggregate optimization} -body {
+# optimization itself is about Lists, but the same machinery carries structs
+# now (STRUCT-SCALAR-REPLACEMENT.md): with parameter virtualization on, the
+# two grouping structs cross ht_rehash_scan/ht_rehash_insert as fields and no
+# Struct is allocated; with -param-aggregate-opt 0 they are built at the call
+# (src and dest stay virtual locals until their one non-projecting use).
+test paramagg-hashtable-2 {rehash's dest/src grouping is scalar-replaced across the closed calls (0 Structs), and built once each at the call with parameter virtualization off} -body {
     set src [regsub {\nsample\(\)\n$} [corpus::text hashtable] "\n"]
     set hir [sourceHir "$src\nfn many():\n    t = ht_new()\n    ht_set(t, \"a\", 1)\n    ht_set(t, \"b\", 2)\n    ht_set(t, \"c\", 3)\n    ht_set(t, \"d\", 4)\n    ht_set(t, \"e\", 5)\n    ht_set(t, \"f\", 6)\n    ht_size(t)\n\nmany()\n"]
     set modes [lmap mode {1 0} {
@@ -338,7 +339,7 @@ test paramagg-hashtable-2 {rehash's dest/src grouping is two real Struct allocat
         list [dict get $byKind List allocations] [dict get $byKind Struct allocations]
     }]
     list [native::evalHir $hir] $modes
-} -result {{int 6} {{0 2} {0 2}}}
+} -result {{int 6} {{0 0} {0 2}}}
 
 test paramagg-geometric-1 {GeometricBuilder's csv_parse value is unaffected} -body {
     assertParity [corpus::text csv_geometric]

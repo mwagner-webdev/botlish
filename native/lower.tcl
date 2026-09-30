@@ -191,6 +191,11 @@ namespace eval native::lower {
     # whether hir::escape::analyze's own parameter-boundary growth pass is
     # enabled, independent of escapeOpt above.
     variable paramAggregateOpt 1
+    # Struct scalar replacement (STRUCT-SCALAR-REPLACEMENT.md): whether it is
+    # enabled at all (it also needs escapeOpt), and the width caps handed to
+    # hir::escape::analyze (a dict; empty means the analysis defaults).
+    variable structOpt 1
+    variable structWidths {}
     # Block virtualization (see "Block virtualization" below): the
     # hir::blockescape analysis of the program, and whether it is enabled
     # at all.
@@ -1016,6 +1021,8 @@ proc native::lower::program {hirProgram args} {
     variable escape
     variable escapeOpt
     variable paramAggregateOpt
+    variable structOpt
+    variable structWidths
     variable blockescape
     variable blockEscapeOpt
     variable stringregion
@@ -1044,6 +1051,8 @@ proc native::lower::program {hirProgram args} {
         && $::env(BOTLISH_NATIVE_ESCAPE_OPT) eq "0" ? 0 : 1}]
     set paramAggregateDefault [expr {[info exists ::env(BOTLISH_NATIVE_PARAM_AGGREGATE_OPT)]
         && $::env(BOTLISH_NATIVE_PARAM_AGGREGATE_OPT) eq "0" ? 0 : 1}]
+    set structDefault [expr {[info exists ::env(BOTLISH_NATIVE_STRUCT_OPT)]
+        && $::env(BOTLISH_NATIVE_STRUCT_OPT) eq "0" ? 0 : 1}]
     set blockEscapeDefault [expr {[info exists ::env(BOTLISH_NATIVE_BLOCK_ESCAPE_OPT)]
         && $::env(BOTLISH_NATIVE_BLOCK_ESCAPE_OPT) eq "0" ? 0 : 1}]
     set stringRegionDefault [expr {[info exists ::env(BOTLISH_NATIVE_STRING_REGION_OPT)]
@@ -1080,7 +1089,9 @@ proc native::lower::program {hirProgram args} {
         && $::env(BOTLISH_NATIVE_VIRTUAL_CONSTRUCTION_OPT) eq "0" ? 0 : 1}]
     set options [hir::Options native::lower::program \
         [list -specialize $default -repr-opt $reprDefault -escape-opt $escapeDefault \
-            -param-aggregate-opt $paramAggregateDefault -block-escape-opt $blockEscapeDefault \
+            -param-aggregate-opt $paramAggregateDefault -struct-opt $structDefault \
+            -struct-local-width "" -struct-return-width "" -struct-arg-width "" \
+            -block-escape-opt $blockEscapeDefault \
             -string-region-opt $stringRegionDefault -string-traversal-opt $traversalDefault \
             -call-facts-opt $callFactsDefault -call-effects-opt $callEffectsDefault \
             -closed-caller-facts-opt $closedCallerFactsDefault \
@@ -1104,6 +1115,19 @@ proc native::lower::program {hirProgram args} {
     set callEffectsOpt [dict get $options -call-effects-opt]
     set escapeOpt [dict get $options -escape-opt]
     set paramAggregateOpt [dict get $options -param-aggregate-opt]
+    set structOpt [expr {[dict get $options -struct-opt] && [dict get $options -escape-opt]}]
+    set structWidths [dict create enabled $structOpt]
+    foreach {option key envName} {-struct-local-width localWidth BOTLISH_NATIVE_STRUCT_LOCAL_WIDTH
+            -struct-return-width returnWidth BOTLISH_NATIVE_STRUCT_RETURN_WIDTH
+            -struct-arg-width argWidth BOTLISH_NATIVE_STRUCT_ARG_WIDTH} {
+        set width [dict get $options $option]
+        if {$width eq "" && [info exists ::env($envName)] && $::env($envName) ne ""} {
+            set width $::env($envName)
+        }
+        if {$width ne ""} {
+            dict set structWidths $key $width
+        }
+    }
     set blockEscapeOpt [dict get $options -block-escape-opt]
     set stringRegionOpt [dict get $options -string-region-opt]
     set traversalOpt [dict get $options -string-traversal-opt]
@@ -1114,7 +1138,7 @@ proc native::lower::program {hirProgram args} {
         -call-facts-opt [dict get $options -call-facts-opt] \
         -closed-caller-facts-opt [dict get $options -closed-caller-facts-opt]]
     set ranges [hir::range::analyze $hirProgram $spec [dict get $options -call-facts-opt]]
-    set escape [expr {$escapeOpt ? [hir::escape::analyze $hirProgram $spec $paramAggregateOpt]
+    set escape [expr {$escapeOpt ? [hir::escape::analyze $hirProgram $spec $paramAggregateOpt $structWidths]
         : [dict create arity {} wants {} virtual {} paramVirtual {}]}]
     set stringregion [expr {$stringRegionOpt ? [hir::stringregion::analyze $hirProgram $spec]
         : [dict create regionOf {} wants {} virtual {}]}]
@@ -1231,7 +1255,7 @@ proc native::lower::program {hirProgram args} {
     }
     set text "[join $header \n]\n\n[join $texts \n\n]\n"
     return [dict create text $text functions $infos statistics [Statistics $infos] \
-        specialization $spec construction $construction]
+        specialization $spec construction $construction structCensus [hir::escape::census $escape]]
 }
 
 # Code-size and guard statistics of the lowered functions INFOS.
@@ -2020,7 +2044,7 @@ proc native::lower::SetupFieldParams {fnVar id instance params} {
         set name [dict get [hir::binding $hir $b] name]
         if {$n ne ""} {
             set fields [NewRegs fn $n]
-            dict set fn locals $b [list virtual $fields]
+            dict set fn locals $b [list virtual $fields [hir::escape::paramVirtualShape $escape $id $b] $b ""]
             for {set k 0} {$k < $n} {incr k} {
                 lappend pnames "$name.$k"
             }
@@ -2440,7 +2464,12 @@ proc native::lower::ShapeIndex {id layout} {
     return [dict get $shapeIds $key]
 }
 
-proc native::lower::Struct {fnVar e node} {
+# The field registers of struct construction NODE (expression E) in SLOT
+# order, every field expression lowered first, in WRITTEN order (the
+# evaluation order), or "never" if one of them cannot complete normally. No
+# object exists yet: Struct builds one from these, a virtual struct
+# (hir/escape.tcl) keeps them as they are.
+proc native::lower::StructFields {fnVar e node} {
     upvar 1 $fnVar fn
     set regs {}
     foreach field [dict get $node fields] {
@@ -2450,22 +2479,101 @@ proc native::lower::Struct {fnVar e node} {
         }
         lappend regs $r
     }
-    set id [expr {[dict get $node named] ? [dict get $node structId] : ""}]
     set layout [dict get $node layout]
     set names [dict get $node names]
     set ordered {}
     foreach name $layout {
         lappend ordered [lindex $regs [lsearch -exact $names $name]]
     }
+    return $ordered
+}
+
+# The shape key ({ID LAYOUT}, ShapeIndex's key) of struct construction NODE.
+proc native::lower::StructShapeOf {node} {
+    return [list [expr {[dict get $node named] ? [dict get $node structId] : ""}] [dict get $node layout]]
+}
+
+proc native::lower::Struct {fnVar e node} {
+    upvar 1 $fnVar fn
+    variable context
+    variable structOpt
+    set ordered [StructFields fn $e $node]
+    if {$ordered eq "never"} {
+        return never
+    }
+    if {$structOpt && [dict exists $context discarded $e]} {
+        # A struct value nothing reads (statement position): its fields were
+        # evaluated for their effects, in order, and no object is needed.
+        return [Assign fn unit]
+    }
+    lassign [StructShapeOf $node] id layout
     return [Assign fn "structnew [ShapeIndex $id $layout] [join $ordered { }]" $e]
+}
+
+# Materialization (STRUCT-SCALAR-REPLACEMENT.md): the physical struct of the
+# virtual binding B -- `structnew` of its exact shape (named identity or
+# canonical anonymous field set) from fields that all already exist,
+# emitted at the first use that needs the object. The register is recorded
+# in the *root* binding's entry (an alias shares its source's), so every
+# later use this scope dominates reads the same object; a branch or loop
+# body restores `fn locals` on the way out, dropping a materialization that
+# does not dominate what follows.
+proc native::lower::MaterializeVirtual {fnVar b e} {
+    upvar 1 $fnVar fn
+    set local [dict get $fn locals $b]
+    lassign $local tag fields shape root
+    if {$shape eq ""} {
+        throw {NATIVE BUG} "native lowering: virtual binding $b has no struct shape to materialize ($e)"
+    }
+    set rootLocal [dict get $fn locals $root]
+    set mat [lindex $rootLocal 4]
+    if {$mat ne ""} {
+        return $mat
+    }
+    lassign $shape id layout
+    set mat [Assign fn "structnew [ShapeIndex $id $layout] [join [lindex $rootLocal 1] { }]" $e]
+    dict set fn locals $root [lreplace $rootLocal 4 4 $mat]
+    return $mat
 }
 
 proc native::lower::Project {fnVar e node} {
     upvar 1 $fnVar fn
     variable hir
+    variable escape
+    variable currentInstance
     set receiver [dict get $node receiver]
     set type [hir::typeOf $hir $receiver]
     set name [dict get $node name]
+    if {[hir::kind $hir $receiver] eq "ref"} {
+        # A receiver currently held as virtual fields (a virtual local, or a
+        # virtual parameter of this `fields` variant): the projection is the
+        # field register itself -- no `structget`, and the receiver is not
+        # evaluated (a plain reference has no effect of its own).
+        set b [hir::get $hir $receiver binding]
+        if {$b ne "" && [dict exists $fn locals $b]} {
+            set local [dict get $fn locals $b]
+            if {[lindex $local 0] eq "virtual" && [lindex $local 2] ne ""} {
+                set slot [lsearch -exact [lindex $local 2 1] $name]
+                if {$slot < 0} {
+                    throw {NATIVE BUG} "native lowering: virtual binding $b has no field \"$name\" ($e)"
+                }
+                return [lindex [lindex $local 1] $slot]
+            }
+        }
+    }
+    set direct [hir::escape::directProjection $escape $currentInstance $e]
+    if {$direct ne ""} {
+        # The receiver is itself a recognized struct construction (a literal,
+        # or an exact call returning fields): read the field from its virtual
+        # fields; the other fields were evaluated for their effects only.
+        lassign $direct n shape
+        set slot [lsearch -exact [lindex $shape 1] $name]
+        set fields [VirtualValue fn $receiver $n]
+        if {$fields eq "never"} {
+            return never
+        }
+        return [lindex $fields $slot]
+    }
     set slot [expr {[hir::types::IsStructLike $type] ? [lsearch -exact [hir::types::StructLayout $type] $name] : -1}]
     if {$slot < 0} {
         Unsupported $e struct-shape \
@@ -2581,6 +2689,13 @@ proc native::lower::Ref {fnVar e node want} {
         }
         fnvalue { return [list [Assign fn "fnvalue $where" $e] tagged] }
         self    { return [list [Assign fn self $e] tagged] }
+        virtual {
+            # A virtual struct (hir/escape.tcl) referenced where the physical
+            # object is needed: its one materialization, at this first such
+            # use (MaterializeVirtual). A List aggregate is only ever virtual
+            # when *every* use is a constant-index read, so never gets here.
+            return [list [MaterializeVirtual fn $b $e] tagged]
+        }
         pieces  {
             # A plan local (virtual construction) referenced where a flat
             # value is needed: its one materialization (it is linear, so no
@@ -2728,11 +2843,25 @@ proc native::lower::Bind {fnVar e node} {
             # `list_get` at a constant position, intercepted directly in
             # NativeCall below -- nothing ever reads this local's "value"
             # as a single register.
+            set shape [hir::escape::virtualShape $escape $currentInstance $b]
+            if {$shape ne "" && [hir::kind $hir $valueExpr] eq "ref"} {
+                # A struct alias (`b = a`, STRUCT-SCALAR-REPLACEMENT.md):
+                # the same fields, and the same root for materialization, so
+                # the physical object -- if some use ever needs one -- is
+                # built once for both names.
+                set sb [hir::get $hir $valueExpr binding]
+                set source [expr {[dict exists $fn locals $sb] ? [dict get $fn locals $sb] : ""}]
+                if {[lindex $source 0] ne "virtual" || [lindex $source 2] eq ""} {
+                    throw {NATIVE BUG} "native lowering: alias $b of non-virtual binding $sb ($e)"
+                }
+                dict set fn locals $b [list virtual [lindex $source 1] [lindex $source 2] [lindex $source 3] ""]
+                return ""
+            }
             set fields [VirtualValue fn $valueExpr $virtualArity]
             if {$fields eq "never"} {
                 return never
             }
-            dict set fn locals $b [list virtual $fields]
+            dict set fn locals $b [list virtual $fields $shape $b ""]
             return ""
         }
         set family [hir::construction::localFamily $construction $currentInstance $b]
@@ -2862,6 +2991,23 @@ proc native::lower::VirtualValue {fnVar e arity} {
     upvar 1 $fnVar fn
     variable hir
     set node [hir::node $hir $e]
+    if {[dict get $node kind] eq "struct"} {
+        # A struct literal: its field registers in slot order, the object
+        # never built.
+        set fields [StructFields fn $e $node]
+        if {$fields ne "never" && [llength $fields] != $arity} {
+            throw {NATIVE BUG} "native lowering: expected a $arity-field struct construction at $e"
+        }
+        if {$fields ne "never" && [hir::typeOf $hir $e] eq "never"} {
+            Emit fn unreachable $e
+            return never
+        }
+        return $fields
+    }
+    if {[dict get $node kind] eq "if"} {
+        # Branch merging: the branches' fields join field-wise.
+        return [If fn $e $node "" $arity]
+    }
     if {[dict get $node kind] ne "call"} {
         throw {NATIVE BUG} "native lowering: expected a recognized construction at $e"
     }
@@ -2940,6 +3086,12 @@ proc native::lower::CanSupplyFields {fnVar argExprs fieldWidths} {
         if {$width ne ""} {
             switch -- [hir::kind $hir $arg] {
                 call {}
+                if {}
+                struct {
+                    if {[llength [hir::get $hir $arg fields]] != $width} {
+                        return 0
+                    }
+                }
                 ref {
                     set b [hir::get $hir $arg binding]
                     if {$b eq "" || ![dict exists $fn locals $b]
@@ -2993,6 +3145,9 @@ proc native::lower::TryFields {fnVar e n} {
                 return ""
             }
             return $fields
+        }
+        struct - if {
+            return [VirtualValue fn $e $n]
         }
         call {
             set node [hir::node $hir $e]
@@ -4963,7 +5118,7 @@ proc native::lower::NativeImpl {name} {
 # ---------------------------------------------------------------------------
 # Control flow
 
-proc native::lower::If {fnVar e node {family ""}} {
+proc native::lower::If {fnVar e node {family ""} {virtualN ""}} {
     upvar 1 $fnVar fn
     variable hir
     variable guards
@@ -4994,7 +5149,11 @@ proc native::lower::If {fnVar e node {family ""}} {
         set role [expr {$outcome ? "then" : "else"}]
         set saved [dict get $fn locals]
         set savedRaw [dict get $fn rawCache]
-        set value [SequenceTo fn [dict get $node ${role}Body] $family]
+        if {$virtualN ne ""} {
+            set value [SequenceVirtual fn [dict get $node ${role}Body] $virtualN]
+        } else {
+            set value [SequenceTo fn [dict get $node ${role}Body] $family]
+        }
         dict set fn locals $saved
         dict set fn rawCache $savedRaw
         return $value
@@ -5002,7 +5161,8 @@ proc native::lower::If {fnVar e node {family ""}} {
     set then [NewLabel fn]
     set else [NewLabel fn]
     set join [NewLabel fn]
-    set result [NewReg fn]
+    # A virtual struct join (branch merging): one result register per field.
+    set result [expr {$virtualN ne "" ? [NewRegs fn $virtualN] : [NewReg fn]}]
     if {$family ne ""} {
         # A join wanted in a plan position (virtual construction): each
         # branch's value is moved in as a plan or flat value alike.
@@ -5019,13 +5179,21 @@ proc native::lower::If {fnVar e node {family ""}} {
             # HIR decided the condition: this branch never runs.
             Emit fn unreachable $e
             set value never
+        } elseif {$virtualN ne ""} {
+            set value [SequenceVirtual fn $body $virtualN]
         } else {
             set value [SequenceTo fn $body $family]
         }
         dict set fn locals $saved
         dict set fn rawCache $savedRaw
         if {$value ne "never"} {
-            Emit fn "$result = move $value"
+            if {$virtualN ne ""} {
+                foreach r $result v $value {
+                    Emit fn "$r = move $v"
+                }
+            } else {
+                Emit fn "$result = move $value"
+            }
             Emit fn "jump $join"
             set joined 1
         }
@@ -5259,7 +5427,12 @@ proc native::lower::Handle {fnVar e node} {
     set joined 0
 
     Emit fn "pusherrorexit $catchLabel" $e
+    # Anything the protected call materializes (a virtual struct's object,
+    # STRUCT-SCALAR-REPLACEMENT.md) may not exist on the handler's path: it
+    # must not be reused there or after the join.
+    set savedLocals [dict get $fn locals]
     set callResult [Expr fn $call]
+    dict set fn locals $savedLocals
     Emit fn "poperrorexit" $e
     if {$callResult ne "never"} {
         Emit fn "$result = move $callResult" $e
@@ -5624,6 +5797,27 @@ proc native::lower::PlanCallResult {fnVar e result family want} {
 # Like Sequence, but its trailing value is wanted in a plan position of
 # FAMILY ("" for an ordinary Sequence): returns one register (flat or plan)
 # or "never".
+# Like Sequence, for a branch body whose value is a recognized struct
+# construction of N fields: the statements run as usual and the last
+# expression's *fields* (VirtualValue) are the value. A body that cannot
+# complete normally (its last expression is typed never, or a statement
+# never completes) is "never".
+proc native::lower::SequenceVirtual {fnVar exprs n} {
+    upvar 1 $fnVar fn
+    variable hir
+    foreach e [lrange $exprs 0 end-1] {
+        if {[Expr fn $e] eq "never"} {
+            return never
+        }
+    }
+    set last [lindex $exprs end]
+    if {[hir::typeOf $hir $last] eq "never"} {
+        Expr fn $last
+        return never
+    }
+    return [VirtualValue fn $last $n]
+}
+
 proc native::lower::SequenceTo {fnVar exprs family} {
     upvar 1 $fnVar fn
     if {$family eq "" || $exprs eq ""} {
