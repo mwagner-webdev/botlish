@@ -1,0 +1,20 @@
+(first 17)     parent-direct direct-after     diff
+requests               1825         1825       +0
+trivial                 605          605       +0
+hits                    935          935       +0
+walks                   383          383       +0
+rounds                   17           17       +0
+instances               285          285       +0
+used                    285          285       +0
+codegen                 245          245       +0
+functions               234          234       +0
+lines                  6087         6087       +0
+guards                   64           64       +0
+calls                   303          303       +0
+callvalues                8            8       +0
+bytes                103331       103331       +0
+closed                  207          207       +0
+guarded                  38           38       +0
+open                      0            0       +0
+
+programs whose rows differ (digests excluded):

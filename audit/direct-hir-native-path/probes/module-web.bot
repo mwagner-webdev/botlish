@@ -1,0 +1,6 @@
+# Module native bridge (uriEscape -> web::uri_escape_text) and a validator
+# predicate with a native body.
+# requires: web
+fn check(s: str) -> bool:
+    emailish?(s)
+[uriEscape("a b/c"), check("a@b.co"), check("nope")]

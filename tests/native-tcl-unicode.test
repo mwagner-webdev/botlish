@@ -196,7 +196,7 @@ test native-tcl-unicode-emailish-known-result-nir-shape {a redundant Emailish?/e
                 {block {} {const no}}}}}
         {call {ref f} {const str someone@example.com}}
     }
-    set hir [native::buildProgramHir $p]
+    set hir [nativeHirOfIR $p]
     set text [native::nir $hir]
     # Exactly one compiled copy of the validator and its scanner helpers
     # (never two, one per call site).

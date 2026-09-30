@@ -1,0 +1,10 @@
+# Legal argument-passing recursion between two functions.
+fn ping(next, n):
+    if n < 1:
+        return 0
+    next(ping, n - 1) + 1
+fn pong(next, n):
+    if n < 1:
+        return 0
+    next(pong, n - 1) + 2
+ping(pong, 5)

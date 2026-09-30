@@ -6,5 +6,5 @@ source native/native.tcl
 interp recursionlimit {} 20000
 lassign $argv path region
 if {$region eq {}} {set region 1}
-set hir [native::buildProgramHir [hir::lower [surface::readProgramFile $path]]]
+set hir [native::prepareHir [surface::readProgramFile $path]]
 puts [dict get [native::lower::program $hir -string-region-opt $region] text]

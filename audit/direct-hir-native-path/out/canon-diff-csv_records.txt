@@ -1,0 +1,138 @@
+111a112
+>     guard mutarray %3 "mutable_array_set"
+118a120
+>     guard mutarray %3 "mutable_array_set"
+125a128
+>     guard mutarray %3 "mutable_array_set"
+280,287d282
+< func "ht_capacity" params=1 env=0 regs=3 pnames="table" captures=0 instance="generic"
+<     %1 = call <ht_controls<generic>> %0
+<     guard mutarray %1 "mutable_array_capacity"
+<     %2 = op mutarraycapacity %1
+<     ret %2
+< end
+< 
+< 
+320,328d314
+< func "ht_controls" params=1 env=0 regs=4 pnames="table" captures=0 instance="generic" rawregs="2"
+<     %1 = int 0
+<     %2 = rawint 0
+<     guard mutarray %0 "mutable_array_get"
+<     %3 = op mutarrayget %0 %1
+<     ret %3
+< end
+< 
+< 
+358,359c344,345
+< func "ht_find_get" params=3 env=0 regs=30 pnames="table key index" captures=0 instance="any, str, int" rawregs="6 10 12 13 17"
+<     %3 = call <ht_controls<generic>> %0
+---
+> func "ht_find_get" params=3 env=0 regs=30 pnames="table key index" captures=0 instance="mutarray, str, int" rawregs="6 10 12 13 17"
+>     %3 = call <ht_controls<mutarray>> %0
+384c370
+<     %20 = call <ht_keys<generic>> %0
+---
+>     %20 = call <ht_keys<mutarray>> %0
+413c399
+<     %29 = call <ht_probe_next<any, int>> %0 %2
+---
+>     %29 = call <ht_probe_next<mutarray, int>> %0 %2
+517,519c503,505
+< func "ht_get" params=2 env=0 regs=12 pnames="table key" captures=0 instance="any, str" rawregs="5"
+<     %2 = call <ht_probe_start<any, str>> %0 %1
+<     %3 = call <ht_find_get<any, str, int>> %0 %1 %2
+---
+> func "ht_get" params=2 env=0 regs=12 pnames="table key" captures=0 instance="mutarray, str" rawregs="5"
+>     %2 = call <ht_probe_start<mutarray, str>> %0 %1
+>     %3 = call <ht_find_get<mutarray, str, int>> %0 %1 %2
+532c518
+<     %10 = call <ht_values<generic>> %0
+---
+>     %10 = call <ht_values<mutarray>> %0
+564,572d549
+< func "ht_keys" params=1 env=0 regs=4 pnames="table" captures=0 instance="generic" rawregs="2"
+<     %1 = int 1
+<     %2 = rawint 1
+<     guard mutarray %0 "mutable_array_get"
+<     %3 = op mutarrayget %0 %1
+<     ret %3
+< end
+< 
+< 
+644,653d620
+< func "ht_probe_next" params=2 env=0 regs=7 pnames="table index" captures=0 instance="any, int" rawregs="3"
+<     %2 = int 1
+<     %3 = rawint 1
+<     %4 = op iadd %1 %2
+<     %5 = call <ht_capacity<generic>> %0
+<     %6 = op imod %4 %5
+<     ret %6
+< end
+< 
+< 
+664c631
+< func "ht_probe_start" params=2 env=0 regs=5 pnames="table key" captures=0 instance="any, str"
+---
+> func "ht_probe_start" params=2 env=0 regs=5 pnames="table key" captures=0 instance="mutarray, any"
+666c633
+<     %3 = call <ht_capacity<generic>> %0
+---
+>     %3 = call <ht_capacity<mutarray>> %0
+672c639
+< func "ht_probe_start" params=2 env=0 regs=5 pnames="table key" captures=0 instance="mutarray, any"
+---
+> func "ht_probe_start" params=2 env=0 regs=5 pnames="table key" captures=0 instance="mutarray, str"
+858,866d824
+< func "ht_size" params=1 env=0 regs=4 pnames="table" captures=0 instance="generic" rawregs="2"
+<     %1 = int 3
+<     %2 = rawint 3
+<     guard mutarray %0 "mutable_array_get"
+<     %3 = op mutarrayget %0 %1
+<     ret %3
+< end
+< 
+< 
+883,891d840
+< func "ht_values" params=1 env=0 regs=4 pnames="table" captures=0 instance="generic" rawregs="2"
+<     %1 = int 2
+<     %2 = rawint 2
+<     guard mutarray %0 "mutable_array_get"
+<     %3 = op mutarrayget %0 %1
+<     ret %3
+< end
+< 
+< 
+1088c1037
+<     %14 = call <ht_get<any, str>> %6 %13
+---
+>     %14 = call <ht_get<mutarray, str>> %6 %13
+1090c1039
+<     %16 = call <ht_get<any, str>> %12 %15
+---
+>     %16 = call <ht_get<mutarray, str>> %12 %15
+1094,1095c1043,1044
+<     %19 = call <ht_size<generic>> %6
+<     %20 = call <ht_size<generic>> %12
+---
+>     %19 = call <ht_size<mutarray>> %6
+>     %20 = call <ht_size<mutarray>> %12
+1116c1065
+<     %28 = call <ht_get<any, str>> %6 %27
+---
+>     %28 = call <ht_get<mutarray, str>> %6 %27
+1118c1067
+<     %30 = call <ht_get<any, str>> %6 %29
+---
+>     %30 = call <ht_get<mutarray, str>> %6 %29
+1120c1069
+<     %32 = call <ht_get<any, str>> %6 %31
+---
+>     %32 = call <ht_get<mutarray, str>> %6 %31
+1122c1071
+<     %34 = call <ht_get<any, str>> %9 %33
+---
+>     %34 = call <ht_get<mutarray, str>> %9 %33
+1124c1073
+<     %36 = call <ht_get<any, str>> %9 %35
+---
+>     %36 = call <ht_get<mutarray, str>> %9 %35

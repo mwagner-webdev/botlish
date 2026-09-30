@@ -86,8 +86,8 @@ test native-validator-predicate-known-result-branch-fact {a redundant NonEmpty? 
     lmap b $::parityBackends {lindex [outcomeUnder $b $p] 1}
 } -result {{"yes"} {"yes"} {"yes"} {"yes"}}
 
-# NIR shape: a native-body call is substituted before HIR is built (see
-# native/native.tcl's ExpandNativeBodies header), so unlike a plain native
+# NIR shape: a native-body call has its body attached (native::prepareHir,
+# native/prepare.tcl), so unlike a plain native
 # call, its refinement/known-result identity is not visible to HIR any
 # more -- the outer (genuinely dynamic) and inner (HIR-provably-redundant)
 # NonEmpty? checks both compile to a real call of the validator body (each
@@ -96,10 +96,8 @@ test native-validator-predicate-known-result-branch-fact {a redundant NonEmpty? 
 # = 4 `op strlen`, not 2). This is a real, minor optimization gap the
 # -native-body reuse introduces (a provably-redundant validator call is not
 # eliminated, unlike a provably-redundant ordinary native call): still
-# correct, never wrong, and out of this milestone's scope to close (no
-# general inliner; see NATIVE-EMAILISH.md and native/native.tcl's own
-# ExpandNativeBodies header on why this is purely syntactic, pre-HIR
-# substitution). This test pins the count today so a future fix is a
+# correct, never wrong, and out of scope to close (no general inliner; see
+# NATIVE-EMAILISH.md). This test pins the count today so a future fix is a
 # deliberate, visible change here rather than a silent one.
 test native-validator-predicate-known-result-nir-shape {both the dynamic and the HIR-redundant NonEmpty? check compile to a real call (documented optimization gap, not a correctness bug)} -body {
     set p {
@@ -109,7 +107,7 @@ test native-validator-predicate-known-result-nir-shape {both the dynamic and the
                 {block {} {const no}}}}}
         {call {ref f} {const str hi}}
     }
-    set hir [hir::build [native::ExpandNativeBodies $p] -strict 0]
+    set hir [hir::build $p -strict 0]
     regexp -all {op strlen} [native::nir $hir]
 } -result 4
 

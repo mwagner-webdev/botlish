@@ -50,7 +50,7 @@ core::type::register Emailish \
 # as a real, shared, top-level function instead of pasted into every call
 # site (R2-ORDINARY-EMAILISH-PREDICATE.md, mirroring NATIVE-MODULES.md's
 # uriEscape/web::uri_escape_text). No -native-body: this predicate no longer
-# passes through native::ExpandNativeBodies's pre-HIR body substitution at
+# passes through a native body attachment (native::prepareHir) at
 # all, on any backend.
 core::type::definePredicate Emailish emailish? "" {web emailish?}
 # Emailish? is a temporary compatibility alias for emailish?, not a second

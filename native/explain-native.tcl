@@ -45,8 +45,12 @@ file mkdir $outdir
 if {[file extension $path] eq ".bot"} {
     set hir [surface::readProgramFile $path]
 } else {
-    set hir [native::buildProgramHir [core::loadProgramFile $path]]
+    # core IR text is read into HIR like any other input notation; native
+    # compilation starts from that HIR (DIRECT-HIR-NATIVE-PATH.md).
+    set hir [hir::build [core::loadProgramFile $path] -strict 0]
 }
+# Everything below inspects the HIR native lowering actually compiles.
+set hir [native::prepareHir $hir]
 
 proc W {outdir name content} {
     set f [open [file join $outdir $name] w]

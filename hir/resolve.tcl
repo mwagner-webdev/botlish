@@ -669,10 +669,12 @@ proc hir::resolve::Sequence {hirVar nodes ctx} {
 # walk: a qualified reference denotes exactly the one binding NAMESPACE's
 # own module file declares NAME to be, immune to any local binding named
 # NAMESPACE or NAME (no local scope is ever consulted at all) -- and,
-# unlike native/native.tcl's superseded -native-body/ExpandNativeBodies
-# (NATIVE-URI-ESCAPE.md), this runs as part of hir::resolve's own ordinary
-# walk, after full lexical resolution of everything reachable so far, never
-# as raw pre-resolution text substitution.
+# unlike the raw pre-resolution -native-body substitution the native backend
+# once did on core IR text (NATIVE-URI-ESCAPE.md; removed by
+# DIRECT-HIR-NATIVE-PATH.md -- native::prepareHir now attaches native
+# implementations to already resolved HIR), this runs as part of
+# hir::resolve's own ordinary walk, after full lexical resolution of
+# everything reachable so far.
 #
 # Every reference reaching here was already validated, by
 # surface::modules::CollectAndLoad, to name a namespace that was loaded and

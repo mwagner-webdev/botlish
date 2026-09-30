@@ -12,7 +12,7 @@ proc writeText {path value} {
     close $ch
 }
 foreach name {fib loop-count sum-refined refined-checks} {
-    set hir [native::buildProgramHir [core::loadProgramFile [file join $root bench "$name.ir"]]]
+    set hir [native::prepareHir [hir::build [core::loadProgramFile [file join $root bench "$name.ir"]] -strict 0]]
     writeText [file join $out "$name.hir"] [hir::format $hir]
     writeText [file join $out "$name.nir"] [native::nir $hir]
     writeText [file join $out "$name.clif"] [native::clif $hir]

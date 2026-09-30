@@ -8,15 +8,16 @@
 #
 # The two boundaries:
 #
-#   1. native/native.tcl's module-native bridge (ModuleNativeBridge/
-#      buildProgramHir) retargets a trusted native's call to the ordinary
+#   1. native::prepareHir (native/prepare.tcl; before
+#      DIRECT-HIR-NATIVE-PATH.md, ModuleNativeBridge/buildProgramHir over
+#      core IR text) retargets a trusted native's call to the ordinary
 #      cross-file Botlish definition its registry names (-module-fn,
 #      core/native.tcl; today only uriEscape, web::uri_escape_text,
 #      lib/web.bot -- see NATIVE-MODULES.md; a milestone-1-era predecessor,
 #      -native-body/ExpandNativeBodies, pasting a copy of the native's body
 #      into the call site's own IR, did the same job before modules
 #      existed -- NATIVE-URI-ESCAPE.md). Without
-#      hir::ApplyNativeResultOverrides (hir/hir.tcl), the retargeted call's
+#      a call's nativeResultOverride (set by prepareHir), the retargeted call's
 #      result type would be the module function's own plain inferred type,
 #      discarding the native's own registered -result-type -- an opaque
 #      type (str[UriQueryValue]) no ordinary Botlish body can reconstruct
@@ -52,12 +53,11 @@ proc errorCodeOfUnder {backend exprs} {
     }
 }
 
-# The HIR native::runProgram actually lowers for EXPRS: native::buildProgramHir
-# (native/native.tcl), exposed here because runProgram itself only returns
-# the final run outcome, not the intermediate HIR this file's structural
-# assertions need.
+# The HIR native lowering compiles for the core IR text EXPRS: exposed here
+# because a run only returns the final outcome, not the intermediate HIR this
+# file's structural assertions need.
 proc nativeHirOf {exprs} {
-    return [native::buildProgramHir $exprs]
+    return [nativeHirOfIR $exprs]
 }
 
 # ---------------------------------------------------------------------------

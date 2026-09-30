@@ -54,7 +54,7 @@ proc W {outdir name content} {
 if {[file extension $path] eq ".bot"} {
     set hir [surface::readProgramFile $path]
 } else {
-    set hir [native::buildProgramHir [core::loadProgramFile $path]]
+    set hir [native::prepareHir [hir::build [core::loadProgramFile $path] -strict 0]]
 }
 set diagnostics [hir::diagnostics $hir]
 
@@ -236,7 +236,7 @@ if {[catch {native::allocationReport $hir sites 1 {*}$lowerOptions} report]} {
 } else {
     set t [dict get $report total]
     set alloc "allocations=[dict get $t allocations] bytes=[dict get $t allocatedBytes]"
-    foreach kind {String List MutableArray BigInt Result Block Cell Native} {
+    foreach kind {String List MutableArray BigInt Result Block Native} {
         set k [dict get $report byKind $kind]
         if {[dict get $k allocations]} { append alloc " $kind=[dict get $k allocations]" }
     }

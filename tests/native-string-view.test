@@ -321,7 +321,7 @@ f()
 
 proc emailishHir {text} {
     core::loadLibrary web
-    return [native::buildProgramHir [list [list call [list ref Emailish?] [list const str $text]]]]
+    return [nativeHirOfIR [list [list call [list ref Emailish?] [list const str $text]]]]
 }
 
 proc assertEmailishParity {text} {

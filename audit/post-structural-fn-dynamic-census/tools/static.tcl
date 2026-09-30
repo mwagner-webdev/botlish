@@ -26,7 +26,7 @@ foreach path [concat [lsort [glob bench/*.bot]] [lsort [glob examples/stdlib/*.b
     record $f kind source program $path blob [exec git hash-object $path]
     if {[catch {
         set surface [surface::readProgramFile $path]
-        set hir [native::buildProgramHir [hir::lower $surface]]
+        set hir [native::prepareHir $surface]
         set spec [hir::specialize::analyze $hir]
         set lowered [native::lower::program $hir]
         set nir [dict get $lowered text]
@@ -90,6 +90,6 @@ foreach path [concat [lsort [glob bench/*.bot]] [lsort [glob examples/stdlib/*.b
 }
 close $f
 W [file join $out corpus.txt] [join $manifest \n]
-W [file join $out provenance.txt] "commit: [exec git rev-parse HEAD]\nTcl: [info patchlevel]\nrustc: [exec rustc --version]\ntarget: [exec uname -m]\nflags: production defaults, specialize=1, repr-opt=1\nfrontend: surface::readProgramFile -> hir::lower -> native::buildProgramHir\nbenchmark callvalue sites: $total"
+W [file join $out provenance.txt] "commit: [exec git rev-parse HEAD]\nTcl: [info patchlevel]\nrustc: [exec rustc --version]\ntarget: [exec uname -m]\nflags: production defaults, specialize=1, repr-opt=1\nfrontend: surface::readProgramFile -> native::prepareHir (direct HIR path)\nbenchmark callvalue sites: $total"
 if {$total != 9} {error "STOP: expected 9 benchmark callvalue sites, found $total"}
 puts "confirmed $total benchmark callvalue sites"

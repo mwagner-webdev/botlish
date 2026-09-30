@@ -27,7 +27,7 @@ lassign $argv path out scanner
 if {$scanner eq ""} { set scanner scan_while }
 
 core::loadLibrary web
-set hir [native::buildProgramHir [core::loadProgramFile $path]]
+set hir [native::prepareHir [hir::build [core::loadProgramFile $path] -strict 0]]
 set spec [hir::specialize::analyze $hir]
 set open [hir::range::OpenInstances $spec]
 set nir [dict get [native::lower::program $hir] text]

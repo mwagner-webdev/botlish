@@ -123,7 +123,6 @@ impl Heap {
                     let c = closure_of(v);
                     stack.extend_from_slice(unsafe { std::slice::from_raw_parts(c.caps, c.ncaps) });
                 }
-                KIND_CELL => stack.push(unsafe { as_ref::<CellObj>(v) }.value),
                 // A List plan's elements are ordinary program values held
                 // until materialization; a String plan holds only bytes.
                 KIND_LISTPLAN => stack.extend_from_slice(&super::construct::listplan_of(v).items),
@@ -220,7 +219,6 @@ pub unsafe fn object_size(object: *mut Header) -> usize {
             KIND_RESULT => size_of::<ResultObj>(),
             KIND_CLOSURE => size_of::<ClosureObj>() + closure_of(v).ncaps * 8,
             KIND_NATIVE => size_of::<NativeObj>(),
-            KIND_CELL => size_of::<CellObj>(),
             KIND_STRPLAN => size_of::<StrPlanObj>() + super::construct::strplan_of(v).buf.len(),
             KIND_LISTPLAN => size_of::<ListPlanObj>() + super::construct::listplan_of(v).items.capacity() * 8,
             kind => panic!("bad heap object kind {kind}"),
@@ -248,7 +246,6 @@ pub unsafe fn free_object(object: *mut Header) {
                 drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(c.caps, c.ncaps)));
             }
             KIND_NATIVE => drop(Box::from_raw(object as *mut NativeObj)),
-            KIND_CELL => drop(Box::from_raw(object as *mut CellObj)),
             KIND_MUTARRAY => drop(Box::from_raw(object as *mut MutArrayObj)),
             KIND_STRPLAN => drop(Box::from_raw(object as *mut StrPlanObj)),
             KIND_LISTPLAN => drop(Box::from_raw(object as *mut ListPlanObj)),

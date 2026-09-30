@@ -619,7 +619,7 @@ test blockescape-region-companion-flags-both-off {both off: the fully unoptimize
 # value construction, per spec items 28-29).
 test blockescape-region-companion-refined-checks-1 {refined-checks.ir: local_extra_chars' List/ImmutableSet are module-init only (R2.a.1); Block drops from 803 (R2.a.1's own per-call local_char? closure, capturing the module set) to 0 -- local_char? is envless now, a module-static reference is never a capture (MODULE-STATIC-RETAINED-VALUES.md); R2.a.3's char-at-a-time domain? still keeps String at 8004} -body {
     core::loadLibrary web
-    set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
+    set hir [nativeHirOfIR [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
     set on [native::allocationReport $hir summary 1]
     list [native::evalHir $hir] [dict get $on total allocations] [dict get $on byKind Block allocations] \
         [dict get $on byKind String allocations] [dict get $on byKind List allocations] \
@@ -628,7 +628,7 @@ test blockescape-region-companion-refined-checks-1 {refined-checks.ir: local_ext
 
 test blockescape-region-companion-refined-checks-2 {refined-checks.ir: char_at's NIR has no closure/callenvmulti, and env=0/results=3 -- R2 (R2-ORDINARY-EMAILISH-PREDICATE.md) collapses this to one shared instance, not two per-call-site copies} -body {
     core::loadLibrary web
-    set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
+    set hir [nativeHirOfIR [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
     set nirText [dict get [native::lower::program $hir] text]
     list [regexp {"char_at" params=1} $nirText] \
         [llength [regexp -all -inline {"char_at" params=2 env=0 regs=\d+ pnames="i v" captures=0 instance="generic" results=3} $nirText]] \
@@ -649,7 +649,7 @@ test blockescape-region-companion-refined-checks-2 {refined-checks.ir: char_at's
 # per-call-site copy.
 test blockescape-region-companion-refined-checks-3 {refined-checks.ir: scan_while/tld?/domain? flatten captures to [n, v] (domain_loop is gone; scan_while's own induction param is renamed i -> start) -- each remains one shared instance, not two per-call-site copies} -body {
     core::loadLibrary web
-    set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
+    set hir [nativeHirOfIR [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
     set nirText [dict get [native::lower::program $hir] text]
     set noDomainLoop [expr {![regexp {"domain_loop"} $nirText]}]
     set flattened 0
@@ -667,7 +667,7 @@ test blockescape-region-companion-refined-checks-3 {refined-checks.ir: scan_whil
 
 test blockescape-region-companion-refined-checks-4 {refined-checks.ir under GC stress: unchanged value, on the composed representation} -body {
     core::loadLibrary web
-    set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
+    set hir [nativeHirOfIR [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
     set ::env(BOTLISH_NATIVE_GC_STRESS) 1
     set result [catch {native::evalHir $hir} value]
     unset ::env(BOTLISH_NATIVE_GC_STRESS)
@@ -694,7 +694,7 @@ test blockescape-region-companion-refined-checks-4 {refined-checks.ir under GC s
 # own self-tail recursion (the benchmark's own driver loop).
 test blockescape-region-companion-refined-checks-5 {refined-checks.ir: R2.a.3 drops the backedge count from 5 to 3 -- scan_while/domain? no longer self-tail-recurse at all (their own counted-loop bodies are plain jump/label CFG backedges); the 3 remaining `tail` sites are esc_bytes/esc_from/check, none of them emailish?'s own} -body {
     core::loadLibrary web
-    set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
+    set hir [nativeHirOfIR [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
     set nirText [dict get [native::lower::program $hir] text]
     list [regexp {tailenv} $nirText] [llength [regexp -all -inline -line {^\s+tail .*$} $nirText]]
 } -result {0 3}

@@ -3,7 +3,7 @@ source [file join $root compiler compiler.tcl]
 source [file join $root surface surface.tcl]
 source [file join $root native native.tcl]
 interp recursionlimit {} 20000
-set hir [native::buildProgramHir [hir::lower [surface::readProgramFile [lindex $argv 0]]]]
+set hir [native::prepareHir [surface::readProgramFile [lindex $argv 0]]]
 set spec [hir::specialize::analyze $hir]
 set used [dict get $spec used]
 # who has an edge to which used instance

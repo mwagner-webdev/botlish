@@ -49,13 +49,11 @@
 //! | rt_is_result           | any, 1 ok / 0 error | Bool                         | no        |
 //! | rt_result_payload      | Result, 1/0         | payload; TYPE if wrong tag   | no        |
 //! | rt_result_new          | 1/0, any            | Result                       | yes       |
-//! | rt_cell_new            |                     | unbound Cell                 | yes       |
 //! | rt_closure_new         | fn, code, n, *Value | Block                        | yes       |
 //! | rt_call_value          | callee, n, *Value   | call result; ARITY,          | callee    |
 //! |                        |                     | NOT-CALLABLE, callee errors  |           |
 //! | rt_type_error          | value, kind, ctx    | records TYPE, returns 0      | no        |
 //! | rt_not_boolean         | value               | records NOT-BOOLEAN          | no        |
-//! | rt_unbound             | name Str            | records UNBOUND              | no        |
 //! | rt_raise               | kind Str, msg Str   | records a semantic error     | no        |
 //! | rt_stack_overflow      |                     | records NATIVE LIMIT STACK   | no        |
 
@@ -141,12 +139,6 @@ pub extern "C" fn rt_type_error(p: *mut Vm, v: Value, kind: u64, context: Value)
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_not_boolean(p: *mut Vm, v: Value) -> Value {
     vm(p).fail(RtError::NotBoolean { got: v })
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn rt_unbound(p: *mut Vm, name: Value) -> Value {
-    let message = format!("name \"{}\" used before its binding", str_of(name).text);
-    vm(p).fail(RtError::Semantic { kind: "UNBOUND", message })
 }
 
 #[unsafe(no_mangle)]
@@ -1147,12 +1139,7 @@ pub extern "C" fn rt_result_new(p: *mut Vm, ok: u64, v: Value) -> Value {
 }
 
 // ---------------------------------------------------------------------------
-// Cells and closures
-
-#[unsafe(no_mangle)]
-pub extern "C" fn rt_cell_new(p: *mut Vm) -> Value {
-    vm(p).alloc(CellObj { hdr: Header::new(KIND_CELL, false), value: UNBOUND }, 0)
-}
+// Closures
 
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_closure_new(p: *mut Vm, func: u64, code: u64, n: u64, caps: *const Value) -> Value {
@@ -1305,7 +1292,6 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
     vec![
         h!(rt_type_error, 4),
         h!(rt_not_boolean, 2),
-        h!(rt_unbound, 2),
         h!(rt_raise, 3),
         h!(rt_stack_overflow, 1),
         h!(rt_fail_declared, 3),
@@ -1356,7 +1342,6 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_result_payload, 3),
         h!(rt_result_new, 3),
         h!(rt_char_codepoint, 2),
-        h!(rt_cell_new, 1),
         h!(rt_closure_new, 5),
         h!(rt_call_value, 4),
     ]

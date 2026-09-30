@@ -32,13 +32,24 @@ There are three backends that implement the same semantics:
 The whole test suite runs against `interp` and `compile`. The algorithm
 corpus and the native tests run on all of them, and
 `tests/native-coverage.tcl` classifies every test of the suite on
-`cranelift`.
+`cranelift` (through a test-harness backend that hands each test program's
+HIR to `native::evalHir`; `native/` itself registers no core IR backend).
 
-Between the two sits a semantic layer, the **HIR** (`hir/`, §16): core IR
-with every name resolved to a binding identity, every expression typed, and
-scopes, captures, refinements and known call targets made explicit. The
-compiler compiles from HIR; the interpreter runs core IR, and HIR lowers back
-to it.
+Three representations, three roles:
+
+* **HIR** (`hir/`, §16) is the authoritative semantic program representation:
+  core IR's meaning with every name resolved to a binding identity, every
+  expression typed, and scopes, captures, refinements, call targets and
+  module identity made explicit. Every analysis fact lives here.
+* **Core IR** (`core/`, §2) is the small executable representation of the
+  Tcl reference interpreter (and the Tcl compiler's input): HIR lowers to it.
+  It is not on the native path.
+* **NIR** (`native/`, §20) is the production executable representation:
+  HIR lowers directly to it, and native code (JIT, object files, standalone
+  executables) and, later, a bytecode interpreter are built from it.
+
+The compiler compiles from HIR; the interpreter runs the core IR that HIR
+lowers to; native lowers HIR straight to NIR, and never through core IR.
 
 A small source language (`surface/`, §17) parses Botlish source
 into a surface AST and builds HIR from it.
@@ -46,11 +57,11 @@ into a surface AST and builds HIR from it.
 ```
 source ──surface::parse──▶ AST ──surface::lowerToHir──┐
                                                       ▼
-core IR ──────────────hir::build────────────────────▶ HIR ──hir::lower──▶ core IR ──▶ interpreter
+core IR text ─────────hir::build────────────────────▶ HIR ──hir::lower──▶ core IR ──▶ interpreter
                                                        │
                                                        ├──────────────────────────▶ Tcl compiler
                                                        │
-                                                       └──native::lower──▶ NIR ──▶ Cranelift ──▶ machine code
+                                                       └──native::lowered──▶ NIR ──▶ Cranelift ──▶ machine code
 ```
 
 ```
@@ -496,7 +507,8 @@ refinement unless its contract explicitly establishes one. So
 | `hir/specialize.tcl` | call-site specialization: instances, result fixpoint, views for `hir::aot` (§21) |
 | `compiler/compiler.tcl` | HIR → Tcl compiler backend |
 | `native/lower.tcl` | HIR → NIR native lowering (§20) |
-| `native/native.tcl` | the `cranelift` and `cranelift-generic` backends: runs the native driver; NIR, CLIF, object, code size and guard report entry points |
+| `native/native.tcl` | the native entry points, all taking HIR: `native::lowered` (the one HIR → NIR entry), `evalHir` (JIT), NIR, CLIF, object, executable, code size and guard report; runs the native driver |
+| `native/prepare.tcl` | `native::prepareHir`: attaches the native implementations a program calls (module functions, validator bodies) to its HIR |
 | `native/src/nir.rs` | NIR parsing and validation |
 | `native/src/runtime/` | native `Value` representation, heap and collector, errors, runtime helper ABI |
 | `native/src/codegen/` | the `Backend` interface; NIR → Cranelift IR for JIT and object files |
@@ -1665,9 +1677,14 @@ tclsh9.0 bench/corpus.tcl                                    # corpus timings, a
 
 ```tcl
 source native/native.tcl        ;# loads compiler, hir and core too
-core::useBackend cranelift      ;# core::evalProgram now runs natively
-native::evalHir $hir            ;# or run a program-mode HIR directly
+native::evalHir $hir            ;# run a program-mode HIR natively (JIT)
+native::executable $hir $path   ;# or link it into a standalone executable
 ```
+
+Native compilation takes HIR (from `surface::readProgramFile`,
+`hir::readFile`, or `hir::build` for a program written as core IR text) and
+nothing else: there is no `core::useBackend cranelift`, and no path lowers
+HIR to core IR and rebuilds HIR from it (`DIRECT-HIR-NATIVE-PATH.md`).
 
 ### Pipeline
 
@@ -2303,7 +2320,7 @@ NIR (op strcat, cell, closure, ...)
         │
         ▼
 runtime/vm.rs Vm::alloc<T> ── the one physical allocation point
-        │                          (String/List/BigInt/Result/Block/Cell/
+        │                          (String/List/BigInt/Result/Block/
         ▼                           Native all go through it; the constant
 runtime/heap.rs Heap::collect       table is the one exception, counted
   (exact mark-sweep already          separately as "static", excluded from
@@ -2317,7 +2334,7 @@ Metrics::to_tcl -- one Tcl dict (native::allocationReport), native::allocationTe
 ```
 
 **Allocation identity** is the existing `Header::kind` byte -- String, List,
-BigInt, Result, Block, Cell, Native -- no new taxonomy. **`allocatedBytes`**
+BigInt, Result, Block, Native -- no new taxonomy. **`allocatedBytes`**
 is exactly what the runtime's own constructors already compute and hand to
 the heap: `size_of` the Rust struct (`headerBytes`) plus the caller-known
 variable-length payload (`payloadBytes`) -- not the allocator's actual

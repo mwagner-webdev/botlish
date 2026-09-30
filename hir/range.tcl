@@ -1473,6 +1473,11 @@ proc hir::range::VerifyCall {hirVar ranges e node} {
         if {$declaredType ne {} && ![ProvesValueAcceptedBy $argType $argRange $declaredType]} {
             if {$inferred} {
                 dict set hir violatedContracts $paramBinding $arg
+            } elseif {![dict exists $hir semanticContext]} {
+                # A declared contract the program's own (generic) call breaks,
+                # not one only a semantic-instance view breaks: recorded for
+                # consumers that must not trust it (native::prepareHir).
+                dict set hir violatedDeclared $paramBinding $arg
             }
             hir::Diagnose hir TYPE [format \
                 {argument for parameter "%s" cannot be proven to satisfy %s%s (argument type: %s, facts: %s)%s%s} \

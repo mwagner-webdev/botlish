@@ -1150,33 +1150,6 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 let v = self.get(*src);
                 self.def(*dst, v);
             }
-            Inst::Cell { dst } => {
-                let v = self.call_allocating("rt_cell_new", &[self.vm], "cell", KIND_CELL);
-                self.def(*dst, v);
-            }
-            Inst::CellSet { cell, value } => {
-                let c = self.get(*cell);
-                let v = self.get(*value);
-                self.b.ins().store(MemFlagsData::trusted(), v, c, CELL_VALUE_OFFSET);
-            }
-            Inst::CellGet { dst, cell } => {
-                let c = self.get(*cell);
-                let v = self.b.ins().load(I64, MemFlagsData::trusted(), c, CELL_VALUE_OFFSET);
-                self.def(*dst, v);
-            }
-            Inst::CellCheck { dst, cell, name } => {
-                let c = self.get(*cell);
-                let v = self.b.ins().load(I64, MemFlagsData::trusted(), c, CELL_VALUE_OFFSET);
-                let unbound = self.b.ins().icmp_imm_s(IntCC::Equal, v, UNBOUND as i64);
-                let fail = self.b.create_block();
-                let ok = self.b.create_block();
-                self.b.ins().brif(unbound, fail, &[], ok, &[]);
-                self.b.switch_to_block(fail);
-                let name = self.string(name);
-                self.fail_with("rt_unbound", &[self.vm, name]);
-                self.b.switch_to_block(ok);
-                self.def(*dst, v);
-            }
             Inst::Closure { dst, func, captures } => {
                 let (n, ptr) = self.array(captures);
                 let entry = self.func_ref(self.symbols.entry[*func as usize]);

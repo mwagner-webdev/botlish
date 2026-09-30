@@ -18,7 +18,7 @@ set programs [concat [lsort [glob -directory [file join $root bench] *.bot]] \
     [lsort [glob -directory [file join $root examples stdlib] *.bot]]]
 set counts [dict create]
 foreach path $programs {
-    set hir [native::buildProgramHir [hir::lower [surface::readProgramFile $path -strict 0]]]
+    set hir [native::prepareHir [surface::readProgramFile $path -strict 0]]
     set spec [hir::specialize::analyze $hir]
     set regions [hir::specialize::regions $hir $spec]
     lappend L "" "== [file tail $path]"

@@ -1,0 +1,17 @@
+fib.bot                allocs       0 bytes         0 peak         0 gc   0  String/List/MutArr/Block 0/0/0/0
+lex-strategy.bot       allocs     422 bytes     21761 peak     21761 gc   0  String/List/MutArr/Block 198/200/0/0
+loop-count.bot         allocs       0 bytes         0 peak         0 gc   0  String/List/MutArr/Block 0/0/0/0
+refined-checks.bot     allocs    8020 bytes    331888 peak    331888 gc   0  String/List/MutArr/Block 8004/12/0/0
+source-checks.bot      allocs     139 bytes      5792 peak      5792 gc   0  String/List/MutArr/Block 21/115/0/3
+sum-refined.bot        allocs       0 bytes         0 peak         0 gc   0  String/List/MutArr/Block 0/0/0/0
+test-selection.bot     allocs      44 bytes      1816 peak      1816 gc   0  String/List/MutArr/Block 0/39/0/3
+uri-steady.bot         allocs   38513 bytes   1970744 peak   1034983 gc   1  String/List/MutArr/Block 16000/14009/0/2
+ai_text_clean.bot      allocs      68 bytes      3214 peak      3214 gc   0  String/List/MutArr/Block 61/1/0/0
+csv.bot                allocs      18 bytes       811 peak       811 gc   0  String/List/MutArr/Block 6/8/0/0
+csv_chunked.bot        allocs      22 bytes      2835 peak      2835 gc   0  String/List/MutArr/Block 6/8/8/0
+csv_geometric.bot      allocs      19 bytes       771 peak       771 gc   0  String/List/MutArr/Block 6/4/9/0
+csv_records.bot        allocs      73 bytes      3816 peak      3816 gc   0  String/List/MutArr/Block 18/11/44/0
+hashtable.bot          allocs       5 bytes       400 peak       400 gc   0  String/List/MutArr/Block 0/1/4/0
+matmul.bot             allocs      16 bytes       712 peak       712 gc   0  String/List/MutArr/Block 0/13/0/0
+string_replace.bot     allocs       9 bytes       560 peak       560 gc   0  String/List/MutArr/Block 5/1/0/0
+string_reverse.bot     allocs       9 bytes       622 peak       622 gc   0  String/List/MutArr/Block 4/1/0/0

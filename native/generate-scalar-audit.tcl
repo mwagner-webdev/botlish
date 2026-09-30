@@ -10,17 +10,15 @@
 # BENCHMARKS.md: no canonical benchmark is loaded from raw core IR/HIR
 # here), this:
 #
-#   1. Loads/lowers the program to HIR the same way main.tcl and
-#      bench/corpus.tcl do (surface::readProgramFile, then hir::lower to
-#      get back the core-IR-shaped form native::buildProgramHir expects),
-#      routing it through native::buildProgramHir -- the same
-#      ExpandNativeBodies/module-native-bridge-then-hir::buildSyntax
-#      sequence native::runProgram itself uses before compiling, so a
-#      native registered with a -native-body or a -module-fn (core/
-#      native.tcl; currently only uriEscape, -module-fn {web
-#      uri_escape_text}, lib/web.tcl/lib/web.bot -- see NATIVE-MODULES.md)
-#      is audited as the native backend actually runs it, not reported
-#      unsupported merely because this script bypassed that step.
+#   1. Reads the program to HIR with surface::readProgramFile, the same way
+#      main.tcl and bench/corpus.tcl do, and hands that HIR straight to
+#      native::object/native::nir/... -- the production HIR->NIR route
+#      (native::lowered, which first attaches the native implementations the
+#      program calls, native::prepareHir; currently uriEscape ->
+#      web::uri_escape_text and validator predicates -- NATIVE-MODULES.md).
+#      No core IR is involved (DIRECT-HIR-NATIVE-PATH.md); before that
+#      milestone this step lowered to core IR and rebuilt the HIR
+#      (native::buildProgramHir), which is gone.
 #   2. Attempts native::object (specialize 1, the default "cranelift"
 #      backend) to an object file in a scratch temp directory.
 #   3. On success: disassembles the object with `objdump -dr
@@ -270,7 +268,7 @@ foreach name $benchFiles {
     set summaryPath [file join $outdir bench "$base.summary.txt"]
     set status [dict create source "bench/$name" kind unknown]
     if {[catch {
-        set hir [native::buildProgramHir [hir::lower [surface::readProgramFile $path]]]
+        set hir [surface::readProgramFile $path]
     } err]} {
         dict set status kind failed
         dict set status detail "could not load/build HIR: $err"

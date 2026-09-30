@@ -15,7 +15,7 @@ lassign $argv outdir
 file mkdir $outdir
 foreach path [concat [lsort [glob -directory [file join $root bench] *.bot]] \
         [lsort [glob -directory [file join $root examples stdlib] *.bot]]] {
-    set hir [native::buildProgramHir [hir::lower [surface::readProgramFile $path]]]
+    set hir [native::prepareHir [surface::readProgramFile $path]]
     set spec [hir::specialize::analyze $hir]
     set labels [lmap id [dict get $spec used] {hir::specialize::label $spec $id}]
     set nir [dict get [native::lower::program $hir] text]

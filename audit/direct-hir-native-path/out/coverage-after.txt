@@ -1,0 +1,23 @@
+Cranelift backend coverage of the test suite (3315 tests)
+
+  native           1250
+  independent      2007
+  passed-partial      8
+  unsupported        49
+  failed              1
+
+Unsupported tests by needed construct (a test may need several):
+  value                                     15  acceptance-4 block-2 closure-4 set-construction-block-member-single-ok refined-3 refined-6 refine-1 refine-2 refine-3 refine-4 refine-5 refine-6 refine-7 refine-8 refine-9
+  {native test-log}                         11  scope-5 block-1 call-1 call-2 if-2 return-2 return-3 loop-counted-bounds-left-to-right loop-counted-continue-count typed-param-no-runtime-check-2 web-unreserved-or-short-circuits
+  sequence-mode                              7  malformed-6 return-7 completion-1 completion-2 hir-lower-2 boundary-2 boundary-4
+  {native emailish?}                         1  emailish-predicate-alias-not-runtime-value
+  {native test-tick}                         7  loop-counted-bounds-evaluated-once loop-in-iterable-evaluated-once loop-1 loop-2 continue-1 break-1 loop-return-1
+  {native UriQueryValue?}                    2  refined-11 refined-12
+  {native test-fake-escape}                  1  refined-13
+  {refinement evidence}                      2  refined-14 refined-15
+  {native test-both-ints?}                   1  refine-10
+  {native test_tick}                         1  surface-run-continue
+  {native test_log}                          1  surface-run-evaluation-order
+
+FAILED (native backend bugs):
+  failed           refined-5                                

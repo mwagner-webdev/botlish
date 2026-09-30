@@ -60,7 +60,7 @@ proc FunctionBody {text name marker} {
 }
 
 proc refinedChecksHir {} {
-    return [native::buildProgramHir [core::loadProgramFile \
+    return [nativeHirOfIR [core::loadProgramFile \
         [file join $::projectRoot bench refined-checks.ir]]]
 }
 

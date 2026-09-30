@@ -103,8 +103,7 @@ proc hir::sourcetypes::apply {decls} {
         # hir::buildSyntax). This matters because hir::build (core IR, no
         # surface syntax) and every internal re-hir::build of an
         # already-lowered program (the Tcl compiler backend's own
-        # GenerateUnit, the native backend's ExpandNativeBodies/
-        # ModuleNativeBridge path, hir/specialize.tcl) all call through
+        # GenerateUnit, hir/specialize.tcl) all call through
         # here too, with no type decls of their own (core IR has no type-
         # declaration syntax) -- Resetting unconditionally on every call
         # would unregister a program's own already-verified source types

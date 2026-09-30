@@ -1,0 +1,580 @@
+# direct-hir-native.test -- the native path starts from HIR and never goes
+# through core IR (DIRECT-HIR-NATIVE-PATH.md).
+#
+#   HIR -> core IR -> Tcl interpreter        (the reference branch)
+#   HIR -> NIR -> native / executable        (the production branch)
+#
+# Two sibling consumers of one HIR. These tests pin the architecture (no
+# native entry point lowers HIR to core IR or rebuilds HIR from it, and the
+# removed relift machinery stays removed), that native lowering identifies
+# bindings by resolved identity rather than by hygiene-renamed spelling, that
+# module and container identity reach native lowering, and that
+# source -> HIR -> core IR -> interpreter agrees with
+# source -> HIR -> NIR -> native, including standalone executables.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 20000
+
+testConstraint executableAot [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64}}]
+
+# HIR of Botlish source TEXT; the common leading indentation is removed so
+# a program can be written indented inside a test.
+proc srcHir {text} {
+    set lines [split $text \n]
+    set indent 1000
+    foreach line $lines {
+        if {[string trim $line] eq ""} continue
+        set n [expr {[string length $line] - [string length [string trimleft $line " "]]}]
+        if {$n < $indent} { set indent $n }
+    }
+    set text [join [lmap line $lines {string range $line $indent end}] \n]
+    # Through a file, so modules (mathish::, mutarray::, list::) load.
+    set path [makeFile "[string trim $text \n]\n" direct-hir-program.bot]
+    try {
+        return [surface::readProgramFile $path]
+    } finally {
+        removeFile direct-hir-program.bot
+    }
+}
+
+# The value of HIR on the reference branch (HIR -> core IR -> interpreter).
+proc referenceValue {hir} {
+    core::value::show [core::evalProgram [hir::lower $hir]]
+}
+
+# The value of HIR on the production branch (HIR -> NIR -> JIT).
+proc nativeValue {hir args} {
+    core::value::show [native::evalHir $hir {*}$args]
+}
+
+# A standalone executable of HIR, run with an empty PATH; returns its output.
+proc executableValue {hir {options {}}} {
+    set dir [makeDirectory {direct hir executable}]
+    try {
+        native::executable $hir [file join $dir program] {*}$options
+        return [exec env PATH= [file join $dir program]]
+    } finally {
+        removeDirectory {direct hir executable}
+    }
+}
+
+# Canonical NIR: expression tags and function ids replaced by names, so two
+# lowerings of the same program compare equal.
+proc canonicalNir {nir} {
+    set names [dict create]
+    foreach line [split $nir \n] {
+        if {[regexp {^func ([0-9]+) "([^"]*)".*instance="([^"]*)"} $line -> id name instance]} {
+            dict set names $id "$name<$instance>"
+        }
+    }
+    set out {}
+    foreach line [split $nir \n] {
+        set line [regsub -all { @e[0-9]+} $line {}]
+        set line [regsub {^func [0-9]+ } $line {func }]
+        if {[regexp {(call|callenv|callmulti|fnvalue|closure|tail) ([0-9]+)( |$)} $line -> op id]
+                && [dict exists $names $id]} {
+            regsub {(call|callenv|callmulti|fnvalue|closure|tail) [0-9]+( |$)} $line \
+                "\\1 <[dict get $names $id]>\\2" line
+        }
+        lappend out $line
+    }
+    return [join $out \n]
+}
+
+# ---------------------------------------------------------------------------
+# Architecture: nothing native lowers HIR to core IR or rebuilds HIR from it.
+
+test direct-hir-relift-machinery-removed {the core IR -> HIR native bridge and the registered core IR native backends are gone} -body {
+    list [info commands native::buildProgramHir] [info commands native::runProgram] \
+        [info commands native::runSequence] [info commands native::ExpandNativeBodies] \
+        [info commands native::ExpandNativeBodiesIn] [info commands native::ModuleNativeBridge] \
+        [info commands hir::ApplyNativeResultOverrides]
+} -result {{} {} {} {} {} {} {}}
+
+test direct-hir-no-production-native-backend {native/ registers no core IR backend: core::backends is interp and compile only} -constraints executableAot -body {
+    set script {
+        source [file join $::env(PROJECT_ROOT) native native.tcl]
+        puts [lsort [core::backends]]
+    }
+    set ::env(PROJECT_ROOT) $::projectRoot
+    exec [info nameofexecutable] << $script
+} -result {compile interp}
+
+test direct-hir-native-namespace-static-scan {no proc of ::native reaches hir::lower, core IR checking or the removed bridge} -body {
+    set offenders {}
+    proc scanNamespace {ns} {
+        upvar 1 offenders offenders
+        foreach name [info procs ${ns}::*] {
+            set body [info body $name]
+            if {[regexp {hir::lower(?![:A-Za-z])|buildProgramHir|core::ir::check|core::evalProgram|core::compiler::} $body]} {
+                lappend offenders $name
+            }
+        }
+        foreach child [namespace children $ns] { scanNamespace $child }
+    }
+    scanNamespace ::native
+    rename scanNamespace {}
+    set offenders
+} -result {}
+
+# Dynamic version of the same fact: run every production native entry point on
+# a program that uses modules, a native with a module implementation and a
+# validator body, and watch the procs that would betray a round trip.
+test direct-hir-native-entry-points-never-call-core-ir {native::nir, evalHir, object, executable, codeSize, measure and prepareHir never call hir::lower, hir::build or core::evalProgram} -constraints executableAot -body {
+    core::loadLibrary web
+    set hir [srcHir {
+        fn check(s: str) -> bool:
+            emailish?(s)
+        q = uriEscape("a b")
+        a = mutarray::create(2, 0)
+        [check("a@b.co"), UriQueryValue?(q), mutable_array_capacity(a)]
+    }]
+    set ::trips {}
+    proc ::Trip {command args} { lappend ::trips [lindex $command 0] }
+    set watched {hir::lower hir::build hir::buildSyntax hir::syntax::fromIR core::evalProgram core::ir::check
+        core::compiler::compileUnit core::compiler::evalHir}
+    # hir::syntax::fromIR is legitimate inside prepareHir (a native's own
+    # registered body is core IR data): only the program itself must never be
+    # read that way, so it is checked separately below.
+    foreach c [lrange $watched 0 2] { trace add execution $c enter ::Trip }
+    foreach c [lrange $watched 4 end] { trace add execution $c enter ::Trip }
+    set dir [makeDirectory {direct hir entries}]
+    try {
+        set prepared [native::prepareHir $hir]
+        native::nir $hir
+        native::evalHir $hir
+        native::codeSize $hir
+        native::measure $hir 1
+        native::object $hir [file join $dir program.o]
+        native::allocationReport $hir summary
+    } finally {
+        removeDirectory {direct hir entries}
+        foreach c [lrange $watched 0 2] { trace remove execution $c enter ::Trip }
+        foreach c [lrange $watched 4 end] { trace remove execution $c enter ::Trip }
+    }
+    set result $::trips
+    unset ::trips
+    rename ::Trip {}
+    set result
+} -result {}
+
+test direct-hir-native-executable-never-calls-core-ir {native::executable (standalone) takes HIR and never calls hir::lower or hir::build} -constraints executableAot -body {
+    set hir [srcHir {
+        fn fact(n: int):
+            if n < 2:
+                return 1
+            n * fact(n - 1)
+        fact(20)
+    }]
+    set ::trips {}
+    proc ::Trip {command args} { lappend ::trips [lindex $command 0] }
+    foreach c {hir::lower hir::build hir::buildSyntax core::evalProgram} { trace add execution $c enter ::Trip }
+    try {
+        set out [executableValue $hir]
+    } finally {
+        foreach c {hir::lower hir::build hir::buildSyntax core::evalProgram} { trace remove execution $c enter ::Trip }
+    }
+    set result [list $::trips $out]
+    unset ::trips
+    rename ::Trip {}
+    set result
+} -result {{} 2432902008176640000}
+
+test direct-hir-main-rejects-core-ir-for-native {main.tcl compiles .bot and .hir natively and rejects core IR text (.ir) for native backends and executables} -constraints executableAot -body {
+    set main [file join $::projectRoot main.tcl]
+    set ir [file join $::projectRoot examples 01-adder.ir]
+    set bot [file join $::projectRoot examples surface 01-arithmetic.bot]
+    set hirFile [file join $::projectRoot examples hir 01-scopes.hir]
+    set results {}
+    foreach file [list $bot $hirFile $ir] {
+        catch {exec [info nameofexecutable] $main -backend cranelift $file} out
+        lappend results [expr {[string match {*value:*} $out] ? "value" : [string match {*NATIVE AOT INPUT*} $out] ? "rejected" : $out}]
+    }
+    catch {exec [info nameofexecutable] $main -emit-native-executable $ir 2>@1} out
+    lappend results [expr {[string match {*NATIVE AOT INPUT*} $out] ? "rejected" : $out}]
+    lappend results [catch {exec [info nameofexecutable] $main -backend interp $ir} out] [string match {*value:*} $out]
+} -result {value value rejected rejected 0 1}
+
+# ---------------------------------------------------------------------------
+# Binding identity: native lowering reads resolved bindings, not spellings.
+
+set shadowSource {
+    x = 1
+    fn early():
+        x
+    inner = if true:
+        x = 2
+        fn late():
+            x
+        [early(), late(), x]
+    [inner, x, early()]
+}
+
+# A later binding in the same scope would capture an earlier reference in
+# name-based core IR, so HIR construction renames it (x#1).
+set hygieneSource {
+    x = 1
+    inner = if true:
+        early = x
+        x = 2
+        fn late():
+            x
+        [early, late(), x]
+    [inner, x]
+}
+
+test direct-hir-hygiene-source-three-way {a later same-scope binding: interpreter (core IR, via hygiene), direct native and executable agree} -constraints executableAot -body {
+    set hir [srcHir $hygieneSource]
+    list [referenceValue $hir] [nativeValue $hir] [executableValue $hir]
+} -result {{[[1, 2, 2], 1]} {[[1, 2, 2], 1]} {[[1, 2, 2], 1]}}
+
+test direct-hir-shadowing-three-way {earlier outer reference + later shadow: interpreter (core IR), direct native and a standalone executable agree} -constraints executableAot -body {
+    set hir [srcHir $shadowSource]
+    set reference [referenceValue $hir]
+    list $reference [nativeValue $hir] [executableValue $hir]
+} -result {{[[1, 2, 2], 1, 1]} {[[1, 2, 2], 1, 1]} {[[1, 2, 2], 1, 1]}}
+
+# Hygiene renames later bindings (x -> x#1) so *name-based* core IR stays
+# faithful. Native lowering must not need them: undo every rename (restore the
+# source spelling, so two bindings share a name) and lowering is unchanged.
+proc undoHygiene {hir} {
+    dict for {b binding} [dict get $hir bindings] {
+        if {![dict exists $binding spelling]} continue
+        set spelling [dict get $binding spelling]
+        set scope [dict get $binding scope]
+        set old [dict get $binding name]
+        dict set hir bindings $b name $spelling
+        dict unset hir bindings $b spelling
+        dict unset hir scopes $scope names $old
+        dict set hir scopes $scope names $spelling $b
+        dict for {id node} [dict get $hir exprs] {
+            if {[dict get $node kind] in {ref bind} && [dict get $node binding] eq $b} {
+                dict set hir exprs $id name $spelling
+            }
+        }
+    }
+    return $hir
+}
+
+test direct-hir-hygiene-renames-exist {the shadowing program's HIR carries a hygiene rename for the reference branch} -body {
+    set hir [srcHir $hygieneSource]
+    set renamed 0
+    dict for {b binding} [dict get $hir bindings] {
+        if {[dict exists $binding spelling]} { incr renamed }
+    }
+    expr {$renamed > 0}
+} -result 1
+
+test direct-hir-native-independent-of-hygiene {native lowering of HIR with every hygiene rename undone is the same NIR (function labels aside) and the same value} -body {
+    set hir [srcHir $hygieneSource]
+    set plain [undoHygiene $hir]
+    # Only labels differ: function names and parameter names (pnames) are
+    # diagnostics, never read back by anything.
+    set nameless {apply {{nir} {
+        regsub -all { pnames="[^"]*"} [regsub -all {func "[^"]*"} $nir {func}] {}
+    }}}
+    list [expr {$hir ne $plain}] \
+        [expr {[{*}$nameless [canonicalNir [native::nir $hir]]] eq [{*}$nameless [canonicalNir [native::nir $plain]]]}] \
+        [nativeValue $plain]
+} -result {1 1 {[[1, 2, 2], 1]}}
+
+test direct-hir-shadowed-native-name {a local binding named like a native is not the native: native preparation follows binding identity} -constraints executableAot -body {
+    core::loadLibrary web
+    set hir [srcHir {
+        fn uriEscape(s):
+            length(s)
+        [uriEscape("abc"), length("xy")]
+    }]
+    list [referenceValue $hir] [nativeValue $hir] [executableValue $hir]
+} -result {{[3, 2]} {[3, 2]} {[3, 2]}}
+
+# A -strict 0 program that cannot prove a declared parameter type at a call
+# keeps that call's error a *run-time* one: the callee's contract is demoted
+# to a checked requirement (native::prepareHir), so native code guards it
+# instead of assuming it (the front end keeps the declaration and records
+# `violatedDeclared`). (A core IR program has no declared types and was always
+# checked at run time; the removed relift used to hide this.)
+proc lenientHir {text} {
+    set path [makeFile "[string trim $text \n]\n" direct-hir-lenient.bot]
+    try {
+        return [surface::readProgramFile $path -strict 0]
+    } finally {
+        removeFile direct-hir-lenient.bot
+    }
+}
+
+test direct-hir-unproven-declared-contract-checked-at-run-time {a declared parameter type the program cannot prove is checked by the native callee: a violating argument raises the reference TYPE error, a valid one runs} -body {
+    set body "fn take(xs: List\[int\]):\n    list_length(xs)\nfn mixed(c):\n    if c:\n        1\n    else:\n        \[\]\n"
+    set results {}
+    foreach call {take(mixed(true)) take(mixed(false))} {
+        set hir [lenientHir "${body}${call}"]
+        lappend results [outcomeUnderHir interp $hir] [outcomeUnderHir cranelift $hir]
+    }
+    list [expr {[lindex $results 0] eq [lindex $results 1]}] [lindex $results 1 0] [lindex $results 1 1] \
+        [expr {[lindex $results 2] eq [lindex $results 3]}] [lindex $results 3 1] \
+        [expr {[dict exists [lenientHir "${body}take(mixed(true))"] violatedDeclared]}] \
+        [expr {![dict exists [native::prepareHir [lenientHir "${body}take(mixed(true))"]] violatedDeclared]}]
+} -result {1 error {CORE SEMANTIC TYPE} 1 0 1 1}
+
+test direct-hir-lowering-state-per-compilation {native lowering starts each compilation clean: a program's NIR (module-static slot table, header) does not depend on what the process compiled before} -body {
+    core::loadLibrary web
+    set plain [srcHir {[1, 2]}]
+    set withModule [srcHir {[uriEscape("a b"), mathish::inc(1)]}]
+    set before [native::nir $plain]
+    set module [native::nir $withModule]
+    set after [native::nir $plain]
+    list [expr {$before eq $after}] [regexp {statics=0} $before] [expr {![regexp {statics=0} $module]}]
+} -result {1 1 1}
+
+# ---------------------------------------------------------------------------
+# Module and container identity reach native lowering by resolved identity.
+
+test direct-hir-module-identity-in-native-hir {a module-qualified call and the container intrinsics keep their module identity in the HIR native lowers} -body {
+    set hir [srcHir {
+        a = mutarray::create(3, 0)
+        mutable_array_set(a, 1, 7)
+        [mathish::inc(41), mutable_array_get(a, 1)]
+    }]
+    set prepared [native::prepareHir $hir]
+    set moduleBindings 0
+    dict for {b binding} [dict get $prepared bindings] {
+        if {[hir::isModuleBinding $prepared $b]} { incr moduleBindings }
+    }
+    list [expr {$moduleBindings > 0}] [expr {[dict size [dict get $prepared intrinsicBlocks]] == 2}] \
+        [nativeValue $hir]
+} -result {1 1 {[42, 7]}}
+
+test direct-hir-container-call-result-is-semantic-type {the typed result of mutarray::create comes from HIR's semantic analysis: MutableArray[int], not a rediscovered spelling} -body {
+    set hir [srcHir {
+        a = mutarray::create(3, 0)
+        a
+    }]
+    hir::types::show [hir::typeOf $hir [lindex [hir::roots $hir] end]]
+} -result {MutableArray[int]}
+
+# ---------------------------------------------------------------------------
+# Semantic-instance results are consumed as the front end produced them.
+
+test direct-hir-semantic-instances-not-recomputed {native lowering does not re-run semantic instancing: the HIR's census is untouched by native::nir} -body {
+    set hir [srcHir {
+        fn identity(v):
+            v
+        [identity(1), identity("s"), identity([1])]
+    }]
+    set before [dict get $hir semantic]
+    native::nir $hir
+    list [expr {[dict get $hir semantic] eq $before}] [dict get $before walks] [dict get $before rounds]
+} -result {1 3 1}
+
+test direct-hir-prepare-is-idempotent-and-noop-without-natives {prepareHir returns HIR unchanged when no native implementation is needed and is idempotent otherwise} -body {
+    core::loadLibrary web
+    set plain [srcHir {[1, 2]}]
+    set withNative [srcHir {uriEscape("a b")}]
+    set once [native::prepareHir $withNative]
+    list [expr {[native::prepareHir $plain] eq $plain}] [expr {$once ne $withNative}] \
+        [expr {[native::prepareHir $once] eq $once}]
+} -result {1 1 1}
+
+# ---------------------------------------------------------------------------
+# Reference branch against production branch.
+
+set differentialPrograms {
+    {arithmetic} {[1 + 2, 10 * 10 - 1]}
+    {self-recursion} {
+        fn fib(n):
+            if n < 2:
+                return n
+            fib(n - 1) + fib(n - 2)
+        [fib(15), fib(20)]
+    }
+    {closures} {
+        fn counter_from(start):
+            fn step(k):
+                fn add(y):
+                    start + k + y
+                add
+            step
+        s1 = counter_from(10)
+        s2 = counter_from(20)
+        [s1(1)(2), s2(1)(2), s1(3)(4)]
+    }
+    {module-call} {[mathish::inc(41), mathish::inc(1)]}
+    {errors} {
+        error TooSmall
+        error TooBig
+        fn check(n) -> int errors TooSmall, TooBig:
+            if n < 0:
+                fail TooSmall
+            else:
+                if n > 10:
+                    fail TooBig
+                else:
+                    n
+        fn classify(n):
+            r = check(n):
+                on TooSmall:
+                    -1
+                on TooBig:
+                    -2
+            r
+        [classify(20), classify(5), classify(-3)]
+    }
+    {returning-loops} {
+        fn first_over(xs, limit):
+            loop x in xs:
+                if x > limit:
+                    return x
+            0
+        fn sum_to(n):
+            loop i from 0 to n:
+                if i == 3:
+                    continue
+                if i > 7:
+                    break
+            n
+        [first_over([1, 5, 9, 12], 8), first_over([1], 8), sum_to(20)]
+    }
+    {mutable-array} {
+        fn fill(n):
+            a = mutarray::create(n, 0)
+            loop i from 0 to n:
+                mutable_array_set(a, i, i * i)
+            a
+        a = fill(6)
+        [mutable_array_get(a, 5), mutable_array_freeze(a, 6)]
+    }
+    {semantic-instances} {
+        fn identity(v):
+            v
+        fn is_big(n):
+            n > 10
+        fn find_big(xs):
+            r = list::find(xs, is_big):
+                on NotFound:
+                    0
+            r
+        [identity(3), identity("s"), find_big([1, 20, 3]), find_big([5])]
+    }
+    {exact-callables} {
+        fn apply(f, v):
+            f(v)
+        fn inc(n):
+            n + 1
+        [apply(inc, 1), apply(length, "abcd")]
+    }
+    {argument-cycle} {
+        fn ping(next, n):
+            if n < 1:
+                return 0
+            next(ping, n - 1) + 1
+        fn pong(next, n):
+            if n < 1:
+                return 0
+            next(pong, n - 1) + 2
+        ping(pong, 5)
+    }
+}
+foreach {name text} $differentialPrograms {
+    test direct-hir-differential-$name {source -> HIR -> core IR -> interpreter equals source -> HIR -> NIR -> native (specialized and generic)} -body {
+        set hir [srcHir $text]
+        list [nativeValue $hir] [nativeValue $hir -specialize 0] [expr {[referenceValue $hir] eq [nativeValue $hir]}]
+    } -match glob -result {* * 1}
+}
+
+test direct-hir-differential-corpus {every canonical corpus program: reference interpreter and direct native agree} -body {
+    set failures {}
+    foreach path [concat [lsort [glob -directory [file join $::projectRoot bench] *.bot]] \
+            [lsort [glob -directory [file join $::projectRoot examples stdlib] *.bot]]] {
+        set hir [surface::readProgramFile $path]
+        if {[referenceValue $hir] ne [nativeValue $hir]} { lappend failures [file tail $path] }
+    }
+    set failures
+} -result {}
+
+# ---------------------------------------------------------------------------
+# Standalone executables: built from HIR, run without Tcl.
+
+test direct-hir-executable-parity-scalar-and-recursion {a scalar program and self recursion: executable equals interpreter and in-process native} -constraints executableAot -body {
+    set results {}
+    foreach text {
+        {[1 + 2, "hé🙂", 2 * 3 * 7]}
+        {fn fact(n: int):
+    if n < 2:
+        return 1
+    n * fact(n - 1)
+[fact(20), fact(25)]}
+    } {
+        set hir [srcHir $text]
+        set values [list [referenceValue $hir] [nativeValue $hir] [executableValue $hir]]
+        lappend results [expr {[llength [lsort -unique $values]] == 1}]
+    }
+    set results
+} -result {1 1}
+
+test direct-hir-executable-parity-closure-module-mutarray {closure, module call and MutableArray programs: executable equals interpreter and in-process native} -constraints executableAot -body {
+    set results {}
+    foreach text {
+        {fn make_adder(x: int):
+    fn add(y: int):
+        x + y
+    add
+add10 = make_adder(10)
+[add10(32), add10(1)]}
+        {[mathish::inc(41), mathish::inc(1)]}
+        {a = mutarray::create(3, 0)
+mutable_array_set(a, 1, 7)
+b = mutarray::from_list([4, 5, 6])
+[mutable_array_get(a, 1), mutable_array_get(b, 2), mutable_array_freeze(a, 3)]}
+    } {
+        set hir [srcHir $text]
+        set values [list [referenceValue $hir] [nativeValue $hir] [executableValue $hir]]
+        lappend results [expr {[llength [lsort -unique $values]] == 1}]
+    }
+    set results
+} -result {1 1 1}
+
+test direct-hir-executable-parity-shadowing-and-errors {shadowing, and declared errors handled at the call site, in an executable} -constraints executableAot -body {
+    set results {}
+    foreach text [list $shadowSource {error TooBig
+fn check(n: int) -> int errors TooBig:
+    if n > 10:
+        fail TooBig
+    else:
+        n
+fn classify(n: int):
+    r = check(n):
+        on TooBig:
+            -2
+    r
+[classify(20), classify(5)]}] {
+        set hir [srcHir $text]
+        set values [list [referenceValue $hir] [nativeValue $hir] [executableValue $hir]]
+        lappend results [expr {[llength [lsort -unique $values]] == 1}]
+    }
+    set results
+} -result {1 1}
+
+test direct-hir-executable-corpus-csv-and-strings {a larger corpus program (CSV parsing) and two string workloads: executable equals interpreter and in-process native} -constraints executableAot -body {
+    set results {}
+    foreach name {csv string_reverse string_replace} {
+        set hir [surface::readProgramFile [file join $::projectRoot examples stdlib $name.bot]]
+        set values [list [referenceValue $hir] [nativeValue $hir] [executableValue $hir]]
+        lappend results [expr {[llength [lsort -unique $values]] == 1}]
+    }
+    set results
+} -result {1 1 1}
+
+test direct-hir-executable-module-native-bridge {a native with a module implementation (uriEscape) and a validator body compile into an executable from HIR} -constraints executableAot -body {
+    core::loadLibrary web
+    set hir [srcHir {
+        fn check(s: str) -> bool:
+            emailish?(s)
+        [uriEscape("a b/c"), check("a@b.co"), check("nope")]
+    }]
+    list [nativeValue $hir] [executableValue $hir]
+} -result {{["a%20b%2Fc", true, false]} {["a%20b%2Fc", true, false]}}
+
+cleanupTests

@@ -92,7 +92,7 @@ proc outcomeUnderValue {backend exprs} {
 
 test module-static-local-char-envless {web::local_char? (nested inside web::emailish?) is envless: its only external reference, local_extra_chars, is a module-static reference, never a lexical capture} -body {
     core::loadLibrary web
-    set hir [native::buildProgramHir {
+    set hir [nativeHirOfIR {
         {bind s {const str "a"}}
         {call {ref Emailish?} {ref s}}
     }]
@@ -110,7 +110,7 @@ test module-static-local-char-envless {web::local_char? (nested inside web::emai
 
 test module-static-emailish-envless {web::emailish? itself is envless: its own module-static dependency (local_extra_chars, through local_char?) never makes it closure-valued} -body {
     core::loadLibrary web
-    set hir [native::buildProgramHir {
+    set hir [nativeHirOfIR {
         {bind s {const str "a"}}
         {call {ref Emailish?} {ref s}}
     }]
@@ -126,7 +126,7 @@ test module-static-emailish-envless {web::emailish? itself is envless: its own m
 
 test module-static-no-block-allocation {emailish?, called many times, allocates zero Block values (the frozen baseline's own ~800/run local_char? closure allocation is gone)} -body {
     core::loadLibrary web
-    set hir [native::buildProgramHir {
+    set hir [nativeHirOfIR {
         {bind s {const str "example.test@café.example"}}
         {call {ref Emailish?} {ref s}}
     }]
@@ -135,13 +135,13 @@ test module-static-no-block-allocation {emailish?, called many times, allocates 
 
 test module-static-refined-checks-block-allocations {bench/refined-checks.ir's own steady-state Block allocation count drops from the frozen baseline's ~803/run to 0} -body {
     core::loadLibrary web
-    set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
+    set hir [nativeHirOfIR [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
     dict get [native::allocationReport $hir summary 1] byKind Block allocations
 } -result 0
 
 test module-static-check-still-callvalue {scan_while's own predicate parameter is still a dynamic call (spec #26: no finite-target work in this milestone) -- callvalue remains present} -body {
     core::loadLibrary web
-    set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
+    set hir [nativeHirOfIR [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
     set nir [native::nir $hir]
     expr {[regexp -all {callvalue} $nir] >= 1}
 } -result 1
@@ -320,7 +320,7 @@ test module-static-gc-stress-mixed-closure {a static reference and a real activa
 
 test module-static-repeated-runs-reset {the same compiled program, run repeatedly in one process (Vm::reset between runs, matching the benchmark harness), re-initializes and correctly re-reads its module statics every run, under GC stress} -body {
     core::loadLibrary web
-    set hir [native::buildProgramHir {
+    set hir [nativeHirOfIR {
         {bind s {const str "a b/c%d~e_f.g@h"}}
         {call {ref uriEscape} {ref s}}
     }]

@@ -17,7 +17,7 @@ interp recursionlimit {} 20000
 lassign $argv path out
 
 core::loadLibrary web
-set hir [native::buildProgramHir [core::loadProgramFile $path]]
+set hir [native::prepareHir [hir::build [core::loadProgramFile $path] -strict 0]]
 set spec [hir::specialize::analyze $hir]
 set sr [hir::stringregion::analyze $hir $spec]
 set context [dict get $spec context]

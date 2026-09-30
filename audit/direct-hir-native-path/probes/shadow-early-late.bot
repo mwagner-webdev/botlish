@@ -1,0 +1,11 @@
+# Earlier reference to an outer x, a later same-named binding in a nested
+# scope, and closures created before and after the shadow.
+x = 1
+fn early():
+    x
+inner = if true:
+    x = 2
+    fn late():
+        x
+    [early(), late(), x]
+[inner, x, early()]

@@ -1018,6 +1018,11 @@ proc native::lower::program {hirProgram args} {
     variable leafEligible
     variable construction
     variable constructionOpt
+    # The module-static slot table is per program: without this declaration
+    # the reset below assigned a local variable and slot numbers (and the
+    # header's statics=N) leaked from one compilation to the next in the same
+    # process.
+    variable staticSlots
 
     set default [expr {[info exists ::env(BOTLISH_NATIVE_SPECIALIZE)]
         && $::env(BOTLISH_NATIVE_SPECIALIZE) eq "0" ? 0 : 1}]

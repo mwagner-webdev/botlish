@@ -172,22 +172,22 @@ test root-dead-before-safepoint-1 {tagged values with no safepoint in the functi
 # (collect before every allocation).
 
 test root-live-across-gc-1 {a value live across a real allocation survives GC stress} -body {
-    set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=3 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = str \"kept\"\n    %1 = cell\n    %2 = op streq %0 %0\n    ret %2\nend\n"
+    set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=3 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = str \"kept\"\n    %1 = op listnew\n    %2 = op streq %0 %0\n    ret %2\nend\n"
     underGcStress {runNir $text}
 } -result {value {bool true}}
 
 # ---------------------------------------------------------------------------
 # #46: a dead root is not artificially retained forever merely because its
 # slot is reused later. %2 (dynamic String "ab") is rooted across the first
-# cell allocation (needed again right after, by the streq), then dies; %7
+# list allocation (needed again right after, by the streq), then dies; %7
 # (dynamic String "cd") is defined only afterward and, per root-reuse-1's
 # structural shape, shares %2's slot (they never coexist at any safepoint).
-# By the second cell allocation, %2's slot has been overwritten by %7, so
+# By the second list allocation, %2's slot has been overwritten by %7, so
 # "ab" has no root left anywhere and is reclaimed then -- not held for the
 # rest of the function merely because its old slot still physically exists.
 
 test root-retention-1 {a rooted value's object is reclaimed once its slot is reused for an unrelated later root} -body {
-    set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=10 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = str \"a\"\n    %1 = str \"b\"\n    %2 = op strcat %0 %1\n    %3 = cell\n    %4 = op streq %2 %2\n    %5 = str \"c\"\n    %6 = str \"d\"\n    %7 = op strcat %5 %6\n    %8 = cell\n    %9 = op streq %7 %7\n    ret %9\nend\n"
+    set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=10 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = str \"a\"\n    %1 = str \"b\"\n    %2 = op strcat %0 %1\n    %3 = op listnew\n    %4 = op streq %2 %2\n    %5 = str \"c\"\n    %6 = str \"d\"\n    %7 = op strcat %5 %6\n    %8 = op listnew\n    %9 = op streq %7 %7\n    ret %9\nend\n"
     set report [rootsOfNir $text]
     set allocReport [underGcStress {allocReportOfNir $text}]
     list [slotsOf $report "<program>"] [dict get $allocReport byKind String reclaimedObjects] \
@@ -199,7 +199,7 @@ test root-retention-1 {a rooted value's object is reclaimed once its slot is reu
 # and both survive GC stress correctly.
 
 test root-two-roots-1 {two simultaneously live roots survive GC stress and never share a slot} -body {
-    set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=4 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = str \"a\"\n    %1 = str \"b\"\n    %2 = cell\n    %3 = op streq %0 %1\n    ret %3\nend\n"
+    set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=4 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = str \"a\"\n    %1 = str \"b\"\n    %2 = op listnew\n    %3 = op streq %0 %1\n    ret %3\nend\n"
     set report [rootsOfNir $text]
     list [underGcStress {runNir $text}] [slotsOf $report "<program>"]
 } -result {{value {bool false}} 2}

@@ -1,0 +1,20 @@
+error TooSmall
+error TooBig
+fn check(n) -> int errors TooSmall, TooBig:
+    if n < 0:
+        fail TooSmall
+    else:
+        if n > 10:
+            fail TooBig
+        else:
+            n
+fn middle(n) -> int errors TooSmall, TooBig:
+    check(n)
+fn classify(n):
+    r = middle(n):
+        on TooSmall:
+            -1
+        on TooBig:
+            -2
+    r
+[classify(20), classify(5), classify(-3)]

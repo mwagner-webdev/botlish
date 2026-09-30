@@ -1,0 +1,11 @@
+# Exact block targets, native targets and structural Fn boundaries.
+fn apply(f, v):
+    f(v)
+fn inc(n):
+    n + 1
+fn make():
+    fn dbl(n):
+        n * 2
+    dbl
+d = make()
+[apply(inc, 1), apply(d, 4), apply(length, "abcd"), d(5)]

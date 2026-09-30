@@ -1,0 +1,58 @@
+    309 call 
+    123 op iadd
+     81 op listnew
+     66 op regioneq
+     64 guard 
+     61 op mutarrayset
+     61 callmulti 
+     55 tail 
+     51 retmulti 
+     45 op listget
+     41 op listlen
+     39 op rbox
+     36 op runbox
+     36 op mutarrayget
+     34 op strlen
+     33 op ilt
+     29 op ige
+     28 op veq
+     26 op mutarrayallocate
+     20 op riadd
+     18 op rige
+     15 op substr
+     14 op imul
+     13 op risub
+     13 op listappend
+     13 op imod
+     12 op rieq
+     12 op ieq
+     10 op regioncheck
+      9 op mutarraycopy
+      9 callvalue 
+      8 op mutarraycapacity
+      8 op igt
+      8 closure 
+      8 capture 
+      7 op isub
+      6 op rile
+      6 op ile
+      5 op setfromlisttotal
+      5 op hash
+      5 guardbool 
+      5 callenv 
+      4 op mutarrayfreeze
+      4 fnvalue 
+      4 faildeclared 
+      3 staticset 
+      3 op strtclalnum
+      3 op setcontainstotal
+      2 op strutf8bytes
+      2 op strregiontclalnum
+      2 op setcontains
+      2 op rishr
+      2 op iand
+      2 op charcodepoint
+      1 op strbytelen
+      1 op rimul
+      1 op rilt
+      1 op decodecharat

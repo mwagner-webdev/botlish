@@ -6,6 +6,23 @@ Push finished work directly to `main`. This project does not use a
 feature-branch-plus-pull-request review cycle: don't open a PR unless
 explicitly asked to.
 
+## Compiler architecture (three representations)
+
+* **HIR** (`hir/`) is the authoritative semantic representation; every analysis
+  fact lives in it or in its side tables.
+* **Core IR** (`core/`) is the small executable representation of the Tcl
+  reference interpreter (and the Tcl compiler's input). HIR lowers to it
+  (`hir::lower`); it is not on the native path.
+* **NIR** (`native/`) is the production executable representation. Native
+  compilation starts from resolved, analyzed HIR (`native::lowered`,
+  `native::evalHir`, `native::executable`, ...) and never goes through Core IR:
+  do not add a native entry point that accepts Core IR, and do not lower HIR to
+  Core IR and rebuild HIR from it (`tests/direct-hir-native.test` guards this).
+  `DIRECT-HIR-NATIVE-PATH.md` has the details. Tests that run Core-IR-text
+  programs on `cranelift` do so through a harness backend in `tests/helpers.tcl`
+  that hands native the HIR the program was lowered from (or reads hand-written
+  IR text into HIR); it is not a production entry point.
+
 ## Installing Tcl 9
 
 This project's reference evaluator requires Tcl 9.x (`core/core.tcl` checks

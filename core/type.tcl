@@ -364,7 +364,7 @@ proc core::type::IntersectIntegerFacts {a b} {
 # form of it and rejects a dynamic call, whether NAME is opaque or
 # validator-backed. This is what lets validator-backed named-type
 # predicates run natively in general, through the same call-site body
-# substitution native/native.tcl's ExpandNativeBodies already gives any
+# attachment native::prepareHir (native/prepare.tcl) already gives any
 # native (see NATIVE-EMAILISH.md): native/lower.tcl needs no named-type
 # awareness at all.
 #

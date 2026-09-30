@@ -1,4 +1,7 @@
 #!/usr/bin/env tclsh9.0
+# LEGACY / RELIFT COMPARISON (measurement in the relifted pipeline): needs native::buildProgramHir, which
+# DIRECT-HIR-NATIVE-PATH.md removed. Runs only against a tree from before that
+# milestone; the production route is audit/direct-hir-native-path/tools/.
 # measure.tcl -- one program's semantic/specialization/NIR census, in the
 # relifted pipeline bench/bench.tcl compiles. Runs against the tree named by
 # -root (default: the tree this file lives in).

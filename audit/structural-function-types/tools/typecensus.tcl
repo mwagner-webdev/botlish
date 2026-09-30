@@ -1,4 +1,7 @@
 #!/usr/bin/env tclsh9.0
+# LEGACY / RELIFT COMPARISON (census whose "relifted" column is native::buildProgramHir of hir::lower): needs native::buildProgramHir, which
+# DIRECT-HIR-NATIVE-PATH.md removed. Runs only against a tree from before that
+# milestone; the production route is audit/direct-hir-native-path/tools/.
 # typecensus.tcl -- STRUCTURAL-FUNCTION-TYPES.md's before/after callable
 # type census for the three higher-order canonical benchmarks
 # (HIGHER-ORDER-DOGFOODING.md). Observation only: reads HIR types,

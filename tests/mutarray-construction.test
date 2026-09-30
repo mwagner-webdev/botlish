@@ -478,7 +478,7 @@ test mutarray-run-7 {a statically proven mutarray argument needs no kind guard; 
     set src "fn cap(x):\n    mutable_array_capacity(x)\nfn mixed(c):\n    if c:\n        mutable_array_allocate(2)\n    else:\n        \[\]\nfn rows():\n    \[mutarray::from_list(\[1\]), mutarray::from_list(\[2, 3\])\]\nfn via_rows(i):\n    cap(list_get(rows(), i))\nvia_rows(1) + cap(mixed(true))"
     set path [makeFile $src mc-nir.bot]
     try {
-        set hir [native::buildProgramHir [hir::lower [surface::readProgramFile $path -strict 0]]]
+        set hir [native::prepareHir [surface::readProgramFile $path -strict 0]]
         set nir [native::nir $hir]
     } finally {
         removeFile mc-nir.bot
@@ -511,7 +511,7 @@ proc mcAotParity {text} {
         set hir [surface::readProgramFile $path]
         set expected {}
         foreach backend {interp compile cranelift-generic cranelift} {
-            set outcome [outcomeUnder $backend [hir::lower $hir]]
+            set outcome [outcomeUnderHir $backend $hir]
             if {[lindex $outcome 0] ne "value"} { error "$backend: $outcome" }
             lappend expected [lindex $outcome 1]
         }

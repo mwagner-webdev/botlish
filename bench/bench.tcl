@@ -103,12 +103,9 @@ proc best {program runs} {
 # compiled this run at all, so PROGRAM's own support was never tested).
 # Either failure declines the comparison for this row instead of failing
 # the whole run (see this file's header).
-proc bestNative {program runs} {
+proc bestNative {hir runs} {
     if {[catch {native::binary}]} {
         return {"" "" not-built}
-    }
-    if {[catch {native::buildProgramHir $program} hir]} {
-        return {"" "" unsupported}
     }
     if {[catch {native::measure $hir $runs} result]} {
         return {"" "" unsupported}
@@ -208,7 +205,10 @@ if {$markdown} {
 
 set disagreements 0
 foreach path $files {
-    set program [hir::lower [surface::readProgramFile $path]]
+    # One HIR, two consumers: the Tcl backends run the core IR it lowers to;
+    # native compiles the HIR itself (DIRECT-HIR-NATIVE-PATH.md).
+    set hir [surface::readProgramFile $path]
+    set program [hir::lower $hir]
     set base [string map {- _} [file rootname [file tail $path]]]
 
     set backendTimes {}
@@ -220,7 +220,7 @@ foreach path $files {
         lappend backendValues $value
     }
 
-    lassign [bestNative $program $runs] nativeMicros nativeValue nativeStatus
+    lassign [bestNative $hir $runs] nativeMicros nativeValue nativeStatus
 
     set pyResult [runPythonEquivalent $root $base $runs]
     set rustResult [runRustEquivalent $root $base $runs]

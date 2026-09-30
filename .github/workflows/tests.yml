@@ -67,11 +67,12 @@ jobs:
       - name: Native coverage
         run: tclsh9.0 tests/native-coverage.tcl | tee coverage.txt
 
-      # The corpus and the source samples; examples/04-refinement-scope.ir
-      # (returns a Block) and 05-refined-strings.ir (web library) need
-      # unsupported constructs, and surface sample 10 expects an error.
+      # The corpus, the source samples and the HIR fixtures (native compiles
+      # HIR, never core IR text: the examples/*.ir programs run on the Tcl
+      # backends above); surface samples 09 and 10 expect an error (09 became a
+      # rejection example with strict reference determinism).
       - name: Run examples
-        run: tclsh9.0 main.tcl -backend cranelift examples/stdlib/*.bot examples/surface/0*.bot examples/surface/1[1-3]*.bot examples/0[1-3]*.ir
+        run: tclsh9.0 main.tcl -backend cranelift examples/stdlib/*.bot examples/surface/0[1-8]*.bot examples/surface/1[1-3]*.bot examples/hir/0[1-3]*.hir
 
       - name: Publish summary
         if: always()

@@ -18,8 +18,8 @@
 #                   NAMESPACE::NAME (surface/modules.tcl) as this native's
 #                   *executable* implementation, instead of requiring an
 #                   entry in its own op whitelist (native/lower.tcl's
-#                   `natives`) or a -native-body -- see native/native.tcl's
-#                   module-native bridge. impl (run by interp/compile, and
+#                   `natives`) or a -native-body -- see native/prepare.tcl's
+#                   native::prepareHir. impl (run by interp/compile, and
 #                   by the reference contract check) stays authoritative for
 #                   every other backend and for any semantics -- such as
 #                   attaching evidence for an opaque refined result type --
@@ -27,7 +27,7 @@
 #                   trusted native impl may do that: see core/type.tcl); the
 #                   native keeps its own registered -result-type for the
 #                   call's static type on every backend, moduleFn or not
-#                   (hir/hir.tcl's -native-result-overrides). A native's
+#                   (a call's nativeResultOverride, native/prepare.tcl). A native's
 #                   module function sees only its own module's other
 #                   definitions and ordinary root natives; it captures
 #                   nothing from the call site (an ordinary top-level
@@ -38,8 +38,8 @@
 #                   *authoritative-for-native-compilation* implementation
 #                   the native (Cranelift) backend may use instead of
 #                   requiring an entry in its own op whitelist
-#                   (native/lower.tcl's `natives`) -- see native/native.tcl's
-#                   ExpandNativeBodies. impl (run by interp/compile, and by
+#                   (native/lower.tcl's `natives`) -- see native/prepare.tcl's
+#                   native::prepareHir. impl (run by interp/compile, and by
 #                   the reference contract check) stays authoritative for
 #                   every other backend and for any semantics -- such as
 #                   attaching evidence for an opaque refined result type --

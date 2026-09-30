@@ -2,7 +2,7 @@
 source native/native.tcl
 source surface/surface.tcl
 foreach name {fib sum-refined loop-count} {
-    set hir [native::buildProgramHir [core::loadProgramFile "bench/$name.ir"]]
+    set hir [hir::build [core::loadProgramFile "bench/$name.ir"] -strict 0]
     set out [open "native/tests/fixtures/$name.nir" w]
     puts $out [string trimright [native::nir $hir] "\n"]
     close $out

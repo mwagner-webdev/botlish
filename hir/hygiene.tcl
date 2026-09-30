@@ -43,6 +43,19 @@
 # The later binding is renamed (NAME#N, spelling kept), exactly as for root
 # references, so the lowered program and every backend read the binding HIR
 # resolved.
+#
+# Boundary (DIRECT-HIR-NATIVE-PATH.md). Hygiene exists for the consumers that
+# identify bindings by *name*: hir::lower's core IR, the interpreter's scopes,
+# the Tcl compiler's frames and HIR text. The native path does not: native
+# lowering identifies every binding, reference, capture and call target by its
+# resolved BindingId/ExprId, so it neither needs the NAME#N renames nor reads
+# them for anything but labels (function and parameter names in NIR, which
+# prefer `spelling`); tests/direct-hir-native.test lowers HIR with every rename
+# undone and gets the same NIR. The renames are applied once, when HIR is
+# built, so that every consumer of one HIR sees the same names. The
+# qualifyModules renames are HIR-level identity, not only Core IR's: a module
+# binding's canonical spelling is "namespace::name" (hir::containers, module
+# native targets and diagnostics key on it).
 
 namespace eval hir::hygiene {}
 

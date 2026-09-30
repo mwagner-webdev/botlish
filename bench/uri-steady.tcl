@@ -41,11 +41,11 @@ proc hirOf {} {
 proc valueUnder {backend} {
     global programPath
     set hir [hirOf]
-    set exprs [hir::lower $hir]
     if {$backend in {cranelift cranelift-generic}} {
         set args [expr {$backend eq "cranelift-generic" ? {-specialize 0} : {}}]
-        return [core::value::show [native::evalHir [native::buildProgramHir $exprs] {*}$args] 1]
+        return [core::value::show [native::evalHir $hir {*}$args] 1]
     }
+    set exprs [hir::lower $hir]
     set saved [core::useBackend]
     core::useBackend $backend
     try {

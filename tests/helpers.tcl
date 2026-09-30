@@ -7,6 +7,55 @@ set ::projectRoot [file dirname [file dirname [file normalize [info script]]]]
 source [file join $::projectRoot compiler compiler.tcl]
 source [file join $::projectRoot native native.tcl]
 
+# ---------------------------------------------------------------------------
+# Test-only native backends (DIRECT-HIR-NATIVE-PATH.md).
+#
+# core::registerBackend backends run core IR: the Tcl interpreter and the Tcl
+# compiler. Native compilation starts from HIR (native::evalHir) and has no
+# core IR entry point, so native/ registers no backend. Most tests are written
+# as core IR text -- or lower a source/HIR program with hir::lower to get the
+# text -- and run on every backend through core::evalProgram; to keep native
+# coverage of them, the *test harness* registers "cranelift" and
+# "cranelift-generic" here. Native compiles HIR, so:
+#
+#   * a program that hir::lower produced is compiled from the very HIR it was
+#     lowered from (remembered below by the lowered text): the differential
+#     "HIR -> core IR -> interpreter" against "HIR -> NIR -> native" of one
+#     HIR. Native never sees, and never rebuilds HIR from, that core IR;
+#   * any other program is hand-written core IR text (a test of core IR, or
+#     the frozen bench/*.ir): hir::build reads it into HIR -- the same
+#     builder that gives the compile backend its HIR: reading core IR text is
+#     HIR construction, not native compilation of core IR.
+#
+# Tests that start from source or HIR and are about native behavior should
+# call outcomeUnderHir (below) with the HIR itself.
+set ::hirOfLowered [dict create]
+proc ::RecordLowered {command code result args} {
+    dict set ::hirOfLowered $result [lindex $command 1]
+}
+trace add execution hir::lower leave ::RecordLowered
+
+proc ::testNativeHir {exprs} {
+    if {[dict exists $::hirOfLowered $exprs]} {
+        return [dict get $::hirOfLowered $exprs]
+    }
+    return [hir::build $exprs -strict 0]
+}
+
+proc ::testNativeProgram {specialize exprs env} {
+    set options [expr {$specialize eq "" ? {} : [list -specialize $specialize]}]
+    return [core::completion::normal [native::evalHir [testNativeHir $exprs] {*}$options]]
+}
+
+proc ::testNativeSequence {exprs env} {
+    set message "native backend: only checked programs can run natively; code run in an existing environment (core::evalIn) is not supported"
+    lappend native::unsupported [list {NATIVE UNSUPPORTED sequence-mode} $message]
+    throw {NATIVE UNSUPPORTED sequence-mode} $message
+}
+
+core::registerBackend cranelift ::testNativeSequence {::testNativeProgram {}}
+core::registerBackend cranelift-generic ::testNativeSequence {::testNativeProgram 0}
+
 # The backend under test: CORE_BACKEND=interp (default), compile or cranelift.
 if {[info exists ::env(CORE_BACKEND)]} {
     core::useBackend $::env(CORE_BACKEND)
@@ -74,6 +123,31 @@ proc outcomeUnder {backend exprs} {
     } finally {
         core::useBackend $saved
     }
+}
+
+# Outcome of the HIR program HIR under BACKEND, in outcomeUnder's shape. The
+# native backends compile the HIR itself; interp and compile run the core IR
+# it lowers to (the reference branch), so a program's HIR feeds each consumer
+# directly and native never sees core IR.
+proc outcomeUnderHir {backend hir} {
+    if {$backend ni {cranelift cranelift-generic}} {
+        return [outcomeUnder $backend [hir::lower $hir]]
+    }
+    set options [expr {$backend eq "cranelift-generic" ? {-specialize 0} : {}}]
+    resetEffects
+    if {[catch {native::evalHir $hir {*}$options} result options]} {
+        return [list error [dict get $options -errorcode] $result $::testLog]
+    }
+    return [list value [core::value::show $result 1] $::testLog]
+}
+
+# The HIR native lowering compiles for a program written as core IR text
+# EXPRS: hir::build reads the text (HIR construction, as for the compile
+# backend) and native::prepareHir attaches the native implementations it calls.
+# For tests of native behavior on hand-written core IR (or the frozen bench/*.ir
+# files); a source or HIR program passes its own HIR to native instead.
+proc nativeHirOfIR {exprs} {
+    return [native::prepareHir [hir::build $exprs -strict 0]]
 }
 
 # "same" if both backends produce the same outcome; otherwise both outcomes.

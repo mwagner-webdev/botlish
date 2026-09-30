@@ -24,7 +24,7 @@ source [file join $root native native.tcl]
 interp recursionlimit {} 20000
 lassign $argv path out
 
-set hir [native::buildProgramHir [hir::lower [surface::readProgramFile $path]]]
+set hir [native::prepareHir [surface::readProgramFile $path]]
 set spec [hir::specialize::analyze $hir]
 set open [hir::range::OpenInstances $spec]
 set be [hir::blockescape::analyze $hir $spec]

@@ -1263,8 +1263,9 @@ proc hir::types::BindingType {hir ctx b} {
         if {[core::value::kind $value] eq "native" && [dict exists $hir moduleNativeTargets]} {
             set name [core::value::nativeName $value]
             if {[dict exists $hir moduleNativeTargets $name]} {
-                # This backend's own hir::buildSyntax -module-native-targets
-                # (hir.tcl) redirected native NAME to an ordinary top-level
+                # native::prepareHir (native/prepare.tcl, through
+                # hir::ResolveModuleNativeTargets) redirected native NAME to
+                # an ordinary top-level
                 # function elsewhere in this same HIR: a reference to the
                 # native is typed as a call of that function, not of the
                 # native, on every inference of it (including
@@ -1758,8 +1759,8 @@ proc hir::types::Call {hirVar ctxVar e} {
                 set result [{*}[dict get $ctx spec] call $e $block $argTypes]
             }
             if {!$dead && [dict exists $node nativeResultOverride]} {
-                # A trusted native's declared result type survives -native-
-                # body substitution (hir::ApplyNativeResultOverrides):
+                # A trusted native's declared result type survives the
+                # native-body attachment of native::prepareHir:
                 # still run the spec handler above unconditionally, so
                 # instance discovery/edges for the substituted body are
                 # unaffected, but the call's own *type* is the registered

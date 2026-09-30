@@ -33,7 +33,7 @@ lappend L ""
 set counts [dict create]
 set total 0
 foreach path [lsort [glob -directory [file join $root bench] *.bot]] {
-    set hir [native::buildProgramHir [hir::lower [surface::readProgramFile $path]]]
+    set hir [native::prepareHir [surface::readProgramFile $path]]
     set spec [hir::specialize::analyze $hir]
     set labels [dict create]
     foreach id [dict get $spec used] {

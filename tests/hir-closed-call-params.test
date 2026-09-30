@@ -74,7 +74,7 @@ proc paramRanges {analysis id} {
 # code path here is specific to Byte/Nibble/HighNibble by name.
 
 proc refinedChecksFacts {} {
-    set hir [native::buildProgramHir [core::loadProgramFile \
+    set hir [nativeHirOfIR [core::loadProgramFile \
         [file join $::projectRoot bench refined-checks.ir]]]
     set spec [hir::specialize::analyze $hir]
     return [list $hir $spec [hir::range::analyze $hir $spec]]

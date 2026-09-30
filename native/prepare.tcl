@@ -1,7 +1,68 @@
-# Native implementations attached to resolved HIR. Unlike the raw-IR bridge,
-# this preserves source locations, declared contracts, module identities and
-# lexical shadowing. Shared by executable emission and direct HIR/JIT APIs.
+# native::prepareHir -- native implementations attached to resolved HIR.
+#
+# The one place native compilation touches HIR before lowering. A program that
+# calls a native carrying a -module-fn (currently uriEscape, whose executable
+# implementation is the ordinary Botlish function web::uri_escape_text) or a
+# -native-body (a validator predicate such as emailish?) needs that
+# implementation in the program: the owning module sections are loaded and
+# resolved on top of the given HIR, each such call gets its callee (a body) or
+# its reference a target (a module function) by *resolved binding identity*
+# and the result type the native itself declares (nativeResultOverride), and
+# the HIR is checked again (hir::check) because it gained code.
+#
+# It also makes a -strict 0 HIR safe to compile: a declared parameter type the
+# program's own call cannot prove (`violatedDeclared`, recorded by
+# hir::range::VerifyCall) must not be assumed by the callee's native code, so
+# the declaration is dropped and the HIR re-checked -- the callee then guards
+# what its own body needs and the call fails at run time as it does in the
+# interpreter (this is hir::check's recovery for inferred contracts, applied
+# to declared ones for native only; the relift used to hide the case because
+# core IR has no declared types). A strict HIR never has such a violation.
+#
+# Input: program-mode HIR as a front end built it (analyzed). Output: the same
+# HIR when nothing needs preparing (no work, no re-analysis); otherwise HIR
+# with the implementations attached / the contracts recovered, analyzed again.
+# It is idempotent, keeps source locations, declared contracts, module
+# identities and lexical shadowing, and is shared by every native entry point
+# (native::lowered calls it). It replaced the old raw-IR bridge
+# (ExpandNativeBodies/ModuleNativeBridge over Core IR text, name-based and
+# pre-resolution), which is gone (DIRECT-HIR-NATIVE-PATH.md).
 proc native::prepareHir {hir} {
+    return [RecoverDeclaredContracts [AttachNatives $hir]]
+}
+
+# native::prepareHir's second step: see its header.
+proc native::RecoverDeclaredContracts {hir} {
+    if {![dict exists $hir violatedDeclared]} {
+        return $hir
+    }
+    set demote [dict keys [dict get $hir violatedDeclared]]
+    set diagnostics [dict get $hir diagnostics]
+    dict unset hir violatedDeclared
+    dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] ne "block" || ![dict exists $node declaredParamTypes]} continue
+        set declared [dict get $node declaredParamTypes]
+        set changed 0
+        set index 0
+        foreach b [dict get $node params] {
+            if {$b in $demote && [lindex $declared $index] ne {}} {
+                lset declared $index {}
+                set changed 1
+            }
+            incr index
+        }
+        if {$changed} { dict set hir exprs $e declaredParamTypes $declared }
+    }
+    hir::check hir
+    # The violations stay diagnosed (a -strict 0 HIR keeps them); the re-check
+    # sees no declared type to break.
+    dict set hir diagnostics $diagnostics
+    dict unset hir violatedDeclared
+    return $hir
+}
+
+# native::prepareHir's first step: attaches the native implementations.
+proc native::AttachNatives {hir} {
     set targets {}
     set namespaces {}
     set overrides {}
@@ -26,7 +87,13 @@ proc native::prepareHir {hir} {
             if {[dict get $meta moduleFn] ne "" || [dict get $meta nativeBody] ne ""} {
                 dict set overrides $e [dict get $meta resultType]
             }
-            if {[dict get $meta nativeBody] ne "" && [dict get $node known] eq ""} {
+            # Every call of such a native gets its body, including one HIR
+            # already proved redundant (`known`): giving the *other* calls a
+            # body block changes what the re-check can prove (a validator
+            # call is a refinement source only while its callee is the
+            # native), so a call left native could lose its `known` fact and
+            # then have no implementation at all.
+            if {[dict get $meta nativeBody] ne ""} {
                 dict set bodies $e [dict get $meta nativeBody]
             }
         }
@@ -86,6 +153,10 @@ proc native::prepareHir {hir} {
         dict set hir exprs $e callee $callee
     }
     dict unset hir bound
+    # The resolver's diagnostic-only index of later bindings (hir/resolve.tcl)
+    # is dropped when a resolution finishes, exactly as hir::resolve::program
+    # does.
+    dict unset hir laterIndex
     dict set hir roots [concat $roots [lmap e $oldRoots {if {$e in $moved} continue; set e}]]
     hir::hygiene::apply hir
     set prior [expr {[dict exists $hir moduleNativeTargets] ? [dict get $hir moduleNativeTargets] : {}}]

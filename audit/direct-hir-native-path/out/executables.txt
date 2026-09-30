@@ -1,0 +1,30 @@
+fib.bot: MATCH
+lex-strategy.bot: NOT-BUILT program is not AOT-ready:
+loop-count.bot: MATCH
+refined-checks.bot: MATCH
+source-checks.bot: NOT-BUILT program is not AOT-ready:
+sum-refined.bot: NOT-BUILT program is not AOT-ready:
+test-selection.bot: NOT-BUILT program is not AOT-ready:
+uri-steady.bot: MATCH
+ai_text_clean.bot: MATCH
+csv.bot: MATCH
+csv_chunked.bot: NOT-BUILT program is not AOT-ready:
+csv_geometric.bot: NOT-BUILT program is not AOT-ready:
+csv_records.bot: NOT-BUILT program is not AOT-ready:
+hashtable.bot: NOT-BUILT program is not AOT-ready:
+matmul.bot: MATCH
+string_replace.bot: MATCH
+string_reverse.bot: MATCH
+arg-cycle.bot: NOT-BUILT program is not AOT-ready:
+closures.bot: NOT-BUILT program is not AOT-ready:
+errors.bot: MATCH
+exact-callables.bot: NOT-BUILT program is not AOT-ready:
+loops.bot: MATCH
+module-call.bot: MATCH
+module-container.bot: MATCH
+module-web.bot: MATCH
+mutarray-typed.bot: MATCH
+self-recursion.bot: MATCH
+semantic-instances.bot: NOT-BUILT program is not AOT-ready:
+shadow-early-late.bot: MATCH
+shadow-param.bot: MATCH

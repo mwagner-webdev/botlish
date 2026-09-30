@@ -47,7 +47,7 @@ proc m8a::load {path} {
         return [surface::readProgramFile $path]
     }
     core::loadLibrary web
-    return [native::buildProgramHir [core::loadProgramFile $path]]
+    return [native::prepareHir [hir::build [core::loadProgramFile $path] -strict 0]]
 }
 
 proc m8a::W {outdir name text} {

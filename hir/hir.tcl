@@ -6,11 +6,24 @@
 #   hir::lower $h                      ;# back to core IR
 #   hir::parse [hir::format $h]        ;# HIR text back to HIR (read.tcl)
 #
-# Pipeline:
+# Pipeline (DIRECT-HIR-NATIVE-PATH.md):
 #
-#   syntax --hir::buildSyntax--> HIR     (frontends, e.g. surface/)
-#   core IR --hir::build--> HIR --hir::lower--> core IR --> interp / compiler
-#                             \------------------------------> compiler facts
+#   source / syntax --hir::buildSyntax--> HIR     (frontends, e.g. surface/)
+#   core IR text --hir::build--> HIR              (an input notation: examples,
+#                                                  tests; same builder)
+#
+#   HIR --hir::lower--> core IR --> Tcl reference interpreter (core/) and the
+#                                   Tcl compiler (compiler/)
+#   HIR --native::lowered--> NIR --> native: JIT, object, standalone executable
+#                                    (native/), later a bytecode interpreter
+#
+# HIR is the authoritative semantic program representation and the one place
+# analysis facts live (types, contracts, semantic instances, ranges,
+# refinements, call targets, captures, module identity). Core IR is the small
+# executable/reference representation of the Tcl interpreter: a consumer of
+# HIR, never a producer of it for the native path -- nothing lowers HIR to
+# core IR and builds HIR back from it. NIR is the production executable
+# representation.
 #
 # Core IR is the executable specification: small, and all an evaluator needs.
 # HIR is the semantic representation: every name resolved to a binding
@@ -191,17 +204,8 @@ proc hir::Diagnose {hirVar kind message expr} {
 #                   resolution has recorded a diagnostic, before typing: the
 #                   caller raises. Default 0 (typing and every check run and
 #                   keep collecting diagnostics).
-#
-#   -native-result-overrides D   IR-PATH (a list of indices, as in an
-#                   {ir PATH} origin) -> type form. Before type inference,
-#                   each call expression whose origin is exactly that path
-#                   has its declared result type set to the given type,
-#                   overriding whatever ordinary inference of its callee
-#                   would derive -- see hir::ApplyNativeResultOverrides.
-#                   Empty by default (every caller but the native backend's
-#                   own -native-body expansion, native/native.tcl).
 proc hir::build {exprs args} {
-    set options [Options hir::build {-mode program -strict 1 -native-result-overrides {}} $args]
+    set options [Options hir::build {-mode program -strict 1} $args]
     set nodes {}
     set index 0
     foreach expr $exprs {
@@ -220,28 +224,6 @@ proc hir::build {exprs args} {
 #                   SECTION-ORIGIN} dicts (surface/modules.tcl's own
 #                   sections: one per namespace NODES needs, transitively,
 #                   dependencies first) -- see hir::resolve::program
-#   -module-native-targets D   flat NATIVE-NAME NAMESPACE NAME triples:
-#                   every reference to root native NATIVE-NAME is typed,
-#                   from here on, as a call of the ordinary function
-#                   NAMESPACE::NAME already resolved elsewhere in NODES
-#                   (its own module section, hir::resolve's `modules`
-#                   table -- see hir/resolve.tcl), instead of as a call of
-#                   the native itself -- see hir::types::BindingType and
-#                   native/native.tcl's module-native bridge, its only
-#                   caller (the native (Cranelift) backend's own way of
-#                   using an ordinary cross-file Botlish definition, such as
-#                   lib/web.bot's web::uri_escape_text, as a native's
-#                   *executable* implementation, while every other backend
-#                   keeps calling the native's own registered -impl).
-#                   Resolved by binding identity right after resolve/hygiene
-#                   (below), not by re-matching text later, so it survives
-#                   hir/specialize.tcl's own per-instance re-inference (which
-#                   re-runs hir::types::Call, and so would otherwise
-#                   recompute a plain native call's target fresh every time)
-#                   and cannot mistake a locally shadowed name for the
-#                   native, since it is keyed on the native's own resolved
-#                   root BindingId, never on source text.
-#
 #   -type-decls D   surface/lower.tcl's TypeDeclOf dicts (one per "type
 #                   Child = Parent in Domain" declaration the caller found,
 #                   across every module section plus its own top level, in
@@ -268,8 +250,8 @@ proc hir::build {exprs args} {
 # resolution, hygiene (hygiene.tcl), types and refinements happen here.
 proc hir::buildSyntax {nodes args} {
     set options [Options hir::buildSyntax \
-        {-mode program -strict 1 -origin "" -files {} -modules {} -native-result-overrides {} \
-            -module-native-targets {} -type-decls {} -error-decls {} -halt-on-resolution-errors 0} $args]
+        {-mode program -strict 1 -origin "" -files {} -modules {} \
+            -type-decls {} -error-decls {} -halt-on-resolution-errors 0} $args]
     set mode [dict get $options -mode]
     if {$mode ni {program sequence}} {
         error "hir::build: -mode must be program or sequence"
@@ -296,8 +278,6 @@ proc hir::buildSyntax {nodes args} {
             return $hir
         }
     }
-    ResolveModuleNativeTargets hir [dict get $options -module-native-targets]
-    ApplyNativeResultOverrides hir [dict get $options -native-result-overrides]
     hir::check hir
     if {[dict get $options -strict]} {
         foreach diagnostic [dict get $hir diagnostics] {
@@ -320,6 +300,12 @@ proc hir::buildSyntax {nodes args} {
 # HIR and become AOT blockers) this is what keeps every backend from
 # compiling a body that assumes a contract its own program breaks --
 # exactly what such a program meant before its parameter had one.
+#
+# A *declared* parameter type the program's own call cannot prove is
+# diagnosed too, but the HIR keeps the declared type (the analyses pin it);
+# the violation is recorded as `violatedDeclared` (parameter BindingId -> the
+# offending argument) so that a consumer that must not compile a body on the
+# assumption of a broken contract can recover: native::prepareHir does.
 proc hir::check {hirVar} {
     upvar 1 $hirVar hir
     hir::containers::index hir
@@ -713,44 +699,6 @@ proc hir::exprsAt {hir origin} {
         }
     }
     return $result
-}
-
-# Sets the `nativeResultOverride` field of every call expression at one of
-# OVERRIDES' IR paths (PATH -> type form) to that path's type, before type
-# inference runs. hir::types::Call (types.tcl) consults this field, when
-# present, in place of whatever its callee's own type would otherwise give
-# the call's result -- so a trusted declared type survives regardless of
-# what expression the call's callee happens to be.
-#
-# This exists for exactly one caller: the native (Cranelift) backend's
-# ExpandNativeBodies (native/native.tcl), which substitutes a trusted
-# native's -native-body block for its call's callee, before this HIR is
-# built. Without this, the call's result would be inferred from the body
-# block like any ordinary call -- discarding the native's own registered
-# -result-type (core/native.tcl), which is what actually established the
-# call's result as, for example, str[UriQueryValue] (an opaque, evidence-
-# only refinement -- see core/type.tcl -- that no ordinary Botlish body can
-# reconstruct structurally). The override is looked up purely by the
-# native's own registered metadata, keyed by a path ExpandNativeBodies
-# itself assigned during substitution: nothing here lets a program mint an
-# arbitrary trusted type for itself (interp/compile never call hir::build
-# with this option at all, and a hand-written .ir/.hir program is checked
-# against core/ir.tcl's closed grammar -- which has no such construct --
-# before it ever reaches this pass).
-#
-# Set once, before hir::types::infer runs, on the base HIR: every later
-# per-instance re-inference (hir/specialize.tcl's inferRegion) reads the
-# same field from its own copy of this HIR, so the override survives
-# specialization too.
-proc hir::ApplyNativeResultOverrides {hirVar overrides} {
-    upvar 1 $hirVar hir
-    dict for {path type} $overrides {
-        foreach e [exprsAt $hir [list ir $path]] {
-            if {[dict get $hir exprs $e kind] eq "call"} {
-                dict set hir exprs $e nativeResultOverride $type
-            }
-        }
-    }
 }
 
 apply {{dir} {

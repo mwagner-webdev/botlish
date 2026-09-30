@@ -19,7 +19,7 @@ if {[file extension $path] eq ".bot"} {
     set hir [surface::readProgramFile $path]
 } else {
     core::loadLibrary web
-    set hir [native::buildProgramHir [core::loadProgramFile $path]]
+    set hir [native::prepareHir [hir::build [core::loadProgramFile $path] -strict 0]]
 }
 set lines {}
 foreach {label runs mode} {first-run 1 sites steady-state 3 summary} {

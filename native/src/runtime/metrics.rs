@@ -36,7 +36,7 @@
 
 use super::show::tcl_list;
 use super::value::{
-    KIND_BIGINT, KIND_CELL, KIND_CLOSURE, KIND_LIST, KIND_LISTPLAN, KIND_MUTARRAY, KIND_NATIVE, KIND_RESULT, KIND_SET,
+    KIND_BIGINT, KIND_CLOSURE, KIND_LIST, KIND_LISTPLAN, KIND_MUTARRAY, KIND_NATIVE, KIND_RESULT, KIND_SET,
     KIND_STR, KIND_STRPLAN,
 };
 use std::collections::HashMap;
@@ -54,7 +54,6 @@ pub fn kind_name(kind: u8) -> &'static str {
         KIND_RESULT => "Result",
         KIND_CLOSURE => "Block",
         KIND_NATIVE => "Native",
-        KIND_CELL => "Cell",
         KIND_MUTARRAY => "MutableArray",
         KIND_SET => "ImmutableSet",
         KIND_STRPLAN => "StringPlan",
@@ -67,8 +66,8 @@ pub fn kind_name(kind: u8) -> &'static str {
 /// private virtual-construction plan kinds (M8.a) come last: they are
 /// implementation objects, never program values, reported separately so a
 /// String/List allocation count always means semantic flat objects only.
-pub const KINDS: [u8; 11] = [
-    KIND_STR, KIND_LIST, KIND_SET, KIND_MUTARRAY, KIND_BIGINT, KIND_RESULT, KIND_CLOSURE, KIND_CELL, KIND_NATIVE,
+pub const KINDS: [u8; 10] = [
+    KIND_STR, KIND_LIST, KIND_SET, KIND_MUTARRAY, KIND_BIGINT, KIND_RESULT, KIND_CLOSURE, KIND_NATIVE,
     KIND_STRPLAN, KIND_LISTPLAN,
 ];
 

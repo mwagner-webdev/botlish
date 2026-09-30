@@ -186,10 +186,10 @@ impl RootPlan {
 /// direct or dynamically-dispatched Botlish call (conservatively: the callee
 /// may allocate even when this instruction's own operation cannot -- see
 /// this module's doc and the milestone brief's item 9), or a construction
-/// (`cell`/`closure`) whose own runtime helper always allocates.
+/// (`closure`) whose own runtime helper always allocates.
 fn is_safepoint(inst: &Inst) -> bool {
     match inst {
-        Inst::Cell { .. } | Inst::Closure { .. } | Inst::Construct { .. } => true,
+        Inst::Closure { .. } | Inst::Construct { .. } => true,
         Inst::Op { op, .. } => op_may_allocate(*op),
         Inst::Call { may_gc, .. } | Inst::CallEnv { may_gc, .. } | Inst::CallMulti { may_gc, .. } | Inst::CallEnvMulti { may_gc, .. } => *may_gc,
         Inst::CallValue { .. } => true,
@@ -216,14 +216,10 @@ fn def_use(inst: &Inst, params: u32) -> (Vec<Reg>, Vec<Reg>) {
         | Inst::Native { dst, .. }
         | Inst::FnValue { dst, .. }
         | Inst::SelfClosure { dst }
-        | Inst::Capture { dst, .. }
-        | Inst::Cell { dst } => (vec![*dst], vec![]),
+        | Inst::Capture { dst, .. } => (vec![*dst], vec![]),
         Inst::StaticGet { dst, .. } => (vec![*dst], vec![]),
         Inst::Move { dst, src } => (vec![*dst], vec![*src]),
-        Inst::CellSet { cell, value } => (vec![], vec![*cell, *value]),
         Inst::StaticSet { value, .. } => (vec![], vec![*value]),
-        Inst::CellGet { dst, cell } => (vec![*dst], vec![*cell]),
-        Inst::CellCheck { dst, cell, .. } => (vec![*dst], vec![*cell]),
         Inst::Closure { dst, captures, .. } => (vec![*dst], captures.clone()),
         Inst::Guard { value, .. } | Inst::GuardBool { value } => (vec![], vec![*value]),
         Inst::Op { dst, args, .. } => (vec![*dst], args.clone()),
@@ -886,24 +882,24 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // #29: a managed value live across a MayGc op must be rooted. `cell`
-    // allocates but takes no operands, so it isolates "must survive an
-    // allocation" from "is itself the allocation's own argument" (that case
-    // is covered separately below).
+    // #29: a managed value live across a MayGc op must be rooted. An empty
+    // `listnew` allocates but takes no operands, so it isolates "must survive
+    // an allocation" from "is itself the allocation's own argument" (that
+    // case is covered separately below).
 
     #[test]
     fn tagged_live_across_gc_is_rooted() {
         let f = program_of(
             3,
             "",
-            "    %0 = str \"a\"\n    %1 = cell\n    %2 = op streq %0 %0\n    ret %2\n",
+            "    %0 = str \"a\"\n    %1 = op listnew\n    %2 = op streq %0 %0\n    ret %2\n",
         );
         let plan = plan(&f, true);
         assert_eq!(plan.safepoints, 1);
-        assert_eq!(plan.max_live, 1, "only %0 is live across the cell allocation");
+        assert_eq!(plan.max_live, 1, "only %0 is live across the list allocation");
         assert_eq!(plan.root_candidates, 1);
         assert!(plan.slot_of[0].is_some());
-        assert!(plan.slot_of[1].is_none(), "the fresh cell itself is dead before any later safepoint");
+        assert!(plan.slot_of[1].is_none(), "the fresh list itself is dead before any later safepoint");
         assert_eq!(plan.num_slots, 1);
     }
 
@@ -936,7 +932,7 @@ mod tests {
         let f = program_of(
             4,
             "",
-            "    %0 = str \"a\"\n    %1 = str \"b\"\n    %2 = cell\n    %3 = op streq %0 %1\n    ret %3\n",
+            "    %0 = str \"a\"\n    %1 = str \"b\"\n    %2 = op listnew\n    %3 = op streq %0 %1\n    ret %3\n",
         );
         let plan = plan(&f, true);
         assert_eq!(plan.safepoints, 1);
@@ -1372,7 +1368,7 @@ mod tests {
         let f = program_of(
             3,
             "",
-            "    %0 = str \"a\"\n    %1 = cell\n    %2 = op streq %0 %0\n    ret %2\n",
+            "    %0 = str \"a\"\n    %1 = op listnew\n    %2 = op streq %0 %0\n    ret %2\n",
         );
         for native_frame_supported in [true, false] {
             let plan = plan(&f, native_frame_supported);

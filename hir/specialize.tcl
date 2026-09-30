@@ -433,7 +433,7 @@ proc hir::specialize::Intersect {a b} {
 # A call's argument that is anything other than an unchanged forward of the
 # very parameter it feeds contributes its own semantic type's evidence
 # (hir/types.tcl's Call already computed this on the first, generic pass --
-# including, after hir::ApplyNativeResultOverrides, a trusted native's
+# including, through a call's nativeResultOverride, a trusted native's
 # declared result). A transformed value (e.g. concat(q, "")) has no
 # evidence in its own semantic type unless the operation is itself known to
 # preserve it, so it correctly contributes {} -- dropping the fact for that

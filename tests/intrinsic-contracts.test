@@ -525,7 +525,7 @@ test ic-callable-through-hof {a callable passed on to another function whose own
 
 test ic-callable-no-target {calling an inferred callable parameter stays callvalue: a contract, never a code target} -body {
     set h [icCompile "${::icPredUse}pred_use(is_tcl_alpha)"]
-    set nir [dict get [native::lower::program [native::buildProgramHir [hir::lower $h]]] text]
+    set nir [dict get [native::lower::program [native::prepareHir $h]] text]
     regexp {= callvalue } $nir
 } -result 1
 
@@ -552,7 +552,7 @@ test ic-result-bool-preserved {a created Block's body-inferred bool result survi
     set h [icCompile "${::icPick}classify(true, \"x\")"]
     set x [icBlock $h is_x?]
     set exact [hir::bindingType $h [lindex [dict keys [dict filter [dict get $h bindings] script {b v} {expr {[dict get $v name] eq "is_x?"}}]] 0]]
-    set hir [native::buildProgramHir [hir::lower $h]]
+    set hir [native::prepareHir $h]
     set spec [hir::specialize::analyze $hir]
     set pickIf ""
     set call ""
@@ -605,7 +605,7 @@ test ic-checked-not-bearing {a checked-only contract is not precondition-bearing
 
 test ic-keys-unchanged {inferred contracts never enter specialization keys: the scanner's instances are keyed by the argument kinds exactly as before (native / block), and each instance's body sees the Fn contract} -body {
     set src "fn scan(p, n):\n    loop i from 0 to n:\n        if p(\"a\"):\n            continue\n        return i\n    n\nfn loc?(c):\n    is_tcl_alnum(c)\n\[scan(is_tcl_alpha, 3), scan(loc?, 2)\]"
-    set hir [native::buildProgramHir [hir::lower [icCompile $src]]]
+    set hir [native::prepareHir [icCompile $src]]
     set spec [hir::specialize::analyze $hir]
     set labels [lmap id [dict get $spec used] {hir::specialize::label $spec $id}]
     set scan [lsearch -inline -all $labels scan<*]

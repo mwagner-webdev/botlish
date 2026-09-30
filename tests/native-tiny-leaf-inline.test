@@ -66,7 +66,7 @@ proc HasCallIn {body} {
 # instances in the actual refined-checks.ir/web.bot chain (identical to
 # tests/native-bitshift.test's own refinedChecksHir).
 proc refinedChecksHir {} {
-    return [native::buildProgramHir [core::loadProgramFile \
+    return [nativeHirOfIR [core::loadProgramFile \
         [file join $::projectRoot bench refined-checks.ir]]]
 }
 

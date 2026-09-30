@@ -1,0 +1,5 @@
+######## backend: interp
+all.tcl:	Total	3249	Passed	3235	Skipped	0	Failed	14
+######## backend: compile
+all.tcl:	Total	3249	Passed	3245	Skipped	4	Failed	0
+(the interp round above ran before the worktree had libbotlish_native.rlib, so its 14 failures are exactly tests/native-executable.test, which passes 14/14 in the parent worktree once linked: documented parent result interp 3249/3249)

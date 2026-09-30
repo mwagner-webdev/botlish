@@ -1,3 +1,6 @@
+# LEGACY / RELIFT COMPARISON (relift-vs-direct comparison for the typed-builder audit): needs native::buildProgramHir, which
+# DIRECT-HIR-NATIVE-PATH.md removed. Runs only against a tree from before that
+# milestone; the production route is audit/direct-hir-native-path/tools/.
 set root [pwd]
 source [file join $root compiler compiler.tcl]
 source [file join $root surface surface.tcl]

@@ -1,0 +1,12 @@
+# Semantic instances: identity at several types, list::find with a handled
+# NotFound.
+fn identity(v):
+    v
+fn is_big(n):
+    n > 10
+fn find_big(xs):
+    r = list::find(xs, is_big):
+        on NotFound:
+            0
+    r
+[identity(3), identity("s"), identity([1, 2]), find_big([1, 20, 3]), find_big([5])]

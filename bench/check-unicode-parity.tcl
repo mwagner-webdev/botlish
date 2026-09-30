@@ -49,12 +49,17 @@ proc tclReference {s} {
 }
 
 proc emailishUnder {backend s} {
+    set exprs [list [list call {ref Emailish?} [list const str $s]]]
+    # The native backends compile HIR (native::evalHir), never core IR: the
+    # one-call program is read into HIR (hir::build) first.
+    if {$backend in {cranelift cranelift-generic}} {
+        set options [expr {$backend eq "cranelift-generic" ? {-specialize 0} : {}}]
+        return [core::value::show [native::evalHir [hir::build $exprs -strict 0] {*}$options]]
+    }
     set saved [core::useBackend]
     core::useBackend $backend
     try {
-        set exprs [list [list call {ref Emailish?} [list const str $s]]]
-        set result [core::evalProgram $exprs]
-        return [core::value::show $result]
+        return [core::value::show [core::evalProgram $exprs]]
     } finally {
         core::useBackend $saved
     }

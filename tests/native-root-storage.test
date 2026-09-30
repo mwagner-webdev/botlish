@@ -122,13 +122,13 @@ test storage-no-roots-2 {a NativeFrame function's own CLIF never imports rt_stac
 # one safepoint that could reach it.
 
 test storage-one-root-1 {a rooted value with one internal safepoint and no calls uses NativeFrame} -body {
-    set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=3 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = str \"kept\"\n    %1 = cell\n    %2 = op streq %0 %0\n    ret %2\nend\n"
+    set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=3 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = str \"kept\"\n    %1 = op listnew\n    %2 = op streq %0 %0\n    ret %2\nend\n"
     set report [rootsOfNir $text]
     list [storageOf $report "<program>"] [slotsOf $report "<program>"] [underGcStress {runNir $text}]
 } -result {{native frame} 1 {value {bool true}}}
 
 test storage-one-root-2 {that same NativeFrame function's CLIF never imports rt_stack_overflow} -body {
-    set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=3 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = str \"kept\"\n    %1 = cell\n    %2 = op streq %0 %0\n    ret %2\nend\n"
+    set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=3 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = str \"kept\"\n    %1 = op listnew\n    %2 = op streq %0 %0\n    ret %2\nend\n"
     set clif [clifOfNir $text]
     usesHelper $clif [clifFunctionBlock $clif "<program>"] rt_stack_overflow
 } -result 0
@@ -147,7 +147,7 @@ test storage-multi-root-1 {non-overlapping roots reuse one NativeFrame slot, cor
 } -result {{native frame} 1 {value {str bc}}}
 
 test storage-multi-root-2 {two simultaneously live NativeFrame roots never share a slot, and survive stress} -body {
-    set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=4 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = str \"a\"\n    %1 = str \"b\"\n    %2 = cell\n    %3 = op streq %0 %1\n    ret %3\nend\n"
+    set text "${nirHeader}func 0 \"<program>\" params=0 env=0 regs=4 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = str \"a\"\n    %1 = str \"b\"\n    %2 = op listnew\n    %3 = op streq %0 %1\n    ret %3\nend\n"
     set report [rootsOfNir $text]
     list [storageOf $report "<program>"] [slotsOf $report "<program>"] [underGcStress {runNir $text}]
 } -result {{native frame} 2 {value {bool false}}}

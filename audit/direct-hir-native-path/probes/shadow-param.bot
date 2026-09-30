@@ -1,0 +1,9 @@
+# A parameter and a local both shadow an outer name; a closure captures each.
+n = 100
+fn make(n):
+    fn get():
+        n
+    get
+g = make(7)
+h = make(8)
+[g(), h(), n]

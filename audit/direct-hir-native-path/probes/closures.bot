@@ -1,0 +1,11 @@
+# Capturing closures: same block in different environments, nested closures,
+# returned closures.
+fn counter_from(start):
+    fn step(k):
+        fn add(y):
+            start + k + y
+        add
+    step
+s1 = counter_from(10)
+s2 = counter_from(20)
+[s1(1)(2), s2(1)(2), s1(3)(4)]

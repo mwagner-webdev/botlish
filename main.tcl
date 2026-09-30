@@ -2,7 +2,7 @@
 #
 #   tclsh9.0 main.tcl [-backend interp|compile|cranelift|cranelift-generic] [-code] [-hir] [-ast]
 #                    [-aot] [-aot-data] [-aot-spec] [-emit-nir] [-emit-clif]
-#                    [-emit-native-executable] [FILE.ir|FILE.hir|FILE.bot ...]
+#                    [-emit-native-executable] [FILE.bot|FILE.hir|FILE.ir ...]
 #
 # Runs the given program files (default: every examples/*.ir) and prints
 # each program's value, with runtime evidence shown as "text"#{Type}. With
@@ -24,8 +24,13 @@
 #
 # A .hir file (HIR text, e.g. examples/hir/*.hir) is read with hir::readFile;
 # a .bot file (Botlish source, e.g. examples/surface/*.bot) is parsed and
-# lowered to HIR with surface::readProgramFile. For both, the interpreter runs
-# the lowered IR and the compiler compiles the HIR itself.
+# lowered to HIR with surface::readProgramFile. From that HIR, the interpreter
+# runs the core IR it lowers to (the Tcl reference branch), the compiler
+# compiles the HIR itself and the native backends lower it directly to NIR
+# (native::evalHir): native compilation never goes through core IR
+# (DIRECT-HIR-NATIVE-PATH.md). A .ir file is core IR text: it runs on
+# interp and compile only, and is rejected by the native backends and by
+# -emit-native-executable (use the .hir fixtures of examples/hir/ instead).
 #
 # For every Block in the result (directly or as a list element) the runner
 # also prints the refinements visible in the Block's captured environment, so
@@ -45,7 +50,8 @@ proc probeValues {value} {
 }
 
 proc runFile {path showCode showHir showAst showAot showNative} {
-    puts "== [file tail $path] ([core::useBackend])"
+    global backend nativeBackends
+    puts "== [file tail $path] ($backend)"
     set hir ""
     set extension [file extension $path]
     if {$extension eq ".bot"} {
@@ -68,14 +74,24 @@ proc runFile {path showCode showHir showAst showAot showNative} {
             puts "   error: $hir ([dict get $options -errorcode])"
             return 1
         }
-        set program [hir::lower $hir]
+        # Core IR is only produced for the branches that consume it: the
+        # interpreter, the Tcl compiler (its program types and -code) --
+        # never the native backends.
+        set program ""
+        if {$backend in {interp compile} || $showCode} {
+            set program [hir::lower $hir]
+        }
         set run [dict get {
             compile   {core::compiler::evalHir $hir}
             cranelift {native::evalHir $hir}
             cranelift-generic {native::evalHir $hir -specialize 0}
             interp    {core::evalProgram $program}
-        } [core::useBackend]]
+        } $backend]
     } else {
+        if {$backend in $nativeBackends || $showNative ne ""} {
+            puts "   error: $path is core IR text; native compilation starts from HIR (.bot or .hir), never core IR (NATIVE AOT INPUT)"
+            return 1
+        }
         set program [core::loadProgramFile $path]
         set run {core::evalProgram $program}
     }
@@ -93,7 +109,7 @@ proc runFile {path showCode showHir showAst showAot showNative} {
     if {$showCode} {
         puts [core::compiler::generatedCode $program]
     }
-    set nativeOptions [expr {[core::useBackend] eq "cranelift-generic" ? {-specialize 0} : {}}]
+    set nativeOptions [expr {$backend eq "cranelift-generic" ? {-specialize 0} : {}}]
     if {$showNative ne "" && [catch {
         switch -- $showNative {
             nir  { puts -nonewline [native::nir $shownHir {*}$nativeOptions] }
@@ -108,7 +124,7 @@ proc runFile {path showCode showHir showAst showAot showNative} {
         return 1
     }
     puts "   value: [core::value::show $value 1]"
-    if {[core::useBackend] eq "compile"} {
+    if {$backend eq "compile"} {
         dict for {name type} [core::compiler::programTypes $program] {
             puts "   type:  $name : [hir::types::show $type]"
         }
@@ -133,8 +149,7 @@ proc emitExecutable {path} {
         switch -- [file extension $path] {
             .bot { set hir [surface::readProgramFile $path] }
             .hir { set hir [hir::readFile $path] }
-            .ir  { set hir [native::buildProgramHir [core::loadProgramFile $path]] }
-            default { throw {NATIVE AOT INPUT} "expected a .bot, .hir or .ir input file: $path" }
+            default { throw {NATIVE AOT INPUT} "expected a .bot or .hir input file (native executables are built from HIR, never from core IR text): $path" }
         }
         native::executable $hir [file rootname $path]
     } message options]} {
@@ -145,6 +160,8 @@ proc emitExecutable {path} {
     return 0
 }
 
+set nativeBackends {cranelift cranelift-generic}
+set backend [core::useBackend]
 set files {}
 set showCode 0
 set showHir 0
@@ -154,7 +171,18 @@ set showNative ""
 for {set i 0} {$i < [llength $argv]} {incr i} {
     set arg [lindex $argv $i]
     switch -- $arg {
-        -backend { core::useBackend [lindex $argv [incr i]] }
+        -backend {
+            set backend [lindex $argv [incr i]]
+            if {$backend in $nativeBackends} {
+                # Native backends are not core::registerBackend backends:
+                # they compile HIR (native::evalHir), never core IR.
+            } elseif {$backend in [core::backends]} {
+                core::useBackend $backend
+            } else {
+                puts stderr "unknown backend \"$backend\" (known: [core::backends] $nativeBackends)"
+                exit 2
+            }
+        }
         -code    { set showCode 1 }
         -hir     { set showHir 1 }
         -ast     { set showAst 1 }

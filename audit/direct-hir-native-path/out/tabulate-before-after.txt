@@ -1,0 +1,30 @@
+(first 17)     relift-before direct-after     diff
+requests               1808         1825      +17
+trivial                 610          605       -5
+hits                    913          935      +22
+walks                   379          383       +4
+rounds                   17           17       +0
+instances               285          285       +0
+used                    285          285       +0
+codegen                 258          245      -13
+functions               247          234      -13
+lines                  6381         6087     -294
+guards                   69           64       -5
+calls                   309          303       -6
+callvalues                9            8       -1
+bytes                109539       103331    -6208
+closed                  213          207       -6
+guarded                  41           38       -3
+open                      4            0       -4
+
+programs whose rows differ (digests excluded):
+  source-checks          aot 5/1/1->5/2/0
+  test-selection         aot 10/3/1->10/4/0
+  uri-steady             requests 151->137, trivial 32->35, hits 91->83, walks 32->23, instances 28->19, used 28->19, codegen 26->19, functions 24->17, lines 669->418, guards 5->0, calls 21->17, callvalues 1->0, bytes 11353->5674, aot 19/5/2->19/0/0
+  csv_geometric          requests 129->146, trivial 32->34, hits 77->88, walks 28->34, instances 20->24, used 20->24, lines 414->416, guards 0->2, bytes 7424->7578, aot 19/0/0->17/2/0
+  csv_records            requests 542->556, trivial 221->211, hits 247->266, walks 97->104, instances 74->79, used 74->79, codegen 66->60, functions 63->57, lines 1269->1224, guards 28->26, calls 99->97, bytes 24333->23650, aot 49/17/0->45/15/0
+  errors                 requests 9->8, trivial 4->3, aot 2/0/2->4/0/0
+  module-container       requests 2->0, walks 2->0, instances 2->0, used 2->0
+  module-web             trivial 27->29, hits 67->66, walks 21->20, instances 18->17, used 18->17
+  mutarray-typed         requests 4->1, trivial 0->1, hits 1->0, walks 3->0, instances 3->0, used 3->0
+  semantic-instances     aot 5/1/1->5/2/0

@@ -26,7 +26,7 @@ set configs {
     cranelift-generic {-specialize 0}
 }
 foreach path [lsort [glob -directory [file join $root bench] *.ir]] {
-    set hir [native::buildProgramHir [core::loadProgramFile $path]]
+    set hir [native::prepareHir [hir::build [core::loadProgramFile $path] -strict 0]]
     foreach {name opts} $configs {
         foreach runs $runList {
             set bests {}

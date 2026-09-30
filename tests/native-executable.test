@@ -18,7 +18,7 @@ proc aotParity {text {options {}}} {
         set hir [surface::readProgramFile $path]
         set expected {}
         foreach backend {interp compile cranelift-generic cranelift} {
-            set outcome [outcomeUnder $backend [hir::lower $hir]]
+            set outcome [outcomeUnderHir $backend $hir]
             if {[lindex $outcome 0] ne "value"} { error "$backend: $outcome" }
             lappend expected [lindex $outcome 1]
         }

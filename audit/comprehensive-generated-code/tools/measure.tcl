@@ -13,7 +13,7 @@ set argv [lassign $argv path runs sessions]
 if {[file extension $path] eq ".bot"} {
     set hir [surface::readProgramFile $path]
 } else {
-    set hir [native::buildProgramHir [core::loadProgramFile $path]]
+    set hir [native::prepareHir [hir::build [core::loadProgramFile $path] -strict 0]]
 }
 set bests {}
 for {set i 0} {$i < $sessions} {incr i} {

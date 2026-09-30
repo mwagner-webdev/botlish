@@ -2,7 +2,7 @@
 # keyfunctions.tcl -- INTRINSIC-FUNCTION-CONTRACT-INFERENCE.md's per-
 # function before/after record (spec items 39, 52-55): for each key function
 # of the canonical benchmarks, in the relifted pipeline bench/bench.tcl
-# compiles (native::buildProgramHir [hir::lower ...], so web::emailish?'s
+# compiles (native::prepareHir ..., so web::emailish?'s
 # helpers are present through the module-native bridge),
 #
 #   * the source/intrinsic signature (hir::signatures, when the tree has it)
@@ -45,7 +45,7 @@ foreach {program names} {
     source-checks {is_underscore? is_hyphen? classify_leading}
     test-selection {make_changed? affected?}
 } {
-    set hir [native::buildProgramHir [hir::lower [surface::readProgramFile [file join $root bench $program.bot]]]]
+    set hir [native::prepareHir [surface::readProgramFile [file join $root bench $program.bot]]]
     set spec [hir::specialize::analyze $hir]
     set regions [hir::specialize::regions $hir $spec]
     lappend L "" "== bench/$program.bot"

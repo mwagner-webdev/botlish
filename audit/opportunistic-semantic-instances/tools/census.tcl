@@ -1,4 +1,7 @@
 #!/usr/bin/env tclsh9.0
+# LEGACY / RELIFT COMPARISON (census whose "relifted" HIR is native::buildProgramHir of hir::lower): needs native::buildProgramHir, which
+# DIRECT-HIR-NATIVE-PATH.md removed. Runs only against a tree from before that
+# milestone; the production route is audit/direct-hir-native-path/tools/.
 # census.tcl -- the semantic-instance census of the frozen canonical corpus
 # (bench/*.bot and examples/stdlib/*.bot: the 17 programs), and its
 # relationship to codegen instances. Observation only: it runs against

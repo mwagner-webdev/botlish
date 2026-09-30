@@ -40,7 +40,7 @@ proc m7a::load {path} {
     if {[file extension $path] eq ".bot"} {
         return [surface::readProgramFile $path -strict 0]
     }
-    return [native::buildProgramHir [core::loadProgramFile $path]]
+    return [native::prepareHir [hir::build [core::loadProgramFile $path] -strict 0]]
 }
 
 # HIR of Botlish source TEXT, written to a scratch file first so module
@@ -578,7 +578,7 @@ proc m7a::census {path outdir} {
     } else {
         set t [dict get $report total]
         append s "allocations (one run): [dict get $t allocations] objects / [dict get $t allocatedBytes] bytes"
-        foreach kind {String List Block Cell BigInt Result} {
+        foreach kind {String List Block BigInt Result} {
             set k [dict get $report byKind $kind]
             if {[dict get $k allocations]} { append s " $kind=[dict get $k allocations]" }
         }

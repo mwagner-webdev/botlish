@@ -1,0 +1,14 @@
+# MutableArray[T]: create/get/set/freeze/copy and a raw mutable array.
+fn fill(n):
+    a = mutarray::create(n, 0)
+    loop i from 0 to n:
+        mutable_array_set(a, i, i * i)
+    a
+a = fill(6)
+c = mutable_array_allocate(3)
+mutable_array_set(c, 0, "x")
+mutable_array_set(c, 1, "y")
+mutable_array_set(c, 2, "z")
+d = mutable_array_allocate(3)
+mutable_array_copy(d, 0, c, 0, 3)
+[mutable_array_get(a, 5), mutable_array_freeze(a, 6), mutable_array_freeze(d, 3)]

@@ -1,0 +1,6 @@
+ interp
+	Total	3282	Passed	3282	Skipped	0	Failed	0
+ compile
+	Total	3282	Passed	3278	Skipped	4	Failed	0
+	4	coreScoping
+real 22m13s (interp then compile)

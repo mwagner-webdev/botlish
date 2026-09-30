@@ -68,7 +68,7 @@ proc wl::aiText {family n} {
 # WORKLOAD -> script returning its HIR.
 set wl::workloads [dict create \
     uri-steady {surface::readProgramFile [file join $::root bench uri-steady.bot]} \
-    refined-checks {core::loadLibrary web; native::buildProgramHir [core::loadProgramFile [file join $::root bench refined-checks.ir]]} \
+    refined-checks {core::loadLibrary web; native::prepareHir [hir::build [core::loadProgramFile [file join $::root bench refined-checks.ir]] -strict 0]} \
     ai_text_clean/ascii-100K {corpus::program ai_text_clean "clean_ai_text([corpus::literal [wl::aiText ascii 100000]])"} \
     ai_text_clean/emoji-100K {corpus::program ai_text_clean "clean_ai_text([corpus::literal [wl::aiText emoji 100000]])"} \
     ai_text_clean/ascii-10K {corpus::program ai_text_clean "clean_ai_text([corpus::literal [wl::aiText ascii 10000]])"} \
@@ -78,9 +78,9 @@ set wl::workloads [dict create \
     csv_geometric/10000 {corpus::program csv_geometric "csv_parse([corpus::literal [wl::csv 10000]])"} \
     csv_chunked/10000 {corpus::program csv_chunked "csv_parse([corpus::literal [wl::csv 10000]])"} \
     matmul/32x32 {corpus::program matmul "matmul([wl::matrix 32 3], [wl::matrix 32 5])"} \
-    fib {native::buildProgramHir [core::loadProgramFile [file join $::root bench fib.ir]]} \
-    loop-count {native::buildProgramHir [core::loadProgramFile [file join $::root bench loop-count.ir]]} \
-    sum-refined {native::buildProgramHir [core::loadProgramFile [file join $::root bench sum-refined.ir]]}]
+    fib {native::prepareHir [hir::build [core::loadProgramFile [file join $::root bench fib.ir]] -strict 0]} \
+    loop-count {native::prepareHir [hir::build [core::loadProgramFile [file join $::root bench loop-count.ir]] -strict 0]} \
+    sum-refined {native::prepareHir [hir::build [core::loadProgramFile [file join $::root bench sum-refined.ir]] -strict 0]}]
 
 proc wl::row {hir opt runs sessions} {
     set args [list -virtual-construction-opt $opt]

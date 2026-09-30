@@ -32,7 +32,7 @@ foreach path $files {
         if {[file extension $path] eq ".bot"} {
             set hir [surface::readProgramFile $path]
         } else {
-            set hir [native::buildProgramHir [core::loadProgramFile $path]]
+            set hir [native::prepareHir [hir::build [core::loadProgramFile $path] -strict 0]]
         }
         set spec [hir::specialize::analyze $hir]
         set open [hir::range::OpenInstances $spec]

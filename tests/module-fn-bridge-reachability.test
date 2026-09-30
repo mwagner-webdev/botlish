@@ -233,23 +233,23 @@ test module-fn-bridge-minimal-reproducer {module-fn bridge + module dependency +
 # root-identity below) is unchanged; only the storage class it feeds is.
 
 test module-fn-bridge-caller-captures-only-module-function {a caller of bridgefix::one_dep captures nothing: neither the bridged function nor its own module dependency (offset) is ever a lexical capture any more} -body {
-    set hir [native::buildProgramHir [callerShape toplevel-fn probe_one]]
+    set hir [nativeHirOfIR [callerShape toplevel-fn probe_one]]
     list [capturesOf $hir check] [capturesOf $hir bridgefix::one_dep]
 } -result {{} {}}
 
 test module-fn-bridge-transitive-dependencies-stay-in-module {a transitive chain (transitive -> is_marked -> marks) captures nothing at the module level any more; inner still captures its own genuine activation-local value (s), coexisting with its (now static, not captured) reference to bridgefix::transitive} -body {
-    set hir [native::buildProgramHir [callerShape nested-capturing probe_transitive]]
+    set hir [nativeHirOfIR [callerShape nested-capturing probe_transitive]]
     list [capturesOf $hir outer] [capturesOf $hir inner] \
         [capturesOf $hir bridgefix::transitive] [capturesOf $hir bridgefix::is_marked]
 } -result {{} s {} {}}
 
 test module-fn-bridge-two-dependencies-not-copied {two module dependencies (scale, offset) are module-static references from inside two_deps' own body, never captures -- and neither is the bridged reference to two_deps itself, from its caller} -body {
-    set hir [native::buildProgramHir [callerShape toplevel-fn probe_two]]
+    set hir [nativeHirOfIR [callerShape toplevel-fn probe_two]]
     list [capturesOf $hir check] [capturesOf $hir bridgefix::two_deps]
 } -result {{} {}}
 
 test module-fn-bridge-reference-keeps-root-identity {the bridged reference's own binding is still the native's root binding; its bridge is the module function's binding} -body {
-    set hir [native::buildProgramHir [callerShape toplevel-fn probe_one]]
+    set hir [nativeHirOfIR [callerShape toplevel-fn probe_one]]
     set refs [hirFind $hir ref probe_one]
     set e [lindex $refs 0]
     set b [hir::get $hir $e binding]
@@ -267,7 +267,7 @@ test module-fn-bridge-interp-hir-unbridged {without the native backend's bridge 
 # caller's structural capture of it is dropped by native lowering's own
 # CaptureList (a static fnvalue), so the caller stays environment-free.
 test module-fn-bridge-envless-target-caller-stays-envless {a caller of an environment-free bridged function (fn_dep -> inc) stays environment-free in NIR} -body {
-    set text [native::nir [native::buildProgramHir [callerShape toplevel-fn probe_fn]]]
+    set text [native::nir [nativeHirOfIR [callerShape toplevel-fn probe_fn]]]
     regexp {func \d+ "check" params=(\d+) env=(\d+)[^\n]*captures=(\d+)} $text -> nparams nenv ncaptures
     list $nparams $nenv $ncaptures
 } -result {1 0 0}
@@ -284,7 +284,7 @@ test module-fn-bridge-three-callers-one-implementation {three unrelated block ca
         {bind c {block {s} {bind inner {block {} {call {ref probe_two} {ref s}}}} {call {ref inner}}}}
         {call {ref list} {call {ref a} {const int 1}} {call {ref b} {const int 2}} {call {ref c} {const int 3}}}
     }
-    set hir [native::buildProgramHir $p]
+    set hir [nativeHirOfIR $p]
     set spec [hir::specialize::analyze $hir]
     set labels [lsearch -all -inline [lmap id [dict get $spec used] {hir::specialize::label $spec $id}] bridgefix::two_deps*]
     list [regexp -all {func \d+ "bridgefix::two_deps"} [native::nir $hir -tiny-leaf-inline-opt 0]] $labels [fourWay $p]
@@ -312,7 +312,7 @@ test module-fn-bridge-identity-independent-of-caller-shape {the bridged function
     set result {}
     set genericHeaders {}
     foreach shape $::callerShapes {
-        set hir [native::buildProgramHir [callerShape $shape probe_two]]
+        set hir [nativeHirOfIR [callerShape $shape probe_two]]
         set spec [hir::specialize::analyze $hir]
         dict set result $shape [lsort [lsearch -all -inline \
             [lmap id [dict get $spec used] {hir::specialize::label $spec $id}] bridgefix::two_deps*]]
@@ -335,9 +335,9 @@ test module-fn-bridge-matches-qualified-call {check(s) calling bridgefix::one_de
     puts -nonewline $ch "fn check(s):\n    bridgefix::one_dep(s)\ncheck(2)\n"
     close $ch
     set direct [surface::readProgramFile $main]
-    set bridged [native::buildProgramHir [callerShape toplevel-fn probe_one]]
+    set bridged [nativeHirOfIR [callerShape toplevel-fn probe_one]]
     list [capturesOf $direct check] [capturesOf $bridged check] \
-        [lindex [outcomeUnder cranelift [hir::lower $direct]] 1] \
+        [lindex [outcomeUnderHir cranelift $direct] 1] \
         [lindex [outcomeUnder cranelift [callerShape toplevel-fn probe_one]] 1]
 } -result {{} {} 12 12}
 
@@ -347,7 +347,7 @@ test module-fn-bridge-matches-qualified-call-instances {the bridged spelling and
     puts -nonewline $ch "fn check(s):\n    bridgefix::two_deps(s)\n\[check(1), bridgefix::two_deps(3)\]\n"
     close $ch
     set direct [surface::readProgramFile $main]
-    set bridged [native::buildProgramHir {
+    set bridged [nativeHirOfIR {
         {bind check {block {s} {call {ref probe_two} {ref s}}}}
         {call {ref list} {call {ref check} {const int 1}} {call {ref probe_two} {const int 3}}}
     }]
@@ -375,7 +375,7 @@ test module-fn-bridge-out-of-scope-local-still-rejected {an ordinary out-of-scop
         {bind f {block {s} {bind hidden {const int 1}} {call {ref probe_one} {ref s}}}}
         {call {ref +} {call {ref f} {const int 2}} {ref hidden}}
     }
-    set hir [native::buildProgramHir $p]
+    set hir [nativeHirOfIR $p]
     list [lmap d [hir::diagnostics $hir] {dict get $d kind}] \
         [lmap b $::parityBackends {lindex [outcomeUnder $b $p] 1}]
 } -result {UNBOUND {{CORE SEMANTIC UNBOUND} {CORE SEMANTIC UNBOUND} {CORE SEMANTIC UNBOUND} {CORE SEMANTIC UNBOUND}}}
@@ -446,7 +446,7 @@ test module-fn-bridge-emailish-refinement-in-user-block {a user-block caller of 
                 {block {} {const str no}}}}}
         {call {ref check} {const str someone@example.com}}
     }
-    set hir [native::buildProgramHir $p]
+    set hir [nativeHirOfIR $p]
     set calls [lsearch -all -inline -not [lmap e [hirFind $hir call] {
         set callee [hir::get $hir $e callee]
         expr {[hir::kind $hir $callee] eq "ref" && [hir::get $hir $callee name] in {emailish? Emailish?}
@@ -462,7 +462,7 @@ test module-fn-bridge-emailish-refinement-in-user-block {a user-block caller of 
 # local_extra_chars is module-retained again: built once at module
 # initialization (the program function), never inside web::emailish?.
 test module-fn-bridge-emailish-set-retained-once {refined-checks.ir: local_extra_chars' List and ImmutableSet are each constructed exactly once (module init), none per emailish? call} -body {
-    set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
+    set hir [nativeHirOfIR [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
     set webPath [file normalize [file join $::projectRoot lib web.bot]]
     set line [lsearch -regexp [split [core::ReadFile $webPath] \n] {^local_extra_chars = }]
     incr line

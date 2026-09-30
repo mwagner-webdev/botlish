@@ -1,0 +1,17 @@
+# Counting loop with break/continue, list loop with an early return.
+fn first_over(xs, limit):
+    loop x in xs:
+        if x > limit:
+            return x
+    0
+total = 0
+fn sum_to(n):
+    acc = 0
+    loop i from 0 to n:
+        if i == 3:
+            continue
+        if i > 7:
+            break
+        acc = acc + i
+    acc
+[first_over([1, 5, 9, 12], 8), first_over([1], 8), sum_to(20)]

@@ -374,7 +374,7 @@ test surface-modules-double-colon-single-level-only {a::b::c (two levels) is rej
 
 test surface-modules-uri-escape-uses-web-module {uriEscape's native call lowers to a direct call of web::uri_escape_text} -body {
     core::loadLibrary web
-    set hir [native::buildProgramHir {
+    set hir [nativeHirOfIR {
         {bind s {const str "a b"}}
         {call {ref uriEscape} {ref s}}
     }]
@@ -419,7 +419,7 @@ proc outcomeUnderValue {backend exprs} {
 # hex_digits/additional_unreserved_chars resolve as "staticget" reads.
 test surface-modules-uri-hex-digits-startup {web::hex_digits is one startup List; uri_escape_text is fully envless (module-static references are never captures), with no closure/callenv anywhere in its own startup or call path} -body {
     core::loadLibrary web
-    set hir [native::buildProgramHir {
+    set hir [nativeHirOfIR {
         {bind s {const str "a b"}}
         {call {ref uriEscape} {ref s}}
     }]
@@ -453,13 +453,13 @@ test surface-modules-uri-escape-native-parity {uriEscape's escaped text agrees i
         {call {ref uriEscape} {ref s}}
     }
     set interpValue [core::value::show [outcomeUnderValue interp $exprs] 1]
-    set nativeValue [core::value::show [native::evalHir [native::buildProgramHir $exprs]] 1]
+    set nativeValue [core::value::show [native::evalHir [nativeHirOfIR $exprs]] 1]
     list $interpValue $nativeValue
 } -result {{"a%20b%2Fc%25d~e_f.g%40h"#{UriQueryValue}} {"a%20b%2Fc%25d~e_f.g%40h"}}
 
 test surface-modules-refined-checks-still-400-0 {refined-checks.ir is unchanged on cranelift: [400, 0]} -body {
     core::loadLibrary web
-    set hir [native::buildProgramHir [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
+    set hir [nativeHirOfIR [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
     core::value::show [native::evalHir $hir] 1
 } -result {[400, 0]}
 

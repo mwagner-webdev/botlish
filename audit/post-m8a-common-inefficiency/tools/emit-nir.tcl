@@ -1,7 +1,7 @@
 #!/usr/bin/env tclsh9.0
 # emit-nir.tcl -- the NIR text native::measure/bench.tcl would run for a
 # canonical benchmark (POST-M8A-COMMON-INEFFICIENCY-CENSUS.md). Observation
-# only: native::buildProgramHir + native::nir with the given lowering
+# only: native::prepareHir + native::nir with the given lowering
 # options (none = the default M8.a-on baseline), exactly bench.tcl's path.
 #
 #   tclsh9.0 audit/post-m8a-common-inefficiency/tools/emit-nir.tcl PROGRAM.ir OUT.nir ?LOWER-OPTIONS...?
@@ -15,7 +15,7 @@ core::loadLibrary web
 if {[file extension $path] eq ".bot"} {
     set hir [surface::readProgramFile $path]
 } else {
-    set hir [native::buildProgramHir [core::loadProgramFile $path]]
+    set hir [native::prepareHir [hir::build [core::loadProgramFile $path] -strict 0]]
 }
 set f [open $out w]
 fconfigure $f -encoding utf-8 -translation lf

@@ -7,7 +7,6 @@
 //!   ...00000010   false          (2)
 //!   ...00000110   true           (6)
 //!   ...00001010   unit           (10)
-//!   ...00001110   unbound cell   (14)  never a program value
 //!   ccc...ccc100  UnicodeChar, stored as (codepoint << 3) | 4: an immediate
 //!                 (never heap-allocated, never a GC root) carrying its
 //!                 21-bit Unicode scalar value CCC directly in the word, the
@@ -35,7 +34,6 @@ pub const NO_VALUE: Value = 0;
 pub const FALSE: Value = 2;
 pub const TRUE: Value = 6;
 pub const UNIT: Value = 10;
-pub const UNBOUND: Value = 14;
 
 pub const SMALL_MIN: i64 = -(1 << 62);
 pub const SMALL_MAX: i64 = (1 << 62) - 1;
@@ -72,7 +70,8 @@ pub const KIND_LIST: u8 = 3;
 pub const KIND_RESULT: u8 = 4;
 pub const KIND_CLOSURE: u8 = 5;
 pub const KIND_NATIVE: u8 = 6;
-pub const KIND_CELL: u8 = 7;
+// Heap kind 7 was the forward-reference cell (removed by
+// DIRECT-HIR-NATIVE-PATH.md); its number is not reused.
 /// A MutableArray: fixed-capacity mutable indexed storage (see
 /// MutArrayObj). Distinct from KIND_LIST, whose ListObj is never mutated
 /// after construction.
@@ -205,15 +204,7 @@ pub struct NativeObj {
     pub native: u32,
 }
 
-/// A binding that closures may read before it is bound.
-#[repr(C)]
-pub struct CellObj {
-    pub hdr: Header,
-    pub value: Value,
-}
-
 pub const CLOSURE_CAPS_OFFSET: i32 = offset_of!(ClosureObj, caps) as i32;
-pub const CELL_VALUE_OFFSET: i32 = offset_of!(CellObj, value) as i32;
 pub const LIST_LEN_OFFSET: i32 = offset_of!(ListObj, len) as i32;
 pub const LIST_PTR_OFFSET: i32 = offset_of!(ListObj, ptr) as i32;
 

@@ -329,7 +329,7 @@ pub enum Inst {
     /// table, MODULE-STATIC-RETAINED-VALUES.md): a module-retained
     /// immutable binding's stable, program-lifetime storage, disjoint from
     /// any function's own closure environment -- reachable from any
-    /// function alike, never routed through Capture/CellGet. Emitted for
+    /// function alike, never routed through Capture. Emitted for
     /// every reference to a module-static binding, never only the function
     /// that first computes its value.
     StaticGet { dst: Reg, index: u32 },
@@ -340,10 +340,6 @@ pub enum Inst {
     /// the same function through anything but a later StaticGet.
     StaticSet { index: u32, value: Reg },
     Move { dst: Reg, src: Reg },
-    Cell { dst: Reg },
-    CellSet { cell: Reg, value: Reg },
-    CellGet { dst: Reg, cell: Reg },
-    CellCheck { dst: Reg, cell: Reg, name: String },
     Closure { dst: Reg, func: FuncId, captures: Vec<Reg> },
     Guard { kind: Kind, value: Reg, context: String },
     GuardBool { value: Reg },
@@ -738,13 +734,13 @@ fn summarize_call_effects(program: &mut Program, enabled: bool) {
     for (i, f) in program.functions.iter().enumerate() {
         for inst in &f.body {
             match inst {
-                Inst::Guard { .. } | Inst::GuardBool { .. } | Inst::CellCheck { .. }
+                Inst::Guard { .. } | Inst::GuardBool { .. }
                     | Inst::Raise { .. } | Inst::Fail { .. } | Inst::Reraise => local[i].0 = true,
                 Inst::Op { op, .. } => {
                     local[i].0 |= op_may_error(*op);
                     local[i].1 |= op_may_allocate(*op);
                 }
-                Inst::Cell { .. } | Inst::Closure { .. } => local[i].1 = true,
+                Inst::Closure { .. } => local[i].1 = true,
                 Inst::Construct { .. } => local[i] = (true, true),
                 Inst::CallValue { .. } => local[i] = (true, true),
                 _ => {}
@@ -963,9 +959,6 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
                 Inst::StaticGet { dst, index }
             }
             "move" => Inst::Move { dst, src: reg(3)? },
-            "cell" => Inst::Cell { dst },
-            "cellget" => Inst::CellGet { dst, cell: reg(3)? },
-            "cellcheck" => Inst::CellCheck { dst, cell: reg(3)?, name: quoted(4)? },
             "closure" => Inst::Closure { dst, func: num(3)?, captures: regs_from(4)? },
             "op" => {
                 let name = tokens.get(3).and_then(word).unwrap_or("");
@@ -1021,7 +1014,6 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
     let head = tokens.first().and_then(word).unwrap_or("");
     Ok(match head {
         "label" => Inst::Label(label(1)?),
-        "cellset" => Inst::CellSet { cell: reg(1)?, value: reg(2)? },
         "staticset" => {
             let index = num(1)?;
             if index >= program.statics {
@@ -1104,8 +1096,7 @@ fn validate(program: &Program) -> Result<(), NirError> {
                 | Inst::Char { dst, .. }
                 | Inst::Bool { dst, .. }
                 | Inst::Unit { dst }
-                | Inst::Native { dst, .. }
-                | Inst::Cell { dst } => used.push(*dst),
+                | Inst::Native { dst, .. } => used.push(*dst),
                 Inst::SelfClosure { dst } => {
                     if !f.env {
                         return fail(ctx("self in a function without environment".into()));
@@ -1131,9 +1122,7 @@ fn validate(program: &Program) -> Result<(), NirError> {
                     used.push(*dst);
                 }
                 Inst::Move { dst, src } => used.extend([*dst, *src]),
-                Inst::CellSet { cell, value } => used.extend([*cell, *value]),
                 Inst::StaticSet { value, .. } => used.push(*value),
-                Inst::CellGet { dst, cell } | Inst::CellCheck { dst, cell, .. } => used.extend([*dst, *cell]),
                 Inst::Closure { dst, func: g, captures } => {
                     match func(*g) {
                         Some(g) if g.env && g.captures as usize == captures.len() => {}
@@ -1318,7 +1307,7 @@ fn validate(program: &Program) -> Result<(), NirError> {
 ///     register i is;
 ///   * the operand of `ret` in a `planresult=1` function.
 /// Every other use -- a guard, an op, a native call, a Block/dynamic call,
-/// a closure capture, a cell, `retmulti`, a branch condition -- is
+/// a closure capture, `retmulti`, a branch condition -- is
 /// rejected. Definitions: `construct ... plan` must define a plan register
 /// and `construct ... flat` an ordinary one; a `call`/`callenv` of a
 /// `planresult=1` function must define a plan register; a `move` from a
@@ -1429,10 +1418,8 @@ fn validate_plans(program: &Program) -> Result<(), NirError> {
                 | Inst::Jump(_) | Inst::DeclaredErrorEq { .. } | Inst::Int { .. } | Inst::RawInt { .. }
                 | Inst::Str { .. } | Inst::Char { .. } | Inst::Bool { .. } | Inst::Unit { .. }
                 | Inst::Native { .. } | Inst::FnValue { .. } | Inst::SelfClosure { .. } | Inst::Capture { .. }
-                | Inst::Cell { .. } | Inst::StaticGet { .. } => {}
-                Inst::CellSet { cell, value } => used.extend([*cell, *value]),
+                | Inst::StaticGet { .. } => {}
                 Inst::StaticSet { value, .. } => used.push(*value),
-                Inst::CellGet { cell, .. } | Inst::CellCheck { cell, .. } => used.push(*cell),
                 Inst::Closure { captures, .. } => used.extend(captures),
                 Inst::Guard { value, .. } | Inst::GuardBool { value } => used.push(*value),
                 Inst::Op { args, .. } => used.extend(args),
@@ -1601,8 +1588,8 @@ fn def_of(inst: &Inst) -> Option<Reg> {
     match inst {
         Inst::Int { dst, .. } | Inst::RawInt { dst, .. } | Inst::Str { dst, .. } | Inst::Char { dst, .. }
         | Inst::Bool { dst, .. } | Inst::Unit { dst } | Inst::Native { dst, .. } | Inst::FnValue { dst, .. }
-        | Inst::SelfClosure { dst } | Inst::Capture { dst, .. } | Inst::Move { dst, .. } | Inst::Cell { dst }
-        | Inst::CellGet { dst, .. } | Inst::CellCheck { dst, .. } | Inst::Closure { dst, .. }
+        | Inst::SelfClosure { dst } | Inst::Capture { dst, .. } | Inst::Move { dst, .. }
+        | Inst::Closure { dst, .. }
         | Inst::Op { dst, .. } | Inst::Call { dst, .. } | Inst::CallEnv { dst, .. } | Inst::CallValue { dst, .. }
         | Inst::DeclaredErrorEq { dst, .. } | Inst::Construct { dst, .. } => Some(*dst),
         _ => None,
