@@ -943,7 +943,12 @@ test mat-gc-1 {managed defaults, nested typed arrays, List[MutableArray[T]], ali
 # ---------------------------------------------------------------------------
 # Source fence (spec items 48, 49, 82)
 
-test mat-fence-1 {no canonical program or stdlib module other than lib/mutarray.bot uses the new API} -body {
+# TYPED-MUTARRAY-BUILDER-REFACTOR.md reopened this fence for exactly one
+# region: the geometric mutable builder in examples/stdlib/csv_geometric.bot
+# and csv_records.bot (its two duplicated implementations) now uses
+# mutarray::create. Nothing else may use the new API; tests/typed-mutarray-
+# builder.test pins the narrower new fence inside those two files.
+test mat-fence-1 {no canonical program or stdlib module other than lib/mutarray.bot and the two geometric-builder corpus programs uses the new API} -body {
     set hits {}
     foreach pattern {bench/*.bot examples/surface/*.bot examples/stdlib/*.bot lib/*.bot} {
         foreach file [glob -nocomplain -directory $::projectRoot {*}[list $pattern]] {
@@ -956,7 +961,7 @@ test mat-fence-1 {no canonical program or stdlib module other than lib/mutarray.
                 if {[string match "#*" [string trim $line]]} continue
                 set line
             }] \n]
-            if {[file tail $file] ne "mutarray.bot"
+            if {[file tail $file] ni {mutarray.bot csv_geometric.bot csv_records.bot}
                     && ([string first mutarray::create $code] >= 0 || [string first "MutableArray\[" $code] >= 0)} {
                 lappend hits [file tail $file]
             }

@@ -297,8 +297,7 @@ foreach name [corpus::names] {
     set summaryPath [file join $outdir examples-stdlib "$name.summary.txt"]
     set status [dict create source "examples/stdlib/$name.bot" kind unknown]
     if {[catch {
-        foreach req [core::programFileRequires $path] { core::loadLibrary $req }
-        set hir [surface::compile [core::ReadFile $path] $path]
+        set hir [surface::readProgramFile $path]
     } err]} {
         dict set status kind failed
         dict set status detail "could not load/build HIR: $err"

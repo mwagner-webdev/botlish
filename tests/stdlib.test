@@ -143,11 +143,18 @@ foreach name [corpus::names] {
     } -result expected
 
     # bench/corpus.tcl times the lowered IR on every backend; this is what
-    # makes that the same program the compiler compiles from HIR.
-    test stdlib-hir-$name "$name: the HIR is what analysis of its lowered IR derives" -body {
-        set h [surface::readProgramFile [corpus::path $name] -strict 0]
-        expr {[hir::format $h] eq [hir::format [hir::build [hir::lower $h] -strict 0]]}
-    } -result 1
+    # makes that the same program the compiler compiles from HIR. A program
+    # that uses a module (mod::name, e.g. mutarray::create) genuinely does not
+    # round-trip this way -- see tests/surface-samples.test's identical
+    # exemption: its module sections are not recoverable from the flat core IR
+    # (its other checks, the differential backend runs above and below, hold
+    # for it exactly as for any other).
+    if {![regexp -line {^[^#\n]*::} [corpus::text $name]]} {
+        test stdlib-hir-$name "$name: the HIR is what analysis of its lowered IR derives" -body {
+            set h [surface::readProgramFile [corpus::path $name] -strict 0]
+            expr {[hir::format $h] eq [hir::format [hir::build [hir::lower $h] -strict 0]]}
+        } -result 1
+    }
 }
 
 # ---------------------------------------------------------------------------

@@ -643,7 +643,12 @@ test native-spec-14 {guard accounting: blockers and emitted guards agree} -body 
 # is List-only), so its own drop is entirely from `ht_rehash`'s `dest`/
 # `src` List grouping (this file's/native-escape.test's own former
 # "documented blocker").
-} -result {{ai_text_clean 5 5 0 0} {csv 17 19 0 0} {csv_chunked 28 28 1 1} {csv_geometric 24 24 0 0} {csv_records 84 82 29 29} {hashtable 63 53 25 25} {matmul 17 17 0 0} {string_replace 12 12 0 0} {string_reverse 4 4 0 0}}
+#
+# csv_geometric/csv_records changed with TYPED-MUTARRAY-BUILDER-REFACTOR.md (a
+# source change): the geometric builder now uses mutarray::create and threads
+# storage and length as separate values, which changes their blocker and
+# guard counts (measured, attributed in that report).
+} -result {{ai_text_clean 5 5 0 0} {csv 17 19 0 0} {csv_chunked 28 28 1 1} {csv_geometric 25 27 2 2} {csv_records 86 86 26 26} {hashtable 63 53 25 25} {matmul 17 17 0 0} {string_replace 12 12 0 0} {string_reverse 4 4 0 0}}
 
 # ---------------------------------------------------------------------------
 # Closures

@@ -182,6 +182,13 @@ test hir-specialize-17 {aggregate types are bounded} -body {
 # (6 -> 5, 29 -> 28) when semantic function instances made one call result
 # precise in the semantic HIR (OPPORTUNISTIC-SEMANTIC-INSTANCES.md); every
 # instance count is unchanged: semantic instances add no codegen instance.
+#
+# csv_geometric and csv_records changed with TYPED-MUTARRAY-BUILDER-REFACTOR.md
+# (a source change, not a compiler one): their geometric builder now uses
+# mutarray::create and threads storage and length separately, so the corpus
+# programs contain the mutarray module's own two functions and the builder's
+# specialization shape differs. The numbers below are measured, not derived;
+# the report attributes them function by function.
 test hir-specialize-corpus-1 {every used corpus instance is closed; the generic analysis is unchanged} -body {
     lmap name [corpus::names] {
         set hir [surface::readProgramFile [corpus::path $name]]
@@ -191,7 +198,7 @@ test hir-specialize-corpus-1 {every used corpus instance is closed; the generic 
         list $name [dict get $summary generic] [dict get $summary specialized] $statuses \
             [dict get $summary genericInstances] [dict get $summary specializedInstances]
     }
-} -result {{ai_text_clean 5 0 closed 0 5} {csv 17 0 closed 0 9} {csv_chunked 28 1 {closed guarded} 2 17} {csv_geometric 24 0 closed 1 12} {csv_records 84 29 {closed guarded} 12 45} {hashtable 63 25 {closed guarded} 6 23} {matmul 17 0 closed 0 6} {string_replace 12 0 closed 0 3} {string_reverse 4 0 closed 0 2}}
+} -result {{ai_text_clean 5 0 closed 0 5} {csv 17 0 closed 0 9} {csv_chunked 28 1 {closed guarded} 2 17} {csv_geometric 25 2 {closed guarded} 0 18} {csv_records 86 26 {closed guarded} 6 53} {hashtable 63 25 {closed guarded} 6 23} {matmul 17 0 closed 0 6} {string_replace 12 0 closed 0 3} {string_reverse 4 0 closed 0 2}}
 
 test hir-specialize-corpus-2 {specialized instances per corpus function} -body {
     set hir [surface::readProgramFile [corpus::path csv]]

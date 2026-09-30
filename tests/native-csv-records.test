@@ -27,7 +27,7 @@ interp recursionlimit {} 1000000
 set ::csvRecordsSource [regsub {\nsample\(\)\n$} [corpus::text csv_records] "\n"]
 
 proc sourceHir {text} {
-    return [surface::compile "$::csvRecordsSource\n$text\n" t.bot -strict 0]
+    return [corpus::compile "$::csvRecordsSource\n$text\n" t.bot -strict 0]
 }
 
 proc sourceIR {text} {

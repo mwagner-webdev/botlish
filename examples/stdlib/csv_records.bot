@@ -96,13 +96,19 @@
 
 # ---------------------------------------------------------------------------
 # GeometricBuilder (see csv_geometric.bot for the fuller description): a
-# contiguous, geometrically-growing MutableArray. Used three times below --
-# for a record's fields, for the file's records, and for the outer row-table
-# result -- with no change to the strategy itself.
+# contiguous, geometrically-growing MutableArray[T], its storage and length
+# threaded as two separate values. Used three times below -- for a record's
+# fields, for the file's records, and for the outer row-table result -- with
+# no change to the strategy itself, and with one untyped source
+# implementation serving all three element types.
 
-fn geo_new():
-    [mutable_array_allocate(0), 0]
+fn geo_new(first):
+    mutarray::create(1, first)
 
+# The capacity a builder holding LENGTH elements should grow CAPACITY to, to
+# fit one more: double, or exactly enough if doubling still isn't enough
+# (starting from capacity 0). This is the one place the growth policy is
+# decided; MutableArray itself has no notion of growing.
 fn geo_new_capacity(capacity, length):
     doubled = capacity * 2
     if doubled <= length:
@@ -110,26 +116,33 @@ fn geo_new_capacity(capacity, length):
 
     doubled
 
-fn geo_grow(storage, length):
+# STORAGE, grown if it has no room for one more element at LENGTH: a fresh,
+# larger MutableArray with STORAGE's first LENGTH elements copied in, or
+# STORAGE unchanged if it already has room. VALUE, the element about to be
+# appended, initializes every slot of the fresh array (mutarray::create
+# fills all of them); the slots at LENGTH and beyond are overwritten by later
+# appends before freeze(LENGTH) can ever expose them.
+fn geo_grow(storage, length, value):
     capacity = mutable_array_capacity(storage)
     if length < capacity:
         return storage
 
     new_capacity = geo_new_capacity(capacity, length)
-    fresh = mutable_array_allocate(new_capacity)
+    fresh = mutarray::create(new_capacity, value)
     mutable_array_copy(fresh, 0, storage, 0, length)
     fresh
 
-fn geo_append(builder, value):
-    storage = list_get(builder, 0)
-    length = list_get(builder, 1)
-    grown = geo_grow(storage, length)
+# STORAGE with VALUE appended at index LENGTH, grown first when full. The
+# storage is mutated (or replaced by a grown copy, which is returned); the
+# caller's new length is LENGTH + 1.
+fn geo_append(storage, length, value):
+    grown = geo_grow(storage, length, value)
     mutable_array_set(grown, length, value)
-    [grown, length + 1]
+    grown
 
-fn geo_finish(builder):
-    storage = list_get(builder, 0)
-    length = list_get(builder, 1)
+# STORAGE's first LENGTH elements as an ordinary immutable List
+# (finalization: a single exact-size copy, see mutable_array_freeze).
+fn geo_finish(storage, length):
     mutable_array_freeze(storage, length)
 
 # ---------------------------------------------------------------------------
@@ -165,28 +178,44 @@ fn scan_field(text, index):
 
     scan_unquoted(text, index, index)
 
-fn scan_record(text, index, fields):
-    scanned = scan_field(text, index)
-    more = geo_append(fields, list_get(scanned, 0))
-    stop = list_get(scanned, 1)
+# The rest of a record whose first COUNT fields are in FIELDS, the last field
+# ending at STOP. (Defined before scan_record, its only caller, like every
+# helper in this file: a caller placed *before* its callee makes the native
+# specialization keep generic, guarded copies of the whole call chain --
+# TYPED-MUTARRAY-BUILDER-REFACTOR.md, "Definition-order sensitivity".)
+fn scan_record_rest(text, stop, fields, count):
     delimiter = peek(text, stop)
     if delimiter == ",":
-        return scan_record(text, stop + 1, more)
+        scanned = scan_field(text, stop + 1)
+        more = geo_append(fields, count, list_get(scanned, 0))
+        return scan_record_rest(text, list_get(scanned, 1), more, count + 1)
 
     if delimiter == "\n":
-        return [geo_finish(more), stop + 1]
+        return [geo_finish(fields, count), stop + 1]
 
-    [geo_finish(more), stop]
+    [geo_finish(fields, count), stop]
 
-fn scan_records(text, index, records):
+# The record starting at INDEX and the index where it stops: the first field
+# (a record always has one, possibly empty) starts the FIELDS builder.
+fn scan_record(text, index):
+    scanned = scan_field(text, index)
+    scan_record_rest(text, list_get(scanned, 1), geo_new(list_get(scanned, 0)), 1)
+
+# The records from INDEX on, the first COUNT records already in RECORDS.
+fn scan_records(text, index, records, count):
     if index >= length(text):
-        return geo_finish(records)
+        return geo_finish(records, count)
 
-    scanned = scan_record(text, index, geo_new())
-    scan_records(text, list_get(scanned, 1), geo_append(records, list_get(scanned, 0)))
+    scanned = scan_record(text, index)
+    more = geo_append(records, count, list_get(scanned, 0))
+    scan_records(text, list_get(scanned, 1), more, count + 1)
 
 fn csv_parse(text):
-    scan_records(text, 0, geo_new())
+    if length(text) == 0:
+        return []
+
+    scanned = scan_record(text, 0)
+    scan_records(text, list_get(scanned, 1), geo_new(list_get(scanned, 0)), 1)
 
 # ---------------------------------------------------------------------------
 # HashTable (see hashtable.bot for the algorithm's description; identical,
@@ -406,27 +435,39 @@ fn row_table(headers, header_count, fields, presize):
     row_fill(table, headers, fields, 0, list_length(fields))
 
 # RECORDS[i..) (RECORDS[0] is the header row, already consumed by the
-# caller) as row HashTables, appended to the outer GeometricBuilder OUTER --
-# req #5's "one existing efficient construction strategy" for the result,
-# not repeated list_append.
-fn build_rows(records, i, headers, header_count, outer, presize):
+# caller) as row HashTables, appended to the outer GeometricBuilder OUTER
+# (storage) holding COUNT row tables so far -- req #5's "one existing
+# efficient construction strategy" for the result, not repeated list_append.
+#
+# OUTER's declared MutableArray[mutarray] is this file's one concrete
+# (non-generic) parameter contract on the builder path: build_rows appends a
+# value it computes itself (TABLE, statically a mutarray), so its own
+# definition must already know OUTER holds mutarrays -- an untyped OUTER is
+# analyzed as a raw mutarray of unknown elements, and geo_grow would then
+# copy those unknown slots into a MutableArray[mutarray]. The geo_* functions
+# themselves stay untyped. (REFACTOR-FINDING: see
+# TYPED-MUTARRAY-BUILDER-REFACTOR.md, "Definition-level obstruction".)
+fn build_rows(records, i, headers, header_count, outer: MutableArray[mutarray], count, presize):
     if i >= list_length(records):
-        return geo_finish(outer)
+        return geo_finish(outer, count)
 
     table = row_table(headers, header_count, list_get(records, i), presize)
-    build_rows(records, i + 1, headers, header_count, geo_append(outer, table), presize)
+    build_rows(records, i + 1, headers, header_count, geo_append(outer, count, table), count + 1, presize)
 
 # CSV TEXT, with a header row, as an immutable List of mutable HashTables:
 # one per data row, keyed by the header row's own String objects (shared,
 # not reconstructed, across every row -- see the file header). Empty input
-# and header-only input both produce [] (req #9).
+# and header-only input both produce [] (req #9); otherwise the first row
+# table starts the outer builder.
 fn csv_records_generic(text, presize):
     records = csv_parse(text)
-    if list_length(records) == 0:
+    if list_length(records) <= 1:
         return []
 
     headers = list_get(records, 0)
-    build_rows(records, 1, headers, list_length(headers), geo_new(), presize)
+    header_count = list_length(headers)
+    first = row_table(headers, header_count, list_get(records, 1), presize)
+    build_rows(records, 2, headers, header_count, geo_new(first), 1, presize)
 
 # The general baseline: every row table starts at default capacity, not
 # knowing how many fields it will hold (req #46).

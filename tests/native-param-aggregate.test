@@ -22,7 +22,7 @@ source [file join $::projectRoot examples stdlib corpus.tcl]
 interp recursionlimit {} 1000000
 
 proc sourceHir {text} {
-    return [surface::compile $text t.bot -strict 0]
+    return [corpus::compile $text t.bot -strict 0]
 }
 
 # The List allocation count of TEXT under PARAM-AGGREGATE-OPT (1 or 0).
@@ -342,10 +342,15 @@ test paramagg-geometric-1 {GeometricBuilder's csv_parse value is unaffected} -bo
     assertParity [corpus::text csv_geometric]
 } -result {list {{list {{str name} {str age}}} {list {{str Alice} {str 30}}} {list {{str Bob} {str 40}}}}}
 
-test paramagg-geometric-2 {geo_append's own input unpack/output rebox call sites drop out} -body {
+# TYPED-MUTARRAY-BUILDER-REFACTOR.md: the geometric builder no longer packs
+# storage and length into a [storage, length] pair, so geo_append has nothing
+# to unpack or rebox and returns a single value (its grown storage): no
+# listget/listnew, and no multi-value result (this pin used to be {0 1}: the
+# pair's virtualization, results=2, was what kept those out before).
+test paramagg-geometric-2 {geo_append takes storage, length and value separately and returns one value: no List unpack/rebox and no multi-value result at all} -body {
     set match [funcNir [nirOf [corpus::text csv_geometric]] geo_append]
-    list [regexp {listget|listnew} $match] [regexp {results=2} $match]
-} -result {0 1}
+    list [regexp {listget|listnew} $match] [regexp {results=} $match]
+} -result {0 0}
 
 test paramagg-chunked-1 {ChunkedBuilder's csv_parse value is unaffected} -body {
     assertParity [corpus::text csv_chunked]

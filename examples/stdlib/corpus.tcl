@@ -60,8 +60,36 @@ proc corpus::text {name} {
     return [core::ReadFile [path $name]]
 }
 
+# The HIR of the program TEXT (named FILENAME in every origin), with each
+# module its qualified references (mod::name, e.g. mutarray::create) name
+# loaded and compiled alongside it. surface::compile does not do that -- only
+# surface::readProgramFile does, and only from a file -- but a corpus program
+# is compiled from TEXT (a definitions-only prefix plus a driver), so this is
+# surface::modules::compileProgramFile's own steps over text instead of a
+# file. -strict as surface::compile's.
+proc corpus::compile {source filename args} {
+    set strict 1
+    foreach {option value} $args {
+        if {$option ne "-strict"} {
+            error "corpus::compile: unknown option \"$option\""
+        }
+        set strict $value
+    }
+    set ast [surface::parse $source $filename]
+    set state [dict create files [dict create f1 [dict get $ast span file]] nextFile 2 \
+        loaded [dict create] stack {} sections {} typeDecls {} errorDecls {}]
+    surface::modules::CollectAndLoad state $ast
+    lassign [surface::lower::SplitTypeDecls [dict get $ast body]] executable ownDecls ownErrorDecls
+    set hir [hir::buildSyntax [surface::lower::Sequence $executable] -strict 0 \
+        -origin [surface::lower::Origin [dict get $ast span] ""] \
+        -files [dict get $state files] -modules [dict get $state sections] \
+        -type-decls [concat [dict get $state typeDecls] $ownDecls] \
+        -error-decls [concat [dict get $state errorDecls] $ownErrorDecls]]
+    return [surface::lower::Finish $hir $strict]
+}
+
 proc corpus::program {name driver args} {
-    return [surface::compile "[text $name]\n$driver\n" [path $name] {*}$args]
+    return [compile "[text $name]\n$driver\n" [path $name] {*}$args]
 }
 
 proc corpus::run {backend hir} {

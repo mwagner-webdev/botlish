@@ -1,0 +1,496 @@
+# typed-mutarray-builder.test -- the typed MutableArray builder in the
+# geometric-builder corpus programs (TYPED-MUTARRAY-BUILDER-REFACTOR.md).
+#
+# examples/stdlib/csv_geometric.bot and csv_records.bot build their lists with
+# an ordinary untyped GeometricBuilder whose storage is a typed
+# MutableArray[T] (mutarray::create) and whose storage and length travel as
+# two separate values, not a [storage, length] List. This file pins:
+#
+#   * the builder's source shape (no raw mutable_array_allocate, no pair),
+#   * the static types it now yields for every real element kind, and that the
+#     same untyped source function serves all of them (no generic syntax, no
+#     per-type copy),
+#   * the row-table path of csv_records: List[mutarray] end to end, the nine
+#     historical consumer sites statically mutarray, while a row HashTable
+#     itself stays a raw heterogeneous mutarray,
+#   * behavior: growth boundaries, several growths, empty/one/many records,
+#     presized vs default row tables,
+#   * that the type-seeding default of mutarray::create never becomes
+#     observable (unused slots alias the value that triggered a growth and
+#     never escape freeze(length)) and costs no allocation of its own,
+#   * GC stress on typed create/copy/freeze.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot examples stdlib corpus.tcl]
+
+interp recursionlimit {} 1000000
+
+set lit corpus::literal
+
+proc geoText {} { corpus::text csv_geometric }
+proc recordsText {} { corpus::text csv_records }
+
+# The builder section of a corpus source: everything before its "CSV parsing"
+# banner.
+proc builderSource {text} {
+    set i [string first "\n# CSV parsing (see" $text]
+    string range $text 0 $i
+}
+
+# ITEMS joined by " | ": bracketed type names stay readable in expectations.
+proc row {args} { join $args " | " }
+
+# The semantic type of the last top-level expression of DRIVER appended to
+# corpus program NAME, or "REJECT: <diagnostic>".
+proc driverType {name driver} {
+    if {[catch {corpus::program $name $driver} hir]} {
+        return "REJECT: $hir"
+    }
+    hir::types::show [hir::typeOf $hir [lindex [hir::roots $hir] end]]
+}
+
+# The types of the value bindings called NAME in HIR (source order).
+proc bindingTypes {hir name} {
+    set types {}
+    dict for {b binding} [dict get $hir bindings] {
+        if {[dict get $binding name] ne $name || [dict get $binding declaredBy] eq ""} continue
+        set value [hir::get $hir [dict get $binding declaredBy] value]
+        if {[hir::kind $hir $value] eq "block"} continue
+        lappend types [hir::types::show [hir::typeOf $hir $value]]
+    }
+    return $types
+}
+
+# The used semantic instances of HIR whose function is NAME.
+proc instancesOf {hir name} {
+    lsort [lmap row [hir::semantic::census $hir] {
+        if {[dict get $row name] ne $name} continue
+        format {%s -> %s [%s]} \
+            [join [lmap t [dict get $row args] {hir::semantic::ShowType $hir $t}] {, }] \
+            [hir::semantic::ShowType $hir [dict get $row result]] [dict get $row status]
+    }]
+}
+
+# ---------------------------------------------------------------------------
+# Source shape
+
+foreach {name} {csv_geometric csv_records} {
+    test tmb-source-$name-1 "$name: the builder allocates its storage only through mutarray::create -- no raw mutable_array_allocate" -body {
+        set b [builderSource [corpus::text $name]]
+        list [regexp -all {mutable_array_allocate} [regsub -all -line {^\s*#.*$} $b {}]] \
+            [regexp -all {mutarray::create} [regsub -all -line {^\s*#.*$} $b {}]]
+    } -result {0 2}
+
+    test tmb-source-$name-2 "$name: storage and length are separate values -- the builder functions contain no List literal, list_get or list_length" -body {
+        set b [regsub -all -line {^\s*#.*$} [builderSource [corpus::text $name]] {}]
+        list [regexp {list_get|list_length|\[} $b] \
+            [regexp {fn geo_append\(storage, length, value\)} $b] \
+            [regexp {fn geo_finish\(storage, length\)} $b]
+    } -result {0 1 1}
+
+    test tmb-source-$name-3 "$name: the builder is ordinary untyped source -- no annotation, generic syntax or per-type copy on any geo_ function" -body {
+        set b [builderSource [corpus::text $name]]
+        list [regexp {fn geo_[a-z_]+\([^)]*:} $b] [regexp {fn geo_[a-z_]+\[} $b] \
+            [regexp -all {fn geo_} $b]
+    } -result {0 0 5}
+}
+
+# ---------------------------------------------------------------------------
+# One untyped source function, several element types (driven directly on the
+# real corpus source)
+
+test tmb-types-1 {the string case: MutableArray[str] storage, List[str] result} -body {
+    row [driverType csv_geometric {geo_new("a")}] \
+        [driverType csv_geometric {geo_append(geo_new("a"), 1, "b")}] \
+        [driverType csv_geometric {geo_finish(geo_append(geo_new("a"), 1, "b"), 2)}]
+} -result {MutableArray[str] | MutableArray[str] | List[str]}
+
+test tmb-types-2 {the record case: MutableArray[List[str]] storage, List[List[str]] result} -body {
+    row [driverType csv_geometric {geo_new(["x"])}] \
+        [driverType csv_geometric {geo_finish(geo_append(geo_new(["x"]), 1, ["y"]), 2)}]
+} -result {MutableArray[List[str]] | List[List[str]]}
+
+test tmb-types-3 {the row-table case: MutableArray[mutarray] storage, List[mutarray] result} -body {
+    row [driverType csv_geometric {geo_new(mutable_array_allocate(1))}] \
+        [driverType csv_geometric {geo_finish(geo_append(geo_new(mutable_array_allocate(1)), 1, mutable_array_allocate(1)), 2)}]
+} -result {MutableArray[mutarray] | List[mutarray]}
+
+test tmb-types-4 {a value of the wrong element type is rejected at compile time, whatever the builder's own source} -body {
+    set message [driverType csv_geometric {geo_append(geo_new("a"), 1, 5)}]
+    expr {[string first "call to geo_append with storage : MutableArray\[str\], length : int, value : int is invalid" $message] >= 0 && [string match {REJECT: *} $message]}
+} -result 1
+
+test tmb-types-5 {one source function geo_append serves every element type: it has several valid semantic instances and no invalid one} -body {
+    set hir [corpus::program csv_geometric {geo_finish(geo_append(geo_new("a"), 1, "b"), 2)
+geo_finish(geo_append(geo_new(["x"]), 1, ["y"]), 2)
+geo_finish(geo_append(geo_new(mutable_array_allocate(1)), 1, mutable_array_allocate(1)), 2)}]
+    set defs [lmap {b binding} [dict get $hir bindings] {
+        if {[dict get $binding name] ne "geo_append" || [dict get $binding declaredBy] eq ""} continue
+        set b
+    }]
+    set instances [instancesOf $hir geo_append]
+    list [llength $defs] \
+        [expr {"MutableArray\[str\], int, str -> MutableArray\[str\] \[valid\]" in $instances}] \
+        [expr {"MutableArray\[List\[str\]\], int, List\[str\] -> MutableArray\[List\[str\]\] \[valid\]" in $instances}] \
+        [expr {"MutableArray\[mutarray\], int, mutarray -> MutableArray\[mutarray\] \[valid\]" in $instances}] \
+        [llength [lsearch -all -glob $instances {*\[invalid\]}]]
+} -result {1 1 1 1 0}
+
+# ---------------------------------------------------------------------------
+# The real CSV programs
+
+test tmb-csv-geometric-1 {csv_geometric: the builders of fields and records are MutableArray[any] -- the positional [field, index] scan pair erases the element type (a struct boundary, not a builder one); the frozen results are broad lists} -body {
+    set hir [surface::readProgramFile [corpus::path csv_geometric] -strict 0]
+    list [instancesOf $hir geo_append] [instancesOf $hir geo_finish] [hir::diagnostics $hir]
+} -result {{{MutableArray[any], int, any -> MutableArray[any] [valid]} {mutarray, int, any -> mutarray [valid]}} {{MutableArray[any], int -> list [valid]} {mutarray, int -> list [valid]}} {}}
+
+test tmb-csv-records-1 {csv_records: the row-table builder is MutableArray[mutarray] and freezes to List[mutarray]} -body {
+    set hir [surface::readProgramFile [corpus::path csv_records] -strict 0]
+    set instances [instancesOf $hir geo_append]
+    list [expr {"MutableArray\[mutarray\], int, mutarray -> MutableArray\[mutarray\] \[valid\]" in $instances}] \
+        [expr {"MutableArray\[mutarray\], int -> List\[mutarray\] \[valid\]" in [instancesOf $hir geo_finish]}] \
+        [instancesOf $hir geo_new]
+} -result {1 1 {{mutarray -> MutableArray[mutarray] [valid]}}}
+
+test tmb-csv-records-2 {csv_records: the nine historical row-table consumer sites are statically mutarray: rows/presized_rows are List[mutarray] and every list_get out of them is a mutarray} -body {
+    set hir [surface::readProgramFile [corpus::path csv_records] -strict 0]
+    row [join [bindingTypes $hir rows] ,] [join [bindingTypes $hir presized_rows] ,] \
+        [join [bindingTypes $hir first] ,] [join [bindingTypes $hir second] ,] [join [bindingTypes $hir presized_first] ,]
+} -result {List[mutarray] | List[mutarray] | mutarray,mutarray | mutarray | mutarray}
+
+test tmb-csv-records-3 {csv_records: a row HashTable itself stays a raw heterogeneous mutarray, never MutableArray[T]} -body {
+    set hir [surface::readProgramFile [corpus::path csv_records] -strict 0]
+    list [lsort -unique [bindingTypes $hir table]] \
+        [lsort -unique [lmap row [hir::semantic::census $hir] {
+            if {[dict get $row name] ne "row_table"} continue
+            hir::semantic::ShowType $hir [dict get $row result]
+        }]]
+} -result {mutarray mutarray}
+
+test tmb-csv-records-4 {csv_records: the file has the same diagnostics-free HIR and the wrong row type is rejected} -body {
+    set hir [surface::readProgramFile [corpus::path csv_records] -strict 0]
+    llength [hir::diagnostics $hir]
+} -result 0
+
+
+# ---------------------------------------------------------------------------
+# The definition-level obstruction (why csv_records' build_rows, and the
+# drivers below that append a precisely typed value themselves, declare their
+# storage parameter): an UNTYPED function that receives typed storage as a
+# parameter and appends a value whose type it computes itself is analyzed, as
+# a definition, with the storage as a raw mutarray of unknown elements, and
+# geo_grow would copy those unknown slots into a MutableArray[T]. A value that
+# merely passes through as another parameter (statically `any` inside) has no
+# such problem: it can only produce MutableArray[any]. The semantic instances
+# of the CALL cannot rescue the definition of the caller.
+
+set forwarderPrefix {
+fn forward_precise(storage, length):
+    geo_append(storage, length, "x")
+}
+test tmb-obstruction-1 {an untyped forwarder that appends a value of its own precise type is rejected at its own definition} -body {
+    set message [driverType csv_geometric "$forwarderPrefix
+forward_precise(geo_new(\"a\"), 1)"]
+    expr {[string first "call to geo_append with storage : any, length : any, value : str is invalid" $message] >= 0
+        && [string first "cannot copy from a source of type mutarray into MutableArray\[str\]" $message] >= 0}
+} -result 1
+
+test tmb-obstruction-2 {declaring the storage parameter's concrete type (no generics) makes the same forwarder valid} -body {
+    driverType csv_geometric {
+fn forward_precise(storage: MutableArray[str], length):
+    geo_append(storage, length, "x")
+
+geo_finish(forward_precise(geo_new("a"), 1), 2)
+}
+} -result {List[str]}
+
+test tmb-obstruction-3 {a forwarder whose value is a parameter (statically any inside) is valid untyped: instances supply the element type at each call} -body {
+    row [driverType csv_geometric {
+fn forward_value(storage, length, value):
+    geo_append(storage, length, value)
+
+geo_finish(forward_value(geo_new("a"), 1, "b"), 2)
+}] [driverType csv_geometric {
+fn forward_value(storage, length, value):
+    geo_append(storage, length, value)
+
+geo_finish(forward_value(geo_new(["a"]), 1, ["b"]), 2)
+}]
+} -result {List[str] | List[List[str]]}
+
+
+# ---------------------------------------------------------------------------
+# The new source fence (mutable-array-type.test's mat-fence-1 allows exactly
+# these two files to use the typed API; this pins what they may use it for)
+
+proc codeOf {text} {
+    join [lmap line [split $text \n] {
+        if {[string match "#*" [string trim $line]]} continue
+        set line
+    }] \n
+}
+
+test tmb-fence-1 {the typed API appears in the corpus only in csv_geometric.bot and csv_records.bot, and only mutarray::create in the builder (plus csv_records' one build_rows contract)} -body {
+    set out {}
+    foreach file [lsort [glob -directory [file join $::projectRoot examples stdlib] *.bot]] {
+        set code [codeOf [core::ReadFile $file]]
+        set creates [regexp -all {mutarray::create} $code]
+        set typed [regexp -all {MutableArray\[} $code]
+        if {$creates || $typed} { lappend out [list [file tail $file] $creates $typed] }
+    }
+    set out
+} -result {{csv_geometric.bot 2 0} {csv_records.bot 2 1}}
+
+test tmb-fence-2 {csv_geometric.bot has no raw mutable_array_allocate at all; csv_records.bot keeps it only in the heterogeneous HashTable code} -body {
+    set geo [regexp -all {mutable_array_allocate} [codeOf [geoText]]]
+    set rec [codeOf [recordsText]]
+    set builder [regexp -all {mutable_array_allocate} [codeOf [builderSource [recordsText]]]]
+    set hashtableStart [string first "fn ht_min_capacity" $rec]
+    set outsideHashtable [regexp -all {mutable_array_allocate} [string range $rec 0 $hashtableStart]]
+    list $geo $builder $outsideHashtable
+} -result {0 0 0}
+
+test tmb-fence-3 {the row HashTable representation is untouched: its record is still a raw mutable_array_allocate(5) whose 11 slot writes (ht_alloc, ht_rehash, ht_place) are the fence commit's} -body {
+    set rec [recordsText]
+    list [regexp {table = mutable_array_allocate\(5\)} $rec] \
+        [regexp -all {mutable_array_set\(table, [0-4], } $rec]
+} -result {1 11}
+
+# ---------------------------------------------------------------------------
+# Behavior: growth boundaries, several growths (capacity 1, 2, 4, 8, 16, 32;
+# length + 1 each time it fills), on the same cases against csv, csv_geometric
+# and csv_chunked (strategy equivalence, as in stdlib.test) and on every
+# backend.
+
+proc grownCsv {records fields} {
+    set lines {}
+    for {set i 0} {$i < $records} {incr i} {
+        set row {}
+        for {set j 0} {$j < $fields} {incr j} { lappend row "r${i}c${j}" }
+        lappend lines [join $row ,]
+    }
+    return "[join $lines \n]\n"
+}
+proc grownValue {records fields} {
+    set rows {}
+    for {set i 0} {$i < $records} {incr i} {
+        set row {}
+        for {set j 0} {$j < $fields} {incr j} { lappend row "\"r${i}c${j}\"" }
+        lappend rows "\[[join $row {, }]\]"
+    }
+    return "\[[join $rows {, }]\]"
+}
+
+proc parityCase {name driver expected} {
+    set hir [corpus::program $name $driver]
+    set outcomes [lmap backend $corpus::backends {corpus::outcome $backend $hir}]
+    foreach outcome $outcomes {
+        if {$outcome ne $expected} {
+            return [join [lmap backend $corpus::backends outcome $outcomes {list $backend $outcome}] " / "]
+        }
+    }
+    return expected
+}
+
+foreach {records fields} {1 1  1 2  1 5  2 2  5 9  17 33  33 5} {
+    foreach corpusName {csv csv_geometric csv_chunked} {
+        test tmb-grow-$corpusName-$records-$fields "$corpusName: $records records of $fields fields (growth boundaries)" -body {
+            parityCase $corpusName "csv_parse([$lit [grownCsv $records $fields]])" [list value [grownValue $records $fields]]
+        } -result expected
+    }
+}
+
+test tmb-empty-1 {empty input has no records; no builder is created for it} -body {
+    parityCase csv_geometric {csv_parse("")} {value {[]}}
+} -result expected
+
+test tmb-empty-2 {one empty line is one record with one empty field} -body {
+    parityCase csv_geometric {csv_parse("\n")} {value {[[""]]}}
+} -result expected
+
+# csv_records: the outer builder starts from the first row table.
+foreach {rows cols} {0 3  1 3  2 3  3 4  5 9  9 4  17 2} {
+    test tmb-rows-$rows-$cols "csv_records: $rows data rows of $cols columns (outer builder growth), default and presized" -body {
+        set headers {}
+        for {set j 0} {$j < $cols} {incr j} { lappend headers "h$j" }
+        set text [join $headers ,]\n
+        for {set i 0} {$i < $rows} {incr i} {
+            set row {}
+            for {set j 0} {$j < $cols} {incr j} { lappend row "v${i}x${j}" }
+            append text [join $row ,]\n
+        }
+        set last [expr {$rows - 1}]
+        set driver "
+fn probe(rows):
+    if list_length(rows) == 0:
+        return \[0\]
+    r = list_get(rows, [expr {max($last, 0)}])
+    \[list_length(rows), ht_get(r, \"h0\"), ht_get(r, \"h[expr {$cols - 1}]\"), ht_size(r)\]
+\[probe(csv_records([$lit $text])), probe(csv_records_presized([$lit $text]))\]"
+        set expectRows [expr {$rows == 0 ? "\[0\]" : "\[$rows, \"v${last}x0\", \"v${last}x[expr {$cols - 1}]\", $cols\]"}]
+        parityCase csv_records $driver [list value "\[$expectRows, $expectRows\]"]
+    } -result expected
+}
+
+# ---------------------------------------------------------------------------
+# The type-seeding default is unobservable
+#
+# mutarray::create(capacity, value) fills EVERY slot with the same value
+# reference, so after a growth the slots at LENGTH and beyond alias the value
+# that triggered the growth. append overwrites slot LENGTH immediately and no
+# read of a slot >= LENGTH can happen through the builder, and freeze(LENGTH)
+# copies only the first LENGTH slots: the aliased default is never visible.
+
+set aliasDriver {
+t0 = mutable_array_allocate(1)
+mutable_array_set(t0, 0, 10)
+t1 = mutable_array_allocate(1)
+mutable_array_set(t1, 0, 20)
+t2 = mutable_array_allocate(1)
+mutable_array_set(t2, 0, 30)
+s0 = geo_new(t0)
+s1 = geo_append(s0, 1, t1)
+s2 = geo_append(s1, 2, t2)
+frozen = geo_finish(s2, 3)
+}
+
+test tmb-alias-1 {after growth 1 -> 2 -> 4 the builder holds exactly the appended elements, in order} -body {
+    parityCase csv_geometric "$aliasDriver
+\[mutable_array_capacity(s2), list_length(frozen), mutable_array_get(list_get(frozen, 0), 0), mutable_array_get(list_get(frozen, 1), 0), mutable_array_get(list_get(frozen, 2), 0)\]" \
+        {value {[4, 3, 10, 20, 30]}}
+} -result expected
+
+test tmb-alias-2 {the default slot really aliases the value that triggered the growth (slot 3 of the capacity-4 array is t2's handle) -- and that is unobservable through freeze} -body {
+    parityCase csv_geometric "$aliasDriver
+mutable_array_set(t2, 0, 99)
+\[mutable_array_get(mutable_array_get(s2, 3), 0), mutable_array_get(list_get(frozen, 2), 0), mutable_array_get(list_get(frozen, 0), 0), mutable_array_get(list_get(frozen, 1), 0), list_length(frozen)\]" \
+        {value {[99, 99, 10, 20, 3]}}
+} -result expected
+
+test tmb-alias-3 {the frozen list stops at LENGTH: the default-filled slot beyond it is not an element} -body {
+    parityCase csv_geometric "$aliasDriver
+list_get(frozen, 3)" {error {CORE SEMANTIC RANGE}}
+} -result expected
+
+test tmb-alias-4 {a later append overwrites the default slot; earlier frozen lists are unaffected (freeze copied)} -body {
+    parityCase csv_geometric "$aliasDriver
+t3 = mutable_array_allocate(1)
+mutable_array_set(t3, 0, 40)
+s3 = geo_append(s2, 3, t3)
+later = geo_finish(s3, 4)
+\[list_length(frozen), list_length(later), mutable_array_get(list_get(later, 3), 0), mutable_array_get(mutable_array_get(s3, 3), 0)\]" \
+        {value {[3, 4, 40, 40]}}
+} -result expected
+
+test tmb-copy-1 {growth copies exactly [0, length) and leaves the elements in place, over several growths from an empty start (1 -> 2 -> 4 -> 8 -> 16)} -body {
+    parityCase csv_geometric {
+fn fill(storage: MutableArray[int], length, n):
+    if length >= n:
+        return geo_finish(storage, length)
+
+    fill(geo_append(storage, length, length * 10), length + 1, n)
+
+xs = fill(geo_new(0), 1, 11)
+[list_length(xs), list_get(xs, 0), list_get(xs, 1), list_get(xs, 3), list_get(xs, 4), list_get(xs, 7), list_get(xs, 8), list_get(xs, 10)]
+} {value {[11, 0, 10, 30, 40, 70, 80, 100]}}
+} -result expected
+
+# ---------------------------------------------------------------------------
+# Allocation: the default costs nothing beyond the storage itself
+
+# MutableArray allocations DRIVER adds to corpus program NAME, i.e. beyond the
+# allocations of the file's own trailing sample expression (measured with the
+# trivial driver 0).
+proc mutableArrayAllocs {name driver} {
+    set total [dict get [native::allocationReport [corpus::program $name $driver] summary 1] byKind MutableArray allocations]
+    set base [dict get [native::allocationReport [corpus::program $name 0] summary 1] byKind MutableArray allocations]
+    expr {$total - $base}
+}
+
+test tmb-alloc-1 {empty input allocates no builder storage at all (there is no zero-capacity placeholder)} -body {
+    mutableArrayAllocs csv_geometric {csv_parse("")}
+} -result 0
+
+test tmb-alloc-2 {a single one-field record allocates exactly two MutableArrays: one capacity-1 fields array and one capacity-1 records array -- no dummy element-type seed} -body {
+    mutableArrayAllocs csv_geometric {csv_parse("a")}
+} -result 2
+
+test tmb-alloc-3 {two records of two fields: per fields builder 1 create + 1 growth, and the records builder 1 create + 1 growth} -body {
+    mutableArrayAllocs csv_geometric {csv_parse("a,b\nc,d\n")}
+} -result 6
+
+test tmb-alloc-4 {csv_records over one data row: the parse costs 4 arrays; the row adds the outer builder's first array (created from the first row table, no placeholder) and the row table's own 4 arrays} -body {
+    set parseOnly [mutableArrayAllocs csv_records {list_length(csv_parse("h\nv\n"))}]
+    set both [mutableArrayAllocs csv_records {list_length(csv_records("h\nv\n"))}]
+    list $parseOnly [expr {$both - $parseOnly}]
+} -result {4 5}
+
+# ---------------------------------------------------------------------------
+# GC stress: typed create / copy / freeze under a forced collection at every
+# allocation site
+
+proc gcStress {body} {
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        uplevel 1 $body
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+}
+
+test tmb-gc-1 {csv_geometric under GC stress: a many-record parse with growth returns the exact value} -body {
+    gcStress {
+        native::evalHir [corpus::program csv_geometric "csv_parse([$lit [grownCsv 20 5]]) == [grownValue 20 5]"] -specialize 1
+    }
+} -result {bool true}
+
+test tmb-gc-2 {csv_records under GC stress: row tables and the typed outer builder survive collection} -body {
+    gcStress {
+        set text [grownCsv 12 4]
+        native::evalHir [corpus::program csv_records "
+fn checkRow(rows, i, n, ok):
+    if i >= n:
+        return ok
+    r = list_get(rows, i)
+    checkRow(rows, i + 1, n, ok and ht_contains(r, \"r0c0\") and ht_size(r) == 4)
+
+rows = csv_records([$lit $text])
+\[list_length(rows), checkRow(rows, 0, list_length(rows), true), ht_get(list_get(rows, 0), \"r0c0\"), ht_get(list_get(rows, 10), \"r0c3\")\]"] -specialize 1
+    }
+} -result {list {{int 11} {bool true} {str r1c0} {str r11c3}}}
+
+test tmb-gc-3 {typed create/copy/freeze under GC stress: managed element values (Strings, Lists, MutableArrays) held only by the builder survive growth} -body {
+    gcStress {
+        native::evalHir [corpus::program csv_geometric {
+fn fill_str(storage: MutableArray[str], length, n):
+    if length >= n:
+        return geo_finish(storage, length)
+
+    fill_str(geo_append(storage, length, concat("s", concat("-", "x"))), length + 1, n)
+
+fn fill_list(storage: MutableArray[List[str]], length, n):
+    if length >= n:
+        return geo_finish(storage, length)
+
+    fill_list(geo_append(storage, length, ["a", "b"]), length + 1, n)
+
+fn fill_mut(storage: MutableArray[mutarray], length, n):
+    if length >= n:
+        return geo_finish(storage, length)
+
+    m = mutable_array_allocate(1)
+    mutable_array_set(m, 0, length)
+    fill_mut(geo_append(storage, length, m), length + 1, n)
+
+strings = fill_str(geo_new("s"), 1, 13)
+lists = fill_list(geo_new(["a", "b"]), 1, 13)
+m0 = mutable_array_allocate(1)
+mutable_array_set(m0, 0, 0)
+tables = fill_mut(geo_new(m0), 1, 13)
+[list_length(strings), list_get(strings, 12), list_length(lists), list_get(list_get(lists, 12), 1), list_length(tables), mutable_array_get(list_get(tables, 12), 0)]
+}] -specialize 1
+    }
+} -result {list {{int 13} {str s-x} {int 13} {str b} {int 13} {int 12}}}
+
+cleanupTests

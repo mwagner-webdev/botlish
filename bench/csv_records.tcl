@@ -34,6 +34,7 @@ source [file join $root core core.tcl]
 source [file join $root compiler compiler.tcl]
 source [file join $root surface surface.tcl]
 source [file join $root native native.tcl]
+source [file join $root examples stdlib corpus.tcl]
 
 interp recursionlimit {} 4000000
 
@@ -46,7 +47,7 @@ set csvRecordsSource [regsub {\nsample\(\)\n$} \
 
 proc hirOf {text} {
     global csvRecordsSource
-    return [surface::compile "$csvRecordsSource\n$text\n" bench.bot -strict 0]
+    return [corpus::compile "$csvRecordsSource\n$text\n" bench.bot -strict 0]
 }
 
 # TEXT as a Botlish string literal (examples/stdlib/corpus.tcl's own

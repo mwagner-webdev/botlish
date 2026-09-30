@@ -7,16 +7,26 @@
 # the identical parsing algorithm.
 #
 # GeometricBuilder: a contiguous, geometrically-growing mutable array,
-# built entirely from the MutableArray substrate (mutable_array_allocate/
-# _capacity/_get/_set/_copy/_freeze) -- ordinary Botlish, not a compiler or
-# runtime primitive. A builder's state is the two-element list
-# [storage, length]; growth policy (capacity doubles, or length + 1 if that
-# still isn't enough) lives entirely here, not in the runtime.
+# built entirely from the MutableArray substrate (mutarray::create/
+# mutable_array_capacity/_set/_copy/_freeze) -- ordinary Botlish, not a
+# compiler or runtime primitive. A builder's state is two separate values,
+# STORAGE (a typed MutableArray[T], created from a real element) and LENGTH
+# (how many of its slots are in use), threaded through the parsing functions
+# side by side rather than packed into one List; growth policy (capacity
+# doubles, or length + 1 if that still isn't enough) lives entirely here,
+# not in the runtime. Every builder function is ordinary untyped source: the
+# element type T is recovered per call from the value appended.
 #
 # expect: [["name", "age"], ["Alice", "30"], ["Bob", "40"]]
 
-fn geo_new():
-    [mutable_array_allocate(0), 0]
+# A builder holding exactly FIRST: a capacity-1 array (every slot holds
+# FIRST, so slot 0 is already the first element) and, for the caller to keep,
+# length 1. Starting from a real element is what gives the storage its
+# element type without a placeholder value; a builder with no elements at
+# all does not exist (callers with a possibly empty result handle that case
+# themselves).
+fn geo_new(first):
+    mutarray::create(1, first)
 
 # The capacity a builder holding LENGTH elements should grow CAPACITY to, to
 # fit one more: double, or exactly enough if doubling still isn't enough
@@ -31,39 +41,40 @@ fn geo_new_capacity(capacity, length):
 
 # STORAGE, grown if it has no room for one more element at LENGTH: a fresh,
 # larger MutableArray with STORAGE's first LENGTH elements copied in, or
-# STORAGE unchanged if it already has room.
-fn geo_grow(storage, length):
+# STORAGE unchanged if it already has room. VALUE, the element about to be
+# appended, initializes every slot of the fresh array (mutarray::create
+# fills all of them); the slots at LENGTH and beyond are overwritten by later
+# appends before freeze(LENGTH) can ever expose them.
+fn geo_grow(storage, length, value):
     capacity = mutable_array_capacity(storage)
     if length < capacity:
         return storage
 
     new_capacity = geo_new_capacity(capacity, length)
-    fresh = mutable_array_allocate(new_capacity)
+    fresh = mutarray::create(new_capacity, value)
     mutable_array_copy(fresh, 0, storage, 0, length)
     fresh
 
-# BUILDER with VALUE appended: a new builder state (BUILDER's storage,
-# grown in place when full, is mutated -- only the [storage, length] pair
-# threading the length forward is a fresh value, exactly like scan_record's
-# own state threading below).
-fn geo_append(builder, value):
-    storage = list_get(builder, 0)
-    length = list_get(builder, 1)
-    grown = geo_grow(storage, length)
+# STORAGE with VALUE appended at index LENGTH, grown first when full. The
+# storage is mutated (or replaced by a grown copy, which is returned); the
+# caller's new length is LENGTH + 1.
+fn geo_append(storage, length, value):
+    grown = geo_grow(storage, length, value)
     mutable_array_set(grown, length, value)
-    [grown, length + 1]
+    grown
 
-# BUILDER's elements as an ordinary immutable List (finalization: a single
-# exact-size copy, see mutable_array_freeze).
-fn geo_finish(builder):
-    storage = list_get(builder, 0)
-    length = list_get(builder, 1)
+# STORAGE's first LENGTH elements as an ordinary immutable List
+# (finalization: a single exact-size copy, see mutable_array_freeze).
+fn geo_finish(storage, length):
     mutable_array_freeze(storage, length)
 
 # ---------------------------------------------------------------------------
 # CSV parsing (see csv.bot for the algorithm's description; unchanged here
-# except that FIELDS and RECORDS are GeometricBuilder states, finalized with
-# geo_finish wherever the persistent version returned a completed List).
+# except that FIELDS and RECORDS are GeometricBuilder states (storage and
+# count), finalized with geo_finish wherever the persistent version returned
+# a completed List, and that each builder starts from its first element: a
+# record always has a first field, and the empty text is the only input
+# without a first record).
 
 fn peek(text, index):
     if index >= length(text):
@@ -94,27 +105,43 @@ fn scan_field(text, index):
 
     scan_unquoted(text, index, index)
 
-fn scan_record(text, index, fields):
-    scanned = scan_field(text, index)
-    more = geo_append(fields, list_get(scanned, 0))
-    stop = list_get(scanned, 1)
+# The rest of a record whose first COUNT fields are in FIELDS, the last field
+# ending at STOP. (Defined before scan_record, its only caller, like every
+# helper in this file: a caller placed *before* its callee makes the native
+# specialization keep generic, guarded copies of the whole call chain --
+# TYPED-MUTARRAY-BUILDER-REFACTOR.md, "Definition-order sensitivity".)
+fn scan_record_rest(text, stop, fields, count):
     delimiter = peek(text, stop)
     if delimiter == ",":
-        return scan_record(text, stop + 1, more)
+        scanned = scan_field(text, stop + 1)
+        more = geo_append(fields, count, list_get(scanned, 0))
+        return scan_record_rest(text, list_get(scanned, 1), more, count + 1)
 
     if delimiter == "\n":
-        return [geo_finish(more), stop + 1]
+        return [geo_finish(fields, count), stop + 1]
 
-    [geo_finish(more), stop]
+    [geo_finish(fields, count), stop]
 
-fn scan_records(text, index, records):
+# The record starting at INDEX and the index where it stops: the first field
+# (a record always has one, possibly empty) starts the FIELDS builder.
+fn scan_record(text, index):
+    scanned = scan_field(text, index)
+    scan_record_rest(text, list_get(scanned, 1), geo_new(list_get(scanned, 0)), 1)
+
+# The records from INDEX on, the first COUNT records already in RECORDS.
+fn scan_records(text, index, records, count):
     if index >= length(text):
-        return geo_finish(records)
+        return geo_finish(records, count)
 
-    scanned = scan_record(text, index, geo_new())
-    scan_records(text, list_get(scanned, 1), geo_append(records, list_get(scanned, 0)))
+    scanned = scan_record(text, index)
+    more = geo_append(records, count, list_get(scanned, 0))
+    scan_records(text, list_get(scanned, 1), more, count + 1)
 
 fn csv_parse(text):
-    scan_records(text, 0, geo_new())
+    if length(text) == 0:
+        return []
+
+    scanned = scan_record(text, 0)
+    scan_records(text, list_get(scanned, 1), geo_new(list_get(scanned, 0)), 1)
 
 csv_parse("name,age\nAlice,30\nBob,40\n")

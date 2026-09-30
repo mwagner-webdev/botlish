@@ -45,8 +45,7 @@ source [file join $root examples stdlib corpus.tcl]
 set stdlibOut [file join $root audit post-native-stack examples-stdlib]
 foreach name [corpus::names] {
     set path [corpus::path $name]
-    foreach req [core::programFileRequires $path] { core::loadLibrary $req }
-    set hir [surface::compile [core::ReadFile $path] $path]
+    set hir [surface::readProgramFile $path]
     writeText [file join $stdlibOut "$name.nir"] [native::nir $hir]
     puts "$name: NIR written"
 }
