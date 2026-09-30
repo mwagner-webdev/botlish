@@ -1,0 +1,724 @@
+# structs.test -- structs and struct values (STRUCTS.md): anonymous struct
+# values `{ x: a, y: b }`, named structs `struct Name:` / `Name { ... }`, and
+# static field projection `value.field`.
+#
+# Every program below runs on all four executable paths -- the Tcl interpreter
+# and the Tcl compiler (both from the core IR the HIR lowers to) and native
+# code, with and without specialization (both directly from the HIR) -- and
+# the outcomes must agree. Static errors are pinned by kind and message.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 100000
+
+set structBackends {interp compile cranelift-generic cranelift}
+
+# Runs SOURCE (a program) on every backend: "same: VALUE" if they all agree
+# (VALUE the interp outcome's shown value), otherwise every outcome.
+proc structRun {source {backends ""}} {
+    set hir [surface::compile $source struct.bot]
+    return [structOutcomes $hir $backends]
+}
+
+# The backends that can run a function whose field projections are proven
+# only by its semantic instances: native specialization compiles the
+# instance's own shape; the unspecialized native baseline has no slot for a
+# receiver of unknown shape.
+set structInstanceBackends {interp compile cranelift}
+
+proc structOutcomes {hir {backends ""}} {
+    if {$backends eq ""} {
+        set backends $::structBackends
+    }
+    set outcomes [lmap backend $backends {outcomeUnderHir $backend $hir}]
+    if {[llength [lsort -unique $outcomes]] == 1} {
+        set first [lindex $outcomes 0]
+        if {[lindex $first 0] eq "value"} {
+            return "same: [lindex $first 1]"
+        }
+        return "same error: [lindex $first 1]"
+    }
+    return [join [lmap backend $backends outcome $outcomes {list $backend $outcome}] " / "]
+}
+
+# The static error (KIND: MESSAGE) compiling SOURCE raises.
+proc structError {source} {
+    if {[catch {surface::compile $source struct.bot} message options]} {
+        return "[lindex [dict get $options -errorcode] end]: $message"
+    }
+    return "no error"
+}
+
+# The first line of the syntax error parsing SOURCE raises.
+proc structSyntax {source} {
+    if {[catch {surface::parse $source struct.bot} message options]} {
+        return $message
+    }
+    return "no error"
+}
+
+# Shown types of the top-level bindings of SOURCE, as "name:type ...".
+proc structTypes {source} {
+    set hir [surface::compile $source struct.bot]
+    set result {}
+    foreach e [hir::roots $hir] {
+        if {[hir::kind $hir $e] eq "bind"} {
+            lappend result "[hir::get $hir $e name]:[hir::types::show [hir::typeOf $hir $e]]"
+        }
+    }
+    return [join $result " | "]
+}
+
+# A scratch library directory with module fixtures (as surface-modules.test).
+proc withScratchLibrary {script} {
+    set saved $::core::libraryDir
+    set dir [tcltest::makeDirectory structs-scratch-[pid]-[incr ::scratchLibraryCounter]]
+    set ::core::libraryDir $dir
+    try {
+        uplevel 1 [list apply [list {dir} $script] $dir]
+    } finally {
+        set ::core::libraryDir $saved
+        tcltest::removeDirectory [file tail $dir]
+    }
+}
+set ::scratchLibraryCounter 0
+
+proc writeFile {path content} {
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts -nonewline $channel $content
+    close $channel
+}
+
+# Runs the .bot file PATH on every backend (modules loaded from the current
+# library directory).
+proc structRunFile {path {backends ""}} {
+    return [structOutcomes [surface::readProgramFile $path] $backends]
+}
+
+proc structErrorFile {source} {
+    set path [tcltest::makeFile $source attack.bot]
+    if {[catch {surface::readProgramFile $path} message options]} {
+        return "[lindex [dict get $options -errorcode] end]: $message"
+    }
+    return "no error"
+}
+
+set person "struct Person:\n    name: str\n    age: int\n"
+set accounts "${person}struct Account:\n    name: str\n    age: int\n"
+
+# ---------------------------------------------------------------------------
+# Anonymous struct values are genuine values in their own right
+
+test struct-anon-projection {an anonymous struct value needs no declaration} -body {
+    structRun "x = \{\n    left: 1,\n    right: 2,\n\}\nx.left"
+} -result {same: 1}
+
+test struct-anon-print-canonical {an anonymous struct prints its fields in canonical (sorted) order} -body {
+    structRun {{name: "Grace", age: 45}}
+} -result {same: {age: 45, name: "Grace"}}
+
+test struct-anon-trailing-comma {the trailing comma is optional, and newlines are free inside braces} -body {
+    list [structRun "{a: 1, b: 2,}"] [structRun "{a: 1, b: 2}"] [structRun "{\n  a: 1,\n  b: 2\n}"]
+} -result {{same: {a: 1, b: 2}} {same: {a: 1, b: 2}} {same: {a: 1, b: 2}}}
+
+test struct-anon-empty {the empty struct value is legal and has one shape} -body {
+    list [structRun "\{\}"] [structRun "\{\} == \{\}"] [structRun "\{\} == \{a: 1\}"]
+} -result {{same: {}} {same: true} {same: false}}
+
+test struct-anon-types-canonical {differently ordered literals have one anonymous struct type} -body {
+    set types [lmap entry [split [structTypes "a = \{x: 1, y: \"a\"\}\nb = \{y: \"b\", x: 2\}"] |] {
+        string range [string trim $entry] 2 end
+    }]
+    list $types [expr {[lindex $types 0] eq [lindex $types 1]}]
+} -result {{{struct{x: int, y: str}} {struct{x: int, y: str}}} 1}
+
+test struct-anon-field-types-in-type {exact values stay out of the type: {x: 1} is {x: int}} -body {
+    structTypes "a = \{x: 1\}\nb = \{x: 2\}\nc = \{x: \"s\"\}"
+} -result {a:struct{x: int} | b:struct{x: int} | c:struct{x: str}}
+
+test struct-anon-projection-types {projection from an anonymous struct is typed from its fields, without guards} -body {
+    structTypes "x = \{name: \"Ada\", age: 36\}\nn = x.name\na = x.age"
+} -result {x:struct{age: int, name: str} | n:str | a:int}
+
+test struct-anon-nested {anonymous structs nest, and projection preserves the nested types} -body {
+    list [structRun "x = \{a: 1, inner: \{b: \"z\", c: \[1, 2\]\}\}\nx.inner.c"] \
+        [structTypes "x = \{a: 1, inner: \{b: \"z\"\}\}\ny = x.inner\nz = y.b"]
+} -result {{same: [1, 2]} {x:struct{a: int, inner: struct{b: str}} | y:struct{b: str} | z:str}}
+
+test struct-anon-projection-of-literal {a struct literal can be projected directly} -body {
+    list [structRun "\{f: 1\}.f"] [structRun "\{a: \{b: 7\}\}.a.b"]
+} -result {{same: 1} {same: 7}}
+
+test struct-anon-call-then-projection {projection binds tighter than operators and chains with calls} -body {
+    structRun "fn mk(n):\n    \{v: n, w: n + 1\}\nmk(5).v + mk(6).w * 2"
+} -result {same: 19}
+
+# ---------------------------------------------------------------------------
+# Equality (generic ==): structural, shape-sensitive
+
+test struct-eq-order-independent {anonymous structs equal iff same field set and equal values, whatever the source order} -body {
+    list [structRun "\{x: 1, y: 2\} == \{y: 2, x: 1\}"] \
+        [structRun "\{x: 1, y: \"a\"\} == \{y: \"a\", x: 1\}"]
+} -result {{same: true} {same: true}}
+
+test struct-eq-different {different values, different field sets and different field kinds are unequal} -body {
+    list [structRun "\{x: 1\} == \{x: 2\}"] [structRun "\{x: 1\} == \{x: 1, y: 2\}"] \
+        [structRun "\{x: 1\} == \{y: 1\}"] [structRun "\{x: 1\} == \{x: \"1\"\}"]
+} -result {{same: false} {same: false} {same: false} {same: false}}
+
+test struct-eq-nested {equality recurses through lists, strings and structs} -body {
+    list [structRun "\{a: \[1, \{b: \"z\"\}\]\} == \{a: \[1, \{b: \"z\"\}\]\}"] \
+        [structRun "\{a: \[1, \{b: \"z\"\}\]\} == \{a: \[1, \{b: \"y\"\}\]\}"]
+} -result {{same: true} {same: false}}
+
+test struct-eq-not-a-list {a struct is never a List, whatever it holds} -body {
+    list [structRun "\{a: 1\} == \[1\]"] [structRun "\{\} == \[\]"]
+} -result {{same: false} {same: false}}
+
+test struct-eq-named {named structs equal iff the same declaration and equal fields} -body {
+    list [structRun "${accounts}Person \{name: \"a\", age: 1\} == Person \{age: 1, name: \"a\"\}"] \
+        [structRun "${accounts}Person \{name: \"a\", age: 1\} == Person \{age: 2, name: \"a\"\}"]
+} -result {{same: true} {same: false}}
+
+test struct-eq-nominal {two declarations with identical fields are different types and never equal} -body {
+    structRun "${accounts}a = Person \{name: \"a\", age: 1\}\nb = Account \{name: \"a\", age: 1\}\na == b"
+} -result {same: false}
+
+test struct-eq-named-vs-anonymous {a named struct never equals an anonymous one with the same fields} -body {
+    structRun "${person}a = Person \{name: \"a\", age: 1\}\nb = \{name: \"a\", age: 1\}\n\[a == b, b == a\]"
+} -result {same: [false, false]}
+
+test struct-eq-mutarray-field {equality keeps the existing rule: a MutableArray has no structural equality} -body {
+    set hir [surface::readProgramFile [tcltest::makeFile "m = mutarray::create(1, 0)\n\{a: m\} == \{a: m\}\n" eq-mutarray.bot]]
+    lmap backend $::structBackends {lindex [outcomeUnderHir $backend $hir] 1}
+} -result {{CORE SEMANTIC EQUALITY} {CORE SEMANTIC EQUALITY} {CORE SEMANTIC EQUALITY} {CORE SEMANTIC EQUALITY}}
+
+test struct-eq-hash-consistent {hash agrees with struct equality across source orders} -body {
+    structRun "\[hash(\{x: 1, y: \"a\"\}) == hash(\{y: \"a\", x: 1\}), hash(\{x: 1\}) == hash(\{x: 2\}), hash(\{x: 1\}) == hash(\{y: 1\})\]"
+} -result {same: [true, false, false]}
+
+# ---------------------------------------------------------------------------
+# Evaluation order, completions, closures
+
+test struct-eval-source-order {field expressions run in SOURCE order, not canonical layout order} -body {
+    set path [tcltest::makeFile "counter = mutarray::create(1, 0)
+fn ticket(m):
+    n = mutable_array_get(m, 0)
+    mutable_array_set(m, 0, n + 1)
+    n
+r = \{z: ticket(counter), a: ticket(counter), m: ticket(counter)\}
+\[r, mutable_array_get(counter, 0)\]
+" eval-order.bot]
+    structRunFile $path
+} -result {same: [{a: 1, m: 2, z: 0}, 3]}
+
+test struct-eval-error-completion {a failing field completes the struct expression with that completion} -body {
+    structRun "error Boom
+fn mayfail(n) errors Boom:
+    if n > 1:
+        fail Boom
+    \{v: n\}
+fn run(n):
+    r = mayfail(n):
+        on Boom:
+            \{v: 99\}
+    r.v
+\[run(1), run(2), run(0 - 5)\]"
+} -result {same: [1, 99, -5]}
+
+test struct-eval-field-error-propagates {an error inside a field initializer leaves no struct built and reaches the handler} -body {
+    structRun "error Boom
+fn mayfail(n) errors Boom:
+    if n > 1:
+        fail Boom
+    n
+fn build(n) errors Boom:
+    \{first: 1, second: mayfail(n), third: 3\}
+fn run(n):
+    r = build(n):
+        on Boom:
+            \{first: 0, second: 0, third: 0\}
+    r.second
+\[run(1), run(2)\]"
+} -result {same: [1, 0]}
+
+test struct-closure-capture {struct values capture like any value, and returned closures keep them} -body {
+    list [structRun "x = \{value: \"hello\"\}\nfn get():\n    x.value\nget()"] \
+        [structRun "fn mk(v):\n    x = \{value: v\}\n    fn get():\n        x.value\n    get\ng = mk(\"a\")\nh = mk(\"b\")\n\[g(), h()\]"]
+} -result {{same: "hello"} {same: ["a", "b"]}}
+
+test struct-field-callable {a function value stored in a struct field is called through the projection} -body {
+    structRun "fn inc(n: int) -> int:\n    n + 1\nh = \{f: inc, v: 41\}\nh.f(h.v)"
+} -result {same: 42}
+
+test struct-if-value {a struct is an ordinary if value; same-field-set branches join fieldwise} -body {
+    list [structRun "v = if 1 == 2:\n    \{value: \"a\"\}\nelse:\n    \{value: \"b\"\}\nv.value"] \
+        [structTypes "fn pick(c):\n    if c:\n        return \{value: \"a\"\}\n    \{value: \"b\"\}\nv = pick(true)"]
+} -result {{same: "b"} {pick:block(e2)/1 -> struct{value: str} | v:struct{value: str}}}
+
+# ---------------------------------------------------------------------------
+# Named structs
+
+test struct-named-construct {named construction applies the same initializer to the declared schema} -body {
+    structRun "${person}p = Person \{\n    name: \"Ada\",\n    age: 36,\n\}\np"
+} -result {same: Person {name: "Ada", age: 36}}
+
+test struct-named-any-order {fields may be written in any order: the declaration fixes slot order} -body {
+    structRun "${person}p = Person \{age: 36, name: \"Ada\"\}\n\[p, p.name, p.age\]"
+} -result {same: [Person {name: "Ada", age: 36}, "Ada", 36]}
+
+test struct-named-type-not-value {a struct declaration introduces a type, not a value binding} -body {
+    list [structRun "${person}Person = 5\np = Person \{name: \"a\", age: 2\}\n\[p, Person\]"] \
+        [structError "${person}x = Person"]
+} -result {{same: [Person {name: "a", age: 2}, 5]} {UNBOUND: struct.bot:4:5: unbound name "Person"}}
+
+test struct-named-declared-after-use {struct declarations are types: order in the file does not matter} -body {
+    structRun "p = Person \{name: \"a\", age: 2\}\n${person}p.age"
+} -result {same: 2}
+
+test struct-named-types {named structs carry their declared field types; projection is from the declaration} -body {
+    structTypes "${person}p = Person \{name: \"Ada\", age: 36\}\nn = p.name\na = p.age"
+} -result {p:Person | n:str | a:int}
+
+test struct-named-annotations {named structs work in ordinary annotations} -body {
+    list [structRun "${person}fn birthday(p: Person) -> int:\n    p.age + 1\nbirthday(Person \{name: \"a\", age: 1\})"] \
+        [structRun "${person}fn same_name(a: Person, b: Person) -> bool:\n    a.name == b.name\nsame_name(Person \{name: \"a\", age: 1\}, Person \{name: \"a\", age: 2\})"]
+} -result {{same: 2} {same: true}}
+
+test struct-named-nested {named structs nest in named and anonymous structs; projection preserves the types} -body {
+    set src "${person}struct Team:\n    lead: Person\n    size: int\nt = Team \{size: 2, lead: Person \{name: \"Ada\", age: 36\}\}\nx = \{person: Person \{name: \"B\", age: 1\}, active: true\}\nlead = t.lead\nage = t.lead.age"
+    list [structRun "${src}\n\[t, x, age\]"] [structTypes $src]
+} -result {{same: [Team {lead: Person {name: "Ada", age: 36}, size: 2}, {active: true, person: Person {name: "B", age: 1}}, 36]} {t:Team | x:struct{active: bool, person: Person} | lead:Person | age:int}}
+
+test struct-named-field-authoritative {a named struct field has its declared type, whatever the construction site proves} -body {
+    structTypes "struct X:\n    value: int\nx = X \{value: 1\}\nv = x.value"
+} -result {x:X | v:int}
+
+test struct-named-in-containers {named structs are ordinary element types} -body {
+    structTypes "${person}ps = \[Person \{name: \"a\", age: 1\}\]\np0 = list_get(ps, 0)\nn = p0.name"
+} -result {ps:List[Person] | p0:Person | n:str}
+
+test struct-named-recursive-declaration {a struct may name itself: the type exists though no finite value constructs it} -body {
+    structRun "struct Node:\n    next: Node\n    label: str\nfn follow(n: Node) -> Node:\n    n.next\n1"
+} -result {same: 1}
+
+test struct-named-function-field {a named struct field may hold a typed callable} -body {
+    structRun "fn inc(n: int) -> int:\n    n + 1\nstruct Op:\n    apply: Fn\{args: \[int\], return: int, errors: \[\]\}\n    label: str\no = Op \{label: \"inc\", apply: inc\}\no.apply(41)"
+} -result {same: 42}
+
+# ---------------------------------------------------------------------------
+# Static errors
+
+test struct-error-missing-field {a named construction omits a declared field} -body {
+    structError "${person}p = Person \{name: \"Ada\"\}"
+} -result {MISSING-FIELD: struct.bot:4:5: the Person construction is missing field "age" (every declared field must be given exactly once; there are no defaults)}
+
+test struct-error-unknown-field {a named construction gives a field the struct lacks} -body {
+    structError "${person}p = Person \{name: \"Ada\", age: 1, height: 3\}"
+} -result {UNKNOWN-FIELD: struct.bot:4:34: struct Person has no field "height" (declared fields: name, age)}
+
+test struct-error-duplicate-field-named {a named construction gives a field twice} -body {
+    structError "${person}p = Person \{name: \"Ada\", age: 1, age: 2\}"
+} -result {DUPLICATE-FIELD: struct.bot:4:34: duplicate field "age" in the Person construction: each field may be given only once}
+
+test struct-error-duplicate-field-anon {an anonymous initializer gives a field twice} -body {
+    structError "x = \{a: 1, a: 2\}"
+} -result {DUPLICATE-FIELD: struct.bot:1:12: duplicate field "a" in this struct initializer: each field may be given only once}
+
+test struct-error-wrong-field-type {a value not proven admissible for the declared field type is a compile-time TYPE error} -body {
+    structError "${person}p = Person \{name: 5, age: 1\}"
+} -match glob -result {TYPE: struct.bot:4:13: field "name" of struct Person cannot be proven to satisfy its declared type str (value type: int, *}
+
+test struct-error-no-implicit-guard {an untyped value is not proven, and no runtime guard is inserted for it} -body {
+    structError "${person}fn make(x):\n    Person \{name: x, age: 36\}\nmake(\"a\")"
+} -match glob -result {TYPE: struct.bot:5:13: field "name" of struct Person cannot be proven to satisfy its declared type str (value type: any, *}
+
+test struct-error-unknown-struct {a construction of an undeclared struct} -body {
+    list [structError "q = Nope \{a: 1\}"] [structError "q = int \{a: 1\}"]
+} -result {{UNKNOWN-STRUCT: struct.bot:1:5: unknown struct type "Nope": no "struct Nope" declaration is visible} {UNKNOWN-STRUCT: struct.bot:1:5: "int" is not a struct type}}
+
+test struct-error-missing-projected-field {projection of a field the static struct type lacks} -body {
+    list [structError "${person}p = Person \{name: \"a\", age: 1\}\np.height"] \
+        [structError "x = \{a: 1\}\nx.b"]
+} -result {{UNKNOWN-FIELD: struct.bot:5:3: struct type Person has no field "height" (known fields: name, age)} {UNKNOWN-FIELD: struct.bot:2:3: struct type struct{a: int} has no field "b" (known fields: a)}}
+
+test struct-error-projection-from-non-struct {projection from a value of another kind} -body {
+    structError "x = 5\nx.f"
+} -result {NOT-A-STRUCT: struct.bot:2:3: cannot project field "f" from a value of type int: only a struct has fields}
+
+test struct-error-nominal-mismatch {a struct of another declaration, or an anonymous one, is never a Person} -body {
+    list [structError "${accounts}fn birthday(p: Person) -> int:\n    p.age + 1\nbirthday(Account \{name: \"a\", age: 1\})"] \
+        [structError "${person}fn birthday(p: Person) -> int:\n    p.age + 1\nbirthday(\{name: \"a\", age: 1\})"]
+} -match glob -result {{TYPE: struct.bot:9:10: argument for parameter "p" cannot be proven to satisfy Person (argument type: Account, *} {TYPE: struct.bot:6:10: argument for parameter "p" cannot be proven to satisfy Person (argument type: struct{age: int, name: str}, *}}
+
+test struct-error-declaration {declaration errors point at the declaration} -body {
+    list [structError "struct P:\n    a: int\n    a: str\n"] \
+        [structError "struct P:\n    a: Nope\n"] \
+        [structError "struct P:\n    a: int\nstruct P:\n    b: int\n"] \
+        [structError "struct Int:\n    a: int\n"] \
+        [structError "type Small = Int in 0..3\nstruct Small:\n    a: int\n"]
+} -result {{TYPE: struct.bot:3:5: duplicate field "a" in struct "P"} {TYPE: struct.bot:2:8: unknown or invalid type Nope for field "a" of struct "P": core::type: unknown type "Nope"} {TYPE: struct.bot:3:8: type "P" is already declared} {TYPE: struct.bot:1:8: "Int" cannot be declared as a struct: the name is already a built-in or declared type} {TYPE: struct.bot:2:8: "Small" cannot be declared as a struct: the name is already a built-in or declared type}}
+
+test struct-error-unknown-projection-in-function {an unknown field is diagnosed even when the receiver flows through a function} -body {
+    structError "${person}fn f(p: Person):\n    p.height\n1"
+} -result {UNKNOWN-FIELD: struct.bot:5:7: struct type Person has no field "height" (known fields: name, age)}
+
+# ---------------------------------------------------------------------------
+# Static projection: never a runtime lookup
+
+test struct-projection-any-rejected {projection from an `any` receiver is rejected, never looked up at run time} -body {
+    structError "fn first(x):\n    x.value\nfirst"
+} -match glob -result {UNPROVEN-FIELD: struct.bot:2:7: cannot project field "value": the receiver's struct type is not known here (its type is any), *}
+
+test struct-projection-instance-proves {a semantic instance analyzes the body under the call's actual struct type} -body {
+    set src "fn first(x):\n    x.value\nr = first(\{value: \"a\", next: 1\})\ns = first(\{next: 2, value: 7\})"
+    list [structTypes $src] [structRun "${src}\n\[r, s\]" $::structInstanceBackends]
+} -result {{first:block(e2)/1 -> any | r:str | s:int} {same: ["a", 7]}}
+
+test struct-projection-instance-named {a function called with a named struct is analyzed under exactly that type} -body {
+    set src "${person}fn name_of(x):\n    x.name\np = Person \{name: \"Ada\", age: 36\}\nn = name_of(p)"
+    set hir [surface::compile $src struct.bot]
+    list [structTypes $src] [lmap row [hir::semantic::census $hir] {lmap t [dict get $row args] {hir::types::show $t}}]
+} -result {{name_of:block(e2)/1 -> any | p:Person | n:str} Person}
+
+test struct-projection-instance-invalid-call {a call whose struct type lacks the field is invalid at the call} -body {
+    structError "fn first(x):\n    x.value\nfirst(\{other: 1\})"
+} -match glob -result {TYPE: struct.bot:3:1: call to first with x : struct{other: int} is invalid: struct type struct{other: int} has no field "value" (known fields: other) (in the body of first, at 2:5)}
+
+test struct-projection-instance-non-struct-call {a call with a non-struct argument is invalid at the call} -body {
+    structError "fn first(x):\n    x.value\nfirst(5)"
+} -match glob -result {TYPE: struct.bot:3:1: call to first with x : int is invalid: cannot project field "value" from a value of type int: only a struct has fields (in the body of first, at 2:5)}
+
+test struct-projection-escaped-function-rejected {a function whose value escapes may run generically, so an unproven projection in it is an error} -body {
+    structError "fn first(x):\n    x.value\nf = first\nf(\{value: 1\})"
+} -match glob -result {UNPROVEN-FIELD: *}
+
+test struct-projection-unused-function-ok {a function nobody can run cannot execute its projection} -body {
+    structRun "fn first(x):\n    x.value\n1"
+} -result {same: 1}
+
+test struct-projection-through-wrapper {instances chain: a wrapper called with a struct gives its callee the struct too} -body {
+    structRun "fn first(x):\n    x.value\nfn wrap(y):\n    first(y)\nwrap(\{value: \"deep\"\})" $::structInstanceBackends
+} -result {same: "deep"}
+
+# ---------------------------------------------------------------------------
+# Type algebra
+
+test struct-type-lub-same-fields {two anonymous structs with the same field names join fieldwise} -body {
+    set a [hir::types::MakeStruct {x int y str} 0]
+    set b [hir::types::MakeStruct {y str x {refined int {Small}}} 0]
+    catch {type Small} ;# no-op: Small is not registered; use plain types below
+    hir::types::show [hir::types::lub [hir::types::MakeStruct {x int y str} 0] [hir::types::MakeStruct {x int y str} 0]]
+} -result {struct{x: int, y: str}}
+
+test struct-type-lub-different-fields {no width subtyping, no optional fields: different field sets have no useful join} -body {
+    set a [hir::types::MakeStruct {x int} 0]
+    set b [hir::types::MakeStruct {x int y int} 0]
+    list [hir::types::lub $a $b] [hir::types::subtype $b $a] [hir::types::subtype $a $b]
+} -result {any 0 0}
+
+test struct-type-lub-fieldwise {field types join with the ordinary type lub} -body {
+    set a [hir::types::MakeStruct {x int y str} 0]
+    set b [hir::types::MakeStruct {x str y str} 0]
+    hir::types::show [hir::types::lub $a $b]
+} -result {struct{x: any, y: str}}
+
+test struct-type-canonical-order {field order is canonicalized: construction order never matters} -body {
+    list [expr {[hir::types::MakeStruct {b int a str} 0] eq [hir::types::MakeStruct {a str b int} 0]}] \
+        [hir::types::show [hir::types::MakeStruct {b int a str} 0]]
+} -result {1 {struct{a: str, b: int}}}
+
+test struct-type-nominal-lub {named structs join only with themselves; shape coincidence never makes a named type} -body {
+    structTypes "${accounts}a = Person \{name: \"a\", age: 1\}\nb = Account \{name: \"a\", age: 1\}\nc = \{name: \"a\", age: 1\}\nfn pick1(i):\n    if i == 1:\n        return a\n    b\nfn pick2(i):\n    if i == 1:\n        return a\n    c\nfn pick3(i):\n    if i == 1:\n        return a\n    a\nx = pick1(1)\ny = pick2(1)\nz = pick3(1)"
+} -result {a:Person | b:Account | c:struct{age: int, name: str} | pick1:block(e14)/1 -> any | pick2:block(e24)/1 -> any | pick3:block(e34)/1 -> Person | x:any | y:any | z:Person}
+
+# ---------------------------------------------------------------------------
+# Containers and composition
+
+test struct-list-of-anonymous {anonymous structs of one field set infer List[struct]} -body {
+    structTypes "xs = \[\{name: \"a\", age: 1\}, \{age: 2, name: \"b\"\}\]\nsecond = list_get(xs, 1)\nn = second.name"
+} -result {xs:List[struct{age: int, name: str}] | second:struct{age: int, name: str} | n:str}
+
+test struct-list-of-anonymous-run {list_get of List[struct] keeps the struct type for a dynamic index} -body {
+    structRun "xs = \[\{name: \"a\", age: 1\}, \{age: 2, name: \"b\"\}\]\nfn at(i):\n    list_get(xs, i).name\n\[at(0), at(1)\]"
+} -result {same: ["a", "b"]}
+
+test struct-mutarray-of-structs {MutableArray of structs is inferred and its reads are typed} -body {
+    set path [tcltest::makeFile "m = mutarray::from_list(\[\{x: 1\}, \{x: 2\}\])\ne = mutable_array_get(m, 1).x\n" mutarray-structs.bot]
+    set hir [surface::readProgramFile $path]
+    set types {}
+    foreach e [hir::roots $hir] {
+        if {[hir::kind $hir $e] eq "bind" && [hir::get $hir $e name] in {m e}} {
+            lappend types [hir::types::show [hir::typeOf $hir $e]]
+        }
+    }
+    list $types [structOutcomes $hir]
+} -result {{{MutableArray[struct{x: int}]} int} {same: 2}}
+
+test struct-immutable-set-of-structs {ImmutableSet of structs deduplicates by struct equality} -body {
+    structRun "s = immutable_set_from_list(\[\{a: 1\}, \{a: 1\}, \{a: 2\}\])\nlist_length(\[1\])"
+} -result {same: 1}
+
+test struct-field-mutarray-typed {a MutableArray field keeps its element contract through the struct} -body {
+    set path [tcltest::makeFile "s = \{storage: mutarray::create(4, \"x\"), length: 0\}\nst = s.storage\n" field-mutarray.bot]
+    set hir [surface::readProgramFile $path]
+    lmap e [lrange [hir::roots $hir] 2 end] {hir::types::show [hir::typeOf $hir $e]}
+} -result {{struct{length: int, storage: MutableArray[str]}} {MutableArray[str]}}
+
+# ---------------------------------------------------------------------------
+# Bearing: contracts do not vanish inside structs
+
+test struct-bearing-recursive {a struct is bearing iff a field is, recursively} -body {
+    set hir [hir::build {} -strict 0]
+    set array [hir::types::resolveApplication MutableArray int]
+    set inner [hir::types::MakeStruct [list storage $array] 0]
+    set outer [hir::types::MakeStruct [list box $inner n int] 0]
+    set plain [hir::types::MakeStruct {n int s str} 0]
+    list [hir::callables::Bearing $hir $inner] [hir::callables::Bearing $hir $outer] [hir::callables::Bearing $hir $plain] \
+        [hir::callables::Bearing $hir [hir::types::resolveApplication List [list $inner]]]
+} -result {1 1 0 1}
+
+test struct-bearing-attacks {a typed array cannot be erased through an untyped struct boundary} -body {
+    set m "m = mutarray::create(2, \"x\")\n"
+    set attacks [list \
+        "${m}s = \{storage: m\}\nxs = \[s, 5\]\nxs" \
+        "struct Box:\n    value: any\n${m}b = Box \{value: m\}\nb" \
+        "${m}s = \{storage: m\}\nfn f(v: any):\n    v\nf(s)" \
+        "struct Holder:\n    arr: MutableArray\[int\]\n${m}h = Holder \{arr: m\}\nh.arr"]
+    set needles [list \
+        "cannot erase element contract struct{storage: MutableArray\[str\]} passed as an ordinary call argument" \
+        "cannot erase element contract MutableArray\[str\] stored in field \"value\" of a struct" \
+        "cannot erase element contract struct{storage: MutableArray\[str\]} passed as an ordinary call argument" \
+        "field \"arr\" of struct Holder cannot be proven to satisfy its declared type MutableArray\[int\]"]
+    lmap attack $attacks needle $needles {
+        set message [structErrorFile $attack]
+        list [lindex [split $message :] 0] [expr {[string first $needle $message] >= 0}]
+    }
+} -result {{TYPE 1} {TYPE 1} {TYPE 1} {TYPE 1}}
+
+test struct-bearing-instance-keeps-contract {an instance keeps the typed array contract across an untyped function} -body {
+    set m "m = mutarray::create(2, \"x\")\n"
+    set hir [surface::readProgramFile [tcltest::makeFile "${m}s = \{storage: m\}\nfn leak(v):\n    v\nt = leak(s)\nu = t.storage\n" instance-bearing.bot]]
+    set types {}
+    foreach e [hir::roots $hir] {
+        if {[hir::kind $hir $e] eq "bind" && [hir::get $hir $e name] in {s t u}} {
+            lappend types "[hir::get $hir $e name]:[hir::types::show [hir::typeOf $hir $e]]"
+        }
+    }
+    join $types " | "
+} -result {s:struct{storage: MutableArray[str]} | t:struct{storage: MutableArray[str]} | u:MutableArray[str]}
+
+
+# ---------------------------------------------------------------------------
+# Modules: nominal identity is the declaration, module-qualified
+
+test struct-module-nominal {a module's struct is construct/projected/annotated through `module::Name` and never equals a local struct of the same name} -body {
+    withScratchLibrary {
+        writeFile [file join $dir geo.bot] "namespace geo
+
+struct Point:
+    x: int
+    y: int
+
+fn origin() -> Point:
+    Point \{x: 0, y: 0\}
+
+fn shift(p: Point, dx: int) -> Point:
+    Point \{x: p.x + dx, y: p.y\}
+"
+        writeFile [file join $dir main.bot] "struct Point:
+    x: int
+    y: int
+
+p = geo::Point \{x: 1, y: 2\}
+q = geo::shift(p, 5)
+o = geo::origin()
+fn norm1(a: geo::Point) -> int:
+    a.x + a.y
+local = Point \{x: 1, y: 2\}
+\[norm1(q), o.x, q == geo::Point \{x: 6, y: 2\}, local == p, local, q\]
+"
+        structRunFile [file join $dir main.bot]
+    }
+} -result {same: [8, 0, true, false, Point {x: 1, y: 2}, geo::Point {x: 6, y: 2}]}
+
+test struct-module-distinct-modules {two modules' structs with the same name and fields are distinct types} -body {
+    withScratchLibrary {
+        writeFile [file join $dir geo.bot] "namespace geo\n\nstruct Point:\n    x: int\n    y: int\n"
+        writeFile [file join $dir shapes.bot] "namespace shapes\n\nstruct Point:\n    x: int\n    y: int\n"
+        writeFile [file join $dir main.bot] "a = geo::Point \{x: 1, y: 2\}\nb = shapes::Point \{x: 1, y: 2\}\n\[a == b, a == geo::Point \{x: 1, y: 2\}\]\n"
+        set same [structRunFile [file join $dir main.bot]]
+        writeFile [file join $dir bad.bot] "fn f(p: geo::Point) -> int:\n    p.x\nf(shapes::Point \{x: 1, y: 2\})\n"
+        set bad ok
+        if {[catch {surface::readProgramFile [file join $dir bad.bot]} message]} { set bad $message }
+        list $same [string match "*cannot be proven to satisfy geo::Point (argument type: shapes::Point*" $bad]
+    }
+} -result {{same: [false, true]} 1}
+
+test struct-module-unknown-struct {a qualified struct the module does not declare is a module error} -body {
+    withScratchLibrary {
+        writeFile [file join $dir geo.bot] "namespace geo\n\nstruct Point:\n    x: int\n"
+        writeFile [file join $dir main.bot] "p = geo::Nope \{x: 1\}\n"
+        catch {surface::readProgramFile [file join $dir main.bot]} message
+        set message
+    }
+} -match glob -result {*namespace "geo" has no struct "Nope" (it declares: Point)}
+
+# ---------------------------------------------------------------------------
+# HIR representation
+
+test struct-hir-nodes {HIR has one `struct` node kind (anonymous or named) and a `project` node} -body {
+    set hir [surface::compile "${person}p = Person \{age: 36, name: \"Ada\"\}\nq = \{y: 1, x: p.age\}\n" struct.bot]
+    set structs [hirFind $hir struct]
+    set projects [hirFind $hir project]
+    list [llength $structs] [llength $projects] \
+        [lmap e $structs {list [hir::get $hir $e named] [hir::get $hir $e structId] [hir::get $hir $e names] [hir::get $hir $e layout] [hir::get $hir $e slots]}]
+} -result {2 1 {{1 Person {age name} {name age} {1 0}} {0 {} {y x} {x y} {1 0}}}}
+
+test struct-hir-format-roundtrip {HIR text prints structs, projections and declarations and reads back} -body {
+    set hir [surface::compile "${person}p = Person \{age: 36, name: \"Ada\"\}\nq = \{p: p, n: \[1\]\}\nq.p.name" struct.bot]
+    set text [hir::format $hir]
+    set back [hir::parse $text]
+    list [expr {[hir::format $back] eq $text}] [expr {[hir::lower $back] eq [hir::lower $hir]}] \
+        [string match "struct Person name Person ns - fields name: str, age: int*" $text]
+} -result {1 1 1}
+
+test struct-core-ir {core IR has explicit struct and project forms, in written order} -body {
+    set hir [surface::compile "${person}p = Person \{age: 36, name: \"Ada\"\}\nq = \{z: 1, a: p.age\}\n" struct.bot]
+    hir::lower $hir
+} -result {{bind p {struct {Person name age} age {const 36} name {const str Ada}}} {bind q {struct {} z {const 1} a {project {ref p} age}}}}
+
+test struct-core-ir-check {core IR text with struct forms is checked} -body {
+    list [catch {core::ir::check {struct {} a {const 1} a {const 2}}} m1] $m1 \
+        [catch {core::ir::check {project {const 1}}} m2] \
+        [run {struct {} z {const 1} a {const 2}}] \
+        [run {project {struct {} x {const 7}} x}]
+} -result {1 {duplicate field "a" in a struct initializer} 1 {{a: 2, z: 1}} 7}
+
+# ---------------------------------------------------------------------------
+# Specialization: semantic precision is not machine-code multiplication
+
+test struct-keytype-layout-and-kinds {a struct's specialization key keeps the layout and each field's kind, never its semantic type} -body {
+    set a [hir::types::MakeStruct [list x [hir::types::resolveApplication MutableArray int]] 0]
+    set b [hir::types::MakeStruct [list x [hir::types::resolveApplication MutableArray str]] 0]
+    set c [hir::types::MakeStruct {x int} 0]
+    set d [hir::types::MakeStruct {x str} 0]
+    set e [hir::types::MakeStruct {x int y int} 0]
+    lmap t [list $a $b $c $d $e] {hir::types::show [hir::specialize::KeyType $t]}
+} -result {{struct{x: mutarray}} {struct{x: mutarray}} {struct{x: int}} {struct{x: str}} {struct{x: int, y: int}}}
+
+test struct-keytype-named {a named struct's key is its declaration} -body {
+    hir::specialize::KeyType [list nstruct Person]
+} -result {nstruct Person}
+
+test struct-specialization-census {five semantic instances lower to four codegen instances: differing MutableArray element contracts share one} -body {
+    set hir [surface::readProgramFile [tcltest::makeFile "fn get(p):
+    p.x
+a = \{x: mutarray::create(2, 0)\}
+b = \{x: mutarray::create(2, \"s\")\}
+c = \{x: 7\}
+d = \{x: \"s\"\}
+e = \{x: 1, y: 2\}
+\[mutable_array_get(get(a), 0), mutable_array_get(get(b), 0), get(c), get(d), get(e)\]
+" census.bot]]
+    set nir [dict get [native::lowered $hir] text]
+    set semantic [llength [lsearch -all -inline -exact [lmap row [hir::semantic::census $hir] {dict get $row name}] get]]
+    set codegen [llength [regexp -all -inline {func [0-9]+ "get" [^\n]*} $nir]]
+    list $semantic $codegen [structOutcomes $hir $::structInstanceBackends]
+} -result {5 4 {same: [0, "s", 7, "s", 1]}}
+
+# ---------------------------------------------------------------------------
+# Native: shapes, slots and standalone executables
+
+test struct-native-nir {native code lowers construction to structnew of a shape and projection to a known slot} -body {
+    set hir [surface::compile "x = \{left: 1, right: 2\}\nx.right\n" struct.bot]
+    set nir [dict get [native::lowered $hir] text]
+    list [regexp {shape 0 anon fields="left right"} $nir] [regexp {structnew 0 %[0-9]+ %[0-9]+} $nir] [regexp {structget 1 %[0-9]+} $nir]
+} -result {1 1 1}
+
+test struct-native-shapes-shared {anonymous literals of one field set share one runtime shape whatever the source order} -body {
+    set hir [surface::compile "a = \{x: 1, y: 2\}\nb = \{y: 3, x: 4\}\nc = \{x: \"s\", y: \"t\"\}\n" struct.bot]
+    set nir [dict get [native::lowered $hir] text]
+    list [regexp -all {\nshape } $nir] [regexp -all {structnew 0 } $nir]
+} -result {1 3}
+
+test struct-native-named-shape {a named struct has its own nominal shape, distinct from an identical anonymous one} -body {
+    set hir [surface::compile "${accounts}a = Person \{name: \"a\", age: 1\}\nb = Account \{name: \"a\", age: 1\}\nc = \{age: 1, name: \"a\"\}\n" struct.bot]
+    set nir [dict get [native::lowered $hir] text]
+    regexp -all -inline {shape [0-9]+ [a-z]+ (?:"[A-Za-z:]+" )?fields="[a-z ]+"} $nir
+} -result {{shape 0 named "Person" fields="name age"} {shape 1 named "Account" fields="name age"} {shape 2 anon fields="age name"}}
+
+test struct-native-unknown-shape-unsupported {native code never looks a field up by name: a generic body with an unknown shape is unsupported} -body {
+    set hir [surface::compile "fn first(x):\n    x.value\nfirst(\{value: 1\})\n" struct.bot]
+    catch {native::evalHir $hir -specialize 0} message options
+    list [dict get $options -errorcode] [string match "*field projection*has a receiver of type any*" $message]
+} -result {{NATIVE UNSUPPORTED struct-shape} 1}
+
+test struct-native-gc-stress {struct values survive collection at every allocation} -body {
+    set dir [makeDirectory struct-gc]
+    set path [file join $dir gc.bot]
+    writeFile $path "struct Person:
+    name: str
+    age: int
+fn build(n):
+    if n < 1:
+        return \[\]
+    p = Person \{name: concat(\"n\", \"x\"), age: n\}
+    q = \{who: p, tags: \[concat(\"a\", \"b\"), concat(\"c\", \"d\")\], n: \{depth: n\}\}
+    rest = build(n - 1)
+    list_append(rest, q)
+xs = build(40)
+\[list_length(xs), list_get(xs, 0).who.age, list_get(xs, 39).n.depth, list_get(xs, 5).tags\]
+"
+    set hir [surface::readProgramFile $path]
+    set plain [outcomeUnderHir cranelift $hir]
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        set stressed [outcomeUnderHir cranelift $hir]
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+    removeDirectory struct-gc
+    list [expr {$plain eq $stressed}] [structOutcomes $hir]
+} -result {1 {same: [40, 1, 40, ["ab", "cd"]]}}
+
+testConstraint executableAot [expr {$::tcl_platform(os) eq "Linux" && $::tcl_platform(machine) in {x86_64 amd64}}]
+
+test struct-executable-parity {a standalone executable prints the same struct values, under GC stress too} -constraints executableAot -body {
+    set dir [makeDirectory struct-exe]
+    set path [file join $dir program.bot]
+    writeFile $path "struct Person:
+    name: str
+    age: int
+struct Team:
+    lead: Person
+    size: int
+t = Team \{size: 2, lead: Person \{name: \"Ada\", age: 36\}\}
+q = \{team: t, names: \[\"a\", \"b\"\], anon: \{z: 1, a: 2\}\}
+\[q, q == q, t.lead == Person \{age: 36, name: \"Ada\"\}, q.anon == \{a: 2, z: 1\}\]
+"
+    try {
+        set hir [surface::readProgramFile $path]
+        set expected [lindex [outcomeUnderHir interp $hir] 1]
+        native::executable $hir [file rootname $path]
+        set plain [exec env PATH= [file rootname $path]]
+        set stressed [exec env PATH= BOTLISH_NATIVE_GC_STRESS=1 [file rootname $path]]
+        list [expr {$plain eq $stressed}] [expr {$plain eq $expected}] $plain
+    } finally {
+        removeDirectory struct-exe
+    }
+} -result {1 1 {[{anon: {a: 2, z: 1}, names: ["a", "b"], team: Team {lead: Person {name: "Ada", age: 36}, size: 2}}, true, true, true]}}
+
+test struct-executable-module {a module-declared struct works in a standalone executable} -constraints executableAot -body {
+    withScratchLibrary {
+        writeFile [file join $dir geo.bot] "namespace geo\n\nstruct Point:\n    x: int\n    y: int\n\nfn origin() -> Point:\n    Point \{x: 0, y: 0\}\n"
+        writeFile [file join $dir main.bot] "p = geo::Point \{x: 3, y: 4\}\n\[p, geo::origin(), p.x + p.y\]\n"
+        set hir [surface::readProgramFile [file join $dir main.bot]]
+        native::executable $hir [file join $dir main]
+        list [exec env PATH= [file join $dir main]] [lindex [outcomeUnderHir interp $hir] 1]
+    }
+} -result {{[geo::Point {x: 3, y: 4}, geo::Point {x: 0, y: 0}, 7]} {[geo::Point {x: 3, y: 4}, geo::Point {x: 0, y: 0}, 7]}}
+
+cleanupTests

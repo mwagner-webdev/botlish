@@ -1,0 +1,251 @@
+# structs-syntax.test -- the surface syntax of structs (STRUCTS.md): anonymous
+# struct values `{ x: a }`, named construction `Name { x: a }`, field
+# projection `value.field`, `struct Name:` declarations, qualified type
+# names; grammar ambiguity, node ids, formatting and malformed input.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+proc ast {source args} {
+    return [surface::formatAst [surface::parse $source t.bot] {*}$args]
+}
+
+# The arguments joined with " | " (the results of several cases in one test).
+proc each {args} {
+    return [join $args " | "]
+}
+
+# "LINE:COLUMN MESSAGE" of the syntax error SOURCE raises.
+proc parseError {source} {
+    if {![catch {surface::parse $source t.bot} message options]} {
+        return "no error"
+    }
+    lassign [dict get $options -errorcode] a b diagnostic
+    if {"$a $b" ne "SURFACE SYNTAX"} {
+        return "unexpected error: $message"
+    }
+    return "[dict get $diagnostic line]:[dict get $diagnostic column] [dict get $diagnostic message]"
+}
+
+# ---------------------------------------------------------------------------
+# Expressions: what AST node each form is
+
+test structsyn-anon {an anonymous struct value is an `anonstruct` node} -body {
+    ast "\{x: 1, y: 2\}"
+} -result {(struct (x (int 1)) (y (int 2)))}
+
+test structsyn-named {a named construction is a `namedstruct` node with the same initializer payload} -body {
+    ast "Person \{x: 1, y: 2\}"
+} -result {(struct Person (x (int 1)) (y (int 2)))}
+
+test structsyn-shared-payload {both forms carry one shared field-initializer (`fieldinits`) payload} -body {
+    set anon [lindex [dict get [surface::parse "\{x: 1, y: a\}" t.bot] body] 0]
+    set named [lindex [dict get [surface::parse "P \{x: 1, y: a\}" t.bot] body] 0]
+    list [dict get $anon kind] [dict get $named kind] [dict get [dict get $anon init] kind] [dict get [dict get $named init] kind] \
+        [lmap f [dict get [dict get $anon init] fields] {dict get $f name}] \
+        [expr {[lmap f [dict get [dict get $anon init] fields] {dict get $f name}] eq [lmap f [dict get [dict get $named init] fields] {dict get $f name}]}]
+} -result {anonstruct namedstruct fieldinits fieldinits {x y} 1}
+
+test structsyn-empty {the empty braces are the empty anonymous struct} -body {
+    ast "\{\}\nx = \{\}"
+} -result {(struct)
+(bind x (struct))}
+
+test structsyn-trailing-comma {the trailing comma is optional} -body {
+    list [ast "\{a: 1,\}"] [ast "\{a: 1\}"] [ast "P \{a: 1,\}"]
+} -result {{(struct (a (int 1)))} {(struct (a (int 1)))} {(struct P (a (int 1)))}}
+
+test structsyn-multiline {newlines and indentation are free inside braces} -body {
+    ast "p = Person \{\n    name: \"Ada\",\n    age: 36,\n\}\nq = \{\n  a: 1\n\}\nq"
+} -result {(bind p (struct Person (name (str "Ada")) (age (int 36))))
+(bind q (struct (a (int 1))))
+(name q)}
+
+test structsyn-nested {literals nest in fields, lists and calls} -body {
+    ast "x = \{p: Person \{a: 1\}, l: \[\{b: 2\}\], c: f(\{d: 3\})\}"
+} -result {(bind x (struct (p (struct Person (a (int 1)))) (l (list (struct (b (int 2))))) (c (call (name f) (struct (d (int 3)))))))}
+
+test structsyn-qualified-name {a module-qualified type name constructs: NAMESPACE::Name \{...\}} -body {
+    ast "p = geo::Point \{x: 1\}"
+} -result {(bind p (struct geo::Point (x (int 1))))}
+
+test structsyn-projection {field projection is postfix and chains with calls} -body {
+    ast "a.b\na.b.c\nf(x).y\nx.f(1)\n-p.x\np.x * 2\n\{a: 1\}.a\nPerson \{a: 1\}.a"
+} -result {(project (name a) b)
+(project (project (name a) b) c)
+(project (call (name f) (name x)) y)
+(call (project (name x) f) (int 1))
+(unary - (project (name p) x))
+(binary * (project (name p) x) (int 2))
+(project (struct (a (int 1))) a)
+(project (struct Person (a (int 1))) a)}
+
+test structsyn-projection-spaces {spaces around the dot do not change the parse} -body {
+    ast "a . b\na .b\na. b"
+} -result {(project (name a) b)
+(project (name a) b)
+(project (name a) b)}
+
+test structsyn-decl {a struct declaration is a top-level declaration with typed fields} -body {
+    ast "struct Person:\n    name: str\n    age: int\nstruct Team:\n    lead: Person\n    members: List\[Person\]\n    f: Fn\{args: \[int\], return: int, errors: \[\]\}\n    p: geo::Point\n"
+} -result {struct Person
+    name: str
+    age: int
+struct Team
+    lead: Person
+    members: List[Person]
+    f: Fn{args: [int], return: int, errors: []}
+    p: geo::Point}
+
+test structsyn-decl-nested-fn-type {struct declarations and uses interleave with ordinary statements} -body {
+    ast "x = 1\nstruct S:\n    a: int\ny = S \{a: x\}\n"
+} -result {(bind x (int 1))
+struct S
+    a: int
+(bind y (struct S (a (name x))))}
+
+# ---------------------------------------------------------------------------
+# Grammar ambiguity: braces, blocks and calls
+
+test structsyn-blocks-stay-indentation {braces never open a block: blocks are colon and indentation} -body {
+    ast "if c:\n    x = \{a: 1\}\nelse:\n    y = \{\}\nloop:\n    break\n"
+} -result {if (name c)
+    (bind x (struct (a (int 1))))
+else
+    (bind y (struct))
+loop
+    (break)}
+
+test structsyn-call-then-literal-line {a call followed by a struct literal on the next line is two statements} -body {
+    ast "f(x)\n\{a: 1\}"
+} -result {(call (name f) (name x))
+(struct (a (int 1)))}
+
+test structsyn-call-then-literal-same-line {a call directly followed by a literal is not a construction} -body {
+    parseError "f(x) \{a: 1\}"
+} -result "1:6 expected end of line, found \"{\""
+
+test structsyn-name-brace-is-construction {a name followed by braces is a named construction, nothing else} -body {
+    list [ast "Person \{a: 1\}"] [ast "x\n\{a: 1\}"]
+} -result {{(struct Person (a (int 1)))} {(name x)
+(struct (a (int 1)))}}
+
+test structsyn-domain-and-fn-type-braces-unchanged {the other two uses of braces are untouched} -body {
+    ast "type Small = Int in \{1, 2, 3\}\ntype Byte = Int in 0..255\nfn f(g: Fn\{args: \[int\], return: int\}) -> int:\n    g(1)\n"
+} -result {type Small = Int in {1, 2, 3}
+type Byte = Int in 0..255
+fn f (g:Fn{args: [int], return: int, errors: []})
+    (call (name g) (int 1))}
+
+test structsyn-keyword-not-a-name {struct is a keyword and cannot be used as a name} -body {
+    each [parseError "struct = 1"] [parseError "x = struct"]
+} -result "1:8 expected a struct name after \"struct\", found \"=\" | 1:5 expected an expression, found \"struct\""
+
+# ---------------------------------------------------------------------------
+# Node ids and spans
+
+test structsyn-ids {field values and receivers have structural ids} -body {
+    ast "p = Person \{name: \"A\", age: 3\}\nq = p.age\n" -ids 1
+} -result "(bind p (struct Person (name (str \"A\") <p=/value/field1>) (age (int 3) <p=/value/field2>)) <p=/value>) <p=>
+(bind q (project (name p) <q=/value/receiver> age) <q=/value>) <q=>"
+
+test structsyn-spans {a struct literal's span covers its braces; projection covers receiver through field name} -body {
+    ast "x = \{a: 1\}\ny = x.a\n" -spans 1
+} -result "(bind x (struct (a (int 1) @1:9-1:10)) @1:5-1:11) @1:1-1:11
+(bind y (project (name x) @2:5-2:6 a) @2:5-2:8) @2:1-2:8"
+
+# ---------------------------------------------------------------------------
+# Malformed input: clean, located syntax errors
+
+test structsyn-error-missing-colon {a field needs its colon} -body {
+    parseError "x = \{a 1\}"
+} -result {1:8 expected ":" after the field name "a", found integer 1}
+
+test structsyn-error-missing-value {a field needs its value} -body {
+    each [parseError "x = \{a:\}"] [parseError "x = \{a: , b: 1\}"]
+} -result "1:8 expected an expression, found \"}\" | 1:9 expected an expression, found \",\""
+
+test structsyn-error-duplicate-comma {no empty fields} -body {
+    each [parseError "x = \{a: 1,, b: 2\}"] [parseError "x = \{,\}"]
+} -result "1:11 expected a field name (an identifier), found \",\" | 1:6 expected a field name (an identifier), found \",\""
+
+test structsyn-error-bad-field-name {a field name is an ordinary identifier} -body {
+    each [parseError "x = \{1: 2\}"] [parseError "x = \{\"a\": 2\}"] [parseError "x = \{fn: 2\}"] [parseError "x = \{\[a\]: 2\}"]
+} -result "1:6 expected a field name (an identifier), found integer 1 | 1:6 expected a field name (an identifier), found string \"a\" | 1:6 expected a field name, found the keyword \"fn\" (a field name is an ordinary identifier) | 1:6 expected a field name (an identifier), found \"\[\""
+
+test structsyn-error-unterminated {an unterminated literal is diagnosed by the lexer} -body {
+    parseError "x = \{a: 1"
+} -result "1:5 \"{\" is never closed"
+
+test structsyn-error-bad-nested-braces {mismatched and stray closers} -body {
+    each [parseError "x = \{a: \{b: 1\}"] [parseError "x = \{a: 1\}\}"] [parseError "x = \{a: (1\}"]
+} -result "1:5 \"{\" is never closed | 1:11 unmatched \"}\" | 1:11 \"}\" does not match \"(\" opened at t.bot:1:9"
+
+test structsyn-error-projection-name {a dot needs a field name} -body {
+    each [parseError "x = a."] [parseError "x = a.1"] [parseError "x = a.(b)"] [parseError "x = a..b"]
+} -result "1:7 expected a field name after \".\", found end of line | 1:7 expected a field name after \".\", found integer 1 | 1:7 expected a field name after \".\", found \"(\" | 1:6 expected end of line, found \"..\""
+
+test structsyn-error-decl {declaration errors} -body {
+    each [parseError "struct Marker:\n"] [parseError "struct P:\n    a\n"] [parseError "struct P:\n    a: int = 1\n"] \
+        [parseError "struct P\n    a: int\n"] [parseError "fn f():\n    struct P:\n        a: int\n"]
+} -result "2:1 a struct declaration needs at least one \"field: Type\" line in an indented block (there is no empty-struct syntax), found end of file | 2:6 expected \":\" and a type after the field name \"a\" (a struct field always has an explicit type), found end of line | 2:12 a struct field cannot have a default value (every field must be given explicitly when a struct is constructed) | 1:9 expected \":\" after the struct name \"P\", found end of line | 2:5 a struct declaration is only allowed at the top level of a module, not nested in a function/if/loop"
+
+test structsyn-error-recovery {with recovery a malformed struct statement is one error node and parsing resumes} -body {
+    set program [surface::parse "x = 1\ny = \{a 1\}\nz = 2\n" t.bot -recover 1]
+    list [lmap s [dict get $program body] {dict get $s kind}] [llength [dict get $program diagnostics]]
+} -result {{bind error bind} 1}
+
+# ---------------------------------------------------------------------------
+# Robustness: every mutation of valid struct source parses or fails cleanly
+
+test structsyn-mutation-robustness {deleting, duplicating and replacing any token of struct programs never crashes the lexer or parser} -body {
+    set seeds [list \
+        "struct Person:\n    name: str\n    age: int\np = Person \{\n    name: \"Ada\",\n    age: 36,\n\}\nq = \{name: \"G\", age: 45\}\nn = p.name\nm = q.age\n" \
+        "x = \{a: \{b: \[1, 2\]\}, c: f(1).d\}\ny = \{\}\nz = geo::P \{x: 1\}.x\n" \
+        "struct T:\n    a: List\[geo::P\]\n    b: Fn\{args: \[int\], return: int, errors: \[\]\}\nt = T \{a: \[\], b: g\}\n"]
+    set replacements {\{ \} : , . struct = ( ) \[ \] "::" x 1 "\"s\"" "\n" "\n    "}
+    set unexpected {}
+    set cases 0
+    foreach seed $seeds {
+        set tokens [surface::lex $seed t.bot]
+        # Work on the source text split at token boundaries.
+        set pieces {}
+        set offset 0
+        foreach token $tokens {
+            set span [dict get $token span]
+            set start [dict get $span start]
+            set end [dict get $span end]
+            if {$end <= $start || $start < $offset} continue
+            lappend pieces [list $start $end]
+        }
+        set n [llength $pieces]
+        for {set i 0} {$i < $n} {incr i} {
+            lassign [lindex $pieces $i] start end
+            set head [string range $seed 0 $start-1]
+            set tail [string range $seed $end end]
+            set text [string range $seed $start $end-1]
+            set variants [list "$head$tail" "$head$text$text$tail" "$head$text $text$tail"]
+            foreach r $replacements {
+                lappend variants "$head$r$tail"
+            }
+            foreach variant $variants {
+                incr cases
+                foreach recover {0 1} {
+                    if {[catch {surface::parse $variant t.bot -recover $recover} message options]} {
+                        if {[lrange [dict get $options -errorcode] 0 1] ne {SURFACE SYNTAX}} {
+                            lappend unexpected [list $variant $message]
+                        }
+                    } elseif {$recover == 0} {
+                        # A program that parses must format and lower without a Tcl error.
+                        if {[catch {surface::formatAst $message} formatError]} {
+                            lappend unexpected [list $variant "format: $formatError"]
+                        }
+                    }
+                }
+            }
+        }
+    }
+    list [expr {$cases > 500}] $unexpected
+} -result {1 {}}
+
+cleanupTests

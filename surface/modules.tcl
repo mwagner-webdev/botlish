@@ -343,6 +343,19 @@ proc surface::modules::CollectAndLoad {stateVar ast} {
     }
 }
 
+# The initial loader state of a program whose own root file is FILES (a dict
+# FileId -> path; {} for a caller with no file of its own) and whose module
+# files start at FileId f(NEXTFILE): the one constructor of the state
+# LoadNamespace/CollectAndLoad thread through, so every caller (this file's
+# own entry points, examples/stdlib/corpus.tcl's text-based compile) carries
+# every table -- loaded definitions, loaded struct types, sections and the
+# three kinds of declaration -- without a copy of the list to keep in sync.
+proc surface::modules::NewState {files nextFile} {
+    return [dict create files $files nextFile $nextFile \
+        loaded [dict create] loadedStructs [dict create] stack {} sections {} \
+        typeDecls {} errorDecls {} structDecls {}]
+}
+
 # {sections SECTIONS files FILES functions NAMESPACE->{FUNCTION-NAME ...}}
 # for NAMESPACES and everything they transitively depend on -- the general
 # module loader's entry point for a caller with no source AST of its own
@@ -361,9 +374,7 @@ proc surface::modules::LoadNamespaces {namespaces args} {
         }
         dict set options $option $value
     }
-    set state [dict create files [dict create] nextFile [dict get $options -start-file] \
-        loaded [dict create] loadedStructs [dict create] stack {} sections {} typeDecls {} errorDecls {} \
-        structDecls {}]
+    set state [NewState [dict create] [dict get $options -start-file]]
     foreach name $namespaces {
         LoadNamespace state $name ""
     }
@@ -384,9 +395,7 @@ proc surface::modules::compileProgramFile {path args} {
         dict set options $option $value
     }
     set ast [surface::parse [core::ReadFile $path] $path]
-    set state [dict create files [dict create f1 [dict get $ast span file]] nextFile 2 \
-        loaded [dict create] loadedStructs [dict create] stack {} sections {} typeDecls {} errorDecls {} \
-        structDecls {}]
+    set state [NewState [dict create f1 [dict get $ast span file]] 2]
     CollectAndLoad state $ast
     lassign [surface::lower::SplitTypeDecls [dict get $ast body]] executable ownDecls ownErrorDecls ownStructDecls
     set decls [concat [dict get $state typeDecls] $ownDecls]

@@ -76,15 +76,15 @@ proc corpus::compile {source filename args} {
         set strict $value
     }
     set ast [surface::parse $source $filename]
-    set state [dict create files [dict create f1 [dict get $ast span file]] nextFile 2 \
-        loaded [dict create] stack {} sections {} typeDecls {} errorDecls {}]
+    set state [surface::modules::NewState [dict create f1 [dict get $ast span file]] 2]
     surface::modules::CollectAndLoad state $ast
-    lassign [surface::lower::SplitTypeDecls [dict get $ast body]] executable ownDecls ownErrorDecls
+    lassign [surface::lower::SplitTypeDecls [dict get $ast body]] executable ownDecls ownErrorDecls ownStructDecls
     set hir [hir::buildSyntax [surface::lower::Sequence $executable] -strict 0 \
         -origin [surface::lower::Origin [dict get $ast span] ""] \
         -files [dict get $state files] -modules [dict get $state sections] \
         -type-decls [concat [dict get $state typeDecls] $ownDecls] \
-        -error-decls [concat [dict get $state errorDecls] $ownErrorDecls]]
+        -error-decls [concat [dict get $state errorDecls] $ownErrorDecls] \
+        -struct-decls [concat [dict get $state structDecls] $ownStructDecls]]
     return [surface::lower::Finish $hir $strict]
 }
 

@@ -546,7 +546,7 @@ proc surface::parser::TypeExpr {pVar what} {
         # string "geo::Point", so every bare-name consumer keeps working.
         Advance p
         set member [Expect p IDENT "a type name after \"::\""]
-        set name "$name::[dict get $member value]"
+        set name "${name}::[dict get $member value]"
     }
     if {[Kind p] ne "\["} {
         return $name
