@@ -117,6 +117,7 @@ Values are immutable. Every value has exactly one kind:
 | `bool`   | `true` / `false` | the only valid condition values                    |
 | `unit`   | `unit`           | value of an empty sequence                         |
 | `list`   | `[1, "a"]`       | an ordered sequence of values                      |
+| `struct` | `{a: 1, b: 2}` / `Name {a: 1}` | fixed named fields (STRUCTS.md): anonymous (structural) or declared by `struct Name:` (nominal) |
 | `result` | `ok(v)` / `error(v)` | an application-level outcome                   |
 | `block`  | `<block (x y)>`  | a closure: parameters, body, captured environment  |
 | `native` | `<native +>`     | a primitive callable, possibly with refinement metadata |
@@ -126,7 +127,8 @@ Kinds never blur: the integer `10`, the string `"10"`, and the string
 
 **Equality (`==`)** compares structure. Values of different kinds are never
 equal. Integers compare numerically, strings compare exact characters, lists
-compare element by element, and Results compare tag and payload. Equality on
+compare element by element, structs compare by shape (an anonymous struct's
+field set, or one declaration) and then field by field, and Results compare tag and payload. Equality on
 callables is not defined, because it would need identity semantics, which are
 out of scope. Comparing callables makes the program invalid.
 
@@ -207,6 +209,16 @@ an error.
 
 A program is a list of IR expressions. Each IR node is a list that starts
 with its operation name. A malformed node is rejected, never guessed at.
+
+### `(struct HEAD NAME EXPR ...)` / `(project EXPR NAME)`
+
+`struct` builds a struct value (STRUCTS.md): every EXPR is evaluated in written
+order, then the value is built, so no partially initialized struct is ever
+observable. HEAD is `{}` for an anonymous struct (its identity is its field
+set, never the order written) or `{ID FIELD ...}` for a named struct
+(declaration identity and slot order). `project` reads one field of a struct
+value; HIR proves statically that the receiver is a struct with that field, so
+there is no dynamic lookup and no missing-field error.
 
 ### `(const LITERAL)` / `(const TYPE LITERAL)`
 
@@ -536,7 +548,9 @@ Implementation notes (not part of the semantics):
 
 ## 11. Not implemented (deliberately)
 
-Surface syntax beyond the minimal language of §17, macros, objects, assignment, mutable
+Surface syntax beyond the minimal language of §17, macros, objects (structs,
+STRUCTS.md, are immutable values: no mutable struct, update syntax, methods or
+inheritance), assignment, mutable
 variables, exceptions, `?` propagation, pattern matching, a type checker
 beyond refinement tracking, async, coroutines, threads, or FFI. A small
 one-file/one-namespace module system *is* implemented (§17's `namespace`/
@@ -1263,6 +1277,15 @@ add10(32)          # 42 (add captures x)
   order, newlines allowed inside the braces; `errors` may be omitted and
   then means `errors: []`, exactly like a `fn` without an `errors` clause).
   See STRUCTURAL-FUNCTION-TYPES.md.
+* A **struct** is a fixed set of named fields (STRUCTS.md). `{x: 1, y: 2}` is
+  an anonymous struct value (structural type, field order irrelevant, `{}`
+  legal, trailing comma optional); `struct Point:` followed by indented
+  `name: Type` lines declares a nominal type, and `Point {x: 1, y: 2}`
+  constructs it (every declared field exactly once, statically type-checked,
+  no defaults; `mod::Point {...}` for a module's). `value.field` is a total
+  static projection; a receiver the compiler cannot prove is a struct with
+  that field is rejected, never looked up at run time. Struct values are
+  immutable.
 * Integers (decimal, arbitrary precision, no leading zeros), strings
   (`"..."`, escapes `\\ \" \n \r \t`), `true`, `false`, `unit`, lists
   `[a, b]`, calls `f(x)(y)`.

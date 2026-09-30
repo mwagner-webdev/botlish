@@ -1,0 +1,2 @@
+KeyType variant kinds: codegen used 242 emitted 231
+KeyType variant layout: codegen used 242 emitted 231

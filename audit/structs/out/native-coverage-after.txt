@@ -1,0 +1,605 @@
+Cranelift backend coverage of the test suite (3436 tests)
+
+  native           1264
+  independent      2082
+  passed-partial     40
+  unsupported        49
+  failed              1
+
+Unsupported tests by needed construct (a test may need several):
+  value                                     15  acceptance-4 block-2 closure-4 set-construction-block-member-single-ok refined-3 refined-6 refine-1 refine-2 refine-3 refine-4 refine-5 refine-6 refine-7 refine-8 refine-9
+  {native test-log}                         11  scope-5 block-1 call-1 call-2 if-2 return-2 return-3 loop-counted-bounds-left-to-right loop-counted-continue-count typed-param-no-runtime-check-2 web-unreserved-or-short-circuits
+  sequence-mode                              7  malformed-6 return-7 completion-1 completion-2 hir-lower-2 boundary-2 boundary-4
+  {native emailish?}                         1  emailish-predicate-alias-not-runtime-value
+  {native test-tick}                         7  loop-counted-bounds-evaluated-once loop-in-iterable-evaluated-once loop-1 loop-2 continue-1 break-1 loop-return-1
+  {native UriQueryValue?}                    2  refined-11 refined-12
+  {native test-fake-escape}                  1  refined-13
+  {refinement evidence}                      2  refined-14 refined-15
+  {native test-both-ints?}                   1  refine-10
+  {native test_tick}                         1  surface-run-continue
+  {native test_log}                          1  surface-run-evaluation-order
+
+FAILED (native backend bugs):
+  failed           refined-5                                
+
+Tests running in interp:  /usr/bin/tclsh9.0
+Tests located in:  /home/user/botlish/tests
+Tests running in:  /home/user/botlish
+Temporary files stored in /home/user/botlish
+Test files run in separate interpreters
+Running tests that match:  *
+Skipping test files that match:  l.*.test
+Only running test files that match:  *.test
+Tests began at Wed Sep 30 18:10:22 UTC 2026
+acceptance.test
+
+
+==== acceptance-4 refinement scoping FAILED
+==== Contents of test case:
+
+    lassign [core::value::items [runExample 04-refinement-scope.ir]] inside after
+    list [core::envRefinements [core::blockEnv $inside]]  [core::envRefinements [core::blockEnv $after]]
+
+---- Test generated error; Return code was: 1
+---- Return code should have been one of: 0 2
+---- errorInfo: the native backend cannot return a Block to the host: <block ()>
+    while executing
+"throw $code $message"
+    (procedure "Outcome" line 16)
+    invoked from within
+"Outcome [Driver run [nir $hir {*}$args]]"
+    (procedure "native::evalHir" line 5)
+    invoked from within
+"native::evalHir [testNativeHir $exprs] {*}$options"
+    (procedure "::testNativeProgram" line 3)
+    invoked from within
+"{*}[dict get $backends $backend $mode] $exprs $env"
+    (procedure "core::RunWithBackend" line 4)
+    invoked from within
+"core::RunWithBackend program $exprs $env"
+    (procedure "core::evalProgram" line 10)
+    invoked from within
+"core::evalProgram [core::readProgramFile [file join $::projectRoot examples $name]]"
+    (procedure "runExample" line 2)
+    invoked from within
+"runExample 04-refinement-scope.ir"
+    ("uplevel" body line 2)
+    invoked from within
+"uplevel 1 $script"
+---- errorCode: NATIVE UNSUPPORTED value
+==== acceptance-4 FAILED
+
+Warning: files left behind:
+	acceptance.test:	native-coverage.log
+applied-types.test
+ascii.test
+backends.test
+bench-backends.test
+bench-corpus.test
+bindings.test
+
+
+==== scope-5 duplicate binding in a block body without closures FAILED
+==== Contents of test case:
+
+    list [catch {core::eval {call {block {}
+                                {bind x {const 1}}
+                                {bind x {call {ref test-log} {const 2}}}}}} message options]  [dict get $options -errorcode] $::testLog
+
+---- Result was:
+1 {NATIVE UNSUPPORTED {native test-log}} {}
+---- Result should have been (exact matching):
+1 {CORE SEMANTIC DUPLICATE} 2
+==== scope-5 FAILED
+
+
+
+==== malformed-6 malformed nodes are rejected by evalIn too FAILED
+==== Contents of test case:
+
+    core::evalIn {ref} [core::rootEnv]
+
+---- Error code was: 'NATIVE UNSUPPORTED sequence-mode'
+---- Error code should have been: 'CORE MALFORMED'
+==== malformed-6 FAILED
+
+blocks.test
+
+
+==== block-1 evaluating a block does not execute its body FAILED
+==== Contents of test case:
+
+    list [run {block {x y} {call {ref test-log} {const ran}}}] $::testLog
+
+---- Test generated error; Return code was: 1
+---- Return code should have been one of: 0 2
+---- errorInfo: ir {0 2}: e2: native lowering does not support native test-log: the native "test-log" has no native implementation
+    while executing
+"throw [list NATIVE UNSUPPORTED $what] "${where}$e: native lowering does not support $what: $detail""
+    (procedure "Unsupported" line 12)
+    invoked from within
+"Unsupported $e "native $name" "the native \"$name\" has no native implementation""
+    (procedure "NativeCall" line 27)
+    invoked from within
+"NativeCall fn $e $node $name $argRegs $rawEligible $op $want"
+    (procedure "Call" line 263)
+    invoked from within
+"Call fn $e $node $want "" [expr {$want eq "region"}]"
+    (procedure "Expr" line 11)
+    invoked from within
+"Expr fn $e"
+    (procedure "Sequence" line 7)
+    invoked from within
+"Sequence fn $exprs"
+    (procedure "SequenceTo" line 4)
+    invoked from within
+"SequenceTo fn $body [PlanResultFamily fn]"
+    (procedure "Function" line 61)
+    invoked from within
+"Function $id"
+    (procedure "native::lower::program" line 163)
+    invoked from within
+"native::lower::program [prepareHir $hir] {*}$args"
+    (procedure "lowered" line 4)
+    invoked from within
+"lowered $hir {*}$args"
+    (procedure "nir" line 2)
+    invoked from within
+"nir $hir {*}$args"
+    (procedure "native::evalHir" line 5)
+    invoked from within
+"native::evalHir [testNativeHir $exprs] {*}$options"
+    (procedure "::testNativeProgram" line 3)
+    invoked from within
+"{*}[dict get $backends $backend $mode] $exprs $env"
+    (procedure "core::RunWithBackend" line 4)
+    invoked from within
+"core::RunWithBackend program $exprs $env"
+    (procedure "core::evalProgram" line 10)
+    invoked from within
+"core::evalProgram $args"
+    (procedure "run" line 2)
+    invoked from within
+"run {block {x y} {call {ref test-log} {const ran}}}"
+    ("uplevel" body line 2)
+    invoked from within
+"uplevel 1 $script"
+---- errorCode: NATIVE UNSUPPORTED {native test-log}
+==== block-1 FAILED
+
+
+
+==== block-2 block value is inspectable FAILED
+==== Contents of test case:
+
+    set b [runValue {block {x} {ref x}}]
+    list [core::value::blockParams $b] [core::value::blockBody $b]
+
+---- Test generated error; Return code was: 1
+---- Return code should have been one of: 0 2
+---- errorInfo: the native backend cannot return a Block to the host: <block (x)>
+    while executing
+"throw $code $message"
+    (procedure "Outcome" line 16)
+    invoked from within
+"Outcome [Driver run [nir $hir {*}$args]]"
+    (procedure "native::evalHir" line 5)
+    invoked from within
+"native::evalHir [testNativeHir $exprs] {*}$options"
+    (procedure "::testNativeProgram" line 3)
+    invoked from within
+"{*}[dict get $backends $backend $mode] $exprs $env"
+    (procedure "core::RunWithBackend" line 4)
+    invoked from within
+"core::RunWithBackend program $exprs $env"
+    (procedure "core::evalProgram" line 10)
+    invoked from within
+"core::evalProgram $args"
+    (procedure "runValue" line 2)
+    invoked from within
+"runValue {block {x} {ref x}}"
+    ("uplevel" body line 2)
+    invoked from within
+"uplevel 1 $script"
+---- errorCode: NATIVE UNSUPPORTED value
+==== block-2 FAILED
+
+
+
+==== closure-4 the body runs in a child of the captured environment FAILED
+==== Contents of test case:
+
+    set b [runValue {bind x {const 1}} {block {} {ref x}}]
+    dict get [core::envBindings [core::blockEnv $b]] x
+
+---- Test generated error; Return code was: 1
+---- Return code should have been one of: 0 2
+---- errorInfo: the native backend cannot return a Block to the host: <block ()>
+    while executing
+"throw $code $message"
+    (procedure "Outcome" line 16)
+    invoked from within
+"Outcome [Driver run [nir $hir {*}$args]]"
+    (procedure "native::evalHir" line 5)
+    invoked from within
+"native::evalHir [testNativeHir $exprs] {*}$options"
+    (procedure "::testNativeProgram" line 3)
+    invoked from within
+"{*}[dict get $backends $backend $mode] $exprs $env"
+    (procedure "core::RunWithBackend" line 4)
+    invoked from within
+"core::RunWithBackend program $exprs $env"
+    (procedure "core::evalProgram" line 10)
+    invoked from within
+"core::evalProgram $args"
+    (procedure "runValue" line 2)
+    invoked from within
+"runValue {bind x {const 1}} {block {} {ref x}}"
+    ("uplevel" body line 2)
+    invoked from within
+"uplevel 1 $script"
+---- errorCode: NATIVE UNSUPPORTED value
+==== closure-4 FAILED
+
+byte-set.test
+calls.test
+
+
+==== call-1 callee then arguments are evaluated left to right FAILED
+==== Contents of test case:
+
+    run {call {call {ref test-log} {ref list}}
+              {call {ref test-log} {const 1}}
+              {call {ref test-log} {const 2}}
+              {call {ref test-log} {const 3}}}
+    set ::testLog
+
+---- Test generated error; Return code was: 1
+---- Return code should have been one of: 0 2
+---- errorInfo: ir {0 1}: e2: native lowering does not support native test-log: the native "test-log" has no native implementation
+    while executing
+"throw [list NATIVE UNSUPPORTED $what] "${where}$e: native lowering does not support $what: $detail""
+    (procedure "Unsupported" line 12)
+    invoked from within
+"Unsupported $e "native $name" "the native \"$name\" has no native implementation""
+    (procedure "NativeCall" line 27)
+    invoked from within
+"NativeCall fn $e $node $name $argRegs $rawEligible $op $want"
+    (procedure "Call" line 263)
+    invoked from within
+"Call fn $e $node $want "" [expr {$want eq "region"}]"
+    (procedure "Expr" line 11)
+    invoked from within
+"Expr fn $calleeExpr"
+    (procedure "Call" line 237)
+    invoked from within
+"Call fn $e $node $want "" [expr {$want eq "region"}]"
+    (procedure "Expr" line 11)
+    invoked from within
+"Expr fn $e"
+    (procedure "Sequence" line 7)
+    invoked from within
+"Sequence fn $exprs"
+    (procedure "SequenceTo" line 4)
+    invoked from within
+"SequenceTo fn $body [PlanResultFamily fn]"
+    (procedure "Function" line 61)
+    invoked from within
+"Function $id"
+    (procedure "native::lower::program" line 163)
+    invoked from within
+"native::lower::program [prepareHir $hir] {*}$args"
+    (procedure "lowered" line 4)
+    invoked from within
+"lowered $hir {*}$args"
+    (procedure "nir" line 2)
+    invoked from within
+"nir $hir {*}$args"
+    (procedure "native::evalHir" line 5)
+    invoked from within
+"native::evalHir [testNativeHir $exprs] {*}$options"
+    (procedure "::testNativeProgram" line 3)
+    invoked from within
+"{*}[dict get $backends $backend $mode] $exprs $env"
+    (procedure "core::RunWithBackend" line 4)
+    invoked from within
+"core::RunWithBackend program $exprs $env"
+    (procedure "core::evalProgram" line 10)
+    invoked from within
+"core::evalProgram $args"
+    (procedure "run" line 2)
+    invoked from within
+"run {call {call {ref test-log} {ref list}}
+              {call {ref test-log} {const 1}}
+              {call {ref test-log} {const 2}}
+              {..."
+    ("uplevel" body line 2)
+    invoked from within
+"uplevel 1 $script"
+---- errorCode: NATIVE UNSUPPORTED {native test-log}
+==== call-1 FAILED
+
+
+
+==== call-2 arguments are evaluated before arity is checked FAILED
+==== Contents of test case:
+
+    catch {core::eval {call {block {} {const 0}} {call {ref test-log} {const 1}}}}
+    set ::testLog
+
+---- Result was:
+
+---- Result should have been (exact matching):
+1
+==== call-2 FAILED
+
+checked-domain-proof-provenance.test
+close-callers-convergence.test
+closed-closure-entry-facts.test
+compiler-opt.test
+conjunctive-entry-facts.test
+control.test
+
+
+==== if-2 exactly one branch executes FAILED
+==== Contents of test case:
+
+    run {if {ref true}
+            {block {} {call {ref test-log} {const then}}}
+            {block {} {call {ref test-log} {const else}}}}
+    set ::testLog
+
+---- Test generated error; Return code was: 1
+---- Return code should have been one of: 0 2
+---- errorInfo: ir {0 2 2}: e3: native lowering does not support native test-log: the native "test-log" has no native implementation
+    while executing
+"throw [list NATIVE UNSUPPORTED $what] "${where}$e: native lowering does not support $what: $detail""
+    (procedure "Unsupported" line 12)
+    invoked from within
+"Unsupported $e "native $name" "the native \"$name\" has no native implementation""
+    (procedure "NativeCall" line 27)
+    invoked from within
+"NativeCall fn $e $node $name $argRegs $rawEligible $op $want"
+    (procedure "Call" line 263)
+    invoked from within
+"Call fn $e $node $want "" [expr {$want eq "region"}]"
+    (procedure "Expr" line 11)
+    invoked from within
+"Expr fn $e"
+    (procedure "Sequence" line 7)
+    invoked from within
+"Sequence fn $exprs"
+    (procedure "SequenceTo" line 4)
+    invoked from within
+"SequenceTo fn [dict get $node ${role}Body] $family"
+    (procedure "If" line 32)
+    invoked from within
+"If fn $e $node"
+    (procedure "Expr" line 12)
+    invoked from within
+"Expr fn $e"
+    (procedure "Sequence" line 7)
+    invoked from within
+"Sequence fn $exprs"
+    (procedure "SequenceTo" line 4)
+    invoked from within
+"SequenceTo fn $body [PlanResultFamily fn]"
+    (procedure "Function" line 61)
+    invoked from within
+"Function $id"
+    (procedure "native::lower::program" line 163)
+    invoked from within
+"native::lower::program [prepareHir $hir] {*}$args"
+    (procedure "lowered" line 4)
+    invoked from within
+"lowered $hir {*}$args"
+    (procedure "nir" line 2)
+    invoked from within
+"nir $hir {*}$args"
+    (procedure "native::evalHir" line 5)
+    invoked from within
+"native::evalHir [testNativeHir $exprs] {*}$options"
+    (procedure "::testNativeProgram" line 3)
+    invoked from within
+"{*}[dict get $backends $backend $mode] $exprs $env"
+    (procedure "core::RunWithBackend" line 4)
+    invoked from within
+"core::RunWithBackend program $exprs $env"
+    (procedure "core::evalProgram" line 10)
+    invoked from within
+"core::evalProgram $args"
+    (procedure "run" line 2)
+    invoked from within
+"run {if {ref true}
+            {block {} {call {ref test-log} {const then}}}
+            {block {} {call {ref test-log} {const else}}}}"
+    ("uplevel" body line 2)
+    invoked from within
+"uplevel 1 $script"
+---- errorCode: NATIVE UNSUPPORTED {native test-log}
+==== if-2 FAILED
+
+
+
+==== return-2 code after return is not evaluated FAILED
+==== Contents of test case:
+
+    run {call {block {} {call {ref test-log} {const before}}
+                        {return {const 10}}
+                        {call {ref test-log} {const after}}}}
+    set ::testLog
+
+---- Test generated error; Return code was: 1
+---- Return code should have been one of: 0 2
+---- errorInfo: ir {0 1 2}: e3: native lowering does not support native test-log: the native "test-log" has no native implementation
+    while executing
+"throw [list NATIVE UNSUPPORTED $what] "${where}$e: native lowering does not support $what: $detail""
+    (procedure "Unsupported" line 12)
+    invoked from within
+"Unsupported $e "native $name" "the native \"$name\" has no native implementation""
+    (procedure "NativeCall" line 27)
+    invoked from within
+"NativeCall fn $e $node $name $argRegs $rawEligible $op $want"
+    (procedure "Call" line 263)
+    invoked from within
+"Call fn $e $node $want "" [expr {$want eq "region"}]"
+    (procedure "Expr" line 11)
+    invoked from within
+"Expr fn $e"
+    (procedure "Sequence" line 7)
+    invoked from within
+"Sequence fn $exprs"
+    (procedure "SequenceTo" line 4)
+    invoked from within
+"SequenceTo fn $body [PlanResultFamily fn]"
+    (procedure "Function" line 61)
+    invoked from within
+"Function $id"
+    (procedure "native::lower::program" line 163)
+    invoked from within
+"native::lower::program [prepareHir $hir] {*}$args"
+    (procedure "lowered" line 4)
+    invoked from within
+"lowered $hir {*}$args"
+    (procedure "nir" line 2)
+    invoked from within
+"nir $hir {*}$args"
+    (procedure "native::evalHir" line 5)
+    invoked from within
+"native::evalHir [testNativeHir $exprs] {*}$options"
+    (procedure "::testNativeProgram" line 3)
+    invoked from within
+"{*}[dict get $backends $backend $mode] $exprs $env"
+    (procedure "core::RunWithBackend" line 4)
+    invoked from within
+"core::RunWithBackend program $exprs $env"
+    (procedure "core::evalProgram" line 10)
+    invoked from within
+"core::evalProgram $args"
+    (procedure "run" line 2)
+    invoked from within
+"run {call {block {} {call {ref test-log} {const before}}
+                        {return {const 10}}
+                        {call {ref test-log} {con..."
+    ("uplevel" body line 2)
+    invoked from within
+"uplevel 1 $script"
+---- errorCode: NATIVE UNSUPPORTED {native test-log}
+==== return-2 FAILED
+
+
+
+==== return-3 return inside an if branch exits the enclosing callable FAILED
+==== Contents of test case:
+
+    list [run {call {block {x}
+                  {if {call {ref <} {ref x} {const 0}} {block {} {return {const negative}}} {block {}}}
+                  {call {ref test-log} {const continued}}
+                  {const nonnegative}}
+              {const -1}}] $::testLog
+
+---- Test generated error; Return code was: 1
+---- Return code should have been one of: 0 2
+---- errorInfo: ir {0 1 3}: e10: native lowering does not support native test-log: the native "test-log" has no native implementation
+    while executing
+"throw [list NATIVE UNSUPPORTED $what] "${where}$e: native lowering does not support $what: $detail""
+    (procedure "Unsupported" line 12)
+    invoked from within
+"Unsupported $e "native $name" "the native \"$name\" has no native implementation""
+    (procedure "NativeCall" line 27)
+    invoked from within
+"NativeCall fn $e $node $name $argRegs $rawEligible $op $want"
+    (procedure "Call" line 263)
+    invoked from within
+"Call fn $e $node $want "" [expr {$want eq "region"}]"
+    (procedure "Expr" line 11)
+    invoked from within
+"Expr fn $e"
+    (procedure "Sequence" line 7)
+    invoked from within
+"Sequence fn $exprs"
+    (procedure "SequenceTo" line 4)
+    invoked from within
+"SequenceTo fn $body [PlanResultFamily fn]"
+    (procedure "Function" line 61)
+    invoked from within
+"Function $id"
+    (procedure "native::lower::program" line 163)
+    invoked from within
+"native::lower::program [prepareHir $hir] {*}$args"
+    (procedure "lowered" line 4)
+    invoked from within
+"lowered $hir {*}$args"
+    (procedure "nir" line 2)
+    invoked from within
+"nir $hir {*}$args"
+    (procedure "native::evalHir" line 5)
+    invoked from within
+"native::evalHir [testNativeHir $exprs] {*}$options"
+    (procedure "::testNativeProgram" line 3)
+    invoked from within
+"{*}[dict get $backends $backend $mode] $exprs $env"
+    (procedure "core::RunWithBackend" line 4)
+    invoked from within
+"core::RunWithBackend program $exprs $env"
+    (procedure "core::evalProgram" line 10)
+    invoked from within
+"core::evalProgram $args"
+    (procedure "run" line 2)
+    invoked from within
+"run {call {block {x}
+                  {if {call {ref <} {ref x} {const 0}} {block {} {return {const negative}}} {block {}}}
+                  {call {..."
+    ("uplevel" body line 2)
+    invoked from within
+"uplevel 1 $script"
+---- errorCode: NATIVE UNSUPPORTED {native test-log}
+==== return-3 FAILED
+
+
+
+==== return-7 return reaching the program boundary is rejected dynamically FAILED
+==== Contents of test case:
+
+    set c [core::evalIn {return {const 1}} [core::rootEnv]]
+    list [core::formatCompletion $c] [catch {core::completion::atProgramBoundary $c} m opts] [dict get $opts -errorcode]
+
+---- Test generated error; Return code was: 1
+---- Return code should have been one of: 0 2
+---- errorInfo: native backend: only checked programs can run natively; code run in an existing environment (core::evalIn) is not supported
+    while executing
+"throw {NATIVE UNSUPPORTED sequence-mode} $message"
+    (procedure "::testNativeSequence" line 4)
+    invoked from within
+"{*}[dict get $backends $backend $mode] $exprs $env"
+    (procedure "core::RunWithBackend" line 4)
+    invoked from within
+"core::RunWithBackend sequence [list $node] $env"
+    (procedure "core::evalIn" line 2)
+    invoked from within
+"core::evalIn {return {const 1}} [core::rootEnv]"
+    ("uplevel" body line 2)
+    invoked from within
+"uplevel 1 $script"
+---- errorCode: NATIVE UNSUPPORTED sequence-mode
+==== return-7 FAILED
+
+
+
+==== completion-1 evalIn exposes semantic completions FAILED
+==== Contents of test case:
+
+    set scope [core::rootEnv]
+    list [core::formatCompletion [core::evalIn {const 1} $scope]]  [core::formatCompletion [core::evalIn {return {const 2}} $scope]]  [core::formatCompletion [core::evalIn {break} $scope]]  [core::formatCompletion [core::evalIn {break {const 3}} $scope]]  [core::formatCompletion [core::evalIn {continue} $scope]]
+
+---- Test generated error; Return code was: 1
+---- Return code should have been one of: 0 2
+---- errorInfo: native backend: only checked programs can run natively; code run in an existing environment (core::evalIn) is not supported
+    while executing
+"throw {NATIVE UNSUPPORTED sequence-mode} $message"
+    (procedure "::testNativeSequence" line 4)
+    invoked from within
+"{*}[dict get $backends $backend $mode] $exprs $env"
+    (procedure "core::RunWithBackend" line 4)
+    invoked from within
+"core::RunWithBacke

@@ -1,0 +1,312 @@
+# instances: <program>, list::any?<List[str], block>, list::none?<List[str], block>, list::find<List[Test], block>, make_changed?<List[str]>, changed?<generic>, test_name<Test>, test_deps<Test>, affected?<Test, block>, select_affected<List[Test], block>, first_affected<List[Test], block>, is_affected?<generic>
+nir 1 call-effects=1 statics=0
+shape 0 named "Test" fields="name dependencies"
+
+func 0 "<program>" params=0 env=0 regs=86 pnames="" captures=0 instance="generic"
+    %0 = str "parser-tests" @e116
+    %1 = str "src/parser.bot" @e119
+    %2 = str "src/ast.bot" @e120
+    %3 = op listnew %1 %2 @e117
+    %4 = structnew 0 %0 %3 @e115
+    %5 = str "lexer-tests" @e122
+    %6 = str "src/lexer.bot" @e125
+    %7 = str "src/token.bot" @e126
+    %8 = op listnew %6 %7 @e123
+    %9 = structnew 0 %5 %8 @e121
+    %10 = str "resolve-tests" @e128
+    %11 = str "hir/resolve.tcl" @e131
+    %12 = str "hir/hir.tcl" @e132
+    %13 = op listnew %11 %12 @e129
+    %14 = structnew 0 %10 %13 @e127
+    %15 = str "types-tests" @e134
+    %16 = str "hir/types.tcl" @e137
+    %17 = str "hir/hir.tcl" @e138
+    %18 = op listnew %16 %17 @e135
+    %19 = structnew 0 %15 %18 @e133
+    %20 = str "specialize-tests" @e140
+    %21 = str "hir/specialize.tcl" @e143
+    %22 = str "hir/range.tcl" @e144
+    %23 = op listnew %21 %22 @e141
+    %24 = structnew 0 %20 %23 @e139
+    %25 = str "native-lower-tests" @e146
+    %26 = str "native/lower.tcl" @e149
+    %27 = str "native/native.tcl" @e150
+    %28 = op listnew %26 %27 @e147
+    %29 = structnew 0 %25 %28 @e145
+    %30 = str "compile-tests" @e152
+    %31 = str "compiler/compiler.tcl" @e155
+    %32 = op listnew %31 @e153
+    %33 = structnew 0 %30 %32 @e151
+    %34 = str "web-tests" @e157
+    %35 = str "lib/web.bot" @e160
+    %36 = str "lib/byte.bot" @e161
+    %37 = op listnew %35 %36 @e158
+    %38 = structnew 0 %34 %37 @e156
+    %39 = str "ascii-tests" @e163
+    %40 = str "lib/ascii.bot" @e166
+    %41 = op listnew %40 @e164
+    %42 = structnew 0 %39 %41 @e162
+    %43 = str "list-tests" @e168
+    %44 = str "lib/list.bot" @e171
+    %45 = op listnew %44 @e169
+    %46 = structnew 0 %43 %45 @e167
+    %47 = str "byte-tests" @e173
+    %48 = str "lib/byte.bot" @e176
+    %49 = str "core/scalarbits.tcl" @e177
+    %50 = op listnew %48 %49 @e174
+    %51 = structnew 0 %47 %50 @e172
+    %52 = str "char-tests" @e179
+    %53 = str "lib/char.bot" @e182
+    %54 = str "core/unicodechar.tcl" @e183
+    %55 = op listnew %53 %54 @e180
+    %56 = structnew 0 %52 %55 @e178
+    %57 = str "docs-tests" @e185
+    %58 = str "README.md" @e188
+    %59 = str "AGENTS.md" @e189
+    %60 = op listnew %58 %59 @e186
+    %61 = structnew 0 %57 %60 @e184
+    %62 = str "bench-tests" @e191
+    %63 = str "bench/bench.tcl" @e194
+    %64 = op listnew %63 @e192
+    %65 = structnew 0 %62 %64 @e190
+    %66 = op listnew %4 %9 %14 %19 %24 %29 %33 %38 %42 %46 %51 %56 %61 %65 @e113
+    %67 = str "lib/web.bot" @e198
+    %68 = str "hir/hir.tcl" @e199
+    %69 = op listnew %67 %68 @e196
+    %70 = str "README.md" @e203
+    %71 = op listnew %70 @e201
+    %72 = call 4 %69 @e205
+    %73 = call 4 %71 @e209
+    %74 = str "lib/web.bot" @e215
+    %75 = callenv 5 %72 %74 @e213
+    %76 = call 9 %66 %72 @e217
+    %77 = call 9 %66 %73 @e222
+    %78 = str "README.md" @e229
+    %79 = str "AGENTS.md" @e230
+    %80 = op listnew %78 %79 @e227
+    %81 = call 2 %80 %72 @e232
+    %82 = op listlen %76 @e238
+    %83 = op listlen %77 @e241
+    %84 = call 10 %66 %72 @e244
+    %85 = op listnew %82 %83 %84 %75 %81 @e236
+    ret %85
+end
+
+func 1 "list::any?" params=2 env=0 regs=18 pnames="xs predicate" captures=0 instance="List[str], block" rawregs="4 14" @e2
+    %2 = op listlen %0 @e3
+    %3 = int 0 @e3
+    %4 = rawint 0
+    %5 = move %3 @e3
+    jump L0 @e3
+  label L0
+    %7 = op ilt %5 %2 @e3
+    br %7 L1 L3 @e3
+  label L1
+    %8 = op listget %0 %5 @e3
+    %9 = callvalue %1 %8 @e6
+    guardbool %9 @e5
+    br %9 L5 L6 @e5
+  label L5
+    %11 = bool true @e10
+    ret %11 @e9
+  label L6
+    %12 = unit
+    %10 = move %12
+    jump L7
+  label L7
+    jump L2 @e3
+  label L2
+    %13 = int 1 @e3
+    %14 = rawint 1
+    %15 = op iadd %5 %13 @e3
+    %5 = move %15 @e3
+    jump L0 @e3
+  label L3
+    %16 = unit @e3
+    %6 = move %16 @e3
+    jump L4 @e3
+  label L4
+    %17 = bool false @e11
+    ret %17
+end
+
+func 2 "list::none?" params=2 env=0 regs=18 pnames="xs predicate" captures=0 instance="List[str], block" rawregs="4 14" @e27
+    %2 = op listlen %0 @e28
+    %3 = int 0 @e28
+    %4 = rawint 0
+    %5 = move %3 @e28
+    jump L0 @e28
+  label L0
+    %7 = op ilt %5 %2 @e28
+    br %7 L1 L3 @e28
+  label L1
+    %8 = op listget %0 %5 @e28
+    %9 = callvalue %1 %8 @e31
+    guardbool %9 @e30
+    br %9 L5 L6 @e30
+  label L5
+    %11 = bool false @e35
+    ret %11 @e34
+  label L6
+    %12 = unit
+    %10 = move %12
+    jump L7
+  label L7
+    jump L2 @e28
+  label L2
+    %13 = int 1 @e28
+    %14 = rawint 1
+    %15 = op iadd %5 %13 @e28
+    %5 = move %15 @e28
+    jump L0 @e28
+  label L3
+    %16 = unit @e28
+    %6 = move %16 @e28
+    jump L4 @e28
+  label L4
+    %17 = bool true @e36
+    ret %17
+end
+
+func 3 "list::find" params=2 env=0 regs=16 pnames="xs predicate" captures=0 instance="List[Test], block" rawregs="4 13" @e38
+    %2 = op listlen %0 @e39
+    %3 = int 0 @e39
+    %4 = rawint 0
+    %5 = move %3 @e39
+    jump L0 @e39
+  label L0
+    %7 = op ilt %5 %2 @e39
+    br %7 L1 L3 @e39
+  label L1
+    %8 = op listget %0 %5 @e39
+    %9 = callvalue %1 %8 @e42
+    guardbool %9 @e41
+    br %9 L5 L6 @e41
+  label L5
+    ret %8 @e45
+  label L6
+    %11 = unit
+    %10 = move %11
+    jump L7
+  label L7
+    jump L2 @e39
+  label L2
+    %12 = int 1 @e39
+    %13 = rawint 1
+    %14 = op iadd %5 %12 @e39
+    %5 = move %14 @e39
+    jump L0 @e39
+  label L3
+    %15 = unit @e39
+    %6 = move %15 @e39
+    jump L4 @e39
+  label L4
+    faildeclared 1 "NotFound" @e47
+end
+
+func 4 "make_changed?" params=1 env=0 regs=3 pnames="changed" captures=0 instance="List[str]" @e49
+    %1 = op setfromlisttotal %0 @e51
+    %2 = closure 5 %1 @e55
+    ret %2
+end
+
+func 5 "changed?" params=1 env=1 regs=3 pnames="path" captures=1 instance="generic" @e55
+    %1 = capture 0
+    %2 = op setcontains %1 %0 @e56
+    ret %2
+end
+
+func 6 "test_name" params=1 env=0 regs=2 pnames="test" captures=0 instance="Test" @e62
+    %1 = structget 0 %0 @e63
+    ret %1
+end
+
+func 7 "test_deps" params=1 env=0 regs=2 pnames="test" captures=0 instance="Test" @e66
+    %1 = structget 1 %0 @e67
+    ret %1
+end
+
+func 8 "affected?" params=2 env=0 regs=4 pnames="test changed?" captures=0 instance="Test, block" @e70
+    %2 = call 7 %0 @e73
+    %3 = call 1 %2 %1 @e71
+    ret %3
+end
+
+func 9 "select_affected" params=2 env=0 regs=21 pnames="tests changed?" captures=0 instance="List[Test], block" rawregs="4 19" @e78
+    %2 = op listlen %0 @e79
+    %3 = int 0 @e79
+    %4 = rawint 0
+    %5 = move %3 @e79
+    %7 = op listnew @e79
+    %8 = move %7 @e79
+    jump L0 @e79
+  label L0
+    %9 = op ilt %5 %2 @e79
+    br %9 L1 L3 @e79
+  label L1
+    %10 = op listget %0 %5 @e79
+    %11 = call 8 %10 %1 @e83
+    br %11 L5 L6 @e82
+  label L5
+    %13 = bool false @e87
+    %12 = move %13
+    jump L7
+  label L6
+    %14 = bool true @e88
+    %12 = move %14
+    jump L7
+  label L7
+    br %12 L8 L9 @e81
+  label L8
+    jump L2 @e89
+  label L9
+    %16 = unit
+    %15 = move %16
+    jump L10
+  label L10
+    %17 = op listappend %8 %10 @e79
+    %8 = move %17 @e79
+    jump L2 @e79
+  label L2
+    %18 = int 1 @e79
+    %19 = rawint 1
+    %20 = op iadd %5 %18 @e79
+    %5 = move %20 @e79
+    jump L0 @e79
+  label L3
+    %6 = move %8 @e79
+    jump L4 @e79
+  label L4
+    ret %6
+end
+
+func 10 "first_affected" params=2 env=0 regs=10 pnames="tests changed?" captures=0 instance="List[Test], block" @e92
+    %2 = closure 11 %1 @e94
+    pusherrorexit L0 @e100
+    %4 = call 3 %0 %2 @e101
+    poperrorexit @e100
+    %3 = move %4 @e100
+    jump L1 @e100
+  label L0
+    %5 = declarederroreq 1 @e100
+    br %5 L2 L3 @e100
+  label L2
+    cleardeclarederror @e100
+    %6 = str "<none>" @e106
+    %7 = op listnew @e107
+    %8 = structnew 0 %6 %7 @e105
+    %3 = move %8 @e100
+    jump L1 @e100
+  label L3
+    reraise @e100
+  label L1
+    %9 = call 6 %3 @e109
+    ret %9
+end
+
+func 11 "is_affected?" params=1 env=1 regs=3 pnames="test" captures=1 instance="generic" @e94
+    %1 = capture 0
+    %2 = call 8 %0 %1 @e95
+    ret %2
+end
+

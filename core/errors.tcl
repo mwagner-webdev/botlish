@@ -24,6 +24,15 @@
 #   CONTINUE-OUTSIDE-LOOP    continue not lexically inside a loop
 #   RETURN-OUTSIDE-CALLABLE  return not inside a callable invocation
 #   UNCAUGHT-ERROR           a propagate-error completion reached the program
+#   STRUCT                   a struct value built with fields other than its
+#                            declaration's (a named (struct ...) whose field
+#                            names differ from the declared ones; HIR rules
+#                            this out for a checked program)
+#
+# A checked program's struct diagnostics are HIR diagnostics (hir/structs.tcl,
+# hir/resolve.tcl), reported with these kinds: UNKNOWN-STRUCT, DUPLICATE-FIELD,
+# UNKNOWN-FIELD, MISSING-FIELD, NOT-A-STRUCT, UNPROVEN-FIELD (STRUCTS.md,
+# "Diagnostics"); a wrongly typed field is a TYPE diagnostic.
 #
 # Application/domain failures are *not* errors in this sense: they are
 # ordinary Result values (see value.tcl).
