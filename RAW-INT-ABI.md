@@ -75,7 +75,7 @@ every raw region has) does not count as a competing use.
   programs whose parameters mix raw and tagged uses shrink (`matmul` −223 → −51
   bytes, `lex-strategy` −40 → 0): see *Updated corpus code-size result*.
 * Full regression (interp 3,733/3,733, compile 3,729 + 4 skipped, native
-  coverage, Rust 67 + 22), differential fuzzing (6,400 random programs over two
+  coverage, Rust 67 + 22), differential fuzzing (6,598 random programs over two
   generators, 0 disagreements), GC stress (700 native/raw-ABI tests) and standalone-executable
   parity all pass; see *Full regression*, *Differential testing*, *GC stress* and
   *Standalone parity*.
