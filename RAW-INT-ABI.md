@@ -863,37 +863,33 @@ parameter is typically compared or stepped and also stored, indexed or passed
 on), results mostly *tagged-only* (a bounded result is usually handed to a
 store, a tagged comparison or an unbounded accumulator).
 
-## Dynamic instructions per run (three-way)
+## Dynamic instructions per run (four-way)
 
 Callgrind steady state (`profile-nir.sh`, the same audit binary, 4 runs of which
 run 0 is excluded; `out/ir-demand.txt`), Ir per run of the emitted NIR:
 
-| program | A tagged | B eligibility only | C demand-filtered | C vs A | C vs B |
-|---|---:|---:|---:|---:|---:|
-| fib | 1,547,454 | 1,404,178 | 1,404,178 | -9.26 % | +0.00 % |
-| loop-count | 13,039 | 12,037 | 12,037 | -7.68 % | +0.00 % |
-| sum-refined | 12,437 | 12,435 | 12,435 | -0.02 % | +0.00 % |
-| lex-strategy | 311,115 | 313,567 | 313,859 | +0.88 % | +0.09 % |
-| refined-checks | 6,776,663 | 6,776,616 | 6,776,688 | +0.00 % | +0.00 % |
-| uri-steady | 42,754,528 | 42,690,043 | 42,702,585 | -0.12 % | +0.03 % |
-| matmul | 9,246 | 9,226 | 9,226 | -0.22 % | +0.00 % |
-| hashtable | 11,727 | 11,790 | 11,801 | +0.63 % | +0.09 % |
-| csv_records | 99,472 | 99,745 | 99,490 | +0.02 % | -0.26 % |
-| csv_geometric | 19,637 | 19,652 | 19,637 | +0.00 % | -0.08 % |
-| csv_chunked | 19,516 | 19,504 | 19,504 | -0.06 % | +0.00 % |
+| program | A tagged | B eligibility only | C mixed uses raw | D mixed uses boxed | D vs A | D vs B |
+|---|---:|---:|---:|---:|---:|---:|
+| fib | 1,547,454 | 1,404,178 | 1,404,178 | 1,404,178 | -9.26 % | +0.00 % |
+| loop-count | 13,039 | 12,037 | 12,037 | 12,037 | -7.68 % | +0.00 % |
+| sum-refined | 12,437 | 12,435 | 12,435 | 12,435 | -0.02 % | +0.00 % |
+| lex-strategy | 312,704 | 312,946 | 311,644 | 314,264 | +0.50 % | +0.42 % |
+| refined-checks | 6,777,321 | 6,776,760 | 6,776,694 | 6,776,661 | -0.01 % | -0.00 % |
+| uri-steady | 42,746,691 | 42,681,034 | 42,695,633 | 42,727,997 | -0.04 % | +0.11 % |
+| matmul | 9,246 | 9,226 | 9,226 | 9,240 | -0.06 % | +0.15 % |
+| hashtable | 11,727 | 11,790 | 11,785 | 11,727 | +0.00 % | -0.53 % |
+| csv_records | 99,461 | 99,541 | 99,203 | 99,694 | +0.23 % | +0.15 % |
+| csv_geometric | 19,637 | 19,652 | 19,637 | 19,637 | +0.00 % | -0.08 % |
+| csv_chunked | 19,516 | 19,504 | 19,504 | 19,516 | +0.00 % | +0.06 % |
 
-`fib` is exactly the preliminary figure (identical NIR). `lex-strategy`'s B and C
-NIR are byte-identical, so its 0.1 % B/C spread is run-to-run measurement noise
-of an allocating program, not code; its +0.8 % against the tagged ABI is the
-preliminary RawInt's, unchanged by suppression. `csv_geometric` returns to the
-tagged baseline (the regression was entirely tagged-only), `csv_records` falls
-from +0.27 % (B) to +0.02 % (C), and `hashtable` stays +0.6 % over the tagged
-baseline because of the mixed-caller `ht_capacity` result (and is 11 Ir, +0.09 %,
-above B: a smaller program that executes marginally more instructions; not
-investigated further at the level of a ~11.8 k-instruction run). `loop-count`,
-`matmul`, `csv_chunked` and `uri-steady` are at or below the tagged baseline.
-No workload slows down materially: the worst is `lex-strategy` (+0.9 %), which
-the demand rule neither caused nor changed.
+`fib` is exactly the preliminary figure (identical NIR). `hashtable` and
+`csv_geometric` are at the tagged baseline (their D NIR is the tagged code), `fib`
+−9.3 %, `loop-count` −7.7 %. `lex-strategy` allocates, so its Ir moves by about
+±0.5 % between identical runs (its A figure was 311,115 in an earlier sweep,
+312,704 now): its +0.5 % is noise-level. The one measurable cost of the
+boxed-mixed default is `csv_records`, +0.23 % over the tagged baseline (+0.15 %
+over B): a mixed `ht_capacity_for.expected` chain is unboxed once per call
+instead of being raw throughout. No workload slows down materially.
 
 ## Updated corpus code-size result
 
@@ -1217,16 +1213,15 @@ String fact) and its own conversion pair, not a new framework.
 
 ## Corpus questions
 
-35. Instances gaining raw parameters: 53 positions (56 eligible; the demand
-    filter suppressed 3), 51 instances have any raw position (68 eligible).
-    36. Raw results: 6 (23 eligible, 17 suppressed). 37. Both: 1 (4 eligible).
-    38. `rbox`/`runbox`: 47/47 (tagged) → 66/48 (eligibility only) → **60/41**
-    (demand-filtered); call-boundary rbox/runbox 20/18 → 19/5 → 21/3. 39.
-    Whole-corpus machine bytes: 101,963 → 101,662 → **101,552**. 40.
-    Non-numeric workloads: struct storage, String representation, allocation
-    counts and guards are identical (`controls.txt`, `controls-demand.txt`);
-    only Int helper signatures inside `hashtable`/`csv_*`/`refined-checks`/
-    `uri-steady` changed.
+35. Instances gaining raw parameters: 19 positions (56 eligible; 37 not
+    selected), 19 instances have any raw position (68 eligible). 36. Raw
+    results: 1 (23 eligible). 37. Both: 1 (4 eligible). 38. `rbox`/`runbox`: 47/47
+    (tagged) → 66/48 (eligibility only) → **44/42** (demand-filtered, mixed uses
+    boxed); call-boundary rbox/runbox 20/18 → 19/5 → 18/10. 39. Whole-corpus
+    machine bytes: 101,963 → 101,662 → **101,879**. 40. Non-numeric workloads:
+    struct storage, String representation, allocation counts and guards are
+    identical (`controls.txt`, `controls-demand.txt`); only Int helper signatures
+    inside `hashtable`/`csv_*`/`refined-checks`/`uri-steady` changed.
 
 ## Raw-demand questions
 
@@ -1261,27 +1256,32 @@ String fact) and its own conversion pair, not a new framework.
    earlier "any genuine raw demand retains RawInt".)
 7. **Does `fib` remain fully raw?** **Yes**: raw parameter, raw result, 0
    `rbox`/0 `runbox`, byte-identical NIR, 1,404,178 Ir/run.
-8. **Does the rule apply to results as well as parameters?** **Yes**: 17 of 23
-   eligible results and 3 of 56 eligible parameters were suppressed.
+8. **Does the rule apply to results as well as parameters?** **Yes**: 22 of 23
+   eligible results (17 tagged-only, 5 mixed) and 37 of 56 eligible parameters
+   (3 tagged-only, 34 mixed) are not raw.
 
 ## Census questions
 
 9. **`rbox` / `runbox`** pre-RawInt / pre-suppression / post-suppression:
-   **47/47 → 66/48 → 60/41** (corpus, static NIR).
+   **47/47 → 66/48 → 44/42** (corpus, static NIR; 60/41 with mixed uses kept
+   raw).
 10. **Hashtable bytes** pre-RawInt / pre-suppression / post-suppression:
-    **12,732 → 12,799 → 12,786** (`rbox` 4 → 11 → 10).
+    **12,732 → 12,799 → 12,732** (`rbox` 4 → 11 → 4, `runbox` 0 → 1 → 0).
 11. **CSV bytes/conversions:** `csv_geometric` 7,578 → 7,597 → **7,578**
     (`rbox`/`runbox` 0/1 → 1/3 → 0/1); `csv_records` 23,245 → 23,204 →
-    **23,177** (8/3 → 14/9 → 13/6); `csv_chunked` 10,168 → 10,142 → 10,142;
-    `csv` 5,723 → 5,719 → 5,719.
-12. **Raw positions before/after suppression:** parameters 56 → 53, results
-    23 → 6, instances with any raw position 68 → 51, with both 4 → 1.
-13. **How many eligible positions were suppressed?** 20 of 79 (25 %).
-14. **Suppressed parameters vs results:** 3 parameters, 17 results.
-15. **Did whole-corpus bytes improve or regress?** **Improved**: 101,963 →
-    101,662 → 101,552 (C is 110 bytes smaller than the preliminary and 411
-    smaller than the tagged baseline); only `hashtable` remains larger than the
-    tagged baseline (+54).
+    **23,234** (8/3 → 14/9 → 8/4); `csv_chunked` 10,168 → 10,142 → 10,168;
+    `csv` 5,723 → 5,719 → 5,723.
+12. **Raw positions before/after suppression:** parameters 56 → **19**, results
+    23 → **1**, instances with any raw position 68 → **19**, with both 4 → 1.
+13. **How many eligible positions were suppressed?** 59 of 79 (75 %): 20 for
+    want of any raw demand, 39 as mixed uses.
+14. **Suppressed parameters vs results:** 37 parameters (3 + 34 mixed), 22
+    results (17 + 5 mixed).
+15. **Did whole-corpus bytes improve or regress?** Against the tagged baseline:
+    **improved**, 101,963 → 101,879 (−84). Against the preliminary eligibility-only
+    plan (101,662): 217 bytes larger, the gains of the mixed-use positions the
+    default boxes. The regressions are gone (no program larger than the tagged
+    baseline except `uri-steady`, +9).
 
 ## Performance questions
 
@@ -1291,18 +1291,17 @@ String fact) and its own conversion pair, not a new framework.
     out/fib/demand.nir` is empty; raw `n`, raw result, 0 `rbox`/0 `runbox` in
     the recursion, one `rawint`/`rbox` frontier in the program function. No loss
     of RawInt transport.
-18. **Does hashtable recover the preliminary code-size regression?** Partly:
-    +67 → **+54** bytes over the tagged baseline (13 bytes, 19 %, recovered): the
-    five tagged-only positions are suppressed (`ht_alloc.capacity` and the four
-    `ht_*_state`/`ht_min_capacity` results), the rest is `ht_capacity`'s result,
-    which one caller (`ht_rehash` → `ht_rehash_scan`'s loop slot) demands raw and
-    six tagged call sites (six `rbox`) do not. That is a mixed use, retained by policy; it is not a
-    tagged-only closure. CSV is fully recovered (`csv_geometric` +19 → 0).
+18. **Does hashtable recover the preliminary code-size regression?** **Fully**:
+    +67 → **+0** bytes (12,732, no function differs from the tagged build), and
+    Ir 11,727 = tagged. The earlier policy recovered 13 of the 67 bytes; the
+    residue was `ht_capacity`'s result, raw-demanded by one caller and tagged by
+    six, which the boxed-mixed default boxes. CSV: `csv_geometric` +19 → 0,
+    `csv_records` −11 bytes vs tagged.
 19. **Does any workload materially slow down?** No. Against the tagged ABI the
-    worst case is `lex-strategy` (+0.9 % Ir, unchanged from the preliminary
-    plan), then `hashtable` (+0.6 %); every other program is within ±0.3 % or
-    faster (`fib` −9.3 %, `loop-count` −7.7 %). Against the preliminary plan no
-    program gets slower by more than 0.1 %.
+    worst is `csv_records` (+0.23 % Ir) and `lex-strategy` (+0.5 %, noise-level);
+    `fib` −9.3 %, `loop-count` −7.7 %. Against the preliminary plan no program
+    gets slower by more than 0.42 % (`lex-strategy`, noise-level; `csv_records`
+    +0.15 %).
 
 ## Future-facing question
 
