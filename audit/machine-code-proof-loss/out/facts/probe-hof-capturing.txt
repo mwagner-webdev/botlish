@@ -1,0 +1,42 @@
+   value: 3
+== semantic instances (hir::semantic::census, front end)
+  s0    char_at                args=<int> result=str status=valid passes=1 calls=3
+  s1    scan_while             args=<int, native is_tcl_alpha> result=int status=valid passes=1 calls=2
+  s2    run                    args=<str> result=int status=valid passes=1 calls=1
+
+== codegen instances (hir::specialize + hir::range, native lowering's inputs)
+  i0 <program>
+    key args:  <>  result: int  generic: 1
+    call @e36 -> run<str>
+  i1 run<str>
+    key args:  <str>  result: int  generic: 0
+    closed (InstanceClosed): 1
+    closed-caller theorem:   -
+    param 0 v: entry range [-∞, +∞]
+    result range: [-∞, 4611686018427387902]
+    call @e32 -> scan_while<generic>
+  i3 char_at<generic>
+    key args:  <any>  result: str  generic: 1
+    closed (InstanceClosed): 1
+    closed-caller theorem:   int
+    param 0 i: entry range [-∞, +∞]
+    result range: [-∞, +∞]
+  i2 scan_while<generic>
+    key args:  <any, any>  result: int  generic: 1
+    closed (InstanceClosed): 1
+    closed-caller theorem:   int native
+    param 0 start: entry range [-∞, +∞]
+    param 1 predicate: entry range [-∞, +∞]
+    result range: [-∞, 4611686018427387902]
+    call @e25 -> char_at<generic>
+
+== NIR functions and call forms
+func 0 "<program>" params=0 env=0 regs=2 pnames="" captures=0 instance="generic"
+    %1 = call 1 %0 @e36
+func 1 "run" params=1 env=0 regs=6 pnames="v" captures=0 instance="str" rawregs="3" @e2
+    %5 = call 3 %2 %4 %1 %0 @e32
+func 2 "char_at" params=2 env=0 regs=6 pnames="i v" captures=0 instance="generic" rawregs="3" @e8
+    %5 = op substr %1 %0 %4 @e9
+func 3 "scan_while" params=4 env=0 regs=15 pnames="start predicate n v" captures=0 instance="generic" rawregs="12" @e18
+    %7 = call 2 %4 %3 @e25
+    %8 = callvalue %1 %7 @e23

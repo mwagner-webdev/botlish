@@ -1,0 +1,20 @@
+# Probe (audit only): scan_while's own shape -- a value-capturing nested
+# closure (captures n and v) taking a callable parameter -- with ONE call
+# site and ONE exact callable, to separate "two targets" from "capturing
+# closure".
+#
+# expect: 3
+
+fn run(v):
+    n = length(v)
+    fn char_at(i):
+        substring(v, i, i + 1)
+    fn scan_while(start, predicate):
+        loop i from start to n:
+            if predicate(char_at(i)):
+                continue
+            return i
+        n
+    scan_while(0, is_tcl_alpha)
+
+run("abc1")

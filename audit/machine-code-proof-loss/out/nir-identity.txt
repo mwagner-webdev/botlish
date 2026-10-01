@@ -1,0 +1,19 @@
+program | changed NIR lines vs structs/out/nir-before (84f4d68) | vs struct-scalar-replacement/out/nir-before (structs) | vs struct-scalar-replacement/out/nir-after (90e9e97)
+ai_text_clean | 1 | 1 | 1
+csv | 207 | 175 | 1
+csv_chunked | 209 | 191 | 1
+csv_geometric | 191 | 153 | 1
+csv_records | 977 | 287 | 1
+fib | 1 | 1 | 1
+hashtable | 379 | 145 | 1
+lex-strategy | 1 | 1 | 1
+loop-count | 1 | 1 | 1
+matmul | 1 | 1 | 1
+refined-checks | 1 | 1 | 1
+source-checks | 1 | 1 | 1
+string_replace | 1 | 1 | 1
+string_reverse | 1 | 1 | 1
+sum-refined | 1 | 1 | 1
+test-selection | 303 | 1 | 1
+uri-steady | 1 | 1 | 1
+(1 = only the committed snapshot's trailing blank line)

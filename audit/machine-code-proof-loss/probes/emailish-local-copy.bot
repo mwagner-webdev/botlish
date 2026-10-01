@@ -1,0 +1,56 @@
+# Probe (audit only): lib/web.bot's emailish? algorithm, copied verbatim
+# into the main program (no module boundary), called the way
+# bench/refined-checks.bot calls it. Separates "two different exact
+# callables reach scan_while" from "scan_while lives in a module".
+# Not a benchmark; bench/refined-checks.bot and lib/web.bot are untouched.
+#
+# expect: [true, false]
+
+local_extra_chars = immutable_set_from_list([".", "_", "%", "+", "-"])
+
+fn my_emailish?(v):
+    n = length(v)
+    fn char_at(i):
+        substring(v, i, i + 1)
+    fn local_char?(c):
+        is_tcl_alnum(c) or immutable_set_contains(local_extra_chars, c)
+    fn label_char?(c):
+        is_tcl_alnum(c) or c == "-"
+    fn scan_while(start, predicate):
+        loop i from start to n:
+            if predicate(char_at(i)):
+                continue
+            return i
+        n
+    fn tld?(i):
+        e = scan_while(i, is_tcl_alpha)
+        if e == n:
+            e - i >= 2
+        else:
+            false
+    fn domain?(start):
+        loop j from start to n:
+            if char_at(j) == ".":
+                if j == start:
+                    return false
+                if char_at(j - 1) == ".":
+                    return false
+                if tld?(j + 1):
+                    return true
+            else:
+                if not label_char?(char_at(j)):
+                    return false
+        false
+    local_end = scan_while(0, local_char?)
+    if local_end == 0:
+        false
+    else:
+        if local_end >= n:
+            false
+        else:
+            if char_at(local_end) == "@":
+                domain?(local_end + 1)
+            else:
+                false
+
+[my_emailish?("café@例え.テスト"), my_emailish?("not-an-email")]

@@ -1,0 +1,89 @@
+   value: [true, false]
+== semantic instances (hir::semantic::census, front end)
+  s0    char_at                args=<int> result=str status=valid passes=1 calls=16
+  s1    scan_while             args=<any, native is_tcl_alpha> result=int status=valid passes=1 calls=2
+  s2    tld?                   args=<int> result=bool status=valid passes=1 calls=3
+  s3    scan_while             args=<int, native is_tcl_alpha> result=int status=valid passes=1 calls=1
+  s4    label_char?            args=<str> result=bool status=valid passes=1 calls=3
+  s5    scan_while             args=<int, block(e28)/1 -> bool> result=int status=valid passes=1 calls=2
+  s6    local_char?            args=<str> result=bool status=valid passes=1 calls=1
+  s7    domain?                args=<int> result=bool status=valid passes=1 calls=2
+  s8    my_emailish?           args=<str> result=bool status=valid passes=1 calls=2
+
+== codegen instances (hir::specialize + hir::range, native lowering's inputs)
+  i0 <program>
+    key args:  <>  result: List[bool]  generic: 1
+    call @e175 -> my_emailish?<generic>
+    call @e178 -> my_emailish?<generic>
+  i1 my_emailish?<generic>
+    key args:  <any>  result: bool  generic: 1
+    closed (InstanceClosed): 1
+    closed-caller theorem:   str
+    param 0 v: entry range [-∞, +∞]
+    result range: [-∞, +∞]
+    call @e143 -> scan_while<generic>
+    call @e162 -> char_at<generic>
+    call @e166 -> domain?<generic>
+  i3 char_at<generic>
+    key args:  <any>  result: str  generic: 1
+    closed (InstanceClosed): 1
+    closed-caller theorem:   int
+    param 0 i: entry range [-∞, +∞]
+    result range: [-∞, +∞]
+  i7 local_char?<generic>
+    key args:  <any>  result: bool  generic: 1
+    closed (InstanceClosed): 0
+    closed-caller theorem:   -
+    param 0 c: entry range [-∞, +∞]
+    result range: [-∞, +∞]
+  i6 label_char?<str>
+    key args:  <str>  result: bool  generic: 0
+    closed (InstanceClosed): 1
+    closed-caller theorem:   -
+    param 0 c: entry range [-∞, +∞]
+    result range: [-∞, +∞]
+  i2 scan_while<generic>
+    key args:  <any, any>  result: int  generic: 1
+    closed (InstanceClosed): 1
+    closed-caller theorem:   int any
+    param 0 start: entry range [-∞, +∞]
+    param 1 predicate: entry range [-∞, +∞]
+    result range: [-∞, 4611686018427387902]
+    call @e63 -> char_at<generic>
+  i5 tld?<generic>
+    key args:  <any>  result: bool  generic: 1
+    closed (InstanceClosed): 1
+    closed-caller theorem:   int
+    param 0 i: entry range [-∞, +∞]
+    result range: [-∞, +∞]
+    call @e73 -> scan_while<generic>
+  i4 domain?<generic>
+    key args:  <any>  result: bool  generic: 1
+    closed (InstanceClosed): 1
+    closed-caller theorem:   int
+    param 0 start: entry range [-∞, +∞]
+    result range: [-∞, +∞]
+    call @e98 -> char_at<generic>
+    call @e112 -> char_at<generic>
+    call @e122 -> tld?<generic>
+    call @e134 -> char_at<generic>
+    call @e132 -> label_char?<str>
+
+== NIR functions and call forms
+func 0 "<program>" params=0 env=0 regs=12 pnames="" captures=0 instance="generic"
+    %8 = call 1 %7 %6 @e175
+    %10 = call 1 %9 %6 @e178
+func 1 "my_emailish?" params=2 env=0 regs=26 pnames="v local_extra_chars" captures=0 instance="generic" rawregs="5 8 22" @e12
+    %6 = call 5 %4 %3 %2 %0 @e143
+    %24 = call 7 %23 %2 %0 @e166
+func 2 "char_at" params=2 env=0 regs=6 pnames="i v" captures=0 instance="generic" results=3 rawregs="3" @e18
+func 3 "char_at" params=2 env=0 regs=6 pnames="i v" captures=0 instance="generic" rawregs="3" @e18
+    %5 = op substr %1 %0 %4 @e19
+func 4 "local_char?" params=1 env=1 regs=9 pnames="c" captures=1 instance="generic" @e28
+func 5 "scan_while" params=4 env=0 regs=15 pnames="start predicate n v" captures=0 instance="generic" rawregs="12" @e56
+    %7 = call 3 %4 %3 @e63
+    %8 = callvalue %1 %7 @e61
+func 6 "tld?" params=3 env=0 regs=12 pnames="i n v" captures=0 instance="generic" rawregs="9" @e71
+    %4 = call 5 %0 %3 %1 %2 @e73
+func 7 "domain?" params=3 env=0 regs=56 pnames="start n v" captures=0 instance="generic" rawregs="17 28 52" @e91
+    %30 = call 6 %29 %1 %2 @e122

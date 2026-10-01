@@ -1,0 +1,161 @@
+# from audit/post-r2a-dynamic-census/profiles/history/r2/program.nir (committed in 2b82c5b; emitted from worktree e7d53b6 = R2)
+func 10 "char_at" params=2 env=0 regs=6 pnames="i v" captures=0 instance="generic" results=3 rawregs="3" @e163
+    %2 = int 1 @e171
+    %3 = rawint 1
+    %4 = op iadd %0 %2 @e168
+    %5 = op regioncheck %1 %0 %4 @e164
+    retmulti %1 %0 %4
+end
+func 11 "scan_local" params=3 env=0 regs=48 pnames="i n v" captures=0 instance="generic" rawregs="46" @e237
+    %3 = op ige %0 %1 @e239
+    br %3 L0 L1 @e238
+  label L0
+    %4 = move %0
+    jump L2
+  label L1
+    %5 %6 %7 = callmulti 10 %0 %2 @e247
+    %8 = op strregiontclalnum %5 %6 %7 @e179
+    br %8 L3 L4 @e178
+  label L3
+    %10 = bool true @e182
+    %9 = move %10
+    jump L5
+  label L4
+    %11 = str "." @e187
+    %12 = op regioneq %5 %6 %7 %11 @e184
+    br %12 L6 L7 @e183
+  label L6
+    %14 = bool true @e188
+    %13 = move %14
+    jump L8
+  label L7
+    %15 = bool false @e189
+    %13 = move %15
+    jump L8
+  label L8
+    %9 = move %13
+    jump L5
+  label L5
+    br %9 L9 L10 @e177
+  label L9
+    %17 = bool true @e190
+    %16 = move %17
+    jump L11
+  label L10
+    %18 = str "_" @e195
+    %19 = op regioneq %5 %6 %7 %18 @e192
+    br %19 L12 L13 @e191
+  label L12
+    %21 = bool true @e196
+    %20 = move %21
+    jump L14
+  label L13
+    %22 = bool false @e197
+    %20 = move %22
+    jump L14
+  label L14
+    %16 = move %20
+    jump L11
+  label L11
+    br %16 L15 L16 @e176
+  label L15
+    %24 = bool true @e198
+    %23 = move %24
+    jump L17
+  label L16
+    %25 = str "%" @e203
+    %26 = op regioneq %5 %6 %7 %25 @e200
+    br %26 L18 L19 @e199
+  label L18
+    %28 = bool true @e204
+    %27 = move %28
+    jump L20
+  label L19
+    %29 = bool false @e205
+    %27 = move %29
+    jump L20
+  label L20
+    %23 = move %27
+    jump L17
+  label L17
+    br %23 L21 L22 @e175
+  label L21
+    %31 = bool true @e206
+    %30 = move %31
+    jump L23
+  label L22
+    %32 = str "+" @e211
+    %33 = op regioneq %5 %6 %7 %32 @e208
+    br %33 L24 L25 @e207
+  label L24
+    %35 = bool true @e212
+    %34 = move %35
+    jump L26
+  label L25
+    %36 = bool false @e213
+    %34 = move %36
+    jump L26
+  label L26
+    %30 = move %34
+    jump L23
+  label L23
+    br %30 L27 L28 @e174
+  label L27
+    %38 = bool true @e214
+    %37 = move %38
+    jump L29
+  label L28
+    %39 = str "-" @e219
+    %40 = op regioneq %5 %6 %7 %39 @e216
+    br %40 L30 L31 @e215
+  label L30
+    %42 = bool true @e220
+    %41 = move %42
+    jump L32
+  label L31
+    %43 = bool false @e221
+    %41 = move %43
+    jump L32
+  label L32
+    %37 = move %41
+    jump L29
+  label L29
+    br %37 L33 L34 @e244
+  label L33
+    %45 = int 1 @e255
+    %46 = rawint 1
+    %47 = op iadd %0 %45 @e252
+    tail %47 %1 %2 @e250
+  label L34
+    %44 = move %0
+    jump L35
+  label L35
+    %4 = move %44
+    jump L2
+  label L2
+    ret %4
+end
+func 13 "scan_alpha" params=3 env=0 regs=13 pnames="i n v" captures=0 instance="generic" rawregs="11" @e279
+    %3 = op ige %0 %1 @e281
+    br %3 L0 L1 @e280
+  label L0
+    %4 = move %0
+    jump L2
+  label L1
+    %5 %6 %7 = callmulti 10 %0 %2 @e289
+    %8 = op strregiontclalpha %5 %6 %7 @e287
+    br %8 L3 L4 @e286
+  label L3
+    %10 = int 1 @e297
+    %11 = rawint 1
+    %12 = op iadd %0 %10 @e294
+    tail %12 %1 %2 @e292
+  label L4
+    %9 = move %0
+    jump L5
+  label L5
+    %4 = move %9
+    jump L2
+  label L2
+    ret %4
+end

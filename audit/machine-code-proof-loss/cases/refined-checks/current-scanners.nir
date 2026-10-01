@@ -1,0 +1,91 @@
+# current frozen tree c251e7c, bench/refined-checks.bot
+func 10 "char_at" params=2 env=0 regs=6 pnames="i v" captures=0 instance="generic" results=3 rawregs="3" @e229
+    %2 = int 1 @e237
+    %3 = rawint 1
+    %4 = op iadd %0 %2 @e234
+    %5 = op regioncheck %1 %0 %4 @e230
+    retmulti %1 %0 %4
+end
+func 11 "char_at" params=2 env=0 regs=6 pnames="i v" captures=0 instance="generic" rawregs="3" @e229
+    %2 = int 1 @e237
+    %3 = rawint 1
+    %4 = op iadd %0 %2 @e234
+    %5 = op substr %1 %0 %4 @e230
+    ret %5
+end
+func 12 "local_char?" params=1 env=0 regs=9 pnames="c" captures=0 instance="generic" @e239
+    guard str %0 "is_tcl_alnum" @e241
+    %1 = op strtclalnum %0 @e241
+    br %1 L0 L1 @e240
+  label L0
+    %3 = bool true @e244
+    %2 = move %3
+    jump L2
+  label L1
+    %4 = staticget 0 @e248
+    %5 = op setcontainstotal %4 %0 @e246
+    br %5 L3 L4 @e245
+  label L3
+    %7 = bool true @e250
+    %6 = move %7
+    jump L5
+  label L4
+    %8 = bool false @e251
+    %6 = move %8
+    jump L5
+  label L5
+    %2 = move %6
+    jump L2
+  label L2
+    ret %2
+end
+func 13 "scan_while" params=4 env=0 regs=15 pnames="start predicate n v" captures=0 instance="generic" rawregs="12" @e267
+    %4 = move %0 @e268
+    jump L0 @e268
+  label L0
+    %6 = op ilt %4 %2 @e268
+    br %6 L1 L3 @e268
+  label L1
+    %7 = call 11 %4 %3 @e274
+    %8 = callvalue %1 %7 @e272
+    br %8 L5 L6 @e271
+  label L5
+    jump L2 @e277
+  label L6
+    %10 = unit
+    %9 = move %10
+    jump L7
+  label L7
+    ret %4 @e278
+  label L2
+    %11 = int 1 @e268
+    %12 = rawint 1
+    %13 = op iadd %4 %11 @e268
+    %4 = move %13 @e268
+    jump L0 @e268
+  label L3
+    %14 = unit @e268
+    %5 = move %14 @e268
+    jump L4 @e268
+  label L4
+    ret %2
+end
+func 14 "tld?" params=3 env=0 regs=12 pnames="i n v" captures=0 instance="generic" rawregs="9" @e282
+    %3 = native "is_tcl_alpha" @e287
+    %4 = call 13 %0 %3 %1 %2 @e284
+    %5 = op ieq %4 %1 @e289
+    br %5 L0 L1 @e288
+  label L0
+    %7 = op isub %4 %0 @e295
+    %8 = int 2 @e299
+    %9 = rawint 2
+    %10 = op ige %7 %8 @e293
+    %6 = move %10
+    jump L2
+  label L1
+    %11 = bool false @e300
+    %6 = move %11
+    jump L2
+  label L2
+    ret %6
+end

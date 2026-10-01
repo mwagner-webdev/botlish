@@ -1,0 +1,200 @@
+== semantic instances (hir::semantic::census, front end)
+  s0    check                  args=<int, int, str, any> result=int status=valid passes=2 calls=2
+  s1    check                  args=<int, int, str, str[UriQueryValue]> result=int status=valid passes=2 calls=3
+
+== codegen instances (hir::specialize + hir::range, native lowering's inputs)
+  i0 <program>
+    key args:  <>  result: List[int]  generic: 1
+    call @e404 -> byte::set<List[UnicodeChar]>
+    call @e2 -> web::uri_escape_text<str>
+    call @e45 -> check<int, int, str, str>
+    call @e51 -> check<int, int, str, str>
+  i2 char::codepoint<UnicodeChar>
+    key args:  <UnicodeChar>  result: int  generic: 0
+    closed (InstanceClosed): 1
+    closed-caller theorem:   -
+    param 0 c: entry range [-∞, +∞]
+    result range: [0, +∞]
+  i16 byte::high_nibble<int>
+    key args:  <int>  result: int[HighNibble]  generic: 0
+    closed (InstanceClosed): 1
+    closed-caller theorem:   -
+    param 0 b: entry range [-∞, +∞]
+    result range: [0, 240] {0,16,32,48,64,80,96,112,128,144,160,176,192,208,224,240}
+  i17 byte::nibble<int>
+    key args:  <int>  result: int[Nibble]  generic: 0
+    closed (InstanceClosed): 1
+    closed-caller theorem:   -
+    param 0 x: entry range [0, 240] {0,16,32,48,64,80,96,112,128,144,160,176,192,208,224,240}
+    result range: [0, 15]
+  i3 byte::from_int<int>
+    key args:  <int>  result: int[Byte]  generic: 0
+    closed (InstanceClosed): 1
+    closed-caller theorem:   -
+    param 0 value: entry range [0, +∞]
+    result range: [0, 255]
+  i1 byte::set<List[UnicodeChar]>
+    key args:  <List[UnicodeChar]>  result: ImmutableSet[int[Byte]]  generic: 0
+    closed (InstanceClosed): 1
+    closed-caller theorem:   -
+    param 0 chars: entry range [-∞, +∞]
+    result range: [-∞, +∞]
+    call @e135 -> char::codepoint<UnicodeChar>
+    call @e133 -> byte::from_int<int>
+  i12 ascii::is_digit<int>
+    key args:  <int>  result: bool  generic: 0
+    closed (InstanceClosed): 1
+    closed-caller theorem:   -
+    param 0 b: entry range [0, 255]
+    result range: [-∞, +∞]
+  i10 ascii::is_upper<int>
+    key args:  <int>  result: bool  generic: 0
+    closed (InstanceClosed): 1
+    closed-caller theorem:   -
+    param 0 b: entry range [0, 255]
+    result range: [-∞, +∞]
+  i11 ascii::is_lower<int>
+    key args:  <int>  result: bool  generic: 0
+    closed (InstanceClosed): 1
+    closed-caller theorem:   -
+    param 0 b: entry range [0, 255]
+    result range: [-∞, +∞]
+  i9 ascii::is_alphabetic<int>
+    key args:  <int>  result: bool  generic: 0
+    closed (InstanceClosed): 1
+    closed-caller theorem:   -
+    param 0 b: entry range [0, 255]
+    result range: [-∞, +∞]
+    call @e189 -> ascii::is_upper<int>
+    call @e194 -> ascii::is_lower<int>
+  i8 ascii::is_alphanumeric<int>
+    key args:  <int>  result: bool  generic: 0
+    closed (InstanceClosed): 1
+    closed-caller theorem:   -
+    param 0 b: entry range [0, 255]
+    result range: [-∞, +∞]
+    call @e202 -> ascii::is_alphabetic<int>
+    call @e207 -> ascii::is_digit<int>
+  i19 web::emailish?<str>
+    key args:  <str>  result: bool  generic: 0
+    closed (InstanceClosed): 1
+    closed-caller theorem:   -
+    param 0 v: entry range [-∞, +∞]
+    result range: [-∞, +∞]
+    call @e354 -> scan_while<generic>
+    call @e373 -> char_at<generic>
+    call @e377 -> domain?<generic>
+  i21 char_at<generic>
+    key args:  <any>  result: str  generic: 1
+    closed (InstanceClosed): 1
+    closed-caller theorem:   int
+    param 0 i: entry range [-∞, +∞]
+    result range: [-∞, +∞]
+  i25 local_char?<generic>
+    key args:  <any>  result: bool  generic: 1
+    closed (InstanceClosed): 0
+    closed-caller theorem:   -
+    param 0 c: entry range [-∞, +∞]
+    result range: [-∞, +∞]
+  i24 label_char?<str>
+    key args:  <str>  result: bool  generic: 0
+    closed (InstanceClosed): 1
+    closed-caller theorem:   -
+    param 0 c: entry range [-∞, +∞]
+    result range: [-∞, +∞]
+  i20 scan_while<generic>
+    key args:  <any, any>  result: int  generic: 1
+    closed (InstanceClosed): 1
+    closed-caller theorem:   int any
+    param 0 start: entry range [-∞, +∞]
+    param 1 predicate: entry range [-∞, +∞]
+    result range: [-∞, 4611686018427387902]
+    call @e274 -> char_at<generic>
+  i23 tld?<generic>
+    key args:  <any>  result: bool  generic: 1
+    closed (InstanceClosed): 1
+    closed-caller theorem:   int
+    param 0 i: entry range [-∞, +∞]
+    result range: [-∞, +∞]
+    call @e284 -> scan_while<generic>
+  i22 domain?<generic>
+    key args:  <any>  result: bool  generic: 1
+    closed (InstanceClosed): 1
+    closed-caller theorem:   int
+    param 0 start: entry range [-∞, +∞]
+    result range: [-∞, +∞]
+    call @e309 -> char_at<generic>
+    call @e323 -> char_at<generic>
+    call @e333 -> tld?<generic>
+    call @e345 -> char_at<generic>
+    call @e343 -> label_char?<str>
+  i7 web::is_unreserved<int>
+    key args:  <int>  result: bool  generic: 0
+    closed (InstanceClosed): 1
+    closed-caller theorem:   -
+    param 0 b: entry range [0, 255]
+    result range: [-∞, +∞]
+    call @e415 -> ascii::is_alphanumeric<int>
+  i4 web::uri_escape_text<str>
+    key args:  <str>  result: str  generic: 0
+    closed (InstanceClosed): 1
+    closed-caller theorem:   -
+    param 0 s: entry range [-∞, +∞]
+    result range: [-∞, +∞]
+    call @e544 -> esc_from<str, int, str>
+  i15 high_nibble<int>
+    key args:  <int>  result: int[Nibble]  generic: 0
+    closed (InstanceClosed): 1
+    closed-caller theorem:   -
+    param 0 b: entry range [-∞, +∞]
+    result range: [0, 15]
+    call @e432 -> byte::high_nibble<int>
+    call @e430 -> byte::nibble<int>
+  i14 hex_pair<int>
+    key args:  <int>  result: str  generic: 0
+    closed (InstanceClosed): 1
+    closed-caller theorem:   -
+    param 0 b: entry range [-∞, +∞]
+    result range: [-∞, +∞]
+    call @e442 -> high_nibble<int>
+  i13 esc_bytes<List[int], int, str>
+    key args:  <List[int], int, str>  result: str  generic: 0
+    closed (InstanceClosed): 1
+    closed-caller theorem:   -
+    param 0 bytes: entry range [-∞, +∞]
+    param 1 i: entry range [0, 4611686018427387903]
+    param 2 acc: entry range [-∞, +∞]
+    result range: [-∞, +∞]
+    call @e475 -> hex_pair<int>
+    call @e462 -> esc_bytes<List[int], int, str>
+  i6 esc_char<str>
+    key args:  <str>  result: str  generic: 0
+    closed (InstanceClosed): 1
+    closed-caller theorem:   -
+    param 0 c: entry range [-∞, +∞]
+    result range: [-∞, +∞]
+    call @e500 -> web::is_unreserved<int>
+    call @e504 -> esc_bytes<List[int], int, str>
+    call @e509 -> esc_bytes<List[int], int, str>
+  i5 esc_from<str, int, str>
+    key args:  <str, int, str>  result: str  generic: 0
+    closed (InstanceClosed): 1
+    closed-caller theorem:   -
+    param 0 text: entry range [-∞, +∞]
+    param 1 i: entry range [0, 4611686018427387903]
+    param 2 acc: entry range [-∞, +∞]
+    result range: [-∞, +∞]
+    call @e534 -> esc_char<str>
+    call @e524 -> esc_from<str, int, str>
+  i18 check<int, int, str, str>
+    key args:  <int, int, str, str>  result: int  generic: 0
+    closed (InstanceClosed): 1
+    closed-caller theorem:   -
+    param 0 n: entry range [0, 400]
+    param 1 acc: entry range [0, +∞]
+    param 2 s: entry range [-∞, +∞]
+    param 3 q: entry range [-∞, +∞]
+    result range: [-∞, +∞]
+    call @e16 -> web::emailish?<str>
+    call @e20 -> web::emailish?<str>
+    call @e31 -> check<int, int, str, str>

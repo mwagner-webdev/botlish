@@ -1,0 +1,225 @@
+events: Ir Dr Dw I1mr D1mr D1mw ILmr DLmr DLmw Bc Bcm Bi Bim
+runs collected: 20 (per-run figures below = total / runs)
+totals per run: Ir=9,392,986  Dr=2,063,681  Dw=1,589,698  I1mr=180  D1mr=11,310  D1mw=2,203  ILmr=0  DLmr=0  DLmw=0  Bc=1,378,527  Bcm=45,459  Bi=120,626  Bim=5,608
+(Ir = executed instructions; Dr/Dw = data reads/writes; Bc/Bcm = conditional branches / mispredicted; Bi = indirect branches; D1mr/D1mw = L1 data misses -- callgrind simulated)
+
+== exclusive cost by code kind (per run)
+  runtime       42.0% of Ir  Ir= 3,946,764.0  Dr=   953,288.0  Dw=   740,979.0  Bc=   586,931.0  Bcm=    27,677.5  Bi=    87,378.0  D1mr=        52.5  D1mw=     2,175.3
+  libc          29.4% of Ir  Ir= 2,759,686.1  Dr=   611,903.4  Dw=   333,778.5  Bc=   521,398.2  Bcm=    12,967.2  Bi=         0.0  D1mr=    11,233.0  D1mw=        18.6
+  botlish       14.8% of Ir  Ir= 1,394,535.0  Dr=   217,899.0  Dw=   301,641.0  Bc=   158,553.0  Bcm=       813.0  Bi=         0.0  D1mr=        24.0  D1mw=         7.0
+  rust-other    13.8% of Ir  Ir= 1,292,001.0  Dr=   280,591.0  Dw=   213,299.0  Bc=   111,645.0  Bcm=     4,001.2  Bi=    33,248.0  D1mr=         1.0  D1mw=         2.0
+
+== exclusive cost per function (per run, sorted by Ir; >= 0.1% of Ir)
+   10.94%  [runtime] rt_substr                                                    Ir=1,027,839.0  Dr=  186,855.0  Dw=  129,245.0  Bc=  196,440.0  Bcm=   16,808.0  Bi=   23,612.0  D1mr=        6.0  D1mw=        0.0
+    9.98%  [libc] _int_malloc                                                     Ir=  937,765.2  Dr=  195,323.3  Dw=  107,666.2  Bc=  182,790.0  Bcm=    7,014.1  Bi=        0.0  D1mr=   10,623.0  D1mw=        3.5
+    9.95%  [libc] malloc                                                          Ir=  934,523.8  Dr=  253,039.8  Dw=  140,301.0  Bc=  160,339.0  Bcm=    2,524.9  Bi=        0.0  D1mr=       16.8  D1mw=        2.0
+    6.40%  [runtime] equal                                                        Ir=  601,490.0  Dr=  108,260.0  Dw=   60,180.0  Bc=  126,280.0  Bcm=        5.2  Bi=   18,040.0  D1mr=        9.5  D1mw=        2.0
+    5.63%  [botlish] 14 scan_while                                                Ir=  528,400.0  Dr=   67,200.0  Dw=  116,400.0  Bc=   73,600.0  Bcm=      801.0  Bi=        0.0  D1mr=        1.0  D1mw=        0.0
+    5.19%  [runtime] <runtime::vm::Vm>::alloc::<runtime::value::StrObj>           Ir=  487,812.0  Dr=  193,284.0  Dw=  156,468.0  Bc=   46,020.0  Bcm=        0.1  Bi=   18,408.0  D1mr=        0.0  D1mw=    1,843.8
+    5.11%  [libc] realloc                                                         Ir=  479,600.0  Dr=   88,000.0  Dw=   44,000.0  Bc=   92,400.0  Bcm=    2,800.1  Bi=        0.0  D1mr=      582.1  D1mw=        0.0
+    4.13%  [rust-other] <alloc::string::String as core::iter::traits::collect::Fr Ir=  387,600.0  Dr=   83,600.0  Dw=   74,800.0  Bc=   37,600.0  Bcm=    2,800.1  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+    3.33%  [botlish] 11 char_at                                                   Ir=  312,800.0  Dr=   46,000.0  Dw=   82,800.0  Bc=   27,600.0  Bcm=        0.1  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+    3.01%  [runtime] runtime::vm::str_object                                      Ir=  282,400.0  Dr=   64,000.0  Dw=   77,200.0  Bc=   35,200.0  Bcm=    2,400.0  Bi=    6,800.0  D1mr=        2.0  D1mw=        0.0
+    2.97%  [runtime] rt_call_value                                                Ir=  279,200.0  Dr=   80,800.0  Dw=   50,800.0  Bc=   31,200.0  Bcm=    1,600.0  Bi=    9,200.0  D1mr=        3.5  D1mw=        0.0
+    2.72%  [libc] _int_realloc                                                    Ir=  255,200.0  Dr=   44,000.0  Dw=   35,200.0  Bc=   35,200.0  Bcm=        0.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+    2.71%  [runtime] one_scalar                                                   Ir=  254,800.0  Dr=   78,000.0  Dw=   64,400.0  Bc=   32,000.0  Bcm=      800.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+    2.54%  [runtime] rt_is_tcl_alnum                                              Ir=  238,400.0  Dr=   56,000.0  Dw=   24,000.0  Bc=   32,000.0  Bcm=    2,001.0  Bi=        0.0  D1mr=        7.0  D1mw=        0.0
+    2.44%  [botlish] 12 is_local_char                                             Ir=  229,600.0  Dr=   43,200.0  Dw=   35,200.0  Bc=   28,400.0  Bcm=        0.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+    2.10%  [runtime] <runtime::vm::Vm>::new_str_known                             Ir=  196,964.0  Dr=   48,040.0  Dw=   76,864.0  Bc=    9,608.0  Bcm=        0.1  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+    1.92%  [rust-other] <alloc::raw_vec::RawVecInner>::finish_grow                Ir=  180,400.0  Dr=   35,200.0  Dw=   44,000.0  Bc=   17,600.0  Bcm=        0.1  Bi=    8,800.0  D1mr=        0.0  D1mw=        0.0
+    1.92%  [rust-other] __rustc::__rdl_alloc                                      Ir=  180,387.0  Dr=   20,043.0  Dw=        0.0  Bc=   20,043.0  Bcm=        1.1  Bi=   20,043.0  D1mr=        0.0  D1mw=        0.0
+    1.83%  [rust-other] <alloc::raw_vec::RawVecInner<_>>::reserve::do_reserve_and Ir=  171,600.0  Dr=   35,200.0  Dw=   26,400.0  Bc=   13,200.0  Bcm=        0.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+    1.35%  [runtime] rt_str_region_eq                                             Ir=  126,800.0  Dr=   20,400.0  Dw=    8,400.0  Bc=   26,400.0  Bcm=    2,803.2  Bi=      400.0  D1mr=        2.0  D1mw=        0.0
+    1.03%  [rust-other] __rustc::__rdl_realloc                                    Ir=   96,800.0  Dr=   26,400.0  Dw=   22,000.0  Bc=    4,400.0  Bcm=        0.0  Bi=    4,400.0  D1mr=        0.0  D1mw=        0.0
+    0.94%  [libc] __memcpy_avx_unaligned_erms                                     Ir=   88,050.0  Dr=   12,201.0  Dw=    6,560.0  Bc=   31,360.0  Bcm=      617.9  Bi=        0.0  D1mr=        5.0  D1mw=       11.1
+    0.94%  [runtime] <runtime::vm::Vm>::new_str                                   Ir=   88,000.0  Dr=   26,400.0  Dw=   22,000.0  Bc=    4,400.0  Bcm=        0.0  Bi=    4,400.0  D1mr=        1.0  D1mw=        0.0
+    0.92%  [runtime] rt_set_contains                                              Ir=   86,463.0  Dr=   16,813.0  Dw=   14,411.0  Bc=   13,209.0  Bcm=    1,201.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+    0.91%  [runtime] invoke_native                                                Ir=   85,200.0  Dr=   20,400.0  Dw=   10,800.0  Bc=   18,000.0  Bcm=        4.0  Bi=    1,200.0  D1mr=        3.0  D1mw=        0.0
+    0.86%  [botlish] 9 web::emailish?                                             Ir=   80,800.0  Dr=   11,600.0  Dw=   15,600.0  Bc=    8,000.0  Bcm=        0.1  Bi=        0.0  D1mr=        3.0  D1mw=        0.0
+    0.85%  [rust-other] __rustc::__rust_no_alloc_shim_is_unstable_v2              Ir=   80,180.0  Dr=   40,090.0  Dw=   20,045.0  Bc=        0.0  Bcm=        0.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+    0.85%  [rust-other] __rustc::__rust_alloc                                     Ir=   80,172.0  Dr=   20,043.0  Dw=   20,043.0  Bc=        0.0  Bcm=        0.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+    0.71%  [rust-other] core::str::count::char_count_general_case                 Ir=   66,800.0  Dr=    9,200.0  Dw=        0.0  Bc=   11,600.0  Bcm=      400.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+    0.68%  [libc] __memcmp_avx2_movbe                                             Ir=   64,100.0  Dr=   19,230.0  Dw=        0.0  Bc=   19,230.0  Bcm=        3.0  Bi=        0.0  D1mr=        5.0  D1mw=        0.0
+    0.65%  [runtime] apply_op                                                     Ir=   61,200.0  Dr=   16,800.0  Dw=   10,800.0  Bc=    6,000.0  Bcm=        0.0  Bi=    1,200.0  D1mr=        2.0  D1mw=        0.0
+    0.51%  [botlish] 12 is_local_char (generic entry)                             Ir=   47,600.0  Dr=   20,400.0  Dw=   13,600.0  Bc=        0.0  Bcm=        0.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+    0.50%  [botlish] 24 check                                                     Ir=   46,880.0  Dr=    2,418.0  Dw=    8,828.0  Bc=    6,404.0  Bcm=        2.1  Bi=        0.0  D1mr=        3.0  D1mw=        0.0
+    0.50%  [runtime] rt_closure_new                                               Ir=   46,574.0  Dr=   12,045.0  Dw=   16,060.0  Bc=    2,409.0  Bcm=        2.0  Bi=    2,409.0  D1mr=        6.0  D1mw=        0.0
+    0.43%  [runtime] <runtime::vm::Vm>::alloc::<runtime::value::ClosureObj>       Ir=   40,150.0  Dr=   15,257.0  Dw=   12,045.0  Bc=    4,015.0  Bcm=        2.0  Bi=    1,606.0  D1mr=        0.0  D1mw=      311.1
+    0.41%  [botlish] 16 domain_loop                                               Ir=   38,800.0  Dr=    6,800.0  Dw=    7,200.0  Bc=    4,400.0  Bcm=        0.0  Bi=        0.0  D1mr=        1.0  D1mw=        0.0
+    0.40%  [botlish] 13 is_label_char                                             Ir=   38,000.0  Dr=    6,800.0  Dw=    5,200.0  Bc=    5,200.0  Bcm=        2.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+    0.39%  [botlish] 10 char_at                                                   Ir=   36,800.0  Dr=    5,600.0  Dw=    9,600.0  Bc=    2,400.0  Bcm=        0.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+    0.32%  [rust-other] <core::iter::adapters::take::Take<core::str::iter::Chars> Ir=   30,400.0  Dr=    6,400.0  Dw=    1,600.0  Bc=    7,200.0  Bcm=      800.0  Bi=        0.0  D1mr=        1.0  D1mw=        0.0
+    0.32%  [runtime] rt_str_region_check                                          Ir=   30,400.0  Dr=    6,400.0  Dw=    5,600.0  Bc=    2,400.0  Bcm=        0.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+    0.26%  [botlish] 15 tld_ok                                                    Ir=   24,800.0  Dr=    4,000.0  Dw=    4,400.0  Bc=    2,400.0  Bcm=        0.0  Bi=        0.0  D1mr=        1.0  D1mw=        0.0
+    0.19%  [rust-other] __rustc::__rust_realloc                                   Ir=   17,600.0  Dr=    4,400.0  Dw=    4,400.0  Bc=        0.0  Bcm=        0.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+
+== Botlish -> Botlish calls, per callee (per run): count; INCLUSIVE cost of the non-self calls
+       9,660.0  11 char_at                               incl  66.00% of Ir  Ir=6,199,338.8  Dr=1,393,550.2  Dw=1,068,764.9  Bc=  901,547.8  Bcm=   35,011.5  Bi=   84,800.0  D1mr=   10,752.1  D1mw=    1,844.2
+       7,140.0  12 is_local_char                         incl   0.00% of Ir  Ir=        0.0  Dr=        0.0  Dw=        0.0  Bc=        0.0  Bcm=        0.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+       7,140.0  12 is_local_char (generic entry)         incl  14.84% of Ir  Ir=1,393,600.0  Dr=  308,800.0  Dw=  191,200.0  Bc=  233,600.0  Bcm=    3,202.0  Bi=   18,000.0  D1mr=        4.0  D1mw=        0.0
+       1,680.0  14 scan_while                            incl  93.02% of Ir  Ir=8,737,738.8  Dr=1,935,550.2  Dw=1,478,764.9  Bc=1,289,147.9  Bcm=   41,821.6  Bi=  114,800.0  D1mr=   10,768.6  D1mw=    1,844.2
+       1,260.0  13 is_label_char                         incl   0.00% of Ir  Ir=        0.0  Dr=        0.0  Dw=        0.0  Bc=        0.0  Bcm=        0.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+       1,260.0  13 is_label_char (generic entry)         incl   1.53% of Ir  Ir=  144,000.0  Dr=   36,000.0  Dw=   21,600.0  Bc=   19,200.0  Bcm=    1,203.0  Bi=      400.0  D1mr=        3.0  D1mw=        0.0
+         840.0  10 char_at                               incl   0.72% of Ir  Ir=   67,200.0  Dr=   12,000.0  Dw=   15,200.0  Bc=    4,800.0  Bcm=        0.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+         840.0  9 web::emailish?                         incl  99.35% of Ir  Ir=9,331,702.9  Dr=2,057,852.8  Dw=1,578,266.6  Bc=1,370,050.9  Bcm=   45,331.6  Bi=  120,400.0  D1mr=   11,238.5  D1mw=    2,154.6
+         420.0  16 domain_loop                           incl  32.87% of Ir  Ir=3,087,600.0  Dr=  640,600.0  Dw=  481,400.0  Bc=  449,400.0  Bcm=   22,210.1  Bi=   31,200.0  D1mr=    2,598.7  D1mw=      410.9
+         420.0  15 tld_ok                                incl  17.08% of Ir  Ir=1,604,600.0  Dr=  332,800.0  Dw=  246,400.0  Bc=  238,400.0  Bcm=   11,604.0  Bi=   16,800.0  D1mr=    1,734.2  D1mw=      111.0
+           4.2  1 char::codepoint                        incl   0.00% of Ir  Ir=       60.0  Dr=       16.0  Dw=       12.0  Bc=        0.0  Bcm=        0.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+           4.2  2 byte::from_int                         incl   0.00% of Ir  Ir=      108.0  Dr=       24.0  Dw=       12.0  Bc=       12.0  Bcm=        0.1  Bi=        0.0  D1mr=        1.0  D1mw=        0.0
+           3.1  22 esc_char                              incl   0.04% of Ir  Ir=    3,528.0  Dr=      800.0  Dw=      617.0  Bc=      490.0  Bcm=       29.6  Bi=       37.0  D1mr=        8.0  D1mw=        8.0
+           3.1  17 web::is_unreserved                    incl   0.01% of Ir  Ir=      549.0  Dr=      100.0  Dw=       94.0  Bc=       62.0  Bcm=        4.3  Bi=        4.0  D1mr=        0.0  D1mw=        0.0
+           3.1  5 ascii::is_upper                        incl   0.00% of Ir  Ir=       34.0  Dr=        6.0  Dw=        3.0  Bc=        5.0  Bcm=        1.1  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+           3.1  6 ascii::is_lower                        incl   0.00% of Ir  Ir=       32.0  Dr=        6.0  Dw=        3.0  Bc=        5.0  Bcm=        0.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+           3.1  7 ascii::is_alphabetic                   incl   0.00% of Ir  Ir=      141.0  Dr=       24.0  Dw=       21.0  Bc=       16.0  Bcm=        1.1  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+           3.1  8 ascii::is_alphanumeric                 incl   0.00% of Ir  Ir=      214.0  Dr=       38.0  Dw=       35.0  Bc=       21.0  Bcm=        1.1  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+           2.1  24 check                                 incl  99.85% of Ir  Ir=9,378,582.9  Dr=2,060,270.8  Dw=1,587,094.6  Bc=1,376,454.9  Bcm=   45,333.7  Bi=  120,400.0  D1mr=   11,241.5  D1mw=    2,154.6
+           1.1  3 byte::set                              incl   0.03% of Ir  Ir=    2,713.0  Dr=      630.0  Dw=      494.0  Bc=      363.0  Bcm=       23.4  Bi=       48.0  D1mr=        5.8  D1mw=        5.0
+           1.1  18 web::uri_escape_text                  incl   0.08% of Ir  Ir=    7,358.0  Dr=    1,732.0  Dw=    1,364.0  Bc=    1,034.0  Bcm=       69.5  Bi=       87.0  D1mr=       18.5  D1mw=       27.0
+           1.1  19 high_nibble                           incl   0.00% of Ir  Ir=       16.0  Dr=        2.0  Dw=        3.0  Bc=        1.0  Bcm=        0.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+           1.1  23 esc_from                              incl   0.08% of Ir  Ir=    7,334.0  Dr=    1,724.0  Dw=    1,357.0  Bc=    1,033.0  Bcm=       69.5  Bi=       87.0  D1mr=       17.5  D1mw=       27.0
+           1.1  21 esc_bytes                             incl   0.02% of Ir  Ir=    1,624.0  Dr=      378.0  Dw=      285.0  Bc=      238.0  Bcm=       17.8  Bi=       12.0  D1mr=        8.0  D1mw=        7.0
+           1.1  20 hex_pair                              incl   0.01% of Ir  Ir=      944.0  Dr=      222.0  Dw=      166.0  Bc=      138.0  Bcm=        6.6  Bi=        9.0  D1mr=        7.0  D1mw=        7.0
+           1.1  4 ascii::is_digit                        incl   0.00% of Ir  Ir=       10.0  Dr=        2.0  Dw=        1.0  Bc=        1.0  Bcm=        0.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+           1.0  0 <program>                              incl 100.00% of Ir  Ir=9,392,980.1  Dr=2,063,680.4  Dw=1,589,696.5  Bc=1,378,527.2  Bcm=   45,459.0  Bi=  120,625.0  D1mr=   11,310.5  D1mw=    2,202.9
+
+== Botlish -> Botlish calls, per caller -> callee (per run)
+       9,660.0  14 scan_while  ->  11 char_at
+       7,140.0  12 is_local_char (entry)  ->  12 is_local_char
+       7,140.0  rt_call_value  ->  12 is_local_char (generic entry)
+       1,260.0  13 is_label_char (entry)  ->  13 is_label_char
+       1,260.0  rt_call_value  ->  13 is_label_char (generic entry)
+         840.0  9 web::emailish?  ->  14 scan_while
+         840.0  24 check  ->  9 web::emailish?
+         420.0  9 web::emailish?  ->  10 char_at
+         420.0  9 web::emailish?  ->  16 domain_loop
+         420.0  16 domain_loop  ->  14 scan_while
+         420.0  16 domain_loop  ->  10 char_at
+         420.0  16 domain_loop  ->  15 tld_ok
+         420.0  15 tld_ok  ->  14 scan_while
+           4.2  3 byte::set  ->  1 char::codepoint
+           4.2  3 byte::set  ->  2 byte::from_int
+           3.1  23 esc_from  ->  22 esc_char
+           3.1  22 esc_char  ->  17 web::is_unreserved
+           3.1  7 ascii::is_alphabetic  ->  5 ascii::is_upper
+           3.1  7 ascii::is_alphabetic  ->  6 ascii::is_lower
+           3.1  8 ascii::is_alphanumeric  ->  7 ascii::is_alphabetic
+           3.1  17 web::is_unreserved  ->  8 ascii::is_alphanumeric
+           2.1  0 <program>  ->  24 check
+           1.1  0 <program>  ->  3 byte::set
+           1.1  0 <program>  ->  18 web::uri_escape_text
+           1.1  20 hex_pair  ->  19 high_nibble
+           1.1  18 web::uri_escape_text  ->  23 esc_from
+           1.1  22 esc_char  ->  21 esc_bytes
+           1.1  21 esc_bytes  ->  20 hex_pair
+           1.1  8 ascii::is_alphanumeric  ->  4 ascii::is_digit
+           1.0  botlish_audit_run  ->  0 <program>
+
+== Botlish -> runtime/libc calls, per helper: count and INCLUSIVE cost (per run)
+  rt_substr                                                    calls=   9,663.1  62.68% of Ir    609.3 Ir/call  Ir=5,887,470.8  Dr=1,347,800.2  Dw=  986,165.9  Bc=  874,074.8  Bcm=   35,014.7  Bi=   84,824.0  D1mr=   10,753.1  D1mw=    1,845.2
+  rt_call_value                                                calls=   9,660.0  21.40% of Ir    208.1 Ir/call  Ir=2,010,000.0  Dr=  474,800.0  Dw=  293,600.0  Bc=  314,000.0  Bcm=    6,009.1  Bi=   30,000.0  D1mr=       15.5  D1mw=        0.0
+  rt_set_contains                                              calls=   1,261.0   7.95% of Ir    592.1 Ir/call  Ir=  746,659.0  Dr=  142,845.0  Dw=   74,443.0  Bc=  157,237.0  Bcm=    1,204.2  Bi=   18,004.0  D1mr=        0.0  D1mw=        0.0
+  rt_is_tcl_alnum                                              calls=   8,400.0   4.75% of Ir     53.1 Ir/call  Ir=  446,400.0  Dr=  122,000.0  Dw=   80,000.0  Bc=   58,000.0  Bcm=    2,801.0  Bi=        0.0  D1mr=        7.0  D1mw=        0.0
+  rt_closure_new                                               calls=     843.1   2.50% of Ir    278.8 Ir/call  Ir=  235,093.0  Dr=   63,875.6  Dw=   48,552.7  Bc=   29,945.0  Bcm=      316.3  Bi=    5,621.0  D1mr=      468.5  D1mw=      311.1
+  rt_str_region_eq                                             calls=   1,260.0   1.72% of Ir    127.9 Ir/call  Ir=  161,200.0  Dr=   28,000.0  Dw=   10,000.0  Bc=   34,800.0  Bcm=    3,603.2  Bi=      400.0  D1mr=        3.0  D1mw=        0.0
+  rt_str_region_check                                          calls=     840.0   0.32% of Ir     36.2 Ir/call  Ir=   30,400.0  Dr=    6,400.0  Dw=    5,600.0  Bc=    2,400.0  Bcm=        0.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+  rt_str_len                                                   calls=     850.5   0.09% of Ir     10.5 Ir/call  Ir=    8,910.0  Dr=    2,430.0  Dw=      810.0  Bc=      810.0  Bcm=        0.1  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+  rt_construct                                                 calls=       6.3   0.04% of Ir    617.0 Ir/call  Ir=    3,887.0  Dr=      973.0  Dw=      677.0  Bc=      588.0  Bcm=       50.5  Bi=       38.0  D1mr=       13.5  D1mw=       25.0
+  rt_set_from_list                                             calls=       2.1   0.02% of Ir   1047.1 Ir/call  Ir=    2,199.0  Dr=      480.0  Dw=      291.0  Bc=      395.0  Bcm=       21.2  Bi=       50.0  D1mr=       16.7  D1mw=        3.0
+  rt_list_append                                               calls=       4.2   0.02% of Ir    341.0 Ir/call  Ir=    1,432.0  Dr=      366.0  Dw=      272.0  Bc=      204.0  Bcm=       11.8  Bi=       31.0  D1mr=        2.0  D1mw=        3.0
+  rt_list_new                                                  calls=       5.2   0.01% of Ir    224.0 Ir/call  Ir=    1,176.2  Dr=      315.6  Dw=      243.9  Bc=      141.3  Bcm=       11.3  Bi=       36.0  D1mr=       14.2  D1mw=        7.7
+  rt_str_utf8_bytes                                            calls=       3.1   0.01% of Ir    362.5 Ir/call  Ir=    1,142.0  Dr=      281.0  Dw=      190.0  Bc=      174.0  Bcm=        7.5  Bi=       21.0  D1mr=        0.0  D1mw=        1.0
+  rt_int_mod                                                   calls=       1.1   0.00% of Ir     41.9 Ir/call  Ir=       44.0  Dr=        7.0  Dw=        6.0  Bc=        5.0  Bcm=        0.1  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+  rt_char_codepoint                                            calls=       4.2   0.00% of Ir      7.6 Ir/call  Ir=       32.0  Dr=        8.0  Dw=        4.0  Bc=        0.0  Bcm=        0.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+
+== Botlish -> helper calls, per calling Botlish function (per run)
+       9,660.0  14 scan_while  ->  rt_call_value
+       9,660.0  11 char_at  ->  rt_substr
+       7,140.0  12 is_local_char  ->  rt_is_tcl_alnum
+       1,260.0  13 is_label_char  ->  rt_is_tcl_alnum
+       1,260.0  12 is_local_char  ->  rt_set_contains
+         840.0  9 web::emailish?  ->  rt_str_len
+         840.0  9 web::emailish?  ->  rt_closure_new
+         840.0  10 char_at  ->  rt_str_region_check
+         420.0  9 web::emailish?  ->  rt_str_region_eq
+         420.0  13 is_label_char  ->  rt_str_region_eq
+         420.0  16 domain_loop  ->  rt_str_region_eq
+           4.2  0 <program>  ->  rt_list_new
+           4.2  1 char::codepoint  ->  rt_char_codepoint
+           4.2  23 esc_from  ->  rt_str_len
+           4.2  23 esc_from  ->  rt_construct
+           4.2  3 byte::set  ->  rt_list_append
+           3.1  0 <program>  ->  rt_closure_new
+           3.1  23 esc_from  ->  rt_substr
+           3.1  22 esc_char  ->  rt_str_utf8_bytes
+           3.1  22 esc_char  ->  rt_str_len
+           2.1  21 esc_bytes  ->  rt_str_len
+           1.1  0 <program>  ->  rt_set_from_list
+           1.1  20 hex_pair  ->  rt_int_mod
+           1.1  20 hex_pair  ->  rt_construct
+           1.1  21 esc_bytes  ->  rt_construct
+           1.1  3 byte::set  ->  rt_str_len
+           1.1  3 byte::set  ->  rt_list_new
+           1.1  3 byte::set  ->  rt_set_from_list
+           1.1  17 web::is_unreserved  ->  rt_set_contains
+
+== calls made outside Botlish code, caller -> callee (per run; top 60)
+      23,058.3  __rustc::__rust_dealloc  ->  __rustc::__rdl_dealloc
+      23,058.3  __rustc::__rdl_dealloc  ->  free
+      23,058.3  free  ->  _int_free
+      23,010.7  __rustc::__rust_alloc  ->  __rustc::__rdl_alloc
+      23,010.7  __rustc::__rdl_alloc  ->  malloc
+       9,664.2  <runtime::vm::Vm>::alloc::<runtime::value::StrObj>  ->  __rustc::__rust_no_alloc_shim_is_unstable_v2
+       9,664.2  <runtime::vm::Vm>::alloc::<runtime::value::StrObj>  ->  __rustc::__rust_alloc
+       8,400.0  rt_is_tcl_alnum  ->  one_scalar
+       6,310.5  equal  ->  __memcmp_avx2_movbe
+       6,304.2  rt_set_contains  ->  equal
+       5,044.2  <runtime::vm::Vm>::new_str_known  ->  <runtime::vm::Vm>::alloc::<runtime::value::StrObj>
+       5,043.1  rt_substr  ->  __rustc::__rust_no_alloc_shim_is_unstable_v2
+       5,043.1  rt_substr  ->  __rustc::__rust_alloc
+       5,043.1  rt_substr  ->  __memcpy_avx_unaligned_erms
+       5,043.1  rt_substr  ->  <runtime::vm::Vm>::new_str_known
+       4,864.9  __rustc::__rust_realloc  ->  __rustc::__rdl_realloc
+       4,864.9  __rustc::__rdl_realloc  ->  realloc
+       4,859.6  <alloc::raw_vec::RawVecInner>::finish_grow  ->  __rustc::__rust_no_alloc_shim_is_unstable_v2
+       4,859.6  <alloc::raw_vec::RawVecInner>::finish_grow  ->  __rustc::__rust_alloc
+       4,848.6  realloc  ->  _int_realloc
+       4,783.4  <alloc::raw_vec::RawVecInner<_>>::reserve::do_reserve_and_handle::<alloc::alloc::Global>  ->  <alloc::raw_vec::RawVecInner>::finish_grow
+       4,620.0  <runtime::vm::Vm>::new_str  ->  runtime::vm::str_object
+       4,620.0  <runtime::vm::Vm>::new_str  ->  <runtime::vm::Vm>::alloc::<runtime::value::StrObj>
+       4,620.0  runtime::vm::str_object  ->  __rustc::__rust_realloc
+       4,620.0  rt_substr  ->  <alloc::string::String as core::iter::traits::collect::FromIterator<char>>::from_iter::<core::iter::adapters::take::Take<core::str::iter::Chars>>
+       4,620.0  rt_substr  ->  <runtime::vm::Vm>::new_str
+       4,620.0  <alloc::string::String as core::iter::traits::collect::FromIterator<char>>::from_iter::<core::iter::adapters::take::Take<core::str::iter::Chars>>  ->  <alloc::raw_vec::RawVecInner<_>>::reserve::do_reserve_and_handle::<alloc::alloc::Global>
+       3,657.2  malloc  ->  _int_malloc
+       2,520.1  runtime::vm::str_object  ->  core::str::count::char_count_general_case
+       1,260.0  rt_call_value  ->  invoke_native
+       1,260.0  apply_op  ->  one_scalar
+       1,260.0  invoke_native  ->  apply_op
+         843.1  <runtime::vm::Vm>::alloc::<runtime::value::ClosureObj>  ->  __rustc::__rust_no_alloc_shim_is_unstable_v2
+         843.1  <runtime::vm::Vm>::alloc::<runtime::value::ClosureObj>  ->  __rustc::__rust_alloc
+         843.1  rt_closure_new  ->  __rustc::__rust_no_alloc_shim_is_unstable_v2
+         843.1  rt_closure_new  ->  __rustc::__rust_alloc
+         843.1  rt_closure_new  ->  __memcpy_avx_unaligned_erms
+         843.1  rt_closure_new  ->  <runtime::vm::Vm>::alloc::<runtime::value::ClosureObj>
+         840.0  rt_str_region_eq  ->  <core::iter::adapters::take::Take<core::str::iter::Chars> as core::iter::traits::iterator::Iterator>::eq_by::<core::str::iter::Chars, <core::iter::adapters::take::Take<core::str::iter::Chars> as core::iter::traits::iterator::Iterator>::eq<core::str::iter::Chars>::{closure#0}>
+         782.0  _int_malloc  ->  alloc_perturb
+         420.0  rt_str_region_eq  ->  __memcmp_avx2_movbe
+         156.8  _int_malloc  ->  unlink_chunk.isra.0
+          48.0  calloc  ->  _int_malloc
+          47.7  __rustc::__rust_alloc_zeroed  ->  __rustc::__rdl_alloc_zeroed
+          47.7  __rustc::__rdl_alloc_zeroed  ->  calloc
+          16.8  rt_set_from_list  ->  equal
+          15.8  rt_construct  ->  __memcpy_avx_unaligned_erms
+          12.6  <runtime::vm::Vm>::new_list  ->  __rustc::__rust_no_alloc_shim_is_unstable_v2
+          12.6  <runtime::vm::Vm>::new_list  ->  __rustc::__rust_alloc
+           5.2  rt_list_new  ->  <runtime::vm::Vm>::new_list
+           4.2  rt_list_append  ->  __rustc::__rust_no_alloc_shim_is_unstable_v2
+           4.2  rt_list_append  ->  __rustc::__rust_alloc
+           4.2  rt_list_append  ->  <runtime::vm::Vm>::new_list
+           4.2  rt_list_new  ->  __rustc::__rust_no_alloc_shim_is_unstable_v2
+           4.2  rt_list_new  ->  __rustc::__rust_alloc
+           4.2  rt_list_new  ->  __memcpy_avx_unaligned_erms
+           3.1  rt_construct  ->  __rustc::__rust_no_alloc_shim_is_unstable_v2
+           3.1  rt_str_utf8_bytes  ->  __rustc::__rust_no_alloc_shim_is_unstable_v2
+           3.1  rt_str_utf8_bytes  ->  __rustc::__rust_alloc
+           3.1  rt_str_utf8_bytes  ->  <runtime::vm::Vm>::new_list

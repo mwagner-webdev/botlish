@@ -1,0 +1,11 @@
+945d84b compiler 3970c3e 2026-09-18 | <program entry>=202 sum<int, int>=267 step<generic>=318
+1e8958c compiler aa62b9e 2026-09-19 | <program entry>=187 sum<int, int>=256 step<generic>=327
+67c0eb8 compiler 587e92f 2026-09-19 | <program entry>=202 sum<int, int>=267 step<generic>=318
+a39eb2d compiler 67c0eb8 2026-09-19 | <program entry>=187 sum<int, int>=256 step<generic>=327
+ed0d13c compiler c8be6d1 2026-09-19 | <program entry>=187 sum<int, int>=256 step<generic>=300
+43aa3a1 compiler ed0d13c 2026-09-19 | <program entry>=200 sum<int, int>=268 step<generic>=206
+36ebd8a compiler c12f9d5 2026-09-20 | <program entry>=84 sum<int, int>=162 step<generic>=206
+966bb60 compiler 2189a30 2026-09-20 | <program entry>=84 sum<int, int>=162 step<int>=98
+caf8ca7 compiler e32ea1a 2026-09-21 | <program entry>=63 sum<int, int>=131 step<int>=98
+d2d6dfe compiler 6d549aa 2026-09-26 | <program entry>=63 sum<int, int>=125 step<int>=98
+661231b compiler 925518c 2026-09-28 | <program entry>=63 refined_sum<int, int>=125 step<int>=98

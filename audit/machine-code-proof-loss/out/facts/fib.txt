@@ -1,0 +1,15 @@
+== semantic instances (hir::semantic::census, front end)
+  s0    fib                    args=<int> result=int status=valid passes=2 calls=5
+
+== codegen instances (hir::specialize + hir::range, native lowering's inputs)
+  i0 <program>
+    key args:  <>  result: int  generic: 1
+    call @e23 -> fib<int>
+  i1 fib<int>
+    key args:  <int>  result: int  generic: 0
+    closed (InstanceClosed): 1
+    closed-caller theorem:   -
+    param 0 n: entry range [0, 22]
+    result range: [-∞, +∞]
+    call @e11 -> fib<int>
+    call @e17 -> fib<int>

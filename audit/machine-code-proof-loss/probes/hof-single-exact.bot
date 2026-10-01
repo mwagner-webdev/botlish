@@ -1,0 +1,16 @@
+# Probe (audit only): a top-level, envless higher-order function with ONE
+# call site passing ONE exact callable. Does the call through the parameter
+# compile to a direct call?
+#
+# expect: 42
+
+fn inc(x):
+    x + 1
+
+fn apply_loop(f, i, n):
+    loop j from i to n:
+        if f(j) > 41:
+            return j + 1
+    n
+
+apply_loop(inc, 0, 100)

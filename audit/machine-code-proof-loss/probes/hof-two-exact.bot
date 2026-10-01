@@ -1,0 +1,23 @@
+# Probe (audit only): the same top-level, envless higher-order function
+# called from TWO sites with two DIFFERENT exact callables (a Botlish
+# function and a native), the shape scan_while has, but with no captures.
+#
+# expect: [42, 3]
+
+fn inc(x):
+    x + 1
+
+fn first_hit(f, i, n):
+    loop j from i to n:
+        if f(j) > 41:
+            return j + 1
+    n
+
+fn alpha_run(p, s, i):
+    loop j from i to length(s):
+        if p(substring(s, j, j + 1)):
+            continue
+        return j
+    length(s)
+
+[first_hit(inc, 0, 100), alpha_run(is_tcl_alpha, "abc1", 0)]

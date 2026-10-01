@@ -1,0 +1,5 @@
+char_at<generic>             range-open=1 InstanceClosed=1
+local_char?<generic>         range-open=1 InstanceClosed=0
+scan_while<generic>          range-open=1 InstanceClosed=1
+tld?<generic>                range-open=1 InstanceClosed=1
+domain?<generic>             range-open=1 InstanceClosed=1

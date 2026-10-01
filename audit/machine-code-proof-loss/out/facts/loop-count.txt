@@ -1,0 +1,23 @@
+== semantic instances (hir::semantic::census, front end)
+  s0    work                   args=<int> result=int status=valid passes=1 calls=2
+  s1    drive                  args=<int, int> result=int status=valid passes=2 calls=3
+
+== codegen instances (hir::specialize + hir::range, native lowering's inputs)
+  i0 <program>
+    key args:  <>  result: int  generic: 1
+    call @e46 -> drive<int, int>
+  i2 work<int>
+    key args:  <int>  result: int  generic: 0
+    closed (InstanceClosed): 1
+    closed-caller theorem:   -
+    param 0 i: entry range [1, 500]
+    result range: [7, 7] {7}
+  i1 drive<int, int>
+    key args:  <int, int>  result: int  generic: 0
+    closed (InstanceClosed): 1
+    closed-caller theorem:   -
+    param 0 i: entry range [0, 500]
+    param 1 total: entry range [0, +∞]
+    result range: [-∞, +∞]
+    call @e43 -> work<int>
+    call @e34 -> drive<int, int>

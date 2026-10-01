@@ -1,0 +1,29 @@
+== semantic instances (hir::semantic::census, front end)
+  s0    step                   args=<int> result=int status=valid passes=1 calls=2
+  s1    refined_sum            args=<int, int> result=int status=valid passes=2 calls=3
+
+== codegen instances (hir::specialize + hir::range, native lowering's inputs)
+  i0 <program>
+    key args:  <>  result: int  generic: 1
+    call @e33 -> refined_sum<int, int>
+  i1 refined_sum<int, int>
+    key args:  <int, int>  result: int  generic: 0
+    closed (InstanceClosed): 1
+    closed-caller theorem:   -
+    param 0 n: entry range [0, 400]
+    param 1 acc: entry range [-∞, +∞]
+    result range: [-∞, +∞]
+    call @e26 -> step<int>
+    call @e20 -> refined_sum<int, int>
+  i2 step<int>
+    key args:  <int>  result: int  generic: 0
+    closed (InstanceClosed): 1
+    closed-caller theorem:   -
+    param 0 x: entry range [-∞, +∞]
+    result range: [-∞, +∞]
+  i3 step<generic>
+    key args:  <any>  result: int  generic: 1
+    closed (InstanceClosed): 0
+    closed-caller theorem:   -
+    param 0 x: entry range [-∞, +∞]
+    result range: [-∞, +∞]

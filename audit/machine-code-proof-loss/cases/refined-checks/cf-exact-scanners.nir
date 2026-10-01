@@ -1,0 +1,95 @@
+# exact-target counterfactual (scratch worktree only), bench/refined-checks.bot
+func 11 "char_at" params=2 env=0 regs=6 pnames="i v" captures=0 instance="generic" rawregs="3" @e229
+    %2 = int 1 @e237
+    %3 = rawint 1
+    %4 = op iadd %0 %2 @e234
+    %5 = op substr %1 %0 %4 @e230
+    ret %5
+end
+func 12 "local_char?" params=1 env=0 regs=9 pnames="c" captures=0 instance="str" @e239
+    %1 = op strtclalnum %0 @e241
+    br %1 L0 L1 @e240
+  label L0
+    %3 = bool true @e244
+    %2 = move %3
+    jump L2
+  label L1
+    %4 = staticget 0 @e248
+    %5 = op setcontainstotal %4 %0 @e246
+    br %5 L3 L4 @e245
+  label L3
+    %7 = bool true @e250
+    %6 = move %7
+    jump L5
+  label L4
+    %8 = bool false @e251
+    %6 = move %8
+    jump L5
+  label L5
+    %2 = move %6
+    jump L2
+  label L2
+    ret %2
+end
+func 13 "scan_local" params=3 env=0 regs=14 pnames="start n v" captures=0 instance="generic" rawregs="11" @e267
+    %3 = move %0 @e268
+    jump L0 @e268
+  label L0
+    %5 = op ilt %3 %1 @e268
+    br %5 L1 L3 @e268
+  label L1
+    %6 = call 11 %3 %2 @e274
+    %7 = call 12 %6 @e272
+    br %7 L5 L6 @e271
+  label L5
+    jump L2 @e277
+  label L6
+    %9 = unit
+    %8 = move %9
+    jump L7
+  label L7
+    ret %3 @e278
+  label L2
+    %10 = int 1 @e268
+    %11 = rawint 1
+    %12 = op iadd %3 %10 @e268
+    %3 = move %12 @e268
+    jump L0 @e268
+  label L3
+    %13 = unit @e268
+    %4 = move %13 @e268
+    jump L4 @e268
+  label L4
+    ret %1
+end
+func 14 "scan_alpha" params=3 env=0 regs=16 pnames="start n v" captures=0 instance="generic" rawregs="13" @e282
+    %3 = move %0 @e283
+    jump L0 @e283
+  label L0
+    %5 = op ilt %3 %1 @e283
+    br %5 L1 L3 @e283
+  label L1
+    %6 %7 %8 = callmulti 10 %3 %2 @e289
+    %9 = op strregiontclalpha %6 %7 %8 @e287
+    br %9 L5 L6 @e286
+  label L5
+    jump L2 @e292
+  label L6
+    %11 = unit
+    %10 = move %11
+    jump L7
+  label L7
+    ret %3 @e293
+  label L2
+    %12 = int 1 @e283
+    %13 = rawint 1
+    %14 = op iadd %3 %12 @e283
+    %3 = move %14 @e283
+    jump L0 @e283
+  label L3
+    %15 = unit @e283
+    %4 = move %15 @e283
+    jump L4 @e283
+  label L4
+    ret %1
+end

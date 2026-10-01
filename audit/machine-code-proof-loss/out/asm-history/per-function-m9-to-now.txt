@@ -1,0 +1,158 @@
+== audit/native-scalar-asm/bench/refined-checks.asm
+   label                                       0c2dead    924482b    45f29dc    84f4d68    46d658d    b370d52    c251e7c
+   <program entry>                                1172       1443       1443       1443       1443       1443       1443
+   byte::set<List[UnicodeChar]>                    617        617        609        609        609        609        609
+   web::is_unreserved<generic>                     155          -          -          -          -          -          -
+   web::uri_escape_text<generic>                   125          -          -          -          -          -          -
+   high_nibble<generic>                            103          -          -          -          -          -          -
+   hex_pair<generic>                               453          -          -          -          -          -          -
+   esc_bytes<generic>                              758          -          -          -          -          -          -
+   esc_char<generic>                               486          -          -          -          -          -          -
+   esc_from<generic>                               828          -          -          -          -          -          -
+   check<int, int, str, str>                       402        344        344        344        344        344        344
+   <str>                                       681,681          -          -          -          -          -          -
+   <generic>                                   769,769          -          -          -          -          -          -
+   char_at<generic>                            262,262    262,222    262,222    262,222    262,222    262,222    262,222
+   scan_local<generic>                         804,804          -          -          -          -          -          -
+   scan_label<generic>                         564,564          -          -          -          -          -          -
+   scan_alpha<generic>                         468,468          -          -          -          -          -          -
+   tld_ok<generic>                             452,452          -          -          -          -          -          -
+   domain_loop<generic>                        644,644          -          -          -          -          -          -
+   web::emailish?<str>                               -        601        601        601        601        601        601
+   local_char?<generic>                              -        238        238        238        238        238        238
+   scan_while<generic>                               -        528        496        496        496        496        496
+   tld?<generic>                                     -        468        468        468        468        468        468
+   domain?<generic>                                  -       1244       1244       1244       1244       1244       1244
+   web::is_unreserved<int>                           -        137        137        137        137        137        137
+   web::uri_escape_text<str>                         -         94         94         94         94         94         94
+   high_nibble<int>                                  -        103        103        103        103        103        103
+   hex_pair<int>                                     -        474        474        474        474        474        474
+   esc_bytes<List[int], int, str>                    -        491        491        491        491        491        491
+   esc_char<str>                                     -        426        426        426        426        426        426
+   esc_from<str, int, str>                           -        451        451        451        451        451        451
+== audit/native-scalar-asm/bench/sum-refined.asm
+   label                                       0c2dead    924482b    45f29dc    84f4d68    46d658d    b370d52    c251e7c
+   sum<int, int>                                   125        125          -          -          -          -          -
+   refined_sum<int, int>                             -          -        125        125        125        125        125
+== audit/native-scalar-asm/examples-stdlib/csv.asm
+   label                                       0c2dead    924482b    45f29dc    84f4d68    46d658d    b370d52    c251e7c
+   scan_unquoted<str, int, int>                    585        585        585        585        664        585        585
+   scan_quoted<str, int, str>                     1063       1063       1063       1063       1122       1063       1063
+   scan_field<str, int>                            352        352        352        352        364        352        352
+   scan_record<str, int, List[never]>              795        795        795        795        972        795        795
+   scan_record<str, int, List[str]>                976        976        976        976       1113        976        976
+   scan_records<str, int, List[never]>             398        398        398        398        413        398        398
+   scan_records<str, int, List[List[str]]>         524        524        524        524        540        524        524
+== audit/native-scalar-asm/examples-stdlib/csv_chunked.asm
+   label                                       0c2dead    924482b    45f29dc    84f4d68    46d658d    b370d52    c251e7c
+   scan_unquoted<str, int, int>                    585        585        585        585        664        585        585
+   scan_quoted<str, int, str>                     1063       1063       1063       1063       1122       1063       1063
+   scan_field<str, int>                            352        352        352        352        364        352        352
+   scan_record<str, int, list[List[never],         799        799        799        799        985        799        799
+   scan_record<str, int, list[List[mutarray        833        833        833        833       1034        833        833
+   scan_records<str, int, list[List[never],        537        537        537        537        549        537        537
+   scan_records<str, int, list[List[mutarra        612        612        612        612        620        612        612
+== audit/native-scalar-asm/examples-stdlib/csv_geometric.asm
+   label                                       0c2dead    924482b    45f29dc    84f4d68    46d658d    b370d52    c251e7c
+   geo_new<generic>                                 78         78          -          -          -          -          -
+   geo_grow<mutarray, int>                         381        381          -          -          -          -          -
+   geo_append<list[mutarray, int], str>            272        272          -          -          -          -          -
+   geo_append<list[mutarray, int], list>           272        272          -          -          -          -          -
+   geo_finish<list[mutarray, int]>                  81         81          -          -          -          -          -
+   scan_unquoted<str, int, int>                    585        585        585        585        664        585        585
+   scan_quoted<str, int, str>                     1063       1063       1063       1063       1122       1063       1063
+   scan_field<str, int>                            352        352        352        352        364        352        352
+   scan_record<str, int, list[mutarray, int        695        695          -          -          -          -          -
+   scan_records<str, int, list[mutarray, in        456        456          -          -          -          -          -
+   csv_parse<str>                                  171        171        325        325        337        325        325
+   mutarray::create<int, str>                        -          -        461        461        461        461        461
+   mutarray::create<int, list>                       -          -        461        461          -          -          -
+   geo_new<str>                                      -          -         81         81         81         81         81
+   geo_new<list>                                     -          -         81         81          -          -          -
+   geo_grow<mutarray, int, str>                      -          -        412        412        412        412        412
+   geo_grow<mutarray, int, list>                     -          -        412        412          -          -          -
+   geo_append<mutarray, int, str>                    -          -        279        279        279        279        279
+   geo_append<mutarray, int, list>                   -          -        279        279          -          -          -
+   geo_finish<mutarray, int>                         -          -         81         81         81         81         81
+   scan_record_rest<str, int, mutarray, int          -          -        783        783        961        783        783
+   scan_record<str, int>                             -          -        215        215        239        215        215
+   scan_records<str, int, mutarray, int>             -          -        488        488        520        488        488
+   mutarray::create<int, List[str]>                  -          -          -          -        461        461        461
+   geo_new<List[str]>                                -          -          -          -         81         81         81
+   geo_grow<mutarray, int, List[str]>                -          -          -          -        412        412        412
+   geo_append<mutarray, int, List[str]>              -          -          -          -        279        279        279
+== audit/native-scalar-asm/examples-stdlib/csv_records.asm
+   label                                       0c2dead    924482b    45f29dc    84f4d68    46d658d    b370d52    c251e7c
+   geo_new<generic>                                 78         78          -          -          -          -          -
+   geo_grow<mutarray, int>                         381        381          -          -          -          -          -
+   geo_append<list[mutarray, int], str>            272        272          -          -          -          -          -
+   geo_append<list[mutarray, int], list>           272        272          -          -          -          -          -
+   geo_append<list[mutarray, int], mutarray        272        272          -          -          -          -          -
+   geo_finish<list[mutarray, int]>                  81         81          -          -          -          -          -
+   scan_unquoted<str, int, int>                    584        584        585        585        664        585        585
+   scan_quoted<str, int, str>                     1063       1063       1063       1063       1122       1063       1063
+   scan_field<str, int>                            351        351        352        352        364        352        352
+   scan_record<str, int, list[mutarray, int        695        695          -          -          -          -          -
+   scan_records<str, int, list[mutarray, in        456        456          -          -          -          -          -
+   csv_parse<str>                                  171        171        325        325        337        325        325
+   ht_controls<generic>                            125        125          -          -          -          -          -
+   ht_keys<generic>                                125        125          -          -          -          -          -
+   ht_values<generic>                              125        125          -          -          -          -          -
+   ht_size<generic>                                125        125          -          -          -          -          -
+   ht_capacity<generic>                            168        168          -          -          -          -          -
+   ht_probe_start<mutarray, any>                   179        179        179        179          -          -          -
+   ht_probe_start<any, str>                        179        179          -          -          -          -          -
+   ht_probe_next<any, int>                         245        245          -          -          -          -          -
+   ht_find_get<any, str, int>                      804        804          -          -          -          -          -
+   ht_find_insert<mutarray, any, int, int>        1248       1248       1248       1248          -          -          -
+   ht_get<any, str>                                429        429          -          -          -          -          -
+   ht_rehash_insert<List[mutarray], int, an        439        439        439        439          -          -          -
+   ht_rehash_scan<list, int, int, List[muta        977        977        977        977          -          -          -
+   ht_rehash<mutarray, int>                        766        766        766        766        807        766        766
+   ht_place<mutarray, int, any, any>              1168       1168       1168       1168          -          -          -
+   ht_set<mutarray, any, any>                      836        836        836        836          -          -          -
+   row_fill<mutarray, any, any, int, int>          618        618          -          -          -          -          -
+   row_table<any, int, any, bool>                  335        335          -          -          -          -          -
+   build_rows<list, int, any, int, list[mut        528        528          -          -          -          -          -
+   csv_records_generic<str, bool>                  580        580        698        698        634        634        634
+   mutarray::create<int, str>                        -          -        461        461        461        461        461
+   mutarray::create<int, list>                       -          -        461        461          -          -          -
+   mutarray::create<int, mutarray>                   -          -        461        461        461        461        461
+   geo_new<str>                                      -          -         81         81         81         81         81
+   geo_new<list>                                     -          -         81         81          -          -          -
+   geo_new<mutarray>                                 -          -         81         81         81         81         81
+   geo_grow<mutarray, int, str>                      -          -        412        412        412        412        412
+   geo_grow<mutarray, int, list>                     -          -        412        412          -          -          -
+   geo_grow<mutarray, int, mutarray>                 -          -        412        412        412        412        412
+   geo_append<mutarray, int, str>                    -          -        278        278        278        278        278
+   geo_append<mutarray, int, list>                   -          -        278        278          -          -          -
+   geo_append<mutarray, int, mutarray>               -          -        278        278        278        278        278
+   geo_finish<mutarray, int>                         -          -         81         81         81         81         81
+   scan_record_rest<str, int, mutarray, int          -          -        783        783        961        783        783
+   scan_record<str, int>                             -          -        215        215        239        215        215
+   scan_records<str, int, mutarray, int>             -          -        488        488        520        488        488
+   ht_probe_start<mutarray, str>                     -          -        179        179        179        179        179
+   ht_find_get<mutarray, str, int>                   -          -        804        804        804        804        804
+   ht_get<mutarray, str>                             -          -        429        429        429        429        429
+   row_fill<mutarray, list, any, int, int>           -          -        524        524          -          -          -
+   row_table<list, int, any, bool>                   -          -        335        335          -          -          -
+   build_rows<list, int, list, int, mutarra          -          -        629        629          -          -          -
+   mutarray::create<int, List[str]>                  -          -          -          -        461        461        461
+   geo_new<List[str]>                                -          -          -          -         81         81         81
+   geo_grow<mutarray, int, List[str]>                -          -          -          -        412        412        412
+   geo_append<mutarray, int, List[str]>              -          -          -          -        278        278        278
+   ht_find_insert<mutarray, str, int, int>           -          -          -          -       1248       1248       1248
+   ht_rehash_insert<struct{controls: mutarr          -          -          -          -        401        439        439
+   ht_rehash_scan<struct{controls: any, key          -          -          -          -        724        977        977
+   ht_place<mutarray, int, str, str>                 -          -          -          -       1168       1168       1168
+   ht_set<mutarray, str, str>                        -          -          -          -        836        836        836
+   row_fill<mutarray, List[str], List[str],          -          -          -          -        427        427        427
+   row_table<List[str], int, List[str], boo          -          -          -          -        270        270        270
+   build_rows<List[List[str]], int, List[st          -          -          -          -        629        629        629
+== audit/native-scalar-asm/examples-stdlib/hashtable.asm
+   label                                       0c2dead    924482b    45f29dc    84f4d68    46d658d    b370d52    c251e7c
+   ht_rehash_insert<List[mutarray], int, an        439        439        439        439          -          -          -
+   ht_rehash_scan<list, int, int, List[muta        977        977        977        977          -          -          -
+   ht_rehash<mutarray, int>                        766        766        766        766        802        766        766
+   ht_rehash_insert<struct{controls: mutarr          -          -          -          -        401        439        439
+   ht_rehash_scan<struct{controls: any, key          -          -          -          -        724        977        977

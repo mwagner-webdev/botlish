@@ -1,0 +1,23 @@
+== before prepareHir: 2 semantic instances
+  check<int, int, str, any> -> int valid
+  check<int, int, str, str[UriQueryValue]> -> int valid
+== after prepareHir: 19 semantic instances
+  char_at<int> -> str valid
+  scan_while<any, native is_tcl_alpha> -> int valid
+  tld?<int> -> bool valid
+  scan_while<int, native is_tcl_alpha> -> int valid
+  label_char?<str> -> bool valid
+  scan_while<int, block(e239)/1 -> bool> -> int valid
+  local_char?<str> -> bool valid
+  domain?<int> -> bool valid
+  byte::nibble<int[HighNibble]> -> int[Nibble] valid
+  esc_bytes<list, int, str> -> str valid
+  esc_bytes<List[int[Byte]], int, str> -> str valid
+  hex_pair<int[Byte]> -> str valid
+  high_nibble<int[Byte]> -> int[Nibble] valid
+  byte::high_nibble<int[Byte]> -> int[HighNibble] valid
+  esc_char<str> -> str valid
+  esc_from<str, int, str> -> str valid
+  esc_from<any, int, str> -> str valid
+  check<int, int, any, any> -> int valid
+  check<int, int, str, str[UriQueryValue]> -> int valid

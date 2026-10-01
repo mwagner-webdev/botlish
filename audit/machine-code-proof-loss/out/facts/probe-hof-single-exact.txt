@@ -1,0 +1,30 @@
+   value: 42
+== semantic instances (hir::semantic::census, front end)
+  s0    apply_loop             args=<block(e2)/1 -> int, int, int> result=int status=valid passes=1 calls=1
+  s1    inc                    args=<int> result=int status=valid passes=1 calls=1
+
+== codegen instances (hir::specialize + hir::range, native lowering's inputs)
+  i0 <program>
+    key args:  <>  result: int  generic: 1
+    call @e25 -> apply_loop<block, int, int>
+  i2 inc<generic>
+    key args:  <any>  result: int  generic: 1
+    closed (InstanceClosed): 0
+    closed-caller theorem:   -
+    param 0 x: entry range [-∞, +∞]
+    result range: [-∞, +∞]
+  i1 apply_loop<block, int, int>
+    key args:  <block, int, int>  result: int  generic: 0
+    closed (InstanceClosed): 1
+    closed-caller theorem:   -
+    param 0 f: entry range [-∞, +∞]
+    param 1 i: entry range [0, 0] {0}
+    param 2 n: entry range [100, 100] {100}
+    result range: [1, 100]
+
+== NIR functions and call forms
+func 0 "<program>" params=0 env=0 regs=6 pnames="" captures=0 instance="generic" rawregs="2 4"
+    %5 = call 2 %0 %1 %3 @e25
+func 1 "inc" params=1 env=0 regs=4 pnames="x" captures=0 instance="generic" rawregs="2" @e2
+func 2 "apply_loop" params=3 env=0 regs=21 pnames="f i n" captures=0 instance="block, int, int" rawregs="8 11 13 14 18" @e8
+    %6 = callvalue %0 %3 @e15

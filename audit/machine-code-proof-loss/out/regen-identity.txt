@@ -1,0 +1,8 @@
+regenerated: tclsh9.0 native/generate-scalar-audit.tcl -outdir SCRATCH/current-asm
+tree: c251e7c641030d1859fd032aa5a2a0e318bdf4fc
+diff -r against audit/native-scalar-asm/ (differences listed; README.md records the generating commit):
+Files SCRATCH/current-asm/README.md and audit/native-scalar-asm/README.md differ
+15c15
+< - git commit: c251e7c641030d1859fd032aa5a2a0e318bdf4fc
+---
+> - git commit: 795eaefa12c2e8dfca8b5a25955026a30058e544
