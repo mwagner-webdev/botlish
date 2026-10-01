@@ -189,7 +189,7 @@ value (the consumer builds it) and has its own, narrower path
 Distance is symmetric as a fact and asymmetric as a cost. The grid in "Width
 experiments" measures, for each width and each of 1..12 edges, the stack
 operands and function bytes of the virtual form against the object, in each
-direction (`audit/.../out/calibration-grid.md`):
+direction (`audit/value-transport-materialization/out/calibration-grid.md`):
 
 * **argument hop** -- every field is re-passed at every hop and the values past
   the ~4 that stay in registers are spilled, reloaded and re-stored: measured
@@ -207,8 +207,8 @@ hop(return, W) = (W if W > returnFree else 0)
                  + returnSpill * max(0, W - returnRegs)       returnFree 2, returnRegs 8, returnSpill 1.5
 ```
 
-(`hop(arg)` = 2, 3, 4, 6, 10, 24 and `hop(return)` = 0, 3, 4, 6, 8, 14 at the same
-widths.)
+(`hop(arg)` = 2, 3, 4, 6, 10, 24 at widths 2, 3, 4, 5, 6, 8 and `hop(return)` =
+0, 3, 4, 6, 8, 18 at widths 2, 3, 4, 6, 8, 12: the measured values above.)
 
 ## Transport-pressure model
 
@@ -259,8 +259,7 @@ operands and 1.7x the code.
 previous milestone's whole policy -- local 16, return 8, argument 4 -- kept as
 the comparison oracle and as a validation tool, not as a second optimizer: it
 runs through the same analysis with the transport arithmetic off. It reproduces
-the baseline tree's NIR byte for byte on the corpus and on every probe of this
-report (`audit/.../out/` + `legacycmp` check in "Differential modes"). The caps
+the baseline tree's NIR byte for byte on the corpus and on 14 probe programs (`tools/legacy-parity.tcl`, `out/legacy-parity.txt`; "Differential modes"). The caps
 survive in the new policy as hard safety ceilings (`-struct-local-width` 16,
 `-struct-return-width` 16, `-struct-arg-width` 8), configurable.
 
@@ -285,6 +284,19 @@ survive in the new policy as hard safety ceilings (`-struct-local-width` 16,
   it. A local all of whose uses materialize it is built at construction (it
   would only move the allocation).
 * **Nested** values are cut (below).
+
+## Lists and other fixed-shape products
+
+The planner works on the descriptor abstraction (`{N SHAPE}`, SHAPE `""` for a
+positional product List), not on struct syntax: a fixed-shape positional List
+parameter or result is planned and budgeted exactly like a struct of the same
+width (`vt-positional-list-uses-the-same-model`: a 4-element List crosses three
+argument edges as fields, a 6-element one becomes a List allocation, the legacy
+policy leaves both virtual). Struct-specific semantics (lazy materialization,
+nesting, named identity) stay separate; a List remains all-or-nothing. Ordinary
+variable-length Lists are never candidates, and nothing here scalarizes them.
+The canonical corpus' positional-List state (`csv_chunked`) scores 18 against 20
+and is unchanged.
 
 ## Hard versus soft boundaries
 
