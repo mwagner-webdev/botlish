@@ -1,0 +1,63 @@
+=== NIR (function 2)
+func 2 "fwd1" params=9 env=0 regs=10 pnames="r.0 r.1 r.2 r.3 r.4 r.5 r.6 r.7 k" captures=0 instance="struct{f0: int, f1: int, f2: int, f3: int, f4: int, f5: int, f6: int, f7: int}, int" @e37
+    %9 = call 1 %0 %1 %2 %3 %4 %5 %6 %7 %8 @e38
+    ret %9
+end
+=== machine code (function 2)
+0000000000000382 <botlish_fn_2>:
+ 382:	push   rbp
+ 383:	mov    rbp,rsp
+ 386:	sub    rsp,0x80
+ 38d:	mov    QWORD PTR [rsp+0x70],r12
+ 392:	mov    r12,QWORD PTR [rbp+0x10]
+ 396:	mov    r10,QWORD PTR [rbp+0x18]
+ 39a:	mov    r11,QWORD PTR [rbp+0x20]
+ 39e:	mov    rax,QWORD PTR [rbp+0x28]
+ 3a2:	mov    QWORD PTR [rsp+0x20],rsi
+ 3a7:	mov    QWORD PTR [rsp+0x28],rdx
+ 3ac:	mov    QWORD PTR [rsp+0x30],rcx
+ 3b1:	mov    QWORD PTR [rsp+0x38],r8
+ 3b6:	mov    QWORD PTR [rsp+0x40],r9
+ 3bb:	mov    QWORD PTR [rsp+0x48],r12
+ 3c0:	mov    QWORD PTR [rsp+0x50],r10
+ 3c5:	mov    QWORD PTR [rsp+0x58],r11
+ 3ca:	mov    QWORD PTR [rsp+0x60],rax
+ 3cf:	mov    QWORD PTR [rsp],r12
+ 3d3:	mov    QWORD PTR [rsp+0x8],r10
+ 3d8:	mov    QWORD PTR [rsp+0x10],r11
+ 3dd:	mov    QWORD PTR [rsp+0x18],rax
+ 3e2:	call   3e7 <botlish_fn_2+0x65>
+			3e3: R_X86_64_PLT32	botlish_fn_1-0x4
+ 3e7:	mov    r12,QWORD PTR [rsp+0x70]
+ 3ec:	add    rsp,0x80
+ 3f3:	mov    rsp,rbp
+ 3f6:	pop    rbp
+ 3f7:	ret
+
+00000000000003f8 <botlish_entry_2>:
+ 3f8:	push   rbp
+ 3f9:	mov    rbp,rsp
+ 3fc:	sub    rsp,0x30
+ 400:	mov    QWORD PTR [rsp+0x20],r12
+ 405:	mov    rsi,QWORD PTR [rdx]
+ 408:	mov    rax,QWORD PTR [rdx+0x8]
+ 40c:	mov    rcx,QWORD PTR [rdx+0x10]
+ 410:	mov    r8,QWORD PTR [rdx+0x18]
+ 414:	mov    r9,QWORD PTR [rdx+0x20]
+ 418:	mov    r10,QWORD PTR [rdx+0x28]
+ 41c:	mov    r11,QWORD PTR [rdx+0x30]
+ 420:	mov    r12,QWORD PTR [rdx+0x38]
+ 424:	mov    rdx,QWORD PTR [rdx+0x40]
+ 428:	mov    QWORD PTR [rsp],r10
+ 42c:	mov    QWORD PTR [rsp+0x8],r11
+ 431:	mov    QWORD PTR [rsp+0x10],r12
+ 436:	mov    QWORD PTR [rsp+0x18],rdx
+ 43b:	mov    rdx,rax
+ 43e:	call   443 <botlish_entry_2+0x4b>
+			43f: R_X86_64_PLT32	botlish_fn_2-0x4
+ 443:	mov    r12,QWORD PTR [rsp+0x20]
+ 448:	add    rsp,0x30
+ 44c:	mov    rsp,rbp
+ 44f:	pop    rbp
+ 450:	ret
+

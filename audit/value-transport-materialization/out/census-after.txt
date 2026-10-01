@@ -1,0 +1,432 @@
+ROW fib off 0 0 0 0 0 3 0 0 0 2 35 292
+ROW fib legacy 0 0 0 0 0 3 0 0 0 2 35 292
+ROW fib on 0 0 0 0 0 3 0 0 0 2 35 292
+== fib
+virtual            0
+materialized       0
+transportedFields  0
+argHops            0
+returnHops         0
+loopHops           0
+structnew          0
+nestedOpened       0
+nestedClosed       0
+afterLocalUse      0
+plannedParams      0
+deniedParams       0
+causes: budget 0 hard 0 other 0
+frontier: 
+distance x width: 
+ROW lex-strategy off 0 0 6 6 2 11 0 2 0 11 354 5207
+ROW lex-strategy legacy 0 0 6 6 2 11 0 2 0 11 354 5207
+ROW lex-strategy on 0 0 6 6 2 11 0 2 0 11 354 5207
+== lex-strategy
+virtual            0
+materialized       0
+transportedFields  0
+argHops            0
+returnHops         0
+loopHops           0
+structnew          0
+nestedOpened       0
+nestedClosed       0
+afterLocalUse      0
+plannedParams      0
+deniedParams       0
+causes: budget 0 hard 0 other 0
+frontier: 
+distance x width: 
+ROW loop-count off 0 0 0 0 0 2 0 0 0 3 53 287
+ROW loop-count legacy 0 0 0 0 0 2 0 0 0 3 53 287
+ROW loop-count on 0 0 0 0 0 2 0 0 0 3 53 287
+== loop-count
+virtual            0
+materialized       0
+transportedFields  0
+argHops            0
+returnHops         0
+loopHops           0
+structnew          0
+nestedOpened       0
+nestedClosed       0
+afterLocalUse      0
+plannedParams      0
+deniedParams       0
+causes: budget 0 hard 0 other 0
+frontier: 
+distance x width: 
+ROW refined-checks off 0 0 5 5 1 24 4 1 1 24 689 8903
+ROW refined-checks legacy 0 0 5 5 1 24 4 1 1 24 689 8903
+ROW refined-checks on 0 0 5 5 1 24 4 1 1 24 689 8903
+== refined-checks
+virtual            0
+materialized       0
+transportedFields  0
+argHops            0
+returnHops         12
+loopHops           0
+structnew          0
+nestedOpened       0
+nestedClosed       0
+afterLocalUse      0
+plannedParams      0
+deniedParams       0
+causes: budget 0 hard 0 other 0
+frontier: 
+distance x width: 
+ROW source-checks off 0 0 6 5 2 1 0 2 0 7 241 4305
+ROW source-checks legacy 0 0 6 5 2 1 0 2 0 7 241 4305
+ROW source-checks on 0 0 6 5 2 1 0 2 0 7 241 4305
+== source-checks
+virtual            0
+materialized       0
+transportedFields  0
+argHops            0
+returnHops         0
+loopHops           0
+structnew          0
+nestedOpened       0
+nestedClosed       0
+afterLocalUse      0
+plannedParams      0
+deniedParams       0
+causes: budget 0 hard 0 other 0
+frontier: 
+distance x width: 
+ROW sum-refined off 0 0 0 0 0 2 0 0 0 3 36 286
+ROW sum-refined legacy 0 0 0 0 0 2 0 0 0 3 36 286
+ROW sum-refined on 0 0 0 0 0 2 0 0 0 3 36 286
+== sum-refined
+virtual            0
+materialized       0
+transportedFields  0
+argHops            0
+returnHops         0
+loopHops           0
+structnew          0
+nestedOpened       0
+nestedClosed       0
+afterLocalUse      0
+plannedParams      0
+deniedParams       0
+causes: budget 0 hard 0 other 0
+frontier: 
+distance x width: 
+ROW test-selection off 15 2 21 4 3 12 0 3 0 12 310 6589
+ROW test-selection legacy 15 2 21 4 3 12 0 3 0 12 310 6589
+ROW test-selection on 15 2 21 4 3 12 0 3 0 12 310 6589
+== test-selection
+<program>                          e115   named 2-field -> 2  none      args=0 rets=0 score=0.0/0.0 frontier=storage-boundary phys=1  materialized (storage)
+<program>                          e121   named 2-field -> 2  none      args=0 rets=0 score=0.0/0.0 frontier=storage-boundary phys=1  materialized (storage)
+<program>                          e127   named 2-field -> 2  none      args=0 rets=0 score=0.0/0.0 frontier=storage-boundary phys=1  materialized (storage)
+<program>                          e133   named 2-field -> 2  none      args=0 rets=0 score=0.0/0.0 frontier=storage-boundary phys=1  materialized (storage)
+<program>                          e139   named 2-field -> 2  none      args=0 rets=0 score=0.0/0.0 frontier=storage-boundary phys=1  materialized (storage)
+<program>                          e145   named 2-field -> 2  none      args=0 rets=0 score=0.0/0.0 frontier=storage-boundary phys=1  materialized (storage)
+<program>                          e151   named 2-field -> 2  none      args=0 rets=0 score=0.0/0.0 frontier=storage-boundary phys=1  materialized (storage)
+<program>                          e156   named 2-field -> 2  none      args=0 rets=0 score=0.0/0.0 frontier=storage-boundary phys=1  materialized (storage)
+<program>                          e162   named 2-field -> 2  none      args=0 rets=0 score=0.0/0.0 frontier=storage-boundary phys=1  materialized (storage)
+<program>                          e167   named 2-field -> 2  none      args=0 rets=0 score=0.0/0.0 frontier=storage-boundary phys=1  materialized (storage)
+<program>                          e172   named 2-field -> 2  none      args=0 rets=0 score=0.0/0.0 frontier=storage-boundary phys=1  materialized (storage)
+<program>                          e178   named 2-field -> 2  none      args=0 rets=0 score=0.0/0.0 frontier=storage-boundary phys=1  materialized (storage)
+<program>                          e184   named 2-field -> 2  none      args=0 rets=0 score=0.0/0.0 frontier=storage-boundary phys=1  materialized (storage)
+<program>                          e190   named 2-field -> 2  none      args=0 rets=0 score=0.0/0.0 frontier=storage-boundary phys=1  materialized (storage)
+first_affected<List[Test], block>  e105   named 2-field -> 2  none      args=0 rets=0 score=0.0/0.0 frontier=control-merge phys=1  materialized (control)
+virtual            0
+materialized       15
+transportedFields  0
+argHops            0
+returnHops         0
+loopHops           0
+structnew          15
+nestedOpened       0
+nestedClosed       0
+afterLocalUse      0
+plannedParams      0
+deniedParams       0
+causes: budget 0 hard 15 other 0
+frontier: control-merge 1 storage-boundary 14
+distance x width: {0 x2} 15
+SITE test-selection <program> e115 width=2 materialized:storage frontier=storage-boundary mats=
+SITE test-selection <program> e121 width=2 materialized:storage frontier=storage-boundary mats=
+SITE test-selection <program> e127 width=2 materialized:storage frontier=storage-boundary mats=
+SITE test-selection <program> e133 width=2 materialized:storage frontier=storage-boundary mats=
+SITE test-selection <program> e139 width=2 materialized:storage frontier=storage-boundary mats=
+SITE test-selection <program> e145 width=2 materialized:storage frontier=storage-boundary mats=
+SITE test-selection <program> e151 width=2 materialized:storage frontier=storage-boundary mats=
+SITE test-selection <program> e156 width=2 materialized:storage frontier=storage-boundary mats=
+SITE test-selection <program> e162 width=2 materialized:storage frontier=storage-boundary mats=
+SITE test-selection <program> e167 width=2 materialized:storage frontier=storage-boundary mats=
+SITE test-selection <program> e172 width=2 materialized:storage frontier=storage-boundary mats=
+SITE test-selection <program> e178 width=2 materialized:storage frontier=storage-boundary mats=
+SITE test-selection <program> e184 width=2 materialized:storage frontier=storage-boundary mats=
+SITE test-selection <program> e190 width=2 materialized:storage frontier=storage-boundary mats=
+SITE test-selection first_affected<List[Test], block> e105 width=2 materialized:control frontier=control-merge mats=
+ROW uri-steady off 0 0 5 6 0 17 0 0 0 17 417 5674
+ROW uri-steady legacy 0 0 5 6 0 17 0 0 0 17 417 5674
+ROW uri-steady on 0 0 5 6 0 17 0 0 0 17 417 5674
+== uri-steady
+virtual            0
+materialized       0
+transportedFields  0
+argHops            0
+returnHops         0
+loopHops           0
+structnew          0
+nestedOpened       0
+nestedClosed       0
+afterLocalUse      0
+plannedParams      0
+deniedParams       0
+causes: budget 0 hard 0 other 0
+frontier: 
+distance x width: 
+ROW ai_text_clean off 0 0 1 0 0 9 0 0 0 5 500 3081
+ROW ai_text_clean legacy 0 0 1 0 0 9 0 0 0 5 500 3081
+ROW ai_text_clean on 0 0 1 0 0 9 0 0 0 5 500 3081
+== ai_text_clean
+virtual            0
+materialized       0
+transportedFields  0
+argHops            0
+returnHops         0
+loopHops           0
+structnew          0
+nestedOpened       0
+nestedClosed       0
+afterLocalUse      0
+plannedParams      0
+deniedParams       0
+causes: budget 0 hard 0 other 0
+frontier: 
+distance x width: 
+ROW csv off 6 8 3 0 0 11 5 0 2 11 310 6218
+ROW csv legacy 0 0 3 0 0 4 12 0 11 11 294 5723
+ROW csv on 0 0 3 0 0 4 12 0 11 11 294 5723
+== csv
+scan_record<str, int, List[never]> e184   2-field -> 2  result    args=0 rets=1 score=0.0/20.0 frontier=never phys=0  return
+scan_record<str, int, List[never]> e190   2-field -> 2  result    args=0 rets=1 score=0.0/20.0 frontier=never phys=0  return
+scan_quoted<str, int, str>         e102   2-field -> 2  result    args=0 rets=2 score=0.0/20.0 frontier=never phys=0  return
+scan_unquoted<str, int, int>       e51    2-field -> 2  result    args=0 rets=2 score=0.0/20.0 frontier=never phys=0  return
+scan_record<str, int, List[str]>   e184   2-field -> 2  result    args=0 rets=2 score=0.0/20.0 frontier=never phys=0  return
+scan_record<str, int, List[str]>   e190   2-field -> 2  result    args=0 rets=2 score=0.0/20.0 frontier=never phys=0  return
+result instance i7     width=2 depth=0 score=0.0/20.0 virtual
+result instance i6     width=2 depth=0 score=0.0/20.0 virtual
+result instance i4     width=2 depth=1 score=0.0/20.0 virtual
+result instance i8     width=2 depth=0 score=0.0/20.0 virtual
+result instance i3     width=2 depth=1 score=0.0/20.0 virtual
+virtual            6
+materialized       0
+transportedFields  12
+argHops            0
+returnHops         29
+loopHops           0
+structnew          0
+nestedOpened       0
+nestedClosed       0
+afterLocalUse      0
+plannedParams      0
+deniedParams       0
+causes: budget 0 hard 0 other 0
+frontier: never 6
+distance x width: {1 x2} 2 {2 x2} 4
+SITE csv scan_record<str, int, List[never]> e184 width=2 return frontier=never mats=
+SITE csv scan_record<str, int, List[never]> e190 width=2 return frontier=never mats=
+SITE csv scan_quoted<str, int, str> e102 width=2 return frontier=never mats=
+SITE csv scan_unquoted<str, int, int> e51 width=2 return frontier=never mats=
+SITE csv scan_record<str, int, List[str]> e184 width=2 return frontier=never mats=
+SITE csv scan_record<str, int, List[str]> e190 width=2 return frontier=never mats=
+ROW csv_chunked off 6 8 1 2 1 19 12 0 11 20 528 10725
+ROW csv_chunked legacy 0 0 1 2 1 12 19 0 20 20 512 10168
+ROW csv_chunked on 0 0 1 2 1 12 19 0 20 20 512 10168
+== csv_chunked
+scan_record<str, int, list[List[never], mutarray, int]> e342   2-field -> 2  result    args=0 rets=1 score=0.0/20.0 frontier=never phys=0  return
+scan_record<str, int, list[List[never], mutarray, int]> e350   2-field -> 2  result    args=0 rets=1 score=0.0/20.0 frontier=never phys=0  return
+scan_quoted<str, int, str>         e260   2-field -> 2  result    args=0 rets=2 score=0.0/20.0 frontier=never phys=0  return
+scan_unquoted<str, int, int>       e209   2-field -> 2  result    args=0 rets=2 score=0.0/20.0 frontier=never phys=0  return
+scan_record<str, int, list[List[mutarray], mutarray, int]> e342   2-field -> 2  result    args=0 rets=2 score=0.0/20.0 frontier=never phys=0  return
+scan_record<str, int, list[List[mutarray], mutarray, int]> e350   2-field -> 2  result    args=0 rets=2 score=0.0/20.0 frontier=never phys=0  return
+result instance i11    width=2 depth=0 score=0.0/20.0 virtual
+result instance i10    width=2 depth=0 score=0.0/20.0 virtual
+result instance i8     width=2 depth=1 score=0.0/20.0 virtual
+result instance i13    width=2 depth=0 score=0.0/20.0 virtual
+result instance i7     width=2 depth=1 score=0.0/20.0 virtual
+virtual            6
+materialized       0
+transportedFields  12
+argHops            45
+returnHops         50
+loopHops           6
+structnew          0
+nestedOpened       0
+nestedClosed       0
+afterLocalUse      0
+plannedParams      0
+deniedParams       0
+causes: budget 0 hard 0 other 0
+frontier: never 6
+distance x width: {1 x2} 2 {2 x2} 4
+SITE csv_chunked scan_record<str, int, list[List[never], mutarray, int]> e342 width=2 return frontier=never mats=
+SITE csv_chunked scan_record<str, int, list[List[never], mutarray, int]> e350 width=2 return frontier=never mats=
+SITE csv_chunked scan_quoted<str, int, str> e260 width=2 return frontier=never mats=
+SITE csv_chunked scan_unquoted<str, int, int> e209 width=2 return frontier=never mats=
+SITE csv_chunked scan_record<str, int, list[List[mutarray], mutarray, int]> e342 width=2 return frontier=never mats=
+SITE csv_chunked scan_record<str, int, list[List[mutarray], mutarray, int]> e350 width=2 return frontier=never mats=
+ROW csv_geometric off 4 8 1 0 2 25 4 0 2 20 429 7974
+ROW csv_geometric legacy 0 0 1 0 2 18 11 0 9 20 415 7578
+ROW csv_geometric on 0 0 1 0 2 18 11 0 9 20 415 7578
+== csv_geometric
+scan_quoted<str, int, str>         e214   2-field -> 2  result    args=0 rets=2 score=0.0/20.0 frontier=never phys=0  return
+scan_unquoted<str, int, int>       e163   2-field -> 2  result    args=0 rets=2 score=0.0/20.0 frontier=never phys=0  return
+scan_record_rest<str, int, mutarray, int> e299   2-field -> 2  result    args=0 rets=2 score=0.0/20.0 frontier=never phys=0  return
+scan_record_rest<str, int, mutarray, int> e308   2-field -> 2  result    args=0 rets=2 score=0.0/20.0 frontier=never phys=0  return
+result instance i6     width=2 depth=0 score=0.0/20.0 virtual
+result instance i5     width=2 depth=0 score=0.0/20.0 virtual
+result instance i3     width=2 depth=1 score=0.0/20.0 virtual
+result instance i9     width=2 depth=0 score=0.0/20.0 virtual
+result instance i2     width=2 depth=1 score=0.0/20.0 virtual
+virtual            4
+materialized       0
+transportedFields  8
+argHops            0
+returnHops         26
+loopHops           0
+structnew          0
+nestedOpened       0
+nestedClosed       0
+afterLocalUse      0
+plannedParams      0
+deniedParams       0
+causes: budget 0 hard 0 other 0
+frontier: never 4
+distance x width: {2 x2} 4
+SITE csv_geometric scan_quoted<str, int, str> e214 width=2 return frontier=never mats=
+SITE csv_geometric scan_unquoted<str, int, int> e163 width=2 return frontier=never mats=
+SITE csv_geometric scan_record_rest<str, int, mutarray, int> e299 width=2 return frontier=never mats=
+SITE csv_geometric scan_record_rest<str, int, mutarray, int> e308 width=2 return frontier=never mats=
+ROW csv_records off 6 17 3 8 23 103 4 0 2 56 1239 23391
+ROW csv_records legacy 0 0 3 8 23 96 11 0 9 56 1213 23245
+ROW csv_records on 0 0 3 8 23 96 11 0 9 56 1213 23245
+== csv_records
+scan_quoted<str, int, str>         e214   2-field -> 2  result    args=0 rets=2 score=0.0/20.0 frontier=never phys=0  return
+scan_unquoted<str, int, int>       e163   2-field -> 2  result    args=0 rets=2 score=0.0/20.0 frontier=never phys=0  return
+scan_record_rest<str, int, mutarray, int> e299   2-field -> 2  result    args=0 rets=2 score=0.0/20.0 frontier=never phys=0  return
+scan_record_rest<str, int, mutarray, int> e308   2-field -> 2  result    args=0 rets=2 score=0.0/20.0 frontier=never phys=0  return
+ht_rehash<mutarray, int>           e857   3-field -> 3  local     args=1 rets=0 cyclic score=15.0/20.0 frontier=never phys=0  call
+ht_rehash<mutarray, int>           e881   3-field -> 3  local     args=2 rets=0 cyclic score=18.0/20.0 frontier=never phys=0  call
+param i47 b165               width=3 live=3 up=1 down=0 ret=0 cyclic score=15.0/20.0 virtual
+param i47 b168               width=3 live=3 up=1 down=1 ret=0 cyclic score=18.0/20.0 virtual
+param i48 b158               width=3 live=3 up=2 down=0 ret=0 score=6.0/20.0 virtual
+result instance i9     width=2 depth=0 score=0.0/20.0 virtual
+result instance i8     width=2 depth=0 score=0.0/20.0 virtual
+result instance i6     width=2 depth=1 score=0.0/20.0 virtual
+result instance i12    width=2 depth=0 score=0.0/20.0 virtual
+result instance i5     width=2 depth=1 score=0.0/20.0 virtual
+virtual            6
+materialized       0
+transportedFields  14
+argHops            9
+returnHops         26
+loopHops           6
+structnew          0
+nestedOpened       0
+nestedClosed       0
+afterLocalUse      0
+plannedParams      3
+deniedParams       0
+causes: budget 0 hard 0 other 0
+frontier: never 6
+distance x width: {2 x2} 4 {cyclic x3-4} 2
+SITE csv_records scan_quoted<str, int, str> e214 width=2 return frontier=never mats=
+SITE csv_records scan_unquoted<str, int, int> e163 width=2 return frontier=never mats=
+SITE csv_records scan_record_rest<str, int, mutarray, int> e299 width=2 return frontier=never mats=
+SITE csv_records scan_record_rest<str, int, mutarray, int> e308 width=2 return frontier=never mats=
+SITE csv_records ht_rehash<mutarray, int> e857 width=3 call frontier=never mats=
+SITE csv_records ht_rehash<mutarray, int> e881 width=3 call frontier=never mats=
+ROW hashtable off 2 9 1 0 25 68 0 0 0 26 643 12477
+ROW hashtable legacy 0 0 1 0 25 68 0 0 0 26 631 12732
+ROW hashtable on 0 0 1 0 25 68 0 0 0 26 631 12732
+== hashtable
+ht_rehash<mutarray, int>           e464   3-field -> 3  local     args=1 rets=0 cyclic score=15.0/20.0 frontier=never phys=0  call
+ht_rehash<mutarray, int>           e488   3-field -> 3  local     args=2 rets=0 cyclic score=18.0/20.0 frontier=never phys=0  call
+param i22 b88                width=3 live=3 up=1 down=0 ret=0 cyclic score=15.0/20.0 virtual
+param i22 b91                width=3 live=3 up=1 down=1 ret=0 cyclic score=18.0/20.0 virtual
+param i23 b81                width=3 live=3 up=2 down=0 ret=0 score=6.0/20.0 virtual
+virtual            2
+materialized       0
+transportedFields  6
+argHops            9
+returnHops         0
+loopHops           6
+structnew          0
+nestedOpened       0
+nestedClosed       0
+afterLocalUse      0
+plannedParams      3
+deniedParams       0
+causes: budget 0 hard 0 other 0
+frontier: never 2
+distance x width: {cyclic x3-4} 2
+SITE hashtable ht_rehash<mutarray, int> e464 width=3 call frontier=never mats=
+SITE hashtable ht_rehash<mutarray, int> e488 width=3 call frontier=never mats=
+ROW matmul off 0 0 11 6 0 8 0 0 0 7 189 4734
+ROW matmul legacy 0 0 11 6 0 8 0 0 0 7 189 4734
+ROW matmul on 0 0 11 6 0 8 0 0 0 7 189 4734
+== matmul
+virtual            0
+materialized       0
+transportedFields  0
+argHops            0
+returnHops         0
+loopHops           0
+structnew          0
+nestedOpened       0
+nestedClosed       0
+afterLocalUse      0
+plannedParams      0
+deniedParams       0
+causes: budget 0 hard 0 other 0
+frontier: 
+distance x width: 
+ROW string_replace off 0 0 1 0 0 7 0 0 0 4 103 2618
+ROW string_replace legacy 0 0 1 0 0 7 0 0 0 4 103 2618
+ROW string_replace on 0 0 1 0 0 7 0 0 0 4 103 2618
+== string_replace
+virtual            0
+materialized       0
+transportedFields  0
+argHops            0
+returnHops         0
+loopHops           0
+structnew          0
+nestedOpened       0
+nestedClosed       0
+afterLocalUse      0
+plannedParams      0
+deniedParams       0
+causes: budget 0 hard 0 other 0
+frontier: 
+distance x width: 
+ROW string_reverse off 0 0 1 0 0 6 0 0 0 3 50 990
+ROW string_reverse legacy 0 0 1 0 0 6 0 0 0 3 50 990
+ROW string_reverse on 0 0 1 0 0 6 0 0 0 3 50 990
+== string_reverse
+virtual            0
+materialized       0
+transportedFields  0
+argHops            0
+returnHops         0
+loopHops           0
+structnew          0
+nestedOpened       0
+nestedClosed       0
+afterLocalUse      0
+plannedParams      0
+deniedParams       0
+causes: budget 0 hard 0 other 0
+frontier: 
+distance x width: 
+COLUMNS structnew structget listnew listget guards call callmulti callvalue retmulti functions lines bytes
+TOTAL off 39 52 66 42 59 328 29 8 18 231 6126 103751
+TOTAL legacy 15 2 66 42 59 300 57 8 50 231 6042 102412
+TOTAL on 15 2 66 42 59 300 57 8 50 231 6042 102412
+METRIC-TOTALS afterLocalUse 0 argHops 63 deniedParams 0 loopHops 18 materialized 15 nestedClosed 0 nestedOpened 0 plannedParams 6 returnHops 143 structnew 15 transportedFields 52 virtual 24

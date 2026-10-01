@@ -1,0 +1,99 @@
+   Compiling botlish-native v0.1.0 (/home/user/botlish/native)
+    Finished `release` profile [optimized + debuginfo] target(s) in 5.56s
+     Running unittests src/lib.rs (native/target/release/deps/botlish_native-bd3049e0f4503646)
+
+running 56 tests
+test nir::effect_tests::call_effects_off_keeps_call_bookkeeping_conservative ... ok
+test nir::effect_tests::call_effects_independence_matrix ... ok
+test nir::effect_tests::call_effects_propagate_transitively_and_recursively ... ok
+test nir::plan_tests::a_plan_is_consumed_at_most_once_per_path ... ok
+test nir::plan_tests::construct_parses_every_piece_kind ... ok
+test nir::plan_tests::a_plan_parameter_is_redefined_by_a_self_tail_call ... ok
+test nir::plan_tests::plan_registers_only_reach_plan_positions ... ok
+test nir::plan_tests::region_and_elem_pieces_are_family_specific ... ok
+test nir::struct_tests::malformed_shapes_are_rejected ... ok
+test nir::struct_tests::shapes_and_struct_ops_parse ... ok
+test nir::struct_tests::structnew_checks_shape_and_arity ... ok
+test nir::struct_tests::the_empty_struct_is_a_zero_field_shape ... ok
+test runtime::construct::tests::repeated_appends_copy_linearly ... ok
+test runtime::construct::tests::reserve_back_grows_geometrically_and_keeps_data ... ok
+test runtime::construct::tests::reserve_front_grows_toward_the_front ... ok
+test runtime::framemap::tests::find_locates_containing_function ... ok
+test runtime::framemap::tests::functions_pushed_out_of_order_are_still_found ... ok
+test runtime::framemap::tests::roots_at_looks_up_by_exact_offset ... ok
+test runtime::framewalk::tests::walk_stops_at_explicit_out_of_bounds_frame ... ok
+test runtime::framewalk::tests::walk_terminates_when_registered_function_is_never_on_stack ... ok
+test runtime::framewalk::tests::walk_with_empty_map_finds_nothing_and_terminates ... ok
+test runtime::heap::tests::counts_and_bytes_by_kind ... ok
+test runtime::heap::tests::off_mode_records_nothing ... ok
+test runtime::heap::tests::live_and_reclaimed_are_recomputed_exactly ... ok
+test runtime::heap::tests::peak_live_can_exceed_final_live ... ok
+test runtime::heap::tests::reachable_children_survive_through_their_container ... ok
+test runtime::heap::tests::trigger_reason_reflects_stress_flag ... ok
+test runtime::heap::tests::reset_preserves_static_but_clears_run_counters ... ok
+test runtime::native_stack::tests::bounds_exclude_guard_and_check_end_before_dereference ... ok
+test runtime::ops::tests::decode_char_at_ascii ... ok
+test runtime::ops::tests::decode_char_at_four_byte ... ok
+test runtime::ops::tests::decode_char_at_mixed_width_sequence ... ok
+test runtime::ops::tests::decode_char_at_records_no_seek_regardless_of_offset ... ok
+test runtime::ops::tests::decode_char_at_three_byte ... ok
+test runtime::ops::tests::decode_char_at_two_byte ... ok
+test runtime::ops::tests::region_classify_ascii_records_no_seek ... ok
+test runtime::ops::tests::region_classify_matches_materializing_form_ascii_and_non_ascii ... ok
+test runtime::ops::tests::region_classify_non_ascii_records_seek_bytes ... ok
+test runtime::ops::tests::region_classify_range_error_on_non_one_scalar_width ... ok
+test runtime::ops::tests::region_eq_non_ascii_records_seek_bytes ... ok
+test runtime::ops::tests::struct_equality_is_shape_and_field_wise ... ok
+test runtime::ops::tests::struct_equality_keeps_the_no_equality_rule_for_arrays ... ok
+test runtime::ops::tests::struct_fields_are_traced_and_reclaimed ... ok
+test runtime::ops::tests::struct_hash_agrees_with_equality ... ok
+test runtime::ops::tests::struct_show_names_fields_in_shape_order ... ok
+test runtime::ops::tests::substr_ascii_records_no_seek ... ok
+test runtime::ops::tests::substr_non_ascii_records_seek_bytes_to_the_start_offset ... ok
+test runtime::ops::tests::substr_non_ascii_seek_grows_with_start_index ... ok
+test runtime::ops::tests::utf8_bytes_ascii ... ok
+test runtime::ops::tests::utf8_bytes_empty ... ok
+test runtime::ops::tests::utf8_bytes_four_byte ... ok
+test runtime::ops::tests::utf8_bytes_mixed_width_sequence ... ok
+test runtime::ops::tests::utf8_bytes_three_byte ... ok
+test runtime::ops::tests::utf8_bytes_two_byte ... ok
+test runtime::platform::x86_64_linux::tests::current_pthread_has_usable_stack_and_guard ... ok
+test runtime::construct::tests::a_consumed_plan_cannot_be_read_again - should panic ... ok
+
+test result: ok. 56 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
+
+     Running unittests src/main.rs (native/target/release/deps/botlish_native-7feb40a4bfda7bc6)
+
+running 22 tests
+test codegen::roots::tests::any_botlish_call_sets_depth_reservation_but_only_fallback_forces_runtime_stack ... ok
+test codegen::roots::tests::assignment_is_deterministic ... ok
+test codegen::roots::tests::colored_slot_reuse_does_not_force_bogus_entry_zero ... ok
+test codegen::roots::tests::call_argument_is_rooted_during_the_call ... ok
+test codegen::roots::tests::branch_local_roots_do_not_interfere ... ok
+test codegen::roots::tests::conditionally_defined_root_before_safepoint_forces_entry_zero ... ok
+test codegen::roots::tests::early_return_branch_without_safepoint_does_not_force_entry_zero ... ok
+test codegen::roots::tests::direct_call_is_a_conservative_safepoint ... ok
+test codegen::roots::tests::error_path_does_not_extend_liveness ... ok
+test codegen::roots::tests::fib_shape_needs_two_slots ... ok
+test codegen::roots::tests::fib_shape_moves_to_native_frame_on_stack_map_path_stays_on_fallback ... ok
+test codegen::roots::tests::loop_carried_root_needs_no_entry_zero ... ok
+test codegen::roots::tests::loop_carried_root_stays_rooted ... ok
+test codegen::roots::tests::parameter_root_needs_no_entry_zero ... ok
+test codegen::roots::tests::raw_only_needs_no_slots ... ok
+test codegen::roots::tests::non_overlapping_roots_reuse_one_slot ... ok
+test codegen::roots::tests::root_with_no_botlish_calls_is_native_frame ... ok
+test codegen::roots::tests::tagged_dead_before_safepoint_needs_no_slot ... ok
+test codegen::roots::tests::safepoint_before_first_definition_forces_entry_zero ... ok
+test codegen::roots::tests::tail_self_loop_alone_is_native_frame ... ok
+test codegen::roots::tests::tagged_live_across_gc_is_rooted ... ok
+test codegen::roots::tests::two_simultaneous_roots_get_distinct_slots ... ok
+
+test result: ok. 22 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests botlish_native
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+exit 0

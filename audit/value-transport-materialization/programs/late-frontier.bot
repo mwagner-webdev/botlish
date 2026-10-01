@@ -1,0 +1,18 @@
+fn fwd0(r, k):
+    r.f0 + r.f1 + r.f2 + r.f3 + r.f4 + r.f5 + k
+fn fwd1(r, k):
+    fwd0(r, k)
+fn fwd2(r, k):
+    fwd1(r, k)
+fn fwd3(r, k):
+    fwd2(r, k)
+fn fwd4(r, k):
+    fwd3(r, k)
+
+fn drive(i, n, acc):
+    if i >= n:
+        return acc
+    r = {f0: i + 0, f1: i + 1, f2: i + 2, f3: i + 3, f4: i + 4, f5: i + 5}
+    local = r.f0 + r.f1
+    drive(i + 1, n, acc + local + fwd4(r, i))
+drive(0, 200000, 0)

@@ -1,0 +1,12 @@
+fn fwd0(r, k):
+    r.a + r.b + r.inner.c0 + r.inner.c1 + r.inner.c2 + r.inner.c3 + k
+fn fwd1(r, k):
+    fwd0(r, k)
+fn fwd2(r, k):
+    fwd1(r, k)
+
+fn drive(i, n, acc):
+    if i >= n:
+        return acc
+    drive(i + 1, n, acc + fwd2({a: i, b: i + 1, inner: {c0: i + 2, c1: i + 3, c2: i + 4, c3: i + 5}}, i))
+drive(0, 200000, 0)

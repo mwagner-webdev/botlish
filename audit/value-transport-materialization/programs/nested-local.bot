@@ -1,0 +1,6 @@
+fn drive(i, n, acc):
+    if i >= n:
+        return acc
+    r = {a: i, b: i + 1, inner: {c0: i + 2, c1: i + 3}}
+    drive(i + 1, n, acc + r.a + r.b + r.inner.c0 + r.inner.c1)
+drive(0, 200000, 0)

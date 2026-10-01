@@ -26,7 +26,7 @@
 # boundary in direction D costs  factor[D] * W * (1 + spill[D](W)),  where
 # spill is how far W exceeds the values a boundary of that direction carries
 # in registers; a path costs the sum over its edges (width x distance, per
-# direction); a cycle costs cycleFactor extra argument edges (a loop carries
+# direction); a cycle costs cycleFactor x W more (a loop carries
 # its value forever). A value stays virtual across a boundary only while its
 # whole path -- upstream of the slot back to the nearest place that could
 # have become the physical object, and downstream to the real consumption --
@@ -46,7 +46,7 @@ namespace eval hir::transport {
         legacyArgWidth 4
         argFactor 1.0
         returnFactor 1.0
-        cycleFactor 4.0
+        cycleFactor 3.0
         argRegs 4
         argSpill 1.0
         returnFree 2
@@ -129,7 +129,13 @@ proc hir::transport::PathScore {structOpts width argEdges retEdges cyclic densit
     set cr [EdgeScore $structOpts return $width]
     set s [expr {$argEdges * $ca + $retEdges * $cr}]
     if {$cyclic} {
-        set s [expr {$s + [Option $structOpts cycleFactor] * $ca}]
+        # A loop-carried value is not re-passed through a frame at every
+        # iteration (a self-tail call is a jump): what it costs is holding its
+        # fields in registers for the whole loop, linear in the width
+        # (measured stack operands over the physical loop at 2, 3, 4, 5, 6, 8 fields
+        # after the allocation sequence it saves: 6, 10, 17, 15, 18, 34; the term
+        # 3 * W gives 6, 9, 12, 15, 18, 24).
+        set s [expr {$s + [Option $structOpts cycleFactor] * $width}]
     }
     return [expr {$s * $density}]
 }

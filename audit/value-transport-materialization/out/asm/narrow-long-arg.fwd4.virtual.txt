@@ -1,0 +1,33 @@
+=== NIR (function 5)
+func 5 "fwd4" params=3 env=0 regs=4 pnames="r.0 r.1 k" captures=0 instance="struct{f0: int, f1: int}, int" @e31
+    %3 = call 4 %0 %1 %2 @e32
+    ret %3
+end
+=== machine code (function 5)
+00000000000001e1 <botlish_fn_5>:
+ 1e1:	push   rbp
+ 1e2:	mov    rbp,rsp
+ 1e5:	sub    rsp,0x20
+ 1e9:	mov    QWORD PTR [rsp],rsi
+ 1ed:	mov    QWORD PTR [rsp+0x8],rdx
+ 1f2:	mov    QWORD PTR [rsp+0x10],rcx
+ 1f7:	call   1fc <botlish_fn_5+0x1b>
+			1f8: R_X86_64_PLT32	botlish_fn_4-0x4
+ 1fc:	add    rsp,0x20
+ 200:	mov    rsp,rbp
+ 203:	pop    rbp
+ 204:	ret
+
+0000000000000205 <botlish_entry_5>:
+ 205:	push   rbp
+ 206:	mov    rbp,rsp
+ 209:	mov    rsi,QWORD PTR [rdx]
+ 20c:	mov    r8,QWORD PTR [rdx+0x8]
+ 210:	mov    rcx,QWORD PTR [rdx+0x10]
+ 214:	mov    rdx,r8
+ 217:	call   21c <botlish_entry_5+0x17>
+			218: R_X86_64_PLT32	botlish_fn_5-0x4
+ 21c:	mov    rsp,rbp
+ 21f:	pop    rbp
+ 220:	ret
+

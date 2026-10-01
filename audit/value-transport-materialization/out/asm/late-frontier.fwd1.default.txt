@@ -1,0 +1,30 @@
+=== NIR (function 2)
+func 2 "fwd1" params=2 env=0 regs=3 pnames="r k" captures=0 instance="struct{f0: int, f1: int, f2: int, f3: int, f4: int, f5: int}, int" @e29
+    %2 = call 1 %0 %1 @e30
+    ret %2
+end
+=== machine code (function 2)
+000000000000026c <botlish_fn_2>:
+ 26c:	push   rbp
+ 26d:	mov    rbp,rsp
+ 270:	sub    rsp,0x10
+ 274:	mov    QWORD PTR [rsp],rsi
+ 278:	mov    QWORD PTR [rsp+0x8],rdx
+ 27d:	call   282 <botlish_fn_2+0x16>
+			27e: R_X86_64_PLT32	botlish_fn_1-0x4
+ 282:	add    rsp,0x10
+ 286:	mov    rsp,rbp
+ 289:	pop    rbp
+ 28a:	ret
+
+000000000000028b <botlish_entry_2>:
+ 28b:	push   rbp
+ 28c:	mov    rbp,rsp
+ 28f:	mov    rsi,QWORD PTR [rdx]
+ 292:	mov    rdx,QWORD PTR [rdx+0x8]
+ 296:	call   29b <botlish_entry_2+0x10>
+			297: R_X86_64_PLT32	botlish_fn_2-0x4
+ 29b:	mov    rsp,rbp
+ 29e:	pop    rbp
+ 29f:	ret
+

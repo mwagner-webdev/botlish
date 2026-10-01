@@ -1,0 +1,156 @@
+=== NIR (function 5)
+func 5 "drive" params=3 env=0 regs=44 pnames="i n acc" captures=0 instance="int, int, int" rawregs="0 1 7 8 10 11 14 15 18 19 22 23 26 27 30 31 34 35 38 39" @e55
+    %3 = op rige %0 %1 @e57
+    br %3 L0 L1 @e56
+  label L0
+    ret %2 @e61
+  label L1
+    %5 = unit
+    %4 = move %5
+    jump L2
+  label L2
+    %6 = int 1 @e68
+    %7 = rawint 1
+    %8 = op riadd %0 %7 @e65
+    %9 = int 0 @e79
+    %10 = rawint 0
+    %11 = op riadd %0 %10 @e76
+    %12 = op rbox %11
+    %13 = int 1 @e83
+    %14 = rawint 1
+    %15 = op riadd %0 %14 @e80
+    %16 = op rbox %15
+    %17 = int 2 @e87
+    %18 = rawint 2
+    %19 = op riadd %0 %18 @e84
+    %20 = op rbox %19
+    %21 = int 3 @e91
+    %22 = rawint 3
+    %23 = op riadd %0 %22 @e88
+    %24 = op rbox %23
+    %25 = int 4 @e95
+    %26 = rawint 4
+    %27 = op riadd %0 %26 @e92
+    %28 = op rbox %27
+    %29 = int 5 @e99
+    %30 = rawint 5
+    %31 = op riadd %0 %30 @e96
+    %32 = op rbox %31
+    %33 = int 6 @e103
+    %34 = rawint 6
+    %35 = op riadd %0 %34 @e100
+    %36 = op rbox %35
+    %37 = int 7 @e107
+    %38 = rawint 7
+    %39 = op riadd %0 %38 @e104
+    %40 = op rbox %39
+    %41 = op rbox %0
+    %42 = call 4 %12 %16 %20 %24 %28 %32 %36 %40 %41 @e73
+    %43 = op iadd %2 %42 @e70
+    tail %8 %1 %43 @e63
+end
+=== machine code (function 5)
+00000000000005ef <botlish_fn_5>:
+ 5ef:	push   rbp
+ 5f0:	mov    rbp,rsp
+ 5f3:	sub    rsp,0x90
+ 5fa:	mov    QWORD PTR [rsp+0x70],rbx
+ 5ff:	mov    QWORD PTR [rsp+0x78],r12
+ 604:	mov    QWORD PTR [rsp+0x80],r13
+ 60c:	mov    QWORD PTR [rsp+0x88],r14
+ 614:	mov    r13,rdi
+ 617:	mov    QWORD PTR [rsp+0x20],rcx
+ 61c:	sar    rsi,1
+ 61f:	sar    rdx,1
+ 622:	mov    r12,rdx
+ 625:	mov    r14,rcx
+ 628:	cmp    rsi,r12
+ 62b:	jge    72c <botlish_fn_5+0x13d>
+ 631:	mov    rax,rsi
+ 634:	shl    rax,1
+ 637:	or     rax,0x1
+ 63b:	mov    r11,rax
+ 63e:	mov    QWORD PTR [rsp+0x28],rax
+ 643:	lea    rbx,[rsi+0x1]
+ 647:	mov    rdx,rbx
+ 64a:	shl    rdx,1
+ 64d:	or     rdx,0x1
+ 651:	mov    QWORD PTR [rsp+0x30],rdx
+ 656:	lea    rcx,[rsi+0x2]
+ 65a:	shl    rcx,1
+ 65d:	or     rcx,0x1
+ 661:	mov    QWORD PTR [rsp+0x38],rcx
+ 666:	lea    r8,[rsi+0x3]
+ 66a:	shl    r8,1
+ 66d:	or     r8,0x1
+ 671:	mov    QWORD PTR [rsp+0x40],r8
+ 676:	lea    r9,[rsi+0x4]
+ 67a:	shl    r9,1
+ 67d:	or     r9,0x1
+ 681:	mov    QWORD PTR [rsp+0x48],r9
+ 686:	lea    rdi,[rsi+0x5]
+ 68a:	shl    rdi,1
+ 68d:	or     rdi,0x1
+ 691:	mov    QWORD PTR [rsp+0x50],rdi
+ 696:	lea    r10,[rsi+0x6]
+ 69a:	shl    r10,1
+ 69d:	or     r10,0x1
+ 6a1:	mov    QWORD PTR [rsp+0x58],r10
+ 6a6:	lea    rax,[rsi+0x7]
+ 6aa:	shl    rax,1
+ 6ad:	or     rax,0x1
+ 6b1:	mov    QWORD PTR [rsp+0x60],rax
+ 6b6:	mov    rsi,r11
+ 6b9:	mov    QWORD PTR [rsp+0x68],rsi
+ 6be:	mov    QWORD PTR [rsp],rdi
+ 6c2:	mov    QWORD PTR [rsp+0x8],r10
+ 6c7:	mov    QWORD PTR [rsp+0x10],rax
+ 6cc:	mov    QWORD PTR [rsp+0x18],rsi
+ 6d1:	mov    rdi,r13
+ 6d4:	call   6d9 <botlish_fn_5+0xea>
+			6d5: R_X86_64_PLT32	botlish_fn_4-0x4
+ 6d9:	mov    QWORD PTR [rsp+0x28],rax
+ 6de:	mov    rsi,r14
+ 6e1:	mov    rcx,rsi
+ 6e4:	and    rcx,rax
+ 6e7:	test   rcx,0x1
+ 6ee:	jne    6fc <botlish_fn_5+0x10d>
+ 6f4:	mov    rdx,rax
+ 6f7:	jmp    714 <botlish_fn_5+0x125>
+ 6fc:	lea    rcx,[rax-0x1]
+ 700:	mov    rdx,rax
+ 703:	mov    rax,rsi
+ 706:	add    rax,rcx
+ 709:	seto   cl
+ 70c:	test   cl,cl
+ 70e:	je     71c <botlish_fn_5+0x12d>
+ 714:	mov    rdi,r13
+ 717:	call   71c <botlish_fn_5+0x12d>
+			718: R_X86_64_PLT32	rt_int_add-0x4
+ 71c:	mov    QWORD PTR [rsp+0x20],rax
+ 721:	mov    rsi,rbx
+ 724:	mov    r14,rax
+ 727:	jmp    628 <botlish_fn_5+0x39>
+ 72c:	mov    rax,r14
+ 72f:	mov    rbx,QWORD PTR [rsp+0x70]
+ 734:	mov    r12,QWORD PTR [rsp+0x78]
+ 739:	mov    r13,QWORD PTR [rsp+0x80]
+ 741:	mov    r14,QWORD PTR [rsp+0x88]
+ 749:	add    rsp,0x90
+ 750:	mov    rsp,rbp
+ 753:	pop    rbp
+ 754:	ret
+
+0000000000000755 <botlish_entry_5>:
+ 755:	push   rbp
+ 756:	mov    rbp,rsp
+ 759:	mov    rsi,QWORD PTR [rdx]
+ 75c:	mov    r8,QWORD PTR [rdx+0x8]
+ 760:	mov    rcx,QWORD PTR [rdx+0x10]
+ 764:	mov    rdx,r8
+ 767:	call   76c <botlish_entry_5+0x17>
+			768: R_X86_64_PLT32	botlish_fn_5-0x4
+ 76c:	mov    rsp,rbp
+ 76f:	pop    rbp
+ 770:	ret
+

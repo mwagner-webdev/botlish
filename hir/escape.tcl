@@ -439,7 +439,7 @@ proc hir::escape::Arities {hir spec {structOpts {}}} {
                 set ok 0
                 set reason width
             }
-            if {$ok && $desc ne "" && [lindex $desc 1] ne "" && ![LegacyPolicy $structOpts]} {
+            if {$ok && $desc ne "" && ![LegacyPolicy $structOpts]} {
                 if {![lindex [hir::transport::ReturnVerdict $structOpts [lindex $desc 0] $myDepth] 0]} {
                     set ok 0
                     set reason transport-budget
@@ -1304,7 +1304,7 @@ proc hir::escape::TransportPlan {spec regions callSites arity retDepth eligible 
     set width [dict create]
     dict for {key desc} $eligible {
         lassign $key id b
-        if {[dict exists $rawParam $id $b] && [lindex $desc 1] ne ""} {
+        if {[dict exists $rawParam $id $b]} {
             lappend nodes $key
             dict set width $key [lindex $desc 0]
         }
@@ -1333,6 +1333,7 @@ proc hir::escape::TransportPlan {spec regions callSites arity retDepth eligible 
         set layout [lindex $desc 1 1]
         set argPos [dict get $info argPos]
         set projByRecv [dict get $info projByRecv]
+        set listGetByArg [dict get $info listGetByArg]
         set targets {}
         set slots {}
         foreach r $refs {
@@ -1340,6 +1341,14 @@ proc hir::escape::TransportPlan {spec regions callSites arity retDepth eligible 
                 set slot [lsearch -exact $layout [hir::get $view [dict get $projByRecv $r] name]]
                 if {$slot >= 0} {
                     lappend slots $slot
+                }
+                continue
+            }
+            if {[dict exists $listGetByArg $r]} {
+                # a positional product read at a constant index: slot = index
+                set idxExpr [lindex [dict get [hir::node $view [dict get $listGetByArg $r]] args] 1]
+                if {[hir::kind $view $idxExpr] eq "const" && [core::value::kind [hir::get $view $idxExpr value]] eq "int"} {
+                    lappend slots [core::value::intOf [hir::get $view $idxExpr value]]
                 }
                 continue
             }
@@ -2205,7 +2214,7 @@ proc hir::escape::Census {spec regions arity resultWhy wants virtual paramVirtua
                 named [dict get $node named] width $n class $class \
                 reason [expr {$class eq "materialized" ? $reason : ""}] mats $mats \
                 structural $structural dest $dest parentKind $pkind nested "" physical 0 transportedWidth $n \
-                argEdges 0 retEdges 0 cyclic 0 score 0.0 budget 0.0 live $n where none]
+                argEdges 0 retEdges 0 cyclic 0 score 0.0 budget 0.0 live $n where none frontierAt ""]
             dict set byExpr [list $id $e] $rec
         }
     }
@@ -2219,6 +2228,7 @@ proc hir::escape::Census {spec regions arity resultWhy wants virtual paramVirtua
         }
         set rec [CensusTransport $rec $id $regions $transport $retTop $structOpts $paramVirtual]
         set rec [CensusFrontier $rec]
+        dict set rec frontierAt [FrontierCall $spec $regions $rec $deny]
         if {[dict exists $literalClass [list lit $id $e]]} {
             set cr [dict get $literalClass [list lit $id $e]]
             dict set rec transportedWidth [dict get $cr width]
@@ -2263,7 +2273,7 @@ proc hir::escape::Census {spec regions arity resultWhy wants virtual paramVirtua
         }
         dict set rec nested $nestedTag
         if {$nestedTag eq "opened" && $outer ne ""} {
-            foreach k {class reason mats argEdges retEdges cyclic score budget where frontier afterLocalUse} {
+            foreach k {class reason mats argEdges retEdges cyclic score budget where frontier afterLocalUse frontierAt} {
                 dict set rec $k [dict get $outer $k]
             }
         } else {
@@ -2278,6 +2288,28 @@ proc hir::escape::Census {spec regions arity resultWhy wants virtual paramVirtua
         lappend records [Physical [dict get $byExpr $key]]
     }
     return $records
+}
+
+# The label of the callee at whose call a transport-denied value turns
+# physical (the first forward into a denied parameter), or "".
+proc hir::escape::FrontierCall {spec regions rec deny} {
+    if {[dict get $rec frontier] ne "before-long-forwarding-region"} {
+        return ""
+    }
+    set dest [dict get $rec dest]
+    set id [dict get $rec instance]
+    if {[lindex $dest 0] eq "par"} {
+        return [lindex [split [hir::specialize::label $spec [lindex $dest 1]] <] 0]
+    }
+    if {[lindex $dest 0] ne "loc"} {
+        return ""
+    }
+    foreach key [ForwardKeys $regions $id [lindex $dest 2]] {
+        if {[dict exists $deny $key]} {
+            return [lindex [split [hir::specialize::label $spec [lindex $key 0]] <] 0]
+        }
+    }
+    return ""
 }
 
 # The number of physical `structnew` sites a census record accounts for: a

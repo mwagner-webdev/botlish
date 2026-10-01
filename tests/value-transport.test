@@ -280,12 +280,35 @@ test vt-branch-frontier-values {the branch probe agrees on every execution} -bod
     vtValue [branchy 8 6 100 90]
 } -result {16885}
 
+test vt-positional-list-uses-the-same-model {a fixed-shape positional product List is one more descriptor of the same transport model; arbitrary Lists never participate} -body {
+    proc listChain {w e} {
+        set idx [lrange {0 1 2 3 4 5 6 7 8 9} 0 [expr {$w - 1}]]
+        set uses [join [lmap i $idx {string cat "list_get(r, $i)"}] { + }]
+        set lit "\[[join [lmap i $idx {string cat "i + $i"}] {, }]\]"
+        set chain "fn fwd0(r, k):\n    $uses + k\n"
+        for {set k 1} {$k < $e} {incr k} { append chain "fn fwd${k}(r, k):\n    fwd[expr {$k - 1}](r, k)\n" }
+        return "$chain
+fn drive(i, n, acc):
+    if i >= n:
+        return acc
+    drive(i + 1, n, acc + fwd[expr {$e - 1}]($lit, i))
+drive(0, 10, 0)
+"
+    }
+    proc listNew {source args} {
+        return [vtCount [dict get [vtLowered [vtHir $source] {*}$args] text] {op listnew}]
+    }
+    list [listNew [listChain 4 3]] [listNew [listChain 6 3]] [listNew [listChain 6 3] -struct-policy legacy] \
+        [listNew [listChain 2 8]] [vtValue [listChain 6 3]]
+} -result {0 1 0 0 465}
+
 # ---------------------------------------------------------------------------
 # Cyclic transport
 
-test vt-cyclic-narrow {a narrow loop-carried struct keeps its fields through the back edge; a wide one is an object} -body {
-    list [vtOps [selfTail 4 $N]] [vtParamSet [selfTail 4 $N] spin] [vtNew [selfTail 5 $N]] [vtNew [selfTail 5 $N] -struct-policy legacy]
-} -result {{structnew 0 structget 0 callmulti 0 retmulti 0} 6 2 2}
+test vt-cyclic-narrow {a narrow loop-carried struct keeps its fields through the back edge (its supply edge and the loop term must fit the budget); a wide one is an object} -body {
+    list [vtOps [selfTail 4 $N]] [vtParamSet [selfTail 4 $N] spin] [vtNew [selfTail 6 $N]] [vtNew [selfTail 8 $N]] \
+        [vtNew [selfTail 5 $N] -struct-policy legacy] [vtNew [selfTail 5 $N] -struct-cycle-budget 10]
+} -result {{structnew 0 structget 0 callmulti 0 retmulti 0} 6 2 2 2 2}
 
 test vt-cyclic-values {loop-carried structs agree on every execution} -body {
     list [vtValue [selfTail 3 $N]] [vtValue [selfTail 6 $N]]

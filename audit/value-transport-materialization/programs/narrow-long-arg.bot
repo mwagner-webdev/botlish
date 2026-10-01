@@ -1,0 +1,24 @@
+fn fwd0(r, k):
+    r.f0 + r.f1 + k
+fn fwd1(r, k):
+    fwd0(r, k)
+fn fwd2(r, k):
+    fwd1(r, k)
+fn fwd3(r, k):
+    fwd2(r, k)
+fn fwd4(r, k):
+    fwd3(r, k)
+fn fwd5(r, k):
+    fwd4(r, k)
+fn fwd6(r, k):
+    fwd5(r, k)
+fn fwd7(r, k):
+    fwd6(r, k)
+fn fwd8(r, k):
+    fwd7(r, k)
+
+fn drive(i, n, acc):
+    if i >= n:
+        return acc
+    drive(i + 1, n, acc + fwd8({f0: i + 0, f1: i + 1}, i))
+drive(0, 200000, 0)

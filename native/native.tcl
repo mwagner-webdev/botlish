@@ -540,7 +540,7 @@ proc native::transportCensusText {hir args} {
             }
             lappend lines [format "%-34s %-6s %s%d-field -> %d  %-9s args=%d rets=%d%s score=%.1f/%.1f frontier=%s%s phys=%d  %s" \
                 $label $expr [expr {$named ? "named " : ""}] $width $transportedWidth $where $argEdges $retEdges \
-                [expr {$cyclic ? " cyclic" : ""}] $score $budget $frontier [expr {$afterLocalUse ? " (after local use)" : ""}] $physical $what]
+                [expr {$cyclic ? " cyclic" : ""}] $score $budget $frontier[expr {$frontierAt ne "" ? "@$frontierAt" : ""}] [expr {$afterLocalUse ? " (after local use)" : ""}] $physical $what]
         }
     }
     foreach cls [dict get $c nested] {

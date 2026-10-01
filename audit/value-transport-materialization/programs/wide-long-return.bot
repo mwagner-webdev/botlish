@@ -1,0 +1,23 @@
+fn ret0(i):
+    {f0: i + 0, f1: i + 1, f2: i + 2, f3: i + 3, f4: i + 4, f5: i + 5, f6: i + 6, f7: i + 7}
+fn ret1(i):
+    ret0(i)
+fn ret2(i):
+    ret1(i)
+fn ret3(i):
+    ret2(i)
+fn ret4(i):
+    ret3(i)
+fn ret5(i):
+    ret4(i)
+fn ret6(i):
+    ret5(i)
+fn ret7(i):
+    ret6(i)
+
+fn drive(i, n, acc):
+    if i >= n:
+        return acc
+    r = ret7(i)
+    drive(i + 1, n, acc + r.f0 + r.f1 + r.f2 + r.f3 + r.f4 + r.f5 + r.f6 + r.f7)
+drive(0, 200000, 0)

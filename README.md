@@ -1820,12 +1820,20 @@ reference runtime does, so CSV's quadratic behavior is kept deliberately
 **Structs** are immutable heap objects of an interned shape (STRUCTS.md), but a
 struct is a semantic value and a `StructObj` only one representation of it:
 native code keeps a struct as its fields (one ordinary register each) while
-it is built and only projected, handed across one exact call, returned across
-one exact call, or joined by an `if`, and materializes it -- once, lazily,
-with its exact named or anonymous shape -- at the first use that needs the
-object (storage in a List/MutableArray, equality, hashing, an unknown call,
-capture). `structnew` in NIR therefore counts real materializations
-(STRUCT-SCALAR-REPLACEMENT.md; `-struct-opt 0` disables it).
+it is built and only projected, carried across exact calls and returns, or
+joined by an `if`, and materializes it -- once, lazily, with its exact named
+or anonymous shape -- at the first use that needs the object (storage in a
+List/MutableArray, equality, hashing, an unknown call, capture). `structnew`
+in NIR therefore counts real materializations (STRUCT-SCALAR-REPLACEMENT.md;
+`-struct-opt 0` disables it). *How far* a value stays virtual is a per-path
+transport decision, not a width cap: its width, the exact argument and return
+edges it would cross (weighted differently, a loop counted as unbounded) and a
+use-density factor are scored against budgets, so a narrow value may be
+carried through a dozen calls while a wide one, or one with a long forwarding
+chain ahead of it, becomes one physical object -- built once, lazily, after its
+cheap local uses -- and an inner struct that is only ever projected is opened
+into its outer value (VALUE-TRANSPORT-MATERIALIZATION.md; `-struct-policy
+legacy` restores the width-only caps for comparison).
 
 ### Functions, calls and closures
 
