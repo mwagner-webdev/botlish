@@ -12,9 +12,9 @@ are complete.
 
 ## Compiler revision
 
-- git commit: 81f4332bdc0343343bc183e7f02d3a251c505b68
+- git commit: 4dab3338a2c6fee8c75566083aa55a2fc5aabac5
 - Tcl: 9.0.1
-- rustc 1.98.1 (48a229cea 2026-09-01)
+- rustc 1.99.0 (b940084d7 2026-09-28)
 - cranelift-codegen: 0.135.2
 - target: x86_64 (System V ABI, Linux ELF64)
 - backend flags: cranelift, -specialize 1 (default), -repr-opt 1 (default)
@@ -29,13 +29,13 @@ are complete.
 - native-compilable programs: 13
 - unsupported/failed programs: 0
 - total native functions inspected: 186
-- total committed disassembly bytes of machine code: 80823
+- total committed disassembly bytes of machine code: 80712
 
 ## Status
 
 | file | status | asm / vcode | notes |
 |---|---|---|---|
-| bench/fib.bot | compiled / inspected | [bench/fib.asm](bench/fib.asm) / [bench/fib.vcode](bench/fib.vcode) | 2 functions, 292 bytes |
+| bench/fib.bot | compiled / inspected | [bench/fib.asm](bench/fib.asm) / [bench/fib.vcode](bench/fib.vcode) | 2 functions, 181 bytes |
 | bench/loop-count.bot | compiled / inspected | [bench/loop-count.asm](bench/loop-count.asm) / [bench/loop-count.vcode](bench/loop-count.vcode) | 3 functions, 287 bytes |
 | bench/sum-refined.bot | compiled / inspected | [bench/sum-refined.asm](bench/sum-refined.asm) / [bench/sum-refined.vcode](bench/sum-refined.vcode) | 3 functions, 286 bytes |
 | bench/refined-checks.bot | compiled / inspected | [bench/refined-checks.asm](bench/refined-checks.asm) / [bench/refined-checks.vcode](bench/refined-checks.vcode) | 26 functions, 9089 bytes |
