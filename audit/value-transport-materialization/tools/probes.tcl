@@ -99,6 +99,7 @@ proc run {label source names} {
             set stack [spills [disasm $hir $opts] $ids]
             lassign [native::measure $hir $runs {*}$opts] lower jit best collections value
             set gcc [dict get $report gc cycles]
+            set hops [native::NirHops $nir]
             set sn [regexp -all {= structnew } $nir]
             set cm [regexp -all {= callmulti } $nir]
             set sig {}
@@ -110,9 +111,9 @@ proc run {label source names} {
                 }
             }
             set ns [expr {$best * 1000.0 / $ITERS}]
-            lappend out [format "%-34s %-8s struct-allocs %7d bytes %9d gc %2d  structnew %2d callmulti %2d  code %6d B (fns %5d B)  stack-ops %4d  %7.2f ns/iter  sig %s  value %s" \
-                $label $mode $structs $bytes $gcc $sn $cm $total $fnBytes $stack $ns [join $sig ,] [core::value::show $value]]
-            lappend tsv [join [list $label $mode $structs $bytes $gcc $sn $cm $total $fnBytes $stack $ns [join $sig ,] [core::value::show $value]] \t]
+            lappend out [format "%-34s %-8s struct-allocs %7d bytes %9d gc %2d  structnew %2d callmulti %2d  hops arg %3d ret %3d  code %6d B (fns %5d B)  stack-ops %4d  %7.2f ns/iter  sig %s  value %s" \
+                $label $mode $structs $bytes $gcc $sn $cm [dict get $hops arg] [dict get $hops return] $total $fnBytes $stack $ns [join $sig ,] [core::value::show $value]]
+            lappend tsv [join [list $label $mode $structs $bytes $gcc $sn $cm $total $fnBytes $stack $ns [join $sig ,] [core::value::show $value] [dict get $hops arg] [dict get $hops return]] \t]
         } msg]} {
             lappend out "$label $mode: ERROR $msg"
         }

@@ -2082,7 +2082,7 @@ proc hir::escape::DirectRoots {regions arity structOpts} {
 #               materialize it later ("storage", "equality", ...)
 #   reason      for a materialized one, the tag naming why
 #
-# The record is a dict: instance, label, expr, named (0|1), width N, class,
+# The record is a dict: instance, label, expr, desc ({N SHAPE}), named (0|1), width N, class,
 # reason, mats -- and, for the transport model (VALUE-TRANSPORT-
 # MATERIALIZATION.md): where (the slot kind that carries it: local, param,
 # result, direct, none), argEdges / retEdges / cyclic (the worst exact path
@@ -2211,7 +2211,7 @@ proc hir::escape::Census {spec regions arity resultWhy wants virtual paramVirtua
             }
             set desc [list $n [list [expr {[dict get $node named] ? [dict get $node structId] : ""}] [dict get $node layout]]]
             set rec [dict create instance $id label [hir::specialize::label $spec $id] expr $e \
-                named [dict get $node named] width $n class $class \
+                desc $desc named [dict get $node named] width $n class $class \
                 reason [expr {$class eq "materialized" ? $reason : ""}] mats $mats \
                 structural $structural dest $dest parentKind $pkind nested "" physical 0 transportedWidth $n \
                 argEdges 0 retEdges 0 cyclic 0 score 0.0 budget 0.0 live $n where none frontierAt ""]

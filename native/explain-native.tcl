@@ -24,6 +24,11 @@
 #   roots.txt         native::roots: codegen::roots's per-function GC-root
 #                     report (register/safepoint/root-candidate counts and
 #                     the resulting shadow-slot count)
+#   transport.txt     native::transportCensusText: every fixed-shape struct
+#                     construction with its transport distance, direction,
+#                     score and budget, frontier and nested cut, the planning
+#                     verdicts and the field-hop/histogram metrics
+#                     (VALUE-TRANSPORT-MATERIALIZATION.md)
 #   program.nir       nir.txt's text again, as a standalone file the Rust
 #                     driver (native/target/release/botlish-native) can
 #                     take directly: `botlish-native clif|size|object|bench
@@ -123,6 +128,7 @@ W $outdir induction.txt [hir::induction::explain $hir $spec [dict get $ranges in
 
 set nirText [native::nir $hir]
 W $outdir nir.txt $nirText
+W $outdir transport.txt [native::transportCensusText $hir]
 W $outdir program.nir $nirText
 
 if {[catch {native::clif $hir} clifText]} {

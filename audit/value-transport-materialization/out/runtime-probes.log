@@ -1,0 +1,14 @@
+narrow-arg W=2 E=9          physical min   93.79 med   94.16  legacy   min   12.46 med   12.66  default  min   13.01 med   13.20  virtual  min   12.85 med   13.11
+wide-return W=8 E=2         physical min   90.57 med   92.07  legacy   min   10.77 med   10.90  default  min   10.85 med   10.85  virtual  min   10.80 med   10.81
+wide-return W=8 E=8         physical min  101.50 med  102.18  legacy   min   24.03 med   24.37  default  min  100.00 med  101.81  virtual  min   24.48 med   24.56
+wide-arg W=8 E=4            physical min   93.51 med   95.71  legacy   min   93.89 med   94.80  default  min   94.81 med   95.01  virtual  min   19.75 med   19.75
+wide-arg W=8 E=8            physical min   98.34 med   98.78  legacy   min   98.61 med   98.85  default  min   96.87 med   98.33  virtual  min   36.67 med   36.72
+late-frontier W=6 E=5       physical min   95.66 med   95.97  legacy   min   95.56 med   95.63  default  min   94.11 med   95.45  virtual  min   17.79 med   17.86
+direction-arg W=6 E=3       physical min   92.57 med   94.87  legacy   min   92.75 med   94.67  default  min   92.68 med   94.39  virtual  min   11.53 med   11.60
+direction-ret W=6 E=3       physical min   92.08 med   92.28  legacy   min   10.04 med   10.05  default  min    9.93 med   10.01  virtual  min   10.06 med   10.11
+branchy W=8 E=6             physical min   96.33 med   97.16  legacy   min   96.57 med   98.27  default  min   97.10 med   97.40  virtual  min   27.96 med   28.08
+mixed W=4 R=3 A=6           physical min   91.02 med   91.72  legacy   min   15.73 med   15.85  default  min   91.29 med   91.79  virtual  min   15.58 med   15.76
+nested-local                physical min  163.86 med  163.92  legacy   min   87.02 med   87.43  default  min    3.96 med    3.97  virtual  min    3.98 med    3.99
+nested-return E=1           physical min  169.06 med  169.23  legacy   min   88.03 med   88.67  default  min    4.87 med    4.96  virtual  min    4.86 med    4.91
+nested-return E=6           physical min  175.72 med  176.31  legacy   min   96.15 med   96.63  default  min   96.77 med   98.55  virtual  min   11.22 med   11.32
+nested-arg inner4 E=3       physical min  173.33 med  173.44  legacy   min   87.01 med   87.13  default  min   87.80 med   88.76  virtual  min   86.36 med   87.69

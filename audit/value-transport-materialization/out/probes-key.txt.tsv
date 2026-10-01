@@ -1,0 +1,220 @@
+narrow-arg W=2 E=1	physical	200000	9600000	9	1	0	625	550	27	85.57641	fwd0:2,drive:3	59999900000	0	0
+narrow-arg W=2 E=1	virtual	0	0	0	0	0	558	483	18	4.400225	fwd0:3,drive:3	59999900000	2	0
+narrow-arg W=2 E=1	legacy	0	0	0	0	0	558	483	18	4.436965	fwd0:3,drive:3	59999900000	2	0
+narrow-arg W=2 E=1	default	0	0	0	0	0	558	483	18	4.549375	fwd0:3,drive:3	59999900000	2	0
+narrow-arg W=2 E=4	physical	200000	9600000	9	1	0	781	706	30	87.741685	fwd0:2,fwd1:2,fwd2:2,fwd3:2,drive:3	59999900000	0	0
+narrow-arg W=2 E=4	virtual	0	0	0	0	0	750	675	24	8.11044	fwd0:3,fwd1:3,fwd2:3,fwd3:3,drive:3	59999900000	8	0
+narrow-arg W=2 E=4	legacy	0	0	0	0	0	750	675	24	10.543585	fwd0:3,fwd1:3,fwd2:3,fwd3:3,drive:3	59999900000	8	0
+narrow-arg W=2 E=4	default	0	0	0	0	0	750	675	24	8.636295	fwd0:3,fwd1:3,fwd2:3,fwd3:3,drive:3	59999900000	8	0
+narrow-arg W=2 E=8	physical	200000	9600000	9	1	0	989	914	34	121.16506	fwd0:2,fwd1:2,fwd2:2,fwd3:2,fwd4:2,fwd5:2,fwd6:2,fwd7:2,drive:3	59999900000	0	0
+narrow-arg W=2 E=8	virtual	0	0	0	0	0	1006	931	32	12.420635	fwd0:3,fwd1:3,fwd2:3,fwd3:3,fwd4:3,fwd5:3,fwd6:3,fwd7:3,drive:3	59999900000	16	0
+narrow-arg W=2 E=8	legacy	0	0	0	0	0	1006	931	32	12.88587	fwd0:3,fwd1:3,fwd2:3,fwd3:3,fwd4:3,fwd5:3,fwd6:3,fwd7:3,drive:3	59999900000	16	0
+narrow-arg W=2 E=8	default	0	0	0	0	0	1006	931	32	12.4322	fwd0:3,fwd1:3,fwd2:3,fwd3:3,fwd4:3,fwd5:3,fwd6:3,fwd7:3,drive:3	59999900000	16	0
+narrow-arg W=2 E=12	physical	200000	9600000	9	1	0	1197	1122	38	95.790445	fwd0:2,fwd1:2,fwd2:2,fwd3:2,fwd4:2,fwd5:2,fwd6:2,fwd7:2,fwd8:2,fwd9:2,fwd10:2,fwd11:2,drive:3	59999900000	0	0
+narrow-arg W=2 E=12	virtual	0	0	0	0	0	1262	1187	40	16.493185	fwd0:3,fwd1:3,fwd2:3,fwd3:3,fwd4:3,fwd5:3,fwd6:3,fwd7:3,fwd8:3,fwd9:3,fwd10:3,fwd11:3,drive:3	59999900000	24	0
+narrow-arg W=2 E=12	legacy	0	0	0	0	0	1262	1187	40	16.981955	fwd0:3,fwd1:3,fwd2:3,fwd3:3,fwd4:3,fwd5:3,fwd6:3,fwd7:3,fwd8:3,fwd9:3,fwd10:3,fwd11:3,drive:3	59999900000	24	0
+narrow-arg W=2 E=12	default	200000	9600000	9	1	0	1197	1122	38	96.081605	fwd0:2,fwd1:2,fwd2:2,fwd3:2,fwd4:2,fwd5:2,fwd6:2,fwd7:2,fwd8:2,fwd9:2,fwd10:2,fwd11:2,drive:3	59999900000	0	0
+narrow-arg W=2 E=16	physical	200000	9600000	9	1	0	1405	1330	42	101.170385	fwd0:2,fwd1:2,fwd2:2,fwd3:2,fwd4:2,fwd5:2,fwd6:2,fwd7:2,fwd8:2,fwd9:2,fwd10:2,fwd11:2,fwd12:2,fwd13:2,fwd14:2,fwd15:2,drive:3	59999900000	0	0
+narrow-arg W=2 E=16	virtual	0	0	0	0	0	1518	1443	48	25.739175	fwd0:3,fwd1:3,fwd2:3,fwd3:3,fwd4:3,fwd5:3,fwd6:3,fwd7:3,fwd8:3,fwd9:3,fwd10:3,fwd11:3,fwd12:3,fwd13:3,fwd14:3,fwd15:3,drive:3	59999900000	32	0
+narrow-arg W=2 E=16	legacy	0	0	0	0	0	1518	1443	48	24.8124	fwd0:3,fwd1:3,fwd2:3,fwd3:3,fwd4:3,fwd5:3,fwd6:3,fwd7:3,fwd8:3,fwd9:3,fwd10:3,fwd11:3,fwd12:3,fwd13:3,fwd14:3,fwd15:3,drive:3	59999900000	32	0
+narrow-arg W=2 E=16	default	200000	9600000	9	1	0	1405	1330	42	98.928955	fwd0:2,fwd1:2,fwd2:2,fwd3:2,fwd4:2,fwd5:2,fwd6:2,fwd7:2,fwd8:2,fwd9:2,fwd10:2,fwd11:2,fwd12:2,fwd13:2,fwd14:2,fwd15:2,drive:3	59999900000	0	0
+wide-return W=6 E=1	physical	200000	16000000	15	1	0	908	833	31	91.089075	ret0:1,drive:3	120002400000	0	0
+wide-return W=6 E=1	virtual	0	0	0	0	1	910	835	37	7.445985	ret0:1>6,drive:3	120002400000	0	6
+wide-return W=6 E=1	legacy	0	0	0	0	1	910	835	37	7.018965	ret0:1>6,drive:3	120002400000	0	6
+wide-return W=6 E=1	default	0	0	0	0	1	910	835	37	7.238585	ret0:1>6,drive:3	120002400000	0	6
+wide-return W=6 E=2	physical	200000	16000000	15	1	0	951	876	31	91.43132	ret0:1,ret1:1,drive:3	120002400000	0	0
+wide-return W=6 E=2	virtual	0	0	0	0	2	1001	926	43	8.568265	ret0:1>6,ret1:1>6,drive:3	120002400000	0	12
+wide-return W=6 E=2	legacy	0	0	0	0	2	1001	926	43	8.57047	ret0:1>6,ret1:1>6,drive:3	120002400000	0	12
+wide-return W=6 E=2	default	0	0	0	0	2	1001	926	43	8.74367	ret0:1>6,ret1:1>6,drive:3	120002400000	0	12
+wide-return W=8 E=1	physical	200000	19200000	18	1	0	1145	1070	39	90.572245	ret0:1,drive:3	160004800000	0	0
+wide-return W=8 E=1	virtual	0	0	0	0	1	1155	1080	45	9.238685	ret0:1>8,drive:3	160004800000	0	8
+wide-return W=8 E=1	legacy	0	0	0	0	1	1155	1080	45	9.25635	ret0:1>8,drive:3	160004800000	0	8
+wide-return W=8 E=1	default	0	0	0	0	1	1155	1080	45	9.38284	ret0:1>8,drive:3	160004800000	0	8
+wide-return W=8 E=2	physical	200000	19200000	18	1	0	1188	1113	39	94.23877	ret0:1,ret1:1,drive:3	160004800000	0	0
+wide-return W=8 E=2	virtual	0	0	0	0	2	1264	1189	53	10.81877	ret0:1>8,ret1:1>8,drive:3	160004800000	0	16
+wide-return W=8 E=2	legacy	0	0	0	0	2	1264	1189	53	10.919195	ret0:1>8,ret1:1>8,drive:3	160004800000	0	16
+wide-return W=8 E=2	default	0	0	0	0	2	1264	1189	53	11.03995	ret0:1>8,ret1:1>8,drive:3	160004800000	0	16
+wide-return W=8 E=3	physical	200000	19200000	18	1	0	1231	1156	39	93.97304	ret0:1,ret1:1,ret2:1,drive:3	160004800000	0	0
+wide-return W=8 E=3	virtual	0	0	0	0	3	1373	1298	61	13.863505	ret0:1>8,ret1:1>8,ret2:1>8,drive:3	160004800000	0	24
+wide-return W=8 E=3	legacy	0	0	0	0	3	1373	1298	61	13.675085	ret0:1>8,ret1:1>8,ret2:1>8,drive:3	160004800000	0	24
+wide-return W=8 E=3	default	200000	19200000	18	1	0	1231	1156	39	97.65806	ret0:1,ret1:1,ret2:1,drive:3	160004800000	0	0
+wide-arg W=8 E=4	physical	200000	19200000	18	1	0	1437	1362	55	94.94551	fwd0:2,fwd1:2,fwd2:2,fwd3:2,drive:3	180004700000	0	0
+wide-arg W=8 E=4	virtual	0	0	0	0	0	1961	1886	132	20.17079	fwd0:9,fwd1:9,fwd2:9,fwd3:9,drive:3	180004700000	32	0
+wide-arg W=8 E=4	legacy	200000	19200000	18	1	0	1437	1362	55	94.91055	fwd0:2,fwd1:2,fwd2:2,fwd3:2,drive:3	180004700000	0	0
+wide-arg W=8 E=4	default	200000	19200000	18	1	0	1437	1362	55	96.033795	fwd0:2,fwd1:2,fwd2:2,fwd3:2,drive:3	180004700000	0	0
+wide-arg W=8 E=6	physical	200000	19200000	18	1	0	1541	1466	57	101.21287	fwd0:2,fwd1:2,fwd2:2,fwd3:2,fwd4:2,fwd5:2,drive:3	180004700000	0	0
+wide-arg W=8 E=6	virtual	0	0	0	0	0	2375	2300	178	28.557195	fwd0:9,fwd1:9,fwd2:9,fwd3:9,fwd4:9,fwd5:9,drive:3	180004700000	48	0
+wide-arg W=8 E=6	legacy	200000	19200000	18	1	0	1541	1466	57	100.79418	fwd0:2,fwd1:2,fwd2:2,fwd3:2,fwd4:2,fwd5:2,drive:3	180004700000	0	0
+wide-arg W=8 E=6	default	200000	19200000	18	1	0	1541	1466	57	95.247505	fwd0:2,fwd1:2,fwd2:2,fwd3:2,fwd4:2,fwd5:2,drive:3	180004700000	0	0
+wide-arg W=8 E=8	physical	200000	19200000	18	1	0	1645	1570	59	99.906455	fwd0:2,fwd1:2,fwd2:2,fwd3:2,fwd4:2,fwd5:2,fwd6:2,fwd7:2,drive:3	180004700000	0	0
+wide-arg W=8 E=8	virtual	0	0	0	0	0	2789	2714	224	39.230875	fwd0:9,fwd1:9,fwd2:9,fwd3:9,fwd4:9,fwd5:9,fwd6:9,fwd7:9,drive:3	180004700000	64	0
+wide-arg W=8 E=8	legacy	200000	19200000	18	1	0	1645	1570	59	99.472285	fwd0:2,fwd1:2,fwd2:2,fwd3:2,fwd4:2,fwd5:2,fwd6:2,fwd7:2,drive:3	180004700000	0	0
+wide-arg W=8 E=8	default	200000	19200000	18	1	0	1645	1570	59	98.90677	fwd0:2,fwd1:2,fwd2:2,fwd3:2,fwd4:2,fwd5:2,fwd6:2,fwd7:2,drive:3	180004700000	0	0
+late-frontier W=8 E=4	physical	200000	19200000	18	1	0	1616	1541	62	98.20809	fwd0:2,fwd1:2,fwd2:2,fwd3:2,drive:3	220004700000	0	0
+late-frontier W=8 E=4	virtual	0	0	0	0	0	2254	2179	160	23.446325	fwd0:9,fwd1:9,fwd2:9,fwd3:9,drive:3	220004700000	32	0
+late-frontier W=8 E=4	legacy	200000	19200000	18	1	0	1722	1647	84	96.82091	fwd0:2,fwd1:2,fwd2:2,fwd3:2,drive:3	220004700000	0	0
+late-frontier W=8 E=4	default	200000	19200000	18	1	0	1722	1647	84	97.99924	fwd0:2,fwd1:2,fwd2:2,fwd3:2,drive:3	220004700000	0	0
+late-frontier W=8 E=6	physical	200000	19200000	18	1	0	1720	1645	64	99.95813	fwd0:2,fwd1:2,fwd2:2,fwd3:2,fwd4:2,fwd5:2,drive:3	220004700000	0	0
+late-frontier W=8 E=6	virtual	0	0	0	0	0	2668	2593	206	31.73716	fwd0:9,fwd1:9,fwd2:9,fwd3:9,fwd4:9,fwd5:9,drive:3	220004700000	48	0
+late-frontier W=8 E=6	legacy	200000	19200000	18	1	0	1826	1751	86	98.09952	fwd0:2,fwd1:2,fwd2:2,fwd3:2,fwd4:2,fwd5:2,drive:3	220004700000	0	0
+late-frontier W=8 E=6	default	200000	19200000	18	1	0	1826	1751	86	99.763935	fwd0:2,fwd1:2,fwd2:2,fwd3:2,fwd4:2,fwd5:2,drive:3	220004700000	0	0
+late-frontier W=8 E=8	physical	200000	19200000	18	1	0	1824	1749	66	100.658965	fwd0:2,fwd1:2,fwd2:2,fwd3:2,fwd4:2,fwd5:2,fwd6:2,fwd7:2,drive:3	220004700000	0	0
+late-frontier W=8 E=8	virtual	0	0	0	0	0	3082	3007	252	40.486755	fwd0:9,fwd1:9,fwd2:9,fwd3:9,fwd4:9,fwd5:9,fwd6:9,fwd7:9,drive:3	220004700000	64	0
+late-frontier W=8 E=8	legacy	200000	19200000	18	1	0	1930	1855	88	103.335305	fwd0:2,fwd1:2,fwd2:2,fwd3:2,fwd4:2,fwd5:2,fwd6:2,fwd7:2,drive:3	220004700000	0	0
+late-frontier W=8 E=8	default	200000	19200000	18	1	0	1930	1855	88	100.499495	fwd0:2,fwd1:2,fwd2:2,fwd3:2,fwd4:2,fwd5:2,fwd6:2,fwd7:2,drive:3	220004700000	0	0
+late-frontier W=6 E=4	physical	200000	16000000	15	1	0	1429	1354	54	96.46506	fwd0:2,fwd1:2,fwd2:2,fwd3:2,drive:3	180002300000	0	0
+late-frontier W=6 E=4	virtual	0	0	0	0	0	1704	1629	97	16.27597	fwd0:7,fwd1:7,fwd2:7,fwd3:7,drive:3	180002300000	24	0
+late-frontier W=6 E=4	legacy	200000	16000000	15	1	0	1515	1440	73	97.099065	fwd0:2,fwd1:2,fwd2:2,fwd3:2,drive:3	180002300000	0	0
+late-frontier W=6 E=4	default	200000	16000000	15	1	0	1515	1440	73	96.47205	fwd0:2,fwd1:2,fwd2:2,fwd3:2,drive:3	180002300000	0	0
+direction-arg W=4 E=6	physical	200000	12800000	12	1	0	1120	1045	41	89.51011	fwd0:2,fwd1:2,fwd2:2,fwd3:2,fwd4:2,fwd5:2,drive:3	100000700000	0	0
+direction-arg W=4 E=6	virtual	0	0	0	0	0	1209	1134	46	11.955595	fwd0:5,fwd1:5,fwd2:5,fwd3:5,fwd4:5,fwd5:5,drive:3	100000700000	24	0
+direction-arg W=4 E=6	legacy	0	0	0	0	0	1209	1134	46	11.98837	fwd0:5,fwd1:5,fwd2:5,fwd3:5,fwd4:5,fwd5:5,drive:3	100000700000	24	0
+direction-arg W=4 E=6	default	200000	12800000	12	1	0	1120	1045	41	88.865875	fwd0:2,fwd1:2,fwd2:2,fwd3:2,fwd4:2,fwd5:2,drive:3	100000700000	0	0
+direction-ret W=4 E=6	physical	200000	12800000	12	1	0	934	859	25	88.118675	ret0:1,ret1:1,ret2:1,ret3:1,ret4:1,ret5:1,drive:3	80000800000	0	0
+direction-ret W=4 E=6	virtual	0	0	0	0	6	1044	969	49	11.5477	ret0:1>4,ret1:1>4,ret2:1>4,ret3:1>4,ret4:1>4,ret5:1>4,drive:3	80000800000	0	24
+direction-ret W=4 E=6	legacy	0	0	0	0	6	1044	969	49	11.55064	ret0:1>4,ret1:1>4,ret2:1>4,ret3:1>4,ret4:1>4,ret5:1>4,drive:3	80000800000	0	24
+direction-ret W=4 E=6	default	200000	12800000	12	1	0	934	859	25	89.0194	ret0:1,ret1:1,ret2:1,ret3:1,ret4:1,ret5:1,drive:3	80000800000	0	0
+direction-arg W=4 E=8	physical	200000	12800000	12	1	0	1224	1149	43	90.032225	fwd0:2,fwd1:2,fwd2:2,fwd3:2,fwd4:2,fwd5:2,fwd6:2,fwd7:2,drive:3	100000700000	0	0
+direction-arg W=4 E=8	virtual	0	0	0	0	0	1373	1298	54	14.65268	fwd0:5,fwd1:5,fwd2:5,fwd3:5,fwd4:5,fwd5:5,fwd6:5,fwd7:5,drive:3	100000700000	32	0
+direction-arg W=4 E=8	legacy	0	0	0	0	0	1373	1298	54	14.10953	fwd0:5,fwd1:5,fwd2:5,fwd3:5,fwd4:5,fwd5:5,fwd6:5,fwd7:5,drive:3	100000700000	32	0
+direction-arg W=4 E=8	default	200000	12800000	12	1	0	1224	1149	43	90.33545	fwd0:2,fwd1:2,fwd2:2,fwd3:2,fwd4:2,fwd5:2,fwd6:2,fwd7:2,drive:3	100000700000	0	0
+direction-ret W=4 E=8	physical	200000	12800000	12	1	0	1020	945	25	92.87921	ret0:1,ret1:1,ret2:1,ret3:1,ret4:1,ret5:1,ret6:1,ret7:1,drive:3	80000800000	0	0
+direction-ret W=4 E=8	virtual	0	0	0	0	8	1190	1115	57	14.608375	ret0:1>4,ret1:1>4,ret2:1>4,ret3:1>4,ret4:1>4,ret5:1>4,ret6:1>4,ret7:1>4,drive:3	80000800000	0	32
+direction-ret W=4 E=8	legacy	0	0	0	0	8	1190	1115	57	14.96896	ret0:1>4,ret1:1>4,ret2:1>4,ret3:1>4,ret4:1>4,ret5:1>4,ret6:1>4,ret7:1>4,drive:3	80000800000	0	32
+direction-ret W=4 E=8	default	200000	12800000	12	1	0	1020	945	25	93.82662	ret0:1,ret1:1,ret2:1,ret3:1,ret4:1,ret5:1,ret6:1,ret7:1,drive:3	80000800000	0	0
+direction-arg W=6 E=3	physical	200000	16000000	15	1	0	1189	1114	46	93.317255	fwd0:2,fwd1:2,fwd2:2,drive:3	140002300000	0	0
+direction-arg W=6 E=3	virtual	0	0	0	0	0	1329	1254	64	11.694655	fwd0:7,fwd1:7,fwd2:7,drive:3	140002300000	18	0
+direction-arg W=6 E=3	legacy	200000	16000000	15	1	0	1189	1114	46	101.286325	fwd0:2,fwd1:2,fwd2:2,drive:3	140002300000	0	0
+direction-arg W=6 E=3	default	200000	16000000	15	1	0	1189	1114	46	94.540835	fwd0:2,fwd1:2,fwd2:2,drive:3	140002300000	0	0
+direction-ret W=6 E=3	physical	200000	16000000	15	1	0	994	919	31	94.486425	ret0:1,ret1:1,ret2:1,drive:3	120002400000	0	0
+direction-ret W=6 E=3	virtual	0	0	0	0	3	1092	1017	49	10.209475	ret0:1>6,ret1:1>6,ret2:1>6,drive:3	120002400000	0	18
+direction-ret W=6 E=3	legacy	0	0	0	0	3	1092	1017	49	10.13908	ret0:1>6,ret1:1>6,ret2:1>6,drive:3	120002400000	0	18
+direction-ret W=6 E=3	default	0	0	0	0	3	1092	1017	49	10.245495000000002	ret0:1>6,ret1:1>6,ret2:1>6,drive:3	120002400000	0	18
+direction-arg W=6 E=4	physical	200000	16000000	15	1	0	1241	1166	47	92.788705	fwd0:2,fwd1:2,fwd2:2,fwd3:2,drive:3	140002300000	0	0
+direction-arg W=6 E=4	virtual	0	0	0	0	0	1464	1389	75	13.40319	fwd0:7,fwd1:7,fwd2:7,fwd3:7,drive:3	140002300000	24	0
+direction-arg W=6 E=4	legacy	200000	16000000	15	1	0	1241	1166	47	96.51244	fwd0:2,fwd1:2,fwd2:2,fwd3:2,drive:3	140002300000	0	0
+direction-arg W=6 E=4	default	200000	16000000	15	1	0	1241	1166	47	95.52587	fwd0:2,fwd1:2,fwd2:2,fwd3:2,drive:3	140002300000	0	0
+direction-ret W=6 E=4	physical	200000	16000000	15	1	0	1037	962	31	94.37402	ret0:1,ret1:1,ret2:1,ret3:1,drive:3	120002400000	0	0
+direction-ret W=6 E=4	virtual	0	0	0	0	4	1183	1108	55	12.321525	ret0:1>6,ret1:1>6,ret2:1>6,ret3:1>6,drive:3	120002400000	0	24
+direction-ret W=6 E=4	legacy	0	0	0	0	4	1183	1108	55	12.104475	ret0:1>6,ret1:1>6,ret2:1>6,ret3:1>6,drive:3	120002400000	0	24
+direction-ret W=6 E=4	default	200000	16000000	15	1	0	1037	962	31	91.506805	ret0:1,ret1:1,ret2:1,ret3:1,drive:3	120002400000	0	0
+mixed W=4 R=3 A=3	physical	200000	12800000	12	1	0	1101	1026	36	88.238765	ret0:1,ret1:1,ret2:1,fwd0:2,fwd1:2,fwd2:2,drive:3	100000700000	0	0
+mixed W=4 R=3 A=3	virtual	0	0	0	0	3	1216	1141	52	13.619465	ret0:1>4,ret1:1>4,ret2:1>4,fwd0:5,fwd1:5,fwd2:5,drive:3	100000700000	12	12
+mixed W=4 R=3 A=3	legacy	0	0	0	0	3	1216	1141	52	12.54837	ret0:1>4,ret1:1>4,ret2:1>4,fwd0:5,fwd1:5,fwd2:5,drive:3	100000700000	12	12
+mixed W=4 R=3 A=3	default	0	0	0	0	3	1216	1141	52	12.338585	ret0:1>4,ret1:1>4,ret2:1>4,fwd0:5,fwd1:5,fwd2:5,drive:3	100000700000	12	12
+mixed W=4 R=6 A=6	physical	200000	12800000	12	1	0	1386	1311	39	95.63894	ret0:1,ret1:1,ret2:1,ret3:1,ret4:1,ret5:1,fwd0:2,fwd1:2,fwd2:2,fwd3:2,fwd4:2,fwd5:2,drive:3	100000700000	0	0
+mixed W=4 R=6 A=6	virtual	0	0	0	0	6	1681	1606	76	20.998655	ret0:1>4,ret1:1>4,ret2:1>4,ret3:1>4,ret4:1>4,ret5:1>4,fwd0:5,fwd1:5,fwd2:5,fwd3:5,fwd4:5,fwd5:5,drive:3	100000700000	24	24
+mixed W=4 R=6 A=6	legacy	0	0	0	0	6	1681	1606	76	20.807444999999998	ret0:1>4,ret1:1>4,ret2:1>4,ret3:1>4,ret4:1>4,ret5:1>4,fwd0:5,fwd1:5,fwd2:5,fwd3:5,fwd4:5,fwd5:5,drive:3	100000700000	24	24
+mixed W=4 R=6 A=6	default	200000	12800000	12	1	0	1386	1311	39	97.0322	ret0:1,ret1:1,ret2:1,ret3:1,ret4:1,ret5:1,fwd0:2,fwd1:2,fwd2:2,fwd3:2,fwd4:2,fwd5:2,drive:3	100000700000	0	0
+mixed W=2 R=4 A=4	physical	200000	9600000	9	1	0	961	886	28	95.104505	ret0:1,ret1:1,ret2:1,ret3:1,fwd0:2,fwd1:2,fwd2:2,fwd3:2,drive:3	59999900000	0	0
+mixed W=2 R=4 A=4	virtual	0	0	0	0	4	860	785	26	10.297265	ret0:1>2,ret1:1>2,ret2:1>2,ret3:1>2,fwd0:3,fwd1:3,fwd2:3,fwd3:3,drive:3	59999900000	8	8
+mixed W=2 R=4 A=4	legacy	0	0	0	0	4	860	785	26	9.669985	ret0:1>2,ret1:1>2,ret2:1>2,ret3:1>2,fwd0:3,fwd1:3,fwd2:3,fwd3:3,drive:3	59999900000	8	8
+mixed W=2 R=4 A=4	default	0	0	0	0	4	860	785	26	9.113525	ret0:1>2,ret1:1>2,ret2:1>2,ret3:1>2,fwd0:3,fwd1:3,fwd2:3,fwd3:3,drive:3	59999900000	8	8
+mixed W=6 R=3 A=2	physical	200000	16000000	15	1	0	1252	1177	43	94.76159	ret0:1,ret1:1,ret2:1,fwd0:2,fwd1:2,drive:3	140002300000	0	0
+mixed W=6 R=3 A=2	virtual	0	0	0	0	3	1525	1450	77	14.909685	ret0:1>6,ret1:1>6,ret2:1>6,fwd0:7,fwd1:7,drive:3	140002300000	12	18
+mixed W=6 R=3 A=2	legacy	200000	16000000	15	1	0	1252	1177	43	93.622815	ret0:1,ret1:1,ret2:1,fwd0:2,fwd1:2,drive:3	140002300000	0	0
+mixed W=6 R=3 A=2	default	0	0	0	0	3	1525	1450	77	14.79045	ret0:1>6,ret1:1>6,ret2:1>6,fwd0:7,fwd1:7,drive:3	140002300000	12	18
+mixed W=8 R=4 A=1	physical	200000	19200000	18	1	0	1454	1379	52	98.45431	ret0:1,ret1:1,ret2:1,ret3:1,fwd0:2,drive:3	180004700000	0	0
+mixed W=8 R=4 A=1	virtual	0	0	0	0	4	1842	1767	101	19.25038	ret0:1>8,ret1:1>8,ret2:1>8,ret3:1>8,fwd0:9,drive:3	180004700000	8	32
+mixed W=8 R=4 A=1	legacy	200000	19200000	18	1	0	1454	1379	52	95.635505	ret0:1,ret1:1,ret2:1,ret3:1,fwd0:2,drive:3	180004700000	0	0
+mixed W=8 R=4 A=1	default	200000	19200000	18	1	0	1454	1379	52	97.428975	ret0:1,ret1:1,ret2:1,ret3:1,fwd0:2,drive:3	180004700000	0	0
+branchy W=8 E=6	physical	200000	19200000	18	1	0	1665	1590	63	99.041145	fwd0:2,fwd1:2,fwd2:2,fwd3:2,fwd4:2,fwd5:2,drive:3	180004662650	0	0
+branchy W=8 E=6	virtual	0	0	0	0	0	2456	2381	180	27.933765	fwd0:9,fwd1:9,fwd2:9,fwd3:9,fwd4:9,fwd5:9,drive:3	180004662650	48	0
+branchy W=8 E=6	legacy	199900	19190400	18	1	0	1628	1553	61	97.225355	fwd0:2,fwd1:2,fwd2:2,fwd3:2,fwd4:2,fwd5:2,drive:3	180004662650	0	0
+branchy W=8 E=6	default	199900	19190400	18	1	0	1628	1553	61	99.89021	fwd0:2,fwd1:2,fwd2:2,fwd3:2,fwd4:2,fwd5:2,drive:3	180004662650	0	0
+branchy W=4 E=8	physical	200000	12800000	12	1	0	1342	1267	49	91.701785	fwd0:2,fwd1:2,fwd2:2,fwd3:2,fwd4:2,fwd5:2,fwd6:2,fwd7:2,drive:3	100000684650	0	0
+branchy W=4 E=8	virtual	0	0	0	0	0	1458	1383	56	27.7234	fwd0:5,fwd1:5,fwd2:5,fwd3:5,fwd4:5,fwd5:5,fwd6:5,fwd7:5,drive:3	100000684650	32	0
+branchy W=4 E=8	legacy	0	0	0	0	0	1458	1383	56	14.27493	fwd0:5,fwd1:5,fwd2:5,fwd3:5,fwd4:5,fwd5:5,fwd6:5,fwd7:5,drive:3	100000684650	32	0
+branchy W=4 E=8	default	199900	12793600	12	1	0	1309	1234	47	89.915415	fwd0:2,fwd1:2,fwd2:2,fwd3:2,fwd4:2,fwd5:2,fwd6:2,fwd7:2,drive:3	100000684650	0	0
+branchy W=4 E=2	physical	200000	12800000	12	1	0	1030	955	43	85.5598	fwd0:2,fwd1:2,drive:3	100000684650	0	0
+branchy W=4 E=2	virtual	0	0	0	0	0	966	891	32	7.7878	fwd0:5,fwd1:5,drive:3	100000684650	8	0
+branchy W=4 E=2	legacy	0	0	0	0	0	966	891	32	7.49304	fwd0:5,fwd1:5,drive:3	100000684650	8	0
+branchy W=4 E=2	default	0	0	0	0	0	966	891	32	7.63054	fwd0:5,fwd1:5,drive:3	100000684650	8	0
+nested-flat4 local	physical	200000	12800000	12	1	0	663	588	26	83.57708000000001	drive:3	80000800000	0	0
+nested-flat4 local	virtual	0	0	0	0	0	591	516	25	4.01816	drive:3	80000800000	0	0
+nested-flat4 local	legacy	0	0	0	0	0	591	516	25	3.94967	drive:3	80000800000	0	0
+nested-flat4 local	default	0	0	0	0	0	591	516	25	4.05604	drive:3	80000800000	0	0
+nested-flat4 return	physical	200000	12800000	12	1	0	715	640	25	83.97069	mk:1,drive:3	80000800000	0	0
+nested-flat4 return	virtual	0	0	0	0	1	675	600	29	4.84463	mk:1>4,drive:3	80000800000	0	4
+nested-flat4 return	legacy	0	0	0	0	1	675	600	29	4.866	mk:1>4,drive:3	80000800000	0	4
+nested-flat4 return	default	0	0	0	0	1	675	600	29	4.88962	mk:1>4,drive:3	80000800000	0	4
+nested-flat4 argument	physical	200000	12800000	12	1	0	855	780	35	83.370805	consume_fields:2,drive:3	100000700000	0	0
+nested-flat4 argument	virtual	0	0	0	0	0	794	719	25	6.691795	consume_fields:5,drive:3	100000700000	4	0
+nested-flat4 argument	legacy	0	0	0	0	0	794	719	25	6.61298	consume_fields:5,drive:3	100000700000	4	0
+nested-flat4 argument	default	0	0	0	0	0	794	719	25	6.757655	consume_fields:5,drive:3	100000700000	4	0
+nested-flat4 long-argument	physical	200000	12800000	12	1	0	1115	1040	40	89.65543	fwd0:2,fwd1:2,fwd2:2,fwd3:2,fwd4:2,fwd5:2,drive:3	100000700000	0	0
+nested-flat4 long-argument	virtual	0	0	0	0	0	1204	1129	45	11.948905	fwd0:5,fwd1:5,fwd2:5,fwd3:5,fwd4:5,fwd5:5,drive:3	100000700000	24	0
+nested-flat4 long-argument	legacy	0	0	0	0	0	1204	1129	45	11.488085	fwd0:5,fwd1:5,fwd2:5,fwd3:5,fwd4:5,fwd5:5,drive:3	100000700000	24	0
+nested-flat4 long-argument	default	200000	12800000	12	1	0	1115	1040	40	87.516875	fwd0:2,fwd1:2,fwd2:2,fwd3:2,fwd4:2,fwd5:2,drive:3	100000700000	0	0
+nested-inner1 local	physical	400000	20800000	19	2	0	815	740	46	162.25897	drive:3	80000800000	0	0
+nested-inner1 local	virtual	0	0	0	0	0	591	516	25	4.050075	drive:3	80000800000	0	0
+nested-inner1 local	legacy	200000	9600000	9	1	0	683	608	39	86.741675	drive:3	80000800000	0	0
+nested-inner1 local	default	0	0	0	0	0	591	516	25	4.08218	drive:3	80000800000	0	0
+nested-inner1 return	physical	400000	20800000	19	2	0	846	771	38	162.3036	mk:1,drive:3	80000800000	0	0
+nested-inner1 return	virtual	0	0	0	0	1	675	600	29	4.84158	mk:1>4,drive:3	80000800000	0	4
+nested-inner1 return	legacy	200000	9600000	9	1	1	778	703	42	85.809025	mk:1>3,drive:3	80000800000	0	3
+nested-inner1 return	default	0	0	0	0	1	675	600	29	4.907275	mk:1>4,drive:3	80000800000	0	4
+nested-inner1 argument	physical	400000	20800000	19	2	0	984	909	53	163.350875	consume_fields:2,drive:3	100000700000	0	0
+nested-inner1 argument	virtual	0	0	0	0	0	794	719	25	6.81662	consume_fields:5,drive:3	100000700000	4	0
+nested-inner1 argument	legacy	200000	9600000	9	1	0	857	782	34	85.34169	consume_fields:4,drive:3	100000700000	3	0
+nested-inner1 argument	default	0	0	0	0	0	794	719	25	6.847125	consume_fields:5,drive:3	100000700000	4	0
+nested-inner1 long-argument	physical	400000	20800000	19	2	0	1244	1169	58	175.66785	fwd0:2,fwd1:2,fwd2:2,fwd3:2,fwd4:2,fwd5:2,drive:3	100000700000	0	0
+nested-inner1 long-argument	virtual	0	0	0	0	0	1204	1129	45	11.43729	fwd0:5,fwd1:5,fwd2:5,fwd3:5,fwd4:5,fwd5:5,drive:3	100000700000	24	0
+nested-inner1 long-argument	legacy	200000	9600000	9	1	0	1222	1147	49	92.916595	fwd0:4,fwd1:4,fwd2:4,fwd3:4,fwd4:4,fwd5:4,drive:3	100000700000	18	0
+nested-inner1 long-argument	default	200000	9600000	9	1	0	1222	1147	49	94.88359	fwd0:4,fwd1:4,fwd2:4,fwd3:4,fwd4:4,fwd5:4,drive:3	100000700000	18	0
+nested-inner2 local	physical	600000	28800000	27	3	0	885	810	53	243.4068	drive:3	80000800000	0	0
+nested-inner2 local	virtual	0	0	0	0	0	591	516	25	4.02092	drive:3	80000800000	0	0
+nested-inner2 local	legacy	400000	19200000	18	2	0	796	721	47	166.98891	drive:3	80000800000	0	0
+nested-inner2 local	default	0	0	0	0	0	591	516	25	4.05162	drive:3	80000800000	0	0
+nested-inner2 return	physical	600000	28800000	27	3	0	912	837	41	257.42205	mk:1,drive:3	80000800000	0	0
+nested-inner2 return	virtual	0	0	0	0	1	675	600	29	4.853935	mk:1>4,drive:3	80000800000	0	4
+nested-inner2 return	legacy	400000	19200000	18	2	1	838	763	41	165.819015	mk:1>2,drive:3	80000800000	0	2
+nested-inner2 return	default	0	0	0	0	1	675	600	29	4.886725	mk:1>4,drive:3	80000800000	0	4
+nested-inner2 argument	physical	600000	28800000	27	3	0	1097	1022	63	255.65687	consume_fields:2,drive:3	100000700000	0	0
+nested-inner2 argument	virtual	0	0	0	0	0	794	719	25	6.68616	consume_fields:5,drive:3	100000700000	4	0
+nested-inner2 argument	legacy	400000	19200000	18	2	0	1022	947	56	172.52689	consume_fields:3,drive:3	100000700000	2	0
+nested-inner2 argument	default	0	0	0	0	0	794	719	25	7.210045	consume_fields:5,drive:3	100000700000	4	0
+nested-inner2 long-argument	physical	600000	28800000	27	3	0	1357	1282	68	263.101105	fwd0:2,fwd1:2,fwd2:2,fwd3:2,fwd4:2,fwd5:2,drive:3	100000700000	0	0
+nested-inner2 long-argument	virtual	0	0	0	0	0	1204	1129	45	11.559725	fwd0:5,fwd1:5,fwd2:5,fwd3:5,fwd4:5,fwd5:5,drive:3	100000700000	24	0
+nested-inner2 long-argument	legacy	400000	19200000	18	2	0	1342	1267	66	184.339315	fwd0:3,fwd1:3,fwd2:3,fwd3:3,fwd4:3,fwd5:3,drive:3	100000700000	12	0
+nested-inner2 long-argument	default	200000	9600000	9	1	0	1222	1147	49	94.49045	fwd0:4,fwd1:4,fwd2:4,fwd3:4,fwd4:4,fwd5:4,drive:3	100000700000	18	0
+nested-deep local	physical	600000	28800000	27	3	0	886	811	52	246.732815	drive:3	80000800000	0	0
+nested-deep local	virtual	0	0	0	0	0	591	516	25	3.999	drive:3	80000800000	0	0
+nested-deep local	legacy	400000	19200000	18	2	0	805	730	46	163.055615	drive:3	80000800000	0	0
+nested-deep local	default	0	0	0	0	0	591	516	25	3.940725	drive:3	80000800000	0	0
+nested-deep return	physical	600000	28800000	27	3	0	914	839	41	256.274405	mk:1,drive:3	80000800000	0	0
+nested-deep return	virtual	0	0	0	0	1	675	600	29	4.853265	mk:1>4,drive:3	80000800000	0	4
+nested-deep return	legacy	400000	19200000	18	2	1	823	748	35	165.74538	mk:1>2,drive:3	80000800000	0	2
+nested-deep return	default	0	0	0	0	1	675	600	29	4.86504	mk:1>4,drive:3	80000800000	0	4
+nested-deep argument	physical	600000	28800000	27	3	0	1082	1007	59	259.82455	consume_fields:2,drive:3	100000700000	0	0
+nested-deep argument	virtual	0	0	0	0	0	794	719	25	6.91217	consume_fields:5,drive:3	100000700000	4	0
+nested-deep argument	legacy	400000	19200000	18	2	0	982	907	51	173.11311	consume_fields:3,drive:3	100000700000	2	0
+nested-deep argument	default	0	0	0	0	0	794	719	25	6.926955	consume_fields:5,drive:3	100000700000	4	0
+nested-deep long-argument	physical	600000	28800000	27	3	0	1342	1267	64	264.855035	fwd0:2,fwd1:2,fwd2:2,fwd3:2,fwd4:2,fwd5:2,drive:3	100000700000	0	0
+nested-deep long-argument	virtual	0	0	0	0	0	1204	1129	45	12.11298	fwd0:5,fwd1:5,fwd2:5,fwd3:5,fwd4:5,fwd5:5,drive:3	100000700000	24	0
+nested-deep long-argument	legacy	400000	19200000	18	2	0	1302	1227	61	179.02256	fwd0:3,fwd1:3,fwd2:3,fwd3:3,fwd4:3,fwd5:3,drive:3	100000700000	12	0
+nested-deep long-argument	default	200000	9600000	9	1	0	1222	1147	49	92.799345	fwd0:4,fwd1:4,fwd2:4,fwd3:4,fwd4:4,fwd5:4,drive:3	100000700000	18	0
+cyclic W=2	physical	200001	9600048	9	2	0	615	442	22	86.716885	spin:3	400001	0	0
+cyclic W=2	virtual	0	0	0	0	0	494	404	15	1.72433	spin:4	400001	2	0
+cyclic W=2	legacy	0	0	0	0	0	494	404	15	1.633475	spin:4	400001	2	0
+cyclic W=2	default	0	0	0	0	0	494	404	15	1.72488	spin:4	400001	2	0
+cyclic W=3	physical	200001	11200056	10	2	0	807	625	30	83.81984	spin:3	600003	0	0
+cyclic W=3	virtual	0	0	0	0	0	700	595	27	2.53543	spin:5	600003	3	0
+cyclic W=3	legacy	0	0	0	0	0	700	595	27	2.478965	spin:5	600003	3	0
+cyclic W=3	default	0	0	0	0	0	700	595	27	2.704365	spin:5	600003	3	0
+cyclic W=4	physical	200001	12800064	12	2	0	1011	811	39	84.99111	spin:3	800006	0	0
+cyclic W=4	virtual	0	0	0	0	0	940	816	43	3.15976	spin:6	800006	4	0
+cyclic W=4	legacy	0	0	0	0	0	940	816	43	3.10216	spin:6	800006	4	0
+cyclic W=4	default	0	0	0	0	0	940	816	43	3.11589	spin:6	800006	4	0
+cyclic W=5	physical	200001	14400072	13	2	0	1272	1054	58	84.100385	spin:3	1000010	0	0
+cyclic W=5	virtual	0	0	0	0	0	1161	1021	60	4.639475	spin:7	1000010	5	0
+cyclic W=5	legacy	200001	14400072	13	2	0	1272	1054	58	84.632115	spin:3	1000010	0	0
+cyclic W=5	default	200001	14400072	13	2	0	1272	1054	58	82.92004999999999	spin:3	1000010	0	0
+cyclic W=6	physical	200001	16000080	15	2	0	1505	1269	70	88.97388	spin:3	1200015	0	0
+cyclic W=6	virtual	0	0	0	0	0	1397	1237	75	5.282115	spin:8	1200015	6	0
+cyclic W=6	legacy	200001	16000080	15	2	0	1505	1269	70	94.14751	spin:3	1200015	0	0
+cyclic W=6	default	200001	16000080	15	2	0	1505	1269	70	88.39156	spin:3	1200015	0	0
+cyclic W=8	physical	200001	19200096	18	2	0	2042	1752	92	92.721865	spin:3	1600028	0	0
+cyclic W=8	virtual	0	0	0	0	0	1922	1701	113	8.4649	spin:10	1600028	8	0
+cyclic W=8	legacy	200001	19200096	18	2	0	2042	1752	92	91.81131	spin:3	1600028	0	0
+cyclic W=8	default	200001	19200096	18	2	0	2042	1752	92	91.771405	spin:3	1600028	0	0

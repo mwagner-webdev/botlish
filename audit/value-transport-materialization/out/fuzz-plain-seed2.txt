@@ -1,0 +1,1 @@
+programs 200, compile-skipped 16, mismatches 0, programs with virtual structs 143, denied slots 46, nested values opened 165

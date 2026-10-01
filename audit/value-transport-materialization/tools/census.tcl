@@ -56,7 +56,11 @@ foreach path $paths {
         lappend out "== $name"
         lappend out [native::transportCensusText $hir]
         dict for {k v} [dict get $census metrics] {
-            if {[string is integer -strict $v]} { dict incr metricTotals $k $v }
+            if {[string is integer -strict $v]} {
+                dict incr metricTotals $k $v
+            } elseif {$k in {frontier distance causes}} {
+                dict for {kk vv} $v { dict incr metricTotals $k:$kk $vv }
+            }
         }
         foreach rec [dict get $census records] {
             dict with rec {

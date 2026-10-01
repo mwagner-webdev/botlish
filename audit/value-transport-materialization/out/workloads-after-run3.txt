@@ -1,0 +1,446 @@
+== csv_geometric_100
+value: length 4902 crc 1604811774
+native best-of-15 us: 315.80  (jit compile us: 8940)
+alloc total: 2828 allocations, 128635 bytes, peak 128635
+gc cycles: 0
+copies: stringBytes 6587 listElements 0 mutableArrayElements 950
+byKind BigInt: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind Block: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind ImmutableSet: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind List: allocations 106 allocatedBytes 6656 headerBytes 2544 payloadBytes 4112 currentLiveObjects 106 currentLiveBytes 6656 reclaimedObjects 0 reclaimedBytes 0
+byKind ListPlan: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind MutableArray: allocations 320 allocatedBytes 15504 headerBytes 7680 payloadBytes 7824 currentLiveObjects 320 currentLiveBytes 15504 reclaimedObjects 0 reclaimedBytes 0
+byKind Native: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind Result: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind String: allocations 2302 allocatedBytes 96875 headerBytes 92080 payloadBytes 4795 currentLiveObjects 2302 currentLiveBytes 96875 reclaimedObjects 0 reclaimedBytes 0
+byKind StringPlan: allocations 100 allocatedBytes 9600 headerBytes 6400 payloadBytes 3200 currentLiveObjects 100 currentLiveBytes 9600 reclaimedObjects 0 reclaimedBytes 0
+byKind Struct: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+emitted functions: 20
+machine code bytes: 7625
+nir lines: 418
+nir op mutarrayallocate   2
+nir op mutarrayset        4
+nir op mutarrayget        0
+nir op mutarraycopy       2
+nir op mutarrayfreeze     1
+nir op mutarraycapacity   2
+nir op listnew            1
+nir op listget            0
+nir op listlength         0
+nir op listappend         0
+nir guard/guardbool: 2
+nir call: 19  callvalue: 0
+nir retmulti: 9  callmulti: 11
+nir structnew: 0  structget: 0
+  fn scan_unquoted/13 params=3 instance=<str, int, int>
+  fn scan_quoted/14 params=3 instance=<str, int, str>
+  fn scan_field/15 params=2 instance=<str, int>
+  fn scan_record/17 params=2 instance=<str, int>
+  fn scan_record_rest/16 params=4 instance=<str, int, mutarray, int>
+  fn scan_records/18 params=4 instance=<str, int, mutarray, int>
+== csv_geometric_1000
+value: length 51603 crc 252047263
+native best-of-15 us: 4412.51  (jit compile us: 9475)
+alloc total: 28932 allocations, 1312985 bytes, peak 1048581
+gc cycles: 1
+copies: stringBytes 70390 listElements 0 mutableArrayElements 9046
+byKind BigInt: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind Block: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind ImmutableSet: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind List: allocations 1006 allocatedBytes 64256 headerBytes 24144 payloadBytes 40112 currentLiveObjects 1002 currentLiveBytes 64088 reclaimedObjects 4 reclaimedBytes 168
+byKind ListPlan: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind MutableArray: allocations 3023 allocatedBytes 145112 headerBytes 72552 payloadBytes 72560 currentLiveObjects 599 currentLiveBytes 33720 reclaimedObjects 2424 reclaimedBytes 111392
+byKind Native: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind Result: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind String: allocations 23903 allocatedBytes 1007617 headerBytes 956120 payloadBytes 51497 currentLiveObjects 7973 currentLiveBytes 354474 reclaimedObjects 15930 reclaimedBytes 653143
+byKind StringPlan: allocations 1000 allocatedBytes 96000 headerBytes 64000 payloadBytes 32000 currentLiveObjects 199 currentLiveBytes 19104 reclaimedObjects 801 reclaimedBytes 51264
+byKind Struct: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+emitted functions: 20
+machine code bytes: 7625
+nir lines: 418
+nir op mutarrayallocate   2
+nir op mutarrayset        4
+nir op mutarrayget        0
+nir op mutarraycopy       2
+nir op mutarrayfreeze     1
+nir op mutarraycapacity   2
+nir op listnew            1
+nir op listget            0
+nir op listlength         0
+nir op listappend         0
+nir guard/guardbool: 2
+nir call: 19  callvalue: 0
+nir retmulti: 9  callmulti: 11
+nir structnew: 0  structget: 0
+  fn scan_unquoted/13 params=3 instance=<str, int, int>
+  fn scan_quoted/14 params=3 instance=<str, int, str>
+  fn scan_field/15 params=2 instance=<str, int>
+  fn scan_record/17 params=2 instance=<str, int>
+  fn scan_record_rest/16 params=4 instance=<str, int, mutarray, int>
+  fn scan_records/18 params=4 instance=<str, int, mutarray, int>
+== csv_geometric_10000
+value: length 545616 crc -465105042
+native best-of-15 us: 54681.97  (jit compile us: 10374)
+alloc total: 298937 allocations, 13653895 bytes, peak 4904619
+gc cycles: 7
+copies: stringBytes 753405 listElements 0 mutableArrayElements 96406
+byKind BigInt: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind Block: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind ImmutableSet: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind List: allocations 10006 allocatedBytes 640256 headerBytes 240144 payloadBytes 400112 currentLiveObjects 10002 currentLiveBytes 640088 reclaimedObjects 4 reclaimedBytes 168
+byKind ListPlan: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind MutableArray: allocations 30027 allocatedBytes 1542968 headerBytes 720648 payloadBytes 822320 currentLiveObjects 4154 currentLiveBytes 308280 reclaimedObjects 25873 reclaimedBytes 1234688
+byKind Native: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind Result: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind String: allocations 248904 allocatedBytes 10510671 headerBytes 9956160 payloadBytes 554511 currentLiveObjects 69061 currentLiveBytes 3137095 reclaimedObjects 179843 reclaimedBytes 7373576
+byKind StringPlan: allocations 10000 allocatedBytes 960000 headerBytes 640000 payloadBytes 320000 currentLiveObjects 1384 currentLiveBytes 132864 reclaimedObjects 8616 reclaimedBytes 551424
+byKind Struct: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+emitted functions: 20
+machine code bytes: 7625
+nir lines: 418
+nir op mutarrayallocate   2
+nir op mutarrayset        4
+nir op mutarrayget        0
+nir op mutarraycopy       2
+nir op mutarrayfreeze     1
+nir op mutarraycapacity   2
+nir op listnew            1
+nir op listget            0
+nir op listlength         0
+nir op listappend         0
+nir guard/guardbool: 2
+nir call: 19  callvalue: 0
+nir retmulti: 9  callmulti: 11
+nir structnew: 0  structget: 0
+  fn scan_unquoted/13 params=3 instance=<str, int, int>
+  fn scan_quoted/14 params=3 instance=<str, int, str>
+  fn scan_field/15 params=2 instance=<str, int>
+  fn scan_record/17 params=2 instance=<str, int>
+  fn scan_record_rest/16 params=4 instance=<str, int, mutarray, int>
+  fn scan_records/18 params=4 instance=<str, int, mutarray, int>
+== csv_records_1000x5
+value: length 4 crc -1272470761
+native best-of-15 us: 2869.56  (jit compile us: 30463)
+alloc total: 14107 allocations, 891117 bytes, peak 891117
+gc cycles: 0
+copies: stringBytes 29557 listElements 7 mutableArrayElements 16113
+byKind BigInt: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind Block: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind ImmutableSet: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind List: allocations 1014 allocatedBytes 80664 headerBytes 24336 payloadBytes 56328 currentLiveObjects 1014 currentLiveBytes 80664 reclaimedObjects 0 reclaimedBytes 0
+byKind ListPlan: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind MutableArray: allocations 8070 allocatedBytes 579976 headerBytes 193680 payloadBytes 386296 currentLiveObjects 8070 currentLiveBytes 579976 reclaimedObjects 0 reclaimedBytes 0
+byKind Native: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind Result: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind String: allocations 5023 allocatedBytes 230477 headerBytes 200920 payloadBytes 29557 currentLiveObjects 5023 currentLiveBytes 230477 reclaimedObjects 0 reclaimedBytes 0
+byKind StringPlan: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind Struct: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+emitted functions: 56
+machine code bytes: 23335
+nir lines: 1217
+nir op mutarrayallocate   10
+nir op mutarrayset        25
+nir op mutarrayget        16
+nir op mutarraycopy       3
+nir op mutarrayfreeze     1
+nir op mutarraycapacity   4
+nir op listnew            3
+nir op listget            8
+nir op listlength         0
+nir op listappend         0
+nir guard/guardbool: 23
+nir call: 97  callvalue: 0
+nir retmulti: 9  callmulti: 11
+nir structnew: 0  structget: 0
+  fn scan_unquoted/17 params=3 instance=<str, int, int>
+  fn scan_quoted/18 params=3 instance=<str, int, str>
+  fn scan_field/19 params=2 instance=<str, int>
+  fn scan_record/21 params=2 instance=<str, int>
+  fn scan_record_rest/20 params=4 instance=<str, int, mutarray, int>
+  fn scan_records/22 params=4 instance=<str, int, mutarray, int>
+  fn ht_rehash/43 params=2 instance=<mutarray, int>
+  fn ht_rehash_insert/41 params=6 instance=<struct{controls: mutarray, keys: mutarray, values: mutarray}, int, any, any>
+  fn ht_rehash_scan/42 params=9 instance=<struct{controls: any, keys: any, values: any}, int, int, struct{controls: mutarray, keys: mutarray, values: mutarray}, int>
+== csv_records_1000x20
+value: length 4 crc -1272470761
+native best-of-15 us: 13480.80  (jit compile us: 26577)
+alloc total: 37124 allocations, 3438734 bytes, peak 2514798
+gc cycles: 2
+copies: stringBytes 128022 listElements 7 mutableArrayElements 55152
+byKind BigInt: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind Block: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind ImmutableSet: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind List: allocations 1014 allocatedBytes 200784 headerBytes 24336 payloadBytes 176448 currentLiveObjects 1003 currentLiveBytes 200240 reclaimedObjects 11 reclaimedBytes 544
+byKind ListPlan: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind MutableArray: allocations 16072 allocatedBytes 2308408 headerBytes 385728 payloadBytes 1922680 currentLiveObjects 7915 currentLiveBytes 1385808 reclaimedObjects 8157 reclaimedBytes 922600
+byKind Native: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind Result: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind String: allocations 20038 allocatedBytes 929542 headerBytes 801520 payloadBytes 128022 currentLiveObjects 20020 currentLiveBytes 928750 reclaimedObjects 18 reclaimedBytes 792
+byKind StringPlan: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind Struct: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+emitted functions: 56
+machine code bytes: 23335
+nir lines: 1217
+nir op mutarrayallocate   10
+nir op mutarrayset        25
+nir op mutarrayget        16
+nir op mutarraycopy       3
+nir op mutarrayfreeze     1
+nir op mutarraycapacity   4
+nir op listnew            3
+nir op listget            8
+nir op listlength         0
+nir op listappend         0
+nir guard/guardbool: 23
+nir call: 97  callvalue: 0
+nir retmulti: 9  callmulti: 11
+nir structnew: 0  structget: 0
+  fn scan_unquoted/17 params=3 instance=<str, int, int>
+  fn scan_quoted/18 params=3 instance=<str, int, str>
+  fn scan_field/19 params=2 instance=<str, int>
+  fn scan_record/21 params=2 instance=<str, int>
+  fn scan_record_rest/20 params=4 instance=<str, int, mutarray, int>
+  fn scan_records/22 params=4 instance=<str, int, mutarray, int>
+  fn ht_rehash/43 params=2 instance=<mutarray, int>
+  fn ht_rehash_insert/41 params=6 instance=<struct{controls: mutarray, keys: mutarray, values: mutarray}, int, any, any>
+  fn ht_rehash_scan/42 params=9 instance=<struct{controls: any, keys: any, values: any}, int, int, struct{controls: mutarray, keys: mutarray, values: mutarray}, int>
+== csv_records_presized_1000x20
+value: length 4 crc -1272470761
+native best-of-15 us: 11460.51  (jit compile us: 27582)
+alloc total: 31124 allocations, 2718734 bytes, peak 2041238
+gc cycles: 2
+copies: stringBytes 128022 listElements 7 mutableArrayElements 55152
+byKind BigInt: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind Block: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind ImmutableSet: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind List: allocations 1014 allocatedBytes 200784 headerBytes 24336 payloadBytes 176448 currentLiveObjects 1003 currentLiveBytes 200240 reclaimedObjects 11 reclaimedBytes 544
+byKind ListPlan: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind MutableArray: allocations 10072 allocatedBytes 1588408 headerBytes 241728 payloadBytes 1346680 currentLiveObjects 4002 currentLiveBytes 912248 reclaimedObjects 6070 reclaimedBytes 676160
+byKind Native: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind Result: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind String: allocations 20038 allocatedBytes 929542 headerBytes 801520 payloadBytes 128022 currentLiveObjects 20020 currentLiveBytes 928750 reclaimedObjects 18 reclaimedBytes 792
+byKind StringPlan: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind Struct: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+emitted functions: 56
+machine code bytes: 23335
+nir lines: 1217
+nir op mutarrayallocate   10
+nir op mutarrayset        25
+nir op mutarrayget        16
+nir op mutarraycopy       3
+nir op mutarrayfreeze     1
+nir op mutarraycapacity   4
+nir op listnew            3
+nir op listget            8
+nir op listlength         0
+nir op listappend         0
+nir guard/guardbool: 23
+nir call: 97  callvalue: 0
+nir retmulti: 9  callmulti: 11
+nir structnew: 0  structget: 0
+  fn scan_unquoted/17 params=3 instance=<str, int, int>
+  fn scan_quoted/18 params=3 instance=<str, int, str>
+  fn scan_field/19 params=2 instance=<str, int>
+  fn scan_record/21 params=2 instance=<str, int>
+  fn scan_record_rest/20 params=4 instance=<str, int, mutarray, int>
+  fn scan_records/22 params=4 instance=<str, int, mutarray, int>
+  fn ht_rehash/43 params=2 instance=<mutarray, int>
+  fn ht_rehash_insert/41 params=6 instance=<struct{controls: mutarray, keys: mutarray, values: mutarray}, int, any, any>
+  fn ht_rehash_scan/42 params=9 instance=<struct{controls: any, keys: any, values: any}, int, int, struct{controls: mutarray, keys: mutarray, values: mutarray}, int>
+== csv_records_10000x5
+value: length 5 crc 2008841541
+native best-of-15 us: 35110.64  (jit compile us: 27688)
+alloc total: 140115 allocations, 9113829 bytes, peak 7059701
+gc cycles: 3
+copies: stringBytes 344557 listElements 7 mutableArrayElements 172833
+byKind BigInt: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind Block: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind ImmutableSet: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind List: allocations 10014 allocatedBytes 800664 headerBytes 240336 payloadBytes 560328 currentLiveObjects 10003 currentLiveBytes 800120 reclaimedObjects 11 reclaimedBytes 544
+byKind ListPlan: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind MutableArray: allocations 80078 allocatedBytes 5967688 headerBytes 1921872 payloadBytes 4045816 currentLiveObjects 44485 currentLiveBytes 3914896 reclaimedObjects 35593 reclaimedBytes 2052792
+byKind Native: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind Result: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind String: allocations 50023 allocatedBytes 2345477 headerBytes 2000920 payloadBytes 344557 currentLiveObjects 50005 currentLiveBytes 2344685 reclaimedObjects 18 reclaimedBytes 792
+byKind StringPlan: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind Struct: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+emitted functions: 56
+machine code bytes: 23335
+nir lines: 1217
+nir op mutarrayallocate   10
+nir op mutarrayset        25
+nir op mutarrayget        16
+nir op mutarraycopy       3
+nir op mutarrayfreeze     1
+nir op mutarraycapacity   4
+nir op listnew            3
+nir op listget            8
+nir op listlength         0
+nir op listappend         0
+nir guard/guardbool: 23
+nir call: 97  callvalue: 0
+nir retmulti: 9  callmulti: 11
+nir structnew: 0  structget: 0
+  fn scan_unquoted/17 params=3 instance=<str, int, int>
+  fn scan_quoted/18 params=3 instance=<str, int, str>
+  fn scan_field/19 params=2 instance=<str, int>
+  fn scan_record/21 params=2 instance=<str, int>
+  fn scan_record_rest/20 params=4 instance=<str, int, mutarray, int>
+  fn scan_records/22 params=4 instance=<str, int, mutarray, int>
+  fn ht_rehash/43 params=2 instance=<mutarray, int>
+  fn ht_rehash_insert/41 params=6 instance=<struct{controls: mutarray, keys: mutarray, values: mutarray}, int, any, any>
+  fn ht_rehash_scan/42 params=9 instance=<struct{controls: any, keys: any, values: any}, int, int, struct{controls: mutarray, keys: mutarray, values: mutarray}, int>
+== csv_records_sample
+value: length 52 crc 2079333616
+native best-of-15 us: 19.46  (jit compile us: 27900)
+alloc total: 146 allocations, 7632 bytes, peak 7632
+gc cycles: 0
+copies: stringBytes 144 listElements 14 mutableArrayElements 108
+byKind BigInt: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind Block: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind ImmutableSet: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind List: allocations 22 allocatedBytes 1088 headerBytes 528 payloadBytes 560 currentLiveObjects 22 currentLiveBytes 1088 reclaimedObjects 0 reclaimedBytes 0
+byKind ListPlan: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind MutableArray: allocations 88 allocatedBytes 4960 headerBytes 2112 payloadBytes 2848 currentLiveObjects 88 currentLiveBytes 4960 reclaimedObjects 0 reclaimedBytes 0
+byKind Native: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind Result: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind String: allocations 36 allocatedBytes 1584 headerBytes 1440 payloadBytes 144 currentLiveObjects 36 currentLiveBytes 1584 reclaimedObjects 0 reclaimedBytes 0
+byKind StringPlan: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind Struct: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+emitted functions: 56
+machine code bytes: 23292
+nir lines: 1215
+nir op mutarrayallocate   10
+nir op mutarrayset        25
+nir op mutarrayget        16
+nir op mutarraycopy       3
+nir op mutarrayfreeze     1
+nir op mutarraycapacity   4
+nir op listnew            3
+nir op listget            8
+nir op listlength         0
+nir op listappend         0
+nir guard/guardbool: 23
+nir call: 97  callvalue: 0
+nir retmulti: 9  callmulti: 11
+nir structnew: 0  structget: 0
+  fn scan_unquoted/17 params=3 instance=<str, int, int>
+  fn scan_quoted/18 params=3 instance=<str, int, str>
+  fn scan_field/19 params=2 instance=<str, int>
+  fn scan_record/21 params=2 instance=<str, int>
+  fn scan_record_rest/20 params=4 instance=<str, int, mutarray, int>
+  fn scan_records/22 params=4 instance=<str, int, mutarray, int>
+  fn ht_rehash/43 params=2 instance=<mutarray, int>
+  fn ht_rehash_insert/41 params=6 instance=<struct{controls: mutarray, keys: mutarray, values: mutarray}, int, any, any>
+  fn ht_rehash_scan/42 params=9 instance=<struct{controls: any, keys: any, values: any}, int, int, struct{controls: mutarray, keys: mutarray, values: mutarray}, int>
+== hashtable_build_1000
+value: length 4 crc -1272470761
+native best-of-15 us: 298.44  (jit compile us: 10869)
+alloc total: 28 allocations, 98824 bytes, peak 98824
+gc cycles: 0
+copies: stringBytes 0 listElements 0 mutableArrayElements 0
+byKind BigInt: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind Block: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind ImmutableSet: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind List: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind ListPlan: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind MutableArray: allocations 28 allocatedBytes 98824 headerBytes 672 payloadBytes 98152 currentLiveObjects 28 currentLiveBytes 98824 reclaimedObjects 0 reclaimedBytes 0
+byKind Native: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind Result: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind String: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind StringPlan: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind Struct: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+emitted functions: 23
+machine code bytes: 9587
+nir lines: 493
+nir op mutarrayallocate   7
+nir op mutarrayset        19
+nir op mutarrayget        13
+nir op mutarraycopy       0
+nir op mutarrayfreeze     0
+nir op mutarraycapacity   1
+nir op listnew            0
+nir op listget            0
+nir op listlength         0
+nir op listappend         0
+nir guard/guardbool: 17
+nir call: 46  callvalue: 0
+nir retmulti: 0  callmulti: 0
+nir structnew: 0  structget: 0
+  fn ht_rehash/16 params=2 instance=<mutarray, int>
+  fn ht_rehash_insert/14 params=6 instance=<struct{controls: mutarray, keys: mutarray, values: mutarray}, int, any, any>
+  fn ht_rehash_scan/15 params=9 instance=<struct{controls: any, keys: any, values: any}, int, int, struct{controls: mutarray, keys: mutarray, values: mutarray}, int>
+== hashtable_build_10000
+value: length 5 crc 2008841541
+native best-of-15 us: 3095.94  (jit compile us: 11078)
+alloc total: 37 allocations, 787168 bytes, peak 787168
+gc cycles: 0
+copies: stringBytes 0 listElements 0 mutableArrayElements 0
+byKind BigInt: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind Block: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind ImmutableSet: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind List: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind ListPlan: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind MutableArray: allocations 37 allocatedBytes 787168 headerBytes 888 payloadBytes 786280 currentLiveObjects 37 currentLiveBytes 787168 reclaimedObjects 0 reclaimedBytes 0
+byKind Native: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind Result: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind String: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind StringPlan: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind Struct: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+emitted functions: 23
+machine code bytes: 9587
+nir lines: 493
+nir op mutarrayallocate   7
+nir op mutarrayset        19
+nir op mutarrayget        13
+nir op mutarraycopy       0
+nir op mutarrayfreeze     0
+nir op mutarraycapacity   1
+nir op listnew            0
+nir op listget            0
+nir op listlength         0
+nir op listappend         0
+nir guard/guardbool: 17
+nir call: 46  callvalue: 0
+nir retmulti: 0  callmulti: 0
+nir structnew: 0  structget: 0
+  fn ht_rehash/16 params=2 instance=<mutarray, int>
+  fn ht_rehash_insert/14 params=6 instance=<struct{controls: mutarray, keys: mutarray, values: mutarray}, int, any, any>
+  fn ht_rehash_scan/15 params=9 instance=<struct{controls: any, keys: any, values: any}, int, int, struct{controls: mutarray, keys: mutarray, values: mutarray}, int>
+== hashtable_build_50000
+value: length 5 crc -2109940859
+native best-of-15 us: 21964.47  (jit compile us: 12493)
+alloc total: 46 allocations, 6292408 bytes, peak 5505304
+gc cycles: 2
+copies: stringBytes 0 listElements 0 mutableArrayElements 0
+byKind BigInt: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind Block: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind ImmutableSet: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind List: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind ListPlan: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind MutableArray: allocations 46 allocatedBytes 6292408 headerBytes 1104 payloadBytes 6291304 currentLiveObjects 10 currentLiveBytes 5505304 reclaimedObjects 36 reclaimedBytes 787104
+byKind Native: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind Result: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind String: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind StringPlan: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+byKind Struct: allocations 0 allocatedBytes 0 headerBytes 0 payloadBytes 0 currentLiveObjects 0 currentLiveBytes 0 reclaimedObjects 0 reclaimedBytes 0
+emitted functions: 23
+machine code bytes: 9587
+nir lines: 493
+nir op mutarrayallocate   7
+nir op mutarrayset        19
+nir op mutarrayget        13
+nir op mutarraycopy       0
+nir op mutarrayfreeze     0
+nir op mutarraycapacity   1
+nir op listnew            0
+nir op listget            0
+nir op listlength         0
+nir op listappend         0
+nir guard/guardbool: 17
+nir call: 46  callvalue: 0
+nir retmulti: 0  callmulti: 0
+nir structnew: 0  structget: 0
+  fn ht_rehash/16 params=2 instance=<mutarray, int>
+  fn ht_rehash_insert/14 params=6 instance=<struct{controls: mutarray, keys: mutarray, values: mutarray}, int, any, any>
+  fn ht_rehash_scan/15 params=9 instance=<struct{controls: any, keys: any, values: any}, int, int, struct{controls: mutarray, keys: mutarray, values: mutarray}, int>
