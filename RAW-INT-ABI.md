@@ -34,9 +34,10 @@ canonical tagged ABI is untouched everywhere the proof does not apply.
   flows through tagged consumers (hashtable, csv) the static conversion count
   went **up** (47 → 66 `rbox`, 47 → 48 `runbox`) and `hashtable` grew by 67
   bytes; see *Known limitations*.
-* Full regression, differential fuzzing (3,300 random programs, 0
-  disagreements), GC stress and standalone-executable parity pass (see the
-  sections below).
+* Full regression (interp, compile, native coverage, Rust), differential
+  fuzzing (3,300 random programs, 0 disagreements) and standalone-executable
+  parity pass. GC stress passes for the native test files and the fuzz run; the
+  suite-wide stress run is left to CI's `gc-stress` job (see *GC stress*).
 
 Files: `native/rawabi.tcl` (planner, audit), `native/lower.tcl` (plan storage,
 callee/caller lowering, raw `if` join, raw alias, option),
@@ -435,7 +436,21 @@ profitability test" policy is not uniformly a win in size.
 
 ## Compile-time impact
 
-COMPILETIME_PLACEHOLDER
+`audit/raw-int-abi/tools/compiletime.tcl` (median of 7, milliseconds, whole
+compile = `native::codeSize`; `out/compiletime.txt`). The planner itself is
+negligible: 0.03 ms for `fib`, `loop-count`, `sum-refined`; 0.27 ms for
+`refined-checks`; 0.60 ms for `csv_records` (0.1 % of its 760 ms compile).
+
+| program | abi plan | lower (ABI off → on) | cranelift (off → on) | whole compile (off → on) |
+|---|---:|---:|---:|---:|
+| fib | 0.03 | 3 → 2 | 5 → 4 | 26 → 24 |
+| loop-count | 0.03 | 5 → 3 | 5 → 4 | 16 → 14 |
+| sum-refined | 0.04 | 4 → 3 | 4 → 4 | 13 → 12 |
+| refined-checks | 0.27 | 74 → 64 | 20 → 16 | 396 → 371 |
+| csv_records | 0.60 | 394 → 370 | 20 → 4 | 768 → 760 |
+
+(The differences are within run-to-run noise; no compile-time cost is
+measurable. `prepare`/`specialize`/`range` are the same analyses either way.)
 
 ## Controls
 
@@ -447,7 +462,18 @@ Int parameter/result transport only.
 
 ## GC stress
 
-GCSTRESS_PLACEHOLDER
+* The `native*.test` files (26 files, 779 tests) pass under
+  `BOTLISH_NATIVE_GC_STRESS=1` (forced GC attempt at every allocation site).
+* `raw-int-abi.test` contains its own stress cases (`raw-gc-raw-live-across-
+  allocation`, `raw-gc-recursive-allocating-frames`, both executable tests run
+  under stress), and `tools/fuzz.tcl` ran 300 random programs under stress, 0
+  disagreements (`out/fuzz-gcstress.txt`).
+* The remaining suite-wide stress run is left to the `gc-stress` job of
+  `.github/workflows/tests.yml` on push (`AGENTS.md`); it was not run locally
+  for the whole suite. `fib<int>` and the other raw functions that make no
+  allocation have no safepoint at all, so stress has nothing to exercise in
+  them; the stress value is in raw values live across *other* functions'
+  safepoints, which the tests above cover.
 
 ## Standalone parity
 
@@ -469,7 +495,32 @@ agrees with interp, compile, `cranelift-generic` and `cranelift`.
 
 ## Full regression
 
-FULLREGRESSION_PLACEHOLDER
+Tcl 9.0.1, Linux x86-64, release native backend, all from a clean tree.
+
+| run | before (parent) | after |
+|---|---|---|
+| `tests/all.tcl` interp backend | 3663 total, 3663 passed | **3709 total, 3709 passed, 0 failed** |
+| `tests/all.tcl` compile backend | 3663 total, 3659 passed, 4 skipped | **3709 total, 3705 passed, 4 skipped, 0 failed** |
+| `tests/native-coverage.tcl` (cranelift) | 3697: native 1418, independent 2188, passed-partial 41, unsupported 49, failed 1 | **3743: native 1453, independent 2199, passed-partial 41, unsupported 49, failed 1** |
+| Rust release tests (`cargo test --release`) | 56 + 22 | **64 + 22 passed** (8 new raw-ABI validation/effects tests) |
+
+* +46 tests are the new `raw-int-abi.test` (45) and
+  `tiny-leaf-pressure-growth-under-raw-abi` (1).
+* The one coverage "failed" test is `refined-5` (the error message names
+  `length` instead of `emailish?` under the cranelift test backend). It fails
+  identically on the parent tree (checked on a clean worktree of the parent
+  commit): pre-existing, unrelated.
+* `bench/bench.tcl -runs 1`: all backends agree on every program, exit 0
+  (`fib.bot` Tcl interp 9951 ms, compile 72.6 ms, Cranelift 175 us).
+* `bench/corpus.tcl -runs 1`: all backends agree on every algorithm/size
+  (6 m 30 s run), exit 0.
+* Native execution time, `botlish-native bench` on the emitted NIR, best of 3
+  x 200 runs, ABI off → on (machine shared with a background job, so only
+  `fib` is a clear signal): **fib 145.9 -> 136.3 us (-6.6 %)**; loop-count 896
+  -> 902 ns, sum-refined 723 -> 723 ns, refined-checks 663 -> 659 us,
+  uri-steady 4.63 -> 4.65 ms, matmul 833 -> 833 ns, csv_records 9.41 -> 9.38 us,
+  hashtable 1076 -> 1094 ns (all within noise). Callgrind is the reliable
+  instruction-level figure for `fib` (above).
 
 ## Existing tests that changed (and why)
 

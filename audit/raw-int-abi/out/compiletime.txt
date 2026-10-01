@@ -1,0 +1,14 @@
+abi 0
+program | prepare | specialize | range | abi plan | lower | cranelift | total (ms, median of 7)
+bench/fib.bot | 0 | 2 | 16 | 0.03 | 3 | 5 | 26
+bench/loop-count.bot | 0 | 3 | 4 | 0.03 | 5 | 5 | 16
+bench/sum-refined.bot | 0 | 2 | 3 | 0.04 | 4 | 4 | 13
+bench/refined-checks.bot | 196 | 44 | 70 | 0.28 | 74 | 20 | 396
+examples/stdlib/csv_records.bot | 3 | 145 | 206 | 0.61 | 394 | 20 | 768
+abi 1
+program | prepare | specialize | range | abi plan | lower | cranelift | total (ms, median of 7)
+bench/fib.bot | 0 | 2 | 16 | 0.03 | 2 | 4 | 24
+bench/loop-count.bot | 0 | 2 | 3 | 0.03 | 3 | 4 | 14
+bench/sum-refined.bot | 0 | 2 | 2 | 0.03 | 3 | 4 | 12
+bench/refined-checks.bot | 184 | 45 | 67 | 0.27 | 64 | 16 | 371
+examples/stdlib/csv_records.bot | 3 | 144 | 210 | 0.60 | 370 | 4 | 760

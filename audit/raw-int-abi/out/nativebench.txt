@@ -1,0 +1,16 @@
+fib abi0 best 145941 ns
+fib abi1 best 136257 ns
+loop-count abi0 best 896 ns
+loop-count abi1 best 902 ns
+sum-refined abi0 best 723 ns
+sum-refined abi1 best 723 ns
+refined-checks abi0 best 662894 ns
+refined-checks abi1 best 659361 ns
+uri-steady abi0 best 4629350 ns
+uri-steady abi1 best 4646089 ns
+matmul abi0 best 833 ns
+matmul abi1 best 833 ns
+csv_records abi0 best 9412 ns
+csv_records abi1 best 9381 ns
+hashtable abi0 best 1076 ns
+hashtable abi1 best 1094 ns
