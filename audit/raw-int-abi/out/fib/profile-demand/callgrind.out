@@ -1,0 +1,185 @@
+# callgrind format
+version: 1
+creator: callgrind-3.22.0
+pid: 19851
+cmd:  /tmp/claude-0/-home-user-botlish/21d47bb1-c7e4-5798-abd8-a919b41642c7/scratchpad/audit-work/target/release/botlish-native bench 21 audit/raw-int-abi/out/fib/profile-demand/program.nir
+part: 1
+
+
+desc: I1 cache: 32768 B, 64 B, 8-way associative
+desc: D1 cache: 49152 B, 64 B, 12-way associative
+desc: LL cache: 276824064 B, 64 B, 33-way associative
+
+desc: Timerange: Basic block 0 - 4787360
+desc: Trigger: Program termination
+
+positions: instr
+events: Ir Dr Dw I1mr D1mr D1mw ILmr DLmr DLmw Bc Bcm Bi Bim
+summary: 28083560 5731360 5731340 0 0 0 0 0 0 1146260 103322 20 1
+
+
+ob=???
+fl=???
+fn=0x0000000004847028
+0x4847028 20 0 20
+0x4847029 20
+0x484702c 20
+0x4847030 20 0 20
+0x4847034 20 0 20
+0x4847039 20 0 20
+0x484703e 20
+0x4847041 20
+0x4847045 20
+0x4847048 20 0 0 0 0 0 0 0 0 20 2
+0x484704e 20
+0x4847051 20
+0x4847054 20
+0x4847058 20
+0x484705b 20 0 20
+cfn=0x0000000004847028'2
+calls=21 0x4847028 
+0x484705b 17356180 3542100 3542080 0 0 0 0 0 0 708420 63860
+0x4847060 20
+0x4847063 20
+0x4847066 20
+0x484706a 20
+0x484706d 20 0 20
+cfn=0x0000000004847028'2
+calls=21 0x4847028 
+0x484706d 10726480 2189100 2189080 0 0 0 0 0 0 437820 39460
+0x4847072 20
+0x4847075 20
+0x4847078 20
+0x4847083 20 20
+0x4847087 20 20
+0x484708c 20 20
+0x4847091 20
+0x4847095 20
+0x4847098 20 20
+0x4847099 20 20
+
+fn=0x0000000004847028'2
+0x4847028 1146240 0 1146240
+0x4847029 1146240
+0x484702c 1146240
+0x4847030 1146240 0 1146240
+0x4847034 1146240 0 1146240
+0x4847039 1146240 0 1146240
+0x484703e 1146240
+0x4847041 1146240
+0x4847045 1146240
+0x4847048 1146240 0 0 0 0 0 0 0 0 1146240 103320
+0x484704e 573100
+0x4847051 573100
+0x4847054 573100
+0x4847058 573100
+0x484705b 573100 0 573100
+cfn=0x0000000004847028'2
+calls=601755 0x4847028 
+0x484705b 231344800 47856500 47283400 0 0 0 0 0 0 9571300 979600
+0x4847060 573100
+0x4847063 573100
+0x4847066 573100
+0x484706a 573100
+0x484706d 573100 0 573100
+cfn=0x0000000004847028'2
+calls=601755 0x4847028 
+0x484706d 139376700 29087500 28514400 0 0 0 0 0 0 5817500 410780
+0x4847072 573100
+0x4847075 573100
+0x4847078 573100
+0x484707d 573140
+0x4847080 573140
+0x4847083 573140 573140
+0x4847087 573140 573140
+0x484708c 573140 573140
+0x4847091 573140
+0x4847095 573140
+0x4847098 573140 573140
+0x4847099 573140 573140
+0x4847083 573100 573100
+0x4847087 573100 573100
+0x484708c 573100 573100
+0x4847091 573100
+0x4847095 573100
+0x4847098 573100 573100
+0x4847099 573100 573100
+
+fn=0x0000000004847000
+0x4847000 20 0 20
+0x4847001 20
+0x4847004 20
+0x4847009 20 0 20
+cfn=0x0000000004847028
+calls=21 0x4847028 
+0x4847009 28083260 5731300 5731280 0 0 0 0 0 0 1146260 103322
+0x484700e 20
+0x4847011 20
+0x4847015 20
+0x4847018 20 20
+0x4847019 20 20
+
+ob=/usr/lib/x86_64-linux-gnu/libc.so.6
+fl=./nptl/./nptl/pthread_create.c
+fn=start_thread
+cob=/tmp/claude-0/-home-user-botlish/21d47bb1-c7e4-5798-abd8-a919b41642c7/scratchpad/audit-work/target/release/botlish-native
+cfi=/rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/sys/thread/unix.rs
+cfn=<std::sys::thread::unix::Thread>::new::thread_start
+calls=1 0x7165c0 
+0x9ca9e 28083560 5731360 5731340 0 0 0 0 0 0 1146260 103322 20 1
+
+fl=./misc/../sysdeps/unix/sysv/linux/x86_64/clone.S
+fn=clone
+cfi=./nptl/./nptl/pthread_create.c
+cfn=start_thread
+calls=1 0x9c720 
+0x129a62 28083560 5731360 5731340 0 0 0 0 0 0 1146260 103322 20 1
+
+ob=/tmp/claude-0/-home-user-botlish/21d47bb1-c7e4-5798-abd8-a919b41642c7/scratchpad/audit-work/target/release/botlish-native
+fl=/rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/sys/thread/unix.rs
+fn=<std::sys::thread::unix::Thread>::new::thread_start
+fi=/rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/alloc/src/boxed.rs
+cfi=/rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/ops/function.rs
+cfn=<std::thread::lifecycle::spawn_unchecked<botlish_native::main::{closure#2}, i32>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0}
+calls=1 0x194eb0 
+0x71670b 28083560 5731360 5731340 0 0 0 0 0 0 1146260 103322 20 1
+fe=/rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/sys/thread/unix.rs
+
+fl=/tmp/claude-0/-home-user-botlish/21d47bb1-c7e4-5798-abd8-a919b41642c7/scratchpad/audit-work/native-audit/src/main.rs
+fn=botlish_native::cli
+cfn=botlish_audit_run
+calls=20 0x188a60 
+0x1858c4 28083560 5731360 5731340 0 0 0 0 0 0 1146260 103322 20 1
+
+fn=botlish_audit_run
+0x188a60 20 0 20
+0x188a61 20
+0x188a64 20
+0x188a67 20
+0x188a6a 20 20
+0x188a6b 20 0 0 0 0 0 0 0 0 0 0 20 1
+cob=???
+cfi=???
+cfn=0x0000000004847000
+calls=20 0x4847000 
+0x188a6b 28083440 5731340 5731320 0 0 0 0 0 0 1146260 103322
+
+fl=/rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/sys/backtrace.rs
+fn=std::sys::backtrace::__rust_begin_short_backtrace::<botlish_native::main::{closure#2}, i32>
+fi=/tmp/claude-0/-home-user-botlish/21d47bb1-c7e4-5798-abd8-a919b41642c7/scratchpad/audit-work/native-audit/src/main.rs
+cfi=/tmp/claude-0/-home-user-botlish/21d47bb1-c7e4-5798-abd8-a919b41642c7/scratchpad/audit-work/native-audit/src/main.rs
+cfn=botlish_native::cli
+calls=1 0x1843a0 
+0x19415f 28083560 5731360 5731340 0 0 0 0 0 0 1146260 103322 20 1
+fe=/rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/sys/backtrace.rs
+
+fl=/rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/ops/function.rs
+fn=<std::thread::lifecycle::spawn_unchecked<botlish_native::main::{closure#2}, i32>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0}
+fi=/rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/thread/lifecycle.rs
+cfi=/rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/sys/backtrace.rs
+cfn=std::sys::backtrace::__rust_begin_short_backtrace::<botlish_native::main::{closure#2}, i32>
+calls=1 0x194140 
+0x194f5d 28083560 5731360 5731340 0 0 0 0 0 0 1146260 103322 20 1
+fe=/rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/ops/function.rs
+
+totals: 28083560 5731360 5731340 0 0 0 0 0 0 1146260 103322 20 1

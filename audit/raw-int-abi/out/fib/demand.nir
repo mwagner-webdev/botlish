@@ -1,0 +1,32 @@
+nir 1 call-effects=1 statics=0
+
+func 0 "<program>" params=0 env=0 regs=3 pnames="" captures=0 instance="generic" rawregs="0 1"
+    %0 = rawint 22 @e25
+    %1 = call 1 %0 @e23
+    %2 = op rbox %1
+    ret %2
+end
+
+func 1 "fib" params=1 env=0 regs=14 pnames="n" captures=0 instance="int" rawregs="0 2 4 6 7 8 10 11 12 13" rawparams="0" rawresult=1 @e2
+    %1 = int 2 @e7
+    %2 = rawint 2
+    %3 = op rilt %0 %2 @e4
+    br %3 L0 L1 @e3
+  label L0
+    %4 = move %0
+    jump L2
+  label L1
+    %5 = int 1 @e16
+    %6 = rawint 1
+    %7 = op risub %0 %6 @e13
+    %8 = call 1 %7 @e11
+    %9 = int 2 @e22
+    %10 = rawint 2
+    %11 = op risub %0 %10 @e19
+    %12 = call 1 %11 @e17
+    %13 = op riadd %8 %12 @e9
+    %4 = move %13
+    jump L2
+  label L2
+    ret %4
+end

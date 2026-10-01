@@ -1,0 +1,4 @@
+bench/test-selection.bot: struct/transport census identical; allocations off 44 on 44; bytes off 1928 on 1928; by kind identical; guards off 0 on 0
+bench/refined-checks.bot: struct/transport census identical; allocations off 6820 on 6820; bytes off 280288 on 280288; by kind identical; guards off 1 on 1
+examples/stdlib/hashtable.bot: struct/transport census identical; allocations off 5 on 5; bytes off 400 on 400; by kind identical; guards off 25 on 25
+examples/stdlib/csv_records.bot: struct/transport census identical; allocations off 73 on 73; bytes off 3816 on 3816; by kind identical; guards off 23 on 23

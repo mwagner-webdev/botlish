@@ -130,11 +130,15 @@ test root-structural-1 {fib<int>: far fewer shadow slots than its 14 NIR registe
 # The old counts (17/13/1 slot floor discussion under the pre-migration
 # fixture) are historical; see CANONICAL-SURFACE-BENCHMARKS.md's bridge
 # census for the full old-vs-new comparison.
+# work's successful Int result is RawInt-eligible, but its only caller adds it
+# to an unbounded accumulator (a tagged operation), so raw-demand suppression
+# keeps it tagged (RAW-INT-ABI.md): one more register than the eligibility-only
+# plan (14), one fewer than the tagged ABI (16).
 test root-structural-2 {loop-count: work (no safepoint, no calls) needs zero slots; drive needs far fewer than 13} -body {
     set report [native::roots [sourceBotHir [file join $::projectRoot bench loop-count.bot]]]
     list [regsOf $report work] [safepointsOf $report work] [slotsOf $report work] \
         [regsOf $report drive] [expr {[slotsOf $report drive] < 13}]
-} -result {14 0 0 14 1}
+} -result {15 0 0 14 1}
 
 test root-structural-3 {sum-refined: refined_sum and step both need far fewer slots than their register counts} -body {
     set report [native::roots [sourceBotHir [file join $::projectRoot bench sum-refined.bot]]]

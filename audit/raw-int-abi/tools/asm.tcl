@@ -3,7 +3,9 @@
 # generated code with the raw Int ABI off (0) or on (1)
 # (RAW-INT-ABI.md). Observation only.
 #
-#   tclsh9.0 audit/raw-int-abi/tools/asm.tcl PROGRAM.bot OPT OUTPREFIX
+#   tclsh9.0 audit/raw-int-abi/tools/asm.tcl PROGRAM.bot OPT OUTPREFIX ?DEMAND?
+#
+# DEMAND is -raw-demand-opt (default 1; 0 = eligibility-only RawInt).
 #
 # Writes OUTPREFIX.nir, OUTPREFIX.asm (objdump -dr on the unlinked object,
 # symbols labelled with the function names) and OUTPREFIX.roots. Prints the
@@ -13,9 +15,10 @@ source [file join $root compiler compiler.tcl]
 source [file join $root surface surface.tcl]
 source [file join $root native native.tcl]
 interp recursionlimit {} 20000
-lassign $argv path opt prefix
+lassign $argv path opt prefix demand
+if {$demand eq ""} { set demand 1 }
 set hir [surface::readProgramFile $path]
-set options [list -raw-int-abi-opt $opt]
+set options [list -raw-int-abi-opt $opt -raw-demand-opt $demand]
 proc W {path content} {
     set f [open $path w]
     fconfigure $f -encoding utf-8

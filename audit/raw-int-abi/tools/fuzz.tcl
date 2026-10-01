@@ -124,9 +124,10 @@ for {set s $seed0} {$s < $seed0 + $n} {incr s} {
     file delete $path
     set outcomes [list [outcome interp $hir] [outcome compile $hir]]
     set prepared [native::prepareHir $hir]
-    foreach abi {0 1} {
+    # Tagged ABI, eligibility-only RawInt, RawInt + demand suppression.
+    foreach {abi demand} {0 1 1 0 1 1} {
         foreach inline {0 1} {
-            lappend outcomes [outcome native $prepared -raw-int-abi-opt $abi -tiny-leaf-inline-opt $inline]
+            lappend outcomes [outcome native $prepared -raw-int-abi-opt $abi -raw-demand-opt $demand -tiny-leaf-inline-opt $inline]
         }
     }
     dict incr kinds [lindex [lindex $outcomes 0] 0]

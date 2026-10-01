@@ -166,7 +166,11 @@ test tiny-leaf-pressure-no-growth-observed {whole-program machine code with inli
 # one-op and chain leaves, and at most a few percent for the fold-resistant
 # 8-op horner leaf at high call-site counts. Inlining stays correct (parity
 # above); the inline/call break-even is future tuning, not this milestone.
-test tiny-leaf-pressure-growth-under-raw-abi {with the raw Int ABI, inlining never grows code for the 1-op and chain leaves and by under 10% for the 8-op horner leaf} -body {
+# Raw-demand suppression (RAW-INT-ABI.md) made the non-inlined baseline a few
+# percent cheaper again at some call-site counts (the inlined code is
+# unchanged, e.g. 128 sites: 4483 -> 4476 bytes inlined, 4183 -> 4049 not),
+# so the bound for the fold-resistant horner leaf is 15%.
+test tiny-leaf-pressure-growth-under-raw-abi {with the raw Int ABI, inlining never grows code for the 1-op and chain leaves and by under 15% for the 8-op horner leaf} -body {
     set tinyLeafPressure::abiOpt 1
     set worst 0.0
     set grewSmall {}
@@ -186,7 +190,7 @@ test tiny-leaf-pressure-growth-under-raw-abi {with the raw Int ABI, inlining nev
             }
         }
     }
-    list $grewSmall [expr {$worst < 0.10}]
+    list $grewSmall [expr {$worst < 0.15}]
 } -result {{} 1}
 
 cleanupTests

@@ -2058,6 +2058,55 @@ mod raw_abi_tests {
         assert!(m.contains("argument 0") && m.contains("tagged"), "{m}");
     }
 
+    /// Function 1: `n + 1` with *tagged* parameter and result: what a RawInt-
+    /// eligible position the demand analysis suppressed looks like.
+    fn tagged_callee() -> String {
+        "func 1 \"callee\" params=1 env=0 regs=3 pnames=\"n\" captures=0 rawregs=\"\"\n    %1 = int 1\n    %2 = op iadd %0 %1\n    ret %2\nend\n\n".to_string()
+    }
+
+    #[test]
+    fn suppressed_position_is_tagged_on_both_sides() {
+        // A position kept tagged by the demand analysis: neither the callee's
+        // header nor the caller's call carries a raw register for it.
+        let text = program(
+            1,
+            &format!(
+                "{}func 2 \"caller\" params=1 env=0 regs=2 pnames=\"x\" captures=0 rawregs=\"\"\n    %1 = call 1 %0\n    ret %1\nend\n",
+                tagged_callee()
+            ),
+        );
+        let p = parse(&text).unwrap_or_else(|e| panic!("{}", e.message));
+        assert!(!p.functions[1].has_raw_abi() && !p.functions[1].raw_params[0]);
+    }
+
+    #[test]
+    fn raw_argument_to_a_suppressed_tagged_parameter_is_a_bug() {
+        // The caller still passes the argument raw although the callee's
+        // plan kept that parameter tagged: caller/callee disagree.
+        let text = program(
+            1,
+            &format!(
+                "{}func 2 \"caller\" params=1 env=0 regs=2 pnames=\"x\" captures=0 rawregs=\"0\" rawparams=\"0\"\n    %1 = call 1 %0\n    ret %1\nend\n",
+                tagged_callee()
+            ),
+        );
+        let m = message(parse(&text));
+        assert!(m.contains("argument 0") && m.contains("raw"), "{m}");
+    }
+
+    #[test]
+    fn raw_destination_for_a_suppressed_tagged_result_is_a_bug() {
+        let text = program(
+            1,
+            &format!(
+                "{}func 2 \"caller\" params=1 env=0 regs=3 pnames=\"x\" captures=0 rawregs=\"1\"\n    %1 = call 1 %0\n    %2 = op rbox %1\n    ret %2\nend\n",
+                tagged_callee()
+            ),
+        );
+        let m = message(parse(&text));
+        assert!(m.contains("result %1") && m.contains("raw"), "{m}");
+    }
+
     #[test]
     fn tagged_destination_for_raw_result_is_a_bug() {
         let text = program(

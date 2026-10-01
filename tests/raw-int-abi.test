@@ -108,6 +108,32 @@ proc abiReasons {text label args} {
     error "no instance $label"
 }
 
+# Like abiPlan, but a position that is RawInt-eligible and was suppressed
+# for want of raw demand reads `supp` (raw: selected; val: not eligible).
+proc abiDemandPlan {text args} {
+    set lowered [native::lowered [srcHir $text] {*}$args]
+    set spec [dict get $lowered specialization]
+    set plan [dict get $lowered abiPlan]
+    set lines {}
+    foreach id [dict get $spec used] {
+        set p [dict get $plan $id]
+        set label [hir::specialize::label $spec $id]
+        if {$label eq "<program>"} continue
+        set params [lmap k [dict get $p params] e [dict get $p paramEligible] {
+            expr {$k eq "rawint" ? "raw" : $e ? "supp" : "val"}
+        }]
+        set result [expr {[dict get $p result] eq "rawint" ? "raw" : [dict get $p resultEligible] ? "supp" : "val"}]
+        lappend lines "$label=[join $params ,]>$result"
+    }
+    return [lsort $lines]
+}
+
+# Conversion counts {rbox runbox} of NIR function NAME of TEXT.
+proc conversionsIn {nir name} {
+    set text [fnText $nir $name]
+    return [list [countIn {op rbox} $text] [countIn {op runbox} $text]]
+}
+
 # The outcome of native::evalHir of HIR: {value V} or {error CODE}.
 proc nativeOutcome {hir args} {
     resetEffects
@@ -117,8 +143,8 @@ proc nativeOutcome {hir args} {
     return [list value [core::value::show $result 1]]
 }
 
-# Every backend, and native with the ABI on and off (leaf inlining on and
-# off), agree on TEXT; returns the one outcome.
+# Every backend, and native with the ABI off / eligibility-only / demand-
+# filtered (leaf inlining on and off), agree on TEXT; returns the one outcome.
 proc parityAbi {text} {
     set hir [srcHir $text]
     set outcomes {}
@@ -127,9 +153,12 @@ proc parityAbi {text} {
         lappend outcomes [lindex $outcome 0]:[lindex $outcome 1]
     }
     set prepared [native::prepareHir $hir]
-    foreach abi {0 1} {
+    # The tagged ABI, the eligibility-only plan (-raw-demand-opt 0) and the
+    # demand-filtered plan (the default).
+    foreach {abi demand} {0 1 1 0 1 1} {
         foreach inline {0 1} {
-            set outcome [nativeOutcome $prepared -raw-int-abi-opt $abi -tiny-leaf-inline-opt $inline]
+            set outcome [nativeOutcome $prepared -raw-int-abi-opt $abi -raw-demand-opt $demand \
+                -tiny-leaf-inline-opt $inline]
             lappend outcomes [lindex $outcome 0]:[lindex $outcome 1]
         }
     }
@@ -216,7 +245,10 @@ test raw-helper-both {a closed non-recursive helper: raw parameter, raw result (
 test raw-param-tagged-result {the parameter fits, the result may exceed the small domain: raw parameter, tagged result} -body {
     set text {
         fn big(n):
-            n * 3000000000000000000
+            if n < 0:
+                0
+            else:
+                n * 3000000000000000000
 
         big(5) + big(7)
     }
@@ -248,7 +280,10 @@ test raw-mixed-parameters {fn f(a, b, s): a small, b unbounded, s a String: raw,
                 count(n - 1, acc + n)
 
         fn f(a, b, s):
-            length(s) + a + b
+            if a > 100:
+                0
+            else:
+                length(s) + a + b
 
         f(3, count(500, 0), "abc")
     }
@@ -259,7 +294,10 @@ test raw-mixed-parameters {fn f(a, b, s): a small, b unbounded, s a String: raw,
 test raw-mixed-physical-signature-in-nir {only position 0 is in rawparams; a hidden or tagged position is not} -body {
     set text {
         fn f(a, s):
-            length(s) + a
+            if a > 100:
+                0
+            else:
+                length(s) + a
 
         f(3, "abc") + f(4, "de")
     }
@@ -291,7 +329,10 @@ test raw-small-domain-edges {values at smallMin and smallMax round-trip with cor
 test raw-outside-small-result {a result Range reaching 2^62 is finite and fits an i64 register but not the tagged small-Int domain: no raw result} -body {
     set text {
         fn succ(n):
-            n + 1
+            if n < 0:
+                0
+            else:
+                n + 1
 
         succ(4611686018427387903)
     }
@@ -342,12 +383,12 @@ test raw-open-instance-stays-tagged {a function whose Block value escapes keeps 
         fn stash():
             [open_one]
 
-        a = open_one(5)
+        a = open_one(5) + 1
         [a, list_length(stash())]
     }
     set plan [abiPlan $text {*}$noInline]
     list $plan [abiReasons $text open_one<generic> {*}$noInline] [parityAbi $text]
-} -result {{open_one<int>=raw>raw open_one<generic>=val>val stash<generic>=>val} {not-int open-instance} {value:[10, 1]}}
+} -result {{open_one<int>=raw>raw open_one<generic>=val>val stash<generic>=>val} {not-int open-instance} {value:[11, 1]}}
 
 test raw-dynamic-call-uses-generic-entry {a function invoked through a Block value runs its tagged generic entry, and agrees} -body {
     set text {
@@ -376,11 +417,11 @@ test raw-exact-callable-target-is-raw {an exact callable specialization calls a 
         fn stash():
             [open_one]
 
-        [apply_dyn(open_one, 6), list_length(stash())]
+        [apply_dyn(open_one, 6) + 1, list_length(stash())]
     }
     set nir [nirOf $text {*}$noInline]
     list [abiPlan $text {*}$noInline] [countIn {callvalue} $nir] [parityAbi $text]
-} -result {{open_one<int>=raw>raw open_one<generic>=val>val {apply_dyn<block(e2), int>=val,raw>raw} stash<generic>=>val} 0 {value:[12, 1]}}
+} -result {{open_one<int>=raw>raw open_one<generic>=val>val {apply_dyn<block(e2), int>=val,raw>raw} stash<generic>=>val} 0 {value:[13, 1]}}
 
 # ---------------------------------------------------------------------------
 # Recursion
@@ -600,6 +641,290 @@ test raw-comparison-consumes-raw-directly {a raw parameter feeds every raw compa
 } -result {0 0 value:1}
 
 # ---------------------------------------------------------------------------
+# Raw-demand suppression (RAW-INT-ABI.md): eligibility is safety, selection
+# additionally needs a raw consumer somewhere in the position's use /
+# transport closure. Boolean reachability to a genuine raw consumer; no
+# scores.
+
+test demand-tagged-only-parameter {a small closed Int parameter that only reaches a tagged consumer (List construction) is eligible but stays tagged: no rawparams, no conversion at the boundary} -body {
+    set text {
+        fn wrap(n):
+            [n]
+
+        list_length(wrap(3))
+    }
+    set nir [nirOf $text {*}$noInline]
+    list [abiDemandPlan $text {*}$noInline] [abiReasons $text wrap<int> {*}$noInline] \
+        [physical [fnText $nir wrap]] [conversionsIn $nir wrap] [conversionsIn $nir <program>] [parityAbi $text]
+} -result {wrap<int>=supp>val {suppressed-no-raw-demand not-int} {{} 0} {0 0} {0 0} value:1}
+
+test demand-eligibility-only-mode-is-the-preliminary-plan {-raw-demand-opt 0 selects every eligible position: the same program is raw, with the conversions the demand rule removes} -body {
+    set text {
+        fn wrap(n):
+            [n]
+
+        list_length(wrap(3))
+    }
+    set nir [nirOf $text {*}$noInline -raw-demand-opt 0]
+    list [abiDemandPlan $text {*}$noInline -raw-demand-opt 0] [physical [fnText $nir wrap]] \
+        [conversionsIn $nir wrap]
+} -result {wrap<int>=raw>val {0 0} {1 0}}
+
+test demand-tagged-only-result {a bounded closed result whose every caller hands it to a tagged consumer is eligible but returned tagged (the body boxes it once; no result conversion at the caller)} -body {
+    set text {
+        fn pick(n):
+            if n < 3:
+                n
+            else:
+                3
+
+        [pick(1), pick(2)]
+    }
+    set nir [nirOf $text {*}$noInline]
+    list [abiDemandPlan $text {*}$noInline] [abiReasons $text pick<int> {*}$noInline] \
+        [physical [fnText $nir pick]] [conversionsIn $nir pick] [conversionsIn $nir <program>] [parityAbi $text]
+} -result {pick<int>=raw>supp {{{}} suppressed-no-raw-demand} {0 0} {1 0} {0 0} {value:[1, 2]}}
+
+test demand-raw-parameter {a parameter used by raw arithmetic is selected raw whatever its result does} -body {
+    set text {
+        fn inc(n):
+            n + 1
+
+        list_length([inc(2)])
+    }
+    set nir [nirOf $text {*}$noInline]
+    list [abiDemandPlan $text {*}$noInline] [physical [fnText $nir inc]] [conversionsIn $nir inc] [parityAbi $text]
+} -result {inc<int>=raw>supp {0 0} {1 0} value:1}
+
+test demand-raw-result {a bounded closed result consumed by raw arithmetic at a caller is selected raw} -body {
+    set text {
+        fn six(s):
+            length(s)
+
+        if six(concat("a", "b")) < 5:
+            1
+        else:
+            2
+    }
+    set nir [nirOf $text {*}$noInline]
+    list [abiDemandPlan $text {*}$noInline] [physical [fnText $nir six]] [parityAbi $text]
+} -result {six<str>=val>raw {{} 1} value:1}
+
+test demand-mixed-use-keeps-raw {raw arithmetic and a tagged storage use of the same parameter: a genuine raw demand exists, so RawInt is retained (mixed uses are not weighed)} -body {
+    set text {
+        fn both(n):
+            x = n + 1
+            [n, x]
+
+        list_length(both(4))
+    }
+    set nir [nirOf $text {*}$noInline]
+    list [abiDemandPlan $text {*}$noInline] [conversionsIn $nir both] [parityAbi $text]
+} -result {both<int>=raw>val {2 0} value:2}
+
+test demand-propagates-through-aliases {the only raw consumer is behind an alias chain} -body {
+    set text {
+        fn f(n):
+            y = n
+            z = y
+            z + 1
+
+        list_length([f(1)])
+    }
+    list [abiDemandPlan $text {*}$noInline] [parityAbi $text]
+} -result {f<int>=raw>supp value:1}
+
+test demand-any-branch-keeps-raw-all-tagged-branches-suppress {one branch with a raw consumer retains RawInt; when every reachable branch is tagged-only the parameter is tagged} -body {
+    set text {
+        fn some(n, c):
+            if c:
+                list_length([n])
+            else:
+                n + 1
+
+        fn none(n, c):
+            if c:
+                list_length([n])
+            else:
+                list_length([n, n])
+
+        [some(5, true), some(5, false), none(5, true), none(5, false)]
+    }
+    list [lsearch -inline -all [abiDemandPlan $text {*}$noInline] some<*] \
+        [lsearch -inline -all [abiDemandPlan $text {*}$noInline] none<*] [parityAbi $text]
+} -result {{{some<int, bool>=raw,val>supp}} {{none<int, bool>=supp,val>supp}} {value:[1, 6, 1, 2]}}
+
+test demand-dead-branch-raw-use-does-not-count {a raw use in a branch HIR/Range proved dead keeps nothing alive} -body {
+    set text {
+        fn f(n, c):
+            if c > 100:
+                n + 1
+            else:
+                list_length([n])
+
+        f(7, 3)
+    }
+    list [abiDemandPlan $text {*}$noInline] [parityAbi $text]
+} -result {{{f<int, int>=supp,raw>supp}} value:1}
+
+test demand-return-propagates {a returned parameter inherits the demand of its callers' use of the result: raw when a caller adds, tagged when callers only store it} -body {
+    set raw {
+        fn keep(n):
+            return n
+
+        keep(3) + 1
+    }
+    set tagged {
+        fn keep(n):
+            return n
+
+        [keep(3)]
+    }
+    list [abiDemandPlan $raw {*}$noInline] [abiDemandPlan $tagged {*}$noInline] [parityAbi $raw] [parityAbi $tagged]
+} -result {keep<int>=raw>raw keep<int>=supp>supp value:4 {value:[3]}}
+
+test demand-transport-chain-stays-raw {f result -> g parameter -> h parameter -> raw arithmetic: every transport position stays raw and no intermediate rbox/runbox exists} -body {
+    set text {
+        fn f(k):
+            if k > 0:
+                4
+            else:
+                5
+
+        fn h(z):
+            z + 1
+
+        fn g(y):
+            h(y)
+
+        g(f(1))
+    }
+    set nir [nirOf $text {*}$noInline]
+    list [abiDemandPlan $text {*}$noInline] [conversionsIn $nir g] [conversionsIn $nir <program>] [parityAbi $text]
+} -result {{f<int>=raw>raw g<int>=raw>supp h<int>=raw>supp} {0 0} {0 0} value:5}
+
+test demand-tagged-chain-is-all-tagged {f result -> g parameter -> h parameter -> tagged storage with no raw operation on the transported value: the whole chain is tagged (raw transport alone never creates demand)} -body {
+    set text {
+        fn f(k):
+            if k > 0:
+                4
+            else:
+                5
+
+        fn h(z):
+            [z]
+
+        fn g(y):
+            h(y)
+
+        list_length(g(f(1)))
+    }
+    set nir [nirOf $text {*}$noInline]
+    list [abiDemandPlan $text {*}$noInline] [conversionsIn $nir g] [conversionsIn $nir h] [parityAbi $text]
+} -result {{f<int>=raw>supp g<int>=supp>val h<int>=supp>val} {0 0} {0 0} value:1}
+
+test demand-forwarding-cycle-cannot-bootstrap-raw {a recursive position that only forwards the value to itself and returns it, whose caller stores it: no raw operation on the value anywhere, so neither the parameter nor the result is selected} -body {
+    set text {
+        fn f(n, c):
+            if c == 0:
+                n
+            else:
+                list_length([f(n, c - 1)])
+
+        [f(3, 5)]
+    }
+    list [abiDemandPlan $text {*}$noInline] [parityAbi $text]
+} -result {{{f<int, int>=supp,val>supp}} {value:[1]}}
+
+test demand-program-frontier {one raw region reaching a program-visible tagged result: raw internally, a single box at the final frontier} -body {
+    set text {
+        fn h(z):
+            z * 2
+
+        fn g(y):
+            h(y + 1) + 3
+
+        fn f(x):
+            g(x * 2) - 1
+
+        f(3)
+    }
+    set nir [nirOf $text {*}$noInline]
+    list [abiDemandPlan $text {*}$noInline] [conversionsIn $nir f] [conversionsIn $nir g] [conversionsIn $nir h] \
+        [conversionsIn $nir <program>] [parityAbi $text]
+} -result {{f<int>=raw>supp g<int>=raw>raw h<int>=raw>raw} {1 0} {0 0} {0 0} {0 0} value:16}
+
+test demand-fib-keeps-the-recursive-raw-cycle {the recursive parameter/result cycle has genuine raw seeds (compare, subtraction, addition): fib stays raw in both positions, with the trace naming them} -body {
+    set lowered [native::lowered [srcHir $fibSource]]
+    set spec [dict get $lowered specialization]
+    set plan [dict get $lowered abiPlan]
+    set out {}
+    foreach id [dict get $spec used] {
+        if {[hir::specialize::label $spec $id] ne "fib<int>"} continue
+        set p [dict get $plan $id]
+        lappend out [dict get $p params] [dict get $p result] \
+            [regsub -all {@e\d+} [lindex [lindex [dict get $p paramTrace] 0] 1] @] \
+            [regsub -all {@e\d+} [lindex [dict get $p resultTrace] 1] @]
+    }
+    set out
+} -result {rawint rawint {{parameter n} {raw rilt @}} {{result of fib<int> (raw riadd @)}}}
+
+test demand-suppressed-signature-is-consistent {a suppressed position is tagged for the callee and every caller: the physical signature is the one plan, validated by the NIR checker when the program is compiled} -body {
+    set text {
+        fn wrap(n):
+            [n]
+
+        fn twice(n):
+            list_length(wrap(n)) + list_length(wrap(n + 1))
+
+        twice(4) + twice(5)
+    }
+    set nir [nirOf $text {*}$noInline]
+    list [abiDemandPlan $text {*}$noInline] [physical [fnText $nir wrap]] [parityAbi $text]
+} -result {{twice<int>=raw>val wrap<int>=supp>val} {{} 0} value:4}
+
+test demand-is-deterministic {repeated lowering gives byte-identical NIR and machine code} -body {
+    set text {
+        fn pick(n):
+            if n < 3:
+                n
+            else:
+                3
+
+        fn h(z):
+            z + 1
+
+        fn g(y):
+            h(y)
+
+        [pick(1), g(pick(2))]
+    }
+    set a [nirOf $text {*}$noInline]
+    set b [nirOf $text {*}$noInline]
+    set hir [srcHir $text]
+    list [expr {$a eq $b}] [expr {[native::codeSize $hir] eq [native::codeSize $hir]}]
+} -result {1 1}
+
+test demand-explain-reports-the-trace {the ABI audit text names eligibility, the demand verdict and the chain} -body {
+    set text {
+        fn pick(n):
+            if n < 3:
+                n
+            else:
+                3
+
+        [pick(1)]
+    }
+    set lowered [native::lowered [srcHir $text] {*}$noInline]
+    set spec [dict get $lowered specialization]
+    set audit [native::rawabi::explainAll $native::lower::baseHir $spec $native::lower::ranges \
+        [dict get $lowered abiPlan]]
+    list [regexp {RawInt eligible yes\n      raw demand: parameter n -> raw rilt} $audit] \
+        [regexp {raw demand: none \(tagged consumers: result of pick<int> \(list element\)|raw demand: none \(tagged consumers: [^)]*} $audit] \
+        [regexp {ABI tagged \(suppressed-no-raw-demand\)} $audit]
+} -result {1 1 1}
+
+# ---------------------------------------------------------------------------
 # Errors and completions
 
 set errorSource {
@@ -615,7 +940,7 @@ set errorSource {
         if i > 4:
             acc
         else:
-            drive(i + 1, acc + check(3 - i))
+            drive(i + 1, acc + (check(3 - i) + 0))
 
     r = drive(0, 0):
         on Negative:
@@ -729,7 +1054,7 @@ test raw-gc-stack-map-has-no-raw-roots {the root report of a raw-parameter funct
 # ---------------------------------------------------------------------------
 # Standalone executables (JIT, object and executable all carry the ABI)
 
-proc aotParity {text} {
+proc aotParity {text {extra {}}} {
     set text [dedent $text]
     set dir [makeDirectory {raw int abi executable test}]
     set path [file join $dir {program with spaces.bot}]
@@ -745,7 +1070,7 @@ proc aotParity {text} {
             if {[lindex $outcome 0] ne "value"} { error "$backend: $outcome" }
             lappend expected [lindex $outcome 1]
         }
-        native::executable $hir [file rootname $path] -tiny-leaf-inline-opt 0
+        native::executable $hir [file rootname $path] -tiny-leaf-inline-opt 0 {*}$extra
         set relocated [file join $dir relocated]
         file rename [file rootname $path] $relocated
         file delete $path
@@ -792,6 +1117,60 @@ test raw-executable-mixed {raw, tagged and error-capable instances in one standa
         [r, ok, work(3, "a", [1, 2])]
     }
 } -result {[-77, -1, 8]}
+
+set demandSource {
+    fn wrap(n):
+        [n]
+
+    fn pick(n):
+        if n < 3:
+            n
+        else:
+            3
+
+    fn both(n):
+        x = n + 1
+        [n, x]
+
+    fn h(z):
+        z + 1
+
+    fn g(y):
+        h(y)
+
+    fn f(n, c):
+        if c == 0:
+            n
+        else:
+            list_length([f(n, c - 1)])
+
+    fn chain(x):
+        g(x * 2) - 1
+
+    [list_length(wrap(3)), pick(1), pick(2), list_length(both(4)), g(pick(2)), f(3, 5), chain(3)]
+}
+
+test raw-executable-demand {suppressed, mixed, transported and raw instances in one standalone executable, with demand suppression on and off, also under GC stress} -constraints executableAot -body {
+    list [aotParity $demandSource] [aotParity $demandSource {-raw-demand-opt 0}]
+} -result {{[1, 1, 2, 2, 3, 1, 6]} {[1, 1, 2, 2, 3, 1, 6]}}
+
+# The corpus hashtable carries runtime kind guards (its table is an untyped
+# MutableArray handle), so it is not AOT-ready and has no standalone
+# executable; it runs under the JIT instead, with and without demand
+# suppression and the tagged ABI, every collection forced.
+test raw-hashtable-jit-gc-stress {the corpus hashtable (tagged-only Int helpers, mixed callers, self-tail loop slots) agrees under the JIT with the ABI off, eligibility-only and demand-filtered, every allocation site forcing a collection} -body {
+    set hir [native::prepareHir [surface::readProgramFile [file join $::projectRoot examples stdlib hashtable.bot]]]
+    set outcomes {}
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        foreach {abi demand} {0 1 1 0 1 1} {
+            lappend outcomes [nativeOutcome $hir -raw-int-abi-opt $abi -raw-demand-opt $demand]
+        }
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+    lsort -unique $outcomes
+} -result {{value {[true, true, false, false, true, 1]}}}
 
 # ---------------------------------------------------------------------------
 # Randomized differential: bounded random programs, ABI on/off

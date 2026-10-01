@@ -2,19 +2,42 @@
 
 ## Outcome
 
-An exact, **closed** Botlish instance now transports an Int parameter, and its
+An exact, **closed** Botlish instance transports an Int parameter, and its
 successful Int result, as a **raw signed machine integer** (`RawInt`, a
 two's-complement `i64` on the current native target) instead of a tagged
-`Value`, whenever the instance's final Ranges prove the position fits the
-tagged small-Int domain (`hir::range::fitsSmall`). It is a physical calling
-convention only: the semantic type stays `Int`, arbitrary precision, and the
-canonical tagged ABI is untouched everywhere the proof does not apply.
+`Value` when two independent conditions hold:
+
+1. **Safety (eligibility, the theorem).** The position's semantic type is Int,
+   its instance is closed (`InstanceClosed`), and its final Range
+   `fitsSmall` (`hir::range::fitsSmall`): the integer is provably a small
+   tagged Int at every call, so the raw/tagged conversions at the boundary are
+   non-allocating and lossless.
+2. **Usefulness (raw demand).** Raw representation is *demanded* somewhere in
+   the position's use / transport closure: some reachable consumer
+   genuinely wants a raw Int (a raw arithmetic or comparison operand, a raw
+   self-tail loop slot), possibly behind aliases, branches, returns and exact
+   call edges.
+
+```
+eligible  +  raw demanded somewhere in the use / transport closure   =>  RawInt
+eligible  +  the entire closure is tagged-only                       =>  tagged Value
+```
+
+The second condition is a usefulness filter layered *after* the safety
+theorem; it never makes an ineligible position raw and never changes a value,
+an error or a completion. It exists because eligible-but-undemanded raw
+transport is a pointless `tagged -> raw -> tagged` round trip (the preliminary
+milestone's hashtable/CSV regression, below). The semantic type stays `Int`,
+arbitrary precision, and the canonical tagged ABI is untouched everywhere the
+proof or the demand rule does not apply.
 
 * `fib<int>` (`bench/fib.bot`) is physically `i64 fib(i64 n)`: `n` raw, the
   result raw, `n - 1` / `n - 2` passed raw, results added with the existing
   raw `riadd`, returned raw. **No `rbox`/`runbox` remains in the function**
   (before: 3 + 3). The program passes the literal `22` as a `rawint` and boxes
-  the final result once.
+  the final result once. Its recursive parameter/result cycle has genuine raw
+  seeds (`rilt`, `risub`, `riadd`), so demand suppression leaves it exactly as
+  the preliminary milestone had it: **byte-identical NIR, 1,404,178 Ir/run**.
 * Dynamic instructions (callgrind, 21 runs, run 0 excluded): **1,547,454 →
   1,404,178 Ir/run (−9.3 %)**. All 286,561 Ir of retag/untag disappear; about
   half of that is given back by one extra callee-saved register the backend now
@@ -24,27 +47,32 @@ canonical tagged ABI is untouched everywhere the proof does not apply.
   closedness and Range analyses and read by the callee's lowering and by every
   call site. NIR carries the physical signature in the function header
   (`rawparams="0 2" rawresult=1`); `native/src/nir.rs` re-validates caller/callee
-  agreement and rejects a mismatch as a compiler bug.
+  agreement and rejects a mismatch as a compiler bug. Demand suppression feeds
+  that same plan, so a suppressed position is tagged for the callee and for every
+  caller by construction.
 * Errors are never encoded in the integer. A raw-result function that cannot
   fail returns the bare integer; one that can fail returns the integer plus a
   status word (second return register).
-* Whole canonical corpus: machine code 101,963 → 101,662 bytes (−301), GC root
-  candidates 1,283 → 1,238, 228 instances examined, 68 gain a raw position
-  (56 raw parameters, 23 raw results, 4 both). Honest caveat: where an Int only
-  flows through tagged consumers (hashtable, csv) the static conversion count
-  went **up** (47 → 66 `rbox`, 47 → 48 `runbox`) and `hashtable` grew by 67
-  bytes; see *Known limitations*.
-* Full regression (interp, compile, native coverage, Rust), differential
-  fuzzing (3,300 random programs, 0 disagreements) and standalone-executable
-  parity pass. GC stress passes for the native test files and the fuzz run; the
-  suite-wide stress run is left to CI's `gc-stress` job (see *GC stress*).
+* Whole canonical corpus (A tagged ABI → B RawInt eligibility only → C RawInt +
+  demand suppression): machine code **101,963 → 101,662 → 101,552 bytes**
+  (C is −411 vs A and −110 vs B), 233 functions in every configuration, GC
+  root candidates 1,283 → 1,238 → 1,244. Of 228 instances examined, **51 gain a
+  raw position** (B: 68): 53 raw parameters (B: 56, **3 suppressed**), 6 raw
+  results (B: 23, **17 suppressed**), 1 instance with both (B: 4). Static
+  `rbox`/`runbox`: **47/47 → 66/48 → 60/41**. The hashtable's +67 bytes
+  fall to +54 (the residue is one mixed-caller result, see *Hashtable
+  regression recovery*) and the CSV regression is recovered
+  (`csv_geometric` +19 → 0, `csv_records` −41 → −68).
+* Regression, differential fuzzing, GC stress and standalone-executable
+  parity: see *Full regression*, *Differential testing*, *GC stress* and
+  *Standalone parity* (results pending final validation).
 
-Files: `native/rawabi.tcl` (planner, audit), `native/lower.tcl` (plan storage,
-callee/caller lowering, raw `if` join, raw alias, option),
+Files: `native/rawabi.tcl` (planner, demand pass, audit), `native/lower.tcl`
+(plan storage, callee/caller lowering, raw `if` join, raw alias, options),
 `native/src/nir.rs` (header attributes, validation, call-site effect rule, unit
 tests), `native/src/codegen/clif.rs` (physical signature, prologue, call/ret,
 generic-entry conversion), `native/explain-native.tcl` (`raw-int-abi.txt`),
-`tests/raw-int-abi.test` (45 tests), `audit/raw-int-abi/`.
+`tests/raw-int-abi.test` (65 tests), `audit/raw-int-abi/`.
 
 ## Motivation
 
@@ -132,11 +160,189 @@ treats generic closure instances as open then (found by the existing
 ## Authoritative ABI plan
 
 `native::rawabi::plan` returns `InstanceId → {params {value|rawint…} result
-value|rawint paramReasons resultReason closed}`. It is stored once in
-`native::lower::abiPlan`. Callers and callees go through `AbiParams` /
-`AbiResult`; nothing decides rawness at an individual call instruction. The
+value|rawint paramReasons resultReason closed paramEligible resultEligible
+paramTrace resultTrace}`. It is stored once in `native::lower::abiPlan`. Callers
+and callees go through `AbiParams` / `AbiResult`; nothing decides rawness at an
+individual call instruction, and the demand filter (below) is applied *inside*
+the plan, never in lowering, so a position the demand rule keeps tagged is
+tagged in the callee's prologue/return and at every call site. The
 physical-kind vocabulary (`value`, `rawint`) is a seed for future scalar
 representations; only `rawint` is implemented.
+
+## Why safety and usefulness are separate
+
+The eligibility theorem answers *"can this value safely be transported raw?"*
+It reads three facts (type, closedness, `fitsSmall`) and is the only thing that
+makes raw transport **sound**. It says nothing about whether raw transport is
+**worth it**: an eligible parameter that only reaches `list_append`,
+`mutable_array_set`, a `hash` call or a struct field is a tagged value in a raw
+costume. The caller unboxes (or computes raw), the callee immediately re-boxes
+for its tagged consumer, and the pair `rbox`/`runbox` buys nothing:
+
+```
+RawInt-eligible value  ->  raw at the function boundary  ->  rbox  ->  tagged consumers only
+```
+
+That is the preliminary milestone's measured symptom (static `rbox` 47 → 66,
+`hashtable` +67 bytes). The two questions are kept as two distinct planner
+stages with distinct vocabulary:
+
+* **eligible** = proven safe (Position, unchanged, still the whole safety rule);
+* **selected** = eligible **and** raw-demanded (the demand pass, below).
+
+Only selected positions are physical RawInt. The plan records both
+(`paramEligible`/`resultEligible` beside `params`/`result`), so the audit can
+always say *which* of the two a position failed. A position can be eligible but
+not selected; it can never be selected without being eligible.
+
+## Raw-demand suppression
+
+The rule is deliberately the smallest one that removes the dominated case:
+
+```
+RawInt selected   iff   RawInt eligible   AND   raw representation is demanded
+                                                  somewhere in its use / transport closure
+```
+
+If the entire closure ends in tagged consumers, the ABI position stays tagged
+(`suppressed-no-raw-demand`). If *any* genuine raw demand exists, RawInt is
+retained, however many tagged uses there also are. There are no scores,
+distances, weights, consumer counts, frequency or spill estimates and no
+profitability model: raw representation with **no** raw consumer anywhere is
+categorically a conversion cost with no benefit, and only that case is
+suppressed. Mixed raw/tagged use is left raw for now (see *Known
+limitations*).
+
+Planner pipeline (the final plan stays the one authoritative result):
+
+```
+Range / closedness
+  -> RawInt eligibility                 (Position: unchanged)
+  -> raw-demand analysis                (Demand: boolean reachability)
+  -> final ABI plan                     (native::lower::abiPlan)
+  -> lowering
+```
+
+`native::rawabi::plan` runs eligibility, then `Demand` over the eligible
+positions, and returns the plan; lowering never re-decides a position, so the
+callee and every caller see one physical signature.
+
+## Demand graph
+
+`Demand` builds a small directed graph per program and computes one boolean per
+eligible position.
+
+Nodes: `P:ID:K` (parameter K of instance ID), `R:ID` (its successful result),
+`B:ID:BINDING` (a local or parameter binding of that instance's region) and one
+distinguished seed `RAW`. An edge `A -> B` reads "if B is raw-demanded then so is
+A": A's value flows into B. **Absence of an edge is a tagged consumer.**
+
+Raw-demand seeds (edges into `RAW`), using the repository's actual operation
+categories:
+
+| seed | what lowering does with it |
+|---|---|
+| operand of a raw-representable native op: `+ - * < <= > >=`, `==` on two Ints, the proven-safe `shift_left`/`shift_right` | `riadd risub rimul rilt rile rigt rige rieq rishl rishr` consume the operand raw. Same range conditions as `RawEligibleCall`/`RawEligibleShift` (both operands, and for arithmetic the result, `fitsSmall`), without the guard facts (which only ever reject), so the planner is never stricter than lowering |
+| a slot of a self-tail loop whose entry Range `fitsSmall` | `native::lower::RawParams` already keeps that parameter a raw register for the whole function, whatever the ABI; a self tail call passes it raw |
+
+Everything else a value can reach is **tagged**, positively recognized as such:
+a tagged native op (`list`, `list_get`, `mutable_array_*`, `hash`, `mod`,
+`bit_and`, an equality that is not Int-vs-Int, ...), a generic or dynamic call,
+a call argument whose callee position is not eligible (an eligible one gets an
+edge, which reaches `RAW` only if that position is itself demanded), struct
+fields, `ok`/`error` payloads, loop bounds, list-loop elements, branch
+conditions, discarded statement values, the program's own last value, a
+captured or module-static slot (written tagged), and a call's callee.
+
+Any construct the pass does not recognise adds an edge into `RAW`: the fallback
+is always *keep the existing decision*.
+
+## Transport propagation
+
+Demand propagates backward along **transport-preserving** edges; each is an edge
+in the graph:
+
+* **alias / binding**: `y = x`: `B(x)` flows to `B(y)`, and `B(y)`'s own uses are
+  whatever they are (`z = y; z + 1` demands `x`);
+* **branches**: each reachable branch's last value flows to the `if`'s own sink;
+  one raw branch retains RawInt, all-tagged branches do not. Branches decided
+  by `hir::range::ConditionOutcome` or marked unreachable in the instance view
+  are skipped (the same facts lowering uses; no new reachability analysis);
+* **return** and a body's tail value: flow into `R(this instance)`;
+* **exact call argument**: argument `i` flows into `P(callee, i)` iff that
+  position is eligible, so demand continues through `P(callee, i)`'s own uses
+  and onward transports (`f` result → `g` parameter → `h` parameter → raw op
+  stays raw end to end);
+* **exact call result**: `R(callee)` flows into the consumer of the call's
+  value at each direct call site. Because RawInt requires a closed instance,
+  every call site is known (every invocation is a direct exact call recorded in
+  some instance's `calls` map), so a result's demand is determined from the
+  *complete* caller set. An open instance is never eligible, so open demand is
+  never inferred;
+* **break value** flows to the loop's sink; **handle** forwards its sink to its
+  call and handler bodies.
+
+A position is demanded iff it **reaches `RAW`** (a reverse breadth-first search
+from the seed; monotone, deterministic, `O(values + use edges + exact transport
+edges)`, no path enumeration). Consequently *raw transport alone never creates
+demand*: a cycle of pure transport edges (`f(x) -> g(x)`, `g(x) -> f(x)`, or a
+self-forwarding non-tail recursion) is never reached from `RAW` and collapses to
+tagged. Transport propagates existing demand; it cannot bootstrap its own.
+
+Parameters and results are planned in their own directions. A parameter's
+demand is its uses in the callee's body and onward transports; a result's
+demand is the demand of every closed caller's use of the call value. A body
+that computes its result raw does not by itself demand a raw result (it would
+be boxed somewhere regardless); a raw-consuming callee does demand a raw
+parameter (it removes the callee's own unboxing).
+
+## Tagged-only suppression
+
+A parameter or result whose whole closure is tagged-only stays tagged:
+
+```
+fn wrap(n): [n]                 # n: Int, small, closed -> eligible
+list_length(wrap(3))            # n only reaches `list` (tagged): suppressed
+```
+
+`wrap<int>=val>val`, `paramReasons {suppressed-no-raw-demand}`, no `rawparams`
+in the header, zero `rbox`/`runbox` at the call or in the callee.
+`tests/raw-int-abi.test` (`demand-*`) pins the parameter, result, mixed,
+alias, branch, dead-branch, return, transport-chain, tagged-chain,
+self-forwarding-cycle and program-frontier shapes. A bounded result whose every
+caller stores it (`[pick(1), pick(2)]`) is eligible and suppressed
+(`pick<int>=raw>supp`); a result consumed by a raw comparison at a caller is
+selected (`six<str>=val>raw`).
+
+The audit text (`native/explain-native.tcl`'s `raw-int-abi.txt`,
+`native::rawabi::explain`) states, for each eligible position, the verdict and
+its trace:
+
+```
+instance fib<int>
+  params:
+    n:
+      entry [0, 22]    fitsSmall yes    RawInt eligible yes
+      raw demand: parameter n -> raw rilt @e4
+      ABI RawInt
+  result:
+    range [0, 17711]   fitsSmall yes    RawInt eligible yes
+    raw demand: result of fib<int> (raw riadd @e9)
+    ABI RawInt
+
+instance ht_alloc<int>
+  params:
+    capacity:
+      entry [8, 8]     fitsSmall yes    RawInt eligible yes
+      raw demand: none (tagged consumers: tagged native mutable_array_allocate,
+                        tagged argument 2 of ht_fill_empty<mutarray, int, int>)
+      ABI tagged (suppressed-no-raw-demand)
+```
+
+`-raw-demand-opt 0` (env `BOTLISH_NATIVE_RAW_DEMAND_OPT=0`) is an audit-only
+switch (not a language feature): it keeps eligibility and skips the demand
+filter, reproducing the preliminary "eligible ⇒ raw" plan for three-way
+comparison. `-raw-int-abi-opt 0` is still the tagged baseline.
 
 ## Parameter raw masks, raw result planning
 
@@ -179,11 +385,15 @@ arguments, tag the result / status) even though it can never run.
 
 `hir::specialize::analyze` (instances, the one closedness result) →
 `hir::range::analyze` (entry Ranges, call results, bounded recursive result
-summaries) → **`native::rawabi::plan`** → escape / string region / block escape /
-traversal / construction analyses → NIR lowering → Cranelift. The planner runs
-after the Range results are stable and strictly before any lowering. It is
-downstream of the proof: raw selection removes boxing, never a check the proof
-relied on, so it cannot feed back into Range.
+summaries) → **`native::rawabi::plan`** (eligibility, then the raw-demand
+analysis) → escape / string region / block escape / traversal / construction
+analyses → NIR lowering → Cranelift. The planner runs after the Range results
+are stable and strictly before any lowering. It is downstream of the proof: raw
+selection removes boxing, never a check the proof relied on, so it cannot feed
+back into Range. The demand pass is monotone: it only reads eligibility (never
+speculative raw selection), seeds from actual raw operations and propagates
+backward, so there is no circular planning (no position is raw merely because
+another is raw).
 
 ## Exact-call interaction
 
@@ -393,7 +603,7 @@ comparisons consuming raw directly.
 * exact callable specialization calls the raw instance directly; the generic
   instance of the same function stays tagged.
 
-## ABI census
+## ABI census (preliminary: eligibility only)
 
 `audit/raw-int-abi/out/census.txt` (17 canonical programs: `bench/*.bot`,
 `examples/stdlib/*.bot`): **228 instances examined; 56 raw parameter positions;
@@ -414,7 +624,7 @@ Call edges (corpus, emitted NIR): off — tagged→tagged 309; on — raw→raw 
 tagged→raw 48 (frontier conversions in the caller), raw→tagged 18,
 tagged→tagged 219.
 
-## Conversion census
+## Conversion census (preliminary: eligibility only)
 
 Total NIR `rbox`/`runbox`: **47/47 → 66/48**. Classified call-boundary
 conversions (an `rbox` feeding a call argument or `ret`; a `runbox` of a call
@@ -424,7 +634,7 @@ The static total went up in programs where an Int is raw only to be consumed by
 tagged operations (hashtable `ht_probe_*`/`ht_grow_or_clean`/`ht_alloc`,
 csv_records) — see limitations.
 
-## Code-size impact
+## Code-size impact (preliminary: eligibility only)
 
 `out/codesize.txt`: whole-corpus machine code **101,963 → 101,662 bytes
 (−301, −0.3 %)**; the functions that gain a raw signature −62 bytes (callers
@@ -433,6 +643,213 @@ function +7 for the `rawint`/`rbox`); loop-count −6; sum-refined −9; matmul
 −223 (−4.7 %); refined-checks −21; csv_records −41; **hashtable +67 (+0.5 %)**,
 csv_geometric +19. No pathological growth, but the "proven ⇒ raw, no
 profitability test" policy is not uniformly a win in size.
+
+## Three-way conversion census
+
+`audit/raw-int-abi/tools/demand.tcl` (`out/demand.txt`, `-detail` adds every
+position's trace) lowers each canonical program three ways: **A** tagged ABI
+(`-raw-int-abi-opt 0`, the pre-RawInt baseline), **B** RawInt eligibility only
+(`-raw-demand-opt 0`, the preliminary result) and **C** RawInt + demand
+suppression (production). Static NIR counts over the 17 programs, 233 functions:
+
+| | rbox | runbox | machine bytes |
+|---|---:|---:|---:|
+| A tagged baseline | 47 | 47 | 101,963 |
+| B eligibility only | 66 | 48 | 101,662 |
+| C demand suppression | **60** | **41** | **101,552** |
+
+Per program (rbox A / B / C; runbox A / B / C; bytes A / B / C; eligible →
+selected positions, parameters and results):
+
+| program | rbox | runbox | machine bytes | eligible → selected |
+|---|---|---|---|---|
+| fib | 3 / 1 / 1 | 3 / 0 / 0 | 181 / 181 / 181 | 1→1; 1→1 |
+| lex-strategy | 4 / 5 / 5 | 4 / 3 / 3 | 5119 / 5079 / 5079 | 3→3; 0→0 |
+| loop-count | 4 / 2 / 3 | 1 / 0 / 0 | 287 / 281 / 274 | 2→2; 1→0 |
+| refined-checks | 7 / 10 / 8 | 11 / 10 / 9 | 9089 / 9068 / 9046 | 10→10; 6→2 |
+| source-checks | 1 / 1 / 1 | 3 / 3 / 3 | 4249 / 4249 / 4249 | 0→0; 0→0 |
+| sum-refined | 1 / 1 / 1 | 0 / 0 / 0 | 286 / 277 / 277 | 1→1; 0→0 |
+| test-selection | 0 / 0 / 0 | 0 / 0 / 0 | 6421 / 6421 / 6421 | 0→0; 0→0 |
+| uri-steady | 5 / 8 / 6 | 7 / 6 / 5 | 5462 / 5459 / 5437 | 9→9; 4→1 |
+| ai_text_clean | 1 / 1 / 1 | 1 / 1 / 1 | 3081 / 3078 / 3078 | 2→2; 0→0 |
+| csv | 0 / 1 / 1 | 2 / 1 / 1 | 5723 / 5719 / 5719 | 1→1; 0→0 |
+| csv_chunked | 2 / 2 / 2 | 4 / 4 / 4 | 10168 / 10142 / 10142 | 3→3; 1→0 |
+| csv_geometric | 0 / 1 / 0 | 1 / 3 / 1 | 7578 / 7597 / 7578 | 1→0; 0→0 |
+| csv_records | 8 / 14 / 13 | 3 / 9 / 6 | 23245 / 23204 / 23177 | 11→10; 5→1 |
+| hashtable | 4 / 11 / 10 | 0 / 1 / 1 | 12732 / 12799 / 12786 | 3→2; 5→1 |
+| matmul | 5 / 6 / 6 | 5 / 5 / 5 | 4734 / 4511 / 4511 | 8→8; 0→0 |
+| string_replace | 0 / 0 / 0 | 1 / 1 / 1 | 2618 / 2618 / 2618 | 0→0; 0→0 |
+| string_reverse | 2 / 2 / 2 | 1 / 1 / 1 | 990 / 979 / 979 | 1→1; 0→0 |
+
+C is no larger than B in any program, and no larger than A in any program
+except `hashtable`. The target of the cleanup is the conversion introduced
+*solely* by raw values whose closure is tagged-only, not the old counts: some
+conversions are legitimate new RawInt frontiers.
+
+**Classification of every remaining `rbox`** (the tool follows each box back to
+where its raw value came from, and whether anything else wanted that value
+raw):
+
+| class | meaning | A | B | C |
+|---|---|---:|---:|---:|
+| frontier | raw *computation* (arithmetic, constant, join) boxed for a tagged consumer: the inherent tagged frontier of raw arithmetic | 25 | 21 | 22 |
+| mixed | raw parameter / raw call result with a genuine raw consumer in the same function as the tagged one (retained by policy) | 0 | 22 | 22 |
+| mixed-callers | raw call result with no raw consumer at *this* call site, kept raw because another caller wants it raw (retained by policy) | 0 | 16 | 12 |
+| program boundary | the program's own final boxed result | 0 | 1 | 1 |
+| other (tagged-ABI call boundaries in A; unclassified here) | | 22 | 3 | 3 |
+| **raw selected, no raw consumer** | a raw parameter whose every use is tagged: a bug of the demand rule | 0 | **3** | **0** |
+
+So the conversions whose reason is *raw selected but no raw consumer* are 3 in
+the preliminary plan and **0** after suppression; what remains is the
+inherent frontier, mixed uses (kept by design) and the mixed-caller case, which
+is the hashtable residue below.
+
+## Hashtable regression recovery
+
+Eligible hashtable positions and their verdicts (`out/demand.txt`):
+
+| position | closure | verdict |
+|---|---|---|
+| `ht_min_capacity`, `ht_empty_state`, `ht_occupied_state`, `ht_tombstone_state` results | `mutable_array_set` / `==` against an untyped `mutable_array_get` / `ht_alloc` / `ht_capacity_for`'s unbounded argument: tagged only | **suppressed** (4) |
+| `ht_alloc.capacity` | `mutable_array_allocate`, `ht_fill_empty`'s unbounded argument: tagged only | **suppressed** |
+| `ht_rehash_scan.i`, `.oldCapacity` | self-tail loop slot / `i >= oldCapacity` / `i + 1` | raw demanded |
+| `ht_capacity` result | `oldCapacity = ht_capacity(table)` → `ht_rehash_scan`'s raw loop slot (one caller), but `ht_probe_start`, `ht_probe_next`, `ht_should_grow` (`* 2` overflows the small range) and others use it tagged | raw demanded at one call site: **retained** (mixed callers) |
+
+Machine code, whole program: **A 12,732 → B 12,799 (+67) → C 12,786 (+54)**;
+`rbox` 4 → 11 → 10, `runbox` 0 → 1 → 1. Per function (C − A): `ht_capacity` +31,
+`ht_rehash` +18, `ht_probe_next` +7, `ht_probe_start` +6, `ht_should_grow` −8;
+`ht_alloc` (B +33) and `ht_new` (B −20, which only existed because
+`ht_min_capacity` was raw) are back at their tagged sizes.
+
+The cleanup therefore recovers **13 of the 67 bytes (19 %)**, not the whole
+regression, and the rest is *not* a tagged-only closure: `ht_capacity`'s result is
+raw-demanded by exactly one of its callers (`ht_rehash`, through the
+`ht_rehash_scan` loop slot) and tagged by the rest. Mixed raw/tagged use is
+retained by the policy of this cleanup (see *Known limitations*: the
+`1 raw vs N tagged` trade-off is for an opportunity-cost model once real
+workloads justify it). No hashtable-specific rule exists.
+
+## CSV conversion recovery
+
+The CSV programs (`csv`, `csv_chunked`, `csv_geometric`, `csv_records`) were
+re-audited position by position. The tagged-only Ints are the same
+`ht_*`/`geo_*` helpers they share with the hashtable:
+
+* `csv_geometric` **+19 → 0 bytes** (`geo_new_capacity.capacity` only reaches the
+  overflowing `capacity * 2`, a tagged multiply; `geo_grow` stops needing an
+  `rbox` for it): fully recovered, `rbox` 1 → 0, `runbox` 3 → 1.
+* `csv_records` **23,204 (B) → 23,177 (C)** (A 23,245; −68 vs A): the four
+  `ht_*_state`/`ht_min_capacity` results and `geo_new_capacity.capacity` are
+  suppressed; `rbox` 14 → 13, `runbox` 9 → 6. Its remaining 6 `mixed-callers`
+  conversions are the same `ht_capacity` result as above.
+* `csv_chunked` and `csv` are unchanged (their raw positions are real:
+  `index` compared with `>=` and used as a self-tail loop slot); `chunk_size`'s
+  result, only stored/compared against an untyped value, is suppressed.
+
+## Updated ABI census
+
+`out/census-demand.txt` (`census.tcl`, default = demand-filtered): **228
+instances examined; 53 raw parameter positions; 6 raw results; 1 instance with
+both; 51 instances with any raw ABI (22 recursive, 29 non-recursive); 177
+tagged-only.** Against the preliminary 228 / 56 / 23 / 4 / 68 (22 / 46):
+
+| | B eligibility only | C demand-filtered |
+|---|---:|---:|
+| instances examined | 228 | 228 |
+| raw parameter positions | 56 | **53** |
+| raw result positions | 23 | **6** |
+| instances with any raw position | 68 | **51** |
+| instances with both | 4 | **1** |
+| recursive / non-recursive with a raw position | 22 / 46 | 22 / 29 |
+
+Call edges (emitted NIR): off — tagged→tagged 309; **on — raw→raw 24, tagged→raw
+38, raw→tagged 17, tagged→tagged 230** (B: 24 / 48 / 18 / 219). Every recursive
+raw instance survives (their cycles have genuine seeds); what disappears is
+non-recursive helpers with no raw consumer.
+
+**Suppression census** (parameters and results separately):
+
+| | eligible | selected | suppressed (tagged-only) |
+|---|---:|---:|---:|
+| parameters | 56 | 53 | 3 |
+| results | 23 | 6 | 17 |
+| **total positions** | **79** | **59** | **20** |
+
+The three suppressed parameters are `ht_alloc.capacity` (hashtable) and
+`geo_new_capacity.capacity` (csv_geometric, csv_records) — each
+`eligible-fits-small`, then `suppressed-no-raw-demand`. The seventeen
+suppressed results are `ht_min_capacity`, `ht_empty_state`, `ht_occupied_state`
+and `ht_tombstone_state` (in the two programs that use the table, 8),
+`byte::from_int`, `byte::nibble` and `high_nibble` (in the two programs that use
+the byte helpers, 6), `chunk_size`, `scan_while` and `loop-count`'s `work`
+(1 each); `out/demand.txt` lists every one with its tagged consumers. Results
+are suppressed far more often than parameters because a bounded result is
+usually handed to a store, a tagged comparison or an unbounded accumulator,
+while a bounded parameter usually exists because the callee compares or steps
+it.
+
+## Dynamic instructions per run (three-way)
+
+Callgrind steady state (`profile-nir.sh`, the same audit binary, 4 runs of which
+run 0 is excluded; `out/ir-demand.txt`), Ir per run of the emitted NIR:
+
+| program | A tagged | B eligibility only | C demand-filtered | C vs A | C vs B |
+|---|---:|---:|---:|---:|---:|
+| fib | 1,547,454 | 1,404,178 | 1,404,178 | -9.26 % | +0.00 % |
+| loop-count | 13,039 | 12,037 | 12,037 | -7.68 % | +0.00 % |
+| sum-refined | 12,437 | 12,435 | 12,435 | -0.02 % | +0.00 % |
+| lex-strategy | 311,115 | 313,567 | 313,859 | +0.88 % | +0.09 % |
+| refined-checks | 6,776,663 | 6,776,616 | 6,776,688 | +0.00 % | +0.00 % |
+| uri-steady | 42,754,528 | 42,690,043 | 42,702,585 | -0.12 % | +0.03 % |
+| matmul | 9,246 | 9,226 | 9,226 | -0.22 % | +0.00 % |
+| hashtable | 11,727 | 11,790 | 11,801 | +0.63 % | +0.09 % |
+| csv_records | 99,472 | 99,745 | 99,490 | +0.02 % | -0.26 % |
+| csv_geometric | 19,637 | 19,652 | 19,637 | +0.00 % | -0.08 % |
+| csv_chunked | 19,516 | 19,504 | 19,504 | -0.06 % | +0.00 % |
+
+`fib` is exactly the preliminary figure (identical NIR). `lex-strategy`'s B and C
+NIR are byte-identical, so its 0.1 % B/C spread is run-to-run measurement noise
+of an allocating program, not code; its +0.8 % against the tagged ABI is the
+preliminary RawInt's, unchanged by suppression. `csv_geometric` returns to the
+tagged baseline (the regression was entirely tagged-only), `csv_records` falls
+from +0.27 % (B) to +0.02 % (C), and `hashtable` stays +0.6 % over the tagged
+baseline because of the mixed-caller `ht_capacity` result (and is 11 Ir, +0.09 %,
+above B: a smaller program that executes marginally more instructions; not
+investigated further at the level of a ~11.8 k-instruction run). `loop-count`,
+`matmul`, `csv_chunked` and `uri-steady` are at or below the tagged baseline.
+No workload slows down materially: the worst is `lex-strategy` (+0.9 %), which
+the demand rule neither caused nor changed.
+
+## Updated corpus code-size result
+
+Whole canonical corpus (17 programs, 233 functions in every configuration):
+
+| | machine code bytes | GC root candidates | root slots | safepoints |
+|---|---:|---:|---:|---:|
+| A tagged baseline | 101,963 | 1,283 | 812 | 595 |
+| B eligibility only | 101,662 (−301) | 1,238 | 781 | 595 |
+| C demand-filtered | **101,552 (−411)** | 1,244 | 782 | 595 |
+
+The corpus result *improves* on the preliminary (−110 bytes vs B). Root
+candidates rise by 6 over B (positions that went back to tagged are legitimately
+rootable again), still 39 below A; safepoints are unchanged. Functions with no
+root slot: 46 → 48 → 47 of 233 (`out/roots-demand.txt`).
+
+## Updated fib result
+
+`fib<int>` stays `i64 fib(i64 n)`: raw parameter, raw result, **0 `rbox`/0
+`runbox` in the function**, the recursive call arguments `risub` results passed
+raw, results `riadd`ed raw and returned raw. Its demand trace
+(`raw demand: parameter n -> raw rilt @e4`, `result of fib<int> (raw riadd
+@e9)`) names the genuine seeds, which is why the recursive parameter/result cycle
+survives the suppression. The emitted NIR is **byte-identical** to the
+preliminary RawInt NIR (`out/fib/demand.nir` vs `out/fib/abi1.nir`), so the
+machine code is the same: `fib<int>` 141 bytes (`codeSize`), whole program 181.
+
+Callgrind, the same methodology and the same audit binary (`profile-nir.sh`, 21
+runs, run 0 excluded; `out/fib/profile-demand/`): **1,404,178 Ir/run**, exactly
+the preliminary figure (28,656 internal calls at 30 instructions, 28,657 leaf
+calls at 19). No change was expected and none occurred.
 
 ## Compile-time impact
 
@@ -451,6 +868,31 @@ negligible: 0.03 ms for `fib`, `loop-count`, `sum-refined`; 0.27 ms for
 
 (The differences are within run-to-run noise; no compile-time cost is
 measurable. `prepare`/`specialize`/`range` are the same analyses either way.)
+
+**Raw-demand pass** (`compiletime.tcl` now has a `demand` column: the plan with
+demand minus the eligibility-only plan; `out/compiletime-demand.txt`; median of
+7, ms, whole compile = `native::codeSize`):
+
+| program | abi plan (eligibility) | demand pass | lower | whole compile | demand / whole |
+|---|---:|---:|---:|---:|---:|
+| fib | 0.02 | 0.41 | 3 | 26 | 1.6 % |
+| loop-count | 0.03 | 0.34 | 5 | 16 | 2.1 % |
+| sum-refined | 0.04 | 0.23 | 4 | 12 | 1.9 % |
+| refined-checks | 0.28 | 4.34 | 73 | 392 | 1.1 % |
+| uri-steady | 0.21 | 3.17 | 45 | 128 | 2.5 % |
+| matmul | 0.09 | 1.59 | 19 | 64 | 2.5 % |
+| hashtable | 0.33 | 7.55 | 149 | 336 | 2.2 % |
+| csv_records | 0.61 | **13.67** | 363 | 727 | **1.9 %** |
+
+The worst canonical case is `csv_records`: 13.7 ms, 3.8 % of its lowering time
+and 1.9 % of the whole compile. The pass itself is a boolean walk over the
+relevant instances' expressions plus a reverse breadth-first search,
+`O(values + use edges + exact transport edges)` (no path enumeration, no
+exponential branch exploration); about a third of its time (4.0 of 10.8 ms in
+`csv_records`) is building each relevant instance's `hir::specialize::view`
+(30 of the 59 instances, the same view lowering builds), the rest is the walk
+and the range queries. It is much larger than the eligibility planner alone (that is
+a flat loop over instances) but small beside lowering and Cranelift.
 
 ## Controls
 
@@ -529,21 +971,49 @@ Tcl 9.0.1, Linux x86-64, release native backend, all from a clean tree.
   (their subject — a conversion at a call boundary — no longer exists under the
   raw ABI; `raw-int-abi.test` pins the new behaviour at the same boundaries).
 * `native-root-liveness.test`: `fib` 20 → 14 NIR registers, `loop-count` 16/15 →
-  14/14 (fewer conversions).
+  14/14 (fewer conversions); with demand suppression `loop-count`'s `work`
+  (whose result only feeds an unbounded accumulator) is back to a tagged result:
+  **15**/14 registers (`root-structural-2`).
 * `native-tiny-leaf-pressure.test`: the "inlining never grows code" audit is
   the tagged-ABI property (`-raw-int-abi-opt 0`); a new test pins the
   production behaviour: no growth for the 1-op and chain leaves, under 10 % for
   the fold-resistant 8-op horner leaf (a raw call is cheaper than a tagged one,
-  so the inline/call break-even moved; retuning is future work).
+  so the inline/call break-even moved; retuning is future work). Demand
+  suppression made the non-inlined baseline cheaper again at some call-site
+  counts (128 sites, direct only: inlined 4,483 → 4,476 bytes, not inlined
+  4,183 → 4,049, i.e. +10.5 % instead of +7.2 %), so that bound is now 15 %.
+* `raw-int-abi.test`: seven tests pinned "eligible ⇒ raw" on programs whose only
+  consumers of the position are tagged (`raw-param-tagged-result`,
+  `raw-mixed-parameters`, `raw-mixed-physical-signature-in-nir`,
+  `raw-outside-small-result`, `raw-open-instance-stays-tagged`,
+  `raw-exact-callable-target-is-raw`, `raw-error-capable-result`); each program
+  gained a genuine raw consumer (a compare or an addition), keeping the property
+  the test is about. `parityAbi` now also runs the eligibility-only plan.
 
 ## Known limitations
 
-* **No profitability test**: an Int that is only passed to tagged consumers gets
-  a pointless conversion pair (callee `rbox`/caller `runbox`, or a tagged native
-  result `runbox`ed to return raw). Measured: hashtable +0.5 % bytes, corpus
-  `rbox` +19. A demand-based refinement (keep tagged when every exact caller
-  and the callee body only want tagged) is future work and was not added, per
-  the brief.
+* **No general opportunity-cost model.** The demand rule removes only the
+  *categorically* dominated case (raw with **no** raw consumer anywhere in the
+  closure). Mixed use stays raw: one raw consumer retains RawInt however many
+  tagged uses exist, so a result with one raw caller and many tagged callers
+  (`ht_capacity`: 1 raw, 5-6 tagged; the +54-byte hashtable residue) keeps its raw
+  ABI, and an eligible parameter with one raw operation and twenty tagged
+  stores does too. A weighted policy (use counts, distance, frequency, spill or
+  code size) is deliberately not added; revisit it only when self-hosting or
+  stdlib growth gives real workloads that need it.
+* **The demand pass approximates lowering's raw consumers from HIR and Ranges.**
+  It drops the guard facts (so it can only over-approximate raw demand), does
+  not see tiny-leaf inlining (a call to a leaf whose parameter is *not*
+  eligible is treated as a tagged argument, so a raw operation inside the
+  inlined body does not retain the caller's parameter), and does not see
+  later lowering-only facts (virtualization, scalar replacement). Where it is
+  unsure it keeps the preliminary decision.
+* **Self-tail loop slots always count as raw demand**, because
+  `RawParams` already keeps them raw whatever the ABI; a pure-forwarding self-tail
+  parameter therefore stays raw (there is no raw consumer, but the loop state
+  is a raw register regardless). Pure forwarding *cycles* without that
+  mechanism (non-tail recursion, mutual recursion if the language had forward
+  references) collapse to tagged.
 * Raw ABI is for the **canonical** function only. Companion, region,
   internal-capture and fields variants, `callmulti` field transport, closures'
   captured storage, struct/List/MutableArray storage, FFI/native calls and the
@@ -559,7 +1029,12 @@ Tcl 9.0.1, Linux x86-64, release native backend, all from a clean tree.
 * RawInt currently means signed `i64`; target-specific machine-word lowering is
   open but not claimed.
 * Leaf-path cost can rise (17 → 19 instructions for fib's leaf) when the
-  allocator needs one more callee-saved register; no shrink-wrapping here.
+  allocator needs one more callee-saved register; no shrink-wrapping here
+  (backend territory, recorded for the later machine-code audit).
+* No RawInt32 ABI, no Range change, no root-store (`rbox` immediate) optimisation
+  and no hashtable/CSV storage specialisation were added by the demand cleanup;
+  the RawInt ABI is **frozen** pending substantially larger stdlib or
+  self-hosting evidence.
 
 ## Readiness for short-string frontier heuristics
 
@@ -580,7 +1055,10 @@ String fact) and its own conversion pair, not a new framework.
    `native::lower::program` after `hir::specialize::analyze` and
    `hir::range::analyze`, stored in `native::lower::abiPlan`.
 2. **Facts consumed?** `closed`, instance key/result types, final entry Ranges,
-   successful-result Ranges, `fitsSmall` (+ whether block-escape is enabled).
+   successful-result Ranges, `fitsSmall` (+ whether block-escape is enabled);
+   for the demand filter additionally each relevant instance's view
+   (`reachable`, types, exact targets), `hir::range::ConditionOutcome`, operand
+   Ranges and the self-tail call set. It invents no numeric fact.
 3. **Does HIR change?** No.
 4. **Does semantic Int typing change?** No.
 5. **Is RawInt a source type?** No.
@@ -589,10 +1067,12 @@ String fact) and its own conversion pair, not a new framework.
 
 ## Eligibility questions
 
-7. A parameter is raw when it is Int, the instance is closed and its final entry
-   Range is `fitsSmall`.
-8. The result is raw under the same three conditions on the successful-result
-   Range.
+7. A parameter is RawInt-*eligible* when it is Int, the instance is closed and
+   its final entry Range is `fitsSmall`; it is *selected* raw when, in addition,
+   raw representation is demanded in its use / transport closure.
+8. The result is eligible under the same three conditions on the
+   successful-result Range, and selected under the same demand condition over
+   its closed callers.
 9. `InstanceClosed` is required so the Range covers every invocation and no
    dynamic/Block-value caller can pass a tagged Value to a raw entry.
 10. `fitsSmall` rather than "finite": only inside the tagged small domain are
@@ -641,14 +1121,90 @@ String fact) and its own conversion pair, not a new framework.
 
 ## Corpus questions
 
-35. Instances gaining raw parameters: 56 positions across the instances listed
-    in `census.txt` (68 instances have any raw position). 36. Raw results: 23.
-37. Both: 4. 38. `rbox`/`runbox`: call-boundary runbox 18 → 5, call-boundary
-    rbox 20 → 19; total static `rbox` 47 → 66, `runbox` 47 → 48 (net up, see
-    limitations). 39. Whole-corpus machine bytes: 101,963 → 101,662. 40.
+35. Instances gaining raw parameters: 53 positions (56 eligible; the demand
+    filter suppressed 3), 51 instances have any raw position (68 eligible).
+    36. Raw results: 6 (23 eligible, 17 suppressed). 37. Both: 1 (4 eligible).
+    38. `rbox`/`runbox`: 47/47 (tagged) → 66/48 (eligibility only) → **60/41**
+    (demand-filtered); call-boundary rbox/runbox 20/18 → 19/5 → 21/3. 39.
+    Whole-corpus machine bytes: 101,963 → 101,662 → **101,552**. 40.
     Non-numeric workloads: struct storage, String representation, allocation
-    counts and guards are identical (`controls.txt`); only Int helper
-    signatures inside `hashtable`/`csv_*`/`refined-checks`/`uri-steady` changed.
+    counts and guards are identical (`controls.txt`, `controls-demand.txt`);
+    only Int helper signatures inside `hashtable`/`csv_*`/`refined-checks`/
+    `uri-steady` changed.
+
+## Raw-demand questions
+
+1. **What is the difference between RawInt eligibility and RawInt selection?**
+   Eligibility is the safety theorem (Int, closed instance, final Range
+   `fitsSmall`): the position *may* be raw. Selection additionally requires raw
+   demand somewhere in the position's use / transport closure: the position
+   *should* be raw. Selected implies eligible, never the reverse.
+2. **What constitutes a raw-demand seed?** An operand of a raw-representable
+   native operation (`+ - * < <= > >=`, `==` on two Ints, the proven-safe
+   shifts) under lowering's own range conditions, and a slot of a self-tail loop
+   whose entry Range `fitsSmall` (`RawParams`). Nothing else is a seed.
+3. **Through which edges does raw demand propagate?** Backward through aliases
+   (`y = x`), if branches (each reachable branch's last value), `return` and a
+   body's tail value (into the instance's result), exact call arguments (into
+   an eligible callee parameter), exact call results (into the call value's
+   consumer, over the complete closed caller set), `break` values and `handle`
+   bodies; dead branches (unreachable bit, range-decided condition) are skipped.
+4. **Does raw ABI transport itself create demand?** **Not by itself.** It
+   propagates existing demand but cannot bootstrap a demand-free cycle: demand
+   is reachability to the seed `RAW`, and a cycle of pure transport edges never
+   reaches it (`demand-forwarding-cycle-cannot-bootstrap-raw`,
+   `demand-tagged-chain-is-all-tagged`).
+5. **What happens if all consumers are tagged?** **RawInt is suppressed**: the
+   position stays tagged (`suppressed-no-raw-demand`) for the callee and every
+   caller.
+6. **What happens with mixed consumers?** For now, **RawInt is retained if any
+   genuine raw demand exists** (`demand-mixed-use-keeps-raw`), however many
+   tagged uses there are. This is the known limitation behind the hashtable
+   residue.
+7. **Does `fib` remain fully raw?** **Yes**: raw parameter, raw result, 0
+   `rbox`/0 `runbox`, byte-identical NIR, 1,404,178 Ir/run.
+8. **Does the rule apply to results as well as parameters?** **Yes**: 17 of 23
+   eligible results and 3 of 56 eligible parameters were suppressed.
+
+## Census questions
+
+9. **`rbox` / `runbox`** pre-RawInt / pre-suppression / post-suppression:
+   **47/47 → 66/48 → 60/41** (corpus, static NIR).
+10. **Hashtable bytes** pre-RawInt / pre-suppression / post-suppression:
+    **12,732 → 12,799 → 12,786** (`rbox` 4 → 11 → 10).
+11. **CSV bytes/conversions:** `csv_geometric` 7,578 → 7,597 → **7,578**
+    (`rbox`/`runbox` 0/1 → 1/3 → 0/1); `csv_records` 23,245 → 23,204 →
+    **23,177** (8/3 → 14/9 → 13/6); `csv_chunked` 10,168 → 10,142 → 10,142;
+    `csv` 5,723 → 5,719 → 5,719.
+12. **Raw positions before/after suppression:** parameters 56 → 53, results
+    23 → 6, instances with any raw position 68 → 51, with both 4 → 1.
+13. **How many eligible positions were suppressed?** 20 of 79 (25 %).
+14. **Suppressed parameters vs results:** 3 parameters, 17 results.
+15. **Did whole-corpus bytes improve or regress?** **Improved**: 101,963 →
+    101,662 → 101,552 (C is 110 bytes smaller than the preliminary and 411
+    smaller than the tagged baseline); only `hashtable` remains larger than the
+    tagged baseline (+54).
+
+## Performance questions
+
+16. **`fib` Ir/run after suppression?** **1,404,178**, identical to the
+    preliminary RawInt (byte-identical NIR; tagged baseline 1,547,454).
+17. **Has its recursive NIR changed?** No: `diff out/fib/abi1.nir
+    out/fib/demand.nir` is empty; raw `n`, raw result, 0 `rbox`/0 `runbox` in
+    the recursion, one `rawint`/`rbox` frontier in the program function. No loss
+    of RawInt transport.
+18. **Does hashtable recover the preliminary code-size regression?** Partly:
+    +67 → **+54** bytes over the tagged baseline (13 bytes, 19 %, recovered): the
+    five tagged-only positions are suppressed (`ht_alloc.capacity` and the four
+    `ht_*_state`/`ht_min_capacity` results), the rest is `ht_capacity`'s result,
+    which one caller (`ht_rehash` → `ht_rehash_scan`'s loop slot) demands raw and
+    six tagged call sites (six `rbox`) do not. That is a mixed use, retained by policy; it is not a
+    tagged-only closure. CSV is fully recovered (`csv_geometric` +19 → 0).
+19. **Does any workload materially slow down?** No. Against the tagged ABI the
+    worst case is `lex-strategy` (+0.9 % Ir, unchanged from the preliminary
+    plan), then `hashtable` (+0.6 %); every other program is within ±0.3 % or
+    faster (`fib` −9.3 %, `loop-count` −7.7 %). Against the preliminary plan no
+    program gets slower by more than 0.1 %.
 
 ## Future-facing question
 

@@ -1,0 +1,10 @@
+abi 1 demand 1
+program | prepare | specialize | range | abi plan | demand | lower | cranelift | total (ms, median of 7)
+bench/fib.bot | 0 | 1 | 17 | 0.02 | 0.41 | 3 | 4 | 26
+bench/loop-count.bot | 0 | 2 | 3 | 0.03 | 0.34 | 5 | 6 | 16
+bench/sum-refined.bot | 0 | 2 | 2 | 0.04 | 0.23 | 4 | 4 | 12
+bench/refined-checks.bot | 187 | 47 | 67 | 0.28 | 4.34 | 73 | 13 | 392
+bench/uri-steady.bot | 1 | 32 | 34 | 0.21 | 3.17 | 45 | 10 | 128
+examples/stdlib/matmul.bot | 0 | 11 | 23 | 0.09 | 1.59 | 19 | 9 | 64
+examples/stdlib/hashtable.bot | 2 | 73 | 90 | 0.33 | 7.55 | 149 | 17 | 336
+examples/stdlib/csv_records.bot | 2 | 137 | 184 | 0.61 | 13.67 | 363 | 43 | 727
