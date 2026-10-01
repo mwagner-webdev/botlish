@@ -75,8 +75,8 @@ every raw region has) does not count as a competing use.
   programs whose parameters mix raw and tagged uses shrink (`matmul` −223 → −51
   bytes, `lex-strategy` −40 → 0): see *Updated corpus code-size result*.
 * Full regression (interp 3,733/3,733, compile 3,729 + 4 skipped, native
-  coverage, Rust 67 + 22), differential fuzzing (3,100 random programs, 0
-  disagreements), GC stress (700 native/raw-ABI tests) and standalone-executable
+  coverage, Rust 67 + 22), differential fuzzing (6,400 random programs over two
+  generators, 0 disagreements), GC stress (700 native/raw-ABI tests) and standalone-executable
   parity all pass; see *Full regression*, *Differential testing*, *GC stress* and
   *Standalone parity*.
 
@@ -1072,13 +1072,18 @@ allocation forcing a collection.
   (`-raw-demand-opt 0`) and demand-filtered, leaf inlining on/off.
 * `raw-fuzz-random-closed-helpers` (40 programs) and
   `raw-fuzz-random-self-recursion` (25) in the suite.
-* `tools/fuzz.tcl` (now also comparing the eligibility-only plan):
-  **1,500 + 1,499 random programs and 299 under GC stress, 0 disagreements**
-  (`out/fuzz-demand-*.txt`). Programs 100262 and 200167 are skipped: they
-  recurse with an exponentially growing Int and do not terminate in *any*
-  backend, including the interpreter and the tagged ABI (the runner re-runs a
-  timed-out chunk seed by seed with a 20 s limit). Of the first 1,500, 1,350
-  use a raw ABI and 159 a raw result under the production policy (the
+* `tools/fuzz.tcl` (now also comparing the eligibility-only plan): with the
+  original generator **1,500 + 1,499 random programs and 299 under GC stress, 0
+  disagreements** (`out/fuzz-demand-*.txt`); two seeds (100262, 200167) were
+  skipped as not terminating within the runner's limits. They are **not a
+  bug**: correct programs whose exact result is astronomically large (about
+  10^20 digits and 28.4 million digits), identical in every backend wherever
+  computable, 200167 completing natively in ~50 s with equal results for all four
+  plans (`out/fuzz-hangs/README.md`). The generator is fixed (recursive helpers
+  no longer feed products into their own arguments), and a fresh run with it
+  compared **1,500 + 1,500 programs and 300 under GC stress, 0 disagreements, none
+  skipped** (`out/fuzz-demand-fixed-generator.txt`). Of the first original 1,500,
+  1,350 use a raw ABI and 159 a raw result under the production policy (the
   eligibility-only comparison still exercises every eligible position); 34 end in
   an error outcome (a runtime `mod` by zero).
 
