@@ -992,9 +992,7 @@ Int parameter/result transport only.
 
 Run against the final (boxed-mixed) policy:
 
-* The `native*.test` files (26 files) and `raw-int-abi.test` (66 of its 69
-  tests at the time; the three later `demand-*` transport tests are plan/NIR
-  assertions) pass under `BOTLISH_NATIVE_GC_STRESS=1` (forced GC attempt at
+* The `native*.test` files (26 files) and `raw-int-abi.test` (all 69 tests) pass under `BOTLISH_NATIVE_GC_STRESS=1` (forced GC attempt at
   every allocation site): **700 tests, 700 passed, 0 failed**.
   (`native-tiny-leaf-inline.test` prints no summary line, it has no
   `cleanupTests`, and no failure output.)
