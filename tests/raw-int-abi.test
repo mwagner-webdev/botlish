@@ -836,6 +836,36 @@ test demand-forwarding-cycle-cannot-bootstrap-raw {a recursive position that onl
     list [abiDemandPlan $text {*}$noInline] [parityAbi $text]
 } -result {{{f<int, int>=supp,val>supp}} {value:[1]}}
 
+test demand-loops-and-handlers-agree {raw consumers inside a counted loop and behind an error handler: every backend and every plan (tagged, eligibility only, demand-filtered) agree, and the loop's counted comparison keeps its parameter raw} -body {
+    set loop {
+        fn find(n):
+            loop i from 0 to n:
+                if i * i > n:
+                    return i
+            -1
+
+        [find(10), find(100)]
+    }
+    set handled {
+        error Bad
+
+        fn check(n) -> int errors Bad:
+            if n < 0:
+                fail Bad
+            else:
+                n + 1
+
+        fn safe(n):
+            r = check(n):
+                on Bad:
+                    0
+            r + 1
+
+        [safe(3), safe(0 - 1)]
+    }
+    list [abiDemandPlan $loop {*}$noInline] [parityAbi $loop] [parityAbi $handled]
+} -result {find<int>=raw>supp {value:[4, 11]} {value:[5, 1]}}
+
 test demand-program-frontier {one raw region reaching a program-visible tagged result: raw internally, a single box at the final frontier} -body {
     set text {
         fn h(z):
