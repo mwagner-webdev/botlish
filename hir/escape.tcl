@@ -27,6 +27,23 @@
 # materialized there, once (UseVerdict; native/lower.tcl's
 # MaterializeVirtual). A List keeps the original all-or-nothing rule.
 #
+# Value transport and materialization frontiers (VALUE-TRANSPORT-
+# MATERIALIZATION.md): *how far* a virtual struct is carried as fields is a
+# per-path decision, not a width cap. TransportPlan scores the exact-
+# forwarding graph of virtual parameter slots by width x distance, argument and
+# return edges weighted separately, a cycle with its own term (hir/transport.tcl),
+# and denies a slot whose whole path exceeds its budget: the producer then
+# materializes lazily, once, immediately before the first such edge (its
+# earlier uses stay virtual) and passes one pointer. A result is recognized
+# only while its return chain stays within the return budget (Arities). A
+# nested struct literal is a value tree and the virtual form is a *cut*
+# through it (NestingPlan): an inner value that is only ever projected is
+# opened into the outer representation when its widened path still fits its
+# budget, one that has an independent use stays one field. This file keeps
+# its historical name; its responsibilities are now value representation and
+# transport analysis rather than escape analysis proper (it also still answers
+# the List and plan questions below).
+#
 # Semantic struct identity is never lost: the shape travels in the descriptor
 # (named identity and anonymous field set alike), so a virtual struct that
 # materializes is built with exactly the shape it would have had. Width is a
@@ -449,6 +466,32 @@ proc hir::escape::Arities {hir spec {structOpts {}}} {
         }
     }
     return [list $arity $forward $why $depth]
+}
+
+# InstanceId -> the number of return edges a value built by that instance's
+# own exits crosses on its *longest* way up to a consumer: 1 for an instance
+# nothing forwards through, 1 + that of the worst instance forwarding its
+# result otherwise. ARITY's insertion order is the growth order (an instance
+# is recognized after its forwarding targets), so one reverse pass is the
+# whole computation. Audit/census: the recognition decision itself uses each
+# instance's own depth (Arities).
+proc hir::escape::RetTop {arity forward} {
+    set top [dict create]
+    foreach id [dict keys $arity] {
+        dict set top $id 1
+    }
+    foreach id [lreverse [dict keys $arity]] {
+        if {![dict exists $forward $id]} {
+            continue
+        }
+        foreach t [dict get $forward $id] {
+            set cand [expr {[dict get $top $id] + 1}]
+            if {$cand > [dict get $top $t]} {
+                dict set top $t $cand
+            }
+        }
+    }
+    return $top
 }
 
 # ---------------------------------------------------------------------------
@@ -1272,6 +1315,15 @@ proc hir::escape::TransportPlan {spec regions callSites arity retDepth eligible 
     set fwd [dict create]
     set used [dict create]
     set supply [dict create]
+    # The call graph of the used instances: a site inside a recursive cycle
+    # carries its value around that cycle.
+    set callSucc [dict create]
+    dict for {callee sites} $callSites {
+        foreach site $sites {
+            dict lappend callSucc [lindex $site 0] $callee
+        }
+    }
+    lassign [hir::transport::Scc [dict get $spec used] $callSucc] instComp - -
     foreach key $nodes {
         lassign $key id b
         set desc [dict get $eligible $key]
@@ -1325,6 +1377,7 @@ proc hir::escape::TransportPlan {spec regions callSites arity retDepth eligible 
                 set argExpr [lindex $callerArgs $index]
                 set cinfo [dict get $regions $callerId]
                 set cview [dict get $cinfo view]
+                set recursive [expr {[dict get $instComp $callerId] == [dict get $instComp $id]}]
                 if {[hir::kind $cview $argExpr] eq "ref"} {
                     set b2 [hir::get $cview $argExpr binding]
                     if {$callerId eq $id && $b2 eq $b} {
@@ -1332,9 +1385,9 @@ proc hir::escape::TransportPlan {spec regions callSites arity retDepth eligible 
                     }
                     set src [list $callerId $b2]
                     if {[dict exists $width $src] && [dict get $eligible $src] eq $desc} {
-                        lappend entries [list $src 0]
+                        lappend entries [list $src 0 $recursive]
                     } elseif {[dict exists $eligible $src] && [dict get $eligible $src] eq $desc} {
-                        lappend entries [list "" 0]
+                        lappend entries [list "" 0 $recursive]
                     }
                     continue
                 }
@@ -1347,7 +1400,7 @@ proc hir::escape::TransportPlan {spec regions callSites arity retDepth eligible 
                 foreach t $targetIds {
                     set ret [expr {max($ret, 1 + [dict get $retDepth $t])}]
                 }
-                lappend entries [list "" $ret]
+                lappend entries [list "" $ret $recursive]
             }
         }
         dict set supply $key $entries
@@ -1812,6 +1865,7 @@ proc hir::escape::ChooseLevel {structOpts tree prefix blocked ceiling ea er cyc 
 #   census        one record per struct construction (see Census)
 proc hir::escape::analyze {hir spec {paramOpt 1} {structOpts {}}} {
     lassign [Arities $hir $spec $structOpts] arity forward resultWhy retDepth
+    set retTop [RetTop $arity $forward]
     set regions [dict create]
     foreach id [dict get $spec used] {
         dict set regions $id [RegionInfo $hir $spec $id]
@@ -1927,10 +1981,11 @@ proc hir::escape::analyze {hir spec {paramOpt 1} {structOpts {}}} {
     set wants [Propagate $wants $forward]
     set analysis [dict create arity $arity wants $wants virtual $virtual paramVirtual $paramVirtual \
         structOpts $structOpts direct $direct directRoot $directRoot transport $transport deny $deny \
-        retDepth $retDepth nested $nested]
+        retDepth $retDepth retTop $retTop nested $nested]
     if {[StructEnabled $structOpts]} {
         dict set analysis census [Census $spec $regions $arity $resultWhy $wants $virtual $paramVirtual \
-            $localWhy $dropWhy $useInfo $structOpts]
+            $localWhy $dropWhy $useInfo $structOpts [dict create deny $deny transport $transport \
+            retDepth $retDepth retTop $retTop nested $nested]]
     } else {
         dict set analysis census {}
     }
@@ -2007,10 +2062,10 @@ proc hir::escape::DirectRoots {regions arity structOpts} {
 
 # ---------------------------------------------------------------------------
 # Census (audit only): one record per struct construction (a `struct` node of
-# a used instance), saying what became of it.
+# a used instance), saying what became of it, and why.
 #
 #   class       local     virtual, never leaves its function, never built
-#               call      virtual, handed across one exact call as fields
+#               call      virtual, handed across exact calls as fields
 #               return    a virtual exit of an instance whose result a caller
 #                         consumes as fields (multi-value return)
 #               materialized   built as a physical StructObj
@@ -2019,15 +2074,40 @@ proc hir::escape::DirectRoots {regions arity structOpts} {
 #   reason      for a materialized one, the tag naming why
 #
 # The record is a dict: instance, label, expr, named (0|1), width N, class,
-# reason, mats. Reason tags: storage (List/MutableArray/Set element),
+# reason, mats -- and, for the transport model (VALUE-TRANSPORT-
+# MATERIALIZATION.md): where (the slot kind that carries it: local, param,
+# result, direct, none), argEdges / retEdges / cyclic (the worst exact path
+# its slot lies on: transport distance), score and budget (the pressure score
+# of that path and the budget it was held to), live (fields ever read
+# downstream), frontier (where it becomes physical: construction,
+# before-first-call, before-long-forwarding-region, storage-boundary,
+# open-call, control-merge, never), afterLocalUse (0|1: free local uses
+# preceded the materialization), nested ("" | opened | closed:REASON, for a
+# literal inside another literal), physical (physical structnew sites this
+# construction accounts for), transportedWidth (physical width of the
+# virtual form). Reason tags: storage (List/MutableArray/Set element),
 # equality, hash, native call, open call (callvalue or unresolved target),
-# call param (exact call, parameter not virtualizable), capture, width,
-# loop (a physical use that would run per iteration), return (returned, no
-# virtual consumer), mixed exits, nested field, control, other.
-proc hir::escape::Census {spec regions arity resultWhy wants virtual paramVirtual localWhy dropWhy useInfo structOpts} {
+# call param (exact call, parameter not virtualizable), transport-budget
+# (exact callee could take fields but the path is too costly), capture,
+# width, loop (a physical use that would run per iteration), return
+# (returned, no virtual consumer), mixed exits, nested field, control, other.
+proc hir::escape::Census {spec regions arity resultWhy wants virtual paramVirtual localWhy dropWhy useInfo structOpts {ctx {}}} {
     set records {}
     set context [dict get $spec context]
     set selfTails [dict get $context selfTails]
+    set deny [expr {[dict exists $ctx deny] ? [dict get $ctx deny] : {}}]
+    set transport [expr {[dict exists $ctx transport] ? [dict get $ctx transport] : {}}]
+    set retDepth [expr {[dict exists $ctx retDepth] ? [dict get $ctx retDepth] : {}}]
+    set retTop [expr {[dict exists $ctx retTop] ? [dict get $ctx retTop] : {}}]
+    set nested [expr {[dict exists $ctx nested] ? [dict get $ctx nested] : {}}]
+    # literal origin -> its class record
+    set literalClass [dict create]
+    foreach rec $nested {
+        foreach lit [dict get $rec literals] {
+            dict set literalClass $lit $rec
+        }
+    }
+    set byExpr [dict create]
     foreach id [dict get $spec used] {
         set info [dict get $regions $id]
         set view [dict get $info view]
@@ -2046,6 +2126,8 @@ proc hir::escape::Census {spec regions arity resultWhy wants virtual paramVirtua
             set class materialized
             set reason other
             set mats {}
+            set structural 0
+            set dest ""
             # The value root: a literal that ends a branch of an `if` that is
             # itself a value (a bound value, an exit, an argument) shares the
             # fate of that `if` (branch merging).
@@ -2069,6 +2151,7 @@ proc hir::escape::Census {spec regions arity resultWhy wants virtual paramVirtua
                 # for their effects and no object is built.
                 set class local
             } elseif {$v in $exits || ($pkind eq "return")} {
+                set dest [list res $id]
                 if {[dict exists $arity $id]} {
                     if {[dict exists $wants $id]} {
                         set class return
@@ -2084,6 +2167,7 @@ proc hir::escape::Census {spec regions arity resultWhy wants virtual paramVirtua
                 set class local
             } elseif {$pkind eq "bind" && [hir::get $view $pe value] eq $v} {
                 set b [hir::get $view $pe binding]
+                set dest [list loc $id $b]
                 if {[dict exists $virtual $id $b]} {
                     lassign [dict get $useInfo [list $id $b]] structural forwards mats
                     set class [expr {$forwards > 0 ? "call" : "local"}]
@@ -2098,34 +2182,262 @@ proc hir::escape::Census {spec regions arity resultWhy wants virtual paramVirtua
                 set argIndex [lsearch -exact [hir::get $view $pe args] $v]
                 set callee [expr {[dict exists [dict get $instance calls] $pe] ? [dict get [dict get $instance calls] $pe] : ""}]
                 set virtualParam 0
-                if {$callee ne "" && $argIndex >= 0 && [dict exists $regions $callee]
-                        && [dict exists $paramVirtual $callee]} {
+                if {$callee ne "" && $argIndex >= 0 && [dict exists $regions $callee]} {
                     set cblock [dict get [dict get $regions $callee instance] block]
                     set params [hir::get [dict get $regions $callee view] $cblock params]
-                    set virtualParam [expr {$argIndex < [llength $params]
-                        && [dict exists $paramVirtual $callee [lindex $params $argIndex]]}]
+                    if {$argIndex < [llength $params]} {
+                        set dest [list par $callee [lindex $params $argIndex]]
+                        set virtualParam [dict exists $paramVirtual $callee [lindex $params $argIndex]]
+                    }
                 }
                 if {$virtualParam} {
                     set class call
                 } else {
-                    set reason [UseTag $info $v]
+                    set reason [UseTag $info $v $regions $deny]
                 }
             } elseif {$pkind eq "struct"} {
                 set reason "nested field"
             } else {
-                set reason [expr {$pe eq "" ? "other" : [UseTag $info $v]}]
+                set reason [expr {$pe eq "" ? "other" : [UseTag $info $v $regions $deny]}]
             }
             set desc [list $n [list [expr {[dict get $node named] ? [dict get $node structId] : ""}] [dict get $node layout]]]
-            lappend records [dict create instance $id label [hir::specialize::label $spec $id] expr $e \
+            set rec [dict create instance $id label [hir::specialize::label $spec $id] expr $e \
                 named [dict get $node named] width $n class $class \
-                reason [expr {$class eq "materialized" ? $reason : ""}] mats $mats]
+                reason [expr {$class eq "materialized" ? $reason : ""}] mats $mats \
+                structural $structural dest $dest parentKind $pkind nested "" physical 0 transportedWidth $n \
+                argEdges 0 retEdges 0 cyclic 0 score 0.0 budget 0.0 live $n where none]
+            dict set byExpr [list $id $e] $rec
         }
+    }
+    # Transport facts of every record, then nested literals (a literal inside
+    # another literal shares its outer's fate: opened into it, or a bundle).
+    foreach key [lsort -dictionary [dict keys $byExpr]] {
+        lassign $key id e
+        set rec [dict get $byExpr $key]
+        if {[dict get $rec parentKind] eq "struct"} {
+            continue
+        }
+        set rec [CensusTransport $rec $id $regions $transport $retTop $structOpts $paramVirtual]
+        set rec [CensusFrontier $rec]
+        if {[dict exists $literalClass [list lit $id $e]]} {
+            set cr [dict get $literalClass [list lit $id $e]]
+            dict set rec transportedWidth [dict get $cr width]
+        }
+        dict set byExpr $key $rec
+    }
+    foreach key [lsort -dictionary [dict keys $byExpr]] {
+        lassign $key id e
+        set rec [dict get $byExpr $key]
+        if {[dict get $rec parentKind] ne "struct"} {
+            continue
+        }
+        set info [dict get $regions $id]
+        set view [dict get $info view]
+        set parent [dict get $info parent]
+        # walk to the root literal, collecting the field path
+        set path {}
+        set node $e
+        while {[dict exists $parent $node] && [dict get $parent $node] ne "" && [hir::kind $view [dict get $parent $node]] eq "struct"} {
+            set up [dict get $parent $node]
+            set names [hir::get $view $up names]
+            set fields [hir::get $view $up fields]
+            set path [linsert $path 0 [lindex $names [lsearch -exact $fields $node]]]
+            set node $up
+        }
+        set outerKey [list $id $node]
+        set outer [expr {[dict exists $byExpr $outerKey] ? [dict get $byExpr $outerKey] : {}}]
+        set nestedTag "closed:independent-use"
+        if {[dict exists $literalClass [list lit $id $node]]} {
+            set cr [dict get $literalClass [list lit $id $node]]
+            if {[lsearch -exact [dict get $cr opened] $path] >= 0} {
+                set nestedTag opened
+            } else {
+                foreach pair [dict get $cr closed] {
+                    if {[lindex $pair 0] eq $path} {
+                        set nestedTag "closed:[lindex $pair 1]"
+                    }
+                }
+            }
+        } else {
+            set nestedTag "closed:not-candidate"
+        }
+        dict set rec nested $nestedTag
+        if {$nestedTag eq "opened" && $outer ne ""} {
+            foreach k {class reason mats argEdges retEdges cyclic score budget where frontier afterLocalUse} {
+                dict set rec $k [dict get $outer $k]
+            }
+        } else {
+            dict set rec class materialized
+            dict set rec reason "nested field"
+            dict set rec frontier construction
+            dict set rec afterLocalUse 0
+        }
+        dict set byExpr $key $rec
+    }
+    foreach key [lsort -dictionary [dict keys $byExpr]] {
+        lappend records [Physical [dict get $byExpr $key]]
     }
     return $records
 }
 
+# The number of physical `structnew` sites a census record accounts for: a
+# materialized construction builds one object at its frontier; a virtual one
+# builds one only where a materializing use needs it (and then also one per
+# inner value it opened, rebuilt there); a virtual one with no such use never
+# builds any.
+proc hir::escape::Physical {rec} {
+    set n 0
+    if {[dict get $rec class] eq "materialized"} {
+        set n 1
+    } elseif {[dict get $rec mats] ne ""} {
+        set n 1
+    }
+    if {[dict get $rec nested] eq "opened"} {
+        set n [expr {[dict get $rec mats] ne "" ? 1 : 0}]
+    }
+    dict set rec physical $n
+    return $rec
+}
+
+# The forwarding parameter slots a local binding feeds (exact calls whose
+# parameter receives it unchanged).
+proc hir::escape::ForwardKeys {regions id b} {
+    set info [dict get $regions $id]
+    set refs [expr {[dict exists [dict get $info refsByBinding] $b] ? [dict get [dict get $info refsByBinding] $b] : {}}]
+    set keys {}
+    foreach r $refs {
+        if {![dict exists [dict get $info argPos] $r]} {
+            continue
+        }
+        lassign [dict get [dict get $info argPos] $r] callee argIndex
+        if {$callee eq "" || ![dict exists $regions $callee]} {
+            continue
+        }
+        set cblock [dict get [dict get $regions $callee instance] block]
+        if {$cblock eq "program"} {
+            continue
+        }
+        set params [hir::get [dict get $regions $callee view] $cblock params]
+        if {$argIndex >= 0 && $argIndex < [llength $params]} {
+            lappend keys [list $callee [lindex $params $argIndex]]
+        }
+    }
+    return [lsort -unique $keys]
+}
+
+# Adds the path statistics (distance, direction, cycle, score, budget, live
+# width) of the slot REC's construction is carried by.
+proc hir::escape::CensusTransport {rec id regions transport retTop structOpts paramVirtual} {
+    set dest [dict get $rec dest]
+    if {$dest eq ""} {
+        return $rec
+    }
+    set width [dict get $rec width]
+    switch -- [lindex $dest 0] {
+        res {
+            dict set rec where result
+            if {[dict exists $retTop $id]} {
+                set edges [dict get $retTop $id]
+                lassign [hir::transport::ReturnVerdict $structOpts $width [expr {$edges - 1}]] ok score budget edges
+                dict set rec retEdges $edges
+                dict set rec score $score
+                dict set rec budget $budget
+            }
+        }
+        par {
+            dict set rec where param
+            set key [lrange $dest 1 2]
+            if {[dict exists $transport $key]} {
+                set v [dict get $transport $key]
+                dict set rec argEdges [expr {[dict get $v up] + [dict get $v down]}]
+                dict set rec retEdges [dict get $v ret]
+                dict set rec cyclic [dict get $v cyclic]
+                dict set rec score [dict get $v score]
+                dict set rec budget [dict get $v budget]
+                dict set rec live [dict get $v used]
+            }
+        }
+        loc {
+            dict set rec where local
+            set worst ""
+            foreach key [ForwardKeys $regions $id [lindex $dest 2]] {
+                if {![dict exists $transport $key]} {
+                    continue
+                }
+                set v [dict get $transport $key]
+                if {$worst eq "" || [dict get $v score] > [dict get $worst score]} {
+                    set worst $v
+                }
+            }
+            if {$worst ne ""} {
+                dict set rec argEdges [expr {[dict get $worst up] + [dict get $worst down]}]
+                dict set rec retEdges [dict get $worst ret]
+                dict set rec cyclic [dict get $worst cyclic]
+                dict set rec score [dict get $worst score]
+                dict set rec budget [dict get $worst budget]
+                dict set rec live [dict get $worst used]
+            }
+        }
+    }
+    return $rec
+}
+
+# The frontier (where the value becomes physical) of a census record.
+proc hir::escape::CensusFrontier {rec} {
+    set class [dict get $rec class]
+    set mats [dict get $rec mats]
+    set tag ""
+    if {$class eq "materialized"} {
+        set tag [dict get $rec reason]
+    } elseif {$mats ne ""} {
+        set tag [lindex $mats 0]
+    }
+    set after [expr {$class ne "materialized" && $mats ne "" && [dict get $rec structural] > 0}]
+    if {$tag eq ""} {
+        set frontier never
+    } else {
+        switch -- $tag {
+            transport-budget { set frontier before-long-forwarding-region }
+            "call param" - "call target" { set frontier before-first-call }
+            storage { set frontier storage-boundary }
+            "open call" - "native call" - equality - hash - capture - result - return { set frontier open-call }
+            control - loop { set frontier control-merge }
+            default { set frontier construction }
+        }
+        if {$class eq "materialized" && $frontier eq "before-first-call"} {
+            set frontier construction
+        }
+    }
+    dict set rec frontier $frontier
+    dict set rec afterLocalUse $after
+    return $rec
+}
+
 proc hir::escape::structOptsOf {analysis} {
     return [expr {[dict exists $analysis structOpts] ? [dict get $analysis structOpts] : {}}]
+}
+
+# The planning facts of ANALYSIS (audit only): {params RESULTS NESTED DENY}
+# -- the path verdict of every planned parameter slot (hir::transport::Plan),
+# the return verdict of every recognized struct result ({InstanceId -> dict
+# of width depth edges score budget ok}), the nested value-tree classes
+# (NestingPlan) and the denied parameter slots.
+proc hir::escape::transportFacts {analysis} {
+    set results [dict create]
+    if {[dict exists $analysis retDepth]} {
+        dict for {id depth} [dict get $analysis retDepth] {
+            set desc [dict get $analysis arity $id]
+            if {[lindex $desc 1] eq ""} {
+                continue
+            }
+            set structOpts [structOptsOf $analysis]
+            lassign [hir::transport::ReturnVerdict $structOpts [lindex $desc 0] $depth] ok score budget edges
+            dict set results $id [dict create width [lindex $desc 0] depth $depth edges $edges score $score budget $budget ok $ok]
+        }
+    }
+    return [dict create params [expr {[dict exists $analysis transport] ? [dict get $analysis transport] : {}}] \
+        results $results nested [expr {[dict exists $analysis nested] ? [dict get $analysis nested] : {}}] \
+        deny [expr {[dict exists $analysis deny] ? [dict get $analysis deny] : {}}]]
 }
 
 # The census of ANALYSIS: one record per struct construction, see Census.

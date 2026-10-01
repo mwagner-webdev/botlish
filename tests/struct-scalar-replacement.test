@@ -61,8 +61,8 @@ proc srValue {source} {
 }
 
 # The census records of SOURCE as "class" / "class:reason" (+mats) words.
-proc srCensus {source} {
-    return [lmap rec [dict get [srLowered [srHir $source]] structCensus] {
+proc srCensus {source args} {
+    return [lmap rec [dict get [srLowered [srHir $source] {*}$args] structCensus] {
         set word [dict get $rec class]
         if {$word eq "materialized"} {
             append word :[string map {{ } _} [dict get $rec reason]]
@@ -262,9 +262,9 @@ test sr-nested-outer-virtual {the outer struct is virtual, the inner one is a si
     list [srValue $source] [srOps $source] [srOps $source -struct-opt 0] [lsort [srCensus $source]]
 } -result {{[3, 1, 2]} {structnew 1 structget 2 callmulti 0 retmulti 0} {structnew 2 structget 5 callmulti 0 retmulti 0} {local materialized:nested_field}}
 
-test sr-nested-literal-field {a literal nested in a literal is one field value, never flattened} -body {
+test sr-nested-literal-field {under the legacy width-only policy a literal nested in a literal is one field value, never flattened} -body {
     set source "fn mk(i):\n    \{pos: \{line: i, col: 2\}, tok: \"t\"\}\nr = mk(3)\n\[r.pos.line, r.pos.col, r.tok\]\n"
-    list [srValue $source] [srOps $source] [srCensus $source]
+    list [srValue $source] [srOps $source -struct-policy legacy] [srCensus $source -struct-policy legacy]
 } -result {{[3, 2, "t"]} {structnew 1 structget 2 callmulti 1 retmulti 1} {return materialized:nested_field}}
 
 # ---------------------------------------------------------------------------
@@ -401,9 +401,9 @@ test sr-materialize-escaping-closure {a struct captured by a closure is built} -
     list [srValue $source] [srOps $source] [srCensus $source]
 } -result {{"a"} {structnew 1 structget 1 callmulti 0 retmulti 0} materialized:capture}
 
-test sr-materialize-wide-return {a result wider than the return cap (8) is returned as an object} -body {
+test sr-materialize-wide-return {under the legacy policy a result wider than the return cap (8) is returned as an object} -body {
     set source "fn wide(i):\n    \{a: i, b: 2, c: 3, d: 4, e: 5, f: 6, g: 7, h: 8, i: 9\}\nw = wide(1)\n\[w.a, w.i\]\n"
-    list [srValue $source] [srOps $source] [srCensus $source]
+    list [srValue $source] [srOps $source -struct-policy legacy] [srCensus $source -struct-policy legacy]
 } -result {{[1, 9]} {structnew 1 structget 2 callmulti 0 retmulti 0} materialized:width}
 
 test sr-materialize-loop-use {a struct built once and needed as an object per iteration is not re-allocated per iteration} -body {
@@ -502,14 +502,16 @@ test sr-width-policy-local {locals stay virtual up to the local cap (16) and are
     list [srOps [widthSource 16 local]] [srOps [widthSource 17 local]]
 } -result {{structnew 0 structget 0 callmulti 0 retmulti 0} {structnew 1 structget 17 callmulti 0 retmulti 0}}
 
-test sr-width-policy-return {a result crosses a return as fields up to the return cap (8 fields), wider ones as an object} -body {
-    list [srOps [widthSource 2 return]] [srOps [widthSource 4 return]] [srOps [widthSource 8 return]] [srOps [widthSource 16 return]] \
-        [srOps [widthSource 16 return] -struct-return-width 16]
+test sr-width-policy-return {legacy policy: a result crosses a return as fields up to the return cap (8 fields), wider ones as an object} -body {
+    set legacy {-struct-policy legacy}
+    list [srOps [widthSource 2 return] {*}$legacy] [srOps [widthSource 4 return] {*}$legacy] [srOps [widthSource 8 return] {*}$legacy] [srOps [widthSource 16 return] {*}$legacy] \
+        [srOps [widthSource 16 return] {*}$legacy -struct-return-width 16]
 } -result {{structnew 0 structget 0 callmulti 1 retmulti 1} {structnew 0 structget 0 callmulti 1 retmulti 1} {structnew 0 structget 0 callmulti 1 retmulti 1} {structnew 1 structget 16 callmulti 0 retmulti 0} {structnew 0 structget 0 callmulti 1 retmulti 1}}
 
-test sr-width-policy-argument {an argument crosses a call as fields up to the argument cap (4 fields)} -body {
-    list [srOps [widthSource 2 argument]] [srOps [widthSource 4 argument]] [srOps [widthSource 8 argument]] \
-        [srOps [widthSource 8 argument] -struct-arg-width 8]
+test sr-width-policy-argument {legacy policy: an argument crosses a call as fields up to the argument cap (4 fields)} -body {
+    set legacy {-struct-policy legacy}
+    list [srOps [widthSource 2 argument] {*}$legacy] [srOps [widthSource 4 argument] {*}$legacy] [srOps [widthSource 8 argument] {*}$legacy] \
+        [srOps [widthSource 8 argument] {*}$legacy -struct-arg-width 8]
 } -result {{structnew 0 structget 0 callmulti 0 retmulti 0} {structnew 0 structget 0 callmulti 0 retmulti 0} {structnew 1 structget 8 callmulti 0 retmulti 0} {structnew 0 structget 0 callmulti 0 retmulti 0}}
 
 test sr-width-zero-fields-across-boundaries {a zero-field struct is virtual locally but is an object across a boundary (there is nothing to transport)} -body {

@@ -45,15 +45,18 @@ namespace eval hir::transport {
         legacyReturnWidth 8
         legacyArgWidth 4
         argFactor 1.0
-        returnFactor 0.5
+        returnFactor 1.0
         cycleFactor 4.0
         argRegs 4
+        argSpill 1.0
+        returnFree 2
         returnRegs 8
-        argBudget 24.0
-        returnBudget 32.0
-        cycleBudget 24.0
+        returnSpill 1.5
+        argBudget 20.0
+        returnBudget 20.0
+        cycleBudget 20.0
         densityWeight 0.5
-        allocUnits 16.0
+        allocUnits 13.0
         nesting 1
     }
 }
@@ -85,13 +88,32 @@ proc hir::transport::Ceiling {structOpts boundary} {
     return [Option $structOpts ${boundary}Width]
 }
 
-# DIR is arg or return. The score of carrying WIDTH independent values across
-# one such boundary: the values themselves plus, for every value beyond the
-# register budget of that direction, one more transfer (a spill and reload).
+# DIR is arg or return. The pressure score of carrying WIDTH independent
+# values across one such boundary, calibrated against the measured stack
+# operands the transport adds to the functions on each side
+# (VALUE-TRANSPORT-MATERIALIZATION.md, "Transport-pressure model"):
+#
+#   argument: every field is re-passed at every hop, and the values beyond the
+#     ~4 that stay in registers (the forwarding function's own other
+#     parameters take the rest) are spilled, reloaded and re-stored: the cost
+#     grows faster than linearly, W + argSpill * max(0, W - argRegs)^2
+#     (measured +2, +3, +4, +7, +11, +23 stack operands per hop at 2, 3, 4, 5,
+#     6, 8 fields: the formula gives 2, 3, 4, 6, 10, 24);
+#   return: the first returnFree values come back in registers (rax, rdx), so
+#     two fields are free at every hop; beyond that each field is a store and
+#     a load, linear, with a steeper tail past returnRegs (measured 0, +3, +4,
+#     +6, +8, +18 per hop at 2, 3, 4, 6, 8, 12 fields: the formula gives 0, 3,
+#     4, 6, 8, 14).
+#
+# The unit is "extra stack operand per hop" only as a calibration anchor; the
+# score is a dimensionless heuristic.
 proc hir::transport::Hop {structOpts dir width} {
-    set regs [Option $structOpts ${dir}Regs]
-    set spill [expr {max(0, $width - $regs)}]
-    return [expr {double($width) * (1 + $spill)}]
+    if {$dir eq "arg"} {
+        set over [expr {max(0, $width - [Option $structOpts argRegs])}]
+        return [expr {double($width) + [Option $structOpts argSpill] * $over * $over}]
+    }
+    set hop [expr {$width > [Option $structOpts returnFree] ? double($width) : 0.0}]
+    return [expr {$hop + [Option $structOpts returnSpill] * max(0, $width - [Option $structOpts returnRegs])}]
 }
 
 # The weighted score of one edge in direction DIR (arg | return).
@@ -146,26 +168,12 @@ proc hir::transport::ReturnVerdict {structOpts width depth} {
     return [list [expr {$score <= $budget}] $score $budget $edges]
 }
 
-# Plans the virtual *parameter* slots NODES (a list of slot keys) over the
-# exact-forwarding graph. FWD: key -> list of keys it forwards its value to
-# unchanged (each such forward is one argument edge). SUPPLY: key -> list of
-# {SOURCE RETEDGES}: one entry per exact call site that can hand the slot its
-# value; SOURCE is the key of a caller slot that forwards its own parameter
-# ("" when the argument is a construction or a local, which can itself become
-# the physical object lazily, so the path starts there), RETEDGES the number
-# of return edges the construction already crossed (an argument that is
-# itself the result of an exact call). WIDTH/USED: key -> transported width /
-# number of distinct fields ever read downstream.
-#
-# Returns key -> dict {width used up down ret cyclic score budget ok}: UP is
-# the longest argument path into the slot (>= 1: the edge that delivers it),
-# DOWN the longest argument path out of it to a consumption, RET the return
-# edges at the head of the worst path, CYCLIC whether the slot lies on a
-# forwarding cycle (a self-tail loop or mutual recursion, whose distance is
-# unbounded: it gets the cycle term instead of a fabricated finite distance),
-# SCORE/BUDGET/OK the verdict. SCCs by Tarjan (iterative), then one pass in
-# topological order for each of the two longest-path summaries: linear.
-proc hir::transport::Plan {structOpts nodes fwd supply width used} {
+# Strongly connected components of the graph over NODES whose successor lists
+# are SUCC (key -> list of keys; keys outside NODES are ignored): {COMP MEMBERS
+# NCOMP}. Tarjan, iterative (a chain can be long); components are numbered in
+# completion order, so a component's successors always have lower numbers
+# (sinks first = reverse topological order).
+proc hir::transport::Scc {nodes succMap} {
     set index [dict create]
     set i 0
     foreach n $nodes {
@@ -196,7 +204,7 @@ proc hir::transport::Plan {structOpts nodes fwd supply width used} {
                 lappend stack $v
                 dict set onStack $v 1
             }
-            set succ [expr {[dict exists $fwd $v] ? [dict get $fwd $v] : {}}]
+            set succ [expr {[dict exists $succMap $v] ? [dict get $succMap $v] : {}}]
             set descended 0
             while {$pos < [llength $succ]} {
                 set w [lindex $succ $pos]
@@ -236,6 +244,32 @@ proc hir::transport::Plan {structOpts nodes fwd supply width used} {
             }
         }
     }
+    return [list $comp $members $ncomp]
+}
+
+# Plans the virtual *parameter* slots NODES (a list of slot keys) over the
+# exact-forwarding graph. FWD: key -> list of keys it forwards its value to
+# unchanged (each such forward is one argument edge). SUPPLY: key -> list of
+# {SOURCE RETEDGES CYCLIC}: one entry per exact call site that can hand the slot its
+# value (CYCLIC is 1 when that site lies on a recursive call cycle: a value
+# supplied there is carried around the cycle -- a loop-carried aggregate, whose
+# distance is unbounded whatever it is built from); SOURCE is the key of a caller slot that forwards its own parameter
+# ("" when the argument is a construction or a local, which can itself become
+# the physical object lazily, so the path starts there), RETEDGES the number
+# of return edges the construction already crossed (an argument that is
+# itself the result of an exact call). WIDTH/USED: key -> transported width /
+# number of distinct fields ever read downstream.
+#
+# Returns key -> dict {width used up down ret cyclic score budget ok}: UP is
+# the longest argument path into the slot (>= 1: the edge that delivers it),
+# DOWN the longest argument path out of it to a consumption, RET the return
+# edges at the head of the worst path, CYCLIC whether the slot lies on a
+# forwarding cycle (a self-tail loop or mutual recursion, whose distance is
+# unbounded: it gets the cycle term instead of a fabricated finite distance),
+# SCORE/BUDGET/OK the verdict. SCCs by Tarjan (iterative), then one pass in
+# topological order for each of the two longest-path summaries: linear.
+proc hir::transport::Plan {structOpts nodes fwd supply width used} {
+    lassign [Scc $nodes $fwd] comp members ncomp
     # A component is cyclic when it has several members or one that forwards
     # to itself.
     set cyclic [dict create]
@@ -249,6 +283,14 @@ proc hir::transport::Plan {structOpts nodes fwd supply width used} {
             }
         }
         dict set cyclic $c $cyc
+    }
+    # A slot supplied at a recursive call site is loop-carried.
+    dict for {v entries} $supply {
+        foreach entry $entries {
+            if {[lindex $entry 2] && [dict exists $comp $v]} {
+                dict set cyclic [dict get $comp $v] 1
+            }
+        }
     }
     # down: longest argument path out of a component (component numbers
     # ascend from sinks, so every successor is already done).

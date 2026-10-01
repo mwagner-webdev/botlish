@@ -370,6 +370,208 @@ proc native::structCensusText {hir args} {
     return [join $lines \n]
 }
 
+# The representation (transport) census of HIR (VALUE-TRANSPORT-
+# MATERIALIZATION.md): everything native::structCensus reports, per record
+# with the transport facts (distance, direction, score and budget, frontier,
+# nested decision), plus the planning facts and the aggregate metrics, as a
+# dict:
+#   records    the census records (hir/escape.tcl's Census)
+#   nested     one dict per representation class with an inline nested literal:
+#              the value-tree cut chosen for it (opened / closed paths and why)
+#   params     the path verdict of every planned virtual parameter slot
+#   results    the return verdict of every recognized struct result
+#   deny       the parameter slots the transport policy gave up on
+#   metrics    virtual / materialized constructions, transported field values,
+#              argument and return field-hops (counted from the NIR), nested
+#              opened / closed, materializations by cause, and the distance,
+#              width and frontier histograms
+# An audit, not a language feature; the compiler-internal name is "transport
+# census" because the same machinery serves any fixed-shape product.
+proc native::transportCensus {hir args} {
+    set lowered [lowered $hir {*}$args]
+    set facts [dict get $lowered transportFacts]
+    set records [dict get $lowered structCensus]
+    return [dict create records $records nested [dict get $facts nested] \
+        params [dict get $facts params] results [dict get $facts results] \
+        deny [dict get $facts deny] \
+        metrics [TransportMetrics $records [dict get $lowered text] $facts]]
+}
+
+# 0 1 2 3-4 5-8 9+ (or "cyclic") for a transport distance.
+proc native::DistanceBucket {edges cyclic} {
+    if {$cyclic} {
+        return cyclic
+    }
+    if {$edges <= 2} {
+        return $edges
+    }
+    if {$edges <= 4} {
+        return 3-4
+    }
+    if {$edges <= 8} {
+        return 5-8
+    }
+    return 9+
+}
+
+proc native::WidthBucket {w} {
+    if {$w <= 2} {
+        return $w
+    }
+    if {$w <= 4} {
+        return 3-4
+    }
+    if {$w <= 8} {
+        return 5-8
+    }
+    return 9+
+}
+
+# The number of fields passed as separate parameters by each function of NIR
+# TEXT (the dotted `pnames` of a fields variant), and the argument / return /
+# loop field-hop counts of its calls: an argument hop is one field passed by a
+# `call` to such a function, a return hop one result of a `callmulti`, a loop
+# hop one field carried by a self-tail `tail`.
+proc native::NirHops {text} {
+    set dotted [dict create]
+    set current ""
+    set arg 0
+    set ret 0
+    set loop 0
+    set structnew 0
+    foreach line [split $text \n] {
+        if {[regexp {^func (\d+) "[^"]*" params=\d+.* pnames="([^"]*)"} $line -> id pnames]} {
+            set current $id
+            dict set dotted $id [llength [lmap p $pnames {expr {[regexp {\.\d+$} $p] ? $p : [continue]}}]]
+        }
+    }
+    foreach line [split $text \n] {
+        if {[regexp {^func (\d+) } $line -> id]} {
+            set current $id
+            continue
+        }
+        if {[regexp {^\s+((?:%\d+ )*)= (?:call|callenv|callmulti|callenvmulti) (\d+)} $line -> dsts callee]} {
+            if {[dict exists $dotted $callee]} {
+                incr arg [dict get $dotted $callee]
+            }
+            if {[regexp {= callenvmulti|= callmulti} $line]} {
+                incr ret [llength $dsts]
+            }
+        } elseif {[regexp {^\s+tail } $line] && $current ne "" && [dict exists $dotted $current]} {
+            incr loop [dict get $dotted $current]
+        }
+        if {[regexp {= structnew } $line]} {
+            incr structnew
+        }
+    }
+    return [dict create arg $arg return $ret loop $loop structnew $structnew]
+}
+
+proc native::TransportMetrics {records text facts} {
+    set virtual 0
+    set materialized 0
+    set transported 0
+    set frontier [dict create]
+    set distance [dict create]
+    set openedN 0
+    set closedN 0
+    set causes [dict create budget 0 hard 0 other 0]
+    set afterLocal 0
+    foreach rec $records {
+        set nestedTag [dict get $rec nested]
+        if {[dict get $rec class] eq "materialized"} {
+            incr materialized
+        } else {
+            incr virtual
+            if {$nestedTag eq ""} {
+                incr transported [dict get $rec transportedWidth]
+            }
+        }
+        if {$nestedTag eq "opened"} {
+            incr openedN
+        } elseif {[string match closed:* $nestedTag]} {
+            incr closedN
+        }
+        if {$nestedTag ne ""} {
+            continue
+        }
+        dict incr frontier [dict get $rec frontier]
+        incr afterLocal [dict get $rec afterLocalUse]
+        set tag [expr {[dict get $rec class] eq "materialized" ? [dict get $rec reason] : [lindex [dict get $rec mats] 0]}]
+        if {$tag ne ""} {
+            if {$tag eq "transport-budget"} {
+                dict incr causes budget
+            } elseif {$tag in {storage equality hash capture "open call" "native call" "call target" result control loop return}} {
+                dict incr causes hard
+            } else {
+                dict incr causes other
+            }
+        }
+        set key "[DistanceBucket [expr {[dict get $rec argEdges] + [dict get $rec retEdges]}] [dict get $rec cyclic]] x[WidthBucket [dict get $rec width]]"
+        dict incr distance $key
+    }
+    set hops [NirHops $text]
+    return [dict create virtual $virtual materialized $materialized transportedFields $transported \
+        argHops [dict get $hops arg] returnHops [dict get $hops return] loopHops [dict get $hops loop] \
+        structnew [dict get $hops structnew] nestedOpened $openedN nestedClosed $closedN \
+        causes $causes frontier $frontier distance $distance afterLocalUse $afterLocal \
+        deniedParams [dict size [dict get $facts deny]] \
+        plannedParams [dict size [dict get $facts params]]]
+}
+
+# A human-readable rendering of native::transportCensus: one line per
+# construction (what it became, where it is carried, how far, at what score
+# against which budget, where it turns physical), the nested value-tree
+# decisions, the planning verdicts and the aggregate metrics.
+proc native::transportCensusText {hir args} {
+    set c [transportCensus $hir {*}$args]
+    set lines {}
+    foreach rec [dict get $c records] {
+        dict with rec {
+            set what $class
+            if {$class eq "materialized"} {
+                append what " ($reason)"
+            }
+            if {$mats ne ""} {
+                append what " [join $mats ,]-later"
+            }
+            if {$nested ne ""} {
+                append what " nested=$nested"
+            }
+            lappend lines [format "%-34s %-6s %s%d-field -> %d  %-9s args=%d rets=%d%s score=%.1f/%.1f frontier=%s%s phys=%d  %s" \
+                $label $expr [expr {$named ? "named " : ""}] $width $transportedWidth $where $argEdges $retEdges \
+                [expr {$cyclic ? " cyclic" : ""}] $score $budget $frontier [expr {$afterLocalUse ? " (after local use)" : ""}] $physical $what]
+        }
+    }
+    foreach cls [dict get $c nested] {
+        set closed [join [lmap p [dict get $cls closed] {format "%s:%s" [join [lindex $p 0] .] [lindex $p 1]}] ", "]
+        lappend lines [format "nested class %s: width %d -> %d  opened {%s}  kept closed {%s}  args=%d rets=%d%s score=%.1f/%.1f" \
+            [join [lindex [dict get $cls shape] 1] ,] [dict get $cls width0] [dict get $cls width] \
+            [join [lmap p [dict get $cls opened] {join $p .}] ", "] $closed \
+            [dict get $cls argEdges] [dict get $cls retEdges] [expr {[dict get $cls cyclic] ? " cyclic" : ""}] \
+            [dict get $cls score] [dict get $cls budget]]
+    }
+    dict for {key v} [dict get $c params] {
+        dict with v {
+            lappend lines [format "param %-22s width=%d live=%d up=%d down=%d ret=%d%s score=%.1f/%.1f %s" \
+                $key $width $used $up $down $ret [expr {$cyclic ? " cyclic" : ""}] $score $budget [expr {$ok ? "virtual" : "DENIED"}]]
+        }
+    }
+    dict for {id v} [dict get $c results] {
+        dict with v {
+            lappend lines [format "result instance %-6s width=%d depth=%d score=%.1f/%.1f %s" $id $width $depth $score $budget [expr {$ok ? "virtual" : "DENIED"}]]
+        }
+    }
+    set m [dict get $c metrics]
+    foreach k {virtual materialized transportedFields argHops returnHops loopHops structnew nestedOpened nestedClosed afterLocalUse plannedParams deniedParams} {
+        lappend lines [format "%-18s %s" $k [dict get $m $k]]
+    }
+    lappend lines "causes: [lsort -stride 2 [dict get $m causes]]"
+    lappend lines "frontier: [lsort -stride 2 [dict get $m frontier]]"
+    lappend lines "distance x width: [lsort -stride 2 [dict get $m distance]]"
+    return [join $lines \n]
+}
+
 # SITES (native::allocationReport's "sites" list) with each entry's
 # "hirExpr" resolved to a "location" key: {file line column}, or {} if
 # unattributed or unresolvable. Kept separate from the Rust report so the

@@ -1,0 +1,719 @@
+# value-transport.test -- value transport and materialization frontiers
+# (VALUE-TRANSPORT-MATERIALIZATION.md): how long a fixed-shape value stays
+# virtual (carried as its fields) along its path, where it becomes one physical
+# aggregate, and which nested values are opened into it.
+#
+# Every program is differential: the Tcl interpreter (HIR -> Core IR), native
+# code under the transport policy (the default), native code under the
+# legacy width-only policy, native code with nesting off and native code with
+# `-struct-opt 0` (every struct physical) must agree on its value. The
+# decisions are pinned through the NIR: `structnew` (a materialization),
+# `structget`, `callmulti`/`retmulti` (virtual returns), the `params=` of the
+# functions that forward a value (fields or one pointer), and the transport
+# census (distance, direction, score and budget, frontier, nested cut).
+#
+# The defaults pinned here are the calibrated ones (hir/transport.tcl): the
+# argument, return and cycle budgets are all 20 pressure units; an edge costs
+# W + max(0, W-4)^2 for an argument, W (0 up to two fields) + a tail past 8
+# for a return, a cycle four argument edges.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+source [file join $::projectRoot tests transport-shapes.tcl]
+
+interp recursionlimit {} 100000
+
+testConstraint executableAot [expr {$::tcl_platform(os) eq "Linux" && $::tcl_platform(machine) in {x86_64 amd64}}]
+
+set vtFiles {}
+proc vtWrite {name content} {
+    lappend ::vtFiles $name
+    return [tcltest::makeFile $content $name]
+}
+set ::vtCounter 0
+proc vtHir {source} {
+    return [surface::readProgramFile [vtWrite vt-[incr ::vtCounter].bot $source]]
+}
+# Probe programs run for a handful of iterations; tiny-leaf inlining is off so
+# every boundary under test stays a call.
+set vtCommon {-tiny-leaf-inline-opt 0}
+proc vtLowered {hir args} {
+    return [native::lowered $hir {*}$::vtCommon {*}$args]
+}
+proc vtCount {text regexp} {
+    return [regexp -all -line $regexp $text]
+}
+# "structnew N structget M callmulti C retmulti R" of SOURCE's NIR under ARGS.
+proc vtOps {source args} {
+    set text [dict get [vtLowered [vtHir $source] {*}$args] text]
+    return [list structnew [vtCount $text {= structnew }] structget [vtCount $text {= structget }] \
+        callmulti [vtCount $text {= callmulti }] retmulti [vtCount $text {^\s+retmulti }]]
+}
+# The structnew count only.
+proc vtNew {source args} {
+    return [vtCount [dict get [vtLowered [vtHir $source] {*}$args] text] {= structnew }]
+}
+# name=params of every emitted function called NAMES-prefixed (fwd, ret, ...),
+# in program order, e.g. "fwd0=3 fwd1=3".
+proc vtParams {source prefix args} {
+    set text [dict get [vtLowered [vtHir $source] {*}$args] text]
+    set r {}
+    foreach line [split $text \n] {
+        if {[regexp "^func \\d+ \"($prefix\[a-z0-9\]*)\" params=(\\d+)" $line -> n p]} {
+            lappend r $n=$p
+        }
+    }
+    return $r
+}
+# Just the distinct parameter counts of those functions.
+proc vtParamSet {source prefix args} {
+    return [lsort -unique -integer [lmap x [vtParams $source $prefix {*}$args] {lindex [split $x =] 1}]]
+}
+# The text of the NIR function called NAME (the first variant).
+proc vtFunc {text name} {
+    set lines {}
+    set collecting 0
+    foreach line [split $text \n] {
+        if {!$collecting} {
+            if {[regexp "^func \\d+ \"$name\"" $line]} {
+                set collecting 1
+                lappend lines $line
+            }
+            continue
+        }
+        lappend lines $line
+        if {$line eq "end"} {
+            break
+        }
+    }
+    return [join $lines \n]
+}
+# The value SOURCE has under the reference interpreter, native with the
+# transport policy, with the legacy policy, with nesting off and with every
+# struct physical, or the disagreement.
+proc vtValue {source} {
+    set hir [vtHir $source]
+    set interp [outcomeUnderHir interp $hir]
+    set shown [list [lindex $interp 1]]
+    foreach opts {{} {-struct-policy legacy} {-struct-nesting 0} {-struct-opt 0}} {
+        lappend shown [core::value::show [native::evalHir $hir {*}$opts] 1]
+    }
+    if {[lindex $interp 0] ne "value" || [llength [lsort -unique $shown]] != 1} {
+        return "DISAGREE: [join $shown { / }]"
+    }
+    return [lindex $shown 0]
+}
+proc vtCensus {source args} {
+    return [dict get [vtLowered [vtHir $source] {*}$args] structCensus]
+}
+proc vtMetrics {source args} {
+    return [dict get [native::transportCensus [vtHir $source] {*}$::vtCommon {*}$args] metrics]
+}
+# Runs SOURCE under GC stress (a collection attempted at every allocation
+# site) and plainly; both must agree and equal the interpreter's value.
+proc vtStressed {source} {
+    set hir [vtHir $source]
+    set expected [lindex [outcomeUnderHir interp $hir] 1]
+    set plain [outcomeUnderHir cranelift $hir]
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        set stressed [outcomeUnderHir cranelift $hir]
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+    if {$plain ne $stressed || [lindex $plain 1] ne $expected} {
+        return "DISAGREE: $expected / $plain / $stressed"
+    }
+    return $expected
+}
+set N 10
+
+# ---------------------------------------------------------------------------
+# Policy and knobs
+
+test vt-legacy-policy-is-the-previous-milestone {-struct-policy legacy keeps the width-only caps: argument 4, return 8, a wide result is an object} -body {
+    list [vtNew [chainArg 4 1 $N] -struct-policy legacy] [vtNew [chainArg 6 1 $N] -struct-policy legacy] \
+        [vtNew [chainRet 8 2 $N] -struct-policy legacy] [vtNew [chainRet 9 1 $N] -struct-policy legacy]
+} -result {0 1 0 1}
+
+test vt-transport-policy-is-distance-aware {the same width crosses short chains virtually and long ones as an object} -body {
+    list [vtNew [chainArg 4 5 $N]] [vtNew [chainArg 4 6 $N]] [vtNew [chainArg 4 6 $N] -struct-policy legacy]
+} -result {0 1 0}
+
+test vt-budget-knobs {the argument budget is audit-configurable} -body {
+    list [vtNew [chainArg 6 3 $N]] [vtNew [chainArg 6 3 $N] -struct-arg-budget 100] \
+        [vtNew [chainArg 2 3 $N]] [vtNew [chainArg 2 3 $N] -struct-arg-budget 2]
+} -result {1 0 0 1}
+
+test vt-ceiling-is-a-hard-limit {a width ceiling denies a struct whatever its score} -body {
+    list [vtNew [chainArg 4 1 $N]] [vtNew [chainArg 4 1 $N] -struct-arg-width 3] \
+        [vtNew [chainArg 4 1 $N] -struct-arg-width 3 -struct-arg-budget 1e9] \
+        [vtNew [chainRet 4 1 $N] -struct-return-width 3 -struct-return-budget 1e9]
+} -result {0 1 1 1}
+
+test vt-environment-policy {BOTLISH_NATIVE_STRUCT_POLICY selects the legacy policy} -body {
+    set ::env(BOTLISH_NATIVE_STRUCT_POLICY) legacy
+    try {
+        vtNew [chainArg 6 1 $N]
+    } finally {
+        unset ::env(BOTLISH_NATIVE_STRUCT_POLICY)
+    }
+} -result 1
+
+# ---------------------------------------------------------------------------
+# Distance, width and direction
+
+test vt-narrow-long-arg {width 2 stays virtual across 10 argument edges: one field-wise function per edge} -body {
+    list [vtOps [chainArg 2 9 $N]] [vtParamSet [chainArg 2 9 $N] fwd] \
+        [vtNew [chainArg 2 10 $N]] [vtNew [chainArg 2 11 $N]] [vtParamSet [chainArg 2 11 $N] fwd]
+} -result {{structnew 0 structget 0 callmulti 0 retmulti 0} 3 0 1 2}
+
+test vt-narrow-long-return {width 2 returns cost nothing per hop: virtual through any chain} -body {
+    list [vtOps [chainRet 2 12 $N]] [vtOps [chainRet 2 40 $N]]
+} -result {{structnew 0 structget 0 callmulti 12 retmulti 12} {structnew 0 structget 0 callmulti 40 retmulti 40}}
+
+test vt-wide-short-return {a 6- or 8-field result crosses one or two returns as fields} -body {
+    list [vtOps [chainRet 6 1 $N]] [vtOps [chainRet 6 3 $N]] [vtOps [chainRet 8 1 $N]] [vtOps [chainRet 8 2 $N]]
+} -result {{structnew 0 structget 0 callmulti 1 retmulti 1} {structnew 0 structget 0 callmulti 3 retmulti 3} {structnew 0 structget 0 callmulti 1 retmulti 1} {structnew 0 structget 0 callmulti 2 retmulti 2}}
+
+test vt-wide-long-return {an 8-field result crossing 8 returns is one object, built where it is constructed} -body {
+    set source [chainRet 8 8 $N]
+    list [vtOps $source] [vtCount [vtFunc [dict get [vtLowered [vtHir $source]] text] ret0] {= structnew }]
+} -result {{structnew 1 structget 8 callmulti 0 retmulti 0} 1}
+
+test vt-wide-long-arg {an 8-field value forwarded down 4..8 argument edges is one object and one pointer per hop} -body {
+    list [vtOps [chainArg 8 4 $N]] [vtParamSet [chainArg 8 4 $N] fwd] \
+        [vtOps [chainArg 8 8 $N]] [vtParamSet [chainArg 8 8 $N] fwd] \
+        [vtOps [chainArg 8 8 $N] -struct-policy legacy] [vtOps [chainArg 8 8 $N] -struct-opt 0]
+} -result {{structnew 1 structget 8 callmulti 0 retmulti 0} 2 {structnew 1 structget 8 callmulti 0 retmulti 0} 2 {structnew 1 structget 8 callmulti 0 retmulti 0} {structnew 1 structget 8 callmulti 0 retmulti 0}}
+
+test vt-direction-asymmetry {identical width and distance: arguments materialize where returns stay virtual} -body {
+    list [vtNew [chainArg 6 3 $N]] [vtNew [chainRet 6 3 $N]] [vtNew [chainArg 8 2 $N]] [vtNew [chainRet 8 2 $N]]
+} -result {1 0 1 0}
+
+test vt-direction-asymmetry-values {the direction probe pair agrees on every execution} -body {
+    list [vtValue [chainArg 6 3 $N]] [vtValue [chainRet 6 3 $N]]
+} -result {465 420}
+
+test vt-mixed-direction-local {a returned value bound to a local keeps its return virtual and materializes before the long argument chain} -body {
+    set source [mixed 4 3 6 $N]
+    list [vtOps $source] [vtParamSet $source fwd] [vtParamSet $source ret]
+} -result {{structnew 1 structget 4 callmulti 0 retmulti 0} 2 1}
+
+test vt-mixed-direction-all-virtual {a short return chain then a short argument chain stays virtual end to end} -body {
+    set source [mixed 2 4 4 $N]
+    list [vtOps $source] [vtParamSet $source fwd]
+} -result {{structnew 0 structget 0 callmulti 4 retmulti 4} 3}
+
+test vt-mixed-direction-accumulates {with no local between them, return and argument edges add up on one path} -body {
+    list [vtNew [mixedDirect 2 6 6 $N]] [vtNew [mixedDirect 4 3 3 $N]] [vtNew [mixedDirect 4 2 4 $N]]
+} -result {0 1 1}
+
+test vt-width-shrinks-with-a-new-value {a callee that builds a narrower result starts a new path of its own width} -body {
+    set source {fn mk4(i):
+    {a: i, b: i + 1, c: i + 2, d: i + 3}
+fn narrow(r):
+    {a: r.a, b: r.d}
+fn drive(i, n, acc):
+    if i >= n:
+        return acc
+    s = narrow(mk4(i))
+    drive(i + 1, n, acc + s.a + s.b)
+drive(0, 10, 0)
+}
+    list [vtValue $source] [vtOps $source]
+} -result {120 {structnew 0 structget 0 callmulti 2 retmulti 2}}
+
+# ---------------------------------------------------------------------------
+# Frontiers
+
+test vt-late-frontier {virtual through local use, one materialization immediately before the expensive chain, one pointer through it} -body {
+    set source [lateFrontier 6 5 $N]
+    set text [dict get [vtLowered [vtHir $source]] text]
+    set drive [vtFunc $text drive]
+    # the local use (an iadd of two field registers) precedes the structnew
+    set lines [split $drive \n]
+    set add [lsearch -glob $lines {*op iadd*}]
+    set mat [lsearch -glob $lines {*= structnew*}]
+    list [vtOps $source] [vtParamSet $source fwd] [vtCount $drive {= structget }] [expr {$add >= 0 && $add < $mat}] \
+        [vtCount [vtFunc $text fwd0] {= structget }] [vtValue $source]
+} -result {{structnew 1 structget 6 callmulti 0 retmulti 0} 2 0 1 6 565}
+
+test vt-late-frontier-census {the census names the frontier: after local use, before the long forwarding region} -body {
+    set c [native::transportCensus [vtHir [lateFrontier 6 5 $N]] {*}$::vtCommon]
+    set rec [lindex [dict get $c records] 0]
+    list [dict get $rec class] [dict get $rec frontier] [dict get $rec afterLocalUse] [dict get $rec mats] \
+        [dict get $rec argEdges] [expr {[dict get $rec score] > [dict get $rec budget]}] [dict get $rec physical]
+} -result {local before-long-forwarding-region 1 transport-budget 5 1 1}
+
+test vt-frontier-is-not-construction {with no distant use the same value never materializes; a distant use moves the frontier, not the whole value} -body {
+    set short [lateFrontier 6 1 $N]
+    list [vtOps $short] [vtNew [lateFrontier 6 5 $N]] [vtNew [lateFrontier 4 2 $N]]
+} -result {{structnew 0 structget 0 callmulti 0 retmulti 0} 1 0}
+
+test vt-materialization-is-single {two long forwards of one value share the one object} -body {
+    set source [lateTwice 6 5 $N]
+    list [vtOps $source] [vtValue $source]
+} -result {{structnew 1 structget 6 callmulti 0 retmulti 0} 1040}
+
+test vt-multiple-consumers {a cheap consumer takes fields, the long path takes the one object, built once} -body {
+    set source [twoConsumers 4 6 $N]
+    list [vtOps $source] [vtParams $source cheap] [vtParamSet $source long] [vtValue $source]
+} -result {{structnew 1 structget 4 callmulti 0 retmulti 0} cheap=5 2 570}
+
+test vt-shared-prefix {materializing before a shared expensive prefix, once} -body {
+    set source [sharedPrefix 4 6 $N]
+    list [vtNew $source] [vtParams $source head] [vtParamSet $source long] [vtValue $source]
+} -result {1 head=2 2 570}
+
+test vt-branch-frontier {the object is built only on the path that needs it: allocations equal the long-branch iterations} -body {
+    set out {}
+    foreach threshold {100 90 0} {
+        set source [branchy 8 6 100 $threshold]
+        set report [native::allocationReport [vtHir $source] summary 1 {*}$::vtCommon]
+        lappend out [dict get $report byKind Struct allocations] [vtNew $source]
+    }
+    set out
+} -result {0 0 10 1 100 1}
+
+test vt-branch-frontier-values {the branch probe agrees on every execution} -body {
+    vtValue [branchy 8 6 100 90]
+} -result {16885}
+
+# ---------------------------------------------------------------------------
+# Cyclic transport
+
+test vt-cyclic-narrow {a narrow loop-carried struct keeps its fields through the back edge; a wide one is an object} -body {
+    list [vtOps [selfTail 4 $N]] [vtParamSet [selfTail 4 $N] spin] [vtNew [selfTail 5 $N]] [vtNew [selfTail 5 $N] -struct-policy legacy]
+} -result {{structnew 0 structget 0 callmulti 0 retmulti 0} 6 2 2}
+
+test vt-cyclic-values {loop-carried structs agree on every execution} -body {
+    list [vtValue [selfTail 3 $N]] [vtValue [selfTail 6 $N]]
+} -result {33 75}
+
+test vt-cyclic-census {a loop-carried slot is marked cyclic, its distance is not a fabricated finite number} -body {
+    set c [native::transportCensus [vtHir [selfTail 3 $N]] {*}$::vtCommon]
+    set params [dict get $c params]
+    list [lsort -unique [lmap k [dict keys $params] {dict get $params $k cyclic}]] \
+        [dict get [dict get $c metrics] loopHops]
+} -result {1 3}
+
+test vt-cyclic-recursion-non-tail {a struct handed down a non-tail self-recursion is carried around the cycle} -body {
+    set source {fn depth(s, n):
+    if n == 0:
+        return s.a + s.b
+    depth({a: s.a + 1, b: s.b}, n - 1) + 1
+depth({a: 1, b: 2}, 5)
+}
+    set c [native::transportCensus [vtHir $source] {*}$::vtCommon]
+    list [vtValue $source] [dict get [dict get $c metrics] structnew] \
+        [lsort -unique [lmap k [dict keys [dict get $c params]] {dict get $c params $k cyclic}]]
+} -result {13 0 1}
+
+# ---------------------------------------------------------------------------
+# Nested values: the cut through the value tree
+
+set nestedLocal {fn drive(i, n, acc):
+    if i >= n:
+        return acc
+    r = {a: i, b: i + 1, inner: {c: i + 2, d: i + 3}}
+    drive(i + 1, n, acc + r.a + r.b + r.inner.c + r.inner.d)
+drive(0, 10, 0)
+}
+
+test vt-nested-local {an inner literal only projected joins the outer representation: no allocation at all} -body {
+    list [vtValue $nestedLocal] [vtOps $nestedLocal] [vtOps $nestedLocal -struct-nesting 0] [vtOps $nestedLocal -struct-policy legacy] \
+        [vtOps $nestedLocal -struct-opt 0]
+} -result {240 {structnew 0 structget 0 callmulti 0 retmulti 0} {structnew 1 structget 2 callmulti 0 retmulti 0} {structnew 1 structget 2 callmulti 0 retmulti 0} {structnew 2 structget 6 callmulti 0 retmulti 0}}
+
+test vt-nested-census {the census records the cut: one inner value opened, its width folded into the outer} -body {
+    set c [native::transportCensus [vtHir $nestedLocal] {*}$::vtCommon]
+    set cls [lindex [dict get $c nested] 0]
+    list [dict get $cls width0] [dict get $cls width] [dict get $cls opened] [dict get $cls closed] \
+        [dict get [dict get $c metrics] nestedOpened] [dict get [dict get $c metrics] nestedClosed] \
+        [lmap r [dict get $c records] {dict get $r nested}]
+} -result {3 4 inner {} 1 0 {{} opened}}
+
+test vt-nested-two-inner {two inner values are two independent decisions, both opened locally} -body {
+    set source {fn drive(i, n, acc):
+    if i >= n:
+        return acc
+    r = {left: {a: i, b: i + 1}, right: {c: i + 2, d: i + 3}}
+    drive(i + 1, n, acc + r.left.a + r.left.b + r.right.c + r.right.d)
+drive(0, 10, 0)
+}
+    list [vtValue $source] [vtOps $source] [vtOps $source -struct-nesting 0]
+} -result {240 {structnew 0 structget 0 callmulti 0 retmulti 0} {structnew 2 structget 4 callmulti 0 retmulti 0}}
+
+test vt-nested-deep {a cut can open several levels} -body {
+    set source {fn drive(i, n, acc):
+    if i >= n:
+        return acc
+    r = {a: i, x: {b: i + 1, y: {c: i + 2, d: i + 3}}}
+    drive(i + 1, n, acc + r.a + r.x.b + r.x.y.c + r.x.y.d)
+drive(0, 10, 0)
+}
+    list [vtValue $source] [vtOps $source] [vtOps $source -struct-nesting 0]
+} -result {240 {structnew 0 structget 0 callmulti 0 retmulti 0} {structnew 2 structget 5 callmulti 0 retmulti 0}}
+
+test vt-nested-short-return {at one return edge the inner value is opened: four fields cross, not three} -body {
+    set source [nestedChainRet 2 1 $N]
+    list [vtValue $source] [vtOps $source] [vtOps $source -struct-nesting 0] \
+        [regexp {results=4} [vtFunc [dict get [vtLowered [vtHir $source]] text] ret0]] \
+        [regexp {results=3} [vtFunc [dict get [vtLowered [vtHir $source] -struct-nesting 0] text] ret0]]
+} -result {240 {structnew 0 structget 0 callmulti 1 retmulti 1} {structnew 1 structget 2 callmulti 1 retmulti 1} 1 1}
+
+test vt-nested-return-budget-chooses {the same value over longer return chains: opened while its widened path fits, bundled once it does not, an object when even that does not} -body {
+    set out {}
+    foreach e {1 5 6 8} {
+        set source [nestedChainRet 2 $e $N]
+        lappend out "$e:[vtNew $source]/[vtCount [dict get [vtLowered [vtHir $source]] text] {= callmulti }]"
+    }
+    set out
+} -result {1:0/1 5:0/5 6:1/6 8:2/0}
+
+test vt-nested-return-budget-values {the nested return probes agree on every execution} -body {
+    list [vtValue [nestedChainRet 2 5 $N]] [vtValue [nestedChainRet 2 6 $N]] [vtValue [nestedChainRet 2 8 $N]]
+} -result {240 240 240}
+
+test vt-nested-long-arg-stays-bundled {a wide inner value over a long argument chain stays one transported value} -body {
+    set open [nestedChainArg 4 1 $N]
+    set long [nestedChainArg 4 3 $N]
+    list [vtOps $open] [vtParamSet $open fwd] [vtOps $long] [vtParamSet $long fwd] [vtValue $long] \
+        [lmap r [vtCensus $long] {dict get $r nested}]
+} -result {{structnew 0 structget 0 callmulti 0 retmulti 0} 7 {structnew 1 structget 4 callmulti 0 retmulti 0} 4 465 {{} closed:transport-budget}}
+
+test vt-nested-long-arg-narrow-opens {a narrow inner value is opened even across a long argument chain} -body {
+    set source [nestedChainArg 2 4 $N]
+    list [vtOps $source] [vtParamSet $source fwd] [vtValue $source]
+} -result {{structnew 0 structget 0 callmulti 0 retmulti 0} 5 285}
+
+test vt-nested-independent-lifetime {an inner value that is itself forwarded stays one field, however much else projects it} -body {
+    set source {fn take(q):
+    q.c + q.d
+fn drive(i, n, acc):
+    if i >= n:
+        return acc
+    r = {a: i, b: i + 1, inner: {c: i + 2, d: i + 3}}
+    drive(i + 1, n, acc + r.a + r.inner.c + take(r.inner))
+drive(0, 10, 0)
+}
+    list [vtValue $source] [vtOps $source] [lmap r [vtCensus $source] {dict get $r nested}] \
+        [dict get [lindex [dict get [vtLowered [vtHir $source]] transportFacts nested] 0] closed]
+} -result {250 {structnew 1 structget 3 callmulti 0 retmulti 0} {{} closed:independent-use} {{inner independent-use}}}
+
+test vt-nested-stored-inner {an inner value stored in a List keeps its own object} -body {
+    set source {fn drive(i, n, acc):
+    if i >= n:
+        return acc
+    r = {a: i, inner: {c: i + 2, d: i + 3}}
+    xs = list_append([], r.inner)
+    drive(i + 1, n, acc + r.a + list_length(xs))
+drive(0, 10, 0)
+}
+    list [vtValue $source] [vtOps $source]
+} -result {55 {structnew 1 structget 0 callmulti 0 retmulti 0}}
+
+test vt-nested-shared-inner {a nested value bound to a name and used as a field is shared, not scalarized into the tree} -body {
+    set source {fn drive(i, n, acc):
+    if i >= n:
+        return acc
+    inner = {c: i + 2, d: i + 3}
+    r = {a: i, inner: inner}
+    drive(i + 1, n, acc + r.a + r.inner.c + inner.d)
+drive(0, 10, 0)
+}
+    list [vtValue $source] [vtOps $source]
+} -result {185 {structnew 1 structget 1 callmulti 0 retmulti 0}}
+
+test vt-nested-materialization-rebuilds {materializing an outer with an opened inner rebuilds the inner object first: two objects, as the physical form} -body {
+    set source {fn drive(i, n, acc):
+    if i >= n:
+        return acc
+    r = {a: i, inner: {c: i + 2, d: i + 3}}
+    xs = list_append([], r)
+    drive(i + 1, n, acc + r.a + r.inner.c + list_length(xs))
+drive(0, 10, 0)
+}
+    list [vtValue $source] [vtOps $source] [vtOps $source -struct-opt 0]
+} -result {120 {structnew 2 structget 0 callmulti 0 retmulti 0} {structnew 2 structget 3 callmulti 0 retmulti 0}}
+
+test vt-nested-identity {an opened named inner struct is rebuilt with its own nominal identity} -body {
+    set source {struct Pt:
+    x: int
+    y: int
+struct Seg:
+    p: Pt
+    q: Pt
+fn run(i: int):
+    s = Seg {p: Pt {x: i, y: 1}, q: Pt {x: 2, y: i}}
+    t = list_append([], s)
+    [s.p.x, s.q.y, list_get(t, 0), list_get(t, 0) == Seg {p: Pt {x: i, y: 1}, q: Pt {x: 2, y: i}}]
+run(7)
+}
+    list [vtValue $source] [vtNew $source]
+} -result {{[7, 7, Seg {p: Pt {x: 7, y: 1}, q: Pt {x: 2, y: 7}}, true]} 6}
+
+# ---------------------------------------------------------------------------
+# Equality, hashing and printing of a frontier-materialized value
+
+test vt-late-materialized-is-equal-to-eager {a value materialized after local use and a long chain compares, hashes and prints as if built at construction} -body {
+    set source {fn f0(r, k):
+    r.a + r.b + r.c + r.d + r.e + r.f + k
+fn f1(r, k):
+    f0(r, k)
+fn f2(r, k):
+    f1(r, k)
+fn f3(r, k):
+    f2(r, k)
+fn f4(r, k):
+    f3(r, k)
+fn run(i):
+    r = {a: i, b: i + 1, c: i + 2, d: i + 3, e: i + 4, f: i + 5}
+    s = {f: i + 5, e: i + 4, d: i + 3, c: i + 2, b: i + 1, a: i}
+    local = r.a + r.b
+    t = f4(r, i)
+    [local, t, r == s, hash(r) == hash(s), r]
+run(3)
+}
+    list [vtValue $source] [vtNew $source]
+} -result {{[7, 36, true, true, {a: 3, b: 4, c: 5, d: 6, e: 7, f: 8}]} 2}
+
+# ---------------------------------------------------------------------------
+# No combinatorial variants
+
+test vt-bounded-variants {however its values are cut and carried, an instance has at most the canonical function, one fields form and the two companions} -body {
+    set source {fn leaf(r, k):
+    r.a + r.b + r.inner.c + r.inner.d + k
+fn mid(r, k):
+    leaf(r, k)
+fn big(r, k):
+    mid(r, k) + leaf(r, k + 1)
+fn mk(i):
+    {a: i, b: 1, inner: {c: i, d: 2}}
+fn drive(i, n, acc):
+    if i >= n:
+        return acc
+    r = mk(i)
+    acc2 = acc + big(r, i) + big({a: i, b: 2, inner: {c: 1, d: i}}, i) + mid(mk(i + 1), i)
+    drive(i + 1, n, acc2)
+drive(0, 10, 0)
+}
+    set text [dict get [vtLowered [vtHir $source]] text]
+    set counts [dict create]
+    foreach line [split $text \n] {
+        if {[regexp {^func \d+ "([^"]*)"} $line -> n]} {
+            dict incr counts $n
+        }
+    }
+    list [vtValue $source] [expr {[lindex [lsort -integer [dict values $counts]] end] <= 4}] \
+        [dict get $counts leaf] [dict get $counts mk]
+} -match glob -result {* 1 * *}
+
+test vt-one-fields-layout-per-parameter {all call sites of a parameter agree on one transported layout} -body {
+    set source {fn leaf(r, k):
+    r.a + r.b + r.inner.c + k
+fn drive(i, n, acc):
+    if i >= n:
+        return acc
+    drive(i + 1, n, acc + leaf({a: i, b: 1, inner: {c: i, d: 2}}, i) + leaf({a: 1, b: i, inner: {c: 2, d: i}}, i))
+drive(0, 10, 0)
+}
+    set text [dict get [vtLowered [vtHir $source]] text]
+    list [vtValue $source] [vtParamSet $source leaf]
+} -result {265 5}
+
+# ---------------------------------------------------------------------------
+# Determinism and convergence
+
+test vt-deterministic-planning {the plan is a pure function of the program: lowering twice, and under permuted options, gives identical NIR} -body {
+    set source [mixed 4 3 6 $N]
+    set hir [vtHir $source]
+    set a [dict get [vtLowered $hir] text]
+    set b [dict get [vtLowered $hir] text]
+    set c [dict get [vtLowered $hir -struct-arg-budget 20.0 -struct-return-budget 20.0] text]
+    list [expr {$a eq $b}] [expr {$a eq $c}]
+} -result {1 1}
+
+# ---------------------------------------------------------------------------
+# GC: frontier materialization and nested opening under collection at every
+# allocation site
+
+set vtGc(frontier-strings) {fn f0(r, k):
+    concat(r.a, r.b) + k
+fn f1(r, k):
+    f0(r, k)
+fn f2(r, k):
+    f1(r, k)
+fn run(i):
+    r = {a: concat("a", "b"), b: concat("c", "d"), c: i, d: [1, 2], e: concat("e", "f"), f: i + 1}
+    junk = [concat("j", "k"), concat("m", "n")]
+    local = r.c + r.f
+    [local, r.d, r.e, junk, r.a]
+run(2)
+}
+set vtGc(frontier-after-calls) {fn use(r, k):
+    [r.a, r.f, k]
+fn f1(r, k):
+    use(r, k)
+fn f2(r, k):
+    f1(r, k)
+fn f3(r, k):
+    f2(r, k)
+fn run(i):
+    r = {a: concat("a", "b"), b: i, c: [concat("x", "y")], d: i, e: i, f: concat("t", "u")}
+    junk = [concat("j", "k"), concat("m", "n"), concat("o", "p")]
+    [f3(r, i), junk, r.c]
+run(2)
+}
+set vtGc(nested-strings) {fn mk(i):
+    {s: concat("a", "b"), inner: {t: concat("c", "d"), u: [concat("e", "f")]}, n: i}
+fn run(i):
+    r = mk(i)
+    junk = [concat("j", "k"), concat("m", "n")]
+    [r.s, r.inner.t, r.inner.u, r.n, junk]
+run(4)
+}
+set vtGc(nested-list-mutarray) {fn mk(i):
+    m = mutarray::create(2, "z")
+    mutable_array_set(m, 0, concat("q", "r"))
+    {arr: m, inner: {items: [concat("a", "b"), concat("c", "d")], tag: concat("t", "g")}}
+fn run(i):
+    r = mk(i)
+    junk = concat(concat("j", "k"), "m")
+    [mutable_array_get(r.arr, 0), r.inner.items, r.inner.tag, junk]
+run(1)
+}
+set vtGc(nested-materialized-later) {fn run(i):
+    r = {s: concat("a", "b"), inner: {t: concat("c", "d"), u: [concat("e", "f")]}}
+    junk = [concat("j", "k"), concat("m", "n"), concat("o", "p")]
+    xs = list_append([], r)
+    [r.s, r.inner.t, list_get(xs, 0).inner.u, junk]
+run(1)
+}
+set vtGc(branch-specific) {fn f0(r, k):
+    [r.a, r.f, k]
+fn f1(r, k):
+    f0(r, k)
+fn f2(r, k):
+    f1(r, k)
+fn f3(r, k):
+    f2(r, k)
+fn run(i):
+    r = {a: concat("a", "b"), b: i, c: i, d: i, e: i, f: concat("t", "u")}
+    junk = [concat("j", "k"), concat("m", "n")]
+    v = if i >= 2:
+        f3(r, i)
+    else:
+        [r.a, r.b]
+    [v, junk]
+run(3)
+}
+set vtGc(cyclic) {fn spin(s, i, n):
+    if i >= n:
+        return [s.a, s.b, s.c]
+    spin({a: concat(s.a, "x"), b: s.b, c: [i]}, i + 1, n)
+spin({a: "a", b: concat("b", "c"), c: [0]}, 0, 3)
+}
+foreach name [lsort [array names vtGc]] {
+    test vt-gc-$name {pointer-bearing fields survive collection at every allocation site} -body {
+        vtStressed $vtGc($name)
+    } -match regexp -result {^(?!DISAGREE).+}
+}
+
+test vt-gc-frontier-is-virtual-then-physical {the GC probes really exercise the frontier and the cut} -body {
+    list [vtOps $vtGc(frontier-strings)] [vtOps $vtGc(nested-strings)] [vtOps $vtGc(nested-materialized-later)] [vtOps $vtGc(cyclic)]
+} -match glob -result {{structnew 0 *} {structnew 0 *callmulti 1 retmulti 1} {structnew 2 *} {structnew 0 *}}
+
+# ---------------------------------------------------------------------------
+# Standalone executables: empty PATH, GC stress
+
+test vt-executable-parity {frontier- and cut-sensitive programs run as real executables with an empty PATH, plainly and under GC stress} -constraints executableAot -body {
+    set dir [tcltest::makeDirectory vt-exe]
+    set results {}
+    foreach name {frontier-strings frontier-after-calls nested-strings nested-materialized-later branch-specific cyclic} {
+        set path [file join $dir $name.bot]
+        set channel [open $path w]
+        fconfigure $channel -encoding utf-8
+        puts -nonewline $channel $vtGc($name)
+        close $channel
+        set hir [surface::readProgramFile $path]
+        set expected [lindex [outcomeUnderHir interp $hir] 1]
+        native::executable $hir [file rootname $path]
+        set plain [exec env PATH= [file rootname $path]]
+        set stressed [exec env PATH= BOTLISH_NATIVE_GC_STRESS=1 [file rootname $path]]
+        lappend results [expr {$plain eq $stressed && $plain eq $expected}]
+    }
+    tcltest::removeDirectory vt-exe
+    set results
+} -result {1 1 1 1 1 1}
+
+# ---------------------------------------------------------------------------
+# The real corpus: the transport policy makes the previous milestone's choices
+
+test vt-corpus-csv-allocation-free {the CSV scan results stay virtual: no Struct object on the normal path, the same as the legacy policy} -body {
+    set hir [native::prepareHir [surface::readProgramFile [file join $::projectRoot examples stdlib csv_geometric.bot]]]
+    set new [native::allocationReport $hir summary 1]
+    set old [native::allocationReport $hir summary 1 -struct-policy legacy]
+    list [dict get $new byKind Struct allocations] [dict get $old byKind Struct allocations] \
+        [expr {[dict get $new total allocations] == [dict get $old total allocations]}]
+} -result {0 0 1}
+
+test vt-corpus-identical-nir {the whole canonical corpus lowers to the same NIR under the transport and the legacy policy} -body {
+    set same {}
+    foreach path [concat [lsort [glob -directory [file join $::projectRoot bench] *.bot]] \
+            [lsort [glob -directory [file join $::projectRoot examples stdlib] *.bot]]] {
+        set hir [native::prepareHir [surface::readProgramFile $path]]
+        if {[dict get [native::lowered $hir] text] ne [dict get [native::lowered $hir -struct-policy legacy] text]} {
+            lappend same [file tail $path]
+        }
+    }
+    set same
+} -result {}
+
+test vt-corpus-hashtable-rehash {the 3-field rehash groupings still cross their exact calls as fields} -body {
+    set hir [native::prepareHir [surface::readProgramFile [file join $::projectRoot examples stdlib hashtable.bot]]]
+    set text [dict get [native::lowered $hir] text]
+    regexp {func \d+ "ht_rehash_scan" params=(\d+) env=0 regs=\d+ pnames="([^"]*)"} $text -> params pnames
+    set metrics [dict get [native::transportCensus $hir] metrics]
+    list $params $pnames [dict get $metrics structnew] [dict get $metrics deniedParams]
+} -result {9 {src.0 src.1 src.2 i oldCapacity dest.0 dest.1 dest.2 newCapacity} 0 0}
+
+test vt-corpus-test-selection-control {stored Test values stay physical: storage is a hard boundary, whatever the policy} -body {
+    set hir [native::prepareHir [surface::readProgramFile [file join $::projectRoot bench test-selection.bot]]]
+    set metrics [dict get [native::transportCensus $hir] metrics]
+    list [dict get $metrics structnew] [lsort -stride 2 [dict get $metrics frontier]] [dict get $metrics causes]
+} -result {15 {control-merge 1 storage-boundary 14} {budget 0 hard 15 other 0}}
+
+test vt-corpus-makes-no-new-decision {the canonical corpus makes the previous milestone's decisions: no slot is denied by the transport budget} -body {
+    set denied 0
+    foreach path [concat [lsort [glob -directory [file join $::projectRoot bench] *.bot]] \
+            [lsort [glob -directory [file join $::projectRoot examples stdlib] *.bot]]] {
+        set hir [native::prepareHir [surface::readProgramFile $path]]
+        incr denied [dict get [native::transportCensus $hir] metrics deniedParams]
+    }
+    set denied
+} -result 0
+
+# ---------------------------------------------------------------------------
+# The census
+
+test vt-census-metrics {the aggregate metrics: virtual and materialized constructions, field-hops, histograms} -body {
+    set m [vtMetrics [chainArg 2 4 $N]]
+    list [dict get $m virtual] [dict get $m materialized] [dict get $m transportedFields] \
+        [dict get $m argHops] [dict get $m returnHops] [dict get $m structnew] [dict get $m distance] [dict get $m frontier]
+} -result {1 0 2 8 0 0 {{3-4 x2} 1} {never 1}}
+
+test vt-census-return-hops {a virtual result chain is counted in return field-hops, one hop per field per return edge} -body {
+    set m [vtMetrics [chainRet 4 3 $N]]
+    list [dict get $m returnHops] [dict get $m argHops] [dict get $m distance]
+} -result {12 0 {{3-4 x3-4} 1}}
+
+test vt-census-denied {a denied slot is explained: width, distance, score above budget, and the reason on its upstream} -body {
+    set c [native::transportCensus [vtHir [chainArg 8 4 $N]] {*}$::vtCommon]
+    set rec [lindex [dict get $c records] 0]
+    list [dict get $rec class] [dict get $rec reason] [dict get $rec frontier] [dict get $rec argEdges] \
+        [expr {[dict get $rec score] > [dict get $rec budget]}] [dict get [dict get $c metrics] deniedParams]
+} -result {materialized transport-budget before-long-forwarding-region 4 1 4}
+
+cleanupTests

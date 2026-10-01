@@ -671,6 +671,19 @@ namespace eval native::lower {
 #     dominate what follows is never reused there. `structnew` therefore now
 #     counts real materializations.
 #
+# Value transport (VALUE-TRANSPORT-MATERIALIZATION.md) adds no mechanism here,
+# only decisions the analysis makes and this file already knows how to carry:
+# whether a struct crosses an exact call as fields or as one object is the
+# transport plan's per-parameter verdict (a denied parameter takes the object,
+# so the caller materializes lazily, once, just before that call, and its
+# earlier projections stay virtual); a recognized result's return chain is
+# bounded the same way; and a nested literal may be opened by a *cut* the
+# analysis chose -- virtual entries carry it (index 5), literals flatten by it
+# (StructFields), a projection chain reads through it (ProjectChain), and a
+# materialization rebuilds the inner objects first (BuildStruct). One
+# transported layout per slot: an instance still has at most the canonical
+# function, one `fields` form and the two companions.
+#
 # GC: a virtual struct is not an object and so not a root; each field is an
 # ordinary tagged register, rooted by the same liveness that roots every
 # register, live exactly until its last use (a projection or the
@@ -1315,7 +1328,8 @@ proc native::lower::program {hirProgram args} {
     }
     set text "[join $header \n]\n\n[join $texts \n\n]\n"
     return [dict create text $text functions $infos statistics [Statistics $infos] \
-        specialization $spec construction $construction structCensus [hir::escape::census $escape]]
+        specialization $spec construction $construction structCensus [hir::escape::census $escape] \
+        transportFacts [hir::escape::transportFacts $escape]]
 }
 
 # Code-size and guard statistics of the lowered functions INFOS.
