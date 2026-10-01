@@ -13,6 +13,10 @@
 #                     requirements per specialization
 #   recursive-ranges.txt  bounded self-recursive result proofs and
 #                     rejection reasons (hir/rangerec.tcl), with state trace
+#   raw-int-abi.txt  native::rawabi: the raw Int ABI plan of every used
+#                     instance (RAW-INT-ABI.md): closedness, each parameter's
+#                     type, entry Range and ABI, the result's, and the
+#                     rejection tag of every position that stays tagged
 #   range-params.txt  hir::range::analyze's per-parameter/result Range of
 #                     every used instance
 #   range-exprs.txt   the same analysis's per-expression Range, keyed by
@@ -74,6 +78,10 @@ set recursiveOpt [expr {[info exists ::env(BOTLISH_NATIVE_RECURSIVE_RESULT_RANGE
 set recursiveLimit [expr {[info exists ::env(BOTLISH_NATIVE_RECURSIVE_RANGE_LIMIT)]
     ? $::env(BOTLISH_NATIVE_RECURSIVE_RANGE_LIMIT) : ""}]
 set ranges [hir::range::analyze $hir $spec $callFactsOpt 1 1 $recursiveOpt $recursiveLimit]
+set rawAbiOpt [expr {[info exists ::env(BOTLISH_NATIVE_RAW_INT_ABI_OPT)]
+    && $::env(BOTLISH_NATIVE_RAW_INT_ABI_OPT) eq "0" ? 0 : 1}]
+set abiPlan [native::rawabi::plan $hir $spec $ranges $rawAbiOpt]
+W $outdir raw-int-abi.txt [native::rawabi::explainAll $hir $spec $ranges $abiPlan]
 W $outdir hir.txt [hir::format $hir]
 W $outdir aot.txt [hir::aot::explain $hir]
 W $outdir aot-spec.txt [hir::specialize::explain $hir $spec]

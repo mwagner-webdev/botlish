@@ -79,6 +79,11 @@ use std::collections::HashMap;
 const I64: ir::Type = types::I64;
 
 pub struct Symbols {
+    /// Per function: whether its direct function returns a raw Int result
+    /// together with a status word (`raw_result` and `may_error`: see
+    /// `physical_results`), so a call site checks the status word, not the
+    /// value, for an error.
+    pub status_result: Vec<bool>,
     pub direct: Vec<ModuleFuncId>,
     pub entry: Vec<ModuleFuncId>,
     pub helpers: HashMap<&'static str, ModuleFuncId>,
@@ -116,6 +121,21 @@ pub struct Symbols {
     /// own rel32-range check on a real address this backend cannot vouch
     /// for the distance of.
     pub direct_helpers: bool,
+}
+
+/// How many machine words F's direct function returns. Ordinarily
+/// `f.results`; a raw-Int-result function (RAW-INT-ABI.md) that can fail
+/// returns two: the raw integer and a status word (0 = an error is pending,
+/// 1 = success), because the integer itself has no sentinel value -- errors
+/// are never encoded in a magic integer. A raw-result function that cannot
+/// fail (the settled `may_error` summary) returns just the integer: that is
+/// the bare `i64 f(i64, ...)` shape.
+fn physical_results(f: &nir::Function) -> usize {
+    if f.raw_result && f.may_error {
+        2
+    } else {
+        f.results as usize
+    }
 }
 
 fn signature<M: Module>(module: &M, params: usize) -> Signature {
@@ -165,8 +185,14 @@ fn module_error(e: cranelift_module::ModuleError) -> BackendError {
 /// Declares the runtime helpers and every function of PROGRAM.
 pub fn declare<M: Module>(module: &mut M, program: &nir::Program, export: bool) -> Result<Symbols, BackendError> {
     let direct_helpers = export && module.isa().name() == "x64";
-    let mut symbols =
-        Symbols { direct: vec![], entry: vec![], helpers: HashMap::new(), names: HashMap::new(), direct_helpers };
+    let mut symbols = Symbols {
+        status_result: vec![],
+        direct: vec![],
+        entry: vec![],
+        helpers: HashMap::new(),
+        names: HashMap::new(),
+        direct_helpers,
+    };
     for (name, params, _) in helpers() {
         let id = module.declare_function(name, Linkage::Import, &signature(module, params)).map_err(module_error)?;
         symbols.helpers.insert(name, id);
@@ -177,8 +203,9 @@ pub fn declare<M: Module>(module: &mut M, program: &nir::Program, export: bool) 
         let params = 1 + f.env as usize + f.params as usize;
         let name = format!("botlish_fn_{}", f.id);
         let id = module
-            .declare_function(&name, linkage, &signature_n(module, params, f.results as usize))
+            .declare_function(&name, linkage, &signature_n(module, params, physical_results(f)))
             .map_err(module_error)?;
+        symbols.status_result.push(f.raw_result && f.may_error);
         symbols.names.insert(id.as_u32(), format!("{name} ({})", f.name));
         symbols.direct.push(id);
         // A results>1 function (a scalar-replacement companion) is only
@@ -231,7 +258,7 @@ pub fn define<M: Module>(
     let mut ctx = module.make_context();
     let mut fctx = FunctionBuilderContext::new();
 
-    ctx.func.signature = signature_n(module, 1 + f.env as usize + f.params as usize, f.results as usize);
+    ctx.func.signature = signature_n(module, 1 + f.env as usize + f.params as usize, physical_results(f));
     ctx.func.name = UserFuncName::user(0, symbols.direct[f.id as usize].as_u32());
     let config = module.isa().frontend_config();
     {
@@ -313,11 +340,33 @@ pub fn define<M: Module>(
             args.push(params[1]);
         }
         for i in 0..f.params {
-            args.push(b.ins().load(I64, MemFlagsData::trusted(), params[2], (i * 8) as i32));
+            let mut v = b.ins().load(I64, MemFlagsData::trusted(), params[2], (i * 8) as i32);
+            if f.raw_params[i as usize] {
+                // The raw Int ABI (RAW-INT-ABI.md) is only planned for an
+                // exact closed instance, which no Block value or dynamic
+                // caller can reach, so this wrapper never runs; it still
+                // converts so that the generic ABI is correct by
+                // construction (a tagged small Int in, a raw integer out).
+                v = b.ins().sshr_imm_s(v, 1);
+            }
+            args.push(v);
         }
         let callee = module.declare_func_in_func(symbols.direct[f.id as usize], b.func);
         let call = b.ins().call(callee, &args);
         let mut result = b.inst_results(call)[0];
+        if f.raw_result {
+            let shifted = b.ins().ishl_imm_s(result, 1);
+            let tagged = b.ins().bor_imm_s(shifted, 1);
+            result = if f.may_error {
+                // The status word (nonzero = success): an error is the
+                // ordinary 0 sentinel of the tagged ABI.
+                let status = b.inst_results(call)[1];
+                let zero = b.ins().iconst(I64, 0);
+                b.ins().select(status, tagged, zero)
+            } else {
+                tagged
+            };
+        }
         if f.plan_result {
             // A plan-result function (M8.a, nir::Function::plan_result) is
             // only ever given one when it is closed -- its every caller is
@@ -501,7 +550,13 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         }
         for i in 0..f.params {
             let v = params[next + i as usize];
-            if f.raw_regs[i as usize] {
+            if f.raw_params[i as usize] {
+                // Raw Int ABI (RAW-INT-ABI.md): the incoming argument is
+                // already a raw signed machine integer, the proven-small
+                // value itself -- no tag test, no unboxing, nothing to
+                // re-check (the exact-call plan is the proof).
+                self.def_raw(i, v);
+            } else if f.raw_regs[i as usize] {
                 // native/lower.tcl proved this parameter's whole range fits
                 // the small-Int representation (RawParams): unbox the
                 // incoming tagged argument once, here, so it stays raw for
@@ -880,7 +935,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         // (signature_n): its caller reads only that one word as the error
         // sentinel and never touches the result buffer when it is 0, so
         // there is nothing to write there on this path.
-        let n = if self.f.results > 2 { 1 } else { self.f.results.max(1) as usize };
+        let n = if self.f.results > 2 { 1 } else { physical_results(self.f).max(1) };
         let zeros = vec![zero; n];
         self.b.ins().return_(&zeros);
     }
@@ -961,6 +1016,26 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             3,
         ));
         self.b.ins().stack_addr(I64, slot, 0)
+    }
+
+    /// Defines DST from the results of the direct call CALL of FUNC and
+    /// performs the call site's error check. The tagged ABI returns one
+    /// Value whose 0 is the error sentinel. The raw Int ABI
+    /// (RAW-INT-ABI.md) returns the raw integer -- never an error sentinel
+    /// -- alone when FUNC cannot fail, or followed by a status word
+    /// (nonzero = success) when it can: the check then reads the status.
+    fn finish_call(&mut self, dst: Reg, func: nir::FuncId, call: ir::Inst, may_error: bool) {
+        let results = self.b.inst_results(call).to_vec();
+        if self.symbols.status_result[func as usize] {
+            self.check(results[1]);
+        } else if may_error {
+            self.check(results[0]);
+        }
+        if self.f.raw_regs[dst as usize] {
+            self.def_raw(dst, results[0]);
+        } else {
+            self.def(dst, results[0]);
+        }
     }
 
     /// Shared body of Inst::CallMulti/CallEnvMulti: calls FUNC (VALUES
@@ -1255,9 +1330,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 let r = self.func_ref(self.symbols.direct[*func as usize]);
                 let call = self.b.ins().call(r, &values);
                 if *may_gc { self.mark_safepoint(call); }
-                let v = self.b.inst_results(call)[0];
-                if *may_error { self.check(v); }
-                self.def(*dst, v);
+                self.finish_call(*dst, *func, call, *may_error);
             }
             Inst::CallEnv { dst, func, closure, args, may_error, may_gc } => {
                 let mut values = vec![self.vm, self.get(*closure)];
@@ -1265,9 +1338,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 let r = self.func_ref(self.symbols.direct[*func as usize]);
                 let call = self.b.ins().call(r, &values);
                 if *may_gc { self.mark_safepoint(call); }
-                let v = self.b.inst_results(call)[0];
-                if *may_error { self.check(v); }
-                self.def(*dst, v);
+                self.finish_call(*dst, *func, call, *may_error);
             }
             Inst::CallMulti { dsts, func, args, may_error, may_gc } => {
                 let mut values = vec![self.vm];
@@ -1321,7 +1392,14 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             Inst::Ret(reg) => {
                 let v = self.get(*reg);
                 self.restore_root_frame();
-                self.b.ins().return_(&[v]);
+                if self.f.raw_result && self.f.may_error {
+                    // Raw Int result of a function that can fail: the value
+                    // plus a nonzero status word (RAW-INT-ABI.md).
+                    let ok = self.iconst(1);
+                    self.b.ins().return_(&[v, ok]);
+                } else {
+                    self.b.ins().return_(&[v]);
+                }
                 self.terminated = true;
             }
             Inst::RetMulti(regs) => {

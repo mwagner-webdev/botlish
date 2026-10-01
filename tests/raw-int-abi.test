@@ -1,0 +1,876 @@
+# raw-int-abi.test -- RAW-INT-ABI.md: the raw Int ABI.
+#
+# An exact closed instance transports its Int parameters / successful Int
+# result as raw signed machine integers when their final Ranges fit the tagged
+# small-Int domain (native/rawabi.tcl). Pins (1) the plan -- which positions
+# are raw, which stay tagged and why --, (2) the NIR it emits (no boundary
+# rbox/runbox in a raw region, the conversions exactly at the frontiers), (3)
+# the controls (open, dynamic, outside-small, unbounded), (4) errors, GC and
+# standalone-executable behavior, and (5) differential parity: every backend,
+# and native with the ABI on and off, with and without leaf inlining.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 100000
+
+testConstraint executableAot [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64}}]
+
+proc dedent {text} {
+    set lines [split $text \n]
+    set indent 1000
+    foreach line $lines {
+        if {[string trim $line] eq ""} continue
+        set n [expr {[string length $line] - [string length [string trimleft $line " "]]}]
+        if {$n < $indent} { set indent $n }
+    }
+    return [join [lmap line $lines {string range $line $indent end}] \n]
+}
+
+# The HIR of surface program TEXT (dedented).
+proc srcHir {text} {
+    set dir [makeDirectory {raw int abi}]
+    set path [file join $dir p.bot]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts $channel [dedent $text]
+    close $channel
+    try {
+        return [surface::readProgramFile $path]
+    } finally {
+        removeDirectory {raw int abi}
+    }
+}
+
+# Leaf inlining removes a small callee's separate function, and with it the
+# calling convention under test: most pins below disable it.
+set noInline {-tiny-leaf-inline-opt 0}
+
+proc nirOf {text args} {
+    return [native::nir [srcHir $text] {*}$args]
+}
+
+# The text of the NIR function named NAME (optionally of instance KEY).
+proc fnText {nir name {key ""}} {
+    set found {}
+    foreach body [split [string map [list "\n\nfunc " "\n\u0001func "] $nir] \u0001] {
+        if {![regexp {^func \d+ "} $body]} continue
+        if {![regexp [format {^func \d+ "%s"} [string map {. \\.} $name]] $body]} continue
+        if {$key ne "" && ![regexp [format {instance="%s"} $key] $body]} continue
+        lappend found [string trim $body]
+    }
+    if {[llength $found] != 1} {
+        error "expected one function $name ($key), found [llength $found] in:\n$nir"
+    }
+    return [lindex $found 0]
+}
+
+proc countIn {pattern text} {
+    return [llength [regexp -all -inline $pattern $text]]
+}
+
+# The header attributes {rawparams rawresult} of NIR function TEXT.
+proc physical {text} {
+    set head [lindex [split $text \n] 0]
+    set params ""
+    regexp {rawparams="([^"]*)"} $head -> params
+    return [list $params [regexp {rawresult=1} $head]]
+}
+
+# One line per used instance: "label=P,P>R" with raw/val per position.
+proc abiPlan {text args} {
+    set lowered [native::lowered [srcHir $text] {*}$args]
+    set spec [dict get $lowered specialization]
+    set plan [dict get $lowered abiPlan]
+    set lines {}
+    foreach id [dict get $spec used] {
+        set p [dict get $plan $id]
+        set label [hir::specialize::label $spec $id]
+        if {$label eq "<program>"} continue
+        set params [lmap k [dict get $p params] {expr {$k eq "rawint" ? "raw" : "val"}}]
+        lappend lines "$label=[join $params ,]>[expr {[dict get $p result] eq "rawint" ? "raw" : "val"}]"
+    }
+    return $lines
+}
+
+# {reasons...} of instance LABEL: paramReasons then resultReason.
+proc abiReasons {text label args} {
+    set lowered [native::lowered [srcHir $text] {*}$args]
+    set spec [dict get $lowered specialization]
+    set plan [dict get $lowered abiPlan]
+    foreach id [dict get $spec used] {
+        if {[hir::specialize::label $spec $id] eq $label} {
+            set p [dict get $plan $id]
+            return [list [dict get $p paramReasons] [dict get $p resultReason]]
+        }
+    }
+    error "no instance $label"
+}
+
+# The outcome of native::evalHir of HIR: {value V} or {error CODE}.
+proc nativeOutcome {hir args} {
+    resetEffects
+    if {[catch {native::evalHir $hir {*}$args} result options]} {
+        return [list error [dict get $options -errorcode]]
+    }
+    return [list value [core::value::show $result 1]]
+}
+
+# Every backend, and native with the ABI on and off (leaf inlining on and
+# off), agree on TEXT; returns the one outcome.
+proc parityAbi {text} {
+    set hir [srcHir $text]
+    set outcomes {}
+    foreach backend {interp compile cranelift-generic cranelift} {
+        set outcome [outcomeUnderHir $backend $hir]
+        lappend outcomes [lindex $outcome 0]:[lindex $outcome 1]
+    }
+    set prepared [native::prepareHir $hir]
+    foreach abi {0 1} {
+        foreach inline {0 1} {
+            set outcome [nativeOutcome $prepared -raw-int-abi-opt $abi -tiny-leaf-inline-opt $inline]
+            lappend outcomes [lindex $outcome 0]:[lindex $outcome 1]
+        }
+    }
+    if {[llength [lsort -unique $outcomes]] != 1} {
+        error "backends disagree:\n[join $outcomes \n]"
+    }
+    return [lindex $outcomes 0]
+}
+
+set fibSource {
+    fn fib(n):
+        if n < 2:
+            n
+        else:
+            fib(n - 1) + fib(n - 2)
+
+    fib(22)
+}
+
+# ---------------------------------------------------------------------------
+# The central case: fib<int>
+
+test raw-fib-plan {fib<int>: the parameter and the successful result are RawInt} -body {
+    abiPlan $fibSource
+} -result {fib<int>=raw>raw}
+
+test raw-fib-signature {the physical signature is in the NIR header} -body {
+    physical [fnText [nirOf $fibSource] fib int]
+} -result {0 1}
+
+test raw-fib-no-boundary-conversion {no rbox/runbox anywhere in fib: recursion passes and returns raw values} -body {
+    set fib [fnText [nirOf $fibSource] fib int]
+    list [countIn {op rbox} $fib] [countIn {op runbox} $fib] [countIn {= call 1 } $fib]
+} -result {0 0 2}
+
+test raw-fib-recursive-calls-are-raw-calls {both recursive call arguments are raw arithmetic results, the results feed raw addition} -body {
+    set fib [fnText [nirOf $fibSource] fib int]
+    set rawRegs ""
+    regexp {rawregs="([^"]*)"} [lindex [split $fib \n] 0] -> rawRegs
+    set ok 1
+    foreach {- dst arg} [regexp -all -inline {%(\d+) = call 1 %(\d+)} $fib] {
+        if {$dst ni $rawRegs || $arg ni $rawRegs} { set ok 0 }
+    }
+    list $ok [regexp {op riadd %(\d+) %(\d+)} $fib]
+} -result {1 1}
+
+test raw-fib-outer-frontier {the program passes the literal raw (no tagged constant) and boxes the final result once} -body {
+    set program [fnText [nirOf $fibSource] <program>]
+    list [countIn {rawint 22} $program] [countIn {int 22} $program] [countIn {op rbox} $program] [countIn {op runbox} $program]
+} -result {1 1 1 0}
+
+test raw-fib-parity {fib agrees on every backend with the ABI on and off} -body {
+    parityAbi $fibSource
+} -result value:17711
+
+test raw-fib-disabled-is-the-tagged-abi {-raw-int-abi-opt 0 reproduces the tagged signature and the per-call boxing} -body {
+    set fib [fnText [nirOf $fibSource -raw-int-abi-opt 0] fib int]
+    list [physical $fib] [countIn {op rbox} $fib] [countIn {op runbox} $fib]
+} -result {{{} 0} 3 3}
+
+test raw-fib-env-disables {BOTLISH_NATIVE_RAW_INT_ABI_OPT=0 is the same switch} -body {
+    set ::env(BOTLISH_NATIVE_RAW_INT_ABI_OPT) 0
+    try {
+        physical [fnText [nirOf $fibSource] fib int]
+    } finally {
+        unset ::env(BOTLISH_NATIVE_RAW_INT_ABI_OPT)
+    }
+} -result {{} 0}
+
+# ---------------------------------------------------------------------------
+# General (non-recursive) cases
+
+test raw-helper-both {a closed non-recursive helper: raw parameter, raw result (no recursion needed)} -body {
+    set text {
+        fn inc_bounded(n):
+            n + 1
+
+        inc_bounded(5) + inc_bounded(6)
+    }
+    list [abiPlan $text {*}$noInline] [physical [fnText [nirOf $text {*}$noInline] inc_bounded]] \
+        [parityAbi $text]
+} -result {inc_bounded<int>=raw>raw {0 1} value:13}
+
+test raw-param-tagged-result {the parameter fits, the result may exceed the small domain: raw parameter, tagged result} -body {
+    set text {
+        fn big(n):
+            n * 3000000000000000000
+
+        big(5) + big(7)
+    }
+    list [abiPlan $text {*}$noInline] [abiReasons $text big<int> {*}$noInline] [parityAbi $text]
+} -result {big<int>=raw>val {{{}} unbounded-or-not-small} value:36000000000000000000}
+
+test raw-result-tagged-param {an unproven (unbounded) entry with a constant successful result: tagged parameter, raw result} -body {
+    set text {
+        fn count(n, acc):
+            if n == 0:
+                acc
+            else:
+                count(n - 1, acc + n)
+
+        fn seven(v):
+            7
+
+        seven(count(500, 0)) + 1
+    }
+    list [abiPlan $text {*}$noInline] [abiReasons $text seven<int> {*}$noInline] [parityAbi $text]
+} -result {{{count<int, int>=raw,val>val} seven<int>=val>raw} {unknown-range {}} value:8}
+
+test raw-mixed-parameters {fn f(a, b, s): a small, b unbounded, s a String: raw, tagged, tagged} -body {
+    set text {
+        fn count(n, acc):
+            if n == 0:
+                acc
+            else:
+                count(n - 1, acc + n)
+
+        fn f(a, b, s):
+            length(s) + a + b
+
+        f(3, count(500, 0), "abc")
+    }
+    list [lsearch -inline [abiPlan $text {*}$noInline] f<*] [abiReasons $text {f<int, int, str>} {*}$noInline] \
+        [parityAbi $text]
+} -result {{f<int, int, str>=raw,val,val>val} {{{} unknown-range not-int} unknown-range} value:125256}
+
+test raw-mixed-physical-signature-in-nir {only position 0 is in rawparams; a hidden or tagged position is not} -body {
+    set text {
+        fn f(a, s):
+            length(s) + a
+
+        f(3, "abc") + f(4, "de")
+    }
+    physical [fnText [nirOf $text {*}$noInline] f]
+} -result {0 0}
+
+test raw-negative-range {a negative Range is RawInt-eligible, not only nonnegative ones} -body {
+    set text {
+        fn neg(n):
+            n * 2 - 7
+
+        neg(0 - 100) + neg(100)
+    }
+    list [abiPlan $text {*}$noInline] [parityAbi $text]
+} -result {neg<int>=raw>raw value:-14}
+
+test raw-small-domain-edges {values at smallMin and smallMax round-trip with correct sign handling} -body {
+    set text {
+        fn ident(n):
+            n
+
+        a = ident(4611686018427387903) + 0
+        b = ident(0 - 4611686018427387904) + 0
+        [a, b]
+    }
+    list [abiPlan $text {*}$noInline] [parityAbi $text]
+} -result {ident<int>=raw>raw {value:[4611686018427387903, -4611686018427387904]}}
+
+test raw-outside-small-result {a result Range reaching 2^62 is finite and fits an i64 register but not the tagged small-Int domain: no raw result} -body {
+    set text {
+        fn succ(n):
+            n + 1
+
+        succ(4611686018427387903)
+    }
+    list [abiPlan $text {*}$noInline] [parityAbi $text]
+} -result {succ<int>=raw>val value:4611686018427387904}
+
+test raw-outside-small-parameter {an entry Range reaching 2^62 is not RawInt either} -body {
+    set text {
+        fn ident(n):
+            n
+
+        ident(4611686018427387904) + ident(1)
+    }
+    list [abiPlan $text {*}$noInline] [parityAbi $text]
+} -result {ident<int>=val>val value:4611686018427387905}
+
+test raw-finite-large-fib {fib(100): the successful result is finite but exceeds the small domain: no raw result; the parameter is still raw} -body {
+    set text {
+        fn fib(n):
+            if n < 2:
+                n
+            else:
+                fib(n - 1) + fib(n - 2)
+
+        fn go(n):
+            if n > 100:
+                0
+            else:
+                1
+
+        go(5)
+        if go(5) > 5:
+            fib(100)
+        else:
+            0
+    }
+    list [abiPlan $text {*}$noInline] [abiReasons $text fib<int> {*}$noInline]
+} -result {{fib<int>=raw>val go<int>=raw>raw} {{{}} unbounded-or-not-small}}
+
+# ---------------------------------------------------------------------------
+# Controls: open, dynamic, escaping
+
+test raw-open-instance-stays-tagged {a function whose Block value escapes keeps the tagged generic ABI; the exact direct-call instance may still be raw} -body {
+    set text {
+        fn open_one(n):
+            n * 2
+
+        fn stash():
+            [open_one]
+
+        a = open_one(5)
+        [a, list_length(stash())]
+    }
+    set plan [abiPlan $text {*}$noInline]
+    list $plan [abiReasons $text open_one<generic> {*}$noInline] [parityAbi $text]
+} -result {{open_one<int>=raw>raw open_one<generic>=val>val stash<generic>=>val} {not-int open-instance} {value:[10, 1]}}
+
+test raw-dynamic-call-uses-generic-entry {a function invoked through a Block value runs its tagged generic entry, and agrees} -body {
+    set text {
+        fn add1(n):
+            n + 1
+
+        fn twice(f, x):
+            f(f(x))
+
+        fn stash():
+            [add1]
+
+        [twice(add1, 3), list_length(stash())]
+    }
+    parityAbi $text
+} -result {value:[5, 1]}
+
+test raw-exact-callable-target-is-raw {an exact callable specialization calls a raw instance directly, not through callvalue} -body {
+    set text {
+        fn open_one(n):
+            n * 2
+
+        fn apply_dyn(f, v):
+            f(v)
+
+        fn stash():
+            [open_one]
+
+        [apply_dyn(open_one, 6), list_length(stash())]
+    }
+    set nir [nirOf $text {*}$noInline]
+    list [abiPlan $text {*}$noInline] [countIn {callvalue} $nir] [parityAbi $text]
+} -result {{open_one<int>=raw>raw open_one<generic>=val>val {apply_dyn<block(e2), int>=val,raw>raw} stash<generic>=>val} 0 {value:[12, 1]}}
+
+# ---------------------------------------------------------------------------
+# Recursion
+
+test raw-mixed-recursion {a recursive function with a raw parameter and a tagged accumulator keeps the mixed signature} -body {
+    set text {
+        fn sum(n, acc):
+            if n == 0:
+                acc
+            else:
+                sum(n - 1, acc + n)
+
+        sum(1000, 0)
+    }
+    set nir [nirOf $text {*}$noInline]
+    list [abiPlan $text {*}$noInline] [physical [fnText $nir sum]] [parityAbi $text]
+} -result {{{sum<int, int>=raw,val>val}} {0 0} value:500500}
+
+test raw-non-tail-recursion-with-allocation {raw n and raw result stay valid across a recursive call that also allocates} -body {
+    set text {
+        fn build(n):
+            if n < 1:
+                0
+            else:
+                s = concat("ab", "cd")
+                if length(s) > 3:
+                    build(n - 1) + n
+                else:
+                    0
+
+        build(30)
+    }
+    list [abiPlan $text {*}$noInline] [parityAbi $text]
+} -result {build<int>=raw>raw value:465}
+
+test raw-tail-recursion-keeps-self-tail {a self tail call stays a loop backedge with a raw parameter} -body {
+    set text {
+        fn down(n, acc):
+            if n == 0:
+                acc
+            else:
+                down(n - 1, acc + 2)
+
+        down(50, 0)
+    }
+    set down [fnText [nirOf $text {*}$noInline] down]
+    list [physical $down] [countIn {tail } $down] [countIn {= call } $down] [parityAbi $text]
+} -result {{0 0} 1 0 value:100}
+
+test raw-recursive-mixed-bound {the plan is per instance: a parameter whose recursive calls pass an unbounded value falls back to tagged for every call, while the measure parameter and the (constant) result stay raw} -body {
+    set text {
+        fn g(n, k):
+            if n < 1:
+                0
+            else:
+                g(n - 1, k * 1000000007) + 1
+
+        g(5, 1)
+    }
+    list [abiPlan $text {*}$noInline] [abiReasons $text {g<int, int>} {*}$noInline] [parityAbi $text]
+} -result {{{g<int, int>=raw,val>raw}} {{{} unknown-range} {}} value:5}
+
+test raw-result-follows-the-ordinary-result-query {result eligibility is the ordinary successful-result Range, with no recursion special case: withdraw the derived recursive summary (option, or a state budget too small) and the same instance's result is tagged again, its parameter unaffected} -body {
+    list [abiPlan $fibSource] \
+        [abiPlan $fibSource -recursive-result-range-opt 0] \
+        [abiPlan $fibSource -recursive-range-limit 5]
+} -result {fib<int>=raw>raw fib<int>=raw>val fib<int>=raw>val}
+
+test raw-branch-join-of-a-tagged-only-int-stays-tagged {one branch's value is an Int with no proven bound: the join and the function result are tagged, no raw assumption is made} -body {
+    set text {
+        fn count(n, acc):
+            if n < 1:
+                acc
+            else:
+                count(n - 1, acc + n)
+
+        fn mix(c, v):
+            if c:
+                1
+            else:
+                v
+
+        [mix(true, count(40, 0)), mix(false, count(40, 0))]
+    }
+    list [lsearch -inline [abiPlan $text {*}$noInline] mix<*] [parityAbi $text]
+} -result {{mix<bool, int>=val,val>val} {value:[1, 820]}}
+
+test raw-callee-of-a-constant-is-still-called {a call whose successful result is a proven constant is replaced by the constant, but the call itself stays (effects), with a raw argument} -body {
+    set text {
+        fn seven(v):
+            7
+
+        seven(3) + 1
+    }
+    set program [fnText [nirOf $text {*}$noInline] <program>]
+    list [countIn {= call } $program] [parityAbi $text]
+} -result {1 value:8}
+
+# ---------------------------------------------------------------------------
+# Continuous raw regions and frontiers
+
+set chainSource {
+    fn h(z):
+        z * 2
+
+    fn g(y):
+        h(y + 1) + 3
+
+    fn f(x):
+        g(x * 2) - 1
+
+    f(3) + f(4)
+}
+
+test raw-chain-one-continuous-region {f -> g -> h all raw: no rbox/runbox in any of them} -body {
+    set nir [nirOf $chainSource {*}$noInline]
+    set counts {}
+    foreach name {f g h} {
+        set text [fnText $nir $name]
+        lappend counts [physical $text] [countIn {op rbox} $text] [countIn {op runbox} $text]
+    }
+    list [abiPlan $chainSource {*}$noInline] $counts [parityAbi $chainSource]
+} -result {{h<int>=raw>raw g<int>=raw>raw f<int>=raw>raw} {{0 1} 0 0 {0 1} 0 0 {0 1} 0 0} value:36}
+
+set frontierSource {
+    fn count(n, acc):
+        if n == 0:
+            acc
+        else:
+            count(n - 1, acc + n)
+
+    fn bump(x):
+        x + 1
+
+    fn seven(v):
+        7
+
+    fn mid(x):
+        y = bump(x)
+        w = seven(count(500, y))
+        bump(w)
+
+    mid(2) + mid(3)
+}
+
+test raw-mixed-frontier-converts-exactly-at-the-boundary {raw bump -> tagged-only seven -> raw bump: one rbox before the tagged position, nothing around the raw ones} -body {
+    set mid [fnText [nirOf $frontierSource {*}$noInline] mid]
+    list [abiPlan $frontierSource {*}$noInline] [countIn {op rbox} $mid] [countIn {op runbox} $mid] [parityAbi $frontierSource]
+} -result {{{count<int, int>=raw,val>val} bump<int>=raw>raw seven<int>=val>raw mid<int>=raw>raw} 1 0 value:16}
+
+test raw-alias-stays-raw {a local alias of a raw parameter is passed on raw: no box/unbox because of the alias} -body {
+    set text {
+        fn inner(v):
+            v * 3
+
+        fn outer(x):
+            y = x
+            z = y
+            inner(z) + inner(y)
+
+        outer(2) + outer(5)
+    }
+    set outer [fnText [nirOf $text {*}$noInline] outer]
+    list [abiPlan $text {*}$noInline] [countIn {op rbox} $outer] [countIn {op runbox} $outer] [parityAbi $text]
+} -result {{inner<int>=raw>raw outer<int>=raw>raw} 0 0 value:42}
+
+test raw-branch-merge-stays-raw {both branches of an if in the tail position join in one raw register} -body {
+    set text {
+        fn pick(a, b):
+            if a < b:
+                a + 1
+            else:
+                b * 2
+
+        pick(1, 5) + pick(7, 3)
+    }
+    set pick [fnText [nirOf $text {*}$noInline] pick]
+    list [abiPlan $text {*}$noInline] [countIn {op rbox} $pick] [countIn {op runbox} $pick] [parityAbi $text]
+} -result {{{pick<int, int>=raw,raw>raw}} 0 0 value:8}
+
+test raw-return-statement-is-raw {an early return in a raw-result function returns the raw value} -body {
+    set text {
+        fn clamp(n):
+            if n > 10:
+                return 10
+            n * 2
+
+        clamp(3) + clamp(40)
+    }
+    set clamp [fnText [nirOf $text {*}$noInline] clamp]
+    list [abiPlan $text {*}$noInline] [countIn {op rbox} $clamp] [countIn {op runbox} $clamp] [parityAbi $text]
+} -result {clamp<int>=raw>raw 0 0 value:16}
+
+test raw-constant-argument-is-a-raw-constant {a small literal for a raw parameter is a rawint, no tagged constant built} -body {
+    set text {
+        fn f(x):
+            x + 1
+
+        f(41)
+    }
+    set program [fnText [nirOf $text {*}$noInline] <program>]
+    list [countIn {rawint 41} $program] [countIn {= int 41} $program]
+} -result {1 0}
+
+test raw-comparison-consumes-raw-directly {a raw parameter feeds every raw comparison with no conversion} -body {
+    set text {
+        fn cmp(a, b):
+            if a < b and a <= b and b > a and b >= a and a != b:
+                1
+            else:
+                0
+
+        cmp(1, 2) + cmp(5, 3)
+    }
+    set cmp [fnText [nirOf $text {*}$noInline] cmp]
+    list [countIn {op rbox} $cmp] [countIn {op runbox} $cmp] [parityAbi $text]
+} -result {0 0 value:1}
+
+# ---------------------------------------------------------------------------
+# Errors and completions
+
+set errorSource {
+    error Negative
+
+    fn check(n) -> int errors Negative:
+        if n < 0:
+            fail Negative
+        else:
+            n * 2
+
+    fn drive(i, acc) -> int errors Negative:
+        if i > 4:
+            acc
+        else:
+            drive(i + 1, acc + check(3 - i))
+
+    r = drive(0, 0):
+        on Negative:
+            -77
+    ok = drive(2, 0):
+        on Negative:
+            -1
+    [r, ok]
+}
+
+test raw-error-capable-result {a function that may fail still has a raw successful payload: the status travels beside it, never inside the integer} -body {
+    list [lsearch -inline [abiPlan $errorSource {*}$noInline] check<*] [parityAbi $errorSource]
+} -result {check<int>=raw>raw {value:[-77, -1]}}
+
+test raw-error-path-and-caller-handle {success, the error path and the caller's handler all agree} -body {
+    parityAbi {
+        error Negative
+
+        fn check(n) -> int errors Negative:
+            if n < 0:
+                fail Negative
+            else:
+                n + 100
+
+        fn drive(i) -> int errors Negative:
+            if i > 3:
+                0
+            else:
+                check(2 - i) + drive(i + 1)
+
+        a = drive(0):
+            on Negative:
+                -5
+        b = drive(10):
+            on Negative:
+                -6
+        [a, b]
+    }
+} -result {value:[-5, 0]}
+
+test raw-error-escapes-uncaught-as-an-error {an undeclared runtime failure inside a raw function is the same error outcome with the ABI on and off} -body {
+    set text {
+        fn pick(i, d):
+            if i > 100:
+                0
+            else:
+                mod(10, d - i) + pick(i + 1, d)
+
+        pick(0, 3)
+    }
+    parityAbi $text
+} -match glob -result {error:*}
+
+# ---------------------------------------------------------------------------
+# GC: a raw Int is a non-root scalar
+
+test raw-gc-raw-live-across-allocation {a raw parameter, a String and a List live across unrelated allocations under GC stress} -body {
+    set text {
+        fn work(n, s, xs):
+            t = concat(s, "x")
+            u = list_append(xs, n)
+            v = concat(t, t)
+            flag = if length(v) > list_length(u):
+                1
+            else:
+                0
+            n * 2 + flag
+
+        work(3, "a", [1, 2]) + work(4, "bc", [9])
+    }
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        list [abiPlan $text {*}$noInline] [parityAbi $text]
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+} -result {{{work<int, str, List[int]>=raw,val,val>raw}} value:16}
+
+test raw-gc-recursive-allocating-frames {raw n and a raw result across 200 recursive, allocating frames under GC stress} -body {
+    set text {
+        fn depth(n, s):
+            if n == 0:
+                length(s)
+            else:
+                t = concat(s, "z")
+                depth(n - 1, t) + n
+
+        depth(200, "")
+    }
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        parityAbi $text
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+} -result value:20300
+
+test raw-gc-stack-map-has-no-raw-roots {the root report of a raw-parameter function lists the raw registers as non-roots} -body {
+    set text {
+        fn work(n, s):
+            t = concat(s, "x")
+            n + length(t)
+
+        work(3, "a") + work(4, "b")
+    }
+    set roots [native::roots [srcHir $text] {*}$noInline]
+    # the report names register/safepoint/root-candidate counts per function
+    expr {[string first work $roots] >= 0}
+} -result 1
+
+# ---------------------------------------------------------------------------
+# Standalone executables (JIT, object and executable all carry the ABI)
+
+proc aotParity {text} {
+    set text [dedent $text]
+    set dir [makeDirectory {raw int abi executable test}]
+    set path [file join $dir {program with spaces.bot}]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts $channel $text
+    close $channel
+    try {
+        set hir [surface::readProgramFile $path]
+        set expected {}
+        foreach backend {interp compile cranelift-generic cranelift} {
+            set outcome [outcomeUnderHir $backend $hir]
+            if {[lindex $outcome 0] ne "value"} { error "$backend: $outcome" }
+            lappend expected [lindex $outcome 1]
+        }
+        native::executable $hir [file rootname $path] -tiny-leaf-inline-opt 0
+        set relocated [file join $dir relocated]
+        file rename [file rootname $path] $relocated
+        file delete $path
+        lappend expected [exec env PATH= $relocated]
+        lappend expected [exec env PATH= BOTLISH_NATIVE_GC_STRESS=1 $relocated]
+        if {[llength [lsort -unique $expected]] != 1} { error "values disagree: $expected" }
+        return [lindex $expected 0]
+    } finally {
+        removeDirectory {raw int abi executable test}
+    }
+}
+
+test raw-executable-fib {the standalone executable of fib agrees with every backend, also under GC stress} -constraints executableAot -body {
+    aotParity $fibSource
+} -result 17711
+
+test raw-executable-mixed {raw, tagged and error-capable instances in one standalone executable} -constraints executableAot -body {
+    aotParity {
+        error Negative
+
+        fn check(n) -> int errors Negative:
+            if n < 0:
+                fail Negative
+            else:
+                n * 2
+
+        fn drive(i, acc) -> int errors Negative:
+            if i > 4:
+                acc
+            else:
+                drive(i + 1, acc + check(3 - i))
+
+        fn work(n: int, s: str, xs: List[int]):
+            t = concat(s, "x")
+            u = list_append(xs, n)
+            n + length(t) + list_length(u)
+
+        r = drive(0, 0):
+            on Negative:
+                -77
+        ok = drive(2, 0):
+            on Negative:
+                -1
+        [r, ok, work(3, "a", [1, 2])]
+    }
+} -result {[-77, -1, 8]}
+
+# ---------------------------------------------------------------------------
+# Randomized differential: bounded random programs, ABI on/off
+
+proc randomProgram {seed} {
+    expr {srand($seed)}
+    set ops {+ - *}
+    set small {0 1 2 3 7 11 100}
+    proc term {vars} {
+        upvar 1 small small
+        if {rand() < 0.5 && $vars ne ""} {
+            return [lindex $vars [expr {int(rand() * [llength $vars])}]]
+        }
+        return [lindex $small [expr {int(rand() * [llength $small])}]]
+    }
+    proc expression {vars ops depth} {
+        upvar 1 small small
+        if {$depth == 0} { return [term $vars] }
+        set op [lindex $ops [expr {int(rand() * [llength $ops])}]]
+        return "([expression $vars $ops [expr {$depth - 1}]] $op [expression $vars $ops [expr {$depth - 1}]])"
+    }
+    array unset ::arities
+    set lines {}
+    set nfun [expr {2 + int(rand() * 3)}]
+    for {set i 1} {$i <= $nfun} {incr i} {
+        set arity [expr {1 + int(rand() * 2)}]
+        set vars [lrange {a b} 0 [expr {$arity - 1}]]
+        set body [expression $vars $ops 2]
+        # an exact call of an earlier helper
+        if {$i > 1 && rand() < 0.7} {
+            set callee [expr {1 + int(rand() * ($i - 1))}]
+            set args [lmap _ [lrange {a b} 0 [expr {$::arities($callee) - 1}]] {expression $vars $ops 1}]
+            set body "$body + f${callee}([join $args {, }])"
+        }
+        if {rand() < 0.4} {
+            set body "if [lindex $vars 0] < [term {}]:\n        $body\n    else:\n        [expression $vars $ops 1]"
+        }
+        set ::arities($i) $arity
+        lappend lines "fn f${i}([join $vars {, }]):\n    $body\n"
+    }
+    set calls {}
+    for {set i 1} {$i <= $nfun} {incr i} {
+        foreach n {5 0 -3 100} {
+            set args [lmap _ [lrange {a b} 0 [expr {$::arities($i) - 1}]] {
+                set v [lindex [list $n [expr {$n + 2}] [expr {$n * 7}]] [expr {int(rand() * 3)}]]
+                expr {$v < 0 ? "(0 - [expr {-$v}])" : $v}
+            }]
+            lappend calls "f${i}([join $args {, }])"
+        }
+    }
+    return "[join $lines \n]\n[lindex $calls 0]\n\[[join $calls {, }]\]\n"
+}
+
+test raw-fuzz-random-closed-helpers {bounded random programs with closed Int helpers (multiple parameters, negative ranges, small and large results, exact calls): ABI on = ABI off = interp} -body {
+    set bad {}
+    for {set seed 1} {$seed <= 40} {incr seed} {
+        set text [randomProgram $seed]
+        if {[catch {parityAbi $text} result]} {
+            lappend bad "seed $seed: $result\n$text"
+        }
+    }
+    join $bad \n
+} -result {}
+
+test raw-fuzz-random-self-recursion {bounded random decreasing self recursions: ABI on = ABI off = interp} -body {
+    set bad {}
+    for {set seed 1} {$seed <= 25} {incr seed} {
+        expr {srand($seed * 7919)}
+        set k [expr {2 + int(rand() * 5)}]
+        set step [expr {1 + int(rand() * 3)}]
+        set start [expr {5 + int(rand() * 14)}]
+        set op [lindex {+ - *} [expr {int(rand() * 3)}]]
+        set c [expr {1 + int(rand() * 4)}]
+        set text "fn r(n):\n    if n < $k:\n        n $op $c\n    else:\n        r(n - $step) + r(n - [expr {$step + 1}]) - $c\n\nr($start) + r([expr {$start - 3}])\n"
+        if {[catch {parityAbi $text} result]} {
+            lappend bad "seed $seed: $result\n$text"
+        }
+    }
+    join $bad \n
+} -result {}
+
+cleanupTests

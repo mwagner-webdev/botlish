@@ -1,0 +1,25 @@
+function 0 "<program>"
+  NIR regs: 3
+  raw regs: 1
+  managed-capable regs: 2
+  effects: may_error=false may_gc=false
+  safepoints: 0
+  root candidates: 0
+  max live roots: 0
+  shadow slots: 0
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame
+
+function 1 "fib"
+  NIR regs: 20
+  raw regs: 9
+  managed-capable regs: 11
+  effects: may_error=false may_gc=false
+  safepoints: 0
+  root candidates: 0
+  max live roots: 0
+  shadow slots: 0
+  entry zero slots: 0
+  depth reservation: no
+  storage: native frame

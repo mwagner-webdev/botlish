@@ -140,7 +140,8 @@ test tiny-leaf-pressure-sentinel-128-8op {sentinel: an 8-op fold-resistant leaf 
 # leaf and even at the highest tested count. This is current-behavior
 # evidence (spec's own item 31), not a claim that stays true at any N.
 
-test tiny-leaf-pressure-no-growth-observed {whole-program machine code with inlining on does not exceed the explicit-off baseline at any tested call-site count, either leaf style, direct-only or with a dynamic caller present} -body {
+test tiny-leaf-pressure-no-growth-observed {whole-program machine code with inlining on does not exceed the explicit-off baseline at any tested call-site count, either leaf style, direct-only or with a dynamic caller present (tagged ABI: -raw-int-abi-opt 0)} -body {
+    set tinyLeafPressure::abiOpt 0
     set grew {}
     foreach dynamic {0 1} {
         foreach {ops style} {1 chain 8 chain 8 horner} {
@@ -152,7 +153,40 @@ test tiny-leaf-pressure-no-growth-observed {whole-program machine code with inli
             }
         }
     }
+    set tinyLeafPressure::abiOpt 1
     set grew
 } -result {}
+
+
+# RAW-INT-ABI.md: with the raw Int ABI a non-inlined call of an Int leaf no
+# longer boxes its argument or unboxes its result, so the explicit-off
+# baseline shrank while an inlined copy of the same body did not. The
+# no-growth property above is therefore the tagged-ABI baseline; this pins
+# what the production configuration (ABI on) actually does: no growth for the
+# one-op and chain leaves, and at most a few percent for the fold-resistant
+# 8-op horner leaf at high call-site counts. Inlining stays correct (parity
+# above); the inline/call break-even is future tuning, not this milestone.
+test tiny-leaf-pressure-growth-under-raw-abi {with the raw Int ABI, inlining never grows code for the 1-op and chain leaves and by under 10% for the 8-op horner leaf} -body {
+    set tinyLeafPressure::abiOpt 1
+    set worst 0.0
+    set grewSmall {}
+    foreach dynamic {0 1} {
+        foreach {ops style} {1 chain 8 chain 8 horner} {
+            foreach n $tinyLeafPressure::callSiteCounts {
+                set m [tinyLeafPressure::measure $ops $n $dynamic $style]
+                set on [dict get $m bytesOn]
+                set off [dict get $m bytesOff]
+                if {$on > $off} {
+                    if {$style eq "horner"} {
+                        set worst [expr {max($worst, double($on - $off) / $off)}]
+                    } else {
+                        lappend grewSmall [list $ops $style $n $dynamic $on $off]
+                    }
+                }
+            }
+        }
+    }
+    list $grewSmall [expr {$worst < 0.10}]
+} -result {{} 1}
 
 cleanupTests

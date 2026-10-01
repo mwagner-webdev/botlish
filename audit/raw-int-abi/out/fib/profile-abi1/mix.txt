@@ -1,0 +1,23 @@
+executed Botlish-code instructions per run: 1,404,172 (100.0% of all Ir)
+
+== total executed JIT instruction mix (per run)
+  frame: epilogue         401,194.0   28.6%  Dr=286,567.0
+  mov reg-reg             372,532.0   26.5%
+  frame: prologue         343,880.0   24.5%  Dw=229,253.0
+  arith                    85,968.0    6.1%
+  call botlish             57,313.0    4.1%  Dw=57,313.0
+  cmp/test (other)         57,313.0    4.1%
+  jcc (other)              57,313.0    4.1%  Bc=57,313.0  Bcm=5,166.0
+  jmp                      28,656.0    2.0%
+  retag                         2.0    0.0%
+  mov imm                       1.0    0.0%
+
+== 1 fib: 1,404,163.0 executed instructions per run (100.0% of JIT)
+  frame: epilogue         401,191.0   28.6%
+  mov reg-reg             372,532.0   26.5%
+  frame: prologue         343,878.0   24.5%
+  arith                    85,968.0    6.1%
+  cmp/test (other)         57,313.0    4.1%
+  jcc (other)              57,313.0    4.1%
+  call botlish             57,312.0    4.1%
+  jmp                      28,656.0    2.0%

@@ -532,6 +532,32 @@ pub struct Function {
     /// knows it (native/lower.tcl); its generic entry materializes
     /// defensively (codegen::clif's `define`).
     pub plan_result: bool,
+    /// Raw Int ABI (RAW-INT-ABI.md): parameter positions (index < params,
+    /// never the closure) whose *physical* incoming argument is a raw signed
+    /// machine integer rather than a tagged Value (`rawparams=` header
+    /// attribute). native/lower.tcl plans this once per exact closed
+    /// instance from proven small Ranges; every position is also declared in
+    /// `raw_regs`, and no prologue unboxing happens for it. Always
+    /// `params` entries long. All false for an ordinary (tagged-ABI)
+    /// function.
+    pub raw_params: Vec<bool>,
+    /// Whether the successful result is a raw signed machine integer
+    /// (`rawresult=1`): `ret` returns a raw register. Errors are never
+    /// encoded in the integer: a function that `may_error` returns the raw
+    /// value together with a second status word (see
+    /// codegen::clif's `physical_results`), one that cannot fail returns the
+    /// bare integer.
+    pub raw_result: bool,
+}
+
+impl Function {
+    /// Whether this function uses the raw Int ABI anywhere (a raw parameter
+    /// or a raw result): such a function has no Block value and no generic
+    /// dispatch path -- native/lower.tcl plans it only for an exact closed
+    /// instance -- so `fnvalue`/`closure` of it is rejected by `validate`.
+    pub fn has_raw_abi(&self) -> bool {
+        self.raw_result || self.raw_params.iter().any(|b| *b)
+    }
 }
 
 pub struct NativeDecl {
@@ -800,6 +826,12 @@ fn summarize_call_effects(program: &mut Program, enabled: bool) {
         }
         if effects == old { break; }
     }
+    // A raw-result callee (RAW-INT-ABI.md) has no error sentinel in its
+    // result word, so its call sites must know exactly whether it can fail
+    // (and so whether a status word follows the value): its own settled
+    // summary decides that even with call effects disabled, which otherwise
+    // forces every call site to check.
+    let raw_results: Vec<bool> = program.functions.iter().map(|f| f.raw_result).collect();
     for (i, f) in program.functions.iter_mut().enumerate() {
         (f.may_error, f.may_gc) = effects[i];
         for inst in &mut f.body {
@@ -808,7 +840,11 @@ fn summarize_call_effects(program: &mut Program, enabled: bool) {
                     | Inst::CallEnv { func, may_error, may_gc, .. }
                     | Inst::CallMulti { func, may_error, may_gc, .. }
                     | Inst::CallEnvMulti { func, may_error, may_gc, .. } => {
-                        (*may_error, *may_gc) = if enabled { effects[*func as usize] } else { (true, true) };
+                        (*may_error, *may_gc) = if enabled {
+                            effects[*func as usize]
+                        } else {
+                            (if raw_results[*func as usize] { effects[*func as usize].0 } else { true }, true)
+                        };
                     }
                 _ => {}
             }
@@ -907,10 +943,21 @@ fn parse_func_header(p: &Parser, tokens: &[Token]) -> Result<Function, NirError>
         }
     }
     let plan_result = kv.get("planresult").is_some_and(|v| v == "1");
+    let params = num("params")?;
+    let mut raw_params = vec![false; params as usize];
+    if let Some(list) = kv.get("rawparams") {
+        for tok in list.split_whitespace() {
+            let r: usize = tok.parse().map_err(|_| ())
+                .and_then(|r: usize| if r < params as usize { Ok(r) } else { Err(()) })
+                .or_else(|_| p.err::<usize>(format!("bad rawparams position {tok}")))?;
+            raw_params[r] = true;
+        }
+    }
+    let raw_result = kv.get("rawresult").is_some_and(|v| v == "1");
     Ok(Function {
         id,
         name: name.clone(),
-        params: num("params")?,
+        params,
         env: num("env")? == 1,
         regs,
         pnames: kv.get("pnames").cloned().unwrap_or_default(),
@@ -923,6 +970,8 @@ fn parse_func_header(p: &Parser, tokens: &[Token]) -> Result<Function, NirError>
         raw_regs,
         plan_regs,
         plan_result,
+        raw_params,
+        raw_result,
     })
 }
 
@@ -1142,6 +1191,24 @@ fn validate(program: &Program) -> Result<(), NirError> {
         if f.params > f.regs {
             return fail(ctx("params > regs".into()));
         }
+        // The raw Int ABI (RAW-INT-ABI.md) is a calling convention of an
+        // ordinary single-result function that is never the program and
+        // never a Block value: every raw parameter register is also a
+        // declared raw register (it is defined raw on entry), a companion
+        // (results != 1) keeps the tagged ABI, and a plan-result function
+        // (whose result is a String/List) can have raw parameters but never
+        // a raw result.
+        if f.has_raw_abi() {
+            if f.id == 0 {
+                return fail(ctx("the program function cannot use the raw Int ABI".into()));
+            }
+            if f.results != 1 || (f.raw_result && f.plan_result) {
+                return fail(ctx("the raw Int ABI requires an ordinary single-result function".into()));
+            }
+            if let Some(i) = (0..f.params as usize).find(|i| f.raw_params[*i] && !f.raw_regs[*i]) {
+                return fail(ctx(format!("rawparams position {i} is not declared in rawregs")));
+            }
+        }
         let mut labels = HashSet::new();
         for inst in &f.body {
             if let Inst::Label(l) = inst {
@@ -1197,6 +1264,9 @@ fn validate(program: &Program) -> Result<(), NirError> {
                 Inst::StaticGet { dst, .. } => used.push(*dst),
                 Inst::FnValue { dst, func: g } => {
                     match func(*g) {
+                        Some(g) if g.has_raw_abi() => {
+                            return fail(ctx(format!("fnvalue of {}: it uses the raw Int ABI and has no Block value", g.id)));
+                        }
                         Some(g) if !g.env => {}
                         _ => return fail(ctx(format!("fnvalue of {g}: not an environment-free function"))),
                     }
@@ -1206,6 +1276,9 @@ fn validate(program: &Program) -> Result<(), NirError> {
                 Inst::StaticSet { value, .. } => used.push(*value),
                 Inst::Closure { dst, func: g, captures } => {
                     match func(*g) {
+                        Some(g) if g.has_raw_abi() => {
+                            return fail(ctx(format!("closure of {}: it uses the raw Int ABI and has no Block value", g.id)));
+                        }
                         Some(g) if g.env && g.captures as usize == captures.len() => {}
                         _ => return fail(ctx(format!("closure of {g}: bad target or capture count"))),
                     }
@@ -1311,6 +1384,46 @@ fn validate(program: &Program) -> Result<(), NirError> {
                 Inst::RawInt { dst, .. } => {
                     if !raw[*dst as usize] {
                         return fail(ctx(format!("rawint %{dst}: not declared in rawregs")));
+                    }
+                }
+                // Call-site agreement with the callee's *physical* signature
+                // (RAW-INT-ABI.md): argument i is raw exactly when the
+                // callee's parameter i is, and the destination is raw
+                // exactly when the callee's result is. A mismatch is a
+                // lowering bug, never a silent conversion. Positions past
+                // the callee's declared list (a hidden trailing parameter)
+                // are ordinary tagged Values.
+                Inst::Call { dst, func: g, args, .. } | Inst::CallEnv { dst, func: g, args, .. } => {
+                    let callee = func(*g).expect("target checked above");
+                    for (i, a) in args.iter().enumerate() {
+                        if raw[*a as usize] != callee.raw_params[i] {
+                            return fail(ctx(format!(
+                                "call of {g}: argument {i} (%{a}) is {}, but the callee's parameter is {}",
+                                if raw[*a as usize] { "raw" } else { "tagged" },
+                                if callee.raw_params[i] { "raw" } else { "tagged" }
+                            )));
+                        }
+                    }
+                    if raw[*dst as usize] != callee.raw_result {
+                        return fail(ctx(format!(
+                            "call of {g}: result %{dst} is {}, but the callee's result is {}",
+                            if raw[*dst as usize] { "raw" } else { "tagged" },
+                            if callee.raw_result { "raw" } else { "tagged" }
+                        )));
+                    }
+                    if let Inst::CallEnv { closure, .. } = inst {
+                        if raw[*closure as usize] {
+                            return fail(ctx(format!("callenv closure %{closure} must be tagged")));
+                        }
+                    }
+                }
+                Inst::Ret(r) => {
+                    if raw[*r as usize] != f.raw_result {
+                        return fail(ctx(format!(
+                            "ret %{r}: it is {}, but the function's result is {}",
+                            if raw[*r as usize] { "raw" } else { "tagged" },
+                            if f.raw_result { "raw" } else { "tagged" }
+                        )));
                     }
                 }
                 Inst::Move { dst, src } => {
@@ -1886,5 +1999,147 @@ mod struct_tests {
         ))
         .unwrap();
         assert!(p.shapes[0].fields.is_empty());
+    }
+}
+
+/// The raw Int ABI (RAW-INT-ABI.md): the physical-signature metadata, its
+/// validation (call-site and `ret` agreement, no Block value) and the
+/// call-site effect rule for a raw-result callee.
+#[cfg(test)]
+mod raw_abi_tests {
+    use super::*;
+
+    fn message(r: Result<Program, NirError>) -> String {
+        match r {
+            Ok(_) => panic!("expected invalid NIR"),
+            Err(e) => e.message,
+        }
+    }
+
+    const PROGRAM: &str = "func 0 \"<program>\" params=0 env=0 regs=1 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = unit\n    ret %0\nend\n\n";
+
+    /// Function 1: `n + 1` with a raw parameter and a raw result (BODY_TAIL
+    /// replaces the final `ret` line so a test can make it fail instead).
+    fn callee(tail: &str) -> String {
+        format!(
+            "func 1 \"callee\" params=1 env=0 regs=3 pnames=\"n\" captures=0 rawregs=\"0 1 2\" rawparams=\"0\" rawresult=1\n    %1 = rawint 1\n    %2 = op riadd %0 %1\n{tail}end\n\n"
+        )
+    }
+
+    fn program(effects: u32, rest: &str) -> String {
+        format!("nir 1 call-effects={effects}\n\n{PROGRAM}{rest}")
+    }
+
+    #[test]
+    fn matching_raw_call_parses() {
+        // function 2 passes a raw parameter and boxes the raw result
+        let text = program(
+            1,
+            &format!(
+                "{}func 2 \"caller\" params=1 env=0 regs=3 pnames=\"x\" captures=0 rawregs=\"0 1\" rawparams=\"0\"\n    %1 = call 1 %0\n    %2 = op rbox %1\n    ret %2\nend\n",
+                callee("    ret %2\n")
+            ),
+        );
+        let p = parse(&text).unwrap_or_else(|e| panic!("{}", e.message));
+        assert!(p.functions[1].raw_params[0] && p.functions[1].raw_result);
+        assert!(p.functions[1].has_raw_abi() && !p.functions[0].has_raw_abi());
+    }
+
+    #[test]
+    fn tagged_argument_to_raw_parameter_is_a_bug() {
+        let text = program(
+            1,
+            &format!(
+                "{}func 2 \"caller\" params=1 env=0 regs=3 pnames=\"x\" captures=0 rawregs=\"1\"\n    %1 = call 1 %0\n    %2 = op rbox %1\n    ret %2\nend\n",
+                callee("    ret %2\n")
+            ),
+        );
+        let m = message(parse(&text));
+        assert!(m.contains("argument 0") && m.contains("tagged"), "{m}");
+    }
+
+    #[test]
+    fn tagged_destination_for_raw_result_is_a_bug() {
+        let text = program(
+            1,
+            &format!(
+                "{}func 2 \"caller\" params=1 env=0 regs=2 pnames=\"x\" captures=0 rawregs=\"0\" rawparams=\"0\"\n    %1 = call 1 %0\n    ret %1\nend\n",
+                callee("    ret %2\n")
+            ),
+        );
+        let m = message(parse(&text));
+        assert!(m.contains("result %1") && m.contains("tagged"), "{m}");
+    }
+
+    #[test]
+    fn ret_of_wrong_representation_is_a_bug() {
+        // a raw-result function returning a tagged register
+        let text = program(
+            1,
+            "func 1 \"c\" params=1 env=0 regs=2 pnames=\"n\" captures=0 rawregs=\"0\" rawparams=\"0\" rawresult=1\n    %1 = op rbox %0\n    ret %1\nend\n",
+        );
+        let m = message(parse(&text));
+        assert!(m.contains("ret %1"), "{m}");
+        // and a tagged-result function returning a raw register
+        let text = program(
+            1,
+            "func 1 \"c\" params=0 env=0 regs=1 pnames=\"\" captures=0 rawregs=\"0\"\n    %0 = rawint 1\n    ret %0\nend\n",
+        );
+        let m = message(parse(&text));
+        assert!(m.contains("ret %0"), "{m}");
+    }
+
+    #[test]
+    fn raw_parameter_must_be_a_declared_raw_register() {
+        let text = program(
+            1,
+            "func 1 \"c\" params=1 env=0 regs=3 pnames=\"n\" captures=0 rawregs=\"1 2\" rawparams=\"0\" rawresult=1\n    %1 = rawint 1\n    %2 = rawint 2\n    ret %2\nend\n",
+        );
+        let m = message(parse(&text));
+        assert!(m.contains("rawparams position 0"), "{m}");
+    }
+
+    #[test]
+    fn a_raw_abi_function_has_no_block_value() {
+        let text = program(
+            1,
+            &format!(
+                "{}func 2 \"caller\" params=0 env=0 regs=2 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = fnvalue 1\n    %1 = unit\n    ret %1\nend\n",
+                callee("    ret %2\n")
+            ),
+        );
+        let m = message(parse(&text));
+        assert!(m.contains("raw Int ABI"), "{m}");
+    }
+
+    #[test]
+    fn program_function_cannot_be_raw() {
+        let m = message(parse(
+            "nir 1\n\nfunc 0 \"<program>\" params=0 env=0 regs=1 pnames=\"\" captures=0 rawregs=\"0\" rawresult=1\n    %0 = rawint 1\n    ret %0\nend\n",
+        ));
+        assert!(m.contains("program"), "{m}");
+    }
+
+    /// With call effects disabled every ordinary call site must check, but a
+    /// raw-result callee has no error sentinel: its call site follows the
+    /// callee's own settled `may_error`.
+    #[test]
+    fn raw_result_call_site_follows_the_callee_even_without_call_effects() {
+        let caller = "func 2 \"caller\" params=1 env=0 regs=3 pnames=\"x\" captures=0 rawregs=\"0 1\" rawparams=\"0\"\n    %1 = call 1 %0\n    %2 = op rbox %1\n    ret %2\nend\n";
+        let site = |p: &Program| match &p.functions[2].body[0] {
+            Inst::Call { may_error, .. } => *may_error,
+            other => panic!("{other:?}"),
+        };
+        for effects in [0u32, 1u32] {
+            let ok = parse(&program(effects, &format!("{}{caller}", callee("    ret %2\n"))))
+                .unwrap_or_else(|e| panic!("{}", e.message));
+            assert!(!ok.functions[1].may_error);
+            assert!(!site(&ok), "a cannot-fail raw callee is never checked (effects={effects})");
+            // A callee that can fail (a raise) is checked at every call site.
+            let failing = parse(&program(effects, &format!("{}{caller}", callee("    raise TYPE \"x\"\n"))))
+                .unwrap_or_else(|e| panic!("{}", e.message));
+            assert!(failing.functions[1].may_error);
+            assert!(site(&failing), "a raw callee that can fail is checked (effects={effects})");
+        }
     }
 }

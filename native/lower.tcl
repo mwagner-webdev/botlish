@@ -177,6 +177,12 @@ namespace eval native::lower {
     variable ranges {}
     variable currentInstance {}
     variable reprOpt 1
+    # The raw Int ABI plan (native/rawabi.tcl): InstanceId -> its physical
+    # parameter/result representation, computed once per program from the
+    # settled closedness and Range analyses and read by every instance's own
+    # lowering and by every call site (the callee's plan is authoritative).
+    variable abiPlan {}
+    variable rawIntAbiOpt 1
     # The widest shift amount a raw (host machine i64) shift may use (see
     # RawEligibleShift): the host word width, not core/scalarbits.tcl's own
     # much larger MAX_SHIFT -- a proven-constant shift count under this bound
@@ -1074,6 +1080,14 @@ namespace eval native::lower {
 #                      (default: hir::range's maxRecursiveRangeStates;
 #                      BOTLISH_NATIVE_RECURSIVE_RANGE_LIMIT overrides it).
 #                      An audit/native option, never source syntax.
+#   -raw-int-abi-opt 1|0
+#                      transport the Int parameters and the successful Int
+#                      result of an exact closed instance as raw signed
+#                      machine integers when their final entry/result Ranges
+#                      satisfy hir::range::fitsSmall (native/rawabi.tcl,
+#                      RAW-INT-ABI.md; default 1;
+#                      BOTLISH_NATIVE_RAW_INT_ABI_OPT=0 restores the
+#                      tagged ABI everywhere, for differential testing).
 #   -string-traversal-opt 1|0
 #                      carry a provably forward, +1-per-iteration character
 #                      scan's physical UTF-8 byte position across its self-
@@ -1105,6 +1119,8 @@ proc native::lower::program {hirProgram args} {
     variable ranges
     variable callFactsOpt
     variable reprOpt
+    variable abiPlan
+    variable rawIntAbiOpt
     variable escape
     variable escapeOpt
     variable paramAggregateOpt
@@ -1144,6 +1160,8 @@ proc native::lower::program {hirProgram args} {
         && $::env(BOTLISH_NATIVE_BLOCK_ESCAPE_OPT) eq "0" ? 0 : 1}]
     set stringRegionDefault [expr {[info exists ::env(BOTLISH_NATIVE_STRING_REGION_OPT)]
         && $::env(BOTLISH_NATIVE_STRING_REGION_OPT) eq "0" ? 0 : 1}]
+    set rawIntAbiDefault [expr {[info exists ::env(BOTLISH_NATIVE_RAW_INT_ABI_OPT)]
+        && $::env(BOTLISH_NATIVE_RAW_INT_ABI_OPT) eq "0" ? 0 : 1}]
     set callFactsDefault [expr {[info exists ::env(BOTLISH_NATIVE_CALL_FACTS_OPT)]
         && $::env(BOTLISH_NATIVE_CALL_FACTS_OPT) eq "0" ? 0 : 1}]
     set closedCallerFactsDefault [expr {[info exists ::env(BOTLISH_NATIVE_CLOSED_CALLER_FACTS_OPT)]
@@ -1195,6 +1213,7 @@ proc native::lower::program {hirProgram args} {
             -exact-callable-opt $exactCallableDefault -exact-callable-limit $exactLimitDefault \
             -tiny-leaf-inline-opt $tinyLeafInlineDefault \
             -recursive-result-range-opt $recursiveRangeDefault -recursive-range-limit $recursiveLimitDefault \
+            -raw-int-abi-opt $rawIntAbiDefault \
             -virtual-construction-opt $constructionDefault] $args]
     if {[hir::mode $hirProgram] ne "program"} {
         throw {NATIVE UNSUPPORTED sequence-mode} \
@@ -1253,6 +1272,12 @@ proc native::lower::program {hirProgram args} {
         -exact-callable-limit [dict get $options -exact-callable-limit]]
     set ranges [hir::range::analyze $hirProgram $spec [dict get $options -call-facts-opt] 1 1 \
         [dict get $options -recursive-result-range-opt] [dict get $options -recursive-range-limit]]
+    # The raw Int ABI plan runs strictly after the closedness and Range
+    # analyses it consumes (including bounded recursive result summaries)
+    # and strictly before any lowering, so every call site sees the final
+    # physical signature of its callee.
+    set rawIntAbiOpt [expr {[dict get $options -raw-int-abi-opt] && $reprOpt}]
+    set abiPlan [native::rawabi::plan $hirProgram $spec $ranges $rawIntAbiOpt $blockEscapeOpt]
     set escape [expr {$escapeOpt ? [hir::escape::analyze $hirProgram $spec $paramAggregateOpt $structWidths]
         : [dict create arity {} wants {} virtual {} paramVirtual {}]}]
     set stringregion [expr {$stringRegionOpt ? [hir::stringregion::analyze $hirProgram $spec]
@@ -1370,7 +1395,7 @@ proc native::lower::program {hirProgram args} {
     }
     set text "[join $header \n]\n\n[join $texts \n\n]\n"
     return [dict create text $text functions $infos statistics [Statistics $infos] \
-        specialization $spec construction $construction structCensus [hir::escape::census $escape] \
+        specialization $spec abiPlan $abiPlan construction $construction structCensus [hir::escape::census $escape] \
         transportFacts [hir::escape::transportFacts $escape]]
 }
 
@@ -1597,6 +1622,13 @@ proc native::lower::GenericRef {e} {
     if {$id eq ""} {
         throw {NATIVE BUG} "native lowering: no generic instance of block $e"
     }
+    variable abiPlan
+    if {[native::rawabi::uses $abiPlan $id]} {
+        # A Block value always enters the tagged generic entry: an instance
+        # with a raw physical signature must be closed, so no Block value of
+        # it can exist (rawabi.tcl, eligibility condition 2).
+        throw {NATIVE BUG} "native lowering: instance $id has a raw Int ABI but a Block value of it is materialized"
+    }
     return [FunctionRef $id]
 }
 
@@ -1616,6 +1648,35 @@ proc native::lower::HasSelfTailCall {id calls} {
         }
     }
     return 0
+}
+
+# ---------------------------------------------------------------------------
+# Raw Int ABI (native/rawabi.tcl, RAW-INT-ABI.md)
+#
+# The plan is the single authority for the *physical* signature of an
+# instance's canonical function. Its callee lowering (Function) and every
+# caller (Call) read it through these accessors; nothing decides rawness at
+# an individual call site, and nirs.rs re-validates agreement on the text.
+
+# 1|0 per each of the first N parameter positions of instance ID's canonical
+# function: whether the incoming argument is a raw signed machine integer.
+proc native::lower::AbiParams {id n} {
+    variable abiPlan
+    return [native::rawabi::params $abiPlan $id $n]
+}
+
+# 1 if instance ID's canonical function returns its successful Int result as
+# a raw signed machine integer.
+proc native::lower::AbiResult {id} {
+    variable abiPlan
+    return [native::rawabi::result $abiPlan $id]
+}
+
+# 1 if the current function's own successful result is raw (only ever set,
+# by Function, for the canonical function of a raw-result instance).
+proc native::lower::ResultRaw {fnVar} {
+    upvar 1 $fnVar fn
+    return [expr {[dict exists $fn resultRaw] && [dict get $fn resultRaw]}]
 }
 
 # 1|0 per parameter of instance ID's PARAMS: whether hir::range::analyze's
@@ -1685,6 +1746,13 @@ proc native::lower::Function {id} {
         set body [hir::get $hir $region body]
     }
     set rawParams [RawParams $id $instance $params]
+    # Raw Int ABI: these positions arrive as raw machine integers (no
+    # prologue unboxing); the others keep the self-tail rule above.
+    set abiParams [AbiParams $id [llength $params]]
+    set rawParams [lmap a $abiParams r $rawParams {expr {$a || $r}}]
+    if {$region ne "program" && [AbiResult $id]} {
+        dict set fn resultRaw 1
+    }
     set k 0
     foreach b $params raw $rawParams {
         set r [NewReg fn]
@@ -1708,7 +1776,11 @@ proc native::lower::Function {id} {
     if {$region ne "program"} {
         dict set fn planResult [hir::construction::resultFamily $construction $id]
     }
-    set result [SequenceTo fn $body [PlanResultFamily fn]]
+    if {[ResultRaw fn]} {
+        set result [SequenceRaw fn $body]
+    } else {
+        set result [SequenceTo fn $body [PlanResultFamily fn]]
+    }
     if {$result ne "never"} {
         Emit fn "ret $result"
     }
@@ -1726,6 +1798,20 @@ proc native::lower::Function {id} {
         append head " rawregs=[Quote [join $rawRegs { }]]"
     }
     append head [PlanHeader fn]
+    # The physical raw Int signature (a compact, deterministic encoding of
+    # the plan: positions, then the result).
+    set rawPositions {}
+    set k 0
+    foreach a $abiParams {
+        if {$a} { lappend rawPositions $k }
+        incr k
+    }
+    if {$rawPositions ne ""} {
+        append head " rawparams=[Quote [join $rawPositions { }]]"
+    }
+    if {[ResultRaw fn]} {
+        append head " rawresult=1"
+    }
     if {$region ne "program"} {
         append head " @$region"
     }
@@ -2430,13 +2516,29 @@ proc native::lower::Expr {fnVar e {want tagged}} {
     variable escape
     set node [hir::node $hir $e]
     set repr tagged
+    # `rawjoin` is `raw` that an `if` may also honor by joining its branches
+    # in one raw register. It is only ever demanded in the tail position, or
+    # by a `return`, of a raw-result function (SequenceRaw, Expr's `return`),
+    # where the value flows into the function's successful result: that
+    # Range is proven small (the plan), and an `if`'s value is within it, so
+    # each branch value is a small Int and the raw join is sound. Everywhere
+    # else it is just `raw`.
+    set rawJoin [expr {$want eq "rawjoin" && [dict get $node kind] eq "if" && [ResultRaw fn]}]
+    if {$want eq "rawjoin"} {
+        set want raw
+    }
     switch -- [dict get $node kind] {
         const    { lassign [ConstOrRegion fn $e $node $want] result repr }
         ref      { lassign [Ref fn $e $node $want] result repr }
         bind     { set result [Bind fn $e $node] }
         block    { set result [Closure fn $e] }
         call     { lassign [Call fn $e $node $want "" [expr {$want eq "region"}]] result repr }
-        if       { set result [If fn $e $node] }
+        if       {
+            set result [If fn $e $node "" "" "" $rawJoin]
+            if {$rawJoin && $result ne "never"} {
+                set repr raw
+            }
+        }
         loop      { set result [Loop fn $e $node] }
         listloop  { set result [ListLoop fn $e $node] }
         countloop { set result [CountLoop fn $e $node] }
@@ -2476,7 +2578,7 @@ proc native::lower::Expr {fnVar e {want tagged}} {
                     Emit fn "ret $value" $e
                 }
             } else {
-                set value [Expr fn [dict get $node value]]
+                set value [Expr fn [dict get $node value] [expr {[ResultRaw fn] ? "rawjoin" : "tagged"}]]
                 if {$value ne "never"} {
                     Emit fn "ret $value" $e
                 }
@@ -3078,6 +3180,7 @@ proc native::lower::Bind {fnVar e node} {
     variable blockescape
     variable stringregion
     variable currentInstance
+    variable rawIntAbiOpt
     set valueExpr [dict get $node value]
     set b [dict get $node binding]
     if {[hir::kind $hir $valueExpr] eq "block" && $valueExpr in [dict get $context envless]
@@ -3164,6 +3267,20 @@ proc native::lower::Bind {fnVar e node} {
                 return never
             }
             dict set fn locals $b [list region $fields]
+            return ""
+        }
+    }
+    # A local alias of a raw register (`y = x` where x is a raw parameter or
+    # a raw alias itself): the new name is the same raw register, so passing
+    # `y` on needs no rbox/runbox merely because of the lexical rebinding
+    # (RAW-INT-ABI.md). Only in statement position (the bind's own value is
+    # not read) and for a plain local.
+    if {$rawIntAbiOpt && [hir::kind $hir $valueExpr] eq "ref" && [dict exists $context discarded $e]
+            && ![dict get $node duplicate] && [dict get [hir::binding $hir $b] kind] eq "local"
+            && ![hir::isModuleBinding $hir $b]} {
+        set sb [hir::get $hir $valueExpr binding]
+        if {$sb ne "" && [dict exists $fn locals $sb] && [lindex [dict get $fn locals $sb] 0] eq "rawreg"} {
+            dict set fn locals $b [dict get $fn locals $sb]
             return ""
         }
     }
@@ -3462,6 +3579,7 @@ proc native::lower::TryFields {fnVar e n {cut ""}} {
 # instead of `tagged`. "never" if any argument cannot complete normally.
 proc native::lower::CallArgs {fnVar argExprs fieldWidths rawSlots {planSlots {}} {fieldCuts {}}} {
     upvar 1 $fnVar fn
+    variable hir
     set regs {}
     set i 0
     foreach arg $argExprs {
@@ -3487,6 +3605,14 @@ proc native::lower::CallArgs {fnVar argExprs fieldWidths rawSlots {planSlots {}}
             lappend regs {*}$fields
         } else {
             set argWant [expr {$i < [llength $rawSlots] && [lindex $rawSlots $i] ? "raw" : "tagged"}]
+            if {$argWant eq "raw" && [RawConstArg $arg]} {
+                # A small Int literal handed to a raw parameter is a raw
+                # constant: no tagged constant built only to be unboxed.
+                set r [AssignRaw fn "rawint [core::value::intOf [dict get [hir::node $hir $arg] value]]" $arg]
+                lappend regs $r
+                incr i
+                continue
+            }
             set r [Expr fn $arg $argWant]
             if {$r eq "never"} {
                 return never
@@ -3496,6 +3622,20 @@ proc native::lower::CallArgs {fnVar argExprs fieldWidths rawSlots {planSlots {}}
         incr i
     }
     return $regs
+}
+
+# 1 if argument expression E is an Int literal that fits the small-Int
+# domain (so a raw machine constant is exactly its value).
+proc native::lower::RawConstArg {e} {
+    variable hir
+    variable reprOpt
+    variable rawIntAbiOpt
+    if {!$reprOpt || !$rawIntAbiOpt || [hir::kind $hir $e] ne "const"} {
+        return 0
+    }
+    set value [hir::get $hir $e value]
+    return [expr {[core::value::kind $value] eq "int"
+        && [hir::range::fitsSmall [hir::range::point [core::value::intOf $value]]]}]
 }
 
 # Returns {RESULT REPR}: REPR is "raw" only when Ref or Call produced it
@@ -3660,6 +3800,26 @@ proc native::lower::ModuleBridgeBinding {calleeExpr targetKind} {
 # Preserve the exact call and its completion handling, then substitute a
 # successful-result constant for later value uses when the per-instance range
 # analysis proves one. This is not an effect or totality optimization.
+# {RESULT REPR} of a call whose callee returns a raw Int (RAW-INT-ABI.md):
+# RESULT is the raw register. A raw consumer takes it as is; a tagged one
+# gets the one non-allocating `rbox` (the callee's Range fits the small-Int
+# domain), which TaggedOf caches so later raw uses of that tagged value
+# unbox for free. Where the call facts prove the successful result is one
+# constant, the tagged constant is returned exactly as ClosedResult does for
+# a tagged call (the call itself still ran, for its effects).
+proc native::lower::RawCallResult {fnVar e result want} {
+    upvar 1 $fnVar fn
+    set constant [ClosedResult fn $e ""]
+    lassign $constant value repr
+    if {$value ne ""} {
+        return $constant
+    }
+    if {$want eq "raw"} {
+        return [list $result raw]
+    }
+    return [list [TaggedOf fn $result] tagged]
+}
+
 proc native::lower::ClosedResult {fnVar e result} {
     upvar 1 $fnVar fn
     variable callFactsOpt
@@ -3985,6 +4145,18 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
         # bind the callee's parameters to ordinary flat registers).
         set leafInline [expr {!$self && $wantVirtual eq "" && !$wantRegion && $tinyLeafInlineOpt
             && $fieldWidths eq "" && $instance ne "" && [LeafInlineEligible $instance]}]
+        # Raw Int ABI: a call of the target's *canonical* function (no
+        # companion, region or fields variant, no inlining) passes each
+        # planned raw position as a raw machine integer. The callee's plan
+        # is authoritative (native/rawabi.tcl); a self tail call needs no
+        # such lookup, its slots follow the function's own raw parameters
+        # above (which the same plan made raw).
+        set abiCall [expr {!$self && $instance ne "" && $wantVirtual eq "" && !$wantRegion
+            && $fieldWidths eq "" && !$leafInline && [llength $params] == [llength $argExprs]
+            && [dict get $node known] eq ""}]
+        if {$abiCall} {
+            set rawSlots [AbiParams $instance [llength $argExprs]]
+        }
         set planSlots {}
         if {$instance ne "" && !$wantRegion && !$leafInline} {
             set planSlots [PlanSlots $instance [llength $argExprs]]
@@ -4097,10 +4269,15 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
             # offset 0 here -- exactly where a semantic index of 0 begins.
             lappend argRegs [IntConst fn 0 $e]
         }
+        set rawResult [expr {$abiCall && [AbiResult $instance]}]
+        set assign [expr {$rawResult ? "AssignRaw" : "Assign"}]
         if {$target in $envless} {
-            set result [Assign fn [string trimright "call $id [join $argRegs { }]"] $e]
+            set result [$assign fn [string trimright "call $id [join $argRegs { }]"] $e]
         } else {
-            set result [Assign fn [string trimright "callenv $id $callee [join $argRegs { }]"] $e]
+            set result [$assign fn [string trimright "callenv $id $callee [join $argRegs { }]"] $e]
+        }
+        if {$rawResult} {
+            return [RawCallResult fn $e $result $want]
         }
         set resultFamily [hir::construction::resultFamily $construction $instance]
         if {$resultFamily ne ""} {
@@ -5417,7 +5594,7 @@ proc native::lower::NativeImpl {name} {
 # ---------------------------------------------------------------------------
 # Control flow
 
-proc native::lower::If {fnVar e node {family ""} {virtualN ""} {virtualCut ""}} {
+proc native::lower::If {fnVar e node {family ""} {virtualN ""} {virtualCut ""} {rawJoin 0}} {
     upvar 1 $fnVar fn
     variable hir
     variable guards
@@ -5450,6 +5627,8 @@ proc native::lower::If {fnVar e node {family ""} {virtualN ""} {virtualCut ""}} 
         set savedRaw [dict get $fn rawCache]
         if {$virtualN ne ""} {
             set value [SequenceVirtual fn [dict get $node ${role}Body] $virtualN $virtualCut]
+        } elseif {$rawJoin} {
+            set value [SequenceRaw fn [dict get $node ${role}Body]]
         } else {
             set value [SequenceTo fn [dict get $node ${role}Body] $family]
         }
@@ -5462,6 +5641,11 @@ proc native::lower::If {fnVar e node {family ""} {virtualN ""} {virtualCut ""}} 
     set join [NewLabel fn]
     # A virtual struct join (branch merging): one result register per field.
     set result [expr {$virtualN ne "" ? [NewRegs fn $virtualN] : [NewReg fn]}]
+    if {$rawJoin} {
+        # Both branches' values are small Ints (they flow into a raw
+        # result's proven-small Range), joined in one raw register.
+        MarkRaw fn $result
+    }
     if {$family ne ""} {
         # A join wanted in a plan position (virtual construction): each
         # branch's value is moved in as a plan or flat value alike.
@@ -5480,6 +5664,8 @@ proc native::lower::If {fnVar e node {family ""} {virtualN ""} {virtualCut ""}} 
             set value never
         } elseif {$virtualN ne ""} {
             set value [SequenceVirtual fn $body $virtualN $virtualCut]
+        } elseif {$rawJoin} {
+            set value [SequenceRaw fn $body]
         } else {
             set value [SequenceTo fn $body $family]
         }
@@ -6115,6 +6301,24 @@ proc native::lower::SequenceVirtual {fnVar exprs n {cut ""}} {
         return never
     }
     return [VirtualValue fn $last $n $cut]
+}
+
+# Like Sequence, for a body whose value is wanted as a raw machine integer
+# (the tail of a raw-result function, a raw `if` join): the statements run
+# as usual, the last expression is demanded `rawjoin`. The caller has
+# already established (RawJoinOk / the plan) that the value's Range fits the
+# small-Int domain.
+proc native::lower::SequenceRaw {fnVar exprs} {
+    upvar 1 $fnVar fn
+    if {$exprs eq ""} {
+        throw {NATIVE BUG} "native lowering: a raw-Int body has no value"
+    }
+    foreach e [lrange $exprs 0 end-1] {
+        if {[Expr fn $e] eq "never"} {
+            return never
+        }
+    }
+    return [Expr fn [lindex $exprs end] rawjoin]
 }
 
 proc native::lower::SequenceTo {fnVar exprs family} {

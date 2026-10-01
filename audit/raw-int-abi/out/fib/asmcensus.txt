@@ -1,0 +1,14 @@
+== abi 0
+function                           kind   bytes insns stores tagshft calls safepts rootcand  slots
+<program><generic>                 fn        19     7      0       0     1     0      0      0
+<program><generic>                 entry     14     6      0       0     1     -      -      -
+fib<int>                           fn       131    38      2       9     2     0      0      0
+fib<int>                           entry     17     7      0       0     1     -      -      -
+direct functions total: bytes 150 insns 45 stack-stores 2 tag-shifts 9 calls 3
+== abi 1
+function                           kind   bytes insns stores tagshft calls safepts rootcand  slots
+<program><generic>                 fn        26     9      0       2     1     0      0      0
+<program><generic>                 entry     14     6      0       0     1     -      -      -
+fib<int>                           fn       114    32      3       0     2     0      0      0
+fib<int>                           entry     27    10      0       3     1     -      -      -
+direct functions total: bytes 140 insns 41 stack-stores 3 tag-shifts 2 calls 3

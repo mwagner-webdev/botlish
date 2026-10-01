@@ -72,6 +72,11 @@ if {[info commands ::native::evalHir] eq ""} {
 
 namespace eval tinyLeafPressure {
     variable callSiteCounts {1 2 4 8 16 32 64 128 256}
+    # -raw-int-abi-opt for every compile in `measure` (RAW-INT-ABI.md): the
+    # raw Int ABI makes the non-inlined call cheaper, which moves the
+    # inline/call break-even; 0 reproduces the tagged-ABI baseline this
+    # audit was written against.
+    variable abiOpt 1
 }
 
 # The body expression of a leaf with OPS native calls, in STYLE "chain"
@@ -122,19 +127,20 @@ proc tinyLeafPressure::hirOf {ops n dynamic {style chain}} {
 # from N exact sites (DYNAMIC 1 also adds one dynamic call), inline on vs
 # off.
 proc tinyLeafPressure::measure {ops n dynamic {style chain}} {
+    variable abiOpt
     set hir [hirOf $ops $n $dynamic $style]
-    set valueOn [native::evalHir $hir -tiny-leaf-inline-opt 1]
-    set valueOff [native::evalHir $hir -tiny-leaf-inline-opt 0]
-    set nirOn [native::nir $hir -tiny-leaf-inline-opt 1]
-    set nirOff [native::nir $hir -tiny-leaf-inline-opt 0]
+    set valueOn [native::evalHir $hir -tiny-leaf-inline-opt 1 -raw-int-abi-opt $abiOpt]
+    set valueOff [native::evalHir $hir -tiny-leaf-inline-opt 0 -raw-int-abi-opt $abiOpt]
+    set nirOn [native::nir $hir -tiny-leaf-inline-opt 1 -raw-int-abi-opt $abiOpt]
+    set nirOff [native::nir $hir -tiny-leaf-inline-opt 0 -raw-int-abi-opt $abiOpt]
     set callsOn [regexp -all {= call(env)? } $nirOn]
     set callsOff [regexp -all {= call(env)? } $nirOff]
     set funcsOn [regexp -all -line {^func } $nirOn]
     set funcsOff [regexp -all -line {^func } $nirOff]
     set t0 [clock microseconds]
-    set sizeOn [native::codeSize $hir -tiny-leaf-inline-opt 1]
+    set sizeOn [native::codeSize $hir -tiny-leaf-inline-opt 1 -raw-int-abi-opt $abiOpt]
     set t1 [clock microseconds]
-    set sizeOff [native::codeSize $hir -tiny-leaf-inline-opt 0]
+    set sizeOff [native::codeSize $hir -tiny-leaf-inline-opt 0 -raw-int-abi-opt $abiOpt]
     set t2 [clock microseconds]
     set bytesOn [lindex $sizeOn 0]
     set bytesOff [lindex $sizeOff 0]

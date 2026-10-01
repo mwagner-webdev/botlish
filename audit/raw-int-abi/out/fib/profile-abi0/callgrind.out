@@ -1,0 +1,195 @@
+# callgrind format
+version: 1
+creator: callgrind-3.22.0
+pid: 28481
+cmd:  /tmp/claude-0/-home-user-botlish/93931cb5-c26e-5605-8404-e8915a92fddf/scratchpad/audit/target/release/botlish-native bench 21 audit/raw-int-abi/out/fib/profile-abi0/program.nir
+part: 1
+
+
+desc: I1 cache: 32768 B, 64 B, 8-way associative
+desc: D1 cache: 49152 B, 64 B, 12-way associative
+desc: LL cache: 276824064 B, 64 B, 33-way associative
+
+desc: Timerange: Basic block 0 - 4811798
+desc: Trigger: Program termination
+
+positions: instr
+events: Ir Dr Dw I1mr D1mr D1mw ILmr DLmr DLmw Bc Bcm Bi Bim
+summary: 30949080 4585100 4585080 1 0 0 0 0 0 1146260 103320 20 1
+
+
+ob=???
+fl=???
+fn=0x0000000004847021
+0x4847021 20 0 20
+0x4847022 20
+0x4847025 20
+0x4847029 20 0 20
+0x484702d 20 0 20
+0x4847032 20
+0x4847035 20
+0x4847038 20
+0x484703b 20
+0x484703f 20 0 0 0 0 0 0 0 0 20
+0x4847045 20
+0x4847048 20
+0x484704c 20
+0x484704f 20
+0x4847052 20
+0x4847056 20
+0x4847059 20 0 20
+cfn=0x0000000004847021'2
+calls=21 0x4847021 
+0x4847059 19127140 2833680 2833660 0 0 0 0 0 0 708420 63860
+0x484705e 20
+0x4847061 20
+0x4847064 20
+0x4847068 20
+0x484706b 20
+0x484706f 20
+0x4847072 20 0 20
+cfn=0x0000000004847021'2
+calls=21 0x4847021 
+0x4847072 11820940 1751280 1751260 0 0 0 0 0 0 437820 39460
+0x4847077 20
+0x484707a 20
+0x484707d 20
+0x4847080 20
+0x4847083 20
+0x4847086 20
+0x484708a 20
+0x4847092 20 20
+0x4847096 20 20
+0x484709b 20
+0x484709f 20
+0x48470a2 20 20
+0x48470a3 20 20
+
+fn=0x0000000004847021'2
+0x4847021 1146240 0 1146240
+0x4847022 1146240
+0x4847025 1146240
+0x4847029 1146240 0 1146240
+0x484702d 1146240 0 1146240
+0x4847032 1146240
+0x4847035 1146240
+0x4847038 1146240
+0x484703b 1146240
+0x484703f 1146240 0 0 0 0 0 0 0 0 1146240 103320
+0x4847045 573100
+0x4847048 573100
+0x484704c 573100
+0x484704f 573100
+0x4847052 573100
+0x4847056 573100
+0x4847059 573100 0 573100
+cfn=0x0000000004847021'2
+calls=601755 0x4847021 
+0x4847059 252694100 38285200 37712100 0 0 0 0 0 0 9571300 979600
+0x484705e 573100
+0x4847061 573100
+0x4847064 573100
+0x4847068 573100
+0x484706b 573100
+0x484706f 573100
+0x4847072 573100 0 573100
+cfn=0x0000000004847021'2
+calls=601755 0x4847021 
+0x4847072 151341500 23270000 22696900 0 0 0 0 0 0 5817500 410780
+0x4847077 573100
+0x484707a 573100
+0x484707d 573100
+0x4847080 573100
+0x4847083 573100
+0x4847086 573100
+0x484708a 573100
+0x484708f 573140
+0x4847092 573140 573140
+0x4847096 573140 573140
+0x484709b 573140
+0x484709f 573140
+0x48470a2 573140 573140
+0x48470a3 573140 573140
+0x4847092 573100 573100
+0x4847096 573100 573100
+0x484709b 573100
+0x484709f 573100
+0x48470a2 573100 573100
+0x48470a3 573100 573100
+
+fn=0x0000000004847000
+0x4847000 20 0 20
+0x4847001 20
+0x4847004 20
+0x4847009 20 0 20
+cfn=0x0000000004847021
+calls=21 0x4847021 
+0x4847009 30948820 4585040 4585020 0 0 0 0 0 0 1146260 103320
+0x484700e 20
+0x4847011 20 20
+0x4847012 20 20
+
+ob=/tmp/claude-0/-home-user-botlish/93931cb5-c26e-5605-8404-e8915a92fddf/scratchpad/audit/target/release/botlish-native
+fl=/rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/ops/function.rs
+fn=<std::thread::lifecycle::spawn_unchecked<botlish_native::main::{closure#2}, i32>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0}
+fi=/rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/thread/lifecycle.rs
+cfi=/rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/sys/backtrace.rs
+cfn=std::sys::backtrace::__rust_begin_short_backtrace::<botlish_native::main::{closure#2}, i32>
+calls=1 0x194130 
+0x194f4d 30949080 4585100 4585080 1 0 0 0 0 0 1146260 103320 20 1
+fe=/rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/ops/function.rs
+
+fl=/tmp/claude-0/-home-user-botlish/93931cb5-c26e-5605-8404-e8915a92fddf/scratchpad/audit/native-audit/src/main.rs
+fn=botlish_native::cli
+cfn=botlish_audit_run
+calls=20 0x188a50 
+0x1858b4 30949080 4585100 4585080 1 0 0 0 0 0 1146260 103320 20 1
+
+fn=botlish_audit_run
+0x188a50 20 0 20 1
+0x188a51 20
+0x188a54 20
+0x188a57 20
+0x188a5a 20 20
+0x188a5b 20 0 0 0 0 0 0 0 0 0 0 20 1
+cob=???
+cfi=???
+cfn=0x0000000004847000
+calls=20 0x4847000 
+0x188a5b 30948960 4585080 4585060 0 0 0 0 0 0 1146260 103320
+
+fl=/rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/sys/thread/unix.rs
+fn=<std::sys::thread::unix::Thread>::new::thread_start
+fi=/rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/alloc/src/boxed.rs
+cfi=/rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/core/src/ops/function.rs
+cfn=<std::thread::lifecycle::spawn_unchecked<botlish_native::main::{closure#2}, i32>::{closure#1} as core::ops::function::FnOnce<()>>::call_once::{shim:vtable#0}
+calls=1 0x194ea0 
+0x7166fb 30949080 4585100 4585080 1 0 0 0 0 0 1146260 103320 20 1
+fe=/rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/sys/thread/unix.rs
+
+fl=/rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/sys/backtrace.rs
+fn=std::sys::backtrace::__rust_begin_short_backtrace::<botlish_native::main::{closure#2}, i32>
+fi=/tmp/claude-0/-home-user-botlish/93931cb5-c26e-5605-8404-e8915a92fddf/scratchpad/audit/native-audit/src/main.rs
+cfi=/tmp/claude-0/-home-user-botlish/93931cb5-c26e-5605-8404-e8915a92fddf/scratchpad/audit/native-audit/src/main.rs
+cfn=botlish_native::cli
+calls=1 0x184390 
+0x19414f 30949080 4585100 4585080 1 0 0 0 0 0 1146260 103320 20 1
+fe=/rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/sys/backtrace.rs
+
+ob=/usr/lib/x86_64-linux-gnu/libc.so.6
+fl=./nptl/./nptl/pthread_create.c
+fn=start_thread
+cob=/tmp/claude-0/-home-user-botlish/93931cb5-c26e-5605-8404-e8915a92fddf/scratchpad/audit/target/release/botlish-native
+cfi=/rustc/2d8144b7880597b6e6d3dfd63a9a9efae3f533d3/library/std/src/sys/thread/unix.rs
+cfn=<std::sys::thread::unix::Thread>::new::thread_start
+calls=1 0x7165b0 
+0x9ca9e 30949080 4585100 4585080 1 0 0 0 0 0 1146260 103320 20 1
+
+fl=./misc/../sysdeps/unix/sysv/linux/x86_64/clone.S
+fn=clone
+cfi=./nptl/./nptl/pthread_create.c
+cfn=start_thread
+calls=1 0x9c720 
+0x129a62 30949080 4585100 4585080 1 0 0 0 0 0 1146260 103320 20 1
+
+totals: 30949080 4585100 4585080 1 0 0 0 0 0 1146260 103320 20 1
