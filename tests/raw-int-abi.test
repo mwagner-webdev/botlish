@@ -245,15 +245,13 @@ test raw-helper-both {a closed non-recursive helper: raw parameter, raw result (
 test raw-param-tagged-result {the parameter fits, the result may exceed the small domain: raw parameter, tagged result} -body {
     set text {
         fn big(n):
-            if n < 0:
-                0
-            else:
-                n * 3000000000000000000
+            m = n + 1
+            m * 3000000000000000000
 
         big(5) + big(7)
     }
     list [abiPlan $text {*}$noInline] [abiReasons $text big<int> {*}$noInline] [parityAbi $text]
-} -result {big<int>=raw>val {{{}} unbounded-or-not-small} value:36000000000000000000}
+} -result {big<int>=raw>val {{{}} unbounded-or-not-small} value:42000000000000000000}
 
 test raw-result-tagged-param {an unproven (unbounded) entry with a constant successful result: tagged parameter, raw result} -body {
     set text {
@@ -269,7 +267,7 @@ test raw-result-tagged-param {an unproven (unbounded) entry with a constant succ
         seven(count(500, 0)) + 1
     }
     list [abiPlan $text {*}$noInline] [abiReasons $text seven<int> {*}$noInline] [parityAbi $text]
-} -result {{{count<int, int>=raw,val>val} seven<int>=val>raw} {unknown-range {}} value:8}
+} -result {{{count<int, int>=val,val>val} seven<int>=val>raw} {unknown-range {}} value:8}
 
 test raw-mixed-parameters {fn f(a, b, s): a small, b unbounded, s a String: raw, tagged, tagged} -body {
     set text {
@@ -283,13 +281,13 @@ test raw-mixed-parameters {fn f(a, b, s): a small, b unbounded, s a String: raw,
             if a > 100:
                 0
             else:
-                length(s) + a + b
+                length(s) + b
 
         f(3, count(500, 0), "abc")
     }
     list [lsearch -inline [abiPlan $text {*}$noInline] f<*] [abiReasons $text {f<int, int, str>} {*}$noInline] \
         [parityAbi $text]
-} -result {{f<int, int, str>=raw,val,val>val} {{{} unknown-range not-int} unknown-range} value:125256}
+} -result {{f<int, int, str>=raw,val,val>val} {{{} unknown-range not-int} unknown-range} value:125253}
 
 test raw-mixed-physical-signature-in-nir {only position 0 is in rawparams; a hidden or tagged position is not} -body {
     set text {
@@ -297,7 +295,7 @@ test raw-mixed-physical-signature-in-nir {only position 0 is in rawparams; a hid
             if a > 100:
                 0
             else:
-                length(s) + a
+                length(s)
 
         f(3, "abc") + f(4, "de")
     }
@@ -332,7 +330,7 @@ test raw-outside-small-result {a result Range reaching 2^62 is finite and fits a
             if n < 0:
                 0
             else:
-                n + 1
+                4611686018427387904
 
         succ(4611686018427387903)
     }
@@ -353,7 +351,7 @@ test raw-finite-large-fib {fib(100): the successful result is finite but exceeds
     set text {
         fn fib(n):
             if n < 2:
-                n
+                1
             else:
                 fib(n - 1) + fib(n - 2)
 
@@ -432,13 +430,13 @@ test raw-mixed-recursion {a recursive function with a raw parameter and a tagged
             if n == 0:
                 acc
             else:
-                sum(n - 1, acc + n)
+                sum(n - 1, acc + 1)
 
         sum(1000, 0)
     }
     set nir [nirOf $text {*}$noInline]
     list [abiPlan $text {*}$noInline] [physical [fnText $nir sum]] [parityAbi $text]
-} -result {{{sum<int, int>=raw,val>val}} {0 0} value:500500}
+} -result {{{sum<int, int>=raw,val>val}} {0 0} value:1000}
 
 test raw-non-tail-recursion-with-allocation {raw n and raw result stay valid across a recursive call that also allocates} -body {
     set text {
@@ -484,11 +482,11 @@ test raw-recursive-mixed-bound {the plan is per instance: a parameter whose recu
     list [abiPlan $text {*}$noInline] [abiReasons $text {g<int, int>} {*}$noInline] [parityAbi $text]
 } -result {{{g<int, int>=raw,val>raw}} {{{} unknown-range} {}} value:5}
 
-test raw-result-follows-the-ordinary-result-query {result eligibility is the ordinary successful-result Range, with no recursion special case: withdraw the derived recursive summary (option, or a state budget too small) and the same instance's result is tagged again, its parameter unaffected} -body {
+test raw-result-follows-the-ordinary-result-query {result eligibility is the ordinary successful-result Range, with no recursion special case: withdraw the derived recursive summary (option, or a state budget too small) and the same instance's result is tagged again (and so is its parameter, which fib also returns: a mixed use is boxed)} -body {
     list [abiPlan $fibSource] \
         [abiPlan $fibSource -recursive-result-range-opt 0] \
         [abiPlan $fibSource -recursive-range-limit 5]
-} -result {fib<int>=raw>raw fib<int>=raw>val fib<int>=raw>val}
+} -result {fib<int>=raw>raw fib<int>=val>val fib<int>=val>val}
 
 test raw-branch-join-of-a-tagged-only-int-stays-tagged {one branch's value is an Int with no proven bound: the join and the function result are tagged, no raw assumption is made} -body {
     set text {
@@ -567,10 +565,10 @@ set frontierSource {
     mid(2) + mid(3)
 }
 
-test raw-mixed-frontier-converts-exactly-at-the-boundary {raw bump -> tagged-only seven -> raw bump: one rbox before the tagged position, nothing around the raw ones} -body {
+test raw-mixed-frontier-converts-exactly-at-the-boundary {raw parameters, a tagged-only bump result (it feeds a tagged parameter) and a raw seven result: conversions only at the frontier, one runbox for mid's raw result and no rbox} -body {
     set mid [fnText [nirOf $frontierSource {*}$noInline] mid]
     list [abiPlan $frontierSource {*}$noInline] [countIn {op rbox} $mid] [countIn {op runbox} $mid] [parityAbi $frontierSource]
-} -result {{{count<int, int>=raw,val>val} bump<int>=raw>raw seven<int>=val>raw mid<int>=raw>raw} 1 0 value:16}
+} -result {{{count<int, int>=val,val>val} bump<int>=raw>val seven<int>=val>raw mid<int>=raw>raw} 0 1 value:16}
 
 test raw-alias-stays-raw {a local alias of a raw parameter is passed on raw: no box/unbox because of the alias} -body {
     set text {
@@ -670,7 +668,7 @@ test demand-eligibility-only-mode-is-the-preliminary-plan {-raw-demand-opt 0 sel
         [conversionsIn $nir wrap]
 } -result {wrap<int>=raw>val {0 0} {1 0}}
 
-test demand-tagged-only-result {a bounded closed result whose every caller hands it to a tagged consumer is eligible but returned tagged (the body boxes it once; no result conversion at the caller)} -body {
+test demand-tagged-only-result {a bounded closed result whose every caller hands it to a tagged consumer is eligible but returned tagged, with no result conversion at the caller; its parameter, also returned, is boxed (a mixed use)} -body {
     set text {
         fn pick(n):
             if n < 3:
@@ -683,7 +681,7 @@ test demand-tagged-only-result {a bounded closed result whose every caller hands
     set nir [nirOf $text {*}$noInline]
     list [abiDemandPlan $text {*}$noInline] [abiReasons $text pick<int> {*}$noInline] \
         [physical [fnText $nir pick]] [conversionsIn $nir pick] [conversionsIn $nir <program>] [parityAbi $text]
-} -result {pick<int>=raw>supp {{{}} suppressed-no-raw-demand} {0 0} {1 0} {0 0} {value:[1, 2]}}
+} -result {pick<int>=supp>supp {suppressed-mixed-tagged-use suppressed-no-raw-demand} {{} 0} {0 1} {0 0} {value:[1, 2]}}
 
 test demand-raw-parameter {a parameter used by raw arithmetic is selected raw whatever its result does} -body {
     set text {
@@ -710,7 +708,7 @@ test demand-raw-result {a bounded closed result consumed by raw arithmetic at a 
     list [abiDemandPlan $text {*}$noInline] [physical [fnText $nir six]] [parityAbi $text]
 } -result {six<str>=val>raw {{} 1} value:1}
 
-test demand-mixed-use-keeps-raw {raw arithmetic and a tagged storage use of the same parameter: a genuine raw demand exists, so RawInt is retained (mixed uses are not weighed)} -body {
+test demand-mixed-use-is-boxed {raw arithmetic and a tagged storage use of the same parameter: a mixed use, so the position is boxed by default (reason suppressed-mixed-tagged-use); -raw-mixed-policy raw is the audit-only earlier behaviour} -body {
     set text {
         fn both(n):
             x = n + 1
@@ -719,8 +717,10 @@ test demand-mixed-use-keeps-raw {raw arithmetic and a tagged storage use of the 
         list_length(both(4))
     }
     set nir [nirOf $text {*}$noInline]
-    list [abiDemandPlan $text {*}$noInline] [conversionsIn $nir both] [parityAbi $text]
-} -result {both<int>=raw>val {2 0} value:2}
+    set raw [nirOf $text {*}$noInline -raw-mixed-policy raw]
+    list [abiDemandPlan $text {*}$noInline] [abiReasons $text both<int> {*}$noInline] [conversionsIn $nir both] \
+        [abiDemandPlan $text {*}$noInline -raw-mixed-policy raw] [conversionsIn $raw both] [parityAbi $text]
+} -result {both<int>=supp>val {suppressed-mixed-tagged-use not-int} {1 1} both<int>=raw>val {2 0} value:2}
 
 test demand-propagates-through-aliases {the only raw consumer is behind an alias chain} -body {
     set text {
@@ -734,7 +734,7 @@ test demand-propagates-through-aliases {the only raw consumer is behind an alias
     list [abiDemandPlan $text {*}$noInline] [parityAbi $text]
 } -result {f<int>=raw>supp value:1}
 
-test demand-any-branch-keeps-raw-all-tagged-branches-suppress {one branch with a raw consumer retains RawInt; when every reachable branch is tagged-only the parameter is tagged} -body {
+test demand-branches-raw-only-raw-mixed-boxed-tagged-only-tagged {every reachable branch raw: RawInt; one raw and one tagged branch: boxed (mixed); every branch tagged: tagged} -body {
     set text {
         fn some(n, c):
             if c:
@@ -748,11 +748,18 @@ test demand-any-branch-keeps-raw-all-tagged-branches-suppress {one branch with a
             else:
                 list_length([n, n])
 
-        [some(5, true), some(5, false), none(5, true), none(5, false)]
+        fn only(n, c):
+            if c:
+                n + 1
+            else:
+                n * 2
+
+        [some(5, true), some(5, false), none(5, true), none(5, false), only(5, true), only(5, false)]
     }
-    list [lsearch -inline -all [abiDemandPlan $text {*}$noInline] some<*] \
-        [lsearch -inline -all [abiDemandPlan $text {*}$noInline] none<*] [parityAbi $text]
-} -result {{{some<int, bool>=raw,val>supp}} {{none<int, bool>=supp,val>supp}} {value:[1, 6, 1, 2]}}
+    set plan [abiDemandPlan $text {*}$noInline]
+    list [lsearch -inline -all $plan only<*] [lsearch -inline -all $plan some<*] \
+        [lsearch -inline -all $plan none<*] [parityAbi $text]
+} -result {{{only<int, bool>=raw,val>supp}} {{some<int, bool>=supp,val>supp}} {{none<int, bool>=supp,val>supp}} {value:[1, 6, 1, 2, 6, 10]}}
 
 test demand-dead-branch-raw-use-does-not-count {a raw use in a branch HIR/Range proved dead keeps nothing alive} -body {
     set text {
@@ -836,7 +843,7 @@ test demand-forwarding-cycle-cannot-bootstrap-raw {a recursive position that onl
     list [abiDemandPlan $text {*}$noInline] [parityAbi $text]
 } -result {{{f<int, int>=supp,val>supp}} {value:[1]}}
 
-test demand-loops-and-handlers-agree {raw consumers inside a counted loop and behind an error handler: every backend and every plan (tagged, eligibility only, demand-filtered) agree, and the loop's counted comparison keeps its parameter raw} -body {
+test demand-loops-and-handlers-agree {a counted loop's bound is a tagged consumer, so a parameter that is also compared raw is boxed (mixed); every backend and every plan (tagged, eligibility only, demand-filtered) agree, also behind an error handler} -body {
     set loop {
         fn find(n):
             loop i from 0 to n:
@@ -864,7 +871,48 @@ test demand-loops-and-handlers-agree {raw consumers inside a counted loop and be
         [safe(3), safe(0 - 1)]
     }
     list [abiDemandPlan $loop {*}$noInline] [parityAbi $loop] [parityAbi $handled]
-} -result {find<int>=raw>supp {value:[4, 11]} {value:[5, 1]}}
+} -result {find<int>=supp>supp {value:[4, 11]} {value:[5, 1]}}
+
+test demand-mixed-use-propagates-through-transport {a callee that boxes its parameter (raw and tagged use) makes the caller's forwarded parameter boxed too: the tagged consumer is in the closure} -body {
+    set text {
+        fn h(z):
+            x = z + 1
+            [z, x]
+
+        fn g(y):
+            h(y)
+
+        list_length(g(3))
+    }
+    list [abiDemandPlan $text {*}$noInline] [abiDemandPlan $text {*}$noInline -raw-mixed-policy raw] [parityAbi $text]
+} -result {{g<int>=supp>val h<int>=supp>val} {g<int>=raw>val h<int>=raw>val} value:2}
+
+test demand-discarded-raw-result-is-a-tagged-use {a call whose raw result is discarded is still boxed at the call, so a result also used raw elsewhere is a mixed use} -body {
+    set text {
+        fn f(n):
+            n + 1
+
+        fn g(x):
+            f(x)
+            f(x) * 2
+
+        g(3) + g(4)
+    }
+    list [abiDemandPlan $text {*}$noInline] [parityAbi $text]
+} -result {{f<int>=raw>supp g<int>=raw>raw} value:18}
+
+test demand-program-frontier-is-not-a-mixed-use {a tagged use in the program function (it runs once: the frontier conversion every raw region has) does not box a result that functions use raw} -body {
+    set text {
+        fn f(n):
+            n * 2
+
+        fn g(x):
+            f(x) + 1
+
+        [f(4), g(5)]
+    }
+    list [abiDemandPlan $text {*}$noInline] [parityAbi $text]
+} -result {{f<int>=raw>raw g<int>=raw>supp} {value:[8, 11]}}
 
 test demand-program-frontier {one raw region reaching a program-visible tagged result: raw internally, a single box at the final frontier} -body {
     set text {
@@ -911,7 +959,7 @@ test demand-suppressed-signature-is-consistent {a suppressed position is tagged 
     }
     set nir [nirOf $text {*}$noInline]
     list [abiDemandPlan $text {*}$noInline] [physical [fnText $nir wrap]] [parityAbi $text]
-} -result {{twice<int>=raw>val wrap<int>=supp>val} {{} 0} value:4}
+} -result {{twice<int>=supp>val wrap<int>=supp>val} {{} 0} value:4}
 
 test demand-is-deterministic {repeated lowering gives byte-identical NIR and machine code} -body {
     set text {
@@ -1031,7 +1079,7 @@ test raw-gc-raw-live-across-allocation {a raw parameter, a String and a List liv
     set text {
         fn work(n, s, xs):
             t = concat(s, "x")
-            u = list_append(xs, n)
+            u = list_append(xs, 7)
             v = concat(t, t)
             flag = if length(v) > list_length(u):
                 1

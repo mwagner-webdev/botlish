@@ -6,7 +6,11 @@
 #   A  -raw-int-abi-opt 0                    the tagged baseline (pre-RawInt)
 #   B  -raw-int-abi-opt 1 -raw-demand-opt 0  RawInt eligibility only
 #                                            (eligible => raw: the preliminary)
-#   C  -raw-int-abi-opt 1 -raw-demand-opt 1  RawInt + demand suppression
+#   C  ... -raw-mixed-policy raw             RawInt + demand suppression, a
+#                                            position with any raw consumer
+#                                            stays raw (the earlier policy)
+#   D  -raw-int-abi-opt 1 (defaults)         RawInt + demand suppression, mixed
+#                                            raw/tagged uses boxed (production)
 #
 # and, per program: the suppression census (eligible / selected / suppressed
 # positions, parameters and results separately), NIR conversion counts
@@ -31,7 +35,8 @@ foreach a $argv {
 set configs {
     A {-raw-int-abi-opt 0}
     B {-raw-int-abi-opt 1 -raw-demand-opt 0}
-    C {-raw-int-abi-opt 1 -raw-demand-opt 1}
+    C {-raw-int-abi-opt 1 -raw-demand-opt 1 -raw-mixed-policy raw}
+    D {-raw-int-abi-opt 1 -raw-demand-opt 1 -raw-mixed-policy boxed}
 }
 
 set totals [dict create]
@@ -64,12 +69,15 @@ foreach path $paths {
         puts "$path: SKIP ($err)"
         continue
     }
-    # Census from C's plan (carries eligibility) and B's plan (all eligible raw).
-    set lowC [dict get $res C lowered]
+    # Census from D's plan (carries eligibility), B's (all eligible raw) and
+    # C's (mixed uses kept raw).
+    set lowC [dict get $res D lowered]
     set spec [dict get $lowC specialization]
     set planC [dict get $lowC abiPlan]
     set planB [dict get [dict get $res B lowered] abiPlan]
-    set eligP 0; set selP 0; set eligR 0; set selR 0; set anyB 0; set anyC 0; set bothC 0
+    set planM [dict get [dict get $res C lowered] abiPlan]
+    set eligP 0; set selP 0; set eligR 0; set selR 0; set anyB 0; set anyD 0; set anyC 0; set bothD 0
+    set mixP 0; set mixR 0; set noP 0; set noR 0; set selMP 0; set selMR 0
     set suppressed {}
     set selected {}
     foreach id [dict get $spec used] {
@@ -82,58 +90,69 @@ foreach path $paths {
                 dict get [hir::binding $prepared $b] name
             }]
         }
-        set nEl 0; set nSel 0
-        foreach eligible [dict get $p paramEligible] kind [dict get $p params] name $names trace [dict get $p paramTrace] {
+        set nSel 0
+        foreach eligible [dict get $p paramEligible] kind [dict get $p params] reason [dict get $p paramReasons] \
+                name $names trace [dict get $p paramTrace] {
             if {!$eligible} continue
-            incr eligP; incr nEl
+            incr eligP
             if {$kind eq "rawint"} {
                 incr selP; incr nSel
-                lappend selected [list $label $name raw $trace]
+                lappend selected [list $label $name $trace]
             } else {
-                lappend suppressed [list $label $name raw $trace]
+                if {$reason eq "suppressed-mixed-tagged-use"} { incr mixP } else { incr noP }
+                lappend suppressed [list $label $name $reason $trace]
             }
         }
         if {[dict get $p resultEligible]} {
-            incr eligR; incr nEl
+            incr eligR
             if {[dict get $p result] eq "rawint"} {
                 incr selR; incr nSel
-                lappend selected [list $label result raw [dict get $p resultTrace]]
+                lappend selected [list $label result [dict get $p resultTrace]]
             } else {
-                lappend suppressed [list $label result raw [dict get $p resultTrace]]
+                set reason [dict get $p resultReason]
+                if {$reason eq "suppressed-mixed-tagged-use"} { incr mixR } else { incr noR }
+                lappend suppressed [list $label result $reason [dict get $p resultTrace]]
             }
         }
-        set hasB [expr {[llength [lsearch -all -exact [dict get $planB $id params] rawint]] > 0 || [dict get $planB $id result] eq "rawint"}]
-        set hasC [expr {$nSel > 0}]
-        if {$hasB} { incr anyB }
-        if {$hasC} { incr anyC }
-        set resSel [expr {[dict get $p result] eq "rawint"}]
-        set parSel [expr {[llength [lsearch -all -exact [dict get $p params] rawint]] > 0}]
-        if {$resSel && $parSel} { incr bothC }
+        proc anyRaw {q} { return [expr {"rawint" in [dict get $q params] || [dict get $q result] eq "rawint"}] }
+        if {[anyRaw [dict get $planB $id]]} { incr anyB }
+        if {[anyRaw [dict get $planM $id]]} { incr anyC }
+        if {$nSel > 0} { incr anyD }
+        if {[dict get $p result] eq "rawint" && "rawint" in [dict get $p params]} { incr bothD }
+        set q [dict get $planM $id]
+        incr selMP [llength [lsearch -all -exact [dict get $q params] rawint]]
+        incr selMR [expr {[dict get $q result] eq "rawint"}]
     }
     set examined [expr {[llength [dict get $spec used]] - 1}]
     puts "$path:"
-    puts "  instances examined $examined; instances with any raw position B $anyB, C $anyC (both param+result in C: $bothC)"
-    puts "  positions eligible/selected/suppressed: parameters $eligP/$selP/[expr {$eligP - $selP}]; results $eligR/$selR/[expr {$eligR - $selR}]"
-    foreach name {A B C} {
+    puts "  instances examined $examined; instances with any raw position: B $anyB, C $anyC, D $anyD (both param+result in D: $bothD)"
+    puts "  positions eligible/selected: parameters $eligP/$selP (C: $selMP); results $eligR/$selR (C: $selMR)"
+    puts "  suppressed (D): parameters no-raw-demand $noP, mixed-tagged-use $mixP; results no-raw-demand $noR, mixed-tagged-use $mixR"
+    foreach name {A B C D} {
         set r [dict get $res $name]
         lassign [dict get $r conv] rb rub brb brub
         puts "  $name: rbox $rb runbox $rub; machine bytes [dict get $r bytes]; rbox classes [lsort -stride 2 [dict get $r cls]]"
     }
     if {$detail} {
         foreach s $selected {
-            lassign $s label name - trace
-            puts "    selected   $label.$name: [lindex $trace 0] demand [join [lindex $trace 1] { -> }]"
+            lassign $s label name trace
+            puts "    selected   $label.$name: raw demand [join [lindex $trace 1] { -> }]"
         }
         foreach s $suppressed {
-            lassign $s label name - trace
-            set items [lindex $trace 1]
-            puts "    suppressed $label.$name: no raw consumer; tagged: [expr {$items eq "" ? "(none)" : [join $items {, }]}]"
+            lassign $s label name reason trace
+            if {$reason eq "suppressed-mixed-tagged-use"} {
+                puts "    mixed      $label.$name: raw demand [join [lindex $trace 1] { -> }]; but tagged: [join [lindex $trace 2] {, }]"
+            } else {
+                set items [lindex $trace 1]
+                puts "    suppressed $label.$name: no raw consumer; tagged: [expr {$items eq "" ? "(none)" : [join $items {, }]}]"
+            }
         }
     }
-    foreach {k v} [list examined $examined eligP $eligP selP $selP eligR $eligR selR $selR anyB $anyB anyC $anyC bothC $bothC] {
+    foreach {k v} [list examined $examined eligP $eligP selP $selP selMP $selMP eligR $eligR selR $selR selMR $selMR \
+            anyB $anyB anyC $anyC anyD $anyD bothD $bothD noP $noP mixP $mixP noR $noR mixR $mixR] {
         total $k $v
     }
-    foreach name {A B C} {
+    foreach name {A B C D} {
         set r [dict get $res $name]
         lassign [dict get $r conv] rb rub brb brub
         total rbox$name $rb

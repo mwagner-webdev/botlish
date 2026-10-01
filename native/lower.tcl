@@ -186,6 +186,9 @@ namespace eval native::lower {
     # Raw-demand suppression of the plan (RAW-INT-ABI.md): 0 selects every
     # eligible position (audit-only comparison mode).
     variable rawDemandOpt 1
+    # What a position with both a raw and a tagged consumer becomes: `boxed`
+    # (default) or `raw` (audit-only: the earlier any-demand-retains policy).
+    variable rawMixedPolicy boxed
     # The widest shift amount a raw (host machine i64) shift may use (see
     # RawEligibleShift): the host word width, not core/scalarbits.tcl's own
     # much larger MAX_SHIFT -- a proven-constant shift count under this bound
@@ -1125,6 +1128,7 @@ proc native::lower::program {hirProgram args} {
     variable abiPlan
     variable rawIntAbiOpt
     variable rawDemandOpt
+    variable rawMixedPolicy
     variable escape
     variable escapeOpt
     variable paramAggregateOpt
@@ -1168,6 +1172,8 @@ proc native::lower::program {hirProgram args} {
         && $::env(BOTLISH_NATIVE_RAW_INT_ABI_OPT) eq "0" ? 0 : 1}]
     set rawDemandDefault [expr {[info exists ::env(BOTLISH_NATIVE_RAW_DEMAND_OPT)]
         && $::env(BOTLISH_NATIVE_RAW_DEMAND_OPT) eq "0" ? 0 : 1}]
+    set rawMixedDefault [expr {[info exists ::env(BOTLISH_NATIVE_RAW_MIXED_POLICY)]
+        && $::env(BOTLISH_NATIVE_RAW_MIXED_POLICY) eq "raw" ? "raw" : "boxed"}]
     set callFactsDefault [expr {[info exists ::env(BOTLISH_NATIVE_CALL_FACTS_OPT)]
         && $::env(BOTLISH_NATIVE_CALL_FACTS_OPT) eq "0" ? 0 : 1}]
     set closedCallerFactsDefault [expr {[info exists ::env(BOTLISH_NATIVE_CLOSED_CALLER_FACTS_OPT)]
@@ -1219,7 +1225,7 @@ proc native::lower::program {hirProgram args} {
             -exact-callable-opt $exactCallableDefault -exact-callable-limit $exactLimitDefault \
             -tiny-leaf-inline-opt $tinyLeafInlineDefault \
             -recursive-result-range-opt $recursiveRangeDefault -recursive-range-limit $recursiveLimitDefault \
-            -raw-int-abi-opt $rawIntAbiDefault -raw-demand-opt $rawDemandDefault \
+            -raw-int-abi-opt $rawIntAbiDefault -raw-demand-opt $rawDemandDefault -raw-mixed-policy $rawMixedDefault \
             -virtual-construction-opt $constructionDefault] $args]
     if {[hir::mode $hirProgram] ne "program"} {
         throw {NATIVE UNSUPPORTED sequence-mode} \
@@ -1284,7 +1290,8 @@ proc native::lower::program {hirProgram args} {
     # physical signature of its callee.
     set rawIntAbiOpt [expr {[dict get $options -raw-int-abi-opt] && $reprOpt}]
     set rawDemandOpt [dict get $options -raw-demand-opt]
-    set abiPlan [native::rawabi::plan $hirProgram $spec $ranges $rawIntAbiOpt $blockEscapeOpt $rawDemandOpt]
+    set rawMixedPolicy [dict get $options -raw-mixed-policy]
+    set abiPlan [native::rawabi::plan $hirProgram $spec $ranges $rawIntAbiOpt $blockEscapeOpt $rawDemandOpt $rawMixedPolicy]
     set escape [expr {$escapeOpt ? [hir::escape::analyze $hirProgram $spec $paramAggregateOpt $structWidths]
         : [dict create arity {} wants {} virtual {} paramVirtual {}]}]
     set stringregion [expr {$stringRegionOpt ? [hir::stringregion::analyze $hirProgram $spec]

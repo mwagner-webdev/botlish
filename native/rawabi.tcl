@@ -46,7 +46,10 @@
 # position can reach a genuine raw consumer (a raw arithmetic or comparison
 # operand, a raw self-tail loop slot) through aliases, branches, returns and
 # exact call edges. A position whose whole closure ends in tagged consumers
-# stays tagged (reason `suppressed-no-raw-demand`). The pass is a boolean
+# stays tagged (reason `suppressed-no-raw-demand`). A position whose closure
+# has a raw consumer *and* a tagged one (a mixed use) is boxed by default
+# (reason `suppressed-mixed-tagged-use`): raw only when every consumer in its
+# closure is raw. The pass is a boolean
 # backward reachability over a small demand graph (see Demand below); it never
 # adds an eligibility fact and never turns a tagged position raw.
 #
@@ -81,14 +84,17 @@ namespace eval native::rawabi {
 # paramTrace {T...} resultTrace T}, with KIND `value` | `rawint` and R "" for
 # a raw position, else a concise tag: not-int, open-instance,
 # unbounded-or-not-small, unknown-range, dynamic-entry, disabled,
-# suppressed-no-raw-demand. paramEligible/resultEligible record the *safety*
+# suppressed-no-raw-demand, suppressed-mixed-tagged-use. paramEligible/resultEligible record the *safety*
 # eligibility (before the demand filter); T is the audit trace of an eligible
 # position (see Demand).
 #
 # DEMAND 0 skips the usefulness filter (audit-only: `-raw-demand-opt 0`),
 # leaving every eligible position raw -- the preliminary eligible => raw
-# policy, kept for three-way comparisons.
-proc native::rawabi::plan {hir spec ranges enabled {blockEscape 1} {demand 1}} {
+# policy, kept for comparisons. MIXED says what a position with both a raw
+# consumer and a tagged one becomes: `boxed` (the default, and the policy) keeps
+# it tagged (reason suppressed-mixed-tagged-use); `raw` (audit-only,
+# `-raw-mixed-policy raw`) keeps the earlier "any raw demand retains RawInt".
+proc native::rawabi::plan {hir spec ranges enabled {blockEscape 1} {demand 1} {mixed boxed}} {
     set closed [dict get $spec closed]
     set statics [dict get [dict get $spec context] statics]
     set plan [dict create]
@@ -123,7 +129,7 @@ proc native::rawabi::plan {hir spec ranges enabled {blockEscape 1} {demand 1}} {
             resultEligible [expr {$resultKind eq "rawint"}] paramTrace {} resultTrace {}]
     }
     if {$enabled && $demand} {
-        return [Demand $hir $spec $ranges $plan]
+        return [Demand $hir $spec $ranges $plan $mixed]
     }
     return $plan
 }
@@ -227,6 +233,10 @@ proc native::rawabi::ShowTrace {eligible trace {indent "      "}} {
     if {$verdict eq "raw"} {
         return "${indent}raw demand: [join $items { -> }]\n"
     }
+    if {$verdict eq "mixed"} {
+        lassign [lrange $trace 1 2] steps tagged
+        return "${indent}raw demand: [join $steps { -> }]\n${indent}but tagged consumers too: [join $tagged {, }] (mixed use: boxed)\n"
+    }
     set what [expr {$items eq "" ? "none" : [join $items {, }]}]
     return "${indent}raw demand: none (tagged consumers: $what)\n"
 }
@@ -311,6 +321,11 @@ namespace eval native::rawabi {
     # tagged consumers (audit only; they create no demand).
     variable Fwd
     variable Tagged
+    # Unclean(FROM) = 1: FROM has a tagged consumer of its own *outside the
+    # program function* (a mixed use if it is also raw-demanded). The
+    # program function runs once, so a tagged value there is the single
+    # frontier conversion every raw region has, not a competing use.
+    variable Unclean
     # The walk in progress: h (the instance's view), id, loops (loop ExprId
     # -> sink of its break values), result (the sink of `return`).
     variable W
@@ -340,9 +355,14 @@ proc native::rawabi::Fits {r} {
 proc native::rawabi::Flow {from sink why} {
     variable Fwd
     variable Tagged
+    variable Unclean
+    variable W
     if {$sink eq ""} {
         if {$why eq "discarded"} {
             return
+        }
+        if {!$W(program)} {
+            set Unclean($from) 1
         }
         if {[info exists Tagged($from)] && [llength $Tagged($from)] >= 6} {
             return
@@ -356,13 +376,14 @@ proc native::rawabi::Flow {from sink why} {
 # Plan: the Demand pass. Returns PLAN with every eligible position that
 # cannot reach a raw consumer set back to `value` (reason
 # suppressed-no-raw-demand), plus the audit traces.
-proc native::rawabi::Demand {hir spec ranges plan} {
+proc native::rawabi::Demand {hir spec ranges plan mixed} {
     variable Hir
     variable Spec
     variable Ranges
     variable Plan
     variable Fwd
     variable Tagged
+    variable Unclean
     set any 0
     dict for {id p} $plan {
         if {1 in [dict get $p paramEligible] || [dict get $p resultEligible]} {
@@ -380,8 +401,10 @@ proc native::rawabi::Demand {hir spec ranges plan} {
     variable Labels
     array unset Fwd
     array unset Tagged
+    array unset Unclean
     array unset Labels
     array set Fwd {}
+    array set Unclean {}
     array set Tagged {}
     array set Labels {}
     foreach id [dict get $spec used] {
@@ -410,6 +433,43 @@ proc native::rawabi::Demand {hir spec ranges plan} {
             lappend queue $from
         }
     }
+    # Mixed uses. A node is *unclean* when a tagged consumer sits in its
+    # closure: it has a tagged use of its own (Unclean, recorded outside the
+    # program function), or it flows into an unclean node, or into an eligible
+    # position that ends up tagged (not demanded). Only demanded *and* clean
+    # positions are selected under the boxed-mixed policy.
+    set unclean [dict create]
+    set queue {}
+    foreach node [lsort [array names Unclean]] {
+        dict set unclean $node 1
+        lappend queue $node
+    }
+    foreach id [dict get $spec used] {
+        set p [dict get $plan $id]
+        set k 0
+        foreach eligible [dict get $p paramEligible] {
+            if {$eligible && ![dict exists $demanded P:$id:$k] && ![dict exists $unclean P:$id:$k]} {
+                dict set unclean P:$id:$k 1
+                lappend queue P:$id:$k
+            }
+            incr k
+        }
+        if {[dict get $p resultEligible] && ![dict exists $demanded R:$id] && ![dict exists $unclean R:$id]} {
+            dict set unclean R:$id 1
+            lappend queue R:$id
+        }
+    }
+    for {set i 0} {$i < [llength $queue]} {incr i} {
+        set node [lindex $queue $i]
+        if {![dict exists $rev $node]} continue
+        foreach pair [dict get $rev $node] {
+            set from [lindex $pair 0]
+            if {[dict exists $unclean $from]} continue
+            dict set unclean $from 1
+            lappend queue $from
+        }
+    }
+    set boxedMixed [expr {$mixed eq "boxed"}]
     set out $plan
     foreach id [dict get $spec used] {
         set p [dict get $plan $id]
@@ -420,10 +480,13 @@ proc native::rawabi::Demand {hir spec ranges plan} {
         foreach eligible [dict get $p paramEligible] {
             if {$eligible} {
                 set node P:$id:$k
-                lset traces $k [Trace $node $demanded $next]
+                lset traces $k [Trace $node $demanded $next $unclean]
                 if {![dict exists $demanded $node]} {
                     lset kinds $k value
                     lset reasons $k suppressed-no-raw-demand
+                } elseif {$boxedMixed && [dict exists $unclean $node]} {
+                    lset kinds $k value
+                    lset reasons $k suppressed-mixed-tagged-use
                 }
             }
             incr k
@@ -432,10 +495,13 @@ proc native::rawabi::Demand {hir spec ranges plan} {
         set resultReason [dict get $p resultReason]
         set resultTrace ""
         if {[dict get $p resultEligible]} {
-            set resultTrace [Trace R:$id $demanded $next]
+            set resultTrace [Trace R:$id $demanded $next $unclean]
             if {![dict exists $demanded R:$id]} {
                 set result value
                 set resultReason suppressed-no-raw-demand
+            } elseif {$boxedMixed && [dict exists $unclean R:$id]} {
+                set result value
+                set resultReason suppressed-mixed-tagged-use
             }
         }
         dict set out $id params $kinds
@@ -452,7 +518,7 @@ proc native::rawabi::Demand {hir spec ranges plan} {
 # chain of transport steps down to the raw consumer ("raw: ..."), for a
 # suppressed one the tagged consumers its whole closure ends in ("tagged:
 # ...", "no raw consumer").
-proc native::rawabi::Trace {node demanded next} {
+proc native::rawabi::Trace {node demanded next unclean} {
     variable Fwd
     variable Tagged
     if {[dict exists $demanded $node]} {
@@ -463,8 +529,18 @@ proc native::rawabi::Trace {node demanded next} {
             lappend steps $why
             set cur $to
         }
-        return [list raw $steps]
+        if {![dict exists $unclean $node]} {
+            return [list raw $steps]
+        }
+        return [list mixed $steps [TaggedClosure $node]]
     }
+    return [list tagged [TaggedClosure $node]]
+}
+
+# The tagged consumers in the forward closure of NODE (at most 8 labels).
+proc native::rawabi::TaggedClosure {node} {
+    variable Fwd
+    variable Tagged
     # Forward closure of the position: every tagged consumer reached.
     set seen [dict create $node 1]
     set queue [list $node]
@@ -487,7 +563,7 @@ proc native::rawabi::Trace {node demanded next} {
             }
         }
     }
-    return [list tagged $labels]
+    return $labels
 }
 
 # 1 if instance ID's walk can contribute an edge into an eligible position:
@@ -525,6 +601,7 @@ proc native::rawabi::WalkInstance {id} {
     set W(calls) [dict get $instance calls]
     set W(selfTail) [dict get $Spec context selfTails]
     set p [dict get $Plan $id]
+    set W(program) [expr {$block eq "program"}]
     if {$block eq "program"} {
         set W(result) ""
         Seq [hir::roots $h] "" program
@@ -731,6 +808,11 @@ proc native::rawabi::Call {e node sink why} {
     }
     if {!$self && [dict get $q resultEligible]} {
         Flow R:$instance $sink "result of $label ($why)"
+        if {$sink eq "" && $why eq "discarded" && !$W(program)} {
+            # A discarded raw result is still boxed at the call.
+            variable Unclean
+            set Unclean(R:$instance) 1
+        }
     }
 }
 
