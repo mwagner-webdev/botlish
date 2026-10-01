@@ -1,0 +1,179 @@
+# exact-callable-executable.test -- EXACT-CALLABLE-CLOSED-CALLER.md, standalone
+# executable parity: exact-callable-keyed code (direct calls through callable
+# parameters) compiled to an ELF agrees with every in-process backend and
+# survives GC stress when run relocated with an empty PATH, for an exact
+# Botlish block, an exact native, a value-capturing exact block and the
+# refined-checks scan (the benchmark the milestone repairs).
+#
+# A callable that is passed as an argument is a Block value, so its generic
+# instance is used too, and AOT readiness (native::executable) requires every
+# used instance to be guard-free: the passed callables here declare their
+# parameter types, exactly as for any higher-order program before this
+# milestone (the same programs with untyped passed callables are NOT-READY on
+# the previous tree too).
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 1000000
+
+testConstraint executableAot [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64}}]
+
+# As tests/native-executable.test's aotParity: every in-process backend, then
+# the compiled executable (moved, input deleted, empty PATH), then the same
+# executable under GC stress. Returns the one agreed value.
+proc aotParity {text {strip 1} {backends {interp compile cranelift-generic cranelift}}} {
+    if {$strip} {
+        regsub -all -line {^        } $text {} text
+    }
+    set dir [makeDirectory {exact callable executable test}]
+    set path [file join $dir {program with spaces.bot}]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts $channel $text
+    close $channel
+    try {
+        set hir [surface::readProgramFile $path]
+        set expected {}
+        foreach backend $backends {
+            set outcome [outcomeUnderHir $backend $hir]
+            if {[lindex $outcome 0] ne "value"} { error "$backend: $outcome" }
+            lappend expected [lindex $outcome 1]
+        }
+        exec [info nameofexecutable] [file join $::projectRoot main.tcl] -emit-native-executable $path
+        set relocated [file join $dir relocated]
+        file rename [file rootname $path] $relocated
+        file delete $path
+        lappend expected [exec env PATH= $relocated]
+        lappend expected [exec env PATH= BOTLISH_NATIVE_GC_STRESS=1 $relocated]
+        if {[llength [lsort -unique $expected]] != 1} { error "values disagree: $expected" }
+        return [lindex $expected 0]
+    } finally {
+        removeDirectory {exact callable executable test}
+    }
+}
+
+test exact-callable-executable-botlish {an exact Botlish block called through a helper's parameter} -constraints executableAot -body {
+    aotParity {
+        fn inc(x: int):
+            x + 1
+
+        fn apply_loop(f, i, n):
+            loop j from i to n:
+                if f(j) > 41:
+                    return j + 1
+            n
+
+        apply_loop(inc, 0, 100)
+    }
+} -result 42
+
+test exact-callable-executable-native {an exact native called through a helper's parameter over a StringRegion} -constraints executableAot -body {
+    aotParity {
+        fn count_while(p, s):
+            loop i from 0 to length(s):
+                if p(substring(s, i, i + 1)):
+                    continue
+                return i
+            length(s)
+
+        [count_while(is_tcl_alpha, "abc1"), count_while(is_tcl_alnum, "ab1_")]
+    }
+} -result {[3, 3]}
+
+test exact-callable-executable-mixed {one helper, an exact Botlish block and an exact native: two exact instances} -constraints executableAot -body {
+    aotParity {
+        fn bot_alpha(c: str):
+            is_tcl_alpha(c) or c == "_"
+
+        fn count_while(p, s):
+            loop i from 0 to length(s):
+                if p(substring(s, i, i + 1)):
+                    continue
+                return i
+            length(s)
+
+        [count_while(bot_alpha, "ab_c1"), count_while(is_tcl_alpha, "abc1")]
+    }
+} -result {[4, 3]}
+
+test exact-callable-executable-capturing {an exact value-capturing closure (String, List, Int captures) passed to a helper: callenv with a live environment under GC stress} -constraints executableAot -body {
+    aotParity {
+        fn run(tag: str, words: List[str], n: int):
+            fn heavy(x: str):
+                length(concat(tag, x)) > length(list_get(words, 0)) + n
+            fn first(p, xs: List[str]):
+                loop x in xs:
+                    if p(concat(x, tag)):
+                        return x
+                ""
+            first(heavy, ["a", "bbbb", "ccccccc"])
+
+        run("xy", ["pqr", "st"], 3)
+    }
+} -result {"bbbb"}
+
+test exact-callable-executable-refined-checks-scan {refined-checks' scan_while shape (a de-closured closure with two exact predicates, one a capturing Botlish block, one a native) as an executable} -constraints executableAot -body {
+    aotParity {
+        local_extra_chars = immutable_set_from_list([".", "_", "%", "+", "-"])
+
+        fn my_emailish?(v: str):
+            n = length(v)
+            fn char_at(i):
+                substring(v, i, i + 1)
+            fn local_char?(c: str):
+                is_tcl_alnum(c) or immutable_set_contains(local_extra_chars, c)
+            fn label_char?(c):
+                is_tcl_alnum(c) or c == "-"
+            fn scan_while(start: int, predicate):
+                loop i from start to n:
+                    if predicate(char_at(i)):
+                        continue
+                    return i
+                n
+            fn tld?(i):
+                e = scan_while(i, is_tcl_alpha)
+                if e == n:
+                    e - i >= 2
+                else:
+                    false
+            fn domain?(start):
+                loop j from start to n:
+                    if char_at(j) == ".":
+                        if j == start:
+                            return false
+                        if char_at(j - 1) == ".":
+                            return false
+                        if tld?(j + 1):
+                            return true
+                    else:
+                        if not label_char?(char_at(j)):
+                            return false
+                false
+            local_end = scan_while(0, local_char?)
+            if local_end == 0:
+                false
+            else:
+                if local_end >= n:
+                    false
+                else:
+                    if char_at(local_end) == "@":
+                        domain?(local_end + 1)
+                    else:
+                        false
+
+        [my_emailish?("café@例え.テスト"), my_emailish?("not-an-email"), my_emailish?("a.b@c.io")]
+    }
+} -result {[true, false, true]}
+
+test exact-callable-executable-bench-refined-checks {the real bench/refined-checks.bot (lib/web.bot's emailish?, whose scan_while has the two exact predicates) as an executable: same value, GC stress included} -constraints executableAot -body {
+    set channel [open [file join $::projectRoot bench refined-checks.bot] r]
+    fconfigure $channel -encoding utf-8
+    set text [read $channel]
+    close $channel
+    # cranelift-generic (-specialize 0) cannot compile the validator
+    # predicate UriQueryValue? this program calls (pre-existing).
+    aotParity $text 0 {interp compile cranelift}
+} -result {[400, 0]}
+
+cleanupTests

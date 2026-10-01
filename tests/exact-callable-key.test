@@ -1,0 +1,1105 @@
+# exact-callable-key.test -- EXACT-CALLABLE-CLOSED-CALLER.md: exact callable
+# identity survives codegen projection (hir::specialize::KeyType), so a call
+# through a callable parameter is a direct call whenever the target is
+# statically known, for exact Botlish blocks and exact natives alike;
+# genuinely dynamic callables keep the generic callvalue path; the target
+# count is budgeted; closedness has one authoritative answer that hir::range
+# consumes.
+#
+# Structure of this file (the numbers are the milestone's own spec items):
+#   * one-site probes, Botlish and native (#17, #52, #53)
+#   * several targets, mixed Botlish/native, budget and fallback (#18, #50,
+#     #51, #54, #85)
+#   * dynamic controls: if-chosen, List-held, escaping (#19, #20, #55, #56)
+#   * alias, function-returned, recursion (#40, #41, #57, #59)
+#   * identity: modules, structurally identical targets, natives (#87-#89)
+#   * value-capturing closures, blockescape with several instances (#12-14,
+#     #42, #43, #62)
+#   * completion/error parity, differential backends, GC stress (#23, #93, #94)
+#   * the one closedness proof and hir::range's use of it (#4-6, #32-35, #76)
+#   * fixpoint safety, determinism, the differential flag (#14, #39, #86)
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 100000
+
+# Scratch-library helpers (as in tests/surface-modules.test).
+proc withScratchLibrary {script} {
+    set saved $::core::libraryDir
+    set dir [tcltest::makeDirectory exact-callable-scratch-[pid]-[incr ::scratchLibraryCounter]]
+    set ::core::libraryDir $dir
+    try {
+        uplevel 1 [list apply [list {dir} $script] $dir]
+    } finally {
+        set ::core::libraryDir $saved
+        tcltest::removeDirectory [file tail $dir]
+    }
+}
+set ::scratchLibraryCounter 0
+
+proc writeModule {dir name content} {
+    set path [file join $dir $name.bot]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8
+    puts -nonewline $channel $content
+    close $channel
+    return $path
+}
+
+proc writeMain {dir content} {
+    return [writeModule $dir main $content]
+}
+
+proc sourceHir {text} {
+    return [surface::compile $text t.bot -strict 0]
+}
+
+# The NIR text of source TEXT. Tiny-leaf inlining is off by default so that
+# a direct call stays visible as a call (it is its own milestone's effect).
+proc nirOf {text args} {
+    return [dict get [native::lower::program [sourceHir $text] -tiny-leaf-inline-opt 0 {*}$args] text]
+}
+
+# The `instance=` strings of every NIR function named NAME, in NIR order.
+proc instancesNamed {nir name} {
+    set result {}
+    foreach line [split $nir \n] {
+        if {[regexp [format {^func \d+ "%s" .*instance="([^"]*)"} [string map {? \\? . \\.} $name]] $line -> inst]} {
+            lappend result $inst
+        }
+    }
+    return $result
+}
+
+proc callvalues {nir} {
+    return [regexp -all {callvalue} $nir]
+}
+
+# {interp compile cranelift-generic cranelift} agree? "same" or the outcomes.
+proc parity {text} {
+    set hir [sourceHir $text]
+    set outcomes [lmap backend {interp compile cranelift-generic cranelift} {
+        outcomeUnderHir $backend $hir
+    }]
+    if {[llength [lsort -unique $outcomes]] == 1} {
+        return [lindex $outcomes 0]
+    }
+    return "MISMATCH: $outcomes"
+}
+
+# The value of TEXT under native with and without exact callable keys.
+proc exactOnOff {text} {
+    set hir [sourceHir $text]
+    set on [native::evalHir $hir -exact-callable-opt 1]
+    set off [native::evalHir $hir -exact-callable-opt 0]
+    if {$on ne $off} {
+        error "exact-callable-opt 1 vs 0: $on vs $off"
+    }
+    return $on
+}
+
+proc analysisOf {text args} {
+    set hir [native::prepareHir [sourceHir $text]]
+    return [list $hir [hir::specialize::analyze $hir {*}$args]]
+}
+
+# The label of every used instance named NAME.
+proc labelsOf {analysis name} {
+    lmap id [dict get $analysis used] {
+        if {[dict get $analysis instances $id name] ne $name} continue
+        hir::specialize::label $analysis $id
+    }
+}
+
+proc instanceNamed {analysis name} {
+    foreach id [dict get $analysis used] {
+        if {[dict get $analysis instances $id name] eq $name} {
+            return $id
+        }
+    }
+    error "no used instance named $name"
+}
+
+# ---------------------------------------------------------------------------
+# Sources
+
+set ::incHof {
+fn inc(x):
+    x + 1
+
+fn apply_loop(f, i, n):
+    loop j from i to n:
+        if f(j) > 41:
+            return j + 1
+    n
+
+apply_loop(inc, 0, 100)
+}
+
+set ::nativeHof {
+fn count_while(p, s):
+    loop i from 0 to length(s):
+        if p(substring(s, i, i + 1)):
+            continue
+        return i
+    length(s)
+
+count_while(is_tcl_alpha, "abc1")
+}
+
+set ::mixedHof {
+fn bot_alpha(c):
+    is_tcl_alpha(c) or c == "_"
+
+fn count_while(p, s):
+    loop i from 0 to length(s):
+        if p(substring(s, i, i + 1)):
+            continue
+        return i
+    length(s)
+
+[count_while(bot_alpha, "ab_c1"), count_while(is_tcl_alpha, "abc1")]
+}
+
+set ::dynamicHof {
+fn a_alpha(c):
+    is_tcl_alpha(c)
+
+fn b_alnum(c):
+    is_tcl_alnum(c)
+
+fn count_while(p, s):
+    loop i from 0 to length(s):
+        if p(substring(s, i, i + 1)):
+            continue
+        return i
+    length(s)
+
+fn pick(flag):
+    if flag:
+        a_alpha
+    else:
+        b_alnum
+
+[count_while(pick(true), "ab1"), count_while(pick(false), "12a_")]
+}
+
+# ---------------------------------------------------------------------------
+# One-site probes
+
+test exact-callable-botlish-single-key {one site, one exact Botlish block: apply_loop's codegen key names the block, not the kind `block`} -body {
+    lassign [analysisOf $::incHof] hir analysis
+    list [regexp {^apply_loop<block\(e\d+\), int, int>$} [lindex [labelsOf $analysis apply_loop] 0]] \
+        [llength [labelsOf $analysis apply_loop]]
+} -result {1 1}
+
+test exact-callable-botlish-single-direct {the call through f is a direct call of inc's int instance: no callvalue anywhere} -body {
+    set nir [nirOf $::incHof]
+    # inc's value is still passed as the argument, so its generic instance
+    # (the Block value's entry) stays alongside the exact-call int instance.
+    list [callvalues $nir] [instancesNamed $nir inc] [regexp {instance="block\(e\d+\), int, int"} $nir]
+} -result {0 {int generic} 1}
+
+test exact-callable-botlish-single-value {and still computes the same answer on every backend} -body {
+    parity $::incHof
+} -result {value 42 {}}
+
+test exact-callable-native-single-key {one site, one exact native: the key names the native by its registry name} -body {
+    lassign [analysisOf $::nativeHof] hir analysis
+    labelsOf $analysis count_while
+} -result {{count_while<native(is_tcl_alpha), str>}}
+
+test exact-callable-native-single-direct {the call through p lowers through the native operation directly (a StringRegion consumer of the substring: no String is built), no callvalue} -body {
+    set nir [nirOf $::nativeHof]
+    list [callvalues $nir] [regexp {strregiontclalpha} $nir] [regexp {op substr} $nir]
+} -result {0 1 0}
+
+test exact-callable-native-single-value {native HOF agrees on every backend} -body {
+    parity $::nativeHof
+} -result {value 3 {}}
+
+# ---------------------------------------------------------------------------
+# Symmetry: the same helper called with an exact Botlish block and an exact
+# native gets one exact-keyed instance per target, neither a callvalue
+
+test exact-callable-mixed-two-instances {one helper, a Botlish block and a native: two target-specific instances} -body {
+    lassign [analysisOf $::mixedHof] hir analysis
+    lmap l [labelsOf $analysis count_while] {regsub {e\d+} $l eN}
+} -result {{count_while<block(eN), str>} {count_while<native(is_tcl_alpha), str>}}
+
+test exact-callable-mixed-no-callvalue {neither instance of the mixed helper contains a callvalue} -body {
+    callvalues [nirOf $::mixedHof]
+} -result 0
+
+test exact-callable-mixed-parity {and the answers agree on every backend and without exact keys} -body {
+    list [parity $::mixedHof] [exactOnOff $::mixedHof]
+} -result {{value {[4, 3]} {}} {list {{int 4} {int 3}}}}
+
+test exact-callable-two-botlish-two-natives {two Botlish targets and two natives: four instances, no callvalue} -body {
+    set text {
+fn lt5(x):
+    x < 5
+
+fn lt9(x):
+    x < 9
+
+fn run(f, n):
+    loop j from 0 to n:
+        if f(j) == false:
+            return j
+    n
+
+fn alpha_run(p, s):
+    loop j from 0 to length(s):
+        if p(substring(s, j, j + 1)):
+            continue
+        return j
+    length(s)
+
+[run(lt5, 100), run(lt9, 100), alpha_run(is_tcl_alpha, "ab1"), alpha_run(is_tcl_alnum, "ab1_")]
+}
+    set nir [nirOf $text]
+    list [llength [instancesNamed $nir run]] [llength [instancesNamed $nir alpha_run]] [callvalues $nir] [parity $text]
+} -result {2 2 0 {value {[5, 9, 2, 3]} {}}}
+
+# ---------------------------------------------------------------------------
+# Dynamic controls: the generic callable ABI is still used, and still right
+
+test exact-callable-dynamic-if-chosen {a predicate chosen by if (two different targets) is not exact: the helper keeps the any key and its callvalue} -body {
+    lassign [analysisOf $::dynamicHof] hir analysis
+    set nir [nirOf $::dynamicHof]
+    list [labelsOf $analysis count_while] [callvalues $nir] [parity $::dynamicHof]
+} -result {{{count_while<any, str>}} 1 {value {[2, 3]} {}}}
+
+test exact-callable-dynamic-list-held {a callable read from a List at a non-constant index is dynamic: callvalue stays} -body {
+    set text {
+fn a_alpha(c):
+    is_tcl_alpha(c)
+
+fn b_alnum(c):
+    is_tcl_alnum(c)
+
+fn count_while(p, s):
+    loop i from 0 to length(s):
+        if p(substring(s, i, i + 1)):
+            continue
+        return i
+    length(s)
+
+fn nth(preds, k):
+    list_get(preds, k)
+
+preds = [a_alpha, b_alnum]
+[count_while(nth(preds, 0), "ab1"), count_while(nth(preds, 1), "12a_")]
+}
+    list [expr {[callvalues [nirOf $text]] >= 1}] [parity $text]
+} -result {1 {value {[2, 3]} {}}}
+
+test exact-callable-escaping-exact-stays-sound {an exact callable that also escapes (stored in a List, called through a read) is still called directly where its identity is known, and the escaped copy still works} -body {
+    set text {
+fn is_small(x):
+    x < 10
+
+fn apply_loop(f, i, n):
+    loop j from i to n:
+        if f(j) == false:
+            return j
+    n
+
+fs = [is_small]
+[apply_loop(is_small, 0, 100), list_get(fs, 0)(3)]
+}
+    list [parity $text] [exactOnOff $text]
+} -result {{value {[10, true]} {}} {list {{int 10} {bool true}}}}
+
+test exact-callable-escaping-not-closed {identity known is not all invocations closed: an exact callable that is also stored keeps its generic instance open, so no caller-derived fact is invented for it} -body {
+    lassign [analysisOf {
+fn is_small(x):
+    x < 10
+
+fn apply_loop(f, i, n):
+    loop j from i to n:
+        if f(j) == false:
+            return j
+    n
+
+fs = [is_small]
+[apply_loop(is_small, 0, 100), list_get(fs, 0)(3)]
+}] hir analysis
+    set generic {}
+    foreach id [dict get $analysis used] {
+        if {[dict get $analysis instances $id name] eq "is_small" && [dict get $analysis instances $id generic]} {
+            lappend generic [hir::specialize::closed $hir $analysis $id]
+        }
+    }
+    set generic
+} -result 0
+
+# ---------------------------------------------------------------------------
+# Alias, returned callable, recursion
+
+test exact-callable-alias {p = f; q = p; apply(q, ...) keeps the identity: no syntactic adjacency required} -body {
+    set text {
+fn is_small(x):
+    x < 10
+
+fn apply_loop(f, i, n):
+    loop j from i to n:
+        if f(j) == false:
+            return j
+    n
+
+p = is_small
+q = p
+apply_loop(q, 0, 100)
+}
+    set nir [nirOf $text]
+    list [callvalues $nir] [regexp {instance="block\(e\d+\), int, int"} $nir] [parity $text]
+} -result {0 1 {value 10 {}}}
+
+test exact-callable-function-returned {a function that returns an exact callable preserves its identity under the existing exact-value analysis (the boundary is documented in the report: no new callable-return analysis was added)} -body {
+    set text {
+fn is_small(x):
+    x < 10
+
+fn make():
+    is_small
+
+fn apply_loop(f, i, n):
+    loop j from i to n:
+        if f(j) == false:
+            return j
+    n
+
+apply_loop(make(), 0, 100)
+}
+    set nir [nirOf $text]
+    list [callvalues $nir] [parity $text]
+} -result {0 {value 10 {}}}
+
+test exact-callable-recursive-hof {a recursive helper carrying its exact predicate through every level: one instance, no specialization chain, no callvalue} -body {
+    set text {
+fn is_small(x):
+    x < 10
+
+fn count_up(p, i, n):
+    if i >= n:
+        return i
+    if p(i):
+        return count_up(p, i + 1, n)
+    i
+
+count_up(is_small, 0, 100)
+}
+    set nir [nirOf $text]
+    list [llength [instancesNamed $nir count_up]] [callvalues $nir] [parity $text]
+} -result {1 0 {value 10 {}}}
+
+test exact-callable-non-tail-recursive-hof {non-tail recursion through the exact predicate: still one instance per target, and the same value} -body {
+    set text {
+fn is_small(x):
+    x < 10
+
+fn is_big(x):
+    x > 10
+
+fn depth(p, i, n):
+    if i >= n:
+        return 0
+    if p(i):
+        return 1 + depth(p, i + 1, n)
+    0
+
+[depth(is_small, 0, 100), depth(is_big, 0, 100), depth(is_small, 20, 100)]
+}
+    set nir [nirOf $text]
+    list [llength [instancesNamed $nir depth]] [callvalues $nir] [parity $text]
+} -result {2 0 {value {[10, 0, 0]} {}}}
+
+test exact-callable-recursion-new-closure-each-level {a recursion that wraps its predicate in a new closure each level has finitely many code targets: the key space is the set of blocks, so specialization terminates} -body {
+    set text {
+fn is_small(x):
+    x < 10
+
+fn walk(p, i, n):
+    if i >= n:
+        return i
+    fn next(x):
+        p(x)
+    if p(i):
+        return walk(next, i + 1, n)
+    i
+
+walk(is_small, 0, 50)
+}
+    set nir [nirOf $text]
+    list [expr {[llength [instancesNamed $nir walk]] <= 4}] [parity $text]
+} -result {1 {value 10 {}}}
+
+# ---------------------------------------------------------------------------
+# Identity: never a printed name, never a signature
+
+test exact-callable-same-name-different-blocks {two functions of the same name and the same structural type in different scopes are two exact targets} -body {
+    set text {
+fn apply_loop(f, i, n):
+    loop j from i to n:
+        if f(j) == false:
+            return j
+    n
+
+fn left():
+    fn pred(x):
+        x < 5
+    apply_loop(pred, 0, 100)
+
+fn right():
+    fn pred(x):
+        x < 7
+    apply_loop(pred, 0, 100)
+
+[left(), right()]
+}
+    lassign [analysisOf $text] hir analysis
+    set labels [labelsOf $analysis apply_loop]
+    list [llength [lsort -unique $labels]] [parity $text]
+} -result {2 {value {[5, 7]} {}}}
+
+test exact-callable-same-name-different-modules {the same local name in two modules is two targets (binding identity, not source name)} -body {
+    withScratchLibrary {
+        writeModule $dir ma "namespace ma\n\nfn pred(x):\n    x < 5\n"
+        writeModule $dir mb "namespace mb\n\nfn pred(x):\n    x < 7\n"
+        set main [writeMain $dir "fn apply_loop(f, i, n):\n    loop j from i to n:\n        if f(j) == false:\n            return j\n    n\n\n\[apply_loop(ma::pred, 0, 100), apply_loop(mb::pred, 0, 100)\]\n"]
+        set hir [surface::readProgramFile $main]
+        set nir [native::nir $hir -tiny-leaf-inline-opt 0]
+        list [lsort -unique [instancesNamed $nir apply_loop]] [callvalues $nir] [native::evalHir $hir]
+    }
+} -match glob -result {{{block(e*), int, int} {block(e*), int, int}} 0 {list {{int 5} {int 7}}}}
+
+test exact-callable-natives-same-signature {two natives with the identical structural type (str -> bool) are different exact targets} -body {
+    set text {
+fn alpha_run(p, s):
+    loop j from 0 to length(s):
+        if p(substring(s, j, j + 1)):
+            continue
+        return j
+    length(s)
+
+[alpha_run(is_tcl_alpha, "ab1"), alpha_run(is_tcl_alnum, "ab1_")]
+}
+    lassign [analysisOf $text] hir analysis
+    list [labelsOf $analysis alpha_run] [parity $text]
+} -result {{{alpha_run<native(is_tcl_alpha), str>} {alpha_run<native(is_tcl_alnum), str>}} {value {[2, 3]} {}}}
+
+test exact-callable-blocks-same-signature {two Botlish blocks with identical structural types stay distinct for the analyses that consume exactness} -body {
+    set text {
+fn lt5(x):
+    x < 5
+
+fn lt7(x):
+    x < 7
+
+fn run(f, n):
+    loop j from 0 to n:
+        if f(j) == false:
+            return j
+    n
+
+[run(lt5, 100), run(lt7, 100)]
+}
+    lassign [analysisOf $text] hir analysis
+    set l [labelsOf $analysis run]
+    list [llength [lsort -unique $l]] [parity $text]
+} -result {2 {value {[5, 7]} {}}}
+
+# ---------------------------------------------------------------------------
+# Budget and fallback
+
+proc budgetProgram {n} {
+    set src ""
+    for {set k 1} {$k <= $n} {incr k} {
+        append src "fn p${k}(x):\n    x < [expr {$k * 3}]\n\n"
+    }
+    append src "fn apply_loop(f, i, n):\n    loop j from i to n:\n        if f(j) == false:\n            return j\n    n\n\n"
+    set calls {}
+    for {set k 1} {$k <= $n} {incr k} {
+        lappend calls "apply_loop(p${k}, 0, 100)"
+    }
+    append src "\[[join $calls {, }]\]\n"
+    return $src
+}
+
+proc withExactLimit {limit script} {
+    set saved $::hir::specialize::exactLimit
+    set ::hir::specialize::exactLimit $limit
+    try {
+        uplevel 1 $script
+    } finally {
+        set ::hir::specialize::exactLimit $saved
+    }
+}
+
+test exact-callable-budget-under {targets under the budget are all exact: no callvalue} -body {
+    withExactLimit 4 {
+        set nir [nirOf [budgetProgram 3]]
+        list [llength [instancesNamed $nir apply_loop]] [callvalues $nir]
+    }
+} -result {3 0}
+
+test exact-callable-budget-exceeded {beyond the budget the extra targets share the kind-only callable key: exactly LIMIT exact instances plus one shared instance that uses the callable-value ABI} -body {
+    withExactLimit 2 {
+        set text [budgetProgram 6]
+        set nir [nirOf $text]
+        set insts [instancesNamed $nir apply_loop]
+        list [llength [lsearch -all -glob $insts {block(e*)*}]] \
+            [llength [lsearch -all -exact $insts {block, int, int}]] \
+            [expr {[callvalues $nir] >= 1}]
+    }
+} -result {2 1 1}
+
+test exact-callable-budget-fallback-correct {the fallback instance still computes the right answer on every backend, and the answer equals the unbudgeted one} -body {
+    withExactLimit 2 {
+        set text [budgetProgram 6]
+        list [parity $text] [exactOnOff $text]
+    }
+} -result {{value {[3, 6, 9, 12, 15, 18]} {}} {list {{int 3} {int 6} {int 9} {int 12} {int 15} {int 18}}}}
+
+test exact-callable-budget-deterministic {which targets meet the budget is a pure function of the program: two lowerings are identical} -body {
+    withExactLimit 3 {
+        set text [budgetProgram 8]
+        expr {[nirOf $text] eq [nirOf $text]}
+    }
+} -result 1
+
+test exact-callable-budget-stress {N exact call sites into one helper: the instance count is bounded by the budget at every N} -body {
+    withExactLimit 4 {
+        set counts {}
+        foreach n {1 2 4 8 16} {
+            lappend counts [llength [instancesNamed [nirOf [budgetProgram $n]] apply_loop]]
+        }
+        set counts
+    }
+} -result {1 2 4 5 5}
+
+test exact-callable-limit-option {-exact-callable-limit N is the per-function budget as an ordinary option (and BOTLISH_NATIVE_EXACT_CALLABLE_LIMIT): with 1 the first target stays exact and the second shares the kind-only key and callvalue; with 0 it is the kind-only baseline; the default (4) keeps both exact} -body {
+    set one [nirOf $::mixedHof -exact-callable-limit 1]
+    set zero [nirOf $::mixedHof -exact-callable-limit 0]
+    list [instancesNamed $one count_while] [expr {[callvalues $one] >= 1}] \
+        [instancesNamed $zero count_while] [expr {[callvalues $zero] >= 1}] \
+        $::hir::specialize::exactLimit [callvalues [nirOf $::mixedHof]]
+} -result {{{block(e2), str} {native, str}} 1 {{block, str} {native, str}} 1 4 0}
+
+test exact-callable-opt-off-restores-kind-keys {-exact-callable-opt 0 restores the kind-only keys: one shared instance and a callvalue, same value} -body {
+    set nir [nirOf $::mixedHof -exact-callable-opt 0]
+    list [instancesNamed $nir count_while] [expr {[callvalues $nir] >= 1}] [exactOnOff $::mixedHof]
+} -result {{{block, str} {native, str}} 1 {list {{int 4} {int 3}}}}
+
+# ---------------------------------------------------------------------------
+# Value-capturing closures: exact callable targets despite captured values
+
+set ::capturingHof {
+fn run(s, items, n):
+    fn longer(x):
+        length(x) > length(s) + n
+    fn first_match(p, xs):
+        loop x in xs:
+            if p(x):
+                return x
+        ""
+    first_match(longer, items)
+
+run("ab", ["a", "abc", "abcdef", "abcdefgh"], 2)
+}
+
+test exact-callable-capturing-closure-exact-key {a value-capturing closure target (it captures a String and an Int) is still an exact key: the target identity, never the captured values} -body {
+    lassign [analysisOf $::capturingHof] hir analysis
+    lmap l [labelsOf $analysis first_match] {regsub {e\d+} $l eN}
+} -result {{first_match<block(eN), List[str]>}}
+
+test exact-callable-capturing-closure-direct {the call through p is a direct callenv of the closure value (its environment is an ordinary argument): no callvalue} -body {
+    set nir [nirOf $::capturingHof]
+    list [callvalues $nir] [regexp {callenv} $nir] [parity $::capturingHof]
+} -result {0 1 {value {"abcdef"} {}}}
+
+test exact-callable-capturing-closure-aggregate-capture-keys {the closure rule is relaxed only for the exact callable position: a closure with aggregate captures keeps its other parameters generic (refined by the closed-caller theorem) and its callable parameter exact} -body {
+    lassign [analysisOf {
+fn run(v, k):
+    fn char_at(i):
+        substring(v, i, i + 1)
+    fn scan(start, predicate):
+        loop i from start to length(v):
+            if predicate(char_at(i)):
+                continue
+            return i
+        length(v)
+    scan(k, is_tcl_alpha)
+
+run("abc1", 0)
+}] hir analysis
+    set id [instanceNamed $analysis scan]
+    list [hir::specialize::label $analysis $id] [hir::specialize::closedCallerTheorem $hir $analysis $id] \
+        [hir::specialize::closed $hir $analysis $id]
+} -result {{scan<any, native(is_tcl_alpha)>} {int {native is_tcl_alpha}} 1}
+
+test exact-callable-capturing-closure-no-closure-allocated {blockescape de-closes a closure literal that has SEVERAL exact instances: both are internal variants, no closure is allocated} -body {
+    set text {
+fn run(s):
+    fn char_at(i):
+        substring(s, i, i + 1)
+    fn bot_alpha(c):
+        is_tcl_alpha(c)
+    fn scan(start, predicate):
+        loop i from start to length(s):
+            if predicate(char_at(i)):
+                continue
+            return i
+        length(s)
+    [scan(0, bot_alpha), scan(0, is_tcl_alnum), scan(1, is_tcl_alpha)]
+
+run("ab1_")
+}
+    set nir [nirOf $text]
+    list [regexp -all {= closure } $nir] [callvalues $nir] [llength [instancesNamed $nir scan]] [parity $text]
+} -result {0 0 3 {value {[2, 3, 2]} {}}}
+
+# ---------------------------------------------------------------------------
+# Adversarial shapes: recursion inside a de-closured closure with several
+# exact instances, forwarding through layers, many closures of one code
+# target, typed callables with error sets, a captured callable (the boundary)
+
+test exact-callable-closure-recursion-several-instances {a de-closured closure that recurses (tail and non-tail) and is called with two exact predicates: one internal instance per target, no closure, no callvalue, right values} -body {
+    set text {
+fn run(v):
+    fn walk(i, p):
+        if i >= length(v):
+            return i
+        if p(substring(v, i, i + 1)):
+            return walk(i + 1, p)
+        i
+    fn depth(i, p):
+        if i >= length(v):
+            return 0
+        if p(substring(v, i, i + 1)):
+            return 1 + depth(i + 1, p)
+        0
+    fn a():
+        walk(0, is_tcl_alpha)
+    fn b():
+        walk(0, is_tcl_alnum)
+    [a(), b(), depth(0, is_tcl_alpha), depth(0, is_tcl_alnum), walk(1, is_tcl_alnum)]
+
+run("ab1_")
+}
+    set nir [nirOf $text]
+    list [llength [instancesNamed $nir walk]] [llength [instancesNamed $nir depth]] \
+        [regexp -all {= closure } $nir] [callvalues $nir] [parity $text]
+} -result {2 2 0 0 {value {[2, 3, 2, 3, 3]} {}}}
+
+test exact-callable-forwarded-through-layers {an exact callable forwarded through two helper layers and composed in all four combinations keeps its identity at every layer: no callvalue} -body {
+    set text {
+fn twice(f, x):
+    f(f(x))
+
+fn apply_twice(g, y):
+    twice(g, y)
+
+fn inc(n):
+    n + 1
+
+fn dbl(n):
+    n * 2
+
+fn compose(f, g, x):
+    f(g(x))
+
+[apply_twice(inc, 5), apply_twice(dbl, 5), compose(inc, dbl, 5), compose(dbl, inc, 5), compose(inc, inc, 5), compose(dbl, dbl, 5)]
+}
+    set nir [nirOf $text]
+    list [llength [instancesNamed $nir apply_twice]] [llength [instancesNamed $nir compose]] \
+        [callvalues $nir] [parity $text]
+} -result {2 4 0 {value {[7, 20, 11, 12, 7, 20]} {}}}
+
+test exact-callable-many-closures-one-target {many closures of one code target (each capturing a different value) share one exact instance: the environment is an ordinary argument} -body {
+    set text {
+fn first_match(p, xs):
+    loop x in xs:
+        if p(x):
+            return x
+    0
+
+fn go(i, k, total):
+    if i > k:
+        return total
+    fn big(x):
+        x > i
+    go(i + 1, k, total + first_match(big, [1, 2, 3, 4, 5, 6]))
+
+go(1, 5, 0)
+}
+    set nir [nirOf $text]
+    list [llength [instancesNamed $nir first_match]] [callvalues $nir] [parity $text]
+} -result {1 0 {value 20 {}}}
+
+test exact-callable-typed-callable-with-errors {exact typed callables (declared parameter and result types) through a helper with a declared error: the direct call propagates the helper's NotFound to the handler exactly as before} -body {
+    set text {
+error NotFound
+
+fn find_first(p, xs: List[int]) -> int errors NotFound:
+    loop x in xs:
+        if p(x):
+            return x
+    fail NotFound
+
+fn small?(n: int) -> bool:
+    n < 4
+
+fn big?(n: int) -> bool:
+    n > 100
+
+r1 = find_first(small?, [7, 3, 4, 6]):
+    on NotFound:
+        -2
+r2 = find_first(big?, [1, 3, 4]):
+    on NotFound:
+        -1
+[r1, r2]
+}
+    list [callvalues [nirOf $text]] [parity $text] [exactOnOff $text]
+} -result {0 {value {[3, -1]} {}} {list {{int 3} {int -1}}}}
+
+test exact-callable-captured-callable-boundary {the boundary, documented: a callable CAPTURED by a nested closure is keyed by the closure's own (generic) instance, whose capture seed is the join of every creation's callable, so with two different callables the inner call stays a callvalue (identity of captures is not part of any key); the exact parameter call into the helper is still direct} -body {
+    set text {
+fn outer(p, s):
+    fn inner(x):
+        p(x)
+    fn count(i):
+        if i >= length(s):
+            return i
+        if inner(substring(s, i, i + 1)):
+            return count(i + 1)
+        i
+    count(0)
+
+[outer(is_tcl_alpha, "ab1"), outer(is_tcl_alnum, "ab1_")]
+}
+    set nir [nirOf $text]
+    list [llength [instancesNamed $nir outer]] [callvalues $nir] [parity $text]
+} -result {2 1 {value {[2, 3]} {}}}
+
+test exact-callable-dead-self-call-keeps-closure {the boundary, documented (report: limitation 8): an exact instance that proves a self-call DEAD (a type-test predicate with a statically known outcome) has no recorded call there, so blockescape declines the closure and it is allocated, exactly as every multi-instance literal was before this milestone generalized blockescape; the value is right on every backend} -body {
+    set text {
+fn run(v):
+    fn walk(i, p):
+        if i >= length(v):
+            return i
+        if p(substring(v, i, i + 1)):
+            return walk(i + 1, p)
+        i
+    [walk(0, integer?), walk(0, string?)]
+
+run("ab1")
+}
+    set nir [nirOf $text]
+    list [regexp -all {= closure } $nir] [parity $text]
+} -result {1 {value {[0, 3]} {}}}
+
+# ---------------------------------------------------------------------------
+# GC: captured String / List / MutableArray / struct through an exact call
+
+proc gcStress {script} {
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        uplevel 1 $script
+    } finally {
+        unset -nocomplain ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+}
+
+test exact-callable-gc-capture-string-list {an exact closure capturing a String and a List survives GC at every allocation site} -body {
+    set text {
+fn run(tag, words):
+    fn heavy(x):
+        length(concat(tag, x)) > length(list_get(words, 0)) + 3
+    fn first(p, xs):
+        loop x in xs:
+            if p(concat(x, tag)):
+                return x
+        ""
+    first(heavy, ["a", "bbbb", "ccccccc"])
+
+run("xy", ["pqr", "st"])
+}
+    gcStress {
+        list [native::evalHir [sourceHir $text]] [parity $text]
+    }
+} -result {{str bbbb} {value {"bbbb"} {}}}
+
+test exact-callable-gc-capture-mutarray-struct {an exact closure capturing a MutableArray and a struct, called through a helper under GC stress} -body {
+    set text {
+fn run(n):
+    arr = mutable_array_allocate(4)
+    mutable_array_set(arr, 1, 7)
+    rec = {a: 5, b: "zz"}
+    fn probe(x):
+        x + mutable_array_get(arr, 1) + rec.a > n
+    fn find_first(p, lo, hi):
+        loop i from lo to hi:
+            if p(i):
+                return i
+        hi
+    find_first(probe, 0, 100)
+
+run(30)
+}
+    gcStress {
+        list [native::evalHir [sourceHir $text]] [parity $text]
+    }
+} -result {{int 19} {value 19 {}}}
+
+test exact-callable-gc-exact-native-region {an exact native consumer over a StringRegion under GC stress} -body {
+    gcStress {
+        list [native::evalHir [sourceHir $::nativeHof]] [parity $::nativeHof]
+    }
+} -result {{int 3} {value 3 {}}}
+
+# ---------------------------------------------------------------------------
+# Completion semantics: a direct call keeps normal return and errors
+
+test exact-callable-error-propagates-botlish {an exact Botlish target that raises propagates the same error through the helper, with and without exact keys} -body {
+    set text {
+fn boom(x):
+    length(x) > 0
+
+fn apply(f, v):
+    f(v)
+
+apply(boom, 3)
+}
+    set hir [sourceHir $text]
+    list [outcomeUnderHir cranelift $hir] [outcomeUnderHir interp $hir] \
+        [expr {[catch {native::evalHir $hir -exact-callable-opt 0} off]}]
+} -result {{error {CORE SEMANTIC TYPE} {length: expected str, got 3} {}} {error {CORE SEMANTIC TYPE} {length: expected str, got 3} {}} 1}
+
+test exact-callable-error-propagates-native {an exact native target that raises (wrong argument kind) propagates TYPE from the direct native operation} -body {
+    set text {
+fn apply(f, v):
+    f(v)
+
+apply(length, 3)
+}
+    set hir [sourceHir $text]
+    list [lindex [outcomeUnderHir cranelift $hir] 0] [lindex [outcomeUnderHir cranelift $hir] 1] \
+        [lindex [outcomeUnderHir interp $hir] 1]
+} -result {error {CORE SEMANTIC TYPE} {CORE SEMANTIC TYPE}}
+
+test exact-callable-wrong-arity {an exact target called with the wrong number of arguments raises the same ARITY error as before} -body {
+    set text {
+fn one(x):
+    x
+
+fn apply(f):
+    f(1, 2)
+
+apply(one)
+}
+    set hir [sourceHir $text]
+    list [lindex [outcomeUnderHir cranelift $hir] 1] [lindex [outcomeUnderHir interp $hir] 1]
+} -result {{CORE SEMANTIC ARITY} {CORE SEMANTIC ARITY}}
+
+# ---------------------------------------------------------------------------
+# Downstream analyses see the exactness (no benchmark special case)
+
+test exact-callable-stringregion-consumer {the exact native predicate over substring(...) exposes a StringRegion consumer to the existing analysis: char reads stay regions, no one-character String is built} -body {
+    set nir [nirOf $::nativeHof]
+    list [regexp {strregiontclalpha} $nir] [regexp {op substr} $nir]
+} -result {1 0}
+
+test exact-callable-stringregion-off-without-exact {without exact keys the same program builds a String per character (the cost this milestone removes)} -body {
+    set nir [nirOf $::nativeHof -exact-callable-opt 0]
+    list [regexp {strregiontclalpha} $nir] [expr {[regexp {op substr} $nir] >= 1}] [expr {[callvalues $nir] >= 1}]
+} -result {0 1 1}
+
+test exact-callable-stringregion-reanalysis {StringRegion analysis runs on the exact-call graph: the region companion of char_at is used by the exact native instance of a capturing closure} -body {
+    set text {
+fn run(v):
+    fn char_at(i):
+        substring(v, i, i + 1)
+    fn scan(start, predicate):
+        loop i from start to length(v):
+            if predicate(char_at(i)):
+                continue
+            return i
+        length(v)
+    scan(0, is_tcl_alpha)
+
+run("abc1")
+}
+    set nir [nirOf $text]
+    list [regexp {strregiontclalpha} $nir] [regexp {op substr} $nir] [regexp {callmulti} $nir] [callvalues $nir]
+} -result {1 0 1 0}
+
+test exact-callable-error-sets-visible {the instance view of a call through an exact-keyed parameter carries the resolved target (the semantic HIR has none), so every analysis that reads call targets sees an ordinary exact call} -body {
+    lassign [analysisOf $::incHof] hir analysis
+    set id [instanceNamed $analysis apply_loop]
+    set view [hir::specialize::view $hir $analysis $id]
+    set semanticTargets {}
+    set viewTargets {}
+    foreach e [dict get $analysis context exprs [dict get $analysis instances $id block]] {
+        if {[hir::kind $hir $e] ne "call"} continue
+        lappend semanticTargets [lindex [hir::get $hir $e target] 0]
+        lappend viewTargets [lindex [hir::get $view $e target] 0]
+    }
+    list $semanticTargets $viewTargets
+} -result {{native {} native} {native block native}}
+
+# ---------------------------------------------------------------------------
+# One closedness proof, consumed by hir::range
+
+test exact-callable-closed-result-is-stored {analyze stores the authoritative closedness result, and the public query reads it} -body {
+    lassign [analysisOf $::capturingHof] hir analysis
+    set ok 1
+    foreach id [dict get $analysis used] {
+        set stored [dict exists $analysis closed $id]
+        set recomputed [hir::specialize::InstanceClosed $analysis [hir::blockescape::analyze $hir $analysis] $id]
+        if {$stored != $recomputed || [hir::specialize::closed $hir $analysis $id] != $stored} {
+            set ok 0
+        }
+    }
+    set ok
+} -result 1
+
+test exact-callable-closed-stable-across-closecallers {the closedness result is a property of the frozen call graph, not of the entry-fact pass: it is identical with the closed-caller pass off and on (so the working copy CloseCallers derives mid-analysis and the stored result agree)} -body {
+    set same 1
+    foreach path {bench/refined-checks.bot bench/test-selection.bot bench/lex-strategy.bot bench/source-checks.bot bench/sum-refined.bot examples/stdlib/csv_records.bot} {
+        set hir [native::prepareHir [surface::readProgramFile [file join $::projectRoot $path]]]
+        set on [hir::specialize::analyze $hir -closed-caller-facts-opt 1]
+        set off [hir::specialize::analyze $hir -closed-caller-facts-opt 0]
+        if {[dict get $on closed] ne [dict get $off closed]} {
+            set same 0
+        }
+    }
+    set same
+} -result 1
+
+test exact-callable-range-open-is-not-closed {hir::range's openness is exactly "not InstanceClosed" for every used instance of the benchmark corpus programs: no instance is closed and range-open at once} -body {
+    set bad {}
+    foreach path {bench/refined-checks.bot bench/sum-refined.bot bench/fib.bot bench/loop-count.bot bench/test-selection.bot bench/lex-strategy.bot bench/source-checks.bot examples/stdlib/matmul.bot} {
+        set name $path
+        set hir [native::prepareHir [surface::readProgramFile [file join $::projectRoot $path]]]
+        set analysis [hir::specialize::analyze $hir]
+        set open [hir::range::OpenInstances $analysis]
+        foreach id [dict get $analysis used] {
+            if {[dict get $analysis instances $id block] eq "program"} continue
+            if {[dict exists $open $id] == [dict exists $analysis closed $id]} {
+                lappend bad "$name $id"
+            }
+        }
+    }
+    set bad
+} -result {}
+
+test exact-callable-range-generic-closure-not-open {a generic closure instance blockescape proves closed is no longer range-open: its entry Ranges flow from its callers (with exact keys off so the instance stays generic; before this milestone OpenInstances read the coarser materialization test and called it open)} -body {
+    set text {
+fn run(v):
+    fn char_at(i):
+        substring(v, i, i + 1)
+    fn scan(start, predicate):
+        loop i from start to length(v):
+            if predicate(char_at(i)):
+                continue
+            return i
+        length(v)
+    scan(0, is_tcl_alpha)
+
+run("abc1")
+}
+    lassign [analysisOf $text -exact-callable-opt 0] hir analysis
+    set id [instanceNamed $analysis scan]
+    set ranges [hir::range::analyze $hir $analysis]
+    list [dict get $analysis instances $id generic] [hir::specialize::closed $hir $analysis $id] \
+        [dict exists [hir::range::OpenInstances $analysis] $id] \
+        [hir::range::show [lindex [dict get $ranges instances $id params] 0]]
+} -result {1 1 0 {[0, 0] {0}}}
+
+test exact-callable-range-scanner-entry {with exact keys the scanner's start parameter gets its caller-derived entry Range} -body {
+    lassign [analysisOf {
+fn run(v):
+    fn char_at(i):
+        substring(v, i, i + 1)
+    fn scan(start, predicate):
+        loop i from start to length(v):
+            if predicate(char_at(i)):
+                continue
+            return i
+        length(v)
+    scan(0, is_tcl_alpha)
+
+run("abc1")
+}] hir analysis
+    set id [instanceNamed $analysis scan]
+    set ranges [hir::range::analyze $hir $analysis]
+    hir::range::show [lindex [dict get $ranges instances $id params] 0]
+} -result {[0, 0] {0}}
+
+test exact-callable-closed-audit-output {the audit-only closedness report names every instance's proof, its callers and its exact targets} -body {
+    lassign [analysisOf $::capturingHof] hir analysis
+    set audit [hir::specialize::closedAudit $hir $analysis]
+    list [regexp {first_match<block\(e\d+\), List\[str\]> +closed=1 range-open=0 callers=1 exact=\[block\(e\d+\)\]} $audit] \
+        [regexp {specialized: selected only by exact calls} $audit]
+} -result {1 1}
+
+# ---------------------------------------------------------------------------
+# Fixpoint safety and determinism
+
+test exact-callable-no-instance-after-fixpoint {the closed-caller pass creates no instance: the instance set and keys are identical with the pass off} -body {
+    set same 1
+    foreach text [list $::incHof $::nativeHof $::mixedHof $::dynamicHof $::capturingHof] {
+        lassign [analysisOf $text -closed-caller-facts-opt 1] hir on
+        lassign [analysisOf $text -closed-caller-facts-opt 0] hir off
+        if {[dict get $on keys] ne [dict get $off keys] || [dict get $on used] ne [dict get $off used]} {
+            set same 0
+        }
+    }
+    set same
+} -result 1
+
+test exact-callable-no-instance-after-fixpoint-corpus {and for refined-checks, the program the milestone is about} -body {
+    set hir [native::prepareHir [surface::readProgramFile [file join $::projectRoot bench refined-checks.bot]]]
+    set on [hir::specialize::analyze $hir -closed-caller-facts-opt 1]
+    set off [hir::specialize::analyze $hir -closed-caller-facts-opt 0]
+    list [expr {[dict get $on keys] eq [dict get $off keys]}] [expr {[dict get $on used] eq [dict get $off used]}]
+} -result {1 1}
+
+test exact-callable-deterministic {lowering the same program repeatedly gives identical NIR and an identical instance set} -body {
+    set same 1
+    foreach text [list $::mixedHof $::capturingHof [budgetProgram 5]] {
+        set a [nirOf $text]
+        set b [nirOf $text]
+        lassign [analysisOf $text] hir x
+        lassign [analysisOf $text] hir y
+        if {$a ne $b || [dict get $x keys] ne [dict get $y keys]} {
+            set same 0
+        }
+    }
+    set same
+} -result 1
+
+test exact-callable-key-is-binding-identity {the exact key of a block is its ExprId and arity, never a printed name: renaming the function does not change the key shape} -body {
+    lassign [analysisOf {
+fn first_name(x):
+    x + 1
+
+fn apply_loop(f, i, n):
+    loop j from i to n:
+        if f(j) > 41:
+            return j + 1
+    n
+
+apply_loop(first_name, 0, 100)
+}] hir analysis
+    set id [instanceNamed $analysis apply_loop]
+    set key [lindex [dict get $analysis instances $id args] 0]
+    list [lindex $key 0] [expr {[string match e* [lindex $key 1]]}] [lindex $key 2] [lindex $key 3]
+} -result {block 1 1 any}
+
+cleanupTests
