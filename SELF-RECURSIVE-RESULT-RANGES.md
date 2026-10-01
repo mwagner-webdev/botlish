@@ -583,7 +583,13 @@ the interpreter value: all agree.
 
 ## Full regression
 
-See the end of this document (filled in after the final run).
+`tclsh9.0 tests/all.tcl` on the final code (both Tcl backends, 108 test
+files, includes the 37 new tests): **interp 3,663 / 3,663 passed; compile
+3,659 passed, 4 skipped (the existing `coreScoping` constraint), 0 failed.**
+The only existing test that needed a change is `root-structural-1`
+(`fib`'s NIR register count 17 → 20, see above). The focused recursive
+tests additionally pass under `BOTLISH_NATIVE_GC_STRESS=1`; the whole-suite
+GC-stress run remains the `gc-stress` CI job on `main`.
 
 ## Known limitations
 
