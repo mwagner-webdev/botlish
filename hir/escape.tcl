@@ -253,23 +253,34 @@ proc hir::escape::Iota {n} {
 }
 
 # The struct scalar-replacement options, with defaults. STRUCTOPTS is a dict
-# with any of: enabled (0|1), localWidth, returnWidth, argWidth (the widest
-# struct, in fields, that may stay virtual as a local value, across one exact
-# return boundary, and across one exact call boundary respectively).
-# STRUCT-SCALAR-REPLACEMENT.md, "Width policy".
+# with any of: enabled (0|1); policy (transport | legacy); localWidth,
+# returnWidth, argWidth (the *hard ceilings*: the widest struct, in fields,
+# that may ever stay virtual as a local value, across an exact return and
+# across an exact call); and the transport model's weights and budgets
+# (hir/transport.tcl). Under policy legacy the three widths are the previous
+# milestone's whole policy (16 / 8 / 4, STRUCT-SCALAR-REPLACEMENT.md, "Width
+# policy"), kept as the comparison oracle; under transport they are safety
+# ceilings and the decision is the score (VALUE-TRANSPORT-MATERIALIZATION.md).
 proc hir::escape::StructOption {structOpts name} {
     if {[dict exists $structOpts $name]} {
         return [dict get $structOpts $name]
     }
-    return [dict get {enabled 1 localWidth 16 returnWidth 8 argWidth 4} $name]
+    return [dict get {enabled 1} $name]
 }
 
 proc hir::escape::StructEnabled {structOpts} {
     return [StructOption $structOpts enabled]
 }
 
-# The width cap (fields) struct descriptor DESC has at BOUNDARY (local |
-# return | arg), or 0 when DESC is not a struct (Lists are never capped here).
+# 1 under the legacy width-only policy.
+proc hir::escape::LegacyPolicy {structOpts} {
+    return [hir::transport::Legacy $structOpts]
+}
+
+# 1 if descriptor DESC fits the hard width ceiling of BOUNDARY (local |
+# return | arg); a List is never capped here, and a boundary carries nothing
+# of width 0. Under the transport policy this is only the safety ceiling: the
+# per-path score (hir::transport) is the actual decision.
 proc hir::escape::WidthOk {structOpts desc boundary} {
     if {[lindex $desc 1] eq ""} {
         return 1
@@ -278,7 +289,7 @@ proc hir::escape::WidthOk {structOpts desc boundary} {
     if {$boundary ne "local" && $n < 1} {
         return 0
     }
-    return [expr {$n <= [StructOption $structOpts ${boundary}Width]}]
+    return [expr {$n <= [hir::transport::Ceiling $structOpts $boundary]}]
 }
 
 # Public wrapper of Classify for native/lower.tcl: HIR is the *view* of
@@ -333,13 +344,24 @@ proc hir::escape::Exits {hir context instance id block selfTails} {
     return $exits
 }
 
-# {ARITY FORWARD WHY}: ARITY is InstanceId -> DESC ({N SHAPE}, see Classify)
-# for every used instance whose result is fully recognized (see the file
-# header) and within the return width cap; FORWARD is InstanceId -> list of
-# distinct target InstanceIds among its own forwarding exits (used to
-# propagate companion demand in Wants below); WHY is InstanceId -> reason
-# tag, for a used instance with struct exits whose result was *not*
-# recognized ("width", "mixed exits"): census bookkeeping only.
+# {ARITY FORWARD WHY DEPTH}: ARITY is InstanceId -> DESC ({N SHAPE}, see
+# Classify) for every used instance whose result is fully recognized (see the
+# file header) and that the return policy accepts; FORWARD is InstanceId ->
+# list of distinct target InstanceIds among its own forwarding exits (used to
+# propagate companion demand in Wants below); WHY is InstanceId -> reason tag,
+# for a used instance with struct exits whose result was *not* recognized
+# ("width", "transport-budget", "mixed exits"): census bookkeeping only; DEPTH
+# is InstanceId -> the number of exact return-forwarding edges below the
+# instance's own boundary on its longest chain (0 when every exit builds its
+# value itself), so a caller that consumes the result crosses DEPTH+1 return
+# edges since the construction.
+#
+# The return policy is the legacy width cap (policy legacy) or the transport
+# model's return verdict (width x return edges against the return budget,
+# hir/transport.tcl) under a hard width ceiling. Results are acyclic by
+# construction: an instance is recognized only through already-recognized
+# targets, so the growth below is a well-founded order and DEPTH is final the
+# moment an instance is recognized.
 proc hir::escape::Arities {hir spec {structOpts {}}} {
     set context [dict get $spec context]
     set selfTails [dict get $context selfTails]
@@ -360,6 +382,7 @@ proc hir::escape::Arities {hir spec {structOpts {}}} {
     set arity [dict create]
     set forward [dict create]
     set why [dict create]
+    set depth [dict create]
     set changed 1
     while {$changed} {
         set changed 0
@@ -391,9 +414,19 @@ proc hir::escape::Arities {hir spec {structOpts {}}} {
                     lappend targets {*}$target
                 }
             }
+            set myDepth 0
+            foreach t $targets {
+                set myDepth [expr {max($myDepth, 1 + [dict get $depth $t])}]
+            }
             if {$ok && $desc ne "" && ![WidthOk $structOpts $desc return]} {
                 set ok 0
                 set reason width
+            }
+            if {$ok && $desc ne "" && [lindex $desc 1] ne "" && ![LegacyPolicy $structOpts]} {
+                if {![lindex [hir::transport::ReturnVerdict $structOpts [lindex $desc 0] $myDepth] 0]} {
+                    set ok 0
+                    set reason transport-budget
+                }
             }
             if {$ok && $desc ne "" && [lindex $desc 1] ne "" && [dict get $instance generic]} {
                 # The unspecialized baseline (`-specialize 0`) keeps its
@@ -407,6 +440,7 @@ proc hir::escape::Arities {hir spec {structOpts {}}} {
             if {$ok && $desc ne ""} {
                 dict set arity $id $desc
                 dict set forward $id [lsort -unique $targets]
+                dict set depth $id $myDepth
                 dict unset why $id
                 set changed 1
             } elseif {$reason ne "" && [lsearch -exact [lmap x $exits {hir::kind $view $x}] struct] >= 0} {
@@ -414,7 +448,7 @@ proc hir::escape::Arities {hir spec {structOpts {}}} {
             }
         }
     }
-    return [list $arity $forward $why]
+    return [list $arity $forward $why $depth]
 }
 
 # ---------------------------------------------------------------------------
@@ -963,8 +997,14 @@ proc hir::escape::NativeUseTag {name} {
 
 # A short tag naming why reference R (a use of a struct value) needs the
 # physical object: the kind of its parent expression. Census bookkeeping
-# only -- never consulted by an eligibility decision.
-proc hir::escape::UseTag {info r} {
+# only -- never consulted by an eligibility decision except to distinguish a
+# parameter the transport policy gave up on ("transport-budget": the exact
+# callee exists and could receive fields, but carrying them that far costs
+# more than the budget, so the value becomes one physical aggregate here --
+# the materialization frontier) from one that simply cannot receive them
+# ("call param"). DENY is the set of {InstanceId BindingId} parameter slots
+# the transport plan denied (empty during the first Eligible pass).
+proc hir::escape::UseTag {info r {regions {}} {deny {}}} {
     set view [dict get $info view]
     set parent [dict get $info parent]
     set pe [expr {[dict exists $parent $r] ? [dict get $parent $r] : ""}]
@@ -980,7 +1020,25 @@ proc hir::escape::UseTag {info r} {
             }
             switch -- $targetKind {
                 native { return [NativeUseTag [dict get [hir::symbol $view $target] name]] }
-                block  { return [expr {[dict exists [dict get [dict get $info instance] calls] $pe] ? "call param" : "open call"}] }
+                block  {
+                    set calls [dict get [dict get $info instance] calls]
+                    if {![dict exists $calls $pe]} {
+                        return "open call"
+                    }
+                    set callee [dict get $calls $pe]
+                    if {[dict size $deny] && [dict exists $regions $callee]} {
+                        set i [lsearch -exact [dict get $node args] $r]
+                        set cinfo [dict get $regions $callee]
+                        set cblock [dict get [dict get $cinfo instance] block]
+                        if {$cblock ne "program" && $i >= 0} {
+                            set params [hir::get [dict get $cinfo view] $cblock params]
+                            if {$i < [llength $params] && [dict exists $deny [list $callee [lindex $params $i]]]} {
+                                return "transport-budget"
+                            }
+                        }
+                    }
+                    return "call param"
+                }
             }
             return "open call"
         }
@@ -1014,7 +1072,7 @@ proc hir::escape::UseTag {info r} {
 # *parameter* never materializes: its callers hand it over as fields, so a
 # use inside the callee that needs the object would re-allocate it once per
 # call.
-proc hir::escape::UseVerdict {candidates regions aliasOf id b desc isParam bindExpr} {
+proc hir::escape::UseVerdict {candidates regions aliasOf id b desc isParam bindExpr {deny {}}} {
     set info [dict get $regions $id]
     set view [dict get $info view]
     set refsByBinding [dict get $info refsByBinding]
@@ -1067,7 +1125,7 @@ proc hir::escape::UseVerdict {candidates regions aliasOf id b desc isParam bindE
                 continue
             }
         }
-        set tag [UseTag $info $r]
+        set tag [UseTag $info $r $regions $deny]
         if {$isParam} {
             return [list $tag 0 0 {}]
         }
@@ -1112,7 +1170,7 @@ proc hir::escape::ForwardTarget {candidates regions argPos r desc} {
 # alias is dropped along with its source and vice versa (each is accepted
 # only while the other stands). WHY maps a dropped slot to its reason tag,
 # USEINFO a kept one to {STRUCTURAL FORWARDS MATS}.
-proc hir::escape::Eligible {rawLocal rawParam regions aliasOf} {
+proc hir::escape::Eligible {rawLocal rawParam regions aliasOf {deny {}}} {
     set candidates [dict create]
     set isParam [dict create]
     set bindExprs [dict create]
@@ -1136,13 +1194,21 @@ proc hir::escape::Eligible {rawLocal rawParam regions aliasOf} {
     }
     set why [dict create]
     set useInfo [dict create]
+    # Slots the transport plan denied start out dropped (a monotone shrink:
+    # nothing is ever re-admitted, so planning cannot oscillate).
+    dict for {key reason} $deny {
+        if {[dict exists $candidates $key]} {
+            dict unset candidates $key
+            dict set why $key $reason
+        }
+    }
     set changed 1
     while {$changed} {
         set changed 0
         dict for {key desc} $candidates {
             lassign $key id b
             set verdict [UseVerdict $candidates $regions $aliasOf $id $b $desc [dict exists $isParam $key] \
-                [expr {[dict exists $bindExprs $key] ? [dict get $bindExprs $key] : ""}]]
+                [expr {[dict exists $bindExprs $key] ? [dict get $bindExprs $key] : ""}] $deny]
             lassign $verdict reason structural forwards mats
             if {$reason eq "" && [dict exists $aliasOf $id $b]
                     && ![dict exists $candidates [list $id [dict get $aliasOf $id $b]]]} {
@@ -1158,6 +1224,569 @@ proc hir::escape::Eligible {rawLocal rawParam regions aliasOf} {
         }
     }
     return [list $candidates $why $useInfo]
+}
+
+# ---------------------------------------------------------------------------
+# Transport planning (VALUE-TRANSPORT-MATERIALIZATION.md)
+#
+# Eligible says which struct slots *may* stay virtual (every use is free or,
+# for a local, lazily materializable). This pass asks the other question: how
+# far may a value be carried as independent fields before one physical
+# aggregate is cheaper to carry? It sees the exact-forwarding graph of the
+# virtual *parameter* slots (a slot forwards its value unchanged to a callee
+# slot = one argument edge; a call whose result feeds an argument crosses
+# return edges first), summarizes it by strongly connected components
+# (hir::transport::Plan: linear, no path enumerated) and gives every slot the
+# score of the whole path through it: argument edges and return edges
+# weighted separately, a cycle given its own term (a loop carries its value
+# forever), scaled by use density. A slot whose path exceeds its budget is
+# *denied*: its callers materialize the value before the first such edge --
+# the frontier -- and pass one pointer, while the locals upstream keep every
+# earlier use virtual (lazy single materialization) and a local's own
+# projections never move. Only parameter slots are planned: a parameter never
+# materializes inside its callee (a per-call allocation), so the frontier of
+# a chain can only be at the producer's side of an edge, and a denied slot
+# denies everything that forwards into it (Eligible's own shrink).
+#
+# Planning is two monotone phases, so it cannot oscillate: (1) structural
+# eligibility, (2) a single budget pass over the eligible graph whose
+# verdicts are final, followed by one more structural shrink. Nothing is ever
+# re-admitted; a slot that falls only has fewer callers' fields to carry.
+#
+# Returns {DENY INFO}: DENY is {InstanceId BindingId} -> "transport-budget"
+# for every denied slot, INFO the verdict dict of every planned slot
+# (hir::transport::Plan's records).
+proc hir::escape::TransportPlan {spec regions callSites arity retDepth eligible rawParam structOpts} {
+    set nodes {}
+    set width [dict create]
+    dict for {key desc} $eligible {
+        lassign $key id b
+        if {[dict exists $rawParam $id $b] && [lindex $desc 1] ne ""} {
+            lappend nodes $key
+            dict set width $key [lindex $desc 0]
+        }
+    }
+    if {$nodes eq ""} {
+        return [list [dict create] [dict create]]
+    }
+    set fwd [dict create]
+    set used [dict create]
+    set supply [dict create]
+    foreach key $nodes {
+        lassign $key id b
+        set desc [dict get $eligible $key]
+        set info [dict get $regions $id]
+        set view [dict get $info view]
+        set refs [expr {[dict exists [dict get $info refsByBinding] $b] ? [dict get [dict get $info refsByBinding] $b] : {}}]
+        set layout [lindex $desc 1 1]
+        set argPos [dict get $info argPos]
+        set projByRecv [dict get $info projByRecv]
+        set targets {}
+        set slots {}
+        foreach r $refs {
+            if {[dict exists $projByRecv $r]} {
+                set slot [lsearch -exact $layout [hir::get $view [dict get $projByRecv $r] name]]
+                if {$slot >= 0} {
+                    lappend slots $slot
+                }
+                continue
+            }
+            if {![dict exists $argPos $r]} {
+                continue
+            }
+            lassign [dict get $argPos $r] callee argIndex
+            if {$callee eq "" || ![dict exists $regions $callee]} {
+                continue
+            }
+            set cblock [dict get [dict get $regions $callee instance] block]
+            if {$cblock eq "program"} {
+                continue
+            }
+            set cparams [hir::get [dict get $regions $callee view] $cblock params]
+            if {$argIndex < 0 || $argIndex >= [llength $cparams]} {
+                continue
+            }
+            set target [list $callee [lindex $cparams $argIndex]]
+            if {[dict exists $eligible $target] && [dict get $eligible $target] eq $desc} {
+                lappend targets $target
+            }
+        }
+        dict set fwd $key [lsort -unique $targets]
+        dict set used $key [lsort -unique -integer $slots]
+        # Where the slot's value can come from.
+        set index [lsearch -exact [hir::get $view [dict get [dict get $regions $id instance] block] params] $b]
+        set entries {}
+        if {[dict exists $callSites $id]} {
+            foreach site [dict get $callSites $id] {
+                lassign $site callerId callerArgs
+                if {$index < 0 || $index >= [llength $callerArgs]} {
+                    continue
+                }
+                set argExpr [lindex $callerArgs $index]
+                set cinfo [dict get $regions $callerId]
+                set cview [dict get $cinfo view]
+                if {[hir::kind $cview $argExpr] eq "ref"} {
+                    set b2 [hir::get $cview $argExpr binding]
+                    if {$callerId eq $id && $b2 eq $b} {
+                        continue
+                    }
+                    set src [list $callerId $b2]
+                    if {[dict exists $width $src] && [dict get $eligible $src] eq $desc} {
+                        lappend entries [list $src 0]
+                    } elseif {[dict exists $eligible $src] && [dict get $eligible $src] eq $desc} {
+                        lappend entries [list "" 0]
+                    }
+                    continue
+                }
+                set c [Classify $cview [dict get $cinfo instance] $arity $argExpr $structOpts]
+                if {$c eq ""} {
+                    continue
+                }
+                lassign $c kind cd targetIds
+                set ret 0
+                foreach t $targetIds {
+                    set ret [expr {max($ret, 1 + [dict get $retDepth $t])}]
+                }
+                lappend entries [list "" $ret]
+            }
+        }
+        dict set supply $key $entries
+    }
+    set info [hir::transport::Plan $structOpts $nodes $fwd $supply $width $used]
+    set deny [dict create]
+    dict for {key v} $info {
+        if {![dict get $v ok]} {
+            dict set deny $key transport-budget
+        }
+    }
+    return [list $deny $info]
+}
+
+# ---------------------------------------------------------------------------
+# Nested values: the cut through the value tree (VALUE-TRANSPORT-
+# MATERIALIZATION.md, "Nested value-tree model")
+#
+# A struct whose field is itself an inline struct literal is a tree. The
+# virtual representation is a *cut* through it: every field below the cut is
+# one transported value (the inner aggregate, still a physical object), every
+# field above is opened (its own fields join the outer representation, so the
+# outer width grows by the inner width less one). Nothing here recurses
+# blindly: an inner value is a candidate for opening only if
+#
+#   * every construction that can flow into the slot builds it as an inline
+#     literal of one shape (a shared or computed inner value is one opaque
+#     field: no DAG scalarization), and
+#   * it has no independent lifetime: every use of it, in every slot the value
+#     travels through, is a further projection (`outer.inner.c`) -- an inner
+#     value that is itself forwarded, stored, compared or returned stays a
+#     bundle, however much some other use only projects it.
+#
+# The decision is one greedy pass per *representation class*: the slots
+# (locals, parameters, results) a value moves between without being
+# rebuilt -- bind, alias, exact argument forwarding, exact return -- are
+# unioned, so the whole class shares one transported layout (a callee has
+# one `fields` form, never a family). The pass walks the candidate inner
+# values once, outermost first, and opens one only if the widened path still
+# fits its budget (and the ceiling of every boundary the class touches) and
+# opening costs less transport than the allocation it saves: at distance 0
+# (a local) that is always, across a long argument chain it is not. No subset
+# of cuts is ever enumerated.
+#
+# A cut is the flat list {NAME SUBSHAPE SUBCUT ...} over the opened fields in
+# layout order; a descriptor with a cut is {N SHAPE CUT}, N the *physical*
+# width (opened fields count as their own fields).
+
+# The number of physical fields of struct SHAPE opened as CUT.
+proc hir::escape::CutFields {shape cut} {
+    set n [llength [lindex $shape 1]]
+    foreach {name sub subcut} $cut {
+        incr n [expr {[CutFields $sub $subcut] - 1}]
+    }
+    return $n
+}
+
+# 1 if struct node E of VIEW is a well-formed literal (every written field
+# occupies exactly one slot of its layout; Classify's own condition).
+proc hir::escape::WellFormedStruct {view e} {
+    set node [hir::node $view $e]
+    set n [llength [dict get $node fields]]
+    return [expr {[llength [dict get $node layout]] == $n && [lsort -integer [dict get $node slots]] eq [Iota $n]}]
+}
+
+# {SHAPE CHILDREN}: struct literal E as a tree; CHILDREN maps a field name to
+# the tree of that field's value when it is itself an inline well-formed
+# literal.
+proc hir::escape::LiteralTree {view e} {
+    set node [hir::node $view $e]
+    set shape [list [expr {[dict get $node named] ? [dict get $node structId] : ""}] [dict get $node layout]]
+    set children [dict create]
+    foreach name [dict get $node names] f [dict get $node fields] {
+        if {[hir::kind $view $f] eq "struct" && [WellFormedStruct $view $f]} {
+            dict set children $name [LiteralTree $view $f]
+        }
+    }
+    return [list $shape $children]
+}
+
+# The intersection of two LiteralTrees of one root shape: a child survives
+# only if both have it with the same shape.
+proc hir::escape::IntersectTrees {a b} {
+    lassign $a shape ca
+    lassign $b shape2 cb
+    set children [dict create]
+    dict for {name t} $ca {
+        if {[dict exists $cb $name] && [lindex $t 0] eq [lindex [dict get $cb $name] 0]} {
+            dict set children $name [IntersectTrees $t [dict get $cb $name]]
+        }
+    }
+    return [list $shape $children]
+}
+
+# The constructions expression E (of instance ID, VIEW) is made of when it is
+# a recognized aggregate value: {lit ID E} for a struct literal, {res CALLEE}
+# for an exact call to an instance with a recognized result, through `if`
+# branches. "" if E is anything else.
+proc hir::escape::Origins {view instance arity id e structOpts} {
+    switch -- [hir::kind $view $e] {
+        struct {
+            if {[Classify $view $instance $arity $e $structOpts] eq ""} {
+                return ""
+            }
+            return [list [list lit $id $e]]
+        }
+        call {
+            set c [Classify $view $instance $arity $e $structOpts]
+            if {[lindex $c 0] ne "remote"} {
+                return ""
+            }
+            return [lmap t [lindex $c 2] {list res $t}]
+        }
+        if {
+            set node [hir::node $view $e]
+            set result {}
+            foreach body [list [dict get $node thenBody] [dict get $node elseBody]] {
+                if {$body eq ""} {
+                    return ""
+                }
+                if {![hir::get $view [lindex $body 0] reachable]} {
+                    continue
+                }
+                set last [lindex $body end]
+                if {[hir::typeOf $view $last] eq "never"} {
+                    continue
+                }
+                set o [Origins $view $instance $arity $id $last $structOpts]
+                if {$o eq ""} {
+                    return ""
+                }
+                lappend result {*}$o
+            }
+            return $result
+        }
+    }
+    return ""
+}
+
+# Unions MEMBER with every construction in ORIGINS ({lit ID E} always; {res
+# ID} only if that result is itself a member).
+proc hir::escape::UnionOrigins {ufVar member origins} {
+    upvar 1 $ufVar uf
+    foreach o $origins {
+        if {[lindex $o 0] eq "res" && ![dict exists $uf $o]} {
+            continue
+        }
+        UfUnion uf $member $o
+    }
+}
+
+proc hir::escape::UfFind {ufVar x} {
+    upvar 1 $ufVar uf
+    if {![dict exists $uf $x]} {
+        dict set uf $x $x
+        return $x
+    }
+    set root $x
+    while {[dict get $uf $root] ne $root} {
+        set root [dict get $uf $root]
+    }
+    while {[dict get $uf $x] ne $root} {
+        set next [dict get $uf $x]
+        dict set uf $x $root
+        set x $next
+    }
+    return $root
+}
+
+proc hir::escape::UfUnion {ufVar a b} {
+    upvar 1 $ufVar uf
+    set ra [UfFind uf $a]
+    set rb [UfFind uf $b]
+    if {$ra ne $rb} {
+        if {[string compare $ra $rb] < 0} {
+            dict set uf $rb $ra
+        } else {
+            dict set uf $ra $rb
+        }
+    }
+}
+
+# Plans the cut of every representation class. ELIGIBLE: {InstanceId
+# BindingId} -> natural DESC of every virtual slot (RAWPARAM says which are
+# parameters); ARITY the recognized results; TRANSPORT the parameter slots'
+# path statistics (hir::transport::Plan); RETDEPTH each result's return
+# depth. Returns {CUTS CLASSES}: CUTS maps a member key ({loc ID B}, {par ID
+# B} or {res ID}) to its non-empty cut; CLASSES is one record per class that
+# has an inline nested literal: {members shape width0 width cut opened closed
+# argEdges retEdges cyclic budget score}, closed being {PATH REASON} pairs.
+proc hir::escape::NestingPlan {hir spec regions callSites arity retDepth eligible rawParam transport structOpts} {
+    set uf [dict create]
+    set context [dict get $spec context]
+    set selfTails [dict get $context selfTails]
+    # --- members and their unions
+    dict for {key desc} $eligible {
+        lassign $key id b
+        if {[lindex $desc 1] eq ""} {
+            continue
+        }
+        set k [list [expr {[dict exists $rawParam $id $b] ? "par" : "loc"}] $id $b]
+        UfFind uf $k
+    }
+    dict for {id desc} $arity {
+        if {[lindex $desc 1] ne ""} {
+            UfFind uf [list res $id]
+        }
+    }
+    set bindValues [dict create]
+    foreach id [dict get $spec used] {
+        set info [dict get $regions $id]
+        set view [dict get $info view]
+        foreach e [dict get $info exprs] {
+            if {[hir::kind $view $e] eq "bind"} {
+                set node [hir::node $view $e]
+                if {![dict get $node duplicate]} {
+                    dict set bindValues [list $id [dict get $node binding]] [dict get $node value]
+                }
+            }
+        }
+    }
+    dict for {key desc} $eligible {
+        lassign $key id b
+        if {[lindex $desc 1] eq "" || [dict exists $rawParam $id $b]} {
+            continue
+        }
+        set member [list loc $id $b]
+        if {![dict exists $bindValues $key]} {
+            continue
+        }
+        set v [dict get $bindValues $key]
+        set info [dict get $regions $id]
+        set view [dict get $info view]
+        if {[hir::kind $view $v] eq "ref"} {
+            set src [list $id [hir::get $view $v binding]]
+            if {[dict exists $eligible $src] && ![dict exists $rawParam {*}$src]} {
+                UfUnion uf $member [list loc {*}$src]
+            }
+            continue
+        }
+        UnionOrigins uf $member [Origins $view [dict get $info instance] $arity $id $v $structOpts]
+    }
+    dict for {key desc} $eligible {
+        lassign $key id b
+        if {[lindex $desc 1] eq "" || ![dict exists $rawParam $id $b] || ![dict exists $callSites $id]} {
+            continue
+        }
+        set member [list par $id $b]
+        set block [dict get $regions $id instance block]
+        set index [lsearch -exact [hir::get [dict get $regions $id view] $block params] $b]
+        foreach site [dict get $callSites $id] {
+            lassign $site callerId callerArgs
+            if {$index < 0 || $index >= [llength $callerArgs]} {
+                continue
+            }
+            set argExpr [lindex $callerArgs $index]
+            set cinfo [dict get $regions $callerId]
+            set cview [dict get $cinfo view]
+            if {[hir::kind $cview $argExpr] eq "ref"} {
+                set src [list $callerId [hir::get $cview $argExpr binding]]
+                if {[dict exists $eligible $src] && [dict get $eligible $src] eq $desc} {
+                    UfUnion uf $member [list [expr {[dict exists $rawParam {*}$src] ? "par" : "loc"}] {*}$src]
+                }
+                continue
+            }
+            UnionOrigins uf $member [Origins $cview [dict get $cinfo instance] $arity $callerId $argExpr $structOpts]
+        }
+    }
+    dict for {id desc} $arity {
+        if {[lindex $desc 1] eq ""} {
+            continue
+        }
+        set member [list res $id]
+        set info [dict get $regions $id]
+        set instance [dict get $info instance]
+        set exits [Exits [dict get $info view] $context $instance $id [dict get $instance block] $selfTails]
+        foreach e $exits {
+            UnionOrigins uf $member [Origins [dict get $info view] $instance $arity $id $e $structOpts]
+        }
+    }
+    # --- independent-use constraints: the outermost projection chains
+    set blocked [dict create]
+    foreach id [dict get $spec used] {
+        set info [dict get $regions $id]
+        set view [dict get $info view]
+        set parent [dict get $info parent]
+        foreach pe [dict values [dict get $info projByRecv]] {
+            set up [expr {[dict exists $parent $pe] ? [dict get $parent $pe] : ""}]
+            if {$up ne "" && [hir::kind $view $up] eq "project" && [hir::get $view $up receiver] eq $pe} {
+                continue
+            }
+            # PE is the outermost projection of a chain: walk down to its root.
+            set names {}
+            set node $pe
+            while {[hir::kind $view $node] eq "project"} {
+                set names [linsert $names 0 [hir::get $view $node name]]
+                set node [hir::get $view $node receiver]
+            }
+            set member ""
+            if {[hir::kind $view $node] eq "ref"} {
+                set b [hir::get $view $node binding]
+                foreach kind {loc par} {
+                    if {[dict exists $uf [list $kind $id $b]]} {
+                        set member [list $kind $id $b]
+                    }
+                }
+            } elseif {[hir::kind $view $node] eq "call"} {
+                set c [Classify $view [dict get $info instance] $arity $node $structOpts]
+                if {[lindex $c 0] eq "remote"} {
+                    foreach t [lindex $c 2] {
+                        dict lappend blocked [UfFind uf [list res $t]] $names
+                    }
+                }
+            }
+            if {$member ne ""} {
+                dict lappend blocked [UfFind uf $member] $names
+            }
+        }
+    }
+    # --- classes
+    set classes [dict create]
+    foreach k [dict keys $uf] {
+        dict lappend classes [UfFind uf $k] $k
+    }
+    set cuts [dict create]
+    set records {}
+    foreach root [lsort [dict keys $classes]] {
+        set members [lsort [dict get $classes $root]]
+        set tree ""
+        set shape ""
+        foreach k $members {
+            if {[lindex $k 0] eq "lit"} {
+                lassign $k - id e
+                set t [LiteralTree [dict get $regions $id view] $e]
+                set tree [expr {$tree eq "" ? $t : [IntersectTrees $tree $t]}]
+            } else {
+                set d [expr {[lindex $k 0] eq "res" ? [dict get $arity [lindex $k 1]] : [dict get $eligible [lrange $k 1 2]]}]
+                if {$shape eq ""} {
+                    set shape [lindex $d 1]
+                }
+            }
+        }
+        if {$tree eq "" || [dict size [lindex $tree 1]] == 0} {
+            continue
+        }
+        # path statistics of the class
+        set ea 0
+        set er 0
+        set cyc 0
+        set ceiling [hir::transport::Ceiling $structOpts local]
+        foreach k $members {
+            switch -- [lindex $k 0] {
+                par {
+                    set tinfo [expr {[dict exists $transport [lrange $k 1 2]] ? [dict get $transport [lrange $k 1 2]] : {}}]
+                    if {$tinfo ne ""} {
+                        set ea [expr {max($ea, [dict get $tinfo up] + [dict get $tinfo down])}]
+                        set er [expr {max($er, [dict get $tinfo ret])}]
+                        set cyc [expr {$cyc || [dict get $tinfo cyclic]}]
+                    }
+                    set ceiling [expr {min($ceiling, [hir::transport::Ceiling $structOpts arg])}]
+                }
+                res {
+                    set er [expr {max($er, [dict get $retDepth [lindex $k 1]] + 1)}]
+                    set ceiling [expr {min($ceiling, [hir::transport::Ceiling $structOpts return])}]
+                }
+            }
+        }
+        set blockedPaths [expr {[dict exists $blocked $root] ? [dict get $blocked $root] : {}}]
+        lassign [ChooseCut $structOpts $tree $blockedPaths $ceiling $ea $er $cyc] cut width0 width opened closed score budget
+        if {$opened eq "" && $closed eq ""} {
+            continue
+        }
+        foreach k $members {
+            if {[lindex $k 0] ne "lit" && $cut ne ""} {
+                dict set cuts $k $cut
+            }
+        }
+        lappend records [dict create members [lmap k $members {if {[lindex $k 0] eq "lit"} continue; set k}] \
+            literals [lmap k $members {if {[lindex $k 0] ne "lit"} continue; set k}] \
+            shape [lindex $tree 0] width0 $width0 width $width cut $cut opened $opened closed $closed \
+            argEdges $ea retEdges $er cyclic $cyc score $score budget $budget]
+    }
+    return [list $cuts $records]
+}
+
+# The greedy cut of TREE ({SHAPE CHILDREN}) for a class whose worst path has
+# EA argument edges, ER return edges and CYC (0|1), under the hard width
+# CEILING and the BLOCKED paths (lists of field names that have an
+# independent use). Returns {CUT WIDTH0 WIDTH OPENED CLOSED SCORE BUDGET}:
+# OPENED the opened paths, CLOSED {PATH REASON} for each candidate kept
+# bundled (reasons: independent-use, ceiling, transport-budget,
+# allocation-cheaper).
+proc hir::escape::ChooseCut {structOpts tree blocked ceiling ea er cyc} {
+    set width0 [llength [lindex $tree 0 1]]
+    set budget [hir::transport::Budget $structOpts $ea $er $cyc]
+    set state [dict create width $width0 opened {} closed {}]
+    set cut [ChooseLevel $structOpts $tree {} $blocked $ceiling $ea $er $cyc $budget state]
+    set width [dict get $state width]
+    set score [hir::transport::PathScore $structOpts $width $ea $er $cyc 1.0]
+    return [list $cut $width0 $width [dict get $state opened] [dict get $state closed] $score $budget]
+}
+
+proc hir::escape::ChooseLevel {structOpts tree prefix blocked ceiling ea er cyc budget stateVar} {
+    upvar 1 $stateVar state
+    set cut {}
+    lassign $tree shape children
+    foreach name [lindex $shape 1] {
+        if {![dict exists $children $name]} {
+            continue
+        }
+        set path [concat $prefix [list $name]]
+        set sub [dict get $children $name]
+        if {[lsearch -exact $blocked $path] >= 0} {
+            dict lappend state closed [list $path independent-use]
+            continue
+        }
+        set width [dict get $state width]
+        set delta [expr {[llength [lindex $sub 0 1]] - 1}]
+        set newWidth [expr {$width + $delta}]
+        set cost [hir::transport::PathScore $structOpts $newWidth $ea $er $cyc 1.0]
+        set base [hir::transport::PathScore $structOpts $width $ea $er $cyc 1.0]
+        if {$newWidth > $ceiling} {
+            dict lappend state closed [list $path ceiling]
+            continue
+        }
+        if {$cost > $budget} {
+            dict lappend state closed [list $path transport-budget]
+            continue
+        }
+        if {$cost - $base >= [hir::transport::Option $structOpts allocUnits]} {
+            dict lappend state closed [list $path allocation-cheaper]
+            continue
+        }
+        dict set state width $newWidth
+        dict lappend state opened $path
+        set subcut [ChooseLevel $structOpts $sub $path $blocked $ceiling $ea $er $cyc $budget state]
+        lappend cut $name [lindex $sub 0] $subcut
+    }
+    return $cut
 }
 
 # ---------------------------------------------------------------------------
@@ -1182,7 +1811,7 @@ proc hir::escape::Eligible {rawLocal rawParam regions aliasOf} {
 #                 literal or an exact call): read straight from its fields
 #   census        one record per struct construction (see Census)
 proc hir::escape::analyze {hir spec {paramOpt 1} {structOpts {}}} {
-    lassign [Arities $hir $spec $structOpts] arity forward resultWhy
+    lassign [Arities $hir $spec $structOpts] arity forward resultWhy retDepth
     set regions [dict create]
     foreach id [dict get $spec used] {
         dict set regions $id [RegionInfo $hir $spec $id]
@@ -1195,6 +1824,14 @@ proc hir::escape::analyze {hir spec {paramOpt 1} {structOpts {}}} {
         set rawParam [RawParamArities $spec $arity $rawLocal $callSites $regions $structOpts]
     }
     lassign [Eligible $rawLocal $rawParam $regions $aliasOf] eligible dropWhy useInfo
+    set transport [dict create]
+    set deny [dict create]
+    if {[StructEnabled $structOpts] && ![LegacyPolicy $structOpts]} {
+        lassign [TransportPlan $spec $regions $callSites $arity $retDepth $eligible $rawParam $structOpts] deny transport
+        if {[dict size $deny]} {
+            lassign [Eligible $rawLocal $rawParam $regions $aliasOf $deny] eligible dropWhy useInfo
+        }
+    }
     set virtual [dict create]
     set paramVirtual [dict create]
     set wants [dict create]
@@ -1238,7 +1875,32 @@ proc hir::escape::analyze {hir spec {paramOpt 1} {structOpts {}}} {
             }
         }
     }
+    # Nested values: the cut through each representation class's value tree
+    # (NestingPlan), applied to the descriptors the lowering reads. Only under
+    # the transport policy; the legacy policy keeps every nested struct one
+    # field value.
+    set nested {}
+    if {[StructEnabled $structOpts] && ![LegacyPolicy $structOpts] && [hir::transport::Option $structOpts nesting]} {
+        lassign [NestingPlan $hir $spec $regions $callSites $arity $retDepth $eligible $rawParam $transport $structOpts] cuts nested
+        dict for {k cut} $cuts {
+            switch -- [lindex $k 0] {
+                loc {
+                    set desc [dict get $virtual [lindex $k 1] [lindex $k 2]]
+                    dict set virtual [lindex $k 1] [lindex $k 2] [list [CutFields [lindex $desc 1] $cut] [lindex $desc 1] $cut]
+                }
+                par {
+                    set desc [dict get $paramVirtual [lindex $k 1] [lindex $k 2]]
+                    dict set paramVirtual [lindex $k 1] [lindex $k 2] [list [CutFields [lindex $desc 1] $cut] [lindex $desc 1] $cut]
+                }
+                res {
+                    set desc [dict get $arity [lindex $k 1]]
+                    dict set arity [lindex $k 1] [list [CutFields [lindex $desc 1] $cut] [lindex $desc 1] $cut]
+                }
+            }
+        }
+    }
     set direct [DirectProjections $regions $arity $structOpts]
+    set directRoot [DirectRoots $regions $arity $structOpts]
     dict for {id byExpr} $direct {
         dict for {e desc} $byExpr {
             set view [dict get $regions $id view]
@@ -1250,9 +1912,22 @@ proc hir::escape::analyze {hir spec {paramOpt 1} {structOpts {}}} {
             }
         }
     }
+    dict for {id byExpr} $directRoot {
+        dict for {e info} $byExpr {
+            lassign $info root desc
+            set view [dict get $regions $id view]
+            set c [Classify $view [dict get $regions $id instance] $arity $root $structOpts]
+            if {[lindex $c 0] eq "remote"} {
+                foreach t [lindex $c 2] {
+                    dict set wants $t 1
+                }
+            }
+        }
+    }
     set wants [Propagate $wants $forward]
     set analysis [dict create arity $arity wants $wants virtual $virtual paramVirtual $paramVirtual \
-        structOpts $structOpts direct $direct]
+        structOpts $structOpts direct $direct directRoot $directRoot transport $transport deny $deny \
+        retDepth $retDepth nested $nested]
     if {[StructEnabled $structOpts]} {
         dict set analysis census [Census $spec $regions $arity $resultWhy $wants $virtual $paramVirtual \
             $localWhy $dropWhy $useInfo $structOpts]
@@ -1287,6 +1962,44 @@ proc hir::escape::DirectProjections {regions arity structOpts} {
                 continue
             }
             dict set direct $id $pe $desc
+        }
+    }
+    return $direct
+}
+
+# InstanceId -> ExprId -> {ROOT DESC}: every field projection PE that is the
+# outermost of a chain `root.f.g...` of two or more projections whose root is a
+# recognized *call* result (a recognized construction read straight from its
+# fields, with the descriptor -- cut included -- its slot carries). The
+# chain is resolved to one field register in lowering (a field the cut
+# opened is read from the sub-fields; a closed one by an ordinary structget).
+proc hir::escape::DirectRoots {regions arity structOpts} {
+    set direct [dict create]
+    if {![StructEnabled $structOpts]} {
+        return $direct
+    }
+    dict for {id info} $regions {
+        set view [dict get $info view]
+        set parent [dict get $info parent]
+        foreach pe [dict values [dict get $info projByRecv]] {
+            set up [expr {[dict exists $parent $pe] ? [dict get $parent $pe] : ""}]
+            if {$up ne "" && [hir::kind $view $up] eq "project" && [hir::get $view $up receiver] eq $pe} {
+                continue
+            }
+            set depth 0
+            set node $pe
+            while {[hir::kind $view $node] eq "project"} {
+                set node [hir::get $view $node receiver]
+                incr depth
+            }
+            if {$depth < 2 || [hir::kind $view $node] ne "call"} {
+                continue
+            }
+            set c [Classify $view [dict get $info instance] $arity $node $structOpts]
+            if {[lindex $c 0] ne "remote" || [lindex $c 1 1] eq ""} {
+                continue
+            }
+            dict set direct $id $pe [list $node [lindex $c 1]]
         }
     }
     return $direct
@@ -1471,6 +2184,32 @@ proc hir::escape::paramVirtualShape {analysis id b} {
     set paramVirtual [dict get $analysis paramVirtual]
     if {[dict exists $paramVirtual $id $b]} {
         return [lindex [dict get $paramVirtual $id $b] 1]
+    }
+    return ""
+}
+
+# The cut ({NAME SUBSHAPE SUBCUT ...}, "" when nothing is opened) of instance
+# ID's recognized result, of virtual local B, of virtual parameter B.
+proc hir::escape::resultCut {analysis id} {
+    set arity [dict get $analysis arity]
+    return [expr {[dict exists $arity $id] ? [lindex [dict get $arity $id] 2] : ""}]
+}
+
+proc hir::escape::virtualCut {analysis id b} {
+    set virtual [dict get $analysis virtual]
+    return [expr {[dict exists $virtual $id $b] ? [lindex [dict get $virtual $id $b] 2] : ""}]
+}
+
+proc hir::escape::paramVirtualCut {analysis id b} {
+    set paramVirtual [dict get $analysis paramVirtual]
+    return [expr {[dict exists $paramVirtual $id $b] ? [lindex [dict get $paramVirtual $id $b] 2] : ""}]
+}
+
+# {ROOT DESC} of field projection chain E of instance ID when its root is a
+# recognized call result read straight from its fields (DirectRoots), "".
+proc hir::escape::directRoot {analysis id e} {
+    if {[dict exists $analysis directRoot $id $e]} {
+        return [dict get $analysis directRoot $id $e]
     }
     return ""
 }
