@@ -41,6 +41,17 @@ proc expression {vars depth} {
     return "([expression $vars [expr {$depth - 1}]] $op [expression $vars [expr {$depth - 1}]])"
 }
 
+# Like `expression` without multiplication: a recursive helper feeds its
+# non-measure arguments back into itself, and a product there makes the value
+# grow exponentially with the recursion depth (seed 100262 of the older
+# generator computed an Int of ~10^20 digits, seed 200167 one of 28 million:
+# correct but not terminating in any backend -- audit/raw-int-abi/out/fuzz-hangs).
+proc linexpression {vars depth} {
+    if {$depth == 0} { return [term $vars] }
+    set op [pick {+ - + -}]
+    return "([linexpression $vars [expr {$depth - 1}]] $op [linexpression $vars [expr {$depth - 1}]])"
+}
+
 proc program {} {
     set lines {}
     set nfun [expr {2 + int(rand() * 4)}]
@@ -70,7 +81,7 @@ proc program {} {
                 set step [pick {1 1 2}]
                 set measure [lindex $vars 0]
                 set rest [lrange $vars 1 end]
-                set recArgs [join [concat [list "$measure - $step"] [lmap v $rest {expression $vars 1}]] {, }]
+                set recArgs [join [concat [list "$measure - $step"] [lmap v $rest {linexpression $vars 1}]] {, }]
                 set body "if $measure < $k:\n        [expression $vars 1]\n    else:\n        f${i}($recArgs) + $body"
                 set ::recursive($i) 1
             }
