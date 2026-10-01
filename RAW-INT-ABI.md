@@ -74,9 +74,11 @@ every raw region has) does not count as a competing use.
   boxed-mixed default is that the preliminary milestone's size gains in
   programs whose parameters mix raw and tagged uses shrink (`matmul` −223 → −51
   bytes, `lex-strategy` −40 → 0): see *Updated corpus code-size result*.
-* Regression, differential fuzzing, GC stress and standalone-executable
-  parity: see *Full regression*, *Differential testing*, *GC stress* and
-  *Standalone parity* (results pending final validation).
+* Full regression (interp 3,733/3,733, compile 3,729 + 4 skipped, native
+  coverage, Rust 67 + 22), differential fuzzing (3,100 random programs, 0
+  disagreements), GC stress (700 native/raw-ABI tests) and standalone-executable
+  parity all pass; see *Full regression*, *Differential testing*, *GC stress* and
+  *Standalone parity*.
 
 Files: `native/rawabi.tcl` (planner, demand pass, audit), `native/lower.tcl`
 (plan storage, callee/caller lowering, raw `if` join, raw alias, options),
@@ -988,13 +990,25 @@ Int parameter/result transport only.
 
 ## GC stress
 
-* The `native*.test` files (26 files, 779 tests) pass under
-  `BOTLISH_NATIVE_GC_STRESS=1` (forced GC attempt at every allocation site).
+Run against the final (boxed-mixed) policy:
+
+* The `native*.test` files (26 files) and `raw-int-abi.test` (66 of its 69
+  tests at the time; the three later `demand-*` transport tests are plan/NIR
+  assertions) pass under `BOTLISH_NATIVE_GC_STRESS=1` (forced GC attempt at
+  every allocation site): **700 tests, 700 passed, 0 failed**.
+  (`native-tiny-leaf-inline.test` prints no summary line, it has no
+  `cleanupTests`, and no failure output.)
 * `raw-int-abi.test` contains its own stress cases (`raw-gc-raw-live-across-
-  allocation`, `raw-gc-recursive-allocating-frames`, both executable tests run
-  under stress), and `tools/fuzz.tcl` ran 300 random programs under stress, 0
-  disagreements (`out/fuzz-gcstress.txt`).
-* The remaining suite-wide stress run is left to the `gc-stress` job of
+  allocation`, `raw-gc-recursive-allocating-frames`, `raw-hashtable-jit-gc-
+  stress`, `raw-executable-*` under stress), and `tools/fuzz.tcl` ran 300 random
+  programs under stress (299 compared, 1 skipped as non-terminating in every
+  backend), 0 disagreements (`out/fuzz-demand-gcstress.txt`).
+* A position that goes back from raw to tagged can become legitimately
+  rootable again: corpus GC root candidates 1,238 (eligibility only) → 1,276
+  (boxed-mixed), root slots 781 → 807, still below the tagged baseline's 1,283 /
+  812; safepoints unchanged. Correctness was verified by the stress runs above,
+  not assumed from fewer raw values.
+* The suite-wide stress run is left to the `gc-stress` job of
   `.github/workflows/tests.yml` on push (`AGENTS.md`); it was not run locally
   for the whole suite. `fib<int>` and the other raw functions that make no
   allocation have no safepoint at all, so stress has nothing to exercise in
@@ -1003,50 +1017,58 @@ Int parameter/result transport only.
 
 ## Standalone parity
 
-`raw-executable-fib` and `raw-executable-mixed` (raw, tagged and error-capable
-instances in one program) compile to an ELF, move it, delete the source, run it
-with an empty `PATH`, and again under `BOTLISH_NATIVE_GC_STRESS=1`; the value
-agrees with interp, compile, `cranelift-generic` and `cranelift`.
+`raw-executable-fib`, `raw-executable-mixed` (raw, tagged and error-capable
+instances in one program) and `raw-executable-demand` (suppressed, mixed,
+transported and raw instances in one program, built with demand suppression on
+and off) compile to an ELF, move it, delete the source, run it with an empty
+`PATH`, and again under `BOTLISH_NATIVE_GC_STRESS=1`; the value agrees with
+interp, compile, `cranelift-generic` and `cranelift`. The corpus hashtable
+carries runtime kind guards and is not AOT-ready (it has no standalone
+executable, before or after this change), so `raw-hashtable-jit-gc-stress` runs
+it under the JIT with the ABI off, eligibility-only and demand-filtered, every
+allocation forcing a collection.
 
 ## Differential testing
 
 * `tests/raw-int-abi.test`: every behavioural test runs interp, compile,
-  cranelift-generic, cranelift, and native with the ABI on/off × leaf inlining
-  on/off.
+  cranelift-generic, cranelift, and native with the ABI off, eligibility-only
+  (`-raw-demand-opt 0`) and demand-filtered, leaf inlining on/off.
 * `raw-fuzz-random-closed-helpers` (40 programs) and
   `raw-fuzz-random-self-recursion` (25) in the suite.
-* `tools/fuzz.tcl`: **1,500 + 1,500 random programs and 300 under GC stress, 0
-  disagreements** (`out/fuzz*.txt`); every program uses a raw ABI, about half
-  have a raw result, ~2 % end in an error outcome (a runtime `mod` by zero).
+* `tools/fuzz.tcl` (now also comparing the eligibility-only plan):
+  **1,500 + 1,499 random programs and 299 under GC stress, 0 disagreements**
+  (`out/fuzz-demand-*.txt`). Programs 100262 and 200167 are skipped: they
+  recurse with an exponentially growing Int and do not terminate in *any*
+  backend, including the interpreter and the tagged ABI (the runner re-runs a
+  timed-out chunk seed by seed with a 20 s limit). Of the first 1,500, 1,350
+  use a raw ABI and 159 a raw result under the production policy (the
+  eligibility-only comparison still exercises every eligible position); 34 end in
+  an error outcome (a runtime `mod` by zero).
 
 ## Full regression
 
-Tcl 9.0.1, Linux x86-64, release native backend, all from a clean tree.
+Tcl 9.0.1, Linux x86-64, release native backend, final tree.
 
 | run | before (parent) | after |
 |---|---|---|
-| `tests/all.tcl` interp backend | 3663 total, 3663 passed | **3709 total, 3709 passed, 0 failed** |
-| `tests/all.tcl` compile backend | 3663 total, 3659 passed, 4 skipped | **3709 total, 3705 passed, 4 skipped, 0 failed** |
-| `tests/native-coverage.tcl` (cranelift) | 3697: native 1418, independent 2188, passed-partial 41, unsupported 49, failed 1 | **3743: native 1453, independent 2199, passed-partial 41, unsupported 49, failed 1** |
-| Rust release tests (`cargo test --release`) | 56 + 22 | **64 + 22 passed** (8 new raw-ABI validation/effects tests) |
+| `tests/all.tcl` interp backend | 3663 total, 3663 passed | **3733 total, 3733 passed, 0 failed** |
+| `tests/all.tcl` compile backend | 3663 total, 3659 passed, 4 skipped | **3733 total, 3729 passed, 4 skipped, 0 failed** |
+| `tests/native-coverage.tcl` (cranelift) | 3697: native 1418, independent 2188, passed-partial 41, unsupported 49, failed 1 | **3767: native 1474, independent 2202, passed-partial 41, unsupported 49, failed 1** |
+| Rust release tests (`cargo test --release`) | 56 + 22 | **67 + 22 passed** (11 raw-ABI validation/effects tests; 3 new for suppressed, tagged signatures) |
 
-* +46 tests are the new `raw-int-abi.test` (45) and
-  `tiny-leaf-pressure-growth-under-raw-abi` (1).
+* +70 tests: `raw-int-abi.test` 45 → 69 (24 new: 22 `demand-*`, the demand
+  standalone-executable and hashtable JIT stress tests), plus
+  `tiny-leaf-pressure-growth-under-raw-abi` (+1 from the parent milestone).
 * The one coverage "failed" test is `refined-5` (the error message names
   `length` instead of `emailish?` under the cranelift test backend). It fails
-  identically on the parent tree (checked on a clean worktree of the parent
-  commit): pre-existing, unrelated.
-* `bench/bench.tcl -runs 1`: all backends agree on every program, exit 0
-  (`fib.bot` Tcl interp 9951 ms, compile 72.6 ms, Cranelift 175 us).
+  identically on the parent tree: pre-existing, unrelated.
+* `bench/bench.tcl -runs 1`: all backends agree on every program, exit 0.
 * `bench/corpus.tcl -runs 1`: all backends agree on every algorithm/size
-  (6 m 30 s run), exit 0.
-* Native execution time, `botlish-native bench` on the emitted NIR, best of 3
-  x 200 runs, ABI off → on (machine shared with a background job, so only
-  `fib` is a clear signal): **fib 145.9 -> 136.3 us (-6.6 %)**; loop-count 896
-  -> 902 ns, sum-refined 723 -> 723 ns, refined-checks 663 -> 659 us,
-  uri-steady 4.63 -> 4.65 ms, matmul 833 -> 833 ns, csv_records 9.41 -> 9.38 us,
-  hashtable 1076 -> 1094 ns (all within noise). Callgrind is the reliable
-  instruction-level figure for `fib` (above).
+  (6 m 12 s run), exit 0.
+* Dynamic instruction counts per program (callgrind, four configurations) are in
+  *Dynamic instructions per run (four-way)*; wall-clock `botlish-native bench`
+  (`tools/nativebench.tcl`) was not re-run for the final policy because the
+  machine was shared with the validation jobs, and Ir is the reliable figure.
 
 ## Existing tests that changed (and why)
 
