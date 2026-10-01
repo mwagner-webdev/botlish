@@ -2,7 +2,7 @@ source:  examples/stdlib/csv_chunked.bot
 backend: Cranelift (specialize=1)
 asm:     csv_chunked.asm
 vcode:   csv_chunked.vcode
-machine-code bytes: 10168 (per function: 68 195 534 534 534 534 498 418 540 540 365 430 585 1063 352 799 833 537 612 197)
+machine-code bytes: 10142 (per function: 68 195 534 534 534 534 501 421 524 524 365 430 585 1063 352 799 833 537 612 197)
 
 functions:
   0 <program entry>: nir-regs=2
@@ -13,8 +13,8 @@ functions:
   5 chunked_append<list[List[mutarray], mutarray, int], list>: nir-regs=22
   6 chunked_copy_chunks<List[never], int, mutarray, int>: nir-regs=22
   7 chunked_copy_chunks<List[mutarray], int, mutarray, int>: nir-regs=22
-  8 chunked_finish<list[List[never], mutarray, int]>: nir-regs=18
-  9 chunked_finish<list[List[mutarray], mutarray, int]>: nir-regs=18
+  8 chunked_finish<list[List[never], mutarray, int]>: nir-regs=17
+  9 chunked_finish<list[List[mutarray], mutarray, int]>: nir-regs=17
   10 peek<str, int>: nir-regs=11
   11 peek<str, int>: nir-regs=15
   12 scan_unquoted<str, int, int>: nir-regs=28
@@ -132,28 +132,28 @@ GC roots (csv_chunked.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 8 "chunked_finish"
-    NIR regs: 18
+    NIR regs: 17
     raw regs: 4
-    managed-capable regs: 14
+    managed-capable regs: 13
     effects: may_error=true may_gc=true
     safepoints: 5
-    root candidates: 10
-    max live roots: 7
-    shadow slots: 7
-    entry zero slots: 2
+    root candidates: 9
+    max live roots: 6
+    shadow slots: 6
+    entry zero slots: 1
     depth reservation: no
     storage: native frame
   
   function 9 "chunked_finish"
-    NIR regs: 18
+    NIR regs: 17
     raw regs: 4
-    managed-capable regs: 14
+    managed-capable regs: 13
     effects: may_error=true may_gc=true
     safepoints: 5
-    root candidates: 10
-    max live roots: 7
-    shadow slots: 7
-    entry zero slots: 2
+    root candidates: 9
+    max live roots: 6
+    shadow slots: 6
+    entry zero slots: 1
     depth reservation: no
     storage: native frame
   

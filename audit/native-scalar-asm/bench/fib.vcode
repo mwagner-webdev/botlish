@@ -1,7 +1,7 @@
 ; source:  bench/fib.bot
 ; backend: Cranelift (specialize=1), native::vcode
 ; format:  Cranelift Debug for VCode, pre-regalloc machine-level lowering
-; total machine code bytes: 181  (per function: 33 148)
+; total machine code bytes: 181  (per function: 40 141)
 ;
 vcode from lowering: 
 VCode {
@@ -13,9 +13,11 @@ Block 0([]):
   Inst 1: jmp     label1
 Block 1([]):
     (original IR block: block0)
-  Inst 2: movl $0x2d, %v196
+  Inst 2: movl $0x16, %v201
   Inst 3: call    User(userextname0)
-  Inst 4: rets %v195=%rax
+  Inst 4: shlq $1, (%v199 <- %v200)
+  Inst 5: orq $0x1, (%v198 <- %v199)
+  Inst 6: rets %v198=%rax
 }
 vcode from lowering: 
 VCode {
@@ -38,33 +40,24 @@ Block 1([]):
     (original IR block: block0)
     (successor: Block 3([]))
     (successor: Block 2([]))
-  Inst 2: sarq $1, (%v227 <- %v193)
-  Inst 3: cmpq $0x2, %v227
-  Inst 4: jl      label3; j label2
+  Inst 2: cmpq $0x2, %v193
+  Inst 3: jl      label3; j label2
 Block 2([]):
     (original IR block: block4)
-    (successor: Block 4([VReg(vreg = 214, class = Int)]))
-  Inst 5: subq $0x1, (%v226 <- %v227)
-  Inst 6: shlq $1, (%v225 <- %v226)
-  Inst 7: orq $0x1, (%v224 <- %v225)
-  Inst 8: call    User(userextname0)
-  Inst 9: subq $0x2, (%v222 <- %v227)
-  Inst 10: shlq $1, (%v221 <- %v222)
-  Inst 11: orq $0x1, (%v220 <- %v221)
-  Inst 12: call    User(userextname0)
-  Inst 13: sarq $1, (%v218 <- %v223)
-  Inst 14: sarq $1, (%v217 <- %v219)
-  Inst 15: leaq (%v218, %v217), %v216
-  Inst 16: shlq $1, (%v215 <- %v216)
-  Inst 17: orq $0x1, (%v214 <- %v215)
-  Inst 18: jmp     label4
+    (successor: Block 4([VReg(vreg = 204, class = Int)]))
+  Inst 4: subq $0x1, (%v208 <- %v193)
+  Inst 5: call    User(userextname0)
+  Inst 6: subq $0x2, (%v206 <- %v193)
+  Inst 7: call    User(userextname0)
+  Inst 8: leaq (%v207, %v205), %v204
+  Inst 9: jmp     label4
 Block 3([]):
     (original IR block: block3)
     (successor: Block 4([VReg(vreg = 193, class = Int)]))
-  Inst 19: jmp     label4
-Block 4([VReg(vreg = 213, class = Int)]):
+  Inst 10: jmp     label4
+Block 4([VReg(vreg = 203, class = Int)]):
     (original IR block: block5)
-  Inst 20: rets %v213=%rax
+  Inst 11: rets %v203=%rax
 }
 vcode from lowering: 
 VCode {
@@ -72,7 +65,10 @@ VCode {
 Block 0([]):
     (original IR block: block0)
   Inst 0: args %v192=%rdi %v194=%rdx
-  Inst 1: movq (%v194), %v198
-  Inst 2: call    User(userextname0)
-  Inst 3: rets %v197=%rax
+  Inst 1: movq (%v194), %v205
+  Inst 2: sarq $1, (%v204 <- %v205)
+  Inst 3: call    User(userextname0)
+  Inst 4: shlq $1, (%v202 <- %v203)
+  Inst 5: orq $0x1, (%v201 <- %v202)
+  Inst 6: rets %v201=%rax
 }

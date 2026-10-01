@@ -2,7 +2,7 @@ source:  examples/stdlib/csv_records.bot
 backend: Cranelift (specialize=1)
 asm:     csv_records.asm
 vcode:   csv_records.vcode
-machine-code bytes: 23245 (per function: 45 461 461 461 81 81 81 357 412 412 412 278 278 278 81 365 430 585 1063 352 783 215 488 325 388 524 70 493 114 61 61 61 61 61 168 179 245 804 1248 429 380 439 977 766 817 665 1168 836 107 427 270 629 634 78 78 1222)
+machine-code bytes: 23204 (per function: 45 461 461 461 81 81 81 360 420 420 420 278 278 278 81 365 430 585 1063 352 783 215 488 325 388 524 70 504 112 61 61 61 61 61 199 185 252 804 1248 429 380 439 977 784 809 665 1168 836 90 427 231 604 584 78 78 1222)
 
 functions:
   0 <program entry>: nir-regs=1
@@ -12,10 +12,10 @@ functions:
   4 geo_new<str>: nir-regs=4
   5 geo_new<List[str]>: nir-regs=4
   6 geo_new<mutarray>: nir-regs=4
-  7 geo_new_capacity<int, int>: nir-regs=11
-  8 geo_grow<mutarray, int, str>: nir-regs=14
-  9 geo_grow<mutarray, int, List[str]>: nir-regs=14
-  10 geo_grow<mutarray, int, mutarray>: nir-regs=14
+  7 geo_new_capacity<int, int>: nir-regs=12
+  8 geo_grow<mutarray, int, str>: nir-regs=15
+  9 geo_grow<mutarray, int, List[str]>: nir-regs=15
+  10 geo_grow<mutarray, int, mutarray>: nir-regs=15
   11 geo_append<mutarray, int, str>: nir-regs=5
   12 geo_append<mutarray, int, List[str]>: nir-regs=5
   13 geo_append<mutarray, int, mutarray>: nir-regs=5
@@ -39,24 +39,24 @@ functions:
   31 ht_values<mutarray>: nir-regs=4
   32 ht_size<mutarray>: nir-regs=4
   33 ht_tombstones<mutarray>: nir-regs=4
-  34 ht_capacity<mutarray>: nir-regs=3
-  35 ht_probe_start<mutarray, str>: nir-regs=5
-  36 ht_probe_next<mutarray, int>: nir-regs=7
+  34 ht_capacity<mutarray>: nir-regs=4
+  35 ht_probe_start<mutarray, str>: nir-regs=6
+  36 ht_probe_next<mutarray, int>: nir-regs=8
   37 ht_find_get<mutarray, str, int>: nir-regs=30
   38 ht_find_insert<mutarray, str, int, int>: nir-regs=44
   39 ht_get<mutarray, str>: nir-regs=12
   40 ht_rehash_probe<mutarray, int, int>: nir-regs=13
   41 ht_rehash_insert<struct{controls: mutarray, keys: mutarray, values: mutarray}, int, any, any>: nir-regs=15
   42 ht_rehash_scan<struct{controls: any, keys: any, values: any}, int, int, struct{controls: mutarray, keys: mutarray, values: mutarray}, int>: nir-regs=26
-  43 ht_rehash<mutarray, int>: nir-regs=30
-  44 ht_should_grow<mutarray>: nir-regs=15
-  45 ht_grow_or_clean<mutarray>: nir-regs=12
+  43 ht_rehash<mutarray, int>: nir-regs=31
+  44 ht_should_grow<mutarray>: nir-regs=16
+  45 ht_grow_or_clean<mutarray>: nir-regs=14
   46 ht_place<mutarray, int, str, str>: nir-regs=33
   47 ht_set<mutarray, str, str>: nir-regs=35
   48 row_new<bool, int>: nir-regs=6
   49 row_fill<mutarray, List[str], List[str], int, int>: nir-regs=15
   50 row_table<List[str], int, List[str], bool>: nir-regs=9
-  51 build_rows<List[List[str]], int, List[str], int, mutarray, int, bool>: nir-regs=24
+  51 build_rows<List[List[str]], int, List[str], int, mutarray, int, bool>: nir-regs=23
   52 csv_records_generic<str, bool>: nir-regs=25
   53 csv_records<str>: nir-regs=3
   54 csv_records_presized<str>: nir-regs=3
@@ -155,8 +155,8 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 7 "geo_new_capacity"
-    NIR regs: 11
-    raw regs: 2
+    NIR regs: 12
+    raw regs: 3
     managed-capable regs: 9
     effects: may_error=false may_gc=true
     safepoints: 2
@@ -168,41 +168,41 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 8 "geo_grow"
-    NIR regs: 14
-    raw regs: 2
+    NIR regs: 15
+    raw regs: 3
     managed-capable regs: 12
     effects: may_error=true may_gc=true
     safepoints: 2
-    root candidates: 5
+    root candidates: 4
     max live roots: 4
     shadow slots: 4
-    entry zero slots: 0
+    entry zero slots: 1
     depth reservation: no
     storage: native frame
   
   function 9 "geo_grow"
-    NIR regs: 14
-    raw regs: 2
+    NIR regs: 15
+    raw regs: 3
     managed-capable regs: 12
     effects: may_error=true may_gc=true
     safepoints: 2
-    root candidates: 5
+    root candidates: 4
     max live roots: 4
     shadow slots: 4
-    entry zero slots: 0
+    entry zero slots: 1
     depth reservation: no
     storage: native frame
   
   function 10 "geo_grow"
-    NIR regs: 14
-    raw regs: 2
+    NIR regs: 15
+    raw regs: 3
     managed-capable regs: 12
     effects: may_error=true may_gc=true
     safepoints: 2
-    root candidates: 5
+    root candidates: 4
     max live roots: 4
     shadow slots: 4
-    entry zero slots: 0
+    entry zero slots: 1
     depth reservation: no
     storage: native frame
   
@@ -429,13 +429,13 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
   
   function 28 "ht_new_sized"
     NIR regs: 5
-    raw regs: 1
-    managed-capable regs: 4
+    raw regs: 2
+    managed-capable regs: 3
     effects: may_error=true may_gc=true
     safepoints: 2
-    root candidates: 3
-    max live roots: 2
-    shadow slots: 2
+    root candidates: 2
+    max live roots: 1
+    shadow slots: 1
     entry zero slots: 0
     depth reservation: no
     storage: native frame
@@ -506,8 +506,8 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 34 "ht_capacity"
-    NIR regs: 3
-    raw regs: 0
+    NIR regs: 4
+    raw regs: 1
     managed-capable regs: 3
     effects: may_error=true may_gc=false
     safepoints: 0
@@ -519,8 +519,8 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 35 "ht_probe_start"
-    NIR regs: 5
-    raw regs: 0
+    NIR regs: 6
+    raw regs: 1
     managed-capable regs: 5
     effects: may_error=true may_gc=false
     safepoints: 0
@@ -532,8 +532,8 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 36 "ht_probe_next"
-    NIR regs: 7
-    raw regs: 1
+    NIR regs: 8
+    raw regs: 2
     managed-capable regs: 6
     effects: may_error=true may_gc=true
     safepoints: 1
@@ -623,8 +623,8 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 43 "ht_rehash"
-    NIR regs: 30
-    raw regs: 7
+    NIR regs: 31
+    raw regs: 8
     managed-capable regs: 23
     effects: may_error=true may_gc=true
     safepoints: 5
@@ -636,8 +636,8 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 44 "ht_should_grow"
-    NIR regs: 15
-    raw regs: 3
+    NIR regs: 16
+    raw regs: 4
     managed-capable regs: 12
     effects: may_error=true may_gc=true
     safepoints: 4
@@ -649,8 +649,8 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 45 "ht_grow_or_clean"
-    NIR regs: 12
-    raw regs: 1
+    NIR regs: 14
+    raw regs: 3
     managed-capable regs: 11
     effects: may_error=true may_gc=true
     safepoints: 3
@@ -689,13 +689,13 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
   
   function 48 "row_new"
     NIR regs: 6
-    raw regs: 0
-    managed-capable regs: 6
+    raw regs: 1
+    managed-capable regs: 5
     effects: may_error=true may_gc=true
     safepoints: 2
-    root candidates: 1
-    max live roots: 1
-    shadow slots: 1
+    root candidates: 0
+    max live roots: 0
+    shadow slots: 0
     entry zero slots: 0
     depth reservation: no
     storage: native frame
@@ -715,40 +715,40 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
   
   function 50 "row_table"
     NIR regs: 9
-    raw regs: 1
-    managed-capable regs: 8
+    raw regs: 3
+    managed-capable regs: 6
     effects: may_error=true may_gc=true
     safepoints: 2
-    root candidates: 7
-    max live roots: 5
-    shadow slots: 5
-    entry zero slots: 1
+    root candidates: 4
+    max live roots: 3
+    shadow slots: 3
+    entry zero slots: 0
     depth reservation: no
     storage: native frame
   
   function 51 "build_rows"
-    NIR regs: 24
+    NIR regs: 23
     raw regs: 6
-    managed-capable regs: 18
+    managed-capable regs: 17
     effects: may_error=true may_gc=true
     safepoints: 4
-    root candidates: 10
-    max live roots: 7
-    shadow slots: 7
-    entry zero slots: 2
+    root candidates: 9
+    max live roots: 6
+    shadow slots: 6
+    entry zero slots: 1
     depth reservation: no
     storage: native frame
   
   function 52 "csv_records_generic"
     NIR regs: 25
-    raw regs: 6
-    managed-capable regs: 19
+    raw regs: 7
+    managed-capable regs: 18
     effects: may_error=true may_gc=true
     safepoints: 5
-    root candidates: 10
-    max live roots: 7
-    shadow slots: 7
-    entry zero slots: 5
+    root candidates: 8
+    max live roots: 5
+    shadow slots: 5
+    entry zero slots: 3
     depth reservation: no
     storage: native frame
   

@@ -3,7 +3,7 @@
 ; object:  ELF64 x86-64, unlinked (Botlish-generated code only; runtime
 ;          helpers are unresolved imports, so their bodies are not present)
 ; format:  objdump -dr --no-show-raw-insn -M intel
-; total machine code bytes: 286  (per function: 63 125 98)
+; total machine code bytes: 277  (per function: 54 125 98)
 ;
 ; function symbol -> Botlish label:
 ;   botlish_fn_0 / botlish_entry_0 -> <program entry>
@@ -20,99 +20,98 @@ Disassembly of section .text:
    0:	push   rbp
    1:	mov    rbp,rsp
    4:	sub    rsp,0x10
-   8:	mov    esi,0x321
-   d:	mov    QWORD PTR [rsp],0x321
-  15:	mov    edx,0x1
-  1a:	mov    QWORD PTR [rsp+0x8],0x1
-  23:	call   28 <botlish_fn_0+0x28>
-			24: R_X86_64_PLT32	botlish_fn_1-0x4 ; refined_sum<int, int>
-  28:	add    rsp,0x10
-  2c:	mov    rsp,rbp
-  2f:	pop    rbp
-  30:	ret
+   8:	mov    edx,0x1
+   d:	mov    QWORD PTR [rsp],0x1
+  15:	mov    esi,0x190
+  1a:	call   1f <botlish_fn_0+0x1f>
+			1b: R_X86_64_PLT32	botlish_fn_1-0x4 ; refined_sum<int, int>
+  1f:	add    rsp,0x10
+  23:	mov    rsp,rbp
+  26:	pop    rbp
+  27:	ret
 
-0000000000000031 <botlish_entry_0: <program entry>>:
-  31:	push   rbp
-  32:	mov    rbp,rsp
-  35:	call   3a <botlish_entry_0+0x9>
-			36: R_X86_64_PLT32	botlish_fn_0-0x4 ; <program entry>
-  3a:	mov    rsp,rbp
-  3d:	pop    rbp
-  3e:	ret
+0000000000000028 <botlish_entry_0: <program entry>>:
+  28:	push   rbp
+  29:	mov    rbp,rsp
+  2c:	call   31 <botlish_entry_0+0x9>
+			2d: R_X86_64_PLT32	botlish_fn_0-0x4 ; <program entry>
+  31:	mov    rsp,rbp
+  34:	pop    rbp
+  35:	ret
 
-000000000000003f <botlish_fn_1: refined_sum<int, int>>:
-  3f:	push   rbp
-  40:	mov    rbp,rsp
-  43:	sub    rsp,0x20
-  47:	mov    QWORD PTR [rsp+0x10],r13
-  4c:	mov    QWORD PTR [rsp+0x18],r14
-  51:	mov    r13,rdi
-  54:	mov    QWORD PTR [rsp],rdx
-  58:	sar    rsi,1
-  5b:	mov    r14,rsi
-  5e:	mov    rsi,rdx
-  61:	test   r14,r14
-  64:	je     91 <botlish_fn_1+0x52>
-  6a:	mov    rdx,r14
-  6d:	shl    rdx,1
-  70:	or     rdx,0x1
-  74:	mov    QWORD PTR [rsp+0x8],rdx
-  79:	mov    rdi,r13
-  7c:	call   81 <botlish_fn_1+0x42>
-			7d: R_X86_64_PLT32	botlish_fn_2-0x4 ; step<int>
-  81:	mov    QWORD PTR [rsp],rax
-  85:	sub    r14,0x1
-  89:	mov    rsi,rax
-  8c:	jmp    61 <botlish_fn_1+0x22>
-  91:	mov    rax,rsi
-  94:	mov    r13,QWORD PTR [rsp+0x10]
-  99:	mov    r14,QWORD PTR [rsp+0x18]
-  9e:	add    rsp,0x20
-  a2:	mov    rsp,rbp
-  a5:	pop    rbp
-  a6:	ret
+0000000000000036 <botlish_fn_1: refined_sum<int, int>>:
+  36:	push   rbp
+  37:	mov    rbp,rsp
+  3a:	sub    rsp,0x20
+  3e:	mov    QWORD PTR [rsp+0x10],r12
+  43:	mov    QWORD PTR [rsp+0x18],r13
+  48:	mov    r13,rdi
+  4b:	mov    QWORD PTR [rsp],rdx
+  4f:	mov    r12,rsi
+  52:	mov    rsi,rdx
+  55:	test   r12,r12
+  58:	je     85 <botlish_fn_1+0x4f>
+  5e:	mov    rdx,r12
+  61:	shl    rdx,1
+  64:	or     rdx,0x1
+  68:	mov    QWORD PTR [rsp+0x8],rdx
+  6d:	mov    rdi,r13
+  70:	call   75 <botlish_fn_1+0x3f>
+			71: R_X86_64_PLT32	botlish_fn_2-0x4 ; step<int>
+  75:	mov    QWORD PTR [rsp],rax
+  79:	sub    r12,0x1
+  7d:	mov    rsi,rax
+  80:	jmp    55 <botlish_fn_1+0x1f>
+  85:	mov    rax,rsi
+  88:	mov    r12,QWORD PTR [rsp+0x10]
+  8d:	mov    r13,QWORD PTR [rsp+0x18]
+  92:	add    rsp,0x20
+  96:	mov    rsp,rbp
+  99:	pop    rbp
+  9a:	ret
 
-00000000000000a7 <botlish_entry_1: refined_sum<int, int>>:
-  a7:	push   rbp
-  a8:	mov    rbp,rsp
-  ab:	mov    rsi,QWORD PTR [rdx]
-  ae:	mov    rdx,QWORD PTR [rdx+0x8]
-  b2:	call   b7 <botlish_entry_1+0x10>
-			b3: R_X86_64_PLT32	botlish_fn_1-0x4 ; refined_sum<int, int>
-  b7:	mov    rsp,rbp
-  ba:	pop    rbp
-  bb:	ret
+000000000000009b <botlish_entry_1: refined_sum<int, int>>:
+  9b:	push   rbp
+  9c:	mov    rbp,rsp
+  9f:	mov    rsi,QWORD PTR [rdx]
+  a2:	mov    rdx,QWORD PTR [rdx+0x8]
+  a6:	sar    rsi,1
+  a9:	call   ae <botlish_entry_1+0x13>
+			aa: R_X86_64_PLT32	botlish_fn_1-0x4 ; refined_sum<int, int>
+  ae:	mov    rsp,rbp
+  b1:	pop    rbp
+  b2:	ret
 
-00000000000000bc <botlish_fn_2: step<int>>:
-  bc:	push   rbp
-  bd:	mov    rbp,rsp
-  c0:	sub    rsp,0x10
-  c4:	mov    QWORD PTR [rsp],rsi
-  c8:	mov    QWORD PTR [rsp+0x8],rdx
-  cd:	mov    rax,rsi
-  d0:	and    rax,rdx
-  d3:	test   rax,0x1
-  d9:	je     f4 <botlish_fn_2+0x38>
-  df:	lea    rcx,[rdx-0x1]
-  e3:	mov    rax,rsi
-  e6:	add    rax,rcx
-  e9:	seto   cl
-  ec:	test   cl,cl
-  ee:	je     f9 <botlish_fn_2+0x3d>
-  f4:	call   f9 <botlish_fn_2+0x3d>
-			f5: R_X86_64_PLT32	rt_int_add-0x4
-  f9:	add    rsp,0x10
-  fd:	mov    rsp,rbp
- 100:	pop    rbp
- 101:	ret
+00000000000000b3 <botlish_fn_2: step<int>>:
+  b3:	push   rbp
+  b4:	mov    rbp,rsp
+  b7:	sub    rsp,0x10
+  bb:	mov    QWORD PTR [rsp],rsi
+  bf:	mov    QWORD PTR [rsp+0x8],rdx
+  c4:	mov    rax,rsi
+  c7:	and    rax,rdx
+  ca:	test   rax,0x1
+  d0:	je     eb <botlish_fn_2+0x38>
+  d6:	lea    rcx,[rdx-0x1]
+  da:	mov    rax,rsi
+  dd:	add    rax,rcx
+  e0:	seto   cl
+  e3:	test   cl,cl
+  e5:	je     f0 <botlish_fn_2+0x3d>
+  eb:	call   f0 <botlish_fn_2+0x3d>
+			ec: R_X86_64_PLT32	rt_int_add-0x4
+  f0:	add    rsp,0x10
+  f4:	mov    rsp,rbp
+  f7:	pop    rbp
+  f8:	ret
 
-0000000000000102 <botlish_entry_2: step<int>>:
- 102:	push   rbp
- 103:	mov    rbp,rsp
- 106:	mov    rsi,QWORD PTR [rdx]
- 109:	mov    rdx,QWORD PTR [rdx+0x8]
- 10d:	call   112 <botlish_entry_2+0x10>
-			10e: R_X86_64_PLT32	botlish_fn_2-0x4 ; step<int>
- 112:	mov    rsp,rbp
- 115:	pop    rbp
- 116:	ret
+00000000000000f9 <botlish_entry_2: step<int>>:
+  f9:	push   rbp
+  fa:	mov    rbp,rsp
+  fd:	mov    rsi,QWORD PTR [rdx]
+ 100:	mov    rdx,QWORD PTR [rdx+0x8]
+ 104:	call   109 <botlish_entry_2+0x10>
+			105: R_X86_64_PLT32	botlish_fn_2-0x4 ; step<int>
+ 109:	mov    rsp,rbp
+ 10c:	pop    rbp
+ 10d:	ret
