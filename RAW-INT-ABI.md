@@ -891,7 +891,46 @@ run 0 is excluded; `out/ir-demand.txt`), Ir per run of the emitted NIR:
 312,704 now): its +0.5 % is noise-level. The one measurable cost of the
 boxed-mixed default is `csv_records`, +0.23 % over the tagged baseline (+0.15 %
 over B): a mixed `ht_capacity_for.expected` chain is unboxed once per call
-instead of being raw throughout. No workload slows down materially.
+instead of being raw throughout. No workload executes materially more
+instructions; wall-clock is a different matter, see the next section.
+
+## Wall-clock (`botlish-native bench`)
+
+`tools/nativebench.tcl` (`out/nativebench-demand.txt`): best of 5 invocations of
+200 in-process runs of the emitted NIR, on an otherwise idle machine, ns
+(repeated three more times for `fib`, `loop-count` and `lex-strategy`; the
+figures below were reproducible to a few percent):
+
+| program | A tagged | B eligibility only | C mixed uses raw | D mixed uses boxed | D vs A |
+|---|---:|---:|---:|---:|---:|
+| fib | 141,082 | 136,259 | 136,267 | 131,730 | −6.6 % |
+| loop-count | 732 | 893 | 1,044 | **1,063** | **+45 %** |
+| sum-refined | 722 | 725 | 701 | 725 | +0.4 % |
+| lex-strategy | 34,319 | 34,167 | 33,882 | 33,908 | −1.2 % |
+| refined-checks | 657,247 | 633,878 | 636,939 | 638,667 | −2.8 % |
+| uri-steady | 4,605,097 | 4,546,920 | 4,535,346 | 4,516,973 | −1.9 % |
+| matmul | 804 | 832 | 802 | 806 | +0.2 % |
+| hashtable | 1,085 | 1,035 | 1,051 | 1,077 | −0.7 % |
+| csv_records | 9,373 | 9,401 | 9,383 | 9,386 | +0.1 % |
+| csv_geometric | 1,744 | 1,772 | 1,748 | 1,749 | +0.3 % |
+| csv_chunked | 1,710 | 1,710 | 1,720 | 1,714 | +0.2 % |
+
+Everything except one program is within noise of the tagged baseline or faster
+(`fib` −6.6 %, `refined-checks` −2.8 %). **`loop-count` is the exception: it
+gets slower with the raw ABI in wall-clock, 732 → 893 ns (B) → 1,063 ns (D),
+consistently across repeated runs, although it executes fewer instructions**
+(13,039 → 12,037 Ir, −7.7 %) and its machine code is smaller (287 → 274
+bytes). The production code for `drive`'s loop is strictly tighter than the
+tagged baseline's (no `sar`, no `shl`/`or` retag per iteration; `work` is
+folded to `mov eax, 0xf` in both), so the cost is not representation
+conversion. This is a ~500-iteration, sub-microsecond run whose time is
+dominated by the call/loop-carried dependence and by where the JIT places the
+loop; the differing loop-head and branch placement (`jle`/`jmp` offsets differ
+by a few bytes between the two builds) is the likely cause, **an unverified
+hypothesis** (an alignment/branch-placement effect in the backend), not
+something the planner decides. It is recorded for the later machine-code audit
+and, per the milestone's scope, not chased here; the other loop-bearing
+programs (`sum-refined`, `matmul`, `csv_*`) show no such effect.
 
 ## Updated corpus code-size result
 
@@ -1064,9 +1103,8 @@ Tcl 9.0.1, Linux x86-64, release native backend, final tree.
 * `bench/corpus.tcl -runs 1`: all backends agree on every algorithm/size
   (6 m 12 s run), exit 0.
 * Dynamic instruction counts per program (callgrind, four configurations) are in
-  *Dynamic instructions per run (four-way)*; wall-clock `botlish-native bench`
-  (`tools/nativebench.tcl`) was not re-run for the final policy because the
-  machine was shared with the validation jobs, and Ir is the reliable figure.
+  *Dynamic instructions per run (four-way)*, wall-clock `botlish-native bench`
+  (`tools/nativebench.tcl`, idle machine) in *Wall-clock*.
 
 ## Existing tests that changed (and why)
 
@@ -1108,6 +1146,10 @@ Tcl 9.0.1, Linux x86-64, release native backend, final tree.
   frequency, spill or code size) is deliberately not added; revisit it only when
   self-hosting or stdlib growth gives real workloads that need it.
   `-raw-mixed-policy raw` (audit-only) reproduces the earlier policy.
+* **Wall-clock does not always follow instruction count:** `loop-count` is
+  +45 % slower than the tagged baseline in wall-clock with fewer instructions
+  and smaller code (see *Wall-clock*): suspected backend loop/branch placement,
+  not representation; recorded for the machine-code audit.
 * **A boxed position cascades through transport.** A parameter that flows into a
   boxed parameter, or a result whose consumer is boxed, is itself boxed, so one
   tagged use can un-raw a chain (`web::is_unreserved.b` → `ascii::is_alphanumeric.b`
@@ -1317,11 +1359,15 @@ String fact) and its own conversion pair, not a new framework.
     residue was `ht_capacity`'s result, raw-demanded by one caller and tagged by
     six, which the boxed-mixed default boxes. CSV: `csv_geometric` +19 → 0,
     `csv_records` −11 bytes vs tagged.
-19. **Does any workload materially slow down?** No. Against the tagged ABI the
-    worst is `csv_records` (+0.23 % Ir) and `lex-strategy` (+0.5 %, noise-level);
-    `fib` −9.3 %, `loop-count` −7.7 %. Against the preliminary plan no program
-    gets slower by more than 0.42 % (`lex-strategy`, noise-level; `csv_records`
-    +0.15 %).
+19. **Does any workload materially slow down?** In instructions, no: against
+    the tagged ABI the worst is `csv_records` (+0.23 % Ir) and `lex-strategy`
+    (+0.5 %, noise-level); `fib` −9.3 %, `loop-count` −7.7 %; against the
+    preliminary plan no program gets slower by more than 0.42 %. In **wall-clock,
+    one**: `loop-count` is +45 % slower than the tagged baseline (732 → 1,063 ns;
+    the eligibility-only plan already cost +22 %) despite fewer instructions and
+    tighter code, a suspected backend alignment/branch-placement effect recorded
+    for the machine-code audit (*Wall-clock*). Every other program is within
+    noise or faster (`fib` −6.6 %).
 
 ## Future-facing question
 

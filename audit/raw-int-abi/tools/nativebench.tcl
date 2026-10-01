@@ -1,7 +1,9 @@
 #!/usr/bin/env tclsh9.0
 # nativebench.tcl -- RAW-INT-ABI.md native execution time of the emitted NIR
-# with the raw Int ABI off (A), eligibility-only (B: -raw-demand-opt 0) and
-# demand-filtered (C): `botlish-native bench RUNS file.nir`, best run of
+# with the raw Int ABI off (A), eligibility-only (B: -raw-demand-opt 0),
+# demand-filtered with mixed uses raw (C: -raw-mixed-policy raw) and
+# demand-filtered with mixed uses boxed (D, the default):
+# `botlish-native bench RUNS file.nir`, best run of
 # REPEAT invocations. Wall-clock, so only large differences mean anything on a
 # shared machine; callgrind (profile-nir.sh) is the reliable per-instruction
 # figure.
@@ -25,7 +27,8 @@ set tmp [file join [pwd] .nativebench-[pid].nir]
 set configs {
     A {-raw-int-abi-opt 0}
     B {-raw-int-abi-opt 1 -raw-demand-opt 0}
-    C {-raw-int-abi-opt 1 -raw-demand-opt 1}
+    C {-raw-int-abi-opt 1 -raw-demand-opt 1 -raw-mixed-policy raw}
+    D {-raw-int-abi-opt 1 -raw-demand-opt 1 -raw-mixed-policy boxed}
 }
 foreach path $args {
     set hir [surface::readProgramFile $path]

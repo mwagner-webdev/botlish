@@ -1,0 +1,11 @@
+fib  A 141082 ns  B 136259 ns  C 136267 ns  D 131730 ns
+loop-count  A 732 ns  B 893 ns  C 1044 ns  D 1063 ns
+sum-refined  A 722 ns  B 725 ns  C 701 ns  D 725 ns
+lex-strategy  A 34319 ns  B 34167 ns  C 33882 ns  D 33908 ns
+refined-checks  A 657247 ns  B 633878 ns  C 636939 ns  D 638667 ns
+uri-steady  A 4605097 ns  B 4546920 ns  C 4535346 ns  D 4516973 ns
+matmul  A 804 ns  B 832 ns  C 802 ns  D 806 ns
+hashtable  A 1085 ns  B 1035 ns  C 1051 ns  D 1077 ns
+csv_records  A 9373 ns  B 9401 ns  C 9383 ns  D 9386 ns
+csv_geometric  A 1744 ns  B 1772 ns  C 1748 ns  D 1749 ns
+csv_chunked  A 1710 ns  B 1710 ns  C 1720 ns  D 1714 ns
