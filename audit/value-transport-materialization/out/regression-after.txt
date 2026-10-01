@@ -1,0 +1,240 @@
+######## backend: interp
+Tests running in interp:  /usr/bin/tclsh9.0
+Tests located in:  /tmp/claude-0/regA/tests
+Tests running in:  /tmp/claude-0/regA
+Temporary files stored in /tmp/claude-0/regA
+Test files run in separate interpreters
+Running tests that match:  *
+Skipping test files that match:  l.*.test
+Only running test files that match:  *.test
+Tests began at Thu Oct 01 02:13:10 UTC 2026
+acceptance.test
+applied-types.test
+ascii.test
+backends.test
+bench-backends.test
+bench-corpus.test
+bindings.test
+blocks.test
+byte-set.test
+calls.test
+checked-domain-proof-provenance.test
+close-callers-convergence.test
+closed-closure-entry-facts.test
+compiler-opt.test
+conjunctive-entry-facts.test
+control.test
+direct-hir-native.test
+emailish-predicate.test
+empty-collection-admissibility.test
+errors.test
+exact-value-facts.test
+hir-aot.test
+hir-call-facts.test
+hir-callable-target.test
+hir-cardinality.test
+hir-closed-call-params.test
+hir-lowering.test
+hir-range-bitop.test
+hir-range-exact.test
+hir-range.test
+hir-refinement.test
+hir-resolution.test
+hir-samples.test
+hir-specialize.test
+hir-syntax.test
+hir-types.test
+immutable-set.test
+inference.test
+instance-entry-range-facts.test
+intrinsic-contracts.test
+list-stdlib.test
+lists.test
+loop-counted.test
+loop-in.test
+loops.test
+module-fn-bridge-reachability.test
+module-static-values.test
+mutable-array-type.test
+mutarray-construction.test
+native-alloc.test
+native-bitshift.test
+native-block-escape.test
+native-byte.test
+native-csv-records.test
+native-escape.test
+native-executable.test
+native-hashing.test
+native-hashtable.test
+native-listloop.test
+native-mutarray.test
+native-param-aggregate.test
+native-refinement-propagation.test
+native-root-liveness.test
+native-root-storage.test
+native-stack-map.test
+native-stack-overflow.test
+native-string-region.test
+native-string-traversal.test
+native-string-view.test
+native-tcl-unicode.test
+native-tiny-leaf-inline.test
+native-tiny-leaf-pressure.test
+native-uri-escape.test
+native-validator-predicate.test
+native.test
+refined-signatures.test
+refined.test
+refinements.test
+regex.test
+results.test
+scalarbits.test
+semantic-instances.test
+setcontains-equality-total.test
+setfromlist-equality-total.test
+source-types.test
+stdlib.test
+strict-references.test
+struct-scalar-replacement.test
+structs-syntax.test
+structs.test
+structural-fn-types.test
+surface-lexer.test
+surface-lowering.test
+surface-modules.test
+surface-parser.test
+surface-samples.test
+symbolic-type-identity.test
+typed-callable-escape.test
+typed-mutarray-builder.test
+typed-parameters.test
+types.test
+unicode-char.test
+value-transport.test
+virtual-construction.test
+web-unreserved.test
+
+Tests ended at Thu Oct 01 02:23:36 UTC 2026
+all.tcl:	Total	3551	Passed	3551	Skipped	0	Failed	0
+Sourced 105 Test Files.
+######## backend: compile
+Tests running in interp:  /usr/bin/tclsh9.0
+Tests located in:  /tmp/claude-0/regA/tests
+Tests running in:  /tmp/claude-0/regA
+Temporary files stored in /tmp/claude-0/regA
+Test files run in separate interpreters
+Running tests that match:  *
+Skipping test files that match:  l.*.test
+Only running test files that match:  *.test
+Tests began at Thu Oct 01 02:23:36 UTC 2026
+acceptance.test
+applied-types.test
+ascii.test
+backends.test
+bench-backends.test
+bench-corpus.test
+bindings.test
+blocks.test
+byte-set.test
+calls.test
+checked-domain-proof-provenance.test
+close-callers-convergence.test
+closed-closure-entry-facts.test
+compiler-opt.test
+conjunctive-entry-facts.test
+control.test
+direct-hir-native.test
+emailish-predicate.test
+empty-collection-admissibility.test
+errors.test
+exact-value-facts.test
+hir-aot.test
+hir-call-facts.test
+hir-callable-target.test
+hir-cardinality.test
+hir-closed-call-params.test
+hir-lowering.test
+hir-range-bitop.test
+hir-range-exact.test
+hir-range.test
+hir-refinement.test
+hir-resolution.test
+hir-samples.test
+hir-specialize.test
+hir-syntax.test
+hir-types.test
+immutable-set.test
+inference.test
+instance-entry-range-facts.test
+intrinsic-contracts.test
+list-stdlib.test
+lists.test
+loop-counted.test
+loop-in.test
+loops.test
+module-fn-bridge-reachability.test
+module-static-values.test
+mutable-array-type.test
+mutarray-construction.test
+native-alloc.test
+native-bitshift.test
+native-block-escape.test
+native-byte.test
+native-csv-records.test
+native-escape.test
+native-executable.test
+native-hashing.test
+native-hashtable.test
+native-listloop.test
+native-mutarray.test
+native-param-aggregate.test
+native-refinement-propagation.test
+native-root-liveness.test
+native-root-storage.test
+native-stack-map.test
+native-stack-overflow.test
+native-string-region.test
+native-string-traversal.test
+native-string-view.test
+native-tcl-unicode.test
+native-tiny-leaf-inline.test
+native-tiny-leaf-pressure.test
+native-uri-escape.test
+native-validator-predicate.test
+native.test
+refined-signatures.test
+refined.test
+refinements.test
+regex.test
+results.test
+scalarbits.test
+semantic-instances.test
+setcontains-equality-total.test
+setfromlist-equality-total.test
+source-types.test
+stdlib.test
+strict-references.test
+struct-scalar-replacement.test
+structs-syntax.test
+structs.test
+structural-fn-types.test
+surface-lexer.test
+surface-lowering.test
+surface-modules.test
+surface-parser.test
+surface-samples.test
+symbolic-type-identity.test
+typed-callable-escape.test
+typed-mutarray-builder.test
+typed-parameters.test
+types.test
+unicode-char.test
+value-transport.test
+virtual-construction.test
+web-unreserved.test
+
+Tests ended at Thu Oct 01 02:33:11 UTC 2026
+all.tcl:	Total	3551	Passed	3547	Skipped	4	Failed	0
+Sourced 105 Test Files.
+Number of tests skipped for each constraint:
+	4	coreScoping

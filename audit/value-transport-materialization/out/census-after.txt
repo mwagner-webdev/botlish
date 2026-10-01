@@ -245,6 +245,16 @@ scan_quoted<str, int, str>         e260   2-field -> 2  result    args=0 rets=2 
 scan_unquoted<str, int, int>       e209   2-field -> 2  result    args=0 rets=2 score=0.0/20.0 frontier=never phys=0  return
 scan_record<str, int, list[List[mutarray], mutarray, int]> e342   2-field -> 2  result    args=0 rets=2 score=0.0/20.0 frontier=never phys=0  return
 scan_record<str, int, list[List[mutarray], mutarray, int]> e350   2-field -> 2  result    args=0 rets=2 score=0.0/20.0 frontier=never phys=0  return
+param i7 b61                 width=3 live=3 up=1 down=1 ret=1 score=9.0/20.0 virtual
+param i13 b61                width=3 live=3 up=1 down=1 ret=0 cyclic score=15.0/20.0 virtual
+param i4 b69                 width=3 live=3 up=1 down=1 ret=1 score=9.0/20.0 virtual
+param i18 b69                width=3 live=3 up=1 down=1 ret=1 cyclic score=18.0/20.0 virtual
+param i12 b6                 width=3 live=3 up=2 down=0 ret=1 score=9.0/20.0 virtual
+param i14 b6                 width=3 live=3 up=2 down=0 ret=0 score=6.0/20.0 virtual
+param i17 b6                 width=3 live=3 up=2 down=0 ret=1 score=9.0/20.0 virtual
+param i19 b6                 width=3 live=3 up=2 down=0 ret=1 score=9.0/20.0 virtual
+param i5 b28                 width=3 live=3 up=2 down=0 ret=1 score=9.0/20.0 virtual
+param i15 b28                width=3 live=3 up=2 down=0 ret=1 score=9.0/20.0 virtual
 result instance i11    width=2 depth=0 score=0.0/20.0 virtual
 result instance i10    width=2 depth=0 score=0.0/20.0 virtual
 result instance i8     width=2 depth=1 score=0.0/20.0 virtual
@@ -260,7 +270,7 @@ structnew          0
 nestedOpened       0
 nestedClosed       0
 afterLocalUse      0
-plannedParams      0
+plannedParams      10
 deniedParams       0
 causes: budget 0 hard 0 other 0
 frontier: never 6
@@ -311,10 +321,10 @@ scan_quoted<str, int, str>         e214   2-field -> 2  result    args=0 rets=2 
 scan_unquoted<str, int, int>       e163   2-field -> 2  result    args=0 rets=2 score=0.0/20.0 frontier=never phys=0  return
 scan_record_rest<str, int, mutarray, int> e299   2-field -> 2  result    args=0 rets=2 score=0.0/20.0 frontier=never phys=0  return
 scan_record_rest<str, int, mutarray, int> e308   2-field -> 2  result    args=0 rets=2 score=0.0/20.0 frontier=never phys=0  return
-ht_rehash<mutarray, int>           e857   3-field -> 3  local     args=1 rets=0 cyclic score=15.0/20.0 frontier=never phys=0  call
-ht_rehash<mutarray, int>           e881   3-field -> 3  local     args=2 rets=0 cyclic score=18.0/20.0 frontier=never phys=0  call
-param i47 b165               width=3 live=3 up=1 down=0 ret=0 cyclic score=15.0/20.0 virtual
-param i47 b168               width=3 live=3 up=1 down=1 ret=0 cyclic score=18.0/20.0 virtual
+ht_rehash<mutarray, int>           e857   3-field -> 3  local     args=1 rets=0 cyclic score=12.0/20.0 frontier=never phys=0  call
+ht_rehash<mutarray, int>           e881   3-field -> 3  local     args=2 rets=0 cyclic score=15.0/20.0 frontier=never phys=0  call
+param i47 b165               width=3 live=3 up=1 down=0 ret=0 cyclic score=12.0/20.0 virtual
+param i47 b168               width=3 live=3 up=1 down=1 ret=0 cyclic score=15.0/20.0 virtual
 param i48 b158               width=3 live=3 up=2 down=0 ret=0 score=6.0/20.0 virtual
 result instance i9     width=2 depth=0 score=0.0/20.0 virtual
 result instance i8     width=2 depth=0 score=0.0/20.0 virtual
@@ -346,10 +356,10 @@ ROW hashtable off 2 9 1 0 25 68 0 0 0 26 643 12477
 ROW hashtable legacy 0 0 1 0 25 68 0 0 0 26 631 12732
 ROW hashtable on 0 0 1 0 25 68 0 0 0 26 631 12732
 == hashtable
-ht_rehash<mutarray, int>           e464   3-field -> 3  local     args=1 rets=0 cyclic score=15.0/20.0 frontier=never phys=0  call
-ht_rehash<mutarray, int>           e488   3-field -> 3  local     args=2 rets=0 cyclic score=18.0/20.0 frontier=never phys=0  call
-param i22 b88                width=3 live=3 up=1 down=0 ret=0 cyclic score=15.0/20.0 virtual
-param i22 b91                width=3 live=3 up=1 down=1 ret=0 cyclic score=18.0/20.0 virtual
+ht_rehash<mutarray, int>           e464   3-field -> 3  local     args=1 rets=0 cyclic score=12.0/20.0 frontier=never phys=0  call
+ht_rehash<mutarray, int>           e488   3-field -> 3  local     args=2 rets=0 cyclic score=15.0/20.0 frontier=never phys=0  call
+param i22 b88                width=3 live=3 up=1 down=0 ret=0 cyclic score=12.0/20.0 virtual
+param i22 b91                width=3 live=3 up=1 down=1 ret=0 cyclic score=15.0/20.0 virtual
 param i23 b81                width=3 live=3 up=2 down=0 ret=0 score=6.0/20.0 virtual
 virtual            2
 materialized       0
@@ -429,4 +439,4 @@ COLUMNS structnew structget listnew listget guards call callmulti callvalue retm
 TOTAL off 39 52 66 42 59 328 29 8 18 231 6126 103751
 TOTAL legacy 15 2 66 42 59 300 57 8 50 231 6042 102412
 TOTAL on 15 2 66 42 59 300 57 8 50 231 6042 102412
-METRIC-TOTALS afterLocalUse 0 argHops 63 deniedParams 0 loopHops 18 materialized 15 nestedClosed 0 nestedOpened 0 plannedParams 6 returnHops 143 structnew 15 transportedFields 52 virtual 24
+METRIC-TOTALS afterLocalUse 0 argHops 63 causes:budget 0 causes:hard 15 causes:other 0 deniedParams 0 {distance:0 x2} 15 {distance:1 x2} 4 {distance:2 x2} 16 {distance:cyclic x3-4} 4 frontier:control-merge 1 frontier:never 24 frontier:storage-boundary 14 loopHops 18 materialized 15 nestedClosed 0 nestedOpened 0 plannedParams 16 returnHops 143 structnew 15 transportedFields 52 virtual 24

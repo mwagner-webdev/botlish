@@ -1,0 +1,14 @@
+a1.nir identical
+a2.nir identical
+a3.nir identical
+b1.nir identical
+c1.nir identical
+c2.nir identical
+d1.nir identical
+d2.nir identical
+l1.nir identical
+m1.nir identical
+n1.nir identical
+n2.nir identical
+r1.nir identical
+r2.nir identical

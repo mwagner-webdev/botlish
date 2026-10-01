@@ -61,7 +61,7 @@ is a heuristic weight and not a measured fact, the text says so.
   failure: the corpus is dominated by narrow scan returns, 3-field rehash
   argument transport and stored `Test` values. The milestone's value is the
   frontier capability and its evidence.
-* **Regression:** `tclsh9.0 tests/all.tcl`: @@REGRESSION@@. The 64 new tests are
+* **Regression:** `tclsh9.0 tests/all.tcl`: interp 3551 passed, 0 failed; compile 3547 passed, 4 skipped, 0 failed (the same 4 `coreScoping` skips as the baseline), and the same totals under GC stress. The 64 new tests are
   `tests/value-transport.test`; the four old tests that pinned the width-only
   policy now run it explicitly (`-struct-policy legacy`).
 
@@ -514,7 +514,7 @@ IR) passes.
 Unchanged opcodes: ordinary registers, `fields` variants (`pnames="r.0 r.1"`),
 `callmulti`/`retmulti` (`results=N`), `structnew`, `structget`. No virtual
 aggregate opcode, no new runtime value, no allocator or GC change (Rust code
-untouched; `cargo test` 78 + 22 passed).
+untouched; `cargo test --release`: 56 + 22 = 78 passed).
 
 ## GC/root handling
 
@@ -567,3 +567,652 @@ frontier compares, hashes and prints exactly as one built at the construction
   building it at the construction when the materialization is unconditional (see
   "Late-frontier probe"): its value is where the allocation is placed (after the
   uses, only on the paths that reach the region).
+
+## Canonical corpus census
+
+(`audit/value-transport-materialization/out/census-after.txt`; the same tool
+run on the baseline tree gives the baseline rows, `census-base.txt`.)
+
+| | no struct opt | legacy policy | **new default** | baseline tree |
+|---|---:|---:|---:|---:|
+| `structnew` | 39 | 15 | **15** | 15 |
+| `structget` | 52 | 2 | **2** | 2 |
+| `call` | 328 | 300 | **300** | 300 |
+| `callmulti` | 29 | 57 | **57** | 57 |
+| `retmulti` | 18 | 50 | **50** | 50 |
+| functions | 231 | 231 | **231** | 231 |
+| guards | 59 | 59 | **59** | 59 |
+| NIR lines | 6126 | 6042 | **6042** | 6042 |
+| machine code bytes | 103751 | 102412 | **102412** | 102412 |
+
+The new default's NIR is **byte-identical** to the legacy policy's and to the
+baseline tree's for all 17 programs (`dump-nir.tcl`, `diff -r`, and pinned by
+`vt-corpus-identical-nir`). Does the canonical corpus make any new frontier
+decision? **No**, and that is the expected result: no slot is denied by the
+budget (`deniedParams` 0), no nested value exists to open, no value turns
+physical for transport reasons. Of the 39 semantic constructions: 24 are
+virtual and never materialized (frontier `never`), 14 are the stored `Test`
+values (`storage-boundary`) and 1 the `NotFound` handler's (`control-merge`).
+
+## Field-hop census
+
+Counted from the NIR (an argument hop = one field passed by a `call` to a
+function whose parameters are field-expanded; a return hop = one result of a
+`callmulti`; a loop hop = one field carried by a self-tail `tail`), summed over
+the corpus:
+
+| | virtual constructions | transported field values | argument hops | return hops | loop hops | `structnew` |
+|---|---:|---:|---:|---:|---:|---:|
+| corpus, new default (= legacy = baseline) | 24 | 52 | 63 | 143 | 18 | 15 |
+
+For comparison the late-frontier probe (W=6, 5 argument edges) is 0 hops under
+the default and 30 under `virtual` (every budget raised); the wide-return probe
+(W=8, 2 edges) is 16 return hops under both.
+
+## Distance histogram
+
+Virtual and materialized constructions by transport distance (argument +
+return edges of the worst path through their slot; `cyclic` separate) and
+width bucket, corpus total:
+
+| distance x width | count |
+|---|---:|
+| 0 x 2 | 15 (the stored `Test` values: no path) |
+| 1 x 2 | 4 |
+| 2 x 2 | 16 (scan results over two exact returns) |
+| cyclic x 3-4 | 4 (the rehash `src`/`dest` groupings, loop-carried by the self-tail scan) |
+| 3-4, 5-8, 9+ | 0 |
+
+The real corpus does not exercise distances beyond 2 or widths beyond 4: the new
+model is validated by the synthetic probes and tests, not by the corpus.
+
+## Frontier histogram
+
+| frontier | construction | before-first-call | after-local-use | before-long-forwarding-region | storage-boundary | open-call | control-merge | never |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| corpus | 0 | 0 | 0 | 0 | 14 | 0 | 1 | 24 |
+
+(`after local use` is also reported as an attribute of the first-call and
+long-region frontiers: `afterLocalUse`.) The synthetic frontier probes populate
+the others: `before-long-forwarding-region` with `afterLocalUse` 1 for the
+late-frontier probe; `construction` for a wide literal passed straight into
+a denied chain.
+
+## CSV control
+
+`csv_geometric` allocates **0** `Struct` objects, as before (also `csv`,
+`csv_chunked`, `csv_records`); `callmulti`/`retmulti` transport is unchanged
+(`csv`: 12 / 11, `csv_chunked`: 19 / 20, `csv_geometric`: 11 / 9, `csv_records`:
+11 / 9); parent-level allocation counts unchanged (`csv_geometric_10000`: 298937
+allocations, 13653895 bytes, 7 GC cycles; `vt-corpus-csv-allocation-free`).
+The scan results are 2-field returns over at most two return edges: their
+return score is 0 (two fields come back in `rax`/`rdx`).
+
+## Hashtable control
+
+The 3-field `src`/`dest` rehash groupings still cross `ht_rehash_scan`
+(`pnames="src.0 src.1 src.2 i oldCapacity dest.0 dest.1 dest.2 newCapacity"`, 9
+parameters) and `ht_rehash_insert` as fields: 0 `Struct` allocations on all three
+hashtable workloads. The model now describes them as *cyclic* (the self-tail
+scan carries them around its back edge), width 3, scores 12 and 15 against a
+budget of 20: virtual. A 4-field grouping on the same paths would score 16 and 20
+(still virtual, as under the legacy cap of 4); a 5-field one 21 and would
+materialize, which is the intended behavior for a wider loop-carried group.
+
+## Test-selection control
+
+`bench/test-selection.bot` keeps its **15** `structnew` (14 stored in
+`List[Test]`: `storage-boundary`; 1 `control-merge`), `structget` 2: stored
+domain values stay physical under every policy
+(`vt-corpus-test-selection-control`).
+
+## Long-narrow probe
+
+A 2-field value built at a call site and forwarded through exact calls (`fwd0`
+... `fwd{E-1}`, every field read by the last callee). `hop(arg, 2) = 2`, so the
+score is `2 E` against a budget of 20: **virtual up to E = 10**, an object
+from E = 11. Measured (virtual against the object, stack operands / function
+bytes, from the grid): E=1 -9 / -67 B, E=4 -6 / -31 B, E=8 -2 / +17 B, E=12
++2 / +65 B -- the break-even is at E~11, which is where the model changes its mind;
+the legacy policy's "argument distance is not measured" would have carried it
+further. A simple very-low hop limit would have stopped far earlier. Pinned:
+`vt-narrow-long-arg` (E=9: 0 `structnew`, every `fwd` takes 3 parameters; E=10
+virtual; E=11 object, `fwd` takes 2).
+
+## Wide-short-return probe
+
+`chainRet W=6/8, E=1..3`: returns cost 6 or 8 per hop (`W`, above the 2
+register-returned fields), score `W E <= 20`: **virtual at W=6 for E <= 3 and at
+W=8 for E <= 2**. Measured, W=8 E=2: 0 `StructObj`s (200000 -> 0), +76 bytes and
++14 stack operands against the object, 94 -> 11 ns/iter; one `retmulti` of 8
+results per function (`ret0:1>8`). `vt-wide-short-return`.
+
+## Wide-long-argument probe
+
+`chainArg W=8, E=4..8`: `hop(arg, 8) = 24` already exceeds the budget at one
+edge: **the value is an object from its first argument edge**. Pinned frontier:
+`structnew` in the driver (at the call, because the value is built there),
+every `fwd` takes **2** parameters (pointer + `k`), the last consumer reads 8
+`structget`s: `vt-wide-long-arg`. Measured against forcing it virtual (E=4): the
+object costs 1362 function bytes and 55 stack operands, the virtual form 1886 bytes
+and 132 (+38% code, 2.4x the stack operands) for 95 -> 20 ns/iter. The census says
+why: `class materialized, reason transport-budget, frontier
+before-long-forwarding-region, args=4, score 96.0/20.0`.
+
+## Late-frontier probe
+
+The defining test: a wide value, two local projections, then a long forward chain.
+
+```
+r = {f0 .. f5}                       # virtual
+local = r.f0 + r.f1                  # on registers, no structget
+... fwd4(r, i)                       # structnew HERE, one pointer through fwd4..fwd0
+```
+
+`vt-late-frontier` (W=6, E=5) pins: exactly 1 `structnew`, in `drive`, **after**
+the `iadd` of the two local projections; 0 `structget` in `drive`; every `fwd`
+takes 2 parameters; the last consumer 6 `structget`s; value 565 on every
+execution. The census record: `class local, mats transport-budget, frontier
+before-long-forwarding-region@fwd4, afterLocalUse 1, argEdges 5, score 50.0/20.0,
+physical 1`. It is **not** eager construction-time materialization: the
+construction does not allocate and the local use does not read memory.
+
+Honest cost note (measured, `late-frontier W=6 E=4`): the object plus
+local-register uses costs more code and stack than allocating at the
+construction when the materialization is unconditional -- 1440 against 1354
+function bytes, 73 against 54 stack operands (six field registers are live until
+the call) -- with the same 200000 allocations and the same 96.5 ns/iter. What the
+late frontier buys is *placement*: the allocation is after the uses and only on
+the paths that reach the region (next probe), and the uses never touch memory.
+
+## Mixed-branch probe
+
+`branchy W=8, E=6`: one branch projects two fields, the other forwards down 6
+argument edges. The structnew is in the long branch only: with 100 iterations
+and the long branch taken when `i >= 90`, the program allocates **exactly 10**
+`StructObj`s (0 if never taken, 100 if always): `vt-branch-frontier`, run
+time. Across a call the frontier cannot differ by branch inside the callee (see
+"Known limitations"); in that case the conservative frontier is the callee's
+parameter being non-virtual.
+
+## Direction comparison
+
+Identical width and distance, different direction (`vt-direction-asymmetry`;
+virtual = 0 `Struct` allocations, object = 200000; fn bytes / stack operands from
+the key probes):
+
+| probe | argument chain | return chain |
+|---|---|---|
+| W=6, E=3 | **object** (1114 B, 46 stack; virtual would be +18 stack) | **virtual** (1017 B, 49 stack) -- 94 -> 10 ns |
+| W=8, E=2 | **object** | **virtual** |
+| W=4, E=6 | object (score 24) | object (score 24): equal at narrow widths |
+| W=4, E=4 | virtual (16) | virtual (16) |
+
+The asymmetry is in the *wide* regime, which is where the measurements say it is:
+per-hop stack growth 11 against 8 at W=6 and 23 against 8 at W=8.
+
+## Nested-local probe
+
+`outer {a, b, inner {c, d}}`, inner only projected: **0** `StructObj`s
+(previously 1 per iteration), 0 `structnew`, 0 `structget`; fn code 740 -> 516
+bytes (legacy 608), stack operands 46 -> 25, 163 -> 4 ns/iter (legacy 87).
+`vt-nested-local`; `{left{a,b}, right{c,d}}` and a 3-deep
+`{a, x{b, y{c,d}}}` likewise 0 (`vt-nested-two-inner`, `vt-nested-deep`).
+
+## Nested-short-return probe
+
+The same value crossing one return: candidates `[a, b, inner*]` (3 results) and
+`[a, b, c, d]` (4 results). The planner opens (score 4 against 3, difference
+1 < `allocUnits` 13), so `ret0` has `results=4` and `drive` 0 allocations;
+`-struct-nesting 0` (and the legacy policy) give `results=3` and one inner
+`structnew`. By chain length (`vt-nested-return-budget-chooses`): E=1..5 opened (4
+fields x 5 = 20); **E=6: bundled** (opening would score 24 > 20, the closed form
+18 <= 20 fits: 6 `callmulti`s, 1 inner `structnew`); E=8: an object (even the closed
+form is 24). The default is chosen by score, not by a nesting rule.
+
+## Nested-long-argument probe
+
+`{a, b, inner {c0..c3}}` over argument chains (`vt-nested-long-arg-stays-bundled`):
+E=1: opened (7 parameters, 0 allocations); **E=3: bundled** (`closed:transport-budget`:
+opened width 6 would score 30 > 20, closed width 3 scores 9; 4 parameters, 1
+`structnew` for the inner value); E=2 is the allocation-cheaper rule's
+case (opened 20 fits but costs 14 > 13 more than the closed 6, so it is kept
+bundled). A narrow inner value is opened across the same long chain (inner width
+2, E=4: 5 parameters, 0 allocations). Every inner value is bundled or opened by
+the *scores*, none by "nested -> box".
+
+## Legacy comparison
+
+Every focused probe where the new default differs from the legacy
+local-16/return-8/argument-4 policy (`out/legacy-comparison.md`; 5 timed runs
+per measurement here, the table "Runtime impact" has the 15x3 methodology;
+allocations are per 200000 iterations):
+
+| probe | legacy | new default | Struct allocs | field-hops arg+ret | fn code bytes | stack ops | ns/iter (best of 5) |
+|---|---|---|---|---|---|---|---|
+| narrow-arg W=2 E=12 | virtual | object (200000 alloc) | 0 -> 200000 | 24 -> 0 | 1187 -> 1122 | 40 -> 38 | 17.0 -> 96.1 |
+| narrow-arg W=2 E=16 | virtual | object (200000 alloc) | 0 -> 200000 | 32 -> 0 | 1443 -> 1330 | 48 -> 42 | 24.8 -> 98.9 |
+| wide-return W=8 E=3 | virtual | object (200000 alloc) | 0 -> 200000 | 24 -> 0 | 1298 -> 1156 | 61 -> 39 | 13.7 -> 97.7 |
+| direction-arg W=4 E=6 | virtual | object (200000 alloc) | 0 -> 200000 | 24 -> 0 | 1134 -> 1045 | 46 -> 41 | 12.0 -> 88.9 |
+| direction-ret W=4 E=6 | virtual | object (200000 alloc) | 0 -> 200000 | 24 -> 0 | 969 -> 859 | 49 -> 25 | 11.6 -> 89.0 |
+| direction-arg W=4 E=8 | virtual | object (200000 alloc) | 0 -> 200000 | 32 -> 0 | 1298 -> 1149 | 54 -> 43 | 14.1 -> 90.3 |
+| direction-ret W=4 E=8 | virtual | object (200000 alloc) | 0 -> 200000 | 32 -> 0 | 1115 -> 945 | 57 -> 25 | 15.0 -> 93.8 |
+| direction-ret W=6 E=4 | virtual | object (200000 alloc) | 0 -> 200000 | 24 -> 0 | 1108 -> 962 | 55 -> 31 | 12.1 -> 91.5 |
+| mixed W=4 R=6 A=6 | virtual | object (200000 alloc) | 0 -> 200000 | 48 -> 0 | 1606 -> 1311 | 76 -> 39 | 20.8 -> 97.0 |
+| mixed W=6 R=3 A=2 | object (200000 alloc) | virtual | 200000 -> 0 | 0 -> 30 | 1177 -> 1450 | 43 -> 77 | 93.6 -> 14.8 |
+| branchy W=4 E=8 | virtual | object (199900 alloc) | 0 -> 199900 | 32 -> 0 | 1383 -> 1234 | 56 -> 47 | 14.3 -> 89.9 |
+| nested-flat4 long-argument | virtual | object (200000 alloc) | 0 -> 200000 | 24 -> 0 | 1129 -> 1040 | 45 -> 40 | 11.5 -> 87.5 |
+| nested-inner1 local | object (200000 alloc) | virtual | 200000 -> 0 | 0 -> 0 | 608 -> 516 | 39 -> 25 | 86.7 -> 4.1 |
+| nested-inner1 return | object (200000 alloc) | virtual | 200000 -> 0 | 3 -> 4 | 703 -> 600 | 42 -> 29 | 85.8 -> 4.9 |
+| nested-inner1 argument | object (200000 alloc) | virtual | 200000 -> 0 | 3 -> 4 | 782 -> 719 | 34 -> 25 | 85.3 -> 6.8 |
+| nested-inner2 local | object (400000 alloc) | virtual | 400000 -> 0 | 0 -> 0 | 721 -> 516 | 47 -> 25 | 167.0 -> 4.1 |
+| nested-inner2 return | object (400000 alloc) | virtual | 400000 -> 0 | 2 -> 4 | 763 -> 600 | 41 -> 29 | 165.8 -> 4.9 |
+| nested-inner2 argument | object (400000 alloc) | virtual | 400000 -> 0 | 2 -> 4 | 947 -> 719 | 56 -> 25 | 172.5 -> 7.2 |
+| nested-inner2 long-argument | object (400000 alloc) | object (200000 alloc) | 400000 -> 200000 | 12 -> 18 | 1267 -> 1147 | 66 -> 49 | 184.3 -> 94.5 |
+| nested-deep local | object (400000 alloc) | virtual | 400000 -> 0 | 0 -> 0 | 730 -> 516 | 46 -> 25 | 163.1 -> 3.9 |
+| nested-deep return | object (400000 alloc) | virtual | 400000 -> 0 | 2 -> 4 | 748 -> 600 | 35 -> 29 | 165.7 -> 4.9 |
+| nested-deep argument | object (400000 alloc) | virtual | 400000 -> 0 | 2 -> 4 | 907 -> 719 | 51 -> 25 | 173.1 -> 6.9 |
+| nested-deep long-argument | object (400000 alloc) | object (200000 alloc) | 400000 -> 200000 | 12 -> 18 | 1227 -> 1147 | 61 -> 49 | 179.0 -> 92.8 |
+
+Why each group differs:
+
+* **Long narrow or moderately wide chains (`narrow-arg W=2 E=12/16`,
+  `direction-* W=4 E=6/8`, `wide-return W=8 E=3`, `direction-ret W=6 E=4`,
+  `mixed W=4 R=6 A=6`, `branchy W=4 E=8`, `nested-flat4 long-argument`):** the
+  legacy caps never looked at distance, so they carried every value that fit
+  *one* boundary through any number of boundaries. The path score exceeds the
+  budget (24..32 against 20), the value becomes one object at its construction
+  or before the chain. Effects: allocations 0 -> 200000, field-hops 24..48 -> 0,
+  function code **-5% .. -18%** (e.g. 1298 -> 1149 B), stack operands **-2 ..
+  -37**, runtime 12..25 ns -> ~90 ns (the allocator's cost; the reason this is
+  never the criterion). These are exactly the "cheaper to carry a pointer than
+  W fields over E edges" cases.
+* **`mixed W=6 R=3 A=2`:** the legacy policy refused the argument (6 > 4), so the
+  bound local was not virtual and the whole return chain was physical. The path
+  model scores the 3 return edges of 6 fields at 18 and, starting at the bound
+  local (which can itself become the object), the 2 argument edges at 20: both
+  within budget, all virtual. Allocations 200000 -> 0, hops 0 -> 30, code +273 B, stack +34, runtime
+  93.6 -> 14.8 ns. A choice in the other direction: the *new* policy keeps *more*
+  virtual where the path is short.
+* **Nested probes:** the legacy policy never opens an inner value; the cut does.
+  Allocations 200000/400000 -> 0 (one per iteration per inner value), function
+  code **-8% .. -28%** (e.g. `inner2 local` 721 -> 516 B), stack operands -6 ..
+  -31, runtime 85..172 ns -> 4..7 ns. The two long-argument rows keep the inner
+  value bundled (only the outer is carried as fields), halving the allocations
+  (400000 -> 200000) and the code (-9%).
+
+## Width experiments
+
+The calibration grid (`out/calibration-grid.md`; every cell is the virtual form
+minus the object, in stack operands / function bytes; **V** = the default
+decision):
+
+
+arg (V = default keeps it virtual, P = default materializes; cells: delta stack operands / delta function bytes, virtual minus physical)
+
+| W \ E | 1 | 2 | 3 | 4 | 6 | 8 | 12 |
+|---|---|---|---|---|---|---|---|
+| 2 | **V** -9 / -67 | **V** -8 / -55 | **V** -7 / -43 | **V** -6 / -31 | **V** -4 / -7 | **V** -2 / +17 | P +2 / +65 |
+| 3 | **V** -10 / -71 | **V** -8 / -50 | **V** -6 / -29 | **V** -4 / -8 | **V** +0 / +34 | P +4 / +76 | P +12 / +160 |
+| 4 | **V** -10 / -61 | **V** -7 / -31 | **V** -4 / -1 | **V** -1 / +29 | P +5 / +89 | P +11 / +149 | P +23 / +269 |
+| 5 | **V** -7 / -26 | **V** -1 / +34 | **V** +5 / +94 | P +11 / +154 | P +23 / +274 | P +35 / +394 | P +59 / +634 |
+| 6 | **V** -2 / -26 | **V** +8 / +57 | P +18 / +140 | P +28 / +223 | P +48 / +389 | P +68 / +555 | P +108 / +887 |
+| 8 | P +11 / +59 | P +33 / +214 | P +55 / +369 | P +77 / +524 | P +121 / +834 | P +165 / +1144 | P +253 / +1764 |
+
+ret (V = default keeps it virtual, P = default materializes; cells: delta stack operands / delta function bytes, virtual minus physical)
+
+| W \ E | 1 | 2 | 3 | 4 | 6 | 8 | 12 |
+|---|---|---|---|---|---|---|---|
+| 2 | **V** -7 / -93 | **V** -7 / -116 | **V** -7 / -139 | **V** -7 / -162 | **V** -7 / -208 | **V** -7 / -254 | **V** -7 / -346 |
+| 3 | **V** -4 / -69 | **V** -1 / -48 | **V** +2 / -27 | **V** +5 / -6 | **V** +11 / +36 | P +17 / +78 | P +29 / +162 |
+| 4 | **V** +4 / -40 | **V** +8 / -10 | **V** +12 / +20 | **V** +16 / +50 | P +24 / +110 | P +32 / +170 | P +48 / +290 |
+| 6 | **V** +6 / +2 | **V** +12 / +50 | **V** +18 / +98 | P +24 / +146 | P +36 / +242 | P +48 / +338 | P +72 / +530 |
+| 8 | **V** +6 / +10 | **V** +14 / +76 | P +22 / +142 | P +30 / +208 | P +46 / +340 | P +62 / +472 | P +94 / +736 |
+| 12 | **V** +0 / -55 | P +18 / +80 | P +36 / +215 | P +54 / +350 | P +90 / +620 | P +126 / +890 | P +198 / +1430 |
+
+Reading: the argument table's break-even (stack delta 0) runs from E=11 at W=2
+to E~1 at W=6 and never at W=8; the return table's from "never" at W=2 (returns
+cost nothing) to E~3 at W=3, E~1 at W=4..6. The default's decision boundary
+(budget 20) sits just above break-even in both. Cyclic (loop-carried, W = 2, 3, 4,
+5, 6, 8): +6, +10, +17, +15, +18, +34 against the object's allocation sequence
+(`out/grid-cyc.tsv`).
+
+## Distance experiments
+
+The same grids read along E: argument transport costs W-proportional hops up to
+4 fields (+2, +3, +4 stack operands per hop), then grows (+7, +11, +23); return
+transport 0 / +3 / +4 / +6 / +8 per hop at W = 2 / 3 / 4 / 6 / 8. A narrow value
+is cheaper than the object over short and medium chains in *both* directions
+(W=2 returns: -7 stack operands and -93..-346 bytes at every distance).
+
+## Nesting experiments
+
+(Probe table, `out/probes-key.txt`; fn code bytes / stack operands / ns per
+iteration, physical / legacy / new default.)
+
+| probe | Struct allocs p/l/d | fn bytes p/l/d | stack ops p/l/d | ns/iter p/l/d |
+|---|---|---|---|---|
+| flat4 (control) local | 200000/0/0 | 588/516/516 | 26/25/25 | 83.6/3.9/4.1 |
+| inner1 local | 400000/200000/0 | 740/608/516 | 46/39/25 | 162.3/86.7/4.1 |
+| inner1 return | 400000/200000/0 | 771/703/600 | 38/42/29 | 162.3/85.8/4.9 |
+| inner1 argument | 400000/200000/0 | 909/782/719 | 53/34/25 | 163.4/85.3/6.8 |
+| inner1 6-edge argument | 400000/200000/200000 | 1169/1147/1147 | 58/49/49 | 175.7/92.9/94.9 |
+| inner2 local | 600000/400000/0 | 810/721/516 | 53/47/25 | 243.4/167.0/4.1 |
+| inner2 return | 600000/400000/0 | 837/763/600 | 41/41/29 | 257.4/165.8/4.9 |
+| inner2 argument | 600000/400000/0 | 1022/947/719 | 63/56/25 | 255.7/172.5/6.8 |
+| deep local | 600000/400000/0 | 811/730/516 | 52/46/25 | 246.7/163.1/3.9 |
+| deep 6-edge argument | 600000/400000/200000 | 1267/1227/1147 | 64/61/49 | 264.9/179.0/92.8 |
+
+The flat 4-field control is exactly the cut-opened nested forms' code (516 B,
+25 stack operands): opening makes a nested value cost what the flat one costs.
+Over the 6-edge chain the width-4 flat value is an object under the default
+(score 24), and the nested forms are bundled with only the outer allocated (1
+object/iteration against 2 or 3).
+
+## Machine code
+
+(`out/asm/`, `tools/machine.py`; objdump, Intel syntax.) `wide-long-arg`
+`fwd1`: default (pointer): 18 instructions, 1 stack operand; forced virtual: 51
+instructions, 23 stack operands -- the 9 transported values arrive 5 in
+registers and 4 on the stack:
+
+```
+mov  QWORD PTR [rsp],r10     ; fields 5..8 stored to the stack argument area
+mov  QWORD PTR [rsp+0x8],r11 ;   at every one of the E call sites
+mov  QWORD PTR [rsp+0x10],r12
+mov  QWORD PTR [rsp+0x18],rdx
+...
+call botlish_fn_2
+```
+
+`late-frontier` `fwd1`: pointer, 18 insns / 1 stack operand against 37 / 11 for
+the virtual form; `narrow-long-arg` `fwd4` (W=2): identical under both (21
+insns, 2 stack operands: three values in registers). `wide-short-return`
+`ret0` (8 results): the first result in `rax`, the other seven stored through a
+return-area pointer passed in `rdx` (7 stores): the same under the default and
+`virtual`. No new
+backend, estimator or Cranelift change; these files only support the choice of
+the budgets.
+
+## Register/stack-pressure evidence
+
+| probe | argument count (fn params) | result count | fn code bytes | stack operands |
+|---|---|---|---|---|
+| wide-arg W=8 E=4: object / virtual | 2 / 9 per `fwd` | 1 / 1 | 1362 / 1886 | 55 / 132 |
+| wide-return W=8 E=2: object / virtual | 1 / 1 | 1 / 8 | 1113 / 1189 | 39 / 53 |
+| narrow W=2 E=8 arg: object / virtual | 2 / 3 | 1 / 1 | 914 / 931 | 34 / 32 |
+| late-frontier W=6 E=4: eager / default / virtual | 2 / 2 / 7 | 1 / 1 / 1 | 1354 / 1440 / 1629 | 54 / 73 / 97 |
+
+Runtime is never reported without these. The stack-operand count is a mechanical
+indicator (`[rsp+..]`/`[rbp-..]` operands of the disassembly), not a model.
+
+## Allocation impact
+
+Corpus and workloads: **none** (identical counts; "Benchmark/corpus parity").
+Probes: where the default materializes (denied path) the allocation count equals
+the physical form's at every iteration; where it opens a nested inner or
+accepts a longer virtual path it is 0 against 200000..600000
+(`legacy-comparison.md`). Allocated bytes and GC cycles follow (9..27 GC cycles
+per probe at 200000 iterations when objects are allocated, 0 virtual; the
+tsv columns carry bytes and cycles for every probe and mode). Allocation count is
+never the success criterion: `narrow-arg E=12` and `wide-return E=3` are objects
+under the default precisely where fewer allocations would cost more transport.
+
+## Code-size impact
+
+Corpus: unchanged (102412 B). Probes (function bytes, the default against the
+raised-budget `virtual` form): `wide-arg W=8` E=4 / 6 / 8: 1362 against 1886 /
+2300 / 2714 bytes (the default avoids +38% / +57% / +73%); `wide-return W=8 E=3`:
+1156 against 1298; `late-frontier W=6 E=4`: 1440 against 1629; nested forms: the
+opened form is the smallest (516 B against 740 for the physical form and 608
+for the legacy one). `nested-flat4 long-argument` (W=4, E=6): the default object
+form is 1040 B, the virtual form 1129 B. Code growth is one of the reasons to
+materialize despite faster isolated runtime, and the grids measure it directly.
+
+## Runtime impact
+
+Workloads: best of 15 per round, three interleaved rounds (baseline tree /
+after tree in turn), minimum and median over the rounds, microseconds
+(`out/workloads-{base,after}-run{1,2,3}.txt`):
+
+| workload | baseline min / med | after min / med | after vs baseline (min / med) |
+|---|---|---|---|
+| `csv_geometric_100` | 316.9 / 319.0 | 315.8 / 444.3 | -0.4% / +39.3% |
+| `csv_geometric_1000` | 4444.1 / 4526.0 | 4412.5 / 4436.0 | -0.7% / -2.0% |
+| `csv_geometric_10000` | 52925.8 / 53107.1 | 53646.1 / 53664.3 | +1.4% / +1.0% |
+| `csv_records_1000x5` | 2846.4 / 2877.3 | 2837.9 / 2845.0 | -0.3% / -1.1% |
+| `csv_records_1000x20` | 12899.1 / 13077.0 | 12938.5 / 13054.0 | +0.3% / -0.2% |
+| `csv_records_presized_1000x20` | 11075.9 / 11092.6 | 11280.2 / 11322.1 | +1.8% / +2.1% |
+| `csv_records_10000x5` | 35150.8 / 35360.4 | 35110.6 / 35195.6 | -0.1% / -0.5% |
+| `csv_records_sample` | 19.1 / 19.4 | 19.3 / 19.3 | +0.6% / -0.4% |
+| `hashtable_build_1000` | 292.9 / 292.9 | 292.9 / 294.9 | +0.0% / +0.7% |
+| `hashtable_build_10000` | 3163.7 / 3166.9 | 3095.9 / 3130.6 | -2.1% / -1.1% |
+| `hashtable_build_50000` | 22005.7 / 22069.1 | 21964.5 / 22024.8 | -0.2% / -0.2% |
+
+NIR and machine code are identical, so any difference is noise (the same
+tree's rounds differ by up to ~3%; the one `csv_geometric_100` median outlier,
++39%, is one slow round of the 300 us workload -- its minimum is -0.4%).
+Probes: best of 15, three interleaved rounds, ns per iteration, minimum / median
+(`out/runtime-probes.txt`), all four modes:
+
+| probe | physical | legacy | **default** | virtual (budgets raised) |
+|---|---|---|---|---|
+| narrow-arg W=2 E=9 | 93.79 / 94.16 | 12.46 / 12.66 | 13.01 / 13.20 | 12.85 / 13.11 |
+| wide-return W=8 E=2 | 90.57 / 92.07 | 10.77 / 10.90 | 10.85 / 10.85 | 10.80 / 10.81 |
+| wide-return W=8 E=8 | 101.50 / 102.18 | 24.03 / 24.37 | 100.00 / 101.81 | 24.48 / 24.56 |
+| wide-arg W=8 E=4 | 93.51 / 95.71 | 93.89 / 94.80 | 94.81 / 95.01 | 19.75 / 19.75 |
+| wide-arg W=8 E=8 | 98.34 / 98.78 | 98.61 / 98.85 | 96.87 / 98.33 | 36.67 / 36.72 |
+| late-frontier W=6 E=5 | 95.66 / 95.97 | 95.56 / 95.63 | 94.11 / 95.45 | 17.79 / 17.86 |
+| direction-arg W=6 E=3 | 92.57 / 94.87 | 92.75 / 94.67 | 92.68 / 94.39 | 11.53 / 11.60 |
+| direction-ret W=6 E=3 | 92.08 / 92.28 | 10.04 / 10.05 | 9.93 / 10.01 | 10.06 / 10.11 |
+| branchy W=8 E=6 | 96.33 / 97.16 | 96.57 / 98.27 | 97.10 / 97.40 | 27.96 / 28.08 |
+| mixed W=4 R=3 A=6 | 91.02 / 91.72 | 15.73 / 15.85 | 91.29 / 91.79 | 15.58 / 15.76 |
+| nested-local | 163.86 / 163.92 | 87.02 / 87.43 | 3.96 / 3.97 | 3.98 / 3.99 |
+| nested-return E=1 | 169.06 / 169.23 | 88.03 / 88.67 | 4.87 / 4.96 | 4.86 / 4.91 |
+| nested-return E=6 | 175.72 / 176.31 | 96.15 / 96.63 | 96.77 / 98.55 | 11.22 / 11.32 |
+| nested-arg inner4 E=3 | 173.33 / 173.44 | 87.01 / 87.13 | 87.80 / 88.76 | 86.36 / 87.69 |
+
+Runtime is one axis: the "virtual" column is fastest on every wide probe and is
+exactly what the model declines (the transport columns above are why).
+
+## Compile-time impact
+
+`tools/compile-split.tcl`, 3 rounds x 7 runs per tree, median of the rounds,
+milliseconds, whole canonical corpus (baseline tree, then after):
+
+| stage | baseline | after | change |
+|---|---:|---:|---:|
+| specialization | 374.1 | 367.7 | -1.7% |
+| **representation analysis** (`hir::escape::analyze`) | 136.5 | 146.2 | **+7.1%** |
+| NIR lowering end to end (includes both above) | 1563.8 | 1606.6 | **+2.7%** |
+| Cranelift JIT | 124.2 | 125.8 | +1.3% |
+
+The analysis grows by ~10 ms over 17 programs (the transport and nesting passes
+are linear in the eligible slot count; the corpus has 16 planned parameter slots
+and no nested values); whole native compile time by under 3%.
+
+## Differential fuzzing
+
+`tools/fuzz.py` (random programs: 2-4 shapes of width 1..9 with 0..2 nested
+inner values; return chains of depth 0..9 (forwarding, bound, reshaping,
+branching), argument chains of depth 0..10 (forwarding, partially projected,
+branching, alias), loop-carried structs, locals, aliases, `if` joins, stores,
+equality, hashing, whole inner values taken out, direct chain projections off a
+call, side effects in every literal) and `tools/fuzz.tcl` compare the
+interpreter and native under six representation modes -- default, legacy,
+no-nesting, every budget raised (`virtual`), every budget 0 (`frugal`: every
+boundary materializes) and `-struct-opt 0` -- and under GC stress:
+
+| run | programs | compile-skipped (generator type errors) | mismatches | with virtual structs | denied slots | nested values opened |
+|---|---:|---:|---:|---:|---:|---:|
+| seed 1 (plain) | 25 | 3 | 0 | 16 | 13 | 15 |
+| seed 2 (plain) | 200 | 16 | **0** | 143 | 46 | 165 |
+| seed 3 (plain) | 150 | 13 | **0** | 116 | 35 | 178 |
+| seed 4 (GC stress as well) | 60 | 8 | **0** | 42 | 10 | 56 |
+
+## GC stress
+
+Whole suite with `BOTLISH_NATIVE_GC_STRESS=1` (a collection attempted at every
+allocation site; checked effective: a 30000-iteration probe goes from 2 to 60000
+collections), final tree (`out/regression-gcstress.txt` is the transcript of the
+run, summarized here): interp **3551 passed, 0 failed**; compile **3547 passed, 4
+skipped, 0 failed**. This includes every `vt-gc-*` test (nested virtual
+String/List/MutableArray fields, a frontier after several calls, branch-specific
+materialization, cyclic forwarding, materialization of an outer with an opened inner
+after safepoints) and the 64-test file as a whole under stress, and the
+differential fuzz run under stress (seed 4).
+
+## Standalone executable parity
+
+`vt-executable-parity`: six programs (nested strings, an opened inner
+materialized after safepoints, a frontier after local use and several calls, a
+branch-specific materialization, a loop-carried struct, strings through a chain)
+are linked as real executables (`native::executable`), run with an empty PATH
+plainly and with `BOTLISH_NATIVE_GC_STRESS=1`, and equal the interpreter's value.
+
+## Full regression
+
+| | baseline (`b370d52`) | after |
+|---|---:|---:|
+| interp | 3487 passed, 0 failed | **3551 passed, 0 failed** |
+| compile | 3483 passed, 4 skipped, 0 failed | **3547 passed, 4 skipped, 0 failed** |
+| GC stress interp / compile | (previous report) 3487 / 3483 (+4 skipped) | **3551 / 3547 (+4 skipped), 0 failed** |
+
++64 tests (`value-transport.test`). Four existing tests pinned the *old width-only
+policy* and now say so with `-struct-policy legacy`
+(`sr-nested-literal-field`, `sr-materialize-wide-return`,
+`sr-width-policy-return`, `sr-width-policy-argument`): their expected values are
+the previous milestone's, unchanged; the new policy's behavior on the same
+programs is pinned in the new file. The baseline run (3487 / 3483 + 4) was
+re-taken fresh from a clean `git archive` of `b370d52` (19 min). The
+`tests/native-coverage.tcl` census was not re-run for this milestone (no Core IR,
+interpreter or backend semantics changed; the new tests are native-only
+programs).
+
+Rust (`cargo test --release --manifest-path native/Cargo.toml`,
+`out/cargo-test.txt`): 56 + 22 = 78 passed, 0 failed (no Rust code changed).
+
+## Benchmark/corpus parity
+
+`tclsh9.0 bench/bench.tcl -runs 1` (`out/bench-runs1-after.txt`) runs the
+canonical programs on every backend and aborts on a value disagreement: it
+completed (exit 0). `tclsh9.0 bench/corpus.tcl -runs 1`
+(`out/corpus-runs1-after.txt`): every algorithm/input row reports `agree` across
+interp, compile, cranelift-generic and cranelift (exit 0). Performance
+conclusions in this report come from the dedicated harnesses, not these runs.
+
+## Differential modes
+
+Every focused program in `tests/value-transport.test` is run under the
+interpreter, the default, `-struct-policy legacy`, `-struct-nesting 0` and
+`-struct-opt 0` (`vtValue`), and the legacy policy is additionally checked
+against the baseline tree: for 14 probe programs (narrow/wide, arguments/
+returns, late-frontier, mixed, branchy, cyclic W=4/5, nested return/argument) the
+NIR text under `-struct-policy legacy` is byte-identical to the baseline tree's.
+
+## Readiness for inline-owner layout / re-virtualization / context struct
+
+Ready: a descriptor with a cut that survives without an object; materialization
+as a *place* rather than an allocation (an owner that embeds fields would be
+one more frontier kind: `storage-boundary` would become a materialization
+*into* the owner); the exact-edge transport graph with direction and cycles; a
+census with a distinct frontier vocabulary; calibration tooling. Not done, by
+design: inline `List[Person]`/`MutableArray[Person]`, re-virtualization of an
+incoming object near its final consumer (the planner chooses where virtuality
+*ends*; a mirror pass could decide where it *restarts*), and any source-level
+representation hint or "context struct" -- the compiler now infers the ordinary
+economics (a wide, long-forwarded value becomes a bundle; a narrow one stays
+open) without annotations.
+
+## Answers to the required questions
+
+**Architecture.**
+1. *Is representation still decided outside HIR?* **Yes.**
+2. *Can one semantic value be virtual in one region and materialized in another?* **Yes** (virtual through local use, materialized before a long chain).
+3. *Can two control-flow paths choose different frontier positions?* **Yes within a function** (`vt-branch-frontier`: 10 allocations for 10 long-branch iterations); not across a call boundary inside the callee (limitation above).
+4. *Does `structnew` still mean actual materialization?* **Yes.**
+5. *Any new runtime aggregate representation?* **No.**
+
+**Distance.**
+6. *How is call-graph transport distance computed?* Per parameter slot over the exact-forwarding graph: Tarjan SCCs, then longest argument path up and down in topological order, plus the return edges at the head of the path; per result, the return depth of its exits.
+7. *What counts as an argument edge?* An exact call that passes a `ref` to a slot unchanged (or hands a literal / local / call result) to an exact callee's parameter that could receive fields.
+8. *A return edge?* An exact callee's recognized result that is an exit of the caller's recognized result, or is consumed by the caller.
+9. *How are forwarding chains summarized?* By `(up, down, ret)` per SCC component, one pass each: no path is enumerated.
+10. *Recursive cycles?* Marked cyclic (call-graph SCC or forwarding SCC): the cycle term `3 x W` replaces a fabricated distance.
+11. *Does lexical nesting affect distance?* **No.**
+
+**Width.**
+12. *Transported width?* The number of independently transported physical values (fields after the cut).
+13. *Does an unopened nested struct count as one?* **Yes.**
+14. *When can width shrink?* When a consumer builds a new, narrower value: that is a new slot with its own path.
+15. *Declared or live?* Declared-after-cut transported width drives the ABI; live width (fields read downstream) enters only as the density factor and the census.
+
+**Direction.**
+16. *How are they weighted differently?* Different hop functions (argument quadratic spill past 4; return linear past 2) and separate factors/budgets.
+17. *What measurements justify it?* The grids (per-hop stack operands 2/3/4/7/11/23 for arguments, 0/3/4/6/8/18 for returns).
+18. *An equal-width/equal-distance probe that differs?* W=6, E=3: arguments object, returns virtual; W=8, E=2 likewise.
+
+**Frontier.**
+19. *What makes a value materialize before a call chain?* The transport verdict of the callee's parameter (`transport-budget`).
+20. *Can it stay virtual for local uses first?* **Yes.**
+21. *Can the frontier occur after construction?* **Yes.**
+22. *Differently by branch?* Yes, within a function.
+23. *Is the materialization reused?* **Yes** (`vt-materialization-is-single`).
+
+**Nesting.**
+24. *How is the nested value represented?* As a value tree with a cut `{NAME SUBSHAPE SUBCUT ...}` in the descriptor.
+25. *When is an inner struct opened?* Inline literal everywhere in its class, no independent use, widened path within budget and ceilings, opening cheaper than the allocation.
+26. *When bundled?* An independent use, a shared/computed inner value, an over-budget or over-ceiling path, or opening not worth the allocation.
+27. *How does opening affect width?* `+ (w - 1)`, charged in the same score.
+28. *Exponential search?* **No** (one greedy decision per nested aggregate).
+29. *Does the old nested-local allocation disappear?* **Yes** (0 allocations).
+
+**Cost model.**
+30. *The exact score?* See "Transport-pressure model".
+31. *Measured facts versus heuristic weights?* Measured: per-hop stack operands by width and direction, the allocation sequence's stack cost, loop-carried cost. Heuristic: the budgets (20), density weight, `allocUnits` as a benefit, the combination as one number.
+32. *Falsely presented as cycles?* **No.**
+33. *Audit-configurable knobs?* `-struct-policy`, `-struct-{arg,return,cycle}-{factor,budget}`, `-struct-{local,return,arg}-width`, `-struct-nesting` and `BOTLISH_NATIVE_STRUCT_*`; deeper constants (`argRegs`, `argSpill`, `returnFree`, `returnRegs`, `returnSpill`, `densityWeight`, `allocUnits`) through the analysis' options dict.
+34. *Hard ceilings?* local 16, return 16, argument 8 fields.
+
+**ABI.**
+35. *Physical function variants per instance?* At most canonical + companion + one fields form + fields-companion.
+36. *Can nested choices create combinatorial ABI variants?* **No** (one cut per class).
+37. *How does a caller choose canonical vs fields?* Per site, `CanSupplyFields`: fields only if every virtual position can be supplied; otherwise canonical.
+38. *Agreement?* Planned before any site is emitted; widths asserted at `TryFields`.
+
+**Probes.**
+39. *Width-2 distance-8 argument?* Virtual (score 16..18 <= 20): fields through all hops.
+40. *Width-8 distance-8 argument?* Object from the first edge (score 192).
+41. *Width-8 distance-8 return?* Object (score 64 > 20): built at the construction, pointers returned (E <= 2 would be virtual).
+42. *Wide value with local projections then a long chain?* Virtual through the projections; `structnew` immediately before the chain; one pointer through it.
+43. *Nested projected-only local struct?* Opened, 0 allocations.
+44. *Nested wide value over a long call chain?* The inner value stays one bundled field (`closed:transport-budget`), only the outer is carried as fields.
+
+**Pressure.**
+45-50. See "Field-hop census", "Register/stack-pressure evidence", "Allocation impact", "Code-size impact" and "Runtime impact": argument hops 63 on the corpus (unchanged), return hops 143; stack operands, code bytes, allocations and runtime for each probe are reported together.
+
+**Real corpus.**
+51. *CSV scan results allocation-free?* **Yes.** 52. *Rehash wrappers?* **Yes.** 53. *Stored `Test` values?* **Physical (15).** 54. *Any new frontier decision on the corpus?* **No.** The corpus is byte-identical to the previous milestone's.
+
+**Compile time.**
+55. *Complexity?* Linear (SCCs, longest paths, union-find, one greedy pass per class). 56. *New fixed points?* None. 57. *SCC handling?* Iterative Tarjan over the forwarding graph and the call graph. 58. *Representation analysis before/after?* 136.5 -> 146.2 ms (+7.1%). 59. *Whole native compile?* +2.7%.
+
+## Architecture note: `hir::escape`
+
+Its responsibilities have clearly become value representation and transport
+analysis (descriptors, use verdicts, a transport graph, a cost model, value
+trees, a census) with escape analysis proper a small part; a later cleanup
+should rename and split it (`representation` / `transport`). It was not renamed
+here: one analysis, one authority, `hir/transport.tcl` being only its arithmetic.
+
+## Files
+
+`hir/escape.tcl` (transport planning, nesting, census), `hir/transport.tcl` (new:
+policy options, scores, SCC and longest-path summaries), `native/lower.tcl`
+(options, cut-aware literals/projection chains/materialization),
+`native/native.tcl` (`transportCensus`, `transportCensusText`),
+`native/explain-native.tcl` (`transport.txt`), `tests/value-transport.test` (64
+tests), `tests/transport-shapes.tcl` (probe generators), four repinned tests in
+`tests/struct-scalar-replacement.test`, `README.md`, and
+`audit/value-transport-materialization/` (tools, probe programs, measured
+outputs). No `.bot` source, HIR, Core IR, runtime or Cranelift code changed.
