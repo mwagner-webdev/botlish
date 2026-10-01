@@ -2,19 +2,19 @@ source:  examples/stdlib/csv.bot
 backend: Cranelift (specialize=1)
 asm:     csv.asm
 vcode:   csv.vcode
-machine-code bytes: 6218 (per function: 68 365 430 664 1122 364 972 1113 413 540 167)
+machine-code bytes: 5723 (per function: 68 365 430 585 1063 352 795 976 398 524 167)
 
 functions:
   0 <program entry>: nir-regs=2
   1 peek<str, int>: nir-regs=11
   2 peek<str, int>: nir-regs=15
-  3 scan_unquoted<str, int, int>: nir-regs=29
-  4 scan_quoted<str, int, str>: nir-regs=36
-  5 scan_field<str, int>: nir-regs=15
-  6 scan_record<str, int, List[never]>: nir-regs=29
-  7 scan_record<str, int, List[str]>: nir-regs=28
-  8 scan_records<str, int, List[never]>: nir-regs=15
-  9 scan_records<str, int, List[List[str]]>: nir-regs=13
+  3 scan_unquoted<str, int, int>: nir-regs=28
+  4 scan_quoted<str, int, str>: nir-regs=35
+  5 scan_field<str, int>: nir-regs=17
+  6 scan_record<str, int, List[never]>: nir-regs=27
+  7 scan_record<str, int, List[str]>: nir-regs=25
+  8 scan_records<str, int, List[never]>: nir-regs=14
+  9 scan_records<str, int, List[List[str]]>: nir-regs=12
   10 csv_parse<str>: nir-regs=5
 
 GC roots (csv.asm's NIR ids match roots.txt's "function N"):
@@ -58,12 +58,12 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 3 "scan_unquoted"
-    NIR regs: 29
+    NIR regs: 28
     raw regs: 1
-    managed-capable regs: 28
+    managed-capable regs: 27
     effects: may_error=true may_gc=true
-    safepoints: 4
-    root candidates: 5
+    safepoints: 3
+    root candidates: 4
     max live roots: 4
     shadow slots: 4
     entry zero slots: 1
@@ -71,12 +71,12 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 4 "scan_quoted"
-    NIR regs: 36
+    NIR regs: 35
     raw regs: 6
-    managed-capable regs: 30
+    managed-capable regs: 29
     effects: may_error=true may_gc=true
-    safepoints: 10
-    root candidates: 14
+    safepoints: 9
+    root candidates: 13
     max live roots: 5
     shadow slots: 5
     entry zero slots: 2
@@ -84,9 +84,9 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 5 "scan_field"
-    NIR regs: 15
+    NIR regs: 17
     raw regs: 1
-    managed-capable regs: 14
+    managed-capable regs: 16
     effects: may_error=true may_gc=true
     safepoints: 4
     root candidates: 5
@@ -97,12 +97,12 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 6 "scan_record"
-    NIR regs: 29
+    NIR regs: 27
     raw regs: 2
-    managed-capable regs: 27
+    managed-capable regs: 25
     effects: may_error=true may_gc=true
-    safepoints: 10
-    root candidates: 12
+    safepoints: 8
+    root candidates: 10
     max live roots: 5
     shadow slots: 5
     entry zero slots: 2
@@ -110,12 +110,12 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 7 "scan_record"
-    NIR regs: 28
+    NIR regs: 25
     raw regs: 2
-    managed-capable regs: 26
+    managed-capable regs: 23
     effects: may_error=true may_gc=true
-    safepoints: 9
-    root candidates: 11
+    safepoints: 7
+    root candidates: 9
     max live roots: 5
     shadow slots: 5
     entry zero slots: 2
@@ -123,9 +123,9 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 8 "scan_records"
-    NIR regs: 15
+    NIR regs: 14
     raw regs: 2
-    managed-capable regs: 13
+    managed-capable regs: 12
     effects: may_error=true may_gc=true
     safepoints: 4
     root candidates: 7
@@ -136,9 +136,9 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 9 "scan_records"
-    NIR regs: 13
+    NIR regs: 12
     raw regs: 0
-    managed-capable regs: 13
+    managed-capable regs: 12
     effects: may_error=true may_gc=true
     safepoints: 4
     root candidates: 6
@@ -164,4 +164,4 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
 mechanical pattern counts (triage only; see report for interpretation):
   12 x calls to rt_int_add
   3 x calls to rt_int_cmp
-  38 x calls to other rt_* helpers
+  32 x calls to other rt_* helpers
