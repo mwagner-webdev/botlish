@@ -1,0 +1,633 @@
+# self-recursive-result-ranges.test -- SELF-RECURSIVE-RESULT-RANGES.md:
+# bounded successful-result Ranges for closed, direct, self-recursive Int
+# instances (hir/rangerec.tcl).
+#
+# Pins (1) the derived result Ranges of positive synthetic cases, (2) the
+# conservative fall-back (and its audit tag) of every negative case, (3)
+# error-path and base-case-shape cases, (4) the audit/differential knobs
+# (`recursiveOpt`, `recursiveLimit`; -recursive-result-range-opt and
+# -recursive-range-limit on native), and (5) differential parity: interpreter,
+# Tcl compile backend, native with the analysis, native with it disabled --
+# values and errors agree.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 100000
+
+# TEXT without its common leading indentation (the programs below are
+# written indented inside the test bodies).
+proc dedent {text} {
+    set lines [split $text \n]
+    set indent 1000
+    foreach line $lines {
+        if {[string trim $line] eq ""} continue
+        set n [expr {[string length $line] - [string length [string trimleft $line " "]]}]
+        if {$n < $indent} { set indent $n }
+    }
+    return [join [lmap line $lines {string range $line $indent end}] \n]
+}
+
+# {hir spec analysis} of the surface program TEXT. ARGS: recursiveOpt
+# recursiveLimit for hir::range::analyze.
+proc recOf {text {recursiveOpt 1} {limit ""}} {
+    set hir [surface::compile [dedent $text] t.bot -strict 0]
+    set spec [hir::specialize::analyze $hir]
+    return [list $hir $spec [hir::range::analyze $hir $spec 1 1 1 $recursiveOpt $limit]]
+}
+
+proc recInstance {spec name {key ""}} {
+    foreach id [dict get $spec used] {
+        set instance [dict get $spec instances $id]
+        if {[dict get $instance name] ne $name} continue
+        if {$key eq "" || [join [lmap t [dict get $instance args] {hir::types::show $t}] {, }] eq $key} {
+            return $id
+        }
+    }
+    error "no used instance of \"$name\" matching \"$key\""
+}
+
+# "[min, max]" of Range R, without its exact value set (those are an
+# artifact of the small-point joins; the interval is what the tests pin).
+proc bounds {r} {
+    return [string map {-inf -∞ +inf +∞} "\[[dict get $r min], [dict get $r max]\]"]
+}
+
+# {status reason result} of function NAME's recursive record. result is the
+# instance's ordinary successful-result Range as consumers see it.
+proc recSummary {text name {key int} {limit ""}} {
+    lassign [recOf $text 1 $limit] hir spec analysis
+    set id [recInstance $spec $name $key]
+    set result [bounds [dict get $analysis instances $id result]]
+    if {![dict exists $analysis recursive $id]} {
+        return [list none {} $result]
+    }
+    set r [dict get $analysis recursive $id]
+    return [list [dict get $r status] [dict get $r reason] $result]
+}
+
+proc recRecord {text name {key int} {limit ""}} {
+    lassign [recOf $text 1 $limit] hir spec analysis
+    return [dict get $analysis recursive [recInstance $spec $name $key]]
+}
+
+# A native value (or the error outcome) with the analysis on / off.
+proc nativeWith {hir opt} {
+    resetEffects
+    if {[catch {native::evalHir $hir -recursive-result-range-opt $opt} result options]} {
+        return [list error [dict get $options -errorcode]]
+    }
+    return [list value [core::value::show $result 1]]
+}
+
+# Every backend plus native-without-the-analysis agree; returns the value.
+proc parity {text} {
+    set dir [makeDirectory {self recursive result ranges}]
+    set path [file join $dir p.bot]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts $channel [dedent $text]
+    close $channel
+    try {
+        set hir [surface::readProgramFile $path]
+        set outcomes {}
+        foreach backend {interp compile cranelift-generic cranelift} {
+            set outcome [outcomeUnderHir $backend $hir]
+            lappend outcomes [lindex $outcome 0]:[lindex $outcome 1]
+        }
+        foreach opt {0 1} {
+            set outcome [nativeWith [native::prepareHir $hir] $opt]
+            lappend outcomes [lindex $outcome 0]:[lindex $outcome 1]
+        }
+        if {[llength [lsort -unique $outcomes]] != 1} {
+            error "backends disagree: $outcomes"
+        }
+        if {![string match value:* [lindex $outcomes 0]]} {
+            error "not a value: $outcomes"
+        }
+        return [string range [lindex $outcomes 0] 6 end]
+    } finally {
+        removeDirectory {self recursive result ranges}
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Positive synthetic cases (spec #56). Each pins the result Range.
+
+test rec-fib {fib: entry [0,22] gives the finite result [0,17711] over 23 states, both calls decreasing} -body {
+    set r [recRecord {
+        fn fib(n):
+            if n < 2:
+                n
+            else:
+                fib(n - 1) + fib(n - 2)
+
+        fib(22)
+    } fib]
+    list [dict get $r status] [hir::range::show [lindex [dict get $r entryBefore] 0]] [dict size [dict get $r states]] \
+        [dict get $r result min] [dict get $r result max] \
+        [hir::range::show [dict get $r resultBefore]] [hir::range::fitsSmall [dict get $r result]] \
+        [lmap {e text a} [dict get $r calls] {list $text [hir::range::show $a]}]
+} -result {solved {[0, 22]} 23 0 17711 {[-∞, +∞]} 1 {{{n - 1} {[1, 21]}} {{n - 2} {[0, 20]}}}}
+
+test rec-A-counting {A: f(n) = f(n - 1) + 1 with base n <= 0} -body {
+    recSummary {
+        fn f(n):
+            if n <= 0:
+                1
+            else:
+                f(n - 1) + 1
+
+        f(10)
+    } f
+} -result {solved {} {[1, 11]}}
+
+test rec-A-equality-guard {A with an == base case and a NON-tail call: ordinary entry analysis only proves [-inf,5] (hir/induction.tcl is self-tail only), but the external entry {5} is finite and the state closure reaches exactly 5..0} -body {
+    set r [recRecord {
+        fn f(n):
+            if n == 0:
+                1
+            else:
+                f(n - 1) + 1
+
+        f(5)
+    } f]
+    list [dict get $r status] [hir::range::show [lindex [dict get $r entryBefore] 0]] [dict size [dict get $r states]] \
+        [bounds [dict get $r result]]
+} -result {solved {[-∞, 5]} 6 {[1, 6]}}
+
+test rec-B-two-calls {B: two decreasing calls (n - 1, n - 3) with two base conditions} -body {
+    recSummary {
+        fn g(n):
+            if n < 3:
+                1
+            else:
+                g(n - 1) + g(n - 3)
+
+        g(25)
+    } g
+} -result {solved {} {[1, 8641]}}
+
+test rec-C-negative-measure {C: a negative-to-zero measure; recursion descends from 0 to -10} -body {
+    set r [recRecord {
+        fn f(n):
+            if n <= -10:
+                0
+            else:
+                f(n - 1) + 1
+
+        f(0)
+    } f]
+    list [dict get $r status] [hir::range::show [lindex [dict get $r entryBefore] 0]] [dict size [dict get $r states]] \
+        [bounds [dict get $r result]]
+} -result {solved {[-10, 0]} 11 {[0, 10]}}
+
+test rec-D-wider-finite {D: a wider but finite interval (f(n - 1) * 2 + 1)} -body {
+    recSummary {
+        fn f(n):
+            if n == 0:
+                1
+            else:
+                f(n - 1) * 2 + 1
+
+        f(20)
+    } f
+} -result {solved {} {[1, 2097151]}}
+
+test rec-E-exact-helper {E: a non-recursive exact helper whose own result summary participates} -body {
+    recSummary {
+        fn weight(x):
+            x + 1
+
+        fn f(n):
+            if n <= 0:
+                0
+            else:
+                weight(n) + f(n - 1)
+
+        f(10)
+    } f
+} -result {solved {} {[0, 110]}}
+
+test rec-multiple-base-cases {several base conditions, no assumption of exactly one} -body {
+    recSummary {
+        fn f(n):
+            if n == 0:
+                0
+            else:
+                if n == 1:
+                    1
+                else:
+                    if n == 2:
+                        5
+                    else:
+                        f(n - 1) + f(n - 2)
+
+        f(12)
+    } f
+} -result {solved {} {[1, 500]}}
+
+test rec-nonzero-lower-bound {external entry [5,20]: the recursion terminates at 5, nothing requires lower bound zero} -body {
+    set r [recRecord {
+        fn f(n):
+            if n <= 5:
+                1
+            else:
+                f(n - 1) + 1
+
+        f(5) + f(20)
+    } f]
+    list [dict get $r status] [dict size [dict get $r states]] [bounds [dict get $r result]]
+} -result {solved 16 {[1, 16]}}
+
+test rec-step-two {f(n - 2): decrease greater than one} -body {
+    recSummary {
+        fn f(n):
+            if n <= 1:
+                1
+            else:
+                f(n - 2) + 1
+
+        f(30)
+    } f
+} -result {solved {} {[1, 16]}}
+
+test rec-mixed-steps {f(n - 1) and f(n - 3) together} -body {
+    recSummary {
+        fn f(n):
+            if n <= 2:
+                1
+            else:
+                f(n - 1) + f(n - 3)
+
+        f(20)
+    } f
+} -result {solved {} {[1, 1278]}}
+
+test rec-multiple-returns {several return sites joined per state} -body {
+    recSummary {
+        fn f(n):
+            if n <= 0:
+                return 7
+            if n == 1:
+                return 100
+            f(n - 1) + 1
+
+        f(6)
+    } f
+} -result {solved {} {[100, 105]}}
+
+test rec-tail-recursion {a self-tail recursive function with a bounded decreasing measure is eligible too} -body {
+    recSummary {
+        fn f(n):
+            if n <= 0:
+                7
+            else:
+                f(n - 1)
+
+        f(10)
+    } f
+} -result {solved {} {[7, 7]}}
+
+test rec-tail-accumulator {an accumulator needs a relational fact (acc <= 10 - n): the Range of acc only widens, so the successful result is not finite and the instance falls back (spec #106)} -body {
+    recSummary {
+        fn f(n, acc):
+            if n <= 0:
+                acc
+            else:
+                f(n - 1, acc + 1)
+
+        f(10, 0)
+    } f {int, int}
+} -result {rejected unsupported-result {[-∞, +∞]}}
+
+# ---------------------------------------------------------------------------
+# Negative cases: no bounded summary, the audit tag names why.
+
+test rec-neg-self-call {f(n): f(n)} -body {
+    recSummary {
+        fn f(n):
+            f(n)
+
+        f(5)
+    } f
+} -result {rejected nondecreasing-call {[-∞, +∞]}}
+
+test rec-neg-increasing {f(n): f(n + 1) is rejected even though the caller's n is bounded} -body {
+    recSummary {
+        fn f(n):
+            f(n + 1)
+
+        f(5)
+    } f
+} -result {rejected nondecreasing-call {[-∞, +∞]}}
+
+test rec-neg-mixed {one decreasing and one non-decreasing reachable call} -body {
+    recSummary {
+        fn f(n):
+            if n < 0:
+                0
+            else:
+                if n > 5:
+                    f(n - 1)
+                else:
+                    f(n)
+
+        f(10)
+    } f
+} -result {rejected nondecreasing-call {[-∞, +∞]}}
+
+test rec-neg-unbounded-entry {an unbounded external entry is not eligible} -body {
+    recSummary {
+        fn f(n):
+            if n <= 0:
+                0
+            else:
+                f(n - 1) + 1
+
+        f(mod(500, 11))
+    } f
+} -result {rejected unbounded-entry {[-∞, +∞]}}
+
+test rec-neg-state-budget {a finite million-state entry hits the budget and falls back cheaply} -body {
+    recSummary {
+        fn f(n):
+            if n <= 0:
+                0
+            else:
+                f(n - 1) + 1
+
+        f(1000000)
+    } f
+} -result {rejected state-budget {[-∞, +∞]}}
+
+test rec-neg-state-budget-explicit {the limit is an explicit option: 23 states fit 23 but not 22} -body {
+    set text {
+        fn fib(n):
+            if n < 2:
+                n
+            else:
+                fib(n - 1) + fib(n - 2)
+
+        fib(22)
+    }
+    list [recSummary $text fib int 23] [recSummary $text fib int 22]
+} -result {{solved {} {[0, 17711]}} {rejected state-budget {[-∞, +∞]}}}
+
+test rec-neg-no-int-measure {a self-recursive instance without an Int parameter} -body {
+    recSummary {
+        fn f(b):
+            if b:
+                0
+            else:
+                f(true) + 1
+
+        f(false)
+    } f bool
+} -result {rejected no-int-measure {[-∞, +∞]}}
+
+test rec-neg-multiple-measures {a lexicographic pair: no single parameter decreases in every call} -body {
+    recSummary {
+        fn f(a, b):
+            if a <= 0:
+                if b <= 0:
+                    0
+                else:
+                    f(a, b - 1) + 1
+            else:
+                f(a - 1, b) + 1
+
+        f(3, 3)
+    } f {int, int}
+} -result {rejected multiple-measures {[-∞, +∞]}}
+
+test rec-neg-open-callable {a recursive function that is also passed as a value: the generic instance has unknown callers and gets no bounded summary; no instance of f is pinned to a Range derived from the one known call site} -body {
+    lassign [recOf {
+        fn f(n):
+            if n <= 0:
+                0
+            else:
+                f(n - 1) + 1
+
+        fn apply(g, x):
+            g(x)
+
+        apply(f, 5)
+    }] hir spec analysis
+    set generic {}
+    foreach id [dict get $spec used] {
+        if {[dict get $spec instances $id name] eq "f" && [dict get $spec instances $id generic]} {
+            lappend generic [bounds [dict get $analysis instances $id result]] \
+                [expr {[dict exists $analysis recursive $id] ? [dict get $analysis recursive $id reason] : "-"}]
+        }
+    }
+    set generic
+} -result {{[-∞, +∞]} -}
+
+test rec-neg-mutual-recursion {the mutual-recursion test is on the call graph: f -> g -> f declines} -body {
+    set graph [dict create i1 {i1 i2} i2 {i1}]
+    list [hir::range::MutuallyRecursive $graph i1] \
+        [hir::range::MutuallyRecursive [dict create i1 {i1}] i1] \
+        [hir::range::MutuallyRecursive [dict create i1 {i1 i2} i2 {}] i1]
+} -result {1 0 0}
+
+test rec-neg-opt-off {with the analysis disabled the parent facts are reproduced} -body {
+    lassign [recOf {
+        fn fib(n):
+            if n < 2:
+                n
+            else:
+                fib(n - 1) + fib(n - 2)
+
+        fib(22)
+    } 0] hir spec analysis
+    set id [recInstance $spec fib]
+    list [hir::range::show [dict get $analysis instances $id result]] [dict size [dict get $analysis recursive]]
+} -result {{[-∞, +∞]} 0}
+
+# ---------------------------------------------------------------------------
+# Error paths: successful-result Range only; the error semantics are the
+# existing ones.
+
+# f may fail Negative; g reaches it with a *range* of arguments that includes
+# failing ones (not statically known to fail), so the solver's state closure
+# contains states whose only completion is the error: their successful-result
+# summary is empty, and the Range of f is the join of the surviving states.
+set errorProgram {
+    error Negative
+    fn f(n) errors Negative:
+        if n < 0:
+            fail Negative
+        if n == 0:
+            1
+        else:
+            f(n - 1) + 1
+
+    fn g(m) errors Negative:
+        f(m - 3)
+
+    r1 = g(%s):
+        on Negative:
+            -1
+    r2 = g(%s):
+        on Negative:
+            -1
+    [r1, r2]
+}
+
+test rec-error-path-range {a function that can fail still gets a finite successful-result Range: the failing states contribute no value} -body {
+    list [recSummary [format $errorProgram 5 0] f] \
+        [dict map {k v} [dict get [recRecord [format $errorProgram 5 0] f] states] {
+            expr {$v eq "never" ? "never" : [bounds $v]}
+        }]
+} -result {{solved {} {[1, 3]}} {-3 never 0 {[1, 1]} 1 {[2, 2]} 2 {[3, 3]}}}
+
+test rec-error-path-value {success and failure agree on every backend, with and without the analysis} -body {
+    # mod(500, 11) is 5, but not statically known.
+    list [parity [format $errorProgram {mod(500, 11)} {mod(500, 11) - 5}]] \
+        [parity [format $errorProgram {mod(500, 11) + 3} {mod(500, 11) - 2}]] \
+        [parity [format $errorProgram {mod(500, 11) - 4} {mod(500, 11) - 3}]]
+} -result {{[3, -1]} {[6, 1]} {[-1, -1]}}
+
+# ---------------------------------------------------------------------------
+# Differential semantics on the positive cases.
+
+foreach {name program expected} {
+    fib {
+        fn fib(n):
+            if n < 2:
+                n
+            else:
+                fib(n - 1) + fib(n - 2)
+
+        fib(22)
+    } 17711
+    two-calls {
+        fn g(n):
+            if n < 3:
+                1
+            else:
+                g(n - 1) + g(n - 3)
+
+        g(25)
+    } 8641
+    helper {
+        fn weight(x):
+            x + 1
+
+        fn f(n):
+            if n <= 0:
+                0
+            else:
+                weight(n) + f(n - 1)
+
+        f(10)
+    } 65
+    negative {
+        fn f(n):
+            if n <= -10:
+                0
+            else:
+                f(n - 1) + 1
+
+        f(0)
+    } 10
+    constant-result {
+        fn f(n):
+            if n <= 0:
+                7
+            else:
+                f(n - 1)
+
+        f(10) + f(3)
+    } 14
+    multiple-returns {
+        fn f(n):
+            if n <= 0:
+                return 7
+            if n == 1:
+                return 100
+            f(n - 1) + 1
+
+        f(6)
+    } 105
+} {
+    test rec-parity-$name {parity across interp, compile, native (with and without the analysis)} -body {
+        parity $program
+    } -result $expected
+}
+
+# ---------------------------------------------------------------------------
+# Standalone executable parity (spec #82): the analysis-compiled ELF, moved and
+# run with an empty PATH, agrees with the interpreter -- normally and under
+# BOTLISH_NATIVE_GC_STRESS=1 (spec #81: eliminating generic Int/error paths can
+# change safepoints and liveness even though the representation is unchanged).
+
+testConstraint executableAot [expr {$::tcl_platform(os) eq "Linux" && $::tcl_platform(machine) in {x86_64 amd64}}]
+
+proc executableParity {text} {
+    set dir [makeDirectory {self recursive executable}]
+    set path [file join $dir {program with spaces.bot}]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts $channel [dedent $text]
+    close $channel
+    try {
+        set hir [surface::readProgramFile $path]
+        set expected [lindex [outcomeUnderHir interp $hir] 1]
+        exec [info nameofexecutable] [file join $::projectRoot main.tcl] -emit-native-executable $path
+        set relocated [file join $dir relocated]
+        file rename [file rootname $path] $relocated
+        file delete $path
+        set plain [exec env PATH= $relocated]
+        set stressed [exec env PATH= BOTLISH_NATIVE_GC_STRESS=1 $relocated]
+        if {$plain ne $expected || $stressed ne $expected} {
+            error "interp $expected, executable $plain, gc-stress $stressed"
+        }
+        return $expected
+    } finally {
+        removeDirectory {self recursive executable}
+    }
+}
+
+test rec-executable-fib {fib as a standalone executable, plain and under GC stress} -constraints executableAot -body {
+    executableParity {
+        fn fib(n):
+            if n < 2:
+                n
+            else:
+                fib(n - 1) + fib(n - 2)
+
+        fib(22)
+    }
+} -result 17711
+
+test rec-executable-two-calls {a three-step two-call recurrence} -constraints executableAot -body {
+    executableParity {
+        fn g(n):
+            if n < 3:
+                1
+            else:
+                g(n - 1) + g(n - 3)
+
+        g(25)
+    }
+} -result 8641
+
+test rec-executable-negative {a negative-to-base measure} -constraints executableAot -body {
+    executableParity {
+        fn f(n):
+            if n <= -10:
+                0
+            else:
+                f(n - 1) + 1
+
+        f(0)
+    }
+} -result 10
+
+test rec-executable-error-path {a failing recursion handled by the caller} -constraints executableAot -body {
+    executableParity [format $errorProgram {mod(500, 11)} {mod(500, 11) - 5}]
+} -result {[3, -1]}
+
+cleanupTests

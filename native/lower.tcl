@@ -1060,6 +1060,20 @@ namespace eval native::lower {
 #                      BOTLISH_NATIVE_EXACT_CALLABLE_LIMIT overrides it). A
 #                      further target shares the kind-only key and the
 #                      callable-value ABI.
+#   -recursive-result-range-opt 1|0
+#                      derive a finite successful-result Range for a closed,
+#                      direct, self-recursive Int instance whose measure
+#                      parameter has a finite entry Range and strictly
+#                      decreases (hir/rangerec.tcl, SELF-RECURSIVE-RESULT-
+#                      RANGES.md; default 1;
+#                      BOTLISH_NATIVE_RECURSIVE_RESULT_RANGE_OPT=0 disables
+#                      it for differential testing). Part of call facts:
+#                      with -call-facts-opt 0 there are no result summaries.
+#   -recursive-range-limit N
+#                      the explicit measure-state budget of that solver
+#                      (default: hir::range's maxRecursiveRangeStates;
+#                      BOTLISH_NATIVE_RECURSIVE_RANGE_LIMIT overrides it).
+#                      An audit/native option, never source syntax.
 #   -string-traversal-opt 1|0
 #                      carry a provably forward, +1-per-iteration character
 #                      scan's physical UTF-8 byte position across its self-
@@ -1138,6 +1152,10 @@ proc native::lower::program {hirProgram args} {
         && $::env(BOTLISH_NATIVE_EXACT_CALLABLE_OPT) eq "0" ? 0 : 1}]
     set exactLimitDefault [expr {[info exists ::env(BOTLISH_NATIVE_EXACT_CALLABLE_LIMIT)]
         ? $::env(BOTLISH_NATIVE_EXACT_CALLABLE_LIMIT) : ""}]
+    set recursiveRangeDefault [expr {[info exists ::env(BOTLISH_NATIVE_RECURSIVE_RESULT_RANGE_OPT)]
+        && $::env(BOTLISH_NATIVE_RECURSIVE_RESULT_RANGE_OPT) eq "0" ? 0 : 1}]
+    set recursiveLimitDefault [expr {[info exists ::env(BOTLISH_NATIVE_RECURSIVE_RANGE_LIMIT)]
+        ? $::env(BOTLISH_NATIVE_RECURSIVE_RANGE_LIMIT) : ""}]
     set callEffectsDefault [expr {[info exists ::env(BOTLISH_NATIVE_CALL_EFFECTS_OPT)]
         && $::env(BOTLISH_NATIVE_CALL_EFFECTS_OPT) eq "0" ? 0 : 1}]
     set traversalDefault [expr {[info exists ::env(BOTLISH_NATIVE_STRING_TRAVERSAL_OPT)]
@@ -1176,6 +1194,7 @@ proc native::lower::program {hirProgram args} {
             -closed-caller-facts-opt $closedCallerFactsDefault \
             -exact-callable-opt $exactCallableDefault -exact-callable-limit $exactLimitDefault \
             -tiny-leaf-inline-opt $tinyLeafInlineDefault \
+            -recursive-result-range-opt $recursiveRangeDefault -recursive-range-limit $recursiveLimitDefault \
             -virtual-construction-opt $constructionDefault] $args]
     if {[hir::mode $hirProgram] ne "program"} {
         throw {NATIVE UNSUPPORTED sequence-mode} \
@@ -1232,7 +1251,8 @@ proc native::lower::program {hirProgram args} {
         -closed-caller-facts-opt [dict get $options -closed-caller-facts-opt] \
         -exact-callable-opt [dict get $options -exact-callable-opt] \
         -exact-callable-limit [dict get $options -exact-callable-limit]]
-    set ranges [hir::range::analyze $hirProgram $spec [dict get $options -call-facts-opt]]
+    set ranges [hir::range::analyze $hirProgram $spec [dict get $options -call-facts-opt] 1 1 \
+        [dict get $options -recursive-result-range-opt] [dict get $options -recursive-range-limit]]
     set escape [expr {$escapeOpt ? [hir::escape::analyze $hirProgram $spec $paramAggregateOpt $structWidths]
         : [dict create arity {} wants {} virtual {} paramVirtual {}]}]
     set stringregion [expr {$stringRegionOpt ? [hir::stringregion::analyze $hirProgram $spec]

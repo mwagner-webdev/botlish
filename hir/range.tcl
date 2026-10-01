@@ -34,7 +34,7 @@
 #
 # What is analyzed
 # -----------------
-# analyze walks the region (hir::specialize view) of every used instance,
+# analyze (hir/rangerec.tcl; Fixpoint here) walks the region (hir::specialize view) of every used instance,
 # computing a Range for each reachable expression: constants, `+ - *` of two
 # known ranges (interval arithmetic; unknown if either operand is unknown),
 # natives whose -result-range metadata promises a fact (core/native.tcl),
@@ -1147,6 +1147,13 @@ proc hir::range::Call {hirVar ctxVar e node} {
         # fixpoint, cross feeds the callee's).
         set targetId [dict get [dict get $ctx instanceCalls] $e]
         dict lappend ctx calls [list $targetId $argRanges]
+        if {[dict exists $ctx rec] && $targetId eq [dict get $ctx id]} {
+            set result [RecursiveCall hir ctx $e $argRanges]
+            if {$result ne "never"} {
+                dict set ctx exprs $e $result
+            }
+            return $result
+        }
         set results [dict get $ctx calleeResults]
         set result [expr {[dict exists $results $targetId] ? [dict get $results $targetId] : [unknown]}]
         set result [ConstrainType $hir $e $result]
@@ -1645,6 +1652,14 @@ proc hir::range::If {hirVar ctxVar e node} {
     set condition [dict get $node condition]
     Expr hir ctx $condition
     set known [hir::types::KnownOutcome $hir $condition]
+    if {$known eq "" && [dict exists $ctx rec]} {
+        # Only while the bounded self-recursive solver (rangerec.tcl) walks
+        # one measure state: the measure is a point there, so the existing
+        # range-decided-branch theorem (ComparisonOutcome) usually decides
+        # a base-case condition outright. Ordinary analysis never enters
+        # this branch, so its facts are unchanged.
+        set known [RecursiveDecided $hir $ctx $condition]
+    }
     set saved [dict get $ctx bindings]
     set branches [dict create]
     set after [dict create]
@@ -1973,8 +1988,15 @@ proc hir::range::ConditionOutcome {hir analysis id condition} {
         return ""
     }
     lassign $args ea eb
-    set ra [of $analysis $id $ea]
-    set rb [of $analysis $id $eb]
+    return [ComparisonOutcome $name [of $analysis $id $ea] [of $analysis $id $eb]]
+}
+
+# The range-only half of ConditionOutcome: whether the native comparison NAME
+# applied to operands with Ranges RA/RB is always true (1), always false (0)
+# or undecided (""). ConditionOutcome (analysis facts) and the bounded
+# self-recursive solver (rangerec.tcl: per-state ctx facts) both call it, so
+# there is exactly one range-decided-branch theorem.
+proc hir::range::ComparisonOutcome {name ra rb} {
     if {$name eq "=="} {
         if {![CouldBeEqual $ra $rb]} {
             return 0
@@ -2081,9 +2103,17 @@ proc hir::range::analyzeSequence {hir body} {
 # exactly like a parameter, so an ordinary `ref` of a captured binding inside
 # this region is already ConstrainType'd/narrowed by the existing machinery
 # with no special-casing (spec #38: existing consumers stay unchanged).
-proc hir::range::AnalyzeInstance {hir id instanceCalls block params assumed monotone calleeResults {captureSeed {}}} {
+proc hir::range::AnalyzeInstance {hir id instanceCalls block params assumed monotone calleeResults {captureSeed {}} {recursive {}}} {
     set ctx [dict create bindings [dict create] returnRange never breakRanges {} exprs [dict create] \
         calls {} id $id instanceCalls $instanceCalls monotone $monotone calleeResults $calleeResults creates {}]
+    if {$recursive ne {}} {
+        # Bounded self-recursive state solve (rangerec.tcl): see RecursiveCall.
+        dict set ctx rec $recursive
+        dict set ctx recNeeds {}
+        dict set ctx recFail {}
+        dict set ctx recIncomplete 0
+        dict set ctx recCalls {}
+    }
     foreach b $params r $assumed {
         dict set ctx bindings $b $r
     }
@@ -2093,8 +2123,15 @@ proc hir::range::AnalyzeInstance {hir id instanceCalls block params assumed mono
     set body [expr {$block eq "program" ? [hir::roots $hir] : [hir::get $hir $block body]}]
     set final [Sequence hir ctx $body]
     set result [join $final [dict get $ctx returnRange]]
-    return [dict create exprs [dict get $ctx exprs] result $result calls [dict get $ctx calls] \
+    set outcome [dict create exprs [dict get $ctx exprs] result $result calls [dict get $ctx calls] \
         creates [dict get $ctx creates]]
+    if {$recursive ne {}} {
+        dict set outcome recNeeds [dict get $ctx recNeeds]
+        dict set outcome recFail [dict get $ctx recFail]
+        dict set outcome recIncomplete [dict get $ctx recIncomplete]
+        dict set outcome recCalls [dict get $ctx recCalls]
+    }
+    return $outcome
 }
 
 # The instances whose set of callers this analysis does not fully know: an
@@ -2189,9 +2226,19 @@ proc hir::range::SettleInstance {hir id instanceCalls block params assumed locke
 # ---------------------------------------------------------------------------
 # Entry point
 
+# Fixpoint: the ordinary interprocedural analysis. hir::range::analyze
+# (hir/rangerec.tcl) is the public entry point: it runs this once, unchanged,
+# then -- only when a closed self-recursive instance exists -- derives the
+# bounded successful-result summaries (SELF-RECURSIVE-RESULT-RANGES.md) and
+# re-runs this with them PINNED (PINNED: InstanceId -> Range, seeding
+# calleeResults; a pinned summary is never recomputed, joined or poisoned
+# here). With PINNED empty this is exactly the analysis that existed before
+# that milestone.
+#
 # Range facts for every used instance of specialization ANALYSIS (the return
 # of hir::specialize::analyze) over program HIR. Returns a dict:
 #   instances  InstanceId -> {params {Range ...} exprs {ExprId Range ...} result Range}
+#   state      the converged internal facts (analyze strips it)
 #
 # Two cooperating mechanisms feed a used instance's parameter entry facts:
 #
@@ -2243,7 +2290,7 @@ proc hir::range::SettleInstance {hir id instanceCalls block params assumed locke
 # captured binding reads as unknown exactly as before this milestone.
 # NARROWOPT 0 skips the narrowing phase outright, committing the ascending
 # phase's own widened ASSUMED/CAPTURESEEDS as final.
-proc hir::range::analyze {hir spec {callFactsOpt 1} {narrowOpt 1} {captureOpt 1}} {
+proc hir::range::Fixpoint {hir spec callFactsOpt narrowOpt captureOpt pinned} {
     # hir/induction.tcl is fed only the old, purely syntactic external seeds
     # (a literal argument, or a direct call to a native with context-free
     # -result-range metadata) -- unchanged by, and entirely independent of,
@@ -2269,7 +2316,11 @@ proc hir::range::analyze {hir spec {callFactsOpt 1} {narrowOpt 1} {captureOpt 1}
     set lockedOf [dict create]
     set assumed [dict create]
     set outcomes [dict create]
-    set calleeResults [dict create]
+    # PINNED (bounded self-recursive result summaries, rangerec.tcl):
+    # InstanceId -> a finite successful-result Range the solver proved. They
+    # seed calleeResults and are never recomputed, joined or poisoned below;
+    # every other instance's summary is derived exactly as before.
+    set calleeResults $pinned
     set resultPoisoned [dict create]
     # Indices this instance's own self-call feedback has, at some round,
     # actually *destroyed*: widened a concrete entry fact all the way to
@@ -2486,6 +2537,7 @@ proc hir::range::analyze {hir spec {callFactsOpt 1} {narrowOpt 1} {captureOpt 1}
         # evidence destroys it, unknown is permanent for this analysis.
         if {$callFactsOpt} {
             foreach id $ids {
+                if {[dict exists $pinned $id]} continue
                 set inferred [dict get $outcomes $id result]
                 if {![dict exists $calleeResults $id]} {
                     set next $inferred
@@ -2653,10 +2705,20 @@ proc hir::range::analyze {hir spec {callFactsOpt 1} {narrowOpt 1} {captureOpt 1}
     set instances [dict create]
     foreach id $ids {
         set outcome [dict get $finalOutcomes $id]
+        # A pinned instance's successful-result summary IS the solver's
+        # proof: the state-less walk above only sees the joined entry
+        # Range, so its own join of the recursive branches (e.g. R + R
+        # for fib) is looser than the per-state summary R.
+        set result [expr {[dict exists $pinned $id] ? [dict get $pinned $id] : [dict get $outcome result]}]
         dict set instances $id [dict create params [dict get $narrowed $id] \
-            exprs [dict get $outcome exprs] result [dict get $outcome result]]
+            exprs [dict get $outcome exprs] result $result]
     }
-    return [dict create instances $instances induction $induction]
+    # STATE is the solver's input (rangerec.tcl); analyze strips it.
+    set state [dict create ids $ids blockOf $blockOf paramsOf $paramsOf viewOf $viewOf \
+        instanceCallsOf $instanceCallsOf monotoneOf $monotoneOf open $open \
+        narrowed $narrowed narrowedCaptures $narrowedCaptures calleeResults $calleeResults \
+        finalOutcomes $finalOutcomes captureOpt $captureOpt selfRecursiveOf $selfRecursiveOf pinned $pinned]
+    return [dict create instances $instances induction $induction state $state]
 }
 
 # The Range of expression E as instance ID's analysis proved it, or unknown.

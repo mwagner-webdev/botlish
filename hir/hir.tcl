@@ -740,7 +740,7 @@ proc hir::exprsAt {hir origin} {
 }
 
 apply {{dir} {
-    foreach file {syntax resolve refcheck hygiene sourcetypes structs errordecls types exactvalue signatures modulebinding refine lower format read aot specialize range callables containers semantic completions errorsets induction transport escape blockescape stringregion traversal construction cardinality} {
+    foreach file {syntax resolve refcheck hygiene sourcetypes structs errordecls types exactvalue signatures modulebinding refine lower format read aot specialize range rangerec callables containers semantic completions errorsets induction transport escape blockescape stringregion traversal construction cardinality} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

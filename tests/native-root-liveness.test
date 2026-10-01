@@ -105,10 +105,13 @@ set nirHeader "nir 1\n\n"
 # Structural: the audit's four programs, well below the old policy (one slot
 # per NIR register -- 17, 17, 13, 12/3 respectively; see NATIVE-AUDIT.md).
 
-test root-structural-1 {fib<int>: far fewer shadow slots than its 17 NIR registers} -body {
+# SELF-RECURSIVE-RESULT-RANGES.md: fib's result Range is now finite, so the
+# recursive-result addition is a raw riadd on unboxed results (runbox x2, one
+# rbox): 17 -> 20 NIR registers. The shadow-slot ceiling is unchanged.
+test root-structural-1 {fib<int>: far fewer shadow slots than its 20 NIR registers} -body {
     set report [native::roots [sourceBotHir [file join $::projectRoot bench fib.bot]]]
     list [regsOf $report fib] [expr {[slotsOf $report fib] < 17}] [expr {[slotsOf $report fib] <= 4}]
-} -result {17 1 1}
+} -result {20 1 1}
 
 # work makes no Botlish call at all (pure arithmetic), so it is
 # RootStorage::NativeFrame (native/src/codegen/roots.rs's eligibility rule):

@@ -1,0 +1,3 @@
+functions 150, solved 150, state values checked 1028, violations 0
+functions 150, solved 150, state values checked 1086, violations 0
+functions 150, solved 150, state values checked 1030, violations 0

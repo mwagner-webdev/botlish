@@ -1,0 +1,30 @@
+runs collected: 20; all figures per run
+total Ir/run: 1,977,300
+exclusive Ir by code kind: botlish 1,977,294 (100.0%)  rust-other 6 (0.0%)
+
+== Botlish functions: invocations (exact), SELF Ir (direct / generic entry), INCLUSIVE Ir (direct+entry+all callees)
+  function                               invoc entry-invoc  self direct self entry    inclusive  incl %  self %
+  0 <program>                                1           0           10          0    1,977,294 100.00%   0.00%
+  1 fib                                 57,313           0    1,977,284          0    1,977,284 100.00% 100.00%
+
+== calls out of Botlish code (in-region counts): caller -> callee, count/run, inclusive Ir/run, Ir/call, % total
+  0 <program>                    -> 1 fib                                                                1     1,977,284  1977284.0  100.00%
+
+== runtime/libc functions: exact in-region invocations (entry-instruction count, if resolvable), SELF, INCLUSIVE
+  botlish_audit_run                                                              1  self           6 ( 0.00%)  incl   1,977,300 (100.00%)  1977300.0 Ir/call
+  <std::sys::thread::unix::Thread>::new::thread_start                            ?  self           0 ( 0.00%)  incl   1,977,300 (100.00%)
+  cli                                                                            ?  self           0 ( 0.00%)  incl   1,977,300 (100.00%)
+  std::sys::backtrace::__rust_begin_short_backtrace::<main::{closure#2},         ?  self           0 ( 0.00%)  incl   1,977,300 (100.00%)
+  <std::thread::lifecycle::spawn_unchecked<main::{closure#2}, i32>::{clo         ?  self           0 ( 0.00%)  incl   1,977,300 (100.00%)
+  start_thread                                                                   ?  self           0 ( 0.00%)  incl   1,977,300 (100.00%)
+  clone                                                                          ?  self           0 ( 0.00%)  incl   1,977,300 (100.00%)
+
+== arcs out of hot runtime functions: in-region call count/run, inclusive Ir/run of the callee subtree
+
+== SELF cost of hot runtime functions by inlined source (addr2line -i: innermost function @ line; outermost line)
+
+== executed JIT instruction classes (per run), per function (direct + generic entry)
+  class-totals: mov reg-reg=429,843; frame: epilogue=401,195; frame: prologue=343,881; stack store=171,938; retag=114,624; arith=85,968; tag test=85,968; overflow check=85,968; call botlish=57,313; untag=57,313; cmp/test (other)=57,313; jcc (other)=57,313; lea=28,656; mov imm=1
+  1 fib (1,977,284): mov reg-reg=429,843; frame: epilogue=401,191; frame: prologue=343,878; stack store=171,937; retag=114,624; arith=85,968; tag test=85,968; overflow check=85,968; untag=57,313; cmp/test (other)=57,313; jcc (other)=57,313; call botlish=57,312; lea=28,656
+  0 <program> (10): frame: epilogue=4; frame: prologue=3; mov imm=1; stack store=1; call botlish=1
+

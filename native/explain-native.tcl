@@ -11,6 +11,8 @@
 #   aot.txt           hir::aot::explain: closed-AOT readiness per function
 #   aot-spec.txt      hir::specialize::explain: instances, guards, runtime
 #                     requirements per specialization
+#   recursive-ranges.txt  bounded self-recursive result proofs and
+#                     rejection reasons (hir/rangerec.tcl), with state trace
 #   range-params.txt  hir::range::analyze's per-parameter/result Range of
 #                     every used instance
 #   range-exprs.txt   the same analysis's per-expression Range, keyed by
@@ -67,7 +69,11 @@ proc W {outdir name content} {
 set callFactsOpt [expr {[info exists ::env(BOTLISH_NATIVE_CALL_FACTS_OPT)]
     && $::env(BOTLISH_NATIVE_CALL_FACTS_OPT) eq "0" ? 0 : 1}]
 set spec [hir::specialize::analyze $hir -call-facts-opt $callFactsOpt]
-set ranges [hir::range::analyze $hir $spec $callFactsOpt]
+set recursiveOpt [expr {[info exists ::env(BOTLISH_NATIVE_RECURSIVE_RESULT_RANGE_OPT)]
+    && $::env(BOTLISH_NATIVE_RECURSIVE_RESULT_RANGE_OPT) eq "0" ? 0 : 1}]
+set recursiveLimit [expr {[info exists ::env(BOTLISH_NATIVE_RECURSIVE_RANGE_LIMIT)]
+    ? $::env(BOTLISH_NATIVE_RECURSIVE_RANGE_LIMIT) : ""}]
+set ranges [hir::range::analyze $hir $spec $callFactsOpt 1 1 $recursiveOpt $recursiveLimit]
 W $outdir hir.txt [hir::format $hir]
 W $outdir aot.txt [hir::aot::explain $hir]
 W $outdir aot-spec.txt [hir::specialize::explain $hir $spec]
@@ -92,6 +98,7 @@ foreach id [dict get $spec used] {
     append out "  result range: [hir::range::show [dict get [dict get $ranges instances $id] result]]\n"
 }
 W $outdir range-params.txt $out
+W $outdir recursive-ranges.txt [hir::range::explainRecursive $spec $ranges 1]
 
 # Per-expr range facts for every used instance, keyed by ExprId (for
 # cross-referencing against hir.txt's e<N> ids).

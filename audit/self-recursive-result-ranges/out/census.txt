@@ -1,0 +1,66 @@
+bench/fib.bot: self-recursive instances 1; NIR DIFFERS
+    fib<int>: solved states 23 result [-∞, +∞] -> [0, 17711] {0,1,2,3,5,8,13,21,34,55,89,144,233,377,610,987,1597,2584,4181,6765,10946,17711}
+bench/lex-strategy.bot: self-recursive instances 3; NIR identical
+    chars_of<str, int, List[str]>: rejected nondecreasing-call -- state i=1: self call e88: measure argument [2, 2] {2} is not below 1
+    count_true<List[bool], int, int>: rejected multiple-measures -- no single Int parameter decreases in every reachable self call
+    total_valid<List[str], bool, int, int>: rejected nondecreasing-call -- state i=0: self call e195: measure argument [1, 1] {1} is not below 0
+bench/loop-count.bot: self-recursive instances 1; NIR identical
+    drive<int, int>: rejected state-budget -- measure i: at least 500 states predicted from 499 down to the entry floor 0 (budget 128)
+bench/refined-checks.bot: self-recursive instances 3; NIR identical
+    esc_bytes<List[int], int, str>: rejected nondecreasing-call -- state i=0: self call e462: measure argument [1, 1] {1} is not below 0
+    esc_from<str, int, str>: rejected nondecreasing-call -- state i=0: self call e524: measure argument [1, 1] {1} is not below 0
+    check<int, int, str, str>: rejected state-budget -- measure n: at least 400 states predicted from 399 down to the entry floor 0 (budget 128)
+bench/source-checks.bot: self-recursive instances 0; NIR identical
+bench/sum-refined.bot: self-recursive instances 1; NIR identical
+    refined_sum<int, int>: rejected state-budget -- measure n: at least 400 states predicted from 399 down to the entry floor 0 (budget 128)
+bench/test-selection.bot: self-recursive instances 0; NIR identical
+bench/uri-steady.bot: self-recursive instances 3; NIR identical
+    esc_bytes<List[int], int, str>: rejected nondecreasing-call -- state i=0: self call e406: measure argument [1, 1] {1} is not below 0
+    esc_from<str, int, str>: rejected nondecreasing-call -- state i=0: self call e468: measure argument [1, 1] {1} is not below 0
+    repeat_uri<generic>: rejected no-int-measure -- no Int parameter
+examples/stdlib/ai_text_clean.bot: self-recursive instances 1; NIR identical
+    clean_from<str, int, str>: rejected nondecreasing-call -- state index=0: self call e200: measure argument [1, 1] {1} is not below 0
+examples/stdlib/csv.bot: self-recursive instances 4; NIR identical
+    scan_unquoted<str, int, int>: rejected unbounded-entry -- no Int parameter has a finite external entry Range
+    scan_quoted<str, int, str>: rejected unbounded-entry -- no Int parameter has a finite external entry Range
+    scan_record<str, int, List[str]>: rejected unbounded-entry -- no Int parameter has a finite external entry Range
+    scan_records<str, int, List[List[str]]>: rejected unbounded-entry -- no Int parameter has a finite external entry Range
+examples/stdlib/csv_chunked.bot: self-recursive instances 6; NIR identical
+    chunked_copy_chunks<List[never], int, mutarray, int>: rejected multiple-measures -- no single Int parameter decreases in every reachable self call
+    chunked_copy_chunks<List[mutarray], int, mutarray, int>: rejected multiple-measures -- no single Int parameter decreases in every reachable self call
+    scan_unquoted<str, int, int>: rejected unbounded-entry -- no Int parameter has a finite external entry Range
+    scan_quoted<str, int, str>: rejected unbounded-entry -- no Int parameter has a finite external entry Range
+    scan_record<str, int, list[List[mutarray], mutarray, int]>: rejected unbounded-entry -- no Int parameter has a finite external entry Range
+    scan_records<str, int, list[List[mutarray], mutarray, int]>: rejected unbounded-entry -- no Int parameter has a finite external entry Range
+examples/stdlib/csv_geometric.bot: self-recursive instances 4; NIR identical
+    scan_unquoted<str, int, int>: rejected unbounded-entry -- no Int parameter has a finite external entry Range
+    scan_quoted<str, int, str>: rejected unbounded-entry -- no Int parameter has a finite external entry Range
+    scan_record_rest<str, int, mutarray, int>: rejected nondecreasing-call -- state count=1: self call e283: measure argument [2, 2] {2} is not below 1
+    scan_records<str, int, mutarray, int>: rejected nondecreasing-call -- state count=1: self call e357: measure argument [2, 2] {2} is not below 1
+examples/stdlib/csv_records.bot: self-recursive instances 12; NIR identical
+    scan_unquoted<str, int, int>: rejected unbounded-entry -- no Int parameter has a finite external entry Range
+    scan_quoted<str, int, str>: rejected unbounded-entry -- no Int parameter has a finite external entry Range
+    scan_record_rest<str, int, mutarray, int>: rejected nondecreasing-call -- state count=1: self call e283: measure argument [2, 2] {2} is not below 1
+    scan_records<str, int, mutarray, int>: rejected nondecreasing-call -- state count=1: self call e357: measure argument [2, 2] {2} is not below 1
+    ht_fill_empty<mutarray, int, int>: rejected nondecreasing-call -- state i=0: self call e421: measure argument [1, 1] {1} is not below 0
+    ht_capacity_for<int, int>: rejected state-budget -- measure expected: 4611686018427387904 entry states exceed the budget 128
+    ht_find_get<mutarray, str, int>: rejected unbounded-entry -- no Int parameter has a finite external entry Range
+    ht_find_insert<mutarray, str, int, int>: rejected unknown-recursive-arg-range -- state first_tombstone=-1: self call e689: measure argument [0, +∞]
+    ht_rehash_probe<mutarray, int, int>: rejected state-budget -- measure capacity: 9223372036854775807 entry states exceed the budget 128
+    ht_rehash_scan<struct{controls: any, keys: any, values: any}, int, int, struct{controls: mutarray, keys: mutarray, values: mutarray}, int>: rejected nondecreasing-call -- state i=0: self call e844: measure argument [1, 1] {1} is not below 0
+    row_fill<mutarray, List[str], List[str], int, int>: rejected nondecreasing-call -- state i=0: self call e1130: measure argument [1, 1] {1} is not below 0
+    build_rows<List[List[str]], int, List[str], int, mutarray, int, bool>: rejected nondecreasing-call -- state i=2: self call e1180: measure argument [3, 3] {3} is not below 2
+examples/stdlib/hashtable.bot: self-recursive instances 5; NIR identical
+    ht_fill_empty<mutarray, int, int>: rejected nondecreasing-call -- state i=0: self call e28: measure argument [1, 1] {1} is not below 0
+    ht_find_get<mutarray, str, int>: rejected unbounded-entry -- no Int parameter has a finite external entry Range
+    ht_find_insert<mutarray, str, int, int>: rejected unknown-recursive-arg-range -- state first_tombstone=-1: self call e296: measure argument [0, +∞]
+    ht_rehash_probe<mutarray, int, int>: rejected state-budget -- measure capacity: 9223372036854775807 entry states exceed the budget 128
+    ht_rehash_scan<struct{controls: any, keys: any, values: any}, int, int, struct{controls: mutarray, keys: mutarray, values: mutarray}, int>: rejected nondecreasing-call -- state i=0: self call e451: measure argument [1, 1] {1} is not below 0
+examples/stdlib/matmul.bot: self-recursive instances 3; NIR identical
+    dot<List[int], List[List[int]], int, int, int, int>: rejected nondecreasing-call -- state k=0: self call e24: measure argument [1, 1] {1} is not below 0
+    product_row<List[int], List[List[int]], int, int, List[int]>: rejected nondecreasing-call -- state column=1: self call e58: measure argument [2, 2] {2} is not below 1
+    product_rows<List[List[int]], List[List[int]], int, int, List[List[int]]>: rejected nondecreasing-call -- state i=1: self call e94: measure argument [2, 2] {2} is not below 1
+examples/stdlib/string_replace.bot: self-recursive instances 1; NIR identical
+    replace_from<str, str, str, int, int, str>: rejected nondecreasing-call -- state index=0: self call e75: measure argument [0, 4611686018427387903] is not below 0
+examples/stdlib/string_reverse.bot: self-recursive instances 1; NIR identical
+    reverse_from<str, int, str>: rejected nondecreasing-call -- state index=0: self call e21: measure argument [1, 1] {1} is not below 0

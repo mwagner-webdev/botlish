@@ -1,0 +1,14 @@
+opt 0
+program | prepare | specialize | range | lower | cranelift | total (ms, median of 9)
+bench/fib.bot | 0 | 1 | 3 | 2 | 4 | 11
+bench/loop-count.bot | 0 | 2 | 3 | 3 | 5 | 13
+bench/sum-refined.bot | 0 | 2 | 2 | 3 | 5 | 12
+bench/refined-checks.bot | 193 | 46 | 69 | 66 | 19 | 392
+examples/stdlib/csv_records.bot | 3 | 145 | 194 | 379 | 11 | 732
+opt 1
+program | prepare | specialize | range | lower | cranelift | total (ms, median of 9)
+bench/fib.bot | 0 | 1 | 16 | 3 | 4 | 24
+bench/loop-count.bot | 0 | 2 | 4 | 4 | 5 | 14
+bench/sum-refined.bot | 0 | 2 | 2 | 4 | 4 | 13
+bench/refined-checks.bot | 191 | 45 | 69 | 58 | 13 | 376
+examples/stdlib/csv_records.bot | 3 | 140 | 198 | 348 | 30 | 741
