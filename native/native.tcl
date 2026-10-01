@@ -197,8 +197,12 @@ proc native::executable {hir path args} {
     foreach {option variable} {
         -call-facts-opt BOTLISH_NATIVE_CALL_FACTS_OPT
         -closed-caller-facts-opt BOTLISH_NATIVE_CLOSED_CALLER_FACTS_OPT
+        -exact-callable-opt BOTLISH_NATIVE_EXACT_CALLABLE_OPT
     } {
         dict set analysisOptions $option [expr {![info exists ::env($variable)] || $::env($variable) ne "0"}]
+    }
+    if {[info exists ::env(BOTLISH_NATIVE_EXACT_CALLABLE_LIMIT)] && $::env(BOTLISH_NATIVE_EXACT_CALLABLE_LIMIT) ne ""} {
+        dict set analysisOptions -exact-callable-limit $::env(BOTLISH_NATIVE_EXACT_CALLABLE_LIMIT)
     }
     foreach {option value} $args {
         if {[dict exists $analysisOptions $option]} { dict set analysisOptions $option $value }

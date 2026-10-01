@@ -358,10 +358,17 @@ test sr-argument-self-recursion {a struct argument rebuilt on every step of a se
     list [srValue $tail] [srOps $tail] [srValue $nontail] [srOps $nontail]
 } -result {10 {structnew 0 structget 0 callmulti 0 retmulti 0} 15 {structnew 0 structget 0 callmulti 0 retmulti 0}}
 
-test sr-recursion-higher-order-cycle {an argument-passing cycle through a function value is an open call: the struct is built there, nothing oscillates, the value is unchanged} -body {
+# EXACT-CALLABLE-CLOSED-CALLER.md: the cycle left -> g(...) -> right -> f(...)
+# passes the exact functions to each other, so each call through f/g is a
+# direct call of a known target (one instance per target, a finite key space:
+# nothing oscillates) and the structs that crossed it as an open-call barrier
+# now flow through exact calls: 4 static constructions become 2. The value is
+# unchanged, and with struct scalar replacement off every struct is still
+# built.
+test sr-recursion-higher-order-cycle {an argument-passing cycle through function values: the calls are exact (one instance per target), nothing oscillates, the value is unchanged and fewer structs are built} -body {
     set source "struct S:\n    a: int\n    b: int\nfn left(f, g, x: S, n: int):\n    if n <= 0:\n        return x.a\n    g(f, g, S \{a: x.a + 1, b: x.b\}, n - 1)\nfn right(f, g, x: S, n: int):\n    if n <= 0:\n        return x.b\n    f(f, g, S \{a: x.a, b: x.b + 2\}, n - 1)\nleft(left, right, S \{a: 0, b: 0\}, 5) + right(left, right, S \{a: 0, b: 0\}, 5)\n"
     list [srValue $source] [srOps $source] [srOps $source -struct-opt 0]
-} -result {6 {structnew 4 structget 6 callmulti 0 retmulti 0} {structnew 6 structget 10 callmulti 0 retmulti 0}}
+} -result {6 {structnew 2 structget 6 callmulti 0 retmulti 0} {structnew 6 structget 12 callmulti 0 retmulti 0}}
 
 test sr-argument-open-call-materializes {a virtual struct handed to an unknown callable is built first} -body {
     set source "fn one(x):\n    1\nfn two(x):\n    2\nfn pick(n):\n    list_get(\[one, two\], n)\nfn run(n):\n    f = pick(n)\n    x = \{k: 1, v: 2\}\n    \[x.k, f(x)\]\n\[run(0), run(1)\]\n"

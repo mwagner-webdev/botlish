@@ -2097,28 +2097,42 @@ proc hir::range::AnalyzeInstance {hir id instanceCalls block params assumed mono
         creates [dict get $ctx creates]]
 }
 
-# The block ExprIds that materialize (hir/aot.tcl::materializedBlocks) as an
-# escaping Block value somewhere in the used instances' reachable code: a
-# value that can be called through unknown dynamic dispatch this analysis
-# has no edges for (spec #9, #28-29). Only a block's *generic* instance can
-# ever run such a call (hir::specialize's own materialization rule always
-# resolves a materialized value to the block's generic instance --
-# specialize.tcl's own header, "Closures over values stay generic" and "not
-# a static block"): a *specialized* instance's only possible callers are
-# exactly the direct calls hir::specialize resolved to it, so it is never
-# open regardless of this set.
-proc hir::range::OpenInstances {spec} {
-    set materialized [dict create]
-    foreach id [dict get $spec used] {
-        foreach block [dict get [dict get $spec instances $id] values] {
-            dict set materialized $block 1
-        }
+# The instances whose set of callers this analysis does not fully know: an
+# instance is OPEN exactly when hir::specialize's authoritative closedness
+# proof (InstanceClosed; EXACT-CALLABLE-CLOSED-CALLER.md) does not hold for
+# it. There is no second, range-specific notion of openness.
+#
+# Before that milestone this proc asked a coarser question of its own: "is a
+# Block value of this block materialized anywhere in the used code"
+# (hir::aot::materializedBlocks). That answer is right for an ordinary
+# (static) block, and InstanceClosed's static branch is the identical test,
+# but it is wrong for a value-capturing closure: aot counts *every* bind of
+# a capturing closure as materializing, so every generic closure instance
+# read as open even where hir::blockescape had proved that every reference
+# is an exact call (the instance's whole caller set is known). Those
+# instances therefore never received caller-propagated entry Ranges.
+#
+# An open instance never receives caller-propagated facts for any parameter
+# (spec #28-29): only a *generic* instance can ever be open (a specialized
+# instance's only possible callers are exactly the direct calls hir::
+# specialize resolved to it), and its set of known callers is then not the
+# full set of actual callers.
+#
+# SPEC carries the proof (`closed`) hir::specialize::analyze computed once
+# at the stable point; HIR is only needed to derive it for a hand-built SPEC
+# that lacks it.
+proc hir::range::OpenInstances {spec {hir ""}} {
+    if {[dict exists $spec closed]} {
+        set closed [dict get $spec closed]
+    } elseif {$hir ne ""} {
+        set closed [hir::specialize::ClosedInstances $hir $spec]
+    } else {
+        error "hir::range::OpenInstances: SPEC has no closedness result and no HIR was given"
     }
     set open [dict create]
     foreach id [dict get $spec used] {
         set instance [dict get $spec instances $id]
-        if {[dict get $instance generic] && [dict get $instance block] ne "program"
-                && [dict exists $materialized [dict get $instance block]]} {
+        if {[dict get $instance block] ne "program" && ![dict exists $closed $id]} {
             dict set open $id 1
         }
     }
@@ -2244,7 +2258,7 @@ proc hir::range::analyze {hir spec {callFactsOpt 1} {narrowOpt 1} {captureOpt 1}
     # already accounts for would immediately widen it back to infinity (see
     # hir/induction.tcl's header).
     set induction [hir::induction::analyze $hir $spec $literalSeeds]
-    set open [OpenInstances $spec]
+    set open [OpenInstances $spec $hir]
 
     set ids [dict get $spec used]
     set blockOf [dict create]

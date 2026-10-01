@@ -229,7 +229,16 @@ test closed-call-exact-union-exceeds-budget {34 distinct literal callers exceed 
 # generic instance a dynamic call resolves to, must not contaminate each
 # other.
 
-test closed-call-open-caller-fallback {a direct exact caller's narrow fact stays on the specialized instance; the same function's dynamically-dispatched generic instance stays fully unknown} -body {
+# EXACT-CALLABLE-CLOSED-CALLER.md: `apply(f, 999999999)` used to reach f
+# through an indirect callvalue (the key erased which callable g was), so
+# its argument never flowed into f's facts and the narrow [16, 16] stood. The
+# call is exact now, so 999999999 IS a known caller argument of f's
+# specialized instance, and the instance's entry Range is honestly the join
+# [16, 999999999]; f's generic instance (the Block value passed as an
+# argument still exists, and is open) stays fully unknown. The separation
+# the test pins is unchanged: no caller fact reaches the open generic
+# instance, and the specialized one never claims more than its callers prove.
+test closed-call-open-caller-fallback {the specialized instance's entry Range joins the arguments of both its (now both exact) callers; the same function's open generic instance stays fully unknown} -body {
     lassign [closedCallFacts {
 fn f(x):
     x
@@ -250,7 +259,39 @@ apply(f, 999999999)
         }
     }
     list [paramRanges $analysis $specializedId] [paramRanges $analysis $genericId]
-} -result {{{[16, 16] {16}}} {{[-∞, +∞]}}}
+} -result {{{[16, 999999999] {16,999999999}}} {{[-∞, +∞]}}}
+
+# The genuinely dynamic variant keeps the original contrast: the callable is
+# chosen at run time (declared Fn type), so the call reaches no exact
+# instance and its argument never narrows or widens f's specialized facts.
+test closed-call-dynamic-caller-contributes-nothing {a genuinely dynamic caller (callable chosen at run time) contributes no fact to f's specialized instance: its entry stays the direct caller's [16, 16]} -body {
+    lassign [closedCallFacts {
+fn f(x):
+    x
+
+fn other(x):
+    x
+
+fn pick(b) -> Fn{args: [int], return: int}:
+    if b:
+        f
+    else:
+        other
+
+fn apply(g, v):
+    g(v)
+
+f(16)
+apply(pick(true), 999999999)
+}] hir spec analysis
+    set specializedId ""
+    foreach id [instancesNamed $spec f] {
+        if {![instanceGeneric $spec $id]} {
+            set specializedId $id
+        }
+    }
+    paramRanges $analysis $specializedId
+} -result {{[16, 16] {16}}}
 
 # ---------------------------------------------------------------------------
 # Branch-narrowed caller facts (spec #31-32, #77): a caller's own local flow

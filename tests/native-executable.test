@@ -83,16 +83,26 @@ test native-executable-modules {module statics, sets, strings and specialized co
     }
 } -result {[true, false, "a%20b%2F%C3%A9%F0%9F%99%82"]}
 
+# The callable is chosen at run time: with a statically exact target
+# (EXACT-CALLABLE-CLOSED-CALLER.md) the call through `f` is direct and never
+# enters a generic trampoline, which is what this test exists to cover.
 test native-executable-generic-entry {known callable kinds can call through generic trampolines under GC} -constraints executableAot -body {
     aotParity {
         fn build():
             concat("x", "y")
+        fn other():
+            concat("z", "w")
+        fn pick(flag: bool):
+            if flag:
+                build
+            else:
+                other
         fn apply(f):
             prefix = concat("a", "b")
             [prefix, f()]
-        apply(build)
+        [apply(pick(true)), apply(pick(false))]
     } {-block-escape-opt 0 -tiny-leaf-inline-opt 0}
-} -result {["ab", "xy"]}
+} -result {[["ab", "xy"], ["ab", "zw"]]}
 
 test native-executable-native-bridge {source native implementations share existing modules and preserve declared contracts} -constraints executableAot -body {
     aotParity {

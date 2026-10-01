@@ -139,6 +139,17 @@ test blockescape-open-call-1 {a closure passed as an ordinary argument still all
     list [assertParity $text] [blockAllocs $text 1] [blockAllocs $text 0]
 } -result {{int 15} 1 1}
 
+# EXACT-CALLABLE-CLOSED-CALLER.md: in the test above the call through apply's
+# parameter is now an exact `callenv` of step's closure (the closure is still
+# allocated: passing it is an escape blockescape cannot see through). The
+# genuinely dynamic variant -- the closure chosen at run time -- keeps the
+# callvalue dispatch covered.
+test blockescape-open-call-2 {a closure chosen at run time and passed as an ordinary argument still allocates and dispatches correctly through callvalue} -body {
+    set text "fn apply(g, y):\n    g(y)\n\nfn f(n, up):\n    fn step(x):\n        x + n\n    fn back(x):\n        x - n\n    fn pick(u):\n        if u:\n            step\n        else:\n            back\n    apply(pick(up), 5)\n\n\[f(10, true), f(10, false)\]"
+    set nir [dict get [native::lower::program [sourceHir $text]] text]
+    list [assertParity $text] [expr {[blockAllocs $text 1] >= 1}] [expr {[regexp {callvalue} $nir] >= 1}]
+} -result {{list {{int 15} {int -5}}} 1 1}
+
 # ---------------------------------------------------------------------------
 # Recursive Block (de-closure conversion #21, #92): a self-referencing local
 # closure whose only self-reference is its own exact recursive call no
@@ -617,14 +628,21 @@ test blockescape-region-companion-flags-both-off {both off: the fully unoptimize
 # 803 (8823 -> 8020); String/List/ImmutableSet are unchanged (this
 # milestone corrects storage/reachability representation only, never
 # value construction, per spec items 28-29).
-test blockescape-region-companion-refined-checks-1 {refined-checks.ir: local_extra_chars' List/ImmutableSet are module-init only (R2.a.1); Block drops from 803 (R2.a.1's own per-call local_char? closure, capturing the module set) to 0 -- local_char? is envless now, a module-static reference is never a capture (MODULE-STATIC-RETAINED-VALUES.md); R2.a.3's char-at-a-time domain? still keeps String at 8004} -body {
+# EXACT-CALLABLE-CLOSED-CALLER.md: scan_while's TLD call site now has the
+# exact predicate is_tcl_alpha in its key, so the TLD scan consumes
+# char_at(i) as a StringRegion (no one-character String per TLD character):
+# String 8004 -> 6804 (the 1,200 TLD characters of the 800 real emailish?
+# calls' accepted inputs), total allocations 8020 -> 6820. The local-part
+# scan's 6,800 one-character Strings remain (set membership is not a region
+# consumer).
+test blockescape-region-companion-refined-checks-1 {refined-checks.ir: local_extra_chars' List/ImmutableSet are module-init only (R2.a.1); Block drops from 803 (R2.a.1's own per-call local_char? closure, capturing the module set) to 0 -- local_char? is envless now, a module-static reference is never a capture (MODULE-STATIC-RETAINED-VALUES.md); the exact predicate is_tcl_alpha makes the TLD scan a StringRegion consumer, so String falls 8004 -> 6804 (the local part's set-membership characters remain)} -body {
     core::loadLibrary web
     set hir [nativeHirOfIR [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
     set on [native::allocationReport $hir summary 1]
     list [native::evalHir $hir] [dict get $on total allocations] [dict get $on byKind Block allocations] \
         [dict get $on byKind String allocations] [dict get $on byKind List allocations] \
         [dict get $on byKind ImmutableSet allocations]
-} -result {{list {{int 400} {int 0}}} 8020 0 8004 12 2}
+} -result {{list {{int 400} {int 0}}} 6820 0 6804 12 2}
 
 test blockescape-region-companion-refined-checks-2 {refined-checks.ir: char_at's NIR has no closure/callenvmulti, and env=0/results=3 -- R2 (R2-ORDINARY-EMAILISH-PREDICATE.md) collapses this to one shared instance, not two per-call-site copies} -body {
     core::loadLibrary web
@@ -647,23 +665,17 @@ test blockescape-region-companion-refined-checks-2 {refined-checks.ir: char_at's
 # still exactly one used generic instance each, still capturing n/v
 # directly (never char_at) as ordinary flattened parameters, not a
 # per-call-site copy.
-test blockescape-region-companion-refined-checks-3 {refined-checks.ir: scan_while/tld?/domain? flatten captures to [n, v] (domain_loop is gone; scan_while's own induction param is renamed i -> start) -- each remains one shared instance, not two per-call-site copies} -body {
+test blockescape-region-companion-refined-checks-3 {refined-checks.ir: scan_while/tld?/domain? flatten captures to [n, v] (domain_loop is gone; scan_while's own induction param is renamed i -> start) -- tld? and domain? remain one shared instance each; scan_while has one instance per exact predicate target (local_char?, is_tcl_alpha), each flattened (EXACT-CALLABLE-CLOSED-CALLER.md: blockescape de-closes a literal with several instances), and no closure is built} -body {
     core::loadLibrary web
     set hir [nativeHirOfIR [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
     set nirText [dict get [native::lower::program $hir] text]
     set noDomainLoop [expr {![regexp {"domain_loop"} $nirText]}]
-    set flattened 0
-    if {[llength [regexp -all -inline {"scan_while" params=4 env=0 [^\n]*pnames="start predicate n v"} $nirText]] == 1} {
-        incr flattened
-    }
-    if {[llength [regexp -all -inline {"tld\?" params=3 env=0 [^\n]*pnames="i n v"} $nirText]] == 1} {
-        incr flattened
-    }
-    if {[llength [regexp -all -inline {"domain\?" params=3 env=0 [^\n]*pnames="start n v"} $nirText]] == 1} {
-        incr flattened
-    }
-    list $noDomainLoop $flattened 3
-} -result {1 3 3}
+    list $noDomainLoop \
+        [llength [regexp -all -inline {"scan_while" params=4 env=0 [^\n]*pnames="start predicate n v"} $nirText]] \
+        [llength [regexp -all -inline {"tld\?" params=3 env=0 [^\n]*pnames="i n v"} $nirText]] \
+        [llength [regexp -all -inline {"domain\?" params=3 env=0 [^\n]*pnames="start n v"} $nirText]] \
+        [regexp -all {= closure } $nirText] [regexp -all {callvalue} $nirText]
+} -result {1 2 1 1 0 0}
 
 test blockescape-region-companion-refined-checks-4 {refined-checks.ir under GC stress: unchanged value, on the composed representation} -body {
     core::loadLibrary web

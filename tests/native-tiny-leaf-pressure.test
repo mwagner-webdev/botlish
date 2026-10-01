@@ -106,13 +106,15 @@ test tiny-leaf-pressure-dynamic-keeps-canonical {with one dynamic caller present
     set nir [native::nir $hir -tiny-leaf-inline-opt 1]
     # "leaf" appears exactly once (its own generic instance, kept alive by
     # the dynamic use -- its <int> instance's 64 direct call sites all
-    # inlined and left no separate function to also match). The 2 surviving
+    # inlined and left no separate function to also match). The 3 surviving
     # call/callenv instructions are the top-level program's own calls to
-    # caller() and apply(...) -- neither is itself tiny-leaf eligible
-    # (caller calls leaf, a Block target; apply's own g(v) is a dynamic,
-    # non-exact call) -- not calls to leaf.
+    # caller(), pick(true) and apply(...) -- none is itself tiny-leaf
+    # eligible (caller calls leaf, a Block target; pick branches; apply's own
+    # g(v) is a dynamic, non-exact call because pick chooses the callable at
+    # run time -- EXACT-CALLABLE-CLOSED-CALLER.md: with an exact target it
+    # would be a direct call) -- not calls to leaf.
     list [regexp -all {"leaf"} $nir] [regexp -all {= call(env)? } $nir]
-} -result {1 2}
+} -result {1 3}
 
 # ---------------------------------------------------------------------------
 # Budget sentinel (spec's own items 29-31): high expansion pressure,

@@ -23,7 +23,7 @@
 #       leaf(x + 0) + leaf(x + 1) + ... + leaf(x + (N-1))
 #
 #   caller(1)                          (direct-only), or
-#   [caller(1), apply(leaf, 1)]        (direct + one dynamic use, DYNAMIC 1)
+#   [caller(1), apply(pick(true), 1)]  (direct + one dynamic use, DYNAMIC 1)
 #
 # CALLER takes its own unknown-at-compile-time parameter X (rather than
 # calling leaf on N bare literals): every one of leaf's N call sites then
@@ -47,8 +47,12 @@
 # (((x+1)*2+1)*2+1)*2+1)*2, alternating add/multiply by non-foldable
 # runtize-unknown-dependent steps) resists that collapse and gives a
 # genuinely differentiated 8-op data point.
-# DYNAMIC 1 additionally passes leaf itself as a first-class value
-# (apply(leaf, v)), which hir::specialize keeps as a *separate* generic
+# DYNAMIC 1 additionally passes leaf itself as a first-class value chosen at
+# run time (apply(pick(true), v): pick returns leaf or a second function, so
+# the target is not statically exact -- with an exact target the call through
+# apply's parameter would be a direct, inlinable call, EXACT-CALLABLE-CLOSED-
+# CALLER.md, and the fixture would no longer exercise a dynamic use),
+# which hir::specialize keeps as a *separate* generic
 # instance from the direct calls' own specialized <int> instance
 # (CLOSED-CALL-PARAMETER-FACTS.md's own finding: a specialized instance's
 # caller set is closed by construction) -- this isolates true inline
@@ -101,7 +105,7 @@ proc tinyLeafPressure::source {ops n dynamic {style chain}} {
     }
     append src "    [join $terms " + "]\n"
     if {$dynamic} {
-        append src "\nfn apply(g, v):\n    g(v)\n\n\[caller(1), apply(leaf, 1)\]\n"
+        append src "\nfn other(v):\n    v\n\nfn pick(up):\n    if up:\n        leaf\n    else:\n        other\n\nfn apply(g, v):\n    g(v)\n\n\[caller(1), apply(pick(true), 1)\]\n"
     } else {
         append src "\ncaller(1)\n"
     }

@@ -31,19 +31,26 @@ proc nirOf {text} {
 }
 
 # ---------------------------------------------------------------------------
-# Positive: an exact callable forwarded through an ordinary *untyped* call
-# argument to a shared instance's own untyped parameter has no compiler
-# proof of a singleton target (hir::specialize::KeyType reduces any Block-
-# typed argument to the bare "block" kind, discarding which block, by
-# design -- M2 spec items 6-7 explicitly forbid changing this). The call
-# through that parameter therefore remains indirect even with exactly one
-# caller: this is the correct, sound "genuinely open" result (M2 Outcome
-# C), not a bug this milestone leaves unfixed. (A *typed* callable, e.g.
-# `fn foo(x: Byte)`, cannot even reach this position at all --
-# hir::callables::verify already rejects it at compile time, per
+# An exact callable forwarded through an ordinary *untyped* call argument to
+# an instance's own untyped parameter.
+#
+# M2 (this file's own milestone) found that hir::specialize::KeyType reduced
+# any Block-typed argument to the bare "block" kind, so the call through the
+# parameter stayed an indirect callvalue even with exactly one caller, and it
+# pinned that as the correct, sound "genuinely open" result (M2 Outcome C),
+# forbidding a change to the key. EXACT-CALLABLE-CLOSED-CALLER.md made that
+# change deliberately: the argument's exact identity (a fact the semantic
+# type always had) now enters the codegen key, so each target gets its own
+# instance and the call through the parameter is a direct call. The M2
+# soundness property that mattered -- never treat an instance shared by
+# SEVERAL targets as having a singleton target -- is preserved structurally:
+# targets no longer share an instance until the target budget is spent, and
+# then the shared instance keeps the indirect callvalue (below). (A *typed*
+# callable, e.g. `fn foo(x: Byte)`, still cannot reach this position at all
+# -- hir::callables::verify already rejects it at compile time, per
 # typed-callable-escape.test.)
 
-test callable-target-forwarded-param-one-caller-stays-indirect {a callable forwarded through an ordinary untyped parameter, even with a single caller, has no singleton-target proof and stays a callvalue (M2 Outcome C)} -body {
+test callable-target-forwarded-param-one-caller-is-direct {a callable forwarded through an ordinary untyped parameter with a single caller is a direct call of its exact target: no callvalue (EXACT-CALLABLE-CLOSED-CALLER.md; M2 Outcome C no longer holds)} -body {
     set text {fn foo(x):
     x + 1
 
@@ -52,9 +59,9 @@ fn apply(f, x):
 
 apply(foo, 1)}
     regexp {callvalue} [nirOf $text]
-} -result 1
+} -result 0
 
-test callable-target-forwarded-param-two-callers-share-instance-stays-indirect {two callers of the same untyped-parameter instance passing different callables: still one shared instance, still indirect (the anti-unsoundness regression: M2 spec items 30-31)} -body {
+test callable-target-forwarded-param-two-callers-get-two-instances {two callers of the same untyped-parameter function passing different callables: one instance per exact target, each a direct call -- never one instance wrongly treated as having a singleton target} -body {
     set text {fn foo(x):
     x + 1
 
@@ -70,10 +77,37 @@ apply(bar, 2)}
     set analysis [hir::specialize::analyze $hir]
     set labels [lmap id [dict get $analysis used] {
         if {[dict get $analysis instances $id name] ne "apply"} continue
-        hir::specialize::label $analysis $id
+        regsub {e\d+} [hir::specialize::label $analysis $id] eN
     }]
     list $labels [regexp {callvalue} [nirOf $text]]
-} -result {{{apply<block, int>}} 1}
+} -result {{{apply<block(eN), int>} {apply<block(eN), int>}} 0}
+
+test callable-target-forwarded-param-shared-instance-stays-indirect {when the exact-target budget is spent, targets that share one instance (the kind-only key) are still called indirectly: the anti-unsoundness regression of M2 spec items 30-31, now exercised on the budget fallback} -body {
+    set saved $::hir::specialize::exactLimit
+    set ::hir::specialize::exactLimit 1
+    try {
+        set text {fn foo(x):
+    x + 1
+
+fn bar(x):
+    x + 2
+
+fn apply(f, x):
+    f(x)
+
+apply(foo, 1)
+apply(bar, 2)}
+        set hir [sourceHir $text]
+        set analysis [hir::specialize::analyze $hir]
+        set labels [lmap id [dict get $analysis used] {
+            if {[dict get $analysis instances $id name] ne "apply"} continue
+            regsub {e\d+} [hir::specialize::label $analysis $id] eN
+        }]
+        list [lsort $labels] [regexp {callvalue} [nirOf $text]]
+    } finally {
+        set ::hir::specialize::exactLimit $saved
+    }
+} -result {{{apply<block(eN), int>} {apply<block, int>}} 1}
 
 # ---------------------------------------------------------------------------
 # Alias: an immutable top-level alias of an exact function is itself typed

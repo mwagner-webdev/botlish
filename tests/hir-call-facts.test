@@ -42,7 +42,10 @@ test call-facts-sum-1 {exact captured closure call specializes and keeps its gen
          [expr {[string first {guard int %0} $off] >= 0}]
 } -result {1 1 1}
 
-test call-facts-generic-1 {an open Block call keeps step's generic Int guard} -body {
+# EXACT-CALLABLE-CLOSED-CALLER.md: apply's g(x) is an exact call now; what keeps
+# the generic Int guard is the Block value `step` passed as the argument (its
+# generic instance is the value's entry), exactly as before.
+test call-facts-generic-1 {a Block value passed as an argument keeps step's generic instance and its Int guard} -body {
     set hir [surface::compile "fn step(x):\n    x + 1\n\nfn apply(f, x):\n    f(x)\n\napply(step, \"wrong\")" t.bot -strict 0]
     set nir [native::nir $hir]
     list [expr {[string first {instance="generic"} $nir] >= 0}] \

@@ -37,8 +37,14 @@
 # instance; several semantic instances routinely lower through one codegen
 # instance (`identity<MutableArray[str]>` and `identity<MutableArray[int]>`
 # run the same generic code: KeyType(MutableArray[T]) is still `mutarray`), and
-# an inlined call has no codegen identity at all. hir::specialize::KeyType is
-# deliberately untouched.
+# an inlined call has no codegen identity at all. Nothing in this file
+# changes hir::specialize::KeyType. (EXACT-CALLABLE-CLOSED-CALLER.md later
+# changed KeyType itself, deliberately and in one place: an exact callable
+# argument keeps its identity in the codegen key because that identity
+# decides direct versus indirect lowering. That is a statement about
+# representation, not a relaxation of the separation above: every other
+# exact semantic fact -- an exact scalar value, an exact List element, a
+# contract -- still stays out of the key.)
 #
 # The key
 # -------

@@ -309,7 +309,37 @@ caller()}] caller]
     NoCallIn $body
 } -result 1
 
-test tiny-leaf-dynamic-call-not-inlined {a call through a first-class value (unknown target) never inlines, even though the same function's own direct call site does} -body {
+test tiny-leaf-dynamic-call-not-inlined {a call through a first-class value (unknown target: chosen at run time) never inlines, even though the same function's own direct call site does} -body {
+    set text {fn inc(x):
+    x + 1
+
+fn dec(x):
+    x - 1
+
+fn pick(up):
+    if up:
+        inc
+    else:
+        dec
+
+fn apply(g, y):
+    g(y)
+
+[inc(5), apply(pick(true), 5)]}
+    set nirText [nirTextOf $text]
+    set applyBody [FunctionBody $nirText apply]
+    list [regexp {callvalue} $applyBody] [expr {[string first "\"inc\"" $nirText] >= 0}] \
+        [native::evalHir [sourceHir $text]]
+} -result {1 1 {list {{int 6} {int 6}}}}
+
+# EXACT-CALLABLE-CLOSED-CALLER.md: the same shape with a statically exact
+# callable. The call through the parameter is a direct call of a known
+# target, so it is an ordinary exact call and the existing tiny-leaf rule
+# applies to it like any other: inc is a straight-line, environment-free
+# leaf, so its body is inlined into apply's exact instance (no callvalue, no
+# call). Nothing here forces inlining: it is the existing eligibility test
+# reacting to the repaired target information.
+test tiny-leaf-exact-callable-param-call-inlines {a call through a parameter whose key names an exact tiny leaf is a direct call and inlines like any other exact leaf call} -body {
     set text {fn inc(x):
     x + 1
 
@@ -319,13 +349,22 @@ fn apply(g, y):
 [inc(5), apply(inc, 5)]}
     set nirText [nirTextOf $text]
     set applyBody [FunctionBody $nirText apply]
-    list [regexp {callvalue} $applyBody] [expr {[string first "\"inc\"" $nirText] >= 0}] \
+    list [regexp {callvalue} $applyBody] [NoCallIn $applyBody] \
         [native::evalHir [sourceHir $text]]
-} -result {1 1 {list {{int 6} {int 6}}}}
+} -result {0 1 {list {{int 6} {int 6}}}}
 
-test tiny-leaf-dynamic-call-top-level-site-still-inlines {the *other* (direct, top-level) call to the very same eligible leaf still inlines, independent of the dynamic call elsewhere} -body {
+test tiny-leaf-dynamic-call-top-level-site-still-inlines {the *other* (direct, top-level) call to the very same eligible leaf still inlines, independent of the dynamic call elsewhere (a callable chosen at run time: with an exact target that call would be exact too -- tiny-leaf-exact-callable-param-call-inlines)} -body {
     set text {fn inc(x):
     x + 1
+
+fn dec(x):
+    x - 1
+
+fn pick(up):
+    if up:
+        inc
+    else:
+        dec
 
 fn apply(g, y):
     g(y)
@@ -333,7 +372,7 @@ fn apply(g, y):
 fn caller():
     inc(5)
 
-[caller(), apply(inc, 5)]}
+[caller(), apply(pick(true), 5)]}
     list [NoCallIn [FunctionBody [nirTextOf $text] caller]] [native::evalHir [sourceHir $text]]
 } -result {1 {list {{int 6} {int 6}}}}
 
@@ -456,16 +495,25 @@ caller()}
 # function (spec \167 9, \167 104): not removed merely because one call site
 # inlined, as long as something else still reaches it the ordinary way.
 
-test tiny-leaf-canonical-still-callable-value {a leaf inlined at one call site and called ordinarily (through a dynamic value) at another still gives the same value both ways} -body {
+test tiny-leaf-canonical-still-callable-value {a leaf inlined at one call site and called ordinarily (through a dynamic value) at another still gives the same value both ways: the canonical function survives and the generic callvalue reaches it} -body {
     set text {fn inc(x):
     x + 1
+
+fn dec(x):
+    x - 1
+
+fn pick(up):
+    if up:
+        inc
+    else:
+        dec
 
 fn apply(g, y):
     g(y)
 
-[inc(5), apply(inc, 5)]}
-    native::evalHir [sourceHir $text]
-} -result {list {{int 6} {int 6}}}
+[inc(5), apply(pick(true), 5), apply(pick(false), 5)]}
+    list [native::evalHir [sourceHir $text]] [regexp {callvalue} [native::nir [sourceHir $text]]]
+} -result {{list {{int 6} {int 6} {int 4}}} 1}
 
 # ---------------------------------------------------------------------------
 # GC stress smoke test (full-suite GC stress is run separately, per

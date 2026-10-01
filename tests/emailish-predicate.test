@@ -273,16 +273,18 @@ test emailish-predicate-canonical-style-fixture {the same fixture, spelled with 
 # ---------------------------------------------------------------------------
 # R2-specific range regression: the bridge-created open generic predicate
 # artifact (a dead, anonymous callee-position fnvalue) is gone. The scanner
-# closures' own entry Int facts remain broad (hir::range::OpenInstances
-# still flags them "open"), for a reason this milestone identified and did
-# not paper over: any nested closure with a free-variable capture (v, n) is
-# "open" under this classification regardless of the native-body bridge --
-# proven by comparison with lib/web.bot's own pre-existing uriEscape helpers
-# (esc_from/esc_char/esc_bytes/hex_pair), which show the identical "open"
-# classification and were never touched by this milestone. See
-# R2-ORDINARY-EMAILISH-PREDICATE.md's own census for the full before/after
-# instance/range tables; this regression pins the part that *did* change:
-# no anonymous, unnamed callee-position instance exists any more.
+# closures' own entry Int facts were broad when this milestone landed
+# (hir::range::OpenInstances flagged them "open"), for a reason that
+# milestone identified and did not paper over: any nested closure with a
+# free-variable capture (v, n) was "open" under that classification
+# regardless of the native-body bridge. EXACT-CALLABLE-CLOSED-CALLER.md
+# retired that classification: hir::range now reads hir::specialize's one
+# authoritative InstanceClosed, which blockescape's every-reference-is-a-call
+# proof settles for these closures, so their entry Ranges now follow their
+# callers. See R2-ORDINARY-EMAILISH-PREDICATE.md's own census for the full
+# before/after instance/range tables; this regression pins the part that
+# *did* change then: no anonymous, unnamed callee-position instance exists
+# any more.
 
 test emailish-predicate-no-anonymous-callee-instance {no anonymous (unnamed) callee-position block instance exists for emailish? any more} -body {
     set hir [nativeHirOfIR [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
@@ -297,7 +299,15 @@ test emailish-predicate-no-anonymous-callee-instance {no anonymous (unnamed) cal
     set anonymous
 } -result 0
 
-test emailish-predicate-check-scanner-instance-count {each scanner helper (and web::emailish? itself) exists as exactly one used instance, not two (one per call site, as the old native-body bridge produced)} -body {
+# EXACT-CALLABLE-CLOSED-CALLER.md: still one instance per scanner helper
+# except where the milestone intends more -- scan_while has one codegen
+# instance per exact predicate target (local_char?, is_tcl_alpha), plus the
+# generic entry its Block value would need (it is de-closure-converted, so
+# that one is never emitted), and local_char? keeps its generic instance for
+# the Block value passed as an argument next to its exact-call instance. The
+# old native-body bridge's failure mode (one copy per call site) would show
+# up as a larger count for the other helpers.
+test emailish-predicate-check-scanner-instance-count {every scanner helper (and web::emailish? itself) is one used instance, except scan_while (one per exact predicate target plus the never-emitted generic) and local_char? (its exact-call instance plus the generic Block-value entry)} -body {
     set hir [nativeHirOfIR [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
     set spec [hir::specialize::analyze $hir]
     set counts [dict create]
@@ -309,8 +319,8 @@ test emailish-predicate-check-scanner-instance-count {each scanner helper (and w
             dict incr counts $name
         }
     }
-    lsort -unique [dict values $counts]
-} -result 1
+    lmap name [lsort [dict keys $counts]] {list $name [dict get $counts $name]}
+} -result {{char_at 1} {domain? 1} {label_char? 1} {local_char? 2} {scan_while 3} {tld? 1} {web::emailish? 1}}
 
 # ---------------------------------------------------------------------------
 # check.n control: R2 did not disturb M9's own pre-existing improvement of

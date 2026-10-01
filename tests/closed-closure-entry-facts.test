@@ -221,10 +221,26 @@ test open-instance-guard-retained {inner's own guard remains present -- the open
     paramGuards $hir $analysis [specId $analysis inner]
 } -result {UnknownParameterKind}
 
-test open-instance-callvalue-stays-dynamic {apply's own f(y) stays a generic/dynamic call -- M7.c never turns an ordinary callvalue into a direct call merely because a small program has few observed targets (spec item 77)} -body {
+# EXACT-CALLABLE-CLOSED-CALLER.md: apply's f(y) is no longer a dynamic call.
+# inner's identity is exact at apply's single call site (the semantic type
+# of the argument), and that identity is now part of apply's codegen key, so
+# the call through f is a direct call of inner's instance. Closedness is a
+# different question and is unchanged: inner still escapes as a value, so
+# its instance is still open (the tests above), and nothing is derived from
+# the exact caller about inner's own entry.
+test open-instance-exact-callable-call-is-direct {apply's own f(y) is now a direct call of inner (its key names the exact callable); inner itself stays open -- exact identity is not closedness (spec item 20)} -body {
     lassign [specOf $::openFixture] hir analysis
     set id [specId $analysis apply]
-    dict get [dict get $analysis instances $id] calls
+    set inner [specId $analysis inner]
+    list [regexp {^apply<block\(e\d+\), int>$} [hir::specialize::label $analysis $id]] \
+        [expr {[dict values [dict get $analysis instances $id calls]] eq [list $inner]}] \
+        [hir::specialize::closed $hir $analysis $inner]
+} -result {1 1 0}
+
+test open-instance-callvalue-with-exact-callable-opt-off {with -exact-callable-opt 0 apply's f(y) is the old indirect callvalue: no call target} -body {
+    lassign [specOf $::openFixture -exact-callable-opt 0] hir analysis
+    set id [specId $analysis apply]
+    dict get [dict get $analysis instances $id calls]
 } -result {}
 
 # ---------------------------------------------------------------------------

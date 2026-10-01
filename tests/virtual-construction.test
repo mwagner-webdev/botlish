@@ -193,13 +193,14 @@ test vc-str-chain-1 {a three-level helper chain materializes once, not once per 
         [dict get $on construction materializations] [allocs $off String]
 } -result {{value {"a7bc"}} {{a<generic> str} {b<generic> str}} 1 1 1 3}
 
-test vc-str-open-1 {an open/dynamic call is a barrier: the argument is materialized before the dynamic call, and only the exact-call instance of a helper used as a value returns a plan} -body {
+test vc-str-open-1 {an exact call through a parameter is an ordinary exact call: the argument crosses it as a plan, and only the exact-call instance of a helper also used as a value returns a plan} -body {
     # wrap is used both as a Block value (its generic instance: open,
     # reached through the generic entry) and by an exact direct call (the
-    # specialized wrap<str>, reachable only that way: closed). apply's x is
-    # never a plan parameter: its one use is a dynamic call's argument, so
-    # the caller passes an ordinary flat String (the eager strcat) and
-    # apply's body has no plan register at all.
+    # specialized wrap<str>, reachable only that way: closed).
+    # EXACT-CALLABLE-CLOSED-CALLER.md: apply's g(x) is now an exact call of
+    # wrap<str> as well, so x is a plan parameter after all (apply has a
+    # plan register): the open-call barrier this test pinned is gone for an
+    # exact callable. The genuinely dynamic variant is vc-str-open-2.
     set text "fn wrap(s):\n    concat(s, \"!\")\n\nfn apply(g, x):\n    g(x)\n\n\[apply(wrap, concat(\"a\", \"b\")), concat(wrap(\"c\"), \"?\")\]"
     set nir [nirOf $text]
     lassign [analysisOf $text] spec analysis
@@ -207,7 +208,15 @@ test vc-str-open-1 {an open/dynamic call is a barrier: the argument is materiali
     list [parity $text] [planResults $text] [planParams $text] \
         [regexp {planregs} [lindex [regexp -inline {func \d+ "apply"[^\n]*} $nir] 0]] \
         [expr {"every use needs a flat value" in $why}]
-} -result {{value {["ab!", "c!?"]}} {{wrap<str> str}} {} 0 1}
+} -result {{value {["ab!", "c!?"]}} {{wrap<str> str}} {} 1 1}
+
+test vc-str-open-2 {an open/dynamic call is a barrier: with the callable chosen at run time (two Blocks), the argument is materialized before the dynamic call and apply's body has no plan register at all} -body {
+    set text "fn wrap(s):\n    concat(s, \"!\")\n\nfn shout(s):\n    concat(s, \"?\")\n\nfn pick(flag):\n    if flag:\n        wrap\n    else:\n        shout\n\nfn apply(g, x):\n    g(x)\n\n\[apply(pick(true), concat(\"a\", \"b\")), apply(pick(false), concat(\"c\", \"d\"))\]"
+    set nir [nirOf $text]
+    list [parity $text] \
+        [regexp {planregs} [lindex [regexp -inline {func \d+ "apply"[^\n]*} $nir] 0]] \
+        [regexp {callvalue} $nir]
+} -result {{value {["ab!", "cd?"]}} 0 1}
 
 test vc-str-empty-1 {empty pieces, empty accumulators and an empty result} -body {
     set text "fn build(i, n, acc):\n    if i >= n:\n        return acc\n    build(i + 1, n, concat(concat(acc, \"\"), \"\"))\n\n\[build(0, 5, \"\"), concat(\"\", \"\"), length(build(0, 0, \"\"))\]"

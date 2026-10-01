@@ -27,8 +27,18 @@
 # types (hir/types.tcl) reduced to what an operation's choice depends on:
 #
 #   int str bool unit result any    kinds, evidence (named types) dropped
-#   block native                    a callable of that kind; which one is
-#                                   not part of the key
+#   {block E ARITY any ?CONTRACT?}  an EXACT Botlish callable: the code
+#                                   target E (a block ExprId, i.e. binding/
+#                                   declaration identity, never a printed
+#                                   name) and its arity. Which closure
+#                                   *values* (captured environments) reach
+#                                   it is not part of the key: the value
+#                                   itself is still an ordinary argument
+#   {native NAME}                   an EXACT native: its registry name
+#   block native                    a callable of that kind only: what an
+#                                   exact callable degrades to when the
+#                                   target budget is spent (exactLimit) or
+#                                   -exact-callable-opt 0
 #   (a structural function type)    any: a Fn value has no one runtime
 #                                   kind, and its contract never selects
 #                                   an instance (STRUCTURAL-FUNCTION-
@@ -40,6 +50,18 @@
 #                                   through the key
 #   list, {list ELEM}, {list ELEM SHAPE}
 #                                   aggregate facts with key-typed elements
+#                                   (a callable *inside* an aggregate stays
+#                                   the kind-only `block`/`native`: nothing
+#                                   proves which element a read returns)
+#
+# Exact callable keys (EXACT-CALLABLE-CLOSED-CALLER.md): the identity of a
+# callable argument IS representation-relevant, because it decides how a
+# call through the parameter is lowered -- an indirect `callvalue` when the
+# key only says `block`, a direct call (or direct native operation) when it
+# names the target -- and every downstream analysis (StringRegion,
+# blockescape, tiny-leaf inlining, error and range facts) then sees the
+# ordinary exact call. The semantic type is unchanged; only the codegen
+# projection stopped erasing what it already knew.
 #
 # The generic instance of a block has key type any for every parameter. Equal
 # keys are the same instance (the cache: keys -> InstanceId); instance ids
@@ -63,7 +85,10 @@
 #     closures may specialize when every capture has a proven Int kind.
 #     Captured types are joined across creations, so a shared instance is
 #     valid for every creation. Other value-capturing closures stay generic
-#     to bound code growth. A materialized Block retains a generic entry.
+#     to bound code growth, except that an exact callable argument keeps its
+#     identity in the key (bounded by exactLimit): which code a parameter
+#     runs is representation-relevant, the captured values are not. A
+#     materialized Block retains a generic entry.
 #   * a self tail call (hir::aot::selfTailCalls) whose key types are all
 #     subtypes of I's own: I itself, so the call stays a loop. Otherwise
 #     the key is the pointwise lub of I's key and the call's, which is
@@ -107,6 +132,10 @@
 #   used        InstanceIds reachable from the program, ordered by the
 #               block's position in the program, then by InstanceId
 #   context     the hir::aot::context the analysis used
+#   closed      InstanceId -> 1 for every used instance InstanceClosed
+#               proves closed (the one authoritative closedness result;
+#               see "InstanceClosed" below)
+#   exactCallable  1 if exact callable identity may enter keys
 #
 # An instance:
 #
@@ -124,14 +153,29 @@
 #             those values
 #   edges     InstanceIds its reachable code uses: callees and the generic
 #             instances of values
-#   overlay   ExprId -> {TYPE KNOWN REACHABLE} for the region's expressions
-#             whose facts differ from the semantic HIR's ("" for semantic
-#             types: specialize 0)
+#   overlay   ExprId -> {TYPE KNOWN REACHABLE ?TARGET?} for the region's
+#             expressions whose facts differ from the semantic HIR's (""
+#             for semantic types: specialize 0). TARGET is "" or the call
+#             target this instance resolves a call to that the semantic HIR
+#             leaves open ({block E} or {native NAME}): a call through a
+#             parameter whose key names an exact callable
 #   reachable the region's ExprIds reachable under the instance's facts
 #   passes    how often it was analyzed
 
 namespace eval hir::specialize {
     variable limit 8
+    # EXACT-CALLABLE-CLOSED-CALLER.md: at most this many live specialized
+    # instances of one block may be keyed by an exact callable target; a
+    # further distinct target degrades to the kind-only `block`/`native`
+    # key (the pre-existing generic callable key). Deterministic: which
+    # target meets the budget first depends on discovery order. Default 4,
+    # measured (EXACT-CALLABLE-CLOSED-CALLER.md, "Specialization budget"):
+    # each extra exact instance of a small higher-order function costs about
+    # half a kilobyte of machine code and a few milliseconds of lowering,
+    # the corpus's most-targeted function has 2 targets, and the per-block
+    # `limit` above (8, shared with kind keys) is the hard ceiling anyway.
+    # analyze's -exact-callable-limit overrides it per analysis.
+    variable exactLimit 4
     variable passLimit 16
     variable instanceLimit 1000
     # How deeply newly discovered callees are analyzed on demand.
@@ -157,10 +201,15 @@ namespace eval hir::specialize {
 proc hir::specialize::analyze {hir args} {
     variable state
     set options [hir::Options hir::specialize::analyze \
-        {-specialize 1 -call-facts-opt 1 -closed-caller-facts-opt 1} $args]
+        {-specialize 1 -call-facts-opt 1 -closed-caller-facts-opt 1 -exact-callable-opt 1
+         -exact-callable-limit {}} $args]
+    variable exactLimit
     set context [hir::aot::context $hir]
     set state [dict create hir $hir context $context \
         specialize [dict get $options -specialize] callFactsOpt [dict get $options -call-facts-opt] \
+        exactCallableOpt [dict get $options -exact-callable-opt] \
+        exactLimit [expr {[dict get $options -exact-callable-limit] ne ""
+            ? [dict get $options -exact-callable-limit] : $exactLimit}] \
         instances [dict create] keys [dict create] byBlock [dict create] \
         seeds [dict create] deps [dict create] refs [dict create] \
         queue {} next 0 current "" building {} analyses 0 \
@@ -181,9 +230,18 @@ proc hir::specialize::analyze {hir args} {
         } else {
             SemanticInstances
         }
-        return [dict create specialize [dict get $state specialize] \
+        set analysis [dict create specialize [dict get $state specialize] \
             instances [dict get $state instances] keys [dict get $state keys] \
-            used [Used] context $context]
+            used [Used] context $context \
+            exactCallable [expr {[dict get $state specialize] && [dict get $state exactCallableOpt]}]]
+        # The one authoritative closedness result (see InstanceClosed): every
+        # later consumer reads it from here rather than re-deriving it.
+        # CloseCallers already ran blockescape over the identical frozen graph
+        # (it reads only structure and calls/edges/values/used, which that
+        # pass never writes), so its result is reused rather than recomputed.
+        dict set analysis closed [ClosedInstances $hir $analysis \
+            [expr {[dict exists $state blockescape] ? [dict get $state blockescape] : ""}]]
+        return $analysis
     } finally {
         set state {}
     }
@@ -198,6 +256,14 @@ proc hir::specialize::Instance {block keyArgs} {
     variable state
     variable limit
     variable instanceLimit
+    if {$block ne "program" && [HasExactCallable $keyArgs]
+            && ![dict exists $state keys [list $block $keyArgs]]
+            && [LiveExactSpecializations $block] >= [dict get $state exactLimit]} {
+        # The exact-target budget is spent: this target shares the existing
+        # kind-only callable key (callers of it use the ordinary
+        # callable-value ABI), exactly the pre-exact behavior.
+        set keyArgs [lmap k $keyArgs {CoarseCallable $k}]
+    }
     set generic [expr {$block eq "program" || [lsearch -exact -not $keyArgs any] < 0}]
     set key [expr {$block eq "program" ? "program" : [list $block $keyArgs]}]
     if {!$generic && ![dict exists $state keys $key]
@@ -244,6 +310,27 @@ proc hir::specialize::LiveSpecializations {block} {
     return $count
 }
 
+# The number of specialized instances of BLOCK in use (as LiveSpecializations
+# counts them) whose key names an exact callable target.
+proc hir::specialize::LiveExactSpecializations {block} {
+    variable state
+    if {![dict exists $state byBlock $block]} {
+        return 0
+    }
+    set current [dict get $state current]
+    set pending [expr {$current eq "" ? {} : [dict values [dict get $state instances $current calls]]}]
+    set count 0
+    foreach id [dict get $state byBlock $block] {
+        if {[dict get $state instances $id generic] || ![HasExactCallable [dict get $state instances $id args]]} {
+            continue
+        }
+        if {[dict get $state refs $id] > 0 || $id in $pending} {
+            incr count
+        }
+    }
+    return $count
+}
+
 proc hir::specialize::Requeue {id} {
     variable state
     if {$id ni [dict get $state queue]} {
@@ -269,18 +356,45 @@ proc hir::specialize::DropRef {id} {
     }
 }
 
-# The key type of static type TYPE. Deliberately coarser than TYPE itself:
-# an exact callable's identity is erased to its kind (so two different
-# code targets share one instance), and a structural function type to any
-# (kindOf has no one kind for it) -- specializing on a contract would
-# multiply instances without changing any operation's lowering, since a
-# call through either is the same indirect callvalue. The full HIR type
-# keeps both the identity and the contract (STRUCTURAL-FUNCTION-TYPES.md).
+# The key type of static type TYPE (an argument of an instance's call).
+# Deliberately coarser than TYPE itself (evidence, applied types, a
+# structural function type's contract never select an instance), with one
+# deliberate exception: an EXACT callable keeps its identity.
+#
+#   {block E ARITY any ?CONTRACT?}   exact Botlish callable E
+#   {native NAME}                    exact native
+#
+# Before EXACT-CALLABLE-CLOSED-CALLER.md both were reduced to the kinds
+# `block`/`native` on the stated premise that "a call through either is the
+# same indirect callvalue". That premise held only because the key erased
+# the identity: with it kept, the call through the parameter is a direct call
+# of a known target, and every downstream analysis sees it. The block's
+# result slot is normalized to any (it is a property of the creating walk,
+# which grows during the fixpoint; the target's own instance carries the
+# result) and its contract, a function of E alone (hir::types::blockType),
+# is kept. Natives are identified by registry name, never by signature.
+#
+# A callable *inside* an aggregate (a List element, a struct field) is not
+# exact here (ElementKeyType): nothing proves which element a read returns,
+# and aggregate exact-value propagation is out of scope.
 proc hir::specialize::KeyType {type} {
+    if {[hir::types::IsExactBlock $type]} {
+        return [lreplace $type 3 3 any]
+    }
+    if {[hir::types::IsExactNative $type]} {
+        return $type
+    }
+    return [ElementKeyType $type]
+}
+
+# The kind-only projection KeyType applied to every type before exact
+# callable keys: an exact callable's identity is erased to its kind, a
+# structural function type to any.
+proc hir::specialize::ElementKeyType {type} {
     if {[hir::types::IsList $type]} {
-        set elem [KeyType [lindex $type 1]]
+        set elem [ElementKeyType [lindex $type 1]]
         if {[llength $type] == 3} {
-            return [hir::types::MakeList $elem [lmap p [lindex $type 2] {KeyType $p}] 1]
+            return [hir::types::MakeList $elem [lmap p [lindex $type 2] {ElementKeyType $p}] 1]
         }
         return [hir::types::MakeList $elem]
     }
@@ -294,7 +408,7 @@ proc hir::specialize::KeyType {type} {
         # field types (evidence, applied types) never enter the key.
         set fields [dict create]
         dict for {name t} [lindex $type 1] {
-            dict set fields $name [KeyType $t]
+            dict set fields $name [ElementKeyType $t]
         }
         return [hir::types::MakeStruct $fields 0]
     }
@@ -304,6 +418,67 @@ proc hir::specialize::KeyType {type} {
     }
     set kind [hir::types::kindOf $type]
     return [expr {$type eq "never" ? "never" : $kind eq "" ? "any" : $kind}]
+}
+
+# 1 if KEY (a key type) names an exact callable.
+proc hir::specialize::IsExactCallableKey {key} {
+    return [expr {[hir::types::IsExactBlock $key] || [hir::types::IsExactNative $key]}]
+}
+
+# 1 if some key type of KEYARGS names an exact callable.
+proc hir::specialize::HasExactCallable {keyArgs} {
+    foreach k $keyArgs {
+        if {[IsExactCallableKey $k]} {
+            return 1
+        }
+    }
+    return 0
+}
+
+# KEY with an exact callable reduced to its kind (`block`/`native`), any
+# other key unchanged: the generic callable key.
+proc hir::specialize::CoarseCallable {key} {
+    if {[hir::types::IsExactBlock $key]} {
+        return block
+    }
+    if {[hir::types::IsExactNative $key]} {
+        return native
+    }
+    return $key
+}
+
+# The join of two key types. Two different callables (exact or kind-only)
+# join to their common kind (`block`/`native`) or any, exactly as the kind
+# keys joined before exact keys: never to a structural function contract,
+# which would add a fact the pre-exact keys never carried. Equal keys (the
+# same exact target on both sides) keep the exact identity.
+proc hir::specialize::JoinKey {a b} {
+    if {$a eq $b} {
+        return $a
+    }
+    if {[IsCallableKey $a] && [IsCallableKey $b]} {
+        set ca [CoarseCallable $a]
+        set cb [CoarseCallable $b]
+        return [expr {$ca eq $cb ? $ca : "any"}]
+    }
+    return [hir::types::lub $a $b]
+}
+
+proc hir::specialize::IsCallableKey {key} {
+    return [expr {[IsExactCallableKey $key] || $key in {block native}}]
+}
+
+# The label text of key type KEY: an exact callable as block(e239) /
+# native(is_tcl_alpha), everything else as hir::types::show. (The block's
+# ExprId is a diagnostic handle for audits, never a language feature.)
+proc hir::specialize::ShowKey {key} {
+    if {[hir::types::IsExactBlock $key]} {
+        return "block([lindex $key 1])"
+    }
+    if {[hir::types::IsExactNative $key]} {
+        return "native([lindex $key 1])"
+    }
+    return [hir::types::show $key]
 }
 
 proc hir::specialize::GenericKey {block} {
@@ -615,10 +790,12 @@ proc hir::specialize::Analyze {id} {
             set known [expr {[dict exists $node known] ? [dict get $node known] : ""}]
             # Equal type forms have equal TypeIds: scratch interns into a copy
             # of the semantic type table.
+            set target [InstanceTarget $scratch $node $base]
             if {[dict get $node type] ne [dict get $base type]
                     || [dict get $node reachable] != [dict get $base reachable]
-                    || $known ne [expr {[dict exists $base known] ? [dict get $base known] : ""}]} {
-                dict set overlay $e [list [hir::typeOf $scratch $e] $known [dict get $node reachable]]
+                    || $known ne [expr {[dict exists $base known] ? [dict get $base known] : ""}]
+                    || $target ne ""} {
+                dict set overlay $e [OverlayEntry [hir::typeOf $scratch $e] $known [dict get $node reachable] $target]
             }
             if {[dict get $node reachable]} {
                 dict set reachable $e 1
@@ -671,6 +848,36 @@ proc hir::specialize::Analyze {id} {
     }
 }
 
+# One overlay entry: {TYPE KNOWN REACHABLE} plus, only when the instance
+# resolves a call the semantic HIR leaves open, its TARGET.
+proc hir::specialize::OverlayEntry {type known reachable target} {
+    if {$target eq ""} {
+        return [list $type $known $reachable]
+    }
+    return [list $type $known $reachable $target]
+}
+
+# The target instance region inference resolved for call node NODE (of the
+# SCRATCH HIR) when the semantic HIR BASE node left it open: a call through a
+# parameter whose key names an exact callable. {block E}, {native NAME}
+# (natives by registry name: a symbol id belongs to one HIR copy), or ""
+# for every other expression and every call the semantic HIR already
+# resolved (a call's semantic target is never changed, only added).
+proc hir::specialize::InstanceTarget {scratch node base} {
+    if {[dict get $node kind] ne "call" || ![dict exists $node target]} {
+        return ""
+    }
+    set target [dict get $node target]
+    if {$target eq "" || ([dict exists $base target] && [dict get $base target] ne "")} {
+        return ""
+    }
+    lassign $target kind value
+    if {$kind eq "native"} {
+        return [list native [dict get [hir::symbol $scratch $value] name]]
+    }
+    return $target
+}
+
 # The handler region inference calls (hir::types::inferRegion).
 proc hir::specialize::Handle {op args} {
     variable state
@@ -680,12 +887,16 @@ proc hir::specialize::Handle {op args} {
             lassign $args e block argTypes
             set region [dict get $state instances $current block]
             set keyArgs [lmap type $argTypes {KeyType $type}]
+            if {![dict get $state exactCallableOpt]} {
+                set keyArgs [lmap k $keyArgs {CoarseCallable $k}]
+            }
             # Exact closure calls can specialize: captured types are joined
             # across creations, and a growing join requeues instances.
             if {$block ni [dict get $state context statics]} {
                 # Bound code growth for value-capturing closures. Scalar Int
                 # captures can feed the existing raw representation path;
-                # aggregate and managed captures retain the generic entry.
+                # aggregate and managed captures retain the generic entry for
+                # every parameter except an exact callable (below).
                 set scalarCaptures [dict exists $state seeds $block]
                 if {$scalarCaptures} {
                     foreach b [dict get $state hir exprs $block captures] {
@@ -696,8 +907,23 @@ proc hir::specialize::Handle {op args} {
                         }
                     }
                 }
-                if {![dict get $state callFactsOpt] || !$scalarCaptures} {
+                if {![dict get $state callFactsOpt]} {
                     set keyArgs [GenericKey $block]
+                } elseif {!$scalarCaptures} {
+                    # What the generic-key rule protects is code growth and
+                    # blockescape's single-instance de-closure proof, not
+                    # correctness: the captured values reach the instance
+                    # through the closure value and the capture seeds, never
+                    # through the key, and a specialized instance is only
+                    # ever entered by the exact calls that selected it (a
+                    # materialized Block keeps its own generic entry). A
+                    # callable argument's identity is different in kind: it
+                    # selects direct versus indirect lowering of the call
+                    # through the parameter. So the exact callable positions
+                    # keep their identity (bounded by exactLimit), and every
+                    # other position stays generic, to be refined by the
+                    # closed-caller theorem (ClosedSet) exactly as before.
+                    set keyArgs [lmap k $keyArgs {expr {[IsExactCallableKey $k] ? $k : "any"}}]
                 }
             }
             set target ""
@@ -712,7 +938,7 @@ proc hir::specialize::Handle {op args} {
                 if {$within} {
                     set target $current
                 } else {
-                    set keyArgs [lmap k $keyArgs o $own {KeyType [hir::types::lub $k $o]}]
+                    set keyArgs [lmap k $keyArgs o $own {KeyType [JoinKey $k $o]}]
                 }
             }
             if {$target eq ""} {
@@ -780,25 +1006,23 @@ proc hir::specialize::Handle {op args} {
 # downstream guard/type machinery removes the resulting guards with no
 # change of its own (spec item 49).
 #
-# Closedness: hir::range::OpenInstances' own "materialized" test (a block's
-# generic instance is open iff some reachable code anywhere in the used
-# instance set materializes a Block value of it) is already the right,
-# audited answer for an ordinary (static/envless) block -- and stays that
-# way here (ClosedSet's "static" branch below is exactly that test,
-# duplicated rather than imported to avoid reversing hir::range's own
-# dependency on hir::specialize). It is NOT the right test for a family-1b
+# Closedness: see "InstanceClosed" below -- since EXACT-CALLABLE-CLOSED-
+# CALLER.md the one authoritative proof, shared with hir::range (whose own
+# coarser "some Block value of it is materialized" test is gone). It was
+# the right, audited answer for an ordinary (static/envless) block -- and is
+# InstanceClosed's static branch unchanged -- but NOT for a family-1b
 # *closure*: hir::aot::materializedBlocks' own "bind" case counts *every*
 # bind of a non-envless (capturing) closure as materializing, unconditionally
 # (`$value ni $envless` alone, no reference-level check) -- correct for its
-# own conservative purpose, but it makes OpenInstances say "open" for
+# own conservative purpose, but it makes that test say "open" for
 # essentially every value-capturing closure regardless of how it is actually
 # referenced (confirmed empirically against both frozen benchmarks: every
 # family-1b guard site except plain-static cascades reads open=1 there).
 # The finer, already-existing proof that most of these closures' *every*
 # reference actually is an exact, statically resolved call is
 # hir::blockescape's own eligibility fixpoint (RefsAsCalls): reused directly
-# below (ClosedSet's "closure" branch) rather than building a second escape
-# analysis, per spec item 10's own explicit preference. hir::blockescape
+# below (InstanceClosed's "closure" branch) rather than building a second
+# escape analysis, per spec item 10's own explicit preference. hir::blockescape
 # already needs this exact proof for a stronger consequence (skipping heap
 # allocation entirely), so this milestone's own closedness proof is no less
 # audited than that existing, shipped guarantee.
@@ -838,15 +1062,65 @@ proc hir::specialize::Handle {op args} {
 # reanalyzed (Reanalyze is only ever called for instances ClosedCallerFacts
 # found a fact for), so it never receives an arbitrary theorem (spec #32).
 
+# ---------------------------------------------------------------------------
+# InstanceClosed: the one authoritative closedness proof
+# (EXACT-CALLABLE-CLOSED-CALLER.md)
+#
+# InstanceClosed(I) means: every invocation of codegen instance I that can
+# happen at run time is accounted for in the analysis's own call graph, so
+# facts derived from the callers the compiler knows (an entry-kind theorem,
+# an entry Range, an exact-callable key) hold for every call that can occur.
+#
+# What it relies on, per kind of instance:
+#
+#   * the program      -- no callers at all.
+#   * a SPECIALIZED instance (some key position is not `any`: a kind, an
+#     exact callable, an aggregate shape) -- it is only ever *selected* by a
+#     direct call (Handle -> Instance); nothing else can name a specific key.
+#     A Block value's dynamic dispatch always enters the block's GENERIC
+#     instance (a materialized Block "retains a generic entry").
+#   * a GENERIC instance of a static (environment-free) block -- closed iff
+#     the block's Block value is never materialized (hir::aot::
+#     materializedBlocks over every used instance): the value is the only
+#     route to an unknown caller.
+#   * a GENERIC instance of a value-capturing closure -- closed iff
+#     hir::blockescape proves every reference to the binding is an exact,
+#     arity-matching call (its eligibility fixpoint, RefsAsCalls): the
+#     closure is never a first-class value, so there is no unknown caller.
+#     (aot's materializedBlocks counts *every* bind of a capturing closure as
+#     materializing, which is why it cannot decide this branch.)
+#
+# Which analysis computes it: InstanceClosed itself, over the finished
+# analysis. When it is stable: after the ordinary Fixpoint has converged --
+# `calls`, `edges`, `values` and the used set are frozen from then on
+# (CloseCallers writes only overlays and results), and blockescape reads
+# only structure and those frozen maps. analyze therefore computes it once
+# (ClosedInstances) and stores it under `closed` in its result; CloseCallers
+# derives its own working copy from the identical call, at the identical
+# frozen graph. Every consumer reads that one result: hir::range
+# (OpenInstances), hir::construction, the audit output (closedAudit), and
+# the public closed query.
+#
+# Instances it cannot prove closed: a generic instance whose Block value is
+# materialized (a callable that escapes: stored, returned, put in a List,
+# passed to code that is not an exact call); a closure blockescape declines
+# (a reference that is not a call; a candidate it finds no call to at all);
+# an instance whose callers the analysis never saw.
+#
+# Soundness of *exact callable identity* is a different question from
+# closedness: an exact callable argument says which code a parameter holds
+# at one call. That is a fact about the argument expression's type, and it
+# keys a SPECIALIZED instance that is closed by construction. An exact
+# callable that also escapes elsewhere does not make anything else closed.
+
 # 1 if every runtime route by which instance ID could be invoked is
 # accounted for in SNAPSHOT's own call graph (a `hir::specialize::analyze`
 # return value) and BLOCKESCAPE's own eligibility analysis
-# (`hir::blockescape::analyze $hir SNAPSHOT`) -- see this section's own
-# header for what makes each branch below sound. Only ever true for a
-# *generic* instance of a real block (the program is never open; a
-# specialized instance's only possible callers are exactly the direct calls
-# that selected it, per hir::range::OpenInstances' own comment, reproduced
-# here).
+# (`hir::blockescape::analyze $hir SNAPSHOT`) -- see the section header above
+# for what makes each branch below sound. Only ever *needed* for a generic
+# instance of a real block (the program is never open; a specialized
+# instance's only possible callers are exactly the direct calls that
+# selected it).
 proc hir::specialize::InstanceClosed {snapshot blockescape id} {
     set instance [dict get $snapshot instances $id]
     if {[dict get $instance block] eq "program" || ![dict get $instance generic]} {
@@ -859,10 +1133,26 @@ proc hir::specialize::InstanceClosed {snapshot blockescape id} {
     return [hir::blockescape::wants $blockescape $id]
 }
 
+# InstanceId -> 1 for every used instance InstanceClosed proves closed
+# (specialized instances and the program included): the authoritative
+# result analyze stores under `closed`.
+proc hir::specialize::ClosedInstances {hir analysis {blockescape ""}} {
+    if {$blockescape eq ""} {
+        set blockescape [hir::blockescape::analyze $hir $analysis]
+    }
+    set closed [dict create]
+    foreach id [dict get $analysis used] {
+        if {[InstanceClosed $analysis $blockescape $id]} {
+            dict set closed $id 1
+        }
+    }
+    return $closed
+}
+
 # BlockExprId -> 1, for every block whose Block value some used instance's
 # reachable code materializes (hir::aot::materializedBlocks): the identical
-# computation hir::range::OpenInstances makes, duplicated here rather than
-# imported (see this section's own header).
+# computation hir::range::OpenInstances used to make, kept here as the
+# static-block branch of InstanceClosed.
 proc hir::specialize::MaterializedBlocks {snapshot} {
     set materialized [dict create]
     foreach id [dict get $snapshot used] {
@@ -873,14 +1163,31 @@ proc hir::specialize::MaterializedBlocks {snapshot} {
     return $materialized
 }
 
-# InstanceId -> 1, for every used generic instance InstanceClosed proves
-# closed.
+# InstanceId -> 1, for every used closed instance the closed-caller entry-kind
+# theorem applies to: a generic instance, and a SPECIALIZED instance of a
+# value-capturing closure whose key still has an `any` position (Handle's
+# closure rule leaves every position of such a closure generic except an
+# exact callable, so the theorem refines them exactly as it refines the
+# generic instance's -- without it `scan_while`'s start would stay `any`
+# merely because the instance now has an exact predicate in its key). An
+# ordinary (static) block's specialized instance with an `any` position
+# keeps it: there the callers genuinely pass nothing more precise, and the
+# theorem would only re-run the inference with a less precise call-result
+# handler (FrozenHandle) for no gain.
 proc hir::specialize::ClosedSet {snapshot blockescape} {
     set closed [dict create]
+    set statics [dict get [dict get $snapshot context] statics]
     foreach id [dict get $snapshot used] {
-        if {[dict get [dict get $snapshot instances $id] block] ne "program"
-                && [dict get [dict get $snapshot instances $id] generic]
-                && [InstanceClosed $snapshot $blockescape $id]} {
+        set instance [dict get $snapshot instances $id]
+        set block [dict get $instance block]
+        if {$block eq "program"} {
+            continue
+        }
+        set applies [dict get $instance generic]
+        if {!$applies && $block ni $statics && [lsearch -exact [dict get $instance args] any] >= 0} {
+            set applies 1
+        }
+        if {$applies && [InstanceClosed $snapshot $blockescape $id]} {
             dict set closed $id 1
         }
     }
@@ -920,6 +1227,7 @@ proc hir::specialize::ClosedSet {snapshot blockescape} {
 # has been folded in).
 proc hir::specialize::ClosedCallerFacts {hir snapshot closed} {
     set facts [dict create]
+    set exactCallable [expr {[dict exists $snapshot exactCallable] && [dict get $snapshot exactCallable]}]
     foreach callerId [dict get $snapshot used] {
         set callerInstance [dict get $snapshot instances $callerId]
         set calls [dict get $callerInstance calls]
@@ -942,7 +1250,11 @@ proc hir::specialize::ClosedCallerFacts {hir snapshot closed} {
                 if {[dict get $argNode kind] eq "ref" && [dict get $argNode binding] eq $p} {
                     lappend contribution ""
                 } else {
-                    lappend contribution [KeyType [hir::typeOf $view $a]]
+                    set key [KeyType [hir::typeOf $view $a]]
+                    if {!$exactCallable} {
+                        set key [CoarseCallable $key]
+                    }
+                    lappend contribution $key
                 }
             }
             if {![dict exists $facts $target]} {
@@ -955,7 +1267,7 @@ proc hir::specialize::ClosedCallerFacts {hir snapshot closed} {
                     } elseif {$cur eq ""} {
                         lappend merged $prev
                     } else {
-                        lappend merged [hir::types::lub $prev $cur]
+                        lappend merged [JoinKey $prev $cur]
                     }
                 }
                 dict set facts $target $merged
@@ -1083,10 +1395,12 @@ proc hir::specialize::Reanalyze {id argTypes} {
         set node [dict get $scratch exprs $e]
         set base [dict get $hir exprs $e]
         set known [expr {[dict exists $node known] ? [dict get $node known] : ""}]
+        set target [InstanceTarget $scratch $node $base]
         if {[dict get $node type] ne [dict get $base type]
                 || [dict get $node reachable] != [dict get $base reachable]
-                || $known ne [expr {[dict exists $base known] ? [dict get $base known] : ""}]} {
-            dict set overlay $e [list [hir::typeOf $scratch $e] $known [dict get $node reachable]]
+                || $known ne [expr {[dict exists $base known] ? [dict get $base known] : ""}]
+                || $target ne ""} {
+            dict set overlay $e [OverlayEntry [hir::typeOf $scratch $e] $known [dict get $node reachable] $target]
         }
         if {[dict get $node reachable]} {
             lappend reachable $e
@@ -1142,8 +1456,10 @@ proc hir::specialize::CloseCallers {} {
     set hir [dict get $state hir]
     set baseline [dict get $state instances]
     set snapshot [dict create specialize 1 instances $baseline \
-        keys [dict get $state keys] used [Used] context [dict get $state context]]
+        keys [dict get $state keys] used [Used] context [dict get $state context] \
+        exactCallable [dict get $state exactCallableOpt]]
     set be [hir::blockescape::analyze $hir $snapshot]
+    dict set state blockescape $be
     set closed [ClosedSet $snapshot $be]
     if {![dict size $closed]} {
         set closeCallersConverged 1
@@ -1232,7 +1548,67 @@ proc hir::specialize::CloseCallers {} {
 # 1 if ANALYSIS (a hir::specialize::analyze return value) proves instance ID
 # closed -- see InstanceClosed's own header for the exact proof per branch.
 proc hir::specialize::closed {hir analysis id} {
+    if {[dict exists $analysis closed]} {
+        return [dict exists $analysis closed $id]
+    }
     return [InstanceClosed $analysis [hir::blockescape::analyze $hir $analysis] $id]
+}
+
+# Audit-only: one line per used instance (never user-facing) stating the
+# authoritative closedness answer and what it rests on: instance, closed
+# yes/no with the proof branch, how many exact call sites target it, and the
+# exact callable target(s) in its key. hir::range's openness must read
+# `closed yes` for exactly the generic instances it treats as not open: the
+# `range-open` column is that consumer's own answer.
+proc hir::specialize::closedAudit {hir analysis} {
+    set be [hir::blockescape::analyze $hir $analysis]
+    set callers [dict create]
+    foreach id [dict get $analysis used] {
+        foreach target [lsort -unique [dict values [dict get $analysis instances $id calls]]] {
+            dict incr callers $target
+        }
+    }
+    set open [hir::range::OpenInstances $analysis $hir]
+    set lines {}
+    foreach id [dict get $analysis used] {
+        set instance [dict get $analysis instances $id]
+        set block [dict get $instance block]
+        if {$block eq "program"} {
+            continue
+        }
+        set closed [InstanceClosed $analysis $be $id]
+        if {![dict get $instance generic]} {
+            set why "specialized: selected only by exact calls"
+        } elseif {$block in [dict get $analysis context statics]} {
+            set why [expr {$closed ? "static block, never materialized" : "static block, Block value materialized"}]
+        } elseif {$closed} {
+            set why "closure, blockescape: every reference is an exact call"
+        } else {
+            # A generic instance of a closure blockescape does de-closure-
+            # convert (through its other, specialized instances) is the Block
+            # value's entry: never entered at run time, but not itself part
+            # of the proof, so it stays open (and, being reachable in the
+            # call graph, still contributes its own calls to range facts).
+            set sibling 0
+            foreach other [dict get $analysis used] {
+                if {$other ne $id && [dict get $analysis instances $other block] eq $block
+                        && [hir::blockescape::wants $be $other]} {
+                    set sibling 1
+                }
+            }
+            set why [expr {$sibling
+                ? "closure de-closure-converted via its specialized instances; this generic Block-value entry is never entered but is not itself proven"
+                : "closure, blockescape declined (its Block value may exist: stored, returned or passed)"}]
+        }
+        set exact [lmap k [dict get $instance args] {
+            if {![IsExactCallableKey $k]} continue
+            ShowKey $k
+        }]
+        lappend lines [format "%-8s %-40s closed=%d range-open=%d callers=%d exact=\[%s\]  (%s)" \
+            $id [label $analysis $id] $closed [dict exists $open $id] \
+            [expr {[dict exists $callers $id] ? [dict get $callers $id] : 0}] [join $exact {, }] $why]
+    }
+    return [join $lines \n]
 }
 
 # The closed-caller entry-kind theorem (one KeyType per parameter, "any"
@@ -1354,11 +1730,21 @@ proc hir::specialize::view {hir analysis id} {
         return $hir
     }
     dict for {e entry} $overlay {
-        lassign $entry type known reachable
+        lassign $entry type known reachable target
         dict set hir exprs $e type [hir::types::intern hir $type]
         dict set hir exprs $e reachable $reachable
         if {$known ne "" || [dict exists $hir exprs $e known]} {
             dict set hir exprs $e known $known
+        }
+        if {$target ne ""} {
+            # A call through a parameter this instance's key names an exact
+            # callable for: the view says what the semantic HIR cannot, that
+            # the call has a known target.
+            lassign $target targetKind targetValue
+            if {$targetKind eq "native"} {
+                set targetValue [hir::resolve::nativeSymbol hir $targetValue]
+            }
+            dict set hir exprs $e target [list $targetKind $targetValue]
         }
     }
     set block [dict get $instance block]
@@ -1385,7 +1771,7 @@ proc hir::specialize::label {analysis id} {
     if {[dict get $instance generic]} {
         return "$name<generic>"
     }
-    return "$name<[join [lmap t [dict get $instance args] {hir::types::show $t}] {, }]>"
+    return "$name<[join [lmap t [dict get $instance args] {ShowKey $t}] {, }]>"
 }
 
 # The hir::aot region analysis of instance ID (on its view), with

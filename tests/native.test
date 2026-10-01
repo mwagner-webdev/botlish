@@ -334,12 +334,19 @@ test native-call-6 {environment-free functions take no environment} -body {
          [regexp "fnvalue [nirFunctionId $used inc generic]" $used] [regexp {"unused"} $used]
 } -result {1 1 1 0 1 0}
 
-test native-call-7 {calls chosen at run time: closures and natives as values} -body {
+# EXACT-CALLABLE-CLOSED-CALLER.md: closures and natives passed as values still
+# work through a helper; where the target is statically exact (here a native
+# handed straight to apply) the call through the parameter is now a direct
+# native operation, and only a callable genuinely chosen at run time is still
+# an indirect callvalue.
+test native-call-7 {calls through closures and natives passed as values: exact targets are direct, a callable chosen at run time is a callvalue} -body {
     list [parity "fn apply(f, x):\n    f(x)\n\nfn inc(n):\n    n + 1\n\n\[apply(inc, 1), apply(length, \"abc\")\]"] \
          [regexp {callvalue} [nirFunction [nirOf "fn apply(f, x):\n    f(x)\n\napply(length, \"a\")"] apply]] \
          [parity "fn apply(f, x):\n    f(x)\n\napply(substring, \"abc\")"] \
-         [parity "fn apply2(f, x, y):\n    f(x, y)\n\n\[apply2(list_get, \[1, 2\], 1), apply2(list_get, \[1\], 5)\]"]
-} -result {same 1 same same}
+         [parity "fn apply2(f, x, y):\n    f(x, y)\n\n\[apply2(list_get, \[1, 2\], 1), apply2(list_get, \[1\], 5)\]"] \
+         [regexp {callvalue} [nirFunction [nirOf "fn apply(f, x):\n    f(x)\n\nfn inc(n):\n    n + 1\n\nfn dec(n):\n    n - 1\n\nfn pick(up):\n    if up:\n        inc\n    else:\n        dec\n\napply(pick(true), 1)"] apply]] \
+         [parity "fn apply(f, x):\n    f(x)\n\nfn inc(n):\n    n + 1\n\nfn dec(n):\n    n - 1\n\nfn pick(up):\n    if up:\n        inc\n    else:\n        dec\n\n\[apply(pick(true), 1), apply(pick(false), 1)\]"]
+} -result {same 0 same same 1 same}
 
 test native-call-8 {a forward reference never reaches native lowering (rejected at resolution); direct recursion needs no cell or init check} -body {
     set rec "fn even(n):\n    if n == 0:\n        return true\n    even(n - 2)\n\n\[even(10000), even(4)\]"

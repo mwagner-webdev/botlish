@@ -333,9 +333,14 @@ proc assertEmailishParity {text} {
     return [list $on [expr {$off > 0}] [expr {$onValue eq $offValue}] $onValue]
 }
 
-test view-emailish-corpus-1 {lib/web.tcl's Emailish? validator: string-region-opt eliminates emailish?'s own direct char_at allocations (15 raw down to 8 surviving, R2.a.3's domain? touching many more characters directly than domain_loop's own single post-scan check did -- not to 0, since scan_while's char_at still feeds an opaque predicate callvalue string-region-opt cannot see through), same value either way} -body {
+# EXACT-CALLABLE-CLOSED-CALLER.md: 8 -> 5. The TLD scan's predicate is the
+# exact native is_tcl_alpha, a StringRegion consumer, so the 3 characters of
+# the TLD "テスト" are no longer materialized; the local part's characters
+# still are (their predicate also tests set membership, which is not a region
+# consumer yet).
+test view-emailish-corpus-1 {lib/web.tcl's Emailish? validator: string-region-opt eliminates emailish?'s own direct char_at allocations (15 raw down to 5 surviving: the TLD scan's exact is_tcl_alpha predicate is a region consumer, so its 3 characters are no longer built; the local part's set-membership characters still are), same value either way} -body {
     assertEmailishParity "café@例え.テスト"
-} -result {8 1 1 {bool true}}
+} -result {5 1 1 {bool true}}
 
 test view-emailish-corpus-2 {lib/web.tcl's Emailish? validator on a non-matching String (scan_while's own family, reached only through the predicate callvalue): string-region-opt eliminates none of them, same value either way} -body {
     assertEmailishParity "not-an-email"

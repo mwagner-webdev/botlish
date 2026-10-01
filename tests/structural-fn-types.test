@@ -269,11 +269,16 @@ test fn-law-nested-return-bounded {a closure factory's contract names a function
     list [hir::types::show $outer] [hir::types::show [fnT {} [fnT {} [fnT {} [fnT {} int]]]]]
 } -result {{Fn{args: [int], return: Fn{args: [int], return: int, errors: []}, errors: []}} {Fn{args: [], return: Fn{args: [], return: Fn{args: [], return: any, errors: []}, errors: []}, errors: []}}}
 
-test fn-keytype-projection {specialization keys erase exact identity to the kind and a structural function type to any: neither a code target nor a contract selects an instance} -body {
+# EXACT-CALLABLE-CLOSED-CALLER.md: an exact callable keeps its identity in the
+# key (the code target, with the contract that is a function of that target
+# and the result slot normalized to any); a structural function type still
+# projects to any, and a callable *inside* an aggregate stays the kind.
+test fn-keytype-projection {specialization keys keep an exact callable's identity (a code target: block ExprId and arity, a native by name), project a structural function type to any, and keep only the kind for a callable inside an aggregate} -body {
     list [hir::specialize::KeyType {native is_tcl_alpha}] [hir::specialize::KeyType {block e1 1 bool}] \
          [hir::specialize::KeyType {block e1 1 bool {args {str} errors {}}}] \
-         [hir::specialize::KeyType [fnT {str} bool]]
-} -result {native block block any}
+         [hir::specialize::KeyType [fnT {str} bool]] \
+         [hir::specialize::KeyType [hir::types::MakeList {block e1 1 bool}]]
+} -result {{native is_tcl_alpha} {block e1 1 any} {block e1 1 any {args {str} errors {}}} any {list block}}
 
 # ---------------------------------------------------------------------------
 # Surface syntax (spec items 2, 9, 37-39, 59, 97)
@@ -801,20 +806,29 @@ fn wrap() -> Fn{args: [], return: any}:
 # ---------------------------------------------------------------------------
 # Specialization keys (spec items 60-62, 101)
 
-test fn-specialization-shared-instance {two different code targets with the same kind share one specialization of an Fn-taking function: identity never enters the key, and neither does the contract} -body {
-    set hir [fnCompile "$::applyStr
+# EXACT-CALLABLE-CLOSED-CALLER.md: two different code targets no longer share
+# one specialization (that sharing was the erasure the milestone repairs),
+# until the exact-target budget is spent -- then they share the kind-only
+# key again. The contract never selects an instance either way.
+test fn-specialization-shared-instance {two different code targets of the same kind get one specialization each (exact keys); once the exact-target budget is spent they share the kind-only key} -body {
+    set text "$::applyStr
 fn a?(c):
     c == \"a\"
 fn b?(c):
     c == \"b\"
-\[apply(a?, \"a\"), apply(b?, \"a\")\]"]
-    set spec [hir::specialize::analyze $hir]
-    lsort -unique [lmap id [dict get $spec used] {
-        set label [hir::specialize::label $spec $id]
-        if {![string match apply<* $label]} continue
-        set label
-    }]
-} -result {{apply<block, str>}}
+\[apply(a?, \"a\"), apply(b?, \"a\")\]"
+    set labels {}
+    foreach limit {4 1} {
+        set hir [fnCompile $text]
+        set spec [hir::specialize::analyze $hir -exact-callable-limit $limit]
+        lappend labels [lsort [lmap id [dict get $spec used] {
+            set label [hir::specialize::label $spec $id]
+            if {![string match apply<* $label]} continue
+            regsub {e\d+} $label eN
+        }]]
+    }
+    set labels
+} -result {{{apply<block(eN), str>} {apply<block(eN), str>}} {{apply<block(eN), str>} {apply<block, str>}}}
 
 # ---------------------------------------------------------------------------
 # HIR text round trip (spec item 89)

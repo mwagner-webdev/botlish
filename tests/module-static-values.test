@@ -139,10 +139,22 @@ test module-static-refined-checks-block-allocations {bench/refined-checks.ir's o
     dict get [native::allocationReport $hir summary 1] byKind Block allocations
 } -result 0
 
-test module-static-check-still-callvalue {scan_while's own predicate parameter is still a dynamic call (spec #26: no finite-target work in this milestone) -- callvalue remains present} -body {
+# EXACT-CALLABLE-CLOSED-CALLER.md: this pin read "scan_while's own predicate
+# parameter is still a dynamic call (spec #26: no finite-target work in this
+# milestone)". That work is exactly what the exact-callable milestone did
+# (the key keeps the predicate's identity), so the callvalue is gone; the
+# opt-off flag still reproduces the old indirect call.
+test module-static-check-callvalue-gone {scan_while's predicate parameter is no longer a dynamic call: both predicates (local_char? and is_tcl_alpha) are exact targets of their call sites} -body {
     core::loadLibrary web
     set hir [nativeHirOfIR [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
     set nir [native::nir $hir]
+    regexp -all {callvalue} $nir
+} -result 0
+
+test module-static-check-callvalue-with-exact-callable-off {with -exact-callable-opt 0 the predicate call is the old indirect callvalue (differential baseline)} -body {
+    core::loadLibrary web
+    set hir [nativeHirOfIR [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
+    set nir [native::nir $hir -exact-callable-opt 0]
     expr {[regexp -all {callvalue} $nir] >= 1}
 } -result 1
 

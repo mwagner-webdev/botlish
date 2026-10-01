@@ -1045,6 +1045,21 @@ namespace eval native::lower {
 #                      option's own mechanism also reaches, so isolating
 #                      -call-facts-opt's own contribution alone requires
 #                      disabling this one too)
+#   -exact-callable-opt 1|0
+#                      keep an exact callable argument's identity (an exact
+#                      Botlish block, an exact native) in the codegen key, so
+#                      a call through the parameter is a direct call, not an
+#                      indirect callvalue (EXACT-CALLABLE-CLOSED-CALLER.md;
+#                      default 1; BOTLISH_NATIVE_EXACT_CALLABLE_OPT=0
+#                      restores the kind-only `block`/`native` keys for
+#                      differential testing)
+#   -exact-callable-limit N
+#                      the exact-target budget: at most N live specialized
+#                      instances of one function keyed by an exact callable
+#                      (default: hir::specialize's exactLimit, 4;
+#                      BOTLISH_NATIVE_EXACT_CALLABLE_LIMIT overrides it). A
+#                      further target shares the kind-only key and the
+#                      callable-value ABI.
 #   -string-traversal-opt 1|0
 #                      carry a provably forward, +1-per-iteration character
 #                      scan's physical UTF-8 byte position across its self-
@@ -1119,6 +1134,10 @@ proc native::lower::program {hirProgram args} {
         && $::env(BOTLISH_NATIVE_CALL_FACTS_OPT) eq "0" ? 0 : 1}]
     set closedCallerFactsDefault [expr {[info exists ::env(BOTLISH_NATIVE_CLOSED_CALLER_FACTS_OPT)]
         && $::env(BOTLISH_NATIVE_CLOSED_CALLER_FACTS_OPT) eq "0" ? 0 : 1}]
+    set exactCallableDefault [expr {[info exists ::env(BOTLISH_NATIVE_EXACT_CALLABLE_OPT)]
+        && $::env(BOTLISH_NATIVE_EXACT_CALLABLE_OPT) eq "0" ? 0 : 1}]
+    set exactLimitDefault [expr {[info exists ::env(BOTLISH_NATIVE_EXACT_CALLABLE_LIMIT)]
+        ? $::env(BOTLISH_NATIVE_EXACT_CALLABLE_LIMIT) : ""}]
     set callEffectsDefault [expr {[info exists ::env(BOTLISH_NATIVE_CALL_EFFECTS_OPT)]
         && $::env(BOTLISH_NATIVE_CALL_EFFECTS_OPT) eq "0" ? 0 : 1}]
     set traversalDefault [expr {[info exists ::env(BOTLISH_NATIVE_STRING_TRAVERSAL_OPT)]
@@ -1155,6 +1174,7 @@ proc native::lower::program {hirProgram args} {
             -string-region-opt $stringRegionDefault -string-traversal-opt $traversalDefault \
             -call-facts-opt $callFactsDefault -call-effects-opt $callEffectsDefault \
             -closed-caller-facts-opt $closedCallerFactsDefault \
+            -exact-callable-opt $exactCallableDefault -exact-callable-limit $exactLimitDefault \
             -tiny-leaf-inline-opt $tinyLeafInlineDefault \
             -virtual-construction-opt $constructionDefault] $args]
     if {[hir::mode $hirProgram] ne "program"} {
@@ -1209,7 +1229,9 @@ proc native::lower::program {hirProgram args} {
     set leafEligible [dict create]
     set spec [hir::specialize::analyze $hirProgram -specialize [dict get $options -specialize] \
         -call-facts-opt [dict get $options -call-facts-opt] \
-        -closed-caller-facts-opt [dict get $options -closed-caller-facts-opt]]
+        -closed-caller-facts-opt [dict get $options -closed-caller-facts-opt] \
+        -exact-callable-opt [dict get $options -exact-callable-opt] \
+        -exact-callable-limit [dict get $options -exact-callable-limit]]
     set ranges [hir::range::analyze $hirProgram $spec [dict get $options -call-facts-opt]]
     set escape [expr {$escapeOpt ? [hir::escape::analyze $hirProgram $spec $paramAggregateOpt $structWidths]
         : [dict create arity {} wants {} virtual {} paramVirtual {}]}]
@@ -1677,7 +1699,7 @@ proc native::lower::Function {id} {
     }
     # pnames: the parameter names as block error messages show them.
     set key [expr {[dict get $instance generic] ? "generic"
-        : [join [lmap t [dict get $instance args] {hir::types::show $t}] {, }]}]
+        : [join [lmap t [dict get $instance args] {hir::specialize::ShowKey $t}] {, }]}]
     set head "func [Placeholder $id] [Quote $name] params=[expr {[llength $params] + $extraParams}] env=$env regs=[dict get $fn nreg] pnames=[Quote [join $pnames { }]] captures=[llength $captures] instance=[Quote $key]"
     set rawRegs [lsort -integer [lmap r [dict keys [dict get $fn rawRegs]] {string range $r 1 end}]]
     if {$rawRegs ne ""} {
@@ -1775,7 +1797,7 @@ proc native::lower::CompanionFunction {id} {
         set captures [lmap b [dict get $captureLists $region] {dict get [hir::binding $hir $b] name}]
     }
     set key [expr {[dict get $instance generic] ? "generic"
-        : [join [lmap t [dict get $instance args] {hir::types::show $t}] {, }]}]
+        : [join [lmap t [dict get $instance args] {hir::specialize::ShowKey $t}] {, }]}]
     set head "func [Placeholder $id companion] [Quote $name] params=[llength $params] env=$env regs=[dict get $fn nreg] pnames=[Quote [join $pnames { }]] captures=[llength $captures] instance=[Quote $key] results=$arity"
     set rawRegs [lsort -integer [lmap r [dict keys [dict get $fn rawRegs]] {string range $r 1 end}]]
     if {$rawRegs ne ""} {
@@ -1870,7 +1892,7 @@ proc native::lower::RegionCompanionFunction {id} {
         set captures [lmap b [dict get $captureLists $region] {dict get [hir::binding $hir $b] name}]
     }
     set key [expr {[dict get $instance generic] ? "generic"
-        : [join [lmap t [dict get $instance args] {hir::types::show $t}] {, }]}]
+        : [join [lmap t [dict get $instance args] {hir::specialize::ShowKey $t}] {, }]}]
     set head "func [Placeholder $id region] [Quote $name] params=[llength $params] env=$env regs=[dict get $fn nreg] pnames=[Quote [join $pnames { }]] captures=[llength $captures] instance=[Quote $key] results=3"
     set rawRegs [lsort -integer [lmap r [dict keys [dict get $fn rawRegs]] {string range $r 1 end}]]
     if {$rawRegs ne ""} {
@@ -1965,7 +1987,7 @@ proc native::lower::InternalFunction {id} {
     set pnames [concat [lmap b $params {dict get [hir::binding $hir $b] name}] \
         [lmap b $captureBindings {dict get [hir::binding $hir $b] name}]]
     set key [expr {[dict get $instance generic] ? "generic"
-        : [join [lmap t [dict get $instance args] {hir::types::show $t}] {, }]}]
+        : [join [lmap t [dict get $instance args] {hir::specialize::ShowKey $t}] {, }]}]
     set head "func [Placeholder $id internal] [Quote $name] params=[expr {[llength $params] + [llength $captureBindings]}] env=0 regs=[dict get $fn nreg] pnames=[Quote [join $pnames { }]] captures=0 instance=[Quote $key]"
     set rawRegs [lsort -integer [lmap r [dict keys [dict get $fn rawRegs]] {string range $r 1 end}]]
     if {$rawRegs ne ""} {
@@ -2073,7 +2095,7 @@ proc native::lower::InternalRegionCompanionFunction {id} {
     set pnames [concat [lmap b $params {dict get [hir::binding $hir $b] name}] \
         [lmap b $captureBindings {dict get [hir::binding $hir $b] name}]]
     set key [expr {[dict get $instance generic] ? "generic"
-        : [join [lmap t [dict get $instance args] {hir::types::show $t}] {, }]}]
+        : [join [lmap t [dict get $instance args] {hir::specialize::ShowKey $t}] {, }]}]
     set head "func [Placeholder $id internalregion] [Quote $name] params=[expr {[llength $params] + [llength $captureBindings]}] env=0 regs=[dict get $fn nreg] pnames=[Quote [join $pnames { }]] captures=0 instance=[Quote $key] results=3"
     set rawRegs [lsort -integer [lmap r [dict keys [dict get $fn rawRegs]] {string range $r 1 end}]]
     if {$rawRegs ne ""} {
@@ -2186,7 +2208,7 @@ proc native::lower::FieldsFunction {id} {
         set captures [lmap b [dict get $captureLists $region] {dict get [hir::binding $hir $b] name}]
     }
     set key [expr {[dict get $instance generic] ? "generic"
-        : [join [lmap t [dict get $instance args] {hir::types::show $t}] {, }]}]
+        : [join [lmap t [dict get $instance args] {hir::specialize::ShowKey $t}] {, }]}]
     set head "func [Placeholder $id fields] [Quote $name] params=[llength $pnames] env=$env regs=[dict get $fn nreg] pnames=[Quote [join $pnames { }]] captures=[llength $captures] instance=[Quote $key]"
     set rawRegs [lsort -integer [lmap r [dict keys [dict get $fn rawRegs]] {string range $r 1 end}]]
     if {$rawRegs ne ""} {
@@ -2271,7 +2293,7 @@ proc native::lower::FieldsCompanionFunction {id} {
         set captures [lmap b [dict get $captureLists $region] {dict get [hir::binding $hir $b] name}]
     }
     set key [expr {[dict get $instance generic] ? "generic"
-        : [join [lmap t [dict get $instance args] {hir::types::show $t}] {, }]}]
+        : [join [lmap t [dict get $instance args] {hir::specialize::ShowKey $t}] {, }]}]
     set head "func [Placeholder $id fieldscompanion] [Quote $name] params=[llength $pnames] env=$env regs=[dict get $fn nreg] pnames=[Quote [join $pnames { }]] captures=[llength $captures] instance=[Quote $key] results=$arity"
     set rawRegs [lsort -integer [lmap r [dict keys [dict get $fn rawRegs]] {string range $r 1 end}]]
     if {$rawRegs ne ""} {
@@ -3675,6 +3697,15 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
         set calleeBinding [hir::get $hir $calleeExpr binding]
         set flattenedTarget [expr {$calleeBinding ne "" ? [hir::blockescape::virtual $blockescape $currentInstance $calleeBinding] : ""}]
         if {$flattenedTarget ne ""} {
+            # A de-closure-converted binding may have several used instances
+            # (one per exact callable target it is called with, for one):
+            # blockescape's proof is that every reference is a call to one
+            # of them, so THIS call site's own instance -- the one
+            # hir::specialize chose for it -- is the callee.
+            set flattenedTarget [expr {[dict exists $fn targets $e] ? [dict get $fn targets $e] : ""}]
+            if {$flattenedTarget eq "" || ![hir::blockescape::wants $blockescape $flattenedTarget]} {
+                throw {NATIVE BUG} "native lowering: call $e of a de-closure-converted binding has no wanted callee instance"
+            }
             # A direct call of a Block binding hir::blockescape.tcl already
             # proved eligible for de-closure conversion: CALLEEEXPR is
             # never evaluated at all (there is no Block value to produce).

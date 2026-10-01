@@ -5,6 +5,10 @@
 #
 #   set analysis [hir::blockescape::analyze $hir $spec]
 #   hir::blockescape::virtual $analysis $instanceId $bindingId  -> "" | calleeInstanceId
+#                       (non-empty: the binding is de-closure-converted; the
+#                       instance named is one of its used instances -- a
+#                       literal may have several, one per exact callable
+#                       target, each call site names its own)
 #   hir::blockescape::wants $analysis $calleeInstanceId          -> 0 | 1
 #   hir::blockescape::captures $analysis $calleeInstanceId       -> BindingId list
 #
@@ -113,13 +117,15 @@
 # (interprocedural propagation beyond one region's own sibling graph);
 # specializing an
 # internal variant's own body differently per call site (one internal
-# variant per callee instance, shared by every call site that demands it);
+# variant per callee instance, shared by every call site that demands it --
+# a literal may have SEVERAL used instances, e.g. one per exact callable
+# target it is called with (EXACT-CALLABLE-CLOSED-CALLER.md): every one of
+# them gets its own internal variant, each call site naming its own
+# instance, and every reference must resolve to one of them);
 # mutual recursion between two DIFFERENT candidate bindings that are not
 # simply "B calls A, A does not call B back" (the eligibility fixpoint
 # only removes candidates, so a genuine A<->B value-capture cycle -- as
 # opposed to a call cycle, which is fine -- can decline both, and does,
-# conservatively); a Block with more than one used specialize instance in
-# a role this analysis needs a single instance for (declined outright,
 # conservatively). A Block literal with no captures at all is never a
 # candidate here either: the existing envless/fnvalue path (native/
 # lower.tcl's Closure) already calls it directly with zero allocation, so
@@ -145,54 +151,46 @@ proc hir::blockescape::HasSelfCapture {view l} {
 # Every `ref` expression in EXPRLIST (view HIR, one region's own exprs) that
 # refers to binding B must be exactly the callee of a call with ARITY
 # arguments, resolved (via INSTANCE's own `calls` map -- callExprId ->
-# callee InstanceId) to one consistent target instance. Returns {OK TARGET}:
-# OK 0 if some reference fails this proof; OK 1 and TARGET "" if no
-# reference to B exists in EXPRLIST at all (vacuously fine); OK 1 and TARGET
-# set to the single consistent callee instance otherwise.
+# callee InstanceId) to a target instance. Returns {OK TARGETS}: OK 0 if
+# some reference fails this proof; OK 1 and TARGETS {} if no reference to B
+# exists in EXPRLIST at all (vacuously fine); OK 1 and the sorted list of
+# distinct callee instances otherwise. (Which of them are acceptable is the
+# caller's question: every one must be an instance of B's own literal.)
 proc hir::blockescape::RefsAsCalls {view context instance exprlist b arity} {
     set callees [dict get $context callees]
     set calls [dict get $instance calls]
-    set target ""
+    set targets {}
     foreach e $exprlist {
         if {[hir::kind $view $e] ne "ref" || [hir::get $view $e binding] ne $b} {
             continue
         }
         if {![dict exists $callees $e]} {
-            return {0 ""}
+            return {0 {}}
         }
         set callExpr [dict get $callees $e]
         if {[llength [dict get [hir::node $view $callExpr] args]] != $arity} {
-            return {0 ""}
+            return {0 {}}
         }
         if {![dict exists $calls $callExpr]} {
-            return {0 ""}
+            return {0 {}}
         }
-        set t [dict get $calls $callExpr]
-        if {$target eq ""} {
-            set target $t
-        } elseif {$target ne $t} {
-            return {0 ""}
-        }
+        lappend targets [dict get $calls $callExpr]
     }
-    return [list 1 $target]
+    return [list 1 [lsort -unique $targets]]
 }
 
-# The BLOCK's own single used specialize instance id, or "" if this
-# analysis cannot settle on one. hir/specialize.tcl's own header notes "a
-# materialized Block retains a generic entry": a Block literal that is ever
-# a candidate here routinely has *two* used instances even when only one is
-# ever actually a call target -- a specialized (non-generic) instance real
-# calls resolve to, plus an always-present generic one kept only so a
-# canonical/materialized entry exists (hir::aot::materializedBlocks),
-# typically with an empty `calls` map of its own (nothing was ever
-# analyzed calling out of it). So: if there is exactly one *non-generic*
-# used instance, that is L's target, regardless of how many generic
-# siblings coexist; otherwise, if there is exactly one used instance in
-# all (no specialization occurred), use that; otherwise decline (a
-# candidate whose literal is polymorphic across several genuinely distinct
-# used instances needs one canonical target/capture shape this analysis
-# does not attempt to choose between).
-proc hir::blockescape::SingleInstance {spec block} {
+# The used specialize instances of BLOCK a de-closure-converted binding of it
+# may be called at: its non-generic used instances if it has any, otherwise
+# its one generic instance if that is the only one, otherwise none (declined:
+# a literal whose only instances are several generic ones does not exist,
+# and a generic instance kept only so a canonical/materialized entry exists
+# (hir/specialize.tcl's header: "a materialized Block retains a generic
+# entry") is, whenever a specialized instance exists, never a call target of
+# an eligible binding -- eligibility requires every reference to be an exact
+# call, and exact calls select specialized instances). One literal commonly
+# has several of them now: one per exact callable target it is called with,
+# as before one per argument-kind key (hir/specialize.tcl).
+proc hir::blockescape::RelevantInstances {spec block} {
     set found {}
     set nonGeneric {}
     foreach id [dict get $spec used] {
@@ -204,10 +202,10 @@ proc hir::blockescape::SingleInstance {spec block} {
             }
         }
     }
-    if {[llength $nonGeneric] == 1} {
-        return [lindex $nonGeneric 0]
+    if {[llength $nonGeneric]} {
+        return $nonGeneric
     }
-    return [expr {[llength $found] == 1 ? [lindex $found 0] : ""}]
+    return [expr {[llength $found] == 1 ? $found : {}}]
 }
 
 # The flattened, deduplicated capture list (BindingId list, first-occurrence
@@ -265,6 +263,16 @@ proc hir::blockescape::FlattenBinding {view envless eligible candidates memoVar 
     }
     dict set memo $b $result
     return $result
+}
+
+# 1 if some element of TARGETS is not in ALLOWED.
+proc hir::blockescape::NotAllIn {targets allowed} {
+    foreach t $targets {
+        if {$t ni $allowed} {
+            return 1
+        }
+    }
+    return 0
 }
 
 # {VIRTUAL WANTS CAPTURES}: VIRTUAL is BindingId -> calleeInstanceId, for
@@ -334,11 +342,11 @@ proc hir::blockescape::Bindings {hir spec} {
         # Eligibility: a greatest fixpoint over the candidate graph (see
         # the file header's #3).
         set eligible [dict create]
-        set singleInstance [dict create]
+        set instancesOf [dict create]
         set arityOf [dict create]
         foreach {b l} $candidates {
             dict set eligible $b 1
-            dict set singleInstance $b [SingleInstance $spec $l]
+            dict set instancesOf $b [RelevantInstances $spec $l]
             dict set arityOf $b [llength [hir::get $view $l params]]
         }
         set changed 1
@@ -348,35 +356,44 @@ proc hir::blockescape::Bindings {hir spec} {
                 if {![dict get $eligible $b]} {
                     continue
                 }
-                set linst [dict get $singleInstance $b]
-                if {$linst eq ""} {
+                set linsts [dict get $instancesOf $b]
+                if {$linsts eq ""} {
                     dict set eligible $b 0
                     set changed 1
                     continue
                 }
-                set linstance [dict get $spec instances $linst]
                 set arity [dict get $arityOf $b]
                 set ok 1
-                # self references, inside L's own body. A self-reference
+                # self references, inside L's own body, examined in every
+                # used instance of L (each instance has its own `calls`).
+                # Each must be a call to an instance of L. A self-reference
                 # nested inside some further closure of L's own (rather
                 # than directly in L's own body) is not examined by this
                 # analysis (see the file header's scope limits): if L
                 # structurally captures itself but no *direct* self-
                 # reference-as-call was found, decline conservatively
                 # rather than risk missing a genuine escaping use.
-                lassign [RefsAsCalls $view $context $linstance [dict get $context exprs $l] $b $arity] selfOk selfTarget
-                if {!$selfOk || ($selfTarget ne "" && $selfTarget ne $linst)} {
-                    set ok 0
-                } elseif {$selfTarget eq "" && [HasSelfCapture $view $l]} {
+                set selfFound 0
+                foreach linst $linsts {
+                    lassign [RefsAsCalls $view $context [dict get $spec instances $linst] [dict get $context exprs $l] $b $arity] selfOk selfTargets
+                    if {!$selfOk || [NotAllIn $selfTargets $linsts]} {
+                        set ok 0
+                        break
+                    }
+                    if {$selfTargets ne ""} {
+                        set selfFound 1
+                    }
+                }
+                if {$ok && !$selfFound && [HasSelfCapture $view $l]} {
                     set ok 0
                 }
                 # external references, in this region's own top exprs.
                 set found 0
                 if {$ok} {
-                    lassign [RefsAsCalls $view $context $instance $exprs $b $arity] extOk extTarget
-                    if {!$extOk || ($extTarget ne "" && $extTarget ne $linst)} {
+                    lassign [RefsAsCalls $view $context $instance $exprs $b $arity] extOk extTargets
+                    if {!$extOk || [NotAllIn $extTargets $linsts]} {
                         set ok 0
-                    } elseif {$extTarget ne ""} {
+                    } elseif {$extTargets ne ""} {
                         set found 1
                     }
                 }
@@ -399,23 +416,27 @@ proc hir::blockescape::Bindings {hir spec} {
                             set ok 0
                             break
                         }
-                        set cinst [dict get $singleInstance $cb]
-                        if {$cinst eq ""} {
+                        set cinsts [dict get $instancesOf $cb]
+                        if {$cinsts eq ""} {
                             set ok 0
                             break
                         }
-                        set cinstance [dict get $spec instances $cinst]
                         # capturedBy already proves C's own literal
                         # structurally captures B; a *direct* reference
                         # inside C's own body (context.exprs[ce]) must
-                        # therefore exist. If none is found there, the
-                        # actual use is nested inside some further closure
-                        # of C's own -- not examined by this analysis (the
-                        # file header's scope limits) -- so decline
-                        # conservatively.
-                        lassign [RefsAsCalls $view $context $cinstance [dict get $context exprs $ce] $b $arity] cOk cTarget
-                        if {!$cOk || $cTarget eq "" || $cTarget ne $linst} {
-                            set ok 0
+                        # therefore exist, in every used instance of C. If
+                        # none is found there, the actual use is nested
+                        # inside some further closure of C's own -- not
+                        # examined by this analysis (the file header's scope
+                        # limits) -- so decline conservatively.
+                        foreach cinst $cinsts {
+                            lassign [RefsAsCalls $view $context [dict get $spec instances $cinst] [dict get $context exprs $ce] $b $arity] cOk cTargets
+                            if {!$cOk || $cTargets eq "" || [NotAllIn $cTargets $linsts]} {
+                                set ok 0
+                                break
+                            }
+                        }
+                        if {!$ok} {
                             break
                         }
                         set found 1
@@ -448,12 +469,18 @@ proc hir::blockescape::Bindings {hir spec} {
             if {![dict get $eligible $b]} {
                 continue
             }
-            set linst [dict get $singleInstance $b]
-            dict set virtual $b $linst
-            dict set wants $linst 1
-            if {![dict exists $flatCaptures $linst]} {
-                dict set flatCaptures $linst \
-                    [FlattenBinding $view $envless $eligible $candidates memo $b]
+            set linsts [dict get $instancesOf $b]
+            # VIRTUAL answers only "is this binding de-closure-converted"
+            # (its first instance stands for it); each call site names its
+            # own callee instance, and every used instance of the literal is
+            # wanted, with the one flattened capture list a literal has.
+            dict set virtual $b [lindex $linsts 0]
+            set flat [FlattenBinding $view $envless $eligible $candidates memo $b]
+            foreach linst $linsts {
+                dict set wants $linst 1
+                if {![dict exists $flatCaptures $linst]} {
+                    dict set flatCaptures $linst $flat
+                }
             }
         }
     }

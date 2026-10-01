@@ -523,11 +523,17 @@ test ic-callable-through-hof {a callable passed on to another function whose own
     icSig $h outer
 } -result {{q: Fn{args: [str], return: bool, errors: []} (inferred trusted)}}
 
-test ic-callable-no-target {calling an inferred callable parameter stays callvalue: a contract, never a code target} -body {
+# EXACT-CALLABLE-CLOSED-CALLER.md: an inferred contract is still never a code
+# target -- but the exact *argument* is. With the exact callable in the
+# instance's key, the call through the inferred-contract parameter is a
+# direct call (here, a direct native operation); only a callable that is
+# genuinely dynamic (chosen at run time, so the value has just its contract)
+# stays an indirect callvalue.
+test ic-callable-no-target {a call through an inferred-callable parameter is a direct native operation when the argument is an exact native: the contract was never the target, the exact argument is} -body {
     set h [icCompile "${::icPredUse}pred_use(is_tcl_alpha)"]
     set nir [dict get [native::lower::program [native::prepareHir $h]] text]
     regexp {= callvalue } $nir
-} -result 1
+} -result 0
 
 # ---------------------------------------------------------------------------
 # Reachability (spec items 59-60)
@@ -600,10 +606,16 @@ test ic-checked-not-bearing {a checked-only contract is not precondition-bearing
     }
 } -result true
 
+test ic-callable-contract-only-stays-callvalue {a callable known only by its contract (chosen at run time between two Blocks) is still an indirect callvalue: the contract is not a code target} -body {
+    set h [icCompile "${::icPick}classify(true, \"x\")"]
+    set nir [dict get [native::lower::program [native::prepareHir $h]] text]
+    regexp {= callvalue } $nir
+} -result 1
+
 # ---------------------------------------------------------------------------
 # Specialization keys (spec items 62-63)
 
-test ic-keys-unchanged {inferred contracts never enter specialization keys: the scanner's instances are keyed by the argument kinds exactly as before (native / block), and each instance's body sees the Fn contract} -body {
+test ic-keys-unchanged {inferred contracts never enter specialization keys as a dimension of their own: the scanner's instances are keyed by the exact callable's identity (a function of the target alone -- the label shows the target, never a Fn contract), and every call through the parameter is now a direct call} -body {
     set src "fn scan(p, n):\n    loop i from 0 to n:\n        if p(\"a\"):\n            continue\n        return i\n    n\nfn loc?(c):\n    is_tcl_alnum(c)\n\[scan(is_tcl_alpha, 3), scan(loc?, 2)\]"
     set hir [native::prepareHir [icCompile $src]]
     set spec [hir::specialize::analyze $hir]
@@ -611,16 +623,14 @@ test ic-keys-unchanged {inferred contracts never enter specialization keys: the 
     set scan [lsearch -inline -all $labels scan<*]
     set id [lindex [dict get $spec used] [lsearch $labels [lindex $scan 0]]]
     set view [hir::specialize::view $hir $spec $id]
-    set block [dict get [hir::specialize::instance $spec $id] block]
-    set p [lindex [hir::get $view $block params] 0]
-    set callee ""
+    set unresolved 0
     foreach e [dict get [hir::specialize::instance $spec $id] reachable] {
         if {[hir::kind $view $e] eq "call" && [hir::get $view $e target] eq ""} {
-            set callee [hir::types::show [hir::typeOf $view [hir::get $view $e callee]]]
+            incr unresolved
         }
     }
-    list $scan $callee [icRun $src]
-} -result {{{scan<native, int>} {scan<block, int>}} {Fn{args: [str], return: bool, errors: []}} {[3, 2]}}
+    list [lmap l $scan {regsub {e\d+} $l eN}] [regexp {Fn\{} $scan] $unresolved [icRun $src]
+} -result {{{scan<native(is_tcl_alpha), int>} {scan<block(eN), int>}} 0 0 {[3, 2]}}
 
 # ---------------------------------------------------------------------------
 # Module signatures (spec items 44-45)

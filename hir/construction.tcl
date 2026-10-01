@@ -548,7 +548,11 @@ proc hir::construction::analyze {hir spec escape stringregion blockescape} {
     set used [dict get $spec used]
     foreach id $used {
         dict set s regions $id [RegionInfo $hir $spec $id]
-        if {[hir::specialize::InstanceClosed $spec $blockescape $id]} {
+        # The authoritative closedness proof (hir::specialize's `closed`,
+        # computed once at the stable point); a hand-built SPEC without it
+        # falls back to the identical InstanceClosed over BLOCKESCAPE.
+        if {[dict exists $spec closed] ? [dict exists $spec closed $id]
+                : [hir::specialize::InstanceClosed $spec $blockescape $id]} {
             dict set s closed $id 1
         }
         if {[hir::escape::wants $escape $id] || [hir::escape::paramWants $escape $id]

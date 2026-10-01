@@ -197,16 +197,28 @@ test stack-map-deep-3 {a much deeper chain of simultaneously-live caller-frame r
 # module's own doc on why "keep going either way" is required) or corrupt
 # this result (roots lost, prematurely collected under stress).
 
+# The callable must be genuinely dynamic here: with the target statically
+# exact (EXACT-CALLABLE-CLOSED-CALLER.md) `apply(build, 40)` is a direct call
+# and nests no foreign frame at all, which would silently stop covering the
+# boundary this test exists for. `pick` chooses between two Blocks at run
+# time, so the call through `f` stays an rt_call_value dispatch.
+set ::callvalueBoundaryProgram "fn build(n):\n    if n < 1:\n        return \"\"\n    prefix = concat(\"x\", \"y\")\n    concat(prefix, build(n - 1))\n\nfn other(n):\n    \"z\"\n\nfn pick(flag):\n    if flag:\n        build\n    else:\n        other\n\nfn apply(f, x):\n    f(x)\n\napply(pick(true), 40)"
+
 test stack-map-callvalue-boundary-1 {a CallValue dispatch nests a foreign frame; the walk still finds every Botlish root beneath it, under GC stress} -body {
     underGcStress {
-        native "fn build(n):\n    if n < 1:\n        return \"\"\n    prefix = concat(\"x\", \"y\")\n    concat(prefix, build(n - 1))\n\nfn apply(f, x):\n    f(x)\n\napply(build, 40)"
+        native $::callvalueBoundaryProgram
     }
 } -result [list value "\"[string repeat xy 40]\""]
 
 test stack-map-callvalue-boundary-2 {confirms the program above really does dispatch through CallValue (rt_call_value), not a direct call} -body {
-    set nir [nirOf "fn build(n):\n    if n < 1:\n        return \"\"\n    prefix = concat(\"x\", \"y\")\n    concat(prefix, build(n - 1))\n\nfn apply(f, x):\n    f(x)\n\napply(build, 40)"]
+    set nir [nirOf $::callvalueBoundaryProgram]
     regexp {callvalue} [nirFunction $nir apply]
 } -result 1
+
+test stack-map-callvalue-boundary-3 {and with the target statically exact the same helper is a direct call: no foreign frame, same value under GC stress} -body {
+    set text "fn build(n):\n    if n < 1:\n        return \"\"\n    prefix = concat(\"x\", \"y\")\n    concat(prefix, build(n - 1))\n\nfn apply(f, x):\n    f(x)\n\napply(build, 40)"
+    list [regexp {callvalue} [nirFunction [nirOf $text] apply]] [underGcStress {native $text}]
+} -result [list 0 [list value "\"[string repeat xy 40]\""]]
 
 # native.test's own helpers, duplicated minimally (see its header for why
 # each *.test file keeps its own small copy rather than sourcing another).

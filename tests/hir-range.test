@@ -465,7 +465,33 @@ checkedSmall(15)}
             [hir::range::ConditionOutcome $hir $analysis $id [lindex $conditions 1]]
 } -result {0 0}
 
-test condition-outcome-6 {broad, genuinely open/dynamic Int stays Unknown: arbitrary-precision Int is never assumed small merely because it is a Botlish Int (spec #18, #37)} -body {
+# EXACT-CALLABLE-CLOSED-CALLER.md: `caller(f, 10)` used to be a dynamic call
+# (the key erased which callable g is), which is what made f's parameter
+# "genuinely open". The target is statically exact there, so it is now a
+# direct call and f's entry Range is the caller's [10, 10] -- a legitimate
+# fact, decided below as condition-outcome-6b. The open/dynamic control must
+# therefore make the callable genuinely dynamic: chosen at run time between
+# two declared-Fn-typed alternatives, which erases the target (the callable
+# has only a structural contract) so f's parameter keeps no caller fact.
+test condition-outcome-6 {broad, genuinely open/dynamic Int stays Unknown: arbitrary-precision Int is never assumed small merely because it is a Botlish Int (spec #18, #37); the callable is chosen dynamically so no exact caller exists} -body {
+    outcomeOf {fn f(x: int) -> int:
+    if x < 0:
+        1
+    else:
+        2
+fn h(x: int) -> int:
+    3
+fn pick(b) -> Fn{args: [int], return: int}:
+    if b:
+        f
+    else:
+        h
+fn caller(g, v) -> int:
+    g(v)
+caller(pick(true), 10)} 0 f
+} -result {}
+
+test condition-outcome-6b {the same shape with the callable statically exact: f is called exactly once, with 10, through caller's parameter -- a direct call, so f's own condition is decided from the caller's argument Range} -body {
     outcomeOf {fn f(x: int) -> int:
     if x < 0:
         1
@@ -474,7 +500,7 @@ test condition-outcome-6 {broad, genuinely open/dynamic Int stays Unknown: arbit
 fn caller(g, v) -> int:
     g(v)
 caller(f, 10)} 0 f
-} -result {}
+} -result {0}
 
 test condition-outcome-7 {path-sensitive narrowing: inside x >= 0's own true branch, the existing branch-narrowing facts (hir::range::ComparisonNarrowing, built for a different purpose -- representation/unboxing) already prove the nested x < 0 impossible, with x itself left genuinely open/dynamic (no literal-collapse shortcut)} -body {
     set src {fn f(x: int) -> int:
@@ -485,9 +511,16 @@ test condition-outcome-7 {path-sensitive narrowing: inside x >= 0's own true bra
             2
     else:
         3
+fn h(x: int) -> int:
+    4
+fn pick(b) -> Fn{args: [int], return: int}:
+    if b:
+        f
+    else:
+        h
 fn caller(g, v) -> int:
     g(v)
-caller(f, 10)}
+caller(pick(true), 10)}
     lassign [rangeOf $src] hir spec analysis
     set id [rangeInstance $spec f]
     set conditions [ifConditions $hir]
