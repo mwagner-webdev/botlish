@@ -1,8 +1,9 @@
 #!/usr/bin/env tclsh9.0
 # roots.tcl -- RAW-INT-ABI.md GC-root effect: per program, the sums over all
 # functions of the GC-root report (native::roots) with the raw Int ABI off (A),
-# eligibility-only (B: -raw-demand-opt 0) and demand-filtered (C, the
-# default): safepoints, root candidates (managed-capable registers live across
+# eligibility-only (B: -raw-demand-opt 0), demand-filtered with mixed uses
+# kept raw (C: -raw-mixed-policy raw) and demand-filtered with mixed uses boxed
+# (D, the default): safepoints, root candidates (managed-capable registers live across
 # a safepoint), shadow/frame root slots, and functions that need no root slot.
 #
 #   tclsh9.0 audit/raw-int-abi/tools/roots.tcl PROGRAM.bot...
@@ -24,24 +25,31 @@ proc sums {report} {
     return $d
 }
 proc zero {} { return [dict create safepoints 0 candidates 0 slots 0 functions 0 slotless 0] }
-set tA [zero]; set tB [zero]; set tC [zero]
-proc line {a b c} {
+set configs {
+    A {-raw-int-abi-opt 0}
+    B {-raw-int-abi-opt 1 -raw-demand-opt 0}
+    C {-raw-int-abi-opt 1 -raw-mixed-policy raw}
+    D {-raw-int-abi-opt 1}
+}
+set tot [dict create]
+foreach {n o} $configs { dict set tot $n [zero] }
+proc line {rows} {
     set out {}
     foreach {k label} {safepoints safepoints candidates "root candidates" slots "root slots"} {
-        lappend out "$label [dict get $a $k] -> [dict get $b $k] -> [dict get $c $k]"
+        lappend out "$label [join [lmap r $rows {dict get $r $k}] { -> }]"
     }
-    lappend out "functions with no slot [dict get $a slotless]/[dict get $a functions] -> [dict get $b slotless]/[dict get $b functions] -> [dict get $c slotless]/[dict get $c functions]"
+    lappend out "functions with no slot [join [lmap r $rows {format %d/%d [dict get $r slotless] [dict get $r functions]}] { -> }]"
     return [join $out {; }]
 }
-puts "(A tagged ABI -> B RawInt eligibility only -> C RawInt + demand suppression)"
+puts "(A tagged ABI -> B RawInt eligibility only -> C demand, mixed uses raw -> D demand, mixed uses boxed)"
 foreach path $argv {
     set hir [surface::readProgramFile $path]
-    set a [sums [native::roots $hir -raw-int-abi-opt 0]]
-    set b [sums [native::roots $hir -raw-int-abi-opt 1 -raw-demand-opt 0]]
-    set c [sums [native::roots $hir -raw-int-abi-opt 1 -raw-demand-opt 1]]
-    puts "$path: [line $a $b $c]"
-    foreach k {safepoints candidates slots functions slotless} {
-        dict incr tA $k [dict get $a $k]; dict incr tB $k [dict get $b $k]; dict incr tC $k [dict get $c $k]
+    set rows {}
+    foreach {n o} $configs {
+        set r [sums [native::roots $hir {*}$o]]
+        lappend rows $r
+        foreach k {safepoints candidates slots functions slotless} { dict set tot $n $k [expr {[dict get $tot $n $k] + [dict get $r $k]}] }
     }
+    puts "$path: [line $rows]"
 }
-puts "TOTAL: [line $tA $tB $tC]"
+puts "TOTAL: [line [lmap {n o} $configs {dict get $tot $n}]]"

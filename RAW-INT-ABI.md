@@ -5,7 +5,7 @@
 An exact, **closed** Botlish instance transports an Int parameter, and its
 successful Int result, as a **raw signed machine integer** (`RawInt`, a
 two's-complement `i64` on the current native target) instead of a tagged
-`Value` when two independent conditions hold:
+`Value` when three conditions hold:
 
 1. **Safety (eligibility, the theorem).** The position's semantic type is Int,
    its instance is closed (`InstanceClosed`), and its final Range
@@ -13,31 +13,37 @@ two's-complement `i64` on the current native target) instead of a tagged
    tagged Int at every call, so the raw/tagged conversions at the boundary are
    non-allocating and lossless.
 2. **Usefulness (raw demand).** Raw representation is *demanded* somewhere in
-   the position's use / transport closure: some reachable consumer
-   genuinely wants a raw Int (a raw arithmetic or comparison operand, a raw
-   self-tail loop slot), possibly behind aliases, branches, returns and exact
-   call edges.
+   the position's use / transport closure: some reachable consumer genuinely
+   wants a raw Int (a raw arithmetic or comparison operand, a raw self-tail loop
+   slot), possibly behind aliases, branches, returns and exact call edges.
+3. **No competing tagged use (mixed uses are boxed).** No consumer in that
+   closure needs a tagged Value. A position with both raw and tagged consumers
+   stays tagged.
 
 ```
-eligible  +  raw demanded somewhere in the use / transport closure   =>  RawInt
-eligible  +  the entire closure is tagged-only                       =>  tagged Value
+eligible  +  raw demanded  +  every consumer in the closure raw   =>  RawInt
+eligible  +  the entire closure tagged-only                       =>  tagged Value
+eligible  +  mixed raw/tagged consumers                           =>  tagged Value (boxed by default)
 ```
 
-The second condition is a usefulness filter layered *after* the safety
-theorem; it never makes an ineligible position raw and never changes a value,
-an error or a completion. It exists because eligible-but-undemanded raw
-transport is a pointless `tagged -> raw -> tagged` round trip (the preliminary
-milestone's hashtable/CSV regression, below). The semantic type stays `Int`,
-arbitrary precision, and the canonical tagged ABI is untouched everywhere the
-proof or the demand rule does not apply.
+Conditions 2 and 3 are a usefulness filter layered *after* the safety theorem;
+they never make an ineligible position raw and never change a value, an error
+or a completion. They exist because eligible-but-undemanded or only partly
+demanded raw transport is a `tagged -> raw -> tagged` round trip with nothing to
+gain (the preliminary milestone's hashtable/CSV regression, below). The semantic
+type stays `Int`, arbitrary precision, and the canonical tagged ABI is
+untouched everywhere the proof or these rules do not apply. A tagged consumer in
+the *program function* (it runs once, so it is the single frontier conversion
+every raw region has) does not count as a competing use.
 
 * `fib<int>` (`bench/fib.bot`) is physically `i64 fib(i64 n)`: `n` raw, the
   result raw, `n - 1` / `n - 2` passed raw, results added with the existing
   raw `riadd`, returned raw. **No `rbox`/`runbox` remains in the function**
   (before: 3 + 3). The program passes the literal `22` as a `rawint` and boxes
-  the final result once. Its recursive parameter/result cycle has genuine raw
-  seeds (`rilt`, `risub`, `riadd`), so demand suppression leaves it exactly as
-  the preliminary milestone had it: **byte-identical NIR, 1,404,178 Ir/run**.
+  the final result once. Every consumer in its recursive parameter/result
+  cycle is raw (`rilt`, `risub`, `riadd`, the program's boundary box), so both
+  suppression rules leave it exactly as the preliminary milestone had it:
+  **byte-identical NIR, 1,404,178 Ir/run**.
 * Dynamic instructions (callgrind, 21 runs, run 0 excluded): **1,547,454 →
   1,404,178 Ir/run (−9.3 %)**. All 286,561 Ir of retag/untag disappear; about
   half of that is given back by one extra callee-saved register the backend now
@@ -47,22 +53,27 @@ proof or the demand rule does not apply.
   closedness and Range analyses and read by the callee's lowering and by every
   call site. NIR carries the physical signature in the function header
   (`rawparams="0 2" rawresult=1`); `native/src/nir.rs` re-validates caller/callee
-  agreement and rejects a mismatch as a compiler bug. Demand suppression feeds
-  that same plan, so a suppressed position is tagged for the callee and for every
+  agreement and rejects a mismatch as a compiler bug. The demand rules feed that
+  same plan, so a suppressed position is tagged for the callee and for every
   caller by construction.
 * Errors are never encoded in the integer. A raw-result function that cannot
   fail returns the bare integer; one that can fail returns the integer plus a
   status word (second return register).
-* Whole canonical corpus (A tagged ABI → B RawInt eligibility only → C RawInt +
-  demand suppression): machine code **101,963 → 101,662 → 101,552 bytes**
-  (C is −411 vs A and −110 vs B), 233 functions in every configuration, GC
-  root candidates 1,283 → 1,238 → 1,244. Of 228 instances examined, **51 gain a
-  raw position** (B: 68): 53 raw parameters (B: 56, **3 suppressed**), 6 raw
-  results (B: 23, **17 suppressed**), 1 instance with both (B: 4). Static
-  `rbox`/`runbox`: **47/47 → 66/48 → 60/41**. The hashtable's +67 bytes
-  fall to +54 (the residue is one mixed-caller result, see *Hashtable
-  regression recovery*) and the CSV regression is recovered
-  (`csv_geometric` +19 → 0, `csv_records` −41 → −68).
+* Whole canonical corpus (A tagged ABI → B RawInt eligibility only → C demand,
+  mixed uses kept raw → **D demand, mixed uses boxed (production)**): machine
+  code **101,963 → 101,662 → 101,552 → 101,879 bytes**, 233 functions in every
+  configuration, GC root candidates 1,283 → 1,238 → 1,244 → 1,276. Of 79 eligible
+  positions (56 parameters, 23 results) **20 are selected** (19 parameters, 1
+  result; B: 79), 3 + 17 suppressed for want of any raw demand and 34 + 5 as
+  mixed uses. Static `rbox`/`runbox`: **47/47 → 66/48 → 60/41 → 44/42**.
+* **The regressions are recovered in full:** `hashtable` 12,732 (tagged) →
+  12,799 (+67) → **12,732 (+0)**, `csv_geometric` 7,578 → 7,597 (+19) →
+  **7,578**, `csv_records` 23,245 → 23,204 → 23,234; and no program is larger
+  than the tagged baseline except `uri-steady` (+9 bytes, a mixed-parameter
+  frontier in `web::is_unreserved`, see *Known limitations*). The price of the
+  boxed-mixed default is that the preliminary milestone's size gains in
+  programs whose parameters mix raw and tagged uses shrink (`matmul` −223 → −51
+  bytes, `lex-strategy` −40 → 0): see *Updated corpus code-size result*.
 * Regression, differential fuzzing, GC stress and standalone-executable
   parity: see *Full regression*, *Differential testing*, *GC stress* and
   *Standalone parity* (results pending final validation).
@@ -72,7 +83,7 @@ Files: `native/rawabi.tcl` (planner, demand pass, audit), `native/lower.tcl`
 `native/src/nir.rs` (header attributes, validation, call-site effect rule, unit
 tests), `native/src/codegen/clif.rs` (physical signature, prologue, call/ret,
 generic-entry conversion), `native/explain-native.tcl` (`raw-int-abi.txt`),
-`tests/raw-int-abi.test` (65 tests), `audit/raw-int-abi/`.
+`tests/raw-int-abi.test` (69 tests), `audit/raw-int-abi/`.
 
 ## Motivation
 
@@ -184,11 +195,14 @@ RawInt-eligible value  ->  raw at the function boundary  ->  rbox  ->  tagged co
 ```
 
 That is the preliminary milestone's measured symptom (static `rbox` 47 → 66,
-`hashtable` +67 bytes). The two questions are kept as two distinct planner
+`hashtable` +67 bytes), and it is just as real when only *some* consumers are
+tagged: the conversion is paid for the tagged ones and the raw one could have
+paid its own. The two questions are kept as two distinct planner
 stages with distinct vocabulary:
 
 * **eligible** = proven safe (Position, unchanged, still the whole safety rule);
-* **selected** = eligible **and** raw-demanded (the demand pass, below).
+* **selected** = eligible, raw-demanded **and** free of competing tagged uses
+  (the demand pass, below).
 
 Only selected positions are physical RawInt. The plan records both
 (`paramEligible`/`resultEligible` beside `params`/`result`), so the audit can
@@ -197,28 +211,35 @@ not selected; it can never be selected without being eligible.
 
 ## Raw-demand suppression
 
-The rule is deliberately the smallest one that removes the dominated case:
+The rule is deliberately small and purely boolean:
 
 ```
-RawInt selected   iff   RawInt eligible   AND   raw representation is demanded
-                                                  somewhere in its use / transport closure
+RawInt selected   iff   RawInt eligible
+                  AND   raw representation is demanded somewhere in its use / transport closure
+                  AND   no consumer in that closure needs a tagged Value
 ```
 
-If the entire closure ends in tagged consumers, the ABI position stays tagged
-(`suppressed-no-raw-demand`). If *any* genuine raw demand exists, RawInt is
-retained, however many tagged uses there also are. There are no scores,
-distances, weights, consumer counts, frequency or spill estimates and no
-profitability model: raw representation with **no** raw consumer anywhere is
-categorically a conversion cost with no benefit, and only that case is
-suppressed. Mixed raw/tagged use is left raw for now (see *Known
-limitations*).
+* If the entire closure ends in tagged consumers, the position stays tagged
+  (`suppressed-no-raw-demand`).
+* If it has a raw consumer **and** a tagged one anywhere in the closure (a
+  *mixed use*), it stays tagged too (`suppressed-mixed-tagged-use`): **boxed is
+  the default in mixed cases**. Not even one raw consumer in twenty tagged ones,
+  or twenty raw consumers and one tagged one, retains RawInt; there is nothing
+  to weigh.
+* Only a position every consumer of which is raw is raw.
+
+There are no scores, distances, weights, consumer counts, frequency or spill
+estimates and no profitability model; the rule never asks *how many* uses are
+raw or tagged, only whether any is tagged. `-raw-mixed-policy raw`
+(env `BOTLISH_NATIVE_RAW_MIXED_POLICY=raw`, audit-only) restores the earlier
+"any raw demand retains RawInt" policy for comparison (configuration C below).
 
 Planner pipeline (the final plan stays the one authoritative result):
 
 ```
 Range / closedness
   -> RawInt eligibility                 (Position: unchanged)
-  -> raw-demand analysis                (Demand: boolean reachability)
+  -> raw-demand analysis                (Demand: boolean reachability + tagged-use closure)
   -> final ABI plan                     (native::lower::abiPlan)
   -> lowering
 ```
@@ -265,7 +286,7 @@ in the graph:
 * **alias / binding**: `y = x`: `B(x)` flows to `B(y)`, and `B(y)`'s own uses are
   whatever they are (`z = y; z + 1` demands `x`);
 * **branches**: each reachable branch's last value flows to the `if`'s own sink;
-  one raw branch retains RawInt, all-tagged branches do not. Branches decided
+  every branch raw retains RawInt; one tagged branch (a mixed use) or all-tagged branches do not. Branches decided
   by `hir::range::ConditionOutcome` or marked unreachable in the instance view
   are skipped (the same facts lowering uses; no new reachability analysis);
 * **return** and a body's tail value: flow into `R(this instance)`;
@@ -284,7 +305,12 @@ in the graph:
 
 A position is demanded iff it **reaches `RAW`** (a reverse breadth-first search
 from the seed; monotone, deterministic, `O(values + use edges + exact transport
-edges)`, no path enumeration). Consequently *raw transport alone never creates
+edges)`, no path enumeration). It is *clean* iff nothing in its closure is
+tagged: a second reverse breadth-first search marks as unclean every node with a
+tagged consumer of its own, every node that flows into an unclean node, and
+every node that flows into an eligible position that is not demanded (such a
+position is tagged, so the flow into it is a tagged use). A position is selected
+iff it is demanded and clean. Consequently *raw transport alone never creates
 demand*: a cycle of pure transport edges (`f(x) -> g(x)`, `g(x) -> f(x)`, or a
 self-forwarding non-tail recursion) is never reached from `RAW` and collapses to
 tagged. Transport propagates existing demand; it cannot bootstrap its own.
@@ -310,9 +336,8 @@ in the header, zero `rbox`/`runbox` at the call or in the callee.
 `tests/raw-int-abi.test` (`demand-*`) pins the parameter, result, mixed,
 alias, branch, dead-branch, return, transport-chain, tagged-chain,
 self-forwarding-cycle and program-frontier shapes. A bounded result whose every
-caller stores it (`[pick(1), pick(2)]`) is eligible and suppressed
-(`pick<int>=raw>supp`); a result consumed by a raw comparison at a caller is
-selected (`six<str>=val>raw`).
+caller stores it is eligible and suppressed (`pick<int>=supp>supp`); a result
+consumed by a raw comparison at a caller is selected (`six<str>=val>raw`).
 
 The audit text (`native/explain-native.tcl`'s `raw-int-abi.txt`,
 `native::rawabi::explain`) states, for each eligible position, the verdict and
@@ -344,10 +369,49 @@ switch (not a language feature): it keeps eligibility and skips the demand
 filter, reproducing the preliminary "eligible ⇒ raw" plan for three-way
 comparison. `-raw-int-abi-opt 0` is still the tagged baseline.
 
+## Mixed uses (boxed by default)
+
+A position with a raw consumer *and* a tagged one is boxed
+(`suppressed-mixed-tagged-use`), and the rule travels along transport edges,
+because a tagged consumer anywhere in the closure is a tagged consumer of the
+position:
+
+```
+fn both(n):                     # raw: x = n + 1      tagged: [n, x]
+    x = n + 1
+    [n, x]                      # both<int>=supp>val
+
+fn h(z): x = z + 1; [z, x]      # z boxed (mixed)
+fn g(y): h(y)                   # y flows into a boxed position: g's parameter is boxed too
+```
+
+Specifics (`demand-*` tests pin each):
+
+* a returned parameter whose result position is tagged (ineligible, or boxed) is
+  a tagged use, so `pick(n) = if n < 3: n else: 3` boxes `n`;
+* a counted loop's bounds, a branch condition, collection and struct storage, a
+  tagged native op and a call into a boxed or ineligible position are tagged
+  uses;
+* a **discarded raw call result** is still boxed at the call, so it is a tagged
+  use of the callee's result; other discarded values (no code) are not;
+* a tagged use **in the program function** is not a competing use: that function
+  runs once and the conversion there is the frontier every raw region has (this
+  is why `fib(22)` as the program's last value does not box `fib`'s result);
+* a self-tail loop slot is still a raw register inside the function whatever the
+  ABI (`RawParams`), so a boxed loop parameter costs one unboxing at entry, not
+  one per iteration;
+* a position boxed because of a mixed use does not make its raw consumers raw
+  elsewhere: only the position's own representation changes.
+
+The cost is in the transport: a raw operation on a boxed parameter unboxes it
+once in the callee (which the preliminary plan paid at every tagged caller or
+tagged use instead). Which side is cheaper depends on counts the rule
+deliberately does not take.
+
 ## Parameter raw masks, raw result planning
 
 Each position is independent: `raw/tagged`, `tagged/raw` and `raw/raw` all occur,
-and so do mixed parameter lists (`f(a, b, s)` → `raw, tagged, tagged`). One
+and so do mixed parameter lists (`f(a, b, s)` → `raw, tagged, tagged`: `a` only compared, `b` unbounded, `s` a String). One
 plan exists per codegen instance — a mask over the declared parameters plus a
 result flag — so there are no per-call-site variants. The plan is a function of
 instance facts only; exact Range values never enter an instance key (two
@@ -647,146 +711,157 @@ profitability test" policy is not uniformly a win in size.
 ## Three-way conversion census
 
 `audit/raw-int-abi/tools/demand.tcl` (`out/demand.txt`, `-detail` adds every
-position's trace) lowers each canonical program three ways: **A** tagged ABI
-(`-raw-int-abi-opt 0`, the pre-RawInt baseline), **B** RawInt eligibility only
-(`-raw-demand-opt 0`, the preliminary result) and **C** RawInt + demand
-suppression (production). Static NIR counts over the 17 programs, 233 functions:
+position's trace) lowers each canonical program in four configurations: **A**
+tagged ABI (`-raw-int-abi-opt 0`, the pre-RawInt baseline), **B** RawInt
+eligibility only (`-raw-demand-opt 0`, the preliminary result), **C** demand
+suppression with mixed uses kept raw (`-raw-mixed-policy raw`, the earlier
+cleanup policy, audit-only) and **D** demand suppression with mixed uses boxed
+(production). The comparison that matters is A / B / D; C shows what the
+boxed-mixed default costs and recovers. Static NIR counts over the 17 programs,
+233 functions:
 
 | | rbox | runbox | machine bytes |
 |---|---:|---:|---:|
 | A tagged baseline | 47 | 47 | 101,963 |
 | B eligibility only | 66 | 48 | 101,662 |
-| C demand suppression | **60** | **41** | **101,552** |
+| C demand, mixed uses raw | 60 | 41 | 101,552 |
+| **D demand, mixed uses boxed** | **44** | **42** | **101,879** |
 
-Per program (rbox A / B / C; runbox A / B / C; bytes A / B / C; eligible →
-selected positions, parameters and results):
+Per program:
 
-| program | rbox | runbox | machine bytes | eligible → selected |
+| program | rbox A / B / C / D | runbox A / B / C / D | machine bytes A / B / C / D | eligible → selected (D): parameters; results |
 |---|---|---|---|---|
-| fib | 3 / 1 / 1 | 3 / 0 / 0 | 181 / 181 / 181 | 1→1; 1→1 |
-| lex-strategy | 4 / 5 / 5 | 4 / 3 / 3 | 5119 / 5079 / 5079 | 3→3; 0→0 |
-| loop-count | 4 / 2 / 3 | 1 / 0 / 0 | 287 / 281 / 274 | 2→2; 1→0 |
-| refined-checks | 7 / 10 / 8 | 11 / 10 / 9 | 9089 / 9068 / 9046 | 10→10; 6→2 |
-| source-checks | 1 / 1 / 1 | 3 / 3 / 3 | 4249 / 4249 / 4249 | 0→0; 0→0 |
-| sum-refined | 1 / 1 / 1 | 0 / 0 / 0 | 286 / 277 / 277 | 1→1; 0→0 |
-| test-selection | 0 / 0 / 0 | 0 / 0 / 0 | 6421 / 6421 / 6421 | 0→0; 0→0 |
-| uri-steady | 5 / 8 / 6 | 7 / 6 / 5 | 5462 / 5459 / 5437 | 9→9; 4→1 |
-| ai_text_clean | 1 / 1 / 1 | 1 / 1 / 1 | 3081 / 3078 / 3078 | 2→2; 0→0 |
-| csv | 0 / 1 / 1 | 2 / 1 / 1 | 5723 / 5719 / 5719 | 1→1; 0→0 |
-| csv_chunked | 2 / 2 / 2 | 4 / 4 / 4 | 10168 / 10142 / 10142 | 3→3; 1→0 |
-| csv_geometric | 0 / 1 / 0 | 1 / 3 / 1 | 7578 / 7597 / 7578 | 1→0; 0→0 |
-| csv_records | 8 / 14 / 13 | 3 / 9 / 6 | 23245 / 23204 / 23177 | 11→10; 5→1 |
-| hashtable | 4 / 11 / 10 | 0 / 1 / 1 | 12732 / 12799 / 12786 | 3→2; 5→1 |
-| matmul | 5 / 6 / 6 | 5 / 5 / 5 | 4734 / 4511 / 4511 | 8→8; 0→0 |
-| string_replace | 0 / 0 / 0 | 1 / 1 / 1 | 2618 / 2618 / 2618 | 0→0; 0→0 |
-| string_reverse | 2 / 2 / 2 | 1 / 1 / 1 | 990 / 979 / 979 | 1→1; 0→0 |
+| fib | 3 / 1 / 1 / 1 | 3 / 0 / 0 / 0 | 181 / 181 / 181 / 181 | 1→1; 1→1 |
+| lex-strategy | 4 / 5 / 5 / 4 | 4 / 3 / 3 / 4 | 5,119 / 5,079 / 5,079 / 5,119 | 3→0; 0→0 |
+| loop-count | 4 / 2 / 3 / 3 | 1 / 0 / 0 / 0 | 287 / 281 / 274 / 274 | 2→2; 1→0 |
+| refined-checks | 7 / 10 / 8 / 7 | 11 / 10 / 9 / 9 | 9,089 / 9,068 / 9,046 / 9,080 | 10→6; 6→0 |
+| source-checks | 1 / 1 / 1 / 1 | 3 / 3 / 3 / 3 | 4,249 / 4,249 / 4,249 / 4,249 | 0→0; 0→0 |
+| sum-refined | 1 / 1 / 1 / 1 | 0 / 0 / 0 / 0 | 286 / 277 / 277 / 277 | 1→1; 0→0 |
+| test-selection | 0 / 0 / 0 / 0 | 0 / 0 / 0 / 0 | 6,421 / 6,421 / 6,421 / 6,421 | 0→0; 0→0 |
+| uri-steady | 5 / 8 / 6 / 5 | 7 / 6 / 5 / 5 | 5,462 / 5,459 / 5,437 / 5,471 | 9→5; 4→0 |
+| ai_text_clean | 1 / 1 / 1 / 1 | 1 / 1 / 1 / 1 | 3,081 / 3,078 / 3,078 / 3,081 | 2→0; 0→0 |
+| csv | 0 / 1 / 1 / 0 | 2 / 1 / 1 / 2 | 5,723 / 5,719 / 5,719 / 5,723 | 1→0; 0→0 |
+| csv_chunked | 2 / 2 / 2 / 2 | 4 / 4 / 4 / 4 | 10,168 / 10,142 / 10,142 / 10,168 | 3→0; 1→0 |
+| csv_geometric | 0 / 1 / 0 / 0 | 1 / 3 / 1 / 1 | 7,578 / 7,597 / 7,578 / 7,578 | 1→0; 0→0 |
+| csv_records | 8 / 14 / 13 / 8 | 3 / 9 / 6 / 4 | 23,245 / 23,204 / 23,177 / 23,234 | 11→2; 5→0 |
+| hashtable | 4 / 11 / 10 / 4 | 0 / 1 / 1 / 0 | 12,732 / 12,799 / 12,786 / 12,732 | 3→1; 5→0 |
+| matmul | 5 / 6 / 6 / 5 | 5 / 5 / 5 / 7 | 4,734 / 4,511 / 4,511 / 4,683 | 8→1; 0→0 |
+| string_replace | 0 / 0 / 0 / 0 | 1 / 1 / 1 / 1 | 2,618 / 2,618 / 2,618 / 2,618 | 0→0; 0→0 |
+| string_reverse | 2 / 2 / 2 / 2 | 1 / 1 / 1 / 1 | 990 / 979 / 979 / 990 | 1→0; 0→0 |
 
-C is no larger than B in any program, and no larger than A in any program
-except `hashtable`. The target of the cleanup is the conversion introduced
-*solely* by raw values whose closure is tagged-only, not the old counts: some
-conversions are legitimate new RawInt frontiers.
+D is larger than the tagged baseline A in one program only, `uri-steady` (+9
+bytes). Against the eligibility-only plan B, D is larger in the programs whose
+raw parameters or results had a competing tagged use, which the boxed-mixed
+default gives back: `matmul` +172 (still −51 vs A), `lex-strategy` +40 (= A),
+`csv_records` +30, `csv_chunked` +26, `uri-steady` +12, `refined-checks` +12
+(−9 vs A), `string_reverse` +11, `csv` +4, `ai_text_clean` +3. The `rbox` total
+is now *below* the tagged baseline (44 < 47).
 
 **Classification of every remaining `rbox`** (the tool follows each box back to
 where its raw value came from, and whether anything else wanted that value
 raw):
 
-| class | meaning | A | B | C |
-|---|---|---:|---:|---:|
-| frontier | raw *computation* (arithmetic, constant, join) boxed for a tagged consumer: the inherent tagged frontier of raw arithmetic | 25 | 21 | 22 |
-| mixed | raw parameter / raw call result with a genuine raw consumer in the same function as the tagged one (retained by policy) | 0 | 22 | 22 |
-| mixed-callers | raw call result with no raw consumer at *this* call site, kept raw because another caller wants it raw (retained by policy) | 0 | 16 | 12 |
-| program boundary | the program's own final boxed result | 0 | 1 | 1 |
-| other (tagged-ABI call boundaries in A; unclassified here) | | 22 | 3 | 3 |
-| **raw selected, no raw consumer** | a raw parameter whose every use is tagged: a bug of the demand rule | 0 | **3** | **0** |
+| class | meaning | A | B | C | D |
+|---|---|---:|---:|---:|---:|
+| frontier | raw *computation* (arithmetic, constant, join) boxed for a tagged consumer: the inherent tagged frontier of raw arithmetic | 25 | 21 | 22 | 22 |
+| mixed | raw parameter / raw call result with a genuine raw consumer in the same function as the tagged one | 0 | 22 | 22 | **1** |
+| mixed-callers | raw call result with no raw consumer at *this* call site, raw because another caller wants it raw | 0 | 16 | 12 | **0** |
+| program boundary | the program's own final boxed result | 0 | 1 | 1 | 1 |
+| other (raw registers that are not ABI positions, e.g. self-tail loop registers; unclassified) | | 22 | 3 | 3 | 20 |
+| **raw selected, no raw consumer** | a raw parameter whose every use is tagged: a bug of the demand rule | 0 | **3** | 0 | **0** |
 
-So the conversions whose reason is *raw selected but no raw consumer* are 3 in
-the preliminary plan and **0** after suppression; what remains is the
-inherent frontier, mixed uses (kept by design) and the mixed-caller case, which
-is the hashtable residue below.
+The boxed-mixed default removes the `mixed-callers` class entirely and all but
+one `mixed` box (a self-tail loop parameter that is raw inside the function
+whatever the ABI); what is left is the inherent frontier, the program boundary
+and the loop-register boxes the tagged baseline already had.
 
 ## Hashtable regression recovery
 
-Eligible hashtable positions and their verdicts (`out/demand.txt`):
+Every eligible hashtable position and its verdict (`out/demand.txt`):
 
 | position | closure | verdict |
 |---|---|---|
-| `ht_min_capacity`, `ht_empty_state`, `ht_occupied_state`, `ht_tombstone_state` results | `mutable_array_set` / `==` against an untyped `mutable_array_get` / `ht_alloc` / `ht_capacity_for`'s unbounded argument: tagged only | **suppressed** (4) |
-| `ht_alloc.capacity` | `mutable_array_allocate`, `ht_fill_empty`'s unbounded argument: tagged only | **suppressed** |
-| `ht_rehash_scan.i`, `.oldCapacity` | self-tail loop slot / `i >= oldCapacity` / `i + 1` | raw demanded |
-| `ht_capacity` result | `oldCapacity = ht_capacity(table)` → `ht_rehash_scan`'s raw loop slot (one caller), but `ht_probe_start`, `ht_probe_next`, `ht_should_grow` (`* 2` overflows the small range) and others use it tagged | raw demanded at one call site: **retained** (mixed callers) |
+| `ht_min_capacity`, `ht_empty_state`, `ht_occupied_state`, `ht_tombstone_state` results | `mutable_array_set` / `==` against an untyped `mutable_array_get` / `ht_alloc` / `ht_capacity_for`'s unbounded argument: tagged only | **suppressed**, no raw demand (4) |
+| `ht_alloc.capacity` | `mutable_array_allocate`, `ht_fill_empty`'s unbounded argument: tagged only | **suppressed**, no raw demand |
+| `ht_capacity` result | raw-demanded once (`oldCapacity = ht_capacity(table)` → `ht_rehash_scan`'s raw loop slot) but used tagged by `ht_probe_start`, `ht_probe_next`, `ht_should_grow` (`* 2` overflows the small range) and others | **boxed**, mixed use |
+| `ht_rehash_scan.i` | raw `i >= oldCapacity`, `i + 1` and the self-tail slot, but also `mutable_array_get(oldControls, i)` | **boxed**, mixed use (still a raw register inside the function: `RawParams`) |
+| `ht_rehash_scan.oldCapacity` | `i >= oldCapacity` and the self-tail slot only | raw |
 
-Machine code, whole program: **A 12,732 → B 12,799 (+67) → C 12,786 (+54)**;
-`rbox` 4 → 11 → 10, `runbox` 0 → 1 → 1. Per function (C − A): `ht_capacity` +31,
-`ht_rehash` +18, `ht_probe_next` +7, `ht_probe_start` +6, `ht_should_grow` −8;
-`ht_alloc` (B +33) and `ht_new` (B −20, which only existed because
-`ht_min_capacity` was raw) are back at their tagged sizes.
-
-The cleanup therefore recovers **13 of the 67 bytes (19 %)**, not the whole
-regression, and the rest is *not* a tagged-only closure: `ht_capacity`'s result is
-raw-demanded by exactly one of its callers (`ht_rehash`, through the
-`ht_rehash_scan` loop slot) and tagged by the rest. Mixed raw/tagged use is
-retained by the policy of this cleanup (see *Known limitations*: the
-`1 raw vs N tagged` trade-off is for an opportunity-cost model once real
-workloads justify it). No hashtable-specific rule exists.
+Machine code, whole program: **A 12,732 → B 12,799 (+67) → C 12,786 (+54) → D
+12,732 (+0)**; `rbox` 4 → 11 → 10 → 4, `runbox` 0 → 1 → 1 → 0. Per function the
+D code is the tagged baseline's: no function differs in size from A. The
+earlier cleanup (C) removed only the five tagged-only positions (13 of the 67
+bytes); the residue was `ht_capacity`'s result, raw-demanded by one caller and
+tagged by six, which is a mixed use. Boxing mixed uses removes it, so the
+regression is **recovered in full**, with no hashtable-specific rule.
 
 ## CSV conversion recovery
 
 The CSV programs (`csv`, `csv_chunked`, `csv_geometric`, `csv_records`) were
-re-audited position by position. The tagged-only Ints are the same
-`ht_*`/`geo_*` helpers they share with the hashtable:
+re-audited position by position. The tagged-only and mixed Ints are the same
+`ht_*`/`geo_*`/`scan_*` helpers they share with the hashtable, plus their own
+loop indices:
 
-* `csv_geometric` **+19 → 0 bytes** (`geo_new_capacity.capacity` only reaches the
-  overflowing `capacity * 2`, a tagged multiply; `geo_grow` stops needing an
-  `rbox` for it): fully recovered, `rbox` 1 → 0, `runbox` 3 → 1.
-* `csv_records` **23,204 (B) → 23,177 (C)** (A 23,245; −68 vs A): the four
-  `ht_*_state`/`ht_min_capacity` results and `geo_new_capacity.capacity` are
-  suppressed; `rbox` 14 → 13, `runbox` 9 → 6. Its remaining 6 `mixed-callers`
-  conversions are the same `ht_capacity` result as above.
-* `csv_chunked` and `csv` are unchanged (their raw positions are real:
-  `index` compared with `>=` and used as a self-tail loop slot); `chunk_size`'s
-  result, only stored/compared against an untyped value, is suppressed.
+* `csv_geometric` **+19 → 0 bytes** (B 7,597, D 7,578 = A): `geo_new_capacity
+  .capacity` only reaches the overflowing `capacity * 2`, a tagged multiply;
+  `rbox` 1 → 0, `runbox` 3 → 1.
+* `csv_records` A 23,245 → B 23,204 → C 23,177 → **D 23,234** (−11 vs A, +30 vs
+  B): the four `ht_*_state`/`ht_min_capacity` results and `geo_new_capacity
+  .capacity` are suppressed (no raw demand), eight parameters and `ht_capacity`'s
+  result are mixed and boxed (`ht_capacity_for.expected` and its callers
+  `ht_new_sized`/`row_new`/`row_table.header_count` feed a tagged `*`; the `i`
+  loop indices feed `list_get`/`mutable_array_get`), leaving `ht_rehash_scan
+  .oldCapacity` and `row_fill.field_count` raw. `rbox` 14 → 8 (= A), `runbox`
+  9 → 4.
+* `csv_chunked` 10,168 and `csv` 5,723 return to their tagged sizes: their
+  `scan_records.index` is compared with `>=` but also passed to the tagged
+  `scan_record`, `chunked_copy_chunks.index` feeds `list_get` (mixed), and
+  `chunk_size`'s result is tagged-only.
 
 ## Updated ABI census
 
-`out/census-demand.txt` (`census.tcl`, default = demand-filtered): **228
-instances examined; 53 raw parameter positions; 6 raw results; 1 instance with
-both; 51 instances with any raw ABI (22 recursive, 29 non-recursive); 177
-tagged-only.** Against the preliminary 228 / 56 / 23 / 4 / 68 (22 / 46):
+`out/census-demand.txt` (`census.tcl`, default = production D): **228 instances
+examined; 19 raw parameter positions; 1 raw result; 1 instance with both; 19
+instances with any raw ABI (8 recursive, 11 non-recursive); 209 tagged-only.**
+Against the preliminary (B) 228 / 56 / 23 / 4 / 68 (22 / 46) and the
+mixed-kept-raw policy (C) 53 / 6 / 1 / 51 (22 / 29):
 
-| | B eligibility only | C demand-filtered |
-|---|---:|---:|
-| instances examined | 228 | 228 |
-| raw parameter positions | 56 | **53** |
-| raw result positions | 23 | **6** |
-| instances with any raw position | 68 | **51** |
-| instances with both | 4 | **1** |
-| recursive / non-recursive with a raw position | 22 / 46 | 22 / 29 |
-
-Call edges (emitted NIR): off — tagged→tagged 309; **on — raw→raw 24, tagged→raw
-38, raw→tagged 17, tagged→tagged 230** (B: 24 / 48 / 18 / 219). Every recursive
-raw instance survives (their cycles have genuine seeds); what disappears is
-non-recursive helpers with no raw consumer.
-
-**Suppression census** (parameters and results separately):
-
-| | eligible | selected | suppressed (tagged-only) |
+| | B eligibility only | C mixed uses raw | D mixed uses boxed |
 |---|---:|---:|---:|
-| parameters | 56 | 53 | 3 |
-| results | 23 | 6 | 17 |
-| **total positions** | **79** | **59** | **20** |
+| instances examined | 228 | 228 | 228 |
+| raw parameter positions | 56 | 53 | **19** |
+| raw result positions | 23 | 6 | **1** |
+| instances with any raw position | 68 | 51 | **19** |
+| instances with both | 4 | 1 | **1** |
+| recursive / non-recursive with a raw position | 22 / 46 | 22 / 29 | 8 / 11 |
 
-The three suppressed parameters are `ht_alloc.capacity` (hashtable) and
-`geo_new_capacity.capacity` (csv_geometric, csv_records) — each
-`eligible-fits-small`, then `suppressed-no-raw-demand`. The seventeen
-suppressed results are `ht_min_capacity`, `ht_empty_state`, `ht_occupied_state`
-and `ht_tombstone_state` (in the two programs that use the table, 8),
-`byte::from_int`, `byte::nibble` and `high_nibble` (in the two programs that use
-the byte helpers, 6), `chunk_size`, `scan_while` and `loop-count`'s `work`
-(1 each); `out/demand.txt` lists every one with its tagged consumers. Results
-are suppressed far more often than parameters because a bounded result is
-usually handed to a store, a tagged comparison or an unbounded accumulator,
-while a bounded parameter usually exists because the callee compares or steps
-it.
+Call edges (emitted NIR): off — tagged→tagged 309; **on (D) — raw→raw 11,
+tagged→raw 10, raw→tagged 3, tagged→tagged 285** (B: 24 / 48 / 18 / 219).
+The surviving raw positions are the ones every consumer of which is raw:
+`fib<int>` (parameter and result), the `ascii::is_*` predicates' `b`,
+`check`/`dot`/`drive`/`work`/`refined_sum` loop parameters, `ht_rehash_scan
+.oldCapacity`, `row_fill.field_count`.
+
+**Suppression census** (eligible → selected → suppressed, parameters and
+results separately; every suppressed position names its reason):
+
+| | eligible | selected | suppressed: no raw demand | suppressed: mixed tagged use |
+|---|---:|---:|---:|---:|
+| parameters | 56 | 19 | 3 | 34 |
+| results | 23 | 1 | 17 | 5 |
+| **total positions** | **79** | **20** | **20** | **39** |
+
+Reasons: `eligible-fits-small` (every row above is eligible), then either
+`suppressed-no-raw-demand` (the 3 parameters `ht_alloc.capacity` and
+`geo_new_capacity.capacity` ×2, and the 17 results `ht_min_capacity`,
+`ht_empty_state`, `ht_occupied_state`, `ht_tombstone_state` ×2 programs each,
+`byte::from_int`, `byte::nibble`, `high_nibble` ×2 each, `chunk_size`,
+`scan_while`, `work`) or `suppressed-mixed-tagged-use` (34 parameters, 5
+results: `high_nibble` ×2, `ht_capacity` ×2, `scan_while`). `out/demand.txt`
+lists every position with its trace. Parameters are mostly *mixed* (a bounded
+parameter is typically compared or stepped and also stored, indexed or passed
+on), results mostly *tagged-only* (a bounded result is usually handed to a
+store, a tagged comparison or an unbounded accumulator).
 
 ## Dynamic instructions per run (three-way)
 
@@ -828,12 +903,21 @@ Whole canonical corpus (17 programs, 233 functions in every configuration):
 |---|---:|---:|---:|---:|
 | A tagged baseline | 101,963 | 1,283 | 812 | 595 |
 | B eligibility only | 101,662 (−301) | 1,238 | 781 | 595 |
-| C demand-filtered | **101,552 (−411)** | 1,244 | 782 | 595 |
+| C demand, mixed uses raw | 101,552 (−411) | 1,244 | 782 | 595 |
+| **D demand, mixed uses boxed** | **101,879 (−84)** | 1,276 | 807 | 595 |
 
-The corpus result *improves* on the preliminary (−110 bytes vs B). Root
-candidates rise by 6 over B (positions that went back to tagged are legitimately
-rootable again), still 39 below A; safepoints are unchanged. Functions with no
-root slot: 46 → 48 → 47 of 233 (`out/roots-demand.txt`).
+D is **84 bytes smaller than the tagged baseline** but 223 bytes larger than the
+eligibility-only plan and 327 larger than C: boxing mixed uses removes every
+regression (hashtable, `csv_geometric`, `csv_chunked`, `csv`, ... back to the
+tagged size; no program larger than A except `uri-steady`, +9) and with them
+most of the preliminary gains in programs whose raw parameters also had tagged
+uses (`matmul` −223 → −51, `lex-strategy` −40 → 0, `uri-steady` −3 → +9,
+`refined-checks` −21 → −9, `csv_records` −41 → −11). That is the trade of the
+boxed-mixed default; the audit-only `-raw-mixed-policy raw` recovers the
+earlier numbers (C). GC root candidates rise by 38 over B (positions that went
+back to tagged are legitimately rootable again), still 7 below A; safepoints
+are unchanged. Functions with no root slot: 46 → 48 → 47 → 46 of 233
+(`out/roots-demand.txt`).
 
 ## Updated fib result
 
@@ -875,17 +959,21 @@ demand minus the eligibility-only plan; `out/compiletime-demand.txt`; median of
 
 | program | abi plan (eligibility) | demand pass | lower | whole compile | demand / whole |
 |---|---:|---:|---:|---:|---:|
-| fib | 0.02 | 0.41 | 3 | 26 | 1.6 % |
-| loop-count | 0.03 | 0.34 | 5 | 16 | 2.1 % |
-| sum-refined | 0.04 | 0.23 | 4 | 12 | 1.9 % |
-| refined-checks | 0.28 | 4.34 | 73 | 392 | 1.1 % |
-| uri-steady | 0.21 | 3.17 | 45 | 128 | 2.5 % |
-| matmul | 0.09 | 1.59 | 19 | 64 | 2.5 % |
-| hashtable | 0.33 | 7.55 | 149 | 336 | 2.2 % |
-| csv_records | 0.61 | **13.67** | 363 | 727 | **1.9 %** |
+| fib | 0.02 | 0.40 | 3 | 24 | 1.7 % |
+| loop-count | 0.03 | 0.38 | 4 | 13 | 2.9 % |
+| sum-refined | 0.03 | 0.26 | 3 | 12 | 2.2 % |
+| refined-checks | 0.31 | 4.52 | 61 | 368 | 1.2 % |
+| uri-steady | 0.19 | 3.13 | 41 | 117 | 2.7 % |
+| matmul | 0.09 | 1.70 | 18 | 60 | 2.8 % |
+| hashtable | 0.29 | 7.21 | 119 | 290 | 2.5 % |
+| csv_records | 0.57 | **12.86** | 347 | 699 | **1.8 %** |
 
-The worst canonical case is `csv_records`: 13.7 ms, 3.8 % of its lowering time
-and 1.9 % of the whole compile. The pass itself is a boolean walk over the
+(The csv_records and hashtable rows are a quiet re-measure, median of 9; the
+others median of 7. The pass now also computes the tagged-use closure, a second
+reverse search: no measurable change from the earlier 13.7 ms.)
+
+The worst canonical case is `csv_records`: 12.9 ms, 3.7 % of its lowering time
+and 1.8 % of the whole compile. The pass itself is a boolean walk over the
 relevant instances' expressions plus a reverse breadth-first search,
 `O(values + use edges + exact transport edges)` (no path enumeration, no
 exponential branch exploration); about a third of its time (4.0 of 10.8 ms in
@@ -992,15 +1080,23 @@ Tcl 9.0.1, Linux x86-64, release native backend, all from a clean tree.
 
 ## Known limitations
 
-* **No general opportunity-cost model.** The demand rule removes only the
-  *categorically* dominated case (raw with **no** raw consumer anywhere in the
-  closure). Mixed use stays raw: one raw consumer retains RawInt however many
-  tagged uses exist, so a result with one raw caller and many tagged callers
-  (`ht_capacity`: 1 raw, 5-6 tagged; the +54-byte hashtable residue) keeps its raw
-  ABI, and an eligible parameter with one raw operation and twenty tagged
-  stores does too. A weighted policy (use counts, distance, frequency, spill or
-  code size) is deliberately not added; revisit it only when self-hosting or
-  stdlib growth gives real workloads that need it.
+* **No general opportunity-cost model, and the boxed-mixed default is blunt.**
+  The rules are categorical: raw only when *every* consumer in the closure is
+  raw. They never count uses, so a parameter with nineteen raw operations and one
+  tagged store is boxed, and the callee then unboxes it once for the raw
+  operations; the preliminary plan would have kept it raw and boxed it once for
+  the store. The boxed default exists because mixed use was the whole residue of
+  the hashtable regression (and the cost is visible: the corpus saving shrinks
+  from −411 bytes with mixed uses raw to −84, `matmul` −223 → −51, `uri-steady`
+  +9 over the tagged baseline). A weighted policy (use counts, distance,
+  frequency, spill or code size) is deliberately not added; revisit it only when
+  self-hosting or stdlib growth gives real workloads that need it.
+  `-raw-mixed-policy raw` (audit-only) reproduces the earlier policy.
+* **A boxed position cascades through transport.** A parameter that flows into a
+  boxed parameter, or a result whose consumer is boxed, is itself boxed, so one
+  tagged use can un-raw a chain (`web::is_unreserved.b` → `ascii::is_alphanumeric.b`
+  is the `uri-steady` case: the raw predicates keep their raw parameter, the
+  mixed caller boxes its own and unboxes once at the call, +3 bytes).
 * **The demand pass approximates lowering's raw consumers from HIR and Ranges.**
   It drops the guard facts (so it can only over-approximate raw demand), does
   not see tiny-leaf inlining (a call to a leaf whose parameter is *not*
@@ -1157,10 +1253,12 @@ String fact) and its own conversion pair, not a new framework.
 5. **What happens if all consumers are tagged?** **RawInt is suppressed**: the
    position stays tagged (`suppressed-no-raw-demand`) for the callee and every
    caller.
-6. **What happens with mixed consumers?** For now, **RawInt is retained if any
-   genuine raw demand exists** (`demand-mixed-use-keeps-raw`), however many
-   tagged uses there are. This is the known limitation behind the hashtable
-   residue.
+6. **What happens with mixed consumers?** **RawInt is boxed**: a position with
+   both raw and tagged consumers anywhere in its closure stays tagged
+   (`suppressed-mixed-tagged-use`, `demand-mixed-use-is-boxed`,
+   `demand-mixed-use-propagates-through-transport`). Only a closure whose every
+   consumer is raw is raw. (`-raw-mixed-policy raw`, audit-only, keeps the
+   earlier "any genuine raw demand retains RawInt".)
 7. **Does `fib` remain fully raw?** **Yes**: raw parameter, raw result, 0
    `rbox`/0 `runbox`, byte-identical NIR, 1,404,178 Ir/run.
 8. **Does the rule apply to results as well as parameters?** **Yes**: 17 of 23

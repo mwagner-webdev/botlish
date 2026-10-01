@@ -8,16 +8,13 @@ bench/fib.bot:
   machine code bytes off 181 on 181 (0)
     gains: fib<int> params raw result raw (recursive)
 bench/lex-strategy.bot:
-  instances examined 10; raw parameter positions 3; raw results 0; both 0; any raw 3 (recursive 2, non-recursive 1); tagged-only 7; emitted NIR functions with a raw signature 3 of 11
-  rejection tags: not-int 23 unbounded-or-not-small 2 unknown-range 4
+  instances examined 10; raw parameter positions 0; raw results 0; both 0; any raw 0 (recursive 0, non-recursive 0); tagged-only 10; emitted NIR functions with a raw signature 0 of 11
+  rejection tags: not-int 23 suppressed-mixed-tagged-use 3 unbounded-or-not-small 2 unknown-range 4
   call edges off: raw->raw 0 raw->tagged 0 tagged->raw 0 tagged->tagged 11
-  call edges on:  raw->raw 0 raw->tagged 2 tagged->raw 5 tagged->tagged 4
+  call edges on:  raw->raw 0 raw->tagged 0 tagged->raw 0 tagged->tagged 11
   rbox/runbox (total, call-boundary rbox, call-boundary runbox) off: 4/4 boundary 1/1
-  rbox/runbox (total, call-boundary rbox, call-boundary runbox) on:  5/3 boundary 1/0
-  machine code bytes off 5119 on 5079 (-40)
-    gains: chars_of<str, int, List[never]> params val,raw,val result val
-    gains: count_true<List[bool], int, int> params val,raw,val result val (recursive)
-    gains: total_valid<List[str], bool, int, int> params val,val,raw,val result val (recursive)
+  rbox/runbox (total, call-boundary rbox, call-boundary runbox) on:  4/4 boundary 1/1
+  machine code bytes off 5119 on 5119 (0)
 bench/loop-count.bot:
   instances examined 2; raw parameter positions 2; raw results 0; both 0; any raw 2 (recursive 1, non-recursive 1); tagged-only 0; emitted NIR functions with a raw signature 2 of 3
   rejection tags: suppressed-no-raw-demand 1 unbounded-or-not-small 1 unknown-range 1
@@ -29,24 +26,18 @@ bench/loop-count.bot:
     gains: work<int> params raw result val
     gains: drive<int, int> params raw,val result val (recursive)
 bench/refined-checks.bot:
-  instances examined 28; raw parameter positions 10; raw results 2; both 0; any raw 12 (recursive 3, non-recursive 9); tagged-only 16; emitted NIR functions with a raw signature 9 of 26
-  rejection tags: not-int 42 open-instance 1 suppressed-no-raw-demand 4 unbounded-or-not-small 3 unknown-range 4
+  instances examined 28; raw parameter positions 6; raw results 0; both 0; any raw 6 (recursive 1, non-recursive 5); tagged-only 22; emitted NIR functions with a raw signature 6 of 26
+  rejection tags: not-int 42 open-instance 1 suppressed-mixed-tagged-use 6 suppressed-no-raw-demand 4 unbounded-or-not-small 3 unknown-range 4
   call edges off: raw->raw 0 raw->tagged 0 tagged->raw 0 tagged->tagged 25
-  call edges on:  raw->raw 5 raw->tagged 3 tagged->raw 6 tagged->tagged 11
+  call edges on:  raw->raw 4 raw->tagged 1 tagged->raw 3 tagged->tagged 17
   rbox/runbox (total, call-boundary rbox, call-boundary runbox) off: 7/11 boundary 3/5
-  rbox/runbox (total, call-boundary rbox, call-boundary runbox) on:  8/9 boundary 3/2
-  machine code bytes off 9089 on 9046 (-43)
-    gains: byte::high_nibble<int> params val result raw
-    gains: byte::nibble<int> params raw result val
+  rbox/runbox (total, call-boundary rbox, call-boundary runbox) on:  7/9 boundary 3/3
+  machine code bytes off 9089 on 9080 (-9)
     gains: ascii::is_digit<int> params raw result val
     gains: ascii::is_upper<int> params raw result val
     gains: ascii::is_lower<int> params raw result val
     gains: ascii::is_alphabetic<int> params raw result val
     gains: ascii::is_alphanumeric<int> params raw result val
-    gains: scan_while<any, block(e239)> params val,val result raw
-    gains: web::is_unreserved<int> params raw result val
-    gains: esc_bytes<List[int], int, str> params val,raw,val result val (recursive)
-    gains: esc_from<str, int, str> params val,raw,val result val (recursive)
     gains: check<int, int, str, str> params raw,val,val,val result val (recursive)
 bench/source-checks.bot:
   instances examined 6; raw parameter positions 0; raw results 0; both 0; any raw 0 (recursive 0, non-recursive 0); tagged-only 6; emitted NIR functions with a raw signature 0 of 7
@@ -74,53 +65,42 @@ bench/test-selection.bot:
   rbox/runbox (total, call-boundary rbox, call-boundary runbox) on:  0/0 boundary 0/0
   machine code bytes off 6421 on 6421 (0)
 bench/uri-steady.bot:
-  instances examined 18; raw parameter positions 9; raw results 1; both 0; any raw 10 (recursive 2, non-recursive 8); tagged-only 8; emitted NIR functions with a raw signature 8 of 17
-  rejection tags: not-int 23 suppressed-no-raw-demand 3 unbounded-or-not-small 2 unknown-range 4
+  instances examined 18; raw parameter positions 5; raw results 0; both 0; any raw 5 (recursive 0, non-recursive 5); tagged-only 13; emitted NIR functions with a raw signature 5 of 17
+  rejection tags: not-int 23 suppressed-mixed-tagged-use 5 suppressed-no-raw-demand 3 unbounded-or-not-small 2 unknown-range 4
   call edges off: raw->raw 0 raw->tagged 0 tagged->raw 0 tagged->tagged 17
-  call edges on:  raw->raw 5 raw->tagged 2 tagged->raw 4 tagged->tagged 6
+  call edges on:  raw->raw 4 raw->tagged 0 tagged->raw 1 tagged->tagged 12
   rbox/runbox (total, call-boundary rbox, call-boundary runbox) off: 5/7 boundary 1/3
-  rbox/runbox (total, call-boundary rbox, call-boundary runbox) on:  6/5 boundary 1/0
-  machine code bytes off 5462 on 5437 (-25)
-    gains: byte::high_nibble<int> params val result raw
-    gains: byte::nibble<int> params raw result val
+  rbox/runbox (total, call-boundary rbox, call-boundary runbox) on:  5/5 boundary 1/1
+  machine code bytes off 5462 on 5471 (9)
     gains: ascii::is_digit<int> params raw result val
     gains: ascii::is_upper<int> params raw result val
     gains: ascii::is_lower<int> params raw result val
     gains: ascii::is_alphabetic<int> params raw result val
     gains: ascii::is_alphanumeric<int> params raw result val
-    gains: web::is_unreserved<int> params raw result val
-    gains: esc_bytes<List[int], int, str> params val,raw,val result val (recursive)
-    gains: esc_from<str, int, str> params val,raw,val result val (recursive)
 examples/stdlib/ai_text_clean.bot:
-  instances examined 5; raw parameter positions 2; raw results 0; both 0; any raw 2 (recursive 1, non-recursive 1); tagged-only 3; emitted NIR functions with a raw signature 1 of 5
-  rejection tags: not-int 11
+  instances examined 5; raw parameter positions 0; raw results 0; both 0; any raw 0 (recursive 0, non-recursive 0); tagged-only 5; emitted NIR functions with a raw signature 0 of 5
+  rejection tags: not-int 11 suppressed-mixed-tagged-use 2
   call edges off: raw->raw 0 raw->tagged 0 tagged->raw 0 tagged->tagged 9
-  call edges on:  raw->raw 0 raw->tagged 1 tagged->raw 1 tagged->tagged 7
+  call edges on:  raw->raw 0 raw->tagged 0 tagged->raw 0 tagged->tagged 9
   rbox/runbox (total, call-boundary rbox, call-boundary runbox) off: 1/1 boundary 0/0
   rbox/runbox (total, call-boundary rbox, call-boundary runbox) on:  1/1 boundary 0/0
-  machine code bytes off 3081 on 3078 (-3)
-    gains: peek<str, int> params val,raw result val
-    gains: clean_from<str, int, str> params val,raw,val result val (recursive)
+  machine code bytes off 3081 on 3081 (0)
 examples/stdlib/csv.bot:
-  instances examined 9; raw parameter positions 1; raw results 0; both 0; any raw 1 (recursive 0, non-recursive 1); tagged-only 8; emitted NIR functions with a raw signature 1 of 11
-  rejection tags: not-int 23 unbounded-or-not-small 1 unknown-range 7
+  instances examined 9; raw parameter positions 0; raw results 0; both 0; any raw 0 (recursive 0, non-recursive 0); tagged-only 9; emitted NIR functions with a raw signature 0 of 11
+  rejection tags: not-int 23 suppressed-mixed-tagged-use 1 unbounded-or-not-small 1 unknown-range 7
   call edges off: raw->raw 0 raw->tagged 0 tagged->raw 0 tagged->tagged 4
-  call edges on:  raw->raw 0 raw->tagged 1 tagged->raw 1 tagged->tagged 2
+  call edges on:  raw->raw 0 raw->tagged 0 tagged->raw 0 tagged->tagged 4
   rbox/runbox (total, call-boundary rbox, call-boundary runbox) off: 0/2 boundary 0/1
-  rbox/runbox (total, call-boundary rbox, call-boundary runbox) on:  1/1 boundary 0/0
-  machine code bytes off 5723 on 5719 (-4)
-    gains: scan_records<str, int, List[never]> params val,raw,val result val
+  rbox/runbox (total, call-boundary rbox, call-boundary runbox) on:  0/2 boundary 0/1
+  machine code bytes off 5723 on 5723 (0)
 examples/stdlib/csv_chunked.bot:
-  instances examined 19; raw parameter positions 3; raw results 0; both 0; any raw 3 (recursive 2, non-recursive 1); tagged-only 16; emitted NIR functions with a raw signature 2 of 20
-  rejection tags: not-int 44 suppressed-no-raw-demand 1 unbounded-or-not-small 3 unknown-range 9
+  instances examined 19; raw parameter positions 0; raw results 0; both 0; any raw 0 (recursive 0, non-recursive 0); tagged-only 19; emitted NIR functions with a raw signature 0 of 20
+  rejection tags: not-int 44 suppressed-mixed-tagged-use 3 suppressed-no-raw-demand 1 unbounded-or-not-small 3 unknown-range 9
   call edges off: raw->raw 0 raw->tagged 0 tagged->raw 0 tagged->tagged 12
-  call edges on:  raw->raw 0 raw->tagged 0 tagged->raw 2 tagged->tagged 10
+  call edges on:  raw->raw 0 raw->tagged 0 tagged->raw 0 tagged->tagged 12
   rbox/runbox (total, call-boundary rbox, call-boundary runbox) off: 2/4 boundary 0/1
   rbox/runbox (total, call-boundary rbox, call-boundary runbox) on:  2/4 boundary 0/1
-  machine code bytes off 10168 on 10142 (-26)
-    gains: chunked_copy_chunks<List[never], int, mutarray, int> params val,raw,val,val result val (recursive)
-    gains: chunked_copy_chunks<List[mutarray], int, mutarray, int> params val,raw,val,val result val (recursive)
-    gains: scan_records<str, int, list[List[never], mutarray, int]> params val,raw,val result val
+  machine code bytes off 10168 on 10168 (0)
 examples/stdlib/csv_geometric.bot:
   instances examined 18; raw parameter positions 0; raw results 0; both 0; any raw 0 (recursive 0, non-recursive 0); tagged-only 18; emitted NIR functions with a raw signature 0 of 20
   rejection tags: not-int 41 suppressed-no-raw-demand 1 unbounded-or-not-small 12 unknown-range 7
@@ -130,44 +110,33 @@ examples/stdlib/csv_geometric.bot:
   rbox/runbox (total, call-boundary rbox, call-boundary runbox) on:  0/1 boundary 0/0
   machine code bytes off 7578 on 7578 (0)
 examples/stdlib/csv_records.bot:
-  instances examined 58; raw parameter positions 10; raw results 1; both 0; any raw 8 (recursive 4, non-recursive 4); tagged-only 50; emitted NIR functions with a raw signature 7 of 56
-  rejection tags: not-int 122 suppressed-no-raw-demand 5 unbounded-or-not-small 27 unknown-range 16
+  instances examined 58; raw parameter positions 2; raw results 0; both 0; any raw 2 (recursive 2, non-recursive 0); tagged-only 56; emitted NIR functions with a raw signature 1 of 56
+  rejection tags: not-int 122 suppressed-mixed-tagged-use 9 suppressed-no-raw-demand 5 unbounded-or-not-small 27 unknown-range 16
   call edges off: raw->raw 0 raw->tagged 0 tagged->raw 0 tagged->tagged 96
-  call edges on:  raw->raw 5 raw->tagged 6 tagged->raw 8 tagged->tagged 77
+  call edges on:  raw->raw 0 raw->tagged 1 tagged->raw 1 tagged->tagged 94
   rbox/runbox (total, call-boundary rbox, call-boundary runbox) off: 8/3 boundary 4/0
-  rbox/runbox (total, call-boundary rbox, call-boundary runbox) on:  13/6 boundary 5/0
-  machine code bytes off 23245 on 23177 (-68)
-    gains: ht_capacity_for<int, int> params raw,val result val (recursive)
-    gains: ht_new_sized<int> params raw result val
-    gains: ht_capacity<mutarray> params val result raw
-    gains: ht_rehash_scan<struct{controls: any, keys: any, values: any}, int, int, struct{controls: mutarray, keys: mutarray, values: mutarray}, int> params val,raw,raw,val,val result val (recursive)
-    gains: row_new<bool, int> params val,raw result val
-    gains: row_fill<mutarray, List[str], List[str], int, int> params val,val,val,raw,raw result val (recursive)
-    gains: row_table<List[str], int, List[str], bool> params val,raw,val,val result val
-    gains: build_rows<List[List[str]], int, List[str], int, mutarray, int, bool> params val,raw,val,raw,val,val,val result val (recursive)
+  rbox/runbox (total, call-boundary rbox, call-boundary runbox) on:  8/4 boundary 4/0
+  machine code bytes off 23245 on 23234 (-11)
+    gains: ht_rehash_scan<struct{controls: any, keys: any, values: any}, int, int, struct{controls: mutarray, keys: mutarray, values: mutarray}, int> params val,val,raw,val,val result val (recursive)
+    gains: row_fill<mutarray, List[str], List[str], int, int> params val,val,val,val,raw result val (recursive)
 examples/stdlib/hashtable.bot:
-  instances examined 29; raw parameter positions 2; raw results 1; both 0; any raw 2 (recursive 1, non-recursive 1); tagged-only 27; emitted NIR functions with a raw signature 1 of 26
-  rejection tags: not-int 54 suppressed-no-raw-demand 5 unbounded-or-not-small 12 unknown-range 5
+  instances examined 29; raw parameter positions 1; raw results 0; both 0; any raw 1 (recursive 1, non-recursive 0); tagged-only 28; emitted NIR functions with a raw signature 0 of 26
+  rejection tags: not-int 54 suppressed-mixed-tagged-use 2 suppressed-no-raw-demand 5 unbounded-or-not-small 12 unknown-range 5
   call edges off: raw->raw 0 raw->tagged 0 tagged->raw 0 tagged->tagged 68
-  call edges on:  raw->raw 0 raw->tagged 1 tagged->raw 6 tagged->tagged 61
+  call edges on:  raw->raw 0 raw->tagged 0 tagged->raw 0 tagged->tagged 68
   rbox/runbox (total, call-boundary rbox, call-boundary runbox) off: 4/0 boundary 3/0
-  rbox/runbox (total, call-boundary rbox, call-boundary runbox) on:  10/1 boundary 5/0
-  machine code bytes off 12732 on 12786 (54)
-    gains: ht_capacity<mutarray> params val result raw
-    gains: ht_rehash_scan<struct{controls: any, keys: any, values: any}, int, int, struct{controls: mutarray, keys: mutarray, values: mutarray}, int> params val,raw,raw,val,val result val (recursive)
+  rbox/runbox (total, call-boundary rbox, call-boundary runbox) on:  4/0 boundary 3/0
+  machine code bytes off 12732 on 12732 (0)
+    gains: ht_rehash_scan<struct{controls: any, keys: any, values: any}, int, int, struct{controls: mutarray, keys: mutarray, values: mutarray}, int> params val,val,raw,val,val result val (recursive)
 examples/stdlib/matmul.bot:
-  instances examined 6; raw parameter positions 8; raw results 0; both 0; any raw 5 (recursive 3, non-recursive 2); tagged-only 1; emitted NIR functions with a raw signature 5 of 7
-  rejection tags: not-int 21 unbounded-or-not-small 3 unknown-range 2
+  instances examined 6; raw parameter positions 1; raw results 0; both 0; any raw 1 (recursive 1, non-recursive 0); tagged-only 5; emitted NIR functions with a raw signature 1 of 7
+  rejection tags: not-int 21 suppressed-mixed-tagged-use 7 unbounded-or-not-small 3 unknown-range 2
   call edges off: raw->raw 0 raw->tagged 0 tagged->raw 0 tagged->tagged 8
-  call edges on:  raw->raw 6 raw->tagged 0 tagged->raw 1 tagged->tagged 1
+  call edges on:  raw->raw 0 raw->tagged 0 tagged->raw 2 tagged->tagged 6
   rbox/runbox (total, call-boundary rbox, call-boundary runbox) off: 5/5 boundary 3/3
-  rbox/runbox (total, call-boundary rbox, call-boundary runbox) on:  6/5 boundary 3/0
-  machine code bytes off 4734 on 4511 (-223)
-    gains: dot<List[int], List[List[int]], int, int, int, int> params val,val,val,raw,raw,val result val (recursive)
-    gains: product_row<List[int], List[List[int]], int, int, List[never]> params val,val,raw,raw,val result val
-    gains: product_row<List[int], List[List[int]], int, int, List[int]> params val,val,val,raw,val result val (recursive)
-    gains: product_rows<List[List[int]], List[List[int]], int, int, List[never]> params val,val,raw,raw,val result val
-    gains: product_rows<List[List[int]], List[List[int]], int, int, List[List[int]]> params val,val,val,raw,val result val (recursive)
+  rbox/runbox (total, call-boundary rbox, call-boundary runbox) on:  5/7 boundary 3/3
+  machine code bytes off 4734 on 4683 (-51)
+    gains: dot<List[int], List[List[int]], int, int, int, int> params val,val,val,val,raw,val result val (recursive)
 examples/stdlib/string_replace.bot:
   instances examined 3; raw parameter positions 0; raw results 0; both 0; any raw 0 (recursive 0, non-recursive 0); tagged-only 3; emitted NIR functions with a raw signature 0 of 4
   rejection tags: not-int 12 unbounded-or-not-small 3
@@ -177,12 +146,11 @@ examples/stdlib/string_replace.bot:
   rbox/runbox (total, call-boundary rbox, call-boundary runbox) on:  0/1 boundary 0/0
   machine code bytes off 2618 on 2618 (0)
 examples/stdlib/string_reverse.bot:
-  instances examined 2; raw parameter positions 1; raw results 0; both 0; any raw 1 (recursive 1, non-recursive 0); tagged-only 1; emitted NIR functions with a raw signature 1 of 3
-  rejection tags: not-int 5
+  instances examined 2; raw parameter positions 0; raw results 0; both 0; any raw 0 (recursive 0, non-recursive 0); tagged-only 2; emitted NIR functions with a raw signature 0 of 3
+  rejection tags: not-int 5 suppressed-mixed-tagged-use 1
   call edges off: raw->raw 0 raw->tagged 0 tagged->raw 0 tagged->tagged 6
-  call edges on:  raw->raw 0 raw->tagged 0 tagged->raw 1 tagged->tagged 5
+  call edges on:  raw->raw 0 raw->tagged 0 tagged->raw 0 tagged->tagged 6
   rbox/runbox (total, call-boundary rbox, call-boundary runbox) off: 2/1 boundary 0/0
   rbox/runbox (total, call-boundary rbox, call-boundary runbox) on:  2/1 boundary 0/0
-  machine code bytes off 990 on 979 (-11)
-    gains: reverse_from<str, int, str> params val,raw,val result val (recursive)
-TOTALS: anyRaw 51 both 1 brbox0 20 brbox1 21 brunbox0 18 brunbox1 3 bytes0 101963 bytes1 101552 examined 228 nonRecursiveRaw 29 off:raw->raw 0 off:raw->tagged 0 off:tagged->raw 0 off:tagged->tagged 309 on:raw->raw 24 on:raw->tagged 17 on:tagged->raw 38 on:tagged->tagged 230 rawParams 53 rawResults 6 rbox0 47 rbox1 60 recursiveRaw 22 runbox0 47 runbox1 41 taggedOnly 177
+  machine code bytes off 990 on 990 (0)
+TOTALS: anyRaw 19 both 1 brbox0 20 brbox1 18 brunbox0 18 brunbox1 10 bytes0 101963 bytes1 101879 examined 228 nonRecursiveRaw 11 off:raw->raw 0 off:raw->tagged 0 off:tagged->raw 0 off:tagged->tagged 309 on:raw->raw 11 on:raw->tagged 3 on:tagged->raw 10 on:tagged->tagged 285 rawParams 19 rawResults 1 rbox0 47 rbox1 44 recursiveRaw 8 runbox0 47 runbox1 42 taggedOnly 209
