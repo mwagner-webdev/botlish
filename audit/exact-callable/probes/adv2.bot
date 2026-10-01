@@ -1,0 +1,34 @@
+# Probe (audit only): boundary: a callable CAPTURED by a nested closure stays a callvalue when creations differ; closures of one code target share an instance.
+# Not a benchmark.
+#
+# expect: [2, 3, 1, 101, 8, 21]
+
+fn outer(p, s):
+    fn inner(x):
+        p(x)
+    fn count(i):
+        if i >= length(s):
+            return i
+        if inner(substring(s, i, i + 1)):
+            return count(i + 1)
+        i
+    count(0)
+
+fn pos?(n):
+    n > 0
+
+fn big?(n):
+    n > 100
+
+fn mk(k):
+    fn gt(n):
+        n > k
+    gt
+
+fn first_idx(p, lo, hi):
+    loop i from lo to hi:
+        if p(i):
+            return i
+    hi
+
+[outer(is_tcl_alpha, "ab1"), outer(is_tcl_alnum, "ab1_"), first_idx(pos?, -5, 5), first_idx(big?, 0, 200), first_idx(mk(7), 0, 50), first_idx(mk(20), 0, 50)]

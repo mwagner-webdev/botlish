@@ -1,0 +1,25 @@
+# Probe (audit only): recursion (tail and non-tail) inside a de-closured closure with two exact instances.
+# Not a benchmark.
+#
+# expect: [2, 3, 2, 3, 3]
+
+fn run(v):
+    fn walk(i, p):
+        if i >= length(v):
+            return i
+        if p(substring(v, i, i + 1)):
+            return walk(i + 1, p)
+        i
+    fn depth(i, p):
+        if i >= length(v):
+            return 0
+        if p(substring(v, i, i + 1)):
+            return 1 + depth(i + 1, p)
+        0
+    fn a():
+        walk(0, is_tcl_alpha)
+    fn b():
+        walk(0, is_tcl_alnum)
+    [a(), b(), depth(0, is_tcl_alpha), depth(0, is_tcl_alnum), walk(1, is_tcl_alnum)]
+
+run("ab1_")

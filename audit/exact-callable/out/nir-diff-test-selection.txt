@@ -1,0 +1,39 @@
+94c94
+< func 1 "list::any?" params=2 env=0 regs=18 pnames="xs predicate" captures=0 instance="List[str], block" rawregs="4 14" @e2
+---
+> func 1 "list::any?" params=2 env=0 regs=18 pnames="xs predicate" captures=0 instance="List[str], block(e55)" rawregs="4 14" @e2
+105,106c105
+<     %9 = callvalue %1 %8 @e6
+<     guardbool %9 @e5
+---
+>     %9 = callenv 5 %1 %8 @e6
+132c131
+< func 2 "list::none?" params=2 env=0 regs=18 pnames="xs predicate" captures=0 instance="List[str], block" rawregs="4 14" @e27
+---
+> func 2 "list::none?" params=2 env=0 regs=18 pnames="xs predicate" captures=0 instance="List[str], block(e55)" rawregs="4 14" @e27
+143,144c142
+<     %9 = callvalue %1 %8 @e31
+<     guardbool %9 @e30
+---
+>     %9 = callenv 5 %1 %8 @e31
+170c168
+< func 3 "list::find" params=2 env=0 regs=16 pnames="xs predicate" captures=0 instance="List[Test], block" rawregs="4 13" @e38
+---
+> func 3 "list::find" params=2 env=0 regs=16 pnames="xs predicate" captures=0 instance="List[Test], block(e94)" rawregs="4 13" @e38
+181,182c179
+<     %9 = callvalue %1 %8 @e42
+<     guardbool %9 @e41
+---
+>     %9 = callenv 11 %1 %8 @e42
+228c225
+< func 8 "affected?" params=2 env=0 regs=4 pnames="test changed?" captures=0 instance="Test, block" @e70
+---
+> func 8 "affected?" params=2 env=0 regs=4 pnames="test changed?" captures=0 instance="Test, block(e55)" @e70
+234c231
+< func 9 "select_affected" params=2 env=0 regs=21 pnames="tests changed?" captures=0 instance="List[Test], block" rawregs="4 19" @e78
+---
+> func 9 "select_affected" params=2 env=0 regs=21 pnames="tests changed?" captures=0 instance="List[Test], block(e55)" rawregs="4 19" @e78
+282c279
+< func 10 "first_affected" params=2 env=0 regs=10 pnames="tests changed?" captures=0 instance="List[Test], block" @e92
+---
+> func 10 "first_affected" params=2 env=0 regs=10 pnames="tests changed?" captures=0 instance="List[Test], block(e55)" @e92

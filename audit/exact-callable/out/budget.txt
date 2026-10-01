@@ -1,0 +1,10 @@
+# budget.tcl N LIMIT: median of 5 runs (individual lowering times in brackets); bytes/instances/functions are deterministic
+N=16 limit=0  apply_loop-instances=1  callvalue=2 funcs=18  bytes=5960   lower_ms=52  (runs: [51, 52, 52, 61, 62])
+N=16 limit=1  apply_loop-instances=2  callvalue=2 funcs=19  bytes=6500   lower_ms=61  (runs: [58, 60, 61, 62, 73])
+N=16 limit=2  apply_loop-instances=3  callvalue=2 funcs=20  bytes=7040   lower_ms=66  (runs: [64, 66, 66, 66, 71])
+N=16 limit=4  apply_loop-instances=5  callvalue=2 funcs=22  bytes=8120   lower_ms=79  (runs: [77, 79, 79, 79, 83])
+N=16 limit=8  apply_loop-instances=9  callvalue=2 funcs=26  bytes=10280  lower_ms=104  (runs: [102, 103, 104, 109, 110])
+N=1  limit=8  apply_loop-instances=1  callvalue=0 funcs=3   bytes=922    lower_ms=29  (runs: [28, 28, 29, 32, 32])
+N=2  limit=8  apply_loop-instances=2  callvalue=0 funcs=5   bytes=1785   lower_ms=38  (runs: [36, 36, 38, 38, 38])
+N=4  limit=8  apply_loop-instances=4  callvalue=0 funcs=9   bytes=3511   lower_ms=50  (runs: [49, 50, 50, 50, 53])
+N=8  limit=8  apply_loop-instances=8  callvalue=0 funcs=17  bytes=7008   lower_ms=85  (runs: [78, 81, 85, 89, 101])

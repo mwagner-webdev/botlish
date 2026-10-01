@@ -1,0 +1,16 @@
+# Probe (audit only): recursive HOF carrying its exact predicate (#40).
+# Not a benchmark.
+#
+# expect: 10
+
+fn is_small(x):
+    x < 10
+
+fn count_up(p, i, n):
+    if i >= n:
+        return i
+    if p(i):
+        return count_up(p, i + 1, n)
+    i
+
+count_up(is_small, 0, 100)

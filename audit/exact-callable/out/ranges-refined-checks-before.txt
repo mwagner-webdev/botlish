@@ -1,0 +1,7 @@
+program | function<key> | binding | entry Range | read Range | range-open
+bench/refined-checks.bot | scan_while<generic> | start | [-∞, +∞] | [-∞, +∞] | 1
+bench/refined-checks.bot | scan_while<generic> | i | - | [-∞, 4611686018427387902] | 1
+bench/refined-checks.bot | char_at<generic> | i | [-∞, +∞] | [-∞, +∞] | 1
+bench/refined-checks.bot | tld?<generic> | i | [-∞, +∞] | [-∞, +∞] | 1
+bench/refined-checks.bot | domain?<generic> | j | - | [-∞, 4611686018427387902] | 1
+bench/refined-checks.bot | domain?<generic> | start | [-∞, +∞] | [-∞, +∞] | 1

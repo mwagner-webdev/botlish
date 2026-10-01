@@ -1,0 +1,181 @@
+events: Ir Dr Dw I1mr D1mr D1mw ILmr DLmr DLmw Bc Bcm Bi Bim
+runs collected: 20 (per-run figures below = total / runs)
+totals per run: Ir=312,757  Dr=72,795  Dw=56,560  I1mr=111  D1mr=154  D1mw=70  ILmr=0  DLmr=0  DLmw=0  Bc=45,489  Bcm=1,340  Bi=3,861  Bim=79
+(Ir = executed instructions; Dr/Dw = data reads/writes; Bc/Bcm = conditional branches / mispredicted; Bi = indirect branches; D1mr/D1mw = L1 data misses -- callgrind simulated)
+
+== exclusive cost by code kind (per run)
+  runtime       45.5% of Ir  Ir=   142,230.0  Dr=    38,164.0  Dw=    30,805.0  Bc=    18,810.0  Bcm=       420.0  Bi=     2,893.0  D1mr=        26.4  D1mw=        40.6
+  libc          37.2% of Ir  Ir=   116,397.0  Dr=    26,995.7  Dw=    15,986.8  Bc=    21,228.0  Bcm=       829.5  Bi=         0.0  D1mr=       121.2  D1mw=        25.4
+  botlish       11.1% of Ir  Ir=    34,781.0  Dr=     3,083.0  Dw=     6,922.0  Bc=     4,279.0  Bcm=        86.0  Bi=         0.0  D1mr=         5.0  D1mw=         3.0
+  rust-other     6.2% of Ir  Ir=    19,285.0  Dr=     4,521.0  Dw=     2,846.0  Bc=     1,172.0  Bcm=         4.3  Bi=       936.0  D1mr=         1.0  D1mw=         1.0
+  other          0.0% of Ir  Ir=        63.6  Dr=        31.8  Dw=         0.0  Bc=         0.0  Bcm=         0.0  Bi=        31.8  D1mr=         0.1  D1mw=         0.0
+
+== exclusive cost per function (per run, sorted by Ir; >= 0.1% of Ir)
+   18.71%  [runtime] rt_construct                                                 Ir=   58,518.0  Dr=   14,160.0  Dw=   10,164.0  Bc=    8,808.0  Bcm=      205.5  Bi=      426.0  D1mr=        0.0  D1mw=        7.5
+   13.47%  [libc] _int_malloc                                                     Ir=   42,142.2  Dr=    8,336.6  Dw=    4,745.6  Bc=    8,354.2  Bcm=      255.2  Bi=        0.0  D1mr=       95.5  D1mw=        3.0
+   12.08%  [libc] malloc                                                          Ir=   37,796.2  Dr=   10,097.2  Dw=    5,621.0  Bc=    6,359.0  Bcm=      190.3  Bi=        0.0  D1mr=       16.6  D1mw=        2.0
+    6.36%  [libc] __memcpy_avx_unaligned_erms                                     Ir=   19,893.6  Dr=    4,571.1  Dw=    3,503.4  Bc=    3,603.3  Bcm=      141.3  Bi=        0.0  D1mr=        3.5  D1mw=       20.2
+    5.08%  [runtime] rt_substr                                                    Ir=   15,903.0  Dr=    3,711.0  Dw=    2,946.0  Bc=    2,766.0  Bcm=       96.6  Bi=      756.0  D1mr=        8.9  D1mw=        1.0
+    3.84%  [botlish] 5 chars_of                                                   Ir=   12,012.0  Dr=      540.0  Dw=    3,144.0  Bc=    1,464.0  Bcm=       25.1  Bi=        0.0  D1mr=        0.1  D1mw=        0.0
+    3.52%  [runtime] <runtime::vm::Vm>::new_list                                  Ir=   11,000.0  Dr=    3,800.0  Dw=    3,400.0  Bc=    1,200.0  Bcm=       11.2  Bi=      400.0  D1mr=        0.0  D1mw=        7.5
+    3.36%  [runtime] <runtime::vm::Vm>::alloc::<runtime::value::StrObj>           Ir=   10,494.0  Dr=    4,158.0  Dw=    3,366.0  Bc=      990.0  Bcm=        0.0  Bi=      396.0  D1mr=        0.0  D1mw=       16.2
+    3.03%  [runtime] rt_list_append                                               Ir=    9,491.0  Dr=    2,360.0  Dw=    2,776.0  Bc=      931.0  Bcm=       18.1  Bi=      515.0  D1mr=        0.0  D1mw=        5.1
+    2.88%  [botlish] 6 classify                                                   Ir=    9,004.0  Dr=      804.0  Dw=    1,556.0  Bc=    1,136.0  Bcm=       18.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+    2.44%  [runtime] <runtime::vm::Vm>::new_str_known                             Ir=    7,626.0  Dr=    1,860.0  Dw=    2,976.0  Bc=      372.0  Bcm=        0.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.1
+    2.31%  [rust-other] __rustc::__rdl_alloc                                      Ir=    7,227.0  Dr=      803.0  Dw=        0.0  Bc=      803.0  Bcm=        2.0  Bi=      803.0  D1mr=        0.0  D1mw=        0.0
+    1.71%  [botlish] 7 count_true                                                 Ir=    5,357.0  Dr=      492.0  Dw=      656.0  Bc=      676.0  Bcm=       26.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+    1.64%  [libc] realloc                                                         Ir=    5,124.0  Dr=      960.0  Dw=      480.0  Bc=      972.0  Bcm=       75.7  Bi=        0.0  D1mr=        1.6  D1mw=        0.0
+    1.56%  [runtime] rt_call_value                                                Ir=    4,884.0  Dr=    1,452.0  Dw=      924.0  Bc=      594.0  Bcm=       10.0  Bi=      132.0  D1mr=        3.0  D1mw=        1.0
+    1.50%  [runtime] invoke_native                                                Ir=    4,686.0  Dr=    1,122.0  Dw=      594.0  Bc=      990.0  Bcm=        4.1  Bi=       66.0  D1mr=        3.0  D1mw=        0.0
+    1.46%  [runtime] rt_str_len                                                   Ir=    4,554.0  Dr=    1,242.0  Dw=      414.0  Bc=      414.0  Bcm=        0.1  Bi=        0.0  D1mr=        6.5  D1mw=        0.0
+    1.31%  [runtime] one_scalar                                                   Ir=    4,110.0  Dr=    1,363.0  Dw=    1,190.0  Bc=      513.0  Bcm=        4.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+    1.23%  [libc] _int_free                                                       Ir=    3,849.8  Dr=    1,004.4  Dw=      430.1  Bc=      772.2  Bcm=      119.6  Bi=        0.0  D1mr=        1.3  D1mw=        0.0
+    1.08%  [libc] _int_realloc                                                    Ir=    3,384.6  Dr=      651.6  Dw=      464.2  Bc=      492.1  Bcm=       16.6  Bi=        0.0  D1mr=        2.1  D1mw=        0.0
+    1.05%  [runtime] apply_op                                                     Ir=    3,284.0  Dr=      924.0  Dw=      594.0  Bc=      330.0  Bcm=       10.8  Bi=       66.0  D1mr=        2.0  D1mw=        0.0
+    1.03%  [rust-other] __rustc::__rust_alloc                                     Ir=    3,212.0  Dr=      803.0  Dw=      803.0  Bc=        0.0  Bcm=        0.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+    1.03%  [rust-other] __rustc::__rust_no_alloc_shim_is_unstable_v2              Ir=    3,212.0  Dr=    1,606.0  Dw=      803.0  Bc=        0.0  Bcm=        0.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+    0.99%  [runtime] rt_is_tcl_alnum                                              Ir=    3,105.0  Dr=      728.0  Dw=      312.0  Bc=      416.0  Bcm=       15.1  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+    0.70%  [botlish] 2 lenient_ident_char?                                        Ir=    2,178.0  Dr=      354.0  Dw=      276.0  Bc=      342.0  Bcm=        7.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+    0.63%  [botlish] 1 list::all?                                                 Ir=    1,977.0  Dr=      201.0  Dw=      172.0  Bc=      330.0  Bcm=        1.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+    0.61%  [rust-other] <alloc::raw_vec::RawVecInner>::finish_grow                Ir=    1,896.0  Dr=      312.0  Dw=      444.0  Bc=      156.0  Bcm=        0.1  Bi=       60.0  D1mr=        1.0  D1mw=        0.0
+    0.57%  [runtime] rt_list_new                                                  Ir=    1,791.0  Dr=      393.0  Dw=      438.0  Bc=      174.0  Bcm=        3.5  Bi=       49.0  D1mr=        1.0  D1mw=        0.0
+    0.51%  [botlish] 4 chars_of                                                   Ir=    1,584.0  Dr=      144.0  Dw=      480.0  Bc=       96.0  Bcm=        0.1  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+    0.48%  [libc] _int_free_merge_chunk                                           Ir=    1,489.3  Dr=      353.6  Dw=      287.1  Bc=      243.1  Bcm=       13.9  Bi=        0.0  D1mr=        0.1  D1mw=        0.1
+    0.41%  [runtime] <runtime::vm::Vm>::alloc::<runtime::construct::ListPlanObj>  Ir=    1,272.0  Dr=      504.0  Dw=      384.0  Bc=      120.0  Bcm=       24.1  Bi=       48.0  D1mr=        0.0  D1mw=        2.1
+    0.36%  [libc] unlink_chunk.isra.0                                             Ir=    1,126.7  Dr=      474.1  Dw=      156.8  Bc=      254.8  Bcm=        4.7  Bi=        0.0  D1mr=        0.5  D1mw=        0.0
+    0.34%  [rust-other] __rustc::__rdl_realloc                                    Ir=    1,056.0  Dr=      288.0  Dw=      240.0  Bc=       48.0  Bcm=        0.0  Bi=       48.0  D1mr=        0.0  D1mw=        0.0
+    0.30%  [rust-other] <alloc::raw_vec::RawVec<u64>>::grow_one                   Ir=      936.0  Dr=      288.0  Dw=      216.0  Bc=       36.0  Bcm=        0.0  Bi=        0.0  D1mr=        0.0  D1mw=        1.0
+    0.30%  [libc] free                                                            Ir=      936.0  Dr=      288.0  Dw=      144.0  Bc=       96.0  Bcm=        0.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+    0.29%  [rust-other] <alloc::string::String as core::iter::traits::collect::Fr Ir=      894.0  Dr=      219.0  Dw=      195.0  Bc=       81.0  Bcm=        2.2  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+    0.24%  [runtime] runtime::vm::str_object                                      Ir=      756.0  Dr=      171.0  Dw=      207.0  Bc=       96.0  Bcm=        3.0  Bi=       15.0  D1mr=        0.0  D1mw=        0.0
+    0.24%  [botlish] 10 total_valid                                               Ir=      738.0  Dr=       62.0  Dw=      132.0  Bc=       82.0  Bcm=        2.1  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+    0.18%  [botlish] 0 <program>                                                  Ir=      565.0  Dr=      128.0  Dw=      102.0  Bc=       81.0  Bcm=        2.5  Bi=        0.0  D1mr=        5.0  D1mw=        3.0
+    0.17%  [libc] _int_free_maybe_consolidate                                     Ir=      530.4  Dr=      221.0  Dw=      154.7  Bc=       44.2  Bcm=        0.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+    0.16%  [runtime] rt_str_region_eq                                             Ir=      516.0  Dr=      144.0  Dw=       60.0  Bc=       84.0  Bcm=       14.0  Bi=       12.0  D1mr=        1.0  D1mw=        0.0
+    0.15%  [rust-other] <alloc::raw_vec::RawVecInner<_>>::reserve::do_reserve_and Ir=      468.0  Dr=       96.0  Dw=       72.0  Bc=       36.0  Bcm=        0.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+    0.15%  [botlish] 2 lenient_ident_char? (generic entry)                        Ir=      462.0  Dr=      198.0  Dw=      132.0  Bc=        0.0  Bcm=        0.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+    0.14%  [botlish] 8 valid_chars                                                Ir=      432.0  Dr=       48.0  Dw=      160.0  Bc=       32.0  Bcm=        0.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+    0.10%  [botlish] 9 fully_alnum?                                               Ir=      320.0  Dr=       48.0  Dw=       96.0  Bc=       24.0  Bcm=        0.1  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+
+== Botlish -> Botlish calls, per callee (per run): count; INCLUSIVE cost of the non-self calls
+          69.3  2 lenient_ident_char?                    incl   0.00% of Ir  Ir=        0.0  Dr=        0.0  Dw=        0.0  Bc=        0.0  Bcm=        0.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+          69.3  2 lenient_ident_char? (generic entry)    incl   2.19% of Ir  Ir=    6,842.0  Dr=    1,723.0  Dw=    1,128.0  Bc=      925.0  Bcm=       42.0  Bi=       12.0  D1mr=        1.0  D1mw=        0.0
+          25.2  4 chars_of                               incl  68.25% of Ir  Ir=  213,441.6  Dr=   49,774.7  Dw=   38,673.7  Bc=   31,933.1  Bcm=      982.0  Bi=    2,356.8  D1mr=      101.9  D1mw=       44.8
+          25.2  5 chars_of                               incl  60.26% of Ir  Ir=  188,480.9  Dr=   43,697.3  Dw=   33,789.8  Bc=   28,560.0  Bcm=      829.6  Bi=    1,990.8  D1mr=       79.0  D1mw=       28.1
+          16.8  6 classify                               incl  72.31% of Ir  Ir=  226,152.0  Dr=   53,534.3  Dw=   41,285.2  Bc=   32,963.7  Bcm=      972.5  Bi=    3,017.8  D1mr=      102.0  D1mw=       54.9
+          16.8  7 count_true                             incl   2.23% of Ir  Ir=    6,985.0  Dr=      936.0  Dw=      804.0  Bc=      824.0  Bcm=       26.0  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+          16.8  8 valid_chars                            incl  74.68% of Ir  Ir=  233,569.0  Dr=   54,518.3  Dw=   42,249.2  Bc=   33,819.7  Bcm=      998.5  Bi=    3,017.8  D1mr=      102.0  D1mw=       54.9
+          16.8  3 choose_classifier                      incl   0.05% of Ir  Ir=      152.0  Dr=       64.0  Dw=       16.0  Bc=       16.0  Bcm=        4.1  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+           8.4  9 fully_alnum?                           incl  24.53% of Ir  Ir=   76,726.4  Dr=   17,775.4  Dw=   13,858.0  Bc=   11,373.3  Bcm=      327.4  Bi=      815.0  D1mr=       44.3  D1mw=       11.4
+           8.4  1 list::all?                             incl   1.32% of Ir  Ir=    4,120.0  Dr=      796.0  Dw=      560.0  Bc=      605.0  Bcm=        9.1  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+           2.1  10 total_valid                           incl  74.98% of Ir  Ir=  234,505.0  Dr=   54,634.3  Dw=   42,399.2  Bc=   33,919.7  Bcm=    1,000.7  Bi=    3,017.8  D1mr=      102.0  D1mw=       54.9
+           1.0  0 <program>                              incl 100.00% of Ir  Ir=  312,750.6  Dr=   72,794.4  Dw=   56,558.8  Bc=   45,488.9  Bcm=    1,339.9  Bi=    3,859.8  D1mr=      153.6  D1mw=       70.0
+
+== Botlish -> Botlish calls, per caller -> callee (per run)
+          69.3  2 lenient_ident_char? (entry)  ->  2 lenient_ident_char?
+          69.3  rt_call_value  ->  2 lenient_ident_char? (generic entry)
+          25.2  4 chars_of  ->  5 chars_of
+          16.8  8 valid_chars  ->  6 classify
+          16.8  8 valid_chars  ->  7 count_true
+          16.8  10 total_valid  ->  8 valid_chars
+          16.8  6 classify  ->  3 choose_classifier
+          16.8  6 classify  ->  4 chars_of
+           8.4  0 <program>  ->  9 fully_alnum?
+           8.4  9 fully_alnum?  ->  4 chars_of
+           8.4  9 fully_alnum?  ->  1 list::all?
+           2.1  0 <program>  ->  10 total_valid
+           1.0  botlish_audit_run  ->  0 <program>
+
+== Botlish -> runtime/libc calls, per helper: count and INCLUSIVE cost (per run)
+  rt_construct                                                 calls=     233.1  35.34% of Ir    474.1 Ir/call  Ir=  110,522.5  Dr=   26,581.2  Dw=   18,623.7  Bc=   16,897.7  Bcm=      602.5  Bi=      745.8  D1mr=       25.9  D1mw=       27.1
+  rt_substr                                                    calls=     207.9  27.78% of Ir    417.9 Ir/call  Ir=   86,881.1  Dr=   21,843.5  Dw=   16,204.0  Bc=   13,253.4  Bcm=      354.3  Bi=    1,611.0  D1mr=       69.4  D1mw=       17.6
+  rt_list_append                                               calls=     139.7  14.80% of Ir    331.4 Ir/call  Ir=   46,282.8  Dr=   11,915.5  Dw=    8,922.2  Bc=    6,470.6  Bcm=      201.2  Bi=    1,047.0  D1mr=       29.3  D1mw=       19.1
+  rt_call_value                                                calls=     138.6   6.81% of Ir    153.6 Ir/call  Ir=   21,290.0  Dr=    5,750.0  Dw=    3,702.0  Bc=    3,038.0  Bcm=       69.0  Bi=      276.0  D1mr=        9.0  D1mw=        1.0
+  rt_list_new                                                  calls=      45.1   2.89% of Ir    199.9 Ir/call  Ir=    9,024.2  Dr=    2,360.3  Dw=    1,798.8  Bc=    1,211.2  Bcm=       25.8  Bi=      180.0  D1mr=        8.4  D1mw=        2.1
+  rt_is_tcl_alnum                                              calls=     109.2   1.80% of Ir     51.5 Ir/call  Ir=    5,621.0  Dr=    1,562.0  Dw=    1,040.0  Bc=      730.0  Bcm=       17.1  Bi=        0.0  D1mr=        0.0  D1mw=        0.0
+  rt_str_len                                                   calls=     434.7   1.46% of Ir     10.5 Ir/call  Ir=    4,554.0  Dr=    1,242.0  Dw=      414.0  Bc=      414.0  Bcm=        0.1  Bi=        0.0  D1mr=        6.5  D1mw=        0.0
+  rt_str_region_eq                                             calls=      12.6   0.20% of Ir     50.5 Ir/call  Ir=      636.0  Dr=      180.0  Dw=       60.0  Bc=      120.0  Bcm=       26.0  Bi=       12.0  D1mr=        1.0  D1mw=        0.0
+
+== Botlish -> helper calls, per calling Botlish function (per run)
+         207.9  5 chars_of  ->  rt_str_len
+         207.9  5 chars_of  ->  rt_construct
+         182.7  5 chars_of  ->  rt_substr
+         155.4  7 count_true  ->  rt_str_len
+         138.6  6 classify  ->  rt_call_value
+         138.6  6 classify  ->  rt_list_append
+          69.3  2 lenient_ident_char?  ->  rt_is_tcl_alnum
+          39.9  1 list::all?  ->  rt_is_tcl_alnum
+          33.6  6 classify  ->  rt_list_new
+          25.2  4 chars_of  ->  rt_str_len
+          25.2  4 chars_of  ->  rt_substr
+          25.2  4 chars_of  ->  rt_construct
+          18.9  10 total_valid  ->  rt_str_len
+          16.8  6 classify  ->  rt_str_len
+          12.6  2 lenient_ident_char?  ->  rt_str_region_eq
+           8.4  1 list::all?  ->  rt_str_len
+           8.4  9 fully_alnum?  ->  rt_list_new
+           3.1  0 <program>  ->  rt_list_new
+           2.1  0 <program>  ->  rt_str_len
+           1.1  0 <program>  ->  rt_list_append
+
+== calls made outside Botlish code, caller -> callee (per run; top 60)
+       1,896.1  free  ->  _int_free
+       1,896.0  __rustc::__rust_dealloc  ->  __rustc::__rdl_dealloc
+       1,896.0  __rustc::__rdl_dealloc  ->  free
+       1,870.7  __rustc::__rdl_alloc  ->  malloc
+       1,870.7  __rustc::__rust_alloc  ->  __rustc::__rdl_alloc
+         258.3  rt_construct  ->  __memcpy_avx_unaligned_erms
+         222.1  malloc  ->  _int_malloc
+         210.0  <runtime::vm::Vm>::new_list  ->  __rustc::__rust_no_alloc_shim_is_unstable_v2
+         210.0  <runtime::vm::Vm>::new_list  ->  __rustc::__rust_alloc
+         207.9  <runtime::vm::Vm>::alloc::<runtime::value::StrObj>  ->  __rustc::__rust_no_alloc_shim_is_unstable_v2
+         207.9  <runtime::vm::Vm>::alloc::<runtime::value::StrObj>  ->  __rustc::__rust_alloc
+         195.3  rt_substr  ->  __rustc::__rust_no_alloc_shim_is_unstable_v2
+         195.3  rt_substr  ->  __rustc::__rust_alloc
+         195.3  rt_substr  ->  __memcpy_avx_unaligned_erms
+         195.3  rt_substr  ->  <runtime::vm::Vm>::new_str_known
+         195.3  <runtime::vm::Vm>::new_str_known  ->  <runtime::vm::Vm>::alloc::<runtime::value::StrObj>
+         173.7  __rustc::__rdl_realloc  ->  realloc
+         173.7  __rustc::__rust_realloc  ->  __rustc::__rdl_realloc
+         165.2  realloc  ->  _int_realloc
+         148.2  _int_realloc  ->  _int_free
+         140.9  <alloc::raw_vec::RawVecInner>::finish_grow  ->  __rustc::__rust_no_alloc_shim_is_unstable_v2
+         140.9  <alloc::raw_vec::RawVecInner>::finish_grow  ->  __rustc::__rust_alloc
+         140.8  0x000000000498b6b0  ->  __memcpy_avx_unaligned_erms
+         140.1  _int_free  ->  _int_free_merge_chunk
+         139.7  rt_list_append  ->  __rustc::__rust_no_alloc_shim_is_unstable_v2
+         139.7  rt_list_append  ->  __rustc::__rust_alloc
+         139.7  rt_list_append  ->  <runtime::vm::Vm>::new_list
+         137.9  _int_realloc  ->  _int_malloc
+         137.8  _int_realloc  ->  0x000000000498b6b0
+         137.2  _int_free_merge_chunk  ->  _int_free_maybe_consolidate
+         121.8  rt_list_append  ->  __memcpy_avx_unaligned_erms
+         109.2  rt_is_tcl_alnum  ->  one_scalar
+         103.0  _int_malloc  ->  unlink_chunk.isra.0
+         100.3  <alloc::raw_vec::RawVecInner<_>>::reserve::do_reserve_and_handle::<alloc::alloc::Global>  ->  <alloc::raw_vec::RawVecInner>::finish_grow
+          69.3  invoke_native  ->  apply_op
+          69.3  apply_op  ->  one_scalar
+          69.3  rt_call_value  ->  invoke_native
+          60.7  _int_malloc  ->  alloc_perturb
+          50.4  rt_construct  ->  __rustc::__rust_no_alloc_shim_is_unstable_v2
+          50.4  rt_construct  ->  __rustc::__rust_alloc
+          49.5  _int_free_merge_chunk  ->  unlink_chunk.isra.0
+          45.1  rt_list_new  ->  <runtime::vm::Vm>::new_list
+          37.8  rt_construct  ->  <alloc::raw_vec::RawVec<u64>>::grow_one
+          37.8  <alloc::raw_vec::RawVec<u64>>::grow_one  ->  <alloc::raw_vec::RawVecInner>::finish_grow
+          37.8  <alloc::raw_vec::RawVecInner>::finish_grow  ->  __rustc::__rust_realloc
+          25.2  <runtime::vm::Vm>::alloc::<runtime::construct::ListPlanObj>  ->  __rustc::__rust_no_alloc_shim_is_unstable_v2
+          25.2  <runtime::vm::Vm>::alloc::<runtime::construct::ListPlanObj>  ->  __rustc::__rust_alloc
+          25.2  rt_construct  ->  <runtime::vm::Vm>::alloc::<runtime::construct::ListPlanObj>
+          25.2  rt_construct  ->  <runtime::vm::Vm>::new_list
+          25.2  rt_construct  ->  __rustc::__rust_dealloc
+          12.8  _int_realloc  ->  unlink_chunk.isra.0
+          12.6  rt_substr  ->  <alloc::string::String as core::iter::traits::collect::FromIterator<char>>::from_iter::<core::iter::adapters::take::Take<core::str::iter::Chars>>
+          12.6  rt_substr  ->  <runtime::vm::Vm>::new_str
+          12.6  rt_str_region_eq  ->  __memcmp_avx2_movbe
+          12.6  <runtime::vm::Vm>::new_str  ->  runtime::vm::str_object
+          12.6  <runtime::vm::Vm>::new_str  ->  <runtime::vm::Vm>::alloc::<runtime::value::StrObj>
+          12.6  runtime::vm::str_object  ->  __rustc::__rust_realloc
+          12.6  <alloc::string::String as core::iter::traits::collect::FromIterator<char>>::from_iter::<core::iter::adapters::take::Take<core::str::iter::Chars>>  ->  <alloc::raw_vec::RawVecInner<_>>::reserve::do_reserve_and_handle::<alloc::alloc::Global>
+           3.2  runtime::vm::str_object  ->  core::str::count::char_count_general_case
+           2.1  rt_list_new  ->  __rustc::__rust_no_alloc_shim_is_unstable_v2

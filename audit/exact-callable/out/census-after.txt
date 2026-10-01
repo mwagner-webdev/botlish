@@ -1,0 +1,274 @@
+program | sem | used | emitted | generic | exact | kindcall | callvalue | closures | bytes | lower-ms
+bench/fib.bot | 1 | 2 | 2 | 0 | 0 | 0 | 0 | 0 | 292 | 30
+    fn <program><generic> bytes=49
+    fn fib<int> bytes=243
+bench/lex-strategy.bot | 13 | 11 | 11 | 1 | 1 | 0 | 1 | 0 | 5119 | 90
+    instances chars_of: 2
+    fn <program><generic> bytes=1302
+    fn list::all?<List[str], native(is_tcl_alnum)> bytes=541
+    fn lenient_ident_char?<generic> bytes=327
+    fn choose_classifier<bool> bytes=57
+    fn chars_of<str, int, List[never]> bytes=371
+    fn chars_of<str, int, List[str]> bytes=652
+    fn classify<str, bool> bytes=725
+    callvalue in classify<str, bool>
+    fn count_true<List[bool], int, int> bytes=379
+    fn valid_chars<str, bool> bytes=153
+    fn fully_alnum?<str> bytes=204
+    fn total_valid<List[str], bool, int, int> bytes=408
+bench/loop-count.bot | 2 | 3 | 3 | 0 | 0 | 0 | 0 | 0 | 287 | 23
+    fn <program><generic> bytes=63
+    fn work<int> bytes=31
+    fn drive<int, int> bytes=193
+bench/refined-checks.bot | 19 | 29 | 26 | 5 | 2 | 0 | 0 | 0 | 9089 | 428
+    instances local_char?: 2
+    instances scan_while: 3
+    fn <program><generic> bytes=1443
+    fn char::codepoint<UnicodeChar> bytes=39
+    fn byte::from_int<int> bytes=289
+    fn byte::set<List[UnicodeChar]> bytes=609
+    fn ascii::is_digit<int> bytes=74
+    fn ascii::is_upper<int> bytes=74
+    fn ascii::is_lower<int> bytes=74
+    fn ascii::is_alphabetic<int> bytes=125
+    fn ascii::is_alphanumeric<int> bytes=125
+    fn web::emailish?<str> bytes=379
+    fn char_at<generic> bytes=262
+    fn char_at<generic> bytes=222
+    fn local_char?<str> bytes=176
+    fn local_char?<generic> bytes=238
+    fn scan_while<any, block(e239)> bytes=440
+    fn scan_while<any, native(is_tcl_alpha)> bytes=456
+    fn tld?<generic> bytes=468
+    fn domain?<generic> bytes=1076
+    fn web::is_unreserved<int> bytes=137
+    fn web::uri_escape_text<str> bytes=94
+    fn high_nibble<int> bytes=103
+    fn hex_pair<int> bytes=474
+    fn esc_bytes<List[int], int, str> bytes=491
+    fn esc_char<str> bytes=426
+    fn esc_from<str, int, str> bytes=451
+    fn check<int, int, str, str> bytes=344
+bench/source-checks.bot | 4 | 7 | 7 | 5 | 1 | 0 | 1 | 3 | 4249 | 73
+    fn <program><generic> bytes=2054
+    fn list::find<List[str], block(e114)> bytes=549
+    fn is_underscore?<generic> bytes=113
+    fn is_hyphen?<generic> bytes=113
+    fn classify_leading<generic> bytes=1025
+    callvalue in classify_leading<generic>
+    fn valid_start?<generic> bytes=294
+    fn invalid_name?<generic> bytes=101
+bench/sum-refined.bot | 2 | 4 | 3 | 1 | 0 | 0 | 0 | 0 | 286 | 25
+    instances step: 2
+    fn <program><generic> bytes=63
+    fn refined_sum<int, int> bytes=125
+    fn step<int> bytes=98
+bench/test-selection.bot | 12 | 12 | 12 | 2 | 6 | 0 | 0 | 2 | 6421 | 43
+    fn <program><generic> bytes=3337
+    fn list::any?<List[str], block(e55)> bytes=549
+    fn list::none?<List[str], block(e55)> bytes=549
+    fn list::find<List[Test], block(e94)> bytes=549
+    fn make_changed?<List[str]> bytes=112
+    fn changed?<generic> bytes=63
+    fn test_name<Test> bytes=33
+    fn test_deps<Test> bytes=34
+    fn affected?<Test, block(e55)> bytes=126
+    fn select_affected<List[Test], block(e55)> bytes=669
+    fn first_affected<List[Test], block(e55)> bytes=318
+    fn is_affected?<generic> bytes=82
+bench/uri-steady.bot | 19 | 19 | 17 | 1 | 0 | 0 | 0 | 0 | 5462 | 188
+    fn <program><generic> bytes=1409
+    fn char::codepoint<UnicodeChar> bytes=39
+    fn byte::from_int<int> bytes=289
+    fn byte::set<List[UnicodeChar]> bytes=609
+    fn ascii::is_digit<int> bytes=74
+    fn ascii::is_upper<int> bytes=74
+    fn ascii::is_lower<int> bytes=74
+    fn ascii::is_alphabetic<int> bytes=125
+    fn ascii::is_alphanumeric<int> bytes=125
+    fn web::is_unreserved<int> bytes=137
+    fn web::uri_escape_text<str> bytes=94
+    fn high_nibble<int> bytes=103
+    fn hex_pair<int> bytes=474
+    fn esc_bytes<List[int], int, str> bytes=491
+    fn esc_char<str> bytes=426
+    fn esc_from<str, int, str> bytes=451
+    fn repeat_uri<generic> bytes=468
+examples/stdlib/ai_text_clean.bot | 6 | 6 | 5 | 0 | 0 | 0 | 0 | 0 | 3081 | 109
+    fn <program><generic> bytes=505
+    fn cleaner_emoji<str> bytes=994
+    fn clean_char<str> bytes=723
+    fn clean_from<str, int, str> bytes=752
+    fn clean_ai_text<str> bytes=107
+examples/stdlib/csv.bot | 17 | 10 | 11 | 0 | 0 | 0 | 0 | 0 | 5723 | 75
+    instances scan_record: 2
+    instances scan_records: 2
+    fn <program><generic> bytes=68
+    fn peek<str, int> bytes=365
+    fn peek<str, int> bytes=430
+    fn scan_unquoted<str, int, int> bytes=585
+    fn scan_quoted<str, int, str> bytes=1063
+    fn scan_field<str, int> bytes=352
+    fn scan_record<str, int, List[never]> bytes=795
+    fn scan_record<str, int, List[str]> bytes=976
+    fn scan_records<str, int, List[never]> bytes=398
+    fn scan_records<str, int, List[List[str]]> bytes=524
+    fn csv_parse<str> bytes=167
+examples/stdlib/csv_chunked.bot | 20 | 20 | 20 | 2 | 0 | 0 | 0 | 0 | 10168 | 186
+    instances chunked_append: 4
+    instances chunked_copy_chunks: 2
+    instances chunked_finish: 2
+    instances scan_record: 2
+    instances scan_records: 2
+    fn <program><generic> bytes=68
+    fn chunked_new<generic> bytes=195
+    fn chunked_append<list[List[never], mutarray, int], str> bytes=534
+    fn chunked_append<list[List[mutarray], mutarray, int], str> bytes=534
+    fn chunked_append<list[List[never], mutarray, int], list> bytes=534
+    fn chunked_append<list[List[mutarray], mutarray, int], list> bytes=534
+    fn chunked_copy_chunks<List[never], int, mutarray, int> bytes=498
+    fn chunked_copy_chunks<List[mutarray], int, mutarray, int> bytes=418
+    fn chunked_finish<list[List[never], mutarray, int]> bytes=540
+    fn chunked_finish<list[List[mutarray], mutarray, int]> bytes=540
+    fn peek<str, int> bytes=365
+    fn peek<str, int> bytes=430
+    fn scan_unquoted<str, int, int> bytes=585
+    fn scan_quoted<str, int, str> bytes=1063
+    fn scan_field<str, int> bytes=352
+    fn scan_record<str, int, list[List[never], mutarray, int]> bytes=799
+    fn scan_record<str, int, list[List[mutarray], mutarray, int]> bytes=833
+    fn scan_records<str, int, list[List[never], mutarray, int]> bytes=537
+    fn scan_records<str, int, list[List[mutarray], mutarray, int]> bytes=612
+    fn csv_parse<str> bytes=197
+examples/stdlib/csv_geometric.bot | 29 | 19 | 20 | 0 | 0 | 0 | 0 | 0 | 7578 | 136
+    instances mutarray::create: 2
+    instances geo_new: 2
+    instances geo_grow: 2
+    instances geo_append: 2
+    fn <program><generic> bytes=68
+    fn mutarray::create<int, str> bytes=461
+    fn mutarray::create<int, List[str]> bytes=461
+    fn geo_new<str> bytes=81
+    fn geo_new<List[str]> bytes=81
+    fn geo_new_capacity<int, int> bytes=357
+    fn geo_grow<mutarray, int, str> bytes=412
+    fn geo_grow<mutarray, int, List[str]> bytes=412
+    fn geo_append<mutarray, int, str> bytes=279
+    fn geo_append<mutarray, int, List[str]> bytes=279
+    fn geo_finish<mutarray, int> bytes=81
+    fn peek<str, int> bytes=365
+    fn peek<str, int> bytes=430
+    fn scan_unquoted<str, int, int> bytes=585
+    fn scan_quoted<str, int, str> bytes=1063
+    fn scan_field<str, int> bytes=352
+    fn scan_record_rest<str, int, mutarray, int> bytes=783
+    fn scan_record<str, int> bytes=215
+    fn scan_records<str, int, mutarray, int> bytes=488
+    fn csv_parse<str> bytes=325
+examples/stdlib/csv_records.bot | 86 | 59 | 56 | 6 | 0 | 0 | 0 | 0 | 23245 | 636
+    instances mutarray::create: 3
+    instances geo_new: 3
+    instances geo_grow: 3
+    instances geo_append: 3
+    fn <program><generic> bytes=45
+    fn mutarray::create<int, str> bytes=461
+    fn mutarray::create<int, List[str]> bytes=461
+    fn mutarray::create<int, mutarray> bytes=461
+    fn geo_new<str> bytes=81
+    fn geo_new<List[str]> bytes=81
+    fn geo_new<mutarray> bytes=81
+    fn geo_new_capacity<int, int> bytes=357
+    fn geo_grow<mutarray, int, str> bytes=412
+    fn geo_grow<mutarray, int, List[str]> bytes=412
+    fn geo_grow<mutarray, int, mutarray> bytes=412
+    fn geo_append<mutarray, int, str> bytes=278
+    fn geo_append<mutarray, int, List[str]> bytes=278
+    fn geo_append<mutarray, int, mutarray> bytes=278
+    fn geo_finish<mutarray, int> bytes=81
+    fn peek<str, int> bytes=365
+    fn peek<str, int> bytes=430
+    fn scan_unquoted<str, int, int> bytes=585
+    fn scan_quoted<str, int, str> bytes=1063
+    fn scan_field<str, int> bytes=352
+    fn scan_record_rest<str, int, mutarray, int> bytes=783
+    fn scan_record<str, int> bytes=215
+    fn scan_records<str, int, mutarray, int> bytes=488
+    fn csv_parse<str> bytes=325
+    fn ht_fill_empty<mutarray, int, int> bytes=388
+    fn ht_alloc<int> bytes=524
+    fn ht_new<generic> bytes=70
+    fn ht_capacity_for<int, int> bytes=493
+    fn ht_new_sized<int> bytes=114
+    fn ht_controls<mutarray> bytes=61
+    fn ht_keys<mutarray> bytes=61
+    fn ht_values<mutarray> bytes=61
+    fn ht_size<mutarray> bytes=61
+    fn ht_tombstones<mutarray> bytes=61
+    fn ht_capacity<mutarray> bytes=168
+    fn ht_probe_start<mutarray, str> bytes=179
+    fn ht_probe_next<mutarray, int> bytes=245
+    fn ht_find_get<mutarray, str, int> bytes=804
+    fn ht_find_insert<mutarray, str, int, int> bytes=1248
+    fn ht_get<mutarray, str> bytes=429
+    fn ht_rehash_probe<mutarray, int, int> bytes=380
+    fn ht_rehash_insert<struct{controls: mutarray, keys: mutarray, values: mutarray}, int, any, any> bytes=439
+    fn ht_rehash_scan<struct{controls: any, keys: any, values: any}, int, int, struct{controls: mutarray, keys: mutarray, values: mutarray}, int> bytes=977
+    fn ht_rehash<mutarray, int> bytes=766
+    fn ht_should_grow<mutarray> bytes=817
+    fn ht_grow_or_clean<mutarray> bytes=665
+    fn ht_place<mutarray, int, str, str> bytes=1168
+    fn ht_set<mutarray, str, str> bytes=836
+    fn row_new<bool, int> bytes=107
+    fn row_fill<mutarray, List[str], List[str], int, int> bytes=427
+    fn row_table<List[str], int, List[str], bool> bytes=270
+    fn build_rows<List[List[str]], int, List[str], int, mutarray, int, bool> bytes=629
+    fn csv_records_generic<str, bool> bytes=634
+    fn csv_records<str> bytes=78
+    fn csv_records_presized<str> bytes=78
+    fn sample<generic> bytes=1222
+examples/stdlib/hashtable.bot | 37 | 30 | 26 | 6 | 0 | 0 | 0 | 0 | 12732 | 474
+    fn <program><generic> bytes=45
+    fn ht_fill_empty<mutarray, int, int> bytes=388
+    fn ht_alloc<int> bytes=524
+    fn ht_new<generic> bytes=70
+    fn ht_controls<mutarray> bytes=61
+    fn ht_keys<mutarray> bytes=61
+    fn ht_values<mutarray> bytes=61
+    fn ht_size<mutarray> bytes=61
+    fn ht_tombstones<mutarray> bytes=61
+    fn ht_capacity<mutarray> bytes=167
+    fn ht_probe_start<mutarray, str> bytes=179
+    fn ht_probe_next<mutarray, int> bytes=245
+    fn ht_find_get<mutarray, str, int> bytes=804
+    fn ht_find_insert<mutarray, str, int, int> bytes=1248
+    fn ht_get<mutarray, str> bytes=429
+    fn ht_contains<mutarray, str> bytes=253
+    fn ht_rehash_probe<mutarray, int, int> bytes=380
+    fn ht_rehash_insert<struct{controls: mutarray, keys: mutarray, values: mutarray}, int, any, any> bytes=439
+    fn ht_rehash_scan<struct{controls: any, keys: any, values: any}, int, int, struct{controls: mutarray, keys: mutarray, values: mutarray}, int> bytes=977
+    fn ht_rehash<mutarray, int> bytes=766
+    fn ht_should_grow<mutarray> bytes=817
+    fn ht_grow_or_clean<mutarray> bytes=665
+    fn ht_place<mutarray, int, str, str> bytes=1168
+    fn ht_set<mutarray, str, str> bytes=836
+    fn ht_delete<mutarray, str> bytes=1189
+    fn sample<generic> bytes=838
+examples/stdlib/matmul.bot | 19 | 7 | 7 | 0 | 0 | 0 | 0 | 0 | 4734 | 156
+    instances product_row: 2
+    instances product_rows: 2
+    fn <program><generic> bytes=750
+    fn dot<List[int], List[List[int]], int, int, int, int> bytes=703
+    fn product_row<List[int], List[List[int]], int, int, List[never]> bytes=556
+    fn product_row<List[int], List[List[int]], int, int, List[int]> bytes=812
+    fn product_rows<List[List[int]], List[List[int]], int, int, List[never]> bytes=613
+    fn product_rows<List[List[int]], List[List[int]], int, int, List[List[int]]> bytes=892
+    fn matmul<List[List[int]], List[List[int]]> bytes=408
+examples/stdlib/string_replace.bot | 6 | 4 | 4 | 0 | 0 | 0 | 0 | 0 | 2618 | 47
+    fn <program><generic> bytes=561
+    fn matches_at<str, str, int> bytes=476
+    fn replace_from<str, str, str, int, int, str> bytes=1308
+    fn replace<str, str, str> bytes=273
+examples/stdlib/string_reverse.bot | 3 | 3 | 3 | 0 | 0 | 0 | 0 | 0 | 990 | 10
+    fn <program><generic> bytes=418
+    fn reverse_from<str, int, str> bytes=482
+    fn reverse_chars<str> bytes=90

@@ -1,0 +1,20 @@
+# Probe (audit only): callable read from a List at a CONSTANT index: existing exact-value analysis makes it exact (#56/#58 boundary).
+# Not a benchmark.
+#
+# expect: [2, 3]
+
+fn a_alpha(c):
+    is_tcl_alpha(c)
+
+fn b_alnum(c):
+    is_tcl_alnum(c)
+
+fn count_while(p, s):
+    loop i from 0 to length(s):
+        if p(substring(s, i, i + 1)):
+            continue
+        return i
+    length(s)
+
+preds = [a_alpha, b_alnum]
+[count_while(list_get(preds, 0), "ab1"), count_while(list_get(preds, 1), "12a_")]

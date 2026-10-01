@@ -1,0 +1,6 @@
+program | prepare | specialize | range | lower | cranelift | total (ms, median of 7)
+bench/refined-checks.bot | 178 | 39 | 41 | 50 | 20 | 332
+bench/test-selection.bot | 0 | 10 | 8 | 20 | 11 | 48
+bench/lex-strategy.bot | 0 | 12 | 18 | 20 | 8 | 60
+examples/stdlib/csv_records.bot | 2 | 134 | 171 | 313 | 31 | 648
+examples/stdlib/hashtable.bot | 1 | 67 | 81 | 99 | 21 | 278

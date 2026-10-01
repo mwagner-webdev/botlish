@@ -1,0 +1,9 @@
+93c93
+< func 1 "list::find" params=2 env=0 regs=16 pnames="xs predicate" captures=0 instance="List[str], block" rawregs="4 13" @e38
+---
+> func 1 "list::find" params=2 env=0 regs=16 pnames="xs predicate" captures=0 instance="List[str], block(e114)" rawregs="4 13" @e38
+104,105c104
+<     %9 = callvalue %1 %8 @e42
+<     guardbool %9 @e41
+---
+>     %9 = callenv 6 %1 %8 @e42

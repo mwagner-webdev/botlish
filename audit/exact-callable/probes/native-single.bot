@@ -1,0 +1,13 @@
+# Probe (audit only): one exact native through a HOF (the native one-site probe, #52).
+# Not a benchmark.
+#
+# expect: 3
+
+fn count_while(p, s):
+    loop i from 0 to length(s):
+        if p(substring(s, i, i + 1)):
+            continue
+        return i
+    length(s)
+
+count_while(is_tcl_alpha, "abc1")

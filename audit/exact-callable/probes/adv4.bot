@@ -1,0 +1,19 @@
+# Probe (audit only): many closures of one code target, each capturing a different value.
+# Not a benchmark.
+#
+# expect: 20
+
+fn first_match(p, xs):
+    loop x in xs:
+        if p(x):
+            return x
+    0
+
+fn go(i, k, total):
+    if i > k:
+        return total
+    fn big(x):
+        x > i
+    go(i + 1, k, total + first_match(big, [1, 2, 3, 4, 5, 6]))
+
+go(1, 5, 0)

@@ -1,0 +1,16 @@
+# Probe (audit only): one HOF, an exact Botlish block and an exact native (symmetry, #54).
+# Not a benchmark.
+#
+# expect: [4, 3]
+
+fn bot_alpha(c):
+    is_tcl_alpha(c) or c == "_"
+
+fn count_while(p, s):
+    loop i from 0 to length(s):
+        if p(substring(s, i, i + 1)):
+            continue
+        return i
+    length(s)
+
+[count_while(bot_alpha, "ab_c1"), count_while(is_tcl_alpha, "abc1")]

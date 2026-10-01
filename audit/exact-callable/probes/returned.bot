@@ -1,0 +1,18 @@
+# Probe (audit only): function-returned callable keeps identity under the existing exact-value analysis (#59).
+# Not a benchmark.
+#
+# expect: 10
+
+fn is_small(x):
+    x < 10
+
+fn make():
+    is_small
+
+fn apply_loop(f, i, n):
+    loop j from i to n:
+        if f(j) == false:
+            return j
+    n
+
+apply_loop(make(), 0, 100)

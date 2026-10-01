@@ -1,0 +1,203 @@
+runs collected: 20; all figures per run
+total Ir/run: 33,274
+exclusive Ir by code kind: runtime 15,707 (47.2%)  libc 8,282 (24.9%)  botlish 7,817 (23.5%)  rust-other 1,468 (4.4%)
+
+== Botlish functions: invocations (exact), SELF Ir (direct / generic entry), INCLUSIVE Ir (direct+entry+all callees)
+  function                               invoc entry-invoc  self direct self entry    inclusive  incl %  self %
+  0 <program>                                1           0          596          0       33,268  99.98%   1.79%
+  9 select_affected                          2           0        1,702          0       16,688  50.15%   5.12%
+  8 affected?                               31           0          713          0       15,289  45.95%   2.14%
+  1 list::any?                              31           0        3,554          0       14,359  43.15%  10.68%
+  5 changed?                                55           0          605          0       11,114  33.40%   1.82%
+  10 first_affected                          1           0           34          0        2,572   7.73%   0.10%
+  3 list::find                               1           0          161          0        2,280   6.85%   0.48%
+  11 is_affected?                            3           0           48          0        2,108   6.34%   0.14%
+  4 make_changed?                            2           0           46          0        1,829   5.50%   0.14%
+  2 list::none?                              1           0          134          0          629   1.89%   0.40%
+  7 test_deps                               31           0          217          0          217   0.65%   0.65%
+  6 test_name                                1           0            7          0            7   0.02%   0.02%
+
+== calls out of Botlish code (in-region counts): caller -> callee, count/run, inclusive Ir/run, Ir/call, % total
+  0 <program>                    -> 9 select_affected                                                    2        16,688   8343.9   50.15%
+  8 affected?                    -> 1 list::any?                                                        31        14,359    463.2   43.15%
+  9 select_affected              -> 8 affected?                                                         28        13,229    472.5   39.76%
+  5 changed?                     -> rt_set_contains                                                     55        10,509    191.1   31.58%
+  1 list::any?                   -> 5 changed?                                                          52        10,464    201.2   31.45%
+  0 <program>                    -> rt_list_new                                                         19         6,521    343.2   19.60%
+  0 <program>                    -> rt_struct_new                                                       14         4,246    303.3   12.76%
+  0 <program>                    -> 10 first_affected                                                    1         2,572   2571.7    7.73%
+  10 first_affected              -> 3 list::find                                                         1         2,280   2280.0    6.85%
+  3 list::find                   -> 11 is_affected?                                                      3         2,108    702.7    6.34%
+  11 is_affected?                -> 8 affected?                                                          3         2,060    686.7    6.19%
+  0 <program>                    -> 4 make_changed?                                                      2         1,829    914.5    5.50%
+  9 select_affected              -> rt_list_append                                                       4         1,419    354.7    4.26%
+  4 make_changed?                -> rt_set_from_list                                                     2         1,063    531.5    3.19%
+  4 make_changed?                -> rt_closure_new                                                       2           720    360.0    2.16%
+  0 <program>                    -> 2 list::none?                                                        1           629    629.0    1.89%
+  2 list::none?                  -> 5 changed?                                                           2           484    242.0    1.45%
+  1 list::any?                   -> rt_str_len                                                          31           341     11.0    1.02%
+  9 select_affected              -> rt_list_new                                                          2           316    158.0    0.95%
+  10 first_affected              -> rt_closure_new                                                       1           251    250.7    0.75%
+  8 affected?                    -> 7 test_deps                                                         31           217      7.0    0.65%
+  0 <program>                    -> 5 changed?                                                           1           166    166.0    0.50%
+  0 <program>                    -> rt_str_len                                                           2            22     11.0    0.07%
+  9 select_affected              -> rt_str_len                                                           2            22     11.0    0.07%
+  2 list::none?                  -> rt_str_len                                                           1            11     11.0    0.03%
+  3 list::find                   -> rt_str_len                                                           1            11     11.0    0.03%
+  10 first_affected              -> 6 test_name                                                          1             7      7.0    0.02%
+
+== runtime/libc functions: exact in-region invocations (entry-instruction count, if resolvable), SELF, INCLUSIVE
+  botlish_audit_run                                                              1  self           6 ( 0.02%)  incl      33,274 (100.00%)  33274.1 Ir/call
+  start_thread                                                                   ?  self           0 ( 0.00%)  incl      33,274 (100.00%)
+  clone                                                                          ?  self           0 ( 0.00%)  incl      33,274 (100.00%)
+  <std::thread::lifecycle::spawn_unchecked<main::{closure#2}, i32>::{clo         ?  self           0 ( 0.00%)  incl      33,274 (100.00%)
+  cli                                                                            ?  self           0 ( 0.00%)  incl      33,274 (100.00%)
+  <std::sys::thread::unix::Thread>::new::thread_start                            ?  self           0 ( 0.00%)  incl      33,274 (100.00%)
+  std::sys::backtrace::__rust_begin_short_backtrace::<main::{closure#2},         ?  self           0 ( 0.00%)  incl      33,274 (100.00%)
+  rt_set_contains                                                               55  self       2,250 ( 6.76%)  incl      10,509 (31.58%)    191.1 Ir/call
+  __rustc::__rust_alloc                                                         86  self         344 ( 1.03%)  incl       8,668 (26.05%)    100.8 Ir/call
+  equal                                                                         86  self       8,096 (24.33%)  incl       8,380 (25.18%)     97.4 Ir/call
+  __rustc::__rdl_alloc                                                          86  self         774 ( 2.33%)  incl       8,324 (25.02%)     96.8 Ir/call
+  malloc                                                                         ?  self       4,092 (12.30%)  incl       7,550 (22.69%)
+  rt_list_new                                                                   21  self       1,127 ( 3.39%)  incl       6,837 (20.55%)    325.6 Ir/call
+  rt_struct_new                                                                 14  self         770 ( 2.31%)  incl       4,246 (12.76%)    303.3 Ir/call
+  <runtime::vm::Vm>::new_list                                                   25  self       1,375 ( 4.13%)  incl       4,159 (12.50%)    166.4 Ir/call
+  _int_malloc                                                                    ?  self       3,456 (10.39%)  incl       3,458 (10.39%)
+  <runtime::vm::Vm>::new_struct                                                 14  self         784 ( 2.36%)  incl       2,053 ( 6.17%)    146.6 Ir/call
+  rt_list_append                                                                 4  self         278 ( 0.84%)  incl       1,419 ( 4.26%)    354.7 Ir/call
+  rt_set_from_list                                                               2  self         186 ( 0.56%)  incl       1,063 ( 3.19%)    531.5 Ir/call
+  rt_closure_new                                                                 3  self         174 ( 0.52%)  incl         971 ( 2.92%)    323.6 Ir/call
+  <runtime::vm::Vm>::alloc::<runtime::value::ClosureObj>                         3  self         150 ( 0.45%)  incl         572 ( 1.72%)    190.7 Ir/call
+  __memcpy_avx_unaligned_erms                                                    ?  self         448 ( 1.35%)  incl         448 ( 1.35%)
+  rt_str_len                                                                    37  self         407 ( 1.22%)  incl         407 ( 1.22%)     11.0 Ir/call
+  __rustc::__rust_no_alloc_shim_is_unstable_v2                                  86  self         344 ( 1.03%)  incl         344 ( 1.03%)      4.0 Ir/call
+  __memcmp_avx2_movbe                                                            ?  self         284 ( 0.85%)  incl         284 ( 0.85%)
+  <runtime::vm::Vm>::new_set                                                     2  self         110 ( 0.33%)  incl         234 ( 0.70%)    117.0 Ir/call
+
+== arcs out of hot runtime functions: in-region call count/run, inclusive Ir/run of the callee subtree
+  rt_set_contains: self 2,250, inclusive 10,509
+      -> equal                                                                                             85 calls       8,259
+  equal: self 8,096, inclusive 8,380
+      -> __memcmp_avx2_movbe                                                                               14 calls         284
+  rt_closure_new: self 174, inclusive 971
+      -> <runtime::vm::Vm>::alloc::<runtime::value::ClosureObj>                                             3 calls         572
+      -> __rustc::__rust_alloc                                                                              3 calls         174
+      -> __memcpy_avx_unaligned_erms                                                                        3 calls          39
+      -> __rustc::__rust_no_alloc_shim_is_unstable_v2                                                       3 calls          12
+  rt_str_len: self 407, inclusive 407
+  <runtime::vm::Vm>::alloc::<runtime::value::ClosureObj>: self 150, inclusive 572
+      -> __rustc::__rust_alloc                                                                              3 calls         410
+      -> __rustc::__rust_no_alloc_shim_is_unstable_v2                                                       3 calls          12
+
+== SELF cost of hot runtime functions by inlined source (addr2line -i: innermost function @ line; outermost line)
+  equal: self 8,096 Ir/run
+    by runtime source line (innermost botlish-native runtime frame):
+      ops.rs:347                                    1,204   14.9%
+      value.rs:390                                  1,204   14.9%
+      value.rs:382                                  1,032   12.7%
+      value.rs:261                                    688    8.5%
+      ops.rs:403                                      688    8.5%
+      value.rs:275                                    516    6.4%
+      ops.rs:351                                      430    5.3%
+      ops.rs:361                                      370    4.6%
+      value.rs:379                                    344    4.2%
+      value.rs:?                                      344    4.2%
+      value.rs:387                                    344    4.2%
+      ops.rs:358                                      344    4.2%
+    by innermost inlined function:
+      equal @ ops.rs:347                                                                    1,204   14.9%
+      runtime::value::kind_of @ value.rs:390                                                1,204   14.9%
+      runtime::value::kind_of @ value.rs:382                                                1,032   12.7%
+      runtime::value::is_pointer @ value.rs:261                                               688    8.5%
+      equal @ ops.rs:403                                                                      688    8.5%
+      runtime::value::is_char @ value.rs:275                                                  516    6.4%
+      equal @ ops.rs:351                                                                      430    5.3%
+      runtime::value::kind_of @ value.rs:379                                                  344    4.2%
+  rt_set_contains: self 2,250 Ir/run
+    by runtime source line (innermost botlish-native runtime frame):
+      ops.rs:1006                                     550   24.4%
+      ops.rs:1008                                     522   23.2%
+      ops.rs:1007                                     512   22.8%
+      ops.rs:1015                                     440   19.6%
+      value.rs:190                                    110    4.9%
+      ops.rs:?                                        110    4.9%
+      macros.rs:?                                       6    0.3%
+    by innermost inlined function:
+      rt_set_contains @ ops.rs:1006                                                           550   24.4%
+      rt_set_contains @ ops.rs:1008                                                           522   23.2%
+      rt_set_contains @ ops.rs:1015                                                           440   19.6%
+      rt_set_contains @ ops.rs:1007                                                           195    8.7%
+      <core::slice::iter::Iter<u64> as core::iter::traits::iterato @ macros.rs:180            183    8.1%
+      <core::ptr::non_null::NonNull<u64> as core::cmp::PartialEq>: @ non_null.rs:1714         134    6.0%
+      <runtime::value::SetObj>::items @ value.rs:190                                          110    4.9%
+      rt_set_contains @ ops.rs:?                                                              110    4.9%
+  rt_str_len: self 407 Ir/run
+    by runtime source line (innermost botlish-native runtime frame):
+      ops.rs:918                                      111   27.3%
+      ops.rs:920                                      111   27.3%
+      ops.rs:919                                       74   18.2%
+      value.rs:256                                     37    9.1%
+      vm.rs:365                                        37    9.1%
+      value.rs:251                                     37    9.1%
+    by innermost inlined function:
+      rt_list_len @ ops.rs:918                                                                111   27.3%
+      rt_list_len @ ops.rs:920                                                                111   27.3%
+      rt_list_len @ ops.rs:919                                                                 74   18.2%
+      <core::ops::range::RangeInclusive<i64> as core::ops::range:: @ range.rs:873              37    9.1%
+      <runtime::vm::Vm>::new_int @ vm.rs:365                                                   37    9.1%
+      runtime::value::make_small @ value.rs:251                                                37    9.1%
+  rt_closure_new: self 174 Ir/run
+    by runtime source line (innermost botlish-native runtime frame):
+      ops.rs:1192                                      48   27.6%
+      ops.rs:1191                                      36   20.7%
+      ops.rs:1194                                      27   15.5%
+      ops.rs:1193                                      24   13.8%
+      ops.rs:1203                                      24   13.8%
+      ops.rs:1202                                       9    5.2%
+      value.rs:106                                      6    3.4%
+    by innermost inlined function:
+      rt_closure_new @ ops.rs:1191                                                             36   20.7%
+      rt_closure_new @ ops.rs:1194                                                             27   15.5%
+      rt_closure_new @ ops.rs:1203                                                             24   13.8%
+      alloc::alloc::alloc @ alloc.rs:101                                                       15    8.6%
+      core::ptr::copy_nonoverlapping::<u64> @ mod.rs:551                                       12    6.9%
+      <usize as core::slice::index::SliceIndex<[runtime::vm::Funct @ index.rs:272              12    6.9%
+      rt_closure_new @ ops.rs:1202                                                              9    5.2%
+      <alloc::boxed::Box<[u64]>>::try_clone_from_ref_in @ boxed.rs:877                          6    3.4%
+  <runtime::vm::Vm>::alloc::<runtime::value::ClosureObj>: self 150 Ir/run
+    by runtime source line (innermost botlish-native runtime frame):
+      vm.rs:246                                        39   26.0%
+      vm.rs:242                                        33   22.0%
+      vm.rs:256                                        27   18.0%
+      heap.rs:92                                       21   14.0%
+      heap.rs:72                                       15   10.0%
+      vm.rs:243                                         3    2.0%
+      vm.rs:248                                         3    2.0%
+      heap.rs:93                                        3    2.0%
+      metrics.rs:176                                    3    2.0%
+      vm.rs:249                                         3    2.0%
+    by innermost inlined function:
+      <runtime::vm::Vm>::alloc::<runtime::value::ClosureObj> @ vm.rs:242                       33   22.0%
+      <runtime::vm::Vm>::alloc::<runtime::value::ClosureObj> @ vm.rs:256                       27   18.0%
+      <alloc::boxed::Box<runtime::value::ClosureObj>>::new @ boxed.rs:289                      18   12.0%
+      <runtime::heap::Heap>::wants_collection @ heap.rs:72                                     15   10.0%
+      alloc::alloc::alloc @ alloc.rs:101                                                        9    6.0%
+      alloc::boxed::box_new_uninit @ boxed.rs:248                                               6    4.0%
+      <alloc::vec::Vec<*mut runtime::value::Header>>::push_mut @ mod.rs:1040                    6    4.0%
+      <alloc::vec::Vec<*mut runtime::value::Header>>::push_mut @ mod.rs:1046                    6    4.0%
+
+== executed JIT instruction classes (per run), per function (direct + generic entry)
+  class-totals: mov reg-reg=1,735; frame: epilogue=799; stack store=679; frame: prologue=639; tag test=556; heap/vm load=523; bool test=454; mov imm=408; completion check=408; overflow check=237; cmp/test (other)=200; call helper=198; jmp=186; call botlish=159; logic=114; bool materialize=114; stack load=107; jcc (other)=86; untag=85; arith=79; lea (stack addr)=36; frame: root-slot zero=12; lea=3
+  1 list::any? (3,554): mov reg-reg=962; tag test=354; frame: epilogue=279; bool test=260; frame: prologue=248; stack store=218; mov imm=218; heap/vm load=156; overflow check=141; cmp/test (other)=130; completion check=104; jmp=94; logic=78; bool materialize=78; untag=52; jcc (other)=52; call botlish=52; arith=47; call helper=31
+  9 select_affected (1,702): mov reg-reg=390; stack store=188; tag test=172; bool test=172; mov imm=98; stack load=90; heap/vm load=84; jmp=84; overflow check=84; completion check=68; cmp/test (other)=58; logic=30; bool materialize=30; untag=28; jcc (other)=28; call botlish=28; arith=28; frame: epilogue=18; frame: prologue=16; call helper=8
+  8 affected? (713): mov reg-reg=186; frame: epilogue=186; frame: prologue=155; stack store=62; call botlish=62; completion check=62
+  5 changed? (605): frame: epilogue=165; frame: prologue=110; heap/vm load=110; call helper=110; completion check=110
+  0 <program> (596): stack store=173; mov reg-reg=97; heap/vm load=88; mov imm=66; completion check=46; call helper=42; lea (stack addr)=33; stack load=13; frame: root-slot zero=12; frame: epilogue=9; frame: prologue=8; call botlish=7; cmp/test (other)=1; jcc (other)=1
+  7 test_deps (217): frame: epilogue=93; frame: prologue=62; heap/vm load=62
+  3 list::find (161): mov reg-reg=42; tag test=16; stack store=14; bool test=12; heap/vm load=9; frame: epilogue=9; frame: prologue=8; mov imm=7; cmp/test (other)=6; completion check=6; overflow check=6; stack load=4; jmp=4; logic=3; bool materialize=3; untag=3; jcc (other)=3; call botlish=3; arith=2; call helper=1
+  2 list::none? (134): mov reg-reg=37; tag test=14; bool test=10; frame: epilogue=9; frame: prologue=8; stack store=8; mov imm=8; heap/vm load=6; overflow check=6; cmp/test (other)=5; completion check=4; jmp=4; logic=3; bool materialize=3; untag=2; jcc (other)=2; call botlish=2; arith=2; call helper=1
+  11 is_affected? (48): frame: epilogue=12; frame: prologue=9; stack store=6; mov reg-reg=6; heap/vm load=6; completion check=6; call botlish=3
+  4 make_changed? (46): frame: epilogue=10; frame: prologue=8; mov imm=8; mov reg-reg=6; stack store=6; call helper=4; lea (stack addr)=2; lea=2
+  10 first_affected (34): mov reg-reg=9; frame: epilogue=6; frame: prologue=5; stack store=4; mov imm=3; call botlish=2; completion check=2; lea (stack addr)=1; lea=1; call helper=1
+  6 test_name (7): frame: epilogue=3; frame: prologue=2; heap/vm load=2
+

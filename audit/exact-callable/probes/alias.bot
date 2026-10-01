@@ -1,0 +1,17 @@
+# Probe (audit only): p = f; q = p; apply(q, ...) keeps identity (#57).
+# Not a benchmark.
+#
+# expect: 10
+
+fn is_small(x):
+    x < 10
+
+fn apply_loop(f, i, n):
+    loop j from i to n:
+        if f(j) == false:
+            return j
+    n
+
+p = is_small
+q = p
+apply_loop(q, 0, 100)

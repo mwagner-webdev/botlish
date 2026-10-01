@@ -1,0 +1,16 @@
+# Probe (audit only): value-capturing exact closure (String/Int captures) through a HOF (#13/#42).
+# Not a benchmark.
+#
+# expect: "abcdef"
+
+fn run(s, items, n):
+    fn longer(x):
+        length(x) > length(s) + n
+    fn first_match(p, xs):
+        loop x in xs:
+            if p(x):
+                return x
+        ""
+    first_match(longer, items)
+
+run("ab", ["a", "abc", "abcdef", "abcdefgh"], 2)

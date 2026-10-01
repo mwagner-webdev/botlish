@@ -1,0 +1,9 @@
+78c78
+< func 1 "list::all?" params=2 env=0 regs=21 pnames="xs predicate" captures=0 instance="List[str], native" rawregs="4 17" @e13
+---
+> func 1 "list::all?" params=2 env=0 regs=21 pnames="xs predicate" captures=0 instance="List[str], native(is_tcl_alnum)" rawregs="4 17" @e13
+89,90c89
+<     %9 = callvalue %1 %8 @e18
+<     guardbool %9 @e17
+---
+>     %9 = op strtclalnum %8 @e18

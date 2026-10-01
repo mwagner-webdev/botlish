@@ -1,0 +1,29 @@
+397,398c397,398
+< func 16 "repeat_uri" params=4 env=0 regs=16 pnames="i total acc corpus" captures=0 instance="generic" rawregs="12" @e501
+<     %4 = op ige %0 %1 @e503
+---
+> func 16 "repeat_uri" params=4 env=0 regs=17 pnames="i total acc corpus" captures=0 instance="generic" rawregs="0 1 13 14" @e501
+>     %4 = op rige %0 %1 @e503
+407,416c407,417
+<     %7 = op listlen %3 @e516
+<     %8 = op imod %0 %7 @e513
+<     %9 = op listget %3 %8 @e510
+<     %10 = call 10 %9 @e520
+<     %11 = int 1 @e528
+<     %12 = rawint 1
+<     %13 = op iadd %0 %11 @e525
+<     %14 = op strlen %10 @e533
+<     %15 = op iadd %2 %14 @e530
+<     tail %13 %1 %15 %3 @e523
+---
+>     %7 = op rbox %0
+>     %8 = op listlen %3 @e516
+>     %9 = op imod %7 %8 @e513
+>     %10 = op listget %3 %9 @e510
+>     %11 = call 10 %10 @e520
+>     %12 = int 1 @e528
+>     %13 = rawint 1
+>     %14 = op riadd %0 %13 @e525
+>     %15 = op strlen %11 @e533
+>     %16 = op iadd %2 %15 @e530
+>     tail %14 %1 %16 %3 @e523

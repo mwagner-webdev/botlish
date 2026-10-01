@@ -1,0 +1,21 @@
+# Probe (audit only): exact callables forwarded through two layers and composed (4 compose instances).
+# Not a benchmark.
+#
+# expect: [7, 20, 11, 12, 7, 20]
+
+fn twice(f, x):
+    f(f(x))
+
+fn apply_twice(g, y):
+    twice(g, y)
+
+fn inc(n):
+    n + 1
+
+fn dbl(n):
+    n * 2
+
+fn compose(f, g, x):
+    f(g(x))
+
+[apply_twice(inc, 5), apply_twice(dbl, 5), compose(inc, dbl, 5), compose(dbl, inc, 5), compose(inc, inc, 5), compose(dbl, dbl, 5)]

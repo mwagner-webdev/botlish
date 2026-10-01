@@ -1,0 +1,19 @@
+identical  fib
+changed    lex-strategy  (5 lines)
+identical  loop-count
+changed    refined-checks  (297 lines)
+changed    source-checks  (5 lines)
+identical  sum-refined
+changed    test-selection  (21 lines)
+changed    uri-steady  (25 lines)
+identical  ai_text_clean
+identical  csv
+identical  csv_chunked
+identical  csv_geometric
+identical  csv_records
+identical  hashtable
+identical  matmul
+identical  string_replace
+identical  string_reverse
+
+-exact-callable-opt 0 vs before (8 canonical programs): identical except uri-steady (25 lines: the range-openness unification, which has no flag)

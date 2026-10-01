@@ -1,0 +1,11 @@
+program | function<key> | binding | entry Range | read Range | range-open
+bench/refined-checks.bot | scan_while<any, block(e239)> | start | [0, 0] {0} | [0, 0] {0} | 0
+bench/refined-checks.bot | scan_while<any, native(is_tcl_alpha)> | start | [2, 4611686018427387903] | [2, 4611686018427387903] | 0
+bench/refined-checks.bot | scan_while<generic> | start | [-∞, +∞] | [-∞, +∞] | 1
+bench/refined-checks.bot | scan_while<any, block(e239)> | i | - | [0, 4611686018427387902] | 0
+bench/refined-checks.bot | scan_while<any, native(is_tcl_alpha)> | i | - | [2, 4611686018427387902] | 0
+bench/refined-checks.bot | scan_while<generic> | i | - | [-∞, 4611686018427387902] | 1
+bench/refined-checks.bot | char_at<generic> | i | [-∞, 4611686018427387902] | [-∞, 4611686018427387902] | 0
+bench/refined-checks.bot | tld?<generic> | i | [2, 4611686018427387903] | [2, 4611686018427387903] | 0
+bench/refined-checks.bot | domain?<generic> | j | - | [1, 4611686018427387902] | 0
+bench/refined-checks.bot | domain?<generic> | start | [1, 4611686018427387903] | [1, 4611686018427387903] | 0
