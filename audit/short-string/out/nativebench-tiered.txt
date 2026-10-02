@@ -1,0 +1,7 @@
+fib              identical NIR
+lex-strategy     identical NIR
+loop-count       identical NIR
+refined-checks    off 646123 ns  on 1093114 ns  (+69.2%)
+source-checks     off 7869 ns  on 11187 ns  (+42.2%)
+sum-refined      identical NIR
+test-selection   identical NIR

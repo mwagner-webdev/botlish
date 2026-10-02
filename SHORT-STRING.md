@@ -1,5 +1,10 @@
 # ShortString1: a one-i64 physical representation of Strings of at most one character
 
+> **Superseded in part.** The interned Latin-1 materialization table described
+> in this document no longer exists, and a second tier (packed ASCII of up to
+> eight characters) was added: see `SHORT-STRING-TIERS.md`. The measurements
+> below are of the first milestone as shipped (the `m1` configuration there).
+
 ## Outcome
 
 A Botlish `String` value whose existing frontend facts prove a semantic
@@ -865,7 +870,10 @@ Tcl-side phases are identical by construction.
 binary, also under `BOTLISH_NATIVE_GC_STRESS=1`; the Rust suite passes 90 + 26
 with the feature; differential fuzz over the same three seeds as the shipped
 run (1,471 + 491 GC-stress + 291 generic programs): 0 disagreements. The full
-`tests/all.tcl` result is below.
+`tests/all.tcl` against the recovered binary, run in a clean worktree of the
+commit that introduced the feature: **3,792 / 3,792 and 3,788 + 4 skipped, 0
+failed** (an earlier attempt was invalid: it ran while the working tree was
+being edited).
 
 **Reading.** The cached field costs a store on every String the program ever
 builds (even with the optimization off) and buys a conversion that is about

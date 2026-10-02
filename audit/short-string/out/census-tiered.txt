@@ -1,0 +1,206 @@
+== fib
+  planner fixpoint rounds: 1
+  positions examined 0  given a tier 0 (ascii 0, short 0) | locals examined 0 proven 0 virtualized 0 (ascii 0, short 0) | params 0/0 (ascii 0, short 0) result 0/0 (ascii 0, short 0) | instances with any scalar ABI 0
+  virtualized values: known Empty 0, known One (scalar known) 0, known One (scalar at run time) 0, runtime Empty-or-One 0, ASCII 2..8 characters 0
+  frontier counters, packed ASCII (lowering): strtoascii 0  asciitostr 0  literal-materialized 0  asciilit 0  asciilen 0  asciieq 0  asciishorteq 0  asciitoshort 0  joins 0
+  frontier counters, ShortString1 (lowering): strtoshort 0  shorttostr 0  literal-materialized 0  shortlit 0  shortlen 0  shorteq 0  joins 0  slices 0
+  static NIR: strtoascii 0 asciitostr 0 strtoshort 0 shorttostr 0  (off: 0/0/0/0)
+  virtual registers by materialization count: 0 zero, 0 one, 0 multiple
+== lex-strategy
+  planner fixpoint rounds: 3
+  positions examined 5  given a tier 0 (ascii 0, short 0) | locals examined 0 proven 0 virtualized 0 (ascii 0, short 0) | params 0/5 (ascii 0, short 0) result 0/0 (ascii 0, short 0) | instances with any scalar ABI 0
+  virtualized values: known Empty 0, known One (scalar known) 0, known One (scalar at run time) 0, runtime Empty-or-One 0, ASCII 2..8 characters 0
+  frontier counters, packed ASCII (lowering): strtoascii 0  asciitostr 0  literal-materialized 0  asciilit 0  asciilen 0  asciieq 0  asciishorteq 0  asciitoshort 0  joins 0
+  frontier counters, ShortString1 (lowering): strtoshort 0  shorttostr 0  literal-materialized 0  shortlit 0  shortlen 0  shorteq 0  joins 0  slices 0
+  static NIR: strtoascii 0 asciitostr 0 strtoshort 0 shorttostr 0  (off: 0/0/0/0)
+  virtual registers by materialization count: 0 zero, 0 one, 0 multiple
+== loop-count
+  planner fixpoint rounds: 1
+  positions examined 0  given a tier 0 (ascii 0, short 0) | locals examined 0 proven 0 virtualized 0 (ascii 0, short 0) | params 0/0 (ascii 0, short 0) result 0/0 (ascii 0, short 0) | instances with any scalar ABI 0
+  virtualized values: known Empty 0, known One (scalar known) 0, known One (scalar at run time) 0, runtime Empty-or-One 0, ASCII 2..8 characters 0
+  frontier counters, packed ASCII (lowering): strtoascii 0  asciitostr 0  literal-materialized 0  asciilit 0  asciilen 0  asciieq 0  asciishorteq 0  asciitoshort 0  joins 0
+  frontier counters, ShortString1 (lowering): strtoshort 0  shorttostr 0  literal-materialized 0  shortlit 0  shortlen 0  shorteq 0  joins 0  slices 0
+  static NIR: strtoascii 0 asciitostr 0 strtoshort 0 shorttostr 0  (off: 0/0/0/0)
+  virtual registers by materialization count: 0 zero, 0 one, 0 multiple
+== refined-checks
+  planner fixpoint rounds: 4
+  positions examined 17  given a tier 6 (ascii 2, short 4) | locals examined 1 proven 0 virtualized 0 (ascii 0, short 0) | params 5/10 (ascii 2, short 3) result 1/6 (ascii 0, short 1) | instances with any scalar ABI 6
+  virtualized values: known Empty 0, known One (scalar known) 0, known One (scalar at run time) 4, runtime Empty-or-One 0, ASCII 2..8 characters 2
+  frontier counters, packed ASCII (lowering): strtoascii 0  asciitostr 1  literal-materialized 0  asciilit 1  asciilen 1  asciieq 0  asciishorteq 0  asciitoshort 0  joins 0
+  frontier counters, ShortString1 (lowering): strtoshort 1  shorttostr 2  literal-materialized 0  shortlit 0  shortlen 0  shorteq 0  joins 0  slices 1
+  static NIR: strtoascii 0 asciitostr 1 strtoshort 1 shorttostr 2  (off: 0/0/0/0)
+    materialization: general String operation = 2
+    materialization: other = 1
+  virtual registers by materialization count: 4 zero, 3 one, 0 multiple
+== source-checks
+  planner fixpoint rounds: 2
+  positions examined 3  given a tier 1 (ascii 0, short 1) | locals examined 2 proven 1 virtualized 1 (ascii 0, short 1) | params 0/0 (ascii 0, short 0) result 0/1 (ascii 0, short 0) | instances with any scalar ABI 0
+  virtualized values: known Empty 0, known One (scalar known) 0, known One (scalar at run time) 1, runtime Empty-or-One 0, ASCII 2..8 characters 0
+  frontier counters, packed ASCII (lowering): strtoascii 0  asciitostr 0  literal-materialized 0  asciilit 0  asciilen 0  asciieq 0  asciishorteq 0  asciitoshort 0  joins 0
+  frontier counters, ShortString1 (lowering): strtoshort 0  shorttostr 1  literal-materialized 0  shortlit 0  shortlen 0  shorteq 0  joins 0  slices 1
+  static NIR: strtoascii 0 asciitostr 0 strtoshort 0 shorttostr 1  (off: 0/0/0/0)
+    materialization: generic/dynamic call = 1
+  virtual registers by materialization count: 0 zero, 1 one, 0 multiple
+== sum-refined
+  planner fixpoint rounds: 1
+  positions examined 0  given a tier 0 (ascii 0, short 0) | locals examined 0 proven 0 virtualized 0 (ascii 0, short 0) | params 0/0 (ascii 0, short 0) result 0/0 (ascii 0, short 0) | instances with any scalar ABI 0
+  virtualized values: known Empty 0, known One (scalar known) 0, known One (scalar at run time) 0, runtime Empty-or-One 0, ASCII 2..8 characters 0
+  frontier counters, packed ASCII (lowering): strtoascii 0  asciitostr 0  literal-materialized 0  asciilit 0  asciilen 0  asciieq 0  asciishorteq 0  asciitoshort 0  joins 0
+  frontier counters, ShortString1 (lowering): strtoshort 0  shorttostr 0  literal-materialized 0  shortlit 0  shortlen 0  shorteq 0  joins 0  slices 0
+  static NIR: strtoascii 0 asciitostr 0 strtoshort 0 shorttostr 0  (off: 0/0/0/0)
+  virtual registers by materialization count: 0 zero, 0 one, 0 multiple
+== test-selection
+  planner fixpoint rounds: 2
+  positions examined 2  given a tier 0 (ascii 0, short 0) | locals examined 0 proven 0 virtualized 0 (ascii 0, short 0) | params 0/0 (ascii 0, short 0) result 0/2 (ascii 0, short 0) | instances with any scalar ABI 0
+  virtualized values: known Empty 0, known One (scalar known) 0, known One (scalar at run time) 0, runtime Empty-or-One 0, ASCII 2..8 characters 0
+  frontier counters, packed ASCII (lowering): strtoascii 0  asciitostr 0  literal-materialized 0  asciilit 0  asciilen 0  asciieq 0  asciishorteq 0  asciitoshort 0  joins 0
+  frontier counters, ShortString1 (lowering): strtoshort 0  shorttostr 0  literal-materialized 0  shortlit 0  shortlen 0  shorteq 0  joins 0  slices 0
+  static NIR: strtoascii 0 asciitostr 0 strtoshort 0 shorttostr 0  (off: 0/0/0/0)
+  virtual registers by materialization count: 0 zero, 0 one, 0 multiple
+== uri-steady
+  planner fixpoint rounds: 4
+  positions examined 12  given a tier 1 (ascii 0, short 1) | locals examined 2 proven 0 virtualized 0 (ascii 0, short 0) | params 1/5 (ascii 0, short 1) result 0/5 (ascii 0, short 0) | instances with any scalar ABI 1
+  virtualized values: known Empty 0, known One (scalar known) 0, known One (scalar at run time) 1, runtime Empty-or-One 0, ASCII 2..8 characters 0
+  frontier counters, packed ASCII (lowering): strtoascii 0  asciitostr 0  literal-materialized 0  asciilit 0  asciilen 0  asciieq 0  asciishorteq 0  asciitoshort 0  joins 0
+  frontier counters, ShortString1 (lowering): strtoshort 0  shorttostr 1  literal-materialized 0  shortlit 0  shortlen 0  shorteq 0  joins 0  slices 1
+  static NIR: strtoascii 0 asciitostr 0 strtoshort 0 shorttostr 1  (off: 0/0/0/0)
+    materialization: general String operation = 1
+  virtual registers by materialization count: 1 zero, 1 one, 0 multiple
+== ai_text_clean
+  planner fixpoint rounds: 3
+  positions examined 10  given a tier 3 (ascii 0, short 3) | locals examined 0 proven 0 virtualized 0 (ascii 0, short 0) | params 2/6 (ascii 0, short 2) result 1/4 (ascii 0, short 1) | instances with any scalar ABI 3
+  virtualized values: known Empty 0, known One (scalar known) 0, known One (scalar at run time) 0, runtime Empty-or-One 3, ASCII 2..8 characters 0
+  frontier counters, packed ASCII (lowering): strtoascii 0  asciitostr 0  literal-materialized 0  asciilit 0  asciilen 0  asciieq 0  asciishorteq 0  asciitoshort 0  joins 0
+  frontier counters, ShortString1 (lowering): strtoshort 1  shorttostr 1  literal-materialized 0  shortlit 19  shortlen 0  shorteq 19  joins 0  slices 0
+  static NIR: strtoascii 0 asciitostr 0 strtoshort 1 shorttostr 1  (off: 0/0/0/0)
+    materialization: tagged result (return) = 1
+  virtual registers by materialization count: 21 zero, 1 one, 0 multiple
+== csv
+  planner fixpoint rounds: 5
+  positions examined 15  given a tier 5 (ascii 0, short 5) | locals examined 4 proven 4 virtualized 1 (ascii 0, short 1) | params 0/10 (ascii 0, short 0) result 1/1 (ascii 0, short 1) | instances with any scalar ABI 1
+  virtualized values: known Empty 0, known One (scalar known) 0, known One (scalar at run time) 0, runtime Empty-or-One 5, ASCII 2..8 characters 0
+  frontier counters, packed ASCII (lowering): strtoascii 0  asciitostr 0  literal-materialized 0  asciilit 1  asciilen 0  asciieq 0  asciishorteq 0  asciitoshort 0  joins 0
+  frontier counters, ShortString1 (lowering): strtoshort 0  shorttostr 1  literal-materialized 0  shortlit 2  shortlen 0  shorteq 1  joins 0  slices 1
+  static NIR: strtoascii 0 asciitostr 0 strtoshort 0 shorttostr 1  (off: 0/0/0/0)
+    materialization: general String operation = 1
+  virtual registers by materialization count: 4 zero, 1 one, 0 multiple
+== csv_chunked
+  planner fixpoint rounds: 5
+  positions examined 17  given a tier 5 (ascii 0, short 5) | locals examined 4 proven 4 virtualized 1 (ascii 0, short 1) | params 0/12 (ascii 0, short 0) result 1/1 (ascii 0, short 1) | instances with any scalar ABI 1
+  virtualized values: known Empty 0, known One (scalar known) 0, known One (scalar at run time) 0, runtime Empty-or-One 5, ASCII 2..8 characters 0
+  frontier counters, packed ASCII (lowering): strtoascii 0  asciitostr 0  literal-materialized 0  asciilit 1  asciilen 0  asciieq 0  asciishorteq 0  asciitoshort 0  joins 0
+  frontier counters, ShortString1 (lowering): strtoshort 0  shorttostr 1  literal-materialized 0  shortlit 2  shortlen 0  shorteq 1  joins 0  slices 1
+  static NIR: strtoascii 0 asciitostr 0 strtoshort 0 shorttostr 1  (off: 0/0/0/0)
+    materialization: general String operation = 1
+  virtual registers by materialization count: 4 zero, 1 one, 0 multiple
+== csv_geometric
+  planner fixpoint rounds: 4
+  positions examined 17  given a tier 4 (ascii 0, short 4) | locals examined 3 proven 3 virtualized 1 (ascii 0, short 1) | params 0/13 (ascii 0, short 0) result 1/1 (ascii 0, short 1) | instances with any scalar ABI 1
+  virtualized values: known Empty 0, known One (scalar known) 0, known One (scalar at run time) 0, runtime Empty-or-One 4, ASCII 2..8 characters 0
+  frontier counters, packed ASCII (lowering): strtoascii 0  asciitostr 0  literal-materialized 0  asciilit 1  asciilen 0  asciieq 0  asciishorteq 0  asciitoshort 0  joins 0
+  frontier counters, ShortString1 (lowering): strtoshort 0  shorttostr 1  literal-materialized 0  shortlit 2  shortlen 0  shorteq 1  joins 0  slices 1
+  static NIR: strtoascii 0 asciitostr 0 strtoshort 0 shorttostr 1  (off: 0/0/0/0)
+    materialization: general String operation = 1
+  virtual registers by materialization count: 4 zero, 1 one, 0 multiple
+== csv_records
+  planner fixpoint rounds: 7
+  positions examined 28  given a tier 6 (ascii 2, short 4) | locals examined 3 proven 3 virtualized 1 (ascii 0, short 1) | params 2/24 (ascii 2, short 0) result 1/1 (ascii 0, short 1) | instances with any scalar ABI 3
+  virtualized values: known Empty 0, known One (scalar known) 0, known One (scalar at run time) 0, runtime Empty-or-One 4, ASCII 2..8 characters 2
+  frontier counters, packed ASCII (lowering): strtoascii 0  asciitostr 2  literal-materialized 0  asciilit 8  asciilen 0  asciieq 0  asciishorteq 0  asciitoshort 0  joins 0
+  frontier counters, ShortString1 (lowering): strtoshort 0  shorttostr 1  literal-materialized 0  shortlit 2  shortlen 0  shorteq 1  joins 0  slices 1
+  static NIR: strtoascii 0 asciitostr 2 strtoshort 0 shorttostr 1  (off: 0/0/0/0)
+    materialization: general String operation = 2
+    materialization: tagged argument of an exact call = 1
+  virtual registers by materialization count: 11 zero, 3 one, 0 multiple
+== hashtable
+  planner fixpoint rounds: 3
+  positions examined 10  given a tier 10 (ascii 10, short 0) | locals examined 0 proven 0 virtualized 0 (ascii 0, short 0) | params 10/10 (ascii 10, short 0) result 0/0 (ascii 0, short 0) | instances with any scalar ABI 8
+  virtualized values: known Empty 0, known One (scalar known) 0, known One (scalar at run time) 0, runtime Empty-or-One 0, ASCII 2..8 characters 10
+  frontier counters, packed ASCII (lowering): strtoascii 0  asciitostr 6  literal-materialized 0  asciilit 12  asciilen 0  asciieq 0  asciishorteq 0  asciitoshort 0  joins 0
+  frontier counters, ShortString1 (lowering): strtoshort 0  shorttostr 0  literal-materialized 0  shortlit 0  shortlen 0  shorteq 0  joins 0  slices 0
+  static NIR: strtoascii 0 asciitostr 6 strtoshort 0 shorttostr 0  (off: 0/0/0/0)
+    materialization: general String operation = 3
+    materialization: collection/storage frontier = 3
+  virtual registers by materialization count: 16 zero, 6 one, 0 multiple
+== matmul
+  planner fixpoint rounds: 1
+  positions examined 0  given a tier 0 (ascii 0, short 0) | locals examined 0 proven 0 virtualized 0 (ascii 0, short 0) | params 0/0 (ascii 0, short 0) result 0/0 (ascii 0, short 0) | instances with any scalar ABI 0
+  virtualized values: known Empty 0, known One (scalar known) 0, known One (scalar at run time) 0, runtime Empty-or-One 0, ASCII 2..8 characters 0
+  frontier counters, packed ASCII (lowering): strtoascii 0  asciitostr 0  literal-materialized 0  asciilit 0  asciilen 0  asciieq 0  asciishorteq 0  asciitoshort 0  joins 0
+  frontier counters, ShortString1 (lowering): strtoshort 0  shorttostr 0  literal-materialized 0  shortlit 0  shortlen 0  shorteq 0  joins 0  slices 0
+  static NIR: strtoascii 0 asciitostr 0 strtoshort 0 shorttostr 0  (off: 0/0/0/0)
+  virtual registers by materialization count: 0 zero, 0 one, 0 multiple
+== string_replace
+  planner fixpoint rounds: 3
+  positions examined 12  given a tier 8 (ascii 8, short 0) | locals examined 1 proven 0 virtualized 0 (ascii 0, short 0) | params 8/9 (ascii 8, short 0) result 0/2 (ascii 0, short 0) | instances with any scalar ABI 3
+  virtualized values: known Empty 0, known One (scalar known) 0, known One (scalar at run time) 0, runtime Empty-or-One 2, ASCII 2..8 characters 6
+  frontier counters, packed ASCII (lowering): strtoascii 0  asciitostr 6  literal-materialized 0  asciilit 15  asciilen 7  asciieq 0  asciishorteq 0  asciitoshort 0  joins 0
+  frontier counters, ShortString1 (lowering): strtoshort 0  shorttostr 0  literal-materialized 0  shortlit 0  shortlen 0  shorteq 0  joins 0  slices 0
+  static NIR: strtoascii 0 asciitostr 6 strtoshort 0 shorttostr 0  (off: 0/0/0/0)
+    materialization: other = 4
+    materialization: general String operation = 1
+    materialization: tagged result (return) = 1
+  virtual registers by materialization count: 18 zero, 4 one, 1 multiple
+== string_reverse
+  planner fixpoint rounds: 3
+  positions examined 6  given a tier 1 (ascii 0, short 1) | locals examined 1 proven 1 virtualized 0 (ascii 0, short 0) | params 0/3 (ascii 0, short 0) result 0/2 (ascii 0, short 0) | instances with any scalar ABI 0
+  virtualized values: known Empty 0, known One (scalar known) 0, known One (scalar at run time) 1, runtime Empty-or-One 0, ASCII 2..8 characters 0
+  frontier counters, packed ASCII (lowering): strtoascii 0  asciitostr 0  literal-materialized 0  asciilit 0  asciilen 0  asciieq 0  asciishorteq 0  asciitoshort 0  joins 0
+  frontier counters, ShortString1 (lowering): strtoshort 0  shorttostr 0  literal-materialized 0  shortlit 0  shortlen 0  shorteq 0  joins 0  slices 0
+  static NIR: strtoascii 0 asciitostr 0 strtoshort 0 shorttostr 0  (off: 0/0/0/0)
+  virtual registers by materialization count: 0 zero, 0 one, 0 multiple
+== TOTAL
+  (max fixpoint rounds in one program: 7)
+  rounds = 52
+  positionsExamined = 154
+  positionsProven = 50
+  localsExamined = 21
+  localsProven = 16
+  paramPositions = 107
+  paramSelected = 28
+  resultPositions = 26
+  resultSelected = 6
+  anyAbi = 27
+  exactEmpty = 0
+  exactOne = 0
+  exactOneUnknown = 7
+  runtimeEmptyOrOne = 23
+  asciiMulti = 20
+  tierAscii = 22
+  tierShort = 28
+  paramAscii = 22
+  paramShort = 6
+  resultAscii = 0
+  resultShort = 6
+  shortLocals = 5
+  shortLits = 27
+  shortFromTagged = 2
+  shortToTagged = 9
+  shortConstMaterialized = 0
+  shortLen = 0
+  shortEq = 23
+  shortJoins = 0
+  shortSlices = 7
+  asciiLocals = 0
+  asciiLits = 39
+  asciiFromTagged = 0
+  asciiToTagged = 15
+  asciiConstMaterialized = 0
+  asciiLen = 8
+  asciiEq = 0
+  asciiShortEq = 0
+  asciiToShort = 0
+  asciiJoins = 0
+  offScalarConversions = 0
+  materialization classes:
+    general String operation = 12
+    other = 5
+    generic/dynamic call = 1
+    tagged result (return) = 2
+    tagged argument of an exact call = 1
+    collection/storage frontier = 3
+  virtual registers by materialization count: zero 83 one 22 many 1
+  rejection reasons of String positions kept tagged:
+    unknown-length = 54
+    length-gt-8 = 42
+    not-ascii-multi = 3
