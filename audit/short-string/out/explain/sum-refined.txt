@@ -1,0 +1,37 @@
+instance <program>
+  closed: yes
+  entry: runtime (tagged)
+
+instance refined_sum<int, int>
+  closed: yes
+  params:
+    n:
+      semantic type: int
+      ABI tagged (not-string)
+    acc:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+
+instance step<int>
+  closed: yes
+  params:
+    x:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+
+instance step<generic>
+  closed: no
+  params:
+    x:
+      semantic type: any
+      ABI tagged (not-string)
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+

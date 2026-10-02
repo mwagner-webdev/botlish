@@ -105,6 +105,7 @@ proc program {} {
     set ::counter 0
     set ::TEXT "\"a\u03bb\u732b\U0001f600z\""
     set lines {}
+    set extra {}
     # peek, once: the corpus idiom
     if {rand() < 0.5} {
         lappend lines "fn peek(text, index):\n    if index >= length(text):\n        return \"\"\n\n    substring(text, index, index + 1)\n"
@@ -113,6 +114,19 @@ proc program {} {
         set peekable 0
     }
     set callable {}        ;# name:kind (s = String parameter, i = Int parameter), String-returning
+    if {rand() < 0.6} {
+        # an error-capable helper whose success value is a short String, and a
+        # caller with a handler: Empty must stay a value, failure the status
+        set lines [linsert $lines 0 "error Bad\n"]
+        lappend lines "fn guarded(n, s) -> str errors Bad:\n    if n > 3:\n        fail Bad\n    else:\n        [atom {s} {n} {}]\n"
+        lappend lines "fn run(n, s):\n    r = guarded(n, s):\n        on Bad:\n            [strLit]\n    r\n"
+        lappend callable "run:is"
+    }
+    if {rand() < 0.4} {
+        # a closure capturing a short local (the environment is tagged)
+        lappend lines "fn cap(n, s):\n    v = [atom {s} {n} {}]\n    fn add(x):\n        concat(v, x)\n    add(\"!\")\n"
+        lappend extra "cap:is"
+    }
     set nfun [expr {2 + int(rand() * 4)}]
     for {set i 1} {$i <= $nfun} {incr i} {
         set kind [pick {s si is i ss ii si}]
@@ -156,7 +170,7 @@ proc program {} {
     }
     # consumers of String results
     set cons {}
-    foreach f $callable {
+    foreach f [concat $callable $extra] {
         lassign [split $f :] name kind
         set args {}
         foreach k [split $kind ""] { lappend args [expr {$k eq "s" ? [strLit] : [intLit]}] }

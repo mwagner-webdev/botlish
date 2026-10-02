@@ -1,0 +1,120 @@
+instance <program>
+  closed: yes
+  entry: runtime (tagged)
+
+instance matches_at<str, str, int>
+  closed: yes
+  params:
+    haystack:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        length
+        substring
+    needle:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        equality with an unrestricted String
+        length
+    index:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: bool
+    ABI tagged (not-string)
+
+instance replace_from<str, str, str, int, int, str>
+  closed: yes
+  params:
+    haystack:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 0 of matches_at<str, str, int>
+        argument 0 of replace_from<str, str, str, int, int, str>
+        length
+        substring
+    needle:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 1 of matches_at<str, str, int>
+        argument 1 of replace_from<str, str, str, int, int, str>
+        length
+    replacement:
+      semantic type: String
+      proven character length: [0,1]
+      ShortString1 eligible: yes
+      ABI ShortString1
+      uses:
+        argument 2 of replace_from<str, str, str, int, int, str> -> scalar
+        concat -> materialize
+    index:
+      semantic type: int
+      ABI tagged (not-string)
+    run_start:
+      semantic type: int
+      ABI tagged (not-string)
+    done:
+      semantic type: String
+      proven character length: unproven (unknown length)
+      ShortString1 eligible: no
+      ABI tagged (unknown-length)
+      uses:
+        argument 5 of replace_from<str, str, str, int, int, str>
+        concat
+  result:
+    semantic type: String
+    proven character length: unproven (unknown length)
+    ShortString1 eligible: no
+    ABI tagged (unknown-length)
+  values:
+    copied (e58):
+      semantic type: String
+      proven character length: unproven (unknown length)
+      ShortString1 eligible: no (unknown length)
+      physical representation: tagged String (unknown-length)
+      uses:
+        concat
+
+instance replace<str, str, str>
+  closed: yes
+  params:
+    haystack:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 0 of replace_from<str, str, str, int, int, str>
+        return
+    needle:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 1 of replace_from<str, str, str, int, int, str>
+        length
+    replacement:
+      semantic type: String
+      proven character length: [0,1]
+      ShortString1 eligible: yes
+      ABI ShortString1
+      uses:
+        argument 2 of replace_from<str, str, str, int, int, str> -> scalar
+  result:
+    semantic type: String
+    proven character length: unproven (unknown length)
+    ShortString1 eligible: no
+    ABI tagged (unknown-length)
+

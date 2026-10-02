@@ -119,7 +119,24 @@ pub struct StrObj {
     /// Number of characters (Unicode scalar values).
     pub chars: usize,
     pub ascii: bool,
+    /// The first character's Unicode scalar value, 0 for the empty String.
+    /// Set once at construction, in what was padding after `ascii` (the
+    /// struct does not grow): it lets generated code turn a String already
+    /// proven to have at most one character into its ShortString1 scalar
+    /// with two loads and no call (`StrToShort`, SHORT-STRING.md).
+    pub first: u32,
     pub text: Box<str>,
+}
+
+/// The scalar value of `text`'s first character (0 if empty); ASCII is
+/// the caller's already-computed `text.is_ascii()`.
+#[inline]
+pub fn first_scalar(text: &str, ascii: bool) -> u32 {
+    if ascii {
+        text.as_bytes().first().map_or(0, |b| *b as u32)
+    } else {
+        text.chars().next().map_or(0, |c| c as u32)
+    }
 }
 
 /// A List's elements: a raw pointer plus a count, exactly like ClosureObj's
@@ -232,6 +249,8 @@ pub struct NativeObj {
 
 pub const CLOSURE_CAPS_OFFSET: i32 = offset_of!(ClosureObj, caps) as i32;
 pub const LIST_LEN_OFFSET: i32 = offset_of!(ListObj, len) as i32;
+pub const STR_CHARS_OFFSET: i32 = offset_of!(StrObj, chars) as i32;
+pub const STR_FIRST_OFFSET: i32 = offset_of!(StrObj, first) as i32;
 pub const LIST_PTR_OFFSET: i32 = offset_of!(ListObj, ptr) as i32;
 pub const STRUCT_PTR_OFFSET: i32 = offset_of!(StructObj, ptr) as i32;
 

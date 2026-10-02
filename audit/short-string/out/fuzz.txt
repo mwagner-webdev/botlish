@@ -1,0 +1,1 @@
+programs 1471 of 1500 (rejected statically 29; outcomes/features: value 1424 uses-short-abi 1449 short-result 1317 short-param 1405 materializes 1335 extracts 399 slices 745 scalar-equality 582 error 47); disagreements 0

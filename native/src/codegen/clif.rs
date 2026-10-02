@@ -62,6 +62,7 @@ use super::{BackendError, Const, ConstPool, Site};
 use crate::nir::{self, Inst, OpCode, Reg};
 use crate::runtime::ops::helpers;
 use crate::runtime::value::*;
+use crate::runtime::vm::VM_SHORT_CACHE_OFFSET;
 use crate::runtime::vm::{
     VM_ALLOC_SITE_OFFSET, VM_CONSTS_OFFSET, VM_NATIVE_ROOTS_LEN_OFFSET, VM_NATIVE_ROOTS_PTR_OFFSET,
     VM_SS_LIMIT_OFFSET, VM_SS_TOP_OFFSET, VM_STATICS_OFFSET,
@@ -1561,10 +1562,40 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 let flag = self.b.ins().icmp_imm_s(IntCC::NotEqual, a[0], -1);
                 self.b.ins().uextend(I64, flag)
             }
-            StrToShort => self.call_helper("rt_str_to_short", &[self.vm, a[0]]),
+            // Tagged String -> ShortString1, inline: the operand is a String
+            // the compiler proved has at most one character, so its
+            // character count is 0 or 1 and its first scalar (set at
+            // construction, 0 when empty) is the whole payload.
+            StrToShort => {
+                let chars = self.b.ins().load(I64, MemFlagsData::trusted(), a[0], STR_CHARS_OFFSET);
+                let first = self.b.ins().uload32(MemFlagsData::trusted(), a[0], STR_FIRST_OFFSET);
+                let empty = self.b.ins().icmp_imm_s(IntCC::Equal, chars, 0);
+                let minus_one = self.b.ins().iconst(I64, -1);
+                self.b.ins().select(empty, minus_one, first)
+            }
             StrSliceShort => self.call_helper("rt_str_slice_short", &[self.vm, a[0], a[1], a[2]]),
+            // ShortString1 -> tagged String. Empty and U+0000..U+00FF are
+            // interned static Strings in `Vm::short_cache` (slot short + 1),
+            // probed inline; a cold slot (not built yet) and every other
+            // scalar take the helper, which builds/allocates.
             ShortToStr => {
-                return self.call_allocating("rt_short_to_str", &[self.vm, a[0]], "shorttostr", KIND_STR);
+                let idx = self.b.ins().iadd_imm_s(a[0], 1);
+                let in_range = self.b.ins().icmp_imm_s(IntCC::UnsignedLessThan, idx, 257);
+                let probe = self.b.create_block();
+                let slow = self.b.create_block();
+                let done = self.b.create_block();
+                let result = self.b.append_block_param(done, I64);
+                self.b.ins().brif(in_range, probe, &[], slow, &[]);
+                self.b.switch_to_block(probe);
+                let offset = self.b.ins().ishl_imm_s(idx, 3);
+                let slot = self.b.ins().iadd(self.vm, offset);
+                let cached = self.b.ins().load(I64, MemFlagsData::trusted(), slot, VM_SHORT_CACHE_OFFSET);
+                self.b.ins().brif(cached, done, &[BlockArg::Value(cached)], slow, &[]);
+                self.b.switch_to_block(slow);
+                let v = self.call_allocating("rt_short_to_str", &[self.vm, a[0]], "shorttostr", KIND_STR);
+                self.b.ins().jump(done, &[BlockArg::Value(v)]);
+                self.b.switch_to_block(done);
+                result
             }
             RIAdd => self.b.ins().iadd(a[0], a[1]),
             RISub => self.b.ins().isub(a[0], a[1]),

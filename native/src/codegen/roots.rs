@@ -871,6 +871,67 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
+    // SHORT-STRING.md: a ShortString1 is a non-root scalar. It may be live
+    // across any number of allocating safepoints without ever getting a slot
+    // or a stack-map entry; the String it materializes to is an ordinary
+    // root.
+
+    fn program_with(regs: u32, rawregs: &str, shortregs: &str, body: &str) -> nir::Function {
+        let text = format!(
+            "nir 1 call-effects=0\n\nfunc 0 \"<program>\" params=0 env=0 regs={regs} pnames=\"\" captures=0 rawregs=\"{rawregs}\" shortregs=\"{shortregs}\"\n{body}end\n"
+        );
+        parse_one(&text)
+    }
+
+    #[test]
+    fn short_live_across_allocation_is_not_a_root() {
+        // %0 is a ShortString1 live across two allocating listnew ops and
+        // used afterwards by a scalar op; only the Lists are roots.
+        let f = program_with(
+            7,
+            "4",
+            "0",
+            concat!(
+                "    %0 = shortlit 955\n",
+                "    %1 = op listnew\n",
+                "    %2 = op listnew %1\n",
+                "    %3 = op listnew\n",
+                "    %4 = op shortlen %0\n",
+                "    %5 = op rbox %4\n",
+                "    %6 = op listnew %2 %3 %5\n",
+                "    ret %6\n",
+            ),
+        );
+        let plan = plan(&f, true);
+        assert!(plan.safepoints >= 3);
+        assert!(plan.slot_of[0].is_none(), "the short scalar must never get a root slot");
+        assert!(plan.safepoint_slots.values().flatten().count() > 0, "the live Lists are rooted");
+        // %0 is a scalar: counted among the non-root registers.
+        assert_eq!(RootPlan::counts(&f), (7, 2));
+    }
+
+    #[test]
+    fn materialized_short_is_an_ordinary_root() {
+        // The String %1 a ShortString1 %0 materializes to is a tagged Value
+        // live across an allocation, so it IS rooted -- unlike %0.
+        let f = program_with(
+            4,
+            "",
+            "0",
+            concat!(
+                "    %0 = shortlit 955\n",
+                "    %1 = op shorttostr %0\n",
+                "    %2 = op listnew\n",
+                "    %3 = op listnew %1 %2\n",
+                "    ret %3\n",
+            ),
+        );
+        let plan = plan(&f, true);
+        assert!(plan.slot_of[0].is_none());
+        assert!(plan.slot_of[1].is_some(), "the materialized String is live across listnew and must be a root");
+    }
+
+    // -----------------------------------------------------------------------
     // #28: tagged intermediates that die before any safepoint need no slot.
     // `imod`'s helper never allocates (ops.rs's table), so this function has
     // no safepoint at all despite every register being tagged.

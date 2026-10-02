@@ -1,0 +1,101 @@
+instance <program>
+  closed: yes
+  entry: runtime (tagged)
+
+instance peek<str, int>
+  closed: yes
+  params:
+    text:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        length
+        substring
+    index:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: String
+    proven character length: [0,1]
+    ShortString1 eligible: yes
+    ABI ShortString1
+
+instance cleaner_emoji<str>
+  closed: yes
+  params:
+    character:
+      semantic type: String
+      proven character length: [0,1]
+      ShortString1 eligible: yes
+      ABI ShortString1
+      uses:
+        equality -> scalar
+  result:
+    semantic type: bool
+    ABI tagged (not-string)
+
+instance clean_char<str>
+  closed: yes
+  params:
+    character:
+      semantic type: String
+      proven character length: [0,1]
+      ShortString1 eligible: yes
+      ABI ShortString1
+      uses:
+        argument 0 of cleaner_emoji<str> -> scalar
+        equality -> scalar
+        return -> materialize
+  result:
+    semantic type: String
+    proven character length: unproven (more than one character (length > 1))
+    ShortString1 eligible: no
+    ABI tagged (length-gt-1)
+
+instance clean_from<str, int, str>
+  closed: yes
+  params:
+    text:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 0 of clean_from<str, int, str>
+        argument 0 of peek<str, int>
+        length
+    index:
+      semantic type: int
+      ABI tagged (not-string)
+    done:
+      semantic type: String
+      proven character length: unproven (unknown length)
+      ShortString1 eligible: no
+      ABI tagged (unknown-length)
+      uses:
+        concat
+        return
+  result:
+    semantic type: String
+    proven character length: unproven (unknown length)
+    ShortString1 eligible: no
+    ABI tagged (unknown-length)
+
+instance clean_ai_text<str>
+  closed: yes
+  params:
+    text:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 0 of clean_from<str, int, str>
+  result:
+    semantic type: String
+    proven character length: unproven (unknown length)
+    ShortString1 eligible: no
+    ABI tagged (unknown-length)
+

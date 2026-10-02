@@ -1,0 +1,926 @@
+instance <program>
+  closed: yes
+  entry: runtime (tagged)
+
+instance mutarray::create<int, str>
+  closed: yes
+  params:
+    capacity:
+      semantic type: int
+      ABI tagged (not-string)
+    default:
+      semantic type: String
+      proven character length: unproven (unknown length)
+      ShortString1 eligible: no
+      ABI tagged (unknown-length)
+      uses:
+        mutable_array_set
+  result:
+    semantic type: mutarray
+    ABI tagged (not-string)
+
+instance mutarray::create<int, List[str]>
+  closed: yes
+  params:
+    capacity:
+      semantic type: int
+      ABI tagged (not-string)
+    default:
+      semantic type: List[str]
+      ABI tagged (not-string)
+  result:
+    semantic type: mutarray
+    ABI tagged (not-string)
+
+instance mutarray::create<int, mutarray>
+  closed: yes
+  params:
+    capacity:
+      semantic type: int
+      ABI tagged (not-string)
+    default:
+      semantic type: mutarray
+      ABI tagged (not-string)
+  result:
+    semantic type: mutarray
+    ABI tagged (not-string)
+
+instance geo_new<str>
+  closed: yes
+  params:
+    first:
+      semantic type: String
+      proven character length: unproven (unknown length)
+      ShortString1 eligible: no
+      ABI tagged (unknown-length)
+      uses:
+        argument 1 of mutarray::create<int, str>
+  result:
+    semantic type: MutableArray[str]
+    ABI tagged (not-string)
+
+instance geo_new<List[str]>
+  closed: yes
+  params:
+    first:
+      semantic type: List[str]
+      ABI tagged (not-string)
+  result:
+    semantic type: MutableArray[List[str]]
+    ABI tagged (not-string)
+
+instance geo_new<mutarray>
+  closed: yes
+  params:
+    first:
+      semantic type: mutarray
+      ABI tagged (not-string)
+  result:
+    semantic type: MutableArray[mutarray]
+    ABI tagged (not-string)
+
+instance geo_new_capacity<int, int>
+  closed: yes
+  params:
+    capacity:
+      semantic type: int
+      ABI tagged (not-string)
+    length:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+
+instance geo_grow<mutarray, int, str>
+  closed: yes
+  params:
+    storage:
+      semantic type: mutarray
+      ABI tagged (not-string)
+    length:
+      semantic type: int
+      ABI tagged (not-string)
+    value:
+      semantic type: String
+      proven character length: unproven (unknown length)
+      ShortString1 eligible: no
+      ABI tagged (unknown-length)
+      uses:
+        argument 1 of mutarray::create<int, str>
+  result:
+    semantic type: any
+    ABI tagged (not-string)
+
+instance geo_grow<mutarray, int, List[str]>
+  closed: yes
+  params:
+    storage:
+      semantic type: mutarray
+      ABI tagged (not-string)
+    length:
+      semantic type: int
+      ABI tagged (not-string)
+    value:
+      semantic type: List[str]
+      ABI tagged (not-string)
+  result:
+    semantic type: any
+    ABI tagged (not-string)
+
+instance geo_grow<mutarray, int, mutarray>
+  closed: yes
+  params:
+    storage:
+      semantic type: mutarray
+      ABI tagged (not-string)
+    length:
+      semantic type: int
+      ABI tagged (not-string)
+    value:
+      semantic type: mutarray
+      ABI tagged (not-string)
+  result:
+    semantic type: any
+    ABI tagged (not-string)
+
+instance geo_append<mutarray, int, str>
+  closed: yes
+  params:
+    storage:
+      semantic type: mutarray
+      ABI tagged (not-string)
+    length:
+      semantic type: int
+      ABI tagged (not-string)
+    value:
+      semantic type: String
+      proven character length: unproven (unknown length)
+      ShortString1 eligible: no
+      ABI tagged (unknown-length)
+      uses:
+        argument 2 of geo_grow<mutarray, int, str>
+        mutable_array_set
+  result:
+    semantic type: mutarray
+    ABI tagged (not-string)
+
+instance geo_append<mutarray, int, List[str]>
+  closed: yes
+  params:
+    storage:
+      semantic type: mutarray
+      ABI tagged (not-string)
+    length:
+      semantic type: int
+      ABI tagged (not-string)
+    value:
+      semantic type: List[str]
+      ABI tagged (not-string)
+  result:
+    semantic type: mutarray
+    ABI tagged (not-string)
+
+instance geo_append<mutarray, int, mutarray>
+  closed: yes
+  params:
+    storage:
+      semantic type: mutarray
+      ABI tagged (not-string)
+    length:
+      semantic type: int
+      ABI tagged (not-string)
+    value:
+      semantic type: mutarray
+      ABI tagged (not-string)
+  result:
+    semantic type: mutarray
+    ABI tagged (not-string)
+
+instance geo_finish<mutarray, int>
+  closed: yes
+  params:
+    storage:
+      semantic type: mutarray
+      ABI tagged (not-string)
+    length:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: list
+    ABI tagged (not-string)
+
+instance peek<str, int>
+  closed: yes
+  params:
+    text:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        length
+        substring
+    index:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: String
+    proven character length: [0,1]
+    ShortString1 eligible: yes
+    ABI ShortString1
+
+instance scan_unquoted<str, int, int>
+  closed: yes
+  params:
+    text:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 0 of peek<str, int>
+        argument 0 of scan_unquoted<str, int, int>
+        substring
+    start:
+      semantic type: int
+      ABI tagged (not-string)
+    index:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: struct{field: str, index: int}
+    ABI tagged (not-string)
+  values:
+    character (e134):
+      semantic type: String
+      proven character length: [0,1]
+      ShortString1 eligible: yes
+      physical representation: ShortString1 (local)
+      production: result of peek<str, int>
+      uses:
+        equality -> scalar
+
+instance scan_quoted<str, int, str>
+  closed: yes
+  params:
+    text:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 0 of peek<str, int>
+        argument 0 of scan_quoted<str, int, str>
+    index:
+      semantic type: int
+      ABI tagged (not-string)
+    field:
+      semantic type: String
+      proven character length: unproven (unknown length)
+      ShortString1 eligible: no
+      ABI tagged (unknown-length)
+      uses:
+        concat
+        struct field
+  result:
+    semantic type: struct{field: str, index: int}
+    ABI tagged (not-string)
+  values:
+    character (e180):
+      semantic type: String
+      proven character length: [0,1]
+      ShortString1 eligible: yes
+      physical representation: ShortString1 (local)
+      production: result of peek<str, int>
+      uses:
+        concat -> materialize
+        equality -> scalar
+
+instance scan_field<str, int>
+  closed: yes
+  params:
+    text:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 0 of peek<str, int>
+        argument 0 of scan_quoted<str, int, str>
+        argument 0 of scan_unquoted<str, int, int>
+    index:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: struct{field: str, index: int}
+    ABI tagged (not-string)
+
+instance scan_record_rest<str, int, mutarray, int>
+  closed: yes
+  params:
+    text:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 0 of peek<str, int>
+        argument 0 of scan_field<str, int>
+        argument 0 of scan_record_rest<str, int, mutarray, int>
+    stop:
+      semantic type: int
+      ABI tagged (not-string)
+    fields:
+      semantic type: mutarray
+      ABI tagged (not-string)
+    count:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: struct{fields: List[str], stop: int}
+    ABI tagged (not-string)
+  values:
+    delimiter (e257):
+      semantic type: String
+      proven character length: [0,1]
+      ShortString1 eligible: yes
+      physical representation: ShortString1 (local)
+      production: result of peek<str, int>
+      uses:
+        equality -> scalar
+
+instance scan_record<str, int>
+  closed: yes
+  params:
+    text:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 0 of scan_field<str, int>
+        argument 0 of scan_record_rest<str, int, mutarray, int>
+    index:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: struct{fields: List[str], stop: int}
+    ABI tagged (not-string)
+
+instance scan_records<str, int, mutarray, int>
+  closed: yes
+  params:
+    text:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 0 of scan_record<str, int>
+        argument 0 of scan_records<str, int, mutarray, int>
+        length
+    index:
+      semantic type: int
+      ABI tagged (not-string)
+    records:
+      semantic type: mutarray
+      ABI tagged (not-string)
+    count:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: List[List[str]]
+    ABI tagged (not-string)
+
+instance csv_parse<str>
+  closed: yes
+  params:
+    text:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 0 of scan_record<str, int>
+        argument 0 of scan_records<str, int, mutarray, int>
+        length
+  result:
+    semantic type: List[List[str]]
+    ABI tagged (not-string)
+
+instance ht_min_capacity<generic>
+  closed: yes
+  params:
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+
+instance ht_empty_state<generic>
+  closed: yes
+  params:
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+
+instance ht_occupied_state<generic>
+  closed: yes
+  params:
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+
+instance ht_tombstone_state<generic>
+  closed: yes
+  params:
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+
+instance ht_fill_empty<mutarray, int, int>
+  closed: yes
+  params:
+    controls:
+      semantic type: mutarray
+      ABI tagged (not-string)
+    i:
+      semantic type: int
+      ABI tagged (not-string)
+    capacity:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: unit
+    ABI tagged (not-string)
+
+instance ht_alloc<int>
+  closed: yes
+  params:
+    capacity:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: mutarray
+    ABI tagged (not-string)
+
+instance ht_new<generic>
+  closed: yes
+  params:
+  result:
+    semantic type: mutarray
+    ABI tagged (not-string)
+
+instance ht_capacity_for<int, int>
+  closed: yes
+  params:
+    expected:
+      semantic type: int
+      ABI tagged (not-string)
+    capacity:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+
+instance ht_new_sized<int>
+  closed: yes
+  params:
+    expected:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: mutarray
+    ABI tagged (not-string)
+
+instance ht_controls<mutarray>
+  closed: yes
+  params:
+    table:
+      semantic type: mutarray
+      ABI tagged (not-string)
+  result:
+    semantic type: any
+    ABI tagged (not-string)
+
+instance ht_keys<mutarray>
+  closed: yes
+  params:
+    table:
+      semantic type: mutarray
+      ABI tagged (not-string)
+  result:
+    semantic type: any
+    ABI tagged (not-string)
+
+instance ht_values<mutarray>
+  closed: yes
+  params:
+    table:
+      semantic type: mutarray
+      ABI tagged (not-string)
+  result:
+    semantic type: any
+    ABI tagged (not-string)
+
+instance ht_size<mutarray>
+  closed: yes
+  params:
+    table:
+      semantic type: mutarray
+      ABI tagged (not-string)
+  result:
+    semantic type: any
+    ABI tagged (not-string)
+
+instance ht_tombstones<mutarray>
+  closed: yes
+  params:
+    table:
+      semantic type: mutarray
+      ABI tagged (not-string)
+  result:
+    semantic type: any
+    ABI tagged (not-string)
+
+instance ht_capacity<mutarray>
+  closed: yes
+  params:
+    table:
+      semantic type: mutarray
+      ABI tagged (not-string)
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+
+instance ht_probe_start<mutarray, str>
+  closed: yes
+  params:
+    table:
+      semantic type: mutarray
+      ABI tagged (not-string)
+    key:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        hash
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+
+instance ht_probe_next<mutarray, int>
+  closed: yes
+  params:
+    table:
+      semantic type: mutarray
+      ABI tagged (not-string)
+    index:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+
+instance ht_find_get<mutarray, str, int>
+  closed: yes
+  params:
+    table:
+      semantic type: mutarray
+      ABI tagged (not-string)
+    key:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 1 of ht_find_get<mutarray, str, int>
+        equality with an unrestricted String
+    index:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+
+instance ht_find_insert<mutarray, str, int, int>
+  closed: yes
+  params:
+    table:
+      semantic type: mutarray
+      ABI tagged (not-string)
+    key:
+      semantic type: String
+      proven character length: unproven (unknown length)
+      ShortString1 eligible: no
+      ABI tagged (unknown-length)
+      uses:
+        argument 1 of ht_find_insert<mutarray, str, int, int>
+        equality with an unrestricted String
+    index:
+      semantic type: int
+      ABI tagged (not-string)
+    first_tombstone:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+
+instance ht_get<mutarray, str>
+  closed: yes
+  params:
+    table:
+      semantic type: mutarray
+      ABI tagged (not-string)
+    key:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 1 of ht_find_get<mutarray, str, int>
+        argument 1 of ht_probe_start<mutarray, str>
+  result:
+    semantic type: any
+    ABI tagged (not-string)
+
+instance ht_rehash_probe<mutarray, int, int>
+  closed: yes
+  params:
+    newControls:
+      semantic type: mutarray
+      ABI tagged (not-string)
+    index:
+      semantic type: int
+      ABI tagged (not-string)
+    capacity:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+
+instance ht_rehash_insert<struct{controls: mutarray, keys: mutarray, values: mutarray}, int, any, any>
+  closed: yes
+  params:
+    dest:
+      semantic type: struct{controls: mutarray, keys: mutarray, values: mutarray}
+      ABI tagged (not-string)
+    capacity:
+      semantic type: int
+      ABI tagged (not-string)
+    key:
+      semantic type: any
+      ABI tagged (not-string)
+    value:
+      semantic type: any
+      ABI tagged (not-string)
+  result:
+    semantic type: unit
+    ABI tagged (not-string)
+
+instance ht_rehash_scan<struct{controls: any, keys: any, values: any}, int, int, struct{controls: mutarray, keys: mutarray, values: mutarray}, int>
+  closed: yes
+  params:
+    src:
+      semantic type: struct{controls: any, keys: any, values: any}
+      ABI tagged (not-string)
+    i:
+      semantic type: int
+      ABI tagged (not-string)
+    oldCapacity:
+      semantic type: int
+      ABI tagged (not-string)
+    dest:
+      semantic type: struct{controls: mutarray, keys: mutarray, values: mutarray}
+      ABI tagged (not-string)
+    newCapacity:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: unit
+    ABI tagged (not-string)
+
+instance ht_rehash<mutarray, int>
+  closed: yes
+  params:
+    table:
+      semantic type: mutarray
+      ABI tagged (not-string)
+    newCapacity:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: unit
+    ABI tagged (not-string)
+
+instance ht_should_grow<mutarray>
+  closed: yes
+  params:
+    table:
+      semantic type: mutarray
+      ABI tagged (not-string)
+  result:
+    semantic type: bool
+    ABI tagged (not-string)
+
+instance ht_grow_or_clean<mutarray>
+  closed: yes
+  params:
+    table:
+      semantic type: mutarray
+      ABI tagged (not-string)
+  result:
+    semantic type: unit
+    ABI tagged (not-string)
+
+instance ht_place<mutarray, int, str, str>
+  closed: yes
+  params:
+    table:
+      semantic type: mutarray
+      ABI tagged (not-string)
+    index:
+      semantic type: int
+      ABI tagged (not-string)
+    key:
+      semantic type: String
+      proven character length: unproven (unknown length)
+      ShortString1 eligible: no
+      ABI tagged (unknown-length)
+      uses:
+        mutable_array_set
+    value:
+      semantic type: String
+      proven character length: unproven (unknown length)
+      ShortString1 eligible: no
+      ABI tagged (unknown-length)
+      uses:
+        mutable_array_set
+  result:
+    semantic type: unit
+    ABI tagged (not-string)
+
+instance ht_set<mutarray, str, str>
+  closed: yes
+  params:
+    table:
+      semantic type: mutarray
+      ABI tagged (not-string)
+    key:
+      semantic type: String
+      proven character length: unproven (unknown length)
+      ShortString1 eligible: no
+      ABI tagged (unknown-length)
+      uses:
+        argument 1 of ht_find_insert<mutarray, str, int, int>
+        argument 1 of ht_probe_start<mutarray, str>
+        argument 2 of ht_place<mutarray, int, str, str>
+    value:
+      semantic type: String
+      proven character length: unproven (unknown length)
+      ShortString1 eligible: no
+      ABI tagged (unknown-length)
+      uses:
+        argument 3 of ht_place<mutarray, int, str, str>
+        mutable_array_set
+  result:
+    semantic type: unit
+    ABI tagged (not-string)
+
+instance row_new<bool, int>
+  closed: yes
+  params:
+    presize:
+      semantic type: bool
+      ABI tagged (not-string)
+    header_count:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: mutarray
+    ABI tagged (not-string)
+
+instance row_fill<mutarray, List[str], List[str], int, int>
+  closed: yes
+  params:
+    table:
+      semantic type: mutarray
+      ABI tagged (not-string)
+    headers:
+      semantic type: List[str]
+      ABI tagged (not-string)
+    fields:
+      semantic type: List[str]
+      ABI tagged (not-string)
+    i:
+      semantic type: int
+      ABI tagged (not-string)
+    field_count:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: mutarray
+    ABI tagged (not-string)
+
+instance row_table<List[str], int, List[str], bool>
+  closed: yes
+  params:
+    headers:
+      semantic type: List[str]
+      ABI tagged (not-string)
+    header_count:
+      semantic type: int
+      ABI tagged (not-string)
+    fields:
+      semantic type: List[str]
+      ABI tagged (not-string)
+    presize:
+      semantic type: bool
+      ABI tagged (not-string)
+  result:
+    semantic type: mutarray
+    ABI tagged (not-string)
+
+instance build_rows<List[List[str]], int, List[str], int, mutarray, int, bool>
+  closed: yes
+  params:
+    records:
+      semantic type: List[List[str]]
+      ABI tagged (not-string)
+    i:
+      semantic type: int
+      ABI tagged (not-string)
+    headers:
+      semantic type: List[str]
+      ABI tagged (not-string)
+    header_count:
+      semantic type: int
+      ABI tagged (not-string)
+    outer:
+      semantic type: mutarray
+      ABI tagged (not-string)
+    count:
+      semantic type: int
+      ABI tagged (not-string)
+    presize:
+      semantic type: bool
+      ABI tagged (not-string)
+  result:
+    semantic type: List[mutarray]
+    ABI tagged (not-string)
+
+instance csv_records_generic<str, bool>
+  closed: yes
+  params:
+    text:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 0 of csv_parse<str>
+    presize:
+      semantic type: bool
+      ABI tagged (not-string)
+  result:
+    semantic type: List[mutarray]
+    ABI tagged (not-string)
+
+instance csv_records<str>
+  closed: yes
+  params:
+    text:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 0 of csv_records_generic<str, bool>
+  result:
+    semantic type: List[mutarray]
+    ABI tagged (not-string)
+
+instance csv_records_presized<str>
+  closed: yes
+  params:
+    text:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 0 of csv_records_generic<str, bool>
+  result:
+    semantic type: List[mutarray]
+    ABI tagged (not-string)
+
+instance sample<generic>
+  closed: yes
+  params:
+  result:
+    semantic type: list[int, any, any, any, any, any, bool]
+    ABI tagged (not-string)
+

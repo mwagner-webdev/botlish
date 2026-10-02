@@ -1,0 +1,17 @@
+fib              identical NIR
+lex-strategy     identical NIR
+loop-count       identical NIR
+refined-checks    off 450763 ns  on 536409 ns  (+19.0%)
+source-checks     off 5455 ns  on 5525 ns  (+1.3%)
+sum-refined      identical NIR
+test-selection   identical NIR
+uri-steady        off 3662175 ns  on 2778927 ns  (-24.1%)
+ai_text_clean     off 11754 ns  on 4637 ns  (-60.5%)
+csv               off 1272 ns  on 1313 ns  (+3.2%)
+csv_chunked       off 1157 ns  on 1379 ns  (+19.2%)
+csv_geometric     off 1433 ns  on 1383 ns  (-3.5%)
+csv_records       off 7596 ns  on 7581 ns  (-0.2%)
+hashtable        identical NIR
+matmul           identical NIR
+string_replace    off 670 ns  on 758 ns  (+13.1%)
+string_reverse   identical NIR

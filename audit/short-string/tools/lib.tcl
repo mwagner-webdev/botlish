@@ -102,6 +102,7 @@ proc ClassifyUse {line d fname attrs} {
     if {[regexp {= op (listnew|listappend)} $line]} { return "collection/storage frontier" }
     if {[regexp {= op (mutarrayset|mutarrayfreeze|mutarrayallocate)} $line] || [regexp {= structnew} $line]} { return "collection/storage frontier" }
     if {[regexp {= op (setfromlist|setcontains)} $line]} { return "collection/storage frontier" }
+    if {[regexp {= construct } $line]} { return "general String operation" }
     if {[regexp {= op (strcat|strlower|substr |hash|strutf8bytes|strtclalpha|strtclalnum|veq)} $line]} { return "general String operation" }
     if {[regexp {= op streq} $line]} { return "mixed scalar/tagged use (equality with an unrestricted String)" }
     if {[regexp {= (callvalue)} $line]} { return "generic/dynamic call" }

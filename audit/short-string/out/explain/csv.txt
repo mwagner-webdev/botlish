@@ -1,0 +1,230 @@
+instance <program>
+  closed: yes
+  entry: runtime (tagged)
+
+instance peek<str, int>
+  closed: yes
+  params:
+    text:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        length
+        substring
+    index:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: String
+    proven character length: [0,1]
+    ShortString1 eligible: yes
+    ABI ShortString1
+
+instance scan_unquoted<str, int, int>
+  closed: yes
+  params:
+    text:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 0 of peek<str, int>
+        argument 0 of scan_unquoted<str, int, int>
+        substring
+    start:
+      semantic type: int
+      ABI tagged (not-string)
+    index:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: struct{field: str, index: int}
+    ABI tagged (not-string)
+  values:
+    character (e22):
+      semantic type: String
+      proven character length: [0,1]
+      ShortString1 eligible: yes
+      physical representation: ShortString1 (local)
+      production: result of peek<str, int>
+      uses:
+        equality -> scalar
+
+instance scan_quoted<str, int, str>
+  closed: yes
+  params:
+    text:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 0 of peek<str, int>
+        argument 0 of scan_quoted<str, int, str>
+    index:
+      semantic type: int
+      ABI tagged (not-string)
+    field:
+      semantic type: String
+      proven character length: unproven (unknown length)
+      ShortString1 eligible: no
+      ABI tagged (unknown-length)
+      uses:
+        concat
+        struct field
+  result:
+    semantic type: struct{field: str, index: int}
+    ABI tagged (not-string)
+  values:
+    character (e68):
+      semantic type: String
+      proven character length: [0,1]
+      ShortString1 eligible: yes
+      physical representation: ShortString1 (local)
+      production: result of peek<str, int>
+      uses:
+        concat -> materialize
+        equality -> scalar
+
+instance scan_field<str, int>
+  closed: yes
+  params:
+    text:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 0 of peek<str, int>
+        argument 0 of scan_quoted<str, int, str>
+        argument 0 of scan_unquoted<str, int, int>
+    index:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: struct{field: str, index: int}
+    ABI tagged (not-string)
+
+instance scan_record<str, int, List[never]>
+  closed: yes
+  params:
+    text:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 0 of peek<str, int>
+        argument 0 of scan_field<str, int>
+        argument 0 of scan_record<str, int, List[str]>
+    index:
+      semantic type: int
+      ABI tagged (not-string)
+    fields:
+      semantic type: List[never]
+      ABI tagged (not-string)
+  result:
+    semantic type: struct{fields: List[str], stop: int}
+    ABI tagged (not-string)
+  values:
+    delimiter (e159):
+      semantic type: String
+      proven character length: [0,1]
+      ShortString1 eligible: yes
+      physical representation: ShortString1 (local)
+      production: result of peek<str, int>
+      uses:
+        equality -> scalar
+
+instance scan_record<str, int, List[str]>
+  closed: yes
+  params:
+    text:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 0 of peek<str, int>
+        argument 0 of scan_field<str, int>
+        argument 0 of scan_record<str, int, List[str]>
+    index:
+      semantic type: int
+      ABI tagged (not-string)
+    fields:
+      semantic type: List[str]
+      ABI tagged (not-string)
+  result:
+    semantic type: struct{fields: List[str], stop: int}
+    ABI tagged (not-string)
+  values:
+    delimiter (e159):
+      semantic type: String
+      proven character length: [0,1]
+      ShortString1 eligible: yes
+      physical representation: ShortString1 (local)
+      production: result of peek<str, int>
+      uses:
+        equality -> scalar
+
+instance scan_records<str, int, List[never]>
+  closed: yes
+  params:
+    text:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 0 of scan_record<str, int, List[never]>
+        argument 0 of scan_records<str, int, List[List[str]]>
+        length
+    index:
+      semantic type: int
+      ABI tagged (not-string)
+    records:
+      semantic type: List[never]
+      ABI tagged (not-string)
+  result:
+    semantic type: List[List[str]]
+    ABI tagged (not-string)
+
+instance scan_records<str, int, List[List[str]]>
+  closed: yes
+  params:
+    text:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 0 of scan_record<str, int, List[never]>
+        argument 0 of scan_records<str, int, List[List[str]]>
+        length
+    index:
+      semantic type: int
+      ABI tagged (not-string)
+    records:
+      semantic type: List[List[str]]
+      ABI tagged (not-string)
+  result:
+    semantic type: List[List[str]]
+    ABI tagged (not-string)
+
+instance csv_parse<str>
+  closed: yes
+  params:
+    text:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 0 of scan_records<str, int, List[never]>
+  result:
+    semantic type: List[List[str]]
+    ABI tagged (not-string)
+

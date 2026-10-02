@@ -1,0 +1,27 @@
+instance <program>
+  closed: yes
+  entry: runtime (tagged)
+
+instance work<int>
+  closed: yes
+  params:
+    i:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+
+instance drive<int, int>
+  closed: yes
+  params:
+    i:
+      semantic type: int
+      ABI tagged (not-string)
+    total:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+

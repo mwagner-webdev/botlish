@@ -1,0 +1,164 @@
+instance <program>
+  closed: yes
+  entry: runtime (tagged)
+
+instance list::all?<List[str], native(is_tcl_alnum)>
+  closed: yes
+  params:
+    xs:
+      semantic type: List[str]
+      ABI tagged (not-string)
+    predicate:
+      semantic type: native(is_tcl_alnum)
+      ABI tagged (not-string)
+  result:
+    semantic type: bool
+    ABI tagged (not-string)
+
+instance lenient_ident_char?<generic>
+  closed: no
+  params:
+    c:
+      semantic type: any
+      ABI tagged (not-string)
+  result:
+    semantic type: bool
+    ABI tagged (not-string)
+
+instance choose_classifier<bool>
+  closed: yes
+  params:
+    strict_mode:
+      semantic type: bool
+      ABI tagged (not-string)
+  result:
+    semantic type: Fn{args: [any], return: bool, errors: []}
+    ABI tagged (not-string)
+
+instance chars_of<str, int, List[never]>
+  closed: yes
+  params:
+    s:
+      semantic type: String
+      proven character length: unproven (unknown length)
+      ShortString1 eligible: no
+      ABI tagged (unknown-length)
+      uses:
+        argument 0 of chars_of<str, int, List[str]>
+        length
+        substring
+    i:
+      semantic type: int
+      ABI tagged (not-string)
+    acc:
+      semantic type: List[never]
+      ABI tagged (not-string)
+  result:
+    semantic type: List[str]
+    ABI tagged (not-string)
+
+instance chars_of<str, int, List[str]>
+  closed: yes
+  params:
+    s:
+      semantic type: String
+      proven character length: unproven (unknown length)
+      ShortString1 eligible: no
+      ABI tagged (unknown-length)
+      uses:
+        argument 0 of chars_of<str, int, List[str]>
+        length
+        substring
+    i:
+      semantic type: int
+      ABI tagged (not-string)
+    acc:
+      semantic type: List[str]
+      ABI tagged (not-string)
+  result:
+    semantic type: List[str]
+    ABI tagged (not-string)
+
+instance classify<str, bool>
+  closed: yes
+  params:
+    token:
+      semantic type: String
+      proven character length: unproven (unknown length)
+      ShortString1 eligible: no
+      ABI tagged (unknown-length)
+      uses:
+        argument 0 of chars_of<str, int, List[never]>
+    strict_mode:
+      semantic type: bool
+      ABI tagged (not-string)
+  result:
+    semantic type: List[bool]
+    ABI tagged (not-string)
+
+instance count_true<List[bool], int, int>
+  closed: yes
+  params:
+    flags:
+      semantic type: List[bool]
+      ABI tagged (not-string)
+    i:
+      semantic type: int
+      ABI tagged (not-string)
+    acc:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+
+instance valid_chars<str, bool>
+  closed: yes
+  params:
+    token:
+      semantic type: String
+      proven character length: unproven (unknown length)
+      ShortString1 eligible: no
+      ABI tagged (unknown-length)
+      uses:
+        argument 0 of classify<str, bool>
+    strict_mode:
+      semantic type: bool
+      ABI tagged (not-string)
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+
+instance fully_alnum?<str>
+  closed: yes
+  params:
+    token:
+      semantic type: String
+      proven character length: unproven (unknown length)
+      ShortString1 eligible: no
+      ABI tagged (unknown-length)
+      uses:
+        argument 0 of chars_of<str, int, List[never]>
+  result:
+    semantic type: bool
+    ABI tagged (not-string)
+
+instance total_valid<List[str], bool, int, int>
+  closed: yes
+  params:
+    tokens:
+      semantic type: List[str]
+      ABI tagged (not-string)
+    strict_mode:
+      semantic type: bool
+      ABI tagged (not-string)
+    i:
+      semantic type: int
+      ABI tagged (not-string)
+    acc:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+

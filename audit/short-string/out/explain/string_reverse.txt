@@ -1,0 +1,58 @@
+instance <program>
+  closed: yes
+  entry: runtime (tagged)
+
+instance reverse_from<str, int, str>
+  closed: yes
+  params:
+    text:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 0 of reverse_from<str, int, str>
+        length
+        substring
+    index:
+      semantic type: int
+      ABI tagged (not-string)
+    reversed:
+      semantic type: String
+      proven character length: unproven (unknown length)
+      ShortString1 eligible: no
+      ABI tagged (unknown-length)
+      uses:
+        concat
+        return
+  result:
+    semantic type: String
+    proven character length: unproven (unknown length)
+    ShortString1 eligible: no
+    ABI tagged (unknown-length)
+  values:
+    character (e12):
+      semantic type: String
+      proven character length: [1,1]
+      ShortString1 eligible: yes
+      physical representation: ShortString1 (local)
+      production: native substring
+      uses:
+        concat -> materialize
+
+instance reverse_chars<str>
+  closed: yes
+  params:
+    text:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 0 of reverse_from<str, int, str>
+  result:
+    semantic type: String
+    proven character length: unproven (unknown length)
+    ShortString1 eligible: no
+    ABI tagged (unknown-length)
+

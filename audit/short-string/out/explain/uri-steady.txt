@@ -1,0 +1,252 @@
+instance <program>
+  closed: yes
+  entry: runtime (tagged)
+
+instance char::codepoint<UnicodeChar>
+  closed: yes
+  params:
+    c:
+      semantic type: UnicodeChar
+      ABI tagged (not-string)
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+
+instance byte::high_nibble<int>
+  closed: yes
+  params:
+    b:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: int[HighNibble]
+    ABI tagged (not-string)
+
+instance byte::nibble<int>
+  closed: yes
+  params:
+    x:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: int[Nibble]
+    ABI tagged (not-string)
+
+instance byte::from_int<int>
+  closed: yes
+  params:
+    value:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: int[Byte]
+    ABI tagged (not-string)
+
+instance byte::set<List[UnicodeChar]>
+  closed: yes
+  params:
+    chars:
+      semantic type: List[UnicodeChar]
+      ABI tagged (not-string)
+  result:
+    semantic type: ImmutableSet[int[Byte]]
+    ABI tagged (not-string)
+
+instance ascii::is_digit<int>
+  closed: yes
+  params:
+    b:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: bool
+    ABI tagged (not-string)
+
+instance ascii::is_upper<int>
+  closed: yes
+  params:
+    b:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: bool
+    ABI tagged (not-string)
+
+instance ascii::is_lower<int>
+  closed: yes
+  params:
+    b:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: bool
+    ABI tagged (not-string)
+
+instance ascii::is_alphabetic<int>
+  closed: yes
+  params:
+    b:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: bool
+    ABI tagged (not-string)
+
+instance ascii::is_alphanumeric<int>
+  closed: yes
+  params:
+    b:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: bool
+    ABI tagged (not-string)
+
+instance web::is_unreserved<int>
+  closed: yes
+  params:
+    b:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: bool
+    ABI tagged (not-string)
+
+instance web::uri_escape_text<str>
+  closed: yes
+  params:
+    s:
+      semantic type: String
+      proven character length: unproven (unknown length)
+      ShortString1 eligible: no
+      ABI tagged (unknown-length)
+      uses:
+        argument 0 of esc_from<str, int, str>
+  result:
+    semantic type: String
+    proven character length: unproven (unknown length)
+    ShortString1 eligible: no
+    ABI tagged (unknown-length)
+
+instance high_nibble<int>
+  closed: yes
+  params:
+    b:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: int[Nibble]
+    ABI tagged (not-string)
+
+instance hex_pair<int>
+  closed: yes
+  params:
+    b:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: String
+    proven character length: unproven (unknown length)
+    ShortString1 eligible: no
+    ABI tagged (unknown-length)
+
+instance esc_bytes<List[int], int, str>
+  closed: yes
+  params:
+    bytes:
+      semantic type: List[int]
+      ABI tagged (not-string)
+    i:
+      semantic type: int
+      ABI tagged (not-string)
+    acc:
+      semantic type: String
+      proven character length: unproven (unknown length)
+      ShortString1 eligible: no
+      ABI tagged (unknown-length)
+      uses:
+        concat
+        return
+  result:
+    semantic type: String
+    proven character length: unproven (unknown length)
+    ShortString1 eligible: no
+    ABI tagged (unknown-length)
+
+instance esc_char<str>
+  closed: yes
+  params:
+    c:
+      semantic type: String
+      proven character length: [1,1]
+      ShortString1 eligible: yes
+      ABI ShortString1
+      uses:
+        encode_utf8 -> materialize
+        return -> materialize
+  result:
+    semantic type: String
+    proven character length: unproven (unknown length)
+    ShortString1 eligible: no
+    ABI tagged (unknown-length)
+
+instance esc_from<str, int, str>
+  closed: yes
+  params:
+    text:
+      semantic type: String
+      proven character length: unproven (unknown length)
+      ShortString1 eligible: no
+      ABI tagged (unknown-length)
+      uses:
+        argument 0 of esc_from<str, int, str>
+        length
+        substring
+    i:
+      semantic type: int
+      ABI tagged (not-string)
+    acc:
+      semantic type: String
+      proven character length: unproven (unknown length)
+      ShortString1 eligible: no
+      ABI tagged (unknown-length)
+      uses:
+        concat
+        return
+  result:
+    semantic type: String
+    proven character length: unproven (unknown length)
+    ShortString1 eligible: no
+    ABI tagged (unknown-length)
+
+instance repeat_uri<generic>
+  closed: yes
+  params:
+    i:
+      semantic type: any
+      ABI tagged (not-string)
+    total:
+      semantic type: any
+      ABI tagged (not-string)
+    acc:
+      semantic type: any
+      ABI tagged (not-string)
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+  values:
+    text (e509):
+      semantic type: String
+      proven character length: unproven (unknown length)
+      ShortString1 eligible: no (unknown length)
+      physical representation: tagged String (unknown-length)
+      uses:
+        argument 0 of web::uri_escape_text<str>
+    escaped (e519):
+      semantic type: String
+      proven character length: unproven (unknown length)
+      ShortString1 eligible: no (unknown length)
+      physical representation: tagged String (unknown-length)
+      uses:
+        length
+

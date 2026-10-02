@@ -156,14 +156,20 @@ pub struct Vm {
     framemap: Rc<ProgramMap>,
     native_stack: Option<NativeStack>,
     /// The interned static Strings a ShortString1 materializes to for Empty
-    /// and the scalars U+0000..U+00FF (`short_string`): slot 0..=255 is the
-    /// one-character String of that scalar, slot 256 the empty String; 0 =
-    /// not built yet. Strings are immutable and compared structurally, so
+    /// and the scalars U+0000..U+00FF (`short_string`): slot `short + 1`
+    /// (slot 0 the empty String, slots 1..=256 the one-character Strings of
+    /// U+0000..U+00FF); 0 = not built yet. Public and laid out at a known
+    /// offset (`VM_SHORT_CACHE_OFFSET`) because generated code probes it
+    /// inline (`ShortToStr`); only `short_string` ever writes it. Strings are immutable and compared structurally, so
     /// sharing one object is unobservable; being static they are never
     /// collected (heap.rs skips `is_static`) and need no rooting.
-    short_cache: Vec<Value>,
+    pub short_cache: [Value; SHORT_CACHE_SLOTS],
     short_objects: Vec<*mut Header>,
 }
+
+/// Slots of `Vm::short_cache`: index `short + 1` for ShortString1 scalar
+/// -1 (Empty) and 0..=255 (Latin-1), so 257 slots.
+pub const SHORT_CACHE_SLOTS: usize = 257;
 
 pub const VM_SS_TOP_OFFSET: i32 = offset_of!(Vm, ss_top) as i32;
 pub const VM_SS_LIMIT_OFFSET: i32 = offset_of!(Vm, ss_limit) as i32;
@@ -172,6 +178,7 @@ pub const VM_ALLOC_SITE_OFFSET: i32 = offset_of!(Vm, alloc_site) as i32;
 pub const VM_NATIVE_ROOTS_PTR_OFFSET: i32 = offset_of!(Vm, native_roots_ptr) as i32;
 pub const VM_NATIVE_ROOTS_LEN_OFFSET: i32 = offset_of!(Vm, native_roots_len) as i32;
 pub const VM_STATICS_OFFSET: i32 = offset_of!(Vm, statics_ptr) as i32;
+pub const VM_SHORT_CACHE_OFFSET: i32 = offset_of!(Vm, short_cache) as i32;
 
 impl Vm {
     pub fn new(info: Rc<ProgramInfo>, alloc_mode: AllocMode) -> Box<Vm> {
@@ -203,7 +210,7 @@ impl Vm {
             const_table: Vec::new(),
             statics: Vec::new(),
             framemap: Rc::new(ProgramMap::new()),
-            short_cache: vec![0; 257],
+            short_cache: [0; SHORT_CACHE_SLOTS],
             short_objects: Vec::new(),
             native_stack: {
                 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
@@ -392,7 +399,8 @@ impl Vm {
             return v;
         }
         let bytes = text.len();
-        let obj = StrObj { hdr: Header::new(KIND_STR, false), chars, ascii, text: text.into_boxed_str() };
+        let first = first_scalar(&text, ascii);
+        let obj = StrObj { hdr: Header::new(KIND_STR, false), chars, ascii, first, text: text.into_boxed_str() };
         self.alloc(obj, bytes)
     }
 
@@ -404,15 +412,11 @@ impl Vm {
     /// have come from. Any other scalar allocates a fresh one-character
     /// String.
     pub fn short_string(&mut self, short: i64) -> Value {
-        let slot = match short {
-            -1 => Some(256),
-            0..=255 => Some(short as usize),
-            _ => None,
-        };
-        let Some(slot) = slot else {
+        if !(-1..256).contains(&short) {
             let c = char::from_u32(short as u32).expect("a ShortString1 scalar is a Unicode scalar value");
             return self.new_str_known(c.to_string(), 1, c.is_ascii());
-        };
+        }
+        let slot = (short + 1) as usize;
         if self.short_cache[slot] != 0 {
             return self.short_cache[slot];
         }
@@ -510,5 +514,6 @@ impl Drop for Vm {
 pub fn str_object(text: String, is_static: bool) -> StrObj {
     let ascii = text.is_ascii();
     let chars = if ascii { text.len() } else { text.chars().count() };
-    StrObj { hdr: Header::new(KIND_STR, is_static), chars, ascii, text: text.into_boxed_str() }
+    let first = first_scalar(&text, ascii);
+    StrObj { hdr: Header::new(KIND_STR, is_static), chars, ascii, first, text: text.into_boxed_str() }
 }

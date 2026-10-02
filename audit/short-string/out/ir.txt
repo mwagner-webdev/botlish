@@ -1,17 +1,17 @@
-fib identical-nir
-lex-strategy identical-nir
-loop-count identical-nir
-refined-checks off 6776747 on 7195439 delta +418692 (+6.18%) runs 4
-source-checks off 73486 on 68963 delta -4523 (-6.15%) runs 11
-sum-refined identical-nir
-test-selection identical-nir
-uri-steady off 42728012 on 36053824 delta -6674188 (-15.62%) runs 4
-ai_text_clean off 187348 on 68507 delta -118841 (-63.43%) runs 11
-csv off 19629 on 19622 delta -7 (-0.04%) runs 11
-csv_chunked off 19516 on 19516 delta +0 (+0.00%) runs 4
-csv_geometric off 19637 on 19637 delta +0 (+0.00%) runs 4
-csv_records off 99778 on 99713 delta -65 (-0.07%) runs 4
-hashtable identical-nir
-matmul identical-nir
-string_replace off 11935 on 12274 delta +339 (+2.84%) runs 11
-string_reverse identical-nir
+fib             base      1404178  off      1404178 (+0.00%)  on      1404178  on-vs-base +0 (+0.00%)  on-vs-off +0 (+0.00%)  (NIR unchanged)
+lex-strategy    base       312814  off       314020 (+0.39%)  on       314020  on-vs-base +1206 (+0.39%)  on-vs-off +0 (+0.00%)  (NIR unchanged)
+loop-count      base        12037  off        12037 (+0.00%)  on        12037  on-vs-base +0 (+0.00%)  on-vs-off +0 (+0.00%)  (NIR unchanged)
+refined-checks  base      6777452  off      6826601 (+0.73%)  on      6892829  on-vs-base +115377 (+1.70%)  on-vs-off +66228 (+0.97%)  
+source-checks   base        73492  off        73686 (+0.26%)  on        65946  on-vs-base -7546 (-10.27%)  on-vs-off -7740 (-10.50%)  
+sum-refined     base        12435  off        12435 (+0.00%)  on        12435  on-vs-base +0 (+0.00%)  on-vs-off +0 (+0.00%)  (NIR unchanged)
+test-selection  base        33420  off        33297 (-0.37%)  on        33297  on-vs-base -123 (-0.37%)  on-vs-off +0 (+0.00%)  (NIR unchanged)
+uri-steady      base     42730297  off     42855215 (+0.29%)  on     35653329  on-vs-base -7076968 (-16.56%)  on-vs-off -7201886 (-16.81%)  
+ai_text_clean   base       187382  off       187975 (+0.32%)  on        66517  on-vs-base -120865 (-64.50%)  on-vs-off -121458 (-64.61%)  
+csv             base        19631  off        19665 (+0.17%)  on        19685  on-vs-base +54 (+0.28%)  on-vs-off +20 (+0.10%)  
+csv_chunked     base        19516  off        19558 (+0.22%)  on        19558  on-vs-base +42 (+0.22%)  on-vs-off +0 (+0.00%)  
+csv_geometric   base        19637  off        19679 (+0.21%)  on        19679  on-vs-base +42 (+0.21%)  on-vs-off +0 (+0.00%)  
+csv_records     base        99074  off        99816 (+0.75%)  on        99629  on-vs-base +555 (+0.56%)  on-vs-off -187 (-0.19%)  
+hashtable       base        11727  off        11727 (+0.00%)  on        11727  on-vs-base +0 (+0.00%)  on-vs-off +0 (+0.00%)  (NIR unchanged)
+matmul          base         9240  off         9240 (+0.00%)  on         9240  on-vs-base +0 (+0.00%)  on-vs-off +0 (+0.00%)  (NIR unchanged)
+string_replace  base        12035  off        12130 (+0.79%)  on        12094  on-vs-base +59 (+0.49%)  on-vs-off -36 (-0.30%)  
+string_reverse  base        11382  off        11364 (-0.16%)  on        11364  on-vs-base -18 (-0.16%)  on-vs-off +0 (+0.00%)  (NIR unchanged)

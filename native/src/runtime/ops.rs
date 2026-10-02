@@ -731,10 +731,7 @@ pub extern "C" fn rt_str_to_short(_p: *mut Vm, s: Value) -> u64 {
     if obj.chars == 0 {
         return SHORT_EMPTY as u64;
     }
-    if obj.ascii {
-        return obj.text.as_bytes()[0] as u64;
-    }
-    obj.text.chars().next().expect("a one-character String has a character") as u64
+    obj.first as u64
 }
 
 /// The String a ShortString1 scalar stands for: "" for Empty, else the

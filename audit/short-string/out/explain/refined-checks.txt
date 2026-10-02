@@ -1,0 +1,383 @@
+instance <program>
+  closed: yes
+  entry: runtime (tagged)
+  values:
+    q (e1):
+      semantic type: String
+      proven character length: unproven (unknown length)
+      ShortString1 eligible: no (unknown length)
+      physical representation: tagged String (unknown-length)
+      uses:
+        argument 3 of check<int, int, str, str>
+
+instance char::codepoint<UnicodeChar>
+  closed: yes
+  params:
+    c:
+      semantic type: UnicodeChar
+      ABI tagged (not-string)
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+
+instance byte::high_nibble<int>
+  closed: yes
+  params:
+    b:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: int[HighNibble]
+    ABI tagged (not-string)
+
+instance byte::nibble<int>
+  closed: yes
+  params:
+    x:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: int[Nibble]
+    ABI tagged (not-string)
+
+instance byte::from_int<int>
+  closed: yes
+  params:
+    value:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: int[Byte]
+    ABI tagged (not-string)
+
+instance byte::set<List[UnicodeChar]>
+  closed: yes
+  params:
+    chars:
+      semantic type: List[UnicodeChar]
+      ABI tagged (not-string)
+  result:
+    semantic type: ImmutableSet[int[Byte]]
+    ABI tagged (not-string)
+
+instance ascii::is_digit<int>
+  closed: yes
+  params:
+    b:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: bool
+    ABI tagged (not-string)
+
+instance ascii::is_upper<int>
+  closed: yes
+  params:
+    b:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: bool
+    ABI tagged (not-string)
+
+instance ascii::is_lower<int>
+  closed: yes
+  params:
+    b:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: bool
+    ABI tagged (not-string)
+
+instance ascii::is_alphabetic<int>
+  closed: yes
+  params:
+    b:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: bool
+    ABI tagged (not-string)
+
+instance ascii::is_alphanumeric<int>
+  closed: yes
+  params:
+    b:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: bool
+    ABI tagged (not-string)
+
+instance web::emailish?<str>
+  closed: yes
+  params:
+    v:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        length
+  result:
+    semantic type: bool
+    ABI tagged (not-string)
+
+instance char_at<generic>
+  closed: yes
+  params:
+    i:
+      semantic type: any
+      ABI tagged (not-string)
+  result:
+    semantic type: String
+    proven character length: [1,1]
+    ShortString1 eligible: yes
+    ABI ShortString1
+
+instance local_char?<str>
+  closed: yes
+  params:
+    c:
+      semantic type: String
+      proven character length: [1,1]
+      ShortString1 eligible: yes
+      ABI ShortString1
+      uses:
+        immutable_set_contains -> materialize
+        is_tcl_alnum -> materialize
+  result:
+    semantic type: bool
+    ABI tagged (not-string)
+
+instance local_char?<generic>
+  closed: no
+  params:
+    c:
+      semantic type: any
+      ABI tagged (not-string)
+  result:
+    semantic type: bool
+    ABI tagged (not-string)
+
+instance label_char?<str>
+  closed: yes
+  params:
+    c:
+      semantic type: String
+      proven character length: [1,1]
+      ShortString1 eligible: yes
+      ABI ShortString1
+      uses:
+        equality -> scalar
+        is_tcl_alnum -> materialize
+  result:
+    semantic type: bool
+    ABI tagged (not-string)
+
+instance scan_while<any, block(e239)>
+  closed: yes
+  params:
+    start:
+      semantic type: any
+      ABI tagged (not-string)
+    predicate:
+      semantic type: block(e239)
+      ABI tagged (not-string)
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+
+instance scan_while<any, native(is_tcl_alpha)>
+  closed: yes
+  params:
+    start:
+      semantic type: any
+      ABI tagged (not-string)
+    predicate:
+      semantic type: native(is_tcl_alpha)
+      ABI tagged (not-string)
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+
+instance scan_while<generic>
+  closed: no
+  params:
+    start:
+      semantic type: any
+      ABI tagged (not-string)
+    predicate:
+      semantic type: any
+      ABI tagged (not-string)
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+
+instance tld?<generic>
+  closed: yes
+  params:
+    i:
+      semantic type: any
+      ABI tagged (not-string)
+  result:
+    semantic type: bool
+    ABI tagged (not-string)
+
+instance domain?<generic>
+  closed: yes
+  params:
+    start:
+      semantic type: any
+      ABI tagged (not-string)
+  result:
+    semantic type: bool
+    ABI tagged (not-string)
+
+instance web::is_unreserved<int>
+  closed: yes
+  params:
+    b:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: bool
+    ABI tagged (not-string)
+
+instance web::uri_escape_text<str>
+  closed: yes
+  params:
+    s:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 0 of esc_from<str, int, str>
+  result:
+    semantic type: String
+    proven character length: unproven (unknown length)
+    ShortString1 eligible: no
+    ABI tagged (unknown-length)
+
+instance high_nibble<int>
+  closed: yes
+  params:
+    b:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: int[Nibble]
+    ABI tagged (not-string)
+
+instance hex_pair<int>
+  closed: yes
+  params:
+    b:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: String
+    proven character length: unproven (unknown length)
+    ShortString1 eligible: no
+    ABI tagged (unknown-length)
+
+instance esc_bytes<List[int], int, str>
+  closed: yes
+  params:
+    bytes:
+      semantic type: List[int]
+      ABI tagged (not-string)
+    i:
+      semantic type: int
+      ABI tagged (not-string)
+    acc:
+      semantic type: String
+      proven character length: unproven (unknown length)
+      ShortString1 eligible: no
+      ABI tagged (unknown-length)
+      uses:
+        concat
+        return
+  result:
+    semantic type: String
+    proven character length: unproven (unknown length)
+    ShortString1 eligible: no
+    ABI tagged (unknown-length)
+
+instance esc_char<str>
+  closed: yes
+  params:
+    c:
+      semantic type: String
+      proven character length: [1,1]
+      ShortString1 eligible: yes
+      ABI ShortString1
+      uses:
+        encode_utf8 -> materialize
+        return -> materialize
+  result:
+    semantic type: String
+    proven character length: unproven (unknown length)
+    ShortString1 eligible: no
+    ABI tagged (unknown-length)
+
+instance esc_from<str, int, str>
+  closed: yes
+  params:
+    text:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 0 of esc_from<str, int, str>
+        length
+        substring
+    i:
+      semantic type: int
+      ABI tagged (not-string)
+    acc:
+      semantic type: String
+      proven character length: unproven (unknown length)
+      ShortString1 eligible: no
+      ABI tagged (unknown-length)
+      uses:
+        concat
+        return
+  result:
+    semantic type: String
+    proven character length: unproven (unknown length)
+    ShortString1 eligible: no
+    ABI tagged (unknown-length)
+
+instance check<int, int, str, str>
+  closed: yes
+  params:
+    n:
+      semantic type: int
+      ABI tagged (not-string)
+    acc:
+      semantic type: int
+      ABI tagged (not-string)
+    s:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 0 of web::emailish?<str>
+        argument 2 of check<int, int, str, str>
+    q:
+      semantic type: String
+      proven character length: unproven (unknown length)
+      ShortString1 eligible: no
+      ABI tagged (unknown-length)
+      uses:
+        UriQueryValue?
+        argument 3 of check<int, int, str, str>
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+

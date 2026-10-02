@@ -1,0 +1,18 @@
+fib              values agree     strtoshort   0 shorttostr   0 shortlit   0 shortlen  0 shorteq  0 slice  0 | short ABI functions  0 (params  0 results  0) | 181 bytes
+lex-strategy     values agree     strtoshort   0 shorttostr   0 shortlit   0 shortlen  0 shorteq  0 slice  0 | short ABI functions  0 (params  0 results  0) | 5119 bytes
+loop-count       values agree     strtoshort   0 shorttostr   0 shortlit   0 shortlen  0 shorteq  0 slice  0 | short ABI functions  0 (params  0 results  0) | 274 bytes
+refined-checks   values agree     strtoshort   1 shorttostr   2 shortlit   0 shortlen  0 shorteq  0 slice  1 | short ABI functions  2 (params  2 results  0) | 9324 bytes
+source-checks    values agree     strtoshort   0 shorttostr   1 shortlit   0 shortlen  0 shorteq  0 slice  1 | short ABI functions  0 (params  0 results  0) | 4329 bytes
+sum-refined      values agree     strtoshort   0 shorttostr   0 shortlit   0 shortlen  0 shorteq  0 slice  0 | short ABI functions  0 (params  0 results  0) | 277 bytes
+test-selection   values agree     strtoshort   0 shorttostr   0 shortlit   0 shortlen  0 shorteq  0 slice  0 | short ABI functions  0 (params  0 results  0) | 6421 bytes
+uri-steady       values agree     strtoshort   0 shorttostr   1 shortlit   0 shortlen  0 shorteq  0 slice  1 | short ABI functions  1 (params  1 results  0) | 5593 bytes
+ai_text_clean    values agree     strtoshort   1 shorttostr   1 shortlit  19 shortlen  0 shorteq 19 slice  0 | short ABI functions  2 (params  2 results  0) | 2473 bytes
+csv              values agree     strtoshort   0 shorttostr   1 shortlit   2 shortlen  0 shorteq  1 slice  1 | short ABI functions  1 (params  0 results  1) | 5860 bytes
+csv_chunked      values agree     strtoshort   0 shorttostr   1 shortlit   2 shortlen  0 shorteq  1 slice  1 | short ABI functions  1 (params  0 results  1) | 10305 bytes
+csv_geometric    values agree     strtoshort   0 shorttostr   1 shortlit   2 shortlen  0 shorteq  1 slice  1 | short ABI functions  1 (params  0 results  1) | 7715 bytes
+csv_records      values agree     strtoshort   0 shorttostr   1 shortlit   2 shortlen  0 shorteq  1 slice  1 | short ABI functions  1 (params  0 results  1) | 23371 bytes
+hashtable        values agree     strtoshort   0 shorttostr   0 shortlit   0 shortlen  0 shorteq  0 slice  0 | short ABI functions  0 (params  0 results  0) | 12732 bytes
+matmul           values agree     strtoshort   0 shorttostr   0 shortlit   0 shortlen  0 shorteq  0 slice  0 | short ABI functions  0 (params  0 results  0) | 4683 bytes
+string_replace   values agree     strtoshort   0 shorttostr   1 shortlit   5 shortlen  0 shorteq  0 slice  0 | short ABI functions  2 (params  2 results  0) | 2776 bytes
+string_reverse   values agree     strtoshort   0 shorttostr   0 shortlit   0 shortlen  0 shorteq  0 slice  0 | short ABI functions  0 (params  0 results  0) | 990 bytes
+disagreements: 0

@@ -1,0 +1,14 @@
+instance <program>
+  closed: yes
+  entry: runtime (tagged)
+
+instance fib<int>
+  closed: yes
+  params:
+    n:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+

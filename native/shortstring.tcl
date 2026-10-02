@@ -986,7 +986,7 @@ proc native::shortstr::explain {id} {
             if {$key eq "str" && [dict exists $uses $b]} {
                 append out "      uses:\n"
                 foreach u [lsort -unique [dict get $uses $b]] {
-                    append out "        $u\n"
+                    append out "        [UseText $u [Ok $fact]]\n"
                 }
             }
         }
@@ -1021,12 +1021,21 @@ proc native::shortstr::explain {id} {
             if {$ulist ne ""} {
                 append out "      uses:\n"
                 foreach u [lsort -unique $ulist] {
-                    append out "        $u\n"
+                    append out "        [UseText $u [Ok $f]]\n"
                 }
             }
         }
     }
     return $out
+}
+
+# A use label: for a value that stays a tagged String the scalar/materialize
+# distinction does not exist (it is simply a tagged use).
+proc native::shortstr::UseText {use eligible} {
+    if {$eligible} {
+        return $use
+    }
+    return [string map {" -> materialize" "" " -> scalar" ""} $use]
 }
 
 proc native::shortstr::FactRange {f} {

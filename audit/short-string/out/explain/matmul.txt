@@ -1,0 +1,130 @@
+instance <program>
+  closed: yes
+  entry: runtime (tagged)
+
+instance dot<List[int], List[List[int]], int, int, int, int>
+  closed: yes
+  params:
+    a_row:
+      semantic type: List[int]
+      ABI tagged (not-string)
+    b:
+      semantic type: List[List[int]]
+      ABI tagged (not-string)
+    column:
+      semantic type: int
+      ABI tagged (not-string)
+    k:
+      semantic type: int
+      ABI tagged (not-string)
+    count:
+      semantic type: int
+      ABI tagged (not-string)
+    total:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+
+instance product_row<List[int], List[List[int]], int, int, List[never]>
+  closed: yes
+  params:
+    a_row:
+      semantic type: List[int]
+      ABI tagged (not-string)
+    b:
+      semantic type: List[List[int]]
+      ABI tagged (not-string)
+    column:
+      semantic type: int
+      ABI tagged (not-string)
+    columns:
+      semantic type: int
+      ABI tagged (not-string)
+    row:
+      semantic type: List[never]
+      ABI tagged (not-string)
+  result:
+    semantic type: List[int]
+    ABI tagged (not-string)
+
+instance product_row<List[int], List[List[int]], int, int, List[int]>
+  closed: yes
+  params:
+    a_row:
+      semantic type: List[int]
+      ABI tagged (not-string)
+    b:
+      semantic type: List[List[int]]
+      ABI tagged (not-string)
+    column:
+      semantic type: int
+      ABI tagged (not-string)
+    columns:
+      semantic type: int
+      ABI tagged (not-string)
+    row:
+      semantic type: List[int]
+      ABI tagged (not-string)
+  result:
+    semantic type: List[int]
+    ABI tagged (not-string)
+
+instance product_rows<List[List[int]], List[List[int]], int, int, List[never]>
+  closed: yes
+  params:
+    a:
+      semantic type: List[List[int]]
+      ABI tagged (not-string)
+    b:
+      semantic type: List[List[int]]
+      ABI tagged (not-string)
+    i:
+      semantic type: int
+      ABI tagged (not-string)
+    columns:
+      semantic type: int
+      ABI tagged (not-string)
+    rows:
+      semantic type: List[never]
+      ABI tagged (not-string)
+  result:
+    semantic type: List[List[int]]
+    ABI tagged (not-string)
+
+instance product_rows<List[List[int]], List[List[int]], int, int, List[List[int]]>
+  closed: yes
+  params:
+    a:
+      semantic type: List[List[int]]
+      ABI tagged (not-string)
+    b:
+      semantic type: List[List[int]]
+      ABI tagged (not-string)
+    i:
+      semantic type: int
+      ABI tagged (not-string)
+    columns:
+      semantic type: int
+      ABI tagged (not-string)
+    rows:
+      semantic type: List[List[int]]
+      ABI tagged (not-string)
+  result:
+    semantic type: List[List[int]]
+    ABI tagged (not-string)
+
+instance matmul<List[List[int]], List[List[int]]>
+  closed: yes
+  params:
+    a:
+      semantic type: List[List[int]]
+      ABI tagged (not-string)
+    b:
+      semantic type: List[List[int]]
+      ABI tagged (not-string)
+  result:
+    semantic type: List[List[int]]
+    ABI tagged (not-string)
+

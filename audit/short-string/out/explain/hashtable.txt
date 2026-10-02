@@ -1,0 +1,405 @@
+instance <program>
+  closed: yes
+  entry: runtime (tagged)
+
+instance ht_min_capacity<generic>
+  closed: yes
+  params:
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+
+instance ht_empty_state<generic>
+  closed: yes
+  params:
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+
+instance ht_occupied_state<generic>
+  closed: yes
+  params:
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+
+instance ht_tombstone_state<generic>
+  closed: yes
+  params:
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+
+instance ht_fill_empty<mutarray, int, int>
+  closed: yes
+  params:
+    controls:
+      semantic type: mutarray
+      ABI tagged (not-string)
+    i:
+      semantic type: int
+      ABI tagged (not-string)
+    capacity:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: unit
+    ABI tagged (not-string)
+
+instance ht_alloc<int>
+  closed: yes
+  params:
+    capacity:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: mutarray
+    ABI tagged (not-string)
+
+instance ht_new<generic>
+  closed: yes
+  params:
+  result:
+    semantic type: mutarray
+    ABI tagged (not-string)
+
+instance ht_controls<mutarray>
+  closed: yes
+  params:
+    table:
+      semantic type: mutarray
+      ABI tagged (not-string)
+  result:
+    semantic type: any
+    ABI tagged (not-string)
+
+instance ht_keys<mutarray>
+  closed: yes
+  params:
+    table:
+      semantic type: mutarray
+      ABI tagged (not-string)
+  result:
+    semantic type: any
+    ABI tagged (not-string)
+
+instance ht_values<mutarray>
+  closed: yes
+  params:
+    table:
+      semantic type: mutarray
+      ABI tagged (not-string)
+  result:
+    semantic type: any
+    ABI tagged (not-string)
+
+instance ht_size<mutarray>
+  closed: yes
+  params:
+    table:
+      semantic type: mutarray
+      ABI tagged (not-string)
+  result:
+    semantic type: any
+    ABI tagged (not-string)
+
+instance ht_tombstones<mutarray>
+  closed: yes
+  params:
+    table:
+      semantic type: mutarray
+      ABI tagged (not-string)
+  result:
+    semantic type: any
+    ABI tagged (not-string)
+
+instance ht_capacity<mutarray>
+  closed: yes
+  params:
+    table:
+      semantic type: mutarray
+      ABI tagged (not-string)
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+
+instance ht_probe_start<mutarray, str>
+  closed: yes
+  params:
+    table:
+      semantic type: mutarray
+      ABI tagged (not-string)
+    key:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        hash
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+
+instance ht_probe_next<mutarray, int>
+  closed: yes
+  params:
+    table:
+      semantic type: mutarray
+      ABI tagged (not-string)
+    index:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+
+instance ht_find_get<mutarray, str, int>
+  closed: yes
+  params:
+    table:
+      semantic type: mutarray
+      ABI tagged (not-string)
+    key:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 1 of ht_find_get<mutarray, str, int>
+        equality with an unrestricted String
+    index:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+
+instance ht_find_insert<mutarray, str, int, int>
+  closed: yes
+  params:
+    table:
+      semantic type: mutarray
+      ABI tagged (not-string)
+    key:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 1 of ht_find_insert<mutarray, str, int, int>
+        equality with an unrestricted String
+    index:
+      semantic type: int
+      ABI tagged (not-string)
+    first_tombstone:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+
+instance ht_get<mutarray, str>
+  closed: yes
+  params:
+    table:
+      semantic type: mutarray
+      ABI tagged (not-string)
+    key:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 1 of ht_find_get<mutarray, str, int>
+        argument 1 of ht_probe_start<mutarray, str>
+  result:
+    semantic type: any
+    ABI tagged (not-string)
+
+instance ht_contains<mutarray, str>
+  closed: yes
+  params:
+    table:
+      semantic type: mutarray
+      ABI tagged (not-string)
+    key:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 1 of ht_find_get<mutarray, str, int>
+        argument 1 of ht_probe_start<mutarray, str>
+  result:
+    semantic type: bool
+    ABI tagged (not-string)
+
+instance ht_rehash_probe<mutarray, int, int>
+  closed: yes
+  params:
+    newControls:
+      semantic type: mutarray
+      ABI tagged (not-string)
+    index:
+      semantic type: int
+      ABI tagged (not-string)
+    capacity:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: int
+    ABI tagged (not-string)
+
+instance ht_rehash_insert<struct{controls: mutarray, keys: mutarray, values: mutarray}, int, any, any>
+  closed: yes
+  params:
+    dest:
+      semantic type: struct{controls: mutarray, keys: mutarray, values: mutarray}
+      ABI tagged (not-string)
+    capacity:
+      semantic type: int
+      ABI tagged (not-string)
+    key:
+      semantic type: any
+      ABI tagged (not-string)
+    value:
+      semantic type: any
+      ABI tagged (not-string)
+  result:
+    semantic type: unit
+    ABI tagged (not-string)
+
+instance ht_rehash_scan<struct{controls: any, keys: any, values: any}, int, int, struct{controls: mutarray, keys: mutarray, values: mutarray}, int>
+  closed: yes
+  params:
+    src:
+      semantic type: struct{controls: any, keys: any, values: any}
+      ABI tagged (not-string)
+    i:
+      semantic type: int
+      ABI tagged (not-string)
+    oldCapacity:
+      semantic type: int
+      ABI tagged (not-string)
+    dest:
+      semantic type: struct{controls: mutarray, keys: mutarray, values: mutarray}
+      ABI tagged (not-string)
+    newCapacity:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: unit
+    ABI tagged (not-string)
+
+instance ht_rehash<mutarray, int>
+  closed: yes
+  params:
+    table:
+      semantic type: mutarray
+      ABI tagged (not-string)
+    newCapacity:
+      semantic type: int
+      ABI tagged (not-string)
+  result:
+    semantic type: unit
+    ABI tagged (not-string)
+
+instance ht_should_grow<mutarray>
+  closed: yes
+  params:
+    table:
+      semantic type: mutarray
+      ABI tagged (not-string)
+  result:
+    semantic type: bool
+    ABI tagged (not-string)
+
+instance ht_grow_or_clean<mutarray>
+  closed: yes
+  params:
+    table:
+      semantic type: mutarray
+      ABI tagged (not-string)
+  result:
+    semantic type: unit
+    ABI tagged (not-string)
+
+instance ht_place<mutarray, int, str, str>
+  closed: yes
+  params:
+    table:
+      semantic type: mutarray
+      ABI tagged (not-string)
+    index:
+      semantic type: int
+      ABI tagged (not-string)
+    key:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        mutable_array_set
+    value:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        mutable_array_set
+  result:
+    semantic type: unit
+    ABI tagged (not-string)
+
+instance ht_set<mutarray, str, str>
+  closed: yes
+  params:
+    table:
+      semantic type: mutarray
+      ABI tagged (not-string)
+    key:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 1 of ht_find_insert<mutarray, str, int, int>
+        argument 1 of ht_probe_start<mutarray, str>
+        argument 2 of ht_place<mutarray, int, str, str>
+    value:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 3 of ht_place<mutarray, int, str, str>
+        mutable_array_set
+  result:
+    semantic type: unit
+    ABI tagged (not-string)
+
+instance ht_delete<mutarray, str>
+  closed: yes
+  params:
+    table:
+      semantic type: mutarray
+      ABI tagged (not-string)
+    key:
+      semantic type: String
+      proven character length: unproven (more than one character (length > 1))
+      ShortString1 eligible: no
+      ABI tagged (length-gt-1)
+      uses:
+        argument 1 of ht_find_get<mutarray, str, int>
+        argument 1 of ht_probe_start<mutarray, str>
+  result:
+    semantic type: unit
+    ABI tagged (not-string)
+
+instance sample<generic>
+  closed: yes
+  params:
+  result:
+    semantic type: list[bool, bool, bool, bool, bool, any]
+    ABI tagged (not-string)
+

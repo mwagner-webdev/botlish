@@ -25,6 +25,12 @@
 #                     provenance -- guard condition, its nesting depth,
 #                     recursive update, and the resulting Range, or why an
 #                     attempted parameter was not proven
+#   short-string.txt  native::shortstr: the ShortString1 plan (SHORT-STRING.md):
+#                     per instance and per local String value, the proven
+#                     character length, eligibility, physical representation,
+#                     production, uses (scalar consumer or materialization
+#                     frontier) and the rejection reason of every String
+#                     position kept tagged
 #   nir.txt           native::nir: the NIR every instance lowers to
 #   clif.txt          native::clif: the Cranelift IR of every function
 #   roots.txt         native::roots: codegen::roots's per-function GC-root
@@ -147,6 +153,9 @@ W $outdir induction.txt [hir::induction::explain $hir $spec [dict get $ranges in
 
 set nirText [native::nir $hir]
 W $outdir nir.txt $nirText
+# The ShortString1 plan of that very lowering (native::lower::program left it
+# in native::shortstr's state).
+W $outdir short-string.txt [native::shortstr::explainAll]
 W $outdir transport.txt [native::transportCensusText $hir]
 W $outdir program.nir $nirText
 

@@ -1021,4 +1021,111 @@ test short-deterministic-plan-and-nir {fixed source and configuration give byte-
     expr {$a eq $b}
 } -result 1
 
+# ---------------------------------------------------------------------------
+# Audit output: the explanation and the censuses
+
+proc explainOf {text args} {
+    native::lowered [srcHir $text] {*}$args
+    return [native::shortstr::explainAll]
+}
+
+proc censusOf {text args} {
+    native::lowered [srcHir $text] {*}$args
+    return [native::shortstr::census]
+}
+
+set auditSource {
+    fn choose(flag):
+        if flag:
+            ""
+        else:
+            "x"
+
+    fn probe(flag, xs):
+        s = choose(flag)
+        t = "ab"
+        [length(s), s == "x", list_append(xs, s), t]
+
+    probe(true, [])
+}
+
+test short-audit-explains-a-virtual-value {the audit says what was proven, what the value is, how it is produced and how each use consumes it} -body {
+    set text [explainOf $auditSource {*}$noInline]
+    foreach needle {
+        "instance choose<bool>"
+        "proven character length: \[0,1\]"
+        "ShortString1 eligible: yes"
+        "physical representation: ShortString1 (local)"
+        "production: result of choose<bool>"
+        "length -> scalar"
+        "equality -> scalar"
+        "list_append -> materialize"
+    } {
+        if {[string first $needle $text] < 0} { error "missing \"$needle\" in:\n$text" }
+    }
+    set ok 1
+} -result 1
+
+test short-audit-explains-rejections {a String kept tagged says why: length > 1, open instance, disabled} -body {
+    set text [explainOf $auditSource {*}$noInline]
+    foreach needle {
+        "t (e"
+        "proven character length: unproven (more than one character (length > 1))"
+        "physical representation: tagged String (length-gt-1)"
+    } {
+        if {[string first $needle $text] < 0} { error "missing \"$needle\" in:\n$text" }
+    }
+    set off [explainOf $auditSource {*}$noInline -short-string-opt 0]
+    if {[string first "disabled" $off] < 0} { error "disabled not explained:\n$off" }
+    set ok 1
+} -result 1
+
+test short-audit-census-counts {the virtualization census over a known program} -body {
+    set c [censusOf $auditSource {*}$noInline]
+    list [dict get $c localsExamined] [dict get $c localsProven] [dict get $c resultSelected] [dict get $c runtimeEmptyOrOne] [dict get $c exactOne]
+} -result {2 1 1 2 0}
+
+test short-audit-lowering-counters {lowering counts its frontier conversions per function} -body {
+    set lowered [native::lowered [srcHir $auditSource] {*}$noInline]
+    set total [dict create shortToTagged 0 shortLocals 0 shortLen 0 shortEq 0]
+    foreach info [dict get $lowered functions] {
+        if {![dict exists $info short]} continue
+        dict for {k v} [dict get $info short] {
+            if {[dict exists $total $k]} { dict incr total $k $v }
+        }
+    }
+    set total
+} -result {shortToTagged 1 shortLocals 1 shortLen 1 shortEq 1}
+
+test short-literal-materializes-to-a-constant-not-an-allocation {a short local bound to a literal and stored in a List materializes to a static String constant (`str`), never shorttostr; a scalar use of the same local costs nothing} -body {
+    set text {
+        fn keep(xs):
+            s = "x"
+            [length(s), list_append(xs, s)]
+
+        keep([])
+    }
+    set nir [nirOf $text {*}$noInline]
+    set keep [fnText $nir keep]
+    list [conversionsIn $nir keep] [countIn {shortlit 120} $keep] [countIn {= str "x"} $keep] [parityShort $text]
+} -result {{0 0} 1 1 {value:[1, ["x"]]}}
+
+test short-mixed-parameter-converts-once {a short parameter used by a tagged consumer and by two scalar consumers is materialized once and read as a scalar for the rest (the cached conversion)} -body {
+    set text {
+        fn pick(flag):
+            if flag:
+                ""
+            else:
+                "y"
+
+        fn probe(s):
+            t = list_append([], s)
+            [t, length(s), s == "y"]
+
+        probe(pick(true))
+    }
+    set nir [nirOf $text {*}$noInline]
+    list [conversionsIn $nir probe] [parityShort $text]
+} -result {{0 1} {value:[[""], 0, false]}}
+
 cleanupTests

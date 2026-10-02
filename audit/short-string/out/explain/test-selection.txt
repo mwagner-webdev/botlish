@@ -1,0 +1,136 @@
+instance <program>
+  closed: yes
+  entry: runtime (tagged)
+
+instance list::any?<List[str], block(e55)>
+  closed: yes
+  params:
+    xs:
+      semantic type: List[str]
+      ABI tagged (not-string)
+    predicate:
+      semantic type: block(e55)
+      ABI tagged (not-string)
+  result:
+    semantic type: bool
+    ABI tagged (not-string)
+
+instance list::none?<List[str], block(e55)>
+  closed: yes
+  params:
+    xs:
+      semantic type: List[str]
+      ABI tagged (not-string)
+    predicate:
+      semantic type: block(e55)
+      ABI tagged (not-string)
+  result:
+    semantic type: bool
+    ABI tagged (not-string)
+
+instance list::find<List[Test], block(e94)>
+  closed: yes
+  params:
+    xs:
+      semantic type: List[Test]
+      ABI tagged (not-string)
+    predicate:
+      semantic type: block(e94)
+      ABI tagged (not-string)
+  result:
+    semantic type: Test
+    ABI tagged (not-string)
+
+instance make_changed?<List[str]>
+  closed: yes
+  params:
+    changed:
+      semantic type: List[str]
+      ABI tagged (not-string)
+  result:
+    semantic type: block(e55)/1 -> bool
+    ABI tagged (not-string)
+
+instance changed?<generic>
+  closed: no
+  params:
+    path:
+      semantic type: any
+      ABI tagged (not-string)
+  result:
+    semantic type: bool
+    ABI tagged (not-string)
+
+instance test_name<Test>
+  closed: yes
+  params:
+    test:
+      semantic type: Test
+      ABI tagged (not-string)
+  result:
+    semantic type: String
+    proven character length: unproven (unknown length)
+    ShortString1 eligible: no
+    ABI tagged (unknown-length)
+
+instance test_deps<Test>
+  closed: yes
+  params:
+    test:
+      semantic type: Test
+      ABI tagged (not-string)
+  result:
+    semantic type: List[str]
+    ABI tagged (not-string)
+
+instance affected?<Test, block(e55)>
+  closed: yes
+  params:
+    test:
+      semantic type: Test
+      ABI tagged (not-string)
+    changed?:
+      semantic type: block(e55)
+      ABI tagged (not-string)
+  result:
+    semantic type: bool
+    ABI tagged (not-string)
+
+instance select_affected<List[Test], block(e55)>
+  closed: yes
+  params:
+    tests:
+      semantic type: List[Test]
+      ABI tagged (not-string)
+    changed?:
+      semantic type: block(e55)
+      ABI tagged (not-string)
+  result:
+    semantic type: List[Test]
+    ABI tagged (not-string)
+
+instance first_affected<List[Test], block(e55)>
+  closed: yes
+  params:
+    tests:
+      semantic type: List[Test]
+      ABI tagged (not-string)
+    changed?:
+      semantic type: block(e55)
+      ABI tagged (not-string)
+  result:
+    semantic type: String
+    proven character length: unproven (unknown length)
+    ShortString1 eligible: no
+    ABI tagged (unknown-length)
+
+instance is_affected?<generic>
+  closed: no
+  params:
+    test:
+      semantic type: any
+      ABI tagged (not-string)
+  result:
+    semantic type: bool
+    ABI tagged (not-string)
+

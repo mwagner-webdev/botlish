@@ -1,0 +1,86 @@
+instance <program>
+  closed: yes
+  entry: runtime (tagged)
+  values:
+    first_invalid (e149):
+      semantic type: String
+      proven character length: unproven (unknown length)
+      ShortString1 eligible: no (unknown length)
+      physical representation: tagged String (unknown-length)
+      uses:
+        list
+
+instance list::find<List[str], block(e114)>
+  closed: yes
+  params:
+    xs:
+      semantic type: List[str]
+      ABI tagged (not-string)
+    predicate:
+      semantic type: block(e114)
+      ABI tagged (not-string)
+  result:
+    semantic type: String
+    proven character length: unproven (unknown length)
+    ShortString1 eligible: no
+    ABI tagged (unknown-length)
+
+instance is_underscore?<generic>
+  closed: no
+  params:
+    c:
+      semantic type: any
+      ABI tagged (not-string)
+  result:
+    semantic type: bool
+    ABI tagged (not-string)
+
+instance is_hyphen?<generic>
+  closed: no
+  params:
+    c:
+      semantic type: any
+      ABI tagged (not-string)
+  result:
+    semantic type: bool
+    ABI tagged (not-string)
+
+instance classify_leading<generic>
+  closed: no
+  params:
+    name:
+      semantic type: any
+      ABI tagged (not-string)
+  result:
+    semantic type: List[bool]
+    ABI tagged (not-string)
+  values:
+    c (e83):
+      semantic type: String
+      proven character length: [1,1]
+      ShortString1 eligible: yes
+      physical representation: ShortString1 (local)
+      production: native substring
+      uses:
+        argument 0 of a dynamic call -> materialize
+
+instance valid_start?<generic>
+  closed: no
+  params:
+    name:
+      semantic type: any
+      ABI tagged (not-string)
+  result:
+    semantic type: bool
+    ABI tagged (not-string)
+
+instance invalid_name?<generic>
+  closed: no
+  params:
+    name:
+      semantic type: any
+      ABI tagged (not-string)
+  result:
+    semantic type: bool
+    ABI tagged (not-string)
+
