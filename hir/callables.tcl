@@ -421,6 +421,19 @@ proc hir::callables::WalkExpr {hirVar e} {
             foreach child [dict get $node body] {
                 WalkExpr hir $child
             }
+            # A collecting loop (COLLECTING-LOOPS.md): see listloop above.
+            CheckTrailing hir [dict get $node body] [hir::types::elementOf [hir::typeOf $hir $e]] \
+                {as a collecting loop's collected element, whose List element type differs}
+        }
+        lockloop {
+            foreach operand [hir::loopOperands $node] {
+                WalkExpr hir $operand
+            }
+            foreach child [dict get $node body] {
+                WalkExpr hir $child
+            }
+            CheckTrailing hir [dict get $node body] [hir::types::elementOf [hir::typeOf $hir $e]] \
+                {as a collecting loop's collected element, whose List element type differs}
         }
         return {
             set value [dict get $node value]

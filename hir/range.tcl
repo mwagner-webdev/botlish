@@ -812,6 +812,38 @@ proc hir::range::Sequence {hirVar ctxVar exprs} {
     return $result
 }
 
+# The Range every iteration's induction value lies in for a numeric loop
+# domain whose start/end operands have Ranges STARTR/ENDR (either may be
+# `never`: dead code, in which case nothing is claimed). START is where
+# iteration begins; the endpoint arithmetic below is on *Range bounds* (which
+# are unbounded integers in this analysis), never on a program value, so an
+# exclusive/inclusive adjustment cannot overflow anything:
+#
+#   up   to        min = START.min  max = END.max - 1
+#   up   through   min = START.min  max = END.max
+#   down to        min = END.min + 1  max = START.max
+#   down through   min = END.min      max = START.max
+proc hir::range::InductionSeed {startR endR direction endKind} {
+    if {$startR eq "never" || $endR eq "never"} {
+        return [unknown]
+    }
+    set exclusive [expr {$endKind eq "exclusive"}]
+    if {$direction eq "up"} {
+        set min [dict get $startR min]
+        set max [dict get $endR max]
+        if {$exclusive && $max ne "+inf"} {
+            set max [expr {$max - 1}]
+        }
+    } else {
+        set max [dict get $startR max]
+        set min [dict get $endR min]
+        if {$exclusive && $min ne "-inf"} {
+            set min [expr {$min + 1}]
+        }
+    }
+    return [dict create min $min max $max]
+}
+
 proc hir::range::Expr {hirVar ctxVar e} {
     upvar 1 $hirVar hir $ctxVar ctx
     if {![hir::get $hir $e reachable]} {
@@ -935,39 +967,57 @@ proc hir::range::Expr {hirVar ctxVar e} {
         }
         countloop {
             # Unlike listloop's element binding, the induction binding gets
-            # a real seed: the syntax itself supplies the theorem
-            # start <= i < end whenever the body runs at all (spec item
-            # 33). This is ordinary interval arithmetic over START's/END's
-            # own already-computed Ranges (ExternalSeeds/branch narrowing
-            # etc. have already run by the time this reads them) -- ranges
-            # min = START's own min (conservatively -inf if unknown), max =
-            # END's own max minus one (conservatively +inf if unknown, and
-            # never computed for END's exact bound minus one when END's max
-            # is itself infinite) -- never a new relational solver, and
-            # never fabricated when START/END's own Range is "never" (dead
-            # code reaching this loop at all).
+            # a real seed: the syntax itself supplies the interval theorem
+            # whenever the body runs at all (spec item 33) -- START <= i <
+            # END for `from .. to`, START <= i <= END for `from .. through`,
+            # START >= i > END for `down from .. to` and START >= i >= END
+            # for `down from .. through` (InductionSeed). This is ordinary
+            # interval arithmetic over START's/END's own already-computed
+            # Ranges (ExternalSeeds/branch narrowing etc. have already run
+            # by the time this reads them), conservatively infinite where an
+            # input bound is, and never a new relational solver. A
+            # countloop is a collecting loop (COLLECTING-LOOPS.md): its own
+            # value is a List, never rangeable (`unknown`), exactly like
+            # listloop's; body, bounds and seed are still all visited.
             set saved [dict get $ctx bindings]
             set startR [Expr hir ctx [dict get $node start]]
             set endR [Expr hir ctx [dict get $node end]]
-            set seed [unknown]
-            if {$startR ne "never" && $endR ne "never"} {
-                set endMax [dict get $endR max]
-                if {$endMax ne "+inf"} {
-                    set endMax [expr {$endMax - 1}]
-                }
-                set seed [dict create min [dict get $startR min] max $endMax]
-            }
+            set seed [InductionSeed $startR $endR [dict get $node direction] [dict get $node endKind]]
             set bindings [dict get $ctx bindings]
             dict set bindings [dict get $node countBinding] [intersect [TypeFact int] $seed]
             dict set ctx bindings $bindings
-            dict set ctx breakRanges $e never
             foreach child [dict get $node body] {
                 Expr hir ctx $child
             }
-            set result [dict get $ctx breakRanges $e]
-            dict unset ctx breakRanges $e
             dict set ctx bindings $saved
-            return $result
+            return [unknown]
+        }
+        lockloop {
+            # A lockstep loop's numeric domains are seeded exactly like a
+            # countloop's own induction binding; its list domains' element
+            # bindings stay unseeded, like listloop's. The value is a List.
+            set saved [dict get $ctx bindings]
+            set seeds {}
+            foreach domain [dict get $node domains] {
+                if {[dict get $domain kind] eq "list"} {
+                    Expr hir ctx [dict get $domain iterable]
+                } else {
+                    set startR [Expr hir ctx [dict get $domain start]]
+                    set endR [Expr hir ctx [dict get $domain end]]
+                    lappend seeds [dict get $domain binding] [InductionSeed $startR $endR \
+                        [dict get $domain direction] [dict get $domain endKind]]
+                }
+            }
+            set bindings [dict get $ctx bindings]
+            foreach {binding seed} $seeds {
+                dict set bindings $binding [intersect [TypeFact int] $seed]
+            }
+            dict set ctx bindings $bindings
+            foreach child [dict get $node body] {
+                Expr hir ctx $child
+            }
+            dict set ctx bindings $saved
+            return [unknown]
         }
         return {
             set value [dict get $node value]

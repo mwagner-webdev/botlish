@@ -1269,6 +1269,38 @@ add10(32)          # 42 (add captures x)
   bindings are not hoisted, so write callees before callers. See
   STRICT-REFERENCE-DETERMINISM.md.
 * `if c:` / `else:` (optional `else`), `loop:`, `break [e]`, `continue`.
+* **Collecting loops.** A loop with an iteration clause evaluates to the List
+  of its body's values (`continue` contributes nothing, a bare `break` ends it
+  with the List so far, `return`/errors leave as usual). A clause is one of
+
+  ```
+  loop x in xs:                    # every element of a List
+  loop i from a to b:              # a <= i <  b, ascending, b exclusive
+  loop i from a through b:         # a <= i <= b, ascending, b inclusive
+  loop i down from b to a:         # b >= i >  a, descending, a exclusive
+  loop i down from b through a:    # b >= i >= a, descending, a inclusive
+  ```
+
+  `from`/`down from` give the direction, `to`/`through` the endpoint
+  (`to` exclusive, `through` inclusive); a numeric loop whose bounds put
+  nothing in the domain runs zero times (it never reverses direction by
+  itself), and bounds are arbitrary-precision `Int`s evaluated once. The
+  inclusive forms are not `b + 1` / `a - 1` sugar: no value outside the
+  endpoints is ever formed. Clauses compose in **lockstep** with `and`:
+
+  ```
+  loop value in values and index from 0 to list_length(values):
+      [value, index]
+  ```
+
+  `and` runs one body execution per common position, advancing every clause
+  together (`continue` advances all of them, `break` leaves the loop). It is
+  *not* a special enumeration feature and not `zip`: every clause must have a
+  **statically provable equal iteration count**, otherwise the program is
+  rejected at compile time (`LOCKSTEP-UNPROVEN`, or `LOCKSTEP-UNEQUAL` when
+  the counts provably differ); there is no shortest-wins rule and no runtime
+  length check. See COLLECTING-LOOPS.md. A bare `loop:` (no clause) is
+  unchanged.
 * An `if` can also be the value of a binding, `return` or `break`
   (`sign = if n < 0:` followed by its blocks). It can't be an operand or an
   argument.

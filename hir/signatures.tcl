@@ -518,7 +518,18 @@ proc hir::signatures::Value {hir AVar e sink ctx} {
         countloop {
             Value $hir A [dict get $node start] {type int checked "the start of a counted loop"} $ctx
             Value $hir A [dict get $node end] {type int checked "the end of a counted loop"} $ctx
-            Seq $hir A [dict get $node body] drop $ctx
+            Seq $hir A [dict get $node body] flow $ctx
+        }
+        lockloop {
+            foreach domain [dict get $node domains] {
+                if {[dict get $domain kind] eq "list"} {
+                    Value $hir A [dict get $domain iterable] {type list checked "the iterable of a loop"} $ctx
+                } else {
+                    Value $hir A [dict get $domain start] {type int checked "the start of a counted loop"} $ctx
+                    Value $hir A [dict get $domain end] {type int checked "the end of a counted loop"} $ctx
+                }
+            }
+            Seq $hir A [dict get $node body] flow $ctx
         }
         return {
             if {[dict get $node value] ne ""} {

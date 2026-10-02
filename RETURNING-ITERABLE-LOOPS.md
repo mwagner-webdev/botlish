@@ -1,5 +1,10 @@
 # RETURNING-ITERABLE-LOOPS.md
 
+**Partially superseded by COLLECTING-LOOPS.md:** the section "Why counted
+loops remain unchanged" below is no longer true. COLLECTING-LOOPS.md made
+`loop i from a to b:` (and the new numeric forms) collecting loops with
+exactly the semantics this report gives `loop x in xs:`.
+
 ## Outcome
 
 `loop x in xs:` (core IR `listloop`) already existed as a language

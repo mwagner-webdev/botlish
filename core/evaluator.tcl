@@ -37,6 +37,7 @@ namespace eval core::interp {
         loop        core::forms::op-loop \
         listloop    core::forms::op-listloop \
         countloop   core::forms::op-countloop \
+        lockloop    core::forms::op-lockloop \
         return      core::forms::op-return \
         break       core::forms::op-break \
         continue    core::forms::op-continue \
@@ -222,25 +223,29 @@ proc core::forms::op-listloop {node env} {
     return [core::completion::normal [core::value::listOf $results]]
 }
 
-# (countloop START-EXPR END-EXPR (block (I) BODY...)): evaluates START-EXPR
+# (countloop START-EXPR END-EXPR (block (I) BODY...) ?DIRECTION ENDKIND?):
+# the numeric collecting loop (COLLECTING-LOOPS.md). Evaluates START-EXPR
 # then END-EXPR once each, left to right, in the enclosing scope -- exactly
 # like op-listloop's own LIST-EXPR. Iterates the Int induction value I from
-# START (inclusive) to END (exclusive), unit step, in a fresh scope each
-# iteration (exactly like op-loop's own body) that binds I to the current
-# value. `return`/an error propagate directly out of the loop, exactly as
-# they already do in op-loop/op-listloop; `break` ends the loop with its
-# own payload (or unit) as the countloop's result. Unlike op-listloop, an
-# ordinary (`value`) completion is *discarded*, not collected: this is a
-# procedural loop, not a collecting one. Reaching END without a `break`
-# completes normally with unit -- never a List: there is no hidden
-# collection of I's visited values. START/END must be Int, checked
+# START by +1 (`up`) or -1 (`down`), each iteration in a fresh scope that
+# binds I, for as long as I is still on the near side of END:
+#
+#     up   to       I <  END       up   through  I <= END
+#     down to       I >  END       down through  I >= END
+#
+# The inclusive forms test END with <=/>= directly: no END+1 / END-1 is ever
+# formed, so the loop is exactly as correct for a Botlish Int of any
+# magnitude as the exclusive forms. The result is collected exactly like
+# op-listloop's (a `value` completion contributes its value, `continue`
+# nothing, a bare `break` ends the loop with the List collected so far,
+# `return`/an error propagate directly); START/END must be Int, checked
 # dynamically (core::value::expect), exactly like every other Int
 # operation's own runtime discipline (core/primitives.tcl) -- not a new
-# loop-only error kind. Advances I with plain `expr {$i + 1}`, never Tcl's
-# `incr`: AGENTS.md documents a confirmed Tcl-core bug where `incr` inside a
-# compiled proc silently wraps at the i64 boundary instead of promoting to
-# a bignum, so this loop -- which must remain correct for a Botlish Int of
-# any magnitude -- follows core/primitives.tcl's own arbitrary-precision
+# loop-only error kind. Advances I with plain `expr`, never Tcl's `incr`:
+# AGENTS.md documents a confirmed Tcl-core bug where `incr` inside a
+# compiled proc silently wraps at the i64 boundary instead of promoting to a
+# bignum, so this loop -- which must remain correct for a Botlish Int of any
+# magnitude -- follows core/primitives.tcl's own arbitrary-precision
 # `expr`-only idiom throughout.
 proc core::forms::op-countloop {node env} {
     set startExpr [lindex $node 1]
@@ -252,7 +257,11 @@ proc core::forms::op-countloop {node env} {
     set endValue [core::interp::valueOf [core::interp::evalIn $endExpr $env]]
     set i [core::value::intOf [core::value::expect int $startValue "loop start"]]
     set end [core::value::intOf [core::value::expect int $endValue "loop end"]]
-    while {$i < $end} {
+    lassign [core::ir::countOptions $node] direction endKind
+    set holds [core::forms::CountTest $direction $endKind]
+    set step [expr {$direction eq "up" ? 1 : -1}]
+    set results {}
+    while {[$holds $i $end]} {
         set iterationEnv [core::env::child $env]
         core::env::define $iterationEnv $param [core::value::int $i]
         core::env::declare $iterationEnv [core::ir::scopeBindNames $body]
@@ -262,19 +271,128 @@ proc core::forms::op-countloop {node env} {
             core::env::release $iterationEnv
         }
         switch -- [core::completion::kind $completion] {
-            value - continue {
-                # discard the body's value; advance to the next iteration
+            value {
+                lappend results [core::completion::payload $completion]
+            }
+            continue {
+                # contributes nothing; advance to the next iteration
             }
             break {
-                return [core::completion::normal [core::completion::payload $completion]]
+                return [core::completion::normal [core::value::listOf $results]]
             }
             return - propagate-error {
                 return $completion
             }
         }
-        set i [expr {$i + 1}]
+        set i [expr {$i + $step}]
     }
-    return [core::completion::normal [core::value::unit]]
+    return [core::completion::normal [core::value::listOf $results]]
+}
+
+# The command that tests "is I still inside the domain" for a numeric loop of
+# DIRECTION (up|down) and ENDKIND (exclusive|inclusive), called as
+# `$cmd I END` on arbitrary-precision Tcl integers.
+proc core::forms::CountTest {direction endKind} {
+    switch -- $direction/$endKind {
+        up/exclusive   { return ::tcl::mathop::< }
+        up/inclusive   { return ::tcl::mathop::<= }
+        down/exclusive { return ::tcl::mathop::> }
+        down/inclusive { return ::tcl::mathop::>= }
+    }
+    error "core::forms::CountTest: bad $direction/$endKind"
+}
+
+# The exact number of values a numeric domain from START toward END visits:
+# max(END - START, 0) (+1 when inclusive) for `up`, max(START - END, 0) (+1
+# when inclusive) for `down` -- the mathematical cardinality of
+# hir/cardinality.tcl, on arbitrary-precision integers.
+proc core::forms::CountSize {direction endKind start end} {
+    set span [expr {$direction eq "up" ? $end - $start : $start - $end}]
+    if {$endKind eq "inclusive"} {
+        set span [expr {$span + 1}]
+    }
+    return [expr {$span > 0 ? $span : 0}]
+}
+
+# (lockloop (DOMAIN...) (block (P...) BODY...) ?REJECTED?): the lockstep
+# collecting loop (COLLECTING-LOOPS.md). Every DOMAIN operand is evaluated
+# once, left to right, in the enclosing scope; then body iteration k binds
+# every parameter to the k-th element of its own domain, the loop's result
+# being collected exactly like op-countloop's/op-listloop's.
+#
+# All domains must have the same element count -- a *static* obligation that
+# HIR discharges (hir/lockstep.tcl): a loop that could not be proven never
+# reaches the evaluator (strict builds raise the diagnostic; a -strict 0
+# lowering appends REJECTED, whose message is replayed here, unconditionally,
+# before anything is evaluated). There is no runtime length check as
+# language semantics and no shortest-wins rule. This reference interpreter
+# does cross-check the proof it was handed -- a mismatch is a bug in the
+# compiler's proof, reported as an internal error, which is what makes the
+# differential fuzzers catch an unsound cardinality rule.
+proc core::forms::op-lockloop {node env} {
+    if {[llength $node] == 4} {
+        regexp {^(\S+): (.*)$} [lindex $node 3] -> kind message
+        core::semanticError $kind $message
+    }
+    set params [core::ir::blockParams [lindex $node 2]]
+    set body [core::ir::blockBody [lindex $node 2]]
+    set domains {}
+    foreach domain [lindex $node 1] {
+        if {[lindex $domain 0] eq "list"} {
+            set listValue [core::interp::valueOf [core::interp::evalIn [lindex $domain 1] $env]]
+            set items [core::value::items [core::value::expect list $listValue "loop iterable"]]
+            lappend domains [list list $items [llength $items]]
+        } else {
+            set startValue [core::interp::valueOf [core::interp::evalIn [lindex $domain 1] $env]]
+            set endValue [core::interp::valueOf [core::interp::evalIn [lindex $domain 2] $env]]
+            set start [core::value::intOf [core::value::expect int $startValue "loop start"]]
+            set end [core::value::intOf [core::value::expect int $endValue "loop end"]]
+            lassign [core::ir::countOptions [list countloop {} {} {} [lindex $domain 3] [lindex $domain 4]]] \
+                direction endKind
+            lappend domains [list count $start [expr {$direction eq "up" ? 1 : -1}] \
+                [core::forms::CountSize $direction $endKind $start $end]]
+        }
+    }
+    set total [lindex $domains 0 end]
+    foreach domain $domains {
+        if {[lindex $domain end] != $total} {
+            error "lockloop: iteration counts differ at run time ([lmap d $domains {lindex $d end}]):\
+                the compiler's equal-cardinality proof was wrong"
+        }
+    }
+    set results {}
+    for {set k 0} {$k < $total} {incr k} {
+        set iterationEnv [core::env::child $env]
+        foreach param $params domain $domains {
+            if {[lindex $domain 0] eq "list"} {
+                core::env::define $iterationEnv $param [lindex [lindex $domain 1] $k]
+            } else {
+                core::env::define $iterationEnv $param \
+                    [core::value::int [expr {[lindex $domain 1] + $k * [lindex $domain 2]}]]
+            }
+        }
+        core::env::declare $iterationEnv [core::ir::scopeBindNames $body]
+        try {
+            set completion [core::interp::evalSequence $body $iterationEnv]
+        } finally {
+            core::env::release $iterationEnv
+        }
+        switch -- [core::completion::kind $completion] {
+            value {
+                lappend results [core::completion::payload $completion]
+            }
+            continue {
+                # contributes nothing; every domain advances together
+            }
+            break {
+                return [core::completion::normal [core::value::listOf $results]]
+            }
+            return - propagate-error {
+                return $completion
+            }
+        }
+    }
+    return [core::completion::normal [core::value::listOf $results]]
 }
 
 # (struct HEAD NAME EXPR ...): evaluates every EXPR strictly in written

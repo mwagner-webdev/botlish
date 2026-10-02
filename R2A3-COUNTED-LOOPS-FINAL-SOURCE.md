@@ -1,5 +1,16 @@
 # R2.a.3: counted loops + final `emailish?` source normalization
 
+**Partially superseded by COLLECTING-LOOPS.md.** Counted loops are no
+longer procedural: every numeric loop (`from .. to`, and the new
+`from .. through`, `down from .. to`, `down from .. through`) is a
+*collecting* loop whose value is the List of its body values, a bare `break`
+returns the collected prefix, and natural exhaustion yields the List (empty
+for an empty domain), not `unit`. `through` and `down from` are implemented
+(they are no longer "reserved"), and `and` composes iteration clauses in
+lockstep. Everything below that describes `unit`-valued exhaustion,
+discarded body values or reserved `through`/`down` diagnostics is the
+historical record of the original design.
+
 **Partially superseded by PAYLOAD-FREE-BREAK.md.** This report documents
 `break VALUE` as part of a counted loop's "final" design, overriding the
 loop's own result exactly like a bare `loop:`'s own established semantics.

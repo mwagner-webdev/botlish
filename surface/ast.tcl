@@ -54,16 +54,25 @@
 #   loop       elementName, elementNameSpan, iterable (an expression, or ""
 #              for the plain form), countName, countNameSpan, countStart,
 #              countEnd (an expression, or "" unless this is the counted
-#              form), body (suite) -- exactly one of {iterable, countStart}
-#              is ever set. "loop x in EXPR:" (elementName/iterable both
-#              set) is a List traversal binding x fresh each iteration;
-#              "loop i from START to END:" (countName/countStart/countEnd
-#              all set) is an ascending, exclusive-end counted traversal
-#              binding i fresh each iteration (core/ir.tcl's `countloop`,
-#              R2A3-COUNTED-LOOPS-FINAL-SOURCE.md); plain "loop:" (neither
-#              set) repeats until break, as before this feature (see
-#              core/ir.tcl's `listloop`/`countloop` and this file's own
-#              Statement/Children/Ids below)
+#              form), direction (up | down, "" unless counted), endKind
+#              (exclusive | inclusive, "" unless counted), clauses, body
+#              (suite). `clauses` lists every iteration clause in written
+#              order as dicts {kind (list | count) name nameSpan iterable
+#              start end direction endKind}: none for a plain "loop:", one
+#              for a single-domain loop, two or more for a lockstep loop
+#              ("loop x in xs and i from 0 to n:", COLLECTING-LOOPS.md).
+#              For a single-clause loop the per-form fields above mirror
+#              that clause (exactly one of {iterable, countStart} is set);
+#              for a lockstep loop they are all empty and `clauses` is the
+#              whole description. "loop x in EXPR:" is a List traversal
+#              binding x fresh each iteration; "loop i from START to END:"
+#              an ascending traversal of START <= i < END, "from START
+#              through END" of START <= i <= END, "down from START to END"
+#              of START >= i > END and "down from START through END" of
+#              START >= i >= END (START is always the value iteration
+#              begins at: core/ir.tcl's `countloop`, R2A3-COUNTED-LOOPS-
+#              FINAL-SOURCE.md, COLLECTING-LOOPS.md); plain "loop:" (no
+#              clause) repeats until break
 #   return     value (an expression, an if, or "")
 #   break      value (an expression, an if, or "")
 #   continue
@@ -266,6 +275,20 @@ proc surface::ast::Ids {node id} {
                 dict set node countStart [Ids [dict get $node countStart] $id/start]
                 dict set node countEnd [Ids [dict get $node countEnd] $id/end]
             }
+            if {[llength [dict get $node clauses]] > 1} {
+                set clauses {}
+                set index 1
+                foreach clause [dict get $node clauses] {
+                    foreach field {iterable start end} {
+                        if {[dict get $clause $field] ne ""} {
+                            dict set clause $field [Ids [dict get $clause $field] $id/clause$index/$field]
+                        }
+                    }
+                    lappend clauses $clause
+                    incr index
+                }
+                dict set node clauses $clauses
+            }
             dict set node body [Suite [dict get $node body] $id]
         }
         handledcall {
@@ -313,6 +336,17 @@ proc surface::ast::Children {node} {
         }
         function           { return [list [dict get $node body]] }
         loop {
+            if {[llength [dict get $node clauses]] > 1} {
+                set children {}
+                foreach clause [dict get $node clauses] {
+                    foreach field {iterable start end} {
+                        if {[dict get $clause $field] ne ""} {
+                            lappend children [dict get $clause $field]
+                        }
+                    }
+                }
+                return [concat $children [list [dict get $node body]]]
+            }
             if {[dict get $node iterable] ne ""} {
                 return [list [dict get $node iterable] [dict get $node body]]
             }
@@ -565,11 +599,8 @@ proc surface::ast::Statement {node indent show linesVar} {
             return
         }
         loop {
-            if {[dict get $node iterable] ne ""} {
-                lappend lines "${pad}loop [dict get $node elementName] in [Expr [dict get $node iterable] $show]$at"
-            } elseif {[dict get $node countStart] ne ""} {
-                lappend lines "${pad}loop [dict get $node countName] from\
-                    [Expr [dict get $node countStart] $show] to [Expr [dict get $node countEnd] $show]$at"
+            if {[llength [dict get $node clauses]] > 0} {
+                lappend lines "${pad}loop [join [lmap clause [dict get $node clauses] {Clause $clause $show}] { and }]$at"
             } else {
                 lappend lines "${pad}loop$at"
             }
@@ -593,6 +624,17 @@ proc surface::ast::Statement {node indent show linesVar} {
         }
     }
     lappend lines "$pad[Expr $node $show]"
+}
+
+# Source text of one loop iteration CLAUSE (see the `loop` node above).
+proc surface::ast::Clause {clause show} {
+    set name [dict get $clause name]
+    if {[dict get $clause kind] eq "list"} {
+        return "$name in [Expr [dict get $clause iterable] $show]"
+    }
+    set from [expr {[dict get $clause direction] eq "down" ? "down from" : "from"}]
+    set word [expr {[dict get $clause endKind] eq "inclusive" ? "through" : "to"}]
+    return "$name $from [Expr [dict get $clause start] $show] $word [Expr [dict get $clause end] $show]"
 }
 
 # Lines of the handled-call NODE ("CALL: on NAME: ... on NAME: ..."), its

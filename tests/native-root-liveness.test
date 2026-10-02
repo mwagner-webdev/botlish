@@ -263,6 +263,32 @@ f("the managed base string")}
     underGcStress {native::evalHir [sourceHir $text]}
 } -result {str {the managed base string}}
 
+# COLLECTING-LOOPS.md: a numeric loop now also carries its result-List
+# accumulator across iterations, and a lockstep loop carries a list register,
+# a shared position register and one induction register per numeric clause;
+# each iteration allocates garbage, so every one of them must stay rooted.
+test root-loop-carried-collecting-1 {a descending inclusive loop's accumulator and a carried value survive GC stress} -body {
+    set text {fn f(s):
+    ys = loop i down from 20 through 1:
+        junk = concat(s, "pad")
+        concat(s, junk)
+    list_length(ys)
+
+f("the managed base string")}
+    underGcStress {native::evalHir [sourceHir $text]}
+} -result {int 20}
+
+test root-loop-carried-lockstep-1 {a lockstep loop's list, position, induction registers and accumulator survive GC stress} -body {
+    set text {fn f(xs, s):
+    ys = loop x in xs and i from 0 to list_length(xs) and j down from list_length(xs) through 1:
+        junk = concat(s, "pad")
+        concat(x, junk)
+    ys
+
+f(["a", "b", "c", "d", "e", "f"], "the managed base string")}
+    underGcStress {native::evalHir [sourceHir $text]}
+} -match glob -result {list *}
+
 # ---------------------------------------------------------------------------
 # #34: a value live only on the success path is not affected by, and does
 # not affect, an unrelated error-terminating path, under stress.

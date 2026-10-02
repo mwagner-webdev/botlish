@@ -230,16 +230,12 @@ proc hir::aot::context {hir} {
             block { set bodies [list [hir::get $hir $e body]] }
             if    { set bodies [list [hir::get $hir $e thenBody] [hir::get $hir $e elseBody]] }
             loop  { set bodies [list [concat [hir::get $hir $e body] [list ""]]] }
-            listloop {
-                # Unlike `loop`, a listloop body's last value is used (it
-                # contributes to the accumulated result): not discarded.
+            listloop - countloop - lockloop {
+                # Unlike `loop`, a collecting loop body's last value is used
+                # (it contributes to the accumulated result): not discarded.
+                # That is every list loop, numeric loop and lockstep loop
+                # (COLLECTING-LOOPS.md).
                 set bodies [list [hir::get $hir $e body]]
-            }
-            countloop {
-                # A countloop is procedural, exactly like a bare `loop`
-                # (never a collecting loop like listloop): every iteration's
-                # body value is discarded, including the last one.
-                set bodies [list [concat [hir::get $hir $e body] [list ""]]]
             }
         }
         foreach body $bodies {
@@ -583,6 +579,16 @@ proc hir::aot::Visit {hir stateVar region e tails statics} {
             Require $hir state $region $e [dict get $node start] int TYPE "the loop start value"
             Require $hir state $region $e [dict get $node end] int TYPE "the loop end value"
         }
+        lockloop {
+            foreach domain [dict get $node domains] {
+                if {[dict get $domain kind] eq "list"} {
+                    Require $hir state $region $e [dict get $domain iterable] list TYPE
+                } else {
+                    Require $hir state $region $e [dict get $domain start] int TYPE "the loop start value"
+                    Require $hir state $region $e [dict get $domain end] int TYPE "the loop end value"
+                }
+            }
+        }
         project {
             # A field projection lowers to a known slot of a known struct
             # shape (STRUCTS.md): there is no dynamic lookup to fall back
@@ -782,7 +788,7 @@ proc hir::aot::Cause {hir e {depth 0}} {
                 }
             }
         }
-        if - loop - listloop - countloop {
+        if - loop - listloop - countloop - lockloop {
             return [dict merge $cause [dict create cause merge]]
         }
     }

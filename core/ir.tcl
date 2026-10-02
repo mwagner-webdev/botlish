@@ -12,6 +12,8 @@
 #   (loop BODY-BLOCK)
 #   (listloop LIST-EXPR ELEMENT-BLOCK)
 #   (countloop START-EXPR END-EXPR ELEMENT-BLOCK)
+#   (countloop START-EXPR END-EXPR ELEMENT-BLOCK DIRECTION ENDKIND)
+#   (lockloop (DOMAIN...) ELEMENTS-BLOCK)   (lockloop ... REJECTED-MESSAGE)
 #   (return EXPR)
 #   (break)                     (break EXPR)
 #                               PAYLOAD-FREE-BREAK.md: no valid Botlish
@@ -101,28 +103,49 @@
 # exhausted without a `break`, the result is the List of every iteration's
 # contributed value, in that order (empty for an empty LIST-EXPR).
 #
-# (countloop START-EXPR END-EXPR ELEMENT-BLOCK): the surface "loop i from
-# START to END:" form (see surface/parser.tcl, R2A3-COUNTED-LOOPS-FINAL-
-# SOURCE.md). START-EXPR and END-EXPR are each evaluated exactly once, in
-# the enclosing scope, left to right, before any iteration -- exactly like
-# listloop's own LIST-EXPR. ELEMENT-BLOCK must be a syntactic (block (I)
-# BODY...) node with exactly one parameter, exactly like listloop's own
-# (not a callable boundary: `return` inside it still returns from the
-# enclosing function; a valid target for `break`/`continue`). Ascending,
-# unit step, END-EXPR exclusive: I is bound fresh (immutable) to START,
-# START+1, START+2, ..., stopping (without running the body) the first time
-# I would equal or exceed END. `start >= end` (as ordinary Int values, per
-# core::value::compare) runs the body zero times. Unlike listloop, this is
-# a *procedural* loop, not a collecting one: an iteration whose body
-# completes with an ordinary value simply discards it and advances to the
-# next I; `continue` likewise just advances. `break` (with or without a
-# value) ends the loop immediately, its own value (or unit) becoming the
-# countloop's result -- exactly a plain `loop`'s own break semantics
-# (unlike listloop's, unchanged by RETURNING-ITERABLE-LOOPS.md: a countloop
-# is not a returning/collecting loop, so it keeps override-and-discard
-# break semantics; see that report's "why counted loops remain unchanged").
-# Reaching END without a `break` completes normally with unit, never a
-# List: there is no hidden collection of I's visited values.
+# (countloop START-EXPR END-EXPR ELEMENT-BLOCK ?DIRECTION ENDKIND?): the
+# surface numeric loops "loop i from A to B:", "from A through B:", "down
+# from B to A:" and "down from B through A:" (COLLECTING-LOOPS.md). DIRECTION
+# is `up` or `down`, ENDKIND `to` or `through`; both default to the original
+# `up to` form when omitted. START-EXPR and END-EXPR are each evaluated
+# exactly once, in the enclosing scope, left to right, before any iteration
+# -- exactly like listloop's own LIST-EXPR. ELEMENT-BLOCK must be a
+# syntactic (block (I) BODY...) node with exactly one parameter, exactly like
+# listloop's own (not a callable boundary: `return` inside it still returns
+# from the enclosing function; a valid target for `break`/`continue`). I is
+# bound fresh (immutable), starting at START and stepping by exactly one
+# (+1 for `up`, -1 for `down`), for as long as it stays on the near side of
+# END as ordinary Int values (core::value::compare):
+#
+#     up   to       START <= I <  END
+#     up   through  START <= I <= END
+#     down to       START >= I >  END
+#     down through  START >= I >= END
+#
+# The inclusive forms are *not* END+1 / END-1 arithmetic: the loop simply
+# tests I against END with <= / >=, so no Int outside the endpoints is ever
+# formed. A domain that is empty under that test runs the body zero times.
+# Like listloop, a countloop is a *collecting* loop: an iteration whose body
+# completes with an ordinary value contributes it to the result List, in
+# order; `continue` contributes nothing; a bare `break` ends the loop with
+# the List collected so far; exhaustion completes with the whole List (empty
+# for an empty domain). `break` with a value is rejected at HIR (hir/resolve.
+# tcl's LISTLOOP-BREAK-VALUE), exactly as for listloop.
+#
+# (lockloop (DOMAIN...) (block (P1 ... Pn) BODY...)): the lockstep loop "loop
+# x in xs and i from 0 to n:". Each DOMAIN is (list LIST-EXPR) or (count
+# START-EXPR END-EXPR DIRECTION ENDKIND) (DIRECTION/ENDKIND as above), and the
+# block binds one parameter per DOMAIN, in order. All domain operand
+# expressions are evaluated once, left to right, in the enclosing scope;
+# then body iteration k (k = 0, 1, ...) runs with each Pj bound to the k-th
+# element of its domain (the k-th list item, or the k-th Int of its numeric
+# domain). The loop's result is collected exactly like a countloop's. All
+# domains MUST have the same number of elements: that is a compile-time proof
+# obligation discharged by HIR (hir/lockstep.tcl) -- there is no runtime
+# length check and no shortest-wins rule here, and the interpreter treats a
+# violation as an internal compiler error. The optional trailing string marks
+# a loop whose obligation HIR rejected (only a -strict 0 lowering produces it):
+# evaluating it raises that diagnostic unconditionally, before anything runs.
 #
 # This file knows syntax only; it does not evaluate anything.
 
@@ -190,6 +213,24 @@ proc core::ir::CheckElementBlock {blockNode owner role} {
     }
 }
 
+# {DIRECTION ENDKIND} of a (countloop ...) node -- "up exclusive" unless the
+# optional trailing `up|down to|through` words say otherwise -- as the HIR
+# spelling (up|down, exclusive|inclusive).
+proc core::ir::countOptions {node} {
+    if {[llength $node] == 4} {
+        return {up exclusive}
+    }
+    set direction [lindex $node 4]
+    set word [lindex $node 5]
+    if {$direction ni {up down}} {
+        core::malformed "a counted loop's DIRECTION must be up or down" $node
+    }
+    if {$word ni {to through}} {
+        core::malformed "a counted loop's ENDKIND must be to or through" $node
+    }
+    return [list $direction [expr {$word eq "through" ? "inclusive" : "exclusive"}]]
+}
+
 # Validates the shape of one node (not of its sub-expressions).
 proc core::ir::CheckShape {node} {
     set op [op $node]
@@ -250,8 +291,44 @@ proc core::ir::CheckShape {node} {
             CheckElementBlock [lindex $node 2] $node "body"
         }
         countloop {
-            ExpectLength $node 4 4 "(countloop START-EXPR END-EXPR ELEMENT-BLOCK)"
+            if {[llength $node] != 4 && [llength $node] != 6} {
+                core::malformed "(countloop START-EXPR END-EXPR ELEMENT-BLOCK ?DIRECTION ENDKIND?)" $node
+            }
             CheckElementBlock [lindex $node 3] $node "body"
+            countOptions $node
+        }
+        lockloop {
+            ExpectLength $node 3 4 "(lockloop (DOMAIN...) ELEMENTS-BLOCK ?REJECTED?)"
+            set domains [lindex $node 1]
+            if {[catch {llength $domains} n] || $n < 2} {
+                core::malformed "(lockloop ...) needs at least two domains" $node
+            }
+            foreach domain $domains {
+                switch -- [lindex $domain 0] {
+                    list {
+                        if {[llength $domain] != 2} {
+                            core::malformed "a lockstep list domain is (list LIST-EXPR)" $node
+                        }
+                    }
+                    count {
+                        if {[llength $domain] != 5} {
+                            core::malformed "a lockstep count domain is (count START END DIRECTION ENDKIND)" $node
+                        }
+                        countOptions [list countloop {} {} {} [lindex $domain 3] [lindex $domain 4]]
+                    }
+                    default {
+                        core::malformed "a lockstep domain is (list EXPR) or (count START END DIRECTION ENDKIND)" $node
+                    }
+                }
+            }
+            set block [lindex $node 2]
+            if {[catch {llength $block} n] || $n == 0 || [lindex $block 0] ne "block"} {
+                core::malformed "the body of lockloop must be a (block (P...) ...) node" $node
+            }
+            CheckShape $block
+            if {[llength [blockParams $block]] != [llength $domains]} {
+                core::malformed "the body block of lockloop needs exactly one parameter per domain" $node
+            }
         }
         struct {
             ExpectLength $node 2 * "(struct HEAD NAME EXPR ...)"
@@ -419,6 +496,13 @@ proc core::ir::CollectBindNames {node namesVar} {
             CollectBindNames [lindex $node 1] names
             CollectBindNames [lindex $node 2] names
         }
+        lockloop {
+            foreach domain [lindex $node 1] {
+                foreach operand [lrange $domain 1 [expr {[lindex $domain 0] eq "list" ? 1 : 2}]] {
+                    CollectBindNames $operand names
+                }
+            }
+        }
         return - ok - error-value {
             CollectBindNames [lindex $node 1] names
         }
@@ -462,6 +546,18 @@ proc core::ir::containsBlock {exprs} {
             countloop {
                 if {[containsBlock [list [lindex $expr 1] [lindex $expr 2]]]
                     || [containsBlock [blockBody [lindex $expr 3]]]} {
+                    return 1
+                }
+            }
+            lockloop {
+                foreach domain [lindex $expr 1] {
+                    foreach operand [lrange $domain 1 [expr {[lindex $domain 0] eq "list" ? 1 : 2}]] {
+                        if {[containsBlock [list $operand]]} {
+                            return 1
+                        }
+                    }
+                }
+                if {[containsBlock [blockBody [lindex $expr 2]]]} {
                     return 1
                 }
             }
@@ -576,6 +672,17 @@ proc core::ir::check {node {context {callable 0 loop 0}}} {
             check [lindex $node 2] $context
             set inner [dict replace $context loop 1]
             foreach expr [blockBody [lindex $node 3]] {
+                check $expr $inner
+            }
+        }
+        lockloop {
+            foreach domain [lindex $node 1] {
+                foreach operand [lrange $domain 1 [expr {[lindex $domain 0] eq "list" ? 1 : 2}]] {
+                    check $operand $context
+                }
+            }
+            set inner [dict replace $context loop 1]
+            foreach expr [blockBody [lindex $node 2]] {
                 check $expr $inner
             }
         }

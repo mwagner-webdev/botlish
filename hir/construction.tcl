@@ -238,12 +238,18 @@ proc hir::construction::Uses {view b loops e} {
             set total [Add $pn [Max $per 0]]
             return [list $total [Max $pa $total]]
         }
-        countloop {
-            # START/END are a two-element prefix, evaluated once each, left
-            # to right, in the enclosing scope -- exactly like listloop's
-            # own single-expression iterable prefix above, just over two
-            # expressions (SeqUses already composes a sequence correctly).
-            set prefix [SeqUses $view $b $loops [list [hir::get $view $e start] [hir::get $view $e end]]]
+        countloop - lockloop {
+            # START/END (or every lockstep domain's operands) are a prefix,
+            # evaluated once each, left to right, in the enclosing scope --
+            # exactly like listloop's own single-expression iterable prefix
+            # above, just over several expressions (SeqUses already
+            # composes a sequence correctly).
+            if {[hir::kind $view $e] eq "countloop"} {
+                set operands [list [hir::get $view $e start] [hir::get $view $e end]]
+            } else {
+                set operands [hir::loopOperands [dict get $view exprs $e]]
+            }
+            set prefix [SeqUses $view $b $loops $operands]
             lassign [SeqUses $view $b $loops [hir::get $view $e body]] bn ba
             set per [Max $bn $ba]
             if {$per > 0 && ![dict exists $loops $e]} {
@@ -295,6 +301,11 @@ proc hir::construction::Linear {info b} {
             }
             countloop {
                 if {$e ne [hir::get $view $p start] && $e ne [hir::get $view $p end]} {
+                    dict set loops $p 1
+                }
+            }
+            lockloop {
+                if {$e ni [hir::loopOperands [dict get $view exprs $p]]} {
                     dict set loops $p 1
                 }
             }
@@ -492,7 +503,13 @@ proc hir::construction::Context {s id e} {
             if {$e eq [hir::get $view $p start] || $e eq [hir::get $view $p end]} {
                 return {0 "flat-only operation (countloop bound)"}
             }
-            return {0 "loop body value (discarded)"}
+            return {0 "loop body value (collected or discarded)"}
+        }
+        lockloop {
+            if {$e in [hir::loopOperands [dict get $view exprs $p]]} {
+                return {0 "flat-only operation (lockloop domain operand)"}
+            }
+            return {0 "loop body value (collected or discarded)"}
         }
         handle {
             return {0 "handled call result"}

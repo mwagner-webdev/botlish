@@ -97,12 +97,26 @@
 #             refinements (dict OUTCOME -> BindingId FACT pairs)
 #   loop      bodyScope, body
 #   listloop  iterable, elementBinding, bodyScope, body
-#   countloop start, end, countBinding, bodyScope, body -- the ascending,
-#             exclusive-end counted loop (R2A3-COUNTED-LOOPS-FINAL-SOURCE.
-#             md); start/end are ExprIds evaluated once in the *enclosing*
-#             scope, countBinding is the per-iteration immutable induction
-#             BindingId (in scope only in body, exactly like listloop's own
-#             elementBinding)
+#   countloop start, end, direction, endKind, countBinding, bodyScope, body
+#             -- the numeric collecting loop (R2A3-COUNTED-LOOPS-FINAL-SOURCE.
+#             md, COLLECTING-LOOPS.md); start/end are ExprIds evaluated once
+#             in the *enclosing* scope, countBinding is the per-iteration
+#             immutable induction BindingId (in scope only in body, exactly
+#             like listloop's own elementBinding). `start` is where iteration
+#             begins and `end` the limit; direction (up | down) and endKind
+#             (exclusive | inclusive) say how it advances and whether `end`
+#             itself is visited -- explicit semantic fields, never an
+#             `end + 1` / `start - 1` rewrite (hir::cardinality::Numeric
+#             spells the exact element count of each combination).
+#   lockloop  domains, bodyScope, body -- the lockstep collecting loop (`loop
+#             x in xs and i from 0 to n:`): one loop whose iteration domains
+#             all advance together. domains is a list of dicts in written
+#             order, {kind list binding B iterable E} or {kind count binding
+#             B start E end E direction D endKind K}, each domain's ExprIds
+#             evaluated once in the *enclosing* scope and each binding a
+#             fresh per-iteration immutable parameter of bodyScope. Its
+#             obligation -- every domain has the same element count -- is
+#             discharged statically by hir/lockstep.tcl.
 #   return    value, target (the block ExprId it leaves, "" if none)
 #   break     value ("" if none), target (the loop ExprId, "" if none)
 #   continue  target
@@ -364,6 +378,7 @@ proc hir::CheckOnce {hirVar demote} {
     hir::range::verifyDeclaredResults hir
     hir::range::verifyDeclaredParams hir
     hir::callables::verify hir
+    hir::lockstep::verify hir
     hir::structs::verify hir
     hir::semantic::verify hir
     hir::errorsets::verify hir
@@ -601,6 +616,9 @@ proc hir::children {hir e} {
         countloop {
             return [concat [list [dict get $node start] [dict get $node end]] [dict get $node body]]
         }
+        lockloop {
+            return [concat [hir::loopOperands $node] [dict get $node body]]
+        }
         struct  { return [dict get $node fields] }
         project { return [list [dict get $node receiver]] }
         fail  { return {} }
@@ -612,6 +630,20 @@ proc hir::children {hir e} {
             return $result
         }
     }
+}
+
+# The operand ExprIds of lockloop NODE's domains, in written order (a list
+# domain's iterable; a count domain's start then end).
+proc hir::loopOperands {node} {
+    set result {}
+    foreach domain [dict get $node domains] {
+        if {[dict get $domain kind] eq "list"} {
+            lappend result [dict get $domain iterable]
+        } else {
+            lappend result [dict get $domain start] [dict get $domain end]
+        }
+    }
+    return $result
 }
 
 # All expression ids in pre-order.
@@ -740,7 +772,7 @@ proc hir::exprsAt {hir origin} {
 }
 
 apply {{dir} {
-    foreach file {syntax resolve refcheck hygiene sourcetypes structs errordecls types exactvalue signatures modulebinding refine lower format read aot specialize range rangerec callables containers semantic completions errorsets induction transport escape blockescape stringregion traversal construction cardinality} {
+    foreach file {syntax resolve refcheck hygiene sourcetypes structs errordecls types exactvalue signatures modulebinding refine lower format read aot specialize range rangerec callables containers semantic completions errorsets induction transport escape blockescape stringregion traversal construction cardinality lockstep} {
         uplevel #0 [list source [file join $dir $file.tcl]]
     }
 }} $hir::home

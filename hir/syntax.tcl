@@ -35,7 +35,18 @@
 #             left to right, exactly like listloop's iterable;
 #             countName/countOrigin/bodyOrigin/body describe the
 #             per-iteration immutable induction binding and body, exactly
-#             like listloop's own elementName/elementOrigin/bodyOrigin/body
+#             like listloop's own elementName/elementOrigin/bodyOrigin/body.
+#             direction (up | down) and endKind (exclusive | inclusive)
+#             record which of the four numeric forms was written (COLLECTING-
+#             LOOPS.md): `start` is always where iteration begins and `end`
+#             the limit, so "down from B to A" is start B / end A
+#   lockloop  domains, bodyOrigin, body -- the surface lockstep form "loop x
+#             in xs and i from 0 to n:": every domain advances together, one
+#             position per body execution. domains is a list of dicts in
+#             written order, {kind list name origin iterable} or {kind count
+#             name origin start end direction endKind}, each binding its own
+#             per-iteration name; the operand expressions are evaluated once,
+#             in the enclosing scope, before the first iteration
 #   struct    type, fields -- STRUCTS.md. TYPE is "" for an anonymous struct
 #             value { x: a, y: b }, or for a named construction `Name { ... }`
 #             a dict {name NAME namespace NS origin ORIGIN} (an as-written,
@@ -155,9 +166,26 @@ proc hir::syntax::listLoopNode {origin iterable elementName elementOrigin bodyOr
         elementOrigin $elementOrigin bodyOrigin $bodyOrigin body $body]
 }
 
-proc hir::syntax::countLoopNode {origin start end countName countOrigin bodyOrigin body} {
+# DIRECTION is up | down and ENDKIND exclusive | inclusive; START is the value
+# iteration begins at and END the limit (see the countloop entry above).
+proc hir::syntax::countLoopNode {origin start end countName countOrigin bodyOrigin body
+        {direction up} {endKind exclusive}} {
+    if {$direction eq ""} {
+        set direction up
+    }
+    if {$endKind eq ""} {
+        set endKind exclusive
+    }
     return [Node countloop $origin start $start end $end countName $countName \
-        countOrigin $countOrigin bodyOrigin $bodyOrigin body $body]
+        countOrigin $countOrigin bodyOrigin $bodyOrigin body $body \
+        direction $direction endKind $endKind]
+}
+
+# DOMAINS: one dict per iteration clause, in written order --
+#   {kind list  name N origin O iterable EXPR}
+#   {kind count name N origin O start EXPR end EXPR direction D endKind K}
+proc hir::syntax::lockLoopNode {origin domains bodyOrigin body} {
+    return [Node lockloop $origin domains $domains bodyOrigin $bodyOrigin body $body]
 }
 
 proc hir::syntax::returnNode {origin value} {
@@ -248,13 +276,39 @@ proc hir::syntax::fromIR {node path} {
                 body [Sequence [core::ir::blockBody [lindex $node 2]] [concat $path 2] 2]]
         }
         countloop {
+            lassign [core::ir::countOptions $node] direction endKind
             return [Node countloop $origin \
                 start [fromIR [lindex $node 1] [concat $path 1]] \
                 end [fromIR [lindex $node 2] [concat $path 2]] \
                 countName [lindex [core::ir::blockParams [lindex $node 3]] 0] \
                 countOrigin [list ir [concat $path 3 1 0]] \
                 bodyOrigin [list ir [concat $path 3]] \
-                body [Sequence [core::ir::blockBody [lindex $node 3]] [concat $path 3] 2]]
+                body [Sequence [core::ir::blockBody [lindex $node 3]] [concat $path 3] 2] \
+                direction $direction endKind $endKind]
+        }
+        lockloop {
+            set names [core::ir::blockParams [lindex $node 2]]
+            set domains {}
+            set index 0
+            foreach domain [lindex $node 1] name $names {
+                set dpath [concat $path 1 $index]
+                set norigin [list ir [concat $path 2 1 $index]]
+                if {[lindex $domain 0] eq "list"} {
+                    lappend domains [dict create kind list name $name origin $norigin \
+                        iterable [fromIR [lindex $domain 1] [concat $dpath 1]]]
+                } else {
+                    lassign [core::ir::countOptions [list countloop {} {} {} \
+                        [lindex $domain 3] [lindex $domain 4]]] direction endKind
+                    lappend domains [dict create kind count name $name origin $norigin \
+                        start [fromIR [lindex $domain 1] [concat $dpath 1]] \
+                        end [fromIR [lindex $domain 2] [concat $dpath 2]] \
+                        direction $direction endKind $endKind]
+                }
+                incr index
+            }
+            return [Node lockloop $origin domains $domains \
+                bodyOrigin [list ir [concat $path 2]] \
+                body [Sequence [core::ir::blockBody [lindex $node 2]] [concat $path 2] 2]]
         }
         struct {
             # (struct HEAD NAME EXPR ...): HEAD is {} (anonymous) or {ID
@@ -362,6 +416,15 @@ proc hir::syntax::CollectBindNames {node namesVar} {
         countloop {
             CollectBindNames [dict get $node start] names
             CollectBindNames [dict get $node end] names
+        }
+        lockloop {
+            foreach domain [dict get $node domains] {
+                foreach field {iterable start end} {
+                    if {[dict exists $domain $field]} {
+                        CollectBindNames [dict get $domain $field] names
+                    }
+                }
+            }
         }
         return - ok - error {
             CollectBindNames [dict get $node value] names

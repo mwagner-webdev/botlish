@@ -27,6 +27,15 @@
 #                                        "else SCOPE ..." lines with the
 #                                        refinements proven on entry
 #   eN loop SCOPE
+#   eN listloop SCOPE (ELEM)             children: the iterable, then the body
+#   eN countloop SCOPE (I) ?DIR KIND?    DIR up|down, KIND exclusive|inclusive,
+#                                        shown only when not "up exclusive";
+#                                        children: start, end, then the body
+#   eN lockloop SCOPE (B list) (B count DIR KIND) ...
+#                                        one (BINDING NAME ...) group per
+#                                        domain; children: each domain's
+#                                        operands in order (one for list,
+#                                        start then end for count), the body
 #   eN return -> eN / break -> eN / continue -> eN
 #   eN ok / eN error
 #   eN struct (anon|ID) (FIELD, ...)     a struct value/construction; one
@@ -274,6 +283,9 @@ proc hir::format::Expr {hir e indent origins linesVar} {
         countloop {
             set text "countloop [dict get $node bodyScope]\
                 ([ParamList $hir [list [dict get $node countBinding]] {{}}])"
+            if {[dict get $node direction] ne "up" || [dict get $node endKind] ne "exclusive"} {
+                append text " [dict get $node direction] [dict get $node endKind]"
+            }
             set binds [Binds $hir [dict get $node bodyScope]]
             if {$binds ne ""} {
                 append text " $binds"
@@ -281,6 +293,28 @@ proc hir::format::Expr {hir e indent origins linesVar} {
             Line $hir $e $text $indent $origins lines
             Expr $hir [dict get $node start] $inner $origins lines
             Expr $hir [dict get $node end] $inner $origins lines
+            foreach child [dict get $node body] {
+                Expr $hir $child $inner $origins lines
+            }
+        }
+        lockloop {
+            set text "lockloop [dict get $node bodyScope]"
+            foreach domain [dict get $node domains] {
+                set label [ParamList $hir [list [dict get $domain binding]] {{}}]
+                if {[dict get $domain kind] eq "list"} {
+                    append text " ($label list)"
+                } else {
+                    append text " ($label count [dict get $domain direction] [dict get $domain endKind])"
+                }
+            }
+            set binds [Binds $hir [dict get $node bodyScope]]
+            if {$binds ne ""} {
+                append text " $binds"
+            }
+            Line $hir $e $text $indent $origins lines
+            foreach operand [hir::loopOperands $node] {
+                Expr $hir $operand $inner $origins lines
+            }
             foreach child [dict get $node body] {
                 Expr $hir $child $inner $origins lines
             }

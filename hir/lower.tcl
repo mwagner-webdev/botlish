@@ -14,7 +14,8 @@
 #   if         (if COND (block {} THEN...) (block {} ELSE...))
 #   loop       (loop (block {} BODY...))
 #   listloop   (listloop ITERABLE (block (ELEM) BODY...))
-#   countloop  (countloop START END (block (I) BODY...))
+#   countloop  (countloop START END (block (I) BODY...) DIRECTION ENDKIND)
+#   lockloop   (lockloop (DOMAIN...) (block (P...) BODY...) ?REJECTED?)
 #   return     (return VALUE)
 #   break      (break) / (break VALUE)
 #   continue   (continue)
@@ -74,8 +75,35 @@ proc hir::lower::expr {hir e} {
         }
         countloop {
             set countName [dict get $hir bindings [dict get $node countBinding] name]
-            return [list countloop [expr $hir [dict get $node start]] [expr $hir [dict get $node end]] \
+            set lowered [list countloop [expr $hir [dict get $node start]] [expr $hir [dict get $node end]] \
                 [list block [list $countName] {*}[Exprs $hir [dict get $node body]]]]
+            if {[dict get $node direction] ne "up" || [dict get $node endKind] ne "exclusive"} {
+                lappend lowered [dict get $node direction] \
+                    [::expr {[dict get $node endKind] eq "inclusive" ? "through" : "to"}]
+            }
+            return $lowered
+        }
+        lockloop {
+            set domains {}
+            set names {}
+            foreach domain [dict get $node domains] {
+                lappend names [dict get $hir bindings [dict get $domain binding] name]
+                if {[dict get $domain kind] eq "list"} {
+                    lappend domains [list list [expr $hir [dict get $domain iterable]]]
+                } else {
+                    lappend domains [list count [expr $hir [dict get $domain start]] \
+                        [expr $hir [dict get $domain end]] [dict get $domain direction] \
+                        [::expr {[dict get $domain endKind] eq "inclusive" ? "through" : "to"}]]
+                }
+            }
+            set lowered [list lockloop $domains [list block $names {*}[Exprs $hir [dict get $node body]]]]
+            if {[dict exists $node unproven]} {
+                # A -strict 0 program whose lockstep obligation was rejected:
+                # replay the diagnostic at run time instead of ever running
+                # an unproven lockstep loop (see hir/lockstep.tcl).
+                lappend lowered [dict get $node unproven]
+            }
+            return $lowered
         }
         return {
             return [list return [expr $hir [dict get $node value]]]

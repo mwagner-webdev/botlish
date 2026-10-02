@@ -759,8 +759,9 @@ proc hir::escape::RegionInfo {hir spec id} {
 
 # {PARENT LOOPOF} of the region whose top-level body is TOPBODY (VIEW): PARENT
 # maps every sub-expression to the expression directly containing it, LOOPOF
-# to the innermost loop / listloop / countloop expression it executes inside
-# ("" outside every loop). A countloop's bounds and a listloop's iterable run
+# to the innermost loop / listloop / countloop / lockloop expression it
+# executes inside ("" outside every loop). A countloop's bounds, a lockloop's
+# domain operands and a listloop's iterable run
 # once, outside the loop; nested blocks are other regions and are not entered.
 # Iterative (an explicit stack): a region can be large.
 proc hir::escape::ParentsAndLoops {view topBody} {
@@ -793,6 +794,14 @@ proc hir::escape::ParentsAndLoops {view topBody} {
             countloop {
                 lappend stack [list [dict get $node start] $e $loop]
                 lappend stack [list [dict get $node end] $e $loop]
+                foreach c [dict get $node body] {
+                    lappend stack [list $c $e $e]
+                }
+            }
+            lockloop {
+                foreach operand [hir::loopOperands $node] {
+                    lappend stack [list $operand $e $loop]
+                }
                 foreach c [dict get $node body] {
                     lappend stack [list $c $e $e]
                 }
@@ -1089,7 +1098,7 @@ proc hir::escape::UseTag {info r {regions {}} {deny {}}} {
         ok - error { return storage }
         struct { return "nested field" }
         bind   { return alias }
-        if - loop - listloop - countloop - handle { return control }
+        if - loop - listloop - countloop - lockloop - handle { return control }
     }
     return other
 }

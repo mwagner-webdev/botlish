@@ -43,6 +43,10 @@
 #   loop: body            loop {body...}        inline body
 #   loop x in e: body     listloop e {x} {body...}  element binding traversal
 #                         of a List (see core/ir.tcl's `listloop`)
+#   loop i from a to b: body   countloop a b {i} {body...}  (also through, and
+#                         down from; core/ir.tcl's `countloop`)
+#   loop x in e and i from a to b: body   lockloop {domains} {body...}
+#                         (lockstep; core/ir.tcl's `lockloop`)
 #   return / return e     return ^unit / return e
 #   break / break e       break / break e
 #   continue              continue
@@ -336,6 +340,24 @@ proc surface::lower::Node {node} {
         }
         loop {
             set body [dict get $node body]
+            if {[llength [dict get $node clauses]] > 1} {
+                set domains {}
+                foreach clause [dict get $node clauses] {
+                    set name [dict get $clause name]
+                    set nameOrigin [Origin [dict get $clause nameSpan] "[dict get $node id]/($name)"]
+                    if {[dict get $clause kind] eq "list"} {
+                        lappend domains [dict create kind list name $name origin $nameOrigin \
+                            iterable [Node [dict get $clause iterable]]]
+                    } else {
+                        lappend domains [dict create kind count name $name origin $nameOrigin \
+                            start [Node [dict get $clause start]] end [Node [dict get $clause end]] \
+                            direction [dict get $clause direction] endKind [dict get $clause endKind]]
+                    }
+                }
+                return [hir::syntax::lockLoopNode $origin $domains \
+                    [Origin [dict get $body span] [dict get $body id]/body] \
+                    [Sequence [dict get $body body]]]
+            }
             if {[dict get $node iterable] ne ""} {
                 return [hir::syntax::listLoopNode $origin \
                     [Node [dict get $node iterable]] \
@@ -351,7 +373,8 @@ proc surface::lower::Node {node} {
                     [dict get $node countName] \
                     [Origin [dict get $node countNameSpan] "[dict get $node id]/([dict get $node countName])"] \
                     [Origin [dict get $body span] [dict get $body id]/body] \
-                    [Sequence [dict get $body body]]]
+                    [Sequence [dict get $body body]] \
+                    [dict get $node direction] [dict get $node endKind]]
             }
             return [hir::syntax::loopNode $origin \
                 [Origin [dict get $body span] [dict get $body id]/body] \

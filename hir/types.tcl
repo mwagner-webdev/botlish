@@ -1610,18 +1610,43 @@ proc hir::types::Expr {hirVar ctxVar e} {
             # compiler boundary, spec item 6) -- not something this static
             # type pass needs to decide or reject.
             dict set ctx facts [dict get $node countBinding] int
+            # A countloop is a collecting loop exactly like a listloop
+            # (COLLECTING-LOOPS.md): see that case above for why breakTypes
+            # is only seeded for the shared `break` case and why the result
+            # is always List[R] for the body's own type R.
             dict set ctx breakTypes $e never
-            # Like listloop, unlike a plain `loop`: natural (non-break)
-            # completion also contributes to the result, but a countloop's
-            # own natural-completion value is always unit (item 9), never
-            # the body's own last value -- this is a *procedural* loop, so
-            # the body's own Sequence type is computed (for its own
-            # sub-expressions' facts) but not folded into the loop's result.
-            Sequence hir ctx [dict get $node body]
-            set type [lub [dict get $ctx breakTypes $e] unit]
+            set bodyType [Sequence hir ctx [dict get $node body]]
             dict unset ctx breakTypes $e
             dict set ctx facts $saved
-            return [SetType hir $e $type]
+            return [SetType hir $e [MakeList $bodyType]]
+        }
+        lockloop {
+            # Every domain's operands are typed in written order in the
+            # enclosing scope; each domain binding is then typed like the
+            # single-domain loop's own (an element's type, or exactly Int).
+            # The result is the same collected List[R] as any collecting
+            # loop's.
+            set facts {}
+            foreach domain [dict get $node domains] {
+                if {[dict get $domain kind] eq "list"} {
+                    Expr hir ctx [dict get $domain iterable]
+                    set elemType [elementOf [hir::typeOf $hir [dict get $domain iterable]]]
+                    lappend facts [dict get $domain binding] [expr {$elemType eq "" ? "any" : $elemType}]
+                } else {
+                    Expr hir ctx [dict get $domain start]
+                    Expr hir ctx [dict get $domain end]
+                    lappend facts [dict get $domain binding] int
+                }
+            }
+            set saved [dict get $ctx facts]
+            foreach {binding type} $facts {
+                dict set ctx facts $binding $type
+            }
+            dict set ctx breakTypes $e never
+            set bodyType [Sequence hir ctx [dict get $node body]]
+            dict unset ctx breakTypes $e
+            dict set ctx facts $saved
+            return [SetType hir $e [MakeList $bodyType]]
         }
         return {
             set value [Expr hir ctx [dict get $node value]]

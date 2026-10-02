@@ -1,6 +1,11 @@
 # loop-counted.test -- "loop i from START to END:" (core IR: countloop),
 # R2A3-COUNTED-LOOPS-FINAL-SOURCE.md's ascending, exclusive-end, unit-step
-# counted loop.
+# counted loop. COLLECTING-LOOPS.md later made every numeric loop a
+# *collecting* loop (the result is the List of the body values, like
+# `loop x in xs:`), added `through` and `down from`, and lockstep iteration:
+# the zero-iteration/exhaustion/break expectations below changed from `unit`
+# to the collected List accordingly; the full new surface is covered by
+# tests/loop-collecting.test.
 #
 # Covers the construct on its own (not only through web::emailish?'s
 # scan_while/domain? rewrite): parsing (including the reserved future
@@ -10,7 +15,7 @@
 # TYPE error, not a new loop-only error kind), binding/scope (the induction
 # variable is not visible in START/END or after the loop, and may be
 # shadowed), break/continue/return/error composition, natural exhaustion
-# (unit, never a collected List), nested-loop combinations, the
+# (the collected List), nested-loop combinations, the
 # arbitrary-precision small-Int-tag boundary, and four-way backend parity.
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
@@ -72,13 +77,13 @@ test loop-counted-zero-iterations-equal {start == end runs the body zero times} 
     loopInterpValue {loop i from 3 to 3:
     -1
 }
-} -result unit
+} -result {[]}
 
 test loop-counted-zero-iterations-reversed {start > end runs the body zero times} -body {
     loopInterpValue {loop i from 5 to 2:
     -1
 }
-} -result unit
+} -result {[]}
 
 test loop-counted-zero-iterations-parity {both zero-iteration shapes agree on every backend} -body {
     list [loopParity {loop i from 3 to 3:
@@ -149,21 +154,22 @@ f(3)}
 } -result same
 
 # ---------------------------------------------------------------------------
-# Natural exhaustion is unit, never a collected List (spec item 9)
+# Natural exhaustion is the collected List (COLLECTING-LOOPS.md; before that
+# milestone a counted loop was procedural and exhausted to unit)
 
-test loop-counted-natural-exhaustion-is-unit {reaching END without a break evaluates to unit} -body {
+test loop-counted-natural-exhaustion-collects {reaching END without a break evaluates to the List of the body values} -body {
     loopInterpValue {loop i from 0 to 3:
     i
 }
-} -result unit
+} -result {[0, 1, 2]}
 
-test loop-counted-natural-exhaustion-not-collected {the body's own values are never silently collected into a List} -body {
+test loop-counted-natural-exhaustion-type {the loop's static type is List of the body's type} -body {
     set hir [loopSourceHir {v = loop i from 0 to 3:
     i
 v}]
     set e [lindex [dict get $hir roots] end]
     hir::types::show [hir::typeOf $hir $e]
-} -result unit
+} -result {List[int]}
 
 test loop-counted-natural-exhaustion-parity {natural exhaustion agrees on every backend} -body {
     loopParity {loop i from 0 to 3:
@@ -178,7 +184,7 @@ test loop-counted-natural-exhaustion-parity {natural exhaustion agrees on every 
 test loop-counted-bounds-evaluated-once {START and END are each evaluated exactly once, not once per iteration} -setup resetEffects -body {
     list [run {countloop {call {ref test-tick}} {call {ref test-tick}} {block {i} {ref i}}}] \
          $::testTicks
-} -result {unit 2}
+} -result {{[1]} 2}
 
 test loop-counted-bounds-left-to-right {START is evaluated before END} -setup resetEffects -body {
     run {countloop {call {ref test-log} {const 1}} {call {ref test-log} {const 2}} {block {i} {ref i}}}
@@ -282,12 +288,12 @@ test loop-counted-break-value-rejected {break VALUE is a syntax error, not an ov
 }
 } -result {3:15 "break" does not take a value, found name "i"}
 
-test loop-counted-break-bare {a plain break (no value) ends the loop with unit} -body {
+test loop-counted-break-bare {a plain break (no value) ends the loop with the collected prefix} -body {
     loopInterpValue {loop i from 0 to 10:
     if i == 2:
         break
 }
-} -result unit
+} -result {[unit, unit]}
 
 test loop-counted-continue-sequence {continue advances to i+1: the induction sequence stays 0 1 2 3, no skip/duplicate} -body {
     loopInterpValue {fn f():
@@ -309,7 +315,7 @@ loop i from 0 to 5:
     else:
         i
 }
-} -result unit
+} -result {[0, 1, 3, 4]}
 
 test loop-counted-continue-count {continue runs every iteration's own body (side effect via test-log), skipping only its own contribution} -setup resetEffects -body {
     run {countloop {const int 0} {const int 4} \
@@ -399,7 +405,7 @@ test loop-counted-end-exclusive-under-continue {end exclusivity holds even when 
 loop i from 0 to 3:
     continue
 }
-} -result unit
+} -result {[]}
 
 # ---------------------------------------------------------------------------
 # Nested loop combinations (spec item 14): break/continue target the
@@ -577,15 +583,15 @@ test loop-counted-parse-basic {loop i from a to b: parses to a countloop-shaped 
 
 test loop-counted-parse-error-missing-binding {loop from 0 to 10: -- missing binding (from's own contextual-keyword ambiguity: reported at the point the header actually stops parsing)} -body {
     parseErrorOf "loop from 0 to 10:\n    1\n"
-} -result {1:11 expected "in" or "from" after the loop variable, found integer 0}
+} -result {1:11 expected "in", "from" or "down from" after the loop variable, found integer 0}
 
 test loop-counted-parse-error-missing-from {loop i 0 to 10: -- missing "from"} -body {
     parseErrorOf "loop i 0 to 10:\n    1\n"
-} -match glob -result {1:8 expected "in" or "from" after the loop variable, found integer 0}
+} -match glob -result {1:8 expected "in", "from" or "down from" after the loop variable, found integer 0}
 
 test loop-counted-parse-error-missing-to {loop i from 0 10: -- missing "to"} -body {
     parseErrorOf "loop i from 0 10:\n    1\n"
-} -result {1:15 expected "to" after the loop start value, found integer 10}
+} -result {1:15 expected "to" or "through" after the loop start value, found integer 10}
 
 test loop-counted-parse-error-missing-end {loop i from 0 to: -- missing end} -body {
     parseErrorOf "loop i from 0 to:\n    1\n"
@@ -595,13 +601,10 @@ test loop-counted-parse-error-missing-start {loop i from to 10: -- missing start
     parseErrorOf "loop i from to 10:\n    1\n"
 } -match glob -result {1:13 expected an expression*after "from"*}
 
-test loop-counted-parse-error-down-reserved {loop i down from ...: is reserved, not implemented} -body {
-    parseErrorOf "loop i down from 10 to 0:\n    1\n"
-} -match glob -result {1:8 *down from*reserved*}
-
-test loop-counted-parse-error-through-reserved {loop i from a through b: is reserved, not implemented} -body {
-    parseErrorOf "loop i from 0 through 10:\n    1\n"
-} -match glob -result {1:15 *through*reserved*}
+test loop-counted-parse-down-and-through-implemented {down from / through are the COLLECTING-LOOPS.md forms, no longer reserved} -body {
+    list [surface::formatAst [surface::parse "loop i down from 10 to 0:\n    1\n"]] \
+         [surface::formatAst [surface::parse "loop i from 0 through 10:\n    1\n"]]
+} -match glob -result {{loop i down from (int 10) to (int 0)*} {loop i from (int 0) through (int 10)*}}
 
 test loop-counted-parse-error-by-reserved {loop i from a to b by s: is reserved, not implemented} -body {
     parseErrorOf "loop i from 0 to 10 by 2:\n    1\n"
