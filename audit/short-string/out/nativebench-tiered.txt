@@ -5,3 +5,13 @@ refined-checks    off 646123 ns  on 1093114 ns  (+69.2%)
 source-checks     off 7869 ns  on 11187 ns  (+42.2%)
 sum-refined      identical NIR
 test-selection   identical NIR
+uri-steady        off 4708627 ns  on 4551866 ns  (-3.3%)
+ai_text_clean     off 13467 ns  on 8790 ns  (-34.7%)
+csv               off 1728 ns  on 1696 ns  (-1.9%)
+csv_chunked       off 1801 ns  on 1753 ns  (-2.7%)
+csv_geometric     off 1828 ns  on 1816 ns  (-0.7%)
+csv_records       off 9663 ns  on 10435 ns  (+8.0%)
+hashtable         off 1128 ns  on 2016 ns  (+78.7%)
+matmul           identical NIR
+string_replace    off 940 ns  on 2431 ns  (+158.6%)
+string_reverse   identical NIR

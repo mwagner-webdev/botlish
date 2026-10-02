@@ -204,6 +204,17 @@ root candidates 1,276 -> 1,223, root slots 807 -> 788; census (`census-tiered.tx
 parameter positions and 6 of 26 result positions selected, **22 packed
 parameters against 8 scalar `length` uses and 15 `asciitostr`**.
 
+**Wall-clock** (`nativebench`, one quiet run, off versus on; tiny kernels are
+noisy, but the directions match the instruction counts): `refined-checks`
++69 %, `source-checks` +42 %, `uri-steady` -3.3 %, `ai_text_clean` -35 %,
+`csv_records` +8 %, `hashtable` +79 %, `string_replace` +159 %, the other CSV
+programs within +/-3 %.
+
+**Compile time** (`compiletime-tiered.txt`, corpus total, median of 5): planner
+140 ms (7 fixpoint rounds at most), NIR 2,317 -> 2,406 ms (+3.8 %), whole
+compile including Cranelift 2,499 -> 2,633 ms (+5.3 %); the first milestone
+measured +1.7 % to +8.8 % on different runs, so this is within the spread.
+
 ## Open decision
 
 The regime as specified is net-negative on this corpus without a rule that
