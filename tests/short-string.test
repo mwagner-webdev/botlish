@@ -46,8 +46,13 @@ proc srcHir {text} {
 }
 
 # Leaf inlining removes a small callee's separate function, and with it the
-# calling convention under test: most pins below disable it.
-set noInline {-tiny-leaf-inline-opt 0}
+# calling convention under test: most pins below disable it. The packed-ASCII
+# tier (tests/packed-ascii.test) is also disabled here: every pin in this file
+# is about the ShortString1 scalar tier, which then holds every String of at
+# most one character, ASCII or not (the single-tier regime), exactly as the
+# first milestone defined it -- minus the interned materialization table,
+# which no longer exists.
+set noInline {-tiny-leaf-inline-opt 0 -ascii-pack-opt 0}
 
 proc nirOf {text args} {
     return [native::nir [srcHir $text] {*}$args]
@@ -72,7 +77,8 @@ proc countIn {pattern text} {
     return [llength [regexp -all -inline $pattern $text]]
 }
 
-# {shortparams shortresult shortregs rawregs} of NIR function TEXT's header.
+# {shortparams shortresult shortregs rawregs asciiparams asciiresult asciiregs}
+# of NIR function TEXT's header.
 proc physical {text} {
     set head [lindex [split $text \n] 0]
     set params ""
@@ -81,12 +87,19 @@ proc physical {text} {
     regexp {shortregs="([^"]*)"} $head -> regs
     set raws ""
     regexp {rawregs="([^"]*)"} $head -> raws
-    return [list $params [regexp {shortresult=1} $head] $regs $raws]
+    set aparams ""
+    regexp {asciiparams="([^"]*)"} $head -> aparams
+    set aregs ""
+    regexp {asciiregs="([^"]*)"} $head -> aregs
+    return [list $params [regexp {shortresult=1} $head] $regs $raws $aparams [regexp {asciiresult=1} $head] $aregs]
 }
 
 proc shortParams {text} { return [lindex [physical $text] 0] }
 proc shortResult {text} { return [lindex [physical $text] 1] }
 proc shortRegs {text} { return [lindex [physical $text] 2] }
+proc asciiParams {text} { return [lindex [physical $text] 4] }
+proc asciiResult {text} { return [lindex [physical $text] 5] }
+proc asciiRegs {text} { return [lindex [physical $text] 6] }
 
 # Static ShortString1 conversion counts {strtoshort shorttostr} of function NAME.
 proc conversionsIn {nir name} {
@@ -94,7 +107,7 @@ proc conversionsIn {nir name} {
     return [list [countIn {op strtoshort} $text] [countIn {op shorttostr} $text]]
 }
 
-# One line per used instance: "label=P,P>R" with short/val per position.
+# One line per used instance: "label=P,P>R" with ascii/short/val per position.
 proc shortPlan {text args} {
     set lowered [native::lowered [srcHir $text] {*}$args]
     set spec [dict get $lowered specialization]
@@ -104,8 +117,9 @@ proc shortPlan {text args} {
         set p [dict get $plan $id]
         set label [hir::specialize::label $spec $id]
         if {$label eq "<program>"} continue
-        set params [lmap k [dict get $p params] {expr {$k eq "short" ? "short" : "val"}}]
-        lappend lines "$label=[join $params ,]>[expr {[dict get $p result] eq "short" ? "short" : "val"}]"
+        set params [lmap k [dict get $p params] {expr {$k in {short ascii} ? $k : "val"}}]
+        set result [dict get $p result]
+        lappend lines "$label=[join $params ,]>[expr {$result in {short ascii} ? $result : "val"}]"
     }
     return [lsort $lines]
 }
@@ -159,8 +173,10 @@ proc parityShort {text} {
     set prepared [native::prepareHir $hir]
     foreach opt {0 1} {
         foreach inline {0 1} {
-            set outcome [nativeOutcome $prepared -short-string-opt $opt -tiny-leaf-inline-opt $inline]
-            lappend outcomes [lindex $outcome 0]:[lindex $outcome 1]
+            foreach pack {0 1} {
+                set outcome [nativeOutcome $prepared -short-string-opt $opt -tiny-leaf-inline-opt $inline -ascii-pack-opt $pack]
+                lappend outcomes [lindex $outcome 0]:[lindex $outcome 1]
+            }
         }
     }
     if {[llength [lsort -unique $outcomes]] != 1} {
@@ -169,9 +185,10 @@ proc parityShort {text} {
     return [lindex $outcomes 0]
 }
 
-# The NIR of TEXT with the optimization off must contain no ShortString1 at all.
+# The NIR of TEXT with the optimization off must contain no short String
+# (either tier) at all.
 proc noShortAnywhere {nir} {
-    return [expr {[countIn {shortregs|shortparams|shortresult|shortlit|strtoshort|shorttostr|shortlen|shorteq|strsliceshort} $nir] == 0}]
+    return [expr {[countIn {shortregs|shortparams|shortresult|shortlit|strtoshort|shorttostr|shortlen|shorteq|strsliceshort|asciiregs|asciiparams|asciiresult|asciilit|strtoascii|asciitostr|asciilen|asciieq|asciitoshort|asciishorteq} $nir] == 0}]
 }
 
 # ---------------------------------------------------------------------------
@@ -238,9 +255,9 @@ test short-plan-branch-join-of-empty-and-one {fn choose(flag): "" or "x": the re
     shortPlan $chooseSource {*}$noInline
 } -result {choose<bool>=val>short}
 
-test short-plan-facts-empty-or-one {the fact behind it is the lattice join empty|one = maybe (length [0,1]), not an exact length} -body {
+test short-plan-facts-empty-or-one {the fact behind it is the lattice join of the empty and the one-character literal: length [0,1] (ASCII, scalar unknown), not an exact length} -body {
     shortFacts $chooseSource choose<bool> {*}$noInline
-} -result {over:not-string maybe}
+} -result {over:not-string {0 1 1 {}}}
 
 test short-plan-non-ascii-branch-join {fn lam(flag): "λ" or "": non-ASCII, still ShortString1 (this is not ASCII packing)} -body {
     shortPlan $lamSource {*}$noInline
@@ -257,7 +274,7 @@ test short-plan-two-one-character-branches {"x" or "λ": two one-character value
         two(true) == "x"
     }
     list [shortPlan $text {*}$noInline] [shortFacts $text two<bool> {*}$noInline]
-} -result {two<bool>=val>short {over:not-string one}}
+} -result {two<bool>=val>short {over:not-string {1 1 0 {}}}}
 
 test short-plan-chain-parameters {f -> g -> h forwards a ShortString1 parameter at every position} -body {
     shortPlan $chainSource {*}$noInline
@@ -271,7 +288,7 @@ test short-plan-parameter-control {a closed helper whose String parameter is pro
         [describe(""), describe("q"), describe("é")]
     }
     list [shortPlan $text {*}$noInline] [shortFacts $text describe<str> {*}$noInline]
-} -result {describe<str>=short>val {maybe over:not-string}}
+} -result {describe<str>=short>val {{{0 1 0 {}}} over:not-string}}
 
 test short-plan-result-control {a closed helper returning a String proven length <= 1 gets a ShortString1 result, consumed by length and equality} -body {
     set text {
@@ -296,7 +313,7 @@ test short-plan-long-literal-stays-tagged {"ab" has two characters: never ShortS
         two("ab")
     }
     list [shortPlan $text {*}$noInline] [shortReasons $text two<str> {*}$noInline] [shortFacts $text two<str> {*}$noInline]
-} -result {two<str>=val>val {length-gt-1 not-string} {over:long over:not-string}}
+} -result {two<str>=val>val {length-gt-1 not-string} {{{2 2 1 {}}} over:not-string}}
 
 test short-plan-unknown-length-stays-tagged {a String of unknown length (a caller passes concat's result) stays tagged: no speculation from the other callers} -body {
     set text {
@@ -358,7 +375,7 @@ test short-plan-open-instance-stays-tagged {a function whose value escapes (a ge
         [apply(pick, true), length(pick(false))]
     }
     list [shortReasons $text pick<generic> {*}$noInline] [shortFacts $text pick<generic> {*}$noInline]
-} -result {{not-string open-instance} {over:not-string maybe}}
+} -result {{not-string open-instance} {over:not-string {0 1 1 {}}}}
 
 # ---------------------------------------------------------------------------
 # Encoding: Empty is -1, NUL is 0, the domain is the scalar values
@@ -1054,7 +1071,7 @@ test short-audit-explains-a-virtual-value {the audit says what was proven, what 
     foreach needle {
         "instance choose<bool>"
         "proven character length: \[0,1\]"
-        "ShortString1 eligible: yes"
+        "eligible representation: ShortString1"
         "physical representation: ShortString1 (local)"
         "production: result of choose<bool>"
         "length -> scalar"
@@ -1070,7 +1087,7 @@ test short-audit-explains-rejections {a String kept tagged says why: length > 1,
     set text [explainOf $auditSource {*}$noInline]
     foreach needle {
         "t (e"
-        "proven character length: unproven (more than one character (length > 1))"
+        "proven character length: \[2,2\]"
         "physical representation: tagged String (length-gt-1)"
     } {
         if {[string first $needle $text] < 0} { error "missing \"$needle\" in:\n$text" }

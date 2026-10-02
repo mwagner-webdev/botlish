@@ -80,7 +80,7 @@ pub fn op_may_allocate(op: OpCode) -> bool {
     use OpCode::*;
     matches!(
         op,
-        IAdd | ISub | IMul | IAnd | IOr | IXor | IShl | IShr | Substr | DecodeCharAt | ShortToStr | StrLower | StrCat
+        IAdd | ISub | IMul | IAnd | IOr | IXor | IShl | IShr | Substr | DecodeCharAt | ShortToStr | AsciiToStr | StrLower | StrCat
             | StrUtf8Bytes | ListNew | ListAppend | MutArrayAllocate | MutArrayFreeze | MkOk | MkError
             | SetFromList
             // Same allocation behavior as SetFromList (same runtime helper,
@@ -749,17 +749,33 @@ fn first_scalar_of(obj: &StrObj) -> u32 {
 }
 
 /// The String a ShortString1 scalar stands for: "" for Empty, else the
-/// one-character String of that Unicode scalar value. Empty and the scalars
-/// U+0000..U+00FF materialize to interned static Strings (`Vm::short_string`:
-/// no allocation); any other scalar allocates.
+/// one-character String of that Unicode scalar value, UTF-8 encoded into a
+/// fresh String (there is no interned table: a value the compiler knows
+/// statically is a `str` constant and never gets here).
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_short_to_str(p: *mut Vm, short: u64) -> Value {
     let short = short as i64;
-    if (-1..256).contains(&short) {
-        return vm(p).short_string(short);
-    }
-    let r = vm(p).short_string(short);
+    let r = vm(p).short_to_string(short);
     vm(p).metrics.record_string_copy(char::from_u32(short as u32).map_or(0, |c| c.len_utf8()));
+    r
+}
+
+/// The packed-ASCII word (tier A, see `value::pack_ascii`) of String S, which
+/// the compiler proved ASCII with at most eight characters.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_str_to_ascii(_p: *mut Vm, s: Value) -> u64 {
+    let obj = str_of(s);
+    debug_assert!(obj.ascii && obj.chars <= 8, "packed ASCII of a String that is not ASCII of at most 8 characters");
+    pack_ascii(obj.text.as_bytes())
+}
+
+/// The String a packed-ASCII word stands for, freshly allocated: the word
+/// masked to its 7-bit payload, truncated to the length the presence bits
+/// give.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_ascii_to_str(p: *mut Vm, word: u64) -> Value {
+    let r = vm(p).ascii_to_string(word);
+    vm(p).metrics.record_string_copy(ascii_word_len(word));
     r
 }
 
@@ -1389,7 +1405,8 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         MkError => rt_result_new(p, 0, a[0]),
         Hash => rt_hash(p, a[0]),
         RegionCheck | RegionEq | RBox | RUnbox | RIAdd | RISub | RIMul | RILt | RILe | RIGt | RIGe | RIEq
-        | RIShr | RIShl | StrToShort | ShortToStr | ShortLen | ShortEq | StrSliceShort
+        | RIShr | RIShl | StrToShort | ShortToStr | ShortLen | ShortEq | StrSliceShort | StrToAscii | AsciiToStr
+        | AsciiLen | AsciiEq | AsciiToShort | AsciiShortEq
         | DecodeCharAt | StrByteLen | StrRegionIsTclAlpha | StrRegionIsTclAlnum => {
             // Raw (untagged) representation ops, StringRegion ops and String
             // traversal ops never implement a dynamic native: native/lower.tcl
@@ -1437,6 +1454,8 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_str_byte_len, 2),
         h!(rt_str_to_short, 2),
         h!(rt_short_to_str, 2),
+        h!(rt_str_to_ascii, 2),
+        h!(rt_ascii_to_str, 2),
         h!(rt_str_slice_short, 4),
         h!(rt_str_lower, 2),
         h!(rt_str_cat, 3),
@@ -1699,14 +1718,49 @@ mod tests {
         // NUL materializes as a one-character String, -1 as the empty one.
         let nul = rt_short_to_str(&mut *vm, 0);
         assert_eq!((str_of(nul).chars, str_of(nul).text.len()), (1, 1));
-        // Latin-1 scalars and Empty are interned static Strings: the same
-        // object every time, nothing allocated; other scalars are fresh.
-        assert_eq!(rt_short_to_str(&mut *vm, 0), nul);
-        assert_eq!(rt_short_to_str(&mut *vm, 97), rt_short_to_str(&mut *vm, 97));
-        assert_eq!(rt_short_to_str(&mut *vm, (-1i64) as u64), rt_short_to_str(&mut *vm, (-1i64) as u64));
-        assert_ne!(rt_short_to_str(&mut *vm, 0x3bb), rt_short_to_str(&mut *vm, 0x3bb));
+        // No interned table: every materialization is a fresh String.
+        assert_ne!(rt_short_to_str(&mut *vm, 97), rt_short_to_str(&mut *vm, 97));
+        assert_ne!(rt_short_to_str(&mut *vm, (-1i64) as u64), rt_short_to_str(&mut *vm, (-1i64) as u64));
         let empty = rt_short_to_str(&mut *vm, (-1i64) as u64);
         assert_eq!((str_of(empty).chars, str_of(empty).text.len()), (0, 0));
+    }
+
+    // -----------------------------------------------------------------------
+    // Packed ASCII (tier A): byte i = 0x80 | c, 0 past the end.
+
+    #[test]
+    fn packed_ascii_layout_length_and_canonical_form() {
+        assert_eq!(pack_ascii(b""), 0);
+        assert_eq!(pack_ascii(b"a"), 0xE1);
+        assert_eq!(pack_ascii(b"\0"), 0x80, "NUL is a present 0x80, never absent");
+        assert_eq!(pack_ascii(b"ab"), 0xE2E1);
+        assert_eq!(pack_ascii(b"abcdefgh"), 0xE8E7_E6E5_E4E3_E2E1);
+        for (text, n) in [("", 0usize), ("a", 1), ("\0\0", 2), ("abc", 3), ("1234567", 7), ("12345678", 8)] {
+            let w = pack_ascii(text.as_bytes());
+            assert_eq!(ascii_word_len(w), n, "{text:?}");
+            assert!(is_canonical_ascii_word(w), "{text:?}");
+            let (bytes, len) = unpack_ascii(w);
+            assert_eq!(&bytes[..len], text.as_bytes());
+        }
+        // Non-canonical words: a payload byte without its presence flag, or a
+        // present byte after an absent one.
+        assert!(!is_canonical_ascii_word(0x61));
+        assert!(!is_canonical_ascii_word(0xE100));
+        assert!(!is_canonical_ascii_word(0xE100_0000_0000_00E1), "a gap before a present byte");
+        assert!(is_canonical_ascii_word(0));
+    }
+
+    #[test]
+    fn packed_ascii_round_trips_through_strings() {
+        let mut vm = vm();
+        for text in ["", "a", "\0", "ab", "hello", "1234567", "12345678", "\u{7f}\u{0}A"] {
+            let s = str_val(&mut vm, text);
+            let w = rt_str_to_ascii(&mut *vm, s);
+            let back = rt_ascii_to_str(&mut *vm, w);
+            assert_eq!(str_of(back).text.as_ref(), text, "{text:?}");
+            assert_eq!(str_of(back).chars, text.chars().count());
+            assert!(str_of(back).ascii);
+        }
     }
 
     #[test]

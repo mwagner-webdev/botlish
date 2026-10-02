@@ -1,0 +1,18 @@
+fib              safepoints   0 ->   0  root candidates    0 ->    0  root slots    0 ->    0
+lex-strategy     safepoints  31 ->  31  root candidates   72 ->   72  root slots   41 ->   41
+loop-count       safepoints   2 ->   2  root candidates    3 ->    3  root slots    3 ->    3
+refined-checks   safepoints  45 ->  48  root candidates  105 ->   99  root slots   70 ->   67
+source-checks    safepoints  21 ->  21  root candidates   60 ->   57  root slots   33 ->   33
+sum-refined      safepoints   3 ->   3  root candidates    5 ->    5  root slots    5 ->    5
+test-selection   safepoints  55 ->  55  root candidates  118 ->  118  root slots   43 ->   43
+uri-steady       safepoints  26 ->  26  root candidates   72 ->   69  root slots   42 ->   41
+ai_text_clean    safepoints  12 ->  14  root candidates   23 ->   23  root slots   15 ->   15
+csv              safepoints  45 ->  45  root candidates   65 ->   64  root slots   40 ->   39
+csv_chunked      safepoints  72 ->  72  root candidates  143 ->  142  root slots   92 ->   91
+csv_geometric    safepoints  54 ->  54  root candidates   98 ->   97  root slots   70 ->   69
+csv_records      safepoints 126 -> 128  root candidates  265 ->  256  root slots  192 ->  189
+hashtable        safepoints  51 ->  62  root candidates  118 ->  107  root slots   81 ->   79
+matmul           safepoints  29 ->  29  root candidates   71 ->   71  root slots   44 ->   44
+string_replace   safepoints  14 ->  20  root candidates   41 ->   23  root slots   24 ->   17
+string_reverse   safepoints   9 ->   9  root candidates   17 ->   17  root slots   12 ->   12
+TOTAL            safepoints 595 -> 619  root candidates 1276 -> 1223  root slots  807 ->  788  (functions 233 -> 233)

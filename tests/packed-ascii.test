@@ -1,0 +1,1028 @@
+# packed-ascii.test -- SHORT-STRING.md: the tiered short-String regime.
+#
+#   known ASCII, at most 8 characters      -> packed ASCII (tier A): one i64,
+#       byte i = 0x80 | c, 0 past the end; length (71 - clz) >> 3; equality
+#       is word equality; the String is `w & 0x7F7F...` stored as one word
+#   at most 1 character, maybe Unicode     -> ShortString1 (tier B): one i64,
+#       -1 Empty, else the Unicode scalar (tests/short-string.test)
+#   anything else                          -> the ordinary tagged String
+#
+# There is no interned table of materialized Strings: a value the compiler
+# knows statically materializes to a `str` constant, any other
+# materialization allocates. This file pins the proof and the plan, the NIR
+# (the physical kinds, conversions only at frontiers), the boundaries (8/9
+# characters, NUL, DEL, U+0080), the tier interplay (joins, mixed equality),
+# errors, GC, standalone executables and differential parity across every
+# backend and every option combination.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 100000
+
+testConstraint executableAot [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64}}]
+
+proc dedent {text} {
+    set lines [split $text \n]
+    set indent 1000
+    foreach line $lines {
+        if {[string trim $line] eq ""} continue
+        set n [expr {[string length $line] - [string length [string trimleft $line " "]]}]
+        if {$n < $indent} { set indent $n }
+    }
+    return [join [lmap line $lines {string range $line $indent end}] \n]
+}
+
+proc srcHir {text} {
+    set dir [makeDirectory {packed ascii}]
+    set path [file join $dir p.bot]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts $channel [dedent $text]
+    close $channel
+    try {
+        return [surface::readProgramFile $path]
+    } finally {
+        removeDirectory {packed ascii}
+    }
+}
+
+set noInline {-tiny-leaf-inline-opt 0}
+
+proc nirOf {text args} {
+    return [native::nir [srcHir $text] {*}$args]
+}
+
+proc fnText {nir name {key ""}} {
+    set found {}
+    foreach body [split [string map [list "\n\nfunc " "\n\u0001func "] $nir] \u0001] {
+        if {![regexp {^func \d+ "} $body]} continue
+        if {![regexp [format {^func \d+ "%s"} [string map {. \\.} $name]] $body]} continue
+        if {$key ne "" && ![regexp [format {instance="%s"} $key] $body]} continue
+        lappend found [string trim $body]
+    }
+    if {[llength $found] != 1} {
+        error "expected one function $name ($key), found [llength $found] in:\n$nir"
+    }
+    return [lindex $found 0]
+}
+
+proc countIn {pattern text} {
+    return [llength [regexp -all -inline $pattern $text]]
+}
+
+# {asciiparams asciiresult asciiregs shortparams shortresult shortregs} of the
+# header of NIR function TEXT.
+proc physical {text} {
+    set head [lindex [split $text \n] 0]
+    set out {}
+    foreach attr {asciiparams asciiregs shortparams shortregs} {
+        set v ""
+        regexp "$attr=\"(\[^\"\]*)\"" $head -> v
+        set $attr $v
+    }
+    return [list $asciiparams [regexp {asciiresult=1} $head] $asciiregs $shortparams [regexp {shortresult=1} $head] $shortregs]
+}
+
+proc asciiParams {text} { return [lindex [physical $text] 0] }
+proc asciiResult {text} { return [lindex [physical $text] 1] }
+proc asciiRegs {text} { return [lindex [physical $text] 2] }
+proc shortParams {text} { return [lindex [physical $text] 3] }
+proc shortResult {text} { return [lindex [physical $text] 4] }
+proc shortRegs {text} { return [lindex [physical $text] 5] }
+
+proc conversionsOf {nir name} {
+    set text [fnText $nir $name]
+    return [list [countIn {op strtoascii} $text] [countIn {op asciitostr} $text] [countIn {op strtoshort} $text] [countIn {op shorttostr} $text] [countIn {op asciitoshort} $text]]
+}
+
+# One line per used instance: "label=P,P>R" with ascii/short/val per position.
+proc kindPlan {text args} {
+    set lowered [native::lowered [srcHir $text] {*}$args]
+    set spec [dict get $lowered specialization]
+    set plan [dict get $lowered shortPlan]
+    set lines {}
+    foreach id [dict get $spec used] {
+        set p [dict get $plan $id]
+        set label [hir::specialize::label $spec $id]
+        if {$label eq "<program>"} continue
+        set params [lmap k [dict get $p params] {expr {$k in {short ascii} ? $k : "val"}}]
+        set result [dict get $p result]
+        lappend lines "$label=[join $params ,]>[expr {$result in {short ascii} ? $result : "val"}]"
+    }
+    return [lsort $lines]
+}
+
+proc planFacts {text label args} {
+    set lowered [native::lowered [srcHir $text] {*}$args]
+    set spec [dict get $lowered specialization]
+    set plan [dict get $lowered shortPlan]
+    foreach id [dict get $spec used] {
+        if {[hir::specialize::label $spec $id] eq $label} {
+            set p [dict get $plan $id]
+            return [list [dict get $p paramFacts] [dict get $p resultFact] [dict get $p paramReasons] [dict get $p resultReason]]
+        }
+    }
+    error "no instance $label"
+}
+
+proc nativeOutcome {hir args} {
+    resetEffects
+    if {[catch {native::evalHir $hir {*}$args} result options]} {
+        return [list error [dict get $options -errorcode]]
+    }
+    return [list value [core::value::show $result 1]]
+}
+
+# Every backend, and native under every combination of the short-String
+# switch, the packed-ASCII switch and leaf inlining, agree on TEXT; returns
+# the one outcome ("kind:text").
+proc parity {text} {
+    set hir [srcHir $text]
+    set outcomes {}
+    foreach backend {interp compile cranelift-generic cranelift} {
+        set outcome [outcomeUnderHir $backend $hir]
+        lappend outcomes [lindex $outcome 0]:[lindex $outcome 1]
+    }
+    set prepared [native::prepareHir $hir]
+    foreach opt {0 1} {
+        foreach pack {0 1} {
+            foreach inline {0 1} {
+                set outcome [nativeOutcome $prepared -short-string-opt $opt -ascii-pack-opt $pack -tiny-leaf-inline-opt $inline]
+                lappend outcomes [lindex $outcome 0]:[lindex $outcome 1]
+            }
+        }
+    }
+    if {[llength [lsort -unique $outcomes]] != 1} {
+        error "backends disagree:\n[join $outcomes \n]"
+    }
+    return [lindex $outcomes 0]
+}
+
+# ---------------------------------------------------------------------------
+# The proof and the plan
+
+test pa-plan-literal-join-is-packed {fn mix(flag): "ab" or "cdefgh": two ASCII literals of at most 8 characters join to a packed result} -body {
+    set text {
+        fn mix(flag):
+            if flag:
+                "ab"
+            else:
+                "cdefgh"
+
+        [length(mix(true)), mix(false) == "cdefgh"]
+    }
+    list [kindPlan $text {*}$noInline] [planFacts $text mix<bool> {*}$noInline]
+} -result {mix<bool>=val>ascii {over:not-string {2 6 1 {}} not-string {}}}
+
+test pa-plan-eight-characters-are-the-limit {exactly 8 ASCII characters are packed, 9 stay tagged with the reason length-gt-8} -body {
+    set eight {
+        fn id(s):
+            s
+
+        [id("12345678"), length(id("12345678"))]
+    }
+    set nine {
+        fn id(s):
+            s
+
+        [id("123456789"), length(id("123456789"))]
+    }
+    list [kindPlan $eight {*}$noInline] [kindPlan $nine {*}$noInline] [lindex [planFacts $nine id<str> {*}$noInline] 2]
+} -result {id<str>=ascii>ascii id<str>=val>val length-gt-8}
+
+test pa-plan-parameter-transport {a closed helper whose String parameter is fed only ASCII literals of at most 8 characters has a packed parameter} -body {
+    set text {
+        fn probe(s):
+            [length(s), s == "ab", s == ""]
+
+        [probe("ab"), probe(""), probe("abcdefgh")]
+    }
+    list [kindPlan $text {*}$noInline] [lindex [planFacts $text probe<str> {*}$noInline] 0]
+} -result {probe<str>=ascii>val {{0 8 1 {}}}}
+
+test pa-plan-unicode-multi-character-stays-tagged {"ab" or "λμ": a multi-character String that is not proven ASCII is not representable} -body {
+    set text {
+        fn mix(flag):
+            if flag:
+                "ab"
+            else:
+                "λμ"
+
+        length(mix(true))
+    }
+    list [kindPlan $text {*}$noInline] [planFacts $text mix<bool> {*}$noInline]
+} -result {mix<bool>=val>val {over:not-string over:unicode not-string not-ascii-multi}}
+
+test pa-plan-ascii-and-unicode-one-character-is-the-scalar-tier {"a" or "λ": the join is not ASCII but has one character: ShortString1} -body {
+    set text {
+        fn pick(flag):
+            if flag:
+                "a"
+            else:
+                "λ"
+
+        [length(pick(true)), pick(false) == "λ"]
+    }
+    kindPlan $text {*}$noInline
+} -result {pick<bool>=val>short}
+
+test pa-plan-one-ascii-character-is-packed-not-scalar {a one-character ASCII literal is known ASCII, so it is packed; U+0080 and U+00E9 are not ASCII and are scalars} -body {
+    set ascii {
+        fn c(flag):
+            if flag:
+                "a"
+            else:
+                "b"
+
+        c(true) == "a"
+    }
+    set latin {
+        fn c(flag):
+            if flag:
+                "é"
+            else:
+                "b"
+
+        c(true) == "é"
+    }
+    set c1 [format {
+        fn c(flag):
+            if flag:
+                "%s"
+            else:
+                "b"
+
+        c(true) == "%s"
+    } [format %c 0x80] [format %c 0x80]]
+    list [kindPlan $ascii {*}$noInline] [kindPlan $latin {*}$noInline] [kindPlan $c1 {*}$noInline]
+} -result {c<bool>=val>ascii c<bool>=val>short c<bool>=val>short}
+
+test pa-plan-ascii-pack-switch {-ascii-pack-opt 0 turns the packed tier off: one character is a ShortString1 and nothing longer is virtual} -body {
+    set text {
+        fn mix(flag):
+            if flag:
+                "ab"
+            else:
+                "cd"
+
+        fn one(flag):
+            if flag:
+                "a"
+            else:
+                ""
+
+        [length(mix(true)), length(one(true))]
+    }
+    list [kindPlan $text {*}$noInline] [kindPlan $text {*}$noInline -ascii-pack-opt 0] [kindPlan $text {*}$noInline -short-string-opt 0]
+} -result {{mix<bool>=val>ascii one<bool>=val>ascii} {mix<bool>=val>val one<bool>=val>short} {mix<bool>=val>val one<bool>=val>val}}
+
+test pa-plan-concatenation-is-not-a-packed-producer {concat of packed parameters is a tagged String: no length inference is invented for it} -body {
+    set text {
+        fn cat(a, b):
+            concat(a, b)
+
+        length(cat("ab", "cd"))
+    }
+    kindPlan $text {*}$noInline
+} -result {{cat<str, str>=ascii,ascii>val}}
+
+test pa-plan-open-instance-stays-tagged {a function whose value escapes keeps the tagged ABI even though its result is bounded ASCII} -body {
+    set text {
+        fn pick(flag):
+            if flag:
+                "yes"
+            else:
+                "no"
+
+        fn apply(f, x):
+            f(x)
+
+        [apply(pick, true), length(pick(false))]
+    }
+    lrange [planFacts $text pick<generic> {*}$noInline] 2 3
+} -result {not-string open-instance}
+
+test pa-plan-dead-long-branch-does-not-poison {a branch the existing range analysis proves dead contributes nothing} -body {
+    set text {
+        fn pick(n):
+            if n < 5:
+                "abc"
+            else:
+                "a very long dead string"
+
+        pick(1) == "abc"
+    }
+    kindPlan $text {*}$noInline
+} -result {pick<int>=val>ascii}
+
+# ---------------------------------------------------------------------------
+# NIR: the packed kind, constants, conversions at frontiers
+
+test pa-nir-packed-constants {the packed words of "", "a", "ab", NUL and a full 8-character String are asciilit constants: byte i = 0x80 | c} -body {
+    set nul [format %c 0]
+    set text "fn id(s):\n    s\n\n\[length(id(\"\")), length(id(\"a\")), length(id(\"ab\")), length(id(\"$nul\")), length(id(\"abcdefgh\"))\]"
+    set program [fnText [nirOf $text {*}$noInline] <program>]
+    lsort -unique [regexp -all -inline {asciilit -?\d+} $program]
+} -result {{asciilit -1664107662228069663} {asciilit 0} {asciilit 128} {asciilit 225} {asciilit 58081}}
+
+test pa-nir-packed-physical-kind-is-not-rawint-or-short {asciiregs, never rawregs or shortregs: three distinct kinds even though all are an i64} -body {
+    set text {
+        fn probe(s):
+            [length(s), s == "ab"]
+
+        [probe("ab"), probe("")]
+    }
+    set nir [nirOf $text {*}$noInline]
+    set probe [fnText $nir probe]
+    list [asciiParams $probe] [asciiRegs $probe] [shortRegs $probe] [countIn {rawregs="1"} $probe]
+} -result {0 {0 3} {} 1}
+
+test pa-nir-length-and-equality-are-scalar {length of a packed value is asciilen, equality asciieq: no strlen / streq} -body {
+    set text {
+        fn probe(s):
+            [length(s), s == "ab", s == ""]
+
+        [probe("ab"), probe("")]
+    }
+    set probe [fnText [nirOf $text {*}$noInline] probe]
+    list [countIn {op asciilen} $probe] [countIn {op asciieq} $probe] [countIn {op strlen|op streq|op veq} $probe] [countIn {op asciitostr} $probe]
+} -result {1 2 0 0}
+
+test pa-nir-literal-materializes-to-a-constant {a packed local bound to a literal and stored in a List is the static `str` constant, never asciitostr} -body {
+    set text {
+        fn keep(xs):
+            s = "hello"
+            [length(s), list_append(xs, s)]
+
+        keep([])
+    }
+    set keep [fnText [nirOf $text {*}$noInline] keep]
+    list [countIn {op asciitostr} $keep] [countIn {= str "hello"} $keep] [countIn {op asciilen} $keep] [parity $text]
+} -result {0 1 1 {value:[5, ["hello"]]}}
+
+test pa-nir-runtime-value-materializes-by-unpacking {a packed value that is only known at run time materializes with one asciitostr at the tagged use} -body {
+    set text {
+        fn keep(xs, s):
+            list_append(xs, s)
+
+        [keep([], "ab"), keep([], "cd")]
+    }
+    set keep [fnText [nirOf $text {*}$noInline] keep]
+    list [asciiParams $keep] [countIn {op asciitostr} $keep] [parity $text]
+} -result {1 1 {value:[["ab"], ["cd"]]}}
+
+test pa-nir-mixed-use-materializes-once {length(s) is scalar; two tagged uses of the same packed parameter share one materialization} -body {
+    set text {
+        fn mixed(s, xs):
+            [length(s), list_append(xs, s), list_append(xs, s)]
+
+        mixed("xyz", [])
+    }
+    set f [fnText [nirOf $text {*}$noInline] mixed]
+    list [countIn {op asciilen} $f] [countIn {op asciitostr} $f] [parity $text]
+} -result {1 1 {value:[3, ["xyz"], ["xyz"]]}}
+
+test pa-nir-tier-widening-is-one-conversion {a packed value joining a ShortString1 position is widened with asciitoshort (a literal just becomes a shortlit)} -body {
+    set text {
+        fn widen(c, flag):
+            if flag:
+                c
+            else:
+                "λ"
+
+        [widen("a", true), widen("b", false), length(widen("b", true))]
+    }
+    set nir [nirOf $text {*}$noInline]
+    set widen [fnText $nir widen]
+    list [asciiParams $widen] [shortResult $widen] [countIn {op asciitoshort} $widen] [countIn {shortlit} $widen] [parity $text]
+} -result {0 1 1 1 {value:["a", "λ", 1]}}
+
+test pa-nir-mixed-equality-uses-the-sentinel-op {a packed value against a ShortString1: asciishorteq (a scalar above 0x7F or a longer packed value is simply unequal)} -body {
+    set text {
+        fn same(a, b):
+            a == b
+
+        fn slice(t, i):
+            substring(t, i, i + 1)
+
+        [same("a", slice("äa", 1)), same("ab", slice("ab", 0)), same("", slice("ab", 0)), same("a", slice("äa", 0))]
+    }
+    set same [fnText [nirOf $text {*}$noInline] same]
+    list [countIn {op asciishorteq} $same] [parity $text]
+} -result {1 {value:[true, false, false, false]}}
+
+test pa-nir-disabled-reproduces-the-tagged-strings {-short-string-opt 0 emits no short String (either tier) anywhere} -body {
+    set text {
+        fn mix(flag):
+            if flag:
+                "ab"
+            else:
+                "λ"
+
+        fn probe(s):
+            [length(s), s == "ab"]
+
+        [probe(mix(true)), probe("zz")]
+    }
+    set nir [nirOf $text {*}$noInline -short-string-opt 0]
+    countIn {asciiregs|asciiparams|asciiresult|asciilit|asciitostr|asciilen|asciieq|shortregs|shortparams|shortresult|shortlit|strtoshort|shorttostr|shortlen|shorteq} $nir
+} -result 0
+
+test pa-nir-env-switches {BOTLISH_NATIVE_SHORT_STRING_OPT=0 and BOTLISH_NATIVE_ASCII_PACK_OPT=0 are the same switches} -body {
+    set text {
+        fn probe(s):
+            [length(s), s == "ab"]
+
+        [probe("ab"), probe("")]
+    }
+    set base [countIn {asciiregs} [nirOf $text {*}$noInline]]
+    set ::env(BOTLISH_NATIVE_ASCII_PACK_OPT) 0
+    try {
+        set noPack [countIn {asciiregs} [nirOf $text {*}$noInline]]
+    } finally {
+        unset ::env(BOTLISH_NATIVE_ASCII_PACK_OPT)
+    }
+    set ::env(BOTLISH_NATIVE_SHORT_STRING_OPT) 0
+    try {
+        set off [countIn {asciiregs|shortregs} [nirOf $text {*}$noInline]]
+    } finally {
+        unset ::env(BOTLISH_NATIVE_SHORT_STRING_OPT)
+    }
+    list [expr {$base > 0}] $noPack $off
+} -result {1 0 0}
+
+# ---------------------------------------------------------------------------
+# Behavior: values and lengths at the boundaries, every backend and option
+
+test pa-length-of-every-size {the length of an ASCII String of 0..8 characters (and 9, 12) through a closed helper: (71 - clz) >> 3} -body {
+    parity {
+        fn size(s):
+            length(s)
+
+        [size(""), size("a"), size("ab"), size("abc"), size("abcd"), size("abcde"), size("abcdef"), size("abcdefg"), size("abcdefgh"), size("abcdefghi"), size("abcdefghijkl")]
+    }
+} -result {value:[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12]}
+
+test pa-nul-del-and-high-ascii {NUL is a present byte (never "absent"), DEL (0x7F) is ASCII, U+0080 is not} -body {
+    set nul [format %c 0]
+    set del [format %c 0x7f]
+    set c1 [format %c 0x80]
+    parity "
+        fn size(s):
+            length(s)
+
+        fn same(a, b):
+            a == b
+
+        \[size(\"$nul\"), size(\"a${nul}b\"), size(\"$nul$nul$nul\"), size(\"$del\"), size(\"$c1\"), size(\"$del$nul\"),
+         same(\"$nul\", \"\"), same(\"a${nul}\", \"a\"), same(\"${nul}a\", \"a${nul}\"), same(\"$del\", \"$del\"), same(\"$c1\", \"$c1\")\]
+    "
+} -result {value:[1, 3, 3, 1, 1, 2, false, false, false, true, true]}
+
+test pa-equality-is-word-equality {equal Strings have equal words; prefixes, different lengths and different characters are all unequal} -body {
+    parity {
+        fn same(a, b):
+            a == b
+
+        [same("", ""), same("a", "a"), same("ab", "ab"), same("ab", "abc"), same("abc", "ab"), same("ab", "ba"),
+         same("abcdefgh", "abcdefgh"), same("abcdefgh", "abcdefgi"), same("A", "a"), same("", "a")]
+    }
+} -result {value:[true, true, true, false, false, false, true, false, false, false]}
+
+test pa-join-and-alias-stay-packed {a packed value through a branch join and aliases is one packed register: no String until the tagged use} -body {
+    set text {
+        fn pick(flag):
+            if flag:
+                "yes"
+            else:
+                "no"
+
+        fn alias(flag):
+            x = pick(flag)
+            y = x
+            z = y
+            [length(z), z == "yes", z == "no"]
+
+        [alias(true), alias(false)]
+    }
+    set nir [nirOf $text {*}$noInline]
+    list [conversionsOf $nir alias] [asciiResult [fnText $nir pick]] [parity $text]
+} -result {{0 0 0 0 0} 1 {value:[[3, true, false], [2, false, true]]}}
+
+test pa-chain-is-one-continuous-region {pick -> f -> g -> h forwards a packed value through every exact call with no conversion in any function} -body {
+    set text {
+        fn pick(flag):
+            if flag:
+                ""
+            else:
+                "word"
+
+        fn h(s):
+            [length(s), s == "word", s == ""]
+
+        fn g(s):
+            h(s)
+
+        fn f(s):
+            g(s)
+
+        [f(pick(true)), f(pick(false))]
+    }
+    set nir [nirOf $text {*}$noInline]
+    list [lmap n {f g h pick <program>} {conversionsOf $nir $n}] [parity $text]
+} -result {{{0 0 0 0 0} {0 0 0 0 0} {0 0 0 0 0} {0 0 0 0 0} {0 0 0 0 0}} {value:[[0, false, true], [4, true, false]]}}
+
+test pa-loop-state-stays-packed {a packed String carried around a self-tail loop is a packed parameter slot: no conversion per iteration} -body {
+    set text {
+        fn pick(flag):
+            if flag:
+                "odd"
+            else:
+                "even"
+
+        fn spin(s, n):
+            if n == 0:
+                s
+            else:
+                spin(pick(n == 2), n - 1)
+
+        spin("", 5)
+    }
+    set nir [nirOf $text {*}$noInline]
+    set spin [fnText $nir spin]
+    list [asciiParams $spin] [asciiResult $spin] [conversionsOf $nir spin] [countIn {tail } $spin] [parity $text]
+} -result "0 1 {0 0 0 0 0} 1 value:\\\"even\\\""
+
+test pa-program-frontier {the program's externally visible result is a String: a final packed value materializes once at the program boundary} -body {
+    set text {
+        fn pick(flag):
+            if flag:
+                ""
+            else:
+                "tail"
+
+        pick(false)
+    }
+    set nir [nirOf $text {*}$noInline]
+    list [conversionsOf $nir <program>] [parity $text]
+} -result "{0 1 0 0 0} value:\\\"tail\\\""
+
+test pa-error-capable-result {an error-capable function with a packed success result: Empty (0) is a successful value, failure uses the status word} -body {
+    set text {
+        error Bad
+
+        fn guarded(n) -> str errors Bad:
+            if n < 0:
+                fail Bad
+            else:
+                if n == 0:
+                    ""
+                else:
+                    "yes"
+
+        fn run(n):
+            r = guarded(n):
+                on Bad:
+                    "caught"
+            r
+
+        [run(-1), run(0), run(3), length(run(0)), run(0) == ""]
+    }
+    set nir [nirOf $text {*}$noInline]
+    list [asciiResult [fnText $nir guarded]] [parity $text]
+} -result {1 {value:["caught", "", "yes", 0, true]}}
+
+test pa-error-capable-with-handler-in-the-caller {a handler around a packed-result call: the empty word passes through the success path} -body {
+    parity {
+        error Bad
+
+        fn guarded(n) -> str errors Bad:
+            if n < 0:
+                fail Bad
+            else:
+                ""
+
+        fn run(n):
+            r = guarded(n):
+                on Bad:
+                    "handled"
+            [r, length(r)]
+
+        [run(0), run(-1)]
+    }
+} -result {value:[["", 0], ["handled", 7]]}
+
+test pa-storage-and-general-operations-materialize {storage (List), concat, lowercase and hashing consume the real String} -body {
+    parity {
+        fn pick(flag):
+            if flag:
+                ""
+            else:
+                "ABC"
+
+        xs = [pick(true), pick(false)]
+        [xs, list_length(xs), concat(pick(false), "!"), lowercase(pick(false)), hash(pick(false)) == hash("ABC")]
+    }
+} -result {value:[["", "ABC"], 2, "ABC!", "abc", true]}
+
+test pa-equality-with-an-unrestricted-string-materializes {a packed String compared with a String of unknown length materializes the packed operand and uses the existing equality} -body {
+    set text {
+        fn same(s, t):
+            s == t
+
+        [same("ab", concat("a", "b")), same("", concat("", "")), same("ab", concat("a", "bc"))]
+    }
+    set same [fnText [nirOf $text {*}$noInline] same]
+    list [parity $text] [countIn {op asciitostr} $same] [countIn {op streq} $same]
+} -result {{value:[true, true, false]} 1 1}
+
+test pa-dynamic-callable-stays-tagged {a function passed as a value is called through the generic tagged entry; the exact instances keep their ABI} -body {
+    parity {
+        fn pick(flag):
+            if flag:
+                ""
+            else:
+                "yes"
+
+        fn apply(f, x):
+            f(x)
+
+        [apply(pick, true), apply(pick, false), pick(false)]
+    }
+} -result {value:["", "yes", "yes"]}
+
+test pa-capture-materializes {a packed local captured by a closure is stored in the (tagged) environment} -body {
+    parity {
+        fn pick(flag):
+            if flag:
+                ""
+            else:
+                "yes"
+
+        fn captured(flag):
+            s = pick(flag)
+            fn add(x):
+                concat(s, x)
+            add("!")
+
+        [captured(true), captured(false)]
+    }
+} -result {value:["!", "yes!"]}
+
+test pa-struct-field-and-mutable-array-materialize {a packed String stored in a struct field or a MutableArray slot is materialized there} -body {
+    set text {
+        struct Pair:
+            left: str
+            right: int
+
+        fn pick(flag):
+            if flag:
+                ""
+            else:
+                "word"
+
+        fn store(flag):
+            p = Pair {left: pick(flag), right: 1}
+            a = mutable_array_allocate(2)
+            mutable_array_set(a, 0, pick(flag))
+            mutable_array_set(a, 1, "z")
+            [p.left, length(p.left), mutable_array_get(a, 0), mutable_array_get(a, 1) == "z"]
+
+        [store(true), store(false)]
+    }
+    set nir [nirOf $text {*}$noInline]
+    list [parity $text] [expr {[countIn {op asciitostr} [fnText $nir store]] >= 1}]
+} -result {{value:[["", 0, "", true], ["word", 4, "word", true]]} 1}
+
+test pa-toplevel-literal-is-passed-as-the-constant {a top-level literal binding handed to a function that takes it tagged (a captured module value) is the static `str` constant: no asciitostr} -body {
+    set text {
+        greeting = "hello"
+
+        fn use():
+            [length(greeting), greeting == "hello"]
+
+        use()
+    }
+    set nir [nirOf $text {*}$noInline]
+    list [parity $text] [countIn {op asciitostr} $nir] [countIn {= str "hello"} [fnText $nir <program>]]
+} -result {{value:[5, true]} 0 1}
+
+test pa-unicode-model-is-untouched {the scalar tier still counts scalars, not bytes: U+00E9, U+20AC, an astral character} -body {
+    parity {
+        fn size(s):
+            length(s)
+
+        fn first(t):
+            substring(t, 0, 1)
+
+        [size("é"), size("€"), size("😀"), first("é!") == "é", first("😀!") == "😀", size(first("x😀"))]
+    }
+} -result {value:[1, 1, 1, true, true, 1]}
+
+test pa-peek-traversal-keeps-its-shape {the String-traversal idiom over literal text: the text is a packed parameter, the character a ShortString1 slice of its materialization} -body {
+    set text {
+        fn peek(text, index):
+            if index >= length(text):
+                return ""
+
+            substring(text, index, index + 1)
+
+        fn count_a(text, index, acc):
+            c = peek(text, index)
+            if c == "":
+                acc
+            else:
+                step = if c == "a":
+                    1
+                else:
+                    0
+                count_a(text, index + 1, acc + step)
+
+        [count_a("banana", 0, 0), count_a("", 0, 0), count_a("xyz", 0, 0)]
+    }
+    parity $text
+} -result {value:[3, 0, 0]}
+
+# ---------------------------------------------------------------------------
+# GC: a packed word is a non-root scalar
+
+test pa-gc-live-across-allocation {a packed value live across unrelated allocations, with ordinary Strings, a List and a struct as live roots, under GC stress} -body {
+    set text {
+        struct Pair:
+            left: str
+            right: int
+
+        fn pick(flag):
+            if flag:
+                ""
+            else:
+                "packed"
+
+        fn work(s, xs):
+            p = Pair {left: "keep", right: 7}
+            t = concat("a", "b")
+            u = list_append(xs, 1)
+            v = concat(t, t)
+            [length(s), s == "packed", length(v), list_length(u), p.left, p.right, s]
+
+        [work(pick(false), [1, 2]), work(pick(true), [9])]
+    }
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        list [kindPlan $text {*}$noInline] [parity $text]
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+} -result {{pick<bool>=val>ascii {work<str, List[int]>=ascii,val>val}} {value:[[6, true, 4, 3, "keep", 7, "packed"], [0, false, 4, 2, "keep", 7, ""]]}}
+
+test pa-gc-materialize-allocates-under-stress {materializing runtime packed values allocates fresh Strings; with a collection at every allocation the Strings (roots) stay valid} -body {
+    set text {
+        fn pick(flag):
+            if flag:
+                ""
+            else:
+                "cat"
+
+        fn work(s):
+            first = list_append([], s)
+            filler = concat("x", "y")
+            second = list_append(first, s)
+            more = concat(filler, filler)
+            [first, second, length(more), s]
+
+        [work(pick(false)), work(pick(true))]
+    }
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        parity $text
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+} -result {value:[[["cat"], ["cat", "cat"], 4, "cat"], [[""], ["", ""], 4, ""]]}
+
+test pa-gc-recursive-exact-call-transport {a packed parameter and result across 200 recursive, allocating frames under GC stress} -body {
+    set text {
+        fn step(n):
+            if n == 0:
+                ""
+            else:
+                "word"
+
+        fn depth(n, s, acc):
+            if n == 0:
+                length(acc)
+            else:
+                t = concat(acc, "z")
+                depth(n - 1, step(n - 1), t) + length(s)
+
+        depth(200, step(1), "")
+    }
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        list [kindPlan $text {*}$noInline] [parity $text]
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+} -result {{{depth<int, str, str>=val,ascii,val>val} step<int>=val>ascii} value:1000}
+
+test pa-gc-stack-map-has-no-packed-roots {the root report lists the packed registers as non-roots} -body {
+    set text {
+        fn pick(flag):
+            if flag:
+                ""
+            else:
+                "word"
+
+        fn work(s):
+            t = concat("a", "b")
+            [length(s), t]
+
+        work(pick(false))
+    }
+    set roots [native::roots [srcHir $text] {*}$noInline]
+    expr {[string first work $roots] >= 0}
+} -result 1
+
+# ---------------------------------------------------------------------------
+# Standalone executables
+
+proc aotParity {text {extra {}}} {
+    set text [dedent $text]
+    set dir [makeDirectory {packed ascii executable test}]
+    set path [file join $dir {program with spaces.bot}]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts $channel $text
+    close $channel
+    try {
+        set hir [surface::readProgramFile $path]
+        set expected {}
+        foreach backend {interp compile cranelift-generic cranelift} {
+            set outcome [outcomeUnderHir $backend $hir]
+            if {[lindex $outcome 0] ne "value"} { error "$backend: $outcome" }
+            lappend expected [lindex $outcome 1]
+        }
+        native::executable $hir [file rootname $path] -tiny-leaf-inline-opt 0 {*}$extra
+        set relocated [file join $dir relocated]
+        file rename [file rootname $path] $relocated
+        file delete $path
+        lappend expected [exec env PATH= $relocated]
+        lappend expected [exec env PATH= BOTLISH_NATIVE_GC_STRESS=1 $relocated]
+        if {[llength [lsort -unique $expected]] != 1} { error "values disagree: $expected" }
+        return [lindex $expected 0]
+    } finally {
+        removeDirectory {packed ascii executable test}
+    }
+}
+
+test pa-executable-everything {every tier, transport, a tagged frontier and an error-capable path in one standalone executable, also under GC stress} -constraints executableAot -body {
+    set nul [format %c 0]
+    aotParity "
+        error Bad
+
+        fn pick(n):
+            if n == 0:
+                \"\"
+            else:
+                if n == 1:
+                    \"a\"
+                else:
+                    if n == 2:
+                        \"abcdefgh\"
+                    else:
+                        \"a${nul}b\"
+
+        fn guarded(n) -> str errors Bad:
+            if n > 3:
+                fail Bad
+            else:
+                pick(n)
+
+        fn run(n):
+            r = guarded(n):
+                on Bad:
+                    \"bad\"
+            r
+
+        fn fwd(s):
+            s
+
+        fn probe(s):
+            \[length(s), s == \"\", s == \"abcdefgh\", s == \"a${nul}b\"\]
+
+        fn glyph(flag):
+            if flag:
+                \"λ\"
+            else:
+                \"\"
+
+        fn first(t):
+            substring(t, 0, 1)
+
+        \[probe(fwd(pick(0))), probe(fwd(pick(1))), probe(fwd(pick(2))), probe(fwd(pick(3))), run(2), run(8), list_append(\[pick(2)\], pick(0)), length(glyph(true)), first(\"ä€\") == \"ä\"\]
+    "
+} -result "\[\[0, true, false, false\], \[1, false, false, false\], \[8, false, true, false\], \[3, false, false, true\], \"abcdefgh\", \"bad\", \[\"abcdefgh\", \"\"\], 1, true\]"
+
+test pa-executable-options-off {the same executable with -short-string-opt 0 and with -ascii-pack-opt 0 agrees} -constraints executableAot -body {
+    set text {
+        fn pick(flag):
+            if flag:
+                ""
+            else:
+                "yes"
+
+        fn fwd(s):
+            s
+
+        [length(fwd(pick(true))), length(fwd(pick(false))), fwd(pick(false)) == "yes"]
+    }
+    list [aotParity $text {-short-string-opt 0}] [aotParity $text {-ascii-pack-opt 0}]
+} -result {{[0, 3, true]} {[0, 3, true]}}
+
+# ---------------------------------------------------------------------------
+# Determinism and the audit
+
+test pa-deterministic-plan-and-nir {fixed source and configuration give byte-identical NIR twice} -body {
+    set text {
+        fn pick(flag):
+            if flag:
+                ""
+            else:
+                "word"
+
+        fn h(s):
+            [length(s), s == "word"]
+
+        [h(pick(true)), h(pick(false))]
+    }
+    expr {[nirOf $text] eq [nirOf $text]}
+} -result 1
+
+proc explainOf {text args} {
+    native::lowered [srcHir $text] {*}$args
+    return [native::shortstr::explainAll]
+}
+
+proc censusOf {text args} {
+    native::lowered [srcHir $text] {*}$args
+    return [native::shortstr::census]
+}
+
+set auditSource {
+    fn choose(flag):
+        if flag:
+            ""
+        else:
+            "word"
+
+    fn probe(flag, xs):
+        s = choose(flag)
+        t = "this is a long string"
+        u = "λ"
+        [length(s), s == "word", list_append(xs, s), t, u]
+
+    probe(true, [])
+}
+
+test pa-audit-explains-the-tiers {the audit names the tier, the proven length and ASCII-ness, the production and each use} -body {
+    set text [explainOf $auditSource {*}$noInline]
+    foreach needle {
+        "instance choose<bool>"
+        "proven character length: \[0,4\]"
+        "proven ASCII: yes"
+        "eligible representation: packed ASCII"
+        "ABI packed ASCII"
+        "physical representation: packed ASCII (local)"
+        "production: result of choose<bool>"
+        "length -> scalar"
+        "equality -> scalar"
+        "list_append -> materialize"
+        "proven character length: unproven (more than 8 characters)"
+        "physical representation: tagged String (length-gt-8)"
+        "physical representation: ShortString1 (local)"
+    } {
+        if {[string first $needle $text] < 0} { error "missing \"$needle\" in:\n$text" }
+    }
+    set ok 1
+} -result 1
+
+test pa-audit-census-counts-the-tiers {the census counts positions by tier} -body {
+    set c [censusOf $auditSource {*}$noInline]
+    list [dict get $c tierAscii] [dict get $c tierShort] [dict get $c resultAscii] [dict get $c localsProven] [dict get $c localsExamined]
+} -result {2 1 1 2 3}
+
+test pa-audit-lowering-counters {lowering counts conversions and consumers per tier} -body {
+    set lowered [native::lowered [srcHir $auditSource] {*}$noInline]
+    set total [dict create asciiToTagged 0 asciiLocals 0 asciiLen 0 asciiEq 0 shortLocals 0 asciiLits 0]
+    foreach info [dict get $lowered functions] {
+        if {![dict exists $info short]} continue
+        dict for {k v} [dict get $info short] {
+            if {[dict exists $total $k]} { dict incr total $k $v }
+        }
+    }
+    set total
+} -result {asciiToTagged 1 asciiLocals 1 asciiLen 1 asciiEq 1 shortLocals 1 asciiLits 3}
+
+cleanupTests

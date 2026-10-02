@@ -210,6 +210,7 @@ fn def_use(inst: &Inst, params: u32) -> (Vec<Reg>, Vec<Reg>) {
         Inst::Int { dst, .. }
         | Inst::RawInt { dst, .. }
         | Inst::ShortLit { dst, .. }
+        | Inst::AsciiLit { dst, .. }
         | Inst::Str { dst, .. }
         | Inst::Char { dst, .. }
         | Inst::Bool { dst, .. }

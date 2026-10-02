@@ -140,6 +140,58 @@ pub fn first_scalar(text: &str, ascii: bool) -> u32 {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Packed ASCII (SHORT-STRING.md, tier A): a String proved ASCII with at most
+// eight characters as one 64-bit word. Byte i (bits 8i..8i+7) is `0x80 | c`
+// for the character c at index i, and 0 past the end:
+//   * the high bit of each byte is a *presence* flag, so the length is
+//     recoverable from the word alone with one count-leading-zeros and the
+//     word is canonical (equal Strings have equal words);
+//   * the empty String is 0, NUL is a present 0x80 (never absent);
+//   * unpacking to the String's bytes is `w & 0x7F7F_7F7F_7F7F_7F7F`, stored
+//     as one little-endian word, then truncated to the length.
+
+pub const ASCII_PAYLOAD_MASK: u64 = 0x7F7F_7F7F_7F7F_7F7F;
+
+/// The character count (0..=8) of canonical packed word W.
+#[inline]
+pub fn ascii_word_len(w: u64) -> usize {
+    ((71 - w.leading_zeros()) >> 3) as usize
+}
+
+/// Packs the ASCII BYTES (at most eight, none above 0x7F) into a word.
+#[inline]
+pub fn pack_ascii(bytes: &[u8]) -> u64 {
+    debug_assert!(bytes.len() <= 8 && bytes.iter().all(|b| *b < 0x80));
+    let mut w = 0u64;
+    for (i, b) in bytes.iter().enumerate() {
+        w |= ((*b as u64) | 0x80) << (8 * i);
+    }
+    w
+}
+
+/// The String's bytes of packed word W (the first `ascii_word_len(w)` of the
+/// returned array are meaningful).
+#[inline]
+pub fn unpack_ascii(w: u64) -> ([u8; 8], usize) {
+    ((w & ASCII_PAYLOAD_MASK).to_le_bytes(), ascii_word_len(w))
+}
+
+/// Whether W is a canonical packed word: every byte is 0 (absent) or has the
+/// presence bit set (present), and no present byte follows an absent one.
+pub fn is_canonical_ascii_word(w: u64) -> bool {
+    let mut absent = false;
+    for i in 0..8 {
+        let b = (w >> (8 * i)) & 0xFF;
+        if b == 0 {
+            absent = true;
+        } else if absent || b & 0x80 == 0 {
+            return false;
+        }
+    }
+    true
+}
+
 /// A List's elements: a raw pointer plus a count, exactly like ClosureObj's
 /// `caps`/`ncaps` (see `rt_closure_new`/`free_object`) rather than `Vec`,
 /// whose field layout is not something generated native code may rely on

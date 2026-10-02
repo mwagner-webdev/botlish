@@ -1,13 +1,15 @@
 #!/usr/bin/env tclsh9.0
-# fuzz.tcl -- bounded randomized differential check of ShortString1
-# (SHORT-STRING.md). Generates small programs over Strings of at most one
-# character (Empty, ASCII, Latin-1, BMP, astral, NUL; branches, aliases,
-# exact calls with String parameters and results, self-tail and non-tail
-# recursion, substring slices, an error-capable helper with a handler,
-# closures, tagged storage and general String operations) and compares the
-# reference interpreter, the Tcl compile backend and native with
-# ShortString1 off and on (leaf inlining off and on), for values, errors and
-# completion behavior. Any disagreement is printed with its program. The
+# fuzz.tcl -- bounded randomized differential check of the tiered short-String
+# regime (SHORT-STRING.md). Generates small programs over Strings of at most
+# one character (Empty, ASCII, Latin-1, BMP, astral, NUL) and over ASCII
+# Strings of 2..8 characters (NUL and DEL inside, the 8/9-character boundary,
+# a non-ASCII multi-character negative control); branches, aliases, exact
+# calls with String parameters and results, self-tail and non-tail recursion,
+# substring slices, an error-capable helper with a handler, closures, tagged
+# storage and general String operations; and compares the reference
+# interpreter, the Tcl compile backend and native with the short-String
+# switch off/on, the packed-ASCII tier off/on and leaf inlining off/on, for
+# values, errors and completion behavior. Any disagreement is printed with its program. The
 # generator is bounded: recursion measures are small literals and nothing
 # multiplies, so every program finishes quickly.
 #
@@ -44,9 +46,13 @@ proc strLit {} {
     return [pick $choices]
 }
 
-# Rarely a two-character literal: the length > 1 negative control.
+# A multi-character literal: ASCII of 2..8 characters (packed ASCII), the
+# 9-character boundary and a non-ASCII pair (both stay tagged).
 proc maybeLong {} {
-    return [pick [list "\"ab\"" "\"\u03bb\u03bb\"" "\"\U0001f600!\""]]
+    set nul [format %c 0]
+    set del [format %c 0x7f]
+    return [pick [list "\"ab\"" "\"hello\"" "\"12345678\"" "\"a${nul}b\"" "\"${del}z\"" "\"yes\"" "\"no\"" "\"abcdefg\"" \
+        "\"123456789\"" "\"\u03bb\u03bb\"" "\"\U0001f600!\"" "\"ab\"" "\"hello\""]]
 }
 
 proc intLit {} { return [pick {0 1 2 3 4}] }
@@ -74,7 +80,7 @@ proc atom {svars ivars callable} {
     if {$x < 0.72 && $ivars ne ""} {
         return "substring($::TEXT, [pick $ivars], [pick $ivars] + 1)"
     }
-    if {$x < 0.76} { return [maybeLong] }
+    if {$x < 0.86} { return [maybeLong] }
     return [strLit]
 }
 
@@ -218,8 +224,11 @@ for {set s $seed0} {$s < $seed0 + $n} {incr s} {
     set outcomes [list [outcome interp $hir] [outcome compile $hir]]
     set prepared [native::prepareHir $hir]
     foreach opt {0 1} {
-        foreach inline {0 1} {
-            lappend outcomes [outcome native $prepared -short-string-opt $opt -tiny-leaf-inline-opt $inline]
+        foreach pack {0 1} {
+            foreach inline {0 1} {
+                if {!$opt && $pack} continue
+                lappend outcomes [outcome native $prepared -short-string-opt $opt -ascii-pack-opt $pack -tiny-leaf-inline-opt $inline]
+            }
         }
     }
     if {$generic} {
@@ -227,13 +236,17 @@ for {set s $seed0} {$s < $seed0 + $n} {incr s} {
     }
     dict incr kinds [lindex [lindex $outcomes 0] 0]
     set nir [native::nir $prepared -short-string-opt 1 -tiny-leaf-inline-opt 0]
-    if {[regexp {shortparams=|shortresult=1} $nir]} { dict incr kinds uses-short-abi }
-    if {[regexp {shortresult=1} $nir]} { dict incr kinds short-result }
-    if {[regexp {shortparams=} $nir]} { dict incr kinds short-param }
-    if {[regexp {op shorttostr} $nir]} { dict incr kinds materializes }
-    if {[regexp {op strtoshort} $nir]} { dict incr kinds extracts }
+    if {[regexp {shortparams=|shortresult=1|asciiparams=|asciiresult=1} $nir]} { dict incr kinds uses-scalar-abi }
+    if {[regexp {asciiparams=|asciiresult=1} $nir]} { dict incr kinds ascii-abi }
+    if {[regexp {shortparams=|shortresult=1} $nir]} { dict incr kinds short-abi }
+    if {[regexp {asciiresult=1} $nir]} { dict incr kinds ascii-result }
+    if {[regexp {asciiparams=} $nir]} { dict incr kinds ascii-param }
+    if {[regexp {op asciitostr|op shorttostr} $nir]} { dict incr kinds materializes }
+    if {[regexp {op strtoshort|op strtoascii} $nir]} { dict incr kinds extracts }
     if {[regexp {op strsliceshort} $nir]} { dict incr kinds slices }
-    if {[regexp {op shorteq} $nir]} { dict incr kinds scalar-equality }
+    if {[regexp {op shorteq|op asciieq} $nir]} { dict incr kinds scalar-equality }
+    if {[regexp {op asciilen|op shortlen} $nir]} { dict incr kinds scalar-length }
+    if {[regexp {op asciitoshort|op asciishorteq} $nir]} { dict incr kinds tier-mix }
     set norm [lmap o $outcomes {lrange $o 0 1}]
     # error messages must also agree among the backends that produce them
     set msgs [lsort -unique [lmap o $outcomes {expr {[lindex $o 0] eq "error" ? [lindex $o 2] : ""}}]]

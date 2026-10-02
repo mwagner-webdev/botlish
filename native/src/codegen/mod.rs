@@ -424,3 +424,83 @@ mod short_string_generic_entry_tests {
         }
     }
 }
+
+/// The same for the packed-ASCII ABI (SHORT-STRING.md, tier A): a tagged ASCII
+/// String of at most eight characters in is packed for the direct function,
+/// the packed result is unpacked (a fresh String) and an error-capable
+/// function's status word becomes the 0 error sentinel.
+#[cfg(test)]
+mod packed_ascii_generic_entry_tests {
+    use super::*;
+    use crate::runtime::error::RtError;
+    use crate::runtime::metrics::AllocMode;
+    use crate::runtime::ops::GenericEntry;
+    use crate::runtime::vm::ProgramInfo;
+    use std::rc::Rc;
+
+    const PROGRAM: &str = concat!(
+        "nir 1 call-effects=1\n\n",
+        "func 0 \"<program>\" params=0 env=0 regs=1 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = unit\n    ret %0\nend\n\n",
+        "func 1 \"echo\" params=1 env=0 regs=1 pnames=\"s\" captures=0 asciiregs=\"0\" asciiparams=\"0\" asciiresult=1\n    ret %0\nend\n\n",
+        "func 2 \"guarded\" params=2 env=0 regs=2 pnames=\"s flag\" captures=0 asciiregs=\"0\" asciiparams=\"0\" asciiresult=1\n",
+        "    br %1 L0 L1\n  label L0\n    raise RANGE \"boom\"\n  label L1\n    ret %0\nend\n\n",
+    );
+
+    struct Rig {
+        vm: Box<Vm>,
+        compiled: CompiledProgram,
+    }
+
+    fn rig() -> Rig {
+        let program = crate::nir::parse(PROGRAM).unwrap_or_else(|e| panic!("{}", e.message));
+        let options = CompileOptions { clif: false, vcode: false, alloc_sites: false };
+        let compiled = CraneliftJit.compile(&program, &options).expect("compiles");
+        let mut vm = Vm::new(
+            Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new() }),
+            AllocMode::Summary,
+        );
+        compiled.install_constants(&mut vm);
+        vm.set_framemap(compiled.framemap.clone());
+        Rig { vm, compiled }
+    }
+
+    fn call(rig: &mut Rig, func: usize, args: &[Value]) -> Value {
+        let entry: GenericEntry = unsafe { std::mem::transmute(rig.compiled.generic_entries[func]) };
+        entry(&mut *rig.vm, 0, args.as_ptr())
+    }
+
+    fn text(v: Value) -> String {
+        str_of(v).text.to_string()
+    }
+
+    #[test]
+    fn echo_entry_packs_and_unpacks_every_length() {
+        let mut r = rig();
+        for text_in in ["", "a", "ab", "\u{0}", "a\u{0}b", "\u{7f}", "abcdefg", "abcdefgh", "Hello, w"] {
+            let arg = r.vm.new_str(text_in.to_string());
+            let out = call(&mut r, 1, &[arg]);
+            assert_ne!(out, NO_VALUE, "{text_in:?}");
+            assert_eq!(text(out), text_in);
+            assert_eq!(str_of(out).chars, text_in.chars().count());
+            assert!(str_of(out).ascii);
+        }
+    }
+
+    #[test]
+    fn guarded_entry_returns_empty_as_a_success_and_failure_as_the_sentinel() {
+        let mut r = rig();
+        let empty = r.vm.new_str(String::new());
+        let ok = call(&mut r, 2, &[empty, FALSE]);
+        assert_ne!(ok, NO_VALUE, "the empty word is a successful value, never the error sentinel");
+        assert_eq!(text(ok), "");
+        let word = r.vm.new_str("abc".to_string());
+        let ok = call(&mut r, 2, &[word, FALSE]);
+        assert_eq!(text(ok), "abc");
+        let failed = call(&mut r, 2, &[word, TRUE]);
+        assert_eq!(failed, NO_VALUE);
+        match r.vm.error.take() {
+            Some(RtError::Semantic { kind, message }) => assert_eq!((kind, message.as_str()), ("RANGE", "boom")),
+            other => panic!("expected the RANGE error, got {other:?}"),
+        }
+    }
+}

@@ -62,7 +62,6 @@ use super::{BackendError, Const, ConstPool, Site};
 use crate::nir::{self, Inst, OpCode, Reg};
 use crate::runtime::ops::helpers;
 use crate::runtime::value::*;
-use crate::runtime::vm::VM_SHORT_CACHE_OFFSET;
 use crate::runtime::vm::{
     VM_ALLOC_SITE_OFFSET, VM_CONSTS_OFFSET, VM_NATIVE_ROOTS_LEN_OFFSET, VM_NATIVE_ROOTS_PTR_OFFSET,
     VM_SS_LIMIT_OFFSET, VM_SS_TOP_OFFSET, VM_STATICS_OFFSET,
@@ -132,7 +131,7 @@ pub struct Symbols {
 /// fail (the settled `may_error` summary) returns just the integer: that is
 /// the bare `i64 f(i64, ...)` shape.
 fn physical_results(f: &nir::Function) -> usize {
-    if (f.raw_result || f.short_result) && f.may_error {
+    if f.scalar_result() && f.may_error {
         2
     } else {
         f.results as usize
@@ -206,7 +205,7 @@ pub fn declare<M: Module>(module: &mut M, program: &nir::Program, export: bool) 
         let id = module
             .declare_function(&name, linkage, &signature_n(module, params, physical_results(f)))
             .map_err(module_error)?;
-        symbols.status_result.push((f.raw_result || f.short_result) && f.may_error);
+        symbols.status_result.push(f.scalar_result() && f.may_error);
         symbols.names.insert(id.as_u32(), format!("{name} ({})", f.name));
         symbols.direct.push(id);
         // A results>1 function (a scalar-replacement companion) is only
@@ -357,6 +356,12 @@ pub fn define<M: Module>(
                 let helper = module.declare_func_in_func(symbols.helpers["rt_str_to_short"], b.func);
                 let call = b.ins().call(helper, &[params[0], v]);
                 v = b.inst_results(call)[0];
+            } else if f.ascii_params[i as usize] {
+                // And for the packed-ASCII ABI: a tagged ASCII String in,
+                // its packed word out (never reachable, correct anyway).
+                let helper = module.declare_func_in_func(symbols.helpers["rt_str_to_ascii"], b.func);
+                let call = b.ins().call(helper, &[params[0], v]);
+                v = b.inst_results(call)[0];
             }
             args.push(v);
         }
@@ -376,11 +381,12 @@ pub fn define<M: Module>(
                 tagged
             };
         }
-        if f.short_result {
-            // A ShortString1 result is materialized for the generic ABI
-            // (this wrapper never runs for it, see above), with the same
-            // status-word convention as a raw result.
-            let helper = module.declare_func_in_func(symbols.helpers["rt_short_to_str"], b.func);
+        if f.short_result || f.ascii_result {
+            // A ShortString1 / packed-ASCII result is materialized for the
+            // generic ABI (this wrapper never runs for it, see above), with
+            // the same status-word convention as a raw result.
+            let name = if f.short_result { "rt_short_to_str" } else { "rt_ascii_to_str" };
+            let helper = module.declare_func_in_func(symbols.helpers[name], b.func);
             let call_status = if f.may_error { Some(b.inst_results(call)[1]) } else { None };
             let materialize = b.ins().call(helper, &[params[0], result]);
             let tagged = b.inst_results(materialize)[0];
@@ -581,10 +587,11 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 // value itself -- no tag test, no unboxing, nothing to
                 // re-check (the exact-call plan is the proof).
                 self.def_raw(i, v);
-            } else if f.short_params[i as usize] {
+            } else if f.short_params[i as usize] || f.ascii_params[i as usize] {
                 // ShortString1 ABI (SHORT-STRING.md): the incoming argument
                 // is already the scalar -- -1 Empty or the one character's
-                // Unicode scalar value -- never a GC root.
+                // Unicode scalar value -- or, for the packed-ASCII ABI, the
+                // packed word; never a GC root.
                 self.def_raw(i, v);
             } else if f.raw_regs[i as usize] {
                 // native/lower.tcl proved this parameter's whole range fits
@@ -1185,7 +1192,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 let v = self.b.ins().iconst(I64, n);
                 self.def_raw(*dst, v);
             }
-            Inst::ShortLit { dst, value } => {
+            Inst::ShortLit { dst, value } | Inst::AsciiLit { dst, value } => {
                 let v = self.b.ins().iconst(I64, *value);
                 self.def_raw(*dst, v);
             }
@@ -1426,8 +1433,8 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             Inst::Ret(reg) => {
                 let v = self.get(*reg);
                 self.restore_root_frame();
-                if (self.f.raw_result || self.f.short_result) && self.f.may_error {
-                    // Raw Int / ShortString1 result of a function that can
+                if self.f.scalar_result() && self.f.may_error {
+                    // Raw Int / ShortString1 / packed ASCII result of a function that can
                     // fail: the value plus a nonzero status word
                     // (RAW-INT-ABI.md, SHORT-STRING.md). The scalar never
                     // carries the error: Empty is -1, a successful value.
@@ -1602,29 +1609,51 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 self.b.ins().select(empty, minus_one, first)
             }
             StrSliceShort => self.call_helper("rt_str_slice_short", &[self.vm, a[0], a[1], a[2]]),
-            // ShortString1 -> tagged String. Empty and U+0000..U+00FF are
-            // interned static Strings in `Vm::short_cache` (slot short + 1),
-            // probed inline; a cold slot (not built yet) and every other
-            // scalar take the helper, which builds/allocates.
-            ShortToStr => {
-                let idx = self.b.ins().iadd_imm_s(a[0], 1);
-                let in_range = self.b.ins().icmp_imm_s(IntCC::UnsignedLessThan, idx, 257);
-                let probe = self.b.create_block();
-                let slow = self.b.create_block();
-                let done = self.b.create_block();
-                let result = self.b.append_block_param(done, I64);
-                self.b.ins().brif(in_range, probe, &[], slow, &[]);
-                self.b.switch_to_block(probe);
-                let offset = self.b.ins().ishl_imm_s(idx, 3);
-                let slot = self.b.ins().iadd(self.vm, offset);
-                let cached = self.b.ins().load(I64, MemFlagsData::trusted(), slot, VM_SHORT_CACHE_OFFSET);
-                self.b.ins().brif(cached, done, &[BlockArg::Value(cached)], slow, &[]);
-                self.b.switch_to_block(slow);
-                let v = self.call_allocating("rt_short_to_str", &[self.vm, a[0]], "shorttostr", KIND_STR);
-                self.b.ins().jump(done, &[BlockArg::Value(v)]);
-                self.b.switch_to_block(done);
-                result
+            // ShortString1 -> tagged String: UTF-8 encode the scalar into a
+            // fresh String (no interned table; a statically known value is a
+            // `str` constant and never reaches this op).
+            ShortToStr => self.call_allocating("rt_short_to_str", &[self.vm, a[0]], "shorttostr", KIND_STR),
+            // Packed ASCII (tier A, SHORT-STRING.md): byte i = 0x80 | c.
+            // Equality is word equality (the form is canonical).
+            AsciiEq => {
+                let flag = self.b.ins().icmp(IntCC::Equal, a[0], a[1]);
+                self.bool_of(flag)
             }
+            // length = (71 - clz(w)) >> 3: the highest set bit of a word of
+            // n characters is bit 8n - 1 (its presence flag), and 0 gives 0.
+            AsciiLen => {
+                let lz = self.b.ins().clz(a[0]);
+                let seventy_one = self.b.ins().iconst(I64, 71);
+                let diff = self.b.ins().isub(seventy_one, lz);
+                self.b.ins().ushr_imm_s(diff, 3)
+            }
+            // Word of at most one character -> ShortString1: 0 is Empty
+            // (-1), else the payload byte.
+            AsciiToShort => {
+                let empty = self.b.ins().icmp_imm_s(IntCC::Equal, a[0], 0);
+                let minus_one = self.b.ins().iconst(I64, -1);
+                let payload = self.b.ins().band_imm_s(a[0], 0x7f);
+                self.b.ins().select(empty, minus_one, payload)
+            }
+            // Ascii == ShortString1: pack the scalar (Empty -> 0, an ASCII
+            // scalar c -> 0x80 | c, anything else -> 1, a word no canonical
+            // packed String can equal) and compare words.
+            AsciiShortEq => {
+                let is_empty = self.b.ins().icmp_imm_s(IntCC::Equal, a[1], -1);
+                let is_ascii = self.b.ins().icmp_imm_s(IntCC::UnsignedLessThan, a[1], 0x80);
+                let packed = self.b.ins().bor_imm_s(a[1], 0x80);
+                let one = self.b.ins().iconst(I64, 1);
+                let zero = self.b.ins().iconst(I64, 0);
+                let non_empty = self.b.ins().select(is_ascii, packed, one);
+                let candidate = self.b.ins().select(is_empty, zero, non_empty);
+                let flag = self.b.ins().icmp(IntCC::Equal, a[0], candidate);
+                self.bool_of(flag)
+            }
+            // Tagged ASCII String (<= 8 characters, the caller's proof) ->
+            // packed word: a non-allocating helper (reading a variable
+            // number of bytes safely without overrunning the allocation).
+            StrToAscii => self.call_helper("rt_str_to_ascii", &[self.vm, a[0]]),
+            AsciiToStr => self.call_allocating("rt_ascii_to_str", &[self.vm, a[0]], "asciitostr", KIND_STR),
             RIAdd => self.b.ins().iadd(a[0], a[1]),
             RISub => self.b.ins().isub(a[0], a[1]),
             RIMul => self.b.ins().imul(a[0], a[1]),

@@ -225,6 +225,32 @@ pub enum OpCode {
     /// validated the bounds and the width proof (end - start <= 1) holds, so
     /// it never fails.
     StrSliceShort,
+    /// Packed ASCII (SHORT-STRING.md, tier A): a String the compiler proved
+    /// is ASCII with at most eight characters, carried as one i64 in which
+    /// byte i (bits 8i..8i+7) is `0x80 | c` for the character c at index i
+    /// and 0 past the end. The high bit of each byte is the *presence* flag,
+    /// so the word is canonical (equality is word equality), the empty
+    /// String is 0, NUL is a present 0x80, the length is
+    /// `(71 - clz(w)) >> 3`, and unpacking to string bytes is `w & 0x7f..7f`.
+    /// An Ascii register is a distinct physical kind (`asciiregs=`).
+    ///
+    /// Tagged String -> Ascii: non-allocating; the operand is a String
+    /// lowering already proved ASCII with at most eight characters.
+    StrToAscii,
+    /// Ascii -> tagged String: allocates the String the word stands for.
+    AsciiToStr,
+    /// The character count of an Ascii word, a raw Int in 0..=8.
+    AsciiLen,
+    /// Equality of two Ascii words: word equality, a tagged Bool.
+    AsciiEq,
+    /// Ascii -> ShortString1 for a word of at most one character (the
+    /// caller's proof): 0 -> Empty (-1), else the character's scalar.
+    AsciiToShort,
+    /// Equality of an Ascii word (operand 0) and a ShortString1 (operand
+    /// 1): true only when they are the same String (a scalar above 0x7F, or
+    /// an Ascii word longer than one character, is simply unequal), a tagged
+    /// Bool.
+    AsciiShortEq,
 }
 
 /// The physical representation class of a register (`rawregs=`/`shortregs=`
@@ -235,6 +261,7 @@ pub enum RegKind {
     Tagged,
     Raw,
     Short,
+    Ascii,
 }
 
 impl RegKind {
@@ -243,6 +270,7 @@ impl RegKind {
             RegKind::Tagged => "tagged",
             RegKind::Raw => "raw",
             RegKind::Short => "short",
+            RegKind::Ascii => "ascii",
         }
     }
 }
@@ -323,6 +351,12 @@ impl OpCode {
             "shortlen" => ShortLen,
             "shorteq" => ShortEq,
             "strsliceshort" => StrSliceShort,
+            "strtoascii" => StrToAscii,
+            "asciitostr" => AsciiToStr,
+            "asciilen" => AsciiLen,
+            "asciieq" => AsciiEq,
+            "asciitoshort" => AsciiToShort,
+            "asciishorteq" => AsciiShortEq,
             _ => return None,
         })
     }
@@ -335,7 +369,8 @@ impl OpCode {
             StrLen | StrLower | ListLen | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList | IsMutArray
             | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | Hash | RBox | RUnbox
             | StrByteLen | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum | CharCodepoint | SetFromList
-            | SetFromListTotal | StrToShort | ShortToStr | ShortLen => Some(1),
+            | SetFromListTotal | StrToShort | ShortToStr | ShortLen | StrToAscii | AsciiToStr | AsciiLen
+            | AsciiToShort => Some(1),
             Substr | MutArraySet | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum | StrSliceShort => Some(3),
             RegionEq => Some(4),
             MutArrayCopy => Some(5),
@@ -346,7 +381,7 @@ impl OpCode {
     /// 1 if OP's result is a raw (untagged) machine integer, not a Value.
     pub fn raw_result(self) -> bool {
         matches!(self, OpCode::RUnbox | OpCode::RIAdd | OpCode::RISub | OpCode::RIMul
-            | OpCode::RIShr | OpCode::RIShl | OpCode::ShortLen)
+            | OpCode::RIShr | OpCode::RIShl | OpCode::ShortLen | OpCode::AsciiLen)
     }
 
     /// 1 if OP's operands are raw (untagged) machine integers, not Values.
@@ -355,13 +390,17 @@ impl OpCode {
         matches!(self, RBox | RIAdd | RISub | RIMul | RILt | RILe | RIGt | RIGe | RIEq | RIShr | RIShl)
     }
 
-    /// The physical kind every operand of OP must have.
-    pub fn operand_kind(self) -> RegKind {
+    /// The physical kind the operand at position I of OP must have.
+    pub fn operand_kind_at(self, i: usize) -> RegKind {
         use OpCode::*;
         if self.raw_operands() {
             RegKind::Raw
         } else if matches!(self, ShortToStr | ShortLen | ShortEq) {
             RegKind::Short
+        } else if matches!(self, AsciiToStr | AsciiLen | AsciiEq | AsciiToShort) {
+            RegKind::Ascii
+        } else if matches!(self, AsciiShortEq) {
+            if i == 0 { RegKind::Ascii } else { RegKind::Short }
         } else {
             RegKind::Tagged
         }
@@ -372,8 +411,10 @@ impl OpCode {
         use OpCode::*;
         if self.raw_result() {
             RegKind::Raw
-        } else if matches!(self, StrToShort | StrSliceShort) {
+        } else if matches!(self, StrToShort | StrSliceShort | AsciiToShort) {
             RegKind::Short
+        } else if matches!(self, StrToAscii) {
+            RegKind::Ascii
         } else {
             RegKind::Tagged
         }
@@ -393,6 +434,9 @@ pub enum Inst {
     /// 0..=0x10FFFF (never a surrogate) the one-character String of that
     /// Unicode scalar value. U+0000 is `shortlit 0`, never Empty.
     ShortLit { dst: Reg, value: i64 },
+    /// A packed-ASCII constant (`asciilit W`): W is the canonical word (see
+    /// `OpCode::StrToAscii`), printed as a signed i64.
+    AsciiLit { dst: Reg, value: i64 },
     Str { dst: Reg, text: String },
     /// A UnicodeChar constant: DIGITS is the canonical decimal codepoint
     /// (must be a valid Unicode scalar value, never a surrogate -- see
@@ -643,8 +687,20 @@ pub struct Function {
     /// Like a raw result, errors never use the scalar: a function that
     /// `may_error` returns (value, status).
     pub short_result: bool,
+    /// Registers declared packed ASCII (`asciiregs=`, SHORT-STRING.md tier
+    /// A): a String proved ASCII with at most eight characters, one i64 in
+    /// the canonical packed form. A third physical kind, disjoint from
+    /// `raw_regs` and `short_regs`.
+    pub ascii_regs: Vec<bool>,
+    /// Packed-ASCII ABI (`asciiparams=`): parameter positions whose incoming
+    /// argument is a packed word, every one also in `ascii_regs`.
+    pub ascii_params: Vec<bool>,
+    /// Whether the successful result is a packed word (`asciiresult=1`);
+    /// like the other scalar results, a function that `may_error` returns
+    /// (value, status).
+    pub ascii_result: bool,
     /// Registers that hold an unboxed machine scalar rather than a tagged
-    /// Value, of either physical kind (`raw_regs` or `short_regs`): never GC
+    /// Value, of any physical kind (raw, short or ascii): never GC
     /// roots, never stored to the shadow stack. Derived once at parse time;
     /// codegen and root analysis read this, never the two declarations.
     pub scalar_regs: Vec<bool>,
@@ -657,9 +713,22 @@ impl Function {
             RegKind::Raw
         } else if self.short_regs[r as usize] {
             RegKind::Short
+        } else if self.ascii_regs[r as usize] {
+            RegKind::Ascii
         } else {
             RegKind::Tagged
         }
+    }
+
+    /// Whether this function uses the packed-ASCII ABI anywhere.
+    pub fn has_ascii_abi(&self) -> bool {
+        self.ascii_result || self.ascii_params.iter().any(|b| *b)
+    }
+
+    /// Whether the successful result is an unboxed scalar of any kind (a
+    /// function that can fail then returns it with a status word).
+    pub fn scalar_result(&self) -> bool {
+        self.raw_result || self.short_result || self.ascii_result
     }
 
     /// Whether this function uses the ShortString1 ABI anywhere.
@@ -671,7 +740,18 @@ impl Function {
     /// convention anywhere: such a function has no Block value and no
     /// dynamic caller.
     pub fn has_scalar_abi(&self) -> bool {
-        self.has_raw_abi() || self.has_short_abi()
+        self.has_raw_abi() || self.has_short_abi() || self.has_ascii_abi()
+    }
+
+    /// The name of the scalar ABI this function uses (for diagnostics).
+    pub fn scalar_abi_name(&self) -> &'static str {
+        if self.has_raw_abi() {
+            "raw Int ABI"
+        } else if self.has_short_abi() {
+            "ShortString1 ABI"
+        } else {
+            "packed ASCII ABI"
+        }
     }
 
     /// The physical kind of the incoming argument at parameter position I.
@@ -680,6 +760,8 @@ impl Function {
             RegKind::Raw
         } else if self.short_params[i] {
             RegKind::Short
+        } else if self.ascii_params[i] {
+            RegKind::Ascii
         } else {
             RegKind::Tagged
         }
@@ -691,6 +773,8 @@ impl Function {
             RegKind::Raw
         } else if self.short_result {
             RegKind::Short
+        } else if self.ascii_result {
+            RegKind::Ascii
         } else {
             RegKind::Tagged
         }
@@ -976,7 +1060,7 @@ fn summarize_call_effects(program: &mut Program, enabled: bool) {
     // (and so whether a status word follows the value): its own settled
     // summary decides that even with call effects disabled, which otherwise
     // forces every call site to check.
-    let raw_results: Vec<bool> = program.functions.iter().map(|f| f.raw_result || f.short_result).collect();
+    let raw_results: Vec<bool> = program.functions.iter().map(|f| f.scalar_result()).collect();
     for (i, f) in program.functions.iter_mut().enumerate() {
         (f.may_error, f.may_gc) = effects[i];
         for inst in &mut f.body {
@@ -1118,7 +1202,26 @@ fn parse_func_header(p: &Parser, tokens: &[Token]) -> Result<Function, NirError>
         }
     }
     let short_result = kv.get("shortresult").is_some_and(|v| v == "1");
-    let scalar_regs: Vec<bool> = (0..regs as usize).map(|r| raw_regs[r] || short_regs[r]).collect();
+    let mut ascii_regs = vec![false; regs as usize];
+    if let Some(list) = kv.get("asciiregs") {
+        for tok in list.split_whitespace() {
+            let r: usize = tok.parse().map_err(|_| ())
+                .and_then(|r: usize| if r < regs as usize { Ok(r) } else { Err(()) })
+                .or_else(|_| p.err::<usize>(format!("bad asciiregs register {tok}")))?;
+            ascii_regs[r] = true;
+        }
+    }
+    let mut ascii_params = vec![false; params as usize];
+    if let Some(list) = kv.get("asciiparams") {
+        for tok in list.split_whitespace() {
+            let r: usize = tok.parse().map_err(|_| ())
+                .and_then(|r: usize| if r < params as usize { Ok(r) } else { Err(()) })
+                .or_else(|_| p.err::<usize>(format!("bad asciiparams position {tok}")))?;
+            ascii_params[r] = true;
+        }
+    }
+    let ascii_result = kv.get("asciiresult").is_some_and(|v| v == "1");
+    let scalar_regs: Vec<bool> = (0..regs as usize).map(|r| raw_regs[r] || short_regs[r] || ascii_regs[r]).collect();
     Ok(Function {
         id,
         name: name.clone(),
@@ -1140,6 +1243,9 @@ fn parse_func_header(p: &Parser, tokens: &[Token]) -> Result<Function, NirError>
         short_regs,
         short_params,
         short_result,
+        ascii_regs,
+        ascii_params,
+        ascii_result,
         scalar_regs,
     })
 }
@@ -1217,6 +1323,14 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
                     return p.err("shortlit must be -1 (Empty) or a Unicode scalar value");
                 }
                 Inst::ShortLit { dst, value }
+            }
+            "asciilit" => {
+                let text = tokens.get(3).and_then(word).unwrap_or("");
+                let Ok(value) = text.parse::<i64>() else { return p.err("bad asciilit literal") };
+                if !crate::runtime::value::is_canonical_ascii_word(value as u64) {
+                    return p.err("asciilit must be a canonical packed-ASCII word");
+                }
+                Inst::AsciiLit { dst, value }
             }
             "str" => Inst::Str { dst, text: quoted(3)? },
             "char" => {
@@ -1414,6 +1528,32 @@ fn validate(program: &Program) -> Result<(), NirError> {
         if let Some(r) = (0..f.regs as usize).find(|r| f.raw_regs[*r] && f.short_regs[*r]) {
             return fail(ctx(format!("register %{r} is declared both raw and short")));
         }
+        // The packed-ASCII ABI (tier A): the same discipline again.
+        if f.has_ascii_abi() {
+            if f.id == 0 {
+                return fail(ctx("the program function cannot use the packed ASCII ABI".into()));
+            }
+            if f.results != 1 || (f.ascii_result && f.plan_result) {
+                return fail(ctx("the packed ASCII ABI requires an ordinary single-result function".into()));
+            }
+            if let Some(i) = (0..f.params as usize).find(|i| f.ascii_params[*i] && !f.ascii_regs[*i]) {
+                return fail(ctx(format!("asciiparams position {i} is not declared in asciiregs")));
+            }
+            if [f.raw_result, f.short_result, f.ascii_result].iter().filter(|b| **b).count() > 1 {
+                return fail(ctx("a result cannot be of two scalar kinds".into()));
+            }
+            if let Some(i) = (0..f.params as usize)
+                .find(|i| f.ascii_params[*i] && (f.raw_params[*i] || f.short_params[*i])) {
+                return fail(ctx(format!("parameter {i} is declared in two scalar ABIs")));
+            }
+        }
+        if let Some(i) = (0..f.params as usize).find(|i| f.ascii_regs[*i] && !f.ascii_params[*i]) {
+            return fail(ctx(format!("parameter register %{i} is declared ascii but is not an asciiparams position")));
+        }
+        if let Some(r) = (0..f.regs as usize)
+            .find(|r| [f.raw_regs[*r], f.short_regs[*r], f.ascii_regs[*r]].iter().filter(|b| **b).count() > 1) {
+            return fail(ctx(format!("register %{r} is declared in two scalar kinds")));
+        }
         let mut labels = HashSet::new();
         for inst in &f.body {
             if let Inst::Label(l) = inst {
@@ -1447,6 +1587,7 @@ fn validate(program: &Program) -> Result<(), NirError> {
                 Inst::Int { dst, .. }
                 | Inst::RawInt { dst, .. }
                 | Inst::ShortLit { dst, .. }
+                | Inst::AsciiLit { dst, .. }
                 | Inst::Str { dst, .. }
                 | Inst::Char { dst, .. }
                 | Inst::Bool { dst, .. }
@@ -1473,7 +1614,7 @@ fn validate(program: &Program) -> Result<(), NirError> {
                     match func(*g) {
                         Some(g) if g.has_scalar_abi() => {
                             return fail(ctx(format!("fnvalue of {}: it uses the {} and has no Block value", g.id,
-                                if g.has_raw_abi() { "raw Int ABI" } else { "ShortString1 ABI" })));
+                                g.scalar_abi_name())));
                         }
                         Some(g) if !g.env => {}
                         _ => return fail(ctx(format!("fnvalue of {g}: not an environment-free function"))),
@@ -1486,7 +1627,7 @@ fn validate(program: &Program) -> Result<(), NirError> {
                     match func(*g) {
                         Some(g) if g.has_scalar_abi() => {
                             return fail(ctx(format!("closure of {}: it uses the {} and has no Block value", g.id,
-                                if g.has_raw_abi() { "raw Int ABI" } else { "ShortString1 ABI" })));
+                                g.scalar_abi_name())));
                         }
                         Some(g) if g.env && g.captures as usize == captures.len() => {}
                         _ => return fail(ctx(format!("closure of {g}: bad target or capture count"))),
@@ -1600,6 +1741,11 @@ fn validate(program: &Program) -> Result<(), NirError> {
                         return fail(ctx(format!("shortlit %{dst}: not declared in shortregs")));
                     }
                 }
+                Inst::AsciiLit { dst, .. } => {
+                    if kind(*dst) != RegKind::Ascii {
+                        return fail(ctx(format!("asciilit %{dst}: not declared in asciiregs")));
+                    }
+                }
                 // Call-site agreement with the callee's *physical* signature
                 // (RAW-INT-ABI.md, SHORT-STRING.md): argument i has exactly
                 // the physical kind of the callee's parameter i, and the
@@ -1651,11 +1797,11 @@ fn validate(program: &Program) -> Result<(), NirError> {
                     }
                 }
                 Inst::Op { dst, op, args } => {
-                    if let Some(a) = args.iter().find(|a| kind(**a) != op.operand_kind()) {
+                    if let Some((i, a)) = args.iter().enumerate().find(|(i, a)| kind(**a) != op.operand_kind_at(*i)) {
                         return fail(ctx(format!(
                             "op {op:?}: operand %{a} is {}, must be {}",
                             kind(*a).name(),
-                            op.operand_kind().name()
+                            op.operand_kind_at(i).name()
                         )));
                     }
                     if kind(*dst) != op.result_kind() {
@@ -1832,6 +1978,7 @@ fn validate_plans(program: &Program) -> Result<(), NirError> {
                 Inst::Label(_) | Inst::Unreachable | Inst::Raise { .. } | Inst::Fail { .. }
                 | Inst::ClearDeclaredError | Inst::PushErrorExit(_) | Inst::PopErrorExit | Inst::Reraise
                 | Inst::Jump(_) | Inst::DeclaredErrorEq { .. } | Inst::Int { .. } | Inst::RawInt { .. } | Inst::ShortLit { .. }
+                | Inst::AsciiLit { .. }
                 | Inst::Str { .. } | Inst::Char { .. } | Inst::Bool { .. } | Inst::Unit { .. }
                 | Inst::Native { .. } | Inst::FnValue { .. } | Inst::SelfClosure { .. } | Inst::Capture { .. }
                 | Inst::StaticGet { .. } => {}
@@ -2004,7 +2151,7 @@ fn check_plan_linearity(f: &Function, consumes: &[Vec<Reg>]) -> Result<(), Strin
 /// caller).
 fn def_of(inst: &Inst) -> Option<Reg> {
     match inst {
-        Inst::Int { dst, .. } | Inst::RawInt { dst, .. } | Inst::ShortLit { dst, .. } | Inst::Str { dst, .. } | Inst::Char { dst, .. }
+        Inst::Int { dst, .. } | Inst::RawInt { dst, .. } | Inst::ShortLit { dst, .. } | Inst::AsciiLit { dst, .. } | Inst::Str { dst, .. } | Inst::Char { dst, .. }
         | Inst::Bool { dst, .. } | Inst::Unit { dst } | Inst::Native { dst, .. } | Inst::FnValue { dst, .. }
         | Inst::SelfClosure { dst } | Inst::Capture { dst, .. } | Inst::Move { dst, .. }
         | Inst::Closure { dst, .. }
@@ -2631,5 +2778,161 @@ mod short_string_tests {
             };
             assert!(!site(&p), "a cannot-fail short callee is never checked (effects={effects})");
         }
+    }
+}
+
+/// The packed-ASCII physical kind (SHORT-STRING.md, tier A): `asciiregs=`,
+/// `asciiparams=`/`asciiresult=`, the `asciilit` constant and the ascii ops,
+/// a third kind distinct from RawInt and ShortString1.
+#[cfg(test)]
+mod packed_ascii_tests {
+    use super::*;
+
+    const PROGRAM: &str = "func 0 \"<program>\" params=0 env=0 regs=1 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = unit\n    ret %0\nend\n\n";
+
+    fn whole(rest: &str) -> String {
+        format!("nir 1 call-effects=1\n\n{PROGRAM}{rest}")
+    }
+
+    fn rejected(rest: &str) -> String {
+        match parse(&whole(rest)) {
+            Ok(_) => panic!("expected invalid NIR:\n{rest}"),
+            Err(e) => e.message,
+        }
+    }
+
+    fn accepted(rest: &str) -> Program {
+        parse(&whole(rest)).unwrap_or_else(|e| panic!("{}", e.message))
+    }
+
+    const CALLEE: &str = "func 1 \"callee\" params=1 env=0 regs=1 pnames=\"s\" captures=0 asciiregs=\"0\" asciiparams=\"0\" asciiresult=1\n    ret %0\nend\n\n";
+
+    #[test]
+    fn ascii_literals_and_ops_parse() {
+        // "ab" = 0xE2E1 = 58081; the empty word is 0; a full word is negative.
+        let p = accepted(
+            "func 1 \"f\" params=0 env=0 regs=7 pnames=\"\" captures=0 rawregs=\"4\" asciiregs=\"0 1 2\" shortregs=\"3\"\n    %0 = asciilit 58081\n    %1 = asciilit 0\n    %2 = asciilit -1664107662228069663\n    %3 = op asciitoshort %1\n    %4 = op asciilen %0\n    %5 = op asciieq %0 %2\n    %6 = op asciishorteq %0 %3\n    ret %5\nend\n",
+        );
+        let f = &p.functions[1];
+        assert!(f.ascii_regs[0] && f.ascii_regs[1] && f.ascii_regs[2] && !f.ascii_regs[3]);
+        assert_eq!(f.kind_of(0), RegKind::Ascii);
+        assert_eq!(f.kind_of(3), RegKind::Short);
+        assert!(f.scalar_regs[0] && f.scalar_regs[3] && f.scalar_regs[4]);
+    }
+
+    #[test]
+    fn non_canonical_words_are_rejected() {
+        // 97: a payload byte without its presence flag; 256: byte 1 without
+        // flag and byte 0 absent; 57600 (0xE100): a present byte after an
+        // absent one; 225000: a payload byte (0x6E) without its flag. (-1 is
+        // *valid*: eight DEL characters.)
+        for bad in ["97", "256", "57600", "225000"] {
+            let m = rejected(&format!(
+                "func 1 \"f\" params=0 env=0 regs=1 pnames=\"\" captures=0 asciiregs=\"0\"\n    %0 = asciilit {bad}\n    ret %0\nend\n"
+            ));
+            assert!(m.contains("asciilit"), "{bad}: {m}");
+        }
+    }
+
+    #[test]
+    fn asciilit_needs_an_ascii_register() {
+        let m = rejected("func 1 \"f\" params=0 env=0 regs=1 pnames=\"\" captures=0\n    %0 = asciilit 225\n    ret %0\nend\n");
+        assert!(m.contains("not declared in asciiregs"), "{m}");
+    }
+
+    #[test]
+    fn ascii_is_neither_raw_nor_short() {
+        // An Ascii operand of riadd is rejected; a Short operand of asciieq too.
+        let m = rejected(
+            "func 1 \"f\" params=0 env=0 regs=3 pnames=\"\" captures=0 rawregs=\"2\" asciiregs=\"0 1\"\n    %0 = asciilit 225\n    %1 = asciilit 226\n    %2 = op riadd %0 %1\n    ret %2\nend\n",
+        );
+        assert!(m.contains("operand") && m.contains("ascii") && m.contains("raw"), "{m}");
+        let m = rejected(
+            "func 1 \"f\" params=0 env=0 regs=3 pnames=\"\" captures=0 asciiregs=\"0\" shortregs=\"1\"\n    %0 = asciilit 225\n    %1 = shortlit 97\n    %2 = op asciieq %0 %1\n    ret %2\nend\n",
+        );
+        assert!(m.contains("operand") && m.contains("short") && m.contains("ascii"), "{m}");
+        // asciishorteq wants (ascii, short) in that order.
+        let m = rejected(
+            "func 1 \"f\" params=0 env=0 regs=3 pnames=\"\" captures=0 asciiregs=\"0\" shortregs=\"1\"\n    %0 = asciilit 225\n    %1 = shortlit 97\n    %2 = op asciishorteq %1 %0\n    ret %2\nend\n",
+        );
+        assert!(m.contains("operand"), "{m}");
+        // A move between kinds is a bug, not a conversion.
+        let m = rejected(
+            "func 1 \"f\" params=0 env=0 regs=2 pnames=\"\" captures=0 asciiregs=\"0\" shortregs=\"1\"\n    %0 = asciilit 225\n    %1 = move %0\n    ret %1\nend\n",
+        );
+        assert!(m.contains("move"), "{m}");
+    }
+
+    #[test]
+    fn a_register_is_in_one_scalar_kind_only() {
+        let m = rejected(
+            "func 1 \"f\" params=0 env=0 regs=1 pnames=\"\" captures=0 shortregs=\"0\" asciiregs=\"0\"\n    %0 = asciilit 225\n    ret %0\nend\n",
+        );
+        assert!(m.contains("two scalar kinds"), "{m}");
+    }
+
+    #[test]
+    fn an_ascii_value_is_not_a_tagged_value() {
+        let m = rejected(
+            "func 1 \"f\" params=0 env=0 regs=2 pnames=\"\" captures=0 asciiregs=\"0\"\n    %0 = asciilit 225\n    %1 = op listnew %0\n    ret %1\nend\n",
+        );
+        assert!(m.contains("ascii") && m.contains("tagged"), "{m}");
+    }
+
+    #[test]
+    fn matching_ascii_call_parses_and_reports_the_abi() {
+        let p = accepted(&format!(
+            "{CALLEE}func 2 \"caller\" params=0 env=0 regs=3 pnames=\"\" captures=0 asciiregs=\"0 1\"\n    %0 = asciilit 58081\n    %1 = call 1 %0\n    %2 = op asciitostr %1\n    ret %2\nend\n"
+        ));
+        let f = &p.functions[1];
+        assert!(f.ascii_params[0] && f.ascii_result && f.has_ascii_abi());
+        assert!(f.has_scalar_abi() && !f.has_short_abi() && !f.has_raw_abi());
+        assert_eq!(f.scalar_abi_name(), "packed ASCII ABI");
+    }
+
+    #[test]
+    fn tagged_short_or_raw_arguments_cannot_feed_an_ascii_parameter() {
+        let m = rejected(&format!(
+            "{CALLEE}func 2 \"caller\" params=1 env=0 regs=3 pnames=\"x\" captures=0 asciiregs=\"1\"\n    %1 = call 1 %0\n    %2 = op asciitostr %1\n    ret %2\nend\n"
+        ));
+        assert!(m.contains("argument 0") && m.contains("tagged") && m.contains("ascii"), "{m}");
+        let m = rejected(&format!(
+            "{CALLEE}func 2 \"caller\" params=0 env=0 regs=3 pnames=\"\" captures=0 shortregs=\"0\" asciiregs=\"1\"\n    %0 = shortlit 97\n    %1 = call 1 %0\n    %2 = op asciitostr %1\n    ret %2\nend\n"
+        ));
+        assert!(m.contains("argument 0") && m.contains("short") && m.contains("ascii"), "{m}");
+    }
+
+    #[test]
+    fn a_result_is_of_one_scalar_kind_only() {
+        let m = rejected(
+            "func 1 \"f\" params=0 env=0 regs=1 pnames=\"\" captures=0 asciiregs=\"0\" asciiresult=1 shortresult=1\n    %0 = asciilit 225\n    ret %0\nend\n",
+        );
+        assert!(m.contains("two scalar kinds"), "{m}");
+    }
+
+    #[test]
+    fn the_program_function_cannot_use_the_ascii_abi() {
+        let src = "nir 1 call-effects=1\n\nfunc 0 \"<program>\" params=0 env=0 regs=1 pnames=\"\" captures=0 asciiregs=\"0\" asciiresult=1\n    %0 = asciilit 225\n    ret %0\nend\n";
+        let m = match parse(src) {
+            Ok(_) => panic!("expected invalid NIR"),
+            Err(e) => e.message,
+        };
+        assert!(m.contains("program"), "{m}");
+    }
+
+    #[test]
+    fn a_block_value_of_an_ascii_function_is_a_bug() {
+        let m = rejected(&format!(
+            "{CALLEE}func 2 \"caller\" params=0 env=0 regs=1 pnames=\"\" captures=0\n    %0 = fnvalue 1\n    ret %0\nend\n"
+        ));
+        assert!(m.contains("packed ASCII ABI"), "{m}");
+    }
+
+    #[test]
+    fn tail_arguments_keep_the_ascii_kind() {
+        let m = rejected(
+            "func 1 \"f\" params=1 env=0 regs=2 pnames=\"s\" captures=0 asciiregs=\"0\" asciiparams=\"0\" asciiresult=1\n    %1 = op strtoascii %0\n    tail %1\nend\n",
+        );
+        assert!(!m.is_empty());
     }
 }

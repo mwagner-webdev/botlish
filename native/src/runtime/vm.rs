@@ -155,21 +155,7 @@ pub struct Vm {
     /// roots -- harmless for the brief window before a program is compiled.
     framemap: Rc<ProgramMap>,
     native_stack: Option<NativeStack>,
-    /// The interned static Strings a ShortString1 materializes to for Empty
-    /// and the scalars U+0000..U+00FF (`short_string`): slot `short + 1`
-    /// (slot 0 the empty String, slots 1..=256 the one-character Strings of
-    /// U+0000..U+00FF); 0 = not built yet. Public and laid out at a known
-    /// offset (`VM_SHORT_CACHE_OFFSET`) because generated code probes it
-    /// inline (`ShortToStr`); only `short_string` ever writes it. Strings are immutable and compared structurally, so
-    /// sharing one object is unobservable; being static they are never
-    /// collected (heap.rs skips `is_static`) and need no rooting.
-    pub short_cache: [Value; SHORT_CACHE_SLOTS],
-    short_objects: Vec<*mut Header>,
 }
-
-/// Slots of `Vm::short_cache`: index `short + 1` for ShortString1 scalar
-/// -1 (Empty) and 0..=255 (Latin-1), so 257 slots.
-pub const SHORT_CACHE_SLOTS: usize = 257;
 
 pub const VM_SS_TOP_OFFSET: i32 = offset_of!(Vm, ss_top) as i32;
 pub const VM_SS_LIMIT_OFFSET: i32 = offset_of!(Vm, ss_limit) as i32;
@@ -178,7 +164,6 @@ pub const VM_ALLOC_SITE_OFFSET: i32 = offset_of!(Vm, alloc_site) as i32;
 pub const VM_NATIVE_ROOTS_PTR_OFFSET: i32 = offset_of!(Vm, native_roots_ptr) as i32;
 pub const VM_NATIVE_ROOTS_LEN_OFFSET: i32 = offset_of!(Vm, native_roots_len) as i32;
 pub const VM_STATICS_OFFSET: i32 = offset_of!(Vm, statics_ptr) as i32;
-pub const VM_SHORT_CACHE_OFFSET: i32 = offset_of!(Vm, short_cache) as i32;
 
 impl Vm {
     pub fn new(info: Rc<ProgramInfo>, alloc_mode: AllocMode) -> Box<Vm> {
@@ -210,8 +195,6 @@ impl Vm {
             const_table: Vec::new(),
             statics: Vec::new(),
             framemap: Rc::new(ProgramMap::new()),
-            short_cache: [0; SHORT_CACHE_SLOTS],
-            short_objects: Vec::new(),
             native_stack: {
                 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
                 { Some(NativeStack::current().expect("pthread stack bounds")) }
@@ -413,26 +396,25 @@ impl Vm {
     }
 
     /// The String a ShortString1 scalar SHORT stands for (-1: the empty
-    /// String, else the one character of that Unicode scalar value). Empty
-    /// and U+0000..U+00FF are interned static Strings, built once: a
-    /// materialization of a Latin-1 character (the whole ASCII range
-    /// included) allocates nothing, exactly like the String literal it may
-    /// have come from. Any other scalar allocates a fresh one-character
-    /// String.
-    pub fn short_string(&mut self, short: i64) -> Value {
-        if !(-1..256).contains(&short) {
-            let c = char::from_u32(short as u32).expect("a ShortString1 scalar is a Unicode scalar value");
-            return self.new_str_known(c.to_string(), 1, c.is_ascii());
+    /// String, else the one character of that Unicode scalar value),
+    /// UTF-8 encoded into a freshly allocated String. There is no interned
+    /// table: every runtime materialization allocates (a value the compiler
+    /// knows statically is a `str` constant instead, never reaching here).
+    pub fn short_to_string(&mut self, short: i64) -> Value {
+        if short == -1 {
+            return self.new_str_known(String::new(), 0, true);
         }
-        let slot = (short + 1) as usize;
-        if self.short_cache[slot] != 0 {
-            return self.short_cache[slot];
-        }
-        let text = if short == -1 { String::new() } else { char::from_u32(short as u32).unwrap().to_string() };
-        let object = Box::into_raw(Box::new(str_object(text, true))) as *mut Header;
-        self.short_objects.push(object);
-        self.short_cache[slot] = object as Value;
-        object as Value
+        let c = char::from_u32(short as u32).expect("a ShortString1 scalar is a Unicode scalar value");
+        self.new_str_known(c.to_string(), 1, c.is_ascii())
+    }
+
+    /// The String a packed-ASCII word stands for: its bytes are the word
+    /// masked to the 7-bit payload (one AND), truncated to its length.
+    pub fn ascii_to_string(&mut self, word: u64) -> Value {
+        let (bytes, n) = unpack_ascii(word);
+        // SAFETY: every payload byte is below 0x80, so the prefix is ASCII.
+        let text = unsafe { String::from_utf8_unchecked(bytes[..n].to_vec()) };
+        self.new_str_known(text, n, true)
     }
 
     pub fn new_list(&mut self, items: Vec<Value>) -> Value {
@@ -511,9 +493,6 @@ impl Vm {
 impl Drop for Vm {
     fn drop(&mut self) {
         for &object in &self.statics {
-            unsafe { super::heap::free_object(object) };
-        }
-        for &object in &self.short_objects {
             unsafe { super::heap::free_object(object) };
         }
     }

@@ -1,17 +1,32 @@
-# shortstring.tcl -- the ShortString1 planner (SHORT-STRING.md).
+# shortstring.tcl -- the short-String planner (SHORT-STRING.md).
 #
 # A *representation* decision, in the same family as native/rawabi.tcl: a
-# Botlish String the compiler already proves has at most one character may be
-# carried physically as ONE signed i64 -- a "ShortString1" -- instead of a
-# materialized, tagged String object:
+# Botlish String the compiler already proves is small may be carried
+# physically as ONE i64 instead of a materialized, tagged String object. Three
+# regimes, chosen per position by the proof alone (never by profitability):
 #
-#   -1                  the empty String (Empty)
-#   0 .. 0x10FFFF       the one Unicode scalar value of a one-character
-#                       String (One); U+0000 is 0, never Empty
+#   known ASCII, at most 8 characters   -> "packed ASCII" (tier `ascii`)
+#       byte i of the word is 0x80 | c for the character c at index i and 0
+#       past the end. The high bit of every byte is a *presence* flag (the
+#       otherwise-unused eighth bit of an ASCII byte), so the length is
+#       (71 - clz(w)) >> 3 from the word alone, the empty String is 0, NUL is
+#       a present 0x80, the form is canonical (equality is word equality) and
+#       unpacking to a String's bytes is `w & 0x7F7F7F7F7F7F7F7F` -- one AND,
+#       one 8-byte store.
+#   at most 1 character, possibly Unicode -> "ShortString1" (tier `short`)
+#       one signed i64: -1 the empty String, 0..0x10FFFF the one Unicode
+#       scalar value (U+0000 is 0, never Empty); materialized by UTF-8
+#       encoding.
+#   anything else                       -> the ordinary tagged String
 #
-# The semantic type stays `String`. ShortString1 is not a source type, not a
-# Char, not an Int; it is an internal physical kind (`shortregs=` in NIR),
-# distinct from RawInt even though both are an i64.
+# A one-character ASCII String is therefore packed (it is known ASCII); only
+# a value that may be non-ASCII is a scalar. There is no interned table of
+# materialized Strings: materializing a value the compiler knows statically
+# (a literal) is a `str` constant, any other materialization allocates.
+#
+# The semantic type stays `String`. Neither tier is a source type, a Char or
+# an Int; each is an internal physical kind (`asciiregs=` / `shortregs=` in
+# NIR), distinct from RawInt and from each other even though all are an i64.
 #
 # What one Botlish "character" is (settled by reading the runtime, not
 # assumed): a Unicode scalar value. A String is a Rust `str` natively
@@ -20,17 +35,19 @@
 # `length` and `substring` index by it. Surrogates (U+D800..U+DFFF) cannot be
 # part of a String, so they are not in the representation's domain; a lone
 # surrogate literal is simply not eligible. Not a byte, not a grapheme
-# cluster. One non-ASCII character ("ä", "€", "λ", "猫") is one scalar and
-# fully eligible; nothing here ever looks at an encoded byte length.
+# cluster. One non-ASCII character ("ä", "€", "λ", "猫", an emoji scalar) is
+# one scalar and a ShortString1; a multi-character String that is not proven
+# ASCII stays tagged.
 #
 # Layering (frontend proof -> NIR physical contract -> backend):
 #
-#   1. PROOF. `Fact` answers "can this String contain more than one
-#      character?" by *composing* facts the repository already has; it adds
-#      no inference engine and no String-length lattice of its own beyond
-#      the five-point join below. The existing facts it reads:
-#        * a String literal's own text (a `const`), through immutable local
-#          aliases (the one `bind` of a single-assignment binding);
+#   1. PROOF. `Fact` answers "how many characters can this String have, and is
+#      it ASCII?" by *composing* facts the repository already has; it adds no
+#      inference engine beyond the small product lattice below. The existing
+#      facts it reads:
+#        * a String literal's own text (a `const`: its length and whether it
+#          is ASCII are read off the text), through immutable local aliases
+#          (the one `bind` of a single-assignment binding);
 #        * hir::range::ConditionOutcome / the instance view's `reachable`
 #          flags -- a branch the existing analyses prove dead contributes
 #          nothing (so a dead long-String branch never forces a conversion);
@@ -43,50 +60,59 @@
 #          (InstanceClosed): a closed instance's parameter is bounded by the
 #          join of its callers' arguments, a result by the join of its exits.
 #      Whatever is not provable is `over` and stays an ordinary tagged String
-#      (a missed opportunity, not an error). No Range/Cranelift/register
-#      concern participates.
+#      (a missed opportunity, not an error). ASCII-ness has exactly one
+#      source: a literal's text (a slice of a String says nothing about its
+#      source's alphabet here).
 #
-#   2. PHYSICAL PLAN. The selection is *categorical*: proven length <= 1 =>
-#      ShortString1. There is no profitability score, no use count, no
-#      transport distance, no demand suppression (the planner stays small and
-#      linear so a later, struct-style frontier heuristic can sit on top of
-#      the same facts: eligible + benefit - materialization cost). The plan
-#      is one authoritative result per codegen instance, stored once and read
-#      by the callee's lowering and by every exact caller.
+#   2. PHYSICAL PLAN. The selection is *categorical*: proven ASCII with length
+#      <= 8 => packed ASCII; else proven length <= 1 => ShortString1; else
+#      tagged. There is no profitability score, no use count, no transport
+#      distance, no demand suppression (the planner stays small and linear so a
+#      later, struct-style frontier heuristic can sit on top of the same
+#      facts: eligible + benefit - materialization cost). The plan is one
+#      authoritative result per codegen instance, stored once and read by the
+#      callee's lowering and by every exact caller.
 #
-#   3. BACKEND. native/lower.tcl emits NIR with explicit `shortregs=`,
-#      `shortparams=`/`shortresult=`, `shortlit`, `strtoshort`, `shorttostr`
-#      and the scalar ops; native/src/nir.rs validates caller/callee
-#      agreement; Cranelift lowers the kind to an i64 that is never a GC root.
+#   3. BACKEND. native/lower.tcl emits NIR with explicit `asciiregs=` /
+#      `shortregs=`, `asciiparams=`/`shortparams=`, `asciiresult=`/
+#      `shortresult=`, `asciilit`/`shortlit`, the conversion ops and the scalar
+#      ops; native/src/nir.rs validates caller/callee agreement; Cranelift
+#      lowers each kind to an i64 that is never a GC root.
 #
-# The fact lattice (a value's *possible* character count, never more):
+# The fact lattice (what a value's character count and alphabet can be):
 #
-#   never      no value (dead code, or an expression that cannot complete)
-#   empty      exactly 0 characters
-#   one:N      exactly 1 character, Unicode scalar value N known
-#   one        exactly 1 character, value unknown
-#   maybe      0 or 1 character (the case one i64 with an Empty encoding is
-#              there for: `if flag: "" else: "x"`)
-#   over:WHY   more than one character, or unknown (WHY: long, unknown,
-#              not-string, open-instance, disabled)
+#   never                 no value (dead code, or an expression that cannot
+#                         complete)
+#   {lo hi asc known}     lo..hi characters (hi <= 8), asc 1 when every
+#                         possible character is proven ASCII, `known` the
+#                         scalar value when exactly one character with a
+#                         known value (else "")
+#   over:WHY              not representable: more than 8 characters, more than
+#                         one character not proven ASCII, or unknown (WHY:
+#                         long, unicode, unknown, not-string, open-instance,
+#                         disabled)
 #
-# Join is the usual least upper bound; `over` absorbs (its first reason wins).
+# The tier of a fact: `ascii` when asc and hi <= 8, else `short` when hi <= 1,
+# else none. Join is the usual least upper bound (min lo, max hi, asc and,
+# known kept when equal); a join that no tier can represent is `over`, which
+# absorbs (its first reason wins). The lattice is finite, so the fixpoints
+# below terminate.
 #
-# Parameters. Instance I's parameter K is a ShortString1 position iff I is
-# closed (every invocation is a direct, exact call the specialization saw --
-# so no dynamic caller can hand the entry a tagged String it does not
-# expect), the key type is `str`, and the join over every reachable call
-# site's argument is not `over`. A *result* is a ShortString1 position iff
-# the instance is closed and the join of its reachable successful exits is
-# not `over`. Both facts are least fixpoints from `never` over the call graph
-# (monotone, finite height 5), so recursion is handled with no special case.
-# A result fact is valid for an open instance too (it describes the
-# instance's own exits): an open instance's *callers* may use it to keep a
+# Parameters. Instance I's parameter K is a short position iff I is closed
+# (every invocation is a direct, exact call the specialization saw -- so no
+# dynamic caller can hand the entry a tagged String it does not expect), the
+# key type is `str`, and the join over every reachable call site's argument has
+# a tier. A *result* is a short position iff the instance is closed and the
+# join of its reachable successful exits has a tier. Both facts are least
+# fixpoints from `never` over the call graph, so recursion is handled with no
+# special case. A result fact is valid for an open instance too (it describes
+# the instance's own exits): an open instance's *callers* may use it to keep a
 # local value short, converting at the call (tagged -> short), but its ABI
 # stays tagged.
 
 namespace eval native::shortstr {
     variable Enabled 0
+    variable AsciiPack 1
     variable Hir ""
     variable Spec ""
     variable Ranges ""
@@ -114,9 +140,39 @@ proc native::shortstr::Over {f} {
     return [expr {[string range $f 0 3] eq "over"}]
 }
 
-# 1 if fact F says "at most one character" with at least one possible value.
+# The fact with LO..HI characters, ASC (1: all ASCII) and KNOWN (the scalar of
+# a one-character value, else ""), normalized: a bound no tier can represent
+# is `over`.
+proc native::shortstr::Mk {lo hi asc known} {
+    if {$hi > 8} {
+        return over:long
+    }
+    if {$hi > 1 && !$asc} {
+        return over:unicode
+    }
+    if {!($lo == 1 && $hi == 1)} {
+        set known ""
+    }
+    return [list $lo $hi $asc $known]
+}
+
+# The tier of fact F: `ascii` (proven ASCII, at most 8 characters), `short`
+# (at most one character, possibly non-ASCII) or "" (not representable).
+proc native::shortstr::Tier {f} {
+    if {$f eq "never" || [Over $f]} {
+        return ""
+    }
+    variable AsciiPack
+    lassign $f lo hi asc known
+    if {$asc && $AsciiPack} {
+        return ascii
+    }
+    return [expr {$hi <= 1 ? "short" : ""}]
+}
+
+# 1 if fact F has a tier (and so can be carried as a scalar).
 proc native::shortstr::Ok {f} {
-    return [expr {$f in {empty one maybe} || [string match one:* $f]}]
+    return [expr {[Tier $f] ne ""}]
 }
 
 proc native::shortstr::Join {a b} {
@@ -125,59 +181,67 @@ proc native::shortstr::Join {a b} {
     if {[Over $a]} { return $a }
     if {[Over $b]} { return $b }
     if {$a eq $b} { return $a }
-    set oa [expr {$a eq "empty" ? "e" : $a eq "maybe" ? "m" : "o"}]
-    set ob [expr {$b eq "empty" ? "e" : $b eq "maybe" ? "m" : "o"}]
-    if {$oa eq "o" && $ob eq "o"} {
-        # two one-character values (a different scalar, or one unknown)
-        return one
-    }
-    return maybe
+    lassign $a alo ahi aasc aknown
+    lassign $b blo bhi basc bknown
+    set known [expr {$aknown ne "" && $aknown eq $bknown ? $aknown : ""}]
+    return [Mk [expr {min($alo, $blo)}] [expr {max($ahi, $bhi)}] [expr {$aasc && $basc}] $known]
 }
 
 # The fact of a String literal's text.
 proc native::shortstr::Literal {text} {
     variable maxScalar
     set n [string length $text]
-    if {$n == 0} {
-        return empty
-    }
-    if {$n > 1} {
+    if {$n > 8} {
         return over:long
     }
-    scan $text %c cp
-    if {$cp < 0 || $cp > $maxScalar || ($cp >= 0xD800 && $cp <= 0xDFFF)} {
-        return over:unknown
+    set asc 1
+    foreach ch [split $text ""] {
+        scan $ch %c cp
+        if {$cp < 0 || $cp > $maxScalar || ($cp >= 0xD800 && $cp <= 0xDFFF)} {
+            return over:unknown
+        }
+        if {$cp >= 0x80} {
+            set asc 0
+        }
     }
-    return one:$cp
+    set known ""
+    if {$n == 1} {
+        scan $text %c known
+    }
+    return [Mk $n $n $asc $known]
 }
 
 # A human reading of a fact for the audit.
 proc native::shortstr::Describe {f} {
     switch -glob -- $f {
         never   { return "no value" }
-        empty   { return "exactly empty (length 0)" }
-        one:*   { return "exactly one character U+[format %04X [string range $f 4 end]]" }
-        one     { return "exactly one character (value unknown)" }
-        maybe   { return "empty or one character (length [0,1])" }
-        over:long      { return "more than one character (length > 1)" }
+        over:long      { return "more than 8 characters" }
+        over:unicode   { return "more than one character and not proven ASCII" }
         over:open-instance { return "unknown (open instance: callers not all known)" }
         over:not-string { return "not a String position" }
         over:disabled  { return "disabled" }
-        default { return "unknown length" }
+        over:*  { return "unknown length" }
     }
+    lassign $f lo hi asc known
+    set out "length \[$lo,$hi\], [expr {$asc ? "ASCII" : "not proven ASCII"}]"
+    if {$known ne ""} {
+        append out [format ", exactly U+%04X" $known]
+    }
+    return $out
 }
 
-# 1 if the fact names a *proven* bound (including the reason it is not).
+# The reason code of an unrepresentable fact ("" for a representable one).
 proc native::shortstr::Reason {f} {
     switch -glob -- $f {
         never { return no-value }
-        over:long { return length-gt-1 }
+        over:long { return length-gt-8 }
+        over:unicode { return not-ascii-multi }
         over:open-instance { return open-instance }
         over:not-string { return not-string }
         over:disabled { return disabled }
         over:* { return unknown-length }
     }
-    return ""
+    return [expr {[Tier $f] eq "" ? "length-gt-1" : ""}]
 }
 
 # ---------------------------------------------------------------------------
@@ -195,8 +259,9 @@ proc native::shortstr::Reason {f} {
 # virtual-construction plan keeps that representation (`construction-plan`),
 # so two virtualizations never claim one position. The facts are also queryable per expression
 # afterwards (`fact`).
-proc native::shortstr::plan {hir spec ranges enabled {blockEscape 1} {construction {}}} {
+proc native::shortstr::plan {hir spec ranges enabled {blockEscape 1} {construction {}} {asciiPack 1}} {
     variable Enabled
+    variable AsciiPack
     variable Hir
     variable Spec
     variable Ranges
@@ -213,6 +278,7 @@ proc native::shortstr::plan {hir spec ranges enabled {blockEscape 1} {constructi
     variable Rounds
     set Rounds 0
     set Enabled $enabled
+    set AsciiPack $asciiPack
     set Hir $hir
     set Spec $spec
     set Ranges $ranges
@@ -340,11 +406,12 @@ proc native::shortstr::plan {hir spec ranges enabled {blockEscape 1} {constructi
             } else {
                 set f $PFact($id,$k)
                 lappend facts $f
-                if {[Ok $f] && $construction ne "" && [hir::construction::paramFamily $construction $id $k] ne ""} {
+                set tier [Tier $f]
+                if {$tier ne "" && $construction ne "" && [hir::construction::paramFamily $construction $id $k] ne ""} {
                     lappend kinds value
                     lappend reasons construction-plan
-                } elseif {[Ok $f]} {
-                    lappend kinds short
+                } elseif {$tier ne ""} {
+                    lappend kinds $tier
                     lappend reasons ""
                 } else {
                     lappend kinds value
@@ -369,7 +436,7 @@ proc native::shortstr::plan {hir spec ranges enabled {blockEscape 1} {constructi
                 set resultKind value
                 set resultReason construction-plan
             } else {
-                set resultKind short
+                set resultKind [Tier $resultFact]
                 set resultReason ""
             }
         }
@@ -381,29 +448,40 @@ proc native::shortstr::plan {hir spec ranges enabled {blockEscape 1} {constructi
     return $plan
 }
 
-# 1|0 per parameter position of the first N of instance ID: whether it is a
-# ShortString1 position of its canonical function. Positions beyond the
-# plan's list (a hidden trailing parameter) are tagged.
+# The physical kind per parameter position of the first N of instance ID's
+# canonical function: `ascii` (packed ASCII), `short` (ShortString1) or ""
+# (an ordinary tagged value). Positions beyond the plan's list (a hidden
+# trailing parameter) are tagged.
 proc native::shortstr::params {plan id n} {
     set out {}
     set kinds [expr {[dict exists $plan $id] ? [dict get $plan $id params] : {}}]
     for {set i 0} {$i < $n} {incr i} {
-        lappend out [expr {[lindex $kinds $i] eq "short"}]
+        set k [lindex $kinds $i]
+        lappend out [expr {$k in {ascii short} ? $k : ""}]
     }
     return $out
 }
 
-# 1 if instance ID's successful result is a ShortString1.
+# The physical kind of instance ID's successful result: `ascii`, `short` or "".
 proc native::shortstr::result {plan id} {
-    return [expr {[dict exists $plan $id] && [dict get $plan $id result] eq "short"}]
+    if {![dict exists $plan $id]} {
+        return ""
+    }
+    set k [dict get $plan $id result]
+    return [expr {$k in {ascii short} ? $k : ""}]
 }
 
-# 1 if instance ID's canonical function has any ShortString1 position.
+# 1 if instance ID's canonical function has any short-String position.
 proc native::shortstr::uses {plan id} {
     if {![dict exists $plan $id]} {
         return 0
     }
-    return [expr {[dict get $plan $id result] eq "short" || "short" in [dict get $plan $id params]}]
+    foreach k [concat [list [dict get $plan $id result]] [dict get $plan $id params]] {
+        if {$k in {ascii short}} {
+            return 1
+        }
+    }
+    return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -723,7 +801,7 @@ proc native::shortstr::SubstringFact {h argExprs} {
         if {$b ne "" && [dict get [hir::binding $h $b] kind] in {param local}} {
             set c [hir::induction::ClassifyArg $h $end $b]
             if {$c eq "identity"} {
-                return empty
+                return [Mk 0 0 1 ""]
             }
             if {[lindex $c 0] eq "step"} {
                 return [WidthFact [lindex $c 1]]
@@ -735,12 +813,15 @@ proc native::shortstr::SubstringFact {h argExprs} {
 
 proc native::shortstr::WidthFact {w} {
     if {$w == 0} {
-        return empty
+        return [Mk 0 0 1 ""]
     }
     if {$w == 1} {
-        return one
+        return [Mk 1 1 0 ""]
     }
-    return [expr {$w > 1 ? "over:long" : "over:unknown"}]
+    if {$w < 0} {
+        return over:unknown
+    }
+    return [expr {$w > 8 ? "over:long" : "over:unicode"}]
 }
 
 # ---------------------------------------------------------------------------
@@ -755,21 +836,24 @@ proc native::shortstr::fact {id e} {
     return [Fact $id $e]
 }
 
-# 1 if E is a String the compiler proved has at most one character (and can
-# complete): lowering may carry it as a ShortString1.
+# The tier of String expression E of instance ID: `ascii`, `short` or ""
+# (not representable as a scalar).
+proc native::shortstr::tier {id e} {
+    return [Tier [fact $id $e]]
+}
+
+# 1 if E is a String the compiler proved small (a tier) and can complete:
+# lowering may carry it as a scalar.
 proc native::shortstr::ok {id e} {
     return [Ok [fact $id $e]]
 }
 
-# {kind value} of E's *statically known* ShortString1 scalar: {empty -1},
-# {one CP}, or "" when it is only known at run time.
+# {kind value} of E's *statically known* one-character scalar, or "" when it
+# is only known at run time.
 proc native::shortstr::known {id e} {
     set f [fact $id $e]
-    if {$f eq "empty"} {
-        return {empty -1}
-    }
-    if {[string match one:* $f]} {
-        return [list one [string range $f 4 end]]
+    if {![Over $f] && $f ne "never" && [lindex $f 3] ne ""} {
+        return [list one [lindex $f 3]]
     }
     return ""
 }
@@ -813,11 +897,15 @@ proc native::shortstr::Production {id e} {
     switch -- [hir::kind $h $e] {
         const {
             set f [fact $id $e]
-            if {$f eq "empty"} {
+            if {$f eq "never" || [Over $f]} {
+                return "String literal"
+            }
+            lassign $f lo hi asc known
+            if {$hi == 0} {
                 return "empty literal"
             }
-            if {[string match one:* $f]} {
-                return [format "one-character literal U+%04X" [string range $f 4 end]]
+            if {$known ne ""} {
+                return [format "one-character literal U+%04X" $known]
             }
             return "String literal"
         }
@@ -900,7 +988,7 @@ proc native::shortstr::UseWalk {id e ctx usesVar} {
                 set k 0
                 foreach a $args {
                     if {$callee ne "" && [dict exists $Plan $callee]
-                            && [lindex [dict get $Plan $callee params] $k] eq "short"} {
+                            && [lindex [dict get $Plan $callee params] $k] in {short ascii}} {
                         UseWalk $id $a "argument $k of [Label $callee] -> scalar" uses
                     } else {
                         UseWalk $id $a "argument $k of [expr {$callee eq "" ? "a dynamic call" : [Label $callee]}] -> materialize" uses
@@ -924,7 +1012,7 @@ proc native::shortstr::UseWalk {id e ctx usesVar} {
             set value [dict get $node value]
             if {$value ne ""} {
                 set block [dict get [dict get $Spec instances $id] block]
-                set short [expr {[dict exists $Plan $id] && [dict get $Plan $id result] eq "short"}]
+                set short [expr {[dict exists $Plan $id] && [dict get $Plan $id result] in {short ascii}}]
                 UseWalk $id $value [expr {$short ? "return -> scalar" : "return -> materialize"}] uses
             }
         }
@@ -948,7 +1036,7 @@ proc native::shortstr::UsesOf {id} {
     set instance [dict get $Spec instances $id]
     set block [dict get $instance block]
     set uses [dict create]
-    set short [expr {[dict exists $Plan $id] && [dict get $Plan $id result] eq "short"}]
+    set short [expr {[dict exists $Plan $id] && [dict get $Plan $id result] in {short ascii}}]
     set body [expr {$block eq "program" ? [hir::roots $h] : [hir::get $h $block body]}]
     set n [llength $body]
     set i 0
@@ -984,9 +1072,10 @@ proc native::shortstr::explain {id} {
             append out "      semantic type: [expr {$key eq "str" ? "String" : [hir::specialize::ShowKey $key]}]\n"
             if {$key eq "str"} {
                 append out "      proven character length: [FactRange $fact]\n"
-                append out "      ShortString1 eligible: [expr {[Ok $fact] ? "yes" : "no"}]\n"
+                append out "      proven ASCII: [FactAscii $fact]\n"
+                append out "      eligible representation: [TierName [Tier $fact]]\n"
             }
-            append out "      ABI [expr {$kind eq "short" ? "ShortString1" : "tagged ($reason)"}]\n"
+            append out "      ABI [expr {$kind in {short ascii} ? [TierName $kind] : "tagged ($reason)"}]\n"
             if {$key eq "str" && [dict exists $uses $b]} {
                 append out "      uses:\n"
                 foreach u [lsort -unique [dict get $uses $b]] {
@@ -999,9 +1088,10 @@ proc native::shortstr::explain {id} {
         append out "    semantic type: [expr {[hir::types::kindOf [dict get $instance result]] eq "str" ? "String" : [hir::types::show [dict get $instance result]]}]\n"
         if {[hir::types::kindOf [dict get $instance result]] eq "str"} {
             append out "    proven character length: [FactRange $fact]\n"
-            append out "    ShortString1 eligible: [expr {[Ok $fact] ? "yes" : "no"}]\n"
+            append out "    proven ASCII: [FactAscii $fact]\n"
+            append out "    eligible representation: [TierName [Tier $fact]]\n"
         }
-        append out "    ABI [expr {[dict get $p result] eq "short" ? "ShortString1" : "tagged ([dict get $p resultReason])"}]\n"
+        append out "    ABI [expr {[dict get $p result] in {short ascii} ? [TierName [dict get $p result]] : "tagged ([dict get $p resultReason])"}]\n"
     }
     set binds [StringBinds $id]
     if {$binds ne ""} {
@@ -1014,9 +1104,10 @@ proc native::shortstr::explain {id} {
             append out "    $name ($e):\n"
             append out "      semantic type: String\n"
             append out "      proven character length: [FactRange $f]\n"
-            append out "      ShortString1 eligible: [expr {[Ok $f] ? "yes" : "no ([Describe $f])"}]\n"
+            append out "      proven ASCII: [FactAscii $f]\n"
+            append out "      eligible representation: [expr {[Ok $f] ? [TierName [Tier $f]] : "tagged ([Describe $f])"}]\n"
             if {[Ok $f]} {
-                append out "      physical representation: ShortString1 (local)\n"
+                append out "      physical representation: [TierName [Tier $f]] (local)\n"
                 append out "      production: [Production $id [hir::get $h $e value]]\n"
             } else {
                 append out "      physical representation: tagged String ([Reason $f])\n"
@@ -1043,13 +1134,30 @@ proc native::shortstr::UseText {use eligible} {
 }
 
 proc native::shortstr::FactRange {f} {
-    switch -glob -- $f {
-        never { return "none (no value)" }
-        empty { return "\[0,0\]" }
-        one*  { return "\[1,1\]" }
-        maybe { return "\[0,1\]" }
+    if {$f eq "never"} {
+        return "none (no value)"
     }
-    return "unproven ([Describe $f])"
+    if {[Over $f]} {
+        return "unproven ([Describe $f])"
+    }
+    lassign $f lo hi asc known
+    return "\[$lo,$hi\]"
+}
+
+proc native::shortstr::FactAscii {f} {
+    if {$f eq "never" || [Over $f]} {
+        return "unknown"
+    }
+    return [expr {[lindex $f 2] ? "yes" : "no"}]
+}
+
+# The name of a tier (`ascii`, `short`) in the audit text.
+proc native::shortstr::TierName {tier} {
+    switch -- $tier {
+        ascii { return "packed ASCII" }
+        short { return "ShortString1" }
+    }
+    return "tagged String"
 }
 
 proc native::shortstr::explainAll {} {
@@ -1071,7 +1179,8 @@ proc native::shortstr::census {} {
     variable Rounds
     set c [dict create rounds $Rounds instances 0 positionsExamined 0 positionsProven 0 localsExamined 0 localsProven 0 \
         paramPositions 0 paramSelected 0 resultPositions 0 resultSelected 0 anyAbi 0 \
-        exactEmpty 0 exactOne 0 exactOneUnknown 0 runtimeEmptyOrOne 0 reasons {}]
+        exactEmpty 0 exactOne 0 exactOneUnknown 0 runtimeEmptyOrOne 0 asciiMulti 0 tierAscii 0 tierShort 0 \
+        paramAscii 0 paramShort 0 resultAscii 0 resultShort 0 reasons {}]
     foreach id [dict get $Spec used] {
         set instance [dict get $Spec instances $id]
         if {[dict get $instance block] eq "program"} {
@@ -1086,8 +1195,9 @@ proc native::shortstr::census {} {
             dict incr c positionsExamined
             dict incr c paramPositions
             if {[Ok $fact]} { dict incr c positionsProven }
-            if {$kind eq "short"} {
+            if {$kind in {short ascii}} {
                 dict incr c paramSelected
+                dict incr c param[string totitle $kind]
                 set any 1
                 Classify c $fact
             } else {
@@ -1100,8 +1210,9 @@ proc native::shortstr::census {} {
             dict incr c resultPositions
             set fact [dict get $p resultFact]
             if {[Ok $fact]} { dict incr c positionsProven }
-            if {[dict get $p result] eq "short"} {
+            if {[dict get $p result] in {short ascii}} {
                 dict incr c resultSelected
+                dict incr c result[string totitle [dict get $p result]]
                 set any 1
                 Classify c $fact
             } else {
@@ -1125,14 +1236,19 @@ proc native::shortstr::census {} {
 
 proc native::shortstr::Classify {cVar fact} {
     upvar 1 $cVar c
-    if {$fact eq "empty"} {
+    if {$fact eq "never" || [Over $fact]} return
+    lassign $fact lo hi asc known
+    dict incr c tier[string totitle [Tier $fact]]
+    if {$hi == 0} {
         dict incr c exactEmpty
-    } elseif {[string match one:* $fact]} {
+    } elseif {$known ne ""} {
         dict incr c exactOne
-    } elseif {$fact eq "one"} {
+    } elseif {$lo == 1 && $hi == 1} {
         dict incr c exactOneUnknown
-    } else {
+    } elseif {$hi == 1} {
         dict incr c runtimeEmptyOrOne
+    } else {
+        dict incr c asciiMulti
     }
 }
 

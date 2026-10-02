@@ -17,9 +17,11 @@ foreach path [corpusPaths] {
     set nir [native::nir $hir -short-string-opt 1]
     set c [shortCounts $nir]
     set size [lindex [native::codeSize $hir -short-string-opt 1] 0]
-    puts [format "%-16s values %s  strtoshort %3d shorttostr %3d shortlit %3d shortlen %2d shorteq %2d slice %2d | short ABI functions %2d (params %2d results %2d) | %d bytes" \
+    puts [format "%-16s values %s  A: strtoascii %2d asciitostr %2d asciilit %3d len %2d eq %2d | S: strtoshort %2d shorttostr %2d shortlit %3d len %2d eq %2d slice %2d | widen %d mixedeq %d | ABI functions A %2d S %2d | %d bytes" \
         [programName $path] [expr {$same ? "agree   " : "DISAGREE"}] \
+        [dict get $c strtoascii] [dict get $c asciitostr] [dict get $c asciilit] [dict get $c asciilen] [dict get $c asciieq] \
         [dict get $c strtoshort] [dict get $c shorttostr] [dict get $c shortlit] [dict get $c shortlen] [dict get $c shorteq] [dict get $c strsliceshort] \
-        [dict get $c shortFunctions] [dict get $c shortparams] [dict get $c shortresult] $size]
+        [dict get $c asciitoshort] [dict get $c asciishorteq] \
+        [dict get $c asciiFunctions] [dict get $c shortFunctions] $size]
 }
 puts "disagreements: $bad"

@@ -27,11 +27,12 @@ proc nirFunctions {nir} {
     set out {}
     foreach chunk [split [string map [list "\n\nfunc " "\n\u0001func "] $nir] \u0001] {
         if {![regexp {^func (\d+) "([^"]*)" (.*)$} [lindex [split $chunk \n] 0] -> id name rest]} continue
-        set d [dict create shortparams "" shortresult 0 shortregs "" instance "" results 1]
-        regexp {shortparams="([^"]*)"} $rest -> sp
-        if {[info exists sp]} { dict set d shortparams $sp; unset sp }
+        set d [dict create shortparams "" shortresult 0 shortregs "" asciiparams "" asciiresult 0 asciiregs "" instance "" results 1]
+        foreach attr {shortparams shortregs asciiparams asciiregs} {
+            if {[regexp "$attr=\"(\[^\"\]*)\"" $rest -> v]} { dict set d $attr $v }
+        }
         dict set d shortresult [regexp {shortresult=1} $rest]
-        if {[regexp {shortregs="([^"]*)"} $rest -> sr]} { dict set d shortregs $sr }
+        dict set d asciiresult [regexp {asciiresult=1} $rest]
         if {[regexp {instance="([^"]*)"} $rest -> inst]} { dict set d instance $inst }
         if {[regexp {results=(\d+)} $rest -> r]} { dict set d results $r }
         lappend out [list $id $name $d [lrange [split $chunk \n] 1 end]]
@@ -39,25 +40,36 @@ proc nirFunctions {nir} {
     return $out
 }
 
-# The static ShortString1 operation counts of NIR text.
+# The static short-String operation counts of NIR text, both tiers (ShortString1
+# `short*`, packed ASCII `ascii*`).
 proc shortCounts {nir} {
-    set c [dict create strtoshort 0 shorttostr 0 shortlit 0 shortlen 0 shorteq 0 strsliceshort 0 shortparams 0 shortresult 0 shortregs 0 functions 0 shortFunctions 0]
+    set c [dict create]
+    foreach k {strtoshort shorttostr shortlit shortlen shorteq strsliceshort shortparams shortresult shortregs
+            strtoascii asciitostr asciilit asciilen asciieq asciitoshort asciishorteq asciiparams asciiresult asciiregs
+            functions shortFunctions asciiFunctions scalarFunctions} {
+        dict set c $k 0
+    }
     foreach f [nirFunctions $nir] {
         lassign $f id name attrs body
         dict incr c functions
-        set any 0
         foreach line $body {
-            foreach op {strtoshort shorttostr shortlen shorteq strsliceshort} {
+            foreach op {strtoshort shorttostr shortlen shorteq strsliceshort strtoascii asciitostr asciilen asciieq asciitoshort asciishorteq} {
                 if {[regexp "= op $op " $line]} { dict incr c $op }
             }
             if {[regexp {= shortlit } $line]} { dict incr c shortlit }
+            if {[regexp {= asciilit } $line]} { dict incr c asciilit }
         }
         dict incr c shortparams [llength [dict get $attrs shortparams]]
         dict incr c shortresult [dict get $attrs shortresult]
         dict incr c shortregs [llength [dict get $attrs shortregs]]
-        if {[llength [dict get $attrs shortparams]] || [dict get $attrs shortresult]} {
-            dict incr c shortFunctions
-        }
+        dict incr c asciiparams [llength [dict get $attrs asciiparams]]
+        dict incr c asciiresult [dict get $attrs asciiresult]
+        dict incr c asciiregs [llength [dict get $attrs asciiregs]]
+        set s [expr {[llength [dict get $attrs shortparams]] || [dict get $attrs shortresult]}]
+        set a [expr {[llength [dict get $attrs asciiparams]] || [dict get $attrs asciiresult]}]
+        if {$s} { dict incr c shortFunctions }
+        if {$a} { dict incr c asciiFunctions }
+        if {$s || $a} { dict incr c scalarFunctions }
     }
     return $c
 }
@@ -74,7 +86,7 @@ proc materializations {nir} {
         set n [llength $body]
         for {set i 0} {$i < $n} {incr i} {
             set line [string trim [lindex $body $i]]
-            if {[regexp {^%(\d+) = op shorttostr %(\d+)} $line -> d s]} {
+            if {[regexp {^%(\d+) = op (?:short|ascii)tostr %(\d+)} $line -> d s]} {
                 dict set defIsMat $d [list $s $i]
                 dict incr perValue "$id:$s"
             }
