@@ -1,7 +1,7 @@
 ; source:  bench/loop-count.bot
 ; backend: Cranelift (specialize=1), native::vcode
 ; format:  Cranelift Debug for VCode, pre-regalloc machine-level lowering
-; total machine code bytes: 281  (per function: 54 41 186)
+; total machine code bytes: 274  (per function: 54 34 186)
 ;
 vcode from lowering: 
 VCode {
@@ -42,7 +42,7 @@ Block 1([]):
   Inst 1: jmp     label2
 Block 2([]):
     (original IR block: block3)
-  Inst 2: movl $0x7, %v195
+  Inst 2: movl $0xf, %v195
   Inst 3: rets %v195=%rax
 }
 vcode from lowering: 
@@ -51,12 +51,10 @@ VCode {
 Block 0([]):
     (original IR block: block0)
   Inst 0: args %v192=%rdi %v194=%rdx
-  Inst 1: movq (%v194), %v205
-  Inst 2: sarq $1, (%v204 <- %v205)
+  Inst 1: movq (%v194), %v201
+  Inst 2: sarq $1, (%v200 <- %v201)
   Inst 3: call    User(userextname0)
-  Inst 4: shlq $1, (%v202 <- %v203)
-  Inst 5: orq $0x1, (%v201 <- %v202)
-  Inst 6: rets %v201=%rax
+  Inst 4: rets %v199=%rax
 }
 vcode from lowering: 
 VCode {

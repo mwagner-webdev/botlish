@@ -1,7 +1,7 @@
 ; source:  bench/refined-checks.bot
 ; backend: Cranelift (specialize=1), native::vcode
 ; format:  Cranelift Debug for VCode, pre-regalloc machine-level lowering
-; total machine code bytes: 9068  (per function: 1425 39 317 609 74 74 74 128 128 379 262 222 176 238 440 456 468 1076 145 83 103 468 491 398 451 344)
+; total machine code bytes: 9080  (per function: 1425 39 289 609 74 74 74 128 128 379 262 222 176 238 440 456 468 1076 140 94 103 474 491 426 451 344)
 ;
 vcode from lowering: 
 VCode {
@@ -303,20 +303,20 @@ Block 1([]):
   Inst 3: jnz     label3; j label2
 Block 2([]):
     (original IR block: block4)
-    (successor: Block 4([VReg(vreg = 250, class = Int)]))
-  Inst 4: movl $0x1, %v254
-  Inst 5: load_ext_name userextname0+0, %v253
-  Inst 6: call    *%v253
-  Inst 7: movl $0x2, %v251
-  Inst 8: testq %v252, %v252
-  Inst 9: cmovlq (%rip), (%v250 <- %v251)
+    (successor: Block 4([VReg(vreg = 246, class = Int)]))
+  Inst 4: movl $0x1, %v250
+  Inst 5: load_ext_name userextname0+0, %v249
+  Inst 6: call    *%v249
+  Inst 7: movl $0x2, %v247
+  Inst 8: testq %v248, %v248
+  Inst 9: cmovlq (%rip), (%v246 <- %v247)
   Inst 10: jmp     label4
 Block 3([]):
     (original IR block: block3)
-    (successor: Block 4([VReg(vreg = 248, class = Int)]))
-  Inst 11: movl $0x2, %v249
+    (successor: Block 4([VReg(vreg = 244, class = Int)]))
+  Inst 11: movl $0x2, %v245
   Inst 12: testq %v193, %v193
-  Inst 13: cmovleq (%rip), (%v248 <- %v249)
+  Inst 13: cmovleq (%rip), (%v244 <- %v245)
   Inst 14: jmp     label4
 Block 4([VReg(vreg = 209, class = Int)]):
     (original IR block: block5)
@@ -326,20 +326,20 @@ Block 4([VReg(vreg = 209, class = Int)]):
   Inst 16: jnz     label6; j label5
 Block 5([]):
     (original IR block: block7)
-    (successor: Block 7([VReg(vreg = 243, class = Int)]))
-  Inst 17: movl $0x1ff, %v247
-  Inst 18: load_ext_name userextname0+0, %v246
-  Inst 19: call    *%v246
-  Inst 20: movl $0x2, %v244
-  Inst 21: testq %v245, %v245
-  Inst 22: cmovgq (%rip), (%v243 <- %v244)
+    (successor: Block 7([VReg(vreg = 239, class = Int)]))
+  Inst 17: movl $0x1ff, %v243
+  Inst 18: load_ext_name userextname0+0, %v242
+  Inst 19: call    *%v242
+  Inst 20: movl $0x2, %v240
+  Inst 21: testq %v241, %v241
+  Inst 22: cmovgq (%rip), (%v239 <- %v240)
   Inst 23: jmp     label7
 Block 6([]):
     (original IR block: block6)
-    (successor: Block 7([VReg(vreg = 241, class = Int)]))
-  Inst 24: movl $0x2, %v242
+    (successor: Block 7([VReg(vreg = 237, class = Int)]))
+  Inst 24: movl $0x2, %v238
   Inst 25: cmpq $0x1ff, %v193
-  Inst 26: cmovgq (%rip), (%v241 <- %v242)
+  Inst 26: cmovgq (%rip), (%v237 <- %v238)
   Inst 27: jmp     label7
 Block 7([VReg(vreg = 223, class = Int)]):
     (original IR block: block8)
@@ -353,23 +353,21 @@ Block 8([]):
   Inst 30: jmp     label9
 Block 9([]):
     (original IR block: block11)
-  Inst 31: movl $0x1, %v240
-  Inst 32: sarq $1, (%v239 <- %v193)
-  Inst 33: rets %v239=%rax %v240=%rdx
+  Inst 31: rets %v193=%rax
 Block 10([]):
     (original IR block: block9)
     (successor: Block 11([]))
-  Inst 34: movq 0x10(%v192), %v238
-  Inst 35: movq 0xc0(%v238), %v237
-  Inst 36: movl $0x1, %v236
-  Inst 37: load_ext_name userextname1+0, %v235
-  Inst 38: call    *%v235
-  Inst 39: jmp     label11
+  Inst 32: movq 0x10(%v192), %v236
+  Inst 33: movq 0xc0(%v236), %v235
+  Inst 34: movl $0x1, %v234
+  Inst 35: load_ext_name userextname1+0, %v233
+  Inst 36: call    *%v233
+  Inst 37: jmp     label11
 Block 11([]):
     (original IR block: block1)
-  Inst 40: uninit  %v232
-  Inst 41: xorq %v232, (%v233 <- %v232)
-  Inst 42: rets %v233=%rax %v233=%rdx
+  Inst 38: uninit  %v230
+  Inst 39: xorq %v230, (%v231 <- %v230)
+  Inst 40: rets %v231=%rax
 }
 vcode from lowering: 
 VCode {
@@ -377,15 +375,9 @@ VCode {
 Block 0([]):
     (original IR block: block0)
   Inst 0: args %v192=%rdi %v194=%rdx
-  Inst 1: movq (%v194), %v210
+  Inst 1: movq (%v194), %v198
   Inst 2: call    User(userextname0)
-  Inst 3: shlq $1, (%v207 <- %v208)
-  Inst 4: orq $0x1, (%v206 <- %v207)
-  Inst 5: uninit  %v204
-  Inst 6: xorq %v204, (%v205 <- %v204)
-  Inst 7: testq %v209, %v209
-  Inst 8: cmovneq %v206, (%v203 <- %v205)
-  Inst 9: rets %v203=%rax
+  Inst 3: rets %v197=%rax
 }
 vcode from lowering: 
 VCode {
@@ -402,48 +394,48 @@ Block 1([]):
     (original IR block: block0)
     (successor: Block 3([]))
     (successor: Block 2([]))
-  Inst 5: load_ext_name userextname0+0, %v284
-  Inst 6: call    *%v284
-  Inst 7: movq %v283, <offset:1>+8(%rsp)
+  Inst 5: load_ext_name userextname0+0, %v277
+  Inst 6: call    *%v277
+  Inst 7: movq %v276, <offset:1>+8(%rsp)
   Inst 8: movq $0x1, <offset:1>+0x10(%rsp)
-  Inst 9: uninit  %v281
-  Inst 10: xorq %v281, (%v282 <- %v281)
-  Inst 11: load_ext_name userextname1+0, %v280
-  Inst 12: call    *%v280
+  Inst 9: uninit  %v274
+  Inst 10: xorq %v274, (%v275 <- %v274)
+  Inst 11: load_ext_name userextname1+0, %v273
+  Inst 12: call    *%v273
     UserStackMap { by_type: [(types::I64, CompoundBitSet {0, 8, 16})], sp_to_sized_stack_slots: None }
-  Inst 13: testq %v279, %v279
+  Inst 13: testq %v272, %v272
   Inst 14: jnz     label3; j label2
 Block 2([]):
     (successor: Block 22([]))
   Inst 15: jmp     label22
 Block 3([]):
     (original IR block: block3)
-    (successor: Block 4([VReg(vreg = 278, class = Int), VReg(vreg = 279, class = Int)]))
-  Inst 16: movq %v279, <offset:1>+0x18(%rsp)
-  Inst 17: movl $0x1, %v278
+    (successor: Block 4([VReg(vreg = 271, class = Int), VReg(vreg = 272, class = Int)]))
+  Inst 16: movq %v272, <offset:1>+0x18(%rsp)
+  Inst 17: movl $0x1, %v271
   Inst 18: jmp     label4
 Block 4([VReg(vreg = 204, class = Int), VReg(vreg = 205, class = Int)]):
     (original IR block: block4)
     (successor: Block 6([]))
     (successor: Block 5([]))
-  Inst 19: andq %v283, (%v277 <- %v204)
-  Inst 20: testq $0x1, %v277
+  Inst 19: andq %v276, (%v270 <- %v204)
+  Inst 20: testq $0x1, %v270
   Inst 21: jnz     label6; j label5
 Block 5([]):
     (original IR block: block6)
-    (successor: Block 7([VReg(vreg = 273, class = Int)]))
-  Inst 22: load_ext_name userextname2+0, %v276
-  Inst 23: call    *%v276
-  Inst 24: movl $0x2, %v274
-  Inst 25: testq %v275, %v275
-  Inst 26: cmovlq (%rip), (%v273 <- %v274)
+    (successor: Block 7([VReg(vreg = 266, class = Int)]))
+  Inst 22: load_ext_name userextname2+0, %v269
+  Inst 23: call    *%v269
+  Inst 24: movl $0x2, %v267
+  Inst 25: testq %v268, %v268
+  Inst 26: cmovlq (%rip), (%v266 <- %v267)
   Inst 27: jmp     label7
 Block 6([]):
     (original IR block: block5)
-    (successor: Block 7([VReg(vreg = 271, class = Int)]))
-  Inst 28: movl $0x2, %v272
-  Inst 29: cmpq %v283, %v204
-  Inst 30: cmovlq (%rip), (%v271 <- %v272)
+    (successor: Block 7([VReg(vreg = 264, class = Int)]))
+  Inst 28: movl $0x2, %v265
+  Inst 29: cmpq %v276, %v204
+  Inst 30: cmovlq (%rip), (%v264 <- %v265)
   Inst 31: jmp     label7
 Block 7([VReg(vreg = 219, class = Int)]):
     (original IR block: block7)
@@ -458,10 +450,10 @@ Block 8([]):
   Inst 35: jmp     label9
 Block 9([]):
     (original IR block: block21)
-  Inst 36: load_ext_name userextname8+0, %v270
-  Inst 37: call    *%v270
+  Inst 36: load_ext_name userextname8+0, %v263
+  Inst 37: call    *%v263
     UserStackMap { by_type: [(types::I64, CompoundBitSet {0})], sp_to_sized_stack_slots: None }
-  Inst 38: rets %v269=%rax
+  Inst 38: rets %v262=%rax
 Block 10([]):
     (original IR block: block8)
     (successor: Block 12([]))
@@ -475,9 +467,9 @@ Block 12([]):
     (original IR block: block12)
     (successor: Block 17([]))
     (successor: Block 13([]))
-  Inst 42: movq 8(%v193), %v268
-  Inst 43: sarq $1, (%v267 <- %v204)
-  Inst 44: cmpq %v268, %v267
+  Inst 42: movq 8(%v193), %v261
+  Inst 43: sarq $1, (%v260 <- %v204)
+  Inst 44: cmpq %v261, %v260
   Inst 45: jb      label17; j label13
 Block 13([]):
     (successor: Block 14([]))
@@ -486,22 +478,22 @@ Block 14([]):
     (original IR block: block11)
     (successor: Block 16([]))
     (successor: Block 15([]))
-  Inst 47: load_ext_name userextname3+0, %v266
-  Inst 48: call    *%v266
-  Inst 49: testq %v265, %v265
+  Inst 47: load_ext_name userextname3+0, %v259
+  Inst 48: call    *%v259
+  Inst 49: testq %v258, %v258
   Inst 50: jnz     label16; j label15
 Block 15([]):
     (successor: Block 22([]))
   Inst 51: jmp     label22
 Block 16([]):
     (original IR block: block14)
-    (successor: Block 18([VReg(vreg = 265, class = Int)]))
+    (successor: Block 18([VReg(vreg = 258, class = Int)]))
   Inst 52: jmp     label18
 Block 17([]):
     (original IR block: block13)
-    (successor: Block 18([VReg(vreg = 263, class = Int)]))
-  Inst 53: movq 0x10(%v193), %v264
-  Inst 54: movq (%v264, %v267, 8), %v263
+    (successor: Block 18([VReg(vreg = 256, class = Int)]))
+  Inst 53: movq 0x10(%v193), %v257
+  Inst 54: movq (%v257, %v260, 8), %v256
   Inst 55: jmp     label18
 Block 18([VReg(vreg = 234, class = Int)]):
     (original IR block: block10)
@@ -509,7 +501,7 @@ Block 18([VReg(vreg = 234, class = Int)]):
     (successor: Block 19([]))
   Inst 56: call    User(userextname4)
   Inst 57: call    User(userextname5)
-  Inst 58: testq %v261, %v261
+  Inst 58: testq %v254, %v254
   Inst 59: jnz     label20; j label19
 Block 19([]):
     (successor: Block 22([]))
@@ -518,64 +510,62 @@ Block 20([]):
     (original IR block: block15)
     (successor: Block 23([]))
     (successor: Block 21([]))
-  Inst 61: shlq $1, (%v259 <- %v260)
-  Inst 62: orq $0x1, (%v258 <- %v259)
-  Inst 63: movq %v258, <offset:1>+0x20(%rsp)
-  Inst 64: load_ext_name userextname6+0, %v257
-  Inst 65: call    *%v257
+  Inst 61: movq %v254, <offset:1>+0x20(%rsp)
+  Inst 62: load_ext_name userextname6+0, %v253
+  Inst 63: call    *%v253
     UserStackMap { by_type: [(types::I64, CompoundBitSet {0, 8, 16, 24, 32})], sp_to_sized_stack_slots: None }
-  Inst 66: testq %v256, %v256
-  Inst 67: jnz     label23; j label21
+  Inst 64: testq %v252, %v252
+  Inst 65: jnz     label23; j label21
 Block 21([]):
     (successor: Block 22([]))
-  Inst 68: jmp     label22
+  Inst 66: jmp     label22
 Block 22([]):
     (original IR block: block1)
-  Inst 69: uninit  %v254
-  Inst 70: xorq %v254, (%v255 <- %v254)
-  Inst 71: rets %v255=%rax
+  Inst 67: uninit  %v250
+  Inst 68: xorq %v250, (%v251 <- %v250)
+  Inst 69: rets %v251=%rax
 Block 23([]):
     (original IR block: block16)
     (successor: Block 24([]))
-  Inst 72: movq %v256, <offset:1>+0x18(%rsp)
-  Inst 73: jmp     label24
+  Inst 70: movq %v252, <offset:1>+0x18(%rsp)
+  Inst 71: jmp     label24
 Block 24([]):
     (original IR block: block17)
     (successor: Block 26([]))
     (successor: Block 25([]))
-  Inst 74: movl $0x3, %v253
-  Inst 75: movq $0x3, <offset:1>+0x20(%rsp)
-  Inst 76: testq $0x1, %v204
-  Inst 77: jnz     label26; j label25
+  Inst 72: movl $0x3, %v249
+  Inst 73: movq $0x3, <offset:1>+0x20(%rsp)
+  Inst 74: testq $0x1, %v204
+  Inst 75: jnz     label26; j label25
 Block 25([]):
     (successor: Block 29([]))
-  Inst 78: jmp     label29
+  Inst 76: jmp     label29
 Block 26([]):
     (original IR block: block18)
     (successor: Block 27([]))
     (successor: Block 28([]))
-  Inst 79: addq $0x2, (%v251 <- %v204)
-  Inst 80: seto %v252
-  Inst 81: testb %v252, %v252
-  Inst 82: jnz     label27; j label28
+  Inst 77: addq $0x2, (%v247 <- %v204)
+  Inst 78: seto %v248
+  Inst 79: testb %v248, %v248
+  Inst 80: jnz     label27; j label28
 Block 27([]):
     (successor: Block 29([]))
-  Inst 83: jmp     label29
+  Inst 81: jmp     label29
 Block 28([]):
-    (successor: Block 30([VReg(vreg = 251, class = Int)]))
-  Inst 84: jmp     label30
+    (successor: Block 30([VReg(vreg = 247, class = Int)]))
+  Inst 82: jmp     label30
 Block 29([]):
     (original IR block: block19)
-    (successor: Block 30([VReg(vreg = 249, class = Int)]))
-  Inst 85: load_ext_name userextname7+0, %v250
-  Inst 86: call    *%v250
+    (successor: Block 30([VReg(vreg = 245, class = Int)]))
+  Inst 83: load_ext_name userextname7+0, %v246
+  Inst 84: call    *%v246
     UserStackMap { by_type: [(types::I64, CompoundBitSet {0, 8, 16, 24, 32})], sp_to_sized_stack_slots: None }
-  Inst 87: jmp     label30
-Block 30([VReg(vreg = 247, class = Int)]):
+  Inst 85: jmp     label30
+Block 30([VReg(vreg = 243, class = Int)]):
     (original IR block: block20)
-    (successor: Block 4([VReg(vreg = 247, class = Int), VReg(vreg = 256, class = Int)]))
-  Inst 88: movq %v247, <offset:1>+0x10(%rsp)
-  Inst 89: jmp     label4
+    (successor: Block 4([VReg(vreg = 243, class = Int), VReg(vreg = 252, class = Int)]))
+  Inst 86: movq %v243, <offset:1>+0x10(%rsp)
+  Inst 87: jmp     label4
 }
 vcode from lowering: 
 VCode {
@@ -2066,43 +2056,42 @@ Block 1([]):
     (original IR block: block0)
     (successor: Block 6([]))
     (successor: Block 2([]))
-  Inst 2: call    User(userextname0)
-  Inst 3: cmpq $0x6, %v219
-  Inst 4: jz      label6; j label2
+  Inst 2: sarq $1, (%v217 <- %v193)
+  Inst 3: call    User(userextname0)
+  Inst 4: cmpq $0x6, %v216
+  Inst 5: jz      label6; j label2
 Block 2([]):
     (original IR block: block4)
     (successor: Block 4([]))
     (successor: Block 3([]))
-  Inst 5: movq 0x30(%v192), %v218
-  Inst 6: movq 0x10(%v218), %v217
-  Inst 7: shlq $1, (%v216 <- %v193)
-  Inst 8: orq $0x1, (%v215 <- %v216)
-  Inst 9: load_ext_name userextname1+0, %v214
-  Inst 10: call    *%v214
-  Inst 11: cmpq $0x6, %v213
-  Inst 12: jz      label4; j label3
+  Inst 6: movq 0x30(%v192), %v215
+  Inst 7: movq 0x10(%v215), %v214
+  Inst 8: load_ext_name userextname1+0, %v213
+  Inst 9: call    *%v213
+  Inst 10: cmpq $0x6, %v212
+  Inst 11: jz      label4; j label3
 Block 3([]):
     (original IR block: block7)
-    (successor: Block 5([VReg(vreg = 212, class = Int)]))
-  Inst 13: movl $0x2, %v212
-  Inst 14: jmp     label5
+    (successor: Block 5([VReg(vreg = 211, class = Int)]))
+  Inst 12: movl $0x2, %v211
+  Inst 13: jmp     label5
 Block 4([]):
     (original IR block: block6)
-    (successor: Block 5([VReg(vreg = 211, class = Int)]))
-  Inst 15: movl $0x6, %v211
-  Inst 16: jmp     label5
-Block 5([VReg(vreg = 208, class = Int)]):
+    (successor: Block 5([VReg(vreg = 210, class = Int)]))
+  Inst 14: movl $0x6, %v210
+  Inst 15: jmp     label5
+Block 5([VReg(vreg = 207, class = Int)]):
     (original IR block: block8)
-    (successor: Block 7([VReg(vreg = 208, class = Int)]))
-  Inst 17: jmp     label7
+    (successor: Block 7([VReg(vreg = 207, class = Int)]))
+  Inst 16: jmp     label7
 Block 6([]):
     (original IR block: block3)
-    (successor: Block 7([VReg(vreg = 210, class = Int)]))
-  Inst 18: movl $0x6, %v210
-  Inst 19: jmp     label7
-Block 7([VReg(vreg = 209, class = Int)]):
+    (successor: Block 7([VReg(vreg = 209, class = Int)]))
+  Inst 17: movl $0x6, %v209
+  Inst 18: jmp     label7
+Block 7([VReg(vreg = 208, class = Int)]):
     (original IR block: block5)
-  Inst 20: rets %v209=%rax
+  Inst 19: rets %v208=%rax
 }
 vcode from lowering: 
 VCode {
@@ -2110,10 +2099,9 @@ VCode {
 Block 0([]):
     (original IR block: block0)
   Inst 0: args %v192=%rdi %v194=%rdx
-  Inst 1: movq (%v194), %v201
-  Inst 2: sarq $1, (%v200 <- %v201)
-  Inst 3: call    User(userextname0)
-  Inst 4: rets %v199=%rax
+  Inst 1: movq (%v194), %v198
+  Inst 2: call    User(userextname0)
+  Inst 3: rets %v197=%rax
 }
 vcode from lowering: 
 VCode {
@@ -2128,13 +2116,13 @@ Block 1([]):
     (original IR block: block0)
     (successor: Block 3([]))
     (successor: Block 2([]))
-  Inst 3: movq 0x10(%v192), %v206
-  Inst 4: movq 0xe8(%v206), %v205
-  Inst 5: movq %v205, <offset:1>+8(%rsp)
-  Inst 6: uninit  %v203
-  Inst 7: xorq %v203, (%v204 <- %v203)
+  Inst 3: movl $0x1, %v205
+  Inst 4: movq $0x1, <offset:1>+8(%rsp)
+  Inst 5: movq 0x10(%v192), %v204
+  Inst 6: movq 0xe8(%v204), %v203
+  Inst 7: movq %v203, <offset:1>+0x10(%rsp)
   Inst 8: call    User(userextname0)
-    UserStackMap { by_type: [(types::I64, CompoundBitSet {0, 8})], sp_to_sized_stack_slots: None }
+    UserStackMap { by_type: [(types::I64, CompoundBitSet {0, 8, 16})], sp_to_sized_stack_slots: None }
   Inst 9: testq %v202, %v202
   Inst 10: jnz     label3; j label2
 Block 2([]):
@@ -2174,21 +2162,23 @@ Block 1([]):
   Inst 5: jnz     label3; j label2
 Block 2([]):
     (original IR block: block4)
-    (successor: Block 4([VReg(vreg = 207, class = Int)]))
-  Inst 6: movl $0x1e1, %v209
-  Inst 7: load_ext_name userextname0+0, %v208
-  Inst 8: call    *%v208
+    (successor: Block 4([VReg(vreg = 212, class = Int)]))
+  Inst 6: movl $0x1e1, %v214
+  Inst 7: load_ext_name userextname0+0, %v213
+  Inst 8: call    *%v213
     UserStackMap { by_type: [(types::I64, CompoundBitSet {0, 8})], sp_to_sized_stack_slots: None }
   Inst 9: jmp     label4
 Block 3([]):
     (original IR block: block3)
-    (successor: Block 4([VReg(vreg = 206, class = Int)]))
-  Inst 10: andq $0x1e1, (%v206 <- %v193)
+    (successor: Block 4([VReg(vreg = 211, class = Int)]))
+  Inst 10: andq $0x1e1, (%v211 <- %v193)
   Inst 11: jmp     label4
 Block 4([VReg(vreg = 202, class = Int)]):
     (original IR block: block5)
-  Inst 12: sarq $0x5, (%v205 <- %v202)
-  Inst 13: rets %v205=%rax
+  Inst 12: sarq $0x5, (%v210 <- %v202)
+  Inst 13: shlq $1, (%v209 <- %v210)
+  Inst 14: orq $0x1, (%v208 <- %v209)
+  Inst 15: rets %v208=%rax
 }
 vcode from lowering: 
 VCode {
@@ -2196,11 +2186,9 @@ VCode {
 Block 0([]):
     (original IR block: block0)
   Inst 0: args %v192=%rdi %v194=%rdx
-  Inst 1: movq (%v194), %v203
+  Inst 1: movq (%v194), %v198
   Inst 2: call    User(userextname0)
-  Inst 3: shlq $1, (%v201 <- %v202)
-  Inst 4: orq $0x1, (%v200 <- %v201)
-  Inst 5: rets %v200=%rax
+  Inst 3: rets %v197=%rax
 }
 vcode from lowering: 
 VCode {
@@ -2213,130 +2201,134 @@ Block 0([]):
   Inst 2: jmp     label1
 Block 1([]):
     (original IR block: block0)
+    (successor: Block 3([]))
     (successor: Block 2([]))
-  Inst 3: movq 0x30(%v192), %v270
-  Inst 4: movq 8(%v270), %v269
-  Inst 5: movq %v269, <offset:1>+8(%rsp)
+  Inst 3: movq 0x30(%v192), %v264
+  Inst 4: movq 8(%v264), %v263
+  Inst 5: movq %v263, <offset:1>+8(%rsp)
   Inst 6: call    User(userextname0)
     UserStackMap { by_type: [(types::I64, CompoundBitSet {0, 8})], sp_to_sized_stack_slots: None }
-  Inst 7: jmp     label2
+  Inst 7: testq $0x1, %v262
+  Inst 8: jnz     label3; j label2
 Block 2([]):
-    (original IR block: block5)
-    (successor: Block 6([]))
-    (successor: Block 3([]))
-  Inst 8: movq 8(%v269), %v267
-  Inst 9: shlq $1, (%v266 <- %v268)
-  Inst 10: orq $0x1, (%v265 <- %v266)
-  Inst 11: sarq $1, (%v264 <- %v265)
-  Inst 12: cmpq %v267, %v264
-  Inst 13: jb      label6; j label3
-Block 3([]):
-    (original IR block: block4)
     (successor: Block 5([]))
-    (successor: Block 4([]))
-  Inst 14: shlq $1, (%v263 <- %v268)
-  Inst 15: orq $0x1, (%v262 <- %v263)
-  Inst 16: load_ext_name userextname1+0, %v261
-  Inst 17: call    *%v261
-  Inst 18: testq %v260, %v260
-  Inst 19: jnz     label5; j label4
-Block 4([]):
-    (successor: Block 19([]))
-  Inst 20: jmp     label19
-Block 5([]):
-    (original IR block: block7)
-    (successor: Block 7([VReg(vreg = 260, class = Int)]))
-  Inst 21: jmp     label7
-Block 6([]):
-    (original IR block: block6)
-    (successor: Block 7([VReg(vreg = 258, class = Int)]))
-  Inst 22: movq 0x10(%v269), %v259
-  Inst 23: movq (%v259, %v264, 8), %v258
-  Inst 24: jmp     label7
-Block 7([VReg(vreg = 214, class = Int)]):
-    (original IR block: block3)
-    (successor: Block 9([]))
+  Inst 9: jmp     label5
+Block 3([]):
+    (original IR block: block5)
     (successor: Block 8([]))
-  Inst 25: movq %v214, <offset:1>+(%rsp)
-  Inst 26: movq 0x30(%v192), %v257
-  Inst 27: movq 8(%v257), %v256
-  Inst 28: movl $0x21, %v255
-  Inst 29: load_ext_name userextname2+0, %v254
-  Inst 30: call    *%v254
-  Inst 31: testq %v253, %v253
-  Inst 32: jnz     label9; j label8
+    (successor: Block 4([]))
+  Inst 10: movq 8(%v263), %v261
+  Inst 11: sarq $1, (%v260 <- %v262)
+  Inst 12: cmpq %v261, %v260
+  Inst 13: jb      label8; j label4
+Block 4([]):
+    (successor: Block 5([]))
+  Inst 14: jmp     label5
+Block 5([]):
+    (original IR block: block4)
+    (successor: Block 7([]))
+    (successor: Block 6([]))
+  Inst 15: load_ext_name userextname1+0, %v259
+  Inst 16: call    *%v259
+  Inst 17: testq %v258, %v258
+  Inst 18: jnz     label7; j label6
+Block 6([]):
+    (successor: Block 21([]))
+  Inst 19: jmp     label21
+Block 7([]):
+    (original IR block: block7)
+    (successor: Block 9([VReg(vreg = 258, class = Int)]))
+  Inst 20: jmp     label9
 Block 8([]):
-    (successor: Block 19([]))
-  Inst 33: jmp     label19
-Block 9([]):
-    (original IR block: block8)
+    (original IR block: block6)
+    (successor: Block 9([VReg(vreg = 256, class = Int)]))
+  Inst 21: movq 0x10(%v263), %v257
+  Inst 22: movq (%v257, %v260, 8), %v256
+  Inst 23: jmp     label9
+Block 9([VReg(vreg = 211, class = Int)]):
+    (original IR block: block3)
     (successor: Block 11([]))
     (successor: Block 10([]))
-  Inst 34: testq $0x1, %v253
-  Inst 35: jnz     label11; j label10
+  Inst 24: movq %v211, <offset:1>+(%rsp)
+  Inst 25: movq 0x30(%v192), %v255
+  Inst 26: movq 8(%v255), %v254
+  Inst 27: movl $0x21, %v253
+  Inst 28: load_ext_name userextname2+0, %v252
+  Inst 29: call    *%v252
+  Inst 30: testq %v251, %v251
+  Inst 31: jnz     label11; j label10
 Block 10([]):
-    (successor: Block 13([]))
-  Inst 36: jmp     label13
+    (successor: Block 21([]))
+  Inst 32: jmp     label21
 Block 11([]):
-    (original IR block: block11)
-    (successor: Block 16([]))
-    (successor: Block 12([]))
-  Inst 37: movq 8(%v256), %v252
-  Inst 38: sarq $1, (%v251 <- %v253)
-  Inst 39: cmpq %v252, %v251
-  Inst 40: jb      label16; j label12
-Block 12([]):
+    (original IR block: block8)
     (successor: Block 13([]))
-  Inst 41: jmp     label13
-Block 13([]):
-    (original IR block: block10)
+    (successor: Block 12([]))
+  Inst 33: testq $0x1, %v251
+  Inst 34: jnz     label13; j label12
+Block 12([]):
     (successor: Block 15([]))
-    (successor: Block 14([]))
-  Inst 42: load_ext_name userextname1+0, %v250
-  Inst 43: call    *%v250
-  Inst 44: testq %v249, %v249
-  Inst 45: jnz     label15; j label14
-Block 14([]):
-    (successor: Block 19([]))
-  Inst 46: jmp     label19
-Block 15([]):
-    (original IR block: block13)
-    (successor: Block 17([VReg(vreg = 249, class = Int), VReg(vreg = 214, class = Int)]))
-  Inst 47: jmp     label17
-Block 16([]):
-    (original IR block: block12)
-    (successor: Block 17([VReg(vreg = 247, class = Int), VReg(vreg = 214, class = Int)]))
-  Inst 48: movq 0x10(%v256), %v248
-  Inst 49: movq (%v248, %v251, 8), %v247
-  Inst 50: jmp     label17
-Block 17([VReg(vreg = 230, class = Int), VReg(vreg = 231, class = Int)]):
-    (original IR block: block9)
-    (successor: Block 20([]))
+  Inst 35: jmp     label15
+Block 13([]):
+    (original IR block: block11)
     (successor: Block 18([]))
-  Inst 51: movq %v230, <offset:1>+8(%rsp)
-  Inst 52: leaq <offset:1>+0x10(%rsp), %v246
-  Inst 53: movq $0x0, <offset:1>+0x10(%rsp)
-  Inst 54: movq %v231, <offset:1>+0x18(%rsp)
-  Inst 55: movq $0x0, <offset:1>+0x20(%rsp)
-  Inst 56: movq %v230, <offset:1>+0x28(%rsp)
-  Inst 57: movl $0x2, %v245
-  Inst 58: movl $0x4, %v244
-  Inst 59: load_ext_name userextname3+0, %v243
-  Inst 60: call    *%v243
-    UserStackMap { by_type: [(types::I64, CompoundBitSet {0, 8})], sp_to_sized_stack_slots: None }
-  Inst 61: testq %v242, %v242
-  Inst 62: jnz     label20; j label18
+    (successor: Block 14([]))
+  Inst 36: movq 8(%v254), %v250
+  Inst 37: sarq $1, (%v249 <- %v251)
+  Inst 38: cmpq %v250, %v249
+  Inst 39: jb      label18; j label14
+Block 14([]):
+    (successor: Block 15([]))
+  Inst 40: jmp     label15
+Block 15([]):
+    (original IR block: block10)
+    (successor: Block 17([]))
+    (successor: Block 16([]))
+  Inst 41: load_ext_name userextname1+0, %v248
+  Inst 42: call    *%v248
+  Inst 43: testq %v247, %v247
+  Inst 44: jnz     label17; j label16
+Block 16([]):
+    (successor: Block 21([]))
+  Inst 45: jmp     label21
+Block 17([]):
+    (original IR block: block13)
+    (successor: Block 19([VReg(vreg = 247, class = Int), VReg(vreg = 211, class = Int)]))
+  Inst 46: jmp     label19
 Block 18([]):
-    (successor: Block 19([]))
-  Inst 63: jmp     label19
-Block 19([]):
-    (original IR block: block1)
-  Inst 64: uninit  %v240
-  Inst 65: xorq %v240, (%v241 <- %v240)
-  Inst 66: rets %v241=%rax
+    (original IR block: block12)
+    (successor: Block 19([VReg(vreg = 245, class = Int), VReg(vreg = 211, class = Int)]))
+  Inst 47: movq 0x10(%v254), %v246
+  Inst 48: movq (%v246, %v249, 8), %v245
+  Inst 49: jmp     label19
+Block 19([VReg(vreg = 228, class = Int), VReg(vreg = 229, class = Int)]):
+    (original IR block: block9)
+    (successor: Block 22([]))
+    (successor: Block 20([]))
+  Inst 50: movq %v228, <offset:1>+8(%rsp)
+  Inst 51: leaq <offset:1>+0x10(%rsp), %v244
+  Inst 52: movq $0x0, <offset:1>+0x10(%rsp)
+  Inst 53: movq %v229, <offset:1>+0x18(%rsp)
+  Inst 54: movq $0x0, <offset:1>+0x20(%rsp)
+  Inst 55: movq %v228, <offset:1>+0x28(%rsp)
+  Inst 56: movl $0x2, %v243
+  Inst 57: movl $0x4, %v242
+  Inst 58: load_ext_name userextname3+0, %v241
+  Inst 59: call    *%v241
+    UserStackMap { by_type: [(types::I64, CompoundBitSet {0, 8})], sp_to_sized_stack_slots: None }
+  Inst 60: testq %v240, %v240
+  Inst 61: jnz     label22; j label20
 Block 20([]):
+    (successor: Block 21([]))
+  Inst 62: jmp     label21
+Block 21([]):
+    (original IR block: block1)
+  Inst 63: uninit  %v238
+  Inst 64: xorq %v238, (%v239 <- %v238)
+  Inst 65: rets %v239=%rax
+Block 22([]):
     (original IR block: block14)
-  Inst 67: rets %v242=%rax
+  Inst 66: rets %v240=%rax
 }
 vcode from lowering: 
 VCode {
@@ -2355,379 +2347,114 @@ VCode {
   Entry block: 0
 Block 0([]):
     (original IR block: block2)
-    (successor: Block 1([VReg(vreg = 194, class = Int), VReg(vreg = 195, class = Int)]))
+    (successor: Block 1([VReg(vreg = 265, class = Int), VReg(vreg = 195, class = Int)]))
   Inst 0: args %v192=%rdi %v193=%rsi %v194=%rdx %v195=%rcx
   Inst 1: movq %v193, <offset:1>+(%rsp)
   Inst 2: movq %v195, <offset:1>+8(%rsp)
-  Inst 3: leaq <offset:1>+0x20(%rsp), %v263
-  Inst 4: jmp     label1
-Block 1([VReg(vreg = 209, class = Int), VReg(vreg = 210, class = Int)]):
+  Inst 3: sarq $1, (%v265 <- %v194)
+  Inst 4: leaq <offset:1>+0x20(%rsp), %v264
+  Inst 5: jmp     label1
+Block 1([VReg(vreg = 210, class = Int), VReg(vreg = 211, class = Int)]):
     (original IR block: block0)
     (successor: Block 14([]))
     (successor: Block 2([]))
-  Inst 5: load_ext_name userextname0+0, %v262
-  Inst 6: call    *%v262
-  Inst 7: sarq $1, (%v260 <- %v261)
-  Inst 8: cmpq %v260, %v209
-  Inst 9: jnl     label14; j label2
+  Inst 6: load_ext_name userextname0+0, %v263
+  Inst 7: call    *%v263
+  Inst 8: sarq $1, (%v261 <- %v262)
+  Inst 9: cmpq %v261, %v210
+  Inst 10: jnl     label14; j label2
 Block 2([]):
     (original IR block: block4)
     (successor: Block 3([]))
-  Inst 10: movq 0x10(%v192), %v259
-  Inst 11: movq 0x10(%v259), %v258
-  Inst 12: movq %v258, <offset:1>+0x10(%rsp)
-  Inst 13: jmp     label3
+  Inst 11: movq 0x10(%v192), %v260
+  Inst 12: movq 0x10(%v260), %v259
+  Inst 13: movq %v259, <offset:1>+0x10(%rsp)
+  Inst 14: jmp     label3
 Block 3([]):
     (original IR block: block8)
     (successor: Block 7([]))
     (successor: Block 4([]))
-  Inst 14: movq 8(%v193), %v257
-  Inst 15: shlq $1, (%v256 <- %v209)
-  Inst 16: orq $0x1, (%v255 <- %v256)
-  Inst 17: sarq $1, (%v254 <- %v255)
-  Inst 18: cmpq %v257, %v254
-  Inst 19: jb      label7; j label4
+  Inst 15: movq 8(%v193), %v258
+  Inst 16: shlq $1, (%v257 <- %v210)
+  Inst 17: orq $0x1, (%v256 <- %v257)
+  Inst 18: sarq $1, (%v255 <- %v256)
+  Inst 19: cmpq %v258, %v255
+  Inst 20: jb      label7; j label4
 Block 4([]):
     (original IR block: block7)
     (successor: Block 6([]))
     (successor: Block 5([]))
-  Inst 20: shlq $1, (%v253 <- %v209)
-  Inst 21: orq $0x1, (%v252 <- %v253)
-  Inst 22: load_ext_name userextname1+0, %v251
-  Inst 23: call    *%v251
-  Inst 24: testq %v250, %v250
-  Inst 25: jnz     label6; j label5
+  Inst 21: shlq $1, (%v254 <- %v210)
+  Inst 22: orq $0x1, (%v253 <- %v254)
+  Inst 23: load_ext_name userextname1+0, %v252
+  Inst 24: call    *%v252
+  Inst 25: testq %v251, %v251
+  Inst 26: jnz     label6; j label5
 Block 5([]):
     (successor: Block 12([]))
-  Inst 26: jmp     label12
+  Inst 27: jmp     label12
 Block 6([]):
     (original IR block: block10)
-    (successor: Block 8([VReg(vreg = 250, class = Int)]))
-  Inst 27: jmp     label8
+    (successor: Block 8([VReg(vreg = 251, class = Int)]))
+  Inst 28: jmp     label8
 Block 7([]):
     (original IR block: block9)
-    (successor: Block 8([VReg(vreg = 248, class = Int)]))
-  Inst 28: movq 0x10(%v193), %v249
-  Inst 29: movq (%v249, %v254, 8), %v248
-  Inst 30: jmp     label8
-Block 8([VReg(vreg = 232, class = Int)]):
+    (successor: Block 8([VReg(vreg = 249, class = Int)]))
+  Inst 29: movq 0x10(%v193), %v250
+  Inst 30: movq (%v250, %v255, 8), %v249
+  Inst 31: jmp     label8
+Block 8([VReg(vreg = 233, class = Int)]):
     (original IR block: block6)
     (successor: Block 10([]))
     (successor: Block 9([]))
-  Inst 31: movq %v232, <offset:1>+0x18(%rsp)
-  Inst 32: call    User(userextname2)
+  Inst 32: movq %v233, <offset:1>+0x18(%rsp)
+  Inst 33: call    User(userextname2)
     UserStackMap { by_type: [(types::I64, CompoundBitSet {0, 8, 16, 24})], sp_to_sized_stack_slots: None }
-  Inst 33: testq %v247, %v247
-  Inst 34: jnz     label10; j label9
+  Inst 34: testq %v248, %v248
+  Inst 35: jnz     label10; j label9
 Block 9([]):
     (successor: Block 12([]))
-  Inst 35: jmp     label12
+  Inst 36: jmp     label12
 Block 10([]):
     (original IR block: block11)
     (successor: Block 13([]))
     (successor: Block 11([]))
-  Inst 36: movq %v247, <offset:1>+0x18(%rsp)
-  Inst 37: movq $0x0, <offset:1>+0x20(%rsp)
-  Inst 38: movq %v210, <offset:1>+0x28(%rsp)
-  Inst 39: movq $0x0, <offset:1>+0x30(%rsp)
-  Inst 40: movq %v258, <offset:1>+0x38(%rsp)
-  Inst 41: movq $0x0, <offset:1>+0x40(%rsp)
-  Inst 42: movq %v247, <offset:1>+0x48(%rsp)
-  Inst 43: movl $0x2, %v246
-  Inst 44: movl $0x6, %v245
-  Inst 45: load_ext_name userextname3+0, %v244
-  Inst 46: call    *%v244
+  Inst 37: movq %v248, <offset:1>+0x18(%rsp)
+  Inst 38: movq $0x0, <offset:1>+0x20(%rsp)
+  Inst 39: movq %v211, <offset:1>+0x28(%rsp)
+  Inst 40: movq $0x0, <offset:1>+0x30(%rsp)
+  Inst 41: movq %v259, <offset:1>+0x38(%rsp)
+  Inst 42: movq $0x0, <offset:1>+0x40(%rsp)
+  Inst 43: movq %v248, <offset:1>+0x48(%rsp)
+  Inst 44: movl $0x2, %v247
+  Inst 45: movl $0x6, %v246
+  Inst 46: load_ext_name userextname3+0, %v245
+  Inst 47: call    *%v245
     UserStackMap { by_type: [(types::I64, CompoundBitSet {0, 8, 16, 24})], sp_to_sized_stack_slots: None }
-  Inst 47: testq %v243, %v243
-  Inst 48: jnz     label13; j label11
+  Inst 48: testq %v244, %v244
+  Inst 49: jnz     label13; j label11
 Block 11([]):
     (successor: Block 12([]))
-  Inst 49: jmp     label12
+  Inst 50: jmp     label12
 Block 12([]):
     (original IR block: block1)
-  Inst 50: uninit  %v241
-  Inst 51: xorq %v241, (%v242 <- %v241)
-  Inst 52: rets %v242=%rax
+  Inst 51: uninit  %v242
+  Inst 52: xorq %v242, (%v243 <- %v242)
+  Inst 53: rets %v243=%rax
 Block 13([]):
     (original IR block: block12)
-    (successor: Block 1([VReg(vreg = 240, class = Int), VReg(vreg = 243, class = Int)]))
-  Inst 53: movq %v193, <offset:1>+(%rsp)
-  Inst 54: movq %v243, <offset:1>+8(%rsp)
-  Inst 55: leaq 1(%v209), %v240
-  Inst 56: jmp     label1
+    (successor: Block 1([VReg(vreg = 241, class = Int), VReg(vreg = 244, class = Int)]))
+  Inst 54: movq %v193, <offset:1>+(%rsp)
+  Inst 55: movq %v244, <offset:1>+8(%rsp)
+  Inst 56: leaq 1(%v210), %v241
+  Inst 57: jmp     label1
 Block 14([]):
     (original IR block: block3)
     (successor: Block 15([]))
-  Inst 57: jmp     label15
+  Inst 58: jmp     label15
 Block 15([]):
     (original IR block: block5)
-  Inst 58: rets %v210=%rax
-}
-vcode from lowering: 
-VCode {
-  Entry block: 0
-Block 0([]):
-    (original IR block: block0)
-  Inst 0: args %v192=%rdi %v194=%rdx
-  Inst 1: movq (%v194), %v208
-  Inst 2: movq 8(%v194), %v207
-  Inst 3: movq 0x10(%v194), %v206
-  Inst 4: sarq $1, (%v205 <- %v207)
-  Inst 5: call    User(userextname0)
-  Inst 6: load_ext_name userextname1+0, %v203
-  Inst 7: call    *%v203
-  Inst 8: rets %v202=%rax
-}
-vcode from lowering: 
-VCode {
-  Entry block: 0
-Block 0([]):
-    (original IR block: block2)
-    (successor: Block 1([]))
-  Inst 0: args %v192=%rdi %v193=%rsi
-  Inst 1: movq $0x0, <offset:1>+8(%rsp)
-  Inst 2: movq %v193, <offset:1>+(%rsp)
-  Inst 3: jmp     label1
-Block 1([]):
-    (original IR block: block0)
-    (successor: Block 3([]))
-    (successor: Block 2([]))
-  Inst 4: load_ext_name userextname0+0, %v247
-  Inst 5: call    *%v247
-    UserStackMap { by_type: [(types::I64, CompoundBitSet {0})], sp_to_sized_stack_slots: None }
-  Inst 6: testq %v246, %v246
-  Inst 7: jnz     label3; j label2
-Block 2([]):
-    (successor: Block 16([]))
-  Inst 8: jmp     label16
-Block 3([]):
-    (original IR block: block3)
-    (successor: Block 7([]))
-    (successor: Block 4([]))
-  Inst 9: movq %v246, <offset:1>+(%rsp)
-  Inst 10: load_ext_name userextname1+0, %v245
-  Inst 11: call    *%v245
-  Inst 12: sarq $1, (%v243 <- %v244)
-  Inst 13: cmpq $0x1, %v243
-  Inst 14: jz      label7; j label4
-Block 4([]):
-    (original IR block: block5)
-    (successor: Block 6([]))
-    (successor: Block 5([]))
-  Inst 15: movq 0x10(%v192), %v242
-  Inst 16: movq 0xe8(%v242), %v241
-  Inst 17: movq %v241, <offset:1>+8(%rsp)
-  Inst 18: uninit  %v239
-  Inst 19: xorq %v239, (%v240 <- %v239)
-  Inst 20: call    User(userextname4)
-    UserStackMap { by_type: [(types::I64, CompoundBitSet {0, 8})], sp_to_sized_stack_slots: None }
-  Inst 21: testq %v238, %v238
-  Inst 22: jnz     label6; j label5
-Block 5([]):
-    (successor: Block 16([]))
-  Inst 23: jmp     label16
-Block 6([]):
-    (original IR block: block16)
-    (successor: Block 20([VReg(vreg = 238, class = Int)]))
-  Inst 24: jmp     label20
-Block 7([]):
-    (original IR block: block4)
-    (successor: Block 8([]))
-  Inst 25: jmp     label8
-Block 8([]):
-    (original IR block: block8)
-    (successor: Block 12([]))
-    (successor: Block 9([]))
-  Inst 26: movq 8(%v246), %v237
-  Inst 27: testq %v237, %v237
-  Inst 28: jnz     label12; j label9
-Block 9([]):
-    (original IR block: block7)
-    (successor: Block 11([]))
-    (successor: Block 10([]))
-  Inst 29: movl $0x1, %v236
-  Inst 30: load_ext_name userextname2+0, %v235
-  Inst 31: call    *%v235
-  Inst 32: testq %v234, %v234
-  Inst 33: jnz     label11; j label10
-Block 10([]):
-    (successor: Block 16([]))
-  Inst 34: jmp     label16
-Block 11([]):
-    (original IR block: block10)
-    (successor: Block 13([VReg(vreg = 234, class = Int)]))
-  Inst 35: jmp     label13
-Block 12([]):
-    (original IR block: block9)
-    (successor: Block 13([VReg(vreg = 232, class = Int)]))
-  Inst 36: movq 0x10(%v246), %v233
-  Inst 37: movq (%v233), %v232
-  Inst 38: jmp     label13
-Block 13([VReg(vreg = 207, class = Int)]):
-    (original IR block: block6)
-    (successor: Block 18([]))
-    (successor: Block 14([]))
-  Inst 39: sarq $1, (%v231 <- %v207)
-  Inst 40: call    User(userextname3)
-  Inst 41: cmpq $0x6, %v230
-  Inst 42: jz      label18; j label14
-Block 14([]):
-    (original IR block: block12)
-    (successor: Block 17([]))
-    (successor: Block 15([]))
-  Inst 43: movq 0x10(%v192), %v229
-  Inst 44: movq 0xe8(%v229), %v228
-  Inst 45: movq %v228, <offset:1>+8(%rsp)
-  Inst 46: uninit  %v226
-  Inst 47: xorq %v226, (%v227 <- %v226)
-  Inst 48: call    User(userextname4)
-    UserStackMap { by_type: [(types::I64, CompoundBitSet {0, 8})], sp_to_sized_stack_slots: None }
-  Inst 49: testq %v225, %v225
-  Inst 50: jnz     label17; j label15
-Block 15([]):
-    (successor: Block 16([]))
-  Inst 51: jmp     label16
-Block 16([]):
-    (original IR block: block1)
-  Inst 52: uninit  %v223
-  Inst 53: xorq %v223, (%v224 <- %v223)
-  Inst 54: rets %v224=%rax
-Block 17([]):
-    (original IR block: block14)
-    (successor: Block 19([VReg(vreg = 225, class = Int)]))
-  Inst 55: jmp     label19
-Block 18([]):
-    (original IR block: block11)
-    (successor: Block 19([VReg(vreg = 193, class = Int)]))
-  Inst 56: jmp     label19
-Block 19([VReg(vreg = 217, class = Int)]):
-    (original IR block: block13)
-    (successor: Block 20([VReg(vreg = 217, class = Int)]))
-  Inst 57: jmp     label20
-Block 20([VReg(vreg = 222, class = Int)]):
-    (original IR block: block15)
-  Inst 58: rets %v222=%rax
-}
-vcode from lowering: 
-VCode {
-  Entry block: 0
-Block 0([]):
-    (original IR block: block0)
-  Inst 0: args %v192=%rdi %v194=%rdx
-  Inst 1: movq (%v194), %v201
-  Inst 2: call    User(userextname0)
-  Inst 3: load_ext_name userextname1+0, %v199
-  Inst 4: call    *%v199
-  Inst 5: rets %v198=%rax
-}
-vcode from lowering: 
-VCode {
-  Entry block: 0
-Block 0([]):
-    (original IR block: block2)
-    (successor: Block 1([VReg(vreg = 194, class = Int), VReg(vreg = 195, class = Int)]))
-  Inst 0: args %v192=%rdi %v193=%rsi %v194=%rdx %v195=%rcx
-  Inst 1: movq $0x0, <offset:1>+0x10(%rsp)
-  Inst 2: movq $0x0, <offset:1>+0x18(%rsp)
-  Inst 3: movq %v193, <offset:1>+(%rsp)
-  Inst 4: movq %v195, <offset:1>+8(%rsp)
-  Inst 5: leaq <offset:1>+0x30(%rsp), %v252
-  Inst 6: jmp     label1
-Block 1([VReg(vreg = 206, class = Int), VReg(vreg = 207, class = Int)]):
-    (original IR block: block0)
-    (successor: Block 9([]))
-    (successor: Block 2([]))
-  Inst 7: load_ext_name userextname0+0, %v251
-  Inst 8: call    *%v251
-  Inst 9: sarq $1, (%v249 <- %v250)
-  Inst 10: cmpq %v249, %v206
-  Inst 11: jnl     label9; j label2
-Block 2([]):
-    (original IR block: block4)
-    (successor: Block 4([]))
-    (successor: Block 3([]))
-  Inst 12: shlq $1, (%v248 <- %v206)
-  Inst 13: orq $0x1, (%v247 <- %v248)
-  Inst 14: movq %v247, <offset:1>+0x10(%rsp)
-  Inst 15: leaq 1(%v206), %v246
-  Inst 16: shlq $1, (%v245 <- %v246)
-  Inst 17: orq $0x1, (%v244 <- %v245)
-  Inst 18: movq %v244, <offset:1>+0x18(%rsp)
-  Inst 19: load_ext_name userextname2+0, %v243
-  Inst 20: call    *%v243
-    UserStackMap { by_type: [(types::I64, CompoundBitSet {0, 8, 16, 24})], sp_to_sized_stack_slots: None }
-  Inst 21: testq %v242, %v242
-  Inst 22: jnz     label4; j label3
-Block 3([]):
-    (successor: Block 11([]))
-  Inst 23: jmp     label11
-Block 4([]):
-    (original IR block: block7)
-    (successor: Block 6([]))
-    (successor: Block 5([]))
-  Inst 24: movq %v242, <offset:1>+0x10(%rsp)
-  Inst 25: call    User(userextname3)
-    UserStackMap { by_type: [(types::I64, CompoundBitSet {0, 8, 16})], sp_to_sized_stack_slots: None }
-  Inst 26: testq %v241, %v241
-  Inst 27: jnz     label6; j label5
-Block 5([]):
-    (successor: Block 11([]))
-  Inst 28: jmp     label11
-Block 6([]):
-    (original IR block: block8)
-    (successor: Block 8([]))
-    (successor: Block 7([]))
-  Inst 29: movq %v241, <offset:1>+0x10(%rsp)
-  Inst 30: movq $0x0, <offset:1>+0x30(%rsp)
-  Inst 31: movq %v207, <offset:1>+0x38(%rsp)
-  Inst 32: movq $0x0, <offset:1>+0x40(%rsp)
-  Inst 33: movq %v241, <offset:1>+0x48(%rsp)
-  Inst 34: movl $0x2, %v240
-  Inst 35: movl $0x4, %v239
-  Inst 36: load_ext_name userextname1+0, %v238
-  Inst 37: call    *%v238
-    UserStackMap { by_type: [(types::I64, CompoundBitSet {0, 8, 16})], sp_to_sized_stack_slots: None }
-  Inst 38: testq %v237, %v237
-  Inst 39: jnz     label8; j label7
-Block 7([]):
-    (successor: Block 11([]))
-  Inst 40: jmp     label11
-Block 8([]):
-    (original IR block: block9)
-    (successor: Block 1([VReg(vreg = 246, class = Int), VReg(vreg = 237, class = Int)]))
-  Inst 41: movq %v193, <offset:1>+(%rsp)
-  Inst 42: movq %v237, <offset:1>+8(%rsp)
-  Inst 43: jmp     label1
-Block 9([]):
-    (original IR block: block3)
-    (successor: Block 12([]))
-    (successor: Block 10([]))
-  Inst 44: uninit  %v235
-  Inst 45: xorq %v235, (%v236 <- %v235)
-  Inst 46: leaq <offset:1>+0x20(%rsp), %v234
-  Inst 47: movq $0x0, <offset:1>+0x20(%rsp)
-  Inst 48: movq %v207, <offset:1>+0x28(%rsp)
-  Inst 49: movl $0x2, %v233
-  Inst 50: load_ext_name userextname1+0, %v232
-  Inst 51: call    *%v232
-    UserStackMap { by_type: [(types::I64, CompoundBitSet {8})], sp_to_sized_stack_slots: None }
-  Inst 52: testq %v231, %v231
-  Inst 53: jnz     label12; j label10
-Block 10([]):
-    (successor: Block 11([]))
-  Inst 54: jmp     label11
-Block 11([]):
-    (original IR block: block1)
-  Inst 55: uninit  %v229
-  Inst 56: xorq %v229, (%v230 <- %v229)
-  Inst 57: rets %v230=%rax
-Block 12([]):
-    (original IR block: block5)
-    (successor: Block 13([]))
-  Inst 58: jmp     label13
-Block 13([]):
-    (original IR block: block6)
-  Inst 59: rets %v231=%rax
+  Inst 59: rets %v211=%rax
 }
 vcode from lowering: 
 VCode {
@@ -2738,9 +2465,274 @@ Block 0([]):
   Inst 1: movq (%v194), %v205
   Inst 2: movq 8(%v194), %v204
   Inst 3: movq 0x10(%v194), %v203
-  Inst 4: sarq $1, (%v202 <- %v204)
-  Inst 5: call    User(userextname0)
-  Inst 6: rets %v201=%rax
+  Inst 4: call    User(userextname0)
+  Inst 5: load_ext_name userextname1+0, %v201
+  Inst 6: call    *%v201
+  Inst 7: rets %v200=%rax
+}
+vcode from lowering: 
+VCode {
+  Entry block: 0
+Block 0([]):
+    (original IR block: block2)
+    (successor: Block 1([]))
+  Inst 0: args %v192=%rdi %v193=%rsi
+  Inst 1: movq $0x0, <offset:1>+8(%rsp)
+  Inst 2: movq $0x0, <offset:1>+0x10(%rsp)
+  Inst 3: movq %v193, <offset:1>+(%rsp)
+  Inst 4: jmp     label1
+Block 1([]):
+    (original IR block: block0)
+    (successor: Block 3([]))
+    (successor: Block 2([]))
+  Inst 5: load_ext_name userextname0+0, %v242
+  Inst 6: call    *%v242
+    UserStackMap { by_type: [(types::I64, CompoundBitSet {0})], sp_to_sized_stack_slots: None }
+  Inst 7: testq %v241, %v241
+  Inst 8: jnz     label3; j label2
+Block 2([]):
+    (successor: Block 16([]))
+  Inst 9: jmp     label16
+Block 3([]):
+    (original IR block: block3)
+    (successor: Block 7([]))
+    (successor: Block 4([]))
+  Inst 10: movq %v241, <offset:1>+(%rsp)
+  Inst 11: load_ext_name userextname1+0, %v240
+  Inst 12: call    *%v240
+  Inst 13: sarq $1, (%v238 <- %v239)
+  Inst 14: cmpq $0x1, %v238
+  Inst 15: jz      label7; j label4
+Block 4([]):
+    (original IR block: block5)
+    (successor: Block 6([]))
+    (successor: Block 5([]))
+  Inst 16: movl $0x1, %v237
+  Inst 17: movq $0x1, <offset:1>+8(%rsp)
+  Inst 18: movq 0x10(%v192), %v236
+  Inst 19: movq 0xe8(%v236), %v235
+  Inst 20: movq %v235, <offset:1>+0x10(%rsp)
+  Inst 21: call    User(userextname4)
+    UserStackMap { by_type: [(types::I64, CompoundBitSet {0, 8, 16})], sp_to_sized_stack_slots: None }
+  Inst 22: testq %v234, %v234
+  Inst 23: jnz     label6; j label5
+Block 5([]):
+    (successor: Block 16([]))
+  Inst 24: jmp     label16
+Block 6([]):
+    (original IR block: block16)
+    (successor: Block 20([VReg(vreg = 234, class = Int)]))
+  Inst 25: jmp     label20
+Block 7([]):
+    (original IR block: block4)
+    (successor: Block 8([]))
+  Inst 26: jmp     label8
+Block 8([]):
+    (original IR block: block8)
+    (successor: Block 12([]))
+    (successor: Block 9([]))
+  Inst 27: movq 8(%v241), %v233
+  Inst 28: testq %v233, %v233
+  Inst 29: jnz     label12; j label9
+Block 9([]):
+    (original IR block: block7)
+    (successor: Block 11([]))
+    (successor: Block 10([]))
+  Inst 30: movl $0x1, %v232
+  Inst 31: load_ext_name userextname2+0, %v231
+  Inst 32: call    *%v231
+  Inst 33: testq %v230, %v230
+  Inst 34: jnz     label11; j label10
+Block 10([]):
+    (successor: Block 16([]))
+  Inst 35: jmp     label16
+Block 11([]):
+    (original IR block: block10)
+    (successor: Block 13([VReg(vreg = 230, class = Int)]))
+  Inst 36: jmp     label13
+Block 12([]):
+    (original IR block: block9)
+    (successor: Block 13([VReg(vreg = 228, class = Int)]))
+  Inst 37: movq 0x10(%v241), %v229
+  Inst 38: movq (%v229), %v228
+  Inst 39: jmp     label13
+Block 13([VReg(vreg = 207, class = Int)]):
+    (original IR block: block6)
+    (successor: Block 18([]))
+    (successor: Block 14([]))
+  Inst 40: call    User(userextname3)
+  Inst 41: cmpq $0x6, %v227
+  Inst 42: jz      label18; j label14
+Block 14([]):
+    (original IR block: block12)
+    (successor: Block 17([]))
+    (successor: Block 15([]))
+  Inst 43: movl $0x1, %v226
+  Inst 44: movq $0x1, <offset:1>+8(%rsp)
+  Inst 45: movq 0x10(%v192), %v225
+  Inst 46: movq 0xe8(%v225), %v224
+  Inst 47: movq %v224, <offset:1>+0x10(%rsp)
+  Inst 48: call    User(userextname4)
+    UserStackMap { by_type: [(types::I64, CompoundBitSet {0, 8, 16})], sp_to_sized_stack_slots: None }
+  Inst 49: testq %v223, %v223
+  Inst 50: jnz     label17; j label15
+Block 15([]):
+    (successor: Block 16([]))
+  Inst 51: jmp     label16
+Block 16([]):
+    (original IR block: block1)
+  Inst 52: uninit  %v221
+  Inst 53: xorq %v221, (%v222 <- %v221)
+  Inst 54: rets %v222=%rax
+Block 17([]):
+    (original IR block: block14)
+    (successor: Block 19([VReg(vreg = 223, class = Int)]))
+  Inst 55: jmp     label19
+Block 18([]):
+    (original IR block: block11)
+    (successor: Block 19([VReg(vreg = 193, class = Int)]))
+  Inst 56: jmp     label19
+Block 19([VReg(vreg = 215, class = Int)]):
+    (original IR block: block13)
+    (successor: Block 20([VReg(vreg = 215, class = Int)]))
+  Inst 57: jmp     label20
+Block 20([VReg(vreg = 220, class = Int)]):
+    (original IR block: block15)
+  Inst 58: rets %v220=%rax
+}
+vcode from lowering: 
+VCode {
+  Entry block: 0
+Block 0([]):
+    (original IR block: block0)
+  Inst 0: args %v192=%rdi %v194=%rdx
+  Inst 1: movq (%v194), %v201
+  Inst 2: call    User(userextname0)
+  Inst 3: load_ext_name userextname1+0, %v199
+  Inst 4: call    *%v199
+  Inst 5: rets %v198=%rax
+}
+vcode from lowering: 
+VCode {
+  Entry block: 0
+Block 0([]):
+    (original IR block: block2)
+    (successor: Block 1([VReg(vreg = 254, class = Int), VReg(vreg = 195, class = Int)]))
+  Inst 0: args %v192=%rdi %v193=%rsi %v194=%rdx %v195=%rcx
+  Inst 1: movq $0x0, <offset:1>+0x10(%rsp)
+  Inst 2: movq $0x0, <offset:1>+0x18(%rsp)
+  Inst 3: movq %v193, <offset:1>+(%rsp)
+  Inst 4: movq %v195, <offset:1>+8(%rsp)
+  Inst 5: sarq $1, (%v254 <- %v194)
+  Inst 6: leaq <offset:1>+0x30(%rsp), %v253
+  Inst 7: jmp     label1
+Block 1([VReg(vreg = 207, class = Int), VReg(vreg = 208, class = Int)]):
+    (original IR block: block0)
+    (successor: Block 9([]))
+    (successor: Block 2([]))
+  Inst 8: load_ext_name userextname0+0, %v252
+  Inst 9: call    *%v252
+  Inst 10: sarq $1, (%v250 <- %v251)
+  Inst 11: cmpq %v250, %v207
+  Inst 12: jnl     label9; j label2
+Block 2([]):
+    (original IR block: block4)
+    (successor: Block 4([]))
+    (successor: Block 3([]))
+  Inst 13: shlq $1, (%v249 <- %v207)
+  Inst 14: orq $0x1, (%v248 <- %v249)
+  Inst 15: movq %v248, <offset:1>+0x10(%rsp)
+  Inst 16: leaq 1(%v207), %v247
+  Inst 17: shlq $1, (%v246 <- %v247)
+  Inst 18: orq $0x1, (%v245 <- %v246)
+  Inst 19: movq %v245, <offset:1>+0x18(%rsp)
+  Inst 20: load_ext_name userextname2+0, %v244
+  Inst 21: call    *%v244
+    UserStackMap { by_type: [(types::I64, CompoundBitSet {0, 8, 16, 24})], sp_to_sized_stack_slots: None }
+  Inst 22: testq %v243, %v243
+  Inst 23: jnz     label4; j label3
+Block 3([]):
+    (successor: Block 11([]))
+  Inst 24: jmp     label11
+Block 4([]):
+    (original IR block: block7)
+    (successor: Block 6([]))
+    (successor: Block 5([]))
+  Inst 25: movq %v243, <offset:1>+0x10(%rsp)
+  Inst 26: call    User(userextname3)
+    UserStackMap { by_type: [(types::I64, CompoundBitSet {0, 8, 16})], sp_to_sized_stack_slots: None }
+  Inst 27: testq %v242, %v242
+  Inst 28: jnz     label6; j label5
+Block 5([]):
+    (successor: Block 11([]))
+  Inst 29: jmp     label11
+Block 6([]):
+    (original IR block: block8)
+    (successor: Block 8([]))
+    (successor: Block 7([]))
+  Inst 30: movq %v242, <offset:1>+0x10(%rsp)
+  Inst 31: movq $0x0, <offset:1>+0x30(%rsp)
+  Inst 32: movq %v208, <offset:1>+0x38(%rsp)
+  Inst 33: movq $0x0, <offset:1>+0x40(%rsp)
+  Inst 34: movq %v242, <offset:1>+0x48(%rsp)
+  Inst 35: movl $0x2, %v241
+  Inst 36: movl $0x4, %v240
+  Inst 37: load_ext_name userextname1+0, %v239
+  Inst 38: call    *%v239
+    UserStackMap { by_type: [(types::I64, CompoundBitSet {0, 8, 16})], sp_to_sized_stack_slots: None }
+  Inst 39: testq %v238, %v238
+  Inst 40: jnz     label8; j label7
+Block 7([]):
+    (successor: Block 11([]))
+  Inst 41: jmp     label11
+Block 8([]):
+    (original IR block: block9)
+    (successor: Block 1([VReg(vreg = 247, class = Int), VReg(vreg = 238, class = Int)]))
+  Inst 42: movq %v193, <offset:1>+(%rsp)
+  Inst 43: movq %v238, <offset:1>+8(%rsp)
+  Inst 44: jmp     label1
+Block 9([]):
+    (original IR block: block3)
+    (successor: Block 12([]))
+    (successor: Block 10([]))
+  Inst 45: uninit  %v236
+  Inst 46: xorq %v236, (%v237 <- %v236)
+  Inst 47: leaq <offset:1>+0x20(%rsp), %v235
+  Inst 48: movq $0x0, <offset:1>+0x20(%rsp)
+  Inst 49: movq %v208, <offset:1>+0x28(%rsp)
+  Inst 50: movl $0x2, %v234
+  Inst 51: load_ext_name userextname1+0, %v233
+  Inst 52: call    *%v233
+    UserStackMap { by_type: [(types::I64, CompoundBitSet {8})], sp_to_sized_stack_slots: None }
+  Inst 53: testq %v232, %v232
+  Inst 54: jnz     label12; j label10
+Block 10([]):
+    (successor: Block 11([]))
+  Inst 55: jmp     label11
+Block 11([]):
+    (original IR block: block1)
+  Inst 56: uninit  %v230
+  Inst 57: xorq %v230, (%v231 <- %v230)
+  Inst 58: rets %v231=%rax
+Block 12([]):
+    (original IR block: block5)
+    (successor: Block 13([]))
+  Inst 59: jmp     label13
+Block 13([]):
+    (original IR block: block6)
+  Inst 60: rets %v232=%rax
+}
+vcode from lowering: 
+VCode {
+  Entry block: 0
+Block 0([]):
+    (original IR block: block0)
+  Inst 0: args %v192=%rdi %v194=%rdx
+  Inst 1: movq (%v194), %v202
+  Inst 2: movq 8(%v194), %v201
+  Inst 3: movq 0x10(%v194), %v200
+  Inst 4: call    User(userextname0)
+  Inst 5: rets %v199=%rax
 }
 vcode from lowering: 
 VCode {
