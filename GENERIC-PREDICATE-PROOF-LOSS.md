@@ -15,6 +15,7 @@ section below; the status table is the index.
 | – | prerequisite found while verifying fix 3: `hir::range` never visited a call's callee expression (unsound; native miscompiles on `main`) | `hir/range.tcl` `Call` | **fixed** ([Callee-position calls](#callee-position-calls-soundness-fix)) |
 | – | prerequisite found while verifying fix 3: the `bit_and` identity fold trusted interval Ranges (unsound; native miscompiles on `main`) | `native/lower.tcl` `FoldPureBitwise` | **fixed** ([`bit_and` identity fold](#bit_and-identity-fold-soundness-fix)) |
 | – | prerequisite found while verifying point 2: `hir::blockescape` never examined a closure nested in a candidate's own literal or in a sibling capturer (unsound; native crashes on `main`, wrong results with `-block-escape-opt 0` once point 2 trusts it) | `hir/blockescape.tcl` `Bindings` | **fixed** ([Blockescape: nested capturers](#blockescape-nested-capturers-soundness-fix)) |
+| – | prerequisite found while preparing point 1: `hir::blockescape` never counted a literal's generic instance as a de-closure target when an exact call selected it next to specialized ones (pre-existing NATIVE BUG; with point 1, closures called with an Int and another kind would lose de-closure) | `hir/blockescape.tcl:194` (`RelevantInstances`) | **fixed** ([Blockescape: a called generic instance](#blockescape-a-called-generic-instance)) |
 | 4 | counted loops always use tagged compare/advance; their bounds are tagged RawInt consumers | `native/lower.tcl` `CountLoop`, `native/rawabi.tcl:696-709` | open |
 | 5 | the RawInt ABI never reaches de-closured (internal-capture) functions | `native/lower.tcl:2246` (`InternalFunction`), `:4676` (`abiCall`), `native/rawabi.tcl:64-66` | open |
 
@@ -937,6 +938,64 @@ is `NATIVE AOT NOT-READY` with the knob off).
    any-caller facts, and its calls into RawInt parameters unbox unchecked.
 5. **The fuzzer never generates nested capturers**, which is why it could not
    find the blockescape bug the review found.
+
+## Blockescape: a called generic instance
+
+Needed by loss point 1, and a fix for the pre-existing NATIVE BUG fix 3's
+fuzzing found (its own commit).
+
+`hir::blockescape::RelevantInstances` lists the instances a de-closured
+binding may be called at. It returned a literal's non-generic instances if
+it had any, and its generic instance only when that was the literal's only
+instance: a generic instance next to specialized ones was assumed to be
+kept only as the materialized Block value's entry, never a call target.
+That is false when an exact call's arguments give no key while another
+call's do:
+
+```
+fn f(a):
+    k = 5
+    fn g(x):
+        x + k
+    g(a)          # in f<generic> (f is a Block value in a List): g<generic>
+fs = [f]          # in f<int> (the exact call below):        g<int>
+list_get(fs, 0)(3)
+```
+
+blockescape found `g` eligible in `f<int>`'s region instance and marked
+the binding de-closured (per binding), but `f<generic>`'s call selected
+`g<generic>`, which had no internal variant: `native lowering: call e11 of
+a de-closure-converted binding has no wanted callee instance (NATIVE BUG)`
+(fix 3's fuzz: 40 of 5,600 programs; the point-2 fuzz: 38 of 5,000). With
+loss point 1 the same situation becomes common: a closure called with an Int
+and with a String gets `inner<int>` and `inner<generic>`, and blockescape
+declined the binding, so the closure was heap-allocated again where the
+single generic instance used to be de-closured.
+
+**The change** (`hir/blockescape.tcl`, `RelevantInstances`): the generic
+instance is a de-closure target too when some used instance's `calls` map
+targets it. Every reference must still be an exact call to one of the
+listed instances; the generic one now gets its own internal variant like
+the others. It becomes `wanted`, hence closed (InstanceClosed's closure
+branch): every call to it is a recorded exact call, because the binding is
+de-closured and its value never reaches a dynamic call site. A generic
+instance called only by dormant code (or only by itself) is still dormant:
+the dormant entry rule counts every generic instance of a de-closured
+literal, wanted or not.
+
+**Evidence.** Corpus: NIR byte-identical in all 44 programs (no corpus
+closure has a generic instance called next to a specialized one). Tests
+(`tests/blockescape-called-generic.test`, 5): both instances wanted and
+closed, no closure allocated, interp/compile/cranelift parity with block
+escape on and off for the program above and a variant calling `g` both
+ways. The fuzzer's whole class of pre-existing disagreements is gone: the
+point-1 fuzz (which includes this commit) reports 0 disagreements in 7,000
+programs, where the point-2 run had 38 in 5,000.
+
+Reviewed together with loss point 1 (its section): no problem found; the
+review noted that the called generic instance now also goes through
+blockescape's self and sibling checks, so a call pruned there declines the
+binding (not observed).
 
 ## Next steps (points 1, 2, 4, 5)
 

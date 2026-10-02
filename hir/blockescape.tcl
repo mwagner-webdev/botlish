@@ -180,29 +180,44 @@ proc hir::blockescape::RefsAsCalls {view context instance exprlist b arity} {
 }
 
 # The used specialize instances of BLOCK a de-closure-converted binding of it
-# may be called at: its non-generic used instances if it has any, otherwise
-# its one generic instance if that is the only one, otherwise none (declined:
-# a literal whose only instances are several generic ones does not exist,
-# and a generic instance kept only so a canonical/materialized entry exists
+# may be called at: its non-generic used instances, plus its generic
+# instance if some used instance's exact call selected it (a call whose
+# arguments give no key, next to calls that do: `inner(tag)` and
+# `inner(1)`); with no non-generic instance, its one generic instance if that
+# is the only one; otherwise none (declined: a literal whose only instances
+# are several generic ones does not exist). A generic instance no exact call
+# selects is kept only so a canonical/materialized entry exists
 # (hir/specialize.tcl's header: "a materialized Block retains a generic
-# entry") is, whenever a specialized instance exists, never a call target of
-# an eligible binding -- eligibility requires every reference to be an exact
-# call, and exact calls select specialized instances). One literal commonly
-# has several of them now: one per exact callable target it is called with,
-# as before one per argument-kind key (hir/specialize.tcl).
+# entry"), and is never a call target of an eligible binding. One literal
+# commonly has several of them: one per exact callable target or argument
+# kind it is called with (hir/specialize.tcl).
 proc hir::blockescape::RelevantInstances {spec block} {
     set found {}
     set nonGeneric {}
+    set generic {}
     foreach id [dict get $spec used] {
         set inst [dict get $spec instances $id]
         if {[dict get $inst block] eq $block} {
             lappend found $id
             if {![dict get $inst generic]} {
                 lappend nonGeneric $id
+            } else {
+                lappend generic $id
             }
         }
     }
     if {[llength $nonGeneric]} {
+        set called [dict create]
+        foreach id [dict get $spec used] {
+            foreach target [dict values [dict get $spec instances $id calls]] {
+                dict set called $target 1
+            }
+        }
+        foreach id $generic {
+            if {[dict exists $called $id]} {
+                lappend nonGeneric $id
+            }
+        }
         return $nonGeneric
     }
     return [expr {[llength $found] == 1 ? $found : {}}]

@@ -1,0 +1,93 @@
+# blockescape-called-generic.test -- hir::blockescape::RelevantInstances
+# (GENERIC-PREDICATE-PROOF-LOSS.md, "Blockescape: a called generic
+# instance"): a closure literal's generic instance is a de-closure target of
+# its own when an exact call selects it (an argument that gives no key, next
+# to calls that do), not only when it is the literal's single instance.
+#
+# Before, a literal with a specialized instance never counted its generic
+# one, so a binding whose calls selected both was either declined (one
+# region instance) or, when another region instance found it eligible,
+# de-closured without an internal variant for the generic callee: native
+# lowering then threw "call eN of a de-closure-converted binding has no
+# wanted callee instance (NATIVE BUG)" (the fix-3 fuzz finding: a function
+# called through `list_get(fs, 0)(3)` whose nested closure captures a local).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+proc dedent {text} {
+    set lines [split $text \n]
+    set indent 1000
+    foreach line $lines {
+        if {[string trim $line] eq ""} continue
+        set n [expr {[string length $line] - [string length [string trimleft $line " "]]}]
+        if {$n < $indent} { set indent $n }
+    }
+    return [join [lmap line $lines {string range $line $indent end}] \n]
+}
+
+# f is a Block value in a List (f<generic>, an open entry) and called
+# directly (f<int>); in f<generic> the nested closure's call g(a) has an
+# unknown argument and selects g<generic>, in f<int> it selects g<int>.
+set listGetShape {
+    fn f(a):
+        k = 5
+        fn g(x):
+            x + k
+        g(a)
+
+    fs = [f]
+    list_get(fs, 0)(3)
+}
+
+set bothShape {
+    fn f(a):
+        k = 5
+        fn g(x):
+            x + k
+        [g(a), g(1)]
+
+    fs = [f]
+    [list_get(fs, 0)(3), f(4)]
+}
+
+proc wanted {text} {
+    set hir [surface::compile [dedent $text] t.bot -strict 0]
+    set spec [hir::specialize::analyze $hir]
+    set be [hir::blockescape::analyze $hir $spec]
+    lsort [lmap pair [hir::blockescape::wantedInstances $hir $spec $be] {lindex $pair 1}]
+}
+
+test blockescape-called-generic-wanted {both of g's instances are de-closure targets: the called generic one too} -body {
+    list [wanted $listGetShape] [wanted $bothShape]
+} -result {{g<generic> g<int>} {g<generic> g<int>}}
+
+test blockescape-called-generic-closed {the called generic instance is closed: every call to it is a recorded exact call (the binding is de-closured, so its Block value never exists)} -body {
+    set hir [surface::compile [dedent $bothShape] t.bot -strict 0]
+    set spec [hir::specialize::analyze $hir]
+    set rows {}
+    foreach id [dict get $spec used] {
+        if {[dict get $spec instances $id name] ne "g"} continue
+        lappend rows [list [hir::specialize::label $spec $id] [hir::specialize::closed $hir $spec $id]]
+    }
+    lsort $rows
+} -result {{g<generic> 1} {g<int> 1}}
+
+test blockescape-called-generic-no-closure {no closure is allocated for g} -body {
+    lmap text [list $listGetShape $bothShape] {
+        regexp -all {= closure } [native::nir [surface::compile [dedent $text] t.bot -strict 0]]
+    }
+} -result {0 0}
+
+foreach {name src expected} [list listget $listGetShape 8 both $bothShape {[[8, 6], [9, 6]]}] {
+    test blockescape-called-generic-parity-$name "called generic instance, $name: interp, compile and cranelift (block escape on and off) agree (cranelift threw NATIVE BUG before)" -body {
+        set hir [surface::compile [dedent $src] t.bot -strict 0]
+        set outcomes [lmap backend {interp compile cranelift} {outcomeUnderHir $backend $hir}]
+        resetEffects
+        lappend outcomes [list value [core::value::show [native::evalHir $hir -block-escape-opt 0] 1] {}]
+        set outcomes [lsort -unique $outcomes]
+        expr {[llength $outcomes] == 1 ? [lindex $outcomes 0 1] : $outcomes}
+    } -result $expected
+}
+
+cleanupTests
