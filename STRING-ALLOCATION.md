@@ -212,7 +212,7 @@ String path is still two allocations.
 | differential fuzz, existing short-String generator | 0 disagreements: 1,500 default + 500 GC-stress + 300 specialization-off programs |
 | differential fuzz, new general-construction generator (`fuzz-general.tcl`) | 800 default + 400 GC-stress + 300 specialization-off: the only 2 disagreements are the pre-existing region-equality `NATIVE BUG` below (identical at the parent commit) |
 | helpers byte-identical to the measured build | the String helpers' machine code (`rt_*`) compared by disassembly: identical |
-| GC-stress full suite / native-coverage | see "Pending" |
+| GC-stress full suite / native-coverage | pass / one pre-existing failure: see "CI-equivalent runs" |
 
 ### Tests whose expectations changed
 
@@ -639,7 +639,7 @@ than once but write each output byte once; no path copies output bytes more than
 **GC.** 26. Yes. 27. No. 28. In `Vm::alloc_str` after the (possible) collection and the
 single allocation, before the text is written, with no allocation in between. 29. `free_object`
 -> `free_str`, one deallocation. 30. Small and large Strings pass the Rust, Tcl and fuzz GC-stress
-runs (full-suite stress: see Pending). 31. No change (NIR unchanged). 32. No change (identical root
+runs (full-suite stress: see "CI-equivalent runs"). 31. No change (NIR unchanged). 32. No change (identical root
 reports). 33. Not applicable: nothing changed.
 
 **Cost.** 34. ~417 Ir (steady state, U+0061); 35. ~204. 36. 862. 37. 509. 38. glibc
@@ -684,9 +684,15 @@ Measurement tools, their output and the parent-commit census patch are in
 `audit/string-allocation/` (see its README). Audit builds must be made from inside a
 checkout (root `.cargo` config, frame pointers).
 
-## Pending at the time of writing
+## CI-equivalent runs
 
-* GC-stress run of the full Tcl suite (`BOTLISH_NATIVE_GC_STRESS=1 tests/all.tcl`, the CI `gc-stress` job): running.
-* `tests/native-coverage.tcl` (the CI cranelift-coverage job): running.
-
-These two are the only checks outstanding; the Rust, Tcl and fuzz GC-stress runs above already pass.
+* GC-stress run of the full Tcl suite (`BOTLISH_NATIVE_GC_STRESS=1 tclsh9.0 tests/all.tcl`, the
+  CI `gc-stress` job, on a snapshot of the final tree): interp 3880/3880, compile 3876 passed + 4
+  skipped, 0 failed.
+* `tests/native-coverage.tcl` (the CI cranelift-coverage job): 3,914 tests; 1,565 native,
+  2,258 backend-independent, 41 passed-partial, 49 unsupported (the usual unsupported
+  constructs), 1 failed: `refined-5` (`Emailish?` requires a string), which fails identically at
+  the parent commit and is unrelated to this change.
+* The snapshots used for these runs predate only two code-motion/lint edits (`packed_ascii` moved
+  into `strobj.rs`, one no-op cast removed); the compiled String helpers were compared by
+  disassembly and are identical to the measured build.
