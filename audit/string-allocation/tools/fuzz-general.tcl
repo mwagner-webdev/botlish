@@ -37,15 +37,6 @@ while {[lindex $args 0] in {-n -seed -generic -dump}} {
 proc pick {list} { return [lindex $list [expr {int(rand() * [llength $list])}]] }
 
 # A String literal of 0..~20 characters.
-#
-# One divergence that exists at the parent commit (independent of the String
-# storage, found by this generator, recorded in STRING-ALLOCATION.md "Known
-# limitations") is kept out of the generator so it can assert exact agreement
-# (the other one it found, lowercase("\u0130"), is fixed and in the pool):
-#   * `v == v` with v the result of a substring (a String region compared with
-#     itself) is a native lowering failure ({NATIVE BUG} "region binding ...
-#     referenced outside a recognized consumer"). Equality is only generated
-#     between two distinct variables.
 proc lit {} {
     set nul [format %c 0]
     set pool [list "" "a" "b" "hello" "HELLO, World" "abcdefgh" "abcdefghi" "x y" "\u00e9" "\u00c9t\u00e9" "\u2026" "a\u2026b" \
@@ -120,7 +111,7 @@ proc program {} {
     set shown [lrange $vars [expr {[llength $vars] > 6 ? [llength $vars] - 6 : 0}] end]
     set lens [lmap v $shown {string cat "length($v)"}]
     set e1 [pick $vars]
-    set e2 [pick [lsearch -all -inline -not -exact $vars $e1]]
+    set e2 [pick $vars]
     set eqs [list "$e1 == $e2" "hash([pick $vars]) == hash([pick $vars])"]
     lappend stmts "    xs = list_append(list_append(\[\], [pick $vars]), [pick $vars])"
     lappend stmts "    m = mutable_array_allocate(2)" "    mutable_array_set(m, 0, [pick $vars])" "    mutable_array_set(m, 1, [pick $vars])"

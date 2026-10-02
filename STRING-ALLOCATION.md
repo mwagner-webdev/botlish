@@ -595,9 +595,12 @@ storage and serve as ground truth.
   backends but unchanged on native (Rust's lowercase of it is two characters; since fixed
   in `rt_str_lower`, and U+0130 is back in the fuzzer's literal pool); and a
   substring result compared with another String-region binding (`v == v`, and shapes like
-  `first_half(x) == y`) fails native lowering with `{NATIVE BUG} region binding ...
-  referenced outside a recognized consumer`. The fuzzer excludes `v == v`
-  and its two remaining disagreements are the second bug.
+  `first_half(x) == y`) failed native lowering with `{NATIVE BUG} region binding ...
+  referenced outside a recognized consumer`. That one is now fixed (`==` takes exactly one
+  region operand: `hir::stringregion::Bindings` no longer treats a ref as a consumer when
+  the other operand is also a ref, and `TryStringRegionOp` gives the region role to a ref
+  when both sides are region-eligible; tests in `tests/native-string-region.test`), and the
+  fuzzer generates `v == v` again.
 * Miri validates `strobj.rs` only (the rest of the crate needs the JIT and stack walker).
 
 ## Future argv / I/O and the deferred frontier
