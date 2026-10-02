@@ -157,13 +157,19 @@ proc hir::range::analyze {hir spec {callFactsOpt 1} {narrowOpt 1} {captureOpt 1}
 }
 
 # The callee summaries the per-state walks read. calleeResults holds the
-# ASCENDING phase's widened summaries (an exact call expression's Range in
-# the ordinary analysis reads them, e.g. weight<int> -> [2,+inf] while its
-# post-narrowing result is [2,11]). The solver instead reads each other
-# instance's result under the final, narrowed entries (Fixpoint's
-# finalOutcomes: the very `result` instances reports) when that is tighter
-# -- both are sound, so their intersection is. A pinned instance keeps its
-# pinned summary.
+# summaries an exact call expression's Range reads in the ordinary
+# analysis: since Fixpoint's result narrowing (GENERIC-PREDICATE-PROOF-
+# LOSS.md, fix 3) they are narrowed together with the entries when that
+# pass converges, and otherwise the ASCENDING phase's widened ones (e.g.
+# weight<int> -> [2,+inf] while its post-narrowing result is [2,11]). The
+# solver reads each other instance's result under the final, narrowed
+# entries (Fixpoint's finalOutcomes: the very `result` instances reports)
+# when that is tighter -- both are sound, so their intersection is. Even
+# after a converged result narrowing the intersection can be strictly
+# tighter: RangeNarrow only fills infinite sides and does not carry exact
+# value sets, so a summary that is finite but loose (g(x) = bit_and(x, 255)
+# called with 1 and 3: summary [0, 255], result [1, 3] {1,3}) keeps its
+# bounds. A pinned instance keeps its pinned summary.
 proc hir::range::RefinedResults {st} {
     set refined [dict get $st calleeResults]
     foreach id [dict get $st ids] {

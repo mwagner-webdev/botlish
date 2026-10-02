@@ -1,0 +1,288 @@
+Result-narrowing corpus census (GENERIC-PREDICATE-PROOF-LOSS.md, fix 3)
+hir::range::resultNarrowOpt 0 (pass skipped) vs 1 (default), same tree, same specialization,
+default native lowering options; facts are the ones native::nir's own lowering consumed.
+
+Corpus: 31 programs; compiled natively: 29; skipped: 2
+
+program                             inst  facts narrow  WIDER equal drp/add resultNarrow     nirFn abi    
+----------------------------------------------------------------------------------------------------------
+bench/fib                              2     21      0      0     0     0/0 1/1/1,1/1/1          0 same   
+bench/lex-strategy                    11    202      0      0     0     0/0 1/1/1                0 same   
+bench/loop-count                       3     38      0      0     0     0/0 1/1/1                0 same   
+bench/refined-checks                  29    439      5      0     0     0/0 1/1/2                1 changed
+bench/source-checks                    7    105      0      0     0     0/0 1/1/1                0 same   
+bench/sum-refined                      4     35      0      0     0     0/0 1/1/1                0 same   
+bench/test-selection                  12    179      0      0     0     0/0 1/1/1                0 same   
+bench/uri-steady                      19    280      0      0     0     0/0 1/1/1                0 same   
+examples/stdlib/ai_text_clean          6    176      0      0     0     0/0 1/1/1                0 same   
+examples/stdlib/csv                   10    244      0      0     0     0/0 1/1/1                0 same   
+examples/stdlib/csv_chunked           20    554      0      0     0     0/0 1/1/1                0 same   
+examples/stdlib/csv_geometric         19    375      0      0     0     0/0 1/1/1                0 same   
+examples/stdlib/csv_records           59   1223      0      0     0     0/0 1/1/1                0 same   
+examples/stdlib/hashtable             30    688      0      0     0     0/0 1/1/1                0 same   
+examples/stdlib/matmul                 7    196      0      0     0     0/0 1/1/1                0 same   
+examples/stdlib/string_replace         4    117      0      0     0     0/0 1/1/1                0 same   
+examples/stdlib/string_reverse         3     46      0      0     0     0/0 1/1/1                0 same   
+examples/surface/01-arithmetic         1      9      0      0     0     0/0 1/1/1                0 same   
+examples/surface/02-recursion          2     21      0      0     0     0/0 1/1/1,1/1/1          0 same   
+examples/surface/03-closure            4     23      0      0     0     0/0 1/1/1                0 same   
+examples/surface/04-branch-value       2     10      0      0     0     0/0 1/1/1                0 same   
+examples/surface/05-shadowing          1      7      0      0     0     0/0 1/1/1                0 same   
+examples/surface/06-list               1      9      0      0     0     0/0 1/1/1                0 same   
+examples/surface/07-loop-break         1      2      0      0     0     0/0 1/1/1                0 same   
+examples/surface/08-return             3     33      3      0     0     0/0 1/1/2                0 same   
+examples/surface/11-boolean-operators     3     46      0      0     0     0/0 1/1/1                0 same   
+examples/surface/12-if-value           2     24      0      0     0     0/0 1/1/1                0 same   
+examples/surface/13-hygiene            2     15      0      0     0     0/0 1/1/1                0 same   
+examples/surface/14-modules            2     13      0      0     0     0/0 1/1/1                0 same   
+----------------------------------------------------------------------------------------------------------
+TOTAL                                269   5130      8      0     0     0/0                      1
+
+Columns: inst = used instances; facts = Range facts compared (entry params, summaries, results,
+expression Ranges, capture facts); narrow = facts strictly narrower at knob 1; WIDER = facts wider or
+incomparable at knob 1 (must be 0); equal = same value set, different text; drp/add = ExprIds
+present at knob 0 only / knob 1 only; resultNarrow = attempted/converged/rounds of each Fixpoint call
+(analyze re-runs Fixpoint after pinning self-recursive summaries); nirFn = NIR functions changed;
+abi = raw-int-ABI plan text (native::rawabi::explainAll).
+
+Totals
+  facts compared:            5130
+  same:                      5122
+  equal set, different text: 0
+  narrower:                  8
+  wider:                     0
+  incomparable:              0
+  ExprIds dropped / added:   0 / 0
+  exact call sites (call expressions) narrowed: 3
+  callee summaries (calleeResults) narrowed:   2
+  programs with any Range fact change: 2
+  programs with narrower facts: 2
+  programs with NIR changes:    1 (1 functions)
+  programs with raw-int-ABI plan changes: 1
+  final Fixpoint: result narrowing attempted 29, converged 29
+  max result-narrowing rounds (any Fixpoint call): 2
+  non-converged result narrowings (any Fixpoint call): 0
+
+By fact kind (kind class count):
+  capture same             326
+  entry same               466
+  expr narrower            6
+  expr same                3794
+  result same              269
+  summary narrower         2
+  summary same             267
+
+Aggregate NIR op-count deltas over all changed functions (knob 1 minus knob 0):
+  ieq -1, ige -1, isub -1, rieq 1, rige 1, risub 1, runbox 3
+
+Wider/incomparable facts and structural mismatches: 0
+
+Skipped programs (did not compile natively):
+  examples/surface/09-mutual-recursion.bot (both): CORE SEMANTIC UNBOUND -- examples/surface/09-mutual-recursion.bot:13:5: unbound name "is_odd": "is_odd" is declared later; forward references are not allowed (a binding is visible only after it is established)
+  examples/surface/10-duplicate-binding.bot (both): CORE SEMANTIC DUPLICATE -- examples/surface/10-duplicate-binding.bot:7:1: duplicate binding "x" in the same lexical scope
+
+Details per program (only programs where something changed)
+============================================================
+== bench/refined-checks (bench/refined-checks.bot)
+  calls knob0: analyze 1 fixpoint 1 plan 1 ms 1654; knob1: analyze 1 fixpoint 1 plan 1 ms 1926
+  resultNarrow per Fixpoint call (attempted/converged/rounds): knob1 1/1/2; knob0 0/0/0
+  Range facts that changed (knob 0 -> knob 1):
+    narrower  scan_while<any, native(is_tcl_alpha)>  summary summary: [-∞, 4611686018427387903] -> [0, 4611686018427387903]
+    narrower  tld?<generic>  expr e284: [-∞, 4611686018427387903] -> [0, 4611686018427387903]   (call block(e267) : int) <- exact call site
+    narrower  tld?<generic>  expr e291: [-∞, 4611686018427387903] -> [0, 4611686018427387903]   (ref b104 e : int)
+    narrower  tld?<generic>  expr e295: [-∞, 4611686018427387901] -> [-4611686018427387903, 4611686018427387901]   (call native(-) : int)
+    narrower  tld?<generic>  expr e297: [-∞, 4611686018427387903] -> [0, 4611686018427387903]   (ref b104 e : int)
+  NIR functions that changed:
+    func "tld?" instance="generic" @e282
+      header rawregs: "9" -> "5 6 9 10 12"
+      header regs: "12" -> "15"
+      tagged-int ops 3->0, raw ri* ops 0->3, runbox 0->3, rbox 0->0, br 1->1, label 3->3, lines 17->20
+      op deltas: ieq 1->0, ige 1->0, isub 1->0, rieq 0->1, rige 0->1, risub 0->1, runbox 0->3
+  raw-int-ABI plan changes (- knob 0, + knob 1):
+    instance scan_while<any, native(is_tcl_alpha)>
+      NIR variants emitted for i25: knob0 {internal}, knob1 {internal} -- canonical function not emitted: the plan's raw signature is not realized in NIR
+      - raw demand: none (tagged consumers: tagged native ==, tagged native -)
+      + raw demand: result of scan_while<any, native(is_tcl_alpha)> (bind e) -> raw rieq @e289
+      - ABI tagged (suppressed-no-raw-demand)
+      + ABI RawInt
+
+== examples/surface/08-return (examples/surface/08-return.bot)
+  calls knob0: analyze 1 fixpoint 1 plan 1 ms 19; knob1: analyze 1 fixpoint 1 plan 1 ms 85
+  resultNarrow per Fixpoint call (attempted/converged/rounds): knob1 1/1/2; knob0 0/0/0
+  Range facts that changed (knob 0 -> knob 1):
+    narrower  <program>  expr e28: [0, +∞] -> [0, 7]   (call block(e2) : int) <- exact call site
+    narrower  <program>  expr e34: [0, +∞] -> [0, 7]   (call block(e2) : int) <- exact call site
+    narrower  abs<int>  summary summary: [0, +∞] -> [0, 7]
+
+
+Refactor equivalence (corpus above), base 584de41
+===================================================================
+Refactor equivalence: pre-change tree (detached worktree of the base revision, its own defaults)
+vs the changed tree with hir::range::resultNarrowOpt 0
+
+programs compared: 29; skipped on both trees with identical errors: 2
+  examples/surface/09-mutual-recursion (identical error on both trees)
+  examples/surface/10-duplicate-binding (identical error on both trees)
+required byte-identical comparisons (nir.txt, instances.txt): 58, mismatches: 0
+additional byte-identical comparisons (analysis incl. induction/recursive, raw-int-ABI plan text,
+  instance labels, emitted NIR function variants, HIR text, analyze/Fixpoint/plan call counts,
+  every Fixpoint call's state minus the two new keys): 203, mismatches: 0
+knob-0 sanity (resultNarrow all-zero, calleeResults == ascendingResults) and knob-1 ascending
+  phase == knob-0 ascending phase: violations: 0
+
+
+OPTIONAL EXTRA CORPUS: Core-IR-text programs (bench/*.ir examples/*.ir examples/hir/*.ir)
+#########################################################################################
+
+Result-narrowing corpus census (GENERIC-PREDICATE-PROOF-LOSS.md, fix 3)
+hir::range::resultNarrowOpt 0 (pass skipped) vs 1 (default), same tree, same specialization,
+default native lowering options; facts are the ones native::nir's own lowering consumed.
+
+Corpus: 15 programs; compiled natively: 15; skipped: 0
+
+program                             inst  facts narrow  WIDER equal drp/add resultNarrow     nirFn abi    
+----------------------------------------------------------------------------------------------------------
+bench/fib                              2     21      0      0     0     0/0 1/1/1,1/1/1          0 same   
+bench/loop-count                       3     38      0      0     0     0/0 1/1/1                0 same   
+bench/refined-checks                  29    439      5      0     0     0/0 1/1/2                1 changed
+bench/sum-refined                      4     35      0      0     0     0/0 1/1/1                0 same   
+examples/01-adder                      4     25      0      0     0     0/0 1/1/1                0 same   
+examples/02-loop-break                 2     10      0      0     0     0/0 1/1/1                0 same   
+examples/03-lexical-closure            3     13      0      0     0     0/0 1/1/1                0 same   
+examples/04-refinement-scope           3     16      0      0     0     0/0 1/1/1                0 same   
+examples/05-refined-strings           30    421      5      0     0     0/0 1/1/2                1 changed
+examples/hir/01-scopes                 4     22      0      0     0     0/0 1/1/1                0 same   
+examples/hir/02-closures               5     32      0      0     0     0/0 1/1/1                0 same   
+examples/hir/03-recursion              2     18      0      0     0     0/0 1/1/1,1/1/1          0 same   
+examples/hir/04-refinement             4     38      0      0     0     0/0 1/1/1                0 same   
+examples/hir/05-control                2     17      0      0     0     0/0 1/1/1                0 same   
+examples/hir/06-refined-strings       29    411      5      0     0     0/0 1/1/2                1 changed
+----------------------------------------------------------------------------------------------------------
+TOTAL                                126   1556     15      0     0     0/0                      3
+
+Columns: inst = used instances; facts = Range facts compared (entry params, summaries, results,
+expression Ranges, capture facts); narrow = facts strictly narrower at knob 1; WIDER = facts wider or
+incomparable at knob 1 (must be 0); equal = same value set, different text; drp/add = ExprIds
+present at knob 0 only / knob 1 only; resultNarrow = attempted/converged/rounds of each Fixpoint call
+(analyze re-runs Fixpoint after pinning self-recursive summaries); nirFn = NIR functions changed;
+abi = raw-int-ABI plan text (native::rawabi::explainAll).
+
+Totals
+  facts compared:            1556
+  same:                      1541
+  equal set, different text: 0
+  narrower:                  15
+  wider:                     0
+  incomparable:              0
+  ExprIds dropped / added:   0 / 0
+  exact call sites (call expressions) narrowed: 3
+  callee summaries (calleeResults) narrowed:   3
+  programs with any Range fact change: 3
+  programs with narrower facts: 3
+  programs with NIR changes:    3 (3 functions)
+  programs with raw-int-ABI plan changes: 3
+  final Fixpoint: result narrowing attempted 15, converged 15
+  max result-narrowing rounds (any Fixpoint call): 2
+  non-converged result narrowings (any Fixpoint call): 0
+
+By fact kind (kind class count):
+  capture same             62
+  entry same               129
+  expr narrower            12
+  expr same                1101
+  result same              126
+  summary narrower         3
+  summary same             123
+
+Aggregate NIR op-count deltas over all changed functions (knob 1 minus knob 0):
+  ieq -3, ige -3, isub -3, rieq 3, rige 3, risub 3, runbox 9
+
+Wider/incomparable facts and structural mismatches: 0
+
+Skipped programs (did not compile natively):
+  none
+
+Details per program (only programs where something changed)
+============================================================
+== bench/refined-checks (bench/refined-checks.ir)
+  calls knob0: analyze 1 fixpoint 1 plan 1 ms 2152; knob1: analyze 1 fixpoint 1 plan 1 ms 2212
+  resultNarrow per Fixpoint call (attempted/converged/rounds): knob1 1/1/2; knob0 0/0/0
+  Range facts that changed (knob 0 -> knob 1):
+    narrower  scan_while<any, native(is_tcl_alpha)>  summary summary: [-∞, 4611686018427387903] -> [0, 4611686018427387903]
+    narrower  tld?<generic>  expr e283: [-∞, 4611686018427387903] -> [0, 4611686018427387903]   (call block(e266) : int) <- exact call site
+    narrower  tld?<generic>  expr e290: [-∞, 4611686018427387903] -> [0, 4611686018427387903]   (ref b104 e : int)
+    narrower  tld?<generic>  expr e294: [-∞, 4611686018427387901] -> [-4611686018427387903, 4611686018427387901]   (call native(-) : int)
+    narrower  tld?<generic>  expr e296: [-∞, 4611686018427387903] -> [0, 4611686018427387903]   (ref b104 e : int)
+  NIR functions that changed:
+    func "tld?" instance="generic" @e281
+      header rawregs: "9" -> "5 6 9 10 12"
+      header regs: "12" -> "15"
+      tagged-int ops 3->0, raw ri* ops 0->3, runbox 0->3, rbox 0->0, br 1->1, label 3->3, lines 17->20
+      op deltas: ieq 1->0, ige 1->0, isub 1->0, rieq 0->1, rige 0->1, risub 0->1, runbox 0->3
+  raw-int-ABI plan changes (- knob 0, + knob 1):
+    instance scan_while<any, native(is_tcl_alpha)>
+      NIR variants emitted for i25: knob0 {internal}, knob1 {internal} -- canonical function not emitted: the plan's raw signature is not realized in NIR
+      - raw demand: none (tagged consumers: tagged native ==, tagged native -)
+      + raw demand: result of scan_while<any, native(is_tcl_alpha)> (bind e) -> raw rieq @e288
+      - ABI tagged (suppressed-no-raw-demand)
+      + ABI RawInt
+
+== examples/05-refined-strings (examples/05-refined-strings.ir)
+  calls knob0: analyze 1 fixpoint 1 plan 1 ms 2248; knob1: analyze 1 fixpoint 1 plan 1 ms 2262
+  resultNarrow per Fixpoint call (attempted/converged/rounds): knob1 1/1/2; knob0 0/0/0
+  Range facts that changed (knob 0 -> knob 1):
+    narrower  scan_while<any, native(is_tcl_alpha)>  summary summary: [-∞, 4611686018427387903] -> [0, 4611686018427387903]
+    narrower  tld?<generic>  expr e258: [-∞, 4611686018427387903] -> [0, 4611686018427387903]   (call block(e241) : int) <- exact call site
+    narrower  tld?<generic>  expr e265: [-∞, 4611686018427387903] -> [0, 4611686018427387903]   (ref b105 e : int)
+    narrower  tld?<generic>  expr e269: [-∞, 4611686018427387901] -> [-4611686018427387903, 4611686018427387901]   (call native(-) : int)
+    narrower  tld?<generic>  expr e271: [-∞, 4611686018427387903] -> [0, 4611686018427387903]   (ref b105 e : int)
+  NIR functions that changed:
+    func "tld?" instance="generic" @e256
+      header rawregs: "9" -> "5 6 9 10 12"
+      header regs: "12" -> "15"
+      tagged-int ops 3->0, raw ri* ops 0->3, runbox 0->3, rbox 0->0, br 1->1, label 3->3, lines 17->20
+      op deltas: ieq 1->0, ige 1->0, isub 1->0, rieq 0->1, rige 0->1, risub 0->1, runbox 0->3
+  raw-int-ABI plan changes (- knob 0, + knob 1):
+    instance scan_while<any, native(is_tcl_alpha)>
+      NIR variants emitted for i10: knob0 {internal}, knob1 {internal} -- canonical function not emitted: the plan's raw signature is not realized in NIR
+      - raw demand: none (tagged consumers: tagged native ==, tagged native -)
+      + raw demand: result of scan_while<any, native(is_tcl_alpha)> (bind e) -> raw rieq @e263
+      - ABI tagged (suppressed-no-raw-demand)
+      + ABI RawInt
+
+== examples/hir/06-refined-strings (examples/hir/06-refined-strings.ir)
+  calls knob0: analyze 1 fixpoint 1 plan 1 ms 1981; knob1: analyze 1 fixpoint 1 plan 1 ms 2007
+  resultNarrow per Fixpoint call (attempted/converged/rounds): knob1 1/1/2; knob0 0/0/0
+  Range facts that changed (knob 0 -> knob 1):
+    narrower  scan_while<any, native(is_tcl_alpha)>  summary summary: [-∞, 4611686018427387903] -> [0, 4611686018427387903]
+    narrower  tld?<generic>  expr e248: [-∞, 4611686018427387903] -> [0, 4611686018427387903]   (call block(e231) : int) <- exact call site
+    narrower  tld?<generic>  expr e255: [-∞, 4611686018427387903] -> [0, 4611686018427387903]   (ref b103 e : int)
+    narrower  tld?<generic>  expr e259: [-∞, 4611686018427387901] -> [-4611686018427387903, 4611686018427387901]   (call native(-) : int)
+    narrower  tld?<generic>  expr e261: [-∞, 4611686018427387903] -> [0, 4611686018427387903]   (ref b103 e : int)
+  NIR functions that changed:
+    func "tld?" instance="generic" @e246
+      header rawregs: "9" -> "5 6 9 10 12"
+      header regs: "12" -> "15"
+      tagged-int ops 3->0, raw ri* ops 0->3, runbox 0->3, rbox 0->0, br 1->1, label 3->3, lines 17->20
+      op deltas: ieq 1->0, ige 1->0, isub 1->0, rieq 0->1, rige 0->1, risub 0->1, runbox 0->3
+  raw-int-ABI plan changes (- knob 0, + knob 1):
+    instance scan_while<any, native(is_tcl_alpha)>
+      NIR variants emitted for i11: knob0 {internal}, knob1 {internal} -- canonical function not emitted: the plan's raw signature is not realized in NIR
+      - raw demand: none (tagged consumers: tagged native ==, tagged native -)
+      + raw demand: result of scan_while<any, native(is_tcl_alpha)> (bind e) -> raw rieq @e253
+      - ABI tagged (suppressed-no-raw-demand)
+      + ABI RawInt
+
+
+Refactor equivalence (extra corpus), base 584de41
+===================================================================
+Refactor equivalence: pre-change tree (detached worktree of the base revision, its own defaults)
+vs the changed tree with hir::range::resultNarrowOpt 0
+
+programs compared: 15; skipped on both trees with identical errors: 0
+required byte-identical comparisons (nir.txt, instances.txt): 30, mismatches: 0
+additional byte-identical comparisons (analysis incl. induction/recursive, raw-int-ABI plan text,
+  instance labels, emitted NIR function variants, HIR text, analyze/Fixpoint/plan call counts,
+  every Fixpoint call's state minus the two new keys): 105, mismatches: 0
+knob-0 sanity (resultNarrow all-zero, calleeResults == ascendingResults) and knob-1 ascending
+  phase == knob-0 ascending phase: violations: 0

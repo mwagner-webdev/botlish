@@ -1,0 +1,117 @@
+Compile-time effect of the result-narrowing pass (GENERIC-PREDICATE-PROOF-LOSS.md, fix 3)
+NOTE (base): measured on e1ce1a3 + fix 3, before the two soundness fixes the review found
+(callee-position calls in hir::range, the bit_and identity fold) were committed under it, and before
+the rebase onto main 07b373c (fix 3's parent is now 584de41).
+Neither changes the NIR of any of these 17 programs (checked: e1ce1a3 and 07b373c vs the fixes, all bench/stdlib
+programs byte-identical), and fix 3's own knob 0 vs 1 NIR difference is unchanged on 584de41
+(out/census.txt), so fix 3's own work (rounds, AnalyzeInstance calls) is unchanged. The callee-position
+fix adds a walk of each non-reference callee expression to every analysis (rare in this corpus);
+its wall time was not re-measured.
+hir::range::resultNarrowOpt 0 (pass skipped) vs 1 (default); same tree (e1ce1a3 + the uncommitted
+change), same prepared HIR and specialization, default lowering options.
+Tool: audit/generic-predicate-proof-loss/tools/compiletime.tcl (see its header for the columns):
+  range   hir::range::analyze wall time (all its Fixpoint calls plus rangerec.tcl's solve)
+  pass    wall time inside the result-narrowing NarrowRounds calls (knob 1), summed over the
+          analyze's Fixpoint calls. A converged pass's last round doubles as Fixpoint's final
+          recompute (which knob 0 runs separately), so this is NOT the pass's net cost
+  nir     native::nir wall time (prepareHir, specialization, this analysis, every other analysis,
+          NIR emission)
+  dRange  (median range 1 - median range 0) / median range 0
+  fixpoints  per Fixpoint call at knob 1: instances:attempted/converged/rounds (Fixpoint state
+          resultNarrow; analyze re-runs Fixpoint after pinning self-recursive summaries, hence two
+          entries for bench/fib)
+  AI      AnalyzeInstance calls made by one hir::range::analyze, knob 0 -> knob 1 (counted in a
+          separate untimed run); "extra AI" = the per-instance walks the pass adds, net of the final
+          recompute it replaces
+Medians of N alternating runs (knob order 0,1 on even iterations, 1,0 on odd), minimum in
+parentheses, milliseconds.
+
+MACHINE LOAD / NOISE: measured on a shared 4-CPU machine while two full test-suite runs were in
+progress (load average 3.7 -> 5.0 during these runs). Wall times are therefore noisy: across the 16
+programs whose analysis work is provably identical at both knobs (same AnalyzeInstance count, see
+the AI column), per-program dRange ranges from -3.9% to +4.6% in pass A and from -4.5% to +13.7% in
+pass B (csv_geometric: +1.4% in A, +13.7% in B, identical work). Treat any per-program range delta
+within about +/-14%, and any nir delta within a few %, as noise. The work counts (fixpoints, AI) are
+exact and deterministic.
+
+== Pass A (n=5, full corpus) ==
+load: load average: 3.67, 2.83, 1.81 at start, load average: 4.45, 3.14, 1.96 at end
+program                        | range 0           | range 1           | pass    | nir 0             | nir 1             | dRange   | fixpoints                | AI 0 -> 1 (extra AI)
+bench/fib                      |    15.5 (   14.8) |    14.9 (   14.7) |     1.3 |    20.8 (   20.0) |    20.2 (   19.8) |    -3.9% | 2:1/1/1,2:1/1/1          | 60 -> 60 (+0)
+bench/lex-strategy             |    18.5 (   17.7) |    18.5 (   17.9) |     2.2 |    54.6 (   50.9) |    54.0 (   52.2) |    -0.0% | 11:1/1/1                 | 73 -> 73 (+0)
+bench/loop-count               |     3.2 (    3.0) |     3.4 (    3.2) |     0.3 |    10.5 (    9.9) |    10.2 (    9.9) |    +4.6% | 3:1/1/1                  | 21 -> 21 (+0)
+bench/refined-checks           |    68.3 (   66.9) |    73.7 (   72.7) |    11.2 |   385.1 (  375.7) |   399.9 (  385.3) |    +7.9% | 29:1/1/2                 | 268 -> 297 (+29)
+bench/source-checks            |     5.1 (    5.0) |     5.0 (    4.9) |     1.0 |    25.7 (   25.4) |    25.6 (   24.8) |    -2.9% | 7:1/1/1                  | 28 -> 28 (+0)
+bench/sum-refined              |     2.4 (    2.3) |     2.5 (    2.4) |     0.3 |     9.4 (    9.2) |     9.6 (    9.2) |    +2.6% | 4:1/1/1                  | 23 -> 23 (+0)
+bench/test-selection           |     9.6 (    9.2) |     9.6 (    9.4) |     1.6 |    51.1 (   45.9) |    47.6 (   46.7) |    +1.0% | 12:1/1/1                 | 48 -> 48 (+0)
+bench/uri-steady               |    34.8 (   33.1) |    35.7 (   32.7) |     3.8 |   137.8 (  122.8) |   132.4 (  116.5) |    +2.7% | 19:1/1/1                 | 119 -> 119 (+0)
+examples/stdlib/ai_text_clean  |    14.6 (   13.9) |    14.6 (   13.9) |     2.1 |    56.2 (   47.2) |    47.0 (   44.8) |    +0.3% | 6:1/1/1                  | 38 -> 38 (+0)
+examples/stdlib/csv            |    13.4 (   13.3) |    14.0 (   13.6) |     2.7 |    64.0 (   61.4) |    63.8 (   62.6) |    +4.2% | 10:1/1/1                 | 40 -> 40 (+0)
+examples/stdlib/csv_chunked    |    47.8 (   46.8) |    47.6 (   47.0) |     6.0 |   176.4 (  175.4) |   172.9 (  171.5) |    -0.3% | 20:1/1/1                 | 126 -> 126 (+0)
+examples/stdlib/csv_geometric  |    34.6 (   34.5) |    35.1 (   34.6) |     3.8 |   116.1 (  113.9) |   117.2 (  114.0) |    +1.4% | 19:1/1/1                 | 137 -> 137 (+0)
+examples/stdlib/csv_records    |   183.0 (  172.7) |   182.4 (  167.2) |    13.0 |   754.2 (  707.4) |   756.1 (  741.5) |    -0.3% | 59:1/1/1                 | 549 -> 549 (+0)
+examples/stdlib/hashtable      |    84.4 (   83.4) |    85.4 (   84.3) |     6.8 |   297.8 (  287.6) |   304.1 (  295.9) |    +1.2% | 30:1/1/1                 | 276 -> 276 (+0)
+examples/stdlib/matmul         |    20.9 (   20.6) |    21.7 (   20.8) |     2.3 |    55.4 (   53.5) |    56.0 (   54.7) |    +3.8% | 7:1/1/1                  | 56 -> 56 (+0)
+examples/stdlib/string_replace |     6.8 (    6.8) |     7.0 (    6.9) |     0.9 |    26.1 (   25.9) |    26.1 (   26.0) |    +1.6% | 4:1/1/1                  | 23 -> 23 (+0)
+examples/stdlib/string_reverse |     2.1 (    2.1) |     2.1 (    2.1) |     0.4 |    10.1 (   10.1) |    10.2 (   10.1) |    +2.5% | 3:1/1/1                  | 13 -> 13 (+0)
+SUM of medians                 |   565.0           |   573.2           |    59.6 |  2251.3           |  2252.9           |    +1.5% |
+
+== Pass B (n=5, full corpus, repeat of A for noise) ==
+load: load average: 4.41, 3.15, 1.97 at start, load average: 4.75, 3.40, 2.11 at end
+program                        | range 0           | range 1           | pass    | nir 0             | nir 1             | dRange   | fixpoints                | AI 0 -> 1 (extra AI)
+bench/fib                      |    14.6 (   14.3) |    14.6 (   14.5) |     1.3 |    19.4 (   18.9) |    19.5 (   19.2) |    +0.6% | 2:1/1/1,2:1/1/1          | 60 -> 60 (+0)
+bench/lex-strategy             |    17.6 (   17.5) |    18.1 (   17.9) |     2.1 |    52.0 (   51.7) |    52.0 (   51.4) |    +2.4% | 11:1/1/1                 | 73 -> 73 (+0)
+bench/loop-count               |     3.1 (    3.1) |     3.2 (    3.2) |     0.3 |     9.7 (    9.6) |     9.9 (    9.6) |    +2.2% | 3:1/1/1                  | 21 -> 21 (+0)
+bench/refined-checks           |    68.2 (   63.2) |    77.0 (   70.9) |    12.6 |   384.9 (  359.5) |   392.7 (  374.9) |   +12.8% | 29:1/1/2                 | 268 -> 297 (+29)
+bench/source-checks            |     5.3 (    5.1) |     5.1 (    4.9) |     1.0 |    25.0 (   24.7) |    25.9 (   24.6) |    -4.5% | 7:1/1/1                  | 28 -> 28 (+0)
+bench/sum-refined              |     2.4 (    2.3) |     2.6 (    2.4) |     0.3 |     9.1 (    8.9) |     9.1 (    8.9) |    +7.3% | 4:1/1/1                  | 23 -> 23 (+0)
+bench/test-selection           |     9.7 (    9.3) |     9.4 (    9.1) |     1.6 |    48.2 (   44.9) |    50.2 (   48.7) |    -3.6% | 12:1/1/1                 | 48 -> 48 (+0)
+bench/uri-steady               |    32.9 (   31.1) |    31.8 (   31.1) |     3.6 |   119.1 (  113.8) |   118.2 (  113.8) |    -3.3% | 19:1/1/1                 | 119 -> 119 (+0)
+examples/stdlib/ai_text_clean  |    13.5 (   12.8) |    13.4 (   13.2) |     1.9 |    43.5 (   42.9) |    43.8 (   43.5) |    -0.7% | 6:1/1/1                  | 38 -> 38 (+0)
+examples/stdlib/csv            |    13.9 (   13.3) |    14.8 (   13.9) |     2.7 |    64.0 (   63.3) |    64.3 (   64.0) |    +6.7% | 10:1/1/1                 | 40 -> 40 (+0)
+examples/stdlib/csv_chunked    |    49.8 (   49.2) |    50.7 (   47.3) |     6.1 |   191.4 (  174.3) |   183.4 (  177.1) |    +1.9% | 20:1/1/1                 | 126 -> 126 (+0)
+examples/stdlib/csv_geometric  |    35.4 (   34.7) |    40.3 (   35.4) |     4.2 |   136.7 (  126.4) |   120.0 (  118.2) |   +13.7% | 19:1/1/1                 | 137 -> 137 (+0)
+examples/stdlib/csv_records    |   187.0 (  169.0) |   188.4 (  166.9) |    13.3 |   778.0 (  717.4) |   775.5 (  731.7) |    +0.7% | 59:1/1/1                 | 549 -> 549 (+0)
+examples/stdlib/hashtable      |    85.6 (   83.4) |    88.0 (   86.0) |     6.8 |   307.6 (  302.2) |   321.6 (  309.2) |    +2.8% | 30:1/1/1                 | 276 -> 276 (+0)
+examples/stdlib/matmul         |    21.0 (   20.9) |    21.1 (   20.9) |     2.2 |    54.5 (   54.1) |    56.7 (   55.2) |    +0.5% | 7:1/1/1                  | 56 -> 56 (+0)
+examples/stdlib/string_replace |     7.0 (    6.9) |     7.1 (    7.0) |     1.0 |    26.7 (   26.4) |    26.3 (   26.2) |    +1.3% | 4:1/1/1                  | 23 -> 23 (+0)
+examples/stdlib/string_reverse |     2.1 (    2.0) |     2.2 (    2.1) |     0.3 |    10.6 (   10.2) |    10.3 (   10.1) |    +2.7% | 3:1/1/1                  | 13 -> 13 (+0)
+SUM of medians                 |   569.3           |   587.7           |    61.4 |  2280.3           |  2279.5           |    +3.2% |
+
+== Pass C (n=15, the changed program and the largest one) ==
+load: load average: 4.77, 3.43, 2.12 at start, load average: 4.96, 3.69, 2.28 at end
+program                        | range 0           | range 1           | pass    | nir 0             | nir 1             | dRange   | fixpoints                | AI 0 -> 1 (extra AI)
+bench/refined-checks           |    66.7 (   61.6) |    73.9 (   70.5) |    11.4 |   391.3 (  345.5) |   390.1 (  369.9) |   +10.8% | 29:1/1/2                 | 268 -> 297 (+29)
+examples/stdlib/csv_records    |   183.1 (  170.4) |   184.5 (  173.4) |    13.0 |   787.9 (  685.4) |   783.7 (  724.0) |    +0.8% | 59:1/1/1                 | 549 -> 549 (+0)
+SUM of medians                 |   249.8           |   258.4           |    24.3 |  1179.2           |  1173.9           |    +3.5% |
+
+== Extra AnalyzeInstance rounds per program (exact, deterministic) ==
+program                          instances  result-narrowing rounds   extra AnalyzeInstance rounds   AI calls 0 -> 1
+bench/refined-checks                    29  2 (converged)             1 (= +29 AI calls)             268 -> 297 (+10.8%)
+every other program (16 of 17)    2 .. 59   1 (converged) per Fixpoint call   0                      identical
+  (bench/fib: two Fixpoint calls, 1 round each; every pass in the corpus converged, none hit the
+  budget.) A pass of R rounds that converges costs R-1 extra AnalyzeInstance rounds: its converged
+  round analyzes every instance under exactly the committed facts and is reused as the final
+  recompute. The only extra work of a 1-round pass is one RangeNarrow per result summary plus the
+  change test -- not measurable here.
+
+== Summary ==
+* bench/refined-checks (the only program whose facts change): +1 AnalyzeInstance round (+29 calls,
+  +10.8%). hir::range::analyze median +5.4 ms (+7.9%, pass A), +8.8 ms (+12.8%, pass B), +7.2 ms
+  (+10.8%, pass C n=15) on ~67 ms; the pass itself takes 11.2-12.6 ms for its 2 rounds, i.e. ~6 ms
+  per round, matching the one extra round. Whole native::nir: 385.1 -> 399.9 (A), 384.9 -> 392.7
+  (B), 391.3 -> 390.1 (C) ms -- an expected ~+6 ms (~+1.5%) that is inside the noise.
+* The other 16 programs: identical AnalyzeInstance counts; the pass runs 1 round that replaces the
+  final recompute. Sum of range medians (excluding refined-checks) 496.7 -> 499.5 ms (+0.6%, A),
+  500.9 -> 510.8 ms (+2.0%, B, mostly csv_geometric's noisy +4.9 ms; sum of minimums 474.9 -> 475.8,
+  +0.2%); sum of nir medians 1866.2 -> 1853.0 (A), 1895.5 -> 1886.7 (B): no measurable change.
+* Whole corpus, sum of native::nir medians: 2251.3 -> 2252.9 ms (A), 2280.3 -> 2279.5 ms (B).
+* Cost bound: a pass that converges in R rounds adds R-1 rounds; one that does not converge adds
+  its whole budget (its facts are discarded and the final recompute still runs). Each round is one
+  AnalyzeInstance per used instance (the same unit M9's narrowing loop costs); the budget is
+  Fixpoint's own roundBudget (4 * instances + 16) unless resultNarrowRoundLimit overrides it, and
+  it applies to every Fixpoint call analyze makes (up to 1 + maxRecursivePasses = 3).
+
+Reproduce (repository root):
+  tclsh9.0 audit/generic-predicate-proof-loss/tools/compiletime.tcl -n 5 bench/*.bot examples/stdlib/*.bot
+  tclsh9.0 audit/generic-predicate-proof-loss/tools/compiletime.tcl -n 15 bench/refined-checks.bot examples/stdlib/csv_records.bot

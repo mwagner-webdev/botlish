@@ -225,7 +225,7 @@ fn g(m) -> int errors TooLarge:
     }
 } -result {}
 
-test checked-domain-q2-still-emits-both-checks {UPDATED BY M6: with that narrower one-sided HIR-level-*and-now-codegen-visible* proof (nonneg's own result range settles to [10,+inf) -- both its branches return a value already >=10), checkedSmall<int>'s TooSmall check is eliminated (value<10 is AlwaysFalse against [10,+inf)), but TooLarge remains: nonneg's result is only bounded below, never above, so value>20 is genuinely Unknown -- Q2 = one check, not two; a real partial-range elimination, exactly proportional to what hir::range actually proves (no invented upper bound)} -body {
+test checked-domain-q2-still-emits-both-checks {UPDATED BY M6: with that narrower one-sided HIR-level-*and-now-codegen-visible* proof (nonneg's own result range settles to [10, 2^62-1] -- both its branches return a value already >=10), checkedSmall<int>'s TooSmall check is eliminated (value<10 is AlwaysFalse), but TooLarge remains: nonneg's argument is a String length, bounded only by the small-Int range, so value>20 is genuinely Unknown -- Q2 = one check, not two; a real partial-range elimination, exactly proportional to what hir::range actually proves (no invented upper bound). UPDATED BY GENERIC-PREDICATE-PROOF-LOSS.md (fix 3): the program's only caller used to be g(5), whose upper side was Unknown only because call sites read nonneg's ascending summary [10,+inf); with result narrowing that caller proves nonneg(5) = 10 and removes both checks (next test), so the genuinely upper-unbounded caller below keeps this test about partial elimination} -body {
     set body [nirFuncBody [nirOf "${::smallCheckedSrc}fn nonneg(m) -> int:
     if m < 10:
         10
@@ -233,10 +233,34 @@ test checked-domain-q2-still-emits-both-checks {UPDATED BY M6: with that narrowe
         m
 fn g(m) -> int errors TooLarge:
     checkedSmall(nonneg(m))
-g(5)"] "checkedSmall"]
+fn h(s) -> int errors TooLarge:
+    g(length(s))
+h(\"a long enough string\")"] "checkedSmall"]
     list [regexp -all {faildeclared 1 "TooSmall"} $body] \
             [regexp -all {faildeclared 2 "TooLarge"} $body]
 } -result {0 1}
+
+test checked-domain-q2-narrowed-summary-removes-both-checks {GENERIC-PREDICATE-PROOF-LOSS.md (fix 3): with g(5) as nonneg's only caller, nonneg's result summary narrows from the ascending [10,+inf) to [10, 10] (the m < 10 branch is the only live one), so checkedSmall<int> needs neither check; with hir::range::resultNarrowOpt 0 the call site reads the old one-sided summary and TooLarge stays} -body {
+    set src "${::smallCheckedSrc}fn nonneg(m) -> int:
+    if m < 10:
+        10
+    else:
+        m
+fn g(m) -> int errors TooLarge:
+    checkedSmall(nonneg(m))
+g(5)"
+    set row {{src} {
+        set body [nirFuncBody [nirOf $src] "checkedSmall"]
+        list [regexp -all {faildeclared 1 "TooSmall"} $body] [regexp -all {faildeclared 2 "TooLarge"} $body]
+    }}
+    set hir::range::resultNarrowOpt 0
+    try {
+        set off [apply $row $src]
+    } finally {
+        set hir::range::resultNarrowOpt 1
+    }
+    list $off [apply $row $src]
+} -result {{0 1} {0 0}}
 
 # ---------------------------------------------------------------------------
 # Q3 (decision-tree item 46): the real byte::set path, the actual question

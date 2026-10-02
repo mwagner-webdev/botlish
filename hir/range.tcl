@@ -69,6 +69,11 @@
 #
 # Exact-call arguments and successful-result ranges now settle together in
 # the instance rounds below. No value fact implies completion or an effect.
+# After the ascending rounds, two descending passes recover infinite sides
+# the rounds left behind: M9's (entries and captures) and the result
+# narrowing (the callee summaries call expressions read, together with
+# entries and captures; GENERIC-PREDICATE-PROOF-LOSS.md, fix 3). See
+# Fixpoint.
 
 
 namespace eval hir::range {
@@ -110,6 +115,15 @@ namespace eval hir::range {
     # (falls back to `unknown`) rather than trying to compute and propagate
     # a bound of a size nothing downstream can afford to look at.
     variable maxShiftLeftAmount 4096
+    # GENERIC-PREDICATE-PROOF-LOSS.md (fix 3): Fixpoint's result-narrowing
+    # pass, which narrows callee result summaries (what a call expression
+    # reads) together with entry and capture facts after M9's narrowing.
+    # Test/audit-only knobs, never a user-facing flag: resultNarrowOpt 0
+    # skips the pass (the call-site summaries stay the ascending phase's
+    # widened ones, exactly as before it existed); resultNarrowRoundLimit
+    # overrides its round budget ("" = Fixpoint's own roundBudget).
+    variable resultNarrowOpt 1
+    variable resultNarrowRoundLimit ""
 }
 
 # ---------------------------------------------------------------------------
@@ -2285,6 +2299,126 @@ proc hir::range::SettleInstance {hir id instanceCalls block params assumed locke
     return [list $outcome $assumed]
 }
 
+# One bounded descending pass over the used instances (M9's post-widen
+# narrowing, and Fixpoint's result narrowing): starting from the sound facts
+# NARROWED (InstanceId -> entry Ranges), CAPTURES (child block ExprId ->
+# BindingId -> Range) and RESULTS (InstanceId -> successful-result Range,
+# the summaries a call reads), each round re-analyzes every instance once
+# under the current facts -- a single AnalyzeInstance, never
+# SettleInstance's own self-call sub-loop, which would re-apply `widen` --
+# and folds what it finds back with RangeNarrow:
+#
+#   * every reached exact call's argument Ranges, joined over all callers
+#     (self calls included), into the callee's entry -- never into an OPEN
+#     instance (unknown ingress) and never at an induction-LOCKED index;
+#   * every reached creation site's capture Ranges, joined over all sites,
+#     into the child block's capture facts;
+#   * with NARROWRESULTS only, each instance's own fresh result into its
+#     summary in RESULTS -- never a PINNED summary (rangerec.tcl), never an
+#     instance with no summary at all.
+#
+# CTX holds Fixpoint's per-instance tables (ids blockOf paramsOf viewOf
+# instanceCallsOf monotoneOf lockedOf open captureOpt pinned). Returns
+# {CONVERGED NARROWED CAPTURES RESULTS ROUNDS OUTCOMES}: CONVERGED is 1 iff
+# a round changed nothing within ROUNDBUDGET rounds, ROUNDS the rounds run,
+# OUTCOMES the last round's AnalyzeInstance outcomes (computed under the
+# returned facts exactly when CONVERGED). With NARROWRESULTS 0 this is
+# exactly M9's narrowing loop.
+proc hir::range::NarrowRounds {ctx narrowed captures results narrowResults roundBudget} {
+    set ids [dict get $ctx ids]
+    set open [dict get $ctx open]
+    set captureOpt [dict get $ctx captureOpt]
+    set pinned [dict get $ctx pinned]
+    set converged 0
+    set rounds 0
+    set freshOutcomes [dict create]
+    for {set round 1} {$round <= $roundBudget} {incr round} {
+        set rounds $round
+        set changed 0
+        set contributions [dict create]
+        set roundCaptures [dict create]
+        set freshOutcomes [dict create]
+        foreach id $ids {
+            set block [dict get $ctx blockOf $id]
+            set captureSeed [expr {$captureOpt && [dict exists $captures $block] ? [dict get $captures $block] : {}}]
+            set outcome [AnalyzeInstance [dict get $ctx viewOf $id] $id [dict get $ctx instanceCallsOf $id] \
+                $block [dict get $ctx paramsOf $id] [dict get $narrowed $id] \
+                [dict get $ctx monotoneOf $id] $results $captureSeed]
+            dict set freshOutcomes $id $outcome
+            foreach pair [dict get $outcome calls] {
+                lassign $pair target argRanges
+                if {[dict exists $open $target]} {
+                    continue
+                }
+                set current [expr {[dict exists $contributions $target]
+                    ? [dict get $contributions $target] : [lrepeat [llength $argRanges] never]}]
+                set next {}
+                foreach c $current r $argRanges {
+                    lappend next [join $c $r]
+                }
+                dict set contributions $target $next
+            }
+            foreach pair [dict get $outcome creates] {
+                lassign $pair childBlock capRanges
+                set current [expr {[dict exists $roundCaptures $childBlock] ? [dict get $roundCaptures $childBlock] : {}}]
+                dict for {b r} $capRanges {
+                    set prior [expr {[dict exists $current $b] ? [dict get $current $b] : "never"}]
+                    dict set current $b [join $prior $r]
+                }
+                dict set roundCaptures $childBlock $current
+            }
+        }
+        dict for {target contribution} $contributions {
+            set locked [dict get $ctx lockedOf $target]
+            set current [dict get $narrowed $target]
+            set next {}
+            set i 0
+            foreach o $current c $contribution {
+                if {[dict exists $locked $i]} {
+                    lappend next $o
+                } else {
+                    lappend next [RangeNarrow $o [expr {$c eq "never" ? [unknown] : $c}]]
+                }
+                incr i
+            }
+            if {$next ne $current} {
+                set changed 1
+            }
+            dict set narrowed $target $next
+        }
+        dict for {childBlock capRanges} $roundCaptures {
+            set current [expr {[dict exists $captures $childBlock] ? [dict get $captures $childBlock] : {}}]
+            set next $current
+            dict for {b r} $capRanges {
+                set old [expr {[dict exists $current $b] ? [dict get $current $b] : [unknown]}]
+                dict set next $b [RangeNarrow $old $r]
+            }
+            if {$next ne $current} {
+                set changed 1
+            }
+            dict set captures $childBlock $next
+        }
+        if {$narrowResults} {
+            foreach id $ids {
+                if {[dict exists $pinned $id] || ![dict exists $results $id]} {
+                    continue
+                }
+                set current [dict get $results $id]
+                set next [RangeNarrow $current [dict get $freshOutcomes $id result]]
+                if {$next ne $current} {
+                    dict set results $id $next
+                    set changed 1
+                }
+            }
+        }
+        if {!$changed} {
+            set converged 1
+            break
+        }
+    }
+    return [list $converged $narrowed $captures $results $rounds $freshOutcomes]
+}
+
 # ---------------------------------------------------------------------------
 # Entry point
 
@@ -2669,99 +2803,97 @@ proc hir::range::Fixpoint {hir spec callFactsOpt narrowOpt captureOpt pinned} {
     # the widened baseline is used as-is: no user-facing error, and no
     # partially-narrowed instance is ever committed merely because the
     # round budget expired.
+    set narrowCtx [dict create ids $ids blockOf $blockOf paramsOf $paramsOf viewOf $viewOf \
+        instanceCallsOf $instanceCallsOf monotoneOf $monotoneOf lockedOf $lockedOf open $open \
+        captureOpt $captureOpt pinned $pinned]
     set narrowed $assumed
     set narrowedCaptures $captureSeeds
-    set narrowConverged 0
     if {$narrowOpt} {
-    for {set round 1} {$round <= $roundBudget} {incr round} {
-        set changed 0
-        set contributions [dict create]
-        set roundCaptures [dict create]
-        set freshOutcomes [dict create]
-        foreach id $ids {
-            set block [dict get $blockOf $id]
-            set captureSeed [expr {$captureOpt && [dict exists $narrowedCaptures $block] ? [dict get $narrowedCaptures $block] : {}}]
-            set outcome [AnalyzeInstance [dict get $viewOf $id] $id [dict get $instanceCallsOf $id] \
-                $block [dict get $paramsOf $id] [dict get $narrowed $id] \
-                [dict get $monotoneOf $id] $calleeResults $captureSeed]
-            dict set freshOutcomes $id $outcome
-            foreach pair [dict get $outcome calls] {
-                lassign $pair target argRanges
-                if {[dict exists $open $target]} {
-                    continue
-                }
-                set current [expr {[dict exists $contributions $target]
-                    ? [dict get $contributions $target] : [lrepeat [llength $argRanges] never]}]
-                set next {}
-                foreach c $current r $argRanges {
-                    lappend next [join $c $r]
-                }
-                dict set contributions $target $next
-            }
-            foreach pair [dict get $outcome creates] {
-                lassign $pair childBlock capRanges
-                set current [expr {[dict exists $roundCaptures $childBlock] ? [dict get $roundCaptures $childBlock] : {}}]
-                dict for {b r} $capRanges {
-                    set prior [expr {[dict exists $current $b] ? [dict get $current $b] : "never"}]
-                    dict set current $b [join $prior $r]
-                }
-                dict set roundCaptures $childBlock $current
-            }
+        lassign [NarrowRounds $narrowCtx $assumed $captureSeeds $calleeResults 0 $roundBudget] \
+            narrowConverged candidate candidateCaptures
+        if {$narrowConverged} {
+            set narrowed $candidate
+            set narrowedCaptures $candidateCaptures
         }
-        dict for {target contribution} $contributions {
-            set locked [dict get $lockedOf $target]
-            set current [dict get $narrowed $target]
-            set next {}
-            set i 0
-            foreach o $current c $contribution {
-                if {[dict exists $locked $i]} {
-                    lappend next $o
-                } else {
-                    lappend next [RangeNarrow $o [expr {$c eq "never" ? [unknown] : $c}]]
-                }
-                incr i
-            }
-            if {$next ne $current} {
-                set changed 1
-            }
-            dict set narrowed $target $next
-        }
-        dict for {childBlock capRanges} $roundCaptures {
-            set current [expr {[dict exists $narrowedCaptures $childBlock] ? [dict get $narrowedCaptures $childBlock] : {}}]
-            set next $current
-            dict for {b r} $capRanges {
-                set old [expr {[dict exists $current $b] ? [dict get $current $b] : [unknown]}]
-                dict set next $b [RangeNarrow $old $r]
-            }
-            if {$next ne $current} {
-                set changed 1
-            }
-            dict set narrowedCaptures $childBlock $next
-        }
-        if {!$changed} {
-            set narrowConverged 1
-            break
-        }
+        # Otherwise it did not stabilize within budget: leak nothing (spec
+        # #16-17) -- the ascending phase's own widened baseline, outright.
+        # (The result narrowing below then starts from that baseline, and
+        # may still commit narrower facts of its own if it converges.)
     }
-    }
-    if {!$narrowConverged} {
-        # Did not stabilize within budget: leak nothing (spec #16-17) --
-        # fall back to the ascending phase's own widened baseline outright.
-        set narrowed $assumed
-        set narrowedCaptures $captureSeeds
+
+    # ---------------------------------------------------------------------
+    # Result narrowing (GENERIC-PREDICATE-PROOF-LOSS.md, fix 3).
+    #
+    # The pass above narrows entry and capture facts but reads every callee
+    # result summary from CALLEERESULTS, which only the ascending phase
+    # writes, and there a summary is only ever joined: a first round run
+    # while the callee's entries were still unknown can leave it an
+    # infinite side that no later round removes, so a call expression keeps
+    # that side even where the callee's own result under its narrowed
+    # entries is bounded (refined-checks' `e = scan_while(i, is_tcl_alpha)`
+    # in tld? read [-∞, 2^62-1] for a callee whose result is [0, 2^62-1],
+    # so tld?'s `e - i` could not be lowered raw; `fn clamp(x): if x > 100:
+    # 100 else: x`, called only as clamp(5), read [-∞, 100]). This second
+    # pass, starting from the committed facts above, narrows all three
+    # together: each round's fresh result of an instance narrows its own
+    # summary with the same RangeNarrow, so callers read it on the next
+    # round, and whatever their arguments then gain narrows their callees'
+    # entries in turn. Like M9's, it only fills infinite sides: a summary
+    # the ascending rounds left finite but loose stays as it is.
+    #
+    # Soundness does not rest on convergence or on monotonicity of the
+    # transfer functions: every fact this pass starts from is sound, every
+    # fact a round computes from sound facts is sound (the ordinary
+    # per-instance soundness of AnalyzeInstance -- the same argument the
+    # pass above and rangerec.tcl's RefinedResults rely on), and
+    # RangeNarrow(old, new) is never tighter than old ∩ new. Commit
+    # discipline is nevertheless the same as the pass above (spec #16-17):
+    # only a pass that reaches its own fixed point within budget is
+    # committed; otherwise the facts above stand unchanged. Starting from
+    # them, and RangeNarrow never widening, this pass can only ever refine
+    # them, so a non-converging pass costs precision it never had, nothing
+    # more. Pinned summaries (rangerec.tcl) are never touched.
+    #
+    # RESULTNARROWOPT / RESULTNARROWROUNDLIMIT (namespace variables, top of
+    # this file): test/audit-only knobs, never a user-facing flag.
+    variable resultNarrowOpt
+    variable resultNarrowRoundLimit
+    set ascendingResults $calleeResults
+    set resultNarrow [dict create attempted 0 converged 0 rounds 0]
+    set finalOutcomes ""
+    if {$narrowOpt && $callFactsOpt && $resultNarrowOpt} {
+        set budget [expr {$resultNarrowRoundLimit ne "" ? $resultNarrowRoundLimit : $roundBudget}]
+        lassign [NarrowRounds $narrowCtx $narrowed $narrowedCaptures $calleeResults 1 $budget] \
+            converged candidate candidateCaptures candidateResults rounds lastOutcomes
+        dict set resultNarrow attempted 1
+        dict set resultNarrow converged $converged
+        dict set resultNarrow rounds $rounds
+        if {$converged} {
+            set narrowed $candidate
+            set narrowedCaptures $candidateCaptures
+            set calleeResults $candidateResults
+            # The converged round changed nothing, so it analyzed every
+            # instance under exactly the committed facts: its outcomes ARE
+            # the final recompute below.
+            set finalOutcomes $lastOutcomes
+        }
     }
 
     # One final recompute under whichever facts were actually committed
-    # (the narrowed candidate, or the widened baseline on fallback), so
+    # (narrowed by M9 and/or the result narrowing, or the ascending
+    # baseline where neither converged), so
     # every instance's own recorded exprs/result reflects exactly that
     # committed entry fact -- never a still-converging intermediate round's.
-    set finalOutcomes [dict create]
-    foreach id $ids {
-        set block [dict get $blockOf $id]
-        set captureSeed [expr {$captureOpt && [dict exists $narrowedCaptures $block] ? [dict get $narrowedCaptures $block] : {}}]
-        dict set finalOutcomes $id [AnalyzeInstance [dict get $viewOf $id] $id [dict get $instanceCallsOf $id] \
-            $block [dict get $paramsOf $id] [dict get $narrowed $id] \
-            [dict get $monotoneOf $id] $calleeResults $captureSeed]
+    # (Already in hand when the result narrowing converged: see above.)
+    if {$finalOutcomes eq ""} {
+        set finalOutcomes [dict create]
+        foreach id $ids {
+            set block [dict get $blockOf $id]
+            set captureSeed [expr {$captureOpt && [dict exists $narrowedCaptures $block] ? [dict get $narrowedCaptures $block] : {}}]
+            dict set finalOutcomes $id [AnalyzeInstance [dict get $viewOf $id] $id [dict get $instanceCallsOf $id] \
+                $block [dict get $paramsOf $id] [dict get $narrowed $id] \
+                [dict get $monotoneOf $id] $calleeResults $captureSeed]
+        }
     }
 
     set instances [dict create]
@@ -2779,7 +2911,8 @@ proc hir::range::Fixpoint {hir spec callFactsOpt narrowOpt captureOpt pinned} {
     set state [dict create ids $ids blockOf $blockOf paramsOf $paramsOf viewOf $viewOf \
         instanceCallsOf $instanceCallsOf monotoneOf $monotoneOf open $open \
         narrowed $narrowed narrowedCaptures $narrowedCaptures calleeResults $calleeResults \
-        finalOutcomes $finalOutcomes captureOpt $captureOpt selfRecursiveOf $selfRecursiveOf pinned $pinned]
+        finalOutcomes $finalOutcomes captureOpt $captureOpt selfRecursiveOf $selfRecursiveOf pinned $pinned \
+        ascendingResults $ascendingResults resultNarrow $resultNarrow]
     return [dict create instances $instances induction $induction state $state]
 }
 
