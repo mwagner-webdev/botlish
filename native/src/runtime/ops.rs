@@ -810,6 +810,12 @@ pub extern "C" fn rt_str_byte_len(p: *mut Vm, s: Value) -> Value {
 pub extern "C" fn rt_str_lower(p: *mut Vm, s: Value) -> Value {
     // Simple (one-to-one) case mapping, like Tcl's string tolower.
     fn lower(c: char) -> char {
+        // U+0130's full lowercase is "i" + U+0307 (SpecialCasing.txt's only
+        // unconditional multi-character lowercase); Tcl's simple mapping
+        // (UnicodeData.txt) is plain U+0069.
+        if c == '\u{130}' {
+            return 'i';
+        }
         let mut lower = c.to_lowercase();
         match (lower.next(), lower.next()) {
             (Some(l), None) => l,
