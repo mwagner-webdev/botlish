@@ -916,21 +916,33 @@ figures below were reproducible to a few percent):
 | csv_chunked | 1,710 | 1,710 | 1,720 | 1,714 | +0.2 % |
 
 Everything except one program is within noise of the tagged baseline or faster
-(`fib` −6.6 %, `refined-checks` −2.8 %). **`loop-count` is the exception: it
-gets slower with the raw ABI in wall-clock, 732 → 893 ns (B) → 1,063 ns (D),
-consistently across repeated runs, although it executes fewer instructions**
-(13,039 → 12,037 Ir, −7.7 %) and its machine code is smaller (287 → 274
-bytes). The production code for `drive`'s loop is strictly tighter than the
-tagged baseline's (no `sar`, no `shl`/`or` retag per iteration; `work` is
-folded to `mov eax, 0xf` in both), so the cost is not representation
-conversion. This is a ~500-iteration, sub-microsecond run whose time is
-dominated by the call/loop-carried dependence and by where the JIT places the
-loop; the differing loop-head and branch placement (`jle`/`jmp` offsets differ
-by a few bytes between the two builds) is the likely cause, **an unverified
-hypothesis** (an alignment/branch-placement effect in the backend), not
-something the planner decides. It is recorded for the later machine-code audit
-and, per the milestone's scope, not chased here; the other loop-bearing
-programs (`sum-refined`, `matmul`, `csv_*`) show no such effect.
+(`fib` −6.6 %, `refined-checks` −2.8 %). **`loop-count` is the apparent
+exception: 732 → 893 ns (B) → 1,063 ns (D), reproducibly, although it executes
+fewer instructions** (13,039 → 12,037 Ir, −7.7 %) and its machine code is
+smaller and tighter (no per-iteration `shl`/`or` retag; `work` folds to `mov eax,
+0xf` in both). **Investigated: it is code placement, not the raw ABI**
+(`out/loop-count-placement/README.md`):
+
+* on this CPU (Emerald Rapids; the Skylake JCC erratum does not apply) the same
+  machine code runs in 725 or 900 or 1,060 ns depending only on where it is
+  placed: shifting the functions with Cranelift's `log2_min_function_alignment`
+  moves D from 1,062 to 891 ns and A from 731 to 798 ns, and changing only the
+  initial accumulator constant of the program (a few bytes of `<program>`) flips
+  the order of B and D (B 894 → 1,062, D 1,062 → 895);
+* a standalone assembly replica of the three loops swept over all 64 offsets from
+  a 64-byte boundary gives, in ns, A min/median/max 729/1,157/1,246 (mean 1,076),
+  B 724/1,004/1,238 (995), D 726/971/1,592 (1,037): the best case is identical
+  (about 725 ns, 1.45 ns per iteration), every variant is 1.2-1.6x slower at
+  unlucky offsets, and D's mean is below A's. No variant is systematically slower;
+* the slow offsets are not explained by any simple branch-alignment rule
+  (call/ret/jmp crossing or ending at a 16/32/64-byte boundary), and this
+  machine has no hardware counters, so the exact mechanism (uop cache, BTB,
+  return prediction) is **undetermined**.
+
+So the wall-clock number for a sub-microsecond, 500-iteration run is placement
+luck, a backend concern (Cranelift has a function-alignment setting but no loop
+or branch alignment) recorded for the later machine-code audit, not touched here.
+Instruction counts are the reliable per-program figure.
 
 ## Updated corpus code-size result
 
@@ -1151,10 +1163,11 @@ Tcl 9.0.1, Linux x86-64, release native backend, final tree.
   frequency, spill or code size) is deliberately not added; revisit it only when
   self-hosting or stdlib growth gives real workloads that need it.
   `-raw-mixed-policy raw` (audit-only) reproduces the earlier policy.
-* **Wall-clock does not always follow instruction count:** `loop-count` is
-  +45 % slower than the tagged baseline in wall-clock with fewer instructions
-  and smaller code (see *Wall-clock*): suspected backend loop/branch placement,
-  not representation; recorded for the machine-code audit.
+* **Wall-clock does not always follow instruction count:** `loop-count` looks
+  +45 % slower than the tagged baseline in wall-clock with fewer instructions and
+  smaller code; investigated in *Wall-clock* and shown to be code placement (the
+  same code runs 725-1,590 ns depending on offset), a backend concern recorded for
+  the machine-code audit, not a cost of the representation.
 * **A boxed position cascades through transport.** A parameter that flows into a
   boxed parameter, or a result whose consumer is boxed, is itself boxed, so one
   tagged use can un-raw a chain (`web::is_unreserved.b` → `ascii::is_alphanumeric.b`
@@ -1368,11 +1381,11 @@ String fact) and its own conversion pair, not a new framework.
     the tagged ABI the worst is `csv_records` (+0.23 % Ir) and `lex-strategy`
     (+0.5 %, noise-level); `fib` −9.3 %, `loop-count` −7.7 %; against the
     preliminary plan no program gets slower by more than 0.42 %. In **wall-clock,
-    one**: `loop-count` is +45 % slower than the tagged baseline (732 → 1,063 ns;
-    the eligibility-only plan already cost +22 %) despite fewer instructions and
-    tighter code, a suspected backend alignment/branch-placement effect recorded
-    for the machine-code audit (*Wall-clock*). Every other program is within
-    noise or faster (`fib` −6.6 %).
+    one apparent case**: `loop-count` measures +45 % slower than the tagged baseline
+    (732 → 1,063 ns) despite fewer instructions and tighter code; investigated and
+    shown to be code placement (identical code runs 725-1,590 ns depending on
+    offset; the best case is the same for all builds), not the representation
+    (*Wall-clock*). Every other program is within noise or faster (`fib` −6.6 %).
 
 ## Future-facing question
 

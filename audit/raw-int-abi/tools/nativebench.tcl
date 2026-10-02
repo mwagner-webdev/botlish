@@ -8,6 +8,8 @@
 # shared machine; callgrind (profile-nir.sh) is the reliable per-instruction
 # figure.
 #
+# BOTLISH_NATIVE_BIN overrides the botlish-native binary (e.g. an experimental build).
+#
 #   tclsh9.0 audit/raw-int-abi/tools/nativebench.tcl ?-runs N? ?-repeat M? PROGRAM.bot...
 set root [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]]
 set args $argv
@@ -22,7 +24,7 @@ while {[lindex $args 0] in {-runs -repeat}} {
     if {[lindex $args 0] eq "-runs"} { set runs [lindex $args 1] } else { set repeat [lindex $args 1] }
     set args [lrange $args 2 end]
 }
-set bin [file join $root native target release botlish-native]
+set bin [expr {[info exists ::env(BOTLISH_NATIVE_BIN)] ? $::env(BOTLISH_NATIVE_BIN) : [file join $root native target release botlish-native]}]
 set tmp [file join [pwd] .nativebench-[pid].nir]
 set configs {
     A {-raw-int-abi-opt 0}
