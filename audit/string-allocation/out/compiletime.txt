@@ -1,0 +1,19 @@
+program             old us    new us
+ai_text_clean         3448      3416
+csv                   6939      6387
+csv_chunked          11692     12006
+csv_geometric         9705      9421
+csv_records          26710     26885
+fib                    907       832
+hashtable            14763     14821
+lex-strategy          6821      6884
+loop-count            1185      1057
+matmul                4979      4885
+refined-checks       11163     11115
+source-checks         4820      4962
+string_replace        3148      3067
+string_reverse        1560      1524
+sum-refined           1153      1086
+test-selection        6741      6667
+uri-steady            7016      6986
+TOTAL               122750    122001  -0.61%
