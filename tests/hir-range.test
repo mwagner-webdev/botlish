@@ -636,4 +636,103 @@ caller(dyn, 45)}
             [hir::range::ConditionOutcome $hir $analysis $id [lindex $conditions 1]]
 } -result {0 {} {}}
 
+# ---------------------------------------------------------------------------
+# Callee-position calls (GENERIC-PREDICATE-PROOF-LOSS.md): a call's callee is
+# an expression like any other, so an exact call (or a closure creation)
+# inside it is a real call site whose argument Ranges must reach the called
+# instance's entry. hir::range::Call used to walk only the arguments, so such
+# a callee was invisible to the interprocedural analysis and its callers'
+# entry Ranges were missing an argument -- unsound, and a native miscompile
+# (each program below printed a wrong value on cranelift before the fix).
+
+set ::calleeSel {fn one(y):
+    1
+
+fn two(y):
+    2
+
+fn sel(k):
+    if k > 5:
+        two
+    else:
+        one
+
+fn apply(g):
+    g(0)
+
+[apply(sel(1)), sel(10)(0)]}
+
+test range-callee-position-call-reaches-entry {sel is called once as an ordinary argument (sel(1)) and once in callee position (sel(10)(0)): its entry joins both, [1, 10] -- not the [1, 1] that made `k > 5` look always false} -body {
+    lassign [rangeOf $::calleeSel] hir spec analysis
+    paramRanges $analysis [rangeInstance $spec sel int]
+} -result {{[1, 10] {1,10}}}
+
+test range-callee-position-call-in-index-reaches-entry {a call inside the index of a list_get in callee position (list_get(fs, pick(10))(0)) is a call site of pick too} -body {
+    lassign [rangeOf {fn pick(k):
+    if k > 5:
+        1
+    else:
+        0
+
+fn one(y):
+    1
+
+fn two(y):
+    2
+
+fs = [one, two]
+
+[pick(1), list_get(fs, pick(10))(0)]}] hir spec analysis
+    paramRanges $analysis [rangeInstance $spec pick int]
+} -result {{[1, 10] {1,10}}}
+
+foreach {name src expected} [list \
+    sel $::calleeSel {[1, 2]} \
+    sel-through-clamp {fn clamp(x):
+    if x > 100:
+        100
+    else:
+        x
+
+fn one(y):
+    1
+
+fn two(y):
+    2
+
+fn sel(k):
+    c = clamp(k)
+    if c < 0:
+        two
+    else:
+        one
+
+fn apply(g):
+    g(0)
+
+[apply(sel(1)), sel(0 - 50)(0)]} {[1, 2]} \
+    list-index {fn pick(k):
+    if k > 5:
+        1
+    else:
+        0
+
+fn one(y):
+    1
+
+fn two(y):
+    2
+
+fs = [one, two]
+
+[pick(1), list_get(fs, pick(10))(0)]} {[0, 2]}] {
+    test range-callee-position-parity-$name "callee-position call program $name: interp, compile and cranelift agree" -body {
+        set hir [surface::compile $src t.bot -strict 0]
+        set outcomes [lsort -unique [lmap backend {interp compile cranelift} {
+            outcomeUnderHir $backend $hir
+        }]]
+        expr {[llength $outcomes] == 1 ? [lindex $outcomes 0 1] : $outcomes}
+    } -result $expected
+}
+
 cleanupTests

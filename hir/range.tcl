@@ -1135,6 +1135,18 @@ proc hir::range::DifferenceOffset {hir left right} {
 
 proc hir::range::Call {hirVar ctxVar e node} {
     upvar 1 $hirVar hir $ctxVar ctx
+    # The callee is evaluated like any other subexpression (and first, as at
+    # run time): an exact call in callee position (`sel(k)(0)`,
+    # `list_get(fs, pick(k))(y)`) or a closure created there is a real call
+    # or creation site, and its argument and capture Ranges must reach the
+    # entry facts of what it calls/creates like any other -- skipping it left
+    # those entries missing a caller, which is unsound
+    # (GENERIC-PREDICATE-PROOF-LOSS.md, "Callee-position calls"). A plain
+    # reference has no subexpressions and is not visited.
+    set callee [dict get $node callee]
+    if {[hir::kind $hir $callee] ne "ref" && [Expr hir ctx $callee] eq "never"} {
+        return never
+    }
     set argRanges {}
     set dead 0
     foreach a [dict get $node args] {
