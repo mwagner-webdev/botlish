@@ -239,7 +239,7 @@ impl StrInit {
             (thin as *mut Header).write(Header::new(KIND_STR, is_static));
             (thin.add(offset_of!(StrObj, chars)) as *mut usize).write(chars);
             (thin.add(offset_of!(StrObj, byte_len)) as *mut usize).write(byte_len);
-            (thin.add(offset_of!(StrObj, ascii)) as *mut u8).write(ascii as u8);
+            thin.add(offset_of!(StrObj, ascii)).write(ascii as u8);
         }
         StrInit { thin, byte_len, written: 0 }
     }
