@@ -808,13 +808,24 @@ pub extern "C" fn rt_str_byte_len(p: *mut Vm, s: Value) -> Value {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_str_lower(p: *mut Vm, s: Value) -> Value {
-    // Simple (one-to-one) case mapping, like Tcl's string tolower.
+    // The Unicode 16 simple (one-to-one, UnicodeData.txt) lowercase mapping,
+    // identical to core::strings::lowercase (see its comment and README.md,
+    // "Strings"). Rust's tables are newer than Unicode 16 and its
+    // to_lowercase is the *full* mapping, so two adjustments:
     fn lower(c: char) -> char {
         // U+0130's full lowercase is "i" + U+0307 (SpecialCasing.txt's only
-        // unconditional multi-character lowercase); Tcl's simple mapping
-        // (UnicodeData.txt) is plain U+0069.
+        // unconditional multi-character lowercase); its simple mapping is
+        // plain U+0069.
         if c == '\u{130}' {
             return 'i';
+        }
+        // Scalars with a lowercase mapping that Unicode 17 added: leave them
+        // unchanged to stay at Unicode 16 (Latin Extended-D U+A7CE, U+A7D2,
+        // U+A7D4 and the Beria Erfe capitals U+16EA0..=U+16EB8). tests/
+        // native-tcl-unicode.test compares every scalar with the reference,
+        // so a toolchain whose tables add more fails there.
+        if matches!(c, '\u{A7CE}' | '\u{A7D2}' | '\u{A7D4}' | '\u{16EA0}'..='\u{16EB8}') {
+            return c;
         }
         let mut lower = c.to_lowercase();
         match (lower.next(), lower.next()) {

@@ -385,7 +385,7 @@ A native that breaks its declared type contract (§8) raises
 | `result-error` | error Result → its payload | |
 | `length` | str → int | |
 | `substring` | str, int, int → str (characters `start <= i < end`) | |
-| `lowercase` | str → str | |
+| `lowercase` | str → str (Unicode 16 simple one-to-one case mapping; see §"Strings") | |
 | `concat` | str, str → str | |
 | `list_length` | list → int | |
 | `list_get` | list, int → any (the element at `0 <= i < length`, else `RANGE`) | |
@@ -1868,8 +1868,22 @@ supplementary-plane characters as one unit each: ASCII strings are indexed
 in O(1), others by walking the characters. This matches Tcl 9, the Tcl
 reference implementation's required host (see this README's introduction),
 so the corpus tests (§18) exercise supplementary-plane characters like any
-other. `lowercase` uses simple one-to-one case mapping, like Tcl's `string
-tolower`, and keeps a character whose lowercase form is several characters.
+other. `lowercase` is the Unicode 16 *simple* case mapping: each scalar maps
+to exactly one scalar through `UnicodeData.txt`'s simple lowercase column, so
+the character count never changes and the mapping ignores context and
+language. Consequences: `İ` (U+0130) lowercases to `i` (not the full mapping's
+`i` + U+0307), a Greek capital sigma always lowercases to `σ` (never the
+final `ς`), and `ẞ` lowercases to `ß`. It is the reference interpreter's
+`string tolower` (Tcl 9.0.x, Unicode 16 tables) plus a patch for the two
+scalars Tcl leaves unchanged against the standard, U+023A and U+023E (they
+lowercase to U+2C65 and U+2C66), and native uses Rust's tables adjusted the
+same way: U+0130 is mapped to `i`, and the scalars Unicode 17 gave a
+lowercase mapping (U+A7CE, U+A7D2, U+A7D4, U+16EA0..U+16EB8) stay unchanged.
+Not implemented here, on purpose: the full mapping (`SpecialCasing.txt`, where
+a scalar can become several, plus the final-sigma and language rules), which
+is planned for a `grapheme::` namespace, and Unicode 17 and later. The
+all-scalars comparison in `tests/native-tcl-unicode.test` fails if a Tcl or
+Rust upgrade changes any mapping.
 
 **Lists** are immutable vectors of values. `list_append` copies, as the
 reference runtime does, so CSV's quadratic behavior is kept deliberately
