@@ -2,7 +2,7 @@ source:  examples/stdlib/ai_text_clean.bot
 backend: Cranelift (specialize=1)
 asm:     ai_text_clean.asm
 vcode:   ai_text_clean.vcode
-machine-code bytes: 2473 (per function: 505 547 541 776 104)
+machine-code bytes: 2425 (per function: 505 547 493 776 104)
 
 functions:
   0 <program entry>: nir-regs=13

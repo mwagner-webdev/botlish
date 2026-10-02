@@ -1,7 +1,7 @@
 ; source:  examples/stdlib/ai_text_clean.bot
 ; backend: Cranelift (specialize=1), native::vcode
 ; format:  Cranelift Debug for VCode, pre-regalloc machine-level lowering
-; total machine code bytes: 2473  (per function: 505 547 541 776 104)
+; total machine code bytes: 2425  (per function: 505 547 493 776 104)
 ;
 vcode from lowering: 
 VCode {
@@ -500,11 +500,11 @@ Block 0([]):
   Inst 1: jmp     label1
 Block 1([]):
     (original IR block: block0)
-    (successor: Block 40([]))
+    (successor: Block 34([]))
     (successor: Block 2([]))
   Inst 2: call    User(userextname0)
-  Inst 3: cmpq $0x6, %v277
-  Inst 4: jz      label40; j label2
+  Inst 3: cmpq $0x6, %v264
+  Inst 4: jz      label34; j label2
 Block 2([]):
     (original IR block: block4)
     (successor: Block 3([]))
@@ -523,13 +523,13 @@ Block 4([]):
   Inst 9: jz      label6; j label5
 Block 5([]):
     (original IR block: block10)
-    (successor: Block 7([VReg(vreg = 276, class = Int)]))
-  Inst 10: movl $0x2, %v276
+    (successor: Block 7([VReg(vreg = 263, class = Int)]))
+  Inst 10: movl $0x2, %v263
   Inst 11: jmp     label7
 Block 6([]):
     (original IR block: block9)
-    (successor: Block 7([VReg(vreg = 275, class = Int)]))
-  Inst 12: movl $0x6, %v275
+    (successor: Block 7([VReg(vreg = 262, class = Int)]))
+  Inst 12: movl $0x6, %v262
   Inst 13: jmp     label7
 Block 7([VReg(vreg = 206, class = Int)]):
     (original IR block: block11)
@@ -537,15 +537,15 @@ Block 7([VReg(vreg = 206, class = Int)]):
   Inst 14: jmp     label9
 Block 8([]):
     (original IR block: block6)
-    (successor: Block 9([VReg(vreg = 274, class = Int)]))
-  Inst 15: movl $0x6, %v274
+    (successor: Block 9([VReg(vreg = 261, class = Int)]))
+  Inst 15: movl $0x6, %v261
   Inst 16: jmp     label9
 Block 9([VReg(vreg = 207, class = Int)]):
     (original IR block: block8)
-    (successor: Block 39([]))
+    (successor: Block 33([]))
     (successor: Block 10([]))
   Inst 17: cmpq $0x6, %v207
-  Inst 18: jz      label39; j label10
+  Inst 18: jz      label33; j label10
 Block 10([]):
     (original IR block: block13)
     (successor: Block 11([]))
@@ -564,13 +564,13 @@ Block 12([]):
   Inst 23: jz      label14; j label13
 Block 13([]):
     (original IR block: block19)
-    (successor: Block 15([VReg(vreg = 273, class = Int)]))
-  Inst 24: movl $0x2, %v273
+    (successor: Block 15([VReg(vreg = 260, class = Int)]))
+  Inst 24: movl $0x2, %v260
   Inst 25: jmp     label15
 Block 14([]):
     (original IR block: block18)
-    (successor: Block 15([VReg(vreg = 272, class = Int)]))
-  Inst 26: movl $0x6, %v272
+    (successor: Block 15([VReg(vreg = 259, class = Int)]))
+  Inst 26: movl $0x6, %v259
   Inst 27: jmp     label15
 Block 15([VReg(vreg = 219, class = Int)]):
     (original IR block: block20)
@@ -578,15 +578,15 @@ Block 15([VReg(vreg = 219, class = Int)]):
   Inst 28: jmp     label17
 Block 16([]):
     (original IR block: block15)
-    (successor: Block 17([VReg(vreg = 271, class = Int)]))
-  Inst 29: movl $0x6, %v271
+    (successor: Block 17([VReg(vreg = 258, class = Int)]))
+  Inst 29: movl $0x6, %v258
   Inst 30: jmp     label17
 Block 17([VReg(vreg = 220, class = Int)]):
     (original IR block: block17)
-    (successor: Block 38([]))
+    (successor: Block 32([]))
     (successor: Block 18([]))
   Inst 31: cmpq $0x6, %v220
-  Inst 32: jz      label38; j label18
+  Inst 32: jz      label32; j label18
 Block 18([]):
     (original IR block: block22)
     (successor: Block 19([]))
@@ -605,13 +605,13 @@ Block 20([]):
   Inst 37: jz      label22; j label21
 Block 21([]):
     (original IR block: block28)
-    (successor: Block 23([VReg(vreg = 270, class = Int)]))
-  Inst 38: movl $0x2, %v270
+    (successor: Block 23([VReg(vreg = 257, class = Int)]))
+  Inst 38: movl $0x2, %v257
   Inst 39: jmp     label23
 Block 22([]):
     (original IR block: block27)
-    (successor: Block 23([VReg(vreg = 269, class = Int)]))
-  Inst 40: movl $0x6, %v269
+    (successor: Block 23([VReg(vreg = 256, class = Int)]))
+  Inst 40: movl $0x6, %v256
   Inst 41: jmp     label23
 Block 23([VReg(vreg = 232, class = Int)]):
     (original IR block: block29)
@@ -619,87 +619,59 @@ Block 23([VReg(vreg = 232, class = Int)]):
   Inst 42: jmp     label25
 Block 24([]):
     (original IR block: block24)
-    (successor: Block 25([VReg(vreg = 268, class = Int)]))
-  Inst 43: movl $0x6, %v268
+    (successor: Block 25([VReg(vreg = 255, class = Int)]))
+  Inst 43: movl $0x6, %v255
   Inst 44: jmp     label25
 Block 25([VReg(vreg = 233, class = Int)]):
     (original IR block: block26)
-    (successor: Block 37([]))
+    (successor: Block 31([]))
     (successor: Block 26([]))
   Inst 45: cmpq $0x6, %v233
-  Inst 46: jz      label37; j label26
+  Inst 46: jz      label31; j label26
 Block 26([]):
     (original IR block: block31)
     (successor: Block 27([]))
   Inst 47: jmp     label27
 Block 27([]):
     (original IR block: block32)
-    (successor: Block 36([]))
+    (successor: Block 30([]))
     (successor: Block 28([]))
   Inst 48: cmpq $0x2026, %v193
-  Inst 49: jz      label36; j label28
+  Inst 49: jz      label30; j label28
 Block 28([]):
     (original IR block: block34)
     (successor: Block 29([]))
   Inst 50: jmp     label29
 Block 29([]):
     (original IR block: block35)
-    (successor: Block 31([]))
-    (successor: Block 30([]))
-  Inst 51: leaq 1(%v193), %v267
-  Inst 52: cmpq $0x101, %v267
-  Inst 53: jb      label31; j label30
+  Inst 51: load_ext_name userextname1+0, %v254
+  Inst 52: call    *%v254
+  Inst 53: rets %v253=%rax
 Block 30([]):
-    (successor: Block 34([]))
-  Inst 54: jmp     label34
-Block 31([]):
-    (original IR block: block36)
-    (successor: Block 32([]))
-    (successor: Block 33([]))
-  Inst 55: leaq 1(%v193), %v266
-  Inst 56: movq 0x648(%v192, %v266, 8), %v265
-  Inst 57: testq %v265, %v265
-  Inst 58: jnz     label32; j label33
-Block 32([]):
-    (successor: Block 35([VReg(vreg = 265, class = Int)]))
-  Inst 59: jmp     label35
-Block 33([]):
-    (successor: Block 34([]))
-  Inst 60: jmp     label34
-Block 34([]):
-    (original IR block: block37)
-    (successor: Block 35([VReg(vreg = 263, class = Int)]))
-  Inst 61: load_ext_name userextname1+0, %v264
-  Inst 62: call    *%v264
-  Inst 63: jmp     label35
-Block 35([VReg(vreg = 252, class = Int)]):
-    (original IR block: block38)
-  Inst 64: rets %v252=%rax
-Block 36([]):
     (original IR block: block33)
-  Inst 65: movq 0x10(%v192), %v262
-  Inst 66: movq 0x50(%v262), %v261
-  Inst 67: rets %v261=%rax
-Block 37([]):
+  Inst 54: movq 0x10(%v192), %v252
+  Inst 55: movq 0x50(%v252), %v251
+  Inst 56: rets %v251=%rax
+Block 31([]):
     (original IR block: block30)
-  Inst 68: movq 0x10(%v192), %v260
-  Inst 69: movq 0x48(%v260), %v259
-  Inst 70: rets %v259=%rax
-Block 38([]):
+  Inst 57: movq 0x10(%v192), %v250
+  Inst 58: movq 0x48(%v250), %v249
+  Inst 59: rets %v249=%rax
+Block 32([]):
     (original IR block: block21)
-  Inst 71: movq 0x10(%v192), %v258
-  Inst 72: movq 0x40(%v258), %v257
-  Inst 73: rets %v257=%rax
-Block 39([]):
+  Inst 60: movq 0x10(%v192), %v248
+  Inst 61: movq 0x40(%v248), %v247
+  Inst 62: rets %v247=%rax
+Block 33([]):
     (original IR block: block12)
-  Inst 74: movq 0x10(%v192), %v256
-  Inst 75: movq 0x38(%v256), %v255
-  Inst 76: rets %v255=%rax
-Block 40([]):
+  Inst 63: movq 0x10(%v192), %v246
+  Inst 64: movq 0x38(%v246), %v245
+  Inst 65: rets %v245=%rax
+Block 34([]):
     (original IR block: block3)
-  Inst 77: movq 0x10(%v192), %v254
-  Inst 78: movq 0x30(%v254), %v253
-  Inst 79: rets %v253=%rax
+  Inst 66: movq 0x10(%v192), %v244
+  Inst 67: movq 0x30(%v244), %v243
+  Inst 68: rets %v243=%rax
 }
 vcode from lowering: 
 VCode {
