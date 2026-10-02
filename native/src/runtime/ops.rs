@@ -305,13 +305,24 @@ pub extern "C" fn rt_int_xor(p: *mut Vm, a: Value, b: Value) -> Value {
 pub extern "C" fn rt_int_shl(p: *mut Vm, a: Value, b: Value) -> Value {
     let Some(k) = shift_amount(p, b) else { return NO_VALUE };
     if let Some(x) = int_small(a) {
-        if k < 63 {
-            if let Some(r) = x.checked_shl(k) {
-                return vm(p).new_int(r);
-            }
+        if let Some(r) = shl_i64_exact(x, k) {
+            return vm(p).new_int(r);
         }
     }
     vm(p).new_big(int_to_big(a) << (k as usize))
+}
+
+/// X << K as an i64, or None if the exact result does not fit one. Not
+/// `i64::checked_shl`: that only rejects K >= 64 and silently drops the
+/// bits shifted out, so `2 << 62` would come back as i64::MIN. A shift is
+/// exact exactly when shifting back recovers X (the arithmetic right shift
+/// restores every dropped bit only if each was a copy of the sign bit).
+fn shl_i64_exact(x: i64, k: u32) -> Option<i64> {
+    if k >= 64 {
+        return if x == 0 { Some(0) } else { None };
+    }
+    let r = x.wrapping_shl(k);
+    if (r >> k) == x { Some(r) } else { None }
 }
 
 /// A >> K: arithmetic (sign-extending) shift, i.e. floor(A / 2^K) -- the
@@ -1979,5 +1990,53 @@ mod tests {
         let mut vm = vm();
         let s = str_val(&mut vm, "a\u{e9}\u{1f600}");
         assert_eq!(utf8_bytes_of(&mut vm, s), vec![97, 0xC3, 0xA9, 0xF0, 0x9F, 0x98, 0x80]);
+    }
+
+    /// rt_int_shl/rt_int_shr over every small/BigInt operand shape, checked
+    /// against num_bigint's exact shift (the reference interpreter's
+    /// arbitrary-precision semantics): in particular, a small Int shifted
+    /// past 2^62/2^63 must promote, never wrap (`2 << 62` is 2^63, not
+    /// i64::MIN).
+    #[test]
+    fn int_shifts_are_exact_across_word_boundaries() {
+        let mut vm = vm();
+        let p: *mut Vm = &mut *vm;
+        let values: Vec<BigInt> = [
+            0i64, 1, 2, 3, -1, -2, -3, -20, 5, 1000000,
+            SMALL_MAX, SMALL_MIN, SMALL_MAX - 1, SMALL_MIN + 1,
+            1 << 61, -(1 << 61), i64::MAX, i64::MIN,
+        ]
+        .iter()
+        .map(|&n| BigInt::from(n))
+        .chain([BigInt::from(1) << 100usize, -(BigInt::from(3) << 90usize)])
+        .collect();
+        for x in &values {
+            for k in [0u32, 1, 2, 60, 61, 62, 63, 64, 65, 100, 200] {
+                let a = match i64::try_from(x) {
+                    Ok(n) => vm.new_int(n),
+                    Err(_) => vm.new_big(x.clone()),
+                };
+                let b = vm.new_int(k as i64);
+                let shl = rt_int_shl(p, a, b);
+                assert_eq!(int_to_big(shl), x << (k as usize), "{x} << {k}");
+                let shr = rt_int_shr(p, a, b);
+                assert_eq!(int_to_big(shr), x >> (k as usize), "{x} >> {k}");
+            }
+        }
+    }
+
+    #[test]
+    fn shl_i64_exact_rejects_dropped_bits() {
+        assert_eq!(shl_i64_exact(2, 62), None);
+        assert_eq!(shl_i64_exact(1, 62), Some(1 << 62));
+        assert_eq!(shl_i64_exact(1, 63), None);
+        assert_eq!(shl_i64_exact(-1, 63), Some(i64::MIN));
+        assert_eq!(shl_i64_exact(-2, 62), Some(i64::MIN));
+        assert_eq!(shl_i64_exact(-3, 62), None);
+        assert_eq!(shl_i64_exact(-20, 62), None);
+        assert_eq!(shl_i64_exact(0, 64), Some(0));
+        assert_eq!(shl_i64_exact(0, 100), Some(0));
+        assert_eq!(shl_i64_exact(1, 64), None);
+        assert_eq!(shl_i64_exact(-1, 64), None);
     }
 }

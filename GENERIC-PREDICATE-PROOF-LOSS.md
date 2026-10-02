@@ -539,7 +539,13 @@ every finding then reproduced or refuted by a separate verifier:
   bug, not fixed here**: `rt_int_shl` (`native/src/runtime/ops.rs`) uses
   `i64::checked_shl`, which only rejects shift amounts >= 64 and silently
   drops shifted-out bits, so `shift_left(2, 62)` is `-9223372036854775808`
-  natively and `9223372036854775808` on interp/compile.
+  natively and `9223372036854775808` on interp/compile. **Since fixed** in
+  a later commit: `rt_int_shl` keeps the small result only when shifting it
+  back recovers the operand (`shl_i64_exact`) and otherwise promotes to
+  BigInt; the raw `rishl` path was audited and was already sound (it needs
+  a proven small result range). Regression tests: `bitshift-shl-*` and
+  `bitshift-shr-negative-tagged` in `tests/native-bitshift.test`, plus Rust
+  unit tests in `native/src/runtime/ops.rs`.
 
 
 ### Verification
