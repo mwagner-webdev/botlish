@@ -1,0 +1,397 @@
+# dormant-instances.test -- loss point 2 of GENERIC-PREDICATE-PROOF-LOSS.md:
+# the generic Block-value entry of a closure hir::blockescape de-closures
+# through specialized instances is never entered at run time, and neither is
+# anything only it reaches. hir::specialize records them as `dormant`; they
+# stay in `used`, but their calls and closure creations are no evidence for
+# hir::range, the closed-caller theorem or AOT readiness, and hir::range
+# treats them as open.
+#
+# Knob (test/audit-only namespace variable, hir/specialize.tcl):
+# hir::specialize::dormantOpt 0 makes the dormant set empty (the compiler
+# before it existed).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 1000000
+
+testConstraint executableAot [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64}}]
+
+proc dedent {text} {
+    set lines [split $text \n]
+    set indent 1000
+    foreach line $lines {
+        if {[string trim $line] eq ""} continue
+        set n [expr {[string length $line] - [string length [string trimleft $line " "]]}]
+        if {$n < $indent} { set indent $n }
+    }
+    return [join [lmap line $lines {string range $line $indent end}] \n]
+}
+
+# Run SCRIPT (in the caller's scope) with hir::specialize::dormantOpt OPT,
+# restoring the production default afterwards.
+proc withDormant {opt script} {
+    set hir::specialize::dormantOpt $opt
+    try {
+        return [uplevel 1 $script]
+    } finally {
+        set hir::specialize::dormantOpt 1
+    }
+}
+
+# {HIR SPEC ANALYSIS} of program TEXT (.bot source), prepared for native
+# (lib/web.bot's emailish? is reached through a native body).
+proc dormantOf {text} {
+    set hir [native::prepareHir [surface::compile [dedent $text] t.bot -strict 0]]
+    set spec [hir::specialize::analyze $hir]
+    return [list $hir $spec [hir::range::analyze $hir $spec]]
+}
+
+proc refinedChecks {} {
+    set hir [native::prepareHir [surface::readProgramFile [file join $::projectRoot bench refined-checks.bot]]]
+    set spec [hir::specialize::analyze $hir]
+    return [list $hir $spec [hir::range::analyze $hir $spec]]
+}
+
+# Sorted labels of SPEC's dormant instances.
+proc dormantLabels {spec} {
+    lsort [lmap id [dict keys [dict get $spec dormant]] {hir::specialize::label $spec $id}]
+}
+
+# The InstanceId of SPEC's used instance labelled LABEL.
+proc instanceLabelled {spec label} {
+    foreach id [dict get $spec used] {
+        if {[hir::specialize::label $spec $id] eq $label} {
+            return $id
+        }
+    }
+    error "no used instance labelled \"$label\""
+}
+
+proc bounds {r} {
+    if {$r eq "never"} { return never }
+    return [string map {-inf -∞ +inf +∞} "\[[dict get $r min], [dict get $r max]\]"]
+}
+
+# Entry bounds of instance LABEL, one per parameter.
+proc entryOf {analysis spec label} {
+    lmap r [dict get [dict get $analysis instances [instanceLabelled $spec $label]] params] {bounds $r}
+}
+
+# The NIR ops of every NIR function named NAME, function by function.
+proc nirOpsOf {nir name} {
+    set result {}
+    set ops ""
+    foreach line [split $nir \n] {
+        if {[regexp {^func \d+ "([^"]*)"} $line -> fname]} {
+            if {$ops ne ""} { lappend result [lrange $ops 1 end] }
+            set ops [expr {$fname eq $name ? "fn" : ""}]
+            continue
+        }
+        if {$ops ne "" && [regexp {= op (\S+)} $line -> op]} {
+            lappend ops $op
+        }
+    }
+    if {$ops ne ""} { lappend result [lrange $ops 1 end] }
+    return $result
+}
+
+# The emailish? scanner shape: scan's generic instance is the Block-value
+# entry of a closure blockescape de-closures through scan<any, native(...)>.
+set scanShape {
+    fn outer(v, start0):
+        n = length(v)
+        fn get(i):
+            substring(v, i, i + 1)
+        fn scan(start, pred):
+            loop i from start to n:
+                if pred(get(i)):
+                    continue
+                return i
+            n
+        scan(start0, is_tcl_alpha)
+    [outer("abc1", 0), outer("x", 0), outer("", 0)]
+}
+
+# The same, with an instance reachable ONLY through the dormant entry:
+# scan<generic> calls apply<any, str, int> (its `pred` is any there), which
+# alone reaches idx<int> with an unbounded argument; the live
+# apply<native(is_tcl_alpha), str, int> reaches idx<int> too.
+set transitiveShape {
+    fn idx(x):
+        x * 2
+    fn apply(p, c, i):
+        if p(c):
+            idx(i + 0)
+        else:
+            0 - 1
+    fn outer(v, start0):
+        n = length(v)
+        fn get(i):
+            substring(v, i, i + 1)
+        fn scan(start, pred):
+            loop i from start to n:
+                if apply(pred, get(i), i) >= 0:
+                    continue
+                return i
+            n
+        scan(start0, is_tcl_alpha)
+    [outer("abc1", 0), outer("x", 1), outer("ab", 2)]
+}
+
+# The scanner shape with a call of get on scan's own `start`, which is
+# `any` in the dormant scan<generic>.
+set theoremShape {
+    fn outer(v, start0):
+        n = length(v)
+        fn get(i):
+            substring(v, i, i + 1)
+        fn scan(start, pred):
+            first = get(start)
+            loop i from start to n:
+                if pred(get(i)):
+                    continue
+                return i
+            n
+        scan(start0, is_tcl_alpha)
+    [outer("abc1", 0), outer("x", 0)]
+}
+
+# A capturing closure called only with an Int (adder<int>), whose generic
+# Block-value entry creates the inner closure with an unknown n.
+set adderShape {
+    base = 100
+    fn adder(n):
+        fn add(x):
+            x + n + base
+        add
+    add5 = adder(5)
+    add5(1)
+}
+
+# Two literals of the same shape: mk's g escapes (returned), so its generic
+# entry is a real, open entry; f's g is only ever called, so its generic
+# entry is dormant.
+set escapeShape {
+    fn mk(k):
+        fn g(y):
+            y + k
+        g
+    fn f(a):
+        k = 5
+        fn g(y):
+            y + k
+        [g(a), mk(k)(a)]
+    [f(3), f(10)]
+}
+
+# ---------------------------------------------------------------------------
+# Which instances are dormant
+
+test dormant-refined-checks-set {refined-checks: the only dormant instance is scan_while's generic Block-value entry (the closure is de-closured through its two exact-predicate instances)} -body {
+    lassign [refinedChecks] hir spec analysis
+    dormantLabels $spec
+} -result {scan_while<generic>}
+
+test dormant-transitive {an instance reachable only through a dormant entry is dormant too (apply<any, str, int>); the live, exact apply instance is not} -body {
+    lassign [dormantOf $transitiveShape] hir spec analysis
+    dormantLabels $spec
+} -result {{apply<any, str, int>} scan<generic>}
+
+test dormant-escaping-entry-stays-live {a returned closure's generic entry is a real Block-value entry: open, not dormant; only the never-materialized literal's entry is dormant} -body {
+    lassign [dormantOf $escapeShape] hir spec analysis
+    set rows {}
+    foreach id [dict get $spec used] {
+        if {[dict get [hir::specialize::instance $spec $id] name] ne "g"} continue
+        lappend rows [list [hir::specialize::label $spec $id] [hir::specialize::closed $hir $spec $id] \
+            [hir::specialize::dormant $hir $spec $id]]
+    }
+    lsort $rows
+} -result {{g<generic> 0 0} {g<generic> 0 1} {g<int> 1 0} {g<int> 1 0}}
+
+test dormant-used-set-unchanged {the dormant set changes no instance: keys and used are identical with the knob off} -body {
+    set same {}
+    foreach text [list $scanShape $transitiveShape $adderShape $escapeShape] {
+        lassign [dormantOf $text] hir on
+        lassign [withDormant 0 {dormantOf $text}] hir off
+        lappend same [expr {[dict get $on keys] eq [dict get $off keys] && [dict get $on used] eq [dict get $off used]
+            && [dict get $off dormant] eq {}}]
+    }
+    set same
+} -result {1 1 1 1}
+
+test dormant-closed-audit {closedAudit states the dormant entry: open to hir::range, never entered} -body {
+    lassign [refinedChecks] hir spec analysis
+    set audit [hir::specialize::closedAudit $hir $spec]
+    list [regexp {scan_while<generic> +closed=0 range-open=1 callers=0 exact=\[\] dormant=1  \(closure de-closure-converted via its specialized instances; this generic Block-value entry is never entered\)} $audit] \
+        [regexp {char_at<generic> +closed=1 range-open=0 callers=5 exact=\[\] dormant=0} $audit]
+} -result {1 1}
+
+test dormant-transitive-instance-open-to-range {a transitively dormant instance stays closed (its key selects it only through exact calls) but hir::range treats it as open: it gets the facts that hold for any caller} -body {
+    lassign [dormantOf $transitiveShape] hir spec analysis
+    set id [instanceLabelled $spec {apply<any, str, int>}]
+    list [hir::specialize::closed $hir $spec $id] [dict exists [hir::range::OpenInstances $spec $hir] $id] \
+        [entryOf $analysis $spec {apply<any, str, int>}]
+} -result {1 1 {{[-∞, +∞]} {[-∞, +∞]} {[-∞, +∞]}}}
+
+# ---------------------------------------------------------------------------
+# What a dormant instance no longer pollutes
+
+test dormant-refined-checks-char-at-entry {refined-checks: char_at.i loses the -∞ the dormant scan_while<generic>'s calls joined in (limitation 2 of EXACT-CALLABLE-CLOSED-CALLER.md)} -body {
+    set off [withDormant 0 {
+        lassign [refinedChecks] hir spec analysis
+        entryOf $analysis $spec char_at<generic>
+    }]
+    lassign [refinedChecks] hir spec analysis
+    list $off [entryOf $analysis $spec char_at<generic>]
+} -result {{{[-∞, 4611686018427387902]}} {{[0, 4611686018427387902]}}}
+
+test dormant-refined-checks-char-at-nir {refined-checks: char_at's i + 1 is a raw riadd (no tag test, no overflow check) in both of its emitted variants, instead of a tagged iadd} -body {
+    set hir [surface::readProgramFile [file join $::projectRoot bench refined-checks.bot]]
+    set off [withDormant 0 {nirOpsOf [native::nir $hir] char_at}]
+    list $off [nirOpsOf [native::nir $hir] char_at]
+} -result {{{iadd regioncheck} {iadd substr}} {{runbox riadd rbox regioncheck} {runbox riadd rbox substr}}}
+
+test dormant-scan-shape-entry {the emailish? scanner shape: get.i is [0, …] once scan<generic>'s unbounded loop counter no longer reaches it} -body {
+    set off [withDormant 0 {
+        lassign [dormantOf $scanShape] hir spec analysis
+        entryOf $analysis $spec get<generic>
+    }]
+    lassign [dormantOf $scanShape] hir spec analysis
+    list $off [entryOf $analysis $spec get<generic>]
+} -result {{{[-∞, 4611686018427387902]}} {{[0, 4611686018427387902]}}}
+
+test dormant-transitive-callee-entry {transitivity matters: idx<int> is reached by the live apply and by the transitively dormant apply<any, str, int>; only the dormant one passes an unbounded argument} -body {
+    set off [withDormant 0 {
+        lassign [dormantOf $transitiveShape] hir spec analysis
+        entryOf $analysis $spec idx<int>
+    }]
+    lassign [dormantOf $transitiveShape] hir spec analysis
+    list $off [entryOf $analysis $spec idx<int>]
+} -result {{{[-∞, 4611686018427387902]}} {{[0, 4611686018427387902]}}}
+
+test dormant-creation-no-capture-evidence {a closure created only by live code: the dormant adder<generic> creates `add` with an unknown n, which no longer joins into add's capture (n is exactly 5)} -body {
+    proc captureOfN {} {
+        lassign [dormantOf $::adderShape] hir spec analysis
+        set st [dict get [hir::range::Fixpoint $hir $spec 1 1 1 [dict create]] state]
+        set result {}
+        dict for {block caps} [dict get $st narrowedCaptures] {
+            dict for {b r} $caps {
+                if {[dict get [hir::binding $hir $b] name] eq "n"} {
+                    lappend result [bounds $r]
+                }
+            }
+        }
+        list [dormantLabels $spec] $result
+    }
+    list [withDormant 0 {captureOfN}] [captureOfN]
+} -result {{{} {{[-∞, +∞]}}} {adder<generic> {{[5, 5]}}}}
+
+test dormant-closed-caller-theorem-skips-dormant-callers {the closed-caller theorem joins only live callers: the dormant scan<generic> passes its unknown `start` to get, which erased the live caller's Int (and left get's kind guards in live code)} -body {
+    proc theoremRow {} {
+        lassign [dormantOf $::theoremShape] hir spec analysis
+        set id [instanceLabelled $spec get<generic>]
+        set callers {}
+        foreach callerId [dict get $spec used] {
+            if {$id in [dict values [dict get $spec instances $callerId calls]]} {
+                lappend callers [list [hir::specialize::label $spec $callerId] [hir::specialize::dormant $hir $spec $callerId]]
+            }
+        }
+        set region [hir::specialize::region $hir $spec $id]
+        list [lsort $callers] [hir::specialize::closedCallerTheorem $hir $spec $id] \
+            [entryOf $analysis $spec get<generic>] [dict get $region status]
+    }
+    list [withDormant 0 {theoremRow}] [theoremRow]
+} -result {{{{scan<generic> 0} {{scan<any, native(is_tcl_alpha)>} 0}} any {{[-∞, +∞]}} guarded} {{{scan<generic> 1} {{scan<any, native(is_tcl_alpha)>} 0}} int {{[0, 4611686018427387902]}} closed}}
+
+# ---------------------------------------------------------------------------
+# Every backend agrees, with and without block escape (where lowering
+# materializes the closure and still emits the dormant entry, never calling
+# it), and the standalone executable is no longer refused for a dormant
+# entry's guards.
+
+foreach {name src expected} [list \
+    scan $scanShape {[3, 1, 0]} \
+    transitive $transitiveShape {[3, 1, 2]} \
+    theorem $theoremShape {[3, 1]} \
+    adder $adderShape 106 \
+    escape $escapeShape {[[8, 8], [15, 15]]}] {
+    test dormant-parity-$name "dormant-sensitive program $name: interp, compile and cranelift (block escape on and off) agree" -body {
+        set hir [surface::compile [dedent $src] t.bot -strict 0]
+        set outcomes [lmap backend {interp compile cranelift} {outcomeUnderHir $backend $hir}]
+        resetEffects
+        lappend outcomes [list value [core::value::show [native::evalHir $hir -block-escape-opt 0] 1] {}]
+        set outcomes [lsort -unique $outcomes]
+        expr {[llength $outcomes] == 1 ? [lindex $outcomes 0 1] : $outcomes}
+    } -result $expected
+}
+
+test dormant-aot-readiness {AOT readiness ignores a dormant instance's guards: the scanner shape builds (it was NOT-READY on scan<generic>'s `loop i from start` guard), with block escape on and off} -constraints executableAot -body {
+    set hir [surface::compile [dedent $transitiveShape] t.bot -strict 0]
+    set dir [makeDirectory {dormant executable test}]
+    set path [file join $dir prog]
+    try {
+        set off [withDormant 0 {
+            catch {native::executable $hir $path} message options
+            dict get $options -errorcode
+        }]
+        native::executable $hir $path
+        set on [exec env PATH= $path]
+        set gc [exec env PATH= BOTLISH_NATIVE_GC_STRESS=1 $path]
+        file delete $path
+        native::executable $hir $path -block-escape-opt 0
+        list $off $on $gc [exec env PATH= $path]
+    } finally {
+        removeDirectory {dormant executable test}
+    }
+} -result {{NATIVE AOT NOT-READY} {[3, 1, 2]} {[3, 1, 2]} {[3, 1, 2]}}
+
+# ---------------------------------------------------------------------------
+# The adversarial review's programs: a closure nested in the literal (or in a
+# sibling) stores the binding in a List and calls it dynamically, next to a
+# direct call. The dormant set rests on blockescape's proof that the value is
+# never called dynamically; blockescape now declines such a binding (tests/
+# blockescape-nested-capturers.test), so its generic entry is a real, live
+# entry and no instance of it is dormant. Before that fix these returned
+# garbage with -block-escape-opt 0.
+
+set nestedValueShape {
+    fn h(x):
+        x + 1
+    fn other(a, p):
+        0
+    fn outer(k):
+        fn f(n, p):
+            if p("a"):
+                h(n) + k
+            else:
+                0
+        fn c(m, p):
+            fn d(z):
+                fs = [other, f]
+                g = list_get(fs, k)
+                g(z * 10000000000000000000000, p)
+            f(m, p) + d(m)
+        c(7, is_tcl_alpha)
+    outer(1)
+}
+
+test dormant-nested-value-use-not-dormant {f's binding is used as a value by a nested closure: none of f's instances is dormant} -body {
+    lassign [dormantOf $nestedValueShape] hir spec analysis
+    lmap id [dict keys [dict get $spec dormant]] {
+        if {[dict get $spec instances $id name] ne "f"} continue
+        hir::specialize::label $spec $id
+    }
+} -result {}
+
+test dormant-nested-value-use-parity {interp, compile and cranelift (block escape on and off) agree on the bignum the dynamic call computes} -body {
+    set hir [surface::compile [dedent $nestedValueShape] t.bot -strict 0]
+    set outcomes [lmap backend {interp compile cranelift} {outcomeUnderHir $backend $hir}]
+    resetEffects
+    lappend outcomes [list value [core::value::show [native::evalHir $hir -block-escape-opt 0] 1] {}]
+    set outcomes [lsort -unique $outcomes]
+    expr {[llength $outcomes] == 1 ? [lindex $outcomes 0 1] : $outcomes}
+} -result 70000000000000000000011
+
+cleanupTests

@@ -218,6 +218,11 @@ proc native::executable {hir path args} {
     set failures {}
     dict for {id region} [hir::specialize::regions $hir $analysis] {
         if {[dict get $region status] eq "closed"} continue
+        # A dormant instance is never entered (hir::specialize::
+        # DormantInstances): a guard in it never runs, so it cannot need a
+        # runtime fallback. Lowering emits it only as the Block-value entry
+        # of a closure -block-escape-opt 0 materializes and never calls.
+        if {[hir::specialize::dormant $hir $analysis $id]} continue
         lappend failures "[dict get $region label]: [dict get $region status]"
         foreach blocker [dict get $region blockers] {
             lappend failures "  [hir::aot::LocationText [dict get $blocker location]]: [dict get $blocker message]"

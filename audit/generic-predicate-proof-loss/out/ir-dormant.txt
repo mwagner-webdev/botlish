@@ -1,0 +1,12 @@
+Loss point 2, dynamic check: callgrind (audit/post-r2a-dynamic-census/tools/profile-nir.sh, audit binary,
+21 runs, run 0 excluded), NIR of bench/refined-checks.bot from tools/run-knob.sh's dumps, knob 0 vs 1,
+on the point-2 commit (main at ccedf43 + the nested-capturer fix).
+
+bench/refined-checks: total Ir/run 5,637,105 -> 5,509,900 (-127,205, -2.26%)
+  value knob0: value {list {{int 400} {int 0}}}
+  value knob1: value {list {{int 400} {int 0}}}  [same]
+  9 web::emailish?: invocations 800 -> 800; self Ir/run 48,000 -> 47,200 (60.0 -> 59.0 Ir/call); inclusive 5,598,426 -> 5,471,221
+  10 char_at: invocations 4,000 -> 4,000; self Ir/run 184,000 -> 140,000 (46.0 -> 35.0 Ir/call); inclusive 336,000 -> 292,000
+  11 char_at: invocations 6,800 -> 6,800; self Ir/run 231,200 -> 149,600 (34.0 -> 22.0 Ir/call); inclusive 2,687,626 -> 2,606,421
+  15 scan_while: invocations 400 -> 400; self Ir/run 65,200 -> 64,800 (163.0 -> 162.0 Ir/call); inclusive 445,600 -> 432,000
+  17 domain?: invocations 400 -> 400; self Ir/run 95,600 -> 94,800 (239.0 -> 237.0 Ir/call); inclusive 1,205,600 -> 1,164,800

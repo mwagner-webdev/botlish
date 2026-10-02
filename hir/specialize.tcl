@@ -135,6 +135,9 @@
 #   closed      InstanceId -> 1 for every used instance InstanceClosed
 #               proves closed (the one authoritative closedness result;
 #               see "InstanceClosed" below)
+#   dormant     InstanceId -> 1 for every used instance that is never
+#               entered at run time (DormantInstances, below): kept in
+#               `used`, but no evidence for anything else
 #   exactCallable  1 if exact callable identity may enter keys
 #
 # An instance:
@@ -196,6 +199,10 @@ namespace eval hir::specialize {
     # tests and tooling, not a compiler diagnostic: non-convergence is never
     # a source-program error (see CloseCallers' own comment).
     variable closeCallersConverged 1
+    # GENERIC-PREDICATE-PROOF-LOSS.md, loss point 2: test/audit knob, not a
+    # user-facing flag. 0 makes DormantInstances find nothing, which
+    # reproduces the compiler before the dormant set existed.
+    variable dormantOpt 1
 }
 
 proc hir::specialize::analyze {hir args} {
@@ -239,8 +246,10 @@ proc hir::specialize::analyze {hir args} {
         # CloseCallers already ran blockescape over the identical frozen graph
         # (it reads only structure and calls/edges/values/used, which that
         # pass never writes), so its result is reused rather than recomputed.
-        dict set analysis closed [ClosedInstances $hir $analysis \
-            [expr {[dict exists $state blockescape] ? [dict get $state blockescape] : ""}]]
+        set be [expr {[dict exists $state blockescape] ? [dict get $state blockescape]
+            : [hir::blockescape::analyze $hir $analysis]}]
+        dict set analysis closed [ClosedInstances $hir $analysis $be]
+        dict set analysis dormant [DormantInstances $analysis $be]
         return $analysis
     } finally {
         set state {}
@@ -1163,6 +1172,92 @@ proc hir::specialize::MaterializedBlocks {snapshot} {
     return $materialized
 }
 
+# ---------------------------------------------------------------------------
+# Dormant instances (GENERIC-PREDICATE-PROOF-LOSS.md, loss point 2)
+#
+# A value-capturing closure's bind always materializes its Block value as far
+# as hir::aot::materializedBlocks is concerned, so Analyze keeps an edge to
+# the literal's generic instance from every instance that binds it, even when
+# hir::blockescape de-closures the binding (`wants` some instance of the
+# literal). That generic instance is then the entry of a Block value nobody
+# ever calls dynamically: blockescape's proof (the one InstanceClosed's
+# closure branch rests on) is that every reference to the binding is the
+# callee of an exact call, so the value never reaches a dynamic call site.
+# A Block value's only route into code is a call, so such an ENTRY runs only
+# when an exact call selects it -- on any backend, whether or not native
+# lowering builds the value (with -block-escape-opt 0 it does, and an exact
+# call of the materialized closure still goes to the instance
+# hir::specialize chose for that call site).
+#
+# DORMANT is the set of used instances not reachable from the program once
+# an edge into an entry is followed only when it is a call of the source
+# (a `calls` target of it): the entries no live code calls, and everything
+# only they reach. Code that never runs makes no calls and creates no
+# closures, so nothing a dormant instance does is evidence about anything
+# else: hir::range, the closed-caller theorem and AOT readiness ignore them
+# as sources. Following every call edge means the set never relies on
+# blockescape's proof that the calls reach only specialized instances
+# (where it does not hold -- a call that selected the generic instance --
+# the instance is simply live); it relies only on the value never being
+# called dynamically. Dormant instances stay in `used` (with their keys and
+# edges): the used graph is what blockescape itself is computed from, and
+# lowering still emits an entry's code when -block-escape-opt 0
+# materializes the closure. Their own facts must hold whatever calls them:
+# hir::range treats every dormant instance as open (no caller facts).
+#
+# Only computed after the ordinary Fixpoint, from the frozen graph and the
+# blockescape result over it (see InstanceClosed's section).
+proc hir::specialize::DormantInstances {snapshot blockescape} {
+    variable dormantOpt
+    if {!$dormantOpt} {
+        return {}
+    }
+    set statics [dict get [dict get $snapshot context] statics]
+    set used [dict get $snapshot used]
+    set wantedBlocks [dict create]
+    foreach id $used {
+        if {[hir::blockescape::wants $blockescape $id]} {
+            dict set wantedBlocks [dict get $snapshot instances $id block] 1
+        }
+    }
+    set entries [dict create]
+    foreach id $used {
+        set instance [dict get $snapshot instances $id]
+        set block [dict get $instance block]
+        if {$block ne "program" && [dict get $instance generic] && $block ni $statics
+                && [dict exists $wantedBlocks $block]} {
+            dict set entries $id 1
+        }
+    }
+    if {![dict size $entries]} {
+        return {}
+    }
+    set live [dict create]
+    set work [list [dict get $snapshot keys program]]
+    while {$work ne ""} {
+        set work [lassign $work id]
+        if {[dict exists $live $id]} {
+            continue
+        }
+        dict set live $id 1
+        set instance [dict get $snapshot instances $id]
+        set callees [dict values [dict get $instance calls]]
+        foreach target [dict get $instance edges] {
+            if {[dict exists $entries $target] && $target ni $callees} {
+                continue
+            }
+            lappend work $target
+        }
+    }
+    set dormant [dict create]
+    foreach id $used {
+        if {![dict exists $live $id]} {
+            dict set dormant $id 1
+        }
+    }
+    return $dormant
+}
+
 # InstanceId -> 1, for every used closed instance the closed-caller entry-kind
 # theorem applies to: a generic instance, and a SPECIALIZED instance of a
 # value-capturing closure whose key still has an `any` position (Handle's
@@ -1225,10 +1320,15 @@ proc hir::specialize::ClosedSet {snapshot blockescape} {
 # theorem, which must still join as "any" -- CombineCallerTheorem treats
 # both alike as "nothing to narrow with" only once every contributing call
 # has been folded in).
-proc hir::specialize::ClosedCallerFacts {hir snapshot closed} {
+#
+# A DORMANT caller (DormantInstances) contributes nothing: it never runs.
+proc hir::specialize::ClosedCallerFacts {hir snapshot closed {dormant {}}} {
     set facts [dict create]
     set exactCallable [expr {[dict exists $snapshot exactCallable] && [dict get $snapshot exactCallable]}]
     foreach callerId [dict get $snapshot used] {
+        if {[dict exists $dormant $callerId]} {
+            continue
+        }
         set callerInstance [dict get $snapshot instances $callerId]
         set calls [dict get $callerInstance calls]
         if {![dict size $calls]} {
@@ -1461,6 +1561,7 @@ proc hir::specialize::CloseCallers {} {
     set be [hir::blockescape::analyze $hir $snapshot]
     dict set state blockescape $be
     set closed [ClosedSet $snapshot $be]
+    set dormant [DormantInstances $snapshot $be]
     if {![dict size $closed]} {
         set closeCallersConverged 1
         return
@@ -1471,7 +1572,7 @@ proc hir::specialize::CloseCallers {} {
     # this set of targets is identical in every round -- computing it once,
     # ahead of the round loop, is exactly the round-1 computation, not a
     # separate query.
-    set facts [ClosedCallerFacts $hir $snapshot $closed]
+    set facts [ClosedCallerFacts $hir $snapshot $closed $dormant]
     # A closed instance may already carry a `result` the ordinary Fixpoint
     # pinned to "any" only because it exhausted its own passLimit while
     # every entry fact was still "any" (Analyze's own non-convergence
@@ -1498,7 +1599,7 @@ proc hir::specialize::CloseCallers {} {
     set converged 0
     for {set round 1} {$round <= $roundLimit} {incr round} {
         if {$round > 1} {
-            set facts [ClosedCallerFacts $hir $snapshot $closed]
+            set facts [ClosedCallerFacts $hir $snapshot $closed $dormant]
         }
         set changed 0
         dict for {id argTypes} $facts {
@@ -1554,11 +1655,29 @@ proc hir::specialize::closed {hir analysis id} {
     return [InstanceClosed $analysis [hir::blockescape::analyze $hir $analysis] $id]
 }
 
+# The dormant set of ANALYSIS (see DormantInstances): the one analyze
+# stored, or derived from BLOCKESCAPE for a hand-built analysis without it.
+proc hir::specialize::DormantOf {analysis blockescape} {
+    if {[dict exists $analysis dormant]} {
+        return [dict get $analysis dormant]
+    }
+    return [DormantInstances $analysis $blockescape]
+}
+
+# 1 if instance ID of ANALYSIS is dormant: never entered at run time, kept
+# in `used` but no evidence for anything else (DormantInstances).
+proc hir::specialize::dormant {hir analysis id} {
+    if {[dict exists $analysis dormant]} {
+        return [dict exists $analysis dormant $id]
+    }
+    return [dict exists [DormantInstances $analysis [hir::blockescape::analyze $hir $analysis]] $id]
+}
+
 # Audit-only: one line per used instance (never user-facing) stating the
 # authoritative closedness answer and what it rests on: instance, closed
 # yes/no with the proof branch, how many exact call sites target it, and the
-# exact callable target(s) in its key. hir::range's openness must read
-# `closed yes` for exactly the generic instances it treats as not open: the
+# exact callable target(s) in its key, and whether it is dormant. hir::range
+# treats an instance as open exactly when it is not closed or is dormant: the
 # `range-open` column is that consumer's own answer.
 proc hir::specialize::closedAudit {hir analysis} {
     set be [hir::blockescape::analyze $hir $analysis]
@@ -1569,6 +1688,7 @@ proc hir::specialize::closedAudit {hir analysis} {
         }
     }
     set open [hir::range::OpenInstances $analysis $hir]
+    set dormant [DormantOf $analysis $be]
     set lines {}
     foreach id [dict get $analysis used] {
         set instance [dict get $analysis instances $id]
@@ -1586,9 +1706,9 @@ proc hir::specialize::closedAudit {hir analysis} {
         } else {
             # A generic instance of a closure blockescape does de-closure-
             # convert (through its other, specialized instances) is the Block
-            # value's entry: never entered at run time, but not itself part
-            # of the proof, so it stays open (and, being reachable in the
-            # call graph, still contributes its own calls to range facts).
+            # value's entry: never entered at run time, and not itself part
+            # of the proof, so it stays open; it is dormant (DormantInstances),
+            # so its own calls are no evidence for anything else.
             set sibling 0
             foreach other [dict get $analysis used] {
                 if {$other ne $id && [dict get $analysis instances $other block] eq $block
@@ -1597,16 +1717,17 @@ proc hir::specialize::closedAudit {hir analysis} {
                 }
             }
             set why [expr {$sibling
-                ? "closure de-closure-converted via its specialized instances; this generic Block-value entry is never entered but is not itself proven"
+                ? "closure de-closure-converted via its specialized instances; this generic Block-value entry is never entered"
                 : "closure, blockescape declined (its Block value may exist: stored, returned or passed)"}]
         }
         set exact [lmap k [dict get $instance args] {
             if {![IsExactCallableKey $k]} continue
             ShowKey $k
         }]
-        lappend lines [format "%-8s %-40s closed=%d range-open=%d callers=%d exact=\[%s\]  (%s)" \
+        lappend lines [format "%-8s %-40s closed=%d range-open=%d callers=%d exact=\[%s\] dormant=%d  (%s)" \
             $id [label $analysis $id] $closed [dict exists $open $id] \
-            [expr {[dict exists $callers $id] ? [dict get $callers $id] : 0}] [join $exact {, }] $why]
+            [expr {[dict exists $callers $id] ? [dict get $callers $id] : 0}] [join $exact {, }] \
+            [dict exists $dormant $id] $why]
     }
     return [join $lines \n]
 }
@@ -1617,11 +1738,12 @@ proc hir::specialize::closedAudit {hir analysis} {
 # test can distinguish "closed but every caller position was any/absent"
 # from "not closed, no theorem is even attempted".
 proc hir::specialize::closedCallerTheorem {hir analysis id} {
-    set closed [ClosedSet $analysis [hir::blockescape::analyze $hir $analysis]]
+    set be [hir::blockescape::analyze $hir $analysis]
+    set closed [ClosedSet $analysis $be]
     if {![dict exists $closed $id]} {
         return ""
     }
-    set facts [ClosedCallerFacts $hir $analysis $closed]
+    set facts [ClosedCallerFacts $hir $analysis $closed [DormantOf $analysis $be]]
     if {![dict exists $facts $id]} {
         return [lrepeat [llength [dict get $analysis instances $id args]] any]
     }

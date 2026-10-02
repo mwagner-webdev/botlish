@@ -10,7 +10,7 @@ section below; the status table is the index.
 | # | loss point | where (at the commit that fixed / last checked it) | status |
 |---|---|---|---|
 | 1 | value-capturing closures with a non-Int capture get the generic key | `hir/specialize.tcl:897-926` (`Handle`) | open |
-| 2 | never-entered generic Block-value entries of de-closured closures stay in the analysis | `hir/aot.tcl:286`, `hir/specialize.tcl:820`, `hir/range.tcl` (contributions *from* open instances) | open |
+| 2 | never-entered generic Block-value entries of de-closured closures stay in the analysis | `hir/aot.tcl:269`, `hir/specialize.tcl:829`; fixed in `hir/specialize.tcl:1210` (`DormantInstances`), `hir/range.tcl:2250` (`OpenInstances`), `:2378`, `:2642`, `hir/rangerec.tcl:269`, `native/native.tcl:225` | **fixed** ([Loss point 2](#loss-point-2-dormant-instances)) |
 | 3 | call sites read the ascending phase's callee result summaries, never narrowed | `hir/range.tcl` `Fixpoint` / `Call` | **fixed** (this report, [Fix 3](#fix-3-result-summary-narrowing)) |
 | – | prerequisite found while verifying fix 3: `hir::range` never visited a call's callee expression (unsound; native miscompiles on `main`) | `hir/range.tcl` `Call` | **fixed** ([Callee-position calls](#callee-position-calls-soundness-fix)) |
 | – | prerequisite found while verifying fix 3: the `bit_and` identity fold trusted interval Ranges (unsound; native miscompiles on `main`) | `native/lower.tcl` `FoldPureBitwise` | **fixed** ([`bit_and` identity fold](#bit_and-identity-fold-soundness-fix)) |
@@ -653,6 +653,291 @@ and interp/compile/cranelift parity for the two review programs and a
 nested call-only shape under default flags, `-block-escape-opt 0`,
 `-exact-callable-opt 0` and both.
 
+## Loss point 2: dormant instances
+
+### Outcome
+
+The generic Block-value entry of a closure that `hir::blockescape`
+de-closures, and every instance only such an entry reaches, is now
+**dormant**: still used (still in the call graph, still emitted when
+`-block-escape-opt 0` materializes the closure), but never entered at run
+time, so nothing it does is evidence about anything else.
+
+* `refined-checks`: `scan_while<generic>` is dormant; its unbounded loop
+  counter no longer reaches `char_at`, whose entry goes from
+  `[-∞, 2^62-2]` to **`[0, 2^62-2]`**. `char_at`'s `i + 1` lowers to
+  `runbox`/`riadd`/`rbox` instead of the tagged, overflow-checked `iadd`, in
+  both of its emitted variants. This is limitation 2 of
+  EXACT-CALLABLE-CLOSED-CALLER.md.
+* `char_at`: 46 → **35** and 34 → **22 Ir/call** (10,800 calls per run);
+  `refined-checks`: 5,637,105 → **5,509,900 Ir/run (−2.26%)**. More than the
+  "≈2%" ceiling the investigation estimated for `tld?`/`domain?`: `char_at`
+  is the hot one.
+* Nothing gets wider: over the corpus (29 programs, 5,130 Range facts) 4
+  facts narrower, **0 wider**; 1 program's NIR changes (`refined-checks`,
+  the two `char_at` functions). Core-IR text (15 programs): 22 narrower,
+  0 wider; 4 programs change, 3 of them the same `char_at` change
+  (`refined-checks.ir`, `05-refined-strings.ir`, `hir/06-refined-strings.ir`),
+  one a closure capture (`hir/02-closures.ir`, below).
+* With the knob off (`hir::specialize::dormantOpt 0`) the compiler is
+  byte-identical to its parent commit on all 44 programs (440 dump files).
+* Point 1 is now possible without the regressions the scratch experiment
+  showed (next section).
+* Side effect: a program whose only AOT blockers sit in a dormant entry is
+  now accepted by `-emit-native-executable` (the scanner shapes in
+  `tests/dormant-instances.test` were `NATIVE AOT NOT-READY` on
+  `scan<generic>`'s `loop i from start` guard).
+
+### The loss
+
+`hir::aot::materializedBlocks` (`hir/aot.tcl:269`) counts every bind of a
+value-capturing closure as materializing its Block value, so
+`hir::specialize::Analyze` keeps an edge from the binding instance to the
+literal's generic instance (`hir/specialize.tcl:829`). When blockescape
+de-closures the binding through specialized instances, that generic
+instance is the entry of a Block value no code ever calls. It is open (its
+callers are not all known: it has none), so it receives no facts, but its
+own calls and closure creations still fed `hir::range` (which skipped
+contributions *to* open instances, not *from* them), the closed-caller
+theorem and `hir::range::ExternalSeeds`; and AOT readiness required it to be
+guard-free although it is never emitted (block escape on) or never run
+(off).
+
+Instances reachable only through such an entry inherit the problem: with
+`<int>` keys (point 1) the dormant `tld?<generic>` creates its own
+`scan_while<any, native(is_tcl_alpha)>`, whose calls would pollute
+`char_at<int>`.
+
+### The change
+
+`hir/specialize.tcl`:
+
+* `DormantInstances` (`:1210`), computed once after the ordinary fixpoint
+  from the frozen graph and the blockescape result over it, stored as
+  `dormant` in the analysis (`:252`) and computed identically by
+  `CloseCallers` (`:1564`). **Entries** are the generic instances of every
+  value-capturing literal of which blockescape wants some instance (the
+  binding is de-closured). **Live** is reachability from the program over
+  `edges`, where an edge into an entry is followed only when the target is
+  a `calls` target of the source. Dormant = used − live.
+* `ClosedCallerFacts` (`:1325`) skips dormant callers.
+* Queries: `hir::specialize::dormant` (`:1669`); `closedAudit` (`:1682`)
+  gains a `dormant=` column.
+* Knob `hir::specialize::dormantOpt` (test/audit only; 0 = empty set).
+
+`hir/range.tcl`: `OpenInstances` (`:2250`) adds the dormant set to `open`
+(a dormant instance gets the facts that hold for any caller); `Fixpoint`'s
+ascending loop (`:2642`) and `NarrowRounds` (`:2378`) skip the calls and
+closure creations of dormant instances; `ExternalSeeds` (`:790`) skips
+dormant callers. `hir/rangerec.tcl`: `ExternalEntry` (`:269`) skips dormant
+callers. `native/native.tcl:225`: AOT readiness skips dormant instances.
+
+#### Design questions
+
+* **Prune from `used`, or keep and exclude?** Kept. The used graph is the
+  input of blockescape, so pruning it would make the dormant set depend on
+  an analysis computed from the set (circular); and with
+  `-block-escape-opt 0` lowering materializes the closure and needs the
+  entry's code (its function pointer). Keeping them changes no instance,
+  key, edge or emitted function: the knob-off equivalence is exact, and
+  with the knob on only facts change.
+* **Where facts are joined.** Every consumer that joins evidence across
+  instances: `hir::range` (calls, creations, external seeds, rangerec's
+  external entry), the closed-caller theorem, AOT readiness. Consumers that
+  read `closed` and plan representations (`native/rawabi.tcl`,
+  `native/shortstring.tcl`, `hir/construction.tcl`) are unchanged: they keep
+  callers and callees consistent by construction, and a dormant instance's
+  Ranges are the open ones, so no raw position is planned from them.
+* **Circularity with blockescape.** None: blockescape runs on the full
+  used graph exactly as before, and the dormant set is derived from its
+  result afterwards.
+* **`-block-escape-opt 0`.** The entry is emitted (it is the closure's code
+  pointer) and still never called: an exact call of a materialized closure
+  goes to the instance hir::specialize chose for that call site
+  (`callenv` of the specialized canonical function). `native/rawabi.tcl`
+  already treats such generic instances as open there.
+
+### Soundness
+
+The claim is that no dormant instance runs, on any backend.
+
+1. A Block value only runs code when called. An exact call runs the
+   instance recorded for that call site in the caller's `calls`; a dynamic
+   call of a Block value runs the literal's generic instance.
+2. An entry's literal is de-closured, so blockescape proved that every
+   reference to its binding is the callee of an exact call: its Block value
+   never reaches a dynamic call site. So an entry runs only when a recorded
+   exact call selects it, and every other dormant instance runs only when
+   some instance calls it or creates it.
+3. Liveness follows every call edge of a live instance (even unreachable
+   calls) and every value edge except into entries. An instance that some
+   live instance calls is therefore live; a dormant instance is only ever
+   called or created by dormant ones. By induction over a run, no dormant
+   instance is ever entered: the program is live, and a live instance only
+   enters live instances.
+
+It does not rely on blockescape's claim that the exact calls reach
+*specialized* instances: a call that selects the generic instance keeps it
+live. It does rely on the dynamic-call part of the proof, and that part was
+wrong for closures nested in the literal or in a sibling: the
+[nested-capturer fix](#blockescape-nested-capturers-soundness-fix), found
+by this change's review, comes first for that reason.
+
+Given that, excluding a dormant instance's calls and creations removes only
+evidence of runs that never happen; treating dormant instances as open gives
+them facts that hold whoever calls them, so their code (emitted under
+`-block-escape-opt 0`) is correct even if the claim were wrong for them.
+The one place where code compiled for a dormant caller relies on a live
+callee's facts is a call into a RawInt parameter planned from live callers
+only: the dormant call site unboxes without a check (wrong only if run).
+
+### `refined-checks`: `char_at` before / after
+
+```
+before                              after
+%2 = int 1                          %2 = op runbox %0
+%3 = rawint 1                       %3 = int 1
+%4 = op iadd %0 %2                  %4 = rawint 1
+%5 = op regioncheck %1 %0 %4        %5 = op riadd %2 %4
+retmulti %1 %0 %4                   %6 = op rbox %5
+                                    %7 = op regioncheck %1 %0 %6
+                                    retmulti %1 %0 %6
+```
+
+The other variant (`substr` instead of `regioncheck`) changes the same way.
+
+### `examples/hir/02-closures.ir`
+
+```
+{bind adder {block {n} {block {x} (x + n + base)}}}
+{bind add5 {call {ref adder} {const 5}}}
+{call {ref add5} {const 1}}
+```
+
+`adder<int>` is the call target; `adder<generic>` is dormant. It created
+the inner closure with an unknown `n`, which joined into the capture fact;
+now `n` is `[5, 5]`, the inner closure's `+`s lower raw and its result is
+`[106, 106]`. Correct (the program returns 106 on every backend).
+
+### Evidence
+
+`tools/run-knob.sh` (`out/census-dormant.txt`, base = the nested-capturer
+fix): the census above, `census.tcl` knob 0 vs 1, and `equivalence-off.tcl`
+(parent commit vs knob 0: NIR, Range analysis, every `Fixpoint` state, RawInt
+plan text, labels, variants, HIR, dormant set and call counts byte-identical,
+440 comparisons, 0 mismatches). `census.tcl` gained a `dormant-wider` class
+for facts of instances dormant at knob 1 (deliberately the open facts); the
+corpus has none.
+
+Instructions (`out/ir-dormant.txt`; `audit/post-r2a-dynamic-census/tools/profile-nir.sh`, 21
+runs, run 0 excluded):
+
+| function (`refined-checks`) | calls/run | self Ir/run before | after |
+|---|---:|---:|---:|
+| `char_at` (region variant) | 4,000 | 184,000 | 140,000 |
+| `char_at` (ordinary variant) | 6,800 | 231,200 | 149,600 |
+| total | | 5,637,105 | 5,509,900 (−2.26%) |
+
+(`web::emailish?`, `scan_while` and `domain?` lose 1-2 Ir/call each from
+the shorter calls; every other function's self Ir is unchanged.)
+
+### Fuzzing
+
+`tools/fuzz.tcl -knob hir::specialize::dormantOpt` (`out/fuzz-dormant.txt`).
+Its trace oracle now joins only a block's *live* instances (a dormant one
+claims nothing, so joining it would make the oracle vacuous exactly where
+this change acts), and reports any invocation of a block whose every
+instance is dormant; `-mutate 2` (every instance that makes a call declared
+dormant too) is the matching oracle self-test.
+
+| run | programs | native | Range checks | violations | disagreements |
+|---|---:|---|---:|---:|---:|
+| A | 5,000 | default | 26,796 top-level + 394,560 trace | 0 | 38, all pre-existing |
+| B | 2,000 | `-block-escape-opt 0` | 10,830 + 160,338 | 0 | 0 |
+| C (self-test) | 200 | `-mutate 2` | | 15 top-level, 1,209 trace | 24 (21 introduced) |
+
+In A, 2,341 programs have a dormant instance and 497 change a Range. The 38
+disagreements are all the pre-existing `list_get(fs, 0)(3)` NATIVE BUG
+(identical with the knob off), fixed by the [next
+commit](#blockescape-a-called-generic-instance). The generator never builds
+nested capturers (limitation 5), so it could not find the review's bug.
+
+### Adversarial review
+
+An independent review (soundness, integration, downstream consumers),
+every finding reproduced before acting:
+
+* **Soundness: found a real hole, pre-existing, that this change turned into
+  wrong results.** blockescape never examined closures nested in a literal
+  or a sibling capturer (two reproducers: a recursive closure stored in a
+  List by a closure nested in its own body; a sibling stored by a closure
+  nested in its capturer). On `main` both fail to compile natively; with
+  `-block-escape-opt 0` they returned garbage under this change (a
+  "dormant" entry was entered through the List). Fixed first:
+  [nested capturers](#blockescape-nested-capturers-soundness-fix); both
+  programs are regression tests here and there.
+* Everything else held: liveness (strongly connected components are wholly
+  live or wholly dormant, so recursive solving never mixes them), capture
+  facts (a block created only by dormant code has only dormant instances),
+  `CloseCallers` and `analyze` computing the same set, the representation
+  planners reading `closed`, AOT readiness, per-region-instance eligibility,
+  and a probe matrix over every backend and option combination
+  (`-block-escape-opt 0`, `-specialize 0`, `-call-facts-opt 0`,
+  `-exact-callable-opt 0`, `-closed-caller-facts-opt 0`) with the knob on and
+  off.
+* Unrelated, recorded, not fixed: `interp` accepts a forward reference
+  between sibling local closures and returns a value where `compile` and
+  cranelift raise `CORE SEMANTIC UNBOUND`.
+
+The review also covered the generalized entry rule (wanted generic
+instances count as entries too) and the planned blockescape change of the
+next section, and found no separate problem in either beyond the nested
+capturers.
+
+### Verification
+
+On this commit (the nested-capturer fix underneath, `main` at `ccedf43`),
+each suite in its own worktree:
+
+| suite | result |
+|---|---|
+| `tests/all.tcl`, interp | 4,345 / 4,345 |
+| `tests/all.tcl`, compile | 4,341 passed, 4 skipped (`coreScoping`), 0 failed |
+| the same under `BOTLISH_NATIVE_GC_STRESS=1` | identical |
+| `tests/native-coverage.tcl` (cranelift) | 4,379 tests: native 1,830, independent 2,442, passed-partial 46, unsupported 60, failed 1 (`refined-5`) |
+| the same on `main` (`ccedf43`) | 4,346 tests: native 1,811, independent 2,428, passed-partial 46, unsupported 60, failed 1 (`refined-5`) |
+
+The coverage difference is exactly the 33 added tests (13 for the
+nested-capturer fix, 20 here; 19 native and 14 independent in all); the one failure
+is the pre-existing `refined-5` on both.
+
+Tests: `tests/dormant-instances.test` (new, 20): the dormant sets of
+`refined-checks` and of a transitive shape; an escaping closure's entry
+stays live; `used`/keys unchanged by the knob; `closedAudit`; a transitively
+dormant instance is closed but range-open; `char_at`'s entry and NIR, the
+scanner shape's `get`, the transitive callee's entry, the `adder` capture and
+the closed-caller theorem, each knob off and on; the review's nested-value
+program (nothing dormant, parity); interp/compile/cranelift parity with
+block escape on and off on five shapes; and AOT readiness (the scanner
+shape builds and runs, also under GC stress and with block escape off, and
+is `NATIVE AOT NOT-READY` with the knob off).
+
+### Known limitations
+
+1. **The set rests on blockescape's no-dynamic-call proof.** Any future
+   gap there is a gap here (the nested-capturer bug was one).
+2. **Representation planners still see dormant callers.** RawInt and
+   ShortString1 demand, and virtual construction, still count call sites
+   in dormant code (never emitted with block escape on). Only usefulness,
+   never safety.
+3. **A static block materialized only in dormant code** still counts as
+   materialized (`hir::specialize::MaterializedBlocks`), so its generic
+   instance stays open.
+4. **Dormant code is still compiled under `-block-escape-opt 0`**, with the
+   any-caller facts, and its calls into RawInt parameters unbox unchecked.
+5. **The fuzzer never generates nested capturers**, which is why it could not
+   find the blockescape bug the review found.
+
 ## Next steps (points 1, 2, 4, 5)
 
 Point 3 is the only one that was both independent and worth something on
@@ -661,12 +946,9 @@ never-entered generic entries stop feeding the analysis (2), and a
 non-generic `tld?`/`domain?` is only worth something once counted loops can
 run raw (4) and de-closured functions can take raw parameters (5).
 
-1. **Point 2 first:** remove the generic Block-value entry of a literal
-   blockescape de-closures (and anything only it reaches) from the
-   analyzed instances, or stop it from contributing to `hir::range`. This
-   is limitation 2 of EXACT-CALLABLE-CLOSED-CALLER.md, and the
-   precondition for 1 (Range regression and `NATIVE AOT NOT-READY`
-   otherwise).
+1. **Point 2: done** ([Loss point 2](#loss-point-2-dormant-instances)):
+   the entries and what only they reach are dormant, kept in `used` but no
+   evidence for anything else.
 2. **Point 1:** keep `int` key positions for closures in `Handle`
    (one line), or let `native/rawabi.tcl:120` accept the closed-caller
    theorem for a closed generic instance instead (no key change, no split

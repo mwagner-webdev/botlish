@@ -80,6 +80,21 @@
 # small L makes the pass give up: its commit-nothing path); -mutate 1 is an
 # ORACLE SELF-TEST that makes the pass deliberately unsound (every committed
 # summary's finite lower bound raised by one), which must be reported.
+#
+# Loss point 2 (dormant instances): -knob VAR names the knob the "knob 0"
+# side of every comparison above turns off (default
+# hir::range::resultNarrowOpt; hir::specialize::dormantOpt for loss point 2:
+# its knob-0 analysis re-runs the specialization with the knob off). The
+# trace oracle always joins only NON-dormant instances of a block (a dormant
+# instance is open and claims nothing, so including it would make the
+# oracle vacuous for exactly the blocks loss point 2 is about), so an
+# invocation of a block outside its live instances' facts -- including a
+# dormant instance actually being entered -- is a violation. -mutate 2 is
+# the matching ORACLE SELF-TEST: every used function instance that makes a
+# call is declared dormant as well (its calls stop counting while it still
+# runs), which must be reported. -nativeopts OPT=V,... passes native::evalHir
+# options to the native run (e.g. -block-escape-opt=0, where lowering
+# materializes every closure and emits dormant entries).
 set root [file dirname [file dirname [file dirname [file dirname [file normalize [info script]]]]]]
 set script [file normalize [info script]]
 set args $argv
@@ -98,6 +113,8 @@ set jobs 2
 set slice 10
 set roundLimit ""
 set mutate 0
+set knob hir::range::resultNarrowOpt
+set nativeOpts {}
 set memLimitKb 4000000
 set timeLimit 600
 while {[llength $args] > 0} {
@@ -113,6 +130,8 @@ while {[llength $args] > 0} {
         -slice { set slice $value }
         -roundlimit { set roundLimit $value }
         -mutate { set mutate $value }
+        -knob { set knob $value }
+        -nativeopts { set nativeOpts $value }
         -timelimit { set timeLimit $value }
         default { puts stderr "unknown option $key"; exit 2 }
     }
@@ -127,7 +146,22 @@ set hir::range::resultNarrowRoundLimit $roundLimit
 # -mutate 1: ORACLE SELF-TEST ONLY. Deliberately unsound result narrowing:
 # every summary the pass commits gets its finite lower bound raised by one.
 # A run with it must report range violations; one without it must not.
-if {$mutate} {
+if {$mutate == 2} {
+    rename hir::specialize::DormantInstances hir::specialize::DormantInstancesOriginal
+    proc hir::specialize::DormantInstances {snapshot blockescape} {
+        set dormant [DormantInstancesOriginal $snapshot $blockescape]
+        if {!$::hir::specialize::dormantOpt} {
+            return $dormant
+        }
+        foreach id [dict get $snapshot used] {
+            set instance [dict get $snapshot instances $id]
+            if {[dict get $instance block] ne "program" && [dict size [dict get $instance calls]]} {
+                dict set dormant $id 1
+            }
+        }
+        return $dormant
+    }
+} elseif {$mutate} {
     rename hir::range::NarrowRounds hir::range::NarrowRoundsOriginal
     proc hir::range::NarrowRounds {ctx narrowed captures results narrowResults roundBudget} {
         set out [NarrowRoundsOriginal $ctx $narrowed $captures $results $narrowResults $roundBudget]
@@ -576,7 +610,13 @@ proc outcome {kind hir} {
         switch $kind {
             interp  { core::useBackend interp;  set r [core::evalProgram [hir::lower $hir]] }
             compile { core::useBackend compile; set r [core::evalProgram [hir::lower $hir]] }
-            native  { set r [native::evalHir $hir] }
+            native  {
+                set opts {}
+                foreach pair [split $::nativeOpts ,] {
+                    if {$pair ne ""} { lappend opts {*}[split $pair =] }
+                }
+                set r [native::evalHir $hir {*}$opts]
+            }
         }
     } msg opts]} {
         return [list error [dict get $opts -errorcode] $msg]
@@ -627,11 +667,16 @@ proc within {r1 r0} {
 proc showRange {r} { return [hir::range::show $r] }
 
 proc analyzeWith {opt hir spec} {
-    set hir::range::resultNarrowOpt $opt
+    set ::$::knob $opt
     try {
+        if {$::knob ne "hir::range::resultNarrowOpt"} {
+            # A specialization knob (hir::specialize::dormantOpt): the
+            # specialization itself is computed with it.
+            set spec [hir::specialize::analyze $hir]
+        }
         return [hir::range::analyze $hir $spec]
     } finally {
-        set hir::range::resultNarrowOpt 1
+        set ::$::knob 1
     }
 }
 
@@ -675,6 +720,8 @@ proc checkProgram {seed k} {
         if {[dict get [hir::specialize::instance $spec $id] block] ne "program"} { set openHelper 1 }
     }
     dict set rec openInstance $openHelper
+    set dormant [expr {[dict exists $spec dormant] ? [dict get $spec dormant] : {}}]
+    dict set rec dormant [expr {[dict size $dormant] > 0}]
 
     # -- runs
     set ::observed {}
@@ -694,15 +741,15 @@ proc checkProgram {seed k} {
         set kind [expr {[string match "NATIVE UNSUPPORTED*" [lindex $on 1]] ? "native-unsupported" : "disagreement"}]
         # Attribution: native again with the pass off. The same native
         # outcome there means the disagreement predates the pass.
-        set hir::range::resultNarrowOpt 0
+        set ::$::knob 0
         try {
             set on0 [outcome native $prepared]
         } finally {
-            set hir::range::resultNarrowOpt 1
+            set ::$::knob 1
         }
         set origin [expr {[lrange $on0 0 2] eq [lrange $on 0 2]
-            ? "pre-existing: identical with resultNarrowOpt 0"
-            : "INTRODUCED by the pass: resultNarrowOpt 0 native gives [lrange $on0 0 2]"}]
+            ? "pre-existing: identical with $::knob 0"
+            : "INTRODUCED by the pass: $::knob 0 native gives [lrange $on0 0 2]"}]
         dict lappend rec failures [list $kind \
             "interp:  [lrange $oi 0 2]\ncompile: [lrange $oc 0 2]\nnative:  [lrange $on 0 2]\n($origin)"]
     } elseif {[lindex $oi 0] eq "error" && [llength [lsort -unique [lmap o [list $oi $oc $on] {lindex $o 2}]]] != 1} {
@@ -774,7 +821,7 @@ proc checkProgram {seed k} {
         if {![inRange $v $r1]} {
             dict lappend rec failures [list range-top \
                 "element $index ($e, [dict get [hir::binding $prepared $b] name]) = $v not in [showRange $r1]\
-                 (resultNarrowOpt 0: [showRange $r0], [expr {[inRange $v $r0] ? "contains it: INTRODUCED by the pass" : "violated too: pre-existing"}])"]
+                 ($::knob 0: [showRange $r0], [expr {[inRange $v $r0] ? "contains it: INTRODUCED by the pass" : "violated too: pre-existing"}])"]
         }
     }
     dict set rec topChecks $topChecks
@@ -788,6 +835,12 @@ proc checkProgram {seed k} {
         set ej {}
         set rj never
         set sj never
+        set ids [lmap id $ids {expr {[dict exists $dormant $id] ? [continue] : $id}}]
+        if {$ids eq ""} {
+            # Every instance is dormant: the block must never run.
+            dict set entryJoin $block dormant
+            continue
+        }
         foreach id $ids {
             set inst [dict get $a1 instances $id]
             if {$ej eq ""} {
@@ -823,6 +876,10 @@ proc checkProgram {seed k} {
         }
         set block [dict get $blockOfKey $params]
         set label "[join $params ,]"
+        if {[dict get $entryJoin $block] eq "dormant"} {
+            lappend traceFail "invoked ($label), whose every used instance is dormant"
+            continue
+        }
         foreach v $argValues r [dict get $entryJoin $block] p $params {
             if {$v eq "" || [core::value::kind $v] ne "int"} continue
             incr traceChecks
@@ -885,7 +942,7 @@ if {$worker} {
 proc launch {seed first count} {
     set cmd "ulimit -v $::memLimitKb 2>/dev/null; exec timeout $::timeLimit tclsh9.0\
         [list $::script] -worker 1 -seed $seed -first $first -n $count\
-        -roundlimit [list $::roundLimit] -mutate $::mutate"
+        -roundlimit [list $::roundLimit] -mutate $::mutate -knob [list $::knob] -nativeopts $::nativeOpts"
     return [open |[list sh -c $cmd 2>@1] r]
 }
 
@@ -952,7 +1009,7 @@ foreach seed $seeds {
     set s [dict create programs 0 ok 0 rejected 0 interpError 0 disagreements 0 unsupported 0 \
         analysisErrors 0 limits 0 harness 0 disagreementsIntroduced 0 topChecks 0 topViolations 0 topIntroduced 0 \
         traceChecks 0 traceViolations 0 changed 0 topChanged 0 exprChanged 0 notRefinement 0 \
-        attempted 0 converged 0 unconverged 0 messageMismatch 0 openInstance 0]
+        attempted 0 converged 0 unconverged 0 messageMismatch 0 openInstance 0 dormant 0]
     set rounds {}
     set rejectSamples {}
     foreach k [lsort -integer [dict keys $records]] {
@@ -970,7 +1027,7 @@ foreach seed $seeds {
             limit { dict incr s limits }
             harness-error { dict incr s harness }
         }
-        foreach key {interpError changed topChanged exprChanged messageMismatch openInstance} {
+        foreach key {interpError changed topChanged exprChanged messageMismatch openInstance dormant} {
             if {[dict exists $rec $key] && [dict get $rec $key]} { dict incr s $key }
         }
         foreach key {topChecks traceChecks} {
@@ -1043,14 +1100,14 @@ foreach seed $seeds {
         the pass %d), native-unsupported %d, analysis errors %d, limits %d, harness errors %d; range violations: top-level %d\
         of %d checks (introduced by the pass %d), trace %d of %d checks; narrowing changed an entry/call Range in\
         %d programs (a checked top-level call Range in %d, any expression Range in %d); programs with an open\
-        instance %d; result narrowing\
+        instance %d, with a dormant instance %d; result narrowing\
         attempted %d, converged %d (rounds %s), not converged %d; knob-on not within knob-off %d;\
         error-message mismatches %d; %ds" \
         $seed [dict get $s programs] [dict get $s ok] [dict get $s rejected] [dict get $s interpError] \
         [dict get $s disagreements] [dict get $s disagreementsIntroduced] [dict get $s unsupported] [dict get $s analysisErrors] [dict get $s limits] \
         [dict get $s harness] [dict get $s topViolations] [dict get $s topChecks] [dict get $s topIntroduced] \
         [dict get $s traceViolations] [dict get $s traceChecks] [dict get $s changed] [dict get $s topChanged] \
-        [dict get $s exprChanged] [dict get $s openInstance] [dict get $s attempted] [dict get $s converged] $roundText \
+        [dict get $s exprChanged] [dict get $s openInstance] [dict get $s dormant] [dict get $s attempted] [dict get $s converged] $roundText \
         [dict get $s unconverged] [dict get $s notRefinement] [dict get $s messageMismatch] \
         [expr {[clock seconds] - $t0}]]
     flush stdout
@@ -1060,9 +1117,9 @@ foreach seed $seeds {
 }
 if {[llength $seeds] > 1} {
     puts [format "total (seeds %s): programs %d, compiled %d, disagreements %d, range violations top %d / trace %d,\
-        changed-by-narrowing %d (top-level %d), not-converged %d, failures %d programs; %ds" \
+        changed-by-the-knob %d (top-level %d), with a dormant instance %d, not-converged %d, failures %d programs; %ds" \
         [join $seeds ,] [dict get $totals programs] [dict get $totals ok] [dict get $totals disagreements] \
         [dict get $totals topViolations] [dict get $totals traceViolations] [dict get $totals changed] \
-        [dict get $totals topChanged] [dict get $totals unconverged] $totalFailures [expr {[clock seconds] - $started}]]
+        [dict get $totals topChanged] [dict get $totals dormant] [dict get $totals unconverged] $totalFailures [expr {[clock seconds] - $started}]]
 }
 exit [expr {$totalFailures ? 1 : 0}]

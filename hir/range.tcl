@@ -785,9 +785,15 @@ proc hir::range::SeedRange {hir e} {
 # InstanceId -> list of Range, one per parameter: the join of the literal
 # argument ranges every *other* used instance's direct calls pass it.
 # Self-recursive calls are excluded (Analyze below feeds those back).
+#
+# A dormant caller (DormantInstances) passes nothing.
 proc hir::range::ExternalSeeds {hir spec} {
     set seeds [dict create]
+    set dormant [DormantInstances $spec $hir]
     foreach id [dict get $spec used] {
+        if {[dict exists $dormant $id]} {
+            continue
+        }
         set instance [dict get $spec instances $id]
         foreach {callExpr target} [dict get $instance calls] {
             if {$target eq $id} {
@@ -2231,9 +2237,16 @@ proc hir::range::AnalyzeInstance {hir id instanceCalls block params assumed mono
 # specialize resolved to it), and its set of known callers is then not the
 # full set of actual callers.
 #
-# SPEC carries the proof (`closed`) hir::specialize::analyze computed once
-# at the stable point; HIR is only needed to derive it for a hand-built SPEC
-# that lacks it.
+# A DORMANT instance (hir::specialize::DormantInstances: never entered at
+# run time) is open too, whatever its closedness: its only callers are other
+# dormant instances, whose calls are no evidence (DormantInstances below), so
+# it gets the facts that hold for any caller. Lowering may still emit it (a
+# Block-value entry under -block-escape-opt 0), and that code must be correct
+# for whatever reaches it.
+#
+# SPEC carries the proof (`closed`, `dormant`) hir::specialize::analyze
+# computed once at the stable point; HIR is only needed to derive it for a
+# hand-built SPEC that lacks it.
 proc hir::range::OpenInstances {spec {hir ""}} {
     if {[dict exists $spec closed]} {
         set closed [dict get $spec closed]
@@ -2242,14 +2255,30 @@ proc hir::range::OpenInstances {spec {hir ""}} {
     } else {
         error "hir::range::OpenInstances: SPEC has no closedness result and no HIR was given"
     }
+    set dormant [DormantInstances $spec $hir]
     set open [dict create]
     foreach id [dict get $spec used] {
         set instance [dict get $spec instances $id]
-        if {[dict get $instance block] ne "program" && ![dict exists $closed $id]} {
+        if {[dict get $instance block] ne "program"
+                && (![dict exists $closed $id] || [dict exists $dormant $id])} {
             dict set open $id 1
         }
     }
     return $open
+}
+
+# The dormant instances of SPEC (hir::specialize::DormantInstances): never
+# entered at run time, so a call or closure creation in one is no evidence
+# for anything (GENERIC-PREDICATE-PROOF-LOSS.md, loss point 2). Every place
+# this module joins facts across instances (Fixpoint's ascending and
+# narrowing rounds, ExternalSeeds, rangerec.tcl's ExternalEntry) skips them
+# as sources. A hand-built SPEC without the set has none (the analysis
+# before the set existed).
+proc hir::range::DormantInstances {spec {hir ""}} {
+    if {[dict exists $spec dormant]} {
+        return [dict get $spec dormant]
+    }
+    return {}
 }
 
 # Runs instance ID to its own local self-call fixpoint (self tail calls and
@@ -2318,7 +2347,7 @@ proc hir::range::SettleInstance {hir id instanceCalls block params assumed locke
 #     instance with no summary at all.
 #
 # CTX holds Fixpoint's per-instance tables (ids blockOf paramsOf viewOf
-# instanceCallsOf monotoneOf lockedOf open captureOpt pinned). Returns
+# instanceCallsOf monotoneOf lockedOf open dormant captureOpt pinned). Returns
 # {CONVERGED NARROWED CAPTURES RESULTS ROUNDS OUTCOMES}: CONVERGED is 1 iff
 # a round changed nothing within ROUNDBUDGET rounds, ROUNDS the rounds run,
 # OUTCOMES the last round's AnalyzeInstance outcomes (computed under the
@@ -2327,6 +2356,7 @@ proc hir::range::SettleInstance {hir id instanceCalls block params assumed locke
 proc hir::range::NarrowRounds {ctx narrowed captures results narrowResults roundBudget} {
     set ids [dict get $ctx ids]
     set open [dict get $ctx open]
+    set dormant [dict get $ctx dormant]
     set captureOpt [dict get $ctx captureOpt]
     set pinned [dict get $ctx pinned]
     set converged 0
@@ -2345,7 +2375,8 @@ proc hir::range::NarrowRounds {ctx narrowed captures results narrowResults round
                 $block [dict get $ctx paramsOf $id] [dict get $narrowed $id] \
                 [dict get $ctx monotoneOf $id] $results $captureSeed]
             dict set freshOutcomes $id $outcome
-            foreach pair [dict get $outcome calls] {
+            set evidence [expr {![dict exists $dormant $id]}]
+            foreach pair [expr {$evidence ? [dict get $outcome calls] : {}}] {
                 lassign $pair target argRanges
                 if {[dict exists $open $target]} {
                     continue
@@ -2358,7 +2389,7 @@ proc hir::range::NarrowRounds {ctx narrowed captures results narrowResults round
                 }
                 dict set contributions $target $next
             }
-            foreach pair [dict get $outcome creates] {
+            foreach pair [expr {$evidence ? [dict get $outcome creates] : {}}] {
                 lassign $pair childBlock capRanges
                 set current [expr {[dict exists $roundCaptures $childBlock] ? [dict get $roundCaptures $childBlock] : {}}]
                 dict for {b r} $capRanges {
@@ -2502,6 +2533,11 @@ proc hir::range::Fixpoint {hir spec callFactsOpt narrowOpt captureOpt pinned} {
     # hir/induction.tcl's header).
     set induction [hir::induction::analyze $hir $spec $literalSeeds]
     set open [OpenInstances $spec $hir]
+    # A dormant instance (never entered at run time) is open (above) and
+    # makes no call and creates no closure that counts: its outcome is
+    # computed like any other's (lowering may still emit its code), but
+    # never folded into another instance's facts, here or in NarrowRounds.
+    set dormant [DormantInstances $spec $hir]
 
     set ids [dict get $spec used]
     set blockOf [dict create]
@@ -2603,7 +2639,8 @@ proc hir::range::Fixpoint {hir spec callFactsOpt narrowOpt captureOpt pinned} {
                 $block [dict get $paramsOf $id] $before \
                 [dict get $lockedOf $id] [dict get $monotoneOf $id] $calleeResults $captureSeed] outcome settled
             dict set outcomes $id $outcome
-            foreach pair [dict get $outcome creates] {
+            set evidence [expr {![dict exists $dormant $id]}]
+            foreach pair [expr {$evidence ? [dict get $outcome creates] : {}}] {
                 lassign $pair childBlock capRanges
                 set current [expr {[dict exists $roundCaptures $childBlock] ? [dict get $roundCaptures $childBlock] : {}}]
                 dict for {b r} $capRanges {
@@ -2633,7 +2670,7 @@ proc hir::range::Fixpoint {hir spec callFactsOpt narrowOpt captureOpt pinned} {
                 dict set assumed $id $settled
                 set changed 1
             }
-            foreach pair [dict get $outcome calls] {
+            foreach pair [expr {$evidence ? [dict get $outcome calls] : {}}] {
                 lassign $pair target argRanges
                 if {$target eq $id || [dict exists $open $target]} {
                     continue
@@ -2805,7 +2842,7 @@ proc hir::range::Fixpoint {hir spec callFactsOpt narrowOpt captureOpt pinned} {
     # round budget expired.
     set narrowCtx [dict create ids $ids blockOf $blockOf paramsOf $paramsOf viewOf $viewOf \
         instanceCallsOf $instanceCallsOf monotoneOf $monotoneOf lockedOf $lockedOf open $open \
-        captureOpt $captureOpt pinned $pinned]
+        dormant $dormant captureOpt $captureOpt pinned $pinned]
     set narrowed $assumed
     set narrowedCaptures $captureSeeds
     if {$narrowOpt} {
@@ -2909,7 +2946,7 @@ proc hir::range::Fixpoint {hir spec callFactsOpt narrowOpt captureOpt pinned} {
     }
     # STATE is the solver's input (rangerec.tcl); analyze strips it.
     set state [dict create ids $ids blockOf $blockOf paramsOf $paramsOf viewOf $viewOf \
-        instanceCallsOf $instanceCallsOf monotoneOf $monotoneOf open $open \
+        instanceCallsOf $instanceCallsOf monotoneOf $monotoneOf open $open dormant $dormant \
         narrowed $narrowed narrowedCaptures $narrowedCaptures calleeResults $calleeResults \
         finalOutcomes $finalOutcomes captureOpt $captureOpt selfRecursiveOf $selfRecursiveOf pinned $pinned \
         ascendingResults $ascendingResults resultNarrow $resultNarrow]

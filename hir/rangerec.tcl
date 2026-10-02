@@ -265,11 +265,11 @@ proc hir::range::MutuallyRecursive {graph id} {
 
 # The join, per parameter, of the argument Ranges of every reachable exact
 # call to ID from another instance (the instance's *external* entry), or ""
-# if there is none.
+# if there is none. A dormant caller (DormantInstances) never runs.
 proc hir::range::ExternalEntry {st id} {
     set entry ""
     foreach caller [dict get $st ids] {
-        if {$caller eq $id} continue
+        if {$caller eq $id || [dict exists $st dormant $caller]} continue
         foreach pair [dict get $st finalOutcomes $caller calls] {
             lassign $pair target argRanges
             if {$target ne $id} continue

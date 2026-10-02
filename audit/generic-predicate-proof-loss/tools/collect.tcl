@@ -6,8 +6,10 @@
 #
 #   tclsh9.0 collect.tcl TREE KNOB OUTDIR PROGRAM.{bot,ir}...
 #
-# KNOB is 0 or 1 (hir::range::resultNarrowOpt) or "-" (leave the tree's
-# own defaults alone: the pre-change tree has no such variable). Per
+# KNOB is 0 or 1, or "-" (leave the tree's own defaults alone: the
+# pre-change tree has no such variable). The variable it sets is
+# hir::range::resultNarrowOpt (fix 3), or the one named by the environment
+# variable AUDIT_KNOB (loss point 2: hir::specialize::dormantOpt). Per
 # program, ONE native::nir run with default lowering options; the Range
 # analysis, the Fixpoint states and the raw-int-ABI plan are the very ones
 # that run computed (captured with execution traces, never recomputed), so
@@ -28,6 +30,8 @@
 #                  internal, internalregion, fields, fieldscompanion) in
 #                  the order lowering's worklist produced them
 #   calls.txt      number of analyze / Fixpoint / rawabi::plan calls
+#   dormant.txt    the specialization's dormant InstanceIds (loss point 2;
+#                  empty on a tree without them)
 # or OUTDIR/<stem>/skip.txt with the error, when lowering failed.
 lassign $argv tree knob outdir
 set programs [lrange $argv 3 end]
@@ -37,7 +41,7 @@ source [file join $tree surface surface.tcl]
 source [file join $tree native native.tcl]
 interp recursionlimit {} 20000
 if {$knob ne "-"} {
-    set hir::range::resultNarrowOpt $knob
+    set ::[expr {[info exists ::env(AUDIT_KNOB)] ? $::env(AUDIT_KNOB) : "hir::range::resultNarrowOpt"}] $knob
 }
 
 proc W {path content} {
@@ -159,6 +163,7 @@ foreach path $programs {
         append labels [list $id [dict create label [hir::specialize::label $spec $id] block $block pnames $pnames]] \n
     }
     W [file join $dir labels.txt] $labels
+    W [file join $dir dormant.txt] "[expr {[dict exists $spec dormant] ? [lsort [dict keys [dict get $spec dormant]]] : ""}]\n"
     W [file join $dir hir.txt] [hir::format $ahir]
     W [file join $dir variants.txt] "[join $cap::variants \n]\n"
     lassign [lindex $cap::planArgs end] phir pspec pranges

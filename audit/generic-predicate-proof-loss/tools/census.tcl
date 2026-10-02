@@ -26,8 +26,16 @@
 #       and per changed function the op-mix change (tagged Int ops, raw ri*
 #       ops, runbox/rbox, constants, branches, labels), its header changes,
 #       and the raw-int-ABI plan's text diff.
+#
+# The knob being compared is named by the environment variable AUDIT_KNOB
+# (default hir::range::resultNarrowOpt, fix 3; loss point 2 uses
+# hir::specialize::dormantOpt). When the dumps carry dormant.txt (loss
+# point 2), a wider or incomparable fact of an instance that is dormant at
+# knob 1 -- never entered at run time, and deliberately given the any-caller
+# facts -- is counted as "dormant-wider" instead of WIDER.
 
 lassign $argv dump0 dump1 outPath
+set knobName [expr {[info exists ::env(AUDIT_KNOB)] ? $::env(AUDIT_KNOB) : "hir::range::resultNarrowOpt"}]
 set programs [lrange $argv 3 end]
 
 proc Read {path} {
@@ -249,6 +257,13 @@ proc LoadDump {dir} {
         dict lappend variants $id $mode
     }
     dict set d variants $variants
+    set dormant [dict create]
+    if {[file exists [file join $dir dormant.txt]]} {
+        foreach id [string trim [Read [file join $dir dormant.txt]]] {
+            dict set dormant $id 1
+        }
+    }
+    dict set d dormant $dormant
     return $d
 }
 
@@ -256,7 +271,7 @@ proc LoadDump {dir} {
 set totals [dict create]
 foreach k {programs skipped instances facts same equal narrower wider incomparable dropped added
         progNarrowed progRangeChanged progNirChanged progAbiChanged funcsChanged attempted converged
-        callSitesNarrowed summariesNarrowed} {
+        callSitesNarrowed summariesNarrowed dormantWider} {
     dict set totals $k 0
 }
 set byKind [dict create]
@@ -295,7 +310,7 @@ foreach path $programs {
     set exprText [dict get $d1 exprText]
     set fp0 [lindex [dict get $d0 fixpoints] end]
     set fp1 [lindex [dict get $d1 fixpoints] end]
-    set cat [dict create same 0 equal 0 narrower 0 wider 0 incomparable 0 dropped 0 added 0]
+    set cat [dict create same 0 equal 0 narrower 0 wider 0 incomparable 0 dropped 0 added 0 dormant-wider 0]
     set progDetails {}
     set nInst 0
     set nFacts 0
@@ -346,9 +361,16 @@ foreach path $programs {
                 lappend progDetails "    $cls  $label  expr $e [Show $r]   ($txt)"
             }
         }
+        set isDormant [dict exists $d1 dormant $id]
         foreach {kind what r0 r1} $facts {
             incr nFacts
             set cls [Classify $r0 $r1]
+            if {$isDormant && $cls in {wider incomparable}} {
+                Note cat $kind dormant-wider
+                dict incr totals dormantWider
+                lappend progDetails "  ~~dormant-$cls  $label  $kind $what: [Show $r0] -> [Show $r1]"
+                continue
+            }
             Note cat $kind $cls
             if {$cls ne "same"} {
                 set txt ""
@@ -616,8 +638,8 @@ foreach path $programs {
 # Report
 
 set out {}
-lappend out "Result-narrowing corpus census (GENERIC-PREDICATE-PROOF-LOSS.md, fix 3)"
-lappend out "hir::range::resultNarrowOpt 0 (pass skipped) vs 1 (default), same tree, same specialization,"
+lappend out "Corpus census (GENERIC-PREDICATE-PROOF-LOSS.md)"
+lappend out "$knobName 0 vs 1 (default), same tree, same specialization,"
 lappend out "default native lowering options; facts are the ones native::nir's own lowering consumed."
 lappend out ""
 lappend out "Corpus: [llength $programs] programs; compiled natively: [dict get $totals programs]; skipped: [dict get $totals skipped]"
@@ -647,6 +669,7 @@ lappend out "  equal set, different text: [dict get $totals equal]"
 lappend out "  narrower:                  [dict get $totals narrower]"
 lappend out "  wider:                     [dict get $totals wider]"
 lappend out "  incomparable:              [dict get $totals incomparable]"
+lappend out "  wider/incomparable in instances dormant at knob 1 (never entered): [dict get $totals dormantWider]"
 lappend out "  ExprIds dropped / added:   [dict get $totals dropped] / [dict get $totals added]"
 lappend out "  exact call sites (call expressions) narrowed: [dict get $totals callSitesNarrowed]"
 lappend out "  callee summaries (calleeResults) narrowed:   [dict get $totals summariesNarrowed]"
