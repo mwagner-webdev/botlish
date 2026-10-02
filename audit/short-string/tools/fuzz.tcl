@@ -8,7 +8,7 @@
 # substring slices, an error-capable helper with a handler, closures, tagged
 # storage and general String operations; and compares the reference
 # interpreter, the Tcl compile backend and native with the short-String
-# switch off/on, the packed-ASCII tier off/on and leaf inlining off/on, for
+# switch off/on, the packed-ASCII tier off/on, the demand rule off/on and leaf inlining off/on, for
 # values, errors and completion behavior. Any disagreement is printed with its program. The
 # generator is bounded: recursion measures are small literals and nothing
 # multiplies, so every program finishes quickly.
@@ -226,8 +226,10 @@ for {set s $seed0} {$s < $seed0 + $n} {incr s} {
     foreach opt {0 1} {
         foreach pack {0 1} {
             foreach inline {0 1} {
-                if {!$opt && $pack} continue
-                lappend outcomes [outcome native $prepared -short-string-opt $opt -ascii-pack-opt $pack -tiny-leaf-inline-opt $inline]
+                foreach demand {0 1} {
+                    if {!$opt && ($pack || $demand)} continue
+                    lappend outcomes [outcome native $prepared -short-string-opt $opt -ascii-pack-opt $pack -tiny-leaf-inline-opt $inline -short-demand-opt $demand]
+                }
             }
         }
     }

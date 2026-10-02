@@ -17,9 +17,12 @@ is a source type. Selection stays categorical: no use count, no profitability
 score, no demand suppression.
 
 **Status.** Implemented, tested and measured on branch
-`claude/cool-allen-564579`; **not merged to `main`**, because it regresses
-several corpus programs and 9 existing allocation/NIR-shape pins fail (see
-*Results* and *Open decision*).
+`claude/cool-allen-564579`; **not merged to `main`**. Without the demand rule
+(next section) it regresses several corpus programs and 9 existing
+allocation/NIR-shape pins fail; with the rule (the default) four of the
+regressions are gone, one program (`string_replace`) still regresses by +85 %,
+and the 8 allocation pins pass again (see *The demand rule* and *Open
+decision*).
 
 ## Packed ASCII layout
 
@@ -132,7 +135,8 @@ off and reproduces the tagged Strings.
 | `tests/short-string.test` | 59 tests, all pass, now with the ASCII tier off (they pin the ShortString1 tier) |
 | Rust unit tests | 104 + 28 pass (new: packed layout/length/canonical form, round trips, NIR kind validation, generic-entry wrappers) |
 | differential fuzz (generator extended with ASCII 2..8, NUL/DEL, the 9-character and non-ASCII multi-character controls) | 1,471 programs + 491 under GC stress + 291 with specialization off: **0 disagreements** |
-| full `tests/all.tcl`, two passes | **3,830 / 3,839** and **3,826 + 4 skipped / 3,839**; the same 9 tests fail in both |
+| full `tests/all.tcl`, two passes, before the demand rule | 3,830 / 3,839 and 3,826 + 4 skipped / 3,839; the same 9 tests fail in both |
+| full `tests/all.tcl`, two passes, with the demand rule | 3,855 / 3,856 and 3,851 + 4 skipped / 3,856: only `native-validator-predicate-known-result-nir-shape` failed, because the length it counts is now `asciilen`; its pin now runs with the switch off and passes |
 | first-milestone counterfactual (`short-first-recovered`) full suite, clean worktree | 3,792 / 3,792 and 3,788 + 4 skipped, 0 failed |
 
 The 9 failing tests are real consequences of the regime, not miscompiles: six
@@ -141,6 +145,80 @@ keys of at most 8 characters are now packed and every runtime materialization
 allocates) and `native-validator-predicate-known-result-nir-shape`. They have
 been left failing deliberately rather than adapted with `-ascii-pack-opt 0`,
 because adapting them would hide the regression below.
+
+## The demand rule
+
+The struct scalar-replacement precedent -- a value all of whose uses
+materialize it is not virtualized -- applied to String positions
+(`-short-demand-opt`, default on; `BOTLISH_NATIVE_SHORT_DEMAND_OPT=0` or
+`-short-demand-opt 0` restores the categorical behavior).
+
+A candidate position -- a closed instance's String parameter or result that
+has a tier, or a local `bind` that has a tier and that lowering would keep in a
+register -- stays virtual only if it has at least one **free use**:
+
+* a scalar consumer: `length(x)` or `x == y` whose operands could both be
+  scalars (a literal, a reference, a call with a candidate result, or a
+  one-character `substring`), and which is not taken by the String-region forms
+  of `length`/`==` first;
+* a flow into another position that is itself virtual and useful: an argument
+  of a virtual parameter, the value of a virtual result (a `return` or the
+  function's trailing value), the value of a virtual local, directly or through
+  a branch join.
+
+A position with no free use keeps the tagged String (reason `no-scalar-use`).
+Usefulness is the **least fixpoint** of "has a free use", so a cycle of pure
+forwarding (a function that only passes its String to itself, a forwarding
+chain ending in a `list_append`) never justifies itself. Uses the walk does not
+understand are not free, so the rule can only turn a position tagged, never
+invent a scalar. Two lowering facts are folded in so the rule matches what the
+code generator will actually do: a call that lowering turns into a String-region
+companion (tagged arguments, no scalar result) is not a flow, and a local the
+String-region analysis keeps as a region is never a candidate. (The first
+version missed the companion case and still packed a literal-fed `text`
+parameter that a region-producing helper then re-materialized every loop
+iteration.)
+
+Implementation: `native::shortstr::ApplyDemand`, `DemandWalk`, `PotNatural`
+(`native/shortstring.tcl`), with lowering supplying one callback
+(`native::lower::DemandCallTagged`) and consulting `localVirtual` in `Bind`.
+`tests/short-demand.test` (17 tests) pins parameters, equality, forwarding
+chains and cycles, results, locals, ShortString1, the region-companion case and
+the switches; the representation pins in the other two files run with the rule
+off, and every parity test covers both settings.
+
+Instruction counts, all configurations (`out/ir-demand.txt`; `nd` = tiers
+without the rule, `new` = with it; percentages against the pre-milestone
+commit):
+
+| program | m1 (table) | nd | **new** |
+|---|---:|---:|---:|
+| refined-checks | +1.7 % | +42.8 % | **+0.7 %** |
+| source-checks | -10.0 % | +37.0 % | **+0.5 %** |
+| hashtable | +0.1 % | +71.6 % | **+0.1 %** |
+| csv_records | +0.1 % | +6.1 % | **-0.1 %** |
+| ai_text_clean | -64.5 % | -54.0 % | **-54.0 %** |
+| uri-steady | -16.6 % | -2.6 % | **+0.3 %** |
+| string_replace | +0.4 % | +99.4 % | **+84.6 %** |
+| lex-strategy, test-selection | | -0.6 %, -0.3 % | same |
+| csv, csv_chunked, csv_geometric, string_reverse | | | within +0.7 % |
+| fib, loop-count, sum-refined, matmul | | | unchanged |
+
+What the rule does and does not do:
+
+* It recovers `refined-checks`, `source-checks`, `hashtable` and `csv_records`
+  to baseline: in each, the virtualized positions had no scalar consumer, so
+  every use materialized them (round trips and literal-fed parameters).
+* It keeps `ai_text_clean` (-54 %): the scalar equalities are free uses.
+* It gives back `uri-steady`'s small gain (-2.6 % -> +0.3 %): that gain was an
+  avoided producer allocation (the slice), which a use count cannot see.
+* **It does not fix `string_replace` (+84.6 %).** Its packed parameters each
+  have at least one scalar use (`length`, seven of them) and so stay virtual,
+  but they are also materialized 35 times at about 290 instructions each while
+  a scalar `length` saves a few. "At least one free use" is the wrong threshold
+  there; the fix is an allocation-weighted model (benefit = avoided producer
+  allocation + scalar-consumer savings, cost = runtime materializations, static
+  literals free), not implemented.
 
 ## Results (corpus: 17 programs, 233 functions)
 
