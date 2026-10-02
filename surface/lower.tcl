@@ -40,6 +40,13 @@
 #   fn f(a, b): body      bind f (block (a b) body...)
 #   if c: t else: e       if c {t...} {e...}    inline branches; a missing
 #                         else is an empty branch (value unit)
+#   if c: t elif c2: t2 else: e   if c {t...} {if c2 {t2...} {e...}}
+#                         nothing here: the parser already built the nested
+#                         shape (an elif clause is an `if` alone in the
+#                         previous clause's else suite, ELIF.md), so the `if`
+#                         rule below lowers it, and the clause's own origins
+#                         (the `elif` keyword through the end of the chain)
+#                         come from its AST node
 #   loop: body            loop {body...}        inline body
 #   loop x in e: body     listloop e {x} {body...}  element binding traversal
 #                         of a List (see core/ir.tcl's `listloop`)

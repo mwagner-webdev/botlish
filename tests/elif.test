@@ -1,0 +1,973 @@
+# elif.test -- `elif` (ELIF.md): surface syntax for `else:` holding one nested
+# `if`, with exactly the semantics of the nested spelling.
+#
+# Parsing, diagnostics and AST shape are pinned in surface-parser.test, the
+# lowering to HIR (and clause locations) in surface-lowering.test. This file
+# runs programs: every program is run on all four in-process backends
+# (interpreter, Tcl compiler, native generic, native specialized), and for each
+# program the elif spelling is compared with the explicitly nested spelling --
+# by value, by error, by the log of its own evaluation order, by its analyses
+# and by its native IR.
+#
+# Evaluation order is observed with a one-slot MutableArray read as a decimal
+# number: every probe appends its digit (the test-log native of helpers.tcl is
+# not nameable from source and is not available natively).
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+interp recursionlimit {} 100000
+
+testConstraint executableAot [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64}}]
+
+set ::allBackends {interp compile cranelift-generic cranelift}
+
+# The preamble of the evaluation-order programs: probe(log, id, result) appends
+# the digit ID to the number in log[0] and returns RESULT.
+set ::probePreamble {fn probe(log, id, result):
+    n = mutable_array_get(log, 0)
+    mutable_array_set(log, 0, n * 10 + id)
+    result
+fn fresh():
+    log = mutable_array_allocate(1)
+    mutable_array_set(log, 0, 0)
+    log
+}
+
+# Error messages carry source locations, which differ between spellings.
+proc stripLocations {message} {
+    return [regsub -all {t\.bot:[0-9]+:[0-9]+} $message {t.bot:L:C}]
+}
+
+# The outcomes of SOURCE on every backend, as a list: the shown value, or
+# "error CODE" (a compile-time rejection is the same on every backend).
+proc outcomesOf {source} {
+    if {[catch {surface::compile $source t.bot} hir options]} {
+        set code [dict get $options -errorcode]
+        return [lmap backend $::allBackends {list error $code [stripLocations $hir]}]
+    }
+    return [lmap backend $::allBackends {
+        set outcome [outcomeUnderHir $backend $hir]
+        if {[lindex $outcome 0] eq "value"} {
+            list value [lindex $outcome 1]
+        } else {
+            list error [lindex $outcome 1] [stripLocations [lindex $outcome 2]]
+        }
+    }]
+}
+
+# The one outcome SOURCE has on every backend ("disagree: ..." if they differ).
+proc parity {source} {
+    set outcomes [outcomesOf $source]
+    if {[llength [lsort -unique $outcomes]] != 1} {
+        return "disagree: [lmap b $::allBackends o $outcomes {list $b $o}]"
+    }
+    return [lindex $outcomes 0]
+}
+
+# The outcome both spellings have on every backend, or what differs.
+proc bothSpellings {elif nested} {
+    set a [parity $elif]
+    set b [parity $nested]
+    if {$a ne $b} {
+        return "elif: $a / nested: $b"
+    }
+    return $a
+}
+
+# ---------------------------------------------------------------------------
+# Semantics: which branch runs
+
+test elif-first-condition {the first condition true selects the first branch; later conditions are never needed} -body {
+    parity "if true:\n    1\nelif true:\n    2\nelse:\n    3"
+} -result {value 1}
+
+test elif-second-condition {the first false and the second true select the elif branch} -body {
+    parity "if false:\n    1\nelif true:\n    2\nelse:\n    3"
+} -result {value 2}
+
+test elif-else-branch {every condition false selects the else branch} -body {
+    parity "if false:\n    1\nelif false:\n    2\nelse:\n    3"
+} -result {value 3}
+
+set ::pick4 {fn pick(a, b, c, d):
+    if a:
+        1
+    elif b:
+        2
+    elif c:
+        3
+    elif d:
+        4
+    else:
+        5
+}
+set ::pick4Nested {fn pick(a, b, c, d):
+    if a:
+        1
+    else:
+        if b:
+            2
+        else:
+            if c:
+                3
+            else:
+                if d:
+                    4
+                else:
+                    5
+}
+set ::pick4Calls {[pick(true, false, false, false), pick(false, true, false, false),
+ pick(false, false, true, false), pick(false, false, false, true), pick(false, false, false, false),
+ pick(true, true, true, true), pick(false, true, true, true), pick(false, false, true, true)]}
+
+test elif-multiple-clauses {four conditions: every branch is reachable, and the first true condition wins} -body {
+    bothSpellings $::pick4$::pick4Calls $::pick4Nested$::pick4Calls
+} -result {value {[1, 2, 3, 4, 5, 1, 2, 3]}}
+
+test elif-without-else {an elif chain without a final else has the value of the nested if without else: unit} -body {
+    set elif {fn f(a, b, c):
+    if a:
+        1
+    elif b:
+        2
+    elif c:
+        3
+[f(true, false, false), f(false, true, false), f(false, false, true), f(false, false, false)]}
+    set nested {fn f(a, b, c):
+    if a:
+        1
+    else:
+        if b:
+            2
+        else:
+            if c:
+                3
+[f(true, false, false), f(false, true, false), f(false, false, true), f(false, false, false)]}
+    bothSpellings $elif $nested
+} -result {value {[1, 2, 3, unit]}}
+
+test elif-long-chain {a chain of a hundred clauses selects the right branch at both ends and in the middle} -body {
+    set elif "fn f(x):\n    if x == 0:\n        0"
+    set nested "fn f(x):\n    if x == 0:\n        0"
+    set pad "    "
+    for {set i 1} {$i < 100} {incr i} {
+        append elif "\n    elif x == $i:\n        $i"
+        append nested "\n${pad}else:\n${pad}    if x == $i:\n${pad}        $i"
+        append pad "    "
+    }
+    append elif "\n    else:\n        -1"
+    append nested "\n${pad}else:\n${pad}    -1"
+    set calls "\n\[f(0), f(1), f(57), f(99), f(100)\]"
+    bothSpellings $elif$calls $nested$calls
+} -result {value {[0, 1, 57, 99, -1]}}
+
+# ---------------------------------------------------------------------------
+# Expression position
+
+test elif-bound-value {an elif chain is the value of a binding, and the binding is usable afterwards} -body {
+    set elif {fn f(a, b):
+    x = if a:
+        10
+    elif b:
+        20
+    else:
+        30
+    x + 1
+[f(true, false), f(false, true), f(false, false)]}
+    set nested {fn f(a, b):
+    x = if a:
+        10
+    else:
+        if b:
+            20
+        else:
+            30
+    x + 1
+[f(true, false), f(false, true), f(false, false)]}
+    bothSpellings $elif $nested
+} -result {value {[11, 21, 31]}}
+
+test elif-returned-value {an elif chain is the value of a return} -body {
+    set elif {fn f(a, b):
+    return if a:
+        1
+    elif b:
+        2
+    else:
+        3
+    99
+[f(true, false), f(false, true), f(false, false)]}
+    set nested {fn f(a, b):
+    return if a:
+        1
+    else:
+        if b:
+            2
+        else:
+            3
+    99
+[f(true, false), f(false, true), f(false, false)]}
+    bothSpellings $elif $nested
+} -result {value {[1, 2, 3]}}
+
+test elif-top-level-value {a top-level elif chain is the program's value} -body {
+    bothSpellings "x = 5\nif x < 0:\n    -1\nelif x == 0:\n    0\nelif x < 10:\n    1\nelse:\n    2" \
+        "x = 5\nif x < 0:\n    -1\nelse:\n    if x == 0:\n        0\n    else:\n        if x < 10:\n            1\n        else:\n            2"
+} -result {value 1}
+
+# ---------------------------------------------------------------------------
+# Evaluation order: conditions in written order, each at most once, none after
+# the selected one; only the selected body runs.
+
+set ::orderElif {fn pick(log, a, b, c):
+    return if probe(log, 1, a):
+        probe(log, 5, true)
+        10
+    elif probe(log, 2, b):
+        probe(log, 6, true)
+        20
+    elif probe(log, 3, c):
+        probe(log, 7, true)
+        30
+    else:
+        probe(log, 8, true)
+        40
+fn run(a, b, c):
+    log = fresh()
+    v = pick(log, a, b, c)
+    [v, mutable_array_get(log, 0)]
+}
+set ::orderNested {fn pick(log, a, b, c):
+    return if probe(log, 1, a):
+        probe(log, 5, true)
+        10
+    else:
+        if probe(log, 2, b):
+            probe(log, 6, true)
+            20
+        else:
+            if probe(log, 3, c):
+                probe(log, 7, true)
+                30
+            else:
+                probe(log, 8, true)
+                40
+fn run(a, b, c):
+    log = fresh()
+    v = pick(log, a, b, c)
+    [v, mutable_array_get(log, 0)]
+}
+
+foreach {name call expected} {
+    first   {run(true, true, true)}    {[10, 15]}
+    second  {run(false, true, true)}   {[20, 126]}
+    third   {run(false, false, true)}  {[30, 1237]}
+    else    {run(false, false, false)} {[40, 1238]}
+} {
+    test elif-order-$name "evaluation order, $name branch: exactly the conditions up to the selected one, each once, in written order, then only the selected body" -body {
+        bothSpellings $::probePreamble$::orderElif$call $::probePreamble$::orderNested$call
+    } -result [list value $expected]
+}
+
+test elif-order-without-else {with no final else and every condition false, all conditions run once, in order, and no body} -body {
+    set elif {fn run():
+    log = fresh()
+    v = if probe(log, 1, false):
+        probe(log, 4, true)
+    elif probe(log, 2, false):
+        probe(log, 5, true)
+    elif probe(log, 3, false):
+        probe(log, 6, true)
+    [v, mutable_array_get(log, 0)]
+run()}
+    set nested {fn run():
+    log = fresh()
+    v = if probe(log, 1, false):
+        probe(log, 4, true)
+    else:
+        if probe(log, 2, false):
+            probe(log, 5, true)
+        else:
+            if probe(log, 3, false):
+                probe(log, 6, true)
+    [v, mutable_array_get(log, 0)]
+run()}
+    bothSpellings $::probePreamble$elif $::probePreamble$nested
+} -result {value {[unit, 123]}}
+
+# ---------------------------------------------------------------------------
+# Ownership: an elif/else belongs to the open if at its own indentation.
+
+set ::ownCalls {[f(true, true, true), f(true, false, true), f(true, false, false), f(false, true, true), f(false, false, false)]}
+
+test elif-ownership-inner-elif {an elif under the then-branch is the inner if's; the else after the dedent is the outer if's} -body {
+    set elif {fn f(a, b, c):
+    if a:
+        if b:
+            1
+        elif c:
+            2
+    else:
+        3
+}
+    set nested {fn f(a, b, c):
+    if a:
+        if b:
+            1
+        else:
+            if c:
+                2
+    else:
+        3
+}
+    bothSpellings $elif$::ownCalls $nested$::ownCalls
+} -result {value {[1, 2, unit, 3, 3]}}
+
+test elif-ownership-outer-elif {an elif after a dedent past a complete inner if/else is the outer if's} -body {
+    set elif {fn f(a, b, c):
+    if a:
+        if b:
+            1
+        else:
+            2
+    elif c:
+        3
+    else:
+        4
+}
+    set nested {fn f(a, b, c):
+    if a:
+        if b:
+            1
+        else:
+            2
+    else:
+        if c:
+            3
+        else:
+            4
+}
+    bothSpellings $elif$::ownCalls $nested$::ownCalls
+} -result {value {[1, 2, 2, 3, 4]}}
+
+test elif-ownership-branch-contains-if {an elif branch containing an if with its own else} -body {
+    set elif {fn f(a, b, c):
+    if a:
+        1
+    elif b:
+        if c:
+            2
+        else:
+            3
+    else:
+        4
+}
+    set nested {fn f(a, b, c):
+    if a:
+        1
+    else:
+        if b:
+            if c:
+                2
+            else:
+                3
+        else:
+            4
+}
+    bothSpellings $elif$::ownCalls $nested$::ownCalls
+} -result {value {[1, 1, 1, 2, 4]}}
+
+test elif-ownership-chain-in-else {an elif chain may start inside the else of another chain} -body {
+    set elif {fn f(a, b, c):
+    if a:
+        1
+    elif b:
+        2
+    else:
+        if c:
+            3
+        elif a:
+            4
+        else:
+            5
+}
+    set nested {fn f(a, b, c):
+    if a:
+        1
+    else:
+        if b:
+            2
+        else:
+            if c:
+                3
+            else:
+                if a:
+                    4
+                else:
+                    5
+}
+    bothSpellings $elif$::ownCalls $nested$::ownCalls
+} -result {value {[1, 1, 1, 2, 5]}}
+
+test elif-ownership-else-after-inner-chain {an else after a dedent belongs to the outer chain even when the inner chain has elifs and no else} -body {
+    set elif {fn f(a, b, c):
+    if a:
+        if b:
+            1
+        elif c:
+            2
+        elif a:
+            3
+    elif b:
+        4
+    else:
+        5
+}
+    set nested {fn f(a, b, c):
+    if a:
+        if b:
+            1
+        else:
+            if c:
+                2
+            else:
+                if a:
+                    3
+    else:
+        if b:
+            4
+        else:
+            5
+}
+    bothSpellings $elif$::ownCalls $nested$::ownCalls
+} -result {value {[1, 2, 3, 4, 5]}}
+
+# ---------------------------------------------------------------------------
+# Scope
+
+test elif-branch-bindings-are-local {a binding made in an elif branch is not visible after the chain, exactly as for a nested if} -body {
+    bothSpellings "x = 1\nif x == 0:\n    y = 1\nelif x == 1:\n    y = 2\nelse:\n    y = 3\ny" \
+        "x = 1\nif x == 0:\n    y = 1\nelse:\n    if x == 1:\n        y = 2\n    else:\n        y = 3\ny"
+} -match glob -result {error {CORE SEMANTIC UNBOUND} {t.bot:L:C: unbound name "y"}}
+
+test elif-branch-shadowing {a branch may shadow an outer name; the outer binding is untouched, and an elif sees the names of enclosing branches} -body {
+    set elif {fn f(a, b):
+    x = 100
+    v = if a:
+        x = 1
+        x
+    elif b:
+        x = 2
+        y = x + 10
+        if a:
+            0
+        elif b:
+            x + y
+        else:
+            1
+    else:
+        x
+    [v, x]
+[f(true, false), f(false, true), f(false, false)]}
+    set nested {fn f(a, b):
+    x = 100
+    v = if a:
+        x = 1
+        x
+    else:
+        if b:
+            x = 2
+            y = x + 10
+            if a:
+                0
+            else:
+                if b:
+                    x + y
+                else:
+                    1
+        else:
+            x
+    [v, x]
+[f(true, false), f(false, true), f(false, false)]}
+    bothSpellings $elif $nested
+} -result {value {[[1, 100], [14, 100], [100, 100]]}}
+
+# ---------------------------------------------------------------------------
+# Completions: return, fail, break, continue
+
+test elif-return {a return in an elif branch returns from the function, as in the nested spelling} -body {
+    set elif {fn f(a, b):
+    x = if a:
+        1
+    elif b:
+        return 2
+    else:
+        3
+    x + 100
+[f(true, false), f(false, true), f(false, false)]}
+    set nested {fn f(a, b):
+    x = if a:
+        1
+    else:
+        if b:
+            return 2
+        else:
+            3
+    x + 100
+[f(true, false), f(false, true), f(false, false)]}
+    bothSpellings $elif $nested
+} -result {value {[101, 2, 103]}}
+
+test elif-fail {a fail in an elif branch produces the named error, handled by the caller} -body {
+    set elif {error Boom
+fn f(a, b) errors Boom:
+    if a:
+        1
+    elif b:
+        fail Boom
+    else:
+        3
+fn run(a, b):
+    v = f(a, b):
+        on Boom:
+            -7
+    v
+[run(true, false), run(false, true), run(false, false)]}
+    set nested {error Boom
+fn f(a, b) errors Boom:
+    if a:
+        1
+    else:
+        if b:
+            fail Boom
+        else:
+            3
+fn run(a, b):
+    v = f(a, b):
+        on Boom:
+            -7
+    v
+[run(true, false), run(false, true), run(false, false)]}
+    bothSpellings $elif $nested
+} -result {value {[1, -7, 3]}}
+
+set ::failElifDefs {error Boom
+fn f(a, b) errors Boom:
+    if a:
+        1
+    elif b:
+        fail Boom
+    else:
+        3
+}
+set ::failNestedDefs {error Boom
+fn f(a, b) errors Boom:
+    if a:
+        1
+    else:
+        if b:
+            fail Boom
+        else:
+            3
+}
+
+test elif-fail-propagates {an error produced in an elif branch propagates through a caller that declares it, to the handler} -body {
+    set rest {fn g(a, b) errors Boom:
+    f(a, b)
+v = g(false, true):
+    on Boom:
+        99
+w = g(false, false):
+    on Boom:
+        99
+[v, w]}
+    bothSpellings $::failElifDefs$rest $::failNestedDefs$rest
+} -result {value {[99, 3]}}
+
+test elif-fail-unhandled {an elif branch's declared error that nobody handles is rejected statically, exactly as for the nested spelling} -body {
+    set rest "f(false, true)"
+    bothSpellings $::failElifDefs$rest $::failNestedDefs$rest
+} -match glob -result {error {CORE SEMANTIC UNHANDLED-ERROR} {t.bot:L:C: this call may produce the declared error "Boom"*}}
+
+set ::loopPrelude {fn run():
+    acc = mutable_array_allocate(1)
+    mutable_array_set(acc, 0, 0)
+    loop i from 0 to 9:
+}
+set ::loopTail {
+    mutable_array_get(acc, 0)
+run()}
+
+test elif-continue-and-break {continue and break in elif branches inside a loop behave as in the nested spelling} -body {
+    set elif {        if i == 1:
+            mutable_array_set(acc, 0, mutable_array_get(acc, 0) + 100)
+        elif i == 3:
+            continue
+        elif i == 6:
+            break
+        else:
+            mutable_array_set(acc, 0, mutable_array_get(acc, 0) + i)}
+    set nested {        if i == 1:
+            mutable_array_set(acc, 0, mutable_array_get(acc, 0) + 100)
+        else:
+            if i == 3:
+                continue
+            else:
+                if i == 6:
+                    break
+                else:
+                    mutable_array_set(acc, 0, mutable_array_get(acc, 0) + i)}
+    bothSpellings $::loopPrelude$elif$::loopTail $::loopPrelude$nested$::loopTail
+} -result {value 111}
+
+test elif-return-in-loop {a return in an elif branch inside a loop leaves the function} -body {
+    set elif {fn find(n):
+    loop i from 0 to 10:
+        if i == 2:
+            continue
+        elif i * i > n:
+            return i
+        elif i == 8:
+            break
+    -1
+[find(10), find(0), find(1000)]}
+    set nested {fn find(n):
+    loop i from 0 to 10:
+        if i == 2:
+            continue
+        else:
+            if i * i > n:
+                return i
+            else:
+                if i == 8:
+                    break
+    -1
+[find(10), find(0), find(1000)]}
+    bothSpellings $elif $nested
+} -result {value {[4, 1, -1]}}
+
+# ---------------------------------------------------------------------------
+# Branch values: the existing typing and join rules apply unchanged
+
+set ::structDecl "struct Point:\n    x: int\n    y: int\n"
+
+foreach {name decl one two three expected} [list \
+    int     {}  1                   2                   3                   {[1, 2, 3]} \
+    string  {}  {"a"}               {"b"}               {"c"}               {["a", "b", "c"]} \
+    list    {}  {[1]}               {[2, 3]}            {[]}                {[[1], [2, 3], []]} \
+    struct  $::structDecl  {Point { x: 1, y: 2 }}  {Point { x: 3, y: 4 }}  {Point { x: 5, y: 6 }} \
+            {[Point {x: 1, y: 2}, Point {x: 3, y: 4}, Point {x: 5, y: 6}]} \
+    unit    {}  unit                unit                unit                {[unit, unit, unit]} \
+    mixed   {}  1                   {"b"}               {[3]}               {[1, "b", [3]]} \
+] {
+    test elif-branch-values-$name "elif chain with $name branch values: the nested spelling's value, under the existing typing and join rules" -body {
+        set calls "\[f(true, false), f(false, true), f(false, false)\]"
+        set elif "${decl}fn f(a, b):\n    if a:\n        $one\n    elif b:\n        $two\n    else:\n        $three\n$calls"
+        set nested "${decl}fn f(a, b):\n    if a:\n        $one\n    else:\n        if b:\n            $two\n        else:\n            $three\n$calls"
+        bothSpellings $elif $nested
+    } -result [list value $expected]
+}
+
+test elif-branch-values-error-capable {branches that call an error-capable function: the handled errors and the values agree with the nested spelling} -body {
+    set elif {error TooBig
+fn check(n) errors TooBig:
+    if n > 10:
+        fail TooBig
+    else:
+        n
+fn classify(n):
+    v = if n < 0:
+        0
+    elif n < 5:
+        check(n)
+    elif n < 50:
+        check(n):
+            on TooBig:
+                -1
+    else:
+        100
+    v
+[classify(-4), classify(3), classify(7), classify(20), classify(60)]}
+    set nested {error TooBig
+fn check(n) errors TooBig:
+    if n > 10:
+        fail TooBig
+    else:
+        n
+fn classify(n):
+    v = if n < 0:
+        0
+    else:
+        if n < 5:
+            check(n)
+        else:
+            if n < 50:
+                check(n):
+                    on TooBig:
+                        -1
+            else:
+                100
+    v
+[classify(-4), classify(3), classify(7), classify(20), classify(60)]}
+    bothSpellings $elif $nested
+} -result {value {[0, 3, 7, -1, 100]}}
+
+# ---------------------------------------------------------------------------
+# Static errors keep the clause's own location
+
+test elif-error-in-condition {an unbound name in an elif condition is reported at that condition} -body {
+    catch {surface::compile "x = 1\nif x == 0:\n    1\nelif x == 1:\n    2\nelif missing:\n    3\nelse:\n    4" t.bot} message
+    set message
+} -result {t.bot:6:6: unbound name "missing"}
+
+test elif-error-in-branch {an unbound name in an elif branch is reported at that branch} -body {
+    catch {surface::compile "x = 1\nif x == 0:\n    1\nelif x == 1:\n    missing\nelse:\n    4" t.bot} message
+    set message
+} -result {t.bot:5:5: unbound name "missing"}
+
+test elif-non-boolean-condition {a non-Boolean elif condition is the same error as for a nested if} -body {
+    bothSpellings "x = 1\nif x == 0:\n    1\nelif 5:\n    2\nelse:\n    3" \
+        "x = 1\nif x == 0:\n    1\nelse:\n    if 5:\n        2\n    else:\n        3"
+} -result {error {CORE SEMANTIC NOT-BOOLEAN} {if condition must be a Boolean, got 5}}
+
+test elif-reserved-word {elif is a keyword: it cannot name a binding or a function} -body {
+    list [catch {surface::compile "elif = 1" t.bot} m1] $m1 [catch {surface::compile "fn elif():\n    1" t.bot} m2] $m2
+} -result {1 {t.bot:1:1: "elif" without a matching "if"} 1 {t.bot:1:4: expected a function name after "fn", found "elif"}}
+
+# ---------------------------------------------------------------------------
+# Equivalent sources have equivalent HIR, analyses and native IR
+
+# TEXT with source locations removed: origins and "line L:C" mentions.
+proc locationFree {text} {
+    set text [regsub -all {(origin|location) \{(?:[^\{\}]|\{\})*\}} $text {\1 {}}]
+    return [regsub -all {line [0-9]+:[0-9]+} $text {line L:C}]
+}
+
+set ::analysisElif {fn classify(x):
+    if x < 0:
+        0 - x
+    elif x > 10:
+        x * 2
+    else:
+        x
+fn run(n):
+    classify(n - 3)
+[run(1), run(20), run(5)]}
+set ::analysisNested {fn classify(x):
+    if x < 0:
+        0 - x
+    else:
+        if x > 10:
+            x * 2
+        else:
+            x
+fn run(n):
+    classify(n - 3)
+[run(1), run(20), run(5)]}
+
+test elif-same-analyses {types, specialization, range, escape, cardinality and closed-call analyses of an elif program equal those of the nested program} -body {
+    set e [surface::compile $::analysisElif t.bot -strict 0]
+    set n [surface::compile $::analysisNested t.bot -strict 0]
+    set se [hir::specialize::analyze $e]
+    set sn [hir::specialize::analyze $n]
+    set ee [hir::escape::analyze $e $se]
+    set en [hir::escape::analyze $n $sn]
+    list [expr {[hir::format $e] eq [hir::format $n]}] \
+        [expr {$se eq $sn}] \
+        [expr {[hir::range::analyze $e $se] eq [hir::range::analyze $n $sn]}] \
+        [expr {$ee eq $en}] \
+        [expr {[hir::cardinality::analyze $e] eq [hir::cardinality::analyze $n]}] \
+        [expr {[locationFree [hir::aot::analyze $e]] eq [locationFree [hir::aot::analyze $n]]}] \
+        [expr {[locationFree [hir::aot::explain $e]] eq [locationFree [hir::aot::explain $n]]}] \
+        [expr {[locationFree [hir::specialize::explain $e]] eq [locationFree [hir::specialize::explain $n]]}]
+} -result {1 1 1 1 1 1 1 1}
+
+test elif-same-nir {native IR (specialized and generic) of an elif program equals that of the nested program} -body {
+    set e [surface::compile $::analysisElif t.bot -strict 0]
+    set n [surface::compile $::analysisNested t.bot -strict 0]
+    list [expr {[dict get [native::lower::program $e] text] eq [dict get [native::lower::program $n] text]}] \
+        [expr {[dict get [native::lower::program $e -specialize 0] text] eq [dict get [native::lower::program $n -specialize 0] text]}]
+} -result {1 1}
+
+foreach {name elif nested expected} [list \
+    completions "error Boom
+fn f(a, b, c) errors Boom:
+    if a:
+        return 1
+    elif b:
+        fail Boom
+    elif c:
+        2
+    else:
+        3
+fn run(a, b, c):
+    v = f(a, b, c):
+        on Boom:
+            -1
+    v
+\[run(true, false, false), run(false, true, false), run(false, false, true), run(false, false, false)\]" \
+    "error Boom
+fn f(a, b, c) errors Boom:
+    if a:
+        return 1
+    else:
+        if b:
+            fail Boom
+        else:
+            if c:
+                2
+            else:
+                3
+fn run(a, b, c):
+    v = f(a, b, c):
+        on Boom:
+            -1
+    v
+\[run(true, false, false), run(false, true, false), run(false, false, true), run(false, false, false)\]" \
+    {value {[1, -1, 2, 3]}} \
+    decided-branch "fn f(x):
+    if x < 0:
+        1
+    elif x > 10:
+        2
+    else:
+        3
+f(5)" \
+    "fn f(x):
+    if x < 0:
+        1
+    else:
+        if x > 10:
+            2
+        else:
+            3
+f(5)" \
+    {value 3} \
+    construction "fn f(a, b):
+    if a:
+        \[1, 2\]
+    elif b:
+        \[3, 4\]
+    else:
+        \[5, 6\]
+list_length(f(true, false)) + list_length(f(false, true)) + list_length(f(false, false))" \
+    "fn f(a, b):
+    if a:
+        \[1, 2\]
+    else:
+        if b:
+            \[3, 4\]
+        else:
+            \[5, 6\]
+list_length(f(true, false)) + list_length(f(false, true)) + list_length(f(false, false))" \
+    {value 6} \
+] {
+    test elif-same-nir-$name "$name: elif and nested programs lower to the same NIR and have the same HIR facts" -body {
+        set e [surface::compile $elif t.bot -strict 0]
+        set n [surface::compile $nested t.bot -strict 0]
+        list [expr {[hir::format $e] eq [hir::format $n]}] \
+            [expr {[dict get [native::lower::program $e] text] eq [dict get [native::lower::program $n] text]}] \
+            [expr {[dict get [native::lower::program $e -specialize 0] text] eq [dict get [native::lower::program $n -specialize 0] text]}] \
+            [expr {[parity $elif] eq [parity $nested]}] \
+            [parity $elif]
+    } -result [list 1 1 1 1 $expected]
+}
+
+# ---------------------------------------------------------------------------
+# Standalone executables
+
+proc executableValue {text} {
+    set dir [makeDirectory {elif executable}]
+    set path [file join $dir program.bot]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts $channel $text
+    close $channel
+    try {
+        exec [info nameofexecutable] [file join $::projectRoot main.tcl] -emit-native-executable $path
+        return [exec env PATH= [file rootname $path]]
+    } finally {
+        removeDirectory {elif executable}
+    }
+}
+
+# Closed AOT needs typed code: a typed MutableArray[int] log (the untyped
+# mutable_array_get above has no static kind).
+set ::typedPreamble {fn probe(log: MutableArray[int], id: int, result: bool) -> bool:
+    n = mutable_array_get(log, 0)
+    mutable_array_set(log, 0, n * 10 + id)
+    result
+}
+set ::typedElif {fn pick(log: MutableArray[int], a: bool, b: bool, c: bool) -> int:
+    return if probe(log, 1, a):
+        probe(log, 5, true)
+        10
+    elif probe(log, 2, b):
+        probe(log, 6, true)
+        20
+    elif probe(log, 3, c):
+        probe(log, 7, true)
+        30
+    else:
+        probe(log, 8, true)
+        40
+fn run(a: bool, b: bool, c: bool):
+    log = mutarray::create(1, 0)
+    v = pick(log, a, b, c)
+    [v, mutable_array_get(log, 0)]
+}
+set ::typedNested {fn pick(log: MutableArray[int], a: bool, b: bool, c: bool) -> int:
+    return if probe(log, 1, a):
+        probe(log, 5, true)
+        10
+    else:
+        if probe(log, 2, b):
+            probe(log, 6, true)
+            20
+        else:
+            if probe(log, 3, c):
+                probe(log, 7, true)
+                30
+            else:
+                probe(log, 8, true)
+                40
+fn run(a: bool, b: bool, c: bool):
+    log = mutarray::create(1, 0)
+    v = pick(log, a, b, c)
+    [v, mutable_array_get(log, 0)]
+}
+
+# The one value TEXT has on every in-process backend, for programs that use
+# library modules (readProgramFile loads them; surface::compile does not).
+proc fileParity {text} {
+    set path [makeFile $text elif-module.bot]
+    try {
+        set hir [surface::readProgramFile $path]
+        set outcomes [lmap backend $::allBackends {outcomeUnderHir $backend $hir}]
+        if {[llength [lsort -unique $outcomes]] != 1} {
+            return "disagree: $outcomes"
+        }
+        return [lindex $outcomes 0 1]
+    } finally {
+        removeFile elif-module.bot
+    }
+}
+
+test elif-standalone-executable {the standalone executables of the elif and nested spellings print the value (and evaluation log) every in-process backend computes} -constraints executableAot -body {
+    set calls {[run(true, true, true), run(false, true, true), run(false, false, true), run(false, false, false)]}
+    set elif $::typedPreamble$::typedElif$calls
+    set nested $::typedPreamble$::typedNested$calls
+    list [executableValue $elif] [executableValue $nested] [fileParity $elif] [fileParity $nested]
+} -result {{[[10, 15], [20, 126], [30, 1237], [40, 1238]]} {[[10, 15], [20, 126], [30, 1237], [40, 1238]]} {[[10, 15], [20, 126], [30, 1237], [40, 1238]]} {[[10, 15], [20, 126], [30, 1237], [40, 1238]]}}
+
+# ---------------------------------------------------------------------------
+# Equivalence fuzzing (audit/elif/tools/fuzz.tcl): a bounded run; a longer one
+# is `tclsh9.0 audit/elif/tools/fuzz.tcl -n 500 -seed 1000`.
+
+test elif-fuzz-smoke {randomly generated elif programs and their nested spellings agree on every backend, and the backends agree with each other} -body {
+    set output [exec [info nameofexecutable] [file join $::projectRoot audit elif tools fuzz.tcl] -n 12 -seed 7000 2>@1]
+    lindex [split [string trim $output] \n] end
+} -match glob -result {elif-fuzz programs 12 values * errors * equivalence-disagreements 0 backend-disagreements 0}
+
+cleanupTests

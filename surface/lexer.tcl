@@ -18,7 +18,7 @@
 #             escapes \\ \' \n \r \t                        value: the
 #             scalar's canonical decimal codepoint (like an INT token's
 #             digits) -- see UNICODE-CHAR-LITERALS.md
-#   keywords  fn if else loop return break continue true false unit and or not
+#   keywords  fn if elif else loop return break continue true false unit and or not
 #             namespace type struct error errors fail on (kind is the word
 #             itself)
 #   operators ( ) [ ] { } , : :: = == != < <= > >= + - * -> .. .
@@ -63,7 +63,7 @@
 #                              statement (see UnclosedBefore)
 
 namespace eval surface::lexer {
-    variable keywords {fn if else loop return break continue true false unit and or not namespace type \
+    variable keywords {fn if elif else loop return break continue true false unit and or not namespace type \
         struct error errors fail on}
     # Longest operators first ("::" before ":", so a module-qualified name
     # like web::uri_escape does not lex as ":" ":"). "{" and "}" are not
@@ -339,7 +339,7 @@ proc surface::lexer::UnclosedBefore {source start indent} {
         return 0
     }
     return [expr {[string length $spaces] <= $indent
-        && [regexp {^(?:(?:fn|if|else|loop|return|break|continue|fail)\M|[A-Za-z_][A-Za-z0-9_]*[ \t]*=(?!=))} $rest]}]
+        && [regexp {^(?:(?:fn|if|elif|else|loop|return|break|continue|fail)\M|[A-Za-z_][A-Za-z0-9_]*[ \t]*=(?!=))} $rest]}]
 }
 
 proc surface::lexer::Token {kind text value span} {

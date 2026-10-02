@@ -39,6 +39,9 @@ foreach {name source ir} {
     function    "fn add(a, b):\n    a + b" {{bind add {block {a b} {call {ref +} {ref a} {ref b}}}}}
     if-else     "if true:\n    1\nelse:\n    2" {{if {ref true} {block {} {const 1}} {block {} {const 2}}}}
     if-no-else  "if true:\n    1"         {{if {ref true} {block {} {const 1}} {block {}}}}
+    elif-else   "if true:\n    1\nelif false:\n    2\nelse:\n    3" {{if {ref true} {block {} {const 1}} {block {} {if {ref false} {block {} {const 2}} {block {} {const 3}}}}}}
+    elif-no-else "if true:\n    1\nelif false:\n    2" {{if {ref true} {block {} {const 1}} {block {} {if {ref false} {block {} {const 2}} {block {}}}}}}
+    elif-chain  "if true:\n    1\nelif false:\n    2\nelif true:\n    3\nelse:\n    4" {{if {ref true} {block {} {const 1}} {block {} {if {ref false} {block {} {const 2}} {block {} {if {ref true} {block {} {const 3}} {block {} {const 4}}}}}}}}
     break-unit  "loop:\n    break"        {{loop {block {} break}}}
     continue    "loop:\n    continue"     {{loop {block {} continue}}}
     return      "fn f():\n    return\nfn g():\n    return 1" {{bind f {block {} {return {ref unit}}}} {bind g {block {} {return {const 1}}}}}
@@ -147,6 +150,83 @@ test lower-origins-branches {branch and loop scopes originate at their suites} -
          [at [dict get [hir::scope $h [hir::get $h $if elseScope]] origin]] \
          [at [dict get [hir::scope $h [hir::get $h [hirFind $h loop] bodyScope]] origin]]
 } -result {2:5 4:5 5:9}
+
+# elif (ELIF.md) lowers to the HIR of the nested spelling, and keeps
+# clause-level locations.
+
+foreach {name elif nested} {
+    one-else
+        "if a:\n    1\nelif b:\n    2\nelse:\n    3"
+        "if a:\n    1\nelse:\n    if b:\n        2\n    else:\n        3"
+    chain
+        "if a:\n    1\nelif b:\n    2\nelif c:\n    3\nelif d:\n    4\nelse:\n    5"
+        "if a:\n    1\nelse:\n    if b:\n        2\n    else:\n        if c:\n            3\n        else:\n            if d:\n                4\n            else:\n                5"
+    no-else
+        "if a:\n    1\nelif b:\n    2\nelif c:\n    3"
+        "if a:\n    1\nelse:\n    if b:\n        2\n    else:\n        if c:\n            3"
+    value
+        "x = if a:\n    1\nelif b:\n    2\nelse:\n    3\nx"
+        "x = if a:\n    1\nelse:\n    if b:\n        2\n    else:\n        3\nx"
+    return
+        "fn f():\n    return if a:\n        1\n    elif b:\n        2\n    else:\n        3\nf()"
+        "fn f():\n    return if a:\n        1\n    else:\n        if b:\n            2\n        else:\n            3\nf()"
+    elif-in-branch
+        "if a:\n    if b:\n        1\n    elif c:\n        2\nelif d:\n    if e:\n        3\n    else:\n        4\nelse:\n    5"
+        "if a:\n    if b:\n        1\n    else:\n        if c:\n            2\nelse:\n    if d:\n        if e:\n            3\n        else:\n            4\n    else:\n        5"
+    scoped-bindings
+        "if a:\n    x = 1\n    x\nelif b:\n    x = 2\n    x\nelse:\n    x = 3\n    x"
+        "if a:\n    x = 1\n    x\nelse:\n    if b:\n        x = 2\n        x\n    else:\n        x = 3\n        x"
+    control
+        "fn f(a, b):\n    loop:\n        if a:\n            continue\n        elif b:\n            return 1\n        else:\n            break\n    2"
+        "fn f(a, b):\n    loop:\n        if a:\n            continue\n        else:\n            if b:\n                return 1\n            else:\n                break\n    2"
+} {
+    test lower-elif-same-hir-$name "elif ($name) has exactly the HIR (and core IR) of the nested spelling" -body {
+        # Unbound names a..e are diagnostics, not errors, under -strict 0; the
+        # diagnostics (which carry source locations) are compared by message
+        # only.
+        set e [surface::compile $elif t.bot -strict 0]
+        set n [surface::compile $nested t.bot -strict 0]
+        set messages {}
+        foreach h [list $e $n] {
+            lappend messages [lmap d [hir::diagnostics $h] {dict get $d message}]
+        }
+        list [expr {[hir::format $e] eq [hir::format $n]}] \
+            [expr {[canonicalProgram [hir::lower $e]] eq [canonicalProgram [hir::lower $n]]}] \
+            [expr {[lindex $messages 0] eq [lindex $messages 1]}]
+    } -result {1 1 1}
+}
+
+test lower-elif-origins {an elif clause's if and the else scope holding it originate at the elif keyword; its condition and branch keep their own locations} -body {
+    set h [surface::compile "if true:\n    1\nelif false:\n    2\nelif true:\n    3\nelse:\n    4" t.bot]
+    lmap e [hirFind $h if] {
+        list [at [hir::get $h $e origin]] [at [hir::get $h [hir::get $h $e condition] origin]] \
+            [at [dict get [hir::scope $h [hir::get $h $e thenScope]] origin]] \
+            [at [dict get [hir::scope $h [hir::get $h $e elseScope]] origin]]
+    }
+} -result {{1:1 1:4 2:5 3:1} {3:1 3:6 4:5 5:1} {5:1 5:6 6:5 8:5}}
+
+test lower-elif-origins-no-else {without a final else the last clause's empty else originates at the end of the chain, as for a plain if} -body {
+    set h [surface::compile "if true:\n    1\nelif false:\n    2" t.bot]
+    set inner [lindex [hirFind $h if] 1]
+    list [at [hir::get $h $inner origin]] [at [dict get [hir::scope $h [hir::get $h $inner elseScope]] origin]]
+} -result {3:1 4:6}
+
+test lower-elif-origin-node-ids {the node ids in an elif clause's origins are the nested ids} -body {
+    set h [surface::compile "if true:\n    1\nelif false:\n    2\nelse:\n    3" t.bot]
+    list [llength [surface::hirExprs $h if/else/if]] \
+        [lmap e [surface::hirExprs $h if/else/if/cond] {hir::kind $h $e}] \
+        [lmap e [surface::hirExprs $h if/else/if/else/int] {hir::kind $h $e}]
+} -result {1 ref const}
+
+test lower-elif-error-location {a static error in an elif condition names the elif condition's own line and column} -body {
+    catch {surface::compile "x = 1\nif x < 0:\n    1\nelif nope:\n    2\nelif x > 3:\n    3\nelse:\n    4" t.bot} message
+    set message
+} -result {t.bot:4:6: unbound name "nope"}
+
+test lower-elif-error-location-in-branch {a static error in an elif branch names its own line and column} -body {
+    catch {surface::compile "x = 1\nif x < 0:\n    1\nelif x > 3:\n    2\nelse:\n    nope" t.bot} message
+    set message
+} -result {t.bot:7:5: unbound name "nope"}
 
 test lower-origins-query {hir::exprsAt finds expressions by source origin} -body {
     set h [surface::compile "x = 1\nx" t.bot]

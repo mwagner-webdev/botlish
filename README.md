@@ -1268,7 +1268,30 @@ add10(32)          # 42 (add captures x)
   Mutually recursive definitions need a future explicit mechanism; ordinary
   bindings are not hoisted, so write callees before callers. See
   STRICT-REFERENCE-DETERMINISM.md.
-* `if c:` / `else:` (optional `else`), `loop:`, `break [e]`, `continue`.
+* `if c:` / `elif c2:` … / `else:` (any number of `elif`s, optional `else`),
+  `loop:`, `break [e]`, `continue`. **`elif` is equivalent to `else:` holding
+  one nested `if`**, under the ordinary `if` semantics, and nothing more:
+
+  ```
+  if a:                       if a:
+      one                         one
+  elif b:                     else:
+      two              ==         if b:
+  else:                               two
+      three                       else:
+                                      three
+  ```
+
+  Conditions are evaluated in written order, each at most once, and none after
+  the first true one; only the selected branch runs. A chain without a final
+  `else` has the value (`unit`) a nested `if` without `else` has. An `if` chain
+  is a value wherever an `if` is (the right side of `=`, the value of
+  `return`), with the same branch typing, scopes and completions
+  (`return`/`fail`/`break`/`continue` in any branch). An `elif` or `else`
+  belongs to the open `if` at its own indentation. An `else` ends the chain
+  (`elif` after `else` is a syntax error), `elif` without a preceding `if` is
+  a syntax error, and `elif` is a reserved word like `else` (it can no longer
+  name a binding or function). See ELIF.md.
 * **Collecting loops.** A loop with an iteration clause evaluates to the List
   of its body's values (`continue` contributes nothing, a bare `break` ends it
   with the List so far, `return`/errors leave as usual). A clause is one of
@@ -1373,6 +1396,7 @@ program binds (§16, "Root references and hygiene").
 | `x = e` | `bind x e` |
 | `fn f(a): body` | `bind f (block {a} body…)` |
 | `if c: t` / `else: e` | `if c {t…} {e…}`, inline branches; no `else` → empty branch (`unit`) |
+| `if c: t` / `elif c2: t2` / `else: e` | `if c {t…} {if c2 {t2…} {e…}}`: an `elif` is an `if` alone in the previous clause's else branch; no HIR or later pass knows `elif` |
 | `loop: body` | `loop {body…}` |
 | `return` / `break` | `return ^unit` / `break` |
 
@@ -1447,8 +1471,10 @@ references and hygiene.
 * An `if` is a value only as the whole right side of `=`, or the whole value
   of `return` or `break`. It can't be an operand or an argument
   (`1 + if c: …`, `f(if c: …)`), because its blocks need their own lines.
-  There's no one-line form (`if c: a else: b`) and no `elif`; nest an `if`
-  inside `else:` instead.
+  There's no one-line form (`if c: a else: b`). A chain of conditions is
+  written with `elif` (ELIF.md); a chain's length is bounded only by the
+  nesting depth the passes can recurse to (a few hundred clauses at Tcl's
+  default recursion limit, as for the same chain written as nested `if`s).
 * Natives whose names contain `?` or `-` (`integer?`, `ok?`, `result-value`,
   `test-log`) can't be named from source. `?` is reserved, and `-` is an
   operator.

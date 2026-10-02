@@ -18,7 +18,8 @@
 #   function     = "fn" IDENT "(" [ param { "," param } [ "," ] ] ")"
 #                  [ "->" IDENT ] [ "errors" IDENT { "," IDENT } ] ":" suite
 #   param        = IDENT [ ":" IDENT ]
-#   if           = "if" expression ":" suite [ "else" ":" suite ]
+#   if           = "if" expression ":" suite
+#                  { "elif" expression ":" suite } [ "else" ":" suite ]
 #   loop         = "loop" [ clause { "and" clause } ] ":" suite
 #   clause       = IDENT "in" operand
 #                | IDENT [ "down" ] "from" operand ( "to" | "through" ) operand
@@ -369,6 +370,7 @@ proc surface::parser::Statement {pVar} {
         }
         INDENT { Fail $token "unexpected indentation" }
         else   { Fail $token "\"else\" without a matching \"if\"" }
+        elif   { Fail $token "\"elif\" without a matching \"if\"" }
         namespace { Fail $token "a \"namespace\" declaration must be the first statement in the file" }
     }
     set statement [Simple p]
@@ -828,18 +830,69 @@ proc surface::parser::SignedInt {pVar} {
     return [list $text [SpanFrom p $start]]
 }
 
+# An if chain: "if" CONDITION ":" SUITE { "elif" CONDITION ":" SUITE }
+# [ "else" ":" SUITE ] (ELIF.md).
+#
+# "elif" is surface syntax only. Each "elif" clause is built as an ordinary
+# `if` node (marked `elif 1`) standing alone in a synthetic else suite (also
+# marked `elif 1`) of the clause before it, so
+#
+#   if a: A elif b: B else: C
+#
+# parses to exactly the AST of
+#
+#   if a: A else: if b: B else: C
+#
+# up to those two markers, and ids, spans, lowering and every later pass see
+# only the nested shape. A clause's own `if` node and synthetic else suite
+# span from its "elif" keyword to the end of the chain; its condition and
+# suite keep their own spans.
+#
+# An "elif" or "else" belongs to the `if` whose chain is open at the same
+# indentation: the suite of an inner `if` ends (at its DEDENT) before the
+# next clause keyword is looked at, so a clause keyword is always claimed by
+# the innermost chain still open at its own indentation. Clauses are
+# collected in a loop, not by recursion, so a long chain costs no parser
+# stack depth.
 proc surface::parser::If {pVar} {
     upvar 1 $pVar p
-    set start [dict get [Advance p] span]
-    set condition [Expression p]
-    set then [Suite p "the \"if\" condition"]
+    set start [dict get [Peek p] span]
+    set clauseStart $start
+    set keyword if
+    Advance p
+    set clauses {}
+    while 1 {
+        set condition [Expression p]
+        set then [Suite p "the \"$keyword\" condition"]
+        lappend clauses [list $clauseStart $condition $then]
+        if {[Kind p] ne "elif"} {
+            break
+        }
+        set clauseStart [dict get [Advance p] span]
+        set keyword elif
+    }
     set else ""
     if {[Kind p] eq "else"} {
         Advance p
         set else [Suite p "\"else\""]
+        if {[Kind p] eq "elif"} {
+            Fail [Peek p] "\"elif\" after \"else\": an \"else\" ends the if chain"
+        }
     }
-    return [surface::ast::node if [SpanFrom p $start] \
-        condition $condition then $then else $else]
+    # Fold the clauses from the last to the first into right-nested ifs.
+    set index [llength $clauses]
+    while {$index > 0} {
+        incr index -1
+        lassign [lindex $clauses $index] clauseStart condition then
+        set span [SpanFrom p $clauseStart]
+        set node [surface::ast::node if $span condition $condition then $then else $else]
+        if {$index == 0} {
+            return $node
+        }
+        dict set node elif 1
+        set else [surface::ast::node suite $span body [list $node] resultType {} \
+            resultTypeSpan {} errors {} elif 1]
+    }
 }
 
 # A loop header is one or more iteration clauses joined by "and":

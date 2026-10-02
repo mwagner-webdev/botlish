@@ -30,6 +30,10 @@ test lex-identifiers {identifiers, keywords and underscores} -body {
     tokens "fn _x x1 if else loop return break continue true false unit iffy"
 } -result {fn IDENT:_x IDENT:x1 if else loop return break continue true false unit IDENT:iffy NEWLINE EOF}
 
+test lex-elif-keyword {elif is a reserved keyword, like else; it is not a prefix match} -body {
+    tokens "if elif else elif_x elifs xelif elseif"
+} -result {if elif else IDENT:elif_x IDENT:elifs IDENT:xelif IDENT:elseif NEWLINE EOF}
+
 test lex-integers {decimal integers of any size} -body {
     tokens "0 42 123456789012345678901234567890"
 } -result {INT:0 INT:42 INT:123456789012345678901234567890 NEWLINE EOF}

@@ -50,7 +50,13 @@
 #              paramsSpan (from "(" to the end of the body: the function
 #              literal), errors ({NAME SPAN} pairs, from the function's own
 #              "errors E1, E2" clause, empty if none), body (suite)
-#   if         condition, then (suite), else (suite or "")
+#   if         condition, then (suite), else (suite or ""). An "elif" clause
+#              is not a node kind of its own (ELIF.md): the parser makes it an
+#              ordinary `if` node (extra field `elif 1`) standing alone in a
+#              synthetic else suite (extra field `elif 1`) of the previous
+#              clause, spanning from its "elif" keyword to the end of the
+#              chain -- the AST of `else:` + a nested `if`, plus the markers
+#              formatAst needs to print it back as `elif`
 #   loop       elementName, elementNameSpan, iterable (an expression, or ""
 #              for the plain form), countName, countNameSpan, countStart,
 #              countEnd (an expression, or "" unless this is the counted
@@ -506,15 +512,29 @@ proc surface::ast::Body {suite indent show linesVar} {
     }
 }
 
-# Lines of the if NODE, its first line starting with PREFIX.
+# Lines of the if NODE, its first line starting with PREFIX. An else suite
+# the parser made for an "elif" clause (ELIF.md) is printed as "elif" and its
+# chain continued, not as an "else" holding a nested if.
 proc surface::ast::If {node prefix indent show linesVar} {
     upvar 1 $linesVar lines
     set pad [string repeat {    } $indent]
-    lappend lines "$pad${prefix}if [Expr [dict get $node condition] $show][At $node $show]"
-    Body [dict get $node then] [expr {$indent + 1}] $show lines
-    if {[dict get $node else] ne ""} {
-        lappend lines "${pad}else[At [dict get $node else] $show]"
-        Body [dict get $node else] [expr {$indent + 1}] $show lines
+    set keyword if
+    while 1 {
+        lappend lines "$pad${prefix}$keyword [Expr [dict get $node condition] $show][At $node $show]"
+        Body [dict get $node then] [expr {$indent + 1}] $show lines
+        set else [dict get $node else]
+        if {$else eq ""} {
+            return
+        }
+        if {[dict exists $else elif]} {
+            set node [lindex [dict get $else body] 0]
+            set prefix ""
+            set keyword elif
+            continue
+        }
+        lappend lines "${pad}else[At $else $show]"
+        Body $else [expr {$indent + 1}] $show lines
+        return
     }
 }
 
