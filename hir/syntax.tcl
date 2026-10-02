@@ -59,6 +59,12 @@
 #             field-initializer payload for both forms.
 #   project   receiver, name, nameOrigin -- `receiver.name`: a statically
 #             resolved field projection (STRUCTS.md)
+#
+# A `call` node may carry `method 1`: it was written `receiver.name(args)`
+# (METHOD-SUGAR.md). Its callee is then the `project` node of `receiver.name`
+# and ARGS exclude the receiver; hir::resolve::Expr turns it into the
+# ordinary call `name(receiver, args)` when `name` is visible from the call,
+# and otherwise leaves the call of the field value it has always been.
 #   return    value
 #   break     value (node or "")
 #   continue
@@ -150,6 +156,23 @@ proc hir::syntax::projectNode {origin receiver name nameOrigin} {
 
 proc hir::syntax::callNode {origin callee args} {
     return [Node call $origin callee $callee args $args]
+}
+
+# `receiver.name(args...)` (METHOD-SUGAR.md): a call of the field projection
+# `receiver.name` marked as method-call sugar. NAMEORIGIN locates `name`.
+# The projection's own origin spans the receiver through the name.
+proc hir::syntax::methodCallNode {origin receiver name nameOrigin args} {
+    set projectOrigin $origin
+    if {[dict exists $projectOrigin node]} {
+        dict set projectOrigin node [dict get $projectOrigin node]/callee
+    }
+    dict set projectOrigin end [dict get $nameOrigin end]
+    dict set projectOrigin endLine [dict get $nameOrigin endLine]
+    dict set projectOrigin endColumn [dict get $nameOrigin endColumn]
+    set callee [projectNode $projectOrigin $receiver $name $nameOrigin]
+    set call [callNode $origin $callee {*}$args]
+    dict set call method 1
+    return $call
 }
 
 proc hir::syntax::ifNode {origin condition thenOrigin thenBody elseOrigin elseBody} {

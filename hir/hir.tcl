@@ -92,7 +92,14 @@
 #             references, disjoint from captures -- hir::isModuleBinding,
 #             MODULE-STATIC-RETAINED-VALUES.md), resultType (TypeId)
 #   call      callee, args (ExprIds), target ("" | {native SymbolId} |
-#             {block ExprId}), known ("" | 1 | 0: result decided statically)
+#             {block ExprId}), known ("" | 1 | 0: result decided statically).
+#             A call written `receiver.name(args)` with a function `name`
+#             visible (METHOD-SUGAR.md) is an ordinary call `name(receiver,
+#             args)`, receiver first in `args`; it carries `method` {name
+#             nameOrigin} for the field/function ambiguity check and
+#             diagnostics only (no analysis, lowering or backend reads it).
+#             Without such a function the written callee is a `project`
+#             marked `methodCallee 1` (diagnostic wording only)
 #   if        condition, thenScope, thenBody, elseScope, elseBody,
 #             refinements (dict OUTCOME -> BindingId FACT pairs)
 #   loop      bodyScope, body

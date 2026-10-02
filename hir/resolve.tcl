@@ -278,6 +278,28 @@ proc hir::resolve::Lookup {hirVar s name} {
     return ""
 }
 
+# 1 if NAME denotes a binding from scope S -- the walk Lookup makes, without
+# creating anything: the visibility test method-call sugar uses
+# (METHOD-SUGAR.md). An ambient scope (sequence mode) denotes whatever the
+# host environment holds, so everything is visible there.
+proc hir::resolve::MethodTargetVisible {hirVar s name} {
+    upvar 1 $hirVar hir
+    for {} {$s ne ""} {set s [dict get $hir scopes $s parent]} {
+        if {[dict exists $hir scopes $s names $name]} {
+            return 1
+        }
+        switch -- [dict get $hir scopes $s kind] {
+            ambient {
+                return 1
+            }
+            root {
+                return [expr {$name in [RootNames]}]
+            }
+        }
+    }
+    return 0
+}
+
 # Records that block expression E is created in scope S's region.
 proc hir::resolve::AddClosure {hirVar s e} {
     upvar 1 $hirVar hir
@@ -472,8 +494,35 @@ proc hir::resolve::Expr {hirVar node ctx} {
             SetField hir $e body [Sequence hir $body $inner]
         }
         call {
-            SetField hir $e callee [Expr hir [dict get $node callee] $ctx]
-            SetField hir $e args [Sequence hir [dict get $node args] $ctx]
+            set written [dict get $node callee]
+            if {[dict exists $node method] && [MethodTargetVisible hir $scope [dict get $written name]]} {
+                # Method-call sugar (METHOD-SUGAR.md): `receiver.name(args)`
+                # is the ordinary call `name(receiver, args)` when `name` is
+                # visible from here under ordinary lexical resolution -- the
+                # same walk a reference to `name` makes, so a shadowing local
+                # is what the sugar sees, and the ref is a real use (capture,
+                # call target, call graph). The receiver is the first
+                # argument and is resolved (and later evaluated) once, in
+                # that position. Nothing below this point knows the spelling:
+                # the node is an ordinary `call`, and `method` records only
+                # that the callee was written after a ".", for the
+                # field/function ambiguity check (hir::structs::verify).
+                set name [dict get $written name]
+                set nameOrigin [dict get $written nameOrigin]
+                SetField hir $e callee [Expr hir [hir::syntax::refNode $nameOrigin $name] $ctx]
+                SetField hir $e args [Sequence hir \
+                    [concat [list [dict get $written receiver]] [dict get $node args]] $ctx]
+                SetField hir $e method [dict create name $name nameOrigin $nameOrigin]
+            } else {
+                SetField hir $e callee [Expr hir $written $ctx]
+                SetField hir $e args [Sequence hir [dict get $node args] $ctx]
+                if {[dict exists $node method]} {
+                    # No function `name` is visible: this is the call of a
+                    # field value it has always been. Only diagnostics need
+                    # to know it was written as a method call.
+                    SetField hir [dict get $hir exprs $e callee] methodCallee 1
+                }
+            }
             SetField hir $e target ""
             SetField hir $e known ""
         }

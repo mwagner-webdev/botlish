@@ -40,6 +40,10 @@
 #              namedstruct
 #   project    receiver, name, nameSpan   receiver.name: a field projection
 #   call       callee, args
+#   methodcall receiver, name, nameSpan, args   receiver.name(args): method-call
+#              sugar (METHOD-SUGAR.md), the surface spelling of the ordinary
+#              call name(receiver, args). Only the parser and the printer
+#              know it by this name: lowering turns it into an ordinary call
 #   unary      op (-), opSpan, operand
 #   not        opSpan, operand
 #   binary     op (+ - * == != < <= > >=), opSpan, left, right
@@ -99,7 +103,7 @@
 #              exactly like typedecl.
 #   fail       name, nameSpan -- "fail NAME": produces the named error's
 #              completion (EXPLICIT-ERROR-COMPLETIONS.md).
-#   handledcall  call (a `call` node), handlers (a list of {name nameSpan
+#   handledcall  call (a `call` or `methodcall` node), handlers (a list of {name nameSpan
 #              body} dicts, one per "on NAME:" clause in written order;
 #              body a suite) -- "CALL: on NAME: ... on NAME: ...". Only a
 #              bare call expression may be handled this way (item 9).
@@ -115,7 +119,7 @@
 #   if loop return break continue     KIND       any other expression statement
 #
 # the Nth statement with the same key among its siblings adding "#N" (N > 1).
-# Inner nodes add their role: then, else, cond, value, callee, argN, itemN,
+# Inner nodes add their role: then, else, cond, value, callee, receiver, argN, itemN,
 # left, right, operand; a parameter is NAME()/(PARAM). A top-level function
 # fib is "fib()"; the x + y in make_adder's inner add is
 # "make_adder()/add()/binary". Editing one function body changes no id outside
@@ -254,6 +258,16 @@ proc surface::ast::Ids {node id} {
         project {
             dict set node receiver [Ids [dict get $node receiver] $id/receiver]
         }
+        methodcall {
+            dict set node receiver [Ids [dict get $node receiver] $id/receiver]
+            set args {}
+            set index 1
+            foreach arg [dict get $node args] {
+                lappend args [Ids $arg $id/arg$index]
+                incr index
+            }
+            dict set node args $args
+        }
         binary - logical {
             dict set node left [Ids [dict get $node left] $id/left]
             dict set node right [Ids [dict get $node right] $id/right]
@@ -336,6 +350,7 @@ proc surface::ast::Children {node} {
             return [lmap field [dict get $node init fields] {dict get $field value}]
         }
         project            { return [list [dict get $node receiver]] }
+        methodcall         { return [concat [list [dict get $node receiver]] [dict get $node args]] }
         binary - logical   { return [list [dict get $node left] [dict get $node right]] }
         bind - return - break {
             return [expr {[dict get $node value] eq "" ? {} : [list [dict get $node value]]}]
@@ -457,6 +472,13 @@ proc surface::ast::Expr {node show} {
         }
         call {
             set parts [list call [Expr [dict get $node callee] $show]]
+            foreach arg [dict get $node args] {
+                lappend parts [Expr $arg $show]
+            }
+            return "([::join $parts { }])$at"
+        }
+        methodcall {
+            set parts [list methodcall [Expr [dict get $node receiver] $show] [dict get $node name]]
             foreach arg [dict get $node args] {
                 lappend parts [Expr $arg $show]
             }

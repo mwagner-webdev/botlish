@@ -74,7 +74,7 @@ test structsyn-projection {field projection is postfix and chains with calls} -b
 } -result {(project (name a) b)
 (project (project (name a) b) c)
 (project (call (name f) (name x)) y)
-(call (project (name x) f) (int 1))
+(methodcall (name x) f (int 1))
 (unary - (project (name p) x))
 (binary * (project (name p) x) (int 2))
 (project (struct (a (int 1))) a)

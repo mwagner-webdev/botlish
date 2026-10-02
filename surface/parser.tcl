@@ -92,7 +92,7 @@
 #   additive     = multiplicative { ( "+" | "-" ) multiplicative }
 #   multiplicative = unary { "*" unary }
 #   unary        = "-" unary | postfix
-#   postfix      = primary { "(" [ arguments ] ")" | "." IDENT }
+#   postfix      = primary { "(" [ arguments ] ")" | "." IDENT [ "(" [ arguments ] ")" ] }
 #   arguments    = expression { "," expression } [ "," ]
 #   primary      = INT | STRING | CHAR | "true" | "false" | "unit"
 #                | IDENT [ "::" IDENT ] [ fieldInits ]
@@ -110,7 +110,11 @@
 # by dedicated grammar), and "NAME {" can only mean a named construction:
 # no existing expression is ever followed by "{". Field names are ordinary
 # identifiers: no keyword, computed key, string or integer key. "x.name" is
-# a field projection, resolved statically by HIR.
+# a field projection, resolved statically by HIR. "x.name(args)" -- a "."
+# IDENT immediately followed by an argument list -- is a method call
+# (METHOD-SUGAR.md): the surface spelling of the ordinary call
+# "name(x, args)", decided by HIR resolution, never here. "(x.name)(args)" is
+# not one: the parenthesized projection is a field value being called.
 #
 # An if (or a loop, including "loop x in EXPR:") is a value where a
 # statement's value ends the statement: the right side of a binding, or the
@@ -460,7 +464,7 @@ proc surface::parser::ValueOrHandled {pVar} {
         return [Value p]
     }
     set expr [Expression p]
-    if {[Kind p] eq ":" && [dict get $expr kind] eq "call"} {
+    if {[Kind p] eq ":" && [dict get $expr kind] in {call methodcall}} {
         return [HandledCall p $expr]
     }
     return $expr
@@ -1212,6 +1216,16 @@ proc surface::parser::Postfix {pVar} {
                     Fail $token "expected a field name after \".\", found [Describe $token]"
                 }
                 Advance p
+                if {[Kind p] eq "("} {
+                    # Method call (METHOD-SUGAR.md): same argument grammar
+                    # as an ordinary call.
+                    Advance p
+                    set args [Arguments p ) "argument list"]
+                    set expr [surface::ast::node methodcall [SpanFrom p [dict get $expr span]] \
+                        receiver $expr name [dict get $token value] nameSpan [dict get $token span] \
+                        args $args]
+                    continue
+                }
                 set expr [surface::ast::node project [SpanFrom p [dict get $expr span]] \
                     receiver $expr name [dict get $token value] nameSpan [dict get $token span]]
             }

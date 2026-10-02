@@ -1,0 +1,912 @@
+# method-sugar.test -- method-call sugar (METHOD-SUGAR.md):
+#
+#     receiver.f(a, b)   is   f(receiver, a, b)
+#
+# when `f` is visible from the call under ordinary lexical resolution. The
+# sugar is parasitic on ordinary calls, so most tests here run a method
+# spelling and the free spelling of the same program on every in-process
+# backend (interpreter, Tcl compiler, native generic, native specialized) and
+# require the same outcome: value, error, and the log the program kept of its
+# own evaluation order. Parsing and AST shape are pinned in
+# surface-parser.test, lowering and locations in surface-lowering.test.
+#
+# Botlish has no `import` statement (README.md section 12): the functions a
+# call can use under a bare name are the ones in lexical scope -- the file's
+# own functions, local bindings, the root natives, and any function bound to
+# a name (`find = list::find`). That is the "imported function" of the
+# method-sugar rule, and what these tests mean by "visible". A module
+# function reached only as `mod::f` is not visible as `f`.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+interp recursionlimit {} 100000
+
+testConstraint executableAot [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64}}]
+
+set ::allBackends {interp compile cranelift-generic cranelift}
+
+# Error messages carry source locations, which differ between spellings.
+proc stripLocations {message} {
+    set message [regsub -all {[^ ]*\.bot:[0-9]+:[0-9]+} $message {t.bot:L:C}]
+    return [regsub -all {\(at [0-9]+:[0-9]+\)} $message {(at L:C)}]
+}
+
+# The outcomes of SOURCE on every backend, as a list: the shown value, or
+# "error CODE MESSAGE" (a compile-time rejection is the same on every
+# backend). Programs that use library modules go through a file.
+proc outcomesOf {source} {
+    set path [makeFile $source method-sugar-case.bot]
+    try {
+        if {[catch {surface::readProgramFile $path} hir options]} {
+            set code [dict get $options -errorcode]
+            return [lmap backend $::allBackends {list error $code [stripLocations $hir]}]
+        }
+        return [lmap backend $::allBackends {
+            set outcome [outcomeUnderHir $backend $hir]
+            if {[lindex $outcome 0] eq "value"} {
+                list value [lindex $outcome 1]
+            } else {
+                list error [lindex $outcome 1] [stripLocations [lindex $outcome 2]]
+            }
+        }]
+    } finally {
+        removeFile method-sugar-case.bot
+    }
+}
+
+# The one outcome SOURCE has on every backend ("disagree: ..." if they differ).
+proc parity {source} {
+    set outcomes [outcomesOf $source]
+    if {[llength [lsort -unique $outcomes]] != 1} {
+        return "disagree: [lmap b $::allBackends o $outcomes {list $b $o}]"
+    }
+    return [lindex $outcomes 0]
+}
+
+# The outcome both spellings have on every backend, or what differs.
+proc bothSpellings {method free} {
+    set a [parity $method]
+    set b [parity $free]
+    if {$a ne $b} {
+        return "method: $a / free: $b"
+    }
+    return $a
+}
+
+# TEXT with source locations removed: origins and "line L:C" mentions.
+proc locationFree {text} {
+    set text [regsub -all {(origin|location) \{(?:[^\{\}]|\{\})*\}} $text {\1 {}}]
+    return [regsub -all {line [0-9]+:[0-9]+} $text {line L:C}]
+}
+
+# The compiled HIR of SOURCE (diagnostics and all).
+proc hirOf {source} {
+    set path [makeFile $source method-sugar-case.bot]
+    try {
+        return [surface::readProgramFile $path -strict 0]
+    } finally {
+        removeFile method-sugar-case.bot
+    }
+}
+
+# The NIR text of HIR, or the error native lowering raised (both spellings of
+# a program native cannot lower, such as a generic struct projection, must
+# fail the same way).
+proc nirOf {hir args} {
+    if {[catch {native::lower::program $hir {*}$args} result options]} {
+        return [list error [dict get $options -errorcode] $result]
+    }
+    return [dict get $result text]
+}
+
+# "" if the two spellings have one HIR (as printed), one core IR, and one
+# NIR (specialized and generic) and the same analyses; else what differs.
+proc sameProgram {method free} {
+    set m [hirOf $method]
+    set f [hirOf $free]
+    set diffs {}
+    if {[hir::format $m] ne [hir::format $f]} {lappend diffs hir-format}
+    if {[hir::lower $m] ne [hir::lower $f]} {lappend diffs core-ir}
+    if {[hir::diagnostics $m] ne {} || [hir::diagnostics $f] ne {}} {lappend diffs diagnostics}
+    if {[nirOf $m] ne [nirOf $f]} {lappend diffs nir}
+    if {[nirOf $m -specialize 0] ne [nirOf $f -specialize 0]} {lappend diffs nir-generic}
+    set sm [hir::specialize::analyze $m]
+    set sf [hir::specialize::analyze $f]
+    if {$sm ne $sf} {lappend diffs specialization}
+    if {[hir::range::analyze $m $sm] ne [hir::range::analyze $f $sf]} {lappend diffs range}
+    if {[hir::escape::analyze $m $sm] ne [hir::escape::analyze $f $sf]} {lappend diffs escape}
+    if {[hir::cardinality::analyze $m] ne [hir::cardinality::analyze $f]} {lappend diffs cardinality}
+    if {[locationFree [hir::aot::analyze $m]] ne [locationFree [hir::aot::analyze $f]]} {lappend diffs aot}
+    if {[locationFree [hir::aot::explain $m]] ne [locationFree [hir::aot::explain $f]]} {lappend diffs aot-explain}
+    if {[locationFree [hir::specialize::explain $m]] ne [locationFree [hir::specialize::explain $f]]} {lappend diffs specialize-explain}
+    return $diffs
+}
+
+# The message of the static rejection of SOURCE, or "accepted".
+proc rejection {source} {
+    set path [makeFile $source method-sugar-case.bot]
+    try {
+        if {[catch {surface::readProgramFile $path} message options]} {
+            return "[lindex [dict get $options -errorcode] end]: [stripLocations $message]"
+        }
+        return accepted
+    } finally {
+        removeFile method-sugar-case.bot
+    }
+}
+
+# ---------------------------------------------------------------------------
+# The basic rewrite: receiver.f(a, b) is f(receiver, a, b)
+
+set ::fns {fn add(a, b):
+    a + b
+fn add3(a, b, c):
+    a + b + c
+fn inc(a):
+    a + 1
+fn twice(a):
+    a * 2
+fn pack(a, b, c):
+    [a, b, c]
+}
+
+foreach {name method free expected} {
+    unary          {5.inc()}                       {inc(5)}                     {value 6}
+    binary         {5.add(4)}                      {add(5, 4)}                  {value 9}
+    ternary        {5.add3(4, 3)}                  {add3(5, 4, 3)}              {value 12}
+    receiver-first {1.pack(2, 3)}                  {pack(1, 2, 3)}              {value {[1, 2, 3]}}
+    on-a-name      {x = 7
+x.add(x)}                                          {x = 7
+add(x, x)}                                                                       {value 14}
+    result-bound   {y = 2.add(3)
+y.twice()}                                         {y = add(2, 3)
+twice(y)}                                                                        {value 10}
+    as-argument    {inc(3.add(4))}                 {inc(add(3, 4))}             {value 8}
+    argument-pos   {add(1, 2.add(3))}              {add(1, add(2, 3))}          {value 6}
+    arithmetic     {1 + 2.inc() * 3}               {1 + inc(2) * 3}             {value 10}
+    unary-minus    {-5.inc()}                      {-inc(5)}                    {value -6}
+    not-operand    {not 3.add(1) == 4}             {not add(3, 1) == 4}         {value false}
+    parenthesized  {(2 + 3).inc()}                 {inc(2 + 3)}                 {value 6}
+    list-receiver  {[1, 2, 3].list_length()}       {list_length([1, 2, 3])}     {value 3}
+    string-receiver {"abc".length()}               {length("abc")}              {value 3}
+    call-receiver  {inc(1).add(2)}                 {add(inc(1), 2)}             {value 4}
+    trailing-comma {1.add(2,)}                     {add(1, 2,)}                 {value 3}
+} {
+    test method-basic-$name "$name: method and free spellings agree" -body {
+        bothSpellings $::fns$method $::fns$free
+    } -result $expected
+}
+
+test method-multiline-arguments {a method call's arguments span lines through the ordinary argument grammar} -body {
+    bothSpellings "${::fns}1.add3(\n    2,\n    3,\n)" "${::fns}add3(1, 2, 3)"
+} -result {value 6}
+
+test method-multiline-chain {a chain written across lines inside brackets} -body {
+    bothSpellings "${::fns}\[\n    1.inc()\n        .twice()\n        .add(3),\n    2\n\]" "${::fns}\[\n    add(twice(inc(1)), 3),\n    2\n\]"
+} -result {value {[7, 2]}}
+
+# ---------------------------------------------------------------------------
+# Natives and library functions by their real names
+
+foreach {name method free expected} {
+    list_get    {xs = [10, 20, 30]
+xs.list_get(1)}  {xs = [10, 20, 30]
+list_get(xs, 1)}  {value 20}
+    list_get-expr  {[10, 20, 30].list_get(1 + 1)}  {list_get([10, 20, 30], 1 + 1)}  {value 30}
+    substring   {"HeLLo World".substring(0, 5)}  {substring("HeLLo World", 0, 5)}  {value {"HeLLo"}}
+    lowercase   {"HeLLo".lowercase()}            {lowercase("HeLLo")}              {value {"hello"}}
+    list_append {[1, 2].list_append(3)}          {list_append([1, 2], 3)}          {value {[1, 2, 3]}}
+    concat      {"ab".concat("cd")}              {concat("ab", "cd")}              {value {"abcd"}}
+    chained     {"HeLLo World".lowercase().substring(6, 11)}  {substring(lowercase("HeLLo World"), 6, 11)}  {value {"world"}}
+    variadic    {5.list(6, 7)}                   {list(5, 6, 7)}                   {value {[5, 6, 7]}}
+    variadic-0  {5.list()}                       {list(5)}                         {value {[5]}}
+    chained-natives {[3, 1, 2].list_length().twice()}  {twice(list_length([3, 1, 2]))}  {value 6}
+} {
+    set prelude $::fns
+    test method-natives-$name "$name: a root native is a function visible by its name" -body {
+        bothSpellings $prelude$method $prelude$free
+    } -result $expected
+}
+
+# Library functions are visible once bound to a name (there is no import
+# statement: `NAME = module::NAME` is how a module function becomes
+# visible); the sugar then works exactly as for any function, including
+# error-capable ones and handled calls.
+set ::libBindings {complement = byte::complement
+high_nibble = byte::high_nibble
+from_int = byte::from_int
+find = list::find
+fn big(x):
+    x > 1
+}
+
+foreach {name method free expected} {
+    aliased-module-function  {200.complement()}  {complement(200)}  {value 55}
+    aliased-chain            {200.complement().high_nibble()}  {high_nibble(complement(200))}  {value 48}
+    aliased-error-capable   {fn conv(n):
+    b = n.from_int():
+        on AboveRange:
+            0
+        on BelowRange:
+            1
+    b
+[conv(200), conv(300), conv(0 - 5)]}  {fn conv(n):
+    b = from_int(n):
+        on AboveRange:
+            0
+        on BelowRange:
+            1
+    b
+[conv(200), conv(300), conv(0 - 5)]}  {value {[200, 0, 1]}}
+    higher-order             {d = [1, 2, 3].find(big):
+    on NotFound:
+        0
+d}  {d = find([1, 2, 3], big):
+    on NotFound:
+        0
+d}  {value 2}
+    higher-order-not-found   {d = [0, 1].find(big):
+    on NotFound:
+        99
+d}  {d = find([0, 1], big):
+    on NotFound:
+        99
+d}  {value 99}
+} {
+    set prelude $::libBindings
+    test method-library-$name "$name: a module function bound to a name is visible to the sugar" -body {
+        bothSpellings $prelude$method $prelude$free
+    } -result $expected
+}
+
+# ---------------------------------------------------------------------------
+# Visibility: only a function visible by that name enables the spelling
+
+set ::notVisible {fn big(x):
+    x > 1
+}
+
+# ---------------------------------------------------------------------------
+# Visibility: only a function visible by that name enables the spelling
+
+set ::notVisible {fn big(x):
+    x > 1
+}
+
+test method-not-visible-module-function {a module function reached only as mod::f is not found by the sugar, though its first parameter would accept the receiver (no search by receiver type)} -body {
+    list [rejection "${::notVisible}\[1, 2, 3\].any?(big)"] [rejection "${::notVisible}list::any?(\[1, 2, 3\], big)"]
+} -result {{NOT-A-STRUCT: t.bot:L:C: cannot project field "any?" from a value of type List[int]: only a struct has fields; as a method-style call, no function named "any?" is visible here either: method syntax only applies a function that is already visible by that name (define it here, or bind it, e.g. `any? = module::any?`)} accepted}
+
+test method-not-visible-names-the-fix {the diagnostic of a method call with no visible function says the function must be visible by that name, instead of blaming a missing member} -body {
+    rejection "x = 5\nx.nothere(1)"
+} -result {NOT-A-STRUCT: t.bot:L:C: cannot project field "nothere" from a value of type int: only a struct has fields; as a method-style call, no function named "nothere" is visible here either: method syntax only applies a function that is already visible by that name (define it here, or bind it, e.g. `nothere = module::nothere`)}
+
+test method-not-visible-no-type-import-needed-or-used {the receiver's type is never searched for the function: a function in a module that declares the receiver's type is no more visible than any other} -body {
+    # byte::complement takes a Byte; 200.complement() has no `complement` in scope.
+    rejection "x = 200\nx.complement()"
+} -match glob -result {*cannot project field "complement"*no function named "complement" is visible here either*}
+
+test method-not-visible-forward-reference {a function defined later in the file is not visible yet: the ordinary rule (a binding is visible once established) is the sugar's rule} -body {
+    list [rejection "5.later()\nfn later(a):\n    a"] [rejection "later(5)\nfn later(a):\n    a"]
+} -match glob -result {{NOT-A-STRUCT: *cannot project field "later"*} {UNBOUND: *unbound name "later"*}}
+
+test method-not-visible-on-struct-receiver {a struct receiver has fields, not methods: an absent field is still the field error, now with the visibility hint} -body {
+    rejection "s = {v: 1}\ns.w(1)"
+} -match glob -result {UNKNOWN-FIELD: t.bot:L:C: struct type struct{v: int} has no field "w" (known fields: v); as a method-style call, no function named "w" is visible here either*}
+
+test method-visible-in-nested-scope {a function visible in an enclosing scope is visible in a nested function, a branch and a loop body} -body {
+    bothSpellings "${::fns}fn nest(n):
+    r = if n > 0:
+        n.inc()
+    else:
+        0
+    r
+fn run(xs):
+    loop x in xs:
+        x.twice()
+\[nest(3), nest(0), run(\[1, 2, 3\])\]" "${::fns}fn nest(n):
+    r = if n > 0:
+        inc(n)
+    else:
+        0
+    r
+fn run(xs):
+    loop x in xs:
+        twice(x)
+\[nest(3), nest(0), run(\[1, 2, 3\])\]"
+} -result {value {[4, 0, [2, 4, 6]]}}
+
+test method-visible-recursion {a function reaches itself through the sugar exactly as through a plain call, and nothing else in its own body forward} -body {
+    bothSpellings "fn sum_to(n, acc):
+    if n == 0:
+        return acc
+    (n - 1).sum_to(acc + n)
+10.sum_to(0)" "fn sum_to(n, acc):
+    if n == 0:
+        return acc
+    sum_to(n - 1, acc + n)
+sum_to(10, 0)"
+} -result {value 55}
+
+# ---------------------------------------------------------------------------
+# The visible name is the method name
+
+test method-alias-name-is-the-local-name {a function bound to another name is called by that name; the original, hidden name is not made visible by the binding} -body {
+    set prelude "transform = byte::complement\n"
+    list [bothSpellings "${prelude}200.transform()" "${prelude}transform(200)"] \
+        [rejection "${prelude}200.complement()"]
+} -match glob -result {{value 55} {NOT-A-STRUCT: *cannot project field "complement"*}}
+
+test method-alias-of-local-function {a local alias of a local function: both names are visible, each by ordinary lookup} -body {
+    bothSpellings "${::fns}transform = inc\n\[5.transform(), 5.inc()\]" "${::fns}transform = inc\n\[transform(5), inc(5)\]"
+} -result {value {[6, 6]}}
+
+# ---------------------------------------------------------------------------
+# Every failure is the free spelling's failure
+
+set ::strictFns {fn add(a, b):
+    a + b
+fn zero():
+    1
+fn takes_text(t: str):
+    t
+fn later_text(a, t: str):
+    a
+fn three(a, b, c):
+    a + b + c
+}
+
+foreach {name method free} {
+    zero-parameters      {5.zero()}                   {zero(5)}
+    too-few-arguments    {5.add()}                    {add(5)}
+    too-many-arguments   {5.add(1, 2)}                {add(5, 1, 2)}
+    arity-two            {5.three(1)}                 {three(5, 1)}
+    wrong-receiver-type  {5.takes_text()}             {takes_text(5)}
+    wrong-later-argument {5.later_text(7)}            {later_text(5, 7)}
+    receiver-not-callable-name {x = 5
+5.x()}                                                {x = 5
+x(5)}
+} {
+    test method-failure-$name "$name: the method spelling fails exactly as the free spelling fails" -body {
+        set m [parity $::strictFns$method]
+        set f [parity $::strictFns$free]
+        list [expr {[lindex $m 0] eq "error"}] [expr {$m eq $f}]
+    } -result {1 1}
+}
+
+test method-failure-diagnostics {the diagnostics of wrong receiver, wrong later argument, and arity are the ordinary call diagnostics} -body {
+    list [rejection "${::strictFns}5.takes_text()"] [rejection "${::strictFns}5.later_text(7)"] \
+        [parity "${::strictFns}5.zero()"] [parity "${::strictFns}5.add()"]
+} -match glob -result {{TYPE: t.bot:L:C: * parameter "t"*} {TYPE: t.bot:L:C: * parameter "t"*} {error {CORE SEMANTIC ARITY} {block () expects 0 argument(s), got 1}} {error {CORE SEMANTIC ARITY} {block (a b) expects 2 argument(s), got 1}}}
+
+test method-failure-locations {a failing method call is located at the receiver or the later argument that is wrong, as the free call is located at its argument} -body {
+    set where {}
+    foreach source [list "${::strictFns}5.takes_text()" "${::strictFns}\"x\".later_text(7)" "${::strictFns}1.later_text(7)"] {
+        set path [makeFile $source method-sugar-case.bot]
+        catch {surface::readProgramFile $path} message
+        removeFile method-sugar-case.bot
+        lappend where [regsub -all {^.*\.bot:([0-9]+:[0-9]+):.*$} $message {\1}]
+    }
+    set where
+} -result {11:1 11:16 11:14}
+
+# ---------------------------------------------------------------------------
+# Modules: a module's own code uses the sugar with its own visible names; a
+# module's functions are not visible to the program that loads it.
+
+test method-in-a-module {a module function uses the sugar on its own earlier functions; the program binds the module function to a name and uses it as a method; the module's other names stay invisible to the program} -body {
+    set libPath [file join $::core::libraryDir methodsugarlib.bot]
+    set ch [open $libPath w]
+    fconfigure $ch -encoding utf-8
+    puts -nonewline $ch {namespace methodsugarlib
+
+fn inc(a):
+    a + 1
+
+fn inc_twice(a):
+    a.inc().inc()
+}
+    close $ch
+    try {
+        set bind "inc_twice = methodsugarlib::inc_twice\n"
+        list [bothSpellings "${bind}5.inc_twice()" "${bind}inc_twice(5)"] \
+            [bothSpellings "${bind}5.inc_twice().inc_twice()" "${bind}inc_twice(inc_twice(5))"] \
+            [rejection "${bind}5.inc()"] \
+            [rejection "methodsugarlib::inc_twice(5).inc()"]
+    } finally {
+        file delete $libPath
+    }
+} -match glob -result {{value 7} {value 9} {NOT-A-STRUCT: *cannot project field "inc"*no function named "inc" is visible here either*} {NOT-A-STRUCT: *cannot project field "inc"*}}
+
+test method-qualified-references-inside-method-calls {module-qualified references in a receiver or an argument load their modules as in any call} -body {
+    set prelude "fn add(a, b):\n    a + b\nfn id(x):\n    x\n"
+    bothSpellings "${prelude}\[byte::complement(200).add(byte::complement(100)), id(5).add(byte::high_nibble(255))\]" \
+        "${prelude}\[add(byte::complement(200), byte::complement(100)), add(id(5), byte::high_nibble(255))\]"
+} -result {value {[210, 245]}}
+
+# ---------------------------------------------------------------------------
+# Types: the ordinary call decides
+
+test method-type-never-imported {the receiver's type is never named in the program and never imported; the function visible by name is enough (the receiver is a Byte from a module)} -body {
+    bothSpellings "${::libBindings}fn show(b):
+    b.high_nibble()
+\[show(200.complement()), 200.complement().high_nibble()\]" "${::libBindings}fn show(b):
+    high_nibble(b)
+\[show(complement(200)), high_nibble(complement(200))\]"
+} -result {value {[48, 48]}}
+
+set ::refined {type Small = Int in 0..10
+
+fn one() -> Small:
+    1
+fn wide(x: int):
+    x + 100
+fn narrow(x: Small):
+    x + 1
+fn mk(n):
+    n + 20
+}
+
+foreach {name method free} {
+    refined-to-parent        {one().wide()}               {wide(one())}
+    literal-in-domain        {5.narrow()}                 {narrow(5)}
+    literal-out-of-domain    {50.narrow()}                {narrow(50)}
+    unproven-parent-to-child {mk(1).narrow()}             {narrow(mk(1))}
+    refined-to-same          {one().narrow()}             {narrow(one())}
+    chained-domains          {one().narrow().wide()}      {wide(narrow(one()))}
+} {
+    test method-types-$name "$name: a refinement type is accepted or rejected exactly as in the free call" -body {
+        set m [parity $::refined$method]
+        set f [parity $::refined$free]
+        list [expr {[stripLocations $m] eq [stripLocations $f]}] [lindex $m 0]
+    } -match glob -result {1 *}
+}
+
+test method-types-refinement-outcomes {pin the outcomes the table above compares: child to parent and an in-domain literal are accepted, an unproven or out-of-domain argument is rejected} -body {
+    lmap source [list one().wide() 5.narrow() 50.narrow() mk(1).narrow() one().narrow().wide()] {
+        lindex [split [rejection $::refined$source] :] 0
+    }
+} -result {accepted accepted TYPE TYPE accepted}
+
+test method-types-generic-functions {an untyped (generic) function accepts any receiver, as in the free call} -body {
+    set prelude "fn pair(a, b):\n    \[a, b\]\n"
+    bothSpellings "${prelude}\[1.pair(\"x\"), \"s\".pair(2), \[1\].pair(unit), {v: 1}.pair(3)\]" \
+        "${prelude}\[pair(1, \"x\"), pair(\"s\", 2), pair(\[1\], unit), pair({v: 1}, 3)\]"
+} -result {value {[[1, "x"], ["s", 2], [[1], unit], [{v: 1}, 3]]}}
+
+test method-types-dynamic-receiver {a receiver whose type the analysis does not know (an untyped parameter, `any`) is accepted exactly where the free call is: ordinary call rules decide, the sugar adds nothing} -body {
+    set prelude "fn describe(a):\n    a\nfn via(x):\n    x.describe()\nfn via_free(x):\n    describe(x)\n"
+    list [parity "${prelude}\[via(1), via(\"s\"), via(\[1\])\]"] [parity "${prelude}\[via_free(1), via_free(\"s\"), via_free(\[1\])\]"]
+} -result {{value {[1, "s", [1]]}} {value {[1, "s", [1]]}}}
+
+test method-types-dynamic-receiver-into-typed-parameter {an untyped receiver is not proven for a declared parameter type, in either spelling} -body {
+    set prelude "fn takes_text(t: str):\n    t\n"
+    set m "${prelude}fn via(x):\n    x.takes_text()\n\[via(\"s\"), via(5)\]"
+    set f "${prelude}fn via(x):\n    takes_text(x)\n\[via(\"s\"), via(5)\]"
+    list [rejection $m] [rejection $f] [bothSpellings $m $f]
+} -match glob -result {{TYPE: *} {TYPE: *} {error {CORE SEMANTIC TYPE} *}}
+
+# ---------------------------------------------------------------------------
+# Shadowing and ambiguity: ordinary lexical resolution
+
+test method-shadowing-local {a local binding that shadows a function is what the sugar sees too: it does not reach the function behind it} -body {
+    set prelude "fn f(a):\n    a + 100\n"
+    list [bothSpellings "${prelude}fn g(x):\n    f = 5\n    x.f()\ng(1)" "${prelude}fn g(x):\n    f = 5\n    f(x)\ng(1)"] \
+        [bothSpellings "${prelude}fn g(x):\n    fn f(a):\n        a + 1\n    x.f()\ng(1)" "${prelude}fn g(x):\n    fn f(a):\n        a + 1\n    f(x)\ng(1)"]
+} -result {{error {CORE SEMANTIC NOT-CALLABLE} {cannot call non-callable value 5}} {value 2}}
+
+test method-shadowing-parameter {a parameter named like a function shadows it for the sugar too} -body {
+    set prelude "fn f(a):\n    a + 100\n"
+    bothSpellings "${prelude}fn g(f, x):\n    x.f()\ng(5, 1)" "${prelude}fn g(f, x):\n    f(x)\ng(5, 1)"
+} -result {error {CORE SEMANTIC NOT-CALLABLE} {cannot call non-callable value 5}}
+
+test method-shadowing-parameter-function {a function-valued parameter named like a function: the parameter is the callee} -body {
+    set prelude "fn f(a):\n    a + 100\nfn plus_one(a):\n    a + 1\n"
+    bothSpellings "${prelude}fn g(f, x):\n    x.f()\ng(plus_one, 1)" "${prelude}fn g(f, x):\n    f(x)\ng(plus_one, 1)"
+} -result {value 2}
+
+test method-shadowing-later-binding-cannot-reach-back {a binding established after the call does not change what the call sees} -body {
+    set prelude "fn f(a):\n    a + 100\n"
+    bothSpellings "${prelude}fn g(x):\n    r = x.f()\n    f = 5\n    r\ng(1)" "${prelude}fn g(x):\n    r = f(x)\n    f = 5\n    r\ng(1)"
+} -result {value 101}
+
+test method-no-overloads-no-ranking {Botlish has no overloading: a name denotes one binding, so there is nothing for the sugar to rank. A second binding of the name in one scope is the ordinary DUPLICATE error; in an inner scope it shadows} -body {
+    list [rejection "fn f(a):\n    a\nfn f(a, b):\n    a + b\n1.f()"] [rejection "fn f(a):\n    a\nfn f(a, b):\n    a + b\nf(1)"]
+} -match glob -result {{DUPLICATE: *duplicate binding "f"*} {DUPLICATE: *duplicate binding "f"*}}
+
+# ---------------------------------------------------------------------------
+# Fields: plain access is unchanged; the field-call form keeps its meaning
+
+set ::fieldFns {fn inc(a):
+    a + 1
+fn cb(a):
+    a + 100
+fn v(a):
+    a + 1000
+}
+
+test method-field-plain-access-unchanged {x.field is a projection whatever functions are visible} -body {
+    bothSpellings "${::fieldFns}s = {cb: 1, v: 3}\n\[s.v, s.cb\]" "${::fieldFns}s = {cb: 1, v: 3}\n\[s.v, s.cb\]"
+} -result {value {[3, 1]}}
+
+test method-field-call-without-function {a callable field is still called through the field when no function of that name is visible} -body {
+    set prelude "fn inc(a):\n    a + 1\n"
+    bothSpellings "${prelude}s = {cb: inc, v: 3}\ns.cb(41)" "${prelude}s = {cb: inc, v: 3}\n(s.cb)(41)"
+} -result {value 42}
+
+test method-field-call-parenthesized-is-the-field {(s.f)(a) is the call of a field value even where a function f is visible} -body {
+    set prelude "fn inc(a):\n    a + 1\nfn cb(a):\n    a + 100\n"
+    bothSpellings "${prelude}s = {cb: inc, v: 3}\n(s.cb)(41)" "${prelude}s = {cb: inc, v: 3}\nf = s.cb\nf(41)"
+} -result {value 42}
+
+test method-field-call-ambiguous-is-rejected {a callable field and a visible function of the same name: the sugar does not silently pick a meaning, it rejects and names both spellings} -body {
+    set prelude "fn inc(a):\n    a + 1\nfn cb(a):\n    a + 100\ns = {cb: inc, v: 3}\n"
+    rejection "${prelude}s.cb(41)"
+} -result {AMBIGUOUS-METHOD-CALL: t.bot:L:C: method-style call "cb" is ambiguous: the receiver (type struct{cb: block(e2)/1 -> int, v: int}) has a field "cb" whose value may be callable, and a function "cb" is also visible here; write (receiver.cb)(...) to call the field, or cb(receiver, ...) to call the function}
+
+test method-field-call-ambiguity-resolved-by-either-spelling {the two spellings the diagnostic offers both work} -body {
+    set prelude "fn inc(a):\n    a + 1\nfn cb(a):\n    a + 100\ns = {cb: inc, v: 3}\n"
+    list [parity "${prelude}(s.cb)(41)"] [parity "${prelude}cb(s, 41)"]
+} -match glob -result {{value 42} {error {CORE SEMANTIC *}}}
+
+test method-field-of-another-kind-does-not-compete {a field that cannot be called (an Int) is no candidate: the function is the only callable, so the sugar applies and the call is the ordinary one} -body {
+    set prelude "fn cb(s):\n    s.v + 100\ns = {cb: 7, v: 3}\n"
+    bothSpellings "${prelude}s.cb()" "${prelude}cb(s)"
+} -result {value 103}
+
+test method-field-call-ambiguity-in-an-instance {an untyped receiver is typed by the call that supplies it: the instance sees the callable field, and the same ambiguity is diagnosed at that call (a program that was valid as a field call is never silently re-read as a function call)} -body {
+    set prelude "fn inc(a):\n    a + 1\nfn cb(a):\n    a + 100\nfn call_it(s):\n    s.cb(41)\n"
+    list [rejection "${prelude}call_it({cb: inc, v: 2})"] \
+        [rejection "fn inc(a):\n    a + 1\nfn call_it(s):\n    s.cb(41)\ncall_it({cb: inc, v: 2})"] \
+        [parity "fn inc(a):\n    a + 1\nfn call_it(s):\n    s.cb(41)\ncall_it({cb: inc, v: 2})"]
+} -match glob -result {{TYPE: * method-style call "cb" is ambiguous*} accepted {value 42}}
+
+test method-field-of-another-kind-does-not-compete-in-an-instance {an instance whose receiver's field cannot be called leaves the function as the only candidate} -body {
+    parity "fn cb(p):\n    p.v + 100\nfn call_it(s):\n    s.cb()\ncall_it({cb: 5, v: 2})"
+} -result {value 102}
+
+test method-field-struct-receiver-method {a struct receiver with no field of that name: the function applies} -body {
+    set prelude "fn total(p, extra):\n    p.x + p.y + extra\np = {x: 1, y: 2}\n"
+    bothSpellings "${prelude}p.total(10)" "${prelude}total(p, 10)"
+} -result {value 13}
+
+test method-field-then-method {a field projection is a receiver like any other} -body {
+    set prelude "fn inc(a):\n    a + 1\ns = {v: 3, w: {z: 9}}\n"
+    bothSpellings "${prelude}\[s.v.inc(), s.w.z.inc().inc()\]" "${prelude}\[inc(s.v), inc(inc(s.w.z))\]"
+} -result {value {[4, 11]}}
+
+test method-no-bound-method-values {x.f is a field projection, never a bound function: it is exactly the error it was before} -body {
+    set prelude "fn inc(a):\n    a + 1\n"
+    list [rejection "${prelude}g = 5.inc\ng(1)"] [rejection "${prelude}s = {v: 1}\ng = s.inc\ng(1)"]
+} -match glob -result {{NOT-A-STRUCT: *cannot project field "inc" from a value of type int*} {UNKNOWN-FIELD: *struct type struct{v: int} has no field "inc"*}}
+
+# ---------------------------------------------------------------------------
+# Evaluation: the receiver is the first argument, evaluated once
+
+set ::logFns {fn probe(log, id, result):
+    n = mutable_array_get(log, 0)
+    mutable_array_set(log, 0, n * 10 + id)
+    result
+fn fresh():
+    log = mutable_array_allocate(1)
+    mutable_array_set(log, 0, 0)
+    log
+fn add(a, b):
+    a + b
+fn add3(a, b, c):
+    a + b + c
+fn first(a, b):
+    a
+}
+
+foreach {name method free expected} {
+    receiver-once {log = fresh()
+v = probe(log, 1, 10).add(probe(log, 2, 5))
+[v, mutable_array_get(log, 0)]}  {log = fresh()
+v = add(probe(log, 1, 10), probe(log, 2, 5))
+[v, mutable_array_get(log, 0)]}  {value {[15, 12]}}
+    receiver-before-arguments {log = fresh()
+v = probe(log, 1, 1).add3(probe(log, 2, 2), probe(log, 3, 3))
+[v, mutable_array_get(log, 0)]}  {log = fresh()
+v = add3(probe(log, 1, 1), probe(log, 2, 2), probe(log, 3, 3))
+[v, mutable_array_get(log, 0)]}  {value {[6, 123]}}
+    receiver-is-a-method-call {log = fresh()
+v = probe(log, 1, 1).add(probe(log, 2, 2)).add(probe(log, 3, 3))
+[v, mutable_array_get(log, 0)]}  {log = fresh()
+v = add(add(probe(log, 1, 1), probe(log, 2, 2)), probe(log, 3, 3))
+[v, mutable_array_get(log, 0)]}  {value {[6, 123]}}
+    argument-is-a-method-call {log = fresh()
+v = probe(log, 1, 1).add(probe(log, 2, 2).add(probe(log, 3, 3)))
+[v, mutable_array_get(log, 0)]}  {log = fresh()
+v = add(probe(log, 1, 1), add(probe(log, 2, 2), probe(log, 3, 3)))
+[v, mutable_array_get(log, 0)]}  {value {[6, 123]}}
+    receiver-effect-not-duplicated {log = fresh()
+v = probe(log, 4, 7).first(0)
+[v, mutable_array_get(log, 0)]}  {log = fresh()
+v = first(probe(log, 4, 7), 0)
+[v, mutable_array_get(log, 0)]}  {value {[7, 4]}}
+    result-ignored {log = fresh()
+probe(log, 1, 1).first(probe(log, 2, 2))
+mutable_array_get(log, 0)}  {log = fresh()
+first(probe(log, 1, 1), probe(log, 2, 2))
+mutable_array_get(log, 0)}  {value 12}
+} {
+    test method-evaluation-$name "$name: receiver and argument evaluation order and counts equal the free call's" -body {
+        bothSpellings $::logFns$method $::logFns$free
+    } -result $expected
+}
+
+# ---------------------------------------------------------------------------
+# Chaining: nested ordinary calls, one step at a time
+
+set ::chainFns {fn inc(a):
+    a + 1
+fn add(a, b):
+    a + b
+fn to_list(a):
+    [a, a]
+fn size(xs):
+    list_length(xs)
+fn text(n):
+    substring("abcdefghij", 0, n)
+fn shout(s):
+    lowercase(s)
+}
+
+foreach {name method free expected} {
+    two-steps       {1.inc().inc()}                         {inc(inc(1))}                         {value 3}
+    with-arguments  {1.inc().add(5).add(6)}                 {add(add(inc(1), 5), 6)}              {value 13}
+    type-changes    {3.to_list().size().inc()}              {inc(size(to_list(3)))}               {value 3}
+    int-to-string   {4.text().shout().length()}             {length(shout(text(4)))}              {value 4}
+    string-to-list  {"ab".to_list().list_length().text()}   {text(list_length(to_list("ab")))}     {value {"ab"}}
+    long            {0.inc().inc().inc().inc().inc().inc().inc().inc()}  {inc(inc(inc(inc(inc(inc(inc(inc(0))))))))}  {value 8}
+} {
+    test method-chain-$name "$name: a chain is the nested ordinary calls" -body {
+        bothSpellings $::chainFns$method $::chainFns$free
+    } -result $expected
+}
+
+test method-chain-is-nested-calls {the HIR of a chain is the HIR of the nested free calls: no pipeline node, no chain abstraction} -body {
+    set m [hirOf "${::chainFns}3.to_list().size().inc()"]
+    set f [hirOf "${::chainFns}inc(size(to_list(3)))"]
+    list [expr {[hir::format $m] eq [hir::format $f]}] [llength [hirFind $m call]] [llength [hirFind $f call]]
+} -result {1 9 9}
+
+# ---------------------------------------------------------------------------
+# Errors and completions: unchanged
+
+set ::errorFns {error TooSmall
+error TooBig
+fn check(n, limit) -> int errors TooSmall, TooBig:
+    if n < 0:
+        fail TooSmall
+    if n > limit:
+        fail TooBig
+    n
+}
+
+set ::checkRun {fn run(n):
+    r = n.check(10):
+        on TooSmall:
+            -1
+        on TooBig:
+            -2
+    r
+}
+set ::checkRunFree {fn run(n):
+    r = check(n, 10):
+        on TooSmall:
+            -1
+        on TooBig:
+            -2
+    r
+}
+
+foreach {name method free expected} {
+    success-expected-and-second {[run(5), run(0 - 1), run(50)]}  {[run(5), run(0 - 1), run(50)]}  {value {[5, -1, -2]}}
+    boundary-values             {[run(0), run(10), run(11)]}      {[run(0), run(10), run(11)]}      {value {[0, 10, -2]}}
+} {
+    test method-errors-$name "$name: a handled error-capable method call behaves identically to the free call" -body {
+        bothSpellings $::errorFns$::checkRun$method $::errorFns$::checkRunFree$free
+    } -result $expected
+}
+
+set ::propagateFns {fn outer(n) -> int errors TooSmall, TooBig:
+    n.check(10).check(100)
+fn run(n):
+    r = outer(n):
+        on TooSmall:
+            -1
+        on TooBig:
+            -2
+    r
+}
+set ::propagateFree {fn outer(n) -> int errors TooSmall, TooBig:
+    check(check(n, 10), 100)
+fn run(n):
+    r = outer(n):
+        on TooSmall:
+            -1
+        on TooBig:
+            -2
+    r
+}
+
+test method-errors-propagation {an unhandled declared error propagates out of a method chain through the function's own errors clause, as through nested free calls} -body {
+    bothSpellings "$::errorFns$::propagateFns\[run(7), run(0 - 5), run(70)\]" "$::errorFns$::propagateFree\[run(7), run(0 - 5), run(70)\]"
+} -result {value {[7, -1, -2]}}
+
+set ::safeFns {fn safe(n):
+    n.check(10):
+        on TooSmall:
+            0
+        on TooBig:
+            10
+fn twice(n):
+    n + n
+fn run(n):
+    n.safe().twice()
+}
+set ::safeFree {fn safe(n):
+    check(n, 10):
+        on TooSmall:
+            0
+        on TooBig:
+            10
+fn twice(n):
+    n + n
+fn run(n):
+    twice(safe(n))
+}
+
+test method-errors-handled-inside-a-chain {a handled call whose result feeds a chain} -body {
+    bothSpellings "$::errorFns$::safeFns\[run(5), run(0 - 3), run(99)\]" "$::errorFns$::safeFree\[run(5), run(0 - 3), run(99)\]"
+} -result {value {[10, 0, 20]}}
+
+test method-errors-unhandled-is-rejected-alike {an unhandled declared error is the same static rejection (UNHANDLED-ERROR) in both spellings, at the same call} -body {
+    set m [rejection "${::errorFns}fn run(n):\n    n.check(10)\n\[run(1), run(2)\]"]
+    set f [rejection "${::errorFns}fn run(n):\n    check(n, 10)\n\[run(1), run(2)\]"]
+    list [expr {$m eq $f}] [lindex [split $m :] 0]
+} -result {1 UNHANDLED-ERROR}
+
+test method-errors-handler-must-name-declared-errors {the handler checks (undeclared names, missing handlers) are the free call's} -body {
+    set m [rejection "${::errorFns}fn run(n):\n    r = n.check(10):\n        on Missing:\n            0\n    r\nrun(1)"]
+    set f [rejection "${::errorFns}fn run(n):\n    r = check(n, 10):\n        on Missing:\n            0\n    r\nrun(1)"]
+    list [expr {$m eq $f}] [lindex [split $m :] 0]
+} -result {1 UNDECLARED-ERROR}
+
+test method-errors-handled-method-call-parses-as-handled-call {a method call is a call expression for the handled-call form} -body {
+    surface::formatAst [surface::parse "r = 5.check(10):\n    on TooSmall:\n        0\nr" t.bot]
+} -result {bind r = (methodcall (int 5) check (int 10)):
+    on TooSmall:
+        (int 0)
+(name r)}
+
+# ---------------------------------------------------------------------------
+# Types of the result, uses, call graph
+
+test method-result-type-is-the-functions {the type of a method call is the selected function's result type: no receiver-related transformation} -body {
+    set prelude "fn to_text(n) -> str:\n    substring(\"abcdef\", 0, n)\nfn size(s):\n    length(s)\n"
+    set m [hirOf "${prelude}a = 3.to_text()\nb = a.size()\n\[a, b\]"]
+    set f [hirOf "${prelude}a = to_text(3)\nb = size(a)\n\[a, b\]"]
+    list [lmap e [hirFind $m bind] {hir::types::show [hir::typeOf $m $e]}] [lmap e [hirFind $f bind] {hir::types::show [hir::typeOf $f $e]}] \
+        [expr {[hir::format $m] eq [hir::format $f]}]
+} -result {{{block(e2)/1 -> str} {block(e9)/1 -> int} str int} {{block(e2)/1 -> str} {block(e9)/1 -> int} str int} 1}
+
+test method-callee-is-an-ordinary-use {the name after the dot is a real reference to the visible binding: same binding, same capture by an enclosing function, same call target} -body {
+    set prelude "k = 10\nfn inc(a):\n    a + 1\nfn add_k(a, b):\n    a + b\n"
+    set m [hirOf "${prelude}fn outer(x):\n    shift = inc\n    fn inner(y):\n        y.shift().add_k(k)\n    inner(x)\nouter(1)"]
+    set f [hirOf "${prelude}fn outer(x):\n    shift = inc\n    fn inner(y):\n        add_k(shift(y), k)\n    inner(x)\nouter(1)"]
+    proc facts {h} {
+        set inner [lindex [hirFind $h block] end-1]
+        list [lmap c [hir::get $h $inner captures] {dict get [hir::binding $h $c] name}] \
+            [lmap call [hirFind $h call] {hir::get $h $call target}]
+    }
+    list [expr {[facts $m] eq [facts $f]}] [expr {[hir::format $m] eq [hir::format $f]}]
+} -result {1 1}
+
+test method-call-graph-and-callables-equal {the call graph (exact targets, recursion, closedness) of a method program equals the free program's} -body {
+    set prelude "fn step(n, acc):\n    if n == 0:\n        return acc\n    (n - 1).step(acc + n)\n"
+    set freePrelude "fn step(n, acc):\n    if n == 0:\n        return acc\n    step(n - 1, acc + n)\n"
+    sameProgram "${prelude}\[10.step(0), 4.step(1)\]" "${freePrelude}\[step(10, 0), step(4, 1)\]"
+} -result {}
+
+# ---------------------------------------------------------------------------
+# Equivalent sources have equivalent HIR, analyses and native IR
+
+foreach {name method free} {
+    scalar-chain
+        "fn inc(x):\n    x + 1\nfn twice(x):\n    x * 2\nfn run(n):\n    n.inc().twice().inc()\n\[run(1), run(20), run(5)\]"
+        "fn inc(x):\n    x + 1\nfn twice(x):\n    x * 2\nfn run(n):\n    inc(twice(inc(n)))\n\[run(1), run(20), run(5)\]"
+    two-argument
+        "fn add(a, b):\n    a + b\nfn run(n):\n    n.add(3).add(n.add(1))\n\[run(1), run(20)\]"
+        "fn add(a, b):\n    a + b\nfn run(n):\n    add(add(n, 3), add(n, 1))\n\[run(1), run(20)\]"
+    lists-and-strings
+        "fn total(xs):\n    list_length(xs)\nfn name(n):\n    substring(\"abcdef\", 0, n)\n\[\[1, 2, 3\].total(), 4.name().lowercase()\]"
+        "fn total(xs):\n    list_length(xs)\nfn name(n):\n    substring(\"abcdef\", 0, n)\n\[total(\[1, 2, 3\]), lowercase(name(4))\]"
+    construction
+        "fn pair(a, b):\n    \[a, b\]\nfn first(p):\n    list_get(p, 0)\nfn run(n):\n    n.pair(n + 1).first()\n\[run(1), run(5)\]"
+        "fn pair(a, b):\n    \[a, b\]\nfn first(p):\n    list_get(p, 0)\nfn run(n):\n    first(pair(n, n + 1))\n\[run(1), run(5)\]"
+    struct-receiver
+        "fn area(r, scale):\n    r.w * r.h * scale\nfn run(n):\n    {w: n, h: 3}.area(2)\n\[run(1), run(4)\]"
+        "fn area(r, scale):\n    r.w * r.h * scale\nfn run(n):\n    area({w: n, h: 3}, 2)\n\[run(1), run(4)\]"
+    recursion
+        "fn step(n, acc):\n    if n == 0:\n        return acc\n    (n - 1).step(acc + n)\n\[10.step(0), 3.step(1)\]"
+        "fn step(n, acc):\n    if n == 0:\n        return acc\n    step(n - 1, acc + n)\n\[step(10, 0), step(3, 1)\]"
+    closures
+        "fn make(n):\n    fn add(x):\n        x + n\n    add\nfn apply(f, x):\n    f(x)\nfn run(n):\n    make(n).apply(10)\n\[run(1), run(2)\]"
+        "fn make(n):\n    fn add(x):\n        x + n\n    add\nfn apply(f, x):\n    f(x)\nfn run(n):\n    apply(make(n), 10)\n\[run(1), run(2)\]"
+    typed
+        "type Small = Int in 0..10\nfn narrow(x: Small) -> int:\n    x + 1\nfn wide(x: int) -> int:\n    x * 2\nfn run(n: Small) -> int:\n    n.narrow().wide()\n\[run(1), run(9)\]"
+        "type Small = Int in 0..10\nfn narrow(x: Small) -> int:\n    x + 1\nfn wide(x: int) -> int:\n    x * 2\nfn run(n: Small) -> int:\n    wide(narrow(n))\n\[run(1), run(9)\]"
+} {
+    test method-same-program-$name "$name: method and free spellings have the same HIR, core IR, analyses and NIR (specialized and generic), and the same outcome on every backend" -body {
+        list [sameProgram $method $free] [bothSpellings $method $free]
+    } -match glob -result {{} {value *}}
+}
+
+test method-no-method-operation-in-nir {the NIR of a method program has no trace of the spelling} -body {
+    set text [dict get [native::lower::program [hirOf "fn inc(x):\n    x + 1\n3.inc().inc()"]] text]
+    list [string match *method* $text] [string match *project* $text]
+} -result {0 0}
+
+# ---------------------------------------------------------------------------
+# Standalone executables
+
+proc executableValue {text} {
+    set dir [makeDirectory {method executable}]
+    set path [file join $dir program.bot]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts $channel $text
+    close $channel
+    try {
+        exec [info nameofexecutable] [file join $::projectRoot main.tcl] -emit-native-executable $path
+        return [exec env PATH= [file rootname $path]]
+    } finally {
+        removeDirectory {method executable}
+    }
+}
+
+set ::typedMethod {fn probe(log: MutableArray[int], id: int, result: int) -> int:
+    n = mutable_array_get(log, 0)
+    mutable_array_set(log, 0, n * 10 + id)
+    result
+fn add(a: int, b: int) -> int:
+    a + b
+fn twice(a: int) -> int:
+    a * 2
+fn run(n: int) -> int:
+    log = mutarray::create(1, 0)
+    v = probe(log, 1, n).add(probe(log, 2, 5)).twice()
+    v * 1000 + mutable_array_get(log, 0)
+[run(1), run(20)]}
+set ::typedFree {fn probe(log: MutableArray[int], id: int, result: int) -> int:
+    n = mutable_array_get(log, 0)
+    mutable_array_set(log, 0, n * 10 + id)
+    result
+fn add(a: int, b: int) -> int:
+    a + b
+fn twice(a: int) -> int:
+    a * 2
+fn run(n: int) -> int:
+    log = mutarray::create(1, 0)
+    v = twice(add(probe(log, 1, n), probe(log, 2, 5)))
+    v * 1000 + mutable_array_get(log, 0)
+[run(1), run(20)]}
+
+test method-standalone-executable {the standalone executables of the method and free spellings print the value (and evaluation log) every in-process backend computes} -constraints executableAot -body {
+    list [executableValue $::typedMethod] [executableValue $::typedFree] [parity $::typedMethod] [parity $::typedFree]
+} -result {{[12012, 50012]} {[12012, 50012]} {value {[12012, 50012]}} {value {[12012, 50012]}}}
+
+# ---------------------------------------------------------------------------
+# Equivalence fuzzing (audit/method-sugar/tools/fuzz.tcl): a bounded run; a
+# longer one is `tclsh9.0 audit/method-sugar/tools/fuzz.tcl -n 500 -seed 1000`.
+
+test method-fuzz-smoke {randomly generated method programs and their free spellings agree on every backend, rejected variants are rejected, and the backends agree with each other} -body {
+    set output [exec [info nameofexecutable] [file join $::projectRoot audit method-sugar tools fuzz.tcl] -n 12 -seed 7000 2>@1]
+    lindex [split [string trim $output] \n] end
+} -match glob -result {method-fuzz programs 12 values * errors * negatives * equivalence-disagreements 0 negative-escapes 0 backend-disagreements 0}
+
+cleanupTests

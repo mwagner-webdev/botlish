@@ -593,4 +593,86 @@ test parse-find-node {surface::findNode finds a node by id} -body {
     list [dict get [surface::findNode $ast f()/binary/right] text] [surface::findNode $ast nope]
 } -result {1 {}}
 
+# ---------------------------------------------------------------------------
+# Method calls (METHOD-SUGAR.md): `receiver.name(args)` is its own AST node,
+# printed as written; `receiver.name` alone and `(receiver.name)(args)` are
+# the field projection and the call of a field value they always were.
+
+test parse-method-call {a method call: receiver, name, arguments} -body {
+    ast "x.f()\nx.f(a, b)\nx.f(1,)"
+} -result {(methodcall (name x) f)
+(methodcall (name x) f (name a) (name b))
+(methodcall (name x) f (int 1))}
+
+test parse-method-call-chain {chains nest left to right} -body {
+    ast "x.f(a).g(b)\nx.f(a).g(b, c).h()"
+} -result {(methodcall (methodcall (name x) f (name a)) g (name b))
+(methodcall (methodcall (methodcall (name x) f (name a)) g (name b) (name c)) h)}
+
+test parse-method-call-receivers {any postfix-or-primary expression is a receiver} -body {
+    ast "f(x).g()\n\[1, 2\].f()\n{v: 1}.f()\n(a + b).f()\na.b.f(c)\nx.f().g\nx.f()(1)"
+} -result {(methodcall (call (name f) (name x)) g)
+(methodcall (list (int 1) (int 2)) f)
+(methodcall (struct (v (int 1))) f)
+(methodcall (binary + (name a) (name b)) f)
+(methodcall (project (name a) b) f (name c))
+(project (methodcall (name x) f) g)
+(call (methodcall (name x) f) (int 1))}
+
+test parse-method-call-precedence {a method call is a postfix: tighter than unary minus, * and +} -body {
+    ast "-x.f()\na + b.f(c) * d\nnot x.f()"
+} -result {(unary - (methodcall (name x) f))
+(binary + (name a) (binary * (methodcall (name b) f (name c)) (name d)))
+(not (methodcall (name x) f))}
+
+test parse-method-call-in-arguments {method calls nest in argument lists} -body {
+    ast "x.f(y.g(z), w.h())\nf(x.g())"
+} -result {(methodcall (name x) f (methodcall (name y) g (name z)) (methodcall (name w) h))
+(call (name f) (methodcall (name x) g))}
+
+test parse-method-call-multiline {the argument list is the ordinary argument grammar: newlines inside the parentheses, a trailing comma} -body {
+    ast "x.f(\n    a,\n    b,\n)\n\[\n    x.f()\n        .g(1),\n    2\n\]"
+} -result {(methodcall (name x) f (name a) (name b))
+(list (methodcall (methodcall (name x) f) g (int 1)) (int 2))}
+
+test parse-field-forms-unchanged {a field projection and a parenthesized field call are not method calls} -body {
+    ast "x.f\n(x.f)(a)\nx.f.g\nx.f.g(a)"
+} -result {(project (name x) f)
+(call (project (name x) f) (name a))
+(project (project (name x) f) g)
+(methodcall (project (name x) f) g (name a))}
+
+test parse-method-call-spans {a method call spans its receiver through the closing parenthesis; the receiver and arguments keep their own spans} -body {
+    ast "x.f(a, b)\nx.f(a).g(b)\nx.f(\n    a,\n)" -spans 1
+} -result {(methodcall (name x) @1:1-1:2 f (name a) @1:5-1:6 (name b) @1:8-1:9) @1:1-1:10
+(methodcall (methodcall (name x) @2:1-2:2 f (name a) @2:5-2:6) @2:1-2:7 g (name b) @2:10-2:11) @2:1-2:12
+(methodcall (name x) @3:1-3:2 f (name a) @4:5-4:6) @3:1-5:2}
+
+test parse-method-call-ids {a method call's receiver and arguments take the roles receiver and argN} -body {
+    ast "x.f(a).g(b)" -ids 1
+} -result {(methodcall (methodcall (name x) <methodcall/receiver/receiver> f (name a) <methodcall/receiver/arg1>) <methodcall/receiver> g (name b) <methodcall/arg1>) <methodcall>}
+
+test parse-method-call-handled {a method call may be the handled call of the handled-call form} -body {
+    ast "r = x.f(1):\n    on Boom:\n        0\nr"
+} -result {bind r = (methodcall (name x) f (int 1)):
+    on Boom:
+        (int 0)
+(name r)}
+
+foreach {name source expected} {
+    unclosed        "x.f("          {1:4 "(" is never closed}
+    unclosed-args   "x.f(a"         {1:4 "(" is never closed}
+    no-name         "x.(a)"         {1:3 expected a field name after ".", found "("}
+    integer-name    "x.1()"         {1:3 expected a field name after ".", found integer 1}
+    keyword-name    "x.if()"        {1:3 expected a field name after ".", found "if"}
+    empty-argument  "x.f(,)"        {1:5 expected an expression, found ","}
+    missing-comma   "x.f(a b)"      {1:7 expected "," or ")" in the argument list, found name "b"}
+    extra-paren     "x.f(a))"       {1:7 unmatched ")"}
+    leading-dot-line "x.f()\n.g()"  {2:1 expected an expression, found "."}
+} {
+    test parse-method-call-error-$name "method call syntax error: $name" -body {
+        parseError $source
+    } -result $expected
+}
+
 cleanupTests

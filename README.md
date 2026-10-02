@@ -1341,10 +1341,25 @@ add10(32)          # 42 (add captures x)
   static projection; a receiver the compiler cannot prove is a struct with
   that field is rejected, never looked up at run time. Struct values are
   immutable.
+* **Method-call sugar.** `value.f(a, b)` is another spelling of the ordinary
+  call `f(value, a, b)`, allowed exactly when `f` is a function visible by
+  that name at the call (under ordinary lexical resolution: a function or
+  binding of the file, a root native, or a module function bound to a name,
+  `f = mod::f` -- there is no `import`, and `mod::f` alone does not make `f`
+  visible) and the ordinary call is valid. It adds no declaration, receiver
+  type, method table, overload rule or lookup by receiver type: the receiver
+  is parameter 1 of the ordinary call, evaluated once in the first-argument
+  position; every type, arity, error and handler rule is the free call's; and
+  `x.f(a)` and `f(x, a)` resolve to the same HIR. `x.f` without a call is
+  still the field projection, `(x.f)(a)` still calls a field value, and a
+  call whose name is both a visible function and a possibly-callable field of
+  the receiver's struct type is rejected as ambiguous
+  (`AMBIGUOUS-METHOD-CALL`). See METHOD-SUGAR.md.
 * Integers (decimal, arbitrary precision, no leading zeros), strings
   (`"..."`, escapes `\\ \" \n \r \t`), `true`, `false`, `unit`, lists
   `[a, b]`, calls `f(x)(y)`.
-* Operators, from highest precedence: call, unary `-`, `*`, `+ -`,
+* Operators, from highest precedence: the postfix forms (call, `.field`,
+  `.method(...)`, which chain left to right), unary `-`, `*`, `+ -`,
   `== != < <= > >=`, `not`, `and`, `or`. Arithmetic, `and` and `or` are
   left-associative. Comparisons don't chain (`a < b < c` is a syntax error).
 * Blocks are delimited by indentation (spaces only; tabs are an error).

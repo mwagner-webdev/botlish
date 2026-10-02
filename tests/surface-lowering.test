@@ -387,4 +387,89 @@ test lower-parse-without-analysis {the AST of a semantically invalid program is 
          [catch {surface::lowerToHir $ast}]
 } -result {2 1}
 
+# Method calls (METHOD-SUGAR.md): `receiver.name(args)` lowers to a call of the
+# projection `receiver.name` marked `method`; HIR resolution turns it into the
+# ordinary call `name(receiver, args)` when `name` is visible, so the HIR (and
+# core IR) is exactly the free spelling's.
+
+foreach {name method free} {
+    unary       "fn f(a):\n    a\nx = 1\nx.f()"                              "fn f(a):\n    a\nx = 1\nf(x)"
+    binary      "fn f(a, b):\n    b\nx = 1\nx.f(2)"                          "fn f(a, b):\n    b\nx = 1\nf(x, 2)"
+    chain       "fn f(a, b):\n    b\nx = 1\nx.f(2).f(3).f(4)"                 "fn f(a, b):\n    b\nx = 1\nf(f(f(x, 2), 3), 4)"
+    nested      "fn f(a, b):\n    b\nx = 1\nx.f(x.f(2))"                     "fn f(a, b):\n    b\nx = 1\nf(x, f(x, 2))"
+    receiver-call "fn f(a, b):\n    b\nf(1, 2).f(3)"                         "fn f(a, b):\n    b\nf(f(1, 2), 3)"
+    native      "\[1, 2\].list_length()"                                      "list_length(\[1, 2\])"
+    alias       "fn f(a):\n    a\ng = f\n1.g()"                              "fn f(a):\n    a\ng = f\ng(1)"
+    in-function "fn f(a, b):\n    b\nfn h(x):\n    x.f(1)\nh(2)"             "fn f(a, b):\n    b\nfn h(x):\n    f(x, 1)\nh(2)"
+    in-branch   "fn f(a):\n    a\nif true:\n    1.f()\nelse:\n    2.f()"     "fn f(a):\n    a\nif true:\n    f(1)\nelse:\n    f(2)"
+    in-loop     "fn f(a):\n    a\nloop x in \[1, 2\]:\n    x.f()"            "fn f(a):\n    a\nloop x in \[1, 2\]:\n    f(x)"
+    handled     "error E\nfn f(a) errors E:\n    fail E\nr = 1.f():\n    on E:\n        0\nr"  "error E\nfn f(a) errors E:\n    fail E\nr = f(1):\n    on E:\n        0\nr"
+} {
+    test lower-method-same-hir-$name "method call ($name) has exactly the HIR (and core IR) of the free spelling" -body {
+        set m [surface::compile $method t.bot -strict 0]
+        set f [surface::compile $free t.bot -strict 0]
+        list [expr {[hir::format $m] eq [hir::format $f]}] \
+            [expr {[hir::lower $m] eq [hir::lower $f]}] \
+            [expr {[lmap d [hir::diagnostics $m] {dict get $d message}] eq [lmap d [hir::diagnostics $f] {dict get $d message}]}]
+    } -result {1 1 1}
+}
+
+test lower-method-call-node {the lowered syntax of a method call is the call of a projection, marked method} -body {
+    set ast [surface::parse "x.f(a, b)" t.bot]
+    set node [surface::lower::Node [lindex [dict get $ast body] 0]]
+    list [dict get $node kind] [dict get $node method] [dict get $node callee kind] [dict get $node callee name] \
+        [dict get $node callee receiver kind] [llength [dict get $node args]]
+} -result {call 1 project f ref 2}
+
+test lower-method-call-is-an-ordinary-call-after-resolution {no HIR node of a resolved method call knows the spelling except the call's own diagnostic marker: no project node, the callee is a reference to the function} -body {
+    set h [surface::compile "fn f(a, b):\n    b\nx = 1\nx.f(2)" t.bot]
+    set call [lindex [hirFind $h call] 0]
+    list [llength [hirFind $h project]] [hir::kind $h [hir::get $h $call callee]] \
+        [hir::get $h [hir::get $h $call callee] name] \
+        [lmap a [hir::get $h $call args] {hir::kind $h $a}] [dict get $h exprs $call method name]
+} -result {0 ref f {ref const} f}
+
+test lower-method-call-targets-the-same-callable {the call target (the callable the call is resolved to) is the free call's} -body {
+    set m [surface::compile "fn f(a, b):\n    b\nx = 1\nx.f(2)" t.bot]
+    set f [surface::compile "fn f(a, b):\n    b\nx = 1\nf(x, 2)" t.bot]
+    list [hir::get $m [lindex [hirFind $m call] 0] target] [hir::get $f [lindex [hirFind $f call] 0] target] \
+        [hir::get $m [hir::get $m [lindex [hirFind $m call] 0] callee] binding] [hir::get $f [hir::get $f [lindex [hirFind $f call] 0] callee] binding]
+} -match glob -result {{block *} {block *} * *}
+
+test lower-method-call-origins {a method call originates at the receiver through the closing parenthesis; the callee reference at the method name; the receiver and each argument at their own text} -body {
+    set h [surface::compile "fn f(a, b):\n    b\nx = 1\nx.f(2)" t.bot]
+    set call [lindex [hirFind $h call] 0]
+    set callee [hir::get $h $call callee]
+    lassign [hir::get $h $call args] receiver argument
+    list [at [hir::get $h $call origin]] [at [hir::get $h $callee origin]] [at [hir::get $h $receiver origin]] [at [hir::get $h $argument origin]] \
+        [dict get [lrange [hir::get $h $callee origin] 2 end] end] [dict get [lrange [hir::get $h $call origin] 2 end] endColumn]
+} -result {4:1 4:3 4:1 4:5 27 7}
+
+test lower-method-call-origin-node-ids {origins carry the node ids of the method call and of its parts} -body {
+    set h [surface::compile "fn f(a, b):\n    b\nx = 1\nx.f(2)" t.bot]
+    set call [lindex [hirFind $h call] 0]
+    lmap e [list $call [hir::get $h $call callee] {*}[hir::get $h $call args]] {
+        dict get [lrange [hir::get $h $e origin] 2 end] node
+    }
+} -result {methodcall methodcall/method methodcall/receiver methodcall/arg1}
+
+test lower-method-call-unvisible-keeps-the-field-call {with no function of that name visible the call is the call of a field value, and its callee projection is marked for diagnostics} -body {
+    set h [surface::compile "s = {cb: 5, v: 1}\ns.v(1)" t.bot -strict 0]
+    set call [lindex [hirFind $h call] 0]
+    list [hir::kind $h [hir::get $h $call callee]] [dict exists [dict get $h exprs $call] method] [dict get $h exprs [hir::get $h $call callee] methodCallee]
+} -result {project 0 1}
+
+test lower-method-call-visibility-is-lexical {the sugar sees what a reference to the name would: a later binding, a shadowing local, a parameter} -body {
+    lmap source {
+        "fn f(a):\n    a\nx = 1\nx.f()"
+        "x = 1\nx.f()\nfn f(a):\n    a"
+        "fn f(a):\n    a\nfn g(f):\n    1.f()\ng(2)"
+        "fn f(a):\n    a\nfn g():\n    f = 5\n    1.f()\ng()"
+    } {
+        set h [surface::compile $source t.bot -strict 0]
+        set call [lindex [hirFind $h call] 0]
+        list [dict exists [dict get $h exprs $call] method] [hir::kind $h [hir::get $h $call callee]]
+    }
+} -result {{1 ref} {0 project} {1 ref} {1 ref}}
+
 cleanupTests

@@ -30,6 +30,12 @@
 #                         to the declared struct Name
 #   e.name                project e name             a static field projection
 #   f(a, b)               call f a b
+#   e.name(a, b)          call (project e name) a b, marked `method`: the
+#                         method-call sugar (METHOD-SUGAR.md). Written as the
+#                         field-value call it has always been (callee
+#                         `e.name`) plus the marker; hir::resolve decides,
+#                         from the lexical scope alone, whether `name` is a
+#                         visible function and the call is `name(e, a, b)`
 #   a OP b                call ^OP a b              OP: + - * == < <= > >=
 #   a != b                if (call ^== a b) {^false} {^true}
 #   -a                    call ^- (const 0) a
@@ -264,6 +270,11 @@ proc surface::lower::Node {node} {
         }
         call {
             return [hir::syntax::callNode $origin [Node [dict get $node callee]] \
+                {*}[Sequence [dict get $node args]]]
+        }
+        methodcall {
+            return [hir::syntax::methodCallNode $origin [Node [dict get $node receiver]] \
+                [dict get $node name] [Origin [dict get $node nameSpan] [dict get $node id]/method] \
                 {*}[Sequence [dict get $node args]]]
         }
         anonstruct {

@@ -260,20 +260,33 @@ proc hir::structs::ProjectionProblem {hir e} {
     if {$type eq "never" || ![dict get $node reachable]} {
         return ""
     }
+    set hint [expr {[dict exists $node methodCallee] ? [MethodHint $name] : ""}]
     if {[hir::types::IsStructLike $type]} {
         if {[hir::types::StructField $type $name] ne ""} {
             return ""
         }
-        return [list UNKNOWN-FIELD [format {struct type %s has no field "%s" (known fields: %s)} \
-            [hir::types::show $type] $name [join [hir::types::StructLayout $type] {, }]]]
+        return [list UNKNOWN-FIELD [format {struct type %s has no field "%s" (known fields: %s)%s} \
+            [hir::types::show $type] $name [join [hir::types::StructLayout $type] {, }] $hint]]
     }
     set kind [hir::types::kindOf $type]
     if {$kind ni {"" struct}} {
-        return [list NOT-A-STRUCT [format {cannot project field "%s" from a value of type %s: only a struct has fields} \
-            $name [hir::types::show $type]]]
+        return [list NOT-A-STRUCT [format {cannot project field "%s" from a value of type %s: only a struct has fields%s} \
+            $name [hir::types::show $type] $hint]]
     }
-    return [list UNPROVEN-FIELD [format {cannot project field "%s": the receiver's struct type is not known here (its type is %s), and a field projection is resolved statically, never looked up at run time} \
-        $name [hir::types::show $type]]]
+    return [list UNPROVEN-FIELD [format {cannot project field "%s": the receiver's struct type is not known here (its type is %s), and a field projection is resolved statically, never looked up at run time%s} \
+        $name [hir::types::show $type] $hint]]
+}
+
+# What a projection problem adds when the projection is the callee of a
+# method-style call `receiver.NAME(args)` that found no function NAME to
+# apply (METHOD-SUGAR.md): the call is then a call of the field NAME, and the
+# programmer may have meant the function spelling, which needs a function
+# visible under that name here -- the only way a function enables method
+# syntax (there is no search by receiver type, and no import statement:
+# `NAME = module::NAME` makes a module function visible).
+proc hir::structs::MethodHint {name} {
+    return [format {; as a method-style call, no function named "%s" is visible here either: method syntax only applies a function that is already visible by that name (define it here, or bind it, e.g. `%s = module::%s`)} \
+        $name $name $name]
 }
 
 # Diagnoses the projection problems among the expressions EXPRS (an instance's
@@ -284,6 +297,15 @@ proc hir::structs::verifyExprs {hirVar exprs} {
     upvar 1 $hirVar hir
     foreach e $exprs {
         set node [dict get $hir exprs $e]
+        if {[dict get $node kind] eq "call" && [dict exists $node method]} {
+            # The instance knows the receiver's concrete type: a field the
+            # generic analysis could not see may compete with the function.
+            set problem [AmbiguousMethodCall $hir $e]
+            if {$problem ne ""} {
+                hir::DiagnoseAt hir AMBIGUOUS-METHOD-CALL $problem $e [dict get $node method nameOrigin]
+            }
+            continue
+        }
         if {[dict get $node kind] ne "project"} continue
         set problem [ProjectionProblem $hir $e]
         if {$problem ne ""} {
@@ -300,6 +322,13 @@ proc hir::structs::verify {hirVar} {
     upvar 1 $hirVar hir
     set live ""
     dict for {e node} [dict get $hir exprs] {
+        if {[dict get $node kind] eq "call" && [dict exists $node method]} {
+            set problem [AmbiguousMethodCall $hir $e]
+            if {$problem ne ""} {
+                hir::DiagnoseAt hir AMBIGUOUS-METHOD-CALL $problem $e [dict get $node method nameOrigin]
+            }
+            continue
+        }
         if {[dict get $node kind] ne "project"} continue
         set problem [ProjectionProblem $hir $e]
         if {$problem eq ""} continue
@@ -313,6 +342,44 @@ proc hir::structs::verify {hirVar} {
         }
         hir::DiagnoseAt hir $kind $message $e [dict get $node nameOrigin]
     }
+}
+
+# "": the method-style call E (a call carrying `method`, i.e. written
+# `receiver.NAME(args)` with a function NAME visible: METHOD-SUGAR.md) has
+# exactly one meaning; else the message of its AMBIGUOUS-METHOD-CALL.
+#
+# The written form already meant something before the sugar existed: call the
+# value of field NAME. When the receiver's static type is a struct with a
+# field NAME that could hold a callable (anything not statically some other
+# kind of value), both the field's value and the visible function are
+# candidates for the one callee, and Botlish picks neither: the programmer
+# writes `(receiver.NAME)(args)` for the field or `NAME(receiver, args)` for
+# the function. A field statically of another kind (an Int, a String, ...)
+# could never be called, so the function is the only candidate. A receiver
+# whose struct type is not known here has no field the generic analysis can
+# see; the call is the function call there, and a semantic instance
+# (verifyExprs), which does know the receiver's concrete type, diagnoses the
+# same ambiguity at the call that made the instance.
+proc hir::structs::AmbiguousMethodCall {hir e} {
+    set node [dict get $hir exprs $e]
+    if {![dict get $node reachable]} {
+        return ""
+    }
+    set receiver [lindex [dict get $node args] 0]
+    set type [hir::typeOf $hir $receiver]
+    if {$type eq "never" || ![hir::types::IsStructLike $type]} {
+        return ""
+    }
+    set name [dict get $node method name]
+    if {$name ni [hir::types::StructLayout $type]} {
+        return ""
+    }
+    set fieldType [hir::types::StructField $type $name]
+    if {![hir::types::IsCallable $fieldType] && [hir::types::kindOf $fieldType] ni {"" any block native}} {
+        return ""
+    }
+    return [format {method-style call "%s" is ambiguous: the receiver (type %s) has a field "%s" whose value may be callable, and a function "%s" is also visible here; write (receiver.%s)(...) to call the field, or %s(receiver, ...) to call the function} \
+        $name [hir::types::show $type] $name $name $name $name]
 }
 
 # The innermost block whose body CODE of expression E is in ("program" at
