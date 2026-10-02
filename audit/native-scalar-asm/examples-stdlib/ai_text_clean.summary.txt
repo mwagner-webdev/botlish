@@ -2,7 +2,7 @@ source:  examples/stdlib/ai_text_clean.bot
 backend: Cranelift (specialize=1)
 asm:     ai_text_clean.asm
 vcode:   ai_text_clean.vcode
-machine-code bytes: 2425 (per function: 505 547 493 776 104)
+machine-code bytes: 2465 (per function: 505 547 493 816 104)
 
 functions:
   0 <program entry>: nir-regs=13
@@ -80,4 +80,4 @@ GC roots (ai_text_clean.asm's NIR ids match roots.txt's "function N"):
 mechanical pattern counts (triage only; see report for interpretation):
   1 x calls to rt_int_add
   1 x calls to rt_int_cmp
-  11 x calls to other rt_* helpers
+  12 x calls to other rt_* helpers
