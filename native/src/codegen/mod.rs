@@ -338,3 +338,89 @@ pub fn emit_object(program: &Program) -> Result<ObjectProgram, BackendError> {
     let bytes = module.finish().emit().map_err(|e| BackendError::Codegen(e.to_string()))?;
     Ok(ObjectProgram { bytes, pool, functions })
 }
+
+/// The generic-entry wrapper of a function with the ShortString1 ABI
+/// (SHORT-STRING.md). No Botlish program can reach it -- only a closed
+/// instance has the ABI, and a Block value of one is rejected -- but it is
+/// generated for every such function and must be correct by construction: a
+/// tagged String in is converted to the scalar the direct function expects,
+/// the scalar result is materialized, and an error-capable function's status
+/// word becomes the ordinary 0 error sentinel. Called here directly through
+/// the JIT'd entry pointer.
+#[cfg(test)]
+mod short_string_generic_entry_tests {
+    use super::*;
+    use crate::runtime::error::RtError;
+    use crate::runtime::metrics::AllocMode;
+    use crate::runtime::ops::GenericEntry;
+    use crate::runtime::vm::ProgramInfo;
+    use std::rc::Rc;
+
+    /// func 1 echo(s): ShortString1 in, ShortString1 out, cannot fail.
+    /// func 2 guarded(s, flag): ShortString1 in, flag tagged; raises when
+    /// FLAG is true, else returns s (so an Empty result is a *success*).
+    const PROGRAM: &str = concat!(
+        "nir 1 call-effects=1\n\n",
+        "func 0 \"<program>\" params=0 env=0 regs=1 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = unit\n    ret %0\nend\n\n",
+        "func 1 \"echo\" params=1 env=0 regs=1 pnames=\"s\" captures=0 shortregs=\"0\" shortparams=\"0\" shortresult=1\n    ret %0\nend\n\n",
+        "func 2 \"guarded\" params=2 env=0 regs=2 pnames=\"s flag\" captures=0 shortregs=\"0\" shortparams=\"0\" shortresult=1\n",
+        "    br %1 L0 L1\n  label L0\n    raise RANGE \"boom\"\n  label L1\n    ret %0\nend\n\n",
+    );
+
+    struct Rig {
+        vm: Box<Vm>,
+        compiled: CompiledProgram,
+    }
+
+    fn rig() -> Rig {
+        let program = crate::nir::parse(PROGRAM).unwrap_or_else(|e| panic!("{}", e.message));
+        let options = CompileOptions { clif: false, vcode: false, alloc_sites: false };
+        let compiled = CraneliftJit.compile(&program, &options).expect("compiles");
+        let mut vm = Vm::new(
+            Rc::new(ProgramInfo { functions: Vec::new(), natives: Vec::new(), shapes: Vec::new() }),
+            AllocMode::Summary,
+        );
+        compiled.install_constants(&mut vm);
+        vm.set_framemap(compiled.framemap.clone());
+        Rig { vm, compiled }
+    }
+
+    fn call(rig: &mut Rig, func: usize, args: &[Value]) -> Value {
+        let entry: GenericEntry = unsafe { std::mem::transmute(rig.compiled.generic_entries[func]) };
+        entry(&mut *rig.vm, 0, args.as_ptr())
+    }
+
+    fn text(v: Value) -> String {
+        str_of(v).text.to_string()
+    }
+
+    #[test]
+    fn echo_entry_converts_a_tagged_string_in_and_out() {
+        let mut r = rig();
+        for text_in in ["", "a", "\u{0}", "\u{e9}", "\u{3bb}", "\u{732b}", "\u{1f600}", "\u{10ffff}"] {
+            let arg = r.vm.new_str(text_in.to_string());
+            let out = call(&mut r, 1, &[arg]);
+            assert_ne!(out, NO_VALUE, "{text_in:?}");
+            assert_eq!(text(out), text_in);
+            assert_eq!(str_of(out).chars, text_in.chars().count());
+        }
+    }
+
+    #[test]
+    fn guarded_entry_returns_empty_as_a_success_and_failure_as_the_sentinel() {
+        let mut r = rig();
+        let empty = r.vm.new_str(String::new());
+        let ok = call(&mut r, 2, &[empty, FALSE]);
+        assert_ne!(ok, NO_VALUE, "Empty is a successful value, never the error sentinel");
+        assert_eq!(text(ok), "");
+        let x = r.vm.new_str("x".to_string());
+        let ok = call(&mut r, 2, &[x, FALSE]);
+        assert_eq!(text(ok), "x");
+        let failed = call(&mut r, 2, &[x, TRUE]);
+        assert_eq!(failed, NO_VALUE);
+        match r.vm.error.take() {
+            Some(RtError::Semantic { kind, message }) => assert_eq!((kind, message.as_str()), ("RANGE", "boom")),
+            other => panic!("expected the RANGE error, got {other:?}"),
+        }
+    }
+}

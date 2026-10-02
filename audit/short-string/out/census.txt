@@ -1,22 +1,26 @@
 == fib
+  planner fixpoint rounds: 1
   positions examined 0  proven <=1 0 | locals examined 0 proven 0 virtualized 0 | params 0/0 result 0/0 | instances with any ShortString1 ABI 0
   virtualized values: known Empty 0, known One (scalar known) 0, known One (scalar at run time) 0, runtime Empty-or-One 0
   frontier counters (lowering): strtoshort 0  shorttostr 0  literal-materialized 0  shortlit 0  shortlen 0  shorteq 0  joins 0  slices 0
   static NIR: strtoshort 0  shorttostr 0  (off: 0/0)
   virtual registers by materialization count: 0 zero, 0 one, 0 multiple
 == lex-strategy
+  planner fixpoint rounds: 3
   positions examined 5  proven <=1 0 | locals examined 0 proven 0 virtualized 0 | params 0/5 result 0/0 | instances with any ShortString1 ABI 0
   virtualized values: known Empty 0, known One (scalar known) 0, known One (scalar at run time) 0, runtime Empty-or-One 0
   frontier counters (lowering): strtoshort 0  shorttostr 0  literal-materialized 0  shortlit 0  shortlen 0  shorteq 0  joins 0  slices 0
   static NIR: strtoshort 0  shorttostr 0  (off: 0/0)
   virtual registers by materialization count: 0 zero, 0 one, 0 multiple
 == loop-count
+  planner fixpoint rounds: 1
   positions examined 0  proven <=1 0 | locals examined 0 proven 0 virtualized 0 | params 0/0 result 0/0 | instances with any ShortString1 ABI 0
   virtualized values: known Empty 0, known One (scalar known) 0, known One (scalar at run time) 0, runtime Empty-or-One 0
   frontier counters (lowering): strtoshort 0  shorttostr 0  literal-materialized 0  shortlit 0  shortlen 0  shorteq 0  joins 0  slices 0
   static NIR: strtoshort 0  shorttostr 0  (off: 0/0)
   virtual registers by materialization count: 0 zero, 0 one, 0 multiple
 == refined-checks
+  planner fixpoint rounds: 4
   positions examined 17  proven <=1 4 | locals examined 1 proven 0 virtualized 0 | params 3/10 result 1/6 | instances with any ShortString1 ABI 4
   virtualized values: known Empty 0, known One (scalar known) 0, known One (scalar at run time) 4, runtime Empty-or-One 0
   frontier counters (lowering): strtoshort 0  shorttostr 2  literal-materialized 0  shortlit 0  shortlen 0  shorteq 0  joins 0  slices 1
@@ -24,6 +28,7 @@
     materialization: general String operation = 2
   virtual registers by materialization count: 2 zero, 2 one, 0 multiple
 == source-checks
+  planner fixpoint rounds: 2
   positions examined 3  proven <=1 1 | locals examined 2 proven 1 virtualized 1 | params 0/0 result 0/1 | instances with any ShortString1 ABI 0
   virtualized values: known Empty 0, known One (scalar known) 0, known One (scalar at run time) 1, runtime Empty-or-One 0
   frontier counters (lowering): strtoshort 0  shorttostr 1  literal-materialized 0  shortlit 0  shortlen 0  shorteq 0  joins 0  slices 1
@@ -31,18 +36,21 @@
     materialization: generic/dynamic call = 1
   virtual registers by materialization count: 0 zero, 1 one, 0 multiple
 == sum-refined
+  planner fixpoint rounds: 1
   positions examined 0  proven <=1 0 | locals examined 0 proven 0 virtualized 0 | params 0/0 result 0/0 | instances with any ShortString1 ABI 0
   virtualized values: known Empty 0, known One (scalar known) 0, known One (scalar at run time) 0, runtime Empty-or-One 0
   frontier counters (lowering): strtoshort 0  shorttostr 0  literal-materialized 0  shortlit 0  shortlen 0  shorteq 0  joins 0  slices 0
   static NIR: strtoshort 0  shorttostr 0  (off: 0/0)
   virtual registers by materialization count: 0 zero, 0 one, 0 multiple
 == test-selection
+  planner fixpoint rounds: 2
   positions examined 2  proven <=1 0 | locals examined 0 proven 0 virtualized 0 | params 0/0 result 0/2 | instances with any ShortString1 ABI 0
   virtualized values: known Empty 0, known One (scalar known) 0, known One (scalar at run time) 0, runtime Empty-or-One 0
   frontier counters (lowering): strtoshort 0  shorttostr 0  literal-materialized 0  shortlit 0  shortlen 0  shorteq 0  joins 0  slices 0
   static NIR: strtoshort 0  shorttostr 0  (off: 0/0)
   virtual registers by materialization count: 0 zero, 0 one, 0 multiple
 == uri-steady
+  planner fixpoint rounds: 4
   positions examined 12  proven <=1 1 | locals examined 2 proven 0 virtualized 0 | params 1/5 result 0/5 | instances with any ShortString1 ABI 1
   virtualized values: known Empty 0, known One (scalar known) 0, known One (scalar at run time) 1, runtime Empty-or-One 0
   frontier counters (lowering): strtoshort 0  shorttostr 1  literal-materialized 0  shortlit 0  shortlen 0  shorteq 0  joins 0  slices 1
@@ -50,6 +58,7 @@
     materialization: general String operation = 1
   virtual registers by materialization count: 1 zero, 1 one, 0 multiple
 == ai_text_clean
+  planner fixpoint rounds: 3
   positions examined 10  proven <=1 3 | locals examined 0 proven 0 virtualized 0 | params 2/6 result 1/4 | instances with any ShortString1 ABI 3
   virtualized values: known Empty 0, known One (scalar known) 0, known One (scalar at run time) 0, runtime Empty-or-One 3
   frontier counters (lowering): strtoshort 1  shorttostr 1  literal-materialized 0  shortlit 19  shortlen 0  shorteq 19  joins 0  slices 0
@@ -57,6 +66,7 @@
     materialization: tagged result (return) = 1
   virtual registers by materialization count: 21 zero, 1 one, 0 multiple
 == csv
+  planner fixpoint rounds: 5
   positions examined 15  proven <=1 5 | locals examined 4 proven 4 virtualized 0 | params 0/10 result 1/1 | instances with any ShortString1 ABI 1
   virtualized values: known Empty 0, known One (scalar known) 0, known One (scalar at run time) 0, runtime Empty-or-One 5
   frontier counters (lowering): strtoshort 0  shorttostr 0  literal-materialized 0  shortlit 1  shortlen 0  shorteq 0  joins 0  slices 1
@@ -64,6 +74,7 @@
     materialization: general String operation = 1
   virtual registers by materialization count: 3 zero, 1 one, 0 multiple
 == csv_chunked
+  planner fixpoint rounds: 5
   positions examined 17  proven <=1 5 | locals examined 4 proven 4 virtualized 0 | params 0/12 result 1/1 | instances with any ShortString1 ABI 1
   virtualized values: known Empty 0, known One (scalar known) 0, known One (scalar at run time) 0, runtime Empty-or-One 5
   frontier counters (lowering): strtoshort 0  shorttostr 0  literal-materialized 0  shortlit 1  shortlen 0  shorteq 0  joins 0  slices 1
@@ -71,6 +82,7 @@
     materialization: general String operation = 1
   virtual registers by materialization count: 3 zero, 1 one, 0 multiple
 == csv_geometric
+  planner fixpoint rounds: 4
   positions examined 17  proven <=1 4 | locals examined 3 proven 3 virtualized 0 | params 0/13 result 1/1 | instances with any ShortString1 ABI 1
   virtualized values: known Empty 0, known One (scalar known) 0, known One (scalar at run time) 0, runtime Empty-or-One 4
   frontier counters (lowering): strtoshort 0  shorttostr 0  literal-materialized 0  shortlit 1  shortlen 0  shorteq 0  joins 0  slices 1
@@ -78,6 +90,7 @@
     materialization: general String operation = 1
   virtual registers by materialization count: 3 zero, 1 one, 0 multiple
 == csv_records
+  planner fixpoint rounds: 7
   positions examined 28  proven <=1 4 | locals examined 3 proven 3 virtualized 0 | params 0/24 result 1/1 | instances with any ShortString1 ABI 1
   virtualized values: known Empty 0, known One (scalar known) 0, known One (scalar at run time) 0, runtime Empty-or-One 4
   frontier counters (lowering): strtoshort 0  shorttostr 0  literal-materialized 0  shortlit 1  shortlen 0  shorteq 0  joins 0  slices 1
@@ -85,18 +98,21 @@
     materialization: general String operation = 1
   virtual registers by materialization count: 3 zero, 1 one, 0 multiple
 == hashtable
+  planner fixpoint rounds: 3
   positions examined 10  proven <=1 0 | locals examined 0 proven 0 virtualized 0 | params 0/10 result 0/0 | instances with any ShortString1 ABI 0
   virtualized values: known Empty 0, known One (scalar known) 0, known One (scalar at run time) 0, runtime Empty-or-One 0
   frontier counters (lowering): strtoshort 0  shorttostr 0  literal-materialized 0  shortlit 0  shortlen 0  shorteq 0  joins 0  slices 0
   static NIR: strtoshort 0  shorttostr 0  (off: 0/0)
   virtual registers by materialization count: 0 zero, 0 one, 0 multiple
 == matmul
+  planner fixpoint rounds: 1
   positions examined 0  proven <=1 0 | locals examined 0 proven 0 virtualized 0 | params 0/0 result 0/0 | instances with any ShortString1 ABI 0
   virtualized values: known Empty 0, known One (scalar known) 0, known One (scalar at run time) 0, runtime Empty-or-One 0
   frontier counters (lowering): strtoshort 0  shorttostr 0  literal-materialized 0  shortlit 0  shortlen 0  shorteq 0  joins 0  slices 0
   static NIR: strtoshort 0  shorttostr 0  (off: 0/0)
   virtual registers by materialization count: 0 zero, 0 one, 0 multiple
 == string_replace
+  planner fixpoint rounds: 3
   positions examined 12  proven <=1 2 | locals examined 1 proven 0 virtualized 0 | params 2/9 result 0/2 | instances with any ShortString1 ABI 2
   virtualized values: known Empty 0, known One (scalar known) 0, known One (scalar at run time) 0, runtime Empty-or-One 2
   frontier counters (lowering): strtoshort 0  shorttostr 1  literal-materialized 0  shortlit 5  shortlen 0  shorteq 0  joins 0  slices 0
@@ -104,12 +120,15 @@
     materialization: general String operation = 1
   virtual registers by materialization count: 6 zero, 1 one, 0 multiple
 == string_reverse
+  planner fixpoint rounds: 3
   positions examined 6  proven <=1 1 | locals examined 1 proven 1 virtualized 0 | params 0/3 result 0/2 | instances with any ShortString1 ABI 0
   virtualized values: known Empty 0, known One (scalar known) 0, known One (scalar at run time) 1, runtime Empty-or-One 0
   frontier counters (lowering): strtoshort 0  shorttostr 0  literal-materialized 0  shortlit 0  shortlen 0  shorteq 0  joins 0  slices 0
   static NIR: strtoshort 0  shorttostr 0  (off: 0/0)
   virtual registers by materialization count: 0 zero, 0 one, 0 multiple
 == TOTAL
+  (max fixpoint rounds in one program: 7)
+  rounds = 52
   positionsExamined = 154
   positionsProven = 30
   localsExamined = 21

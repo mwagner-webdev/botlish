@@ -4,10 +4,15 @@
 # temporary-substring comparison, escaping substrings, mixed use, bounds
 # errors, Unicode boundaries (ASCII/BMP/astral), and GC stress.
 #
-# -string-region-opt 0 -short-string-opt 0 (or BOTLISH_NATIVE_STRING_REGION_OPT=0) disables the
+# -string-region-opt 0 (or BOTLISH_NATIVE_STRING_REGION_OPT=0) disables the
 # analysis outright: most tests here differentially compare it against the
 # default (on), the same way native-escape.test's own tests compare
 # -escape-opt 1 vs 0.
+
+# SHORT-STRING.md: every native run below passes -short-string-opt 0. These
+# tests measure the StringRegion optimization in isolation (their "off" String
+# counts are the unoptimized String baseline); ShortString1 removes some of
+# those allocations too, and is pinned in tests/short-string.test.
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]

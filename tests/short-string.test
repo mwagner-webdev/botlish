@@ -1128,4 +1128,29 @@ test short-mixed-parameter-converts-once {a short parameter used by a tagged con
     list [conversionsIn $nir probe] [parityShort $text]
 } -result {{0 1} {value:[[""], 0, false]}}
 
+test short-struct-field-and-mutable-array-materialize {a short String stored in a struct field or a MutableArray slot is materialized there: those storage layouts stay tagged} -body {
+    set text {
+        struct Pair:
+            left: str
+            right: int
+
+        fn pick(flag):
+            if flag:
+                ""
+            else:
+                "λ"
+
+        fn store(flag):
+            p = Pair {left: pick(flag), right: 1}
+            a = mutable_array_allocate(2)
+            mutable_array_set(a, 0, pick(flag))
+            mutable_array_set(a, 1, "z")
+            [p.left, length(p.left), mutable_array_get(a, 0), mutable_array_get(a, 1) == "z"]
+
+        [store(true), store(false)]
+    }
+    set nir [nirOf $text {*}$noInline]
+    list [parityShort $text] [expr {[countIn {op shorttostr} [fnText $nir store]] >= 1}]
+} -result {{value:[["", 0, "", true], ["λ", 1, "λ", true]]} 1}
+
 cleanupTests

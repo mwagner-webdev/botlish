@@ -7,10 +7,15 @@
 # (i))` (lib/web.tcl's Emailish? shape) -- with zero one-character String
 # allocation, the same value/error as the unoptimized baseline either way.
 #
-# -string-region-opt 0 -short-string-opt 0 (or BOTLISH_NATIVE_STRING_REGION_OPT=0) disables this
+# -string-region-opt 0 (or BOTLISH_NATIVE_STRING_REGION_OPT=0) disables this
 # analysis and lowering outright (the same flag native-string-region.test's
 # own tests use): most tests here differentially compare it against the
 # default (on).
+
+# SHORT-STRING.md: every native run below passes -short-string-opt 0. These
+# tests measure the StringRegion optimization in isolation (their "off" String
+# counts are the unoptimized String baseline); ShortString1 removes some of
+# those allocations too, and is pinned in tests/short-string.test.
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
@@ -293,7 +298,7 @@ f()
 # (hir/stringregion.tcl, untouched by this milestone, per spec item 34) can
 # no longer prove *every* char_at result is a purely transient,
 # region-testable value once that value's only consumer is an opaque call:
-# -string-region-opt 1 -short-string-opt 0 used to eliminate every one of emailish?'s own
+# -string-region-opt 1 used to eliminate every one of emailish?'s own
 # one-character String allocations for both corpus strings below (0, both
 # cases); it now eliminates only the ones reached through a *direct*
 # char_at call, not the ones reached through scan_while's predicate

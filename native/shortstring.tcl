@@ -101,6 +101,7 @@ namespace eval native::shortstr {
     variable RFact
     variable Memo
     variable RegionExprs
+    variable Rounds 0
     variable Plan {}
     variable maxScalar 1114111
     variable Labels
@@ -209,6 +210,8 @@ proc native::shortstr::plan {hir spec ranges enabled {blockEscape 1} {constructi
     variable Memo
     variable Labels
     variable RegionExprs
+    variable Rounds
+    set Rounds 0
     set Enabled $enabled
     set Hir $hir
     set Spec $spec
@@ -273,6 +276,7 @@ proc native::shortstr::plan {hir spec ranges enabled {blockEscape 1} {constructi
     set changed 1
     while {$changed} {
         set changed 0
+        incr Rounds
         array unset Memo
         array set Memo {}
         foreach id $order {
@@ -1064,7 +1068,8 @@ proc native::shortstr::explainAll {} {
 proc native::shortstr::census {} {
     variable Spec
     variable Plan
-    set c [dict create instances 0 positionsExamined 0 positionsProven 0 localsExamined 0 localsProven 0 \
+    variable Rounds
+    set c [dict create rounds $Rounds instances 0 positionsExamined 0 positionsProven 0 localsExamined 0 localsProven 0 \
         paramPositions 0 paramSelected 0 resultPositions 0 resultSelected 0 anyAbi 0 \
         exactEmpty 0 exactOne 0 exactOneUnknown 0 runtimeEmptyOrOne 0 reasons {}]
     foreach id [dict get $Spec used] {

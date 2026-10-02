@@ -54,6 +54,9 @@ foreach path $paths {
         }
     }
     puts "== [programName $path]"
+    puts "  planner fixpoint rounds: [dict get $c rounds]"
+    add total rounds [dict get $c rounds]
+    set maxRounds [expr {[info exists maxRounds] ? max($maxRounds, [dict get $c rounds]) : [dict get $c rounds]}]
     puts [format "  positions examined %d  proven <=1 %d | locals examined %d proven %d virtualized %d | params %d/%d result %d/%d | instances with any ShortString1 ABI %d" \
         [dict get $c positionsExamined] [dict get $c positionsProven] [dict get $c localsExamined] [dict get $c localsProven] \
         [dict get $counters shortLocals] [dict get $c paramSelected] [dict get $c paramPositions] [dict get $c resultSelected] [dict get $c resultPositions] [dict get $c anyAbi]]
@@ -78,6 +81,7 @@ foreach path $paths {
     if {$detail} { puts [native::shortstr::explainAll] }
 }
 puts "== TOTAL"
+puts "  (max fixpoint rounds in one program: $maxRounds)"
 dict for {k v} $total { puts "  $k = $v" }
 puts "  materialization classes:"
 dict for {k v} $classTotal { puts "    $k = $v" }

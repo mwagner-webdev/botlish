@@ -38,7 +38,7 @@ What was measured over the canonical corpus (17 programs, 233 functions):
 * **Correctness.** Optimization on and off agree on every corpus value, in
   differential parity (every backend, leaf inlining on/off, ShortString1
   on/off), in 2,253 randomly generated programs (1,471 + 491 under GC stress +
-  291 with specialization off; **0 disagreements**), in the 56 tests of
+  291 with specialization off; **0 disagreements**), in the 59 tests of
   `tests/short-string.test`, and in the full existing regression
   (@@REGRESSION@@).
 * **Whole-corpus machine code: 101,879 -> 102,423 bytes (+544, +0.53 %).**
@@ -67,7 +67,7 @@ generic-entry wrapper, inline conversions), `native/src/codegen/roots.rs`
 (scalar registers, 2 unit tests), `native/src/runtime/{ops,vm,value,heap}.rs`
 (three helpers, interned Latin-1 materialization, first-scalar field, 4 unit
 tests), `native/explain-native.tcl` (`short-string.txt`),
-`tests/short-string.test` (56 tests), `audit/short-string/` (tools and
+`tests/short-string.test` (59 tests), `audit/short-string/` (tools and
 measured output).
 
 ## Motivation
@@ -237,7 +237,7 @@ stays tagged.
   and `ShortNatural` declines a *call* that is itself region-eligible
   (a direct `substring`, a region-producing instance) so the existing region
   NIR (`callmulti`, `regioneq`) is unchanged; ShortString1 applies where the
-  region machinery does not. This is why only five existing tests needed
+  region machinery does not. This is why only five existing test files needed
   `-short-string-opt 0` (below).
 
 ## Authoritative ABI planning
@@ -462,8 +462,8 @@ the allocating (non-Latin-1) and ordinary-String paths in the tests below.
 
 Root census (`audit/short-string/out/roots.txt`; fewer roots is a side effect,
 not the goal): safepoints 595 -> 600, root candidates 1,276 -> 1,257, root slots
-807 -> 799. The five extra safepoints are `shorttostr` ops (allocating in the
-general case); the candidate drop is the String values that stayed short
+807 -> 799. The five extra safepoints are the `shorttostr` ops (allocating in the
+general case) and the calls into functions that now contain one; the candidate drop is the String values that stayed short
 (e.g. `string_replace` 41 -> 35).
 
 ## Unicode behavior
@@ -552,7 +552,41 @@ materialization (`concat`'s piece), cheap for Latin-1 (inline probe).
 
 ### Wall-clock
 
-@@WALLCLOCK@@
+`audit/short-string/tools/nativebench.tcl` (`out/nativebench.txt`): `botlish-native
+bench 200` of the emitted NIR, best of 7 invocations, ShortString1 off versus on,
+programs whose NIR is identical not repeated:
+
+| program | off (ns) | on (ns) | delta | Ir on vs off |
+|---|---:|---:|---:|---:|
+| refined-checks | 450,763 | 536,409 | +19.0 % | +0.97 % |
+| source-checks | 5,455 | 5,525 | +1.3 % | -10.50 % |
+| **uri-steady** | 3,662,175 | 2,778,927 | **-24.1 %** | -16.81 % |
+| **ai_text_clean** | 11,754 | 4,637 | **-60.5 %** | -64.61 % |
+| csv | 1,272 | 1,313 | +3.2 % | +0.10 % |
+| csv_chunked | 1,157 | 1,379 | +19.2 % | 0 |
+| csv_geometric | 1,433 | 1,383 | -3.5 % | 0 |
+| csv_records | 7,596 | 7,581 | -0.2 % | -0.19 % |
+| string_replace | 670 | 758 | +13.1 % | -0.30 % |
+
+The two large improvements (`uri-steady`, `ai_text_clean`) agree in direction
+and size with the deterministic Ir. **The rest of the table is not evidence.**
+On this shared machine the same off/on pair of a microsecond-scale kernel
+varies by +/-15-20 % between *invocations* of the tool: `refined-checks` repeated
+three times gave +13.3 %, +22.4 % and **-12.6 %**; `csv_chunked` -1.1 %, -8.4 %,
++16.8 %; `string_replace` +0.4 %, -5.1 %, +0.7 %; `csv` -0.4 %, -2.5 %,
++10.8 % (200-400 runs, best of 7 each). Sign flips with identical NIR and
+identical machine code are measurement spread (frequency/placement/neighbors),
+not a property of the representation. `refined-checks` is the one program with
+a real deterministic regression (+0.97 % Ir, branch mispredictions
+37,720 -> 39,312 and D1 read misses 7,891 -> 8,090 in callgrind's simulation),
+a few percent at most, far below the wall-clock swing. **Does any wall-clock
+anomaly lack an instruction-count/code-shape explanation?** Single-invocation
+numbers for `csv_chunked` (+19.2 % with exactly +0 Ir) and `string_replace`
+(+13.1 % with -0.30 % Ir) do, but repeated runs show they are not stable (see
+above), so they are recorded as tiny-kernel measurement spread, **not attributed
+to the frontend optimization**. No backend alignment, placement or Cranelift
+setting was touched; the existing placement-sensitivity investigation (RawInt
+`loop-count`) remains the tool if a stable tiny-kernel anomaly ever appears.
 
 ## Corpus code-size result
 
@@ -608,11 +642,35 @@ where it measured a benefit.
 
 ## Compile-time impact
 
-@@COMPILETIME@@
+`audit/short-string/tools/compiletime.tcl` (`out/compiletime.txt`), median of 5, ms,
+whole canonical corpus (sums):
+
+| phase | ms |
+|---|---:|
+| `native::prepareHir` | 192.6 |
+| `hir::specialize::analyze` | 465.1 |
+| `hir::range::analyze` | 557.8 |
+| **`native::shortstr::plan` (facts, fixpoint, plan)** | **142.3** |
+| `native::nir`, optimization off | 2,240.8 |
+| `native::nir`, optimization on (plan + lowering) | 2,279.6 (+38.8, +1.7 %) |
+| `native::codeSize` off / on (everything, Cranelift included) | 2,370.1 / 2,579.9 |
+
+The standalone planner row recomputes the per-instance HIR views, which
+lowering also builds, so it overstates the marginal cost: what the optimization
+adds to the Tcl-side compile (`nir` on minus off, planning plus the extra
+lowering) is **+38.8 ms over 17 programs (+1.7 %)**; the largest workload,
+`csv_records` (the largest program, 56 functions), is 800.2 -> 827.8
+ms (+3.4 %), planner alone 57.6 ms. `native::codeSize` carries a few percent of
+run-to-run noise (e.g. `refined-checks` 375 -> 468 ms is the machine, its
+`nir` times are 373.1 vs 366.0). The initial policy is linear in the facts
+already traversed: one liveness walk per instance, a chaotic iteration over a
+height-5 lattice (1-7 rounds per corpus program, median 3, each a memoized walk
+of the same expressions), no path enumeration, no combinatorial search and no
+per-call ABI variants.
 
 ## Differential testing
 
-* **Behavioral tests** (`tests/short-string.test`, 56): every one runs the
+* **Behavioral tests** (`tests/short-string.test`, 59): every one runs the
   interpreter, the Tcl compile backend, `cranelift-generic` and `cranelift`
   on the four backends plus native with `-short-string-opt` 0 and 1 and leaf
   inlining 0 and 1 (eight outcomes) via `parityShort`, requiring one
@@ -646,7 +704,7 @@ materialized before an allocation and again after), `short-gc-recursive-exact-
 call-transport` (200 allocating recursive frames with a short parameter and
 result), `short-gc-stack-map-has-no-short-roots` and the executable tests run
 under `BOTLISH_NATIVE_GC_STRESS=1` (every allocation site forces a collection);
-the whole file also runs under the variable (56/56). The scalar never appears
+the whole file also runs under the variable (59/59). The scalar never appears
 in a stack map: `short_live_across_allocation_is_not_a_root`.
 
 ## Standalone parity
@@ -707,8 +765,11 @@ isolation; the assertions themselves are unchanged:
   then extracts it; a short decode (`DecodeCharAt` straight to a scalar) is a
   straightforward future step.
 * **The `first` scalar field and the interned table are runtime-wide costs**
-  (+0.2..0.8 % Ir on String-allocating programs, even with the optimization
-  off; no change for programs without Strings).
+  (+0.17..+0.79 % Ir on ten String-allocating programs, even with the
+  optimization off; -0.37 % / -0.16 % on two others through libc `_int_malloc`
+  arena effects of the larger `Vm`; exactly 0 for programs without Strings).
+  A layout-dependent read of the `Box<str>` pointer would avoid the per-String
+  store but relies on an unspecified fat-pointer layout; it was not taken.
 * **Generic/dynamic calls remain tagged**; nothing about dynamic dispatch was
   redesigned.
 * **Backend placement/alignment is untouched** and remains the backend audit's
@@ -821,7 +882,9 @@ ones the struct heuristic uses.
 63. **Inputs to the later heuristic?** Yes (tagged-only parameters, mixed
     positions).
 64. **Wall-clock anomaly lacking an instruction/code-shape explanation?**
-    @@ANOMALY@@
+    Single-invocation tiny-kernel numbers (`csv_chunked`, `string_replace`) only,
+    and they flip sign on repetition; recorded in *Wall-clock* as spread, not
+    attributed to this optimization.
 65-72. **Correctness:** values, errors and completion behavior agree
     on/off/interpreter/native for every test, ASCII and non-ASCII, NUL, the
     Empty branches, GC stress, standalone executables and 2,253 fuzz
