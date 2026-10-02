@@ -8,8 +8,11 @@
 #         its own NIR and audit build
 #   off   this tree with -short-string-opt 0 (no short Strings; runtime without
 #         the table)
-#   b     this tree with -ascii-pack-opt 0 (ShortString1 only, no table)
-#   new   this tree, defaults (packed ASCII + ShortString1, no table)
+#   b     this tree with -ascii-pack-opt 0 -short-demand-opt 0 (ShortString1
+#         only, no table, categorical)
+#   nd    this tree with -short-demand-opt 0 (packed ASCII + ShortString1, no
+#         table, categorical: the regime before the demand rule)
+#   new   this tree, defaults (the same with the demand rule)
 #
 # A configuration whose (binary, NIR) pair equals another's is profiled once.
 #
@@ -54,7 +57,8 @@ foreach path $paths {
         base $baseBin [readFile [file join $baseNirDir $name.nir]] \
         m1 $m1Bin [readFile [file join $m1NirDir $name.nir]] \
         off $bin [native::nir $hir -short-string-opt 0] \
-        b $bin [native::nir $hir -ascii-pack-opt 0] \
+        b $bin [native::nir $hir -ascii-pack-opt 0 -short-demand-opt 0] \
+        nd $bin [native::nir $hir -short-demand-opt 0] \
         new $bin [native::nir $hir]]
     set done [dict create]
     foreach {tag binary nir} $configs {
@@ -71,9 +75,9 @@ foreach path $paths {
         set ir($tag) [totalsIr [file join $out $name profile-$tag profile.txt]]
         dict set done $key $ir($tag)
     }
-    puts [format "%-15s base %10d | m1 %10d (%s%%) | off %10d (%s%%) | b %10d (%s%%) | new %10d (%s%%)  new-vs-m1 %s%%  new-vs-b %s%%" $name \
+    puts [format "%-15s base %10d | m1 %10d (%s%%) | off %10d (%s%%) | b %10d (%s%%) | nd %10d (%s%%) | new %10d (%s%%)  new-vs-nd %s%%  new-vs-m1 %s%%" $name \
         $ir(base) $ir(m1) [pct $ir(m1) $ir(base)] $ir(off) [pct $ir(off) $ir(base)] $ir(b) [pct $ir(b) $ir(base)] \
-        $ir(new) [pct $ir(new) $ir(base)] [pct $ir(new) $ir(m1)] [pct $ir(new) $ir(b)]]
+        $ir(nd) [pct $ir(nd) $ir(base)] $ir(new) [pct $ir(new) $ir(base)] [pct $ir(new) $ir(nd)] [pct $ir(new) $ir(m1)]]
     unset ir
     flush stdout
 }

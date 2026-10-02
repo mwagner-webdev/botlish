@@ -1,0 +1,408 @@
+# short-demand.test -- SHORT-STRING-TIERS.md: the demand rule.
+#
+# A short-String position (a String parameter or result, a local) that has a
+# tier stays virtual only if it has at least one free use: a scalar consumer
+# (`length`, `==` on operands that could both be scalars) or a flow into another
+# position that is itself virtual and useful. A position every use of which
+# materializes it keeps the tagged String (reason `no-scalar-use`): a runtime
+# materialization costs an allocation and saves nothing -- the rule the struct
+# scalar-replacement uses for its locals. Uses the walk does not understand are
+# never free, so the rule can only turn a position tagged.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 100000
+
+testConstraint executableAot [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64}}]
+
+proc dedent {text} {
+    set lines [split $text \n]
+    set indent 1000
+    foreach line $lines {
+        if {[string trim $line] eq ""} continue
+        set n [expr {[string length $line] - [string length [string trimleft $line " "]]}]
+        if {$n < $indent} { set indent $n }
+    }
+    return [join [lmap line $lines {string range $line $indent end}] \n]
+}
+
+proc srcHir {text} {
+    set dir [makeDirectory {short demand}]
+    set path [file join $dir p.bot]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts $channel [dedent $text]
+    close $channel
+    try {
+        return [surface::readProgramFile $path]
+    } finally {
+        removeDirectory {short demand}
+    }
+}
+
+set noInline {-tiny-leaf-inline-opt 0 -short-demand-opt 0}
+
+proc nirOf {text args} {
+    return [native::nir [srcHir $text] {*}$args]
+}
+
+proc fnText {nir name {key ""}} {
+    set found {}
+    foreach body [split [string map [list "\n\nfunc " "\n\u0001func "] $nir] \u0001] {
+        if {![regexp {^func \d+ "} $body]} continue
+        if {![regexp [format {^func \d+ "%s"} [string map {. \\.} $name]] $body]} continue
+        if {$key ne "" && ![regexp [format {instance="%s"} $key] $body]} continue
+        lappend found [string trim $body]
+    }
+    if {[llength $found] != 1} {
+        error "expected one function $name ($key), found [llength $found] in:\n$nir"
+    }
+    return [lindex $found 0]
+}
+
+proc countIn {pattern text} {
+    return [llength [regexp -all -inline $pattern $text]]
+}
+
+# {asciiparams asciiresult asciiregs shortparams shortresult shortregs} of the
+# header of NIR function TEXT.
+proc physical {text} {
+    set head [lindex [split $text \n] 0]
+    set out {}
+    foreach attr {asciiparams asciiregs shortparams shortregs} {
+        set v ""
+        regexp "$attr=\"(\[^\"\]*)\"" $head -> v
+        set $attr $v
+    }
+    return [list $asciiparams [regexp {asciiresult=1} $head] $asciiregs $shortparams [regexp {shortresult=1} $head] $shortregs]
+}
+
+proc asciiParams {text} { return [lindex [physical $text] 0] }
+proc asciiResult {text} { return [lindex [physical $text] 1] }
+proc asciiRegs {text} { return [lindex [physical $text] 2] }
+proc shortParams {text} { return [lindex [physical $text] 3] }
+proc shortResult {text} { return [lindex [physical $text] 4] }
+proc shortRegs {text} { return [lindex [physical $text] 5] }
+
+proc conversionsOf {nir name} {
+    set text [fnText $nir $name]
+    return [list [countIn {op strtoascii} $text] [countIn {op asciitostr} $text] [countIn {op strtoshort} $text] [countIn {op shorttostr} $text] [countIn {op asciitoshort} $text]]
+}
+
+# One line per used instance: "label=P,P>R" with ascii/short/val per position.
+proc kindPlan {text args} {
+    set lowered [native::lowered [srcHir $text] {*}$args]
+    set spec [dict get $lowered specialization]
+    set plan [dict get $lowered shortPlan]
+    set lines {}
+    foreach id [dict get $spec used] {
+        set p [dict get $plan $id]
+        set label [hir::specialize::label $spec $id]
+        if {$label eq "<program>"} continue
+        set params [lmap k [dict get $p params] {expr {$k in {short ascii} ? $k : "val"}}]
+        set result [dict get $p result]
+        lappend lines "$label=[join $params ,]>[expr {$result in {short ascii} ? $result : "val"}]"
+    }
+    return [lsort $lines]
+}
+
+proc planFacts {text label args} {
+    set lowered [native::lowered [srcHir $text] {*}$args]
+    set spec [dict get $lowered specialization]
+    set plan [dict get $lowered shortPlan]
+    foreach id [dict get $spec used] {
+        if {[hir::specialize::label $spec $id] eq $label} {
+            set p [dict get $plan $id]
+            return [list [dict get $p paramFacts] [dict get $p resultFact] [dict get $p paramReasons] [dict get $p resultReason]]
+        }
+    }
+    error "no instance $label"
+}
+
+proc nativeOutcome {hir args} {
+    resetEffects
+    if {[catch {native::evalHir $hir {*}$args} result options]} {
+        return [list error [dict get $options -errorcode]]
+    }
+    return [list value [core::value::show $result 1]]
+}
+
+# Every backend, and native under every combination of the short-String
+# switch, the packed-ASCII switch and leaf inlining, agree on TEXT; returns
+# the one outcome ("kind:text").
+proc parity {text} {
+    set hir [srcHir $text]
+    set outcomes {}
+    foreach backend {interp compile cranelift-generic cranelift} {
+        set outcome [outcomeUnderHir $backend $hir]
+        lappend outcomes [lindex $outcome 0]:[lindex $outcome 1]
+    }
+    set prepared [native::prepareHir $hir]
+    foreach opt {0 1} {
+        foreach pack {0 1} {
+            foreach inline {0 1} {
+                foreach demand {0 1} {
+                    set outcome [nativeOutcome $prepared -short-string-opt $opt -ascii-pack-opt $pack -tiny-leaf-inline-opt $inline -short-demand-opt $demand]
+                    lappend outcomes [lindex $outcome 0]:[lindex $outcome 1]
+                }
+            }
+        }
+    }
+    if {[llength [lsort -unique $outcomes]] != 1} {
+        error "backends disagree:\n[join $outcomes \n]"
+    }
+    return [lindex $outcomes 0]
+}
+
+# ---------------------------------------------------------------------------
+# Parameters
+
+test sd-materialize-only-parameter-stays-tagged {a packed-eligible parameter whose only use is a List append keeps the tagged String: no asciitostr anywhere} -body {
+    set text {
+        fn keep(xs, s):
+            list_append(xs, s)
+
+        [keep([], "ab"), keep([], "cd")]
+    }
+    set nir [nirOf $text]
+    set keep [fnText $nir keep]
+    list [kindPlan $text] [lindex [planFacts $text {keep<List[never], str>}] 2] [countIn {asciitostr} $nir] [asciiParams $keep] [parity $text]
+} -result {{{keep<List[never], str>=val,val>val}} {not-string no-scalar-use} 0 {} {value:[["ab"], ["cd"]]}}
+
+test sd-demand-off-keeps-it-virtual {-short-demand-opt 0 is the previous categorical behavior: the same parameter is packed and materialized at its use} -body {
+    set text {
+        fn keep(xs, s):
+            list_append(xs, s)
+
+        [keep([], "ab"), keep([], "cd")]
+    }
+    list [kindPlan $text -short-demand-opt 0] [countIn {asciitostr} [nirOf $text -short-demand-opt 0]]
+} -result {{{keep<List[never], str>=val,ascii>val}} 1}
+
+test sd-scalar-use-keeps-it-packed {one scalar consumer among tagged uses is enough: the parameter stays packed and materializes once} -body {
+    set text {
+        fn mixed(s, xs):
+            [length(s), list_append(xs, s), list_append(xs, s)]
+
+        mixed("xyz", [])
+    }
+    set f [fnText [nirOf $text] mixed]
+    list [asciiParams $f] [countIn {op asciilen} $f] [countIn {op asciitostr} $f] [parity $text]
+} -result {0 1 1 {value:[3, ["xyz"], ["xyz"]]}}
+
+test sd-equality-is-a-scalar-use {== against a literal counts, so a parameter compared and then stored stays packed} -body {
+    set text {
+        fn tag(s, xs):
+            [s == "yes", list_append(xs, s)]
+
+        [tag("yes", []), tag("no", [])]
+    }
+    set f [fnText [nirOf $text] tag]
+    list [asciiParams $f] [countIn {op asciieq} $f] [parity $text]
+} -result {0 1 {value:[[true, ["yes"]], [false, ["no"]]]}}
+
+test sd-equality-with-an-unrestricted-string-is-not-a-scalar-use {s == t where t is a concat result cannot be scalar: the parameter has no free use and stays tagged} -body {
+    set text {
+        fn same(s, t):
+            s == t
+
+        [same("ab", concat("a", "b")), same("", concat("", ""))]
+    }
+    list [kindPlan $text] [parity $text]
+} -result {{{same<str, str>=val,val>val}} {value:[true, true]}}
+
+# ---------------------------------------------------------------------------
+# Forwarding
+
+test sd-forward-chain-with-a-consumer-is-virtual {f -> g -> h where h takes the length: every parameter on the chain stays packed} -body {
+    set text {
+        fn h(s):
+            length(s)
+
+        fn g(s):
+            h(s)
+
+        fn f(s):
+            g(s)
+
+        [f("abc"), f("")]
+    }
+    kindPlan $text
+} -result {f<str>=ascii>val g<str>=ascii>val h<str>=ascii>val}
+
+test sd-forward-chain-without-a-consumer-is-tagged {the same chain ending in a List append has no free use anywhere: all tagged} -body {
+    set text {
+        fn h(s):
+            list_append([], s)
+
+        fn g(s):
+            h(s)
+
+        fn f(s):
+            g(s)
+
+        [f("abc"), f("")]
+    }
+    list [kindPlan $text] [countIn {asciitostr|shorttostr} [nirOf $text]]
+} -result {{f<str>=val>val g<str>=val>val h<str>=val>val} 0}
+
+test sd-forwarding-recursion-is-not-self-justifying {a function that only passes its String parameter to itself has no consumer: the usefulness fixpoint starts empty, so it stays tagged} -body {
+    set text {
+        fn spin(s, n):
+            if n == 0:
+                0
+            else:
+                spin(s, n - 1)
+
+        spin("abc", 4)
+    }
+    kindPlan $text
+} -result {{spin<str, int>=val,val>val}}
+
+# ---------------------------------------------------------------------------
+# Results and locals
+
+test sd-result-with-a-scalar-caller-is-virtual {a result whose caller takes the length stays packed even though another caller stores it} -body {
+    set text {
+        fn pick(flag):
+            if flag:
+                ""
+            else:
+                "word"
+
+        [length(pick(true)), list_append([], pick(false))]
+    }
+    set nir [nirOf $text]
+    list [kindPlan $text] [countIn {asciitostr} $nir]
+} -result {pick<bool>=val>ascii 1}
+
+test sd-result-only-stored-is-tagged {a result every caller only stores stays a tagged String} -body {
+    set text {
+        fn pick(flag):
+            if flag:
+                ""
+            else:
+                "word"
+
+        [list_append([], pick(true)), list_append([], pick(false))]
+    }
+    list [kindPlan $text] [countIn {asciitostr} [nirOf $text]]
+} -result {pick<bool>=val>val 0}
+
+test sd-local-without-a-scalar-use-is-not-a-register {a local literal that is only stored never becomes a packed register (and so emits no dead asciilit)} -body {
+    set text {
+        fn keep(xs):
+            s = "hello"
+            list_append(xs, s)
+
+        keep([])
+    }
+    set keep [fnText [nirOf $text] keep]
+    list [countIn {asciilit} $keep] [asciiRegs $keep] [parity $text]
+} -result {0 {} {value:["hello"]}}
+
+test sd-local-with-a-scalar-use-is-a-register {a local bound to a call result that is compared with a parameter stays packed} -body {
+    set text {
+        fn word(flag):
+            if flag:
+                "yes"
+            else:
+                "no"
+
+        fn probe(flag, t, xs):
+            s = word(flag)
+            [s == t, list_append(xs, s)]
+
+        [probe(true, "yes", []), probe(false, "yes", [])]
+    }
+    set probe [fnText [nirOf $text] probe]
+    list [kindPlan $text] [expr {[asciiRegs $probe] ne ""}] [parity $text]
+} -result {{{probe<bool, str, List[never]>=val,ascii,val>val} word<bool>=val>ascii} 1 {value:[[true, ["yes"]], [false, ["no"]]]}}
+
+# ---------------------------------------------------------------------------
+# ShortString1
+
+test sd-round-trip-parameter-stays-tagged {a one-character parameter used only by tagged operations (the refined-checks shape) keeps the tagged String: no strtoshort/shorttostr pair} -body {
+    set text {
+        fn classify(c):
+            is_tcl_alpha(c)
+
+        fn drive(t, i):
+            classify(substring(t, i, i + 1))
+
+        [drive("a1", 0), drive("a1", 1)]
+    }
+    set nir [nirOf $text]
+    list [countIn {op shorttostr|op strtoshort|op asciitostr} $nir] [parity $text]
+} -result {0 {value:[true, false]}}
+
+test sd-non-ascii-scalar-parameter-with-consumers-stays-short {a ShortString1 parameter that is compared and measured keeps the scalar: shorteq and shortlen, no conversion} -body {
+    set text {
+        fn probe(c):
+            [c == "λ", length(c)]
+
+        [probe("λ"), probe("é")]
+    }
+    set f [fnText [nirOf $text] probe]
+    list [kindPlan $text] [countIn {op shorteq} $f] [countIn {op shortlen} $f] [parity $text]
+} -result {probe<str>=short>val 1 1 {value:[[true, 1], [false, 1]]}}
+
+# ---------------------------------------------------------------------------
+# String regions and the switches
+
+test sd-region-companion-call-is-not-a-flow {text handed to a region-producing helper (a tagged companion call) does not count as a free use: the literal-fed parameter stays tagged, so no asciitostr runs inside the loop} -body {
+    set text {
+        fn peek(text, index):
+            if index >= length(text):
+                return ""
+
+            substring(text, index, index + 1)
+
+        fn count_a(text, index, acc):
+            c = peek(text, index)
+            if c == "":
+                acc
+            else:
+                step = if c == "a":
+                    1
+                else:
+                    0
+                count_a(text, index + 1, acc + step)
+
+        [count_a("banana", 0, 0), count_a("", 0, 0), count_a("xyz", 0, 0)]
+    }
+    set nir [nirOf $text -tiny-leaf-inline-opt 0]
+    list [countIn {asciitostr} $nir] [parity $text]
+} -result {0 {value:[3, 0, 0]}}
+
+test sd-env-switch {BOTLISH_NATIVE_SHORT_DEMAND_OPT=0 is the same switch} -body {
+    set text {
+        fn keep(xs, s):
+            list_append(xs, s)
+
+        keep([], "ab")
+    }
+    set ::env(BOTLISH_NATIVE_SHORT_DEMAND_OPT) 0
+    try {
+        kindPlan $text
+    } finally {
+        unset ::env(BOTLISH_NATIVE_SHORT_DEMAND_OPT)
+    }
+} -result {{keep<List[never], str>=val,ascii>val}}
+
+test sd-deterministic {the rule is a fixed function of the program: identical NIR twice} -body {
+    set text {
+        fn h(s):
+            [length(s), s == "ab"]
+
+        fn k(xs, s):
+            list_append(xs, s)
+
+        [h("ab"), k([], "cd"), k([], "ef")]
+    }
+    expr {[nirOf $text] eq [nirOf $text]}
+} -result 1
+
+cleanupTests

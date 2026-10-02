@@ -113,6 +113,13 @@
 namespace eval native::shortstr {
     variable Enabled 0
     variable AsciiPack 1
+    variable Demand 1
+    variable CallTagged {}
+    # "id,e" -> 1 for every local `bind` the demand rule keeps virtual
+    variable LocalVirt
+    # slot key -> list of contexts (see Demand below)
+    variable SlotUses
+    variable SlotCand
     variable Hir ""
     variable Spec ""
     variable Ranges ""
@@ -259,9 +266,12 @@ proc native::shortstr::Reason {f} {
 # virtual-construction plan keeps that representation (`construction-plan`),
 # so two virtualizations never claim one position. The facts are also queryable per expression
 # afterwards (`fact`).
-proc native::shortstr::plan {hir spec ranges enabled {blockEscape 1} {construction {}} {asciiPack 1}} {
+proc native::shortstr::plan {hir spec ranges enabled {blockEscape 1} {construction {}} {asciiPack 1} {demand 1} {callTagged {}}} {
     variable Enabled
     variable AsciiPack
+    variable Demand
+    variable LocalVirt
+    variable CallTagged
     variable Hir
     variable Spec
     variable Ranges
@@ -279,6 +289,9 @@ proc native::shortstr::plan {hir spec ranges enabled {blockEscape 1} {constructi
     set Rounds 0
     set Enabled $enabled
     set AsciiPack $asciiPack
+    set Demand $demand
+    set CallTagged $callTagged
+    array unset LocalVirt
     set Hir $hir
     set Spec $spec
     set Ranges $ranges
@@ -445,6 +458,10 @@ proc native::shortstr::plan {hir spec ranges enabled {blockEscape 1} {constructi
     }
     variable Plan
     set Plan $plan
+    if {$Demand} {
+        set plan [ApplyDemand $plan]
+        set Plan $plan
+    }
     return $plan
 }
 
@@ -482,6 +499,290 @@ proc native::shortstr::uses {plan id} {
         }
     }
     return 0
+}
+
+# ---------------------------------------------------------------------------
+# The demand rule (the struct scalar-replacement precedent: a value all of
+# whose uses materialize it is not virtualized)
+#
+# A candidate position -- a String parameter or result that has a tier, a local
+# `bind` that has a tier and that lowering would keep in a register -- stays
+# virtual only if it has at least one *free* use: a scalar consumer (`length`,
+# `==` whose operands could both be scalars), or a flow into another position
+# that is itself virtual and useful (an argument of a virtual parameter, the
+# value of a virtual result, the value of a virtual local, directly or through
+# a branch join). Otherwise every use materializes it, which costs an
+# allocation at run time and saves nothing, so it keeps the tagged String
+# (reason `no-scalar-use`). Uses the walk does not understand are not free, so
+# the rule can only ever turn a position tagged, never invent a scalar.
+#
+# Usefulness is the least fixpoint of "has a free use": a cycle of pure
+# forwarding with no consumer never becomes useful. Slots are keyed
+# P:ID:K (parameter), R:ID (result), L:ID:E (local bind E); a use records the
+# *context* of the expression: `scalar`, `tagged`, `discard`, or `slot KEY`.
+
+proc native::shortstr::ApplyDemand {plan} {
+    variable Spec
+    variable SlotUses
+    variable SlotCand
+    variable LocalVirt
+    array unset SlotUses
+    array unset SlotCand
+    set context [dict get $Spec context]
+    set discarded [dict get $context discarded]
+    # candidates
+    foreach id [dict get $Spec used] {
+        set p [dict get $plan $id]
+        set k 0
+        foreach kind [dict get $p params] {
+            if {$kind in {short ascii}} {
+                set SlotCand(P:$id:$k) 1
+            }
+            incr k
+        }
+        if {[dict get $p result] in {short ascii}} {
+            set SlotCand(R:$id) 1
+        }
+        set h [View $id]
+        variable CallTagged
+        foreach e [StringBinds $id] {
+            if {![dict exists $discarded $e]} continue
+            # a local the String-region analysis keeps as a region is never a
+            # short register
+            if {$CallTagged ne "" && [{*}$CallTagged $id $e]} continue
+            set f [fact $id [hir::get $h $e value]]
+            if {[Ok $f]} {
+                set SlotCand(L:$id:$e) 1
+            }
+        }
+    }
+    # uses
+    foreach id [dict get $Spec used] {
+        set instance [dict get $Spec instances $id]
+        set block [dict get $instance block]
+        set h [View $id]
+        set body [expr {$block eq "program" ? [hir::roots $h] : [hir::get $h $block body]}]
+        set tail [expr {$block eq "program" ? "tagged" : [info exists SlotCand(R:$id)] ? "slot R:$id" : "tagged"}]
+        DemandBody $id $body $tail
+    }
+    # least fixpoint of "has a free use"
+    array set useful {}
+    set changed 1
+    while {$changed} {
+        set changed 0
+        foreach key [array names SlotCand] {
+            if {[info exists useful($key)]} continue
+            if {![info exists SlotUses($key)]} continue
+            foreach ctx $SlotUses($key) {
+                if {$ctx eq "scalar"
+                        || ([lindex $ctx 0] eq "slot" && [info exists useful([lindex $ctx 1])])} {
+                    set useful($key) 1
+                    set changed 1
+                    break
+                }
+            }
+        }
+    }
+    # apply: demote candidates without a free use
+    set out $plan
+    foreach id [dict get $Spec used] {
+        set p [dict get $plan $id]
+        set kinds {}
+        set reasons [dict get $p paramReasons]
+        set k 0
+        foreach kind [dict get $p params] {
+            if {$kind in {short ascii} && ![info exists useful(P:$id:$k)]} {
+                lappend kinds value
+                lset reasons $k no-scalar-use
+            } else {
+                lappend kinds $kind
+            }
+            incr k
+        }
+        dict set out $id params $kinds
+        dict set out $id paramReasons $reasons
+        if {[dict get $p result] in {short ascii} && ![info exists useful(R:$id)]} {
+            dict set out $id result value
+            dict set out $id resultReason no-scalar-use
+        }
+    }
+    foreach key [array names useful] {
+        if {[string match L:* $key]} {
+            lassign [split $key :] - id e
+            set LocalVirt($id,$e) 1
+        }
+    }
+    return $out
+}
+
+# Records the uses of a statement list's expressions: all but the last are
+# discarded, the last flows to TAIL.
+proc native::shortstr::DemandBody {id body tail} {
+    set n [llength $body]
+    set i 0
+    foreach e $body {
+        incr i
+        DemandWalk $id $e [expr {$i < $n ? "discard" : $tail}]
+    }
+}
+
+# 1 if String expression E is something a scalar consumer could take without
+# first producing a real String (an optimistic reading of lowering's
+# ShortNatural: it is judged before the positions it depends on are final).
+proc native::shortstr::PotNatural {id e} {
+    variable Spec
+    variable SlotCand
+    if {![Ok [fact $id $e]]} {
+        return 0
+    }
+    set h [View $id]
+    switch -- [hir::kind $h $e] {
+        const { return 1 }
+        ref {
+            set b [hir::get $h $e binding]
+            return [expr {$b ne "" && [dict get [hir::binding $h $b] kind] ne "root"}]
+        }
+        call {
+            set node [hir::node $h $e]
+            lassign [dict get $node target] kind target
+            if {$kind eq "native"} {
+                return [expr {[Tier [fact $id $e]] eq "short"
+                    && [dict get [hir::symbol $h $target] name] eq "substring"}]
+            }
+            set calls [dict get $Spec instances $id calls]
+            return [expr {[dict exists $calls $e] && [info exists SlotCand(R:[dict get $calls $e])]}]
+        }
+    }
+    return 0
+}
+
+# Records, for every expression under E that reaches a candidate slot, the
+# context it is consumed in (CTX: scalar, tagged, discard or "slot KEY").
+proc native::shortstr::DemandWalk {id e ctx} {
+    variable Spec
+    variable SlotUses
+    variable SlotCand
+    if {![dict exists [Live $id] $e]} {
+        return
+    }
+    set h [View $id]
+    set node [hir::node $h $e]
+    switch -- [dict get $node kind] {
+        const - continue - fail - block { }
+        ref {
+            set b [dict get $node binding]
+            if {$b eq ""} return
+            set binding [hir::binding $h $b]
+            switch -- [dict get $binding kind] {
+                param {
+                    set block [dict get [dict get $Spec instances $id] block]
+                    if {$block eq "program"} return
+                    set k [lsearch -exact [hir::get $h $block params] $b]
+                    if {$k >= 0 && [info exists SlotCand(P:$id:$k)]} {
+                        lappend SlotUses(P:$id:$k) $ctx
+                    }
+                }
+                local {
+                    set decl [dict get $binding declaredBy]
+                    if {$decl ne "" && [info exists SlotCand(L:$id:$decl)]} {
+                        lappend SlotUses(L:$id:$decl) $ctx
+                    }
+                }
+            }
+        }
+        bind {
+            set value [dict get $node value]
+            if {[hir::kind $h $value] eq "block"} return
+            variable CallTagged
+            if {$CallTagged ne "" && [{*}$CallTagged $id $e]} {
+                # a local that lowering keeps as a String region: its value
+                # is a companion call with tagged arguments
+                DemandWalk $id $value companion
+            } elseif {[info exists SlotCand(L:$id:$e)]} {
+                DemandWalk $id $value "slot L:$id:$e"
+            } else {
+                DemandWalk $id $value tagged
+            }
+        }
+        call {
+            lassign [dict get $node target] kind target
+            set args [dict get $node args]
+            if {[hir::kind $h [dict get $node callee]] ne "ref"} {
+                DemandWalk $id [dict get $node callee] tagged
+            }
+            if {$kind eq "native"} {
+                set name [dict get [hir::symbol $h $target] name]
+                set scalar 0
+                if {$name eq "length" && [llength $args] == 1} {
+                    set scalar [PotNatural $id [lindex $args 0]]
+                } elseif {$name eq "==" && [llength $args] == 2} {
+                    set scalar [expr {[PotNatural $id [lindex $args 0]] && [PotNatural $id [lindex $args 1]]}]
+                }
+                # The String-region forms of length/== come first in lowering:
+                # an operand they take is a region, not a scalar consumer.
+                variable CallTagged
+                if {$scalar && $CallTagged ne ""} {
+                    foreach a $args {
+                        if {[hir::kind $h $a] in {ref call} && [{*}$CallTagged $id $a]} {
+                            set scalar 0
+                        }
+                    }
+                }
+                foreach a $args {
+                    DemandWalk $id $a [expr {$scalar ? "scalar" : "tagged"}]
+                }
+            } else {
+                set calls [dict get $Spec instances $id calls]
+                set callee [expr {[dict exists $calls $e] ? [dict get $calls $e] : ""}]
+                # A call lowering turns into a companion (a String region)
+                # passes tagged arguments and yields no scalar result.
+                variable CallTagged
+                if {$callee ne "" && ($ctx eq "companion" || ($CallTagged ne "" && [{*}$CallTagged $id $e]))} {
+                    set callee ""
+                }
+                if {$callee ne "" && [info exists SlotCand(R:$callee)]} {
+                    lappend SlotUses(R:$callee) $ctx
+                }
+                set k 0
+                foreach a $args {
+                    if {$callee ne "" && [info exists SlotCand(P:$callee:$k)]} {
+                        DemandWalk $id $a "slot P:$callee:$k"
+                    } else {
+                        DemandWalk $id $a tagged
+                    }
+                    incr k
+                }
+            }
+        }
+        if {
+            DemandWalk $id [dict get $node condition] tagged
+            foreach role {thenBody elseBody} {
+                set body [dict get $node $role]
+                if {$body eq ""} continue
+                DemandBody $id $body $ctx
+            }
+        }
+        return {
+            set value [dict get $node value]
+            if {$value ne ""} {
+                set rctx [expr {[info exists SlotCand(R:$id)] ? "slot R:$id" : "tagged"}]
+                DemandWalk $id $value $rctx
+            }
+        }
+        default {
+            foreach c [hir::children $h $e] {
+                DemandWalk $id $c tagged
+            }
+        }
+    }
+}
+
+# 1 if the demand rule keeps local `bind` E of instance ID virtual (always 1
+# when the rule is off).
+proc native::shortstr::localVirtual {id e} {
+    variable Demand
+    variable LocalVirt
+    return [expr {!$Demand || [info exists LocalVirt($id,$e)]}]
 }
 
 # ---------------------------------------------------------------------------

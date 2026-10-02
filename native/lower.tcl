@@ -1184,6 +1184,8 @@ proc native::lower::program {hirProgram args} {
         && $::env(BOTLISH_NATIVE_RAW_MIXED_POLICY) eq "raw" ? "raw" : "boxed"}]
     set shortStringDefault [expr {[info exists ::env(BOTLISH_NATIVE_SHORT_STRING_OPT)]
         && $::env(BOTLISH_NATIVE_SHORT_STRING_OPT) eq "0" ? 0 : 1}]
+    set shortDemandDefault [expr {[info exists ::env(BOTLISH_NATIVE_SHORT_DEMAND_OPT)]
+        && $::env(BOTLISH_NATIVE_SHORT_DEMAND_OPT) eq "0" ? 0 : 1}]
     set asciiPackDefault [expr {[info exists ::env(BOTLISH_NATIVE_ASCII_PACK_OPT)]
         && $::env(BOTLISH_NATIVE_ASCII_PACK_OPT) eq "0" ? 0 : 1}]
     set callFactsDefault [expr {[info exists ::env(BOTLISH_NATIVE_CALL_FACTS_OPT)]
@@ -1238,7 +1240,7 @@ proc native::lower::program {hirProgram args} {
             -tiny-leaf-inline-opt $tinyLeafInlineDefault \
             -recursive-result-range-opt $recursiveRangeDefault -recursive-range-limit $recursiveLimitDefault \
             -raw-int-abi-opt $rawIntAbiDefault -raw-demand-opt $rawDemandDefault -raw-mixed-policy $rawMixedDefault \
-            -short-string-opt $shortStringDefault -ascii-pack-opt $asciiPackDefault \
+            -short-string-opt $shortStringDefault -ascii-pack-opt $asciiPackDefault -short-demand-opt $shortDemandDefault \
             -virtual-construction-opt $constructionDefault] $args]
     if {[hir::mode $hirProgram] ne "program"} {
         throw {NATIVE UNSUPPORTED sequence-mode} \
@@ -1343,7 +1345,12 @@ proc native::lower::program {hirProgram args} {
     # most one character is then a ShortString1 whether or not it is ASCII,
     # and nothing longer is virtual (the single-tier regime).
     set asciiPackOpt [dict get $options -ascii-pack-opt]
-    set shortPlan [native::shortstr::plan $hirProgram $spec $ranges $shortStringOpt $blockEscapeOpt $construction $asciiPackOpt]
+    # -short-demand-opt 0 turns off the demand rule (a position with a tier is
+    # virtual whatever its uses are); on, a position none of whose uses is
+    # free (a scalar consumer or a flow into another virtual position) stays
+    # a tagged String, as a struct none of whose uses is free does.
+    set shortDemandOpt [dict get $options -short-demand-opt]
+    set shortPlan [native::shortstr::plan $hirProgram $spec $ranges $shortStringOpt $blockEscapeOpt $construction $asciiPackOpt $shortDemandOpt native::lower::DemandCallTagged]
     set context [dict get $spec context]
     set selfTail [dict get $context selfTails]
     set envless [dict get $context envless]
@@ -1786,6 +1793,31 @@ proc native::lower::ResultShort {fnVar} {
 # The tier of expression E of the instance being lowered: `ascii` when the
 # planner proved it ASCII with at most eight characters, `short` when it
 # proved at most one character, "" otherwise (and when it cannot complete).
+# 1 if call E of instance ID will be lowered as a companion call (a String
+# region) whose arguments are tagged and whose result is not the canonical
+# function's scalar: the demand rule must not count such a call as a flow.
+proc native::lower::DemandCallTagged {id e} {
+    variable currentInstance
+    variable stringRegionOpt
+    if {!$stringRegionOpt} {
+        return 0
+    }
+    variable hir
+    variable stringregion
+    if {[hir::kind $hir $e] eq "bind"} {
+        # a local the String-region analysis keeps as a region
+        set b [hir::get $hir $e binding]
+        return [expr {$b ne "" && [hir::stringregion::virtual $stringregion $id $b]}]
+    }
+    set saved $currentInstance
+    set currentInstance $id
+    try {
+        return [RegionEligible $e]
+    } finally {
+        set currentInstance $saved
+    }
+}
+
 proc native::lower::ShortTier {e} {
     variable currentInstance
     variable shortStringOpt
@@ -3738,7 +3770,7 @@ proc native::lower::Bind {fnVar e node} {
     if {$shortStringOpt && [dict exists $context discarded $e]
             && ![dict get $node duplicate] && [dict get [hir::binding $hir $b] kind] eq "local"
             && ![hir::isModuleBinding $hir $b] && [hir::kind $hir $valueExpr] ne "block"
-            && [ShortOk $valueExpr]} {
+            && [ShortOk $valueExpr] && [native::shortstr::localVirtual $currentInstance $e]} {
         set tier [ShortTier $valueExpr]
         set value [Expr fn $valueExpr $tier]
         if {$value eq "never"} {

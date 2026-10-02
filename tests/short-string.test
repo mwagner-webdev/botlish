@@ -51,8 +51,10 @@ proc srcHir {text} {
 # is about the ShortString1 scalar tier, which then holds every String of at
 # most one character, ASCII or not (the single-tier regime), exactly as the
 # first milestone defined it -- minus the interned materialization table,
-# which no longer exists.
-set noInline {-tiny-leaf-inline-opt 0 -ascii-pack-opt 0}
+# which no longer exists. The demand rule (a position none of whose uses is a
+# scalar consumer stays tagged) is disabled too: these pins are about the
+# representation mechanics, and many of their programs only materialize.
+set noInline {-tiny-leaf-inline-opt 0 -ascii-pack-opt 0 -short-demand-opt 0}
 
 proc nirOf {text args} {
     return [native::nir [srcHir $text] {*}$args]
@@ -174,8 +176,10 @@ proc parityShort {text} {
     foreach opt {0 1} {
         foreach inline {0 1} {
             foreach pack {0 1} {
-                set outcome [nativeOutcome $prepared -short-string-opt $opt -tiny-leaf-inline-opt $inline -ascii-pack-opt $pack]
-                lappend outcomes [lindex $outcome 0]:[lindex $outcome 1]
+                foreach demand {0 1} {
+                    set outcome [nativeOutcome $prepared -short-string-opt $opt -tiny-leaf-inline-opt $inline -ascii-pack-opt $pack -short-demand-opt $demand]
+                    lappend outcomes [lindex $outcome 0]:[lindex $outcome 1]
+                }
             }
         }
     }

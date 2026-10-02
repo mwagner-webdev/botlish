@@ -48,7 +48,7 @@ proc srcHir {text} {
     }
 }
 
-set noInline {-tiny-leaf-inline-opt 0}
+set noInline {-tiny-leaf-inline-opt 0 -short-demand-opt 0}
 
 proc nirOf {text args} {
     return [native::nir [srcHir $text] {*}$args]
@@ -149,8 +149,10 @@ proc parity {text} {
     foreach opt {0 1} {
         foreach pack {0 1} {
             foreach inline {0 1} {
-                set outcome [nativeOutcome $prepared -short-string-opt $opt -ascii-pack-opt $pack -tiny-leaf-inline-opt $inline]
-                lappend outcomes [lindex $outcome 0]:[lindex $outcome 1]
+                foreach demand {0 1} {
+                    set outcome [nativeOutcome $prepared -short-string-opt $opt -ascii-pack-opt $pack -tiny-leaf-inline-opt $inline -short-demand-opt $demand]
+                    lappend outcomes [lindex $outcome 0]:[lindex $outcome 1]
+                }
             }
         }
     }
