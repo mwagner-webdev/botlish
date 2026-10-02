@@ -40,7 +40,7 @@ What was measured over the canonical corpus (17 programs, 233 functions):
   on/off), in 2,253 randomly generated programs (1,471 + 491 under GC stress +
   291 with specialization off; **0 disagreements**), in the 59 tests of
   `tests/short-string.test`, and in the full existing regression
-  (@@REGRESSION@@).
+  (interp 3,789/3,789, compile 3,785 + 4 skipped, native coverage, Rust 90 + 26, whole suite under GC stress 3,792/3,792 and 3,788 + 4 skipped, bench and corpus parity).
 * **Whole-corpus machine code: 101,879 -> 102,423 bytes (+544, +0.53 %).**
   Only programs that use the representation change; `ai_text_clean` shrinks by
   608 bytes (-19.7 %), the CSV family and `string_replace` grow by 137-158
@@ -78,8 +78,10 @@ character is "a real String object carrying a lot more representation than the
 value semantically requires": `peek(text, i)` (`""` past the end, otherwise
 `substring(text, i, i + 1)`) is the corpus idiom, and the equality tests
 against single-character literals that follow it (`ai_text_clean`'s 19
-emoji/punctuation comparisons per character, `csv`'s `"\""` and `","`) were
-each an allocation plus a `streq` helper call.
+emoji/punctuation comparison sites, `csv`'s `"\""` and `","`) were each a
+`regioneq`/`streq` helper call, with a one-character String allocated by the
+`peek` that produced the character wherever it was not consumed as a
+StringRegion.
 
 The starting point is exactly the RawInt lesson applied to a second
 representation: keep a value in the cheapest physical form its proof allows,
@@ -610,7 +612,7 @@ twice gives byte-identical NIR and the same code size (`codesize.tcl`,
 `audit/short-string/out/census.txt`. Static NIR over the corpus, **optimization
 off: 0 strtoshort / 0 shorttostr; on: 1 strtoshort / 10 shorttostr** (the
 tagged->short side is nearly empty because short values are produced short:
-28 `shortlit`, 7 `strsliceshort`, 6 short results). Frontier classes: see
+32 `shortlit`, 23 `shorteq`, 7 `strsliceshort`, 6 short results). Frontier classes: see
 *Tagged materialization frontiers*. Zero short registers are materialized more
 than once: 42 virtual registers with zero materializations, 10 with exactly
 one, 0 with several.
@@ -622,21 +624,25 @@ one, 0 with several.
 | String values/positions examined (params of String-keyed instances + String results + live String locals) | 154 |
 | proven length <= 1 | 30 |
 | local String bindings examined / proven | 21 / 16 |
-| local values virtualized as short registers | 1 |
+| local values virtualized as short registers | 5 |
 | parameter positions (String) / selected as ShortString1 | 107 / 8 |
 | result positions (String) / selected | 26 / 6 |
 | instances with any ShortString1 ABI position | 14 (of 233) |
-| virtualized positions that are known Empty | 0 |
+| of the proven-short positions and locals above: known Empty | 0 |
 | known One (scalar statically known) | 0 |
 | known One (scalar at run time) | 7 |
 | runtime Empty-or-One (`maybe`) | 23 |
 | String positions kept tagged: `length-gt-1` | 66 |
 | String positions kept tagged: `unknown-length` | 53 |
 
-(Only 1 of the 16 proven locals is a short register because 15 are
-`character`-style locals the String-region analysis already keeps allocation-
-free, or are not in statement position; the existing virtualization wins by
-design.) The corpus is dominated by tagged Strings of length > 1; the
+(5 of the 16 proven locals are short registers: `source-checks`' and one `peek`
+result in each of the four CSV programs. Of the other 11, 10 are `character`/
+`delimiter` locals every use of which is an equality, which the String-region
+analysis already keeps allocation-free, and 1 is `string_reverse`'s
+`character`, a StringRegion piece of a virtual `concat`: the existing
+virtualization wins by design. The static-NIR counts include the variant
+(companion) functions: the CSV short locals live in the scalar-replacement
+companions of the scanners.) The corpus is dominated by tagged Strings of length > 1; the
 representation applies to the `peek`/`char_at` family and to literals, which is
 where it measured a benefit.
 
@@ -719,7 +725,38 @@ JIT, object and executable share the one code path.
 
 ## Full regression
 
-@@REGRESSION@@
+Tcl 9.0.1, Linux x86-64, release native backend, final tree. "Before" is the
+parent commit `d51c0d3` (the RawInt demand branch, the numbers its report
+records).
+
+| run | before (parent) | after |
+|---|---|---|
+| `tests/all.tcl` interp backend | 3733 total, 3733 passed | **3789 total, 3789 passed, 0 failed** |
+| `tests/all.tcl` compile backend | 3733 total, 3729 passed, 4 skipped | **3789 total, 3785 passed, 4 skipped, 0 failed** |
+| `BOTLISH_NATIVE_GC_STRESS=1 tests/all.tcl` (CI's `gc-stress` job) | not run for the parent | **3792 total, 3792 passed; compile 3788 passed, 4 skipped; 0 failed** |
+| `tests/native-coverage.tcl` (cranelift) | 3767: native 1474, independent 2202, passed-partial 41, unsupported 49, failed 1 | **3826: native 1504, independent 2231, passed-partial 41, unsupported 49, failed 1** |
+| Rust release tests (`cargo test --release`) | 67 + 22 | **90 + 26 passed** (19 NIR kind/ABI validation tests, 4 runtime helper tests, 2 root-analysis tests, 2 generic-entry wrapper tests) |
+| `bench/bench.tcl -runs 1` | all backends agree | **exit 0, all backends agree** |
+| `bench/corpus.tcl -runs 1` | all backends agree | **exit 0, all backends agree** (5 m 27 s) |
+| `main.tcl -backend cranelift` examples (CI's example step) | | all run |
+
+* The full interp/compile runs were taken when `short-string.test` had 56 of its
+  final 59 tests (hence 3,789); the GC-stress run had all 59 (3,792). The
+  final file passes on its own, normally and under GC stress.
+* **Pre-existing failure, reported separately:** the single native-coverage
+  "failed" test is `refined-5` (the cranelift test backend's error message names
+  `length` instead of `emailish?`). It fails identically on the parent commit
+  (`d51c0d3`, checked with the parent's own build) and with
+  `-short-string-opt 0`; unrelated to this milestone, as the RawInt report
+  already records.
+* The 24 failures a first full run found (string-region, string-view,
+  block-escape, hashtable, virtual-construction, struct-scalar-replacement
+  tests) were the new representation legitimately changing pinned layouts or
+  allocation counts; three of those classes were fixed in the implementation
+  (existing StringRegion NIR is preserved by declining region-eligible calls;
+  the hashtable's repeated `"b"` keys no longer allocate because Latin-1
+  materialization is interned; plan-result/plan-parameter positions keep the
+  construction analysis' ABI), the rest adapted as listed below.
 
 ### Existing tests adapted (pre-existing representation pins)
 
@@ -888,4 +925,4 @@ ones the struct heuristic uses.
 65-72. **Correctness:** values, errors and completion behavior agree
     on/off/interpreter/native for every test, ASCII and non-ASCII, NUL, the
     Empty branches, GC stress, standalone executables and 2,253 fuzz
-    programs; the full regression passes (@@REGRESSION@@).
+    programs; the full regression passes (interp 3,789/3,789, compile 3,785 + 4 skipped, native coverage, Rust 90 + 26, whole suite under GC stress 3,792/3,792 and 3,788 + 4 skipped, bench and corpus parity).

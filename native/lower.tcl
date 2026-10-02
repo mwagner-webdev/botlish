@@ -2066,7 +2066,8 @@ proc native::lower::CompanionFunction {id} {
         blockers [expr {$blockers - [dict get $fn skippedGuards]}] \
         guards [dict get $fn guards] knownErrorGuards [dict get $fn knownErrorGuards] \
         rawUnboxes [dict get $fn rawUnboxes] rawBoxes [dict get $fn rawBoxes] \
-        rawArith [dict get $fn rawArith] rawCompare [dict get $fn rawCompare]]
+        rawArith [dict get $fn rawArith] rawCompare [dict get $fn rawCompare] \
+        short [ShortCounters fn]]
     return [list $text $info]
 }
 
@@ -2162,7 +2163,8 @@ proc native::lower::RegionCompanionFunction {id} {
         blockers [expr {$blockers - [dict get $fn skippedGuards]}] \
         guards [dict get $fn guards] knownErrorGuards [dict get $fn knownErrorGuards] \
         rawUnboxes [dict get $fn rawUnboxes] rawBoxes [dict get $fn rawBoxes] \
-        rawArith [dict get $fn rawArith] rawCompare [dict get $fn rawCompare]]
+        rawArith [dict get $fn rawArith] rawCompare [dict get $fn rawCompare] \
+        short [ShortCounters fn]]
     return [list $text $info]
 }
 
@@ -2258,7 +2260,8 @@ proc native::lower::InternalFunction {id} {
         blockers [expr {$blockers - [dict get $fn skippedGuards]}] \
         guards [dict get $fn guards] knownErrorGuards [dict get $fn knownErrorGuards] \
         rawUnboxes [dict get $fn rawUnboxes] rawBoxes [dict get $fn rawBoxes] \
-        rawArith [dict get $fn rawArith] rawCompare [dict get $fn rawCompare]]
+        rawArith [dict get $fn rawArith] rawCompare [dict get $fn rawCompare] \
+        short [ShortCounters fn]]
     return [list $text $info]
 }
 
@@ -2367,7 +2370,8 @@ proc native::lower::InternalRegionCompanionFunction {id} {
         blockers [expr {$blockers - [dict get $fn skippedGuards]}] \
         guards [dict get $fn guards] knownErrorGuards [dict get $fn knownErrorGuards] \
         rawUnboxes [dict get $fn rawUnboxes] rawBoxes [dict get $fn rawBoxes] \
-        rawArith [dict get $fn rawArith] rawCompare [dict get $fn rawCompare]]
+        rawArith [dict get $fn rawArith] rawCompare [dict get $fn rawCompare] \
+        short [ShortCounters fn]]
     return [list $text $info]
 }
 
@@ -2481,7 +2485,8 @@ proc native::lower::FieldsFunction {id} {
         blockers [expr {$blockers - [dict get $fn skippedGuards]}] \
         guards [dict get $fn guards] knownErrorGuards [dict get $fn knownErrorGuards] \
         rawUnboxes [dict get $fn rawUnboxes] rawBoxes [dict get $fn rawBoxes] \
-        rawArith [dict get $fn rawArith] rawCompare [dict get $fn rawCompare]]
+        rawArith [dict get $fn rawArith] rawCompare [dict get $fn rawCompare] \
+        short [ShortCounters fn]]
     return [list $text $info]
 }
 
@@ -2567,7 +2572,8 @@ proc native::lower::FieldsCompanionFunction {id} {
         blockers [expr {$blockers - [dict get $fn skippedGuards]}] \
         guards [dict get $fn guards] knownErrorGuards [dict get $fn knownErrorGuards] \
         rawUnboxes [dict get $fn rawUnboxes] rawBoxes [dict get $fn rawBoxes] \
-        rawArith [dict get $fn rawArith] rawCompare [dict get $fn rawCompare]]
+        rawArith [dict get $fn rawArith] rawCompare [dict get $fn rawCompare] \
+        short [ShortCounters fn]]
     return [list $text $info]
 }
 
