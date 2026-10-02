@@ -169,6 +169,19 @@ impl StrObj {
         self.byte_len
     }
 
+    /// The packed-ASCII word of this String (value.rs: byte i = 0x80 | c, absent
+    /// bytes 0), which the compiler proved ASCII with at most eight
+    /// characters: one or two loads from the inline text that never leave it,
+    /// an OR and a mask, no loop and no overread.
+    #[inline]
+    pub fn packed_ascii(&self) -> u64 {
+        debug_assert!(self.ascii && self.byte_len <= 8, "packed ASCII of a String that is not ASCII of at most 8 characters");
+        let n = self.byte_len;
+        let mask = if n >= 8 { u64::MAX } else { (1u64 << (8 * n)) - 1 };
+        // SAFETY: the text is `n` bytes long, so reading its first `n` (<= 8) is in bounds.
+        (unsafe { read_low_bytes(self.text.as_ptr(), n) } | 0x8080_8080_8080_8080) & mask
+    }
+
     /// The first scalar of the String (0 if empty), read from the inline text.
     #[inline]
     pub fn first_scalar(&self) -> u32 {
@@ -352,7 +365,7 @@ unsafe fn write_low_bytes(dst: *mut u8, word: u64, n: usize) {
 /// # Safety
 /// SRC must be valid for N bytes of reads.
 #[inline]
-pub unsafe fn read_low_bytes(src: *const u8, n: usize) -> u64 {
+unsafe fn read_low_bytes(src: *const u8, n: usize) -> u64 {
     unsafe {
         if n >= 4 {
             if n >= 8 {
@@ -547,6 +560,15 @@ mod tests {
             let mut round = [0u8; 8];
             unsafe { write_low_bytes(round.as_mut_ptr(), got, n) };
             assert_eq!(&round[..n], &exact[..], "n={n}");
+        }
+    }
+
+    #[test]
+    fn packed_ascii_of_the_inline_text_agrees_with_the_reference_packer() {
+        for text in ["", "a", "ab", "abc", "abcd", "abcde", "abcdef", "abcdefg", "abcdefgh", "\0", "\0\0\0", "\u{7f}z"] {
+            let p = make(text);
+            assert_eq!(obj(p).packed_ascii(), super::super::value::pack_ascii(text.as_bytes()), "{text:?}");
+            unsafe { free_str(p) };
         }
     }
 

@@ -150,19 +150,6 @@ pub fn pack_ascii(bytes: &[u8]) -> u64 {
     w
 }
 
-/// Packs the ASCII bytes at SRC (N <= 8, all below 0x80, read exactly: never
-/// past `SRC[..N]`) into a canonical word: the bytes with their presence bit
-/// set, absent bytes zero -- one or two loads, an OR and a mask, no loop.
-///
-/// # Safety
-/// SRC must be valid for N bytes of reads; the bytes must be ASCII.
-#[inline]
-pub unsafe fn pack_ascii_at(src: *const u8, n: usize) -> u64 {
-    debug_assert!(n <= 8);
-    let mask = if n >= 8 { u64::MAX } else { (1u64 << (8 * n)) - 1 };
-    (unsafe { super::strobj::read_low_bytes(src, n) } | 0x8080_8080_8080_8080) & mask
-}
-
 /// The String's bytes of packed word W (the first `ascii_word_len(w)` of the
 /// returned array are meaningful).
 #[inline]

@@ -760,11 +760,7 @@ pub extern "C" fn rt_short_to_str(p: *mut Vm, short: u64) -> Value {
 #[unsafe(no_mangle)]
 pub extern "C" fn rt_str_to_ascii(_p: *mut Vm, s: Value) -> u64 {
     let obj = str_of(s);
-    debug_assert!(obj.ascii && obj.chars <= 8, "packed ASCII of a String that is not ASCII of at most 8 characters");
-    // SAFETY: the text is inline and exactly `len_bytes()` long (at most 8
-    // here: the compiler proved at most eight ASCII characters); the packed
-    // word is formed from loads that never leave it.
-    unsafe { pack_ascii_at(obj.text_ptr(), obj.len_bytes()) }
+    obj.packed_ascii()
 }
 
 /// The String a packed-ASCII word stands for, freshly allocated: the word
