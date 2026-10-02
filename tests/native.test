@@ -384,7 +384,10 @@ test native-spec-2 {one function, several instances: Int, String and the generic
     # nirInstances/nirFunction to find, which is not what this test means
     # to measure.
     set text "${pick}fn same(x, y):\n    x == y\n\n\[same(1, 1), same(\"a\", \"b\"), same(pick(true), pick(false)), same(pick(false), \"one\")\]"
-    set nir [nirOf $text -tiny-leaf-inline-opt 0]
+    # -short-string-opt 0: likewise, a (str, str) instance whose callers pass
+    # one-character literals would take ShortString1 parameters and compare
+    # them as scalars; this test pins the tagged String instance.
+    set nir [nirOf $text -tiny-leaf-inline-opt 0 -short-string-opt 0]
     # pick returns an Int or a String: same(pick(...), ...) runs the generic
     # function (structural equality); the known calls compare words or strings.
     list [nirInstances $nir same] \

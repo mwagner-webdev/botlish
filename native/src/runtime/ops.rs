@@ -80,7 +80,7 @@ pub fn op_may_allocate(op: OpCode) -> bool {
     use OpCode::*;
     matches!(
         op,
-        IAdd | ISub | IMul | IAnd | IOr | IXor | IShl | IShr | Substr | DecodeCharAt | StrLower | StrCat
+        IAdd | ISub | IMul | IAnd | IOr | IXor | IShl | IShr | Substr | DecodeCharAt | ShortToStr | StrLower | StrCat
             | StrUtf8Bytes | ListNew | ListAppend | MutArrayAllocate | MutArrayFreeze | MkOk | MkError
             | SetFromList
             // Same allocation behavior as SetFromList (same runtime helper,
@@ -712,6 +712,68 @@ pub extern "C" fn rt_str_decode_char_at(p: *mut Vm, s: Value, byte_offset: Value
     r
 }
 
+// ---------------------------------------------------------------------------
+// ShortString1 (SHORT-STRING.md): a String the compiler proved has at most
+// one character, carried as one i64 -- `SHORT_EMPTY` (-1) is the empty
+// String, `0..=0x10FFFF` (never a surrogate: a Botlish String is a Rust
+// `str`, so its characters are Unicode scalar values) is the one scalar of a
+// one-character String. U+0000 is 0, a one-character String, never Empty.
+// None of these three fail; the proof is the caller's, and a violated one
+// is a compiler bug (asserted in debug builds, never an error value).
+
+pub const SHORT_EMPTY: i64 = -1;
+
+/// The ShortString1 scalar of String S, which has at most one character.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_str_to_short(_p: *mut Vm, s: Value) -> u64 {
+    let obj = str_of(s);
+    debug_assert!(obj.chars <= 1, "ShortString1 of a String with {} characters", obj.chars);
+    if obj.chars == 0 {
+        return SHORT_EMPTY as u64;
+    }
+    if obj.ascii {
+        return obj.text.as_bytes()[0] as u64;
+    }
+    obj.text.chars().next().expect("a one-character String has a character") as u64
+}
+
+/// The String a ShortString1 scalar stands for: "" for Empty, else the
+/// one-character String of that Unicode scalar value. Empty and the scalars
+/// U+0000..U+00FF materialize to interned static Strings (`Vm::short_string`:
+/// no allocation); any other scalar allocates.
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_short_to_str(p: *mut Vm, short: u64) -> Value {
+    let short = short as i64;
+    if (-1..256).contains(&short) {
+        return vm(p).short_string(short);
+    }
+    let r = vm(p).short_string(short);
+    vm(p).metrics.record_string_copy(char::from_u32(short as u32).map_or(0, |c| c.len_utf8()));
+    r
+}
+
+/// BASE[START..END) (a range `rt_str_region_check` already validated, at
+/// most one character wide) as a ShortString1. Never fails, never
+/// allocates. A non-ASCII BASE locates character index START by decoding
+/// forward from byte 0, exactly the seek `rt_substr` pays (and counts).
+#[unsafe(no_mangle)]
+pub extern "C" fn rt_str_slice_short(p: *mut Vm, base: Value, start: Value, end: Value) -> u64 {
+    let b = str_of(base);
+    let from = int_small(start).expect("slice start already validated") as usize;
+    let to = int_small(end).expect("slice end already validated") as usize;
+    debug_assert!(to - from <= 1, "ShortString1 slice of width {}", to - from);
+    if to == from {
+        return SHORT_EMPTY as u64;
+    }
+    if b.ascii {
+        return b.text.as_bytes()[from] as u64;
+    }
+    let mut indices = b.text.char_indices();
+    let seek_start = indices.by_ref().nth(from).map_or(b.text.len(), |(i, _)| i);
+    vm(p).metrics.record_utf8_seek(seek_start);
+    b.text[seek_start..].chars().next().expect("slice start already validated") as u64
+}
+
 /// The UTF-8 byte length of S's text -- distinct from `rt_str_len`, which
 /// counts Unicode scalars. A plain field read (StrObj::text.len()), never a
 /// scan: applied to `rt_str_decode_char_at`'s own result, this gives the
@@ -1316,7 +1378,7 @@ pub fn apply_op(p: *mut Vm, op: OpCode, a: &[Value]) -> Value {
         MkError => rt_result_new(p, 0, a[0]),
         Hash => rt_hash(p, a[0]),
         RegionCheck | RegionEq | RBox | RUnbox | RIAdd | RISub | RIMul | RILt | RILe | RIGt | RIGe | RIEq
-        | RIShr | RIShl
+        | RIShr | RIShl | StrToShort | ShortToStr | ShortLen | ShortEq | StrSliceShort
         | DecodeCharAt | StrByteLen | StrRegionIsTclAlpha | StrRegionIsTclAlnum => {
             // Raw (untagged) representation ops, StringRegion ops and String
             // traversal ops never implement a dynamic native: native/lower.tcl
@@ -1362,6 +1424,9 @@ pub fn helpers() -> Vec<(&'static str, usize, *const u8)> {
         h!(rt_str_region_eq, 5),
         h!(rt_str_decode_char_at, 3),
         h!(rt_str_byte_len, 2),
+        h!(rt_str_to_short, 2),
+        h!(rt_short_to_str, 2),
+        h!(rt_str_slice_short, 4),
         h!(rt_str_lower, 2),
         h!(rt_str_cat, 3),
         h!(rt_str_utf8_bytes, 2),
@@ -1589,6 +1654,77 @@ mod tests {
             byte_offset += small_of(width);
         }
         assert_eq!(byte_offset as usize, str_of(s).text.len());
+    }
+
+    // -----------------------------------------------------------------------
+    // ShortString1 (SHORT-STRING.md): -1 is Empty, 0..=0x10FFFF the one
+    // scalar; U+0000 is 0 and never Empty.
+
+    #[test]
+    fn short_round_trips_every_character_class() {
+        let mut vm = vm();
+        for text in ["", "a", "\u{0}", "\u{e9}", "\u{3bb}", "\u{732b}", "\u{1f600}", "\u{10ffff}", "\u{d7ff}", "\u{e000}"] {
+            let s = str_val(&mut vm, text);
+            let short = rt_str_to_short(&mut *vm, s);
+            let back = rt_short_to_str(&mut *vm, short);
+            assert_eq!(str_of(back).text.as_ref(), text, "{text:?}");
+            assert_eq!(str_of(back).chars, text.chars().count());
+            assert_eq!(str_of(back).ascii, text.is_ascii());
+        }
+    }
+
+    #[test]
+    fn short_encoding_is_the_scalar_value_and_empty_is_minus_one() {
+        let mut vm = vm();
+        let enc = |vm: &mut Vm, text: &str| {
+            let s = str_val(vm, text);
+            rt_str_to_short(vm, s) as i64
+        };
+        assert_eq!(enc(&mut vm, ""), -1);
+        assert_eq!(enc(&mut vm, "\u{0}"), 0, "NUL is a one-character String, not Empty");
+        assert_eq!(enc(&mut vm, "A"), 65);
+        assert_eq!(enc(&mut vm, "\u{3bb}"), 0x3bb);
+        assert_eq!(enc(&mut vm, "\u{10ffff}"), 0x10ffff);
+        // NUL materializes as a one-character String, -1 as the empty one.
+        let nul = rt_short_to_str(&mut *vm, 0);
+        assert_eq!((str_of(nul).chars, str_of(nul).text.len()), (1, 1));
+        // Latin-1 scalars and Empty are interned static Strings: the same
+        // object every time, nothing allocated; other scalars are fresh.
+        assert_eq!(rt_short_to_str(&mut *vm, 0), nul);
+        assert_eq!(rt_short_to_str(&mut *vm, 97), rt_short_to_str(&mut *vm, 97));
+        assert_eq!(rt_short_to_str(&mut *vm, (-1i64) as u64), rt_short_to_str(&mut *vm, (-1i64) as u64));
+        assert_ne!(rt_short_to_str(&mut *vm, 0x3bb), rt_short_to_str(&mut *vm, 0x3bb));
+        let empty = rt_short_to_str(&mut *vm, (-1i64) as u64);
+        assert_eq!((str_of(empty).chars, str_of(empty).text.len()), (0, 0));
+    }
+
+    #[test]
+    fn slice_short_matches_substring_for_widths_zero_and_one() {
+        let mut vm = vm();
+        for text in ["hello", "\u{e9}t\u{e9}", "a\u{3bb}\u{1f600}\u{732b}z"] {
+            let s = str_val(&mut vm, text);
+            let n = text.chars().count();
+            for from in 0..=n {
+                for to in from..=(from + 1).min(n) {
+                    let short = rt_str_slice_short(&mut *vm, s, small(from as i64), small(to as i64));
+                    let sub = rt_substr(&mut *vm, s, small(from as i64), small(to as i64));
+                    let back = rt_short_to_str(&mut *vm, short);
+                    assert_eq!(str_of(back).text, str_of(sub).text, "{text:?}[{from}..{to}]");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn slice_short_counts_the_non_ascii_seek_like_substring() {
+        let mut vm = vm();
+        let s = str_val(&mut vm, &"\u{e9}".repeat(10));
+        rt_str_slice_short(&mut *vm, s, small(3), small(4));
+        assert_eq!(vm.metrics.utf8_seek_bytes, 6);
+        let a = str_val(&mut vm, "plain ascii");
+        let before = vm.metrics.utf8_seek_bytes;
+        rt_str_slice_short(&mut *vm, a, small(3), small(4));
+        assert_eq!(vm.metrics.utf8_seek_bytes, before);
     }
 
     // -----------------------------------------------------------------------

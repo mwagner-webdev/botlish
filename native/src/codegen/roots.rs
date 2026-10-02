@@ -177,7 +177,7 @@ impl RootPlan {
     /// itself since they are already on `Function`, just re-exposed here so
     /// callers don't need both.
     pub fn counts(f: &Function) -> (u32, u32) {
-        let raw = f.raw_regs.iter().filter(|r| **r).count() as u32;
+        let raw = f.scalar_regs.iter().filter(|r| **r).count() as u32;
         (f.regs, raw)
     }
 }
@@ -209,6 +209,7 @@ fn def_use(inst: &Inst, params: u32) -> (Vec<Reg>, Vec<Reg>) {
         Inst::DeclaredErrorEq { dst, .. } => (vec![*dst], vec![]),
         Inst::Int { dst, .. }
         | Inst::RawInt { dst, .. }
+        | Inst::ShortLit { dst, .. }
         | Inst::Str { dst, .. }
         | Inst::Char { dst, .. }
         | Inst::Bool { dst, .. }
@@ -472,7 +473,7 @@ fn analyze(f: &Function, cfg: &Cfg) -> Liveness {
             }
             if is_safepoint(inst) {
                 let roots: Vec<Reg> =
-                    (0..regs).filter(|&r| live_in_inst[r] && !f.raw_regs[r]).map(|r| r as Reg).collect();
+                    (0..regs).filter(|&r| live_in_inst[r] && !f.scalar_regs[r]).map(|r| r as Reg).collect();
                 safepoint_roots.push(roots);
                 safepoint_index.push(idx);
             }

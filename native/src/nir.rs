@@ -198,6 +198,53 @@ pub enum OpCode {
     /// like RIAdd/RISub/RIMul do for `+`/`-`/`*`.
     RIShr,
     RIShl,
+    /// ShortString1 (SHORT-STRING.md): a String the compiler proved has at
+    /// most one character, carried as one signed i64 -- `-1` is the empty
+    /// String, `0..=0x10FFFF` (never a surrogate) is the one Unicode scalar
+    /// value of a one-character String; U+0000 is `0`, never Empty. A
+    /// ShortString1 register is a distinct physical kind (`shortregs=`):
+    /// not a tagged Value (so never a GC root) and not a RawInt (so it can
+    /// never be an operand of `riadd` and friends), even though both lower
+    /// to an i64. These ops are its only transitions and consumers.
+    ///
+    /// Tagged String -> ShortString1: total and non-allocating. The operand
+    /// is a String lowering already proved has at most one character, so no
+    /// length check is performed (a debug build asserts it).
+    StrToShort,
+    /// ShortString1 -> tagged String: allocates the one-character (or empty)
+    /// String the scalar stands for.
+    ShortToStr,
+    /// The character count of a ShortString1: 0 for Empty, 1 for One. The
+    /// result is a raw Int.
+    ShortLen,
+    /// Equality of two ShortString1 values: scalar equality (Empty == Empty,
+    /// One(a) == One(a)), a tagged Bool.
+    ShortEq,
+    /// The characters base[start..end) of a String (tagged base, start and
+    /// end), as a ShortString1. Lowering emits it only after `regioncheck`
+    /// validated the bounds and the width proof (end - start <= 1) holds, so
+    /// it never fails.
+    StrSliceShort,
+}
+
+/// The physical representation class of a register (`rawregs=`/`shortregs=`
+/// declare the non-tagged ones). Distinct kinds are never interchangeable
+/// even when two share a machine type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RegKind {
+    Tagged,
+    Raw,
+    Short,
+}
+
+impl RegKind {
+    pub fn name(self) -> &'static str {
+        match self {
+            RegKind::Tagged => "tagged",
+            RegKind::Raw => "raw",
+            RegKind::Short => "short",
+        }
+    }
 }
 
 impl OpCode {
@@ -271,6 +318,11 @@ impl OpCode {
             "rieq" => RIEq,
             "rishr" => RIShr,
             "rishl" => RIShl,
+            "strtoshort" => StrToShort,
+            "shorttostr" => ShortToStr,
+            "shortlen" => ShortLen,
+            "shorteq" => ShortEq,
+            "strsliceshort" => StrSliceShort,
             _ => return None,
         })
     }
@@ -283,8 +335,8 @@ impl OpCode {
             StrLen | StrLower | ListLen | MutArrayAllocate | MutArrayCapacity | IsInt | IsStr | IsList | IsMutArray
             | IsOk | IsError | ResultValue | ResultError | MkOk | MkError | Hash | RBox | RUnbox
             | StrByteLen | StrUtf8Bytes | StrIsTclAlpha | StrIsTclAlnum | CharCodepoint | SetFromList
-            | SetFromListTotal => Some(1),
-            Substr | MutArraySet | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum => Some(3),
+            | SetFromListTotal | StrToShort | ShortToStr | ShortLen => Some(1),
+            Substr | MutArraySet | RegionCheck | StrRegionIsTclAlpha | StrRegionIsTclAlnum | StrSliceShort => Some(3),
             RegionEq => Some(4),
             MutArrayCopy => Some(5),
             _ => Some(2),
@@ -294,13 +346,37 @@ impl OpCode {
     /// 1 if OP's result is a raw (untagged) machine integer, not a Value.
     pub fn raw_result(self) -> bool {
         matches!(self, OpCode::RUnbox | OpCode::RIAdd | OpCode::RISub | OpCode::RIMul
-            | OpCode::RIShr | OpCode::RIShl)
+            | OpCode::RIShr | OpCode::RIShl | OpCode::ShortLen)
     }
 
     /// 1 if OP's operands are raw (untagged) machine integers, not Values.
     pub fn raw_operands(self) -> bool {
         use OpCode::*;
         matches!(self, RBox | RIAdd | RISub | RIMul | RILt | RILe | RIGt | RIGe | RIEq | RIShr | RIShl)
+    }
+
+    /// The physical kind every operand of OP must have.
+    pub fn operand_kind(self) -> RegKind {
+        use OpCode::*;
+        if self.raw_operands() {
+            RegKind::Raw
+        } else if matches!(self, ShortToStr | ShortLen | ShortEq) {
+            RegKind::Short
+        } else {
+            RegKind::Tagged
+        }
+    }
+
+    /// The physical kind of OP's result.
+    pub fn result_kind(self) -> RegKind {
+        use OpCode::*;
+        if self.raw_result() {
+            RegKind::Raw
+        } else if matches!(self, StrToShort | StrSliceShort) {
+            RegKind::Short
+        } else {
+            RegKind::Tagged
+        }
     }
 }
 
@@ -313,6 +389,10 @@ pub enum Inst {
     /// value the register can hold fits the runtime's small-Int range, so
     /// `op rbox` of it never needs a check.
     RawInt { dst: Reg, digits: String },
+    /// A ShortString1 constant (`shortlit N`): -1 is the empty String, N in
+    /// 0..=0x10FFFF (never a surrogate) the one-character String of that
+    /// Unicode scalar value. U+0000 is `shortlit 0`, never Empty.
+    ShortLit { dst: Reg, value: i64 },
     Str { dst: Reg, text: String },
     /// A UnicodeChar constant: DIGITS is the canonical decimal codepoint
     /// (must be a valid Unicode scalar value, never a surrogate -- see
@@ -548,9 +628,74 @@ pub struct Function {
     /// codegen::clif's `physical_results`), one that cannot fail returns the
     /// bare integer.
     pub raw_result: bool,
+    /// Registers native/lower.tcl declares ShortString1 (`shortregs=`,
+    /// SHORT-STRING.md): a String proved to have at most one character,
+    /// carried as one i64 (-1 Empty, else the scalar value). A distinct
+    /// kind from `raw_regs` (RawInt) although both are non-root i64s: no
+    /// register is in both, and the validator never lets one stand for the
+    /// other. A parameter register declared here is defined short on entry.
+    pub short_regs: Vec<bool>,
+    /// ShortString1 ABI (`shortparams=`): parameter positions whose
+    /// physical incoming argument is a ShortString1 scalar, every one also
+    /// in `short_regs`. Always `params` entries long.
+    pub short_params: Vec<bool>,
+    /// Whether the successful result is a ShortString1 (`shortresult=1`).
+    /// Like a raw result, errors never use the scalar: a function that
+    /// `may_error` returns (value, status).
+    pub short_result: bool,
+    /// Registers that hold an unboxed machine scalar rather than a tagged
+    /// Value, of either physical kind (`raw_regs` or `short_regs`): never GC
+    /// roots, never stored to the shadow stack. Derived once at parse time;
+    /// codegen and root analysis read this, never the two declarations.
+    pub scalar_regs: Vec<bool>,
 }
 
 impl Function {
+    /// The physical kind of register R.
+    pub fn kind_of(&self, r: Reg) -> RegKind {
+        if self.raw_regs[r as usize] {
+            RegKind::Raw
+        } else if self.short_regs[r as usize] {
+            RegKind::Short
+        } else {
+            RegKind::Tagged
+        }
+    }
+
+    /// Whether this function uses the ShortString1 ABI anywhere.
+    pub fn has_short_abi(&self) -> bool {
+        self.short_result || self.short_params.iter().any(|b| *b)
+    }
+
+    /// Whether this function uses a scalar (raw Int or ShortString1) calling
+    /// convention anywhere: such a function has no Block value and no
+    /// dynamic caller.
+    pub fn has_scalar_abi(&self) -> bool {
+        self.has_raw_abi() || self.has_short_abi()
+    }
+
+    /// The physical kind of the incoming argument at parameter position I.
+    pub fn param_kind(&self, i: usize) -> RegKind {
+        if self.raw_params[i] {
+            RegKind::Raw
+        } else if self.short_params[i] {
+            RegKind::Short
+        } else {
+            RegKind::Tagged
+        }
+    }
+
+    /// The physical kind of the successful result.
+    pub fn result_kind(&self) -> RegKind {
+        if self.raw_result {
+            RegKind::Raw
+        } else if self.short_result {
+            RegKind::Short
+        } else {
+            RegKind::Tagged
+        }
+    }
+
     /// Whether this function uses the raw Int ABI anywhere (a raw parameter
     /// or a raw result): such a function has no Block value and no generic
     /// dispatch path -- native/lower.tcl plans it only for an exact closed
@@ -831,7 +976,7 @@ fn summarize_call_effects(program: &mut Program, enabled: bool) {
     // (and so whether a status word follows the value): its own settled
     // summary decides that even with call effects disabled, which otherwise
     // forces every call site to check.
-    let raw_results: Vec<bool> = program.functions.iter().map(|f| f.raw_result).collect();
+    let raw_results: Vec<bool> = program.functions.iter().map(|f| f.raw_result || f.short_result).collect();
     for (i, f) in program.functions.iter_mut().enumerate() {
         (f.may_error, f.may_gc) = effects[i];
         for inst in &mut f.body {
@@ -954,6 +1099,26 @@ fn parse_func_header(p: &Parser, tokens: &[Token]) -> Result<Function, NirError>
         }
     }
     let raw_result = kv.get("rawresult").is_some_and(|v| v == "1");
+    let mut short_regs = vec![false; regs as usize];
+    if let Some(list) = kv.get("shortregs") {
+        for tok in list.split_whitespace() {
+            let r: usize = tok.parse().map_err(|_| ())
+                .and_then(|r: usize| if r < regs as usize { Ok(r) } else { Err(()) })
+                .or_else(|_| p.err::<usize>(format!("bad shortregs register {tok}")))?;
+            short_regs[r] = true;
+        }
+    }
+    let mut short_params = vec![false; params as usize];
+    if let Some(list) = kv.get("shortparams") {
+        for tok in list.split_whitespace() {
+            let r: usize = tok.parse().map_err(|_| ())
+                .and_then(|r: usize| if r < params as usize { Ok(r) } else { Err(()) })
+                .or_else(|_| p.err::<usize>(format!("bad shortparams position {tok}")))?;
+            short_params[r] = true;
+        }
+    }
+    let short_result = kv.get("shortresult").is_some_and(|v| v == "1");
+    let scalar_regs: Vec<bool> = (0..regs as usize).map(|r| raw_regs[r] || short_regs[r]).collect();
     Ok(Function {
         id,
         name: name.clone(),
@@ -972,6 +1137,10 @@ fn parse_func_header(p: &Parser, tokens: &[Token]) -> Result<Function, NirError>
         plan_result,
         raw_params,
         raw_result,
+        short_regs,
+        short_params,
+        short_result,
+        scalar_regs,
     })
 }
 
@@ -1039,6 +1208,15 @@ fn parse_inst(p: &Parser, tokens: &[Token], program: &Program) -> Result<Inst, N
                     return p.err("bad rawint literal (must fit an i64)");
                 }
                 Inst::RawInt { dst, digits }
+            }
+            "shortlit" => {
+                let text = tokens.get(3).and_then(word).unwrap_or("");
+                let Ok(value) = text.parse::<i64>() else { return p.err("bad shortlit literal") };
+                if !(value == -1 || (0..=0x10FFFF).contains(&value)
+                    && crate::runtime::value::is_valid_scalar(value as u32)) {
+                    return p.err("shortlit must be -1 (Empty) or a Unicode scalar value");
+                }
+                Inst::ShortLit { dst, value }
             }
             "str" => Inst::Str { dst, text: quoted(3)? },
             "char" => {
@@ -1209,6 +1387,33 @@ fn validate(program: &Program) -> Result<(), NirError> {
                 return fail(ctx(format!("rawparams position {i} is not declared in rawregs")));
             }
         }
+        // The ShortString1 ABI (SHORT-STRING.md) has the same discipline: a
+        // calling convention of an ordinary single-result function that is
+        // never the program and never a Block value, and a register is never
+        // both RawInt and ShortString1.
+        if f.has_short_abi() {
+            if f.id == 0 {
+                return fail(ctx("the program function cannot use the ShortString1 ABI".into()));
+            }
+            if f.results != 1 || (f.short_result && f.plan_result) {
+                return fail(ctx("the ShortString1 ABI requires an ordinary single-result function".into()));
+            }
+            if let Some(i) = (0..f.params as usize).find(|i| f.short_params[*i] && !f.short_regs[*i]) {
+                return fail(ctx(format!("shortparams position {i} is not declared in shortregs")));
+            }
+            if f.raw_result && f.short_result {
+                return fail(ctx("a result cannot be both raw and short".into()));
+            }
+            if let Some(i) = (0..f.params as usize).find(|i| f.short_params[*i] && f.raw_params[*i]) {
+                return fail(ctx(format!("parameter {i} is declared both rawparams and shortparams")));
+            }
+        }
+        if let Some(i) = (0..f.params as usize).find(|i| f.short_regs[*i] && !f.short_params[*i]) {
+            return fail(ctx(format!("parameter register %{i} is declared short but is not a shortparams position")));
+        }
+        if let Some(r) = (0..f.regs as usize).find(|r| f.raw_regs[*r] && f.short_regs[*r]) {
+            return fail(ctx(format!("register %{r} is declared both raw and short")));
+        }
         let mut labels = HashSet::new();
         for inst in &f.body {
             if let Inst::Label(l) = inst {
@@ -1229,6 +1434,7 @@ fn validate(program: &Program) -> Result<(), NirError> {
         // parameter slot -- and still be validated: every site just has to
         // agree with the same fixed answer, in whatever order it runs.
         let raw = &f.raw_regs;
+        let kind = |r: Reg| f.kind_of(r);
         for inst in &f.body {
             let mut used: Vec<Reg> = Vec::new();
             let mut targets: Vec<Label> = Vec::new();
@@ -1240,6 +1446,7 @@ fn validate(program: &Program) -> Result<(), NirError> {
                 Inst::PushErrorExit(l) => targets.push(*l),
                 Inst::Int { dst, .. }
                 | Inst::RawInt { dst, .. }
+                | Inst::ShortLit { dst, .. }
                 | Inst::Str { dst, .. }
                 | Inst::Char { dst, .. }
                 | Inst::Bool { dst, .. }
@@ -1264,8 +1471,9 @@ fn validate(program: &Program) -> Result<(), NirError> {
                 Inst::StaticGet { dst, .. } => used.push(*dst),
                 Inst::FnValue { dst, func: g } => {
                     match func(*g) {
-                        Some(g) if g.has_raw_abi() => {
-                            return fail(ctx(format!("fnvalue of {}: it uses the raw Int ABI and has no Block value", g.id)));
+                        Some(g) if g.has_scalar_abi() => {
+                            return fail(ctx(format!("fnvalue of {}: it uses the {} and has no Block value", g.id,
+                                if g.has_raw_abi() { "raw Int ABI" } else { "ShortString1 ABI" })));
                         }
                         Some(g) if !g.env => {}
                         _ => return fail(ctx(format!("fnvalue of {g}: not an environment-free function"))),
@@ -1276,8 +1484,9 @@ fn validate(program: &Program) -> Result<(), NirError> {
                 Inst::StaticSet { value, .. } => used.push(*value),
                 Inst::Closure { dst, func: g, captures } => {
                     match func(*g) {
-                        Some(g) if g.has_raw_abi() => {
-                            return fail(ctx(format!("closure of {}: it uses the raw Int ABI and has no Block value", g.id)));
+                        Some(g) if g.has_scalar_abi() => {
+                            return fail(ctx(format!("closure of {}: it uses the {} and has no Block value", g.id,
+                                if g.has_raw_abi() { "raw Int ABI" } else { "ShortString1 ABI" })));
                         }
                         Some(g) if g.env && g.captures as usize == captures.len() => {}
                         _ => return fail(ctx(format!("closure of {g}: bad target or capture count"))),
@@ -1386,96 +1595,104 @@ fn validate(program: &Program) -> Result<(), NirError> {
                         return fail(ctx(format!("rawint %{dst}: not declared in rawregs")));
                     }
                 }
+                Inst::ShortLit { dst, .. } => {
+                    if kind(*dst) != RegKind::Short {
+                        return fail(ctx(format!("shortlit %{dst}: not declared in shortregs")));
+                    }
+                }
                 // Call-site agreement with the callee's *physical* signature
-                // (RAW-INT-ABI.md): argument i is raw exactly when the
-                // callee's parameter i is, and the destination is raw
-                // exactly when the callee's result is. A mismatch is a
-                // lowering bug, never a silent conversion. Positions past
+                // (RAW-INT-ABI.md, SHORT-STRING.md): argument i has exactly
+                // the physical kind of the callee's parameter i, and the
+                // destination the kind of the callee's result. A mismatch is
+                // a lowering bug, never a silent conversion. Positions past
                 // the callee's declared list (a hidden trailing parameter)
                 // are ordinary tagged Values.
                 Inst::Call { dst, func: g, args, .. } | Inst::CallEnv { dst, func: g, args, .. } => {
                     let callee = func(*g).expect("target checked above");
                     for (i, a) in args.iter().enumerate() {
-                        if raw[*a as usize] != callee.raw_params[i] {
+                        let want = if i < callee.params as usize { callee.param_kind(i) } else { RegKind::Tagged };
+                        if kind(*a) != want {
                             return fail(ctx(format!(
                                 "call of {g}: argument {i} (%{a}) is {}, but the callee's parameter is {}",
-                                if raw[*a as usize] { "raw" } else { "tagged" },
-                                if callee.raw_params[i] { "raw" } else { "tagged" }
+                                kind(*a).name(),
+                                want.name()
                             )));
                         }
                     }
-                    if raw[*dst as usize] != callee.raw_result {
+                    if kind(*dst) != callee.result_kind() {
                         return fail(ctx(format!(
                             "call of {g}: result %{dst} is {}, but the callee's result is {}",
-                            if raw[*dst as usize] { "raw" } else { "tagged" },
-                            if callee.raw_result { "raw" } else { "tagged" }
+                            kind(*dst).name(),
+                            callee.result_kind().name()
                         )));
                     }
                     if let Inst::CallEnv { closure, .. } = inst {
-                        if raw[*closure as usize] {
+                        if kind(*closure) != RegKind::Tagged {
                             return fail(ctx(format!("callenv closure %{closure} must be tagged")));
                         }
                     }
                 }
                 Inst::Ret(r) => {
-                    if raw[*r as usize] != f.raw_result {
+                    if kind(*r) != f.result_kind() {
                         return fail(ctx(format!(
                             "ret %{r}: it is {}, but the function's result is {}",
-                            if raw[*r as usize] { "raw" } else { "tagged" },
-                            if f.raw_result { "raw" } else { "tagged" }
+                            kind(*r).name(),
+                            f.result_kind().name()
                         )));
                     }
                 }
                 Inst::Move { dst, src } => {
-                    if raw[*dst as usize] != raw[*src as usize] {
+                    if kind(*dst) != kind(*src) {
                         return fail(ctx(format!(
                             "move %{dst} = %{src}: %{dst} is {}, %{src} is {}",
-                            if raw[*dst as usize] { "raw" } else { "tagged" },
-                            if raw[*src as usize] { "raw" } else { "tagged" }
+                            kind(*dst).name(),
+                            kind(*src).name()
                         )));
                     }
                 }
                 Inst::Op { dst, op, args } => {
-                    if let Some(a) = args.iter().find(|a| raw[**a as usize] != op.raw_operands()) {
-                        let (is, want) = (raw[*a as usize], op.raw_operands());
+                    if let Some(a) = args.iter().find(|a| kind(**a) != op.operand_kind()) {
                         return fail(ctx(format!(
                             "op {op:?}: operand %{a} is {}, must be {}",
-                            if is { "raw" } else { "tagged" },
-                            if want { "raw" } else { "tagged" }
+                            kind(*a).name(),
+                            op.operand_kind().name()
                         )));
                     }
-                    if raw[*dst as usize] != op.raw_result() {
+                    if kind(*dst) != op.result_kind() {
                         return fail(ctx(format!(
                             "op {op:?}: result %{dst} is declared {}, must be {}",
-                            if raw[*dst as usize] { "raw" } else { "tagged" },
-                            if op.raw_result() { "raw" } else { "tagged" }
+                            kind(*dst).name(),
+                            op.result_kind().name()
                         )));
                     }
                 }
-                // A parameter register i < f.params declared raw is unboxed
-                // once in the prologue (codegen::clif), so its representation
-                // for the rest of the function -- including every backedge --
-                // is raw: the i-th argument must already be raw too. Every
-                // other rebound register (env=1's closure) stays ordinary
-                // tagged, like any operand in the catch-all below.
+                // A parameter register i < f.params declared raw or short is
+                // defined in that kind on entry (unboxed once in the
+                // prologue, or already a scalar for a scalar-ABI position),
+                // so its representation for the rest of the function --
+                // including every backedge -- is that kind: the i-th
+                // argument must already have it too. Every other rebound
+                // register (env=1's closure) stays ordinary tagged, like
+                // any operand in the catch-all below.
                 Inst::Tail { args } | Inst::TailEnv { args, .. } => {
-                    if let Some((i, a)) = args.iter().enumerate().find(|(i, a)| raw[**a as usize] != raw[*i]) {
+                    if let Some((i, a)) = args.iter().enumerate().find(|(i, a)| kind(**a) != kind(*i as Reg)) {
                         return fail(ctx(format!(
                             "tail argument {i} (%{a}) is {}, but parameter %{i} is declared {}",
-                            if raw[*a as usize] { "raw" } else { "tagged" },
-                            if raw[i] { "raw" } else { "tagged" }
+                            kind(*a).name(),
+                            kind(i as Reg).name()
                         )));
                     }
                     if let Inst::TailEnv { closure, .. } = inst {
-                        if raw[*closure as usize] {
+                        if kind(*closure) != RegKind::Tagged {
                             return fail(ctx(format!("tailenv closure %{closure} must be tagged")));
                         }
                     }
                 }
                 _ => {
-                    if let Some(r) = used.iter().find(|r| raw[**r as usize]) {
+                    if let Some(r) = used.iter().find(|r| kind(**r) != RegKind::Tagged) {
                         return fail(ctx(format!(
-                            "register %{r} is raw but used where a tagged Value is required"
+                            "register %{r} is {} but used where a tagged Value is required",
+                            kind(*r).name()
                         )));
                     }
                 }
@@ -1532,7 +1749,7 @@ fn validate_plans(program: &Program) -> Result<(), NirError> {
         if f.plan_result && f.results != 1 {
             return fail(ctx("planresult requires results=1".into()));
         }
-        if let Some(r) = (0..f.regs as usize).find(|r| plan[*r] && f.raw_regs[*r]) {
+        if let Some(r) = (0..f.regs as usize).find(|r| plan[*r] && f.scalar_regs[*r]) {
             return fail(ctx(format!("register %{r} is declared both raw and plan")));
         }
         // Per instruction: the plan registers it consumes, or an error.
@@ -1556,7 +1773,7 @@ fn validate_plans(program: &Program) -> Result<(), NirError> {
                                 if plan[*r as usize] {
                                     consumed.push(*r);
                                 }
-                                if f.raw_regs[*r as usize] {
+                                if f.scalar_regs[*r as usize] {
                                     return fail(ctx(format!("construct piece %{r} is raw")));
                                 }
                             }
@@ -1614,7 +1831,7 @@ fn validate_plans(program: &Program) -> Result<(), NirError> {
                 }
                 Inst::Label(_) | Inst::Unreachable | Inst::Raise { .. } | Inst::Fail { .. }
                 | Inst::ClearDeclaredError | Inst::PushErrorExit(_) | Inst::PopErrorExit | Inst::Reraise
-                | Inst::Jump(_) | Inst::DeclaredErrorEq { .. } | Inst::Int { .. } | Inst::RawInt { .. }
+                | Inst::Jump(_) | Inst::DeclaredErrorEq { .. } | Inst::Int { .. } | Inst::RawInt { .. } | Inst::ShortLit { .. }
                 | Inst::Str { .. } | Inst::Char { .. } | Inst::Bool { .. } | Inst::Unit { .. }
                 | Inst::Native { .. } | Inst::FnValue { .. } | Inst::SelfClosure { .. } | Inst::Capture { .. }
                 | Inst::StaticGet { .. } => {}
@@ -1787,7 +2004,7 @@ fn check_plan_linearity(f: &Function, consumes: &[Vec<Reg>]) -> Result<(), Strin
 /// caller).
 fn def_of(inst: &Inst) -> Option<Reg> {
     match inst {
-        Inst::Int { dst, .. } | Inst::RawInt { dst, .. } | Inst::Str { dst, .. } | Inst::Char { dst, .. }
+        Inst::Int { dst, .. } | Inst::RawInt { dst, .. } | Inst::ShortLit { dst, .. } | Inst::Str { dst, .. } | Inst::Char { dst, .. }
         | Inst::Bool { dst, .. } | Inst::Unit { dst } | Inst::Native { dst, .. } | Inst::FnValue { dst, .. }
         | Inst::SelfClosure { dst } | Inst::Capture { dst, .. } | Inst::Move { dst, .. }
         | Inst::Closure { dst, .. }
@@ -2189,6 +2406,230 @@ mod raw_abi_tests {
                 .unwrap_or_else(|e| panic!("{}", e.message));
             assert!(failing.functions[1].may_error);
             assert!(site(&failing), "a raw callee that can fail is checked (effects={effects})");
+        }
+    }
+}
+
+/// The ShortString1 physical kind (SHORT-STRING.md): `shortregs=`,
+/// `shortparams=`/`shortresult=`, the `shortlit` constant and the short ops.
+/// A ShortString1 is a distinct kind from RawInt although both are i64: the
+/// validator never lets one stand for the other, and never silently inserts a
+/// conversion.
+#[cfg(test)]
+mod short_string_tests {
+    use super::*;
+
+    fn message(r: Result<Program, NirError>) -> String {
+        match r {
+            Ok(_) => panic!("expected invalid NIR"),
+            Err(e) => e.message,
+        }
+    }
+
+    const PROGRAM: &str = "func 0 \"<program>\" params=0 env=0 regs=1 pnames=\"\" captures=0 rawregs=\"\"\n    %0 = unit\n    ret %0\nend\n\n";
+
+    fn program(rest: &str) -> String {
+        format!("nir 1 call-effects=1\n\n{PROGRAM}{rest}")
+    }
+
+    /// Function 1: a ShortString1 parameter and result, identity.
+    const CALLEE: &str = "func 1 \"callee\" params=1 env=0 regs=1 pnames=\"s\" captures=0 shortregs=\"0\" shortparams=\"0\" shortresult=1\n    ret %0\nend\n\n";
+
+    fn parses(text: &str) -> Program {
+        parse(text).unwrap_or_else(|e| panic!("{}", e.message))
+    }
+
+    #[test]
+    fn short_literals_and_ops_parse() {
+        let p = parses(&program(
+            "func 1 \"f\" params=0 env=0 regs=5 pnames=\"\" captures=0 rawregs=\"3\" shortregs=\"0 1\"\n    %0 = shortlit -1\n    %1 = shortlit 955\n    %2 = op shorteq %0 %1\n    %3 = op shortlen %1\n    %4 = op rbox %3\n    ret %4\nend\n",
+        ));
+        assert!(p.functions[1].short_regs[0] && p.functions[1].short_regs[1]);
+        assert!(p.functions[1].scalar_regs[0] && p.functions[1].scalar_regs[3] && !p.functions[1].scalar_regs[2]);
+    }
+
+    #[test]
+    fn nul_is_a_one_character_string_and_the_top_scalar_is_valid() {
+        // U+0000 is `shortlit 0` (a one-character String), distinct from
+        // Empty (-1); U+10FFFF is the highest scalar value.
+        let p = parses(&program(
+            "func 1 \"f\" params=0 env=0 regs=3 pnames=\"\" captures=0 shortregs=\"0 1 2\" shortresult=1\n    %0 = shortlit 0\n    %1 = shortlit 1114111\n    %2 = shortlit -1\n    ret %0\nend\n",
+        ));
+        assert!(p.functions[1].short_result);
+    }
+
+    #[test]
+    fn short_literals_outside_the_domain_are_rejected() {
+        for bad in ["-2", "1114112", "55296", "57343", "x"] {
+            let m = message(parse(&program(&format!(
+                "func 1 \"f\" params=0 env=0 regs=1 pnames=\"\" captures=0 shortregs=\"0\"\n    %0 = shortlit {bad}\n    ret %0\nend\n"
+            ))));
+            assert!(m.contains("shortlit"), "{bad}: {m}");
+        }
+    }
+
+    #[test]
+    fn shortlit_needs_a_short_register() {
+        let m = message(parse(&program(
+            "func 1 \"f\" params=0 env=0 regs=1 pnames=\"\" captures=0\n    %0 = shortlit 5\n    ret %0\nend\n",
+        )));
+        assert!(m.contains("not declared in shortregs"), "{m}");
+    }
+
+    #[test]
+    fn short_is_not_raw_int() {
+        // A ShortString1 operand of riadd is rejected: the common i64
+        // machine type is an implementation detail.
+        let m = message(parse(&program(
+            "func 1 \"f\" params=0 env=0 regs=3 pnames=\"\" captures=0 rawregs=\"2\" shortregs=\"0 1\"\n    %0 = shortlit 1\n    %1 = shortlit 2\n    %2 = op riadd %0 %1\n    %0 = shortlit 0\n    ret %2\nend\n",
+        )));
+        assert!(m.contains("operand") && m.contains("short") && m.contains("raw"), "{m}");
+        // ... and a RawInt operand of a short op.
+        let m = message(parse(&program(
+            "func 1 \"f\" params=0 env=0 regs=3 pnames=\"\" captures=0 rawregs=\"0\" shortregs=\"1\"\n    %0 = rawint 1\n    %1 = shortlit 2\n    %2 = op shorteq %0 %1\n    ret %2\nend\n",
+        )));
+        assert!(m.contains("operand") && m.contains("raw") && m.contains("short"), "{m}");
+        // A raw/short move is a bug, not a conversion.
+        let m = message(parse(&program(
+            "func 1 \"f\" params=0 env=0 regs=2 pnames=\"\" captures=0 rawregs=\"0\" shortregs=\"1\"\n    %0 = rawint 1\n    %1 = move %0\n    ret %1\nend\n",
+        )));
+        assert!(m.contains("move"), "{m}");
+    }
+
+    #[test]
+    fn a_register_is_never_both_raw_and_short() {
+        let m = message(parse(&program(
+            "func 1 \"f\" params=0 env=0 regs=1 pnames=\"\" captures=0 rawregs=\"0\" shortregs=\"0\"\n    %0 = rawint 1\n    ret %0\nend\n",
+        )));
+        assert!(m.contains("both raw and short"), "{m}");
+    }
+
+    #[test]
+    fn a_short_value_is_not_a_tagged_value() {
+        // A short register where a tagged Value is required (a list element).
+        let m = message(parse(&program(
+            "func 1 \"f\" params=0 env=0 regs=2 pnames=\"\" captures=0 shortregs=\"0\"\n    %0 = shortlit 1\n    %1 = op listnew %0\n    ret %1\nend\n",
+        )));
+        assert!(m.contains("short") && m.contains("tagged"), "{m}");
+    }
+
+    #[test]
+    fn matching_short_call_parses() {
+        let p = parses(&program(&format!(
+            "{CALLEE}func 2 \"caller\" params=0 env=0 regs=3 pnames=\"\" captures=0 shortregs=\"0 1\"\n    %0 = shortlit 955\n    %1 = call 1 %0\n    %2 = op shorttostr %1\n    ret %2\nend\n"
+        )));
+        assert!(p.functions[1].short_params[0] && p.functions[1].short_result);
+        assert!(p.functions[1].has_short_abi() && !p.functions[1].has_raw_abi() && p.functions[1].has_scalar_abi());
+        assert!(!p.functions[0].has_scalar_abi());
+    }
+
+    #[test]
+    fn tagged_argument_to_short_parameter_is_a_bug() {
+        let m = message(parse(&program(&format!(
+            "{CALLEE}func 2 \"caller\" params=1 env=0 regs=3 pnames=\"x\" captures=0 shortregs=\"1\"\n    %1 = call 1 %0\n    %2 = op shorttostr %1\n    ret %2\nend\n"
+        ))));
+        assert!(m.contains("argument 0") && m.contains("tagged") && m.contains("short"), "{m}");
+    }
+
+    #[test]
+    fn short_argument_to_a_tagged_parameter_is_a_bug() {
+        let tagged = "func 1 \"callee\" params=1 env=0 regs=1 pnames=\"s\" captures=0\n    ret %0\nend\n\n";
+        let m = message(parse(&program(&format!(
+            "{tagged}func 2 \"caller\" params=0 env=0 regs=2 pnames=\"\" captures=0 shortregs=\"0\"\n    %0 = shortlit 1\n    %1 = call 1 %0\n    ret %1\nend\n"
+        ))));
+        assert!(m.contains("argument 0") && m.contains("short") && m.contains("tagged"), "{m}");
+    }
+
+    #[test]
+    fn a_raw_argument_cannot_feed_a_short_parameter() {
+        let m = message(parse(&program(&format!(
+            "{CALLEE}func 2 \"caller\" params=0 env=0 regs=3 pnames=\"\" captures=0 rawregs=\"0\" shortregs=\"1\"\n    %0 = rawint 1\n    %1 = call 1 %0\n    %2 = op shorttostr %1\n    ret %2\nend\n"
+        ))));
+        assert!(m.contains("argument 0") && m.contains("raw") && m.contains("short"), "{m}");
+    }
+
+    #[test]
+    fn short_destination_for_a_tagged_result_is_a_bug() {
+        let tagged = "func 1 \"callee\" params=0 env=0 regs=1 pnames=\"\" captures=0\n    %0 = str \"a\"\n    ret %0\nend\n\n";
+        let m = message(parse(&program(&format!(
+            "{tagged}func 2 \"caller\" params=0 env=0 regs=1 pnames=\"\" captures=0 shortregs=\"0\"\n    %0 = call 1\n    ret %0\nend\n"
+        ))));
+        assert!(m.contains("result %0") && m.contains("short") && m.contains("tagged"), "{m}");
+    }
+
+    #[test]
+    fn tagged_destination_for_a_short_result_is_a_bug() {
+        let m = message(parse(&program(&format!(
+            "{CALLEE}func 2 \"caller\" params=0 env=0 regs=2 pnames=\"\" captures=0 shortregs=\"0\"\n    %0 = shortlit 1\n    %1 = call 1 %0\n    ret %1\nend\n"
+        ))));
+        assert!(m.contains("result %1") && m.contains("tagged") && m.contains("short"), "{m}");
+    }
+
+    #[test]
+    fn ret_kind_must_match_the_function_result() {
+        let m = message(parse(&program(
+            "func 1 \"c\" params=0 env=0 regs=1 pnames=\"\" captures=0 shortregs=\"0\" shortresult=0\n    %0 = shortlit 1\n    ret %0\nend\n",
+        )));
+        assert!(m.contains("ret %0"), "{m}");
+        let m = message(parse(&program(
+            "func 1 \"c\" params=0 env=0 regs=1 pnames=\"\" captures=0 shortresult=1\n    %0 = str \"a\"\n    ret %0\nend\n",
+        )));
+        assert!(m.contains("ret %0"), "{m}");
+    }
+
+    #[test]
+    fn a_short_parameter_register_must_be_a_shortparams_position() {
+        let m = message(parse(&program(
+            "func 1 \"c\" params=1 env=0 regs=1 pnames=\"s\" captures=0 shortregs=\"0\"\n    ret %0\nend\n",
+        )));
+        assert!(m.contains("not a shortparams position"), "{m}");
+        let m = message(parse(&program(
+            "func 1 \"c\" params=1 env=0 regs=1 pnames=\"s\" captures=0 shortparams=\"0\"\n    ret %0\nend\n",
+        )));
+        assert!(m.contains("shortparams position 0 is not declared in shortregs"), "{m}");
+    }
+
+    #[test]
+    fn a_short_abi_function_has_no_block_value() {
+        let m = message(parse(&program(&format!(
+            "{CALLEE}func 2 \"caller\" params=0 env=0 regs=2 pnames=\"\" captures=0\n    %0 = fnvalue 1\n    %1 = unit\n    ret %1\nend\n"
+        ))));
+        assert!(m.contains("ShortString1 ABI"), "{m}");
+    }
+
+    #[test]
+    fn the_program_function_cannot_use_the_short_abi() {
+        let m = message(parse(
+            "nir 1\n\nfunc 0 \"<program>\" params=0 env=0 regs=1 pnames=\"\" captures=0 shortregs=\"0\" shortresult=1\n    %0 = shortlit 1\n    ret %0\nend\n",
+        ));
+        assert!(m.contains("program function"), "{m}");
+    }
+
+    #[test]
+    fn tail_arguments_follow_the_parameter_kind() {
+        let m = message(parse(&program(
+            "func 1 \"loop\" params=1 env=0 regs=2 pnames=\"s\" captures=0 shortregs=\"0\" shortparams=\"0\" shortresult=1\n    %1 = str \"a\"\n    tail %1\nend\n",
+        )));
+        assert!(m.contains("tail argument 0") && m.contains("tagged") && m.contains("short"), "{m}");
+        parses(&program(
+            "func 1 \"loop\" params=1 env=0 regs=1 pnames=\"s\" captures=0 shortregs=\"0\" shortparams=\"0\" shortresult=1\n    tail %0\nend\n",
+        ));
+    }
+
+    /// A short-result callee has no error sentinel in its result word: its
+    /// call sites follow its own settled `may_error` even with call effects
+    /// disabled, exactly like a raw-result callee.
+    #[test]
+    fn short_result_call_site_follows_the_callee_even_without_call_effects() {
+        let caller = "func 2 \"caller\" params=1 env=0 regs=3 pnames=\"x\" captures=0 shortregs=\"0 1\" shortparams=\"0\"\n    %1 = call 1 %0\n    %2 = op shorttostr %1\n    ret %2\nend\n";
+        for effects in [0, 1] {
+            let text = format!("nir 1 call-effects={effects}\n\n{PROGRAM}{CALLEE}{caller}");
+            let p = parses(&text);
+            let site = |p: &Program| match &p.functions[2].body[0] {
+                Inst::Call { may_error, .. } => *may_error,
+                other => panic!("{other:?}"),
+            };
+            assert!(!site(&p), "a cannot-fail short callee is never checked (effects={effects})");
         }
     }
 }

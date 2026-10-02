@@ -131,7 +131,7 @@ pub struct Symbols {
 /// fail (the settled `may_error` summary) returns just the integer: that is
 /// the bare `i64 f(i64, ...)` shape.
 fn physical_results(f: &nir::Function) -> usize {
-    if f.raw_result && f.may_error {
+    if (f.raw_result || f.short_result) && f.may_error {
         2
     } else {
         f.results as usize
@@ -205,7 +205,7 @@ pub fn declare<M: Module>(module: &mut M, program: &nir::Program, export: bool) 
         let id = module
             .declare_function(&name, linkage, &signature_n(module, params, physical_results(f)))
             .map_err(module_error)?;
-        symbols.status_result.push(f.raw_result && f.may_error);
+        symbols.status_result.push((f.raw_result || f.short_result) && f.may_error);
         symbols.names.insert(id.as_u32(), format!("{name} ({})", f.name));
         symbols.direct.push(id);
         // A results>1 function (a scalar-replacement companion) is only
@@ -348,6 +348,14 @@ pub fn define<M: Module>(
                 // converts so that the generic ABI is correct by
                 // construction (a tagged small Int in, a raw integer out).
                 v = b.ins().sshr_imm_s(v, 1);
+            } else if f.short_params[i as usize] {
+                // Likewise for the ShortString1 ABI (SHORT-STRING.md): never
+                // reachable (only an exact closed instance has it), but
+                // correct by construction -- a tagged String in, its
+                // ShortString1 scalar out.
+                let helper = module.declare_func_in_func(symbols.helpers["rt_str_to_short"], b.func);
+                let call = b.ins().call(helper, &[params[0], v]);
+                v = b.inst_results(call)[0];
             }
             args.push(v);
         }
@@ -365,6 +373,22 @@ pub fn define<M: Module>(
                 b.ins().select(status, tagged, zero)
             } else {
                 tagged
+            };
+        }
+        if f.short_result {
+            // A ShortString1 result is materialized for the generic ABI
+            // (this wrapper never runs for it, see above), with the same
+            // status-word convention as a raw result.
+            let helper = module.declare_func_in_func(symbols.helpers["rt_short_to_str"], b.func);
+            let call_status = if f.may_error { Some(b.inst_results(call)[1]) } else { None };
+            let materialize = b.ins().call(helper, &[params[0], result]);
+            let tagged = b.inst_results(materialize)[0];
+            result = match call_status {
+                Some(status) => {
+                    let zero = b.ins().iconst(I64, 0);
+                    b.ins().select(status, tagged, zero)
+                }
+                None => tagged,
             };
         }
         if f.plan_result {
@@ -555,6 +579,11 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                 // already a raw signed machine integer, the proven-small
                 // value itself -- no tag test, no unboxing, nothing to
                 // re-check (the exact-call plan is the proof).
+                self.def_raw(i, v);
+            } else if f.short_params[i as usize] {
+                // ShortString1 ABI (SHORT-STRING.md): the incoming argument
+                // is already the scalar -- -1 Empty or the one character's
+                // Unicode scalar value -- never a GC root.
                 self.def_raw(i, v);
             } else if f.raw_regs[i as usize] {
                 // native/lower.tcl proved this parameter's whole range fits
@@ -1031,7 +1060,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
         } else if may_error {
             self.check(results[0]);
         }
-        if self.f.raw_regs[dst as usize] {
+        if self.f.scalar_regs[dst as usize] {
             self.def_raw(dst, results[0]);
         } else {
             self.def(dst, results[0]);
@@ -1153,6 +1182,10 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             Inst::RawInt { dst, digits } => {
                 let n: i64 = digits.parse().expect("validated rawint literal");
                 let v = self.b.ins().iconst(I64, n);
+                self.def_raw(*dst, v);
+            }
+            Inst::ShortLit { dst, value } => {
+                let v = self.b.ins().iconst(I64, *value);
                 self.def_raw(*dst, v);
             }
             Inst::Int { dst, digits } => {
@@ -1318,7 +1351,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             }
             Inst::Op { dst, op, args } => {
                 let v = self.op(*op, args);
-                if op.raw_result() {
+                if op.result_kind() != nir::RegKind::Tagged {
                     self.def_raw(*dst, v);
                 } else {
                     self.def(*dst, v);
@@ -1368,7 +1401,7 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
                     // raw exactly when parameter slot i is (rawregs=): a
                     // backedge into a raw parameter carries a raw value
                     // straight through, never re-boxing to cross it.
-                    if self.f.raw_regs[i] {
+                    if self.f.scalar_regs[i] {
                         self.def_raw(i as Reg, v);
                     } else {
                         self.def(i as Reg, v);
@@ -1392,9 +1425,11 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             Inst::Ret(reg) => {
                 let v = self.get(*reg);
                 self.restore_root_frame();
-                if self.f.raw_result && self.f.may_error {
-                    // Raw Int result of a function that can fail: the value
-                    // plus a nonzero status word (RAW-INT-ABI.md).
+                if (self.f.raw_result || self.f.short_result) && self.f.may_error {
+                    // Raw Int / ShortString1 result of a function that can
+                    // fail: the value plus a nonzero status word
+                    // (RAW-INT-ABI.md, SHORT-STRING.md). The scalar never
+                    // carries the error: Empty is -1, a successful value.
                     let ok = self.iconst(1);
                     self.b.ins().return_(&[v, ok]);
                 } else {
@@ -1514,6 +1549,22 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             RUnbox => {
                 // a[0] is a tagged Value proven to be a small Int.
                 self.b.ins().sshr_imm_s(a[0], 1)
+            }
+            // ShortString1 (SHORT-STRING.md): one i64, -1 Empty, else the
+            // scalar value. Equality is word equality (both encodings are
+            // canonical); the length is 0 for -1 and 1 otherwise.
+            ShortEq => {
+                let flag = self.b.ins().icmp(IntCC::Equal, a[0], a[1]);
+                self.bool_of(flag)
+            }
+            ShortLen => {
+                let flag = self.b.ins().icmp_imm_s(IntCC::NotEqual, a[0], -1);
+                self.b.ins().uextend(I64, flag)
+            }
+            StrToShort => self.call_helper("rt_str_to_short", &[self.vm, a[0]]),
+            StrSliceShort => self.call_helper("rt_str_slice_short", &[self.vm, a[0], a[1], a[2]]),
+            ShortToStr => {
+                return self.call_allocating("rt_short_to_str", &[self.vm, a[0]], "shorttostr", KIND_STR);
             }
             RIAdd => self.b.ins().iadd(a[0], a[1]),
             RISub => self.b.ins().isub(a[0], a[1]),

@@ -4,7 +4,7 @@
 # temporary-substring comparison, escaping substrings, mixed use, bounds
 # errors, Unicode boundaries (ASCII/BMP/astral), and GC stress.
 #
-# -string-region-opt 0 (or BOTLISH_NATIVE_STRING_REGION_OPT=0) disables the
+# -string-region-opt 0 -short-string-opt 0 (or BOTLISH_NATIVE_STRING_REGION_OPT=0) disables the
 # analysis outright: most tests here differentially compare it against the
 # default (on), the same way native-escape.test's own tests compare
 # -escape-opt 1 vs 0.
@@ -21,7 +21,7 @@ proc sourceHir {text} {
 
 # The String allocation count of TEXT under STRING-REGION-OPT (1 or 0).
 proc strAllocs {text opt} {
-    return [dict get [native::allocationReport [sourceHir $text] summary 1 -string-region-opt $opt] byKind String allocations]
+    return [dict get [native::allocationReport [sourceHir $text] summary 1 -string-region-opt $opt -short-string-opt 0] byKind String allocations]
 }
 
 # Asserts optimized (string-region-opt 1) and baseline (0) agree with the
@@ -29,8 +29,8 @@ proc strAllocs {text opt} {
 proc assertParity {text} {
     set hir [sourceHir $text]
     set interp [core::evalProgram [hir::lower $hir]]
-    set on [native::evalHir $hir -string-region-opt 1]
-    set off [native::evalHir $hir -string-region-opt 0]
+    set on [native::evalHir $hir -string-region-opt 1 -short-string-opt 0]
+    set off [native::evalHir $hir -string-region-opt 0 -short-string-opt 0]
     if {![core::value::equal $interp $on] || ![core::value::equal $interp $off]} {
         error "string-region-opt 1 ($on) vs 0 ($off) vs interp ($interp) mismatch"
     }
@@ -45,8 +45,8 @@ proc assertErrorParity {text} {
     foreach label {interp on off} {
         switch -- $label {
             interp { set code [catch {core::evalProgram $exprs} value options] }
-            on     { set code [catch {native::evalHir $hir -string-region-opt 1} value options] }
-            off    { set code [catch {native::evalHir $hir -string-region-opt 0} value options] }
+            on     { set code [catch {native::evalHir $hir -string-region-opt 1 -short-string-opt 0} value options] }
+            off    { set code [catch {native::evalHir $hir -string-region-opt 0 -short-string-opt 0} value options] }
         }
         if {!$code} {
             error "$label: expected an error, got [core::value::show $value 1]"
@@ -124,13 +124,13 @@ fn f(text, index):
 "
 
 test region-char-nir-1 {NIR: peek's region companion validates bounds (regioncheck) and its ordinary function is unaffected} -body {
-    set nirText [dict get [native::lower::program [sourceHir $::peekCallerSrc] -string-region-opt 1] text]
+    set nirText [dict get [native::lower::program [sourceHir $::peekCallerSrc] -string-region-opt 1 -short-string-opt 0] text]
     list [regexp {regioncheck} $nirText] [regexp -all {op substr } $nirText] [regexp {results=3} $nirText] \
         [regexp {retmulti} $nirText] [regexp {callmulti} $nirText]
 } -result {1 0 1 1 1}
 
 test region-char-nir-2 {without -string-region-opt, peek's body is an ordinary substr call, no region companion} -body {
-    set nirText [dict get [native::lower::program [sourceHir $::peekCallerSrc] -string-region-opt 0] text]
+    set nirText [dict get [native::lower::program [sourceHir $::peekCallerSrc] -string-region-opt 0 -short-string-opt 0] text]
     list [regexp {regioncheck} $nirText] [regexp {op substr } $nirText] [regexp {results=3} $nirText]
 } -result {0 1 0}
 
@@ -175,7 +175,7 @@ fn f(text):
 
 f("hello world")
 }
-    set nirText [dict get [native::lower::program [sourceHir $text] -string-region-opt 1] text]
+    set nirText [dict get [native::lower::program [sourceHir $text] -string-region-opt 1 -short-string-opt 0] text]
     list [regexp {regioneq} $nirText] [regexp {op substr } $nirText] [regexp {op streq} $nirText]
 } -result {1 0 0}
 
@@ -211,7 +211,7 @@ fn f(text):
 
 f("hello wonderful world")
 }
-    set nirText [dict get [native::lower::program [sourceHir $text] -string-region-opt 1] text]
+    set nirText [dict get [native::lower::program [sourceHir $text] -string-region-opt 1 -short-string-opt 0] text]
     list [regexp {op isub } $nirText] [regexp {op substr } $nirText] [regexp {op strlen } $nirText]
 } -result {1 0 0}
 
@@ -243,7 +243,7 @@ test region-escape-large-source-1 {a small escaping substring of a large source 
     set big [string repeat "x" 100000]
     set text "fn f(text):\n    substring(text, 0, 3)\n\nf([corpus::literal $big])"
     set hir [sourceHir $text]
-    set value [native::evalHir $hir -string-region-opt 1]
+    set value [native::evalHir $hir -string-region-opt 1 -short-string-opt 0]
     list [core::value::show $value 1] [dict get [native::allocationReport $hir summary 1] byKind String payloadBytes]
 } -result {{"xxx"} 3}
 
@@ -335,7 +335,7 @@ fn f():
     scan([corpus::literal "a,b,c\na,b,c\na,b,c\n"], 0, 0)
 f()
 "
-    native::evalHir [sourceHir $text] -string-region-opt 1
+    native::evalHir [sourceHir $text] -string-region-opt 1 -short-string-opt 0
 } -result {int 9}
 
 test region-gc-stress-2 {a temporary substring comparison over many rows survives GC stress} -setup {
@@ -357,7 +357,7 @@ fn count(text, index, hits):
 fn f():
     count([corpus::literal $text], 0, 0)
 f()
-    "] -string-region-opt 1
+    "] -string-region-opt 1 -short-string-opt 0
 } -result {int 40}
 
 # ---------------------------------------------------------------------------
@@ -370,10 +370,10 @@ test region-csv-corpus-1 {csv.bot's own peek() sites: string-region-opt material
     set text [corpus::literal "id,name\n1,Alice\n2,Bob\n3,Carol\n"]
     set text "csv_parse($text)"
     set hir [corpus::program csv $text]
-    set on [dict get [native::allocationReport $hir summary 1 -string-region-opt 1] byKind String allocations]
-    set off [dict get [native::allocationReport $hir summary 1 -string-region-opt 0] byKind String allocations]
-    set onValue [native::evalHir $hir -string-region-opt 1]
-    set offValue [native::evalHir $hir -string-region-opt 0]
+    set on [dict get [native::allocationReport $hir summary 1 -string-region-opt 1 -short-string-opt 0] byKind String allocations]
+    set off [dict get [native::allocationReport $hir summary 1 -string-region-opt 0 -short-string-opt 0] byKind String allocations]
+    set onValue [native::evalHir $hir -string-region-opt 1 -short-string-opt 0]
+    set offValue [native::evalHir $hir -string-region-opt 0 -short-string-opt 0]
     list [expr {$on < $off}] [expr {$onValue eq $offValue}]
 } -result {1 1}
 

@@ -7,7 +7,7 @@
 # (i))` (lib/web.tcl's Emailish? shape) -- with zero one-character String
 # allocation, the same value/error as the unoptimized baseline either way.
 #
-# -string-region-opt 0 (or BOTLISH_NATIVE_STRING_REGION_OPT=0) disables this
+# -string-region-opt 0 -short-string-opt 0 (or BOTLISH_NATIVE_STRING_REGION_OPT=0) disables this
 # analysis and lowering outright (the same flag native-string-region.test's
 # own tests use): most tests here differentially compare it against the
 # default (on).
@@ -23,14 +23,14 @@ proc sourceHir {text} {
 }
 
 proc strAllocs {text opt} {
-    return [dict get [native::allocationReport [sourceHir $text] summary 1 -string-region-opt $opt] byKind String allocations]
+    return [dict get [native::allocationReport [sourceHir $text] summary 1 -string-region-opt $opt -short-string-opt 0] byKind String allocations]
 }
 
 proc assertParity {text} {
     set hir [sourceHir $text]
     set interp [core::evalProgram [hir::lower $hir]]
-    set on [native::evalHir $hir -string-region-opt 1]
-    set off [native::evalHir $hir -string-region-opt 0]
+    set on [native::evalHir $hir -string-region-opt 1 -short-string-opt 0]
+    set off [native::evalHir $hir -string-region-opt 0 -short-string-opt 0]
     if {![core::value::equal $interp $on] || ![core::value::equal $interp $off]} {
         error "string-region-opt 1 ($on) vs 0 ($off) vs interp ($interp) mismatch"
     }
@@ -43,8 +43,8 @@ proc assertErrorParity {text} {
     foreach label {interp on off} {
         switch -- $label {
             interp { set code [catch {core::evalProgram $exprs} value options] }
-            on     { set code [catch {native::evalHir $hir -string-region-opt 1} value options] }
-            off    { set code [catch {native::evalHir $hir -string-region-opt 0} value options] }
+            on     { set code [catch {native::evalHir $hir -string-region-opt 1 -short-string-opt 0} value options] }
+            off    { set code [catch {native::evalHir $hir -string-region-opt 0 -short-string-opt 0} value options] }
         }
         if {!$code} {
             error "$label: expected an error, got [core::value::show $value 1]"
@@ -132,7 +132,7 @@ test view-classify-nir-1 {NIR: is_tcl_alnum(peek(...)) lowers to strregiontclaln
 fn f(text, index):
     is_tcl_alnum(peek(text, index))
 "
-    set nirText [dict get [native::lower::program [sourceHir $text] -string-region-opt 1] text]
+    set nirText [dict get [native::lower::program [sourceHir $text] -string-region-opt 1 -short-string-opt 0] text]
     list [regexp {op strregiontclalnum } $nirText] [regexp {op substr } $nirText] [regexp {op strtclalnum } $nirText]
 } -result {1 0 0}
 
@@ -182,7 +182,7 @@ test view-predicate-nir-1 {NIR: a user predicate's body is inlined against the r
 fn f(text, index):
     is_local_char(peek(text, index))
 "
-    set nirText [dict get [native::lower::program [sourceHir $text] -string-region-opt 1] text]
+    set nirText [dict get [native::lower::program [sourceHir $text] -string-region-opt 1 -short-string-opt 0] text]
     list [regexp {op regioneq } $nirText] [regexp {op strregiontclalnum } $nirText] \
         [regexp {op substr } $nirText] [regexp {call \d+ } $nirText]
 } -result {1 1 0 0}
@@ -272,7 +272,7 @@ fn f():
     scan([corpus::literal [string repeat {ab.c_d-e@f} 20]], 0, 0)
 f()
 "
-    native::evalHir [sourceHir $text] -string-region-opt 1
+    native::evalHir [sourceHir $text] -string-region-opt 1 -short-string-opt 0
 } -result {int 180}
 
 # ---------------------------------------------------------------------------
@@ -293,7 +293,7 @@ f()
 # (hir/stringregion.tcl, untouched by this milestone, per spec item 34) can
 # no longer prove *every* char_at result is a purely transient,
 # region-testable value once that value's only consumer is an opaque call:
-# -string-region-opt 1 used to eliminate every one of emailish?'s own
+# -string-region-opt 1 -short-string-opt 0 used to eliminate every one of emailish?'s own
 # one-character String allocations for both corpus strings below (0, both
 # cases); it now eliminates only the ones reached through a *direct*
 # char_at call, not the ones reached through scan_while's predicate
@@ -326,10 +326,10 @@ proc emailishHir {text} {
 
 proc assertEmailishParity {text} {
     set hir [emailishHir $text]
-    set on [dict get [native::allocationReport $hir summary 1 -string-region-opt 1] byKind String allocations]
-    set off [dict get [native::allocationReport $hir summary 1 -string-region-opt 0] byKind String allocations]
-    set onValue [native::evalHir $hir -string-region-opt 1]
-    set offValue [native::evalHir $hir -string-region-opt 0]
+    set on [dict get [native::allocationReport $hir summary 1 -string-region-opt 1 -short-string-opt 0] byKind String allocations]
+    set off [dict get [native::allocationReport $hir summary 1 -string-region-opt 0 -short-string-opt 0] byKind String allocations]
+    set onValue [native::evalHir $hir -string-region-opt 1 -short-string-opt 0]
+    set offValue [native::evalHir $hir -string-region-opt 0 -short-string-opt 0]
     return [list $on [expr {$off > 0}] [expr {$onValue eq $offValue}] $onValue]
 }
 

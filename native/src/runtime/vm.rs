@@ -155,6 +155,14 @@ pub struct Vm {
     /// roots -- harmless for the brief window before a program is compiled.
     framemap: Rc<ProgramMap>,
     native_stack: Option<NativeStack>,
+    /// The interned static Strings a ShortString1 materializes to for Empty
+    /// and the scalars U+0000..U+00FF (`short_string`): slot 0..=255 is the
+    /// one-character String of that scalar, slot 256 the empty String; 0 =
+    /// not built yet. Strings are immutable and compared structurally, so
+    /// sharing one object is unobservable; being static they are never
+    /// collected (heap.rs skips `is_static`) and need no rooting.
+    short_cache: Vec<Value>,
+    short_objects: Vec<*mut Header>,
 }
 
 pub const VM_SS_TOP_OFFSET: i32 = offset_of!(Vm, ss_top) as i32;
@@ -195,6 +203,8 @@ impl Vm {
             const_table: Vec::new(),
             statics: Vec::new(),
             framemap: Rc::new(ProgramMap::new()),
+            short_cache: vec![0; 257],
+            short_objects: Vec::new(),
             native_stack: {
                 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
                 { Some(NativeStack::current().expect("pthread stack bounds")) }
@@ -386,6 +396,33 @@ impl Vm {
         self.alloc(obj, bytes)
     }
 
+    /// The String a ShortString1 scalar SHORT stands for (-1: the empty
+    /// String, else the one character of that Unicode scalar value). Empty
+    /// and U+0000..U+00FF are interned static Strings, built once: a
+    /// materialization of a Latin-1 character (the whole ASCII range
+    /// included) allocates nothing, exactly like the String literal it may
+    /// have come from. Any other scalar allocates a fresh one-character
+    /// String.
+    pub fn short_string(&mut self, short: i64) -> Value {
+        let slot = match short {
+            -1 => Some(256),
+            0..=255 => Some(short as usize),
+            _ => None,
+        };
+        let Some(slot) = slot else {
+            let c = char::from_u32(short as u32).expect("a ShortString1 scalar is a Unicode scalar value");
+            return self.new_str_known(c.to_string(), 1, c.is_ascii());
+        };
+        if self.short_cache[slot] != 0 {
+            return self.short_cache[slot];
+        }
+        let text = if short == -1 { String::new() } else { char::from_u32(short as u32).unwrap().to_string() };
+        let object = Box::into_raw(Box::new(str_object(text, true))) as *mut Header;
+        self.short_objects.push(object);
+        self.short_cache[slot] = object as Value;
+        object as Value
+    }
+
     pub fn new_list(&mut self, items: Vec<Value>) -> Value {
         if let Some(v) = self.reject_oversized_collection(items.len()) {
             return v;
@@ -462,6 +499,9 @@ impl Vm {
 impl Drop for Vm {
     fn drop(&mut self) {
         for &object in &self.statics {
+            unsafe { super::heap::free_object(object) };
+        }
+        for &object in &self.short_objects {
             unsafe { super::heap::free_object(object) };
         }
     }

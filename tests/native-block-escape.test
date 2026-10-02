@@ -638,8 +638,10 @@ test blockescape-region-companion-flags-both-off {both off: the fully unoptimize
 test blockescape-region-companion-refined-checks-1 {refined-checks.ir: local_extra_chars' List/ImmutableSet are module-init only (R2.a.1); Block drops from 803 (R2.a.1's own per-call local_char? closure, capturing the module set) to 0 -- local_char? is envless now, a module-static reference is never a capture (MODULE-STATIC-RETAINED-VALUES.md); the exact predicate is_tcl_alpha makes the TLD scan a StringRegion consumer, so String falls 8004 -> 6804 (the local part's set-membership characters remain)} -body {
     core::loadLibrary web
     set hir [nativeHirOfIR [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
-    set on [native::allocationReport $hir summary 1]
-    list [native::evalHir $hir] [dict get $on total allocations] [dict get $on byKind Block allocations] \
+    # -short-string-opt 0: the pinned String count is the region analysis's
+    # own effect; ShortString1 (SHORT-STRING.md) removes three more.
+    set on [native::allocationReport $hir summary 1 -short-string-opt 0]
+    list [native::evalHir $hir -short-string-opt 0] [dict get $on total allocations] [dict get $on byKind Block allocations] \
         [dict get $on byKind String allocations] [dict get $on byKind List allocations] \
         [dict get $on byKind ImmutableSet allocations]
 } -result {{list {{int 400} {int 0}}} 6820 0 6804 12 2}

@@ -1,0 +1,1024 @@
+# short-string.test -- SHORT-STRING.md: the ShortString1 physical representation.
+#
+# A String the existing frontend facts prove has at most one character may be
+# carried as ONE signed i64 -- ShortString1: -1 is Empty, 0..0x10FFFF is the
+# one Unicode scalar value (U+0000 is 0, never Empty) -- instead of a tagged
+# String object. The semantic type is still String. This file pins (1) the
+# proof inputs and the plan (native/shortstring.tcl), (2) the NIR it emits
+# (explicit physical kind, conversions only at frontiers, exact transport),
+# (3) the controls (long, unknown, open, dynamic, storage), (4) Unicode/NUL/
+# Empty behavior, (5) errors, (6) GC, standalone executables and (7)
+# differential parity: every backend, and native with the optimization on and
+# off, with and without leaf inlining.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 100000
+
+testConstraint executableAot [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64}}]
+
+proc dedent {text} {
+    set lines [split $text \n]
+    set indent 1000
+    foreach line $lines {
+        if {[string trim $line] eq ""} continue
+        set n [expr {[string length $line] - [string length [string trimleft $line " "]]}]
+        if {$n < $indent} { set indent $n }
+    }
+    return [join [lmap line $lines {string range $line $indent end}] \n]
+}
+
+# The HIR of surface program TEXT (dedented).
+proc srcHir {text} {
+    set dir [makeDirectory {short string}]
+    set path [file join $dir p.bot]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts $channel [dedent $text]
+    close $channel
+    try {
+        return [surface::readProgramFile $path]
+    } finally {
+        removeDirectory {short string}
+    }
+}
+
+# Leaf inlining removes a small callee's separate function, and with it the
+# calling convention under test: most pins below disable it.
+set noInline {-tiny-leaf-inline-opt 0}
+
+proc nirOf {text args} {
+    return [native::nir [srcHir $text] {*}$args]
+}
+
+# The text of the NIR function named NAME (optionally of instance KEY).
+proc fnText {nir name {key ""}} {
+    set found {}
+    foreach body [split [string map [list "\n\nfunc " "\n\u0001func "] $nir] \u0001] {
+        if {![regexp {^func \d+ "} $body]} continue
+        if {![regexp [format {^func \d+ "%s"} [string map {. \\.} $name]] $body]} continue
+        if {$key ne "" && ![regexp [format {instance="%s"} $key] $body]} continue
+        lappend found [string trim $body]
+    }
+    if {[llength $found] != 1} {
+        error "expected one function $name ($key), found [llength $found] in:\n$nir"
+    }
+    return [lindex $found 0]
+}
+
+proc countIn {pattern text} {
+    return [llength [regexp -all -inline $pattern $text]]
+}
+
+# {shortparams shortresult shortregs rawregs} of NIR function TEXT's header.
+proc physical {text} {
+    set head [lindex [split $text \n] 0]
+    set params ""
+    regexp {shortparams="([^"]*)"} $head -> params
+    set regs ""
+    regexp {shortregs="([^"]*)"} $head -> regs
+    set raws ""
+    regexp {rawregs="([^"]*)"} $head -> raws
+    return [list $params [regexp {shortresult=1} $head] $regs $raws]
+}
+
+proc shortParams {text} { return [lindex [physical $text] 0] }
+proc shortResult {text} { return [lindex [physical $text] 1] }
+proc shortRegs {text} { return [lindex [physical $text] 2] }
+
+# Static ShortString1 conversion counts {strtoshort shorttostr} of function NAME.
+proc conversionsIn {nir name} {
+    set text [fnText $nir $name]
+    return [list [countIn {op strtoshort} $text] [countIn {op shorttostr} $text]]
+}
+
+# One line per used instance: "label=P,P>R" with short/val per position.
+proc shortPlan {text args} {
+    set lowered [native::lowered [srcHir $text] {*}$args]
+    set spec [dict get $lowered specialization]
+    set plan [dict get $lowered shortPlan]
+    set lines {}
+    foreach id [dict get $spec used] {
+        set p [dict get $plan $id]
+        set label [hir::specialize::label $spec $id]
+        if {$label eq "<program>"} continue
+        set params [lmap k [dict get $p params] {expr {$k eq "short" ? "short" : "val"}}]
+        lappend lines "$label=[join $params ,]>[expr {[dict get $p result] eq "short" ? "short" : "val"}]"
+    }
+    return [lsort $lines]
+}
+
+# {paramReasons resultReason} of instance LABEL.
+proc shortReasons {text label args} {
+    set lowered [native::lowered [srcHir $text] {*}$args]
+    set spec [dict get $lowered specialization]
+    set plan [dict get $lowered shortPlan]
+    foreach id [dict get $spec used] {
+        if {[hir::specialize::label $spec $id] eq $label} {
+            set p [dict get $plan $id]
+            return [list [dict get $p paramReasons] [dict get $p resultReason]]
+        }
+    }
+    error "no instance $label"
+}
+
+# {paramFacts resultFact} of instance LABEL: the proof the plan rests on.
+proc shortFacts {text label args} {
+    set lowered [native::lowered [srcHir $text] {*}$args]
+    set spec [dict get $lowered specialization]
+    set plan [dict get $lowered shortPlan]
+    foreach id [dict get $spec used] {
+        if {[hir::specialize::label $spec $id] eq $label} {
+            set p [dict get $plan $id]
+            return [list [dict get $p paramFacts] [dict get $p resultFact]]
+        }
+    }
+    error "no instance $label"
+}
+
+# The outcome of native::evalHir of HIR: {value V} or {error CODE}.
+proc nativeOutcome {hir args} {
+    resetEffects
+    if {[catch {native::evalHir $hir {*}$args} result options]} {
+        return [list error [dict get $options -errorcode]]
+    }
+    return [list value [core::value::show $result 1]]
+}
+
+# Every backend, and native with the optimization on and off (leaf inlining
+# on and off), agree on TEXT; returns the one outcome ("kind:text").
+proc parityShort {text} {
+    set hir [srcHir $text]
+    set outcomes {}
+    foreach backend {interp compile cranelift-generic cranelift} {
+        set outcome [outcomeUnderHir $backend $hir]
+        lappend outcomes [lindex $outcome 0]:[lindex $outcome 1]
+    }
+    set prepared [native::prepareHir $hir]
+    foreach opt {0 1} {
+        foreach inline {0 1} {
+            set outcome [nativeOutcome $prepared -short-string-opt $opt -tiny-leaf-inline-opt $inline]
+            lappend outcomes [lindex $outcome 0]:[lindex $outcome 1]
+        }
+    }
+    if {[llength [lsort -unique $outcomes]] != 1} {
+        error "backends disagree:\n[join $outcomes \n]"
+    }
+    return [lindex $outcomes 0]
+}
+
+# The NIR of TEXT with the optimization off must contain no ShortString1 at all.
+proc noShortAnywhere {nir} {
+    return [expr {[countIn {shortregs|shortparams|shortresult|shortlit|strtoshort|shorttostr|shortlen|shorteq|strsliceshort} $nir] == 0}]
+}
+
+# ---------------------------------------------------------------------------
+# Sources shared below
+
+set chooseSource {
+    fn choose(flag):
+        if flag:
+            ""
+        else:
+            "x"
+
+    [length(choose(true)), length(choose(false)), choose(true) == "", choose(false) == "x"]
+}
+
+set lamSource {
+    fn lam(flag):
+        if flag:
+            "λ"
+        else:
+            ""
+
+    [length(lam(true)), lam(true) == "λ", lam(false) == ""]
+}
+
+set chainSource {
+    fn pick(flag):
+        if flag:
+            ""
+        else:
+            "λ"
+
+    fn h(s):
+        [length(s), s == "λ", s == ""]
+
+    fn g(s):
+        h(s)
+
+    fn f(s):
+        g(s)
+
+    [f(pick(true)), f(pick(false))]
+}
+
+# ---------------------------------------------------------------------------
+# Semantics: what a Botlish character is, and the encoding's domain
+
+test short-unicode-model-is-the-scalar-value {a non-ASCII character is one semantic character: length counts scalars, never bytes} -body {
+    parityShort {
+        [length("ä"), length("€"), length("λ"), length("猫"), length("😀"), length("e")]
+    }
+} -result {value:[1, 1, 1, 1, 1, 1]}
+
+test short-unicode-model-astral-is-one-character {a supplementary-plane character is one scalar (one character), though 4 UTF-8 bytes and two UTF-16 units} -body {
+    parityShort {
+        [length("😀"), length(substring("a😀b", 1, 2)), substring("a😀b", 1, 2) == "😀"]
+    }
+} -result {value:[1, 1, true]}
+
+# ---------------------------------------------------------------------------
+# The proof and the plan (native/shortstring.tcl)
+
+test short-plan-branch-join-of-empty-and-one {fn choose(flag): "" or "x": the result position is ShortString1} -body {
+    shortPlan $chooseSource {*}$noInline
+} -result {choose<bool>=val>short}
+
+test short-plan-facts-empty-or-one {the fact behind it is the lattice join empty|one = maybe (length [0,1]), not an exact length} -body {
+    shortFacts $chooseSource choose<bool> {*}$noInline
+} -result {over:not-string maybe}
+
+test short-plan-non-ascii-branch-join {fn lam(flag): "λ" or "": non-ASCII, still ShortString1 (this is not ASCII packing)} -body {
+    shortPlan $lamSource {*}$noInline
+} -result {lam<bool>=val>short}
+
+test short-plan-two-one-character-branches {"x" or "λ": two one-character values join to a one-character value of unknown scalar} -body {
+    set text {
+        fn two(flag):
+            if flag:
+                "x"
+            else:
+                "λ"
+
+        two(true) == "x"
+    }
+    list [shortPlan $text {*}$noInline] [shortFacts $text two<bool> {*}$noInline]
+} -result {two<bool>=val>short {over:not-string one}}
+
+test short-plan-chain-parameters {f -> g -> h forwards a ShortString1 parameter at every position} -body {
+    shortPlan $chainSource {*}$noInline
+} -result {f<str>=short>val g<str>=short>val h<str>=short>val pick<bool>=val>short}
+
+test short-plan-parameter-control {a closed helper whose String parameter is proven length <= 1 gets a ShortString1 parameter} -body {
+    set text {
+        fn describe(c):
+            [length(c), c == "", c == "q"]
+
+        [describe(""), describe("q"), describe("é")]
+    }
+    list [shortPlan $text {*}$noInline] [shortFacts $text describe<str> {*}$noInline]
+} -result {describe<str>=short>val {maybe over:not-string}}
+
+test short-plan-result-control {a closed helper returning a String proven length <= 1 gets a ShortString1 result, consumed by length and equality} -body {
+    set text {
+        fn mark(n):
+            if n < 0:
+                ""
+            else:
+                "+"
+
+        [length(mark(3)), mark(3) == "+", mark(-1) == ""]
+    }
+    shortPlan $text {*}$noInline
+} -result {mark<int>=val>short}
+
+# --- negative controls
+
+test short-plan-long-literal-stays-tagged {"ab" has two characters: never ShortString1} -body {
+    set text {
+        fn two(c):
+            length(c)
+
+        two("ab")
+    }
+    list [shortPlan $text {*}$noInline] [shortReasons $text two<str> {*}$noInline] [shortFacts $text two<str> {*}$noInline]
+} -result {two<str>=val>val {length-gt-1 not-string} {over:long over:not-string}}
+
+test short-plan-unknown-length-stays-tagged {a String of unknown length (a caller passes concat's result) stays tagged: no speculation from the other callers} -body {
+    set text {
+        fn size(c):
+            length(c)
+
+        [size("a"), size(concat("a", "b"))]
+    }
+    list [shortPlan $text {*}$noInline] [shortReasons $text size<str> {*}$noInline]
+} -result {size<str>=val>val {unknown-length not-string}}
+
+test short-plan-one-long-branch-poisons-the-join {a join with a two-character branch is not ShortString1} -body {
+    set text {
+        fn pick(flag):
+            if flag:
+                "a"
+            else:
+                "bc"
+
+        length(pick(true))
+    }
+    list [shortPlan $text {*}$noInline] [shortReasons $text pick<bool> {*}$noInline]
+} -result {pick<bool>=val>val {not-string length-gt-1}}
+
+test short-plan-concatenation-is-not-assumed-short {"" + "" is empty and one + one is two characters: concat is not a short producer, only an independently proven bound counts} -body {
+    set text {
+        fn cat(a, b):
+            concat(a, b)
+
+        length(cat("x", "y"))
+    }
+    list [shortPlan $text {*}$noInline] [shortReasons $text {cat<str, str>} {*}$noInline]
+} -result {{{cat<str, str>=short,short>val}} {{{} {}} unknown-length}}
+
+test short-plan-dead-long-branch-does-not-poison {a branch the existing range analysis proves dead contributes nothing: the long literal in it does not force the join} -body {
+    set text {
+        fn pick(n):
+            if n < 5:
+                "x"
+            else:
+                "a long dead string"
+
+        pick(1) == "x"
+    }
+    shortPlan $text {*}$noInline
+} -result {pick<int>=val>short}
+
+test short-plan-open-instance-stays-tagged {a function whose value escapes (a generic open instance) keeps the tagged String ABI even though its result is bounded} -body {
+    set text {
+        fn pick(flag):
+            if flag:
+                ""
+            else:
+                "y"
+
+        fn apply(f, x):
+            f(x)
+
+        [apply(pick, true), length(pick(false))]
+    }
+    list [shortReasons $text pick<generic> {*}$noInline] [shortFacts $text pick<generic> {*}$noInline]
+} -result {{not-string open-instance} {over:not-string maybe}}
+
+# ---------------------------------------------------------------------------
+# Encoding: Empty is -1, NUL is 0, the domain is the scalar values
+
+test short-constants-are-generated-directly {"" "A" NUL "λ" "猫" an astral character and U+10FFFF are shortlit constants: never a String built and decoded} -body {
+    set nul [format %c 0]
+    set top [format %c 0x10FFFF]
+    set text "fn lit(flag):\n    if flag:\n        \"\"\n    else:\n        \"A\"\n\nfn lit2(flag):\n    if flag:\n        \"$nul\"\n    else:\n        \"λ\"\n\nfn lit3(flag):\n    if flag:\n        \"猫\"\n    else:\n        \"😀\"\n\nfn lit4(flag):\n    if flag:\n        \"$top\"\n    else:\n        \"\"\n\n\[lit(true) == \"\", lit2(true) == \"$nul\", lit3(true) == \"猫\", lit4(true) == \"$top\"\]"
+    set nir [nirOf $text {*}$noInline]
+    set all [lmap name {lit lit2 lit3 lit4} {fnText $nir $name}]
+    list [lmap f $all {regexp -all -inline {shortlit -?\d+} $f}] [countIn {op strtoshort|op shorttostr} [join $all]]
+} -result {{{{shortlit -1} {shortlit 65}} {{shortlit 0} {shortlit 955}} {{shortlit 29483} {shortlit 128512}} {{shortlit 1114111} {shortlit -1}}} 0}
+
+test short-nul-is-not-empty {U+0000 is a one-character String (0), distinct from Empty (-1): length, equality and emptiness all see it} -body {
+    set nul [format %c 0]
+    parityShort "
+        fn pick(flag):
+            if flag:
+                \"$nul\"
+            else:
+                \"\"
+
+        \[length(pick(true)), length(pick(false)), pick(true) == \"\", pick(false) == \"\", pick(true) == \"$nul\", pick(true) == pick(false)\]
+    "
+} -result {value:[1, 0, false, true, true, false]}
+
+test short-highest-scalar-round-trips {U+10FFFF, the highest scalar value, survives scalar -> String -> scalar} -body {
+    set top [format %c 0x10FFFF]
+    parityShort "
+        fn pick(flag):
+            if flag:
+                \"$top\"
+            else:
+                \"\"
+
+        s = pick(true)
+        \[length(s), s == \"$top\", s == \"\"\]
+    "
+} -result {value:[1, true, false]}
+
+# ---------------------------------------------------------------------------
+# NIR: an explicit physical kind, conversions only at frontiers
+
+test short-nir-result-is-a-short-register-join {the choose join is one short register, both branches shortlit, `shortresult=1`, nothing converted} -body {
+    set choose [fnText [nirOf $chooseSource {*}$noInline] choose]
+    list [shortResult $choose] [shortParams $choose] [countIn {shortlit} $choose] [countIn {= str|op strtoshort|op shorttostr} $choose]
+} -result {1 {} 2 0}
+
+test short-nir-is-not-rawint {a ShortString1 register is declared shortregs, never rawregs: the two kinds are distinct in NIR even though both are an i64} -body {
+    set choose [fnText [nirOf $chooseSource {*}$noInline] choose]
+    lassign [physical $choose] - - shorts raws
+    list [expr {$shorts ne ""}] [expr {$raws eq ""}]
+} -result {1 1}
+
+test short-nir-length-and-equality-are-scalar {length of a ShortString1 is `shortlen`, equality `shorteq`: no strlen / streq / String} -body {
+    set program [fnText [nirOf $chooseSource {*}$noInline] <program>]
+    list [countIn {op shortlen} $program] [countIn {op shorteq} $program] [countIn {op strlen|op streq|op veq} $program] [countIn {op shorttostr} $program]
+} -result {2 2 0 0}
+
+test short-nir-parameter-is-short-in-the-callee {the helper's parameter is a short register: no strtoshort, scalar length/eq inside} -body {
+    set text {
+        fn describe(c):
+            [length(c), c == "", c == "q"]
+
+        [describe(""), describe("q")]
+    }
+    set describe [fnText [nirOf $text {*}$noInline] describe]
+    list [shortParams $describe] [conversionsIn [nirOf $text {*}$noInline] describe] [countIn {op shortlen} $describe] [countIn {op shorteq} $describe]
+} -result {0 {0 0} 1 2}
+
+test short-nir-alias-stays-virtual {x = s; y = x; z = y: aliases are the same short register, no materialization} -body {
+    set text {
+        fn pick(flag):
+            if flag:
+                ""
+            else:
+                "x"
+
+        fn alias(flag):
+            x = pick(flag)
+            y = x
+            z = y
+            [length(z), z == "x", z == ""]
+
+        alias(true)
+    }
+    set nir [nirOf $text {*}$noInline]
+    list [conversionsIn $nir alias] [countIn {= call 1 } [fnText $nir alias]]
+} -result {{0 0} 1}
+
+test short-nir-chain-is-one-continuous-region {pick -> f -> g -> h: no strtoshort/shorttostr in any function} -body {
+    set nir [nirOf $chainSource {*}$noInline]
+    list [conversionsIn $nir f] [conversionsIn $nir g] [conversionsIn $nir h] [conversionsIn $nir pick] [conversionsIn $nir <program>]
+} -result {{0 0} {0 0} {0 0} {0 0} {0 0}}
+
+test short-nir-return-stays-virtual {a local virtual short returned through a short result: no scalar -> String -> scalar} -body {
+    set text {
+        fn pick(flag):
+            s = if flag:
+                ""
+            else:
+                "λ"
+            s
+
+        length(pick(true))
+    }
+    set nir [nirOf $text {*}$noInline]
+    list [shortResult [fnText $nir pick]] [conversionsIn $nir pick] [conversionsIn $nir <program>]
+} -result {1 {0 0} {0 0}}
+
+test short-nir-tagged-frontier-materializes-once {one ShortString1 forwarded through several exact calls and then stored in a List: one materialization at the storage frontier, not one per transport edge} -body {
+    set text {
+        fn pick(flag):
+            if flag:
+                ""
+            else:
+                "λ"
+
+        fn g(s):
+            s
+
+        fn f(s):
+            g(s)
+
+        fn store(s):
+            list_append([], f(s))
+
+        store(pick(false))
+    }
+    set nir [nirOf $text {*}$noInline]
+    set total 0
+    foreach name {pick g f store <program>} {
+        incr total [lindex [conversionsIn $nir $name] 1]
+    }
+    list $total [conversionsIn $nir store] [shortResult [fnText $nir g]] [shortResult [fnText $nir f]] [parityShort $text]
+} -result "1 {0 1} 1 1 {value:\[\"\u03bb\"\]}"
+
+test short-nir-mixed-use-boxes-at-the-tagged-use {length(s) is scalar; list_append(xs, s) materializes: no suppression heuristic, one recorded conversion} -body {
+    set text {
+        fn mixed(s, xs):
+            [length(s), list_append(xs, s)]
+
+        mixed("x", [])
+    }
+    set nir [nirOf $text {*}$noInline]
+    set f [fnText $nir mixed]
+    list [shortParams $f] [countIn {op shortlen} $f] [countIn {op shorttostr} $f] [countIn {op strlen} $f]
+} -result {0 1 1 0}
+
+test short-nir-loop-state-stays-scalar {a short String carried around a self-tail loop is a short parameter slot: tail passes a short register, no convert per iteration} -body {
+    set text {
+        fn pick(flag):
+            if flag:
+                ""
+            else:
+                "y"
+
+        fn spin(s, n):
+            if n == 0:
+                s
+            else:
+                spin(pick(n == 2), n - 1)
+
+        spin("", 5)
+    }
+    set nir [nirOf $text {*}$noInline]
+    set spin [fnText $nir spin]
+    list [shortParams $spin] [shortResult $spin] [conversionsIn $nir spin] [countIn {tail } $spin] [parityShort $text]
+} -result {0 1 {0 0} 1 value:\"y\"}
+
+test short-nir-program-frontier {the program's externally visible result is a String: a final ShortString1 materializes once at the program boundary} -body {
+    set text {
+        fn pick(flag):
+            if flag:
+                ""
+            else:
+                "y"
+
+        pick(false)
+    }
+    set nir [nirOf $text {*}$noInline]
+    list [conversionsIn $nir <program>] [parityShort $text]
+} -result {{0 1} value:\"y\"}
+
+test short-nir-disabled-reproduces-the-tagged-strings {-short-string-opt 0 emits no ShortString1 anywhere: strings are tagged exactly as before} -body {
+    foreach text [list $chooseSource $lamSource $chainSource] {
+        if {![noShortAnywhere [nirOf $text {*}$noInline -short-string-opt 0]]} {
+            error "short string in the disabled NIR of: $text"
+        }
+    }
+    set ok 1
+} -result 1
+
+test short-nir-env-disables {BOTLISH_NATIVE_SHORT_STRING_OPT=0 is the same switch} -body {
+    set ::env(BOTLISH_NATIVE_SHORT_STRING_OPT) 0
+    try {
+        noShortAnywhere [nirOf $chooseSource {*}$noInline]
+    } finally {
+        unset ::env(BOTLISH_NATIVE_SHORT_STRING_OPT)
+    }
+} -result 1
+
+# ---------------------------------------------------------------------------
+# Producers: the substring slice, and the empty-index error behavior
+
+test short-slice-is-an-infallible-extract-after-the-ordinary-check {substring(text, 0, 1) as a short value: the same regioncheck an ordinary call runs, then a total strsliceshort; no String allocated} -body {
+    set text {
+        fn first(t):
+            substring(t, 0, 1)
+
+        fn show(t):
+            c = first(t)
+            [c, length(c)]
+
+        show("abc")
+    }
+    set nir [nirOf $text {*}$noInline]
+    set first [fnText $nir first]
+    list [shortResult $first] [countIn {op regioncheck} $first] [countIn {op strsliceshort} $first] [countIn {op substr } $first] [parityShort $text]
+} -result {1 1 1 0 {value:["a", 1]}}
+
+test short-slice-peek-shape {peek(text, i): "" past the end, else substring(text, i, i + 1): a ShortString1 result (the index step is hir::induction's existing fact)} -body {
+    set text {
+        fn peek(text, index):
+            if index >= length(text):
+                return ""
+
+            substring(text, index, index + 1)
+
+        fn first_is_a(text):
+            c = peek(text, 0)
+            [length(c), c == "a", c == ""]
+
+        [first_is_a("abc"), first_is_a("")]
+    }
+    list [shortPlan $text {*}$noInline] [parityShort $text]
+} -result {{first_is_a<str>=val>val {peek<str, int>=val,val>short}} {value:[[1, true, false], [0, false, true]]}}
+
+test short-slice-empty-index-error-is-unchanged {substring on an empty String raises the same RANGE error with the ShortString1 producer: Empty (-1) is never a failure value} -body {
+    set text {
+        fn first(t):
+            substring(t, 0, 1)
+
+        first("")
+    }
+    parityShort $text
+} -result {error:CORE SEMANTIC RANGE}
+
+test short-slice-bounds-error-message {the RANGE message of a ShortString1 slice is byte-identical to an ordinary substring's} -body {
+    set text {
+        fn first(t):
+            substring(t, 0, 1)
+
+        first("")
+    }
+    set hir [srcHir $text]
+    set messages {}
+    foreach opt {0 1} {
+        catch {native::evalHir $hir -short-string-opt $opt} msg
+        lappend messages $msg
+    }
+    set interp [catch {core::evalProgram [hir::lower $hir]} imsg]
+    list [lindex $messages 0] [expr {[lindex $messages 0] eq [lindex $messages 1]}] [expr {$imsg eq [lindex $messages 0]}]
+} -result {{substring: range 0..1 is outside 0..0} 1 1}
+
+test short-slice-non-ascii {a non-ASCII slice: the scalar, not a byte} -body {
+    parityShort {
+        fn first(t):
+            substring(t, 0, 1)
+
+        fn second(t):
+            substring(t, 1, 2)
+
+        ["ä" == first("äx"), second("a€") == "€", length(second("a猫")), first("😀z") == "😀"]
+    }
+} -result {value:[true, true, 1, true]}
+
+# ---------------------------------------------------------------------------
+# Errors and completions: Empty is a value, never a failure sentinel
+
+test short-error-capable-result {an error-capable function with a ShortString1 success result: Empty is a successful value, failure uses the status word} -body {
+    set text {
+        error Bad
+
+        fn guarded(n) -> str errors Bad:
+            if n < 0:
+                fail Bad
+            else:
+                if n == 0:
+                    ""
+                else:
+                    "y"
+
+        fn run(n):
+            r = guarded(n):
+                on Bad:
+                    "caught"
+            r
+
+        [run(-1), run(0), run(3), length(run(0)), run(0) == ""]
+    }
+    set nir [nirOf $text {*}$noInline]
+    list [shortResult [fnText $nir guarded]] [parityShort $text]
+} -result {1 {value:["caught", "", "y", 0, true]}}
+
+test short-error-escapes-uncaught {a runtime RANGE failure inside a ShortString1-result function is the same error outcome with the optimization on and off, and Empty never stands for it} -body {
+    parityShort {
+        fn at(t, i):
+            substring(t, i, i + 1)
+
+        fn drive(i):
+            [at("ab", i), length(at("ab", i))]
+
+        [drive(0), drive(1), drive(2)]
+    }
+} -result {error:CORE SEMANTIC RANGE}
+
+test short-error-in-the-caller-handler {a handler around a short-result call: Empty passes through the success path} -body {
+    parityShort {
+        error Bad
+
+        fn guarded(n) -> str errors Bad:
+            if n < 0:
+                fail Bad
+            else:
+                ""
+
+        fn run(n):
+            r = guarded(n):
+                on Bad:
+                    "handled"
+            [r, length(r)]
+
+        [run(0), run(-1)]
+    }
+} -result {value:[["", 0], ["handled", 7]]}
+
+# ---------------------------------------------------------------------------
+# Storage, general operations, dynamic calls, captures: tagged frontiers
+
+test short-storage-list-materializes {a short String stored in a List is materialized there (storage stays tagged)} -body {
+    parityShort {
+        fn pick(flag):
+            if flag:
+                ""
+            else:
+                "λ"
+
+        xs = [pick(true), pick(false)]
+        [xs, list_length(xs), list_get(xs, 1) == "λ"]
+    }
+} -result {value:[["", "λ"], 2, true]}
+
+test short-general-string-operations-materialize {concat, lowercase and hashing consume the real String} -body {
+    parityShort {
+        fn pick(flag):
+            if flag:
+                ""
+            else:
+                "Λ"
+
+        [concat(pick(true), "!"), lowercase(pick(false)), concat(pick(false), pick(false)), hash(pick(false)) == hash("Λ")]
+    }
+} -result {value:["!", "λ", "ΛΛ", true]}
+
+test short-equality-with-an-unrestricted-string-materializes {a ShortString1 compared with a String of unknown length materializes the short operand and uses the existing equality} -body {
+    set text {
+        fn same(s, t):
+            s == t
+
+        fn pick(flag):
+            if flag:
+                ""
+            else:
+                "x"
+
+        [same(pick(true), concat("", "")), same(pick(false), concat("x", "")), same(pick(false), concat("x", "y"))]
+    }
+    set nir [nirOf $text {*}$noInline]
+    set same [fnText $nir same]
+    list [parityShort $text] [shortParams $same] [countIn {op shorttostr} $same] [countIn {op streq} $same]
+} -result {{value:[true, true, false]} 0 1 1}
+
+test short-dynamic-callable-stays-tagged {a function passed as a value is called through the generic tagged entry; the exact instances keep their ABI} -body {
+    parityShort {
+        fn pick(flag):
+            if flag:
+                ""
+            else:
+                "y"
+
+        fn apply(f, x):
+            f(x)
+
+        [apply(pick, true), apply(pick, false), pick(false)]
+    }
+} -result {value:["", "y", "y"]}
+
+test short-capture-materializes {a short local captured by a closure is stored in the (tagged) environment} -body {
+    parityShort {
+        fn pick(flag):
+            if flag:
+                ""
+            else:
+                "y"
+
+        fn captured(flag):
+            s = pick(flag)
+            fn add(x):
+                concat(s, x)
+            add("!")
+
+        [captured(true), captured(false)]
+    }
+} -result {value:["!", "y!"]}
+
+# ---------------------------------------------------------------------------
+# Differential parity of small String programs (the fuzz generator in
+# audit/short-string/tools/fuzz.tcl explores many more)
+
+test short-parity-corpus-mix {ASCII, non-ASCII, NUL, Empty; branches, aliases, calls, returns, loops, storage} -body {
+    set nul [format %c 0]
+    parityShort "
+        error Bad
+
+        fn pick(n):
+            if n == 0:
+                \"\"
+            else:
+                if n == 1:
+                    \"a\"
+                else:
+                    if n == 2:
+                        \"λ\"
+                    else:
+                        \"$nul\"
+
+        fn fwd(s):
+            t = s
+            t
+
+        fn count(n, acc):
+            if n < 0:
+                acc
+            else:
+                count(n - 1, acc + length(fwd(pick(n))))
+
+        fn guarded(n) -> str errors Bad:
+            if n > 3:
+                fail Bad
+            else:
+                pick(n)
+
+        fn run(n):
+            r = guarded(n):
+                on Bad:
+                    \"bad\"
+            r
+
+        \[count(3, 0), pick(2) == \"λ\", pick(3) == \"$nul\", pick(0) == \"\", run(1), run(9), list_append(\[pick(0)\], pick(2))\]
+    "
+} -result "value:\[3, true, true, true, \"a\", \"bad\", \[\"\", \"λ\"\]\]"
+
+# ---------------------------------------------------------------------------
+# GC: a ShortString1 is a non-root scalar
+
+test short-gc-live-across-allocation {a ShortString1 live across unrelated allocations, with ordinary Strings, a List and a struct as live roots, under GC stress} -body {
+    set text {
+        struct Pair:
+            left: str
+            right: int
+
+        fn pick(flag):
+            if flag:
+                ""
+            else:
+                "λ"
+
+        fn work(s, xs):
+            p = Pair {left: "keep", right: 7}
+            t = concat("a", "b")
+            u = list_append(xs, 1)
+            v = concat(t, t)
+            [length(s), s == "λ", length(v), list_length(u), p.left, p.right, s]
+
+        [work(pick(false), [1, 2]), work(pick(true), [9])]
+    }
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        list [shortPlan $text {*}$noInline] [parityShort $text]
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+} -result {{pick<bool>=val>short {work<str, List[int]>=short,val>val}} {value:[[1, true, 4, 3, "keep", 7, "λ"], [0, false, 4, 2, "keep", 7, ""]]}}
+
+test short-gc-materialize-before-and-after-allocation {a short value materialized before an allocation (the String is a root) and again after (cached: the same String)} -body {
+    set text {
+        fn pick(flag):
+            if flag:
+                ""
+            else:
+                "猫"
+
+        fn work(s):
+            first = list_append([], s)
+            filler = concat("x", "y")
+            second = list_append(first, s)
+            more = concat(filler, filler)
+            [first, second, length(more), s]
+
+        [work(pick(false)), work(pick(true))]
+    }
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        parityShort $text
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+} -result {value:[[["猫"], ["猫", "猫"], 4, "猫"], [[""], ["", ""], 4, ""]]}
+
+test short-gc-recursive-exact-call-transport {a ShortString1 parameter and result across 200 recursive, allocating frames under GC stress} -body {
+    set text {
+        fn step(n):
+            if n == 0:
+                ""
+            else:
+                "λ"
+
+        fn depth(n, s, acc):
+            if n == 0:
+                length(acc)
+            else:
+                t = concat(acc, "z")
+                depth(n - 1, step(n - 1), t) + length(s)
+
+        depth(200, step(1), "")
+    }
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        list [shortPlan $text {*}$noInline] [parityShort $text]
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+} -result {{{depth<int, str, str>=val,short,val>val} step<int>=val>short} value:400}
+
+test short-gc-stack-map-has-no-short-roots {the root report lists the short registers as non-roots} -body {
+    set text {
+        fn pick(flag):
+            if flag:
+                ""
+            else:
+                "q"
+
+        fn work(s):
+            t = concat("a", "b")
+            [length(s), t]
+
+        work(pick(false))
+    }
+    set roots [native::roots [srcHir $text] {*}$noInline]
+    expr {[string first work $roots] >= 0}
+} -result 1
+
+# ---------------------------------------------------------------------------
+# Standalone executables (the JIT, the object file and the executable all
+# carry the ABI)
+
+proc aotParity {text {extra {}}} {
+    set text [dedent $text]
+    set dir [makeDirectory {short string executable test}]
+    set path [file join $dir {program with spaces.bot}]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts $channel $text
+    close $channel
+    try {
+        set hir [surface::readProgramFile $path]
+        set expected {}
+        foreach backend {interp compile cranelift-generic cranelift} {
+            set outcome [outcomeUnderHir $backend $hir]
+            if {[lindex $outcome 0] ne "value"} { error "$backend: $outcome" }
+            lappend expected [lindex $outcome 1]
+        }
+        native::executable $hir [file rootname $path] -tiny-leaf-inline-opt 0 {*}$extra
+        set relocated [file join $dir relocated]
+        file rename [file rootname $path] $relocated
+        file delete $path
+        lappend expected [exec env PATH= $relocated]
+        lappend expected [exec env PATH= BOTLISH_NATIVE_GC_STRESS=1 $relocated]
+        if {[llength [lsort -unique $expected]] != 1} { error "values disagree: $expected" }
+        return [lindex $expected 0]
+    } finally {
+        removeDirectory {short string executable test}
+    }
+}
+
+test short-executable-everything {Empty, ASCII, non-ASCII, NUL, parameter/result transport, a tagged frontier and an error-capable path in one standalone executable, also under GC stress} -constraints executableAot -body {
+    set nul [format %c 0]
+    aotParity "
+        error Bad
+
+        fn pick(n):
+            if n == 0:
+                \"\"
+            else:
+                if n == 1:
+                    \"a\"
+                else:
+                    if n == 2:
+                        \"λ\"
+                    else:
+                        \"$nul\"
+
+        fn guarded(n) -> str errors Bad:
+            if n > 3:
+                fail Bad
+            else:
+                pick(n)
+
+        fn run(n):
+            r = guarded(n):
+                on Bad:
+                    \"bad\"
+            r
+
+        fn fwd(s):
+            s
+
+        fn probe(s):
+            \[length(s), s == \"\", s == \"λ\", s == \"$nul\"\]
+
+        fn first(t):
+            substring(t, 0, 1)
+
+        \[probe(fwd(pick(0))), probe(fwd(pick(1))), probe(fwd(pick(2))), probe(fwd(pick(3))), run(2), run(8), list_append(\[pick(2)\], pick(0)), first(\"ä€\") == \"ä\"\]
+    "
+} -result "\[\[0, true, false, false\], \[1, false, false, false\], \[1, false, true, false\], \[1, false, false, true\], \"λ\", \"bad\", \[\"λ\", \"\"\], true\]"
+
+test short-executable-optimization-off {the same executable with -short-string-opt 0 agrees} -constraints executableAot -body {
+    aotParity {
+        fn pick(flag):
+            if flag:
+                ""
+            else:
+                "y"
+
+        fn fwd(s):
+            s
+
+        [length(fwd(pick(true))), length(fwd(pick(false))), fwd(pick(false)) == "y"]
+    } {-short-string-opt 0}
+} -result {[0, 1, true]}
+
+# ---------------------------------------------------------------------------
+# Determinism
+
+test short-deterministic-plan-and-nir {fixed source and configuration give byte-identical NIR twice} -body {
+    set a [nirOf $chainSource]
+    set b [nirOf $chainSource]
+    expr {$a eq $b}
+} -result 1
+
+cleanupTests

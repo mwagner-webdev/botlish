@@ -90,6 +90,7 @@ if {[info commands ::surface::modules::LoadNamespaces] eq ""} {
     source [file join [file dirname [file dirname [file normalize [info script]]]] surface surface.tcl]
 }
 source [file join [file dirname [file normalize [info script]]] rawabi.tcl]
+source [file join [file dirname [file normalize [info script]]] shortstring.tcl]
 source [file join [file dirname [file normalize [info script]]] lower.tcl]
 source [file join [file dirname [file normalize [info script]]] prepare.tcl]
 

@@ -183,6 +183,12 @@ namespace eval native::lower {
     # lowering and by every call site (the callee's plan is authoritative).
     variable abiPlan {}
     variable rawIntAbiOpt 1
+    # The ShortString1 plan (native/shortstring.tcl, SHORT-STRING.md): the
+    # physical representation of every String position/value the existing
+    # facts prove has at most one character. Like abiPlan it is computed
+    # once, strictly before lowering, and read by every callee and caller.
+    variable shortPlan {}
+    variable shortStringOpt 1
     # Raw-demand suppression of the plan (RAW-INT-ABI.md): 0 selects every
     # eligible position (audit-only comparison mode).
     variable rawDemandOpt 1
@@ -1127,6 +1133,8 @@ proc native::lower::program {hirProgram args} {
     variable reprOpt
     variable abiPlan
     variable rawIntAbiOpt
+    variable shortPlan
+    variable shortStringOpt
     variable rawDemandOpt
     variable rawMixedPolicy
     variable escape
@@ -1174,6 +1182,8 @@ proc native::lower::program {hirProgram args} {
         && $::env(BOTLISH_NATIVE_RAW_DEMAND_OPT) eq "0" ? 0 : 1}]
     set rawMixedDefault [expr {[info exists ::env(BOTLISH_NATIVE_RAW_MIXED_POLICY)]
         && $::env(BOTLISH_NATIVE_RAW_MIXED_POLICY) eq "raw" ? "raw" : "boxed"}]
+    set shortStringDefault [expr {[info exists ::env(BOTLISH_NATIVE_SHORT_STRING_OPT)]
+        && $::env(BOTLISH_NATIVE_SHORT_STRING_OPT) eq "0" ? 0 : 1}]
     set callFactsDefault [expr {[info exists ::env(BOTLISH_NATIVE_CALL_FACTS_OPT)]
         && $::env(BOTLISH_NATIVE_CALL_FACTS_OPT) eq "0" ? 0 : 1}]
     set closedCallerFactsDefault [expr {[info exists ::env(BOTLISH_NATIVE_CLOSED_CALLER_FACTS_OPT)]
@@ -1226,6 +1236,7 @@ proc native::lower::program {hirProgram args} {
             -tiny-leaf-inline-opt $tinyLeafInlineDefault \
             -recursive-result-range-opt $recursiveRangeDefault -recursive-range-limit $recursiveLimitDefault \
             -raw-int-abi-opt $rawIntAbiDefault -raw-demand-opt $rawDemandDefault -raw-mixed-policy $rawMixedDefault \
+            -short-string-opt $shortStringDefault \
             -virtual-construction-opt $constructionDefault] $args]
     if {[hir::mode $hirProgram] ne "program"} {
         throw {NATIVE UNSUPPORTED sequence-mode} \
@@ -1316,6 +1327,17 @@ proc native::lower::program {hirProgram args} {
     set construction [expr {$constructionOpt
         ? [hir::construction::analyze $hirProgram $spec $escape $stringregion $blockescape]
         : [dict create params {} bindings {} locals {} results {} closed {} regions {}]}]
+    # The ShortString1 plan (SHORT-STRING.md) runs strictly after the
+    # closedness, Range and virtual-construction analyses it composes with,
+    # and before any lowering. It reads facts and decides a representation;
+    # it never feeds back into them. A position the construction analysis
+    # already carries as a plan (concat/list_append pieces) keeps that
+    # existing representation: ShortString1 does not compete with another
+    # virtualization of the same position. -short-string-opt 0 plans every
+    # position tagged and makes every fact `over`, reproducing the previous
+    # physical Strings.
+    set shortStringOpt [expr {[dict get $options -short-string-opt] && $reprOpt}]
+    set shortPlan [native::shortstr::plan $hirProgram $spec $ranges $shortStringOpt $blockEscapeOpt $construction]
     set context [dict get $spec context]
     set selfTail [dict get $context selfTails]
     set envless [dict get $context envless]
@@ -1409,7 +1431,7 @@ proc native::lower::program {hirProgram args} {
     }
     set text "[join $header \n]\n\n[join $texts \n\n]\n"
     return [dict create text $text functions $infos statistics [Statistics $infos] \
-        specialization $spec abiPlan $abiPlan construction $construction structCensus [hir::escape::census $escape] \
+        specialization $spec abiPlan $abiPlan shortPlan $shortPlan construction $construction structCensus [hir::escape::census $escape] \
         transportFacts [hir::escape::transportFacts $escape]]
 }
 
@@ -1643,6 +1665,12 @@ proc native::lower::GenericRef {e} {
         # it can exist (rawabi.tcl, eligibility condition 2).
         throw {NATIVE BUG} "native lowering: instance $id has a raw Int ABI but a Block value of it is materialized"
     }
+    variable shortPlan
+    if {[native::shortstr::uses $shortPlan $id]} {
+        # Likewise for the ShortString1 ABI (shortstring.tcl: a position is
+        # only ever short for a closed instance).
+        throw {NATIVE BUG} "native lowering: instance $id has a ShortString1 ABI but a Block value of it is materialized"
+    }
     return [FunctionRef $id]
 }
 
@@ -1691,6 +1719,81 @@ proc native::lower::AbiResult {id} {
 proc native::lower::ResultRaw {fnVar} {
     upvar 1 $fnVar fn
     return [expr {[dict exists $fn resultRaw] && [dict get $fn resultRaw]}]
+}
+
+# ---------------------------------------------------------------------------
+# ShortString1 (native/shortstring.tcl, SHORT-STRING.md)
+#
+# A ShortString1 register holds one i64: -1 for the empty String, else the
+# one character's Unicode scalar value (U+0000 is 0, never Empty). It is a
+# distinct physical kind from a raw Int register (`shortregs=` versus
+# `rawregs=`; nir.rs rejects either standing in for the other) and from a
+# tagged String. The proof that a value has at most one character is the
+# planner's (shortstring.tcl); lowering only turns that decision into NIR:
+#
+#   * a local binding / branch join / exact call argument / result the plan
+#     proves short is produced and kept in a short register;
+#   * `strtoshort` (tagged -> short, total, non-allocating) and `shorttostr`
+#     (short -> tagged, allocating) are the only transitions, cached in the
+#     same fn rawCache the raw Int conversions use (register numbers are
+#     unique), so one value converts once per region;
+#   * `length` and `==` on proven-short operands are scalar ops; every other
+#     consumer (storage, general String operations, hashing, FFI, a dynamic
+#     call) materializes the real String at that frontier.
+
+# The ShortString1 statistics of FN (SHORT-STRING.md's censuses): how many
+# virtual values were produced, converted at each frontier and consumed by a
+# scalar operation.
+proc native::lower::ShortCounters {fnVar} {
+    upvar 1 $fnVar fn
+    set out [dict create]
+    foreach key {shortLocals shortLits shortFromTagged shortToTagged shortConstMaterialized shortLen shortEq
+            shortJoins shortSlices} {
+        dict set out $key [expr {[dict exists $fn $key] ? [dict get $fn $key] : 0}]
+    }
+    return $out
+}
+
+# 1|0 per each of the first N parameter positions of instance ID's canonical
+# function: whether the incoming argument is a ShortString1.
+proc native::lower::ShortAbiParams {id n} {
+    variable shortPlan
+    return [native::shortstr::params $shortPlan $id $n]
+}
+
+# 1 if instance ID's canonical function returns its successful String
+# result as a ShortString1.
+proc native::lower::ShortAbiResult {id} {
+    variable shortPlan
+    return [native::shortstr::result $shortPlan $id]
+}
+
+# 1 if the current function's own successful result is a ShortString1.
+proc native::lower::ResultShort {fnVar} {
+    upvar 1 $fnVar fn
+    return [expr {[dict exists $fn resultShort] && [dict get $fn resultShort]}]
+}
+
+# 1 if expression E of the instance being lowered is a String the planner
+# proved has at most one character (and can complete).
+proc native::lower::ShortOk {e} {
+    variable currentInstance
+    variable shortStringOpt
+    return [expr {$shortStringOpt && [native::shortstr::ok $currentInstance $e]}]
+}
+
+# The physical slot kind of the binding P in FN's locals as a call argument
+# slot: 1 raw Int register, `short` ShortString1 register, else 0.
+proc native::lower::SlotKind {fnVar p} {
+    upvar 1 $fnVar fn
+    if {![dict exists $fn locals $p]} {
+        return 0
+    }
+    switch -- [lindex [dict get $fn locals $p] 0] {
+        rawreg   { return 1 }
+        shortreg { return short }
+    }
+    return 0
 }
 
 # 1|0 per parameter of instance ID's PARAMS: whether hir::range::analyze's
@@ -1767,10 +1870,20 @@ proc native::lower::Function {id} {
     if {$region ne "program" && [AbiResult $id]} {
         dict set fn resultRaw 1
     }
+    # ShortString1 ABI: these positions arrive as a ShortString1 scalar
+    # (native/shortstring.tcl); every caller of this canonical function
+    # passes them the same way.
+    set shortParams [expr {$region eq "program" ? [lrepeat [llength $params] 0] : [ShortAbiParams $id [llength $params]]}]
+    if {$region ne "program" && [ShortAbiResult $id]} {
+        dict set fn resultShort 1
+    }
     set k 0
-    foreach b $params raw $rawParams {
+    foreach b $params raw $rawParams short $shortParams {
         set r [NewReg fn]
-        if {$raw} {
+        if {$short} {
+            MarkShort fn $r
+            dict set fn locals $b [list shortreg $r]
+        } elseif {$raw} {
             MarkRaw fn $r
             dict set fn locals $b [list rawreg $r]
         } else {
@@ -1792,6 +1905,8 @@ proc native::lower::Function {id} {
     }
     if {[ResultRaw fn]} {
         set result [SequenceRaw fn $body]
+    } elseif {[ResultShort fn]} {
+        set result [SequenceShort fn $body]
     } else {
         set result [SequenceTo fn $body [PlanResultFamily fn]]
     }
@@ -1811,6 +1926,7 @@ proc native::lower::Function {id} {
     if {$rawRegs ne ""} {
         append head " rawregs=[Quote [join $rawRegs { }]]"
     }
+    append head [ShortRegsHeader fn]
     append head [PlanHeader fn]
     # The physical raw Int signature (a compact, deterministic encoding of
     # the plan: positions, then the result).
@@ -1826,6 +1942,18 @@ proc native::lower::Function {id} {
     if {[ResultRaw fn]} {
         append head " rawresult=1"
     }
+    set shortPositions {}
+    set k 0
+    foreach a $shortParams {
+        if {$a} { lappend shortPositions $k }
+        incr k
+    }
+    if {$shortPositions ne ""} {
+        append head " shortparams=[Quote [join $shortPositions { }]]"
+    }
+    if {[ResultShort fn]} {
+        append head " shortresult=1"
+    }
     if {$region ne "program"} {
         append head " @$region"
     }
@@ -1840,7 +1968,8 @@ proc native::lower::Function {id} {
         blockers [expr {$blockers - [dict get $fn skippedGuards]}] \
         guards [dict get $fn guards] knownErrorGuards [dict get $fn knownErrorGuards] \
         rawUnboxes [dict get $fn rawUnboxes] rawBoxes [dict get $fn rawBoxes] \
-        rawArith [dict get $fn rawArith] rawCompare [dict get $fn rawCompare]]
+        rawArith [dict get $fn rawArith] rawCompare [dict get $fn rawCompare] \
+        short [ShortCounters fn]]
     return [list $text $info]
 }
 
@@ -1923,6 +2052,7 @@ proc native::lower::CompanionFunction {id} {
     if {$rawRegs ne ""} {
         append head " rawregs=[Quote [join $rawRegs { }]]"
     }
+    append head [ShortRegsHeader fn]
     append head [PlanHeader fn]
     append head " @$region"
     set text "$head\n[join [dict get $fn lines] \n]\nend"
@@ -2018,6 +2148,7 @@ proc native::lower::RegionCompanionFunction {id} {
     if {$rawRegs ne ""} {
         append head " rawregs=[Quote [join $rawRegs { }]]"
     }
+    append head [ShortRegsHeader fn]
     append head [PlanHeader fn]
     append head " @$region"
     set text "$head\n[join [dict get $fn lines] \n]\nend"
@@ -2113,6 +2244,7 @@ proc native::lower::InternalFunction {id} {
     if {$rawRegs ne ""} {
         append head " rawregs=[Quote [join $rawRegs { }]]"
     }
+    append head [ShortRegsHeader fn]
     append head [PlanHeader fn]
     append head " @$region"
     set text "$head\n[join [dict get $fn lines] \n]\nend"
@@ -2221,6 +2353,7 @@ proc native::lower::InternalRegionCompanionFunction {id} {
     if {$rawRegs ne ""} {
         append head " rawregs=[Quote [join $rawRegs { }]]"
     }
+    append head [ShortRegsHeader fn]
     append head [PlanHeader fn]
     append head " @$region"
     set text "$head\n[join [dict get $fn lines] \n]\nend"
@@ -2334,6 +2467,7 @@ proc native::lower::FieldsFunction {id} {
     if {$rawRegs ne ""} {
         append head " rawregs=[Quote [join $rawRegs { }]]"
     }
+    append head [ShortRegsHeader fn]
     append head [PlanHeader fn]
     append head " @$region"
     set text "$head\n[join [dict get $fn lines] \n]\nend"
@@ -2419,6 +2553,7 @@ proc native::lower::FieldsCompanionFunction {id} {
     if {$rawRegs ne ""} {
         append head " rawregs=[Quote [join $rawRegs { }]]"
     }
+    append head [ShortRegsHeader fn]
     append head [PlanHeader fn]
     append head " @$region"
     set text "$head\n[join [dict get $fn lines] \n]\nend"
@@ -2503,6 +2638,118 @@ proc native::lower::MarkRaw {fnVar reg} {
     dict set fn rawRegs $reg 1
 }
 
+# Like AssignRaw, for an instruction whose result is a ShortString1: records
+# R in fn shortRegs (the header's `shortregs=`).
+proc native::lower::AssignShort {fnVar rhs {e ""}} {
+    upvar 1 $fnVar fn
+    set r [Assign fn $rhs $e]
+    dict set fn shortRegs $r 1
+    return $r
+}
+
+# Declares REG a ShortString1 register without emitting an instruction (an
+# if-join's shared result register, a tail-rebound parameter slot).
+proc native::lower::MarkShort {fnVar reg} {
+    upvar 1 $fnVar fn
+    dict set fn shortRegs $reg 1
+}
+
+# 1 if REG is declared a ShortString1 register of FN.
+proc native::lower::IsShortReg {fnVar reg} {
+    upvar 1 $fnVar fn
+    return [dict exists $fn shortRegs $reg]
+}
+
+# The ` shortregs="..."` suffix of FN's header ("" when it has none).
+proc native::lower::ShortRegsHeader {fnVar} {
+    upvar 1 $fnVar fn
+    if {![dict exists $fn shortRegs]} {
+        return ""
+    }
+    set regs [lsort -integer [lmap r [dict keys [dict get $fn shortRegs]] {string range $r 1 end}]]
+    if {$regs eq ""} {
+        return ""
+    }
+    return " shortregs=[Quote [join $regs { }]]"
+}
+
+# The ShortString1 scalar of a String's text of at most one character.
+proc native::lower::ShortValueOf {text} {
+    if {$text eq ""} {
+        return -1
+    }
+    scan $text %c cp
+    return $cp
+}
+
+# The text of ShortString1 scalar VALUE (-1: "").
+proc native::lower::ShortText {value} {
+    if {$value == -1} {
+        return ""
+    }
+    return [format %c $value]
+}
+
+# The ShortString1 form of the tagged String register REG, which the planner
+# proved has at most one character (the caller asserts that): one
+# `strtoshort`, or a `shortlit` when REG is a String constant this lowering
+# itself built. Cached with the reverse direction (fn rawCache), so the
+# conversion happens once per region and a later materialization of the
+# value it just extracted is the original register again.
+proc native::lower::ShortOf {fnVar reg} {
+    upvar 1 $fnVar fn
+    set cache [dict get $fn rawCache]
+    if {[dict exists $cache $reg]} {
+        return [dict get $cache $reg]
+    }
+    if {[dict exists $fn strConst $reg]} {
+        set value [ShortValueOf [dict get $fn strConst $reg]]
+        set r [AssignShort fn "shortlit $value"]
+        dict set fn shortConst $r $value
+        dict incr fn shortLits
+    } else {
+        set r [AssignShort fn "op strtoshort $reg"]
+        dict incr fn shortFromTagged
+    }
+    dict set fn rawCache $reg $r
+    dict set fn rawCache $r $reg
+    return $r
+}
+
+# The tagged String of the ShortString1 register REG: one `shorttostr`
+# (allocating), or a String constant when REG is a literal this lowering
+# built (no allocation: the constant is static). Cached with the reverse
+# direction like ShortOf. This is the one materialization of a virtual
+# short String; every frontier that needs a real String comes through here.
+proc native::lower::TaggedOfShort {fnVar reg} {
+    upvar 1 $fnVar fn
+    set cache [dict get $fn rawCache]
+    if {[dict exists $cache $reg]} {
+        return [dict get $cache $reg]
+    }
+    if {[dict exists $fn shortConst $reg]} {
+        set r [Assign fn "str [Quote [ShortText [dict get $fn shortConst $reg]]]"]
+        dict set fn strConst $r [ShortText [dict get $fn shortConst $reg]]
+        dict incr fn shortConstMaterialized
+    } else {
+        set r [Assign fn "op shorttostr $reg"]
+        dict incr fn shortToTagged
+    }
+    dict set fn rawCache $reg $r
+    dict set fn rawCache $r $reg
+    return $r
+}
+
+# A ShortString1 constant for the proven-short String literal TEXT.
+proc native::lower::ShortLit {fnVar text e} {
+    upvar 1 $fnVar fn
+    set value [ShortValueOf $text]
+    set r [AssignShort fn "shortlit $value" $e]
+    dict set fn shortConst $r $value
+    dict incr fn shortLits
+    return $r
+}
+
 # ---------------------------------------------------------------------------
 # Expressions
 #
@@ -2541,6 +2788,11 @@ proc native::lower::Expr {fnVar e {want tagged}} {
     if {$want eq "rawjoin"} {
         set want raw
     }
+    # `short` asks for a ShortString1 register. Only ever requested for a
+    # value the planner proved has at most one character (ShortOk): an `if`
+    # then joins its branches directly in one short register (each branch
+    # value is itself proven, being below the join in the fact lattice).
+    set shortJoin [expr {$want eq "short" && [dict get $node kind] eq "if"}]
     switch -- [dict get $node kind] {
         const    { lassign [ConstOrRegion fn $e $node $want] result repr }
         ref      { lassign [Ref fn $e $node $want] result repr }
@@ -2548,9 +2800,12 @@ proc native::lower::Expr {fnVar e {want tagged}} {
         block    { set result [Closure fn $e] }
         call     { lassign [Call fn $e $node $want "" [expr {$want eq "region"}]] result repr }
         if       {
-            set result [If fn $e $node "" "" "" $rawJoin]
+            set result [If fn $e $node "" "" "" $rawJoin $shortJoin]
             if {$rawJoin && $result ne "never"} {
                 set repr raw
+            }
+            if {$shortJoin && $result ne "never"} {
+                set repr short
             }
         }
         loop      { set result [Loop fn $e $node] }
@@ -2592,7 +2847,7 @@ proc native::lower::Expr {fnVar e {want tagged}} {
                     Emit fn "ret $value" $e
                 }
             } else {
-                set value [Expr fn [dict get $node value] [expr {[ResultRaw fn] ? "rawjoin" : "tagged"}]]
+                set value [Expr fn [dict get $node value] [expr {[ResultRaw fn] ? "rawjoin" : [ResultShort fn] ? "short" : "tagged"}]]
                 if {$value ne "never"} {
                     Emit fn "ret $value" $e
                 }
@@ -2666,6 +2921,16 @@ proc native::lower::Expr {fnVar e {want tagged}} {
         # that ever try): the declined-raw fallback, lower tagged then
         # runbox (milestone #6), reusing RawOf's cache like any other caller.
         set result [RawOf fn $result]
+    }
+    if {$result ne "never" && $want eq "short" && $repr eq "tagged"} {
+        # The tagged-to-ShortString1 frontier: this value is a String the
+        # planner proved has at most one character but was produced as a
+        # real String (a parameter of a tagged-ABI variant, a call of a
+        # tagged-result function, ...). One `strtoshort`, cached.
+        if {![ShortOk $e]} {
+            throw {NATIVE BUG} "native lowering: ShortString1 asked for the unproven expression $e"
+        }
+        set result [ShortOf fn $result]
     }
     return $result
 }
@@ -2981,7 +3246,11 @@ proc native::lower::Const {fnVar e node} {
     set value [dict get $node value]
     switch -- [core::value::kind $value] {
         int  { return [IntConst fn [core::value::intOf $value] $e] }
-        str  { return [Assign fn "str [Quote [core::value::strOf $value]]" $e] }
+        str  {
+            set r [Assign fn "str [Quote [core::value::strOf $value]]" $e]
+            dict set fn strConst $r [core::value::strOf $value]
+            return $r
+        }
         UnicodeChar { return [Assign fn "char [core::value::charOf $value]" $e] }
         list {
             # (const list {...}): a list of literal elements.
@@ -3008,6 +3277,15 @@ proc native::lower::Const {fnVar e node} {
 # RegionEligible, that E is a String constant or a region-producing call).
 proc native::lower::ConstOrRegion {fnVar e node want} {
     upvar 1 $fnVar fn
+    if {$want eq "short" && [core::value::kind [dict get $node value]] eq "str"} {
+        # A String literal the planner proved has at most one character:
+        # the ShortString1 scalar directly, never a String built and then
+        # decoded.
+        if {![ShortOk $e]} {
+            throw {NATIVE BUG} "native lowering: ShortString1 asked for the unproven literal at $e"
+        }
+        return [list [ShortLit fn [core::value::strOf [dict get $node value]] $e] short]
+    }
     if {$want eq "region" && [core::value::kind [dict get $node value]] eq "str"} {
         set text [core::value::strOf [dict get $node value]]
         set base [Assign fn "str [Quote $text]" $e]
@@ -3076,6 +3354,16 @@ proc native::lower::Ref {fnVar e node want} {
                 return [list $where raw]
             }
             return [list [TaggedOf fn $where] tagged]
+        }
+        shortreg {
+            # A String the planner proved has at most one character, held as
+            # a ShortString1 register (a short parameter, a virtualized
+            # local or an alias of one): a short consumer gets it with no
+            # conversion, anything else its one cached materialization.
+            if {$want eq "short"} {
+                return [list $where short]
+            }
+            return [list [TaggedOfShort fn $where] tagged]
         }
         fnvalue { return [list [Assign fn "fnvalue $where" $e] tagged] }
         self    { return [list [Assign fn self $e] tagged] }
@@ -3195,6 +3483,7 @@ proc native::lower::Bind {fnVar e node} {
     variable stringregion
     variable currentInstance
     variable rawIntAbiOpt
+    variable shortStringOpt
     set valueExpr [dict get $node value]
     set b [dict get $node binding]
     if {[hir::kind $hir $valueExpr] eq "block" && $valueExpr in [dict get $context envless]
@@ -3284,6 +3573,26 @@ proc native::lower::Bind {fnVar e node} {
             return ""
         }
     }
+    # A local String the planner proved has at most one character
+    # (SHORT-STRING.md): kept as a ShortString1 register for its whole scope.
+    # Every reference reads it short (no conversion) or materializes it once
+    # at the first consumer that needs a real String (Ref). An alias
+    # `y = x` of such a local is the same register (Expr of the ref asks for
+    # `short` and gets x's register back). Only in statement position (the
+    # bind's own value is not read) and for a plain local; a module binding
+    # is written to a tagged static slot and stays tagged.
+    if {$shortStringOpt && [dict exists $context discarded $e]
+            && ![dict get $node duplicate] && [dict get [hir::binding $hir $b] kind] eq "local"
+            && ![hir::isModuleBinding $hir $b] && [hir::kind $hir $valueExpr] ne "block"
+            && [ShortOk $valueExpr]} {
+        set value [Expr fn $valueExpr short]
+        if {$value eq "never"} {
+            return never
+        }
+        dict set fn locals $b [list shortreg $value]
+        dict incr fn shortLocals
+        return ""
+    }
     # A local alias of a raw register (`y = x` where x is a raw parameter or
     # a raw alias itself): the new name is the same raw register, so passing
     # `y` on needs no rbox/runbox merely because of the lexical rebinding
@@ -3350,6 +3659,7 @@ proc native::lower::CaptureRegsOf {fnVar bindings} {
         switch -- $how {
             reg        { lappend values $where }
             rawreg     { lappend values [TaggedOf fn $where] }
+            shortreg   { lappend values [TaggedOfShort fn $where] }
             fnvalue    { lappend values [Assign fn "fnvalue $where"] }
             self       { lappend values [Assign fn self] }
             default {
@@ -3618,7 +3928,9 @@ proc native::lower::CallArgs {fnVar argExprs fieldWidths rawSlots {planSlots {}}
             }
             lappend regs {*}$fields
         } else {
-            set argWant [expr {$i < [llength $rawSlots] && [lindex $rawSlots $i] ? "raw" : "tagged"}]
+            # A slot is 0 (tagged), 1 (raw Int) or `short` (ShortString1).
+            set slot [expr {$i < [llength $rawSlots] ? [lindex $rawSlots $i] : 0}]
+            set argWant [expr {$slot eq "short" ? "short" : $slot ? "raw" : "tagged"}]
             if {$argWant eq "raw" && [RawConstArg $arg]} {
                 # A small Int literal handed to a raw parameter is a raw
                 # constant: no tagged constant built only to be unboxed.
@@ -3705,9 +4017,7 @@ proc native::lower::FlattenedVirtualCall {fnVar e node target targetInstance cap
     set self [expr {$targetInstance eq $currentInstance && [dict exists $selfTail $e]}]
     set rawSlots {}
     if {$self} {
-        set rawSlots [lmap p $params {
-            expr {[dict exists $fn locals $p] && [lindex [dict get $fn locals $p] 0] eq "rawreg"}
-        }]
+        set rawSlots [lmap p $params {SlotKind fn $p}]
     }
     set argRegs [CallArgs fn $argExprs {} $rawSlots [PlanSlots $targetInstance [llength $argExprs]]]
     if {$argRegs eq "never"} {
@@ -3765,9 +4075,7 @@ proc native::lower::FlattenedVirtualRegionCall {fnVar e node target targetInstan
     set self [expr {$targetInstance eq $currentInstance && [dict exists $selfTail $e]}]
     set rawSlots {}
     if {$self} {
-        set rawSlots [lmap p $params {
-            expr {[dict exists $fn locals $p] && [lindex [dict get $fn locals $p] 0] eq "rawreg"}
-        }]
+        set rawSlots [lmap p $params {SlotKind fn $p}]
     }
     set argRegs [CallArgs fn $argExprs {} $rawSlots]
     if {$argRegs eq "never"} {
@@ -4071,6 +4379,18 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
         return [list $fields virtual]
     }
 
+    if {$wantVirtual eq "" && !$wantRegion && $targetKind eq "native" && [dict get $node known] eq ""} {
+        # ShortString1 (SHORT-STRING.md): the String natives a proven-short
+        # operand can feed directly -- `length`, `==` -- and `substring`
+        # when its result is asked for as a short value. Only through a root
+        # native reference (no callee code to run), like the String-region
+        # forms just above.
+        set short [TryShortStringOp fn $e $node $want]
+        if {$short ne ""} {
+            return $short
+        }
+    }
+
     # The callee is evaluated first. A reference to a root native or to an
     # environment-free function needs no code. A module-native bridge with a
     # captured module value instead reads the module function binding itself.
@@ -4086,6 +4406,7 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
         switch -- $how {
             reg { set callee $where }
             rawreg { set callee [TaggedOf fn $where] }
+            shortreg { set callee [TaggedOfShort fn $where] }
             fnvalue { set callee [Assign fn "fnvalue $where" $e] }
             self { set callee [Assign fn self $e] }
             static { set callee [Assign fn "staticget $where" $e] }
@@ -4150,9 +4471,7 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
         }
         set rawSlots {}
         if {$self} {
-            set rawSlots [lmap p $params {
-                expr {[dict exists $fn locals $p] && [lindex [dict get $fn locals $p] 0] eq "rawreg"}
-            }]
+            set rawSlots [lmap p $params {SlotKind fn $p}]
         }
         # Plan parameters of the target (virtual construction): never for a
         # region-result call or a tiny leaf this call will inline (both
@@ -4170,6 +4489,11 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
             && [dict get $node known] eq ""}]
         if {$abiCall} {
             set rawSlots [AbiParams $instance [llength $argExprs]]
+            # ShortString1 positions (shortstring.tcl): the callee's plan is
+            # authoritative for them too; a position is never both.
+            set rawSlots [lmap r $rawSlots s [ShortAbiParams $instance [llength $argExprs]] {
+                expr {$s ? "short" : $r}
+            }]
         }
         set planSlots {}
         if {$instance ne "" && !$wantRegion && !$leafInline} {
@@ -4284,7 +4608,8 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
             lappend argRegs [IntConst fn 0 $e]
         }
         set rawResult [expr {$abiCall && [AbiResult $instance]}]
-        set assign [expr {$rawResult ? "AssignRaw" : "Assign"}]
+        set shortResult [expr {$abiCall && [ShortAbiResult $instance]}]
+        set assign [expr {$rawResult ? "AssignRaw" : $shortResult ? "AssignShort" : "Assign"}]
         if {$target in $envless} {
             set result [$assign fn [string trimright "call $id [join $argRegs { }]"] $e]
         } else {
@@ -4292,6 +4617,14 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
         }
         if {$rawResult} {
             return [RawCallResult fn $e $result $want]
+        }
+        if {$shortResult} {
+            # The callee returns a ShortString1: a short consumer takes it as
+            # is, anything else materializes the String once, here.
+            if {$want eq "short"} {
+                return [list $result short]
+            }
+            return [list [TaggedOfShort fn $result] tagged]
         }
         set resultFamily [hir::construction::resultFamily $construction $instance]
         if {$resultFamily ne ""} {
@@ -4316,6 +4649,148 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
     }
     dict lappend fn calls [list value]
     return [list [Assign fn [string trimright "callvalue $callee [join $argRegs { }]"] $e] tagged]
+}
+
+# ShortString1 consumers and producers of the String natives (native call E,
+# node NODE), or "" when this call is not one of them (the ordinary lowering
+# then runs unchanged):
+#
+#   length(s)      s short  =>  `shortlen` (Empty 0, One 1): a raw Int
+#   s == t         both short  =>  `shorteq` (scalar equality; Empty == Empty,
+#                  One(a) == One(a), nothing else). Against a literal "" or a
+#                  one-character literal this is the same op with a `shortlit`
+#                  operand. If either operand is not short-natural (it would
+#                  need a fresh String produced and decoded), the ordinary
+#                  path -- including the String-region forms -- is untouched,
+#                  and a short operand against an unrestricted String simply
+#                  materializes (a recorded frontier, not a redesign of
+#                  String equality).
+#   substring(t, a, b)  asked short, with the planner's width proof
+#                  (b - a <= 1)  =>  the same `regioncheck` an ordinary call
+#                  would run (so the RANGE error is byte-identical), then an
+#                  infallible `strsliceshort`: no String allocated, and the
+#                  Empty encoding never doubles as a failure.
+proc native::lower::TryShortStringOp {fnVar e node want} {
+    upvar 1 $fnVar fn
+    variable hir
+    variable shortStringOpt
+    if {!$shortStringOpt} {
+        return ""
+    }
+    set calleeExpr [dict get $node callee]
+    if {[hir::kind $hir $calleeExpr] ne "ref"
+            || [dict get [hir::binding $hir [hir::get $hir $calleeExpr binding]] kind] ne "root"} {
+        return ""
+    }
+    lassign [NativeCallOp $e $node] name op
+    set argExprs [dict get $node args]
+    if {$name eq "length" && $op eq "strlen" && [llength $argExprs] == 1} {
+        set a [lindex $argExprs 0]
+        if {![ShortNatural fn $a]} {
+            return ""
+        }
+        set r [Expr fn $a short]
+        if {$r eq "never"} {
+            return {never tagged}
+        }
+        dict lappend fn calls [list native $name]
+        set n [AssignRaw fn "op shortlen $r" $e]
+        dict incr fn shortLen
+        if {$want eq "raw"} {
+            return [list $n raw]
+        }
+        return [list [TaggedOf fn $n] tagged]
+    }
+    if {$name eq "==" && $op eq "streq" && [llength $argExprs] == 2} {
+        lassign $argExprs a b
+        if {![ShortNatural fn $a] || ![ShortNatural fn $b]} {
+            return ""
+        }
+        set ra [Expr fn $a short]
+        if {$ra eq "never"} {
+            return {never tagged}
+        }
+        set rb [Expr fn $b short]
+        if {$rb eq "never"} {
+            return {never tagged}
+        }
+        dict lappend fn calls [list native $name]
+        dict incr fn shortEq
+        return [list [Assign fn "op shorteq $ra $rb" $e] tagged]
+    }
+    if {$want eq "short" && $name eq "substring" && [llength $argExprs] == 3 && [ShortOk $e]} {
+        lassign $argExprs tExpr sExpr eExpr
+        set base [Expr fn $tExpr]
+        if {$base eq "never"} {
+            return {never tagged}
+        }
+        set start [Expr fn $sExpr]
+        if {$start eq "never"} {
+            return {never tagged}
+        }
+        set end [Expr fn $eExpr]
+        if {$end eq "never"} {
+            return {never tagged}
+        }
+        set meta [core::native::metadata substring]
+        EmitArgGuards fn $e $argExprs [list $base $start $end] [dict get $meta paramTypes] substring
+        dict lappend fn calls [list native substring]
+        Assign fn "op regioncheck $base $start $end" $e
+        dict incr fn shortSlices
+        return [list [AssignShort fn "op strsliceshort $base $start $end" $e] short]
+    }
+    return ""
+}
+
+# 1 if String expression E can be consumed as a ShortString1 without
+# producing a real String first just to decode it: a proven-short expression
+# that is a literal, a reference (a short register, or an already
+# materialized String whose scalar is one cached load away), a `substring`
+# the producer above turns into a slice, or an exact call whose canonical
+# function returns a ShortString1. A call of a tagged-result function is not
+# natural: its String is allocated either way, and the ordinary paths
+# (String regions, plain `streq`) already handle it.
+proc native::lower::ShortNatural {fnVar e} {
+    upvar 1 $fnVar fn
+    variable hir
+    variable stringRegionOpt
+    if {![ShortOk $e]} {
+        return 0
+    }
+    switch -- [hir::kind $hir $e] {
+        const { return 1 }
+        ref {
+            set b [hir::get $hir $e binding]
+            if {$b eq "" || [dict get [hir::binding $hir $b] kind] eq "root"} {
+                return 0
+            }
+            if {[dict exists $fn locals $b]} {
+                return [expr {[lindex [dict get $fn locals $b] 0] in {reg shortreg}}]
+            }
+            return 1
+        }
+        call {
+            # A call the String-region analysis already keeps allocation-free
+            # (a direct `substring`, a region-producing instance): that
+            # existing virtualization wins, ShortString1 does not compete
+            # with it.
+            if {$stringRegionOpt && [RegionEligible $e]} {
+                return 0
+            }
+            set node [hir::node $hir $e]
+            lassign [dict get $node target] kind target
+            if {$kind eq "native"} {
+                return [expr {[dict get [hir::symbol $hir $target] name] eq "substring"
+                    && [llength [dict get $node args]] == 3}]
+            }
+            if {$kind eq "block" && [dict exists $fn targets $e]} {
+                set instance [dict get $fn targets $e]
+                return [expr {[ShortAbiResult $instance] && [dict get $node known] eq ""
+                    && [llength [dict get $node args]] == [llength [hir::get $hir $target params]]}]
+            }
+        }
+    }
+    return 0
 }
 
 # Lowers E, one of PLAN's recognized accesses (native/lower.tcl's "String
@@ -5608,7 +6083,7 @@ proc native::lower::NativeImpl {name} {
 # ---------------------------------------------------------------------------
 # Control flow
 
-proc native::lower::If {fnVar e node {family ""} {virtualN ""} {virtualCut ""} {rawJoin 0}} {
+proc native::lower::If {fnVar e node {family ""} {virtualN ""} {virtualCut ""} {rawJoin 0} {shortJoin 0}} {
     upvar 1 $fnVar fn
     variable hir
     variable guards
@@ -5643,6 +6118,8 @@ proc native::lower::If {fnVar e node {family ""} {virtualN ""} {virtualCut ""} {
             set value [SequenceVirtual fn [dict get $node ${role}Body] $virtualN $virtualCut]
         } elseif {$rawJoin} {
             set value [SequenceRaw fn [dict get $node ${role}Body]]
+        } elseif {$shortJoin} {
+            set value [SequenceShort fn [dict get $node ${role}Body]]
         } else {
             set value [SequenceTo fn [dict get $node ${role}Body] $family]
         }
@@ -5659,6 +6136,13 @@ proc native::lower::If {fnVar e node {family ""} {virtualN ""} {virtualCut ""} {
         # Both branches' values are small Ints (they flow into a raw
         # result's proven-small Range), joined in one raw register.
         MarkRaw fn $result
+    }
+    if {$shortJoin} {
+        # Both branches' values are Strings of at most one character (the
+        # planner's join of them is): joined in one ShortString1 register,
+        # no branch materialized only to be re-joined as a String.
+        MarkShort fn $result
+        dict incr fn shortJoins
     }
     if {$family ne ""} {
         # A join wanted in a plan position (virtual construction): each
@@ -5680,6 +6164,8 @@ proc native::lower::If {fnVar e node {family ""} {virtualN ""} {virtualCut ""} {
             set value [SequenceVirtual fn $body $virtualN $virtualCut]
         } elseif {$rawJoin} {
             set value [SequenceRaw fn $body]
+        } elseif {$shortJoin} {
+            set value [SequenceShort fn $body]
         } else {
             set value [SequenceTo fn $body $family]
         }
@@ -6333,6 +6819,22 @@ proc native::lower::SequenceRaw {fnVar exprs} {
         }
     }
     return [Expr fn [lindex $exprs end] rawjoin]
+}
+
+# Like SequenceRaw, for a body whose value flows into a ShortString1 register:
+# every statement but the last is evaluated for effect, the last is produced
+# short.
+proc native::lower::SequenceShort {fnVar exprs} {
+    upvar 1 $fnVar fn
+    if {$exprs eq ""} {
+        throw {NATIVE BUG} "native lowering: a ShortString1 body has no value"
+    }
+    foreach e [lrange $exprs 0 end-1] {
+        if {[Expr fn $e] eq "never"} {
+            return never
+        }
+    }
+    return [Expr fn [lindex $exprs end] short]
 }
 
 proc native::lower::SequenceTo {fnVar exprs family} {
