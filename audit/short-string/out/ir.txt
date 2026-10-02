@@ -1,0 +1,17 @@
+fib identical-nir
+lex-strategy identical-nir
+loop-count identical-nir
+refined-checks off 6776747 on 7195439 delta +418692 (+6.18%) runs 4
+source-checks off 73486 on 68963 delta -4523 (-6.15%) runs 11
+sum-refined identical-nir
+test-selection identical-nir
+uri-steady off 42728012 on 36053824 delta -6674188 (-15.62%) runs 4
+ai_text_clean off 187348 on 68507 delta -118841 (-63.43%) runs 11
+csv off 19629 on 19622 delta -7 (-0.04%) runs 11
+csv_chunked off 19516 on 19516 delta +0 (+0.00%) runs 4
+csv_geometric off 19637 on 19637 delta +0 (+0.00%) runs 4
+csv_records off 99778 on 99713 delta -65 (-0.07%) runs 4
+hashtable identical-nir
+matmul identical-nir
+string_replace off 11935 on 12274 delta +339 (+2.84%) runs 11
+string_reverse identical-nir
