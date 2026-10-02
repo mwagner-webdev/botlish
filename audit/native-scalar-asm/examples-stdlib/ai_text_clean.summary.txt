@@ -2,14 +2,14 @@ source:  examples/stdlib/ai_text_clean.bot
 backend: Cranelift (specialize=1)
 asm:     ai_text_clean.asm
 vcode:   ai_text_clean.vcode
-machine-code bytes: 3081 (per function: 505 994 723 752 107)
+machine-code bytes: 3078 (per function: 505 994 723 758 98)
 
 functions:
   0 <program entry>: nir-regs=13
   1 cleaner_emoji<str>: nir-regs=128
   2 clean_char<str>: nir-regs=74
   3 clean_from<str, int, str>: nir-regs=24
-  4 clean_ai_text<str>: nir-regs=7
+  4 clean_ai_text<str>: nir-regs=6
 
 GC roots (ai_text_clean.asm's NIR ids match roots.txt's "function N"):
   function 0 "<program>"
@@ -65,14 +65,14 @@ GC roots (ai_text_clean.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 4 "clean_ai_text"
-    NIR regs: 7
+    NIR regs: 6
     raw regs: 2
-    managed-capable regs: 5
+    managed-capable regs: 4
     effects: may_error=true may_gc=true
     safepoints: 1
-    root candidates: 4
-    max live roots: 4
-    shadow slots: 4
+    root candidates: 3
+    max live roots: 3
+    shadow slots: 3
     entry zero slots: 0
     depth reservation: no
     storage: native frame

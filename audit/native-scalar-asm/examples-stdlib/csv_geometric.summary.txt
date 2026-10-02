@@ -2,7 +2,7 @@ source:  examples/stdlib/csv_geometric.bot
 backend: Cranelift (specialize=1)
 asm:     csv_geometric.asm
 vcode:   csv_geometric.vcode
-machine-code bytes: 7578 (per function: 68 461 461 81 81 357 412 412 279 279 81 365 430 585 1063 352 783 215 488 325)
+machine-code bytes: 7597 (per function: 68 461 461 81 81 360 420 420 279 279 81 365 430 585 1063 352 783 215 488 325)
 
 functions:
   0 <program entry>: nir-regs=2
@@ -10,9 +10,9 @@ functions:
   2 mutarray::create<int, List[str]>: nir-regs=13
   3 geo_new<str>: nir-regs=4
   4 geo_new<List[str]>: nir-regs=4
-  5 geo_new_capacity<int, int>: nir-regs=11
-  6 geo_grow<mutarray, int, str>: nir-regs=14
-  7 geo_grow<mutarray, int, List[str]>: nir-regs=14
+  5 geo_new_capacity<int, int>: nir-regs=12
+  6 geo_grow<mutarray, int, str>: nir-regs=15
+  7 geo_grow<mutarray, int, List[str]>: nir-regs=15
   8 geo_append<mutarray, int, str>: nir-regs=5
   9 geo_append<mutarray, int, List[str]>: nir-regs=5
   10 geo_finish<mutarray, int>: nir-regs=3
@@ -93,8 +93,8 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 5 "geo_new_capacity"
-    NIR regs: 11
-    raw regs: 2
+    NIR regs: 12
+    raw regs: 3
     managed-capable regs: 9
     effects: may_error=false may_gc=true
     safepoints: 2
@@ -106,28 +106,28 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 6 "geo_grow"
-    NIR regs: 14
-    raw regs: 2
+    NIR regs: 15
+    raw regs: 3
     managed-capable regs: 12
     effects: may_error=true may_gc=true
     safepoints: 2
-    root candidates: 5
+    root candidates: 4
     max live roots: 4
     shadow slots: 4
-    entry zero slots: 0
+    entry zero slots: 1
     depth reservation: no
     storage: native frame
   
   function 7 "geo_grow"
-    NIR regs: 14
-    raw regs: 2
+    NIR regs: 15
+    raw regs: 3
     managed-capable regs: 12
     effects: may_error=true may_gc=true
     safepoints: 2
-    root candidates: 5
+    root candidates: 4
     max live roots: 4
     shadow slots: 4
-    entry zero slots: 0
+    entry zero slots: 1
     depth reservation: no
     storage: native frame
   
