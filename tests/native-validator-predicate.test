@@ -108,7 +108,11 @@ test native-validator-predicate-known-result-nir-shape {both the dynamic and the
         {call {ref f} {const str hi}}
     }
     set hir [hir::build $p -strict 0]
-    regexp -all {op strlen} [native::nir $hir]
+    # -short-string-opt 0: the literal-fed parameter would otherwise be a packed
+    # ASCII value whose length is `op asciilen`, not `op strlen` (SHORT-STRING-
+    # TIERS.md); this pin is about the validator calls, not the String
+    # representation.
+    regexp -all {op strlen} [native::nir $hir -short-string-opt 0]
 } -result 4
 
 # ---------------------------------------------------------------------------
