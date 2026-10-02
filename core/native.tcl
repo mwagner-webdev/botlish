@@ -27,7 +27,10 @@
 #                   trusted native impl may do that: see core/type.tcl); the
 #                   native keeps its own registered -result-type for the
 #                   call's static type on every backend, moduleFn or not
-#                   (a call's nativeResultOverride, native/prepare.tcl). A native's
+#                   (a call's nativeResultOverride, native/prepare.tcl), and
+#                   its own paramTypes check, under its own name, before
+#                   the module function runs (hir::aot::VisitCall, native/
+#                   lower.tcl's BridgedCheckedNative). A native's
 #                   module function sees only its own module's other
 #                   definitions and ordinary root natives; it captures
 #                   nothing from the call site (an ordinary top-level

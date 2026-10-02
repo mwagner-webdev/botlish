@@ -4308,6 +4308,61 @@ proc native::lower::ModuleBridgeBinding {calleeExpr targetKind} {
     return [dict get $node bridge]
 }
 
+# The native a block call E denotes when it is a call of a module-bridged
+# native that hir::aot holds to the native's parameter kinds (VisitCall):
+# its name if some argument needed a check, "" otherwise. The bridge
+# replaces only the implementation; the native's parameter check is still
+# its own, under its own name, before the module function runs.
+proc native::lower::BridgedCheckedNative {e calleeExpr argExprs} {
+    variable hir
+    variable guards
+    variable knownErrors
+    set name [hir::types::BridgedNative $hir $calleeExpr]
+    if {$name eq ""} {
+        return ""
+    }
+    foreach arg $argExprs {
+        set key [list $e $arg]
+        if {[dict exists $guards $key] || [dict exists $knownErrors $key]} {
+            return $name
+        }
+    }
+    return ""
+}
+
+# 1 if some argument of the bridged native call E is statically of the
+# wrong kind (hir::aot's known error), so its parameter check always fails.
+proc native::lower::BridgedKnownError {e argExprs} {
+    variable knownErrors
+    foreach arg $argExprs {
+        if {[dict exists $knownErrors [list $e $arg]]} {
+            return 1
+        }
+    }
+    return 0
+}
+
+# The kind guards of the bridged native NAME's call E (see
+# BridgedCheckedNative), on its arguments ARGREGS as CallArgs evaluated
+# them. Only an argument of no static kind needs a guard, and its slot is
+# then always an ordinary tagged register (raw, short, field and plan slots
+# are each planned only for a proven kind), so the registers are the
+# arguments' own, one per argument.
+proc native::lower::BridgedArgGuards {fnVar e argExprs argRegs fieldWidths rawSlots planSlots name} {
+    upvar 1 $fnVar fn
+    variable guards
+    if {[join $fieldWidths ""] ne "" || [join $planSlots ""] ne ""
+            || [llength $argRegs] != [llength $argExprs]} {
+        throw {NATIVE BUG} "native lowering: bridged native $name call $e has non-register arguments"
+    }
+    foreach arg $argExprs slot $rawSlots {
+        if {[dict exists $guards [list $e $arg]] && $slot ni {"" 0}} {
+            throw {NATIVE BUG} "native lowering: guarded argument $arg of bridged native $name call $e is not tagged"
+        }
+    }
+    EmitArgGuards fn $e $argExprs $argRegs [dict get [core::native::metadata $name] paramTypes] $name
+}
+
 # Preserve the exact call and its completion handling, then substitute a
 # successful-result constant for later value uses when the per-instance range
 # analysis proves one. This is not an effect or totality optimization.
@@ -4634,6 +4689,26 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
     }
 
     if {$targetKind eq "block"} {
+        set bridged [BridgedCheckedNative $e $calleeExpr $argExprs]
+        if {$bridged ne "" && [BridgedKnownError $e $argExprs]} {
+            # A module-bridged native call whose argument is statically of
+            # the wrong kind: the native's own parameter check always fails
+            # (hir::aot's known error), so the call is never made. The
+            # arguments are evaluated tagged, never in the callee's ABI
+            # form, since that is planned for the wrong kind.
+            set argRegs {}
+            foreach arg $argExprs {
+                set r [Expr fn $arg]
+                if {$r eq "never"} {
+                    return {never tagged}
+                }
+                lappend argRegs $r
+            }
+            EmitArgGuards fn $e $argExprs $argRegs \
+                [dict get [core::native::metadata $bridged] paramTypes] $bridged
+            Emit fn unreachable $e
+            return {never tagged}
+        }
         set params [hir::get $hir $target params]
         set instance [expr {[dict exists $fn targets $e] ? [dict get $fn targets $e] : ""}]
         # The instance hir::specialize chose; a self tail call that stays in
@@ -4705,6 +4780,9 @@ proc native::lower::Call {fnVar e node want {wantVirtual ""} {wantRegion 0}} {
             # bridged module function -- exactly like NativeCall's own
             # identical fold for an unbridged type test (see there).
             return [list [Assign fn "bool [expr {[dict get $node known] ? "true" : "false"}]" $e] tagged]
+        }
+        if {$bridged ne ""} {
+            BridgedArgGuards fn $e $argExprs $argRegs $fieldWidths $rawSlots $planSlots $bridged
         }
         if {![dict exists $fn targets $e]} {
             throw {NATIVE BUG} "native lowering: hir::specialize chose no instance for call $e"

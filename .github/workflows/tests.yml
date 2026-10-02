@@ -63,8 +63,10 @@ jobs:
 
       # Runs the whole suite on cranelift and classifies every test; fails
       # only if a test fails for a reason other than a reported unsupported
-      # construct.
+      # construct. `shell: bash` runs it with pipefail: the default shell
+      # (bash -e) takes tee's exit status, which hid a failing test here.
       - name: Native coverage
+        shell: bash
         run: tclsh9.0 tests/native-coverage.tcl | tee coverage.txt
 
       # The corpus, the source samples and the HIR fixtures (native compiles
