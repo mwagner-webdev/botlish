@@ -591,11 +591,12 @@ storage and serve as ground truth.
 * **Plan-mode `construct`** (private transient `StrPlanObj`) still uses an object plus a
   `Vec`; it is not a canonical String and was out of scope.
 * **Pre-existing bugs found by the new fuzzer, reproducible at the parent commit and not
-  fixed here** (queued as separate tasks): `lowercase("İ")` (U+0130) is `i` on the Tcl
-  backends but unchanged on native (Rust's lowercase of it is two characters); and a
+  fixed here** (queued as separate tasks): `lowercase("İ")` (U+0130) was `i` on the Tcl
+  backends but unchanged on native (Rust's lowercase of it is two characters; since fixed
+  in `rt_str_lower`, and U+0130 is back in the fuzzer's literal pool); and a
   substring result compared with another String-region binding (`v == v`, and shapes like
   `first_half(x) == y`) fails native lowering with `{NATIVE BUG} region binding ...
-  referenced outside a recognized consumer`. The fuzzer excludes U+0130 and `v == v`
+  referenced outside a recognized consumer`. The fuzzer excludes `v == v`
   and its two remaining disagreements are the second bug.
 * Miri validates `strobj.rs` only (the rest of the crate needs the JIT and stack walker).
 

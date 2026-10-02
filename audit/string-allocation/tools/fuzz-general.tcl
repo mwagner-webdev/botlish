@@ -38,12 +38,10 @@ proc pick {list} { return [lindex $list [expr {int(rand() * [llength $list])}]] 
 
 # A String literal of 0..~20 characters.
 #
-# Two divergences that exist at the parent commit (independent of the String
+# One divergence that exists at the parent commit (independent of the String
 # storage, found by this generator, recorded in STRING-ALLOCATION.md "Known
-# limitations") are kept out of the generator so it can assert exact agreement:
-#   * lowercase("\u0130"): the Tcl backends give "i" (Tcl's simple mapping),
-#     native keeps U+0130 (Rust's lowercase of it is two characters, which the
-#     native one-to-one mapping leaves alone). The literal is not generated.
+# limitations") is kept out of the generator so it can assert exact agreement
+# (the other one it found, lowercase("\u0130"), is fixed and in the pool):
 #   * `v == v` with v the result of a substring (a String region compared with
 #     itself) is a native lowering failure ({NATIVE BUG} "region binding ...
 #     referenced outside a recognized consumer"). Equality is only generated
@@ -51,7 +49,7 @@ proc pick {list} { return [lindex $list [expr {int(rand() * [llength $list])}]] 
 proc lit {} {
     set nul [format %c 0]
     set pool [list "" "a" "b" "hello" "HELLO, World" "abcdefgh" "abcdefghi" "x y" "\u00e9" "\u00c9t\u00e9" "\u2026" "a\u2026b" \
-        "\u03bb" "\u732b\u732b" "\U0001f600" "a\U0001f600b\U0001f600" "e\u0301" "\u00df" "\u212a" "$nul" "a${nul}b" \
+        "\u03bb" "\u732b\u732b" "\U0001f600" "a\U0001f600b\U0001f600" "e\u0301" "\u00df" "\u212a" "\u0130" "$nul" "a${nul}b" \
         "Gr\u00fc\u00dfe aus M\u00fcnchen\u2026" "\u0391\u0392\u0393" "ASCII only text" "mixed \u00e9\u2026\U0001f600 text" "\U0010ffff" "z"]
     return "\"[pick $pool]\""
 }
