@@ -282,7 +282,7 @@ NIR, modulo the temporary's name, which NIR does not print).
 
 ## Tests
 
-* `tests/struct-destructuring.test` (214 tests): AST shape and the
+* `tests/struct-destructuring.test` (215 tests, table-generated cases included): AST shape and the
   field-versus-binding direction, syntax errors, the List policy (every shape
   including nested, multi-line, with `-recover`), lowering shape and origins;
   then, for named and anonymous sources, a table of destructured-versus-explicit
