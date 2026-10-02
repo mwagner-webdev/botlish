@@ -1,0 +1,1 @@
+programs 491 of 500 (rejected statically 9; outcomes/features: value 476 uses-scalar-abi 483 ascii-abi 418 short-abi 412 ascii-param 367 materializes 444 extracts 125 slices 225 tier-mix 67 scalar-equality 177 scalar-length 109 ascii-result 281 error 15); disagreements 0
