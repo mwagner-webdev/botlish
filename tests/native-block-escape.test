@@ -346,10 +346,12 @@ test blockescape-region-companion-minimal-1 {a nonescaping char-accessor consume
     list [assertParity $::atScanSrc] [blockAllocs $::atScanSrc 1] [blockAllocs $::atScanSrc 0]
 } -result {{bool true} 0 2}
 
+# (GENERIC-PREDICATE-PROOF-LOSS.md, loss point 1: at is only called with an Int,
+# so its one emitted instance is keyed instance="int" rather than "generic".)
 test blockescape-region-companion-minimal-2 {at's NIR has no closure/callenvmulti, and env=0/results=3} -body {
     set nirText [dict get [native::lower::program [sourceHir $::atScanSrc]] text]
     list [regexp {closure |callenvmulti} $nirText] \
-        [regexp {"at" params=2 env=0 regs=\d+ pnames="i s" captures=0 instance="generic" results=3} $nirText]
+        [regexp {"at" params=2 env=0 regs=\d+ pnames="i s" captures=0 instance="int" results=3} $nirText]
 } -result {0 1}
 
 test blockescape-region-companion-minimal-3 {scan's captures flatten through at to [s], never [at]} -body {
@@ -437,10 +439,12 @@ test blockescape-region-companion-escaping-coexist-1 {an escaping closure and a 
     list [assertParity $::mixedProgramSrc] $on $off
 } -result {{list {{str e} {bool true}}} 1 3}
 
+# (GENERIC-PREDICATE-PROOF-LOSS.md, loss point 1: at2 is only called with an Int,
+# so its one emitted instance is keyed instance="int" rather than "generic".)
 test blockescape-region-companion-escaping-coexist-2 {the escaping at still builds a canonical closure; at2 never does} -body {
     set nirText [dict get [native::lower::program [sourceHir $::mixedProgramSrc]] text]
     list [regexp {closure } $nirText] [regexp {callenvmulti} $nirText] \
-        [regexp {"at2" params=2 env=0 regs=\d+ pnames="i s2" captures=0 instance="generic" results=3} $nirText]
+        [regexp {"at2" params=2 env=0 regs=\d+ pnames="i s2" captures=0 instance="int" results=3} $nirText]
 } -result {1 0 1}
 
 # ---------------------------------------------------------------------------
@@ -646,12 +650,14 @@ test blockescape-region-companion-refined-checks-1 {refined-checks.ir: local_ext
         [dict get $on byKind ImmutableSet allocations]
 } -result {{list {{int 400} {int 0}}} 6820 0 6804 12 2}
 
+# (GENERIC-PREDICATE-PROOF-LOSS.md, loss point 1: char_at is only called with an Int,
+# so its one emitted instance is keyed instance="int" rather than "generic".)
 test blockescape-region-companion-refined-checks-2 {refined-checks.ir: char_at's NIR has no closure/callenvmulti, and env=0/results=3 -- R2 (R2-ORDINARY-EMAILISH-PREDICATE.md) collapses this to one shared instance, not two per-call-site copies} -body {
     core::loadLibrary web
     set hir [nativeHirOfIR [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
     set nirText [dict get [native::lower::program $hir] text]
     list [regexp {"char_at" params=1} $nirText] \
-        [llength [regexp -all -inline {"char_at" params=2 env=0 regs=\d+ pnames="i v" captures=0 instance="generic" results=3} $nirText]] \
+        [llength [regexp -all -inline {"char_at" params=2 env=0 regs=\d+ pnames="i v" captures=0 instance="int" results=3} $nirText]] \
         [regexp {callenvmulti} $nirText]
 } -result {0 1 0}
 

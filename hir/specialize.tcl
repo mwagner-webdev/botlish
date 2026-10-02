@@ -203,6 +203,11 @@ namespace eval hir::specialize {
     # user-facing flag. 0 makes DormantInstances find nothing, which
     # reproduces the compiler before the dormant set existed.
     variable dormantOpt 1
+    # GENERIC-PREDICATE-PROOF-LOSS.md, loss point 1: test/audit knob, not a
+    # user-facing flag. 0 restores the closure key rule before it (a
+    # value-capturing closure with a non-Int capture keeps only exact
+    # callable key positions, not Int ones).
+    variable closureIntKeyOpt 1
 }
 
 proc hir::specialize::analyze {hir args} {
@@ -905,7 +910,7 @@ proc hir::specialize::Handle {op args} {
                 # Bound code growth for value-capturing closures. Scalar Int
                 # captures can feed the existing raw representation path;
                 # aggregate and managed captures retain the generic entry for
-                # every parameter except an exact callable (below).
+                # every parameter except an exact callable or an Int (below).
                 set scalarCaptures [dict exists $state seeds $block]
                 if {$scalarCaptures} {
                     foreach b [dict get $state hir exprs $block captures] {
@@ -929,10 +934,27 @@ proc hir::specialize::Handle {op args} {
                     # callable argument's identity is different in kind: it
                     # selects direct versus indirect lowering of the call
                     # through the parameter. So the exact callable positions
-                    # keep their identity (bounded by exactLimit), and every
-                    # other position stays generic, to be refined by the
+                    # keep their identity (bounded by exactLimit).
+                    #
+                    # An Int position keeps its kind too (GENERIC-PREDICATE-
+                    # PROOF-LOSS.md, loss point 1): Int is the one kind with a
+                    # representation consequence (Range facts, raw Int
+                    # operations and the RawInt ABI all read an Int key), and
+                    # the cost is bounded like any other key (`limit`
+                    # instances per block). The literal's generic instance
+                    # then stays used only as the Block-value entry; when
+                    # blockescape de-closures the binding that entry is
+                    # dormant (DormantInstances), so its unknown-kind calls
+                    # are no evidence for the keyed instances' facts, and an
+                    # exact call that still selects it (an argument of
+                    # another kind) makes it a de-closure target of its own
+                    # (hir::blockescape::RelevantInstances). Every other
+                    # position stays generic, to be refined by the
                     # closed-caller theorem (ClosedSet) exactly as before.
-                    set keyArgs [lmap k $keyArgs {expr {[IsExactCallableKey $k] ? $k : "any"}}]
+                    variable closureIntKeyOpt
+                    set keyArgs [lmap k $keyArgs {
+                        expr {[IsExactCallableKey $k] || ($closureIntKeyOpt && $k eq "int") ? $k : "any"}
+                    }]
                 }
             }
             set target ""
@@ -1262,9 +1284,9 @@ proc hir::specialize::DormantInstances {snapshot blockescape} {
 # theorem applies to: a generic instance, and a SPECIALIZED instance of a
 # value-capturing closure whose key still has an `any` position (Handle's
 # closure rule leaves every position of such a closure generic except an
-# exact callable, so the theorem refines them exactly as it refines the
-# generic instance's -- without it `scan_while`'s start would stay `any`
-# merely because the instance now has an exact predicate in its key). An
+# exact callable or an Int, so the theorem refines them exactly as it
+# refines the generic instance's -- e.g. a String parameter next to an exact
+# predicate in the key). An
 # ordinary (static) block's specialized instance with an `any` position
 # keeps it: there the callers genuinely pass nothing more precise, and the
 # theorem would only re-run the inference with a less precise call-result

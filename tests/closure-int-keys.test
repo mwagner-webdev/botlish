@@ -1,0 +1,207 @@
+# closure-int-keys.test -- loss point 1 of GENERIC-PREDICATE-PROOF-LOSS.md:
+# a value-capturing closure with a non-Int capture keeps the Int positions of
+# its key (hir::specialize::Handle), not only its exact callable positions.
+# lib/web.bot's tld?, domain?, char_at and scan_while's start are therefore
+# keyed <int>; their generic instances stay used as never-entered Block-value
+# entries (dormant: tests/dormant-instances.test).
+#
+# Knob (test/audit-only namespace variable, hir/specialize.tcl):
+# hir::specialize::closureIntKeyOpt 0 restores the rule before loss point 1.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 1000000
+
+proc dedent {text} {
+    set lines [split $text \n]
+    set indent 1000
+    foreach line $lines {
+        if {[string trim $line] eq ""} continue
+        set n [expr {[string length $line] - [string length [string trimleft $line " "]]}]
+        if {$n < $indent} { set indent $n }
+    }
+    return [join [lmap line $lines {string range $line $indent end}] \n]
+}
+
+proc withIntKeys {opt script} {
+    set hir::specialize::closureIntKeyOpt $opt
+    try {
+        return [uplevel 1 $script]
+    } finally {
+        set hir::specialize::closureIntKeyOpt 1
+    }
+}
+
+proc refinedChecks {} {
+    set hir [native::prepareHir [surface::readProgramFile [file join $::projectRoot bench refined-checks.bot]]]
+    set spec [hir::specialize::analyze $hir]
+    return [list $hir $spec [hir::range::analyze $hir $spec]]
+}
+
+proc bounds {r} {
+    if {$r eq "never"} { return never }
+    return [string map {-inf -∞ +inf +∞} "\[[dict get $r min], [dict get $r max]\]"]
+}
+
+# {label dormant entry-bounds} of every used instance named NAME, sorted.
+proc rowsOf {spec analysis name} {
+    set rows {}
+    foreach id [dict get $spec used] {
+        if {[dict get $spec instances $id name] ne $name} continue
+        lappend rows [list [hir::specialize::label $spec $id] [dict exists $spec dormant $id] \
+            [lmap r [dict get [dict get $analysis instances $id] params] {bounds $r}]]
+    }
+    lsort $rows
+}
+
+proc specOf {text args} {
+    set hir [surface::compile [dedent $text] t.bot -strict 0]
+    return [list $hir [hir::specialize::analyze $hir {*}$args]]
+}
+
+proc paramGuards {hir analysis id} {
+    set region [hir::aot::analyzeRegion [hir::specialize::view $hir $analysis $id] \
+        [dict get $analysis instances $id block] [dict get $analysis context]]
+    return [lmap b [dict get $region blockers] {
+        if {[dict get $b class] ne "representation"} continue
+        dict get $b kind
+    }]
+}
+
+# ---------------------------------------------------------------------------
+# refined-checks: the keys, and nothing lost
+
+test closure-int-keys-refined-checks {tld?, domain?, char_at and scan_while's start are Int-keyed; each generic instance is a dormant Block-value entry; the keyed instances keep every entry Range the generic ones had} -body {
+    lassign [refinedChecks] hir spec analysis
+    lmap name {tld? domain? char_at scan_while} {rowsOf $spec $analysis $name}
+} -result {{{tld?<generic> 1 {{[-∞, +∞]}}} {tld?<int> 0 {{[2, 4611686018427387903]}}}} {{domain?<generic> 1 {{[-∞, +∞]}}} {domain?<int> 0 {{[1, 4611686018427387903]}}}} {{char_at<generic> 1 {{[-∞, +∞]}}} {char_at<int> 0 {{[0, 4611686018427387902]}}}} {{scan_while<generic> 1 {{[-∞, +∞]} {[-∞, +∞]}}} {{scan_while<any, native(is_tcl_alpha)>} 1 {{[-∞, +∞]} {[-∞, +∞]}}} {{scan_while<int, block(e239)>} 0 {{[0, 0]} {[-∞, +∞]}}} {{scan_while<int, native(is_tcl_alpha)>} 0 {{[2, 4611686018427387903]} {[-∞, +∞]}}}}}
+
+test closure-int-keys-refined-checks-knob-off {with the knob off the same functions are <generic> (or <any, …>) with the same entry Ranges} -body {
+    withIntKeys 0 {
+        lassign [refinedChecks] hir spec analysis
+        lmap name {tld? domain? char_at} {rowsOf $spec $analysis $name}
+    }
+} -result {{{tld?<generic> 0 {{[2, 4611686018427387903]}}}} {{domain?<generic> 0 {{[1, 4611686018427387903]}}}} {{char_at<generic> 0 {{[0, 4611686018427387902]}}}}}
+
+test closure-int-keys-refined-checks-nir-unchanged {the payoff, pinned honestly: refined-checks' NIR is identical apart from instance labels, with the RawInt demand filter on and off (counted loops stay tagged, loss point 4; de-closured functions never take raw parameters, loss point 5)} -body {
+    set hir [surface::readProgramFile [file join $::projectRoot bench refined-checks.bot]]
+    lmap opts {{} {-raw-demand-opt 0}} {
+        set texts [lmap k {0 1} {
+            withIntKeys $k {
+                set n [native::nir $hir {*}$opts]
+                regsub -all {instance="[^"]*"} $n {instance=X} n
+                regsub -all { @e\d+} $n {} n
+                set n
+            }
+        }]
+        expr {[lindex $texts 0] eq [lindex $texts 1]}
+    }
+} -result {1 1}
+
+test closure-int-keys-refined-checks-rawint-plan {what still blocks raw parameters: the keyed positions are RawInt-eligible now, and the demand rule suppresses them (a counted loop bound is a tagged consumer, loss point 4)} -body {
+    lassign [refinedChecks] hir spec analysis
+    set plan [native::rawabi::plan $hir $spec $analysis 1]
+    set rows {}
+    foreach id [dict get $spec used] {
+        set label [hir::specialize::label $spec $id]
+        if {$label ni {tld?<int> domain?<int> char_at<int> {scan_while<int, native(is_tcl_alpha)>}}} continue
+        lappend rows [list $label [lindex [dict get $plan $id paramEligible] 0] [lindex [dict get $plan $id paramReasons] 0]]
+    }
+    lsort $rows
+} -result {{char_at<int> 1 suppressed-mixed-tagged-use} {domain?<int> 1 suppressed-mixed-tagged-use} {tld?<int> 1 suppressed-mixed-tagged-use} {{scan_while<int, native(is_tcl_alpha)>} 1 suppressed-no-raw-demand}}
+
+# ---------------------------------------------------------------------------
+# The rule
+
+set ::intFixture {
+    fn outer(tag):
+        fn inner(x):
+            x + length(tag)
+        inner(1) + inner(2)
+    outer("v")
+}
+
+test closure-int-keys-key {an Int argument of a closure with a String capture selects inner<int>; the generic instance stays as the (dormant) Block-value entry} -body {
+    lassign [specOf $::intFixture] hir analysis
+    lmap id [dict get $analysis used] {
+        if {[dict get $analysis instances $id name] ne "inner"} continue
+        list [hir::specialize::label $analysis $id] [hir::specialize::dormant $hir $analysis $id]
+    }
+} -result {{inner<int> 0} {inner<generic> 1}}
+
+test closure-int-keys-no-guard-without-theorem {the key alone removes the kind guard: inner<int> has none even with the closed-caller theorem off} -body {
+    lmap opt {1 0} {
+        lassign [specOf $::intFixture -closed-caller-facts-opt $opt] hir analysis
+        set id [lindex [lmap id [dict get $analysis used] {
+            expr {[hir::specialize::label $analysis $id] eq "inner<int>" ? $id : [continue]}
+        }] 0]
+        paramGuards $hir $analysis $id
+    }
+} -result {{} {}}
+
+test closure-int-keys-other-kinds-stay-generic {a String or Bool argument still gives the generic key} -body {
+    lassign [specOf {
+        fn outer(tag):
+            fn inner(x):
+                concat(tag, "")
+                x
+            a = inner(tag)
+            b = inner(true)
+            length(tag)
+        outer("v")
+    }] hir analysis
+    lmap id [dict get $analysis used] {
+        if {[dict get $analysis instances $id name] ne "inner"} continue
+        hir::specialize::label $analysis $id
+    }
+} -result {inner<generic>}
+
+set ::mixedKinds {
+    fn outer(tag):
+        fn inner(x):
+            concat(tag, "")
+            x
+        [inner(tag), inner(1), inner(2)]
+    outer("v")
+}
+
+test closure-int-keys-mixed-kinds-still-de-closured {Int and String callers select inner<int> and inner<generic>: both are de-closure targets (the called generic instance, hir::blockescape::RelevantInstances), so no closure is allocated, as with the single generic instance before} -body {
+    set hir [surface::compile [dedent $::mixedKinds] t.bot -strict 0]
+    set spec [hir::specialize::analyze $hir]
+    set be [hir::blockescape::analyze $hir $spec]
+    list [lsort [lmap pair [hir::blockescape::wantedInstances $hir $spec $be] {lindex $pair 1}]] \
+        [regexp -all {= closure } [native::nir $hir]] \
+        [withIntKeys 0 {regexp -all {= closure } [native::nir $hir]}]
+} -result {{inner<generic> inner<int>} 0 0}
+
+foreach {name src expected} [list \
+    int $::intFixture 5 \
+    mixed $::mixedKinds {["v", 1, 2]} \
+    scanner {
+        fn first_space(s):
+            n = length(s)
+            fn at(i):
+                substring(s, i, i + 1)
+            fn scan(start):
+                loop i from start to n:
+                    if at(i) == " ":
+                        return i
+                n
+            fn tail(i):
+                e = scan(i)
+                e - i
+            [scan(0), tail(1), tail(n)]
+        [first_space("abc def"), first_space("abcdef"), first_space("")]
+    } {[[3, 2, 0], [6, 5, 0], [0, -1, 0]]}] {
+    test closure-int-keys-parity-$name "Int-keyed closure program $name: interp, compile and cranelift (block escape on and off) agree" -body {
+        set hir [surface::compile [dedent $src] t.bot -strict 0]
+        set outcomes [lmap backend {interp compile cranelift} {outcomeUnderHir $backend $hir}]
+        resetEffects
+        lappend outcomes [list value [core::value::show [native::evalHir $hir -block-escape-opt 0] 1] {}]
+        set outcomes [lsort -unique $outcomes]
+        expr {[llength $outcomes] == 1 ? [lindex $outcomes 0 1] : $outcomes}
+    } -result $expected
+}
+
+cleanupTests

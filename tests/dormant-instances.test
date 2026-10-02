@@ -140,21 +140,24 @@ set transitiveShape {
     [outer("abc1", 0), outer("x", 1), outer("ab", 2)]
 }
 
-# The scanner shape with a call of get on scan's own `start`, which is
-# `any` in the dormant scan<generic>.
+# The scanner shape with a String parameter scan passes on to a closure
+# whose String position stays generic (ok captures v): `tag` is Str in the
+# live scan instance and `any` in the dormant scan<generic>.
 set theoremShape {
     fn outer(v, start0):
         n = length(v)
         fn get(i):
             substring(v, i, i + 1)
-        fn scan(start, pred):
-            first = get(start)
+        fn ok(t):
+            length(t) + length(v)
+        fn scan(start, pred, tag):
+            first = ok(tag)
             loop i from start to n:
                 if pred(get(i)):
                     continue
                 return i
             n
-        scan(start0, is_tcl_alpha)
+        scan(start0, is_tcl_alpha, "t")
     [outer("abc1", 0), outer("x", 0)]
 }
 
@@ -189,15 +192,15 @@ set escapeShape {
 # ---------------------------------------------------------------------------
 # Which instances are dormant
 
-test dormant-refined-checks-set {refined-checks: the only dormant instance is scan_while's generic Block-value entry (the closure is de-closured through its two exact-predicate instances)} -body {
+test dormant-refined-checks-set {refined-checks: the dormant instances are the generic Block-value entries of the four de-closured closures whose calls are Int-keyed (char_at, scan_while, tld?, domain?) and the scan_while instance only tld?<generic> calls} -body {
     lassign [refinedChecks] hir spec analysis
     dormantLabels $spec
-} -result {scan_while<generic>}
+} -result {char_at<generic> domain?<generic> {scan_while<any, native(is_tcl_alpha)>} scan_while<generic> tld?<generic>}
 
-test dormant-transitive {an instance reachable only through a dormant entry is dormant too (apply<any, str, int>); the live, exact apply instance is not} -body {
+test dormant-transitive {an instance reachable only through a dormant entry is dormant too (apply<any, str, int>); the live, exact apply instance is not; get's generic entry is dormant (its calls are Int-keyed)} -body {
     lassign [dormantOf $transitiveShape] hir spec analysis
     dormantLabels $spec
-} -result {{apply<any, str, int>} scan<generic>}
+} -result {{apply<any, str, int>} get<generic> scan<generic>}
 
 test dormant-escaping-entry-stays-live {a returned closure's generic entry is a real Block-value entry: open, not dormant; only the never-materialized literal's entry is dormant} -body {
     lassign [dormantOf $escapeShape] hir spec analysis
@@ -225,8 +228,10 @@ test dormant-closed-audit {closedAudit states the dormant entry: open to hir::ra
     lassign [refinedChecks] hir spec analysis
     set audit [hir::specialize::closedAudit $hir $spec]
     list [regexp {scan_while<generic> +closed=0 range-open=1 callers=0 exact=\[\] dormant=1  \(closure de-closure-converted via its specialized instances; this generic Block-value entry is never entered\)} $audit] \
-        [regexp {char_at<generic> +closed=1 range-open=0 callers=5 exact=\[\] dormant=0} $audit]
-} -result {1 1}
+        [regexp {char_at<int> +closed=1 range-open=0 callers=7 exact=\[\] dormant=0  \(specialized: selected only by exact calls\)} $audit] \
+        [regexp {ok<generic> +closed=1 range-open=0 callers=2 exact=\[\] dormant=0  \(closure, blockescape: every reference is an exact call\)} \
+            [lassign [dormantOf $::theoremShape] th ts ta; hir::specialize::closedAudit $th $ts]]
+} -result {1 1 1}
 
 test dormant-transitive-instance-open-to-range {a transitively dormant instance stays closed (its key selects it only through exact calls) but hir::range treats it as open: it gets the facts that hold for any caller} -body {
     lassign [dormantOf $transitiveShape] hir spec analysis
@@ -241,10 +246,10 @@ test dormant-transitive-instance-open-to-range {a transitively dormant instance 
 test dormant-refined-checks-char-at-entry {refined-checks: char_at.i loses the -∞ the dormant scan_while<generic>'s calls joined in (limitation 2 of EXACT-CALLABLE-CLOSED-CALLER.md)} -body {
     set off [withDormant 0 {
         lassign [refinedChecks] hir spec analysis
-        entryOf $analysis $spec char_at<generic>
+        entryOf $analysis $spec char_at<int>
     }]
     lassign [refinedChecks] hir spec analysis
-    list $off [entryOf $analysis $spec char_at<generic>]
+    list $off [entryOf $analysis $spec char_at<int>]
 } -result {{{[-∞, 4611686018427387902]}} {{[0, 4611686018427387902]}}}
 
 test dormant-refined-checks-char-at-nir {refined-checks: char_at's i + 1 is a raw riadd (no tag test, no overflow check) in both of its emitted variants, instead of a tagged iadd} -body {
@@ -256,10 +261,10 @@ test dormant-refined-checks-char-at-nir {refined-checks: char_at's i + 1 is a ra
 test dormant-scan-shape-entry {the emailish? scanner shape: get.i is [0, …] once scan<generic>'s unbounded loop counter no longer reaches it} -body {
     set off [withDormant 0 {
         lassign [dormantOf $scanShape] hir spec analysis
-        entryOf $analysis $spec get<generic>
+        entryOf $analysis $spec get<int>
     }]
     lassign [dormantOf $scanShape] hir spec analysis
-    list $off [entryOf $analysis $spec get<generic>]
+    list $off [entryOf $analysis $spec get<int>]
 } -result {{{[-∞, 4611686018427387902]}} {{[0, 4611686018427387902]}}}
 
 test dormant-transitive-callee-entry {transitivity matters: idx<int> is reached by the live apply and by the transitively dormant apply<any, str, int>; only the dormant one passes an unbounded argument} -body {
@@ -288,10 +293,10 @@ test dormant-creation-no-capture-evidence {a closure created only by live code: 
     list [withDormant 0 {captureOfN}] [captureOfN]
 } -result {{{} {{[-∞, +∞]}}} {adder<generic> {{[5, 5]}}}}
 
-test dormant-closed-caller-theorem-skips-dormant-callers {the closed-caller theorem joins only live callers: the dormant scan<generic> passes its unknown `start` to get, which erased the live caller's Int (and left get's kind guards in live code)} -body {
+test dormant-closed-caller-theorem-skips-dormant-callers {the closed-caller theorem joins only live callers: the dormant scan<generic> passes its unknown `tag` to ok, which erased the live caller's Str (and left ok's kind guard in live code)} -body {
     proc theoremRow {} {
         lassign [dormantOf $::theoremShape] hir spec analysis
-        set id [instanceLabelled $spec get<generic>]
+        set id [instanceLabelled $spec ok<generic>]
         set callers {}
         foreach callerId [dict get $spec used] {
             if {$id in [dict values [dict get $spec instances $callerId calls]]} {
@@ -299,11 +304,10 @@ test dormant-closed-caller-theorem-skips-dormant-callers {the closed-caller theo
             }
         }
         set region [hir::specialize::region $hir $spec $id]
-        list [lsort $callers] [hir::specialize::closedCallerTheorem $hir $spec $id] \
-            [entryOf $analysis $spec get<generic>] [dict get $region status]
+        list [lsort $callers] [hir::specialize::closedCallerTheorem $hir $spec $id] [dict get $region status]
     }
     list [withDormant 0 {theoremRow}] [theoremRow]
-} -result {{{{scan<generic> 0} {{scan<any, native(is_tcl_alpha)>} 0}} any {{[-∞, +∞]}} guarded} {{{scan<generic> 1} {{scan<any, native(is_tcl_alpha)>} 0}} int {{[0, 4611686018427387902]}} closed}}
+} -result {{{{scan<generic> 0} {{scan<int, native(is_tcl_alpha), any>} 0}} any guarded} {{{scan<generic> 1} {{scan<int, native(is_tcl_alpha), any>} 0}} str closed}}
 
 # ---------------------------------------------------------------------------
 # Every backend agrees, with and without block escape (where lowering

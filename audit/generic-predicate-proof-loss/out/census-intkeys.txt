@@ -1,0 +1,94 @@
+Function-level census (GENERIC-PREDICATE-PROOF-LOSS.md, loss point 1): knob 0 vs 1
+Facts: per function, the join over its live (non-dormant) instances of entry, result and expression Ranges.
+
+program                               used  dorm nirFn narrow WIDER equal NIR               
+bench/fib.bot                          2>2   0>0   2>2     0     0     0 same              
+bench/lex-strategy.bot               11>11   0>0 11>11     0     0     0 same              
+bench/loop-count.bot                   3>3   0>0   3>3     0     0     0 same              
+bench/refined-checks.bot             29>33   1>5 26>26     0     0     0 same-modulo-labels
+bench/source-checks.bot                7>7   0>0   7>7     0     0     0 same              
+bench/sum-refined.bot                  4>4   1>1   3>3     0     0     0 same              
+bench/test-selection.bot             12>12   0>0 12>12     0     0     0 same              
+bench/uri-steady.bot                 19>20   0>1 17>17     0     0     0 same-modulo-labels
+examples/stdlib/ai_text_clean.bot      6>6   0>0   5>5     0     0     0 same              
+examples/stdlib/csv.bot              10>10   0>0 11>11     0     0     0 same              
+examples/stdlib/csv_chunked.bot      20>20   0>0 20>20     0     0     0 same              
+examples/stdlib/csv_geometric.bot    19>19   0>0 20>20     0     0     0 same              
+examples/stdlib/csv_records.bot      59>59   0>0 56>56     0     0     0 same              
+examples/stdlib/hashtable.bot        30>30   0>0 26>26     0     0     0 same              
+examples/stdlib/matmul.bot             7>7   0>0   7>7     0     0     0 same              
+examples/stdlib/string_replace.bot     4>4   0>0   4>4     0     0     0 same              
+examples/stdlib/string_reverse.bot     3>3   0>0   3>3     0     0     0 same              
+examples/surface/01-arithmetic.bot     1>1   0>0   1>1     0     0     0 same              
+examples/surface/02-recursion.bot      2>2   0>0   2>2     0     0     0 same              
+examples/surface/03-closure.bot        4>4   0>0   4>4     0     0     0 same              
+examples/surface/04-branch-value.bot   2>2   0>0   2>2     0     0     0 same              
+examples/surface/05-shadowing.bot      1>1   0>0   1>1     0     0     0 same              
+examples/surface/06-list.bot           1>1   0>0   1>1     0     0     0 same              
+examples/surface/07-loop-break.bot     1>1   0>0   1>1     0     0     0 same              
+examples/surface/08-return.bot         3>3   0>0   3>3     0     0     0 same              
+examples/surface/11-boolean-operators.bot   3>3   0>0   3>3     0     0     0 same              
+examples/surface/12-if-value.bot       2>2   0>0   2>2     0     0     0 same              
+examples/surface/13-hygiene.bot        2>2   0>0   2>2     0     0     0 same              
+examples/surface/14-modules.bot        2>2   0>0   1>1     0     0     0 same              
+
+Columns: used / dorm / nirFn = used instances, dormant instances, emitted NIR functions (knob 0 > knob 1).
+
+Totals: programs 29; facts 3970: same 3970, equal 0, narrower 0, wider 0, incomparable 0; functions live at one knob only 0
+NIR: byte-identical 27, identical modulo instance labels 2, different 0
+
+Details
+=======
+== bench/refined-checks.bot (NIR: same-modulo-labels)
+== bench/uri-steady.bot (NIR: same-modulo-labels)
+examples/surface/09-mutual-recursion.bot: skipped (both)
+examples/surface/10-duplicate-binding.bot: skipped (both)
+
+Knob-off equivalence (corpus above), base ee7a28c
+===================================================================
+Knob-off equivalence: parent tree (its own defaults) vs the changed tree with the knob 0
+programs compared: 29; skipped on both trees with identical errors: 2
+  examples/surface/09-mutual-recursion (identical error on both trees)
+  examples/surface/10-duplicate-binding (identical error on both trees)
+byte-identical comparisons (nir.txt, instances.txt, analysis.txt, fixpoints.txt, labels.txt, rawabi.txt, hir.txt, variants.txt, dormant.txt, calls.txt): 290, mismatches: 0
+
+
+OPTIONAL EXTRA CORPUS: Core-IR-text programs (bench/*.ir examples/*.ir examples/hir/*.ir)
+#########################################################################################
+
+Function-level census (GENERIC-PREDICATE-PROOF-LOSS.md, loss point 1): knob 0 vs 1
+Facts: per function, the join over its live (non-dormant) instances of entry, result and expression Ranges.
+
+program                               used  dorm nirFn narrow WIDER equal NIR               
+bench/fib.ir                           2>2   0>0   2>2     0     0     0 same              
+bench/loop-count.ir                    3>3   0>0   3>3     0     0     0 same              
+bench/refined-checks.ir              29>33   1>5 26>26     0     0     0 same-modulo-labels
+bench/sum-refined.ir                   4>4   1>1   3>3     0     0     0 same              
+examples/01-adder.ir                   4>4   0>0   4>4     0     0     0 same              
+examples/02-loop-break.ir              2>2   0>0   2>2     0     0     0 same              
+examples/03-lexical-closure.ir         3>3   0>0   3>3     0     0     0 same              
+examples/04-refinement-scope.ir        3>3   0>0   3>3     0     0     0 same              
+examples/05-refined-strings.ir       30>34   1>5 27>27     0     0     0 same-modulo-labels
+examples/hir/01-scopes.ir              4>4   0>0   4>4     0     0     0 same              
+examples/hir/02-closures.ir            5>5   1>1   4>4     0     0     0 same              
+examples/hir/03-recursion.ir           2>2   0>0   2>2     0     0     0 same              
+examples/hir/04-refinement.ir          4>4   0>0   4>4     0     0     0 same              
+examples/hir/05-control.ir             2>2   0>0   2>2     0     0     0 same              
+examples/hir/06-refined-strings.ir   29>33   1>5 26>26     0     0     0 same-modulo-labels
+
+Columns: used / dorm / nirFn = used instances, dormant instances, emitted NIR functions (knob 0 > knob 1).
+
+Totals: programs 15; facts 1252: same 1252, equal 0, narrower 0, wider 0, incomparable 0; functions live at one knob only 0
+NIR: byte-identical 12, identical modulo instance labels 3, different 0
+
+Details
+=======
+== bench/refined-checks.ir (NIR: same-modulo-labels)
+== examples/05-refined-strings.ir (NIR: same-modulo-labels)
+== examples/hir/06-refined-strings.ir (NIR: same-modulo-labels)
+
+Knob-off equivalence (extra corpus), base ee7a28c
+===================================================================
+Knob-off equivalence: parent tree (its own defaults) vs the changed tree with the knob 0
+programs compared: 15; skipped on both trees with identical errors: 0
+byte-identical comparisons (nir.txt, instances.txt, analysis.txt, fixpoints.txt, labels.txt, rawabi.txt, hir.txt, variants.txt, dormant.txt, calls.txt): 150, mismatches: 0

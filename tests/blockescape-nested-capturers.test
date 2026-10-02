@@ -94,7 +94,9 @@ proc wanted {text} {
     set hir [surface::compile [dedent $text] t.bot -strict 0]
     set spec [hir::specialize::analyze $hir]
     set be [hir::blockescape::analyze $hir $spec]
-    lsort [lmap pair [hir::blockescape::wantedInstances $hir $spec $be] {
+    # Bindings, not instances (since loss point 1, d<int> and d<generic>
+    # are both wanted).
+    lsort -unique [lmap pair [hir::blockescape::wantedInstances $hir $spec $be] {
         lindex [split [lindex $pair 1] <] 0
     }]
 }

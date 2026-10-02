@@ -279,10 +279,13 @@ proc paramViewType {hir analysis label i} {
     return "-"
 }
 
+# Loss point 1 (GENERIC-PREDICATE-PROOF-LOSS.md): cls(1) now selects
+# cls<int>; cls<generic> remains as the Block-value entry (dormant), and both
+# keep the declared parameter type.
 test hir-specialize-m1-closure-capture {a typed function forced into a generic instance by a non-Int capture still retains its declared parameter type (M1 closure fixture, spec items 35-36)} -body {
     lassign [specOf "type Small = Int in 0..10\n\nfn outer(xs):\n    fn cls(b: Small) -> bool:\n        b >= 0 and list_length(xs) > 0\n    cls(1)\n\nouter(\[1, 2, 3\])"] hir analysis
-    list [specLabels $analysis cls] [paramViewType $hir $analysis cls<generic> 0]
-} -result {cls<generic> {int[Small]}}
+    list [specLabels $analysis cls] [paramViewType $hir $analysis cls<generic> 0] [paramViewType $hir $analysis cls<int> 0]
+} -result {{cls<int> cls<generic>} {int[Small]} {int[Small]}}
 
 test hir-specialize-m1-explosion-generic {a typed function forced generic by explosion control retains its declared parameter type; its untyped sibling parameter, "any" before M7C-CLOSED-CLOSURE-ENTRY-FACTS.md, now resolves to str -- classify<generic>'s only actual caller (the one call() forced past the limit) passes "a" literally, and hir::specialize's own explosion-control fallback routes it there through the identical Instance/Handle call graph the closed-caller pass reads, so this is exactly a closed instance with one known exact caller, no different from an ordinary value-capturing closure's own (M1 generic fixture + M7.c closed-caller control, spec items 3, 28, 35)} -body {
     set saved $hir::specialize::limit
@@ -329,8 +332,17 @@ test hir-specialize-m1-exact-call-propagation {a generic caller's own restored d
     set hir [surface::readProgramFile \
         [file join $::projectRoot audit comprehensive-generated-code probes steady-ascii-capture.bot]]
     set analysis [hir::specialize::analyze $hir]
+    # Loss point 1 (GENERIC-PREDICATE-PROOF-LOSS.md): cls is called with an
+    # Int (a Byte), so the call selects cls<int>; the generic instance this
+    # test is about is still used (the Block-value entry), so its own call
+    # is checked directly: it still reaches the Int instance through its
+    # declared parameter type alone.
+    set generic [dict get [specInstance $analysis cls<generic>] id]
     list [specLabels $analysis cls] [specLabels $analysis ascii::is_alphanumeric] \
-         [specLabels $analysis ascii::is_digit]
-} -result {cls<generic> ascii::is_alphanumeric<int> ascii::is_digit<int>}
+         [specLabels $analysis ascii::is_digit] \
+         [lsort -unique [lmap t [dict values [dict get $analysis instances $generic calls]] {
+             hir::specialize::label $analysis $t
+         }]]
+} -result {{cls<int> cls<generic>} ascii::is_alphanumeric<int> ascii::is_digit<int> ascii::is_alphanumeric<int>}
 
 cleanupTests

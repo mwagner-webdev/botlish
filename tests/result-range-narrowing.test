@@ -215,6 +215,11 @@ test result-narrow-pinned-summary-untouched {a solved self-recursive summary (ra
     list $on [expr {$on eq $off}]
 } -result {{solved {[0, 20]} {[0, 20]}} 1}
 
+# Two functions in the List keep apply's call through it dynamic: with one
+# (fns = [f]) the element is an exact callable, and since loss point 1 of
+# GENERIC-PREDICATE-PROOF-LOSS.md keys apply<int, int> (apply captures a
+# List), that call became an exact call of f<int> -- correct, but no longer
+# the dynamic caller this test is about.
 test result-narrow-open-instance-summary-stays-sound {an instance reached through a Block value (open: unknown callers) keeps a summary that covers its dynamic callers: f's generic entry is called with -50 through a List element, so its summary keeps -∞, while the closed f<int> called with 5 narrows to [5, 100]} -body {
     lassign [narrowOf {
         fn f(x):
@@ -223,7 +228,10 @@ test result-narrow-open-instance-summary-stays-sound {an instance reached throug
             else:
                 x
 
-        fns = [f]
+        fn g(x):
+            x
+
+        fns = [f, g]
 
         fn apply(i, v):
             list_get(fns, i)(v)

@@ -9,7 +9,7 @@ section below; the status table is the index.
 
 | # | loss point | where (at the commit that fixed / last checked it) | status |
 |---|---|---|---|
-| 1 | value-capturing closures with a non-Int capture get the generic key | `hir/specialize.tcl:897-926` (`Handle`) | open |
+| 1 | value-capturing closures with a non-Int capture get the generic key | `hir/specialize.tcl:937-957` (`Handle`) | **fixed** ([Loss point 1](#loss-point-1-int-key-positions-for-capturing-closures)): keys and Ranges, no machine-code change until 4 and 5 |
 | 2 | never-entered generic Block-value entries of de-closured closures stay in the analysis | `hir/aot.tcl:269`, `hir/specialize.tcl:829`; fixed in `hir/specialize.tcl:1210` (`DormantInstances`), `hir/range.tcl:2250` (`OpenInstances`), `:2378`, `:2642`, `hir/rangerec.tcl:269`, `native/native.tcl:225` | **fixed** ([Loss point 2](#loss-point-2-dormant-instances)) |
 | 3 | call sites read the ascending phase's callee result summaries, never narrowed | `hir/range.tcl` `Fixpoint` / `Call` | **fixed** (this report, [Fix 3](#fix-3-result-summary-narrowing)) |
 | – | prerequisite found while verifying fix 3: `hir::range` never visited a call's callee expression (unsound; native miscompiles on `main`) | `hir/range.tcl` `Call` | **fixed** ([Callee-position calls](#callee-position-calls-soundness-fix)) |
@@ -997,29 +997,242 @@ review noted that the called generic instance now also goes through
 blockescape's self and sibling checks, so a call pruned there declines the
 binding (not observed).
 
-## Next steps (points 1, 2, 4, 5)
+## Loss point 1: Int key positions for capturing closures
 
-Point 3 is the only one that was both independent and worth something on
-its own. The others are a chain: relaxing the key (1) is unsafe until the
-never-entered generic entries stop feeding the analysis (2), and a
-non-generic `tld?`/`domain?` is only worth something once counted loops can
-run raw (4) and de-closured functions can take raw parameters (5).
+### Outcome
 
-1. **Point 2: done** ([Loss point 2](#loss-point-2-dormant-instances)):
-   the entries and what only they reach are dormant, kept in `used` but no
-   evidence for anything else.
-2. **Point 1:** keep `int` key positions for closures in `Handle`
-   (one line), or let `native/rawabi.tcl:120` accept the closed-caller
-   theorem for a closed generic instance instead (no key change, no split
-   generic entries; still needs 4 and 5).
-3. **Point 4:** raw induction variables for `CountLoop` (and lockstep
+`tld?`, `domain?`, `char_at` and `scan_while`'s `start` are keyed `<int>`
+(`tld?<int>`, `domain?<int>`, `char_at<int>`,
+`scan_while<int, native(is_tcl_alpha)>`, `scan_while<int, block(e239)>`);
+their generic instances remain as dormant Block-value entries.
+
+* **Nothing is lost.** The keyed instances keep every entry Range the
+  closed generic instances had (`tld?.i` `[2, 2^62-1]`, `domain?.start`
+  `[1, 2^62-1]`, `char_at.i` `[0, 2^62-2]`, `scan_while.start` `[0, 0]` /
+  `[2, 2^62-1]`): the scratch experiment's Range regression, test failures
+  and `NATIVE AOT NOT-READY` are gone, because point 2 made the split-off
+  generic entries (and `scan_while<any, native(is_tcl_alpha)>`, which only
+  `tld?<generic>` reaches) dormant.
+* **Machine code: no change, as predicted.** `refined-checks`' NIR is
+  identical apart from instance labels, with the RawInt demand filter on
+  and off; so is every other corpus program's (44 programs: 39
+  byte-identical, 5 identical modulo labels). No Ir to measure.
+* **What changed:** the keys, hence the instance labels and
+  `instance="int"` in the NIR headers; the RawInt plan, which now says
+  *eligible* for `tld?.i`, `domain?.start`, `char_at.i` and
+  `scan_while.start`; the kind guards of a closure whose Int parameter has
+  no closed-caller theorem (a closure not de-closured, or called through an
+  open caller) are gone by the key alone; 4 more (dormant) instances in
+  `refined-checks` (29 → 33), 1 in `uri-steady` (19 → 20).
+* **What still blocks raw parameters** (the RawInt plan, `tests/closure-int-keys.test`):
+  `tld?<int>.i`, `domain?<int>.start` and `char_at<int>.i` are
+  `suppressed-mixed-tagged-use` (a counted loop's bound is a tagged
+  consumer: `domain?`'s own loop, `scan_while`'s loop that `tld?`'s `i`
+  reaches; `char_at`'s `i` feeds `substring`), `scan_while.start` is
+  `suppressed-no-raw-demand` (only a count loop bound consumes it): loss
+  point 4. With the demand filter off (`-raw-demand-opt 0`) the plan is
+  `rawint`, and still nothing changes: every one of these instances is only
+  emitted as a de-closured internal-capture function, which keeps the
+  tagged ABI (loss point 5).
+
+### The choice: the key, not the theorem in `rawabi.tcl`
+
+Two ways were open: keep `int` positions in `Handle`, or let
+`native/rawabi.tcl:120` accept the closed-caller theorem for a closed
+generic instance. The key:
+
+* is the representation every consumer already reads (instance labels,
+  `hir::stringregion`/`traversal`/`escape`'s generic-instance exclusions,
+  AOT readiness, the RawInt ABI); the theorem would be a second channel for
+  one consumer only;
+* holds whether or not the instance is closed (a specialized instance is
+  selected only by the exact calls whose argument was Int), so it also
+  removes kind guards where no theorem exists (a capturing closure that
+  escapes, or whose caller is open);
+* was what the scratch experiment showed to be blocked only by point 2,
+  now fixed; the theorem route would have kept `tld?<generic>` as the
+  direct-call target, i.e. would not have needed point 2, but neither
+  route changes machine code until points 4 and 5 are done.
+
+Only `int` positions: Int is the one kind with a representation consequence
+(Range facts, raw Int operations, the RawInt ABI). Other kinds stay `any`,
+refined by the closed-caller theorem as before; code growth is bounded by
+the existing per-block `limit`.
+
+### The change
+
+`hir/specialize.tcl` `Handle` (`:937-957`): the closure key rule keeps
+`IsExactCallableKey $k || $k eq "int"` positions (knob
+`hir::specialize::closureIntKeyOpt`, test/audit only; 0 = the previous
+rule). It relies on the two preceding commits: point 2 (the generic entry
+that splits off is dormant), and the [called generic
+instance](#blockescape-a-called-generic-instance) (a closure called with an
+Int and with another kind stays de-closured).
+
+### Soundness
+
+A key position is a fact about the call that selected the instance: the
+argument's static kind there. A specialized instance is entered only by the
+exact calls that selected it (InstanceClosed), so `int` in its key holds
+for every invocation; this is the same argument that already keys static
+blocks and scalar-capture closures by kind. The captured values reach the
+instance through the closure (or the flattened captures), never through the
+key, so keying a capturing closure by its parameters' kinds changes nothing
+about captures. Every Block value still enters the generic instance.
+
+### The 21 tests the scratch experiment broke, re-examined
+
+With point 2 and the called-generic fix in place, 44 tests failed: 20 in
+four of the five files the experiment broke (`exact-callable-executable.test`,
+the AOT fixture, now passes), 11 in `close-callers-convergence.test`, 3 in
+`native-block-escape.test` and 2 in `virtual-construction.test` (labels),
+6 in point 2's new dormant tests (point-2-era labels) and 2 in tests added
+since (the nested-capturer fix, fix 3's open-instance test).
+Each was re-examined; none is weakened:
+
+| tests | why it failed | change |
+|---|---|---|
+| `closed-closure-entry-facts.test`: 14 (theorem, guard, identity, instance-count, mixed-kind, open-instance, alias, escape, captured-through-parent, recursive) | the file's vehicle for the closed-caller theorem on a generic closure was an Int parameter, which is now a key position: the theorem had nothing left to derive (`inner<int>`), and `specId` found the keyed instance | vehicle switched to Str (and Bool for the disagreeing caller): every non-Int position is still forced generic, so the same mechanism is exercised on the default path with the same expectations (`int` → `str` in the theorem pins, `x + length(tag)` → `length(x) + length(tag)`); the recursive fixture's `n` is a key position now (`inner<any, int>`, theorem `{str int}`); the header explains; the Int case is pinned in `closure-int-keys.test` |
+| `exact-callable-key.test` `-aggregate-capture-keys` | pinned the old rule (only the exact callable position kept) | pins the new rule, with a third, String parameter that must stay generic: `scan<int, native(is_tcl_alpha), any>`, theorem `{int {native …} str}` |
+| `exact-callable-key.test` `-range-open-is-not-closed` | invariant "range-open ⇔ not closed" | point 2 defined range-open as "not closed or dormant"; with point 1 `refined-checks` has a closed dormant instance. The test checks the new invariant over the same corpus |
+| `exact-callable-key.test` `-range-generic-closure-not-open` | needs a closed *generic* closure instance with an Int parameter | runs with `closureIntKeyOpt 0` as well as exact keys off (its stated premise) |
+| `hir-specialize.test` `-m1-closure-capture`, `-m1-exact-call-propagation` | labels: `cls<int> cls<generic>` | labels updated; both still check the M1 property on `cls<generic>` (declared type in its view; its own call reaching `is_alphanumeric<int>`, now asserted directly so it cannot pass through `cls<int>`) and also on `cls<int>` |
+| `emailish-predicate.test` instance count | +1 instance for `char_at`, `tld?`, `domain?` (dormant generic entries), +1 for `scan_while` (the dormant `<any, native(is_tcl_alpha)>`) | counts updated, description explains each |
+| `close-callers-convergence.test` 11 (M7.c.1's round-budget fence: forced insufficient rounds, cascades, rollback, identity) | the fixtures build cascades that need a known number of CloseCallers rounds, with Int arguments as the vehicle; with Int keys there is nothing for the theorem to derive, so every pass converges at once | the file's two analysis helpers run with `closureIntKeyOpt 0`, fixtures and expectations unchanged: CloseCallers, the code under test, is the same code by default for every non-Int position (exercised on the default path by `closed-closure-entry-facts.test`) |
+| `virtual-construction.test` `vc-str-helper-1`, `vc-str-chain-1` | `piece`, `build`, `a`, `b` capture `digits` and are called with Ints: labels `piece<int>`, `build<int, int, any>`; the dormant generic entries of `a`/`b` are listed by the plan too (it reads closedness) | labels updated; values and allocation counts (what the tests are about) unchanged |
+| `native-block-escape.test` 3 (`-minimal-2`, `-escaping-coexist-2`, `-refined-checks-2`) | NIR headers say `instance="int"` | regexes updated (same function, same env/results/captures checks) |
+| `dormant-instances.test` 3 | the dormant set and labels of point 2 change with keys (`get<int>`, the generic entries of every Int-keyed closure) | expectations updated; the closed-caller-theorem test needed a non-Int vehicle (a String parameter `any` in the dormant `scan<generic>`) to keep exercising a dormant caller |
+| `result-range-narrowing.test` `-open-instance-summary-stays-sound` | `apply` captures a List, so it is `apply<int, int>` now, and its `list_get(fns, i)(v)` became an exact call of `f<int>` (correct: the summary then includes −50) instead of the dynamic call into `f<generic>` the test is about | two functions in the List keep the call dynamic |
+| `blockescape-nested-capturers.test` `-declined` | `d` has two wanted instances | the helper lists bindings (`lsort -unique`) |
+
+`exact-callable-executable.test`'s `refined-checks-scan` fixture (the AOT
+executable) passes.
+
+### Evidence
+
+`tools/run-knob.sh … closureIntKeyOpt census-intkeys.txt blocks`
+(`out/census-intkeys.txt`): a function-level census (`census-blocks.tcl`:
+per function, the join over its live instances of entry, result and
+expression Ranges, since keys change): 5,222 facts, all identical; NIR
+byte-identical in 39 programs and identical modulo instance labels in 5;
+knob off = parent commit, byte for byte (440 comparisons, 0 mismatches).
+
+Compile time: `native::nir` on `refined-checks` 393 → 415 ms (medians of
+3, machine loaded), `uri-steady` 122 → 124 ms.
+
+### Fuzzing
+
+`tools/fuzz.tcl -knob hir::specialize::closureIntKeyOpt` (`out/fuzz-intkeys.txt`).
+Since this knob changes instance keys, the knob-0/knob-1 comparison is made
+per function (the join over its live instances, as `census-blocks.tcl`
+does) instead of per instance id; the runtime oracles are unchanged.
+
+| run | programs | native | Range checks | violations | disagreements |
+|---|---:|---|---:|---:|---:|
+| A | 5,000 | default | 26,796 top-level + 394,560 trace | 0 | 0 |
+| B | 2,000 | `-block-escape-opt 0` | 10,830 + 160,338 | 0 | 0 |
+
+In A, 3,140 programs have a dormant instance and 252 change a Range: 195
+programs gain a strictly narrower interval somewhere, **146 lose precision
+somewhere** (108 of them on a checked top-level call). That is limitation 2
+below: a call that used to reach a callee's generic instance (its argument
+was `any` in a generic-keyed closure) now reaches the callee's `<int>`
+instance and shares its per-instance summary with the other call sites; in
+seed 1/315 this closes an abstract cycle (`t1 = f1(3)` feeds `f3`'s argument,
+which feeds `f1<int>`'s entry, whose summary is `t1`) that widening resolves
+to `[-∞, +∞]`. It is how every keyed static function already behaves; no
+corpus program is affected (census above). The pre-existing `list_get`
+NATIVE BUG of the point-2 run is gone (fixed by the called-generic commit).
+
+### Adversarial review
+
+An independent review of this commit and the called-generic one
+(soundness of both, test changes, downstream consumers), with a probe matrix
+of 19 programs over every backend, `-block-escape-opt 0`, `-specialize 0`,
+`-call-facts-opt 0`, `-exact-callable-opt 0`, `-closed-caller-facts-opt 0`,
+`-raw-int-abi-opt 0`, `-raw-demand-opt 0`, both knobs, `limit` 1-3 and
+`exactLimit` 1/4, and AOT builds under GC stress: no soundness problem in
+either commit. Its findings, all acted on:
+
+* the fuzzer compared knob-0 and knob-1 instances by id, which breaks when
+  keys change (the committed version of the tool at the time); now per
+  function, as above;
+* three test changes protected less than before: `dormant-closed-audit`
+  no longer covered `closedAudit`'s closed-generic-closure branch (now
+  pinned again, on the theorem shape's `ok<generic>`); the recursive M7.c
+  fixture's `n` had become a key position, so the theorem no longer joined a
+  derived self-call argument on a non-key position (the fixture now recurses
+  on a String, `substring(s, 1, …)`, theorem `{str str}`); the dormant
+  theorem test dropped a Range column (covered by the other dormant tests);
+* stale comments (`ClosedSet`'s header, a probe program's header);
+* possible precision costs it did not observe: the called generic instance
+  is now included in blockescape's self and sibling checks (a pruned call
+  there declines the binding), and Int keys count against `limit`.
+
+### Verification
+
+On the final tree (all four commits, rebased onto `main` at `66dbf7d`),
+each suite in its own worktree:
+
+| suite | result |
+|---|---|
+| `tests/all.tcl`, interp | 4,590 / 4,590 |
+| `tests/all.tcl`, compile | 4,586 passed, 4 skipped (`coreScoping`), 0 failed |
+| the same under `BOTLISH_NATIVE_GC_STRESS=1` | identical |
+| `tests/native-coverage.tcl` (cranelift) | 4,624 tests: native 1,932, independent 2,573, passed-partial 58, unsupported 60, failed 1 (`refined-5`) |
+| the same on `main` (`66dbf7d`) | 4,575 tests: native 1,908, independent 2,548, passed-partial 58, unsupported 60, failed 1 (`refined-5`) |
+
+The coverage difference is exactly the 49 added tests (13 nested
+capturers, 20 dormant instances, 5 called generic instance, 11 Int keys;
+24 native, 25 independent); the one failure is the pre-existing `refined-5`
+on both. The point-2 figures in its own section were measured on that
+commit before the rebase (`main` at `ccedf43`; the commits since touch only
+`surface/` and a report).
+
+Tests: `tests/closure-int-keys.test` (new, 11): `refined-checks`' keys and
+entry Ranges with the knob on and off, its NIR identical modulo labels
+(demand filter on and off), the RawInt plan's eligibility and suppression
+reasons, the Int key and its guard removal without the theorem, other kinds
+staying generic, a mixed Int/String closure staying de-closured, and parity
+with block escape on and off on three programs.
+
+### Known limitations
+
+1. **No machine-code payoff until points 4 and 5.** The keys and Ranges
+   are there; counted loops and de-closured functions do not use them.
+2. **Instance merging can widen a per-instance summary.** A call whose
+   argument was `any` in a generic caller (and so went to the callee's
+   generic instance) can now come from a keyed caller with an Int and share
+   the callee's `<int>` instance with other call sites: the fuzzer's seed
+   1/5 has `f1<int>` serving both `f2_h(f2_v)` and `f2_h(f2_v - 5)`, so one
+   call expression's Range goes from `{8, 18, 21}` to `{8, 13, …, 36}`
+   (sound: the program returns the same everywhere). None in the corpus.
+3. **More instances**: every Int-called capturing closure keeps a dormant
+   generic entry beside its keyed instance (not emitted with block escape
+   on), and Int keys count against the per-block `limit`, so a closure
+   called with many kinds reaches the all-`any` fallback sooner.
+
+## Next steps (points 4, 5)
+
+Points 1, 2 and 3 are done. On `refined-checks` they give `char_at`'s
+`i + 1` a raw add (point 2, −2.26% Ir/run) and `tld?`'s comparisons raw
+operations (point 3, −0.19%); point 1 gives `tld?`, `domain?`, `char_at`
+and `scan_while` Int keys with the Ranges intact, and changes no machine
+code. What still keeps their parameters tagged:
+
+1. **Point 4:** raw induction variables for `CountLoop` (and lockstep
    loops) when the domain's Ranges fit small, and the matching demand-rule
-   change in `native/rawabi.tcl:696-709`. This is the only remaining point
-   with a per-character cost in these functions (`domain?`'s and
-   `scan_while`'s loop headers).
-4. **Point 5:** let `InternalFunction` and its blockescape-virtual call
-   sites take the plan's raw positions.
+   change (`native/rawabi.tcl:696-709`, "count loop bound"). It makes
+   `tld?<int>.i`, `domain?<int>.start` and `scan_while.start`
+   `suppressed-mixed-tagged-use` / `suppressed-no-raw-demand` today, and it
+   is the only remaining point with a per-character cost in these
+   functions (`domain?`'s and `scan_while`'s loop headers). `char_at<int>.i`
+   additionally feeds `substring`, a tagged native consumer.
+2. **Point 5:** let `InternalFunction` (`native/lower.tcl:2246`) and its
+   blockescape-virtual call sites (`abiCall`, `:4676`) take the plan's raw
+   positions (`native/rawabi.tcl:64-66` documents the restriction). With the
+   demand filter off the plan is already `rawint` for these instances and
+   the NIR still does not change.
 
-The ceiling is modest on `refined-checks` (`tld?` + `domain?` own code is
-about 2% of it; most of its time is `char_at`'s `rt_substr` and
-`rt_set_contains`), so point 4 is likely worth more than 1/2/5 together.
+The ceiling on `refined-checks` is modest: after point 2 most of its time
+is `char_at`'s `rt_substr`/`regioncheck` and `rt_set_contains`.

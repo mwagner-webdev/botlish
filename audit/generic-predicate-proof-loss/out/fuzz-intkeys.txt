@@ -1,0 +1,567 @@
+Loss point 1 fuzz (GENERIC-PREDICATE-PROOF-LOSS.md, "Loss point 1"), tools/fuzz.tcl on the point-1 commit.
+
+A. -knob hir::specialize::closureIntKeyOpt -n 1000 -seed "1 2 3 4 5" (default native)
+========================================================================================
+NOTE seed 1 program 5: knob-on interval not within knob-off interval:
+  e43 e54 [8, 21] {8,18,21} -> [8, 36] {8,13,18,21,24,27,30,33,36}
+NOTE seed 1 program 121: knob-on interval not within knob-off interval:
+  program e88 [-∞, 9223372036854775796] -> [-∞, +∞]
+  program e92 [14, 28] {14,24,26,28} -> [-∞, +∞]
+  program e100 [14, 28] {14,24,26,28} -> [-∞, +∞]
+  program e101 [14, 28] {14,24,26,28} -> [-∞, +∞]
+  program e110 [14, 28] {14,24,26,28} -> [-∞, +∞]
+NOTE seed 1 program 159: knob-on interval not within knob-off interval:
+  program e155 [-4611686018427387927, 4611686018427387913] -> [-4611686018427387931, 4611686018427387913]
+NOTE seed 1 program 161: knob-on interval not within knob-off interval:
+  e88 e112 [13, 15] -> [5, 4611686018427387915]
+NOTE seed 1 program 173: knob-on interval not within knob-off interval:
+  program e96 [-5, 9223372036854775812] -> [-5, 9223372036854775813]
+  e58 e69 [-5, 9223372036854775812] -> [-5, 9223372036854775813]
+NOTE seed 1 program 221: knob-on interval not within knob-off interval:
+  e30 e41 [-2305843009213693958, -2305843009213693958] {-2305843009213693958} -> [-9223372036854775814, 11529215046068469754]
+NOTE seed 1 program 225: knob-on interval not within knob-off interval:
+  program e90 [4611686018427387929, 4611686018427387929] {4611686018427387929} -> [-∞, +∞]
+  program e97 [4611686018427387929, 4611686018427387929] {4611686018427387929} -> [-∞, +∞]
+  program e107 [4611686018427387929, 4611686018427387929] {4611686018427387929} -> [-∞, +∞]
+  e82 param [19, 4611686018427387929] {19,4611686018427387929} -> [-∞, +∞]
+  e82 e88 [19, 4611686018427387929] {19,4611686018427387929} -> [-∞, +∞]
+NOTE seed 1 program 242: knob-on interval not within knob-off interval:
+  program e150 [-13835058055282163724, 13835058055282163733] -> [-13835058055282163772, 13835058055282163781]
+  e132 e143 [-13835058055282163724, 13835058055282163733] -> [-13835058055282163772, 13835058055282163781]
+NOTE seed 1 program 243: knob-on interval not within knob-off interval:
+  program e103 [-16, 9223372036854775796] {-16,-7,8,10,9223372036854775796} -> [-16, 9223372036854775803] {-16,-9,-7,8,10,9223372036854775796,9223372036854775803}
+  program e127 [-16, 9223372036854775796] {-16,-7,8,10,9223372036854775796} -> [-16, 9223372036854775803] {-16,-9,-7,8,10,9223372036854775796,9223372036854775803}
+  e42 e44 [-11, 9223372036854775801] {-11,-2,13,15,9223372036854775801} -> [-11, 9223372036854775808] {-11,-4,-2,13,15,9223372036854775801,9223372036854775808}
+  e42 e53 [-11, 9223372036854775801] {-11,-2,13,15,9223372036854775801} -> [-11, 9223372036854775808] {-11,-4,-2,13,15,9223372036854775801,9223372036854775808}
+  e42 e51 [1, 9223372036854775813] {1,10,25,27,9223372036854775813} -> [1, 9223372036854775820] {1,8,10,25,27,9223372036854775813,9223372036854775820}
+NOTE seed 1 program 315: knob-on interval not within knob-off interval:
+  program e61 [-12, -12] {-12} -> [-∞, +∞]
+  program e79 [-12, -12] {-12} -> [-∞, +∞]
+  e53 param [-12, 17] {-12,17} -> [-∞, +∞]
+  e53 e59 [-12, 17] {-12,17} -> [-∞, +∞]
+NOTE seed 1 program 335: knob-on interval not within knob-off interval:
+  program e184 [1000000, 4611686018427387904] {1000000,4611686018427387903,4611686018427387904} -> [-∞, +∞]
+  program e191 [1000000, 4611686018427387904] {1000000,4611686018427387903,4611686018427387904} -> [-∞, +∞]
+  program e212 [1000000, 4611686018427387904] {1000000,4611686018427387903,4611686018427387904} -> [-∞, +∞]
+  program e217 [1000000, 4611686018427387904] {1000000,4611686018427387903,4611686018427387904} -> [-∞, +∞]
+  e176 param [-3, 4611686018427387904] {-3,19,1000000,4611686018427387903,4611686018427387904} -> [-∞, +∞]
+NOTE seed 1 program 376: knob-on interval not within knob-off interval:
+  program e121 [-9223372036854775808, -9223372036854775808] {-9223372036854775808} -> [-9223372036854775808, 15] {-9223372036854775808,-4,14,15}
+NOTE seed 1 program 380: knob-on interval not within knob-off interval:
+  program e108 [9223372036854775811, 9223372036854775814] {9223372036854775811,9223372036854775814} -> [-∞, +∞]
+NOTE seed 1 program 463: knob-on interval not within knob-off interval:
+  program e144 [0, 13] {0,13} -> [-3, 2305843009213693967]
+NOTE seed 1 program 495: knob-on interval not within knob-off interval:
+  e89 e106 [-118, -38] {-118,-38} -> [-118, 10]
+NOTE seed 1 program 541: knob-on interval not within knob-off interval:
+  e80 e91 [-1, 4611686018427387902] {-1,0,4611686018427387902} -> [-9, 4611686018427387902] {-9,-8,-7,-6,-5,-4,-3,-2,-1,0,1,2,3,4,4611686018427387902}
+NOTE seed 1 program 583: knob-on interval not within knob-off interval:
+  program e92 [-13, 43] -> [-13, +∞]
+  program e100 [-13, 43] -> [-13, +∞]
+  program e103 [-56, +∞] -> [-∞, +∞]
+  program e110 [-13, 43] -> [-13, +∞]
+  program e111 [-56, +∞] -> [-∞, +∞]
+NOTE seed 1 program 591: knob-on interval not within knob-off interval:
+  program e113 [-5, 4611686018427387933] -> [-5, 9223372036854775836]
+  program e123 [-5, 4611686018427387933] -> [-5, 9223372036854775836]
+NOTE seed 1 program 635: knob-on interval not within knob-off interval:
+  program e119 [-39, 16] {-39,0,3,12,16} -> [-39, 20] {-39,0,3,4,7,12,16,20}
+  e47 e58 [-39, 16] {-39,0,3,12,16} -> [-39, 20] {-39,0,3,4,7,12,16,20}
+NOTE seed 1 program 661: knob-on interval not within knob-off interval:
+  program e115 [-3, 23] {-3,11,22,23} -> [-14, 23] {-14,-9,-5,-3,-1,0,2,3,11,22,23}
+  e63 e74 [-3, 23] {-3,11,22,23} -> [-14, 23] {-14,-9,-5,-3,-1,0,2,3,11,22,23}
+NOTE seed 1 program 767: knob-on interval not within knob-off interval:
+  program e178 [-11529215046068469728, 9223372036854775792] -> [-11529215046068469762, 9223372036854775809]
+  e148 e159 [-11529215046068469728, 9223372036854775792] -> [-11529215046068469762, 9223372036854775809]
+NOTE seed 1 program 781: knob-on interval not within knob-off interval:
+  program e150 [32, 49] {32,36,37,40,49} -> [-13835058055282163714, 49]
+  program e172 [32, 49] {32,36,37,40,49} -> [-13835058055282163714, 49]
+NOTE seed 1 program 816: knob-on interval not within knob-off interval:
+  program e57 [-5, 7] -> [-5, 65]
+NOTE seed 1 program 831: knob-on interval not within knob-off interval:
+  program e70 [0, 18446744073709551692] {0,68,88,148,18446744073709551692} -> [-4, 18446744073709551692] {-4,0,16,68,76,88,148,18446744073709551620,18446744073709551692}
+  e28 e39 [0, 18446744073709551692] {0,68,88,148,18446744073709551692} -> [-4, 18446744073709551692] {-4,0,16,68,76,88,148,18446744073709551620,18446744073709551692}
+NOTE seed 1 program 837: knob-on interval not within knob-off interval:
+  program e208 [-30, 18446744073709551612] -> [-32, 18446744073709551612]
+  program e217 [-30, 18446744073709551612] -> [-32, 18446744073709551612]
+  program e227 [-30, 18446744073709551612] -> [-32, 18446744073709551612]
+  e150 e155 [0, 18446744073709551614] -> [-2, 18446744073709551614]
+  e150 e162 [0, 18446744073709551614] -> [-2, 18446744073709551614]
+NOTE seed 1 program 849: knob-on interval not within knob-off interval:
+  program e112 [-∞, 4611686018427387930] -> [-∞, +∞]
+  e34 e60 [-4611686018427387921, 9] -> [-∞, 9]
+  e90 e101 [-4611686018427387921, 9] -> [-∞, 9]
+  e90 e96 [-∞, 4611686018427387930] -> [-∞, +∞]
+NOTE seed 1 program 866: knob-on interval not within knob-off interval:
+  e152 e163 [22, 1000004] -> [3, 1000004]
+NOTE seed 1 program 902: knob-on interval not within knob-off interval:
+  e82 e90 [-4611686018427387895, -5] {-4611686018427387895,-4611686018427387894,-4611686018427387893,-4611686018427387892,-5} -> [-∞, +∞]
+NOTE seed 1 program 919: knob-on interval not within knob-off interval:
+  program e104 [1, 2305843009213693952] {1,2305843009213693952} -> [1, 4611686018427387902] {1,2305843009213693952,4611686018427387902}
+NOTE seed 1 program 936: knob-on interval not within knob-off interval:
+  program e135 [-4611686018427387913, 22] {-4611686018427387913,14,22} -> [-∞, +∞]
+  program e144 [-4611686018427387913, 22] {-4611686018427387913,14,22} -> [-∞, +∞]
+  program e147 [-4611686018427387913, 22] {-4611686018427387913,14,22} -> [-∞, +∞]
+  program e156 [-4611686018427387913, 22] {-4611686018427387913,14,22} -> [-∞, +∞]
+  program e170 [-4611686018427387913, 22] {-4611686018427387913,14,22} -> [-∞, +∞]
+NOTE seed 1 program 966: knob-on interval not within knob-off interval:
+  program e158 [-4611686018427387908, 4611686018427387878] {-4611686018427387908,-15,4611686018427387878} -> [-∞, +∞]
+  program e161 [-4611686018427387908, 4611686018427387878] {-4611686018427387908,-15,4611686018427387878} -> [-∞, +∞]
+NOTE seed 1 program 987: knob-on interval not within knob-off interval:
+  program e127 [5, 29] {5,9,11,15,27,28,29} -> [-4611686018427387905, 29] {-4611686018427387905,-1,5,6,9,11,12,15,27,28,29}
+  program e141 [5, 29] {5,9,11,15,27,28,29} -> [-4611686018427387905, 29] {-4611686018427387905,-1,5,6,9,11,12,15,27,28,29}
+  program e148 [5, 29] {5,9,11,15,27,28,29} -> [-4611686018427387905, 29] {-4611686018427387905,-1,5,6,9,11,12,15,27,28,29}
+seed 1: programs 1000 (compiled 1000, rejected 0, interp-error outcome 21); disagreements 0 (introduced by the pass 0), native-unsupported 0, analysis errors 0, limits 0, harness errors 0; range violations: top-level 0 of 5411 checks (introduced by the pass 0), trace 0 of 77626 checks; narrowing changed an entry/call Range in 53 programs (a checked top-level call Range in 48, any expression Range in 53); programs with an open instance 625, with a dormant instance 617; result narrowing attempted 1000, converged 1000 (rounds 1..8), not converged 0; knob-on not within knob-off 32 (strictly narrower somewhere: 43, specialization knobs only); error-message mismatches 0; 99s
+NOTE seed 2 program 64: knob-on interval not within knob-off interval:
+  program e198 [5, 16] {5,6,7,8,9,10,16} -> [10, 23] {10,16,23}
+  e82 param [13, 13] {13} -> [0, 13] {0,13}
+  e82 e92 [13, 13] {13} -> [0, 13] {0,13}
+  e82 e97 [13, 13] {13} -> [0, 13] {0,13}
+  e82 e95 [29, 29] {29} -> [16, 29] {16,29}
+NOTE seed 2 program 83: knob-on interval not within knob-off interval:
+  e67 e71 [-6, 1000015] {-6,12,1000015} -> [-∞, +∞]
+  e67 e69 [-4611686018427387911, -4611686018426387890] {-4611686018427387911,-4611686018427387893,-4611686018426387890} -> [-∞, +∞]
+  e67 e95 [-4611686018427387911, -4611686018426387890] {-4611686018427387911,-4611686018427387893,-4611686018426387890} -> [-∞, +∞]
+  e67 e98 [-4611686018427387911, -4611686018426387890] {-4611686018427387911,-4611686018427387893,-4611686018426387890} -> [-∞, +∞]
+NOTE seed 2 program 118: knob-on interval not within knob-off interval:
+  program e69 [-38, 9223372036854775821] -> [-38, 9223372036854775836]
+  e43 e54 [-38, 9223372036854775821] -> [-38, 9223372036854775836]
+NOTE seed 2 program 127: knob-on interval not within knob-off interval:
+  program e64 [48, 27670116110564327424] -> [-∞, +∞]
+  program e97 [48, 27670116110564327424] -> [-∞, +∞]
+  program e103 [48, 27670116110564327424] -> [-∞, +∞]
+  program e106 [48, 27670116110564327424] -> [-∞, +∞]
+NOTE seed 2 program 134: knob-on interval not within knob-off interval:
+  e44 e55 [11, 36] -> [-9, 36]
+NOTE seed 2 program 160: knob-on interval not within knob-off interval:
+  program e118 [-29, 15] {-29,-28,-27,-26,-25,-24,15} -> [-29, 9223372036854775807] {-29,-28,-27,-26,-25,-24,-5,12,15,9223372036854775807}
+NOTE seed 2 program 184: knob-on interval not within knob-off interval:
+  program e114 [-4, 15] -> [-4, +∞]
+  program e118 [-∞, 24] -> [-∞, +∞]
+  program e125 [-4, 15] -> [-4, +∞]
+  program e123 [-∞, 24] -> [-∞, +∞]
+  program e126 [-4, 15] -> [-4, +∞]
+NOTE seed 2 program 195: knob-on interval not within knob-off interval:
+  program e120 [-9223372036854775781, 27] -> [-9223372036854775781, 32]
+  program e131 [-9223372036854775781, 27] -> [-9223372036854775781, 32]
+  program e129 [-9223372036854775781, 27] -> [-9223372036854775781, 32]
+  program e150 [-9223372036854775781, 27] -> [-9223372036854775781, 32]
+  program e144 [-9223372036854775781, 27] -> [-9223372036854775781, 32]
+NOTE seed 2 program 282: knob-on interval not within knob-off interval:
+  program e129 [-4611686018427387909, 6917529027641081892] -> [-4611686018427387913, 6917529027641081896]
+  program e132 [-4, 6917529027641081873] -> [-4, 6917529027641081877]
+  program e136 [-4, 6917529027641081873] -> [-4, 6917529027641081877]
+  program e143 [-4611686018427387909, 6917529027641081892] -> [-4611686018427387913, 6917529027641081896]
+  program e146 [-4611686018427387909, 6917529027641081892] -> [-4611686018427387913, 6917529027641081896]
+NOTE seed 2 program 286: knob-on interval not within knob-off interval:
+  program e33 [14, 23] -> [14, +∞]
+  program e41 [14, 23] -> [14, +∞]
+  program e45 [14, 23] -> [14, +∞]
+  e25 param [14, 2305843009213693952] -> [14, +∞]
+  e25 e31 [14, 2305843009213693952] -> [14, +∞]
+NOTE seed 2 program 391: knob-on interval not within knob-off interval:
+  program e146 [-4611686018427387887, 7] {-4611686018427387887,-4611686018427387881,7} -> [-∞, +∞]
+  program e169 [-4611686018427387887, 7] {-4611686018427387887,-4611686018427387881,7} -> [-∞, +∞]
+  e40 e42 [-4611686018427387887, 7] {-4611686018427387887,-4611686018427387881,7} -> [-∞, +∞]
+  e40 e56 [-∞, 7] -> [-∞, +∞]
+  e40 e59 [-4611686018427387887, 7] {-4611686018427387887,-4611686018427387881,7} -> [-∞, +∞]
+NOTE seed 2 program 408: knob-on interval not within knob-off interval:
+  e26 e57 [-4611686018427387897, 28] -> [-4611686018427387905, 28]
+  e26 e67 [-4611686018427387897, 28] -> [-4611686018427387905, 28]
+  e83 e94 [-4611686018427387897, 28] -> [-4611686018427387905, 28]
+NOTE seed 2 program 451: knob-on interval not within knob-off interval:
+  e59 e70 [7, 7] {7} -> [5, 7]
+NOTE seed 2 program 460: knob-on interval not within knob-off interval:
+  program e76 [-4611686018427387895, 9223372036854775816] {-4611686018427387895,-9,-5,4,5,9223372036854775816} -> [-4611686018427387903, 9223372036854775816] {-4611686018427387903,-4611686018427387895,-17,-13,-9,-5,-3,4,5,9223372036854775808,9223372036854775816}
+  e37 e48 [-4611686018427387895, 9223372036854775816] {-4611686018427387895,-9,-5,4,5,9223372036854775816} -> [-4611686018427387903, 9223372036854775816] {-4611686018427387903,-4611686018427387895,-17,-13,-9,-5,-3,4,5,9223372036854775808,9223372036854775816}
+NOTE seed 2 program 522: knob-on interval not within knob-off interval:
+  program e63 [-20, -20] {-20} -> [-∞, +∞]
+  program e82 [-20, -20] {-20} -> [-∞, +∞]
+  e30 param [-20, 0] {-20,-6,0} -> [-∞, +∞]
+NOTE seed 2 program 557: knob-on interval not within knob-off interval:
+  program e169 [3, 18] {3,18} -> [3, 26] {3,11,18,26}
+  program e180 [3, 18] {3,18} -> [3, 26] {3,11,18,26}
+  e23 param [-1, 18] {-1,3,14,18} -> [-1, 26] {-1,3,11,14,18,26}
+  e23 e33 [-1, 18] {-1,3,14,18} -> [-1, 26] {-1,3,11,14,18,26}
+  e76 param [-4611686018427387894, 19] {-4611686018427387894,-1,3,9,11,14,18,19} -> [-4611686018427387894, 26] {-4611686018427387894,-1,3,9,11,14,18,19,26}
+NOTE seed 2 program 633: knob-on interval not within knob-off interval:
+  program e218 [24, 36] {24,26,28,30,32,34,36} -> [-∞, +∞]
+  program e226 [24, 36] {24,26,28,30,32,34,36} -> [-∞, +∞]
+  e41 e43 [3, 9] -> [-∞, +∞]
+  e41 e58 [3, 9] -> [-∞, +∞]
+  e41 e56 [6, 18] {6,8,10,12,14,16,18} -> [-∞, +∞]
+NOTE seed 2 program 648: knob-on interval not within knob-off interval:
+  program e150 [-30, 9223372036854775808] {-30,4611686018427387903,9223372036854775808} -> [-∞, +∞]
+  program e163 [-30, 9223372036854775808] -> [-∞, +∞]
+  program e168 [-30, 9223372036854775808] {-30,4611686018427387903,9223372036854775808} -> [-∞, +∞]
+  program e166 [-30, 9223372036854775808] -> [-∞, +∞]
+  program e177 [-30, 9223372036854775808] -> [-∞, +∞]
+NOTE seed 2 program 744: knob-on interval not within knob-off interval:
+  program e111 [-20, 40] -> [-20, +∞]
+  program e131 [-20, 40] -> [-20, +∞]
+  e41 e43 [-1, 0] -> [-∞, +∞]
+  e41 e66 [-10, 20] -> [-10, +∞]
+  e41 e69 [-10, 20] -> [-10, +∞]
+NOTE seed 2 program 753: knob-on interval not within knob-off interval:
+  e48 e59 [-23, 18446744073709551607] -> [-23, 18446744073709551608]
+NOTE seed 2 program 777: knob-on interval not within knob-off interval:
+  program e133 [-4611686018427387899, 19] -> [-∞, +∞]
+  program e137 [-4611686018427387899, 19] -> [-∞, +∞]
+  program e141 [-4611686018427387899, 19] -> [-∞, +∞]
+  program e145 [-4611686018427387899, 19] -> [-∞, +∞]
+  e79 e109 [-4611686018427387903, 15] -> [-∞, +∞]
+NOTE seed 2 program 794: knob-on interval not within knob-off interval:
+  program e148 [10, 15] {10,15} -> [6, 15] {6,10,15}
+  e80 e98 [15, 15] {15} -> [6, 15] {6,15}
+NOTE seed 2 program 914: knob-on interval not within knob-off interval:
+  program e110 [5, +∞] -> [-4611686018427387904, +∞]
+  program e121 [5, +∞] -> [-4611686018427387904, +∞]
+  program e133 [-7, +∞] -> [-4611686018427387904, +∞]
+  program e150 [-7, +∞] -> [-4611686018427387904, +∞]
+  program e153 [-7, +∞] -> [-4611686018427387904, +∞]
+NOTE seed 2 program 973: knob-on interval not within knob-off interval:
+  program e119 [-9223372036854775823, 19] -> [-9223372036854775823, 21]
+  program e150 [-9223372036854775823, 19] -> [-9223372036854775823, 21]
+  e56 e67 [-9223372036854775823, 19] -> [-9223372036854775823, 21]
+seed 2: programs 1000 (compiled 1000, rejected 0, interp-error outcome 26); disagreements 0 (introduced by the pass 0), native-unsupported 0, analysis errors 0, limits 0, harness errors 0; range violations: top-level 0 of 5369 checks (introduced by the pass 0), trace 0 of 79678 checks; narrowing changed an entry/call Range in 40 programs (a checked top-level call Range in 32, any expression Range in 40); programs with an open instance 644, with a dormant instance 629; result narrowing attempted 1000, converged 1000 (rounds 1..9), not converged 0; knob-on not within knob-off 24 (strictly narrower somewhere: 27, specialization knobs only); error-message mismatches 0; 85s
+NOTE seed 3 program 55: knob-on interval not within knob-off interval:
+  e22 e24 [-23, 336] {-23,115,128,141,219,336} -> [-62, 336] {-62,-23,24,89,115,128,141,180,219,336}
+  e31 e42 [-23, 336] {-23,115,128,141,219,336} -> [-62, 336] {-62,-23,24,89,115,128,141,180,219,336}
+  e31 e46 [-23, +∞] -> [-62, +∞]
+  e59 e70 [-23, 336] {-23,115,128,141,219,336} -> [-62, 336] {-62,-23,24,89,115,128,141,180,219,336}
+  e82 e93 [-23, 336] {-23,115,128,141,219,336} -> [-62, 336] {-62,-23,24,89,115,128,141,180,219,336}
+NOTE seed 3 program 72: knob-on interval not within knob-off interval:
+  e58 e69 [11, 2305843009213693945] -> [11, 2305843009213693949]
+NOTE seed 3 program 88: knob-on interval not within knob-off interval:
+  e99 e110 [-20, -15] {-20,-19,-15} -> [-20, -14] {-20,-19,-18,-15,-14}
+  e166 e177 [-20, -15] {-20,-19,-15} -> [-20, -14] {-20,-19,-18,-15,-14}
+NOTE seed 3 program 99: knob-on interval not within knob-off interval:
+  program e93 [-∞, 14] -> [-15, 15]
+  program e97 [-∞, 14] -> [-15, 15]
+  program e104 [-∞, 14] -> [-15, 15]
+  program e108 [-15, -1] -> [-16, -1]
+  e38 e49 [-15, -1] -> [-16, -1]
+NOTE seed 3 program 140: knob-on interval not within knob-off interval:
+  program e180 [-3, 12] -> [-3, 19]
+  e116 e127 [-3, 12] -> [-3, 19]
+NOTE seed 3 program 162: knob-on interval not within knob-off interval:
+  program e166 [-1999976, 2000004] -> [-2000016, 2000018]
+  e96 e126 [-999988, 1000002] -> [-1000008, 1000009]
+  e133 e142 [-1999976, 2000004] -> [-2000016, 2000018]
+  e133 e147 [-1999976, 2000004] -> [-2000016, 2000018]
+NOTE seed 3 program 193: knob-on interval not within knob-off interval:
+  program e185 [-4611686018427387891, 55340232221128654890] -> [-4611686018427387905, 55340232221128654890]
+  e128 e139 [-4611686018427387891, 55340232221128654890] -> [-4611686018427387905, 55340232221128654890]
+NOTE seed 3 program 218: knob-on interval not within knob-off interval:
+  program e71 [-4611686018427387903, 1] {-4611686018427387903,0,1} -> [-∞, +∞]
+NOTE seed 3 program 273: knob-on interval not within knob-off interval:
+  program e100 [-5, 4611686018427387904] {-5,4611686018427387904} -> [-13, 4611686018427387904] {-13,-5,10,4611686018427387904}
+NOTE seed 3 program 286: knob-on interval not within knob-off interval:
+  e45 e56 [16, 29] {16,29} -> [6, 29] {6,16,19,29}
+NOTE seed 3 program 288: knob-on interval not within knob-off interval:
+  e22 e24 [8, 8] {8} -> [8, 1000012]
+  e22 e33 [8, 8] {8} -> [8, 1000012]
+  e22 e42 [8, 8] {8} -> [8, 1000000]
+  e22 e51 [8, 8] {8} -> [8, 1000000]
+NOTE seed 3 program 319: knob-on interval not within knob-off interval:
+  e31 e42 [-13835058055282163712, 13835058055282163712] -> [-13835058055282163715, 13835058055282163715]
+NOTE seed 3 program 352: knob-on interval not within knob-off interval:
+  e33 e44 [-20, 40] {-20,-5,10,25,40} -> [-20, 48]
+NOTE seed 3 program 368: knob-on interval not within knob-off interval:
+  program e142 [-4611686018427387905, 9223372036854775812] -> [-∞, +∞]
+  program e150 [-4611686018427387905, 9223372036854775812] -> [-∞, +∞]
+  program e151 [-4611686018427387905, 9223372036854775812] -> [-∞, +∞]
+  program e148 [-9223372036854775815, 18446744073709551622] -> [-∞, +∞]
+  program e154 [-4611686018427387905, 9223372036854775812] -> [-∞, +∞]
+NOTE seed 3 program 376: knob-on interval not within knob-off interval:
+  program e115 [-4, 2305843009213693968] -> [-4611686018427387902, 4611686018427387918]
+  program e137 [-4, 2305843009213693968] -> [-4611686018427387902, 4611686018427387918]
+  program e147 [-4, 2305843009213693968] -> [-4611686018427387902, 4611686018427387918]
+NOTE seed 3 program 381: knob-on interval not within knob-off interval:
+  e62 e66 [4, 4] {4} -> [-∞, +∞]
+NOTE seed 3 program 442: knob-on interval not within knob-off interval:
+  program e127 [-4611686018427387933, 13835058055282163703] -> [-4611686018427387939, 13835058055282163705]
+NOTE seed 3 program 490: knob-on interval not within knob-off interval:
+  program e139 [0, 17] {0,17} -> [-4611686018427387889, 4611686018427387889] {-4611686018427387889,0,17,4611686018427387889}
+NOTE seed 3 program 508: knob-on interval not within knob-off interval:
+  program e62 [-4611686018427387922, -4611686018427387922] {-4611686018427387922} -> [-4611686018427387922, -6] {-4611686018427387922,-20,-19,-17,-15,-9,-6}
+NOTE seed 3 program 509: knob-on interval not within knob-off interval:
+  program e74 [15, 1000000] {15,19,1000000} -> [-8, 1000000] {-8,3,15,19,1000000}
+  program e77 [15, 1000000] {15,19,1000000} -> [-8, 1000000] {-8,3,15,19,1000000}
+NOTE seed 3 program 578: knob-on interval not within knob-off interval:
+  program e82 [-∞, 14] -> [-∞, +∞]
+  program e89 [-∞, 14] -> [-∞, +∞]
+  program e103 [-∞, 14] -> [-∞, +∞]
+  e39 param [-∞, 16] -> [-∞, +∞]
+  e39 e45 [-∞, 16] -> [-∞, +∞]
+NOTE seed 3 program 594: knob-on interval not within knob-off interval:
+  program e140 [-59, 56] {-59,-58,-57,56} -> [-60, 56]
+NOTE seed 3 program 643: knob-on interval not within knob-off interval:
+  e35 e62 [-4611686018427387924, 1] {-4611686018427387924,0,1} -> [-∞, +∞]
+  e35 e60 [-4611686018427387925, 4611686018427387926] -> [-∞, +∞]
+  e42 param [-4611686018427387924, 14] {-4611686018427387924,0,1,14} -> [-∞, +∞]
+  e42 e44 [-4611686018427387924, 14] {-4611686018427387924,0,1,14} -> [-∞, +∞]
+  e42 e47 [-4611686018427387924, 14] {-4611686018427387924,0,1,14} -> [-∞, +∞]
+NOTE seed 3 program 648: knob-on interval not within knob-off interval:
+  e50 e61 [14, 20] {14,20} -> [14, 25] {14,15,16,17,18,19,20,25}
+NOTE seed 3 program 683: knob-on interval not within knob-off interval:
+  program e55 [19, 23] -> [-∞, +∞]
+NOTE seed 3 program 798: knob-on interval not within knob-off interval:
+  program e44 [-9223372036854775784, 9223372036854775784] {-9223372036854775784,-4611686018427387892,0,4611686018427387892,9223372036854775784} -> [-∞, +∞]
+  program e49 [-9223372036854775784, 9223372036854775784] {-9223372036854775784,-4611686018427387892,0,4611686018427387892,9223372036854775784} -> [-∞, +∞]
+NOTE seed 3 program 913: knob-on interval not within knob-off interval:
+  program e63 [35, 4611686018427387917] {35,4611686018427387917} -> [9, 4611686018427387918] {9,22,35,4611686018427387917,4611686018427387918}
+  program e73 [35, 4611686018427387917] {35,4611686018427387917} -> [9, 4611686018427387918] {9,22,35,4611686018427387917,4611686018427387918}
+NOTE seed 3 program 931: knob-on interval not within knob-off interval:
+  e126 e137 [-4611686018427387908, 9223372036854775802] {-4611686018427387908,-10,3,10,13,9223372036854775802} -> [-4611686018427387908, 9223372036854775807] {-4611686018427387908,-4611686018427387903,-10,-5,3,8,10,13,18,9223372036854775802,9223372036854775807}
+NOTE seed 3 program 953: knob-on interval not within knob-off interval:
+  e68 e79 [-9223372036854775791, 37] {-9223372036854775791,8,20,25,37} -> [-9223372036854775809, 37] {-9223372036854775809,-9223372036854775791,-2,2,7,8,19,20,25,37}
+NOTE seed 3 program 970: knob-on interval not within knob-off interval:
+  program e149 [-35, 4611686018427387886] {-35,-16,-10,4611686018427387886} -> [-∞, +∞]
+  program e160 [-35, 4611686018427387886] {-35,-16,-10,4611686018427387886} -> [-∞, +∞]
+  program e179 [-35, 4611686018427387886] {-35,-16,-10,4611686018427387886} -> [-∞, +∞]
+  e107 param [-35, 4611686018427387902] {-35,-16,-10,5,20,4611686018427387886,4611686018427387902} -> [-∞, +∞]
+  e107 e113 [-35, 4611686018427387902] {-35,-16,-10,5,20,4611686018427387886,4611686018427387902} -> [-∞, +∞]
+seed 3: programs 1000 (compiled 1000, rejected 0, interp-error outcome 32); disagreements 0 (introduced by the pass 0), native-unsupported 0, analysis errors 0, limits 0, harness errors 0; range violations: top-level 0 of 5304 checks (introduced by the pass 0), trace 0 of 79178 checks; narrowing changed an entry/call Range in 54 programs (a checked top-level call Range in 46, any expression Range in 54); programs with an open instance 643, with a dormant instance 634; result narrowing attempted 1000, converged 1000 (rounds 1..6), not converged 0; knob-on not within knob-off 30 (strictly narrower somewhere: 44, specialization knobs only); error-message mismatches 0; 86s
+NOTE seed 4 program 16: knob-on interval not within knob-off interval:
+  program e86 [-4611686018427387891, 4611686018427387892] -> [-∞, +∞]
+  program e97 [-4611686018427387891, 4611686018427387892] -> [-∞, +∞]
+  e32 e53 [-4611686018427387891, 4611686018427387892] -> [-∞, +∞]
+  e78 param [-4611686018427387891, 4611686018427387892] -> [-∞, +∞]
+  e78 e84 [-4611686018427387891, 4611686018427387892] -> [-∞, +∞]
+NOTE seed 4 program 17: knob-on interval not within knob-off interval:
+  program e64 [-5, 10] {-5,-4,-3,-2,-1,0,1,2,3,10} -> [-16, 14]
+  program e82 [-5, 10] {-5,-4,-3,-2,-1,0,1,2,3,10} -> [-16, 14]
+NOTE seed 4 program 51: knob-on interval not within knob-off interval:
+  program e187 [6, 13835058055282163696] {6,32,53,13835058055282163696} -> [-10, 13835058055282163696] {-10,6,32,53,13835058055282163696}
+  e39 e41 [6, 13835058055282163696] {6,32,53,13835058055282163696} -> [-10, 13835058055282163696] {-10,6,32,53,13835058055282163696}
+  e39 e50 [6, 13835058055282163696] {6,32,53,13835058055282163696} -> [-10, 13835058055282163696] {-10,6,32,53,13835058055282163696}
+  e39 e65 [6, -4611686018427387905] -> [-10, -4611686018427387905]
+  e82 e84 [6, 13835058055282163696] {6,32,53,13835058055282163696} -> [-10, 13835058055282163696] {-10,6,32,53,13835058055282163696}
+NOTE seed 4 program 72: knob-on interval not within knob-off interval:
+  program e58 [6, 10] {6,8,10} -> [2, 9223372036854775784] {2,4,6,8,10,999991,999993,999995,1999980,4611686018427387893,4611686018427387895,4611686018427387897,4611686018428387882,9223372036854775784}
+  program e65 [6, 10] {6,8,10} -> [2, 9223372036854775784] {2,4,6,8,10,999991,999993,999995,1999980,4611686018427387893,4611686018427387895,4611686018427387897,4611686018428387882,9223372036854775784}
+NOTE seed 4 program 123: knob-on interval not within knob-off interval:
+  program e60 [-4611686018427387905, 4611686018427387902] -> [-∞, 4611686018427387902]
+  program e81 [-4611686018427387905, 4611686018427387902] -> [-∞, 4611686018427387902]
+  e24 param [-4611686018427387905, 4611686018427387902] -> [-∞, 4611686018427387902]
+  e24 e30 [-4611686018427387905, 4611686018427387902] -> [-∞, 4611686018427387902]
+NOTE seed 4 program 138: knob-on interval not within knob-off interval:
+  program e75 [-5, 1] {-5,1} -> [-4611686018427387905, 1] {-4611686018427387905,-5,1}
+NOTE seed 4 program 147: knob-on interval not within knob-off interval:
+  program e91 [0, 10] {0,10} -> [-∞, +∞]
+NOTE seed 4 program 162: knob-on interval not within knob-off interval:
+  e18 e20 [57, 97] {57,59,65,97} -> [31, 97] {31,39,57,59,65,97}
+  e18 e27 [57, 97] {57,59,65,97} -> [31, 97] {31,39,57,59,65,97}
+  e18 e30 [57, 97] {57,59,65,97} -> [31, 97] {31,39,57,59,65,97}
+  e18 e28 [57, 97] {57,59,65,97} -> [31, 97] {31,39,57,59,65,97}
+  e18 e35 [58, 97] -> [32, 97]
+NOTE seed 4 program 172: knob-on interval not within knob-off interval:
+  program e148 [-9223372036854775808, -9223372036854775806] -> [-92233720368547758078, -9223372036854775806]
+  e71 param [2305843009213693952, 18446744073709551616] -> [2305843009213693952, 184467440737095516156]
+  e71 e81 [2305843009213693952, 18446744073709551616] -> [2305843009213693952, 184467440737095516156]
+  e71 e86 [2305843009213693952, 18446744073709551616] -> [2305843009213693952, 184467440737095516156]
+  e71 e84 [2305843009213693958, 18446744073709551622] -> [2305843009213693958, 184467440737095516162]
+NOTE seed 4 program 190: knob-on interval not within knob-off interval:
+  program e40 [-32, 2] {-32,-27,-20,-15,-10,-3,2} -> [-∞, +∞]
+  program e47 [-32, 2] {-32,-27,-20,-15,-10,-3,2} -> [-∞, +∞]
+  program e59 [-32, 2] {-32,-27,-20,-15,-10,-3,2} -> [-∞, +∞]
+  program e60 [-32, 2] {-32,-27,-20,-15,-10,-3,2} -> [-∞, +∞]
+  program e70 [-32, 2] {-32,-27,-20,-15,-10,-3,2} -> [-∞, +∞]
+NOTE seed 4 program 232: knob-on interval not within knob-off interval:
+  e21 param [5, 4611686018427387906] {5,1000017,4611686018427387902,4611686018427387903,4611686018427387904,4611686018427387905,4611686018427387906} -> [-∞, +∞]
+  e21 e70 [5, 4611686018427387906] {5,1000017,4611686018427387902,4611686018427387903,4611686018427387904,4611686018427387905,4611686018427387906} -> [-∞, +∞]
+  e21 e76 [5, 4611686018427387906] {5,1000017,4611686018427387902,4611686018427387903,4611686018427387904,4611686018427387905,4611686018427387906} -> [0, +∞]
+  e21 e79 [5, 4611686018427387903] {5,1000017,4611686018427387902,4611686018427387903} -> [0, 4611686018427387903]
+  e90 e95 [1000017, 1000017] {1000017} -> [-∞, +∞]
+NOTE seed 4 program 250: knob-on interval not within knob-off interval:
+  program e233 [-3000000, -11] {-3000000,-1999997,-1000014,-11} -> [-3000000, 1] {-3000000,-1999997,-1000014,-1000002,-11,1}
+  program e244 [-3000000, -11] {-3000000,-1999997,-1000014,-11} -> [-3000000, 1] {-3000000,-1999997,-1000014,-1000002,-11,1}
+  e215 e226 [-3000000, -11] {-3000000,-1999997,-1000014,-11} -> [-3000000, 1] {-3000000,-1999997,-1000014,-1000002,-11,1}
+NOTE seed 4 program 253: knob-on interval not within knob-off interval:
+  e32 e43 [-17, 31] -> [-37, 34]
+NOTE seed 4 program 347: knob-on interval not within knob-off interval:
+  program e148 [-3, 20] {-3,15,16,17,18,19,20} -> [-∞, +∞]
+  program e154 [-3, 20] {-3,15,16,17,18,19,20} -> [-∞, +∞]
+NOTE seed 4 program 362: knob-on interval not within knob-off interval:
+  program e153 [-2999985, 999956] {-2999985,-2999972,-2000003,-1999990,-1000021,-1000008,-39,-26,999956} -> [-3000000, 999994]
+  e34 e45 [-2999985, 999956] {-2999985,-2999972,-2000003,-1999990,-1000021,-1000008,-39,-26,999956} -> [-3000000, 999994]
+NOTE seed 4 program 391: knob-on interval not within knob-off interval:
+  e48 e59 [-2305843009213693912, 4611686018427387942] {-2305843009213693912,39,43,44,58,4611686018427387942} -> [-2305843009213693931, 4611686018427387942] {-2305843009213693931,-2305843009213693912,20,24,25,39,43,44,58,4611686018427387923,4611686018427387942}
+NOTE seed 4 program 474: knob-on interval not within knob-off interval:
+  program e98 [0, 3] {0,3} -> [-∞, +∞]
+  program e106 [0, 3] {0,3} -> [-∞, +∞]
+  program e122 [0, 3] {0,3} -> [-∞, +∞]
+  program e130 [0, 3] {0,3} -> [-∞, +∞]
+  program e134 [0, 3] {0,3} -> [-∞, +∞]
+NOTE seed 4 program 502: knob-on interval not within knob-off interval:
+  program e70 [-18, -18] {-18} -> [-40, 4]
+NOTE seed 4 program 530: knob-on interval not within knob-off interval:
+  program e147 [-18446744073709551621, +∞] -> [-∞, +∞]
+  program e151 [-36893488147419103242, +∞] -> [-∞, +∞]
+  program e157 [-36893488147419103242, +∞] -> [-∞, +∞]
+  e31 param [-18446744073709551621, +∞] -> [-∞, +∞]
+  e91 e114 [-18446744073709551622, 1999994] {-18446744073709551622,-9223372036854775811,-16,-8,999997,1999994} -> [-∞, +∞]
+NOTE seed 4 program 544: knob-on interval not within knob-off interval:
+  program e157 [-∞, 11] -> [-∞, 24]
+  program e162 [-∞, 11] -> [-∞, 24]
+  e121 e147 [-∞, -1] -> [-∞, 12]
+  e121 e145 [-∞, 11] -> [-∞, 24]
+NOTE seed 4 program 593: knob-on interval not within knob-off interval:
+  program e56 [-9223372036854775795, 23] {-9223372036854775795,8,17,23} -> [-9223372036854775805, 23] {-9223372036854775805,-9223372036854775795,7,8,17,23}
+  e26 e37 [-9223372036854775795, 23] {-9223372036854775795,8,17,23} -> [-9223372036854775805, 23] {-9223372036854775805,-9223372036854775795,7,8,17,23}
+NOTE seed 4 program 600: knob-on interval not within knob-off interval:
+  program e75 [-4611686018427387968, 9223372036854775792] -> [-4611686018427387979, 9223372036854775814]
+  e25 e36 [-4611686018427387968, 9223372036854775792] -> [-4611686018427387979, 9223372036854775814]
+NOTE seed 4 program 628: knob-on interval not within knob-off interval:
+  e110 e121 [-4611686018427387901, 12] {-4611686018427387901,9,12} -> [-4611686018427387903, 12] {-4611686018427387903,-4611686018427387901,7,9,10,12}
+NOTE seed 4 program 633: knob-on interval not within knob-off interval:
+  program e85 [-13835058055282163699, 13835058055282163705] -> [-13835058055282163706, 13835058055282163712]
+  e30 e41 [-13835058055282163699, 13835058055282163705] -> [-13835058055282163706, 13835058055282163712]
+NOTE seed 4 program 643: knob-on interval not within knob-off interval:
+  e34 e45 [54, 54] {54} -> [30, 62] {30,38,46,54,62}
+NOTE seed 4 program 804: knob-on interval not within knob-off interval:
+  program e134 [-18446744073709551605, +∞] -> [-∞, +∞]
+  program e157 [-18446744073709551605, +∞] -> [-∞, +∞]
+  program e158 [-18446744073709551605, +∞] -> [-∞, +∞]
+NOTE seed 4 program 858: knob-on interval not within knob-off interval:
+  program e165 [-2305843009213693930, 4611686018427387899] {-2305843009213693930,-2305843009213693920,-2305843009213693910,1,3,13,23,33,2305843009213693946,2305843009213693956,2305843009213693966,4611686018427387889,4611686018427387899} -> [-∞, +∞]
+  e80 e84 [-2305843009213693930, 4611686018427387899] {-2305843009213693930,-2305843009213693920,-2305843009213693910,1,3,13,23,33,2305843009213693946,2305843009213693956,2305843009213693966,4611686018427387889,4611686018427387899} -> [-∞, +∞]
+NOTE seed 4 program 893: knob-on interval not within knob-off interval:
+  program e110 [0, 15] -> [0, +∞]
+  program e119 [0, 15] -> [0, +∞]
+NOTE seed 4 program 929: knob-on interval not within knob-off interval:
+  e24 e35 [0, 9223372036854775809] -> [-17, 9223372036854775809]
+NOTE seed 4 program 979: knob-on interval not within knob-off interval:
+  program e259 [-∞, 4611686018427387928] -> [-9223372036854775832, 9223372036854775832]
+  program e273 [-∞, 4611686018427387928] -> [-9223372036854775832, 9223372036854775832]
+  program e277 [-∞, 4611686018427387928] -> [-9223372036854775832, 9223372036854775832]
+  e187 e195 [-∞, 4611686018427387903] -> [-25, 9223372036854775807] {-25,-9,-6,-3,0,3,14,23,2305843009213693952,2305843009213693972,9223372036854775807}
+  e187 e193 [-∞, 4611686018427387928] -> [-9223372036854775832, 9223372036854775832]
+seed 4: programs 1000 (compiled 1000, rejected 0, interp-error outcome 25); disagreements 0 (introduced by the pass 0), native-unsupported 0, analysis errors 0, limits 0, harness errors 0; range violations: top-level 0 of 5442 checks (introduced by the pass 0), trace 0 of 79772 checks; narrowing changed an entry/call Range in 54 programs (a checked top-level call Range in 49, any expression Range in 54); programs with an open instance 643, with a dormant instance 631; result narrowing attempted 1000, converged 1000 (rounds 1..8), not converged 0; knob-on not within knob-off 30 (strictly narrower somewhere: 41, specialization knobs only); error-message mismatches 0; 86s
+NOTE seed 5 program 14: knob-on interval not within knob-off interval:
+  program e175 [-39, -1] -> [-66, 24]
+  e50 e61 [-39, -1] -> [-66, 24]
+NOTE seed 5 program 22: knob-on interval not within knob-off interval:
+  e44 e55 [-6, 6] {-6,4,5,6} -> [-6, 8] {-6,0,2,4,5,6,7,8}
+NOTE seed 5 program 99: knob-on interval not within knob-off interval:
+  e104 e115 [2, 2] {2} -> [-19, 23] {-19,-12,-5,2,9,16,23}
+NOTE seed 5 program 107: knob-on interval not within knob-off interval:
+  program e141 [-11, 11] -> [-46, 46]
+  e102 e104 [0, 11] {0,1,2,3,4,11} -> [-21, 25]
+  e102 e128 [0, 11] -> [-21, 25]
+  e102 e131 [0, 11] {0,1,2,3,4,11} -> [-21, 25]
+  e102 e126 [-11, 11] -> [-46, 46]
+NOTE seed 5 program 140: knob-on interval not within knob-off interval:
+  program e49 [4611686018427387903, 4611686018427387903] {4611686018427387903} -> [-∞, +∞]
+  program e61 [4611686018427387903, 4611686018427387903] {4611686018427387903} -> [-∞, +∞]
+  program e65 [4611686018427387903, 4611686018427387903] {4611686018427387903} -> [-∞, +∞]
+  e21 param [16, 4611686018427387903] {16,4611686018427387903} -> [-∞, +∞]
+  e41 param [4611686018427387903, 4611686018427387903] {4611686018427387903} -> [-∞, +∞]
+NOTE seed 5 program 144: knob-on interval not within knob-off interval:
+  program e157 [-14, -7] {-14,-7} -> [-14, 4611686018427387903] {-14,-7,4611686018427387903}
+  e44 e65 [-14, -7] {-14,-7} -> [-14, 4611686018427387903] {-14,-7,4611686018427387903}
+  e48 param [-14, -7] {-14,-7} -> [-14, 4611686018427387903] {-14,-7,4611686018427387903}
+  e48 e50 [-14, -7] {-14,-7} -> [-14, 4611686018427387903] {-14,-7,4611686018427387903}
+  e48 e53 [-14, -7] {-14,-7} -> [-14, 4611686018427387903] {-14,-7,4611686018427387903}
+NOTE seed 5 program 152: knob-on interval not within knob-off interval:
+  program e154 [-19, 8] {-19,8} -> [-4611686018427387904, 13]
+NOTE seed 5 program 213: knob-on interval not within knob-off interval:
+  e158 e169 [28, 4611686018427387890] {28,4611686018427387890} -> [28, 4611686018427387904] {28,4611686018427387890,4611686018427387904}
+NOTE seed 5 program 251: knob-on interval not within knob-off interval:
+  program e150 [-∞, 17] -> [-12, 36]
+  program e181 [-∞, 17] -> [-12, 36]
+  e44 e58 [-1, -1] {-1} -> [-6, 18]
+  e44 e56 [-∞, 17] -> [-∞, 36]
+  e103 e104 [-∞, 17] -> [-12, 36]
+NOTE seed 5 program 288: knob-on interval not within knob-off interval:
+  e79 e109 [-4611686018427387905, 5] -> [-4611686018427387905, 4611686018427387906] {-4611686018427387905,-4611686018427387904,0,1,5,4611686018427387905,4611686018427387906}
+NOTE seed 5 program 299: knob-on interval not within knob-off interval:
+  program e79 [-9223372036854775827, 18446744073709551635] -> [-9223372036856775811, 18446744073711551619]
+  program e85 [-9223372036854775827, 18446744073709551635] -> [-9223372036856775811, 18446744073711551619]
+  e46 e70 [-18446744073709551613, 19] {-18446744073709551613,-9223372036854775797,-1,19} -> [-18446744073709551613, 2000003] {-18446744073709551613,-9223372036854775797,-9223372036853775805,-1,19,1000011,2000003}
+  e46 e68 [-9223372036854775827, 18446744073709551635] -> [-9223372036856775811, 18446744073711551619]
+  e50 param [-18446744073709551613, 19] {-18446744073709551613,-9223372036854775797,-1,19} -> [-18446744073709551613, 2000003] {-18446744073709551613,-9223372036854775797,-9223372036853775805,-1,19,1000011,2000003}
+NOTE seed 5 program 303: knob-on interval not within knob-off interval:
+  e97 e108 [-4611686018427387904, -19] {-4611686018427387904,-19} -> [-4611686018427387904, -18] {-4611686018427387904,-19,-18}
+NOTE seed 5 program 369: knob-on interval not within knob-off interval:
+  program e146 [0, 0] {0} -> [-∞, +∞]
+NOTE seed 5 program 453: knob-on interval not within knob-off interval:
+  program e95 [-6, -6] {-6} -> [-∞, +∞]
+NOTE seed 5 program 486: knob-on interval not within knob-off interval:
+  program e231 [-9223372036854775806, 4611686018427387904] -> [-18446744073709551614, 4611686018427387904]
+  e108 e110 [-9223372036854775806, 4611686018427387904] -> [-18446744073709551614, 4611686018427387904]
+  e108 e126 [-9223372036854775806, 4611686018427387904] -> [-18446744073709551614, 4611686018427387904]
+  e108 e124 [-27670116110564327418, 13835058055282163712] -> [-55340232221128654842, 13835058055282163712]
+  e108 e136 [-9223372036854775806, 4611686018427387904] -> [-18446744073709551614, 4611686018427387904]
+NOTE seed 5 program 596: knob-on interval not within knob-off interval:
+  program e71 [-9223372036854775814, 2305843009213693965] {-9223372036854775814,-4611686018427387922,-11,22,32,2305843009213693965} -> [-9223372036854775827, 2305843009213693965] {-9223372036854775827,-9223372036854775814,-4611686018427387922,-24,-11,-10,19,22,32,2305843009213693952,2305843009213693965}
+  e20 e31 [-9223372036854775814, 2305843009213693965] {-9223372036854775814,-4611686018427387922,-11,22,32,2305843009213693965} -> [-9223372036854775827, 2305843009213693965] {-9223372036854775827,-9223372036854775814,-4611686018427387922,-24,-11,-10,19,22,32,2305843009213693952,2305843009213693965}
+NOTE seed 5 program 613: knob-on interval not within knob-off interval:
+  e53 e64 [0, 4611686018427387924] -> [0, 4611686018427387927]
+NOTE seed 5 program 624: knob-on interval not within knob-off interval:
+  program e141 [-1000026, 999993] -> [-4611686018428387914, 999993]
+  program e145 [-1000026, 999993] -> [-4611686018428387914, 999993]
+  program e171 [-1000026, 999993] -> [-4611686018428387914, 999993]
+  program e175 [-1000033, 13] -> [-4611686018428387921, 13]
+  e107 e130 [-1000033, 13] -> [-4611686018428387921, 13]
+NOTE seed 5 program 626: knob-on interval not within knob-off interval:
+  program e54 [4611686018427387904, 4611686018427387904] {4611686018427387904} -> [-∞, +∞]
+  program e62 [4611686018427387904, 4611686018427387904] {4611686018427387904} -> [-∞, +∞]
+  program e70 [4611686018427387904, 4611686018427387904] {4611686018427387904} -> [-∞, +∞]
+NOTE seed 5 program 630: knob-on interval not within knob-off interval:
+  program e169 [-18446744073709551627, 13835058055282163656] {-18446744073709551627,-13835058055282163728,-4611686018427387911,-91,-55,-43,13,4611686018427387808,4611686018427387844,4611686018427387856,9223372036854775757,13835058055282163656} -> [-∞, +∞]
+  program e201 [-18446744073709551627, 13835058055282163656] {-18446744073709551627,-13835058055282163728,-4611686018427387911,-91,-55,-43,13,4611686018427387808,4611686018427387844,4611686018427387856,9223372036854775757,13835058055282163656} -> [-∞, +∞]
+  e51 param [-4611686018427387879, 9223372036854775813] {-4611686018427387879,-1,8,21,27,45,1000000,9223372036854775813} -> [-∞, +∞]
+  e51 e57 [-4611686018427387879, 9223372036854775813] {-4611686018427387879,-1,8,21,27,45,1000000,9223372036854775813} -> [-∞, +∞]
+  e59 e61 [-4611686018427387879, 9223372036854775813] {-4611686018427387879,21,27,45,9223372036854775813} -> [-∞, +∞]
+NOTE seed 5 program 639: knob-on interval not within knob-off interval:
+  program e138 [-18446744073709551616, 68] {-18446744073709551616,-9223372036854775774,68} -> [-∞, +∞]
+  program e147 [-18446744073709551616, 68] {-18446744073709551616,-9223372036854775774,68} -> [-∞, +∞]
+  e17 e28 [-18446744073709551616, 68] {-18446744073709551616,-9223372036854775774,68} -> [-∞, +∞]
+  e90 param [-136, 36893488147419103232] {-136,-22,15,18446744073709551548,36893488147419103232} -> [-∞, +∞]
+  e90 e96 [-136, 36893488147419103232] {-136,-22,15,18446744073709551548,36893488147419103232} -> [-∞, +∞]
+NOTE seed 5 program 705: knob-on interval not within knob-off interval:
+  program e120 [-1, 2] {-1,2} -> [-13835058055282163711, 13835058055282163709] {-13835058055282163711,-9223372036854775824,-9223372036854775813,-4611686018427387899,-4611686018427387888,-12,-1,2,10,4611686018427387886,4611686018427387897,9223372036854775811,9223372036854775822,13835058055282163709}
+NOTE seed 5 program 711: knob-on interval not within knob-off interval:
+  program e219 [-6, 13835058055282163710] -> [-9223372036854775806, 13835058055282163710]
+  program e225 [-4611686018427387903, 6] -> [-4611686018427387903, 9223372036854775806]
+  program e235 [-6, 13835058055282163710] -> [-9223372036854775806, 13835058055282163710]
+  e126 param [-6, 13835058055282163710] -> [-9223372036854775806, 13835058055282163710]
+  e126 e132 [-6, 13835058055282163710] -> [-9223372036854775806, 13835058055282163710]
+NOTE seed 5 program 720: knob-on interval not within knob-off interval:
+  program e161 [-4611686018427387917, 4611686018427387932] -> [-∞, +∞]
+  program e164 [-4611686018427387933, 4611686018427387919] -> [-∞, +∞]
+  e46 e58 [-4611686018427387917, 4611686018427387932] -> [-∞, +∞]
+  e89 e91 [-4611686018427387917, 4611686018427387932] -> [-∞, +∞]
+  e89 e107 [-4611686018427387917, 4611686018427387932] -> [-∞, +∞]
+NOTE seed 5 program 783: knob-on interval not within knob-off interval:
+  program e162 [-1, -1] {-1} -> [-9223372036854775807, 0] {-9223372036854775807,-4611686018427387919,-1,0}
+NOTE seed 5 program 803: knob-on interval not within knob-off interval:
+  program e114 [-21, 4611686018427387911] -> [-26, 4611686018427387911]
+  e51 e62 [-21, 4611686018427387911] -> [-26, 4611686018427387911]
+NOTE seed 5 program 821: knob-on interval not within knob-off interval:
+  e60 e71 [11, 4611686018427387905] {11,12,13,14,15,4611686018427387905} -> [-5, 4611686018427387905] {-5,11,12,13,14,15,1000000,4611686018427387902,4611686018427387905}
+NOTE seed 5 program 902: knob-on interval not within knob-off interval:
+  program e114 [-23, +∞] -> [-∞, +∞]
+  program e118 [-23, +∞] -> [-∞, +∞]
+  program e129 [-23, +∞] -> [-∞, +∞]
+  program e136 [-23, +∞] -> [-∞, +∞]
+  e57 e65 [1, 24] -> [-∞, 24]
+NOTE seed 5 program 921: knob-on interval not within knob-off interval:
+  program e52 [34, 34] {34} -> [-∞, +∞]
+  program e57 [34, 34] {34} -> [-∞, +∞]
+NOTE seed 5 program 929: knob-on interval not within knob-off interval:
+  program e56 [27, 40] {27,30,34,37,40} -> [16, 4611686018427387912]
+  program e59 [27, 40] {27,30,34,37,40} -> [16, 4611686018427387912]
+seed 5: programs 1000 (compiled 1000, rejected 0, interp-error outcome 26); disagreements 0 (introduced by the pass 0), native-unsupported 0, analysis errors 0, limits 0, harness errors 0; range violations: top-level 0 of 5270 checks (introduced by the pass 0), trace 0 of 78306 checks; narrowing changed an entry/call Range in 51 programs (a checked top-level call Range in 45, any expression Range in 51); programs with an open instance 638, with a dormant instance 629; result narrowing attempted 1000, converged 1000 (rounds 1..8), not converged 0; knob-on not within knob-off 30 (strictly narrower somewhere: 40, specialization knobs only); error-message mismatches 0; 84s
+total (seeds 1,2,3,4,5): programs 5000, compiled 5000, disagreements 0, range violations top 0 / trace 0, changed-by-the-knob 252 (top-level 220), with a dormant instance 3140, not-converged 0, failures 0 programs; 440s
+
+B. -knob hir::specialize::closureIntKeyOpt -nativeopts -block-escape-opt=0 -n 400 -seed "1 2 3 4 5"
+==================================================================================================
+seed 1: programs 400 (compiled 400, rejected 0, interp-error outcome 10); disagreements 0 (introduced by the pass 0), native-unsupported 0, analysis errors 0, limits 0, harness errors 0; range violations: top-level 0 of 2221 checks (introduced by the pass 0), trace 0 of 32755 checks; narrowing changed an entry/call Range in 18 programs (a checked top-level call Range in 16, any expression Range in 18); programs with an open instance 251, with a dormant instance 246; result narrowing attempted 400, converged 400 (rounds 1..8), not converged 0; knob-on not within knob-off 13; error-message mismatches 0; 46s
+seed 2: programs 400 (compiled 400, rejected 0, interp-error outcome 11); disagreements 0 (introduced by the pass 0), native-unsupported 0, analysis errors 0, limits 0, harness errors 0; range violations: top-level 0 of 2186 checks (introduced by the pass 0), trace 0 of 33427 checks; narrowing changed an entry/call Range in 19 programs (a checked top-level call Range in 16, any expression Range in 19); programs with an open instance 270, with a dormant instance 263; result narrowing attempted 400, converged 400 (rounds 1..8), not converged 0; knob-on not within knob-off 11; error-message mismatches 0; 45s
+seed 3: programs 400 (compiled 400, rejected 0, interp-error outcome 14); disagreements 0 (introduced by the pass 0), native-unsupported 0, analysis errors 0, limits 0, harness errors 0; range violations: top-level 0 of 2112 checks (introduced by the pass 0), trace 0 of 31347 checks; narrowing changed an entry/call Range in 25 programs (a checked top-level call Range in 21, any expression Range in 25); programs with an open instance 258, with a dormant instance 255; result narrowing attempted 400, converged 400 (rounds 1..6), not converged 0; knob-on not within knob-off 16; error-message mismatches 0; 49s
+seed 4: programs 400 (compiled 400, rejected 0, interp-error outcome 7); disagreements 0 (introduced by the pass 0), native-unsupported 0, analysis errors 0, limits 0, harness errors 0; range violations: top-level 0 of 2226 checks (introduced by the pass 0), trace 0 of 31773 checks; narrowing changed an entry/call Range in 24 programs (a checked top-level call Range in 20, any expression Range in 24); programs with an open instance 256, with a dormant instance 253; result narrowing attempted 400, converged 400 (rounds 1..8), not converged 0; knob-on not within knob-off 16; error-message mismatches 0; 40s
+seed 5: programs 400 (compiled 400, rejected 0, interp-error outcome 10); disagreements 0 (introduced by the pass 0), native-unsupported 0, analysis errors 0, limits 0, harness errors 0; range violations: top-level 0 of 2085 checks (introduced by the pass 0), trace 0 of 31036 checks; narrowing changed an entry/call Range in 21 programs (a checked top-level call Range in 18, any expression Range in 21); programs with an open instance 252, with a dormant instance 249; result narrowing attempted 400, converged 400 (rounds 1..5), not converged 0; knob-on not within knob-off 13; error-message mismatches 0; 37s
+total (seeds 1,2,3,4,5): programs 2000, compiled 2000, disagreements 0, range violations top 0 / trace 0, changed-by-the-knob 107 (top-level 91), with a dormant instance 1266, not-converged 0, failures 0 programs; 217s

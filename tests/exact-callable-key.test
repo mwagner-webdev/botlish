@@ -621,25 +621,28 @@ test exact-callable-capturing-closure-direct {the call through p is a direct cal
     list [callvalues $nir] [regexp {callenv} $nir] [parity $::capturingHof]
 } -result {0 1 {value {"abcdef"} {}}}
 
-test exact-callable-capturing-closure-aggregate-capture-keys {the closure rule is relaxed only for the exact callable position: a closure with aggregate captures keeps its other parameters generic (refined by the closed-caller theorem) and its callable parameter exact} -body {
+# Loss point 1 (GENERIC-PREDICATE-PROOF-LOSS.md) relaxed the rule for Int
+# positions as well; a third, String parameter pins that every other kind
+# still stays generic and is refined by the theorem.
+test exact-callable-capturing-closure-aggregate-capture-keys {the closure rule is relaxed only for the exact callable and Int positions: a closure with aggregate captures keeps its other parameters generic (refined by the closed-caller theorem), its Int parameter Int and its callable parameter exact} -body {
     lassign [analysisOf {
 fn run(v, k):
     fn char_at(i):
         substring(v, i, i + 1)
-    fn scan(start, predicate):
+    fn scan(start, predicate, tag):
         loop i from start to length(v):
             if predicate(char_at(i)):
                 continue
-            return i
+            return i + length(tag)
         length(v)
-    scan(k, is_tcl_alpha)
+    scan(k, is_tcl_alpha, "t")
 
 run("abc1", 0)
 }] hir analysis
     set id [instanceNamed $analysis scan]
     list [hir::specialize::label $analysis $id] [hir::specialize::closedCallerTheorem $hir $analysis $id] \
         [hir::specialize::closed $hir $analysis $id]
-} -result {{scan<any, native(is_tcl_alpha)>} {int {native is_tcl_alpha}} 1}
+} -result {{scan<int, native(is_tcl_alpha), any>} {int {native is_tcl_alpha} str} 1}
 
 test exact-callable-capturing-closure-no-closure-allocated {blockescape de-closes a closure literal that has SEVERAL exact instances: both are internal variants, no closure is allocated} -body {
     set text {
@@ -981,7 +984,11 @@ test exact-callable-closed-stable-across-closecallers {the closedness result is 
     set same
 } -result 1
 
-test exact-callable-range-open-is-not-closed {hir::range's openness is exactly "not InstanceClosed" for every used instance of the benchmark corpus programs: no instance is closed and range-open at once} -body {
+# Loss point 2 (GENERIC-PREDICATE-PROOF-LOSS.md) made a dormant instance
+# range-open whatever its closedness; with loss point 1, refined-checks has a
+# closed dormant instance (scan_while<any, native(is_tcl_alpha)>, reached only
+# through the dormant tld?<generic>).
+test exact-callable-range-open-is-not-closed {hir::range's openness is exactly "not InstanceClosed, or dormant" for every used instance of the benchmark corpus programs} -body {
     set bad {}
     foreach path {bench/refined-checks.bot bench/sum-refined.bot bench/fib.bot bench/loop-count.bot bench/test-selection.bot bench/lex-strategy.bot bench/source-checks.bot examples/stdlib/matmul.bot} {
         set name $path
@@ -990,7 +997,7 @@ test exact-callable-range-open-is-not-closed {hir::range's openness is exactly "
         set open [hir::range::OpenInstances $analysis]
         foreach id [dict get $analysis used] {
             if {[dict get $analysis instances $id block] eq "program"} continue
-            if {[dict exists $open $id] == [dict exists $analysis closed $id]} {
+            if {[dict exists $open $id] != (![dict exists $analysis closed $id] || [dict exists $analysis dormant $id])} {
                 lappend bad "$name $id"
             }
         }
@@ -998,6 +1005,9 @@ test exact-callable-range-open-is-not-closed {hir::range's openness is exactly "
     set bad
 } -result {}
 
+# The instance must be generic: exact keys off, and (loss point 1 of
+# GENERIC-PREDICATE-PROOF-LOSS.md) Int closure keys off, which would key it
+# scan<int, native>.
 test exact-callable-range-generic-closure-not-open {a generic closure instance blockescape proves closed is no longer range-open: its entry Ranges flow from its callers (with exact keys off so the instance stays generic; before this milestone OpenInstances read the coarser materialization test and called it open)} -body {
     set text {
 fn run(v):
@@ -1013,7 +1023,12 @@ fn run(v):
 
 run("abc1")
 }
-    lassign [analysisOf $text -exact-callable-opt 0] hir analysis
+    set hir::specialize::closureIntKeyOpt 0
+    try {
+        lassign [analysisOf $text -exact-callable-opt 0] hir analysis
+    } finally {
+        set hir::specialize::closureIntKeyOpt 1
+    }
     set id [instanceNamed $analysis scan]
     set ranges [hir::range::analyze $hir $analysis]
     list [dict get $analysis instances $id generic] [hir::specialize::closed $hir $analysis $id] \

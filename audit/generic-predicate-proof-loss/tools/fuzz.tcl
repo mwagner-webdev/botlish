@@ -666,14 +666,41 @@ proc within {r1 r0} {
 
 proc showRange {r} { return [hir::range::show $r] }
 
+# Block -> {params {R...} exprs {e R ...}}: the join over the block's used,
+# non-dormant instances of SPEC (program included) in ANALYSIS.
+proc blockJoins {spec analysis} {
+    set dormant [expr {[dict exists $spec dormant] ? [dict get $spec dormant] : {}}]
+    set joins [dict create]
+    foreach id [dict get $spec used] {
+        if {[dict exists $dormant $id]} continue
+        set block [dict get $spec instances $id block]
+        set inst [dict get $analysis instances $id]
+        if {![dict exists $joins $block]} {
+            dict set joins $block [dict create params [dict get $inst params] exprs [dict get $inst exprs]]
+            continue
+        }
+        set b [dict get $joins $block]
+        dict set b params [lmap x [dict get $b params] y [dict get $inst params] {hir::range::join $x $y}]
+        set ex [dict get $b exprs]
+        dict for {e r} [dict get $inst exprs] {
+            dict set ex $e [expr {[dict exists $ex $e] ? [hir::range::join [dict get $ex $e] $r] : $r}]
+        }
+        dict set b exprs $ex
+        dict set joins $block $b
+    }
+    return $joins
+}
+
 proc analyzeWith {opt hir spec} {
     set ::$::knob $opt
     try {
         if {$::knob ne "hir::range::resultNarrowOpt"} {
-            # A specialization knob (hir::specialize::dormantOpt): the
-            # specialization itself is computed with it.
+            # A specialization knob (hir::specialize::dormantOpt,
+            # closureIntKeyOpt): the specialization itself is computed with
+            # it.
             set spec [hir::specialize::analyze $hir]
         }
+        set ::knobSpec($opt) $spec
         return [hir::range::analyze $hir $spec]
     } finally {
         set ::$::knob 1
@@ -775,7 +802,32 @@ proc checkProgram {seed k} {
     set changed 0
     set exprChanged 0
     set notRefinement {}
-    foreach id [dict get $spec used] {
+    set narrower 0
+    if {$::knob ne "hir::range::resultNarrowOpt"} {
+        # A specialization knob may change the instances (closureIntKeyOpt
+        # changes keys): compare per function, the join over its live
+        # (non-dormant) instances, as census-blocks.tcl does.
+        set j1 [blockJoins $::knobSpec(1) $a1]
+        set j0 [blockJoins $::knobSpec(0) $a0]
+        dict for {block b1} $j1 {
+            if {![dict exists $j0 $block]} continue
+            set b0 [dict get $j0 $block]
+            foreach r1 [dict get $b1 params] r0 [dict get $b0 params] {
+                if {$r1 ne $r0} { set changed 1 }
+                if {![within $r1 $r0]} { lappend notRefinement "$block param [showRange $r0] -> [showRange $r1]" }
+                if {$r1 ne $r0 && [within $r1 $r0] && ![within $r0 $r1]} { set narrower 1 }
+            }
+            dict for {e r1} [dict get $b1 exprs] {
+                set r0 [expr {[dict exists $b0 exprs $e] ? [dict get $b0 exprs $e] : [hir::range::unknown]}]
+                if {$r1 eq $r0} continue
+                set exprChanged 1
+                if {![catch {hir::kind $prepared $e} kind] && $kind eq "call"} { set changed 1 }
+                if {![within $r1 $r0]} { lappend notRefinement "$block $e [showRange $r0] -> [showRange $r1]" }
+                if {[within $r1 $r0] && ![within $r0 $r1]} { set narrower 1 }
+            }
+        }
+    }
+    foreach id [expr {$::knob eq "hir::range::resultNarrowOpt" ? [dict get $spec used] : {}}] {
         set i1 [dict get $a1 instances $id]
         set i0 [dict get $a0 instances $id]
         foreach r1 [dict get $i1 params] r0 [dict get $i0 params] {
@@ -793,6 +845,7 @@ proc checkProgram {seed k} {
     }
     dict set rec changed $changed
     dict set rec exprChanged $exprChanged
+    dict set rec narrower $narrower
     if {$notRefinement ne ""} {
         dict set rec notRefinement [lrange $notRefinement 0 4]
     }
@@ -1009,7 +1062,7 @@ foreach seed $seeds {
     set s [dict create programs 0 ok 0 rejected 0 interpError 0 disagreements 0 unsupported 0 \
         analysisErrors 0 limits 0 harness 0 disagreementsIntroduced 0 topChecks 0 topViolations 0 topIntroduced 0 \
         traceChecks 0 traceViolations 0 changed 0 topChanged 0 exprChanged 0 notRefinement 0 \
-        attempted 0 converged 0 unconverged 0 messageMismatch 0 openInstance 0 dormant 0]
+        attempted 0 converged 0 unconverged 0 messageMismatch 0 openInstance 0 dormant 0 narrower 0]
     set rounds {}
     set rejectSamples {}
     foreach k [lsort -integer [dict keys $records]] {
@@ -1027,7 +1080,7 @@ foreach seed $seeds {
             limit { dict incr s limits }
             harness-error { dict incr s harness }
         }
-        foreach key {interpError changed topChanged exprChanged messageMismatch openInstance dormant} {
+        foreach key {interpError changed topChanged exprChanged messageMismatch openInstance dormant narrower} {
             if {[dict exists $rec $key] && [dict get $rec $key]} { dict incr s $key }
         }
         foreach key {topChecks traceChecks} {
@@ -1101,14 +1154,15 @@ foreach seed $seeds {
         of %d checks (introduced by the pass %d), trace %d of %d checks; narrowing changed an entry/call Range in\
         %d programs (a checked top-level call Range in %d, any expression Range in %d); programs with an open\
         instance %d, with a dormant instance %d; result narrowing\
-        attempted %d, converged %d (rounds %s), not converged %d; knob-on not within knob-off %d;\
+        attempted %d, converged %d (rounds %s), not converged %d; knob-on not within knob-off %d\
+        (strictly narrower somewhere: %d, specialization knobs only);\
         error-message mismatches %d; %ds" \
         $seed [dict get $s programs] [dict get $s ok] [dict get $s rejected] [dict get $s interpError] \
         [dict get $s disagreements] [dict get $s disagreementsIntroduced] [dict get $s unsupported] [dict get $s analysisErrors] [dict get $s limits] \
         [dict get $s harness] [dict get $s topViolations] [dict get $s topChecks] [dict get $s topIntroduced] \
         [dict get $s traceViolations] [dict get $s traceChecks] [dict get $s changed] [dict get $s topChanged] \
         [dict get $s exprChanged] [dict get $s openInstance] [dict get $s dormant] [dict get $s attempted] [dict get $s converged] $roundText \
-        [dict get $s unconverged] [dict get $s notRefinement] [dict get $s messageMismatch] \
+        [dict get $s unconverged] [dict get $s notRefinement] [dict get $s narrower] [dict get $s messageMismatch] \
         [expr {[clock seconds] - $t0}]]
     flush stdout
     dict for {key value} $s {

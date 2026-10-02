@@ -307,7 +307,12 @@ test emailish-predicate-no-anonymous-callee-instance {no anonymous (unnamed) cal
 # the Block value passed as an argument next to its exact-call instance. The
 # old native-body bridge's failure mode (one copy per call site) would show
 # up as a larger count for the other helpers.
-test emailish-predicate-check-scanner-instance-count {every scanner helper (and web::emailish? itself) is one used instance, except scan_while (one per exact predicate target plus the never-emitted generic) and local_char? (its exact-call instance plus the generic Block-value entry)} -body {
+# Loss point 1 (GENERIC-PREDICATE-PROOF-LOSS.md): char_at, tld?, domain? and
+# scan_while are called with Ints, so their calls select <int> instances and
+# each keeps its never-entered generic Block-value entry (dormant, not
+# emitted); scan_while also keeps the instance only tld?<generic> calls
+# (scan_while<any, native(is_tcl_alpha)>, dormant too).
+test emailish-predicate-check-scanner-instance-count {every scanner helper (and web::emailish? itself) is one emitted instance plus, for the Int-keyed closures, the never-entered generic entry; scan_while has one per exact predicate target, the generic entry and the instance only the dormant tld?<generic> reaches; local_char? its exact-call instance plus the generic Block-value entry} -body {
     set hir [nativeHirOfIR [core::loadProgramFile [file join $::projectRoot bench refined-checks.ir]]]
     set spec [hir::specialize::analyze $hir]
     set counts [dict create]
@@ -320,7 +325,7 @@ test emailish-predicate-check-scanner-instance-count {every scanner helper (and 
         }
     }
     lmap name [lsort [dict keys $counts]] {list $name [dict get $counts $name]}
-} -result {{char_at 1} {domain? 1} {label_char? 1} {local_char? 2} {scan_while 3} {tld? 1} {web::emailish? 1}}
+} -result {{char_at 2} {domain? 2} {label_char? 1} {local_char? 2} {scan_while 4} {tld? 2} {web::emailish? 1}}
 
 # ---------------------------------------------------------------------------
 # check.n control: R2 did not disturb M9's own pre-existing improvement of

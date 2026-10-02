@@ -34,20 +34,36 @@ source [file join $::projectRoot surface surface.tcl]
 # throws (it does not, for any fixture below, but this mirrors the "leave no
 # override behind" discipline of a namespace variable meant to be read only
 # during one call).
+#
+# The fixtures below build cascades whose closed-caller theorems need a known
+# number of CloseCallers rounds, with Int arguments as the vehicle. Since
+# loss point 1 of GENERIC-PREDICATE-PROOF-LOSS.md an Int argument is a key
+# position of such a closure, so there would be nothing left for the
+# theorem to derive; both helpers therefore analyze with that rule off
+# (hir::specialize::closureIntKeyOpt 0), which leaves CloseCallers -- the
+# code under test -- exactly as it runs by default for every non-Int
+# position (tests/closed-closure-entry-facts.test exercises those).
 proc specWithRoundLimit {limit text args} {
     set hir::specialize::closeCallersRoundLimit $limit
+    set hir::specialize::closureIntKeyOpt 0
     try {
         set hir [surface::compile $text t.bot -strict 0]
         return [list $hir [hir::specialize::analyze $hir {*}$args] \
             $hir::specialize::closeCallersConverged]
     } finally {
         set hir::specialize::closeCallersRoundLimit ""
+        set hir::specialize::closureIntKeyOpt 1
     }
 }
 
 proc specOf {text args} {
-    set hir [surface::compile $text t.bot -strict 0]
-    return [list $hir [hir::specialize::analyze $hir {*}$args]]
+    set hir::specialize::closureIntKeyOpt 0
+    try {
+        set hir [surface::compile $text t.bot -strict 0]
+        return [list $hir [hir::specialize::analyze $hir {*}$args]]
+    } finally {
+        set hir::specialize::closureIntKeyOpt 1
+    }
 }
 
 proc specId {analysis name} {

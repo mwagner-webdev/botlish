@@ -26,6 +26,15 @@
 # used throughout this file to pin that instance identity never depends on
 # this milestone (spec items 22, 54, 89: the hard "closure identity is
 # unchanged" invariant).
+#
+# Loss point 1 of GENERIC-PREDICATE-PROOF-LOSS.md changed the premise for
+# one kind: an Int argument position of such a closure is now part of its
+# key (inner(1) selects inner<int>), so the theorem has nothing left to
+# derive there. These fixtures therefore pass Strings (and, for the
+# disagreeing callers, a Bool) where they used to pass Ints: every position
+# that is not Int (or an exact callable) is still forced generic, and the
+# closed-caller theorem is still what refines it. tests/closure-int-keys.test
+# pins the Int case itself.
 
 source [file join [file dirname [file normalize [info script]]] helpers.tcl]
 source [file join $::projectRoot surface surface.tcl]
@@ -95,22 +104,22 @@ proc paramGuards {hir analysis id} {
 set ::positiveFixture {
 fn outer(tag):
     fn inner(x):
-        x + length(tag)
-    inner(1) + inner(2)
+        length(x) + length(tag)
+    inner("a") + inner("bb")
 outer("v")
 }
 
-test closed-single-kind-closure-is-closed {inner captures tag (str, not Int -- so Handle's own GenericKey collapse forces it generic), and both of its exact callers pass Int: hir::specialize::closed proves it closed} -body {
+test closed-single-kind-closure-is-closed {inner captures tag (str, not Int -- so Handle's own GenericKey collapse forces its non-Int positions generic), and both of its exact callers pass Str: hir::specialize::closed proves it closed} -body {
     lassign [specOf $::positiveFixture] hir analysis
     hir::specialize::closed $hir $analysis [specId $analysis inner]
 } -result 1
 
-test closed-single-kind-closure-theorem-is-int {the closed-caller theorem for inner's own (single) parameter is exactly Int -- the join of both exact callers, not merely the first} -body {
+test closed-single-kind-closure-theorem-is-str {the closed-caller theorem for inner's own (single) parameter is exactly Str -- the join of both exact callers, not merely the first} -body {
     lassign [specOf $::positiveFixture] hir analysis
     hir::specialize::closedCallerTheorem $hir $analysis [specId $analysis inner]
-} -result {int}
+} -result {str}
 
-test closed-single-kind-closure-guard-eliminated {before this milestone (-closed-caller-facts-opt 0) inner's own "x + length(tag)" has an UnknownParameterKind guard; with the theorem applied, the guard is gone} -body {
+test closed-single-kind-closure-guard-eliminated {before this milestone (-closed-caller-facts-opt 0) inner's own "length(x) + length(tag)" has an UnknownParameterKind guard; with the theorem applied, the guard is gone} -body {
     lassign [specOf $::positiveFixture] hir analysis
     lassign [specOf $::positiveFixture -closed-caller-facts-opt 0] hir0 before
     list [paramGuards $hir0 $before [specId $before inner]] \
@@ -137,16 +146,16 @@ test closed-single-kind-closure-instance-count-unchanged {used-instance count (p
 # but compatible shape must not perturb it -- reusing the primary fixture's
 # own two-caller shape directly, and adding a third homogeneous call site).
 
-test closed-multi-caller-theorem-not-copied-from-first {a third exact Int caller keeps the theorem exactly Int, not the first caller's own possibly-narrower fact by coincidence} -body {
+test closed-multi-caller-theorem-not-copied-from-first {a third exact Str caller keeps the theorem exactly Str, not the first caller's own possibly-narrower fact by coincidence} -body {
     lassign [specOf {
 fn outer(tag):
     fn inner(x):
-        x + length(tag)
-    inner(1) + inner(2) + inner(3)
+        length(x) + length(tag)
+    inner("a") + inner("bb") + inner("ccc")
 outer("v")
 }] hir analysis
     hir::specialize::closedCallerTheorem $hir $analysis [specId $analysis inner]
-} -result {int}
+} -result {str}
 
 # ---------------------------------------------------------------------------
 # Mixed-kind closed fixture (spec items 27, 64): a proven-closed instance
@@ -160,7 +169,7 @@ fn outer(tag):
         concat(tag, "")
         x
     identity_a = inner(tag)
-    identity_b = inner(1)
+    identity_b = inner(true)
     length(tag)
 outer("v")
 }
@@ -170,7 +179,7 @@ test closed-mixed-kind-closure-is-closed {inner is still closed (both callers ar
     hir::specialize::closed $hir $analysis [specId $analysis inner]
 } -result 1
 
-test closed-mixed-kind-closure-theorem-widens-to-any {the theorem for inner's own parameter is "any": Str and Int callers join to the top of the lattice, never a fabricated single kind (spec item 30's own "Required: yes" that disagreement widens)} -body {
+test closed-mixed-kind-closure-theorem-widens-to-any {the theorem for inner's own parameter is "any": Str and Bool callers join to the top of the lattice, never a fabricated single kind (spec item 30's own "Required: yes" that disagreement widens)} -body {
     lassign [specOf $::mixedFixture] hir analysis
     hir::specialize::closedCallerTheorem $hir $analysis [specId $analysis inner]
 } -result {any}
@@ -179,8 +188,8 @@ test closed-mixed-kind-closure-guard-retained-when-necessary {a genuinely kind-r
     lassign [specOf {
 fn outer(tag):
     fn inner(x):
-        x + length(tag)
-    inner(1) + inner(tag)
+        length(x) + length(tag)
+    inner("a") + inner(true)
 outer("v")
 }] hir analysis
     set id [specId $analysis inner]
@@ -193,20 +202,20 @@ outer("v")
 # Open/dynamic caller negative fixture (spec items 28, 65, 77): a closure
 # reachable through an ordinary dynamic callvalue site (apply(f, y): f(y))
 # in addition to its exact callers must not be proven closed, and must not
-# receive an Int-only theorem merely because its known exact caller happens
-# to pass Int.
+# receive a Str-only theorem merely because its known exact caller happens
+# to pass Str.
 
 set ::openFixture {
 fn outer(tag):
     fn inner(x):
-        x + length(tag)
+        length(x) + length(tag)
     fn apply(f, y):
         f(y)
-    inner(1) + apply(inner, 2)
+    inner("a") + apply(inner, "bb")
 outer("v")
 }
 
-test open-instance-not-closed {inner, passed as an ordinary value into apply's own dynamic callvalue site, is not closed -- an exact Int caller (inner(1)) existing alongside does not change that (spec item 45: allocation locality/one caller does not imply closedness)} -body {
+test open-instance-not-closed {inner, passed as an ordinary value into apply's own dynamic callvalue site, is not closed -- an exact Str caller (inner("a")) existing alongside does not change that (spec item 45: allocation locality/one caller does not imply closedness)} -body {
     lassign [specOf $::openFixture] hir analysis
     hir::specialize::closed $hir $analysis [specId $analysis inner]
 } -result 0
@@ -232,7 +241,7 @@ test open-instance-exact-callable-call-is-direct {apply's own f(y) is now a dire
     lassign [specOf $::openFixture] hir analysis
     set id [specId $analysis apply]
     set inner [specId $analysis inner]
-    list [regexp {^apply<block\(e\d+\), int>$} [hir::specialize::label $analysis $id]] \
+    list [regexp {^apply<block\(e\d+\), str>$} [hir::specialize::label $analysis $id]] \
         [expr {[dict values [dict get $analysis instances $id calls]] eq [list $inner]}] \
         [hir::specialize::closed $hir $analysis $inner]
 } -result {1 1 0}
@@ -260,9 +269,9 @@ test exact-alias-reference-is-not-currently-vouched-for {"alias = inner" is a pl
     lassign [specOf {
 fn outer(tag):
     fn inner(x):
-        x + length(tag)
+        length(x) + length(tag)
     alias = inner
-    inner(1) + alias(2)
+    inner("a") + alias("bb")
 outer("v")
 }] hir analysis
     hir::specialize::closed $hir $analysis [specId $analysis inner]
@@ -289,10 +298,10 @@ test escaping-closure-prevents-closedness {a closure passed into an ordinary unt
 set ::capturedThroughParentFixture {
 fn outer(tag):
     fn inner(x):
-        x + length(tag)
+        length(x) + length(tag)
     fn middle(y):
         inner(y)
-    middle(1) + middle(2)
+    middle("a") + middle("bb")
 outer("v")
 }
 
@@ -302,11 +311,11 @@ test captured-through-parent-both-closed {both inner (captured+called only by it
          [hir::specialize::closed $hir $analysis [specId $analysis middle]]
 } -result {1 1}
 
-test captured-through-parent-theorem-flows-transitively {inner's own theorem (Int) is derived from middle's own calls, which are themselves derived from outer's Int calls to middle -- transitive exact-callable transport (spec item 32)} -body {
+test captured-through-parent-theorem-flows-transitively {inner's own theorem (Str) is derived from middle's own calls, which are themselves derived from outer's Str calls to middle -- transitive exact-callable transport (spec item 32)} -body {
     lassign [specOf $::capturedThroughParentFixture] hir analysis
     list [hir::specialize::closedCallerTheorem $hir $analysis [specId $analysis inner]] \
          [hir::specialize::closedCallerTheorem $hir $analysis [specId $analysis middle]]
-} -result {int int}
+} -result {str str}
 
 test captured-through-parent-guard-eliminated {inner's own guard is gone under the transitively-derived theorem} -body {
     lassign [specOf $::capturedThroughParentFixture] hir analysis
@@ -342,20 +351,24 @@ outer("v")
 
 set ::recursiveFixture {
 fn outer(tag):
-    fn inner(x, n):
-        if n <= 0:
-            x + length(tag)
+    fn inner(x, s):
+        if length(s) <= 0:
+            length(x) + length(tag)
         else:
-            inner(x, n - 1)
-    inner(1, 3) + inner(2, 1)
+            inner(x, substring(s, 1, length(s)))
+    inner("a", "abc") + inner("bb", "b")
 outer("v")
 }
 
-test recursive-self-edge-closed-with-theorem {inner, self-recursive on its own second parameter, is closed and both parameters resolve to Int -- x via its two non-self (outer) callers, n via outer's own literals joined with the self-call's own derived (n - 1, not an unchanged forward) argument} -body {
+# Both parameters are Strings, so both stay generic positions (Int ones are
+# key positions since loss point 1): x is refined by the two outer callers
+# alone (the self call forwards it unchanged), s by outer's literals joined
+# with the self call's derived substring(s, 1, ...) argument.
+test recursive-self-edge-closed-with-theorem {inner, self-recursive on its own second parameter, is closed and both parameters resolve to Str -- x via its two non-self (outer) callers, s via outer's own literals joined with the self-call's own derived (substring(s, 1, ...), not an unchanged forward) argument} -body {
     lassign [specOf $::recursiveFixture] hir analysis
     list [hir::specialize::closed $hir $analysis [specId $analysis inner]] \
          [hir::specialize::closedCallerTheorem $hir $analysis [specId $analysis inner]]
-} -result {1 {int int}}
+} -result {1 {str str}}
 
 test recursive-self-edge-guard-eliminated {both of inner's own guards (x's use, n's use) are gone} -body {
     lassign [specOf $::recursiveFixture] hir analysis

@@ -179,11 +179,16 @@ test vc-str-prepend-1 {a prepending recurrence (reverse_from's shape) is linear 
     list [parity $text] [allocs $on String] [allocs $on StringPlan] [dict get $on construction regionPieces]
 } -result {{value {"xzyxzyx!"}} 1 1 7}
 
+# piece, build, a and b capture `digits` and are called with Ints: since loss
+# point 1 of GENERIC-PREDICATE-PROOF-LOSS.md those calls select <int>-keyed
+# instances (labels below), and the generic instances stay as dormant
+# Block-value entries, which the construction plan still lists (it reads
+# closedness, not dormancy). Values and allocation counts are unchanged.
 test vc-str-helper-1 {an exact helper's result is a construction summary: its plan crosses the call, its caller extends it} -body {
     set text "$digits\nfn piece(i):\n    concat(\"<\", concat(list_get(digits, mod(i, 10)), \">\"))\n\nfn build(i, n, acc):\n    if i >= n:\n        return acc\n    build(i + 1, n, concat(acc, piece(i)))\n\nbuild(0, 12, \"\")"
     set on [vcReport $text 1]
     list [parity $text] [planResults $text] [planParams $text] [allocs $on String] [allocs [vcReport $text 0] String]
-} -result {{value {"<0><1><2><3><4><5><6><7><8><9><0><1>"}} {{piece<generic> str}} {{build<generic> 2 str}} 1 36}
+} -result {{value {"<0><1><2><3><4><5><6><7><8><9><0><1>"}} {{piece<int> str}} {{{build<int, int, any>} 2 str}} 1 36}
 
 test vc-str-chain-1 {a three-level helper chain materializes once, not once per level} -body {
     set text "$digits\nfn a(i):\n    concat(\"a\", list_get(digits, mod(i, 10)))\n\nfn b(i):\n    concat(a(i), \"b\")\n\nfn c(i):\n    concat(b(i), \"c\")\n\nc(7)"
@@ -191,7 +196,7 @@ test vc-str-chain-1 {a three-level helper chain materializes once, not once per 
     set off [vcReport $text 0]
     list [parity $text] [planResults $text] [allocs $on String] [allocs $on StringPlan] \
         [dict get $on construction materializations] [allocs $off String]
-} -result {{value {"a7bc"}} {{a<generic> str} {b<generic> str}} 1 1 1 3}
+} -result {{value {"a7bc"}} {{a<generic> str} {a<int> str} {b<generic> str} {b<int> str}} 1 1 1 3}
 
 test vc-str-open-1 {an exact call through a parameter is an ordinary exact call: the argument crosses it as a plan, and only the exact-call instance of a helper also used as a value returns a plan} -body {
     # wrap is used both as a Block value (its generic instance: open,
