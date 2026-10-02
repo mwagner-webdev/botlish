@@ -778,6 +778,111 @@ isolation; the assertions themselves are unchanged:
 * `tests/native-block-escape.test` `blockescape-region-companion-refined-
   checks-1` (pins 6,804 Strings; ShortString1 removes three more).
 
+## Counterfactual: first scalar recovered from the String instance
+
+The shipped design caches the first scalar in `StrObj::first` (written at every
+String construction, in what was padding after `ascii`). The counterfactual
+removes the field and recovers the scalar at the conversion. It is the cargo
+feature `short-first-recovered` (off by default; nothing in the shipped build
+changes): `cargo build --release --manifest-path native/Cargo.toml --features
+short-first-recovered`. The planner, lowering and NIR are untouched; only the
+runtime and the inline `StrToShort` differ:
+
+* `StrObj` has no `first`; construction does no extra work (`first_scalar` is
+  not computed at the four construction sites).
+* `StrToShort` (inline): `chars == 0` -> -1; else load the `ascii` flag; ASCII
+  -> load the first byte through the `Box<str>` data pointer (its offset in the
+  object is measured once at startup, `str_text_ptr_offset`, because Rust does
+  not guarantee the fat-pointer field order); non-ASCII -> `rt_str_to_short`,
+  which decodes the first `char` of the text. That is three blocks and two
+  branches instead of two loads and a select.
+
+Measured with the same tools against the same parent-commit base
+(`audit/short-string/out/*-recovered*.txt`; the binary under test is selected
+with `BOTLISH_NATIVE_BIN`, and the callgrind build with
+`BOTLISH_AUDIT_FEATURES=short-first-recovered`).
+
+**Census.** `out/census-recovered.txt` is byte-identical to `out/census.txt`:
+the planner, the virtualized positions, the frontier counters, the static
+conversion counts and the materialization classes live above the representation
+of one String's first scalar, so the counterfactual cannot change them. The
+only things it can change are the instruction sequence of one conversion and
+the per-String construction cost, and both are measured below.
+
+**Roots / safepoints.** Identical (595 -> 600 safepoints, 1276 -> 1257 root
+candidates, 807 -> 799 slots): the wide-path helper does not allocate and is not
+a safepoint.
+
+**Machine code.** Off is unchanged (101,879 bytes). On: **102,511 bytes
+(+632, +0.62 %)** against 102,423 (+544, +0.53 %) shipped, i.e. **+88 bytes**,
+all in the two programs that contain a `strtoshort` (`refined-checks` +40,
+`ai_text_clean` +48). Deterministic across two compiles.
+
+**Instructions (callgrind Ir, steady state, `out/ir-recovered.txt`).**
+
+| program | base | off shipped | off recovered | on shipped | on recovered |
+|---|---:|---:|---:|---:|---:|
+| `refined-checks` | 6,777,452 | 6,826,601 (+0.73 %) | 6,776,787 (+0.00 %) | 6,892,829 (+1.70 %) | 6,894,459 (**+1.74 %**) |
+| `uri-steady` | 42,730,297 | 42,855,215 (+0.29 %) | 42,748,650 (+0.03 %) | 35,653,329 (-16.56 %) | 35,576,484 (**-16.75 %**) |
+| `ai_text_clean` | 187,382 | 187,975 (+0.32 %) | 187,414 (+0.06 %) | 66,517 (-64.50 %) | 66,634 (-64.42 %) |
+| `source-checks` | 73,492 | 73,686 (+0.26 %) | 73,533 (-0.04 %) | 65,946 (-10.27 %) | 65,989 (-10.29 %) |
+
+(Each Ir column is a different run; a program's *base* moves between runs by
+<= 0.02 % for the large programs and by up to ~0.9 % for the ~100k-Ir CSV
+programs, so for those the figures are indistinguishable from each other. The
+four rows above are far outside that.)
+
+* **The off-configuration cost disappears.** With the optimization off, the
+  recovered build is at base (`refined-checks` +168 Ir against shipped's
+  +49,149): the +0.73 % of the shipped design was the per-String `first`
+  store plus the allocator effect, not anything the planner does.
+* **The conversion gets more expensive.** `refined-checks`' tagged-only
+  parameter round trip (~9,070 `strtoshort -> shorttostr` pairs) costs
+  +117,672 Ir over off instead of +66,228: about **+5.7 Ir per `strtoshort`**
+  (the `ascii` flag load, a second branch, the text-pointer load and the byte
+  load replace one load).
+* **Net.** `refined-checks` ends within 0.04 % of the shipped design (+1.74 %
+  versus +1.70 % against base): the saved construction cost and the dearer
+  conversion cancel almost exactly *on the program that is conversion-heavy and
+  construction-light*. `uri-steady`, which constructs many Strings and converts
+  rarely, is 76,845 Ir (-0.22 %) better; `ai_text_clean` and `source-checks`
+  are within +117 / +43 Ir.
+* Programs without Strings are unchanged in both designs.
+
+**Wall-clock** (`nativebench`, two repetitions per build; `out/nativebench-
+recovered*.txt`, `nativebench-shipped-rerun.txt`): not conclusive. The same
+program swings by more between invocations of the *same* build (`uri-steady`
+off 3.52-3.93 ms, on 2.80-3.10 ms; `refined-checks` on/off -0.1 % to +12.1 %)
+than the two builds differ from each other, so no wall-clock difference between
+the designs is claimed. Instruction counts are the figure of record.
+
+**Compile time** (`out/compiletime-recovered.txt`): total with the optimization
+on 2,497 ms for the corpus against 2,580 ms (original run) and 2,642 ms (rerun)
+for the shipped build: within the run-to-run spread (about +-5 %); the
+Tcl-side phases are identical by construction.
+
+**Correctness.** `tests/short-string.test` passes 59/59 against the recovered
+binary, also under `BOTLISH_NATIVE_GC_STRESS=1`; the Rust suite passes 90 + 26
+with the feature; differential fuzz over the same three seeds as the shipped
+run (1,471 + 491 GC-stress + 291 generic programs): 0 disagreements. The full
+`tests/all.tcl` result is below.
+
+**Reading.** The cached field costs a store on every String the program ever
+builds (even with the optimization off) and buys a conversion that is about
+5.7 Ir cheaper per `strtoshort`. Whether that trade pays depends on the ratio of
+String constructions to `strtoshort` executions in a program, and on the corpus
+the two roughly cancel: one program (`refined-checks`) leans toward the field,
+`uri-steady` toward recovery. The recovered design has two practical
+advantages: no runtime-wide cost when the optimization is off or irrelevant,
+and no 4 bytes of object state that must be kept consistent with `text`.
+Its disadvantages are a 40-48 byte larger conversion at each static site, a
+dependence on a measured (not declared) `Box<str>` pointer offset, and a
+non-ASCII path that calls a helper. The question of which to ship is left
+open. The dominant corpus cost in both designs is the tagged-only parameter
+round trip; a later demand/profitability pass that keeps such parameters
+tagged would remove the `strtoshort` executions there (not implemented, not
+measured), and with them most of what separates the two designs on this corpus.
+
 ## Known limitations
 
 * **No general opportunity-cost heuristic yet.** Selection is categorical;
