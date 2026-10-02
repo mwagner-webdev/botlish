@@ -319,7 +319,14 @@ destination, List pattern (top and nested), rest binding, empty pattern. Each
 must be rejected, with the explicit spelling's rejection where it has one and
 the named diagnostic otherwise.
 
-RESULT_FUZZ
+**Results.** `-n 300 -seed 1000` (all four backends: interp, compile,
+cranelift-generic, cranelift): `programs 300 values 300 errors 0 negatives 300
+equivalence-disagreements 0 negative-escapes 0 backend-disagreements 0`. A first
+run found one seed where *both* spellings failed with `UNPROVEN-FIELD`: four
+levels of nested anonymous structs exceed `aggregateDepth`, a pre-existing
+limit, so the generator was capped at three levels (see Known limitations). A
+bounded run (`-n 12`) is part of the test suite
+(`destructure-fuzz-smoke`); longer: `tclsh9.0 audit/struct-destructuring/tools/fuzz.tcl -n 500 -seed 1000`.
 
 ## Known limitations
 
@@ -399,6 +406,6 @@ RESULT_FUZZ
 45. **Is the source evaluated once under every backend?** Yes.
 46. **Do closures capture destructured bindings normally?** Yes.
 47. **Do error-capable RHS expressions behave like ordinary bindings?** Yes.
-48. **Did equivalence fuzzing find any disagreement?** RESULT_Q48
-49. **Did negative fuzzing find any escape?** RESULT_Q49
-50. **Did the full regression pass?** RESULT_Q50
+48. **Did equivalence fuzzing find any disagreement?** No (300 programs, four backends).
+49. **Did negative fuzzing find any escape?** No (300 negative programs, nine defect kinds).
+50. **Did the full regression pass?** Yes: `tests/all.tcl` passes 4541/4541 on interp and 4537 passed + 4 skipped (as before) on compile, 0 failures; GC stress and native coverage were not rerun locally (nothing in `native/` changed).
