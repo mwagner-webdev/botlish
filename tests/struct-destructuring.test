@@ -1,0 +1,1738 @@
+# struct-destructuring.test -- struct destructuring (STRUCT-DESTRUCTURING.md):
+#
+#     {user, expires: expiry} = result
+#
+# is the evaluation of `result` once, then the ordinary static projections
+# `user = tmp.user` and `expiry = tmp.expires`, bound as ordinary values. The
+# feature is parasitic on ordinary bindings and field projection, so most tests
+# run the destructured spelling and the explicit spelling of the same program
+# (`tmp = source`, `a = tmp.a`, ...) on every in-process backend (interpreter,
+# Tcl compiler, native generic, native specialized) and require the same
+# outcome: value, error, and the log the program kept of its own evaluation
+# order. Static rejections are compared with the explicit spelling's. Parsing
+# and AST shape are pinned in the first section (and in surface-parser.test),
+# lowering and locations in the second.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+interp recursionlimit {} 100000
+
+testConstraint executableAot [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64}}]
+
+set ::allBackends {interp compile cranelift-generic cranelift}
+
+# Error messages carry source locations, which differ between spellings.
+proc stripLocations {message} {
+    set message [regsub -all {[^ ]*\.bot:[0-9]+:[0-9]+} $message {t.bot:L:C}]
+    set message [regsub -all {at [0-9]+:[0-9]+\)} $message {at L:C)}]
+    return [regsub -all {\(at [0-9]+:[0-9]+\)} $message {(at L:C)}]
+}
+
+# The outcomes of SOURCE on every backend, as a list: the shown value, or
+# "error CODE MESSAGE" (a compile-time rejection is the same on every
+# backend). Programs that use library modules go through a file.
+proc outcomesOf {source} {
+    set path [makeFile $source destructuring-case.bot]
+    try {
+        if {[catch {surface::readProgramFile $path} hir options]} {
+            set code [dict get $options -errorcode]
+            return [lmap backend $::allBackends {list error [lrange $code 0 1] [stripLocations $hir]}]
+        }
+        return [lmap backend $::allBackends {
+            set outcome [outcomeUnderHir $backend $hir]
+            if {[lindex $outcome 0] eq "value"} {
+                list value [lindex $outcome 1]
+            } else {
+                list error [lindex $outcome 1] [stripLocations [lindex $outcome 2]]
+            }
+        }]
+    } finally {
+        removeFile destructuring-case.bot
+    }
+}
+
+# The one outcome SOURCE has on every backend ("disagree: ..." if they differ).
+proc parity {source} {
+    set outcomes [outcomesOf $source]
+    if {[llength [lsort -unique $outcomes]] != 1} {
+        return "disagree: [lmap b $::allBackends o $outcomes {list $b $o}]"
+    }
+    return [lindex $outcomes 0]
+}
+
+# The outcome both spellings have on every backend, or what differs.
+proc bothSpellings {destructured explicit} {
+    set a [parity $destructured]
+    set b [parity $explicit]
+    if {$a ne $b} {
+        return "destructured: $a / explicit: $b"
+    }
+    return $a
+}
+
+# TEXT with source locations removed: origins and "line L:C" mentions, and the
+# hygienic temporaries' names replaced by the explicit spelling's `tmp`.
+proc locationFree {text} {
+    set text [regsub -all {(origin|location) \{(?:[^\{\}]|\{\})*\}} $text {\1 {}}]
+    return [regsub -all {line [0-9]+:[0-9]+} $text {line L:C}]
+}
+# The Nth distinct temporary (in order of first appearance) becomes tmp, tmp2,
+# tmp3: the names the explicit spellings give their source and nested values.
+proc tempFree {text} {
+    set seen {}
+    foreach {all} [regexp -all -inline {destructure#[0-9]+(?:#[0-9]+)?} $text] {
+        if {$all ni $seen} {
+            lappend seen $all
+        }
+    }
+    set map {}
+    set n 0
+    foreach name $seen {
+        incr n
+        lappend map $name [expr {$n == 1 ? "tmp" : "tmp$n"}]
+    }
+    return [string map $map $text]
+}
+
+# The compiled HIR of SOURCE (diagnostics and all).
+proc hirOf {source} {
+    set path [makeFile $source destructuring-case.bot]
+    try {
+        return [surface::readProgramFile $path -strict 0]
+    } finally {
+        removeFile destructuring-case.bot
+    }
+}
+
+# The NIR text of HIR, or the error native lowering raised.
+proc nirOf {hir args} {
+    if {[catch {native::lower::program $hir {*}$args} result options]} {
+        return [list error [dict get $options -errorcode] $result]
+    }
+    return [dict get $result text]
+}
+
+# "" if the two spellings have one HIR (as printed, modulo the temporary's
+# name), one core IR, and one NIR (specialized and generic) and the same
+# analyses; else what differs.
+proc sameProgram {destructured explicit} {
+    set m [hirOf $destructured]
+    set f [hirOf $explicit]
+    set diffs {}
+    if {[tempFree [hir::format $m]] ne [hir::format $f]} {lappend diffs hir-format}
+    if {[tempFree [hir::lower $m]] ne [hir::lower $f]} {lappend diffs core-ir}
+    if {[hir::diagnostics $m] ne {} || [hir::diagnostics $f] ne {}} {lappend diffs diagnostics}
+    if {[tempFree [nirOf $m]] ne [nirOf $f]} {lappend diffs nir}
+    if {[tempFree [nirOf $m -specialize 0]] ne [nirOf $f -specialize 0]} {lappend diffs nir-generic}
+    set sm [hir::specialize::analyze $m]
+    set sf [hir::specialize::analyze $f]
+    if {[tempFree $sm] ne $sf} {lappend diffs specialization}
+    if {[tempFree [hir::range::analyze $m $sm]] ne [hir::range::analyze $f $sf]} {lappend diffs range}
+    if {[tempFree [hir::escape::analyze $m $sm]] ne [hir::escape::analyze $f $sf]} {lappend diffs escape}
+    if {[tempFree [hir::cardinality::analyze $m]] ne [hir::cardinality::analyze $f]} {lappend diffs cardinality}
+    if {[tempFree [locationFree [hir::aot::analyze $m]]] ne [locationFree [hir::aot::analyze $f]]} {lappend diffs aot}
+    if {[tempFree [locationFree [hir::aot::explain $m]]] ne [locationFree [hir::aot::explain $f]]} {lappend diffs aot-explain}
+    if {[tempFree [locationFree [hir::specialize::explain $m]]] ne [locationFree [hir::specialize::explain $f]]} {lappend diffs specialize-explain}
+    return $diffs
+}
+
+# "KIND: message" of the static rejection of SOURCE (locations removed), or
+# "accepted". KIND is the semantic kind (or SYNTAX with the diagnostic's
+# `code`, when it has one).
+proc rejection {source} {
+    set path [makeFile $source destructuring-case.bot]
+    try {
+        if {[catch {surface::readProgramFile $path} message options]} {
+            set code [dict get $options -errorcode]
+            if {[lindex $code 1] eq "SYNTAX"} {
+                set diagnostic [lindex $code 2]
+                set kind [expr {[dict exists $diagnostic code] ? "SYNTAX [dict get $diagnostic code]" : "SYNTAX"}]
+                return "$kind: [dict get $diagnostic message]"
+            }
+            return "[lindex $code end]: [stripLocations [regsub {^[^ ]*\.bot:[0-9]+:[0-9]+: } $message {}]]"
+        }
+        return accepted
+    } finally {
+        removeFile destructuring-case.bot
+    }
+}
+
+# The "LINE:COLUMN" the rejection of SOURCE is reported at.
+proc rejectionAt {source} {
+    set path [makeFile $source destructuring-case.bot]
+    try {
+        if {[catch {surface::readProgramFile $path} message options]} {
+            regexp {\.bot:([0-9]+:[0-9]+):} $message -> where
+            return $where
+        }
+        return accepted
+    } finally {
+        removeFile destructuring-case.bot
+    }
+}
+
+# The surface AST of SOURCE, printed.
+proc ast {source args} {
+    return [surface::formatAst [surface::parse $source t.bot] {*}$args]
+}
+
+# The one-line syntax error of SOURCE, "LINE:COLUMN MESSAGE", or "parsed" (a
+# quoted closing brace in a message is spelled "RBRACE", so expected results
+# stay balanced Tcl).
+proc parseError {source} {
+    if {[catch {surface::parse $source t.bot} result options]} {
+        set d [lindex [dict get $options -errorcode] 2]
+        return [string map [list \"\}\" \"RBRACE\"] "[dict get $d line]:[dict get $d column] [dict get $d message]"]
+    }
+    return parsed
+}
+
+# Modules: a scratch library directory (as in surface-modules.test).
+proc withScratchLibrary {script} {
+    set saved $::core::libraryDir
+    set dir [tcltest::makeDirectory destructuring-scratch-[pid]-[incr ::scratchLibraryCounter]]
+    set ::core::libraryDir $dir
+    try {
+        uplevel 1 [list apply [list {dir} $script] $dir]
+    } finally {
+        set ::core::libraryDir $saved
+        tcltest::removeDirectory [file tail $dir]
+    }
+}
+set ::scratchLibraryCounter 0
+
+proc writeModule {dir name content} {
+    set path [file join $dir $name.bot]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8
+    puts -nonewline $channel $content
+    close $channel
+    return $path
+}
+
+proc writeMain {dir content} {
+    return [writeModule $dir main $content]
+}
+
+# ---------------------------------------------------------------------------
+# Syntax: what the parser builds (the left name is the field, the right name is
+# the binding)
+
+test destructure-ast-shorthand {`{a, b}` is a destructure of the fields a and b, each bound under its own name} -body {
+    ast "\{a, b\} = v"
+} -result {(destructure {a, b} (name v))}
+
+test destructure-ast-rename-direction {`{original: renamed}`: the left name is the field read, the right name the binding made} -body {
+    set node [lindex [dict get [surface::parse "\{original: renamed\} = v" t.bot] body] 0]
+    set field [lindex [dict get $node pattern fields] 0]
+    list [dict get $field name] [dict get $field local] [dict get $field shorthand]
+} -result {original renamed 0}
+
+test destructure-ast-shorthand-fields {the shorthand binds the field name; the explicit spelling `{a: a}` is the same selection} -body {
+    set short [lindex [dict get [surface::parse "\{a\} = v" t.bot] body] 0]
+    set long [lindex [dict get [surface::parse "\{a: a\} = v" t.bot] body] 0]
+    set sf [lindex [dict get $short pattern fields] 0]
+    set lf [lindex [dict get $long pattern fields] 0]
+    list [dict get $sf name] [dict get $sf local] [dict get $lf name] [dict get $lf local] \
+        [dict get $sf shorthand] [dict get $lf shorthand]
+} -result {a a a a 1 0}
+
+test destructure-ast-mixed {shorthand and renaming mix freely, in any order} -body {
+    ast "\{user, expires: expiry, token\} = result"
+} -result {(destructure {user, expires: expiry, token} (name result))}
+
+test destructure-ast-trailing-comma {a trailing comma is accepted, as in a struct literal} -body {
+    ast "\{a, b: c,\} = v"
+} -result {(destructure {a, b: c} (name v))}
+
+test destructure-ast-struct-literal-trailing-comma {(the struct literal convention the destructure follows)} -body {
+    ast "x = \{a: 1, b: 2,\}"
+} -result {(bind x (struct (a (int 1)) (b (int 2))))}
+
+test destructure-ast-multiline {the pattern may span lines, as a struct literal may} -body {
+    ast "\{\n    user,\n    expires: expiry,\n\} = result"
+} -result {(destructure {user, expires: expiry} (name result))}
+
+test destructure-ast-call-source {the source is an arbitrary expression} -body {
+    ast "\{a, b\} = f(1, g(2))"
+} -result {(destructure {a, b} (call (name f) (int 1) (call (name g) (int 2))))}
+
+test destructure-ast-struct-source {a struct literal is a source like any other} -body {
+    ast "\{a\} = \{a: 1, b: 2\}\n\{a\} = P \{a: 1\}"
+} -result {(destructure {a} (struct (a (int 1)) (b (int 2))))
+(destructure {a} (struct P (a (int 1))))}
+
+test destructure-ast-method-source {a method call is a source like any other} -body {
+    ast "\{a\} = x.f(1)"
+} -result {(destructure {a} (methodcall (name x) f (int 1)))}
+
+test destructure-ast-nested {a field may be destructured in turn} -body {
+    ast "\{user: \{name, id: uid\}, expires\} = result"
+} -result {(destructure {user: {name, id: uid}, expires} (name result))}
+
+test destructure-ast-statement-forms {a destructure is a statement: the value of an if, a loop or a handled call is a source too} -body {
+    ast "\{a, b\} = if c:\n    p\nelse:\n    q\n\{x\} = f():\n    on Oops:\n        r"
+} -result {destructure {a, b} = if (name c)
+    (name p)
+else
+    (name q)
+destructure {x} = (call (name f)):
+    on Oops:
+        (name r)}
+
+test destructure-ast-spans {every field entry has its own span; the whole statement covers pattern and source} -body {
+    ast "\{a, b: c\} = v" -spans 1
+} -result {(destructure {a @1:2-1:3, b: c @1:5-1:9} (name v) @1:13-1:14) @1:1-1:14}
+
+test destructure-ast-ids {field ids are predictable: statement id, then fieldN (nested: fieldN/fieldM)} -body {
+    ast "\{a, b: \{c, d\}\} = v\n\{e\} = w" -ids 1
+} -result {(destructure {a <destructure/field1>, b: {c <destructure/field2/field1>, d <destructure/field2/field2>} <destructure/field2>} (name v) <destructure/value>) <destructure>
+(destructure {e <destructure#2/field1>} (name w) <destructure#2/value>) <destructure#2>}
+
+test destructure-ast-in-function {a destructure inside a function body, an if branch and a loop body} -body {
+    ast "fn f(r):\n    \{a\} = r\n    if a:\n        \{b\} = r\n    loop:\n        \{c\} = r\n        break"
+} -result {fn f (r)
+    (destructure {a} (name r))
+    if (name a)
+        (destructure {b} (name r))
+    loop
+        (destructure {c} (name r))
+        (break)}
+
+test destructure-ast-struct-statement-unchanged {a braced expression statement not followed by `=` is still an anonymous struct value} -body {
+    ast "\{a: 1\}\n\{a: 1\} == x"
+} -result {(struct (a (int 1)))
+(binary == (struct (a (int 1))) (name x))}
+
+test destructure-ast-struct-value-bind {a struct value on the right of an ordinary binding is unchanged} -body {
+    ast "x = \{a: 1\}\ny = P \{a: 1\}"
+} -result {(bind x (struct (a (int 1))))
+(bind y (struct P (a (int 1))))}
+
+test destructure-ast-list-forms-unchanged {lists and `=` in every legal context keep their meaning} -body {
+    ast "xs = \[1, 2\]\n\[1, 2\] == xs\n\[a, b\]\nys = \[\{a: 1\}\]"
+} -result {(bind xs (list (int 1) (int 2)))
+(binary == (list (int 1) (int 2)) (name xs))
+(list (name a) (name b))
+(bind ys (list (struct (a (int 1)))))}
+
+# ---- the errors
+
+test destructure-syntax-empty {`{} = v` is rejected: it would bind nothing} -body {
+    parseError "\{\} = v"
+} -result {1:1 a struct destructuring must select at least one field; "{} = value" binds nothing}
+
+test destructure-syntax-rest {a rest/spread binding is not supported} -body {
+    list [parseError "\{a, ...rest\} = v"] [parseError "\{a, ..rest\} = v"] [parseError "\{...rest\} = v"]
+} -result {{1:5 rest/spread binding is not supported in a struct destructuring: it selects fields by name only and produces no "remaining fields" value} {1:5 rest/spread binding is not supported in a struct destructuring: it selects fields by name only and produces no "remaining fields" value} {1:2 rest/spread binding is not supported in a struct destructuring: it selects fields by name only and produces no "remaining fields" value}}
+
+test destructure-syntax-defaults {no default values, in either spelling} -body {
+    list [parseError "\{a = 1\} = v"] [parseError "\{a: b = 1\} = v"] [parseError "\{a: default 1\} = v"]
+} -result {{1:4 a struct destructuring has no default values: field "a" must exist in the struct} {1:7 expected "," or "RBRACE" after the destructuring field "a", found "="} {1:13 expected "," or "RBRACE" after the destructuring field "a", found integer 1}}
+
+test destructure-syntax-no-assignment-targets {the right of a mapping names a new binding, never an existing storage: no field paths} -body {
+    list [parseError "\{a: obj.x\} = v"] [parseError "\{obj.a, obj.b\} = v"]
+} -result {{1:8 expected "," or "RBRACE" after the destructuring field "a", found "."} {1:5 expected ",", ":" or "RBRACE" after the field name "obj" in the destructuring pattern, found "."}}
+
+test destructure-syntax-no-binding-modes {no reference or mutability markers} -body {
+    list [parseError "\{ref a\} = v"] [parseError "\{&a\} = v"] [parseError "\{mut a\} = v"]
+} -result {{1:6 expected ",", ":" or "RBRACE" after the field name "ref" in the destructuring pattern, found name "a"} {1:2 unexpected character "&"} {1:6 expected ",", ":" or "RBRACE" after the field name "mut" in the destructuring pattern, found name "a"}}
+
+test destructure-syntax-bad-target {the binding must be a name or a nested pattern} -body {
+    list [parseError "\{a: 1\} = v"] [parseError "\{a: \"s\"\} = v"] [parseError "\{a: f(x)\} = v"] [parseError "\{a: \} = v"]
+} -result {{1:5 expected a binding name or a nested "{...}" pattern after "a:", found integer 1} {1:5 expected a binding name or a nested "{...}" pattern after "a:", found string "s"} {1:6 expected "," or "RBRACE" after the destructuring field "a", found "("} {1:5 expected a binding name or a nested "{...}" pattern after "a:", found "RBRACE"}}
+
+test destructure-syntax-keyword-field {field names are ordinary identifiers: keywords are rejected as they are in a struct literal} -body {
+    list [parseError "\{if\} = v"] [parseError "x = \{if: 1\}"]
+} -result {{1:2 expected a field name, found the keyword "if" (a field name is an ordinary identifier)} {1:6 expected a field name, found the keyword "if" (a field name is an ordinary identifier)}}
+
+test destructure-syntax-unclosed {an unclosed pattern is an error, not a struct value} -body {
+    parseError "\{a, b = v"
+} -match glob -result {*}
+
+test destructure-syntax-no-source {a destructure needs a source} -body {
+    parseError "\{a\} ="
+} -result {1:6 expected an expression, found end of line}
+
+test destructure-syntax-no-positional-struct {no positional struct destructuring} -body {
+    list [parseError "Struct(a, b) = v"] [parseError "(a, b) = v"]
+} -result {{1:14 only a name can be bound with "="} {1:3 expected ")", found ","}}
+
+test destructure-syntax-duplicate-field {the same field cannot be selected twice: a specific diagnostic at the second selection} -body {
+    list [parseError "\{a, a\} = v"] [parseError "\{a, a: x\} = v"] [parseError "\{a: x, a: y\} = v"] \
+        [parseError "\{u: \{a, a\}\} = v"]
+} -result {{1:5 DUPLICATE-FIELD: duplicate field "a" in this struct destructuring: each field may be selected only once} {1:5 DUPLICATE-FIELD: duplicate field "a" in this struct destructuring: each field may be selected only once} {1:8 DUPLICATE-FIELD: duplicate field "a" in this struct destructuring: each field may be selected only once} {1:9 DUPLICATE-FIELD: duplicate field "a" in this struct destructuring: each field may be selected only once}}
+
+test destructure-syntax-same-field-in-different-patterns-ok {the same field name in different (nested) patterns is no duplicate} -body {
+    ast "\{a: \{a\}\} = v"
+} -result {(destructure {a: {a}} (name v))}
+
+# ---- the List policy
+
+set ::listMessage {LIST-DESTRUCTURING: positional List destructuring is not supported; use a struct value with named fields instead (a List is for a sequence of values; have the function return a struct, e.g. `result = get_result()` then `{value, error} = result`)}
+
+test destructure-list-two {[a, b] = value: a dedicated diagnostic} -body {
+    parseError "\[a, b\] = value"
+} -result "1:1 $::listMessage"
+
+foreach {name source where} {
+    one            "\[a\] = value"                  1:1
+    empty          "\[\] = value"                   1:1
+    three          "\[a, b, c\] = value"            1:1
+    trailing-comma "\[a, b,\] = value"              1:1
+    multiline      "\[\n    a,\n    b,\n\] = value"  1:1
+    nested-pattern "\[\[a, b\], c\] = value"        1:1
+    call-source    "\[a, b\] = f()"                 1:1
+    indented       "fn f():\n    \[a, b\] = g()"    2:5
+    nested-field   "\{pair: \[a, b\]\} = value"      1:8
+    nested-empty   "\{pair: \[\]\} = value"          1:8
+    nested-deeper  "\{p: \{q: \[a\]\}\} = value"     1:9
+    nested-second  "\{ok, pair: \[a, b\]\} = value" 1:12
+} {
+    test destructure-list-$name "$name: positional List destructuring has its own diagnostic" -body {
+        parseError $source
+    } -result "$where $::listMessage"
+}
+
+test destructure-list-diagnostic-code {the error carries a stable code in the diagnostic and names the design direction} -body {
+    catch {surface::parse "\[a, b\] = value" t.bot} message options
+    set diagnostic [lindex [dict get $options -errorcode] 2]
+    list [lrange [dict get $options -errorcode] 0 1] [dict get $diagnostic code] \
+        [string match "*use a struct value with named fields*" $message] \
+        [string match "*{value, error} = result*" $message] \
+        [string match "*not supported*" $message] [string match "*sequence of values*" $message]
+} -result {{SURFACE SYNTAX} LIST-DESTRUCTURING 1 1 1 1}
+
+test destructure-list-recover {with -recover the List destructuring is reported and parsing goes on} -body {
+    set program [surface::parse "\[a, b\] = v\nx = 1\n\{y\} = w" t.bot -recover 1]
+    list [lmap d [dict get $program diagnostics] {dict get $d code}] \
+        [lmap s [dict get $program body] {dict get $s kind}]
+} -result {LIST-DESTRUCTURING {error bind destructure}}
+
+test destructure-list-struct-syntax-on-list-source-is-not-list-policy {`{a} = some_list` names a field: it is the ordinary projection error, not LIST-DESTRUCTURING} -body {
+    rejection "xs = \[1, 2\]\n\{a\} = xs"
+} -match glob -result {NOT-A-STRUCT: *cannot project field "a" from a value of type List*: only a struct has fields}
+
+test destructure-list-ordinary-list-uses {a List literal followed by `=` anywhere else keeps its meaning} -body {
+    list [parity "xs = \[1, 2\]\nys = \[3\]\n\[xs, ys\]"] [parity "\[1, 2\] == \[1, 2\]"] \
+        [parity "x = \[1\] == \[1\]\nx"] [parity "xs = \[\{a: 1\}\]\n\{a\} = list_get(xs, 0)\na"]
+} -result {{value {[[1, 2], [3]]}} {value true} {value true} {value 1}}
+
+test destructure-list-indexing-unchanged {List indexing is still an ordinary call, in both spellings} -body {
+    bothSpellings "xs = \[10, 20, 30\]\nxs.list_get(1)" "xs = \[10, 20, 30\]\nlist_get(xs, 1)"
+} -result {value 20}
+
+test destructure-list-bad-assignment-targets-unchanged {other things before `=` keep their old error} -body {
+    list [parseError "x.y = 1"] [parseError "f() = 1"] [parseError "1 = 1"]
+} -result {{1:5 only a name can be bound with "="} {1:5 only a name can be bound with "="} {1:3 only a name can be bound with "="}}
+
+# ---------------------------------------------------------------------------
+# Lowering: ordinary binds, projections and one hygienic temporary
+
+test destructure-lowering-shape {`{a, b: c} = e` lowers to `tmp = e; a = tmp.a; c = tmp.b`, in written order} -body {
+    set hir [surface::compile "r = \{a: 1, b: 2\}\n\{a, b: c\} = r" t.bot -strict 0]
+    lmap e [hir::walk $hir] {
+        switch -- [hir::kind $hir $e] {
+            bind { list bind [hir::get $hir $e name] }
+            project { list project [hir::get $hir $e name] }
+            ref { list ref [hir::get $hir $e name] }
+            default { continue }
+        }
+    }
+} -match glob -result {{bind r} {bind destructure#*} {ref r} {bind a} {project a} {ref destructure#*} {bind c} {project b} {ref destructure#*}}
+
+test destructure-lowering-hir-kinds {nothing in HIR is a destructure: only bind, project, ref, struct, const} -body {
+    set hir [surface::compile "r = \{a: 1, b: 2\}\n\{a, b: c\} = r\n\{a: \{x\}\} = \{a: r\}" t.bot -strict 0]
+    lsort -unique [lmap e [hir::walk $hir] {hir::kind $hir $e}]
+} -result {bind const project ref struct}
+
+test destructure-lowering-hygienic-temp {the temporary's name cannot be spelled in source and is distinct from every user name} -body {
+    set hir [surface::compile "r = \{a: 1\}\n\{a\} = r" t.bot -strict 0]
+    set names [lmap e [hir::walk $hir] {
+        if {[hir::kind $hir $e] ne "bind"} continue
+        hir::get $hir $e name
+    }]
+    set temps [lsearch -all -inline -glob $names *#*]
+    list [llength $temps] [regexp {^[A-Za-z_][A-Za-z0-9_]*\??$} [lindex $temps 0]]
+} -result {1 0}
+
+test destructure-lowering-user-names-cannot-collide {a program that binds `destructure` or `tmp` is not disturbed} -body {
+    parity "destructure = 1\ntmp = 2\n\{a, b\} = \{a: destructure, b: tmp\}\n\[a, b, destructure, tmp\]"
+} -result {value {[1, 2, 1, 2]}}
+
+test destructure-lowering-two-destructures-one-scope {several destructures in a scope each get their own temporary} -body {
+    parity "\{a\} = \{a: 1\}\n\{b\} = \{b: 2\}\n\{c: \{d\}\} = \{c: \{d: 3\}\}\n\[a, b, d\]"
+} -result {value {[1, 2, 3]}}
+
+test destructure-lowering-origins {each projection reports the field name it reads; the binding reports where it is made} -body {
+    set hir [surface::compile "r = \{a: 1, b: 2\}\n\{a, b: c\} = r" t.bot -strict 0]
+    set result {}
+    foreach e [hir::walk $hir] {
+        set origin [hir::get $hir $e origin]
+        if {[hir::kind $hir $e] eq "project"} {
+            lappend result [list project [hir::get $hir $e name] [dict get [lrange $origin 2 end] node] \
+                [dict get [lrange [hir::get $hir $e nameOrigin] 2 end] node] \
+                [dict get [lrange [hir::get $hir $e nameOrigin] 2 end] column]]
+        } elseif {[hir::kind $hir $e] eq "bind" && [string first # [hir::get $hir $e name]] < 0 && [hir::get $hir $e name] ne "r"} {
+            lappend result [list bind [hir::get $hir $e name] [dict get [lrange $origin 2 end] node] \
+                [dict get [lrange $origin 2 end] column]]
+        }
+    }
+    set result
+} -result {{bind a destructure/field1/binding 2} {project a destructure/field1 destructure/field1/name 2} {bind c destructure/field2/binding 8} {project b destructure/field2 destructure/field2/name 5}}
+
+# ---------------------------------------------------------------------------
+# The semantic theorem: destructuring is evaluate-once + named projections +
+# ordinary bindings. Every case runs both spellings on every backend, for a
+# named struct value and an anonymous one.
+
+set ::decls {struct Rec:
+    a: int
+    b: str
+    c: int
+    d: int
+}
+set ::named {Rec {a: 1, b: "x", c: 3, d: 4}}
+set ::anon {{a: 1, b: "x", c: 3, d: 4}}
+
+# destructured spelling / explicit spelling / expected value. @S is the source.
+foreach {name destructured explicit expected} {
+    all          {{a, b, c, d} = @S
+[a, b, c, d]}
+                 {tmp = @S
+a = tmp.a
+b = tmp.b
+c = tmp.c
+d = tmp.d
+[a, b, c, d]}
+                 {value {[1, "x", 3, 4]}}
+    one          {{c} = @S
+c}
+                 {tmp = @S
+c = tmp.c
+c}
+                 {value 3}
+    two          {{a, d} = @S
+[a, d]}
+                 {tmp = @S
+a = tmp.a
+d = tmp.d
+[a, d]}
+                 {value {[1, 4]}}
+    all-but-one  {{a, b, c} = @S
+[a, b, c]}
+                 {tmp = @S
+a = tmp.a
+b = tmp.b
+c = tmp.c
+[a, b, c]}
+                 {value {[1, "x", 3]}}
+    last-field   {{d} = @S
+d}
+                 {tmp = @S
+d = tmp.d
+d}
+                 {value 4}
+    reordered    {{d, c, b, a} = @S
+[a, b, c, d]}
+                 {tmp = @S
+d = tmp.d
+c = tmp.c
+b = tmp.b
+a = tmp.a
+[a, b, c, d]}
+                 {value {[1, "x", 3, 4]}}
+    reordered-subset {{c, a} = @S
+[a, c]}
+                 {tmp = @S
+c = tmp.c
+a = tmp.a
+[a, c]}
+                 {value {[1, 3]}}
+    rename-one   {{a: x} = @S
+x}
+                 {tmp = @S
+x = tmp.a
+x}
+                 {value 1}
+    rename-then-short {{a: x, b} = @S
+[x, b]}
+                 {tmp = @S
+x = tmp.a
+b = tmp.b
+[x, b]}
+                 {value {[1, "x"]}}
+    rename-both  {{a: x, b: y} = @S
+[x, y]}
+                 {tmp = @S
+x = tmp.a
+y = tmp.b
+[x, y]}
+                 {value {[1, "x"]}}
+    mixed-three  {{a, b: y, c} = @S
+[a, y, c]}
+                 {tmp = @S
+a = tmp.a
+y = tmp.b
+c = tmp.c
+[a, y, c]}
+                 {value {[1, "x", 3]}}
+    names-swapped {{a: b, b: a} = @S
+[a, b]}
+                 {tmp = @S
+b = tmp.a
+a = tmp.b
+[a, b]}
+                 {value {["x", 1]}}
+    rename-to-other-field-name {{a: d, d: a} = @S
+[a, d]}
+                 {tmp = @S
+d = tmp.a
+a = tmp.d
+[a, d]}
+                 {value {[4, 1]}}
+    trailing-comma {{a, d: z,} = @S
+[a, z]}
+                 {tmp = @S
+a = tmp.a
+z = tmp.d
+[a, z]}
+                 {value {[1, 4]}}
+    multiline    {{
+    a,
+    d: z,
+} = @S
+[a, z]}
+                 {tmp = @S
+a = tmp.a
+z = tmp.d
+[a, z]}
+                 {value {[1, 4]}}
+    bound-names-usable {{a, c} = @S
+a + c * 10}
+                 {tmp = @S
+a = tmp.a
+c = tmp.c
+a + c * 10}
+                 {value 31}
+    from-binding {s = @S
+{a, d} = s
+[a, d, s.b]}
+                 {s = @S
+tmp = s
+a = tmp.a
+d = tmp.d
+[a, d, s.b]}
+                 {value {[1, 4, "x"]}}
+    repeated     {{a} = @S
+{b: bb} = @S
+[a, bb]}
+                 {tmp = @S
+a = tmp.a
+tmp2 = @S
+bb = tmp2.b
+[a, bb]}
+                 {value {[1, "x"]}}
+} {
+    foreach {kind source} [list named $::named anonymous $::anon] {
+        set d $::decls[string map [list @S $source] $destructured]
+        set e $::decls[string map [list @S $source] $explicit]
+        test destructure-basic-$kind-$name "$kind $name: destructured and explicit spellings agree on every backend" -body {
+            bothSpellings $d $e
+        } -result $expected
+    }
+}
+
+test destructure-named-and-anonymous-agree {named and anonymous struct values destructure identically} -body {
+    set program {{a, b: y, c} = @S
+[a, y, c]}
+    list [parity $::decls[string map [list @S $::named] $program]] [parity $::decls[string map [list @S $::anon] $program]]
+} -result {{value {[1, "x", 3]}} {value {[1, "x", 3]}}}
+
+test destructure-source-statement-value {the destructure statement's value, where one is observable (the last statement of a body), is the explicit spelling's: that of the last binding it makes} -body {
+    bothSpellings "fn f(r):\n    \{a, b\} = r\nf(\{a: 1, b: 2\})" "fn f(r):\n    tmp = r\n    a = tmp.a\n    b = tmp.b\nf(\{a: 1, b: 2\})"
+} -result {value 2}
+
+test destructure-statement-not-a-value-expression {a destructure is a statement: it cannot be an operand} -body {
+    list [parseError "x = \{a\} = r"] [parseError "f(\{a\} = r)"]
+} -match glob -result {{* *} {* *}}
+
+# ---------------------------------------------------------------------------
+# Omitted fields: partial destructuring is the normal model; nothing is made
+# of the rest
+
+test destructure-omitted-adding-a-field-does-not-break-consumers {adding a field to the returned struct leaves a consumer that does not name it valid} -body {
+    set consumer "\{user, expires\} = get_user()\n\[user, expires\]"
+    set v1 "fn get_user():\n    \{user: \"u\", expires: 9\}\n$consumer"
+    set v2 "fn get_user():\n    \{user: \"u\", expires: 9, token: \"t\"\}\n$consumer"
+    list [parity $v1] [parity $v2]
+} -result {{value {["u", 9]}} {value {["u", 9]}}}
+
+test destructure-omitted-named-struct-gains-a-field {the same for a declared struct} -body {
+    set consumer "\{user, expires\} = get_user()\n\[user, expires\]"
+    set v1 "struct R:\n    user: str\n    expires: int\nfn get_user() -> R:\n    R \{user: \"u\", expires: 9\}\n$consumer"
+    set v2 "struct R:\n    user: str\n    expires: int\n    token: str\nfn get_user() -> R:\n    R \{user: \"u\", expires: 9, token: \"t\"\}\n$consumer"
+    list [parity $v1] [parity $v2]
+} -result {{value {["u", 9]}} {value {["u", 9]}}}
+
+test destructure-omitted-no-rest-value {an omitted field is not bound anywhere: there is no remainder} -body {
+    list [rejection "$::decls\{a\} = $::named\nb"] [rejection "$::decls\{a\} = $::named\nrest"] \
+        [rejection "$::decls\{a\} = $::named\nc"]
+} -result {{UNBOUND: unbound name "b"} {UNBOUND: unbound name "rest"} {UNBOUND: unbound name "c"}}
+
+test destructure-omitted-source-unchanged {the source struct is only read: it is still whole afterwards} -body {
+    parity "$::decls\s = $::named\n\{a, c\} = s\n\{d\} = s\n\[a, c, d, s\]"
+} -result {value {[1, 3, 4, Rec {a: 1, b: "x", c: 3, d: 4}]}}
+
+test destructure-field-order-is-not-layout {the pattern's order and the declaration's order are unrelated} -body {
+    set decl "struct Z:\n    z: int\n    y: int\n    x: int\n"
+    list [parity "${decl}\{x, y, z\} = Z \{x: 1, y: 2, z: 3\}\n\[x, y, z\]"] \
+        [parity "${decl}\{z, y, x\} = Z \{z: 3, y: 2, x: 1\}\n\[x, y, z\]"] \
+        [parity "\{x, y, z\} = \{z: 3, y: 2, x: 1\}\n\[x, y, z\]"] \
+        [parity "\{z, x\} = \{x: 1, y: 2, z: 3\}\n\[x, z\]"]
+} -result {{value {[1, 2, 3]}} {value {[1, 2, 3]}} {value {[1, 2, 3]}} {value {[1, 3]}}}
+
+test destructure-fields-of-different-types {heterogeneous results are the point: fields of different types come out as ordinary typed values} -body {
+    parity "\{n, s, xs, p\} = \{n: 3, s: \"text\", xs: \[1, 2\], p: \{q: true\}\}\n\[n + 1, length(s), list_length(xs), p.q\]"
+} -result {value {[4, 4, 2, true]}}
+
+# ---------------------------------------------------------------------------
+# Evaluate the source once
+
+set ::countDecls {struct Rec:
+    a: int
+    b: str
+    c: int
+fn bump(log: MutableArray[int], id: int, v: int) -> int:
+    n = mutable_array_get(log, 0)
+    mutable_array_set(log, 0, n * 10 + id)
+    v
+fn mk_named(log: MutableArray[int]) -> Rec:
+    Rec {a: bump(log, 1, 1), b: "x", c: bump(log, 2, 3)}
+fn mk_anon(log: MutableArray[int]):
+    {a: bump(log, 1, 1), b: "x", c: bump(log, 2, 3)}
+}
+
+foreach {name destructured explicit expected} {
+    named-once   {fn run():
+    log = mutarray::create(1, 0)
+    {a, c} = mk_named(log)
+    [a, c, mutable_array_get(log, 0)]
+run()}
+                 {fn run():
+    log = mutarray::create(1, 0)
+    tmp = mk_named(log)
+    a = tmp.a
+    c = tmp.c
+    [a, c, mutable_array_get(log, 0)]
+run()}
+                 {value {[1, 3, 12]}}
+    anon-once    {fn run():
+    log = mutarray::create(1, 0)
+    {a, c} = mk_anon(log)
+    [a, c, mutable_array_get(log, 0)]
+run()}
+                 {fn run():
+    log = mutarray::create(1, 0)
+    tmp = mk_anon(log)
+    a = tmp.a
+    c = tmp.c
+    [a, c, mutable_array_get(log, 0)]
+run()}
+                 {value {[1, 3, 12]}}
+    one-field-once {fn run():
+    log = mutarray::create(1, 0)
+    {c} = mk_named(log)
+    [c, mutable_array_get(log, 0)]
+run()}
+                 {fn run():
+    log = mutarray::create(1, 0)
+    tmp = mk_named(log)
+    c = tmp.c
+    [c, mutable_array_get(log, 0)]
+run()}
+                 {value {[3, 12]}}
+    repeated-field-name-in-source-fields {fn run():
+    log = mutarray::create(1, 0)
+    {a: x, c: y} = mk_named(log)
+    [x, y, mutable_array_get(log, 0)]
+run()}
+                 {fn run():
+    log = mutarray::create(1, 0)
+    tmp = mk_named(log)
+    x = tmp.a
+    y = tmp.c
+    [x, y, mutable_array_get(log, 0)]
+run()}
+                 {value {[1, 3, 12]}}
+    nested-once  {fn nested(log: MutableArray[int]):
+    {u: mk_named(log), w: bump(log, 3, 7)}
+fn run():
+    log = mutarray::create(1, 0)
+    {u: {a, c}, w} = nested(log)
+    [a, c, w, mutable_array_get(log, 0)]
+run()}
+                 {fn nested(log: MutableArray[int]):
+    {u: mk_named(log), w: bump(log, 3, 7)}
+fn run():
+    log = mutarray::create(1, 0)
+    tmp = nested(log)
+    tmp2 = tmp.u
+    a = tmp2.a
+    c = tmp2.c
+    w = tmp.w
+    [a, c, w, mutable_array_get(log, 0)]
+run()}
+                 {value {[1, 3, 7, 123]}}
+    direct-source-struct-literal {fn run():
+    log = mutarray::create(1, 0)
+    {a, c} = {a: bump(log, 1, 1), b: bump(log, 4, 0), c: bump(log, 2, 3)}
+    [a, c, mutable_array_get(log, 0)]
+run()}
+                 {fn run():
+    log = mutarray::create(1, 0)
+    tmp = {a: bump(log, 1, 1), b: bump(log, 4, 0), c: bump(log, 2, 3)}
+    a = tmp.a
+    c = tmp.c
+    [a, c, mutable_array_get(log, 0)]
+run()}
+                 {value {[1, 3, 142]}}
+    in-loop-body {fn run():
+    log = mutarray::create(1, 0)
+    xs = loop i from 0 to 3:
+        {a, c} = mk_named(log)
+        a + c + i
+    [xs, mutable_array_get(log, 0)]
+run()}
+                 {fn run():
+    log = mutarray::create(1, 0)
+    xs = loop i from 0 to 3:
+        tmp = mk_named(log)
+        a = tmp.a
+        c = tmp.c
+        a + c + i
+    [xs, mutable_array_get(log, 0)]
+run()}
+                 {value {[[4, 5, 6], 121212]}}
+} {
+    test destructure-once-$name "$name: the source is evaluated exactly once, as the hoisted explicit spelling does, on every backend" -body {
+        bothSpellings $::countDecls$destructured $::countDecls$explicit
+    } -result $expected
+}
+
+test destructure-once-not-per-field {destructuring is not a.f; b.f with the source repeated: a source that counts its calls shows one call, never one per field} -body {
+    set program "${::countDecls}fn run():\n    log = mutarray::create(1, 0)\n    \{a, b, c\} = mk_named(log)\n    mutable_array_get(log, 0)\nrun()"
+    parity $program
+} -result {value 12}
+
+# ---------------------------------------------------------------------------
+# Bindings are values, not references into the source struct
+
+test destructure-bound-mutable-value-is-the-same-value {a field holding a MutableArray: the binding denotes that array (its ordinary semantics), so writes through either name are seen through the other} -body {
+    set program "struct Holder:\n    items: MutableArray\[int\]\n    n: int\nfn run():\n    h = Holder \{items: mutarray::create(2, 0), n: 1\}\n    \{items\} = h\n    mutable_array_set(items, 0, 5)\n    mutable_array_set(h.items, 1, 6)\n    \[mutable_array_get(h.items, 0), mutable_array_get(items, 1)\]\nrun()"
+    parity $program
+} -result {value {[5, 6]}}
+
+test destructure-bound-name-is-not-a-field-slot {the bound name is an ordinary binding: it cannot be assigned through, and it does not name the field} -body {
+    list [rejection "\{a\} = \{a: 1\}\na = 2"] [rejection "s = \{a: 1\}\n\{a\} = s\ns.a = 2"]
+} -match glob -result {{DUPLICATE: duplicate binding "a" in the same lexical scope} {* *}}
+
+test destructure-bound-value-independent-of-later-struct {a binding made earlier is not retargeted by later bindings of other structs} -body {
+    parity "s = \{a: 1\}\n\{a\} = s\nt = \{a: 2\}\n\{a: other\} = t\n\[a, other, s.a, t.a\]"
+} -result {value {[1, 2, 1, 2]}}
+
+test destructure-binds-values-not-lvalues {the result of destructuring a field is the field's value: the same as the explicit spelling, including for a field whose value is itself a struct} -body {
+    bothSpellings "s = \{p: \{q: 1\}, r: \[1, 2\]\}\n\{p, r\} = s\n\[p.q, r, s\]" "s = \{p: \{q: 1\}, r: \[1, 2\]\}\ntmp = s\np = tmp.p\nr = tmp.r\n\[p.q, r, s\]"
+} -result {value {[1, [1, 2], {p: {q: 1}, r: [1, 2]}]}}
+
+# ---------------------------------------------------------------------------
+# Static rejection: parasitic on ordinary field projection
+
+# Each case's destructured spelling is rejected exactly as the explicit
+# spelling is (same kind, same message, modulo locations).
+foreach {name destructured explicit} {
+    missing-named   {$D{missing} = $N}
+                    {$Dtmp = $N
+missing = tmp.missing}
+    missing-anon    {{missing} = $A}
+                    {tmp = $A
+missing = tmp.missing}
+    missing-second  {$D{a, missing} = $N}
+                    {$Dtmp = $N
+a = tmp.a
+missing = tmp.missing}
+    missing-renamed {$D{missing: x} = $N}
+                    {$Dtmp = $N
+x = tmp.missing}
+    int-source      {{a} = 42}
+                    {tmp = 42
+a = tmp.a}
+    string-source   {{a} = "text"}
+                    {tmp = "text"
+a = tmp.a}
+    list-source     {{a} = [1, 2, 3]}
+                    {tmp = [1, 2, 3]
+a = tmp.a}
+    bool-source     {{a} = true}
+                    {tmp = true
+a = tmp.a}
+    unit-source     {{a} = unit}
+                    {tmp = unit
+a = tmp.a}
+    function-source {fn f(x):
+    x
+{a} = f}
+                    {fn f(x):
+    x
+tmp = f
+a = tmp.a}
+    native-source   {{a} = list_length}
+                    {tmp = list_length
+a = tmp.a}
+    mutarray-source {{a} = mutarray::create(1, 0)}
+                    {tmp = mutarray::create(1, 0)
+a = tmp.a}
+    unknown-shape   {fn first(x):
+    {a} = x
+    a
+first(1)}
+                    {fn first(x):
+    tmp = x
+    a = tmp.a
+    a
+first(1)}
+    unknown-shape-escaping {fn first(x):
+    {a} = x
+    a
+g = first
+1}
+                    {fn first(x):
+    tmp = x
+    a = tmp.a
+    a
+g = first
+1}
+    nested-missing  {{u: {nope}} = {u: {a: 1}}}
+                    {tmp = {u: {a: 1}}
+tmp2 = tmp.u
+nope = tmp2.nope}
+    nested-non-struct {{u: {a}} = {u: 5}}
+                    {tmp = {u: 5}
+tmp2 = tmp.u
+a = tmp2.a}
+    nested-missing-outer {{nope: {a}} = {u: {a: 1}}}
+                    {tmp = {u: {a: 1}}
+tmp2 = tmp.nope
+a = tmp2.a}
+} {
+    set d [string map [list \$D $::decls \$N $::named \$A $::anon] $destructured]
+    set e [string map [list \$D $::decls \$N $::named \$A $::anon] $explicit]
+    test destructure-reject-$name "$name: rejected exactly as its explicit spelling is" -body {
+        set a [rejection $d]
+        set b [rejection $e]
+        expr {$a eq $b && $a ne "accepted" ? "same: $a" : "differ: $a / $b"}
+    } -match glob -result {same: *}
+}
+
+test destructure-reject-missing-field-message {the unknown-field diagnostic is the ordinary one} -body {
+    rejection "$::decls\{missing\} = $::named"
+} -result {UNKNOWN-FIELD: struct type Rec has no field "missing" (known fields: a, b, c, d)}
+
+test destructure-reject-anonymous-missing-field-message {for an anonymous struct too} -body {
+    rejection "\{missing\} = \{a: 1, b: 2\}"
+} -result {UNKNOWN-FIELD: struct type struct{a: int, b: int} has no field "missing" (known fields: a, b)}
+
+test destructure-reject-int-source-message {a non-struct source reports the projection type error, naming the field and the type} -body {
+    rejection "\{a\} = 42"
+} -result {NOT-A-STRUCT: cannot project field "a" from a value of type int: only a struct has fields}
+
+test destructure-reject-list-source-message {a List source with struct syntax is a plain NOT-A-STRUCT, never the List policy diagnostic} -body {
+    rejection "\{a, b\} = \[1, 2\]"
+} -match glob -result {NOT-A-STRUCT: cannot project field "a" from a value of type *: only a struct has fields}
+
+test destructure-reject-unproven-shape-message {a source whose struct type is not known is the ordinary unproven-field diagnostic: no run-time match} -body {
+    rejection "fn first(x):\n    \{a\} = x\n    a\nfirst(1)\nfirst(2)\ng = first"
+} -match glob -result {*}
+
+test destructure-reject-nothing-bound-on-error {a rejected destructure binds nothing observable} -body {
+    rejection "\{a, missing\} = \{a: 1\}\na"
+} -match glob -result {UNKNOWN-FIELD: *}
+
+# Where the error points: the written field name.
+foreach {name source where} {
+    second-field   "x = \{good: 1\}\n\{good, mising\} = x"        2:8
+    first-field    "x = \{good: 1\}\n\{mising, good\} = x"        2:2
+    renamed-field  "x = \{good: 1\}\n\{good, mising: other\} = x" 2:8
+    non-struct     "\{a\} = 5"                                    1:2
+    nested         "x = \{u: \{a: 1\}\}\n\{u: \{nope\}\} = x"      2:6
+    indented       "fn f():\n    x = \{a: 1\}\n    \{a, z\} = x\nf()"  3:9
+} {
+    test destructure-location-$name "$name: the diagnostic points at the field name written in the pattern" -body {
+        rejectionAt $source
+    } -result $where
+}
+
+test destructure-location-multiline-pattern {a field name on its own line is located there} -body {
+    rejectionAt "x = \{good: 1\}\n\{\n    good,\n    mising,\n\} = x"
+} -result 4:5
+
+# ---------------------------------------------------------------------------
+# Duplicates
+
+test destructure-duplicate-source-field {the same field selected twice is rejected before any binding diagnostic} -body {
+    list [rejection "\{a, a\} = \{a: 1\}"] [rejection "\{a, a: other\} = \{a: 1\}"] [rejection "\{a: x, a: y\} = \{a: 1\}"]
+} -result {{SYNTAX DUPLICATE-FIELD: DUPLICATE-FIELD: duplicate field "a" in this struct destructuring: each field may be selected only once} {SYNTAX DUPLICATE-FIELD: DUPLICATE-FIELD: duplicate field "a" in this struct destructuring: each field may be selected only once} {SYNTAX DUPLICATE-FIELD: DUPLICATE-FIELD: duplicate field "a" in this struct destructuring: each field may be selected only once}}
+
+test destructure-duplicate-destination {two bindings of one name are the ordinary duplicate-binding error, the same as for explicit bindings} -body {
+    set a [rejection "\{a: x, b: x\} = \{a: 1, b: 2\}"]
+    set b [rejection "tmp = \{a: 1, b: 2\}\nx = tmp.a\nx = tmp.b"]
+    list $a [expr {$a eq $b}]
+} -result {{DUPLICATE: duplicate binding "x" in the same lexical scope} 1}
+
+test destructure-duplicate-destination-location {the duplicate is reported at the second binding written} -body {
+    rejectionAt "\{a: x, b: x\} = \{a: 1, b: 2\}"
+} -result 1:11
+
+test destructure-duplicate-destination-shorthand {a shorthand that collides with a rename} -body {
+    list [rejection "\{a, b: a\} = \{a: 1, b: 2\}"] [rejection "\{b: a, a\} = \{a: 1, b: 2\}"]
+} -result {{DUPLICATE: duplicate binding "a" in the same lexical scope} {DUPLICATE: duplicate binding "a" in the same lexical scope}}
+
+test destructure-duplicate-existing-binding {a destructured name already bound in the scope is the ordinary duplicate-binding error: no shadowing semantics of its own} -body {
+    set a [rejection "x = 1\n\{a: x\} = \{a: 2\}"]
+    set b [rejection "x = 1\ntmp = \{a: 2\}\nx = tmp.a"]
+    list $a [expr {$a eq $b}]
+} -result {{DUPLICATE: duplicate binding "x" in the same lexical scope} 1}
+
+test destructure-duplicate-with-earlier-destructure {two destructures in one scope binding the same name} -body {
+    rejection "\{a\} = \{a: 1\}\n\{a\} = \{a: 2\}"
+} -result {DUPLICATE: duplicate binding "a" in the same lexical scope}
+
+test destructure-not-assignment-existing-name {a destructure does not assign an existing variable: `{a: existing}` is a duplicate binding, not a mutation} -body {
+    rejection "existing = 1\n\{a: existing\} = \{a: 2\}\nexisting"
+} -result {DUPLICATE: duplicate binding "existing" in the same lexical scope}
+
+test destructure-same-name-in-inner-scope {a destructured name may shadow an outer one in an inner scope: the ordinary shadowing rule} -body {
+    bothSpellings "x = 1\nfn f(r):\n    \{a: x\} = r\n    x\n\[f(\{a: 5\}), x\]" "x = 1\nfn f(r):\n    tmp = r\n    x = tmp.a\n    x\n\[f(\{a: 5\}), x\]"
+} -result {value {[5, 1]}}
+
+test destructure-shadowing-reference-before {a reference before a shadowing destructure still sees the outer binding} -body {
+    bothSpellings "x = 1\nfn f(r):\n    before = x\n    \{a: x\} = r\n    \[before, x\]\nf(\{a: 5\})" "x = 1\nfn f(r):\n    before = x\n    tmp = r\n    x = tmp.a\n    \[before, x\]\nf(\{a: 5\})"
+} -result {value {[1, 5]}}
+
+test destructure-source-sees-scope-before-the-names {the source is resolved before the pattern's names exist, as an ordinary binding's initializer is} -body {
+    list [rejection "\{a\} = \{a: a\}"] [parity "a = 1\nfn f():\n    \{a\} = \{a: a\}\n    a\nf()"]
+} -match glob -result {{UNBOUND: unbound name "a"*} {value 1}}
+
+# ---------------------------------------------------------------------------
+# Scopes: functions, branches, loops, nested functions, module top level
+
+foreach {name destructured explicit expected} {
+    in-function  {fn get():
+    {n: 1, s: "x"}
+fn run():
+    {n, s} = get()
+    [n, s]
+run()}
+                 {fn get():
+    {n: 1, s: "x"}
+fn run():
+    tmp = get()
+    n = tmp.n
+    s = tmp.s
+    [n, s]
+run()}
+                 {value {[1, "x"]}}
+    in-if        {fn run(flag):
+    if flag:
+        {n} = {n: 1, m: 2}
+        n
+    else:
+        {m} = {n: 1, m: 2}
+        m
+[run(true), run(false)]}
+                 {fn run(flag):
+    if flag:
+        t = {n: 1, m: 2}
+        n = t.n
+        n
+    else:
+        t = {n: 1, m: 2}
+        m = t.m
+        m
+[run(true), run(false)]}
+                 {value {[1, 2]}}
+    in-elif      {fn run(k):
+    if k == 0:
+        {v} = {v: 10}
+        v
+    elif k == 1:
+        {v: w} = {v: 20}
+        w
+    elif k == 2:
+        {v, u} = {v: 30, u: 1}
+        v + u
+    else:
+        0
+[run(0), run(1), run(2), run(3)]}
+                 {fn run(k):
+    if k == 0:
+        t = {v: 10}
+        v = t.v
+        v
+    elif k == 1:
+        t = {v: 20}
+        w = t.v
+        w
+    elif k == 2:
+        t = {v: 30, u: 1}
+        v = t.v
+        u = t.u
+        v + u
+    else:
+        0
+[run(0), run(1), run(2), run(3)]}
+                 {value {[10, 20, 31, 0]}}
+    in-if-value  {fn run(flag):
+    r = if flag:
+        {n} = {n: 1}
+        n + 100
+    else:
+        {n} = {n: 2}
+        n + 200
+    r
+[run(true), run(false)]}
+                 {fn run(flag):
+    r = if flag:
+        t = {n: 1}
+        n = t.n
+        n + 100
+    else:
+        t = {n: 2}
+        n = t.n
+        n + 200
+    r
+[run(true), run(false)]}
+                 {value {[101, 202]}}
+    same-name-in-branches {fn run(flag):
+    if flag:
+        {n} = {n: 1}
+    else:
+        {n} = {n: 2}
+    0
+[run(true), run(false)]}
+                 {fn run(flag):
+    if flag:
+        t = {n: 1}
+        n = t.n
+    else:
+        t = {n: 2}
+        n = t.n
+    0
+[run(true), run(false)]}
+                 {value {[0, 0]}}
+    in-collecting-loop {fn run():
+    pts = [{x: 1, y: 2}, {x: 3, y: 4}, {x: 5, y: 6}]
+    loop p in pts:
+        {x, y: why} = p
+        x * 10 + why
+run()}
+                 {fn run():
+    pts = [{x: 1, y: 2}, {x: 3, y: 4}, {x: 5, y: 6}]
+    loop p in pts:
+        t = p
+        x = t.x
+        why = t.y
+        x * 10 + why
+run()}
+                 {value {[12, 34, 56]}}
+    in-counted-loop {fn run():
+    loop i from 0 to 3:
+        {sq, cube} = {sq: i * i, cube: i * i * i}
+        sq + cube
+run()}
+                 {fn run():
+    loop i from 0 to 3:
+        t = {sq: i * i, cube: i * i * i}
+        sq = t.sq
+        cube = t.cube
+        sq + cube
+run()}
+                 {value {[0, 2, 12]}}
+    in-lockstep-loop {fn run():
+    pts = [{x: 1, y: 2}, {x: 3, y: 4}]
+    loop p in pts and i from 0 to 2:
+        {x, y} = p
+        x + y + i
+run()}
+                 {fn run():
+    pts = [{x: 1, y: 2}, {x: 3, y: 4}]
+    loop p in pts and i from 0 to 2:
+        t = p
+        x = t.x
+        y = t.y
+        x + y + i
+run()}
+                 {value {[3, 8]}}
+    in-plain-loop {fn run():
+    n = 0
+    loop:
+        {k} = {k: 5}
+        break
+    7
+run()}
+                 {fn run():
+    n = 0
+    loop:
+        t = {k: 5}
+        k = t.k
+        break
+    7
+run()}
+                 {value 7}
+    in-nested-function {struct P:
+    a: int
+struct R:
+    b: int
+fn outer(r: R) -> int:
+    fn inner(q: P) -> int:
+        {a} = q
+        a + 1
+    {b} = r
+    inner(P {a: b * 2})
+outer(R {b: 5})}
+                 {struct P:
+    a: int
+struct R:
+    b: int
+fn outer(r: R) -> int:
+    fn inner(q: P) -> int:
+        t = q
+        a = t.a
+        a + 1
+    t = r
+    b = t.b
+    inner(P {a: b * 2})
+outer(R {b: 5})}
+                 {value 11}
+    in-nested-in-loop-in-fn {fn run(rows):
+    total = 0
+    r = loop row in rows:
+        {n} = row
+        if n > 1:
+            {m} = row
+            m
+        else:
+            0
+    r
+run([{n: 1, m: 10}, {n: 2, m: 20}])}
+                 {fn run(rows):
+    total = 0
+    r = loop row in rows:
+        t = row
+        n = t.n
+        if n > 1:
+            t2 = row
+            m = t2.m
+            m
+        else:
+            0
+    r
+run([{n: 1, m: 10}, {n: 2, m: 20}])}
+                 {value {[0, 20]}}
+    top-level    {{a, b} = {a: 1, b: 2}
+a + b}
+                 {t = {a: 1, b: 2}
+a = t.a
+b = t.b
+a + b}
+                 {value 3}
+} {
+    test destructure-scope-$name "$name: destructuring follows the ordinary scope rules, on every backend" -body {
+        bothSpellings $destructured $explicit
+    } -result $expected
+}
+
+test destructure-scope-binding-not-visible-outside {a destructured name is local to its branch} -body {
+    rejection "if true:\n    \{n\} = \{n: 1\}\nn"
+} -result {UNBOUND: unbound name "n"}
+
+test destructure-scope-use-before {a destructured name is not visible before the destructure} -body {
+    rejection "fn f(r):\n    before = a\n    \{a\} = r\n    a\nf(\{a: 1\})"
+} -match glob -result {UNBOUND: unbound name "a"*}
+
+# ---------------------------------------------------------------------------
+# Function results
+
+foreach {name decls call} {
+    named-return {struct User:
+    name: str
+    id: int
+    token: str
+    expires: int
+fn get_user(n: str) -> User:
+    User {name: n, id: 42, token: "t", expires: 99}
+} {{name, expires: expiry} = get_user("alice")
+[name, expiry]}
+    anonymous-return {fn get_user(n: str):
+    {name: n, id: 42, token: "t", expires: 99}
+} {{name, expires: expiry} = get_user("alice")
+[name, expiry]}
+    via-binding {fn get_user(n: str):
+    {name: n, id: 42, token: "t", expires: 99}
+} {result = get_user("alice")
+{name, expires: expiry} = result
+[name, expiry]}
+} {
+    test destructure-function-result-$name "$name: a function's struct result destructures directly" -body {
+        parity $decls$call
+    } -result {value {["alice", 99]}}
+}
+
+test destructure-function-result-equivalent-to-hoisted {direct destructuring of a call and the hoisted spelling agree} -body {
+    set decls "fn get_user(n: str):\n    \{name: n, id: 42, expires: 99\}\n"
+    bothSpellings "${decls}\{name, expires\} = get_user(\"a\")\n\[name, expires\]" "${decls}t = get_user(\"a\")\nname = t.name\nexpires = t.expires\n\[name, expires\]"
+} -result {value {["a", 99]}}
+
+test destructure-function-result-unit-fields {the motivating API: a result with a value and a status, heterogeneous} -body {
+    parity "fn divide(a, b):\n    if b == 0:\n        \{value: 0, ok: false\}\n    else:\n        \{value: a / b, ok: true\}\n\{value, ok\} = divide(7, 0)\n\{value: v2, ok: ok2\} = divide(8, 2)\n\[value, ok, v2, ok2\]"
+} -match glob -result {*}
+
+# Error-capable sources behave exactly as ordinary bindings do.
+
+set ::errDecls {error Oops
+fn risky(n: int) errors Oops:
+    if n < 0:
+        fail Oops
+    {a: n, b: n * 2}
+}
+
+foreach {name destructured explicit expected} {
+    handled    {fn run(n):
+    {a, b} = risky(n):
+        on Oops:
+            {a: -1, b: -2}
+    [a, b]
+[run(3), run(-1)]}
+               {fn run(n):
+    t = risky(n):
+        on Oops:
+            {a: -1, b: -2}
+    a = t.a
+    b = t.b
+    [a, b]
+[run(3), run(-1)]}
+               {value {[[3, 6], [-1, -2]]}}
+    declared-errors   {fn run(n) errors Oops:
+    {a} = risky(n)
+    a
+run(3)}
+               {fn run(n) errors Oops:
+    t = risky(n)
+    a = t.a
+    a
+run(3)}
+               {value 3}
+} {
+    test destructure-error-capable-$name "$name: an error-capable source is handled as an ordinary binding's is" -body {
+        bothSpellings $::errDecls$destructured $::errDecls$explicit
+    } -result $expected
+}
+
+test destructure-error-capable-unhandled-same-diagnostic {an unhandled error-capable source is the ordinary static error, the same as for the explicit spelling} -body {
+    set a [rejection "${::errDecls}fn run(n) errors Oops:\n    \{a\} = risky(n)\n    a\n1"]
+    set b [rejection "${::errDecls}fn run(n) errors Oops:\n    t = risky(n)\n    a = t.a\n    a\n1"]
+    list [expr {$a eq $b}] $a
+} -match glob -result {1 *}
+
+test destructure-error-capable-propagates {a destructure inside an error-declaring function propagates as a binding does} -body {
+    bothSpellings "${::errDecls}fn run(n) errors Oops:\n    \{a\} = risky(n)\n    a\nrun(-5)" "${::errDecls}fn run(n) errors Oops:\n    t = risky(n)\n    a = t.a\n    a\nrun(-5)"
+} -match glob -result {error *}
+
+test destructure-error-field-value-is-just-a-value {a field holding an error-capable function is just a value: destructuring neither calls nor unwraps it, and calling it afterwards is handled as ordinary} -body {
+    bothSpellings "${::errDecls}fn run(n):\n    \{f\} = \{f: risky\}\n    r = f(n):\n        on Oops:\n            \{a: 0, b: 0\}\n    r.a\n\[run(-1), run(4)\]" "${::errDecls}fn run(n):\n    t = \{f: risky\}\n    f = t.f\n    r = f(n):\n        on Oops:\n            \{a: 0, b: 0\}\n    r.a\n\[run(-1), run(4)\]"
+} -result {value {[0, 4]}}
+
+# ---------------------------------------------------------------------------
+# Closures capture destructured bindings as ordinary bindings
+
+foreach {name destructured explicit expected} {
+    capture-short {fn make(r):
+    {n, step} = r
+    fn next(x):
+        x + n * step
+    next
+make({n: 3, step: 10})(1)}
+                 {fn make(r):
+    t = r
+    n = t.n
+    step = t.step
+    fn next(x):
+        x + n * step
+    next
+make({n: 3, step: 10})(1)}
+                 {value 31}
+    capture-renamed {fn make(r):
+    {n: count, step: by} = r
+    fn next(x):
+        x + count * by
+    next
+make({n: 3, step: 10})(1)}
+                 {fn make(r):
+    t = r
+    count = t.n
+    by = t.step
+    fn next(x):
+        x + count * by
+    next
+make({n: 3, step: 10})(1)}
+                 {value 31}
+    capture-in-list {fn fn_a(n):
+    n
+fn fn_b(n):
+    n + 1
+fn run(r):
+    {n} = r
+    fs = [fn_a(n), fn_b(n)]
+    fs
+run({n: 4})}
+                 {fn fn_a(n):
+    n
+fn fn_b(n):
+    n + 1
+fn run(r):
+    t = r
+    n = t.n
+    fs = [fn_a(n), fn_b(n)]
+    fs
+run({n: 4})}
+                 {value {[4, 5]}}
+    capture-two-closures {fn make(r):
+    {n} = r
+    fn get():
+        n
+    fn bump(k):
+        n + k
+    [get, bump]
+fs = make({n: 7})
+[list_get(fs, 0)(), list_get(fs, 1)(1)]}
+                 {fn make(r):
+    t = r
+    n = t.n
+    fn get():
+        n
+    fn bump(k):
+        n + k
+    [get, bump]
+fs = make({n: 7})
+[list_get(fs, 0)(), list_get(fs, 1)(1)]}
+                 {value {[7, 8]}}
+    capture-nested {fn make(r):
+    {u: {a, b}} = r
+    fn f():
+        a * b
+    f
+make({u: {a: 6, b: 7}})()}
+                 {fn make(r):
+    t = r
+    t2 = t.u
+    a = t2.a
+    b = t2.b
+    fn f():
+        a * b
+    f
+make({u: {a: 6, b: 7}})()}
+                 {value 42}
+    capture-struct-value {struct K:
+    k: int
+struct W:
+    inner: K
+fn make(r: W):
+    {inner} = r
+    fn f():
+        inner.k
+    f
+make(W {inner: K {k: 9}})()}
+                 {struct K:
+    k: int
+struct W:
+    inner: K
+fn make(r: W):
+    t = r
+    inner = t.inner
+    fn f():
+        inner.k
+    f
+make(W {inner: K {k: 9}})()}
+                 {value 9}
+} {
+    test destructure-$name "$name: closures capture destructured bindings exactly as explicit ones" -body {
+        bothSpellings $destructured $explicit
+    } -result $expected
+}
+
+# ---------------------------------------------------------------------------
+# Interoperation with method sugar and elif
+
+set ::sugarFns {fn list_sum(xs):
+    total = 0
+    loop x in xs:
+        total
+    list_length(xs)
+fn visible(items, n):
+    list_length(items) + n
+}
+
+test destructure-method-sugar {a destructured binding is an ordinary receiver} -body {
+    bothSpellings "${::sugarFns}\{items, index\} = \{items: \[1, 2, 3\], index: 10\}\nitems.visible(index)" "${::sugarFns}t = \{items: \[1, 2, 3\], index: 10\}\nitems = t.items\nindex = t.index\nitems.visible(index)"
+} -result {value 13}
+
+test destructure-method-sugar-source {a method-call source destructures like any other call} -body {
+    bothSpellings "fn make(n):\n    \{a: n, b: n + 1\}\n\{a, b\} = 5.make()\n\[a, b\]" "fn make(n):\n    \{a: n, b: n + 1\}\nt = make(5)\na = t.a\nb = t.b\n\[a, b\]"
+} -result {value {[5, 6]}}
+
+test destructure-method-sugar-library {a library call through a destructured List binding} -body {
+    bothSpellings "\{xs\} = \{xs: \[3, 1, 2\]\}\nxs.list_length()" "t = \{xs: \[3, 1, 2\]\}\nxs = t.xs\nlist_length(xs)"
+} -result {value 3}
+
+test destructure-method-sugar-field-callable {a field holding a function is still called as a field value (no sugar, no ambiguity)} -body {
+    bothSpellings "fn inc(x):\n    x + 1\n\{f\} = \{f: inc\}\nf(1)" "fn inc(x):\n    x + 1\nt = \{f: inc\}\nf = t.f\nf(1)"
+} -result {value 2}
+
+test destructure-elif-chains {destructures in every clause of an elif chain} -body {
+    bothSpellings "fn pick(k, r):\n    if k == 0:\n        \{a\} = r\n        a\n    elif k == 1:\n        \{b: a\} = r\n        a\n    else:\n        \{a, b\} = r\n        a + b\n\[pick(0, \{a: 1, b: 2\}), pick(1, \{a: 1, b: 2\}), pick(2, \{a: 1, b: 2\})\]" "fn pick(k, r):\n    if k == 0:\n        t = r\n        a = t.a\n        a\n    elif k == 1:\n        t = r\n        a = t.b\n        a\n    else:\n        t = r\n        a = t.a\n        b = t.b\n        a + b\n\[pick(0, \{a: 1, b: 2\}), pick(1, \{a: 1, b: 2\}), pick(2, \{a: 1, b: 2\})\]"
+} -result {value {[1, 2, 3]}}
+
+test destructure-elif-condition-uses-bindings {a destructured binding in a condition of an elif} -body {
+    bothSpellings "fn f(r):\n    \{n\} = r\n    if n == 0:\n        10\n    elif n == 1:\n        20\n    else:\n        30\n\[f(\{n: 0\}), f(\{n: 1\}), f(\{n: 5\})\]" "fn f(r):\n    t = r\n    n = t.n\n    if n == 0:\n        10\n    elif n == 1:\n        20\n    else:\n        30\n\[f(\{n: 0\}), f(\{n: 1\}), f(\{n: 5\})\]"
+} -result {value {[10, 20, 30]}}
+
+# ---------------------------------------------------------------------------
+# Nesting: recursive named projection
+
+test destructure-nested-basic {`{user: {name, id}, expires} = result`} -body {
+    set decls "struct User:\n    name: str\n    id: int\n    admin: bool\nstruct Result:\n    user: User\n    expires: int\n"
+    set src "Result \{user: User \{name: \"ada\", id: 7, admin: true\}, expires: 99\}"
+    bothSpellings "${decls}\{user: \{name, id\}, expires\} = $src\n\[name, id, expires\]" "${decls}t = $src\nt2 = t.user\nname = t2.name\nid = t2.id\nexpires = t.expires\n\[name, id, expires\]"
+} -result {value {["ada", 7, 99]}}
+
+test destructure-nested-anonymous {the same for anonymous structs} -body {
+    set src "\{user: \{name: \"ada\", id: 7, admin: true\}, expires: 99\}"
+    bothSpellings "\{user: \{name, id\}, expires\} = $src\n\[name, id, expires\]" "t = $src\nt2 = t.user\nname = t2.name\nid = t2.id\nexpires = t.expires\n\[name, id, expires\]"
+} -result {value {["ada", 7, 99]}}
+
+test destructure-nested-renaming-inside {renaming inside a nested pattern: left names are fields at every level} -body {
+    set src "\{user: \{name: n, id: i\}, expires: e\}"
+    bothSpellings "\{user: \{name: n, id: i\}, expires: e\} = \{user: \{name: \"ada\", id: 7\}, expires: 99\}\n\[n, i, e\]" "t = \{user: \{name: \"ada\", id: 7\}, expires: 99\}\nt2 = t.user\nn = t2.name\ni = t2.id\ne = t.expires\n\[n, i, e\]"
+} -result {value {["ada", 7, 99]}}
+
+test destructure-nested-omitted-inner-fields {inner fields may be omitted} -body {
+    parity "\{u: \{b\}\} = \{u: \{a: 1, b: 2, c: 3\}, v: 4\}\nb"
+} -result {value 2}
+
+test destructure-nested-binds-only-leaves {a field that is destructured further is not itself bound} -body {
+    rejection "\{u: \{b\}\} = \{u: \{b: 1\}\}\nu"
+} -result {UNBOUND: unbound name "u"}
+
+test destructure-nested-deep {three levels} -body {
+    bothSpellings "\{a: \{b: \{c\}\}\} = \{a: \{b: \{c: 1, d: 2\}\}\}\nc" "t = \{a: \{b: \{c: 1, d: 2\}\}\}\nt2 = t.a\nt3 = t2.b\nc = t3.c\nc"
+} -result {value 1}
+
+test destructure-nested-siblings-order {nested and flat fields mix in written order} -body {
+    bothSpellings "\{x, u: \{p, q\}, y, w: \{r\}\} = \{x: 1, u: \{p: 2, q: 3\}, y: 4, w: \{r: 5\}\}\n\[x, p, q, y, r\]" "t = \{x: 1, u: \{p: 2, q: 3\}, y: 4, w: \{r: 5\}\}\nx = t.x\nt2 = t.u\np = t2.p\nq = t2.q\ny = t.y\nt3 = t.w\nr = t3.r\n\[x, p, q, y, r\]"
+} -result {value {[1, 2, 3, 4, 5]}}
+
+test destructure-nested-duplicate-destination {a duplicate destination across nesting levels is the ordinary duplicate-binding error} -body {
+    rejection "\{a: x, u: \{b: x\}\} = \{a: 1, u: \{b: 2\}\}"
+} -result {DUPLICATE: duplicate binding "x" in the same lexical scope}
+
+test destructure-nested-same-field-name-at-two-levels {the same field name at two levels is no duplicate-field error} -body {
+    parity "\{a: \{a: inner\}, b\} = \{a: \{a: 1\}, b: 2\}\n\[inner, b\]"
+} -result {value {[1, 2]}}
+
+test destructure-nested-struct-field-is-struct-only {a field that is not a struct cannot be destructured further: the ordinary projection error} -body {
+    list [rejection "\{u: \{a\}\} = \{u: 5\}"] [rejection "\{u: \{a\}\} = \{u: \[1, 2\]\}"]
+} -match glob -result {{NOT-A-STRUCT: cannot project field "a" from a value of type int: only a struct has fields} {NOT-A-STRUCT: cannot project field "a" from a value of type *: only a struct has fields}}
+
+# ---------------------------------------------------------------------------
+# Modules (a top-level destructure is not allowed in a module)
+
+test destructure-module-top-level-rejected {a module-level destructure is rejected with a clear reason: module bindings are context-free immutable values and no struct value is one, so the explicit spelling is rejected too (MODULE-CONTEXT)} -body {
+    withScratchLibrary {
+        set results {}
+        foreach body [list "\{lo, hi: top\} = \{lo: 3, hi: 9, mid: 6\}\n" "t = \{lo: 3, hi: 9, mid: 6\}\nlo = t.lo\ntop = t.hi\n"] {
+            writeModule $dir pair "namespace pair\n$body"
+            set main [writeMain $dir "pair::lo\n"]
+            catch {surface::readProgramFile $main} message options
+            lappend results [lrange [dict get $options -errorcode] 0 2]
+        }
+        set results
+    }
+} -result {{SURFACE MODULE INVALID-TOPLEVEL} {CORE SEMANTIC MODULE-CONTEXT}}
+
+test destructure-module-top-level-message {the module-level rejection names the reason and the way out} -body {
+    withScratchLibrary {
+        writeModule $dir pair "namespace pair\n\{lo\} = \{lo: 3\}\n"
+        set main [writeMain $dir "pair::lo\n"]
+        catch {surface::readProgramFile $main} message
+        list [string match "*a struct destructuring is not allowed at module top level*" $message] \
+            [string match "*destructure inside a function*" $message]
+    }
+} -result {1 1}
+
+test destructure-module-destructure-in-function {a destructure inside a module's function} -body {
+    withScratchLibrary {
+        writeModule $dir geo {namespace geo
+fn area(r):
+    {w, h} = r
+    w * h
+}
+        set main [writeMain $dir {geo::area({w: 6, h: 7, tag: "x"})
+}]
+        set hir [surface::readProgramFile $main]
+        lmap backend $::allBackends {lindex [outcomeUnderHir $backend $hir] 1}
+    }
+} -result {42 42 42 42}
+
+test destructure-module-struct-source {a struct declared in a module is destructurable by its fields} -body {
+    withScratchLibrary {
+        writeModule $dir geo {namespace geo
+struct Point:
+    x: int
+    y: int
+}
+        set main [writeMain $dir {{x, y: why} = geo::Point {x: 3, y: 4}
+[x, why]
+}]
+        set hir [surface::readProgramFile $main]
+        lmap backend $::allBackends {lindex [outcomeUnderHir $backend $hir] 1}
+    }
+} -result {{[3, 4]} {[3, 4]} {[3, 4]} {[3, 4]}}
+
+test destructure-module-statements-still-restricted {other statements stay forbidden at module top level} -body {
+    withScratchLibrary {
+        writeModule $dir bad {namespace bad
+x = 1
+if true:
+    y = 2
+}
+        set main [writeMain $dir {bad::x
+}]
+        catch {surface::readProgramFile $main} message options
+        lrange [dict get $options -errorcode] 0 2
+    }
+} -result {SURFACE MODULE INVALID-TOPLEVEL}
+
+# ---------------------------------------------------------------------------
+# Same program: HIR, core IR, analyses and NIR of the two spellings
+
+foreach {name destructured explicit} {
+    scalar
+        "fn run(n: int) -> int:\n    \{a, b: c\} = \{a: n, b: n + 1\}\n    a * c\n\[run(1), run(2)\]"
+        "fn run(n: int) -> int:\n    tmp = \{a: n, b: n + 1\}\n    a = tmp.a\n    c = tmp.b\n    a * c\n\[run(1), run(2)\]"
+    named
+        "struct P:\n    x: int\n    y: int\nfn run(n: int) -> int:\n    \{x, y\} = P \{x: n, y: n * 2\}\n    x + y\n\[run(1), run(5)\]"
+        "struct P:\n    x: int\n    y: int\nfn run(n: int) -> int:\n    tmp = P \{x: n, y: n * 2\}\n    x = tmp.x\n    y = tmp.y\n    x + y\n\[run(1), run(5)\]"
+    call-source
+        "struct P:\n    x: int\n    y: int\nfn make(n: int) -> P:\n    P \{x: n, y: n + 1\}\nfn run(n: int) -> int:\n    \{y, x\} = make(n)\n    x * 100 + y\n\[run(1), run(5)\]"
+        "struct P:\n    x: int\n    y: int\nfn make(n: int) -> P:\n    P \{x: n, y: n + 1\}\nfn run(n: int) -> int:\n    tmp = make(n)\n    y = tmp.y\n    x = tmp.x\n    x * 100 + y\n\[run(1), run(5)\]"
+    nested
+        "fn run(n: int) -> int:\n    \{u: \{a, b\}, v\} = \{u: \{a: n, b: n + 1, c: 0\}, v: n * 3\}\n    a + b + v\n\[run(1), run(5)\]"
+        "fn run(n: int) -> int:\n    tmp = \{u: \{a: n, b: n + 1, c: 0\}, v: n * 3\}\n    tmp2 = tmp.u\n    a = tmp2.a\n    b = tmp2.b\n    v = tmp.v\n    a + b + v\n\[run(1), run(5)\]"
+    capture
+        "fn make(n: int):\n    \{a, b: c\} = \{a: n, b: n + 1\}\n    fn f(k: int) -> int:\n        a * k + c\n    f\nmake(3)(4)"
+        "fn make(n: int):\n    tmp = \{a: n, b: n + 1\}\n    a = tmp.a\n    c = tmp.b\n    fn f(k: int) -> int:\n        a * k + c\n    f\nmake(3)(4)"
+    in-loop
+        "fn run(n: int):\n    loop i from 0 to n:\n        \{s, t\} = \{s: i, t: i * i\}\n        s + t\nrun(4)"
+        "fn run(n: int):\n    loop i from 0 to n:\n        tmp = \{s: i, t: i * i\}\n        s = tmp.s\n        t = tmp.t\n        s + t\nrun(4)"
+    refined
+        "type Small = Int in 0..10\nfn run(n: Small) -> int:\n    \{a, b\} = \{a: n + 1, b: n * 2\}\n    a + b\n\[run(1), run(9)\]"
+        "type Small = Int in 0..10\nfn run(n: Small) -> int:\n    tmp = \{a: n + 1, b: n * 2\}\n    a = tmp.a\n    b = tmp.b\n    a + b\n\[run(1), run(9)\]"
+} {
+    test destructure-same-program-$name "$name: destructured and explicit spellings have the same HIR (modulo the temporary's name), core IR, analyses and NIR, and the same outcome on every backend" -body {
+        list [sameProgram $destructured $explicit] [bothSpellings $destructured $explicit]
+    } -match glob -result {{} {value *}}
+}
+
+test destructure-no-destructuring-operation-in-nir {the NIR of a destructuring program has no trace of the syntax} -body {
+    set text [dict get [native::lower::program [hirOf "fn run(n: int) -> int:\n    \{a, b: c\} = \{a: n, b: n + 1\}\n    a * c\nrun(3)"]] text]
+    list [string match *destructur* $text] [string match *project* $text] [string match *pattern* $text]
+} -result {0 0 0}
+
+test destructure-no-destructuring-operation-in-core-ir {nor in core IR} -body {
+    set text [hir::lower [hirOf "fn run(n: int) -> int:\n    \{a, b: c\} = \{a: n, b: n + 1\}\n    a * c\nrun(3)"]]
+    list [string match *destructur* [tempFree $text]] [string match *pattern* $text]
+} -result {0 0}
+
+test destructure-construction-analysis-sees-ordinary-uses {the construction analysis treats the destructured struct like the explicit one: with only field reads the struct is never allocated} -body {
+    set d "fn run(n: int) -> int:\n    \{a, b\} = \{a: n, b: n + 1\}\n    a + b\nrun(3)"
+    set e "fn run(n: int) -> int:\n    tmp = \{a: n, b: n + 1\}\n    a = tmp.a\n    b = tmp.b\n    a + b\nrun(3)"
+    expr {[tempFree [nirOf [hirOf $d]]] eq [nirOf [hirOf $e]]}
+} -result 1
+
+# ---------------------------------------------------------------------------
+# Standalone executables
+
+proc executableValue {text} {
+    set dir [makeDirectory {destructuring executable}]
+    set path [file join $dir program.bot]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts $channel $text
+    close $channel
+    try {
+        exec [info nameofexecutable] [file join $::projectRoot main.tcl] -emit-native-executable $path
+        return [exec env PATH= [file rootname $path]]
+    } finally {
+        removeDirectory {destructuring executable}
+    }
+}
+
+set ::typedDestructured {struct Acc:
+    total: int
+    count: int
+    last: int
+fn probe(log: MutableArray[int], id: int, result: int) -> int:
+    n = mutable_array_get(log, 0)
+    mutable_array_set(log, 0, n * 10 + id)
+    result
+fn step(log: MutableArray[int], n: int) -> Acc:
+    Acc {total: probe(log, 1, n * 2), count: probe(log, 2, n), last: n}
+fn run(n: int) -> int:
+    log = mutarray::create(1, 0)
+    {total, last: l} = step(log, n)
+    total * 1000 + l * 100 + mutable_array_get(log, 0)
+[run(1), run(20)]}
+set ::typedExplicit {struct Acc:
+    total: int
+    count: int
+    last: int
+fn probe(log: MutableArray[int], id: int, result: int) -> int:
+    n = mutable_array_get(log, 0)
+    mutable_array_set(log, 0, n * 10 + id)
+    result
+fn step(log: MutableArray[int], n: int) -> Acc:
+    Acc {total: probe(log, 1, n * 2), count: probe(log, 2, n), last: n}
+fn run(n: int) -> int:
+    log = mutarray::create(1, 0)
+    tmp = step(log, n)
+    total = tmp.total
+    l = tmp.last
+    total * 1000 + l * 100 + mutable_array_get(log, 0)
+[run(1), run(20)]}
+
+test destructure-standalone-executable {the standalone executables of both spellings print the value every in-process backend computes} -constraints executableAot -body {
+    list [executableValue $::typedDestructured] [executableValue $::typedExplicit] [parity $::typedDestructured] [parity $::typedExplicit]
+} -result {{[2112, 42012]} {[2112, 42012]} {value {[2112, 42012]}} {value {[2112, 42012]}}}
+
+# ---------------------------------------------------------------------------
+# Equivalence fuzzing (audit/struct-destructuring/tools/fuzz.tcl): a bounded
+# run; a longer one is
+# `tclsh9.0 audit/struct-destructuring/tools/fuzz.tcl -n 500 -seed 1000`.
+
+test destructure-fuzz-smoke {randomly generated destructuring programs and their explicit spellings agree on every backend, defective variants are rejected, and the backends agree with each other} -body {
+    set output [exec [info nameofexecutable] [file join $::projectRoot audit struct-destructuring tools fuzz.tcl] -n 12 -seed 7000 2>@1]
+    lindex [split [string trim $output] \n] end
+} -match glob -result {destructuring-fuzz programs 12 values * errors * negatives * equivalence-disagreements 0 negative-escapes 0 backend-disagreements 0}
+
+cleanupTests

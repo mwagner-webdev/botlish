@@ -286,6 +286,14 @@ proc surface::modules::LoadNamespace {stateVar name usedAtSpan} {
             "$path declares \"namespace [dict get $ast namespace]\", but only namespace \"$name\" can load from this path"
     }
     foreach statement [dict get $ast body] {
+        if {[dict get $statement kind] eq "destructure"} {
+            # Not a missing feature of destructuring: a module binding is a
+            # context-free, provably immutable value (hir/modulebinding.tcl),
+            # and no struct value or field projection is one, so neither the
+            # explicit spelling nor this one could ever be accepted here.
+            Error INVALID-TOPLEVEL [dict get $statement span] \
+                "module \"$name\" ($path): a struct destructuring is not allowed at module top level (module bindings are context-free immutable values, and a struct value is not one: MODULE-BINDINGS.md); destructure inside a function"
+        }
         if {[dict get $statement kind] ni {function bind typedecl errordecl structdecl}} {
             Error INVALID-TOPLEVEL [dict get $statement span] \
                 "module \"$name\" ($path): only function definitions, immutable bindings, type declarations, struct declarations and error declarations are allowed at module top level, found a \"[dict get $statement kind]\" statement"

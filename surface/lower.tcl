@@ -43,6 +43,13 @@
 #   a and b               if a {if b {^true} {^false}} {^false}
 #   a or b                if a {^true} {if b {^true} {^false}}
 #   x = e                 bind x e
+#   {a, b: c} = e         bind tmp e; bind a (project tmp a); bind c (project
+#                         tmp b)        struct destructuring (STRUCT-
+#                         DESTRUCTURING.md): tmp is a hygienic temporary, the
+#                         source is evaluated once into it, and the rest is
+#                         ordinary projections and bindings (Sequence splices
+#                         the statements in; a nested pattern binds a further
+#                         temporary)
 #   fn f(a, b): body      bind f (block (a b) body...)
 #   if c: t else: e       if c {t...} {e...}    inline branches; a missing
 #                         else is an empty branch (value unit)
@@ -212,8 +219,72 @@ proc surface::lower::FieldInits {node} {
     }]
 }
 
+# The syntax nodes of the statements NODES, in order. A struct destructuring
+# is the one statement that lowers to several nodes (Destructure), spliced in
+# place.
 proc surface::lower::Sequence {nodes} {
-    return [lmap node $nodes {Node $node}]
+    set result {}
+    foreach node $nodes {
+        if {[dict get $node kind] eq "destructure"} {
+            lappend result {*}[Destructure $node]
+        } else {
+            lappend result [Node $node]
+        }
+    }
+    return $result
+}
+
+# Struct destructuring (STRUCT-DESTRUCTURING.md): `{a, b: c} = value` is
+#
+#     tmp = value           the source, evaluated here, once
+#     a = tmp.a             one ordinary static projection per requested
+#     c = tmp.b             field, bound under its local name
+#
+# in written order. `tmp` is a hygienic temporary: its name contains "#", which
+# source can never spell, so it cannot collide with or capture a user name, and
+# no user-visible binding denotes it. A nested pattern `{u: {x, y}}` binds a
+# further temporary to `tmp.u` and destructures that the same way. The result is
+# plain bind / project / ref syntax: HIR, its analyses, core IR and every backend
+# see exactly what the explicit spelling gives them (the field-access rules,
+# including every diagnostic, are the ordinary projection's), and none of them
+# knows destructuring exists.
+#
+# Origins: each projection and each binding carries its own field of the
+# pattern -- the projection spans the entry and its name origin is the field
+# name read (where UNKNOWN-FIELD, NOT-A-STRUCT and UNPROVEN-FIELD point), the
+# bind's origin is the binding made (where DUPLICATE points).
+proc surface::lower::Destructure {node} {
+    set pattern [dict get $node pattern]
+    set temp [TempName $pattern]
+    set source [hir::syntax::bindNode [Origin [dict get $pattern span] [dict get $node id]/pattern] \
+        $temp [Node [dict get $node value]]]
+    return [concat [list $source] [Projections $pattern $temp]]
+}
+
+# The hygienic temporary of the pattern PATTERN: unique per pattern in a file.
+proc surface::lower::TempName {pattern} {
+    return "destructure#[dict get $pattern span start]"
+}
+
+# The binds of the fields of PATTERN, each reading the struct bound to TEMP.
+proc surface::lower::Projections {pattern temp} {
+    set nodes {}
+    foreach field [dict get $pattern fields] {
+        set id [dict get $field id]
+        set origin [Origin [dict get $field span] $id]
+        set read [hir::syntax::projectNode $origin [hir::syntax::refNode $origin $temp] \
+            [dict get $field name] [Origin [dict get $field nameSpan] $id/name]]
+        if {[dict get $field nested] ne ""} {
+            set inner [dict get $field nested]
+            set innerTemp [TempName $inner]
+            lappend nodes [hir::syntax::bindNode $origin $innerTemp $read]
+            lappend nodes {*}[Projections $inner $innerTemp]
+        } else {
+            lappend nodes [hir::syntax::bindNode [Origin [dict get $field localSpan] $id/binding] \
+                [dict get $field local] $read]
+        }
+    }
+    return $nodes
 }
 
 # if CONDITION {THEN...} {ELSE...}, with branches originating at ORIGIN.

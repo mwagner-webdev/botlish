@@ -9,7 +9,8 @@
 #   namespaceDecl = "namespace" IDENT NEWLINE
 #   topStatement = typeDecl | structDecl | errorDecl | statement
 #   statement    = simple NEWLINE | valued | function | if | loop
-#   simple       = binding | return | break | continue | fail | expression
+#   simple       = binding | destructure | return | break | continue | fail
+#                | expression
 #   valued       = IDENT "=" (if|loop|handledExpr)
 #                | "return" (if|loop|handledExpr)
 #   handledExpr  = expression [ handlers ]     -- handlers only after a bare
@@ -26,6 +27,9 @@
 #                -- operand is an expression without a top-level "and"
 #   suite        = NEWLINE INDENT { NEWLINE | statement } DEDENT
 #   binding      = IDENT "=" expression
+#   destructure  = "{" destructureField { "," destructureField } [ "," ] "}"
+#                  "=" valueOrHandled      -- STRUCT-DESTRUCTURING.md
+#   destructureField = IDENT | IDENT ":" IDENT | IDENT ":" "{" ... "}"
 #   return       = "return" [ expression ]
 #   break        = "break"          -- PAYLOAD-FREE-BREAK.md: never a value,
 #                                       in any loop kind, at the surface
@@ -382,7 +386,7 @@ proc surface::parser::Statement {pVar} {
         # The handler suite(s) already ended the line.
         return $statement
     }
-    if {[dict get $statement kind] in {bind return}
+    if {[dict get $statement kind] in {bind return destructure}
             && [dict get $statement value] ne ""
             && [dict get $statement value kind] in {if loop handledcall}} {
         # The if's (or loop's, or the handler suite's) suite(s) already
@@ -415,6 +419,22 @@ proc surface::parser::Simple {pVar} {
                 set value [ValueOrHandled p]
                 return [surface::ast::node bind [SpanFrom p $start] \
                     name [dict get $token value] nameSpan $start value $value]
+            }
+        }
+        \{ {
+            # A braced pattern followed by "=" at the start of a statement
+            # is a struct destructuring (STRUCT-DESTRUCTURING.md); any other
+            # open brace still starts an anonymous struct value statement.
+            if {[PatternAhead p]} {
+                return [Destructure p]
+            }
+        }
+        [ {
+            # A bracketed group followed by "=" is the shape of a positional
+            # List destructuring, which Botlish intentionally does not have:
+            # a dedicated diagnostic, not "only a name can be bound".
+            if {[PatternAhead p]} {
+                ListDestructuringError [PatternSpan p]
             }
         }
         return {
@@ -1325,6 +1345,176 @@ proc surface::parser::Primary {pVar} {
         }
     }
     Fail $token "expected an expression, found [Describe $token]"
+}
+
+# ---------------------------------------------------------------------------
+# Struct destructuring (STRUCT-DESTRUCTURING.md)
+#
+#   destructure  = pattern "=" valueOrHandled
+#   pattern      = "{" field { "," field } [ "," ] "}"
+#   field        = IDENT | IDENT ":" IDENT | IDENT ":" pattern
+#
+# The left name of "source: local" is the struct field read; the right name
+# is the binding created (nesting: the field's value is destructured in turn).
+# A pattern is only ever recognized at the start of a statement, followed by
+# "=" (PatternAhead): an anonymous struct value used as an expression
+# statement, and every other use of "{" and "[", parse exactly as before.
+# What is deliberately not here: "[...] =" (positional List destructuring,
+# ListDestructuringError), "...rest", "name = default", "_" wildcards,
+# "ref"/"&"/"mut" binding modes and an empty "{}" -- each an error with its own
+# message, none a silently different construct.
+
+# 1 if the tokens at the current position are a bracketed group ("{...}" or
+# "[...]") immediately followed by "=": the shape of a destructuring pattern.
+proc surface::parser::PatternAhead {pVar} {
+    upvar 1 $pVar p
+    return [expr {[PatternEnd p] >= 0}]
+}
+
+# The offset (from the current token) of the token that closes the bracket the
+# current token opens, if "=" follows it; else -1. Brackets nest; a layout
+# token inside means the group is not closed on this logical line.
+proc surface::parser::PatternEnd {pVar} {
+    upvar 1 $pVar p
+    set depth 0
+    for {set i 0} 1 {incr i} {
+        switch -- [Kind p $i] {
+            \{ - [ - ( {
+                incr depth
+            }
+            \} - ] - ) {
+                incr depth -1
+                if {$depth == 0} {
+                    return [expr {[Kind p [expr {$i + 1}]] eq "=" ? $i : -1}]
+                }
+            }
+            NEWLINE - INDENT - DEDENT - EOF {
+                return -1
+            }
+        }
+    }
+}
+
+# The span of the bracketed group at the current token (see PatternEnd).
+proc surface::parser::PatternSpan {pVar} {
+    upvar 1 $pVar p
+    return [surface::ast::cover [dict get [Peek p] span] [dict get [Peek p [PatternEnd p]] span]]
+}
+
+# Raises a syntax error that carries a stable diagnostic CODE, in the
+# diagnostic's `code` entry and as the start of its message.
+proc surface::parser::FailCode {span code message} {
+    set diagnostic [surface::diagnostic $span "$code: $message"]
+    dict set diagnostic code $code
+    surface::raise $diagnostic
+}
+
+# "[a, b] = value" and the nested "{pair: [a, b]}": a positional List
+# destructuring. Intentionally absent from the language, not unfinished: lists
+# stay sequences, and several differently typed results are a struct value.
+proc surface::parser::ListDestructuringError {span} {
+    FailCode $span LIST-DESTRUCTURING \
+        "positional List destructuring is not supported; use a struct value with named fields instead (a List is for a sequence of values; have the function return a struct, e.g. `result = get_result()` then `{value, error} = result`)"
+}
+
+# "{" field { "," field } [ "," ] "}" "=" valueOrHandled, at a "{" that
+# PatternAhead accepted. Node: destructure, pattern, value.
+proc surface::parser::Destructure {pVar} {
+    upvar 1 $pVar p
+    set start [dict get [Peek p] span]
+    set pattern [Pattern p]
+    Expect p = "\"=\""
+    set value [ValueOrHandled p]
+    return [surface::ast::node destructure [SpanFrom p $start] pattern $pattern value $value]
+}
+
+# A pattern: {span SPAN fields {FIELD...}}, each FIELD a dict
+#   name nameSpan   the struct field read (the left name)
+#   span            the whole entry, `name`, `name: local` or `name: {...}`
+#   local localSpan the binding created (the right name; the field name for
+#                   the shorthand), or "" when the field is destructured
+#   nested          the pattern the field's value is destructured by, or ""
+#   shorthand       1 for `name`
+proc surface::parser::Pattern {pVar} {
+    upvar 1 $pVar p
+    set open [Expect p \{ "\"\{\""]
+    set start [dict get $open span]
+    set fields {}
+    set seen {}
+    while {[Kind p] ne "\}"} {
+        set token [Peek p]
+        switch -- [dict get $token kind] {
+            IDENT {}
+            NEWLINE - DEDENT - EOF {
+                Fail $token "expected \"\}\" to close the destructuring pattern, found [Describe $token]"
+            }
+            .. - . {
+                Fail $token "rest/spread binding is not supported in a struct destructuring: it selects fields by name only and produces no \"remaining fields\" value"
+            }
+            default {
+                if {[regexp {^[a-z]+$} [dict get $token text]] && [dict get $token kind] eq [dict get $token text]} {
+                    Fail $token "expected a field name, found the keyword \"[dict get $token text]\" (a field name is an ordinary identifier)"
+                }
+                Fail $token "expected a field name (an identifier) in the destructuring pattern, found [Describe $token]"
+            }
+        }
+        Advance p
+        set name [dict get $token value]
+        if {$name in $seen} {
+            FailCode [dict get $token span] DUPLICATE-FIELD \
+                "duplicate field \"$name\" in this struct destructuring: each field may be selected only once"
+        }
+        lappend seen $name
+        set field [dict create name $name nameSpan [dict get $token span] local "" localSpan "" \
+            nested "" shorthand 0]
+        switch -- [Kind p] {
+            : {
+                Advance p
+                set target [Peek p]
+                switch -- [dict get $target kind] {
+                    IDENT {
+                        Advance p
+                        dict set field local [dict get $target value]
+                        dict set field localSpan [dict get $target span]
+                    }
+                    \{ {
+                        dict set field nested [Pattern p]
+                    }
+                    [ {
+                        ListDestructuringError [surface::ast::cover [dict get $target span] \
+                            [expr {[PatternEnd p] >= 0 ? [dict get [Peek p [PatternEnd p]] span] : [dict get $target span]}]]
+                    }
+                    default {
+                        Fail $target "expected a binding name or a nested \"\{...\}\" pattern after \"[dict get $token value]:\", found [Describe $target]"
+                    }
+                }
+            }
+            = {
+                Fail [Peek p] "a struct destructuring has no default values: field \"$name\" must exist in the struct"
+            }
+            , - \} {
+                dict set field local $name
+                dict set field localSpan [dict get $token span]
+                dict set field shorthand 1
+            }
+            default {
+                Fail [Peek p] "expected \",\", \":\" or \"\}\" after the field name \"$name\" in the destructuring pattern, found [Describe [Peek p]]"
+            }
+        }
+        dict set field span [SpanFrom p [dict get $token span]]
+        lappend fields $field
+        if {[Kind p] eq ","} {
+            Advance p
+        } elseif {[Kind p] ne "\}"} {
+            Fail [Peek p] "expected \",\" or \"\}\" after the destructuring field \"$name\", found [Describe [Peek p]]"
+        }
+    }
+    Advance p
+    set span [SpanFrom p $start]
+    if {$fields eq {}} {
+        Fail $open "a struct destructuring must select at least one field; \"\{\} = value\" binds nothing"
+    }
+    return [dict create span $span fields $fields]
 }
 
 # ---------------------------------------------------------------------------

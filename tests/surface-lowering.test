@@ -472,4 +472,38 @@ test lower-method-call-visibility-is-lexical {the sugar sees what a reference to
     }
 } -result {{1 ref} {0 project} {1 ref} {1 ref}}
 
+# ---------------------------------------------------------------------------
+# Struct destructuring (STRUCT-DESTRUCTURING.md): `{a, b: c} = e` lowers to a
+# hygienic temporary bound to `e`, then ordinary `project` binds in written
+# order. More in struct-destructuring.test.
+
+test lower-destructure-is-bind-and-projections {the statements it lowers to: tmp = e, a = tmp.a, c = tmp.b} -body {
+    set h [surface::compile "r = \{a: 1, b: 2\}\n\{a, b: c\} = r" t.bot -strict 0]
+    lmap e [hir::walk $h] {
+        switch -- [hir::kind $h $e] {
+            bind    { list bind [regsub {destructure#[0-9]+} [hir::get $h $e name] tmp] }
+            project { list project [hir::get $h $e name] }
+            ref     { list ref [regsub {destructure#[0-9]+} [hir::get $h $e name] tmp] }
+            default { continue }
+        }
+    }
+} -result {{bind r} {bind tmp} {ref r} {bind a} {project a} {ref tmp} {bind c} {project b} {ref tmp}}
+
+test lower-destructure-same-core-ir-as-explicit {the core IR is the explicit spelling's, modulo the temporary's name} -body {
+    set d [hir::lower [surface::compile "r = \{a: 1, b: 2\}\n\{a, b: c\} = r\n\[a, c\]" t.bot -strict 0]]
+    set e [hir::lower [surface::compile "r = \{a: 1, b: 2\}\nt = r\na = t.a\nc = t.b\n\[a, c\]" t.bot -strict 0]]
+    expr {[regsub -all {destructure#[0-9]+} $d t] eq $e}
+} -result 1
+
+test lower-destructure-origins {a projection originates at its pattern entry, reports the field name read, and its bind originates at the name bound} -body {
+    set h [surface::compile "r = \{a: 1, b: 2\}\n\{a, b: c\} = r" t.bot -strict 0]
+    set result {}
+    foreach e [hir::walk $h] {
+        if {[hir::kind $h $e] eq "project"} {
+            lappend result [list [hir::get $h $e name] [at [hir::get $h $e origin]] [at [hir::get $h $e nameOrigin]]]
+        }
+    }
+    set result
+} -result {{a 2:2 2:2} {b 2:5 2:5}}
+
 cleanupTests

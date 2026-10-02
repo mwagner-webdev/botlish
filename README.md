@@ -552,7 +552,8 @@ Surface syntax beyond the minimal language of §17, macros, objects (structs,
 STRUCTS.md, are immutable values: no mutable struct, update syntax, methods or
 inheritance), assignment, mutable
 variables, exceptions, `?` propagation, pattern matching, a type checker
-beyond refinement tracking, async, coroutines, threads, or FFI. A small
+beyond refinement tracking (struct destructuring, STRUCT-DESTRUCTURING.md, is
+irrefutable named projection, not pattern matching), async, coroutines, threads, or FFI. A small
 one-file/one-namespace module system *is* implemented (§17's `namespace`/
 `mod::name` syntax, `surface/modules.tcl`, NATIVE-MODULES.md, and
 MODULE-BINDINGS.md). Modules may retain ordinary immutable bindings whose
@@ -1355,6 +1356,27 @@ add10(32)          # 42 (add captures x)
   call whose name is both a visible function and a possibly-callable field of
   the receiver's struct type is rejected as ambiguous
   (`AMBIGUOUS-METHOD-CALL`). See METHOD-SUGAR.md.
+* **Struct destructuring.** `{user, expires: expiry} = result` binds fields
+  of a struct value by name: it evaluates `result` once, then binds `user` to
+  `result.user` and `expiry` to `result.expires`, exactly as the explicit
+  `tmp = result`, `user = tmp.user`, `expiry = tmp.expires` would. Struct
+  destructuring binds fields by name. It creates ordinary value bindings; it
+  does not create references into the source struct. Fields may be omitted or
+  renamed (`{source_field: local_name}`: the left name is the field read, the
+  right name the binding made; `{field}` is `{field: field}`), named and
+  anonymous structs destructure alike, and a nested pattern
+  (`{user: {name, id}, expires} = result`) destructures a field in turn.
+  Every requested field must exist, statically, under the ordinary
+  field-projection rules (the diagnostics are the projection's); selecting a
+  field twice, or binding a name twice, is rejected. It is not pattern
+  matching and not assignment: no defaults, wildcards, rest/spread, reference
+  modes, or assignment to existing names, and it is only legal where an
+  ordinary binding is (not at module top level, where no struct value is a
+  legal module binding). **Lists are intentionally not destructured
+  positionally** (`[a, b] = value` is the dedicated error
+  `LIST-DESTRUCTURING`): APIs returning heterogeneous values should prefer
+  struct values with named fields, and a List remains the type of a sequence.
+  See STRUCT-DESTRUCTURING.md.
 * Integers (decimal, arbitrary precision, no leading zeros), strings
   (`"..."`, escapes `\\ \" \n \r \t`), `true`, `false`, `unit`, lists
   `[a, b]`, calls `f(x)(y)`.
@@ -1409,6 +1431,7 @@ program binds (§16, "Root references and hygiene").
 | `[a, b]` | `call ^list a b` |
 | `f(a)` | `call f a` |
 | `x = e` | `bind x e` |
+| `{a, b: c} = e` | `bind tmp e`, `bind a (project tmp a)`, `bind c (project tmp b)`: `tmp` is a hygienic temporary (its name contains `#`); no HIR or later pass knows destructuring |
 | `fn f(a): body` | `bind f (block {a} body…)` |
 | `if c: t` / `else: e` | `if c {t…} {e…}`, inline branches; no `else` → empty branch (`unit`) |
 | `if c: t` / `elif c2: t2` / `else: e` | `if c {t…} {if c2 {t2…} {e…}}`: an `elif` is an `if` alone in the previous clause's else branch; no HIR or later pass knows `elif` |

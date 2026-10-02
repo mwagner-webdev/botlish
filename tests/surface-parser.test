@@ -675,4 +675,45 @@ foreach {name source expected} {
     } -result $expected
 }
 
+# ---------------------------------------------------------------------------
+# Struct destructuring (STRUCT-DESTRUCTURING.md): `{field: local, ...} = value`.
+# The LEFT name of a mapping is the struct field read, the RIGHT name the
+# binding made. More in struct-destructuring.test.
+
+test parse-destructure-direction {the left name is the field, the right name is the binding} -body {
+    set node [lindex [dict get [surface::parse "\{original: renamed\} = v" t.bot] body] 0]
+    set field [lindex [dict get $node pattern fields] 0]
+    list [dict get $node kind] [dict get $field name] [dict get $field local] [dict get $field shorthand]
+} -result {destructure original renamed 0}
+
+test parse-destructure-forms {shorthand, renaming, mixed, nested, trailing comma} -body {
+    ast "\{a\} = v\n\{a: b\} = v\n\{a, b: c, d\} = v\n\{a: \{b, c: d\},\} = v"
+} -result {(destructure {a} (name v))
+(destructure {a: b} (name v))
+(destructure {a, b: c, d} (name v))
+(destructure {a: {b, c: d}} (name v))}
+
+test parse-destructure-ids {a destructure statement and its fields have structural ids} -body {
+    ast "\{a, b: \{c\}\} = v" -ids 1
+} -result {(destructure {a <destructure/field1>, b: {c <destructure/field2/field1>} <destructure/field2>} (name v) <destructure/value>) <destructure>}
+
+test parse-destructure-brace-statements-unchanged {a braced statement not followed by `=` is still an anonymous struct value} -body {
+    ast "\{a: 1\}\n\{a: 1\} == b"
+} -result {(struct (a (int 1)))
+(binary == (struct (a (int 1))) (name b))}
+
+foreach {name source expected} {
+    empty             "\{\} = v"             {1:1 a struct destructuring must select at least one field; "{} = value" binds nothing}
+    rest              "\{a, ...r\} = v"      {1:5 rest/spread binding is not supported in a struct destructuring: it selects fields by name only and produces no "remaining fields" value}
+    default           "\{a = 1\} = v"        {1:4 a struct destructuring has no default values: field "a" must exist in the struct}
+    duplicate-field   "\{a, a: b\} = v"      {1:5 DUPLICATE-FIELD: duplicate field "a" in this struct destructuring: each field may be selected only once}
+    list-pattern      "\[a, b\] = v"         {1:1 LIST-DESTRUCTURING: positional List destructuring is not supported; use a struct value with named fields instead (a List is for a sequence of values; have the function return a struct, e.g. `result = get_result()` then `{value, error} = result`)}
+    nested-list       "\{p: \[a, b\]\} = v" {1:5 LIST-DESTRUCTURING: positional List destructuring is not supported; use a struct value with named fields instead (a List is for a sequence of values; have the function return a struct, e.g. `result = get_result()` then `{value, error} = result`)}
+    no-source         "\{a\} ="              {1:6 expected an expression, found end of line}
+} {
+    test parse-destructure-error-$name "destructuring syntax error: $name" -body {
+        parseError $source
+    } -result $expected
+}
+
 cleanupTests

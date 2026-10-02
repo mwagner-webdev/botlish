@@ -49,6 +49,15 @@
 #   binary     op (+ - * == != < <= > >=), opSpan, left, right
 #   logical    op (and | or), opSpan, left, right
 #   bind       name, nameSpan, value (an expression or an if)
+#   destructure  pattern, value (like a bind's) -- "{a, b: c} = value"
+#              (STRUCT-DESTRUCTURING.md). pattern is {span SPAN fields
+#              {FIELD...}}, a FIELD {name nameSpan span local localSpan nested
+#              shorthand}: the struct field read (name: the LEFT name), the
+#              binding made (local: the RIGHT name; the field's own name for
+#              the shorthand) or, instead of a binding, a nested pattern the
+#              field's value is destructured by (local ""). Only the parser
+#              and the printer know it by this name: lowering turns it into
+#              a hygienic temporary bind and ordinary projection binds.
 #   function   name, nameSpan, params ({NAME SPAN TYPE TYPESPAN} tuples --
 #              TYPE is "" and TYPESPAN is "" for an untyped parameter),
 #              paramsSpan (from "(" to the end of the body: the function
@@ -116,11 +125,14 @@
 # A statement's id is its parent's id, "/", and a key:
 #
 #   NAME()     function NAME          NAME=      binding of NAME
-#   if loop return break continue     KIND       any other expression statement
+#   if loop return break continue destructure     KIND       any other
+#                                                 expression statement
 #
 # the Nth statement with the same key among its siblings adding "#N" (N > 1).
 # Inner nodes add their role: then, else, cond, value, callee, receiver, argN, itemN,
-# left, right, operand; a parameter is NAME()/(PARAM). A top-level function
+# left, right, operand; a destructure's value is "value" and its field N is
+# "fieldN" (the field name read "fieldN/name", the binding it makes
+# "fieldN/binding", a nested pattern's field M "fieldN/fieldM"); a parameter is NAME()/(PARAM). A top-level function
 # fib is "fib()"; the x + y in make_adder's inner add is
 # "make_adder()/add()/binary". Editing one function body changes no id outside
 # it; adding a statement changes only the ids of later siblings with its key.
@@ -272,9 +284,12 @@ proc surface::ast::Ids {node id} {
             dict set node left [Ids [dict get $node left] $id/left]
             dict set node right [Ids [dict get $node right] $id/right]
         }
-        bind - return - break {
+        bind - return - break - destructure {
             if {[dict get $node value] ne ""} {
                 dict set node value [Ids [dict get $node value] $id/value]
+            }
+            if {[dict get $node kind] eq "destructure"} {
+                dict set node pattern [PatternIds [dict get $node pattern] $id]
             }
         }
         function {
@@ -326,6 +341,24 @@ proc surface::ast::Ids {node id} {
     return $node
 }
 
+# PATTERN (a destructuring pattern) with an id on every field: the Nth field
+# of a pattern whose parent has id PARENT is PARENT/fieldN, so a nested
+# pattern's fields are PARENT/fieldN/fieldM.
+proc surface::ast::PatternIds {pattern parent} {
+    set fields {}
+    set index 1
+    foreach field [dict get $pattern fields] {
+        dict set field id $parent/field$index
+        if {[dict get $field nested] ne ""} {
+            dict set field nested [PatternIds [dict get $field nested] $parent/field$index]
+        }
+        lappend fields $field
+        incr index
+    }
+    dict set pattern fields $fields
+    return $pattern
+}
+
 # NODE, the node with id ID in the tree AST, or "".
 proc surface::findNode {ast id} {
     if {[dict get $ast id] eq $id} {
@@ -352,7 +385,7 @@ proc surface::ast::Children {node} {
         project            { return [list [dict get $node receiver]] }
         methodcall         { return [concat [list [dict get $node receiver]] [dict get $node args]] }
         binary - logical   { return [list [dict get $node left] [dict get $node right]] }
-        bind - return - break {
+        bind - return - break - destructure {
             return [expr {[dict get $node value] eq "" ? {} : [list [dict get $node value]]}]
         }
         function           { return [list [dict get $node body]] }
@@ -509,6 +542,9 @@ proc surface::ast::Expr {node show} {
         bind {
             return "(bind [dict get $node name] [Expr [dict get $node value] $show])$at"
         }
+        destructure {
+            return "(destructure [PatternText [dict get $node pattern] $show] [Expr [dict get $node value] $show])$at"
+        }
         return - break {
             if {[dict get $node value] eq ""} {
                 return "([dict get $node kind])$at"
@@ -649,23 +685,41 @@ proc surface::ast::Statement {node indent show linesVar} {
             Body [dict get $node body] [expr {$indent + 1}] $show lines
             return
         }
-        bind - return - break {
+        bind - return - break - destructure {
             set value [dict get $node value]
+            set prefix [switch -- [dict get $node kind] {
+                bind { expr {"bind [dict get $node name]$at = "} }
+                destructure { expr {"destructure [PatternText [dict get $node pattern] $show]$at = "} }
+                default { expr {"[dict get $node kind]$at "} }
+            }]
             if {$value ne "" && [dict get $value kind] eq "if"} {
-                set prefix [expr {[dict get $node kind] eq "bind"
-                    ? "bind [dict get $node name]$at = " : "[dict get $node kind]$at "}]
                 If $value $prefix $indent $show lines
                 return
             }
             if {$value ne "" && [dict get $value kind] eq "handledcall"} {
-                set prefix [expr {[dict get $node kind] eq "bind"
-                    ? "bind [dict get $node name]$at = " : "[dict get $node kind]$at "}]
                 HandledCall $value $indent $show lines $prefix
                 return
             }
         }
     }
     lappend lines "$pad[Expr $node $show]"
+}
+
+# Source text of the destructuring PATTERN, as written: "{a, b: c, d: {e}}"
+# (with -spans, each field entry is followed by its @LINE:COLUMN-...).
+proc surface::ast::PatternText {pattern show} {
+    set parts {}
+    foreach field [dict get $pattern fields] {
+        if {[dict get $field nested] ne ""} {
+            set text "[dict get $field name]: [PatternText [dict get $field nested] $show]"
+        } elseif {[dict get $field shorthand]} {
+            set text [dict get $field name]
+        } else {
+            set text "[dict get $field name]: [dict get $field local]"
+        }
+        lappend parts "$text[At $field $show]"
+    }
+    return "\{[::join $parts {, }]\}"
 }
 
 # Source text of one loop iteration CLAUSE (see the `loop` node above).
