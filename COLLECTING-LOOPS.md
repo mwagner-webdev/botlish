@@ -275,6 +275,37 @@ reserved-diagnostic tests (`down from`, `through`), which are now implemented.
   `hir-*` unchanged and green.
 * Full per-file suite: see "Verification".
 
+## Verification
+
+Environment: Tcl 9.0.1 (the repo's pinned `.deb`), rustc 1.97, release build of
+`native/`, `LANG=C.utf8 LC_ALL=C.utf8`.
+
+* **Test suite** — every `tests/*.test` file run on the final tree: 4004 tests,
+  0 failed, 0 skipped (this count was taken before the last additions of this
+  milestone: 14 more `loop-collecting` tests, the executable/native-NIR tests,
+  and 2 `native-root-liveness` tests, all passing individually: 140 and 20
+  respectively). The one baseline comparison attempted (clean worktree of
+  `HEAD`) could not finish inside the tool's background time limit, so the
+  claim is "no failure on the final tree", not a before/after diff; the only
+  tests whose expectations changed are the deliberate ones in
+  `tests/loop-counted.test`.
+* **GC stress** (`BOTLISH_NATIVE_GC_STRESS=1`) — `loop-collecting`,
+  `loop-counted`, `loop-in`, `loops`, `native-listloop`,
+  `native-root-liveness` (including the new collecting/lockstep root tests)
+  pass. CI's own `gc-stress` job on the branch was not run from this session.
+* **Differential fuzzing** — `fuzz.sh 1 300` × four ranges (seeds 1–1200; 300
+  numeric loops vs the independent model + 4 backends, 300 legal lockstep
+  loops vs the zip model + 4 backends, 300 deliberately unequal loops, all
+  rejected at compile time: 142 `LOCKSTEP-UNEQUAL`, 125 `LOCKSTEP-UNPROVEN`,
+  33 degenerate shifts of an already-empty domain skipped; 300 soundness
+  programs): 0 failures. A further 2000 soundness programs (seeds 10003–18002;
+  473 accepted by the compiler, each run on 30 parameter assignments on the
+  cross-checking interpreter and on 3 across all backends): 0 unsound
+  acceptances. A GC-stress slice (seeds 5000–5059): 0 failures.
+* **NIR** — for a statement-position `loop i from 0 to n:` the generated
+  function body is byte-identical to the pre-change output (no `listnew`/
+  `listappend`); no performance numbers were collected (none required).
+
 ## Fuzzing
 
 `audit/collecting-loops/tools/fuzz.tcl` (and `fuzz.sh`, which runs it in
@@ -298,6 +329,11 @@ slices: native JIT memory lives for the life of a process):
   backends.
 
 Results: see "Verification".
+
+The harness caps each slice (`ulimit`, `timeout`) because an early generator
+revision paired a huge literal with a small one, producing an astronomically
+large (but legitimate) domain; big values are now generated only as a *window*
+(both bounds near a boundary).
 
 ## Known proof limitations
 

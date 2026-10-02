@@ -5,6 +5,9 @@
 #
 #   audit/collecting-loops/tools/fuzz.sh ?FIRST-SEED? ?COUNT? ?SLICE?
 export LANG=C.utf8 LC_ALL=C.utf8
+# A generator bug (or an unexpected blowup) must fail loudly, not take the
+# machine down: cap each slice's address space and wall time.
+ulimit -v 4000000 2>/dev/null
 here=$(dirname "$0")
 first=${1:-1}
 count=${2:-400}
@@ -15,7 +18,7 @@ end=$((first + count))
 while [ "$seed" -lt "$end" ]; do
     n=$slice
     if [ $((seed + n)) -gt "$end" ]; then n=$((end - seed)); fi
-    out=$(tclsh9.0 "$here/fuzz.tcl" -seed "$seed" -n "$n" 2>&1)
+    out=$(timeout 900 tclsh9.0 "$here/fuzz.tcl" -seed "$seed" -n "$n" 2>&1)
     status=$?
     echo "$out" | grep -E "^(programs|FAILURE)" 
     if [ $status -ne 0 ]; then

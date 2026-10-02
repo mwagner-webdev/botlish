@@ -141,8 +141,10 @@ proc bigPool {} {
         4611686018427387902 4611686018427387903 4611686018427387904 4611686018427387905]
 }
 
+# Literals are always small: a big literal paired with a small one would make
+# a domain of astronomical size. Big values appear only as a *window* (see
+# genLoop): both bounds big and close together.
 proc literalValue {} {
-    if {[chance 0.12]} { return [pick [bigPool]] }
     return [rnd -4 5]
 }
 
@@ -195,7 +197,18 @@ proc genLoop {depth} {
     if {$depth == 0 && [chance 0.3]} {
         set inner [genLoop 1]
     }
-    return [list $dir $kind [boundSpec $outerVar] [boundSpec $outerVar] \
+    set startSpec [boundSpec $outerVar]
+    set endSpec [boundSpec $outerVar]
+    if {$depth == 0 && $inner eq "" && [chance 0.15]} {
+        # a window far beyond i64 / the tagged-small-Int boundary
+        set base [pick [bigPool]]
+        set startSpec [list lit $base]
+        set endSpec [list lit [expr {$base + [rnd -3 4]}]]
+        if {$dir eq "down" && [chance 0.7]} {
+            set endSpec [list lit [expr {$base - [rnd 0 4]}]]
+        }
+    }
+    return [list $dir $kind $startSpec $endSpec \
         [list $guards [list [pick {1 1 2 -1 3}] [rnd -3 3]] $inner]]
 }
 
@@ -468,10 +481,14 @@ proc genSound {} {
     set specs {n m}
     set clauses {}
     set count [rnd 2 3]
+    # One base cardinality text for the program, so a good share of the
+    # generated pairs really are provably equal (acceptance is what exercises
+    # the proof); each clause deviates from it, or shifts, only sometimes.
+    set base [pick {n m 3 4 n m}]
     for {set c 0} {$c < $count} {incr c} {
         set var [lindex {p q r} $c]
-        set nt [pick {n m n m 3 4}]
-        set delta [pick {0 0 0 1 -1 2}]
+        set nt [expr {[chance 0.25] ? [pick {n m 3 4}] : $base}]
+        set delta [expr {[chance 0.2] ? [pick {1 -1 2}] : 0}]
         if {[chance 0.2]} {
             lappend clauses "$var in xs"
             continue
