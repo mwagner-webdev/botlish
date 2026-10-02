@@ -173,7 +173,11 @@ contexts.
 
     tclsh9.0 audit/elif/tools/fuzz.tcl -n 500 -seed 1000
 
-RESULTS_PLACEHOLDER
+Results: `-n 100 -seed 1` (98 values, 2 errors) and `-n 300 -seed 1000`
+(287 values, 13 errors): **0 equivalence disagreements and 0 backend
+disagreements**. The error outcomes are static type errors from random
+branch-type mixes; both spellings are rejected the same way, and they are
+counted, not hidden (`note:` lines).
 
 A mutation check (a parser that drops one clause's `else`) was caught by 19 of
 30 programs and several tests, so the harness does detect real differences.
@@ -200,4 +204,26 @@ A mutation check (a parser that drops one clause's `else`) was caught by 19 of
 
 ## Answers
 
-ANSWERS_PLACEHOLDER
+1. **Syntax added:** `"if" COND ":" SUITE { "elif" COND ":" SUITE } [ "else" ":" SUITE ]`; `elif` is a reserved keyword.
+2. **Multiple `elif` clauses:** yes, any number (the parser has no limit; see Known limitations for the depth the later passes recurse to).
+3. **Final `else` optional:** yes; without it the chain has the value (`unit`) of a nested `if` without `else`.
+4. **Equivalent to nested `else: if`:** yes. The parser builds exactly that nesting, and the HIR, core IR and NIR are identical.
+5. **Each condition evaluated at most once:** yes (pinned with the in-language evaluation log on all backends).
+6. **Written order:** yes.
+7. **Later conditions skipped after a successful one:** yes; they live in the else branch.
+8. **Expression position:** yes (`x = if ...`, `return if ...`, statement position).
+9. **Existing branch typing/join rules reused:** yes; nothing new was written for them.
+10. **Existing range/exact-value/completion analyses reused:** yes, unchanged. Range, specialization, escape, cardinality and AOT analyses are equal to those of the nested source.
+11. **Surface AST:** an ordinary `if` node alone in a synthetic `suite` (the previous clause's `else`), both marked `elif 1` for the printer only.
+12. **Normalized into HIR:** by the existing `if` lowering; `surface/lower.tcl` needed no logic change (a comment only).
+13. **Native lowering semantic change:** none; `native/` is untouched.
+14. **Equivalent nested source gives equivalent NIR:** yes, byte-identical NIR text, specialized and generic, for four program shapes.
+15. **Source locations preserved:** yes: the clause's `if` and the else scope holding it originate at the `elif` keyword; conditions and bodies keep their own spans; static errors name the clause's own line and column.
+16. **`elif` without `if` rejected cleanly:** yes: `"elif" without a matching "if"`.
+17. **`elif` after `else` rejected:** yes: `"elif" after "else": an "else" ends the if chain`.
+18. **Existing `if` semantics changed:** no.
+19. **Conditional optimization added:** no.
+20. **Interpreter/compiler/native parity:** passed: every behavioral program agrees across interp, compile, native generic and native specialized for both spellings, and the standalone executables print the same value.
+21. **Equivalence fuzzer differences:** none (400 programs across the two runs above).
+22. **Full regression:** passed: `tclsh9.0 tests/all.tcl` ran 4117 tests on each backend: interp 4117 passed; compile 4113 passed, 4 skipped (the interp-only `coreScoping` constraint), 0 failed. The native GC-stress job was not run locally: no `native/` code changed.
+
