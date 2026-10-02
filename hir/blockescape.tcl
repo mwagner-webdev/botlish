@@ -286,6 +286,15 @@ proc hir::blockescape::Bindings {hir spec} {
     set virtual [dict create]
     set wants [dict create]
     set flatCaptures [dict create]
+    # BindingId -> every Block literal (in any region) whose captures name
+    # it: structural, the same in every instance's view.
+    set capturers [dict create]
+    foreach region [dict keys [dict get $context exprs]] {
+        if {$region eq "program"} continue
+        foreach cb [hir::get $hir $region captures] {
+            dict lappend capturers $cb $region
+        }
+    }
     foreach id [dict get $spec used] {
         set instance [dict get $spec instances $id]
         set block [dict get $instance block]
@@ -341,10 +350,43 @@ proc hir::blockescape::Bindings {hir spec} {
 
         # Eligibility: a greatest fixpoint over the candidate graph (see
         # the file header's #3).
+        #
+        # A candidate captured by a Block literal that is neither its own
+        # literal nor one of this region's own literals (a closure nested
+        # inside its own body or inside a sibling capturer's body) is
+        # declined outright: the references there are never examined (the
+        # checks below read the region's, the literal's and each sibling
+        # capturer's DIRECT exprs only), so a nested closure that used the
+        # binding as a value -- stored it, passed it, returned it -- would
+        # go unseen while a direct call elsewhere made the binding look
+        # eligible. (GENERIC-PREDICATE-PROOF-LOSS.md, "Blockescape: nested
+        # capturers": before, such a value use made native lowering crash
+        # by default and, with -block-escape-opt 0, let the dynamic call
+        # enter an instance the analysis thought was never entered.)
+        set regionBlocks [dict create]
+        foreach e $exprs {
+            if {[hir::kind $view $e] eq "block"} {
+                dict set regionBlocks $e 1
+            }
+        }
         set eligible [dict create]
         set instancesOf [dict create]
         set arityOf [dict create]
         foreach {b l} $candidates {
+            set nested 0
+            if {[dict exists $capturers $b]} {
+                foreach x [dict get $capturers $b] {
+                    if {![dict exists $regionBlocks $x]} {
+                        set nested 1
+                    }
+                }
+            }
+            if {$nested} {
+                dict set eligible $b 0
+                dict set instancesOf $b {}
+                dict set arityOf $b [llength [hir::get $view $l params]]
+                continue
+            }
             dict set eligible $b 1
             dict set instancesOf $b [RelevantInstances $spec $l]
             dict set arityOf $b [llength [hir::get $view $l params]]

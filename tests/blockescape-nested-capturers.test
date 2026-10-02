@@ -1,0 +1,121 @@
+# blockescape-nested-capturers.test -- hir::blockescape declines a binding
+# that a closure nested inside its own literal, or inside a sibling
+# capturer, captures (GENERIC-PREDICATE-PROOF-LOSS.md, "Blockescape: nested
+# capturers"). Its reference checks read the region's, the literal's and
+# each sibling capturer's DIRECT expressions only; with a direct self call
+# (or a direct sibling call) present, a nested closure that used the binding
+# as a value went unseen and the binding was de-closured anyway: native
+# lowering crashed by default ("self in a function without environment",
+# "eN does not capture bN"), and with -block-escape-opt 0 the analyses that
+# trust the de-closure proof could be wrong about which instances run.
+# Both programs were found by the adversarial review of loss point 2.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+proc dedent {text} {
+    set lines [split $text \n]
+    set indent 1000
+    foreach line $lines {
+        if {[string trim $line] eq ""} continue
+        set n [expr {[string length $line] - [string length [string trimleft $line " "]]}]
+        if {$n < $indent} { set indent $n }
+    }
+    return [join [lmap line $lines {string range $line $indent end}] \n]
+}
+
+# rec calls itself directly, and a closure nested in it puts rec in a List
+# and calls it dynamically with a bignum.
+set selfShape {
+    fn h(x):
+        x + 1
+    fn other(a, p):
+        0
+    fn outer(k):
+        fn rec(n, p):
+            fn bounce(m):
+                fs = [other, rec]
+                g = list_get(fs, k)
+                g(m * 10000000000000000000000, p)
+            if n > 100:
+                h(n)
+            else:
+                if n == 5:
+                    bounce(n)
+                else:
+                    if n <= 0:
+                        0
+                    else:
+                        if p("a"):
+                            h(n) + rec(n - 1, p)
+                        else:
+                            0
+        rec(10, is_tcl_alpha)
+    outer(1)
+}
+
+# c calls its sibling f directly, and a closure nested in c puts f in a List.
+set siblingShape {
+    fn h(x):
+        x + 1
+    fn other(a, p):
+        0
+    fn outer(k):
+        fn f(n, p):
+            if p("a"):
+                h(n) + k
+            else:
+                0
+        fn c(m, p):
+            fn d(z):
+                fs = [other, f]
+                g = list_get(fs, k)
+                g(z * 10000000000000000000000, p)
+            f(m, p) + d(m)
+        c(7, is_tcl_alpha)
+    outer(1)
+}
+
+# A nested closure that only CALLS the binding is declined too (the check
+# is conservative: nested references are not examined at all).
+set nestedCallShape {
+    fn outer(k):
+        fn f(n):
+            n + k
+        fn c(m):
+            fn d(z):
+                f(z)
+            f(m) + d(m)
+        c(7)
+    outer(1)
+}
+
+proc wanted {text} {
+    set hir [surface::compile [dedent $text] t.bot -strict 0]
+    set spec [hir::specialize::analyze $hir]
+    set be [hir::blockescape::analyze $hir $spec]
+    lsort [lmap pair [hir::blockescape::wantedInstances $hir $spec $be] {
+        lindex [split [lindex $pair 1] <] 0
+    }]
+}
+
+test blockescape-nested-capturer-declined {a binding captured by a nested closure (rec, f) is not de-closured; the nested closures themselves and the sibling capturer still are} -body {
+    list [wanted $selfShape] [wanted $siblingShape] [wanted $nestedCallShape]
+} -result {bounce {c d} {c d}}
+
+foreach {name src expected} [list self $selfShape 50000000000000000000046 \
+        sibling $siblingShape 70000000000000000000011 nestedcall $nestedCallShape 16] {
+    foreach opts {{} {-block-escape-opt 0} {-exact-callable-opt 0} {-exact-callable-opt 0 -block-escape-opt 0}} {
+        test "blockescape-nested-capturer-parity-$name-[join $opts {}]" \
+            "nested capturer program $name ($opts): native agrees with interp and compile" -body {
+            set hir [surface::compile [dedent $src] t.bot -strict 0]
+            set outcomes [lmap backend {interp compile} {outcomeUnderHir $backend $hir}]
+            resetEffects
+            lappend outcomes [list value [core::value::show [native::evalHir $hir {*}$opts] 1] {}]
+            set outcomes [lsort -unique $outcomes]
+            expr {[llength $outcomes] == 1 ? [lindex $outcomes 0 1] : $outcomes}
+        } -result $expected
+    }
+}
+
+cleanupTests

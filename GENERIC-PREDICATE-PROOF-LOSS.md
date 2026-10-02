@@ -14,6 +14,7 @@ section below; the status table is the index.
 | 3 | call sites read the ascending phase's callee result summaries, never narrowed | `hir/range.tcl` `Fixpoint` / `Call` | **fixed** (this report, [Fix 3](#fix-3-result-summary-narrowing)) |
 | – | prerequisite found while verifying fix 3: `hir::range` never visited a call's callee expression (unsound; native miscompiles on `main`) | `hir/range.tcl` `Call` | **fixed** ([Callee-position calls](#callee-position-calls-soundness-fix)) |
 | – | prerequisite found while verifying fix 3: the `bit_and` identity fold trusted interval Ranges (unsound; native miscompiles on `main`) | `native/lower.tcl` `FoldPureBitwise` | **fixed** ([`bit_and` identity fold](#bit_and-identity-fold-soundness-fix)) |
+| – | prerequisite found while verifying point 2: `hir::blockescape` never examined a closure nested in a candidate's own literal or in a sibling capturer (unsound; native crashes on `main`, wrong results with `-block-escape-opt 0` once point 2 trusts it) | `hir/blockescape.tcl` `Bindings` | **fixed** ([Blockescape: nested capturers](#blockescape-nested-capturers-soundness-fix)) |
 | 4 | counted loops always use tagged compare/advance; their bounds are tagged RawInt consumers | `native/lower.tcl` `CountLoop`, `native/rawabi.tcl:696-709` | open |
 | 5 | the RawInt ABI never reaches de-closured (internal-capture) functions | `native/lower.tcl:2246` (`InternalFunction`), `:4676` (`abiCall`), `native/rawabi.tcl:64-66` | open |
 
@@ -598,6 +599,59 @@ removing both checks (and keeping `TooLarge` with the pass off).
 4. **The pass runs on the same round budget as `Fixpoint`**
    (`4 × instances + 16`); a program that needs more commits nothing and
    keeps M9's facts.
+
+## Blockescape: nested capturers (soundness fix)
+
+Found by the adversarial review of loss point 2, fixed first (its own
+commit), because point 2 relies on the property it breaks.
+
+`hir::blockescape` de-closures a closure binding B only if every reference
+to B is the callee of an exact call. It checks the references in the
+region's own expressions, in the literal's own body (self calls) and in the
+body of each sibling closure of the same region that captures B. Those are
+*direct* expressions only: a closure nested one level deeper is a region of
+its own and was never looked at. `HasSelfCapture` covered a nested self
+reference only when the literal had no direct self call, and a sibling
+capturer only needed one direct call. So a nested closure that used B as a
+*value* went unseen whenever a direct call existed somewhere:
+
+```
+fn outer(k):
+    fn rec(n, p):
+        fn bounce(m):
+            fs = [other, rec]          # rec as a value, inside rec
+            g = list_get(fs, k)
+            g(m * 10000000000000000000000, p)
+        ...                           # and a direct self call rec(n - 1, p)
+    rec(10, is_tcl_alpha)
+```
+
+On `main` this program (and the sibling variant, `c` calling `f` directly
+while `c`'s nested `d` stores `f`) fails to compile natively ("self in a
+function without environment", "eN does not capture bN"). With
+`-block-escape-opt 0` it ran on `main`, but with point 2 it returned
+garbage: the "never-entered" generic entry of `rec` was entered through
+the List, and a callee whose RawInt ABI had been planned from live callers
+only unboxed a bignum. With `-exact-callable-opt 0 -block-escape-opt 0`
+`main` was already wrong (stack exhaustion, garbage), through the same
+hole and `closed`.
+
+**The change** (`hir/blockescape.tcl`, `Bindings`): a candidate captured by
+any Block literal that is neither one of its region's own literals (its own
+literal, a sibling) nor checked otherwise -- that is, by a closure nested
+inside its literal or inside a sibling -- is declined outright. Conservative:
+a nested closure that only *calls* B declines it too (references there are
+not examined at all); B is then an ordinary heap closure, as any binding
+with an unexamined use.
+
+**Evidence.** Corpus (44 programs, `bench`, `examples/stdlib`,
+`examples/surface`, Core-IR text): NIR byte-identical to `main` in every
+program; no corpus closure has a nested capturer. Tests
+(`tests/blockescape-nested-capturers.test`, 13): which bindings are still
+de-closured (the nested closures and the sibling capturer, not `rec`/`f`),
+and interp/compile/cranelift parity for the two review programs and a
+nested call-only shape under default flags, `-block-escape-opt 0`,
+`-exact-callable-opt 0` and both.
 
 ## Next steps (points 1, 2, 4, 5)
 
