@@ -134,6 +134,7 @@ off and reproduces the tagged Strings.
 | `tests/packed-ascii.test` (new) | 47 tests, all pass: plan/proof, 8/9-character boundary, NUL/DEL/U+0080, tier joins and widening, mixed equality, errors, GC stress, standalone executables, differential parity across every backend and every switch combination (4 backends x short-opt x pack-opt x inlining) |
 | `tests/short-string.test` | 59 tests, all pass, now with the ASCII tier off (they pin the ShortString1 tier) |
 | Rust unit tests | 104 + 28 pass (new: packed layout/length/canonical form, round trips, NIR kind validation, generic-entry wrappers) |
+| differential fuzz with the demand rule (same seeds; the outcome set now also varies the rule) | see `out/fuzz-demand*.txt`: 1,471 + 491 under GC stress + 291 with specialization off, **0 disagreements** |
 | differential fuzz (generator extended with ASCII 2..8, NUL/DEL, the 9-character and non-ASCII multi-character controls) | 1,471 programs + 491 under GC stress + 291 with specialization off: **0 disagreements** |
 | full `tests/all.tcl`, two passes, before the demand rule | 3,830 / 3,839 and 3,826 + 4 skipped / 3,839; the same 9 tests fail in both |
 | full `tests/all.tcl`, two passes, with the demand rule | 3,855 / 3,856 and 3,851 + 4 skipped / 3,856: only `native-validator-predicate-known-result-nir-shape` failed, because the length it counts is now `asciilen`; its pin now runs with the switch off and passes |
