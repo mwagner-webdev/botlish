@@ -2,7 +2,7 @@ source:  examples/stdlib/csv_geometric.bot
 backend: Cranelift (specialize=1)
 asm:     csv_geometric.asm
 vcode:   csv_geometric.vcode
-machine-code bytes: 7578 (per function: 68 461 461 81 81 357 412 412 279 279 81 365 430 585 1063 352 783 215 488 325)
+machine-code bytes: 7715 (per function: 68 461 461 81 81 357 412 412 279 279 81 496 430 585 1069 352 783 215 488 325)
 
 functions:
   0 <program entry>: nir-regs=2
@@ -16,10 +16,10 @@ functions:
   8 geo_append<mutarray, int, str>: nir-regs=5
   9 geo_append<mutarray, int, List[str]>: nir-regs=5
   10 geo_finish<mutarray, int>: nir-regs=3
-  11 peek<str, int>: nir-regs=11
+  11 peek<str, int>: nir-regs=12
   12 peek<str, int>: nir-regs=15
   13 scan_unquoted<str, int, int>: nir-regs=28
-  14 scan_quoted<str, int, str>: nir-regs=35
+  14 scan_quoted<str, int, str>: nir-regs=32
   15 scan_field<str, int>: nir-regs=17
   16 scan_record_rest<str, int, mutarray, int>: nir-regs=29
   17 scan_record<str, int>: nir-regs=9
@@ -171,12 +171,12 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 11 "peek"
-    NIR regs: 11
-    raw regs: 1
-    managed-capable regs: 10
+    NIR regs: 12
+    raw regs: 3
+    managed-capable regs: 9
     effects: may_error=true may_gc=true
-    safepoints: 2
-    root candidates: 4
+    safepoints: 1
+    root candidates: 3
     max live roots: 3
     shadow slots: 3
     entry zero slots: 0
@@ -210,15 +210,15 @@ GC roots (csv_geometric.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 14 "scan_quoted"
-    NIR regs: 35
+    NIR regs: 32
     raw regs: 6
-    managed-capable regs: 29
+    managed-capable regs: 26
     effects: may_error=true may_gc=true
-    safepoints: 9
+    safepoints: 10
     root candidates: 13
-    max live roots: 5
-    shadow slots: 5
-    entry zero slots: 2
+    max live roots: 4
+    shadow slots: 4
+    entry zero slots: 1
     depth reservation: no
     storage: native frame
   
@@ -291,5 +291,5 @@ mechanical pattern counts (triage only; see report for interpretation):
   15 x calls to rt_int_add
   1 x calls to rt_int_mul
   8 x calls to rt_int_cmp
-  32 x calls to other rt_* helpers
+  34 x calls to other rt_* helpers
   2 x guard/guardbool instructions

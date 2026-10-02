@@ -2,24 +2,24 @@ source:  examples/stdlib/string_replace.bot
 backend: Cranelift (specialize=1)
 asm:     string_replace.asm
 vcode:   string_replace.vcode
-machine-code bytes: 2618 (per function: 561 476 1308 273)
+machine-code bytes: 2776 (per function: 520 476 1451 329)
 
 functions:
   0 <program entry>: nir-regs=21
   1 matches_at<str, str, int>: nir-regs=12
-  2 replace_from<str, str, str, int, int, str>: nir-regs=25
+  2 replace_from<str, str, str, int, int, str>: nir-regs=26
   3 replace<str, str, str>: nir-regs=16
 
 GC roots (string_replace.asm's NIR ids match roots.txt's "function N"):
   function 0 "<program>"
     NIR regs: 21
-    raw regs: 0
-    managed-capable regs: 21
+    raw regs: 5
+    managed-capable regs: 16
     effects: may_error=true may_gc=true
     safepoints: 6
-    root candidates: 20
-    max live roots: 7
-    shadow slots: 7
+    root candidates: 15
+    max live roots: 6
+    shadow slots: 6
     entry zero slots: 4
     depth reservation: no
     storage: native frame
@@ -38,27 +38,27 @@ GC roots (string_replace.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 2 "replace_from"
-    NIR regs: 25
-    raw regs: 1
+    NIR regs: 26
+    raw regs: 2
     managed-capable regs: 24
     effects: may_error=true may_gc=true
-    safepoints: 6
+    safepoints: 7
     root candidates: 11
     max live roots: 7
     shadow slots: 7
-    entry zero slots: 0
+    entry zero slots: 1
     depth reservation: no
     storage: native frame
   
   function 3 "replace"
     NIR regs: 16
-    raw regs: 4
-    managed-capable regs: 12
+    raw regs: 5
+    managed-capable regs: 11
     effects: may_error=true may_gc=true
     safepoints: 1
-    root candidates: 6
-    max live roots: 6
-    shadow slots: 6
+    root candidates: 5
+    max live roots: 5
+    shadow slots: 5
     entry zero slots: 0
     depth reservation: no
     storage: native frame
@@ -66,4 +66,4 @@ GC roots (string_replace.asm's NIR ids match roots.txt's "function N"):
 mechanical pattern counts (triage only; see report for interpretation):
   4 x calls to rt_int_add
   2 x calls to rt_int_cmp
-  14 x calls to other rt_* helpers
+  17 x calls to other rt_* helpers

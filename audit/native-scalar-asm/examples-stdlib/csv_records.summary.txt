@@ -2,7 +2,7 @@ source:  examples/stdlib/csv_records.bot
 backend: Cranelift (specialize=1)
 asm:     csv_records.asm
 vcode:   csv_records.vcode
-machine-code bytes: 23234 (per function: 45 461 461 461 81 81 81 357 412 412 412 278 278 278 81 365 430 585 1063 352 783 215 488 325 388 524 70 493 114 61 61 61 61 61 168 179 245 804 1248 429 380 439 977 766 817 665 1168 836 107 427 259 629 634 78 78 1222)
+machine-code bytes: 23371 (per function: 45 461 461 461 81 81 81 357 412 412 412 278 278 278 81 496 430 585 1069 352 783 215 488 325 388 524 70 493 114 61 61 61 61 61 168 179 245 804 1248 429 380 439 977 766 817 665 1168 836 107 427 259 629 634 78 78 1222)
 
 functions:
   0 <program entry>: nir-regs=1
@@ -20,10 +20,10 @@ functions:
   12 geo_append<mutarray, int, List[str]>: nir-regs=5
   13 geo_append<mutarray, int, mutarray>: nir-regs=5
   14 geo_finish<mutarray, int>: nir-regs=3
-  15 peek<str, int>: nir-regs=11
+  15 peek<str, int>: nir-regs=12
   16 peek<str, int>: nir-regs=15
   17 scan_unquoted<str, int, int>: nir-regs=28
-  18 scan_quoted<str, int, str>: nir-regs=35
+  18 scan_quoted<str, int, str>: nir-regs=32
   19 scan_field<str, int>: nir-regs=17
   20 scan_record_rest<str, int, mutarray, int>: nir-regs=29
   21 scan_record<str, int>: nir-regs=9
@@ -259,12 +259,12 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 15 "peek"
-    NIR regs: 11
-    raw regs: 1
-    managed-capable regs: 10
+    NIR regs: 12
+    raw regs: 3
+    managed-capable regs: 9
     effects: may_error=true may_gc=true
-    safepoints: 2
-    root candidates: 4
+    safepoints: 1
+    root candidates: 3
     max live roots: 3
     shadow slots: 3
     entry zero slots: 0
@@ -298,15 +298,15 @@ GC roots (csv_records.asm's NIR ids match roots.txt's "function N"):
     storage: native frame
   
   function 18 "scan_quoted"
-    NIR regs: 35
+    NIR regs: 32
     raw regs: 6
-    managed-capable regs: 29
+    managed-capable regs: 26
     effects: may_error=true may_gc=true
-    safepoints: 9
+    safepoints: 10
     root candidates: 13
-    max live roots: 5
-    shadow slots: 5
-    entry zero slots: 2
+    max live roots: 4
+    shadow slots: 4
+    entry zero slots: 1
     depth reservation: no
     storage: native frame
   
@@ -796,5 +796,5 @@ mechanical pattern counts (triage only; see report for interpretation):
   1 x calls to rt_int_sub
   7 x calls to rt_int_mul
   17 x calls to rt_int_cmp
-  135 x calls to other rt_* helpers
+  137 x calls to other rt_* helpers
   23 x guard/guardbool instructions
