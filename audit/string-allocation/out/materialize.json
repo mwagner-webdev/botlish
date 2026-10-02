@@ -1,0 +1,681 @@
+{
+ "scalar U+0061": {
+  "old": {
+   "alloc": {
+    "ir": 416.5514,
+    "categories": {
+     "allocator (glibc)": 187.28513333333333,
+     "generated code (loop + strlen)": 3.9991999999999983,
+     "Rust allocator shims": 34.0,
+     "memcpy/memmove": 16.0,
+     "runtime constructors": 175.0,
+     "free (glibc)": 0.2670666666666667
+    },
+    "malloc_calls": 2.7706666666666666,
+    "free_calls": 0.0
+   },
+   "free": {
+    "ir": 295.9202,
+    "categories": {
+     "Rust allocator shims": 10.0,
+     "GC bookkeeping + free_object": 40.0054,
+     "free (glibc)": 245.9148
+    },
+    "free_calls": 2.7733333333333334
+   },
+   "lifecycle": {
+    "ir": 862.0243999999999,
+    "categories": {
+     "GC bookkeeping + free_object": 41.99005,
+     "free (glibc)": 328.579,
+     "other": 0.07114999999999944,
+     "allocator (glibc)": 252.37955,
+     "runtime constructors": 175.00015,
+     "generated code (loop + strlen)": 3.9999000000000002,
+     "Rust allocator shims": 44.0022,
+     "memcpy/memmove": 16.0024
+    },
+    "malloc_calls": 2.0001,
+    "free_calls": 2.0001
+   }
+  },
+  "new": {
+   "alloc": {
+    "ir": 204.16693333333333,
+    "categories": {
+     "allocator (glibc)": 95.16773333333333,
+     "generated code (loop + strlen)": 3.9991999999999983,
+     "Rust allocator shims": 17.0,
+     "runtime constructors": 88.0
+    },
+    "malloc_calls": 1.4374,
+    "free_calls": 0.0
+   },
+   "free": {
+    "ir": 160.96286666666666,
+    "categories": {
+     "GC bookkeeping + free_object": 33.0054,
+     "Rust allocator shims": 5.0,
+     "free (glibc)": 122.95746666666666
+    },
+    "free_calls": 1.4400666666666666
+   },
+   "lifecycle": {
+    "ir": 509.1685,
+    "categories": {
+     "GC bookkeeping + free_object": 25.99975,
+     "free (glibc)": 155.00805,
+     "other": 0.05445000000000048,
+     "Rust allocator shims": 22.0013,
+     "runtime constructors": 88.00014999999999,
+     "allocator (glibc)": 214.1048,
+     "generated code (loop + strlen)": 4.0
+    },
+    "malloc_calls": 1.00005,
+    "free_calls": 1.0
+   }
+  }
+ },
+ "scalar U+2026": {
+  "old": {
+   "alloc": {
+    "ir": 457.5514,
+    "categories": {
+     "allocator (glibc)": 187.28513333333333,
+     "generated code (loop + strlen)": 3.9991999999999983,
+     "Rust allocator shims": 34.0,
+     "memcpy/memmove": 18.0,
+     "runtime constructors": 214.0,
+     "free (glibc)": 0.2670666666666667
+    },
+    "malloc_calls": 2.7706666666666666,
+    "free_calls": 0.0
+   },
+   "free": {
+    "ir": 295.9202,
+    "categories": {
+     "GC bookkeeping + free_object": 40.0054,
+     "Rust allocator shims": 10.0,
+     "free (glibc)": 245.9148
+    },
+    "free_calls": 2.7733333333333334
+   },
+   "lifecycle": {
+    "ir": 878.75355,
+    "categories": {
+     "GC bookkeeping + free_object": 41.572449999999996,
+     "free (glibc)": 318.76605000000006,
+     "other": 0.03929999999999973,
+     "runtime constructors": 214.00015,
+     "Rust allocator shims": 44.0022,
+     "memcpy/memmove": 18.003,
+     "allocator (glibc)": 238.3704,
+     "generated code (loop + strlen)": 4.0
+    },
+    "malloc_calls": 2.0001,
+    "free_calls": 2.0001
+   }
+  },
+  "new": {
+   "alloc": {
+    "ir": 240.16693333333333,
+    "categories": {
+     "allocator (glibc)": 95.16773333333333,
+     "generated code (loop + strlen)": 3.9991999999999983,
+     "Rust allocator shims": 17.0,
+     "runtime constructors": 124.0
+    },
+    "malloc_calls": 1.4374,
+    "free_calls": 0.0
+   },
+   "free": {
+    "ir": 160.96286666666666,
+    "categories": {
+     "GC bookkeeping + free_object": 33.0054,
+     "Rust allocator shims": 5.0,
+     "free (glibc)": 122.95746666666666
+    },
+    "free_calls": 1.4400666666666666
+   },
+   "lifecycle": {
+    "ir": 616.6143000000001,
+    "categories": {
+     "GC bookkeeping + free_object": 39.1415,
+     "free (glibc)": 228.45125,
+     "other": 0.07970000000000432,
+     "Rust allocator shims": 22.003500000000003,
+     "runtime constructors": 124.0003,
+     "memcpy/memmove": 0.003,
+     "allocator (glibc)": 198.93505000000002,
+     "generated code (loop + strlen)": 4.0
+    },
+    "malloc_calls": 1.00015,
+    "free_calls": 1.0001
+   }
+  }
+ },
+ "scalar U+1F600": {
+  "old": {
+   "alloc": {
+    "ir": 462.5514,
+    "categories": {
+     "allocator (glibc)": 187.28513333333333,
+     "generated code (loop + strlen)": 3.9991999999999983,
+     "Rust allocator shims": 34.0,
+     "memcpy/memmove": 15.0,
+     "runtime constructors": 222.0,
+     "free (glibc)": 0.2670666666666667
+    },
+    "malloc_calls": 2.7706666666666666,
+    "free_calls": 0.0
+   },
+   "free": {
+    "ir": 295.9202,
+    "categories": {
+     "Rust allocator shims": 10.0,
+     "GC bookkeeping + free_object": 40.0054,
+     "free (glibc)": 245.9148
+    },
+    "free_calls": 2.7733333333333334
+   },
+   "lifecycle": {
+    "ir": 872.5547,
+    "categories": {
+     "GC bookkeeping + free_object": 41.378049999999995,
+     "free (glibc)": 314.2109500000001,
+     "other": 0.0666999999999991,
+     "runtime constructors": 222.00015,
+     "Rust allocator shims": 44.0022,
+     "memcpy/memmove": 15.003,
+     "allocator (glibc)": 231.89365,
+     "generated code (loop + strlen)": 4.0
+    },
+    "malloc_calls": 2.0001,
+    "free_calls": 2.0001
+   }
+  },
+  "new": {
+   "alloc": {
+    "ir": 243.16693333333333,
+    "categories": {
+     "allocator (glibc)": 95.16773333333333,
+     "generated code (loop + strlen)": 3.9991999999999983,
+     "Rust allocator shims": 17.0,
+     "runtime constructors": 127.0
+    },
+    "malloc_calls": 1.4374,
+    "free_calls": 0.0
+   },
+   "free": {
+    "ir": 160.96286666666666,
+    "categories": {
+     "Rust allocator shims": 5.0,
+     "GC bookkeeping + free_object": 33.0054,
+     "free (glibc)": 122.95746666666666
+    },
+    "free_calls": 1.4400666666666666
+   },
+   "lifecycle": {
+    "ir": 606.3888999999999,
+    "categories": {
+     "GC bookkeeping + free_object": 38.68879999999999,
+     "free (glibc)": 223.36149999999998,
+     "other": 0.08170000000000144,
+     "Rust allocator shims": 22.003500000000003,
+     "runtime constructors": 127.0003,
+     "memcpy/memmove": 0.003,
+     "allocator (glibc)": 191.25010000000003,
+     "generated code (loop + strlen)": 4.0
+    },
+    "malloc_calls": 1.00015,
+    "free_calls": 1.0001
+   }
+  }
+ },
+ "scalar Empty": {
+  "old": {
+   "alloc": {
+    "ir": 220.16693333333333,
+    "categories": {
+     "allocator (glibc)": 95.16773333333333,
+     "generated code (loop + strlen)": 3.9991999999999983,
+     "Rust allocator shims": 17.0,
+     "runtime constructors": 104.0
+    },
+    "malloc_calls": 1.4373333333333334,
+    "free_calls": 0.0
+   },
+   "free": {
+    "ir": 160.96286666666666,
+    "categories": {
+     "Rust allocator shims": 5.0,
+     "GC bookkeeping + free_object": 33.0054,
+     "free (glibc)": 122.95746666666666
+    },
+    "free_calls": 1.44
+   },
+   "lifecycle": {
+    "ir": 481.31215,
+    "categories": {
+     "GC bookkeeping + free_object": 35.21079999999999,
+     "free (glibc)": 183.9511,
+     "other": 0.05155000000000368,
+     "runtime constructors": 104.00014999999999,
+     "Rust allocator shims": 22.002200000000002,
+     "memcpy/memmove": 0.003,
+     "allocator (glibc)": 132.09335000000002,
+     "generated code (loop + strlen)": 4.0
+    },
+    "malloc_calls": 1.0001,
+    "free_calls": 1.0001
+   }
+  },
+  "new": {
+   "alloc": {
+    "ir": 20.9992,
+    "categories": {
+     "generated code (loop + strlen)": 3.9991999999999983,
+     "runtime constructors": 17.0
+    },
+    "malloc_calls": 0.0,
+    "free_calls": 0.0
+   },
+   "free": {
+    "ir": 0.0,
+    "categories": {},
+    "free_calls": 0.0
+   },
+   "lifecycle": {
+    "ir": 20.978899999999996,
+    "categories": {
+     "other": -0.029499999999996855,
+     "free (glibc)": 0.006,
+     "GC bookkeeping + free_object": -0.00175,
+     "allocator (glibc)": 0.00415,
+     "runtime constructors": 17.0,
+     "generated code (loop + strlen)": 4.0
+    },
+    "malloc_calls": 0.0,
+    "free_calls": 0.0
+   }
+  }
+ },
+ "packed ASCII length 0": {
+  "old": {
+   "alloc": {
+    "ir": 249.57353333333333,
+    "categories": {
+     "allocator (glibc)": 95.41973333333334,
+     "generated code (loop + strlen)": 3.9991999999999983,
+     "Rust allocator shims": 17.0,
+     "free (glibc)": 0.15460000000000002,
+     "runtime constructors": 133.0
+    },
+    "malloc_calls": 1.4373333333333334,
+    "free_calls": 0.0
+   },
+   "free": {
+    "ir": 160.9626,
+    "categories": {
+     "Rust allocator shims": 5.0,
+     "GC bookkeeping + free_object": 33.0054,
+     "free (glibc)": 122.9572
+    },
+    "free_calls": 1.44
+   },
+   "lifecycle": {
+    "ir": 510.34420000000006,
+    "categories": {
+     "GC bookkeeping + free_object": 35.21254999999999,
+     "free (glibc)": 183.95449999999997,
+     "other": 0.0632500000000018,
+     "allocator (glibc)": 132.10785,
+     "runtime constructors": 133.00015,
+     "generated code (loop + strlen)": 4.0001,
+     "Rust allocator shims": 22.002200000000002,
+     "memcpy/memmove": 0.0036
+    },
+    "malloc_calls": 1.0001,
+    "free_calls": 1.0001
+   }
+  },
+  "new": {
+   "alloc": {
+    "ir": 38.9992,
+    "categories": {
+     "generated code (loop + strlen)": 3.9991999999999983,
+     "runtime constructors": 35.0
+    },
+    "malloc_calls": 0.0,
+    "free_calls": 0.0
+   },
+   "free": {
+    "ir": 0.0,
+    "categories": {},
+    "free_calls": 0.0
+   },
+   "lifecycle": {
+    "ir": 39.010949999999994,
+    "categories": {
+     "other": -0.0013499999999978998,
+     "free (glibc)": 0.0038,
+     "runtime constructors": 35.0,
+     "allocator (glibc)": 0.0085,
+     "generated code (loop + strlen)": 4.0
+    },
+    "malloc_calls": 0.0,
+    "free_calls": 0.0
+   }
+  }
+ },
+ "packed ASCII length 1": {
+  "old": {
+   "alloc": {
+    "ir": 386.5514,
+    "categories": {
+     "allocator (glibc)": 187.28513333333333,
+     "generated code (loop + strlen)": 3.9991999999999983,
+     "Rust allocator shims": 34.0,
+     "memcpy/memmove": 16.0,
+     "free (glibc)": 0.2670666666666667,
+     "runtime constructors": 145.0
+    },
+    "malloc_calls": 2.7706666666666666,
+    "free_calls": 0.0
+   },
+   "free": {
+    "ir": 295.9202,
+    "categories": {
+     "Rust allocator shims": 10.0,
+     "GC bookkeeping + free_object": 40.0054,
+     "free (glibc)": 245.9148
+    },
+    "free_calls": 2.7733333333333334
+   },
+   "lifecycle": {
+    "ir": 831.9988,
+    "categories": {
+     "GC bookkeeping + free_object": 41.98875,
+     "free (glibc)": 328.56970000000007,
+     "other": 0.07609999999999979,
+     "allocator (glibc)": 252.3582,
+     "runtime constructors": 145.00015,
+     "generated code (loop + strlen)": 4.0001,
+     "Rust allocator shims": 44.0022,
+     "memcpy/memmove": 16.0036
+    },
+    "malloc_calls": 2.0001,
+    "free_calls": 2.0001
+   }
+  },
+  "new": {
+   "alloc": {
+    "ir": 251.16693333333333,
+    "categories": {
+     "allocator (glibc)": 95.16773333333333,
+     "generated code (loop + strlen)": 3.9991999999999983,
+     "Rust allocator shims": 17.0,
+     "runtime constructors": 135.0
+    },
+    "malloc_calls": 1.4374,
+    "free_calls": 0.0
+   },
+   "free": {
+    "ir": 160.96286666666666,
+    "categories": {
+     "GC bookkeeping + free_object": 33.0054,
+     "Rust allocator shims": 5.0,
+     "free (glibc)": 122.95746666666666
+    },
+    "free_calls": 1.4400666666666666
+   },
+   "lifecycle": {
+    "ir": 556.1434,
+    "categories": {
+     "GC bookkeeping + free_object": 26.0,
+     "free (glibc)": 154.99775,
+     "other": 0.041199999999999966,
+     "runtime constructors": 135.0001,
+     "Rust allocator shims": 22.0013,
+     "allocator (glibc)": 214.10305,
+     "generated code (loop + strlen)": 4.0
+    },
+    "malloc_calls": 1.00005,
+    "free_calls": 1.0
+   }
+  }
+ },
+ "packed ASCII length 2": {
+  "old": {
+   "alloc": {
+    "ir": 388.5514,
+    "categories": {
+     "allocator (glibc)": 187.28513333333333,
+     "generated code (loop + strlen)": 3.9991999999999983,
+     "Rust allocator shims": 34.0,
+     "memcpy/memmove": 18.0,
+     "free (glibc)": 0.2670666666666667,
+     "runtime constructors": 145.0
+    },
+    "malloc_calls": 2.7706666666666666,
+    "free_calls": 0.0
+   },
+   "free": {
+    "ir": 295.9202,
+    "categories": {
+     "GC bookkeeping + free_object": 40.0054,
+     "Rust allocator shims": 10.0,
+     "free (glibc)": 245.9148
+    },
+    "free_calls": 2.7733333333333334
+   },
+   "lifecycle": {
+    "ir": 821.5509,
+    "categories": {
+     "GC bookkeeping + free_object": 41.773999999999994,
+     "free (glibc)": 323.5427000000001,
+     "other": 0.043349999999998445,
+     "runtime constructors": 145.00015,
+     "Rust allocator shims": 44.0022,
+     "memcpy/memmove": 18.003,
+     "allocator (glibc)": 245.1855,
+     "generated code (loop + strlen)": 4.0
+    },
+    "malloc_calls": 2.0001,
+    "free_calls": 2.0001
+   }
+  },
+  "new": {
+   "alloc": {
+    "ir": 254.16693333333333,
+    "categories": {
+     "allocator (glibc)": 95.16773333333333,
+     "generated code (loop + strlen)": 3.9991999999999983,
+     "Rust allocator shims": 17.0,
+     "runtime constructors": 138.0
+    },
+    "malloc_calls": 1.4374,
+    "free_calls": 0.0
+   },
+   "free": {
+    "ir": 160.96286666666666,
+    "categories": {
+     "Rust allocator shims": 5.0,
+     "GC bookkeeping + free_object": 33.0054,
+     "free (glibc)": 122.95746666666666
+    },
+    "free_calls": 1.4400666666666666
+   },
+   "lifecycle": {
+    "ir": 644.9167500000001,
+    "categories": {
+     "GC bookkeeping + free_object": 39.6312,
+     "free (glibc)": 233.9686,
+     "other": 0.1086500000000008,
+     "runtime constructors": 138.00025,
+     "Rust allocator shims": 22.003500000000003,
+     "memcpy/memmove": 0.00285,
+     "allocator (glibc)": 207.2017,
+     "generated code (loop + strlen)": 4.0
+    },
+    "malloc_calls": 1.00015,
+    "free_calls": 1.0001
+   }
+  }
+ },
+ "packed ASCII length 4": {
+  "old": {
+   "alloc": {
+    "ir": 385.5514,
+    "categories": {
+     "allocator (glibc)": 187.28513333333333,
+     "generated code (loop + strlen)": 3.9991999999999983,
+     "Rust allocator shims": 34.0,
+     "memcpy/memmove": 15.0,
+     "free (glibc)": 0.2670666666666667,
+     "runtime constructors": 145.0
+    },
+    "malloc_calls": 2.7706666666666666,
+    "free_calls": 0.0
+   },
+   "free": {
+    "ir": 295.9202,
+    "categories": {
+     "GC bookkeeping + free_object": 40.0054,
+     "Rust allocator shims": 10.0,
+     "free (glibc)": 245.9148
+    },
+    "free_calls": 2.7733333333333334
+   },
+   "lifecycle": {
+    "ir": 795.55035,
+    "categories": {
+     "GC bookkeeping + free_object": 41.377,
+     "free (glibc)": 314.21365000000003,
+     "other": 0.075900000000002,
+     "runtime constructors": 145.00015,
+     "Rust allocator shims": 44.0022,
+     "memcpy/memmove": 15.00315,
+     "allocator (glibc)": 231.8783,
+     "generated code (loop + strlen)": 4.0
+    },
+    "malloc_calls": 2.0001,
+    "free_calls": 2.0001
+   }
+  },
+  "new": {
+   "alloc": {
+    "ir": 255.16693333333333,
+    "categories": {
+     "allocator (glibc)": 95.16773333333333,
+     "generated code (loop + strlen)": 3.9991999999999983,
+     "Rust allocator shims": 17.0,
+     "runtime constructors": 139.0
+    },
+    "malloc_calls": 1.4374,
+    "free_calls": 0.0
+   },
+   "free": {
+    "ir": 160.96286666666666,
+    "categories": {
+     "GC bookkeeping + free_object": 33.0054,
+     "Rust allocator shims": 5.0,
+     "free (glibc)": 122.95746666666666
+    },
+    "free_calls": 1.4400666666666666
+   },
+   "lifecycle": {
+    "ir": 618.4719,
+    "categories": {
+     "GC bookkeeping + free_object": 38.69059999999999,
+     "free (glibc)": 223.3749,
+     "other": 0.12560000000000038,
+     "runtime constructors": 139.00025,
+     "Rust allocator shims": 22.003500000000003,
+     "memcpy/memmove": 0.003,
+     "allocator (glibc)": 191.27405,
+     "generated code (loop + strlen)": 4.0
+    },
+    "malloc_calls": 1.00015,
+    "free_calls": 1.0001
+   }
+  }
+ },
+ "packed ASCII length 8": {
+  "old": {
+   "alloc": {
+    "ir": 382.8712,
+    "categories": {
+     "allocator (glibc)": 186.872,
+     "generated code (loop + strlen)": 3.9991999999999983,
+     "Rust allocator shims": 34.0,
+     "memcpy/memmove": 13.0,
+     "runtime constructors": 145.0
+    },
+    "malloc_calls": 2.7706666666666666,
+    "free_calls": 0.0
+   },
+   "free": {
+    "ir": 295.92046666666664,
+    "categories": {
+     "GC bookkeeping + free_object": 40.0054,
+     "Rust allocator shims": 10.0,
+     "free (glibc)": 245.91506666666666
+    },
+    "free_calls": 2.7733333333333334
+   },
+   "lifecycle": {
+    "ir": 753.13105,
+    "categories": {
+     "GC bookkeeping + free_object": 40.68165,
+     "free (glibc)": 297.8409,
+     "other": 0.03834999999999944,
+     "runtime constructors": 145.00015,
+     "Rust allocator shims": 44.0022,
+     "memcpy/memmove": 13.003,
+     "allocator (glibc)": 208.56480000000002,
+     "generated code (loop + strlen)": 4.0
+    },
+    "malloc_calls": 2.0001,
+    "free_calls": 2.0001
+   }
+  },
+  "new": {
+   "alloc": {
+    "ir": 251.16693333333333,
+    "categories": {
+     "allocator (glibc)": 95.16773333333333,
+     "generated code (loop + strlen)": 3.9991999999999983,
+     "Rust allocator shims": 17.0,
+     "runtime constructors": 135.0
+    },
+    "malloc_calls": 1.4374,
+    "free_calls": 0.0
+   },
+   "free": {
+    "ir": 160.96286666666666,
+    "categories": {
+     "GC bookkeeping + free_object": 33.0054,
+     "Rust allocator shims": 5.0,
+     "free (glibc)": 122.95746666666666
+    },
+    "free_calls": 1.4400666666666666
+   },
+   "lifecycle": {
+    "ir": 569.44065,
+    "categories": {
+     "GC bookkeeping + free_object": 37.15689999999999,
+     "free (glibc)": 205.99495,
+     "other": 0.08490000000000103,
+     "runtime constructors": 135.00015000000002,
+     "Rust allocator shims": 22.002200000000002,
+     "memcpy/memmove": 0.003,
+     "allocator (glibc)": 165.19855,
+     "generated code (loop + strlen)": 4.0
+    },
+    "malloc_calls": 1.0001,
+    "free_calls": 1.0001
+   }
+  }
+ }
+}

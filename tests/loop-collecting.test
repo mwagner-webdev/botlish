@@ -1,0 +1,677 @@
+# loop-collecting.test -- COLLECTING-LOOPS.md: the four numeric collecting
+# loops (`from .. to`, `from .. through`, `down from .. to`, `down from ..
+# through`) and lockstep iteration (`loop x in xs and i from 0 to n:`).
+#
+# Every behavioral test runs the same program on all four backends (the
+# reference interpreter, the Tcl compiler, native generic and native
+# specialized) and pins the interpreter's value, so a disagreement or a
+# regression in either shows up in the same place.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+set parityBackends {interp compile cranelift-generic cranelift}
+
+proc lcHir {text} {
+    return [surface::compile $text t.bot -strict 0]
+}
+
+# The value of TEXT on every backend, or a description of the disagreement.
+proc lc {text} {
+    set hir [lcHir $text]
+    if {[hir::diagnostics $hir] ne ""} {
+        return "DIAGNOSTICS: [lmap d [hir::diagnostics $hir] {dict get $d message}]"
+    }
+    set outcomes [lmap backend $::parityBackends {outcomeUnderHir $backend $hir}]
+    if {[llength [lsort -unique $outcomes]] != 1} {
+        return "BACKENDS DISAGREE: [join [lmap backend $::parityBackends outcome $outcomes {list $backend $outcome}] { / }]"
+    }
+    set outcome [lindex $outcomes 0]
+    if {[lindex $outcome 0] eq "value"} {
+        return [lindex $outcome 1]
+    }
+    return "ERROR [lindex $outcome 1]"
+}
+
+# {KIND MESSAGE} of the compile-time rejection of TEXT (strict mode).
+proc lcRejects {text} {
+    if {[catch {surface::compile $text t.bot} message options]} {
+        return [list [lindex [dict get $options -errorcode] 2] \
+            [regsub {^t\.bot:\d+:\d+: } $message {}]]
+    }
+    return accepted
+}
+
+proc lcParseError {src} {
+    if {[catch {surface::parse $src t.bot} result options]} {
+        set d [lindex [dict get $options -errorcode] 2]
+        return "[dict get $d line]:[dict get $d column] [dict get $d message]"
+    }
+    return parsed
+}
+
+# A program that evaluates one numeric loop over bounds, as a function body.
+proc numeric {header} {
+    return "fn f():\n    loop $header:\n        i\nf()\n"
+}
+
+# ---------------------------------------------------------------------------
+# 49. Ascending exclusive (existing behavior, now pinned as collecting)
+
+foreach {name header expected} {
+    up-to-empty        {i from 0 to 0}   {[]}
+    up-to-one          {i from 0 to 1}   {[0]}
+    up-to-three        {i from 0 to 3}   {[0, 1, 2]}
+    up-to-reversed     {i from 3 to 1}   {[]}
+    up-to-negative     {i from -3 to 0}  {[-3, -2, -1]}
+    up-to-spanning     {i from -2 to 3}  {[-2, -1, 0, 1, 2]}
+    up-to-doc          {i from 2 to 5}   {[2, 3, 4]}
+} {
+    test loop-collecting-$name "loop $header:" -body {
+        lc [numeric $header]
+    } -result $expected
+}
+
+# 50. Ascending inclusive
+foreach {name header expected} {
+    up-through-single    {i from 0 through 0}   {[0]}
+    up-through-two       {i from 0 through 1}   {[0, 1]}
+    up-through-four      {i from 0 through 3}   {[0, 1, 2, 3]}
+    up-through-reversed  {i from 3 through 1}   {[]}
+    up-through-just-past {i from 3 through 2}   {[]}
+    up-through-spanning  {i from -2 through 2}  {[-2, -1, 0, 1, 2]}
+    up-through-doc       {i from 2 through 5}   {[2, 3, 4, 5]}
+} {
+    test loop-collecting-$name "loop $header:" -body {
+        lc [numeric $header]
+    } -result $expected
+}
+
+# 51. Descending exclusive
+foreach {name header expected} {
+    down-to-three       {i down from 3 to 0}    {[3, 2, 1]}
+    down-to-empty       {i down from 3 to 3}    {[]}
+    down-to-reversed    {i down from 0 to 3}    {[]}
+    down-to-one         {i down from 1 to 0}    {[1]}
+    down-to-negative    {i down from 2 to -3}   {[2, 1, 0, -1, -2]}
+    down-to-neg-empty   {i down from -3 to -3}  {[]}
+    down-to-doc         {i down from 5 to 2}    {[5, 4, 3]}
+} {
+    test loop-collecting-$name "loop $header:" -body {
+        lc [numeric $header]
+    } -result $expected
+}
+
+# 52. Descending inclusive
+foreach {name header expected} {
+    down-through-four     {i down from 3 through 0}    {[3, 2, 1, 0]}
+    down-through-single   {i down from 3 through 3}    {[3]}
+    down-through-reversed {i down from 0 through 3}    {[]}
+    down-through-just     {i down from 2 through 3}    {[]}
+    down-through-negative {i down from -1 through -3}  {[-1, -2, -3]}
+    down-through-spanning {i down from 2 through -2}   {[2, 1, 0, -1, -2]}
+    down-through-doc      {i down from 5 through 2}    {[5, 4, 3, 2]}
+} {
+    test loop-collecting-$name "loop $header:" -body {
+        lc [numeric $header]
+    } -result $expected
+}
+
+# ---------------------------------------------------------------------------
+# 53 / 7 / 8. Inclusive endpoints never go through END+1 / END-1, and Int is
+# arbitrary precision: bounds around and far beyond i64 and the tagged-small-
+# Int boundary (native/src/runtime/value.rs SMALL_MAX = 2^62 - 1).
+
+foreach {name header expected} {
+    big-up-through-i64max {i from 9223372036854775806 through 9223372036854775807}
+        {[9223372036854775806, 9223372036854775807]}
+    big-up-through-past-i64max {i from 9223372036854775806 through 9223372036854775809}
+        {[9223372036854775806, 9223372036854775807, 9223372036854775808, 9223372036854775809]}
+    big-up-to-past-i64max {i from 9223372036854775806 to 9223372036854775809}
+        {[9223372036854775806, 9223372036854775807, 9223372036854775808]}
+    big-down-through-i64min {i down from -9223372036854775807 through -9223372036854775808}
+        {[-9223372036854775807, -9223372036854775808]}
+    big-down-through-past-i64min {i down from -9223372036854775807 through -9223372036854775810}
+        {[-9223372036854775807, -9223372036854775808, -9223372036854775809, -9223372036854775810]}
+    big-down-to-past-i64min {i down from -9223372036854775807 to -9223372036854775810}
+        {[-9223372036854775807, -9223372036854775808, -9223372036854775809]}
+    big-up-through-small-tag {i from 4611686018427387902 through 4611686018427387905}
+        {[4611686018427387902, 4611686018427387903, 4611686018427387904, 4611686018427387905]}
+    big-down-through-small-tag {i down from 4611686018427387905 through 4611686018427387903}
+        {[4611686018427387905, 4611686018427387904, 4611686018427387903]}
+    huge-single-through {i from 1000000000000000000000000000000 through 1000000000000000000000000000000}
+        {[1000000000000000000000000000000]}
+    huge-single-down-through {i down from -1000000000000000000000000000000 through -1000000000000000000000000000000}
+        {[-1000000000000000000000000000000]}
+    huge-empty-through {i from 1000000000000000000000000000001 through 1000000000000000000000000000000}
+        {[]}
+} {
+    test loop-collecting-$name "loop $header:" -body {
+        lc [numeric $header]
+    } -result $expected
+}
+
+test loop-collecting-dynamic-bounds-big {bounds computed at run time past i64 (the raw machine-int path cannot be used) agree on every backend} -body {
+    lc "fn f(n):\n    loop i from n through n + 2:\n        i\nf(9223372036854775806)\n"
+} -result {[9223372036854775806, 9223372036854775807, 9223372036854775808]}
+
+test loop-collecting-dynamic-bounds-big-down {descending inclusive past -i64 at run time} -body {
+    lc "fn f(n):\n    loop i down from n through n - 2:\n        i\nf(-9223372036854775807)\n"
+} -result {[-9223372036854775807, -9223372036854775808, -9223372036854775809]}
+
+test loop-collecting-big-body-arithmetic {arithmetic on the induction value at the i64 edge (RawInt must stay a proof, not a guess)} -body {
+    lc "fn f():\n    loop i from 9223372036854775806 through 9223372036854775807:\n        i + i\nf()\n"
+} -result {[18446744073709551612, 18446744073709551614]}
+
+test loop-collecting-big-body-arithmetic-down {descending: arithmetic below -i64} -body {
+    lc "fn f():\n    loop i down from -9223372036854775807 through -9223372036854775808:\n        i - i - 9223372036854775807 - 9223372036854775807\nf()\n"
+} -result {[-18446744073709551614, -18446744073709551614]}
+
+test loop-collecting-small-range-raw-arithmetic {a provably small numeric domain still computes correctly (RawInt eligible)} -body {
+    lc "fn f():\n    loop i down from 100 through 98:\n        i * i * i\nf()\n"
+} -result {[1000000, 970299, 941192]}
+
+test loop-collecting-dynamic-bounds-small {small dynamic bounds in every form} -body {
+    lc "fn f(a, b):\n    w = loop i from a to b:\n        i\n    x = loop i from a through b:\n        i\n    y = loop i down from b to a:\n        i\n    z = loop i down from b through a:\n        i\n    \[w, x, y, z\]\nf(2, 5)\n"
+} -result {[[2, 3, 4], [2, 3, 4, 5], [5, 4, 3], [5, 4, 3, 2]]}
+
+# ---------------------------------------------------------------------------
+# 10. Collecting body semantics: value, continue, break (bare), nested, if
+
+test loop-collecting-body-value {the body's value is what each iteration collects} -body {
+    lc "fn f():\n    loop i from 1 through 3:\n        i * i\nf()\n"
+} -result {[1, 4, 9]}
+
+test loop-collecting-continue {continue contributes nothing and advances} -body {
+    lc "fn f():\n    loop i from 0 through 5:\n        if i == 0:\n            continue\n        if i == 2:\n            continue\n        i\nf()\n"
+} -result {[1, 3, 4, 5]}
+
+test loop-collecting-continue-skip {continue skips one iteration's contribution only} -body {
+    lc "fn f():\n    loop i down from 5 through 1:\n        if i == 3:\n            continue\n        i\nf()\n"
+} -result {[5, 4, 2, 1]}
+
+test loop-collecting-break-prefix {a bare break returns the collected prefix} -body {
+    lc "fn f():\n    loop i from 0 through 10:\n        if i == 3:\n            break\n        i\nf()\n"
+} -result {[0, 1, 2]}
+
+test loop-collecting-break-prefix-down {a bare break in a descending loop} -body {
+    lc "fn f():\n    loop i down from 10 to 0:\n        if i == 7:\n            break\n        i\nf()\n"
+} -result {[10, 9, 8]}
+
+test loop-collecting-break-first {break before anything is collected} -body {
+    lc "fn f():\n    loop i from 0 through 10:\n        break\nf()\n"
+} -result {[]}
+
+test loop-collecting-return-propagates {return leaves the whole function} -body {
+    lc "fn f():\n    loop i down from 10 through 0:\n        if i == 4:\n            return i\n    -1\nf()\n"
+} -result 4
+
+test loop-collecting-break-value-rejected {break VALUE stays a syntax error} -body {
+    lcParseError "loop i from 0 through 3:\n    break i\n"
+} -match glob -result {*"break" does not take a value*}
+
+test loop-collecting-nested {a numeric loop nested in another: results nest} -body {
+    lc "fn f():\n    loop i from 1 through 3:\n        loop j down from i through 1:\n            j\nf()\n"
+} -result {[[1], [2, 1], [3, 2, 1]]}
+
+test loop-collecting-nested-break-local {break leaves only the innermost loop} -body {
+    lc "fn f():\n    loop i from 1 through 3:\n        loop j from 1 through 3:\n            if j == 2:\n                break\n            i * 10 + j\nf()\n"
+} -result {[[11], [21], [31]]}
+
+test loop-collecting-in-list-loop {a numeric loop inside a list loop} -body {
+    lc "fn f():\n    loop x in \[2, 3\]:\n        loop i from 1 through x:\n            i\nf()\n"
+} -result {[[1, 2], [1, 2, 3]]}
+
+test loop-collecting-closure-per-iteration {a closure captures its iteration's own value in every form} -body {
+    lc "fn f():\n    loop i down from 3 through 1:\n        fn grab():\n            i\n        grab()\nf()\n"
+} -result {[3, 2, 1]}
+
+# ---------------------------------------------------------------------------
+# 8 / 9. Bounds are evaluated once, in the same order the existing loop
+# promises (core IR + test-tick/test-log: raw IR, below the surface).
+
+foreach {name tail} {
+    up-to      {}
+    up-through {up through}
+    down-to    {down to}
+    down-through {down through}
+} {
+    test loop-collecting-bounds-once-$name "each bound is evaluated exactly once ($name)" -setup resetEffects -body {
+        run "countloop {call {ref test-tick}} {call {ref test-tick}} {block {i} {ref i}} $tail"
+        set ::testTicks
+    } -result 2
+
+    test loop-collecting-bounds-order-$name "bounds keep their written order ($name)" -setup resetEffects -body {
+        run "countloop {call {ref test-log} {const 1}} {call {ref test-log} {const 2}} {block {i} {ref i}} $tail"
+        set ::testLog
+    } -result {1 2}
+}
+
+# ---------------------------------------------------------------------------
+# Int checking: a non-Int bound is the ordinary dynamic TYPE error
+
+test loop-collecting-non-int-bound {a non-Int bound is a TYPE error on every backend} -body {
+    set hir [lcHir "loop i down from \"x\" through 3:\n    i\n"]
+    lmap backend $::parityBackends {lrange [outcomeUnderHir $backend $hir] 0 1}
+} -result {{error {CORE SEMANTIC TYPE}} {error {CORE SEMANTIC TYPE}} {error {CORE SEMANTIC TYPE}} {error {CORE SEMANTIC TYPE}}}
+
+# ---------------------------------------------------------------------------
+# Parser
+
+test loop-collecting-parse-forms {the four numeric forms and lockstep format back as written} -body {
+    surface::formatAst [surface::parse "loop a from 0 to 5:\n    a\nloop b from 0 through 5:\n    b\nloop c down from 5 to 0:\n    c\nloop d down from 5 through 0:\n    d\nloop x in xs and i from 0 to n:\n    x\n"]
+} -match glob -result {loop a from (int 0) to (int 5)*loop b from (int 0) through (int 5)*loop c down from (int 5) to (int 0)*loop d down from (int 5) through (int 0)*loop x in (name xs) and i from (int 0) to (name n)*}
+
+test loop-collecting-parse-clauses {a lockstep loop is one loop node with several clauses} -body {
+    set ast [surface::parse "loop x in xs and i from 0 to n and j down from n through 1:\n    x\n"]
+    set loop [lindex [dict get $ast body] 0]
+    list [dict get $loop kind] [llength [dict get $loop clauses]] \
+        [lmap c [dict get $loop clauses] {list [dict get $c kind] [dict get $c name] [dict get $c direction] [dict get $c endKind]}]
+} -result {loop 3 {{list x {} {}} {count i up exclusive} {count j down inclusive}}}
+
+test loop-collecting-parse-clause-first-numeric {a numeric clause may come first} -body {
+    lcParseError "loop i from 0 to n and x in xs:\n    x\n"
+} -result parsed
+
+test loop-collecting-parse-keywords-are-names {through/down/from/to/by/in stay ordinary names everywhere else} -body {
+    lc "through = 1\ndown = 2\nfrom = 3\nto = 4\nby = 5\nin_ = 6\nthrough + down + from + to + by + in_\n"
+} -result 21
+
+test loop-collecting-parse-names-as-variables {a loop variable may itself be named down/through/to} -body {
+    lc "fn f():\n    loop down from 1 through 3:\n        down\nf()\n"
+} -result {[1, 2, 3]}
+
+test loop-collecting-parse-and-in-operand {an `and` inside parentheses stays a boolean operator} -body {
+    list [lcParseError "loop x in (a and b):\n    x\n"] [lcParseError "loop i from (a and b) to 3 and j in ys:\n    i\n"]
+} -result {parsed parsed}
+
+test loop-collecting-parse-error-missing-through-word {the second keyword is required} -body {
+    lcParseError "loop i from 0 10:\n    1\n"
+} -result {1:15 expected "to" or "through" after the loop start value, found integer 10}
+
+test loop-collecting-parse-error-down-without-from {down must be followed by from} -body {
+    lcParseError "loop i down 5 to 0:\n    1\n"
+} -result {1:13 expected "from" after "down", found integer 5}
+
+test loop-collecting-parse-error-and-without-clause {and must be followed by a loop variable} -body {
+    lcParseError "loop x in xs and :\n    1\n"
+} -result {1:18 expected a loop variable after "and", found ":"}
+
+test loop-collecting-parse-error-and-bad-clause {and must be followed by a real clause} -body {
+    lcParseError "loop x in xs and y:\n    1\n"
+} -result {1:19 expected "in", "from" or "down from" after the loop variable, found ":"}
+
+test loop-collecting-parse-error-by {by stays reserved} -body {
+    lcParseError "loop i from 0 to 10 by 2:\n    1\n"
+} -match glob -result {1:21 *"by"*reserved*}
+
+# ---------------------------------------------------------------------------
+# 54-57. Lockstep
+
+test loop-collecting-lockstep-enumerate-shaped {the enumerate-shaped case} -body {
+    lc "fn f():\n    loop x in \[\"a\", \"b\", \"c\"\] and i from 0 to 3:\n        \[x, i\]\nf()\n"
+} -result {[["a", 0], ["b", 1], ["c", 2]]}
+
+test loop-collecting-lockstep-length-proof {x in xs and i from 0 to list_length(xs)} -body {
+    lc "fn f(xs):\n    loop x in xs and i from 0 to list_length(xs):\n        \[x, i\]\nf(\[10, 20\])\n"
+} -result {[[10, 0], [20, 1]]}
+
+test loop-collecting-lockstep-alias-proof {n = list_length(xs) is an alias the proof sees through} -body {
+    lc "fn f(xs):\n    n = list_length(xs)\n    loop x in xs and i from 0 to n:\n        \[x, i\]\nf(\[10, 20\])\n"
+} -result {[[10, 0], [20, 1]]}
+
+test loop-collecting-lockstep-numeric-first {the numeric clause may come first} -body {
+    lc "fn f(xs):\n    loop i from 0 to list_length(xs) and x in xs:\n        \[i, x\]\nf(\[10, 20\])\n"
+} -result {[[0, 10], [1, 20]]}
+
+test loop-collecting-lockstep-through-clauses {inclusive/descending clauses with equal cardinality} -body {
+    lc "fn f():\n    loop i from 0 through 3 and j down from 3 through 0:\n        \[i, j\]\nf()\n"
+} -result {[[0, 3], [1, 2], [2, 1], [3, 0]]}
+
+test loop-collecting-lockstep-shifted-domains {different syntax, same exact cardinality} -body {
+    lc "fn f(n):\n    loop i from 0 to n and j from 10 to 10 + n:\n        \[i, j\]\nf(3)\n"
+} -result {[[0, 10], [1, 11], [2, 12]]}
+
+test loop-collecting-lockstep-through-vs-down {n + 1 elements on both sides} -body {
+    lc "fn f(n):\n    loop i from 0 through n and j down from n through 0:\n        \[i, j\]\nf(2)\n"
+} -result {[[0, 2], [1, 1], [2, 0]]}
+
+test loop-collecting-lockstep-negative-n {both sides clamp to zero for negative n} -body {
+    lc "fn f(n):\n    loop i from 0 to n and j down from n to 0:\n        \[i, j\]\nf(-4)\n"
+} -result {[]}
+
+test loop-collecting-lockstep-down-to-vs-up {down from n to 0 and from 0 to n} -body {
+    lc "fn f(n):\n    loop i from 0 to n and j down from n to 0:\n        \[i, j\]\nf(3)\n"
+} -result {[[0, 3], [1, 2], [2, 1]]}
+
+test loop-collecting-lockstep-three-way {three clauses with one common proven cardinality} -body {
+    lc "fn f(xs):\n    loop x in xs and i from 0 to list_length(xs) and j down from list_length(xs) through 1:\n        \[x, i, j\]\nf(\[7, 8, 9\])\n"
+} -result {[[7, 0, 3], [8, 1, 2], [9, 2, 1]]}
+
+test loop-collecting-lockstep-two-lists-by-construction {a list built by a collecting loop has its source's length} -body {
+    lc "fn f(xs):\n    ys = loop x in xs:\n        x + 1\n    loop a in xs and b in ys:\n        \[a, b\]\nf(\[1, 2, 3\])\n"
+} -result {[[1, 2], [2, 3], [3, 4]]}
+
+test loop-collecting-lockstep-two-lists-numeric-built {a list built from a numeric loop} -body {
+    lc "fn f(n):\n    ys = loop i from 0 to n:\n        i * i\n    loop j from 0 to n and y in ys:\n        \[j, y\]\nf(3)\n"
+} -result {[[0, 0], [1, 1], [2, 4]]}
+
+test loop-collecting-lockstep-two-literal-lists {literal lists of equal length} -body {
+    lc "fn f():\n    loop x in \[1, 2, 3\] and y in \[\"a\", \"b\", \"c\"\]:\n        \[x, y\]\nf()\n"
+} -result {[[1, "a"], [2, "b"], [3, "c"]]}
+
+test loop-collecting-lockstep-same-list-twice {the same list on both sides} -body {
+    lc "fn f(xs):\n    loop x in xs and y in xs:\n        \[x, y\]\nf(\[1, 2\])\n"
+} -result {[[1, 1], [2, 2]]}
+
+test loop-collecting-lockstep-alias-list {an aliased list is the same list} -body {
+    lc "fn f(xs):\n    ys = xs\n    loop x in xs and y in ys:\n        \[x, y\]\nf(\[1, 2\])\n"
+} -result {[[1, 1], [2, 2]]}
+
+test loop-collecting-lockstep-empty {an empty lockstep loop collects the empty list and never runs the body} -body {
+    lc "fn f(xs):\n    loop x in xs and i from 0 to list_length(xs):\n        x\nf(\[\])\n"
+} -result {[]}
+
+test loop-collecting-lockstep-empty-body-never-runs {the body of an empty lockstep loop is never executed (raw IR, test-log)} -setup resetEffects -body {
+    run {lockloop {{list {call {ref list}}} {count {const int 0} {const int 0} up to}} {block {x i} {call {ref test-log} {ref i}}}}
+    set ::testLog
+} -result {}
+
+test loop-collecting-lockstep-empty-constant {all-zero constant cardinalities are equal} -body {
+    lc "fn f():\n    loop i from 3 to 1 and j from 5 through 0 and k down from 0 to 4:\n        \[i, j, k\]\nf()\n"
+} -result {[]}
+
+test loop-collecting-lockstep-large-int-domain {lockstep over arbitrary-precision domains} -body {
+    lc "fn f():\n    loop i from 9223372036854775806 through 9223372036854775808 and j down from -9223372036854775807 through -9223372036854775809:\n        \[i, j\]\nf()\n"
+} -result {[[9223372036854775806, -9223372036854775807], [9223372036854775807, -9223372036854775808], [9223372036854775808, -9223372036854775809]]}
+
+# 26-28, 60. continue / break across domains: one body run per position
+
+test loop-collecting-lockstep-continue {continue advances every domain together} -body {
+    lc "fn f(xs):\n    loop x in xs and i from 0 to list_length(xs):\n        if i == 1:\n            continue\n        \[x, i\]\nf(\[\"a\", \"b\", \"c\"\])\n"
+} -result {[["a", 0], ["c", 2]]}
+
+test loop-collecting-lockstep-break {break ends the whole loop with the prefix} -body {
+    lc "fn f(xs):\n    loop x in xs and i from 0 to list_length(xs):\n        if i == 2:\n            break\n        \[x, i\]\nf(\[\"a\", \"b\", \"c\", \"d\"\])\n"
+} -result {[["a", 0], ["b", 1]]}
+
+test loop-collecting-lockstep-one-body-run-per-position {exactly one body execution per common position, in order (raw IR, test-log)} -setup resetEffects -body {
+    set value [run {lockloop {{count {const int 0} {const int 4} up to} {count {const int 4} {const int 1} down through}} {block {i j} {call {ref test-log} {call {ref +} {call {ref *} {ref i} {const int 10}} {ref j}}}}}]
+    list $value $::testLog
+} -result {{[4, 13, 22, 31]} {4 13 22 31}}
+
+test loop-collecting-lockstep-continue-one-run {continue still advances every domain exactly once (raw IR, test-log)} -setup resetEffects -body {
+    run {lockloop {{count {const int 0} {const int 4} up to} {count {const int 4} {const int 1} down through}} {block {i j} {if {call {ref ==} {ref i} {const int 1}} {block {} {continue}} {block {} {call {ref test-log} {ref j}}}}}}
+    set ::testLog
+} -result {4 2 1}
+
+test loop-collecting-lockstep-return {return leaves the function from inside} -body {
+    lc "fn f(xs):\n    loop x in xs and i from 0 to list_length(xs):\n        if i == 1:\n            return x\n    \"none\"\nf(\[\"a\", \"b\"\])\n"
+} -result {"b"}
+
+test loop-collecting-lockstep-body-error {an error in the body propagates} -body {
+    set hir [lcHir "type Small = Int in 0..10\nerror TooBig\nfn check(n) -> Small errors TooBig:\n    if n > 10:\n        fail TooBig\n    else:\n        n\nloop i from 0 to 3 and j down from 3 through 1:\n    check(i + j + 20)\n"]
+    lmap backend $::parityBackends {lrange [outcomeUnderHir $backend $hir] 0 1}
+} -result {{error {CORE SEMANTIC UNCAUGHT-ERROR}} {error {CORE SEMANTIC UNCAUGHT-ERROR}} {error {CORE SEMANTIC UNCAUGHT-ERROR}} {error {CORE SEMANTIC UNCAUGHT-ERROR}}}
+
+test loop-collecting-lockstep-non-list {a non-list domain operand is the ordinary dynamic TYPE error} -body {
+    set hir [lcHir "fn f(xs):\n    loop x in xs and i from 0 to list_length(xs):\n        x\nf(5)\n"]
+    lmap backend $::parityBackends {lrange [outcomeUnderHir $backend $hir] 0 1}
+} -result {{error {CORE SEMANTIC TYPE}} {error {CORE SEMANTIC TYPE}} {error {CORE SEMANTIC TYPE}} {error {CORE SEMANTIC TYPE}}}
+
+# 25, 62. Lockstep is not a Cartesian product, and nests in the usual way
+
+test loop-collecting-lockstep-not-cartesian {xs and ys advance together: one result per position, not per pair} -body {
+    lc "fn f():\n    loop x in \[1, 2\] and y in \[3, 4\]:\n        x * 10 + y\nf()\n"
+} -result {[13, 24]}
+
+test loop-collecting-lockstep-in-ordinary-loop {lockstep inside an ordinary loop} -body {
+    lc "fn f():\n    loop k from 1 through 2:\n        loop x in \[10, 20\] and i from 0 to 2:\n            x + i + k\nf()\n"
+} -result {[[11, 22], [12, 23]]}
+
+test loop-collecting-ordinary-loop-in-lockstep {an ordinary loop inside a lockstep loop} -body {
+    lc "fn f():\n    loop i from 1 through 2 and j down from 2 through 1:\n        loop k from 1 through i:\n            k * j\nf()\n"
+} -result {[[2], [1, 2]]}
+
+test loop-collecting-lockstep-in-lockstep {lockstep nested in lockstep} -body {
+    lc "fn f():\n    loop a from 0 to 2 and b down from 2 to 0:\n        loop x in \[a, b\] and i from 0 to 2:\n            x * 10 + i\nf()\n"
+} -result {[[0, 21], [10, 11]]}
+
+# Scope: a clause's variable is not visible in any clause operand
+
+test loop-collecting-lockstep-scope-operands {a clause variable is not in scope in another clause's operand} -body {
+    set hir [lcHir "fn f(xs):\n    loop i from 0 to list_length(xs) and j from i to 3:\n        j\nf(\[1, 2, 3\])\n"]
+    lmap d [hir::diagnostics $hir] {dict get $d kind}
+} -match glob -result {*UNBOUND*}
+
+test loop-collecting-lockstep-duplicate-variable {two clauses may not bind the same name} -body {
+    lcRejects "fn f(xs):\n    loop x in xs and x from 0 to list_length(xs):\n        x\nf(\[1\])\n"
+} -match glob -result {DUPLICATE-LOOP-VARIABLE *}
+
+# ---------------------------------------------------------------------------
+# 46-47, 58-59. Rejections
+
+test loop-collecting-reject-unknown-lists {nothing proves the two lists equal} -body {
+    lcRejects "fn f(xs, ys):\n    loop x in xs and y in ys:\n        x\nf(\[1\], \[2\])\n"
+} -result {LOCKSTEP-UNPROVEN {lockstep loop requires equal iteration counts; could not prove length(xs) == length(ys) (clause 1 vs clause 2)}}
+
+test loop-collecting-reject-unequal-constants {provably different constant cardinalities} -body {
+    lcRejects "fn f():\n    loop i from 0 to 3 and j from 0 to 4:\n        i\nf()\n"
+} -result {LOCKSTEP-UNEQUAL {lockstep loop requires equal iteration counts; clause 1 iterates 3 times but clause 2 iterates 4 times}}
+
+test loop-collecting-reject-unequal-by-one {through vs to differ by exactly one} -body {
+    lcRejects "fn f(xs):\n    loop x in xs and i from 0 through list_length(xs):\n        i\nf(\[1\])\n"
+} -result {LOCKSTEP-UNEQUAL {lockstep loop requires equal iteration counts; clause 1 iterates length(xs) times but clause 2 iterates length(xs) + 1 times}}
+
+test loop-collecting-reject-literal-vs-literal {literal lists of different length} -body {
+    lcRejects "fn f():\n    loop x in \[1, 2\] and y in \[1, 2, 3\]:\n        x\nf()\n"
+} -match glob -result {LOCKSTEP-UNEQUAL *}
+
+test loop-collecting-reject-numeric-unknown {from 0 to n versus from 0 to n+1 may be equal for n < 0: unproven, not disproven} -body {
+    lcRejects "fn f(n):\n    loop i from 0 to n and j from 0 to n + 1:\n        i\nf(3)\n"
+} -result {LOCKSTEP-UNPROVEN {lockstep loop requires equal iteration counts; could not prove max(n, 0) == max(n + 1, 0) (clause 1 vs clause 2)}}
+
+test loop-collecting-reject-two-numeric-params {two unrelated parameters} -body {
+    lcRejects "fn f(n, m):\n    loop i from 0 to n and j from 0 to m:\n        i\nf(3, 3)\n"
+} -match glob -result {LOCKSTEP-UNPROVEN *could not prove max(n, 0) == max(m, 0)*}
+
+test loop-collecting-reject-call-results {two separate calls are never assumed equal} -body {
+    lcRejects "fn size():\n    3\nfn f(xs):\n    loop i from 0 to size() and j from 0 to size():\n        i\nf(\[1\])\n"
+} -match glob -result {LOCKSTEP-UNPROVEN *}
+
+test loop-collecting-reject-third-clause {every clause is checked against the first} -body {
+    lcRejects "fn f(xs):\n    loop x in xs and i from 0 to list_length(xs) and j from 0 to 2:\n        x\nf(\[1\])\n"
+} -match glob -result {LOCKSTEP-UNPROVEN *clause 1 vs clause 3*}
+
+test loop-collecting-reject-no-runtime-check {a -strict 0 lowering of a rejected loop fails unconditionally, never by comparing lengths} -body {
+    set hir [lcHir "fn f(xs, ys):\n    loop x in xs and y in ys:\n        x\nf(\[1, 2\], \[3, 4\])\n"]
+    list [lmap d [hir::diagnostics $hir] {dict get $d kind}] \
+        [lrange [outcomeUnder interp [hir::lower $hir]] 0 1] \
+        [lrange [outcomeUnder compile [hir::lower $hir]] 0 1]
+} -result {LOCKSTEP-UNPROVEN {error {CORE SEMANTIC LOCKSTEP-UNPROVEN}} {error {CORE SEMANTIC LOCKSTEP-UNPROVEN}}}
+
+test loop-collecting-reject-equal-lengths-still-rejected {equal at run time is irrelevant: the invariant must be provable} -body {
+    lcRejects "fn f():\n    xs = \[1, 2\]\n    loop x in xs and y in \[3, 4\]:\n        x\nf()\n"
+} -result accepted
+
+# ---------------------------------------------------------------------------
+# 16, 35. Representation: iteration domains in HIR, cardinality as a proof
+
+test loop-collecting-hir-countloop-fields {direction and endKind are explicit fields, not endpoint arithmetic} -body {
+    set hir [lcHir "loop i down from 5 through 2:\n    i\n"]
+    set e [lindex [hirFind $hir countloop] 0]
+    list [hir::get $hir $e direction] [hir::get $hir $e endKind] \
+        [hir::kind $hir [hir::get $hir $e start]] [hir::kind $hir [hir::get $hir $e end]]
+} -result {down inclusive const const}
+
+test loop-collecting-hir-no-endpoint-arithmetic {no `+`/`-` call is introduced by through/down} -body {
+    set hir [lcHir "fn f(a, b):\n    loop i down from b through a:\n        i\nf(1, 2)\n"]
+    set calls 0
+    foreach e [hir::walk $hir] {
+        if {[hir::kind $hir $e] eq "call"} {
+            incr calls
+        }
+    }
+    set calls
+} -result 1
+
+test loop-collecting-hir-lockloop-one-node {lockstep is one loop node with several domains, not nested loops} -body {
+    set hir [lcHir "fn f(xs):\n    loop x in xs and i from 0 to list_length(xs):\n        i\nf(\[1\])\n"]
+    set loops [concat [hirFind $hir lockloop] [hirFind $hir listloop] [hirFind $hir countloop]]
+    set e [lindex [hirFind $hir lockloop] 0]
+    list [llength $loops] [lmap d [hir::get $hir $e domains] {dict get $d kind}]
+} -result {1 {list count}}
+
+test loop-collecting-cardinality-formulas {the exact cardinality of each numeric form} -body {
+    set out {}
+    foreach {header} {
+        {i from 2 to 7} {i from 2 through 7} {i down from 7 to 2} {i down from 7 through 2}
+        {i from 7 to 2} {i from 7 through 2} {i down from 2 to 7} {i down from 2 through 7}
+        {i from 5 through 5} {i down from 5 to 5}
+    } {
+        set hir [lcHir "loop $header:\n    i\n"]
+        set e [lindex [hirFind $hir countloop] 0]
+        set card [hir::cardinality::of_domain $hir [lindex [hir::cardinality::domains $hir $e] 0]]
+        lappend out [lindex $card 0]
+    }
+    set out
+} -result {5 6 5 6 0 0 0 0 1 0}
+
+test loop-collecting-cardinality-symbolic {cardinality is symbolic and normalized} -body {
+    set hir [lcHir "fn f(n, xs):\n    a = loop i from 0 to n:\n        i\n    b = loop i from 10 to 10 + n:\n        i\n    c = loop i from 0 through n:\n        i\n    d = loop i down from n through 0:\n        i\n    e = loop x in xs:\n        x\n    g = loop i from 0 to list_length(xs):\n        i\n    \[a, b, c, d, e, g\]\nf(1, \[2\])\n"]
+    set cards [lmap e [concat [hirFind $hir countloop] [hirFind $hir listloop]] {
+        hir::cardinality::of_domain $hir [lindex [hir::cardinality::domains $hir $e] 0]
+    }]
+    # a == b (max(n,0)); c == d (max(n+1,0)); e == g (length(xs))
+    list [expr {[lindex $cards 0] eq [lindex $cards 1]}] [expr {[lindex $cards 2] eq [lindex $cards 3]}] \
+        [expr {[lindex $cards 5] eq [lindex $cards 4]}] [expr {[lindex $cards 0] eq [lindex $cards 2]}]
+} -result {1 1 1 0}
+
+# ---------------------------------------------------------------------------
+# Regression: nothing reducing was introduced, `through`/`down` stay contextual
+
+test loop-collecting-no-reducing-syntax {reducing/fold/accumulate are not syntax} -body {
+    list [lcParseError "loop i from 0 to 3 reducing s from 0:\n    s\n"] \
+         [lcParseError "fold = 1\nreduce = 2\nsum = 3\naccumulate = 4\nfold + reduce + sum + accumulate\n"]
+} -match glob -result {{*} parsed}
+
+# ---------------------------------------------------------------------------
+# HIR text round trip for the new forms
+
+test loop-collecting-hir-roundtrip-countloop {HIR text of a descending inclusive loop reads back} -body {
+    set hir [lcHir "fn f(a, b):\n    loop i down from b through a:\n        i\nf(1, 3)\n"]
+    set text [hir::format $hir]
+    set again [hir::parse $text]
+    expr {[hir::format $again] eq $text && [string match "*countloop*down inclusive*" $text]}
+} -result 1
+
+test loop-collecting-hir-roundtrip-lockloop {HIR text of a lockstep loop reads back} -body {
+    set hir [lcHir "fn f(xs):\n    loop x in xs and i from 0 to list_length(xs):\n        i\nf(\[1\])\n"]
+    set text [hir::format $hir]
+    set again [hir::parse $text]
+    expr {[hir::format $again] eq $text && [string match "*lockloop*list*count up exclusive*" $text]}
+} -result 1
+
+test loop-collecting-core-ir-lockloop-shape {raw core IR validation of the new nodes} -body {
+    list [catch {core::ir::checkShape {lockloop {{list {const list {}}}} {block {x} {ref x}}}} m] \
+         [catch {core::ir::checkShape {countloop {const int 0} {const int 1} {block {i} {ref i}} sideways to}} m2]
+} -result {1 1}
+
+# ---------------------------------------------------------------------------
+# Standalone native executables (tests/native-executable.test's own harness
+# shape): the same programs compiled to an ELF and run, with and without GC
+# stress, agree with every in-process backend.
+
+testConstraint executableAot [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64}}]
+
+proc aotParity {text} {
+    set dir [makeDirectory {collecting loops executable test}]
+    set path [file join $dir program.bot]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts $channel $text
+    close $channel
+    try {
+        set hir [surface::readProgramFile $path]
+        set values {}
+        foreach backend {interp compile cranelift-generic cranelift} {
+            set outcome [outcomeUnderHir $backend $hir]
+            if {[lindex $outcome 0] ne "value"} { error "$backend: $outcome" }
+            lappend values [lindex $outcome 1]
+        }
+        exec [info nameofexecutable] [file join $::projectRoot main.tcl] -emit-native-executable $path
+        lappend values [exec env PATH= [file rootname $path]]
+        lappend values [exec env PATH= BOTLISH_NATIVE_GC_STRESS=1 [file rootname $path]]
+        if {[llength [lsort -unique $values]] != 1} { error "values disagree: $values" }
+        return [lindex $values 0]
+    } finally {
+        removeDirectory {collecting loops executable test}
+    }
+}
+
+test loop-collecting-executable-numeric {every numeric form, big bounds included, in a standalone executable} -constraints executableAot -body {
+    aotParity "fn f(n):
+    a = loop i from n to n + 2:
+        i
+    b = loop i from n through n + 2:
+        i
+    c = loop i down from n + 2 to n:
+        i
+    d = loop i down from n + 2 through n:
+        i
+    \[a, b, c, d\]
+f(9223372036854775806)
+"
+} -result {[[9223372036854775806, 9223372036854775807], [9223372036854775806, 9223372036854775807, 9223372036854775808], [9223372036854775808, 9223372036854775807], [9223372036854775808, 9223372036854775807, 9223372036854775806]]}
+
+test loop-collecting-executable-lockstep {lockstep (list + numeric, three clauses) in a standalone executable under GC stress} -constraints executableAot -body {
+    aotParity "fn f(xs):
+    loop x in xs and i from 0 to list_length(xs) and j down from list_length(xs) through 1:
+        \[x, i, j\]
+f(\[\"a\", \"b\", \"c\"\])
+"
+} -result {[["a", 0, 3], ["b", 1, 2], ["c", 2, 1]]}
+
+# ---------------------------------------------------------------------------
+# Native lowering: genuine CFG loops, no output List when nothing reads it
+
+proc nirOf {text} {
+    return [native::nir [native::prepareHir [surface::compile $text t.bot -strict 0]]]
+}
+
+foreach {name header} {
+    up-to          {i from 0 to n}
+    up-through     {i from 0 through n}
+    down-to        {i down from n to 0}
+    down-through   {i down from n through 0}
+} {
+    test loop-collecting-native-discarded-$name "a numeric loop whose value is unused ($name) builds no output List" -body {
+        set nir [nirOf "fn f(n):\n    loop $header:\n        i * 2\n    n\nf(5)\n"]
+        # still a real loop: a comparison, a conditional branch and a backedge
+        list [regexp {listnew|listappend} $nir] [regexp {op (ilt|ile|igt|ige) } $nir] [regexp {\n    br } $nir]
+    } -result {0 1 1}
+
+    test loop-collecting-native-retained-$name "a numeric loop whose value is used ($name) accumulates once per iteration" -body {
+        set nir [nirOf "fn f(n):\n    loop $header:\n        i * 2\nf(5)\n"]
+        list [regexp {op listnew} $nir] [regexp {op listappend} $nir]
+    } -result {1 1}
+}
+
+test loop-collecting-native-compare-ops {the endpoint test is the matching comparison, never an adjusted bound} -body {
+    set ops {}
+    foreach header {{i from 0 to n} {i from 0 through n} {i down from n to 0} {i down from n through 0}} {
+        set nir [nirOf "fn f(n):\n    loop $header:\n        i\n    n\nf(5)\n"]
+        lappend ops [lindex [regexp -inline {op (ilt|ile|igt|ige) } $nir] 1]
+    }
+    set ops
+} -result {ilt ile igt ige}
+
+test loop-collecting-native-lockstep-one-loop {a lockstep loop lowers to one CFG loop with one backedge head} -body {
+    set nir [nirOf "fn f(xs):\n    loop x in xs and i from 0 to list_length(xs):\n        \[x, i\]\nf(\[1, 2\])\n"]
+    # one conditional branch (one loop head) and one element read at the
+    # shared position -- not a second, nested loop
+    list [regexp -all {\n    br } $nir] [regexp -all {op listget} $nir]
+} -result {1 1}
+
+cleanupTests

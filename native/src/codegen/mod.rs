@@ -391,14 +391,14 @@ mod short_string_generic_entry_tests {
     }
 
     fn text(v: Value) -> String {
-        str_of(v).text.to_string()
+        str_of(v).as_str().to_string()
     }
 
     #[test]
     fn echo_entry_converts_a_tagged_string_in_and_out() {
         let mut r = rig();
         for text_in in ["", "a", "\u{0}", "\u{e9}", "\u{3bb}", "\u{732b}", "\u{1f600}", "\u{10ffff}"] {
-            let arg = r.vm.new_str(text_in.to_string());
+            let arg = r.vm.new_str(text_in);
             let out = call(&mut r, 1, &[arg]);
             assert_ne!(out, NO_VALUE, "{text_in:?}");
             assert_eq!(text(out), text_in);
@@ -409,11 +409,11 @@ mod short_string_generic_entry_tests {
     #[test]
     fn guarded_entry_returns_empty_as_a_success_and_failure_as_the_sentinel() {
         let mut r = rig();
-        let empty = r.vm.new_str(String::new());
+        let empty = r.vm.new_str("");
         let ok = call(&mut r, 2, &[empty, FALSE]);
         assert_ne!(ok, NO_VALUE, "Empty is a successful value, never the error sentinel");
         assert_eq!(text(ok), "");
-        let x = r.vm.new_str("x".to_string());
+        let x = r.vm.new_str("x");
         let ok = call(&mut r, 2, &[x, FALSE]);
         assert_eq!(text(ok), "x");
         let failed = call(&mut r, 2, &[x, TRUE]);
@@ -470,14 +470,14 @@ mod packed_ascii_generic_entry_tests {
     }
 
     fn text(v: Value) -> String {
-        str_of(v).text.to_string()
+        str_of(v).as_str().to_string()
     }
 
     #[test]
     fn echo_entry_packs_and_unpacks_every_length() {
         let mut r = rig();
         for text_in in ["", "a", "ab", "\u{0}", "a\u{0}b", "\u{7f}", "abcdefg", "abcdefgh", "Hello, w"] {
-            let arg = r.vm.new_str(text_in.to_string());
+            let arg = r.vm.new_str(text_in);
             let out = call(&mut r, 1, &[arg]);
             assert_ne!(out, NO_VALUE, "{text_in:?}");
             assert_eq!(text(out), text_in);
@@ -489,11 +489,11 @@ mod packed_ascii_generic_entry_tests {
     #[test]
     fn guarded_entry_returns_empty_as_a_success_and_failure_as_the_sentinel() {
         let mut r = rig();
-        let empty = r.vm.new_str(String::new());
+        let empty = r.vm.new_str("");
         let ok = call(&mut r, 2, &[empty, FALSE]);
         assert_ne!(ok, NO_VALUE, "the empty word is a successful value, never the error sentinel");
         assert_eq!(text(ok), "");
-        let word = r.vm.new_str("abc".to_string());
+        let word = r.vm.new_str("abc");
         let ok = call(&mut r, 2, &[word, FALSE]);
         assert_eq!(text(ok), "abc");
         let failed = call(&mut r, 2, &[word, TRUE]);

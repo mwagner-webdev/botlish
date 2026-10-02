@@ -525,6 +525,46 @@ proc hir::resolve::Expr {hirVar node ctx} {
             NoteBody hir $iteration $body
             SetField hir $e bodyScope $iteration
             SetField hir $e countBinding $countBinding
+            SetField hir $e direction [dict get $node direction]
+            SetField hir $e endKind [dict get $node endKind]
+            SetField hir $e body [Sequence hir $body [dict replace $ctx scope $iteration loop $e]]
+        }
+        lockloop {
+            # Every domain's operands are resolved in the *enclosing* scope,
+            # in written order, exactly like listloop's iterable / countloop's
+            # bounds: none of the loop's own bindings is in scope in any of
+            # them. The iteration scope then binds one fresh immutable
+            # parameter per domain, in written order.
+            set domains {}
+            foreach domain [dict get $node domains] {
+                if {[dict get $domain kind] eq "list"} {
+                    dict set domain iterable [Expr hir [dict get $domain iterable] $ctx]
+                } else {
+                    dict set domain start [Expr hir [dict get $domain start] $ctx]
+                    dict set domain end [Expr hir [dict get $domain end] $ctx]
+                }
+                lappend domains $domain
+            }
+            set body [dict get $node body]
+            set iteration [NewScope hir loop $scope \
+                [dict get $hir scopes $scope invocation] $e [dict get $node bodyOrigin]]
+            set resolved {}
+            set seen {}
+            foreach domain $domains {
+                if {[dict get $domain name] in $seen} {
+                    hir::Diagnose hir DUPLICATE-LOOP-VARIABLE \
+                        "lockstep loop variable \"[dict get $domain name]\" is bound by more than one iteration clause" $e
+                }
+                lappend seen [dict get $domain name]
+                dict set domain binding [NewBinding hir [dict get $domain name] param \
+                    $iteration [dict get $domain origin]]
+                dict unset domain name
+                dict unset domain origin
+                lappend resolved $domain
+            }
+            NoteBody hir $iteration $body
+            SetField hir $e bodyScope $iteration
+            SetField hir $e domains $resolved
             SetField hir $e body [Sequence hir $body [dict replace $ctx scope $iteration loop $e]]
         }
         return {
@@ -544,7 +584,7 @@ proc hir::resolve::Expr {hirVar node ctx} {
             SetField hir $e target $loop
             if {$loop eq ""} {
                 hir::Diagnose hir BREAK-OUTSIDE-LOOP "break outside lexical loop" $e
-            } elseif {$value ne "" && [dict get $hir exprs $loop kind] eq "listloop"} {
+            } elseif {$value ne "" && [dict get $hir exprs $loop kind] in {listloop countloop lockloop}} {
                 # RETURNING-ITERABLE-LOOPS.md: a returning iterable loop
                 # (`loop x in xs:`) has exactly one stable result type, the
                 # collected List -- a bare `break` ends it with the prefix
@@ -561,7 +601,7 @@ proc hir::resolve::Expr {hirVar node ctx} {
                 # tier" design, below, explains why a plain `loop:`/countloop
                 # target does not need the same defense here.
                 hir::Diagnose hir LISTLOOP-BREAK-VALUE \
-                    "break with a value is not valid inside a returning iterable loop (loop x in ...): use a bare break to end the loop with the collected prefix" $e
+                    "break with a value is not valid inside a collecting loop (loop x in ..., loop i from ...): use a bare break to end the loop with the collected prefix" $e
             }
             # PAYLOAD-FREE-BREAK.md: at the *surface language* level, break
             # never carries a value in any loop kind -- but that rule is

@@ -213,4 +213,24 @@ test native-tcl-unicode-emailish-known-result-nir-shape {a redundant Emailish?/e
     list $isEmailishDefs $domainLoopDefs $calls [fourWay $p]
 } -result {1 1 1 {"yes"}}
 
+# ---------------------------------------------------------------------------
+# lowercase: Tcl's simple (one-to-one) case mapping on every backend. U+0130
+# (LATIN CAPITAL LETTER I WITH DOT ABOVE) is the one scalar whose full
+# lowercase (SpecialCasing.txt) is two scalars, "i" + U+0307, while Tcl's
+# simple mapping (UnicodeData.txt) is plain U+0069; native once kept U+0130
+# unchanged there because Rust's char::to_lowercase yields two chars.
+
+foreach {label s} {
+    dotted-capital-I     İ
+    dotted-I-in-context  AİB
+    ascii-and-latin      ABCÄ
+    capital-sharp-s      ẞ
+} {
+    # The expectation is Tcl's own string tolower (the reference), shown the
+    # way core::value::show prints a String.
+    test native-tcl-unicode-lowercase-$label "lowercase($label) agrees across interp/compile/cranelift-generic/cranelift and with Tcl's string tolower" -body {
+        fourWay [list [list call {ref lowercase} [list const str $s]]]
+    } -result \"[string tolower $s]\"
+}
+
 ::tcltest::cleanupTests

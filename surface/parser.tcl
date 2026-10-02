@@ -19,7 +19,10 @@
 #                  [ "->" IDENT ] [ "errors" IDENT { "," IDENT } ] ":" suite
 #   param        = IDENT [ ":" IDENT ]
 #   if           = "if" expression ":" suite [ "else" ":" suite ]
-#   loop         = "loop" [ IDENT ( "in" expression | "from" expression "to" expression ) ] ":" suite
+#   loop         = "loop" [ clause { "and" clause } ] ":" suite
+#   clause       = IDENT "in" operand
+#                | IDENT [ "down" ] "from" operand ( "to" | "through" ) operand
+#                -- operand is an expression without a top-level "and"
 #   suite        = NEWLINE INDENT { NEWLINE | statement } DEDENT
 #   binding      = IDENT "=" expression
 #   return       = "return" [ expression ]
@@ -70,12 +73,12 @@
 # a global keyword reservation -- `loop`'s own "in" (an element-binding
 # List traversal, "loop x in EXPR:") reuses this identical contextual
 # recognition, immediately after the loop variable's name (Loop, below).
-# `loop`'s ascending counted form ("loop i from START to END:", R2A3-
-# COUNTED-LOOPS-FINAL-SOURCE.md) extends this same one-token-of-lookahead
-# dispatch: "from"/"to" (and the reserved-for-later "down"/"through"/"by")
-# are recognized the same contextual way, never added to the lexer's
-# keyword table, so none of them are reserved anywhere outside a loop
-# header. "type" itself is different: it *is* a
+# `loop`'s numeric forms ("from A to B", "from A through B", "down from B
+# to A", "down from B through A") and its lockstep composition with "and"
+# extend this same one-token-of-lookahead dispatch (see Loop below):
+# "from"/"down"/"to"/"through"/"by" are recognized the same contextual way,
+# never added to the lexer's keyword table, so none of them are reserved
+# anywhere outside a loop header. "type" itself is different: it *is* a
 # reserved keyword (lexer.tcl), since auditing the existing corpus (see
 # SOURCE-DEFINED-INTEGER-DOMAINS.md) found no program using "type" or "in"
 # as an ordinary name.
@@ -839,22 +842,53 @@ proc surface::parser::If {pVar} {
         condition $condition then $then else $else]
 }
 
-# "in" (a List-traversal loop, "loop x in EXPR:") and "from"/"to" (an
-# ascending counted loop, "loop i from START to END:") are both recognized
-# contextually, exactly like TypeDecl's own "in" (see this file's header
-# comment) -- neither is a lexer keyword, so a program is free to use "from",
-# "to", "down", "through" or "by" as an ordinary name anywhere else. Which
-# form applies is decided by a single token of lookahead right after the
-# loop variable's own name: "in" or "from" dispatch to the corresponding
-# form; "down" is the reserved (not yet implemented) descending form (spec
-# item 22); anything else is a malformed header. "through" (an inclusive
-# end, item 23) and "by" (an explicit step, item 24) are recognized the same
-# contextual way, immediately after the counted form's start/end
-# expressions, and rejected with a "reserved, not implemented yet"
-# diagnostic rather than silently parsed as "to" or accepted and ignored.
+# A loop header is one or more iteration clauses joined by "and":
+#
+#   loop x in EXPR:                                  List traversal
+#   loop i from A to B:                              ascending, B exclusive
+#   loop i from A through B:                         ascending, B inclusive
+#   loop i down from B to A:                         descending, A exclusive
+#   loop i down from B through A:                    descending, A inclusive
+#   loop x in EXPR and i from 0 to N and ...:        lockstep (COLLECTING-LOOPS.md)
+#
+# "in", "from", "down", "to", "through" and "by" are recognized contextually,
+# exactly like TypeDecl's own "in" (see this file's header comment): none is
+# a lexer keyword, so a program is free to use any of them as an ordinary
+# name anywhere else. Which clause form applies is decided by one token of
+# lookahead right after the clause's own variable name. "and" is already the
+# boolean operator's keyword, so a clause's own operand expressions are
+# parsed one precedence level below it (LoopOperand): an unparenthesized
+# "a and b" cannot appear inside a clause operand (parenthesize it), and
+# the "and" that follows an operand always starts the next clause.
+#
+# "by" (an explicit step) is still recognized only to be rejected with a
+# "reserved, not implemented yet" diagnostic.
+#
+# The node keeps every clause in `clauses` (a list of dicts; one for each
+# written clause, in written order). For the one-clause forms the older
+# per-form fields (elementName/iterable or countName/countStart/countEnd,
+# plus direction/endKind) mirror that single clause so existing consumers
+# keep working unchanged; a lockstep loop (two or more clauses) leaves them
+# empty and is described by `clauses` alone.
 proc surface::parser::Loop {pVar} {
     upvar 1 $pVar p
     set start [dict get [Advance p] span]
+    set clauses {}
+    if {[Kind p] eq "IDENT"} {
+        lappend clauses [LoopClause p]
+        while {[Kind p] eq "and"} {
+            Advance p
+            if {[Kind p] ne "IDENT"} {
+                Fail [Peek p] "expected a loop variable after \"and\", found [Describe [Peek p]]"
+            }
+            lappend clauses [LoopClause p]
+        }
+        set afterToken [Peek p]
+        if {[dict get $afterToken kind] eq "IDENT" && [dict get $afterToken value] eq "by"} {
+            Fail $afterToken "\"by\" (an explicit step) is reserved for a future counted-loop\
+                form; a counted loop always steps by 1"
+        }
+    }
     set elementName ""
     set elementNameSpan ""
     set iterable ""
@@ -862,63 +896,97 @@ proc surface::parser::Loop {pVar} {
     set countNameSpan ""
     set countStart ""
     set countEnd ""
-    if {[Kind p] eq "IDENT"} {
-        set nameToken [Advance p]
-        set name [dict get $nameToken value]
-        set nameSpan [dict get $nameToken span]
-        set dispatch [Peek p]
-        set dispatchWord [expr {[dict get $dispatch kind] eq "IDENT" ? [dict get $dispatch value] : ""}]
-        switch -- $dispatchWord {
-            in {
-                set elementName $name
-                set elementNameSpan $nameSpan
-                Advance p
-                set iterable [Expression p]
-            }
-            from {
-                set countName $name
-                set countNameSpan $nameSpan
-                Advance p
-                set startToken [Peek p]
-                if {[dict get $startToken kind] eq "IDENT" && [dict get $startToken value] eq "to"} {
-                    Fail $startToken "expected an expression (the loop's start value)\
-                        after \"from\", found [Describe $startToken]"
-                }
-                set countStart [Expression p]
-                set toToken [Peek p]
-                set toWord [expr {[dict get $toToken kind] eq "IDENT" ? [dict get $toToken value] : ""}]
-                if {$toWord eq "through"} {
-                    Fail $toToken "\"through\" (an inclusive loop end) is reserved for a future\
-                        counted-loop form; \"to\" (exclusive) is the only supported end keyword"
-                }
-                if {$toWord ne "to"} {
-                    Fail $toToken "expected \"to\" after the loop start value, found [Describe $toToken]"
-                }
-                Advance p
-                set countEnd [Expression p]
-                set afterToken [Peek p]
-                set afterWord [expr {
-                    [dict get $afterToken kind] eq "IDENT" ? [dict get $afterToken value] : ""
-                }]
-                if {$afterWord eq "by"} {
-                    Fail $afterToken "\"by\" (an explicit step) is reserved for a future counted-loop\
-                        form; a counted loop always steps by 1"
-                }
-            }
-            down {
-                Fail $dispatch "\"down from\" (a descending loop) is reserved for a future counted-loop\
-                    form; use \"from START to END\" (ascending) instead"
-            }
-            default {
-                Fail $dispatch "expected \"in\" or \"from\" after the loop variable, found [Describe $dispatch]"
-            }
+    set direction ""
+    set endKind ""
+    if {[llength $clauses] == 1} {
+        set clause [lindex $clauses 0]
+        if {[dict get $clause kind] eq "list"} {
+            set elementName [dict get $clause name]
+            set elementNameSpan [dict get $clause nameSpan]
+            set iterable [dict get $clause iterable]
+        } else {
+            set countName [dict get $clause name]
+            set countNameSpan [dict get $clause nameSpan]
+            set countStart [dict get $clause start]
+            set countEnd [dict get $clause end]
+            set direction [dict get $clause direction]
+            set endKind [dict get $clause endKind]
         }
     }
     set body [Suite p "\"loop\""]
     return [surface::ast::node loop [SpanFrom p $start] \
         elementName $elementName elementNameSpan $elementNameSpan iterable $iterable \
         countName $countName countNameSpan $countNameSpan countStart $countStart countEnd $countEnd \
+        direction $direction endKind $endKind clauses $clauses \
         body $body]
+}
+
+# One iteration clause, positioned at its variable's IDENT.
+proc surface::parser::LoopClause {pVar} {
+    upvar 1 $pVar p
+    set nameToken [Advance p]
+    set name [dict get $nameToken value]
+    set nameSpan [dict get $nameToken span]
+    set dispatch [Peek p]
+    set dispatchWord [expr {[dict get $dispatch kind] eq "IDENT" ? [dict get $dispatch value] : ""}]
+    switch -- $dispatchWord {
+        in {
+            Advance p
+            return [dict create kind list name $name nameSpan $nameSpan \
+                iterable [LoopOperand p] start "" end "" direction "" endKind ""]
+        }
+        from {
+            Advance p
+            return [LoopCount p $name $nameSpan up]
+        }
+        down {
+            Advance p
+            set fromToken [Peek p]
+            if {[dict get $fromToken kind] ne "IDENT" || [dict get $fromToken value] ne "from"} {
+                Fail $fromToken "expected \"from\" after \"down\", found [Describe $fromToken]"
+            }
+            Advance p
+            return [LoopCount p $name $nameSpan down]
+        }
+        default {
+            Fail $dispatch "expected \"in\", \"from\" or \"down from\" after the loop variable,\
+                found [Describe $dispatch]"
+        }
+    }
+}
+
+# The rest of a numeric clause after its "from": FIRST ("to" | "through")
+# SECOND. FIRST is where iteration begins (the low end of an ascending
+# loop, the high end of a descending one); SECOND is the limit.
+proc surface::parser::LoopCount {pVar name nameSpan direction} {
+    upvar 1 $pVar p
+    set startToken [Peek p]
+    if {[dict get $startToken kind] eq "IDENT" && [dict get $startToken value] in {to through}} {
+        Fail $startToken "expected an expression (the loop's start value)\
+            after \"from\", found [Describe $startToken]"
+    }
+    set first [LoopOperand p]
+    set keywordToken [Peek p]
+    set word [expr {[dict get $keywordToken kind] eq "IDENT" ? [dict get $keywordToken value] : ""}]
+    switch -- $word {
+        to { set endKind exclusive }
+        through { set endKind inclusive }
+        default {
+            Fail $keywordToken "expected \"to\" or \"through\" after the loop start value,\
+                found [Describe $keywordToken]"
+        }
+    }
+    Advance p
+    set second [LoopOperand p]
+    return [dict create kind count name $name nameSpan $nameSpan iterable "" \
+        start $first end $second direction $direction endKind $endKind]
+}
+
+# An expression operand of an iteration clause: a disjunction whose
+# conjunction level is skipped, so "and" is left for the clause separator.
+proc surface::parser::LoopOperand {pVar} {
+    upvar 1 $pVar p
+    return [Logical p or Inversion]
 }
 
 # ":" NEWLINE INDENT statements DEDENT, after AFTER (for messages).

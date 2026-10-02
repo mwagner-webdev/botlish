@@ -1,0 +1,28 @@
+program           old bytes  new bytes    delta functions
+ai_text_clean          2425       2465      +40         5
+csv                    5706       5801      +95        11
+csv_chunked           10151      10246      +95        20
+csv_geometric          7561       7656      +95        20
+csv_records           23217      23312      +95        56
+fib                     181        181       +0         2
+hashtable             12732      12732       +0        26
+lex-strategy           5119       5119       +0        11
+loop-count              274        274       +0         3
+matmul                 4683       4683       +0         7
+refined-checks         9191       9191       +0        26
+source-checks          4249       4249       +0         7
+string_replace         2787       2787       +0         4
+string_reverse          990        990       +0         3
+sum-refined             277        277       +0         3
+test-selection         6421       6421       +0        12
+uri-steady             5471       5471       +0        17
+TOTAL                101435     101855     +420       233
+
+runtime/driver binary sections (size -A):
+  .text          old    6137671  new    6140807  +3136
+  .rodata        old     580856  new     580992  +136
+  .data          old       2688  new       2688  +0
+  .bss           old        320  new        320  +0
+  .eh_frame      old     373500  new     373508  +8
+  .data.rel.ro   old     170016  new     170136  +120
+  file bytes     old   48713800  new   48706816  -6984

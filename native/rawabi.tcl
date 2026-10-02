@@ -696,7 +696,21 @@ proc native::rawabi::Walk {e sink why} {
             Walk [dict get $node start] "" "count loop bound"
             Walk [dict get $node end] "" "count loop bound"
             dict set W(loops) $e ""
-            Seq [dict get $node body] "" discarded
+            # A collecting loop (COLLECTING-LOOPS.md): the body's value is a
+            # result-List element, exactly like listloop's.
+            Seq [dict get $node body] "" "list loop result element"
+        }
+        lockloop {
+            foreach domain [dict get $node domains] {
+                if {[dict get $domain kind] eq "list"} {
+                    Walk [dict get $domain iterable] "" "list loop source"
+                } else {
+                    Walk [dict get $domain start] "" "count loop bound"
+                    Walk [dict get $domain end] "" "count loop bound"
+                }
+            }
+            dict set W(loops) $e ""
+            Seq [dict get $node body] "" "list loop result element"
         }
         struct {
             foreach f [dict get $node fields] {

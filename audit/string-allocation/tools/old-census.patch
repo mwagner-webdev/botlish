@@ -1,0 +1,86 @@
+diff --git a/native/src/runtime/heap.rs b/native/src/runtime/heap.rs
+index ff9d3dd..590df6c 100644
+--- a/native/src/runtime/heap.rs
++++ b/native/src/runtime/heap.rs
+@@ -155,6 +155,9 @@ impl Heap {
+                 true
+             } else {
+                 if metrics.enabled() {
++                    if header.kind == KIND_STR && !str_of(object as Value).text.is_empty() {
++                        metrics.str_text_buffer_frees += 1;
++                    }
+                     let size = unsafe { object_size(object) };
+                     let k = &mut reclaimed_by_kind[header.kind as usize];
+                     k.0 += 1;
+diff --git a/native/src/runtime/metrics.rs b/native/src/runtime/metrics.rs
+index ac375f4..129041a 100644
+--- a/native/src/runtime/metrics.rs
++++ b/native/src/runtime/metrics.rs
+@@ -242,6 +242,9 @@ pub struct Metrics {
+     /// and so never seek at all. See hir/traversal.tcl and native/lower.tcl's
+     /// "String traversal" section for the optimization this measures.
+     pub utf8_seek_bytes: u64,
++    /// AUDIT (old-census.patch): String text buffers (the `Box<str>`) allocated / freed.
++    pub str_text_buffer_allocs: u64,
++    pub str_text_buffer_frees: u64,
+     pub construction: ConstructionStats,
+ }
+ 
+@@ -265,6 +268,8 @@ impl Metrics {
+             mutarray_reads: 0,
+             mutarray_writes: 0,
+             utf8_seek_bytes: 0,
++            str_text_buffer_allocs: 0,
++            str_text_buffer_frees: 0,
+             construction: ConstructionStats::default(),
+         }
+     }
+@@ -439,6 +444,16 @@ impl Metrics {
+         ]);
+         let mutations = dict(&[("reads", n(self.mutarray_reads)), ("writes", n(self.mutarray_writes))]);
+         let traversal = dict(&[("utf8SeekBytes", n(self.utf8_seek_bytes))]);
++        let s = &self.by_kind[KIND_STR as usize];
++        let strings = dict(&[
++            ("objects", n(s.allocations)),
++            ("heapAllocations", n(s.allocations + self.str_text_buffer_allocs)),
++            ("textBufferAllocations", n(self.str_text_buffer_allocs)),
++            ("frees", n(s.reclaimed_objects + self.str_text_buffer_frees)),
++            ("textBufferFrees", n(self.str_text_buffer_frees)),
++            ("bytes", n(s.allocated_bytes())),
++            ("emptyReused", n(0)),
++        ]);
+         let c = &self.construction;
+         let construction = dict(&[
+             ("materializations", n(c.materializations)),
+@@ -464,6 +479,7 @@ impl Metrics {
+             ("copies", copies),
+             ("mutableArray", mutations),
+             ("traversal", traversal),
++            ("strings", strings),
+             ("construction", construction),
+             ("sites", sites_tcl.to_string()),
+         ])
+diff --git a/native/src/runtime/vm.rs b/native/src/runtime/vm.rs
+index c99ebc8..fbf9391 100644
+--- a/native/src/runtime/vm.rs
++++ b/native/src/runtime/vm.rs
+@@ -371,6 +371,9 @@ impl Vm {
+             return v;
+         }
+         let bytes = obj.text.len();
++        if bytes > 0 && self.metrics.enabled() {
++            self.metrics.str_text_buffer_allocs += 1;
++        }
+         self.alloc(obj, bytes)
+     }
+ 
+@@ -382,6 +385,9 @@ impl Vm {
+             return v;
+         }
+         let bytes = text.len();
++        if bytes > 0 && self.metrics.enabled() {
++            self.metrics.str_text_buffer_allocs += 1;
++        }
+         #[cfg(not(feature = "short-first-recovered"))]
+         let first = first_scalar(&text, ascii);
+         let obj = StrObj {

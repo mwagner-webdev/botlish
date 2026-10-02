@@ -13,3 +13,9 @@ delta of `refined-checks` with and without the materializations
 (`audit/short-string/out/ir-demand.txt`, `nd` against `new`), where no
 collection runs inside the measured window, so it contains the allocation side
 only. Results: SHORT-STRING-TIERS.md, "Cost of a materialization".
+
+Superseded measurement: the runtime these figures describe (two allocations per
+String) was replaced by the one-allocation String of `STRING-ALLOCATION.md`;
+`audit/string-allocation/tools/materialize.py` repeats this measurement (and
+splits allocation side from full life cycle, for more value classes) on both
+runtimes. The ~312 / ~862 Ir figures above are historical.

@@ -1,0 +1,497 @@
+# string-allocation.test -- STRING-ALLOCATION.md: the canonical native String
+# is ONE heap allocation holding the object header, the String's metadata and
+# its UTF-8 bytes (it used to be a StrObj plus a separately allocated text
+# buffer).
+#
+# This file pins (1) the structural allocation facts through the native
+# allocation report (one object per dynamic String, no text buffer, 32-byte
+# header, empty reuse, constants allocation-free), (2) value parity for every
+# producer across ASCII, Latin-1, BMP, astral, combining, NUL, ellipsis,
+# empty and large Strings against the reference interpreter and the Tcl
+# compile backend, with the short-String tiers on and off, (3) GC behavior
+# (Strings live across allocations, stored in a List/MutableArray/struct,
+# captured, recursive, large), and (4) standalone executables, each also under
+# GC stress. The Rust-side allocator-call pins (a counting global allocator:
+# exactly one allocation and one free per String for every constructor) are
+# native/src/runtime/string_alloc_tests.rs and strobj.rs.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 100000
+
+testConstraint executableAot [expr {$::tcl_platform(os) eq "Linux" &&
+    $::tcl_platform(machine) in {x86_64 amd64}}]
+
+# Exact counts assume the default, unforced collector.
+catch {unset ::env(BOTLISH_NATIVE_GC_STRESS)}
+catch {unset ::env(BOTLISH_NATIVE_GC_MIN)}
+
+proc dedent {text} {
+    set lines [split $text \n]
+    set indent 1000
+    foreach line $lines {
+        if {[string trim $line] eq ""} continue
+        set n [expr {[string length $line] - [string length [string trimleft $line " "]]}]
+        if {$n < $indent} { set indent $n }
+    }
+    return [join [lmap line $lines {string range $line $indent end}] \n]
+}
+
+proc srcHir {text} {
+    set dir [makeDirectory {string allocation}]
+    set path [file join $dir p.bot]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts $channel [dedent $text]
+    close $channel
+    try {
+        return [surface::readProgramFile $path]
+    } finally {
+        removeDirectory {string allocation}
+    }
+}
+
+proc nativeOutcome {hir args} {
+    resetEffects
+    if {[catch {native::evalHir $hir {*}$args} result options]} {
+        return [list error [dict get $options -errorcode]]
+    }
+    return [list value [core::value::show $result 1]]
+}
+
+# Every backend, and native with the short-String tiers and the demand rule
+# on and off, agree on TEXT; returns the one outcome ("kind:text").
+proc parity {text} {
+    set hir [srcHir $text]
+    set outcomes {}
+    foreach backend {interp compile cranelift-generic cranelift} {
+        set outcome [outcomeUnderHir $backend $hir]
+        lappend outcomes [lindex $outcome 0]:[lindex $outcome 1]
+    }
+    set prepared [native::prepareHir $hir]
+    foreach opt {0 1} {
+        foreach pack {0 1} {
+            foreach demand {0 1} {
+                set outcome [nativeOutcome $prepared -short-string-opt $opt -ascii-pack-opt $pack -short-demand-opt $demand]
+                lappend outcomes [lindex $outcome 0]:[lindex $outcome 1]
+            }
+        }
+    }
+    if {[llength [lsort -unique $outcomes]] != 1} {
+        error "backends disagree:\n[join $outcomes \n]"
+    }
+    return [lindex $outcomes 0]
+}
+
+proc underStress {script} {
+    set ::env(BOTLISH_NATIVE_GC_STRESS) 1
+    try {
+        uplevel 1 $script
+    } finally {
+        unset ::env(BOTLISH_NATIVE_GC_STRESS)
+    }
+}
+
+# The `strings` section and the String kind line of the allocation report.
+proc census {text args} {
+    set report [native::allocationReport [srcHir $text] summary 1 {*}$args]
+    return [list [dict get $report strings] [dict get $report byKind String]]
+}
+
+proc stringsOf {text args} { return [dict get [lindex [census $text {*}$args] 0]] }
+
+# ---------------------------------------------------------------------------
+# (1) Structural allocation facts
+
+test strings-one-object-no-text-buffer {a dynamic String is one allocation: one object, header plus text, and no text buffer exists to count} -body {
+    set c [census {concat("a", "b")}]
+    set s [lindex $c 0]
+    list [dict get $s objects] [dict get $s heapAllocations] [dict get $s textBufferAllocations] \
+        [dict get $s textBufferFrees] [dict get $s bytes]
+} -result {1 1 0 0 27}
+
+test strings-header-is-32-bytes {the fixed header is 25 bytes (it was 40: header plus Box<str> fat pointer); allocatedBytes = 25 + UTF-8 bytes} -body {
+    set k [lindex [census {concat("ab", "…")}] 1]
+    list [dict get $k allocations] [dict get $k headerBytes] [dict get $k payloadBytes] [dict get $k allocatedBytes]
+} -result {1 25 5 30}
+
+test strings-bytes-are-header-plus-utf8 {every dynamic String is 25 header bytes plus its UTF-8 length, for 1-, 2-, 3- and 4-byte scalars} -body {
+    set out {}
+    foreach {a b} {a b é é … … 😀 😀} {
+        set k [lindex [census "concat(\"$a\", \"$b\")"] 1]
+        lappend out [dict get $k allocations] [dict get $k allocatedBytes]
+    }
+    set out
+} -result {1 27 1 29 1 31 1 33}
+
+test strings-hundred-byte-string-is-one-block {a 100-byte String is one allocation of 125 bytes} -body {
+    set half [string repeat x 50]
+    set k [lindex [census "concat(\"$half\", \"$half\")"] 1]
+    list [dict get $k allocations] [dict get $k allocatedBytes]
+} -result {1 125}
+
+test strings-constants-allocate-nothing-at-run-time {literals (empty, one char, ellipsis, astral, long) are static constants: no dynamic String} -body {
+    set long [string repeat y 300]
+    set report [native::allocationReport [srcHir "\[\"\", \"a\", \"…\", \"😀\", \"$long\"\]"] summary]
+    list [dict get $report byKind String allocations] [dict get $report strings objects] \
+        [expr {[dict get $report static byKind String allocations] >= 4}]
+} -result {0 0 1}
+
+test strings-empty-results-reuse-the-canonical-empty {a dynamic empty String (empty substring) is the canonical static empty: zero allocations, counted as a reuse} -body {
+    set s [stringsOf {
+        fn cut(s, i):
+            substring(s, i, i)
+
+        cut(concat("a", "bc"), 2)
+    }]
+    list [dict get $s objects] [dict get $s emptyReused]
+} -result {1 1}
+
+test strings-concat-is-one-object-whatever-the-width {a nested concat is one flat construct (virtual construction: one String, no intermediate); ASCII and non-ASCII substrings each allocate one String} -body {
+    list \
+        [dict get [stringsOf {concat(concat("é", "x"), "…")}] objects] \
+        [dict get [stringsOf {
+            fn cut(s):
+                substring(s, 1, 4)
+
+            cut(concat("hello", "world"))
+        }] objects] \
+        [dict get [stringsOf {
+            fn cut(s):
+                substring(s, 1, 4)
+
+            cut(concat("a😀…", "éz"))
+        }] objects]
+} -result {1 2 2}
+
+test strings-frees-match-objects {after the run, the cleanup collection frees exactly one block per String} -body {
+    set report [native::allocationReport [srcHir {
+        fn grow(n, acc):
+            if n == 0:
+                acc
+            else:
+                grow(n - 1, concat(acc, "é"))
+
+        length(grow(50, concat("a", "b")))
+    }] summary 2]
+    set s [dict get $report byKind String]
+    list [dict get $report strings textBufferFrees] [expr {[dict get $s reclaimedObjects] == [dict get $s allocations]}]
+} -result {0 1}
+
+test strings-large-string-is-one-block {a megabyte-scale String is still one allocation of header plus bytes} -body {
+    set s [stringsOf {
+        fn dbl(n, s):
+            if n == 0:
+                s
+            else:
+                dbl(n - 1, concat(s, s))
+
+        length(dbl(20, "x"))
+    }]
+    dict get $s objects
+} -result 20
+
+test strings-large-string-bytes {the bytes of the doubling chain are exactly the sum of 25 + 2^i} -body {
+    set s [stringsOf {
+        fn dbl(n, s):
+            if n == 0:
+                s
+            else:
+                dbl(n - 1, concat(s, s))
+
+        length(dbl(10, concat("x", "x")))
+    }]
+    # concat("x","x") is 2 bytes; ten doublings: 4, 8, ..., 2048.
+    set bytes 27
+    for {set i 2} {$i <= 11} {incr i} { incr bytes [expr {25 + (1 << $i)}] }
+    list [dict get $s objects] [expr {[dict get $s bytes] == $bytes}]
+} -result {11 1}
+
+test strings-short-materialization-is-one-object {a ShortString1 and a packed ASCII value materialized at a tagged frontier are one String each} -body {
+    set text {
+        fn pick(flag):
+            if flag:
+                ""
+            else:
+                "λ"
+
+        fn pack(flag):
+            if flag:
+                "ab"
+            else:
+                "cd"
+
+        fn store(a, b):
+            [a, b]
+
+        store(pick(false), pack(true))
+    }
+    set s [stringsOf $text -tiny-leaf-inline-opt 0 -short-demand-opt 0]
+    list [dict get $s textBufferAllocations] [expr {[dict get $s objects] <= 2}]
+} -result {0 1}
+
+# ---------------------------------------------------------------------------
+# (2) Value parity per producer
+
+test strings-parity-unicode-classes {ASCII, Latin-1, ellipsis, BMP, astral, combining, NUL and empty through concat, substring, length and equality} -body {
+    set nul [format %c 0]
+    parity "
+        fn probe(s):
+            \[length(s), s == \"\", concat(s, \"!\"), substring(concat(s, \"x\"), 0, 1)\]
+
+        \[probe(\"a\"), probe(\"é\"), probe(\"…\"), probe(\"猫\"), probe(\"😀\"), probe(\"é\"), probe(\"$nul\"), probe(\"\"),
+         probe(concat(\"😀\", \"…\"))\]
+    "
+} -result "value:\[\[1, false, \"a!\", \"a\"\], \[1, false, \"é!\", \"é\"\], \[1, false, \"…!\", \"…\"\], \[1, false, \"猫!\", \"猫\"\], \[1, false, \"😀!\", \"😀\"\], \[2, false, \"e\u0301!\", \"e\"\], \[1, false, \"\u0000!\", \"\u0000\"\], \[0, true, \"!\", \"x\"\], \[2, false, \"😀…!\", \"😀\"\]\]"
+
+test strings-parity-nul-is-one-character {NUL is a one-character String of one zero byte, not the empty String} -body {
+    set nul [format %c 0]
+    parity "
+        fn n(s):
+            \[length(s), s == \"\", s == \"$nul\", length(concat(s, s))\]
+
+        \[n(\"$nul\"), n(concat(\"$nul\", \"\")), n(substring(concat(\"a$nul\", \"b\"), 1, 2))\]
+    "
+} -result {value:[[1, false, true, 2], [1, false, true, 2], [1, false, true, 2]]}
+
+test strings-parity-substring-boundaries {substring at 0, at the end, empty and full, over ASCII and non-ASCII bases, including multi-byte slices} -body {
+    parity {
+        fn cuts(s):
+            n = length(s)
+            [substring(s, 0, 0), substring(s, 0, n), substring(s, n, n), substring(s, 1, n), substring(s, 0, n - 1)]
+
+        [cuts("hello"), cuts("a😀…é"), cuts("é")]
+    }
+} -result {value:[["", "hello", "", "ello", "hell"], ["", "a😀…é", "", "😀…é", "a😀…"], ["", "é", "", "", ""]]}
+
+test strings-parity-concat-shapes {concat chains of every width, accumulating a String over a loop} -body {
+    parity {
+        fn build(n, acc):
+            if n == 0:
+                acc
+            else:
+                build(n - 1, concat(concat("😀", acc), concat("é", "…")))
+
+        s = build(20, "")
+        [length(s), substring(s, 0, 4), substring(s, 56, 60), s == build(20, "")]
+    }
+} -result {value:[60, "😀😀😀😀", "é…é…", true]}
+
+test strings-parity-errors-keep-their-messages {an out-of-range substring and a failing guarded call report the same error on every backend} -body {
+    set hir [srcHir {
+        fn cut(s):
+            substring(concat(s, "é"), 0, 9)
+
+        cut("😀")
+    }]
+    set outcomes {}
+    foreach backend {interp compile cranelift-generic cranelift} {
+        lappend outcomes [lrange [outcomeUnderHir $backend $hir] 0 2]
+    }
+    list [llength [lsort -unique $outcomes]] [lindex $outcomes 0]
+} -result {1 {error {CORE SEMANTIC RANGE} {substring: range 0..9 is outside 0..2}}}
+
+test strings-parity-large {a String over a megabyte, built by doubling, has the right length, ends and equality} -body {
+    parity {
+        fn dbl(n, s):
+            if n == 0:
+                s
+            else:
+                dbl(n - 1, concat(s, s))
+
+        s = dbl(20, "é…")
+        [length(s), substring(s, 0, 3), substring(s, length(s) - 2, length(s))]
+    }
+} -result {value:[2097152, "é…é", "é…"]}
+
+# ---------------------------------------------------------------------------
+# (3) GC: Strings are ordinary objects; the text holds no roots
+
+test strings-gc-live-across-allocation-and-storage {Strings held in a List, a struct, a MutableArray and a captured local survive allocation churn under GC stress, with every width} -body {
+    set text {
+        struct Pair:
+            left: str
+            right: str
+
+        fn churn(n):
+            if n == 0:
+                0
+            else:
+                length(concat(concat("x", "y"), "z")) + churn(n - 1)
+
+        fn make_getter(s):
+            fn get(unused):
+                s
+
+            get
+
+        fn work(a, b):
+            xs = [a, b, concat(a, b)]
+            p = Pair {left: concat(b, a), right: "k"}
+            m = mutable_array_allocate(2)
+            mutable_array_set(m, 0, concat(a, "!"))
+            mutable_array_set(m, 1, substring(concat(a, b), 0, 1))
+            g = make_getter(concat(b, b))
+            c = churn(30)
+            [xs, p.left, p.right, mutable_array_get(m, 0), mutable_array_get(m, 1), g(0), c]
+
+        [work("é", "…"), work("😀", "a"), work("", "bc")]
+    }
+    underStress {parity $text}
+} -result {value:[[["é", "…", "é…"], "…é", "k", "é!", "é", "……", 90], [["😀", "a", "😀a"], "a😀", "k", "😀!", "😀", "aa", 90], [["", "bc", "bc"], "bc", "k", "!", "b", "bcbc", 90]]}
+
+test strings-gc-recursive-allocating-frames {a String parameter and result across 150 recursive allocating frames under GC stress} -body {
+    set text {
+        fn rec(n, s):
+            if n == 0:
+                s
+            else:
+                t = concat(s, "…")
+                u = rec(n - 1, t)
+                concat(substring(u, 0, 1), substring(u, length(u) - 1, length(u)))
+
+        [rec(150, "😀"), length(rec(150, "ab"))]
+    }
+    underStress {parity $text}
+} -result {value:["😀…", 2]}
+
+test strings-gc-large-string-survives-collections {a large String stays intact across the collections its own allocation and later garbage trigger} -body {
+    set text {
+        fn dbl(n, s):
+            if n == 0:
+                s
+            else:
+                dbl(n - 1, concat(s, s))
+
+        fn churn(n):
+            if n == 0:
+                0
+            else:
+                length(concat("a", "b")) + churn(n - 1)
+
+        big = dbl(16, "é…")
+        c = churn(2000)
+        [length(big), substring(big, 0, 4), substring(big, length(big) - 2, length(big)), c]
+    }
+    parity $text
+} -result {value:[131072, "é…é…", "é…", 4000]}
+
+test strings-gc-reclaims-and-reuses {a loop that builds and drops many Strings reaches a steady live set: collections reclaim the dropped Strings, one block each} -body {
+    set report [native::allocationReport [srcHir {
+        fn churn(n, acc):
+            if n == 0:
+                length(acc)
+            else:
+                churn(n - 1, concat(substring(concat(acc, "é"), 0, 3), "…"))
+
+        churn(20000, "ab")
+    }] summary 1]
+    set s [dict get $report byKind String]
+    # One String per iteration (the substring is a region piece of the fused
+    # construct, never its own String); collections free about all of them,
+    # and the peak stays near the collector's 1 MB pacing.
+    list [expr {[dict get $report gc cycles] > 0}] [dict get $report strings objects] \
+        [expr {[dict get $report strings frees] > 10000}] [expr {[dict get $report total peakLiveBytes] < 2000000}] \
+        [dict get $report strings textBufferFrees]
+} -result {1 20001 1 1 0}
+
+# ---------------------------------------------------------------------------
+# (4) Standalone executables
+
+proc aotParity {text {extra {}}} {
+    set text [dedent $text]
+    set dir [makeDirectory {string allocation executable test}]
+    set path [file join $dir {program with spaces.bot}]
+    set channel [open $path w]
+    fconfigure $channel -encoding utf-8 -translation lf
+    puts $channel $text
+    close $channel
+    try {
+        set hir [surface::readProgramFile $path]
+        set expected {}
+        foreach backend {interp compile cranelift-generic cranelift} {
+            set outcome [outcomeUnderHir $backend $hir]
+            if {[lindex $outcome 0] ne "value"} { error "$backend: $outcome" }
+            lappend expected [lindex $outcome 1]
+        }
+        native::executable $hir [file rootname $path] {*}$extra
+        set relocated [file join $dir relocated]
+        file rename [file rootname $path] $relocated
+        file delete $path
+        lappend expected [exec env PATH= $relocated]
+        lappend expected [exec env PATH= BOTLISH_NATIVE_GC_STRESS=1 $relocated]
+        if {[llength [lsort -unique $expected]] != 1} { error "values disagree: $expected" }
+        return [lindex $expected 0]
+    } finally {
+        removeDirectory {string allocation executable test}
+    }
+}
+
+test strings-executable-everything {every width, NUL, empty, concat, substring, storage, an error path and a large String in one standalone executable, also under GC stress} -constraints executableAot -body {
+    set nul [format %c 0]
+    aotParity "
+        error Bad
+
+        fn pick(n):
+            if n == 0:
+                \"\"
+            else:
+                if n == 1:
+                    \"a\"
+                else:
+                    if n == 2:
+                        \"…\"
+                    else:
+                        if n == 3:
+                            \"😀\"
+                        else:
+                            \"$nul\"
+
+        fn guarded(n) -> str errors Bad:
+            if n > 4:
+                fail Bad
+            else:
+                pick(n)
+
+        fn run(n):
+            r = guarded(n):
+                on Bad:
+                    \"bad\"
+            r
+
+        fn dbl(n, s):
+            if n == 0:
+                s
+            else:
+                dbl(n - 1, concat(s, s))
+
+        fn both(n):
+            s = pick(n)
+            \[length(s), concat(s, \"é\"), substring(concat(\"x\", s), 1, length(concat(\"x\", s)))\]
+
+        \[both(0), both(1), both(2), both(3), both(4), run(2), run(9), length(dbl(16, \"é…\")), list_append(\[pick(3)\], pick(0))\]
+    "
+} -result "\[\[0, \"é\", \"\"\], \[1, \"aé\", \"a\"\], \[1, \"…é\", \"…\"\], \[1, \"😀é\", \"😀\"\], \[1, \"\u0000é\", \"\u0000\"\], \"…\", \"bad\", 131072, \[\"😀\", \"\"\]\]"
+
+test strings-executable-short-optimization-off {the same kind of executable with -short-string-opt 0} -constraints executableAot -body {
+    aotParity {
+        fn pick(flag):
+            if flag:
+                ""
+            else:
+                "😀"
+
+        fn fwd(s):
+            s
+
+        [length(fwd(pick(true))), length(fwd(pick(false))), concat(fwd(pick(false)), "…"), substring(concat("a", fwd(pick(false))), 1, 2)]
+    } {-short-string-opt 0}
+} -result {[0, 1, "😀…", "😀"]}
+
+test strings-executable-census-has-no-text-buffer {a standalone executable's allocation report shows no text buffer allocations} -constraints executableAot -body {
+    set report [native::allocationReport [srcHir {concat(concat("a", "b"), "…")}] summary]
+    list [dict get $report strings textBufferAllocations] [dict get $report strings textBufferFrees]
+} -result {0 0}
+
+cleanupTests

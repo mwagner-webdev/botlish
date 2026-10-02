@@ -134,7 +134,7 @@ fn vm<'a>(p: *mut Vm) -> &'a mut Vm {
     unsafe { &mut *p }
 }
 
-/// One decoded String piece: its UTF-8 bytes (borrowed from a live, rooted
+/// One decoded String piece: its UTF-8 text (borrowed from a live, rooted
 /// object -- every piece is an operand register of the running `construct`,
 /// and objects never move), character count, ASCII flag, and the plan
 /// object it came from, if any (to be consumed).
@@ -143,7 +143,7 @@ struct StrPiece<'a> {
     /// The piece's own Value when it is a flat String span (returned as-is
     /// by a one-piece flat construct).
     flat: Option<Value>,
-    bytes: &'a [u8],
+    text: &'a str,
     chars: usize,
     ascii: bool,
     plan: Option<Value>,
@@ -199,6 +199,14 @@ impl<T: Copy> Small<T> {
 impl StrPlanObj {
     fn data(&self) -> &[u8] {
         &self.buf[self.start..self.end]
+    }
+
+    /// The plan's text. A plan's buffer only ever receives whole pieces (each
+    /// a String's or another plan's valid UTF-8, or a region cut on scalar
+    /// boundaries), front or back, so its live bytes are valid UTF-8.
+    fn text(&self) -> &str {
+        // SAFETY: the invariant above.
+        unsafe { std::str::from_utf8_unchecked(self.data()) }
     }
 
     fn len(&self) -> usize {
@@ -258,12 +266,12 @@ fn decode_str_pieces<'a>(p: *mut Vm, words: &'a [u64]) -> Small<StrPiece<'a>> {
                 match heap_kind(v) {
                     KIND_STR => {
                         let s = str_of(v);
-                        pieces.push(StrPiece { flat: Some(v), bytes: s.text.as_bytes(), chars: s.chars, ascii: s.ascii, plan: None });
+                        pieces.push(StrPiece { flat: Some(v), text: s.as_str(), chars: s.chars, ascii: s.ascii, plan: None });
                     }
                     KIND_STRPLAN => {
                         let plan = strplan_of(v);
                         check_live(plan.consumed);
-                        pieces.push(StrPiece { flat: None, bytes: plan.data(), chars: plan.chars, ascii: plan.ascii, plan: Some(v) });
+                        pieces.push(StrPiece { flat: None, text: plan.text(), chars: plan.chars, ascii: plan.ascii, plan: Some(v) });
                     }
                     kind => panic!("BUG: construct str: span piece of heap kind {kind}"),
                 }
@@ -273,21 +281,23 @@ fn decode_str_pieces<'a>(p: *mut Vm, words: &'a [u64]) -> Small<StrPiece<'a>> {
                 let base = str_of(words[i + 1]);
                 let from = int_small(words[i + 2]).expect("region start already validated") as usize;
                 let to = int_small(words[i + 3]).expect("region end already validated") as usize;
-                let bytes = if base.ascii {
-                    &base.text.as_bytes()[from..to]
+                let text = if base.ascii {
+                    // ASCII: character index == byte offset.
+                    &base.as_str()[from..to]
                 } else {
                     // The same seek rt_substr/rt_str_region_eq perform (and
                     // account) for a non-ASCII base: character index FROM
                     // is located by decoding forward from byte 0.
-                    let mut indices = base.text.char_indices();
-                    let seek_start = indices.by_ref().nth(from).map_or(base.text.len(), |(i, _)| i);
+                    let all = base.as_str();
+                    let mut indices = all.char_indices();
+                    let seek_start = indices.by_ref().nth(from).map_or(all.len(), |(i, _)| i);
                     vm(p).metrics.record_utf8_seek(seek_start);
-                    let rest = &base.text[seek_start..];
+                    let rest = &all[seek_start..];
                     let width = rest.char_indices().nth(to - from).map_or(rest.len(), |(i, _)| i);
-                    &rest.as_bytes()[..width]
+                    &rest[..width]
                 };
-                let ascii = base.ascii || bytes.is_ascii();
-                pieces.push(StrPiece { flat: None, bytes, chars: to - from, ascii, plan: None });
+                let ascii = base.ascii || text.is_ascii();
+                pieces.push(StrPiece { flat: None, text, chars: to - from, ascii, plan: None });
                 vm(p).metrics.construction.region_pieces += 1;
                 i += 4;
             }
@@ -351,7 +361,7 @@ fn construct_str(p: *mut Vm, plan_mode: bool, words: &[u64]) -> Value {
     let mut anchor = None;
     for (i, piece) in pieces.iter().enumerate() {
         chars += piece.chars;
-        bytes += piece.bytes.len();
+        bytes += piece.text.len();
         ascii &= piece.ascii;
         if anchor.is_none() && piece.plan.is_some() {
             anchor = Some(i);
@@ -368,12 +378,18 @@ fn construct_str(p: *mut Vm, plan_mode: bool, words: &[u64]) -> Value {
             vm(p).metrics.construction.passthrough += 1;
             return v;
         }
-        let mut text = Vec::with_capacity(bytes);
-        for piece in pieces {
-            text.extend_from_slice(piece.bytes);
-        }
-        let text = unsafe { String::from_utf8_unchecked(text) };
-        let r = vm(p).new_str_known(text, chars, ascii);
+        // The final size is the sum of the pieces: one allocation, each piece
+        // copied once straight into the new String's text (no intermediate
+        // buffer). The pieces' referents are operands of this instruction, so
+        // they are roots across the allocation's collection.
+        let slices: Small<&str> = {
+            let mut v = Small::new();
+            for piece in pieces {
+                v.push(piece.text);
+            }
+            v
+        };
+        let r = vm(p).new_str_pieces(slices.as_slice(), chars, ascii);
         // Every plan piece is absorbed (only its Value is read here: its
         // bytes were copied above).
         for piece in pieces {
@@ -395,8 +411,8 @@ fn construct_str(p: *mut Vm, plan_mode: bool, words: &[u64]) -> Value {
             // (every plan has exactly one owner, and this construct owns
             // them all), so each is copied straight from its own storage.
             let target = pieces[anchor].plan.unwrap();
-            let before: usize = pieces[..anchor].iter().map(|x| x.bytes.len()).sum();
-            let after: usize = pieces[anchor + 1..].iter().map(|x| x.bytes.len()).sum();
+            let before: usize = pieces[..anchor].iter().map(|x| x.text.len()).sum();
+            let after: usize = pieces[anchor + 1..].iter().map(|x| x.text.len()).sum();
             let plan = strplan_mut(target);
             let mut moved = 0;
             if before > 0 {
@@ -404,16 +420,16 @@ fn construct_str(p: *mut Vm, plan_mode: bool, words: &[u64]) -> Value {
                 plan.start -= before;
                 let mut at = plan.start;
                 for piece in &pieces[..anchor] {
-                    plan.buf[at..at + piece.bytes.len()].copy_from_slice(piece.bytes);
-                    at += piece.bytes.len();
+                    plan.buf[at..at + piece.text.len()].copy_from_slice(piece.text.as_bytes());
+                    at += piece.text.len();
                 }
             }
             if after > 0 {
                 moved += plan.reserve_back(after);
                 for piece in &pieces[anchor + 1..] {
                     let end = plan.end;
-                    plan.buf[end..end + piece.bytes.len()].copy_from_slice(piece.bytes);
-                    plan.end += piece.bytes.len();
+                    plan.buf[end..end + piece.text.len()].copy_from_slice(piece.text.as_bytes());
+                    plan.end += piece.text.len();
                 }
             }
             plan.chars = chars;
@@ -437,8 +453,8 @@ fn construct_str(p: *mut Vm, plan_mode: bool, words: &[u64]) -> Value {
             let mut buf = vec![0u8; capacity];
             let mut at = FRESH_FRONT_SLACK;
             for piece in pieces {
-                buf[at..at + piece.bytes.len()].copy_from_slice(piece.bytes);
-                at += piece.bytes.len();
+                buf[at..at + piece.text.len()].copy_from_slice(piece.text.as_bytes());
+                at += piece.text.len();
             }
             let obj = StrPlanObj {
                 hdr: Header::new(KIND_STRPLAN, false),

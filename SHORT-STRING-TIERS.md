@@ -1,5 +1,13 @@
 # Tiered short-String regime: packed ASCII, ShortString1, tagged
 
+> **Later runtime change.** The later `STRING-ALLOCATION.md` milestone replaced
+> the two-allocation canonical String representation (a `StrObj` plus a
+> separately allocated `Box<str>` text buffer) with one allocation holding the
+> header and the UTF-8 bytes. Frontier costs in this report (the ~312 / ~862
+> instruction materialization figures included) therefore describe the
+> historical runtime used for this experiment, and are preserved unchanged as
+> experimental history.
+
 Second short-String milestone, on top of `SHORT-STRING.md`. It replaces the
 interned materialization table with this regime, chosen per position by the
 compiler's proof alone:

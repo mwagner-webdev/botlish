@@ -21,6 +21,7 @@ use super::framemap::ProgramMap;
 use super::heap::Heap;
 use super::metrics::{AllocMode, GcReason, Metrics};
 use super::native_stack::NativeStack;
+use super::strobj::StrInit;
 use super::value::*;
 use crate::nir::OpCode;
 use std::cell::RefCell;
@@ -142,6 +143,11 @@ pub struct Vm {
     pub metrics: Metrics,
     const_table: Vec<Value>,
     statics: Vec<*mut Header>,
+    /// The one canonical empty String (static: never collected, not in the
+    /// heap's object list, not a program constant). Every dynamic String
+    /// constructor returns it instead of allocating a zero-byte object;
+    /// Strings are immutable, so sharing it is unobservable.
+    empty_str: *mut Header,
     /// This program's PC-indexed stack-map table (runtime::framemap), set
     /// once by `set_framemap` right after compiling (codegen::CompiledProgram
     /// owns the original; this is an `Rc` clone). `collect_with` walks the
@@ -194,6 +200,7 @@ impl Vm {
             metrics: Metrics::new(alloc_mode),
             const_table: Vec::new(),
             statics: Vec::new(),
+            empty_str: StrObj::new_static(""),
             framemap: Rc::new(ProgramMap::new()),
             native_stack: {
                 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
@@ -365,56 +372,135 @@ impl Vm {
         if fits_small(n) { make_small(n) } else { self.new_big(n.into()) }
     }
 
-    pub fn new_str(&mut self, text: String) -> Value {
-        let obj = str_object(text, false);
-        if let Some(v) = self.reject_oversized_collection(obj.chars) {
-            return v;
+    /// Allocates the one block of a dynamic String of BYTE_LEN text bytes
+    /// (strobj.rs: header + metadata + text, one allocation): enforces
+    /// MAX_COLLECTION_LENGTH on CHARS (RANGE, no allocation), collects first
+    /// if one is due (before the object exists), allocates, registers it with
+    /// the heap, and returns the writer for the still-uninitialized text. No
+    /// allocation happens between here and `StrInit::finish`, so no
+    /// collection can observe the half-built object.
+    fn alloc_str(&mut self, byte_len: usize, chars: usize, ascii: bool) -> Result<StrInit, Value> {
+        if let Some(v) = self.reject_oversized_collection(chars) {
+            return Err(v);
         }
-        let bytes = obj.text.len();
-        self.alloc(obj, bytes)
+        if self.heap.wants_collection() {
+            self.collect();
+        }
+        let init = StrInit::new(byte_len, chars, ascii, false);
+        self.heap.register(init.addr() as *mut Header, STR_HEADER_SIZE + byte_len);
+        if self.metrics.enabled() {
+            let site = self.alloc_site;
+            self.alloc_site = 0;
+            self.metrics.record_alloc(KIND_STR, STR_HEADER_SIZE, byte_len, site);
+        }
+        Ok(init)
     }
 
-    /// A string whose character count and ASCII flag the caller knows.
-    pub fn new_str_known(&mut self, text: String, chars: usize, ascii: bool) -> Value {
+    /// The canonical empty String, counted for the audit report.
+    #[inline]
+    fn empty_string(&mut self) -> Value {
+        if self.metrics.enabled() {
+            self.metrics.str_empty_reuses += 1;
+        }
+        self.empty_str as Value
+    }
+
+    /// A String with the text TEXT (character count and ASCII flag computed
+    /// here).
+    pub fn new_str(&mut self, text: &str) -> Value {
+        let ascii = text.is_ascii();
+        let chars = if ascii { text.len() } else { text.chars().count() };
+        self.new_str_known(text, chars, ascii)
+    }
+
+    /// A String whose character count and ASCII flag the caller knows: one
+    /// allocation, the bytes copied straight into it.
+    pub fn new_str_known(&mut self, text: &str, chars: usize, ascii: bool) -> Value {
         debug_assert_eq!(chars, text.chars().count());
         debug_assert_eq!(ascii, text.is_ascii());
-        if let Some(v) = self.reject_oversized_collection(chars) {
-            return v;
+        self.new_str_pieces(&[text], chars, ascii)
+    }
+
+    /// The concatenation of PIECES whose total character count and ASCII flag
+    /// the caller knows: the final size is the sum of the pieces, so the
+    /// String is allocated once and each piece is copied once, directly into
+    /// place (no intermediate buffer).
+    pub fn new_str_pieces(&mut self, pieces: &[&str], chars: usize, ascii: bool) -> Value {
+        let byte_len: usize = pieces.iter().map(|p| p.len()).sum();
+        if byte_len == 0 {
+            return self.empty_string();
         }
-        let bytes = text.len();
-        #[cfg(not(feature = "short-first-recovered"))]
-        let first = first_scalar(&text, ascii);
-        let obj = StrObj {
-            hdr: Header::new(KIND_STR, false),
-            chars,
-            ascii,
-            #[cfg(not(feature = "short-first-recovered"))]
-            first,
-            text: text.into_boxed_str(),
-        };
-        self.alloc(obj, bytes)
+        match self.alloc_str(byte_len, chars, ascii) {
+            Err(v) => v,
+            Ok(mut init) => {
+                for piece in pieces {
+                    init.push_str(piece);
+                }
+                init.finish() as Value
+            }
+        }
+    }
+
+    /// The one-character String of scalar C, its UTF-8 encoded straight
+    /// into the new String's text.
+    pub fn new_str_scalar(&mut self, c: char) -> Value {
+        let n = c.len_utf8();
+        match self.alloc_str(n, 1, n == 1) {
+            Err(v) => v,
+            Ok(mut init) => {
+                init.push_scalar(c);
+                init.finish() as Value
+            }
+        }
+    }
+
+    /// A String of BYTE_LEN bytes holding CHARS characters (ASCII exactly when
+    /// the two are equal), whose text FILL writes in place with the writer's
+    /// pushes: for the producers that know the result size before producing
+    /// it (lowercase). The writer enforces valid UTF-8 and that every byte is
+    /// written (strobj.rs), so FILL cannot build a malformed String.
+    pub fn new_str_with(&mut self, byte_len: usize, chars: usize, fill: impl FnOnce(&mut StrInit)) -> Value {
+        if byte_len == 0 {
+            return self.empty_string();
+        }
+        match self.alloc_str(byte_len, chars, byte_len == chars) {
+            Err(v) => v,
+            Ok(mut init) => {
+                fill(&mut init);
+                init.finish() as Value
+            }
+        }
     }
 
     /// The String a ShortString1 scalar SHORT stands for (-1: the empty
-    /// String, else the one character of that Unicode scalar value),
-    /// UTF-8 encoded into a freshly allocated String. There is no interned
-    /// table: every runtime materialization allocates (a value the compiler
-    /// knows statically is a `str` constant instead, never reaching here).
+    /// String, else the one character of that Unicode scalar value), UTF-8
+    /// encoded directly into one freshly allocated String. There is no
+    /// interned table: every runtime materialization of a non-empty value
+    /// allocates (a value the compiler knows statically is a `str` constant
+    /// instead, never reaching here).
     pub fn short_to_string(&mut self, short: i64) -> Value {
         if short == -1 {
-            return self.new_str_known(String::new(), 0, true);
+            return self.empty_string();
         }
         let c = char::from_u32(short as u32).expect("a ShortString1 scalar is a Unicode scalar value");
-        self.new_str_known(c.to_string(), 1, c.is_ascii())
+        self.new_str_scalar(c)
     }
 
     /// The String a packed-ASCII word stands for: its bytes are the word
-    /// masked to the 7-bit payload (one AND), truncated to its length.
+    /// masked to the 7-bit payload (one AND), only the first `len` of them
+    /// written, directly into the one allocation.
     pub fn ascii_to_string(&mut self, word: u64) -> Value {
-        let (bytes, n) = unpack_ascii(word);
-        // SAFETY: every payload byte is below 0x80, so the prefix is ASCII.
-        let text = unsafe { String::from_utf8_unchecked(bytes[..n].to_vec()) };
-        self.new_str_known(text, n, true)
+        let n = ascii_word_len(word);
+        if n == 0 {
+            return self.empty_string();
+        }
+        match self.alloc_str(n, n, true) {
+            Err(v) => v,
+            Ok(mut init) => {
+                init.push_ascii_prefix(word, n);
+                init.finish() as Value
+            }
+        }
     }
 
     pub fn new_list(&mut self, items: Vec<Value>) -> Value {
@@ -495,20 +581,6 @@ impl Drop for Vm {
         for &object in &self.statics {
             unsafe { super::heap::free_object(object) };
         }
-    }
-}
-
-pub fn str_object(text: String, is_static: bool) -> StrObj {
-    let ascii = text.is_ascii();
-    let chars = if ascii { text.len() } else { text.chars().count() };
-    #[cfg(not(feature = "short-first-recovered"))]
-    let first = first_scalar(&text, ascii);
-    StrObj {
-        hdr: Header::new(KIND_STR, is_static),
-        chars,
-        ascii,
-        #[cfg(not(feature = "short-first-recovered"))]
-        first,
-        text: text.into_boxed_str(),
+        unsafe { super::heap::free_object(self.empty_str) };
     }
 }

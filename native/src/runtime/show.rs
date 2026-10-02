@@ -18,7 +18,7 @@ fn show_into(v: Value, out: &mut String) {
         Kind::Int => out.push_str(&int_text(v)),
         Kind::Str => {
             out.push('"');
-            for c in str_of(v).text.chars() {
+            for c in str_of(v).as_str().chars() {
                 match c {
                     '\\' => out.push_str("\\\\"),
                     '"' => out.push_str("\\\""),
@@ -128,7 +128,7 @@ pub fn int_text(v: Value) -> String {
 pub fn tcl_value(v: Value) -> Result<String, RtError> {
     Ok(match kind_of(v) {
         Kind::Int => tcl_list(&["int".to_string(), int_text(v)]),
-        Kind::Str => tcl_list(&["str".to_string(), str_of(v).text.to_string()]),
+        Kind::Str => tcl_list(&["str".to_string(), str_of(v).as_str().to_string()]),
         Kind::Bool => tcl_list(&["bool".to_string(), (if v == TRUE { "true" } else { "false" }).to_string()]),
         Kind::Unit => "unit".to_string(),
         // Matches core::value::char's own representation exactly

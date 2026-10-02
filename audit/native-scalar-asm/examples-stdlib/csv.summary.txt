@@ -2,7 +2,7 @@ source:  examples/stdlib/csv.bot
 backend: Cranelift (specialize=1)
 asm:     csv.asm
 vcode:   csv.vcode
-machine-code bytes: 5706 (per function: 68 365 430 585 1046 352 795 976 398 524 167)
+machine-code bytes: 5801 (per function: 68 365 430 585 1141 352 795 976 398 524 167)
 
 functions:
   0 <program entry>: nir-regs=2
@@ -164,4 +164,4 @@ GC roots (csv.asm's NIR ids match roots.txt's "function N"):
 mechanical pattern counts (triage only; see report for interpretation):
   12 x calls to rt_int_add
   3 x calls to rt_int_cmp
-  31 x calls to other rt_* helpers
+  32 x calls to other rt_* helpers

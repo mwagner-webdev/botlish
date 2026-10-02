@@ -2986,6 +2986,7 @@ proc native::lower::Expr {fnVar e {want tagged}} {
         loop      { set result [Loop fn $e $node] }
         listloop  { set result [ListLoop fn $e $node] }
         countloop { set result [CountLoop fn $e $node] }
+        lockloop  { set result [LockLoop fn $e $node] }
         struct    { set result [Struct fn $e $node] }
         project   { set result [Project fn $e $node] }
         return {
@@ -6538,32 +6539,46 @@ proc native::lower::ListLoop {fnVar e node} {
     return $resultReg
 }
 
-# (countloop START-EXPR END-EXPR (block (I) BODY...)): the ascending,
-# exclusive-end counted loop (R2A3-COUNTED-LOOPS-FINAL-SOURCE.md). Lowers
-# to exactly the same real CFG backedge shape as ListLoop above -- a
-# loop-carried register rebound at the loop's own back edge (the identical
-# multi-definition-site register pattern), `break`/`continue`/`return`/an
-# error inside the body composing completely unchanged through the same
-# `dict set fn loops $e [list $continueLabel $exit $resultReg]` mechanism
-# -- but simpler than ListLoop in two ways: there is no list to index
-# (START/END are ordinary Int expressions, so `op ilt`/`op iadd` -- the
-# same general NIR ops an ordinary `<`/`+` call already lowers to, not a
-# list-length-specific operation -- drive the comparison/advance directly,
-# at whatever precision hir/range.tcl's induction-variable seed and
-# RawEligibleCall's own eligibility check decide, raw or BigInt-capable,
-# exactly like any other Int arithmetic), and there is no accumulator: I
-# itself *is* the one loop-carried register (no extra per-iteration
-# `listget`-style indirection is needed the way ListLoop derives elemReg
-# from idxReg), and an ordinary (non-break) body completion is discarded,
-# never accumulated -- a countloop is procedural, not collecting. Reaching
-# END without a `break` produces `unit` (spec item 9), never the
-# body's own last value and never a materialized collection of I's values:
-# EmitArgGuards' own int-kind check on START/END (hir/aot.tcl's own
-# Require call for this node feeds it, exactly like ListLoop's iterable
-# check) is the only guard; no Range/List/iterator allocation exists here
-# at all.
+# The NIR comparison op that keeps a numeric loop of DIRECTION (up|down) and
+# ENDKIND (exclusive|inclusive) going while its induction value is still
+# inside the domain, and the op that advances it by one. The inclusive forms
+# compare with ile/ige against END directly: no END+1/END-1 is ever formed.
+proc native::lower::CountOps {direction endKind} {
+    switch -- $direction/$endKind {
+        up/exclusive   { return {ilt iadd} }
+        up/inclusive   { return {ile iadd} }
+        down/exclusive { return {igt isub} }
+        down/inclusive { return {ige isub} }
+    }
+    error "native::lower::CountOps: bad $direction/$endKind"
+}
+
+# (countloop START-EXPR END-EXPR (block (I) BODY...) ?DIRECTION ENDKIND?):
+# the numeric collecting loop (COLLECTING-LOOPS.md; R2A3-COUNTED-LOOPS-FINAL-
+# SOURCE.md introduced the ascending exclusive form). Lowers to exactly the
+# same real CFG backedge shape as ListLoop above -- a loop-carried register
+# rebound at the loop's own back edge (the identical multi-definition-site
+# register pattern), `break`/`continue`/`return`/an error inside the body
+# composing completely unchanged through the same `dict set fn loops $e
+# [list $continueLabel $exit $resultReg $accReg]` mechanism -- but simpler
+# than ListLoop in one way: there is no list to index (START/END are
+# ordinary Int expressions, so `op ilt`/`ile`/`igt`/`ige` and `op iadd`/
+# `isub` -- the same general NIR ops an ordinary comparison/`+`/`-` call
+# already lowers to, not a loop-specific operation -- drive the test and the
+# advance directly, at whatever precision hir/range.tcl's induction-variable
+# seed and RawEligibleCall's own eligibility check decide, raw or
+# BigInt-capable, exactly like any other Int arithmetic), and I itself *is*
+# the one loop-carried register (no per-iteration `listget`-style
+# indirection). Like ListLoop it is a collecting loop: an ordinary body value
+# is appended to the accumulator (a bare `break` yields the collected
+# prefix, exhaustion the whole List), unless nothing reads the result
+# (`discarded`, see ListLoop), in which case no output List is ever built.
+# The only guard is EmitArgGuards' int-kind check on START/END (hir/aot.tcl's
+# own Require call for this node feeds it, exactly like ListLoop's iterable
+# check); no Range/List/iterator allocation exists beyond the result.
 proc native::lower::CountLoop {fnVar e node} {
     upvar 1 $fnVar fn
+    variable context
     set startExpr [dict get $node start]
     set endExpr [dict get $node end]
     set startReg [Expr fn $startExpr]
@@ -6575,9 +6590,18 @@ proc native::lower::CountLoop {fnVar e node} {
         return never
     }
     EmitArgGuards fn $e [list $startExpr $endExpr] [list $startReg $endReg] {int int} "loop"
+    lassign [CountOps [dict get $node direction] [dict get $node endKind]] compareOp advanceOp
     set idxReg [NewReg fn]
     set resultReg [NewReg fn]
     Emit fn "$idxReg = move $startReg" $e
+    set retained [expr {![dict exists $context discarded $e]}]
+    if {$retained} {
+        set acc0 [Assign fn "op listnew" $e]
+        set accReg [NewReg fn]
+        Emit fn "$accReg = move $acc0" $e
+    } else {
+        set accReg ""
+    }
     set head [NewLabel fn]
     set bodyLabel [NewLabel fn]
     # `continue`'s own target (registered below): only advances I and loops
@@ -6588,16 +6612,21 @@ proc native::lower::CountLoop {fnVar e node} {
     set exit [NewLabel fn]
     Emit fn "jump $head" $e
     EmitLabel fn $head
-    set cmp [Assign fn "op ilt $idxReg $endReg" $e]
+    set cmp [Assign fn "op $compareOp $idxReg $endReg" $e]
     Emit fn "br $cmp $bodyLabel $normalExit" $e
     EmitLabel fn $bodyLabel
     set saved [dict get $fn locals]
     set savedRaw [dict get $fn rawCache]
-    dict set fn loops $e [list $continueLabel $exit $resultReg]
+    dict set fn loops $e [list $continueLabel $exit $resultReg \
+        [expr {$retained ? $accReg : "discard"}]]
     dict set fn locals [dict get $node countBinding] [list reg $idxReg]
     set bodyValue [Sequence fn [dict get $node body]]
     set usedContinue [dict exists $fn continued $e]
     if {$bodyValue ne "never"} {
+        if {$retained} {
+            set accNext [Assign fn "op listappend $accReg $bodyValue" $e]
+            Emit fn "$accReg = move $accNext" $e
+        }
         Emit fn "jump $continueLabel" $e
     }
     dict unset fn continued $e
@@ -6606,13 +6635,159 @@ proc native::lower::CountLoop {fnVar e node} {
     dict unset fn loops $e
     if {$bodyValue ne "never" || $usedContinue} {
         EmitLabel fn $continueLabel
-        set idxNext [Assign fn "op iadd $idxReg [IntConst fn 1 $e]" $e]
+        set idxNext [Assign fn "op $advanceOp $idxReg [IntConst fn 1 $e]" $e]
         Emit fn "$idxReg = move $idxNext" $e
         Emit fn "jump $head" $e
     }
     EmitLabel fn $normalExit
-    set unitConst [Assign fn unit $e]
-    Emit fn "$resultReg = move $unitConst" $e
+    if {$retained} {
+        Emit fn "$resultReg = move $accReg" $e
+    } else {
+        set unitConst [Assign fn unit $e]
+        Emit fn "$resultReg = move $unitConst" $e
+    }
+    Emit fn "jump $exit" $e
+    EmitLabel fn $exit
+    return $resultReg
+}
+
+# (lockloop (DOMAIN...) (block (P...) BODY...)): the lockstep collecting loop
+# (COLLECTING-LOOPS.md) -- ONE real CFG loop, never nested loops. Every
+# domain's operands are lowered once, in written order, before the loop, and
+# guarded together (list / int kinds, exactly as ListLoop/CountLoop guard
+# theirs). Each numeric domain keeps its own loop-carried induction register
+# (its binding, exactly CountLoop's), every list domain is indexed by one
+# shared position register, and all of them advance at the one continue
+# label, so `continue` advances every domain together and `break` leaves the
+# whole loop. The *continuation test* is the first domain's own (an index
+# below its list's length, or its numeric comparison): hir/lockstep.tcl has
+# already proven every other domain's cardinality equal to it, so a
+# `listget` at the shared position is in bounds by construction and no
+# runtime cardinality check exists anywhere. Result collection, `discarded`
+# and break-prefix behavior are ListLoop's/CountLoop's own.
+proc native::lower::LockLoop {fnVar e node} {
+    upvar 1 $fnVar fn
+    variable context
+    set domains [dict get $node domains]
+    set exprs {}
+    set regs {}
+    set kinds {}
+    foreach domain $domains {
+        if {[dict get $domain kind] eq "list"} {
+            set operands [list [dict get $domain iterable]]
+            set kindList {list}
+        } else {
+            set operands [list [dict get $domain start] [dict get $domain end]]
+            set kindList {int int}
+        }
+        foreach operand $operands kind $kindList {
+            set reg [Expr fn $operand]
+            if {$reg eq "never"} {
+                return never
+            }
+            lappend exprs $operand
+            lappend regs $reg
+            lappend kinds $kind
+        }
+    }
+    EmitArgGuards fn $e $exprs $regs $kinds "loop"
+    # Per-domain loop state, parallel to DOMAINS.
+    set states {}
+    set needPosition 0
+    set cursor 0
+    foreach domain $domains {
+        if {[dict get $domain kind] eq "list"} {
+            set needPosition 1
+            lappend states [dict create kind list list [lindex $regs $cursor]]
+            incr cursor
+        } else {
+            lassign [CountOps [dict get $domain direction] [dict get $domain endKind]] compareOp advanceOp
+            set idxReg [NewReg fn]
+            Emit fn "$idxReg = move [lindex $regs $cursor]" $e
+            lappend states [dict create kind count idx $idxReg end [lindex $regs [expr {$cursor + 1}]] \
+                compare $compareOp advance $advanceOp]
+            incr cursor 2
+        }
+    }
+    set one [IntConst fn 1 $e]
+    if {$needPosition} {
+        set posReg [NewReg fn]
+        Emit fn "$posReg = move [IntConst fn 0 $e]" $e
+    }
+    set first [lindex $states 0]
+    if {[dict get $first kind] eq "list"} {
+        set firstLen [Assign fn "op listlen [dict get $first list]" $e]
+    }
+    set resultReg [NewReg fn]
+    set retained [expr {![dict exists $context discarded $e]}]
+    if {$retained} {
+        set acc0 [Assign fn "op listnew" $e]
+        set accReg [NewReg fn]
+        Emit fn "$accReg = move $acc0" $e
+    } else {
+        set accReg ""
+    }
+    set head [NewLabel fn]
+    set bodyLabel [NewLabel fn]
+    set continueLabel [NewLabel fn]
+    set normalExit [NewLabel fn]
+    set exit [NewLabel fn]
+    Emit fn "jump $head" $e
+    EmitLabel fn $head
+    if {[dict get $first kind] eq "list"} {
+        set cmp [Assign fn "op ilt $posReg $firstLen" $e]
+    } else {
+        set cmp [Assign fn "op [dict get $first compare] [dict get $first idx] [dict get $first end]" $e]
+    }
+    Emit fn "br $cmp $bodyLabel $normalExit" $e
+    EmitLabel fn $bodyLabel
+    set saved [dict get $fn locals]
+    set savedRaw [dict get $fn rawCache]
+    dict set fn loops $e [list $continueLabel $exit $resultReg \
+        [expr {$retained ? $accReg : "discard"}]]
+    foreach domain $domains state $states {
+        if {[dict get $state kind] eq "list"} {
+            set elemReg [Assign fn "op listget [dict get $state list] $posReg" $e]
+            dict set fn locals [dict get $domain binding] [list reg $elemReg]
+        } else {
+            dict set fn locals [dict get $domain binding] [list reg [dict get $state idx]]
+        }
+    }
+    set bodyValue [Sequence fn [dict get $node body]]
+    set usedContinue [dict exists $fn continued $e]
+    if {$bodyValue ne "never"} {
+        if {$retained} {
+            set accNext [Assign fn "op listappend $accReg $bodyValue" $e]
+            Emit fn "$accReg = move $accNext" $e
+        }
+        Emit fn "jump $continueLabel" $e
+    }
+    dict unset fn continued $e
+    dict set fn locals $saved
+    dict set fn rawCache $savedRaw
+    dict unset fn loops $e
+    if {$bodyValue ne "never" || $usedContinue} {
+        EmitLabel fn $continueLabel
+        foreach state $states {
+            if {[dict get $state kind] eq "count"} {
+                set idxReg [dict get $state idx]
+                set next [Assign fn "op [dict get $state advance] $idxReg $one" $e]
+                Emit fn "$idxReg = move $next" $e
+            }
+        }
+        if {$needPosition} {
+            set posNext [Assign fn "op iadd $posReg $one" $e]
+            Emit fn "$posReg = move $posNext" $e
+        }
+        Emit fn "jump $head" $e
+    }
+    EmitLabel fn $normalExit
+    if {$retained} {
+        Emit fn "$resultReg = move $accReg" $e
+    } else {
+        set unitConst [Assign fn unit $e]
+        Emit fn "$resultReg = move $unitConst" $e
+    }
     Emit fn "jump $exit" $e
     EmitLabel fn $exit
     return $resultReg

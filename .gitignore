@@ -8,3 +8,4 @@
 # committed.
 /bench/equivalents/go/*
 !/bench/equivalents/go/*.go
+__pycache__/

@@ -1,7 +1,7 @@
 //! Program-lifetime constants, shared by JIT and AOT startup.
 use super::heap::object_size;
 use super::value::*;
-use super::vm::{Vm, str_object};
+use super::vm::Vm;
 use crate::nir::FuncId;
 
 /// A constant generated code loads from the VM's constant table.
@@ -19,7 +19,7 @@ pub fn install(vm: &mut Vm, entries: &[Const], generic_entries: &[usize], static
     let mut statics = Vec::new();
     for c in entries {
         let raw: *mut Header = match c {
-            Const::Str(text) => Box::into_raw(Box::new(str_object(text.clone(), true))) as *mut Header,
+            Const::Str(text) => StrObj::new_static(text),
             Const::BigInt(digits) => Box::into_raw(Box::new(BigIntObj {
                 hdr: Header::new(KIND_BIGINT, true),
                 n: digits.parse().expect("validated big Int literal"),

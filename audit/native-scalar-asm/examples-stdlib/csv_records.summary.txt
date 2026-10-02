@@ -2,7 +2,7 @@ source:  examples/stdlib/csv_records.bot
 backend: Cranelift (specialize=1)
 asm:     csv_records.asm
 vcode:   csv_records.vcode
-machine-code bytes: 23217 (per function: 45 461 461 461 81 81 81 357 412 412 412 278 278 278 81 365 430 585 1046 352 783 215 488 325 388 524 70 493 114 61 61 61 61 61 168 179 245 804 1248 429 380 439 977 766 817 665 1168 836 107 427 259 629 634 78 78 1222)
+machine-code bytes: 23312 (per function: 45 461 461 461 81 81 81 357 412 412 412 278 278 278 81 365 430 585 1141 352 783 215 488 325 388 524 70 493 114 61 61 61 61 61 168 179 245 804 1248 429 380 439 977 766 817 665 1168 836 107 427 259 629 634 78 78 1222)
 
 functions:
   0 <program entry>: nir-regs=1
@@ -796,5 +796,5 @@ mechanical pattern counts (triage only; see report for interpretation):
   1 x calls to rt_int_sub
   7 x calls to rt_int_mul
   17 x calls to rt_int_cmp
-  134 x calls to other rt_* helpers
+  135 x calls to other rt_* helpers
   23 x guard/guardbool instructions

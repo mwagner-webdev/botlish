@@ -759,10 +759,12 @@ proc hir::read::Expr {hirVar level s path block} {
             SetField hir $e body $ids
         }
         countloop {
-            if {![regexp {^(s[0-9]+) \((b[0-9]+) (\S+)\)(?: binds (.*))?$} \
-                    $head -> body countId countName binds]} {
-                Fail $number "expected \"countloop SCOPE (COUNTBINDING NAME) ?binds ...?\""
+            if {![regexp {^(s[0-9]+) \((b[0-9]+) (\S+)\)(?: (up|down) (exclusive|inclusive))?(?: binds (.*))?$} \
+                    $head -> body countId countName direction endKind binds]} {
+                Fail $number "expected \"countloop SCOPE (COUNTBINDING NAME) ?DIRECTION ENDKIND? ?binds ...?\""
             }
+            SetField hir $e direction [expr {$direction eq "" ? "up" : $direction}]
+            SetField hir $e endKind [expr {$endKind eq "" ? "exclusive" : $endKind}]
             NewScope hir $body loop $s [dict get $hir scopes $s invocation] $e [list ir [concat $path 3]] $number
             NewBinding hir $countId $countName param $body [list ir [concat $path 3 1 0]] $number
             Declare hir $body $binds local $number
@@ -774,6 +776,49 @@ proc hir::read::Expr {hirVar level s path block} {
             set index 2
             while {[AtLevel $hir $inner]} {
                 lappend ids [Expr hir $inner $body [concat $path 3 $index] $block]
+                incr index
+            }
+            SetField hir $e body $ids
+        }
+        lockloop {
+            if {![regexp {^(s[0-9]+)((?: \(b[0-9]+ \S+ (?:list|count (?:up|down) (?:exclusive|inclusive))\))+)(?: binds (.*))?$} \
+                    $head -> body groups binds]} {
+                Fail $number "expected \"lockloop SCOPE (BINDING NAME list|count DIR KIND)... ?binds ...?\""
+            }
+            NewScope hir $body loop $s [dict get $hir scopes $s invocation] $e [list ir [concat $path 2]] $number
+            set domains {}
+            set index 0
+            foreach {group bindingId name kindWord direction endKind} \
+                    [regexp -all -inline {\((b[0-9]+) (\S+) (list|count)(?: (up|down) (exclusive|inclusive))?\)} $groups] {
+                NewBinding hir $bindingId $name param $body [list ir [concat $path 2 1 $index]] $number
+                if {$kindWord eq "list"} {
+                    lappend domains [dict create kind list binding $bindingId]
+                } else {
+                    lappend domains [dict create kind count binding $bindingId \
+                        direction $direction endKind $endKind]
+                }
+                incr index
+            }
+            Declare hir $body $binds local $number
+            SetField hir $e bodyScope $body
+            set index 0
+            set resolved {}
+            foreach domain $domains {
+                set dpath [concat $path 1 $index]
+                if {[dict get $domain kind] eq "list"} {
+                    dict set domain iterable [Expr hir $inner $s [concat $dpath 1] $block]
+                } else {
+                    dict set domain start [Expr hir $inner $s [concat $dpath 1] $block]
+                    dict set domain end [Expr hir $inner $s [concat $dpath 2] $block]
+                }
+                lappend resolved $domain
+                incr index
+            }
+            SetField hir $e domains $resolved
+            set ids {}
+            set index 2
+            while {[AtLevel $hir $inner]} {
+                lappend ids [Expr hir $inner $body [concat $path 2 $index] $block]
                 incr index
             }
             SetField hir $e body $ids
