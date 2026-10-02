@@ -1,0 +1,134 @@
+# native-bitwise-fold.test -- native::lower::FoldPureBitwise's `bit_and`
+# identity fold (GENERIC-PREDICATE-PROOF-LOSS.md, "bit_and identity fold"):
+# `bit_and(a, K)` may be lowered as `a` only when every value a can take
+# keeps all its bits under K (native::lower::AndIdentity). It used to be
+# decided by comparing the call's result Range with a's, which is only a
+# proof for exact value sets: for a plain interval the result is the hull
+# [0, K] whether or not the mask clears bits.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+# Whether function NAME's NIR (first NIR function of that name) still has an
+# `op iand`.
+proc keepsIand {src name} {
+    set inside 0
+    foreach line [split [native::nir [surface::compile $src t.bot -strict 0]] \n] {
+        if {[regexp {^func \d+ "([^"]*)"} $line -> fname]} {
+            if {$inside} break
+            set inside [expr {$fname eq $name}]
+            continue
+        }
+        if {$inside && [string match "*op iand*" $line]} {
+            return 1
+        }
+    }
+    return 0
+}
+
+proc parity {src} {
+    set hir [surface::compile $src t.bot -strict 0]
+    set outcomes [lsort -unique [lmap backend {interp compile cranelift} {
+        outcomeUnderHir $backend $hir
+    }]]
+    expr {[llength $outcomes] == 1 ? [lindex $outcomes 0 1] : $outcomes}
+}
+
+set ::clearsBit {fn lim(x):
+    if x > 95:
+        95
+    else:
+        if x < 0:
+            0
+        else:
+            x
+
+fn f(k):
+    bit_and(lim(k), 95)
+
+loop i from 30 to 34:
+    f(i)}
+
+test bitwise-fold-interval-mask-clearing-a-bit {a in [0, 95] (an interval, too wide for exact values) masked with 95: 32 and 33 have bit 5 set, which 95 clears, so the AND is not the identity and must stay (this miscompiled to [30, 31, 32, 33] natively)} -body {
+    list [parity $::clearsBit] [keepsIand $::clearsBit f]
+} -result {{[30, 31, 0, 1]} 1}
+
+test bitwise-fold-narrowed-call-site {the same mask on a call site whose Range is the narrowed summary [0, 95] of lim (result narrowing): still not folded} -body {
+    parity {fn lim(x):
+    if x > 95:
+        95
+    else:
+        x
+
+fn f(k):
+    bit_and(lim(k), 95)
+
+[f(32), f(0)]}
+} -result {[0, 0]}
+
+test bitwise-fold-nibble-identity-still-folds {a provably in [0, 15] (a small interval: its exact values are all listed) masked with 15 is the identity and is still folded away} -body {
+    set src {fn lim(x):
+    if x > 15:
+        15
+    else:
+        if x < 0:
+            0
+        else:
+            x
+
+fn f(k):
+    bit_and(lim(k), 15)
+
+[f(3), f(40), f(-2)]}
+    list [parity $src] [keepsIand $src f]
+} -result {{[3, 15, 0]} 0}
+
+test bitwise-fold-wide-interval-full-mask-folds {a in [0, 1000] masked with 1023 (every bit below 1000's bit length) is the identity: folded by the bit-mask check, no exact values needed} -body {
+    set src {fn lim(x):
+    if x > 1000:
+        1000
+    else:
+        if x < 0:
+            0
+        else:
+            x
+
+fn f(k):
+    bit_and(lim(k), 1023)
+
+[f(999), f(5000), f(-7)]}
+    list [parity $src] [keepsIand $src f]
+} -result {{[999, 1000, 0]} 0}
+
+test bitwise-fold-exact-set-non-identity-kept {exact values {1, 2} masked with 1: 2 & 1 = 0, so the AND stays} -body {
+    set src {fn pick(c):
+    if c:
+        1
+    else:
+        2
+
+fn f(c):
+    bit_and(pick(c), 1)
+
+[f(true), f(false)]}
+    list [parity $src] [keepsIand $src f]
+} -result {{[1, 0]} 1}
+
+test bitwise-fold-mask-on-the-left {the symmetric case: the constant mask as the first operand} -body {
+    set src {fn lim(x):
+    if x > 95:
+        95
+    else:
+        if x < 0:
+            0
+        else:
+            x
+
+fn f(k):
+    bit_and(95, lim(k))
+
+[f(32), f(31), f(64)]}
+    list [parity $src] [keepsIand $src f]
+} -result {{[0, 31, 64]} 1}
+
+cleanupTests

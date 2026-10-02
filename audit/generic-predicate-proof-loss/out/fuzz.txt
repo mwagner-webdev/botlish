@@ -1,0 +1,236 @@
+# fuzz.txt -- committed output of audit/generic-predicate-proof-loss/tools/fuzz.tcl
+# (randomized soundness fuzzer for Fixpoint's result-narrowing pass,
+# GENERIC-PREDICATE-PROOF-LOSS.md fix 3; the tool's header describes the
+# generator and the oracles). Code under test: main 07b373c plus the two
+# soundness fixes the review of fix 3 found (callee-position calls in
+# hir::range, the bit_and identity fold; fix 3's parent is 584de41) plus fix 3
+# itself (hir/range.tcl NarrowRounds + result narrowing); native = the release
+# build of native/target/release/botlish-native from that tree. Earlier runs of
+# the same commands on e1ce1a3 + fix 3 alone, and on e1ce1a3 + all three
+# commits, gave the same totals. Every program replays from its seed:
+#   tclsh9.0 audit/generic-predicate-proof-loss/tools/fuzz.tcl -seed S -first K -n 1 -dump 1
+#
+# Runs (LANG=C.utf8, 2 worker processes, 10 programs per worker, each
+# worker under ulimit -v 4000000 and timeout 600):
+#   A  -seed "1 2 3 4 5" -n 1000   5000 programs, production knobs
+#   B  -seed 6 -n 300 -roundlimit 1   the pass gives up on every program it
+#                                      would change (commit-nothing path)
+#   C  -seed 7 -n 300 -roundlimit 2   partial budget
+#   D  -seed 8 -n 150 -mutate 1       ORACLE SELF-TEST: a deliberately
+#                                      unsound pass; it MUST be reported
+#
+# Verdict
+#   * Range soundness: 0 violations in A, B and C -- 0 of 26796 + 1563 +
+#     1548 top-level call-Range checks and 0 of 394560 + 25167 + 21700
+#     runtime trace checks (entry Ranges, instance results, call-site
+#     summaries, captured Ints).
+#   * Differential: 0 disagreements introduced by the pass. All 40
+#     disagreements (38 in A, 1 in B, 1 in C) are ONE pre-existing native
+#     lowering bug, identical with resultNarrowOpt 0 and reproduced on a
+#     clean e1ce1a3 checkout (so unrelated to fix 3): exact-callable
+#     calls (list_get of a known List at a known index) of a function whose
+#     body calls a nested closure that captures a local. Minimal program
+#     (interp and compile: 8; native: NATIVE BUG "native lowering: call e11
+#     of a de-closure-converted binding has no wanted callee instance",
+#     thrown by native/lower.tcl's de-closure-converted call path):
+#
+#         fn f(a):
+#             k = 5
+#             fn g(x):
+#                 x + k
+#             g(a)
+#
+#         fs = [f]
+#         list_get(fs, 0)(3)
+#
+#   * Exercise: in A the pass changed an entry or call-expression Range in
+#     1096 of 5000 programs (a checked top-level call Range in 995); every
+#     attempted pass converged (1..9 rounds). B: 72 passes did not converge
+#     within 1 round and committed nothing (0 Ranges differ from
+#     resultNarrowOpt 0); C: 44 did not converge within 2 rounds.
+#   * NOTE lines (3 in A): an expression whose knob-on interval is not
+#     contained in its knob-off one. All three were checked by hand: each is
+#     in code the NARROWED facts prove dead (seed 1/890: `loop i down from
+#     s to s - 0` with s now exactly -6 -- an empty domain whose induction
+#     seed {min -5 max -6} the lattice turns into unknown; seed 4/719 and
+#     seed 5/435: a branch whose condition is infeasible under the narrowed
+#     entry/summary, giving an empty interval such as [14, 8] or [-6, -15]
+#     that `*` then launders into a non-empty one, e.g. [16, 28]). Sound
+#     (dead code has no values), but a precision non-monotonicity: seed
+#     5/435's f2<int, int> instance `result` gets a LOWER bound -45 with the
+#     pass vs -18 without (its call-site summary keeps -18: RangeNarrow never
+#     loosens a finite bound). The lattice has no bottom for an empty
+#     interval, so a fact proving code dead can leak spurious values out of
+#     it.
+#   * Self-test D: the mutated (unsound) pass was caught -- 97 top-level
+#     and 110 trace violations, 2 native disagreements attributed to the
+#     pass (its summary line below; its failure listing is omitted here).
+
+== A: tclsh9.0 audit/generic-predicate-proof-loss/tools/fuzz.tcl -seed "1 2 3 4 5" -n 1000 -jobs 2
+FAILURE seed 1 program 31 (replay: -seed 1 -first 31 -n 1 -dump 1)
+  disagreement: interp:  value {[-21, -3, -21, -6, -3, -6, -32]} {list {{int -21} {int -3} {int -21} {int -6} {int -3} {int -6} {int -32}}}
+    compile: value {[-21, -3, -21, -6, -3, -6, -32]} {list {{int -21} {int -3} {int -21} {int -6} {int -3} {int -6} {int -32}}}
+    native:  error {NATIVE BUG} {native lowering: call e34 of a de-closure-converted binding has no wanted callee instance}
+    (pre-existing: identical with resultNarrowOpt 0)
+  program:
+    fn f1(f1_a):
+        f1_a > 4611686018427387902 and f1_a < 18
+    
+    fn f2(f2_a):
+        f2_k = 13
+        fn f2_g(f2_g_x):
+            if f2_g_x >= f2_k:
+                f2_k
+            else:
+                f2_g_x - f2_k
+        f2_g(f2_g(f2_a))
+    
+    fn f3(f3_a, f3_b):
+        f3_x = f3_a - 4
+        if f3_x <= (-2):
+            f3_x - 17
+        else:
+            f2(f3_a)
+    
+    f4_tbl = [f2, f2, f2]
+    fn f4(f4_i, f4_v):
+        list_get(f4_tbl, f4_i)(f4_v)
+    
+    fn f5(f5_a, f5_b):
+        f5_x = f5_a * (-4)
+        if f5_x > (-4):
+            (-4) + 1
+        else:
+            f5_x + (-3)
+    
+    fn f6(f6_a):
+        f6_s = 1 + (-7)
+        loop f6_i from f6_s to f6_s + 0:
+            if f6_i * 2 >= f6_a:
+                return f4(0, (-2))
+        f6_s
+    
+    t1 = f4(1, 11)
+    t2 = f6(6)
+    [f3(0, (-4)), f5((-4611686018427387905), 7), f4(0, 5), f6(9223372036854775807), f5((-7), (-5)), f6(18), f2(t2)]
+FAILURE seed 1 program 104: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+FAILURE seed 1 program 191: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+FAILURE seed 1 program 257: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+FAILURE seed 1 program 310: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+FAILURE seed 1 program 543: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+FAILURE seed 1 program 668: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+FAILURE seed 1 program 882: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+NOTE seed 1 program 890: knob-on interval not within knob-off interval:
+  i9 e147 [-∞, -6] -> [-∞, +∞]
+  i9 e156 [-∞, -6] -> [-∞, +∞]
+FAILURE seed 1 program 959: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+seed 1: programs 1000 (compiled 1000, rejected 0, interp-error outcome 21); disagreements 9 (introduced by the pass 0), native-unsupported 0, analysis errors 0, limits 0, harness errors 0; range violations: top-level 0 of 5411 checks (introduced by the pass 0), trace 0 of 77626 checks; narrowing changed an entry/call Range in 207 programs (a checked top-level call Range in 182, any expression Range in 207); programs with an open instance 590; result narrowing attempted 1000, converged 1000 (rounds 1..8), not converged 0; knob-on not within knob-off 1; error-message mismatches 0; 197s
+FAILURE seed 2 program 206: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+FAILURE seed 2 program 207: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+FAILURE seed 2 program 218: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+FAILURE seed 2 program 251: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+FAILURE seed 2 program 391: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+FAILURE seed 2 program 405: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+FAILURE seed 2 program 447: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+FAILURE seed 2 program 623: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+FAILURE seed 2 program 861: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+FAILURE seed 2 program 930: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+seed 2: programs 1000 (compiled 1000, rejected 0, interp-error outcome 26); disagreements 10 (introduced by the pass 0), native-unsupported 0, analysis errors 0, limits 0, harness errors 0; range violations: top-level 0 of 5369 checks (introduced by the pass 0), trace 0 of 79678 checks; narrowing changed an entry/call Range in 242 programs (a checked top-level call Range in 221, any expression Range in 242); programs with an open instance 589; result narrowing attempted 1000, converged 1000 (rounds 1..9), not converged 0; knob-on not within knob-off 0; error-message mismatches 0; 185s
+FAILURE seed 3 program 162: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+FAILURE seed 3 program 460: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+FAILURE seed 3 program 560: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+FAILURE seed 3 program 605: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+FAILURE seed 3 program 673: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+FAILURE seed 3 program 855: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+seed 3: programs 1000 (compiled 1000, rejected 0, interp-error outcome 32); disagreements 6 (introduced by the pass 0), native-unsupported 0, analysis errors 0, limits 0, harness errors 0; range violations: top-level 0 of 5304 checks (introduced by the pass 0), trace 0 of 79178 checks; narrowing changed an entry/call Range in 220 programs (a checked top-level call Range in 202, any expression Range in 220); programs with an open instance 599; result narrowing attempted 1000, converged 1000 (rounds 1..6), not converged 0; knob-on not within knob-off 0; error-message mismatches 0; 189s
+FAILURE seed 4 program 284: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+FAILURE seed 4 program 386: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+FAILURE seed 4 program 554: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+FAILURE seed 4 program 629: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+NOTE seed 4 program 719: knob-on interval not within knob-off interval:
+  i5 e148 [28, 32] {28,30,32} -> [16, 28]
+FAILURE seed 4 program 804: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+FAILURE seed 4 program 873: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+FAILURE seed 4 program 972: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+seed 4: programs 1000 (compiled 1000, rejected 0, interp-error outcome 25); disagreements 7 (introduced by the pass 0), native-unsupported 0, analysis errors 0, limits 0, harness errors 0; range violations: top-level 0 of 5442 checks (introduced by the pass 0), trace 0 of 79772 checks; narrowing changed an entry/call Range in 213 programs (a checked top-level call Range in 198, any expression Range in 213); programs with an open instance 599; result narrowing attempted 1000, converged 1000 (rounds 1..8), not converged 0; knob-on not within knob-off 1; error-message mismatches 0; 186s
+NOTE seed 5 program 435: knob-on interval not within knob-off interval:
+  i2 e65 [-18, 13835058055282163706] {-18,6,30,13835058055282163706} -> [-45, -18]
+  i2 e70 [-18, +∞] -> [-45, 18446744073709551635]
+FAILURE seed 5 program 593: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+FAILURE seed 5 program 613: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+FAILURE seed 5 program 624: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+FAILURE seed 5 program 654: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+FAILURE seed 5 program 752: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+FAILURE seed 5 program 814: pre-existing disagreement, same native outcome as seed 1 program 31 (error {NATIVE BUG} {native lowering: call eN of a de-closure-converted binding has no wanted callee instance})
+seed 5: programs 1000 (compiled 1000, rejected 0, interp-error outcome 26); disagreements 6 (introduced by the pass 0), native-unsupported 0, analysis errors 0, limits 0, harness errors 0; range violations: top-level 0 of 5270 checks (introduced by the pass 0), trace 0 of 78306 checks; narrowing changed an entry/call Range in 214 programs (a checked top-level call Range in 192, any expression Range in 214); programs with an open instance 595; result narrowing attempted 1000, converged 1000 (rounds 1..8), not converged 0; knob-on not within knob-off 1; error-message mismatches 0; 151s
+total (seeds 1,2,3,4,5): programs 5000, compiled 5000, disagreements 38, range violations top 0 / trace 0, changed-by-narrowing 1096 (top-level 995), not-converged 0, failures 38 programs; 908s
+
+== B: tclsh9.0 audit/generic-predicate-proof-loss/tools/fuzz.tcl -seed 6 -n 300 -jobs 2 -roundlimit 1
+FAILURE seed 6 program 280 (replay: -seed 6 -first 280 -n 1 -dump 1)
+  disagreement: interp:  value {[0, 0, 0, 19, 27]} {list {{int 0} {int 0} {int 0} {int 19} {int 27}}}
+    compile: value {[0, 0, 0, 19, 27]} {list {{int 0} {int 0} {int 0} {int 19} {int 27}}}
+    native:  error {NATIVE BUG} {native lowering: call e25 of a de-closure-converted binding has no wanted callee instance}
+    (pre-existing: identical with resultNarrowOpt 0)
+  program:
+    fn f1(f1_a, f1_b):
+        f1_k = f1_a - 17 + 8
+        fn f1_g(f1_g_x):
+            if f1_g_x < f1_k:
+                f1_k
+            else:
+                f1_a + f1_g_x
+        f1_g(f1_b) - f1_k
+    
+    fn f2(f2_a):
+        f2_x = f1(f1(f1(f2_a, 6), f2_a), (-7) * 3)
+        f2_y = f1(f2_a * (-1), f2_x)
+        f2_x - f2_y
+    
+    fn f3(f3_a, f3_b):
+        f3_x = f1(f3_a, f1(8, f3_a))
+        if f3_x < 19:
+            19
+        else:
+            f3_x + 4
+    
+    f4_tbl = [f2]
+    fn f4(f4_i, f4_v):
+        f4_h = list_get(f4_tbl, f4_i)
+        f4_h(f4_v) - f4_h(f4_v + 7)
+    
+    [f4(0, 19), f4(0, 9223372036854775807), f4(0, 14), f3((-4), 15), f3(5, 3)]
+seed 6: programs 300 (compiled 300, rejected 0, interp-error outcome 6); disagreements 1 (introduced by the pass 0), native-unsupported 0, analysis errors 0, limits 0, harness errors 0; range violations: top-level 0 of 1563 checks (introduced by the pass 0), trace 0 of 25167 checks; narrowing changed an entry/call Range in 0 programs (a checked top-level call Range in 0, any expression Range in 0); programs with an open instance 181; result narrowing attempted 300, converged 228 (rounds 1..1), not converged 72; knob-on not within knob-off 0; error-message mismatches 0; 88s
+
+== C: tclsh9.0 audit/generic-predicate-proof-loss/tools/fuzz.tcl -seed 7 -n 300 -jobs 2 -roundlimit 2
+FAILURE seed 7 program 151 (replay: -seed 7 -first 151 -n 1 -dump 1)
+  disagreement: interp:  value {[0, 0, 9223372036854775804, 9223372036854775804, 0]} {list {{int 0} {int 0} {int 9223372036854775804} {int 9223372036854775804} {int 0}}}
+    compile: value {[0, 0, 9223372036854775804, 9223372036854775804, 0]} {list {{int 0} {int 0} {int 9223372036854775804} {int 9223372036854775804} {int 0}}}
+    native:  error {NATIVE BUG} {native lowering: call e29 of a de-closure-converted binding has no wanted callee instance}
+    (pre-existing: identical with resultNarrowOpt 0)
+  program:
+    fn f1(f1_a):
+        f1_k = 4611686018427387904 - 2
+        fn f1_g(f1_g_x):
+            loop f1_g_i from f1_g_x to f1_g_x + 1:
+                if f1_g_i >= f1_k:
+                    return f1_k
+            f1_k
+        f1_g(18) + f1_g(f1_a)
+    
+    fn f2(f2_a, f2_b):
+        f2_r = f1(f2_a - 0)
+        f2_q = if f1(7 * (-1)) < f1(f2_b):
+            (-4611686018427387904)
+        else:
+            f2_r
+        f2_q - f2_r
+    
+    f3_tbl = [f1, f1, f1]
+    fn f3(f3_i, f3_v):
+        list_get(f3_tbl, f3_i)(f3_v)
+    
+    [f2((-6), 8), f2(4611686018427387904, 4611686018427387903), f3(0, 14), f1(1), f2(10, 11)]
+seed 7: programs 300 (compiled 300, rejected 0, interp-error outcome 12); disagreements 1 (introduced by the pass 0), native-unsupported 0, analysis errors 0, limits 0, harness errors 0; range violations: top-level 0 of 1548 checks (introduced by the pass 0), trace 0 of 21700 checks; narrowing changed an entry/call Range in 37 programs (a checked top-level call Range in 36, any expression Range in 37); programs with an open instance 184; result narrowing attempted 300, converged 256 (rounds 1..2), not converged 44; knob-on not within knob-off 0; error-message mismatches 0; 45s
+
+== D: tclsh9.0 audit/generic-predicate-proof-loss/tools/fuzz.tcl -seed 8 -n 150 -jobs 2 -mutate 1 (oracle self-test)
+seed 8: programs 150 (compiled 150, rejected 0, interp-error outcome 5); disagreements 2 (introduced by the pass 2), native-unsupported 0, analysis errors 0, limits 0, harness errors 0; range violations: top-level 97 of 787 checks (introduced by the pass 97), trace 110 of 11947 checks; narrowing changed an entry/call Range in 116 programs (a checked top-level call Range in 112, any expression Range in 116); programs with an open instance 95; result narrowing attempted 150, converged 150 (rounds 1..10), not converged 0; knob-on not within knob-off 2; error-message mismatches 0; 29s

@@ -1,0 +1,324 @@
+# result-range-narrowing.test -- Fixpoint's result-narrowing pass
+# (GENERIC-PREDICATE-PROOF-LOSS.md, fix 3): callee result summaries -- the
+# Range a call expression reads -- are narrowed together with entry and
+# capture facts after M9's narrowing, instead of staying the ascending
+# phase's widened summaries.
+#
+# Knobs (test/audit-only namespace variables, hir/range.tcl):
+# hir::range::resultNarrowOpt 0 skips the pass; resultNarrowRoundLimit
+# overrides its round budget.
+
+source [file join [file dirname [file normalize [info script]]] helpers.tcl]
+source [file join $::projectRoot surface surface.tcl]
+
+interp recursionlimit {} 100000
+
+proc dedent {text} {
+    set lines [split $text \n]
+    set indent 1000
+    foreach line $lines {
+        if {[string trim $line] eq ""} continue
+        set n [expr {[string length $line] - [string length [string trimleft $line " "]]}]
+        if {$n < $indent} { set indent $n }
+    }
+    return [join [lmap line $lines {string range $line $indent end}] \n]
+}
+
+# Run SCRIPT (in the caller's scope) with the result-narrowing knobs set to
+# OPT and LIMIT, restoring the production defaults afterwards.
+proc withResultNarrow {opt limit script} {
+    set hir::range::resultNarrowOpt $opt
+    set hir::range::resultNarrowRoundLimit $limit
+    try {
+        return [uplevel 1 $script]
+    } finally {
+        set hir::range::resultNarrowOpt 1
+        set hir::range::resultNarrowRoundLimit ""
+    }
+}
+
+# {HIR SPEC ANALYSIS} of program TEXT (a .bot source) under the current knobs.
+# PREPARE 1 attaches native implementations first (module functions such as
+# lib/web.bot's, which a program reaches through native bodies).
+proc narrowOf {text {prepare 0}} {
+    set hir [surface::compile [dedent $text] t.bot -strict 0]
+    if {$prepare} {
+        set hir [native::prepareHir $hir]
+    }
+    set spec [hir::specialize::analyze $hir]
+    return [list $hir $spec [hir::range::analyze $hir $spec]]
+}
+
+# The same, through hir::range::Fixpoint directly, so the pass's own audit
+# state (calleeResults, ascendingResults, resultNarrow) is visible.
+proc fixpointOf {hir spec} {
+    return [hir::range::Fixpoint $hir $spec 1 1 1 [dict create]]
+}
+
+proc instanceOf {spec name {key ""}} {
+    foreach id [dict get $spec used] {
+        set instance [dict get $spec instances $id]
+        if {[dict get $instance name] ne $name} continue
+        if {$key eq "" || [join [lmap t [dict get $instance args] {hir::types::show $t}] {, }] eq $key} {
+            return $id
+        }
+    }
+    error "no used instance of \"$name\" matching \"$key\""
+}
+
+proc bounds {r} {
+    if {$r eq "never"} { return never }
+    return [string map {-inf -∞ +inf +∞} "\[[dict get $r min], [dict get $r max]\]"]
+}
+
+# The bounds of every reachable call to a function named CALLEE inside
+# instance ID's own region, in ExprId order.
+proc callSiteRanges {hir spec analysis id callee} {
+    set view [hir::specialize::view $hir $spec $id]
+    set result {}
+    foreach e [lsort -dictionary [dict keys [dict get [dict get $analysis instances $id] exprs]]] {
+        if {[hir::kind $view $e] ne "call"} continue
+        set c [hir::get $view $e callee]
+        if {[hir::kind $view $c] ne "ref"} continue
+        set b [hir::get $view $c binding]
+        if {$b eq "" || [dict get [hir::binding $view $b] name] ne $callee} continue
+        lappend result [bounds [hir::range::of $analysis $id $e]]
+    }
+    return $result
+}
+
+# The NIR ops (the word after "op") of function NAME's first NIR function.
+proc nirOps {hir name} {
+    set ops {}
+    set inside 0
+    foreach line [split [native::nir $hir] \n] {
+        if {[regexp {^func \d+ "([^"]*)"} $line -> fname]} {
+            if {$inside} break
+            set inside [expr {$fname eq $name}]
+            continue
+        }
+        if {$inside && [regexp {= op (\S+)} $line -> op]} {
+            lappend ops $op
+        }
+    }
+    return $ops
+}
+
+set clampChain {
+    fn clamp(x):
+        if x > 100:
+            100
+        else:
+            x
+
+    fn double(y):
+        y * 2
+
+    fn use(k):
+        double(clamp(k)) + 1
+
+    use(5)
+}
+
+# ---------------------------------------------------------------------------
+# The loss and its repair
+
+test result-narrow-one-sided-callee-summary {a non-recursive callee whose first-round result (entries still unknown) is one-sided keeps the widened side at every call site without the pass: clamp<int> is only ever called with 5, but use's clamp(k) read [-∞, 100]; the pass gives [5, 100]} -body {
+    set off [withResultNarrow 0 "" {
+        lassign [narrowOf $clampChain] hir spec analysis
+        callSiteRanges $hir $spec $analysis [instanceOf $spec use] clamp
+    }]
+    lassign [narrowOf $clampChain] hir spec analysis
+    list $off [callSiteRanges $hir $spec $analysis [instanceOf $spec use] clamp]
+} -result {{{[-∞, 100]}} {{[5, 100]}}}
+
+test result-narrow-chain-reaches-entries-and-results {a narrowed summary feeds the caller's argument, which narrows the next callee's entry, whose own result then narrows in turn: double's entry [-∞, 100] -> [5, 100], its summary [-∞, +∞] -> [10, 200], use's result [-∞, +∞] -> [11, 201]} -body {
+    proc chainRow {} {
+        lassign [narrowOf $::clampChain] hir spec analysis
+        set d [instanceOf $spec double]
+        list [lmap r [dict get [dict get $analysis instances $d] params] {bounds $r}] \
+            [callSiteRanges $hir $spec $analysis [instanceOf $spec use] double] \
+            [bounds [dict get [dict get $analysis instances [instanceOf $spec use]] result]]
+    }
+    list [withResultNarrow 0 "" {chainRow}] [chainRow]
+} -result {{{{[-∞, 100]}} {{[-∞, +∞]}} {[-∞, +∞]}} {{{[5, 100]}} {{[10, 200]}} {[11, 201]}}}
+
+test result-narrow-refined-checks-tld {refined-checks' tld?: `e = scan_while(i, is_tcl_alpha)` read the ascending summary [-∞, 2^62-1]; with the pass it reads the callee's own [0, 2^62-1], so `e == n`, `e - i` and `>= 2` lower raw} -body {
+    set channel [open [file join $::projectRoot bench refined-checks.bot] r]
+    fconfigure $channel -encoding utf-8
+    set text [read $channel]
+    close $channel
+    set ::tldHir [native::prepareHir [surface::compile $text refined-checks.bot -strict 0]]
+    proc tldRow {} {
+        set hir $::tldHir
+        set spec [hir::specialize::analyze $hir]
+        set analysis [hir::range::analyze $hir $spec]
+        set ops {}
+        foreach op [nirOps $hir tld?] {
+            if {$op in {ieq isub ige rieq risub rige}} {
+                lappend ops $op
+            }
+        }
+        list [callSiteRanges $hir $spec $analysis [instanceOf $spec tld?] scan_while] [lsort -unique $ops]
+    }
+    list [withResultNarrow 0 "" {tldRow}] [tldRow]
+} -result {{{{[-∞, 4611686018427387903]}} {ieq ige isub}} {{{[0, 4611686018427387903]}} {rieq rige risub}}}
+
+# ---------------------------------------------------------------------------
+# Discipline: knobs, non-convergence, pinned summaries, open instances
+
+test result-narrow-knob-off-keeps-ascending-summaries {with the pass off, the call-site summaries are exactly the ascending phase's; with it on, every summary is a sub-interval of the ascending one, never wider} -body {
+    lassign [narrowOf $clampChain] hir spec -
+    set off [withResultNarrow 0 "" {fixpointOf $hir $spec}]
+    set on [fixpointOf $hir $spec]
+    set offState [dict get $off state]
+    set onState [dict get $on state]
+    set within 1
+    dict for {id r} [dict get $onState calleeResults] {
+        set a [dict get $onState ascendingResults $id]
+        if {[hir::range::intersect $a $r] ne $r && [bounds [hir::range::intersect $a $r]] ne [bounds $r]} {
+            set within 0
+        }
+    }
+    list [expr {[dict get $offState calleeResults] eq [dict get $offState ascendingResults]}] \
+        [dict get $offState resultNarrow] \
+        [dict get $onState resultNarrow attempted] [dict get $onState resultNarrow converged] $within
+} -result {1 {attempted 0 converged 0 rounds 0} 1 1 1}
+
+test result-narrow-unconverged-commits-nothing {a pass that does not reach its fixed point within its round budget commits nothing: every instance's entries, expression Ranges and result are exactly the pass-off analysis (the clamp chain needs several rounds; a budget of 1 cannot converge)} -body {
+    lassign [narrowOf $clampChain] hir spec -
+    set off [withResultNarrow 0 "" {fixpointOf $hir $spec}]
+    set short [withResultNarrow 1 1 {fixpointOf $hir $spec}]
+    list [dict get $short state resultNarrow] \
+        [expr {[dict get $short instances] eq [dict get $off instances]}] \
+        [expr {[dict get $short state calleeResults] eq [dict get $off state calleeResults]}]
+} -result {{attempted 1 converged 0 rounds 1} 1 1}
+
+test result-narrow-pinned-summary-untouched {a solved self-recursive summary (rangerec.tcl) is pinned: the pass never rewrites it, and the solver's record is identical with the pass on or off} -body {
+    proc pinRow {} {
+        lassign [narrowOf {
+            fn f(n):
+                if n <= 0:
+                    0
+                else:
+                    f(n - 1) + 2
+
+            f(10) + 1
+        }] hir spec analysis
+        set id [instanceOf $spec f]
+        set record [dict get $analysis recursive $id]
+        list [dict get $record status] [bounds [dict get $record result]] \
+            [bounds [dict get [dict get $analysis instances $id] result]]
+    }
+    set off [withResultNarrow 0 "" {pinRow}]
+    set on [pinRow]
+    list $on [expr {$on eq $off}]
+} -result {{solved {[0, 20]} {[0, 20]}} 1}
+
+test result-narrow-open-instance-summary-stays-sound {an instance reached through a Block value (open: unknown callers) keeps a summary that covers its dynamic callers: f's generic entry is called with -50 through a List element, so its summary keeps -∞, while the closed f<int> called with 5 narrows to [5, 100]} -body {
+    lassign [narrowOf {
+        fn f(x):
+            if x > 100:
+                100
+            else:
+                x
+
+        fns = [f]
+
+        fn apply(i, v):
+            list_get(fns, i)(v)
+
+        [f(5), apply(0, -50)]
+    }] hir spec -
+    set st [dict get [fixpointOf $hir $spec] state]
+    list [bounds [dict get $st calleeResults [instanceOf $spec f int]]] \
+        [bounds [dict get $st calleeResults [instanceOf $spec f any]]]
+} -result {{[5, 100]} {[-∞, 100]}}
+
+# ---------------------------------------------------------------------------
+# Executable parity: every backend agrees where the narrowed summaries
+# change native representation decisions.
+
+foreach {name src expected} {
+    clamp-chain {
+        fn clamp(x):
+            if x > 100:
+                100
+            else:
+                x
+
+        fn double(y):
+            y * 2
+
+        fn use(k):
+            double(clamp(k)) + 1
+
+        [use(5), use(500), use(-7)]
+    } {[11, 201, -13]}
+    small-int-edge {
+        fn cap(x):
+            if x > 4611686018427387903:
+                4611686018427387903
+            else:
+                x
+
+        fn twice(v):
+            cap(v) + cap(v)
+
+        [twice(4611686018427387000), twice(4611686018427387903), twice(-4611686018427387904)]
+    } {[9223372036854774000, 9223372036854775806, -9223372036854775808]}
+    negative-edge {
+        fn floor(x):
+            if x < -4611686018427387904:
+                -4611686018427387904
+            else:
+                x
+
+        fn gap(v):
+            floor(v) - 4611686018427387903
+
+        [gap(-4611686018427387904), gap(0), gap(-5)]
+    } {[-9223372036854775807, -4611686018427387903, -4611686018427387908]}
+    open-and-closed {
+        fn f(x):
+            if x > 100:
+                100
+            else:
+                x
+
+        fns = [f]
+
+        fn apply(i, v):
+            list_get(fns, i)(v)
+
+        [f(5) * 3, apply(0, -50) * 3, apply(0, 4611686018427387903) + f(5), apply(0, -4611686018427387904) - f(5)]
+    } {[15, -150, 105, -4611686018427387909]}
+    scan-shape {
+        fn first_space(s):
+            n = length(s)
+            fn at(i):
+                substring(s, i, i + 1)
+            fn scan(start):
+                loop i from start to n:
+                    if at(i) == " ":
+                        return i
+                n
+            e = scan(1)
+            if e == n:
+                e - 1
+            else:
+                e - 1 + 1000
+
+        [first_space("abc def"), first_space("abcdef"), first_space("x")]
+    } {[1002, 5, 0]}
+} {
+    test result-narrow-parity-$name "result-narrowing-sensitive program $name: interp, compile and cranelift agree" -body {
+        set hir [surface::compile [dedent $src] t.bot -strict 0]
+        set outcomes [lsort -unique [lmap backend {interp compile cranelift} {
+            outcomeUnderHir $backend $hir
+        }]]
+        expr {[llength $outcomes] == 1 ? [lindex $outcomes 0 1] : $outcomes}
+    } -result $expected
+}
+
+cleanupTests

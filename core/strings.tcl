@@ -32,8 +32,19 @@ proc core::strings::substring {s start end} {
     return [core::value::str [string range $text $from [expr {$to - 1}]]]
 }
 
+# lowercase: the Unicode 16 *simple* (one-to-one, UnicodeData.txt) lowercase
+# mapping, which is what Tcl 9.0.x's `string tolower` implements except for two
+# scalars it leaves unchanged although UnicodeData.txt maps them (U+023A and
+# U+023E; verified against all scalars on Tcl 9.0.1, whose tables are Unicode
+# 16). They are patched here so the reference matches the standard, and
+# native/src/runtime/ops.rs's rt_str_lower matches this. The full mapping
+# (SpecialCasing.txt: U+0130 -> "i" + U+0307, context/language rules) and
+# Unicode 17 additions are deliberately not implemented; see README.md
+# ("Strings") and tests/native-tcl-unicode.test, which compares every scalar.
+# Not performance-critical: this is the reference implementation.
 proc core::strings::lowercase {s} {
-    return [core::value::str [string tolower [Text $s lowercase]]]
+    set text [string tolower [Text $s lowercase]]
+    return [core::value::str [string map "Ⱥ ⱥ Ⱦ ⱦ" $text]]
 }
 
 proc core::strings::concat {a b} {

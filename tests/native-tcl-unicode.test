@@ -214,23 +214,59 @@ test native-tcl-unicode-emailish-known-result-nir-shape {a redundant Emailish?/e
 } -result {1 1 1 {"yes"}}
 
 # ---------------------------------------------------------------------------
-# lowercase: Tcl's simple (one-to-one) case mapping on every backend. U+0130
-# (LATIN CAPITAL LETTER I WITH DOT ABOVE) is the one scalar whose full
-# lowercase (SpecialCasing.txt) is two scalars, "i" + U+0307, while Tcl's
-# simple mapping (UnicodeData.txt) is plain U+0069; native once kept U+0130
-# unchanged there because Rust's char::to_lowercase yields two chars.
+# lowercase: the Unicode 16 simple (one-to-one, UnicodeData.txt) lowercase
+# mapping on every backend (README.md, "Strings"). Pinned cases first, each
+# labeled with why it is in the corpus; the full mapping (SpecialCasing.txt)
+# and Unicode 17 are deliberately out of scope.
 
-foreach {label s} {
-    dotted-capital-I     İ
-    dotted-I-in-context  AİB
-    ascii-and-latin      ABCÄ
-    capital-sharp-s      ẞ
+foreach {label s expect} {
+    ascii-and-latin      ABCÄ      abcä
+    capital-sharp-s      ẞ         ß
+    sigma-never-final    ΟΣ   οσ
+    dotted-capital-I     İ         i
+    dotted-I-in-context  AİB       aib
+    a-with-stroke        Ⱥ         ⱥ
+    t-with-diag-stroke   Ⱦ         ⱦ
+    kelvin-sign          K         k
+    already-lowercase    éⱥ   éⱥ
+    astral-deseret       \U00010400     \U00010428
+    astral-no-mapping    \U0001f600     \U0001f600
+    unicode17-A7CE       ꟎         ꟎
+    unicode17-A7D2       ꟒         ꟒
+    unicode17-A7D4       ꟔         ꟔
+    unicode17-beria-erfe \U00016ea0     \U00016ea0
 } {
-    # The expectation is Tcl's own string tolower (the reference), shown the
-    # way core::value::show prints a String.
-    test native-tcl-unicode-lowercase-$label "lowercase($label) agrees across interp/compile/cranelift-generic/cranelift and with Tcl's string tolower" -body {
+    test native-tcl-unicode-lowercase-$label "lowercase($label) is the Unicode 16 simple mapping on interp/compile/cranelift-generic/cranelift" -body {
         fourWay [list [list call {ref lowercase} [list const str $s]]]
-    } -result \"[string tolower $s]\"
+    } -result \"$expect\"
 }
+
+# Every scalar, one plane per program: each backend's lowercase of the plane
+# must equal the reference core::strings::lowercase (Tcl's `string tolower`
+# plus its two U+023A/U+023E patches). The mapping is one-to-one, so this is
+# a scalar-by-scalar comparison, and it is what pins native's Rust tables to
+# Unicode 16: a Tcl or Rust upgrade that changes a mapping fails here and
+# names the backend and plane.
+test native-tcl-unicode-lowercase-all-scalars "every scalar's lowercase agrees with the reference on interp/compile/cranelift-generic/cranelift" -body {
+    set bad {}
+    for {set plane 0} {$plane <= 16} {incr plane} {
+        set text {}
+        for {set cp [expr {$plane << 16}]} {$cp <= ($plane << 16) + 0xFFFF} {incr cp} {
+            if {$cp >= 0xD800 && $cp <= 0xDFFF} continue
+            append text [format %c $cp]
+        }
+        set expected [core::value::strOf [core::strings::lowercase [core::value::str $text]]]
+        set prog [list [list call {ref ==} \
+            [list call {ref lowercase} [list const str $text]] \
+            [list const str $expected]]]
+        foreach b $::parityBackends {
+            set outcome [outcomeUnder $b $prog]
+            if {[lindex $outcome 0] ne "value" || [lindex $outcome 1] ne "true"} {
+                lappend bad $b:plane$plane
+            }
+        }
+    }
+    set bad
+} -result {}
 
 ::tcltest::cleanupTests

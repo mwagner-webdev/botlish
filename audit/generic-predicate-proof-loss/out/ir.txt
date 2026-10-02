@@ -1,0 +1,105 @@
+Dynamic effect of the result-narrowing pass (GENERIC-PREDICATE-PROOF-LOSS.md, fix 3)
+NOTE (base): measured on e1ce1a3 + fix 3, before the two soundness fixes the review found
+(callee-position calls in hir::range, the bit_and identity fold) were committed under it, and before
+the rebase onto main 07b373c (fix 3's parent is now 584de41).
+Neither changes the NIR of any of these 17 programs (checked: e1ce1a3 and 07b373c vs the fixes, all bench/stdlib
+programs byte-identical), and fix 3's own knob 0 vs 1 NIR difference is unchanged on 584de41
+(out/census.txt), so the figures carry over. Re-measured on the final tree (main 07b373c + the three
+commits, runtime rebuilt): refined-checks 5,648,265 -> 5,637,510 Ir/run (-10,755), tld? self 24,800 -> 14,000.
+hir::range::resultNarrowOpt 0 (pass skipped) vs 1 (default); same tree (e1ce1a3 + the uncommitted
+change), default native lowering options otherwise.
+
+NIR: audit/generic-predicate-proof-loss/tools/emit-nir.tcl OPT PROGRAM OUTFILE (native::nir of
+surface::readProgramFile PROGRAM, knob set before lowering), every program of bench/*.bot and
+examples/stdlib/*.bot (17 programs, all compiled natively at both knobs).
+Profile: audit/post-r2a-dynamic-census/tools/profile-nir.sh with the audit-patched botlish-native
+(audit/post-r2a-dynamic-census/tools/build-audit-native.sh build), 21 runs, run 0 outside the
+collected region, figures per collected run (20); callgrind counts are deterministic, so concurrent
+load does not affect them. Comparison: audit/generic-predicate-proof-loss/tools/profile-diff.py.
+
+program                          NIR 0 vs 1            Ir/run knob 0   Ir/run knob 1        delta
+---------------------------------------------------------------------------------------------------
+bench/fib                        identical (  32 lines)   unchanged by construction (byte-identical NIR)
+bench/lex-strategy               identical ( 353 lines)   unchanged by construction (byte-identical NIR)
+bench/loop-count                 identical (  50 lines)   unchanged by construction (byte-identical NIR)
+bench/refined-checks             DIFFERS (1 function)         5,648,266       5,637,429      -10,837 (-0.19%)
+bench/source-checks              identical ( 240 lines)   unchanged by construction (byte-identical NIR)
+bench/sum-refined                identical (  35 lines)   unchanged by construction (byte-identical NIR)
+bench/test-selection             identical ( 307 lines)   unchanged by construction (byte-identical NIR)
+bench/uri-steady                 identical ( 416 lines)   unchanged by construction (byte-identical NIR)
+examples/stdlib/ai_text_clean    identical ( 426 lines)   unchanged by construction (byte-identical NIR)
+examples/stdlib/csv              identical ( 292 lines)   unchanged by construction (byte-identical NIR)
+examples/stdlib/csv_chunked      identical ( 510 lines)   unchanged by construction (byte-identical NIR)
+examples/stdlib/csv_geometric    identical ( 413 lines)   unchanged by construction (byte-identical NIR)
+examples/stdlib/csv_records      identical (1212 lines)   unchanged by construction (byte-identical NIR)
+examples/stdlib/hashtable        identical ( 631 lines)   unchanged by construction (byte-identical NIR)
+examples/stdlib/matmul           identical ( 191 lines)   unchanged by construction (byte-identical NIR)
+examples/stdlib/string_replace   identical ( 113 lines)   unchanged by construction (byte-identical NIR)
+examples/stdlib/string_reverse   identical (  50 lines)   unchanged by construction (byte-identical NIR)
+---------------------------------------------------------------------------------------------------
+Programs with NIR changes: 1 of 17 (bench/refined-checks, NIR function 16 "tld?" only).
+
+bench/refined-checks, Botlish functions whose self Ir or invocation count changed
+  function   invoc/run   self Ir/run knob 0 -> 1     Ir/call       inclusive Ir/run
+  16 tld?        400       24,800 -> 14,000 (-10,800)   62.0 -> 35.0   470,400 -> 459,600
+  Every other Botlish function: identical invocation counts and self Ir (their inclusive figures
+  only carry tld?'s -10,800 up the call chain: domain?, web::emailish?, check, <program>).
+  Run value at both knobs: value {list {{int 400} {int 0}}} (same).
+  Residual -37 Ir/run outside Botlish code: glibc malloc/_int_malloc self Ir (328,977 -> 328,973
+  and 321,047 -> 321,024) under rt_substr's allocations -- heap-layout noise from the different
+  JIT image, not a work change (runtime self Ir identical: 3,455,779 both; rust-other 257,482 both).
+  Exclusive Ir by kind: botlish 1,113,883 -> 1,103,083 (-10,800); libc 821,122 -> 821,085 (-37).
+
+  tld? executed JIT instruction classes per run (cgcensus.py), knob 0 -> knob 1:
+    knob 0: 16 tld? (24,800): mov reg-reg=6,400; tag test=3,200; frame: epilogue=3,200; frame: prologue=2,800; stack store=2,000; cmp/test (other)=1,600; bool materialize=1,200; heap/vm load=800; jcc (other)=800; bool test=800; call botlish=400; mov imm=400; arith=400; overflow check=400; lea=400
+    knob 1: 16 tld? (14,000): mov reg-reg=2,400; frame: epilogue=2,400; frame: prologue=2,000; stack store=1,600; untag=1,200; heap/vm load=800; completion check=800; cmp/test (other)=800; bool materialize=800; call botlish=400; jcc (other)=400; arith=400
+  i.e. per call: the tag tests (8 Ir), the subtraction's overflow check (1) and the bool test (2)
+  are gone; mov reg-reg shrinks 16 -> 6, prologue+epilogue 15 -> 11, stack stores 5 -> 4, other
+  cmp/test 4 -> 2; 3 untags appear (the three runbox ops, 3 Ir), plus 2 Ir the classifier labels
+  "completion check" (absent at knob 0). Net 62 -> 35 Ir/call.
+
+  The NIR change (knob 0 -> knob 1), tld? only (`e = scan_while(i, is_tcl_alpha)` now read as
+  [0, 2^62-1], so `e == n`, `e - i` and `>= 2` lower raw):
+    428c428
+    < func 16 "tld?" params=3 env=0 regs=12 pnames="i n v" captures=0 instance="generic" rawregs="9" @e282
+    ---
+    > func 16 "tld?" params=3 env=0 regs=15 pnames="i n v" captures=0 instance="generic" rawregs="5 6 9 10 12" @e282
+    431,432c431,434
+    <     %5 = op ieq %4 %1 @e289
+    <     br %5 L0 L1 @e288
+    ---
+    >     %5 = op runbox %4
+    >     %6 = op runbox %1
+    >     %7 = op rieq %5 %6 @e289
+    >     br %7 L0 L1 @e288
+    434,438c436,441
+    <     %7 = op isub %4 %0 @e295
+    <     %8 = int 2 @e299
+    <     %9 = rawint 2
+    <     %10 = op ige %7 %8 @e293
+    <     %6 = move %10
+    ---
+    >     %9 = op runbox %0
+    >     %10 = op risub %5 %9 @e295
+    >     %11 = int 2 @e299
+    >     %12 = rawint 2
+    >     %13 = op rige %10 %12 @e293
+    >     %8 = move %13
+    441,442c444,445
+    <     %11 = bool false @e300
+    <     %6 = move %11
+    ---
+    >     %14 = bool false @e300
+    >     %8 = move %14
+    445c448
+    <     ret %6
+    ---
+    >     ret %8
+
+Identical-NIR programs need no profile: the native driver runs only the NIR text, so byte-identical
+NIR means identical machine code and identical Ir.
+
+Reproduce (repository root):
+  for k in 0 1; do tclsh9.0 audit/generic-predicate-proof-loss/tools/emit-nir.tcl $k bench/refined-checks.bot rc-$k.nir; done
+  for k in 0 1; do bash audit/post-r2a-dynamic-census/tools/profile-nir.sh AUDIT_BIN rc-$k.nir 21 prof-$k; done
+  python3 audit/generic-predicate-proof-loss/tools/profile-diff.py bench/refined-checks prof-0 prof-1

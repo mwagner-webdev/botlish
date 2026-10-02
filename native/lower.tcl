@@ -5997,16 +5997,17 @@ proc native::lower::PureBitwiseEligible {e argExprs op} {
 #      the result is unconditionally the other operand's own value (`0|x`,
 #      `x|0`, `0^x`, `x^0` all equal `x` for ordinary Int bit semantics --
 #      spec #27). For `iand`: if one operand (B) is a single proven constant
-#      and the other (A) is nonnegative, and the call's own already-computed
-#      result range/exact-set exactly equals A's own, then this AND changes
-#      nothing: AND-with-any-mask can only ever clear bits of a nonnegative
-#      A (so `a&b <= a` for every a>=0, any b), so a value set that maps
-#      *onto itself* under a fixed mask must map every element to itself
-#      (a self-map of a finite set bounded above by the identity, hitting
-#      every element, is forced to be the identity) -- this is what removes
-#      the real body's own trailing `bit_and(..., 15)` once the OR it wraps
-#      has already been proven to stay within `[0, 15]` (spec #3's "final
-#      masking required by its broad all-Int implementation").
+#      K and every value the other operand (A) can take keeps all its bits
+#      under K (AndIdentity), then this AND changes nothing -- this is what
+#      removes the real body's own trailing `bit_and(..., 15)` once the OR
+#      it wraps has already been proven to stay within `[0, 15]` (spec #3's
+#      "final masking required by its broad all-Int implementation").
+#      (This used to be decided by comparing the call's result Range with
+#      A's: a self-map argument that holds only for exact value sets. For a
+#      plain interval the result is the hull [0, K] whether or not bits are
+#      cleared, so `bit_and(a, 95)` with a in [0, 95] was folded to `a` and
+#      returned 32 for a = 32: GENERIC-PREDICATE-PROOF-LOSS.md, "bit_and
+#      identity fold".)
 proc native::lower::FoldPureBitwise {fnVar e argExprs argRegs op want} {
     upvar 1 $fnVar fn
     variable ranges
@@ -6022,15 +6023,11 @@ proc native::lower::FoldPureBitwise {fnVar e argExprs argRegs op want} {
     set ebRange [hir::range::of $ranges $currentInstance $eb]
     if {$op eq "iand"} {
         set eamn [dict get $eaRange min]
-        set eamx [dict get $eaRange max]
         set ebmn [dict get $ebRange min]
-        set ebmx [dict get $ebRange max]
-        if {$eamn ne "-inf" && $eamn >= 0 && $ebmn ne "-inf" && $ebmn eq $ebmx
-                && $resultRange eq $eaRange} {
+        if {$ebmn ne "-inf" && $ebmn eq [dict get $ebRange max] && [AndIdentity $eaRange $ebmn]} {
             return [WantConvert fn $ra $want]
         }
-        if {$ebmn ne "-inf" && $ebmn >= 0 && $eamn ne "-inf" && $eamn eq $eamx
-                && $resultRange eq $ebRange} {
+        if {$eamn ne "-inf" && $eamn eq [dict get $eaRange max] && [AndIdentity $ebRange $eamn]} {
             return [WantConvert fn $rb $want]
         }
         return ""
@@ -6041,6 +6038,34 @@ proc native::lower::FoldPureBitwise {fnVar e argExprs argRegs op want} {
         }
     }
     return ""
+}
+
+# 1 if `bit_and(a, K)` equals a for every value a Range R allows: R is
+# nonnegative and finite, and either each of its exact values keeps all its
+# bits under K, or (too many values to list) K has every bit below the
+# bit length of R's maximum set, which no value in [0, max] can exceed.
+proc native::lower::AndIdentity {r k} {
+    set mn [dict get $r min]
+    set mx [dict get $r max]
+    if {$mn eq "-inf" || $mx eq "+inf" || $mn < 0} {
+        return 0
+    }
+    set exact [hir::range::ExactOf $r]
+    if {$exact ne ""} {
+        foreach v $exact {
+            if {($v & $k) != $v} {
+                return 0
+            }
+        }
+        return 1
+    }
+    # Not `incr`: see hir::range::ExactOf on compiled `incr` at i64 bounds.
+    set bound 1
+    while {$bound <= $mx} {
+        set bound [expr {$bound * 2}]
+    }
+    set mask [expr {$bound - 1}]
+    return [expr {($k & $mask) == $mask}]
 }
 
 # {REG REPR}: REG converted to WANT's representation (both already-known
