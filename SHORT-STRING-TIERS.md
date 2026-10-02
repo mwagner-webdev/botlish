@@ -293,6 +293,51 @@ programs within +/-3 %.
 compile including Cranelift 2,499 -> 2,633 ms (+5.3 %); the first milestone
 measured +1.7 % to +8.8 % on different runs, so this is within the spread.
 
+## Cost of a materialization
+
+Where the "about 315 instructions" goes, measured two ways
+(`audit/short-string/tools/materialize-cost/`).
+
+**In the corpus, allocation side** (`refined-checks`, 9,067 runtime
+`shorttostr` per run; the program with the materializations minus the same
+program without them, function by function, callgrind exclusive Ir):
+**311.6 Ir each**.
+
+| part | Ir | share |
+|---|---:|---:|
+| glibc `malloc` (two per String: the `StrObj` and the text `Box<str>`; `_int_malloc` 70 + `malloc` 68) | 140.2 | 45 % |
+| runtime code | 126.7 | 41 % |
+| of which `Vm::alloc::<StrObj>` (register, account, `Box::new`) | 40.5 | |
+| `short_to_string` (char -> `String`, encode) | 32.7 | |
+| `new_str_known` (length check, `StrObj` construction) | 32.2 | |
+| `rt_short_to_str` (metrics, call) | 11.3 | |
+| other inlined glue | 10.0 | |
+| Rust allocator shims (`__rdl_alloc`, `__rust_alloc`, no-alloc shim) | 25.5 | 8 % |
+| `memcpy` (text copy into the new `Box<str>`) | 12.1 | 4 % |
+| GC registration/sweep bookkeeping inside the window | 4.5 | 1 % |
+| everything else (slice work the materialization replaced, net) | 2.6 | 1 % |
+
+No GC collection runs inside these short measured windows, so the **free side
+is not in 311.6**.
+
+**Whole life cycle in a churn heap** (a loop that materializes U+0061 and drops
+it, 20,000 -> 40,000 iterations, control loop subtracted): **862 Ir** per
+materialization: about 500 on the allocation side (glibc `malloc` ~250, runtime
+code ~190, Rust shims ~44, `memcpy` ~16) and about 360 on the free side
+(`_int_free` 168, `free` 56 + 22, `malloc_consolidate` 50, `unlink_chunk` 32,
+`free_object` 22, collect ~8). The free-side figures depend on glibc's
+allocator state (tcache/fastbin/consolidation), so 862 is a pure-churn
+worst case and a long-running program with a similar churn rate pays between
+the two figures; the demand rule's cost model should use the larger.
+
+What is removable without a storage redesign: the intermediate `String`
+(`c.to_string()` then `into_boxed_str`, about 12 + 17 Ir) and the metrics call
+(about 8); what is not: the two allocations (`malloc` ~140 plus shims ~25 on the
+way in, most of the free side on the way out). A single-allocation small String
+(text inline in `StrObj` for up to 8 bytes) would remove one `malloc`, its
+shim, its free and the `memcpy`: roughly 40 % of the allocation side and
+about half of the free side.
+
 ## Open decision
 
 The regime as specified is net-negative on this corpus without a rule that

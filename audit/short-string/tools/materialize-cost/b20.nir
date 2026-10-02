@@ -1,0 +1,18 @@
+nir 1 call-effects=1
+
+func 0 "<program>" params=0 env=0 regs=9 pnames="" captures=0 shortregs="1"
+    %0 = int 0
+    %1 = shortlit 97
+    %8 = int 20000
+  label L0
+    %2 = op ilt %0 %8
+    br %2 L1 L2
+  label L1
+    %3 = op shorttostr %1
+    %4 = op strlen %3
+    %6 = int 1
+    %0 = op iadd %0 %6
+    jump L0
+  label L2
+    ret %0
+end
