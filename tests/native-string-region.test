@@ -273,6 +273,59 @@ f(\"hello\")
 } -result {{str h!} 2 2}
 
 # ---------------------------------------------------------------------------
+# `==` takes exactly one operand as a region: a region-eligible operand on
+# BOTH sides (the same binding twice, two bindings, a binding and a
+# `substring` call) must still lower and compare contents correctly.
+
+test region-eq-same-binding-1 {`v == v` on one substring binding (both operands the same region binding)} -body {
+    assertParity "
+fn run(s):
+    v = substring(s, 0, 1)
+    \[v == v\]
+
+run(\"éa\")
+"
+} -result {list {{bool true}}}
+
+test region-eq-two-bindings-1 {`v == w` over two substring bindings: equal and unequal contents} -body {
+    list [assertParity "
+fn run(s):
+    v = substring(s, 0, 1)
+    w = substring(s, 3, 4)
+    \[v == w, v == v, length(v) == length(w)\]
+
+run(\"éa é\")
+"] [assertParity "
+fn run(s):
+    v = substring(s, 0, 1)
+    w = substring(s, 1, 2)
+    \[v == w, w == v\]
+
+run(\"éa\")
+"]
+} -result {{list {{bool true} {bool true} {bool true}}} {list {{bool false} {bool false}}}}
+
+test region-eq-binding-vs-call-1 {a substring call on one side, a virtual binding on the other, in either order} -body {
+    assertParity "
+fn run(s):
+    v = substring(s, 0, 1)
+    \[substring(s, 0, 1) == v, v == substring(s, 0, 1), substring(s, 1, 2) == v\]
+
+run(\"éa\")
+"
+} -result {list {{bool true} {bool true} {bool false}}}
+
+test region-eq-same-binding-length-1 {a binding that is also length()-ed still compares with itself} -body {
+    assertParity "
+fn run(s):
+    v = substring(s, 0, 2)
+    \[v == v, length(v)\]
+
+run(\"a\U0001F600b\")
+"
+} -result {list {{bool true} {int 2}}}
+
+# ---------------------------------------------------------------------------
 # Bounds errors (#31): optimized and unoptimized modes -- and the
 # interpreter -- agree exactly, including error kind and message.
 

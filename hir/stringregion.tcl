@@ -447,7 +447,15 @@ proc hir::stringregion::Bindings {hir spec regionOf consumingParams} {
                         lassign $args a b
                         set ka [hir::types::kindOf [hir::typeOf $view $a]]
                         set kb [hir::types::kindOf [hir::typeOf $view $b]]
-                        if {$ka eq "str" && $kb eq "str"} {
+                        # `==` takes exactly one operand as a region (the
+                        # other is evaluated as an ordinary String), so a
+                        # `ref` on both sides -- `v == v`, `v == w` -- never
+                        # qualifies either one: the lowering would have no
+                        # way to give both a region. Each is then free to be
+                        # virtual only through its other uses; one that
+                        # stays a String is materialized as usual.
+                        if {$ka eq "str" && $kb eq "str"
+                                && !([hir::kind $view $a] eq "ref" && [hir::kind $view $b] eq "ref")} {
                             dict set eqOther $a $b
                             dict set eqOther $b $a
                         }

@@ -5109,6 +5109,7 @@ proc native::lower::RegionEligible {e} {
 # Only ever tried when -string-region-opt is enabled.
 proc native::lower::TryStringRegionOp {fnVar e name op argExprs} {
     upvar 1 $fnVar fn
+    variable hir
     variable guards
     variable knownErrors
     variable stringRegionOpt
@@ -5118,9 +5119,24 @@ proc native::lower::TryStringRegionOp {fnVar e name op argExprs} {
     if {$name eq "==" && $op eq "streq" && [llength $argExprs] == 2} {
         lassign $argExprs ea eb
         set aRegion [RegionEligible $ea]
-        set bRegion [expr {!$aRegion && [RegionEligible $eb]}]
+        set bRegion [RegionEligible $eb]
         if {!$aRegion && !$bRegion} {
             return ""
+        }
+        # Exactly one operand supplies the region. A `ref` operand is a
+        # virtual binding that *cannot* be evaluated any other way (Ref
+        # refuses a non-region request), so it takes the region role; any
+        # other region-eligible operand (a `substring` call, a literal, a
+        # forwarding call) can equally be evaluated as an ordinary String.
+        # hir::stringregion::Bindings never leaves both operands virtual
+        # refs. Otherwise prefer the left one. Evaluation order is
+        # unaffected either way (below).
+        if {$aRegion && $bRegion} {
+            if {[hir::kind $hir $eb] eq "ref" && [hir::kind $hir $ea] ne "ref"} {
+                set aRegion 0
+            } else {
+                set bRegion 0
+            }
         }
         set ra [Expr fn $ea [expr {$aRegion ? "region" : "tagged"}]]
         if {$ra eq "never"} {
