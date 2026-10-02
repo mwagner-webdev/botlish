@@ -21,5 +21,5 @@ rm -rf "$work/native-audit"
 mkdir -p "$work/native-audit"
 cp -r "$root/native/Cargo.toml" "$root/native/Cargo.lock" "$root/native/src" "$work/native-audit/"
 (cd "$work" && patch -s -p1 -d native-audit < "$root/audit/post-r2a-dynamic-census/tools/audit-native.patch")
-cargo build --release --quiet --manifest-path "$work/native-audit/Cargo.toml" --target-dir "$work/target"
+cargo build --release --quiet ${BOTLISH_AUDIT_FEATURES:+--features "$BOTLISH_AUDIT_FEATURES"} --manifest-path "$work/native-audit/Cargo.toml" --target-dir "$work/target"
 echo "$work/target/release/botlish-native"

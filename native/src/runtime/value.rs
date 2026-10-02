@@ -124,6 +124,7 @@ pub struct StrObj {
     /// struct does not grow): it lets generated code turn a String already
     /// proven to have at most one character into its ShortString1 scalar
     /// with two loads and no call (`StrToShort`, SHORT-STRING.md).
+    #[cfg(not(feature = "short-first-recovered"))]
     pub first: u32,
     pub text: Box<str>,
 }
@@ -250,7 +251,24 @@ pub struct NativeObj {
 pub const CLOSURE_CAPS_OFFSET: i32 = offset_of!(ClosureObj, caps) as i32;
 pub const LIST_LEN_OFFSET: i32 = offset_of!(ListObj, len) as i32;
 pub const STR_CHARS_OFFSET: i32 = offset_of!(StrObj, chars) as i32;
+#[cfg(not(feature = "short-first-recovered"))]
 pub const STR_FIRST_OFFSET: i32 = offset_of!(StrObj, first) as i32;
+pub const STR_ASCII_OFFSET: i32 = offset_of!(StrObj, ascii) as i32;
+
+/// Offset, within a `StrObj`, of the pointer to the String's UTF-8 bytes
+/// (the data half of the `Box<str>` fat pointer; its field order is not
+/// guaranteed by Rust, so it is measured once rather than assumed).
+pub fn str_text_ptr_offset() -> i32 {
+    use std::sync::OnceLock;
+    static OFFSET: OnceLock<i32> = OnceLock::new();
+    *OFFSET.get_or_init(|| {
+        let boxed: Box<str> = "ab".into();
+        let data = boxed.as_ptr() as usize;
+        let words = unsafe { std::mem::transmute_copy::<Box<str>, [usize; 2]>(&boxed) };
+        let at = words.iter().position(|w| *w == data).expect("Box<str> data pointer");
+        offset_of!(StrObj, text) as i32 + 8 * at as i32
+    })
+}
 pub const LIST_PTR_OFFSET: i32 = offset_of!(ListObj, ptr) as i32;
 pub const STRUCT_PTR_OFFSET: i32 = offset_of!(StructObj, ptr) as i32;
 

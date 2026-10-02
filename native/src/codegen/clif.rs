@@ -1566,6 +1566,34 @@ impl<'a, 'b, M: Module> Translator<'a, 'b, M> {
             // the compiler proved has at most one character, so its
             // character count is 0 or 1 and its first scalar (set at
             // construction, 0 when empty) is the whole payload.
+            #[cfg(feature = "short-first-recovered")]
+            StrToShort => {
+                // Counterfactual: no cached first scalar. Empty -> -1; an
+                // ASCII String's first byte is its scalar (one load through
+                // the text pointer); a non-ASCII one decodes in the helper.
+                let chars = self.b.ins().load(I64, MemFlagsData::trusted(), a[0], STR_CHARS_OFFSET);
+                let empty = self.b.ins().icmp_imm_s(IntCC::Equal, chars, 0);
+                let nonempty = self.b.create_block();
+                let ascii_path = self.b.create_block();
+                let wide = self.b.create_block();
+                let done = self.b.create_block();
+                let result = self.b.append_block_param(done, I64);
+                let minus_one = self.b.ins().iconst(I64, -1);
+                self.b.ins().brif(empty, done, &[BlockArg::Value(minus_one)], nonempty, &[]);
+                self.b.switch_to_block(nonempty);
+                let ascii = self.b.ins().uload8(I64, MemFlagsData::trusted(), a[0], STR_ASCII_OFFSET);
+                self.b.ins().brif(ascii, ascii_path, &[], wide, &[]);
+                self.b.switch_to_block(ascii_path);
+                let text = self.b.ins().load(I64, MemFlagsData::trusted(), a[0], str_text_ptr_offset());
+                let byte = self.b.ins().uload8(I64, MemFlagsData::trusted(), text, 0);
+                self.b.ins().jump(done, &[BlockArg::Value(byte)]);
+                self.b.switch_to_block(wide);
+                let v = self.call_helper("rt_str_to_short", &[self.vm, a[0]]);
+                self.b.ins().jump(done, &[BlockArg::Value(v)]);
+                self.b.switch_to_block(done);
+                result
+            }
+            #[cfg(not(feature = "short-first-recovered"))]
             StrToShort => {
                 let chars = self.b.ins().load(I64, MemFlagsData::trusted(), a[0], STR_CHARS_OFFSET);
                 let first = self.b.ins().uload32(MemFlagsData::trusted(), a[0], STR_FIRST_OFFSET);

@@ -17,5 +17,11 @@ num-traits = "0.2"
 unicode-general-category = "1.1.0"
 libc = "0.2"
 
+[features]
+# Counterfactual for SHORT-STRING.md: do not cache a String's first scalar in
+# the object (`StrObj::first`); `StrToShort` recovers it from the String's
+# own text instead. Off by default (the cached field is the shipped design).
+short-first-recovered = []
+
 [profile.release]
 debug = 1

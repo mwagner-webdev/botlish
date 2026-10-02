@@ -281,7 +281,7 @@ mod tests {
 
     fn str_val(heap: &mut Heap, metrics: &mut Metrics, text: &str) -> Value {
         let obj =
-            StrObj { hdr: Header::new(KIND_STR, false), chars: text.chars().count(), ascii: text.is_ascii(), first: first_scalar(text, text.is_ascii()), text: text.into() };
+            StrObj { hdr: Header::new(KIND_STR, false), chars: text.chars().count(), ascii: text.is_ascii(), #[cfg(not(feature = "short-first-recovered"))] first: first_scalar(text, text.is_ascii()), text: text.into() };
         let bytes = obj.text.len();
         alloc(heap, metrics, obj, bytes)
     }

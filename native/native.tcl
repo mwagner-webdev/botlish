@@ -108,6 +108,11 @@ proc native::binary {} {
     if {$::tcl_platform(platform) eq "windows"} {
         append path .exe
     }
+    # Audit override: measure a differently built driver (for example the
+    # `short-first-recovered` counterfactual) without replacing the shipped one.
+    if {[info exists ::env(BOTLISH_NATIVE_BIN)]} {
+        set path $::env(BOTLISH_NATIVE_BIN)
+    }
     if {![file exists $path]} {
         throw {NATIVE NOT-BUILT} "native backend not built: run \"cargo build --release\" in $home"
     }

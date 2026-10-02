@@ -731,7 +731,21 @@ pub extern "C" fn rt_str_to_short(_p: *mut Vm, s: Value) -> u64 {
     if obj.chars == 0 {
         return SHORT_EMPTY as u64;
     }
-    obj.first as u64
+    first_scalar_of(obj) as u64
+}
+
+/// The first scalar of a non-empty String object: the cached field, or (the
+/// `short-first-recovered` counterfactual) decoded from its text.
+#[inline]
+fn first_scalar_of(obj: &StrObj) -> u32 {
+    #[cfg(not(feature = "short-first-recovered"))]
+    {
+        obj.first
+    }
+    #[cfg(feature = "short-first-recovered")]
+    {
+        first_scalar(&obj.text, obj.ascii)
+    }
 }
 
 /// The String a ShortString1 scalar stands for: "" for Empty, else the

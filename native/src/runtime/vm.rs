@@ -399,8 +399,16 @@ impl Vm {
             return v;
         }
         let bytes = text.len();
+        #[cfg(not(feature = "short-first-recovered"))]
         let first = first_scalar(&text, ascii);
-        let obj = StrObj { hdr: Header::new(KIND_STR, false), chars, ascii, first, text: text.into_boxed_str() };
+        let obj = StrObj {
+            hdr: Header::new(KIND_STR, false),
+            chars,
+            ascii,
+            #[cfg(not(feature = "short-first-recovered"))]
+            first,
+            text: text.into_boxed_str(),
+        };
         self.alloc(obj, bytes)
     }
 
@@ -514,6 +522,14 @@ impl Drop for Vm {
 pub fn str_object(text: String, is_static: bool) -> StrObj {
     let ascii = text.is_ascii();
     let chars = if ascii { text.len() } else { text.chars().count() };
+    #[cfg(not(feature = "short-first-recovered"))]
     let first = first_scalar(&text, ascii);
-    StrObj { hdr: Header::new(KIND_STR, is_static), chars, ascii, first, text: text.into_boxed_str() }
+    StrObj {
+        hdr: Header::new(KIND_STR, is_static),
+        chars,
+        ascii,
+        #[cfg(not(feature = "short-first-recovered"))]
+        first,
+        text: text.into_boxed_str(),
+    }
 }
